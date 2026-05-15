@@ -1,0 +1,51 @@
+# ============================================================
+# Stock Terminal v2.0 — .gitignore
+# ============================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# User-specific data — should not be committed
+# (each user generates their own ETF snapshots and logs)
+etf_history/*.json
+etf_history/*.txt
+!etf_history/README.txt
+
+logs/
+logs/*
+
+# Build / distribution outputs (built fresh on demand)
+Stock_Terminal/
+Stock_Terminal_*.zip
+*.zip
+
+# Local API keys and secrets (just in case)
+*.key
+.env
+.env.local
+secrets.json
+
+# Backup / temp files
+*.bak
+*.tmp
+*.orig
+*~
+
+# Browser localStorage backups (if anyone exports manually)
+positions_backup.json
+watches_backup.json
