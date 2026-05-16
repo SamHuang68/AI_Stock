@@ -1,0 +1,179 @@
+/* ============================================================
+   Stock Terminal v2.0 — Mobile / Tablet Responsive CSS
+   ------------------------------------------------------------
+   Breakpoints:
+     ≤ 768px  → 手機（直式優先）
+     ≤ 1280px → 平板 / 小筆電
+     > 1280px → 桌機（保持原樣）
+
+   策略：
+     • 手機把右側面板變底部抽屜（drawer），主圖佔滿
+     • 觸控按鈕至少 36px 高
+     • 隱藏部分裝飾性元素（grip 圖示、長標籤）
+     • indbar 改為水平捲動（16 個指標放不下兩列）
+   ============================================================ */
+
+/* ──────────────────────────────────────────────────────────
+   📱 Mobile (≤ 768px)
+   ────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+
+  /* ── Layout: stack vertically ── */
+  #body { flex-direction: column; }
+  #left { min-width: 0; min-height: 0; flex: 1; }
+
+  /* Right panel becomes bottom sheet */
+  #right {
+    width: 100% !important;
+    height: 40vh;
+    max-height: 380px;
+    border-left: none !important;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    transition: height .25s ease;
+  }
+  #right.collapsed { height: 36px !important; }
+  #right.collapsed #rpanel { display: none; }
+
+  /* Drag handle to toggle collapsed state */
+  #rtabs::before {
+    content: '═';
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 14px;
+    color: var(--tlo);
+    background: var(--bg);
+    cursor: pointer;
+    font-size: 14px;
+    letter-spacing: -2px;
+    margin-bottom: -2px;
+  }
+
+  /* ── Topbar: tighter ── */
+  #topbar {
+    height: 38px;
+    gap: 6px !important;
+    padding: 0 8px !important;
+    overflow-x: auto;
+  }
+  #topbar .logo { font-size: 9px !important; letter-spacing: 1px !important; }
+  #topbar .sep { display: none; }
+  #syminput { width: 70px !important; font-size: 12px !important; }
+  .mktbtn { padding: 4px 6px !important; font-size: 9px !important; }
+  #statusbar { font-size: 8px !important; }
+  .probtn { padding: 2px 5px !important; font-size: 8.5px !important; height: 22px !important; }
+
+  /* ── Watchlist bar: keep 2 rows but slimmer ── */
+  #wlbar { height: 56px !important; }
+  #wlchips { grid-template-rows: repeat(2, 1fr) !important; }
+  .wlchip { height: 28px !important; padding: 0 7px !important; font-size: 10px !important; }
+  .wlchip-grip { display: none !important; }   /* 觸控不需要拖把手提示 */
+  .wlchip-p { font-size: 9px !important; }
+  .wladd { height: 56px !important; padding: 0 10px !important; }
+
+  /* ── Range bar: smaller buttons ── */
+  #rangebar { height: 28px !important; }
+  .rgbtn { font-size: 9px !important; min-width: 40px !important; padding: 0 4px !important; }
+
+  /* ── Pro tools row: wrap if needed ── */
+  #pro-tools { padding: 0 4px !important; }
+  #pro-tools .probtn { font-size: 8.5px !important; padding: 0 5px !important; }
+
+  /* ── Indicator bar: scroll horizontally (2-row grid doesn't fit) ── */
+  #indbar { height: 44px !important; }
+  .ig {
+    display: flex !important;
+    grid-template-columns: none !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+  }
+  .igcell {
+    flex: 0 0 auto !important;
+    min-width: 80px !important;
+    height: 44px !important;
+    border-top: none !important;
+    border-right: 1px solid var(--border) !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    padding: 4px 8px !important;
+  }
+  .ig-lbl { font-size: 8px !important; }
+  .ig-val { font-size: 10px !important; text-align: left !important; }
+
+  /* ── Chart area ── */
+  #chart-info { font-size: 9px !important; top: 4px !important; left: 6px !important; }
+  .ci-price { font-size: 15px !important; }
+  #ci-ohlc { font-size: 9px !important; padding: 4px 6px !important; }
+  #ci-ohlc .ma-row { font-size: 8px !important; }
+
+  /* ── Live panel: bottom centered, full width ── */
+  #live-panel {
+    top: auto !important;
+    right: 8px !important;
+    left: 8px !important;
+    bottom: calc(40vh + 8px) !important;
+    width: auto !important;
+  }
+
+  /* ── Right panel content: tighter rows ── */
+  #rpanel { font-size: 10px !important; }
+  .stat-row { padding: 5px 10px !important; font-size: 10px !important; }
+  .stat-hdr, .stat-sect { padding: 6px 10px 4px !important; font-size: 9px !important; }
+
+  /* ── Tabs: smaller ── */
+  .rtab { font-size: 9px !important; height: 32px !important; letter-spacing: .5px !important; }
+
+  /* ── Replay bar ── */
+  #replay-bar { font-size: 9px !important; padding: 3px 8px !important; }
+
+  /* ── Info popup ── */
+  .info-popup { width: 90vw !important; max-width: 360px !important; }
+  .info-popup-title { font-size: 11px !important; }
+  .info-popup-body { font-size: 10.5px !important; }
+
+  /* ── Heatmap cells: bigger touch targets ── */
+  .heatcell { min-height: 60px !important; padding: 8px !important; }
+}
+
+/* ──────────────────────────────────────────────────────────
+   📱 Very small / portrait mode (≤ 480px)
+   ────────────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  #topbar .logo { display: none; }
+  .mktbtn span { display: none; }   /* show only flag */
+  .rgbtn { font-size: 8.5px !important; min-width: 36px !important; }
+  #right { height: 45vh; }
+}
+
+/* ──────────────────────────────────────────────────────────
+   💻 Tablet (≤ 1280px)
+   ────────────────────────────────────────────────────────── */
+@media (max-width: 1280px) and (min-width: 769px) {
+  #right { width: 280px !important; }
+  .stat-row { padding: 6px 10px !important; font-size: 10px !important; }
+  .rgbtn { min-width: 48px !important; font-size: 9.5px !important; }
+  .igcell { min-width: 64px !important; padding: 0 4px !important; }
+  .ig-val { font-size: 10px !important; }
+  .ig-lbl { font-size: 8px !important; }
+  #live-panel { right: 295px !important; width: 220px !important; }
+}
+
+/* ──────────────────────────────────────────────────────────
+   👆 Touch device (any size with touch capability)
+   ────────────────────────────────────────────────────────── */
+@media (hover: none) and (pointer: coarse) {
+  .wlchip-rm { opacity: 1 !important; }            /* 觸控沒 hover，移除鈕永遠顯示 */
+  .heatcell:hover { transform: none !important; }   /* 觸控時 hover scale 會跳 */
+  /* Bigger hitboxes */
+  .probtn, .rgbtn, .rtab, .wlchip, .wladd { min-height: 32px; }
+  .info-i { width: 16px !important; height: 16px !important; font-size: 10px !important; }
+}
+
+/* ──────────────────────────────────────────────────────────
+   🖨 Print mode (already in v1, extend for v2 features)
+   ────────────────────────────────────────────────────────── */
+@media print {
+  #live-panel, #pro-tools, #replay-bar, #btn-notify { display: none !important; }
+}

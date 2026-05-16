@@ -260,6 +260,9 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_single(sym)
         elif p.startswith('/etf-delta'):
             self._handle_etf_delta()
+        elif p.startswith('/quote/'):
+            sym = p[7:].split('?')[0]
+            self._handle_quote(sym)
         elif p == '/health':
             d = find_etf_dir()
             files = list_etf_files()
@@ -326,6 +329,90 @@ class Handler(SimpleHTTPRequestHandler):
                 try: results[sym] = json.loads(data)
                 except Exception: pass
         self._ok(json.dumps(results).encode())
+
+    def _handle_quote(self, sym):
+        """Lightweight near-real-time quote.
+        Yahoo's v7 /finance/quote (which had bid/ask) is gated behind crumb cookie auth
+        since 2024 — unauthenticated requests get 401. We use v8 /finance/chart with
+        range=1d&interval=1m and extract price/high/low/vol from meta + last bar.
+        bid/ask are not available free; would need broker API.
+        """
+        candidates = []
+        if sym.endswith('.TW') and not sym.endswith('.TWO'):
+            candidates = [sym, sym[:-3]+'.TWO']
+        elif sym.endswith('.TWO'):
+            candidates = [sym, sym[:-4]+'.TW']
+        else:
+            candidates = [sym]
+        for candidate in candidates:
+            for base in ('query1', 'query2'):
+                url = f'https://{base}.finance.yahoo.com/v8/finance/chart/{candidate}?interval=1m&range=1d'
+                try:
+                    req = urllib.request.Request(url, headers=YF_HEADERS)
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        raw = resp.read()
+                    parsed = json.loads(raw)
+                    res = parsed.get('chart', {}).get('result')
+                    if not res: continue
+                    r0 = res[0]
+                    meta = r0.get('meta', {})
+                    # Extract last available 1m bar values
+                    quotes = (r0.get('indicators', {}).get('quote') or [{}])[0]
+                    ts = r0.get('timestamp') or []
+                    # find last non-null close
+                    closes = quotes.get('close') or []
+                    highs  = quotes.get('high')  or []
+                    lows   = quotes.get('low')   or []
+                    vols   = quotes.get('volume') or []
+                    last_idx = None
+                    for i in range(len(closes) - 1, -1, -1):
+                        if closes[i] is not None:
+                            last_idx = i
+                            break
+                    last_close = closes[last_idx] if last_idx is not None else meta.get('regularMarketPrice')
+                    # day high/low from meta (more reliable) or compute from intraday
+                    day_high = meta.get('regularMarketDayHigh')
+                    day_low  = meta.get('regularMarketDayLow')
+                    if day_high is None and highs:
+                        day_high = max([h for h in highs if h is not None] or [None])
+                    if day_low is None and lows:
+                        day_low = min([l for l in lows if l is not None] or [None])
+                    prev_close = meta.get('chartPreviousClose') or meta.get('previousClose')
+                    change = (last_close - prev_close) if (last_close is not None and prev_close) else None
+                    change_pct = (change / prev_close * 100) if (change is not None and prev_close) else None
+                    # cumulative volume from meta or sum of intraday
+                    day_vol = meta.get('regularMarketVolume')
+                    if day_vol is None and vols:
+                        day_vol = sum(v for v in vols if v is not None)
+                    out = {
+                        'symbol':       meta.get('symbol', sym),
+                        'price':        last_close,
+                        'change':       change,
+                        'changePct':    change_pct,
+                        'open':         meta.get('regularMarketOpen'),
+                        'high':         day_high,
+                        'low':          day_low,
+                        'prevClose':    prev_close,
+                        'volume':       day_vol,
+                        'bid':          None,                 # Yahoo v7 closed; needs broker API
+                        'ask':          None,
+                        'bidSize':      None,
+                        'askSize':      None,
+                        'marketState':  meta.get('marketState'),  # PRE/REGULAR/POST/CLOSED
+                        'currency':     meta.get('currency'),
+                        'serverTime':   int(time.time()),
+                        'lastBarTime':  ts[last_idx] if last_idx is not None else None,
+                        'source':       'yahoo-v8-chart',
+                    }
+                    self._ok(json.dumps(out, ensure_ascii=False).encode('utf-8'))
+                    return
+                except urllib.error.HTTPError as e:
+                    if e.code == 404: break
+                    continue
+                except Exception as e:
+                    print(f'[quote] {candidate} via {base} error: {e}')
+                    continue
+        self._err('quote fetch failed for ' + sym, 502)
 
     def _handle_etf_delta(self):
         files = list_etf_files()

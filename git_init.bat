@@ -52,8 +52,8 @@ echo Creating initial commit...
 git commit -m "Initial commit: Stock Terminal v2.0 — multi-signal WATCH + POS + i-icon docs + drag-sort watchlist"
 if errorlevel 1 (
     echo [WARN] Commit failed. You may need to set git config user.name / user.email globally first:
-    echo        git config --global user.name  "Your Name"
-    echo        git config --global user.email "you@example.com"
+    echo        git config --global user.name  "Sam Huang"
+    echo        git config --global user.email "samhuang68@gmail.com"
     pause
     exit /b 1
 )
@@ -65,7 +65,7 @@ echo ============================================
 echo.
 echo Next steps (push to GitHub / GitLab):
 echo   1. Create empty repo at https://github.com/new   (name it stock-terminal)
-echo   2. git remote add origin https://github.com/USERNAME/stock-terminal.git
+echo   2. git remote add origin https://github.com/SamHuang68/stock-terminal.git
 echo   3. git push -u origin main
 echo.
 echo Or push to a private GitLab / Gitea / Bitbucket the same way.

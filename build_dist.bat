@@ -32,7 +32,7 @@ REM v1 UI + launchers
 set FILES=%FILES% stock_terminal.html start_terminal.bat
 REM v2 UI + modules + launcher
 set FILES=%FILES% stock_terminal_v2.html start_terminal_v2.bat build_v2.py
-set FILES=%FILES% position_v2.js watch_v2.js info_v2.js
+set FILES=%FILES% position_v2.js watch_v2.js info_v2.js pro_v2.js pattern_v2.js live_v2.js mobile_v2.css
 REM ETF tracker launchers + scheduler
 set FILES=%FILES% run_tracker.bat daily_etf.bat
 set FILES=%FILES% install_scheduler.bat uninstall_scheduler.bat

@@ -15,13 +15,17 @@ DST  = os.path.join(ROOT, 'stock_terminal_v2.html')
 #   position_v2.js — defines num/fx helpers used by both watch and info
 #   watch_v2.js    — defines STRATEGIES / PRESETS used by info_v2.js
 #   info_v2.js     — registers (i) icon tooltips for indicators / strategies / presets
-V2_SCRIPTS = ['position_v2.js', 'watch_v2.js', 'info_v2.js']
+V2_SCRIPTS = ['position_v2.js', 'watch_v2.js', 'info_v2.js', 'pro_v2.js', 'pattern_v2.js', 'live_v2.js']
+V2_STYLES  = ['mobile_v2.css']
 
 if not os.path.isfile(SRC):
     sys.exit(f'[ERR] missing {SRC}')
 for js in V2_SCRIPTS:
     if not os.path.isfile(os.path.join(ROOT, js)):
         sys.exit(f'[ERR] missing {js} — required for v2')
+for css in V2_STYLES:
+    if not os.path.isfile(os.path.join(ROOT, css)):
+        sys.exit(f'[ERR] missing {css} — required for v2')
 
 with open(SRC, 'r', encoding='utf-8') as f:
     html = f.read()
@@ -62,15 +66,23 @@ RP_WATCH_NEW = (RP_WATCH_OLD + "\n"
 if 'renderWatch()' not in html:
     html = html.replace(RP_WATCH_OLD, RP_WATCH_NEW, 1)
 
-# 4a) setTab tabs array: add 'position' between 'history' and 'etf'
+# 4a) setTab tabs array: drop BATCH (v2 doesn't need it), add 'position' + 'watch'
 TAB_V1   = "const tabs=['stats','research','batch','history','etf'];"
 TAB_POS  = "const tabs=['stats','research','batch','history','position','etf'];"
 TAB_FULL = "const tabs=['stats','research','batch','history','position','watch','etf'];"
-if "'watch'" not in html:
-    if TAB_V1 in html:
-        html = html.replace(TAB_V1, TAB_FULL, 1)
-    elif TAB_POS in html:
-        html = html.replace(TAB_POS, TAB_FULL, 1)
+TAB_NOBATCH = "const tabs=['stats','research','history','position','watch','etf'];"
+# Replace any prior version with the no-batch full version
+for old in [TAB_V1, TAB_POS, TAB_FULL]:
+    if old in html:
+        html = html.replace(old, TAB_NOBATCH, 1)
+        break
+
+# 4a2) Hide the BATCH tab button entirely (v2 doesn't expose Batch — too crowded)
+html = re.sub(
+    r'\s*<button class="rtab"[^>]*onclick="setTab\(\'batch\'\)"[^>]*>[^<]*</button>',
+    '',
+    html, count=1
+)
 
 # 4b) Patch v1's loadSym — wrap renderRpanel in try/catch + fire `symLoaded` CustomEvent.
 LS_OLD = "  if (S.ind) updateEtfFlowInd();\n  renderRpanel();"
@@ -80,12 +92,27 @@ LS_NEW = ("  if (S.ind) updateEtfFlowInd();\n"
 if 'symLoaded' not in html:
     html = html.replace(LS_OLD, LS_NEW, 1)
 
-# 5) Inject v2 scripts (with cache-busting timestamp)
+# 5) Inject v2 scripts + stylesheets (with cache-busting timestamp)
 ts = int(time.time())
 # Strip any prior v2 script tags so we can re-emit with fresh ts
 for js in V2_SCRIPTS:
     html = re.sub(rf'<script[^>]+{re.escape(js)}[^>]*></script>\s*', '', html)
+for css in V2_STYLES:
+    html = re.sub(rf'<link[^>]+{re.escape(css)}[^>]*>\s*', '', html)
 
+# Add viewport meta (better mobile rendering)
+if 'name="viewport"' not in html:
+    html = html.replace('<head>', '<head>\n<meta name="viewport" content="width=device-width,initial-scale=1.0">', 1)
+
+# Inject CSS before </head>
+css_block = ''.join(
+    f'<link rel="stylesheet" href="{css}?v={ts}">\n'
+    for css in V2_STYLES
+)
+if '</head>' in html:
+    html = html.replace('</head>', css_block + '</head>', 1)
+
+# Inject scripts before </body>
 script_block = ''.join(
     f'<script src="{js}?v={ts}"></script>\n'
     for js in V2_SCRIPTS

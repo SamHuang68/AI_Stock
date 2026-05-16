@@ -87,6 +87,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 #chart-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:10;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--tlo);letter-spacing:2px}
 #chart-info{position:absolute;top:8px;left:10px;z-index:5;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--tlo);pointer-events:none}
 .ci-price{font-size:18px;font-weight:700;color:var(--thi);letter-spacing:1px}
+#ci-ohlc{display:none;margin-top:6px;padding:5px 8px;background:rgba(11,18,32,.75);border:1px solid var(--border);border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1.7;letter-spacing:.3px;backdrop-filter:blur(4px);max-width:520px}
+#ci-ohlc .ohlc-d{color:var(--tlo);margin-right:8px}
+#ci-ohlc .ohlc-k{color:var(--tlo);margin-right:1px}
+#ci-ohlc .ohlc-v{font-weight:700;margin-right:8px}
+#ci-ohlc .ma-row{font-size:9px;color:var(--tlo);margin-top:3px}
+#ci-ohlc .ma-row span{margin-right:8px}
 .ci-chg{font-size:11px;margin-top:2px}
 
 /* ── INDICATOR BAR (16 cells in 8-col × 2-row grid, no scroll) ── */
@@ -196,6 +202,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
+<link rel="stylesheet" href="mobile_v2.css?v=1778908519">
 </head>
 <body>
 <div id="app">
@@ -226,6 +233,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
           <div class="ci-price" id="ci-price">--</div>
           <div class="ci-chg" id="ci-chg"></div>
           <div style="font-size:9px;color:var(--tlo);margin-top:3px" id="ci-name"></div>
+          <div id="ci-ohlc"></div>
         </div>
       </div>
       <div id="indbar"><div class="ig" id="ig-cells"></div></div>
@@ -234,7 +242,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
       <div id="rtabs">
         <button class="rtab on" onclick="setTab('stats')">STATS</button>
         <button class="rtab" onclick="setTab('research')">RESEARCH</button>
-        <button class="rtab" onclick="setTab('batch')">BATCH</button>
         <button class="rtab" onclick="setTab('history')">HISTORY</button>
         <button class="rtab" id="tab-pos" onclick="setTab('position')">POS</button>
         <button class="rtab" id="tab-watch" onclick="setTab('watch')">WATCH</button>
@@ -588,6 +595,88 @@ function renderChart(candles) {
   vs.setData(candles.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'rgba(74,222,128,0.25)':'rgba(248,113,113,0.25)'})));
   S.volSeries = vs;
 
+  // ── SMA + Bollinger Bands overlay (skip on intraday) ──
+  S.overlaySeries = {};
+  if (!isIntraday && candles.length >= 20) {
+    const closes = candles.map(c => c.close);
+    const sma = (n, i) => {
+      if (i + 1 < n) return null;
+      let s = 0;
+      for (let k = i - n + 1; k <= i; k++) s += closes[k];
+      return s / n;
+    };
+    const std = (n, i, mean) => {
+      if (i + 1 < n) return null;
+      let v = 0;
+      for (let k = i - n + 1; k <= i; k++) v += Math.pow(closes[k] - mean, 2);
+      return Math.sqrt(v / n);
+    };
+
+    const sma20Data = candles.map((c, i) => { const v = sma(20, i); return v == null ? null : {time: c.time, value: v}; }).filter(Boolean);
+    const sma60Data = candles.map((c, i) => { const v = sma(60, i); return v == null ? null : {time: c.time, value: v}; }).filter(Boolean);
+    const bbU = candles.map((c, i) => { const m = sma(20, i); if (m == null) return null; const s = std(20, i, m); return {time: c.time, value: m + 2 * s}; }).filter(Boolean);
+    const bbL = candles.map((c, i) => { const m = sma(20, i); if (m == null) return null; const s = std(20, i, m); return {time: c.time, value: m - 2 * s}; }).filter(Boolean);
+
+    const mkLine = (color, width, dashed) => chart.addLineSeries({
+      color, lineWidth: width, lastValueVisible: false, priceLineVisible: false,
+      lineStyle: dashed ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
+      crosshairMarkerVisible: false,
+    });
+    const sma20S = mkLine('#FBBF24', 1, false);   sma20S.setData(sma20Data);
+    const sma60S = mkLine('#67E8F9', 1, false);   sma60S.setData(sma60Data);
+    const bbUS   = mkLine('rgba(96,165,250,.6)', 1, true); bbUS.setData(bbU);
+    const bbLS   = mkLine('rgba(96,165,250,.6)', 1, true); bbLS.setData(bbL);
+    S.overlaySeries = { sma20: sma20S, sma60: sma60S, bbU: bbUS, bbL: bbLS };
+  }
+
+  // ── Crosshair: dynamic OHLCV display following cursor ──
+  chart.subscribeCrosshairMove(param => {
+    const ohlcEl = document.getElementById('ci-ohlc');
+    if (!ohlcEl) return;
+    if (!param || !param.point || !param.time || !param.seriesData) {
+      ohlcEl.style.display = 'none';
+      return;
+    }
+    const k = param.seriesData.get(cs);
+    const v = param.seriesData.get(vs);
+    if (!k) { ohlcEl.style.display = 'none'; return; }
+
+    // Date string (intraday → date+time, daily → date only)
+    const d = new Date(typeof param.time === 'number' ? param.time * 1000 : Date.parse(param.time));
+    const ds = isIntraday
+      ? `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+      : `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+
+    const isUp = k.close >= k.open;
+    const col = isUp ? 'var(--green)' : 'var(--red)';
+    const chgPct = ((k.close - k.open) / k.open * 100);
+
+    // MA values at this time
+    let maRow = '';
+    if (S.overlaySeries) {
+      const m20 = param.seriesData.get(S.overlaySeries.sma20);
+      const m60 = param.seriesData.get(S.overlaySeries.sma60);
+      const u   = param.seriesData.get(S.overlaySeries.bbU);
+      const l   = param.seriesData.get(S.overlaySeries.bbL);
+      const parts = [];
+      if (m20) parts.push(`<span style="color:#FBBF24">SMA20 ${m20.value.toFixed(2)}</span>`);
+      if (m60) parts.push(`<span style="color:#67E8F9">SMA60 ${m60.value.toFixed(2)}</span>`);
+      if (u && l) parts.push(`<span style="color:rgba(96,165,250,.85)">BB ${l.value.toFixed(2)} ~ ${u.value.toFixed(2)}</span>`);
+      if (parts.length) maRow = `<div class="ma-row">${parts.join(' ')}</div>`;
+    }
+
+    ohlcEl.style.display = 'block';
+    ohlcEl.innerHTML =
+      `<span class="ohlc-d">${ds}</span>` +
+      `<span class="ohlc-k">開</span><span class="ohlc-v" style="color:var(--thi)">${k.open.toFixed(2)}</span>` +
+      `<span class="ohlc-k">高</span><span class="ohlc-v" style="color:var(--green)">${k.high.toFixed(2)}</span>` +
+      `<span class="ohlc-k">低</span><span class="ohlc-v" style="color:var(--red)">${k.low.toFixed(2)}</span>` +
+      `<span class="ohlc-k">收</span><span class="ohlc-v" style="color:${col}">${k.close.toFixed(2)}</span>` +
+      `<span style="color:${col};margin-right:8px">(${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)</span>` +
+      (v ? `<span class="ohlc-k">量</span><span class="ohlc-v" style="color:var(--blue)">${formatVol(v.value)}</span>` : '') +
+      maRow;
+  });
+
   // 🔑 Fit all candles to one page width
   requestAnimationFrame(()=>chart.timeScale().fitContent());
 
@@ -596,6 +685,13 @@ function renderChart(candles) {
     chart.timeScale().fitContent();
   });
   ro.observe(wrap);
+}
+
+function formatVol(v) {
+  if (v == null || isNaN(v)) return '--';
+  if (v >= 1e8) return (v / 1e8).toFixed(2) + '億';
+  if (v >= 1e4) return (v / 1e4).toFixed(0) + '萬';
+  return Math.round(v).toLocaleString();
 }
 
 // ── INDICATOR BAR ────────────────────────────────────────────────
@@ -772,7 +868,7 @@ function relTime(ts) {
 function setTab(tab) {
   S.tab = tab;
   document.querySelectorAll('.rtab').forEach((b,i)=>{
-    const tabs=['stats','research','batch','history','etf'];
+    const tabs=['stats','research','history','position','watch','etf'];
     b.classList.toggle('on', tabs[i]===tab);
   });
   renderRpanel();
@@ -1142,9 +1238,12 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
 });
 </script>
-<script src="position_v2.js?v=1778804680"></script>
-<script src="watch_v2.js?v=1778804680"></script>
-<script src="info_v2.js?v=1778804680"></script>
+<script src="position_v2.js?v=1778908519"></script>
+<script src="watch_v2.js?v=1778908519"></script>
+<script src="info_v2.js?v=1778908519"></script>
+<script src="pro_v2.js?v=1778908519"></script>
+<script src="pattern_v2.js?v=1778908519"></script>
+<script src="live_v2.js?v=1778908519"></script>
 </body>
 </html>
 <script>
