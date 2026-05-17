@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Stock Terminal — 完整功能說明 (v2.3)</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#060A12;--bg2:#0B1220;--bg3:#111B2E;--bg4:#162240;
+  --border:#1A2740;--bhi:#2A3D5C;
+  --gold:#F5C518;--gold-s:rgba(245,197,24,.08);--gold-m:rgba(245,197,24,.18);
+  --text:#C8D3E0;--thi:#F1F5FA;--tlo:#5A6A82;--tf:#2D3A52;
+  --green:#4ADE80;--gbg:rgba(74,222,128,.08);--gbdr:rgba(74,222,128,.3);
+  --blue:#60A5FA;--bbg:rgba(96,165,250,.08);
+  --red:#F87171;--cyan:#67E8F9;--orange:#FB923C;--purple:#A78BFA;
+}
+html,body{background:var(--bg);color:var(--text);font-family:'Noto Serif TC','PingFang TC',serif;scroll-behavior:smooth;line-height:1.7}
+body{padding:0;margin:0}
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap');
+::-webkit-scrollbar{width:8px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--bhi);border-radius:4px}
+
+/* Layout */
+.wrap{max-width:1180px;margin:0 auto;padding:32px 24px}
+
+/* Header */
+header{background:linear-gradient(180deg,var(--bg2) 0%,var(--bg) 100%);border-bottom:1px solid var(--border);padding:48px 24px 36px}
+header .wrap{padding:0;text-align:center}
+.logo{font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--gold);font-weight:700;letter-spacing:6px;margin-bottom:8px}
+h1{font-size:42px;color:var(--thi);margin-bottom:8px;letter-spacing:1px;font-weight:700}
+.subtitle{font-size:15px;color:var(--tlo);margin-bottom:24px}
+.badges{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:14px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.5px}
+.badge.gold{background:var(--gold-s);color:var(--gold);border:1px solid var(--gold-m)}
+.badge.green{background:var(--gbg);color:var(--green);border:1px solid var(--gbdr)}
+.badge.blue{background:var(--bbg);color:var(--blue);border:1px solid rgba(96,165,250,.3)}
+.badge.purple{background:rgba(167,139,250,.1);color:var(--purple);border:1px solid rgba(167,139,250,.3)}
+
+/* TOC */
+.toc{position:sticky;top:0;background:rgba(11,18,32,.95);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);padding:12px 24px;z-index:50;font-family:'JetBrains Mono',monospace;font-size:11px;display:flex;justify-content:center;gap:16px;flex-wrap:wrap;letter-spacing:.5px}
+.toc a{color:var(--tlo);text-decoration:none;transition:color .12s;padding:4px 8px;border-radius:4px}
+.toc a:hover{color:var(--gold);background:var(--gold-s)}
+
+/* Sections */
+section{padding:48px 0;border-bottom:1px solid var(--border)}
+section h2{font-size:28px;color:var(--gold);margin-bottom:6px;font-family:'JetBrains Mono',monospace;letter-spacing:2px;font-weight:700;display:flex;align-items:center;gap:14px}
+section h2 .vbadge{font-size:11px;padding:4px 10px;background:var(--gold-s);color:var(--gold);border:1px solid var(--gold-m);border-radius:12px;letter-spacing:1px;font-weight:600}
+section .lead{color:var(--tlo);font-size:14px;margin-bottom:32px;line-height:1.8}
+
+/* Version timeline */
+.timeline{position:relative;padding-left:34px;margin:24px 0}
+.timeline::before{content:'';position:absolute;left:9px;top:8px;bottom:8px;width:2px;background:linear-gradient(180deg,var(--gold) 0%,var(--blue) 50%,var(--purple) 100%)}
+.tline{position:relative;padding:14px 0 14px 14px;margin-bottom:8px}
+.tline::before{content:'';position:absolute;left:-30px;top:18px;width:14px;height:14px;border-radius:50%;background:var(--bg);border:3px solid var(--gold);box-shadow:0 0 0 2px var(--bg2)}
+.tline.blue::before{border-color:var(--blue)}
+.tline.purple::before{border-color:var(--purple)}
+.tline.green::before{border-color:var(--green)}
+.tline-ver{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--gold);font-weight:700;letter-spacing:1px;margin-bottom:4px}
+.tline.blue .tline-ver{color:var(--blue)}
+.tline.purple .tline-ver{color:var(--purple)}
+.tline.green .tline-ver{color:var(--green)}
+.tline-ttl{font-size:15px;color:var(--thi);font-weight:600;margin-bottom:6px}
+.tline-desc{font-size:12px;color:var(--tlo);line-height:1.7}
+
+/* Feature cards */
+.fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-top:24px}
+.fcard{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:18px 20px;transition:all .15s;position:relative;overflow:hidden}
+.fcard:hover{border-color:var(--gold-m);transform:translateY(-2px);box-shadow:0 6px 18px rgba(245,197,24,.08)}
+.fcard-h{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.fcard-icon{font-size:22px;line-height:1}
+.fcard-title{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--gold);font-weight:700;letter-spacing:.5px;flex:1}
+.fcard-tier{font-size:8.5px;padding:2px 6px;border-radius:8px;letter-spacing:.5px;font-family:'JetBrains Mono',monospace;font-weight:700}
+.fcard-tier.s{background:rgba(248,113,113,.15);color:var(--red)}
+.fcard-tier.a{background:rgba(245,197,24,.15);color:var(--gold)}
+.fcard-tier.b{background:rgba(96,165,250,.15);color:var(--blue)}
+.fcard-desc{font-size:12.5px;color:var(--text);line-height:1.7;margin-bottom:10px}
+.fcard-use{font-size:11px;color:var(--tlo);line-height:1.7;border-top:1px solid var(--border);padding-top:8px}
+.fcard-use b{color:var(--green)}
+
+/* Mock UI */
+.mock{background:var(--bg);border:1px solid var(--border);border-radius:6px;margin:14px 0;overflow:hidden;font-family:'JetBrains Mono',monospace;font-size:10px}
+.mock-header{background:var(--bg2);padding:6px 10px;border-bottom:1px solid var(--border);color:var(--tlo);font-size:9px;letter-spacing:1px;display:flex;justify-content:space-between}
+.mock-body{padding:10px;color:var(--text);line-height:1.6}
+.mock-row{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--bg3)}
+.mock-row:last-child{border-bottom:none}
+.mock-k{color:var(--tlo)}
+.mock-v{color:var(--thi);font-weight:700}
+.mock-v.green{color:var(--green)}
+.mock-v.red{color:var(--red)}
+.mock-v.gold{color:var(--gold)}
+
+/* Mockup chart */
+.chart-mock{height:120px;background:linear-gradient(180deg,var(--bg) 0%,var(--bg3) 100%);border-radius:4px;position:relative;margin:8px 0;overflow:hidden}
+.chart-mock svg{width:100%;height:100%}
+
+/* Indicator strip mock */
+.ind-strip{display:grid;grid-template-columns:repeat(8,1fr);gap:1px;background:var(--border);padding:1px;border-radius:4px;font-size:8.5px;margin:8px 0}
+.ind-cell{background:var(--bg2);padding:5px 7px;display:flex;justify-content:space-between}
+.ind-cell .l{color:var(--tlo);font-size:7px;letter-spacing:.5px}
+.ind-cell .v{color:var(--thi);font-weight:700}
+.ind-cell .v.r{color:var(--red)}
+.ind-cell .v.g{color:var(--green)}
+
+/* Tab mock */
+.tabs-mock{display:flex;border-bottom:1px solid var(--border);margin:8px 0;gap:0}
+.tab{padding:6px 12px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--tlo);letter-spacing:1px;border-bottom:2px solid transparent;cursor:default}
+.tab.on{color:var(--gold);border-bottom-color:var(--gold);background:var(--gold-s)}
+
+/* Watch chip mock */
+.chips-mock{display:grid;grid-template-rows:repeat(2,1fr);grid-auto-flow:column;gap:1px;padding:6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;margin:8px 0;height:60px}
+.chip{padding:0 8px;background:var(--bg2);display:flex;align-items:center;gap:5px;font-family:'JetBrains Mono',monospace;font-size:10px;border-radius:2px}
+.chip.on{background:var(--gold-s);color:var(--gold)}
+.chip-pct.g{color:var(--green);font-size:9px}
+.chip-pct.r{color:var(--red);font-size:9px}
+
+/* Signal cards inside POS */
+.sig-card{padding:7px 10px;border-left:3px solid;border-radius:0 4px 4px 0;margin:6px 0;font-size:10px}
+.sig-card.buy{background:var(--gbg);border-color:var(--green);color:var(--green)}
+.sig-card.sell{background:rgba(248,113,113,.08);border-color:var(--red);color:var(--red)}
+.sig-card.warn{background:rgba(251,146,60,.08);border-color:var(--orange);color:var(--orange)}
+.sig-card .ttl{font-weight:700;margin-bottom:2px;font-family:'JetBrains Mono',monospace;font-size:10px}
+.sig-card .desc{color:var(--text);font-size:9.5px;line-height:1.5}
+
+/* Workflow diagram */
+.workflow{padding:16px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;margin:18px 0}
+.wf-step{display:flex;align-items:center;gap:14px;margin:10px 0}
+.wf-step-num{width:28px;height:28px;background:var(--gold-s);color:var(--gold);border:1px solid var(--gold-m);border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;flex-shrink:0}
+.wf-step-body{flex:1;font-size:13px}
+.wf-step-body b{color:var(--gold)}
+.wf-arrow{margin-left:14px;color:var(--tf);font-size:18px}
+
+/* Tables */
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;overflow:hidden}
+th{background:var(--bg3);padding:9px 12px;text-align:left;color:var(--gold);font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.5px;font-weight:700;border-bottom:1px solid var(--border)}
+td{padding:9px 12px;border-bottom:1px solid var(--border);color:var(--text);font-size:12px}
+tr:last-child td{border-bottom:none}
+tr:hover{background:rgba(245,197,24,.03)}
+
+/* Code */
+code{background:var(--bg2);padding:1px 6px;border-radius:3px;color:var(--gold);font-family:'JetBrains Mono',monospace;font-size:11px;border:1px solid var(--border)}
+pre{background:var(--bg2);padding:12px 14px;border-radius:6px;border:1px solid var(--border);overflow-x:auto;margin:12px 0}
+pre code{background:transparent;padding:0;border:none;font-size:11px;line-height:1.6;color:var(--text)}
+
+/* Notes */
+.note{background:var(--bbg);border-left:3px solid var(--blue);padding:10px 14px;border-radius:0 4px 4px 0;margin:14px 0;font-size:12px;color:var(--text);line-height:1.7}
+.note b{color:var(--blue)}
+.warn{background:rgba(251,146,60,.08);border-left:3px solid var(--orange);padding:10px 14px;border-radius:0 4px 4px 0;margin:14px 0;font-size:12px;color:var(--text);line-height:1.7}
+.warn b{color:var(--orange)}
+
+/* Footer */
+footer{padding:32px 24px;text-align:center;color:var(--tf);font-size:11px;font-family:'JetBrains Mono',monospace;letter-spacing:.5px}
+footer a{color:var(--gold);text-decoration:none}
+
+/* Responsive */
+@media (max-width:768px){
+  h1{font-size:28px}
+  section h2{font-size:20px}
+  .toc{font-size:9.5px;gap:8px;padding:8px}
+  .fgrid{grid-template-columns:1fr}
+  .ind-strip{grid-template-columns:repeat(4,1fr)}
+}
+</style>
+</head>
+<body>
+
+<header>
+<div class="logo">STOCK TERMINAL</div>
+<h1>完整功能說明</h1>
+<p class="subtitle">v1.0 → v2.3 — 從基本看盤到專業多訊號交易系統</p>
+<div class="badges">
+  <span class="badge gold">📊 16 項技術指標</span>
+  <span class="badge green">🎯 多訊號 WATCH + 共識評分</span>
+  <span class="badge blue">🤖 8 種 AI 形態辨識</span>
+  <span class="badge purple">⚡ 即時報價 + 通知中心</span>
+</div>
+</header>
+
+<nav class="toc">
+  <a href="#overview">概覽</a>
+  <a href="#timeline">版本演進</a>
+  <a href="#chart">線型圖表</a>
+  <a href="#watchlist">自選股</a>
+  <a href="#position">倉位 POS</a>
+  <a href="#watch">觀察 WATCH</a>
+  <a href="#signal">訊號引擎</a>
+  <a href="#pattern">AI 形態</a>
+  <a href="#pro">專業工具</a>
+  <a href="#notify">通知中心</a>
+  <a href="#etfmgr">ETF 管理</a>
+  <a href="#data">資料源</a>
+  <a href="#workflow">使用流程</a>
+</nav>
+
+<div class="wrap">
+
+<!-- ============================================================ -->
+<section id="overview">
+<h2>📊 專案概覽</h2>
+<p class="lead">本機運行的 Bloomberg-style 個股研究終端機。零雲端、零外部 Python 套件、純 stdlib 即可跑。整合即時 K 線、16 項技術指標、台股主動式 ETF 持股追蹤、倉位管理、規則化訊號引擎、AI 形態辨識，以及多檔個股的多訊號共識評分系統。</p>
+
+<div class="fgrid">
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">⚙️</span><span class="fcard-title">技術架構</span></div>
+    <div class="fcard-desc">Python ThreadingHTTPServer + ThreadPoolExecutor(32) + LRU Cache(20K) + HTTP/1.1 keep-alive。前端純 vanilla JS + lightweight-charts CDN。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">🎯</span><span class="fcard-title">核心優勢</span></div>
+    <div class="fcard-desc">所有運算本地完成，零追蹤、零雲端依賴。LocalStorage 保存倉位與觀察清單，重灌不掉。完全屬於你。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">🚀</span><span class="fcard-title">效能</span></div>
+    <div class="fcard-desc">Core Ultra 9 285H 主機上一鍵切股 < 200ms（含指標 worker 計算）。LRU 快取讓重複查詢 0ms。</div>
+  </div>
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section id="timeline">
+<h2>🕐 版本演進</h2>
+<p class="lead">從基礎看盤到專業多訊號終端機，五個版本的功能堆疊。</p>
+
+<div class="timeline">
+  <div class="tline">
+    <div class="tline-ver">v1.0 — Base Chart</div>
+    <div class="tline-ttl">基礎看盤平台</div>
+    <div class="tline-desc">即時 Yahoo Finance K 線、11 段時間切換（1天 ~ 全部）、16 項技術指標、自選股清單、AI 八章節研究報告（接 Claude API），台股主動式 ETF 持股每日 delta（MoneyDJ 資料源）。</div>
+  </div>
+  <div class="tline blue">
+    <div class="tline-ver">v2.0 — POS + WATCH</div>
+    <div class="tline-ttl">倉位管理 + 訊號引擎</div>
+    <div class="tline-desc">建倉追蹤（張/股自動換算）、8 大類規則化訊號（均線/RSI/KD/MACD/BB/量能/倉位連動/ETF 共振）、價位觀察清單、7 個策略劇本，每個附中文 (i) 圖示說明。</div>
+  </div>
+  <div class="tline purple">
+    <div class="tline-ver">v2.1 — Pro Tools</div>
+    <div class="tline-ttl">8 個專業工具一次到位</div>
+    <div class="tline-desc">瀏覽器通知、大盤對照線（vs ^TWII / ^GSPC）、手繪支撐壓力線、投組風險面板、部位熱力圖、POC 量價分布、Replay 重播、策略歷史回測。WATCH 升級為多訊號 + 共識評分系統。</div>
+  </div>
+  <div class="tline green">
+    <div class="tline-ver">v2.2 — AI &amp; Mobile</div>
+    <div class="tline-ttl">AI 形態辨識 + 響應式 + 通知中心</div>
+    <div class="tline-desc">8 種經典 K 線形態自動辨識（雙頂底、頭肩、杯柄、三角等）含量度目標；近即時報價輪詢（Yahoo v8 chart 1m）；響應式 RWD 手機/平板/桌機通吃；通知中心保留最近 100 筆觸發歷史。</div>
+  </div>
+  <div class="tline">
+    <div class="tline-ver">v2.3 — ETF Catalog</div>
+    <div class="tline-ttl">ETF 全分類 + 動態管理</div>
+    <div class="tline-desc">ETF 觀測池從 hardcoded 10 檔 → 60+ 檔分 7 類 catalog（主動式/市值型/高股息/科技半導體/槓桿反向/海外/債券/自訂）。前端 ⚙ 管理 modal 含勾選啟用 + 新增自訂 ETF + 「儲存並立即更新」一鍵觸發背景 tracker。自選股雙列改為上排台股下排美股強制分排，HISTORY/BATCH 分頁從 v2 移除減版面。</div>
+  </div>
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section id="chart">
+<h2>📈 線型圖表 <span class="vbadge">v1.0 +</span></h2>
+<p class="lead">基於 TradingView 的 lightweight-charts 引擎，疊加 SMA20/60 均線 + 布林通道。游標跟隨即時顯示 OHLCV，支援 11 個時間段一鍵切換。</p>
+
+<div class="mock">
+<div class="mock-header"><span>STOCK TERMINAL · 2330 · 5Y</span><span style="color:var(--green)">+2.25%</span></div>
+<div class="mock-body">
+<div style="display:flex;gap:4px;margin-bottom:6px">
+  <span style="padding:3px 8px;background:transparent;border:1px solid var(--border);border-radius:3px;font-size:9px;color:var(--tlo)">1天</span>
+  <span style="padding:3px 8px;background:transparent;border:1px solid var(--border);border-radius:3px;font-size:9px;color:var(--tlo)">3周</span>
+  <span style="padding:3px 8px;background:transparent;border:1px solid var(--border);border-radius:3px;font-size:9px;color:var(--tlo)">1月</span>
+  <span style="padding:3px 8px;background:transparent;border:1px solid var(--border);border-radius:3px;font-size:9px;color:var(--tlo)">3月</span>
+  <span style="padding:3px 8px;background:transparent;border:1px solid var(--border);border-radius:3px;font-size:9px;color:var(--tlo)">6月</span>
+  <span style="padding:3px 8px;background:transparent;border:1px solid var(--border);border-radius:3px;font-size:9px;color:var(--tlo)">YTD</span>
+  <span style="padding:3px 8px;background:transparent;border:1px solid var(--border);border-radius:3px;font-size:9px;color:var(--tlo)">1年</span>
+  <span style="padding:3px 8px;background:transparent;border:1px solid var(--border);border-radius:3px;font-size:9px;color:var(--tlo)">2年</span>
+  <span style="padding:3px 8px;background:var(--gold-s);border:1px solid var(--gold);border-radius:3px;font-size:9px;color:var(--gold);font-weight:700">5年</span>
+  <span style="padding:3px 8px;background:transparent;border:1px solid var(--border);border-radius:3px;font-size:9px;color:var(--tlo)">10年</span>
+  <span style="padding:3px 8px;background:transparent;border:1px solid var(--border);border-radius:3px;font-size:9px;color:var(--tlo)">全部</span>
+</div>
+<div class="chart-mock">
+  <svg viewBox="0 0 600 120" preserveAspectRatio="none">
+    <!-- Grid lines -->
+    <g stroke="#0F1A2B" stroke-width="0.5">
+      <line x1="0" y1="30" x2="600" y2="30"/>
+      <line x1="0" y1="60" x2="600" y2="60"/>
+      <line x1="0" y1="90" x2="600" y2="90"/>
+    </g>
+    <!-- SMA60 line (cyan) -->
+    <polyline fill="none" stroke="#67E8F9" stroke-width="1.2" points="0,90 60,85 120,80 180,72 240,65 300,55 360,48 420,42 480,38 540,35 600,32"/>
+    <!-- SMA20 line (gold) -->
+    <polyline fill="none" stroke="#FBBF24" stroke-width="1.2" points="0,85 60,80 120,72 180,60 240,52 300,42 360,35 420,28 480,22 540,18 600,15"/>
+    <!-- BB Upper (dotted blue) -->
+    <polyline fill="none" stroke="rgba(96,165,250,.5)" stroke-width="1" stroke-dasharray="3,2" points="0,75 100,68 200,55 300,40 400,25 500,12 600,5"/>
+    <!-- BB Lower (dotted blue) -->
+    <polyline fill="none" stroke="rgba(96,165,250,.5)" stroke-width="1" stroke-dasharray="3,2" points="0,108 100,100 200,90 300,72 400,55 500,40 600,32"/>
+    <!-- Candlesticks (simplified bars) -->
+    <g>
+      <rect x="20"  y="80" width="6" height="20" fill="#4ADE80"/>
+      <rect x="40"  y="75" width="6" height="18" fill="#4ADE80"/>
+      <rect x="60"  y="78" width="6" height="12" fill="#F87171"/>
+      <rect x="80"  y="70" width="6" height="22" fill="#4ADE80"/>
+      <rect x="100" y="65" width="6" height="20" fill="#4ADE80"/>
+      <rect x="120" y="68" width="6" height="14" fill="#F87171"/>
+      <rect x="140" y="60" width="6" height="20" fill="#4ADE80"/>
+      <rect x="160" y="55" width="6" height="18" fill="#4ADE80"/>
+      <rect x="180" y="50" width="6" height="22" fill="#4ADE80"/>
+      <rect x="200" y="55" width="6" height="12" fill="#F87171"/>
+      <rect x="220" y="45" width="6" height="20" fill="#4ADE80"/>
+      <rect x="240" y="40" width="6" height="18" fill="#4ADE80"/>
+      <rect x="260" y="35" width="6" height="20" fill="#4ADE80"/>
+      <rect x="280" y="40" width="6" height="14" fill="#F87171"/>
+      <rect x="300" y="32" width="6" height="20" fill="#4ADE80"/>
+      <rect x="320" y="28" width="6" height="18" fill="#4ADE80"/>
+      <rect x="340" y="22" width="6" height="20" fill="#4ADE80"/>
+      <rect x="360" y="25" width="6" height="14" fill="#F87171"/>
+      <rect x="380" y="18" width="6" height="22" fill="#4ADE80"/>
+      <rect x="400" y="15" width="6" height="20" fill="#4ADE80"/>
+      <rect x="420" y="12" width="6" height="22" fill="#4ADE80"/>
+      <rect x="440" y="20" width="6" height="14" fill="#F87171"/>
+      <rect x="460" y="10" width="6" height="22" fill="#4ADE80"/>
+      <rect x="480" y="8"  width="6" height="20" fill="#4ADE80"/>
+      <rect x="500" y="6"  width="6" height="18" fill="#4ADE80"/>
+      <rect x="520" y="14" width="6" height="12" fill="#F87171"/>
+      <rect x="540" y="8"  width="6" height="18" fill="#4ADE80"/>
+      <rect x="560" y="5"  width="6" height="14" fill="#4ADE80"/>
+      <rect x="580" y="3"  width="6" height="14" fill="#4ADE80"/>
+    </g>
+    <!-- Cursor crosshair -->
+    <g stroke="#5A6A82" stroke-width="0.5" stroke-dasharray="2,2">
+      <line x1="380" y1="0" x2="380" y2="120"/>
+      <line x1="0" y1="22" x2="600" y2="22"/>
+    </g>
+    <!-- Latest price line (green) -->
+    <line x1="0" y1="10" x2="600" y2="10" stroke="#4ADE80" stroke-dasharray="3,3" stroke-width="0.8"/>
+    <text x="585" y="9" font-size="7" fill="#4ADE80" text-anchor="end">2270.00</text>
+  </svg>
+</div>
+<div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--tlo);background:rgba(11,18,32,.6);padding:5px 8px;border-radius:3px;margin-top:4px">2026/05/14　開 <b style="color:var(--thi)">2230</b>　高 <b style="color:var(--green)">2280</b>　低 <b style="color:var(--red)">2225</b>　收 <b style="color:var(--green)">2270 (+1.79%)</b>　量 <b style="color:var(--blue)">33.14M</b>　<span style="color:#FBBF24">SMA20 2182.75</span>　<span style="color:#67E8F9">SMA60 1985.50</span></div>
+</div>
+</div>
+
+<div class="fgrid">
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">⏱️</span><span class="fcard-title">11 段時間切換</span><span class="fcard-tier s">必備</span></div>
+    <div class="fcard-desc">iOS Stocks 風格按鈕：1天/3周/1月/3月/6月/YTD/1年/2年/5年/10年/全部。1天為 5 分 K 盤中；其他為日 K，全部為週 K。</div>
+    <div class="fcard-use"><b>用法：</b>切到「6月」看波段、「全部」看歷史長期、「1天」看盤中。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">📊</span><span class="fcard-title">SMA + 布林通道疊圖</span><span class="fcard-tier s">必備</span></div>
+    <div class="fcard-desc">SMA20（金黃）/ SMA60（青）/ 布林上下軌（藍虛線）直接畫在 K 線上。專業看盤的基本配備。</div>
+    <div class="fcard-use"><b>用法：</b>價在 SMA60 上方 = 多頭結構；觸 BB 下軌 = 短線超賣。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">🎯</span><span class="fcard-title">游標跟隨 OHLCV</span><span class="fcard-tier a">便利</span></div>
+    <div class="fcard-desc">滑鼠移到任何 K 線位置，左上角顯示該日：日期、開高低收、漲跌幅、成交量、SMA/BB 對應值。</div>
+    <div class="fcard-use"><b>用法：</b>回顧歷史時不必算，直接看當日所有資訊。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">🔄</span><span class="fcard-title">自動 fitContent</span><span class="fcard-tier b">優化</span></div>
+    <div class="fcard-desc">切換時間段後 K 線自動填滿整個圖表寬度，不留白也不被裁切。視窗縮放也會 reflow。</div>
+    <div class="fcard-use"><b>用法：</b>不必手動拖拉縮放，永遠剛好顯示完整資料。</div>
+  </div>
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section id="watchlist">
+<h2>📋 自選股清單 <span class="vbadge">v2.0 +</span></h2>
+<p class="lead">頂端 chip 列，雙列佈局密度翻倍，支援拖曳排序。每個 chip 顯示代號 + 即時漲跌幅 + 主動 ETF 進出徽章。</p>
+
+<div class="chips-mock">
+  <span class="chip on"><span style="color:var(--tf);font-size:8px">⋮⋮</span><b>2330</b> <span class="chip-pct g">+2.25%</span></span>
+  <span class="chip"><span style="color:var(--tf);font-size:8px">⋮⋮</span><b>00631L</b> <span class="chip-pct r">-2.06%</span></span>
+  <span class="chip"><span style="color:var(--tf);font-size:8px">⋮⋮</span><b>2454</b> <span class="chip-pct g">+0.5%</span></span>
+  <span class="chip"><span style="color:var(--tf);font-size:8px">⋮⋮</span><b>6669</b> <span class="chip-pct g">+1.05%</span></span>
+  <span class="chip"><span style="color:var(--tf);font-size:8px">⋮⋮</span><b>3661</b> <span class="chip-pct g">+3.2%</span> <span style="font-size:7px;padding:0 3px;background:rgba(74,222,128,.15);color:var(--green);border-radius:2px">+3</span></span>
+  <span class="chip"><span style="color:var(--tf);font-size:8px">⋮⋮</span><b>SNPS</b> <span class="chip-pct r">-0.77%</span></span>
+  <span class="chip"><span style="color:var(--tf);font-size:8px">⋮⋮</span><b>AAPL</b> <span class="chip-pct g">+0.8%</span></span>
+  <span class="chip"><span style="color:var(--tf);font-size:8px">⋮⋮</span><b>NVDA</b> <span class="chip-pct g">+2.1%</span></span>
+</div>
+
+<div class="fgrid">
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">📐</span><span class="fcard-title">雙列佈局</span></div>
+    <div class="fcard-desc">CSS Grid 強制 2 列分布，密度直接翻倍。chip 由上往下排，再左到右換欄。超過 2×N 仍可水平捲動。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">✋</span><span class="fcard-title">拖曳排序</span></div>
+    <div class="fcard-desc">每個 chip 左側 ⋮⋮ 抓握圖示，HTML5 D&amp;D 拖曳。drop 位置左半 = 插入前、右半 = 插入後，金色邊線提示。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">🟢</span><span class="fcard-title">ETF 進出徽章</span></div>
+    <div class="fcard-desc">如果該股被多檔主動 ETF 加碼，chip 旁顯示 +N（綠）；被減碼顯示 -N（紅）。需先跑 ETF tracker 累積資料。</div>
+  </div>
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section id="position">
+<h2>💼 倉位管理 POS <span class="vbadge">v2.0 +</span></h2>
+<p class="lead">每檔股票獨立記錄進場價、持股數（張或股自動換算）、停利停損、進場筆記。即時計算成本、市值、未實現損益。配合投組風險面板與部位熱力圖一目了然。</p>
+
+<div class="mock">
+<div class="mock-header"><span>POS · 2330 台積電</span><span style="color:var(--gold)">v2.1</span></div>
+<div class="mock-body">
+<div style="background:var(--bg);padding:7px 10px;margin:-10px -10px 8px;border-bottom:1px solid var(--border)">
+  <div class="mock-row"><span class="mock-k">總成本 / 市值</span><span class="mock-v">22,700,000 → 22,700,000</span></div>
+  <div class="mock-row"><span class="mock-k">合計損益</span><span class="mock-v gold">+0.00% (0)</span></div>
+</div>
+<div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--gold);letter-spacing:1px;padding:4px 0">▼ 持倉清單</div>
+<div style="background:var(--gold-s);padding:5px 8px;border-radius:3px;margin-bottom:4px;display:flex;justify-content:space-between;font-size:10px">
+  <span><b style="color:var(--gold)">2330</b> 10張 @ 2270.00</span><span class="mock-v gold">+0.0% 2270</span>
+</div>
+<div style="padding:5px 8px;font-size:10px;display:flex;justify-content:space-between">
+  <span><b style="color:var(--thi)">00631L</b> 90張 @ 32.78</span><span class="mock-v red">-2.5% 31.96</span>
+</div>
+<div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--gold);letter-spacing:1px;padding:8px 0 4px;border-top:1px solid var(--border);margin-top:6px">▼ 投組風險</div>
+<div class="mock-row"><span class="mock-k">最大單股佔比</span><span class="mock-v">88.5%</span></div>
+<div class="mock-row"><span class="mock-k">HHI 集中度</span><span class="mock-v">0.79</span></div>
+<div style="background:rgba(248,113,113,.1);border-left:3px solid var(--red);padding:5px 8px;border-radius:0 3px 3px 0;margin-top:6px;font-size:9.5px;color:var(--text)">⚠ 單股 2330 佔 88.5%（建議 ≤ 30%）</div>
+<div style="background:rgba(248,113,113,.1);border-left:3px solid var(--red);padding:5px 8px;border-radius:0 3px 3px 0;margin-top:4px;font-size:9.5px;color:var(--text)">⚠ HHI 集中度 0.79（&gt; 0.5 風險高）</div>
+</div>
+</div>
+
+<div class="fgrid">
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">📥</span><span class="fcard-title">倉位記錄</span><span class="fcard-tier s">核心</span></div>
+    <div class="fcard-desc">進場價、股數（台股自動 ×1000 換算「張」）、停利價、停損價、進場筆記、建倉日。LocalStorage 永久保存。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">📊</span><span class="fcard-title">即時損益</span><span class="fcard-tier s">核心</span></div>
+    <div class="fcard-desc">每次切回該股自動以最新價算成本、市值、未實現損益（% + 金額）。配合 LIVE 報價更貼近即時。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">⚠️</span><span class="fcard-title">投組風險面板</span><span class="fcard-tier a">v2.1</span></div>
+    <div class="fcard-desc">合計損益、最大單股佔比、前 3 檔佔比、HHI 集中度。單股 &gt; 30% 黃警 / &gt; 40% 紅警。HHI &gt; 0.5 高度集中警告。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">🟩</span><span class="fcard-title">部位熱力圖</span><span class="fcard-tier a">v2.1</span></div>
+    <div class="fcard-desc">每檔持股一個彩色方塊，大小依市值占比、顏色綠紅依 P&amp;L。點任一塊跳轉到該股。</div>
+  </div>
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section id="watch">
+<h2>👁 觀察清單 WATCH <span class="vbadge">v2.0 升級 v2.1</span></h2>
+<p class="lead">「還沒進場、想等訊號才進」的個股。一檔可掛多個訊號，自動算共識評分。內建 7 個策略 + 5 個專業預設劇本。</p>
+
+<div class="mock">
+<div class="mock-header"><span>WATCH · 2330</span><span style="color:var(--green)">🟢 強多 +3</span></div>
+<div class="mock-body">
+<div style="background:var(--gold-s);padding:8px 10px;margin:-10px -10px 6px;display:flex;justify-content:space-between;align-items:center">
+  <div><b style="color:var(--gold);font-family:'JetBrains Mono',monospace;font-size:13px">2330</b> <span style="color:var(--tlo);font-size:9px">2270.00</span></div>
+  <span style="font-size:9px;padding:2px 7px;border-radius:3px;background:rgba(74,222,128,.18);color:var(--green);font-weight:700">🟢 強多 +3</span>
+</div>
+<div style="background:var(--gbg);padding:6px 10px;margin-bottom:1px">
+  <div style="display:flex;justify-content:space-between;font-size:10px"><b>📉 回測 SMA60 ±2%</b> <span style="color:var(--green);font-weight:700">🎯 觸發</span></div>
+  <div style="font-size:8.5px;color:var(--tlo);margin-top:2px">進入容差區 1900~1976</div>
+</div>
+<div style="background:var(--gbg);padding:6px 10px;margin-bottom:1px">
+  <div style="display:flex;justify-content:space-between;font-size:10px"><b>📊 回測 SMA20 ±1%</b> <span style="color:var(--green);font-weight:700">🎯 觸發</span></div>
+  <div style="font-size:8.5px;color:var(--tlo);margin-top:2px">進入容差區 2230~2275</div>
+</div>
+<div style="background:var(--gbg);padding:6px 10px">
+  <div style="display:flex;justify-content:space-between;font-size:10px"><b>🔄 RSI 超賣反彈</b> <span style="color:var(--green);font-weight:700">🎯 觸發</span></div>
+  <div style="font-size:8.5px;color:var(--tlo);margin-top:2px">RSI 32.5 在反彈區 (30~38)</div>
+</div>
+</div>
+</div>
+
+<h3 style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--gold);margin:24px 0 12px;letter-spacing:1px">8 個策略（4 大類）</h3>
+<table>
+<tr><th>類別</th><th>策略</th><th>方向</th><th>難度</th><th>觸發邏輯</th></tr>
+<tr><td>📈 趨勢</td><td>回測 60 日均線</td><td style="color:var(--green)">買</td><td>★☆☆</td><td>價回到 SMA60 ±N%</td></tr>
+<tr><td>📈 趨勢</td><td>回測 20 日均線</td><td style="color:var(--green)">買</td><td>★☆☆</td><td>價回到 SMA20 ±N%</td></tr>
+<tr><td>⚡ 動能</td><td>突破 N 日新高</td><td style="color:var(--green)">買</td><td>★★☆</td><td>突破前 N 日最高 + 量增 X 倍</td></tr>
+<tr><td>⚡ 動能</td><td>RSI 超賣反彈</td><td style="color:var(--green)">買</td><td>★★☆</td><td>RSI 從 &lt;30 回升到 30~38</td></tr>
+<tr><td>⚡ 動能</td><td>🔥 RSI 過熱警示</td><td style="color:var(--red)">空</td><td>★☆☆</td><td>RSI &gt; 75 提示停利</td></tr>
+<tr><td>📊 波動</td><td>布林下軌承接</td><td style="color:var(--green)">買</td><td>★☆☆</td><td>價觸/破 BB 下軌</td></tr>
+<tr><td>🎯 價格</td><td>自訂價位買進</td><td style="color:var(--green)">買</td><td>★☆☆</td><td>價 ≤ 你設的買進價</td></tr>
+<tr><td>🎯 價格</td><td>自訂價位賣出</td><td style="color:var(--red)">空</td><td>★☆☆</td><td>價 ≥ 你設的賣出價</td></tr>
+</table>
+
+<h3 style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--gold);margin:24px 0 12px;letter-spacing:1px">5 個專業劇本（一鍵套用 2~3 訊號）</h3>
+<div class="fgrid">
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">📉</span><span class="fcard-title">經典回檔買進</span><span class="fcard-tier s">最穩</span></div>
+    <div class="fcard-desc">SMA60 + SMA20 + RSI 反彈 三訊號共振。多頭中等回檔，最穩進場組合。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">🚀</span><span class="fcard-title">強勢突破追勢</span><span class="fcard-tier a">追勢</span></div>
+    <div class="fcard-desc">20 日突破 + 60 日突破 + SMA20 三訊號。盤整後抓突破時機。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">🔄</span><span class="fcard-title">超賣反彈短線</span><span class="fcard-tier a">短線</span></div>
+    <div class="fcard-desc">RSI 超賣 + BB 下軌雙重訊號。急殺後抓反彈勝率高。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">💰</span><span class="fcard-title">波段停利</span><span class="fcard-tier b">出場</span></div>
+    <div class="fcard-desc">自訂目標 + RSI 過熱雙提示。已建倉部位的停利規劃。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">🎯</span><span class="fcard-title">雙價位警示</span><span class="fcard-tier b">純價</span></div>
+    <div class="fcard-desc">自訂買進價 + 賣出價。最自由的純價格區間警示。</div>
+  </div>
+</div>
+
+<div class="note">
+<b>共識評分（Confluence）：</b>每檔卡片頂端依觸發訊號方向算分。多訊號共振統計上把勝率從單一指標的 50% 推到 70~80%。
+🟢 強多 +3 → 多訊號共振，高信心進場 / 🟢 偏多 +1 → 小量試單 / ⚖️ 中性 → 訊號互抵 / ⚠️ 多空分歧 → 觀望 / 🔴 偏空/強空 → 減碼或停損 / 👀 觀察中 → 全部訊號等待
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section id="signal">
+<h2>🎯 訊號引擎（POS） <span class="vbadge">v2.0 +</span></h2>
+<p class="lead">每次切換股票自動算 8 大類規則化訊號，輸出多/空/警/訊四級色標 + 建議行動。專業投資人腦中跑的那套規則完整實作。</p>
+
+<div class="mock">
+<div class="mock-header"><span>POS · 2330 訊號建議</span><span style="color:var(--green)">3 個訊號</span></div>
+<div class="mock-body">
+<div class="sig-card buy">
+  <div class="ttl">[多] 站上 60 日均線</div>
+  <div class="desc">價 2270.00 突破 SMA60 1985.50，中線轉多<br>▸ 建議分批進場 1/3 → 1/3 → 1/3，量增確認再加碼</div>
+</div>
+<div class="sig-card sell">
+  <div class="ttl">[空] 破 60 日均線</div>
+  <div class="desc">價 1980 跌破 SMA60 1985.50，中線趨勢轉空<br>▸ 建議減碼 1/2 或全部出場，待重新站回再評估</div>
+</div>
+<div class="sig-card warn">
+  <div class="ttl">[警] RSI 過熱 78</div>
+  <div class="desc">14 日 RSI 高於 75，短線超買區<br>▸ 考慮分批停利 1/3，或上調移動停損</div>
+</div>
+</div>
+</div>
+
+<h3 style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--gold);margin:24px 0 12px;letter-spacing:1px">8 大類規則完整列表</h3>
+<table>
+<tr><th>類別</th><th>規則</th><th>觸發條件</th><th>行動建議</th></tr>
+<tr><td>A. 均線交叉</td><td>破/站上 SMA60</td><td>價穿越 SMA60</td><td>中線轉空建議減碼；轉多分批 1/3 加碼</td></tr>
+<tr><td>A. 均線交叉</td><td>多頭/空頭排列</td><td>SMA5/20/60 順排</td><td>強勢多頭可加碼；空頭結構降部位</td></tr>
+<tr><td>B. RSI 極值</td><td>&gt; 75 過熱</td><td>RSI &gt; 75</td><td>分批停利 1/3</td></tr>
+<tr><td>B. RSI 極值</td><td>&lt; 25 超賣</td><td>RSI &lt; 25</td><td>分批承接 1/3</td></tr>
+<tr><td>C. KD 交叉</td><td>低檔黃金交叉</td><td>K&gt;D &amp; 都&lt;25</td><td>加碼 1/3</td></tr>
+<tr><td>C. KD 交叉</td><td>高檔死亡交叉</td><td>K&lt;D &amp; 都&gt;75</td><td>減碼 1/3</td></tr>
+<tr><td>D. MACD 動能</td><td>由負轉正</td><td>Hist 跨零軸向上</td><td>順勢加碼</td></tr>
+<tr><td>D. MACD 動能</td><td>由正轉負</td><td>Hist 跨零軸向下</td><td>動能轉弱減碼</td></tr>
+<tr><td>E. 布林通道</td><td>觸上軌+RSI 過熱</td><td>價&gt;BB上 &amp; RSI&gt;70</td><td>雙重訊號停利</td></tr>
+<tr><td>E. 布林通道</td><td>觸下軌+RSI 超賣</td><td>價&lt;BB下 &amp; RSI&lt;30</td><td>反彈承接</td></tr>
+<tr><td>F. 量能</td><td>量增價漲</td><td>量&gt;均量2x &amp; 收紅</td><td>突破可信度高</td></tr>
+<tr><td>F. 量能</td><td>量增價跌</td><td>量&gt;均量2x &amp; 收黑</td><td>出貨警示</td></tr>
+<tr><td>G. 倉位連動</td><td>達停利/停損</td><td>價達設定點</td><td>紀律出場</td></tr>
+<tr><td>G. 倉位連動</td><td>距停損 &lt;3%</td><td>距離警告區</td><td>心理準備出場</td></tr>
+<tr><td>G. 倉位連動</td><td>浮盈 ≥20% 或浮虧 ≤-10%</td><td>盈虧達門檻</td><td>檢視策略 / 鎖利 / 重審</td></tr>
+<tr><td>H. ETF 共振</td><td>≥3 檔 ETF 同步買/賣</td><td>主動 ETF 籌碼一致</td><td>法人偏多/偏空，強化信心</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<section id="pattern">
+<h2>🤖 AI 形態辨識 <span class="vbadge">v2.2</span></h2>
+<p class="lead">規則式偵測 8 種經典 K 線形態 — 沒用機器學習（黑盒、不可解釋），全部基於專業技術分析的固定規則。每個形態都有清楚的數學定義、量度目標、歷史驗證的勝率。</p>
+
+<div class="warn">
+<b>為什麼不用 AI / ML？</b>機器學習形態辨識的問題：(1) 訓練資料偏差難避免；(2) 黑盒判斷無法解釋為何說「這是雙頂」；(3) 過擬合風險高。規則式方法雖然死板，但每個結論都能追溯到具體規則 — 這對「股市小白學技術分析」反而是優勢。
+</div>
+
+<div class="fgrid">
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">📈</span><span class="fcard-title">多/空頭結構</span><span class="fcard-tier s">5⭐</span></div>
+    <div class="fcard-desc">HH+HL（高點墊高、低點也墊高）= 多頭趨勢；LH+LL = 空頭趨勢。趨勢追蹤勝率最高的訊號。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">🔻</span><span class="fcard-title">雙頂雙底（M/W 形態）</span><span class="fcard-tier a">4⭐</span></div>
+    <div class="fcard-desc">兩個相近高/低點 + 頸線突破。量度目標 = 頸線往反方向延伸雙頂高度。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">👤</span><span class="fcard-title">頭肩頂/底</span><span class="fcard-tier s">5⭐</span></div>
+    <div class="fcard-desc">3 個峰中間最高（左肩/頭/右肩），雙肩高度相近。最經典反轉形態。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">↔️</span><span class="fcard-title">箱型整理</span><span class="fcard-tier b">3⭐</span></div>
+    <div class="fcard-desc">近 30 日於窄區間整理（振幅 &lt; 12%）。等方向選擇。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">🚀</span><span class="fcard-title">區間突破</span><span class="fcard-tier a">4⭐</span></div>
+    <div class="fcard-desc">從箱型突破上下緣 + 量能判斷有效性（&gt; 1.5x 均量為有效）。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">✨</span><span class="fcard-title">黃金/死亡交叉</span><span class="fcard-tier a">4⭐</span></div>
+    <div class="fcard-desc">SMA20 × SMA60 近 5 日交叉。中線經典訊號（注意有滯後）。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">☕</span><span class="fcard-title">杯柄形態</span><span class="fcard-tier a">4⭐</span></div>
+    <div class="fcard-desc">U 型 + 把手回檔 &lt; 杯深一半。William O'Neil 經典突破策略。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">◢</span><span class="fcard-title">三角收斂</span><span class="fcard-tier b">3⭐</span></div>
+    <div class="fcard-desc">高點下移 + 低點上移 = 收斂中性形態。等突破方向。</div>
+  </div>
+</div>
+
+<div class="note">
+<b>使用方式：</b>點線型上方「🤖 形態」按鈕跳出 modal 列出當前所有形態（含描述、原理、量度目標、行動建議、可靠性星級）。長按 ≥ 0.5 秒則直接在 K 線上疊出所有關鍵價位（左肩/頭/右肩/頸線/目標等）。
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section id="pro">
+<h2>🛠 專業工具列 <span class="vbadge">v2.1 +</span></h2>
+<p class="lead">時間段按鈕右側的 5 個專業工具。每個都是真正幫助決策的功能，不是花俏裝飾。</p>
+
+<div class="fgrid">
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">📊</span><span class="fcard-title">vs 大盤對照</span><span class="fcard-tier s">必備</span></div>
+    <div class="fcard-desc">疊上 ^TWII（台股加權）或 ^GSPC（S&amp;P 500）的歸一化線。看個股相對大盤的真實表現。TSMC 漲 2% 但大盤漲 3% 其實是相對弱勢。</div>
+    <div class="fcard-use"><b>用法：</b>點擊「vs 大盤」按鈕。橘色線 = 大盤；個股 vs 橘線 = alpha。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">📍</span><span class="fcard-title">POC 量價分布</span><span class="fcard-tier a">v2.1</span></div>
+    <div class="fcard-desc">將 K 線歷史價格切 24 個區間，畫出最大量價位（紫色虛線）。POC 是真正的支撐/壓力位 — 成交量最密集 = 套牢最多人。</div>
+    <div class="fcard-use"><b>用法：</b>點擊「POC」按鈕。價格在 POC 附近震盪是正常；明顯偏離可能回歸。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">▶</span><span class="fcard-title">Replay 重播</span><span class="fcard-tier b">練功</span></div>
+    <div class="fcard-desc">隱藏「未來」K 線，用滑桿一根根放出來。模擬「當下你會怎麼決策」。練盤感、練心理、檢驗自己會不會看錯。</div>
+    <div class="fcard-use"><b>用法：</b>點擊「▶ Replay」進入。◀ ▶ 按鈕逐根前進，滑桿任意拖。✕ 退出。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">🤖</span><span class="fcard-title">形態辨識</span><span class="fcard-tier s">v2.2</span></div>
+    <div class="fcard-desc">短按跳出 modal 列出當前偵測到的所有形態；長按疊到 K 線上。詳見「AI 形態辨識」章節。</div>
+    <div class="fcard-use"><b>用法：</b>點擊「🤖 形態」短按看清單，長按 ≥ 0.5 秒切換 K 線疊圖。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">⚪</span><span class="fcard-title">LIVE 即時報價</span><span class="fcard-tier a">v2.2</span></div>
+    <div class="fcard-desc">啟用後右上角浮現 LIVE 面板，每 30 秒自動輪詢 Yahoo v8 chart 1m bar。顯示最新價、漲跌、日內高低、量、市場狀態（盤前/中/後/休）。</div>
+    <div class="fcard-use"><b>用法：</b>點擊「⚪ LIVE」啟用。台股延遲 ~15 min（Yahoo 免費限制）。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">🎨</span><span class="fcard-title">手繪支撐壓力線</span><span class="fcard-tier a">v2.1</span></div>
+    <div class="fcard-desc">在 K 線圖上右鍵點擊任何位置 → 跳出選單 → 加金線（壓力）/ 綠線（支撐）/ 紅線（停損）。每檔股票各自存。</div>
+    <div class="fcard-use"><b>用法：</b>圖上右鍵 → 選顏色加線 / 「✕ 清除全部線」一次清。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">📊</span><span class="fcard-title">策略歷史回測</span><span class="fcard-tier a">v2.1</span></div>
+    <div class="fcard-desc">用當前個股 5 年資料模擬「策略觸發 → 隔日開盤進場 → 20 日後出場」。輸出交易次數、勝率、平均報酬、最大盈虧。</div>
+    <div class="fcard-use"><b>用法：</b>WATCH → 切「🔧 單一策略」模式 → 表單底部「📊 回測這個策略」。</div>
+  </div>
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section id="notify">
+<h2>🔔 通知中心 <span class="vbadge">v2.2</span></h2>
+<p class="lead">解決瀏覽器通知一閃即逝的問題。所有 WATCH 觸發都記錄到歷史，永遠不會錯過。最多保留 100 筆，未讀數字徽章顯示在按鈕上。</p>
+
+<div class="mock">
+<div class="mock-header"><span>📋 通知中心</span><span style="color:var(--tlo)">×</span></div>
+<div class="mock-body">
+<div style="background:var(--bg);padding:7px 10px;margin:-10px -10px 4px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
+  <span style="color:var(--green);font-size:10px">✓ 瀏覽器推播已啟用</span>
+  <span style="padding:2px 9px;border:1px solid var(--red);border-radius:3px;color:var(--red);font-size:9px">停用</span>
+</div>
+<div style="background:var(--bg);padding:5px 10px;margin:0 -10px 6px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);font-size:9.5px;color:var(--tlo)">
+  <span>歷史 12 筆，未讀 3</span>
+  <span><span style="padding:2px 7px;border:1px solid var(--border);border-radius:3px;color:var(--tlo);font-size:8.5px;margin-right:3px">標記已讀</span><span style="padding:2px 7px;border:1px solid var(--border);border-radius:3px;color:var(--red);font-size:8.5px">清除</span></span>
+</div>
+<div style="background:var(--gbg);padding:7px 10px;margin:0 -10px 1px">
+  <div style="display:flex;justify-content:space-between;font-size:10.5px;font-weight:700;color:var(--green)"><span>🎯 2330 — 回測 60 日均線</span><span style="font-size:8.5px;color:var(--tf);font-weight:400">5 分前</span></div>
+  <div style="font-size:9px;color:var(--text);margin-top:2px">進入容差區 1900~1976</div>
+</div>
+<div style="background:var(--gbg);padding:7px 10px;margin:0 -10px 1px">
+  <div style="display:flex;justify-content:space-between;font-size:10.5px;font-weight:700;color:var(--green)"><span>🎯 2330 — RSI 超賣反彈</span><span style="font-size:8.5px;color:var(--tf);font-weight:400">5 分前</span></div>
+  <div style="font-size:9px;color:var(--text);margin-top:2px">RSI 32.5 在反彈區 (30~38)</div>
+</div>
+<div style="background:rgba(248,113,113,.06);padding:7px 10px;margin:0 -10px">
+  <div style="display:flex;justify-content:space-between;font-size:10.5px;font-weight:700;color:var(--red)"><span>⚠️ 00631L — 自訂價位賣出</span><span style="font-size:8.5px;color:var(--tf);font-weight:400">12 分前</span></div>
+  <div style="font-size:9px;color:var(--text);margin-top:2px">觸發停損價 30</div>
+</div>
+</div>
+</div>
+
+<table>
+<tr><th>互動</th><th>行為</th></tr>
+<tr><td>左鍵點 🔔</td><td>跳出通知中心面板</td></tr>
+<tr><td>右鍵點 🔔</td><td>直接啟用 / 停用瀏覽器推播</td></tr>
+<tr><td>點任一通知</td><td>自動 loadSym 跳到該股</td></tr>
+<tr><td>標記已讀</td><td>未讀徽章歸零</td></tr>
+<tr><td>清除</td><td>整段歷史砍掉</td></tr>
+</table>
+
+<div class="note">
+<b>為什麼瀏覽器通知一閃即逝？</b>原生 Notification API 預設 4-7 秒自動消失（macOS 強制收掉）。所以正解就是把歷史記下來，而不是強留通知 — Bloomberg / TradingView 也是這個邏輯。
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section id="etfmgr">
+<h2>🗂 ETF 動態管理 <span class="vbadge">v2.3</span></h2>
+<p class="lead">ETF 觀測池從原本 hardcoded 10 檔主動式擴充為 60+ 檔 / 7 分類 catalog 系統，用前端 ⚙ modal 勾選即可加減追蹤目標，並支援即時觸發 tracker 重抓。</p>
+
+<div class="mock">
+<div class="mock-header"><span>ETF△ Panel · 分類 Tabs</span><span style="color:var(--gold)">⚙ 管理</span></div>
+<div class="mock-body">
+<div style="display:flex;flex-wrap:wrap;gap:2px;padding:4px 0;border-bottom:1px solid var(--border)">
+  <span style="padding:3px 7px;background:var(--gold-s);border:1px solid var(--gold);border-radius:3px;color:var(--gold);font-family:monospace;font-size:9px;font-weight:700">🎯 主動式 2</span>
+  <span style="padding:3px 7px;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--tlo);font-family:monospace;font-size:9px">⚡ 槓桿 1</span>
+  <span style="padding:3px 7px;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--tlo);font-family:monospace;font-size:9px">💰 高股息 0</span>
+  <span style="padding:3px 7px;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--tlo);font-family:monospace;font-size:9px">📊 市值型 0</span>
+  <span style="padding:3px 7px;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--tlo);font-family:monospace;font-size:9px;margin-left:auto">⚙ 管理 ETF</span>
+</div>
+<div style="padding:8px 0;font-size:10px">
+  當前分類「🎯 主動式 ETF」顯示 2 檔啟用：<br>
+  <span style="color:var(--green);font-family:monospace">▸ 00981A 主動統一台股增長 — +3 新進、-1 移除、5 加減碼</span><br>
+  <span style="color:var(--green);font-family:monospace">▸ 00403A 主動統一升級50 — +2 新進、0 移除、3 加減碼</span>
+</div>
+</div>
+</div>
+
+<h3 style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--gold);margin:24px 0 12px;letter-spacing:1px">7 大分類（+ 自訂）— 60+ ETF</h3>
+<table>
+<tr><th>分類</th><th>圖示</th><th>說明</th><th>預設啟用</th></tr>
+<tr><td>主動式 ETF</td><td>🎯</td><td>經理人主動選股，揭露每日完整持股（00980A~00997A）</td><td style="color:var(--green)">10 / 11</td></tr>
+<tr><td>市值型大盤</td><td>📊</td><td>追蹤大盤指數 (0050 / 006208 / 00692 ...)</td><td style="color:var(--tlo)">0 / 8</td></tr>
+<tr><td>高股息</td><td>💰</td><td>高殖利率類 (0056 / 00878 / 00919 / 00929 ...)</td><td style="color:var(--tlo)">0 / 10</td></tr>
+<tr><td>科技/半導體</td><td>💻</td><td>產業 ETF (00891 / 00892 / 00935 / 00757 ...)</td><td style="color:var(--tlo)">0 / 8</td></tr>
+<tr><td>槓桿/反向</td><td>⚡</td><td>正 2、反 1 槓桿（00631L / 00632R / 00670L ...）</td><td style="color:var(--tlo)">0 / 10</td></tr>
+<tr><td>海外股票</td><td>🌍</td><td>美/日/陸港 (00646 / 00662 / 00830 ...)</td><td style="color:var(--tlo)">0 / 8</td></tr>
+<tr><td>債券型</td><td>🏛</td><td>美債、公司債（00679B / 00687B / 00697B ...）</td><td style="color:var(--tlo)">0 / 7</td></tr>
+<tr><td>自訂</td><td>🛠</td><td>用戶自己加的 ETF</td><td style="color:var(--blue)">0 / ∞</td></tr>
+</table>
+
+<div class="note">
+<b>為什麼預設只啟用主動式 10 檔？</b>MoneyDJ 抓取每檔約 1-3 秒。全部勾起來會跑 60+ 檔 × 2-3 秒 = 2-3 分鐘。所以預設只勾真正會看持股 delta 的「主動式 ETF」（每日揭露完整持股 → 真正有 delta 可看）。其他分類大多被動 ETF，持股變動慢，需要時再勾。
+</div>
+
+<div class="fgrid">
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">⚙</span><span class="fcard-title">管理 ETF Modal</span><span class="fcard-tier s">v2.3</span></div>
+    <div class="fcard-desc">8 分類分組顯示、每檔旁邊 checkbox 切換啟用、自訂分類可 × 移除、頂部分類 tab 即時看當前 enabled 數。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">＋</span><span class="fcard-title">新增自訂 ETF</span><span class="fcard-tier a">v2.3</span></div>
+    <div class="fcard-desc">表單：代號 + 名稱 + 分類下拉。驗證代號格式（00XXX[A/B/L/R]）。新增後自動勾啟用。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">💾</span><span class="fcard-title">儲存並立即更新</span><span class="fcard-tier s">最常用</span></div>
+    <div class="fcard-desc">寫 catalog → POST /etf-tracker/run 背景啟動 → 每 2 秒輪詢進度 → 完成自動 refresh panel。整個流程 30~60 秒。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">💾</span><span class="fcard-title">只儲存</span><span class="fcard-tier b">等排程</span></div>
+    <div class="fcard-desc">只寫 catalog，等明天 19:00 Windows Task Scheduler 自動觸發 daily_etf.bat 用新清單抓資料。</div>
+  </div>
+</div>
+
+<h3 style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--gold);margin:24px 0 12px;letter-spacing:1px">新增 API endpoints</h3>
+<pre><code>GET  /etf-catalog          回傳 etf_catalog.json 完整內容
+POST /etf-catalog          更新 catalog (整檔覆寫 + 自動備份 .bak)
+POST /etf-tracker/run      背景 thread 觸發 etf_delta_tracker.py
+GET  /etf-tracker/status   查詢 tracker 狀態 {running, lastDuration, lastReturnCode, lastOutput}</code></pre>
+
+<div class="warn">
+<b>注意：</b>tracker 觸發只能在你本機 server 上跑（必須有 Python + 能連 MoneyDJ）。沙箱排程不能用（網路擋）。Claude scheduled-tasks 必須關掉，只依賴 Windows Task Scheduler。
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section id="data">
+<h2>📡 資料源 <span class="vbadge">v1.0 +</span></h2>
+<p class="lead">所有資料抓取都在你本機跑，零雲端、零追蹤。LRU 快取讓重複查詢 0ms。</p>
+
+<table>
+<tr><th>用途</th><th>來源</th><th>更新頻率</th><th>備註</th></tr>
+<tr><td>K 線 / 報價</td><td>Yahoo Finance v8 chart API</td><td>切股即抓</td><td>失敗時 fallback 經 allorigins.win</td></tr>
+<tr><td>近即時報價</td><td>Yahoo v8 chart 1m bar</td><td>每 30 秒輪詢</td><td>台股延遲 ~15 min</td></tr>
+<tr><td>主動 ETF 持股</td><td>MoneyDJ Basic0007B</td><td>排程 19:00 / 手動</td><td>10 檔台股主動式 ETF</td></tr>
+<tr><td>大盤對照</td><td>Yahoo (^TWII / ^GSPC)</td><td>切股即抓</td><td>歸一化疊圖</td></tr>
+<tr><td>AI 研究報告</td><td>Claude API（需 API key）</td><td>觸發即抓</td><td>八章節結構化分析</td></tr>
+<tr><td>bid / ask 五檔</td><td>需券商 API（富邦/永豐/元大）</td><td>—</td><td>Yahoo v7 已鎖，預留 hook</td></tr>
+</table>
+
+<pre><code>SERVER 端點：
+/yf/{sym}            完整 K 線（支援 ?range=5y&amp;interval=1d）
+/yf/batch?syms=...   批次抓多檔
+/quote/{sym}         輕量近即時報價（v8 chart 1m）
+/etf-delta           主動 ETF 持股 delta（需累積 ≥2 天歷史）
+/etf-delta/list      可用日期列表
+/health              系統狀態（cpu/cache/etf 檔數）</code></pre>
+</section>
+
+<!-- ============================================================ -->
+<section id="workflow">
+<h2>🚀 典型使用流程</h2>
+<p class="lead">三個常見情境的完整流程，從觀察到進場到管理。</p>
+
+<div class="workflow">
+<div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--gold);font-weight:700;margin-bottom:10px;letter-spacing:1px">情境 1：建立 2330 觀察 → 觸發進場 → 倉位管理</div>
+<div class="wf-step">
+  <div class="wf-step-num">1</div>
+  <div class="wf-step-body">頂部輸入 <code>2330</code> 按 GO，自動載入線型 + 16 指標</div>
+</div>
+<div class="wf-step">
+  <div class="wf-step-num">2</div>
+  <div class="wf-step-body">右側點 <b>WATCH</b> 分頁 → 選「📋 套用劇本」 → 經典回檔買進 → 加入觀察</div>
+</div>
+<div class="wf-step">
+  <div class="wf-step-num">3</div>
+  <div class="wf-step-body">右上角 <b>🔔 通知</b> 啟用瀏覽器推播</div>
+</div>
+<div class="wf-step">
+  <div class="wf-step-num">4</div>
+  <div class="wf-step-body">數天後 — 推播觸發 + 通知中心紅色徽章 → 點 🎯 訊號跳到 2330</div>
+</div>
+<div class="wf-step">
+  <div class="wf-step-num">5</div>
+  <div class="wf-step-body">確認共識評分為 <b>🟢 強多 +3</b> → 切 <b>POS</b> 分頁建倉，填進場價、張數、停利停損</div>
+</div>
+<div class="wf-step">
+  <div class="wf-step-num">6</div>
+  <div class="wf-step-body">投組風險面板自動算 — 確認單股佔比 &lt; 30% 不超標</div>
+</div>
+</div>
+
+<div class="workflow">
+<div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--gold);font-weight:700;margin-bottom:10px;letter-spacing:1px">情境 2：判斷個股反轉風險（用形態辨識）</div>
+<div class="wf-step">
+  <div class="wf-step-num">1</div>
+  <div class="wf-step-body">載入個股，點 <b>🤖 形態</b> 按鈕跳出 modal</div>
+</div>
+<div class="wf-step">
+  <div class="wf-step-num">2</div>
+  <div class="wf-step-body">看到「🔻 雙頂 - 已跌破頸線確認反轉」⭐⭐⭐⭐</div>
+</div>
+<div class="wf-step">
+  <div class="wf-step-num">3</div>
+  <div class="wf-step-body">長按 🤖 把雙頂 + 頸線 + 量度目標疊到 K 線上視覺化</div>
+</div>
+<div class="wf-step">
+  <div class="wf-step-num">4</div>
+  <div class="wf-step-body">如果有持倉 → 切 POS，依「建議行動」執行</div>
+</div>
+</div>
+
+<div class="workflow">
+<div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--gold);font-weight:700;margin-bottom:10px;letter-spacing:1px">情境 3：策略上線前的回測驗證</div>
+<div class="wf-step">
+  <div class="wf-step-num">1</div>
+  <div class="wf-step-body">載入要驗證的個股</div>
+</div>
+<div class="wf-step">
+  <div class="wf-step-num">2</div>
+  <div class="wf-step-body">WATCH → 切「🔧 單一策略」 → 選策略（如「突破 N 日新高」）</div>
+</div>
+<div class="wf-step">
+  <div class="wf-step-num">3</div>
+  <div class="wf-step-body">調整參數（如 N=20, 量倍 1.5x）</div>
+</div>
+<div class="wf-step">
+  <div class="wf-step-num">4</div>
+  <div class="wf-step-body">點「📊 回測這個策略」 → 看勝率、平均報酬、最大盈虧</div>
+</div>
+<div class="wf-step">
+  <div class="wf-step-num">5</div>
+  <div class="wf-step-body">勝率 ≥ 55% &amp; 平均報酬正向 → 加入觀察清單實戰</div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section id="footer">
+<h2>📚 進一步閱讀</h2>
+<div class="fgrid">
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">📝</span><span class="fcard-title">README.md</span></div>
+    <div class="fcard-desc">完整安裝、設定、進階教學。包含 server port 修改、ETF 觀測池調整、Claude API key 設定。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">💻</span><span class="fcard-title">原始碼</span></div>
+    <div class="fcard-desc">https://github.com/SamHuang68/stock-terminal — 全部 7 個 JS 模組 + 1 個 CSS + Python server，總計約 3000 行。</div>
+  </div>
+  <div class="fcard">
+    <div class="fcard-h"><span class="fcard-icon">🐛</span><span class="fcard-title">回報問題 / 建議功能</span></div>
+    <div class="fcard-desc">GitHub Issues，或直接修改 .js 檔（每個 module 都有清楚的 section 註解）後重跑 build_v2.py。</div>
+  </div>
+</div>
+</section>
+
+</div>
+
+<footer>
+STOCK TERMINAL v2.2 · 2026-05-15 · MIT License<br>
+資料來源：<a href="https://finance.yahoo.com/" target="_blank">Yahoo Finance</a> · <a href="https://www.moneydj.com/etf/" target="_blank">MoneyDJ</a> · <a href="https://www.tradingview.com/lightweight-charts/" target="_blank">TradingView Lightweight Charts</a><br>
+本軟體僅供研究參考，不構成投資建議。投資有風險，請審慎評估。
+</footer>
+
+</body>
+</html>

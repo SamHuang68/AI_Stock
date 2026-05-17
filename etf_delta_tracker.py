@@ -47,9 +47,34 @@ _SSL_CTX.verify_mode    = ssl.CERT_NONE
 # ── 路徑 ──────────────────────────────────────────────────────────
 SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 HISTORY_DIR = os.path.join(SCRIPT_DIR, 'etf_history')
+CATALOG_FILE = os.path.join(SCRIPT_DIR, 'etf_catalog.json')
 
-# ── 10 檔觀測池：MoneyDJ etfid 鍵（去掉 .TW） → (顯示用代號, 名稱) ─
-ETFS = {
+# ── ETFS 觀測池：從 etf_catalog.json 動態載入 enabled=true 的 ETF ─
+def load_catalog():
+    """讀取 etf_catalog.json，回傳 dict {code: (display_code, name)}.
+    若找不到 catalog 或讀取失敗，fallback 回原本 hardcoded 的 10 檔。"""
+    if not os.path.isfile(CATALOG_FILE):
+        print(f'[WARN] {CATALOG_FILE} 不存在，使用 fallback 10 檔主動 ETF')
+        return _FALLBACK_ETFS
+    try:
+        with open(CATALOG_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f'[ERR] 讀取 {CATALOG_FILE} 失敗：{e}，使用 fallback')
+        return _FALLBACK_ETFS
+    out = {}
+    for cat in data.get('categories', []):
+        for etf in cat.get('etfs', []):
+            if etf.get('enabled') and etf.get('code'):
+                code = etf['code'].strip().upper()
+                name = etf.get('name', code)
+                out[code] = (code, name)
+    if not out:
+        print(f'[WARN] catalog 內無 enabled 的 ETF，使用 fallback')
+        return _FALLBACK_ETFS
+    return out
+
+_FALLBACK_ETFS = {
     '00992A': ('00992A', '主動群益科技創新'),
     '00981A': ('00981A', '主動統一台股增長'),
     '00987A': ('00987A', '主動台新優勢成長'),
@@ -61,6 +86,8 @@ ETFS = {
     '00996A': ('00996A', '主動兆豐台灣豐收'),
     '00984A': ('00984A', '主動安聯台灣高息'),
 }
+
+ETFS = load_catalog()
 
 # ── HTTP 標頭：模擬瀏覽器，加 Accept-Encoding 自動處理 gzip ──────
 HEADERS = {

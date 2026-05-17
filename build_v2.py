@@ -15,7 +15,7 @@ DST  = os.path.join(ROOT, 'stock_terminal_v2.html')
 #   position_v2.js — defines num/fx helpers used by both watch and info
 #   watch_v2.js    — defines STRATEGIES / PRESETS used by info_v2.js
 #   info_v2.js     — registers (i) icon tooltips for indicators / strategies / presets
-V2_SCRIPTS = ['position_v2.js', 'watch_v2.js', 'info_v2.js', 'pro_v2.js', 'pattern_v2.js', 'live_v2.js']
+V2_SCRIPTS = ['position_v2.js', 'watch_v2.js', 'info_v2.js', 'pro_v2.js', 'pattern_v2.js', 'live_v2.js', 'etf_v2.js']
 V2_STYLES  = ['mobile_v2.css']
 
 if not os.path.isfile(SRC):
@@ -66,22 +66,25 @@ RP_WATCH_NEW = (RP_WATCH_OLD + "\n"
 if 'renderWatch()' not in html:
     html = html.replace(RP_WATCH_OLD, RP_WATCH_NEW, 1)
 
-# 4a) setTab tabs array: drop BATCH (v2 doesn't need it), add 'position' + 'watch'
-TAB_V1   = "const tabs=['stats','research','batch','history','etf'];"
-TAB_POS  = "const tabs=['stats','research','batch','history','position','etf'];"
-TAB_FULL = "const tabs=['stats','research','batch','history','position','watch','etf'];"
-TAB_NOBATCH = "const tabs=['stats','research','history','position','watch','etf'];"
-# Replace any prior version with the no-batch full version
-for old in [TAB_V1, TAB_POS, TAB_FULL]:
+# 4a) setTab tabs array: drop BATCH + HISTORY (v2 doesn't need), add 'position' + 'watch'
+TAB_V1       = "const tabs=['stats','research','batch','history','etf'];"
+TAB_POS      = "const tabs=['stats','research','batch','history','position','etf'];"
+TAB_FULL     = "const tabs=['stats','research','batch','history','position','watch','etf'];"
+TAB_NOBATCH  = "const tabs=['stats','research','history','position','watch','etf'];"
+TAB_LEAN     = "const tabs=['stats','research','position','watch','etf'];"   # no batch, no history
+for old in [TAB_V1, TAB_POS, TAB_FULL, TAB_NOBATCH]:
     if old in html:
-        html = html.replace(old, TAB_NOBATCH, 1)
+        html = html.replace(old, TAB_LEAN, 1)
         break
 
-# 4a2) Hide the BATCH tab button entirely (v2 doesn't expose Batch — too crowded)
+# 4a2) Hide BATCH + HISTORY tab buttons (v2 doesn't expose them — too crowded)
 html = re.sub(
     r'\s*<button class="rtab"[^>]*onclick="setTab\(\'batch\'\)"[^>]*>[^<]*</button>',
-    '',
-    html, count=1
+    '', html, count=1
+)
+html = re.sub(
+    r'\s*<button class="rtab"[^>]*onclick="setTab\(\'history\'\)"[^>]*>[^<]*</button>',
+    '', html, count=1
 )
 
 # 4b) Patch v1's loadSym — wrap renderRpanel in try/catch + fire `symLoaded` CustomEvent.

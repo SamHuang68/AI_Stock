@@ -1,0 +1,385 @@
+{
+  "version": 1,
+  "updated": "2026-05-15",
+  "note": "台股 ETF 分類庫。enabled=true 才會被 etf_delta_tracker.py 抓取。新增 ETF 用前端 ⚙ modal 或直接編輯本檔。",
+  "categories": [
+    {
+      "key": "active",
+      "name": "主動式 ETF",
+      "icon": "🎯",
+      "desc": "經理人主動選股的 ETF，揭露每日完整持股",
+      "etfs": [
+        {
+          "code": "00980A",
+          "name": "主動野村臺灣優選",
+          "enabled": false
+        },
+        {
+          "code": "00981A",
+          "name": "主動統一台股增長",
+          "enabled": true
+        },
+        {
+          "code": "00982A",
+          "name": "主動群益台灣強棒",
+          "enabled": false
+        },
+        {
+          "code": "00984A",
+          "name": "主動安聯台灣高息",
+          "enabled": false
+        },
+        {
+          "code": "00987A",
+          "name": "主動台新優勢成長",
+          "enabled": false
+        },
+        {
+          "code": "00991A",
+          "name": "主動復華未來50",
+          "enabled": false
+        },
+        {
+          "code": "00992A",
+          "name": "主動群益科技創新",
+          "enabled": false
+        },
+        {
+          "code": "00994A",
+          "name": "主動第一金台股優",
+          "enabled": false
+        },
+        {
+          "code": "00995A",
+          "name": "主動中信台灣卓越",
+          "enabled": false
+        },
+        {
+          "code": "00996A",
+          "name": "主動兆豐台灣豐收",
+          "enabled": false
+        },
+        {
+          "code": "00990A",
+          "name": "主動元大AI新經濟",
+          "enabled": false
+        },
+        {
+          "code": "00403A",
+          "name": "主動統一升級50",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "key": "broad",
+      "name": "市值型大盤",
+      "icon": "📊",
+      "desc": "追蹤台股大盤指數，被動配置",
+      "etfs": [
+        {
+          "code": "0050",
+          "name": "元大台灣50",
+          "enabled": false
+        },
+        {
+          "code": "006208",
+          "name": "富邦台50",
+          "enabled": false
+        },
+        {
+          "code": "00692",
+          "name": "富邦公司治理",
+          "enabled": false
+        },
+        {
+          "code": "00850",
+          "name": "元大臺灣ESG永續",
+          "enabled": false
+        },
+        {
+          "code": "006203",
+          "name": "元大MSCI台灣",
+          "enabled": false
+        },
+        {
+          "code": "00733",
+          "name": "富邦臺灣中小",
+          "enabled": false
+        },
+        {
+          "code": "00921",
+          "name": "兆豐龍頭等權重",
+          "enabled": false
+        },
+        {
+          "code": "00922",
+          "name": "國泰台灣領袖50",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "key": "dividend",
+      "name": "高股息",
+      "icon": "💰",
+      "desc": "聚焦高殖利率個股",
+      "etfs": [
+        {
+          "code": "0056",
+          "name": "元大高股息",
+          "enabled": false
+        },
+        {
+          "code": "00878",
+          "name": "國泰永續高股息",
+          "enabled": false
+        },
+        {
+          "code": "00713",
+          "name": "元大台灣高息低波",
+          "enabled": false
+        },
+        {
+          "code": "00919",
+          "name": "群益台灣精選高息",
+          "enabled": false
+        },
+        {
+          "code": "00929",
+          "name": "復華台灣科技優息",
+          "enabled": false
+        },
+        {
+          "code": "00939",
+          "name": "統一台灣高息動能",
+          "enabled": false
+        },
+        {
+          "code": "00940",
+          "name": "元大台灣價值高息",
+          "enabled": false
+        },
+        {
+          "code": "00731",
+          "name": "復華富時高息低波",
+          "enabled": false
+        },
+        {
+          "code": "00701",
+          "name": "國泰股利精選30",
+          "enabled": false
+        },
+        {
+          "code": "00936",
+          "name": "台新永續高息中小",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "key": "tech",
+      "name": "科技/半導體",
+      "icon": "💻",
+      "desc": "聚焦半導體或科技類股",
+      "etfs": [
+        {
+          "code": "00891",
+          "name": "中信關鍵半導體",
+          "enabled": false
+        },
+        {
+          "code": "00892",
+          "name": "富邦台灣半導體",
+          "enabled": false
+        },
+        {
+          "code": "00904",
+          "name": "新光臺灣半導體30",
+          "enabled": false
+        },
+        {
+          "code": "00935",
+          "name": "野村臺灣新科技50",
+          "enabled": false
+        },
+        {
+          "code": "00757",
+          "name": "統一FANG+",
+          "enabled": false
+        },
+        {
+          "code": "00770",
+          "name": "國泰北美科技",
+          "enabled": false
+        },
+        {
+          "code": "00876",
+          "name": "元大全球未來通訊",
+          "enabled": false
+        },
+        {
+          "code": "00881",
+          "name": "國泰台灣5G+",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "key": "leverage",
+      "name": "槓桿/反向",
+      "icon": "⚡",
+      "desc": "正 2、反 1 槓桿類，含槓桿/反向 ETF",
+      "etfs": [
+        {
+          "code": "00631L",
+          "name": "元大台灣50正2",
+          "enabled": true
+        },
+        {
+          "code": "00632R",
+          "name": "元大台灣50反1",
+          "enabled": false
+        },
+        {
+          "code": "00675L",
+          "name": "富邦臺灣加權正2",
+          "enabled": false
+        },
+        {
+          "code": "00676R",
+          "name": "富邦臺灣加權反1",
+          "enabled": false
+        },
+        {
+          "code": "00670L",
+          "name": "富邦NASDAQ正2",
+          "enabled": false
+        },
+        {
+          "code": "00671R",
+          "name": "富邦NASDAQ反1",
+          "enabled": false
+        },
+        {
+          "code": "00640L",
+          "name": "富邦日本正2",
+          "enabled": false
+        },
+        {
+          "code": "00641R",
+          "name": "富邦日本反1",
+          "enabled": false
+        },
+        {
+          "code": "00669R",
+          "name": "國泰美國道瓊反1",
+          "enabled": false
+        },
+        {
+          "code": "00674R",
+          "name": "期元大S&P500反1",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "key": "overseas",
+      "name": "海外股票",
+      "icon": "🌍",
+      "desc": "追蹤美股、日股、陸港股、新興市場等",
+      "etfs": [
+        {
+          "code": "00646",
+          "name": "元大S&P500",
+          "enabled": false
+        },
+        {
+          "code": "00662",
+          "name": "富邦NASDAQ",
+          "enabled": false
+        },
+        {
+          "code": "00830",
+          "name": "國泰費城半導體",
+          "enabled": false
+        },
+        {
+          "code": "00858",
+          "name": "永豐美國500大",
+          "enabled": false
+        },
+        {
+          "code": "00861",
+          "name": "元大全球未來關鍵科技",
+          "enabled": false
+        },
+        {
+          "code": "00712",
+          "name": "復華富時不動產",
+          "enabled": false
+        },
+        {
+          "code": "00714",
+          "name": "群益道瓊美國地產",
+          "enabled": false
+        },
+        {
+          "code": "00752",
+          "name": "中信中國50",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "key": "bond",
+      "name": "債券型",
+      "icon": "🏛",
+      "desc": "美債、公司債、金融債 ETF",
+      "etfs": [
+        {
+          "code": "00679B",
+          "name": "元大美債20年",
+          "enabled": false
+        },
+        {
+          "code": "00687B",
+          "name": "國泰20年美債",
+          "enabled": false
+        },
+        {
+          "code": "00697B",
+          "name": "元大美債7-10",
+          "enabled": false
+        },
+        {
+          "code": "00720B",
+          "name": "元大投資級公司債",
+          "enabled": false
+        },
+        {
+          "code": "00772B",
+          "name": "中信高評級公司債",
+          "enabled": false
+        },
+        {
+          "code": "00773B",
+          "name": "中信優先金融債",
+          "enabled": false
+        },
+        {
+          "code": "00937B",
+          "name": "群益ESG投等債20+",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "key": "custom",
+      "name": "自訂",
+      "icon": "🛠",
+      "desc": "使用者自行新增的 ETF（透過 ⚙ 管理 modal 加入）",
+      "etfs": []
+    }
+  ]
+}

@@ -106,12 +106,18 @@ v2 在 v1 之上加了兩個分頁：**POS**（已持有部位）+ **WATCH**（�
 
 ```
 Stock_Terminal/
-├── server.py                  本機 HTTP server（YF proxy + LRU cache + ETF Delta API）
+├── server.py                  本機 HTTP server（YF proxy + LRU + ETF Delta + Catalog + Tracker run）
 ├── stock_terminal.html        v1 UI（單檔 HTML，含雙列拖曳自選股）
-├── stock_terminal_v2.html     v2 UI（build_v2.py 產生：POS + WATCH 分頁）
-├── position_v2.js             v2 倉位管理 + 訊號引擎
-├── watch_v2.js                v2 多訊號觀察清單 + 8 策略 + 5 預設劇本 + 共識評分
-├── info_v2.js                 v2 (i) 圖示浮動中文說明（16 指標 + 8 策略 + 5 劇本）
+├── stock_terminal_v2.html     v2 UI（build_v2.py 產生：POS + WATCH + ETF△ 分類）
+├── position_v2.js             倉位管理 + 訊號引擎
+├── watch_v2.js                多訊號觀察清單 + 8 策略 + 5 預設劇本 + 共識評分
+├── info_v2.js                 (i) 圖示浮動中文說明（16 指標 + 8 策略 + 5 劇本）
+├── pro_v2.js                  專業工具（通知中心/大盤/繪線/風險/熱力圖/POC/Replay/Backtest）
+├── pattern_v2.js              AI 形態辨識（8 種經典 K 線形態）
+├── live_v2.js                 近即時報價輪詢（30 秒 / Yahoo v8 chart 1m）
+├── etf_v2.js                  ETF △分類 tabs + ⚙ 管理 modal + 立即更新
+├── mobile_v2.css              響應式 RWD（手機/平板/桌機）
+├── etf_catalog.json           60+ ETF / 7 分類 + 自訂類觀測池配置
 ├── build_v2.py                v1 → v2 的生成腳本（v1 更新後重跑即同步）
 ├── etf_delta_tracker.py       主動 ETF 持股爬蟲（MoneyDJ）
 ├── start_terminal.bat         v1 啟動

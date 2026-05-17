@@ -2,7 +2,7 @@
 """Stock Terminal local server — ThreadingHTTPServer + ThreadPoolExecutor + LRU cache + ETF Delta
    Tuned for GMKtec EVO-T1 (Core Ultra 9 285H / 96GB DDR5 / RTX 5080).
 """
-import os, json, urllib.request, urllib.error, socketserver, glob, time
+import os, json, urllib.request, urllib.error, socketserver, glob, time, subprocess, sys
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import OrderedDict
@@ -16,10 +16,70 @@ LRU_MAX = 20000  # 96GB RAM → very generous cache
 
 # ── ETF Delta path ──────────────────────────────────────────────
 ETF_DELTA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'etf_history')
+ETF_CATALOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'etf_catalog.json')
 _ETF_FALLBACKS = [
     ETF_DELTA_PATH,
     os.path.join(os.path.dirname(os.path.abspath(__file__)), 'etf_history'),
 ]
+
+# ── Tracker run state (for /etf-tracker/run + /etf-tracker/status) ──
+_tracker_state = {
+    'running':       False,
+    'startedAt':     None,
+    'finishedAt':    None,
+    'lastDuration':  None,   # seconds
+    'lastReturnCode': None,
+    'lastOutput':    '',
+}
+_tracker_lock = threading.Lock()
+
+def _run_tracker_async():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    tracker = os.path.join(script_dir, 'etf_delta_tracker.py')
+    if not os.path.isfile(tracker):
+        with _tracker_lock:
+            _tracker_state.update({
+                'running': False, 'finishedAt': time.time(),
+                'lastReturnCode': -1, 'lastOutput': 'etf_delta_tracker.py not found',
+            })
+        return
+    start = time.time()
+    try:
+        # Use sys.executable so we hit the same Python that's running server.py
+        proc = subprocess.run(
+            [sys.executable, tracker],
+            cwd=script_dir,
+            capture_output=True, text=True,
+            encoding='utf-8', errors='replace',
+            timeout=300,
+        )
+        out = (proc.stdout or '') + ('\n' + proc.stderr if proc.stderr else '')
+        with _tracker_lock:
+            _tracker_state.update({
+                'running': False,
+                'finishedAt': time.time(),
+                'lastDuration': round(time.time() - start, 1),
+                'lastReturnCode': proc.returncode,
+                'lastOutput': out[-4000:],   # keep last 4KB
+            })
+    except subprocess.TimeoutExpired:
+        with _tracker_lock:
+            _tracker_state.update({
+                'running': False,
+                'finishedAt': time.time(),
+                'lastDuration': round(time.time() - start, 1),
+                'lastReturnCode': -2,
+                'lastOutput': 'tracker timed out (5 minutes)',
+            })
+    except Exception as e:
+        with _tracker_lock:
+            _tracker_state.update({
+                'running': False,
+                'finishedAt': time.time(),
+                'lastDuration': round(time.time() - start, 1),
+                'lastReturnCode': -3,
+                'lastOutput': f'exception: {e}',
+            })
 
 ETF_NAME_MAP = {
     '00992A':'主動群益科技創新','00981A':'主動統一台股增長',
@@ -260,6 +320,10 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_single(sym)
         elif p.startswith('/etf-delta'):
             self._handle_etf_delta()
+        elif p.startswith('/etf-catalog'):
+            self._handle_etf_catalog_get()
+        elif p.startswith('/etf-tracker/status'):
+            self._handle_tracker_status()
         elif p.startswith('/quote/'):
             sym = p[7:].split('?')[0]
             self._handle_quote(sym)
@@ -277,6 +341,20 @@ class Handler(SimpleHTTPRequestHandler):
             }).encode())
         else:
             super().do_GET()
+
+    def do_POST(self):
+        if self.path.startswith('/etf-catalog'):
+            self._handle_etf_catalog_post()
+        elif self.path.startswith('/etf-tracker/run'):
+            self._handle_tracker_run()
+        else:
+            self._err('not found', 404)
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
 
     def end_headers(self):
         if hasattr(self, 'path') and self.path.endswith('.html'):
@@ -413,6 +491,61 @@ class Handler(SimpleHTTPRequestHandler):
                     print(f'[quote] {candidate} via {base} error: {e}')
                     continue
         self._err('quote fetch failed for ' + sym, 502)
+
+    def _handle_etf_catalog_get(self):
+        """回傳 etf_catalog.json 內容（含全部 ETF 不論 enabled 與否）"""
+        if not os.path.isfile(ETF_CATALOG_FILE):
+            self._err('etf_catalog.json not found', 404); return
+        try:
+            with open(ETF_CATALOG_FILE, 'rb') as f:
+                data = f.read()
+            self._ok(data)
+        except Exception as e:
+            self._err('read catalog failed: ' + str(e), 500)
+
+    def _handle_etf_catalog_post(self):
+        """接收前端 JSON 更新 catalog，整檔覆寫"""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length) if length > 0 else b''
+            # Validate it parses
+            obj = json.loads(body.decode('utf-8'))
+            if 'categories' not in obj:
+                self._err('invalid catalog: missing categories', 400); return
+            # Backup current file before overwrite
+            if os.path.isfile(ETF_CATALOG_FILE):
+                bk = ETF_CATALOG_FILE + '.bak'
+                try:
+                    import shutil
+                    shutil.copyfile(ETF_CATALOG_FILE, bk)
+                except Exception: pass
+            with open(ETF_CATALOG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(obj, f, ensure_ascii=False, indent=2)
+            n = sum(1 for c in obj.get('categories', []) for e in c.get('etfs', []) if e.get('enabled'))
+            self._ok(json.dumps({'ok': True, 'enabledCount': n}).encode())
+        except json.JSONDecodeError as e:
+            self._err('invalid JSON: ' + str(e), 400)
+        except Exception as e:
+            self._err('save catalog failed: ' + str(e), 500)
+
+    def _handle_tracker_run(self):
+        """POST /etf-tracker/run — 啟動背景 thread 跑 etf_delta_tracker.py"""
+        with _tracker_lock:
+            if _tracker_state['running']:
+                self._err('tracker already running', 409); return
+            _tracker_state.update({
+                'running': True, 'startedAt': time.time(),
+                'finishedAt': None, 'lastReturnCode': None, 'lastOutput': '',
+            })
+        t = threading.Thread(target=_run_tracker_async, daemon=True)
+        t.start()
+        self._ok(json.dumps({'ok': True, 'started': True}).encode())
+
+    def _handle_tracker_status(self):
+        """GET /etf-tracker/status — 回傳當前狀態"""
+        with _tracker_lock:
+            state = dict(_tracker_state)
+        self._ok(json.dumps(state, ensure_ascii=False).encode())
 
     def _handle_etf_delta(self):
         files = list_etf_files()
