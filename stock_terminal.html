@@ -523,6 +523,38 @@ async function loadSym(sym, mkt) {
     parsed.candles = parsed.candles.slice(-rdef.trim);
   }
 
+  // ── Yahoo data freshness fix (v3.6) ──────────────────────────
+  // Yahoo daily K 線陣列偶爾會落後 regularMarketPrice 一天（query1/query2 同步差）。
+  // 偵測：rmt 比最後一根 K 線晚 > 20 小時 → 合成一根「今日」K 線
+  // (OHLC=rmp, volume=0)，讓 chart / chart-info / chip 全部用 Yahoo 最新 rmp。
+  // 落差消失時自動不觸發，無副作用。
+  if (parsed.candles.length >= 1 && parsed.meta) {
+    const _meta = parsed.meta;
+    const _last = parsed.candles[parsed.candles.length - 1];
+    const _rmt = _meta.regularMarketTime;
+    const _rmp = _meta.regularMarketPrice;
+    const _dailyIvl = (rdef.interval === '1d' || rdef.interval === '1wk');
+    if (_dailyIvl && _rmt && _rmp != null && isFinite(_rmp) && _rmp > 0
+        && _last && _last.time && (_rmt - _last.time) > 20 * 3600) {
+      parsed.candles.push({
+        time: _rmt, open: _rmp, high: _rmp, low: _rmp, close: _rmp,
+        volume: 0, _synthetic: true,
+      });
+    }
+  }
+
+  // ── Intraday yesterdayClose 對齊 ─────────────────────────────
+  // intraday (1天 5m) 用倒數第二根 5min K 算 % 是錯的（盤中波動）。
+  // 改用 meta.chartPreviousClose 當「真正的昨收」，存到 S.data.yesterdayClose
+  // 供 polish_v3.js 的「昨收」線/ci-chg 顏色一起對齊。
+  const _isIntraday = (rdef.interval !== '1d' && rdef.interval !== '1wk');
+  if (_isIntraday && parsed.meta) {
+    const _ycp = parsed.meta.chartPreviousClose ?? parsed.meta.previousClose;
+    if (_ycp != null && isFinite(_ycp) && _ycp > 0) {
+      parsed.yesterdayClose = _ycp;
+    }
+  }
+
   S.data = parsed;
   renderChart(parsed.candles);
   document.getElementById('chart-loading').style.display='none';
@@ -530,7 +562,12 @@ async function loadSym(sym, mkt) {
 
   const last = parsed.candles[parsed.candles.length-1];
   const prev = parsed.candles[parsed.candles.length-2];
-  const chgPct = prev ? ((last.close-prev.close)/prev.close*100) : 0;
+  // For intraday: use S.data.yesterdayClose. For daily/weekly (含合成 K): use prev candle.
+  const _prevRef = (_isIntraday && parsed.yesterdayClose != null)
+    ? parsed.yesterdayClose
+    : (prev ? prev.close : null);
+  const chgPct = (_prevRef != null && _prevRef > 0)
+    ? ((last.close - _prevRef) / _prevRef * 100) : 0;
   document.getElementById('ci-price').textContent = last.close.toFixed(2);
   const ci = document.getElementById('ci-chg');
   ci.textContent = (chgPct>=0?'+':'')+chgPct.toFixed(2)+'%';
@@ -555,6 +592,17 @@ function renderChart(candles) {
 
   // intraday (1d range, 5m interval) → show HH:mm; daily/weekly → date only
   const isIntraday = S.range === '1d';
+
+  // ── 時區平移：使用者本地時區 (v3.6) ──────────────────────────
+  // lightweight-charts 預設用 UTC 顯示。台北使用者看 13:30 收盤的台股會
+  // 顯示 05:30，看美股 09:30 開盤會顯示成 09:30 ET。改用本地 TZ offset
+  // 平移後，所有市場的時間軸都對應到「使用者本地時鐘」：
+  //   TW 股 in Taipei: 09:00–13:30
+  //   US 股 in Taipei: 21:30–04:00 隔天
+  // Crosshair 讀回時必須用 getUTC*（時間已被預先平移過）
+  const userTzOffset = -new Date().getTimezoneOffset() * 60;
+  S.tzOffset = userTzOffset;
+  const tz = (t) => (t == null ? t : t + userTzOffset);
 
   const chart = LightweightCharts.createChart(wrap, {
     width: wrap.clientWidth, height: wrap.clientHeight,
@@ -583,7 +631,7 @@ function renderChart(candles) {
     borderUpColor:'#4ADE80',borderDownColor:'#F87171',
     wickUpColor:'#4ADE80',wickDownColor:'#F87171',
   });
-  const lcd = candles.map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close}));
+  const lcd = candles.map(c=>({time:tz(c.time),open:c.open,high:c.high,low:c.low,close:c.close}));
   cs.setData(lcd);
   S.chartSeries = cs;
 
@@ -592,7 +640,7 @@ function renderChart(candles) {
     priceScaleId:'vol',
   });
   chart.priceScale('vol').applyOptions({scaleMargins:{top:0.8,bottom:0}});
-  vs.setData(candles.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'rgba(74,222,128,0.25)':'rgba(248,113,113,0.25)'})));
+  vs.setData(candles.map(c=>({time:tz(c.time),value:c.volume,color:c.close>=c.open?'rgba(74,222,128,0.25)':'rgba(248,113,113,0.25)'})));
   S.volSeries = vs;
 
   // ── SMA + Bollinger Bands overlay (skip on intraday) ──
@@ -612,10 +660,10 @@ function renderChart(candles) {
       return Math.sqrt(v / n);
     };
 
-    const sma20Data = candles.map((c, i) => { const v = sma(20, i); return v == null ? null : {time: c.time, value: v}; }).filter(Boolean);
-    const sma60Data = candles.map((c, i) => { const v = sma(60, i); return v == null ? null : {time: c.time, value: v}; }).filter(Boolean);
-    const bbU = candles.map((c, i) => { const m = sma(20, i); if (m == null) return null; const s = std(20, i, m); return {time: c.time, value: m + 2 * s}; }).filter(Boolean);
-    const bbL = candles.map((c, i) => { const m = sma(20, i); if (m == null) return null; const s = std(20, i, m); return {time: c.time, value: m - 2 * s}; }).filter(Boolean);
+    const sma20Data = candles.map((c, i) => { const v = sma(20, i); return v == null ? null : {time: tz(c.time), value: v}; }).filter(Boolean);
+    const sma60Data = candles.map((c, i) => { const v = sma(60, i); return v == null ? null : {time: tz(c.time), value: v}; }).filter(Boolean);
+    const bbU = candles.map((c, i) => { const m = sma(20, i); if (m == null) return null; const s = std(20, i, m); return {time: tz(c.time), value: m + 2 * s}; }).filter(Boolean);
+    const bbL = candles.map((c, i) => { const m = sma(20, i); if (m == null) return null; const s = std(20, i, m); return {time: tz(c.time), value: m - 2 * s}; }).filter(Boolean);
 
     const mkLine = (color, width, dashed) => chart.addLineSeries({
       color, lineWidth: width, lastValueVisible: false, priceLineVisible: false,
@@ -642,10 +690,11 @@ function renderChart(candles) {
     if (!k) { ohlcEl.style.display = 'none'; return; }
 
     // Date string (intraday → date+time, daily → date only)
+    // 時間已被預先平移到使用者本地時區 → 用 getUTC* 讀取才能取得當地的時/分/日
     const d = new Date(typeof param.time === 'number' ? param.time * 1000 : Date.parse(param.time));
     const ds = isIntraday
-      ? `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
-      : `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+      ? `${d.getUTCMonth()+1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`
+      : `${d.getUTCFullYear()}/${String(d.getUTCMonth()+1).padStart(2,'0')}/${String(d.getUTCDate()).padStart(2,'0')}`;
 
     const isUp = k.close >= k.open;
     const col = isUp ? 'var(--green)' : 'var(--red)';

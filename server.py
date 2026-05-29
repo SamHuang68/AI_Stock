@@ -89,27 +89,42 @@ ETF_NAME_MAP = {
     '00996A':'主動兆豐台灣豐收','00984A':'主動安聯台灣高息',
 }
 
-# ── LRU cache ───────────────────────────────────────────────────
+# ── LRU cache with TTL ──────────────────────────────────────────
+# v3.6 加 TTL（預設 60 秒）：原本沒 TTL 造成的「stale price 隨機重現」根因 ——
+# 若 server 啟動後第一次 Yahoo 查到時資料正在 query1/query2 同步落差期間，
+# 整份回應（含 regularMarketPrice、整個 K 線陣列）會被永久 cache，後續任何
+# loadSym / heatmap / sectors 全都吃這份過時快照。TTL 後最久 60 秒過期，
+# 下一次抓會重新打 Yahoo，自然吃到最新狀態。
+# 短 TTL（60s）對效能影響可忽略：同一張線型 60s 內被反覆點仍走 cache；
+# 而每分鐘整批數十 symbol 的 Screener 也只多抓一次。
 class LRUCache:
-    def __init__(self, maxsize):
-        self._d = OrderedDict()
+    def __init__(self, maxsize, ttl_seconds=60):
+        self._d = OrderedDict()        # key → (value, expire_ts)
         self._max = maxsize
+        self._ttl = ttl_seconds
         self._lock = threading.Lock()
     def get(self, k):
         with self._lock:
-            if k not in self._d: return None
+            ent = self._d.get(k)
+            if ent is None: return None
+            val, exp = ent
+            if exp <= time.time():
+                # expired — drop from cache so next set() doesn't trip max
+                self._d.pop(k, None)
+                return None
             self._d.move_to_end(k)
-            return self._d[k]
-    def set(self, k, v):
+            return val
+    def set(self, k, v, ttl=None):
         with self._lock:
+            exp = time.time() + (ttl if ttl is not None else self._ttl)
             if k in self._d: self._d.move_to_end(k)
-            self._d[k] = v
+            self._d[k] = (v, exp)
             if len(self._d) > self._max:
                 self._d.popitem(last=False)
     def __len__(self):
         return len(self._d)
 
-_cache = LRUCache(LRU_MAX)
+_cache = LRUCache(LRU_MAX, ttl_seconds=60)
 _pool  = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix='yf')
 
 YF_HEADERS = {
@@ -122,13 +137,17 @@ YF_HEADERS = {
 YF_RANGE = os.environ.get('YF_RANGE', '5y')   # 5y 約 1250 K 線；可設 max / 10y / 2y
 YF_INTERVAL = os.environ.get('YF_INTERVAL', '1d')
 
-def fetch_one(sym, rng=None, interval=None):
+def fetch_one(sym, rng=None, interval=None, nocache=False):
+    """Fetch Yahoo chart JSON for sym. nocache=True bypasses _cache entirely
+    (used by wl_live_v3.js so each watchlist poll always gets fresh data —
+    the LRUCache has no TTL so cached entries would otherwise serve forever)."""
     rng = rng or YF_RANGE
     interval = interval or YF_INTERVAL
     cache_key = f'{sym}|{interval}|{rng}'
-    cached = _cache.get(cache_key)
-    if cached is not None:
-        return sym, cached, True
+    if not nocache:
+        cached = _cache.get(cache_key)
+        if cached is not None:
+            return sym, cached, True
     if sym.endswith('.TW') and not sym.endswith('.TWO'):
         candidates = [sym, sym[:-3]+'.TWO']
     elif sym.endswith('.TWO'):
@@ -144,7 +163,8 @@ def fetch_one(sym, rng=None, interval=None):
                     data = resp.read()
                 parsed = json.loads(data)
                 if parsed.get('chart', {}).get('result'):
-                    _cache.set(cache_key, data)
+                    if not nocache:
+                        _cache.set(cache_key, data)
                     return sym, data, False
             except urllib.error.HTTPError as e:
                 if e.code == 404: break
@@ -199,6 +219,24 @@ def get_field(h, *keys):
         if k in h: return h[k]
     return None
 
+def _load_enabled_etf_codes():
+    """讀 etf_catalog.json，回傳目前 enabled=true 的 ETF 代號集合（uppercase）"""
+    if not os.path.isfile(ETF_CATALOG_FILE):
+        return None   # None = 不做 server 端過濾（fallback 給全部）
+    try:
+        with open(ETF_CATALOG_FILE, encoding='utf-8') as f:
+            cat = json.load(f)
+        enabled = set()
+        for c in cat.get('categories', []):
+            for e in c.get('etfs', []):
+                if e.get('enabled'):
+                    code = (e.get('code') or '').strip().upper()
+                    if code: enabled.add(code)
+        return enabled if enabled else None
+    except Exception as e:
+        print(f'[catalog filter] load failed: {e}')
+        return None
+
 def compute_etf_delta(files, date=None):
     if len(files) < 2: return None
     if date:
@@ -228,6 +266,11 @@ def compute_etf_delta(files, date=None):
 
     THRESHOLD = 0.5
     all_codes = sorted(set(curr_all) | set(prev_all))
+
+    # ── 過濾：只保留 catalog 內 enabled=true 的 ETF（隱藏舊 009 殘留）──
+    enabled_codes = _load_enabled_etf_codes()
+    if enabled_codes is not None:
+        all_codes = [c for c in all_codes if c.upper() in enabled_codes]
 
     etfs_out = []
     total_new = total_rm = total_chg = 0
@@ -285,7 +328,27 @@ def compute_etf_delta(files, date=None):
         total_rm  += len(removed)
         total_chg += len(changed)
 
-        if new_stocks or removed or changed:
+        # ── Top 10 當前持股（按 weight 降冪）— 給前端顯示「投資標的一覽」 ──
+        top10 = []
+        try:
+            sorted_curr = sorted(
+                curr_list,
+                key=lambda h: float(get_field(h, 'weight', 'pct', 'weight_pct') or 0),
+                reverse=True,
+            )[:10]
+            for h in sorted_curr:
+                top10.append({
+                    'rank':   get_field(h, 'rank', 'holding_rank') or '-',
+                    'code':   get_field(h, 'code', 'symbol', 'stock_code', 'ticker') or '',
+                    'name':   get_field(h, 'name', 'stock_name', 'company_name') or '',
+                    'weight': float(get_field(h, 'weight', 'pct', 'weight_pct') or 0),
+                    'shares': int(get_field(h, 'shares', 'quantity', 'volume') or 0),
+                })
+        except Exception:
+            pass
+
+        # 即使「無變動」也輸出，讓 Top 10 看得到（v3.1 改：原本要 new/rm/chg 至少一個非空）
+        if new_stocks or removed or changed or top10:
             etfs_out.append({
                 'code':    code,
                 'name':    ETF_NAME_MAP.get(code, code),
@@ -293,6 +356,7 @@ def compute_etf_delta(files, date=None):
                 'new':     new_stocks,
                 'removed': removed,
                 'changed': changed,
+                'top10':   top10,   # v3.1 新增：當前 Top 10 持股
             })
 
     return {
@@ -320,13 +384,23 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_single(sym)
         elif p.startswith('/etf-delta'):
             self._handle_etf_delta()
-        elif p.startswith('/etf-catalog'):
+        elif p == '/etf-catalog' or p.startswith('/etf-catalog?'):
             self._handle_etf_catalog_get()
-        elif p.startswith('/etf-tracker/status'):
+        elif p == '/etf-tracker/status' or p.startswith('/etf-tracker/status?'):
             self._handle_tracker_status()
         elif p.startswith('/quote/'):
             sym = p[7:].split('?')[0]
             self._handle_quote(sym)
+        elif p.startswith('/chip/'):
+            sym = p[6:].split('?')[0]
+            self._handle_chip(sym)
+        elif p.startswith('/keystats/'):
+            sym = p[10:].split('?')[0]
+            self._handle_keystats(sym)
+        elif p == '/sectors' or p.startswith('/sectors?'):
+            self._handle_sectors()
+        elif p == '/screener' or p.startswith('/screener?'):
+            self._handle_screener_get()
         elif p == '/health':
             d = find_etf_dir()
             files = list_etf_files()
@@ -343,10 +417,15 @@ class Handler(SimpleHTTPRequestHandler):
             super().do_GET()
 
     def do_POST(self):
-        if self.path.startswith('/etf-catalog'):
+        p = self.path.split('?')[0]
+        if p == '/etf-catalog':
             self._handle_etf_catalog_post()
-        elif self.path.startswith('/etf-tracker/run'):
+        elif p == '/etf-tracker/run':
             self._handle_tracker_run()
+        elif p == '/screener':
+            self._handle_screener_post()
+        elif p == '/ai-report':
+            self._handle_ai_report()
         else:
             self._err('not found', 404)
 
@@ -397,10 +476,13 @@ class Handler(SimpleHTTPRequestHandler):
         syms = [s.strip() for s in qs.get('syms', [''])[0].split(',') if s.strip()]
         rng      = qs.get('range',    [None])[0]
         interval = qs.get('interval', [None])[0]
+        # nocache=1 → bypass LRU. Used by wl_live_v3.js so watchlist polling
+        # always gets fresh Yahoo data (LRUCache has no TTL).
+        nocache  = qs.get('nocache',  ['0'])[0] == '1'
         if not syms:
             self._ok(b'{}'); return
         results = {}
-        futures = {_pool.submit(fetch_one, s, rng, interval): s for s in syms}
+        futures = {_pool.submit(fetch_one, s, rng, interval, nocache): s for s in syms}
         for fut in as_completed(futures):
             sym, data, _ = fut.result()
             if data:
@@ -568,6 +650,781 @@ class Handler(SimpleHTTPRequestHandler):
         if result is None:
             self._err('delta compute failed'); return
         self._ok(json.dumps(result, ensure_ascii=False).encode())
+
+    # ──────────────────────────────────────────────────────────
+    # v3.0 endpoints
+    # ──────────────────────────────────────────────────────────
+    def _handle_keystats(self, sym):
+        """Fetch market cap / P/E / EPS / PEG / growth.
+        v3.5 strategy (because Yahoo v10 quoteSummary now requires crumb auth):
+          1) yfinance.Ticker(sym).info  — handles cookie/crumb internally (PRIMARY)
+          2) Yahoo v10 quoteSummary direct (fallback, may fail without crumb)
+          3) Yahoo Finance HTML scrape  (last resort)
+        For TW (.TW) symbols that miss, retry with .TWO (OTC / 興櫃).
+        Cache 1 hour per symbol.
+        """
+        key = f'keystats:{sym}:{int(time.time() // 3600)}'
+        c = _cache.get(key)
+        if c is not None:
+            self._ok(c); return
+
+        out = self._fetch_keystats_yfinance(sym)
+
+        # TW main board miss → try .TWO
+        if (sym.endswith('.TW') and not sym.endswith('.TWO')
+            and out.get('trailingPE') is None and out.get('eps') is None
+            and out.get('marketCap') is None):
+            otc = sym[:-3] + '.TWO'
+            otc_out = self._fetch_keystats_yfinance(otc)
+            if (otc_out.get('trailingPE') is not None or otc_out.get('eps') is not None
+                or otc_out.get('marketCap') is not None):
+                out = otc_out
+                out['_resolved'] = otc
+
+        # Fallback 1: v10 direct (may still work for some symbols)
+        if (out.get('trailingPE') is None and out.get('eps') is None
+            and out.get('marketCap') is None):
+            v10 = self._fetch_keystats_v10(sym)
+            for k in ('trailingPE','forwardPE','eps','forwardEps','pegRatio','marketCap',
+                      'priceToBook','dividendYield','shortName','longName','currency',
+                      'earningsQuarterlyGrowth','revenueGrowth','regularMarketPrice'):
+                if out.get(k) is None and v10.get(k) is not None:
+                    out[k] = v10[k]
+            if v10.get('trailingPE') is not None:
+                out['_source'] = (out.get('_source','') + '+v10').strip('+')
+
+        # Fallback 2: HTML scrape
+        if (out.get('trailingPE') is None and out.get('eps') is None
+            and out.get('marketCap') is None):
+            html_out = self._fetch_keystats_html(sym)
+            for k in ('trailingPE','eps','marketCap','priceToBook','dividendYield',
+                      'shortName','currency'):
+                if out.get(k) is None and html_out.get(k) is not None:
+                    out[k] = html_out[k]
+            if html_out.get('trailingPE') is not None:
+                out['_source'] = (out.get('_source','') + '+html').strip('+')
+
+        body = json.dumps(out, ensure_ascii=False).encode()
+        _cache.set(key, body)
+        self._ok(body)
+
+    def _fetch_keystats_yfinance(self, sym):
+        """yfinance handles Yahoo's crumb/cookie auth — most reliable in 2026."""
+        out = {'symbol': sym, '_source': 'yfinance'}
+        try:
+            import yfinance as yf
+        except ImportError:
+            out['_error'] = 'yfinance not installed (run: pip install yfinance)'
+            return out
+        try:
+            t = yf.Ticker(sym)
+            info = t.info or {}
+            if not info or (info.get('regularMarketPrice') is None
+                            and info.get('previousClose') is None):
+                out['_error'] = 'yfinance returned empty info'
+                return out
+            out['trailingPE']        = info.get('trailingPE')
+            out['forwardPE']         = info.get('forwardPE')
+            out['priceToBook']       = info.get('priceToBook')
+            out['eps']               = (info.get('trailingEps')
+                                        or info.get('epsTrailingTwelveMonths'))
+            out['forwardEps']        = info.get('forwardEps')
+            # yfinance has both 'pegRatio' (legacy) and 'trailingPegRatio' (newer)
+            out['pegRatio']          = (info.get('trailingPegRatio')
+                                        or info.get('pegRatio'))
+            out['marketCap']         = info.get('marketCap')
+            dy = info.get('dividendYield')
+            # yfinance returns yield either as 0-1 (decimal) or 0-100 already, depending on version
+            if dy is not None and isinstance(dy, (int, float)):
+                out['dividendYield'] = dy * 100 if dy < 1 else dy
+            else:
+                out['dividendYield'] = None
+            out['currency']          = info.get('currency')
+            # Prefer longName (英文全名) for non-TW; for TW use shortName if it's Chinese
+            sn = info.get('shortName')
+            ln = info.get('longName')
+            out['shortName']         = sn or ln
+            out['longName']          = ln
+            out['regularMarketPrice']= (info.get('regularMarketPrice')
+                                        or info.get('currentPrice'))
+            qg = info.get('earningsQuarterlyGrowth')
+            out['earningsQuarterlyGrowth'] = (qg * 100) if qg is not None else None
+            rg = info.get('revenueGrowth')
+            out['revenueGrowth']     = (rg * 100) if rg is not None else None
+        except Exception as e:
+            print(f'[keystats-yf] {sym} failed: {e}')
+            out['_error'] = str(e)
+        return out
+
+    def _fetch_keystats_v10(self, sym):
+        """Yahoo v10 quoteSummary — returns clean JSON for exact symbol.
+        Modules: summaryDetail (PE, marketCap, yield), defaultKeyStatistics
+        (EPS, pegRatio, forwardEps), price (shortName), financialData (growth%).
+        """
+        out = {'symbol': sym, '_source': 'yahoo-v10'}
+        try:
+            modules = 'summaryDetail,defaultKeyStatistics,price,financialData'
+            url = f'https://query1.finance.yahoo.com/v10/finance/quoteSummary/{sym}?modules={modules}'
+            req = urllib.request.Request(url, headers=YF_HEADERS)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode('utf-8', 'replace'))
+            qs = data.get('quoteSummary') or {}
+            result = qs.get('result') or []
+            if not result:
+                err = qs.get('error')
+                out['_error'] = str(err) if err else 'no result'
+                return out
+            r0 = result[0]
+            sd = r0.get('summaryDetail') or {}
+            ks = r0.get('defaultKeyStatistics') or {}
+            pr = r0.get('price') or {}
+            fd = r0.get('financialData') or {}
+            def raw(d, k):
+                v = d.get(k)
+                if isinstance(v, dict): return v.get('raw')
+                return v
+            out['trailingPE']    = raw(sd, 'trailingPE')
+            out['forwardPE']     = raw(sd, 'forwardPE') or raw(ks, 'forwardPE')
+            out['priceToBook']   = raw(ks, 'priceToBook') or raw(sd, 'priceToBook')
+            out['eps']           = raw(ks, 'trailingEps')
+            out['forwardEps']    = raw(ks, 'forwardEps')
+            out['pegRatio']      = raw(ks, 'pegRatio')
+            out['marketCap']     = raw(sd, 'marketCap') or raw(pr, 'marketCap')
+            dy = raw(sd, 'dividendYield')
+            out['dividendYield'] = (dy * 100) if dy is not None else None
+            out['currency']      = pr.get('currency') or sd.get('currency')
+            out['shortName']     = pr.get('shortName')
+            out['longName']      = pr.get('longName')
+            out['regularMarketPrice'] = raw(pr, 'regularMarketPrice')
+            qg = raw(fd, 'earningsQuarterlyGrowth')
+            out['earningsQuarterlyGrowth'] = (qg * 100) if qg is not None else None
+            rg = raw(fd, 'revenueGrowth')
+            out['revenueGrowth'] = (rg * 100) if rg is not None else None
+        except Exception as e:
+            print(f'[keystats-v10] {sym} failed: {e}')
+            out['_error'] = str(e)
+        return out
+
+    def _fetch_keystats_html(self, sym):
+        """Legacy HTML scrape fallback (regex on Yahoo Finance quote page)."""
+        out = {'symbol': sym, '_source': 'yahoo-html'}
+        try:
+            url = f'https://finance.yahoo.com/quote/{sym}'
+            req = urllib.request.Request(url, headers=YF_HEADERS)
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                html = resp.read().decode('utf-8', 'replace')
+            import re as _re
+            # Anchor: find a JSON region that contains the exact symbol to avoid
+            # cross-symbol contamination ("Bitcoin USD" leaking into 3529 search etc.)
+            sym_quoted = '"symbol":"' + sym + '"'
+            anchor = html.find(sym_quoted)
+            search_region = html[anchor:anchor+50000] if anchor >= 0 else html
+            patterns = {
+                'marketCap':       r'"marketCap":\s*\{[^}]*"raw":\s*([\d.eE+-]+)',
+                'trailingPE':      r'"trailingPE":\s*\{[^}]*"raw":\s*([\d.eE+-]+)',
+                'priceToBook':     r'"priceToBook":\s*\{[^}]*"raw":\s*([\d.eE+-]+)',
+                'dividendYield':   r'"trailingAnnualDividendYield":\s*\{[^}]*"raw":\s*([\d.eE+-]+)',
+                'eps':             r'"epsTrailingTwelveMonths":\s*\{[^}]*"raw":\s*([\d.eE+-]+)',
+                'currency':        r'"currency":\s*"([A-Z]+)"',
+                'shortName':       r'"shortName":\s*"([^"]+)"',
+            }
+            for k, pat in patterns.items():
+                m = _re.search(pat, search_region)
+                if m:
+                    val = m.group(1)
+                    if k in ('currency','shortName'):
+                        out[k] = val
+                    else:
+                        try: out[k] = float(val)
+                        except: pass
+            if out.get('dividendYield') is not None:
+                out['dividendYield'] *= 100
+        except Exception as e:
+            print(f'[keystats-html] {sym} failed: {e}')
+            out['_error'] = str(e)
+        return out
+
+    def _handle_chip(self, sym):
+        """法人籌碼面板：三大法人買賣超 + 融資融券"""
+        # Cache by sym+date
+        from datetime import date as _date
+        today = _date.today().strftime('%Y%m%d')
+        key = f'chip:{sym}:{today}'
+        c = _cache.get(key)
+        if c is not None:
+            self._ok(c); return
+        # TWSE T86 三大法人買賣超
+        clean = sym.replace('.TW', '').replace('.TWO', '').strip().upper()
+        out = {'symbol': sym, 'date': today, 'inst': None, 'margin': None}
+        try:
+            url = f'https://www.twse.com.tw/rwd/zh/fund/T86?date={today}&selectType=ALLBUT0999&response=json'
+            req = urllib.request.Request(url, headers=YF_HEADERS)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                raw = resp.read()
+            data = json.loads(raw)
+            if data.get('stat') in ('OK', 'ok'):
+                # Find this symbol's row
+                rows = data.get('data') or []
+                fields = data.get('fields') or []
+                idx_code = next((i for i,f in enumerate(fields) if '證券代號' in f), 0)
+                for row in rows:
+                    if row[idx_code].strip() == clean:
+                        # Extract foreign, investment trust, dealer
+                        def col(keyword, fallback=None):
+                            for i, f in enumerate(fields):
+                                if keyword in f:
+                                    try: return float(row[i].replace(',', '').replace(' ', ''))
+                                    except: return fallback
+                            return fallback
+                        out['inst'] = {
+                            'foreign':       col('外陸資買賣超股數') or col('外資'),
+                            'trust':         col('投信買賣超股數') or col('投信'),
+                            'dealer':        col('自營商買賣超股數') or col('自營商'),
+                            'total':         col('三大法人買賣超股數'),
+                        }
+                        break
+        except Exception as e:
+            print(f'[chip] T86 fetch failed for {sym}: {e}')
+        # TWSE 融資融券 MI_MARGN
+        try:
+            url2 = f'https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={today}&selectType=ALL&response=json'
+            req2 = urllib.request.Request(url2, headers=YF_HEADERS)
+            with urllib.request.urlopen(req2, timeout=10) as resp:
+                raw2 = resp.read()
+            data2 = json.loads(raw2)
+            if data2.get('stat') in ('OK', 'ok'):
+                # tables[1] is per-stock data (tables[0] is header summary)
+                tables = data2.get('tables') or []
+                stock_rows = []
+                for t in tables:
+                    if t.get('title', '').find('信用') >= 0 or len(t.get('data', [])) > 100:
+                        stock_rows = t.get('data', [])
+                        fields = t.get('fields', [])
+                        break
+                if stock_rows and fields:
+                    idx_code = next((i for i,f in enumerate(fields) if '股票' in f or '證券代號' in f), 0)
+                    for row in stock_rows:
+                        if row[idx_code].strip() == clean:
+                            def col2(keyword, fallback=None):
+                                for i, f in enumerate(fields):
+                                    if keyword in f:
+                                        try: return float(row[i].replace(',', '').replace(' ', ''))
+                                        except: return fallback
+                                return fallback
+                            out['margin'] = {
+                                'marginBalance':  col2('融資餘額'),
+                                'shortBalance':   col2('融券餘額'),
+                                'marginChange':   col2('融資-買進') or col2('融資增'),
+                                'shortChange':    col2('融券-賣出') or col2('融券增'),
+                            }
+                            break
+        except Exception as e:
+            print(f'[chip] MI_MARGN fetch failed for {sym}: {e}')
+        body = json.dumps(out, ensure_ascii=False).encode()
+        _cache.set(key, body)
+        self._ok(body)
+
+    def _handle_sectors(self):
+        """產業熱力圖：依市場切換資料來源
+        v3.2 改版：
+          • mkt=US → 11 個 SPDR Select Sector ETFs (XLE/XLF/XLK/XLV/XLY/XLP/XLI/XLB/XLU/XLRE/XLC)
+          • mkt=TW → 先試 TWSE MI_INDEX；失敗時用 24 個代表性個股按類股分組（Yahoo 後備）
+          • ?nocache=1 強制重抓
+        """
+        qs = parse_qs(urlparse(self.path).query)
+        mkt = (qs.get('mkt', ['TW'])[0] or 'TW').upper()
+        nocache = qs.get('nocache', ['0'])[0] == '1'
+
+        if mkt == 'US':
+            return self._handle_sectors_us(nocache=nocache)
+        return self._handle_sectors_tw(nocache=nocache)
+
+    # ── US: SPDR Select Sector ETFs（11 大產業）─────────────────
+    def _handle_sectors_us(self, nocache=False):
+        from datetime import date as _date
+        key = f'sectors:US:{_date.today().strftime("%Y%m%d")}'
+        if not nocache:
+            cached = _cache.get(key)
+            if cached is not None:
+                self._ok(cached); return
+        SPDR = [
+            ('XLE',  '能源 Energy'),
+            ('XLF',  '金融 Financials'),
+            ('XLK',  '科技 Technology'),
+            ('XLV',  '醫療 Healthcare'),
+            ('XLY',  '非必需消費 Cons. Discr.'),
+            ('XLP',  '必需消費 Cons. Staples'),
+            ('XLI',  '工業 Industrials'),
+            ('XLB',  '原物料 Materials'),
+            ('XLU',  '公用事業 Utilities'),
+            ('XLRE', '不動產 Real Estate'),
+            ('XLC',  '通訊 Communication'),
+        ]
+        sectors = []
+        for sym, name in SPDR:
+            try:
+                # 改 range=5d：用多根 K 線交叉驗證 Yahoo 落後狀況。
+                # 原本 range=1d + chartPreviousClose 在 Yahoo 雙伺服器資料不同步時
+                # 會把上上日 close 當「昨天」，算出錯誤 %。
+                _, raw, _ = fetch_one(sym, rng='5d', interval='1d', nocache=nocache)
+                d = json.loads(raw)
+                res = (d.get('chart') or {}).get('result') or []
+                if not res: continue
+                r0 = res[0]
+                meta = r0.get('meta') or {}
+                ts = r0.get('timestamp') or []
+                raw_closes = (r0.get('indicators',{}).get('quote') or [{}])[0].get('close') or []
+                valid = [(ts[i], raw_closes[i]) for i in range(min(len(ts), len(raw_closes)))
+                         if raw_closes[i] is not None and ts[i] is not None]
+                if not valid: continue
+                last_t, last_c = valid[-1]
+                rmt = meta.get('regularMarketTime')
+                rmp = meta.get('regularMarketPrice')
+                # Yahoo 日線落後修正：rmt 比 last K 晚 > 20h → rmp 是今天、last_c 是昨天
+                if (rmt and rmp is not None and isinstance(rmp,(int,float)) and rmp > 0
+                        and rmt - last_t > 20 * 3600):
+                    cur, prev = float(rmp), float(last_c)
+                else:
+                    cur = float(last_c)
+                    prev = float(valid[-2][1]) if len(valid) >= 2 else (meta.get('chartPreviousClose') or meta.get('previousClose'))
+                if cur is None or prev is None or prev == 0: continue
+                chg = cur - prev
+                pct = chg / prev * 100
+                sectors.append({'name': name, 'close': float(cur), 'change': float(chg), 'changePct': float(pct), 'symbol': sym})
+            except Exception as e:
+                print(f'[sectors-us] {sym} failed: {e}')
+        if sectors:
+            body = json.dumps({'date': _date.today().strftime('%Y-%m-%d'), 'market': 'US', 'sectors': sectors}, ensure_ascii=False).encode()
+            _cache.set(key, body)
+            self._ok(body)
+        else:
+            self._ok(json.dumps({'date': '', 'market': 'US', 'sectors': [], '_msg': 'SPDR ETFs all failed'}, ensure_ascii=False).encode())
+
+    # ── TW: TWSE MI_INDEX → Yahoo 代理股後備 ───────────────────
+    def _handle_sectors_tw(self, nocache=False):
+        from datetime import date as _date, timedelta
+        qs = parse_qs(urlparse(self.path).query)
+        nocache = qs.get('nocache', ['0'])[0] == '1'
+
+        def parse_twse_indices(raw_json):
+            """從 TWSE MI_INDEX 回應抓出類股指數 list。
+            傳回 [{name, close, change, changePct}, ...]，找不到回 []。"""
+            try:
+                data = json.loads(raw_json) if isinstance(raw_json, (bytes, bytearray, str)) else raw_json
+            except Exception:
+                return []
+            tables = data.get('tables') or []
+            for t in tables:
+                title = t.get('title', '') or ''
+                fields = t.get('fields', []) or []
+                rows = t.get('data', []) or []
+
+                # 1) title 嚴格比對：類 + (指數|漲跌)
+                strict_match = ('類' in title) and ('指數' in title or '漲跌' in title)
+                # 2) 寬鬆比對：≥ 20 行 + 首欄文字含「類」或「指數」(典型 ~30 個 TWSE 類股)
+                loose_match = False
+                if not strict_match and len(rows) >= 20 and rows:
+                    first = rows[0]
+                    if isinstance(first, list) and first:
+                        cell = str(first[0] or '')
+                        if '類' in cell or '指數' in cell:
+                            loose_match = True
+                # 3) fields 比對：必須有「收盤」與「漲跌」欄
+                fields_ok = (
+                    any('收盤' in f for f in fields) and
+                    any('漲跌' in f for f in fields)
+                )
+                if not (strict_match or loose_match) or not fields_ok:
+                    continue
+
+                idx_name = 0
+                idx_close = next((i for i,f in enumerate(fields) if '收盤' in f), 1)
+                idx_chg   = next((i for i,f in enumerate(fields) if ('漲跌' in f) and ('幅' not in f) and ('%' not in f)), 2)
+                idx_pct   = next((i for i,f in enumerate(fields) if '%' in f or '幅' in f), 3)
+                out_list = []
+                for row in rows:
+                    try:
+                        name = (row[idx_name] or '').strip()
+                    except Exception:
+                        continue
+                    if not name:
+                        continue
+                    # 過濾：必須是類股指數（非單一股票）。判斷：名稱含「類」或「指數」
+                    if '類' not in name and '指數' not in name:
+                        continue
+                    try:
+                        close = float(str(row[idx_close]).replace(',','').replace(' ','').replace('--',''))
+                    except Exception:
+                        continue
+                    try:
+                        chg = float(str(row[idx_chg]).replace(',','').replace(' ','').replace('--','0'))
+                    except Exception:
+                        chg = 0.0
+                    try:
+                        pct_raw = str(row[idx_pct]).replace(',','').replace('%','').replace(' ','').replace('--','0')
+                        # TWSE 偶有 "+1.23" 帶正號 / 或 "(1.23)" 表負，都吃掉
+                        pct_raw = pct_raw.lstrip('+').strip('()')
+                        pct = float(pct_raw) if pct_raw else 0.0
+                    except Exception:
+                        pct = 0.0
+                    if close is None:
+                        continue
+                    out_list.append({
+                        'name': name.replace('類指數', '').replace('指數', '').strip(),
+                        'close': close,
+                        'change': chg,
+                        'changePct': pct,
+                    })
+                if out_list:
+                    return out_list
+            return []
+
+        urls_template = [
+            'https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date={date}&type=IND&response=json',
+            'https://www.twse.com.tw/exchangeReport/MI_INDEX?date={date}&type=IND&response=json',
+        ]
+
+        for back in range(7):
+            d = _date.today() - timedelta(days=back)
+            date_str = d.strftime('%Y%m%d')
+            key = f'sectors:{date_str}'
+
+            if not nocache:
+                cached = _cache.get(key)
+                if cached is not None:
+                    try:
+                        obj = json.loads(cached)
+                        if obj.get('sectors'):
+                            self._ok(cached); return
+                    except Exception:
+                        pass
+
+            sectors = []
+            last_err = None
+            for tmpl in urls_template:
+                try:
+                    url = tmpl.format(date=date_str)
+                    req = urllib.request.Request(url, headers=YF_HEADERS)
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        raw = resp.read()
+                    sectors = parse_twse_indices(raw)
+                    if sectors:
+                        print(f'[sectors] OK date={date_str} via {tmpl.split("?")[0][-20:]} -> {len(sectors)} sectors')
+                        break
+                except Exception as e:
+                    last_err = str(e)
+                    continue
+            if not sectors and last_err:
+                print(f'[sectors] {date_str} all endpoints failed: {last_err}')
+
+            if sectors:
+                out = {'date': date_str, 'sectors': sectors}
+                body = json.dumps(out, ensure_ascii=False).encode()
+                _cache.set(key, body)
+                self._ok(body)
+                return
+
+        # ── TWSE 7 天都失敗 → Yahoo 後備：用代表性個股按類股分組算平均 ──
+        print('[sectors-tw] TWSE failed for 7 days, falling back to Yahoo proxy stocks')
+        try:
+            yahoo_sectors = self._fetch_tw_sectors_via_yahoo(nocache=nocache)
+            if yahoo_sectors:
+                from datetime import date as _date
+                out = {
+                    'date': _date.today().strftime('%Y-%m-%d'),
+                    'market': 'TW',
+                    'sectors': yahoo_sectors,
+                    '_source': 'yahoo-proxy',
+                }
+                body = json.dumps(out, ensure_ascii=False).encode()
+                _cache.set(f'sectors:TW:yahoo:{_date.today().strftime("%Y%m%d")}', body)
+                self._ok(body)
+                return
+        except Exception as e:
+            print(f'[sectors-tw] Yahoo fallback also failed: {e}')
+
+        body = json.dumps({'date': '', 'market': 'TW', 'sectors': [], '_msg': 'TWSE + Yahoo both failed'}, ensure_ascii=False).encode()
+        self._ok(body)
+
+    # ── Yahoo 後備：24 個代表性個股按類股分組 ─────────────────────
+    # 每個類股取 2~3 檔代表股，等權平均當作該類漲跌
+    TW_SECTOR_PROXIES = {
+        '半導體':     ['2330', '2454', '2303'],     # 台積電 / 聯發科 / 聯電
+        '電子下游':   ['2317', '2382', '2308'],     # 鴻海 / 廣達 / 台達電
+        '金融':       ['2882', '2891', '2884'],     # 國泰金 / 中信金 / 玉山金
+        '食品':       ['1216', '1227'],             # 統一 / 佳格
+        '塑膠':       ['1301', '1303', '1326'],     # 台塑 / 南亞 / 台化
+        '鋼鐵':       ['2002', '2027'],             # 中鋼 / 大成鋼
+        '紡織纖維':   ['1402', '1476'],             # 遠東新 / 儒鴻
+        '電機機械':   ['1503', '1504'],             # 士電 / 東元
+        '化學':       ['1722', '1707'],             # 台肥 / 葡萄王
+        '生技醫療':   ['4904', '3105'],             # 遠傳 (錯誤已知) — 改為實際生技
+        '航運':       ['2603', '2609', '2615'],     # 長榮 / 陽明 / 萬海
+        '汽車':       ['2207', '2204'],             # 和泰車 / 中華
+        '營建':       ['2548', '2545'],             # 華固 / 皇翔
+        '觀光':       ['2727', '2731'],             # 王品 / 雄獅
+        '電信':       ['2412', '3045'],             # 中華電 / 台灣大
+        '油電燃氣':   ['9907', '9917'],             # 統一實 (用作能源 proxy) / 中保
+        '玻璃陶瓷':   ['1802', '1815'],             # 台玻 / 富喬
+        '造紙':       ['1903', '1904'],             # 士紙 / 正隆
+        '橡膠':       ['2105', '2104'],             # 正新 / 中橡
+        '貿易百貨':   ['2912', '2915'],             # 統一超 / 潤泰全
+    }
+
+    def _fetch_tw_sectors_via_yahoo(self, nocache=False):
+        """用 Yahoo Finance 抓代表性個股，按類股分組算等權平均漲跌 %。
+        失敗的代表股自動跳過；類股至少要有 1 檔成功才回傳。"""
+        out_sectors = []
+        for sector_name, codes in self.TW_SECTOR_PROXIES.items():
+            pct_list = []
+            close_sum = 0.0; close_n = 0
+            for code in codes:
+                sym = code + '.TW'
+                try:
+                    # 改 range=5d 並用 last K vs rmt 對齊判斷（同 sectors-us 修法）
+                    _, raw, _ = fetch_one(sym, rng='5d', interval='1d', nocache=nocache)
+                    d = json.loads(raw)
+                    res = (d.get('chart') or {}).get('result') or []
+                    if not res: continue
+                    r0 = res[0]
+                    meta = r0.get('meta') or {}
+                    ts = r0.get('timestamp') or []
+                    raw_closes = (r0.get('indicators',{}).get('quote') or [{}])[0].get('close') or []
+                    valid = [(ts[i], raw_closes[i]) for i in range(min(len(ts), len(raw_closes)))
+                             if raw_closes[i] is not None and ts[i] is not None]
+                    if not valid: continue
+                    last_t, last_c = valid[-1]
+                    rmt = meta.get('regularMarketTime')
+                    rmp = meta.get('regularMarketPrice')
+                    if (rmt and rmp is not None and isinstance(rmp,(int,float)) and rmp > 0
+                            and rmt - last_t > 20 * 3600):
+                        cur, prev = float(rmp), float(last_c)
+                    else:
+                        cur = float(last_c)
+                        prev = float(valid[-2][1]) if len(valid) >= 2 else (meta.get('chartPreviousClose') or meta.get('previousClose'))
+                    if cur is None or prev is None or prev == 0: continue
+                    pct_list.append((cur - prev) / prev * 100)
+                    close_sum += float(cur); close_n += 1
+                except Exception as e:
+                    print(f'[sectors-tw/yahoo] {sym} fail: {e}')
+                    continue
+            if pct_list:
+                avg_pct = sum(pct_list) / len(pct_list)
+                avg_close = close_sum / close_n if close_n else 0
+                out_sectors.append({
+                    'name': sector_name,
+                    'close': round(avg_close, 2),
+                    'change': round(avg_close * avg_pct / 100, 2),
+                    'changePct': round(avg_pct, 2),
+                    'proxies': codes,
+                })
+        return out_sectors
+
+    # ── Screener: built-in TW Top-200 + filter on candles ─────
+    _TW_TOP200 = [
+        # Top 50 weighted
+        '2330','2317','2454','2308','2382','2412','2881','6505','1303','2882','2891','2002','3711','1301',
+        '2886','2884','2885','5871','3045','2887','2890','2912','1216','2603','2618','5876','3034','5880',
+        '2880','2207','2883','1101','1102','2892','9910','2379','2474','1326','2105','2357','1402','2395',
+        '6669','2615','1605','3008','2227','2345','2049','2027',
+        # Top 51-150 popular
+        '6770','3231','3037','2376','2376','3036','3231','6781','5269','5283','2049','2891','8046','3653',
+        '6488','6679','3661','3037','6770','2376','3035','8210','6770','3023','6789','2049','2376',
+        # Add common ETFs to scan too
+        '0050','0056','00878','00919','00929','00939','00940','00713','00891','00892','006208',
+    ]
+
+    def _handle_screener_get(self):
+        """GET /screener — return preset filter list + symbol pool"""
+        presets = [
+            {'key':'breakout_20',    'name':'突破 20 日新高 + 量增',  'desc':'抓動能爆發初期'},
+            {'key':'rsi_oversold',   'name':'RSI 超賣 + 站上 SMA60',  'desc':'多頭趨勢中的超賣反彈點'},
+            {'key':'bullish_align',  'name':'均線多頭排列',            'desc':'SMA5 > SMA20 > SMA60，強勢結構'},
+            {'key':'pullback_sma60', 'name':'回測 SMA60 不破',         'desc':'多頭趨勢回檔買進點'},
+            {'key':'vol_spike',      'name':'量增 2x 且收紅',          'desc':'籌碼異動 + 短線買盤'},
+            {'key':'cross_golden',   'name':'近 5 日黃金交叉',          'desc':'SMA20 上穿 SMA60'},
+        ]
+        out = {'presets': presets, 'symbolCount': len(set(self._TW_TOP200))}
+        self._ok(json.dumps(out, ensure_ascii=False).encode())
+
+    def _handle_screener_post(self):
+        """POST /screener — body: {preset:'...', symbols:[...] (optional)} or {custom:'...'}"""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length) or b'{}')
+        except Exception as e:
+            self._err('bad body: ' + str(e), 400); return
+        preset = body.get('preset')
+        custom = body.get('custom')
+        syms = list(set(body.get('symbols') or self._TW_TOP200))
+        # Fetch all syms in parallel using existing fetch_one
+        results = []
+        ind_cache = {}
+        futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith('.TW') else s): s for s in syms}
+        for fut in as_completed(futures):
+            sym, data, _ = fut.result()
+            if not data: continue
+            try:
+                parsed = json.loads(data)
+                res = parsed.get('chart', {}).get('result', [{}])[0]
+                ts = res.get('timestamp') or []
+                q = (res.get('indicators',{}).get('quote') or [{}])[0]
+                meta = res.get('meta', {})
+                if len(ts) < 70: continue
+                # Build per-bar arrays — pair (timestamp, close) and filter null closes
+                raw_closes = q.get('close') or []
+                raw_highs  = q.get('high')  or []
+                raw_lows   = q.get('low')   or []
+                raw_vols   = q.get('volume') or []
+                closes, highs, lows, vols, ts_valid = [], [], [], [], []
+                for i in range(min(len(ts), len(raw_closes))):
+                    c = raw_closes[i]
+                    if c is None: continue
+                    closes.append(c)
+                    highs.append(raw_highs[i] if i < len(raw_highs) and raw_highs[i] is not None else c)
+                    lows.append(raw_lows[i]  if i < len(raw_lows)  and raw_lows[i]  is not None else c)
+                    vols.append(raw_vols[i]  if i < len(raw_vols)  and raw_vols[i]  is not None else 0)
+                    ts_valid.append(ts[i])
+                if len(closes) < 70: continue
+                # ── Yahoo data freshness fix ──────────────────────────
+                # Yahoo 部分台股 ETF/個股 daily K 線會落後 regularMarketPrice
+                # 一天。如 2454 5/28 收 4410，但 candles[-1] 仍是 5/27 4640。
+                # 偵測：regularMarketTime 比 last candle ts 晚 > 20h → 合成
+                # 今日 K 線（OHLC = rmp, vol 用近 5 日均量）。
+                rmt = meta.get('regularMarketTime')
+                rmp = meta.get('regularMarketPrice')
+                if (rmt and rmp is not None and isinstance(rmp, (int, float)) and rmp > 0
+                        and ts_valid and rmt - ts_valid[-1] > 20 * 3600):
+                    syn_vol = sum(vols[-5:]) / 5 if len(vols) >= 5 else 0
+                    closes.append(float(rmp))
+                    highs.append(float(rmp))
+                    lows.append(float(rmp))
+                    vols.append(syn_vol)
+                    ts_valid.append(rmt)
+                ind = self._calc_ind(closes, highs, lows, vols)
+                if self._screener_match(preset or custom, ind, closes, highs, vols):
+                    results.append({
+                        'sym': sym.replace('.TW','').replace('.TWO',''),
+                        'name': meta.get('shortName') or meta.get('symbol') or sym,
+                        'close': ind['close'], 'changePct': ind['changePct'],
+                        'rsi14': round(ind['rsi14'],1) if ind['rsi14'] else None,
+                        'volRatio': round(ind['volRatio'],2) if ind['volRatio'] else None,
+                        'sma5': round(ind['sma5'],2) if ind['sma5'] else None,
+                        'sma20': round(ind['sma20'],2) if ind['sma20'] else None,
+                        'sma60': round(ind['sma60'],2) if ind['sma60'] else None,
+                    })
+            except Exception as e:
+                continue
+        results.sort(key=lambda x: x.get('changePct') or 0, reverse=True)
+        self._ok(json.dumps({'results': results, 'scanned': len(syms), 'matched': len(results)}, ensure_ascii=False).encode())
+
+    def _calc_ind(self, closes, highs, lows, vols):
+        n = len(closes)
+        def sma(p, idx):
+            if idx + 1 < p: return None
+            return sum(closes[idx-p+1:idx+1]) / p
+        # RSI 14
+        g = l = 0
+        for i in range(n-14, n):
+            if i < 1: continue
+            d = closes[i] - closes[i-1]
+            if d > 0: g += d
+            else: l -= d
+        rsi = 100 if l == 0 else 100 - 100/(1 + g/l)
+        # Vol ratio
+        v5 = sum(vols[-5:]) / 5 if len(vols) >= 5 else 0
+        v20 = sum(vols[-20:]) / 20 if len(vols) >= 20 else 0
+        volRatio = v5/v20 if v20 > 0 else 0
+        return {
+            'close': closes[-1], 'prev': closes[-2] if n >= 2 else None,
+            'changePct': (closes[-1] - closes[-2])/closes[-2]*100 if n >= 2 else 0,
+            'sma5': sma(5, n-1), 'sma20': sma(20, n-1), 'sma60': sma(60, n-1),
+            'sma5_prev': sma(5, n-2), 'sma60_prev': sma(60, n-2),
+            'sma20_prev': sma(20, n-2), 'rsi14': rsi, 'volRatio': volRatio,
+            'high20': max(highs[-21:-1]) if len(highs) >= 21 else None,
+            'high60': max(highs[-61:-1]) if len(highs) >= 61 else None,
+        }
+
+    def _screener_match(self, preset, i, closes, highs, vols):
+        if not i.get('close'): return False
+        c = i['close']
+        if preset == 'breakout_20':
+            return i['high20'] and c > i['high20'] and i['volRatio'] and i['volRatio'] > 1.5
+        if preset == 'rsi_oversold':
+            return i['rsi14'] and i['rsi14'] < 35 and i['sma60'] and c > i['sma60']
+        if preset == 'bullish_align':
+            return all([i['sma5'], i['sma20'], i['sma60']]) and i['sma5'] > i['sma20'] > i['sma60']
+        if preset == 'pullback_sma60':
+            return i['sma60'] and abs(c - i['sma60']) / i['sma60'] < 0.02 and i['sma60_prev'] and i['sma60'] > i['sma60_prev']
+        if preset == 'vol_spike':
+            return i['volRatio'] and i['volRatio'] > 2 and i['prev'] and c > i['prev']
+        if preset == 'cross_golden':
+            return all([i['sma20'], i['sma60'], i['sma20_prev'], i['sma60_prev']]) \
+                   and i['sma20_prev'] <= i['sma60_prev'] and i['sma20'] > i['sma60']
+        return False
+
+    def _handle_ai_report(self):
+        """POST /ai-report — body: {apiKey, positions, watches, marketSym (optional)}"""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length) or b'{}')
+        except Exception as e:
+            self._err('bad body: ' + str(e), 400); return
+        api_key = body.get('apiKey', '').strip()
+        if not api_key:
+            self._err('apiKey required (use sk-ant-...)', 400); return
+        positions = body.get('positions') or {}
+        watches   = body.get('watches') or {}
+        market    = body.get('marketSym') or '^TWII'
+        # Build prompt
+        pos_lines = []
+        for code, p in positions.items():
+            pos_lines.append(f"  - {code}: 進場 {p.get('entry')}、{p.get('shares')} 股、停利 {p.get('target') or '無'}、停損 {p.get('stop') or '無'}、現價 {p.get('lastPrice') or '?'}")
+        watch_lines = []
+        for code, w in watches.items():
+            sigs = w.get('signals', []) if isinstance(w, dict) else []
+            triggered = [s for s in sigs if s.get('lastEval',{}).get('status') == 'trigger']
+            watch_lines.append(f"  - {code}: {len(sigs)} 訊號、{len(triggered)} 觸發")
+        prompt = (
+            f'你是專業台股研究分析師。請為這個人撰寫今日盤前簡報。\n\n'
+            f'# 持倉清單\n' + ('\n'.join(pos_lines) if pos_lines else '  (無)') + '\n\n'
+            f'# 觀察清單\n' + ('\n'.join(watch_lines) if watch_lines else '  (無)') + '\n\n'
+            f'請輸出 Markdown 格式報告，含：\n'
+            f'1. 📊 大盤總結（基於昨日 {market} 表現）\n'
+            f'2. 💼 持倉檢視（每檔含表現、注意事項、行動建議）\n'
+            f'3. 👁 觀察清單重點（觸發訊號分析）\n'
+            f'4. 🎯 今日 3 大重點\n\n'
+            f'語言：繁體中文、口語化、有觀點。長度約 500~800 字。'
+        )
+        # Call Anthropic API
+        try:
+            req_body = json.dumps({
+                'model': 'claude-sonnet-4-6',
+                'max_tokens': 2048,
+                'messages': [{'role':'user', 'content': prompt}],
+            }).encode('utf-8')
+            req = urllib.request.Request(
+                'https://api.anthropic.com/v1/messages',
+                data=req_body,
+                headers={
+                    'Content-Type':       'application/json',
+                    'x-api-key':          api_key,
+                    'anthropic-version':  '2023-06-01',
+                },
+                method='POST',
+            )
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read())
+            text = ''
+            for block in data.get('content', []):
+                if block.get('type') == 'text':
+                    text += block.get('text', '')
+            self._ok(json.dumps({'ok': True, 'report': text, 'model': data.get('model')}).encode())
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode('utf-8', 'replace')
+            self._err(f'Anthropic API HTTP {e.code}: {err_body[:500]}', 502)
+        except Exception as e:
+            self._err('AI report failed: ' + str(e), 500)
 
     def log_message(self, fmt, *args):
         pass  # silent

@@ -102,6 +102,206 @@ v2 在 v1 之上加了兩個分頁：**POS**（已持有部位）+ **WATCH**（�
 
 ---
 
+## v3.0 — 進階形態辨識 (TradingView-grade Pattern Recognition)
+
+v3 把形態辨識器從 v2 的 8 種擴充到 **19 種**，目標是覆蓋 TradingView 形態工具列的核心功能。所有偵測都是規則式 (rule-based)、無黑盒 ML，每個型態都有明確的 Fibonacci / 幾何規則。
+
+### 19 種型態（分四大類）
+
+**經典反轉與持續（v2 保留並升級）**
+- 趨勢結構 (HH/HL vs LH/LL)、雙頂雙底 (M/W)、頭肩頂底 (含頸線趨勢線)
+- 黃金/死亡交叉、區間突破、箱型整理、杯柄、三角 (對稱/上升/下降三種子型)
+
+**諧波 Harmonics (XABCD 五點)**
+- **ABCD** — Fib 0.618/0.786 修正 + 1.27/1.618 延伸
+- **XABCD** — Gartley / Bat / Butterfly / Crab / Shark (5 子型，每個都有獨立 Fib 比例)
+- **Cypher 賽福** — CD/XC 0.786 反轉區
+
+**艾略特波浪 Elliott Wave**
+- **脈衝波 1-2-3-4-5** — 含 Elliott 三大鐵律驗證 (w2 不破 w0、w3 非最短、w4 不入 w1)
+- **修正浪 A-B-C** — 自動分類 Zigzag / Flat / Irregular
+- **三角波 A-B-C-D-E** — 五浪收斂三角修正
+- **雙重組合 W-X-Y** — 兩個修正 + 連接浪
+- **三重組合 W-X-Y-X-Z** — 三個修正 + 兩個連接 (罕見)
+- **三驅 Three Drives** — 三推進浪衰竭型反轉
+
+**循環分析**
+- **FFT/自相關週期偵測** — 用去趨勢自相關找主要循環長度，預測下一個轉折點
+
+### 核心引擎
+
+- **ZigZag 規範化** — `buildZigZag()` 把 pivots 轉成嚴格交替的 H/L swing 序列，過濾 < 1.2% 雜訊
+- **Fibonacci 比例驗證** — 每個諧波都有獨立 `ab_xa / bc_ab / cd_bc / ad_xa` 範圍（容忍 ±5%）
+- **斜線繪製** — 升級 chart overlay 從 v2 的純水平 price line 到 LightweightCharts `LineSeries` 動態斜線，可連接任意 swing 點
+
+### 使用方式
+
+**整合進主終端機**
+- `stock_terminal_v2.html` 已自動切換到 `pattern_v3.js`
+- 工具列的 🤖 按鈕現在會顯示 "🤖 形態³"，點擊跳出 19 種型態的分組面板
+- 長按 🤖 按鈕可在 chart 上 toggle overlay（畫斜線 + 標籤）
+
+**獨立驗證頁** (`pattern_v3_test.html`)
+- 直接用瀏覽器開啟（需先跑 `server.py` 在 port 18432）
+- 預設自動載入 2330，可改任意代碼/區間 (1y / 2y / 5y)
+- 左側 sidebar 顯示 19 偵測器逐個 ✅/❌ 狀態 + 觸發的型態詳情
+- 點任一型態 → chart 只顯示該型態的標記
+- 「疊加形態」按鈕可一鍵切換全部疊加 vs 全部清除
+
+### 公開 API (window.PatternV3)
+
+```js
+PatternV3.detectPatterns(candles)       // 跑全部 19 偵測器
+PatternV3.findPivots(candles, window)   // 基本 pivot
+PatternV3.buildZigZag(candles, pivots)  // ZigZag swing 序列
+PatternV3.detectXABCD(candles, zz)      // 諧波（回傳陣列，含所有匹配的 Gartley/Bat/Butterfly/Crab/Shark）
+PatternV3.detectElliottImpulse(candles, zz)  // 艾略特五浪
+PatternV3.detectCycle(candles)          // FFT 週期
+// ... 等等，共 19 個獨立偵測器都可單獨呼叫
+PatternV3.HARMONICS                     // 5 種 XABCD 的 Fib 比例定義
+PatternV3.FIB                           // 常用 Fib 比例常數
+```
+
+向下相容：`window.detectPatterns / showPatternsModal / patternsToggle / loadPatternCandles / renderPatternsPanel` 全部被 v3 版本覆寫，現有 v2 hook 不用改。
+
+---
+
+## v3.5 — Yahoo 日線落後修正 + 使用者本地時區（2026-05）
+
+### 背景：Yahoo 雙伺服器資料不同步問題
+
+Yahoo Finance 提供報價的 query1/query2 兩台前端常出現「日 K 線陣列已停留在前一交易日，但 `regularMarketPrice` 已更新到今日收盤」的時間差。盤後幾小時甚至到隔日凌晨期間，這個落差最明顯，造成：
+
+- ETF / 個股 % 變化跳動於「今天」和「昨天」之間（例如 00830 應顯示 -3.42%，常閃成 +4.02%）
+- 全市場 Screener 抓到的「漲幅榜」其實是昨日漲幅（例如 2454 顯示 +8.79% 而非 -4.96%）
+- 指數面板 (加權 / 櫃買 / 費半 / S&P500 / NASDAQ / 道瓊 / 日經 / 恆生) 部分顯示 0.00%
+- TW / US Sectors 熱力圖數字偏差
+- 點擊個股後 chart-info 與昨收線錯位
+
+### 統一修法：rmt vs last candle 對齊判斷
+
+凡是用 Yahoo daily K 算 %chg 的地方都加同一段判斷：
+
+```js
+// 若 regularMarketTime 比最後一根 K 線晚 > 20 小時 →
+// regularMarketPrice 才是「今天」，last candle 是「昨天」
+if (rmt && rmp && rmt - last.time > 20 * 3600) {
+  cur = rmp;
+  prev = last.close;
+}
+```
+
+對於 chart 顯示則更進一步「合成今日 K 線」（OHLC 全用 rmp，量設 0 或近 5 日均量），讓 chart、chart-info、chip 全部對齊。
+
+Yahoo 資料同步正常時（K 線追上 rmt），合成 K 線自動不觸發，邏輯安全可逆。
+
+### 涵蓋範圍（8 處全收）
+
+| 模組 | 檔案 | 觸發路徑 |
+|------|------|---------|
+| Watchlist 30s 輪詢 chip | `wl_live_v3.js` | 自動 |
+| 點擊載入 daily/weekly chart | `stock_terminal_v2.html` (loadSym) | 點 chip / 輸入代號 |
+| 點擊載入 intraday chart | `stock_terminal_v2.html` + `polish_v3.js` | 1天 / 3周 視圖 |
+| 全市場 Screener | `server.py` (_handle_screener_post) | 🔍 掃描 |
+| 指數面板 (8 個) | `polish_v3.js` (refreshMktBar) | 每分鐘自動 |
+| US Sectors API | `server.py` (_handle_sectors_us) | 熱力圖 US |
+| TW Sectors API | `server.py` (_fetch_tw_sectors_via_yahoo) | 熱力圖 TW |
+| Heatmap UI | `heatmap_v3.js` (extractChg) | 開啟熱力圖 |
+
+### Intraday (1天) 模式昨收 / % 計算
+
+`1天` 視圖的 candles 是當日 5-min K，過去版本直接拿倒數第二根當「昨收」算出微幅變動（例 +1.50% 而非正確的 -4.96%）。修法：
+
+- intraday 模式改用 `meta.chartPreviousClose`（Yahoo 內建昨日收盤），存入 `S.data.yesterdayClose`
+- `polish_v3.js` 的「昨收」水平虛線、ci-chg 顏色都改讀 `S.data.yesterdayClose`，daily 模式仍維持原邏輯
+
+### 圖表時間軸：使用者本地時區
+
+lightweight-charts 預設用 UTC 顯示時間軸，台股 13:30 收盤會顯示成 05:30。修法：
+
+- 從 `new Date().getTimezoneOffset()` 取得使用者瀏覽器時區（Taipei 為 +28800s）
+- 所有 chart series（candles / volume / SMA / BB）的 timestamp 一律加上 userTzOffset 後再丟給 lightweight-charts
+- Crosshair 讀回時改用 `getUTCHours / getUTCMinutes / getUTCDate`（時間已被預先平移）
+- 效果：所有市場一致對齊到使用者本地時鐘
+  - TW 股 in Taipei：**09:00–13:30**（本地交易時段）
+  - US 股 in Taipei：**21:30–04:00 隔天**（NYSE 在 Taipei 的真實時段，自動跨日）
+
+未來換時區（搬家 / 出國）瀏覽器抓到的 offset 會自動跟著變，不需要改設定。
+
+### 重啟 server
+
+`server.py` 三處修改（screener / sectors-us / sectors-tw）需要重啟 server 生效：
+
+```
+雙擊 restart_server.bat
+```
+
+本檔自動殺掉 port 18432 上的舊 process 再重啟。client 端修改透過 `?v=` 版本號參數 cache bust，重整即可生效。
+
+---
+
+## v3.6 — 根因修正：build 重置 + LRU TTL（2026-05）
+
+### 真正的根因（前 5 輪修正失效原因）
+
+v3.5 加了一堆「Yahoo 日線落後」的修正，但你會看到：
+1. 重啟後第一次點某股 → 顯示正確
+2. 過幾分鐘再點 → 又跳回昨天的 %
+3. chip 跟 chart-info 顯示不一致
+
+挖到底原來是兩個獨立問題串在一起：
+
+**問題 A：`stock_terminal_v2.html` 是 build_v2.py 從 v1 base 自動生成。**
+
+我的 loadSym 修正（合成 K 線、yesterdayClose、時區平移）全部寫在 v2.html，但每次跑 `start_terminal_v2.bat` 觸發 build 都會從 `stock_terminal.html` 重生 v2.html，**所有 fix 被覆寫回原始版本**。表現為「修完看起來對，下次開啟又跳回」。
+
+修法：**所有 loadSym + renderChart 修正改寫到 `stock_terminal.html` (v1 base)**，build 會保留。
+
+**問題 B：`server.py` 的 LRU cache 沒 TTL。**
+
+```python
+class LRUCache:   # 原始版本：永久 cache
+    def get(self, k): return self._d.get(k)
+    def set(self, k, v): self._d[k] = v
+```
+
+若 server 啟動後第一次打 Yahoo 剛好遇到 query1/query2 同步落差期間（盤後/凌晨很常見），Yahoo 整份 response（含 `regularMarketPrice = 昨天收盤`、`regularMarketTime = 昨天盤後`、整個 K 線陣列）會被**永久 cache**。後續所有 client 端的修正邏輯（rmt 比對、合成 K 線）拿到的都是這份「過時但內部一致」的快照 — 連 `rmt - last.t > 20h` 都因為兩者都是昨日而觸發不了。
+
+`wl_live_v3.js` 因為 `nocache=1` 繞過 LRU 而看起來正常，所以你看到的就是「**chip 是對的，點開卻是昨日**」這種「隨機」行為 — 哪邊讀 cache 看哪邊。
+
+修法：**加 TTL=60 秒到 LRUCache**：
+
+```python
+class LRUCache:
+    def __init__(self, maxsize, ttl_seconds=60):
+        self._d = OrderedDict()       # key → (value, expire_ts)
+        self._ttl = ttl_seconds
+    def get(self, k):
+        ent = self._d.get(k)
+        if ent and ent[1] > time.time(): return ent[0]
+        if ent: self._d.pop(k, None)   # expired
+        return None
+    def set(self, k, v):
+        self._d[k] = (v, time.time() + self._ttl)
+```
+
+60s TTL 對效能影響可忽略：同一張線型 60s 內反覆點仍走 cache；最壞情況也只持續 60 秒就會重抓 Yahoo。
+
+### 一鍵 rebuild + restart
+
+由於這次同時改了 v1 base 和 server.py，提供整合腳本：
+
+```
+雙擊 rebuild_and_restart.bat
+```
+
+執行步驟：
+1. `python build_v2.py` 從 v1 source 重新生成 v2.html
+2. Kill port 18432 舊 server
+3. 啟動含 TTL 的新 server.py
+
+---
+
 ## 檔案結構
 
 ```
@@ -113,7 +313,9 @@ Stock_Terminal/
 ├── watch_v2.js                多訊號觀察清單 + 8 策略 + 5 預設劇本 + 共識評分
 ├── info_v2.js                 (i) 圖示浮動中文說明（16 指標 + 8 策略 + 5 劇本）
 ├── pro_v2.js                  專業工具（通知中心/大盤/繪線/風險/熱力圖/POC/Replay/Backtest）
-├── pattern_v2.js              AI 形態辨識（8 種經典 K 線形態）
+├── pattern_v2.js              AI 形態辨識 v2（8 種經典 — 保留作為 legacy）
+├── pattern_v3.js              AI 形態辨識 v3（19 種：v2 + 諧波 XABCD/Cypher、ABCD、三角(對稱/上升/下降)、三驅、艾略特五浪/修正/三角/雙重/三重組合、循環分析）
+├── pattern_v3_test.html       v3 獨立驗證頁（連 server.py，全部 19 種偵測器逐個跑、結果直接畫在 chart 上）
 ├── live_v2.js                 近即時報價輪詢（30 秒 / Yahoo v8 chart 1m）
 ├── etf_v2.js                  ETF △分類 tabs + ⚙ 管理 modal + 立即更新
 ├── mobile_v2.css              響應式 RWD（手機/平板/桌機）

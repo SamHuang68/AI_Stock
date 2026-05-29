@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
-<title>Stock Terminal v2.0 — Position, Watch & Signals</title>
+<title>Stock Terminal v3.5 - PLAN PDF I/O History Position Alert</title>
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -205,12 +205,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
-<link rel="stylesheet" href="mobile_v2.css?v=1779015828">
+<link rel="stylesheet" href="mobile_v2.css?v=1779985208">
 </head>
 <body>
 <div id="app">
   <div id="topbar">
-    <span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#67E8F9;font-size:9px;letter-spacing:1px">v2.0</span></span>
+    <span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v3.5</span></span>
     <div class="sep"></div>
     <div style="display:flex;align-items:center;gap:4px">
       <button class="mktbtn on" id="btn-tw" onclick="setMkt('TW')">🇹🇼 TW</button>
@@ -247,6 +247,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
         <button class="rtab" onclick="setTab('research')">RESEARCH</button>
         <button class="rtab" id="tab-pos" onclick="setTab('position')">POS</button>
         <button class="rtab" id="tab-watch" onclick="setTab('watch')">WATCH</button>
+        <button class="rtab" id="tab-plan" onclick="setTab('plan')">PLAN</button>
         <button class="rtab" id="tab-etf" onclick="setTab('etf')">ETF△</button>
       </div>
       <div id="rpanel"></div>
@@ -282,7 +283,7 @@ const SERVER = 'http://localhost:18432';
 // ── STATE ───────────────────────────────────────────────────────
 let S = {
   mkt: 'TW', sym: '', apiKey: '',
-  range: '5y',                 // iOS-style chart range: 1d/3w/1mo/3mo/6mo/ytd/1y/2y/5y/10y/max
+  range: '6mo',                // iOS-style chart range: 1d/3w/1mo/3mo/6mo/ytd/1y/2y/5y/10y/max
   data: null, ind: null,
   analyzing: false, streamText: '', sources: [], phase: '',
   sections: [],
@@ -301,7 +302,7 @@ window.addEventListener('DOMContentLoaded', () => {
   renderWl();
   renderRpanel();
   if (S.wl.length > 0) loadSym(S.wl[0].t, S.wl[0].m);
-  fetchEtfDelta();
+  (window.fetchEtfDelta || fetchEtfDelta)();
   updateKeyBtn();
 });
 
@@ -524,6 +525,51 @@ async function loadSym(sym, mkt) {
     parsed.candles = parsed.candles.slice(-rdef.trim);
   }
 
+  // ── Yahoo data freshness fix ──────────────────────────────────
+  // Yahoo 的日 K 線資料偶爾會比 regularMarketPrice 慢一天（特別是
+  // 部分 ETF 如 00830/00935/00947/00981A/00988A 等）。當這發生時：
+  //   • candles[-1] 仍是「昨天」的收盤
+  //   • meta.regularMarketPrice 是「今天」的實際收盤
+  //   • meta.regularMarketTime 也已經是今天
+  // 直接用 candles[-1] vs candles[-2] 算 % 會變成「昨天的 %」，
+  // 例如 00830 顯示 +4.02% 而非正確的 -3.42%。
+  //
+  // 修法：偵測這個落差（rmt 比 last candle 晚 > 20 小時），自動
+  // 合成一根「今日」K 線（OHLC 全用 rmp，量設 0），讓 chart 圖、
+  // chart-info 顯示、chip % 全部對齊 Yahoo 的最新收盤資料。
+  // 只在日線/週線生效，盤中 5m K 不適用。
+  // ───────────────────────────────────────────────────────────
+  if (parsed.candles.length >= 1 && parsed.meta) {
+    const _meta = parsed.meta;
+    const _last = parsed.candles[parsed.candles.length - 1];
+    const _rmt = _meta.regularMarketTime;
+    const _rmp = _meta.regularMarketPrice;
+    const _dailyIvl = (rdef.interval === '1d' || rdef.interval === '1wk');
+    if (_dailyIvl && _rmt && _rmp != null && isFinite(_rmp) && _rmp > 0
+        && _last && _last.time && (_rmt - _last.time) > 20 * 3600) {
+      parsed.candles.push({
+        time: _rmt,
+        open: _rmp, high: _rmp, low: _rmp, close: _rmp,
+        volume: 0,
+        _synthetic: true,    // tag for debugging / downstream filters
+      });
+    }
+  }
+
+  // ── Intraday mode 昨收計算 ─────────────────────────────────────
+  // 在 1天 view (interval=5m) 下，candles 是當日 5min K，
+  // candles[-2] 是上一根 5min（非昨日收盤）→ 直接算 % 會變「最後 5min vs
+  // 倒數第二 5min」的微幅變動（例如 +1.50%）而非當日 vs 昨日（-4.96%）。
+  // Yahoo intraday meta 提供正確的 chartPreviousClose（昨日收盤），
+  // 在 intraday 用它作為 prev，並且讓 polish_v3.js 的「昨收」線也使用它。
+  const _isIntraday = (rdef.interval !== '1d' && rdef.interval !== '1wk');
+  if (_isIntraday && parsed.meta) {
+    const _ycp = parsed.meta.chartPreviousClose ?? parsed.meta.previousClose;
+    if (_ycp != null && isFinite(_ycp) && _ycp > 0) {
+      parsed.yesterdayClose = _ycp;   // exposed so polish_v3 prev-close line uses this
+    }
+  }
+
   S.data = parsed;
   renderChart(parsed.candles);
   document.getElementById('chart-loading').style.display='none';
@@ -531,7 +577,11 @@ async function loadSym(sym, mkt) {
 
   const last = parsed.candles[parsed.candles.length-1];
   const prev = parsed.candles[parsed.candles.length-2];
-  const chgPct = prev ? ((last.close-prev.close)/prev.close*100) : 0;
+  // For intraday: prefer yesterdayClose (= meta.chartPreviousClose) as the
+  // % reference; for daily/weekly: prev candle's close is yesterday.
+  const _prevRef = (_isIntraday && parsed.yesterdayClose != null) ? parsed.yesterdayClose
+                                                                   : (prev ? prev.close : null);
+  const chgPct = (_prevRef != null && _prevRef > 0) ? ((last.close - _prevRef) / _prevRef * 100) : 0;
   document.getElementById('ci-price').textContent = last.close.toFixed(2);
   const ci = document.getElementById('ci-chg');
   ci.textContent = (chgPct>=0?'+':'')+chgPct.toFixed(2)+'%';
@@ -557,6 +607,19 @@ function renderChart(candles) {
 
   // intraday (1d range, 5m interval) → show HH:mm; daily/weekly → date only
   const isIntraday = S.range === '1d';
+
+  // ── 時區平移：統一使用「使用者本地時區」 ───────────────────
+  // lightweight-charts 預設用 UTC 顯示時間軸。對台北使用者來說：
+  //   • 台股 5/28 13:30 收盤 = 05:30 UTC → 圖表顯示 01:00–05:30 (錯)
+  //   • 美股 09:30 ET 開盤 = 13:30 UTC → 對台北使用者應顯示 21:30 (Taipei)
+  // 修法：用「使用者本地 TZ offset」(getTimezoneOffset) 平移時間戳，
+  // 讓所有市場的圖表時間都對應到「使用者那邊的時鐘」。
+  //   • TW 股 in Taipei: 09:00–13:30 (本地交易時段)
+  //   • US 股 in Taipei: 21:30–04:00 隔天 (Taipei 看 NYSE 的真實時段)
+  // Crosshair 讀回時用 getUTC* 方法（時間已被預先平移）。
+  const userTzOffset = -new Date().getTimezoneOffset() * 60;   // seconds
+  S.tzOffset = userTzOffset;   // expose for polish_v3.js volume re-set
+  const tz = (t) => (t == null ? t : t + userTzOffset);
 
   const chart = LightweightCharts.createChart(wrap, {
     width: wrap.clientWidth, height: wrap.clientHeight,
@@ -585,7 +648,7 @@ function renderChart(candles) {
     borderUpColor:'#4ADE80',borderDownColor:'#F87171',
     wickUpColor:'#4ADE80',wickDownColor:'#F87171',
   });
-  const lcd = candles.map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close}));
+  const lcd = candles.map(c=>({time:tz(c.time),open:c.open,high:c.high,low:c.low,close:c.close}));
   cs.setData(lcd);
   S.chartSeries = cs;
 
@@ -594,7 +657,7 @@ function renderChart(candles) {
     priceScaleId:'vol',
   });
   chart.priceScale('vol').applyOptions({scaleMargins:{top:0.8,bottom:0}});
-  vs.setData(candles.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'rgba(74,222,128,0.25)':'rgba(248,113,113,0.25)'})));
+  vs.setData(candles.map(c=>({time:tz(c.time),value:c.volume,color:c.close>=c.open?'rgba(74,222,128,0.25)':'rgba(248,113,113,0.25)'})));
   S.volSeries = vs;
 
   // ── SMA + Bollinger Bands overlay (skip on intraday) ──
@@ -614,10 +677,10 @@ function renderChart(candles) {
       return Math.sqrt(v / n);
     };
 
-    const sma20Data = candles.map((c, i) => { const v = sma(20, i); return v == null ? null : {time: c.time, value: v}; }).filter(Boolean);
-    const sma60Data = candles.map((c, i) => { const v = sma(60, i); return v == null ? null : {time: c.time, value: v}; }).filter(Boolean);
-    const bbU = candles.map((c, i) => { const m = sma(20, i); if (m == null) return null; const s = std(20, i, m); return {time: c.time, value: m + 2 * s}; }).filter(Boolean);
-    const bbL = candles.map((c, i) => { const m = sma(20, i); if (m == null) return null; const s = std(20, i, m); return {time: c.time, value: m - 2 * s}; }).filter(Boolean);
+    const sma20Data = candles.map((c, i) => { const v = sma(20, i); return v == null ? null : {time: tz(c.time), value: v}; }).filter(Boolean);
+    const sma60Data = candles.map((c, i) => { const v = sma(60, i); return v == null ? null : {time: tz(c.time), value: v}; }).filter(Boolean);
+    const bbU = candles.map((c, i) => { const m = sma(20, i); if (m == null) return null; const s = std(20, i, m); return {time: tz(c.time), value: m + 2 * s}; }).filter(Boolean);
+    const bbL = candles.map((c, i) => { const m = sma(20, i); if (m == null) return null; const s = std(20, i, m); return {time: tz(c.time), value: m - 2 * s}; }).filter(Boolean);
 
     const mkLine = (color, width, dashed) => chart.addLineSeries({
       color, lineWidth: width, lastValueVisible: false, priceLineVisible: false,
@@ -644,10 +707,11 @@ function renderChart(candles) {
     if (!k) { ohlcEl.style.display = 'none'; return; }
 
     // Date string (intraday → date+time, daily → date only)
+    // 時間已被預先平移到交易所時區 → 用 getUTC* 讀取才能取得當地的時/分/日
     const d = new Date(typeof param.time === 'number' ? param.time * 1000 : Date.parse(param.time));
     const ds = isIntraday
-      ? `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
-      : `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+      ? `${d.getUTCMonth()+1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`
+      : `${d.getUTCFullYear()}/${String(d.getUTCMonth()+1).padStart(2,'0')}/${String(d.getUTCDate()).padStart(2,'0')}`;
 
     const isUp = k.close >= k.open;
     const col = isUp ? 'var(--green)' : 'var(--red)';
@@ -870,7 +934,7 @@ function relTime(ts) {
 function setTab(tab) {
   S.tab = tab;
   document.querySelectorAll('.rtab').forEach((b,i)=>{
-    const tabs=['stats','research','position','watch','etf'];
+    const tabs=['stats','research','position','watch','plan','etf'];
     b.classList.toggle('on', tabs[i]===tab);
   });
   renderRpanel();
@@ -882,9 +946,10 @@ function renderRpanel() {
   if (S.tab==='research') { el.innerHTML = renderResearch(); attachResearch(); return; }
   if (S.tab==='batch')    { el.innerHTML = renderBatch(); attachBatch(); return; }
   if (S.tab==='history')  { el.innerHTML = renderHistoryTab(); return; }
-  if (S.tab==='etf')      { el.innerHTML = renderEtfDelta(); return; }
+  if (S.tab==='etf')      { el.innerHTML = (window.renderEtfDelta || renderEtfDelta)(); return; }
   if (S.tab==='position') { el.innerHTML = renderPosition(); attachPosition(); return; }
   if (S.tab==='watch')    { el.innerHTML = renderWatch(); attachWatch(); return; }
+  if (S.tab==='plan')     { el.innerHTML = renderPlan(); attachPlan(); return; }
 }
 
 // ── STATS TAB ────────────────────────────────────────────────────
@@ -917,7 +982,7 @@ function renderStats() {
   return `
     <div class="stat-hdr">價格資訊 · ${S.sym}</div>
     ${rows.map(([k,v])=>`<div class="stat-row"><span class="stat-k">${k}</span><span class="stat-v">${v}</span></div>`).join('')}
-    ${renderEtfHoldingsForStock(S.sym)}${S.ind?`<div class="stat-sect">技術指標</div>${indRows.map(([k,v])=>`<div class="stat-row"><span class="stat-k">${k}</span><span class="stat-v">${v||'--'}</span></div>`).join('')}`:''}
+    ${(window.renderEtfHoldingsForStock||renderEtfHoldingsForStock)(S.sym)}${S.ind?`<div class="stat-sect">技術指標</div>${indRows.map(([k,v])=>`<div class="stat-row"><span class="stat-k">${k}</span><span class="stat-v">${v||'--'}</span></div>`).join('')}`:''}
   `;
 }
 
@@ -1226,262 +1291,4 @@ function saveKey() {
   const v=document.getElementById('key-inp')?.value?.trim();
   if(!v)return;
   S.apiKey=v; localStorage.setItem(LS_KEY_KEY,v);
-  document.getElementById('key-modal')?.remove();
-  updateKeyBtn(); renderRpanel();
-}
-function clearKey() {
-  S.apiKey=''; localStorage.removeItem(LS_KEY_KEY);
-  document.getElementById('key-modal')?.remove();
-  updateKeyBtn(); renderRpanel();
-}
-
-// keyboard shortcut
-document.addEventListener('keydown',e=>{
-  if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
-});
-</script>
-<script src="position_v2.js?v=1779015828"></script>
-<script src="watch_v2.js?v=1779015828"></script>
-<script src="info_v2.js?v=1779015828"></script>
-<script src="pro_v2.js?v=1779015828"></script>
-<script src="pattern_v2.js?v=1779015828"></script>
-<script src="live_v2.js?v=1779015828"></script>
-<script src="etf_v2.js?v=1779015828"></script>
-</body>
-</html>
-<script>
-// ══════════════════════════════════════════════════════════════
-// ETF DELTA — 新增功能區塊
-// ══════════════════════════════════════════════════════════════
-
-const ETF_MAP_NAMES = {
-  '00992A':'群益科技創新','00981A':'統一台股增長',
-  '00987A':'台新優勢成長','00994A':'第一金台股優',
-  '00982A':'群益台灣強棒','00995A':'中信台灣卓越',
-  '00980A':'野村臺灣優選','00991A':'復華未來50',
-  '00996A':'兆豐台灣豐收','00984A':'安聯台灣高息',
-};
-
-async function fetchEtfDelta(date) {
-  S.etfLoading = true;
-  S.etfErr = null;
-  try {
-    const url = date ? `${SERVER}/etf-delta?date=${date}` : `${SERVER}/etf-delta`;
-    const r = await fetch(url, {cache:'no-store'});
-    if (!r.ok) {
-      let msg = `HTTP ${r.status}`;
-      try { const j = await r.json(); if (j.error) msg = j.error; } catch {}
-      S.etfDelta = null; S.etfErr = msg; S.etfLoading = false;
-      if (S.tab === 'etf') renderRpanel();
-      return;
-    }
-    S.etfDelta = await r.json();
-    renderWl();
-    updateEtfFlowInd();
-    if (S.tab === 'etf')   renderRpanel();
-    if (S.tab === 'stats') renderRpanel();
-  } catch (e) { S.etfDelta = null; S.etfErr = e.message || 'fetch failed'; }
-  S.etfLoading = false;
-}
-
-function getEtfFlowForStock(code) {
-  if (!S.etfDelta) return null;
-  let addCount=0, rmCount=0, chgSum=0;
-  for (const etf of (S.etfDelta.etfs||[])) {
-    if ((etf.new||[]).find(s=>s.code===code))     addCount++;
-    if ((etf.removed||[]).find(s=>s.code===code)) rmCount++;
-    const chg = (etf.changed||[]).find(s=>s.code===code);
-    if (chg) chgSum += chg.delta;
-  }
-  return {addCount, rmCount, chgSum};
-}
-
-function updateEtfFlowInd() {
-  const el = document.getElementById('ig-etfFlow');
-  if (!el || !S.sym) return;
-  if (!S.etfDelta) { el.textContent='--'; return; }
-  const flow = getEtfFlowForStock(S.sym);
-  if (!flow) { el.textContent='--'; return; }
-  if (flow.addCount > 0)      { el.textContent=`+${flow.addCount} ETF`; el.style.color='var(--green)'; }
-  else if (flow.rmCount > 0)  { el.textContent=`-${flow.rmCount} ETF`; el.style.color='var(--red)'; }
-  else if (Math.abs(flow.chgSum) >= 0.5) {
-    el.textContent=(flow.chgSum>0?'+':'')+flow.chgSum.toFixed(2)+'%';
-    el.style.color=flow.chgSum>0?'var(--green)':'var(--red)';
-  } else { el.textContent='無訊號'; el.style.color='var(--tf)'; }
-}
-
-function renderEtfHoldingsForStock(sym) {
-  if (!S.etfDelta || !sym) return '';
-  const rows = [];
-  for (const etf of (S.etfDelta.etfs||[])) {
-    const n = (etf.new||[]).find(s=>s.code===sym);
-    if (n) { rows.push({code:etf.code,rank:n.rank,weight:n.weight,delta:'新增',dc:'var(--green)'}); continue; }
-    const rm = (etf.removed||[]).find(s=>s.code===sym);
-    if (rm) { rows.push({code:etf.code,rank:'-',weight:rm.prev_weight,delta:'移除',dc:'var(--red)'}); continue; }
-    const chg = (etf.changed||[]).find(s=>s.code===sym);
-    if (chg) { rows.push({code:etf.code,rank:chg.rank,weight:chg.curr_weight,delta:(chg.delta>=0?'+':'')+chg.delta.toFixed(2)+'%',dc:chg.delta>=0?'var(--green)':'var(--red)'}); }
-  }
-  if (!rows.length) return '';
-  return `<div class="stat-sect">ETF 持股動態（今日）</div>` +
-    rows.map(r=>`<div class="stat-row">
-      <span class="stat-k" style="font-size:9px">${r.code} <span style="color:var(--tf)">#${r.rank}</span></span>
-      <span class="stat-v">${r.weight}% <span style="color:${r.dc};margin-left:6px">${r.delta}</span></span>
-    </div>`).join('');
-}
-
-// ── ETF Delta Tab ─────────────────────────────────────────────
-let _etfExp = {};
-
-function renderEtfDelta() {
-  if (S.etfLoading) return '<div style="padding:20px;text-align:center;font-family:monospace;font-size:10px;color:var(--tlo)">載入 ETF Delta...</div>';
-  if (!S.etfDelta || S.etfDelta.error) {
-    const err = S.etfErr || '';
-    const needHist = /history|file|need|≥2|dir=/i.test(err);
-    const hint = needHist
-      ? '尚無足夠歷史檔（需 ≥ 2 個交易日）<br><span style="font-size:9px;color:var(--tf)">執行 <code style="color:var(--gold)">python etf_delta_tracker.py --backfill 5</code><br>每天排程一次即可累積</span>'
-      : (err
-          ? `<span style="font-size:9px;color:var(--red)">${err}</span><br><span style="font-size:9px;color:var(--tf)">請確認 server.py 已啟動於 :18432</span>`
-          : '無法連線 ETF Delta<br><span style="font-size:9px;color:var(--tf)">請確認 server.py 已啟動</span>');
-    return `<div style="padding:24px 14px;font-family:monospace;font-size:10px;color:var(--tlo);text-align:center;line-height:1.9">
-      ${hint}<br>
-      <button onclick="fetchEtfDelta()" style="margin-top:14px;padding:5px 16px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--tlo);font-family:monospace;font-size:9px;cursor:pointer">↻ 重試</button>
-    </div>`;
-  }
-
-  const d = S.etfDelta;
-  const s = d.summary;
-
-  // Cross-ETF consensus
-  const newMap = {};
-  for (const etf of (d.etfs||[])) {
-    for (const n of (etf.new||[])) {
-      if (!newMap[n.code]) newMap[n.code] = {code:n.code,name:n.name,etfs:[]};
-      newMap[n.code].etfs.push({etf:etf.code,w:n.weight});
-    }
-  }
-  const consensus = Object.values(newMap).filter(x=>x.etfs.length>=2);
-
-  let h = '';
-
-  // Date bar
-  h += `<div style="padding:5px 12px;font-family:monospace;font-size:9px;color:var(--tlo);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-    <span>📅 ${d.date} vs ${d.prev_date}</span>
-    <button onclick="fetchEtfDelta()" style="padding:1px 7px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--tlo);font-family:monospace;font-size:8px;cursor:pointer">↻</button>
-  </div>`;
-
-  // Summary counts
-  h += `<div style="display:flex;border-bottom:1px solid var(--border)">
-    <div style="flex:1;padding:8px 4px;text-align:center;border-right:1px solid var(--border)">
-      <div style="font-family:monospace;font-size:20px;font-weight:700;color:var(--green)">${s.new}</div>
-      <div style="font-family:monospace;font-size:8px;color:var(--tlo);letter-spacing:1px">新增</div>
-    </div>
-    <div style="flex:1;padding:8px 4px;text-align:center;border-right:1px solid var(--border)">
-      <div style="font-family:monospace;font-size:20px;font-weight:700;color:var(--red)">${s.removed}</div>
-      <div style="font-family:monospace;font-size:8px;color:var(--tlo);letter-spacing:1px">移除</div>
-    </div>
-    <div style="flex:1;padding:8px 4px;text-align:center">
-      <div style="font-family:monospace;font-size:20px;font-weight:700;color:var(--cyan)">${s.changed}</div>
-      <div style="font-family:monospace;font-size:8px;color:var(--tlo);letter-spacing:1px">加減碼</div>
-    </div>
-  </div>`;
-
-  // Consensus
-  if (consensus.length) {
-    h += `<div style="padding:4px 10px;font-family:monospace;font-size:8px;color:var(--tf);letter-spacing:2px;border-bottom:1px solid var(--border);background:var(--bg);text-transform:uppercase">🔥 跨ETF共識新增</div>`;
-    for (const c of consensus) {
-      const etfTxt = c.etfs.map(e=>`${e.etf}(${e.w}%)`).join(' · ');
-      h += `<div onclick="loadSym('${c.code}','TW')" style="padding:7px 10px;border-bottom:1px solid var(--border);cursor:pointer;background:rgba(245,197,24,.04);border-left:2px solid var(--gold);transition:background .12s" onmouseover="this.style.background='rgba(245,197,24,.09)'" onmouseout="this.style.background='rgba(245,197,24,.04)'">
-        <div style="font-family:monospace;font-size:12px;font-weight:700;color:var(--gold)">${c.code} ${c.name}</div>
-        <div style="font-family:monospace;font-size:8px;color:var(--tlo);margin-top:2px">${etfTxt}</div>
-      </div>`;
-    }
-  }
-
-  // All new additions
-  const allNew = (d.etfs||[]).flatMap(e=>(e.new||[]).map(n=>({...n,etfCode:e.code})));
-  if (allNew.length) {
-    h += `<div style="padding:4px 10px;font-family:monospace;font-size:8px;color:var(--tf);letter-spacing:2px;border-bottom:1px solid var(--border);background:var(--bg);text-transform:uppercase">新增持股</div>`;
-    for (const n of allNew) {
-      const pri = n.weight>=2?'高優先':n.weight>=0.5?'中優先':'低優先';
-      const priColor = n.weight>=2?'var(--green)':n.weight>=0.5?'var(--gold)':'var(--tf)';
-      h += `<div onclick="loadSym('${n.code}','TW')" style="display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
-        <span style="font-family:monospace;font-size:11px;font-weight:700;color:var(--thi);min-width:45px">${n.code}</span>
-        <span style="font-family:monospace;font-size:9px;color:var(--tlo);flex:1">${n.name}</span>
-        <span style="font-family:monospace;font-size:10px;color:var(--green);font-weight:700">+${n.weight}%</span>
-        <span style="font-family:monospace;font-size:8px;color:${priColor}">${pri}</span>
-      </div>
-      <div style="padding:2px 10px 5px;font-family:monospace;font-size:8px;color:var(--tf);border-bottom:1px solid var(--border)">${n.etfCode} · #${n.rank} · ${(n.shares||0).toLocaleString()} 股</div>`;
-    }
-    // Batch all button
-    h += `<div style="padding:8px 10px;border-bottom:1px solid var(--border)">
-      <button onclick="etfBatchAllNew()" style="width:100%;padding:6px;background:var(--gold);color:#060A12;border:none;border-radius:5px;font-family:monospace;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:1px">⚡ 一鍵批次 AI 分析所有新增股</button>
-    </div>`;
-  }
-
-  // Per-ETF signal table
-  h += `<div style="padding:4px 10px;font-family:monospace;font-size:8px;color:var(--tf);letter-spacing:2px;border-bottom:1px solid var(--border);background:var(--bg);text-transform:uppercase">各ETF訊號強度（點擊展開）</div>`;
-
-  // Include ETFs with no events too
-  const allEtfCodes = Object.keys(ETF_MAP_NAMES);
-  const etfMap = {};
-  for (const e of (d.etfs||[])) etfMap[e.code] = e;
-
-  for (const code of allEtfCodes) {
-    const etf = etfMap[code] || {code, name:'主動'+ETF_MAP_NAMES[code], new:[], removed:[], changed:[]};
-    const newLen=(etf.new||[]).length, rmLen=(etf.removed||[]).length;
-    const maxDelta = Math.max(0,...(etf.changed||[]).map(c=>Math.abs(c.delta)));
-    let sig='no', sigTxt='無訊號', sigColor='var(--tf)';
-    if (newLen>0)        { sig='hi'; sigTxt=`高 ↑${newLen}新`;   sigColor='var(--green)'; }
-    else if (maxDelta>=1){ sig='md'; sigTxt='中 △';               sigColor='var(--gold)'; }
-    else if (maxDelta>=0.5||rmLen>0){ sig='lo'; sigTxt='低 ○';   sigColor='var(--tlo)'; }
-    const exp = _etfExp[code];
-    h += `<div onclick="toggleEtfExp('${code}')" style="display:flex;align-items:center;gap:6px;padding:5px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
-      <span style="font-family:monospace;font-size:9px;font-weight:700;color:var(--gold);min-width:55px">${code}</span>
-      <span style="font-family:monospace;font-size:8px;color:var(--tlo);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${ETF_MAP_NAMES[code]||''}</span>
-      <span style="font-family:monospace;font-size:8px;font-weight:700;color:${sigColor}">${sigTxt}</span>
-      <span style="font-size:9px;color:var(--tf)">${exp?'▲':'▼'}</span>
-    </div>`;
-    if (exp) {
-      h += `<div style="padding:6px 10px;background:var(--bg);border-bottom:1px solid var(--border)">`;
-      for (const n of (etf.new||[])) h+=`<div style="display:flex;justify-content:space-between;padding:2px 0;font-family:monospace;font-size:9px"><span style="color:var(--thi);min-width:45px">${n.code}</span><span style="color:var(--tlo);flex:1">${n.name}</span><span style="color:var(--green);font-weight:700">新增 +${n.weight}%</span></div>`;
-      for (const r of (etf.removed||[])) h+=`<div style="display:flex;justify-content:space-between;padding:2px 0;font-family:monospace;font-size:9px"><span style="color:var(--thi);min-width:45px">${r.code}</span><span style="color:var(--tlo);flex:1">${r.name}</span><span style="color:var(--red);font-weight:700">移除 ${r.prev_weight}%</span></div>`;
-      for (const c of (etf.changed||[])) {
-        const clr=c.delta>=0?'var(--green)':'var(--red)';
-        h+=`<div style="display:flex;justify-content:space-between;padding:2px 0;font-family:monospace;font-size:9px"><span style="color:var(--thi);min-width:45px">${c.code}</span><span style="color:var(--tlo);flex:1">${c.name}</span><span style="color:${clr};font-weight:700">${c.delta>=0?'+':''}${c.delta.toFixed(2)}%</span></div>`;
-      }
-      if (!newLen && !rmLen && !(etf.changed||[]).length) h+=`<div style="font-family:monospace;font-size:9px;color:var(--tf)">今日無事件</div>`;
-      h += `<div style="display:flex;gap:5px;margin-top:5px">
-        <button onclick="event.stopPropagation();etfAddWl('${code}')" style="padding:2px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--tlo);font-family:monospace;font-size:8px;cursor:pointer">加自選</button>
-        <button onclick="event.stopPropagation();etfAddBatch('${code}')" style="padding:2px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--tlo);font-family:monospace;font-size:8px;cursor:pointer">批次分析</button>
-      </div>`;
-      h += '</div>';
-    }
-  }
-
-  return h;
-}
-
-function toggleEtfExp(code) {
-  _etfExp[code] = !_etfExp[code];
-  if (S.tab==='etf') renderRpanel();
-}
-function etfAddWl(etfCode) {
-  const etf = (S.etfDelta?.etfs||[]).find(e=>e.code===etfCode);
-  if (!etf) return;
-  for (const n of (etf.new||[])) if (!S.wl.find(w=>w.t===n.code&&w.m==='TW')) S.wl.push({t:n.code,m:'TW'});
-  saveWl(); renderWl();
-}
-function etfAddBatch(etfCode) {
-  const etf = (S.etfDelta?.etfs||[]).find(e=>e.code===etfCode);
-  if (!etf) return;
-  for (const n of (etf.new||[])) if (!S.batch.find(b=>b.sym===n.code&&b.mkt==='TW')) S.batch.push({sym:n.code,mkt:'TW',status:'',statusTxt:''});
-  setTab('batch');
-}
-function etfBatchAllNew() {
-  if (!S.etfDelta) return;
-  for (const etf of (S.etfDelta.etfs||[])) {
-    for (const n of (etf.new||[])) if (!S.batch.find(b=>b.sym===n.code&&b.mkt==='TW')) S.batch.push({sym:n.code,mkt:'TW',status:'',statusTxt:''});
-  }
-  setTab('batch');
-}
-</script>
+  documen
