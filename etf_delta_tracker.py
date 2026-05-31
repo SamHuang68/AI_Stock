@@ -138,10 +138,15 @@ def clean_num(s: str) -> float:
 
 
 # ── 來源 A：MoneyDJ Basic0007B（全部持股） ────────────────────────
+# v3.7：原 regex 強制 code=\d{4,6} 且後綴=.TW，會把全球型 ETF 的外股
+# (009150.KS / AMD.US / 7203.JP / 0700.HK 等) 全部過濾掉。00988A 主動
+# 統一全球創新原本 46 檔持股只抓到 13 檔台股，外股 30+ 整段消失。
+# 修法：code 接受英數混合 (含 ADR/港股代號可能帶 0 前綴)、後綴接受任何
+# 2 字母 ISO 市場碼 (TW/US/JP/KS/SH/HK/DE/L 等)。
 _MDJ_DATE_RE = re.compile(r'資料日期[：:]\s*(\d{4})/(\d{2})/(\d{2})')
 _MDJ_ROW_RE  = re.compile(
-    r'etfid=(\d{4,6})\.TW(?:&|&amp;)back=[0-9A-Za-z]+\.TW[^>]*>'
-    r'\s*([^<]+?)\(\1\.TW\)\s*</a>'
+    r'etfid=([0-9A-Za-z]{1,7})\.([A-Z]{2})(?:&|&amp;)back=[0-9A-Za-z]+\.TW[^>]*>'
+    r'\s*([^<]+?)\(\1\.\2\)\s*</a>'
     r'\s*</td>\s*'
     r'<td[^>]*>\s*([\d.]+)\s*</td>\s*'
     r'<td[^>]*>\s*([\d,]+)\s*</td>',
@@ -163,15 +168,18 @@ def fetch_moneydj_full(etf_id: str) -> tuple[list | None, str | None]:
     seen = set()
     for rank, m in enumerate(_MDJ_ROW_RE.finditer(html_txt), 1):
         code   = m.group(1).strip()
-        name   = html.unescape(m.group(2)).strip()
-        weight = clean_num(m.group(3))
-        shares = int(clean_num(m.group(4)))
-        if code in seen:
+        market = m.group(2).strip()
+        name   = html.unescape(m.group(3)).strip()
+        weight = clean_num(m.group(4))
+        shares = int(clean_num(m.group(5)))
+        key = f'{code}.{market}'
+        if key in seen:
             continue
-        seen.add(code)
+        seen.add(key)
         holdings.append({
             'rank':   rank,
             'code':   code,
+            'market': market,                # v3.7 new: TW / US / JP / KS / HK / ...
             'name':   name,
             'weight': round(weight, 4),
             'shares': shares,
@@ -197,16 +205,19 @@ def fetch_moneydj_top(etf_id: str) -> tuple[list | None, str | None]:
     holdings = []
     seen = set()
     for rank, m in enumerate(_MDJ_ROW_RE.finditer(seg), 1):
-        code = m.group(1).strip()
-        if code in seen:
+        code   = m.group(1).strip()
+        market = m.group(2).strip()
+        key = f'{code}.{market}'
+        if key in seen:
             continue
-        seen.add(code)
+        seen.add(key)
         holdings.append({
             'rank':   rank,
             'code':   code,
-            'name':   html.unescape(m.group(2)).strip(),
-            'weight': round(clean_num(m.group(3)), 4),
-            'shares': int(clean_num(m.group(4))),
+            'market': market,
+            'name':   html.unescape(m.group(3)).strip(),
+            'weight': round(clean_num(m.group(4)), 4),
+            'shares': int(clean_num(m.group(5))),
         })
     return (holdings if holdings else None), data_date
 

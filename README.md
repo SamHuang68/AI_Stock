@@ -302,6 +302,88 @@ class LRUCache:
 
 ---
 
+## v3.7 — 全球型 ETF 持股完整抓取 + 多市場跳轉（2026-05）
+
+### 問題
+
+00988A 主動統一全球創新（也包含 00989A 等全球型 ETF）顯示的 TOP 10 持股全部是台股，少了真正大佔比的外國成分（Samsung、AMD、Micron、ROHM 等）。實際 46 檔持股只看到 13 檔。
+
+### 根因
+
+`etf_delta_tracker.py` 的 MoneyDJ row 解析 regex 寫死兩個假設：
+
+```python
+_MDJ_ROW_RE = re.compile(
+    r'etfid=(\d{4,6})\.TW(?:&|&amp;)back=[0-9A-Za-z]+\.TW[^>]*>'
+    #         ^^^^^^^                                  ^^^^
+    r'\s*([^<]+?)\(\1\.TW\)\s*</a>'
+    #                  ^^^^
+    ...
+```
+
+- `(\d{4,6})` 只接受純數字 code → AMD / MU / AAPL（字母 code）整批被擋
+- `\.TW` 鎖死後綴 → 009150.KS / 6963.JP / 0700.HK / 600519.SH 全部被擋
+
+MoneyDJ HTML 對外股的 link 格式：
+
+```
+etfid=AMD.US      → AMD(AMD.US)
+etfid=6963.JP     → ROHM(6963.JP)
+etfid=009150.KS   → Samsung Elec Mech(009150.KS)
+```
+
+### 修法
+
+#### 1. Regex 放寬
+
+```python
+_MDJ_ROW_RE = re.compile(
+    r'etfid=([0-9A-Za-z]{1,7})\.([A-Z]{2})(?:&|&amp;)back=[0-9A-Za-z]+\.TW[^>]*>'
+    r'\s*([^<]+?)\(\1\.\2\)\s*</a>'
+    ...
+)
+```
+
+新增 group 2 抓市場碼，holdings 多存 `market` 欄位。00988A 的 41/46 筆現在都抓得到（剩 5 筆是現金/期貨/特殊格式 row，佔權重 < 1%）。
+
+#### 2. 市場碼 → Yahoo Finance 後綴 mapping
+
+MoneyDJ 跟 Yahoo 對市場後綴的命名不完全一致：
+
+| 市場 | MoneyDJ | Yahoo | 範例 |
+|------|---------|-------|------|
+| 台灣 | .TW | .TW | 2454.TW |
+| 美國 | .US | (無) | AMD |
+| 日本 | .JP | **.T** | 6963.T |
+| 韓國 | .KS | .KS | 009150.KS |
+| 香港 | .HK | .HK | 0700.HK |
+| 上海 | .SH | **.SS** | 600519.SS |
+| 深圳 | .SZ | .SZ | 000858.SZ |
+| 德國 | .DE | .DE | SAP.DE |
+| 英國 | .L | .L | HSBA.L |
+
+`etf_v3.js` 加 `mapToYahoo(sym, mdjMkt)` helper，點擊持股時即時 map 並 dispatch 到 `loadSym(yfsym, uiMkt)`。HK 股代號自動 padStart(4, '0')。
+
+#### 3. 顯示優化
+
+外股代號旁顯示小型市場後綴標籤：
+
+```
+1. AMD .US           Advanced Micro Devices    4.70%
+2. 6963 .JP          ROHM                      0.47%
+3. 009150 .KS        Samsung Elec Mech         5.76%
+4. 2454              聯發科                    3.84%   ← 台股不顯示 .TW
+```
+
+### 套用步驟
+
+```
+1. python etf_delta_tracker.py        重抓 holdings（含 market 欄位）
+2. rebuild_and_restart.bat            套用 etf_v3.js 改動
+```
+
+---
+
 ## 檔案結構
 
 ```
