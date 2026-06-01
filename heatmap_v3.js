@@ -360,4 +360,30 @@ async function openHeatmap(force, mktOverride) {
   body.innerHTML = h;
 }
 
-// ── 注入按鈕到 pro-tools 工具列 ─────────────────────
+// ── 注入按鈕到 pro-tools 工具列 ───────────────────────────────
+(function injectBtn() {
+  let tries = 0;
+  function tryInject() {
+    if (tries++ > 30) return;
+    const tools = document.getElementById('pro-tools');
+    if (!tools) return setTimeout(tryInject, 100);
+    if (document.getElementById('btn-heatmap')) return;
+    const b = document.createElement('button');
+    b.id = 'btn-heatmap';
+    b.className = 'probtn';
+    b.title = '產業熱力圖（TW 17 類股 / US 11 SPDR ETF）';
+    b.innerHTML = '📊 類股';
+    b.onclick = () => openHeatmap(false);
+    tools.appendChild(b);
+  }
+  tryInject();
+})();
+
+// ── 對外 expose ───────────────────────────────────────────────
+window.openHeatmap = openHeatmap;
+window.closeHeatmap = closeHeatmap;
+window.HeatmapV3 = { fetchSectors, fetchUS, fetchTW, SPDR, TW_SECTORS };
+
+console.log('%c[Heatmap v3.2] loaded — pure /yf/batch, no TWSE', 'color:#FBBF24;font-weight:bold');
+
+})();

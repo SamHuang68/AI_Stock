@@ -193,4 +193,51 @@
     // 的最後一次 poll 結果，使用者打開瀏覽器會看到陳舊百分比一閃。
     // 清掉後第一次 render 顯示空白，~300ms 後第一次 poll 完成即補上。
     if (Array.isArray(S.wl)) {
-      
+      let dirty = false;
+      for (const w of S.wl) {
+        if (w.chg != null || w.price != null) {
+          w.chg = null;
+          w.price = null;
+          dirty = true;
+        }
+      }
+      if (dirty) {
+        if (typeof saveWl === 'function') try { saveWl(); } catch {}
+        // 重繪一次讓使用者立即看到空白而非昨日 %
+        if (typeof renderWl === 'function') try { renderWl(); } catch {}
+      }
+    }
+    start();
+    // Re-poll when watchlist changes (chip added/removed/reordered)
+    if (typeof addToWl === 'function' && !global._wlLiveHookedAdd) {
+      global._wlLiveHookedAdd = true;
+      const orig = global.addToWl;
+      global.addToWl = function () {
+        const r = orig.apply(this, arguments);
+        setTimeout(pollOnce, 400);
+        return r;
+      };
+    }
+    if (typeof rmWl === 'function' && !global._wlLiveHookedRm) {
+      global._wlLiveHookedRm = true;
+      const orig = global.rmWl;
+      global.rmWl = function () {
+        const r = orig.apply(this, arguments);
+        setTimeout(pollOnce, 400);
+        return r;
+      };
+    }
+    // Pause when tab not visible to save bandwidth
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) stop();
+      else { start(); pollOnce(); }   // immediate refresh on return
+    });
+  })();
+
+  // ─── expose ────────────────────────────────────────────────
+  global.pollWlPrices    = pollOnce;
+  global.startWlLivePoll = start;
+  global.stopWlLivePoll  = stop;
+
+  console.log('[wl-live] watchlist live polling armed (30s interval, pauses when tab hidden)');
+})(window);

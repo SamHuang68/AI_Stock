@@ -429,10 +429,12 @@ function detectTriangle(candles, pivots) {
 
 // ============================================================
 // MAIN DETECTOR — run all
+// candlesOverride: 可選參數。給 modal 使用時傳入專門抓的 1y 日 K 線，
+// 不傳則 fallback 到 S.data.candles（給 chart overlay 用 — 當前 chart 範圍）
 // ============================================================
-function detectPatterns() {
-  if (!S.data?.candles?.length || S.data.candles.length < 30) return [];
-  const candles = S.data.candles;
+function detectPatterns(candlesOverride) {
+  const candles = candlesOverride || S.data?.candles;
+  if (!candles?.length || candles.length < 30) return [];
   const pivots = findPivots(candles, 5);
   const patterns = [];
   try { const p = detectTrendStructure(candles, pivots);     if (p) patterns.push(p); } catch (e) { console.warn(e); }
@@ -444,6 +446,46 @@ function detectPatterns() {
   try { const p = detectCupHandle(candles, pivots);         if (p) patterns.push(p); } catch (e) { console.warn(e); }
   try { const p = detectTriangle(candles, pivots);          if (p) patterns.push(p); } catch (e) { console.warn(e); }
   return patterns;
+}
+
+// ============================================================
+// DEDICATED DATA LOADER — pattern 模組獨立抓 1y 日 K 線
+// ------------------------------------------------------------
+// 為什麼要獨立抓：使用者把 chart 切到 3周/1月/1天 時 S.data.candles
+// 只有 15~22 根，或甚至是 intraday 5m 不是日 K，形態辨識就會
+// 跳「需要至少 30 個交易日」。這個 loader 永遠抓 1y daily（~250 根）
+// 與 chart 範圍解耦。
+// ============================================================
+const _patternDataCache = new Map();   // key: sym|mkt → {candles, fetchedAt}
+const PATTERN_CACHE_TTL = 5 * 60_000;  // 5 分鐘
+const PATTERN_SERVER = window.SERVER || `http://localhost:18432`;
+
+async function loadPatternCandles(sym, mkt) {
+  if (!sym) return null;
+  mkt = mkt || 'TW';
+  const key = `${sym}|${mkt}`;
+  const cached = _patternDataCache.get(key);
+  if (cached && (Date.now() - cached.fetchedAt < PATTERN_CACHE_TTL)) {
+    return cached.candles;
+  }
+  const yfsym = mkt === 'TW' ? sym + '.TW' : sym;
+  try {
+    const url = `${PATTERN_SERVER}/yf/${yfsym}?range=1y&interval=1d`;
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) { console.warn('[pattern] data fetch HTTP', r.status); return null; }
+    const raw = await r.json();
+    // parseYF 是 v1 的全域 helper（stock_terminal.html 內定義）
+    const parsed = (typeof parseYF === 'function') ? parseYF(raw) : null;
+    if (!parsed?.candles?.length) {
+      console.warn('[pattern] parseYF returned empty for', yfsym);
+      return null;
+    }
+    _patternDataCache.set(key, { candles: parsed.candles, fetchedAt: Date.now() });
+    return parsed.candles;
+  } catch (e) {
+    console.warn('[pattern] loadPatternCandles error:', e);
+    return null;
+  }
 }
 
 // ============================================================
@@ -472,10 +514,11 @@ function drawPatternsOnChart(patterns) {
   }
 }
 
-function renderPatternsPanel() {
-  const patterns = detectPatterns();
+function renderPatternsPanel(candlesOverride) {
+  const patterns = detectPatterns(candlesOverride);
   if (patterns.length === 0) {
-    return '<div style="padding:14px;font-family:monospace;font-size:10px;color:var(--tlo);text-align:center">目前未偵測到明顯形態<br><span style="font-size:9px;color:var(--tf)">需要至少 30 個交易日資料</span></div>';
+    const n = (candlesOverride || S.data?.candles)?.length || 0;
+    return `<div style="padding:14px;font-family:monospace;font-size:10px;color:var(--tlo);text-align:center">目前未偵測到明顯形態<br><span style="font-size:9px;color:var(--tf)">分析了 ${n} 個日 K 線，無觸發任何形態規則</span></div>`;
   }
   const sevColor = {bullish:'var(--green)', bearish:'var(--red)', caution:'var(--orange)', neutral:'var(--blue)', observing:'var(--blue)'};
   const sevBg    = {bullish:'rgba(74,222,128,.08)', bearish:'rgba(248,113,113,.08)', caution:'rgba(251,146,60,.08)', neutral:'rgba(96,165,250,.08)', observing:'rgba(96,165,250,.08)'};
@@ -503,20 +546,44 @@ function patternsToggle() {
   drawPatternsOnChart(detectPatterns());
 }
 
-function showPatternsModal() {
-  const html = `
-    <h3 style="margin:0 0 10px;color:var(--gold);font-family:monospace;font-size:14px">🤖 AI 形態辨識 — ${S.sym || '?'}</h3>
+async function showPatternsModal() {
+  const sym = S.sym;
+  const mkt = S.mkt;
+  if (!sym) {
+    if (typeof showProModal === 'function') showProModal('<div style="padding:20px;text-align:center;font-family:monospace;color:var(--tlo)">請先載入個股</div>');
+    return;
+  }
+
+  // ① 先打開 loading modal — 立刻給視覺回饋
+  const loadingHtml = `
+    <h3 style="margin:0 0 10px;color:var(--gold);font-family:monospace;font-size:14px">🤖 AI 形態辨識 — ${sym}</h3>
     <div style="font-family:monospace;font-size:9.5px;color:var(--tlo);margin-bottom:10px">規則式偵測 8 種經典 K 線形態。沒用機器學習，全部基於可解釋的技術分析規則。</div>
-    <div style="border-top:1px solid var(--border);margin:-2px -24px 6px">
-      ${renderPatternsPanel()}
-    </div>
+    <div style="text-align:center;padding:40px 14px;font-family:monospace;font-size:11px;color:var(--gold)">⟳ 抓取 1 年日 K 線分析中...</div>`;
+  if (typeof showProModal === 'function') showProModal(loadingHtml);
+
+  // ② 抓專用 1y 日 K 線（與 chart 範圍解耦）
+  const candles = await loadPatternCandles(sym, mkt);
+
+  // ③ 抓完用 1y candles 重算 + 刷新 modal 內容
+  let panelHtml;
+  if (!candles) {
+    panelHtml = `<div style="padding:14px;text-align:center;font-family:monospace;font-size:10px;color:var(--red);line-height:1.7">
+      無法載入 ${sym} 的歷史日 K 線<br>
+      <span style="font-size:9px;color:var(--tf)">請確認 server.py (:18432) 運作中，或該 symbol 在 Yahoo 不存在</span>
+    </div>`;
+  } else {
+    panelHtml = renderPatternsPanel(candles);
+  }
+  const html = `
+    <h3 style="margin:0 0 10px;color:var(--gold);font-family:monospace;font-size:14px">🤖 AI 形態辨識 — ${sym}</h3>
+    <div style="font-family:monospace;font-size:9.5px;color:var(--tlo);margin-bottom:10px">規則式偵測 8 種經典 K 線形態。沒用機器學習，全部基於可解釋的技術分析規則。${candles ? `<br>分析基礎：最近 <b style="color:var(--gold)">${candles.length}</b> 個日 K 線（1y 獨立抓取，不受 chart 範圍影響）` : ''}</div>
+    <div style="border-top:1px solid var(--border);margin:-2px -24px 6px">${panelHtml}</div>
     <div style="margin-top:10px;font-family:monospace;font-size:8.5px;color:var(--tf);line-height:1.7">
       ⚠ 形態辨識僅為技術面參考。形態完成不等於後續一定走預期方向；
       務必綜合基本面、量能、大盤、產業判斷。<br>
       勝率星級基於歷史回測，但每次都不同。
     </div>`;
   if (typeof showProModal === 'function') showProModal(html);
-  else alert(detectPatterns().map(p => `${p.icon} ${p.name}\n${p.description}\n▸ ${p.action}`).join('\n\n'));
 }
 
 // ============================================================
@@ -555,3 +622,4 @@ window.detectPatterns      = detectPatterns;
 window.renderPatternsPanel = renderPatternsPanel;
 window.showPatternsModal   = showPatternsModal;
 window.patternsToggle      = patternsToggle;
+window.loadPatternCandles  = loadPatternCandles;

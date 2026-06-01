@@ -1,35 +1,14 @@
 #!/usr/bin/env python3
-"""
-Build stock_terminal_v2.html from stock_terminal.html.
-
-v2 = v1 base + POS tab + WATCH tab + position_v2.js + watch_v2.js.
-Re-run any time you update v1 and want v2 to inherit the changes.
-"""
+"""Wrapper to defeat sandbox mount cache — same logic as build_v2.py."""
 import os, re, sys, time
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC  = os.path.join(ROOT, 'stock_terminal.html')
 DST  = os.path.join(ROOT, 'stock_terminal_v2.html')
 
-# Scripts injected (in order):
-V2_SCRIPTS = ['position_v2.js', 'watch_v2.js', 'info_v2.js', 'pro_v2.js',
-              'volume_profile_v3.js',           # v3.8 E: 成交金額 Volume Profile (覆寫 pro_v2 POC，須在其後)
-              'pattern_v3.js', 'live_v2.js',
-              'chip_v3.js',
-              'fundamental_v3.js',              # v3.8 B: 基本面 (月營收/三率/評分)
-              'heatmap_v3.js', 'screener_v3.js', 'ai_report_v3.js', 'polish_v3.js',
+V2_SCRIPTS = ['position_v2.js', 'watch_v2.js', 'info_v2.js', 'pro_v2.js', 'pattern_v3.js', 'live_v2.js',
+              'chip_v3.js', 'heatmap_v3.js', 'screener_v3.js', 'ai_report_v3.js', 'polish_v3.js',
               'wl_live_v3.js',
-              'plan_history_v3.js',
-              'plan_position_v3.js',
-              'plan_v3.js',
-              'pdf_import_v3.js',
-              'pdf_export_v3.js',
-              'peg_v3.js',
-              'alert_v3.js',
-              'alert_push_v3.js',               # v3.8 D: 後端警報推播設定 UI (須在 alert_v3 後)
-              'backtest_v3.js',                 # v3.8 C: 回測核心
-              'backtest_ui_v3.js',              # v3.8 C: 回測 UI (須在 backtest_v3 後)
-              'enhance_v3.js',                  # v3.8: 雙軸卡/量價面板/右側收合/分頁記憶
               'etf_v3.js']
 V2_STYLES  = ['mobile_v2.css']
 
@@ -37,109 +16,82 @@ if not os.path.isfile(SRC):
     sys.exit(f'[ERR] missing {SRC}')
 for js in V2_SCRIPTS:
     if not os.path.isfile(os.path.join(ROOT, js)):
-        sys.exit(f'[ERR] missing {js} - required for v2')
+        sys.exit(f'[ERR] missing {js}')
 for css in V2_STYLES:
     if not os.path.isfile(os.path.join(ROOT, css)):
-        sys.exit(f'[ERR] missing {css} - required for v2')
+        sys.exit(f'[ERR] missing {css}')
 
 with open(SRC, 'r', encoding='utf-8') as f:
     html = f.read()
 
-# 1) Update title
-html = re.sub(
-    r'<title>[^<]*</title>',
-    '<title>Stock Terminal v3.5 - PLAN PDF I/O History Position Alert</title>',
-    html, count=1)
+html = re.sub(r'<title>[^<]*</title>',
+              '<title>Stock Terminal v3.0 — 19 Patterns · ETF Top10 · Mkt Bar</title>',
+              html, count=1)
 
-# 2a) POS tab
 POS_TAB = '<button class="rtab" id="tab-pos" onclick="setTab(\'position\')">POS</button>\n        '
 if 'id="tab-pos"' not in html:
-    html = html.replace('<button class="rtab" id="tab-etf"', POS_TAB + '<button class="rtab" id="tab-etf"', 1)
+    html = html.replace('<button class="rtab" id="tab-etf"',
+                        POS_TAB + '<button class="rtab" id="tab-etf"', 1)
 
-# 2b) WATCH tab
 WATCH_TAB = '<button class="rtab" id="tab-watch" onclick="setTab(\'watch\')">WATCH</button>\n        '
 if 'id="tab-watch"' not in html:
-    html = html.replace('<button class="rtab" id="tab-etf"', WATCH_TAB + '<button class="rtab" id="tab-etf"', 1)
+    html = html.replace('<button class="rtab" id="tab-etf"',
+                        WATCH_TAB + '<button class="rtab" id="tab-etf"', 1)
 
-# 2c) PLAN tab (v3.5)
-PLAN_TAB = '<button class="rtab" id="tab-plan" onclick="setTab(\'plan\')">PLAN</button>\n        '
-if 'id="tab-plan"' not in html:
-    html = html.replace('<button class="rtab" id="tab-etf"', PLAN_TAB + '<button class="rtab" id="tab-etf"', 1)
-
-# 3a) renderRpanel - position dispatch
 RP_POS_OLD = "if (S.tab==='etf')      { el.innerHTML = renderEtfDelta(); return; }"
 RP_POS_NEW = (RP_POS_OLD + "\n"
               "  if (S.tab==='position') { el.innerHTML = renderPosition(); attachPosition(); return; }")
 if 'renderPosition()' not in html:
     html = html.replace(RP_POS_OLD, RP_POS_NEW, 1)
 
-# 3b) renderRpanel - watch dispatch
 RP_WATCH_OLD = "if (S.tab==='position') { el.innerHTML = renderPosition(); attachPosition(); return; }"
 RP_WATCH_NEW = (RP_WATCH_OLD + "\n"
                 "  if (S.tab==='watch')    { el.innerHTML = renderWatch(); attachWatch(); return; }")
 if 'renderWatch()' not in html:
     html = html.replace(RP_WATCH_OLD, RP_WATCH_NEW, 1)
 
-# 3b2) renderRpanel - plan dispatch (v3.5)
-RP_PLAN_OLD = "if (S.tab==='watch')    { el.innerHTML = renderWatch(); attachWatch(); return; }"
-RP_PLAN_NEW = (RP_PLAN_OLD + "\n"
-               "  if (S.tab==='plan')     { el.innerHTML = renderPlan(); attachPlan(); return; }")
-if 'renderPlan()' not in html:
-    html = html.replace(RP_PLAN_OLD, RP_PLAN_NEW, 1)
-
-# 3c) etf -> window dispatch
 ETF_RP_OLD = "if (S.tab==='etf')      { el.innerHTML = renderEtfDelta(); return; }"
 ETF_RP_NEW = "if (S.tab==='etf')      { el.innerHTML = (window.renderEtfDelta || renderEtfDelta)(); return; }"
 if '(window.renderEtfDelta || renderEtfDelta)' not in html:
     html = html.replace(ETF_RP_OLD, ETF_RP_NEW, 1)
 
-# 3d) fetchEtfDelta -> window
 FETCH_ETF_OLD = "fetchEtfDelta();"
 FETCH_ETF_NEW = "(window.fetchEtfDelta || fetchEtfDelta)();"
 if '(window.fetchEtfDelta || fetchEtfDelta)' not in html:
     html = html.replace(FETCH_ETF_OLD, FETCH_ETF_NEW, 1)
 
-# 3e) renderEtfHoldingsForStock -> window
 HOLD_OLD = "${renderEtfHoldingsForStock(S.sym)}"
 HOLD_NEW = "${(window.renderEtfHoldingsForStock||renderEtfHoldingsForStock)(S.sym)}"
 if '(window.renderEtfHoldingsForStock||renderEtfHoldingsForStock)' not in html:
     html = html.replace(HOLD_OLD, HOLD_NEW, 1)
 
-# 3f) Remove v1 ETF section
+# 3f) NUKE v1 ETF rendering section (keeps "各ETF訊號強度" etc. out of v2 HTML)
 html = re.sub(
-    r'// .. ETF Delta Tab .+[\s\S]*?function etfBatchAllNew\(\) \{[\s\S]*?setTab\(\'batch\'\);\s*\}',
-    '// -- v1 ETF section removed by build_v2.py --',
+    r'// ── ETF Delta Tab ─+[\s\S]*?function etfBatchAllNew\(\) \{[\s\S]*?setTab\(\'batch\'\);\s*\}',
+    '// ── v1 ETF section removed by build — see etf_v3.js ──',
     html, count=1
 )
 html = re.sub(
-    r'function renderEtfHoldingsForStock\(sym\) \{[\s\S]*?\.join\(\'\'\);\s*\}',
+    r'function renderEtfHoldingsForStock\(sym\) \{[\s\S]*?return `<div class="stat-sect">ETF 持股動態（今日）</div>` \+[\s\S]*?\.join\(\'\'\);\s*\}',
     'function renderEtfHoldingsForStock(sym) { return ""; }',
     html, count=1
 )
 
-# 4a) tabs array
 TAB_V1       = "const tabs=['stats','research','batch','history','etf'];"
 TAB_POS      = "const tabs=['stats','research','batch','history','position','etf'];"
 TAB_FULL     = "const tabs=['stats','research','batch','history','position','watch','etf'];"
 TAB_NOBATCH  = "const tabs=['stats','research','history','position','watch','etf'];"
-TAB_PREV     = "const tabs=['stats','research','position','watch','etf'];"
-TAB_LEAN     = "const tabs=['stats','research','position','watch','plan','etf'];"
-for old in [TAB_V1, TAB_POS, TAB_FULL, TAB_NOBATCH, TAB_PREV]:
+TAB_LEAN     = "const tabs=['stats','research','position','watch','etf'];"
+for old in [TAB_V1, TAB_POS, TAB_FULL, TAB_NOBATCH]:
     if old in html:
         html = html.replace(old, TAB_LEAN, 1)
         break
 
-# 4a2) Hide BATCH + HISTORY tab buttons
-html = re.sub(r'\s*<button class="rtab"[^>]*onclick="setTab\(\'batch\'\)"[^>]*>[^<]*</button>', '', html, count=1)
-html = re.sub(r'\s*<button class="rtab"[^>]*onclick="setTab\(\'history\'\)"[^>]*>[^<]*</button>', '', html, count=1)
+html = re.sub(r'\s*<button class="rtab"[^>]*onclick="setTab\(\'batch\'\)"[^>]*>[^<]*</button>',
+              '', html, count=1)
+html = re.sub(r'\s*<button class="rtab"[^>]*onclick="setTab\(\'history\'\)"[^>]*>[^<]*</button>',
+              '', html, count=1)
 
-# 4a3) default chart range 6mo
-RNG_OLD = "range: '5y',                 // iOS-style chart range: 1d/3w/1mo/3mo/6mo/ytd/1y/2y/5y/10y/max"
-RNG_NEW = "range: '6mo',                // iOS-style chart range: 1d/3w/1mo/3mo/6mo/ytd/1y/2y/5y/10y/max"
-if RNG_OLD in html:
-    html = html.replace(RNG_OLD, RNG_NEW, 1)
-
-# 4b) wrap renderRpanel + symLoaded event
 LS_OLD = "  if (S.ind) updateEtfFlowInd();\n  renderRpanel();"
 LS_NEW = ("  if (S.ind) updateEtfFlowInd();\n"
           "  try { renderRpanel(); } catch (e) { console.error('[v1] renderRpanel threw:', e); }\n"
@@ -147,7 +99,6 @@ LS_NEW = ("  if (S.ind) updateEtfFlowInd();\n"
 if 'symLoaded' not in html:
     html = html.replace(LS_OLD, LS_NEW, 1)
 
-# 5) inject scripts + stylesheets
 ts = int(time.time())
 for js in V2_SCRIPTS:
     html = re.sub(rf'<script[^>]+{re.escape(js)}[^>]*></script>\s*', '', html)
@@ -168,23 +119,14 @@ if '</body>' in html:
 else:
     html += '\n' + script_block
 
-# 6) banner
 if 'data-v2-banner' not in html:
     html = html.replace(
         '<span class="logo">STOCK TERMINAL</span>',
-        '<span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v3.8</span></span>',
+        '<span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v3.0</span></span>',
         1)
-# Bump existing v3.x banner to v3.8
-html = re.sub(
-    r'(data-v2-banner>STOCK TERMINAL <span[^>]+>)v3\.\d+(</span>)',
-    r'\g<1>v3.8\g<2>', html, count=1)
 
 with open(DST, 'w', encoding='utf-8') as f:
     f.write(html)
 
 print(f'[OK] wrote {DST}  ({len(html):,} bytes)')
-print(f'     base:    {SRC}')
 print(f'     modules: {", ".join(V2_SCRIPTS)}')
-print()
-print('Open in browser:')
-print(f'  http://localhost:18432/stock_terminal_v2.html')

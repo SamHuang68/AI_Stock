@@ -23,7 +23,9 @@ let _lastQuote = null;
 // ── CSS for live panel ─────────────────────────────────────
 (function injectLiveCSS() {
   const css = `
-#live-panel{position:fixed;top:80px;right:355px;width:240px;z-index:100;background:rgba(11,18,32,.95);border:1px solid var(--gold-m);border-radius:6px;padding:9px 11px;font-family:'JetBrains Mono',monospace;font-size:10px;backdrop-filter:blur(6px);display:none;box-shadow:0 6px 18px rgba(0,0,0,.55)}
+#live-panel{position:fixed;top:80px;right:355px;width:240px;z-index:100;background:rgba(11,18,32,.95);border:1px solid var(--gold-m);border-radius:6px;padding:9px 11px;font-family:'JetBrains Mono',monospace;font-size:10px;backdrop-filter:blur(6px);display:none;box-shadow:0 6px 18px rgba(0,0,0,.55);user-select:none}
+#live-panel .lph{cursor:move}
+#live-panel.dragging{box-shadow:0 10px 26px rgba(0,0,0,.75);transition:none}
 #live-panel.on{display:block}
 #live-panel .lph{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:5px}
 #live-panel .lph .ttl{font-size:9.5px;color:var(--gold);font-weight:700;letter-spacing:1px}
@@ -84,7 +86,79 @@ let _lastQuote = null;
     <div style="margin-top:4px;font-size:8px;color:var(--tf);letter-spacing:.5px;text-align:right">每 30 秒更新 · <span id="lp-time">--</span></div>`;
   document.body.appendChild(panel);
   document.getElementById('lp-close').onclick = liveDisable;
+  attachLiveDrag(panel);
 })();
+
+// ── 拖曳：抓 header (.lph) 移動整個面板，位置存 localStorage ──
+function attachLiveDrag(panel) {
+  const LS_KEY = 'liveLivePanelPos';
+  // 還原上次位置
+  try {
+    const saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+    if (saved && typeof saved.left === 'number' && typeof saved.top === 'number') {
+      // 用 left/top + clear right 才能自由移動
+      panel.style.left = saved.left + 'px';
+      panel.style.top  = saved.top  + 'px';
+      panel.style.right = 'auto';
+    }
+  } catch {}
+
+  const header = panel.querySelector('.lph');
+  if (!header) return;
+  let drag = null;   // {startX, startY, baseLeft, baseTop}
+
+  header.addEventListener('mousedown', e => {
+    // 點到 × 關閉鈕不要觸發拖曳
+    if (e.target.closest('#lp-close')) return;
+    e.preventDefault();
+    // 計算當下實際 left/top（如果是 right-based 要先換算）
+    const rect = panel.getBoundingClientRect();
+    if (panel.style.right && panel.style.right !== 'auto') {
+      panel.style.left = rect.left + 'px';
+      panel.style.top  = rect.top  + 'px';
+      panel.style.right = 'auto';
+    }
+    drag = {
+      startX: e.clientX, startY: e.clientY,
+      baseLeft: rect.left, baseTop: rect.top,
+    };
+    panel.classList.add('dragging');
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!drag) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    // 用 viewport bounds 限制不要被拖出畫面
+    const w = panel.offsetWidth, h = panel.offsetHeight;
+    const maxL = window.innerWidth - 40;
+    const maxT = window.innerHeight - 40;
+    const left = Math.min(Math.max(-w + 60, drag.baseLeft + dx), maxL);
+    const top  = Math.min(Math.max(0,         drag.baseTop  + dy), maxT);
+    panel.style.left = left + 'px';
+    panel.style.top  = top  + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!drag) return;
+    drag = null;
+    panel.classList.remove('dragging');
+    // 持久化位置
+    try {
+      const rect = panel.getBoundingClientRect();
+      localStorage.setItem(LS_KEY, JSON.stringify({ left: rect.left, top: rect.top }));
+    } catch {}
+  });
+
+  // 雙擊 header → reset 回預設位置
+  header.addEventListener('dblclick', e => {
+    if (e.target.closest('#lp-close')) return;
+    panel.style.left = '';
+    panel.style.top = '80px';
+    panel.style.right = '355px';
+    try { localStorage.removeItem(LS_KEY); } catch {}
+  });
+}
 
 // ── Polling ───────────────────────────────────────────────
 async function fetchQuote(sym, mkt) {

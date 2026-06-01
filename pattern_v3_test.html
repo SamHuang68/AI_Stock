@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Pattern v3 驗證頁 — 2330 真實資料</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root {
+    --bg:#060A12; --panel:#0C1422; --border:#1A2740; --text:#D1D5DB; --tlo:#94A3B8; --tf:#64748B;
+    --green:#4ADE80; --red:#F87171; --blue:#60A5FA; --gold:#FBBF24; --orange:#FB923C; --purple:#A78BFA; --cyan:#67E8F9; --pink:#E879F9;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; padding:0; background:var(--bg); color:var(--text); font-family:'JetBrains Mono', 'Consolas', monospace; font-size:12px; }
+  .topbar { background:linear-gradient(180deg,#0C1422,#060A12); padding:10px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .topbar h1 { margin:0; font-size:14px; color:var(--gold); font-weight:700; letter-spacing:.5px; }
+  .topbar .stat { font-size:10px; color:var(--tlo); }
+  .topbar input { background:#060A12; color:var(--text); border:1px solid var(--border); padding:5px 9px; font-family:inherit; font-size:12px; width:80px; }
+  .topbar select, .topbar button { background:#060A12; color:var(--text); border:1px solid var(--border); padding:5px 11px; font-family:inherit; font-size:11px; cursor:pointer; }
+  .topbar button:hover { border-color:var(--gold); color:var(--gold); }
+  .topbar button.active { border-color:var(--gold); color:var(--gold); background:rgba(251,191,36,.08); }
+  .layout { display:grid; grid-template-columns:380px 1fr; gap:0; height:calc(100vh - 49px); }
+  .sidebar { background:var(--panel); border-right:1px solid var(--border); overflow-y:auto; }
+  .main { display:flex; flex-direction:column; }
+  #chart-wrap { flex:1; min-height:0; background:#060A12; position:relative; }
+  #chart-loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--gold); font-size:13px; }
+  .summary { padding:10px 12px; border-bottom:1px solid var(--border); background:#070C18; }
+  .summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px 12px; font-size:10px; }
+  .summary-grid .k { color:var(--tlo); }
+  .summary-grid .v { color:var(--text); font-weight:700; }
+  .group { border-bottom:1px solid var(--border); }
+  .group-h { padding:7px 12px; font-size:10px; color:var(--gold); background:rgba(251,191,36,.06); display:flex; justify-content:space-between; cursor:pointer; user-select:none; }
+  .group-h .cnt { color:var(--tf); font-size:9px; }
+  .group-body.hidden { display:none; }
+  .pat { padding:9px 12px; border-bottom:1px solid #0F1A2B; cursor:pointer; transition:background .12s; }
+  .pat:hover { background:rgba(96,165,250,.04); }
+  .pat.selected { background:rgba(251,191,36,.10); border-left:2px solid var(--gold); padding-left:10px; }
+  .pat .title { font-size:11px; font-weight:700; margin-bottom:3px; }
+  .pat .desc { font-size:9.5px; color:var(--text); line-height:1.6; margin-bottom:3px; }
+  .pat .action { font-size:9.5px; line-height:1.55; margin-bottom:2px; }
+  .pat .rel { font-size:9px; color:var(--tf); }
+  .pat .badge { display:inline-block; padding:1px 6px; border-radius:3px; font-size:8.5px; font-weight:700; margin-right:5px; }
+  .b-bull { background:rgba(74,222,128,.15); color:var(--green); }
+  .b-bear { background:rgba(248,113,113,.15); color:var(--red); }
+  .b-caution { background:rgba(251,146,60,.15); color:var(--orange); }
+  .b-neutral { background:rgba(96,165,250,.15); color:var(--blue); }
+  .b-observing { background:rgba(96,165,250,.15); color:var(--blue); }
+  .empty { padding:20px 14px; text-align:center; color:var(--tlo); font-size:10px; }
+  .err { padding:14px; text-align:center; color:var(--red); font-size:11px; line-height:1.7; }
+  .pat .title.bull { color:var(--green); }
+  .pat .title.bear { color:var(--red); }
+  .pat .title.caution { color:var(--orange); }
+  .pat .title.neutral { color:var(--blue); }
+  .pat .title.observing { color:var(--blue); }
+  /* test-status */
+  .test-status { padding:8px 12px; border-bottom:1px solid var(--border); background:#080E1A; font-size:9.5px; }
+  .test-row { display:flex; justify-content:space-between; padding:2px 0; }
+  .ok { color:var(--green); }
+  .ko { color:var(--tf); }
+  .info-bar { padding:6px 12px; background:#080E1A; border-bottom:1px solid var(--border); font-size:10px; color:var(--tlo); display:flex; gap:14px; flex-wrap:wrap; }
+  .info-bar b { color:var(--text); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>🤖 Pattern v3 驗證頁</h1>
+  <span class="stat">Stock Terminal v3.0 — 19 patterns</span>
+  <input id="sym" value="2330" placeholder="代碼" />
+  <select id="mkt">
+    <option value="TW" selected>TW</option>
+    <option value="US">US</option>
+  </select>
+  <select id="range">
+    <option value="1y">1y</option>
+    <option value="2y" selected>2y</option>
+    <option value="5y">5y</option>
+  </select>
+  <button id="load">載入</button>
+  <button id="toggle-overlay" class="active">疊加形態</button>
+  <span class="stat" id="stat">就緒</span>
+</div>
+
+<div class="layout">
+  <div class="sidebar" id="sidebar">
+    <div class="empty">點「載入」開始</div>
+  </div>
+  <div class="main">
+    <div class="info-bar" id="infobar"></div>
+    <div id="chart-wrap"><div id="chart-loading">尚未載入資料</div></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+// ------------------------------------------------------------
+// 從 stock_terminal_v2.html 抓出來的 parseYF (相容 server.py YF 格式)
+// ------------------------------------------------------------
+function parseYF(raw) {
+  try {
+    const res = raw?.chart?.result?.[0];
+    if (!res) return null;
+    const q = res.indicators.quote[0];
+    const ts = res.timestamp;
+    const candles = ts.map((t,i)=>({
+      time: t,
+      open:  q.open[i]  ?? q.close[i],
+      high:  q.high[i]  ?? q.close[i],
+      low:   q.low[i]   ?? q.close[i],
+      close: q.close[i] ?? 0,
+      volume: q.volume[i] ?? 0,
+    })).filter(c=>c.close!=null&&c.close>0);
+    const meta = res.meta;
+    return { candles, meta, name: meta.longName||meta.shortName||meta.symbol||'' };
+  } catch { return null; }
+}
+
+// 沿用 stock_terminal_v2.html 的 modal stub（pattern_v3.js 會呼叫）
+window.showProModal = function(html) { console.log('[modal]', html.length, 'chars'); };
+
+// 全域 S
+window.S = {
+  sym: '2330', mkt: 'TW',
+  data: null, chart: null, chartSeries: null, volSeries: null,
+  patternsEnabled: true,
+  patternLines: [], patternPolySeries: [],
+};
+</script>
+<script src="pattern_v3.js?v=20260523"></script>
+
+<script>
+const SERVER = 'http://localhost:18432';
+const $ = id => document.getElementById(id);
+const PATTERN_LIST = [
+  // [name, detector function name, group]
+  ['趨勢結構',          'detectTrendStructure',  '經典反轉'],
+  ['雙頂雙底',          'detectDoubleTopBottom', '經典反轉'],
+  ['頭肩頂底',          'detectHeadShoulders',   '經典反轉'],
+  ['黃金/死亡交叉',      'detectMaCross',         '經典反轉'],
+  ['區間突破',          'detectBreakout',        '經典持續'],
+  ['箱型整理',          'detectRange',           '經典持續'],
+  ['杯柄',             'detectCupHandle',       '經典持續'],
+  ['三角(對稱/上升/下降)','detectTriangle',       '經典持續'],
+  ['ABCD',             'detectABCD',            '諧波'],
+  ['XABCD 諧波 (5型)',  'detectXABCD',           '諧波'],
+  ['Cypher 賽福',       'detectCypher',          '諧波'],
+  ['三驅',             'detectThreeDrives',     '艾略特'],
+  ['艾略特脈衝 1-2-3-4-5','detectElliottImpulse', '艾略特'],
+  ['艾略特修正 A-B-C',  'detectElliottCorrection','艾略特'],
+  ['艾略特三角 A-B-C-D-E','detectElliottTriangle','艾略特'],
+  ['雙重組合 W-X-Y',    'detectDoubleCombo',     '艾略特'],
+  ['三重組合 W-X-Y-X-Z','detectTripleCombo',     '艾略特'],
+  ['循環分析',          'detectCycle',           '週期'],
+];
+
+async function load() {
+  const sym = $('sym').value.trim().toUpperCase();
+  const mkt = $('mkt').value;
+  const range = $('range').value;
+  if (!sym) return;
+  $('stat').textContent = '抓 ' + sym + '...';
+  $('chart-loading').style.display = 'flex';
+  $('chart-loading').textContent = '抓取 ' + sym + ' (' + range + ' 日 K)...';
+  $('sidebar').innerHTML = '<div class="empty">載入中...</div>';
+
+  const yfsym = mkt === 'TW' ? sym + '.TW' : sym;
+  const url = `${SERVER}/yf/${yfsym}?range=${range}&interval=1d`;
+  let raw;
+  try {
+    const r = await fetch(url, { cache:'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    raw = await r.json();
+  } catch (e) {
+    $('stat').textContent = '失敗: ' + e.message;
+    $('chart-loading').textContent = '無法抓資料 — 確認 server.py (:18432) 運作中';
+    $('sidebar').innerHTML = `<div class="err">❌ 無法載入<br><br>請開啟 cmd 跑：<br><b>python server.py</b><br><br>確認可訪問 ${url}</div>`;
+    return;
+  }
+  const parsed = parseYF(raw);
+  if (!parsed || !parsed.candles || !parsed.candles.length) {
+    $('stat').textContent = '無資料';
+    $('chart-loading').textContent = '空資料';
+    $('sidebar').innerHTML = '<div class="err">❌ 解析失敗 — symbol 可能在 Yahoo 不存在</div>';
+    return;
+  }
+
+  S.sym = sym; S.mkt = mkt; S.data = parsed;
+  $('infobar').innerHTML = `
+    <span><b>${sym}</b> · ${parsed.name || ''}</span>
+    <span>K 線 <b>${parsed.candles.length}</b> 根</span>
+    <span>區間 <b>${new Date(parsed.candles[0].time*1000).toISOString().slice(0,10)}</b> ~ <b>${new Date(parsed.candles[parsed.candles.length-1].time*1000).toISOString().slice(0,10)}</b></span>
+    <span>最新收盤 <b style="color:var(--gold)">${parsed.candles[parsed.candles.length-1].close.toFixed(2)}</b></span>`;
+  renderChart(parsed.candles);
+  $('chart-loading').style.display = 'none';
+  runAllDetectors(parsed.candles);
+  $('stat').textContent = 'OK · ' + sym;
+}
+
+function renderChart(candles) {
+  const wrap = $('chart-wrap');
+  if (S.chart) { S.chart.remove(); S.chart=null; }
+  const chart = LightweightCharts.createChart(wrap, {
+    width: wrap.clientWidth, height: wrap.clientHeight,
+    layout:{ background:{color:'#060A12'}, textColor:'#5A6A82' },
+    grid:{ vertLines:{color:'#0F1A2B'}, horzLines:{color:'#0F1A2B'} },
+    crosshair:{ mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale:{ borderColor:'#1A2740', scaleMargins:{top:0.05,bottom:0.18} },
+    timeScale:{ borderColor:'#1A2740', timeVisible:false, secondsVisible:false, rightOffset:8, barSpacing:5, fixLeftEdge:true },
+  });
+  S.chart = chart;
+  const cs = chart.addCandlestickSeries({
+    upColor:'#4ADE80', downColor:'#F87171',
+    borderUpColor:'#4ADE80', borderDownColor:'#F87171',
+    wickUpColor:'#4ADE80', wickDownColor:'#F87171',
+  });
+  cs.setData(candles.map(c => ({ time:c.time, open:c.open, high:c.high, low:c.low, close:c.close })));
+  S.chartSeries = cs;
+  const vs = chart.addHistogramSeries({ color:'rgba(96,165,250,0.3)', priceFormat:{type:'volume'}, priceScaleId:'vol' });
+  chart.priceScale('vol').applyOptions({ scaleMargins:{top:0.85,bottom:0} });
+  vs.setData(candles.map(c => ({ time:c.time, value:c.volume, color: c.close>=c.open?'rgba(74,222,128,0.25)':'rgba(248,113,113,0.25)' })));
+  S.volSeries = vs;
+  chart.timeScale().fitContent();
+}
+
+function runAllDetectors(candles) {
+  const PV = window.PatternV3;
+  if (!PV) {
+    $('sidebar').innerHTML = '<div class="err">❌ PatternV3 未載入</div>';
+    return;
+  }
+  const pivots = PV.findPivots(candles, 5);
+  const zz = PV.buildZigZag(candles, pivots);
+
+  const status = [];
+  const results = []; // [{group, name, result, count}]
+  for (const [name, fnName, group] of PATTERN_LIST) {
+    let r = null;
+    try {
+      if (fnName === 'detectMaCross' || fnName === 'detectBreakout' || fnName === 'detectRange' || fnName === 'detectCycle') {
+        r = PV[fnName](candles);
+      } else if (fnName === 'detectABCD' || fnName === 'detectXABCD' || fnName === 'detectCypher' || fnName === 'detectThreeDrives' || fnName === 'detectElliottImpulse' || fnName === 'detectElliottCorrection' || fnName === 'detectElliottTriangle' || fnName === 'detectDoubleCombo' || fnName === 'detectTripleCombo') {
+        r = PV[fnName](candles, zz);
+      } else {
+        r = PV[fnName](candles, pivots);
+      }
+    } catch (e) {
+      console.error('[detector]', name, e);
+      results.push({ group, name, result: null, error: String(e) });
+      status.push({ name, ok: false, error: String(e) });
+      continue;
+    }
+    const arr = Array.isArray(r) ? r : (r ? [r] : []);
+    results.push({ group, name, result: arr, count: arr.length });
+    status.push({ name, ok: arr.length > 0 });
+  }
+
+  renderSidebar(results, status, zz, pivots);
+
+  // 預設疊加：全部找到的型態
+  const allPats = [];
+  for (const r of results) if (r.result) allPats.push(...r.result);
+  S.allPatterns = allPats;
+  S.patternsEnabled = true;
+  PV.drawPatternsOnChart(allPats);
+}
+
+function renderSidebar(results, status, zz, pivots) {
+  // 1) summary
+  const triggered = status.filter(s => s.ok).length;
+  const ratio = (triggered / status.length * 100).toFixed(0);
+  let h = `
+    <div class="summary">
+      <div style="font-size:11px;color:var(--gold);margin-bottom:6px;font-weight:700">執行摘要</div>
+      <div class="summary-grid">
+        <span class="k">總偵測器</span><span class="v">${status.length}</span>
+        <span class="k">觸發</span><span class="v" style="color:var(--green)">${triggered} (${ratio}%)</span>
+        <span class="k">無觸發</span><span class="v" style="color:var(--tf)">${status.length - triggered}</span>
+        <span class="k">ZigZag swing</span><span class="v">${zz.length}</span>
+        <span class="k">Pivot 高</span><span class="v">${pivots.highs.length}</span>
+        <span class="k">Pivot 低</span><span class="v">${pivots.lows.length}</span>
+      </div>
+    </div>
+    <div class="test-status">
+      <div style="color:var(--gold);margin-bottom:4px;font-weight:700">19 偵測器逐個狀態</div>`;
+  for (const s of status) {
+    h += `<div class="test-row"><span class="${s.ok?'ok':'ko'}">${s.ok ? '●' : '○'} ${s.name}</span><span class="${s.ok?'ok':'ko'}">${s.ok ? '觸發' : (s.error?'錯誤':'未觸發')}</span></div>`;
+  }
+  h += `</div>`;
+
+  // 2) 分組顯示型態 — 用 index 對應 window.__patterns 而不是 JSON inline
+  const groups = {};
+  const flat = [];
+  for (const r of results) {
+    if (!r.result || !r.result.length) continue;
+    if (!groups[r.group]) groups[r.group] = [];
+    for (const p of r.result) {
+      const idx = flat.length;
+      flat.push(p);
+      groups[r.group].push({ ...p, _idx: idx });
+    }
+  }
+  window.__patterns = flat;
+  const groupOrder = ['經典反轉', '經典持續', '諧波', '艾略特', '週期'];
+  for (const g of groupOrder) {
+    const ps = groups[g];
+    if (!ps || !ps.length) continue;
+    h += `<div class="group">
+      <div class="group-h" onclick="this.nextElementSibling.classList.toggle('hidden')">▸ ${g} <span class="cnt">${ps.length}</span></div>
+      <div class="group-body">`;
+    for (const p of ps) {
+      const sev = p.severity || 'neutral';
+      const sevLabel = { bullish:'多', bearish:'空', caution:'警戒', neutral:'中性', observing:'觀察' }[sev] || '?';
+      h += `<div class="pat" data-idx="${p._idx}" onclick="showOne(${p._idx})">
+        <div class="title ${sev}">
+          <span class="badge b-${sev}">${sevLabel}</span>
+          ${p.icon || ''} ${escapeHtml(p.name)}
+        </div>
+        <div class="desc">${escapeHtml(p.description || '')}</div>
+        <div class="action" style="color:${sevCol(sev)}">▸ ${escapeHtml(p.action || '')}</div>
+        <div class="rel">${escapeHtml(p.reliability || '')}</div>
+      </div>`;
+    }
+    h += `</div></div>`;
+  }
+  if (!Object.keys(groups).length) {
+    h += `<div class="empty">所有 19 偵測器都未觸發<br><br><span style="color:var(--tf);font-size:9px">資料 ${S.data.candles.length} 根 K 線。若 2y 仍無觸發，這支股票走勢可能太雜訊。</span></div>`;
+  }
+  $('sidebar').innerHTML = h;
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function sevCol(s) { return ({bullish:'var(--green)',bearish:'var(--red)',caution:'var(--orange)',neutral:'var(--blue)',observing:'var(--blue)'})[s] || 'var(--text)'; }
+
+window.showOne = function(idx) {
+  const p = (window.__patterns || [])[idx];
+  if (!p) return;
+  S.patternsEnabled = true;
+  PatternV3.drawPatternsOnChart([p]);
+  // sidebar 高亮
+  document.querySelectorAll('.pat.selected').forEach(el => el.classList.remove('selected'));
+  const el = document.querySelector(`.pat[data-idx="${idx}"]`);
+  if (el) el.classList.add('selected');
+};
+
+// 雙擊任意 .pat 旁邊空白處 → 顯示全部
+window.showAll = function() {
+  document.querySelectorAll('.pat.selected').forEach(el => el.classList.remove('selected'));
+  S.patternsEnabled = true;
+  if (S.allPatterns) PatternV3.drawPatternsOnChart(S.allPatterns);
+};
+
+$('load').onclick = load;
+$('sym').onkeydown = e => { if (e.key === 'Enter') load(); };
+$('toggle-overlay').onclick = function() {
+  S.patternsEnabled = !S.patternsEnabled;
+  this.classList.toggle('active', S.patternsEnabled);
+  if (S.allPatterns) PatternV3.drawPatternsOnChart(S.allPatterns);
+};
+
+// 自動載入 2330
+window.addEventListener('load', () => setTimeout(load, 200));
+</script>
+</body>
+</html>

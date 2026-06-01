@@ -8,6 +8,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import OrderedDict
 from urllib.parse import urlparse, parse_qs
 import threading
+try:
+    import alert_daemon
+except Exception as _e:
+    alert_daemon = None
+    print('[alert] daemon import failed:', _e)
 
 PORT = 18432
 # Core Ultra 9 285H = 6P + 8E + 2LP = 16 threads; oversubscribe for I/O-bound YF
@@ -21,6 +26,109 @@ _ETF_FALLBACKS = [
     ETF_DELTA_PATH,
     os.path.join(os.path.dirname(os.path.abspath(__file__)), 'etf_history'),
 ]
+
+# ── Chip history (v3.8): 每日法人籌碼快照，用於連續買賣超天數 ──
+CHIP_HISTORY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'chip_history')
+
+def _chip_history_record(clean_code, chip_out):
+    """把今日某股的 inst.total 記到 chip_history/<date>.json (彙總多股)"""
+    from datetime import date as _date
+    inst = (chip_out or {}).get('inst') or {}
+    if inst.get('total') is None:
+        return
+    os.makedirs(CHIP_HISTORY_PATH, exist_ok=True)
+    fn = os.path.join(CHIP_HISTORY_PATH, _date.today().strftime('%Y%m%d') + '.json')
+    day = {}
+    if os.path.isfile(fn):
+        try:
+            with open(fn, encoding='utf-8') as f: day = json.load(f)
+        except Exception: day = {}
+    day[clean_code] = {
+        'foreign': inst.get('foreign'), 'trust': inst.get('trust'),
+        'dealer': inst.get('dealer'), 'total': inst.get('total'),
+    }
+    with open(fn, 'w', encoding='utf-8') as f:
+        json.dump(day, f, ensure_ascii=False)
+
+_openapi_ds = {}   # dataset name → (date, {code: row})
+
+def _openapi_lookup(dataset_names, clean_code):
+    """從 TWSE OpenAPI 全市場資料集找某股。資料集整批快取一天。"""
+    from datetime import date as _date
+    today = _date.today().strftime('%Y%m%d')
+    for ds in dataset_names:
+        cached = _openapi_ds.get(ds)
+        if not cached or cached[0] != today:
+            try:
+                url = f'https://openapi.twse.com.tw/v1/opendata/{ds}'
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    arr = json.loads(resp.read())
+                idx = {}
+                for row in arr:
+                    code = (row.get('公司代號') or row.get('證券代號') or '').strip()
+                    if code:
+                        idx[code] = row
+                _openapi_ds[ds] = (today, idx)
+                cached = _openapi_ds[ds]
+            except Exception as e:
+                print(f'[fundamental] openapi {ds} failed: {e}')
+                _openapi_ds[ds] = (today, {})
+                cached = _openapi_ds[ds]
+        row = cached[1].get(clean_code)
+        if row:
+            return row
+    return None
+
+def _fundamental_score(out):
+    """0~100 基本面分數：成長性(營收YoY+累計YoY) + 獲利性(三率)"""
+    score, parts = 0, 0
+    rev = out.get('revenue') or {}
+    inc = out.get('income') or {}
+    if rev.get('yoyPct') is not None:
+        y = rev['yoyPct']
+        score += max(0, min(100, 50 + y)); parts += 1   # YoY 0% → 50 分
+    if rev.get('cumYoyPct') is not None:
+        score += max(0, min(100, 50 + rev['cumYoyPct'])); parts += 1
+    if inc.get('netMargin') is not None:
+        score += max(0, min(100, inc['netMargin'] * 3)); parts += 1   # 淨利率 33%→100
+    if inc.get('opMargin') is not None:
+        score += max(0, min(100, inc['opMargin'] * 3)); parts += 1
+    if not parts:
+        return None
+    return round(score / parts)
+
+def _chip_streak(clean_code):
+    """從 chip_history 反向算外資/投信連續買(>0)賣(<0)超天數"""
+    if not os.path.isdir(CHIP_HISTORY_PATH):
+        return None
+    files = sorted(glob.glob(os.path.join(CHIP_HISTORY_PATH, '*.json')), reverse=True)
+    series = {'foreign': [], 'trust': []}
+    for fn in files[:60]:
+        try:
+            with open(fn, encoding='utf-8') as f: day = json.load(f)
+        except Exception:
+            continue
+        rec = day.get(clean_code)
+        if not rec:
+            continue
+        for k in series:
+            if rec.get(k) is not None:
+                series[k].append(rec[k])
+    def streak(vals):
+        if not vals:
+            return 0
+        sign = 1 if vals[0] > 0 else (-1 if vals[0] < 0 else 0)
+        if sign == 0:
+            return 0
+        n = 0
+        for v in vals:
+            if (v > 0 and sign > 0) or (v < 0 and sign < 0):
+                n += 1
+            else:
+                break
+        return n * sign  # 正=連買天數, 負=連賣天數
+    return {'foreign': streak(series['foreign']), 'trust': streak(series['trust'])}
 
 # ── Tracker run state (for /etf-tracker/run + /etf-tracker/status) ──
 _tracker_state = {
@@ -397,10 +505,19 @@ class Handler(SimpleHTTPRequestHandler):
         elif p.startswith('/keystats/'):
             sym = p[10:].split('?')[0]
             self._handle_keystats(sym)
+        elif p.startswith('/fundamental/'):
+            sym = p[13:].split('?')[0]
+            self._handle_fundamental(sym)
         elif p == '/sectors' or p.startswith('/sectors?'):
             self._handle_sectors()
         elif p == '/screener' or p.startswith('/screener?'):
             self._handle_screener_get()
+        elif p == '/alert/status' or p.startswith('/alert/status?'):
+            self._alert_status()
+        elif p == '/alert/rules' or p.startswith('/alert/rules?'):
+            self._alert_get_rules()
+        elif p == '/alert/config' or p.startswith('/alert/config?'):
+            self._alert_get_config()
         elif p == '/health':
             d = find_etf_dir()
             files = list_etf_files()
@@ -426,6 +543,12 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_screener_post()
         elif p == '/ai-report':
             self._handle_ai_report()
+        elif p == '/alert/rules':
+            self._alert_post_rules()
+        elif p == '/alert/config':
+            self._alert_post_config()
+        elif p == '/alert/test':
+            self._alert_test()
         else:
             self._err('not found', 404)
 
@@ -920,6 +1043,120 @@ class Handler(SimpleHTTPRequestHandler):
                             break
         except Exception as e:
             print(f'[chip] MI_MARGN fetch failed for {sym}: {e}')
+        # 借券賣出餘額 TWT72U (v3.8)
+        try:
+            url3 = f'https://www.twse.com.tw/rwd/zh/marginTrading/TWT72U?date={today}&selectType=ALL&response=json'
+            req3 = urllib.request.Request(url3, headers=YF_HEADERS)
+            with urllib.request.urlopen(req3, timeout=10) as resp:
+                data3 = json.loads(resp.read())
+            if data3.get('stat') in ('OK', 'ok'):
+                fields = data3.get('fields') or []
+                rows = data3.get('data') or []
+                idx_code = next((i for i, f in enumerate(fields) if '股票' in f or '代號' in f), 1)
+                for row in rows:
+                    if str(row[idx_code]).strip() == clean:
+                        def col3(keyword, fb=None):
+                            for i, f in enumerate(fields):
+                                if keyword in f:
+                                    try: return float(str(row[i]).replace(',', '').replace(' ', ''))
+                                    except: return fb
+                            return fb
+                        out['shortLend'] = {
+                            'sellVolume':  col3('借券賣出') or col3('當日賣出'),
+                            'balance':     col3('借券賣出餘額') or col3('餘額'),
+                        }
+                        break
+        except Exception as e:
+            print(f'[chip] TWT72U fetch failed for {sym}: {e}')
+        # 當沖比 TWTB4U (v3.8): 當沖成交量 / 總成交量
+        try:
+            url4 = f'https://www.twse.com.tw/rwd/zh/afterTrading/TWTB4U?date={today}&response=json'
+            req4 = urllib.request.Request(url4, headers=YF_HEADERS)
+            with urllib.request.urlopen(req4, timeout=10) as resp:
+                data4 = json.loads(resp.read())
+            if data4.get('stat') in ('OK', 'ok'):
+                fields = data4.get('fields') or []
+                rows = data4.get('data') or []
+                idx_code = next((i for i, f in enumerate(fields) if '代號' in f), 0)
+                for row in rows:
+                    if str(row[idx_code]).strip() == clean:
+                        def col4(keyword, fb=None):
+                            for i, f in enumerate(fields):
+                                if keyword in f:
+                                    try: return float(str(row[i]).replace(',', '').replace(' ', '').replace('%', ''))
+                                    except: return fb
+                            return fb
+                        dt_vol = col4('當日沖銷交易成交股數') or col4('當沖成交股數') or col4('成交股數')
+                        out['dayTrade'] = {
+                            'volume':  dt_vol,
+                            'ratioPct': col4('當日沖銷交易比率') or col4('當沖比'),
+                        }
+                        break
+        except Exception as e:
+            print(f'[chip] TWTB4U fetch failed for {sym}: {e}')
+        # 法人連續買賣超天數 (v3.8): 讀 chip_history 快照
+        try:
+            out['streak'] = _chip_streak(clean)
+        except Exception as e:
+            print(f'[chip] streak calc failed for {sym}: {e}')
+        # 寫入今日 chip_history 快照供日後連續天數計算
+        try:
+            _chip_history_record(clean, out)
+        except Exception:
+            pass
+        body = json.dumps(out, ensure_ascii=False).encode()
+        _cache.set(key, body)
+        self._ok(body)
+
+    def _handle_fundamental(self, sym):
+        """基本面 (v3.8)：月營收 YoY/MoM + 損益表三率 + 基本面評分
+           資料源：TWSE OpenAPI 全市場資料集 (上市 _L / 上櫃 _O)，整批快取一天"""
+        from datetime import date as _date
+        today = _date.today().strftime('%Y%m%d')
+        clean = sym.replace('.TW', '').replace('.TWO', '').strip().upper()
+        key = f'fund:{clean}:{today}'
+        c = _cache.get(key)
+        if c is not None:
+            self._ok(c); return
+        out = {'symbol': sym, 'code': clean, 'date': today, 'revenue': None, 'income': None, 'score': None}
+        # 月營收
+        rev = _openapi_lookup(['t187ap05_L', 't187ap05_O'], clean)
+        if rev:
+            def fnum(k):
+                try: return float(str(rev.get(k, '')).replace(',', ''))
+                except: return None
+            out['revenue'] = {
+                'period':   rev.get('資料年月'),
+                'monthRev': fnum('當月營收'),
+                'yoyPct':   fnum('去年同月增減(%)'),
+                'momPct':   fnum('上月比較增減(%)'),
+                'cumRev':   fnum('當月累計營收'),
+                'cumYoyPct': fnum('前期比較增減(%)'),
+            }
+        # 綜合損益表 → 三率
+        inc = _openapi_lookup(['t187ap06_L_ci', 't187ap06_O_ci', 't187ap06_L', 't187ap06_O'], clean)
+        if inc:
+            def inum(*keys):
+                for k in keys:
+                    if k in inc:
+                        try: return float(str(inc.get(k, '')).replace(',', ''))
+                        except: pass
+                return None
+            sales = inum('營業收入')
+            gross = inum('營業毛利(毛損)', '營業毛利(毛損)淨額')
+            op = inum('營業利益(損失)')
+            net = inum('本期淨利(淨損)', '本期綜合損益總額', '淨利(淨損)歸屬於母公司業主')
+            eps = inum('基本每股盈餘(元)')
+            pct = lambda a, b: round(a / b * 100, 2) if (a is not None and b) else None
+            out['income'] = {
+                'period':       inc.get('資料年度') or inc.get('資料季別') or inc.get('年度'),
+                'sales':        sales, 'eps': eps,
+                'grossMargin':  pct(gross, sales),
+                'opMargin':     pct(op, sales),
+                'netMargin':    pct(net, sales),
+            }
+        # 基本面評分 0~100（成長性/獲利性二維簡版）
+        out['score'] = _fundamental_score(out)
         body = json.dumps(out, ensure_ascii=False).encode()
         _cache.set(key, body)
         self._ok(body)
@@ -1426,6 +1663,78 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as e:
             self._err('AI report failed: ' + str(e), 500)
 
+    # ── Alert daemon endpoints (v3.8) ──────────────────────
+    def _read_json_body(self):
+        length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(length) if length > 0 else b'{}'
+        return json.loads(body.decode('utf-8'))
+
+    def _alert_status(self):
+        if not alert_daemon:
+            self._err('alert daemon unavailable', 503); return
+        self._ok(json.dumps(alert_daemon.status(), ensure_ascii=False).encode())
+
+    def _alert_get_rules(self):
+        if not alert_daemon:
+            self._err('alert daemon unavailable', 503); return
+        self._ok(json.dumps(alert_daemon.load_rules(), ensure_ascii=False).encode())
+
+    def _alert_post_rules(self):
+        if not alert_daemon:
+            self._err('alert daemon unavailable', 503); return
+        try:
+            rules = self._read_json_body()
+            if not isinstance(rules, list):
+                self._err('rules must be a list', 400); return
+            alert_daemon.save_rules(rules)
+            self._ok(json.dumps({'ok': True, 'count': len(rules)}).encode())
+        except Exception as e:
+            self._err('save rules failed: ' + str(e), 500)
+
+    def _alert_get_config(self):
+        if not alert_daemon:
+            self._err('alert daemon unavailable', 503); return
+        cfg = alert_daemon.load_config()
+        # 遮蔽敏感欄位
+        safe = json.loads(json.dumps(cfg))
+        if safe.get('telegram', {}).get('bot_token'):
+            safe['telegram']['bot_token'] = '***set***'
+        if safe.get('email', {}).get('app_password'):
+            safe['email']['app_password'] = '***set***'
+        self._ok(json.dumps(safe, ensure_ascii=False).encode())
+
+    def _alert_post_config(self):
+        if not alert_daemon:
+            self._err('alert daemon unavailable', 503); return
+        try:
+            incoming = self._read_json_body()
+            cur = alert_daemon.load_config()
+            # 合併：'***set***' 代表前端沒改，保留原值
+            for sect in ('telegram', 'email'):
+                if isinstance(incoming.get(sect), dict):
+                    for k, v in incoming[sect].items():
+                        if v == '***set***':
+                            continue
+                        cur.setdefault(sect, {})[k] = v
+                    incoming.pop(sect)
+            cur.update(incoming)
+            alert_daemon.save_config(cur)
+            if cur.get('enabled') and alert_daemon:
+                alert_daemon.start()
+            self._ok(json.dumps({'ok': True}).encode())
+        except Exception as e:
+            self._err('save config failed: ' + str(e), 500)
+
+    def _alert_test(self):
+        if not alert_daemon:
+            self._err('alert daemon unavailable', 503); return
+        try:
+            cfg = alert_daemon.load_config()
+            ok, results = alert_daemon.notify(cfg, '✅ Stock Terminal 測試推播 — 設定成功', '測試')
+            self._ok(json.dumps({'ok': ok, 'results': results}, ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('test push failed: ' + str(e), 500)
+
     def log_message(self, fmt, *args):
         pass  # silent
 
@@ -1437,4 +1746,14 @@ if __name__ == '__main__':
     print(f'Workers: {MAX_WORKERS}  |  LRU cache: {LRU_MAX} symbols  |  CPU: {os.cpu_count()}')
     print(f'ETF delta path: {d or "NOT FOUND — set ETF_DELTA_PATH in server.py"}')
     print(f'ETF history files: {len(files)}')
+    if alert_daemon:
+        try:
+            _ac = alert_daemon.load_config()
+            if _ac.get('enabled'):
+                alert_daemon.start()
+                print('[alert] daemon started (poll %ss)' % _ac.get('poll_seconds', 60))
+            else:
+                print('[alert] daemon idle (enable in alert_config.json or UI)')
+        except Exception as _e:
+            print('[alert] start failed:', _e)
     ThreadingHTTPServer(('localhost', PORT), Handler).serve_forever()

@@ -37,7 +37,9 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 #left{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}
 #chartarea{flex:1;min-height:0;position:relative;background:var(--bg)}
 #indbar{background:var(--bg2);border-top:1px solid var(--border);display:flex;flex-direction:column;padding:0;overflow:hidden;flex-shrink:0}
-#right{width:340px;display:flex;flex-direction:column;border-left:1px solid var(--border);background:var(--bg2);flex-shrink:0}
+#right{flex:0 0 40%;width:40%;min-width:0;display:flex;flex-direction:column;border-left:1px solid var(--border);background:var(--bg2)}
+#left{min-width:0}
+#splitter{display:none}
 #rtabs{display:flex;border-bottom:1px solid var(--border);height:36px;flex-shrink:0}
 #rpanel{flex:1;overflow-y:auto;min-height:0}
 
@@ -99,10 +101,9 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 .ci-chg{font-size:11px;margin-top:2px}
 
 /* ── INDICATOR BAR (16 cells in 8-col × 2-row grid, no scroll) ── */
-.ig{display:grid;grid-template-columns:repeat(8,1fr);grid-auto-rows:38px;width:100%}
+.ig{display:grid;grid-template-rows:repeat(2,34px);grid-auto-flow:column;grid-auto-columns:1fr;width:100%}
 .igcell{padding:2px 8px;border-right:1px solid var(--border);border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:6px;overflow:hidden;min-width:0}
-.igcell:nth-child(-n+8){border-top:none}
-.igcell:nth-child(8n){border-right:none}
+.igcell:nth-child(odd){border-top:none}
 .ig-lbl{font-family:'JetBrains Mono',monospace;font-size:8.5px;color:var(--tlo);letter-spacing:.5px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:1}
 .ig-val{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--thi);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;flex-shrink:0}
 
@@ -205,12 +206,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
-<link rel="stylesheet" href="mobile_v2.css?v=1779985208">
+<link rel="stylesheet" href="mobile_v2.css?v=1780325418">
 </head>
 <body>
 <div id="app">
   <div id="topbar">
-    <span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v3.5</span></span>
+    <span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v3.8</span></span>
     <div class="sep"></div>
     <div style="display:flex;align-items:center;gap:4px">
       <button class="mktbtn on" id="btn-tw" onclick="setMkt('TW')">🇹🇼 TW</button>
@@ -241,6 +242,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
       </div>
       <div id="indbar"><div class="ig" id="ig-cells"></div></div>
     </div>
+    <div id="splitter" title="拖曳調整線型 / 功能區寬度"></div>
     <div id="right">
       <div id="rtabs">
         <button class="rtab on" onclick="setTab('stats')">STATS</button>
@@ -525,20 +527,11 @@ async function loadSym(sym, mkt) {
     parsed.candles = parsed.candles.slice(-rdef.trim);
   }
 
-  // ── Yahoo data freshness fix ──────────────────────────────────
-  // Yahoo 的日 K 線資料偶爾會比 regularMarketPrice 慢一天（特別是
-  // 部分 ETF 如 00830/00935/00947/00981A/00988A 等）。當這發生時：
-  //   • candles[-1] 仍是「昨天」的收盤
-  //   • meta.regularMarketPrice 是「今天」的實際收盤
-  //   • meta.regularMarketTime 也已經是今天
-  // 直接用 candles[-1] vs candles[-2] 算 % 會變成「昨天的 %」，
-  // 例如 00830 顯示 +4.02% 而非正確的 -3.42%。
-  //
-  // 修法：偵測這個落差（rmt 比 last candle 晚 > 20 小時），自動
-  // 合成一根「今日」K 線（OHLC 全用 rmp，量設 0），讓 chart 圖、
-  // chart-info 顯示、chip % 全部對齊 Yahoo 的最新收盤資料。
-  // 只在日線/週線生效，盤中 5m K 不適用。
-  // ───────────────────────────────────────────────────────────
+  // ── Yahoo data freshness fix (v3.6) ──────────────────────────
+  // Yahoo daily K 線陣列偶爾會落後 regularMarketPrice 一天（query1/query2 同步差）。
+  // 偵測：rmt 比最後一根 K 線晚 > 20 小時 → 合成一根「今日」K 線
+  // (OHLC=rmp, volume=0)，讓 chart / chart-info / chip 全部用 Yahoo 最新 rmp。
+  // 落差消失時自動不觸發，無副作用。
   if (parsed.candles.length >= 1 && parsed.meta) {
     const _meta = parsed.meta;
     const _last = parsed.candles[parsed.candles.length - 1];
@@ -548,25 +541,21 @@ async function loadSym(sym, mkt) {
     if (_dailyIvl && _rmt && _rmp != null && isFinite(_rmp) && _rmp > 0
         && _last && _last.time && (_rmt - _last.time) > 20 * 3600) {
       parsed.candles.push({
-        time: _rmt,
-        open: _rmp, high: _rmp, low: _rmp, close: _rmp,
-        volume: 0,
-        _synthetic: true,    // tag for debugging / downstream filters
+        time: _rmt, open: _rmp, high: _rmp, low: _rmp, close: _rmp,
+        volume: 0, _synthetic: true,
       });
     }
   }
 
-  // ── Intraday mode 昨收計算 ─────────────────────────────────────
-  // 在 1天 view (interval=5m) 下，candles 是當日 5min K，
-  // candles[-2] 是上一根 5min（非昨日收盤）→ 直接算 % 會變「最後 5min vs
-  // 倒數第二 5min」的微幅變動（例如 +1.50%）而非當日 vs 昨日（-4.96%）。
-  // Yahoo intraday meta 提供正確的 chartPreviousClose（昨日收盤），
-  // 在 intraday 用它作為 prev，並且讓 polish_v3.js 的「昨收」線也使用它。
+  // ── Intraday yesterdayClose 對齊 ─────────────────────────────
+  // intraday (1天 5m) 用倒數第二根 5min K 算 % 是錯的（盤中波動）。
+  // 改用 meta.chartPreviousClose 當「真正的昨收」，存到 S.data.yesterdayClose
+  // 供 polish_v3.js 的「昨收」線/ci-chg 顏色一起對齊。
   const _isIntraday = (rdef.interval !== '1d' && rdef.interval !== '1wk');
   if (_isIntraday && parsed.meta) {
     const _ycp = parsed.meta.chartPreviousClose ?? parsed.meta.previousClose;
     if (_ycp != null && isFinite(_ycp) && _ycp > 0) {
-      parsed.yesterdayClose = _ycp;   // exposed so polish_v3 prev-close line uses this
+      parsed.yesterdayClose = _ycp;
     }
   }
 
@@ -577,11 +566,12 @@ async function loadSym(sym, mkt) {
 
   const last = parsed.candles[parsed.candles.length-1];
   const prev = parsed.candles[parsed.candles.length-2];
-  // For intraday: prefer yesterdayClose (= meta.chartPreviousClose) as the
-  // % reference; for daily/weekly: prev candle's close is yesterday.
-  const _prevRef = (_isIntraday && parsed.yesterdayClose != null) ? parsed.yesterdayClose
-                                                                   : (prev ? prev.close : null);
-  const chgPct = (_prevRef != null && _prevRef > 0) ? ((last.close - _prevRef) / _prevRef * 100) : 0;
+  // For intraday: use S.data.yesterdayClose. For daily/weekly (含合成 K): use prev candle.
+  const _prevRef = (_isIntraday && parsed.yesterdayClose != null)
+    ? parsed.yesterdayClose
+    : (prev ? prev.close : null);
+  const chgPct = (_prevRef != null && _prevRef > 0)
+    ? ((last.close - _prevRef) / _prevRef * 100) : 0;
   document.getElementById('ci-price').textContent = last.close.toFixed(2);
   const ci = document.getElementById('ci-chg');
   ci.textContent = (chgPct>=0?'+':'')+chgPct.toFixed(2)+'%';
@@ -608,17 +598,15 @@ function renderChart(candles) {
   // intraday (1d range, 5m interval) → show HH:mm; daily/weekly → date only
   const isIntraday = S.range === '1d';
 
-  // ── 時區平移：統一使用「使用者本地時區」 ───────────────────
-  // lightweight-charts 預設用 UTC 顯示時間軸。對台北使用者來說：
-  //   • 台股 5/28 13:30 收盤 = 05:30 UTC → 圖表顯示 01:00–05:30 (錯)
-  //   • 美股 09:30 ET 開盤 = 13:30 UTC → 對台北使用者應顯示 21:30 (Taipei)
-  // 修法：用「使用者本地 TZ offset」(getTimezoneOffset) 平移時間戳，
-  // 讓所有市場的圖表時間都對應到「使用者那邊的時鐘」。
-  //   • TW 股 in Taipei: 09:00–13:30 (本地交易時段)
-  //   • US 股 in Taipei: 21:30–04:00 隔天 (Taipei 看 NYSE 的真實時段)
-  // Crosshair 讀回時用 getUTC* 方法（時間已被預先平移）。
-  const userTzOffset = -new Date().getTimezoneOffset() * 60;   // seconds
-  S.tzOffset = userTzOffset;   // expose for polish_v3.js volume re-set
+  // ── 時區平移：使用者本地時區 (v3.6) ──────────────────────────
+  // lightweight-charts 預設用 UTC 顯示。台北使用者看 13:30 收盤的台股會
+  // 顯示 05:30，看美股 09:30 開盤會顯示成 09:30 ET。改用本地 TZ offset
+  // 平移後，所有市場的時間軸都對應到「使用者本地時鐘」：
+  //   TW 股 in Taipei: 09:00–13:30
+  //   US 股 in Taipei: 21:30–04:00 隔天
+  // Crosshair 讀回時必須用 getUTC*（時間已被預先平移過）
+  const userTzOffset = -new Date().getTimezoneOffset() * 60;
+  S.tzOffset = userTzOffset;
   const tz = (t) => (t == null ? t : t + userTzOffset);
 
   const chart = LightweightCharts.createChart(wrap, {
@@ -707,7 +695,7 @@ function renderChart(candles) {
     if (!k) { ohlcEl.style.display = 'none'; return; }
 
     // Date string (intraday → date+time, daily → date only)
-    // 時間已被預先平移到交易所時區 → 用 getUTC* 讀取才能取得當地的時/分/日
+    // 時間已被預先平移到使用者本地時區 → 用 getUTC* 讀取才能取得當地的時/分/日
     const d = new Date(typeof param.time === 'number' ? param.time * 1000 : Date.parse(param.time));
     const ds = isIntraday
       ? `${d.getUTCMonth()+1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`
@@ -1291,4 +1279,110 @@ function saveKey() {
   const v=document.getElementById('key-inp')?.value?.trim();
   if(!v)return;
   S.apiKey=v; localStorage.setItem(LS_KEY_KEY,v);
-  documen
+  document.getElementById('key-modal')?.remove();
+  updateKeyBtn(); renderRpanel();
+}
+function clearKey() {
+  S.apiKey=''; localStorage.removeItem(LS_KEY_KEY);
+  document.getElementById('key-modal')?.remove();
+  updateKeyBtn(); renderRpanel();
+}
+
+// keyboard shortcut
+document.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
+});
+</script>
+<script src="position_v2.js?v=1780325418"></script>
+<script src="watch_v2.js?v=1780325418"></script>
+<script src="info_v2.js?v=1780325418"></script>
+<script src="pro_v2.js?v=1780325418"></script>
+<script src="volume_profile_v3.js?v=1780325418"></script>
+<script src="pattern_v3.js?v=1780325418"></script>
+<script src="live_v2.js?v=1780325418"></script>
+<script src="chip_v3.js?v=1780325418"></script>
+<script src="fundamental_v3.js?v=1780325418"></script>
+<script src="heatmap_v3.js?v=1780325418"></script>
+<script src="screener_v3.js?v=1780325418"></script>
+<script src="ai_report_v3.js?v=1780325418"></script>
+<script src="polish_v3.js?v=1780325418"></script>
+<script src="wl_live_v3.js?v=1780325418"></script>
+<script src="plan_history_v3.js?v=1780325418"></script>
+<script src="plan_position_v3.js?v=1780325418"></script>
+<script src="plan_v3.js?v=1780325418"></script>
+<script src="pdf_import_v3.js?v=1780325418"></script>
+<script src="pdf_export_v3.js?v=1780325418"></script>
+<script src="peg_v3.js?v=1780325418"></script>
+<script src="alert_v3.js?v=1780325418"></script>
+<script src="alert_push_v3.js?v=1780325418"></script>
+<script src="backtest_v3.js?v=1780325418"></script>
+<script src="backtest_ui_v3.js?v=1780325418"></script>
+<script src="enhance_v3.js?v=1780325418"></script>
+<script src="etf_v3.js?v=1780325418"></script>
+</body>
+</html>
+<script>
+// ══════════════════════════════════════════════════════════════
+// ETF DELTA — 新增功能區塊
+// ══════════════════════════════════════════════════════════════
+
+const ETF_MAP_NAMES = {
+  '00992A':'群益科技創新','00981A':'統一台股增長',
+  '00987A':'台新優勢成長','00994A':'第一金台股優',
+  '00982A':'群益台灣強棒','00995A':'中信台灣卓越',
+  '00980A':'野村臺灣優選','00991A':'復華未來50',
+  '00996A':'兆豐台灣豐收','00984A':'安聯台灣高息',
+};
+
+async function fetchEtfDelta(date) {
+  S.etfLoading = true;
+  S.etfErr = null;
+  try {
+    const url = date ? `${SERVER}/etf-delta?date=${date}` : `${SERVER}/etf-delta`;
+    const r = await fetch(url, {cache:'no-store'});
+    if (!r.ok) {
+      let msg = `HTTP ${r.status}`;
+      try { const j = await r.json(); if (j.error) msg = j.error; } catch {}
+      S.etfDelta = null; S.etfErr = msg; S.etfLoading = false;
+      if (S.tab === 'etf') renderRpanel();
+      return;
+    }
+    S.etfDelta = await r.json();
+    renderWl();
+    updateEtfFlowInd();
+    if (S.tab === 'etf')   renderRpanel();
+    if (S.tab === 'stats') renderRpanel();
+  } catch (e) { S.etfDelta = null; S.etfErr = e.message || 'fetch failed'; }
+  S.etfLoading = false;
+}
+
+function getEtfFlowForStock(code) {
+  if (!S.etfDelta) return null;
+  let addCount=0, rmCount=0, chgSum=0;
+  for (const etf of (S.etfDelta.etfs||[])) {
+    if ((etf.new||[]).find(s=>s.code===code))     addCount++;
+    if ((etf.removed||[]).find(s=>s.code===code)) rmCount++;
+    const chg = (etf.changed||[]).find(s=>s.code===code);
+    if (chg) chgSum += chg.delta;
+  }
+  return {addCount, rmCount, chgSum};
+}
+
+function updateEtfFlowInd() {
+  const el = document.getElementById('ig-etfFlow');
+  if (!el || !S.sym) return;
+  if (!S.etfDelta) { el.textContent='--'; return; }
+  const flow = getEtfFlowForStock(S.sym);
+  if (!flow) { el.textContent='--'; return; }
+  if (flow.addCount > 0)      { el.textContent=`+${flow.addCount} ETF`; el.style.color='var(--green)'; }
+  else if (flow.rmCount > 0)  { el.textContent=`-${flow.rmCount} ETF`; el.style.color='var(--red)'; }
+  else if (Math.abs(flow.chgSum) >= 0.5) {
+    el.textContent=(flow.chgSum>0?'+':'')+flow.chgSum.toFixed(2)+'%';
+    el.style.color=flow.chgSum>0?'var(--green)':'var(--red)';
+  } else { el.textContent='無訊號'; el.style.color='var(--tf)'; }
+}
+
+function renderEtfHoldingsForStock(sym) { return ""; }
+
+// -- v1 ETF section removed by build_v2.py --
+</script>

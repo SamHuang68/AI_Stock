@@ -221,6 +221,13 @@ document.addEventListener('click', ev => {
 // Fire notification for newly-triggered signals
 function fireSignalNotifications() {
   if (!S.watches) return;
+  // v3.8: 訊號只在「日線」決策 timeframe 評估。
+  // 切到周線/月線/盤中線時 SMA 等指標意義不同，狀態會在 trigger<->none 翻動，
+  // 把去重狀態洗掉造成切回日線重複跳通知。日線各區間(1月~全部)最新指標值相同→穩定。
+  try {
+    const ivl = (typeof currentRangeDef === 'function') ? currentRangeDef().interval : '1d';
+    if (ivl !== '1d') return;
+  } catch {}
   let newCount = 0;
   for (const code in S.watches) {
     const w = S.watches[code];
@@ -781,13 +788,19 @@ document.addEventListener('click', ev => {
     tools.className = 'pro-tools';
     tools.innerHTML =
       `<button class="probtn" id="btn-compare" onclick="compareToggle()" title="疊上大盤指數比較相對表現">vs 大盤</button>` +
-      `<button class="probtn" id="btn-vp"      onclick="vpToggle()"      title="顯示量價分布 (POC)">POC</button>` +
+      `<button class="probtn" id="btn-vp"      onclick="vpToggle()"      title="成交金額量價分布 + POC/主力成本區 (v3.8)">📊 量價</button>` +
+      `<button class="probtn" id="btn-vp-mode" onclick="window.vpCycleMode&&vpCycleMode()" title="切換 金額/成交量 模式 (v3.8)">$/量</button>` +
+      `<button class="probtn" id="btn-bt3"     onclick="window.backtestOpen&&backtestOpen()" title="回測引擎：8 策略勝率 + 型態命中率 (v3.8)">📈 回測</button>` +
+      `<button class="probtn" id="btn-alertpush" onclick="window.alertPushOpen&&alertPushOpen()" title="後端警報推播設定 Telegram/Email (v3.8)">🔔 推播</button>` +
       `<button class="probtn" id="btn-replay"  onclick="replayToggle()"  title="K 線重播模式">▶ Replay</button>`;
     rangebar.parentElement.insertBefore(tools, rangebar.nextSibling);
-    // Move tools to be inside rangebar's container alongside it
-    rangebar.style.flex = '1 1 0';
+    // v3.8: 工具列改 2 列 — 行1 時間段(rangebar)，行2 功能鈕(tools)
+    rangebar.style.flex = '0 0 auto';
+    tools.style.borderLeft = 'none';
+    tools.style.borderTop = '1px solid var(--border)';
+    tools.style.flexWrap = 'wrap';
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'display:flex;align-items:stretch;flex-shrink:0';
+    wrap.style.cssText = 'display:flex;flex-direction:column;align-items:stretch;flex-shrink:0;width:100%';
     rangebar.parentElement.insertBefore(wrap, rangebar);
     wrap.appendChild(rangebar);
     wrap.appendChild(tools);

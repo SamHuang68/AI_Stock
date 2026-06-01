@@ -384,6 +384,63 @@ MoneyDJ 跟 Yahoo 對市場後綴的命名不完全一致：
 
 ---
 
+## v3.8 — 籌碼/基本面/回測/警報 四主軸 + 成交金額 Volume Profile（2026-06）
+
+一次推進五個方向。新增模組皆可獨立關閉，不影響既有功能。
+
+### E. 成交金額 Volume Profile（主力成交金額）
+
+`volume_profile_v3.js` 覆寫 pro_v2 的 POC，把每根 K 的成交**金額**（typical price × volume）分配到 Y 軸價格 bin，右側畫橫向直方圖，並標出：
+
+- **POC**（金額最大價區，主力最集中成本）粗線 + 累積金額（億/萬）
+- **VAH / VAL**（70% 金額集中區上下緣）虛線
+- **主力成本區** = VAL~VAH，自動判斷現價在主力成本之上（偏多）/ 之下（偏空）/ 區內（盤整）
+
+工具列 `📊 量價` 開關、模式鈕循環切換 **量價均衡**（金額與量各自正規化後平均，預設）→ **金額** → **成交量**。
+
+### 版面：可拖拉左右分隔
+
+`layout_v3.js`：線型區 `#left` 與功能分析區 `#right` 之間加可拖曳分隔條 `#splitter`，寬度存 localStorage，雙擊重置成 340px。底部 16 指標鎖成 2 列、頂部自選股維持 2 列。拖曳後自動觸發 chart resize + 量價重繪。
+
+### A. 籌碼深化
+
+`_handle_chip` 擴充：借券賣出餘額（TWT72U）、當沖比（TWTB4U，>30% 標 🚩）、法人連續買賣超天數徽章。新增 `chip_history_tracker.py` 盤後抓 T86 全市場存 `chip_history/`，累積後 `_chip_streak()` 算「外資連 N 買/賣」。
+
+### B. 基本面深化
+
+`fundamental_v3.js` + `/fundamental/<sym>` 端點（TWSE OpenAPI 全市場資料集，整批快取一天）：月營收當月/YoY/MoM/累計YoY、損益表三率（毛利/營益/淨利率）+ EPS、基本面評分 0~100。與 WATCH 技術面共識並列成「技術 × 基本面」雙軸。STATS 分頁新增「基本面」section。
+
+### C. 回測引擎強化
+
+`backtest_v3.js` 統一核心（自足 SMA/RSI/BB，不依賴他模組）：
+
+- **策略掃描** 8 策略歷史勝率 / 賠率 / 期望值 / 總報酬 / 最大回撤 / 夏普
+- **型態命中率** 對 PatternV3 型態跑歷史偵測 → 10 日後報酬分布
+- **投組回測** 多檔 + 資金配置 → 投組權益曲線
+- `backtest_ui_v3.js` 提供面板（工具列 `📈 回測`），點任一策略列畫權益曲線
+
+### D. 警報推播擴充（後端常駐）
+
+警報邏輯下放 `server.py` 背景 thread（`alert_daemon.py`），**瀏覽器關著也會推播**：
+
+- **Telegram Bot**（推薦）+ **Email (SMTP)** 雙通道
+- 設定存 `alert_config.json`、規則存 `alert_rules.json`（皆 .gitignore，含 token）
+- 端點：`GET /alert/status|rules|config`、`POST /alert/rules|config|test`
+- 前端 `alert_push_v3.js`（工具列 `🔔 推播`）：開關 daemon、設定通道、規則表、測試推播
+- 觸發紀錄存 `logs/alerts/`
+- 註：LINE Notify 已於 2025-03 停服，故改 Telegram
+
+### 套用步驟
+
+```
+雙擊 rebuild_and_restart.bat      # build_v2.py 重生 v2.html + 重啟含新端點的 server.py
+（可選）python chip_history_tracker.py    # 起始一筆籌碼快照
+```
+
+警報設定、Telegram token 在終端機 `🔔 推播` 面板填，或直接編 `alert_config.json`。
+
+---
+
 ## 檔案結構
 
 ```

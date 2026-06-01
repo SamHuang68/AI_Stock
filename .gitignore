@@ -40,6 +40,10 @@ Stock_Terminal_*.zip
 .env.local
 secrets.json
 
+# v3.8 Alert daemon — contains Telegram token / SMTP app password / rules
+alert_config.json
+alert_rules.json
+
 # Backup / temp files
 *.bak
 *.tmp

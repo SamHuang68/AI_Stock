@@ -24,20 +24,23 @@ const SERVER_P = window.SERVER || `http://localhost:18432`;
    配色：固定台股慣例 — 紅漲綠跌（不依 body.market-* class 切換）
 */
 #mkt-bar {
-  min-height: 44px; max-height: 88px;
+  min-height: 76px; max-height: 92px;
   background: var(--bg2); border-top: 1px solid var(--border);
   flex-shrink: 0; overflow: hidden;
   font-family: 'JetBrains Mono', monospace; font-size: 10px;
 }
+/* v3.8: 大盤改 2 列 grid (column flow，8 指數 → 4 欄 x 2 列) */
 #mkt-bar-inner {
-  display: flex; flex-wrap: wrap; gap: 0; padding: 0;
+  display: grid; grid-template-rows: repeat(2, 1fr);
+  grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+  gap: 0; padding: 0;
 }
 .mkt-cell {
   display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
-  padding: 4px 12px; border-right: 1px solid var(--border); min-height: 44px;
-  white-space: nowrap; flex-shrink: 0; gap: 2px;
+  padding: 3px 12px; border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border); min-height: 36px;
+  white-space: nowrap; min-width: 0; gap: 1px; overflow: hidden;
 }
-.mkt-cell:last-child { border-right: none; }
 .mkt-cell .row1 {
   display: flex; align-items: baseline; gap: 6px;
 }
@@ -450,4 +453,46 @@ function renderKeystatsSection(ks) {
   h += `<div class="keystat-row"><span class="k">本益比 P/E</span><span class="v" style="color:${pe != null ? (pe < 15 ? 'var(--green)' : pe > 30 ? 'var(--red)' : 'var(--thi)') : 'var(--tlo)'}">${pe != null ? pe.toFixed(2) : '--'}</span></div>`;
   h += `<div class="keystat-row"><span class="k">股價淨值比 P/B</span><span class="v" style="color:${pb != null ? (pb < 1.5 ? 'var(--green)' : pb > 5 ? 'var(--red)' : 'var(--thi)') : 'var(--tlo)'}">${pb != null ? pb.toFixed(2) : '--'}</span></div>`;
   h += `<div class="keystat-row"><span class="k">殖利率 Yield</span><span class="v" style="color:${yld != null ? (yld > 4 ? 'var(--green)' : 'var(--thi)') : 'var(--tlo)'}">${yld != null ? yld.toFixed(2) + '%' : '--'}</span></div>`;
-  if (eps != null) h +
+  if (eps != null) h += `<div class="keystat-row"><span class="k">EPS</span><span class="v">${eps.toFixed(2)} ${epsCurrency}</span></div>`;
+  if (ks._source) h += `<div style="padding:4px 12px;font-family:monospace;font-size:8px;color:var(--tf)">資料源：${ks._source}</div>`;
+  h += '</div>';
+  return h;
+}
+
+// ============================================================
+// (#3) Patch renderWl to wrap code + pct in vertical stack
+// 這樣每個 chip 從橫向 ~80px 縮到 ~52px，可放 2 倍數量
+// ============================================================
+(function patchRenderWl() {
+  if (typeof renderWl !== 'function') return setTimeout(patchRenderWl, 100);
+  if (window._polishWlPatched) return;
+  window._polishWlPatched = true;
+  const orig = window.renderWl;
+  window.renderWl = function () {
+    orig.apply(this, arguments);
+    // After v1 renders chips, restructure: wrap .wlchip-t + .wlchip-p in a .wlchip-stack
+    const ct = document.getElementById('wlchips');
+    if (!ct) return;
+    ct.querySelectorAll('.wlchip').forEach(chip => {
+      if (chip.dataset._stacked) return;
+      const t = chip.querySelector('.wlchip-t');
+      const p = chip.querySelector('.wlchip-p');
+      if (!t || !p || t.parentElement !== chip) return;
+      const stack = document.createElement('div');
+      stack.className = 'wlchip-stack';
+      chip.insertBefore(stack, t);
+      stack.appendChild(t);
+      stack.appendChild(p);
+      chip.dataset._stacked = '1';
+    });
+  };
+  // Trigger once if already rendered
+  if (document.getElementById('wlchips')?.children.length) {
+    try { window.renderWl(); } catch {}
+  }
+})();
+
+// Expose
+window.refreshMktBar  = refreshMktBar;
+window.fetchKeyStats  = fetchKeyStats;
+window.applyMarketColorClass = applyMarketColorClass;
