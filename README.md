@@ -1,6 +1,24 @@
-# Stock Terminal
+# Stock Terminal v3.8
 
 Bloomberg-style 個股研究終端機，本機跑、零雲端依賴、無外部 Python 套件需求。
+
+---
+
+## ⚡ 快速開始（3 步）
+
+> 需求：Windows 10/11 + Python 3.10+（純 stdlib，**不用 pip 裝任何東西**）+ 現代瀏覽器。確認 Python：開 cmd 打 `python --version`。
+
+1. **解壓縮**到任一資料夾（例 `C:\Tools\Stock_Terminal\`）。
+2. **雙擊 `start_terminal_v3.bat`** — 會自動 build、開瀏覽器、啟動本機 server（port 18432）。
+3. 上方輸入框打代號按 **GO**（台股 `2330`；美股先點 `US` 再打 `AAPL`）。
+
+**常用功能**（圖表上方工具列）：`📊 量價`（成交金額/量分布 + 主力成本區）、`📈 回測`、`🔔 推播`（Telegram/Email 警報設定）、`形態³`（19 種型態）。右側 `STATS` 分頁看技術×基本面雙軸卡、籌碼面、基本面。中間邊界 `⟩` 鈕可收合右側放大線型。
+
+**可選排程**（系統管理員身分跑一次）：`install_scheduler.bat`（每交易日 19:00 更新 ETF 持股）、`install_chip_scheduler.bat`（17:40 更新法人籌碼，累積後顯示連買賣天數）。
+
+**更新後沒看到變化？** 先關掉舊的 server 黑視窗 → 雙擊 `rebuild_and_restart.bat` → 瀏覽器 **Ctrl+F5**。
+
+---
 
 - 即時 Yahoo Finance K 線（含 1天 ~ 全部 共 11 個時間段切換）
 - 16 項技術指標（RSI / KD / MACD / SMA / BB / ATR / Ann Vol% / MaxDD% / Vol Ratio / D2-SMA20% / ETF Flow）
@@ -467,8 +485,23 @@ Stock_Terminal/
 ├── daily_etf.bat              排程觸發用的 ETF tracker（無互動）
 ├── install_scheduler.bat      註冊 Windows 工作排程器
 ├── uninstall_scheduler.bat    移除工作排程器
-├── build_dist.bat             打包成 Stock_Terminal_v2.0.zip 的腳本
+├── build_dist.bat             打包成 Stock_Terminal_v3.8.zip 的腳本
+│
+│  ── v3.8 新增 ──
+├── volume_profile_v3.js       成交金額/量平均 Volume Profile（POC/VAH/VAL/主力成本區）
+├── fundamental_v3.js          基本面面板（月營收/三率/評分卡）
+├── backtest_v3.js             統一回測核心（勝率/權益曲線/型態命中率/投組）
+├── backtest_ui_v3.js          回測面板 UI
+├── alert_daemon.py            後端常駐警報（Telegram/Email，瀏覽器免開）
+├── alert_push_v3.js           警報推播設定 UI
+├── chip_history_tracker.py    法人籌碼每日快照（連買賣天數用）
+├── daily_chip.bat             排程觸發用的籌碼抓取（無互動）
+├── install_chip_scheduler.bat 註冊每交易日 17:40 籌碼快照排程
+├── enhance_v3.js              技術×基本面雙軸卡 / 量價數值面板 / 右側收合 / 分頁記憶
+├── alert_config.json          警報通道設定（含 token，.gitignore 不入版控）
+├── alert_rules.json           警報規則（.gitignore 不入版控）
 └── etf_history/               ETF 歷史快照存放處（執行後自動產生）
+   chip_history/               法人籌碼歷史快照（執行後自動產生）
 ```
 
 ---
