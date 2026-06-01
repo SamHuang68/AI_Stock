@@ -65,10 +65,15 @@
 
   // ---- 量價數值面板 ----------------------------------------
   function vpPanelHtml() {
-    const vp = window.VP && VP.enabled && VP.lastVP;
+    if (!window.VP || !VP.enabled) return '';
+    const candles = (S.data && S.data.candles) || [];
+    if (!candles.length) return '';
+    // 重要：用「目前股票的 candles」即時重算，不可讀全域 VP.lastVP
+    // （切股票時 STATS 會比圖表量價重繪先跑，lastVP 還是上一檔的殘值 → 數值對不到股票）
+    const vp = (typeof window.computeVolumeProfile === 'function')
+      ? window.computeVolumeProfile(candles) : VP.lastVP;
     if (!vp) return '';
-    const cur = (S.data && S.data.candles && S.data.candles.length)
-      ? S.data.candles[S.data.candles.length - 1].close : null;
+    const cur = candles[candles.length - 1].close;
     const pos = cur == null ? '—'
       : cur > vp.vah ? '<span style="color:var(--green)">主力成本之上 (偏多)</span>'
         : cur < vp.val ? '<span style="color:var(--red)">主力成本之下 (偏空)</span>'
