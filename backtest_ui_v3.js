@@ -57,12 +57,21 @@
     }
     m.style.display = 'flex';
   }
-  function close() { const m = document.getElementById('bt3-modal'); if (m) m.style.display = 'none'; }
+  function close() {
+    const m = document.getElementById('bt3-modal');
+    if (m) m.style.display = 'none';
+    // 清除上一支股票的回測結果，避免下次開啟殘留
+    lastRows = [];
+    const body = document.getElementById('bt3-body');
+    if (body) body.innerHTML = '按「執行掃描」開始（使用目前線型資料）。';
+    const cv = document.getElementById('bt3-curve');
+    if (cv) { const ctx = cv.getContext('2d'); ctx && ctx.clearRect(0, 0, cv.width, cv.height); }
+  }
 
   let lastRows = [];
 
   function runScan() {
-    const candles = (window.S && S.data && S.data.candles) || [];
+    const candles = ((typeof S !== 'undefined') && S.data && S.data.candles) || [];
     const body = document.getElementById('bt3-body');
     if (candles.length < 80) { body.innerHTML = '<span class="bt3-neg">資料太少（需 ≥ 80 根 K）。請切到較長時間段。</span>'; return; }
     const opts = {

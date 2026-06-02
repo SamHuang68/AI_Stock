@@ -1,7 +1,7 @@
 {
-  "version": 2,
+  "version": "v3.8",
   "updated": "2026-05-25",
-  "note": "台股 ETF 完整分類庫 (2026-05-25 v2)。enabled=true 才會被 etf_delta_tracker.py 抓取。新增 ETF 用前端 ⚙ modal 或直接編輯本檔。",
+  "note": "台股 ETF 完整分類庫 (2026-05-25 v2)。enabled=true 才會被 etf_delta_tracker.py 抓取。新增 ETF 用前端 ⚙ modal 或直接編輯本檔。 | v3.8: market split TW/US; US ETFs enabled=False (no MoneyDJ delta).",
   "categories": [
     {
       "key": "active",
@@ -12,112 +12,140 @@
         {
           "code": "00978A",
           "name": "主動國泰台灣高息成長",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00979A",
           "name": "主動凱基台股優選",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00980A",
           "name": "主動野村臺灣優選",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00981A",
           "name": "主動統一台股增長",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00982A",
           "name": "主動群益台灣強棒",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00984A",
           "name": "主動安聯台灣高息",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00985A",
           "name": "主動富邦台灣動能",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00986A",
           "name": "主動野村高股息動能",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00987A",
           "name": "主動台新優勢成長",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00988A",
           "name": "主動統一全球創新",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00989A",
           "name": "主動國泰AI智選",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00990A",
           "name": "主動元大AI新經濟",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00991A",
           "name": "主動復華未來50",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00992A",
           "name": "主動群益科技創新",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00993A",
           "name": "主動富邦未來科技",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00994A",
           "name": "主動第一金台股優",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00995A",
           "name": "主動中信台灣卓越",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00996A",
           "name": "主動兆豐台灣豐收",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00997A",
           "name": "主動凱基靈活成長",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00403A",
           "name": "主動統一升級50",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00404A",
           "name": "聯博台灣動能收益50",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00405A",
           "name": "富邦台灣龍耀",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
+        },
+        {
+          "code": "00983A",
+          "name": "主動野村臺灣優選",
+          "market": "TW",
+          "enabled": false
         }
       ]
     },
@@ -130,62 +158,140 @@
         {
           "code": "0050",
           "name": "元大台灣50",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "0051",
           "name": "元大中型100",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "006203",
           "name": "元大MSCI台灣",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "006204",
           "name": "永豐臺灣加權",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "006208",
           "name": "富邦台50",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00692",
           "name": "富邦公司治理",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00733",
           "name": "富邦臺灣中小",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00850",
           "name": "元大臺灣ESG永續",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00921",
           "name": "兆豐龍頭等權重",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00922",
           "name": "國泰台灣領袖50",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00923",
           "name": "群益台ESG低碳",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00961",
           "name": "兆豐臺灣加權",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
+        },
+        {
+          "code": "SPY",
+          "name": "SPDR S&P 500",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "VOO",
+          "name": "Vanguard S&P 500",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "IVV",
+          "name": "iShares Core S&P 500",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "VTI",
+          "name": "Vanguard Total US Market",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "QQQ",
+          "name": "Invesco Nasdaq 100",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "QQQM",
+          "name": "Invesco Nasdaq 100 (low fee)",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "DIA",
+          "name": "SPDR Dow Jones",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "IWM",
+          "name": "iShares Russell 2000",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "VT",
+          "name": "Vanguard Total World",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "RSP",
+          "name": "Invesco S&P 500 Equal Weight",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "00905",
+          "name": "FT臺灣Smart",
+          "market": "TW",
+          "enabled": false
         }
       ]
     },
@@ -198,92 +304,152 @@
         {
           "code": "0056",
           "name": "元大高股息",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00701",
           "name": "國泰股利精選30",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00713",
           "name": "元大台灣高息低波",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00731",
           "name": "復華富時高息低波",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00878",
           "name": "國泰永續高股息",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00900",
           "name": "富邦特選高股息30",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00907",
           "name": "永豐優息存股",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00915",
           "name": "凱基優選高股息30",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00918",
           "name": "大華優利高填息30",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00919",
           "name": "群益台灣精選高息",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00929",
           "name": "復華台灣科技優息",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00930",
           "name": "永豐ESG低碳高息",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00932",
           "name": "兆豐永續高息等權",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00936",
           "name": "台新永續高息中小",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00939",
           "name": "統一台灣高息動能",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00940",
           "name": "元大台灣價值高息",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00943",
           "name": "兆豐台灣電子成長高息",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00946",
           "name": "群益台灣科技高息成長",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
+        },
+        {
+          "code": "SCHD",
+          "name": "Schwab US Dividend",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "VYM",
+          "name": "Vanguard High Dividend",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "HDV",
+          "name": "iShares Core High Dividend",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "DGRO",
+          "name": "iShares Dividend Growth",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "JEPI",
+          "name": "JPMorgan Equity Premium Income",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "JEPQ",
+          "name": "JPMorgan Nasdaq Equity Premium",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "SPYD",
+          "name": "SPDR S&P 500 High Dividend",
+          "market": "US",
+          "enabled": false
         }
       ]
     },
@@ -296,77 +462,152 @@
         {
           "code": "0052",
           "name": "富邦科技",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00757",
           "name": "統一FANG+",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00770",
           "name": "國泰北美科技",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00876",
           "name": "元大全球未來通訊",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00881",
           "name": "國泰台灣5G+",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00891",
           "name": "中信關鍵半導體",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00892",
           "name": "富邦台灣半導體",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00895",
           "name": "富邦未來車",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00896",
           "name": "中信綠能及電動車",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00903",
           "name": "富邦元宇宙",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00904",
           "name": "新光臺灣半導體30",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00927",
           "name": "群益半導體收益",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00935",
           "name": "野村臺灣新科技50",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00947",
           "name": "台新臺灣IC設計動能",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00951",
           "name": "永豐美國500大",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
+        },
+        {
+          "code": "SMH",
+          "name": "VanEck Semiconductor",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "SOXX",
+          "name": "iShares Semiconductor",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "XLK",
+          "name": "Tech Select Sector",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "VGT",
+          "name": "Vanguard Information Tech",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "IGV",
+          "name": "iShares Expanded Tech-Software",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "SKYY",
+          "name": "First Trust Cloud",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "ARKK",
+          "name": "ARK Innovation",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "AIQ",
+          "name": "Global X AI & Tech",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "BOTZ",
+          "name": "Global X Robotics & AI",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "00913",
+          "name": "兆豐台灣晶圓製造",
+          "market": "TW",
+          "enabled": false
         }
       ]
     },
@@ -379,92 +620,170 @@
         {
           "code": "00631L",
           "name": "元大台灣50正2",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00632R",
           "name": "元大台灣50反1",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00637L",
           "name": "元大滬深300正2",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00638R",
           "name": "元大滬深300反1",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00640L",
           "name": "富邦日本正2",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00641R",
           "name": "富邦日本反1",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00650L",
           "name": "復華中國正2",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00651R",
           "name": "復華中國反1",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00665L",
           "name": "富邦恒生國企正2",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00666R",
           "name": "富邦恒生國企反1",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00669R",
           "name": "國泰美國道瓊反1",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00670L",
           "name": "富邦NASDAQ正2",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00671R",
           "name": "富邦NASDAQ反1",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00674R",
           "name": "期元大S&P500反1",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00675L",
           "name": "富邦臺灣加權正2",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00676R",
           "name": "富邦臺灣加權反1",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00685L",
           "name": "群益臺灣加權正2",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00686R",
           "name": "群益臺灣加權反1",
+          "enabled": true,
+          "market": "TW"
+        },
+        {
+          "code": "TQQQ",
+          "name": "ProShares UltraPro QQQ 3x",
+          "market": "US",
           "enabled": true
+        },
+        {
+          "code": "SQQQ",
+          "name": "ProShares UltraPro Short QQQ -3x",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "SOXL",
+          "name": "Direxion Semi Bull 3x",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "SOXS",
+          "name": "Direxion Semi Bear 3x",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "UPRO",
+          "name": "ProShares UltraPro S&P500 3x",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "SPXU",
+          "name": "ProShares UltraPro Short S&P -3x",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "TMF",
+          "name": "Direxion 20Y Treasury Bull 3x",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "TNA",
+          "name": "Direxion Small Cap Bull 3x",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "TSLL",
+          "name": "Direxion TSLA Bull 2x",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "NVDL",
+          "name": "GraniteShares NVDA 2x",
+          "market": "US",
+          "enabled": false
         }
       ]
     },
@@ -477,82 +796,152 @@
         {
           "code": "00646",
           "name": "元大S&P500",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00652",
           "name": "富邦印度",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00657",
           "name": "國泰日經225",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00660",
           "name": "元大歐洲50",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00661",
           "name": "元大日經225",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00662",
           "name": "富邦NASDAQ",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00709",
           "name": "富邦歐洲",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00710B",
           "name": "復華彭博非投等債",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00752",
           "name": "中信中國50",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00830",
           "name": "國泰費城半導體",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00858",
           "name": "永豐美國500大",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00861",
           "name": "元大全球未來關鍵科技",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00865B",
           "name": "國泰US短期公債",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00885",
           "name": "富邦越南",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00894",
           "name": "中信美國公債20年",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00919",
           "name": "群益台灣精選高息",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
+        },
+        {
+          "code": "VEA",
+          "name": "Vanguard Developed Markets",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "VWO",
+          "name": "Vanguard Emerging Markets",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "EFA",
+          "name": "iShares MSCI EAFE",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "EEM",
+          "name": "iShares MSCI Emerging",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "VXUS",
+          "name": "Vanguard Total Intl",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "EWJ",
+          "name": "iShares MSCI Japan",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "MCHI",
+          "name": "iShares MSCI China",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "INDA",
+          "name": "iShares MSCI India",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "EWT",
+          "name": "iShares MSCI Taiwan",
+          "market": "US",
+          "enabled": false
         }
       ]
     },
@@ -565,97 +954,170 @@
         {
           "code": "00679B",
           "name": "元大美債20年",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00687B",
           "name": "國泰20年美債",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00694B",
           "name": "富邦美債1-3",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00695B",
           "name": "富邦美債7-10",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00696B",
           "name": "富邦美債20年",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00697B",
           "name": "元大美債7-10",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00719B",
           "name": "元大美債1-3",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00720B",
           "name": "元大投資級公司債",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00722B",
           "name": "群益15年IG電信債",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00725B",
           "name": "國泰投資級公司債",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00751B",
           "name": "元大AAA至A公司債",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00761B",
           "name": "國泰A級公司債",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00772B",
           "name": "中信高評級公司債",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00773B",
           "name": "中信優先金融債",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00782B",
           "name": "中信美國公債20年",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00795B",
           "name": "中信美國公債0-1年",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00857B",
           "name": "永豐10年A公司債",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00937B",
           "name": "群益ESG投等債20+",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00945B",
           "name": "凱基美國優選收益",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
+        },
+        {
+          "code": "TLT",
+          "name": "iShares 20+ Year Treasury",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "IEF",
+          "name": "iShares 7-10 Year Treasury",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "SHY",
+          "name": "iShares 1-3 Year Treasury",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "AGG",
+          "name": "iShares Core US Aggregate Bond",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "BND",
+          "name": "Vanguard Total Bond",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "LQD",
+          "name": "iShares Investment Grade Corp",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "HYG",
+          "name": "iShares High Yield Corp",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "TIP",
+          "name": "iShares TIPS",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "BIL",
+          "name": "SPDR 1-3 Month T-Bill",
+          "market": "US",
+          "enabled": false
         }
       ]
     },
@@ -668,17 +1130,44 @@
         {
           "code": "00712",
           "name": "復華富時不動產",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00714",
           "name": "群益道瓊美國地產",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00908",
           "name": "富邦入息REITs+",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
+        },
+        {
+          "code": "VNQ",
+          "name": "Vanguard Real Estate",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "SCHH",
+          "name": "Schwab US REIT",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "IYR",
+          "name": "iShares US Real Estate",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "VNQI",
+          "name": "Vanguard Global ex-US Real Estate",
+          "market": "US",
+          "enabled": false
         }
       ]
     },
@@ -691,27 +1180,80 @@
         {
           "code": "00635U",
           "name": "期元大S&P黃金",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00642U",
           "name": "期元大S&P石油",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00643",
           "name": "群益深証中小",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00674R",
           "name": "期元大S&P500反1",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00693U",
           "name": "期街口S&P黃豆",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
+        },
+        {
+          "code": "GLD",
+          "name": "SPDR Gold",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "IAU",
+          "name": "iShares Gold",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "SLV",
+          "name": "iShares Silver",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "USO",
+          "name": "US Oil Fund",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "DBC",
+          "name": "Invesco DB Commodity",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "PDBC",
+          "name": "Invesco Optimum Yield Commodity",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "URA",
+          "name": "Global X Uranium",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "LIT",
+          "name": "Global X Lithium",
+          "market": "US",
+          "enabled": false
         }
       ]
     },
@@ -724,32 +1266,62 @@
         {
           "code": "00850",
           "name": "元大臺灣ESG永續",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00865B",
           "name": "國泰US短期公債",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00878",
           "name": "國泰永續高股息",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00923",
           "name": "群益台ESG低碳",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00930",
           "name": "永豐ESG低碳高息",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00937B",
           "name": "群益ESG投等債20+",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
+        },
+        {
+          "code": "ESGU",
+          "name": "iShares ESG Aware MSCI USA",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "ICLN",
+          "name": "iShares Global Clean Energy",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "TAN",
+          "name": "Invesco Solar",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "SUSA",
+          "name": "iShares MSCI USA ESG",
+          "market": "US",
+          "enabled": false
         }
       ]
     },
@@ -762,27 +1334,116 @@
         {
           "code": "0051",
           "name": "元大中型100",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00733",
           "name": "富邦臺灣中小",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00936",
           "name": "台新永續高息中小",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00731",
           "name": "復華富時高息低波",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
         },
         {
           "code": "00713",
           "name": "元大台灣高息低波",
-          "enabled": true
+          "enabled": true,
+          "market": "TW"
+        },
+        {
+          "code": "XLE",
+          "name": "Energy Select Sector",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "XLF",
+          "name": "Financial Select Sector",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "XLV",
+          "name": "Health Care Select",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "XLY",
+          "name": "Consumer Discretionary Select",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "XLP",
+          "name": "Consumer Staples Select",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "XLI",
+          "name": "Industrial Select",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "XLB",
+          "name": "Materials Select",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "XLU",
+          "name": "Utilities Select",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "XLRE",
+          "name": "Real Estate Select",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "XLC",
+          "name": "Communication Services Select",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "IBB",
+          "name": "iShares Biotech",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "ITA",
+          "name": "iShares US Aerospace & Defense",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "JETS",
+          "name": "US Global Jets",
+          "market": "US",
+          "enabled": false
+        },
+        {
+          "code": "XBI",
+          "name": "SPDR S&P Biotech",
+          "market": "US",
+          "enabled": false
         }
       ]
     },
@@ -793,5 +1454,220 @@
       "desc": "使用者自行新增的 ETF（透過 ⚙ 管理 modal 加入）",
       "etfs": []
     }
-  ]
+  ],
+  "_nameMap": {
+    "00978A": "主動國泰台灣高息成長",
+    "00979A": "主動凱基台股優選",
+    "00980A": "主動野村臺灣優選",
+    "00981A": "主動統一台股增長",
+    "00982A": "主動群益台灣強棒",
+    "00984A": "主動安聯台灣高息",
+    "00985A": "主動富邦台灣動能",
+    "00986A": "主動野村高股息動能",
+    "00987A": "主動台新優勢成長",
+    "00988A": "主動統一全球創新",
+    "00989A": "主動國泰AI智選",
+    "00990A": "主動元大AI新經濟",
+    "00991A": "主動復華未來50",
+    "00992A": "主動群益科技創新",
+    "00993A": "主動富邦未來科技",
+    "00994A": "主動第一金台股優",
+    "00995A": "主動中信台灣卓越",
+    "00996A": "主動兆豐台灣豐收",
+    "00997A": "主動凱基靈活成長",
+    "00403A": "主動統一升級50",
+    "00404A": "聯博台灣動能收益50",
+    "00405A": "富邦台灣龍耀",
+    "00983A": "主動野村臺灣優選",
+    "0050": "元大台灣50",
+    "0051": "元大中型100",
+    "006203": "元大MSCI台灣",
+    "006204": "永豐臺灣加權",
+    "006208": "富邦台50",
+    "00692": "富邦公司治理",
+    "00733": "富邦臺灣中小",
+    "00850": "元大臺灣ESG永續",
+    "00921": "兆豐龍頭等權重",
+    "00922": "國泰台灣領袖50",
+    "00923": "群益台ESG低碳",
+    "00961": "兆豐臺灣加權",
+    "SPY": "SPDR S&P 500",
+    "VOO": "Vanguard S&P 500",
+    "IVV": "iShares Core S&P 500",
+    "VTI": "Vanguard Total US Market",
+    "QQQ": "Invesco Nasdaq 100",
+    "QQQM": "Invesco Nasdaq 100 (low fee)",
+    "DIA": "SPDR Dow Jones",
+    "IWM": "iShares Russell 2000",
+    "VT": "Vanguard Total World",
+    "RSP": "Invesco S&P 500 Equal Weight",
+    "00905": "FT臺灣Smart",
+    "0056": "元大高股息",
+    "00701": "國泰股利精選30",
+    "00713": "元大台灣高息低波",
+    "00731": "復華富時高息低波",
+    "00878": "國泰永續高股息",
+    "00900": "富邦特選高股息30",
+    "00907": "永豐優息存股",
+    "00915": "凱基優選高股息30",
+    "00918": "大華優利高填息30",
+    "00919": "群益台灣精選高息",
+    "00929": "復華台灣科技優息",
+    "00930": "永豐ESG低碳高息",
+    "00932": "兆豐永續高息等權",
+    "00936": "台新永續高息中小",
+    "00939": "統一台灣高息動能",
+    "00940": "元大台灣價值高息",
+    "00943": "兆豐台灣電子成長高息",
+    "00946": "群益台灣科技高息成長",
+    "SCHD": "Schwab US Dividend",
+    "VYM": "Vanguard High Dividend",
+    "HDV": "iShares Core High Dividend",
+    "DGRO": "iShares Dividend Growth",
+    "JEPI": "JPMorgan Equity Premium Income",
+    "JEPQ": "JPMorgan Nasdaq Equity Premium",
+    "SPYD": "SPDR S&P 500 High Dividend",
+    "0052": "富邦科技",
+    "00757": "統一FANG+",
+    "00770": "國泰北美科技",
+    "00876": "元大全球未來通訊",
+    "00881": "國泰台灣5G+",
+    "00891": "中信關鍵半導體",
+    "00892": "富邦台灣半導體",
+    "00895": "富邦未來車",
+    "00896": "中信綠能及電動車",
+    "00903": "富邦元宇宙",
+    "00904": "新光臺灣半導體30",
+    "00927": "群益半導體收益",
+    "00935": "野村臺灣新科技50",
+    "00947": "台新臺灣IC設計動能",
+    "00951": "永豐美國500大",
+    "SMH": "VanEck Semiconductor",
+    "SOXX": "iShares Semiconductor",
+    "XLK": "Tech Select Sector",
+    "VGT": "Vanguard Information Tech",
+    "IGV": "iShares Expanded Tech-Software",
+    "SKYY": "First Trust Cloud",
+    "ARKK": "ARK Innovation",
+    "AIQ": "Global X AI & Tech",
+    "BOTZ": "Global X Robotics & AI",
+    "00913": "兆豐台灣晶圓製造",
+    "00631L": "元大台灣50正2",
+    "00632R": "元大台灣50反1",
+    "00637L": "元大滬深300正2",
+    "00638R": "元大滬深300反1",
+    "00640L": "富邦日本正2",
+    "00641R": "富邦日本反1",
+    "00650L": "復華中國正2",
+    "00651R": "復華中國反1",
+    "00665L": "富邦恒生國企正2",
+    "00666R": "富邦恒生國企反1",
+    "00669R": "國泰美國道瓊反1",
+    "00670L": "富邦NASDAQ正2",
+    "00671R": "富邦NASDAQ反1",
+    "00674R": "期元大S&P500反1",
+    "00675L": "富邦臺灣加權正2",
+    "00676R": "富邦臺灣加權反1",
+    "00685L": "群益臺灣加權正2",
+    "00686R": "群益臺灣加權反1",
+    "TQQQ": "ProShares UltraPro QQQ 3x",
+    "SQQQ": "ProShares UltraPro Short QQQ -3x",
+    "SOXL": "Direxion Semi Bull 3x",
+    "SOXS": "Direxion Semi Bear 3x",
+    "UPRO": "ProShares UltraPro S&P500 3x",
+    "SPXU": "ProShares UltraPro Short S&P -3x",
+    "TMF": "Direxion 20Y Treasury Bull 3x",
+    "TNA": "Direxion Small Cap Bull 3x",
+    "TSLL": "Direxion TSLA Bull 2x",
+    "NVDL": "GraniteShares NVDA 2x",
+    "00646": "元大S&P500",
+    "00652": "富邦印度",
+    "00657": "國泰日經225",
+    "00660": "元大歐洲50",
+    "00661": "元大日經225",
+    "00662": "富邦NASDAQ",
+    "00709": "富邦歐洲",
+    "00710B": "復華彭博非投等債",
+    "00752": "中信中國50",
+    "00830": "國泰費城半導體",
+    "00858": "永豐美國500大",
+    "00861": "元大全球未來關鍵科技",
+    "00865B": "國泰US短期公債",
+    "00885": "富邦越南",
+    "00894": "中信美國公債20年",
+    "VEA": "Vanguard Developed Markets",
+    "VWO": "Vanguard Emerging Markets",
+    "EFA": "iShares MSCI EAFE",
+    "EEM": "iShares MSCI Emerging",
+    "VXUS": "Vanguard Total Intl",
+    "EWJ": "iShares MSCI Japan",
+    "MCHI": "iShares MSCI China",
+    "INDA": "iShares MSCI India",
+    "EWT": "iShares MSCI Taiwan",
+    "00679B": "元大美債20年",
+    "00687B": "國泰20年美債",
+    "00694B": "富邦美債1-3",
+    "00695B": "富邦美債7-10",
+    "00696B": "富邦美債20年",
+    "00697B": "元大美債7-10",
+    "00719B": "元大美債1-3",
+    "00720B": "元大投資級公司債",
+    "00722B": "群益15年IG電信債",
+    "00725B": "國泰投資級公司債",
+    "00751B": "元大AAA至A公司債",
+    "00761B": "國泰A級公司債",
+    "00772B": "中信高評級公司債",
+    "00773B": "中信優先金融債",
+    "00782B": "中信美國公債20年",
+    "00795B": "中信美國公債0-1年",
+    "00857B": "永豐10年A公司債",
+    "00937B": "群益ESG投等債20+",
+    "00945B": "凱基美國優選收益",
+    "TLT": "iShares 20+ Year Treasury",
+    "IEF": "iShares 7-10 Year Treasury",
+    "SHY": "iShares 1-3 Year Treasury",
+    "AGG": "iShares Core US Aggregate Bond",
+    "BND": "Vanguard Total Bond",
+    "LQD": "iShares Investment Grade Corp",
+    "HYG": "iShares High Yield Corp",
+    "TIP": "iShares TIPS",
+    "BIL": "SPDR 1-3 Month T-Bill",
+    "00712": "復華富時不動產",
+    "00714": "群益道瓊美國地產",
+    "00908": "富邦入息REITs+",
+    "VNQ": "Vanguard Real Estate",
+    "SCHH": "Schwab US REIT",
+    "IYR": "iShares US Real Estate",
+    "VNQI": "Vanguard Global ex-US Real Estate",
+    "00635U": "期元大S&P黃金",
+    "00642U": "期元大S&P石油",
+    "00643": "群益深証中小",
+    "00693U": "期街口S&P黃豆",
+    "GLD": "SPDR Gold",
+    "IAU": "iShares Gold",
+    "SLV": "iShares Silver",
+    "USO": "US Oil Fund",
+    "DBC": "Invesco DB Commodity",
+    "PDBC": "Invesco Optimum Yield Commodity",
+    "URA": "Global X Uranium",
+    "LIT": "Global X Lithium",
+    "ESGU": "iShares ESG Aware MSCI USA",
+    "ICLN": "iShares Global Clean Energy",
+    "TAN": "Invesco Solar",
+    "SUSA": "iShares MSCI USA ESG",
+    "XLE": "Energy Select Sector",
+    "XLF": "Financial Select Sector",
+    "XLV": "Health Care Select",
+    "XLY": "Consumer Discretionary Select",
+    "XLP": "Consumer Staples Select",
+    "XLI": "Industrial Select",
+    "XLB": "Materials Select",
+    "XLU": "Utilities Select",
+    "XLRE": "Real Estate Select",
+    "XLC": "Communication Services Select",
+    "IBB": "iShares Biotech",
+    "ITA": "iShares US Aerospace & Defense",
+    "JETS": "US Global Jets",
+    "XBI": "SPDR S&P Biotech"
+  }
 }

@@ -38,7 +38,7 @@ REM v3 modules (must match build_v2.py V2_SCRIPTS so v2.html scripts resolve)
 set FILES=%FILES% volume_profile_v3.js pattern_v3.js pattern_v3_test.html chip_v3.js fundamental_v3.js
 set FILES=%FILES% heatmap_v3.js screener_v3.js ai_report_v3.js polish_v3.js wl_live_v3.js
 set FILES=%FILES% plan_history_v3.js plan_position_v3.js plan_v3.js pdf_import_v3.js pdf_export_v3.js peg_v3.js
-set FILES=%FILES% alert_v3.js alert_push_v3.js backtest_v3.js backtest_ui_v3.js enhance_v3.js layout_v3.js etf_v3.js
+set FILES=%FILES% alert_v3.js alert_push_v3.js backtest_v3.js backtest_ui_v3.js enhance_v3.js aftermarket_v3.js layout_v3.js etf_v3.js
 REM ETF + chip tracker launchers + schedulers
 set FILES=%FILES% run_tracker.bat daily_etf.bat daily_chip.bat
 set FILES=%FILES% install_scheduler.bat uninstall_scheduler.bat install_chip_scheduler.bat

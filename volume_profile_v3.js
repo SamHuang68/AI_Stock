@@ -219,7 +219,7 @@
     const m = document.getElementById('btn-vp-mode');
     if (m) m.textContent = MODE_LABEL[VP.mode] || '量價';
   }
-  function syncState() { if (window.S) S.vpEnabled = VP.enabled; }
+  function syncState() { if (typeof S !== 'undefined') S.vpEnabled = VP.enabled; }
   function toggle() {
     VP.enabled = !VP.enabled;
     syncState();

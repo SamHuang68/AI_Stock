@@ -26,7 +26,7 @@
     _raf = requestAnimationFrame(() => {
       _raf = 0;
       try {
-        if (window.S && S.chart) {
+        if (typeof S !== 'undefined' && S.chart) {
           const w = document.getElementById('chart-wrap') || document.getElementById('chartarea');
           if (w && S.chart.resize) S.chart.resize(w.clientWidth, w.clientHeight);
         }

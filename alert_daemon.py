@@ -74,14 +74,20 @@ def _yf_symbol(sym, market):
 
 
 def fetch_price(sym, market):
+    """回傳當前有效價。美股盤後/盤前時改用延伸交易價，讓盤後突破/跌破也能觸發。"""
     yf = _yf_symbol(sym, market)
     for host in ('query1', 'query2'):
         try:
-            url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(yf)}?range=1d&interval=1m'
+            url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(yf)}?range=1d&interval=1m&includePrePost=true'
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=8) as r:
                 d = json.loads(r.read())
             meta = d['chart']['result'][0]['meta']
+            st = meta.get('marketState')
+            if st in ('POST', 'POSTPOST') and meta.get('postMarketPrice') is not None:
+                return meta.get('postMarketPrice')
+            if st == 'PRE' and meta.get('preMarketPrice') is not None:
+                return meta.get('preMarketPrice')
             return meta.get('regularMarketPrice')
         except Exception:
             continue

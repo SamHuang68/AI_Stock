@@ -52,6 +52,17 @@ def _chip_history_record(clean_code, chip_out):
 
 _openapi_ds = {}   # dataset name → (date, {code: row})
 
+def _pick_num(row, includes, excludes=()):
+    """從 row 找第一個 key 同時包含 includes 全部子字串、且不含任何 excludes 的值 → float。
+       用來吸收 TWSE OpenAPI 欄位的前綴(營業收入-)與全形/半形括號差異。"""
+    for k, v in row.items():
+        if all(s in k for s in includes) and not any(e in k for e in excludes):
+            try:
+                return float(str(v).replace(',', '').strip())
+            except Exception:
+                return None
+    return None
+
 def _openapi_lookup(dataset_names, clean_code):
     """從 TWSE OpenAPI 全市場資料集找某股。資料集整批快取一天。"""
     from datetime import date as _date
@@ -629,7 +640,7 @@ class Handler(SimpleHTTPRequestHandler):
             candidates = [sym]
         for candidate in candidates:
             for base in ('query1', 'query2'):
-                url = f'https://{base}.finance.yahoo.com/v8/finance/chart/{candidate}?interval=1m&range=1d'
+                url = f'https://{base}.finance.yahoo.com/v8/finance/chart/{candidate}?interval=1m&range=1d&includePrePost=true'
                 try:
                     req = urllib.request.Request(url, headers=YF_HEADERS)
                     with urllib.request.urlopen(req, timeout=10) as resp:
@@ -681,7 +692,12 @@ class Handler(SimpleHTTPRequestHandler):
                         'ask':          None,
                         'bidSize':      None,
                         'askSize':      None,
-                        'marketState':  meta.get('marketState'),  # PRE/REGULAR/POST/CLOSED
+                        'marketState':  meta.get('marketState'),  # PRE/REGULAR/POST/POSTPOST/CLOSED
+                        # v3.8: 盤後/盤前延伸交易 (主要美股；台股個股無真實盤後波動)
+                        'postMarketPrice':     meta.get('postMarketPrice'),
+                        'postMarketChangePct': meta.get('postMarketChangePercent'),
+                        'preMarketPrice':      meta.get('preMarketPrice'),
+                        'preMarketChangePct':  meta.get('preMarketChangePercent'),
                         'currency':     meta.get('currency'),
                         'serverTime':   int(time.time()),
                         'lastBarTime':  ts[last_idx] if last_idx is not None else None,
@@ -1119,34 +1135,26 @@ class Handler(SimpleHTTPRequestHandler):
         if c is not None:
             self._ok(c); return
         out = {'symbol': sym, 'code': clean, 'date': today, 'revenue': None, 'income': None, 'score': None}
-        # 月營收
+        # 月營收（欄位用「含子字串」模糊比對：TWSE 欄位有前綴如「營業收入-當月營收」）
         rev = _openapi_lookup(['t187ap05_L', 't187ap05_O'], clean)
         if rev:
-            def fnum(k):
-                try: return float(str(rev.get(k, '')).replace(',', ''))
-                except: return None
             out['revenue'] = {
-                'period':   rev.get('資料年月'),
-                'monthRev': fnum('當月營收'),
-                'yoyPct':   fnum('去年同月增減(%)'),
-                'momPct':   fnum('上月比較增減(%)'),
-                'cumRev':   fnum('當月累計營收'),
-                'cumYoyPct': fnum('前期比較增減(%)'),
+                'period':    rev.get('資料年月'),
+                'monthRev':  _pick_num(rev, ['當月營收'], ['累計']),
+                'yoyPct':    _pick_num(rev, ['去年同月增減']),
+                'momPct':    _pick_num(rev, ['上月比較增減']),
+                'cumRev':    _pick_num(rev, ['當月累計營收']),
+                'cumYoyPct': _pick_num(rev, ['累計', '前期比較增減']),
             }
-        # 綜合損益表 → 三率
+        # 綜合損益表 → 三率（同樣模糊比對，避免全形/半形括號差異 例 營業毛利（毛損））
         inc = _openapi_lookup(['t187ap06_L_ci', 't187ap06_O_ci', 't187ap06_L', 't187ap06_O'], clean)
         if inc:
-            def inum(*keys):
-                for k in keys:
-                    if k in inc:
-                        try: return float(str(inc.get(k, '')).replace(',', ''))
-                        except: pass
-                return None
-            sales = inum('營業收入')
-            gross = inum('營業毛利(毛損)', '營業毛利(毛損)淨額')
-            op = inum('營業利益(損失)')
-            net = inum('本期淨利(淨損)', '本期綜合損益總額', '淨利(淨損)歸屬於母公司業主')
-            eps = inum('基本每股盈餘(元)')
+            sales = _pick_num(inc, ['營業收入'], ['成本', '毛利', '費用', '外', '淨額'])
+            gross = _pick_num(inc, ['營業毛利'])
+            op = _pick_num(inc, ['營業利益'])
+            net = _pick_num(inc, ['本期淨利']) or _pick_num(inc, ['本期綜合損益總額']) \
+                or _pick_num(inc, ['淨利', '母公司'])
+            eps = _pick_num(inc, ['基本每股盈餘'])
             pct = lambda a, b: round(a / b * 100, 2) if (a is not None and b) else None
             out['income'] = {
                 'period':       inc.get('資料年度') or inc.get('資料季別') or inc.get('年度'),

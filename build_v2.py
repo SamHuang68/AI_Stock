@@ -30,6 +30,7 @@ V2_SCRIPTS = ['position_v2.js', 'watch_v2.js', 'info_v2.js', 'pro_v2.js',
               'backtest_v3.js',                 # v3.8 C: 回測核心
               'backtest_ui_v3.js',              # v3.8 C: 回測 UI (須在 backtest_v3 後)
               'enhance_v3.js',                  # v3.8: 雙軸卡/量價面板/右側收合/分頁記憶
+              'aftermarket_v3.js',              # v3.8: 美股盤後/盤前延伸交易顯示
               'etf_v3.js']
 V2_STYLES  = ['mobile_v2.css']
 

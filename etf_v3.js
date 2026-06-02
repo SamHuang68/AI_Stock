@@ -84,6 +84,26 @@
     return set;
   }
 
+  // code -> name 對照（來自 catalog），給 delta 卡名稱缺失時回退用
+  function catName(code) {
+    const cat = S.etfV3 && S.etfV3.catalog;
+    if (!cat) return '';
+    if (!cat._nameMap) {
+      const m = {};
+      for (const c of (cat.categories || []))
+        for (const e of (c.etfs || []))
+          if (e.code && e.name) m[(e.code || '').toUpperCase()] = e.name;
+      cat._nameMap = m;
+    }
+    return cat._nameMap[(code || '').toUpperCase()] || '';
+  }
+  // 解析顯示名稱：delta 名稱有效就用，否則回退 catalog 名稱
+  function resolveName(code, name) {
+    const c = (code || '').toUpperCase();
+    if (name && name.toUpperCase() !== c) return name;
+    return catName(code) || name || '';
+  }
+
   function applyFilter() {
     if (!S.etfV3.deltaRaw) {
       S.etfV3.delta = null;
@@ -253,6 +273,12 @@
 .e3-mgritem input[type=checkbox] { accent-color: var(--gold); width: 14px; height: 14px; cursor: pointer; }
 .e3-mgritem .code { color: var(--thi); font-weight: 700; letter-spacing: .5px; min-width: 60px; }
 .e3-mgritem .name { flex: 1; color: var(--text); font-size: 10.5px; }
+.e3-mgritem .name:hover, .e3-mgritem .code:hover { color: var(--gold); }
+.e3-mkttabs { display: flex; gap: 6px; align-items: center; padding: 6px 4px 10px; position: sticky; top: 0; background: var(--bg2); z-index: 2; }
+.e3-mkttab { background: var(--bg3); border: 1px solid var(--border); color: var(--tlo); border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 11px; font-weight: 700; }
+.e3-mkttab.on { background: var(--gold-s); color: var(--gold); border-color: var(--gold); }
+.e3-mkt-tag { font-size: 7.5px; font-weight: 700; margin-left: 3px; padding: 0 3px; border-radius: 3px; vertical-align: top; }
+.e3-mkt-tag.us { background: rgba(96,165,250,.2); color: #60A5FA; }
 .e3-mgritem.off { opacity: .55; }
 .e3-mgritem .rm { color: var(--tf); cursor: pointer; font-size: 13px; padding: 0 4px; border-radius: 3px; }
 .e3-mgritem .rm:hover { color: var(--red); background: rgba(248,113,113,.12); }
@@ -300,6 +326,47 @@
     document.head.appendChild(s);
   })();
 
+  // ─── 🇺🇸 美股 ETF 報價區（主頁獨立分頁）──────────────────────
+  function renderUsSection() {
+    const cats = S.etfV3.catalog?.categories || [];
+    let h = `<div class="e3-meta"><span>🇺🇸 美股 ETF · 報價（點擊載入線型）</span><span>無持股 delta（非台股）</span></div>`;
+    const codes = [];
+    let any = false;
+    for (const c of cats) {
+      const us = (c.etfs || []).filter(e => (e.market || 'TW') === 'US');
+      if (!us.length) continue;
+      any = true;
+      h += `<div class="e3-section-hdr">${c.icon || ''} ${esc(c.name)}</div>`;
+      for (const e of us) {
+        const id = 'use-' + (e.code || '').replace(/[^A-Za-z0-9]/g, '');
+        codes.push(e.code);
+        h += `<div class="e3-stock" data-e3="goto" data-sym="${esc(e.code)}" data-mkt="US" title="載入 ${esc(e.code)} 線型">
+          <span style="font-weight:700;color:var(--thi);min-width:54px">${esc(e.code)}</span>
+          <span class="sname">${esc(e.name || '')}</span>
+          <span class="schg" id="${id}" style="font-family:monospace;font-size:10px;color:var(--tlo);min-width:96px;text-align:right">…</span>
+        </div>`;
+      }
+    }
+    if (!any) h += `<div class="e3-empty">尚無美股 ETF<span class="hint">點 ⚙ 管理 → 選「🇺🇸 美股」新增</span></div>`;
+    else setTimeout(() => fillUsQuotes(codes), 30);
+    return h;
+  }
+  function fillUsQuotes(codes) {
+    for (const code of codes) {
+      fetch(`${SERVER}/quote/${code}`, { cache: 'no-store' })
+        .then(r => r.ok ? r.json() : null)
+        .then(q => {
+          if (!q) return;
+          const el = document.getElementById('use-' + (code || '').replace(/[^A-Za-z0-9]/g, ''));
+          if (!el) return;
+          const pct = q.changePct;
+          el.textContent = (q.price != null ? q.price.toFixed(2) : '—') +
+            (pct != null ? '  ' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%' : '');
+          el.style.color = pct == null ? 'var(--tlo)' : pct > 0 ? 'var(--green)' : pct < 0 ? 'var(--red)' : 'var(--tlo)';
+        }).catch(() => {});
+    }
+  }
+
   // ─── ETF panel renderer ─────────────────────────────────────
   function renderEtfDelta() {
     // Lazy-fetch catalog if needed
@@ -331,6 +398,13 @@
         ? `已啟用 ${cntEnabled} 檔，僅 ${cntWithData} 檔有 delta 資料；缺資料的 ETF 需在 etf_history 跑 tracker —— 點 ⚙ 管理 → 立即更新` : '';
       h += `<button class="e3-tab${on}" data-e3="cat" data-cat="${esc(cat.key)}" title="${esc(tipMissing)}">${cat.icon || ''} ${esc(cat.name)}<span class="cnt">${cntDisplay}</span></button>`;
     }
+    // 🇺🇸 美股獨立分頁（無 MoneyDJ delta，改顯示報價清單）
+    const usList = [];
+    for (const c of cats) for (const e of (c.etfs || [])) if ((e.market || 'TW') === 'US') usList.push(e);
+    if (usList.length) {
+      const on = S.etfV3.catActive === '__US__' ? ' on' : '';
+      h += `<button class="e3-tab${on}" data-e3="cat" data-cat="__US__" title="美股 ETF（報價，點擊載入）">🇺🇸 美股<span class="cnt">${usList.length}</span></button>`;
+    }
     h += `<div class="e3-actions">
       <button class="e3-actbtn" data-e3="refresh" title="重新抓 /etf-delta">${S.etfV3.loading ? '⟳' : '↻'} 刷新</button>
       <button class="e3-actbtn primary" data-e3="mgr" title="管理觀測池">⚙ 管理</button>
@@ -342,6 +416,13 @@
       <span>上次更新：${ago(S.etfV3.lastFetch)}</span>
       <span>切回此分頁自動重抓 (>60s)</span>
     </div>`;
+
+    // 🇺🇸 美股分頁：跳過 TW delta，改渲染報價清單
+    if (S.etfV3.catActive === '__US__') {
+      h += renderUsSection();
+      h += '</div>';
+      return h;
+    }
 
     // Loading
     if (S.etfV3.loading) {
@@ -428,7 +509,7 @@
       h += `<div class="e3-card-hdr" data-e3="toggle" data-code="${esc(code)}">
         <span class="e3-card-arrow">▶</span>
         <span class="e3-card-code">${esc(code)}</span>
-        <span class="e3-card-name">${esc(e.name || '')}</span>
+        <span class="e3-card-name">${esc(resolveName(code, e.name))}</span>
         <div class="e3-card-badges">
           ${nNew ? `<span class="e3-badge new">+${nNew}</span>` : ''}
           ${nRm  ? `<span class="e3-badge rm">-${nRm}</span>`   : ''}
@@ -564,10 +645,16 @@
     if (!S.etfV3.catalog?.categories) {
       return '<div style="padding:30px;text-align:center;color:var(--tlo);font-family:monospace">載入 catalog 中...</div>';
     }
-    let h = '';
+    const mkt = S.etfV3.mgrMkt || 'all';   // 'all' | 'TW' | 'US'
+    const matchMkt = e => mkt === 'all' || (e.market || 'TW') === mkt;
+    const tab = (k, lbl) => `<button class="e3-mkttab${mkt === k ? ' on' : ''}" data-e3m="mgr-mkt" data-mkt="${k}">${lbl}</button>`;
+    let h = `<div class="e3-mkttabs">${tab('all', '全部')}${tab('TW', '🇹🇼 台股')}${tab('US', '🇺🇸 美股')}
+      <span style="margin-left:auto;font-size:9px;color:var(--tlo)">點代號可載入線型 · 美股以 US 市場開啟</span></div>`;
     const cats = S.etfV3.catalog.categories;
     for (let ci = 0; ci < cats.length; ci++) {
       const cat = cats[ci];
+      const visible = (cat.etfs || []).map((e, ei) => ({ e, ei })).filter(o => matchMkt(o.e));
+      if (!visible.length) continue;   // 此市場篩選下該分類無項目 → 跳過
       const enabledCnt = (cat.etfs || []).filter(e => e.enabled).length;
       const totalEtfs = (cat.etfs || []).length;
       h += `<div class="e3-mgrcat">
@@ -581,13 +668,14 @@
         </div>
         <div class="e3-mgrcat-desc">${esc(cat.desc || '')}</div>
         <div class="e3-mgrlist">`;
-      for (let ei = 0; ei < (cat.etfs || []).length; ei++) {
-        const e = cat.etfs[ei];
+      for (const { e, ei } of visible) {
         const isCustom = cat.key === 'custom';
+        const em = e.market || 'TW';
+        const tag = em === 'US' ? '<span class="e3-mkt-tag us">US</span>' : '';
         h += `<div class="e3-mgritem${e.enabled ? '' : ' off'}">
           <input type="checkbox" data-e3m="toggle" data-ci="${ci}" data-ei="${ei}" ${e.enabled ? 'checked' : ''}>
-          <span class="code">${esc(e.code)}</span>
-          <span class="name">${esc(e.name || '')}</span>
+          <span class="code" data-e3m="load" data-sym="${esc(e.code)}" data-mkt="${esc(em)}" title="載入 ${esc(e.code)} 線型" style="cursor:pointer">${esc(e.code)}${tag}</span>
+          <span class="name" data-e3m="load" data-sym="${esc(e.code)}" data-mkt="${esc(em)}" style="cursor:pointer">${esc(e.name || '')}</span>
           ${isCustom ? `<span class="rm" data-e3m="remove" data-ci="${ci}" data-ei="${ei}" title="移除">×</span>` : ''}
         </div>`;
       }
@@ -596,8 +684,12 @@
         h += `<div class="e3-addform">
           <div style="font-family:monospace;font-size:10px;color:var(--gold);font-weight:700;letter-spacing:.5px">+ 新增自訂 ETF</div>
           <div class="row">
-            <input id="e3-add-code" type="text" placeholder="代號（如 00935A）" maxlength="8" style="text-transform:uppercase">
+            <input id="e3-add-code" type="text" placeholder="代號（台股 00935A / 美股 TQQQ）" maxlength="8" style="text-transform:uppercase">
             <input id="e3-add-name" type="text" placeholder="名稱" maxlength="20">
+            <select id="e3-add-mkt" title="市場">
+              <option value="TW">🇹🇼 台股</option>
+              <option value="US">🇺🇸 美股</option>
+            </select>
             <select id="e3-add-cat">
               ${cats.map(c => `<option value="${esc(c.key)}" ${c.key === 'custom' ? 'selected' : ''}>${c.icon || ''} ${esc(c.name)}</option>`).join('')}
             </select>
@@ -652,6 +744,20 @@
     if (!ma) return;
     const act = ma.dataset.e3m;
     if (act === 'close') { ev.preventDefault(); closeMgrModal(); return; }
+    if (act === 'mgr-mkt') {
+      ev.preventDefault();
+      S.etfV3.mgrMkt = ma.dataset.mkt;
+      const body = document.getElementById('e3-mgr-body');
+      if (body) body.innerHTML = renderMgrBody();
+      return;
+    }
+    if (act === 'load') {
+      ev.preventDefault();
+      const sym = ma.dataset.sym, mk = ma.dataset.mkt || 'TW';
+      closeMgrModal();
+      if (typeof loadSym === 'function') loadSym(sym, mk);
+      return;
+    }
     if (act === 'toggle') {
       const ci = +ma.dataset.ci, ei = +ma.dataset.ei;
       const e = S.etfV3.catalog?.categories[ci]?.etfs[ei];
@@ -701,12 +807,18 @@
       const code = document.getElementById('e3-add-code').value.trim().toUpperCase();
       const name = document.getElementById('e3-add-name').value.trim();
       const catKey = document.getElementById('e3-add-cat').value;
+      const mkt = (document.getElementById('e3-add-mkt') || {}).value || 'TW';
       if (!code || !name) { alert('請填代號與名稱'); return; }
-      if (!/^[0-9]{4,6}[A-Z]?$/.test(code)) { alert('代號格式不正確（例：00935A、0050）'); return; }
+      const okTw = /^[0-9]{4,6}[A-Z]?$/.test(code);
+      const okUs = /^[A-Z][A-Z0-9.]{0,7}$/.test(code);
+      if (mkt === 'TW' ? !okTw : !okUs) {
+        alert(mkt === 'TW' ? '台股代號格式不正確（例：00935A、0050）' : '美股代號格式不正確（例：TQQQ、SOXL）'); return;
+      }
       const cat = S.etfV3.catalog.categories.find(c => c.key === catKey);
       if (!cat) return;
-      if (cat.etfs.find(e => e.code === code)) { alert('該 ETF 已存在此分類'); return; }
-      cat.etfs.push({ code, name, enabled: true });
+      if (cat.etfs.find(e => e.code === code && (e.market || 'TW') === mkt)) { alert('該 ETF 已存在此分類'); return; }
+      // 美股無 MoneyDJ 持股 delta，預設不進台股追蹤（enabled:false）
+      cat.etfs.push({ code, name, market: mkt, enabled: mkt === 'TW' });
       const body = document.getElementById('e3-mgr-body');
       if (body) body.innerHTML = renderMgrBody();
       return;

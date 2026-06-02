@@ -33,7 +33,7 @@
 
   // ---- 技術面分數 0~100 ------------------------------------
   function techScore() {
-    const ind = window.S && S.ind;
+    const ind = (typeof S !== 'undefined') && S.ind;
     if (!ind) return null;
     const cur = (S.data && S.data.candles && S.data.candles.length)
       ? S.data.candles[S.data.candles.length - 1].close : null;
