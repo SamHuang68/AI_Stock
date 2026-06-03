@@ -632,6 +632,7 @@ function renderChart(candles) {
     upColor:'#4ADE80',downColor:'#F87171',
     borderUpColor:'#4ADE80',borderDownColor:'#F87171',
     wickUpColor:'#4ADE80',wickDownColor:'#F87171',
+    lastValueVisible:false, priceLineVisible:false,   // 原生現價框關掉，改用 polish_v3 的「今/昨」小標籤
   });
   const lcd = candles.map(c=>({time:tz(c.time),open:c.open,high:c.high,low:c.low,close:c.close}));
   cs.setData(lcd);

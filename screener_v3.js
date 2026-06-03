@@ -14,7 +14,7 @@ let _screenerPresets = null;
 .screener-modal .panel{background:var(--bg2);border:1px solid var(--gold-m);border-radius:8px;width:90vw;max-width:780px;height:80vh;display:flex;flex-direction:column;overflow:hidden}
 .screener-modal .head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);background:var(--bg)}
 .screener-modal .head h3{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--gold);font-weight:700;letter-spacing:1px;margin:0}
-.scr-presets{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:6px;padding:14px;background:var(--bg);border-bottom:1px solid var(--border)}
+.scr-presets{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:6px;padding:14px;background:var(--bg);border-bottom:1px solid var(--border);max-height:42vh;overflow-y:auto;flex-shrink:0}
 .scr-preset{padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:5px;cursor:pointer;transition:all .12s;font-family:monospace}
 .scr-preset:hover{border-color:var(--gold-m);background:var(--gold-s)}
 .scr-preset .ttl{font-size:11px;color:var(--gold);font-weight:700;letter-spacing:.5px}
@@ -57,8 +57,12 @@ async function openScreener() {
   let presetCards = '';
   if (presets?.presets) {
     for (const p of presets.presets) {
-      presetCards += `<div class="scr-preset" data-scr-preset="${p.key}">
-        <div class="ttl">🔍 ${escS(p.name)}</div>
+      const isShort = p.side === 'short';
+      const tag = isShort
+        ? '<span style="color:var(--red);font-weight:700">▼空</span> '
+        : '<span style="color:var(--green);font-weight:700">▲多</span> ';
+      presetCards += `<div class="scr-preset" data-scr-preset="${p.key}" style="border-left:3px solid ${isShort ? 'var(--red)' : 'var(--green)'}">
+        <div class="ttl">${tag}${escS(p.name)}</div>
         <div class="desc">${escS(p.desc)}</div>
       </div>`;
     }

@@ -560,6 +560,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._alert_post_config()
         elif p == '/alert/test':
             self._alert_test()
+        elif p == '/etf-report/email':
+            self._etf_report_email()
         else:
             self._err('not found', 404)
 
@@ -1482,12 +1484,24 @@ class Handler(SimpleHTTPRequestHandler):
     def _handle_screener_get(self):
         """GET /screener — return preset filter list + symbol pool"""
         presets = [
-            {'key':'breakout_20',    'name':'突破 20 日新高 + 量增',  'desc':'抓動能爆發初期'},
-            {'key':'rsi_oversold',   'name':'RSI 超賣 + 站上 SMA60',  'desc':'多頭趨勢中的超賣反彈點'},
-            {'key':'bullish_align',  'name':'均線多頭排列',            'desc':'SMA5 > SMA20 > SMA60，強勢結構'},
-            {'key':'pullback_sma60', 'name':'回測 SMA60 不破',         'desc':'多頭趨勢回檔買進點'},
-            {'key':'vol_spike',      'name':'量增 2x 且收紅',          'desc':'籌碼異動 + 短線買盤'},
-            {'key':'cross_golden',   'name':'近 5 日黃金交叉',          'desc':'SMA20 上穿 SMA60'},
+            # ── 多方 / 進場 ──
+            {'key':'breakout_20',    'name':'突破 20 日新高 + 量增',  'desc':'抓動能爆發初期','side':'long'},
+            {'key':'rsi_oversold',   'name':'RSI 超賣 + 站上 SMA60',  'desc':'多頭趨勢中的超賣反彈點','side':'long'},
+            {'key':'bullish_align',  'name':'均線多頭排列',            'desc':'SMA5 > SMA20 > SMA60，強勢結構','side':'long'},
+            {'key':'pullback_sma60', 'name':'回測 SMA60 不破',         'desc':'多頭趨勢回檔買進點','side':'long'},
+            {'key':'pullback_sma20', 'name':'回測 SMA20 不破',         'desc':'強勢股短線回檔買點','side':'long'},
+            {'key':'vol_spike',      'name':'量增 2x 且收紅',          'desc':'籌碼異動 + 短線買盤','side':'long'},
+            {'key':'cross_golden',   'name':'近 5 日黃金交叉',          'desc':'SMA20 上穿 SMA60','side':'long'},
+            {'key':'near_52w_low',   'name':'逼近 60 日低檔',          'desc':'落底區間，搏反彈（風險高）','side':'long'},
+            {'key':'top_gainers',    'name':'漲幅榜 Top',              'desc':'今日漲幅最大（追勢/強勢觀察）','side':'long'},
+            # ── 空方 / 跌幅 / 出場警示 ──
+            {'key':'top_losers',     'name':'跌幅榜 Top',              'desc':'今日跌幅最大（賣壓/弱勢）','side':'short'},
+            {'key':'breakdown_20',   'name':'跌破 20 日新低 + 量增',  'desc':'空頭動能啟動、停損警示','side':'short'},
+            {'key':'bearish_align',  'name':'均線空頭排列',            'desc':'SMA5 < SMA20 < SMA60，弱勢結構','side':'short'},
+            {'key':'death_cross',    'name':'近 5 日死亡交叉',          'desc':'SMA20 下穿 SMA60，趨勢轉空','side':'short'},
+            {'key':'break_sma60_dn', 'name':'跌破 SMA60',              'desc':'跌破季線，中期轉弱','side':'short'},
+            {'key':'rsi_overbought', 'name':'RSI 過熱 (>75)',          'desc':'短線過熱，留意回檔/停利','side':'short'},
+            {'key':'high_vol_drop',  'name':'帶量下跌 (出貨)',         'desc':'量增 2x 且收黑，疑似出貨','side':'short'},
         ]
         out = {'presets': presets, 'symbolCount': len(set(self._TW_TOP200))}
         self._ok(json.dumps(out, ensure_ascii=False).encode())
@@ -1560,7 +1574,14 @@ class Handler(SimpleHTTPRequestHandler):
                     })
             except Exception as e:
                 continue
-        results.sort(key=lambda x: x.get('changePct') or 0, reverse=True)
+        # 空方/跌幅類 → 由跌最多排序（升冪）；其餘 → 漲幅降冪
+        _bear = {'top_losers', 'breakdown_20', 'bearish_align', 'death_cross',
+                 'break_sma60_dn', 'high_vol_drop', 'near_52w_low'}
+        asc = (preset in _bear)
+        results.sort(key=lambda x: x.get('changePct') or 0, reverse=not asc)
+        # 漲/跌幅榜只取前 40 檔避免整包
+        if preset in ('top_gainers', 'top_losers'):
+            results = results[:40]
         self._ok(json.dumps({'results': results, 'scanned': len(syms), 'matched': len(results)}, ensure_ascii=False).encode())
 
     def _calc_ind(self, closes, highs, lows, vols):
@@ -1588,6 +1609,8 @@ class Handler(SimpleHTTPRequestHandler):
             'sma20_prev': sma(20, n-2), 'rsi14': rsi, 'volRatio': volRatio,
             'high20': max(highs[-21:-1]) if len(highs) >= 21 else None,
             'high60': max(highs[-61:-1]) if len(highs) >= 61 else None,
+            'low20': min(lows[-21:-1]) if len(lows) >= 21 else None,
+            'low60': min(lows[-61:-1]) if len(lows) >= 61 else None,
         }
 
     def _screener_match(self, preset, i, closes, highs, vols):
@@ -1606,6 +1629,30 @@ class Handler(SimpleHTTPRequestHandler):
         if preset == 'cross_golden':
             return all([i['sma20'], i['sma60'], i['sma20_prev'], i['sma60_prev']]) \
                    and i['sma20_prev'] <= i['sma60_prev'] and i['sma20'] > i['sma60']
+        if preset == 'pullback_sma20':
+            return i['sma20'] and abs(c - i['sma20']) / i['sma20'] < 0.015 \
+                   and i['sma20_prev'] and i['sma20'] > i['sma20_prev']
+        if preset == 'near_52w_low':
+            return i['low60'] and c <= i['low60'] * 1.03
+        if preset == 'top_gainers':
+            return i['changePct'] is not None    # 全收，靠排序取前段
+        # ── 空方 / 跌幅 ──
+        if preset == 'top_losers':
+            return i['changePct'] is not None
+        if preset == 'breakdown_20':
+            return i['low20'] and c < i['low20'] and i['volRatio'] and i['volRatio'] > 1.5
+        if preset == 'bearish_align':
+            return all([i['sma5'], i['sma20'], i['sma60']]) and i['sma5'] < i['sma20'] < i['sma60']
+        if preset == 'death_cross':
+            return all([i['sma20'], i['sma60'], i['sma20_prev'], i['sma60_prev']]) \
+                   and i['sma20_prev'] >= i['sma60_prev'] and i['sma20'] < i['sma60']
+        if preset == 'break_sma60_dn':
+            return i['sma60'] and i['prev'] and i['sma60_prev'] \
+                   and i['prev'] >= i['sma60_prev'] and c < i['sma60']
+        if preset == 'rsi_overbought':
+            return i['rsi14'] and i['rsi14'] > 75
+        if preset == 'high_vol_drop':
+            return i['volRatio'] and i['volRatio'] > 2 and i['prev'] and c < i['prev']
         return False
 
     def _handle_ai_report(self):
@@ -1742,6 +1789,20 @@ class Handler(SimpleHTTPRequestHandler):
             self._ok(json.dumps({'ok': ok, 'results': results}, ensure_ascii=False).encode())
         except Exception as e:
             self._err('test push failed: ' + str(e), 500)
+
+    def _etf_report_email(self):
+        """POST /etf-report/email — body {subject, body}；用 alert_daemon 已設定的 Email 寄出"""
+        if not alert_daemon:
+            self._err('alert daemon unavailable', 503); return
+        try:
+            data = self._read_json_body()
+            cfg = alert_daemon.load_config()
+            ok, msg = alert_daemon.push_email(cfg, data.get('subject', 'ETF 報表'), data.get('body', ''))
+            if ok:
+                alert_daemon._log('ETF report emailed: ' + data.get('subject', ''))
+            self._ok(json.dumps({'ok': ok, 'results': {'email': msg}}, ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('email report failed: ' + str(e), 500)
 
     def log_message(self, fmt, *args):
         pass  # silent

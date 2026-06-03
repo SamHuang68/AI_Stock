@@ -124,8 +124,24 @@
     ctx.clearRect(0, 0, W, H);
     if (!vp) return;
 
-    const maxBarW = Math.min(W * 0.28, 220);  // 直方圖最大寬度
-    const x0 = W;                              // 從右邊緣往左畫
+    // 右側有價格軸（刻度+現價框，約 60px）。直方圖要止於價格軸左緣，
+    // 不能畫進刻度區，否則和價格數字互相遮蔽。
+    // timeScale().width() = 繪圖區寬度（已扣掉右側價格軸），最可靠
+    let plotRight = W - 64;                              // fallback：保留 64px 給價格軸
+    try {
+      const tw = S.chart.timeScale().width();
+      if (tw && tw > 40) plotRight = tw - 2;
+    } catch {}
+    plotRight = Math.max(40, plotRight);
+    // 只在「最後一根 K 棒右側、價格軸左側」的空白區畫直方圖
+    let stripLeft = plotRight * 0.72;                   // fallback
+    try {
+      const lastIdx = (S.data.candles.length - 1);
+      const lx = S.chart.timeScale().logicalToCoordinate(lastIdx);
+      if (lx != null && lx > 0) stripLeft = lx + 10;    // 最後一根 K 棒右緣再留 10px
+    } catch {}
+    const x0 = plotRight;                               // 從價格軸左緣往左畫
+    const maxBarW = Math.max(24, Math.min(plotRight - stripLeft - 4, 180));
     for (let i = 0; i < vp.bins; i++) {
       const p = vp.lo + (i + 0.5) * vp.step;
       let y = S.chartSeries.priceToCoordinate(p);
@@ -140,6 +156,23 @@
           : 'rgba(120,140,170,0.30)';
       ctx.fillRect(x0 - w, y - barH / 2, w, barH);
     }
+
+    // POC / VAH / VAL —— 只在右側空白區畫短線 + 標籤，不橫跨全圖
+    const lineLeft = Math.max(0, stripLeft - 46);
+    const level = (price, color, dashed, label) => {
+      const y = S.chartSeries.priceToCoordinate(price);
+      if (y == null) return;
+      ctx.save();
+      ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+      if (dashed) ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.moveTo(lineLeft, y); ctx.lineTo(plotRight, y); ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = color; ctx.font = '700 10px monospace'; ctx.textBaseline = 'bottom';
+      ctx.fillText(`${label} ${price.toFixed(2)}`, lineLeft + 1, y - 1);
+    };
+    level(vp.pocPrice, '#A78BFA', false, 'POC');
+    level(vp.vah, '#60A5FA', true, 'VAH');
+    level(vp.val, '#60A5FA', true, 'VAL');
   }
 
   // ---- price lines (POC/VAH/VAL) --------------------------
@@ -172,7 +205,7 @@
     if (!VP.enabled) { clearLines(); if (VP.canvas) VP.canvas.getContext('2d').clearRect(0, 0, 9999, 9999); updateInfo(null); return; }
     const vp = computeVP(S.data.candles, VP.bins, VP.mode);
     VP.lastVP = vp;
-    drawLines(vp);
+    clearLines();              // 不再用橫跨全圖的 price line；改在 renderHistogram 畫右側短線
     renderHistogram(vp);
     updateInfo(vp);
   }
@@ -220,9 +253,24 @@
     if (m) m.textContent = MODE_LABEL[VP.mode] || '量價';
   }
   function syncState() { if (typeof S !== 'undefined') S.vpEnabled = VP.enabled; }
+  // 開啟量價時把 K 線往左推，右側騰出空間給直方圖；關閉時還原
+  function manageOffset(on) {
+    try {
+      const ts = S.chart && S.chart.timeScale();
+      if (!ts) return;
+      if (on) {
+        if (VP._origOffset == null) VP._origOffset = ts.options().rightOffset || 0;
+        ts.applyOptions({ rightOffset: Math.max(VP._origOffset, 16) });
+      } else if (VP._origOffset != null) {
+        ts.applyOptions({ rightOffset: VP._origOffset });
+        VP._origOffset = null;
+      }
+    } catch {}
+  }
   function toggle() {
     VP.enabled = !VP.enabled;
     syncState();
+    manageOffset(VP.enabled);
     ensureCanvas(); hookRedraw(); draw(); syncBtns();
   }
   function setMode(m) {
@@ -233,7 +281,7 @@
   function cycleMode() {
     const order = ['avg', 'amt', 'vol'];
     setMode(order[(order.indexOf(VP.mode) + 1) % order.length]);
-    if (!VP.enabled) { VP.enabled = true; syncState(); ensureCanvas(); hookRedraw(); draw(); syncBtns(); }
+    if (!VP.enabled) { VP.enabled = true; syncState(); manageOffset(true); ensureCanvas(); hookRedraw(); draw(); syncBtns(); }
   }
   // 切股/切區間：renderChart 後 pro_v2 會檢查 S.vpEnabled 呼叫 drawVolumeProfile(=draw)，
   // 這裡再補一個 symLoaded 監聽確保即時重繪

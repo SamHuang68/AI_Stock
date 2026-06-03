@@ -407,6 +407,7 @@
     }
     h += `<div class="e3-actions">
       <button class="e3-actbtn" data-e3="refresh" title="重新抓 /etf-delta">${S.etfV3.loading ? '⟳' : '↻'} 刷新</button>
+      <button class="e3-actbtn" data-e3="report" title="跨 ETF 買賣超彙總報表：找潛在上漲/下跌標的">📋 報表</button>
       <button class="e3-actbtn primary" data-e3="mgr" title="管理觀測池">⚙ 管理</button>
     </div>`;
     h += '</div>';
@@ -609,6 +610,149 @@
     return h;
   }
 
+  // ─── 跨 ETF 買賣超彙總報表 ──────────────────────────────────
+  function buildEtfReport() {
+    const etfs = (S.etfV3.deltaRaw && S.etfV3.deltaRaw.etfs)
+      || (S.etfV3.delta && S.etfV3.delta.etfs) || [];
+    const agg = {};   // code -> {code,name, add:[], inc:[], rm:[], dec:[], wIn, wOut}
+    const get = (code, name) => {
+      const k = (code || '').toUpperCase();
+      if (!agg[k]) agg[k] = { code, name: name || '', add: [], inc: [], rm: [], dec: [], wIn: 0, wOut: 0 };
+      if (name && !agg[k].name) agg[k].name = name;
+      return agg[k];
+    };
+    for (const e of etfs) {
+      const etf = e.code;
+      for (const n of (e.new || [])) { const s = get(n.code, n.name); s.add.push(etf); s.wIn += (n.weight || 0); }
+      for (const c of (e.changed || [])) {
+        const s = get(c.code, c.name);
+        if ((c.delta || 0) >= 0) { s.inc.push(etf); s.wIn += (c.delta || 0); }
+        else { s.dec.push(etf); s.wOut += Math.abs(c.delta || 0); }
+      }
+      for (const r of (e.removed || [])) { const s = get(r.code, r.name); s.rm.push(etf); s.wOut += (r.prev_weight || 0); }
+    }
+    // 權重：新增/移除 與 加碼/減碼 同權，皆 ×2
+    const arr = Object.values(agg).map(s => ({
+      ...s,
+      bull: (s.add.length + s.inc.length) * 2,
+      bear: (s.rm.length + s.dec.length) * 2,
+    })).map(s => ({ ...s, net: s.bull - s.bear }));
+    const up = arr.filter(s => s.bull > 0).sort((a, b) => b.bull - a.bull || b.wIn - a.wIn);
+    const down = arr.filter(s => s.bear > 0).sort((a, b) => b.bear - a.bear || b.wOut - a.wOut);
+    const net = arr.filter(s => s.net !== 0).sort((a, b) => b.net - a.net);
+    return { up, down, net, etfCount: etfs.length };
+  }
+
+  function reportRows(list, side) {
+    if (!list.length) return '<div class="e3-empty" style="padding:18px">無資料</div>';
+    let h = '';
+    for (const s of list.slice(0, 40)) {
+      const badges = side === 'up'
+        ? `${s.add.length ? `<span class="e3-badge new">▲新增 ${s.add.length}</span>` : ''}${s.inc.length ? `<span class="e3-badge chg">＋加碼 ${s.inc.length}</span>` : ''}`
+        : `${s.rm.length ? `<span class="e3-badge rm">▼移除 ${s.rm.length}</span>` : ''}${s.dec.length ? `<span class="e3-badge chg">－減碼 ${s.dec.length}</span>` : ''}`;
+      const etfList = [...new Set([...(side === 'up' ? [...s.add, ...s.inc] : [...s.rm, ...s.dec])])].slice(0, 8).join(' · ');
+      const wt = side === 'up' ? s.wIn : s.wOut;
+      const wtCol = side === 'up' ? 'var(--green)' : 'var(--red)';
+      h += `<div class="e3-stock" data-e3m="load" data-sym="${esc(s.code)}" data-mkt="TW" style="cursor:pointer;align-items:flex-start;padding:7px 12px">
+        <span style="font-weight:700;color:var(--thi);min-width:54px">${esc(s.code)}</span>
+        <span class="sname" style="flex:1">${esc(s.name || '')}<div style="color:var(--tf);font-size:8.5px;margin-top:2px">${esc(etfList)}</div></span>
+        <span style="text-align:right;white-space:nowrap">${badges}<div style="color:${wtCol};font-size:9px;margin-top:2px">權重 ${wt.toFixed(2)}%</div></span>
+      </div>`;
+    }
+    return h;
+  }
+
+  function netRows(list) {
+    if (!list.length) return '<div class="e3-empty" style="padding:18px">無資料</div>';
+    let h = '';
+    for (const s of list.slice(0, 60)) {
+      const pos = s.net > 0;
+      const col = pos ? 'var(--green)' : 'var(--red)';
+      const etfList = [...new Set([...s.add, ...s.inc, ...s.rm, ...s.dec])].slice(0, 8).join(' · ');
+      h += `<div class="e3-stock" data-e3m="load" data-sym="${esc(s.code)}" data-mkt="TW" style="cursor:pointer;align-items:center;padding:6px 12px">
+        <span style="font-weight:800;color:${col};min-width:42px;font-size:13px;text-align:center">${pos ? '+' : ''}${s.net}</span>
+        <span style="font-weight:700;color:var(--thi);min-width:54px">${esc(s.code)}</span>
+        <span class="sname" style="flex:1">${esc(s.name || '')}<div style="color:var(--tf);font-size:8.5px;margin-top:2px">${esc(etfList)}</div></span>
+        <span style="text-align:right;white-space:nowrap;font-size:8.5px;color:var(--tlo)">▲${s.add.length}/＋${s.inc.length} ▼${s.rm.length}/－${s.dec.length}</span>
+      </div>`;
+    }
+    return h;
+  }
+
+  function renderReportBody(rep, mode) {
+    if (mode === 'net') {
+      return `<div class="e3-section-hdr">📊 淨分數排序（買盤共識 − 賣盤共識，正=偏多 負=偏空）</div>${netRows(rep.net)}`;
+    }
+    return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:0">
+        <div style="border-right:1px solid var(--border)">
+          <div class="e3-section-hdr" style="color:var(--green)">🟢 潛在上漲（買盤共識）</div>
+          ${reportRows(rep.up, 'up')}
+        </div>
+        <div>
+          <div class="e3-section-hdr" style="color:var(--red)">🔴 潛在下跌（賣盤共識）</div>
+          ${reportRows(rep.down, 'down')}
+        </div>
+      </div>`;
+  }
+
+  // 把報表轉純文字（供 Email）
+  function reportToText(rep, date) {
+    const line = s => `${s.net >= 0 ? '+' : ''}${s.net}\t${s.code} ${s.name || ''}\t(新增${s.add.length}/加碼${s.inc.length}/移除${s.rm.length}/減碼${s.dec.length})`;
+    const up = rep.net.filter(s => s.net > 0).slice(0, 20).map(line).join('\n');
+    const dn = rep.net.filter(s => s.net < 0).slice(0, 20).map(line).join('\n');
+    return `ETF 操盤手共識報表 ${date}\n彙總 ${rep.etfCount} 檔主動 ETF 當日新增/移除/加減碼\n\n` +
+      `=== 潛在上漲（淨分數前 20）===\n${up || '無'}\n\n` +
+      `=== 潛在下跌（淨分數後 20）===\n${dn || '無'}\n\n⚠ 僅反映持股異動，非投資建議。`;
+  }
+
+  async function emailReport() {
+    const rep = buildEtfReport();
+    const date = (S.etfV3.deltaRaw && S.etfV3.deltaRaw.date) || (S.etfV3.delta && S.etfV3.delta.date) || '';
+    const body = reportToText(rep, date);
+    try {
+      const r = await fetch(`${SERVER}/etf-report/email`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject: `ETF 共識報表 ${date}`, body }),
+      });
+      const d = await r.json();
+      alert(d.ok ? '已寄出 Email 報表 ✓' : ('寄送失敗：' + JSON.stringify(d.results || d)));
+    } catch (e) { alert('寄送失敗：' + e.message + '\n請確認 🔔 推播已設定 Email'); }
+  }
+
+  async function openEtfReportModal() {
+    if (S.etfV3.catalog == null) await fetchCatalog();
+    if (S.etfV3.deltaRaw == null && S.etfV3.delta == null) { try { await fetchDelta(); } catch {} }
+    closeMgrModal();
+    const rep = buildEtfReport();
+    S.etfV3._rep = rep;
+    const mode = S.etfV3.reportMode || 'dual';
+    const m = document.createElement('div');
+    m.className = 'e3-modal'; m.id = 'e3-modal';
+    const date = (S.etfV3.deltaRaw && S.etfV3.deltaRaw.date) || (S.etfV3.delta && S.etfV3.delta.date) || '';
+    const tabBtn = (k, lbl) => `<button class="e3-mbtn${mode === k ? ' primary' : ''}" data-e3m="rep-mode" data-mode="${k}">${lbl}</button>`;
+    m.innerHTML = `
+      <div class="panel">
+        <div class="head">
+          <h3>📋 ETF 操盤手共識報表 · ${esc(date)}</h3>
+          <span class="x" data-e3m="close">×</span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--border)">
+          ${tabBtn('dual', '雙榜（上漲/下跌）')}${tabBtn('net', '淨分數單榜')}
+          <button class="e3-mbtn" data-e3m="email" style="margin-left:auto">📧 Email 報表</button>
+        </div>
+        <div style="padding:6px 14px;font-family:monospace;font-size:9px;color:var(--tlo);border-bottom:1px solid var(--border)">
+          彙總 ${rep.etfCount} 檔主動 ETF；評分 新增/移除/加碼/減碼 皆 ×2。多檔同步買進→潛在上漲，同步賣出→潛在下跌。點列載入線型。
+        </div>
+        <div class="body" id="e3-rep-body" style="padding:0">${renderReportBody(rep, mode)}</div>
+        <div class="foot">
+          <span style="font-family:monospace;font-size:9px;color:var(--tf)">⚠ 僅反映主動 ETF 當日持股異動，非投資建議</span>
+          <button class="e3-mbtn" data-e3m="close">關閉</button>
+        </div>
+      </div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', ev => { if (ev.target === m) closeMgrModal(); });
+  }
+
   // ─── Manager modal ──────────────────────────────────────────
   async function openEtfMgrModal() {
     if (S.etfV3.catalog == null) await fetchCatalog();
@@ -720,6 +864,7 @@
         if (typeof renderRpanel === 'function') renderRpanel();
       }
       if (act === 'refresh') { ev.preventDefault(); fetchDelta(); }
+      if (act === 'report') { ev.preventDefault(); openEtfReportModal(); }
       if (act === 'mgr') { ev.preventDefault(); openEtfMgrModal(); }
       if (act === 'toggle') {
         ev.preventDefault();
@@ -744,6 +889,16 @@
     if (!ma) return;
     const act = ma.dataset.e3m;
     if (act === 'close') { ev.preventDefault(); closeMgrModal(); return; }
+    if (act === 'rep-mode') {
+      ev.preventDefault();
+      S.etfV3.reportMode = ma.dataset.mode;
+      const body = document.getElementById('e3-rep-body');
+      if (body && S.etfV3._rep) body.innerHTML = renderReportBody(S.etfV3._rep, S.etfV3.reportMode);
+      document.querySelectorAll('[data-e3m="rep-mode"]').forEach(b =>
+        b.classList.toggle('primary', b.dataset.mode === S.etfV3.reportMode));
+      return;
+    }
+    if (act === 'email') { ev.preventDefault(); emailReport(); return; }
     if (act === 'mgr-mkt') {
       ev.preventDefault();
       S.etfV3.mgrMkt = ma.dataset.mkt;

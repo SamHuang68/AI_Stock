@@ -352,10 +352,11 @@ function applyMarketColorClass(mkt) {
               color: 'rgba(200, 200, 200, .35)',
               lineWidth: 1,
               lineStyle: LightweightCharts.LineStyle.Dashed,
-              axisLabelVisible: true,
-              title: '昨收 ' + yPrice.toFixed(2),
+              axisLabelVisible: false,           // 不顯示浮動大框，改用右下小字讀數
+              title: '',
             });
           }
+          renderCloseReadout(last ? last.close : null, yPrice);
         }
         // (d) Legend overlay
         renderChartLegend();
@@ -363,6 +364,39 @@ function applyMarketColorClass(mkt) {
     }, 60);
   };
 })();
+
+// 在右側價格軸「對應價位高度」放昨收/今收小標籤（不橫跨、不蓋 K 線）
+// 像原生現價標一樣貼在軸上，今收=漲跌色、昨收=灰。
+function renderCloseReadout(close, prevClose) {
+  const wrap = document.getElementById('chart-wrap');
+  if (!wrap || !S.chartSeries) return;
+  // 清掉舊版底部框 + 舊標籤
+  ['close-readout', 'ctag-now', 'ctag-prev'].forEach(id => {
+    const e = document.getElementById(id); if (e) e.remove();
+  });
+  const tw = document.body.classList.contains('market-tw') || S.mkt === 'TW';
+  // 半字級小標籤，貼在 Y 軸刻度數字右邊（不蓋刻度），對應價位高度
+  const mk = (id, price, prefix, color) => {
+    if (price == null || price <= 0) return;
+    let y; try { y = S.chartSeries.priceToCoordinate(price); } catch { y = null; }
+    if (y == null) return;
+    const el = document.createElement('div');
+    el.id = id;
+    el.textContent = `${prefix}${price.toFixed(2)}`;
+    el.style.cssText = `position:absolute;right:1px;top:${y}px;transform:translateY(-50%);` +
+      `z-index:7;pointer-events:none;font-family:'JetBrains Mono',monospace;font-size:6.5px;` +
+      `font-weight:700;color:${color};text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap`;
+    wrap.appendChild(el);
+  };
+  // 今收：依漲跌上色（台股紅漲綠跌）；昨收：灰
+  let nowCol = 'var(--tlo)';
+  if (prevClose != null && prevClose > 0) {
+    const up = close >= prevClose;
+    nowCol = up ? (tw ? '#f87171' : '#4ade80') : (tw ? '#4ade80' : '#f87171');
+  }
+  mk('ctag-now', close, '今', nowCol);
+  mk('ctag-prev', prevClose, '昨', 'rgba(190,195,205,.9)');
+}
 
 function renderChartLegend() {
   const wrap = document.getElementById('chart-wrap');
