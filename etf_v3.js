@@ -706,17 +706,14 @@
   }
 
   async function emailReport() {
-    const rep = buildEtfReport();
-    const date = (S.etfV3.deltaRaw && S.etfV3.deltaRaw.date) || (S.etfV3.delta && S.etfV3.delta.date) || '';
-    const body = reportToText(rep, date);
+    // 由伺服器自建富文字 HTML 報表（多區塊，對齊朋友版）並寄出
     try {
       const r = await fetch(`${SERVER}/etf-report/email`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject: `ETF 共識報表 ${date}`, body }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
       });
       const d = await r.json();
-      alert(d.ok ? '已寄出 Email 報表 ✓' : ('寄送失敗：' + JSON.stringify(d.results || d)));
-    } catch (e) { alert('寄送失敗：' + e.message + '\n請確認 🔔 推播已設定 Email'); }
+      alert(d.ok ? '已寄出 Email 報表 ✓（多區塊 HTML）' : ('寄送失敗：' + JSON.stringify(d.results || d) + '\n請確認 🔔 推播已設定 Email'));
+    } catch (e) { alert('寄送失敗：' + e.message + '\n請確認 server 跑著且 🔔 推播已設定 Email'); }
   }
 
   async function openEtfReportModal() {

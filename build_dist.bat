@@ -27,7 +27,7 @@ if exist "stock_terminal.html" if exist "build_v2.py" (
 
 REM ---- Files to bundle (skip user data: etf_history/chip_history JSON, logs, __pycache__, alert_config/rules) ----
 REM Core servers / trackers
-set FILES=README.md server.py etf_delta_tracker.py chip_history_tracker.py alert_daemon.py etf_report_email.py
+set FILES=README.md server.py etf_delta_tracker.py chip_history_tracker.py alert_daemon.py etf_report_email.py etf_report.py
 REM v1 UI + launcher
 set FILES=%FILES% stock_terminal.html start_terminal.bat
 REM v2/v3 UI + build + launchers

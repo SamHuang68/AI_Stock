@@ -110,12 +110,15 @@ def push_telegram(cfg, text):
         return False, str(e)
 
 
-def push_email(cfg, subject, text):
+def push_email(cfg, subject, text, html=None):
     em = cfg.get('email', {})
     if not em.get('enabled') or not em.get('user') or not em.get('app_password') or not em.get('to'):
         return False, 'email disabled/unconfigured'
     try:
-        msg = MIMEText(text, 'plain', 'utf-8')
+        if html:
+            msg = MIMEText(html, 'html', 'utf-8')
+        else:
+            msg = MIMEText(text, 'plain', 'utf-8')
         msg['Subject'] = subject
         msg['From'] = em['user']
         msg['To'] = em['to']

@@ -16,8 +16,9 @@ from datetime import datetime
 PORT = 18432
 try:
     import alert_daemon
+    import etf_report
 except Exception as e:
-    print('[etf-report] alert_daemon import failed:', e); sys.exit(2)
+    print('[etf-report] import failed:', e); sys.exit(2)
 
 
 def fetch_delta():
@@ -78,11 +79,11 @@ def main():
         print('[etf-report] fetch /etf-delta failed (server running?):', e); return 1
     if delta.get('error'):
         print('[etf-report] delta error:', delta.get('error')); return 1
-    rows, n = build_report(delta)
-    date = delta.get('date') or datetime.now().strftime('%Y-%m-%d')
-    text = to_text(rows, n, date)
+    # 富文字 HTML 報表（對齊朋友版多區塊格式）+ 純文字後備
+    subject, html = etf_report.build_report_html(delta)
+    text = etf_report.build_report_text(delta)
     cfg = alert_daemon.load_config()
-    ok, msg = alert_daemon.push_email(cfg, f'ETF 共識報表 {date}', text)
+    ok, msg = alert_daemon.push_email(cfg, subject, text, html=html)
     print(f'[etf-report] email ok={ok} msg={msg}')
     return 0 if ok else 1
 

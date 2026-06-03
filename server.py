@@ -13,6 +13,11 @@ try:
 except Exception as _e:
     alert_daemon = None
     print('[alert] daemon import failed:', _e)
+try:
+    import etf_report
+except Exception as _e:
+    etf_report = None
+    print('[etf-report] module import failed:', _e)
 
 PORT = 18432
 # Core Ultra 9 285H = 6P + 8E + 2LP = 16 threads; oversubscribe for I/O-bound YF
@@ -421,16 +426,25 @@ def compute_etf_delta(files, date=None):
                     'shares': int(get_field(h,'shares','quantity','volume') or 0),
                 })
             else:
-                pw = float(get_field(prev_map[sym],'weight','pct','weight_pct') or 0)
+                ph = prev_map[sym]
+                pw = float(get_field(ph,'weight','pct','weight_pct') or 0)
                 delta = round(w - pw, 4)
-                if abs(delta) >= THRESHOLD:
+                cs = int(get_field(h,'shares','quantity','volume') or 0)
+                ps = int(get_field(ph,'shares','quantity','volume') or 0)
+                sdelta = cs - ps
+                # v3.8: 以張數變化為主、權重變化為輔（對齊朋友報表）
+                if sdelta != 0 or abs(delta) >= THRESHOLD:
                     changed.append({
-                        'rank':        get_field(h,'rank','holding_rank') or '-',
-                        'code':        sym,
-                        'name':        get_field(h,'name','stock_name','company_name') or '',
-                        'prev_weight': pw,
-                        'curr_weight': w,
-                        'delta':       delta,
+                        'rank':         get_field(h,'rank','holding_rank') or '-',
+                        'prev_rank':    get_field(ph,'rank','holding_rank') or '-',
+                        'code':         sym,
+                        'name':         get_field(h,'name','stock_name','company_name') or '',
+                        'prev_weight':  pw,
+                        'curr_weight':  w,
+                        'delta':        delta,
+                        'prev_shares':  ps,
+                        'curr_shares':  cs,
+                        'shares_delta': sdelta,
                     })
 
         for sym, h in prev_map.items():
@@ -440,9 +454,10 @@ def compute_etf_delta(files, date=None):
                     'code':        sym,
                     'name':        get_field(h,'name','stock_name','company_name') or '',
                     'prev_weight': float(get_field(h,'weight','pct','weight_pct') or 0),
+                    'prev_shares': int(get_field(h,'shares','quantity','volume') or 0),
                 })
 
-        changed.sort(key=lambda x: abs(x['delta']), reverse=True)
+        changed.sort(key=lambda x: abs(x.get('shares_delta') or 0), reverse=True)
         total_new += len(new_stocks)
         total_rm  += len(removed)
         total_chg += len(changed)
@@ -1791,15 +1806,28 @@ class Handler(SimpleHTTPRequestHandler):
             self._err('test push failed: ' + str(e), 500)
 
     def _etf_report_email(self):
-        """POST /etf-report/email — body {subject, body}；用 alert_daemon 已設定的 Email 寄出"""
+        """POST /etf-report/email — 伺服器自建富文字 HTML 報表並用已設定 Email 寄出"""
         if not alert_daemon:
             self._err('alert daemon unavailable', 503); return
         try:
-            data = self._read_json_body()
+            try:
+                self._read_json_body()   # 前端可不帶 body
+            except Exception:
+                pass
+            # 自抓 /etf-delta
+            with urllib.request.urlopen(f'http://localhost:{PORT}/etf-delta', timeout=30) as r:
+                delta = json.loads(r.read())
+            if delta.get('error'):
+                self._err('etf-delta error: ' + str(delta.get('error')), 502); return
+            if etf_report:
+                subject, html = etf_report.build_report_html(delta)
+                text = etf_report.build_report_text(delta)
+            else:
+                subject, html, text = 'ETF 報表', None, json.dumps(delta)[:2000]
             cfg = alert_daemon.load_config()
-            ok, msg = alert_daemon.push_email(cfg, data.get('subject', 'ETF 報表'), data.get('body', ''))
+            ok, msg = alert_daemon.push_email(cfg, subject, text, html=html)
             if ok:
-                alert_daemon._log('ETF report emailed: ' + data.get('subject', ''))
+                alert_daemon._log('ETF report emailed: ' + subject)
             self._ok(json.dumps({'ok': ok, 'results': {'email': msg}}, ensure_ascii=False).encode())
         except Exception as e:
             self._err('email report failed: ' + str(e), 500)
