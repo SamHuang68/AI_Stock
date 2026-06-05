@@ -208,10 +208,12 @@ function renderQuote(q) {
     document.getElementById('lp-bid-sz').textContent = 'Yahoo 不開放';
     document.getElementById('lp-ask-sz').textContent = '需券商 API';
   }
-  const st = q.marketState || 'CLOSED';
+  // Yahoo 的 marketState 有時缺值或盤中誤回 CLOSED → 用本地時間推算後備
+  let st = q.marketState;
+  if (!st || st === 'CLOSED') st = sessionByTime(S.mkt || 'TW') || st || 'CLOSED';
   const stEl = document.getElementById('lp-state');
   stEl.textContent = stMap(st);
-  stEl.className = 'lp-state ' + st;
+  stEl.className = 'lp-state ' + (['REGULAR', 'PRE', 'POST', 'CLOSED'].includes(st) ? st : 'REGULAR');
   const d = new Date();
   document.getElementById('lp-time').textContent = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
 
@@ -231,6 +233,30 @@ function renderQuote(q) {
       if (statEl) statEl.textContent = `LIVE · ${S.sym} ${px.toFixed(2)}`;
     } catch (e) { console.warn('[live] update failed:', e); }
   }
+}
+
+// 依使用者本地時間(台北)+市場推算盤別，作為 Yahoo marketState 的後備
+// US 在台北：盤前 16:00–21:30、盤中 21:30–次日04:00、盤後 04:00–08:00
+//   （日光節約時間會 ±1 小時，這裡採近似，足以避免盤中誤判休市）
+// TW 在台北：盤中 09:00–13:30
+function sessionByTime(mkt) {
+  const d = new Date();
+  const h = d.getHours() + d.getMinutes() / 60;
+  const day = d.getDay();   // 0 週日 .. 6 週六
+  if (mkt === 'US') {
+    // 週末邊界（台北時間對應美股週末）：週日全天、週一 08:00 前、週六 08:00 後 視為休市
+    if (day === 0) return 'CLOSED';
+    if (day === 1 && h < 8) return 'CLOSED';
+    if (day === 6 && h >= 8) return 'CLOSED';
+    if (h >= 21.5 || h < 4) return 'REGULAR';
+    if (h >= 16 && h < 21.5) return 'PRE';
+    if (h >= 4 && h < 8) return 'POST';
+    return 'CLOSED';
+  }
+  // 台股：週末休市
+  if (day === 0 || day === 6) return 'CLOSED';
+  if (h >= 9 && h < 13.5) return 'REGULAR';
+  return 'CLOSED';
 }
 
 function stMap(s) {

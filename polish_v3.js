@@ -149,6 +149,10 @@ const MKT_INDICES = [
   {sym:'^DJI',  name:'道瓊'},
   {sym:'^N225', name:'日經'},
   {sym:'^HSI',  name:'恆生'},
+  {sym:'^KS11', name:'韓國'},      // KOSPI
+  {sym:'GC=F',  name:'黃金'},      // COMEX 黃金期貨
+  {sym:'SI=F',  name:'白銀'},      // COMEX 白銀期貨
+  {sym:'CL=F',  name:'原油'},      // WTI 原油期貨
 ];
 
 (function injectMktBar() {

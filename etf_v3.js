@@ -705,14 +705,16 @@
       `=== 潛在下跌（淨分數後 20）===\n${dn || '無'}\n\n⚠ 僅反映持股異動，非投資建議。`;
   }
 
-  async function emailReport() {
-    // 由伺服器自建富文字 HTML 報表（多區塊，對齊朋友版）並寄出
+  async function emailReport(mode) {
+    // 由伺服器自建 HTML 報表並寄出。mode: 'full'(多區塊) | 'lite'(加減碼 Top10)
     try {
       const r = await fetch(`${SERVER}/etf-report/email`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: mode || 'full' }),
       });
       const d = await r.json();
-      alert(d.ok ? '已寄出 Email 報表 ✓（多區塊 HTML）' : ('寄送失敗：' + JSON.stringify(d.results || d) + '\n請確認 🔔 推播已設定 Email'));
+      alert(d.ok ? `已寄出 Email 報表 ✓（${mode === 'lite' ? '加減碼 Top10' : '完整多區塊'}）`
+                 : ('寄送失敗：' + JSON.stringify(d.results || d) + '\n請確認 🔔 推播已設定 Email'));
     } catch (e) { alert('寄送失敗：' + e.message + '\n請確認 server 跑著且 🔔 推播已設定 Email'); }
   }
 
@@ -735,7 +737,8 @@
         </div>
         <div style="display:flex;gap:6px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--border)">
           ${tabBtn('dual', '雙榜（上漲/下跌）')}${tabBtn('net', '淨分數單榜')}
-          <button class="e3-mbtn" data-e3m="email" style="margin-left:auto">📧 Email 報表</button>
+          <button class="e3-mbtn" data-e3m="email" data-mode="full" style="margin-left:auto">📧 完整報表</button>
+          <button class="e3-mbtn" data-e3m="email" data-mode="lite">📧 加減碼Top10</button>
         </div>
         <div style="padding:6px 14px;font-family:monospace;font-size:9px;color:var(--tlo);border-bottom:1px solid var(--border)">
           彙總 ${rep.etfCount} 檔主動 ETF；評分 新增/移除/加碼/減碼 皆 ×2。多檔同步買進→潛在上漲，同步賣出→潛在下跌。點列載入線型。
@@ -895,7 +898,7 @@
         b.classList.toggle('primary', b.dataset.mode === S.etfV3.reportMode));
       return;
     }
-    if (act === 'email') { ev.preventDefault(); emailReport(); return; }
+    if (act === 'email') { ev.preventDefault(); emailReport(ma.dataset.mode || 'full'); return; }
     if (act === 'mgr-mkt') {
       ev.preventDefault();
       S.etfV3.mgrMkt = ma.dataset.mkt;

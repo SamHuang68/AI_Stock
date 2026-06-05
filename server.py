@@ -57,6 +57,80 @@ def _chip_history_record(clean_code, chip_out):
 
 _openapi_ds = {}   # dataset name → (date, {code: row})
 
+# ── 全台股普通股代號宇集（上市 TWSE + 上櫃 TPEx），當日快取 ──
+import re as _re
+_TW_UNIVERSE = {'date': None, 'codes': []}
+_CODE4 = _re.compile(r'^[1-9]\d{3}$')   # 4 位數普通股；排除 ETF(00xxx)/權證(6 位)
+
+def _get_tw_universe():
+    from datetime import date as _date
+    today = _date.today().strftime('%Y%m%d')
+    if _TW_UNIVERSE['date'] == today and _TW_UNIVERSE['codes']:
+        return _TW_UNIVERSE['codes']
+    codes = set()
+
+    def _scan(url):
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                arr = json.loads(r.read())
+            for row in arr:
+                if not isinstance(row, dict):
+                    continue
+                # 優先抓常見欄位，否則掃所有值找 4 位數代號
+                cand = (row.get('Code') or row.get('SecuritiesCompanyCode')
+                        or row.get('證券代號') or row.get('股票代號') or '')
+                cand = str(cand).strip()
+                if _CODE4.match(cand):
+                    codes.add(cand); continue
+                for v in row.values():
+                    s = str(v).strip()
+                    if _CODE4.match(s):
+                        codes.add(s); break
+        except Exception as e:
+            print(f'[universe] scan failed {url}: {e}')
+
+    # 上市（TWSE）所有個股當日行情 → 取代號
+    _scan('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL')
+    # 上櫃（TPEx）主板當日收盤
+    _scan('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes')
+
+    out = sorted(codes)
+    if out:
+        _TW_UNIVERSE['date'] = today
+        _TW_UNIVERSE['codes'] = out
+    return out
+
+# ── 產業別對照（code → 產業別），用月營收資料集(含上市櫃)的「產業別」欄 ──
+_TW_SECTORS = {'date': None, 'map': {}}
+# 科技電子整合群（macro）：涵蓋常見電子相關產業別
+_TECH_SECTORS = {'半導體業', '電腦及週邊設備業', '光電業', '通信網路業',
+                 '電子零組件業', '電子通路業', '其他電子業', '資訊服務業'}
+
+def _get_tw_sectors():
+    from datetime import date as _date
+    today = _date.today().strftime('%Y%m%d')
+    if _TW_SECTORS['date'] == today and _TW_SECTORS['map']:
+        return _TW_SECTORS['map']
+    m = {}
+    for ds in ('t187ap05_L', 't187ap05_O'):
+        try:
+            url = f'https://openapi.twse.com.tw/v1/opendata/{ds}'
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                arr = json.loads(r.read())
+            for row in arr:
+                code = (row.get('公司代號') or '').strip()
+                ind = (row.get('產業別') or '').strip()
+                if code and ind:
+                    m[code] = ind
+        except Exception as e:
+            print(f'[sectors] {ds} failed: {e}')
+    if m:
+        _TW_SECTORS['date'] = today
+        _TW_SECTORS['map'] = m
+    return m
+
 def _pick_num(row, includes, excludes=()):
     """從 row 找第一個 key 同時包含 includes 全部子字串、且不含任何 excludes 的值 → float。
        用來吸收 TWSE OpenAPI 欄位的前綴(營業收入-)與全形/半形括號差異。"""
@@ -1518,7 +1592,16 @@ class Handler(SimpleHTTPRequestHandler):
             {'key':'rsi_overbought', 'name':'RSI 過熱 (>75)',          'desc':'短線過熱，留意回檔/停利','side':'short'},
             {'key':'high_vol_drop',  'name':'帶量下跌 (出貨)',         'desc':'量增 2x 且收黑，疑似出貨','side':'short'},
         ]
-        out = {'presets': presets, 'symbolCount': len(set(self._TW_TOP200))}
+        try:
+            _uni = _get_tw_universe()
+        except Exception:
+            _uni = []
+        try:
+            _sec = sorted(set(_get_tw_sectors().values()))
+        except Exception:
+            _sec = []
+        out = {'presets': presets, 'symbolCount': len(_uni) or len(set(self._TW_TOP200)),
+               'sectors': _sec}
         self._ok(json.dumps(out, ensure_ascii=False).encode())
 
     def _handle_screener_post(self):
@@ -1530,7 +1613,21 @@ class Handler(SimpleHTTPRequestHandler):
             self._err('bad body: ' + str(e), 400); return
         preset = body.get('preset')
         custom = body.get('custom')
-        syms = list(set(body.get('symbols') or self._TW_TOP200))
+        # 預設掃全台股宇集（上市+上櫃普通股）；抓不到才退回精選清單
+        try:
+            _uni = _get_tw_universe()
+        except Exception:
+            _uni = []
+        syms = list(set(body.get('symbols') or _uni or self._TW_TOP200))
+        # 產業別篩選：sector='__TECH__' 科技電子整合，或單一產業別名稱
+        sector = (body.get('sector') or '').strip()
+        if sector and sector not in ('全部', 'all', ''):
+            try:
+                smap = _get_tw_sectors()
+                want = _TECH_SECTORS if sector == '__TECH__' else {sector}
+                syms = [s for s in syms if smap.get(str(s).replace('.TW', '').replace('.TWO', '')) in want]
+            except Exception as e:
+                print('[screener] sector filter failed:', e)
         # Fetch all syms in parallel using existing fetch_one
         results = []
         ind_cache = {}
@@ -1701,7 +1798,10 @@ class Handler(SimpleHTTPRequestHandler):
             f'2. 💼 持倉檢視（每檔含表現、注意事項、行動建議）\n'
             f'3. 👁 觀察清單重點（觸發訊號分析）\n'
             f'4. 🎯 今日 3 大重點\n\n'
-            f'語言：繁體中文、口語化、有觀點。長度約 500~800 字。'
+            f'語言：繁體中文、口語化、有觀點。長度約 500~800 字。\n\n'
+            f'【重要】股票一律以「代號」為準（上面清單給的就是正確代號）。'
+            f'提到公司名稱時務必與代號正確對應；若你不百分之百確定某代號對應的公司名稱，'
+            f'就只用代號稱呼，嚴禁臆測或填入可能錯誤的名稱（例如不可把 2408 寫成旺宏）。'
         )
         # Call Anthropic API
         try:
@@ -1810,8 +1910,9 @@ class Handler(SimpleHTTPRequestHandler):
         if not alert_daemon:
             self._err('alert daemon unavailable', 503); return
         try:
+            mode = 'full'
             try:
-                self._read_json_body()   # 前端可不帶 body
+                mode = (self._read_json_body() or {}).get('mode', 'full')
             except Exception:
                 pass
             # 自抓 /etf-delta
@@ -1820,7 +1921,7 @@ class Handler(SimpleHTTPRequestHandler):
             if delta.get('error'):
                 self._err('etf-delta error: ' + str(delta.get('error')), 502); return
             if etf_report:
-                subject, html = etf_report.build_report_html(delta)
+                subject, html = etf_report.build_report_html(delta, mode)
                 text = etf_report.build_report_text(delta)
             else:
                 subject, html, text = 'ETF 報表', None, json.dumps(delta)[:2000]

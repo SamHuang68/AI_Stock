@@ -126,17 +126,37 @@
     }
   }
 
+  // 更新某筆持倉的現價（v3.8：POS 不再只在點股時更新）
+  function applyToPos(code, cur) {
+    if (cur == null || !isFinite(cur)) return;
+    if (typeof S !== 'undefined' && S.positions && S.positions[code]) {
+      S.positions[code].lastPrice = cur;
+      S.positions[code].lastUpdate = Date.now();
+      _posDirty = true;
+    }
+  }
+  let _posDirty = false;
+
   // ─── main poll ────────────────────────────────────────────
   async function pollOnce() {
     if (_inflight) return;
-    if (typeof S === 'undefined' || !S.wl || S.wl.length === 0) return;
+    const hasWl = (typeof S !== 'undefined' && S.wl && S.wl.length);
+    const hasPos = (typeof S !== 'undefined' && S.positions && Object.keys(S.positions).length);
+    if (!hasWl && !hasPos) return;
     _inflight = true;
+    _posDirty = false;
     try {
       // First pass — TW with .TW suffix, US raw
-      const symMap = new Map();   // yfsym → wl item
-      for (const w of S.wl) {
+      const symMap = new Map();   // yfsym → wl item（或 {_pos: code} 持倉標記）
+      for (const w of (S.wl || [])) {
         const yfsym = w.m === 'TW' ? w.t + '.TW' : w.t;
         symMap.set(yfsym, w);
+      }
+      // 持倉代號（不在自選股的也要抓）：數字開頭視為台股 .TW，否則美股原樣
+      for (const code of Object.keys(S.positions || {})) {
+        const yf = /^[0-9]/.test(code) ? code + '.TW' : code;
+        if (!symMap.has(yf)) symMap.set(yf, { _pos: code });
+        else if (symMap.get(yf) && symMap.get(yf).t) symMap.get(yf)._posAlso = code;
       }
       const syms = [...symMap.keys()];
       const data = await fetchBatch(syms);
@@ -145,28 +165,40 @@
       for (const [yfsym, w] of symMap.entries()) {
         const res = data[yfsym]?.chart?.result?.[0];
         if (!res) {
-          if (w.m === 'TW') missedTw.push(w);
+          if (w && (w.m === 'TW' || (w._pos && /^[0-9]/.test(w._pos)))) missedTw.push(w);
           continue;
         }
         const c = extractChg(res);
-        if (c) applyToChip(w, c.chgPct, c.cur);
+        if (!c) continue;
+        if (w._pos) applyToPos(w._pos, c.cur);
+        else { applyToChip(w, c.chgPct, c.cur); if (w._posAlso) applyToPos(w._posAlso, c.cur); }
       }
 
       // Second pass — retry missed TW with .TWO (OTC / 興櫃)
       if (missedTw.length) {
-        const twoSyms = missedTw.map(w => w.t + '.TWO');
-        const data2 = await fetchBatch(twoSyms);
+        const keyOf = w => (w._pos ? w._pos : w.t) + '.TWO';
+        const data2 = await fetchBatch(missedTw.map(keyOf));
         for (const w of missedTw) {
-          const res = data2[w.t + '.TWO']?.chart?.result?.[0];
+          const res = data2[keyOf(w)]?.chart?.result?.[0];
           if (!res) continue;
           const c = extractChg(res);
-          if (c) applyToChip(w, c.chgPct, c.cur);
+          if (!c) continue;
+          if (w._pos) applyToPos(w._pos, c.cur);
+          else { applyToChip(w, c.chgPct, c.cur); if (w._posAlso) applyToPos(w._posAlso, c.cur); }
         }
       }
 
       // After in-place updates: persist S.wl (so refresh shows last seen %)
       if (typeof saveWl === 'function') {
         try { saveWl(); } catch {}
+      }
+      // v3.8：持倉價有更新 → 存檔 + 若在 POS 分頁則重繪
+      if (_posDirty) {
+        if (typeof savePositions === 'function') { try { savePositions(); } catch {} }
+        if (S.tab === 'position' && typeof renderPosition === 'function') {
+          const el = document.getElementById('rpanel');
+          if (el) { try { el.innerHTML = renderPosition(); if (typeof attachPosition === 'function') attachPosition(); } catch (e) {} }
+        }
       }
     } catch (e) {
       console.warn('[wl-live] poll fail:', e);

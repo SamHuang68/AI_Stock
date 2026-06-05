@@ -11,10 +11,15 @@ let _screenerPresets = null;
 (function injectScreenerCSS() {
   const css = `
 .screener-modal{position:fixed;inset:0;background:rgba(6,10,18,.9);z-index:9998;display:flex;align-items:center;justify-content:center}
-.screener-modal .panel{background:var(--bg2);border:1px solid var(--gold-m);border-radius:8px;width:90vw;max-width:780px;height:80vh;display:flex;flex-direction:column;overflow:hidden}
+.screener-modal .panel{background:var(--bg2);border:1px solid var(--gold-m);border-radius:8px;width:90vw;max-width:780px;height:88vh;display:flex;flex-direction:column;overflow:hidden}
 .screener-modal .head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);background:var(--bg)}
 .screener-modal .head h3{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--gold);font-weight:700;letter-spacing:1px;margin:0}
-.scr-presets{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:6px;padding:14px;background:var(--bg);border-bottom:1px solid var(--border);max-height:42vh;overflow-y:auto;flex-shrink:0}
+.scr-presets{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:4px;padding:6px 8px;background:var(--bg);border-bottom:1px solid var(--border);max-height:24vh;overflow-y:auto;flex-shrink:0}
+.scr-preset{padding:3px 8px!important}
+.scr-preset .ttl{font-size:10.5px}
+.scr-preset .desc{margin-top:0;font-size:8.5px;line-height:1.3}
+.scr-results{flex:1;overflow-y:auto;min-height:56vh}
+.scr-row{padding:5px 14px!important}
 .scr-preset{padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:5px;cursor:pointer;transition:all .12s;font-family:monospace}
 .scr-preset:hover{border-color:var(--gold-m);background:var(--gold-s)}
 .scr-preset .ttl{font-size:11px;color:var(--gold);font-weight:700;letter-spacing:.5px}
@@ -73,6 +78,15 @@ async function openScreener() {
         <h3>🔍 全市場 Screener — 掃描 ${presets?.symbolCount || '?'} 檔台股</h3>
         <span style="cursor:pointer;color:var(--tlo);font-size:20px" onclick="closeScreener()">×</span>
       </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);font-family:monospace;font-size:11px;color:var(--tlo)">
+        類股篩選
+        <select id="scr-sector" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:4px 8px;font-size:11px;max-width:260px">
+          <option value="全部">全部（全市場）</option>
+          <option value="__TECH__">🔌 科技電子（整合）</option>
+          ${(presets?.sectors || []).map(s => `<option value="${escS(s)}">${escS(s)}</option>`).join('')}
+        </select>
+        <span style="color:var(--tf);font-size:9px">選定後只掃該類股，結果更聚焦</span>
+      </div>
       <div class="scr-presets">${presetCards}</div>
       <div class="scr-h">
         <div>代號</div><div>名稱</div><div>現價</div><div>漲跌%</div><div>RSI/量比</div>
@@ -100,13 +114,15 @@ function closeScreener() { document.getElementById('screener-modal')?.remove(); 
 async function runScreener(preset, label) {
   const list = document.getElementById('scr-results');
   if (!list) return;
-  list.innerHTML = `<div style="padding:30px;text-align:center;color:var(--gold);font-family:monospace;font-size:11px">▶ 掃描中（${escS(label)}）...<br><span style="font-size:9px;color:var(--tlo);margin-top:6px;display:inline-block">200+ 檔同時抓資料約 20~40 秒</span></div>`;
+  list.innerHTML = `<div style="padding:30px;text-align:center;color:var(--gold);font-family:monospace;font-size:11px">▶ 掃描中（${escS(label)}）...<br><span style="font-size:9px;color:var(--tlo);margin-top:6px;display:inline-block">全台股上市+上櫃約 1800 檔，首次掃描約 1~2 分鐘（已快取後更快）</span></div>`;
   const t0 = Date.now();
   try {
+    const sectorEl = document.getElementById('scr-sector');
+    const sector = sectorEl ? sectorEl.value : '全部';
     const r = await fetch(`${SERVER_S}/screener`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({preset}),
+      body: JSON.stringify({preset, sector}),
     });
     const data = await r.json();
     const dt = Math.round((Date.now() - t0) / 1000);
