@@ -142,6 +142,7 @@ body.market-us .price-down, body.market-us .neg { color: var(--red) !important; 
 // ============================================================
 const MKT_INDICES = [
   {sym:'^TWII', name:'加權'},
+  {sym:'__TXF__', name:'台指期'},   // TAIFEX 即時(含夜盤)，特例來源 /txf
   {sym:'^TWOII', name:'櫃買'},
   {sym:'^SOX',  name:'費半'},
   {sym:'^GSPC', name:'S&P500'},
@@ -193,7 +194,7 @@ function fmtIdx(v) {
 
 async function refreshMktBar() {
   try {
-    const syms = MKT_INDICES.map(m => m.sym).join(',');
+    const syms = MKT_INDICES.filter(m => m.sym !== '__TXF__').map(m => m.sym).join(',');
     // v3.3 改 range=5d：原 range=2d 只有兩根 K，遇到 Yahoo 日線資料落後
     //   於 regularMarketPrice 時無法做時間軸交叉驗證，會直接用「昨日的
     //   昨日 vs 前日」算出昨日的 % 變化（櫃買/日經顯示 0.00% 即此 bug）。
@@ -249,6 +250,30 @@ async function refreshMktBar() {
       ch.textContent = arrow + Math.abs(chgPct).toFixed(2) + '%';
     }
   } catch (e) { console.warn('[polish-v3] mktbar refresh failed:', e); }
+  // 台指期(含夜盤) — TAIFEX 特例來源
+  try { await refreshTxfCell(); } catch (e) { console.warn('[polish-v3] txf failed:', e); }
+}
+
+async function refreshTxfCell() {
+  const cell = document.querySelector('[data-mkt-sym="__TXF__"]');
+  if (!cell) return;
+  const r = await fetch(`${SERVER_P}/txf`, { cache: 'no-store' });
+  if (!r.ok) return;
+  const d = await r.json();
+  if (!d || !d.ok || d.price == null) return;
+  cell.classList.remove('loading');
+  cell.querySelector('.px').textContent = fmtIdx(d.price);
+  const chg = d.changePct;
+  const dir = chg > 0 ? 'up' : chg < 0 ? 'down' : 'flat';
+  const sign = chg > 0 ? '+' : chg < 0 ? '−' : '';
+  const delta = (d.prevClose != null) ? (d.price - d.prevClose) : null;
+  const dEl = cell.querySelector('.delta');
+  dEl.className = 'delta ' + dir;
+  dEl.textContent = delta != null ? sign + Math.abs(delta).toFixed(0) : '';
+  const ch = cell.querySelector('.ch');
+  ch.className = 'ch ' + dir;
+  const arrow = chg > 0 ? '▲' : chg < 0 ? '▼' : '－';
+  ch.textContent = (chg != null) ? arrow + Math.abs(chg).toFixed(2) + '%' : '';
 }
 
 // ============================================================

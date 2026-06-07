@@ -18,6 +18,11 @@ try:
 except Exception as _e:
     etf_report = None
     print('[etf-report] module import failed:', _e)
+try:
+    import watch_daemon
+except Exception as _e:
+    watch_daemon = None
+    print('[watch] daemon import failed:', _e)
 
 PORT = 18432
 # Core Ultra 9 285H = 6P + 8E + 2LP = 16 threads; oversubscribe for I/O-bound YF
@@ -618,6 +623,10 @@ class Handler(SimpleHTTPRequestHandler):
             self._alert_get_rules()
         elif p == '/alert/config' or p.startswith('/alert/config?'):
             self._alert_get_config()
+        elif p == '/watch/status' or p.startswith('/watch/status?'):
+            self._watch_status()
+        elif p == '/txf' or p.startswith('/txf?'):
+            self._handle_txf()
         elif p == '/health':
             d = find_etf_dir()
             files = list_etf_files()
@@ -651,6 +660,10 @@ class Handler(SimpleHTTPRequestHandler):
             self._alert_test()
         elif p == '/etf-report/email':
             self._etf_report_email()
+        elif p == '/watch/rules':
+            self._watch_post_rules()
+        elif p == '/watch/config':
+            self._watch_post_config()
         else:
             self._err('not found', 404)
 
@@ -1933,6 +1946,128 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as e:
             self._err('email report failed: ' + str(e), 500)
 
+    def _handle_txf(self):
+        """台指期近一(含夜盤) — 主: Yahoo TW 期貨頁(WTX&) 內嵌 JSON；備援: TAIFEX MIS。
+           回 {ok, price, prevClose, changePct, name, source}；失敗回 debug 供修正。"""
+        import re as _re2
+        key = f'txf:{int(time.time() // 20)}'   # 20s 快取
+        c = _cache.get(key)
+        if c is not None:
+            self._ok(c); return
+
+        # ── 主來源：Yahoo TW 期貨頁 WTX&（使用者指定）──
+        try:
+            url = 'https://tw.stock.yahoo.com/future/WTX&'
+            req = urllib.request.Request(url, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                'Accept-Language': 'zh-TW,zh;q=0.9',
+            })
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                html = resp.read().decode('utf-8', 'replace')
+
+            # 頁面 SSR；台指期主報價用「成交/昨收/漲幅」標籤(相對行情表的上市大盤
+            # 用「價位/漲跌(%)」不同標籤)，故去標籤後抓這些就不會抓到大盤。
+            txt = _re2.sub(r'<[^>]+>', ' ', html)
+            txt = txt.replace(' ', ' ')
+
+            def near(label, text):
+                # label 後面(可跨空白/標點)第一個帶兩位小數的數字
+                m = _re2.search(label + r'[^\d\-]{0,12}([\d,]+\.\d{2})', text)
+                if m:
+                    try: return float(m.group(1).replace(',', ''))
+                    except: pass
+                return None
+
+            price = near('成交', txt)
+            prev = near('昨收', txt)
+            mpct = _re2.search(r'漲幅[^\d\-]{0,12}([\d.]+)\s*%', txt)
+            pctmag = float(mpct.group(1)) if mpct else None
+            chg = None
+            if price is not None and prev:
+                chg = (price - prev) / prev * 100          # 帶正負號
+            elif pctmag is not None and price is not None and prev:
+                chg = pctmag * (1 if price >= prev else -1)
+            if price is not None:
+                out = {'ok': True, 'price': price, 'prevClose': prev, 'changePct': chg,
+                       'name': '台指期近一', 'source': 'yahoo-tw'}
+                body = json.dumps(out, ensure_ascii=False).encode()
+                _cache.set(key, body); self._ok(body); return
+            yahoo_debug = {'price_label_hit': price, 'prev_label_hit': prev,
+                           'has_成交': '成交' in txt, 'has_昨收': '昨收' in txt,
+                           'sample': txt[txt.find('台指期近一'): txt.find('台指期近一') + 400] if '台指期近一' in txt else txt[:300]}
+        except Exception as e:
+            yahoo_debug = {'yahoo_error': str(e)}
+
+        # ── 備援：TAIFEX MIS ──
+        try:
+            url = 'https://mis.taifex.com.tw/futures/api/getQuoteList'
+            payload = json.dumps({'MarketType': '0', 'SymbolType': 'F', 'KindID': '1', 'CID': 'TXF',
+                                  'ExpireMonth': '', 'RowSize': '全部', 'PageNo': '', 'SortColumn': '', 'AscDesc': 'A'}).encode('utf-8')
+            req = urllib.request.Request(url, data=payload, method='POST', headers={
+                'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0',
+                'Origin': 'https://mis.taifex.com.tw', 'Referer': 'https://mis.taifex.com.tw/futures/'})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+            rows = (data.get('RtData') or {}).get('QuoteList') or []
+            if rows:
+                def fnum(d, *keys):
+                    for k in keys:
+                        v = d.get(k)
+                        if v not in (None, '', '-'):
+                            try: return float(str(v).replace(',', '').replace('%', ''))
+                            except: pass
+                    return None
+                row = rows[0]
+                price = fnum(row, 'CLastPrice', 'CLast', 'LastPrice')
+                prev = fnum(row, 'CRefPrice', 'CYDClose', 'RefPrice')
+                chg = fnum(row, 'CDiffRate', 'DiffRate')
+                if chg is None and price is not None and prev:
+                    chg = (price - prev) / prev * 100
+                if price is not None:
+                    out = {'ok': True, 'price': price, 'prevClose': prev, 'changePct': chg,
+                           'name': row.get('DispCName') or '台指期', 'source': 'taifex'}
+                    body = json.dumps(out, ensure_ascii=False).encode()
+                    _cache.set(key, body); self._ok(body); return
+        except Exception as e:
+            yahoo_debug['taifex_error'] = str(e)
+
+        self._ok(json.dumps({'ok': False, 'error': '兩來源皆無法解析', 'debug': yahoo_debug}, ensure_ascii=False).encode())
+
+    # ── WATCH 後端偵測端點 (v3.8) ──────────────────────────
+    def _watch_status(self):
+        if not watch_daemon:
+            self._err('watch daemon unavailable', 503); return
+        self._ok(json.dumps(watch_daemon.status(), ensure_ascii=False).encode())
+
+    def _watch_post_rules(self):
+        if not watch_daemon:
+            self._err('watch daemon unavailable', 503); return
+        try:
+            rules = self._read_json_body()
+            if not isinstance(rules, dict):
+                self._err('rules must be an object', 400); return
+            watch_daemon.save_rules(rules)
+            self._ok(json.dumps({'ok': True, 'count': len(rules)}).encode())
+        except Exception as e:
+            self._err('save watch rules failed: ' + str(e), 500)
+
+    def _watch_post_config(self):
+        if not (watch_daemon and alert_daemon):
+            self._err('watch/alert daemon unavailable', 503); return
+        try:
+            inc = self._read_json_body()
+            cur = alert_daemon.load_config()
+            if 'enabled' in inc:
+                cur['watch_enabled'] = bool(inc['enabled'])
+            if 'poll_seconds' in inc:
+                cur['watch_poll_seconds'] = int(inc['poll_seconds'])
+            alert_daemon.save_config(cur)
+            if cur.get('watch_enabled'):
+                watch_daemon.start()
+            self._ok(json.dumps({'ok': True, 'watch_enabled': cur.get('watch_enabled')}).encode())
+        except Exception as e:
+            self._err('save watch config failed: ' + str(e), 500)
+
     def log_message(self, fmt, *args):
         pass  # silent
 
@@ -1952,6 +2087,9 @@ if __name__ == '__main__':
                 print('[alert] daemon started (poll %ss)' % _ac.get('poll_seconds', 60))
             else:
                 print('[alert] daemon idle (enable in alert_config.json or UI)')
+            if watch_daemon and _ac.get('watch_enabled'):
+                watch_daemon.start()
+                print('[watch] daemon started (poll %ss)' % _ac.get('watch_poll_seconds', 300))
         except Exception as _e:
             print('[alert] start failed:', _e)
     ThreadingHTTPServer(('localhost', PORT), Handler).serve_forever()

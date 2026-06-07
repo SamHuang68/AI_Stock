@@ -206,7 +206,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
-<link rel="stylesheet" href="mobile_v2.css?v=1780687687">
+<link rel="stylesheet" href="mobile_v2.css?v=1780867908">
 </head>
 <body>
 <div id="app">
@@ -269,6 +269,18 @@ const SECTION_DEFS = [
   {key:'產業技術生態',zh:'產業技術生態',en:'TECH ECOSYSTEM'},
   {key:'機會與風險', zh:'機會與風險', en:'RISK/REWARD'},
   {key:'分析師總結', zh:'分析師總結', en:'CONCLUSION'},
+];
+
+// ── 大盤分析（市場層級）system prompt + 章節 ──
+const MARKET_SYS_PROMPT = '你是一位頂尖台股大盤策略分析師，專精指數、資金流、產業輪動與國際連動。\n撰寫風格：直白犀利、有觀點、數據精確、給可執行結論。語言：全繁體中文，技術指標保留英文縮寫。\n\n輸出規則（嚴格遵守）：\n1. 每章節以 [[[SECTION:章節名]]] 開頭，必須是以下六個之一，順序固定。\n2. 表格用 Markdown。直接從 [[[SECTION:大盤總覽]]] 開始，不要寫標題行。\n3. 【數據紀律｜最重要】提供的即時快照「只有點數與漲跌%」。凡是快照沒有的數字（成交額/量能、漲跌家數、三大法人買賣超金額、外資期貨口數等）一律先用 web_search 查最新真實值，嚴禁自行估算或編造（曾發生把上市大盤成交額 12,316億 誤填成 2,316億）。查不到就寫「待查」，不要瞎掰。\n\n[[[SECTION:大盤總覽]]]\n加權/櫃買現況表（點數、漲跌%、成交額）。成交額必須來自 web_search 的真實數據，沒查到就標「待查」，不可臆造。最後一句定調今日盤勢（強多/偏多/中性/偏空/強空）。\n\n[[[SECTION:技術面]]]\n加權指數趨勢判斷（🟢多/🟡盤整/🔴空）、關鍵支撐/壓力點位、均線（月線/季線/年線）位置、量價背離與否。\n\n[[[SECTION:資金與籌碼]]]\n三大法人買賣超方向與金額、外資期貨多空淨額、融資融券變化、資金流向（電子/金融/傳產）。\n\n[[[SECTION:類股輪動]]]\n今日強勢/弱勢類股、輪動趨勢（如 AI 半導體→傳產），點名 2~3 個值得關注的族群與代表股。\n\n[[[SECTION:國際與夜盤連動]]]\n美股（道瓊/那斯達克/費半）、美股期貨夜盤、台指期夜盤、重要總經事件，評估對台股隔日開盤的影響（估計開高/開低方向與幅度）。\n\n[[[SECTION:隔日策略]]]\n| 情境 | 操作建議 |\n給「開高/開平/開低」三情境的應對；多單/空單/觀望的條件；最重要的一個觀察點與風險。';
+
+const MARKET_SECTION_DEFS = [
+  {key:'大盤總覽',   zh:'大盤總覽',   en:'MARKET OVERVIEW'},
+  {key:'技術面',     zh:'技術面',     en:'TECHNICALS'},
+  {key:'資金與籌碼', zh:'資金與籌碼', en:'FLOWS'},
+  {key:'類股輪動',   zh:'類股輪動',   en:'ROTATION'},
+  {key:'國際與夜盤連動',zh:'國際與夜盤連動',en:'GLOBAL/OVERNIGHT'},
+  {key:'隔日策略',   zh:'隔日策略',   en:'NEXT-DAY PLAN'},
 ];
 
 const DEFAULT_WL = [
@@ -556,6 +568,22 @@ async function loadSym(sym, mkt) {
     const _ycp = parsed.meta.chartPreviousClose ?? parsed.meta.previousClose;
     if (_ycp != null && isFinite(_ycp) && _ycp > 0) {
       parsed.yesterdayClose = _ycp;
+    }
+  }
+
+  // ── intraday 尾盤集合競價量補回 (v3.8) ──────────────────────
+  // 台股 13:30 收盤集合競價的量常沒進 Yahoo 5m 最後一根（最後一根 volume=0），
+  // 造成「13:25 後沒抓到交易量」。用當日總量 regularMarketVolume 減去其餘各
+  // bar 的量，把缺口（含尾盤競價）補回最後一根。
+  if (_isIntraday && parsed.meta && parsed.candles.length >= 2) {
+    const _rmv = parsed.meta.regularMarketVolume;
+    if (_rmv != null && isFinite(_rmv) && _rmv > 0) {
+      const _cs = parsed.candles;
+      let _sumEx = 0;
+      for (let i = 0; i < _cs.length - 1; i++) _sumEx += _cs[i].volume || 0;
+      const _rem = _rmv - _sumEx;
+      const _lastV = _cs[_cs.length - 1].volume || 0;
+      if (_rem > 0 && _rem > _lastV) _cs[_cs.length - 1].volume = _rem;
     }
   }
 
@@ -978,7 +1006,11 @@ function renderStats() {
 // ── RESEARCH TAB ─────────────────────────────────────────────────
 function renderResearch() {
   const canAna = !!S.apiKey && !!S.sym && !S.analyzing;
-  let html = `<button id="anabtn" onclick="startAnalysis()" ${canAna?'':'disabled'}>${S.analyzing?'分析中...':'▶ AI 分析 '+S.sym}</button>`;
+  const canMkt = !!S.apiKey && !S.analyzing;
+  let html = `<div style="display:flex;gap:6px">
+    <button id="anabtn" style="flex:1" onclick="startAnalysis('stock')" ${canAna?'':'disabled'}>${S.analyzing&&S.anaMode!=='market'?'分析中...':'▶ AI 個股 '+(S.sym||'')}</button>
+    <button id="anabtn-mkt" style="flex:1" onclick="startAnalysis('market')" ${canMkt?'':'disabled'}>${S.analyzing&&S.anaMode==='market'?'分析中...':'📊 大盤分析'}</button>
+  </div>`;
   if (S.analyzing) {
     if (S.phase) html += `<div class="phase-badge"><div class="pulse"></div>${S.phase}</div>`;
     if (S.sources.length) {
@@ -990,10 +1022,11 @@ function renderResearch() {
     return html;
   }
   if (S.sections.length > 0) {
-    html += `<div class="toc-pills">${SECTION_DEFS.map((d,i)=>`<div class="tpill" onclick="scrollSec(${i})">${d.zh}</div>`).join('')}</div>`;
+    const _defs = S.secDefs || SECTION_DEFS;
+    html += `<div class="toc-pills">${_defs.map((d,i)=>`<div class="tpill" onclick="scrollSec(${i})">${d.zh}</div>`).join('')}</div>`;
     html += '<div id="anapanel">';
     for (const sec of S.sections) {
-      const def = SECTION_DEFS.find(d=>d.key===sec.key)||{zh:sec.key,en:''};
+      const def = _defs.find(d=>d.key===sec.key)||{zh:sec.key,en:''};
       html += `<div class="asec" id="asec-${sec.key}">
         <div class="asec-hdr">${def.zh}${def.en?' · '+def.en:''}</div>
         <div class="asec-body">${mdToHtml(sec.content)}</div>
@@ -1011,22 +1044,49 @@ function renderResearch() {
 }
 function attachResearch() {}
 function scrollSec(i) {
-  const d = SECTION_DEFS[i];
+  const d = (S.secDefs || SECTION_DEFS)[i];
+  if (!d) return;
   const el = document.getElementById('asec-'+d.key);
   if (el) el.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
+// 從大盤列 DOM 蒐集即時數據字串，餵給大盤分析
+function gatherMarketSnapshot() {
+  const lines = [];
+  document.querySelectorAll('#mkt-bar-inner .mkt-cell').forEach(c => {
+    const nm = (c.querySelector('.nm')||{}).textContent || '';
+    const px = (c.querySelector('.px')||{}).textContent || '';
+    const ch = (c.querySelector('.ch')||{}).textContent || '';
+    if (nm && px) lines.push(`${nm.trim()}: ${px.trim()} ${ch.trim()}`);
+  });
+  return lines.length ? lines.join('\n') : '（即時數據未載入，請用 web_search 查最新）';
+}
+
 // ── STREAMING ANALYSIS ─────────────────────────────────────────
-async function startAnalysis() {
+async function startAnalysis(mode) {
+  mode = mode || 'stock';
   if (!S.apiKey) { showKeyModal(); return; }
-  if (!S.sym || S.analyzing) return;
-  S.analyzing=true; S.streamText=''; S.sources=[]; S.phase='分析中...'; S.sections=[];
+  if (S.analyzing) return;
+  if (mode === 'stock' && !S.sym) return;
+  S.anaMode = mode;
+  S.secDefs = (mode === 'market') ? MARKET_SECTION_DEFS : SECTION_DEFS;
+  S.analyzing=true; S.streamText=''; S.sources=[]; S.phase=mode==='market'?'分析大盤中...':'分析中...'; S.sections=[];
   renderRpanel();
 
-  const mktLabel = S.mkt==='TW'
-    ? `台股（代號：${S.sym}，幣別：TWD 新台幣）`
-    : `美股（Nasdaq/NYSE 代號：${S.sym}，幣別：USD 美元）`;
-  const userMsg = `請對以下個股撰寫完整八章節研究報告：\n市場：${mktLabel}\n股票代號：${S.sym}\n\n請嚴格按章節標記輸出，每章節以 [[[SECTION:章節名]]] 開頭，直接從 [[[SECTION:公司簡介]]] 開始，不要寫任何標題行。`;
+  let userMsg, systemPrompt;
+  if (mode === 'market') {
+    systemPrompt = MARKET_SYS_PROMPT;
+    const snap = gatherMarketSnapshot();
+    userMsg = `請撰寫台股大盤分析與隔日策略報告。\n\n# 目前即時數據（大盤列）\n${snap}\n\n` +
+      `請結合上述數據，並用 web_search 補最新（加權指數量能、三大法人買賣超、外資期貨、台指期夜盤、美股與費半、重大事件）。\n` +
+      `嚴格按章節標記輸出，從 [[[SECTION:大盤總覽]]] 開始，共六章節，不要寫標題行。`;
+  } else {
+    systemPrompt = SYS_PROMPT;
+    const mktLabel = S.mkt==='TW'
+      ? `台股（代號：${S.sym}，幣別：TWD 新台幣）`
+      : `美股（Nasdaq/NYSE 代號：${S.sym}，幣別：USD 美元）`;
+    userMsg = `請對以下個股撰寫完整八章節研究報告：\n市場：${mktLabel}\n股票代號：${S.sym}\n\n請嚴格按章節標記輸出，每章節以 [[[SECTION:章節名]]] 開頭，直接從 [[[SECTION:公司簡介]]] 開始，不要寫任何標題行。`;
+  }
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -1040,7 +1100,7 @@ async function startAnalysis() {
       body:JSON.stringify({
         model:'claude-sonnet-4-20250514',
         max_tokens:6000, stream:true,
-        system:SYS_PROMPT,
+        system:systemPrompt,
         messages:[{role:'user',content:userMsg}],
         tools:[{type:'web_search_20250305',name:'web_search'}]
       })
@@ -1077,7 +1137,8 @@ async function startAnalysis() {
           if(ev.type==='message_stop') {
             S.sections=parseSections(fullText);
             S.analyzing=false; S.phase='';
-            const report={ticker:S.sym,market:S.mkt,text:fullText,sources:S.sources,sections:S.sections,timestamp:Date.now()};
+            const _tk = S.anaMode==='market' ? '大盤' : S.sym;
+            const report={ticker:_tk,market:S.mkt,text:fullText,sources:S.sources,sections:S.sections,timestamp:Date.now()};
             addHist(report);
             renderRpanel();
             return;
@@ -1294,33 +1355,34 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
 });
 </script>
-<script src="position_v2.js?v=1780687687"></script>
-<script src="watch_v2.js?v=1780687687"></script>
-<script src="info_v2.js?v=1780687687"></script>
-<script src="pro_v2.js?v=1780687687"></script>
-<script src="volume_profile_v3.js?v=1780687687"></script>
-<script src="pattern_v3.js?v=1780687687"></script>
-<script src="live_v2.js?v=1780687687"></script>
-<script src="chip_v3.js?v=1780687687"></script>
-<script src="fundamental_v3.js?v=1780687687"></script>
-<script src="heatmap_v3.js?v=1780687687"></script>
-<script src="screener_v3.js?v=1780687687"></script>
-<script src="ai_report_v3.js?v=1780687687"></script>
-<script src="polish_v3.js?v=1780687687"></script>
-<script src="wl_live_v3.js?v=1780687687"></script>
-<script src="plan_history_v3.js?v=1780687687"></script>
-<script src="plan_position_v3.js?v=1780687687"></script>
-<script src="plan_v3.js?v=1780687687"></script>
-<script src="pdf_import_v3.js?v=1780687687"></script>
-<script src="pdf_export_v3.js?v=1780687687"></script>
-<script src="peg_v3.js?v=1780687687"></script>
-<script src="alert_v3.js?v=1780687687"></script>
-<script src="alert_push_v3.js?v=1780687687"></script>
-<script src="backtest_v3.js?v=1780687687"></script>
-<script src="backtest_ui_v3.js?v=1780687687"></script>
-<script src="enhance_v3.js?v=1780687687"></script>
-<script src="aftermarket_v3.js?v=1780687687"></script>
-<script src="etf_v3.js?v=1780687687"></script>
+<script src="position_v2.js?v=1780867908"></script>
+<script src="watch_v2.js?v=1780867908"></script>
+<script src="info_v2.js?v=1780867908"></script>
+<script src="pro_v2.js?v=1780867908"></script>
+<script src="volume_profile_v3.js?v=1780867908"></script>
+<script src="pattern_v3.js?v=1780867908"></script>
+<script src="live_v2.js?v=1780867908"></script>
+<script src="chip_v3.js?v=1780867908"></script>
+<script src="fundamental_v3.js?v=1780867908"></script>
+<script src="heatmap_v3.js?v=1780867908"></script>
+<script src="screener_v3.js?v=1780867908"></script>
+<script src="ai_report_v3.js?v=1780867908"></script>
+<script src="polish_v3.js?v=1780867908"></script>
+<script src="wl_live_v3.js?v=1780867908"></script>
+<script src="plan_history_v3.js?v=1780867908"></script>
+<script src="plan_position_v3.js?v=1780867908"></script>
+<script src="plan_v3.js?v=1780867908"></script>
+<script src="pdf_import_v3.js?v=1780867908"></script>
+<script src="pdf_export_v3.js?v=1780867908"></script>
+<script src="peg_v3.js?v=1780867908"></script>
+<script src="alert_v3.js?v=1780867908"></script>
+<script src="alert_push_v3.js?v=1780867908"></script>
+<script src="backtest_v3.js?v=1780867908"></script>
+<script src="backtest_ui_v3.js?v=1780867908"></script>
+<script src="enhance_v3.js?v=1780867908"></script>
+<script src="aftermarket_v3.js?v=1780867908"></script>
+<script src="overnight_v3.js?v=1780867908"></script>
+<script src="etf_v3.js?v=1780867908"></script>
 </body>
 </html>
 <script>

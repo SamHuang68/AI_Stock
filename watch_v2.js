@@ -69,6 +69,25 @@ function genSigId() {
 function saveWatches() {
   if (!S.watches) S.watches = {};
   localStorage.setItem(LS_KEY_WATCH, JSON.stringify(S.watches));
+  syncWatchesToServer();   // v3.8: 同步給後端 24h 偵測
+}
+
+// 同步觀察清單到 server（debounce），供 watch_daemon 後端評估
+let _watchSyncTimer = null;
+function syncWatchesToServer() {
+  clearTimeout(_watchSyncTimer);
+  _watchSyncTimer = setTimeout(() => {
+    try {
+      const SRV = window.SERVER || 'http://localhost:18432';
+      // 精簡：只送後端需要的欄位
+      const out = {};
+      for (const code in (S.watches || {})) {
+        const w = S.watches[code];
+        out[code] = { mkt: w.mkt || 'TW', signals: (w.signals || []).map(s => ({ id: s.id, strategy: s.strategy, params: s.params || {} })) };
+      }
+      fetch(`${SRV}/watch/rules`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(out) }).catch(() => {});
+    } catch {}
+  }, 800);
 }
 
 // ── Strategy Playbook ──────────────────────────────────────

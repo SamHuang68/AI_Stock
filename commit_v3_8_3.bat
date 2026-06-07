@@ -16,7 +16,11 @@ git commit ^
  -m "Market bar: add KOSPI / gold / silver / crude oil" ^
  -m "Volume Profile: avg(amount+volume) mode, stops at price axis (no candle overlap), short POC/VAH/VAL lines on right" ^
  -m "Close labels: today/prev close as half-size tags beside price axis; LIVE session inferred from local time when Yahoo marketState missing/wrong" ^
- -m "Dual-axis card / collapsible right panel / tab memory / pre-post market; README v3.8 updated"
+ -m "Dual-axis card / collapsible right panel / tab memory / pre-post market; README v3.8 updated" ^
+ -m "WATCH 24h backend daemon (watch_daemon.py, 8 strategies in Python, /watch endpoints, notify center toggle + manual scan)" ^
+ -m "Overnight panel (overnight_v3.js): US futures night -> TW next-day estimate -> position stop / watch buy-zone linkage" ^
+ -m "TXF night (/txf) via Yahoo TW WTX& SSR (label-anchored parse), added to market bar" ^
+ -m "RESEARCH market-analysis mode (MARKET_SYS_PROMPT, 6 sections) with data-discipline anti-hallucination; intraday closing-auction volume backfill"
 
 echo.
 echo === v3.8.3 committed ===

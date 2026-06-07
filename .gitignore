@@ -44,6 +44,11 @@ secrets.json
 alert_config.json
 alert_rules.json
 
+# v3.8 WATCH backend daemon + ETF report state (user data)
+watch_rules.json
+watch_state.json
+chip_history/
+
 # Backup / temp files
 *.bak
 *.tmp

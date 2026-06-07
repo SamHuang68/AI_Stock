@@ -116,9 +116,14 @@ function notifyPanelToggle() {
       </span>
       <button data-pro="notify-toggle-en" style="padding:3px 10px;background:transparent;border:1px solid ${enabled?'var(--red)':'var(--green)'};border-radius:4px;color:${enabled?'var(--red)':'var(--green)'};font-family:monospace;font-size:9px;cursor:pointer">${enabled ? '停用' : '啟用'}</button>
     </div>
+    <div style="padding:7px 12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:var(--bg)">
+      <span style="font-family:monospace;font-size:9.5px;color:var(--tlo)">🌙 24h 後端自動偵測<br><span style="font-size:8px;color:var(--tf)">瀏覽器關著也偵測，觸發推 Telegram/Email</span></span>
+      <button data-pro="watch-bg" id="watch-bg-btn" style="padding:3px 10px;background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--tlo);font-family:monospace;font-size:9px;cursor:pointer">…</button>
+    </div>
     <div style="padding:6px 12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:var(--bg)">
       <span style="font-family:monospace;font-size:9.5px;color:var(--tlo)">歷史 ${S.notify.history.length} 筆，未讀 ${S.notify.unread || 0}</span>
       <div>
+        <button data-pro="notify-scan" style="padding:2px 8px;background:var(--gold-s);border:1px solid var(--gold-m);border-radius:3px;color:var(--gold);font-family:monospace;font-size:8.5px;cursor:pointer;margin-right:4px">🔍 偵測</button>
         <button data-pro="notify-mark-read" style="padding:2px 8px;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--tlo);font-family:monospace;font-size:8.5px;cursor:pointer;margin-right:4px">標記已讀</button>
         <button data-pro="notify-clear" style="padding:2px 8px;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--red);font-family:monospace;font-size:8.5px;cursor:pointer">清除</button>
       </div>
@@ -128,6 +133,7 @@ function notifyPanelToggle() {
     </div>
     <div style="padding:6px 12px;background:var(--bg);font-family:monospace;font-size:8px;color:var(--tf);border-top:1px solid var(--border);text-align:center">點擊任一筆跳轉到該股 · 通知保留最近 100 筆</div>`;
   document.body.appendChild(panel);
+  refreshWatchBgBtn();
   // Close on outside click
   setTimeout(() => {
     document.addEventListener('mousedown', _notifyOutClose, {capture: true});
@@ -210,6 +216,8 @@ document.addEventListener('click', ev => {
   if (act === 'notify-close')      { document.getElementById('notify-panel')?.remove(); }
   if (act === 'notify-clear')      { notifyClearHistory(); }
   if (act === 'notify-mark-read')  { notifyMarkAllRead(); }
+  if (act === 'notify-scan')       { scanAllWatches(el); }
+  if (act === 'watch-bg')          { toggleWatchBg(el); }
   if (act === 'notify-toggle-en')  { notifyToggle(); document.getElementById('notify-panel')?.remove(); setTimeout(notifyPanelToggle, 100); }
   if (act === 'notify-goto') {
     const sym = el.dataset.sym, mkt = el.dataset.mkt || 'TW';
@@ -219,15 +227,18 @@ document.addEventListener('click', ev => {
 });
 
 // Fire notification for newly-triggered signals
-function fireSignalNotifications() {
+function fireSignalNotifications(force) {
   if (!S.watches) return;
   // v3.8: 訊號只在「日線」決策 timeframe 評估。
   // 切到周線/月線/盤中線時 SMA 等指標意義不同，狀態會在 trigger<->none 翻動，
   // 把去重狀態洗掉造成切回日線重複跳通知。日線各區間(1月~全部)最新指標值相同→穩定。
-  try {
-    const ivl = (typeof currentRangeDef === 'function') ? currentRangeDef().interval : '1d';
-    if (ivl !== '1d') return;
-  } catch {}
+  // force=true（手動偵測）已用各股日線資料評估，略過此閘門。
+  if (!force) {
+    try {
+      const ivl = (typeof currentRangeDef === 'function') ? currentRangeDef().interval : '1d';
+      if (ivl !== '1d') return;
+    } catch {}
+  }
   let newCount = 0;
   for (const code in S.watches) {
     const w = S.watches[code];
@@ -278,6 +289,92 @@ function fireSignalNotifications() {
 
 // Hook: after every symLoaded (which refreshes watches), check for new triggers
 window.addEventListener('symLoaded', () => setTimeout(fireSignalNotifications, 200));
+
+// v3.8: 主動偵測 — 抓所有觀察股的日線，逐檔算指標、評估訊號後推播
+// （不必先點開每檔；用各股自己的日線資料，故 fireSignalNotifications(force)）
+let _scanning = false;
+async function scanAllWatches(btn) {
+  if (_scanning) return;
+  if (!S.watches || !Object.keys(S.watches).length) { alert('觀察清單是空的，先到 WATCH 加股票與訊號'); return; }
+  if (typeof parseYF !== 'function' || typeof runWorker !== 'function' || typeof evaluateSignal !== 'function') {
+    alert('偵測所需函式未就緒，請重新整理'); return;
+  }
+  _scanning = true;
+  const SRV = window.SERVER || 'http://localhost:18432';
+  const codes = Object.keys(S.watches);
+  if (btn) { btn.disabled = true; btn.textContent = '偵測中…'; }
+  let done = 0, ok = 0;
+  // 限制併發，避免一次太多請求
+  const queue = codes.slice();
+  async function worker() {
+    while (queue.length) {
+      const code = queue.shift();
+      const w = S.watches[code];
+      const yf = (w && w.mkt === 'US') ? code : code + '.TW';
+      try {
+        let raw = await fetch(`${SRV}/yf/${yf}?range=1y&interval=1d`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null);
+        let parsed = raw ? parseYF(raw) : null;
+        if ((!parsed || !parsed.candles.length) && (!w || w.mkt !== 'US')) {
+          raw = await fetch(`${SRV}/yf/${code}.TWO?range=1y&interval=1d`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null);
+          parsed = raw ? parseYF(raw) : null;
+        }
+        if (parsed && parsed.candles.length >= 20) {
+          const ind = await runWorker(parsed.candles);
+          for (const sig of (w.signals || [])) {
+            try { sig.lastEval = evaluateSignal(sig, ind, parsed.candles); } catch {}
+          }
+          ok++;
+        }
+      } catch (e) { console.warn('[scan]', code, e); }
+      done++;
+      if (btn) btn.textContent = `偵測中 ${done}/${codes.length}`;
+    }
+  }
+  try {
+    await Promise.all([worker(), worker(), worker(), worker()]);   // 4 併發
+    if (typeof saveWatches === 'function') { try { saveWatches(); } catch {} }
+    fireSignalNotifications(true);   // force：已用日線評估，略過 timeframe 閘門
+    const list = document.getElementById('notify-list');
+    if (list) list.innerHTML = renderNotifyList();
+  } finally {
+    _scanning = false;
+    if (btn) { btn.disabled = false; btn.textContent = '🔍 偵測'; }
+  }
+}
+
+// v3.8: WATCH 後端 24h 偵測開關
+function refreshWatchBgBtn() {
+  const btn = document.getElementById('watch-bg-btn');
+  if (!btn) return;
+  const SRV = window.SERVER || 'http://localhost:18432';
+  fetch(`${SRV}/watch/status`, { cache: 'no-store' }).then(r => r.json()).then(s => {
+    const on = !!s.enabled;
+    btn.dataset.on = on ? '1' : '0';
+    btn.textContent = on ? '停用' : '啟用';
+    btn.style.color = on ? 'var(--red)' : 'var(--green)';
+    btn.style.borderColor = on ? 'var(--red)' : 'var(--green)';
+    btn.title = on ? `執行中 · 規則 ${s.rules_count} 檔 · 上次 ${s.last_run || '—'}` : '點擊啟用後端 24h 偵測';
+  }).catch(() => { btn.textContent = '啟用'; });
+}
+async function toggleWatchBg(btn) {
+  const SRV = window.SERVER || 'http://localhost:18432';
+  const on = btn.dataset.on === '1';
+  if (!on) {
+    // 啟用前先把目前觀察清單同步給後端
+    if (typeof syncWatchesToServer === 'function') syncWatchesToServer();
+  }
+  try {
+    const r = await fetch(`${SRV}/watch/config`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !on }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      alert(!on ? '已啟用 24h 後端偵測 ✓\n（需在 🔔 推播設好 Telegram/Email）' : '已停用後端偵測');
+      refreshWatchBgBtn();
+    } else alert('設定失敗：' + JSON.stringify(d));
+  } catch (e) { alert('設定失敗：' + e.message + '\n請確認 server 跑著'); }
+}
 
 // ============================================================
 // 2. COMPARE MODE (overlay benchmark)
@@ -792,6 +889,7 @@ document.addEventListener('click', ev => {
       `<button class="probtn" id="btn-vp-mode" onclick="window.vpCycleMode&&vpCycleMode()" title="切換 金額/成交量 模式 (v3.8)">$/量</button>` +
       `<button class="probtn" id="btn-bt3"     onclick="window.backtestOpen&&backtestOpen()" title="回測引擎：8 策略勝率 + 型態命中率 (v3.8)">📈 回測</button>` +
       `<button class="probtn" id="btn-alertpush" onclick="window.alertPushOpen&&alertPushOpen()" title="後端警報推播設定 Telegram/Email (v3.8)">🔔 推播</button>` +
+      `<button class="probtn" id="btn-overnight" onclick="window.overnightOpen&&overnightOpen()" title="夜盤連動預警：美股期貨→台股隔日預估→持倉停損/觀察買區 (v3.8)">🌙 夜盤</button>` +
       `<button class="probtn" id="btn-replay"  onclick="replayToggle()"  title="K 線重播模式">▶ Replay</button>`;
     rangebar.parentElement.insertBefore(tools, rangebar.nextSibling);
     // v3.8: 工具列改 2 列 — 行1 時間段(rangebar)，行2 功能鈕(tools)

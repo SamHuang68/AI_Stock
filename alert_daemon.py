@@ -21,6 +21,8 @@ LOG_DIR = os.path.join(_BASE, 'logs', 'alerts')
 _DEFAULT_CONFIG = {
     'enabled': False,
     'poll_seconds': 60,
+    'watch_enabled': False,        # v3.8: WATCH 後端 24h 自動偵測
+    'watch_poll_seconds': 300,
     'telegram': {'enabled': False, 'bot_token': '', 'chat_id': ''},
     'email': {'enabled': False, 'smtp_host': 'smtp.gmail.com', 'smtp_port': 587,
               'user': '', 'app_password': '', 'to': ''},
