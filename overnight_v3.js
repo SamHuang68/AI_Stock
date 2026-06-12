@@ -18,8 +18,8 @@
     { sym: '^SOX', name: '費半', w: 0.35 },
   ];
 
-  // 用日線(5d/1d)算「現價 vs 前一交易日收盤」。期貨(=F)用 1m range 會
-  // 抓到 chartPreviousClose==現價 → 0%；日線的 chartPreviousClose 才是前一結算。
+  // 與大盤列 refreshMktBar 完全相同的算法（rmt 落後判斷 + 前一交易日收盤），
+  // 確保夜盤面板與大盤列數字一致（之前用 chartPreviousClose 會算出錯誤的微小%）。
   async function q(sym) {
     try {
       const r = await fetch(`${SRV}/yf/${encodeURIComponent(sym)}?range=5d&interval=1d`, { cache: 'no-store' });
@@ -28,17 +28,24 @@
       const res = j && j.chart && j.chart.result && j.chart.result[0];
       if (!res) return null;
       const meta = res.meta || {};
-      const closes = ((res.indicators && res.indicators.quote && res.indicators.quote[0] && res.indicators.quote[0].close) || [])
-        .filter(x => x != null);
-      const price = (meta.regularMarketPrice != null) ? meta.regularMarketPrice
-        : (closes.length ? closes[closes.length - 1] : null);
-      // 基準：優先 chartPreviousClose；若它等於現價(期貨常見) 改用倒數第二根日收
-      let base = meta.chartPreviousClose != null ? meta.chartPreviousClose : null;
-      if ((base == null || (price != null && Math.abs(base - price) < 1e-9)) && closes.length >= 2) {
-        base = closes[closes.length - 1] === price ? closes[closes.length - 2] : closes[closes.length - 1];
+      const ts = res.timestamp || [];
+      const cl = (res.indicators && res.indicators.quote && res.indicators.quote[0] && res.indicators.quote[0].close) || [];
+      const valid = [];
+      for (let i = 0; i < Math.min(ts.length, cl.length); i++) {
+        if (cl[i] != null && isFinite(cl[i]) && ts[i] != null) valid.push({ t: ts[i], c: cl[i] });
       }
-      const changePct = (price != null && base) ? (price - base) / base * 100 : null;
-      return { price, changePct };
+      if (!valid.length) return null;
+      const last = valid[valid.length - 1];
+      const prevC = valid.length >= 2 ? valid[valid.length - 2].c : null;
+      const rmt = meta.regularMarketTime, rmp = meta.regularMarketPrice;
+      let cur, prev;
+      if (rmt && rmp != null && isFinite(rmp) && rmp > 0 && rmt - last.t > 20 * 3600) {
+        cur = rmp; prev = last.c;                 // 日線落後 → rmp 才是今天
+      } else {
+        cur = last.c; prev = (prevC != null) ? prevC : (meta.chartPreviousClose || meta.previousClose);
+      }
+      const changePct = (cur != null && prev != null && prev > 0) ? (cur - prev) / prev * 100 : null;
+      return { price: cur, changePct };
     } catch { return null; }
   }
   const col = p => p == null ? 'var(--tlo)' : p > 0 ? 'var(--green)' : p < 0 ? 'var(--red)' : 'var(--tlo)';
@@ -79,6 +86,11 @@
     if (!body) return;
     const quotes = {};
     await Promise.all(DRIVERS.map(async d => { quotes[d.sym] = await q(d.sym); }));
+    // TSM ADR = 2330 的隔日先行指標（核心連動）
+    const tsm = await q('TSM');
+    const tsmPct = (tsm && tsm.changePct != null) ? tsm.changePct : null;
+    const soxQ = quotes['^SOX'];
+    const soxPct = (soxQ && soxQ.changePct != null) ? soxQ.changePct : null;
     // 期貨夜盤表
     let drows = '', composite = 0, wsum = 0;
     for (const d of DRIVERS) {
@@ -140,6 +152,16 @@
         <div style="font-size:11px;color:${estCol}">${tone}</div>
       </div>
       <table><thead><tr><th>夜盤領先指標</th><th>價</th><th>夜盤漲跌</th></tr></thead><tbody>${drows}</tbody></table>
+      <div style="margin:8px 0;padding:8px 10px;border:1px solid #334155;border-radius:8px;background:rgba(251,191,36,.06)">
+        <div style="font-size:12px;font-weight:700;color:#fbbf24">🔱 TSMC 核心連動（2330）</div>
+        <div style="font-size:11px;margin-top:4px">TSM ADR 夜盤 <b style="color:${col(tsmPct)}">${pct(tsmPct)}</b> · 費半 <b style="color:${col(soxPct)}">${pct(soxPct)}</b>
+          → <b>2330 隔日預估 ≈ <span style="color:${col(tsmPct)}">${pct(tsmPct)}</span></b>（主要看 TSM ADR）</div>
+        <div style="font-size:9px;color:var(--tlo);line-height:1.6;margin-top:5px">
+          長線結構：① TSMC＝AI 宇宙核心、先進製程獨佔，營收正比 AI 類股；② TSM/費半漲→2330 隔日多反映（除非美股收盤後重磅利空）；
+          ③ INTEL 18A／Samsung SF2 即便接單，產能良率僅滿足部分；④ AI 與 AMD/INTEL 皆靠 3D 封裝（如 Panther Lake 僅 compute die，其餘 4~5 顆與封裝仍在台積）；
+          ⑤ 4 大 CSP 投資集中台灣：買 TSMC 晶圓→3D 封裝→CPO 光通訊→AI 伺服器整機組裝全在台 → 台股日成交量自 2026/04 前約 8000 億／日 升至 1.2 兆＋。
+        </div>
+      </div>
       <h3 style="font-size:12px;color:var(--red)">📉 持倉停損預警</h3>
       <table><thead><tr><th>代號</th><th>現價</th><th>停損</th><th>距停損</th><th>隔日預估價</th></tr></thead>
         <tbody>${posRows || '<tr><td colspan=5 style="text-align:center;color:var(--tf)">無持倉或未設停損</td></tr>'}</tbody></table>

@@ -890,6 +890,11 @@ document.addEventListener('click', ev => {
       `<button class="probtn" id="btn-bt3"     onclick="window.backtestOpen&&backtestOpen()" title="回測引擎：8 策略勝率 + 型態命中率 (v3.8)">📈 回測</button>` +
       `<button class="probtn" id="btn-alertpush" onclick="window.alertPushOpen&&alertPushOpen()" title="後端警報推播設定 Telegram/Email (v3.8)">🔔 推播</button>` +
       `<button class="probtn" id="btn-overnight" onclick="window.overnightOpen&&overnightOpen()" title="夜盤連動預警：美股期貨→台股隔日預估→持倉停損/觀察買區 (v3.8)">🌙 夜盤</button>` +
+      `<button class="probtn" id="btn-supplychain" onclick="window.supplyChainOpen&&supplyChainOpen()" title="台灣AI供應鏈族群連動：晶圓→封裝→CPO→伺服器→散熱 RS輪動 (v3.8)">🔗 供應鏈</button>` +
+      `<button class="probtn" id="btn-valuation" onclick="window.valuationOpen&&valuationOpen()" title="長線估值錨：本益比河流，判斷現在貴不貴 (v3.8)">⚓ 估值</button>` +
+      `<button class="probtn" id="btn-marketflow" onclick="window.marketFlowOpen&&marketFlowOpen()" title="大盤資金流：量能趨勢8000億→1.2兆 + 三大法人 (v3.8)">💰 資金流</button>` +
+      `<button class="probtn" id="btn-instrank" onclick="window.instRankOpen&&instRankOpen()" title="外資/投信買賣超排行榜 + 連續天數 (v3.8)">🏆 法人榜</button>` +
+      `<button class="probtn" id="btn-calendar" onclick="window.calendarOpen&&calendarOpen()" title="事件行事曆：月營收/除權息提醒 (v3.8)">📅 行事曆</button>` +
       `<button class="probtn" id="btn-replay"  onclick="replayToggle()"  title="K 線重播模式">▶ Replay</button>`;
     rangebar.parentElement.insertBefore(tools, rangebar.nextSibling);
     // v3.8: 工具列改 2 列 — 行1 時間段(rangebar)，行2 功能鈕(tools)

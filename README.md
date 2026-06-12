@@ -1,4 +1,4 @@
-# Stock Terminal v3.8
+# Stock Terminal v3.8.2
 
 Bloomberg-style 個股研究終端機，本機跑、零雲端依賴、無外部 Python 套件需求。
 
@@ -497,6 +497,42 @@ ETF△ 工具列 `📋 報表`：跨 ETF 彙總每日新增/移除/加減碼，�
 
 ---
 
+## v3.8.1–v3.8.2 修正與強化（2026-06-11 ~ 12）
+
+### K 線資料修正（重要）
+
+- **合成「今日」K**（Yahoo 日線陣列落後 `regularMarketPrice` 時觸發）不再用 `OHLC=rmp / volume=0`：改用 meta 當日 `regularMarketDayHigh/Low`、`regularMarketVolume`，open 用 `regularMarketOpen`（缺則退「前一根日 K 收盤」並夾進當日高低）→ 修「前一日量顯示 0」與「+109% 假爆量 K」
+- **教訓**：`meta.chartPreviousClose` 是「**請求區間起點**前一日」的收盤（6mo 區間＝半年前的價），不是昨收；只有 range=1d 時才等於昨收
+- 最後一根「當日」日 K volume 為 null/0 時用 `regularMarketVolume` 回填
+
+### 技術面分數統一（enhance_v3.js）
+
+- 雙軸卡技術面分數一律以 **1y 日線** 為標準基底計算，**不再隨顯示區間變動**（修 0050 在 1月區間顯 26、00631L 依本體 1y 顯 65 的矛盾）
+- 槓桿/反向 ETF 映射本體（00631L/00675L→0050；反向 100−分數），標籤註記 `(依本體 XXXX · 1Y日線)`
+
+### ⚓ 估值修復（台股 + 美股）
+
+- **台股**：BWIBBU_ALL 正確路徑為 `/v1/exchangeReport/`（舊 `/v1/opendata/` 404），且為英文欄位（Code/PEratio/PBratio/DividendYield）無收盤價 → 修正解析；上櫃股退 TPEx `tpex_mainboard_peratio_analysis`；收盤價備援 STOCK_DAY_ALL → Yahoo
+- **美股**：v10 quoteSummary 需 crumb 常 401 → 改共用 /keystats 取得鏈（yfinance → v10 → HTML scrape），TSM/NVDA 等河流圖可正常繪製
+- modal 加 台股/美股 tag 與資料源標示；PER↔EPS 可互推
+
+### 🔗 供應鏈面板 v2：台美雙 tab
+
+- **台股鏈** 7 段 → **11 段 54 檔**：新增 💾 記憶體/儲存、⚡ 被動元件（國巨/華新科/禾伸堂/信昌電）、🔩 機構/連接器/滑軌（嘉澤/川湖/勤誠）、🔌 電源/電力基建（拆自散熱）；補 鴻海、京元電、欣銓、台光電、力旺、晶心科、世界先進、聯亞等
+- **新增美股 AI 鏈** 8 段：設備/EDA → 晶圓代工 → AI 晶片 → 記憶體 → 網通/光互連 → 伺服器 → 電力/散熱基建 → CSP/AI 平台（NVDA/AMD/AVGO、ASML/AMAT、MU/SNDK、ANET/CRDO/ALAB、SMCI/DELL、VRT/GEV、MSFT/GOOGL/AMZN/META…）
+- 開啟時自動跟隨目前市場；美股 tab 綠漲紅跌；點股以對應市場載入
+
+### chart-info 浮動視窗重排（polish_v3.js）
+
+- OHLC 浮動視窗縮小約一半、緊貼大字股價右側空白處，不遮 K 線
+- SMA20/SMA60/BB/昨收 圖例從圖表左下角整合到浮動視窗右下角（仍可點擊摺疊）
+
+### 其他
+
+- `/twindex`（TWSE MIS 即時加權/櫃買）修大盤早盤落後一日；`/marketflow` 資金流、`/inst-rank` 法人榜、`/events` 行事曆（v3.8 第二批）
+
+---
+
 ## 檔案結構
 
 ```
@@ -523,7 +559,7 @@ Stock_Terminal/
 ├── daily_etf.bat              排程觸發用的 ETF tracker（無互動）
 ├── install_scheduler.bat      註冊 Windows 工作排程器
 ├── uninstall_scheduler.bat    移除工作排程器
-├── build_dist.bat             打包成 Stock_Terminal_v3.8.zip 的腳本
+├── build_dist.bat             打包成 Stock_Terminal_v3.8.2.zip 的腳本
 │
 │  ── v3.8 新增 ──
 ├── volume_profile_v3.js       成交金額/量平均 Volume Profile（POC/VAH/VAL/主力成本區）

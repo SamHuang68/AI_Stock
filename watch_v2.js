@@ -508,6 +508,7 @@ const BIAS_META = {
   'conflict':    {col:'var(--orange)',bg:'rgba(251,146,60,.12)'},
   'bear':        {col:'var(--red)',   bg:'rgba(248,113,113,.10)'},
   'strong-bear': {col:'var(--red)',   bg:'rgba(248,113,113,.18)'},
+  'caution':     {col:'var(--orange)',bg:'rgba(251,146,60,.15)'},
   'empty':       {col:'var(--tf)',    bg:'transparent'},
 };
 

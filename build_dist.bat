@@ -4,11 +4,11 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 echo ============================================
-echo  Build Stock_Terminal distribution zip (v3.8)
+echo  Build Stock_Terminal distribution zip (v3.8.2)
 echo ============================================
 echo.
 
-set "ZIP=Stock_Terminal_v3.8.zip"
+set "ZIP=Stock_Terminal_v3.8.2.zip"
 set "STAGE=Stock_Terminal"
 
 REM Clean prior leftovers
@@ -27,7 +27,7 @@ if exist "stock_terminal.html" if exist "build_v2.py" (
 
 REM ---- Files to bundle (skip user data: etf_history/chip_history JSON, logs, __pycache__, alert_config/rules) ----
 REM Core servers / trackers
-set FILES=README.md server.py etf_delta_tracker.py chip_history_tracker.py alert_daemon.py etf_report_email.py etf_report.py watch_daemon.py
+set FILES=README.md server.py etf_delta_tracker.py chip_history_tracker.py alert_daemon.py etf_report_email.py etf_report.py watch_daemon.py daily_morning_brief.py
 REM v1 UI + launcher
 set FILES=%FILES% stock_terminal.html start_terminal.bat
 REM v2/v3 UI + build + launchers
@@ -38,10 +38,10 @@ REM v3 modules (must match build_v2.py V2_SCRIPTS so v2.html scripts resolve)
 set FILES=%FILES% volume_profile_v3.js pattern_v3.js pattern_v3_test.html chip_v3.js fundamental_v3.js
 set FILES=%FILES% heatmap_v3.js screener_v3.js ai_report_v3.js polish_v3.js wl_live_v3.js
 set FILES=%FILES% plan_history_v3.js plan_position_v3.js plan_v3.js pdf_import_v3.js pdf_export_v3.js peg_v3.js
-set FILES=%FILES% alert_v3.js alert_push_v3.js backtest_v3.js backtest_ui_v3.js enhance_v3.js aftermarket_v3.js overnight_v3.js layout_v3.js etf_v3.js
+set FILES=%FILES% alert_v3.js alert_push_v3.js backtest_v3.js backtest_ui_v3.js enhance_v3.js aftermarket_v3.js overnight_v3.js supplychain_v3.js valuation_v3.js marketflow_v3.js instrank_v3.js calendar_v3.js layout_v3.js etf_v3.js
 REM ETF + chip tracker launchers + schedulers
-set FILES=%FILES% run_tracker.bat daily_etf.bat daily_chip.bat daily_etf_report.bat
-set FILES=%FILES% install_scheduler.bat uninstall_scheduler.bat install_chip_scheduler.bat install_etf_report_scheduler.bat
+set FILES=%FILES% run_tracker.bat daily_etf.bat daily_chip.bat daily_etf_report.bat daily_morning_brief.bat
+set FILES=%FILES% install_scheduler.bat uninstall_scheduler.bat install_chip_scheduler.bat install_etf_report_scheduler.bat install_morning_scheduler.bat
 
 for %%F in (%FILES%) do (
     if exist "%%F" (

@@ -148,20 +148,32 @@ def _pick_num(row, includes, excludes=()):
     return None
 
 def _openapi_lookup(dataset_names, clean_code):
-    """從 TWSE OpenAPI 全市場資料集找某股。資料集整批快取一天。"""
+    """從 TWSE/TPEx OpenAPI 全市場資料集找某股。資料集整批快取一天。
+       dataset 名稱規則 (v3.8.1)：
+         'XXX'            → https://openapi.twse.com.tw/v1/opendata/XXX  (舊行為)
+         'exchangeReport/XXX' 等含 '/' → https://openapi.twse.com.tw/v1/<原樣>
+         'tpex:XXX'       → https://www.tpex.org.tw/openapi/v1/XXX (上櫃)
+       代號欄位同時認 中文(公司代號/證券代號) 與 英文(Code/SecuritiesCompanyCode)。"""
     from datetime import date as _date
     today = _date.today().strftime('%Y%m%d')
     for ds in dataset_names:
         cached = _openapi_ds.get(ds)
         if not cached or cached[0] != today:
             try:
-                url = f'https://openapi.twse.com.tw/v1/opendata/{ds}'
+                if ds.startswith('tpex:'):
+                    url = f'https://www.tpex.org.tw/openapi/v1/{ds[5:]}'
+                elif '/' in ds:
+                    url = f'https://openapi.twse.com.tw/v1/{ds}'
+                else:
+                    url = f'https://openapi.twse.com.tw/v1/opendata/{ds}'
                 req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
                 with urllib.request.urlopen(req, timeout=15) as resp:
                     arr = json.loads(resp.read())
                 idx = {}
                 for row in arr:
-                    code = (row.get('公司代號') or row.get('證券代號') or '').strip()
+                    code = (row.get('公司代號') or row.get('證券代號') or
+                            row.get('Code') or row.get('SecuritiesCompanyCode') or
+                            row.get('股票代號') or '').strip()
                     if code:
                         idx[code] = row
                 _openapi_ds[ds] = (today, idx)
@@ -174,6 +186,28 @@ def _openapi_lookup(dataset_names, clean_code):
         if row:
             return row
     return None
+
+def _openapi_lookup_list(dataset_name):
+    """回傳 TWSE OpenAPI 整個資料集 array（快取一天）。給事件行事曆等需整表掃描者用。"""
+    from datetime import date as _date
+    today = _date.today().strftime('%Y%m%d')
+    cache_key = f'__list__{dataset_name}'
+    cached = _openapi_ds.get(cache_key)
+    if cached and cached[0] == today:
+        return cached[1]
+    try:
+        url = f'https://openapi.twse.com.tw/v1/opendata/{dataset_name}'
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            arr = json.loads(resp.read())
+        if not isinstance(arr, list):
+            arr = []
+        _openapi_ds[cache_key] = (today, arr)
+        return arr
+    except Exception as e:
+        print(f'[openapi-list] {dataset_name} failed: {e}')
+        _openapi_ds[cache_key] = (today, [])
+        return []
 
 def _fundamental_score(out):
     """0~100 基本面分數：成長性(營收YoY+累計YoY) + 獲利性(三率)"""
@@ -613,6 +647,15 @@ class Handler(SimpleHTTPRequestHandler):
         elif p.startswith('/fundamental/'):
             sym = p[13:].split('?')[0]
             self._handle_fundamental(sym)
+        elif p.startswith('/valuation/'):
+            sym = p[11:].split('?')[0]
+            self._handle_valuation(sym)
+        elif p == '/marketflow' or p.startswith('/marketflow?'):
+            self._handle_marketflow()
+        elif p == '/inst-rank' or p.startswith('/inst-rank?'):
+            self._handle_inst_rank()
+        elif p == '/events' or p.startswith('/events?'):
+            self._handle_events()
         elif p == '/sectors' or p.startswith('/sectors?'):
             self._handle_sectors()
         elif p == '/screener' or p.startswith('/screener?'):
@@ -627,6 +670,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._watch_status()
         elif p == '/txf' or p.startswith('/txf?'):
             self._handle_txf()
+        elif p == '/twindex' or p.startswith('/twindex?'):
+            self._handle_twindex()
         elif p == '/health':
             d = find_etf_dir()
             files = list_etf_files()
@@ -1271,6 +1316,315 @@ class Handler(SimpleHTTPRequestHandler):
         out['score'] = _fundamental_score(out)
         body = json.dumps(out, ensure_ascii=False).encode()
         _cache.set(key, body)
+        self._ok(body)
+
+    def _handle_valuation(self, sym):
+        """長線估值錨 (v3.8 #2 本益比河流)：當前 PER/PBR/殖利率 + EPS_ttm。
+           TW: TWSE OpenAPI BWIBBU_ALL（上市個股本益比/殖利率/股價淨值比）。
+           US: 走 /keystats 的 trailingPE / priceToBook（Yahoo）。
+           前端用此 EPS_ttm × 倍數 + 歷史股價算河流帶與便宜/昂貴百分位。"""
+        from datetime import date as _date
+        today = _date.today().strftime('%Y%m%d')
+        clean = sym.replace('.TW', '').replace('.TWO', '').strip().upper()
+        is_tw = bool(_CODE4.match(clean)) or sym.endswith('.TW') or sym.endswith('.TWO')
+        key = f'val:{clean}:{today}'
+        c = _cache.get(key)
+        if c is not None:
+            self._ok(c); return
+        out = {'symbol': sym, 'code': clean, 'date': today, 'market': 'TW' if is_tw else 'US',
+               'per': None, 'pbr': None, 'yieldPct': None, 'epsTtm': None, 'price': None}
+        if is_tw:
+            # v3.8.1：BWIBBU_ALL 正確路徑是 exchangeReport/（舊 opendata/ 404），
+            # 且該資料集是英文欄位(Code/PEratio/PBratio/DividendYield)、無收盤價。
+            # 上櫃股 TWSE 查不到 → 退 TPEx peratio 資料集。
+            row = _openapi_lookup(['exchangeReport/BWIBBU_ALL', 'BWIBBU_ALL'], clean)
+            out['_source'] = 'TWSE BWIBBU_ALL'
+            if not row:
+                row = _openapi_lookup(['tpex:tpex_mainboard_peratio_analysis'], clean)
+                out['_source'] = 'TPEx peratio'
+            if row:
+                out['per']      = (_pick_num(row, ['本益比']) or _pick_num(row, ['PEratio'])
+                                   or _pick_num(row, ['PriceEarningRatio']))
+                out['pbr']      = (_pick_num(row, ['股價淨值比']) or _pick_num(row, ['PBratio'])
+                                   or _pick_num(row, ['PriceBookRatio']))
+                out['yieldPct'] = _pick_num(row, ['殖利率']) or _pick_num(row, ['Yield'])
+                out['price']    = _pick_num(row, ['收盤']) or _pick_num(row, ['ClosingPrice'])
+            else:
+                out['_source'] = None
+                print(f'[valuation] {clean}: not in BWIBBU_ALL / TPEx peratio')
+            # 收盤價備援 1：TWSE 全市場日收盤
+            if out['price'] is None:
+                srow = _openapi_lookup(['exchangeReport/STOCK_DAY_ALL'], clean)
+                if srow:
+                    out['price'] = _pick_num(srow, ['ClosingPrice']) or _pick_num(srow, ['收盤'])
+            # 收盤價備援 2：Yahoo 即時（.TW 再試 .TWO）
+            if out['price'] is None:
+                for suf in ('.TW', '.TWO'):
+                    try:
+                        u = f'https://query1.finance.yahoo.com/v8/finance/chart/{clean}{suf}?range=1d&interval=1d'
+                        req = urllib.request.Request(u, headers=YF_HEADERS)
+                        with urllib.request.urlopen(req, timeout=10) as resp:
+                            jj = json.loads(resp.read())
+                        p = ((jj.get('chart', {}).get('result') or [{}])[0].get('meta') or {}).get('regularMarketPrice')
+                        if p:
+                            out['price'] = p
+                            break
+                    except Exception:
+                        pass
+            if out['per'] and out['price']:
+                out['epsTtm'] = round(out['price'] / out['per'], 2)
+        else:
+            # 美股 (v3.8.1)：直打 v10 quoteSummary 需 crumb 常 401 → 全 None。
+            # 改共用 /keystats 的取得鏈：yfinance(內建 cookie/crumb) → v10 → HTML scrape。
+            # 三個 helper 已統一鍵名：trailingPE/priceToBook/dividendYield(%)/eps/regularMarketPrice。
+            ks = self._fetch_keystats_yfinance(clean)
+            if ks.get('trailingPE') is None and ks.get('eps') is None and ks.get('marketCap') is None:
+                v10 = self._fetch_keystats_v10(clean)
+                for k in ('trailingPE', 'priceToBook', 'dividendYield', 'eps', 'regularMarketPrice'):
+                    if ks.get(k) is None and v10.get(k) is not None:
+                        ks[k] = v10[k]
+                if v10.get('trailingPE') is not None:
+                    ks['_source'] = 'yahoo-v10'
+            if ks.get('trailingPE') is None and ks.get('eps') is None:
+                h = self._fetch_keystats_html(clean)
+                for k in ('trailingPE', 'priceToBook', 'dividendYield', 'eps', 'regularMarketPrice'):
+                    if ks.get(k) is None and h.get(k) is not None:
+                        ks[k] = h[k]
+                if h.get('trailingPE') is not None:
+                    ks['_source'] = 'yahoo-html'
+            out['_source']  = ks.get('_source')
+            out['per']      = ks.get('trailingPE')
+            out['pbr']      = ks.get('priceToBook')
+            out['yieldPct'] = ks.get('dividendYield')   # helper 已轉成 %
+            out['epsTtm']   = ks.get('eps')
+            out['price']    = ks.get('regularMarketPrice')
+            # EPS 缺但有 PER+價 → 反推；PER 缺但有 EPS+價 → 反推
+            if out['epsTtm'] is None and out['per'] and out['price']:
+                out['epsTtm'] = round(out['price'] / out['per'], 2)
+            if out['per'] is None and out['epsTtm'] and out['price'] and out['epsTtm'] > 0:
+                out['per'] = round(out['price'] / out['epsTtm'], 2)
+            if out['per'] is None and out['epsTtm'] is None:
+                print(f'[valuation] US {clean}: yfinance/v10/html 全失敗 ({ks.get("_error")})')
+        body = json.dumps(out, ensure_ascii=False).encode()
+        _cache.set(key, body, ttl=1800)
+        self._ok(body)
+
+    def _handle_marketflow(self):
+        """大盤資金流儀表板 (v3.8 #3)：
+           • 量能趨勢 FMTQIK（近月每日成交金額，呼應 8000億→1.2兆）
+           • 三大法人買賣金額 BFI82U（外資/投信/自營 買賣差）
+           • 融資融券大盤 MI_MARGN tables[0] 摘要
+           僅 TW。整批快取 30 分。"""
+        from datetime import date as _date
+        today = _date.today()
+        key = f'marketflow:{today.strftime("%Y%m%d")}'
+        c = _cache.get(key)
+        if c is not None:
+            self._ok(c); return
+        out = {'date': today.strftime('%Y-%m-%d'), 'turnover': [], 'inst': None, 'margin': None}
+        ym1 = today.strftime('%Y%m01')
+        # 量能趨勢 FMTQIK（當月每日；金額單位元）
+        try:
+            url = f'https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date={ym1}&response=json'
+            req = urllib.request.Request(url, headers=YF_HEADERS)
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                d = json.loads(resp.read())
+            if d.get('stat') in ('OK', 'ok'):
+                fields = d.get('fields') or []
+                rows = d.get('data') or []
+                i_date = next((i for i, f in enumerate(fields) if '日期' in f), 0)
+                i_amt  = next((i for i, f in enumerate(fields) if '成交金額' in f), 1)
+                i_idx  = next((i for i, f in enumerate(fields) if '指數' in f), None)
+                i_chg  = next((i for i, f in enumerate(fields) if '漲跌點數' in f), None)
+                for row in rows:
+                    try:
+                        amt = float(str(row[i_amt]).replace(',', ''))
+                    except Exception:
+                        continue
+                    rec = {'date': str(row[i_date]).strip(), 'amount': amt}
+                    if i_idx is not None:
+                        try: rec['index'] = float(str(row[i_idx]).replace(',', ''))
+                        except Exception: pass
+                    if i_chg is not None:
+                        try: rec['chg'] = float(str(row[i_chg]).replace(',', ''))
+                        except Exception: pass
+                    out['turnover'].append(rec)
+        except Exception as e:
+            print(f'[marketflow] FMTQIK failed: {e}')
+        # 三大法人買賣金額 BFI82U（往前找最近一個有資料的交易日）
+        try:
+            from datetime import timedelta
+            for back in range(0, 7):
+                dd = (today - timedelta(days=back)).strftime('%Y%m%d')
+                url = f'https://www.twse.com.tw/rwd/zh/fund/BFI82U?dayDate={dd}&type=day&response=json'
+                req = urllib.request.Request(url, headers=YF_HEADERS)
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    d = json.loads(resp.read())
+                if d.get('stat') not in ('OK', 'ok'):
+                    continue
+                fields = d.get('fields') or []
+                rows = d.get('data') or []
+                i_name = next((i for i, f in enumerate(fields) if '單位名稱' in f or '買賣別' in f), 0)
+                i_net  = next((i for i, f in enumerate(fields) if '買賣差' in f or '買賣超' in f), len(fields) - 1)
+                inst = {'foreign': None, 'trust': None, 'dealer': None, 'date': dd}
+                for row in rows:
+                    nm = str(row[i_name])
+                    try: net = float(str(row[i_net]).replace(',', ''))
+                    except Exception: continue
+                    if '外' in nm: inst['foreign'] = (inst['foreign'] or 0) + net
+                    elif '投信' in nm: inst['trust'] = net
+                    elif '自營' in nm: inst['dealer'] = (inst['dealer'] or 0) + net
+                if any(v is not None for k, v in inst.items() if k != 'date'):
+                    out['inst'] = inst
+                    break
+        except Exception as e:
+            print(f'[marketflow] BFI82U failed: {e}')
+        # 融資融券大盤摘要 MI_MARGN tables[0]
+        try:
+            url = f'https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={today.strftime("%Y%m%d")}&selectType=ALL&response=json'
+            req = urllib.request.Request(url, headers=YF_HEADERS)
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                d = json.loads(resp.read())
+            if d.get('stat') in ('OK', 'ok'):
+                tables = d.get('tables') or []
+                if tables:
+                    t0 = tables[0]
+                    fields = t0.get('fields') or []
+                    rows = t0.get('data') or []
+                    summ = {}
+                    for row in rows:
+                        label = str(row[0]) if row else ''
+                        if '融資' in label and '金額' in label:
+                            try: summ['marginAmt'] = float(str(row[-1]).replace(',', ''))
+                            except Exception: pass
+                    out['margin'] = {'raw': rows[:6]} if rows else None
+        except Exception as e:
+            print(f'[marketflow] MI_MARGN failed: {e}')
+        body = json.dumps(out, ensure_ascii=False).encode()
+        _cache.set(key, body, ttl=1800)
+        self._ok(body)
+
+    def _handle_inst_rank(self):
+        """外資/投信買賣超排行榜 (v3.8 #4)：T86 全表排序 + chip_history 連續天數。
+           ?who=foreign|trust ?side=buy|sell ?n=30"""
+        from datetime import date as _date, timedelta
+        qs = parse_qs(urlparse(self.path).query)
+        who  = (qs.get('who',  ['foreign'])[0]).lower()
+        side = (qs.get('side', ['buy'])[0]).lower()
+        n    = min(int(qs.get('n', ['30'])[0] or 30), 100)
+        today = _date.today()
+        key = f'instrank:{today.strftime("%Y%m%d")}'
+        cached = _cache.get(key)
+        rows_data = None
+        if cached is not None:
+            rows_data = json.loads(cached)
+        else:
+            # 往前找最近有資料的交易日
+            for back in range(0, 7):
+                dd = (today - timedelta(days=back)).strftime('%Y%m%d')
+                try:
+                    url = f'https://www.twse.com.tw/rwd/zh/fund/T86?date={dd}&selectType=ALLBUT0999&response=json'
+                    req = urllib.request.Request(url, headers=YF_HEADERS)
+                    with urllib.request.urlopen(req, timeout=15) as resp:
+                        d = json.loads(resp.read())
+                    if d.get('stat') not in ('OK', 'ok'):
+                        continue
+                    fields = d.get('fields') or []
+                    raw = d.get('data') or []
+                    i_code = next((i for i, f in enumerate(fields) if '證券代號' in f), 0)
+                    i_name = next((i for i, f in enumerate(fields) if '證券名稱' in f), 1)
+                    i_for  = next((i for i, f in enumerate(fields) if '外陸資買賣超股數' in f),
+                              next((i for i, f in enumerate(fields) if '外資買賣超' in f or ('外' in f and '買賣超' in f)), None))
+                    i_tru  = next((i for i, f in enumerate(fields) if '投信買賣超股數' in f),
+                              next((i for i, f in enumerate(fields) if '投信' in f and '買賣超' in f), None))
+                    parsed = []
+                    for r in raw:
+                        def num(i):
+                            try: return float(str(r[i]).replace(',', '').strip())
+                            except Exception: return None
+                        parsed.append({
+                            'code': str(r[i_code]).strip(),
+                            'name': str(r[i_name]).strip(),
+                            'foreign': num(i_for) if i_for is not None else None,
+                            'trust':   num(i_tru) if i_tru is not None else None,
+                        })
+                    rows_data = {'date': dd, 'rows': parsed}
+                    _cache.set(key, json.dumps(rows_data, ensure_ascii=False).encode(), ttl=1800)
+                    break
+                except Exception as e:
+                    print(f'[inst-rank] T86 {dd} failed: {e}')
+        if not rows_data:
+            self._ok(json.dumps({'who': who, 'side': side, 'date': '', 'list': [], '_msg': 'T86 unavailable'}, ensure_ascii=False).encode())
+            return
+        field = 'foreign' if who == 'foreign' else 'trust'
+        items = [x for x in rows_data['rows'] if x.get(field) is not None]
+        items.sort(key=lambda x: x[field], reverse=(side == 'buy'))
+        top = items[:n]
+        # 連續天數（單位：張，順便 /1000）
+        for x in top:
+            try:
+                st = _chip_streak(x['code'])
+                x['streak'] = st.get(field) if st else None
+            except Exception:
+                x['streak'] = None
+            if x.get(field) is not None:
+                x['lots'] = round(x[field] / 1000)
+        self._ok(json.dumps({'who': who, 'side': side, 'date': rows_data['date'], 'list': top}, ensure_ascii=False).encode())
+
+    def _handle_events(self):
+        """事件行事曆 (v3.8 #1)：
+           • 月營收：規則制——每月 10 日前公布上月營收（永遠可算）
+           • 除權除息預告：TWSE OpenAPI 多個資料集嘗試
+           • 法說會：TWSE OpenAPI 法說會一覽（best-effort）
+           ?code=2330 可只看單檔除權息。"""
+        from datetime import date as _date, timedelta
+        qs = parse_qs(urlparse(self.path).query)
+        code = (qs.get('code', [''])[0]).replace('.TW', '').replace('.TWO', '').strip().upper()
+        today = _date.today()
+        key = f'events:{today.strftime("%Y%m%d")}:{code}'
+        c = _cache.get(key)
+        if c is not None:
+            self._ok(c); return
+        out = {'date': today.strftime('%Y-%m-%d'), 'revenue': None, 'exDividend': [], 'conference': []}
+        # 月營收規則：本月 10 日前公布上月；若已過 10 日則下次是下月 10 日
+        try:
+            if today.day <= 10:
+                rev_date = today.replace(day=10)
+            else:
+                nm = (today.replace(day=28) + timedelta(days=10)).replace(day=10)
+                rev_date = nm
+            last_month = (today.replace(day=1) - timedelta(days=1)).strftime('%Y-%m')
+            out['revenue'] = {'nextPublishBy': rev_date.strftime('%Y-%m-%d'),
+                              'forMonth': last_month,
+                              'daysAway': (rev_date - today).days}
+        except Exception as e:
+            print(f'[events] revenue rule failed: {e}')
+        # 除權除息預告（嘗試多個資料集名稱，欄位用模糊比對）
+        for ds in ('TWT48U', 'TWTAWU', 'TWT49U'):
+            try:
+                arr = _openapi_lookup_list(ds)
+                if not arr:
+                    continue
+                cnt = 0
+                for row in arr:
+                    rc = (row.get('股票代號') or row.get('證券代號') or row.get('公司代號') or '').strip()
+                    if code and rc != code:
+                        continue
+                    date_v = (row.get('除權息日期') or row.get('除權除息日期') or row.get('資料日期')
+                              or row.get('停止過戶日期') or '')
+                    name_v = row.get('股票名稱') or row.get('證券名稱') or row.get('名稱') or ''
+                    typ = row.get('除權息') or row.get('權息') or ''
+                    if date_v:
+                        out['exDividend'].append({'code': rc, 'name': name_v, 'date': date_v, 'type': typ})
+                        cnt += 1
+                    if cnt >= (200 if not code else 20):
+                        break
+                if out['exDividend']:
+                    break
+            except Exception as e:
+                print(f'[events] exDividend {ds} failed: {e}')
+        body = json.dumps(out, ensure_ascii=False).encode()
+        _cache.set(key, body, ttl=3600)
         self._ok(body)
 
     def _handle_sectors(self):
@@ -2032,6 +2386,55 @@ class Handler(SimpleHTTPRequestHandler):
             yahoo_debug['taifex_error'] = str(e)
 
         self._ok(json.dumps({'ok': False, 'error': '兩來源皆無法解析', 'debug': yahoo_debug}, ensure_ascii=False).encode())
+
+    def _handle_twindex(self):
+        """台股大盤即時指數 (v3.8 修 Yahoo ^TWII 早盤落後一日 bug)：
+           TWSE MIS 即時——加權 tse_t00.tw、櫃買 otc_o00.tw。
+           回 {ok, indices:{t00:{price,prevClose,changePct}, o00:{...}}, source}。
+           盤前/休市 z 可能為 '-' → price 回 None，前端就保留 Yahoo 值不覆寫。"""
+        import re as _re3
+        key = f'twindex:{int(time.time() // 15)}'   # 15s 快取
+        c = _cache.get(key)
+        if c is not None:
+            self._ok(c); return
+        out = {'ok': False, 'indices': {}, 'source': None}
+        try:
+            ms = int(time.time() * 1000)
+            url = ('https://mis.twse.com.tw/stock/api/getStockInfo.jsp'
+                   f'?ex_ch=tse_t00.tw|otc_o00.tw&json=1&delay=0&_={ms}')
+            req = urllib.request.Request(url, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                'Accept': 'application/json',
+                'Accept-Language': 'zh-TW,zh;q=0.9',
+                'Referer': 'https://mis.twse.com.tw/stock/index.jsp',
+            })
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+            arr = data.get('msgArray') or []
+            def fnum(v):
+                if v in (None, '', '-'):
+                    return None
+                try: return float(str(v).replace(',', ''))
+                except Exception: return None
+            for it in arr:
+                ch = (it.get('ch') or '')          # 例 't00.tw' / 'o00.tw'
+                code = 't00' if 't00' in ch else ('o00' if 'o00' in ch else ch)
+                # z=當前成交指數；盤中無成交時退 o(開盤)；y=昨收
+                price = fnum(it.get('z'))
+                if price is None:
+                    price = fnum(it.get('o'))      # 早盤尚無成交時退開盤
+                prev = fnum(it.get('y'))
+                chg = ((price - prev) / prev * 100) if (price is not None and prev) else None
+                out['indices'][code] = {'price': price, 'prevClose': prev,
+                                        'changePct': chg, 'name': it.get('n')}
+            out['ok'] = any(v.get('price') is not None for v in out['indices'].values())
+            out['source'] = 'twse-mis'
+        except Exception as e:
+            out['error'] = str(e)
+        body = json.dumps(out, ensure_ascii=False).encode()
+        if out['ok']:
+            _cache.set(key, body)
+        self._ok(body)
 
     # ── WATCH 後端偵測端點 (v3.8) ──────────────────────────
     def _watch_status(self):

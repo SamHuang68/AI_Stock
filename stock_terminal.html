@@ -270,7 +270,7 @@ const SECTION_DEFS = [
 ];
 
 // ── 大盤分析（市場層級）system prompt + 章節 ──
-const MARKET_SYS_PROMPT = '你是一位頂尖台股大盤策略分析師，專精指數、資金流、產業輪動與國際連動。\n撰寫風格：直白犀利、有觀點、數據精確、給可執行結論。語言：全繁體中文，技術指標保留英文縮寫。\n\n輸出規則（嚴格遵守）：\n1. 每章節以 [[[SECTION:章節名]]] 開頭，必須是以下六個之一，順序固定。\n2. 表格用 Markdown。直接從 [[[SECTION:大盤總覽]]] 開始，不要寫標題行。\n3. 【數據紀律｜最重要】提供的即時快照「只有點數與漲跌%」。凡是快照沒有的數字（成交額/量能、漲跌家數、三大法人買賣超金額、外資期貨口數等）一律先用 web_search 查最新真實值，嚴禁自行估算或編造（曾發生把上市大盤成交額 12,316億 誤填成 2,316億）。查不到就寫「待查」，不要瞎掰。\n\n[[[SECTION:大盤總覽]]]\n加權/櫃買現況表（點數、漲跌%、成交額）。成交額必須來自 web_search 的真實數據，沒查到就標「待查」，不可臆造。最後一句定調今日盤勢（強多/偏多/中性/偏空/強空）。\n\n[[[SECTION:技術面]]]\n加權指數趨勢判斷（🟢多/🟡盤整/🔴空）、關鍵支撐/壓力點位、均線（月線/季線/年線）位置、量價背離與否。\n\n[[[SECTION:資金與籌碼]]]\n三大法人買賣超方向與金額、外資期貨多空淨額、融資融券變化、資金流向（電子/金融/傳產）。\n\n[[[SECTION:類股輪動]]]\n今日強勢/弱勢類股、輪動趨勢（如 AI 半導體→傳產），點名 2~3 個值得關注的族群與代表股。\n\n[[[SECTION:國際與夜盤連動]]]\n美股（道瓊/那斯達克/費半）、美股期貨夜盤、台指期夜盤、重要總經事件，評估對台股隔日開盤的影響（估計開高/開低方向與幅度）。\n\n[[[SECTION:隔日策略]]]\n| 情境 | 操作建議 |\n給「開高/開平/開低」三情境的應對；多單/空單/觀望的條件；最重要的一個觀察點與風險。';
+const MARKET_SYS_PROMPT = '你是一位頂尖台股大盤策略分析師，專精指數、資金流、產業輪動與國際連動。\n撰寫風格：直白犀利、有觀點、數據精確、給可執行結論。語言：全繁體中文，技術指標保留英文縮寫。\n\n輸出規則（嚴格遵守）：\n1. 每章節以 [[[SECTION:章節名]]] 開頭，必須是以下六個之一，順序固定。\n2. 表格用 Markdown。直接從 [[[SECTION:大盤總覽]]] 開始，不要寫標題行。\n3. 【數據紀律｜最重要】提供的即時快照「只有點數與漲跌%」。凡是快照沒有的數字（成交額/量能、漲跌家數、三大法人買賣超金額、外資期貨口數等）一律先用 web_search 查最新真實值，嚴禁自行估算或編造（曾發生把上市大盤成交額 12,316億 誤填成 2,316億）。查不到就寫「待查」，不要瞎掰。\n4. 【使用者長線結構觀點｜納入研判】(a) TSMC(2330/TSM) 是 AI 宇宙核心、先進製程獨佔，營收正比 AI 類股；TSM ADR／費半漲，2330 隔日多反映（除非美股收盤後重磅利空）。(b) INTEL 18A／Samsung SF2 即便接單，產能良率僅滿足部分需求；AI 與 AMD/INTEL 皆靠 3D 封裝（如 Panther Lake 僅 compute die，其餘晶片與封裝仍在台積），非單一廠全拿。(c) 四大 CSP 的 AI 投資高度集中台灣供應鏈：TSMC 晶圓→3D 封裝→CPO 光通訊→AI 伺服器整機組裝，這是台股日成交量自 2026/04 前約 8000 億／日 升至 1.2 兆＋的結構原因 → 對台股(尤其 AI 半導體)維持結構性偏多視角，但仍須以當下數據與技術面修正短線判斷、提醒風險。\n\n[[[SECTION:大盤總覽]]]\n加權/櫃買現況表（點數、漲跌%、成交額）。成交額必須來自 web_search 的真實數據，沒查到就標「待查」，不可臆造。最後一句定調今日盤勢（強多/偏多/中性/偏空/強空）。\n\n[[[SECTION:技術面]]]\n加權指數趨勢判斷（🟢多/🟡盤整/🔴空）、關鍵支撐/壓力點位、均線（月線/季線/年線）位置、量價背離與否。\n\n[[[SECTION:資金與籌碼]]]\n三大法人買賣超方向與金額、外資期貨多空淨額、融資融券變化、資金流向（電子/金融/傳產）。\n\n[[[SECTION:類股輪動]]]\n今日強勢/弱勢類股、輪動趨勢（如 AI 半導體→傳產），點名 2~3 個值得關注的族群與代表股。\n\n[[[SECTION:國際與夜盤連動]]]\n美股（道瓊/那斯達克/費半）、美股期貨夜盤、台指期夜盤、重要總經事件，評估對台股隔日開盤的影響（估計開高/開低方向與幅度）。\n\n[[[SECTION:隔日策略]]]\n| 情境 | 操作建議 |\n給「開高/開平/開低」三情境的應對；多單/空單/觀望的條件；最重要的一個觀察點與風險。';
 
 const MARKET_SECTION_DEFS = [
   {key:'大盤總覽',   zh:'大盤總覽',   en:'MARKET OVERVIEW'},
@@ -537,23 +537,48 @@ async function loadSym(sym, mkt) {
     parsed.candles = parsed.candles.slice(-rdef.trim);
   }
 
-  // ── Yahoo data freshness fix (v3.6) ──────────────────────────
+  // ── Yahoo data freshness fix (v3.6, v3.8.1 修量0) ────────────
   // Yahoo daily K 線陣列偶爾會落後 regularMarketPrice 一天（query1/query2 同步差）。
-  // 偵測：rmt 比最後一根 K 線晚 > 20 小時 → 合成一根「今日」K 線
-  // (OHLC=rmp, volume=0)，讓 chart / chart-info / chip 全部用 Yahoo 最新 rmp。
-  // 落差消失時自動不觸發，無副作用。
+  // 偵測：rmt 比最後一根 K 線晚 > 20 小時 → 合成一根「今日」K 線。
+  // v3.8.1：合成 K 不再用 OHLC=rmp/volume=0（會顯示平盤假 K + 量0），
+  //   改用 meta 當日資料：high/low=regularMarketDayHigh/Low、
+  //   volume=regularMarketVolume、open=regularMarketOpen(缺則退昨收，
+  //   讓 K 棒方向/漲跌% 正確)。另補：最後一根「當日」日 K volume 為
+  //   null/0 時用 regularMarketVolume 回填（修前一日量顯示 0 bug）。
   if (parsed.candles.length >= 1 && parsed.meta) {
     const _meta = parsed.meta;
     const _last = parsed.candles[parsed.candles.length - 1];
     const _rmt = _meta.regularMarketTime;
     const _rmp = _meta.regularMarketPrice;
     const _dailyIvl = (rdef.interval === '1d' || rdef.interval === '1wk');
-    if (_dailyIvl && _rmt && _rmp != null && isFinite(_rmp) && _rmp > 0
+    const _num = v => (v != null && isFinite(v) && v > 0) ? v : null;
+    if (_dailyIvl && _rmt && _num(_rmp)
         && _last && _last.time && (_rmt - _last.time) > 20 * 3600) {
+      // 昨收 = 前一根日K的收盤(_last.close)。
+      // 嚴禁用 meta.chartPreviousClose：那是「請求區間起點」前一日的收盤
+      // (6mo 區間 = 半年前的價!)，曾造成合成K 開15.95/收33.43/+109% 假爆量K。
+      const _prevC = _num(_last.close);
+      let _o = _num(_meta.regularMarketOpen) ?? _prevC ?? _rmp;
+      // open 是昨收近似值時可能落在當日高低之外(跳空日) → 夾進 [DayLow, DayHigh]
+      const _dh = _num(_meta.regularMarketDayHigh);
+      const _dl = _num(_meta.regularMarketDayLow);
+      const _h0 = _dh ?? Math.max(_rmp, _o);
+      const _l0 = _dl ?? Math.min(_rmp, _o);
+      if (_o > _h0) _o = _h0;
+      if (_o < _l0) _o = _l0;
+      const _h = Math.max(_h0, _rmp);
+      const _l = Math.min(_l0, _rmp);
+      const _v = (_meta.regularMarketVolume != null && isFinite(_meta.regularMarketVolume) && _meta.regularMarketVolume > 0)
+        ? _meta.regularMarketVolume : 0;
       parsed.candles.push({
-        time: _rmt, open: _rmp, high: _rmp, low: _rmp, close: _rmp,
-        volume: 0, _synthetic: true,
+        time: _rmt, open: _o, high: _h, low: _l, close: _rmp,
+        volume: _v, _synthetic: true,
       });
+    } else if (rdef.interval === '1d' && _rmt && _last && _last.time
+        && Math.abs(_rmt - _last.time) <= 20 * 3600
+        && !(_last.volume > 0) && _num(_meta.regularMarketVolume)) {
+      // 日線最後一根就是 rmt 當日，但 Yahoo 給的 volume 是 null/0 → 回填
+      _last.volume = _meta.regularMarketVolume;
     }
   }
 
@@ -728,7 +753,11 @@ function renderChart(candles) {
       : `${d.getUTCFullYear()}/${String(d.getUTCMonth()+1).padStart(2,'0')}/${String(d.getUTCDate()).padStart(2,'0')}`;
 
     const isUp = k.close >= k.open;
-    const col = isUp ? 'var(--green)' : 'var(--red)';
+    // 台股紅漲綠跌；美股綠漲紅跌
+    const twC = (S.mkt === 'TW');
+    const upCol = twC ? 'var(--red)' : 'var(--green)';
+    const dnCol = twC ? 'var(--green)' : 'var(--red)';
+    const col = isUp ? upCol : dnCol;
     const chgPct = ((k.close - k.open) / k.open * 100);
 
     // MA values at this time
@@ -749,8 +778,8 @@ function renderChart(candles) {
     ohlcEl.innerHTML =
       `<span class="ohlc-d">${ds}</span>` +
       `<span class="ohlc-k">開</span><span class="ohlc-v" style="color:var(--thi)">${k.open.toFixed(2)}</span>` +
-      `<span class="ohlc-k">高</span><span class="ohlc-v" style="color:var(--green)">${k.high.toFixed(2)}</span>` +
-      `<span class="ohlc-k">低</span><span class="ohlc-v" style="color:var(--red)">${k.low.toFixed(2)}</span>` +
+      `<span class="ohlc-k">高</span><span class="ohlc-v" style="color:${upCol}">${k.high.toFixed(2)}</span>` +
+      `<span class="ohlc-k">低</span><span class="ohlc-v" style="color:${dnCol}">${k.low.toFixed(2)}</span>` +
       `<span class="ohlc-k">收</span><span class="ohlc-v" style="color:${col}">${k.close.toFixed(2)}</span>` +
       `<span style="color:${col};margin-right:8px">(${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)</span>` +
       (v ? `<span class="ohlc-k">量</span><span class="ohlc-v" style="color:var(--blue)">${formatVol(v.value)}</span>` : '') +

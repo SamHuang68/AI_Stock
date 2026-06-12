@@ -32,6 +32,11 @@ V2_SCRIPTS = ['position_v2.js', 'watch_v2.js', 'info_v2.js', 'pro_v2.js',
               'enhance_v3.js',                  # v3.8: 雙軸卡/量價面板/右側收合/分頁記憶
               'aftermarket_v3.js',              # v3.8: 美股盤後/盤前延伸交易顯示
               'overnight_v3.js',                # v3.8: 夜盤連動預警(美股期貨→台股隔日)
+              'supplychain_v3.js',              # v3.8: 台灣AI供應鏈族群連動
+              'valuation_v3.js',                # v3.8: 長線估值錨(本益比河流)
+              'marketflow_v3.js',               # v3.8: 大盤資金流儀表板
+              'instrank_v3.js',                 # v3.8: 外資/投信買賣超排行榜
+              'calendar_v3.js',                 # v3.8: 事件行事曆+提醒
               'etf_v3.js']
 V2_STYLES  = ['mobile_v2.css']
 

@@ -31,12 +31,28 @@
     document.head.appendChild(s);
   }
 
-  // ---- 技術面分數 0~100 ------------------------------------
-  function techScore() {
-    const ind = (typeof S !== 'undefined') && S.ind;
+  // 槓桿/反向 ETF → 本體（正2 跟本體同向、反1 反向）。槓桿單日%被放大，
+  // 自身指標會失真(00631L 顯 38 偏空，但本體 0050 是 61 中性) → 改依本體判斷。
+  const LEVERAGE_MAP = {
+    '00631L': { base: '0050', inverse: false },   // 元大台灣50正2
+    '00675L': { base: '0050', inverse: false },   // 富邦臺灣加權正2(近似)
+    '00632R': { base: '0050', inverse: true },    // 元大台灣50反1
+    '00676R': { base: '0050', inverse: true },    // 富邦臺灣加權反1
+    '00663L': { base: '^DJI', inverse: false },   // 國泰美國道瓊正2
+    '00670L': { base: '^IXIC', inverse: false },  // 富邦NASDAQ正2
+  };
+  // v3.8.1: 技術面分數一律用「1y 日線」標準基底算（與畫面顯示區間脫鉤）。
+  // 修 bug：本尊(0050)用「目前顯示區間 candles」算、槓桿(00631L)用本體 1y 日線算，
+  // 同一本體兩個分數(26 vs 65)互相矛盾。現統一走 canonical 路徑。
+  const _canonTech = {};   // 'SYM|MKT' -> 1y日線技術面分數(槓桿已映射本體)
+  const _canonFail = {};   // 'SYM|MKT' -> true(抓不到，fallback 用畫面指標)
+
+  // ---- 技術面分數 0~100（可傳入指定 ind/candles，否則用目前載入個股）----
+  function techScore(ind, candles) {
+    ind = ind || ((typeof S !== 'undefined') && S.ind);
+    candles = candles || (S.data && S.data.candles) || [];
     if (!ind) return null;
-    const cur = (S.data && S.data.candles && S.data.candles.length)
-      ? S.data.candles[S.data.candles.length - 1].close : null;
+    const cur = candles.length ? candles[candles.length - 1].close : null;
     let score = 50, parts = 0;
     const add = v => { score += v; parts++; };
     if (ind.rsi14 != null) add(Math.max(-20, Math.min(20, (ind.rsi14 - 50) * 0.8)));
@@ -47,14 +63,65 @@
     if (!parts) return null;
     return Math.max(0, Math.min(100, Math.round(score)));
   }
+
+  // 取得「該檔應顯示的技術面分數」：canonical 快取優先；抓失敗才退回畫面指標
+  function techScoreResolved() {
+    const sym = (typeof S !== 'undefined' && S.sym) ? S.sym.toUpperCase() : '';
+    const key = sym + '|' + ((typeof S !== 'undefined' && S.mkt) || 'TW');
+    if (_canonTech[key] != null) return _canonTech[key];
+    if (_canonFail[key]) return techScore();   // canonical 失敗 → 降級用畫面指標
+    return null;                               // 計算中 → 顯示 —，算好後重繪
+  }
+
+  // 抓「標準基底」1y 日線算技術面分數：槓桿/反向取本體（反向翻轉），
+  // 一般股票取自身。存快取後重繪雙軸卡。
+  async function computeCanonTech(sym, mkt) {
+    const key = sym + '|' + (mkt || 'TW');
+    try {
+      const SRV = window.SERVER || 'http://localhost:18432';
+      const lev = LEVERAGE_MAP[sym];
+      const target = lev ? lev.base : sym;
+      let yf;
+      if (/^\^/.test(target)) yf = target;
+      else if (lev) yf = /^[0-9]/.test(target) ? target + '.TW' : target;
+      else yf = (mkt === 'TW') ? target + '.TW' : target;
+      const r = await fetch(`${SRV}/yf/${encodeURIComponent(yf)}?range=1y&interval=1d`, { cache: 'no-store' });
+      if (!r.ok) { _canonFail[key] = true; return; }
+      const raw = await r.json();
+      const parsed = (typeof parseYF === 'function') ? parseYF(raw) : null;
+      if (!parsed || !parsed.candles || parsed.candles.length < 20) { _canonFail[key] = true; return; }
+      const ind = (typeof runWorker === 'function') ? await runWorker(parsed.candles) : null;
+      if (!ind) { _canonFail[key] = true; return; }
+      let sc = techScore(ind, parsed.candles);
+      if (sc == null) { _canonFail[key] = true; return; }
+      if (lev && lev.inverse) sc = 100 - sc;   // 反向 ETF 與本體相反
+      _canonTech[key] = sc;
+      if (typeof S !== 'undefined' && S.tab === 'stats' && (S.sym || '').toUpperCase() === sym) {
+        const card = document.querySelector('#rpanel .dual-card');
+        if (card) {
+          // 保留目前基本面分數（從畫面讀回）後重繪
+          card.outerHTML = dualCardHtml(null);
+          if (window.fetchFund) fetchFund(S.sym, S.mkt).then(f => {
+            const c2 = document.querySelector('#rpanel .dual-card');
+            if (c2 && S.tab === 'stats') c2.outerHTML = dualCardHtml(f && f.score != null ? f.score : null);
+          });
+        }
+      }
+    } catch (e) { _canonFail[key] = true; }
+  }
   const scoreCol = s => s == null ? 'var(--tlo)' : s >= 65 ? 'var(--green)' : s >= 45 ? 'var(--orange)' : 'var(--red)';
   const techTag = s => s == null ? '—' : s >= 65 ? '🟢 偏多' : s >= 45 ? '⚖️ 中性' : '🔴 偏空';
   const fundTag = s => s == null ? '—' : s >= 70 ? '🟢 體質佳' : s >= 50 ? '🟡 中性' : '🔴 偏弱';
 
   function dualCardHtml(fundScore) {
-    const t = techScore();
+    const t = techScoreResolved();
+    const sym = (typeof S !== 'undefined' && S.sym) ? S.sym.toUpperCase() : '';
+    const lev = LEVERAGE_MAP[sym];
+    const techLbl = lev
+      ? `技術面 <span style="font-size:8px;color:var(--tf)">(依本體 ${lev.base} · 1Y日線)</span>`
+      : `技術面 <span style="font-size:8px;color:var(--tf)">(1Y日線)</span>`;
     return `<div class="dual-card">
-      <div class="dual-half"><div class="lbl">技術面</div>
+      <div class="dual-half"><div class="lbl">${techLbl}</div>
         <div class="score" style="color:${scoreCol(t)}">${t == null ? '—' : t}</div>
         <div class="tag" style="color:${scoreCol(t)}">${techTag(t)}</div></div>
       <div class="dual-half"><div class="lbl">基本面</div>
@@ -95,7 +162,11 @@
     window.renderStats = function () {
       const base = orig.apply(this, arguments);
       const head = dualCardHtml(null) + vpPanelHtml();
-      // 非同步補基本面分數
+      // 非同步補基本面分數 + canonical(1y日線) 技術面（槓桿/反向自動映射本體）
+      const symU = (S.sym || '').toUpperCase();
+      const mktU = S.mkt || 'TW';
+      if (symU && _canonTech[symU + '|' + mktU] == null && !_canonFail[symU + '|' + mktU])
+        computeCanonTech(symU, mktU);
       if (window.fetchFund && S.sym && S.mkt === 'TW') {
         fetchFund(S.sym, S.mkt).then(f => {
           if (S.tab !== 'stats') return;

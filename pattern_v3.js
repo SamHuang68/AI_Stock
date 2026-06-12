@@ -1423,7 +1423,18 @@ function renderPatternsPanelV3(candlesOverride) {
     else if (p.type.startsWith('triangle') || p.type === 'range' || p.type === 'cup_handle' || p.type.startsWith('breakout')) groups['經典持續'].push(p);
     else groups['經典反轉'].push(p);
   }
-  let h = '';
+  // 👶 新手總結：統計多空型態，給整體傾向
+  const bull = patterns.filter(p => p.severity === 'bullish').length;
+  const bear = patterns.filter(p => p.severity === 'bearish').length;
+  const lean = bull > bear ? '整體偏多 🟢' : bear > bull ? '整體偏空 🔴' : '多空分歧 ⚖️';
+  const leanCol = bull > bear ? 'var(--green)' : bear > bull ? 'var(--red)' : 'var(--orange)';
+  let h = `<div style="padding:10px 12px;border-bottom:1px solid var(--border);background:rgba(251,191,36,.06)">
+    <div style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--gold)">👶 新手白話總結</div>
+    <div style="font-family:monospace;font-size:10px;color:var(--text);line-height:1.7;margin-top:4px">
+      共偵測到 <b>${patterns.length}</b> 個型態：<b style="color:var(--green)">${bull}</b> 個看漲 / <b style="color:var(--red)">${bear}</b> 個看跌 →
+      <b style="color:${leanCol}">${lean}</b>。<br>
+      <span style="color:var(--tlo)">型態只是「形狀提示」、非保證。新手記住：看漲也要等站穩再進、設好停損；看跌別急著接刀。</span>
+    </div></div>`;
   for (const gname of Object.keys(groups)) {
     const ps = groups[gname];
     if (!ps.length) continue;
@@ -1432,13 +1443,32 @@ function renderPatternsPanelV3(candlesOverride) {
       const col = sevColor[p.severity] || 'var(--text)', bg = sevBg[p.severity] || 'transparent';
       h += `<div style="padding:9px 12px;border-bottom:1px solid var(--border);background:${bg}">
         <div style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:${col};margin-bottom:4px">${p.icon || ''} ${escP(p.name)}</div>
-        <div style="font-family:monospace;font-size:9.5px;color:var(--text);line-height:1.65;margin-bottom:4px">${escP(p.description)}</div>
-        <div style="font-family:monospace;font-size:9.5px;color:${col};line-height:1.65;margin-bottom:3px">▸ ${escP(p.action)}</div>
-        <div style="font-family:monospace;font-size:9px;color:var(--tf);line-height:1.5">${escP(p.reliability)}</div>
+        <div style="font-family:sans-serif;font-size:10.5px;color:var(--text);line-height:1.7;margin-bottom:4px;background:rgba(255,255,255,.03);border-left:2px solid ${col};padding:4px 7px">👶 ${escP(plainTalkV3(p))}</div>
+        <details style="margin-bottom:2px"><summary style="font-family:monospace;font-size:9px;color:var(--tf);cursor:pointer">技術細節</summary>
+          <div style="font-family:monospace;font-size:9.5px;color:var(--text);line-height:1.65;margin:3px 0">${escP(p.description)}</div>
+          <div style="font-family:monospace;font-size:9.5px;color:${col};line-height:1.65;margin-bottom:3px">▸ ${escP(p.action)}</div>
+          <div style="font-family:monospace;font-size:9px;color:var(--tf);line-height:1.5">${escP(p.reliability)}</div>
+        </details>
       </div>`;
     }
   }
   return h;
+}
+
+// 把型態翻成新手白話（依多空嚴重度 + 型態類型）
+function plainTalkV3(p) {
+  const s = p.severity;
+  const isRev = (p.type || '').includes('elliott') || (p.type || '').includes('harmonic') ||
+                (p.type || '').includes('abcd') || (p.type || '').includes('cypher') || (p.type || '').includes('three_drives');
+  if (s === 'bullish')
+    return '看漲訊號：線圖出現偏多的形狀，近期較可能往上。新手做法 → 別追高，等回檔站穩再小量試單，跌破最近低點就先離場（停損）。';
+  if (s === 'bearish')
+    return '看跌訊號：線圖出現偏空的形狀，近期較可能往下。新手做法 → 手上有股留意停利/停損；沒股別急著接刀，等止穩再看。';
+  if (s === 'caution')
+    return '變盤警示：走勢可能要轉彎或洗盤，方向還不明。新手做法 → 先觀望，等「突破壓力」或「跌破支撐」其中一邊明確了再動。';
+  // neutral / observing
+  return (isRev ? '轉折觀察：' : '盤整觀察：') +
+    '目前方向不明、在區間整理。新手做法 → 別猜方向，等明確突破某一邊再考慮，現階段按兵不動最安全。';
 }
 
 function patternsToggleV3() {

@@ -108,19 +108,33 @@ body.market-tw .price-down, body.market-tw .neg { color: var(--green) !important
 body.market-us .price-up,   body.market-us .pos { color: var(--green) !important; }
 body.market-us .price-down, body.market-us .neg { color: var(--red) !important; }
 
-/* (3) Chart legend — 左下角，水平排版，避免擋到右側價格軸 + 上方 chart-info */
+/* (3) Chart legend — v3.8.1 整合進大浮動視窗右下角；
+       chart-info 改兩欄：左=價格/漲跌/名稱(窄欄)，右=OHLC視窗緊貼股價後 + 圖例。
+       視窗縮小約一半(字級/間距減)、半透明，避免遮到 K 線。 */
+#ci-row { display: flex; align-items: flex-start; gap: 8px; }
+#ci-row .ci-left { min-width: 0; max-width: 150px; }
+#ci-row .ci-left #ci-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ci-east { display: flex; flex-direction: column; align-items: flex-end; }
+#ci-east #ci-ohlc {
+  margin-top: 0; font-size: 8px; line-height: 1.5; letter-spacing: .2px;
+  padding: 2px 6px; max-width: 330px;
+}
+#ci-east #ci-ohlc .ohlc-d { margin-right: 5px; }
+#ci-east #ci-ohlc .ohlc-v { margin-right: 5px; }
+#ci-east #ci-ohlc .ma-row { font-size: 7.5px; margin-top: 1px; }
+#ci-east #ci-ohlc .ma-row span { margin-right: 6px; }
 #chart-legend {
-  position: absolute; bottom: 28px; left: 10px; z-index: 6;
+  margin-top: 2px;
   background: rgba(11, 18, 32, .75); border: 1px solid var(--border);
-  border-radius: 4px; padding: 4px 9px;
-  font-family: 'JetBrains Mono', monospace; font-size: 9px;
-  color: var(--tlo); pointer-events: none;
+  border-radius: 4px; padding: 2px 6px;
+  font-family: 'JetBrains Mono', monospace; font-size: 7.5px;
+  color: var(--tlo); pointer-events: auto;
   display: flex; flex-direction: row; flex-wrap: wrap; align-items: center;
-  gap: 4px 10px; backdrop-filter: blur(4px); max-width: calc(100% - 80px);
+  gap: 3px 7px; backdrop-filter: blur(4px);
 }
 #chart-legend .lg-row { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 #chart-legend .lg-line {
-  display: inline-block; width: 12px; height: 2px; border-radius: 1px;
+  display: inline-block; width: 9px; height: 2px; border-radius: 1px;
 }
 #chart-legend .lg-dash { background-image: linear-gradient(to right, currentColor 50%, transparent 50%); background-size: 4px 2px; background-repeat: repeat-x; height: 2px; }
 #chart-legend.collapsed { padding: 3px 7px; opacity: .55; }
@@ -250,8 +264,43 @@ async function refreshMktBar() {
       ch.textContent = arrow + Math.abs(chgPct).toFixed(2) + '%';
     }
   } catch (e) { console.warn('[polish-v3] mktbar refresh failed:', e); }
+  // 加權/櫃買 — TWSE 即時指數覆寫(修 Yahoo ^TWII 早盤落後一日)
+  try { await refreshTwIndexCells(); } catch (e) { console.warn('[polish-v3] twindex failed:', e); }
   // 台指期(含夜盤) — TAIFEX 特例來源
   try { await refreshTxfCell(); } catch (e) { console.warn('[polish-v3] txf failed:', e); }
+}
+
+// TWSE MIS 即時：加權(t00)→^TWII、櫃買(o00)→^TWOII。
+// 有有效 price 才覆寫 Yahoo 值；盤前無成交(price=null)則保留 Yahoo。
+async function refreshTwIndexCells() {
+  const r = await fetch(`${SERVER_P}/twindex`, { cache: 'no-store' });
+  if (!r.ok) return;
+  const d = await r.json();
+  if (!d || !d.ok || !d.indices) return;
+  const map = { 't00': '^TWII', 'o00': '^TWOII' };
+  for (const [code, sym] of Object.entries(map)) {
+    const ix = d.indices[code];
+    if (!ix || ix.price == null) continue;          // 無即時成交 → 不覆寫
+    const cell = document.querySelector(`[data-mkt-sym="${sym}"]`);
+    if (!cell) continue;
+    const prev = ix.prevClose;
+    const cur = ix.price;
+    const delta = (prev != null) ? (cur - prev) : null;
+    const chgPct = (ix.changePct != null) ? ix.changePct
+      : (delta != null && prev ? delta / prev * 100 : null);
+    cell.classList.remove('loading');
+    cell.querySelector('.px').textContent = fmtIdx(cur);
+    if (delta == null || chgPct == null) continue;
+    const dir = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+    const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
+    const dEl = cell.querySelector('.delta');
+    dEl.className = 'delta ' + dir;
+    dEl.textContent = sign + Math.abs(delta).toFixed(Math.abs(delta) >= 100 ? 0 : 2);
+    const ch = cell.querySelector('.ch');
+    ch.className = 'ch ' + dir;
+    const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '－';
+    ch.textContent = arrow + Math.abs(chgPct).toFixed(2) + '%';
+  }
 }
 
 async function refreshTxfCell() {
@@ -428,24 +477,38 @@ function renderCloseReadout(close, prevClose) {
 }
 
 function renderChartLegend() {
-  const wrap = document.getElementById('chart-wrap');
-  if (!wrap) return;
+  const ci = document.getElementById('chart-info');
+  if (!ci) return;
+  // v3.8.1 一次性重排 chart-info：左欄(價/漲跌/名稱) + 右欄(ci-ohlc + 圖例)
+  let east = document.getElementById('ci-east');
+  if (!east) {
+    const row = document.createElement('div'); row.id = 'ci-row';
+    const left = document.createElement('div'); left.className = 'ci-left';
+    ['ci-price', 'ci-chg', 'ci-name'].forEach(id => {
+      const el = document.getElementById(id); if (el) left.appendChild(el);
+    });
+    east = document.createElement('div'); east.id = 'ci-east';
+    const ohlc = document.getElementById('ci-ohlc');
+    if (ohlc) east.appendChild(ohlc);
+    row.appendChild(left); row.appendChild(east);
+    ci.appendChild(row);
+  }
   let lg = document.getElementById('chart-legend');
+  if (lg && lg.parentElement !== east) { lg.remove(); lg = null; }   // 舊版掛在 chart-wrap → 重建
   if (!lg) {
     lg = document.createElement('div');
     lg.id = 'chart-legend';
     lg.title = '點擊可摺疊';
     lg.style.cursor = 'pointer';
-    lg.style.pointerEvents = 'auto';
     lg.addEventListener('click', e => { e.stopPropagation(); lg.classList.toggle('collapsed'); });
-    wrap.appendChild(lg);
+    east.appendChild(lg);
   }
   // 不顯示 K 線紅/綠（一眼可見不必標註），只標均線/BB/昨收這些「需要解碼」的線
   lg.innerHTML = `
     <div class="lg-row"><span class="lg-line" style="background:#FBBF24"></span>SMA 20</div>
     <div class="lg-row"><span class="lg-line" style="background:#67E8F9"></span>SMA 60</div>
-    <div class="lg-row" style="color:rgba(96,165,250,.85)"><span class="lg-dash" style="width:12px;color:rgba(96,165,250,.85)"></span>BB</div>
-    <div class="lg-row" style="color:rgba(200,200,200,.55)"><span class="lg-dash" style="width:12px;color:rgba(200,200,200,.55)"></span>昨收</div>
+    <div class="lg-row" style="color:rgba(96,165,250,.85)"><span class="lg-dash" style="width:9px;color:rgba(96,165,250,.85)"></span>BB</div>
+    <div class="lg-row" style="color:rgba(200,200,200,.55)"><span class="lg-dash" style="width:9px;color:rgba(200,200,200,.55)"></span>昨收</div>
   `;
 }
 
