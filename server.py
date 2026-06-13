@@ -2,11 +2,11 @@
 """Stock Terminal local server — ThreadingHTTPServer + ThreadPoolExecutor + LRU cache + ETF Delta
    Tuned for GMKtec EVO-T1 (Core Ultra 9 285H / 96GB DDR5 / RTX 5080).
 """
-import os, json, urllib.request, urllib.error, socketserver, glob, time, subprocess, sys
+import os, json, urllib.request, urllib.error, socketserver, glob, time, subprocess, sys, csv, io
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import OrderedDict
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote, quote
 import threading
 try:
     import alert_daemon
@@ -39,6 +39,246 @@ _ETF_FALLBACKS = [
 
 # ── Chip history (v3.8): 每日法人籌碼快照，用於連續買賣超天數 ──
 CHIP_HISTORY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'chip_history')
+
+# v3.9 P3: 畫線雲端記憶 — 存 draw_store.json {sym: [obj,...]}（gitignore）
+DRAW_STORE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'draw_store.json')
+_draw_lock = threading.Lock()
+def _load_draw_store():
+    try:
+        with open(DRAW_STORE_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+def _save_draw_store(d):
+    with open(DRAW_STORE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(d, f, ensure_ascii=False)
+
+# v3.9 P4: 總經數據 — 美國走 FRED「免 API key」公開 CSV 下載端點 (fredgraph.csv)。
+#   台灣 CPI 走 FRED 的 OECD 序列(避開 .tw 直連)；景氣對策信號走國發會 best-effort。
+_macro_cache = {}   # {series_key: (yyyymmdd, payload_bytes)}
+MACRO_SERIES = {
+    'us10y':       {'p': 'fred', 'id': 'DGS10',             'label': '美國10年期公債殖利率', 'unit': '%'},
+    'us2y':        {'p': 'fred', 'id': 'DGS2',              'label': '美國2年期公債殖利率',  'unit': '%'},
+    'spread10y2y': {'p': 'fred', 'id': 'T10Y2Y',           'label': '美10Y-2Y利差(倒掛<0)', 'unit': '%'},
+    'us_cpi':      {'p': 'fred', 'id': 'CPIAUCSL',          'label': '美國CPI指數',          'unit': ''},
+    'fedfunds':    {'p': 'fred', 'id': 'FEDFUNDS',          'label': '美國聯邦基金利率',     'unit': '%'},
+    'unrate':      {'p': 'fred', 'id': 'UNRATE',            'label': '美國失業率',           'unit': '%'},
+    'tw_cpi':      {'p': 'twcpi',                           'label': '台灣CPI指數',          'unit': ''},
+    'tw_light':    {'p': 'ndc',                             'label': '台灣景氣對策信號(分數)', 'unit': '分'},
+}
+
+def _fetch_fred_csv(series_id, cosd):
+    """FRED 免 key CSV：https://fred.stlouisfed.org/graph/fredgraph.csv?id=ID&cosd=YYYY-MM-DD
+       回 [{date, value}]；缺值以 '.' 表示，略過。含重試(逾時偶發)。"""
+    url = f'https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}&cosd={cosd}'
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'text/csv'})
+    text = None
+    last_err = None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                text = resp.read().decode('utf-8', 'replace')
+            break
+        except Exception as e:
+            last_err = e
+            time.sleep(1.5 * (attempt + 1))
+    if text is None:
+        raise last_err if last_err else RuntimeError('fred fetch failed')
+    pts = []
+    for ln in text.splitlines()[1:]:           # 跳過表頭
+        parts = ln.split(',')
+        if len(parts) < 2:
+            continue
+        d, v = parts[0].strip(), parts[1].strip()
+        if not d or v in ('.', ''):
+            continue
+        try:
+            pts.append({'date': d, 'value': float(v)})
+        except Exception:
+            pass
+    return pts
+
+_macro_debug = {}   # 解析失敗時放樣本，供前端 note 顯示給使用者
+
+def _norm_ym(s):
+    """把各種年月格式正規化成 'YYYY-MM-01'。支援 2025M05 / 114M05 / 202505 / 11405(民國) / 114年05月。"""
+    s = str(s).strip()
+    up = s.upper()
+    if 'M' in up:
+        try:
+            a, b = up.split('M'); y = int(a)
+            if y < 1911: y += 1911
+            return f'{y:04d}-{int(b):02d}-01'
+        except Exception:
+            pass
+    digits = ''.join(ch for ch in s if ch.isdigit())
+    try:
+        if len(digits) == 6:                       # YYYYMM
+            return f'{int(digits[:4]):04d}-{int(digits[4:6]):02d}-01'
+        if len(digits) == 5:                       # 民國 YYYMM (例 11405)
+            return f'{1911 + int(digits[:3]):04d}-{int(digits[3:5]):02d}-01'
+        if len(digits) == 7:                       # 民國 YYYMMM? 取前3年後2月
+            return f'{1911 + int(digits[:3]):04d}-{int(digits[3:5]):02d}-01'
+    except Exception:
+        return None
+    return None
+
+def _http_json(url, timeout=15):
+    req = urllib.request.Request(url, headers={
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Accept': 'application/json,text/plain,*/*',
+        'Accept-Language': 'zh-TW,zh;q=0.9',
+    })
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode('utf-8-sig', 'replace'))
+
+def _http_text(url, timeout=15):
+    """抓原始文字。政府 CSV 常為 Big5，依序試多種編碼。"""
+    req = urllib.request.Request(url, headers={
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Accept': 'text/csv,application/json,text/plain,*/*',
+        'Accept-Language': 'zh-TW,zh;q=0.9',
+    })
+    raw = None
+    last_err = None
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read()
+            break
+        except Exception as e:
+            last_err = e
+            time.sleep(1.2)
+    if raw is None:
+        raise last_err if last_err else RuntimeError('http_text failed')
+    for enc in ('utf-8-sig', 'utf-8', 'big5', 'cp950'):
+        try:
+            return raw.decode(enc)
+        except Exception:
+            continue
+    return raw.decode('utf-8', 'replace')
+
+def _rows_from_text(text):
+    """格式自動偵測：開頭是 [ 或 { → JSON；否則當 CSV(含表頭) 解析成 dict 陣列。"""
+    if not text:
+        return []
+    t = text.lstrip('﻿').strip()
+    if t[:1] in '[{':
+        try:
+            return _flatten_rows(json.loads(t))
+        except Exception:
+            pass
+    try:
+        rdr = csv.DictReader(io.StringIO(text))
+        return [dict(r) for r in rdr if any((v or '').strip() for v in r.values())]
+    except Exception:
+        return []
+
+def _flatten_rows(data):
+    """把 data.gov.tw / 各式 JSON 攤平成 dict 陣列。"""
+    if isinstance(data, list):
+        return [r for r in data if isinstance(r, dict)]
+    if isinstance(data, dict):
+        # 常見包裝：{result:{records:[...]}} / {data:[...]} / {records:[...]}
+        for path in (('result', 'records'), ('result', 'distribution'), ('data',), ('records',), ('rows',)):
+            cur = data
+            ok = True
+            for p in path:
+                if isinstance(cur, dict) and p in cur:
+                    cur = cur[p]
+                else:
+                    ok = False; break
+            if ok and isinstance(cur, list):
+                return [r for r in cur if isinstance(r, dict)]
+        # 退而求其次：第一個 list 值
+        for v in data.values():
+            if isinstance(v, list):
+                return [r for r in v if isinstance(r, dict)]
+        return [data]
+    return []
+
+def _pick_field(row, prefer_substrs):
+    """回傳第一個 key 含 prefer_substrs 任一子字串的 key。"""
+    for sub in prefer_substrs:
+        for k in row:
+            if sub.lower() in str(k).lower():
+                return k
+    return None
+
+_DATEK = ('年月', '日期', '時間', '月份', '期間', 'date', 'period', 'yyyymm', 'ym')
+
+def _parse_macro_rows(rows, valkeys, months=0):
+    """共用：rows(dict陣列) → [{date,value}]。valkeys=值欄位優先子字串清單(可多組)。"""
+    if not rows:
+        return [], None
+    dk = _pick_field(rows[0], _DATEK)
+    vk = None
+    for group in valkeys:
+        vk = _pick_field(rows[0], group)
+        if vk:
+            break
+    if not dk or not vk:
+        return [], f'keys={list(rows[0].keys())[:14]}'
+    pts = []
+    for r in rows:
+        d = _norm_ym(r.get(dk))
+        try:
+            v = float(str(r.get(vk)).replace(',', '').strip())
+        except Exception:
+            continue
+        if d:
+            pts.append({'date': d, 'value': v})
+    pts.sort(key=lambda x: x['date'])
+    if months and len(pts) > months:
+        pts = pts[-months:]
+    return pts, (None if pts else f'keys={list(rows[0].keys())[:14]} sample={str(rows[0])[:240]}')
+
+def _fetch_tw_cpi(months=120):
+    """台灣 CPI — 政府資料開放平台固定轉導 (GET，格式自動偵測 JSON/CSV)。
+       值優先總指數/指數，否則年增率。"""
+    urls = ['https://quality.data.gov.tw/dq_download_json.php?nid=8001&md5_url=6b895696ff0a7f14b3017a048a1ad39c',
+            'https://quality.data.gov.tw/dq_download_csv.php?nid=8001&md5_url=6b895696ff0a7f14b3017a048a1ad39c']
+    last = None
+    for url in urls:
+        try:
+            rows = _rows_from_text(_http_text(url))
+            pts, dbg = _parse_macro_rows(rows, [('總指數', 'CPI', '指數'), ('年增率', '漲跌', 'value')], months)
+            if pts:
+                return pts
+            last = dbg or 'empty'
+        except Exception as e:
+            last = 'ERR ' + str(e)
+    _macro_debug['tw_cpi'] = last or '(無回應)'
+    return []
+
+def _fetch_tw_light():
+    """台灣景氣對策信號(分數) — 國發會開放資料專區 (GET CSV/JSON，格式自動偵測)。
+       主：wd.ndc.gov.tw/ndc/opendata/ndc0101.csv；備援：.json、data.gov.tw dataset 6334。"""
+    candidates = ['https://wd.ndc.gov.tw/ndc/opendata/ndc0101.csv',
+                  'https://wd.ndc.gov.tw/ndc/opendata/ndc0101.json']
+    # 動態備援：data.gov.tw dataset 6334 當前資源
+    try:
+        meta = _http_json('https://data.gov.tw/api/v2/rest/dataset/6334', timeout=12)
+        res = (meta.get('result') if isinstance(meta, dict) else None) or {}
+        for d in (res.get('distribution') or res.get('resources') or []):
+            u = d.get('resourceDownloadUrl') or d.get('downloadUrl') or d.get('url') or ''
+            if u:
+                candidates.append(u)
+    except Exception:
+        pass
+    valkeys = [('對策信號分數', '景氣對策信號', '綜合分數', '分數', 'score', 'light')]
+    last = None
+    for url in candidates:
+        try:
+            rows = _rows_from_text(_http_text(url))
+            pts, dbg = _parse_macro_rows(rows, valkeys)
+            if pts:
+                return pts
+            last = dbg or 'empty'
+        except Exception as e:
+            last = 'ERR ' + str(e)
+    _macro_debug['tw_light'] = last or '(無回應)'
+    return []
 
 def _chip_history_record(clean_code, chip_out):
     """把今日某股的 inst.total 記到 chip_history/<date>.json (彙總多股)"""
@@ -672,6 +912,12 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_txf()
         elif p == '/twindex' or p.startswith('/twindex?'):
             self._handle_twindex()
+        elif p.startswith('/draw/'):
+            self._handle_draw_get(p[len('/draw/'):].split('?')[0])
+        elif p == '/macro' or p.startswith('/macro?'):
+            self._handle_macro('')
+        elif p.startswith('/macro/'):
+            self._handle_macro(p[len('/macro/'):].split('?')[0])
         elif p == '/health':
             d = find_etf_dir()
             files = list_etf_files()
@@ -695,8 +941,12 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_tracker_run()
         elif p == '/screener':
             self._handle_screener_post()
+        elif p == '/screen3':
+            self._handle_screen3()
         elif p == '/ai-report':
             self._handle_ai_report()
+        elif p == '/etf-reason':
+            self._handle_etf_reason()
         elif p == '/alert/rules':
             self._alert_post_rules()
         elif p == '/alert/config':
@@ -709,6 +959,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._watch_post_rules()
         elif p == '/watch/config':
             self._watch_post_config()
+        elif p.startswith('/draw/'):
+            self._handle_draw_post(p[len('/draw/'):])
         else:
             self._err('not found', 404)
 
@@ -2200,6 +2452,68 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as e:
             self._err('AI report failed: ' + str(e), 500)
 
+    def _handle_etf_reason(self):
+        """POST /etf-reason — ETF 異動 AI 一句話原因推導 (v3.9 P5)。
+           body: {apiKey, code, name, etfs:[...], action, sharesDelta, weightDelta}
+           伺服器補基本面(月營收YoY/三率)做上下文，呼叫 Anthropic 回一句話。"""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length) or b'{}')
+        except Exception as e:
+            self._err('bad body: ' + str(e), 400); return
+        api_key = (body.get('apiKey') or '').strip()
+        if not api_key:
+            self._err('apiKey required', 400); return
+        code = (body.get('code') or '').strip().upper()
+        etfs = body.get('etfs') or []
+        action = body.get('action') or '加碼'
+        # 補基本面
+        fund_txt = ''
+        try:
+            rev = _openapi_lookup(['t187ap05_L', 't187ap05_O'], code)
+            yoy = _pick_num(rev, ['去年同月增減']) if rev else None
+            inc = _openapi_lookup(['t187ap06_L_ci', 't187ap06_O_ci', 't187ap06_L', 't187ap06_O'], code)
+            gm = nm = None
+            if inc:
+                sales = _pick_num(inc, ['營業收入'], ['成本', '毛利', '費用', '外', '淨額'])
+                gross = _pick_num(inc, ['營業毛利'])
+                net = _pick_num(inc, ['本期淨利']) or _pick_num(inc, ['本期綜合損益總額'])
+                if sales:
+                    gm = round(gross / sales * 100, 1) if gross else None
+                    nm = round(net / sales * 100, 1) if net else None
+            parts = []
+            if yoy is not None: parts.append(f'月營收YoY {yoy}%')
+            if gm is not None: parts.append(f'毛利率 {gm}%')
+            if nm is not None: parts.append(f'淨利率 {nm}%')
+            fund_txt = '、'.join(parts) if parts else '(基本面資料暫缺)'
+        except Exception:
+            fund_txt = '(基本面資料暫缺)'
+        prompt = (
+            f'你是台股研究分析師。請用「一句話」(繁體中文、40字內、有觀點)解讀為何近期有主動型 ETF '
+            f'{action} 個股 {code}。\n'
+            f'相關 ETF：{("、".join(map(str, etfs)) or "多檔主動ETF")}\n'
+            f'{code} 近期基本面：{fund_txt}\n'
+            f'{action}幅度：約 {body.get("sharesDelta", "?")} 股 / 權重變化 {body.get("weightDelta", "?")}%\n'
+            f'要求：以代號為準，若不確定公司名稱就只用代號，嚴禁臆測；'
+            f'結合台灣 AI 供應鏈結構偏多視角但點出短線風險；只回一句話，不要前綴。'
+        )
+        try:
+            req_body = json.dumps({
+                'model': 'claude-sonnet-4-6', 'max_tokens': 300,
+                'messages': [{'role': 'user', 'content': prompt}],
+            }).encode('utf-8')
+            req = urllib.request.Request('https://api.anthropic.com/v1/messages', data=req_body,
+                                         headers={'Content-Type': 'application/json', 'x-api-key': api_key,
+                                                  'anthropic-version': '2023-06-01'}, method='POST')
+            with urllib.request.urlopen(req, timeout=40) as resp:
+                data = json.loads(resp.read())
+            text = ''.join(b.get('text', '') for b in data.get('content', []) if b.get('type') == 'text')
+            self._ok(json.dumps({'ok': True, 'reason': text.strip(), 'fund': fund_txt}, ensure_ascii=False).encode())
+        except urllib.error.HTTPError as e:
+            self._err(f'Anthropic HTTP {e.code}: ' + e.read().decode('utf-8', 'replace')[:300], 502)
+        except Exception as e:
+            self._err('etf-reason failed: ' + str(e), 500)
+
     # ── Alert daemon endpoints (v3.8) ──────────────────────
     def _read_json_body(self):
         length = int(self.headers.get('Content-Length', 0))
@@ -2435,6 +2749,219 @@ class Handler(SimpleHTTPRequestHandler):
         if out['ok']:
             _cache.set(key, body)
         self._ok(body)
+
+    # ── 總經數據 (v3.9 P4) ─────────────────────────────────
+    def _handle_macro(self, series):
+        from datetime import date as _date, timedelta as _td
+        series = (series or '').strip()
+        if series == '' or series == 'list':
+            cat = [{'key': k, 'label': v['label'], 'unit': v.get('unit', ''), 'provider': v['p']}
+                   for k, v in MACRO_SERIES.items()]
+            self._ok(json.dumps({'series': cat}, ensure_ascii=False).encode()); return
+        spec = MACRO_SERIES.get(series)
+        if not spec:
+            self._err('unknown macro series: ' + series, 404); return
+        qs = parse_qs(urlparse(self.path).query)
+        yrs = qs.get('years', ['10'])[0]
+        try:
+            yrs = max(1, min(30, int(yrs)))
+        except Exception:
+            yrs = 10
+        today = _date.today()
+        cosd = (today - _td(days=yrs * 366)).strftime('%Y-%m-%d')
+        ckey = f'{series}:{yrs}:{today.strftime("%Y%m%d")}'
+        cached = _macro_cache.get(ckey)
+        if cached:
+            self._ok(cached); return
+        out = {'series': series, 'label': spec['label'], 'unit': spec.get('unit', ''),
+               'points': [], 'source': None, 'note': None}
+        try:
+            if spec['p'] == 'fred':
+                out['points'] = _fetch_fred_csv(spec['id'], cosd)
+                out['source'] = f'FRED {spec["id"]}'
+                if not out['points']:
+                    out['note'] = '查無資料（FRED 端點未回傳）'
+            elif spec['p'] == 'twcpi':
+                yrs2 = qs.get('years', ['10'])[0]
+                try: mlen = max(12, min(360, int(yrs2) * 12))
+                except Exception: mlen = 120
+                out['points'] = _fetch_tw_cpi(mlen)
+                out['source'] = '主計總處 PXWeb' if out['points'] else None
+                if not out['points']:
+                    out['note'] = '主計總處 CPI 解析失敗。樣本：' + (_macro_debug.get('tw_cpi', '(無回應)'))
+            elif spec['p'] == 'ndc':
+                out['points'] = _fetch_tw_light()
+                out['source'] = '國發會 NDC' if out['points'] else None
+                if not out['points']:
+                    out['note'] = '國發會景氣信號解析失敗。樣本：' + (_macro_debug.get('tw_light', '(無回應)'))
+        except Exception as e:
+            out['note'] = '抓取失敗：' + str(e)
+        body = json.dumps(out, ensure_ascii=False).encode()
+        if out['points']:
+            _macro_cache[ckey] = body
+        self._ok(body)
+
+    # ── 三合一選股 技術+基本面+籌碼 (v3.9 P4) ───────────────
+    def _handle_screen3(self):
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length) or b'{}')
+        except Exception as e:
+            self._err('bad body: ' + str(e), 400); return
+        tech = body.get('tech') or {}
+        fund = body.get('fund') or {}
+        chip = body.get('chip') or {}
+        try:
+            _uni = _get_tw_universe()
+        except Exception:
+            _uni = []
+        syms = list(set(body.get('symbols') or _uni or self._TW_TOP200))
+        sector = (body.get('sector') or '').strip()
+        if sector and sector not in ('全部', 'all', ''):
+            try:
+                smap = _get_tw_sectors()
+                want = _TECH_SECTORS if sector == '__TECH__' else {sector}
+                syms = [s for s in syms if smap.get(str(s).replace('.TW', '').replace('.TWO', '')) in want]
+            except Exception as e:
+                print('[screen3] sector filter failed:', e)
+
+        def fnum(x):
+            try: return float(x)
+            except Exception: return None
+
+        # ── 1) 技術面：平行抓 K 線 + _calc_ind，先篩出 survivors ──
+        survivors = []
+        futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith('.TW') else s): s for s in syms}
+        for fut in as_completed(futures):
+            sym, data, _ = fut.result()
+            if not data:
+                continue
+            try:
+                parsed = json.loads(data)
+                res = parsed.get('chart', {}).get('result', [{}])[0]
+                ts = res.get('timestamp') or []
+                q = (res.get('indicators', {}).get('quote') or [{}])[0]
+                meta = res.get('meta', {})
+                raw_c = q.get('close') or []
+                if len(ts) < 70:
+                    continue
+                closes, highs, lows, vols = [], [], [], []
+                rh, rl, rv = q.get('high') or [], q.get('low') or [], q.get('volume') or []
+                for i in range(min(len(ts), len(raw_c))):
+                    c = raw_c[i]
+                    if c is None: continue
+                    closes.append(c)
+                    highs.append(rh[i] if i < len(rh) and rh[i] is not None else c)
+                    lows.append(rl[i] if i < len(rl) and rl[i] is not None else c)
+                    vols.append(rv[i] if i < len(rv) and rv[i] is not None else 0)
+                if len(closes) < 70:
+                    continue
+                ind = self._calc_ind(closes, highs, lows, vols)
+                if not self._screen3_tech(tech, ind):
+                    continue
+                survivors.append({
+                    'sym': sym.replace('.TW', '').replace('.TWO', ''),
+                    'name': meta.get('shortName') or meta.get('symbol') or sym,
+                    'ind': ind,
+                })
+            except Exception:
+                continue
+
+        # ── 2) 基本面 + 籌碼（O(1) 查表，資料集已快取一天）──
+        results = []
+        want_fund = any(v not in (None, '', False) for v in fund.values())
+        want_chip = any(v not in (None, '', False) for v in chip.values())
+        for row in survivors:
+            code = row['sym']
+            ind = row['ind']
+            rec = {
+                'sym': code, 'name': row['name'],
+                'close': ind['close'],
+                'changePct': round(ind['changePct'], 2) if ind['changePct'] is not None else None,
+                'rsi14': round(ind['rsi14'], 1) if ind['rsi14'] else None,
+                'volRatio': round(ind['volRatio'], 2) if ind['volRatio'] else None,
+            }
+            ok = True
+            # 基本面
+            if want_fund:
+                revrow = _openapi_lookup(['t187ap05_L', 't187ap05_O'], code)
+                yoy = _pick_num(revrow, ['去年同月增減']) if revrow else None
+                valrow = _openapi_lookup(['exchangeReport/BWIBBU_ALL', 'BWIBBU_ALL'], code) or \
+                    _openapi_lookup(['tpex:tpex_mainboard_peratio_analysis'], code)
+                per = ydiv = None
+                if valrow:
+                    per = _pick_num(valrow, ['本益比']) or fnum(valrow.get('PEratio'))
+                    ydiv = _pick_num(valrow, ['殖利率']) or fnum(valrow.get('DividendYield'))
+                rec['revYoy'] = round(yoy, 1) if yoy is not None else None
+                rec['per'] = per
+                rec['yield'] = ydiv
+                if fund.get('revYoyMin') is not None and not (yoy is not None and yoy >= fnum(fund['revYoyMin'])):
+                    ok = False
+                if ok and fund.get('perMax') is not None and not (per is not None and per <= fnum(fund['perMax'])):
+                    ok = False
+                if ok and fund.get('yieldMin') is not None and not (ydiv is not None and ydiv >= fnum(fund['yieldMin'])):
+                    ok = False
+            # 籌碼
+            if ok and want_chip:
+                st = _chip_streak(code) or {'foreign': 0, 'trust': 0}
+                rec['foreignStreak'] = st.get('foreign')
+                rec['trustStreak'] = st.get('trust')
+                if chip.get('trustBuyDays') is not None and not (st.get('trust', 0) >= int(chip['trustBuyDays'])):
+                    ok = False
+                if ok and chip.get('foreignBuyDays') is not None and not (st.get('foreign', 0) >= int(chip['foreignBuyDays'])):
+                    ok = False
+            if ok:
+                results.append(rec)
+
+        results.sort(key=lambda x: x.get('changePct') or 0, reverse=True)
+        self._ok(json.dumps({'results': results[:80], 'scanned': len(syms),
+                             'techPass': len(survivors), 'matched': len(results)},
+                            ensure_ascii=False).encode())
+
+    def _screen3_tech(self, tech, i):
+        """技術面條件 (全部需成立)。空條件 → 直接通過。"""
+        if not i.get('close'):
+            return False
+        c = i['close']
+        def has(k): return tech.get(k) not in (None, '', False)
+        try:
+            if tech.get('aboveSma20') and not (i.get('sma20') and c > i['sma20']): return False
+            if tech.get('aboveSma60') and not (i.get('sma60') and c > i['sma60']): return False
+            if tech.get('bullishAlign') and not (i.get('sma5') and i.get('sma20') and i.get('sma60')
+                                                 and i['sma5'] > i['sma20'] > i['sma60']): return False
+            if has('rsiMin') and not (i.get('rsi14') is not None and i['rsi14'] >= float(tech['rsiMin'])): return False
+            if has('rsiMax') and not (i.get('rsi14') is not None and i['rsi14'] <= float(tech['rsiMax'])): return False
+            if has('volRatioMin') and not (i.get('volRatio') and i['volRatio'] >= float(tech['volRatioMin'])): return False
+            if tech.get('newHigh20') and not (i.get('high20') and c >= i['high20']): return False
+        except Exception:
+            return False
+        return True
+
+    # ── 畫線雲端記憶 (v3.9 P3) ─────────────────────────────
+    def _handle_draw_get(self, sym):
+        sym = unquote(sym or '')
+        store = _load_draw_store()
+        self._ok(json.dumps({'sym': sym, 'objects': store.get(sym, [])}, ensure_ascii=False).encode())
+
+    def _handle_draw_post(self, sym):
+        sym = unquote(sym or '')
+        if not sym:
+            self._err('missing sym', 400); return
+        try:
+            body = self._read_json_body()
+            objs = body.get('objects') if isinstance(body, dict) else body
+            if not isinstance(objs, list):
+                self._err('objects must be a list', 400); return
+            with _draw_lock:
+                store = _load_draw_store()
+                if objs:
+                    store[sym] = objs
+                else:
+                    store.pop(sym, None)
+                _save_draw_store(store)
+            self._ok(json.dumps({'ok': True, 'sym': sym, 'count': len(objs)}).encode())
+        except Exception as e:
+            self._err('save draw failed: ' + str(e), 500)
 
     # ── WATCH 後端偵測端點 (v3.8) ──────────────────────────
     def _watch_status(self):

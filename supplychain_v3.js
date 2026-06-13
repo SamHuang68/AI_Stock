@@ -37,6 +37,7 @@
     { stage: '晶圓代工 / IDM', icon: '🔬', stocks: [['TSM', '台積電ADR'], ['INTC', '英特爾'], ['GFS', '格芯'], ['UMC', '聯電ADR']] },
     { stage: 'AI 晶片 GPU / ASIC', icon: '🧠', stocks: [['NVDA', '輝達'], ['AMD', '超微'], ['AVGO', '博通'], ['MRVL', '邁威爾'], ['QCOM', '高通']] },
     { stage: '記憶體 / 儲存', icon: '💾', stocks: [['MU', '美光'], ['SNDK', 'Sandisk'], ['WDC', '威騰'], ['STX', '希捷']] },
+    { stage: 'AI 電源 / 電源管理 IC', icon: '⚡', stocks: [['MPWR', 'MPS 芯源'], ['VICR', 'Vicor'], ['ON', '安森美'], ['ADI', '亞德諾'], ['TXN', '德儀']] },
     { stage: '網通 / 光通訊 / 互連', icon: '💡', stocks: [['ANET', 'Arista'], ['CSCO', '思科'], ['COHR', 'Coherent'], ['LITE', 'Lumentum'], ['CRDO', 'Credo'], ['ALAB', 'Astera Labs']] },
     { stage: 'AI 伺服器 / 整機', icon: '🖥️', stocks: [['SMCI', '美超微'], ['DELL', '戴爾'], ['HPE', '慧與']] },
     { stage: '電力 / 散熱基建', icon: '🔌', stocks: [['VRT', 'Vertiv'], ['ETN', '伊頓'], ['GEV', 'GE Vernova'], ['CEG', '星座能源']] },

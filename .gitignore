@@ -49,6 +49,9 @@ watch_rules.json
 watch_state.json
 chip_history/
 
+# v3.9 P3 drawing cloud memory (per-user chart annotations)
+draw_store.json
+
 # Backup / temp files
 *.bak
 *.tmp

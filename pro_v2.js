@@ -895,6 +895,13 @@ document.addEventListener('click', ev => {
       `<button class="probtn" id="btn-marketflow" onclick="window.marketFlowOpen&&marketFlowOpen()" title="大盤資金流：量能趨勢8000億→1.2兆 + 三大法人 (v3.8)">💰 資金流</button>` +
       `<button class="probtn" id="btn-instrank" onclick="window.instRankOpen&&instRankOpen()" title="外資/投信買賣超排行榜 + 連續天數 (v3.8)">🏆 法人榜</button>` +
       `<button class="probtn" id="btn-calendar" onclick="window.calendarOpen&&calendarOpen()" title="事件行事曆：月營收/除權息提醒 (v3.8)">📅 行事曆</button>` +
+      `<button class="probtn" id="btn-multichart" onclick="window.multiChartOpen&&multiChartOpen()" title="多圖連動布局：2×2/1×3 同股多時框或相關商品，同步游標/時間軸 (v3.9)　Alt+M">▦ 多圖</button>` +
+      `<button class="probtn" id="btn-spread" onclick="window.spreadOpen&&spreadOpen()" title="價差/比值圖：2330/2303 相對強弱、溢價差 (v3.9)　Alt+D">📊 價差</button>` +
+      `<button class="probtn" id="btn-hotkeys" onclick="window.hotkeysHelp&&hotkeysHelp()" title="鍵盤快捷表：打字即搜尋/Space切自選/Alt+數字切時框 (v3.9)　?">⌨ 快捷</button>` +
+      `<button class="probtn" id="btn-stratbuilder" onclick="window.stratBuilderOpen&&stratBuilderOpen()" title="樂高式策略條件組合器：下拉組進出場條件→回測(MDD/勝率/獲利因子/夏普/明細) (v3.9)">🧱 策略</button>` +
+      `<button class="probtn" id="btn-stratscript" onclick="window.stratScriptOpen&&stratScriptOpen()" title="策略腳本 DSL：類 Pine 語法寫策略→圖上渲染買賣訊號 (v3.9)">📝 腳本</button>` +
+      `<button class="probtn" id="btn-drawtools" onclick="window.drawToolsOpen&&drawToolsOpen()" title="進階畫線：趨勢線/斐波那契/通道/矩形/文字，雲端記憶換裝置不消失 (v3.9)　Alt+T">✏ 畫線</button>` +
+      `<button class="probtn" id="btn-screener3" onclick="window.screener3Open&&screener3Open()" title="三合一選股：技術+基本面+籌碼交集，一鍵存自選 (v3.9)">🔬 選股</button>` +
       `<button class="probtn" id="btn-replay"  onclick="replayToggle()"  title="K 線重播模式">▶ Replay</button>`;
     rangebar.parentElement.insertBefore(tools, rangebar.nextSibling);
     // v3.8: 工具列改 2 列 — 行1 時間段(rangebar)，行2 功能鈕(tools)

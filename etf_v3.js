@@ -617,16 +617,16 @@
     const agg = {};   // code -> {code,name, add:[], inc:[], rm:[], dec:[], wIn, wOut}
     const get = (code, name) => {
       const k = (code || '').toUpperCase();
-      if (!agg[k]) agg[k] = { code, name: name || '', add: [], inc: [], rm: [], dec: [], wIn: 0, wOut: 0 };
+      if (!agg[k]) agg[k] = { code, name: name || '', add: [], inc: [], rm: [], dec: [], wIn: 0, wOut: 0, addShares: 0 };
       if (name && !agg[k].name) agg[k].name = name;
       return agg[k];
     };
     for (const e of etfs) {
       const etf = e.code;
-      for (const n of (e.new || [])) { const s = get(n.code, n.name); s.add.push(etf); s.wIn += (n.weight || 0); }
+      for (const n of (e.new || [])) { const s = get(n.code, n.name); s.add.push(etf); s.wIn += (n.weight || 0); s.addShares += (n.shares || 0); }
       for (const c of (e.changed || [])) {
         const s = get(c.code, c.name);
-        if ((c.delta || 0) >= 0) { s.inc.push(etf); s.wIn += (c.delta || 0); }
+        if ((c.delta || 0) >= 0) { s.inc.push(etf); s.wIn += (c.delta || 0); s.addShares += Math.max(0, c.shares_delta || 0); }
         else { s.dec.push(etf); s.wOut += Math.abs(c.delta || 0); }
       }
       for (const r of (e.removed || [])) { const s = get(r.code, r.name); s.rm.push(etf); s.wOut += (r.prev_weight || 0); }
@@ -650,13 +650,19 @@
       const badges = side === 'up'
         ? `${s.add.length ? `<span class="e3-badge new">▲新增 ${s.add.length}</span>` : ''}${s.inc.length ? `<span class="e3-badge chg">＋加碼 ${s.inc.length}</span>` : ''}`
         : `${s.rm.length ? `<span class="e3-badge rm">▼移除 ${s.rm.length}</span>` : ''}${s.dec.length ? `<span class="e3-badge chg">－減碼 ${s.dec.length}</span>` : ''}`;
+      const etfUp = [...new Set([...s.add, ...s.inc])];
       const etfList = [...new Set([...(side === 'up' ? [...s.add, ...s.inc] : [...s.rm, ...s.dec])])].slice(0, 8).join(' · ');
       const wt = side === 'up' ? s.wIn : s.wOut;
       const wtCol = side === 'up' ? 'var(--green)' : 'var(--red)';
+      // v3.9 P5：買盤側顯示「投信潛在買盤佔個股日均量%」+ AI 原因鈕
+      const extra = (side === 'up' && s.addShares > 0)
+        ? `<div class="e3-volpct" data-sym="${esc(s.code)}" data-shares="${s.addShares}" style="color:var(--gold);font-size:8.5px;margin-top:2px">佔量 計算中…</div>`
+          + `<button class="e3-reason" data-sym="${esc(s.code)}" data-name="${esc(s.name || '')}" data-etfs="${esc(etfUp.slice(0, 6).join(','))}" data-shares="${s.addShares}" data-weight="${wt.toFixed(2)}" data-action="${s.add.length ? '新增' : '加碼'}" style="margin-top:3px;background:#1e293b;border:1px solid #334155;color:#a5b4fc;border-radius:4px;font-size:8.5px;padding:1px 6px;cursor:pointer">🤖 原因</button>`
+        : '';
       h += `<div class="e3-stock" data-e3m="load" data-sym="${esc(s.code)}" data-mkt="TW" style="cursor:pointer;align-items:flex-start;padding:7px 12px">
         <span style="font-weight:700;color:var(--thi);min-width:54px">${esc(s.code)}</span>
-        <span class="sname" style="flex:1">${esc(s.name || '')}<div style="color:var(--tf);font-size:8.5px;margin-top:2px">${esc(etfList)}</div></span>
-        <span style="text-align:right;white-space:nowrap">${badges}<div style="color:${wtCol};font-size:9px;margin-top:2px">權重 ${wt.toFixed(2)}%</div></span>
+        <span class="sname" style="flex:1">${esc(s.name || '')}<div style="color:var(--tf);font-size:8.5px;margin-top:2px">${esc(etfList)}</div><div class="e3-reason-out" data-for="${esc(s.code)}" style="color:#c7d2fe;font-size:9px;margin-top:3px"></div></span>
+        <span style="text-align:right;white-space:nowrap">${badges}<div style="color:${wtCol};font-size:9px;margin-top:2px">權重 ${wt.toFixed(2)}%</div>${extra}</span>
       </div>`;
     }
     return h;
@@ -751,6 +757,61 @@
       </div>`;
     document.body.appendChild(m);
     m.addEventListener('click', ev => { if (ev.target === m) closeMgrModal(); });
+    enhanceConsensus(rep);
+  }
+
+  // ─── v3.9 P5: 佔量% + AI 原因推導 ───────────────────────────
+  const _SRV = () => (typeof window !== 'undefined' && window.SERVER) ? window.SERVER : 'http://localhost:18432';
+
+  async function enhanceConsensus(rep) {
+    // 1) AI 原因鈕（事件委派，阻止冒泡避免觸發整列載入）
+    document.querySelectorAll('#e3-modal .e3-reason').forEach(btn => {
+      btn.onclick = async (ev) => {
+        ev.stopPropagation();
+        const out = document.querySelector(`#e3-modal .e3-reason-out[data-for="${CSS.escape(btn.dataset.sym)}"]`);
+        const key = (typeof S !== 'undefined' && S.apiKey) ? S.apiKey : '';
+        if (!key) { if (out) out.textContent = '⚠ 請先在右上角設定 API KEY'; return; }
+        btn.disabled = true; btn.textContent = '🤖 推導中…';
+        try {
+          const r = await fetch(_SRV() + '/etf-reason', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              apiKey: key, code: btn.dataset.sym, name: btn.dataset.name,
+              etfs: (btn.dataset.etfs || '').split(',').filter(Boolean),
+              action: btn.dataset.action, sharesDelta: btn.dataset.shares, weightDelta: btn.dataset.weight,
+            }),
+          }).then(x => x.json());
+          if (out) out.textContent = r.reason ? ('🤖 ' + r.reason) : ('⚠ ' + (r.error || '無回應'));
+        } catch (e) { if (out) out.textContent = '⚠ ' + e.message; }
+        btn.textContent = '🤖 原因'; btn.disabled = false;
+      };
+    });
+    // 2) 佔量%：批次抓買盤側個股 20 日均量，算 投信加碼張數 ÷ 日均量
+    const cells = [...document.querySelectorAll('#e3-modal .e3-volpct')];
+    if (!cells.length) return;
+    const codes = [...new Set(cells.map(c => c.dataset.sym))];
+    try {
+      const url = `${_SRV()}/yf/batch?syms=${codes.map(c => c + '.TW').join(',')}&range=1mo&interval=1d`;
+      const data = await fetch(url, { cache: 'no-store' }).then(x => x.ok ? x.json() : {});
+      const avgVol = {};
+      for (const c of codes) {
+        const res = data[c + '.TW'] && data[c + '.TW'].chart && data[c + '.TW'].chart.result && data[c + '.TW'].chart.result[0];
+        const vols = (res && res.indicators && res.indicators.quote && res.indicators.quote[0] && res.indicators.quote[0].volume) || [];
+        const valid = vols.filter(v => v != null && isFinite(v) && v > 0).slice(-20);
+        avgVol[c] = valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
+      }
+      cells.forEach(cell => {
+        const sym = cell.dataset.sym, sh = parseFloat(cell.dataset.shares) || 0;
+        const av = avgVol[sym];
+        if (!av) { cell.textContent = '佔量 —（均量無資料）'; return; }
+        const pct = sh / av * 100;
+        const lots = Math.round(sh / 1000);
+        cell.textContent = `投信買盤 ≈ ${lots.toLocaleString()} 張 ≈ 20日均量 ${pct.toFixed(1)}%`;
+        cell.style.color = pct >= 30 ? 'var(--red)' : pct >= 10 ? 'var(--gold)' : 'var(--tf)';
+      });
+    } catch (e) {
+      cells.forEach(cell => { cell.textContent = '佔量 計算失敗'; });
+    }
   }
 
   // ─── Manager modal ──────────────────────────────────────────

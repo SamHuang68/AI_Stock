@@ -37,6 +37,14 @@ V2_SCRIPTS = ['position_v2.js', 'watch_v2.js', 'info_v2.js', 'pro_v2.js',
               'marketflow_v3.js',               # v3.8: 大盤資金流儀表板
               'instrank_v3.js',                 # v3.8: 外資/投信買賣超排行榜
               'calendar_v3.js',                 # v3.8: 事件行事曆+提醒
+              'multichart_v3.js',               # v3.9 P1: 多圖連動布局 (grid overlay)
+              'spread_v3.js',                   # v3.9 P1: 價差/比值圖
+              'hotkeys_v3.js',                  # v3.9 P1: 全鍵盤快捷 (打字即搜尋/Space切自選/Alt切時框)
+              'strategy_builder_v3.js',         # v3.9 P2: 樂高式策略條件組合器 (提供 window.StratLib，須在 backtest_v3 後)
+              'strategy_script_v3.js',          # v3.9 P2: 迷你策略腳本 DSL (依賴 StratLib，須在 strategy_builder 後)
+              'drawtools_v3.js',                # v3.9 P3: 進階畫線(canvas overlay)+雲端記憶
+              'screener3_v3.js',                # v3.9 P4: 三合一進階選股(技術+基本面+籌碼)
+              # 'macro_v3.js',                  # v3.9 P4: 總經疊圖 — 已停用(資料源不穩,2026-06-14 移除;檔案與 server /macro 保留待日後)
               'etf_v3.js']
 V2_STYLES  = ['mobile_v2.css']
 

@@ -4,11 +4,11 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 echo ============================================
-echo  Build Stock_Terminal distribution zip (v3.8.2)
+echo  Build Stock_Terminal distribution zip (v3.9)
 echo ============================================
 echo.
 
-set "ZIP=Stock_Terminal_v3.8.2.zip"
+set "ZIP=Stock_Terminal_v3.9.zip"
 set "STAGE=Stock_Terminal"
 
 REM Clean prior leftovers
@@ -39,6 +39,8 @@ set FILES=%FILES% volume_profile_v3.js pattern_v3.js pattern_v3_test.html chip_v
 set FILES=%FILES% heatmap_v3.js screener_v3.js ai_report_v3.js polish_v3.js wl_live_v3.js
 set FILES=%FILES% plan_history_v3.js plan_position_v3.js plan_v3.js pdf_import_v3.js pdf_export_v3.js peg_v3.js
 set FILES=%FILES% alert_v3.js alert_push_v3.js backtest_v3.js backtest_ui_v3.js enhance_v3.js aftermarket_v3.js overnight_v3.js supplychain_v3.js valuation_v3.js marketflow_v3.js instrank_v3.js calendar_v3.js layout_v3.js etf_v3.js
+REM v3.9 modules (multichart/hotkeys/spread/strategy builder+script/drawtools/screener3; macro_v3.js disabled but bundled dormant)
+set FILES=%FILES% multichart_v3.js spread_v3.js hotkeys_v3.js strategy_builder_v3.js strategy_script_v3.js drawtools_v3.js screener3_v3.js macro_v3.js
 REM ETF + chip tracker launchers + schedulers
 set FILES=%FILES% run_tracker.bat daily_etf.bat daily_chip.bat daily_etf_report.bat daily_morning_brief.bat
 set FILES=%FILES% install_scheduler.bat uninstall_scheduler.bat install_chip_scheduler.bat install_etf_report_scheduler.bat install_morning_scheduler.bat

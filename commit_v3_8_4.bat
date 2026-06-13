@@ -19,8 +19,14 @@ git commit ^
  -m "README v3.8.2 + build_dist v3.8.2"
 
 echo.
-echo === Commit done. ===
+echo === Commit done. Pushing to GitHub... ===
 git log --oneline -1
+
+git push origin main
+if %ERRORLEVEL% NEQ 0 (
+    echo [WARN] Push failed - run push_github.bat to retry.
+)
+
 echo.
 echo Next steps:
 echo   1. build_dist.bat            (pack Stock_Terminal_v3.8.2.zip)

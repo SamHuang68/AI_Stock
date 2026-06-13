@@ -98,7 +98,7 @@
           exit = c.close[j]; exitBar = j;
         }
         let ret = opts.short ? (entry - exit) / entry : (exit - entry) / entry;
-        trades.push({ entryBar: i, exitBar, entry, exit, ret, reason, time: candles[i].time });
+        trades.push({ entryBar: i, exitBar, entry, exit, ret, reason, time: candles[i].time, exitTime: candles[exitBar].time, holdBars: exitBar - i });
         equity *= (1 + ret);
         peak = Math.max(peak, equity);
         maxDD = Math.max(maxDD, (peak - equity) / peak);
@@ -122,12 +122,65 @@
     const sd = n > 1 ? Math.sqrt(rets.reduce((s, r) => s + (r - mean) ** 2, 0) / (n - 1)) : 0;
     const sharpe = sd ? mean / sd * Math.sqrt(n) : 0;
     const payoff = avgLoss ? Math.abs(avgWin / avgLoss) : (avgWin ? Infinity : 0);
+    // v3.9 深化：獲利因子、平均持有、最大連勝/連敗、最佳/最差、年化夏普估計
+    const grossWin = wins.reduce((s, t) => s + t.ret, 0);
+    const grossLoss = Math.abs(losses.reduce((s, t) => s + t.ret, 0));
+    const profitFactor = grossLoss ? grossWin / grossLoss : (grossWin ? Infinity : 0);
+    const avgHoldBars = n ? trades.reduce((s, t) => s + (t.holdBars || 0), 0) / n : 0;
+    let winStreak = 0, lossStreak = 0, curW = 0, curL = 0;
+    for (const t of trades) {
+      if (t.ret > 0) { curW++; curL = 0; winStreak = Math.max(winStreak, curW); }
+      else { curL++; curW = 0; lossStreak = Math.max(lossStreak, curL); }
+    }
+    const best = n ? Math.max(...rets) : 0;
+    const worst = n ? Math.min(...rets) : 0;
+    // 年化夏普估計：以平均持有 bar 數換算每年交易筆數(252 交易日)
+    const tradesPerYear = avgHoldBars > 0 ? 252 / avgHoldBars : n;
+    const sharpeAnn = sd ? (mean / sd) * Math.sqrt(tradesPerYear) : 0;
     return {
       count: n, winRate, wins: wins.length, losses: losses.length,
       avgWin: avgWin * 100, avgLoss: avgLoss * 100, payoff,
       expectancy: expectancy * 100, totalReturn: (equity - 1) * 100,
-      maxDD: maxDD * 100, sharpe, trades, curve,
+      maxDD: maxDD * 100, sharpe, sharpeAnn,
+      profitFactor, avgHoldBars,
+      maxWinStreak: winStreak, maxLossStreak: lossStreak,
+      best: best * 100, worst: worst * 100,
+      trades, curve,
     };
+  }
+
+  // ---- 進出場雙訊號回測 (給樂高條件器 / 腳本引擎用) -------
+  // buyArr[i] 進場、sellArr[j] 出場；tp/sl/maxBars 任一先到也出場。
+  // 同一時間只持有一個部位(進場後直到出場才找下一筆)。
+  function runLS(candles, buyArr, sellArr, opts) {
+    opts = Object.assign({ tp: 0, sl: 0, maxBars: 0, short: false }, opts || {});
+    const c = colsOf(candles);
+    const trades = [];
+    let equity = 1, peak = 1, maxDD = 0;
+    const curve = [];
+    let i = 0;
+    while (i < candles.length) {
+      if (buyArr[i]) {
+        const entry = c.close[i];
+        let exit = entry, exitBar = i, reason = 'end';
+        for (let j = i + 1; j < candles.length; j++) {
+          const ret = opts.short ? (entry - c.close[j]) / entry : (c.close[j] - entry) / entry;
+          exit = c.close[j]; exitBar = j;
+          if (opts.tp > 0 && ret >= opts.tp) { reason = 'tp'; break; }
+          if (opts.sl > 0 && ret <= -opts.sl) { reason = 'sl'; break; }
+          if (opts.maxBars > 0 && (j - i) >= opts.maxBars) { reason = 'time'; break; }
+          if (sellArr && sellArr[j]) { reason = 'signal'; break; }
+        }
+        const ret = opts.short ? (entry - exit) / entry : (exit - entry) / entry;
+        trades.push({ entryBar: i, exitBar, entry, exit, ret, reason, time: candles[i].time, exitTime: candles[exitBar].time, holdBars: exitBar - i });
+        equity *= (1 + ret);
+        peak = Math.max(peak, equity);
+        maxDD = Math.max(maxDD, (peak - equity) / peak);
+        curve.push({ time: candles[exitBar].time, equity });
+        i = exitBar + 1;
+      } else i++;
+    }
+    return summarize(trades, equity, maxDD, curve);
   }
 
   function colsOf(candles) {
@@ -216,7 +269,7 @@
   }
 
   window.Backtest = {
-    run, scanStrategies, patternHitRate, portfolio, drawCurve,
-    STRATEGIES, sma, rsi, bbLower,
+    run, runLS, scanStrategies, patternHitRate, portfolio, drawCurve,
+    STRATEGIES, sma, rsi, bbLower, colsOf, crossUp, breakout,
   };
 })();

@@ -1,4 +1,4 @@
-# Stock Terminal v3.8.2
+# Stock Terminal v3.9
 
 Bloomberg-style 個股研究終端機，本機跑、零雲端依賴、無外部 Python 套件需求。
 
@@ -519,7 +519,7 @@ ETF△ 工具列 `📋 報表`：跨 ETF 彙總每日新增/移除/加減碼，�
 ### 🔗 供應鏈面板 v2：台美雙 tab
 
 - **台股鏈** 7 段 → **11 段 54 檔**：新增 💾 記憶體/儲存、⚡ 被動元件（國巨/華新科/禾伸堂/信昌電）、🔩 機構/連接器/滑軌（嘉澤/川湖/勤誠）、🔌 電源/電力基建（拆自散熱）；補 鴻海、京元電、欣銓、台光電、力旺、晶心科、世界先進、聯亞等
-- **新增美股 AI 鏈** 8 段：設備/EDA → 晶圓代工 → AI 晶片 → 記憶體 → 網通/光互連 → 伺服器 → 電力/散熱基建 → CSP/AI 平台（NVDA/AMD/AVGO、ASML/AMAT、MU/SNDK、ANET/CRDO/ALAB、SMCI/DELL、VRT/GEV、MSFT/GOOGL/AMZN/META…）
+- **新增美股 AI 鏈** 9 段：設備/EDA → 晶圓代工 → AI 晶片 → 記憶體 → **AI 電源/電源管理 IC（MPWR=MPS 芯源/VICR/ON/ADI/TXN）** → 網通/光互連 → 伺服器 → 電力/散熱基建 → CSP/AI 平台（NVDA/AMD/AVGO、ASML/AMAT、MU/SNDK、ANET/CRDO/ALAB、SMCI/DELL、VRT/GEV、MSFT/GOOGL/AMZN/META…）
 - 開啟時自動跟隨目前市場；美股 tab 綠漲紅跌；點股以對應市場載入
 
 ### chart-info 浮動視窗重排（polish_v3.js）

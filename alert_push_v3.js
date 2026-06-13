@@ -42,6 +42,36 @@
 
   let cfg = null, rules = [];
 
+  const COMP_INDS = [['close', '收盤'], ['sma20', 'SMA20'], ['sma60', 'SMA60'], ['rsi14', 'RSI'],
+  ['bbL', '布林下軌'], ['bbU', '布林上軌'], ['volRatio', '量比'], ['high20', '20日高']];
+  function compCondRow(idx) {
+    const opts = COMP_INDS.map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+    return `<div class="row ap-cc" style="margin-top:4px">
+      <div><select class="ap-cc-l">${opts}</select></div>
+      <div><select class="ap-cc-op"><option value="lt">&lt;</option><option value="gt">&gt;</option><option value="lte">≤</option><option value="gte">≥</option></select></div>
+      <div><input class="ap-cc-r" placeholder="數值或指標(如 50 / sma60)"></div>
+    </div>`;
+  }
+  function addComposite() {
+    const sym = document.getElementById('ap-c-sym').value.trim();
+    if (!sym) { alert('請填代號'); return; }
+    const conds = [];
+    document.querySelectorAll('#ap-c-conds .ap-cc').forEach(row => {
+      const left = row.querySelector('.ap-cc-l').value;
+      const op = row.querySelector('.ap-cc-op').value;
+      const right = row.querySelector('.ap-cc-r').value.trim();
+      if (right !== '') conds.push({ left, op, right });
+    });
+    if (!conds.length) { alert('請至少填一個條件'); return; }
+    rules.push({
+      id: Date.now(), type: 'composite', sym,
+      market: document.getElementById('ap-c-mkt').value,
+      combine: document.getElementById('ap-c-combine').value,
+      conditions: conds, enabled: true,
+    });
+    pushRules();
+  }
+
   async function refresh() {
     try { cfg = await api('/alert/config'); } catch { cfg = null; }
     try { rules = await api('/alert/rules'); } catch { rules = []; }
@@ -74,9 +104,29 @@
       <label>收件者</label><input id="ap-em-to" value="${em.to || ''}">
     </section>
     <section>
-      <b>警報規則</b>
+      <div class="ap-toggle"><input type="checkbox" id="ap-wh-en" ${(cfg.webhook || {}).enabled ? 'checked' : ''}><b>Webhook</b>
+      <span style="color:#64748b">（Discord/Slack/自架；POST JSON {text,content}）</span></div>
+      <label>Webhook URL</label><input id="ap-wh-url" value="${(cfg.webhook || {}).url || ''}" placeholder="https://discord.com/api/webhooks/...">
+    </section>
+    <section>
+      <b>複合警示</b> <span style="color:#64748b;font-size:10px">多條件 AND/OR，後端日線評估</span>
+      <table><thead><tr><th>代號</th><th>邏輯</th><th>條件</th><th></th></tr></thead>
+      <tbody>${rules.map((r, i) => r.type === 'composite' ? `<tr>
+        <td>${r.sym}</td><td>${(r.combine || 'AND')}</td>
+        <td style="font-size:10px">${(r.conditions || []).map(c => `${c.left}${({ gt: '>', lt: '<', gte: '≥', lte: '≤' }[c.op] || c.op)}${c.right}`).join(' · ')}</td>
+        <td><button class="sec" data-del="${i}" style="padding:2px 6px">✕</button></td></tr>` : '').join('')}</tbody></table>
+      <div class="row" style="margin-top:6px">
+        <div><input id="ap-c-sym" placeholder="代號 2330"></div>
+        <div><select id="ap-c-mkt"><option>TW</option><option>US</option></select></div>
+        <div><select id="ap-c-combine"><option value="AND">AND 全部</option><option value="OR">OR 任一</option></select></div>
+      </div>
+      <div id="ap-c-conds">${compCondRow(0)}${compCondRow(1)}</div>
+      <button id="ap-c-add" style="margin-top:4px">＋加複合警示</button>
+    </section>
+    <section>
+      <b>價格警報規則</b>
       <table><thead><tr><th>代號</th><th>市場</th><th>類型</th><th>價位</th><th>備註</th><th></th></tr></thead>
-      <tbody id="ap-rules">${rules.map((r, i) => `<tr>
+      <tbody id="ap-rules">${rules.map((r, i) => r.type === 'composite' ? '' : `<tr>
         <td>${r.sym || ''}</td><td>${r.market || 'TW'}</td>
         <td>${r.type === 'cross_down' ? '破支撐↓' : '過壓力↑'}</td>
         <td>${r.price}</td><td>${r.note || ''}</td>
@@ -98,6 +148,7 @@
 
     box.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { rules.splice(+b.dataset.del, 1); pushRules(); });
     box.querySelector('#ap-r-add').onclick = addRule;
+    const cAdd = box.querySelector('#ap-c-add'); if (cAdd) cAdd.onclick = addComposite;
     box.querySelector('#ap-save').onclick = saveCfg;
     box.querySelector('#ap-test').onclick = testPush;
     box.querySelector('#ap-close2').onclick = close;
@@ -130,6 +181,10 @@
         smtp_port: parseInt(document.getElementById('ap-em-port').value, 10) || 587,
         user: document.getElementById('ap-em-user').value.trim(),
         to: document.getElementById('ap-em-to').value.trim(),
+      },
+      webhook: {
+        enabled: document.getElementById('ap-wh-en').checked,
+        url: document.getElementById('ap-wh-url').value.trim(),
       },
     };
     const tok = document.getElementById('ap-tg-token').value.trim();
