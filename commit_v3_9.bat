@@ -25,6 +25,7 @@ git commit ^
  -m "Setup Wizard wizard_v3.js: 4-question flow (use/horizon/risk/capital) + analysis engine (tech score/ATR/support-resistance/scanStrategies/fundamental/valuation/chip) -> one-click apply WATCH signals + alerts (incl composite buy-zone) + position/buy-plan (ATR or fixed stop, suggested shares) + support/resistance draw (fib optional) + verdict (rule or Claude via /ai-note); idempotent source:wizard" ^
  -m "server /ai-note generic Anthropic relay; drawtools window.drawToolsAdd programmatic add" ^
  -m "Fixes: toolbar wraps to multiple rows (release fixed height so right panel does not cover buttons); wizard preserves watch.sym (was undefined title/undeletable); watch_v2 self-heals missing sym from key; wizard fib off by default; build_v2 banner/title v3.9" ^
+ -m "Wizard W2: auto-prompt toast on watchlist add (renderWl hook), per-signal checkboxes effective (applyCore sel.sigsIdx), batch apply across watchlist (fetch 1y per stock -> computeFrom -> applyCore), config templates (wizard_templates); refactor compute/buildSuggestions/ruleConclusion to take params + split applyCore" ^
  -m "README v3.9 + build_dist v3.9 (+wizard_v3.js)"
 
 echo.

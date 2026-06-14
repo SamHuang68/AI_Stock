@@ -72,6 +72,9 @@
   // ---- 體檢引擎 ----
   function compute() {
     const c = (typeof S !== 'undefined' && S.data && S.data.candles) ? S.data.candles : null;
+    return computeFrom(c);
+  }
+  function computeFrom(c) {
     if (!c || c.length < 60 || !window.StratLib) return null;
     const L = window.StratLib;
     const closes = c.map(x => x.close), highs = c.map(x => x.high), lows = c.map(x => x.low), vols = c.map(x => x.volume || 0);
@@ -106,8 +109,8 @@
   }
 
   // ---- 由答案 + 體檢 產生建議 ----
-  function buildSuggestions() {
-    const d = wz.diag; if (!d) return null;
+  function buildSuggestions(d) {
+    d = d || wz.diag; if (!d) return null;
     const price = d.price;
     const tol = PERIOD_TOL[wz.period] || 2;
     // 停損
@@ -162,8 +165,8 @@
   }
 
   // ---- 規則式結論 ----
-  function ruleConclusion() {
-    const d = wz.diag, ctx = wz._ctx || {};
+  function ruleConclusion(d, ctx, sym) {
+    d = d || wz.diag; ctx = ctx || wz._ctx || {}; sym = sym || wz.sym;
     const parts = [];
     parts.push(`技術面${d.techBias >= 60 ? '偏多' : d.techBias <= 40 ? '偏空' : '中性'}(${d.techBias})、RSI ${d.rsi != null ? d.rsi.toFixed(0) : '—'}、波動 ATR ${d.atrPct.toFixed(1)}%`);
     if (ctx.fund && ctx.fund.revenue && ctx.fund.revenue.yoyPct != null)
@@ -178,7 +181,7 @@
       else if (f) parts.push(`外資連${f > 0 ? '買' : '賣'}${Math.abs(f)}天`);
     }
     // 市場派/供應鏈
-    const core = isCoreChain(wz.sym);
+    const core = isCoreChain(sym);
     let view = d.techBias >= 60 ? '順勢偏多，回檔分批' : d.techBias <= 40 ? '弱勢，待轉強再進' : '區間整理，等買區';
     if (core) view += '；屬台灣 AI 供應鏈核心，結構偏多但留意短線過熱風險';
     return parts.join('、') + '。研判：' + view + '。';
@@ -224,7 +227,11 @@
     #wz-msg{font-size:11px;color:#94a3b8;min-height:14px;margin:6px 0}
     .wz-foot{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
     .wz-foot button{border-radius:8px;padding:8px 16px;cursor:pointer;font-size:12px;border:1px solid #334155;background:#1e293b;color:#cbd5e1}
-    .wz-foot .pri{background:rgba(34,197,94,.18);border-color:#22c55e;color:#86efac;font-weight:700}`;
+    .wz-foot .pri{background:rgba(34,197,94,.18);border-color:#22c55e;color:#86efac;font-weight:700}
+    #wz-tpl{background:#0b1220;border:1px solid #334155;color:#cbd5e1;border-radius:6px;padding:5px}
+    #wz-toast{position:fixed;right:16px;bottom:16px;z-index:10001;background:#0f172a;border:1px solid #fbbf24;border-radius:10px;padding:10px 14px;color:#e2e8f0;font-size:12px;box-shadow:0 8px 30px rgba(0,0,0,.5);display:flex;align-items:center;gap:8px}
+    #wz-toast button{background:#1e293b;border:1px solid #334155;color:#cbd5e1;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px}
+    #wz-toast #wz-t-go{background:rgba(251,191,36,.2);border-color:#fbbf24;color:#fbbf24;font-weight:700}`;
     document.head.appendChild(s);
   }
 
@@ -263,12 +270,20 @@
         <label>結論</label>
         <span class="wz-toggle"><button data-tg="conclMode" data-v="rule" class="${wz.conclMode === 'rule' ? 'on' : ''}">規則即時</button><button data-tg="conclMode" data-v="ai" class="${wz.conclMode === 'ai' ? 'on' : ''}">Claude 口語</button></span>
       </div></div>
+      <div class="wz-q"><div class="wz-row">
+        <label>模板</label>
+        <select id="wz-tpl"><option value="">— 載入模板 —</option>${tplOptions()}</select>
+        <button id="wz-tpl-save" style="background:#1e293b;border:1px solid #334155;color:#cbd5e1;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:11px">💾 另存模板</button>
+      </div></div>
       <div id="wz-msg"></div>
-      <div class="wz-foot"><button class="x2" id="wz-cancel">取消</button><button id="wz-go">分析並產生建議 →</button></div>`;
+      <div class="wz-foot"><button id="wz-batch-btn" title="對整個自選股清單套用">⚙ 批次套用自選股</button><button class="x2" id="wz-cancel">取消</button><button id="wz-go">分析並產生建議 →</button></div>`;
     box.querySelectorAll('.wz-opt').forEach(el => el.onclick = () => { wz[el.dataset.grp] = el.dataset.val; renderQuestions(); });
     box.querySelectorAll('[data-tg]').forEach(b => b.onclick = () => { wz[b.dataset.tg] = b.dataset.v; syncInputs(); renderQuestions(); });
     box.querySelector('#wz-go').onclick = onAnalyze;
     box.querySelector('#wz-cancel').onclick = close;
+    box.querySelector('#wz-tpl-save').onclick = saveTemplate;
+    box.querySelector('#wz-tpl').onchange = e => { if (e.target.value) loadTemplate(e.target.value); };
+    box.querySelector('#wz-batch-btn').onclick = batchRun;
   }
   function syncInputs() {
     const cap = document.getElementById('wz-cap'); if (cap) wz.capital = parseFloat(cap.value) || 0;
@@ -283,22 +298,22 @@
     if (!wz.diag) { msg.innerHTML = '<span style="color:#f87171">資料不足，請先載入個股(建議 1 年日線)</span>'; return; }
     msg.textContent = '體檢中…抓基本面/估值/籌碼';
     try { wz._ctx = await fetchContext(wz.sym); } catch { wz._ctx = {}; }
-    wz.sug = buildSuggestions();
+    wz.sug = buildSuggestions(wz.diag);
     // 結論
     if (wz.conclMode === 'ai') {
-      wz.conclusion = '產生中…';
+      wz.conclusion = '產生中…'; wz.sug.conclusion = wz.conclusion;
       renderSummary();
       wz.conclusion = await aiConclusion();
-      renderSummary();
     } else {
-      wz.conclusion = ruleConclusion();
-      renderSummary();
+      wz.conclusion = ruleConclusion(wz.diag, wz._ctx, wz.sym);
     }
+    wz.sug.conclusion = wz.conclusion;
+    renderSummary();
   }
 
   async function aiConclusion() {
     const key = (typeof S !== 'undefined' && S.apiKey) ? S.apiKey : '';
-    if (!key) return ruleConclusion() + '（未設 API KEY，改用規則結論）';
+    if (!key) return ruleConclusion(wz.diag, wz._ctx, wz.sym) + '（未設 API KEY，改用規則結論）';
     const d = wz.diag, ctx = wz._ctx || {};
     const prompt = `你是專業台股分析師。用 2~3 句繁體中文，為個股 ${wz.sym} 寫操作研判。`
       + `數據：技術分數 ${d.techBias}/100、RSI ${d.rsi != null ? d.rsi.toFixed(0) : '—'}、ATR ${d.atrPct.toFixed(1)}%、`
@@ -323,10 +338,10 @@
     const d = wz.diag, s = wz.sug;
     const box = document.getElementById('wz-body');
     const chk = (id, on) => `<input type="checkbox" id="${id}" ${on ? 'checked' : ''}>`;
-    const sigList = s.sigs.map(sig => {
+    const sigList = s.sigs.map((sig, i) => {
       const sc = d.scanMap[sig.strategy];
       const wr = sc && sc.winRate != null ? ` <span style="color:#64748b">(歷史勝率 ${sc.winRate.toFixed(0)}%)</span>` : '';
-      return `<label>${chk('wz-sig-' + sig.strategy + '-' + (sig.params.target || sig.params.days || ''), true)} ${SIG_LBL[sig.strategy] || sig.strategy}${sig.params.target ? ' @' + sig.params.target : ''}${wr}</label>`;
+      return `<label>${chk('wz-sig-' + i, true)} ${SIG_LBL[sig.strategy] || sig.strategy}${sig.params.target ? ' @' + sig.params.target : ''}${wr}</label>`;
     }).join('');
     box.innerHTML = `
       <div class="wz-stat">
@@ -360,61 +375,158 @@
     box.querySelector('#wz-apply').onclick = apply;
   }
 
-  // ---- 套用 ----
+  // ---- 套用核心（單檔/批次共用）----
+  async function applyCore(sym, mkt, diag, sug, sel) {
+    const done = [];
+    // WATCH
+    if (sel.watch && typeof S !== 'undefined') {
+      if (!S.watches) S.watches = {};
+      const prevW = S.watches[sym] || {};
+      const keep = (prevW.signals || []).filter(x => x.source !== 'wizard');
+      let sigs = sug.sigs;
+      if (Array.isArray(sel.sigsIdx)) sigs = sug.sigs.filter((_, i) => sel.sigsIdx.includes(i));
+      const add = sigs.map((sig, i) => ({ id: 'wz' + Date.now() + i + sym, strategy: sig.strategy, params: sig.params, source: 'wizard', addedAt: Date.now(), updatedAt: Date.now(), lastEval: null }));
+      if (add.length || keep.length) {
+        // 保留既有欄位(sym/notes/addedAt) — 漏 sym 會讓 WATCH 標題顯示 undefined
+        S.watches[sym] = Object.assign({}, prevW, { sym: sym, mkt: mkt, notes: prevW.notes || '', addedAt: prevW.addedAt || Date.now(), signals: [...keep, ...add] });
+        if (typeof saveWatches === 'function') saveWatches();
+        if (add.length) done.push('觀察訊號');
+      }
+    }
+    // 警報
+    if (sel.alert) {
+      let rules = [];
+      try { rules = await fetch(`${SRV}/alert/rules`).then(r => r.ok ? r.json() : []); } catch {}
+      if (!Array.isArray(rules)) rules = [];
+      rules = rules.filter(r => !(r.source === 'wizard' && r.sym === sym));
+      sug.alerts.forEach((a, i) => rules.push({ id: Date.now() + i, sym, market: mkt, type: a.type, price: a.price, note: a.note, enabled: true, source: 'wizard' }));
+      if (sug.composite) rules.push({ id: Date.now() + 99, type: 'composite', sym, market: mkt, combine: sug.composite.combine, conditions: sug.composite.conditions, note: sug.composite.note, enabled: true, source: 'wizard' });
+      try { await fetch(`${SRV}/alert/rules`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rules) }); done.push('警報'); } catch {}
+    }
+    // 持倉/計畫
+    if (sel.pos) {
+      if (wz.use === 'hold' && typeof setPosition === 'function' && typeof S !== 'undefined' && S.sym === sym) {
+        setPosition(wz.entry || diag.price, wz.shares || 0, sug.target, sug.stopPrice, '精靈建議: ' + (sug.conclusion || ''));
+        done.push('持倉');
+      } else {
+        try { const k = 'wizard_plans'; const o = JSON.parse(localStorage.getItem(k) || '{}'); o[sym] = { buyLo: sug.buyLo, buyHi: sug.buyHi, stop: sug.stopPrice, target: sug.target, fullShares: sug.fullShares, riskShares: sug.riskShares, ts: Date.now() }; localStorage.setItem(k, JSON.stringify(o)); done.push('買進計畫'); } catch {}
+      }
+    }
+    // 畫線（支撐/壓力，斐波那契選配）
+    if (sel.draw && typeof window.drawToolsAdd === 'function') {
+      const arr = sug.draws.slice();
+      if (sug.fib && sel.fib) arr.push(sug.fib);
+      window.drawToolsAdd(sym, arr, { replaceSource: 'wizard' });
+      done.push('畫線');
+    }
+    // 結論備註
+    try { const k = 'wizard_notes'; const o = JSON.parse(localStorage.getItem(k) || '{}'); o[sym] = { note: sug.conclusion, ts: Date.now() }; localStorage.setItem(k, JSON.stringify(o)); } catch {}
+    return done;
+  }
+
+  // ---- 單檔套用（讀 summary 勾選，含 per-signal）----
   async function apply() {
     const msg = document.getElementById('wz-msg'); msg.textContent = '套用中…';
-    const sym = wz.sym, mkt = wz.mkt, s = wz.sug;
-    const done = [];
+    const s = wz.sug;
+    const sigsIdx = [];
+    s.sigs.forEach((_, i) => { if (document.getElementById('wz-sig-' + i)?.checked) sigsIdx.push(i); });
+    const sel = {
+      watch: !!document.getElementById('wz-ap-watch')?.checked, sigsIdx,
+      alert: !!document.getElementById('wz-ap-alert')?.checked,
+      pos: !!document.getElementById('wz-ap-pos')?.checked,
+      draw: !!document.getElementById('wz-ap-draw')?.checked,
+      fib: !!document.getElementById('wz-ap-fib')?.checked,
+    };
+    let done = [];
     try {
-      // WATCH
-      if (document.getElementById('wz-ap-watch')?.checked) {
-        if (typeof S !== 'undefined') {
-          if (!S.watches) S.watches = {};
-          const prevW = S.watches[sym] || {};
-          const keep = (prevW.signals || []).filter(x => x.source !== 'wizard');
-          const add = s.sigs.map((sig, i) => ({ id: 'wz' + Date.now() + i, strategy: sig.strategy, params: sig.params, source: 'wizard', addedAt: Date.now(), updatedAt: Date.now(), lastEval: null }));
-          // 保留既有欄位(sym/notes/addedAt) — 漏 sym 會讓 WATCH 標題顯示 undefined
-          S.watches[sym] = Object.assign({}, prevW, { sym: sym, mkt: mkt, notes: prevW.notes || '', addedAt: prevW.addedAt || Date.now(), signals: [...keep, ...add] });
-          if (typeof saveWatches === 'function') saveWatches();
-          if (typeof renderRpanel === 'function' && S.tab === 'watch') { try { renderRpanel(); } catch {} }
-          done.push('觀察訊號');
-        }
-      }
-      // 警報
-      if (document.getElementById('wz-ap-alert')?.checked) {
-        let rules = [];
-        try { rules = await fetch(`${SRV}/alert/rules`).then(r => r.ok ? r.json() : []); } catch {}
-        if (!Array.isArray(rules)) rules = [];
-        rules = rules.filter(r => !(r.source === 'wizard' && r.sym === sym));
-        s.alerts.forEach((a, i) => rules.push({ id: Date.now() + i, sym, market: mkt, type: a.type, price: a.price, note: a.note, enabled: true, source: 'wizard' }));
-        if (s.composite) rules.push({ id: Date.now() + 99, type: 'composite', sym, market: mkt, combine: s.composite.combine, conditions: s.composite.conditions, note: s.composite.note, enabled: true, source: 'wizard' });
-        try { await fetch(`${SRV}/alert/rules`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rules) }); done.push('警報'); } catch {}
-      }
-      // 持倉/計畫
-      if (document.getElementById('wz-ap-pos')?.checked) {
-        if (wz.use === 'hold' && typeof setPosition === 'function' && typeof S !== 'undefined' && S.sym === sym) {
-          setPosition(wz.entry || wz.diag.price, wz.shares || 0, s.target, s.stopPrice, '精靈建議: ' + (wz.conclusion || ''));
-          done.push('持倉');
-        } else {
-          // 想建倉/觀察：存買進計畫到 localStorage
-          try { const k = 'wizard_plans'; const o = JSON.parse(localStorage.getItem(k) || '{}'); o[sym] = { buyLo: s.buyLo, buyHi: s.buyHi, stop: s.stopPrice, target: s.target, fullShares: s.fullShares, riskShares: s.riskShares, ts: Date.now() }; localStorage.setItem(k, JSON.stringify(o)); done.push('買進計畫'); } catch {}
-        }
-      }
-      // 畫線（支撐/壓力，斐波那契選配）
-      if (document.getElementById('wz-ap-draw')?.checked && typeof window.drawToolsAdd === 'function') {
-        const arr = s.draws.slice();
-        if (s.fib && document.getElementById('wz-ap-fib')?.checked) arr.push(s.fib);
-        window.drawToolsAdd(sym, arr, { replaceSource: 'wizard' });
-        done.push('畫線');
-      }
-      // 結論備註
-      try { const k = 'wizard_notes'; const o = JSON.parse(localStorage.getItem(k) || '{}'); o[sym] = { note: wz.conclusion, ts: Date.now() }; localStorage.setItem(k, JSON.stringify(o)); } catch {}
-    } catch (e) {
-      msg.innerHTML = '<span style="color:#f87171">套用部分失敗：' + e.message + '</span>'; return;
-    }
+      done = await applyCore(wz.sym, wz.mkt, wz.diag, s, sel);
+      if (typeof renderRpanel === 'function' && typeof S !== 'undefined' && S.tab === 'watch') { try { renderRpanel(); } catch {} }
+    } catch (e) { msg.innerHTML = '<span style="color:#f87171">套用部分失敗：' + e.message + '</span>'; return; }
     msg.innerHTML = `<span style="color:#86efac">✅ 已套用：${done.join('、') || '（無）'}</span>`;
     setTimeout(close, 900);
   }
+
+  // ---- 批次：對整個自選股套用（用目前 週期/風險，視為觀察）----
+  async function batchRun() {
+    syncInputs();
+    const wl = (typeof S !== 'undefined' && Array.isArray(S.wl)) ? S.wl.slice() : [];
+    if (!wl.length) { alert('自選股清單是空的'); return; }
+    if (!confirm(`對自選股 ${wl.length} 檔套用精靈建議？\n(用目前的 週期/風險 設定，一律視為「觀察」，每檔抓 1 年日線分析)`)) return;
+    const box = document.getElementById('wz-body');
+    box.innerHTML = `<div class="sub">批次處理 ${wl.length} 檔…（抓日線分析中，請稍候）</div><div id="wz-batch" style="font-size:11px;max-height:60vh;overflow:auto;font-family:monospace"></div><div class="wz-foot"><button id="wz-bclose">關閉</button></div>`;
+    const logEl = document.getElementById('wz-batch');
+    box.querySelector('#wz-bclose').onclick = close;
+    const savedUse = wz.use; wz.use = 'watch';
+    let ok = 0;
+    for (const w of wl) {
+      const sym = (w.t || '').toUpperCase(), mkt = w.m || 'TW';
+      const row = document.createElement('div'); row.textContent = `${sym} …`; logEl.appendChild(row);
+      try {
+        const yf = (mkt === 'TW') ? sym + '.TW' : sym;
+        const raw = await fetch(`${SRV}/yf/${encodeURIComponent(yf)}?range=1y&interval=1d`, { cache: 'no-store' }).then(x => x.ok ? x.json() : null);
+        const parsed = (raw && typeof parseYF === 'function') ? parseYF(raw) : null;
+        const diag = parsed ? computeFrom(parsed.candles) : null;
+        if (!diag) { row.textContent = `${sym} ✗ 資料不足`; continue; }
+        const sug = buildSuggestions(diag);
+        sug.conclusion = ruleConclusion(diag, {}, sym);
+        const done = await applyCore(sym, mkt, diag, sug, { watch: true, sigsIdx: null, alert: true, pos: true, draw: true, fib: false });
+        row.textContent = `${sym} ✓ ${done.join('/')}`; ok++;
+      } catch (e) { row.textContent = `${sym} ✗ ${e.message}`; }
+    }
+    wz.use = savedUse;
+    const sum = document.createElement('div'); sum.style.cssText = 'color:#86efac;margin-top:8px;font-weight:700';
+    sum.textContent = `完成：${ok}/${wl.length} 檔已套用`; logEl.appendChild(sum);
+    if (typeof renderRpanel === 'function' && typeof S !== 'undefined' && S.tab === 'watch') { try { renderRpanel(); } catch {} }
+  }
+
+  // ---- 設定模板 ----
+  function tplStore() { try { return JSON.parse(localStorage.getItem('wizard_templates') || '{}'); } catch { return {}; } }
+  function tplOptions() { return Object.keys(tplStore()).map(k => `<option value="${k}">${k}</option>`).join(''); }
+  function saveTemplate() {
+    syncInputs();
+    const name = prompt('模板命名：', '我的設定'); if (!name) return;
+    const t = tplStore(); t[name] = { use: wz.use, period: wz.period, risk: wz.risk, capital: wz.capital, slMode: wz.slMode, conclMode: wz.conclMode };
+    localStorage.setItem('wizard_templates', JSON.stringify(t)); renderQuestions();
+  }
+  function loadTemplate(name) { const t = tplStore(); if (!t[name]) return; Object.assign(wz, t[name]); renderQuestions(); }
+
+  // ---- 加股自動提示 ----
+  function hasSettings(sym) {
+    try {
+      if (typeof S !== 'undefined' && S.watches && S.watches[sym] && (S.watches[sym].signals || []).some(x => x.source === 'wizard')) return true;
+      if (JSON.parse(localStorage.getItem('wizard_plans') || '{}')[sym]) return true;
+      if (JSON.parse(localStorage.getItem('wizard_notes') || '{}')[sym]) return true;
+    } catch {}
+    return false;
+  }
+  function dismissed(sym) { try { const d = JSON.parse(localStorage.getItem('wizard_dismiss') || '{}'); return !!(d.all || d[sym]); } catch { return false; } }
+  function setDismiss(sym, all) { try { const d = JSON.parse(localStorage.getItem('wizard_dismiss') || '{}'); if (all) d.all = 1; else if (sym) d[sym] = 1; localStorage.setItem('wizard_dismiss', JSON.stringify(d)); } catch {} }
+  let _seenWl = null;
+  function maybePrompt() {
+    if (typeof S === 'undefined' || !Array.isArray(S.wl)) return;
+    const cur = new Set(S.wl.map(w => w.t));
+    if (_seenWl === null) { _seenWl = cur; return; }   // 首次只記錄基準
+    const news = [...cur].filter(t => !_seenWl.has(t));
+    _seenWl = cur;
+    for (const sym of news) { if (!hasSettings(sym) && !dismissed(sym)) { showToast(sym); break; } }
+  }
+  function showToast(sym) {
+    style();
+    const old = document.getElementById('wz-toast'); if (old) old.remove();
+    const t = document.createElement('div'); t.id = 'wz-toast';
+    t.innerHTML = `✨ 用精靈設定 <b>${sym}</b>？ <button id="wz-t-go">設定</button><button id="wz-t-skip">略過</button><button id="wz-t-never">不再提示</button>`;
+    document.body.appendChild(t);
+    t.querySelector('#wz-t-go').onclick = () => { t.remove(); open(sym); };
+    t.querySelector('#wz-t-skip').onclick = () => t.remove();
+    t.querySelector('#wz-t-never').onclick = () => { setDismiss(null, true); t.remove(); };
+    setTimeout(() => { if (document.getElementById('wz-toast') === t) t.remove(); }, 12000);
+  }
+  // 監看自選股新增 → 提示(包 renderWl)
+  (function patchWl() {
+    if (typeof window.renderWl !== 'function') return setTimeout(patchWl, 200);
+    const o = window.renderWl;
+    window.renderWl = function () { const r = o.apply(this, arguments); try { maybePrompt(); } catch {} return r; };
+  })();
 
   function open(sym, mkt) {
     style();
