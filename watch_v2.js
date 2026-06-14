@@ -33,6 +33,8 @@ const LS_KEY_WATCH = 'stock_terminal_watches_v2';
   let migrated = 0;
   for (const code in S.watches) {
     const w = S.watches[code];
+    // 自我修復：舊版/精靈曾漏寫 sym → 標題 undefined、刪不掉。用 key 回填。
+    if (w && typeof w === 'object' && !w.sym) { w.sym = code; migrated++; }
     if (Array.isArray(w?.signals)) continue;
     if (w?.strategy) {
       S.watches[code] = {

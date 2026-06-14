@@ -45,7 +45,8 @@ V2_SCRIPTS = ['position_v2.js', 'watch_v2.js', 'info_v2.js', 'pro_v2.js',
               'drawtools_v3.js',                # v3.9 P3: 進階畫線(canvas overlay)+雲端記憶
               'screener3_v3.js',                # v3.9 P4: 三合一進階選股(技術+基本面+籌碼)
               # 'macro_v3.js',                  # v3.9 P4: 總經疊圖 — 已停用(資料源不穩,2026-06-14 移除;檔案與 server /macro 保留待日後)
-              'etf_v3.js']
+              'etf_v3.js',
+              'wizard_v3.js']                   # v3.9: 加股設定精靈(依賴 StratLib/Backtest/drawtools/setPosition/saveWatches，排最後)
 V2_STYLES  = ['mobile_v2.css']
 
 if not os.path.isfile(SRC):
@@ -63,7 +64,7 @@ with open(SRC, 'r', encoding='utf-8') as f:
 # 1) Update title
 html = re.sub(
     r'<title>[^<]*</title>',
-    '<title>Stock Terminal v3.5 - PLAN PDF I/O History Position Alert</title>',
+    '<title>Stock Terminal v3.9 - Multi-chart / Backtest / Wizard</title>',
     html, count=1)
 
 # 2a) POS tab
@@ -187,12 +188,12 @@ else:
 if 'data-v2-banner' not in html:
     html = html.replace(
         '<span class="logo">STOCK TERMINAL</span>',
-        '<span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v3.8</span></span>',
+        '<span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v3.9</span></span>',
         1)
-# Bump existing v3.x banner to v3.8
+# Bump existing v3.x banner to v3.9
 html = re.sub(
     r'(data-v2-banner>STOCK TERMINAL <span[^>]+>)v3\.\d+(</span>)',
-    r'\g<1>v3.8\g<2>', html, count=1)
+    r'\g<1>v3.9\g<2>', html, count=1)
 
 with open(DST, 'w', encoding='utf-8') as f:
     f.write(html)

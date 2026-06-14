@@ -393,4 +393,21 @@
   window.drawToolsClose = close;
   window.drawToolsTrend = () => { open(); setMode('trend'); };
   window.drawToolsHLine = () => { open(); setMode('hline'); };
+
+  // 程式化新增畫線物件 (供 Wizard 等模組用)。opts.replaceSource 會先清掉同 source 的舊物件(冪等)。
+  window.drawToolsAdd = function (sym, arr, opts) {
+    if (!sym || !Array.isArray(arr) || !arr.length) return;
+    sym = String(sym).toUpperCase();
+    if (!store[sym]) store[sym] = [];
+    if (opts && opts.replaceSource) store[sym] = store[sym].filter(o => o.source !== opts.replaceSource);
+    arr.forEach(o => store[sym].push(o));
+    saveLocal();
+    try {
+      fetch(`${SRV}/draw/${encodeURIComponent(sym)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ objects: store[sym] }),
+      });
+    } catch {}
+    if (curSym() === sym) { ensureCanvas(); scheduleRedraw(); }
+  };
 })();

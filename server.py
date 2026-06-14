@@ -947,6 +947,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_ai_report()
         elif p == '/etf-reason':
             self._handle_etf_reason()
+        elif p == '/ai-note':
+            self._handle_ai_note()
         elif p == '/alert/rules':
             self._alert_post_rules()
         elif p == '/alert/config':
@@ -2513,6 +2515,38 @@ class Handler(SimpleHTTPRequestHandler):
             self._err(f'Anthropic HTTP {e.code}: ' + e.read().decode('utf-8', 'replace')[:300], 502)
         except Exception as e:
             self._err('etf-reason failed: ' + str(e), 500)
+
+    def _handle_ai_note(self):
+        """POST /ai-note — 通用 Anthropic 文字生成 (v3.9 Wizard 體檢結論口語版用)。
+           body: {apiKey, prompt, max_tokens?}。回 {ok, text}。"""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length) or b'{}')
+        except Exception as e:
+            self._err('bad body: ' + str(e), 400); return
+        api_key = (body.get('apiKey') or '').strip()
+        prompt = (body.get('prompt') or '').strip()
+        if not api_key:
+            self._err('apiKey required', 400); return
+        if not prompt:
+            self._err('prompt required', 400); return
+        mt = int(body.get('max_tokens') or 500)
+        try:
+            req_body = json.dumps({
+                'model': 'claude-sonnet-4-6', 'max_tokens': max(64, min(1500, mt)),
+                'messages': [{'role': 'user', 'content': prompt}],
+            }).encode('utf-8')
+            req = urllib.request.Request('https://api.anthropic.com/v1/messages', data=req_body,
+                                         headers={'Content-Type': 'application/json', 'x-api-key': api_key,
+                                                  'anthropic-version': '2023-06-01'}, method='POST')
+            with urllib.request.urlopen(req, timeout=50) as resp:
+                data = json.loads(resp.read())
+            text = ''.join(b.get('text', '') for b in data.get('content', []) if b.get('type') == 'text')
+            self._ok(json.dumps({'ok': True, 'text': text.strip()}, ensure_ascii=False).encode())
+        except urllib.error.HTTPError as e:
+            self._err(f'Anthropic HTTP {e.code}: ' + e.read().decode('utf-8', 'replace')[:300], 502)
+        except Exception as e:
+            self._err('ai-note failed: ' + str(e), 500)
 
     # ── Alert daemon endpoints (v3.8) ──────────────────────
     def _read_json_body(self):

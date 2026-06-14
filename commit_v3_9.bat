@@ -22,7 +22,10 @@ git commit ^
  -m "P5 composite alerts: alert_daemon composite rule type (daily candles + indicators, AND/OR conditions); alert_push_v3 composite builder" ^
  -m "P5 ETF volume-share + AI reason: consensus report shows trust est buy lots vs 20d avg volume; etf_v3 reason button -> server /etf-reason (Anthropic one-liner with fundamentals)" ^
  -m "Macro overlay (macro_v3.js, server /macro) implemented then disabled in build (FRED latency + TW gov data source instability); files kept dormant for later" ^
- -m "README v3.9 + build_dist v3.9"
+ -m "Setup Wizard wizard_v3.js: 4-question flow (use/horizon/risk/capital) + analysis engine (tech score/ATR/support-resistance/scanStrategies/fundamental/valuation/chip) -> one-click apply WATCH signals + alerts (incl composite buy-zone) + position/buy-plan (ATR or fixed stop, suggested shares) + support/resistance draw (fib optional) + verdict (rule or Claude via /ai-note); idempotent source:wizard" ^
+ -m "server /ai-note generic Anthropic relay; drawtools window.drawToolsAdd programmatic add" ^
+ -m "Fixes: toolbar wraps to multiple rows (release fixed height so right panel does not cover buttons); wizard preserves watch.sym (was undefined title/undeletable); watch_v2 self-heals missing sym from key; wizard fib off by default; build_v2 banner/title v3.9" ^
+ -m "README v3.9 + build_dist v3.9 (+wizard_v3.js)"
 
 echo.
 echo === Commit done. Pushing to GitHub... ===

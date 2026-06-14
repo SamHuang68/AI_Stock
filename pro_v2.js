@@ -902,13 +902,21 @@ document.addEventListener('click', ev => {
       `<button class="probtn" id="btn-stratscript" onclick="window.stratScriptOpen&&stratScriptOpen()" title="策略腳本 DSL：類 Pine 語法寫策略→圖上渲染買賣訊號 (v3.9)">📝 腳本</button>` +
       `<button class="probtn" id="btn-drawtools" onclick="window.drawToolsOpen&&drawToolsOpen()" title="進階畫線：趨勢線/斐波那契/通道/矩形/文字，雲端記憶換裝置不消失 (v3.9)　Alt+T">✏ 畫線</button>` +
       `<button class="probtn" id="btn-screener3" onclick="window.screener3Open&&screener3Open()" title="三合一選股：技術+基本面+籌碼交集，一鍵存自選 (v3.9)">🔬 選股</button>` +
+      `<button class="probtn" id="btn-wizard" onclick="window.wizardOpen&&wizardOpen()" title="加股設定精靈：4題問答→自動體檢並建議 訊號/警報/計畫/畫線 (v3.9)">🧙 精靈</button>` +
       `<button class="probtn" id="btn-replay"  onclick="replayToggle()"  title="K 線重播模式">▶ Replay</button>`;
     rangebar.parentElement.insertBefore(tools, rangebar.nextSibling);
     // v3.8: 工具列改 2 列 — 行1 時間段(rangebar)，行2 功能鈕(tools)
     rangebar.style.flex = '0 0 auto';
     tools.style.borderLeft = 'none';
     tools.style.borderTop = '1px solid var(--border)';
+    // v3.9: 功能鈕多到單列裝不下 → 放開固定高度，允許自動換成多行(右側面板開啟縮窄時不被切到)
     tools.style.flexWrap = 'wrap';
+    tools.style.height = 'auto';
+    tools.style.minHeight = '30px';
+    tools.style.alignItems = 'flex-start';
+    tools.style.rowGap = '3px';
+    tools.style.paddingTop = '4px';
+    tools.style.paddingBottom = '4px';
     const wrap = document.createElement('div');
     wrap.style.cssText = 'display:flex;flex-direction:column;align-items:stretch;flex-shrink:0;width:100%';
     rangebar.parentElement.insertBefore(wrap, rangebar);
