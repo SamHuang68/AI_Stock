@@ -15,46 +15,34 @@ REM Clean prior leftovers
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 if exist "%ZIP%"   del /q "%ZIP%"
 
-mkdir "%STAGE%"
-mkdir "%STAGE%\etf_history"
-
-REM Build v2 first so stock_terminal_v2.html is fresh (embeds all v3.8 scripts)
+REM Build v2 first so stock_terminal_v2.html is fresh
 if exist "stock_terminal.html" if exist "build_v2.py" (
     echo Building v2 ...
     python build_v2.py
     echo.
 )
 
-REM ---- Files to bundle (skip user data: etf_history/chip_history JSON, logs, __pycache__, alert_config/rules) ----
-REM Core servers / trackers
-set FILES=README.md server.py etf_delta_tracker.py chip_history_tracker.py alert_daemon.py etf_report_email.py etf_report.py watch_daemon.py daily_morning_brief.py backup_data.py
-REM v1 base HTML (build source for build_v2.py)
-set FILES=%FILES% stock_terminal.html
-REM v2/v3 UI + build + single launcher
-set FILES=%FILES% stock_terminal_v2.html start_terminal_v3.bat build_v2.py rebuild_and_restart.bat restart_server.bat
-REM v2 base modules
-set FILES=%FILES% position_v2.js watch_v2.js info_v2.js pro_v2.js pattern_v2.js live_v2.js etf_v2.js mobile_v2.css etf_catalog.json
-REM v3 modules (must match build_v2.py V2_SCRIPTS so v2.html scripts resolve)
-set FILES=%FILES% volume_profile_v3.js pattern_v3.js chip_v3.js fundamental_v3.js
-set FILES=%FILES% heatmap_v3.js screener_v3.js ai_report_v3.js polish_v3.js wl_live_v3.js
-set FILES=%FILES% plan_history_v3.js plan_position_v3.js plan_v3.js pdf_import_v3.js pdf_export_v3.js peg_v3.js
-set FILES=%FILES% alert_v3.js alert_push_v3.js backtest_v3.js backtest_ui_v3.js enhance_v3.js aftermarket_v3.js overnight_v3.js supplychain_v3.js valuation_v3.js marketflow_v3.js instrank_v3.js calendar_v3.js etf_v3.js
-REM v3.9 modules (multichart/hotkeys/spread/strategy builder+script/drawtools/screener3; macro_v3.js disabled but bundled dormant)
-set FILES=%FILES% multichart_v3.js spread_v3.js hotkeys_v3.js strategy_builder_v3.js strategy_script_v3.js drawtools_v3.js screener3_v3.js macro_v3.js wizard_v3.js stockfut_v3.js indices_v3.js datahealth_v3.js wlgroup_v3.js toast_v3.js settle_v3.js cmdpalette_v3.js dragwin_v3.js liverefresh_v3.js namesearch_v3.js realtime_v3.js focus_v3.js
-REM ETF + chip tracker launchers + schedulers
-set FILES=%FILES% run_tracker.bat daily_etf.bat daily_chip.bat daily_etf_report.bat daily_morning_brief.bat daily_backup.bat
-set FILES=%FILES% install_scheduler.bat uninstall_scheduler.bat install_chip_scheduler.bat install_etf_report_scheduler.bat install_morning_scheduler.bat install_backup_scheduler.bat
+mkdir "%STAGE%\data\etf_history"
+mkdir "%STAGE%\data\chip_history"
 
-for %%F in (%FILES%) do (
-    if exist "%%F" (
-        copy /Y "%%F" "%STAGE%\" > nul
-        echo + %%F
-    ) else (
-        echo [MISS] %%F not found
-    )
+echo Staging folder trees (src / server / scripts / docs) ...
+REM Copy whole module/server/script/doc trees; skip caches, logs, node_modules
+robocopy "src"     "%STAGE%\src"     /E /XD __pycache__ node_modules /XF *.pyc *.log /NFL /NDL /NJH /NJS /NC /NS /NP >nul
+robocopy "server"  "%STAGE%\server"  /E /XD __pycache__ /XF *.pyc *.log         /NFL /NDL /NJH /NJS /NC /NS /NP >nul
+robocopy "scripts" "%STAGE%\scripts" /E /XF *.log                               /NFL /NDL /NJH /NJS /NC /NS /NP >nul
+robocopy "docs"    "%STAGE%\docs"    /E                                          /NFL /NDL /NJH /NJS /NC /NS /NP >nul
+
+echo Staging root files ...
+for %%F in (stock_terminal.html stock_terminal_v2.html build_v2.py build_order.py) do (
+    if exist "%%F" ( copy /Y "%%F" "%STAGE%\" >nul & echo + %%F ) else ( echo [MISS] %%F )
 )
 
-> "%STAGE%\etf_history\README.txt" echo ETF holding snapshots will appear here after running etf_delta_tracker.py
+REM Catalog only -- NO secrets (ai_key/alert_config/rules), NO history JSON
+if exist "data\etf_catalog.json" ( copy /Y "data\etf_catalog.json" "%STAGE%\data\" >nul & echo + data\etf_catalog.json )
+> "%STAGE%\data\etf_history\README.txt" echo ETF holding snapshots appear here after running server\etf_delta_tracker.py
+
+REM Safety net: make sure no secret slipped into the stage
+del /q "%STAGE%\data\ai_key.txt" "%STAGE%\data\alert_config.json" "%STAGE%\data\alert_rules.json" "%STAGE%\data\watch_rules.json" "%STAGE%\data\watch_state.json" "%STAGE%\data\draw_store.json" 2>nul
 
 echo.
 echo Compressing %STAGE% to %ZIP% ...
@@ -76,15 +64,15 @@ if exist "%ZIP%" (
     powershell -NoProfile -Command "Get-Item '%ZIP%' | Select-Object Name,Length,LastWriteTime | Format-List"
     echo.
     echo Contents:
-    powershell -NoProfile -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path '%ZIP%').Path).Entries | Select-Object FullName, @{N='KB';E={[math]::Round($_.Length/1024,1)}} | Format-Table -AutoSize"
+    powershell -NoProfile -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path '%ZIP%').Path).Entries | Where-Object { $_.Length -gt 0 } | Select-Object FullName, @{N='KB';E={[math]::Round($_.Length/1024,1)}} | Format-Table -AutoSize"
 ) else (
     echo [FAIL] zip not created
 )
 
 echo.
 echo Done. Share %ZIP% with anyone.
-echo Recipient: unzip, then double-click start_terminal_v3.bat (auto-builds v2 + opens).
-echo Optional: install_scheduler.bat (ETF daily) / install_chip_scheduler.bat (chip daily).
+echo Recipient: unzip, then double-click scripts\start_terminal_v3.bat (auto-builds v2 + opens).
+echo Optional: scripts\install_scheduler.bat (ETF daily) / scripts\install_chip_scheduler.bat (chip daily).
 echo Alerts: open the bell button to set Telegram/Email push.
 echo.
 pause
