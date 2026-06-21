@@ -802,6 +802,9 @@ function renderChart(candles) {
   });
   const lcd = candles.map(c=>({time:tz(c.time),open:c.open,high:c.high,low:c.low,close:c.close}));
   cs.setData(lcd);
+  // 每根 K 對應「前一根收盤(昨收)」→ 供十字游標 ci-ohlc 算漲跌(台股以昨收為基準,非開盤)
+  const _prevCloseByTime = new Map();
+  for (let _i = 0; _i < lcd.length; _i++) _prevCloseByTime.set(lcd[_i].time, _i > 0 ? lcd[_i - 1].close : null);
   // 十字圓點:透明收盤線 + crosshairMarker → 游標貼著收盤走時顯示金色圓點(像 Yahoo)
   const _dotSeries = chart.addLineSeries({
     color:'rgba(0,0,0,0)', lineWidth:1, priceLineVisible:false, lastValueVisible:false,
@@ -912,13 +915,16 @@ function renderChart(candles) {
       ? `${d.getUTCMonth()+1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`
       : `${d.getUTCFullYear()}/${String(d.getUTCMonth()+1).padStart(2,'0')}/${String(d.getUTCDate()).padStart(2,'0')}`;
 
-    const isUp = k.close >= k.open;
     // 台股紅漲綠跌；美股綠漲紅跌
     const twC = (S.mkt === 'TW');
     const upCol = twC ? 'var(--red)' : 'var(--green)';
     const dnCol = twC ? 'var(--green)' : 'var(--red)';
-    const col = isUp ? upCol : dnCol;
-    const chgPct = ((k.close - k.open) / k.open * 100);
+    // 漲跌基準 = 昨收(前一根收盤)，非開盤；首根無昨收則退回開盤
+    const _pc = _prevCloseByTime.get(param.time);
+    const _base = (_pc != null && _pc > 0) ? _pc : k.open;
+    // 高於昨收=漲(紅)、低於昨收=跌(綠)、等於昨收=平盤(無色)
+    const col = (k.close > _base) ? upCol : (k.close < _base ? dnCol : 'var(--tlo)');
+    const chgPct = ((k.close - _base) / _base * 100);
 
     // MA values at this time
     let maRow = '';
