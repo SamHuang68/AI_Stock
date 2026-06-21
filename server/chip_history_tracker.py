@@ -14,8 +14,8 @@
 import os, sys, json, urllib.request
 from datetime import date
 
-_BASE = os.path.dirname(os.path.abspath(__file__))
-CHIP_HISTORY_PATH = os.path.join(_BASE, 'chip_history')
+_BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
 YF_HEADERS = {'User-Agent': 'Mozilla/5.0'}
 
 

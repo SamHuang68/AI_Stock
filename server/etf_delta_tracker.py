@@ -45,9 +45,9 @@ _SSL_CTX.check_hostname = False
 _SSL_CTX.verify_mode    = ssl.CERT_NONE
 
 # ── 路徑 ──────────────────────────────────────────────────────────
-SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
-HISTORY_DIR = os.path.join(SCRIPT_DIR, 'etf_history')
-CATALOG_FILE = os.path.join(SCRIPT_DIR, 'etf_catalog.json')
+SCRIPT_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HISTORY_DIR = os.path.join(SCRIPT_DIR, 'data', 'etf_history')
+CATALOG_FILE = os.path.join(SCRIPT_DIR, 'data', 'etf_catalog.json')
 
 # ── ETFS 觀測池：從 etf_catalog.json 動態載入 enabled=true 的 ETF ─
 def load_catalog():

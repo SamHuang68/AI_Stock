@@ -61,3 +61,22 @@ draw_store.json
 # Browser localStorage backups (if anyone exports manually)
 positions_backup.json
 watches_backup.json
+
+# ============================================================
+# v3.9 modularization (P3/P4) — new /data layout + tooling
+# ============================================================
+# Secret — Claude API key (NEVER commit)
+ai_key.txt
+data/ai_key.txt
+# Moved user data/snapshots (keep out of git, same as before the move)
+data/etf_history/
+data/chip_history/
+data/draw_store.json
+data/alert_config.json
+data/alert_rules.json
+data/watch_rules.json
+data/watch_state.json
+# Node test tooling accidentally installed during refactor
+node_modules/
+# Stray test/junk file
+_tb_test.js

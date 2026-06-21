@@ -1,6 +1,6 @@
 @echo off
 REM Push local main to GitHub (ASCII-only). Reusable any time.
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 echo ============================================
 echo  Push to https://github.com/SamHuang68/stock-terminal

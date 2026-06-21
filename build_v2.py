@@ -12,42 +12,64 @@ SRC  = os.path.join(ROOT, 'stock_terminal.html')
 DST  = os.path.join(ROOT, 'stock_terminal_v2.html')
 
 # Scripts injected (in order):
-V2_SCRIPTS = ['position_v2.js', 'watch_v2.js', 'info_v2.js', 'pro_v2.js',
-              'volume_profile_v3.js',           # v3.8 E: 成交金額 Volume Profile (覆寫 pro_v2 POC，須在其後)
-              'pattern_v3.js', 'live_v2.js',
-              'chip_v3.js',
-              'fundamental_v3.js',              # v3.8 B: 基本面 (月營收/三率/評分)
-              'heatmap_v3.js', 'screener_v3.js', 'ai_report_v3.js', 'polish_v3.js',
-              'wl_live_v3.js',
-              'plan_history_v3.js',
-              'plan_position_v3.js',
-              'plan_v3.js',
-              'pdf_import_v3.js',
-              'pdf_export_v3.js',
-              'peg_v3.js',
-              'alert_v3.js',
-              'alert_push_v3.js',               # v3.8 D: 後端警報推播設定 UI (須在 alert_v3 後)
-              'backtest_v3.js',                 # v3.8 C: 回測核心
-              'backtest_ui_v3.js',              # v3.8 C: 回測 UI (須在 backtest_v3 後)
-              'enhance_v3.js',                  # v3.8: 雙軸卡/量價面板/右側收合/分頁記憶
-              'aftermarket_v3.js',              # v3.8: 美股盤後/盤前延伸交易顯示
-              'overnight_v3.js',                # v3.8: 夜盤連動預警(美股期貨→台股隔日)
-              'supplychain_v3.js',              # v3.8: 台灣AI供應鏈族群連動
-              'valuation_v3.js',                # v3.8: 長線估值錨(本益比河流)
-              'marketflow_v3.js',               # v3.8: 大盤資金流儀表板
-              'instrank_v3.js',                 # v3.8: 外資/投信買賣超排行榜
-              'calendar_v3.js',                 # v3.8: 事件行事曆+提醒
-              'multichart_v3.js',               # v3.9 P1: 多圖連動布局 (grid overlay)
-              'spread_v3.js',                   # v3.9 P1: 價差/比值圖
-              'hotkeys_v3.js',                  # v3.9 P1: 全鍵盤快捷 (打字即搜尋/Space切自選/Alt切時框)
-              'strategy_builder_v3.js',         # v3.9 P2: 樂高式策略條件組合器 (提供 window.StratLib，須在 backtest_v3 後)
-              'strategy_script_v3.js',          # v3.9 P2: 迷你策略腳本 DSL (依賴 StratLib，須在 strategy_builder 後)
-              'drawtools_v3.js',                # v3.9 P3: 進階畫線(canvas overlay)+雲端記憶
-              'screener3_v3.js',                # v3.9 P4: 三合一進階選股(技術+基本面+籌碼)
-              # 'macro_v3.js',                  # v3.9 P4: 總經疊圖 — 已停用(資料源不穩,2026-06-14 移除;檔案與 server /macro 保留待日後)
-              'etf_v3.js',
-              'wizard_v3.js']                   # v3.9: 加股設定精靈(依賴 StratLib/Backtest/drawtools/setPosition/saveWatches，排最後)
-V2_STYLES  = ['mobile_v2.css']
+V2_SCRIPTS = ['src/core/position_v2.js', 'src/core/watch_v2.js', 'src/core/info_v2.js', 'src/core/pro_v2.js',
+              'src/chart/volume_profile_v3.js',           # v3.8 E: 成交金額 Volume Profile (覆寫 pro_v2 POC，須在其後)
+              'src/chart/pattern_v3.js', 'src/core/live_v2.js',
+              'src/fundamental/chip_v3.js',
+              'src/fundamental/fundamental_v3.js',              # v3.8 B: 基本面 (月營收/三率/評分)
+              # 'src/chart/heatmap_v3.js',                # v3.9: 📊類股(產業熱力圖)停用 — 改成點下面大盤列 cell 直接帶K線;檔案保留待恢復
+              'src/screener/screener_v3.js', 'src/ai/ai_report_v3.js', 'src/ui/polish_v3.js',
+              'src/core/wl_live_v3.js',
+              'src/fundamental/plan_history_v3.js',
+              'src/fundamental/plan_position_v3.js',
+              'src/fundamental/plan_v3.js',
+              'src/ui/pdf_import_v3.js',
+              'src/ui/pdf_export_v3.js',
+              'src/core/peg_v3.js',
+              'src/alert/alert_v3.js',
+              'src/alert/alert_push_v3.js',               # v3.8 D: 後端警報推播設定 UI (須在 alert_v3 後)
+              'src/screener/backtest_v3.js',                 # v3.8 C: 回測核心
+              'src/screener/backtest_ui_v3.js',              # v3.8 C: 回測 UI (須在 backtest_v3 後)
+              'src/ui/enhance_v3.js',                  # v3.8: 雙軸卡/量價面板/右側收合/分頁記憶
+              'src/chart/aftermarket_v3.js',              # v3.8: 美股盤後/盤前延伸交易顯示
+              'src/chart/overnight_v3.js',                # v3.8: 夜盤連動預警(美股期貨→台股隔日)
+              'src/fundamental/supplychain_v3.js',              # v3.8: 台灣AI供應鏈族群連動
+              'src/fundamental/valuation_v3.js',                # v3.8: 長線估值錨(本益比河流)
+              'src/fundamental/marketflow_v3.js',               # v3.8: 大盤資金流儀表板
+              'src/fundamental/instrank_v3.js',                 # v3.8: 外資/投信買賣超排行榜
+              'src/alert/calendar_v3.js',                 # v3.8: 事件行事曆+提醒
+              'src/chart/multichart_v3.js',               # v3.9 P1: 多圖連動布局 (grid overlay)
+              'src/chart/spread_v3.js',                   # v3.9 P1: 價差/比值圖
+              'src/chart/hotkeys_v3.js',                  # v3.9 P1: 全鍵盤快捷 (打字即搜尋/Space切自選/Alt切時框)
+              'src/screener/strategy_builder_v3.js',         # v3.9 P2: 樂高式策略條件組合器 (提供 window.StratLib，須在 backtest_v3 後)
+              'src/screener/strategy_script_v3.js',          # v3.9 P2: 迷你策略腳本 DSL (依賴 StratLib，須在 strategy_builder 後)
+              'src/chart/drawtools_v3.js',                # v3.9 P3: 進階畫線(canvas overlay)+雲端記憶
+              'src/screener/screener3_v3.js',                # v3.9 P4: 三合一進階選股(技術+基本面+籌碼)
+              # 'src/screener/macro_v3.js',                  # v3.9 P4: 總經疊圖 — 已停用(資料源不穩,2026-06-14 移除;檔案與 server /macro 保留待日後)
+              'src/core/etf_v3.js',
+              'src/fundamental/stockfut_v3.js',                 # v3.9: 個股期夜盤領先(市值前十大,TAIFEX MIS)
+              'src/core/indices_v3.js',                  # v3.9: 大盤指數加入自選(台股加權/櫃買+美股四大)
+              'src/alert/datahealth_v3.js',               # v3.9 Phase-0: 資料源健檢燈(讀 /health sources)
+              # 'src/core/wlgroup_v3.js',                # v3.9: 自選股分組停用 — 使用者覺得篩選列佔版面且未使用;檔案保留待恢復
+
+              'src/alert/toast_v3.js',                    # v3.9 Phase-1: 桌面/頁內 toast 通知(window.notifyToast)
+              'src/alert/settle_v3.js',                   # v3.9: 台股結算日(每月第三個週三)前3天浮動toast提醒
+              'src/ai/cmdpalette_v3.js',               # v3.9 Phase-3: Command Palette(Ctrl+K 搜尋股票/功能)
+              'src/ui/dragwin_v3.js',                  # v3.9 Phase-3: 可拖拉功能視窗(標題列拖曳+記憶位置)
+              'src/core/liverefresh_v3.js',              # v3.9: 「1天」盤中每45s靜默自動刷新(動態看盤)
+              'src/core/namesearch_v3.js',               # v3.9: 代號框打公司名自動完成(/search 反查台股名)
+              'src/core/realtime_v3.js',                 # v3.9: 台股盤中真即時(TWSE MIS 每10s 更新當前分鐘K,解 Yahoo 延遲)
+              'src/ai/focus_v3.js',                    # v3.9: 焦點掃描精靈(多訊號組合自動找做多/做空焦點,/focus)
+              'src/screener/wizard_v3.js',                   # v3.9: 加股設定精靈(依賴 StratLib/Backtest/drawtools/setPosition/saveWatches，排最後)
+              'src/ui/toolbar_v3.js']                  # v3.9: 工具列模組化(一階分類+二階下拉,設定驅動;須排最後,整理所有功能鈕)
+V2_STYLES  = ['src/ui/mobile_v2.css']
+
+# v3.9 P5: 依相依關係自動排序模組(取代人工「須在X後」)。失敗則退回原順序,不影響打包。
+try:
+    from build_order import order_scripts
+    V2_SCRIPTS = order_scripts(V2_SCRIPTS)
+except Exception as _e:
+    print('[build_order] 略過自動排序，用原順序:', _e)
 
 if not os.path.isfile(SRC):
     sys.exit(f'[ERR] missing {SRC}')
@@ -180,7 +202,9 @@ if '</head>' in html:
 
 script_block = ''.join(f'<script src="{js}?v={ts}"></script>\n' for js in V2_SCRIPTS)
 if '</body>' in html:
-    html = html.replace('</body>', script_block + '</body>', 1)
+    # 注入到「最後一個」</body>(真正頁尾)。用 rpartition 避免命中 JS 字串裡的字面 </body>。
+    _head, _sep, _tail = html.rpartition('</body>')
+    html = _head + script_block + _sep + _tail
 else:
     html += '\n' + script_block
 

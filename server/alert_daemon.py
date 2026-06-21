@@ -13,9 +13,9 @@ import os, json, time, threading, urllib.request, urllib.parse, smtplib, ssl
 from email.mime.text import MIMEText
 from datetime import datetime
 
-_BASE = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(_BASE, 'alert_config.json')
-RULES_FILE = os.path.join(_BASE, 'alert_rules.json')
+_BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONFIG_FILE = os.path.join(_BASE, 'data', 'alert_config.json')
+RULES_FILE = os.path.join(_BASE, 'data', 'alert_rules.json')
 LOG_DIR = os.path.join(_BASE, 'logs', 'alerts')
 
 _DEFAULT_CONFIG = {

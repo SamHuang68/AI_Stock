@@ -30,18 +30,18 @@ MAX_WORKERS = max(32, (os.cpu_count() or 16) * 2)
 LRU_MAX = 20000  # 96GB RAM → very generous cache
 
 # ── ETF Delta path ──────────────────────────────────────────────
-ETF_DELTA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'etf_history')
-ETF_CATALOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'etf_catalog.json')
+ETF_DELTA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'etf_history')
+ETF_CATALOG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'etf_catalog.json')
 _ETF_FALLBACKS = [
     ETF_DELTA_PATH,
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'etf_history'),
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'etf_history'),
 ]
 
 # ── Chip history (v3.8): 每日法人籌碼快照，用於連續買賣超天數 ──
-CHIP_HISTORY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'chip_history')
+CHIP_HISTORY_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'chip_history')
 
 # v3.9 P3: 畫線雲端記憶 — 存 draw_store.json {sym: [obj,...]}（gitignore）
-DRAW_STORE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'draw_store.json')
+DRAW_STORE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'draw_store.json')
 _draw_lock = threading.Lock()
 def _load_draw_store():
     try:
@@ -346,6 +346,149 @@ def _get_tw_universe():
         _TW_UNIVERSE['codes'] = out
     return out
 
+# ── 台股 code → 中文名 對照(快取一天)。Yahoo shortName 多為英文，改顯示中文簡稱 ──
+_TW_NAMES = {'date': None, 'map': {}}
+def _get_tw_names():
+    from datetime import date as _date
+    today = _date.today().strftime('%Y%m%d')
+    if _TW_NAMES['date'] == today and _TW_NAMES['map']:
+        return _TW_NAMES['map']
+    m = {}
+    def scan(url, code_keys, name_keys):
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                arr = json.loads(r.read())
+            for row in arr:
+                if not isinstance(row, dict):
+                    continue
+                code = ''
+                for k in code_keys:
+                    if row.get(k):
+                        code = str(row[k]).strip(); break
+                if not _CODE4.match(code):
+                    for v in row.values():
+                        s = str(v).strip()
+                        if _CODE4.match(s):
+                            code = s; break
+                if not _CODE4.match(code):
+                    continue
+                name = ''
+                for k in name_keys:
+                    if row.get(k):
+                        name = str(row[k]).strip(); break
+                # 只收含中文字的名稱(濾掉英文/代號重複)
+                if name and code not in m and any('一' <= ch <= '鿿' for ch in name):
+                    m[code] = name
+        except Exception as e:
+            print(f'[names] scan failed {url}: {e}')
+    scan('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL', ('Code',), ('Name', '名稱', '證券名稱'))
+    scan('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes',
+         ('SecuritiesCompanyCode', 'Code', 'CompanyCode', '公司代號'),
+         ('CompanyName', 'SecuritiesCompanyName', '公司名稱', '公司簡稱', 'Name', '名稱'))
+    for ds in ('t187ap05_L', 't187ap05_O'):
+        scan(f'https://openapi.twse.com.tw/v1/opendata/{ds}', ('公司代號', 'Code'), ('公司名稱', '公司簡稱', 'Name'))
+    if m:
+        _TW_NAMES['date'] = today; _TW_NAMES['map'] = m
+    return m
+
+
+# ── 自適應 AI 模型 (v3.9) ──────────────────────────────────────────
+# 不寫死模型字串:查 Anthropic /v1/models 自動挑「最新 Sonnet」(API 回傳新→舊),每日快取。
+# Anthropic 出新模型自動跟上,不必每次手改;查不到/失敗退現行有效值。
+_MODEL_CACHE = {'date': '', 'id': 'claude-sonnet-4-6'}
+def _resolve_model(api_key):
+    from datetime import date as _d
+    today = _d.today().strftime('%Y%m%d')
+    if _MODEL_CACHE['date'] == today and _MODEL_CACHE['id']:
+        return _MODEL_CACHE['id']
+    model = 'claude-sonnet-4-6'          # fallback(現行有效)
+    if api_key:
+        try:
+            req = urllib.request.Request('https://api.anthropic.com/v1/models?limit=100',
+                                         headers={'x-api-key': api_key, 'anthropic-version': '2023-06-01'})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read())
+            ms = [m for m in (data.get('data') or []) if m.get('id')]
+            pick = (next((m for m in ms if 'sonnet' in m['id'].lower()), None)
+                    or next((m for m in ms if 'opus' in m['id'].lower()), None)
+                    or (ms[0] if ms else None))
+            if pick:
+                model = pick['id']
+        except Exception:
+            pass
+    _MODEL_CACHE['date'] = today
+    _MODEL_CACHE['id'] = model
+    return model
+
+
+def _safe_sym(s):
+    # 安全(v3.9 review):股票代號白名單,防止把惡意字元(/ @ : ? #)串進 Yahoo URL(SSRF)。
+    # 允許:英數 + 指數/期貨/市場常見符號 . ^ = - % _(如 ^TWII、GC=F、2330.TW、%5ETWOII)。
+    if not s or len(s) > 20:
+        return False
+    return all(c.isalnum() or c in '.^=-%_' for c in s)
+
+
+# ── 伺服器端 AI 金鑰(v3.9 review)──────────────────────────────────
+# 把 Anthropic 金鑰存在 server(本機檔,靜態服務已封鎖)而非瀏覽器 localStorage,
+# 並由 server 串流代理所有 AI 呼叫 → 金鑰不進瀏覽器,免於 XSS/惡意擴充竊取。
+_AI_KEY_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'ai_key.txt')
+_ai_key_lock = threading.Lock()
+def _load_ai_key():
+    try:
+        with open(_AI_KEY_FILE, encoding='utf-8') as f:
+            return f.read().strip()
+    except Exception:
+        return ''
+def _save_ai_key(k):
+    with _ai_key_lock:
+        with open(_AI_KEY_FILE, 'w', encoding='utf-8') as f:
+            f.write((k or '').strip())
+
+# ── 個股期貨(含夜盤) 整批載入 (v3.9)：CID='' 一次抓全部，避免每檔打 MIS 被限流(520) ──
+#   日盤 MarketType=0(期貨 -F/現貨 -S)、夜盤 MarketType=1(期貨 -M)。快取 45 秒。
+_MIS_FUT = {'ts': 0, 'map': {}}
+def _mis_load_futures():
+    now = time.time()
+    if _MIS_FUT['map'] and (now - _MIS_FUT['ts'] < 45):
+        return _MIS_FUT['map']
+    def all_rows(mt):
+        payload = json.dumps({'MarketType': mt, 'SymbolType': 'F', 'KindID': '4', 'CID': '',
+                              'ExpireMonth': '', 'RowSize': '全部', 'PageNo': '', 'SortColumn': '', 'AscDesc': 'A'}).encode('utf-8')
+        last = None
+        for _ in range(3):
+            try:
+                req = urllib.request.Request('https://mis.taifex.com.tw/futures/api/getQuoteList', data=payload, method='POST',
+                    headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0',
+                             'Origin': 'https://mis.taifex.com.tw', 'Referer': 'https://mis.taifex.com.tw/futures/'})
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    return (json.loads(resp.read()).get('RtData') or {}).get('QuoteList') or []
+            except Exception as e:
+                last = e; time.sleep(1.2)
+        print(f'[stockfut] MIS load mt={mt} failed: {last}')
+        return []
+    day = all_rows('0'); night = all_rows('1')
+    m = {}
+    def sid(r): return str(r.get('SymbolID') or '')
+    def ens(c): return m.setdefault(c, {})
+    for r in day:
+        s = sid(r)
+        if s.endswith('-S'): ens(s[:-2])['daySpot'] = r          # 現貨 = CID-S
+        elif s.endswith('-F'):
+            c = s.split('-')[0][:-2]                              # 期貨 = CID+月年+-F → 去尾2碼=CID
+            d = ens(c)
+            if 'dayFut' not in d: d['dayFut'] = r                 # 第一筆=近月
+    for r in night:
+        s = sid(r)
+        if s.endswith('-M'):
+            c = s.split('-')[0][:-2]
+            d = ens(c)
+            if 'nightFut' not in d: d['nightFut'] = r
+    if m:
+        _MIS_FUT['ts'] = now; _MIS_FUT['map'] = m
+    return m
+
 # ── 產業別對照（code → 產業別），用月營收資料集(含上市櫃)的「產業別」欄 ──
 _TW_SECTORS = {'date': None, 'map': {}}
 # 科技電子整合群（macro）：涵蓋常見電子相關產業別
@@ -631,6 +774,7 @@ def fetch_one(sym, rng=None, interval=None, nocache=False):
         candidates = [sym, sym[:-4]+'.TW']
     else:
         candidates = [sym]
+    _t0 = time.time()
     for candidate in candidates:
         for base in ('query1', 'query2'):
             url = f'https://{base}.finance.yahoo.com/v8/finance/chart/{candidate}?interval={interval}&range={rng}'
@@ -642,13 +786,239 @@ def fetch_one(sym, rng=None, interval=None, nocache=False):
                 if parsed.get('chart', {}).get('result'):
                     if not nocache:
                         _cache.set(cache_key, data)
+                    _src_record('yahoo', True, int((time.time() - _t0) * 1000))
                     return sym, data, False
             except urllib.error.HTTPError as e:
                 if e.code == 404: break
                 continue
             except Exception:
                 continue
+    _src_record('yahoo', False, int((time.time() - _t0) * 1000), 'all candidates failed')
     return sym, None, False
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# TrustedDataLayer (v3.9 Phase-0) — 對外資料源的 健檢 / 節流 / 熔斷 / 值驗證
+# ----------------------------------------------------------------------------
+# 正確控制流(非 GPT-OSS 流程圖的線性穿透):
+#   呼叫者 → (各 handler 既有 _cache 先查) → _src_fetch_json[節流→熔斷檢查→抓取
+#            →健檢登錄→指數退避重試] → _anom_quote 值合理性驗證 → 回傳。
+#   SourceHealthChecker 是旁路:健康狀態存 _SRC_HEALTH,/health 端點 + 前端燈讀取。
+# 設計原則:單機個人工具,不引入 Redis/CircuitBreaker 套件,純標準庫輕量實作。
+# ════════════════════════════════════════════════════════════════════════════
+_SRC_LOCK = threading.Lock()
+_SRC_HEALTH = {}        # name -> dict(計數/時間/失敗連續數/熔斷到期)
+_SRC_LAST_CALL = {}     # name -> 上次(預約)呼叫時間, 供節流
+# 每源最小請求間隔(秒):TAIFEX MIS 易 520 故拉長;TWSE MIS 次之;yahoo 不節流(0)
+_SRC_MIN_GAP = {'taifex-mis': 1.0, 'twse-mis': 0.3}
+_SRC_CB_THRESHOLD = 4   # 連續失敗達此數 → 開熔斷
+_SRC_CB_COOLDOWN = 30.0 # 熔斷冷卻秒數(期間 fail-fast,不打外部源)
+
+
+class SourceBreakerOpen(Exception):
+    """熔斷開啟期間擲出,呼叫端應走備援或回快取/None。"""
+    pass
+
+
+def _src_record(name, ok, ms, err=None):
+    with _SRC_LOCK:
+        v = _SRC_HEALTH.get(name)
+        if v is None:
+            v = {'ok_ct': 0, 'err_ct': 0, 'last_ok': 0, 'last_err': 0,
+                 'last_ms': None, 'fail_streak': 0, 'last_error': None, 'open_until': 0}
+            _SRC_HEALTH[name] = v
+        v['last_ms'] = ms
+        if ok:
+            v['ok_ct'] += 1; v['last_ok'] = time.time()
+            v['fail_streak'] = 0; v['open_until'] = 0
+        else:
+            v['err_ct'] += 1; v['last_err'] = time.time()
+            v['fail_streak'] += 1
+            v['last_error'] = (str(err)[:160] if err else 'error')
+            if v['fail_streak'] >= _SRC_CB_THRESHOLD:
+                v['open_until'] = time.time() + _SRC_CB_COOLDOWN
+
+
+def _src_breaker_open(name):
+    with _SRC_LOCK:
+        v = _SRC_HEALTH.get(name)
+        return bool(v and time.time() < v['open_until'])
+
+
+def _src_throttle(name):
+    """per-source 最小間隔節流(粗略佔位,避免並發過衝外部源)。"""
+    gap = _SRC_MIN_GAP.get(name)
+    if not gap:
+        return
+    with _SRC_LOCK:
+        last = _SRC_LAST_CALL.get(name, 0)
+        wait = gap - (time.time() - last)
+        _SRC_LAST_CALL[name] = max(time.time(), last + gap)
+    if wait > 0:
+        time.sleep(min(wait, 3.0))
+
+
+def _src_fetch_json(name, url, headers=None, timeout=10, retries=1, data=None):
+    """經 健檢/節流/熔斷/退避 的對外 JSON 抓取。
+       熔斷開啟 → 擲 SourceBreakerOpen;最終失敗 → 擲原始例外。data 給定則為 POST。"""
+    if _src_breaker_open(name):
+        raise SourceBreakerOpen(name)
+    last_exc = None
+    for attempt in range(retries + 1):
+        _src_throttle(name)
+        t0 = time.time()
+        try:
+            req = urllib.request.Request(url, headers=headers or {}, data=data)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read()
+            parsed = json.loads(raw)
+            _src_record(name, True, int((time.time() - t0) * 1000))
+            return parsed
+        except Exception as e:
+            last_exc = e
+            _src_record(name, False, int((time.time() - t0) * 1000), e)
+            if attempt < retries:
+                time.sleep(min(0.5 * (2 ** attempt), 4.0))   # 指數退避
+    raise last_exc if last_exc else RuntimeError(name + ' fetch failed')
+
+
+def _src_snapshot():
+    """供 /health:回各源摘要(成功率/最後成功幾秒前/熔斷狀態)。"""
+    out = {}
+    now = time.time()
+    with _SRC_LOCK:
+        for k, v in _SRC_HEALTH.items():
+            total = v['ok_ct'] + v['err_ct']
+            out[k] = {
+                'healthy': v['fail_streak'] < _SRC_CB_THRESHOLD and not (now < v['open_until']),
+                'okRate': round(v['ok_ct'] / total * 100, 1) if total else None,
+                'calls': total,
+                'lastOkAgo': round(now - v['last_ok'], 1) if v['last_ok'] else None,
+                'lastErrAgo': round(now - v['last_err'], 1) if v['last_err'] else None,
+                'lastMs': v['last_ms'],
+                'failStreak': v['fail_streak'],
+                'lastError': v['last_error'],
+                'breakerOpen': now < v['open_until'],
+            }
+    return out
+
+
+def _yf_prevclose(meta):
+    """單一可信昨收口徑 — 全站共用,避免各端點優先序不一造成漲幅亂跳。
+       優先 regularMarketPreviousClose(真昨收) > previousClose > chartPreviousClose。
+       註:chartPreviousClose 只有 range=1d 時才等於昨收,較長區間會是區間起點,故擺最後。"""
+    if not meta:
+        return None
+    return (meta.get('regularMarketPreviousClose')
+            or meta.get('previousClose')
+            or meta.get('chartPreviousClose'))
+
+
+def _anom_quote(price, prev, chg, kind='stock'):
+    """報價值合理性驗證 — 攔 ^TWOII 419/+56% 這類假數字。
+       回 (suspect:bool, reason:str|None)。kind='index' 對 price/prev 比值較寬鬆。"""
+    if price is None or price <= 0:
+        return True, 'price<=0/None'
+    if prev is not None and prev > 0:
+        ratio = price / prev
+        if ratio > 1.5 or ratio < 0.5:
+            return True, f'price/prev={ratio:.2f} 離譜'
+    lim = 12.0 if kind == 'index' else 11.0   # 台股個股漲跌停±10%;指數日內極少>12%
+    if chg is not None and abs(chg) > lim:
+        return True, f'changePct={chg:.1f}% 超出 ±{lim:g}%'
+    return False, None
+
+
+# Yahoo 不可信標的 → 改走 TWSE MIS。 sym -> (ex_ch, code, kind)
+_BAD_YF = {'^TWOII': ('otc_o00.tw', 'o00', 'index')}   # 櫃買:Yahoo 三端點三值,只信 MIS
+
+
+def _twse_mis_index(ex_ch):
+    """ex_ch('tse_t00.tw' 或 'tse_t00.tw|otc_o00.tw') → {code:{price,prevClose,changePct,name}}。
+       走共用 _src_fetch_json('twse-mis'),享節流/熔斷/健檢。"""
+    ms = int(time.time() * 1000)
+    url = ('https://mis.twse.com.tw/stock/api/getStockInfo.jsp'
+           f'?ex_ch={ex_ch}&json=1&delay=0&_={ms}')
+    data = _src_fetch_json('twse-mis', url, headers={
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Accept': 'application/json', 'Accept-Language': 'zh-TW,zh;q=0.9',
+        'Referer': 'https://mis.twse.com.tw/stock/index.jsp',
+    }, timeout=10)
+
+    def fnum(v):
+        if v in (None, '', '-'):
+            return None
+        try:
+            return float(str(v).replace(',', ''))
+        except Exception:
+            return None
+    out = {}
+    for it in (data.get('msgArray') or []):
+        ch = it.get('ch') or ''
+        code = 't00' if 't00' in ch else ('o00' if 'o00' in ch else ch)
+        price = fnum(it.get('z'))
+        if price is None:
+            price = fnum(it.get('o'))      # 早盤尚無成交退開盤
+        prev = fnum(it.get('y'))
+        chg = ((price - prev) / prev * 100) if (price is not None and prev) else None
+        out[code] = {'price': price, 'prevClose': prev, 'changePct': chg, 'name': it.get('n')}
+    return out
+
+
+def _trusted_quote_override(sym):
+    """sym 若為 Yahoo 不可信標的 → 回 {price,prevClose,changePct,source} 否則 None。
+       MIS 抓取/熔斷失敗時回 None,讓呼叫端走原 Yahoo 流程(不會比現況更糟)。"""
+    spec = _BAD_YF.get(sym)
+    if not spec:
+        return None
+    ex_ch, code, _kind = spec
+    try:
+        idx = _twse_mis_index(ex_ch).get(code) or {}
+        if idx.get('price') is None:
+            return None
+        return {'price': idx['price'], 'prevClose': idx['prevClose'],
+                'changePct': idx['changePct'], 'source': 'twse-mis'}
+    except Exception:
+        return None
+
+
+def _run_selftests():
+    """資料完整性核心函式單元測試(瀏覽器 /selftest 觸發,真函式真執行)。
+       涵蓋:昨收口徑優先序、報價異常驗證、源熔斷狀態機。回 {passed,total,allPass,cases}。
+       這幾處正是過去反覆踩 bug 的地方(漲幅亂跳/櫃買/520),有迴歸測試後改動不會悄悄壞掉。"""
+    cases = []
+
+    def ck(name, got, exp):
+        cases.append({'name': name, 'pass': got == exp, 'got': got, 'exp': exp})
+
+    # _yf_prevclose 昨收口徑優先序
+    ck('prevclose:rmpc優先', _yf_prevclose({'regularMarketPreviousClose': 100, 'previousClose': 99, 'chartPreviousClose': 50}), 100)
+    ck('prevclose:退previousClose', _yf_prevclose({'previousClose': 99, 'chartPreviousClose': 50}), 99)
+    ck('prevclose:退chartPrev', _yf_prevclose({'chartPreviousClose': 50}), 50)
+    ck('prevclose:空meta回None', _yf_prevclose({}), None)
+    ck('prevclose:None回None', _yf_prevclose(None), None)
+
+    # _anom_quote 報價異常驗證
+    ck('anom:正常指數不suspect', _anom_quote(430, 429, 0.2, 'index')[0], False)
+    ck('anom:櫃買419/267離譜', _anom_quote(419, 267, 56.9, 'index')[0], True)
+    ck('anom:櫃買105過低', _anom_quote(105, 267, -60.7, 'index')[0], True)
+    ck('anom:price<=0', _anom_quote(0, 100, 0, 'stock')[0], True)
+    ck('anom:個股+10%正常', _anom_quote(110, 100, 10, 'stock')[0], False)
+    ck('anom:個股+30%超漲停', _anom_quote(130, 100, 30, 'stock')[0], True)
+
+    # _src 熔斷狀態機(用 __test__ 源,測完清掉不污染真源)
+    try:
+        _SRC_HEALTH.pop('__test__', None)
+        for _ in range(_SRC_CB_THRESHOLD):
+            _src_record('__test__', False, 5, 'x')
+        ck('breaker:連敗後開啟', _src_breaker_open('__test__'), True)
+        _src_record('__test__', True, 5)
+        ck('breaker:成功後關閉', _src_breaker_open('__test__'), False)
+    finally:
+        _SRC_HEALTH.pop('__test__', None)
+
+    passed = sum(1 for c in cases if c['pass'])
+    return {'passed': passed, 'total': len(cases), 'allPass': passed == len(cases), 'cases': cases}
 
 # ── ETF Delta helpers ──────────────────────────────────────────
 def find_etf_dir():
@@ -868,6 +1238,7 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_batch()
         elif p.startswith('/yf/'):
             sym = p[4:].split('?')[0]
+            if not _safe_sym(sym): self._err('bad symbol', 400); return
             self._handle_single(sym)
         elif p.startswith('/etf-delta'):
             self._handle_etf_delta()
@@ -875,8 +1246,11 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_etf_catalog_get()
         elif p == '/etf-tracker/status' or p.startswith('/etf-tracker/status?'):
             self._handle_tracker_status()
+        elif p == '/quote-batch' or p.startswith('/quote-batch?'):
+            self._handle_quote_batch()
         elif p.startswith('/quote/'):
             sym = p[7:].split('?')[0]
+            if not _safe_sym(sym): self._err('bad symbol', 400); return
             self._handle_quote(sym)
         elif p.startswith('/chip/'):
             sym = p[6:].split('?')[0]
@@ -900,6 +1274,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_sectors()
         elif p == '/screener' or p.startswith('/screener?'):
             self._handle_screener_get()
+        elif p == '/focus' or p.startswith('/focus?'):
+            self._handle_focus()
         elif p == '/alert/status' or p.startswith('/alert/status?'):
             self._alert_status()
         elif p == '/alert/rules' or p.startswith('/alert/rules?'):
@@ -910,8 +1286,22 @@ class Handler(SimpleHTTPRequestHandler):
             self._watch_status()
         elif p == '/txf' or p.startswith('/txf?'):
             self._handle_txf()
+        elif p == '/stockfut' or p.startswith('/stockfut?'):
+            self._handle_stockfut()
         elif p == '/twindex' or p.startswith('/twindex?'):
             self._handle_twindex()
+        elif p == '/search' or p.startswith('/search?'):
+            self._handle_search()
+        elif p == '/ai-key/status':
+            self._handle_ai_key_status()
+        elif p == '/ai-model' or p.startswith('/ai-model?'):
+            self._handle_ai_model()
+        elif p == '/twquote-batch' or p.startswith('/twquote-batch?'):
+            self._handle_twquote_batch()
+        elif p == '/twquote' or p.startswith('/twquote?'):
+            self._handle_twquote()
+        elif p == '/selftest' or p.startswith('/selftest?'):
+            self._ok(json.dumps(_run_selftests(), ensure_ascii=False).encode())
         elif p.startswith('/draw/'):
             self._handle_draw_get(p[len('/draw/'):].split('?')[0])
         elif p == '/macro' or p.startswith('/macro?'):
@@ -929,13 +1319,38 @@ class Handler(SimpleHTTPRequestHandler):
                 'cache_max': LRU_MAX,
                 'etf_delta_path': d or 'not found',
                 'etf_history_files': len(files),
-            }).encode())
+                'sources': _src_snapshot(),   # v3.9 Phase-0: 各對外源健檢
+            }, ensure_ascii=False).encode())
         else:
+            # 安全(v3.9 review):SimpleHTTPRequestHandler 預設會把工作目錄所有檔當靜態檔服務。
+            # 阻擋敏感檔被下載:金鑰設定(alert_config 含 telegram token/gmail 密碼)、原始碼(.py)、
+            # 批次檔(.bat)、使用者資料(chip/etf 歷史、backups)、log。本機工具只需服務 UI 資產。
+            _pl = p.split('?')[0].lower()
+            _DENY_EXT = ('.py', '.pyc', '.bat', '.log', '.env')
+            _DENY_SUB = ('alert_config', 'alert_rules', 'ai_key', '/chip_history', '/etf_history',
+                         '/backups', '/__pycache__', '/.git', '/.claude')
+            if '..' in _pl or _pl.endswith(_DENY_EXT) or any(s in _pl for s in _DENY_SUB):
+                self._err('forbidden', 403); return
             super().do_GET()
+
+    def _origin_ok(self):
+        # CSRF 防護(v3.9 review):瀏覽器跨來源寫入會帶 Origin/Referer;非本站一律拒。
+        # 同源 fetch 或非瀏覽器本機呼叫可能不帶 → 放行(本機單人工具)。
+        o = self.headers.get('Origin') or self.headers.get('Referer') or ''
+        if not o:
+            return True
+        return (o.startswith('http://localhost:%d' % PORT)
+                or o.startswith('http://127.0.0.1:%d' % PORT))
 
     def do_POST(self):
         p = self.path.split('?')[0]
-        if p == '/etf-catalog':
+        if not self._origin_ok():
+            self._err('forbidden (cross-origin)', 403); return
+        if p == '/ai-key':
+            self._handle_ai_key_set()
+        elif p == '/ai-proxy':
+            self._handle_ai_proxy()
+        elif p == '/etf-catalog':
             self._handle_etf_catalog_post()
         elif p == '/etf-tracker/run':
             self._handle_tracker_run()
@@ -957,6 +1372,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._alert_test()
         elif p == '/etf-report/email':
             self._etf_report_email()
+        elif p == '/report-email':
+            self._handle_report_email()
         elif p == '/watch/rules':
             self._watch_post_rules()
         elif p == '/watch/config':
@@ -1027,6 +1444,229 @@ class Handler(SimpleHTTPRequestHandler):
                 except Exception: pass
         self._ok(json.dumps(results).encode())
 
+    def _handle_twquote(self):
+        """台股個股『即時』報價 (v3.9) — TWSE MIS getStockInfo,真即時。
+           解 Yahoo 免費台股分K 延遲~20min 的問題:盤中即時看盤用此源更新最新K棒。
+           ?code=2330。回 {ok,price,open,high,low,prevClose,volume,name,time}。"""
+        qs = parse_qs(urlparse(self.path).query)
+        code = (qs.get('code', [''])[0] or '').strip().upper().replace('.TWO', '').replace('.TW', '')
+        if not code:
+            self._ok(b'{"ok":false}'); return
+
+        def fnum(v):
+            if v in (None, '', '-'):
+                return None
+            try:
+                return float(str(v).replace(',', ''))
+            except Exception:
+                return None
+        out = {'ok': False, 'code': code}
+        for ex in ('tse_%s.tw' % code, 'otc_%s.tw' % code):
+            try:
+                ms = int(time.time() * 1000)
+                url = ('https://mis.twse.com.tw/stock/api/getStockInfo.jsp'
+                       '?ex_ch=%s&json=1&delay=0&_=%d' % (ex, ms))
+                data = _src_fetch_json('twse-mis', url, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                    'Accept': 'application/json', 'Accept-Language': 'zh-TW,zh;q=0.9',
+                    'Referer': 'https://mis.twse.com.tw/stock/index.jsp',
+                }, timeout=8)
+                arr = data.get('msgArray') or []
+                if not arr:
+                    continue
+                it = arr[0]
+                # Data Integrity:只用最新『成交』價 z。z='-'(無撮合/收盤後)→ 不推估(試下一個 ex,
+                #   都沒有就回 ok:false 讓前端保留上次真實值)。絕不用開盤價/委買賣價假裝成交價(會灌錯值)。
+                price = fnum(it.get('z'))
+                if price is None:
+                    continue
+                out = {'ok': True, 'code': code, 'price': price,
+                       'open': fnum(it.get('o')), 'high': fnum(it.get('h')), 'low': fnum(it.get('l')),
+                       'prevClose': fnum(it.get('y')), 'volume': fnum(it.get('v')),
+                       'name': it.get('n'), 'time': it.get('t'), 'source': 'twse-mis'}
+                break
+            except SourceBreakerOpen:
+                out['error'] = 'twse-mis breaker open'; break
+            except Exception as e:
+                out['error'] = str(e)
+        self._ok(json.dumps(out, ensure_ascii=False).encode())
+
+    def _handle_twquote_batch(self):
+        """台股批次『即時』報價 (v3.9) — TWSE MIS 一次查多檔(自選股即時化用)。
+           ?codes=2330,00631L,...。回 {code:{price,prevClose,changePct}}。
+           每檔同送 tse_ 與 otc_ 兩 ex_ch(MIS 只回存在的);分塊避免過長。"""
+        qs = parse_qs(urlparse(self.path).query)
+        codes = [c.strip().upper().replace('.TWO', '').replace('.TW', '')
+                 for c in (qs.get('codes', [''])[0]).split(',') if c.strip()]
+        if not codes:
+            self._ok(b'{}'); return
+
+        def fnum(v):
+            if v in (None, '', '-'):
+                return None
+            try:
+                return float(str(v).replace(',', ''))
+            except Exception:
+                return None
+        exs = []
+        for c in codes:
+            exs.append('tse_%s.tw' % c)
+            exs.append('otc_%s.tw' % c)
+        out = {}
+        for i in range(0, len(exs), 50):                 # MIS 一次最多約 50~100 檔,保守分塊
+            chunk = '|'.join(exs[i:i + 50])
+            try:
+                ms = int(time.time() * 1000)
+                url = ('https://mis.twse.com.tw/stock/api/getStockInfo.jsp'
+                       '?ex_ch=%s&json=1&delay=0&_=%d' % (chunk, ms))
+                data = _src_fetch_json('twse-mis', url, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                    'Accept': 'application/json', 'Accept-Language': 'zh-TW,zh;q=0.9',
+                    'Referer': 'https://mis.twse.com.tw/stock/index.jsp',
+                }, timeout=8)
+                for it in (data.get('msgArray') or []):
+                    code = (it.get('c') or '').strip()
+                    price = fnum(it.get('z'))        # Data Integrity:只用最新成交價;z='-' 不推估,略過(前端保留上次值)
+                    prev = fnum(it.get('y'))
+                    if code and price is not None:
+                        chg = ((price - prev) / prev * 100) if prev else None
+                        out[code] = {'price': price, 'prevClose': prev, 'changePct': chg}
+            except SourceBreakerOpen:
+                break
+            except Exception:
+                continue
+        self._ok(json.dumps(out, ensure_ascii=False).encode())
+
+    def _handle_ai_key_status(self):
+        self._ok(json.dumps({'set': bool(_load_ai_key())}).encode())
+
+    def _handle_ai_key_set(self):
+        try:
+            n = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(n) or b'{}')
+        except Exception as e:
+            self._err('bad body: ' + str(e), 400); return
+        if body.get('clear'):
+            _save_ai_key(''); self._ok(b'{"ok":true,"cleared":true}'); return
+        k = (body.get('key') or '').strip()
+        if not k.startswith('sk-'):
+            self._err('invalid key (need sk-...)', 400); return
+        _save_ai_key(k)
+        self._ok(b'{"ok":true}')
+
+    def _handle_ai_model(self):
+        self._ok(json.dumps({'model': _resolve_model(_load_ai_key())}).encode())
+
+    def _handle_ai_proxy(self):
+        # 用 server 端儲存的金鑰呼叫 Anthropic,回應原樣串回瀏覽器(金鑰不進瀏覽器)。支援 SSE 串流。
+        key = _load_ai_key()
+        if not key:
+            self._err('AI key not set on server', 400); return
+        try:
+            n = int(self.headers.get('Content-Length', 0))
+            raw = self.rfile.read(n) or b'{}'
+        except Exception as e:
+            self._err('bad body: ' + str(e), 400); return
+        try:
+            up = urllib.request.Request('https://api.anthropic.com/v1/messages', data=raw,
+                                        headers={'Content-Type': 'application/json', 'x-api-key': key,
+                                                 'anthropic-version': '2023-06-01'}, method='POST')
+            resp = urllib.request.urlopen(up, timeout=180)
+        except urllib.error.HTTPError as e:
+            self._err('Anthropic %d: %s' % (e.code, e.read().decode('utf-8', 'replace')[:300]), 502); return
+        except Exception as e:
+            self._err('ai-proxy failed: ' + str(e), 502); return
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', resp.headers.get('Content-Type', 'text/event-stream'))
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            while True:
+                chunk = resp.read(2048)
+                if not chunk:
+                    break
+                self.wfile.write(chunk); self.wfile.flush()
+        except Exception:
+            pass
+
+    def _handle_search(self):
+        """台股名稱/代號搜尋 (v3.9) — 像 Yahoo 股市打公司名找股票。
+           q 可為中文名(子字串)或代號(前綴)。回 {results:[{t,name,m}]}。
+           資料源:_get_tw_names()(TWSE+櫃買+opendata,每日快取)。"""
+        qs = parse_qs(urlparse(self.path).query)
+        q = (qs.get('q', [''])[0] or '').strip()
+        if not q:
+            self._ok(b'{"results":[]}'); return
+        try:
+            names = _get_tw_names()           # {code: name}
+        except Exception:
+            names = {}
+        ql = q.lower()
+        scored = []
+        for code, name in names.items():
+            if code == q:
+                rank = 0                      # 代號完全相符
+            elif code.startswith(q):
+                rank = 1                      # 代號前綴
+            elif name.startswith(q):
+                rank = 2                      # 名稱開頭
+            elif q in name:
+                rank = 3                      # 名稱含
+            elif ql in code.lower():
+                rank = 4
+            else:
+                continue
+            scored.append((rank, len(name), code, name))
+        scored.sort(key=lambda x: (x[0], x[1], x[2]))
+        out = [{'t': c, 'name': n, 'm': 'TW'} for _, _, c, n in scored[:25]]
+        self._ok(json.dumps({'results': out}, ensure_ascii=False).encode())
+
+    def _handle_quote_batch(self):
+        """批次輕量報價 (v3.9) — 給自選股列用，取代 wl_live 的 5d batch。
+           每檔用 range=1d(meta.chartPreviousClose=真昨收，避開 5d 日線 null 缺口
+           導致抓到更舊一根當昨收的亂跳問題)。.TW 抓不到回退 .TWO。並發。
+           回 {sym:{price, prevClose, changePct}}。"""
+        qs = parse_qs(urlparse(self.path).query)
+        syms = [s.strip() for s in qs.get('syms', [''])[0].split(',') if s.strip()]
+        if not syms:
+            self._ok(b'{}'); return
+        def one(sym):
+            ov = _trusted_quote_override(sym)   # ^TWOII 等 → 改走 TWSE MIS
+            if ov:
+                return sym, ov
+            cands = [sym]
+            if sym.endswith('.TW') and not sym.endswith('.TWO'):
+                cands.append(sym[:-3] + '.TWO')
+            for cand in cands:
+                try:
+                    _, data, _ = fetch_one(cand, '1d', '1d', True)
+                    if not data:
+                        continue
+                    res = (json.loads(data).get('chart') or {}).get('result') or []
+                    if not res:
+                        continue
+                    m = res[0].get('meta') or {}
+                    cur = m.get('regularMarketPrice')
+                    if cur is None:
+                        cls = ((res[0].get('indicators') or {}).get('quote') or [{}])[0].get('close') or []
+                        cur = next((c for c in reversed(cls) if c is not None), None)
+                    prev = _yf_prevclose(m)
+                    if cur is None or not prev:
+                        continue
+                    return sym, {'price': cur, 'prevClose': prev, 'changePct': (cur - prev) / prev * 100}
+                except Exception:
+                    continue
+            return sym, None
+        out = {}
+        futs = {_pool.submit(one, s): s for s in syms}
+        for f in as_completed(futs):
+            try:
+                k, v = f.result()
+                if v: out[k] = v
+            except Exception:
+                pass
+        self._ok(json.dumps(out, ensure_ascii=False).encode())
+
     def _handle_quote(self, sym):
         """Lightweight near-real-time quote.
         Yahoo's v7 /finance/quote (which had bid/ask) is gated behind crumb cookie auth
@@ -1034,6 +1674,17 @@ class Handler(SimpleHTTPRequestHandler):
         range=1d&interval=1m and extract price/high/low/vol from meta + last bar.
         bid/ask are not available free; would need broker API.
         """
+        from urllib.parse import unquote as _unq
+        sym = _unq(sym)                     # 路徑未自動解碼:%5ETWOII → ^TWOII,否則 _BAD_YF 比對不到
+        ov = _trusted_quote_override(sym)   # ^TWOII 等 Yahoo 壞標的 → TWSE MIS
+        if ov:
+            self._ok(json.dumps({
+                'symbol': sym, 'price': ov['price'], 'prevClose': ov['prevClose'],
+                'change': (ov['price'] - ov['prevClose']) if ov['prevClose'] else None,
+                'changePct': ov['changePct'], 'source': ov['source'],
+                'serverTime': int(time.time()), 'suspect': False,
+            }, ensure_ascii=False).encode('utf-8'))
+            return
         candidates = []
         if sym.endswith('.TW') and not sym.endswith('.TWO'):
             candidates = [sym, sym[:-3]+'.TWO']
@@ -1074,7 +1725,7 @@ class Handler(SimpleHTTPRequestHandler):
                         day_high = max([h for h in highs if h is not None] or [None])
                     if day_low is None and lows:
                         day_low = min([l for l in lows if l is not None] or [None])
-                    prev_close = meta.get('chartPreviousClose') or meta.get('previousClose')
+                    prev_close = _yf_prevclose(meta)
                     change = (last_close - prev_close) if (last_close is not None and prev_close) else None
                     change_pct = (change / prev_close * 100) if (change is not None and prev_close) else None
                     # cumulative volume from meta or sum of intraday
@@ -1106,6 +1757,11 @@ class Handler(SimpleHTTPRequestHandler):
                         'lastBarTime':  ts[last_idx] if last_idx is not None else None,
                         'source':       'yahoo-v8-chart',
                     }
+                    _susp, _why = _anom_quote(last_close, prev_close, change_pct,
+                                              'index' if sym.startswith('^') else 'stock')
+                    out['suspect'] = _susp
+                    if _susp:
+                        out['suspectReason'] = _why
                     self._ok(json.dumps(out, ensure_ascii=False).encode('utf-8'))
                     return
                 except urllib.error.HTTPError as e:
@@ -2225,6 +2881,95 @@ class Handler(SimpleHTTPRequestHandler):
                'sectors': _sec}
         self._ok(json.dumps(out, ensure_ascii=False).encode())
 
+    def _focus_score(self, i):
+        """多訊號組合 → (買分, 買訊號[], 空分, 空訊號[])。焦點掃描用:綜合趨勢/動能/量價/RSI。"""
+        c = i.get('close'); chg = i.get('changePct') or 0
+        s5, s20, s60 = i.get('sma5'), i.get('sma20'), i.get('sma60')
+        s20p, s60p = i.get('sma20_prev'), i.get('sma60_prev')
+        rsi = i.get('rsi14'); vr = i.get('volRatio') or 0
+        h20, l20 = i.get('high20'), i.get('low20')
+        buy, short, bs, ss = [], [], 0.0, 0.0
+        if s5 and s20 and s60 and s5 > s20 > s60: bs += 2; buy.append('多頭排列')
+        if s60 and c > s60: bs += 1; buy.append('站上季線')
+        if s20 and s60 and s20p and s60p and s20p <= s60p and s20 > s60: bs += 2; buy.append('20/60金叉')
+        if h20 and c > h20 and vr > 1.3: bs += 2; buy.append('帶量突破月高')
+        if vr > 1.5 and chg > 0: bs += 1.5; buy.append('帶量上漲')
+        if rsi and 50 <= rsi <= 70: bs += 1; buy.append('RSI轉強')
+        if rsi and rsi < 35 and s60 and c > s60: bs += 1; buy.append('超賣反彈')
+        if s60 and s60p and abs(c - s60) / s60 < 0.025 and s60 > s60p: bs += 1; buy.append('回測季線撐')
+        if s5 and s20 and s60 and s5 < s20 < s60: ss += 2; short.append('空頭排列')
+        if s60 and c < s60: ss += 1; short.append('跌破季線')
+        if s20 and s60 and s20p and s60p and s20p >= s60p and s20 < s60: ss += 2; short.append('20/60死叉')
+        if l20 and c < l20 and vr > 1.3: ss += 2; short.append('帶量破月低')
+        if vr > 1.5 and chg < 0: ss += 1.5; short.append('帶量下跌')
+        if rsi and rsi > 72 and chg < 0: ss += 1.5; short.append('過熱回落')
+        return bs, buy, ss, short
+
+    def _handle_focus(self):
+        """GET /focus — 自動焦點掃描:全台股跑多訊號組合,回最強做多/做空焦點。
+           回 {ok, scanned, buy:[{sym,name,close,changePct,rsi14,score,signals}], short:[...]}。"""
+        try:
+            _uni = _get_tw_universe()
+        except Exception:
+            _uni = []
+        qs = parse_qs(urlparse(self.path).query)
+        sector = (qs.get('sector', [''])[0] or '').strip()
+        syms = list(set(_uni or self._TW_TOP200))
+        if sector and sector not in ('全部', 'all', ''):
+            try:
+                smap = _get_tw_sectors()
+                want = _TECH_SECTORS if sector == '__TECH__' else {sector}
+                syms = [s for s in syms if smap.get(str(s).replace('.TW', '').replace('.TWO', '')) in want]
+            except Exception:
+                pass
+        buy, short, scanned = [], [], 0
+        futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith('.TW') else s): s for s in syms}
+        for fut in as_completed(futures):
+            sym, data, _ = fut.result()
+            if not data:
+                continue
+            try:
+                res = (json.loads(data).get('chart', {}).get('result', [{}])[0])
+                ts = res.get('timestamp') or []
+                q = (res.get('indicators', {}).get('quote') or [{}])[0]
+                meta = res.get('meta', {})
+                if len(ts) < 70:
+                    continue
+                rc = q.get('close') or []; rh = q.get('high') or []; rl = q.get('low') or []; rv = q.get('volume') or []
+                closes, highs, lows, vols, tv = [], [], [], [], []
+                for k in range(min(len(ts), len(rc))):
+                    cc = rc[k]
+                    if cc is None:
+                        continue
+                    closes.append(cc)
+                    highs.append(rh[k] if k < len(rh) and rh[k] is not None else cc)
+                    lows.append(rl[k] if k < len(rl) and rl[k] is not None else cc)
+                    vols.append(rv[k] if k < len(rv) and rv[k] is not None else 0)
+                    tv.append(ts[k])
+                if len(closes) < 70:
+                    continue
+                rmt = meta.get('regularMarketTime'); rmp = meta.get('regularMarketPrice')
+                if rmt and isinstance(rmp, (int, float)) and rmp > 0 and tv and rmt - tv[-1] > 20 * 3600:
+                    sv = sum(vols[-5:]) / 5 if len(vols) >= 5 else 0
+                    closes.append(float(rmp)); highs.append(float(rmp)); lows.append(float(rmp)); vols.append(sv)
+                scanned += 1
+                ind = self._calc_ind(closes, highs, lows, vols)
+                bscore, bsig, sscore, ssig = self._focus_score(ind)
+                code = sym.replace('.TW', '').replace('.TWO', '')
+                name = _get_tw_names().get(code) or meta.get('shortName') or code
+                base = {'sym': code, 'name': name, 'close': round(ind['close'], 2),
+                        'changePct': round(ind['changePct'], 2),
+                        'rsi14': round(ind['rsi14'], 1) if ind['rsi14'] else None}
+                if bscore >= 3 and bscore > sscore:
+                    r = dict(base); r['score'] = round(bscore, 1); r['signals'] = bsig; buy.append(r)
+                elif sscore >= 3 and sscore > bscore:
+                    r = dict(base); r['score'] = round(sscore, 1); r['signals'] = ssig; short.append(r)
+            except Exception:
+                continue
+        buy.sort(key=lambda x: (-x['score'], -(x['changePct'] or 0)))
+        short.sort(key=lambda x: (-x['score'], (x['changePct'] or 0)))
+        self._ok(json.dumps({'ok': True, 'scanned': scanned, 'buy': buy[:20], 'short': short[:20]}, ensure_ascii=False).encode())
+
     def _handle_screener_post(self):
         """POST /screener — body: {preset:'...', symbols:[...] (optional)} or {custom:'...'}"""
         try:
@@ -2297,7 +3042,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if self._screener_match(preset or custom, ind, closes, highs, vols):
                     results.append({
                         'sym': sym.replace('.TW','').replace('.TWO',''),
-                        'name': meta.get('shortName') or meta.get('symbol') or sym,
+                        'name': _get_tw_names().get(sym.replace('.TW','').replace('.TWO','')) or meta.get('shortName') or meta.get('symbol') or sym,
                         'close': ind['close'], 'changePct': ind['changePct'],
                         'rsi14': round(ind['rsi14'],1) if ind['rsi14'] else None,
                         'volRatio': round(ind['volRatio'],2) if ind['volRatio'] else None,
@@ -2395,7 +3140,7 @@ class Handler(SimpleHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b'{}')
         except Exception as e:
             self._err('bad body: ' + str(e), 400); return
-        api_key = body.get('apiKey', '').strip()
+        api_key = body.get('apiKey', '').strip() or _load_ai_key()
         if not api_key:
             self._err('apiKey required (use sk-ant-...)', 400); return
         positions = body.get('positions') or {}
@@ -2427,7 +3172,7 @@ class Handler(SimpleHTTPRequestHandler):
         # Call Anthropic API
         try:
             req_body = json.dumps({
-                'model': 'claude-sonnet-4-6',
+                'model': _resolve_model(api_key),
                 'max_tokens': 2048,
                 'messages': [{'role':'user', 'content': prompt}],
             }).encode('utf-8')
@@ -2463,7 +3208,7 @@ class Handler(SimpleHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b'{}')
         except Exception as e:
             self._err('bad body: ' + str(e), 400); return
-        api_key = (body.get('apiKey') or '').strip()
+        api_key = (body.get('apiKey') or '').strip() or _load_ai_key()
         if not api_key:
             self._err('apiKey required', 400); return
         code = (body.get('code') or '').strip().upper()
@@ -2501,7 +3246,7 @@ class Handler(SimpleHTTPRequestHandler):
         )
         try:
             req_body = json.dumps({
-                'model': 'claude-sonnet-4-6', 'max_tokens': 300,
+                'model': _resolve_model(api_key), 'max_tokens': 300,
                 'messages': [{'role': 'user', 'content': prompt}],
             }).encode('utf-8')
             req = urllib.request.Request('https://api.anthropic.com/v1/messages', data=req_body,
@@ -2524,7 +3269,7 @@ class Handler(SimpleHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b'{}')
         except Exception as e:
             self._err('bad body: ' + str(e), 400); return
-        api_key = (body.get('apiKey') or '').strip()
+        api_key = (body.get('apiKey') or '').strip() or _load_ai_key()
         prompt = (body.get('prompt') or '').strip()
         if not api_key:
             self._err('apiKey required', 400); return
@@ -2533,7 +3278,7 @@ class Handler(SimpleHTTPRequestHandler):
         mt = int(body.get('max_tokens') or 500)
         try:
             req_body = json.dumps({
-                'model': 'claude-sonnet-4-6', 'max_tokens': max(64, min(1500, mt)),
+                'model': _resolve_model(api_key), 'max_tokens': max(64, min(1500, mt)),
                 'messages': [{'role': 'user', 'content': prompt}],
             }).encode('utf-8')
             req = urllib.request.Request('https://api.anthropic.com/v1/messages', data=req_body,
@@ -2648,6 +3393,41 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as e:
             self._err('email report failed: ' + str(e), 500)
 
+    def _handle_report_email(self):
+        """POST /report-email — 把 AI 報告 HTML 寄給『自訂收件者』(重用已設定的 Email SMTP)。
+           body: {to, subject, html}。與 /etf-report/email 不同:收件者可指定,非設定檔固定的 to。"""
+        if not alert_daemon:
+            self._err('email module unavailable', 503); return
+        try:
+            body = self._read_json_body() or {}
+        except Exception as e:
+            self._err('bad body: ' + str(e), 400); return
+        to = (body.get('to') or '').strip()
+        subject = (body.get('subject') or 'Stock Terminal AI 報告').strip()
+        html = body.get('html') or ''
+        if '@' not in to:
+            self._err('需有效收件者 email', 400); return
+        if not html:
+            self._err('html required', 400); return
+        em = (alert_daemon.load_config() or {}).get('email', {})
+        if not em.get('user') or not em.get('app_password'):
+            self._err('Email 未設定:請先在通知設定填寄件帳號/應用程式密碼', 400); return
+        try:
+            import smtplib, ssl
+            from email.mime.text import MIMEText
+            msg = MIMEText(html, 'html', 'utf-8')
+            msg['Subject'] = subject
+            msg['From'] = em['user']
+            msg['To'] = to
+            ctx = ssl.create_default_context()
+            with smtplib.SMTP(em.get('smtp_host', 'smtp.gmail.com'), int(em.get('smtp_port', 587)), timeout=20) as s:
+                s.starttls(context=ctx)
+                s.login(em['user'], em['app_password'])
+                s.sendmail(em['user'], [to], msg.as_string())
+            self._ok(json.dumps({'ok': True, 'to': to}, ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('send failed: ' + str(e), 502)
+
     def _handle_txf(self):
         """台指期近一(含夜盤) — 主: Yahoo TW 期貨頁(WTX&) 內嵌 JSON；備援: TAIFEX MIS。
            回 {ok, price, prevClose, changePct, name, source}；失敗回 debug 供修正。"""
@@ -2735,6 +3515,64 @@ class Handler(SimpleHTTPRequestHandler):
 
         self._ok(json.dumps({'ok': False, 'error': '兩來源皆無法解析', 'debug': yahoo_debug}, ensure_ascii=False).encode())
 
+    def _stockfut_one(self, cid, m):
+        """從整批快取 m 算單一個股期 {ok,price,changePct,現%,領先,session...}。"""
+        def fnum(d, *keys):
+            for k in keys:
+                v = (d or {}).get(k)
+                if v not in (None, '', '-'):
+                    try: return float(str(v).replace(',', '').replace('%', ''))
+                    except Exception: pass
+            return None
+        e = m.get(cid) or {}
+        day_fut, day_spot, night_fut = e.get('dayFut'), e.get('daySpot'), e.get('nightFut')
+        spot_prev = fnum(day_spot, 'CRefPrice', 'CYDClose')
+        spot_last = fnum(day_spot, 'CLastPrice', 'CLast')
+        spot_chg = fnum(day_spot, 'CDiffRate')
+        if spot_chg is None and spot_last is not None and spot_prev:
+            spot_chg = (spot_last - spot_prev) / spot_prev * 100
+        nf_last = fnum(night_fut, 'CLastPrice', 'CLast')
+        df_last = fnum(day_fut, 'CLastPrice', 'CLast')
+        if nf_last is not None:
+            fut_last, sess, frow = nf_last, 'night', night_fut
+        elif df_last is not None:
+            fut_last, sess, frow = df_last, 'day', day_fut
+        else:
+            fut_last, sess, frow = None, None, (day_fut or night_fut)
+        fut_pct = None
+        if fut_last is not None and spot_prev:
+            fut_pct = (fut_last - spot_prev) / spot_prev * 100
+        elif frow:
+            fut_pct = fnum(frow, 'CDiffRate')
+        lead = None if (fut_pct is None or spot_chg is None) else round(fut_pct - spot_chg, 2)
+        return {'ok': fut_last is not None, 'cid': cid, 'price': fut_last,
+                'prevClose': spot_prev, 'changePct': (round(fut_pct, 2) if fut_pct is not None else None),
+                'name': (frow.get('DispCName') if frow else cid),
+                'contract': str((frow or {}).get('SymbolID') or ''), 'session': sess,
+                'spotPrice': spot_last, 'spotChangePct': (round(spot_chg, 2) if spot_chg is not None else None),
+                'lead': lead, 'source': 'taifex-mis'}
+
+    def _handle_stockfut(self):
+        """個股期貨(含夜盤)即時報價 — TAIFEX MIS 整批(避免限流 520)。
+           ?cid=CDF 回單一；?cids=CDF,DHF,... 回 {results:[...]}。
+           日夜合併(夜盤近月-M 有成交→夜盤,否則日盤-F)，期%/現% 同昨收基準，領先=期%−現%。"""
+        qs = parse_qs(urlparse(self.path).query)
+        cids_raw = (qs.get('cids', [''])[0]).strip()
+        cid = (qs.get('cid', [''])[0] or qs.get('code', [''])[0]).strip().upper()
+        m = _mis_load_futures()
+        if cids_raw:
+            cids = [x.strip().upper() for x in cids_raw.split(',') if x.strip()]
+            results = [self._stockfut_one(c, m) for c in cids]
+            body = json.dumps({'ok': any(r['ok'] for r in results), 'results': results,
+                               'loaded': len(m)}, ensure_ascii=False).encode()
+            self._ok(body); return
+        if not cid:
+            self._err('cid or cids required (e.g. ?cid=CDF)', 400); return
+        out = self._stockfut_one(cid, m)
+        if not out.get('ok'):
+            out['debug'] = {'loaded': len(m), 'hasCid': cid in m}
+        self._ok(json.dumps(out, ensure_ascii=False).encode())
+
     def _handle_twindex(self):
         """台股大盤即時指數 (v3.8 修 Yahoo ^TWII 早盤落後一日 bug)：
            TWSE MIS 即時——加權 tse_t00.tw、櫃買 otc_o00.tw。
@@ -2747,36 +3585,12 @@ class Handler(SimpleHTTPRequestHandler):
             self._ok(c); return
         out = {'ok': False, 'indices': {}, 'source': None}
         try:
-            ms = int(time.time() * 1000)
-            url = ('https://mis.twse.com.tw/stock/api/getStockInfo.jsp'
-                   f'?ex_ch=tse_t00.tw|otc_o00.tw&json=1&delay=0&_={ms}')
-            req = urllib.request.Request(url, headers={
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                'Accept': 'application/json',
-                'Accept-Language': 'zh-TW,zh;q=0.9',
-                'Referer': 'https://mis.twse.com.tw/stock/index.jsp',
-            })
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read())
-            arr = data.get('msgArray') or []
-            def fnum(v):
-                if v in (None, '', '-'):
-                    return None
-                try: return float(str(v).replace(',', ''))
-                except Exception: return None
-            for it in arr:
-                ch = (it.get('ch') or '')          # 例 't00.tw' / 'o00.tw'
-                code = 't00' if 't00' in ch else ('o00' if 'o00' in ch else ch)
-                # z=當前成交指數；盤中無成交時退 o(開盤)；y=昨收
-                price = fnum(it.get('z'))
-                if price is None:
-                    price = fnum(it.get('o'))      # 早盤尚無成交時退開盤
-                prev = fnum(it.get('y'))
-                chg = ((price - prev) / prev * 100) if (price is not None and prev) else None
-                out['indices'][code] = {'price': price, 'prevClose': prev,
-                                        'changePct': chg, 'name': it.get('n')}
+            # 走共用 TrustedDataLayer(節流/熔斷/健檢) — 同 ^TWOII 改路由用的源
+            out['indices'] = _twse_mis_index('tse_t00.tw|otc_o00.tw')
             out['ok'] = any(v.get('price') is not None for v in out['indices'].values())
             out['source'] = 'twse-mis'
+        except SourceBreakerOpen:
+            out['error'] = 'twse-mis breaker open'
         except Exception as e:
             out['error'] = str(e)
         body = json.dumps(out, ensure_ascii=False).encode()
@@ -2895,7 +3709,7 @@ class Handler(SimpleHTTPRequestHandler):
                     continue
                 survivors.append({
                     'sym': sym.replace('.TW', '').replace('.TWO', ''),
-                    'name': meta.get('shortName') or meta.get('symbol') or sym,
+                    'name': _get_tw_names().get(sym.replace('.TW', '').replace('.TWO', '')) or meta.get('shortName') or meta.get('symbol') or sym,
                     'ind': ind,
                 })
             except Exception:
@@ -3036,7 +3850,7 @@ class Handler(SimpleHTTPRequestHandler):
         pass  # silent
 
 if __name__ == '__main__':
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     d = find_etf_dir()
     files = list_etf_files()
     print(f'Stock Terminal: http://localhost:{PORT}/stock_terminal.html')

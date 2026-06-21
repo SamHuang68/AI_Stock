@@ -7,11 +7,21 @@
 
 const SERVER_S = window.SERVER || `http://localhost:18432`;
 let _screenerPresets = null;
+let _scrLastHTML = null, _scrLastSector = '全部';   // v3.9: 結果快取，關了再開不必重掃
 
 (function injectScreenerCSS() {
   const css = `
-.screener-modal{position:fixed;inset:0;background:rgba(6,10,18,.9);z-index:9998;display:flex;align-items:center;justify-content:center}
-.screener-modal .panel{background:var(--bg2);border:1px solid var(--gold-m);border-radius:8px;width:90vw;max-width:780px;height:88vh;display:flex;flex-direction:column;overflow:hidden}
+/* v3.9: 右側常駐 dock，不蓋 K 線(圖在左)，點股載入後面板保留 */
+.screener-modal{position:fixed;top:52px;right:0;bottom:0;z-index:9998;pointer-events:none}
+.screener-modal .panel{pointer-events:auto;position:absolute;top:0;right:0;bottom:0;width:min(460px,44vw);max-width:none;height:auto;background:var(--bg2);border-left:2px solid var(--gold-m);border-radius:0;display:flex;flex-direction:column;overflow:hidden;box-shadow:-10px 0 34px rgba(0,0,0,.55)}
+.scr-row.active{background:var(--gold-s);border-left:3px solid var(--gold)}
+/* v3.9: 收合成右緣細條，露出右側 STATS 看漲跌原因 */
+.screener-modal .panel.scr-collapsed{width:28px}
+#right.scr-docked #rpanel{padding-right:36px}  /* 收合時右側面板讓出細條寬度,STATS 數值不被遮 */
+.screener-modal .panel.scr-collapsed > *{display:none}
+.screener-modal .panel.scr-collapsed .scr-handle{display:flex}
+.scr-handle{display:none;position:absolute;inset:0;align-items:center;justify-content:center;writing-mode:vertical-rl;cursor:pointer;color:var(--gold);font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:3px;background:var(--bg2)}
+.scr-handle:hover{background:var(--gold-s)}
 .screener-modal .head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);background:var(--bg)}
 .screener-modal .head h3{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--gold);font-weight:700;letter-spacing:1px;margin:0}
 .scr-presets{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:4px;padding:6px 8px;background:var(--bg);border-bottom:1px solid var(--border);max-height:24vh;overflow-y:auto;flex-shrink:0}
@@ -74,9 +84,13 @@ async function openScreener() {
   }
   m.innerHTML = `
     <div class="panel">
+      <div class="scr-handle" onclick="screenerExpand()">🔍 掃描結果 ⟨</div>
       <div class="head">
         <h3>🔍 全市場 Screener — 掃描 ${presets?.symbolCount || '?'} 檔台股</h3>
-        <span style="cursor:pointer;color:var(--tlo);font-size:20px" onclick="closeScreener()">×</span>
+        <span style="display:flex;align-items:center;gap:10px">
+          <span style="cursor:pointer;color:var(--tlo);font-size:15px" onclick="screenerCollapse()" title="收合(看右側 STATS 找原因)">⟩</span>
+          <span style="cursor:pointer;color:var(--tlo);font-size:20px" onclick="closeScreener()">×</span>
+        </span>
       </div>
       <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);font-family:monospace;font-size:11px;color:var(--tlo)">
         類股篩選
@@ -97,19 +111,34 @@ async function openScreener() {
     </div>
   `;
   document.body.appendChild(m);
+  // 還原上次掃描結果與類股，免重掃
+  const secEl = document.getElementById('scr-sector');
+  if (secEl && _scrLastSector) secEl.value = _scrLastSector;
+  if (_scrLastHTML) { const list = document.getElementById('scr-results'); if (list) list.innerHTML = _scrLastHTML; }
   m.addEventListener('click', e => {
-    if (e.target === m) closeScreener();
     const preset = e.target.closest('[data-scr-preset]');
-    if (preset) runScreener(preset.dataset.scrPreset, preset.querySelector('.ttl').textContent);
+    if (preset) { runScreener(preset.dataset.scrPreset, preset.querySelector('.ttl').textContent); return; }
     const row = e.target.closest('[data-scr-sym]');
     if (row) {
       const sym = row.dataset.scrSym;
       if (typeof loadSym === 'function') loadSym(sym, 'TW');
-      closeScreener();
+      // 常駐右側：點股載入左側 K 線，高亮選中，不關閉、不重掃；
+      // 自動收合成右緣細條 → 右側 STATS 露出來看漲跌原因；點細條再展開挑下一檔
+      m.querySelectorAll('.scr-row.active').forEach(r => r.classList.remove('active'));
+      row.classList.add('active');
+      screenerCollapse();
     }
   });
 }
-function closeScreener() { document.getElementById('screener-modal')?.remove(); }
+function closeScreener() { document.getElementById('screener-modal')?.remove(); document.getElementById('right')?.classList.remove('scr-docked'); }
+function screenerCollapse() {
+  document.querySelector('#screener-modal .panel')?.classList.add('scr-collapsed');
+  document.getElementById('right')?.classList.add('scr-docked');   // 收合→右側面板讓出細條寬度
+}
+function screenerExpand() {
+  document.querySelector('#screener-modal .panel')?.classList.remove('scr-collapsed');
+  document.getElementById('right')?.classList.remove('scr-docked'); // 展開時 dock 覆蓋右側,不需讓位
+}
 
 async function runScreener(preset, label) {
   const list = document.getElementById('scr-results');
@@ -142,6 +171,7 @@ async function runScreener(preset, label) {
       </div>`;
     }
     list.innerHTML = h;
+    _scrLastHTML = h; _scrLastSector = sector;   // 快取結果
   } catch (e) {
     list.innerHTML = `<div style="padding:30px;text-align:center;color:var(--red);font-family:monospace;font-size:11px">掃描失敗：${escS(e.message)}</div>`;
   }
@@ -149,16 +179,12 @@ async function runScreener(preset, label) {
 
 function escS(s) { return String(s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
-(function injectScreenerBtn() {
-  if (!document.getElementById('pro-tools')) return setTimeout(injectScreenerBtn, 100);
-  if (document.getElementById('btn-screener')) return;
-  const b = document.createElement('button');
-  b.id = 'btn-screener';
-  b.className = 'probtn';
-  b.title = '全市場 Screener — 掃描符合策略的股票';
-  b.innerHTML = '🔍 掃描';
-  b.onclick = openScreener;
-  document.getElementById('pro-tools').appendChild(b);
+/* v3.9: 改用 Toolbar 註冊表(模組化) — 取代手寫 #pro-tools 注入樣板 */
+(function () {
+  var spec = { id: 'btn-screener', label: '🔍 掃描', cat: 'screen',
+               title: '全市場 Screener — 掃描符合策略的股票', onclick: openScreener };
+  (window.Toolbar ? window.Toolbar.register
+    : function (s) { (window.__tbQueue = window.__tbQueue || []).push(s); })(spec);
 })();
 
 window.openScreener = openScreener;

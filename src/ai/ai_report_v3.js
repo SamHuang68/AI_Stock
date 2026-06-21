@@ -41,7 +41,11 @@ const SERVER_A = window.SERVER || `http://localhost:18432`;
 
 // Minimal Markdown → HTML (no external lib)
 function mdToHtml(md) {
-  let h = md;
+  // 安全(v3.9 review):中和潛在注入(AI 回應理論上可含 HTML)。移除 script/iframe/事件處理器/js: 協定。
+  let h = String(md || '')
+    .replace(/<\s*\/?\s*(script|iframe|object|embed|link|meta)\b/gi, '&lt;$1')
+    .replace(/\son\w+\s*=/gi, ' data-x=')
+    .replace(/javascript:/gi, 'js:');
   // Headers
   h = h.replace(/^### (.*?)$/gm, '<h3>$1</h3>');
   h = h.replace(/^## (.*?)$/gm, '<h2>$1</h2>');
@@ -72,7 +76,7 @@ function mdToHtml(md) {
 }
 
 async function generateAIReport() {
-  if (!S.apiKey) { alert('請先在右上角設定 Claude API Key (sk-ant-...)'); return; }
+  if (!S.aiKeySet) { alert('請先在右上角設定 Claude API Key (sk-ant-...)'); return; }
   openAIModal();
   const body = document.getElementById('ai-body');
   body.innerHTML = '<div class="ai-loading"><span class="spin">⚙</span>Claude 撰寫中...<br><span style="font-size:10px;color:var(--tlo);margin-top:10px;display:inline-block">分析您的持倉與觀察清單</span></div>';
@@ -130,7 +134,7 @@ function openAIModal() {
         <h3>🤖 Claude AI 每日盤前報告</h3>
         <span style="cursor:pointer;color:var(--tlo);font-size:20px" onclick="closeAIModal()">×</span>
       </div>
-      <div class="ai-body" id="ai-body"></div>
+      <div class="ai-body" id="ai-body"><div style="color:var(--tlo);font-family:monospace;font-size:11px;line-height:1.8;padding:14px;text-align:center">點下方 <b style="color:var(--gold)">🔄 重新生成</b> 開始分析(會用 Claude 跑你的持倉+觀察+大盤)<br>或 <b>📂 上次報告</b> 看上次結果。</div></div>
       <div class="ai-foot">
         <span style="font-family:monospace;font-size:9.5px;color:var(--tf)">資料：你的持倉 + 觀察 + 大盤 · 模型：Claude</span>
         <div style="display:flex;gap:6px">
@@ -154,16 +158,13 @@ function loadLastAIReport() {
   } catch (e) { alert('讀取失敗：' + e.message); }
 }
 
-(function injectAIBtn() {
-  if (!document.getElementById('pro-tools')) return setTimeout(injectAIBtn, 100);
-  if (document.getElementById('btn-ai-report')) return;
-  const b = document.createElement('button');
-  b.id = 'btn-ai-report';
-  b.className = 'probtn';
-  b.title = 'Claude AI 每日報告（需先設 API Key）';
-  b.innerHTML = '🤖 AI報告';
-  b.onclick = generateAIReport;
-  document.getElementById('pro-tools').appendChild(b);
+/* v3.9: 改用 Toolbar 註冊表(模組化) — 取代手寫 #pro-tools 注入樣板 */
+(function () {
+  var spec = { id: 'btn-ai-report', label: '🤖 AI報告', cat: 'pin',
+               title: 'Claude AI 每日報告（需先設 API Key）',
+               onclick: openAIModal };   // 先開面板,由使用者點「重新生成」才分析
+  (window.Toolbar ? window.Toolbar.register
+    : function (s) { (window.__tbQueue = window.__tbQueue || []).push(s); })(spec);
 })();
 
 window.generateAIReport = generateAIReport;

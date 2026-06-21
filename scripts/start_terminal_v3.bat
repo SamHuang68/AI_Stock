@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 > nul
-cd /d "%~dp0"
+cd /d "%~dp0.."
 echo ============================================
 echo  Stock Terminal v3.0 - 19 Patterns (TradingView-grade)
 echo  http://localhost:18432/stock_terminal_v2.html
@@ -30,4 +30,4 @@ echo.
 echo  Tip: long-press the v3 ROBOT button to toggle pattern overlay on chart.
 echo  Press Ctrl+C to stop the server.
 echo.
-python server.py
+python server\server.py

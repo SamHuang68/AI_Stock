@@ -168,10 +168,14 @@
       <h3 style="font-size:12px;color:var(--green)">📈 觀察股買區機會</h3>
       <table><thead><tr><th>代號</th><th>現價</th><th>買進價</th><th>隔日預估價</th></tr></thead>
         <tbody>${wRows || '<tr><td colspan=4 style="text-align:center;color:var(--tf)">觀察清單無自訂買進價訊號</td></tr>'}</tbody></table>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
-        <span style="font-size:9px;color:var(--tf)">預估＝NQ/ES/YM/費半 夜盤加權；僅供參考非投資建議</span>
-        <div><button onclick="window.overnightRefresh&&overnightRefresh()">↻ 重新整理</button> <button onclick="window.overnightClose&&overnightClose()">關閉</button></div>
-      </div>`;
+      <div style="font-size:9px;color:var(--tf);line-height:1.7;margin-top:8px;border-top:1px solid #222;padding-top:6px">
+        <b style="color:var(--tlo)">資料來源</b>：Yahoo Finance（即時期貨/指數），經本機 /quote · /yf 代理抓取<br>
+        夜盤指標：那斯達克期 <code>NQ=F</code>(35%) · 標普500期 <code>ES=F</code>(20%) · 道瓊期 <code>YM=F</code>(10%) · 費半 <code>^SOX</code>(35%)；核心連動 <code>TSM</code> ADR<br>
+        漲跌基準：各標的前一交易日收盤（遇 null 自動退最近一筆有效值，不帶入 null 計算）<br>
+        更新時間：${new Date().toLocaleString('zh-TW', { hour12: false })} · 僅供參考，非投資建議
+      </div>
+      <div style="text-align:right;margin-top:8px">
+        <button onclick="window.overnightRefresh&&overnightRefresh()">↻ 重新整理</button> <button onclick="window.overnightClose&&overnightClose()">關閉</button></div>`;
     // 點列載入線型
     body.querySelectorAll('[data-load]').forEach(tr => tr.onclick = () => {
       const c = tr.getAttribute('data-load');

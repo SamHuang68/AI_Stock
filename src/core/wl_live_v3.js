@@ -17,7 +17,7 @@
   'use strict';
 
   const SERVER = global.SERVER || `http://localhost:18432`;
-  const POLL_MS = 30_000;          // 30 秒（伺服器負載 OK，又夠快）
+  const POLL_MS = 5_000;           // v3.9 即時化:5 秒(台股 chip 走 MIS;貼近 MIS 更新節奏)
   const INITIAL_DELAY = 300;       // 第一次 poll：頁面 ready 後 ~300ms 觸發
   // 註：不再用 1.5s 是因為等愈久使用者看到 localStorage 殘留的舊 % 愈久
   let _timer = null;
@@ -107,18 +107,27 @@
     return { cur, prev: p, chgPct: (cur - p) / p * 100 };
   }
 
+  // v3.9 即時化:台股批次走 TWSE MIS(真即時),回 {code:{price,prevClose,changePct}}
+  async function fetchMis(codes) {
+    if (!codes.length) return {};
+    try {
+      const url = `${SERVER}/twquote-batch?codes=${encodeURIComponent(codes.join(','))}`;
+      const r = await fetch(url, { cache: 'no-store' });
+      if (!r.ok) return {};
+      return await r.json();
+    } catch (e) { return {}; }
+  }
+
   async function fetchBatch(syms) {
     if (!syms.length) return {};
     try {
-      // range=5d (NOT 1d) — Yahoo query1/query2 雙伺服器盤前/盤後資料偶爾
-      // 不同步，1d response 可能整份停在「上一交易日視角」，造成
-      // %chg 顯示為「昨天的 %」。改 5d 拿多根 K 線，extractChg 用陣列
-      // 對齊 regularMarketTime 來精準判斷哪根是「今天」、哪根是「昨天」。
-      // nocache=1 — server 端 LRU 沒 TTL，不繞過就會一直拿到開機後第一次
-      // 抓到的那份 stale data。
-      const url = `${SERVER}/yf/batch?syms=${encodeURIComponent(syms.join(','))}&range=5d&interval=1d&nocache=1`;
+      // v3.9：改用 /quote-batch（每檔 range=1d，meta.chartPreviousClose=真昨收）。
+      // 原 5d 日線 batch 對「昨日 K 線 close=null 缺口」的 ETF(如 00988A)會
+      // 跳過 null 抓到更舊一根當昨收→漲幅亂跳(+8% vs +0.8%)。/quote-batch 用
+      // 1d meta 昨收，server 端並發 + .TW→.TWO 回退。回 {sym:{price,prevClose,changePct}}。
+      const url = `${SERVER}/quote-batch?syms=${encodeURIComponent(syms.join(','))}`;
       const r = await fetch(url, { cache: 'no-store' });
-      if (!r.ok) { console.warn('[wl-live] batch HTTP', r.status); return {}; }
+      if (!r.ok) { console.warn('[wl-live] quote-batch HTTP', r.status); return {}; }
       return await r.json();
     } catch (e) {
       console.warn('[wl-live] batch error:', e);
@@ -149,7 +158,8 @@
       // First pass — TW with .TW suffix, US raw
       const symMap = new Map();   // yfsym → wl item（或 {_pos: code} 持倉標記）
       for (const w of (S.wl || [])) {
-        const yfsym = w.m === 'TW' ? w.t + '.TW' : w.t;
+        // ^ 開頭=指數(如 ^TWII/^GSPC)，原樣不加 .TW
+        const yfsym = (w.t && w.t[0] === '^') ? w.t : (w.m === 'TW' ? w.t + '.TW' : w.t);
         symMap.set(yfsym, w);
       }
       // 持倉代號（不在自選股的也要抓）：數字開頭視為台股 .TW，否則美股原樣
@@ -159,33 +169,28 @@
         else if (symMap.get(yf) && symMap.get(yf).t) symMap.get(yf)._posAlso = code;
       }
       const syms = [...symMap.keys()];
-      const data = await fetchBatch(syms);
-
-      const missedTw = [];
-      for (const [yfsym, w] of symMap.entries()) {
-        const res = data[yfsym]?.chart?.result?.[0];
-        if (!res) {
-          if (w && (w.m === 'TW' || (w._pos && /^[0-9]/.test(w._pos)))) missedTw.push(w);
-          continue;
+      // v3.9 即時化:台股(.TW/.TWO)→ MIS 即時;指數/美股 → Yahoo。MIS 漏接的台股再用 Yahoo 補。
+      const twYf = syms.filter(s => s.endsWith('.TW') || s.endsWith('.TWO'));
+      const otherYf = syms.filter(s => !(s.endsWith('.TW') || s.endsWith('.TWO')));
+      const data = {};
+      if (twYf.length) {
+        const mis = await fetchMis(twYf.map(s => s.replace('.TWO', '').replace('.TW', '')));
+        for (const yf of twYf) {
+          const code = yf.replace('.TWO', '').replace('.TW', '');
+          if (mis[code] && mis[code].changePct != null) data[yf] = mis[code];
         }
-        const c = extractChg(res);
-        if (!c) continue;
-        if (w._pos) applyToPos(w._pos, c.cur);
-        else { applyToChip(w, c.chgPct, c.cur); if (w._posAlso) applyToPos(w._posAlso, c.cur); }
       }
+      // 台股一律只用 MIS:某輪 MIS 漏接就保留 chip 上次值(不回退 Yahoo,否則 MIS即時↔Yahoo延遲 兩值亂跳)。
+      // 只有美股/指數(無 MIS)走 Yahoo。
+      const missing = otherYf;
+      if (missing.length) Object.assign(data, await fetchBatch(missing));
 
-      // Second pass — retry missed TW with .TWO (OTC / 興櫃)
-      if (missedTw.length) {
-        const keyOf = w => (w._pos ? w._pos : w.t) + '.TWO';
-        const data2 = await fetchBatch(missedTw.map(keyOf));
-        for (const w of missedTw) {
-          const res = data2[keyOf(w)]?.chart?.result?.[0];
-          if (!res) continue;
-          const c = extractChg(res);
-          if (!c) continue;
-          if (w._pos) applyToPos(w._pos, c.cur);
-          else { applyToChip(w, c.chgPct, c.cur); if (w._posAlso) applyToPos(w._posAlso, c.cur); }
-        }
+      // 回傳 {sym:{price,prevClose,changePct}}（台股=MIS 即時,其餘=Yahoo）
+      for (const [yfsym, w] of symMap.entries()) {
+        const d = data[yfsym];
+        if (!d || d.changePct == null) continue;
+        if (w._pos) applyToPos(w._pos, d.price);
+        else { applyToChip(w, d.changePct, d.price); if (w._posAlso) applyToPos(w._posAlso, d.price); }
       }
 
       // After in-place updates: persist S.wl (so refresh shows last seen %)

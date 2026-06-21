@@ -13,8 +13,8 @@
 # ============================================================
 import json, os, shutil
 
-BASE = os.path.dirname(os.path.abspath(__file__))
-CAT = os.path.join(BASE, 'etf_catalog.json')
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CAT = os.path.join(BASE, 'data', 'etf_catalog.json')
 
 # 各分類要補的美股 ETF： 分類名稱 -> [(code, name), ...]
 US_ADD = {

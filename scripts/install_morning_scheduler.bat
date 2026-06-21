@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 > nul
 setlocal enabledelayedexpansion
-cd /d "%~dp0"
+cd /d "%~dp0.."
 echo ============================================
 echo  Register Daily TSMC Morning Brief (v3.8)
 echo  Mon-Fri 07:30 - emails pre-market brief

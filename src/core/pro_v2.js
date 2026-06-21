@@ -894,6 +894,7 @@ document.addEventListener('click', ev => {
       `<button class="probtn" id="btn-valuation" onclick="window.valuationOpen&&valuationOpen()" title="長線估值錨：本益比河流，判斷現在貴不貴 (v3.8)">⚓ 估值</button>` +
       `<button class="probtn" id="btn-marketflow" onclick="window.marketFlowOpen&&marketFlowOpen()" title="大盤資金流：量能趨勢8000億→1.2兆 + 三大法人 (v3.8)">💰 資金流</button>` +
       `<button class="probtn" id="btn-instrank" onclick="window.instRankOpen&&instRankOpen()" title="外資/投信買賣超排行榜 + 連續天數 (v3.8)">🏆 法人榜</button>` +
+      `<button class="probtn" id="btn-stockfut" onclick="window.stockFutOpen&&stockFutOpen()" title="個股期夜盤領先：市值前十大個股期 期%/現%/領先差，現股領先指標 (v3.9)">🔭 個股期</button>` +
       `<button class="probtn" id="btn-calendar" onclick="window.calendarOpen&&calendarOpen()" title="事件行事曆：月營收/除權息提醒 (v3.8)">📅 行事曆</button>` +
       `<button class="probtn" id="btn-multichart" onclick="window.multiChartOpen&&multiChartOpen()" title="多圖連動布局：2×2/1×3 同股多時框或相關商品，同步游標/時間軸 (v3.9)　Alt+M">▦ 多圖</button>` +
       `<button class="probtn" id="btn-spread" onclick="window.spreadOpen&&spreadOpen()" title="價差/比值圖：2330/2303 相對強弱、溢價差 (v3.9)　Alt+D">📊 價差</button>` +

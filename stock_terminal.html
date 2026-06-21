@@ -92,7 +92,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 #chart-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:10;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--tlo);letter-spacing:2px}
 #chart-info{position:absolute;top:8px;left:10px;z-index:5;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--tlo);pointer-events:none}
 .ci-price{font-size:18px;font-weight:700;color:var(--thi);letter-spacing:1px}
-#ci-ohlc{display:none;margin-top:6px;padding:5px 8px;background:rgba(11,18,32,.75);border:1px solid var(--border);border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1.7;letter-spacing:.3px;backdrop-filter:blur(4px);max-width:520px}
+#ci-ohlc{display:none;margin-top:3px;padding:2px 7px;background:rgba(11,18,32,.7);border:1px solid var(--border);border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:9px;line-height:1.45;letter-spacing:.2px;backdrop-filter:blur(4px);white-space:nowrap;max-width:none}
 #ci-ohlc .ohlc-d{color:var(--tlo);margin-right:8px}
 #ci-ohlc .ohlc-k{color:var(--tlo);margin-right:1px}
 #ci-ohlc .ohlc-v{font-weight:700;margin-right:8px}
@@ -294,7 +294,7 @@ const SERVER = 'http://localhost:18432';
 
 // ── STATE ───────────────────────────────────────────────────────
 let S = {
-  mkt: 'TW', sym: '', apiKey: '',
+  mkt: 'TW', sym: '', apiKey: '', aiKeySet: false,
   range: '5y',                 // iOS-style chart range: 1d/3w/1mo/3mo/6mo/ytd/1y/2y/5y/10y/max
   data: null, ind: null,
   analyzing: false, streamText: '', sources: [], phase: '',
@@ -308,7 +308,18 @@ let S = {
 
 // ── INIT ────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  S.apiKey = localStorage.getItem(LS_KEY_KEY) || '';
+  // 安全(v3.9 review):金鑰改存 server。若 localStorage 還有舊 key,搬到 server 後清除,瀏覽器不再保留。
+  (async () => {
+    const _old = localStorage.getItem(LS_KEY_KEY) || '';
+    if (_old) {
+      try { await fetch(`${SERVER}/ai-key`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ key:_old }) }); } catch {}
+      localStorage.removeItem(LS_KEY_KEY);
+    }
+    try { const st = await fetch(`${SERVER}/ai-key/status`).then(r=>r.json()); S.aiKeySet = !!(st && st.set); } catch {}
+    S.apiKey = '';
+    if (typeof updateKeyBtn === 'function') updateKeyBtn();
+    renderRpanel();
+  })();
   S.history = loadHist();
   S.wl = loadWl();
   renderWl();
@@ -426,7 +437,7 @@ function runWorker(candles) {
 // ── YAHOO FINANCE ───────────────────────────────────────────────
 // iOS Stocks-style range presets. trim=N means only show last N bars (for ranges Yahoo doesn't have natively, e.g. 3 weeks).
 const RANGE_DEFS = [
-  {key:'1d',  lbl:'1天',  range:'1d',  interval:'5m',  trim:null},
+  {key:'1d',  lbl:'1天',  range:'1d',  interval:'1m',  trim:null},   // 1分K=對齊 Yahoo「當日」/專業軟體即時盤中(配合 liverefresh 每45s更新)
   {key:'3w',  lbl:'3周',  range:'1mo', interval:'1d',  trim:15},
   {key:'1mo', lbl:'1月',  range:'1mo', interval:'1d',  trim:null},
   {key:'3mo', lbl:'3月',  range:'3mo', interval:'1d',  trim:null},
@@ -497,9 +508,9 @@ function parseYF(raw) {
   try {
     const res = raw?.chart?.result?.[0];
     if (!res) return null;
-    const q = res.indicators.quote[0];
-    const ts = res.timestamp;
-    const candles = ts.map((t,i)=>({
+    const q = (res.indicators?.quote?.[0]) || {};   // 盤中空資料時 Yahoo 可能無 indicators
+    const ts = res.timestamp || [];                  // 空 → candles=[](回空而非丟例外)
+    let candles = ts.map((t,i)=>({
       time: t,
       open:  q.open[i]  ?? q.close[i],
       high:  q.high[i]  ?? q.close[i],
@@ -507,30 +518,105 @@ function parseYF(raw) {
       close: q.close[i] ?? 0,
       volume: q.volume[i] ?? 0,
     })).filter(c=>c.close!=null&&c.close>0);
+    // ── 日線異常驗證 (v3.9 Phase-0 護航) ──────────────────────────
+    // 剔除「孤立尖刺」壞點:某根收盤較前後兩根皆 >40% 落差(且隨即回復)。
+    // 跳空/漲跌停會「持續」(下一根接近壞值)故不會被誤刪;只殺立即回復的離群單根。
+    // 防 Yahoo 偶發壞 tick 汙染線型/指標。保守門檻 40%(遠大於台股±10%漲跌停)。
+    let _anomDropped = 0;
+    if (candles.length >= 3) {
+      const cleaned = [candles[0]];
+      for (let i = 1; i < candles.length - 1; i++) {
+        const a = candles[i-1].close, b = candles[i].close, c = candles[i+1].close;
+        const hi = Math.max(a, c), lo = Math.min(a, c);
+        if (b > hi * 1.4 || b < lo * 0.6) { _anomDropped++; continue; }
+        cleaned.push(candles[i]);
+      }
+      cleaned.push(candles[candles.length - 1]);
+      candles = cleaned;
+    }
+    if (_anomDropped) console.warn('[parseYF] 剔除', _anomDropped, '根異常日K(孤立尖刺)');
     const meta = res.meta;
-    return {candles, meta, name: meta.longName||meta.shortName||meta.symbol||''};
+    return {candles, meta, name: meta.longName||meta.shortName||meta.symbol||'', anomDropped: _anomDropped};
   } catch { return null; }
 }
 
 // ── LOAD SYMBOL ─────────────────────────────────────────────────
-async function loadSym(sym, mkt) {
+async function loadSym(sym, mkt, silent) {
   if (!sym) return;
   sym = sym.toUpperCase().trim();
   mkt = mkt || S.mkt;
+  const _myLoad = (window.__loadSeq = (window.__loadSeq || 0) + 1);   // 切股 race 守衛
   S.sym = sym; S.mkt = mkt;
   document.getElementById('syminput').value = sym;
   setMktUI(mkt);
-  setStat('載入 '+sym+'...');
-  document.getElementById('chart-loading').style.display='flex';
-  document.getElementById('chart-info').style.display='none';
+  if (!silent) {   // silent=當日自動刷新(liverefresh_v3),不閃「載入中」遮罩
+    setStat('載入 '+sym+'...');
+    document.getElementById('chart-loading').style.display='flex';
+    document.getElementById('chart-info').style.display='none';
+  }
   clearInd();
 
-  // Build YF ticker
-  const yfsym = mkt==='TW' ? sym+'.TW' : sym;
-  const rdef = currentRangeDef();
+  // Build YF ticker（^ 開頭=指數，如 ^TWII/^GSPC/^SOX，原樣不加 .TW）
+  const yfsym = (sym[0] === '^') ? sym : (mkt==='TW' ? sym+'.TW' : sym);
+  let rdef = currentRangeDef();
+
+  // ── 日線壞源護航 (v3.9 Phase-0) ──────────────────────────────
+  // Yahoo 對某些指數(^TWOII 櫃買)各端點互斥、日線整段錯亂(419/269/105),
+  // 且無可信日線歷史源 → 不畫假K。改抓 /quote(後端已改走 TWSE MIS 真值),
+  // 在圖區顯示即時值與來源說明。即時值另見底部大盤列。
+  const BAD_DAILY = ['^TWOII'];
+  if (BAD_DAILY.includes(yfsym)) {
+    let _tq = null;
+    try { _tq = await fetch(`${SERVER}/quote/${encodeURIComponent(yfsym)}`, {cache:'no-store'}).then(r=>r.ok?r.json():null); } catch {}
+    if (_myLoad !== window.__loadSeq) return;
+    const _el = document.getElementById('chart-loading');
+    _el.style.display = 'flex';
+    const _pv = (_tq && _tq.price != null) ? _tq.price.toFixed(2) : '—';
+    const _cp = (_tq && _tq.changePct != null) ? ((_tq.changePct>=0?'+':'')+_tq.changePct.toFixed(2)+'%') : '';
+    _el.innerHTML = `<div style="text-align:center;line-height:1.7">⚠ ${sym} 無可信日線資料源<br>`
+      + `<span style="color:var(--muted,#888);font-size:12px">(Yahoo 此指數日線錯亂,不顯示假K)</span><br>`
+      + `即時值 <b>${_pv}</b> <span style="color:${(_tq&&_tq.changePct>=0)?'var(--green)':'var(--red)'}">${_cp}</span>`
+      + `<br><span style="color:var(--muted,#888);font-size:12px">來源:${_tq?_tq.source:'—'}・另見底部大盤列</span></div>`;
+    document.getElementById('chart-info').style.display = 'none';
+    setStat(sym+'：無可信日線,僅即時值('+(_tq?_tq.source:'—')+')');
+    return;
+  }
+
   const raw = await fetchYF(yfsym, rdef);
-  const parsed = parseYF(raw);
-  if (!parsed) { setStat('載入失敗'); document.getElementById('chart-loading').textContent='無資料'; return; }
+  // 切股 race：若這次 fetch 期間使用者已切到別檔(更新的 loadSym)，丟棄這份舊資料不渲染
+  if (_myLoad !== window.__loadSeq) return;
+  let parsed = parseYF(raw);
+  // ── 盤中分K空資料 → 自動退日線 (v3.9 修「9:00開盤抓不到K線」) ──────
+  // Yahoo 台股開盤後常延遲提供當日 intraday(5m)bars,回空陣列→parseYF 無 candles。
+  // 改:偵測到分K為空就自動改抓日線(日線會用 regularMarketPrice 合成今日K棒,
+  // 至少看得到今天),而非顯示「載入失敗/無資料」。
+  const _intradayDef = (rdef.interval !== '1d' && rdef.interval !== '1wk');
+  let _noteMsg = '';
+  // (1) 盤中分K Yahoo 開盤常延遲回空 → 用即時報價(/quote 真當日 open/high/low/現價)
+  //     合成「今日K棒」,保留分鐘時間軸,看得到當日漲跌;配合 liverefresh_v3 每分鐘更新。
+  if (_intradayDef && (!parsed || !parsed.candles.length)) {
+    try {
+      const _q = await fetch(`${SERVER}/quote/${encodeURIComponent(yfsym)}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null);
+      if (_myLoad !== window.__loadSeq) return;   // 切股 race 守衛
+      if (_q && _q.price > 0) {
+        const _o = (_q.open > 0 ? _q.open : (_q.prevClose || _q.price));
+        const _h = (_q.high > 0 ? _q.high : Math.max(_o, _q.price));
+        const _l = (_q.low  > 0 ? _q.low  : Math.min(_o, _q.price));
+        parsed = { candles: [{ time: Math.floor(Date.now() / 1000), open: _o, high: _h, low: _l, close: _q.price, volume: _q.volume || 0 }],
+                   meta: { symbol: yfsym }, name: (parsed && parsed.name) || sym, yesterdayClose: _q.prevClose };
+        _noteMsg = sym + '：盤中分K尚未供,用即時報價合成今日K(自動刷新)';
+      }
+    } catch {}
+  }
+  // (2) 連即時報價都無 → 最後退日線
+  if (_intradayDef && (!parsed || !parsed.candles.length)) {
+    const _draw = await fetchYF(yfsym, { range: '5d', interval: '1d' });
+    if (_myLoad !== window.__loadSeq) return;
+    const _dp = parseYF(_draw);
+    if (_dp && _dp.candles.length) { parsed = _dp; rdef = { range: '5d', interval: '1d' }; _noteMsg = sym + '：暫顯示日線'; }
+  }
+  if (!parsed || !parsed.candles.length) { setStat('載入失敗'); document.getElementById('chart-loading').textContent='無資料'; return; }
+  if (_noteMsg) setStat(_noteMsg);
 
   // trim for ranges Yahoo doesn't have natively (e.g. 3 weeks = last 15 trading days)
   if (rdef.trim && parsed.candles.length > rdef.trim) {
@@ -593,6 +679,23 @@ async function loadSym(sym, mkt) {
       parsed.yesterdayClose = _ycp;
     }
   }
+  // ── 日線/週線昨收 (v3.9 修「漲幅亂跳」) ──────────────────────
+  // 日線 range 的 meta 常缺 previousClose，且若昨日日 K close=null(Yahoo 缺口，
+  // 如 00988A 6/15)，parseYF 過濾後 candles[-2] 會變成「更舊一根」(6/12 20.88)，
+  // 算出 +8% 假漲幅。改：優先 meta.regularMarketPreviousClose/previousClose，
+  // 缺則打 /quote(range=1d 的 previousClose 權威昨收)。存 yesterdayClose 供 ci-chg
+  // 與 polish 昨收線一致。
+  if (!_isIntraday) {
+    let _dp = parsed.meta && (parsed.meta.regularMarketPreviousClose ?? parsed.meta.previousClose);
+    if (!(_dp > 0)) {
+      try {
+        const _q = await fetch(`${SERVER}/quote/${yfsym}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null);
+        if (_q && _q.prevClose > 0) _dp = _q.prevClose;
+      } catch {}
+      if (_myLoad !== window.__loadSeq) return;   // race guard after await
+    }
+    if (_dp > 0) parsed.yesterdayClose = _dp;
+  }
 
   // ── intraday 尾盤集合競價量補回 (v3.8) ──────────────────────
   // 台股 13:30 收盤集合競價的量常沒進 Yahoo 5m 最後一根（最後一根 volume=0），
@@ -617,8 +720,9 @@ async function loadSym(sym, mkt) {
 
   const last = parsed.candles[parsed.candles.length-1];
   const prev = parsed.candles[parsed.candles.length-2];
-  // For intraday: use S.data.yesterdayClose. For daily/weekly (含合成 K): use prev candle.
-  const _prevRef = (_isIntraday && parsed.yesterdayClose != null)
+  // 昨收統一用 parsed.yesterdayClose(intraday=chartPreviousClose；日線=meta/quote 權威昨收)，
+  // 缺才退回前一根 K close。修「日線遇 null 缺口抓到更舊一根→漲幅亂跳」。
+  const _prevRef = (parsed.yesterdayClose != null && parsed.yesterdayClose > 0)
     ? parsed.yesterdayClose
     : (prev ? prev.close : null);
   const chgPct = (_prevRef != null && _prevRef > 0)
@@ -631,6 +735,7 @@ async function loadSym(sym, mkt) {
 
   // compute indicators
   S.ind = await runWorker(parsed.candles);
+  if (_myLoad !== window.__loadSeq) return;   // 切股 race：指標算完前已切別檔→不覆寫
   renderInd(S.ind, last, mkt);
   if (S.ind) updateEtfFlowInd();
   renderRpanel();
@@ -663,8 +768,16 @@ function renderChart(candles) {
     width: wrap.clientWidth, height: wrap.clientHeight,
     layout:{background:{color:'#060A12'},textColor:'#5A6A82'},
     grid:{vertLines:{color:'#0F1A2B'},horzLines:{color:'#0F1A2B'}},
-    crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
-    rightPriceScale:{borderColor:'#1A2740',scaleMargins:{top:0.05,bottom:0.18}},
+    crosshair:{
+      // Magnet 磁吸模式:水平線吸附到最近 K 棒的數值(像 Yahoo 貼著線走,不隨滑鼠 Y 每像素跳動)
+      mode:LightweightCharts.CrosshairMode.Magnet,
+      // Yahoo 風格:金色虛線 + 軸上時間/價格標籤泡泡
+      vertLine:{color:'rgba(245,197,24,.55)',width:1,style:2,labelVisible:true,labelBackgroundColor:'#B8860B'},
+      horzLine:{color:'rgba(245,197,24,.55)',width:1,style:2,labelVisible:true,labelBackgroundColor:'#B8860B'},
+    },
+    rightPriceScale:{borderColor:'#1A2740',
+      // 盤中(1天)加大上下留白 → 把當日小波動壓平(flatten),不再撐滿全高顯得震盪劇烈
+      scaleMargins: isIntraday ? {top:0.30,bottom:0.30} : {top:0.05,bottom:0.18}},
     timeScale:{
       borderColor:'#1A2740',
       timeVisible: isIntraday,
@@ -689,15 +802,62 @@ function renderChart(candles) {
   });
   const lcd = candles.map(c=>({time:tz(c.time),open:c.open,high:c.high,low:c.low,close:c.close}));
   cs.setData(lcd);
+  // 十字圓點:透明收盤線 + crosshairMarker → 游標貼著收盤走時顯示金色圓點(像 Yahoo)
+  const _dotSeries = chart.addLineSeries({
+    color:'rgba(0,0,0,0)', lineWidth:1, priceLineVisible:false, lastValueVisible:false,
+    crosshairMarkerVisible:true, crosshairMarkerRadius:4,
+    crosshairMarkerBorderColor:'#F5C518', crosshairMarkerBackgroundColor:'rgba(245,197,24,.9)', crosshairMarkerBorderWidth:1,
+  });
+  _dotSeries.setData(lcd.map(c=>({time:c.time, value:c.close})));
+  S.dotSeries = _dotSeries;
+  // 盤中(1天)固定 X 軸到整個交易時段(台股9:00–13:30/美股9:30–16:00):用「獨立透明 whitespace 系列」延伸時間軸。
+  // ⚠不可把 whitespace 放在 K 棒系列 — 否則「最後一根」變成收盤時間,realtime 的 series.update(只能改最後一根或往後append)會失效。
+  if (isIntraday && lcd.length) {
+    const _lastTz = lcd[lcd.length - 1].time;
+    const _midnight = _lastTz - (_lastTz % 86400);
+    const _closeTz = _midnight + ((S.mkt === 'TW') ? 13.5 * 3600 : 16 * 3600);
+    const _wsSeries = chart.addLineSeries({ color: 'rgba(0,0,0,0)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    const _ws = [];
+    for (let t = lcd[0].time; t <= _closeTz; t += 60) _ws.push({ time: t });   // 透明留白點撐開時間軸到收盤
+    _wsSeries.setData(_ws);
+    S.wsSeries = _wsSeries;
+  }
+  // 非盤中:把 X 軸補到「所選範圍」起點,符合時間軸概念(選10年就畫10年寬,新股資料短就擠右側一小條)。
+  // 老股資料已涵蓋整個範圍 → lcd[0] 早於起點 → 不補;新股資料短 → 左側透明 whitespace 撐出完整範圍。
+  if (!isIntraday && lcd.length && S.range !== 'max') {
+    const _DAYS = { '3w':21, '1mo':31, '3mo':93, '6mo':186, '1y':366, '2y':731, '5y':1827, '10y':3653 };
+    let _startTz = null;
+    if (S.range === 'ytd') {
+      const _d = new Date();
+      _startTz = Math.floor(Date.UTC(_d.getFullYear(), 0, 1) / 1000) + userTzOffset;
+    } else if (_DAYS[S.range]) {
+      _startTz = lcd[lcd.length - 1].time - _DAYS[S.range] * 86400;
+    }
+    if (_startTz != null && lcd[0].time > _startTz) {
+      const _wsL = chart.addLineSeries({ color:'rgba(0,0,0,0)', lineWidth:1, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+      const _arr = [];
+      for (let t = _startTz; t < lcd[0].time; t += 86400) _arr.push({ time: t });
+      if (_arr.length) { _wsL.setData(_arr); S.wsLeftSeries = _wsL; }
+    }
+  }
   S.chartSeries = cs;
 
-  const vs = chart.addHistogramSeries({
-    color:'rgba(96,165,250,0.3)',priceFormat:{type:'volume'},
-    priceScaleId:'vol',
-  });
-  chart.priceScale('vol').applyOptions({scaleMargins:{top:0.8,bottom:0}});
-  vs.setData(candles.map(c=>({time:tz(c.time),value:c.volume,color:c.close>=c.open?'rgba(74,222,128,0.25)':'rgba(248,113,113,0.25)'})));
-  S.volSeries = vs;
+  // v3.9：指數(如 ^SOX/美股指數)Yahoo 無成交量 → 隱藏量柱區，價格用滿高度
+  const _hasVol = candles.some(c => c.volume > 0);
+  let vs = null;   // ← 須在函式層宣告:十字游標處理器(param.seriesData.get(vs))會引用,
+                   //    否則無量股(隱藏量柱)時 vs 未定義→游標移動拋錯→ci-ohlc 面板填不上而消失
+  if (_hasVol) {
+    vs = chart.addHistogramSeries({
+      color:'rgba(96,165,250,0.3)',priceFormat:{type:'volume'},
+      priceScaleId:'vol',
+    });
+    chart.priceScale('vol').applyOptions({scaleMargins:{top:0.8,bottom:0}});
+    vs.setData(candles.map(c=>({time:tz(c.time),value:c.volume,color:c.close>=c.open?'rgba(74,222,128,0.25)':'rgba(248,113,113,0.25)'})));
+    S.volSeries = vs;
+  } else {
+    S.volSeries = null;
+    chart.priceScale('right').applyOptions({scaleMargins:{top:0.06,bottom:0.04}});  // 無量→價格滿版
+  }
 
   // ── SMA + Bollinger Bands overlay (skip on intraday) ──
   S.overlaySeries = {};
@@ -771,7 +931,7 @@ function renderChart(candles) {
       if (m20) parts.push(`<span style="color:#FBBF24">SMA20 ${m20.value.toFixed(2)}</span>`);
       if (m60) parts.push(`<span style="color:#67E8F9">SMA60 ${m60.value.toFixed(2)}</span>`);
       if (u && l) parts.push(`<span style="color:rgba(96,165,250,.85)">BB ${l.value.toFixed(2)} ~ ${u.value.toFixed(2)}</span>`);
-      if (parts.length) maRow = `<div class="ma-row">${parts.join(' ')}</div>`;
+      if (parts.length) maRow = ` <span class="ohlc-k">·</span> ${parts.join(' ')}`;   // 壓成同一行(去掉換行 .ma-row)
     }
 
     ohlcEl.style.display = 'block';
@@ -872,7 +1032,7 @@ function renderWl() {
     }
     return `<div class="wlchip${isActive?' active':''}" draggable="true" data-sym="${w.t}" data-mkt="${w.m}" onclick="loadSym('${w.t}','${w.m}')" oncontextmenu="rmWl('${w.t}','${w.m}');return false" title="拖曳排序 / 點擊載入 / 右鍵移除">
       <span class="wlchip-grip">⋮⋮</span>
-      <span class="wlchip-t">${w.t}</span>
+      <span class="wlchip-t">${w.name || w.t}</span>
       <span class="wlchip-p ${getPcls(w.chg)}" id="wlp-${w.t}">${w.chg!=null?(w.chg>=0?'+':'')+w.chg.toFixed(2)+'%':''}</span>${_etfBadge}
       <span class="wlchip-rm" onclick="event.stopPropagation();rmWl('${w.t}','${w.m}')" title="移除">×</span>
     </div>`;
@@ -1021,15 +1181,15 @@ function renderStats() {
   ] : [];
   return `
     <div class="stat-hdr">價格資訊 · ${S.sym}</div>
-    ${rows.map(([k,v])=>`<div class="stat-row"><span class="stat-k">${k}</span><span class="stat-v">${v}</span></div>`).join('')}
+    ${rows.map(([k,v])=>`<div class="stat-row"><span class="stat-k">${k}</span><span class="stat-v" id="rp-${k.replace(/\s+/g,'')}">${v}</span></div>`).join('')}
     ${renderEtfHoldingsForStock(S.sym)}${S.ind?`<div class="stat-sect">技術指標</div>${indRows.map(([k,v])=>`<div class="stat-row"><span class="stat-k">${k}</span><span class="stat-v">${v||'--'}</span></div>`).join('')}`:''}
   `;
 }
 
 // ── RESEARCH TAB ─────────────────────────────────────────────────
 function renderResearch() {
-  const canAna = !!S.apiKey && !!S.sym && !S.analyzing;
-  const canMkt = !!S.apiKey && !S.analyzing;
+  const canAna = !!S.aiKeySet && !!S.sym && !S.analyzing;
+  const canMkt = !!S.aiKeySet && !S.analyzing;
   let html = `<div style="display:flex;gap:6px">
     <button id="anabtn" style="flex:1" onclick="startAnalysis('stock')" ${canAna?'':'disabled'}>${S.analyzing&&S.anaMode!=='market'?'分析中...':'▶ AI 個股 '+(S.sym||'')}</button>
     <button id="anabtn-mkt" style="flex:1" onclick="startAnalysis('market')" ${canMkt?'':'disabled'}>${S.analyzing&&S.anaMode==='market'?'分析中...':'📊 大盤分析'}</button>
@@ -1060,7 +1220,9 @@ function renderResearch() {
       html += S.sources.map((s,i)=>`<a class="src-lnk" href="${s.url}" target="_blank">${i+1}. ${s.title||s.url}</a>`).join('');
       html += '</div>';
     }
-    html += '<div style="text-align:center;padding:12px 0"><button onclick="window.print()" style="padding:6px 14px;background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--tlo);font-family:JetBrains Mono,monospace;font-size:10px;cursor:pointer">⬇ 匯出 PDF</button></div>';
+    html += '<div style="text-align:center;padding:12px 0;display:flex;gap:8px;justify-content:center">'
+      + '<button onclick="exportReportPDF()" style="padding:6px 14px;background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--tlo);font-family:JetBrains Mono,monospace;font-size:10px;cursor:pointer">📄 匯出 PDF</button>'
+      + '<button onclick="emailReport()" style="padding:6px 14px;background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--tlo);font-family:JetBrains Mono,monospace;font-size:10px;cursor:pointer">✉ Email 寄送</button></div>';
     html += '</div>';
   }
   return html;
@@ -1086,9 +1248,28 @@ function gatherMarketSnapshot() {
 }
 
 // ── STREAMING ANALYSIS ─────────────────────────────────────────
+// ── 自適應 AI 模型 (v3.9) ────────────────────────────────────────
+// 不寫死模型字串:查 Anthropic /v1/models 自動挑「最新的 Sonnet」(API 回傳新→舊排序),
+// 解析一次後本工作階段快取。Anthropic 出新模型自動跟上,不必每次手改。失敗退現行固定值。
+let _aiModel = 'claude-sonnet-4-6';     // fallback(現行有效)
+let _aiModelResolved = false;
+async function refreshAIModel() {
+  // 改由 server 解析(server 端持有金鑰查 /v1/models)→ 金鑰不進瀏覽器。
+  try {
+    const r = await fetch(`${SERVER}/ai-model`, { cache: 'no-store' });
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j && j.model) { _aiModel = j.model; console.log('[ai] 自適應模型 →', j.model); }
+  } catch (e) { /* 保留 fallback */ }
+}
+async function ensureAIModel() {
+  if (!_aiModelResolved) { await refreshAIModel(); _aiModelResolved = true; }
+  return _aiModel;
+}
+
 async function startAnalysis(mode) {
   mode = mode || 'stock';
-  if (!S.apiKey) { showKeyModal(); return; }
+  if (!S.aiKeySet) { showKeyModal(); return; }
   if (S.analyzing) return;
   if (mode === 'stock' && !S.sym) return;
   S.anaMode = mode;
@@ -1112,16 +1293,11 @@ async function startAnalysis(mode) {
   }
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch(`${SERVER}/ai-proxy`, {   // 經本機 server 代理(金鑰在 server,不進瀏覽器)
       method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'x-api-key':S.apiKey,
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true',
-      },
+      headers:{ 'Content-Type':'application/json' },
       body:JSON.stringify({
-        model:'claude-sonnet-4-20250514',
+        model:(await ensureAIModel()),
         max_tokens:6000, stream:true,
         system:systemPrompt,
         messages:[{role:'user',content:userMsg}],
@@ -1190,7 +1366,7 @@ function renderBatch() {
         <button class="mktbtn" id="bb-us" onclick="batchSetMkt('US')">US</button>
       </div>
       <button class="badd" onclick="batchAdd()">＋</button>
-      <button class="brun" onclick="runBatch()" ${isRunning||!S.apiKey?'disabled':''}>${isRunning?'執行中...':'▶ 批次'}</button>
+      <button class="brun" onclick="runBatch()" ${isRunning||!S.aiKeySet?'disabled':''}>${isRunning?'執行中...':'▶ 批次'}</button>
     </div>
     <div class="batch-list">
       ${S.batch.map((b,i)=>`
@@ -1237,10 +1413,10 @@ async function runBatchItem(b) {
   const mktLabel=b.mkt==='TW'?`台股（代號：${b.sym}，幣別：TWD 新台幣）`:`美股（代號：${b.sym}，幣別：USD）`;
   const userMsg=`請對以下個股撰寫完整八章節研究報告：\n市場：${mktLabel}\n股票代號：${b.sym}\n\n直接從 [[[SECTION:公司簡介]]] 開始。`;
   try {
-    const res=await fetch('https://api.anthropic.com/v1/messages',{
+    const res=await fetch(`${SERVER}/ai-proxy`,{   // 經本機 server 代理(金鑰在 server)
       method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':S.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:6000,stream:true,system:SYS_PROMPT,messages:[{role:'user',content:userMsg}],tools:[{type:'web_search_20250305',name:'web_search'}]})
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:(await ensureAIModel()),max_tokens:6000,stream:true,system:SYS_PROMPT,messages:[{role:'user',content:userMsg}],tools:[{type:'web_search_20250305',name:'web_search'}]})
     });
     if(!res.ok) throw new Error('API '+res.status);
     const reader=res.body.getReader(),dec=new TextDecoder();
@@ -1291,6 +1467,59 @@ function loadReport(ticker, market) {
 }
 
 // ── MARKDOWN → HTML ───────────────────────────────────────────────
+// ── AI 報告匯出 PDF / Email (v3.9) ──────────────────────────────
+function reportDocHTML() {
+  const _defs = S.secDefs || SECTION_DEFS;
+  const title = (S.anaMode === 'market') ? '台股大盤分析與隔日策略' : `${S.sym} 個股研究報告`;
+  const date = new Date().toLocaleString('zh-TW', { hour12: false });
+  let secs = '';
+  for (const sec of (S.sections || [])) {
+    const def = _defs.find(d => d.key === sec.key) || { zh: sec.key };
+    secs += `<h2>${def.zh}</h2>${mdToHtml(sec.content)}`;
+  }
+  let src = '';
+  if (S.sources && S.sources.length) {
+    src = '<h2>資料來源</h2><ol>' + S.sources.map(s => `<li><a href="${s.url}">${(s.title || s.url)}</a></li>`).join('') + '</ol>';
+  }
+  return `<!doctype html><html lang="zh-TW"><head><meta charset="utf-8"><title>${title}</title>
+    <style>body{font-family:'Microsoft JhengHei','PingFang TC',Arial,sans-serif;max-width:760px;margin:24px auto;padding:0 20px;color:#1a1a1a;line-height:1.7}
+    h1{font-size:20px;border-bottom:2px solid #333;padding-bottom:8px}
+    h2{font-size:15px;color:#1f4e79;margin-top:22px;border-left:4px solid #1f4e79;padding-left:8px}
+    table{border-collapse:collapse;width:100%;margin:8px 0;font-size:13px}th,td{border:1px solid #ccc;padding:5px 8px;text-align:left}th{background:#f0f4f8}
+    a{color:#1f4e79;word-break:break-all}.meta{color:#666;font-size:12px;margin-bottom:16px}
+    .foot{margin-top:24px;color:#999;font-size:11px;border-top:1px solid #ddd;padding-top:8px}
+    @media print{a{color:#1f4e79}}</style></head>
+    <body><h1>${title}</h1>
+    <div class="meta">產生時間:${date} · Stock Terminal AI 分析</div>
+    ${secs}${src}
+    <div class="foot">本報告由 Stock Terminal AI 生成,資料來源見上。投資有風險,僅供參考、非投資建議。</div>` + '</' + 'body></' + 'html>';
+    // ↑ 結尾標籤用字串串接,避免原始碼出現字面 </body>(build_v2 以 </body> 為 script 注入點,會誤注入進此字串)
+}
+function exportReportPDF() {
+  if (!S.sections || !S.sections.length) { alert('尚無報告可匯出,請先執行 AI 分析'); return; }
+  const w = window.open('', '_blank');
+  if (!w) { alert('請允許此站彈出視窗後再試'); return; }
+  w.document.write(reportDocHTML());
+  w.document.close();
+  setTimeout(() => { try { w.focus(); w.print(); } catch (e) {} }, 500);   // 列印對話框選「另存為 PDF」
+}
+async function emailReport() {
+  if (!S.sections || !S.sections.length) { alert('尚無報告可寄送,請先執行 AI 分析'); return; }
+  const to = prompt('寄送 AI 報告到 Email(收件者):', '');
+  if (!to || !to.trim()) return;
+  const title = (S.anaMode === 'market') ? '台股大盤分析' : `${S.sym} 個股研究報告`;
+  setStat('寄送中…');
+  try {
+    const r = await fetch(`${SERVER}/report-email`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: to.trim(), subject: '【Stock Terminal】' + title, html: reportDocHTML() }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.ok) setStat('✓ 已寄出報告到 ' + to.trim());
+    else { setStat('寄送失敗'); alert('寄送失敗:' + (j.error || r.status) + '\n\n需先在 🔔 通知 設定 Email SMTP(寄件帳號/應用程式密碼)。'); }
+  } catch (e) { setStat('寄送失敗'); alert('寄送失敗:' + e.message); }
+}
+
 function mdToHtml(raw) {
   if(!raw) return '';
   let t=raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -1335,7 +1564,7 @@ function go() {
 }
 function setStat(msg) { document.getElementById('stattxt').textContent=msg; }
 function updateKeyBtn() {
-  document.getElementById('keybtn').textContent=S.apiKey?'KEY ✓':'API KEY';
+  document.getElementById('keybtn').textContent=S.aiKeySet?'KEY ✓':'API KEY';
 }
 
 // ── API KEY MODAL ─────────────────────────────────────────────────
@@ -1347,28 +1576,33 @@ function showKeyModal() {
   div.innerHTML=`<div class="mbox">
     <div class="m-title">ANTHROPIC API KEY</div>
     <div class="m-desc">取得：<a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--cyan)">console.anthropic.com</a> → API Keys<br>
-    <span style="font-size:9px;color:var(--tf)">Key 儲存於本機 localStorage，不傳送第三方。</span></div>
+    <span style="font-size:9px;color:var(--tf)">Key 儲存於本機 server(不進瀏覽器、不傳第三方);AI 呼叫由本機 server 代理。${S.aiKeySet?'<br><b style="color:var(--green)">目前已設定</b>(輸入新值可更新)':''}</span></div>
     <div class="m-row">
-      <input class="m-input" id="key-inp" type="password" placeholder="sk-ant-api03-..." value="${S.apiKey}">
+      <input class="m-input" id="key-inp" type="password" placeholder="${S.aiKeySet?'已設定 — 輸入可更新':'sk-ant-api03-...'}" value="">
     </div>
     <div class="m-row" style="margin-top:10px">
       <button class="m-btn" onclick="saveKey()">儲存</button>
       <button class="m-btn-sec" onclick="document.getElementById('key-modal').remove()">取消</button>
-      ${S.apiKey?`<button class="m-btn-sec" onclick="clearKey()">清除</button>`:''}
+      ${S.aiKeySet?`<button class="m-btn-sec" onclick="clearKey()">清除</button>`:''}
     </div>
   </div>`;
   document.body.appendChild(div);
   document.getElementById('key-inp').focus();
 }
-function saveKey() {
+async function saveKey() {
   const v=document.getElementById('key-inp')?.value?.trim();
   if(!v)return;
-  S.apiKey=v; localStorage.setItem(LS_KEY_KEY,v);
+  try{
+    const r=await fetch(`${SERVER}/ai-key`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:v})});
+    if(!r.ok){ alert('儲存失敗:'+(await r.text())); return; }
+    S.aiKeySet=true; S.apiKey='';
+  }catch(e){ alert('儲存失敗:'+e.message); return; }
   document.getElementById('key-modal')?.remove();
   updateKeyBtn(); renderRpanel();
 }
-function clearKey() {
-  S.apiKey=''; localStorage.removeItem(LS_KEY_KEY);
+async function clearKey() {
+  try{ await fetch(`${SERVER}/ai-key`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clear:true})}); }catch{}
+  S.aiKeySet=false; S.apiKey='';
   document.getElementById('key-modal')?.remove();
   updateKeyBtn(); renderRpanel();
 }

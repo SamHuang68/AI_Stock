@@ -6,7 +6,7 @@ REM  Logs go to logs\chip_YYYY-MM-DD.log
 REM ===========================================================
 setlocal enabledelayedexpansion
 chcp 65001 > nul
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 if not exist "logs" mkdir "logs"
 
@@ -14,7 +14,7 @@ for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd"') d
 set LOG=logs\chip_%DATE_TAG%.log
 
 echo === Run at %DATE% %TIME% === >> "%LOG%"
-python chip_history_tracker.py >> "%LOG%" 2>&1
+python server\chip_history_tracker.py >> "%LOG%" 2>&1
 set RC=%ERRORLEVEL%
 echo === Exit %RC% === >> "%LOG%"
 

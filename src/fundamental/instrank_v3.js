@@ -15,7 +15,9 @@
     const s = document.createElement('style'); s.id = 'ir-style';
     s.textContent = `
     #ir-modal{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:none;align-items:center;justify-content:center}
-    #ir-box{background:#0f172a;border:1px solid #334155;border-radius:10px;width:min(560px,94vw);max-height:90vh;overflow:auto;padding:16px;color:#e2e8f0;font-size:12px}
+    #ir-box{background:#0f172a;border:1px solid #334155;border-radius:10px;width:min(960px,96vw);max-height:90vh;overflow:auto;padding:16px;color:#e2e8f0;font-size:12px}
+    .ir-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    @media(max-width:680px){.ir-cols{grid-template-columns:1fr}}
     #ir-box h3{margin:0 0 6px;font-size:15px}
     .ir-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
     .ir-tab{padding:4px 10px;border:1px solid #334155;border-radius:14px;cursor:pointer;font-size:11px;color:#94a3b8;background:#0b1220}
@@ -48,16 +50,21 @@
     try { d = await fetch(`${SRV}/inst-rank?who=${who}&side=${side}&n=30`, { cache: 'no-store' }).then(r => r.json()); } catch (e) {}
     const list = (d && d.list) || [];
     const buy = side === 'buy';
-    let rows = list.map((x, i) => {
-      const lots = x.lots, st = x.streak;
+    const cls = buy ? 'ir-up' : 'ir-dn';
+    const rowHtml = (x, rank) => {
+      const st = x.streak;
       const stTxt = (st == null || st === 0) ? '' :
         (st > 0 ? `<span class="ir-up">連買${st}</span>` : `<span class="ir-dn">連賣${Math.abs(st)}</span>`);
-      return `<tr class="ir-row" data-code="${x.code}"><td>${i + 1}</td><td>${x.code} <span style="color:#64748b">${x.name || ''}</span></td>
-        <td class="${buy ? 'ir-up' : 'ir-dn'}">${lots == null ? '—' : (lots >= 0 ? '+' : '') + lots.toLocaleString()} 張</td>
+      return `<tr class="ir-row" data-code="${x.code}"><td>${rank}</td><td>${x.code} <span style="color:#64748b">${x.name || ''}</span></td>
+        <td class="${cls}">${x.lots == null ? '—' : (x.lots >= 0 ? '+' : '') + x.lots.toLocaleString()}</td>
         <td>${stTxt}</td></tr>`;
-    }).join('');
+    };
+    const buildTbl = (slice, offset) =>
+      `<table class="ir-tbl"><tr><th>#</th><th>代號</th><th>張數</th><th>連續</th></tr>${slice.map((x, i) => rowHtml(x, offset + i + 1)).join('')}</table>`;
+    const hdr = `${who === 'foreign' ? '外資' : '投信'}${buy ? '買超' : '賣超'}　${d.date || ''}　（前 30 名並排）`;
     body.innerHTML = tabs() + (list.length
-      ? `<table class="ir-tbl"><tr><th>#</th><th>${who === 'foreign' ? '外資' : '投信'}${buy ? '買超' : '賣超'}（${d.date || ''}）</th><th>張數</th><th>連續</th></tr>${rows}</table>`
+      ? `<div style="font-size:11px;color:#94a3b8;margin:4px 0 6px">${hdr}</div>
+         <div class="ir-cols"><div>${buildTbl(list.slice(0, 15), 0)}</div><div>${buildTbl(list.slice(15, 30), 15)}</div></div>`
       : `<div style="padding:14px;color:#64748b">無資料（T86 多為盤後發布，建議收盤後查）。</div>`)
       + `<div class="ir-note">外資買超榜＝權值與 AI 供應鏈主力動向；投信買超＝中小成長股認養。連續買超天數越長代表趨勢性買盤。點列載入線型。台股紅=買超綠=賣超。</div>`;
     bindTabs();

@@ -7,7 +7,7 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":18432" ^| findstr "LISTENIN
 )
 timeout /t 1 /nobreak >nul
 echo [restart] starting server.py ...
-cd /d "%~dp0"
-start "Stock Terminal Server" /MIN cmd /c "python server.py"
+cd /d "%~dp0.."
+start "Stock Terminal Server" /MIN cmd /c "python server\server.py"
 timeout /t 2 /nobreak >nul
 echo [restart] done. Server should be at http://localhost:18432

@@ -1,7 +1,7 @@
 @echo off
 REM v3.6: rebuild stock_terminal_v2.html from v1 source + restart server
 chcp 65001 >nul
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 echo === Step 1/3: Rebuild stock_terminal_v2.html from v1 base ===
 python build_v2.py
@@ -21,7 +21,7 @@ timeout /t 1 /nobreak >nul
 echo.
 
 echo === Step 3/3: Start fresh server ===
-start "Stock Terminal Server" /MIN cmd /c "python server.py"
+start "Stock Terminal Server" /MIN cmd /c "python server\server.py"
 timeout /t 2 /nobreak >nul
 echo.
 

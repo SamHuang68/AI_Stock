@@ -509,7 +509,7 @@
       h += `<div class="e3-card${opened ? ' open' : ''}">`;
       h += `<div class="e3-card-hdr" data-e3="toggle" data-code="${esc(code)}">
         <span class="e3-card-arrow">▶</span>
-        <span class="e3-card-code">${esc(code)}</span>
+        <span class="e3-card-code" data-e3="goto" data-sym="${esc(code)}" data-mkt="TW" title="載入 ${esc(code)} K線" style="cursor:pointer">${esc(code)}</span>
         <span class="e3-card-name">${esc(resolveName(code, e.name))}</span>
         <div class="e3-card-badges">
           ${nNew ? `<span class="e3-badge new">+${nNew}</span>` : ''}
@@ -769,14 +769,13 @@
       btn.onclick = async (ev) => {
         ev.stopPropagation();
         const out = document.querySelector(`#e3-modal .e3-reason-out[data-for="${CSS.escape(btn.dataset.sym)}"]`);
-        const key = (typeof S !== 'undefined' && S.apiKey) ? S.apiKey : '';
-        if (!key) { if (out) out.textContent = '⚠ 請先在右上角設定 API KEY'; return; }
+        if (!(typeof S !== 'undefined' && S.aiKeySet)) { if (out) out.textContent = '⚠ 請先在右上角設定 API KEY'; return; }
         btn.disabled = true; btn.textContent = '🤖 推導中…';
         try {
           const r = await fetch(_SRV() + '/etf-reason', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              apiKey: key, code: btn.dataset.sym, name: btn.dataset.name,
+              apiKey: '', code: btn.dataset.sym, name: btn.dataset.name,
               etfs: (btn.dataset.etfs || '').split(',').filter(Boolean),
               action: btn.dataset.action, sharesDelta: btn.dataset.shares, weightDelta: btn.dataset.weight,
             }),

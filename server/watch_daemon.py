@@ -20,9 +20,9 @@ except Exception as e:
     alert_daemon = None
     print('[watch] alert_daemon import failed:', e)
 
-_BASE = os.path.dirname(os.path.abspath(__file__))
-RULES_FILE = os.path.join(_BASE, 'watch_rules.json')
-STATE_FILE = os.path.join(_BASE, 'watch_state.json')
+_BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+RULES_FILE = os.path.join(_BASE, 'data', 'watch_rules.json')
+STATE_FILE = os.path.join(_BASE, 'data', 'watch_state.json')
 LOG_DIR = os.path.join(_BASE, 'logs', 'watch')
 _state = {'thread': None, 'stop': False, 'last_run': None, 'fired': []}
 

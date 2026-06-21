@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 > nul
 setlocal enabledelayedexpansion
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 echo ============================================
 echo  Register Daily ETF Report Email (v3.8)

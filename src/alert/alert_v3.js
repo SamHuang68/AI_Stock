@@ -76,6 +76,8 @@
 
   function notify(title, body, sym) {
     console.log(`[v3-alert] 🔔 ${title} — ${body}`);
+    // v3.9 Phase-1:頁內 toast 卡(OS 通知本函式下方自理,故 skipDesktop 避免重複)
+    if (typeof window.notifyToast === 'function') window.notifyToast(title, body, { sym, level: 'warn', skipDesktop: true });
     // UI badge: tint PLAN tab button
     const planTab = document.getElementById('tab-plan');
     if (planTab) {

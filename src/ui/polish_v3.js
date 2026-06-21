@@ -180,7 +180,7 @@ const MKT_INDICES = [
       // v3.1 觀察清單風格雙列：
       //   行 1：指數名（小灰）+ 加權值（大字）
       //   行 2：▲漲跌值 ▲漲跌% （小字、台股紅漲綠跌）
-      `<div class="mkt-cell loading" data-mkt-sym="${m.sym}">
+      `<div class="mkt-cell loading${m.sym==='__TXF__'?' nochart':''}" data-mkt-sym="${m.sym}" title="${m.sym==='__TXF__'?'台指期(無獨立K線)':'點擊載入 '+m.name+' K 線'}">
         <div class="row1">
           <span class="nm">${m.name}</span>
           <span class="px">--</span>
@@ -195,6 +195,21 @@ const MKT_INDICES = [
   const indbar = document.getElementById('indbar');
   if (indbar) left.insertBefore(bar, indbar.nextSibling);
   else left.appendChild(bar);
+  // v3.9:點下面大盤 cell 直接帶出該指數/期貨 K 線(事件委派)。
+  //   指數(^...)/商品期(=F)一律用 'US' 市場避免被附 .TW;台指期無 K 線符號故略過。
+  bar.addEventListener('click', function (e) {
+    const cell = e.target.closest && e.target.closest('.mkt-cell');
+    if (!cell) return;
+    const sym = cell.getAttribute('data-mkt-sym');
+    if (!sym || sym === '__TXF__') return;
+    if (typeof loadSym === 'function') loadSym(sym, 'US');
+  });
+  // 點擊提示樣式
+  const st = document.createElement('style');
+  st.textContent = '.mkt-cell{cursor:pointer;transition:background .12s}' +
+    '.mkt-cell:hover{background:rgba(255,255,255,.06)}' +
+    '.mkt-cell.nochart{cursor:default}.mkt-cell.nochart:hover{background:none}';
+  document.head.appendChild(st);
   refreshMktBar();
   setInterval(refreshMktBar, 60_000);
 })();
@@ -504,12 +519,8 @@ function renderChartLegend() {
     east.appendChild(lg);
   }
   // 不顯示 K 線紅/綠（一眼可見不必標註），只標均線/BB/昨收這些「需要解碼」的線
-  lg.innerHTML = `
-    <div class="lg-row"><span class="lg-line" style="background:#FBBF24"></span>SMA 20</div>
-    <div class="lg-row"><span class="lg-line" style="background:#67E8F9"></span>SMA 60</div>
-    <div class="lg-row" style="color:rgba(96,165,250,.85)"><span class="lg-dash" style="width:9px;color:rgba(96,165,250,.85)"></span>BB</div>
-    <div class="lg-row" style="color:rgba(200,200,200,.55)"><span class="lg-dash" style="width:9px;color:rgba(200,200,200,.55)"></span>昨收</div>
-  `;
+  // v3.9 去重:SMA20/SMA60/BB 已在 OHLC 資訊行用對應顏色+數值標示,色塊圖例只留「昨收」(虛線較不易辨識)
+  lg.innerHTML = `<div class="lg-row" style="color:rgba(200,200,200,.55)"><span class="lg-dash" style="width:9px;color:rgba(200,200,200,.55)"></span>昨收</div>`;
 }
 
 // ============================================================

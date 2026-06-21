@@ -60,7 +60,20 @@
       hist = (cl || []).filter(x => x != null && isFinite(x) && x > 0);
     } catch (e) {}
 
-    const eps = v.epsTtm, curPer = v.per, price = v.price || (hist.length ? hist[hist.length - 1] : null);
+    const eps = v.epsTtm;
+    let price = v.price || (hist.length ? hist[hist.length - 1] : null);
+    // v3.9 Data Integrity:BWIBBU_ALL 的 price 是 EOD 收盤(慢一天)→ 用最新成交價覆蓋,現價/PER 才是最新。
+    //   台股取 MIS /twquote(真即時/收盤);否則用目前載入的 K 線最後收盤。
+    let _live = null;
+    const _code = sym.replace('.TWO', '').replace('.TW', '');
+    if (mkt === 'TW') {
+      try { const _q = await fetch(`${SRV}/twquote?code=${encodeURIComponent(_code)}`, { cache: 'no-store' }).then(r => r.json()); if (_q && _q.ok && _q.price > 0) _live = _q.price; } catch (e) {}
+    }
+    if (!_live && typeof S !== 'undefined' && S.sym === sym && S.data && S.data.candles && S.data.candles.length) {
+      const _lc = S.data.candles[S.data.candles.length - 1]; if (_lc && _lc.close > 0) _live = _lc.close;
+    }
+    if (_live) price = _live;
+    const curPer = (price && eps) ? (price / eps) : v.per;   // 用最新價重算 PER(原 v.per 基於 EOD 收盤)
     const fmt = (x, d = 2) => x == null ? '—' : (+x).toFixed(d);
 
     let kpi = `<div class="val-kpi">

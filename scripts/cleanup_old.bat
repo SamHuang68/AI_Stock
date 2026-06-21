@@ -1,7 +1,7 @@
 @echo off
 REM Stock Terminal - remove obsolete files (ASCII-only). Run AFTER commit_v3_9.bat for separate commits,
 REM or run alone (it will commit + push the removals). Tracked files use git rm; ignored files use del.
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 if exist ".git\index.lock" del /F /Q ".git\index.lock"
 
@@ -10,6 +10,9 @@ git rm -f --ignore-unmatch commit_v3_5.bat commit_v3_6.bat commit_v3_6_7.bat com
 
 echo === Removing old build runners + one-time init ===
 git rm -f --ignore-unmatch build_v2_run.py build_v2_run2.py build_v2_run3.py git_init.bat
+
+echo === Removing old launchers (keep only start_terminal_v3.bat) ===
+git rm -f --ignore-unmatch start_terminal.bat start_terminal_v2.bat
 
 echo === Removing deprecated / prototype modules ===
 git rm -f --ignore-unmatch stock_terminal.jsx stock_terminal_api.html layout_v3.js pattern_v3_test.html

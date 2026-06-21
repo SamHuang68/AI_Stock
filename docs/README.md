@@ -1,604 +1,152 @@
-# Stock Terminal v3.9
+# Stock Terminal
 
-Bloomberg-style 個股研究終端機，本機跑、零雲端依賴、無外部 Python 套件需求。
-
----
-
-## ⚡ 快速開始（3 步）
-
-> 需求：Windows 10/11 + Python 3.10+（純 stdlib，**不用 pip 裝任何東西**）+ 現代瀏覽器。確認 Python：開 cmd 打 `python --version`。
-
-1. **解壓縮**到任一資料夾（例 `C:\Tools\Stock_Terminal\`）。
-2. **雙擊 `start_terminal_v3.bat`** — 會自動 build、開瀏覽器、啟動本機 server（port 18432）。
-3. 上方輸入框打代號按 **GO**（台股 `2330`；美股先點 `US` 再打 `AAPL`）。
-
-**常用功能**（圖表上方工具列）：`📊 量價`（成交金額/量分布 + 主力成本區）、`📈 回測`、`🔔 推播`（Telegram/Email 警報設定）、`形態³`（19 種型態）。右側 `STATS` 分頁看技術×基本面雙軸卡、籌碼面、基本面。中間邊界 `⟩` 鈕可收合右側放大線型。
-
-**可選排程**（系統管理員身分跑一次）：`install_scheduler.bat`（每交易日 19:00 更新 ETF 持股）、`install_chip_scheduler.bat`（17:40 更新法人籌碼，累積後顯示連買賣天數）。
-
-**更新後沒看到變化？** 先關掉舊的 server 黑視窗 → 雙擊 `rebuild_and_restart.bat` → 瀏覽器 **Ctrl+F5**。
+Bloomberg 風格的個股研究終端機。本機跑、零雲端依賴、**不需 pip 安裝任何套件**（純 Python stdlib）。
 
 ---
 
-## v3.9 — 向 TradingView 看齊（多圖 / 全鍵盤 / 視覺化回測 / 畫線 / 三合一選股 / 複合警示）
+## 系統架構（模組結構）
 
-工具列新增（接在既有功能鈕後）：
+執行時是「瀏覽器前端 ↔ 本機 server ↔ 外部資料源」三層；前端模組依功能分資料夾，後端服務集中在 `server/`。
 
-- **▦ 多圖**（`Alt+M`）：在圖區疊出 2×1 / 2×2 / 1×3 分割，每格可獨立換商品與時框，**同步十字游標與時間軸**；內建「同股多時框 / 供應鏈對比 / 自選前四」樣板，版面記憶於瀏覽器。
-- **📊 價差**（`Alt+D`）：輸入數學式畫合成線看相對強弱 / 溢價差，例：`2330/2303`、`^TWII/^SOX`、`2330-TSM*TWD=X`（自寫解析器，不用 eval；純分析用，不可下單）。
-- **⌨ 快捷**（`?` 開快捷表）：非輸入框時**打字即搜尋**切股、`Space`/`Shift+Space` 切自選股、`Alt+1~0` 切時框、`Esc` 關浮層。
-- **🧱 策略**：樂高式條件組合器——下拉組進出場條件（指標 / 比較 / 交叉，AND/OR）→ 回測，輸出**最大回撤 / 勝率 / 獲利因子 / 年化夏普 / 逐筆明細 + 權益曲線**，可在主圖標買賣點；條件組可命名儲存。
-- **📝 腳本**：類 Pine 安全 DSL（自寫直譯器、函式白名單、不用 eval），`buy/sell` 跑回測、`plot` 疊主圖、自動標買賣 marker；內建範例。
-- **✏ 畫線**（`Alt+T`）：趨勢線 / 水平線 / 垂直線 / **斐波那契回撤** / 矩形 / 平行通道 / 文字標記；錨點以時間+價格記錄，**換區間 / 換裝置不消失**（localStorage + 本機 server `/draw` 雲端記憶）。
-- **🔬 選股**：技術 × 基本面 × 籌碼**三合一篩選**全台股（站上均線 / RSI / 量比 / 月營收 YoY / PER / 殖利率 / 投信外資連買天數），結果一鍵載入或加入自選。
-- **🧙 精靈**：加股設定精靈——回答 4 題（用途 / 週期 / 風險 / 資金）即自動體檢個股（技術分數 / ATR / 支撐壓力 / 歷史策略勝率 / 基本面 / 估值 / 籌碼），一鍵套用 **觀察訊號 + 警報（含買區複合警示）+ 持倉或買進計畫（ATR 或固定停損、建議股數）+ 支撐壓力畫線（斐波那契選配）+ 研判結論**（結論可選規則即時或 Claude 口語）。建議預設全套用、可逐項取消，標記來源可冪等覆寫不動手動設定。
+```
+瀏覽器 UI ── src/ 前端模組（工具列：一階分類 + 二階下拉）
+   │  HTTP  localhost:18432
+本機 server.py（純 stdlib）── Yahoo proxy · LRU 快取 · 籌碼/ETF/估值 API · 常駐 daemon
+   │  讀寫                                   │ 抓取
+data/（本機資料：ETF/籌碼/設定）        外部源：Yahoo Finance / MoneyDJ / TWSE
+```
 
-警報與 ETF 深化：
+### 目錄結構
 
-- **複合式警示**：後端 daemon 支援多條件 `AND/OR`（如「RSI < 30 且 收盤 ≤ 布林下軌」），瀏覽器關著也偵測；推播管道新增 **Webhook**（Discord / Slack / 自架），與既有 Telegram / Email 並存。
-- **ETF 異動深化**：共識報表買盤側顯示「**投信潛在買盤 ≈ X 張 ≈ 個股 20 日均量 Y%**」，並提供 **🤖 AI 原因**一句話解讀（補月營收 / 三率後由 Claude 推導，需設 API KEY）。
+```
+Stock_Terminal/
+├── stock_terminal.html          v1 基底 UI（build 來源）
+├── stock_terminal_v2.html       實際使用的 UI（由 build_v2.py 產生）
+├── build_v2.py                  打包器：把 src/ 模組注入 UI
+├── build_order.py               依相依關係自動排序模組載入順序
+├── modularize.py / migrate_*.py / fix_moves.py   結構搬遷工具（一次性）
+│
+├── src/                         ── 前端模組（依功能分類）──
+│   ├── core/        報價・自選・部位・即時（pro / position / watch / live / etf …）
+│   ├── chart/       量價・多圖・價差・畫線・型態・夜盤・Replay
+│   ├── screener/    選股・掃描・策略・腳本・回測・精靈
+│   ├── fundamental/ 估值・資金流・法人榜・供應鏈・個股期・計畫
+│   ├── alert/       通知・推播・行事曆・資料源健檢・結算提醒
+│   ├── ai/          AI 報告・命令面板・焦點掃描
+│   └── ui/          工具列・拖拉視窗・PDF 匯入匯出・外觀
+│
+├── server/                      ── 後端服務（本機，純 stdlib）──
+│   ├── server.py                HTTP server：YF proxy + LRU + 各功能 API
+│   ├── alert_daemon.py          常駐警報（Telegram / Email / Webhook）
+│   ├── watch_daemon.py          觀察清單 24h 後端偵測
+│   ├── chip_history_tracker.py  每日法人籌碼快照
+│   ├── etf_delta_tracker.py     每日主動 ETF 持股 delta（server 會就近 spawn）
+│   └── backup_data.py · expand_etf_catalog.py
+│
+├── data/                        ── 使用者資料（多數 .gitignore）──
+│   ├── etf_catalog.json · etf_history/ · chip_history/
+│   └── alert_config.json · alert_rules.json · draw_store.json · ai_key.txt
+│
+├── scripts/                     ── 啟動與排程 .bat ──
+│   ├── start_terminal_v3.bat    唯一啟動器（build + server + 開頁）
+│   ├── rebuild_and_restart.bat · restart_server.bat
+│   ├── daily_*.bat              排程觸發（籌碼 / ETF / 備份 / 報表 / 早報）
+│   └── install_*.bat · fix_scheduler_paths.bat
+│
+└── docs/                        README 與規劃文件
+```
 
-> 註：總經疊圖（FRED 美債 / CPI / 台灣景氣）已實作但因資料源延遲與台灣政府端不穩，本版**預設停用**（程式保留，日後可復活）。
+### 設計原則
+
+- **設定驅動的工具列**：所有功能鈕收進 4 個分類下拉（圖表 / 籌碼基本面 / 選股策略 / 快訊）＋ 常駐入口（指令 / AI 報告 / 焦點）。新增功能用 `Toolbar.register({...})` 一行掛上，分組只改 `src/ui/toolbar_v3.js` 的設定表。
+- **載入順序自動化**：`build_order.py` 用相依表（取代人工「須在 X 後」）做穩定拓樸排序。
+- **零雲端**：所有抓取與運算都在本機 `server.py`，資料留在 `data/`。
 
 ---
 
-- 即時 Yahoo Finance K 線（含 1天 ~ 全部 共 11 個時間段切換）
-- 16 項技術指標（RSI / KD / MACD / SMA / BB / ATR / Ann Vol% / MaxDD% / Vol Ratio / D2-SMA20% / ETF Flow）
-- 台股 10 檔主動式 ETF 持股每日 delta（資料源：MoneyDJ）
-- 自選股清單、本地 LRU 快取、多執行緒併發抓取
-- 可選：Claude API 串接的個股 AI 研究報告
+## 功能總覽（按模組分類）
 
----
+### 核心看盤 — `src/core`
 
-## 系統需求
+- 即時 Yahoo K 線，11 個時間段（1 天 ～ 全部）切換
+- 16 項技術指標：RSI / KD / MACD / SMA / BB / ATR / 年化波動% / MaxDD% / 量比 / 乖離 / ETF Flow …
+- 多市場：台股 + 美股（`US` 切換）
+- 自選股清單（雙列、拖曳排序）+ 本地 LRU 快取 + 多執行緒併發抓取
+- **POS 持倉**：成本 / 市值 / 未實現損益 + 規則化訊號（均線交叉、RSI、KD、MACD、布林、量能、倉位連動、主動 ETF 共振）
+- **WATCH 多訊號觀察 + 共識評分**：8 策略（趨勢 / 動能 / 波動 / 價格）＋ 5 個預設劇本，一檔可掛多訊號自動算 Confluence
+- **LIVE**：30 秒輪詢近即時報價（含 bid/ask）；指數（加權 / 櫃買 + 美股四大）也能加入自選
 
-- Windows 10 / 11（macOS / Linux 也能跑 server.py 但 .bat 啟動器要自己改寫）
-- Python 3.10+（用 `python --version` 確認）
-  - 純 stdlib，**完全不需要 pip install 任何套件**
-- 現代瀏覽器（Chrome / Edge / Firefox 都行）
-- 網路連線（要打 Yahoo Finance / MoneyDJ）
+### 圖表分析 — `src/chart`
+
+- **量價**：成交金額 Volume Profile（POC / VAH / VAL 主力成本區，可切金額 / 成交量）
+- **多圖**（`Alt+M`）：2×1 / 2×2 / 1×3 分割，每格獨立換商品時框，**同步十字游標與時間軸**，版面記憶
+- **價差**（`Alt+D`）：數學式合成線看相對強弱 / 溢價差（如 `2330/2303`、`^TWII/^SOX`；自寫解析器，純分析不可下單）
+- **畫線**（`Alt+T`）：趨勢 / 水平 / 垂直 / 斐波那契 / 矩形 / 平行通道 / 文字，錨點以時間+價格記錄，換區間換裝置不消失
+- **形態³**：19 種型態辨識（經典 + 諧波 XABCD/Cypher + 艾略特五浪/修正 + 循環分析）
+- **vs 大盤**、**夜盤連動預警**（美股期貨 → 台股隔日）、**Replay** K 線重播
+
+### 選股 / 策略 / 回測 — `src/screener`
+
+- **選股**：技術 × 基本面 × 籌碼 三合一全台股篩選，一鍵載入或加自選
+- **掃描**：全市場 Screener + 類股篩選
+- **策略**：樂高式條件組合器 → 回測，輸出最大回撤 / 勝率 / 獲利因子 / 年化夏普 / 逐筆明細 + 權益曲線
+- **腳本**：類 Pine 安全 DSL（自寫直譯器、函式白名單、不用 eval），`buy/sell` 回測、`plot` 疊主圖
+- **回測引擎**：8 策略勝率 + 型態命中率 + 投組
+- **精靈**：回答 4 題（用途 / 週期 / 風險 / 資金）自動體檢個股，一鍵套用 觀察訊號 + 警報 + 持倉/買進計畫 + 支撐壓力畫線 + 研判結論
+
+### 籌碼 / 基本面 — `src/fundamental`
+
+- **估值**：本益比河流（台股 + 美股），判斷現在貴不貴
+- **資金流**：大盤量能趨勢（8000 億 → 1.2 兆）+ 三大法人
+- **法人榜**：外資 / 投信買賣超排行 + 連續買賣超天數
+- **供應鏈**：台灣 AI 供應鏈族群連動（晶圓 → 封裝 → CPO → 伺服器 → 散熱 RS 輪動）
+- **個股期**：市值前十大個股期夜盤領先（期% − 現%）
+- **基本面**：月營收 / 三率 / 評分卡
+- **計畫（PLAN）**：持倉 / 買進計畫 + 歷史
+- **ETF△**：主動 ETF 每日持股 delta + 共識報表（投信潛在買盤估算 + AI 原因解讀）
+
+### 快訊 / 通知 — `src/alert`
+
+- **通知**：桌面 / 頁內 toast
+- **推播**：後端 daemon 走 Telegram / Email / Webhook（Discord/Slack/自架），**瀏覽器關著也偵測**
+- **複合警示**：多條件 AND/OR（如「RSI < 30 且 收盤 ≤ 布林下軌」）
+- **行事曆**：月營收 / 除權息提醒；**資料源健檢**燈、**結算日**提醒
+
+### AI / 工具 — `src/ai`、`src/ui`
+
+- **AI 報告**：Claude 八章節個股研究報告（需設 API Key，只存瀏覽器 localStorage）
+- **焦點**：全台股多訊號掃描，自動找做多 / 做空焦點股
+- **指令**：命令面板（`Ctrl+K`）搜尋股票與功能
+- **工具列**（本次重構）：一階分類 + 二階摺疊下拉；拖拉視窗、PDF 匯入 / 匯出
+
+### 後端服務 — `server/`
+
+- **server.py**：本機 HTTP server，Yahoo proxy + LRU 快取 + 籌碼/ETF/估值/畫線等 API，純 stdlib
+- **常駐 daemon**：警報（alert）、觀察（watch）後端偵測；籌碼（chip）、ETF（delta）每日快照
+- 全本機運算、零雲端、零追蹤
 
 ---
 
 ## 快速開始（3 步）
 
-**1. 解壓縮**到任何資料夾（例：`C:\Tools\Stock_Terminal\`）
+> 需求：Windows 10/11 + Python 3.10+（純 stdlib，**不用 pip**）+ 現代瀏覽器。確認：cmd 打 `python --version`。
 
-**2. 雙擊 `start_terminal.bat`（v1）或 `start_terminal_v2.bat`（v2 含倉位與訊號）**
-- 自動啟動本機 server（port 18432）
-- 自動開瀏覽器到 `stock_terminal.html` 或 `stock_terminal_v2.html`
-- 輸入股票代號（台股填 2330 / 美股切到 US 填 AAPL）按 GO
+1. **解壓縮**到任一資料夾（例 `C:\Tools\Stock_Terminal\`）。
+2. **雙擊 `scripts\start_terminal_v3.bat`** — 自動 build、開瀏覽器、啟動本機 server（port 18432）。
+3. 上方輸入框打代號按 **GO**（台股 `2330`；美股先點 `US` 再打 `AAPL`）。
 
-**3.（可選）建立每日 ETF 排程**
-- 系統管理員身分跑 `install_scheduler.bat`
-- 之後每個交易日 19:00 自動更新 ETF 持股快照
-- 累積 2 天以上資料後，ETF△ 分頁會顯示主動 ETF 的進出 / 加減碼變化
+**更新後沒看到變化？** 關掉舊 server 黑視窗 → 雙擊 `scripts\rebuild_and_restart.bat` → 瀏覽器 **Ctrl+F5**。
+
+**可選排程**（系統管理員身分跑一次）：`scripts\install_scheduler.bat`（每交易日 19:00 更新 ETF 持股）、`scripts\install_chip_scheduler.bat`（17:40 更新法人籌碼）。搬動資料夾後若排程失效，跑 `scripts\fix_scheduler_paths.bat` 重新指向。
 
 ---
 
-## v2.0 — 倉位管理 + 多訊號觀察 + 共識評分 + 中文說明
-
-v2 在 v1 之上加了兩個分頁：**POS**（已持有部位）+ **WATCH**（觀察名單），並在所有指標/策略旁加 **(i) 圖示**點擊看中文說明。
-
-### POS 分頁 — 倉位管理 + 即時訊號
-
-**倉位記錄**（存瀏覽器 localStorage，每檔股票獨立）
-- 進場價、股數（支援「張」單位自動 ×1000）、停利價、停損價、進場筆記
-- 即時顯示成本、市值、未實現損益（%、金額）
-- **持倉清單**：所有持倉一覽（總成本/市值/合計損益），點任一檔跳轉
-
-**規則化訊號**（每次切換股票自動算）
-- A. 均線交叉：破/站上 SMA20、SMA60；黃金/空頭排列
-- B. RSI：> 75 過熱建議停利、< 25 超賣建議承接
-- C. KD：低檔黃金交叉加碼、高檔死亡交叉減碼
-- D. MACD：動能由空轉多 / 由多轉空
-- E. 布林通道：觸上軌+RSI 過熱 / 觸下軌+RSI 超賣
-- F. 量能：> 20 日均量 2 倍以上 + 價方向判斷
-- G. 倉位連動：達停利/停損、距停損 < 3%、浮盈 ≥ 20%、浮虧 ≤ -10%
-- H. 主動 ETF 共振：≥ 3 檔同步買進 / 賣出該股
-
-### WATCH 分頁 — 多訊號觀察 + 共識評分（v2 核心功能）
-
-**一檔股票可掛多個訊號 + 自動算共識（Confluence）**
-
-8 個策略（4 大類）：
-
-| 類別 | 策略 | 方向 |
-|------|------|------|
-| 📈 趨勢 | 回測 60 日均線、回測 20 日均線 | 多 |
-| ⚡ 動能 | 突破 N 日新高、RSI 超賣反彈、🔥 RSI 過熱 | 多/多/空 |
-| 📊 波動 | 布林下軌承接 | 多 |
-| 🎯 價格 | 自訂買進、自訂賣出 | 多/空 |
-
-**5 個專業預設劇本（一鍵套用 2~3 個搭配好的訊號）**
-
-| 劇本 | 包含 | 適用 |
-|------|------|------|
-| 📉 經典回檔買進 | SMA60 + SMA20 + RSI 反彈 | 多頭中等回檔 |
-| 🚀 強勢突破追勢 | 20 日突破 + 60 日突破 + SMA20 | 盤整後抓突破 |
-| 🔄 超賣反彈短線 | RSI 超賣 + BB 下軌 | 急殺後抓反彈 |
-| 💰 波段停利 | 自訂目標 + RSI 過熱 | 已建倉的停利 |
-| 🎯 雙價位警示 | 自訂買 + 自訂賣 | 純價格區間 |
-
-**共識評分**：每檔股票卡片頂端顯示 🟢 強多 +3 / 🟢 偏多 +1 / ⚖️ 中性 / ⚠️ 多空分歧 / 🔴 偏空 / 👀 觀察中。多訊號共振統計上把勝率從單一指標的 50% 推到 70~80%。
-
-### (i) 圖示中文說明系統
-
-**任何指標、策略、劇本旁邊都有 (i) 小圖示**，點擊跳出浮動視窗：
-
-- **指標說明**（16 個）：是什麼 / 怎麼看 / 實戰用法
-- **策略說明**（8 個）：原理 / 適用場景 / 觸發後行動
-- **劇本說明**（5 個）：適用情境 / 包含訊號 / 為何組合
-
-點視窗外、按 Esc、或點 × 關閉。設計給股市小白：白話、不講廢話、有實戰建議。
-
-### 自選股雙列佈局 + 拖曳排序
-
-頂端自選股列從單列改 **2 列 grid**，密度直接翻倍。每個 chip 左側有 `⋮⋮` 抓握圖示，**拖曳即可重新排序**，順序自動存 localStorage。
-
-> ⚠ 所有訊號僅供參考，不涵蓋基本面與總體環境。多訊號共振只提升勝率，不保證獲利。資金管理 > 選股。
-
-**初次使用**：跑 `start_terminal_v2.bat` 會自動 build v2 + 開啟。之後每次啟動都會自動同步 v1 的更新。
-
----
-
-## v3.0 — 進階形態辨識 (TradingView-grade Pattern Recognition)
-
-v3 把形態辨識器從 v2 的 8 種擴充到 **19 種**，目標是覆蓋 TradingView 形態工具列的核心功能。所有偵測都是規則式 (rule-based)、無黑盒 ML，每個型態都有明確的 Fibonacci / 幾何規則。
-
-### 19 種型態（分四大類）
-
-**經典反轉與持續（v2 保留並升級）**
-- 趨勢結構 (HH/HL vs LH/LL)、雙頂雙底 (M/W)、頭肩頂底 (含頸線趨勢線)
-- 黃金/死亡交叉、區間突破、箱型整理、杯柄、三角 (對稱/上升/下降三種子型)
-
-**諧波 Harmonics (XABCD 五點)**
-- **ABCD** — Fib 0.618/0.786 修正 + 1.27/1.618 延伸
-- **XABCD** — Gartley / Bat / Butterfly / Crab / Shark (5 子型，每個都有獨立 Fib 比例)
-- **Cypher 賽福** — CD/XC 0.786 反轉區
-
-**艾略特波浪 Elliott Wave**
-- **脈衝波 1-2-3-4-5** — 含 Elliott 三大鐵律驗證 (w2 不破 w0、w3 非最短、w4 不入 w1)
-- **修正浪 A-B-C** — 自動分類 Zigzag / Flat / Irregular
-- **三角波 A-B-C-D-E** — 五浪收斂三角修正
-- **雙重組合 W-X-Y** — 兩個修正 + 連接浪
-- **三重組合 W-X-Y-X-Z** — 三個修正 + 兩個連接 (罕見)
-- **三驅 Three Drives** — 三推進浪衰竭型反轉
-
-**循環分析**
-- **FFT/自相關週期偵測** — 用去趨勢自相關找主要循環長度，預測下一個轉折點
-
-### 核心引擎
-
-- **ZigZag 規範化** — `buildZigZag()` 把 pivots 轉成嚴格交替的 H/L swing 序列，過濾 < 1.2% 雜訊
-- **Fibonacci 比例驗證** — 每個諧波都有獨立 `ab_xa / bc_ab / cd_bc / ad_xa` 範圍（容忍 ±5%）
-- **斜線繪製** — 升級 chart overlay 從 v2 的純水平 price line 到 LightweightCharts `LineSeries` 動態斜線，可連接任意 swing 點
-
-### 使用方式
-
-**整合進主終端機**
-- `stock_terminal_v2.html` 已自動切換到 `pattern_v3.js`
-- 工具列的 🤖 按鈕現在會顯示 "🤖 形態³"，點擊跳出 19 種型態的分組面板
-- 長按 🤖 按鈕可在 chart 上 toggle overlay（畫斜線 + 標籤）
-
-**獨立驗證頁** (`pattern_v3_test.html`)
-- 直接用瀏覽器開啟（需先跑 `server.py` 在 port 18432）
-- 預設自動載入 2330，可改任意代碼/區間 (1y / 2y / 5y)
-- 左側 sidebar 顯示 19 偵測器逐個 ✅/❌ 狀態 + 觸發的型態詳情
-- 點任一型態 → chart 只顯示該型態的標記
-- 「疊加形態」按鈕可一鍵切換全部疊加 vs 全部清除
-
-### 公開 API (window.PatternV3)
-
-```js
-PatternV3.detectPatterns(candles)       // 跑全部 19 偵測器
-PatternV3.findPivots(candles, window)   // 基本 pivot
-PatternV3.buildZigZag(candles, pivots)  // ZigZag swing 序列
-PatternV3.detectXABCD(candles, zz)      // 諧波（回傳陣列，含所有匹配的 Gartley/Bat/Butterfly/Crab/Shark）
-PatternV3.detectElliottImpulse(candles, zz)  // 艾略特五浪
-PatternV3.detectCycle(candles)          // FFT 週期
-// ... 等等，共 19 個獨立偵測器都可單獨呼叫
-PatternV3.HARMONICS                     // 5 種 XABCD 的 Fib 比例定義
-PatternV3.FIB                           // 常用 Fib 比例常數
-```
-
-向下相容：`window.detectPatterns / showPatternsModal / patternsToggle / loadPatternCandles / renderPatternsPanel` 全部被 v3 版本覆寫，現有 v2 hook 不用改。
-
----
-
-## v3.5 — Yahoo 日線落後修正 + 使用者本地時區（2026-05）
-
-### 背景：Yahoo 雙伺服器資料不同步問題
-
-Yahoo Finance 提供報價的 query1/query2 兩台前端常出現「日 K 線陣列已停留在前一交易日，但 `regularMarketPrice` 已更新到今日收盤」的時間差。盤後幾小時甚至到隔日凌晨期間，這個落差最明顯，造成：
-
-- ETF / 個股 % 變化跳動於「今天」和「昨天」之間（例如 00830 應顯示 -3.42%，常閃成 +4.02%）
-- 全市場 Screener 抓到的「漲幅榜」其實是昨日漲幅（例如 2454 顯示 +8.79% 而非 -4.96%）
-- 指數面板 (加權 / 櫃買 / 費半 / S&P500 / NASDAQ / 道瓊 / 日經 / 恆生) 部分顯示 0.00%
-- TW / US Sectors 熱力圖數字偏差
-- 點擊個股後 chart-info 與昨收線錯位
-
-### 統一修法：rmt vs last candle 對齊判斷
-
-凡是用 Yahoo daily K 算 %chg 的地方都加同一段判斷：
-
-```js
-// 若 regularMarketTime 比最後一根 K 線晚 > 20 小時 →
-// regularMarketPrice 才是「今天」，last candle 是「昨天」
-if (rmt && rmp && rmt - last.time > 20 * 3600) {
-  cur = rmp;
-  prev = last.close;
-}
-```
-
-對於 chart 顯示則更進一步「合成今日 K 線」（OHLC 全用 rmp，量設 0 或近 5 日均量），讓 chart、chart-info、chip 全部對齊。
-
-Yahoo 資料同步正常時（K 線追上 rmt），合成 K 線自動不觸發，邏輯安全可逆。
-
-### 涵蓋範圍（8 處全收）
-
-| 模組 | 檔案 | 觸發路徑 |
-|------|------|---------|
-| Watchlist 30s 輪詢 chip | `wl_live_v3.js` | 自動 |
-| 點擊載入 daily/weekly chart | `stock_terminal_v2.html` (loadSym) | 點 chip / 輸入代號 |
-| 點擊載入 intraday chart | `stock_terminal_v2.html` + `polish_v3.js` | 1天 / 3周 視圖 |
-| 全市場 Screener | `server.py` (_handle_screener_post) | 🔍 掃描 |
-| 指數面板 (8 個) | `polish_v3.js` (refreshMktBar) | 每分鐘自動 |
-| US Sectors API | `server.py` (_handle_sectors_us) | 熱力圖 US |
-| TW Sectors API | `server.py` (_fetch_tw_sectors_via_yahoo) | 熱力圖 TW |
-| Heatmap UI | `heatmap_v3.js` (extractChg) | 開啟熱力圖 |
-
-### Intraday (1天) 模式昨收 / % 計算
-
-`1天` 視圖的 candles 是當日 5-min K，過去版本直接拿倒數第二根當「昨收」算出微幅變動（例 +1.50% 而非正確的 -4.96%）。修法：
-
-- intraday 模式改用 `meta.chartPreviousClose`（Yahoo 內建昨日收盤），存入 `S.data.yesterdayClose`
-- `polish_v3.js` 的「昨收」水平虛線、ci-chg 顏色都改讀 `S.data.yesterdayClose`，daily 模式仍維持原邏輯
-
-### 圖表時間軸：使用者本地時區
-
-lightweight-charts 預設用 UTC 顯示時間軸，台股 13:30 收盤會顯示成 05:30。修法：
-
-- 從 `new Date().getTimezoneOffset()` 取得使用者瀏覽器時區（Taipei 為 +28800s）
-- 所有 chart series（candles / volume / SMA / BB）的 timestamp 一律加上 userTzOffset 後再丟給 lightweight-charts
-- Crosshair 讀回時改用 `getUTCHours / getUTCMinutes / getUTCDate`（時間已被預先平移）
-- 效果：所有市場一致對齊到使用者本地時鐘
-  - TW 股 in Taipei：**09:00–13:30**（本地交易時段）
-  - US 股 in Taipei：**21:30–04:00 隔天**（NYSE 在 Taipei 的真實時段，自動跨日）
-
-未來換時區（搬家 / 出國）瀏覽器抓到的 offset 會自動跟著變，不需要改設定。
-
-### 重啟 server
-
-`server.py` 三處修改（screener / sectors-us / sectors-tw）需要重啟 server 生效：
-
-```
-雙擊 restart_server.bat
-```
-
-本檔自動殺掉 port 18432 上的舊 process 再重啟。client 端修改透過 `?v=` 版本號參數 cache bust，重整即可生效。
-
----
-
-## v3.6 — 根因修正：build 重置 + LRU TTL（2026-05）
-
-### 真正的根因（前 5 輪修正失效原因）
-
-v3.5 加了一堆「Yahoo 日線落後」的修正，但你會看到：
-1. 重啟後第一次點某股 → 顯示正確
-2. 過幾分鐘再點 → 又跳回昨天的 %
-3. chip 跟 chart-info 顯示不一致
-
-挖到底原來是兩個獨立問題串在一起：
-
-**問題 A：`stock_terminal_v2.html` 是 build_v2.py 從 v1 base 自動生成。**
-
-我的 loadSym 修正（合成 K 線、yesterdayClose、時區平移）全部寫在 v2.html，但每次跑 `start_terminal_v2.bat` 觸發 build 都會從 `stock_terminal.html` 重生 v2.html，**所有 fix 被覆寫回原始版本**。表現為「修完看起來對，下次開啟又跳回」。
-
-修法：**所有 loadSym + renderChart 修正改寫到 `stock_terminal.html` (v1 base)**，build 會保留。
-
-**問題 B：`server.py` 的 LRU cache 沒 TTL。**
-
-```python
-class LRUCache:   # 原始版本：永久 cache
-    def get(self, k): return self._d.get(k)
-    def set(self, k, v): self._d[k] = v
-```
-
-若 server 啟動後第一次打 Yahoo 剛好遇到 query1/query2 同步落差期間（盤後/凌晨很常見），Yahoo 整份 response（含 `regularMarketPrice = 昨天收盤`、`regularMarketTime = 昨天盤後`、整個 K 線陣列）會被**永久 cache**。後續所有 client 端的修正邏輯（rmt 比對、合成 K 線）拿到的都是這份「過時但內部一致」的快照 — 連 `rmt - last.t > 20h` 都因為兩者都是昨日而觸發不了。
-
-`wl_live_v3.js` 因為 `nocache=1` 繞過 LRU 而看起來正常，所以你看到的就是「**chip 是對的，點開卻是昨日**」這種「隨機」行為 — 哪邊讀 cache 看哪邊。
-
-修法：**加 TTL=60 秒到 LRUCache**：
-
-```python
-class LRUCache:
-    def __init__(self, maxsize, ttl_seconds=60):
-        self._d = OrderedDict()       # key → (value, expire_ts)
-        self._ttl = ttl_seconds
-    def get(self, k):
-        ent = self._d.get(k)
-        if ent and ent[1] > time.time(): return ent[0]
-        if ent: self._d.pop(k, None)   # expired
-        return None
-    def set(self, k, v):
-        self._d[k] = (v, time.time() + self._ttl)
-```
-
-60s TTL 對效能影響可忽略：同一張線型 60s 內反覆點仍走 cache；最壞情況也只持續 60 秒就會重抓 Yahoo。
-
-### 一鍵 rebuild + restart
-
-由於這次同時改了 v1 base 和 server.py，提供整合腳本：
-
-```
-雙擊 rebuild_and_restart.bat
-```
-
-執行步驟：
-1. `python build_v2.py` 從 v1 source 重新生成 v2.html
-2. Kill port 18432 舊 server
-3. 啟動含 TTL 的新 server.py
-
----
-
-## v3.7 — 全球型 ETF 持股完整抓取 + 多市場跳轉（2026-05）
-
-### 問題
-
-00988A 主動統一全球創新（也包含 00989A 等全球型 ETF）顯示的 TOP 10 持股全部是台股，少了真正大佔比的外國成分（Samsung、AMD、Micron、ROHM 等）。實際 46 檔持股只看到 13 檔。
-
-### 根因
-
-`etf_delta_tracker.py` 的 MoneyDJ row 解析 regex 寫死兩個假設：
-
-```python
-_MDJ_ROW_RE = re.compile(
-    r'etfid=(\d{4,6})\.TW(?:&|&amp;)back=[0-9A-Za-z]+\.TW[^>]*>'
-    #         ^^^^^^^                                  ^^^^
-    r'\s*([^<]+?)\(\1\.TW\)\s*</a>'
-    #                  ^^^^
-    ...
-```
-
-- `(\d{4,6})` 只接受純數字 code → AMD / MU / AAPL（字母 code）整批被擋
-- `\.TW` 鎖死後綴 → 009150.KS / 6963.JP / 0700.HK / 600519.SH 全部被擋
-
-MoneyDJ HTML 對外股的 link 格式：
-
-```
-etfid=AMD.US      → AMD(AMD.US)
-etfid=6963.JP     → ROHM(6963.JP)
-etfid=009150.KS   → Samsung Elec Mech(009150.KS)
-```
-
-### 修法
-
-#### 1. Regex 放寬
-
-```python
-_MDJ_ROW_RE = re.compile(
-    r'etfid=([0-9A-Za-z]{1,7})\.([A-Z]{2})(?:&|&amp;)back=[0-9A-Za-z]+\.TW[^>]*>'
-    r'\s*([^<]+?)\(\1\.\2\)\s*</a>'
-    ...
-)
-```
-
-新增 group 2 抓市場碼，holdings 多存 `market` 欄位。00988A 的 41/46 筆現在都抓得到（剩 5 筆是現金/期貨/特殊格式 row，佔權重 < 1%）。
-
-#### 2. 市場碼 → Yahoo Finance 後綴 mapping
-
-MoneyDJ 跟 Yahoo 對市場後綴的命名不完全一致：
-
-| 市場 | MoneyDJ | Yahoo | 範例 |
-|------|---------|-------|------|
-| 台灣 | .TW | .TW | 2454.TW |
-| 美國 | .US | (無) | AMD |
-| 日本 | .JP | **.T** | 6963.T |
-| 韓國 | .KS | .KS | 009150.KS |
-| 香港 | .HK | .HK | 0700.HK |
-| 上海 | .SH | **.SS** | 600519.SS |
-| 深圳 | .SZ | .SZ | 000858.SZ |
-| 德國 | .DE | .DE | SAP.DE |
-| 英國 | .L | .L | HSBA.L |
-
-`etf_v3.js` 加 `mapToYahoo(sym, mdjMkt)` helper，點擊持股時即時 map 並 dispatch 到 `loadSym(yfsym, uiMkt)`。HK 股代號自動 padStart(4, '0')。
-
-#### 3. 顯示優化
-
-外股代號旁顯示小型市場後綴標籤：
-
-```
-1. AMD .US           Advanced Micro Devices    4.70%
-2. 6963 .JP          ROHM                      0.47%
-3. 009150 .KS        Samsung Elec Mech         5.76%
-4. 2454              聯發科                    3.84%   ← 台股不顯示 .TW
-```
-
-### 套用步驟
-
-```
-1. python etf_delta_tracker.py        重抓 holdings（含 market 欄位）
-2. rebuild_and_restart.bat            套用 etf_v3.js 改動
-```
-
----
-
-## v3.8 — 籌碼/基本面/回測/警報 四主軸 + 成交金額 Volume Profile（2026-06）
-
-一次推進五個方向。新增模組皆可獨立關閉，不影響既有功能。
-
-### E. 成交金額 Volume Profile（主力成交金額）
-
-`volume_profile_v3.js` 覆寫 pro_v2 的 POC，把每根 K 的成交**金額**（typical price × volume）分配到 Y 軸價格 bin，右側畫橫向直方圖，並標出：
-
-- **POC**（金額最大價區，主力最集中成本）粗線 + 累積金額（億/萬）
-- **VAH / VAL**（70% 金額集中區上下緣）虛線
-- **主力成本區** = VAL~VAH，自動判斷現價在主力成本之上（偏多）/ 之下（偏空）/ 區內（盤整）
-
-工具列 `📊 量價` 開關、模式鈕循環切換 **量價均衡**（金額與量各自正規化後平均，預設）→ **金額** → **成交量**。
-
-### 版面：可拖拉左右分隔
-
-`layout_v3.js`：線型區 `#left` 與功能分析區 `#right` 之間加可拖曳分隔條 `#splitter`，寬度存 localStorage，雙擊重置成 340px。底部 16 指標鎖成 2 列、頂部自選股維持 2 列。拖曳後自動觸發 chart resize + 量價重繪。
-
-### A. 籌碼深化
-
-`_handle_chip` 擴充：借券賣出餘額（TWT72U）、當沖比（TWTB4U，>30% 標 🚩）、法人連續買賣超天數徽章。新增 `chip_history_tracker.py` 盤後抓 T86 全市場存 `chip_history/`，累積後 `_chip_streak()` 算「外資連 N 買/賣」。
-
-### B. 基本面深化
-
-`fundamental_v3.js` + `/fundamental/<sym>` 端點（TWSE OpenAPI 全市場資料集，整批快取一天）：月營收當月/YoY/MoM/累計YoY、損益表三率（毛利/營益/淨利率）+ EPS、基本面評分 0~100。與 WATCH 技術面共識並列成「技術 × 基本面」雙軸。STATS 分頁新增「基本面」section。
-
-### C. 回測引擎強化
-
-`backtest_v3.js` 統一核心（自足 SMA/RSI/BB，不依賴他模組）：
-
-- **策略掃描** 8 策略歷史勝率 / 賠率 / 期望值 / 總報酬 / 最大回撤 / 夏普
-- **型態命中率** 對 PatternV3 型態跑歷史偵測 → 10 日後報酬分布
-- **投組回測** 多檔 + 資金配置 → 投組權益曲線
-- `backtest_ui_v3.js` 提供面板（工具列 `📈 回測`），點任一策略列畫權益曲線；關閉面板自動清空結果，切換股票重開不殘留
-
-### D. 警報推播擴充（後端常駐）
-
-警報邏輯下放 `server.py` 背景 thread（`alert_daemon.py`），**瀏覽器關著也會推播**：
-
-- **Telegram Bot**（推薦）+ **Email (SMTP)** 雙通道
-- 設定存 `alert_config.json`、規則存 `alert_rules.json`（皆 .gitignore，含 token）
-- 端點：`GET /alert/status|rules|config`、`POST /alert/rules|config|test`
-- 前端 `alert_push_v3.js`（工具列 `🔔 推播`）：開關 daemon、設定通道、規則表、測試推播
-- 觸發紀錄存 `logs/alerts/`
-- 註：LINE Notify 已於 2025-03 停服，故改 Telegram
-
-### 套用步驟
-
-```
-雙擊 rebuild_and_restart.bat      # build_v2.py 重生 v2.html + 重啟含新端點的 server.py
-（可選）python chip_history_tracker.py    # 起始一筆籌碼快照
-```
-
-警報設定、Telegram token 在終端機 `🔔 推播` 面板填，或直接編 `alert_config.json`。
-
----
-
-## v3.8 後續增修（2026-06）
-
-### ETF 共識報表 + Email（`etf_report.py` / `etf_report_email.py`）
-
-ETF△ 工具列 `📋 報表`：跨 ETF 彙總每日新增/移除/加減碼，找潛在上漲（買盤共識）/ 下跌（賣盤共識）。
-
-- 雙榜（上漲/下跌）與「淨分數單榜」切換；評分 新增/移除/加碼/減碼 皆 ×2
-- 對齊朋友版多區塊 HTML：今日總覽、新增股總覽、Executive Summary、跨 ETF 共識、各 ETF 明細（含股數/前次股數/股數變化/排名/優先級/布局判讀/共識/敘述）+ ETF 索引可點跳
-- `📧 完整報表` / `📧 加減碼Top10（重點摘要：ETF 總綱 Index + 跨ETF共識 + 高優先加減碼 + 新增）` 兩種寄信
-- 高優先門檻 `HIGH_PRIORITY_RANK`（預設排名≤15，可調）
-- 每日自動寄信：`install_etf_report_scheduler.bat`（每交易日 18:30），需 server 開著 + `🔔 推播` 設好 Email
-
-### 全市場 Screener + 類股篩選
-
-- 掃描範圍改為**全台股上市+上櫃普通股**（約 2000+ 檔，TWSE/TPEx OpenAPI 取代號、當日快取）
-- 多空策略：突破/回測/黃金交叉/漲幅榜（多）、跌幅榜/跌破/死亡交叉/RSI 過熱/帶量下跌（空）
-- **類股篩選**下拉：全部 / 🔌 科技電子（整合）/ 各產業別，選定後只掃該類股
-
-### WATCH 24h 後端自動偵測（`watch_daemon.py`）
-
-8 個 WATCH 策略移植到 Python，server 背景常駐每 5 分鐘抓各觀察股日線評估，新觸發推 Telegram/Email（瀏覽器關著也偵測）。通知中心「🌙 24h 後端自動偵測」開關啟用；WATCH 增刪訊號自動同步到後端（`watch_rules.json`）。通知中心另有「🔍 偵測」可即時手動掃描全部觀察股。
-
-### 夜盤連動預警（`overnight_v3.js`，工具列 🌙 夜盤）
-
-台指期夜盤/台股隔日開盤主要跟美股期貨走。抓 那斯達克期(NQ=F)/標普期(ES=F)/道瓊期(YM=F)/費半 夜盤，加權算「台股隔日預估 %」，並把預估套到**持倉**（估隔日價是否破停損）與**觀察股自訂買進價**（是否可能跌入買區），盤前先規劃進出場。
-
-### 其他修正
-
-- **POS 倉位自動更新**：`wl_live` 輪詢一併更新持倉現價，不必點股就反映當日損益
-- **AI 報告**：prompt 強制以代號為準、不臆測公司名（修正偶發把 2408 標成旺宏）
-- **大盤列**新增 韓國 KOSPI / 黃金 / 白銀 / 原油
-- **量價 Volume Profile**：量價均衡（金額+量正規化平均）模式、止於價格軸不蓋 K 線、POC/VAH/VAL 右側短線
-- **今收/昨收**改右側價格軸對應價位的半字級小標籤
-- **LIVE 盤別**：Yahoo marketState 缺值/誤判時，依本地時間+市場推算盤別
-- 技術×基本面雙軸卡、右側面板可收合、分頁記憶、盤後/盤前延伸交易顯示
-
----
-
-## v3.8.1–v3.8.2 修正與強化（2026-06-11 ~ 12）
-
-### K 線資料修正（重要）
-
-- **合成「今日」K**（Yahoo 日線陣列落後 `regularMarketPrice` 時觸發）不再用 `OHLC=rmp / volume=0`：改用 meta 當日 `regularMarketDayHigh/Low`、`regularMarketVolume`，open 用 `regularMarketOpen`（缺則退「前一根日 K 收盤」並夾進當日高低）→ 修「前一日量顯示 0」與「+109% 假爆量 K」
-- **教訓**：`meta.chartPreviousClose` 是「**請求區間起點**前一日」的收盤（6mo 區間＝半年前的價），不是昨收；只有 range=1d 時才等於昨收
-- 最後一根「當日」日 K volume 為 null/0 時用 `regularMarketVolume` 回填
-
-### 技術面分數統一（enhance_v3.js）
-
-- 雙軸卡技術面分數一律以 **1y 日線** 為標準基底計算，**不再隨顯示區間變動**（修 0050 在 1月區間顯 26、00631L 依本體 1y 顯 65 的矛盾）
-- 槓桿/反向 ETF 映射本體（00631L/00675L→0050；反向 100−分數），標籤註記 `(依本體 XXXX · 1Y日線)`
-
-### ⚓ 估值修復（台股 + 美股）
-
-- **台股**：BWIBBU_ALL 正確路徑為 `/v1/exchangeReport/`（舊 `/v1/opendata/` 404），且為英文欄位（Code/PEratio/PBratio/DividendYield）無收盤價 → 修正解析；上櫃股退 TPEx `tpex_mainboard_peratio_analysis`；收盤價備援 STOCK_DAY_ALL → Yahoo
-- **美股**：v10 quoteSummary 需 crumb 常 401 → 改共用 /keystats 取得鏈（yfinance → v10 → HTML scrape），TSM/NVDA 等河流圖可正常繪製
-- modal 加 台股/美股 tag 與資料源標示；PER↔EPS 可互推
-
-### 🔗 供應鏈面板 v2：台美雙 tab
-
-- **台股鏈** 7 段 → **11 段 54 檔**：新增 💾 記憶體/儲存、⚡ 被動元件（國巨/華新科/禾伸堂/信昌電）、🔩 機構/連接器/滑軌（嘉澤/川湖/勤誠）、🔌 電源/電力基建（拆自散熱）；補 鴻海、京元電、欣銓、台光電、力旺、晶心科、世界先進、聯亞等
-- **新增美股 AI 鏈** 9 段：設備/EDA → 晶圓代工 → AI 晶片 → 記憶體 → **AI 電源/電源管理 IC（MPWR=MPS 芯源/VICR/ON/ADI/TXN）** → 網通/光互連 → 伺服器 → 電力/散熱基建 → CSP/AI 平台（NVDA/AMD/AVGO、ASML/AMAT、MU/SNDK、ANET/CRDO/ALAB、SMCI/DELL、VRT/GEV、MSFT/GOOGL/AMZN/META…）
-- 開啟時自動跟隨目前市場；美股 tab 綠漲紅跌；點股以對應市場載入
-
-### chart-info 浮動視窗重排（polish_v3.js）
-
-- OHLC 浮動視窗縮小約一半、緊貼大字股價右側空白處，不遮 K 線
-- SMA20/SMA60/BB/昨收 圖例從圖表左下角整合到浮動視窗右下角（仍可點擊摺疊）
-
-### 其他
-
-- `/twindex`（TWSE MIS 即時加權/櫃買）修大盤早盤落後一日；`/marketflow` 資金流、`/inst-rank` 法人榜、`/events` 行事曆（v3.8 第二批）
-
----
-
-## 檔案結構
-
-```
-Stock_Terminal/
-├── server.py                  本機 HTTP server（YF proxy + LRU + ETF Delta + Catalog + Tracker run）
-├── stock_terminal.html        v1 UI（單檔 HTML，含雙列拖曳自選股）
-├── stock_terminal_v2.html     v2 UI（build_v2.py 產生：POS + WATCH + ETF△ 分類）
-├── position_v2.js             倉位管理 + 訊號引擎
-├── watch_v2.js                多訊號觀察清單 + 8 策略 + 5 預設劇本 + 共識評分
-├── info_v2.js                 (i) 圖示浮動中文說明（16 指標 + 8 策略 + 5 劇本）
-├── pro_v2.js                  專業工具（通知中心/大盤/繪線/風險/熱力圖/POC/Replay/Backtest）
-├── pattern_v2.js              AI 形態辨識 v2（8 種經典 — 保留作為 legacy）
-├── pattern_v3.js              AI 形態辨識 v3（19 種：v2 + 諧波 XABCD/Cypher、ABCD、三角(對稱/上升/下降)、三驅、艾略特五浪/修正/三角/雙重/三重組合、循環分析）
-├── pattern_v3_test.html       v3 獨立驗證頁（連 server.py，全部 19 種偵測器逐個跑、結果直接畫在 chart 上）
-├── live_v2.js                 近即時報價輪詢（30 秒 / Yahoo v8 chart 1m）
-├── etf_v2.js                  ETF △分類 tabs + ⚙ 管理 modal + 立即更新
-├── mobile_v2.css              響應式 RWD（手機/平板/桌機）
-├── etf_catalog.json           60+ ETF / 7 分類 + 自訂類觀測池配置
-├── build_v2.py                v1 → v2 的生成腳本（v1 更新後重跑即同步）
-├── etf_delta_tracker.py       主動 ETF 持股爬蟲（MoneyDJ）
-├── start_terminal.bat         v1 啟動
-├── start_terminal_v2.bat      v2 啟動（每次自動重 build）
-├── run_tracker.bat            手動跑 ETF tracker（互動式）
-├── daily_etf.bat              排程觸發用的 ETF tracker（無互動）
-├── install_scheduler.bat      註冊 Windows 工作排程器
-├── uninstall_scheduler.bat    移除工作排程器
-├── build_dist.bat             打包成 Stock_Terminal_v3.8.2.zip 的腳本
-│
-│  ── v3.8 新增 ──
-├── volume_profile_v3.js       成交金額/量平均 Volume Profile（POC/VAH/VAL/主力成本區）
-├── fundamental_v3.js          基本面面板（月營收/三率/評分卡）
-├── backtest_v3.js             統一回測核心（勝率/權益曲線/型態命中率/投組）
-├── backtest_ui_v3.js          回測面板 UI
-├── alert_daemon.py            後端常駐警報（Telegram/Email，瀏覽器免開）
-├── alert_push_v3.js           警報推播設定 UI
-├── chip_history_tracker.py    法人籌碼每日快照（連買賣天數用）
-├── daily_chip.bat             排程觸發用的籌碼抓取（無互動）
-├── install_chip_scheduler.bat 註冊每交易日 17:40 籌碼快照排程
-├── enhance_v3.js              技術×基本面雙軸卡 / 量價數值面板 / 右側收合 / 分頁記憶
-├── alert_config.json          警報通道設定（含 token，.gitignore 不入版控）
-├── alert_rules.json           警報規則（.gitignore 不入版控）
-└── etf_history/               ETF 歷史快照存放處（執行後自動產生）
-   chip_history/               法人籌碼歷史快照（執行後自動產生）
-```
+## 系統需求
+
+- Windows 10 / 11（macOS / Linux 也能跑 `server/server.py`，但 `.bat` 啟動器要自己改寫）
+- Python 3.10+（純 stdlib，**完全不需要 pip install**）
+- 現代瀏覽器（Chrome / Edge / Firefox）
+- 網路連線（要打 Yahoo Finance / MoneyDJ / TWSE）
 
 ---
 
@@ -606,29 +154,24 @@ Stock_Terminal/
 
 ### 改 server port
 
-`server.py` 第 14 行：
-```python
-PORT = 18432
-```
+`server/server.py` 的 `PORT = 18432`。
 
 ### 改線型預設範圍
 
-啟動前設環境變數：
+啟動前設環境變數（前端時間段按鈕仍可即時切換，這只是初次預設）：
 ```cmd
 set YF_RANGE=10y
 set YF_INTERVAL=1d
-python server.py
+python server\server.py
 ```
-（前端時間段按鈕仍可即時切換，這只是初次預設）
 
 ### 改 ETF 觀測池
 
-`etf_delta_tracker.py` 第 26 行 `ETFS = {...}` 改成你想追的代號。
-`server.py` 第 24 行 `ETF_NAME_MAP` 也順手改名稱對照。
+`server\etf_delta_tracker.py` 的 `ETFS = {...}` 改成你想追的代號；`server\server.py` 的 `ETF_NAME_MAP` 順手改名稱對照。
 
 ### 上傳 Claude API Key
 
-開終端機後右上角按 `API KEY` → 貼上 `sk-ant-...` → 個股頁面右側 RESEARCH 分頁就能跑 AI 八章節研究報告。Key 只存瀏覽器 localStorage，不會外傳。
+終端機右上角按 `API KEY` → 貼上 `sk-ant-...` → 個股頁右側 RESEARCH 分頁即可跑 AI 研究報告。Key 只存瀏覽器 localStorage，不外傳。
 
 ---
 
@@ -638,7 +181,7 @@ python server.py
 |------|------|------|
 | K 線 / 報價 | Yahoo Finance v8 chart API | 失敗時 fallback 經 allorigins.win |
 | 主動 ETF 持股 | MoneyDJ Basic0007B | 全部持股頁面 |
-| Fallback ETF | MoneyDJ Basic0007 / TWSE | 只有被動 ETF |
+| 法人籌碼 | TWSE 三大法人 | 每日快照累積連買賣天數 |
 
 **所有資料抓取都在你本機跑，零雲端、零追蹤。**
 
@@ -646,28 +189,31 @@ python server.py
 
 ## 疑難排解
 
-**❌ start_terminal.bat 開了但瀏覽器顯示無法連線**
-→ Port 18432 被占用。改 `server.py` PORT 變數或關掉佔用程式（`netstat -ano | findstr 18432`）
+**❌ 啟動了但瀏覽器顯示無法連線** → Port 18432 被占用。改 `server/server.py` 的 `PORT`，或關掉佔用程式（`netstat -ano | findstr 18432`）。
 
-**❌ ETF△ 分頁顯示「尚無足夠歷史檔」**
-→ 跑 `python etf_delta_tracker.py --backfill 5` 一次（會抓 MoneyDJ 最新快照寫到 5 個日期檔案；但因為是同一份快照，summary 會是 0/0/0）
-→ 設好 `install_scheduler.bat` 排程後，明後天就會累積真實的 day-over-day delta
+**❌ ETF△ 顯示「尚無足夠歷史檔」** → 跑 `python server\etf_delta_tracker.py --backfill 5` 一次；設好排程後明後天會累積真實的 day-over-day delta。
 
-**❌ 中文亂碼**
-→ Windows console 預設 CP950。`.bat` 已加 `chcp 65001` 切 UTF-8，Python 輸出也是 UTF-8。看 log 用 `Get-Content -Encoding UTF8 logs\etf_xxx.log`
+**❌ 中文亂碼** → Windows console 預設 CP950。`.bat` 已加 `chcp 65001` 切 UTF-8。看 log 用 `Get-Content -Encoding UTF8 logs\etf_xxx.log`。
 
-**❌ Yahoo Finance 抓不到**
-→ Yahoo 偶爾 rate-limit，server 已內建 LRU cache + query1/query2 雙端點重試。若仍失敗，前端會自動經 allorigins.win 繞道
+**❌ Yahoo Finance 抓不到** → 偶爾 rate-limit，server 已內建 LRU cache + query1/query2 雙端點重試，仍失敗會自動經 allorigins.win 繞道。
 
 ---
 
-## License
+## 版本沿革（精簡）
 
-MIT — 自由分享、修改、商用都可以。原作者保留歸功（不強制）。
+> 詳細功能見上方「功能總覽」；此處僅留各階段重點。
+
+- **v2.0** 倉位管理（POS）+ 多訊號觀察（WATCH）+ 共識評分 + (i) 中文說明
+- **v3.0** 19 種型態辨識（經典 / 諧波 / 艾略特 / 循環）
+- **v3.5–3.7** Yahoo 日線落後修正、build 根因修正 + LRU TTL、全球型 ETF 持股完整抓取
+- **v3.8** 四主軸（籌碼 / 基本面 / 回測 / 警報）+ 成交金額 Volume Profile + 後端推播 daemon
+- **v3.9** 多圖 / 全鍵盤 / 視覺化回測 / 畫線 / 三合一選股 / 複合警示；**模組化重構**（工具列分類下拉、`src/` 依功能分區、`server/` `data/` `scripts/` 分區、載入順序自動排序）
 
 ---
 
-## 致謝
+## License / 致謝
+
+MIT — 自由分享、修改、商用皆可，原作者保留歸功（不強制）。
 
 - [TradingView Lightweight Charts](https://www.tradingview.com/lightweight-charts/) — 圖表引擎
 - [MoneyDJ ETF 基智網](https://www.moneydj.com/etf/) — ETF 持股資料源

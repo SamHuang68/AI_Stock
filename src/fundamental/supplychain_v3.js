@@ -69,7 +69,12 @@
     .sc-flow{text-align:center;color:#475569;font-size:14px;line-height:1}
     .sc-tabs{display:flex;gap:6px;margin:2px 0 8px}
     .sc-tab{background:#1e293b;border:1px solid #334155;color:#94a3b8;border-radius:6px;padding:4px 14px;cursor:pointer;font-size:11px;font-weight:700}
-    .sc-tab.on{background:rgba(251,191,36,.15);border-color:#fbbf24;color:#fbbf24}`;
+    .sc-tab.on{background:rgba(251,191,36,.15);border-color:#fbbf24;color:#fbbf24}
+    .sc-ov-hd{font-size:10px;color:#64748b;margin:2px 0 4px;letter-spacing:1px}
+    .sc-ov{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #1e293b}
+    .sc-ov-chip{display:flex;align-items:center;gap:4px;border:1px solid #1e293b;border-radius:6px;padding:3px 8px;font-size:10.5px;cursor:pointer;background:#0b1220}
+    .sc-ov-chip:hover{border-color:#fbbf24}
+    .sc-ov-chip b{font-weight:800}`;
     document.head.appendChild(s);
   }
 
@@ -120,7 +125,7 @@
     chain.forEach((g, gi) => {
       const vals = g.stocks.map(s => getp(s[0])).filter(v => v != null);
       const rs = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-      stageRS.push({ name: g.stage, rs });
+      stageRS.push({ name: g.stage, rs, gi, icon: g.icon });
       let chips = '';
       // 族群內依強弱排序
       const sorted = [...g.stocks].sort((a, b) => (getp(b[0]) ?? -999) - (getp(a[0]) ?? -999));
@@ -128,7 +133,7 @@
         const p = getp(code);
         chips += `<div class="sc-chip" data-load="${code}"><span class="c">${code}</span><span class="n">${name}</span><span class="${pcls(p)}" style="font-size:10px;font-weight:700">${fmt(p)}</span></div>`;
       }
-      h += `<div class="sc-stage">
+      h += `<div class="sc-stage" id="sc-stage-${gi}">
         <div class="sc-stage-h">${g.icon} ${g.stage}<span class="sc-rs ${pcls(rs)}">${fmt(rs)}</span></div>
         <div class="sc-stocks">${chips}</div></div>`;
       if (gi < chain.length - 1) h += `<div class="sc-flow">▼</div>`;
@@ -144,10 +149,21 @@
         : '鏈條由上游(晶圓)到下游(整機/機構/散熱/電源)；看資金輪動到哪一段。台股紅漲綠跌。';
       summary = `<div style="font-size:11px;color:var(--tlo);margin-bottom:8px">今日最強段：<b class="${pcls(top.rs)}">${top.name} ${fmt(top.rs)}</b>　最弱段：<b class="${pcls(bot.rs)}">${bot.name} ${fmt(bot.rs)}</b><br><span style="font-size:9px;color:var(--tf)">${flowNote}</span></div>`;
     }
-    body.innerHTML = summary + h;
+    // 段別漲跌總覽(依強弱排序，點跳到該段)：上方一目了然不必往下捲
+    let overview = '';
+    if (ranked.length) {
+      const chips = ranked.map(s =>
+        `<div class="sc-ov-chip ${pcls(s.rs)}" data-jump="${s.gi}" title="點擊跳到該段">${s.icon} ${s.name} <b>${fmt(s.rs)}</b></div>`).join('');
+      overview = `<div class="sc-ov-hd">段別漲跌總覽（強→弱）</div><div class="sc-ov">${chips}</div>`;
+    }
+    body.innerHTML = summary + overview + h;
     body.querySelectorAll('[data-load]').forEach(el => el.onclick = () => {
       const c = el.getAttribute('data-load');
       if (typeof loadSym === 'function') { loadSym(c, scMkt); close(); }
+    });
+    body.querySelectorAll('[data-jump]').forEach(el => el.onclick = () => {
+      const t = document.getElementById('sc-stage-' + el.getAttribute('data-jump'));
+      if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   }
 

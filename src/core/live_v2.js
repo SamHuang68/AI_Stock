@@ -303,16 +303,13 @@ window.addEventListener('symLoaded', () => {
 });
 
 // ── UI inject ──────────────────────────────────────────────
-(function injectLiveButton() {
-  if (!document.getElementById('pro-tools')) return setTimeout(injectLiveButton, 100);
-  if (document.getElementById('btn-live')) return;
-  const b = document.createElement('button');
-  b.id = 'btn-live';
-  b.className = 'probtn';
-  b.title = '近即時報價（每 30 秒輪詢 Yahoo Quote API，含 bid/ask）';
-  b.textContent = '⚪ LIVE';
-  b.onclick = liveToggle;
-  document.getElementById('pro-tools').appendChild(b);
+/* v3.9: 改用 Toolbar 註冊表(模組化) — 取代手寫 #pro-tools 注入樣板 */
+(function () {
+  var spec = { id: 'btn-live', label: '⚪ LIVE', cat: 'alert',
+               title: '近即時報價（每 30 秒輪詢 Yahoo Quote API，含 bid/ask）',
+               onclick: liveToggle };   // 標籤之後由 updateLiveBtn 動態更新 ⚪/🟢
+  (window.Toolbar ? window.Toolbar.register
+    : function (s) { (window.__tbQueue = window.__tbQueue || []).push(s); })(spec);
 })();
 
 // ── Broker API placeholder for future Level 2 五檔 ─────────

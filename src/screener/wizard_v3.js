@@ -312,8 +312,7 @@
   }
 
   async function aiConclusion() {
-    const key = (typeof S !== 'undefined' && S.apiKey) ? S.apiKey : '';
-    if (!key) return ruleConclusion(wz.diag, wz._ctx, wz.sym) + '（未設 API KEY，改用規則結論）';
+    if (!(typeof S !== 'undefined' && S.aiKeySet)) return ruleConclusion(wz.diag, wz._ctx, wz.sym) + '（未設 API KEY，改用規則結論）';
     const d = wz.diag, ctx = wz._ctx || {};
     const prompt = `你是專業台股分析師。用 2~3 句繁體中文，為個股 ${wz.sym} 寫操作研判。`
       + `數據：技術分數 ${d.techBias}/100、RSI ${d.rsi != null ? d.rsi.toFixed(0) : '—'}、ATR ${d.atrPct.toFixed(1)}%、`
@@ -323,7 +322,7 @@
       + `。使用者：${({ watch: '觀察中', hold: '已持有', buy: '想建倉' }[wz.use])}、${({ long: '長線', swing: '波段', short: '短線' }[wz.period])}、風險${({ low: '保守', mid: '穩健', high: '積極' }[wz.risk])}。`
       + `以代號為準不臆測公司名；若屬台灣 AI 供應鏈核心納入結構偏多視角但點出短線風險；只回研判本文不要前綴。`;
     try {
-      const r = await fetch(`${SRV}/ai-note`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: key, prompt, max_tokens: 320 }) }).then(x => x.json());
+      const r = await fetch(`${SRV}/ai-note`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: '', prompt, max_tokens: 320 }) }).then(x => x.json());
       return r.text ? r.text : ruleConclusion();
     } catch { return ruleConclusion(); }
   }

@@ -1,6 +1,6 @@
 @echo off
 REM Stock Terminal v3.9 commit (ASCII-only to avoid CP950/.bat encoding issues)
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 if exist ".git\index.lock" del /F /Q ".git\index.lock"
 

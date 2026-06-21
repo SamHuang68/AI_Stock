@@ -6,7 +6,7 @@ REM  Logs to logs\etf_report_YYYY-MM-DD.log
 REM ===========================================================
 setlocal enabledelayedexpansion
 chcp 65001 > nul
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 if not exist "logs" mkdir "logs"
 for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd"') do set DATE_TAG=%%I
