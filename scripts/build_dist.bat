@@ -4,11 +4,11 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0.."
 
 echo ============================================
-echo  Build Stock_Terminal distribution zip (v3.9)
+echo  Build Stock_Terminal distribution zip (v4.0)
 echo ============================================
 echo.
 
-set "ZIP=Stock_Terminal_v3.9.zip"
+set "ZIP=Stock_Terminal_v4.0.zip"
 set "STAGE=Stock_Terminal"
 
 REM Clean prior leftovers

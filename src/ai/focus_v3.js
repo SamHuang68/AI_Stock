@@ -8,8 +8,28 @@
 (function () {
   'use strict';
   var SRV = window.SERVER || 'http://localhost:18432';
+  var _lastScan = null;   // 最後一次掃描結果(供寄送用)
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
   function mClose() { var m = document.getElementById('focus-modal'); if (m) m.style.display = 'none'; }
+
+  // 把掃描結果格式化成純文字(寄送用)
+  function focusText() {
+    if (!_lastScan) return '';
+    var L = _lastScan, lines = [];
+    lines.push('🎯 焦點掃描 · 訊號組合自動選股');
+    lines.push('掃描 ' + L.scanned + ' 檔' + (L.sec ? ' · 產業:' + L.sec : '') + ' · ' + new Date().toLocaleString('zh-TW'));
+    function blk(title, rows) {
+      lines.push(''); lines.push(title + ' (' + rows.length + ')');
+      if (!rows.length) { lines.push('  無符合(綜合分數需 ≥ 3)'); return; }
+      rows.forEach(function (r) {
+        lines.push('  ' + r.sym + ' ' + (r.name || '') + '  ' + (r.changePct >= 0 ? '+' : '') + r.changePct + '%  ' +
+          r.score + '★  ' + ((r.signals || []).join('/')) + (r.rsi14 != null ? '  RSI' + r.rsi14 : ''));
+      });
+    }
+    blk('🟢 做多焦點 Buy', L.buy);
+    blk('🔴 做空焦點 Short', L.short);
+    return lines.join('\n');
+  }
 
   function col(title, color, rows) {
     var h = '<div style="border-right:1px solid #1a1a1a">'
@@ -38,6 +58,7 @@
       .then(function (j) {
         if (!j || !j.ok) { st.textContent = '掃描失敗'; return; }
         st.textContent = '掃描 ' + j.scanned + ' 檔 · 做多焦點 ' + j.buy.length + ' · 做空焦點 ' + j.short.length + '(點列載入 K 線)';
+        _lastScan = { sec: sec, scanned: j.scanned, buy: j.buy || [], short: j.short || [] };
         body.innerHTML = col('🟢 做多焦點 (Buy)', '#3ecf6b', j.buy) + col('🔴 做空焦點 (Short)', '#f87171', j.short);
         body.querySelectorAll('[data-sym]').forEach(function (el) {
           el.onclick = function () { var c = el.getAttribute('data-sym'); if (typeof loadSym === 'function') { loadSym(c, 'TW'); mClose(); } };
@@ -55,6 +76,7 @@
         + '<h3 style="margin:0;font-family:monospace;color:#f5c518;font-size:14px">🎯 焦點掃描 · 訊號組合自動選股</h3>'
         + '<div><select id="fc-sector" style="background:#161616;border:1px solid #333;color:#ccc;border-radius:5px;padding:3px 7px;font-size:11px;margin-right:6px"></select>'
         + '<button id="fc-run" style="background:#2a230a;border:1px solid #8a6d12;color:#f5c518;border-radius:5px;padding:4px 12px;cursor:pointer">▶ 掃描</button> '
+        + (window.ShareResult ? ShareResult.buttonHTML('fc-send') + ' ' : '')
         + '<button id="fc-close" style="background:#334155;border:0;color:#fff;border-radius:5px;padding:4px 10px;cursor:pointer">關閉</button></div></div>'
         + '<div id="fc-status" style="padding:8px 16px;color:#8aa;font-size:11px;font-family:monospace">選產業(可全部)後按「掃描」。多訊號:多/空頭排列、均線交叉、突破破底、帶量、RSI。</div>'
         + '<div id="fc-body" style="flex:1;overflow:auto;display:grid;grid-template-columns:1fr 1fr;gap:0"></div></div>';
@@ -62,6 +84,7 @@
       m.addEventListener('click', function (e) { if (e.target === m) mClose(); });
       document.getElementById('fc-close').onclick = mClose;
       document.getElementById('fc-run').onclick = run;
+      if (window.ShareResult) ShareResult.wire('fc-send', focusText, '焦點掃描結果');
       fetch(SRV + '/screener').then(function (r) { return r.json(); }).then(function (j) {
         var sel = document.getElementById('fc-sector'); if (!sel) return;
         var opts = ['<option value="">全部</option>', '<option value="__TECH__">科技電子(整合)</option>'];

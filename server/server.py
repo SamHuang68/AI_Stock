@@ -23,25 +23,37 @@ try:
 except Exception as _e:
     watch_daemon = None
     print('[watch] daemon import failed:', _e)
+try:
+    import ai_local
+except Exception as _e:
+    ai_local = None
+    print('[ai-local] module import failed:', _e)
 
 PORT = 18432
 # Core Ultra 9 285H = 6P + 8E + 2LP = 16 threads; oversubscribe for I/O-bound YF
 MAX_WORKERS = max(32, (os.cpu_count() or 16) * 2)
 LRU_MAX = 20000  # 96GB RAM → very generous cache
 
+# ── 專案根目錄 ──
+# 凍結成 .exe(PyInstaller)時用 exe 所在資料夾;一般執行(server/ 下)時用其上一層。
+if getattr(sys, 'frozen', False):
+    _BASE = os.path.dirname(sys.executable)
+else:
+    _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # ── ETF Delta path ──────────────────────────────────────────────
-ETF_DELTA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'etf_history')
-ETF_CATALOG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'etf_catalog.json')
+ETF_DELTA_PATH = os.path.join(_BASE, 'data', 'etf_history')
+ETF_CATALOG_FILE = os.path.join(_BASE, 'data', 'etf_catalog.json')
 _ETF_FALLBACKS = [
     ETF_DELTA_PATH,
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'etf_history'),
+    os.path.join(_BASE, 'data', 'etf_history'),
 ]
 
 # ── Chip history (v3.8): 每日法人籌碼快照，用於連續買賣超天數 ──
-CHIP_HISTORY_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'chip_history')
+CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
 
 # v3.9 P3: 畫線雲端記憶 — 存 draw_store.json {sym: [obj,...]}（gitignore）
-DRAW_STORE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'draw_store.json')
+DRAW_STORE_FILE = os.path.join(_BASE, 'data', 'draw_store.json')
 _draw_lock = threading.Lock()
 def _load_draw_store():
     try:
@@ -304,6 +316,39 @@ _openapi_ds = {}   # dataset name → (date, {code: row})
 
 # ── 全台股普通股代號宇集（上市 TWSE + 上櫃 TPEx），當日快取 ──
 import re as _re
+def _round_px(p):
+    """台股價格進位:< NT$50 保留 2 位小數(tick 0.01/0.05),>= 50 進到 1 位
+       (高價 tick 較大,自然顯示為整數);順便去除浮點雜訊。"""
+    try:
+        p = float(p)
+    except (TypeError, ValueError):
+        return p
+    return round(p, 2 if p < 50 else 1)
+
+
+def _db_screener_arrays(code):
+    """v4.0:從本機時序 DB(datastore)取該檔 (closes,highs,lows,vols) 供選股用。
+       無資料或不足 70 根 → 回 None,讓呼叫端退回 Yahoo(DB 空時零行為差異)。"""
+    try:
+        import datastore
+        rows = datastore.get_bars(str(code))
+    except Exception:
+        return None
+    if not rows or len(rows) < 70:
+        return None
+    closes, highs, lows, vols = [], [], [], []
+    for _ts, _o, _h, _l, _c, _v in rows:
+        if _c is None:
+            continue
+        closes.append(_c)
+        highs.append(_h if _h is not None else _c)
+        lows.append(_l if _l is not None else _c)
+        vols.append(_v if _v is not None else 0)
+    if len(closes) < 70:
+        return None
+    return closes, highs, lows, vols
+
+
 _TW_UNIVERSE = {'date': None, 'codes': []}
 _CODE4 = _re.compile(r'^[1-9]\d{3}$')   # 4 位數普通股；排除 ETF(00xxx)/權證(6 位)
 
@@ -433,7 +478,7 @@ def _safe_sym(s):
 # ── 伺服器端 AI 金鑰(v3.9 review)──────────────────────────────────
 # 把 Anthropic 金鑰存在 server(本機檔,靜態服務已封鎖)而非瀏覽器 localStorage,
 # 並由 server 串流代理所有 AI 呼叫 → 金鑰不進瀏覽器,免於 XSS/惡意擴充竊取。
-_AI_KEY_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'ai_key.txt')
+_AI_KEY_FILE = os.path.join(_BASE, 'data', 'ai_key.txt')
 _ai_key_lock = threading.Lock()
 def _load_ai_key():
     try:
@@ -1252,6 +1297,8 @@ class Handler(SimpleHTTPRequestHandler):
             sym = p[7:].split('?')[0]
             if not _safe_sym(sym): self._err('bad symbol', 400); return
             self._handle_quote(sym)
+        elif p == '/bars' or p.startswith('/bars?'):
+            self._handle_bars()
         elif p.startswith('/chip/'):
             sym = p[6:].split('?')[0]
             self._handle_chip(sym)
@@ -1272,6 +1319,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_events()
         elif p == '/sectors' or p.startswith('/sectors?'):
             self._handle_sectors()
+        elif p == '/ai/local/status' or p.startswith('/ai/local/status?'):
+            self._handle_ai_local_status()
         elif p == '/screener' or p.startswith('/screener?'):
             self._handle_screener_get()
         elif p == '/focus' or p.startswith('/focus?'):
@@ -1358,6 +1407,14 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_screener_post()
         elif p == '/screen3':
             self._handle_screen3()
+        elif p == '/portfolio':
+            self._handle_portfolio()
+        elif p == '/chain-momentum':
+            self._handle_chain_momentum()
+        elif p == '/ai/local':
+            self._handle_ai_local()
+        elif p == '/notify':
+            self._handle_notify()
         elif p == '/ai-report':
             self._handle_ai_report()
         elif p == '/etf-reason':
@@ -2970,6 +3027,178 @@ class Handler(SimpleHTTPRequestHandler):
         short.sort(key=lambda x: (-x['score'], (x['changePct'] or 0)))
         self._ok(json.dumps({'ok': True, 'scanned': scanned, 'buy': buy[:20], 'short': short[:20]}, ensure_ascii=False).encode())
 
+    def _handle_bars(self):
+        """v4.0: GET /bars?sym=2330&market=TW → 本機 DB 日線 {candles:[{time,open,high,low,close,volume}]}。
+           DB 沒有/太少則即時抓 Yahoo 5y 並寫回(供回測深度歷史用)。"""
+        try:
+            qs = parse_qs(urlparse(self.path).query)
+            sym = (qs.get('sym', [''])[0]).strip()
+            market = (qs.get('market', ['TW'])[0]).strip() or 'TW'
+            if not sym:
+                self._err('missing sym', 400); return
+            code = sym.replace('.TW', '').replace('.TWO', '')
+            rows = []
+            try:
+                import datastore
+                rows = datastore.get_bars(code)
+                if not rows or len(rows) < 80:
+                    fetched = datastore.fetch_yahoo_daily(code, market, '5y')
+                    if fetched:
+                        datastore.upsert_bars(code, market, fetched)
+                        rows = datastore.get_bars(code)
+            except Exception as e:
+                print('[bars] datastore failed:', e)
+            candles = [{'time': r[0], 'open': r[1], 'high': r[2], 'low': r[3],
+                        'close': r[4], 'volume': r[5]} for r in (rows or [])]
+            self._ok(json.dumps({'sym': code, 'candles': candles}).encode())
+        except Exception as e:
+            self._err('bars failed: ' + str(e), 500)
+
+    def _handle_notify(self):
+        """v4.0: POST /notify  body:{text, subject?} → 用 alert_config 的 Telegram/Email 寄出
+           (把 AI 副駕分析等留存,不會關掉就消失)。回 {ok, results}。"""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length) or b'{}')
+        except Exception as e:
+            self._err('bad body: ' + str(e), 400); return
+        if not alert_daemon:
+            self._err('alert 模組未載入', 500); return
+        text = (body.get('text') or '').strip()
+        if not text:
+            self._err('text 為空', 400); return
+        try:
+            cfg = alert_daemon.load_config()
+            ok, results = alert_daemon.notify(cfg, text, body.get('subject') or 'Stock Terminal AI 副駕')
+            self._ok(json.dumps({'ok': ok, 'results': results}, ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('notify failed: ' + str(e), 500)
+
+    def _handle_ai_local(self):
+        """v4.0: POST /ai/local  body:{prompt, context?, model?} → 本機 Ollama 回答。"""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length) or b'{}')
+        except Exception as e:
+            self._err('bad body: ' + str(e), 400); return
+        if not ai_local:
+            self._err('ai_local 模組未載入', 500); return
+        # 串流回應(text/plain):token 邊生邊送,避免大模型久候 timeout
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/plain; charset=utf-8')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Connection', 'close')   # HTTP/1.1:無 Content-Length → 讀到關閉為止
+        self.end_headers()
+        self.close_connection = True
+        try:
+            for chunk in ai_local.chat_stream(body.get('prompt', ''), body.get('context', ''), body.get('model')):
+                self.wfile.write(chunk.encode('utf-8'))
+                self.wfile.flush()
+        except Exception:
+            pass
+
+    def _handle_ai_local_status(self):
+        """GET /ai/local/status → {ok, models}。Ollama 沒啟動則 ok=false。"""
+        models = ai_local.list_models() if ai_local else None
+        self._ok(json.dumps({'ok': models is not None, 'models': models or []}, ensure_ascii=False).encode())
+
+    def _handle_chain_momentum(self):
+        """v4.0: POST /chain-momentum  body:{stages:[{stage,codes:[...]}]}
+           → 每段 5/20/60 日動能(讀本機 DB)+ 領漲成分股。台股紅漲綠跌。"""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length) or b'{}')
+        except Exception as e:
+            self._err('bad body: ' + str(e), 400); return
+        stages = body.get('stages') or []
+        if not stages:
+            self._err('no stages', 400); return
+        import datastore
+        allcodes = []
+        for st in stages:
+            allcodes += [str(c) for c in (st.get('codes') or [])]
+        bulk = datastore.get_bars_bulk(list(set(allcodes)))
+        names = _get_tw_names()
+
+        def ret(rows, n):
+            if not rows or len(rows) <= n:
+                return None
+            c0 = rows[-1 - n][4]; c1 = rows[-1][4]
+            return (c1 / c0 - 1) * 100 if c0 else None
+
+        out = []
+        for st in stages:
+            codes = [str(c) for c in (st.get('codes') or [])]
+            per = []
+            for c in codes:
+                rows = bulk.get(c)
+                r20 = ret(rows, 20)
+                if r20 is not None:
+                    per.append((c, ret(rows, 5), r20, ret(rows, 60)))
+            if not per:
+                out.append({'stage': st.get('stage'), 'n': 0}); continue
+
+            def avg(i):
+                vals = [p[i] for p in per if p[i] is not None]
+                return round(sum(vals) / len(vals), 2) if vals else None
+            leaders = sorted(per, key=lambda p: p[2], reverse=True)[:2]
+            out.append({
+                'stage': st.get('stage'), 'n': len(per),
+                'mom5': avg(1), 'mom20': avg(2), 'mom60': avg(3),
+                'leaders': [{'code': l[0], 'name': names.get(l[0]) or l[0], 'ret20': round(l[2], 2)} for l in leaders],
+            })
+        # 近 8 週輪動軌跡:每週各段平均報酬 → 當週領漲段(資金輪動到哪一段)
+        rotation = []
+        for w in range(7, -1, -1):                 # 由最舊(前7週)到本週
+            start = -(w + 1) * 5
+            end = (-w * 5) if w > 0 else None
+            best, bestret = None, None
+            for st in stages:
+                rs = []
+                for c in [str(x) for x in (st.get('codes') or [])]:
+                    rows = bulk.get(c)
+                    if not rows or len(rows) < (w + 1) * 5 + 1:
+                        continue
+                    seg = rows[start:end] if end is not None else rows[start:]
+                    if len(seg) < 2 or not seg[0][4]:
+                        continue
+                    rs.append((seg[-1][4] / seg[0][4] - 1) * 100)
+                if rs:
+                    m = sum(rs) / len(rs)
+                    if bestret is None or m > bestret:
+                        bestret, best = m, st.get('stage')
+            rotation.append({'week': '本週' if w == 0 else ('前%d週' % w),
+                             'stage': best, 'ret': round(bestret, 1) if bestret is not None else None})
+        self._ok(json.dumps({'stages': out, 'rotation': rotation}, ensure_ascii=False).encode())
+
+    def _handle_portfolio(self):
+        """v4.0: POST /portfolio  body:{holdings:[{sym,weight}]} 或 {symbols:[...]}
+           → 投組風險(相關性/波動/VaR/Beta/產業曝險)。讀本機 DB,缺的代號先即時回補。"""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length) or b'{}')
+        except Exception as e:
+            self._err('bad body: ' + str(e), 400); return
+        holdings = body.get('holdings') or [{'sym': s, 'weight': 1} for s in (body.get('symbols') or [])]
+        if not holdings:
+            self._err('no holdings', 400); return
+        try:
+            import portfolio, datastore
+            codes = [str(h.get('sym', '')).replace('.TW', '').replace('.TWO', '') for h in holdings]
+            for c in [x for x in codes if x] + ['^TWII']:   # 確保持倉+大盤基準在 DB
+                try:
+                    r = datastore.get_bars(c)
+                    if not r or len(r) < 80:
+                        f = datastore.fetch_yahoo_daily(c, 'TW', '5y')
+                        if f:
+                            datastore.upsert_bars(c, 'TW', f)
+                except Exception:
+                    pass
+            out = portfolio.compute(holdings, sectors_map=_get_tw_sectors(), names_map=_get_tw_names())
+            self._ok(json.dumps(out, ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('portfolio failed: ' + str(e), 500)
+
     def _handle_screener_post(self):
         """POST /screener — body: {preset:'...', symbols:[...] (optional)} or {custom:'...'}"""
         try:
@@ -2994,10 +3223,41 @@ class Handler(SimpleHTTPRequestHandler):
                 syms = [s for s in syms if smap.get(str(s).replace('.TW', '').replace('.TWO', '')) in want]
             except Exception as e:
                 print('[screener] sector filter failed:', e)
-        # Fetch all syms in parallel using existing fetch_one
+        # v4.0:一次把全宇集在 DB 的 bars 撈出(單一查詢,秒級);DB 沒有的才退回 Yahoo(DB 空時零差異)
         results = []
         ind_cache = {}
-        futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith('.TW') else s): s for s in syms}
+        need_yahoo = []
+        try:
+            import datastore
+            _db_all = datastore.get_bars_bulk([str(s).replace('.TW', '').replace('.TWO', '') for s in syms])
+        except Exception:
+            _db_all = {}
+        for _s in syms:
+            _code = str(_s).replace('.TW', '').replace('.TWO', '')
+            _rows = _db_all.get(_code)
+            if not _rows or len(_rows) < 70:
+                need_yahoo.append(_s); continue
+            _cl = [r[4] for r in _rows]
+            _hi = [r[2] if r[2] is not None else r[4] for r in _rows]
+            _lo = [r[3] if r[3] is not None else r[4] for r in _rows]
+            _vo = [r[5] if r[5] is not None else 0 for r in _rows]
+            try:
+                _ind = self._calc_ind(_cl, _hi, _lo, _vo)
+                if self._screener_match(preset or custom, _ind, _cl, _hi, _vo):
+                    results.append({
+                        'sym': _code,
+                        'name': _get_tw_names().get(_code) or _code,
+                        'close': _ind['close'], 'changePct': _ind['changePct'],
+                        'rsi14': round(_ind['rsi14'], 1) if _ind['rsi14'] else None,
+                        'volRatio': round(_ind['volRatio'], 2) if _ind['volRatio'] else None,
+                        'sma5': round(_ind['sma5'], 2) if _ind['sma5'] else None,
+                        'sma20': round(_ind['sma20'], 2) if _ind['sma20'] else None,
+                        'sma60': round(_ind['sma60'], 2) if _ind['sma60'] else None,
+                    })
+            except Exception:
+                pass
+        # Fetch DB-misses in parallel using existing fetch_one
+        futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith('.TW') else s): s for s in need_yahoo}
         for fut in as_completed(futures):
             sym, data, _ = fut.result()
             if not data: continue
@@ -3039,11 +3299,14 @@ class Handler(SimpleHTTPRequestHandler):
                     vols.append(syn_vol)
                     ts_valid.append(rmt)
                 ind = self._calc_ind(closes, highs, lows, vols)
+                # 漲跌% 改以「官方昨收」為基準,避免 closes[-2] 遇資料缺口/除權息造成 +183% 等離譜值
+                _pc = _yf_prevclose(meta)
+                _chg = ((closes[-1] - _pc) / _pc * 100) if (_pc and _pc > 0) else ind['changePct']
                 if self._screener_match(preset or custom, ind, closes, highs, vols):
                     results.append({
                         'sym': sym.replace('.TW','').replace('.TWO',''),
                         'name': _get_tw_names().get(sym.replace('.TW','').replace('.TWO','')) or meta.get('shortName') or meta.get('symbol') or sym,
-                        'close': ind['close'], 'changePct': ind['changePct'],
+                        'close': ind['close'], 'changePct': round(_chg, 2),
                         'rsi14': round(ind['rsi14'],1) if ind['rsi14'] else None,
                         'volRatio': round(ind['volRatio'],2) if ind['volRatio'] else None,
                         'sma5': round(ind['sma5'],2) if ind['sma5'] else None,
@@ -3080,7 +3343,7 @@ class Handler(SimpleHTTPRequestHandler):
         v20 = sum(vols[-20:]) / 20 if len(vols) >= 20 else 0
         volRatio = v5/v20 if v20 > 0 else 0
         return {
-            'close': closes[-1], 'prev': closes[-2] if n >= 2 else None,
+            'close': _round_px(closes[-1]), 'prev': closes[-2] if n >= 2 else None,
             'changePct': (closes[-1] - closes[-2])/closes[-2]*100 if n >= 2 else 0,
             'sma5': sma(5, n-1), 'sma20': sma(20, n-1), 'sma60': sma(60, n-1),
             'sma5_prev': sma(5, n-2), 'sma60_prev': sma(60, n-2),
@@ -3705,6 +3968,10 @@ class Handler(SimpleHTTPRequestHandler):
                 if len(closes) < 70:
                     continue
                 ind = self._calc_ind(closes, highs, lows, vols)
+                # 漲跌% 同樣改以官方昨收為基準(避免資料缺口/除權息造成離譜值)
+                _pc = _yf_prevclose(meta)
+                if _pc and _pc > 0:
+                    ind['changePct'] = round((closes[-1] - _pc) / _pc * 100, 2)
                 if not self._screen3_tech(tech, ind):
                     continue
                 survivors.append({
@@ -3850,7 +4117,7 @@ class Handler(SimpleHTTPRequestHandler):
         pass  # silent
 
 if __name__ == '__main__':
-    os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    os.chdir(_BASE)
     d = find_etf_dir()
     files = list_etf_files()
     print(f'Stock Terminal: http://localhost:{PORT}/stock_terminal.html')
@@ -3870,4 +4137,11 @@ if __name__ == '__main__':
                 print('[watch] daemon started (poll %ss)' % _ac.get('watch_poll_seconds', 300))
         except Exception as _e:
             print('[alert] start failed:', _e)
+    if getattr(sys, 'frozen', False):
+        # 打包成 app 時:啟動後自動開瀏覽器(開發模式由 .bat 開,不重複)
+        try:
+            import webbrowser
+            threading.Timer(1.4, lambda: webbrowser.open(f'http://localhost:{PORT}/stock_terminal_v2.html')).start()
+        except Exception:
+            pass
     ThreadingHTTPServer(('localhost', PORT), Handler).serve_forever()

@@ -44,6 +44,17 @@
     { stage: 'CSP / AI 平台', icon: '☁️', stocks: [['MSFT', '微軟'], ['GOOGL', 'Alphabet'], ['AMZN', '亞馬遜'], ['META', 'Meta'], ['ORCL', '甲骨文']] },
   ];
   const CHAINS = { TW: CHAIN_TW, US: CHAIN_US };
+  // v4.0:暴露「代號 → 供應鏈節點」對照給投組模組用(單一來源,沿用上方 curated 對照)
+  try {
+    const _stageOf = {};
+    for (const mkt of ['TW', 'US']) {
+      for (const g of CHAINS[mkt]) {
+        for (const pair of g.stocks) _stageOf[pair[0]] = g.stage;
+      }
+    }
+    window.SC_STAGE = _stageOf;
+    window.SC_CHAINS = CHAINS;
+  } catch (e) {}
 
   function pcls(c) { return c == null ? '' : c > 0 ? 'sc-up' : c < 0 ? 'sc-dn' : ''; }
   function fmt(c) { return c == null ? '—' : (c >= 0 ? '+' : '') + c.toFixed(2) + '%'; }

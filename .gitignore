@@ -80,3 +80,14 @@ data/watch_state.json
 node_modules/
 # Stray test/junk file
 _tb_test.js
+
+# Installer build artifacts (PyInstaller + Inno Setup output)
+installer/build/
+installer/dist_installer/
+*.exe
+*.spec
+
+# v4.0 local market datastore (regenerable, can grow large)
+data/market.db
+data/market.db-wal
+data/market.db-shm

@@ -63,10 +63,24 @@
   }
 
   function cell(v, cls) { return `<td class="${cls || ''}">${v == null ? '—' : v}</td>`; }
+  // 把選股結果格式化成純文字(寄送用)
+  function screen3Text(rows) {
+    if (!rows || !rows.length) return '';
+    const lines = ['🔬 三合一進階選股(技術 × 基本面 × 籌碼)', new Date().toLocaleString('zh-TW'), '共 ' + rows.length + ' 檔', ''];
+    rows.forEach(r => {
+      lines.push(r.sym + ' ' + (r.name || '') + '  ' + (r.changePct >= 0 ? '+' : '') + (r.changePct == null ? '—' : r.changePct + '%') +
+        '  RSI' + (r.rsi14 == null ? '—' : r.rsi14) + '  量比' + (r.volRatio == null ? '—' : r.volRatio) +
+        '  YoY' + (r.revYoy == null ? '—' : r.revYoy + '%') + '  PER' + (r.per == null ? '—' : r.per) +
+        '  殖利' + (r['yield'] == null ? '—' : r['yield'] + '%'));
+    });
+    return lines.join('\n');
+  }
   function renderResults(rows) {
     const el = document.getElementById('s3-results');
     if (!rows.length) { el.innerHTML = '<div style="color:#64748b;padding:14px;text-align:center">無符合條件的個股</div>'; return; }
-    let h = `<div class="s3-rtop"><button id="s3-addall">＋ 全部加入自選股</button><span style="color:#475569;font-size:10px">點代號載入線型</span></div>`;
+    let h = `<div class="s3-rtop"><button id="s3-addall">＋ 全部加入自選股</button>` +
+      (window.ShareResult ? ShareResult.buttonHTML('s3-send', '寄結果') : '') +
+      `<span style="color:#475569;font-size:10px">點代號載入線型</span></div>`;
     h += `<table class="s3-tbl"><thead><tr><th>代號</th><th>名稱</th><th>價</th><th>漲跌</th><th>RSI</th><th>量比</th><th>營收YoY</th><th>PER</th><th>殖利</th><th>投信</th><th>外資</th><th></th></tr></thead><tbody>`;
     for (const r of rows) {
       const chgCls = (r.changePct >= 0) ? 'up' : 'dn';
@@ -90,6 +104,7 @@
     el.querySelectorAll('.s3-add').forEach(b => b.onclick = () => addWl(b.dataset.sym));
     const addall = document.getElementById('s3-addall');
     if (addall) addall.onclick = () => { rows.forEach(r => addWl(r.sym, true)); if (typeof renderWl === 'function') renderWl(); };
+    if (window.ShareResult) ShareResult.wire('s3-send', () => screen3Text(rows), '條件選股結果');
   }
 
   function addWl(sym, batch) {

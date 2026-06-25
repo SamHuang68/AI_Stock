@@ -252,13 +252,13 @@ async function refreshMktBar() {
       const rmp = meta.regularMarketPrice;
       // ── Yahoo 日線落後修正 ──
       // 若 rmt 比最後一根 K 線晚 > 20h，rmp 才是「今天」，last.c 是「昨天」
-      let cur, prev;
-      if (rmt && rmp != null && isFinite(rmp) && rmp > 0 && rmt - last.t > 20 * 3600) {
-        cur = rmp; prev = last.c;
-      } else {
-        cur = last.c;
-        prev = prevC != null ? prevC : (meta.chartPreviousClose || meta.previousClose);
-      }
+      // 漲跌基準一律用 Yahoo 官方昨收 regularMarketPreviousClose(與主圖一致)。
+      // 原本用日線陣列推算(prevC),外資指數(^KS11/^SOX)遇 Yahoo 落後/壞 tick 會算出
+      // -8% 等離譜值且與主圖不一致 → 改吃官方昨收,只在缺時才退回陣列。
+      const _rmpc = meta.regularMarketPreviousClose;
+      const cur = (rmp != null && isFinite(rmp) && rmp > 0) ? rmp : last.c;
+      const prev = (_rmpc != null && isFinite(_rmpc) && _rmpc > 0) ? _rmpc
+                 : (prevC != null ? prevC : (meta.chartPreviousClose || meta.previousClose));
       if (cur == null || prev == null || !isFinite(prev) || prev <= 0) continue;
       const delta = cur - prev;
       const chgPct = delta / prev * 100;
@@ -377,10 +377,14 @@ function applyMarketColorClass(mkt) {
       ? S.data.yesterdayClose
       : (prev ? prev.close : null);
     if (ref == null) return;
-    const up = last.close >= ref;
+    // 直接依「目前載入個股的市場」上色(以昨收為基準),不靠全域 body.market-* class —
+    // 因 loadSym 切股不會更新 body class,且全域 class 會牽動混合市場的自選股清單。
+    // 台股:漲紅跌綠;美股:漲綠跌紅;平盤無色。
+    const tw = (S.mkt || 'TW') === 'TW';
     el.classList.remove('price-up', 'price-down');
-    el.classList.add(up ? 'price-up' : 'price-down');
-    el.style.color = '';   // clear inline; let class win
+    if (last.close > ref)      el.style.color = tw ? 'var(--red)' : 'var(--green)';
+    else if (last.close < ref) el.style.color = tw ? 'var(--green)' : 'var(--red)';
+    else                       el.style.color = '';
   });
 })();
 

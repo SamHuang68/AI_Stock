@@ -145,7 +145,7 @@
           "code": "00983A",
           "name": "主動野村臺灣優選",
           "market": "TW",
-          "enabled": false
+          "enabled": true
         }
       ]
     },
@@ -231,67 +231,67 @@
           "code": "SPY",
           "name": "SPDR S&P 500",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "VOO",
           "name": "Vanguard S&P 500",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "IVV",
           "name": "iShares Core S&P 500",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "VTI",
           "name": "Vanguard Total US Market",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "QQQ",
           "name": "Invesco Nasdaq 100",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "QQQM",
           "name": "Invesco Nasdaq 100 (low fee)",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "DIA",
           "name": "SPDR Dow Jones",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "IWM",
           "name": "iShares Russell 2000",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "VT",
           "name": "Vanguard Total World",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "RSP",
           "name": "Invesco S&P 500 Equal Weight",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "00905",
           "name": "FT臺灣Smart",
           "market": "TW",
-          "enabled": false
+          "enabled": true
         }
       ]
     },
@@ -413,43 +413,43 @@
           "code": "SCHD",
           "name": "Schwab US Dividend",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "VYM",
           "name": "Vanguard High Dividend",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "HDV",
           "name": "iShares Core High Dividend",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "DGRO",
           "name": "iShares Dividend Growth",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "JEPI",
           "name": "JPMorgan Equity Premium Income",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "JEPQ",
           "name": "JPMorgan Nasdaq Equity Premium",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "SPYD",
           "name": "SPDR S&P 500 High Dividend",
           "market": "US",
-          "enabled": false
+          "enabled": true
         }
       ]
     },
@@ -553,61 +553,61 @@
           "code": "SMH",
           "name": "VanEck Semiconductor",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "SOXX",
           "name": "iShares Semiconductor",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "XLK",
           "name": "Tech Select Sector",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "VGT",
           "name": "Vanguard Information Tech",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "IGV",
           "name": "iShares Expanded Tech-Software",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "SKYY",
           "name": "First Trust Cloud",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "ARKK",
           "name": "ARK Innovation",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "AIQ",
           "name": "Global X AI & Tech",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "BOTZ",
           "name": "Global X Robotics & AI",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "00913",
           "name": "兆豐台灣晶圓製造",
           "market": "TW",
-          "enabled": false
+          "enabled": true
         }
       ]
     },
@@ -735,55 +735,55 @@
           "code": "SQQQ",
           "name": "ProShares UltraPro Short QQQ -3x",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "SOXL",
           "name": "Direxion Semi Bull 3x",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "SOXS",
           "name": "Direxion Semi Bear 3x",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "UPRO",
           "name": "ProShares UltraPro S&P500 3x",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "SPXU",
           "name": "ProShares UltraPro Short S&P -3x",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "TMF",
           "name": "Direxion 20Y Treasury Bull 3x",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "TNA",
           "name": "Direxion Small Cap Bull 3x",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "TSLL",
           "name": "Direxion TSLA Bull 2x",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "NVDL",
           "name": "GraniteShares NVDA 2x",
           "market": "US",
-          "enabled": false
+          "enabled": true
         }
       ]
     },
@@ -893,55 +893,55 @@
           "code": "VEA",
           "name": "Vanguard Developed Markets",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "VWO",
           "name": "Vanguard Emerging Markets",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "EFA",
           "name": "iShares MSCI EAFE",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "EEM",
           "name": "iShares MSCI Emerging",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "VXUS",
           "name": "Vanguard Total Intl",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "EWJ",
           "name": "iShares MSCI Japan",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "MCHI",
           "name": "iShares MSCI China",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "INDA",
           "name": "iShares MSCI India",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "EWT",
           "name": "iShares MSCI Taiwan",
           "market": "US",
-          "enabled": false
+          "enabled": true
         }
       ]
     },
@@ -1069,55 +1069,55 @@
           "code": "TLT",
           "name": "iShares 20+ Year Treasury",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "IEF",
           "name": "iShares 7-10 Year Treasury",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "SHY",
           "name": "iShares 1-3 Year Treasury",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "AGG",
           "name": "iShares Core US Aggregate Bond",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "BND",
           "name": "Vanguard Total Bond",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "LQD",
           "name": "iShares Investment Grade Corp",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "HYG",
           "name": "iShares High Yield Corp",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "TIP",
           "name": "iShares TIPS",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "BIL",
           "name": "SPDR 1-3 Month T-Bill",
           "market": "US",
-          "enabled": false
+          "enabled": true
         }
       ]
     },
@@ -1149,25 +1149,25 @@
           "code": "VNQ",
           "name": "Vanguard Real Estate",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "SCHH",
           "name": "Schwab US REIT",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "IYR",
           "name": "iShares US Real Estate",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "VNQI",
           "name": "Vanguard Global ex-US Real Estate",
           "market": "US",
-          "enabled": false
+          "enabled": true
         }
       ]
     },
@@ -1211,49 +1211,49 @@
           "code": "GLD",
           "name": "SPDR Gold",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "IAU",
           "name": "iShares Gold",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "SLV",
           "name": "iShares Silver",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "USO",
           "name": "US Oil Fund",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "DBC",
           "name": "Invesco DB Commodity",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "PDBC",
           "name": "Invesco Optimum Yield Commodity",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "URA",
           "name": "Global X Uranium",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "LIT",
           "name": "Global X Lithium",
           "market": "US",
-          "enabled": false
+          "enabled": true
         }
       ]
     },
@@ -1303,25 +1303,25 @@
           "code": "ESGU",
           "name": "iShares ESG Aware MSCI USA",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "ICLN",
           "name": "iShares Global Clean Energy",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "TAN",
           "name": "Invesco Solar",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "SUSA",
           "name": "iShares MSCI USA ESG",
           "market": "US",
-          "enabled": false
+          "enabled": true
         }
       ]
     },
@@ -1365,85 +1365,85 @@
           "code": "XLE",
           "name": "Energy Select Sector",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "XLF",
           "name": "Financial Select Sector",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "XLV",
           "name": "Health Care Select",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "XLY",
           "name": "Consumer Discretionary Select",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "XLP",
           "name": "Consumer Staples Select",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "XLI",
           "name": "Industrial Select",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "XLB",
           "name": "Materials Select",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "XLU",
           "name": "Utilities Select",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "XLRE",
           "name": "Real Estate Select",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "XLC",
           "name": "Communication Services Select",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "IBB",
           "name": "iShares Biotech",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "ITA",
           "name": "iShares US Aerospace & Defense",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "JETS",
           "name": "US Global Jets",
           "market": "US",
-          "enabled": false
+          "enabled": true
         },
         {
           "code": "XBI",
           "name": "SPDR S&P Biotech",
           "market": "US",
-          "enabled": false
+          "enabled": true
         }
       ]
     },

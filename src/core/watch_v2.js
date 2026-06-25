@@ -656,10 +656,10 @@ function renderPresetForm() {
 
   // Custom price inputs if preset needs them
   if (preset.customPriceMode === 'sell') {
-    h += `<input id="watch-preset-price" type="number" step="0.01" placeholder="${esc(preset.customPriceLbl)}" style="${inp('var(--green)')}">`;
+    h += `<input id="watch-preset-price" type="text" inputmode="decimal" autocomplete="off" placeholder="${esc(preset.customPriceLbl)}" style="${inp('var(--green)')}">`;
   } else if (preset.customPriceMode === 'both') {
-    h += `<input id="watch-preset-price"  type="number" step="0.01" placeholder="${esc(preset.customPriceLbl)}"  style="${inp('var(--green)')}">`;
-    h += `<input id="watch-preset-price2" type="number" step="0.01" placeholder="${esc(preset.customPriceLbl2)}" style="${inp('var(--red)')}">`;
+    h += `<input id="watch-preset-price"  type="text" inputmode="decimal" autocomplete="off" placeholder="${esc(preset.customPriceLbl)}"  style="${inp('var(--green)')}">`;
+    h += `<input id="watch-preset-price2" type="text" inputmode="decimal" autocomplete="off" placeholder="${esc(preset.customPriceLbl2)}" style="${inp('var(--red)')}">`;
   }
   return h;
 }
@@ -840,15 +840,27 @@ function showWatchToast(msg) {
   setTimeout(() => { if (t) t.style.display = 'none'; }, 2200);
 }
 
+// ── 守門渲染入口(單一標準) ───────────────────────────────
+// 所有「會被定時器/事件重繪」的 WATCH 面板路徑都走這裡:使用者正在欄位
+// (watch-sym/notes/price/param)打字時就跳過重繪,避免清空輸入、奪走焦點。
+function renderWatchPanel() {
+  if (typeof S === 'undefined' || S.tab !== 'watch') return;
+  const el = document.getElementById('rpanel');
+  if (!el) return;
+  const editing = (window.Field && Field.editing) ? Field.editing(el)
+    : (() => { const a = document.activeElement; const tg = (a && a.tagName) || ''; return /^(INPUT|TEXTAREA)$/.test(tg) && (a.type !== 'checkbox'); })();
+  if (editing) return;
+  try { el.innerHTML = renderWatch(); attachWatch(); }
+  catch (e) { console.error('[v2-watch] renderWatchPanel:', e); }
+}
+window.renderWatchPanel = renderWatchPanel;
+
 // ── Sym-loaded hook: refresh current symbol's signals ──────
 window.addEventListener('symLoaded', function () {
   try {
     const code = S.sym?.toUpperCase().trim();
     if (code && S.watches[code]) refreshSignalsForStock(S.watches[code]);
-    if (S.tab === 'watch') {
-      const el = document.getElementById('rpanel');
-      if (el) { el.innerHTML = renderWatch(); attachWatch(); }
-    }
+    renderWatchPanel();   // 守門入口(編輯中自動跳過)
   } catch (e) { console.error('[v2-watch] symLoaded handler:', e); }
 });
 
@@ -859,11 +871,7 @@ window.addEventListener('symLoaded', function () {
     if (S.tab !== 'watch') return;
     if (S.sym !== _last) {
       _last = S.sym;
-      const el = document.getElementById('rpanel');
-      if (el) {
-        try { el.innerHTML = renderWatch(); attachWatch(); }
-        catch (e) { console.error('[v2-watch] poll re-render:', e); }
-      }
+      renderWatchPanel();   // 守門入口(編輯中自動跳過)
     }
   }, 600);
 })();

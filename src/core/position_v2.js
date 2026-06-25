@@ -408,16 +408,16 @@ function renderPosition() {
 
   h += `<div class="stat-sect">${pos ? '更新倉位' : '建立倉位'}</div>`;
   h += `<div style="padding:8px 12px;display:flex;flex-direction:column;gap:6px">
-    <input id="pos-entry"  type="number" step="0.01" inputmode="decimal" placeholder="進場價" value="${pos?.entry ?? ''}"  style="${inpStyle()}">
+    <input id="pos-entry"  type="text" inputmode="decimal" autocomplete="off" placeholder="進場價" value="${pos?.entry ?? ''}"  style="${inpStyle()}">
     <div style="display:flex;gap:4px">
-      <input id="pos-shares" type="number" step="1" inputmode="numeric" placeholder="${unitLot ? '張數' : '股數'}" value="${sharesDisplay}" style="${inpStyle()};flex:1">
+      <input id="pos-shares" type="text" inputmode="numeric" autocomplete="off" placeholder="${unitLot ? '張數' : '股數'}" value="${sharesDisplay}" style="${inpStyle()};flex:1">
       <select id="pos-unit" style="${inpStyle()};width:64px;cursor:pointer">
         <option value="lot" ${unitLot ? 'selected' : ''}>張</option>
         <option value="share" ${!unitLot ? 'selected' : ''}>股</option>
       </select>
     </div>
-    <input id="pos-target" type="number" step="0.01" inputmode="decimal" placeholder="停利價（可空）" value="${pos?.target ?? ''}" style="${inpStyle('var(--green)')}">
-    <input id="pos-stop"   type="number" step="0.01" inputmode="decimal" placeholder="停損價（可空）" value="${pos?.stop ?? ''}"   style="${inpStyle('var(--red)')}">
+    <input id="pos-target" type="text" inputmode="decimal" autocomplete="off" placeholder="停利價（可空）" value="${pos?.target ?? ''}" style="${inpStyle('var(--green)')}">
+    <input id="pos-stop"   type="text" inputmode="decimal" autocomplete="off" placeholder="停損價（可空）" value="${pos?.stop ?? ''}"   style="${inpStyle('var(--red)')}">
     <textarea id="pos-notes" placeholder="進場理由 / 筆記" style="${inpStyle()};resize:vertical;min-height:50px;line-height:1.5">${escapeHtml(pos?.notes || '')}</textarea>
     <button id="pos-save-btn" data-act="save-pos" style="padding:9px;background:var(--gold);border:none;border-radius:4px;color:#060A12;font-family:monospace;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px;margin-top:4px">${pos ? '✓ 更新倉位' : '＋ 儲存倉位'}</button>
     <div id="pos-toast" style="display:none;padding:6px;background:rgba(74,222,128,.12);border:1px solid var(--gbdr);border-radius:4px;color:var(--green);font-family:monospace;font-size:9.5px;text-align:center;letter-spacing:.5px"></div>
@@ -489,17 +489,9 @@ function attachPosition() {
     });
   }
 
-  // ── Per-render: Enter-key submit on the freshly-created form inputs ──
-  // Inputs ARE replaced on every render, so their listeners disappear with them.
-  // Re-binding here is safe (old elements are GC'd along with their listeners).
-  panel.querySelectorAll('input,textarea').forEach(el => {
-    el.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
-        e.preventDefault();
-        submitPosition();
-      }
-    });
-  });
+  // ── 數值欄位維持「純資料輸入」:不在輸入框上掛任何鍵盤行為 ──
+  // 原本「Enter → 送出存倉」已移除:輸入框不混用其他功能。
+  // 儲存一律用「儲存倉位」按鈕(panel 上的 data-act="save-pos" 委派)。
 }
 
 // ── Re-render hook: triggered by `symLoaded` CustomEvent fired in v1's loadSym ──
@@ -516,16 +508,8 @@ window.addEventListener('symLoaded', function (e) {
       S.positions[code].lastUpdate = Date.now();
       savePositions();
     }
-    if (S.tab === 'position') {
-      const el = document.getElementById('rpanel');
-      if (el) {
-        try { el.innerHTML = renderPosition(); attachPosition(); }
-        catch (err) {
-          console.error('[v2] renderPosition threw:', err);
-          el.innerHTML = `<div style="padding:14px;color:var(--red);font-family:monospace;font-size:10px">render error: ${err.message}<br><small>Check console for stack trace</small></div>`;
-        }
-      }
-    }
+    // 重繪一律走單一守門入口(編輯中自動跳過,不清空輸入框/不奪焦點)
+    renderPositionPanel();
     console.log('[v2] symLoaded handler fired for', code, '— S.tab=', S.tab);
   } catch (err) {
     console.error('[v2] symLoaded handler error:', err);
@@ -540,14 +524,32 @@ window.addEventListener('symLoaded', function (e) {
     if (S.tab !== 'position') return;
     if (S.sym && S.sym !== _last) {
       _last = S.sym;
-      const el = document.getElementById('rpanel');
-      if (el) {
-        try { el.innerHTML = renderPosition(); attachPosition(); }
-        catch (err) { console.error('[v2] poll re-render error:', err); }
-      }
+      renderPositionPanel();
     }
   }, 600);
 })();
+
+// ── 單一守門渲染入口 ─────────────────────────────────────────
+// 所有「重繪 POS 面板」的路徑都必須走這裡,集中唯一一道焦點守門:
+// 只要使用者正在任一 pos-* 欄位輸入,就完全不重繪(innerHTML 重建會清空
+// 輸入框、奪走焦點)。資料(S.positions)在背景照常更新,等失焦後的下一次
+// 輪詢才反映到畫面。原則:打字時永不動 DOM。任何模組要刷新 POS 面板,
+// 一律呼叫 window.renderPositionPanel(),不可自行 innerHTML = renderPosition()。
+function renderPositionPanel() {
+  if (typeof S === 'undefined' || S.tab !== 'position') return;
+  const el = document.getElementById('rpanel');
+  if (!el) return;
+  // 單一標準:使用者正在 el 內任一欄位打字 → 不重繪(避免清空輸入/奪焦點)
+  const editing = (window.Field && Field.editing) ? Field.editing(el)
+    : (() => { const a = document.activeElement; return a && /^pos-(entry|shares|target|stop|notes)$/.test(a.id || ''); })();
+  if (editing) return;
+  try { el.innerHTML = renderPosition(); attachPosition(); }
+  catch (err) {
+    console.error('[v2] renderPositionPanel threw:', err);
+    el.innerHTML = `<div style="padding:14px;color:var(--red);font-family:monospace;font-size:10px">render error: ${err.message}</div>`;
+  }
+}
+window.renderPositionPanel = renderPositionPanel;
 
 function submitPosition() {
   console.log('[v2] submitPosition called for', S.sym);
@@ -602,6 +604,11 @@ window.attachPosition = attachPosition;
   // (build_v2.py injects POS *before* ETF, so order is: stats/research/batch/history/pos/etf)
   window.setTab = function (tab) {
     S.tab = tab;
+    // 切換分頁屬明確操作:先讓目前 rpanel 內聚焦的欄位失焦,確保新分頁一定重繪
+    // (否則守門會把「上一頁殘留的焦點」誤判成編輯中而跳過,造成切頁後面板沒更新)
+    const _ae = document.activeElement;
+    const _rp = document.getElementById('rpanel');
+    if (_ae && _rp && _rp.contains(_ae) && typeof _ae.blur === 'function') _ae.blur();
     document.querySelectorAll('.rtab').forEach(b => {
       const oc = b.getAttribute('onclick') || '';
       const m = oc.match(/setTab\(['"](\w+)['"]\)/);
@@ -614,10 +621,13 @@ window.attachPosition = attachPosition;
   const origRender = window.renderRpanel;
   window.renderRpanel = function () {
     if (S.tab === 'position') {
-      const el = document.getElementById('rpanel');
-      if (el) { el.innerHTML = renderPosition(); attachPosition(); }
+      renderPositionPanel();   // 單一守門入口(編輯中自動跳過)
       return;
     }
+    // 其他右panel分頁(自選等):使用者正在欄位打字時不重繪(避免清空輸入/奪焦點)。
+    // 用 Field.editing → 只擋「文字/數值輸入中」,select 變更等仍正常重繪。
+    const rp = document.getElementById('rpanel');
+    if (rp && window.Field && Field.editing(rp)) return;
     return origRender.apply(this, arguments);
   };
 

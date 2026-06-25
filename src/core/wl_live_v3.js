@@ -200,10 +200,9 @@
       // v3.8：持倉價有更新 → 存檔 + 若在 POS 分頁則重繪
       if (_posDirty) {
         if (typeof savePositions === 'function') { try { savePositions(); } catch {} }
-        if (S.tab === 'position' && typeof renderPosition === 'function') {
-          const el = document.getElementById('rpanel');
-          if (el) { try { el.innerHTML = renderPosition(); if (typeof attachPosition === 'function') attachPosition(); } catch (e) {} }
-        }
+        // 重繪一律走單一守門入口:使用者正在輸入欄位時不重繪(否則每次輪詢都會
+        // innerHTML 重建,清空進場價/股數、奪走焦點,下一鍵被攔走)。資料已先更新。
+        if (typeof window.renderPositionPanel === 'function') window.renderPositionPanel();
       }
     } catch (e) {
       console.warn('[wl-live] poll fail:', e);

@@ -70,10 +70,23 @@
 
   let lastRows = [];
 
-  function runScan() {
-    const candles = ((typeof S !== 'undefined') && S.data && S.data.candles) || [];
+  async function runScan() {
     const body = document.getElementById('bt3-body');
-    if (candles.length < 80) { body.innerHTML = '<span class="bt3-neg">資料太少（需 ≥ 80 根 K）。請切到較長時間段。</span>'; return; }
+    if (body) body.innerHTML = '載入本機深度歷史中…';
+    // v4.0:優先用本機 DB 的深度歷史(5年)跑回測,不再只靠畫面載入的區間
+    let candles = [];
+    try {
+      const sym = (typeof S !== 'undefined' && S.sym) ? S.sym : '';
+      const mkt = (typeof S !== 'undefined' && S.mkt) ? S.mkt : 'TW';
+      if (sym) {
+        const r = await fetch('/bars?sym=' + encodeURIComponent(sym) + '&market=' + encodeURIComponent(mkt));
+        const j = await r.json();
+        if (j && j.candles && j.candles.length >= 80) candles = j.candles;
+      }
+    } catch (e) {}
+    // 後援:深度歷史抓不到 → 用畫面載入的線型資料
+    if (candles.length < 80) candles = ((typeof S !== 'undefined') && S.data && S.data.candles) || [];
+    if (candles.length < 80) { body.innerHTML = '<span class="bt3-neg">資料太少（需 ≥ 80 根 K）。</span>'; return; }
     const opts = {
       tp: (+document.getElementById('bt3-tp').value || 15) / 100,
       sl: (+document.getElementById('bt3-sl').value || 8) / 100,

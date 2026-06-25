@@ -11,9 +11,10 @@ Bloomberg 風格的個股研究終端機。本機跑、零雲端依賴、**不�
 ```
 瀏覽器 UI ── src/ 前端模組（工具列：一階分類 + 二階下拉）
    │  HTTP  localhost:18432
-本機 server.py（純 stdlib）── Yahoo proxy · LRU 快取 · 籌碼/ETF/估值 API · 常駐 daemon
+本機 server.py（純 stdlib）── Yahoo proxy · LRU 快取 · 籌碼/ETF/估值/投組/AI API · 常駐 daemon
    │  讀寫                                   │ 抓取
-data/（本機資料：ETF/籌碼/設定）        外部源：Yahoo Finance / MoneyDJ / TWSE
+data/（本機資料：ETF/籌碼/設定 + market.db 時序DB）   外部源：Yahoo / MoneyDJ / TWSE
+   ↕ v4.0 資料骨幹(SQLite)：選股/回測/投組讀同一份；AI 副駕接本機 LM Studio
 ```
 
 ### 目錄結構
@@ -30,9 +31,10 @@ Stock_Terminal/
 │   ├── core/        報價・自選・部位・即時（pro / position / watch / live / etf …）
 │   ├── chart/       量價・多圖・價差・畫線・型態・夜盤・Replay
 │   ├── screener/    選股・掃描・策略・腳本・回測・精靈
-│   ├── fundamental/ 估值・資金流・法人榜・供應鏈・個股期・計畫
+│   ├── fundamental/ 估值・資金流・法人榜・供應鏈・個股期・計畫・供應鏈輪動(v4.0)
+│   ├── portfolio/   投組風險面板（相關性/VaR/曝險/熱力圖,v4.0）
 │   ├── alert/       通知・推播・行事曆・資料源健檢・結算提醒
-│   ├── ai/          AI 報告・命令面板・焦點掃描
+│   ├── ai/          AI 報告・命令面板・焦點掃描・AI 副駕(v4.0)
 │   └── ui/          工具列・拖拉視窗・PDF 匯入匯出・外觀
 │
 ├── server/                      ── 後端服務（本機，純 stdlib）──
@@ -41,9 +43,13 @@ Stock_Terminal/
 │   ├── watch_daemon.py          觀察清單 24h 後端偵測
 │   ├── chip_history_tracker.py  每日法人籌碼快照
 │   ├── etf_delta_tracker.py     每日主動 ETF 持股 delta（server 會就近 spawn）
+│   ├── datastore.py             v4.0 本機時序 DB（SQLite；選股/回測/投組共用）
+│   ├── portfolio.py             v4.0 投組風險引擎（相關性/VaR/Beta/曝險）
+│   ├── ai_local.py              v4.0 AI 副駕（接本機 LM Studio,串流）
 │   └── backup_data.py · expand_etf_catalog.py
 │
 ├── data/                        ── 使用者資料（多數 .gitignore）──
+│   ├── market.db                v4.0 本機時序 DB（全市場日線；可重生,不入版控）
 │   ├── etf_catalog.json · etf_history/ · chip_history/
 │   └── alert_config.json · alert_rules.json · draw_store.json · ai_key.txt
 │
@@ -124,6 +130,21 @@ Stock_Terminal/
 - **server.py**：本機 HTTP server，Yahoo proxy + LRU 快取 + 籌碼/ETF/估值/畫線等 API，純 stdlib
 - **常駐 daemon**：警報（alert）、觀察（watch）後端偵測；籌碼（chip）、ETF（delta）每日快照
 - 全本機運算、零雲端、零追蹤
+
+---
+
+## v4.0 — 本機資料骨幹 + 投組 + AI 副駕
+
+v4.0 把選股 / 回測 / 投組都建在同一條「本機時序資料骨幹」上，並加上本機 AI。
+
+- **本機時序 DB**（`server/datastore.py`，SQLite，純 stdlib）：全市場約 2200 檔日線一鍵回補（`datastore.py backfill-universe`，含限流退避 + resume）。選股 / 回測 / 投組讀同一份乾淨資料。
+- **選股讀 DB**：全市場掃描從分鐘級變**秒級**（DB 沒有的才退回 Yahoo）。
+- **回測讀 DB**：`/bars` 端點供深度 5 年歷史，短線型也能回測長區間。
+- **投組風險面板**（`src/portfolio`）：相關性 / 年化波動 / 1日95%VaR / Beta / 投組Beta / 產業曝險 / **供應鏈曝險鏈條圖** / 相關性熱力圖；可自訂成分股與權重（持倉市值 / 自選等權 / 手動）。
+- **AI 副駕**（`src/ai/copilot` + `server/ai_local.py`）：接**本機 LM Studio**（OpenAI 相容、串流輸出）。自然語言問盤，自動附上你的持倉 / 當前個股 / 盤面當 context，只用真實資料不編造；回答可一鍵**寄到 Telegram/Email** 留存。
+- **供應鏈輪動**（`src/fundamental/chainmom`）：各段 5/20/60 日動能 + 近 8 週**輪動軌跡** + 供應鏈**流向圖**，看資金輪到哪一段（沿用 `CHAIN_TW`）。
+
+> AI 副駕需另裝 [LM Studio](https://lmstudio.ai)（本機 LLM runtime）並載入模型。資料骨幹首次需跑一次 `python server\datastore.py backfill-universe` 回補全市場。
 
 ---
 
@@ -208,6 +229,7 @@ python server\server.py
 - **v3.5–3.7** Yahoo 日線落後修正、build 根因修正 + LRU TTL、全球型 ETF 持股完整抓取
 - **v3.8** 四主軸（籌碼 / 基本面 / 回測 / 警報）+ 成交金額 Volume Profile + 後端推播 daemon
 - **v3.9** 多圖 / 全鍵盤 / 視覺化回測 / 畫線 / 三合一選股 / 複合警示；**模組化重構**（工具列分類下拉、`src/` 依功能分區、`server/` `data/` `scripts/` 分區、載入順序自動排序）
+- **v4.0** 本機 SQLite 時序資料骨幹（選股 / 回測秒級讀 DB）+ 投組風險面板（VaR / 相關性 / 供應鏈曝險）+ 本機 AI 副駕（LM Studio、串流、可寄 Telegram/Email）+ 供應鏈輪動（動能 / 輪動軌跡 / 流向圖）
 
 ---
 

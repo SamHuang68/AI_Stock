@@ -2,7 +2,8 @@
 // Stock Terminal v3.9 — 全鍵盤快捷 (Hotkey Driven)
 // ------------------------------------------------------------
 // 追求 TradingView 式極速操作：
-//   打字即搜尋   非輸入框聚焦時，鍵入數字/字母 → 浮出快搜，Enter 直接 loadSym
+//   /            開啟快搜 (數字=台股, 字母=美股) Enter 直接 loadSym
+//                ※「打字即搜尋」已移除:會與數值欄位(進場價/股數)搶鍵 → 欄位功能混用
 //   Space        下一檔自選股   Shift+Space 上一檔
 //   Alt+1~0      切時框 (對應 RANGE_DEFS)
 //   Alt+M        多圖   Alt+D 價差圖   Alt+T 趨勢線(P3 畫線工具，存在才觸發)
@@ -106,8 +107,7 @@
 
   // ---------- 快捷表 ----------
   const HELP = [
-    ['打字', '直接鍵入代號 → 快搜 (數字=台股 / 字母=美股) Enter 載入'],
-    ['/', '開啟快搜'],
+    ['/', '開啟快搜 (數字=台股 / 字母=美股) Enter 載入'],
     ['Space', '下一檔自選股'],
     ['Shift+Space', '上一檔自選股'],
     ['Alt+1…0', '切換時框 (1天/3周/1月/3月/6月/YTD/1年/2年/5年/10年)'],
@@ -176,12 +176,8 @@
     // 純 Ctrl/Meta 組合不攔 (留給瀏覽器)
     if (e.ctrlKey || e.metaKey) return;
 
-    // 打字即搜尋：可列印字元 (代號常見字元)
-    if (e.key.length === 1 && /[A-Za-z0-9^]/.test(e.key)) {
-      e.preventDefault();
-      openQs(e.key.toUpperCase());
-      return;
-    }
+    // 「打字即搜尋」已移除:會與數值欄位(進場價/股數)搶鍵,造成欄位功能混用。
+    // 搜尋一律以明確動作觸發 → 按 / 或點上方代號框。數值欄位永遠是數值欄位。
   }
 
   function style() {
@@ -205,5 +201,5 @@
   document.addEventListener('keydown', onKey, true);   // capture 期攔截
   window.hotkeysHelp = toggleHelp;
   window.hotkeysSearch = () => openQs('');
-  console.log('[hotkeys] v3.9 ready — 打字即搜尋 / Space 切自選 / Alt+數字 切時框 / ? 快捷表');
+  console.log('[hotkeys] ready — / 開快搜 / Space 切自選 / Alt+數字 切時框 / ? 快捷表 (打字即搜尋已移除)');
 })();

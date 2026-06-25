@@ -730,7 +730,11 @@ async function loadSym(sym, mkt, silent) {
   document.getElementById('ci-price').textContent = last.close.toFixed(2);
   const ci = document.getElementById('ci-chg');
   ci.textContent = (chgPct>=0?'+':'')+chgPct.toFixed(2)+'%';
-  ci.style.color = chgPct>=0 ? 'var(--green)' : 'var(--red)';
+  // 台股紅漲綠跌(以昨收為基準),美股/其他綠漲紅跌;平盤無色
+  const _ciTw = (mkt === 'TW' || /^\^TW/.test(sym || ''));
+  ci.style.color = chgPct > 0 ? (_ciTw ? 'var(--red)' : 'var(--green)')
+                 : chgPct < 0 ? (_ciTw ? 'var(--green)' : 'var(--red)')
+                 : 'var(--thi)';
   document.getElementById('ci-name').textContent = parsed.name;
 
   // compute indicators
@@ -818,7 +822,34 @@ function renderChart(candles) {
   if (isIntraday && lcd.length) {
     const _lastTz = lcd[lcd.length - 1].time;
     const _midnight = _lastTz - (_lastTz % 86400);
-    const _closeTz = _midnight + ((S.mkt === 'TW') ? 13.5 * 3600 : 16 * 3600);
+    // 各市場收盤(換算成使用者本地時鐘的「當地午夜後第幾小時」):
+    //   台股 13:30、KOSPI 14:30(15:30 KST)、日經 14:00(15:00 JST)、恆生 16:00(HKT)、其餘(美股等) 16:00。
+    const _isTwI = (S.mkt === 'TW' || /^\^TW/.test(S.sym || ''));
+    const _isUsI = !_isTwI && S.sym !== '^KS11' && S.sym !== '^N225' && S.sym !== '^HSI';
+    let _closeTz;
+    if (_isUsI) {
+      // 美股收盤 16:00 ET,依日光節約自動換算(夏令 EDT→台灣 04:00 / 冬令 EST→台灣 05:00)。
+      // 用交易所時區 America/New_York 判定當天 EDT(-4)或 EST(-5),DST 轉換日也自動正確。
+      try {
+        const _tzo = (S.tzOffset && isFinite(S.tzOffset)) ? S.tzOffset : 0;   // 圖表顯示位移(台灣=28800)
+        const _lastUtcMs = (lcd[lcd.length - 1].time - _tzo) * 1000;          // 還原成 UTC 毫秒
+        const _p = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'short', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(_lastUtcMs));
+        const _g = t => _p.find(x => x.type === t).value;
+        const _etOff = (_g('timeZoneName') === 'EDT') ? -4 : -5;              // EDT=-4, EST=-5
+        const _closeUtcSec = Date.UTC(+_g('year'), +_g('month') - 1, +_g('day'), 16 - _etOff, 0, 0) / 1000;  // 16:00 ET 的 UTC
+        _closeTz = _closeUtcSec + _tzo;                                       // 轉回圖表顯示時間
+      } catch (e) {
+        const _firstMid = lcd[0].time - (lcd[0].time % 86400);
+        _closeTz = _firstMid + 28 * 3600;   // 退回:固定夏令 04:00
+      }
+    } else {
+      const _ch = _isTwI ? 13.5
+                : (S.sym === '^KS11') ? 14.5
+                : (S.sym === '^N225') ? 14.0
+                : (S.sym === '^HSI') ? 16.0
+                : 16;
+      _closeTz = _midnight + _ch * 3600;
+    }
     const _wsSeries = chart.addLineSeries({ color: 'rgba(0,0,0,0)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     const _ws = [];
     for (let t = lcd[0].time; t <= _closeTz; t += 60) _ws.push({ time: t });   // 透明留白點撐開時間軸到收盤

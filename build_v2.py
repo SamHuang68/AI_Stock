@@ -12,7 +12,10 @@ SRC  = os.path.join(ROOT, 'stock_terminal.html')
 DST  = os.path.join(ROOT, 'stock_terminal_v2.html')
 
 # Scripts injected (in order):
-V2_SCRIPTS = ['src/core/position_v2.js', 'src/core/watch_v2.js', 'src/core/info_v2.js', 'src/core/pro_v2.js',
+V2_SCRIPTS = ['src/core/fields_v3.js',   # 欄位型別定義+全域滾輪防護(單一真理來源,須最先載入)
+              'src/ui/share_v3.js',      # 分析結果寄送 Telegram/Email(單一來源,各分析面板共用)
+              'src/core/etf_flow_tip_v3.js',  # 自選股 ETF 增減碼徽章浮動視窗(列出是哪幾檔 ETF)
+              'src/core/position_v2.js', 'src/core/watch_v2.js', 'src/core/info_v2.js', 'src/core/pro_v2.js',
               'src/chart/volume_profile_v3.js',           # v3.8 E: 成交金額 Volume Profile (覆寫 pro_v2 POC，須在其後)
               'src/chart/pattern_v3.js', 'src/core/live_v2.js',
               'src/fundamental/chip_v3.js',
@@ -34,6 +37,8 @@ V2_SCRIPTS = ['src/core/position_v2.js', 'src/core/watch_v2.js', 'src/core/info_
               'src/chart/aftermarket_v3.js',              # v3.8: 美股盤後/盤前延伸交易顯示
               'src/chart/overnight_v3.js',                # v3.8: 夜盤連動預警(美股期貨→台股隔日)
               'src/fundamental/supplychain_v3.js',              # v3.8: 台灣AI供應鏈族群連動
+              'src/portfolio/portfolio_v3.js',                  # v4.0: 投組風險面板(相關性/VaR/產業·供應鏈曝險,依賴 SC_STAGE 須在 supplychain 後)
+              'src/fundamental/chainmom_v3.js',                 # v4.0: 供應鏈輪動(多時框動能,依賴 SC_CHAINS 須在 supplychain 後)
               'src/fundamental/valuation_v3.js',                # v3.8: 長線估值錨(本益比河流)
               'src/fundamental/marketflow_v3.js',               # v3.8: 大盤資金流儀表板
               'src/fundamental/instrank_v3.js',                 # v3.8: 外資/投信買賣超排行榜
@@ -60,6 +65,7 @@ V2_SCRIPTS = ['src/core/position_v2.js', 'src/core/watch_v2.js', 'src/core/info_
               'src/core/namesearch_v3.js',               # v3.9: 代號框打公司名自動完成(/search 反查台股名)
               'src/core/realtime_v3.js',                 # v3.9: 台股盤中真即時(TWSE MIS 每10s 更新當前分鐘K,解 Yahoo 延遲)
               'src/ai/focus_v3.js',                    # v3.9: 焦點掃描精靈(多訊號組合自動找做多/做空焦點,/focus)
+              'src/ai/copilot_v3.js',                  # v4.0: AI 副駕面板(本機 LM Studio,/ai/local)
               'src/screener/wizard_v3.js',                   # v3.9: 加股設定精靈(依賴 StratLib/Backtest/drawtools/setPosition/saveWatches，排最後)
               'src/ui/toolbar_v3.js']                  # v3.9: 工具列模組化(一階分類+二階下拉,設定驅動;須排最後,整理所有功能鈕)
 V2_STYLES  = ['src/ui/mobile_v2.css']
@@ -86,7 +92,7 @@ with open(SRC, 'r', encoding='utf-8') as f:
 # 1) Update title
 html = re.sub(
     r'<title>[^<]*</title>',
-    '<title>Stock Terminal v3.9 - Multi-chart / Backtest / Wizard</title>',
+    '<title>Stock Terminal v4.0 - Local DB / Portfolio / AI Copilot</title>',
     html, count=1)
 
 # 2a) POS tab
@@ -107,12 +113,12 @@ if 'id="tab-plan"' not in html:
 # 3a) renderRpanel - position dispatch
 RP_POS_OLD = "if (S.tab==='etf')      { el.innerHTML = renderEtfDelta(); return; }"
 RP_POS_NEW = (RP_POS_OLD + "\n"
-              "  if (S.tab==='position') { el.innerHTML = renderPosition(); attachPosition(); return; }")
+              "  if (S.tab==='position') { var _ae=document.activeElement; if(!(_ae&&/^pos-(entry|shares|target|stop|notes|unit)$/.test(_ae.id||''))){ el.innerHTML = renderPosition(); attachPosition(); } return; }")
 if 'renderPosition()' not in html:
     html = html.replace(RP_POS_OLD, RP_POS_NEW, 1)
 
 # 3b) renderRpanel - watch dispatch
-RP_WATCH_OLD = "if (S.tab==='position') { el.innerHTML = renderPosition(); attachPosition(); return; }"
+RP_WATCH_OLD = "if (S.tab==='position') { var _ae=document.activeElement; if(!(_ae&&/^pos-(entry|shares|target|stop|notes|unit)$/.test(_ae.id||''))){ el.innerHTML = renderPosition(); attachPosition(); } return; }"
 RP_WATCH_NEW = (RP_WATCH_OLD + "\n"
                 "  if (S.tab==='watch')    { el.innerHTML = renderWatch(); attachWatch(); return; }")
 if 'renderWatch()' not in html:
@@ -212,12 +218,12 @@ else:
 if 'data-v2-banner' not in html:
     html = html.replace(
         '<span class="logo">STOCK TERMINAL</span>',
-        '<span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v3.9</span></span>',
+        '<span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v4.0</span></span>',
         1)
-# Bump existing v3.x banner to v3.9
+# Bump existing banner to v4.0
 html = re.sub(
-    r'(data-v2-banner>STOCK TERMINAL <span[^>]+>)v3\.\d+(</span>)',
-    r'\g<1>v3.9\g<2>', html, count=1)
+    r'(data-v2-banner>STOCK TERMINAL <span[^>]+>)v[0-9]+\.\d+(</span>)',
+    r'\g<1>v4.0\g<2>', html, count=1)
 
 with open(DST, 'w', encoding='utf-8') as f:
     f.write(html)
