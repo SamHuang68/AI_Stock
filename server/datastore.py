@@ -41,6 +41,10 @@ def get_conn():
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute('PRAGMA journal_mode=WAL')     # 並發讀寫
     conn.execute('PRAGMA synchronous=NORMAL')
+    # GMKtec EVO-T1(96GB DDR5 / PCIe Gen4 NVMe):快取放大,全市場掃描走記憶體
+    conn.execute('PRAGMA cache_size=-262144')     # 256MB page cache(負值=KB)
+    conn.execute('PRAGMA mmap_size=1073741824')   # 1GB mmap,讀取零拷貝
+    conn.execute('PRAGMA temp_store=MEMORY')      # 暫存表/排序全走 RAM
     return conn
 
 def init_db():

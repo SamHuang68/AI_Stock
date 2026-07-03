@@ -31,9 +31,10 @@ except Exception as _e:
     print('[ai-local] module import failed:', _e)
 
 PORT = 18432
-# Core Ultra 9 285H = 6P + 8E + 2LP = 16 threads; oversubscribe for I/O-bound YF
-MAX_WORKERS = max(32, (os.cpu_count() or 16) * 2)
-LRU_MAX = 20000  # 96GB RAM → very generous cache
+# GMKtec EVO-T1:Core Ultra 9 285H = 6P + 8E + 2LP = 16 threads / 96GB DDR5(規格見 .cursorrules)
+# I/O-bound(Yahoo/TWSE)→ thread pool 大幅超額配置;RAM 充裕 → 快取放大,回應時間優先
+MAX_WORKERS = max(64, (os.cpu_count() or 16) * 4)
+LRU_MAX = 50000  # 96GB RAM → 台股+美股全 universe 線圖快照全裝得下(60s TTL 控新鮮度)
 
 # ── 專案根目錄 ──
 # 凍結成 .exe(PyInstaller)時用 exe 所在資料夾;一般執行(server/ 下)時用其上一層。
@@ -1358,7 +1359,7 @@ def compute_etf_delta(files, date=None):
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
-    request_queue_size = 64
+    request_queue_size = 256   # 96GB/16T 主機:批次掃描高併發時不掉連線
 
 class Handler(SimpleHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'   # enables keep-alive
