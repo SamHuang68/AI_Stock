@@ -15,81 +15,18 @@
 
   // ---------- 共用指標庫 StratLib ----------
   // 全部接受/回傳「與 K 線等長、不足期數為 null」的陣列。
-  function sma(arr, p) {
-    const out = new Array(arr.length).fill(null); let s = 0;
-    for (let i = 0; i < arr.length; i++) {
-      const v = arr[i] == null ? 0 : arr[i]; s += v;
-      if (i >= p) s -= (arr[i - p] == null ? 0 : arr[i - p]);
-      if (i >= p - 1) out[i] = s / p;
-    }
-    return out;
-  }
-  function ema(arr, p) {
-    const out = new Array(arr.length).fill(null);
-    const k = 2 / (p + 1); let prev = null;
-    for (let i = 0; i < arr.length; i++) {
-      const v = arr[i];
-      if (v == null) { out[i] = prev; continue; }
-      prev = prev == null ? v : v * k + prev * (1 - k);
-      if (i >= p - 1) out[i] = prev;
-    }
-    return out;
-  }
-  function rsi(close, p) {
-    p = p || 14;
-    const out = new Array(close.length).fill(null);
-    if (close.length <= p) return out;
-    let g = 0, l = 0;
-    for (let i = 1; i <= p; i++) { const d = close[i] - close[i - 1]; if (d >= 0) g += d; else l -= d; }
-    g /= p; l /= p;
-    out[p] = 100 - 100 / (1 + (l === 0 ? 100 : g / l));
-    for (let i = p + 1; i < close.length; i++) {
-      const d = close[i] - close[i - 1];
-      g = (g * (p - 1) + (d > 0 ? d : 0)) / p;
-      l = (l * (p - 1) + (d < 0 ? -d : 0)) / p;
-      out[i] = 100 - 100 / (1 + (l === 0 ? 100 : g / l));
-    }
-    return out;
-  }
-  // 隨機指標 KD (n=9, 平滑3)
-  function kd(high, low, close, n, sm) {
-    n = n || 9; sm = sm || 3;
-    const len = close.length;
-    const rsv = new Array(len).fill(null);
-    for (let i = 0; i < len; i++) {
-      if (i < n - 1) continue;
-      let hh = -Infinity, ll = Infinity;
-      for (let j = i - n + 1; j <= i; j++) { hh = Math.max(hh, high[j]); ll = Math.min(ll, low[j]); }
-      rsv[i] = hh === ll ? 50 : (close[i] - ll) / (hh - ll) * 100;
-    }
-    const k = new Array(len).fill(null), d = new Array(len).fill(null);
-    let pk = 50, pd = 50;
-    for (let i = 0; i < len; i++) {
-      if (rsv[i] == null) continue;
-      pk = pk * (1 - 1 / sm) + rsv[i] * (1 / sm);
-      pd = pd * (1 - 1 / sm) + pk * (1 / sm);
-      k[i] = pk; d[i] = pd;
-    }
-    return { k, d };
-  }
-  function macd(close, f, s, sig) {
-    f = f || 12; s = s || 26; sig = sig || 9;
-    const ef = ema(close, f), es = ema(close, s);
-    const line = close.map((_, i) => (ef[i] == null || es[i] == null) ? null : ef[i] - es[i]);
-    const signal = ema(line.map(v => v == null ? 0 : v), sig).map((v, i) => line[i] == null ? null : v);
-    const hist = line.map((v, i) => (v == null || signal[i] == null) ? null : v - signal[i]);
-    return { macd: line, signal, hist };
-  }
-  function bb(close, p, k) {
-    p = p || 20; k = k || 2;
-    const m = sma(close, p);
-    const up = new Array(close.length).fill(null), lo = new Array(close.length).fill(null);
-    for (let i = p - 1; i < close.length; i++) {
-      let v = 0; for (let j = i - p + 1; j <= i; j++) v += (close[j] - m[i]) ** 2;
-      const sd = Math.sqrt(v / p); up[i] = m[i] + k * sd; lo[i] = m[i] - k * sd;
-    }
-    return { mid: m, upper: up, lower: lo };
-  }
+  // v4.1:指標數學一律委派統一指標庫（src/core/indicators_v3.js,SSOT）,
+  // 本模組不再自帶實作 → 與指標列 / 回測 / Python 後端永遠同一份數學。
+  // (修正舊版 MACD signal 以 0 充填暖身期、EMA 無 SMA 種子的偏差)
+  const IND = window.Indicators;
+  function sma(arr, p) { return IND.sma(arr, p); }
+  function ema(arr, p) { return IND.ema(arr, p); }
+  function rsi(close, p) { return IND.rsi(close, p || 14); }
+  // 隨機指標 KD (n=9, 平滑3) — 台股慣例 9,3,3
+  function kd(high, low, close, n, sm) { return IND.kd(high, low, close, n || 9, sm || 3); }
+  function macd(close, f, s, sig) { return IND.macd(close, f || 12, s || 26, sig || 9); }
+  function bb(close, p, k) { return IND.bb(close, p || 20, k || 2); }
+  function atr(high, low, close, p) { return IND.atr(high, low, close, p || 14); }
   function crossover(a, b) {
     return a.map((_, i) => i > 0 && a[i - 1] != null && b[i - 1] != null && a[i] != null && b[i] != null && a[i - 1] <= b[i - 1] && a[i] > b[i]);
   }
@@ -105,7 +42,7 @@
   function pctChange(close) {
     return close.map((v, i) => i === 0 ? null : (close[i - 1] ? (v - close[i - 1]) / close[i - 1] * 100 : null));
   }
-  window.StratLib = { sma, ema, rsi, kd, macd, bb, crossover, crossunder, highest, lowest, pctChange };
+  window.StratLib = { sma, ema, rsi, kd, macd, bb, atr, crossover, crossunder, highest, lowest, pctChange };
 
   // ---------- 指標清單 (UI 下拉) ----------
   // type: 'price'(無參數) | 'n'(需期數) | 'sub'(子序列 macd/kd/bb)
@@ -312,7 +249,8 @@
     const cell = (lbl, val, cls) => `<div class="sb-stat"><div class="sb-sl">${lbl}</div><div class="sb-sv ${cls || ''}">${val}</div></div>`;
     const pos = v => v >= 0 ? 'up' : 'dn';
     let h = `<div class="sb-stats">` +
-      cell('總報酬', (r.totalReturn >= 0 ? '+' : '') + r.totalReturn.toFixed(1) + '%', pos(r.totalReturn)) +
+      cell('總報酬(淨)', (r.totalReturn >= 0 ? '+' : '') + r.totalReturn.toFixed(1) + '%', pos(r.totalReturn)) +
+      cell('總報酬(毛)', r.totalReturnGross != null ? (r.totalReturnGross >= 0 ? '+' : '') + r.totalReturnGross.toFixed(1) + '%' : '—') +
       cell('交易筆數', r.count) +
       cell('勝率', r.winRate.toFixed(1) + '%', r.winRate >= 50 ? 'up' : 'dn') +
       cell('獲利因子', fmtPF(r.profitFactor), r.profitFactor >= 1 ? 'up' : 'dn') +
@@ -323,7 +261,10 @@
       cell('最大連勝', r.maxWinStreak, 'up') +
       cell('最大連敗', r.maxLossStreak, 'dn') +
       cell('最佳/最差', '+' + r.best.toFixed(1) + '% / ' + r.worst.toFixed(1) + '%') +
-      `</div>`;
+      `</div>` +
+      `<div style="font-size:10px;color:#64748b;margin:4px 0">進場=訊號次根開盤(無前視);淨=已扣` +
+      (r.cost ? `手續費 ${(r.cost.fee * 100).toFixed(4)}%×2 + 證交稅 ${(r.cost.tax * 100).toFixed(2)}%(賣出)` : '費稅') +
+      `;出場訊號成交於次根開盤,TP/SL 以收盤判斷</div>`;
     h += `<div class="sb-actions"><button id="sb-mark">📍 在主圖標示買賣點</button><canvas id="sb-curve" width="540" height="90"></canvas></div>`;
     // 交易明細
     if (r.trades.length) {

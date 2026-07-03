@@ -7,6 +7,8 @@
 <meta http-equiv="Pragma" content="no-cache">
 <title>Stock Terminal v4.1 - Local DB / Portfolio / AI Copilot</title>
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<!-- 統一指標庫（SSOT）：須在所有 inline JS 與模組之前載入;Web Worker 經 INDICATORS_LIB_SRC 共用同一份程式碼 -->
+<script src="src/core/indicators_v3.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -206,7 +208,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
-<link rel="stylesheet" href="src/ui/mobile_v2.css?v=1783116392">
+<link rel="stylesheet" href="src/ui/mobile_v2.css?v=1783120043">
 </head>
 <body>
 <div id="app">
@@ -332,6 +334,10 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── WEB WORKER (inline blob) ─────────────────────────────────────
+// 指標數學一律走統一指標庫（src/core/indicators_v3.js,SSOT）:
+// runWorker 把 INDICATORS_LIB_SRC（工廠原始碼字串）串進 blob 開頭,
+// worker 內的 Indicators 與主執行緒/回測/選股用的是同一份程式碼。
+// RSI=Wilder、KD=台股9-3-3逐根迭代、MACD=有效段signal、ATR=Wilder。
 const WORKER_SRC = `
 self.onmessage = function(e) {
   const {candles} = e.data;
@@ -341,58 +347,26 @@ self.onmessage = function(e) {
   const l = candles.map(x=>x.low);
   const v = candles.map(x=>x.volume||0);
   const n = c.length;
-  function sma(arr,p){
-    const r=[];
-    for(let i=0;i<arr.length;i++){
-      if(i<p-1){r.push(null);continue;}
-      let s=0;for(let j=i-p+1;j<=i;j++)s+=arr[j];
-      r.push(s/p);
-    }
-    return r;
-  }
-  function ema(arr,p){
-    const r=[];const k=2/(p+1);
-    for(let i=0;i<arr.length;i++){
-      if(i===0){r.push(arr[0]);continue;}
-      r.push(arr[i]*k+r[i-1]*(1-k));
-    }
-    return r;
-  }
-  const s5=sma(c,5),s20=sma(c,20),s60=sma(c,60);
-  const cur=c[n-1];
-  // RSI14
-  let gains=0,losses=0;
-  for(let i=n-14;i<n;i++){
-    const d=c[i]-c[i-1];
-    if(d>0)gains+=d;else losses-=d;
-  }
-  const avgG=gains/14,avgL=losses/14;
-  const rsi14=avgL===0?100:(100-(100/(1+avgG/avgL)));
-  // MACD
-  const ema12=ema(c,12),ema26=ema(c,26);
-  const macdLine=ema12[n-1]-ema26[n-1];
-  const macdArr=ema12.map((v,i)=>v-ema26[i]);
-  const signal9=ema(macdArr,9)[n-1];
-  const macdHist=macdLine-signal9;
-  // KD (stoch 9)
-  const kp=9;
-  const lo9=Math.min(...l.slice(n-kp)),hi9=Math.max(...h.slice(n-kp));
-  const rsv=hi9===lo9?50:((cur-lo9)/(hi9-lo9))*100;
-  const prevK=(n>1)?rsv:50,prevD=(n>1)?rsv:50;
-  const K=prevK*2/3+rsv/3,D=prevD*2/3+K/3;
-  // Bollinger 20
-  const m20=s20[n-1];
-  let variance=0;
-  for(let i=n-20;i<n;i++)variance+=(c[i]-m20)**2;
-  const std=Math.sqrt(variance/20);
-  const bbU=m20+2*std,bbL=m20-2*std;
-  // ATR14
-  let atrSum=0;
-  for(let i=n-14;i<n;i++){
-    const tr=Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1]));
-    atrSum+=tr;
-  }
-  const atr14=atrSum/14;
+  const cur = c[n-1];
+  const lastOf = Indicators.last;
+  const fx = (val,d)=> (val==null||val!==val) ? null : val.toFixed(d);
+  // SMA 5/20/60
+  const sma5v  = lastOf(Indicators.sma(c,5));
+  const sma20v = lastOf(Indicators.sma(c,20));
+  const sma60v = lastOf(Indicators.sma(c,60));
+  // RSI14 — Wilder 平滑
+  const rsi14v = lastOf(Indicators.rsi(c,14));
+  // MACD 12/26/9 — 有效段 signal（暖身期回 null）
+  const mac = Indicators.macd(c,12,26,9);
+  const macdV = lastOf(mac.macd), sigV = lastOf(mac.signal), histV = lastOf(mac.hist);
+  // KD 9,3,3 — 台股慣例,K/D 自序列起點逐根迭代
+  const kdr = Indicators.kd(h,l,c,9,3);
+  const Kv = lastOf(kdr.k), Dv = lastOf(kdr.d);
+  // Bollinger 20,2 — 母體標準差
+  const bbr = Indicators.bb(c,20,2);
+  const bbUv = lastOf(bbr.upper), bbLv = lastOf(bbr.lower), bbMv = lastOf(bbr.mid);
+  // ATR14 — Wilder 平滑
+  const atrV = lastOf(Indicators.atr(h,l,c,14));
   // AnnVol
   const rets=[];
   for(let i=Math.max(1,n-60);i<n;i++)rets.push(Math.log(c[i]/c[i-1]));
@@ -411,25 +385,32 @@ self.onmessage = function(e) {
   const v20avg=v.slice(n-20).reduce((a,b)=>a+b,0)/20;
   const volRatio=v20avg>0?(v5avg/v20avg).toFixed(2):'-';
   // d2SMA20
-  const d2=(cur&&m20)?(((cur-m20)/m20)*100).toFixed(2):null;
+  const d2=(cur&&sma20v)?(((cur-sma20v)/sma20v)*100).toFixed(2):null;
   self.postMessage({
-    sma5:s5[n-1], sma20:m20, sma60:s60[n-1],
-    rsi14:rsi14.toFixed(1),
-    macd:macdLine.toFixed(3), macdSig:signal9.toFixed(3), macdHist:macdHist.toFixed(3),
-    K:K.toFixed(1), D:D.toFixed(1),
-    bbU:bbU.toFixed(2), bbL:bbL.toFixed(2), bbM:m20?m20.toFixed(2):null,
-    atr14:atr14.toFixed(2),
+    sma5:sma5v, sma20:sma20v, sma60:sma60v,
+    rsi14:fx(rsi14v,1),
+    macd:fx(macdV,3), macdSig:fx(sigV,3), macdHist:fx(histV,3),
+    K:fx(Kv,1), D:fx(Dv,1),
+    bbU:fx(bbUv,2), bbL:fx(bbLv,2), bbM:fx(bbMv,2),
+    atr14:fx(atrV,2),
     annVol, maxdd:maxdd.toFixed(1),
     volRatio, d2SMA20:d2,
   });
 };
 `;
-const _workerBlob = new Blob([WORKER_SRC], {type:'application/javascript'});
-const _workerURL  = URL.createObjectURL(_workerBlob);
+let _workerURL = null;
+function _getWorkerURL() {
+  if (_workerURL) return _workerURL;
+  // 統一指標庫原始碼串進 worker（worker 讀不到主執行緒的 window,只能用原始碼共享）
+  const lib = 'const Indicators = ' + window.INDICATORS_LIB_SRC + ';\n';
+  const blob = new Blob([lib, WORKER_SRC], {type:'application/javascript'});
+  _workerURL = URL.createObjectURL(blob);
+  return _workerURL;
+}
 
 function runWorker(candles) {
   return new Promise((res) => {
-    const w = new Worker(_workerURL);
+    const w = new Worker(_getWorkerURL());
     w.onmessage = e => { w.terminate(); res(e.data); };
     w.onerror   = () => { w.terminate(); res({}); };
     w.postMessage({candles});
@@ -900,26 +881,18 @@ function renderChart(candles) {
   }
 
   // ── SMA + Bollinger Bands overlay (skip on intraday) ──
+  // 一律走統一指標庫（Indicators,SSOT）,與指標列 / 回測 / 選股同一份數學。
   S.overlaySeries = {};
   if (!isIntraday && candles.length >= 20) {
     const closes = candles.map(c => c.close);
-    const sma = (n, i) => {
-      if (i + 1 < n) return null;
-      let s = 0;
-      for (let k = i - n + 1; k <= i; k++) s += closes[k];
-      return s / n;
-    };
-    const std = (n, i, mean) => {
-      if (i + 1 < n) return null;
-      let v = 0;
-      for (let k = i - n + 1; k <= i; k++) v += Math.pow(closes[k] - mean, 2);
-      return Math.sqrt(v / n);
-    };
+    const sma20Arr = Indicators.sma(closes, 20);
+    const sma60Arr = Indicators.sma(closes, 60);
+    const bbArr    = Indicators.bb(closes, 20, 2);
 
-    const sma20Data = candles.map((c, i) => { const v = sma(20, i); return v == null ? null : {time: tz(c.time), value: v}; }).filter(Boolean);
-    const sma60Data = candles.map((c, i) => { const v = sma(60, i); return v == null ? null : {time: tz(c.time), value: v}; }).filter(Boolean);
-    const bbU = candles.map((c, i) => { const m = sma(20, i); if (m == null) return null; const s = std(20, i, m); return {time: tz(c.time), value: m + 2 * s}; }).filter(Boolean);
-    const bbL = candles.map((c, i) => { const m = sma(20, i); if (m == null) return null; const s = std(20, i, m); return {time: tz(c.time), value: m - 2 * s}; }).filter(Boolean);
+    const sma20Data = candles.map((c, i) => { const v = sma20Arr[i]; return v == null ? null : {time: tz(c.time), value: v}; }).filter(Boolean);
+    const sma60Data = candles.map((c, i) => { const v = sma60Arr[i]; return v == null ? null : {time: tz(c.time), value: v}; }).filter(Boolean);
+    const bbU = candles.map((c, i) => { const v = bbArr.upper[i]; return v == null ? null : {time: tz(c.time), value: v}; }).filter(Boolean);
+    const bbL = candles.map((c, i) => { const v = bbArr.lower[i]; return v == null ? null : {time: tz(c.time), value: v}; }).filter(Boolean);
 
     const mkLine = (color, width, dashed) => chart.addLineSeries({
       color, lineWidth: width, lastValueVisible: false, priceLineVisible: false,
@@ -1658,67 +1631,67 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
 });
 </script>
-<script src="src/core/colors_v3.js?v=1783116392"></script>
-<script src="src/core/market_v3.js?v=1783116392"></script>
-<script src="src/core/fields_v3.js?v=1783116392"></script>
-<script src="src/ui/share_v3.js?v=1783116392"></script>
-<script src="src/ui/datasources_v3.js?v=1783116392"></script>
-<script src="src/core/etf_flow_tip_v3.js?v=1783116392"></script>
-<script src="src/core/position_v2.js?v=1783116392"></script>
-<script src="src/core/watch_v2.js?v=1783116392"></script>
-<script src="src/core/info_v2.js?v=1783116392"></script>
-<script src="src/core/pro_v2.js?v=1783116392"></script>
-<script src="src/chart/volume_profile_v3.js?v=1783116392"></script>
-<script src="src/chart/pattern_v3.js?v=1783116392"></script>
-<script src="src/core/live_v2.js?v=1783116392"></script>
-<script src="src/fundamental/chip_v3.js?v=1783116392"></script>
-<script src="src/fundamental/fundamental_v3.js?v=1783116392"></script>
-<script src="src/screener/screener_v3.js?v=1783116392"></script>
-<script src="src/ai/ai_report_v3.js?v=1783116392"></script>
-<script src="src/ui/polish_v3.js?v=1783116392"></script>
-<script src="src/core/wl_live_v3.js?v=1783116392"></script>
-<script src="src/fundamental/plan_history_v3.js?v=1783116392"></script>
-<script src="src/fundamental/plan_position_v3.js?v=1783116392"></script>
-<script src="src/fundamental/plan_v3.js?v=1783116392"></script>
-<script src="src/ui/pdf_import_v3.js?v=1783116392"></script>
-<script src="src/ui/pdf_export_v3.js?v=1783116392"></script>
-<script src="src/core/peg_v3.js?v=1783116392"></script>
-<script src="src/alert/alert_v3.js?v=1783116392"></script>
-<script src="src/alert/alert_push_v3.js?v=1783116392"></script>
-<script src="src/screener/backtest_v3.js?v=1783116392"></script>
-<script src="src/screener/backtest_ui_v3.js?v=1783116392"></script>
-<script src="src/ui/enhance_v3.js?v=1783116392"></script>
-<script src="src/chart/aftermarket_v3.js?v=1783116392"></script>
-<script src="src/chart/overnight_v3.js?v=1783116392"></script>
-<script src="src/fundamental/supplychain_v3.js?v=1783116392"></script>
-<script src="src/portfolio/portfolio_v3.js?v=1783116392"></script>
-<script src="src/fundamental/chainmom_v3.js?v=1783116392"></script>
-<script src="src/fundamental/valuation_v3.js?v=1783116392"></script>
-<script src="src/fundamental/marketflow_v3.js?v=1783116392"></script>
-<script src="src/fundamental/instrank_v3.js?v=1783116392"></script>
-<script src="src/alert/calendar_v3.js?v=1783116392"></script>
-<script src="src/chart/multichart_v3.js?v=1783116392"></script>
-<script src="src/chart/spread_v3.js?v=1783116392"></script>
-<script src="src/chart/hotkeys_v3.js?v=1783116392"></script>
-<script src="src/screener/strategy_builder_v3.js?v=1783116392"></script>
-<script src="src/screener/strategy_script_v3.js?v=1783116392"></script>
-<script src="src/chart/drawtools_v3.js?v=1783116392"></script>
-<script src="src/screener/screener3_v3.js?v=1783116392"></script>
-<script src="src/core/etf_v3.js?v=1783116392"></script>
-<script src="src/fundamental/stockfut_v3.js?v=1783116392"></script>
-<script src="src/core/indices_v3.js?v=1783116392"></script>
-<script src="src/alert/datahealth_v3.js?v=1783116392"></script>
-<script src="src/alert/toast_v3.js?v=1783116392"></script>
-<script src="src/alert/settle_v3.js?v=1783116392"></script>
-<script src="src/ai/cmdpalette_v3.js?v=1783116392"></script>
-<script src="src/ui/dragwin_v3.js?v=1783116392"></script>
-<script src="src/core/liverefresh_v3.js?v=1783116392"></script>
-<script src="src/core/namesearch_v3.js?v=1783116392"></script>
-<script src="src/core/realtime_v3.js?v=1783116392"></script>
-<script src="src/ai/focus_v3.js?v=1783116392"></script>
-<script src="src/ai/copilot_v3.js?v=1783116392"></script>
-<script src="src/screener/wizard_v3.js?v=1783116392"></script>
-<script src="src/ui/toolbar_v3.js?v=1783116392"></script>
+<script src="src/core/colors_v3.js?v=1783120043"></script>
+<script src="src/core/market_v3.js?v=1783120043"></script>
+<script src="src/core/fields_v3.js?v=1783120043"></script>
+<script src="src/ui/share_v3.js?v=1783120043"></script>
+<script src="src/ui/datasources_v3.js?v=1783120043"></script>
+<script src="src/core/etf_flow_tip_v3.js?v=1783120043"></script>
+<script src="src/core/position_v2.js?v=1783120043"></script>
+<script src="src/core/watch_v2.js?v=1783120043"></script>
+<script src="src/core/info_v2.js?v=1783120043"></script>
+<script src="src/core/pro_v2.js?v=1783120043"></script>
+<script src="src/chart/volume_profile_v3.js?v=1783120043"></script>
+<script src="src/chart/pattern_v3.js?v=1783120043"></script>
+<script src="src/core/live_v2.js?v=1783120043"></script>
+<script src="src/fundamental/chip_v3.js?v=1783120043"></script>
+<script src="src/fundamental/fundamental_v3.js?v=1783120043"></script>
+<script src="src/screener/screener_v3.js?v=1783120043"></script>
+<script src="src/ai/ai_report_v3.js?v=1783120043"></script>
+<script src="src/ui/polish_v3.js?v=1783120043"></script>
+<script src="src/core/wl_live_v3.js?v=1783120043"></script>
+<script src="src/fundamental/plan_history_v3.js?v=1783120043"></script>
+<script src="src/fundamental/plan_position_v3.js?v=1783120043"></script>
+<script src="src/fundamental/plan_v3.js?v=1783120043"></script>
+<script src="src/ui/pdf_import_v3.js?v=1783120043"></script>
+<script src="src/ui/pdf_export_v3.js?v=1783120043"></script>
+<script src="src/core/peg_v3.js?v=1783120043"></script>
+<script src="src/alert/alert_v3.js?v=1783120043"></script>
+<script src="src/alert/alert_push_v3.js?v=1783120043"></script>
+<script src="src/screener/backtest_v3.js?v=1783120043"></script>
+<script src="src/screener/backtest_ui_v3.js?v=1783120043"></script>
+<script src="src/ui/enhance_v3.js?v=1783120043"></script>
+<script src="src/chart/aftermarket_v3.js?v=1783120043"></script>
+<script src="src/chart/overnight_v3.js?v=1783120043"></script>
+<script src="src/fundamental/supplychain_v3.js?v=1783120043"></script>
+<script src="src/portfolio/portfolio_v3.js?v=1783120043"></script>
+<script src="src/fundamental/chainmom_v3.js?v=1783120043"></script>
+<script src="src/fundamental/valuation_v3.js?v=1783120043"></script>
+<script src="src/fundamental/marketflow_v3.js?v=1783120043"></script>
+<script src="src/fundamental/instrank_v3.js?v=1783120043"></script>
+<script src="src/alert/calendar_v3.js?v=1783120043"></script>
+<script src="src/chart/multichart_v3.js?v=1783120043"></script>
+<script src="src/chart/spread_v3.js?v=1783120043"></script>
+<script src="src/chart/hotkeys_v3.js?v=1783120043"></script>
+<script src="src/screener/strategy_builder_v3.js?v=1783120043"></script>
+<script src="src/screener/strategy_script_v3.js?v=1783120043"></script>
+<script src="src/chart/drawtools_v3.js?v=1783120043"></script>
+<script src="src/screener/screener3_v3.js?v=1783120043"></script>
+<script src="src/core/etf_v3.js?v=1783120043"></script>
+<script src="src/fundamental/stockfut_v3.js?v=1783120043"></script>
+<script src="src/core/indices_v3.js?v=1783120043"></script>
+<script src="src/alert/datahealth_v3.js?v=1783120043"></script>
+<script src="src/alert/toast_v3.js?v=1783120043"></script>
+<script src="src/alert/settle_v3.js?v=1783120043"></script>
+<script src="src/ai/cmdpalette_v3.js?v=1783120043"></script>
+<script src="src/ui/dragwin_v3.js?v=1783120043"></script>
+<script src="src/core/liverefresh_v3.js?v=1783120043"></script>
+<script src="src/core/namesearch_v3.js?v=1783120043"></script>
+<script src="src/core/realtime_v3.js?v=1783120043"></script>
+<script src="src/ai/focus_v3.js?v=1783120043"></script>
+<script src="src/ai/copilot_v3.js?v=1783120043"></script>
+<script src="src/screener/wizard_v3.js?v=1783120043"></script>
+<script src="src/ui/toolbar_v3.js?v=1783120043"></script>
 </body>
 </html>
 <script>

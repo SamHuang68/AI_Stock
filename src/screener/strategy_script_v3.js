@@ -247,13 +247,18 @@
     const cell = (lbl, val, cls) => `<div class="ss-stat"><div class="ss-sl">${lbl}</div><div class="ss-sv ${cls || ''}">${val}</div></div>`;
     const pos = v => v >= 0 ? 'up' : 'dn';
     let h = `<div class="ss-stats">` +
-      cell('總報酬', (r.totalReturn >= 0 ? '+' : '') + r.totalReturn.toFixed(1) + '%', pos(r.totalReturn)) +
+      cell('總報酬(淨)', (r.totalReturn >= 0 ? '+' : '') + r.totalReturn.toFixed(1) + '%', pos(r.totalReturn)) +
+      cell('總報酬(毛)', r.totalReturnGross != null ? (r.totalReturnGross >= 0 ? '+' : '') + r.totalReturnGross.toFixed(1) + '%' : '—') +
       cell('筆數', r.count) +
       cell('勝率', r.winRate.toFixed(1) + '%', r.winRate >= 50 ? 'up' : 'dn') +
       cell('獲利因子', fmtPF(r.profitFactor), r.profitFactor >= 1 ? 'up' : 'dn') +
       cell('最大回撤', '-' + r.maxDD.toFixed(1) + '%', 'dn') +
       cell('夏普(年化)', r.sharpeAnn.toFixed(2), r.sharpeAnn >= 1 ? 'up' : '') +
-      `</div><canvas id="ss-curve" width="540" height="80"></canvas>`;
+      `</div>` +
+      `<div style="font-size:10px;color:#64748b;margin:4px 0">進場=訊號次根開盤;淨=已扣` +
+      (r.cost ? `手續費 ${(r.cost.fee * 100).toFixed(4)}%×2 + 證交稅 ${(r.cost.tax * 100).toFixed(2)}%(賣出)` : '費稅') +
+      `;TP/SL 以收盤判斷</div>` +
+      `<canvas id="ss-curve" width="540" height="80"></canvas>`;
     document.getElementById('ss-result').innerHTML = h;
     if (window.Backtest.drawCurve) window.Backtest.drawCurve(document.getElementById('ss-curve'), r.curve, '#fbbf24');
   }
@@ -274,7 +279,7 @@
     #ss-msg{font-size:11px;color:#94a3b8;margin:6px 0;min-height:14px}
     .ss-help{font-size:10px;color:#64748b;background:#0b1220;border:1px solid #1e293b;border-radius:6px;padding:7px 9px;margin:6px 0;line-height:1.6}
     .ss-help code{color:#fbbf24}
-    .ss-stats{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin:8px 0}
+    .ss-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0}
     .ss-stat{background:#0b1220;border:1px solid #1e293b;border-radius:6px;padding:6px}
     .ss-sl{font-size:9px;color:#64748b}.ss-sv{font-size:13px;font-weight:800;margin-top:2px}
     .ss-sv.up{color:#22c55e}.ss-sv.dn{color:#ef4444}

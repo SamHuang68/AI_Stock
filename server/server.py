@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import OrderedDict
 from urllib.parse import urlparse, parse_qs, unquote, quote
 import threading
+import indicators as ta_ind   # 統一指標庫(與前端 src/core/indicators_v3.js 對齊,SSOT)
 try:
     import alert_daemon
 except Exception as _e:
@@ -1139,6 +1140,13 @@ def _run_selftests():
         ck('breaker:成功後關閉', _src_breaker_open('__test__'), False)
     finally:
         _SRC_HEALTH.pop('__test__', None)
+
+    # v4.1 統一指標庫 JS/Python 對齊(同 fixture、同凍結期望值;
+    # node tests/indicators_selftest.js 跑 JS 端,兩邊常數相同 → 分岔立刻紅燈)
+    try:
+        cases.extend(ta_ind.selftest()['cases'])
+    except Exception as _e:
+        cases.append({'name': 'ind:selftest', 'pass': False, 'got': str(_e), 'exp': 'run ok'})
 
     passed = sum(1 for c in cases if c['pass'])
     return {'passed': passed, 'total': len(cases), 'allPass': passed == len(cases), 'cases': cases}
@@ -3551,14 +3559,8 @@ class Handler(SimpleHTTPRequestHandler):
         def sma(p, idx):
             if idx + 1 < p: return None
             return sum(closes[idx-p+1:idx+1]) / p
-        # RSI 14
-        g = l = 0
-        for i in range(n-14, n):
-            if i < 1: continue
-            d = closes[i] - closes[i-1]
-            if d > 0: g += d
-            else: l -= d
-        rsi = 100 if l == 0 else 100 - 100/(1 + g/l)
+        # RSI 14 — 統一指標庫(Wilder 平滑,與前端 indicators_v3.js / 回測引擎對齊)
+        rsi = ta_ind.rsi_last(closes, 14)
         # Vol ratio
         v5 = sum(vols[-5:]) / 5 if len(vols) >= 5 else 0
         v20 = sum(vols[-20:]) / 20 if len(vols) >= 20 else 0

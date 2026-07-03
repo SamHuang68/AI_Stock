@@ -776,15 +776,9 @@ function mockInd(candles) {
     return s / p;
   };
   const last = n - 1;
-  // RSI 14
-  let g = 0, l = 0;
-  for (let i = last - 13; i <= last; i++) {
-    if (i < 1) continue;
-    const d = closes[i] - closes[i-1];
-    if (d > 0) g += d; else l -= d;
-  }
-  const rs = l === 0 ? 100 : g / l;
-  const rsi = 100 - 100 / (1 + rs);
+  // RSI 14 — 統一指標庫(Wilder 平滑,SSOT)。
+  // 修舊版 bug:全漲無跌時 rs 被設 100 → RSI 算出 ≈0.99 而非 100。
+  const rsi = window.Indicators ? Indicators.last(Indicators.rsi(closes, 14)) : null;
   // BB 20
   const m20 = sma(20, last);
   let v = 0;
