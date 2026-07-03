@@ -22,15 +22,39 @@ if exist "stock_terminal.html" if exist "build_v2.py" (
     echo.
 )
 
+REM Selftest gate: never ship a zip with broken indicator math (v4.1 SSOT)
+echo Running indicator selftest (server\indicators.py) ...
+python server\indicators.py >nul
+if errorlevel 1 (
+    echo [FAIL] indicator selftest failed - fix before packaging
+    pause
+    exit /b 1
+)
+echo [OK] indicator selftest pass
+where node >nul 2>nul
+if not errorlevel 1 (
+    node tests\indicators_selftest.js >nul && node tests\backtest_selftest.js >nul
+    if errorlevel 1 (
+        echo [FAIL] JS selftest failed - fix before packaging
+        pause
+        exit /b 1
+    )
+    echo [OK] JS indicator/backtest selftest pass
+) else (
+    echo [SKIP] Node.js not found - JS selftest skipped
+)
+echo.
+
 mkdir "%STAGE%\data\etf_history"
 mkdir "%STAGE%\data\chip_history"
 
-echo Staging folder trees (src / server / scripts / docs) ...
-REM Copy whole module/server/script/doc trees; skip caches, logs, node_modules
+echo Staging folder trees (src / server / scripts / docs / tests) ...
+REM Copy whole module/server/script/doc/test trees; skip caches, logs, node_modules
 robocopy "src"     "%STAGE%\src"     /E /XD __pycache__ node_modules /XF *.pyc *.log /NFL /NDL /NJH /NJS /NC /NS /NP >nul
 robocopy "server"  "%STAGE%\server"  /E /XD __pycache__ /XF *.pyc *.log         /NFL /NDL /NJH /NJS /NC /NS /NP >nul
 robocopy "scripts" "%STAGE%\scripts" /E /XF *.log                               /NFL /NDL /NJH /NJS /NC /NS /NP >nul
 robocopy "docs"    "%STAGE%\docs"    /E /XF revision.md                           /NFL /NDL /NJH /NJS /NC /NS /NP >nul
+robocopy "tests"   "%STAGE%\tests"   /E /XF *.log                               /NFL /NDL /NJH /NJS /NC /NS /NP >nul
 
 echo Staging root files ...
 for %%F in (stock_terminal.html stock_terminal_v2.html build_v2.py build_order.py) do (
@@ -74,5 +98,6 @@ echo Done. Share %ZIP% with anyone.
 echo Recipient: unzip, then double-click scripts\start_terminal_v3.bat (auto-builds v2 + opens).
 echo Optional: scripts\install_scheduler.bat (ETF daily) / scripts\install_chip_scheduler.bat (chip daily).
 echo Alerts: open the bell button to set Telegram/Email push.
+echo Verify:  python server\indicators.py  (indicator selftest, should print ALL PASS).
 echo.
 pause
