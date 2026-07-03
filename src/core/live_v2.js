@@ -163,6 +163,23 @@ function attachLiveDrag(panel) {
 // ── Polling ───────────────────────────────────────────────
 async function fetchQuote(sym, mkt) {
   if (!sym) return null;
+  // 台股指數(加權/櫃買):用 TWSE 即時(與底部總體列同源),避免 Yahoo 1m 對指數延遲、
+  // 與底部數字打架。盤後 TWSE 無即時 → 自動落回 Yahoo。
+  if (sym === '^TWII' || sym === '^TWOII') {
+    try {
+      const SRV = window.SERVER || `http://localhost:18432`;
+      const code = sym === '^TWII' ? 't00' : 'o00';
+      const d = await fetch(`${SRV}/twindex`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null);
+      const ix = d && d.indices && d.indices[code];
+      if (ix && ix.price != null) {
+        const prev = ix.prevClose;
+        const chg = (prev != null) ? ix.price - prev : null;
+        const chgPct = (ix.changePct != null) ? ix.changePct : (chg != null && prev ? chg / prev * 100 : null);
+        return { price: ix.price, change: chg, changePct: chgPct, prevClose: prev,
+                 high: ix.high, low: ix.low, volume: ix.volume, marketState: ix.marketState, _source: 'TWSE' };
+      }
+    } catch (e) { /* 落回 Yahoo */ }
+  }
   const yfsym = mkt === 'TW' ? sym + '.TW' : sym;
   try {
     const SERVER = window.SERVER || `http://localhost:18432`;
@@ -186,7 +203,9 @@ function renderQuote(q) {
   if (!q) return;
   _lastQuote = q;
   const px = q.price, ch = q.change, chPct = q.changePct;
-  const col = (ch == null ? 'var(--tlo)' : (ch >= 0 ? 'var(--green)' : 'var(--red)'));
+  // 漲跌色一律走顏色管理表(依標的市場;台股跌=綠,不再寫死西式)
+  const col = window.Colors ? Colors.dir(S.sym, ch)
+            : (ch == null ? 'var(--tlo)' : (ch >= 0 ? 'var(--green)' : 'var(--red)'));
   document.getElementById('lp-px').textContent = px != null ? px.toFixed(2) : '--';
   document.getElementById('lp-px').style.color = col;
   document.getElementById('lp-chg').innerHTML = ch != null

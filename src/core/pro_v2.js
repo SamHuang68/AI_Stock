@@ -581,7 +581,7 @@ function computePortfolioMetrics() {
 function renderPortfolioRisk() {
   const m = computePortfolioMetrics();
   if (!m) return '';
-  const pnlCol = m.totalPnl >= 0 ? 'var(--green)' : 'var(--red)';
+  const pnlCol = window.Colors ? Colors.gain(m.totalPnl) : (m.totalPnl >= 0 ? 'var(--green)' : 'var(--red)');
   let h = '<div class="stat-sect">投資組合風險</div>';
   h += `<div class="stat-row"><span class="stat-k">總成本</span><span class="stat-v">${Math.round(m.totalCost).toLocaleString()}</span></div>`;
   h += `<div class="stat-row"><span class="stat-k">總市值</span><span class="stat-v">${Math.round(m.totalValue).toLocaleString()}</span></div>`;
@@ -819,8 +819,8 @@ function runBacktestForStrat(stratKey) {
   const r = backtest(stratKey, params, S.data.candles, 20);
   if (!r || r.summary === '無交易訊號') { alert(`${strat.lbl}：歷史資料中無觸發訊號`); return; }
   const s = r.summary;
-  const winCol = s.winRate >= 55 ? 'var(--green)' : s.winRate >= 45 ? 'var(--orange)' : 'var(--red)';
-  const avgCol = s.avgRet >= 0 ? 'var(--green)' : 'var(--red)';
+  const winCol = window.Colors ? Colors.quality(s.winRate, 55, 45) : (s.winRate >= 55 ? 'var(--red)' : s.winRate >= 45 ? 'var(--orange)' : 'var(--green)');
+  const avgCol = window.Colors ? Colors.gain(s.avgRet) : (s.avgRet >= 0 ? 'var(--green)' : 'var(--red)');
   const html =
     `<h3 style="margin:0 0 8px;color:var(--gold);font-family:monospace">${strat.icon} ${strat.lbl} — 回測結果</h3>` +
     `<div style="font-family:monospace;font-size:9.5px;color:var(--tlo);margin-bottom:8px">${S.sym} · ${S.data.candles.length} 個交易日 · 持有 20 日後出場</div>` +

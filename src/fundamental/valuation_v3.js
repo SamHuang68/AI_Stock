@@ -46,7 +46,10 @@
     const body = document.getElementById('val-body');
     if (!body) return;
     const sym = (typeof S !== 'undefined' && S.sym) ? S.sym : null;
-    const mkt = (typeof S !== 'undefined' && S.mkt) ? S.mkt : 'TW';
+    // 市場一律依「代號本身」判(台股代號數字開頭/^TW;美股為字母),不靠 S.mkt 或 server 猜測,
+    // 避免 00631L 之類被標成美股、或用無 .TW 代號抓錯標的。
+    const isTw = window.Colors ? Colors.isTW(sym) : (/^\d/.test(String(sym || '')) || /^\^TW/i.test(String(sym || '')));
+    const mkt = isTw ? 'TW' : 'US';
     if (!sym) { body.innerHTML = '請先載入一檔股票。'; return; }
     body.innerHTML = '載入中…';
     const yfSym = (mkt === 'TW') ? (sym.includes('.') ? sym : sym + '.TW') : sym;
@@ -112,7 +115,7 @@
       gauge = `<div class="val-note">缺 EPS_ttm 或歷史股價不足，無法繪製本益比河流。${mkt === 'TW' ? '（TWSE 本益比資料集可能當日尚未更新，盤後較完整）' : '（美股源 Yahoo：若持續缺值，請確認 server 已安裝 yfinance — pip install yfinance）'}</div>`;
     }
 
-    const mktTag = v.market === 'US'
+    const mktTag = !isTw
       ? '<span style="background:#1e3a5f;color:#7dd3fc;border-radius:4px;padding:1px 6px;font-size:9px">美股</span>'
       : '<span style="background:#3f1e2e;color:#fda4af;border-radius:4px;padding:1px 6px;font-size:9px">台股</span>';
     body.innerHTML = `<div style="font-size:11px;color:#94a3b8;margin-bottom:2px">${mktTag} ${v.code || sym}　EPS(近12月) ${fmt(eps, 2)}　現價 ${fmt(price, 1)}${v._source ? `　<span style="color:#475569;font-size:9px">源:${v._source}</span>` : ''}</div>

@@ -6,7 +6,7 @@
 ; ============================================================
 
 #define MyAppName "Stock Terminal"
-#define MyAppVersion "4.0"
+#define MyAppVersion "4.1"
 #define MyAppExe "server.exe"
 
 [Setup]

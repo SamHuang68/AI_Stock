@@ -27,13 +27,16 @@
   const fmtMoney = v => v == null ? '—' :
     (Math.abs(v) >= 1e8 ? (v / 1e8).toFixed(1) + ' 億' :
       Math.abs(v) >= 1e4 ? (v / 1e4).toFixed(0) + ' 萬' : Math.round(v).toLocaleString());
-  const pctCol = v => v == null ? 'var(--tlo)' : v > 0 ? 'var(--green)' : v < 0 ? 'var(--red)' : 'var(--tlo)';
+  // 方向性成長(YoY/MoM/累計)→ 顏色管理表(台股 正=紅/負=綠);水準型(三率)→ warn(偏低琥珀)
+  const pctCol = v => window.Colors ? Colors.growth(S.sym, v)
+    : (v == null ? 'var(--tlo)' : v > 0 ? 'var(--red)' : v < 0 ? 'var(--green)' : 'var(--tlo)');
   const pctStr = v => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
-  const marginCol = v => v == null ? 'var(--tlo)' : v >= 20 ? 'var(--green)' : v >= 8 ? 'var(--orange)' : 'var(--red)';
+  const marginCol = v => window.Colors ? Colors.warn(v, { lo: 8 })
+    : (v == null ? 'var(--tlo)' : v < 8 ? 'var(--orange)' : 'var(--thi)');
 
   function scoreBadge(s) {
     if (s == null) return '';
-    const col = s >= 70 ? 'var(--green)' : s >= 50 ? 'var(--orange)' : 'var(--red)';
+    const col = window.Colors ? Colors.quality(s, 70, 50) : (s >= 70 ? 'var(--red)' : s >= 50 ? 'var(--orange)' : 'var(--green)');
     const lbl = s >= 70 ? '體質佳' : s >= 50 ? '中性' : '偏弱';
     return `<span style="display:inline-block;padding:1px 8px;border-radius:10px;background:${col};color:#0b1220;font-weight:700;font-size:11px">${s} ${lbl}</span>`;
   }

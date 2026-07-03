@@ -102,7 +102,7 @@
         <td style="color:${col(cp)};font-weight:700">${pct(cp)}</td></tr>`;
     }
     const est = wsum > 0 ? composite / wsum : null;   // 加權台股隔日預估 %
-    const estCol = col(est);
+    const estCol = window.Colors ? Colors.dir('^TWII', est) : col(est);   // 台股隔日預估 → 台股紅漲綠跌
     const estTxt = est == null ? '—' : (est >= 0 ? '+' : '') + est.toFixed(2) + '%';
     const tone = est == null ? '資料不足'
       : est <= -1.5 ? '⚠ 強烈開低風險：檢視持倉停損、觀察買區'
@@ -155,7 +155,7 @@
       <div style="margin:8px 0;padding:8px 10px;border:1px solid #334155;border-radius:8px;background:rgba(251,191,36,.06)">
         <div style="font-size:12px;font-weight:700;color:#fbbf24">🔱 TSMC 核心連動（2330）</div>
         <div style="font-size:11px;margin-top:4px">TSM ADR 夜盤 <b style="color:${col(tsmPct)}">${pct(tsmPct)}</b> · 費半 <b style="color:${col(soxPct)}">${pct(soxPct)}</b>
-          → <b>2330 隔日預估 ≈ <span style="color:${col(tsmPct)}">${pct(tsmPct)}</span></b>（主要看 TSM ADR）</div>
+          → <b>2330 隔日預估 ≈ <span style="color:${window.Colors?Colors.dir('2330',tsmPct):col(tsmPct)}">${pct(tsmPct)}</span></b>（主要看 TSM ADR）</div>
         <div style="font-size:9px;color:var(--tlo);line-height:1.6;margin-top:5px">
           長線結構：① TSMC＝AI 宇宙核心、先進製程獨佔，營收正比 AI 類股；② TSM/費半漲→2330 隔日多反映（除非美股收盤後重磅利空）；
           ③ INTEL 18A／Samsung SF2 即便接單，產能良率僅滿足部分；④ AI 與 AMD/INTEL 皆靠 3D 封裝（如 Panther Lake 僅 compute die，其餘 4~5 顆與封裝仍在台積）；

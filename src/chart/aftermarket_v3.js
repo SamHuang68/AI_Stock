@@ -48,7 +48,7 @@
     if (pct == null && pctRaw != null) pct = pctRaw;
     return { label, px, pct };
   }
-  const col = p => p == null ? 'var(--tlo)' : p > 0 ? 'var(--green)' : p < 0 ? 'var(--red)' : 'var(--tlo)';
+  const col = p => window.Colors ? Colors.dir(S.sym, p) : (p == null ? 'var(--tlo)' : p > 0 ? 'var(--green)' : p < 0 ? 'var(--red)' : 'var(--tlo)');
   const fmt = e => `${e.label} ${e.px.toFixed(2)} ${e.pct == null ? '' : (e.pct >= 0 ? '▲' : '▼') + Math.abs(e.pct).toFixed(2) + '%'}`;
 
   // ---- 1. chart-info 標籤 (active symbol) ------------------

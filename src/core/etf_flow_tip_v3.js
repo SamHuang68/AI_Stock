@@ -80,10 +80,10 @@
         arr.map(function (e) { return '<span class="eft-item" data-etf="' + esc(e.code) + '" title="載入 ' + esc(e.code) + ' 線型">' + etfLabel(e) + '</span>'; }).join('') +
         '</div></div>';
     }
-    h += sec(d.removed, '#f87171', '🔴 移除');
-    h += sec(d.decre, '#fca5a5', '－減碼');
-    h += sec(d.added, '#3ecf6b', '🟢 新增');
-    h += sec(d.incre, '#86efac', '＋加碼');
+    h += sec(d.added, '#f87171', '🔴 新增');
+    h += sec(d.incre, '#fca5a5', '＋加碼');
+    h += sec(d.removed, '#3ecf6b', '🟢 移除');
+    h += sec(d.decre, '#86efac', '－減碼');
     if (!d.removed.length && !d.added.length && !d.incre.length && !d.decre.length) h += '<div style="color:#667">本交易日無 ETF 異動</div>';
     h += '<div style="margin-top:6px;color:#5a6a82;font-size:9px">點 ETF 代號可載入其線型 · 資料:當日各主動 ETF 持股異動</div>';
     return h;

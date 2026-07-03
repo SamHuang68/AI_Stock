@@ -180,9 +180,14 @@
           if (mis[code] && mis[code].changePct != null) data[yf] = mis[code];
         }
       }
-      // 台股一律只用 MIS:某輪 MIS 漏接就保留 chip 上次值(不回退 Yahoo,否則 MIS即時↔Yahoo延遲 兩值亂跳)。
-      // 只有美股/指數(無 MIS)走 Yahoo。
-      const missing = otherYf;
+      // 台股優先用 MIS(真即時);但 MIS 常整批回 {}(伺服器端無 session 易被擋)。
+      // 舊版「MIS 漏接就保留 chip 上次值、不回退 Yahoo」→ MIS 一掛,chip 就凍在上次
+      // 成功輪詢(可能是上週五)的值,分頁開著過週末更明顯。這是反覆出現「舊股價」的真因。
+      // 改:MIS 沒回的台股一律回退 Yahoo /quote-batch(回的是「今天」的價,保證新鮮,
+      // 絕不殘留上一交易日)。Yahoo 1d meta 昨收已修過跳動問題,盤中兩源差異極小,
+      // 遠勝顯示前一個交易日的收盤。美股/指數(無 MIS)本就走 Yahoo。
+      const twMissing = twYf.filter(yf => !data[yf]);
+      const missing = otherYf.concat(twMissing);
       if (missing.length) Object.assign(data, await fetchBatch(missing));
 
       // 回傳 {sym:{price,prevClose,changePct}}（台股=MIS 即時,其餘=Yahoo）

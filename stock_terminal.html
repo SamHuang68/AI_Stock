@@ -545,6 +545,9 @@ async function loadSym(sym, mkt, silent) {
   if (!sym) return;
   sym = sym.toUpperCase().trim();
   mkt = mkt || S.mkt;
+  // 市場一律由代號決定(權威表 Market 優先,代號格式兜底):數字/^TW=台股、字母=美股。
+  // 不靠 TW/US 市場鈕 → 永不抓錯標的;對未收錄的新上市也正確。
+  mkt = window.Market ? Market.of(sym) : ((/^\d/.test(sym) || /^\^TW/i.test(sym)) ? 'TW' : 'US');
   const _myLoad = (window.__loadSeq = (window.__loadSeq || 0) + 1);   // 切股 race 守衛
   S.sym = sym; S.mkt = mkt;
   document.getElementById('syminput').value = sym;
@@ -1070,7 +1073,7 @@ function renderWl() {
     return `<div class="wlchip${isActive?' active':''}" draggable="true" data-sym="${w.t}" data-mkt="${w.m}" onclick="loadSym('${w.t}','${w.m}')" oncontextmenu="rmWl('${w.t}','${w.m}');return false" title="拖曳排序 / 點擊載入 / 右鍵移除">
       <span class="wlchip-grip">⋮⋮</span>
       <span class="wlchip-t">${w.name || w.t}</span>
-      <span class="wlchip-p ${getPcls(w.chg)}" id="wlp-${w.t}">${w.chg!=null?(w.chg>=0?'+':'')+w.chg.toFixed(2)+'%':''}</span>${_etfBadge}
+      <span class="wlchip-p ${getPcls(w.chg)}" id="wlp-${w.t}" style="${window.Colors?('color:'+Colors.dir(w.t,w.chg)+' !important'):''}">${w.chg!=null?(w.chg>=0?'+':'')+w.chg.toFixed(2)+'%':''}</span>${_etfBadge}
       <span class="wlchip-rm" onclick="event.stopPropagation();rmWl('${w.t}','${w.m}')" title="移除">×</span>
     </div>`;
   }).join('');

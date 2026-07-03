@@ -637,6 +637,84 @@ def _openapi_lookup_list(dataset_name):
         _openapi_ds[cache_key] = (today, [])
         return []
 
+
+# ── MOPS 公開資訊觀測站 月營收(補上櫃:官方 OpenAPI 無 per-company 上櫃端點) ──
+_mops_rev_cache = {}   # market('otc'/'sii') -> (yyyymmdd, period('11505'), {code: {...}})
+_MOPS_TR = _re.compile(r'<tr[^>]*>(.*?)</tr>', _re.I | _re.S)
+_MOPS_TD = _re.compile(r'<td[^>]*>(.*?)</td>', _re.I | _re.S)
+_MOPS_TAG = _re.compile(r'<[^>]+>')
+
+
+def _mops_cell(s):
+    s = _MOPS_TAG.sub('', s or '')
+    return s.replace('&nbsp;', '').replace('　', '').replace('\xa0', '').strip()
+
+
+def _parse_mops_t21sc03(html):
+    """解析 MOPS 月營收彙總表(t21sc03)。資料列以 4 碼代號開頭;數字欄為 ASCII,
+    即使 Big5 解碼把中文名弄亂,代號與數值仍可靠。
+    欄序:0代號 1名稱 2當月營收 3上月營收 4去年當月 5上月增減% 6去年同月增減%
+          7當月累計 8去年累計 9前期比較增減% 10備註(千元)。"""
+    out = {}
+    for tr in _MOPS_TR.findall(html):
+        cells = [_mops_cell(c) for c in _MOPS_TD.findall(tr)]
+        if len(cells) < 10:
+            continue
+        code = cells[0]
+        if not _re.match(r'^\d{4}$', code):
+            continue
+
+        def gn(i):
+            if i >= len(cells):
+                return None
+            t = cells[i].replace(',', '').replace('%', '').strip()
+            if t in ('', '--', '---', 'N/A', '不適用'):
+                return None
+            try:
+                return float(t)
+            except Exception:
+                return None
+        out[code] = {'monthRev': gn(2), 'momPct': gn(5), 'yoyPct': gn(6),
+                     'cumRev': gn(7), 'cumYoyPct': gn(9)}
+    return out
+
+
+def _mops_monthly_revenue(market, clean_code):
+    """MOPS 月營收(market:'otc'上櫃 / 'sii'上市)。整批快取一天;往回找最近一個
+    已公布月份(約次月 10 日)。回傳該股 dict 或 None。"""
+    from datetime import date as _date
+    today = _date.today().strftime('%Y%m%d')
+    cached = _mops_rev_cache.get(market)
+    if not cached or cached[0] != today:
+        idx, period = {}, None
+        y, mo = _date.today().year, _date.today().month
+        done = False
+        for _back in range(0, 4):
+            yy, mm = y, mo - _back
+            while mm <= 0:
+                mm += 12; yy -= 1
+            rocy = yy - 1911
+            for host in ('https://mopsov.twse.com.tw', 'https://mops.twse.com.tw'):
+                url = f'{host}/nas/t21/{market}/t21sc03_{rocy}_{mm}_0.html'
+                try:
+                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req, timeout=20) as resp:
+                        raw = resp.read()
+                    rows = _parse_mops_t21sc03(raw.decode('big5', 'replace'))
+                    if rows:
+                        idx, period = rows, f'{rocy}{mm:02d}'; done = True
+                        break
+                except Exception:
+                    continue
+            if done:
+                break
+        _mops_rev_cache[market] = (today, period, idx)
+        cached = _mops_rev_cache[market]
+    row = cached[2].get(clean_code)
+    if row:
+        row = dict(row); row['period'] = cached[1]
+    return row
+
 def _fundamental_score(out):
     """0~100 基本面分數：成長性(營收YoY+累計YoY) + 獲利性(三率)"""
     score, parts = 0, 0
@@ -1299,6 +1377,10 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_quote(sym)
         elif p == '/bars' or p.startswith('/bars?'):
             self._handle_bars()
+        elif p == '/universe' or p.startswith('/universe?'):
+            self._handle_universe()
+        elif p == '/datasources' or p.startswith('/datasources?'):
+            self._handle_datasources()
         elif p.startswith('/chip/'):
             sym = p[6:].split('?')[0]
             self._handle_chip(sym)
@@ -1415,6 +1497,10 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_ai_local()
         elif p == '/notify':
             self._handle_notify()
+        elif p == '/universe/refresh':
+            self._handle_universe_refresh()
+        elif p == '/datasource/refresh':
+            self._handle_datasource_refresh()
         elif p == '/ai-report':
             self._handle_ai_report()
         elif p == '/etf-reason':
@@ -1988,12 +2074,22 @@ class Handler(SimpleHTTPRequestHandler):
             out['pegRatio']          = (info.get('trailingPegRatio')
                                         or info.get('pegRatio'))
             out['marketCap']         = info.get('marketCap')
-            dy = info.get('dividendYield')
-            # yfinance returns yield either as 0-1 (decimal) or 0-100 already, depending on version
-            if dy is not None and isinstance(dy, (int, float)):
-                out['dividendYield'] = dy * 100 if dy < 1 else dy
+            # 殖利率:yfinance 的 dividendYield 在不同版本是小數(0.025)或百分比(2.5),
+            # 舊的「<1 就×100」會把真實低於 1% 的殖利率(如台達電 0.59%)誤放大成 59%。
+            # 改:優先用「每股配息 ÷ 價格」無歧義計算;無配息率才退回 dividendYield(僅極小值當比例×100)
+            # 並夾合理範圍(離譜值視為資料異常→不顯示,避免誤導)。
+            _price = info.get('regularMarketPrice') or info.get('currentPrice') or info.get('previousClose')
+            _drate = info.get('trailingAnnualDividendRate') or info.get('dividendRate')
+            _yld = None
+            if isinstance(_drate, (int, float)) and isinstance(_price, (int, float)) and _price > 0:
+                _yld = _drate / _price * 100.0
             else:
-                out['dividendYield'] = None
+                dy = info.get('dividendYield')
+                if isinstance(dy, (int, float)):
+                    _yld = dy * 100.0 if dy < 0.3 else dy
+            if isinstance(_yld, (int, float)) and (_yld < 0 or _yld > 40):
+                _yld = None
+            out['dividendYield'] = _yld
             out['currency']          = info.get('currency')
             # Prefer longName (英文全名) for non-TW; for TW use shortName if it's Chinese
             sn = info.get('shortName')
@@ -2101,22 +2197,33 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _handle_chip(self, sym):
         """法人籌碼面板：三大法人買賣超 + 融資融券"""
-        # Cache by sym+date
-        from datetime import date as _date
+        # Cache by sym+交易日
+        from datetime import date as _date, timedelta as _td
+        clean = sym.replace('.TW', '').replace('.TWO', '').strip().upper()
         today = _date.today().strftime('%Y%m%d')
-        key = f'chip:{sym}:{today}'
+        # 找最近一個「有 T86 資料」的交易日(往回最多 8 天:跳過週末/假日/盤前 17:30 前未更新)。
+        # 原本只抓當日 → 週末或盤前一律「無籌碼」,即使上市權值股(如 2330)也缺;改為退回最近交易日。
+        tdate, _t86 = None, None
+        for _back in range(0, 8):
+            _d = (_date.today() - _td(days=_back)).strftime('%Y%m%d')
+            try:
+                _u = f'https://www.twse.com.tw/rwd/zh/fund/T86?date={_d}&selectType=ALLBUT0999&response=json'
+                with urllib.request.urlopen(urllib.request.Request(_u, headers=YF_HEADERS), timeout=10) as _r:
+                    _j = json.loads(_r.read())
+                if _j.get('stat') in ('OK', 'ok') and _j.get('data'):
+                    tdate, _t86 = _d, _j; break
+            except Exception:
+                continue
+        if tdate is None:
+            tdate = today
+        key = f'chip:{sym}:{tdate}'
         c = _cache.get(key)
         if c is not None:
             self._ok(c); return
-        # TWSE T86 三大法人買賣超
-        clean = sym.replace('.TW', '').replace('.TWO', '').strip().upper()
-        out = {'symbol': sym, 'date': today, 'inst': None, 'margin': None}
+        # TWSE T86 三大法人買賣超(用上面找到的交易日;_t86 已抓回,不重抓)
+        out = {'symbol': sym, 'date': tdate, 'inst': None, 'margin': None}
         try:
-            url = f'https://www.twse.com.tw/rwd/zh/fund/T86?date={today}&selectType=ALLBUT0999&response=json'
-            req = urllib.request.Request(url, headers=YF_HEADERS)
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                raw = resp.read()
-            data = json.loads(raw)
+            data = _t86 if _t86 is not None else {}
             if data.get('stat') in ('OK', 'ok'):
                 # Find this symbol's row
                 rows = data.get('data') or []
@@ -2140,9 +2247,72 @@ class Handler(SimpleHTTPRequestHandler):
                         break
         except Exception as e:
             print(f'[chip] T86 fetch failed for {sym}: {e}')
+        # 上櫃股 TWSE T86 查不到 → 退 TPEx 三大法人(上櫃個股買賣明細;TPEx OpenAPI 為最新交易日)。
+        # 用關鍵字比對欄位,配對到才填、否則留空(不顯示錯誤數字)。
+        if out['inst'] is None:
+            try:
+                _tu = 'https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading'
+                with urllib.request.urlopen(urllib.request.Request(_tu, headers=YF_HEADERS), timeout=10) as _tr:
+                    _ta = json.loads(_tr.read())
+                if isinstance(_ta, list):
+                    # TPEx OpenAPI JSON 的 key 實測為「英文 PascalCase」(故舊版用中文關鍵字
+                    # '外資'/'三大法人' 比對全 null)。改成中英雙語、且鎖定「淨買賣超(net)」欄位:
+                    # data.gov 確認的中文欄名 + TPEx 英文欄名,並排除子項(不含/自營自行/避險/外資自營商)。
+                    NET = ('買賣超', 'netbuysell', 'net', 'diff', 'buysell')
+
+                    def _num(v):
+                        try:
+                            return float(str(v).replace(',', '').replace(' ', ''))
+                        except Exception:
+                            return None
+
+                    def _pick(row, must, avoid=()):
+                        """挑出『實體淨買賣超』欄位:key 含 must 任一且不含 avoid;
+                        優先取同時含 net 標記者(精準),否則退而取僅含 must 的數值欄。"""
+                        cand = None
+                        for k, v in row.items():
+                            kl = k.lower()
+                            if not any((m in k) or (m.lower() in kl) for m in must):
+                                continue
+                            if any((a in k) or (a.lower() in kl) for a in avoid):
+                                continue
+                            if any((n in k) or (n in kl) for n in NET):
+                                val = _num(v)
+                                if val is not None:
+                                    return val
+                            elif cand is None:
+                                cand = _num(v)
+                        return cand
+
+                    for row in _ta:
+                        if not isinstance(row, dict):
+                            continue
+                        rc = ''
+                        for k, v in row.items():
+                            if ('代號' in k) or ('code' in k.lower()):
+                                rc = str(v).strip(); break
+                        if rc == clean:
+                            out['inst'] = {
+                                'foreign': _pick(row,
+                                                 ('外資及陸資買賣超', 'foreigninvestor', 'foreign', '外資'),
+                                                 avoid=('不含', 'exclud', 'dealer', '自營', 'hedge', '避險', 'self', '自行')),
+                                'trust':   _pick(row,
+                                                 ('投信', 'investmenttrust', 'trust'),
+                                                 avoid=('foreign', '外資', 'dealer', '自營')),
+                                'dealer':  _pick(row,
+                                                 ('自營商買賣超', 'dealer', '自營'),
+                                                 avoid=('foreign', '外資', 'hedge', '避險', 'self', '自行', 'propriet', '不含', 'exclud')),
+                                'total':   _pick(row,
+                                                 ('三大法人', 'totalinstitution', 'institutionalinvestorstotal', 'total'),
+                                                 avoid=('foreign', '外資', 'dealer', '自營', 'trust', '投信')),
+                            }
+                            out['_chipSource'] = 'TPEx'  # 欄位英文 PascalCase:ForeignInvestorsIncludeMainlandAreaInvestors-Difference 等,已實機核對
+                            break
+            except Exception as e:
+                print(f'[chip] TPEx 3insti fetch failed for {sym}: {e}')
         # TWSE 融資融券 MI_MARGN
         try:
-            url2 = f'https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={today}&selectType=ALL&response=json'
+            url2 = f'https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={tdate}&selectType=ALL&response=json'
             req2 = urllib.request.Request(url2, headers=YF_HEADERS)
             with urllib.request.urlopen(req2, timeout=10) as resp:
                 raw2 = resp.read()
@@ -2177,7 +2347,7 @@ class Handler(SimpleHTTPRequestHandler):
             print(f'[chip] MI_MARGN fetch failed for {sym}: {e}')
         # 借券賣出餘額 TWT72U (v3.8)
         try:
-            url3 = f'https://www.twse.com.tw/rwd/zh/marginTrading/TWT72U?date={today}&selectType=ALL&response=json'
+            url3 = f'https://www.twse.com.tw/rwd/zh/marginTrading/TWT72U?date={tdate}&selectType=ALL&response=json'
             req3 = urllib.request.Request(url3, headers=YF_HEADERS)
             with urllib.request.urlopen(req3, timeout=10) as resp:
                 data3 = json.loads(resp.read())
@@ -2202,7 +2372,7 @@ class Handler(SimpleHTTPRequestHandler):
             print(f'[chip] TWT72U fetch failed for {sym}: {e}')
         # 當沖比 TWTB4U (v3.8): 當沖成交量 / 總成交量
         try:
-            url4 = f'https://www.twse.com.tw/rwd/zh/afterTrading/TWTB4U?date={today}&response=json'
+            url4 = f'https://www.twse.com.tw/rwd/zh/afterTrading/TWTB4U?date={tdate}&response=json'
             req4 = urllib.request.Request(url4, headers=YF_HEADERS)
             with urllib.request.urlopen(req4, timeout=10) as resp:
                 data4 = json.loads(resp.read())
@@ -2262,6 +2432,21 @@ class Handler(SimpleHTTPRequestHandler):
                 'cumRev':    _pick_num(rev, ['當月累計營收']),
                 'cumYoyPct': _pick_num(rev, ['累計', '前期比較增減']),
             }
+        # 官方 OpenAPI 無 per-company 上櫃月營收 → 退 MOPS 公開資訊觀測站(otc;上市 sii 備援)
+        if not (out['revenue'] and out['revenue'].get('monthRev') is not None):
+            for mk in ('otc', 'sii'):
+                mr = _mops_monthly_revenue(mk, clean)
+                if mr and mr.get('monthRev') is not None:
+                    out['revenue'] = {
+                        'period':    mr.get('period'),
+                        'monthRev':  mr.get('monthRev'),
+                        'yoyPct':    mr.get('yoyPct'),
+                        'momPct':    mr.get('momPct'),
+                        'cumRev':    mr.get('cumRev'),
+                        'cumYoyPct': mr.get('cumYoyPct'),
+                    }
+                    out['_revSource'] = 'MOPS:' + mk
+                    break
         # 綜合損益表 → 三率（同樣模糊比對，避免全形/半形括號差異 例 營業毛利（毛損））
         inc = _openapi_lookup(['t187ap06_L_ci', 't187ap06_O_ci', 't187ap06_L', 't187ap06_O'], clean)
         if inc:
@@ -3054,6 +3239,42 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as e:
             self._err('bars failed: ' + str(e), 500)
 
+    def _handle_universe(self):
+        """GET /universe → 全台股+美股 code↔name lookup(權威判市場 / 補名 / 驗存在)。讀快取,缺則建。"""
+        try:
+            import universe
+            self._ok(json.dumps(universe.load(), ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('universe failed: ' + str(e), 500)
+
+    def _handle_universe_refresh(self):
+        """POST /universe/refresh → 重抓 TWSE/TPEx/ETF + NASDAQ directory,更新快取。回 counts(新上市即時收錄)。"""
+        try:
+            import universe
+            data = universe.build()
+            self._ok(json.dumps({'ok': True, 'updated': data.get('updated'),
+                                 'counts': data.get('counts')}, ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('universe refresh failed: ' + str(e), 500)
+
+    def _handle_datasources(self):
+        """GET /datasources → 資料源管理表(每源:提供者/可靠度/最後更新/筆數)。"""
+        try:
+            import datasources
+            self._ok(json.dumps(datasources.list_sources(), ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('datasources failed: ' + str(e), 500)
+
+    def _handle_datasource_refresh(self):
+        """POST /datasource/refresh body:{id} → 一鍵更新該來源(重抓可靠來源)。"""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length) or b'{}')
+            import datasources
+            self._ok(json.dumps(datasources.refresh((body.get('id') or '').strip()), ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('datasource refresh failed: ' + str(e), 500)
+
     def _handle_notify(self):
         """v4.0: POST /notify  body:{text, subject?} → 用 alert_config 的 Telegram/Email 寄出
            (把 AI 副駕分析等留存,不會關掉就消失)。回 {ok, results}。"""
@@ -3643,11 +3864,18 @@ class Handler(SimpleHTTPRequestHandler):
                 delta = json.loads(r.read())
             if delta.get('error'):
                 self._err('etf-delta error: ' + str(delta.get('error')), 502); return
+            subject = html = text = None
             if etf_report:
-                subject, html = etf_report.build_report_html(delta, mode)
-                text = etf_report.build_report_text(delta)
-            else:
-                subject, html, text = 'ETF 報表', None, json.dumps(delta)[:2000]
+                try:
+                    subject, html = etf_report.build_report_html(delta, mode)
+                    text = etf_report.build_report_text(delta)
+                except Exception:
+                    html = None
+            if not html:
+                # etf_report 不可用(打包已排除 pandas/matplotlib / dev 未裝)→ 純 stdlib 報表。
+                # 絕不再寄原始 JSON。
+                import etf_report_lite
+                subject, html, text = etf_report_lite.build(delta, mode)
             cfg = alert_daemon.load_config()
             ok, msg = alert_daemon.push_email(cfg, subject, text, html=html)
             if ok:

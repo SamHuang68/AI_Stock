@@ -11,6 +11,10 @@
 
 const SERVER_P = window.SERVER || `http://localhost:18432`;
 
+// 台股代號判定(數字開頭如 2308/00685L,或 ^TW 指數)。台股紅綠慣例應依「標的本身」,
+// 不受 TW/US 市場鈕(S.mkt)影響 —— 否則在 US 鈕時看台股/台股指數會套成美股慣例。
+function _isTwSym(s) { return window.Colors ? Colors.isTW(s) : (/^\d/.test(String(s || '')) || /^\^TW/i.test(String(s || ''))); }
+
 // ============================================================
 // CSS injection
 // ============================================================
@@ -158,10 +162,10 @@ const MKT_INDICES = [
   {sym:'^TWII', name:'加權'},
   {sym:'__TXF__', name:'台指期'},   // TAIFEX 即時(含夜盤)，特例來源 /txf
   {sym:'^TWOII', name:'櫃買'},
-  {sym:'^SOX',  name:'費半'},
-  {sym:'^GSPC', name:'S&P500'},
-  {sym:'^IXIC', name:'NASDAQ'},
-  {sym:'^DJI',  name:'道瓊'},
+  {sym:'^SOX',  name:'費半',  redUp:false},   // 美股:漲綠跌紅
+  {sym:'^GSPC', name:'S&P500',redUp:false},
+  {sym:'^IXIC', name:'NASDAQ',redUp:false},
+  {sym:'^DJI',  name:'道瓊',  redUp:false},
   {sym:'^N225', name:'日經'},
   {sym:'^HSI',  name:'恆生'},
   {sym:'^KS11', name:'韓國'},      // KOSPI
@@ -267,14 +271,17 @@ async function refreshMktBar() {
       cell.classList.remove('loading');
       cell.querySelector('.px').textContent = fmtIdx(cur);
 
-      // ── 漲跌色：固定台股紅漲綠跌（與大盤 bar 慣例一致）──
+      // ── 漲跌色:依各標的市場慣例(台股/東亞 紅漲;美股指數 綠漲)走中央 Colors ──
       const dir = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
       const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
+      const _mc = window.Colors ? Colors.dirRU(m.redUp !== false, delta) : '';
       const dEl = cell.querySelector('.delta');
       dEl.className = 'delta ' + dir;
+      if (_mc) dEl.style.color = _mc;
       dEl.textContent = sign + Math.abs(delta).toFixed(Math.abs(delta) >= 100 ? 0 : 2);
       const ch = cell.querySelector('.ch');
       ch.className = 'ch ' + dir;
+      if (_mc) ch.style.color = _mc;
       const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '－';
       ch.textContent = arrow + Math.abs(chgPct).toFixed(2) + '%';
     }
@@ -380,11 +387,12 @@ function applyMarketColorClass(mkt) {
     // 直接依「目前載入個股的市場」上色(以昨收為基準),不靠全域 body.market-* class —
     // 因 loadSym 切股不會更新 body class,且全域 class 會牽動混合市場的自選股清單。
     // 台股:漲紅跌綠;美股:漲綠跌紅;平盤無色。
-    const tw = (S.mkt || 'TW') === 'TW';
     el.classList.remove('price-up', 'price-down');
-    if (last.close > ref)      el.style.color = tw ? 'var(--red)' : 'var(--green)';
-    else if (last.close < ref) el.style.color = tw ? 'var(--green)' : 'var(--red)';
-    else                       el.style.color = '';
+    el.style.color = (last.close === ref) ? ''
+      : (window.Colors ? Colors.dir(S.sym, last.close - ref)
+        : ((_isTwSym(S.sym) || (S.mkt || 'TW') === 'TW')
+            ? (last.close > ref ? 'var(--red)' : 'var(--green)')
+            : (last.close > ref ? 'var(--green)' : 'var(--red)')));
   });
 })();
 
@@ -392,6 +400,38 @@ function applyMarketColorClass(mkt) {
 // (3) Chart legend + (4) volume color + (5) prev close line
 // All applied by patching renderChart
 // ============================================================
+// ── 台股指數(^TWII/^TWOII)早盤 Yahoo 日線落後一日 → 用 TWSE 即時校正頂部數字 ──
+// Yahoo ^TWII 早盤最後一根日 K 還停在昨天 → 頂部現價/% 與底部總體列(用 TWSE 即時)不一致。
+// 只在「偵測到落後(最後一根 K 收盤≈昨收)」時,用同一個 /twindex 源校正頂部現價/漲跌%/昨收。
+// 正常盤(主圖已是今天)完全不介入,保留 Yahoo。
+(function patchTwIndexHeader() {
+  const TW_IDX = { '^TWII': 't00', '^TWOII': 'o00' };
+  window.addEventListener('symLoaded', async () => {
+    const sym = S.sym;
+    const code = TW_IDX[sym]; if (!code) return;
+    try {
+      const d = await fetch(`${SERVER_P}/twindex`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null);
+      const ix = d && d.indices && d.indices[code];
+      if (!ix || ix.price == null || ix.prevClose == null) return;   // 盤後/假日無即時 → 不動
+      if (S.sym !== sym) return;                                     // race:已切股
+      const cs = S.data && S.data.candles; if (!cs || !cs.length) return;
+      const lb = cs[cs.length - 1];
+      const lagging = Math.abs(lb.close - ix.prevClose) < Math.max(1, ix.prevClose * 1e-5);
+      if (!lagging) return;   // 主圖最後一根已是今天 → Yahoo 已正確,不介入
+      const price = ix.price, prev = ix.prevClose, pct = (price - prev) / prev * 100;
+      if (S.data) S.data.yesterdayClose = prev;
+      const pEl = document.getElementById('ci-price'); if (pEl) pEl.textContent = price.toFixed(2);
+      const cEl = document.getElementById('ci-chg');
+      if (cEl) {
+        cEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+        cEl.classList.remove('price-up', 'price-down');
+        cEl.style.color = window.Colors ? Colors.dir(sym, pct) : (pct > 0 ? 'var(--red)' : pct < 0 ? 'var(--green)' : '');   // 台股指數紅漲綠跌
+      }
+      console.log('[polish-v3] ^TW index header corrected via TWSE (early-session lag):', sym, price, pct.toFixed(2) + '%');
+    } catch (e) { /* keep Yahoo on failure */ }
+  });
+})();
+
 (function patchRenderChartPolish() {
   if (typeof renderChart !== 'function') return setTimeout(patchRenderChartPolish, 100);
   if (window._polishChartPatched) return;
@@ -399,7 +439,7 @@ function applyMarketColorClass(mkt) {
   const orig = window.renderChart;
   window.renderChart = function (candles) {
     // TW/US: swap candle up/down colors before original render reads them
-    const tw = (S.mkt || 'TW') === 'TW';
+    const tw = _isTwSym(S.sym) || (S.mkt || 'TW') === 'TW';
     const UP = tw ? '#F87171' : '#4ADE80';   // TW red-up / US green-up
     const DN = tw ? '#4ADE80' : '#F87171';
     // Temporarily override CSS vars for the chart series creation
@@ -591,9 +631,9 @@ function renderKeystatsSection(ks) {
   const epsCurrency = ks.currency || (S.mkt === 'TW' ? 'TWD' : 'USD');
   let h = '<div id="keystats-sect"><div class="stat-sect">關鍵估值 · ' + S.sym + '</div>';
   h += `<div class="keystat-row"><span class="k">市值 MKT CAP</span><span class="v">${fmtBig(mc)}${mc != null ? ' ' + epsCurrency : ''}</span></div>`;
-  h += `<div class="keystat-row"><span class="k">本益比 P/E</span><span class="v" style="color:${pe != null ? (pe < 15 ? 'var(--green)' : pe > 30 ? 'var(--red)' : 'var(--thi)') : 'var(--tlo)'}">${pe != null ? pe.toFixed(2) : '--'}</span></div>`;
-  h += `<div class="keystat-row"><span class="k">股價淨值比 P/B</span><span class="v" style="color:${pb != null ? (pb < 1.5 ? 'var(--green)' : pb > 5 ? 'var(--red)' : 'var(--thi)') : 'var(--tlo)'}">${pb != null ? pb.toFixed(2) : '--'}</span></div>`;
-  h += `<div class="keystat-row"><span class="k">殖利率 Yield</span><span class="v" style="color:${yld != null ? (yld > 4 ? 'var(--green)' : 'var(--thi)') : 'var(--tlo)'}">${yld != null ? yld.toFixed(2) + '%' : '--'}</span></div>`;
+  h += `<div class="keystat-row"><span class="k">本益比 P/E</span><span class="v" style="color:${pe != null ? (window.Colors ? Colors.warn(pe, {hi:30}) : (pe > 30 ? 'var(--orange)' : 'var(--thi)')) : 'var(--tlo)'}">${pe != null ? pe.toFixed(2) : '--'}</span></div>`;
+  h += `<div class="keystat-row"><span class="k">股價淨值比 P/B</span><span class="v" style="color:${pb != null ? (window.Colors ? Colors.warn(pb, {hi:5}) : (pb > 5 ? 'var(--orange)' : 'var(--thi)')) : 'var(--tlo)'}">${pb != null ? pb.toFixed(2) : '--'}</span></div>`;
+  h += `<div class="keystat-row"><span class="k">殖利率 Yield</span><span class="v" style="color:${yld != null ? (window.Colors ? Colors.warn(yld, {hi:15}) : (yld > 15 ? 'var(--orange)' : 'var(--thi)')) : 'var(--tlo)'}">${yld != null ? yld.toFixed(2) + '%' : '--'}</span></div>`;
   if (eps != null) h += `<div class="keystat-row"><span class="k">EPS</span><span class="v">${eps.toFixed(2)} ${epsCurrency}</span></div>`;
   if (ks._source) h += `<div style="padding:4px 12px;font-family:monospace;font-size:8px;color:var(--tf)">資料源：${ks._source}</div>`;
   h += '</div>';

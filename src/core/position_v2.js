@@ -303,7 +303,7 @@ function renderPositionList() {
     }
   }
   const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost * 100) : 0;
-  const pnlCol = totalPnl >= 0 ? 'var(--green)' : 'var(--red)';
+  const pnlCol = window.Colors ? Colors.gain(totalPnl) : (totalPnl >= 0 ? 'var(--green)' : 'var(--red)');
 
   let h = `<div class="stat-sect">持倉清單 · ${codes.length} 檔</div>`;
 
@@ -325,7 +325,7 @@ function renderPositionList() {
       ? (S.data?.candles?.[S.data.candles.length - 1]?.close ?? p.lastPrice)
       : p.lastPrice;
     const pnlPct = ref != null ? ((ref - p.entry) / p.entry * 100) : null;
-    const pnlCol = pnlPct == null ? 'var(--tlo)' : (pnlPct >= 0 ? 'var(--green)' : 'var(--red)');
+    const pnlCol = window.Colors ? Colors.gain(pnlPct) : (pnlPct == null ? 'var(--tlo)' : (pnlPct >= 0 ? 'var(--green)' : 'var(--red)'));
     const lotsTxt = (p.shares % 1000 === 0) ? `${p.shares / 1000}張` : `${p.shares}股`;
     h += `<div data-act="goto-pos" data-sym="${code}" data-mkt="${p.mkt || 'TW'}"
        style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:${isActive ? 'var(--gold-s)' : 'transparent'};transition:background .12s"
@@ -368,7 +368,7 @@ function renderPosition() {
     const dPnl = c ? (c - pos.entry) * pos.shares : 0;
     const cost = pos.entry * pos.shares;
     const val  = c ? c * pos.shares : cost;
-    const col  = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    const col  = window.Colors ? Colors.gain(pnl) : (pnl >= 0 ? 'var(--green)' : 'var(--red)');
 
     h += '<div class="stat-sect">當前持倉</div>';
     h += row('成本價', pos.entry.toFixed(2));

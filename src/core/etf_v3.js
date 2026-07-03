@@ -230,8 +230,8 @@
 .e3-card-name { flex: 1; font-family: monospace; font-size: 10px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .e3-card-badges { display: flex; gap: 4px; }
 .e3-badge { padding: 1px 6px; border-radius: 3px; font-family: monospace; font-size: 9px; font-weight: 700; }
-.e3-badge.new { background: rgba(74,222,128,.15); color: var(--green); }
-.e3-badge.rm  { background: rgba(248,113,113,.15); color: var(--red); }
+.e3-badge.new { background: rgba(248,113,113,.15); color: var(--red); }
+.e3-badge.rm  { background: rgba(74,222,128,.15); color: var(--green); }
 .e3-badge.chg { background: rgba(96,165,250,.15); color: var(--blue); }
 .e3-badge.empty { background: rgba(90,106,130,.10); color: var(--tf); }
 .e3-card-arrow { color: var(--tlo); font-size: 10px; transition: transform .15s; }
@@ -362,7 +362,7 @@
           const pct = q.changePct;
           el.textContent = (q.price != null ? q.price.toFixed(2) : '—') +
             (pct != null ? '  ' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%' : '');
-          el.style.color = pct == null ? 'var(--tlo)' : pct > 0 ? 'var(--green)' : pct < 0 ? 'var(--red)' : 'var(--tlo)';
+          el.style.color = window.Colors ? Colors.dir(code, pct) : (pct == null ? 'var(--tlo)' : pct > 0 ? 'var(--green)' : pct < 0 ? 'var(--red)' : 'var(--tlo)');
         }).catch(() => {});
     }
   }
@@ -602,7 +602,7 @@
     let h = '<div class="stat-sect">主動 ETF 對此股動向</div>';
     for (const r of rows) {
       const lbl = r.type === 'new' ? '新進' : r.type === 'rm' ? '移除' : '加減碼';
-      const col = r.type === 'rm' ? 'var(--red)' : (r.val >= 0 ? 'var(--green)' : 'var(--red)');
+      const col = r.type === 'rm' ? 'var(--green)' : (window.Colors ? Colors.gain(r.val) : (r.val >= 0 ? 'var(--red)' : 'var(--green)'));
       const sign = (r.type !== 'rm' && r.val >= 0) ? '+' : (r.type === 'rm' ? '-' : '');
       const num = Math.abs(r.val ?? 0).toFixed(2);
       h += `<div class="e3-hold-row"><span class="k">${esc(r.code)} ${lbl}</span><span class="v" style="color:${col}">${sign}${num}%</span></div>`;
@@ -653,7 +653,7 @@
       const etfUp = [...new Set([...s.add, ...s.inc])];
       const etfList = [...new Set([...(side === 'up' ? [...s.add, ...s.inc] : [...s.rm, ...s.dec])])].slice(0, 8).join(' · ');
       const wt = side === 'up' ? s.wIn : s.wOut;
-      const wtCol = side === 'up' ? 'var(--green)' : 'var(--red)';
+      const wtCol = side === 'up' ? 'var(--red)' : 'var(--green)';
       // v3.9 P5：買盤側顯示「投信潛在買盤佔個股日均量%」+ AI 原因鈕
       const extra = (side === 'up' && s.addShares > 0)
         ? `<div class="e3-volpct" data-sym="${esc(s.code)}" data-shares="${s.addShares}" style="color:var(--gold);font-size:8.5px;margin-top:2px">佔量 計算中…</div>`
@@ -673,7 +673,7 @@
     let h = '';
     for (const s of list.slice(0, 60)) {
       const pos = s.net > 0;
-      const col = pos ? 'var(--green)' : 'var(--red)';
+      const col = window.Colors ? Colors.gain(s.net) : (pos ? 'var(--red)' : 'var(--green)');
       const etfList = [...new Set([...s.add, ...s.inc, ...s.rm, ...s.dec])].slice(0, 8).join(' · ');
       h += `<div class="e3-stock" data-e3m="load" data-sym="${esc(s.code)}" data-mkt="TW" style="cursor:pointer;align-items:center;padding:6px 12px">
         <span style="font-weight:800;color:${col};min-width:42px;font-size:13px;text-align:center">${pos ? '+' : ''}${s.net}</span>

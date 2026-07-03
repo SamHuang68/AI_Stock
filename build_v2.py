@@ -12,8 +12,11 @@ SRC  = os.path.join(ROOT, 'stock_terminal.html')
 DST  = os.path.join(ROOT, 'stock_terminal_v2.html')
 
 # Scripts injected (in order):
-V2_SCRIPTS = ['src/core/fields_v3.js',   # 欄位型別定義+全域滾輪防護(單一真理來源,須最先載入)
+V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,須最先載入)
+              'src/core/market_v3.js',   # 台股/美股 universe lookup(權威判市場+名稱,可更新)
+              'src/core/fields_v3.js',   # 欄位型別定義+全域滾輪防護(單一真理來源,須最先載入)
               'src/ui/share_v3.js',      # 分析結果寄送 Telegram/Email(單一來源,各分析面板共用)
+              'src/ui/datasources_v3.js',# 資料源管理表 + 一鍵更新
               'src/core/etf_flow_tip_v3.js',  # 自選股 ETF 增減碼徽章浮動視窗(列出是哪幾檔 ETF)
               'src/core/position_v2.js', 'src/core/watch_v2.js', 'src/core/info_v2.js', 'src/core/pro_v2.js',
               'src/chart/volume_profile_v3.js',           # v3.8 E: 成交金額 Volume Profile (覆寫 pro_v2 POC，須在其後)
@@ -92,7 +95,7 @@ with open(SRC, 'r', encoding='utf-8') as f:
 # 1) Update title
 html = re.sub(
     r'<title>[^<]*</title>',
-    '<title>Stock Terminal v4.0 - Local DB / Portfolio / AI Copilot</title>',
+    '<title>Stock Terminal v4.1 - Local DB / Portfolio / AI Copilot</title>',
     html, count=1)
 
 # 2a) POS tab
@@ -218,12 +221,12 @@ else:
 if 'data-v2-banner' not in html:
     html = html.replace(
         '<span class="logo">STOCK TERMINAL</span>',
-        '<span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v4.0</span></span>',
+        '<span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v4.1</span></span>',
         1)
-# Bump existing banner to v4.0
+# Bump existing banner to v4.1
 html = re.sub(
     r'(data-v2-banner>STOCK TERMINAL <span[^>]+>)v[0-9]+\.\d+(</span>)',
-    r'\g<1>v4.0\g<2>', html, count=1)
+    r'\g<1>v4.1\g<2>', html, count=1)
 
 with open(DST, 'w', encoding='utf-8') as f:
     f.write(html)

@@ -4,11 +4,11 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0.."
 
 echo ============================================
-echo  Build Stock_Terminal distribution zip (v4.0)
+echo  Build Stock_Terminal distribution zip (v4.1)
 echo ============================================
 echo.
 
-set "ZIP=Stock_Terminal_v4.0.zip"
+set "ZIP=Stock_Terminal_v4.1.zip"
 set "STAGE=Stock_Terminal"
 
 REM Clean prior leftovers
@@ -30,7 +30,7 @@ REM Copy whole module/server/script/doc trees; skip caches, logs, node_modules
 robocopy "src"     "%STAGE%\src"     /E /XD __pycache__ node_modules /XF *.pyc *.log /NFL /NDL /NJH /NJS /NC /NS /NP >nul
 robocopy "server"  "%STAGE%\server"  /E /XD __pycache__ /XF *.pyc *.log         /NFL /NDL /NJH /NJS /NC /NS /NP >nul
 robocopy "scripts" "%STAGE%\scripts" /E /XF *.log                               /NFL /NDL /NJH /NJS /NC /NS /NP >nul
-robocopy "docs"    "%STAGE%\docs"    /E                                          /NFL /NDL /NJH /NJS /NC /NS /NP >nul
+robocopy "docs"    "%STAGE%\docs"    /E /XF revision.md                           /NFL /NDL /NJH /NJS /NC /NS /NP >nul
 
 echo Staging root files ...
 for %%F in (stock_terminal.html stock_terminal_v2.html build_v2.py build_order.py) do (

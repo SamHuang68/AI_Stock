@@ -1427,7 +1427,7 @@ function renderPatternsPanelV3(candlesOverride) {
   const bull = patterns.filter(p => p.severity === 'bullish').length;
   const bear = patterns.filter(p => p.severity === 'bearish').length;
   const lean = bull > bear ? '整體偏多 🟢' : bear > bull ? '整體偏空 🔴' : '多空分歧 ⚖️';
-  const leanCol = bull > bear ? 'var(--green)' : bear > bull ? 'var(--red)' : 'var(--orange)';
+  const leanCol = (bull === bear) ? 'var(--orange)' : (window.Colors ? Colors.gain(bull - bear) : (bull > bear ? 'var(--red)' : 'var(--green)'));
   let h = `<div style="padding:10px 12px;border-bottom:1px solid var(--border);background:rgba(251,191,36,.06)">
     <div style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--gold)">👶 新手白話總結</div>
     <div style="font-family:monospace;font-size:10px;color:var(--text);line-height:1.7;margin-top:4px">

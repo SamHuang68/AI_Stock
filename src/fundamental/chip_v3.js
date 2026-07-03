@@ -29,7 +29,7 @@ function fmtShares(n) {
   if (abs >= 1e4) return (n/1e4).toFixed(1) + ' 萬股';
   return Math.round(n).toLocaleString() + ' 股';
 }
-function colorN(n) { return n > 0 ? 'var(--green)' : n < 0 ? 'var(--red)' : 'var(--tlo)'; }
+function colorN(n) { return window.Colors ? Colors.gain(n) : (n > 0 ? 'var(--green)' : n < 0 ? 'var(--red)' : 'var(--tlo)'); }
 function signN(n)  { return (n != null && n >= 0 ? '+' : '') + (n == null ? '—' : fmtShares(n)); }
 
 function renderChipSection(chip) {
@@ -70,7 +70,7 @@ function renderChipSection(chip) {
     const badge = (n, who) => {
       if (!n) return '';
       const buy = n > 0;
-      return `<span style="display:inline-block;margin:2px 4px 0 0;padding:1px 6px;border-radius:8px;font-size:9px;background:${buy?'rgba(34,197,94,.18)':'rgba(239,68,68,.18)'};color:${buy?'var(--green)':'var(--red)'}">${who}連${buy?'買':'賣'}${Math.abs(n)}日</span>`;
+      return `<span style="display:inline-block;margin:2px 4px 0 0;padding:1px 6px;border-radius:8px;font-size:9px;background:${buy?'rgba(239,68,68,.18)':'rgba(34,197,94,.18)'};color:${buy?'var(--red)':'var(--green)'}">${who}連${buy?'買':'賣'}${Math.abs(n)}日</span>`;
     };
     h += `<div style="padding:6px 12px 0">${badge(chip.streak.foreign,'外資')}${badge(chip.streak.trust,'投信')}</div>`;
   }

@@ -161,7 +161,7 @@ async function runScreener(preset, label) {
     }
     let h = `<div style="padding:8px 14px;background:var(--gbg);color:var(--green);font-family:monospace;font-size:10px;border-bottom:1px solid var(--border)">✓ 找到 <b>${data.matched}</b> 檔（掃 ${data.scanned} 檔，耗時 ${dt}s） · 點擊載入</div>`;
     for (const x of data.results) {
-      const chC = x.changePct >= 0 ? 'var(--green)' : 'var(--red)';
+      const chC = window.Colors ? Colors.dir(x.sym, x.changePct) : (x.changePct >= 0 ? 'var(--green)' : 'var(--red)');
       h += `<div class="scr-row" data-scr-sym="${x.sym}">
         <span class="sym">${escS(x.sym)}</span>
         <span class="nm">${escS(x.name || '')}</span>

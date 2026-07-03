@@ -109,7 +109,7 @@
       }
     } catch (e) { _canonFail[key] = true; }
   }
-  const scoreCol = s => s == null ? 'var(--tlo)' : s >= 65 ? 'var(--green)' : s >= 45 ? 'var(--orange)' : 'var(--red)';
+  const scoreCol = s => window.Colors ? Colors.quality(s, 65, 45) : (s == null ? 'var(--tlo)' : s >= 65 ? 'var(--red)' : s >= 45 ? 'var(--orange)' : 'var(--green)');
   const techTag = s => s == null ? '—' : s >= 65 ? '🟢 偏多' : s >= 45 ? '⚖️ 中性' : '🔴 偏空';
   const fundTag = s => s == null ? '—' : s >= 70 ? '🟢 體質佳' : s >= 50 ? '🟡 中性' : '🔴 偏弱';
 
