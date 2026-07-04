@@ -1026,15 +1026,16 @@ def _src_snapshot():
     return out
 
 
-def _yf_prevclose(meta):
+def _yf_prevclose(meta, allow_chart_prev=True):
     """單一可信昨收口徑 — 全站共用,避免各端點優先序不一造成漲幅亂跳。
-       優先 regularMarketPreviousClose(真昨收) > previousClose > chartPreviousClose。
-       註:chartPreviousClose 只有 range=1d 時才等於昨收,較長區間會是區間起點,故擺最後。"""
+       優先 regularMarketPreviousClose(真昨收) > previousClose > chartPreviousClose (限 allow_chart_prev=True)。"""
     if not meta:
         return None
-    return (meta.get('regularMarketPreviousClose')
-            or meta.get('previousClose')
-            or meta.get('chartPreviousClose'))
+    val = (meta.get('regularMarketPreviousClose')
+           or meta.get('previousClose'))
+    if val is not None:
+        return val
+    return meta.get('chartPreviousClose') if allow_chart_prev else None
 
 
 def _anom_quote(price, prev, chg, kind='stock'):
@@ -3530,8 +3531,14 @@ class Handler(SimpleHTTPRequestHandler):
                     vols.append(syn_vol)
                     ts_valid.append(rmt)
                 ind = self._calc_ind(closes, highs, lows, vols)
-                # 漲跌% 改以「官方昨收」為基準,避免 closes[-2] 遇資料缺口/除權息造成 +183% 等離譜值
-                _pc = _yf_prevclose(meta)
+                # 昨收優先級：優先使用無斷層的 closes[-2]，否則退回官方昨收，防止 long range 下 chartPreviousClose 誤用
+                _pc = None
+                if len(closes) >= 2:
+                    _tmp_chg = (closes[-1] - closes[-2]) / closes[-2] * 100
+                    if abs(_tmp_chg) <= 11.0:
+                        _pc = closes[-2]
+                if _pc is None:
+                    _pc = _yf_prevclose(meta, allow_chart_prev=False)
                 _chg = ((closes[-1] - _pc) / _pc * 100) if (_pc and _pc > 0) else ind['changePct']
                 if self._screener_match(preset or custom, ind, closes, highs, vols):
                     results.append({
