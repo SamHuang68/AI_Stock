@@ -512,9 +512,9 @@ function parseYF(raw) {
     const ts = res.timestamp || [];                  // 空 → candles=[](回空而非丟例外)
     let candles = ts.map((t,i)=>({
       time: t,
-      open:  q.open[i]  ?? q.close[i],
-      high:  q.high[i]  ?? q.close[i],
-      low:   q.low[i]   ?? q.close[i],
+      open:  (q.open[i] && q.open[i] > 0) ? q.open[i] : (q.close[i] || 0),
+      high:  (q.high[i] && q.high[i] > 0) ? q.high[i] : (q.close[i] || 0),
+      low:   (q.low[i] && q.low[i] > 0) ? q.low[i] : (q.close[i] || 0),
       close: q.close[i] ?? 0,
       volume: q.volume[i] ?? 0,
     })).filter(c=>c.close!=null&&c.close>0);

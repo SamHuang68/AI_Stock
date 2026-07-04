@@ -35,6 +35,21 @@
   ck('漲停日保留(+10%續漲)', closesOf([100, 110, 121]), [100, 110, 121]);
   ck('首尾不誤刪', closesOf([100, 101, 102, 103]), [100, 101, 102, 103]);
   ck('連續兩根尖刺保守保留', closesOf([100, 200, 201, 102]).length, 4);
+  ck('開最高低為0時fallback至收盤價', (function() {
+    var raw = {
+      chart: {
+        result: [{
+          timestamp: [1700000000],
+          indicators: {
+            quote: [{ open: [0], high: [0], low: [0], close: [39.49], volume: [1000] }]
+          },
+          meta: { symbol: 'TEST_ZERO' }
+        }]
+      }
+    };
+    var p = window.parseYF(raw);
+    return p && p.candles[0] && p.candles[0].open === 39.49 && p.candles[0].high === 39.49 && p.candles[0].low === 39.49;
+  })(), true);
 
   var passed = cases.filter(function (c) { return c.pass; }).length;
   console.table(cases);

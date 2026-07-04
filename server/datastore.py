@@ -70,9 +70,18 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3):
                 rows = []
                 for i, t in enumerate(ts):
                     cl = q['close'][i]
-                    if cl is None:
+                    if cl is None or cl <= 0:
                         continue
-                    rows.append((t, q['open'][i], q['high'][i], q['low'][i], cl, q['volume'][i]))
+                    op = q['open'][i]
+                    hi = q['high'][i]
+                    lo = q['low'][i]
+                    vol = q['volume'][i] if q['volume'][i] is not None else 0
+                    
+                    if op is None or op <= 0: op = cl
+                    if hi is None or hi <= 0: hi = cl
+                    if lo is None or lo <= 0: lo = cl
+                    
+                    rows.append((t, op, hi, lo, cl, vol))
                 return rows
             except urllib.error.HTTPError as e:
                 last = e
