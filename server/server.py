@@ -3554,14 +3554,32 @@ class Handler(SimpleHTTPRequestHandler):
         def sma(p, idx):
             if idx + 1 < p: return None
             return sum(closes[idx-p+1:idx+1]) / p
-        # RSI 14
-        g = l = 0
-        for i in range(n-14, n):
-            if i < 1: continue
-            d = closes[i] - closes[i-1]
-            if d > 0: g += d
-            else: l -= d
-        rsi = 100 if l == 0 else 100 - 100/(1 + g/l)
+
+        # 標準 Wilder's Smoothing RSI 14
+        def calc_rsi_wilders(prices, period=14):
+            if len(prices) <= period:
+                return None
+            gains = []
+            losses = []
+            for i in range(1, len(prices)):
+                diff = prices[i] - prices[i-1]
+                if diff > 0:
+                    gains.append(diff)
+                    losses.append(0.0)
+                else:
+                    gains.append(0.0)
+                    losses.append(-diff)
+            avg_gain = sum(gains[:period]) / period
+            avg_loss = sum(losses[:period]) / period
+            for i in range(period, len(gains)):
+                avg_gain = (avg_gain * 13 + gains[i]) / 14
+                avg_loss = (avg_loss * 13 + losses[i]) / 14
+            if avg_loss == 0:
+                return 100.0
+            rs = avg_gain / avg_loss
+            return 100.0 - (100.0 / (1.0 + rs))
+
+        rsi = calc_rsi_wilders(closes, 14)
         # Vol ratio
         v5 = sum(vols[-5:]) / 5 if len(vols) >= 5 else 0
         v20 = sum(vols[-20:]) / 20 if len(vols) >= 20 else 0

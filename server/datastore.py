@@ -15,7 +15,11 @@ CLI（在專案根目錄跑）:
   python server\\datastore.py query 2330 5          # 看最近 5 根
   python server\\datastore.py stats                 # DB 概況
 """
-import os, sys, json, time, sqlite3, urllib.request, urllib.error, random
+import os, sys, json, time, sqlite3, urllib.request, urllib.error, random, threading
+from contextlib import closing
+
+# 進程內全域寫入鎖
+_db_write_lock = threading.Lock()
 
 # 凍結成 exe 時用 exe 目錄;一般執行(server/ 下)時用其上一層 → data/ 在專案根
 if getattr(sys, 'frozen', False):
@@ -44,8 +48,9 @@ def get_conn():
     return conn
 
 def init_db():
-    with get_conn() as c:
-        c.executescript(SCHEMA)
+    with closing(get_conn()) as conn:
+        with conn:
+            conn.executescript(SCHEMA)
     print('[db] ready:', DB_PATH)
 
 def _yf_symbol(sym, market):
@@ -94,13 +99,15 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3):
     raise RuntimeError(f'fetch failed for {ysym}: {last}')
 
 def upsert_bars(sym, market, rows):
-    with get_conn() as c:
-        c.executemany(
-            'INSERT OR REPLACE INTO bars(symbol,market,ts,open,high,low,close,volume) VALUES(?,?,?,?,?,?,?,?)',
-            [(sym, market, t, o, h, l, cl, v) for (t, o, h, l, cl, v) in rows])
-        c.execute('INSERT OR REPLACE INTO meta(symbol,market,name,last_update) '
-                  'VALUES(?,?,COALESCE((SELECT name FROM meta WHERE symbol=?),?),?)',
-                  (sym, market, sym, sym, int(time.time())))
+    with _db_write_lock:
+        with closing(get_conn()) as conn:
+            with conn:
+                conn.executemany(
+                    'INSERT OR REPLACE INTO bars(symbol,market,ts,open,high,low,close,volume) VALUES(?,?,?,?,?,?,?,?)',
+                    [(sym, market, t, o, h, l, cl, v) for (t, o, h, l, cl, v) in rows])
+                conn.execute('INSERT OR REPLACE INTO meta(symbol,market,name,last_update) '
+                             'VALUES(?,?,COALESCE((SELECT name FROM meta WHERE symbol=?),?),?)',
+                             (sym, market, sym, sym, int(time.time())))
     return len(rows)
 
 def backfill(sym, market='TW', rng='10y'):
@@ -144,8 +151,8 @@ def backfill_universe(market='TW', rng='5y', workers=4, resume=True):
     if not codes:
         print('[db] universe empty — 無法取得代號清單(檢查網路/TWSE OpenAPI)'); return
     if resume:
-        with get_conn() as c:
-            have = {r[0] for r in c.execute('SELECT DISTINCT symbol FROM bars').fetchall()}
+        with closing(get_conn()) as conn:
+            have = {r[0] for r in conn.execute('SELECT DISTINCT symbol FROM bars').fetchall()}
         todo = [x for x in codes if x not in have]
         print(f'[db] 全宇集 {len(codes)} 檔,已有 {len(have)},本次補剩餘 {len(todo)} 檔 '
               f'(range={rng}, workers={workers})...')
@@ -179,7 +186,7 @@ def get_bars_bulk(codes):
     if not codes:
         return {}
     out = {c: [] for c in codes}
-    with get_conn() as conn:
+    with closing(get_conn()) as conn:
         for i in range(0, len(codes), 800):          # 分批避開 SQLite 變數上限
             chunk = codes[i:i + 800]
             ph = ','.join('?' * len(chunk))
@@ -193,8 +200,8 @@ def get_bars_bulk(codes):
     return out
 
 def last_ts(sym):
-    with get_conn() as c:
-        r = c.execute('SELECT MAX(ts) FROM bars WHERE symbol=?', (sym,)).fetchone()
+    with closing(get_conn()) as conn:
+        r = conn.execute('SELECT MAX(ts) FROM bars WHERE symbol=?', (sym,)).fetchone()
     return r[0] if r and r[0] else None
 
 def update(sym, market='TW'):
@@ -207,8 +214,8 @@ def update(sym, market='TW'):
 
 def get_bars(sym, limit=None):
     """回傳該檔 [(ts,o,h,l,c,v),...] 依時間排序;limit 取最近 N 根。"""
-    with get_conn() as c:
-        rows = c.execute(
+    with closing(get_conn()) as conn:
+        rows = conn.execute(
             'SELECT ts,open,high,low,close,volume FROM bars WHERE symbol=? ORDER BY ts',
             (sym,)).fetchall()
     return rows[-limit:] if limit else rows
@@ -245,8 +252,8 @@ def _cli():
             print(time.strftime('%Y-%m-%d', time.gmtime(ts)),
                   f'O {o} H {h} L {l} C {cl} V {int(v or 0)}')
     elif cmd == 'stats':
-        with get_conn() as c:
-            n = c.execute('SELECT COUNT(*), COUNT(DISTINCT symbol) FROM bars').fetchone()
+        with closing(get_conn()) as conn:
+            n = conn.execute('SELECT COUNT(*), COUNT(DISTINCT symbol) FROM bars').fetchone()
         print(f'bars: {n[0]:,}  symbols: {n[1]:,}  db: {DB_PATH}')
     else:
         print('usage: init | backfill SYM [TW|US] [range] | update SYM [TW|US] | '

@@ -776,15 +776,31 @@ function mockInd(candles) {
     return s / p;
   };
   const last = n - 1;
-  // RSI 14
-  let g = 0, l = 0;
-  for (let i = last - 13; i <= last; i++) {
-    if (i < 1) continue;
-    const d = closes[i] - closes[i-1];
-    if (d > 0) g += d; else l -= d;
-  }
-  const rs = l === 0 ? 100 : g / l;
-  const rsi = 100 - 100 / (1 + rs);
+  // 標準 Wilder's Smoothing RSI 14 計算
+  const calcRsiWilders = (prices, period = 14) => {
+    if (prices.length <= period) return null;
+    let gains = [], losses = [];
+    for (let i = 1; i < prices.length; i++) {
+      const diff = prices[i] - prices[i-1];
+      if (diff > 0) { gains.push(diff); losses.push(0); }
+      else { gains.push(0); losses.push(-diff); }
+    }
+    let avgGain = 0, avgLoss = 0;
+    for (let i = 0; i < period; i++) {
+      avgGain += gains[i];
+      avgLoss += losses[i];
+    }
+    avgGain /= period;
+    avgLoss /= period;
+    for (let i = period; i < gains.length; i++) {
+      avgGain = (avgGain * 13 + gains[i]) / 14;
+      avgLoss = (avgLoss * 13 + losses[i]) / 14;
+    }
+    if (avgLoss === 0) return 100;
+    const rs = avgGain / avgLoss;
+    return 100 - 100 / (1 + rs);
+  };
+  const rsi = calcRsiWilders(closes, 14);
   // BB 20
   const m20 = sma(20, last);
   let v = 0;

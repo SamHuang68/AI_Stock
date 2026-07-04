@@ -288,6 +288,21 @@ function stMap(s) {
 
 async function livePollOnce() {
   if (!S.liveEnabled || !S.sym) return;
+  // (1) 視窗隱藏 (Visibility API) 防護：當分頁被背景化時，暫停輪詢防止被 Yahoo 鎖 IP
+  if (document.hidden) {
+    console.log('[live] Tab hidden, skip polling to prevent rate limiting.');
+    return;
+  }
+  // (2) 休眠節流：若市場處於 CLOSED 休市狀態，稀釋請求量 90% (每 5 分鐘實際請求一次)
+  const sess = sessionByTime(S.mkt || 'TW');
+  if (sess === 'CLOSED') {
+    if (!window._closedPollCount) window._closedPollCount = 0;
+    window._closedPollCount++;
+    if (window._closedPollCount % 10 !== 0) {
+      console.log('[live] Market closed, skip polling (will fetch every 5 mins).');
+      return;
+    }
+  }
   const q = await fetchQuote(S.sym, S.mkt || 'TW');
   if (q) renderQuote(q);
 }
