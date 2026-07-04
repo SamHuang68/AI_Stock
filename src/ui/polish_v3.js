@@ -451,24 +451,62 @@ function applyMarketColorClass(mkt) {
     // After orig renders, post-process:
     setTimeout(() => {
       try {
-        // (a) Candle re-color via series.applyOptions
-        if (S.chartSeries) {
-          S.chartSeries.applyOptions({
-            upColor: UP, downColor: DN,
-            borderUpColor: UP, borderDownColor: DN,
-            wickUpColor: UP, wickDownColor: DN,
-          });
+        const _tz = (S.tzOffset && isFinite(S.tzOffset)) ? S.tzOffset : 0;
+        
+        // 建立昨收 Map 供昨收比對使用
+        const _prevMap = new Map();
+        const _cs = S.data?.candles || [];
+        for (let i = 0; i < _cs.length; i++) {
+          _prevMap.set(_cs[i].time, i > 0 ? _cs[i - 1].close : null);
         }
-        // (b) Volume bars: re-set with stronger colors + market convention
-        // 套用同一份 tz 平移（與 renderChart 一致），避免 volume 軸跟 candle 軸錯位
+
+        // (a) Candle re-color: 依據台股昨收比對或美股開收比對，為每根 K 線單獨賦色
+        if (S.chartSeries && S.data?.candles) {
+          S.chartSeries.setData(_cs.map(c => {
+            const _pc = _prevMap.get(c.time);
+            const _base = (_pc != null && _pc > 0) ? _pc : c.open;
+            let cCol;
+            if (tw) {
+              // 台股昨收比對：收>昨收=紅(漲)；收<昨收=綠(跌)；持平=灰
+              cCol = (c.close > _base) ? '#F87171' : (c.close < _base ? '#4ADE80' : '#9CA3AF');
+            } else {
+              // 美股開盤比對：收>開=綠(陽)；收<開=紅(陰)；持平=灰
+              cCol = (c.close > c.open) ? '#4ADE80' : (c.close < c.open ? '#F87171' : '#9CA3AF');
+            }
+            return {
+              time: c.time + _tz,
+              open: c.open,
+              high: c.high,
+              low: c.low,
+              close: c.close,
+              color: cCol,
+              borderColor: cCol,
+              wickColor: cCol
+            };
+          }));
+        }
+
+        // (b) Volume bars: 重新依市場習慣(台股昨收比對/美股開開比對)進行量柱著色
         if (S.volSeries && S.data?.candles) {
           const upAlpha = 'rgba(' + (tw ? '248,113,113' : '74,222,128') + ',0.55)';
           const dnAlpha = 'rgba(' + (tw ? '74,222,128' : '248,113,113') + ',0.55)';
-          const _tz = (S.tzOffset && isFinite(S.tzOffset)) ? S.tzOffset : 0;
-          S.volSeries.setData(S.data.candles.map(c => ({
-            time: c.time + _tz, value: c.volume,
-            color: c.close >= c.open ? upAlpha : dnAlpha,
-          })));
+          const flatAlpha = 'rgba(156,163,175,0.45)';
+
+          S.volSeries.setData(_cs.map(c => {
+            const _pc = _prevMap.get(c.time);
+            const _base = (_pc != null && _pc > 0) ? _pc : c.open;
+            let col;
+            if (tw) {
+              col = (c.close > _base) ? upAlpha : (c.close < _base ? dnAlpha : flatAlpha);
+            } else {
+              col = (c.close > c.open) ? upAlpha : (c.close < c.open ? dnAlpha : flatAlpha);
+            }
+            return {
+              time: c.time + _tz,
+              value: c.volume,
+              color: col
+            };
+          }));
         }
         // (c) Previous close line
         // For daily K: prev candle = yesterday's close
