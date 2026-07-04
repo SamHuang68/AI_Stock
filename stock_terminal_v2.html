@@ -206,7 +206,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
-<link rel="stylesheet" href="src/ui/mobile_v2.css?v=1783165244">
+<link rel="stylesheet" href="src/ui/mobile_v2.css?v=1783165741">
 </head>
 <body>
 <div id="app">
@@ -732,14 +732,17 @@ async function loadSym(sym, mkt, silent) {
     : (prev ? prev.close : null);
   const chgPct = (_prevRef != null && _prevRef > 0)
     ? ((last.close - _prevRef) / _prevRef * 100) : 0;
-  document.getElementById('ci-price').textContent = last.close.toFixed(2);
-  const ci = document.getElementById('ci-chg');
-  ci.textContent = (chgPct>=0?'+':'')+chgPct.toFixed(2)+'%';
-  // 台股紅漲綠跌(以昨收為基準),美股/其他綠漲紅跌;平盤無色
   const _ciTw = (mkt === 'TW' || /^\^TW/.test(sym || ''));
-  ci.style.color = chgPct > 0 ? (_ciTw ? 'var(--red)' : 'var(--green)')
+  const priceCol = chgPct > 0 ? (_ciTw ? 'var(--red)' : 'var(--green)')
                  : chgPct < 0 ? (_ciTw ? 'var(--green)' : 'var(--red)')
                  : 'var(--thi)';
+  const priceEl = document.getElementById('ci-price');
+  priceEl.textContent = last.close.toFixed(2);
+  priceEl.style.color = priceCol;
+
+  const ci = document.getElementById('ci-chg');
+  ci.textContent = (chgPct>=0?'+':'')+chgPct.toFixed(2)+'%';
+  ci.style.color = priceCol;
   document.getElementById('ci-name').textContent = parsed.name;
 
   // compute indicators
@@ -823,6 +826,21 @@ function renderChart(candles) {
   });
   _dotSeries.setData(lcd.map(c=>({time:c.time, value:c.close})));
   S.dotSeries = _dotSeries;
+
+  const closes = candles.map(c => c.close);
+  const sma = (n, i) => {
+    if (i + 1 < n) return null;
+    let s = 0;
+    for (let k = i - n + 1; k <= i; k++) s += closes[k];
+    return s / n;
+  };
+  const std = (n, i, mean) => {
+    if (i + 1 < n) return null;
+    let v = 0;
+    for (let k = i - n + 1; k <= i; k++) v += Math.pow(closes[k] - mean, 2);
+    return Math.sqrt(v / n);
+  };
+
   // 盤中(1天)固定 X 軸到整個交易時段(台股9:00–13:30/美股9:30–16:00):用「獨立透明 whitespace 系列」延伸時間軸。
   // ⚠不可把 whitespace 放在 K 棒系列 — 否則「最後一根」變成收盤時間,realtime 的 series.update(只能改最後一根或往後append)會失效。
   if (isIntraday && lcd.length) {
@@ -934,33 +952,58 @@ function renderChart(candles) {
   }
 
   // ── Crosshair: dynamic OHLCV display following cursor ──
-  chart.subscribeCrosshairMove(param => {
+  function renderOhlcInfo(timeVal, seriesDataParam) {
     const ohlcEl = document.getElementById('ci-ohlc');
     if (!ohlcEl) return;
-    if (!param || !param.point || !param.time || !param.seriesData) {
-      ohlcEl.style.display = 'none';
-      return;
-    }
-    const k = param.seriesData.get(cs);
-    const v = param.seriesData.get(vs);
-    if (!k) { ohlcEl.style.display = 'none'; return; }
 
-    // Date string (intraday → date+time, daily → date only)
-    // 時間已被預先平移到使用者本地時區 → 用 getUTC* 讀取才能取得當地的時/分/日
-    const d = new Date(typeof param.time === 'number' ? param.time * 1000 : Date.parse(param.time));
+    let k = null, vVal = null;
+    let m20Val = null, m60Val = null, bbUVal = null, bbLVal = null;
+
+    if (seriesDataParam) {
+      k = seriesDataParam.get(cs);
+      const vObj = seriesDataParam.get(vs);
+      if (vObj) vVal = vObj.value;
+      if (S.overlaySeries) {
+        const m20Obj = seriesDataParam.get(S.overlaySeries.sma20);
+        const m60Obj = seriesDataParam.get(S.overlaySeries.sma60);
+        const uObj   = seriesDataParam.get(S.overlaySeries.bbU);
+        const lObj   = seriesDataParam.get(S.overlaySeries.bbL);
+        if (m20Obj) m20Val = m20Obj.value;
+        if (m60Obj) m60Val = m60Obj.value;
+        if (uObj) bbUVal = uObj.value;
+        if (lObj) bbLVal = lObj.value;
+      }
+    }
+
+    // fallback 到原始資料（剛載入或滑鼠移出時）
+    if (!k) {
+      const target = candles.find(c => c.time === timeVal || tz(c.time) === timeVal);
+      if (!target) return;
+      k = target;
+      vVal = target.volume;
+      const idx = candles.indexOf(target);
+      if (idx !== -1) {
+        m20Val = sma(20, idx);
+        m60Val = sma(60, idx);
+        const s = std(20, idx, m20Val);
+        if (m20Val != null && s != null) {
+          bbUVal = m20Val + 2 * s;
+          bbLVal = m20Val - 2 * s;
+        }
+      }
+    }
+
+    const d = new Date(typeof timeVal === 'number' ? timeVal * 1000 : Date.parse(timeVal));
     const ds = isIntraday
       ? `${d.getUTCMonth()+1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`
       : `${d.getUTCFullYear()}/${String(d.getUTCMonth()+1).padStart(2,'0')}/${String(d.getUTCDate()).padStart(2,'0')}`;
 
-    // 台股紅漲綠跌；美股綠漲紅跌
     const twC = (S.mkt === 'TW');
     const upCol = twC ? 'var(--red)' : 'var(--green)';
     const dnCol = twC ? 'var(--green)' : 'var(--red)';
-    // 漲跌基準 = 昨收(前一根收盤)，非開盤；首根無昨收則退回開盤
-    const _pc = _prevCloseByTime.get(param.time);
-    const _base = (_pc != null && _pc > 0) ? _pc : k.open;
     
-    // 奇摩股市對齊：開、高、低、收均以「昨收」為基準比對標色
+    const _pc = _prevCloseByTime.get(timeVal);
+    const _base = (_pc != null && _pc > 0) ? _pc : k.open;
     const getValColor = val => (val > _base) ? upCol : (val < _base ? dnCol : 'var(--tlo)');
     
     const openCol = getValColor(k.open);
@@ -968,20 +1011,16 @@ function renderChart(candles) {
     const lowCol = getValColor(k.low);
     const col = getValColor(k.close);
     const chgPct = ((k.close - _base) / _base * 100);
+    const rawChg = k.close - _base;
+    const chgStr = `${rawChg >= 0 ? '+' : ''}${rawChg.toFixed(2)}`;
 
     // MA values at this time
     let maRow = '';
-    if (S.overlaySeries) {
-      const m20 = param.seriesData.get(S.overlaySeries.sma20);
-      const m60 = param.seriesData.get(S.overlaySeries.sma60);
-      const u   = param.seriesData.get(S.overlaySeries.bbU);
-      const l   = param.seriesData.get(S.overlaySeries.bbL);
-      const parts = [];
-      if (m20) parts.push(`<span style="color:#FBBF24">SMA20 ${m20.value.toFixed(2)}</span>`);
-      if (m60) parts.push(`<span style="color:#67E8F9">SMA60 ${m60.value.toFixed(2)}</span>`);
-      if (u && l) parts.push(`<span style="color:rgba(96,165,250,.85)">BB ${l.value.toFixed(2)} ~ ${u.value.toFixed(2)}</span>`);
-      if (parts.length) maRow = ` <span class="ohlc-k">·</span> ${parts.join(' ')}`;   // 壓成同一行(去掉換行 .ma-row)
-    }
+    const parts = [];
+    if (m20Val != null) parts.push(`<span style="color:#FBBF24">SMA20 ${m20Val.toFixed(2)}</span>`);
+    if (m60Val != null) parts.push(`<span style="color:#67E8F9">SMA60 ${m60Val.toFixed(2)}</span>`);
+    if (bbLVal != null && bbUVal != null) parts.push(`<span style="color:rgba(96,165,250,.85)">BB ${bbLVal.toFixed(2)} ~ ${bbUVal.toFixed(2)}</span>`);
+    if (parts.length) maRow = ` <span class="ohlc-k">·</span> ${parts.join(' ')}`;
 
     ohlcEl.style.display = 'block';
     ohlcEl.innerHTML =
@@ -990,10 +1029,23 @@ function renderChart(candles) {
       `<span class="ohlc-k">高</span><span class="ohlc-v" style="color:${highCol}">${k.high.toFixed(2)}</span>` +
       `<span class="ohlc-k">低</span><span class="ohlc-v" style="color:${lowCol}">${k.low.toFixed(2)}</span>` +
       `<span class="ohlc-k">收</span><span class="ohlc-v" style="color:${col}">${k.close.toFixed(2)}</span>` +
-      `<span style="color:${col};margin-right:8px">(${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)</span>` +
-      (v ? `<span class="ohlc-k">量</span><span class="ohlc-v" style="color:var(--blue)">${formatVol(v.value)}</span>` : '') +
+      `<span class="ohlc-k">漲跌</span><span class="ohlc-v" style="color:${col}">${chgStr} (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)</span>` +
+      (vVal ? `<span class="ohlc-k">量</span><span class="ohlc-v" style="color:var(--blue)">${formatVol(vVal)}</span>` : '') +
       maRow;
+  }
+
+  chart.subscribeCrosshairMove(param => {
+    if (!param || !param.point || !param.time || !param.seriesData) {
+      const lastCandle = candles[candles.length - 1];
+      if (lastCandle) renderOhlcInfo(lastCandle.time, null);
+      return;
+    }
+    renderOhlcInfo(param.time, param.seriesData);
   });
+
+  // 預設直接顯示最後一根 K 線的 OHLC 數值
+  const lastCandle = candles[candles.length - 1];
+  if (lastCandle) renderOhlcInfo(lastCandle.time, null);
 
   // 🔑 Fit all candles to one page width
   requestAnimationFrame(()=>chart.timeScale().fitContent());
@@ -1664,67 +1716,67 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
 });
 </script>
-<script src="src/core/colors_v3.js?v=1783165244"></script>
-<script src="src/core/market_v3.js?v=1783165244"></script>
-<script src="src/core/fields_v3.js?v=1783165244"></script>
-<script src="src/ui/share_v3.js?v=1783165244"></script>
-<script src="src/ui/datasources_v3.js?v=1783165244"></script>
-<script src="src/core/etf_flow_tip_v3.js?v=1783165244"></script>
-<script src="src/core/position_v2.js?v=1783165244"></script>
-<script src="src/core/watch_v2.js?v=1783165244"></script>
-<script src="src/core/info_v2.js?v=1783165244"></script>
-<script src="src/core/pro_v2.js?v=1783165244"></script>
-<script src="src/chart/volume_profile_v3.js?v=1783165244"></script>
-<script src="src/chart/pattern_v3.js?v=1783165244"></script>
-<script src="src/core/live_v2.js?v=1783165244"></script>
-<script src="src/fundamental/chip_v3.js?v=1783165244"></script>
-<script src="src/fundamental/fundamental_v3.js?v=1783165244"></script>
-<script src="src/screener/screener_v3.js?v=1783165244"></script>
-<script src="src/ai/ai_report_v3.js?v=1783165244"></script>
-<script src="src/ui/polish_v3.js?v=1783165244"></script>
-<script src="src/core/wl_live_v3.js?v=1783165244"></script>
-<script src="src/fundamental/plan_history_v3.js?v=1783165244"></script>
-<script src="src/fundamental/plan_position_v3.js?v=1783165244"></script>
-<script src="src/fundamental/plan_v3.js?v=1783165244"></script>
-<script src="src/ui/pdf_import_v3.js?v=1783165244"></script>
-<script src="src/ui/pdf_export_v3.js?v=1783165244"></script>
-<script src="src/core/peg_v3.js?v=1783165244"></script>
-<script src="src/alert/alert_v3.js?v=1783165244"></script>
-<script src="src/alert/alert_push_v3.js?v=1783165244"></script>
-<script src="src/screener/backtest_v3.js?v=1783165244"></script>
-<script src="src/screener/backtest_ui_v3.js?v=1783165244"></script>
-<script src="src/ui/enhance_v3.js?v=1783165244"></script>
-<script src="src/chart/aftermarket_v3.js?v=1783165244"></script>
-<script src="src/chart/overnight_v3.js?v=1783165244"></script>
-<script src="src/fundamental/supplychain_v3.js?v=1783165244"></script>
-<script src="src/portfolio/portfolio_v3.js?v=1783165244"></script>
-<script src="src/fundamental/chainmom_v3.js?v=1783165244"></script>
-<script src="src/fundamental/valuation_v3.js?v=1783165244"></script>
-<script src="src/fundamental/marketflow_v3.js?v=1783165244"></script>
-<script src="src/fundamental/instrank_v3.js?v=1783165244"></script>
-<script src="src/alert/calendar_v3.js?v=1783165244"></script>
-<script src="src/chart/multichart_v3.js?v=1783165244"></script>
-<script src="src/chart/spread_v3.js?v=1783165244"></script>
-<script src="src/chart/hotkeys_v3.js?v=1783165244"></script>
-<script src="src/screener/strategy_builder_v3.js?v=1783165244"></script>
-<script src="src/screener/strategy_script_v3.js?v=1783165244"></script>
-<script src="src/chart/drawtools_v3.js?v=1783165244"></script>
-<script src="src/screener/screener3_v3.js?v=1783165244"></script>
-<script src="src/core/etf_v3.js?v=1783165244"></script>
-<script src="src/fundamental/stockfut_v3.js?v=1783165244"></script>
-<script src="src/core/indices_v3.js?v=1783165244"></script>
-<script src="src/alert/datahealth_v3.js?v=1783165244"></script>
-<script src="src/alert/toast_v3.js?v=1783165244"></script>
-<script src="src/alert/settle_v3.js?v=1783165244"></script>
-<script src="src/ai/cmdpalette_v3.js?v=1783165244"></script>
-<script src="src/ui/dragwin_v3.js?v=1783165244"></script>
-<script src="src/core/liverefresh_v3.js?v=1783165244"></script>
-<script src="src/core/namesearch_v3.js?v=1783165244"></script>
-<script src="src/core/realtime_v3.js?v=1783165244"></script>
-<script src="src/ai/focus_v3.js?v=1783165244"></script>
-<script src="src/ai/copilot_v3.js?v=1783165244"></script>
-<script src="src/screener/wizard_v3.js?v=1783165244"></script>
-<script src="src/ui/toolbar_v3.js?v=1783165244"></script>
+<script src="src/core/colors_v3.js?v=1783165741"></script>
+<script src="src/core/market_v3.js?v=1783165741"></script>
+<script src="src/core/fields_v3.js?v=1783165741"></script>
+<script src="src/ui/share_v3.js?v=1783165741"></script>
+<script src="src/ui/datasources_v3.js?v=1783165741"></script>
+<script src="src/core/etf_flow_tip_v3.js?v=1783165741"></script>
+<script src="src/core/position_v2.js?v=1783165741"></script>
+<script src="src/core/watch_v2.js?v=1783165741"></script>
+<script src="src/core/info_v2.js?v=1783165741"></script>
+<script src="src/core/pro_v2.js?v=1783165741"></script>
+<script src="src/chart/volume_profile_v3.js?v=1783165741"></script>
+<script src="src/chart/pattern_v3.js?v=1783165741"></script>
+<script src="src/core/live_v2.js?v=1783165741"></script>
+<script src="src/fundamental/chip_v3.js?v=1783165741"></script>
+<script src="src/fundamental/fundamental_v3.js?v=1783165741"></script>
+<script src="src/screener/screener_v3.js?v=1783165741"></script>
+<script src="src/ai/ai_report_v3.js?v=1783165741"></script>
+<script src="src/ui/polish_v3.js?v=1783165741"></script>
+<script src="src/core/wl_live_v3.js?v=1783165741"></script>
+<script src="src/fundamental/plan_history_v3.js?v=1783165741"></script>
+<script src="src/fundamental/plan_position_v3.js?v=1783165741"></script>
+<script src="src/fundamental/plan_v3.js?v=1783165741"></script>
+<script src="src/ui/pdf_import_v3.js?v=1783165741"></script>
+<script src="src/ui/pdf_export_v3.js?v=1783165741"></script>
+<script src="src/core/peg_v3.js?v=1783165741"></script>
+<script src="src/alert/alert_v3.js?v=1783165741"></script>
+<script src="src/alert/alert_push_v3.js?v=1783165741"></script>
+<script src="src/screener/backtest_v3.js?v=1783165741"></script>
+<script src="src/screener/backtest_ui_v3.js?v=1783165741"></script>
+<script src="src/ui/enhance_v3.js?v=1783165741"></script>
+<script src="src/chart/aftermarket_v3.js?v=1783165741"></script>
+<script src="src/chart/overnight_v3.js?v=1783165741"></script>
+<script src="src/fundamental/supplychain_v3.js?v=1783165741"></script>
+<script src="src/portfolio/portfolio_v3.js?v=1783165741"></script>
+<script src="src/fundamental/chainmom_v3.js?v=1783165741"></script>
+<script src="src/fundamental/valuation_v3.js?v=1783165741"></script>
+<script src="src/fundamental/marketflow_v3.js?v=1783165741"></script>
+<script src="src/fundamental/instrank_v3.js?v=1783165741"></script>
+<script src="src/alert/calendar_v3.js?v=1783165741"></script>
+<script src="src/chart/multichart_v3.js?v=1783165741"></script>
+<script src="src/chart/spread_v3.js?v=1783165741"></script>
+<script src="src/chart/hotkeys_v3.js?v=1783165741"></script>
+<script src="src/screener/strategy_builder_v3.js?v=1783165741"></script>
+<script src="src/screener/strategy_script_v3.js?v=1783165741"></script>
+<script src="src/chart/drawtools_v3.js?v=1783165741"></script>
+<script src="src/screener/screener3_v3.js?v=1783165741"></script>
+<script src="src/core/etf_v3.js?v=1783165741"></script>
+<script src="src/fundamental/stockfut_v3.js?v=1783165741"></script>
+<script src="src/core/indices_v3.js?v=1783165741"></script>
+<script src="src/alert/datahealth_v3.js?v=1783165741"></script>
+<script src="src/alert/toast_v3.js?v=1783165741"></script>
+<script src="src/alert/settle_v3.js?v=1783165741"></script>
+<script src="src/ai/cmdpalette_v3.js?v=1783165741"></script>
+<script src="src/ui/dragwin_v3.js?v=1783165741"></script>
+<script src="src/core/liverefresh_v3.js?v=1783165741"></script>
+<script src="src/core/namesearch_v3.js?v=1783165741"></script>
+<script src="src/core/realtime_v3.js?v=1783165741"></script>
+<script src="src/ai/focus_v3.js?v=1783165741"></script>
+<script src="src/ai/copilot_v3.js?v=1783165741"></script>
+<script src="src/screener/wizard_v3.js?v=1783165741"></script>
+<script src="src/ui/toolbar_v3.js?v=1783165741"></script>
 </body>
 </html>
 <script>
