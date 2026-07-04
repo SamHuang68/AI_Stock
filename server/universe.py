@@ -253,12 +253,13 @@ def fetch_tw_meta(shares_map):
         m['pb'] = m['pb'] if m['pb'] is not None else _row_num(row, ['PB', '淨值比', '股價淨值'])
         m['yield'] = m['yield'] if m['yield'] is not None else _row_num(row, ['Yield', '殖利率'], avoid=['Year', '年度'])
 
-    # 3) 三率 + EPS ── 綜合損益表(僅上市 _L_ci;中文 key)
-    # 註:上櫃(_O)綜合損益表 TWSE/TPEx OpenAPI 均未提供 per-company 端點(實機核
-    # 對 TPEx swagger:t187ap46_O_* 為「公司治理」非財報;TWSE 僅 _L)。故上櫃三率/
-    # EPS 暫留 null(量價與估值仍由 TPEx mainboard 端點正常填入)。
+    # 3) 三率 + EPS ── 綜合損益表(上市=TWSE t187ap06_L_ci;上櫃=TPEx mopsfin_t187ap06_O_ci)
+    # v4.1.1 修正:上櫃損益表其實有 per-company 端點,掛在 TPEx OpenAPI
+    # (mopsfin_t187ap06_O_ci,代號欄=SecuritiesCompanyCode、金額欄中文同上市),
+    # 舊註解「無端點」是打錯 host(TWSE 只回 302)所致 → 上櫃三率/EPS 現在能填。
     for url, board in (
         ('https://openapi.twse.com.tw/v1/opendata/t187ap06_L_ci', '上市'),
+        ('https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap06_O_ci', '上櫃'),
     ):
         for row in _scan_rows(url):
             if not isinstance(row, dict):
@@ -282,10 +283,11 @@ def fetch_tw_meta(shares_map):
                 if ni is not None and m['net'] is None:
                     m['net'] = round(ni / rev * 100, 1)
 
-    # 4) 英文名 + 發行股數 ── 公司基本資料(上市 t187ap03_L;值為英文/數字,key 中文)
-    # 註:上櫃公司基本資料 OpenAPI 同樣無 per-company 端點 → 上櫃英文名暫留 null。
+    # 4) 英文名 + 發行股數 ── 公司基本資料(上市 t187ap03_L,key 中文;
+    #    上櫃 TPEx mopsfin_t187ap03_O,key 英文:IssueShares=發行股數,無英文簡稱欄)
     for url, board in (
         ('https://openapi.twse.com.tw/v1/opendata/t187ap03_L', '上市'),
+        ('https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O', '上櫃'),
     ):
         for row in _scan_rows(url):
             if not isinstance(row, dict):
@@ -297,7 +299,8 @@ def fetch_tw_meta(shares_map):
             en = _row_str(row, ['英文簡稱', '英文全名', '英文名稱', 'EnglishAbbr', 'EnglishName'])
             if en and not m.get('en'):
                 m['en'] = en
-            sh = _row_num(row, ['已發行普通股數', '發行股數', '普通股數'], avoid=['股本', '金額', '資本', '面額', '特別'])
+            sh = _row_num(row, ['已發行普通股數', '發行股數', '普通股數', 'IssueShares'],
+                          avoid=['股本', '金額', '資本', '面額', '特別', 'Private', 'Preferred'])
             if sh and sh > 0:
                 shares_map[code] = sh
 

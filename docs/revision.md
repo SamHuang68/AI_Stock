@@ -7,6 +7,26 @@
 
 ## v4.1 — 體驗打磨 / 欄位標準 / 顏色管理
 
+**修正（v4.1.1 root cause）：異常巨棒 / 台股 K 棒顏色 / 上櫃基本面**
+- **插到 0 的異常巨棒**：Yahoo 偶發回單根 `open/high/low = 0`（是 0 不是 null，實測 00631L 7/1 `o=h=l=0 c=39.49`），`parseYF` 的 `q.open[i] ?? q.close[i]` 擋不住 0 → 畫出下影插到 0 的假巨棒。修：`parseYF` 單根 OHLC 清洗——非正數一律視為缺值退回當根收盤、強制 `high≥max(o,c)`/`low≤min(o,c)`、影線超出實體 ±40%（單日不可能，台股漲跌停 ±10%）夾回實體。`datastore.fetch_yahoo_daily`（進 DB 的資料）與 watch/alert daemon 抓線同規則清洗，避免壞棒汙染回測/選股/訊號。
+- **台股 K 棒顏色（紅漲綠跌）源頭修正**：base `renderChart` 原寫死美股綠漲紅跌、靠 `polish_v3` 事後 `applyOptions` 補救——補丁時序一失效台股就顯示美股色。改：建立系列時就依「標的本身市場」（`Colors.isTW`，SSOT）直接套對色（K 棒 + 量柱），polish 再套色成為同值冪等操作。同步修：`realtime_v3` 量柱寫死美股綠漲（模組僅台股用 → 紅漲綠跌）、多圖 `multichart_v3` 寫死美股色（改依各格標的市場）、`pro_v2` 部位熱力圖 P&L 西式綠=賺（改台股慣例賺=紅）、polish 判市場對齊為「僅依標的本身」。
+- **當日 K 棒方向定義修正**：合成當日 K（Yahoo 日線落後時）在 meta 缺 `regularMarketOpen` 時原本拿「昨收」充當開盤 → K 棒紅綠變成「收盤 vs 昨收」。修：先打 `/quote` 拿真開盤（含 day high/low 備援）再退昨收。K 棒本體方向 = 收盤 vs 當日開盤；漲跌% 標示 = 收盤 vs 昨收——兩者不可混用。
+- **上櫃基本面抓不到（root cause）**：上櫃月營收/綜合損益資料集 `t187ap05_O`/`t187ap06_O_ci` 並不在 `openapi.twse.com.tw`（打了只回 302 → 空資料集快取一整天），實機核對確認掛在 TPEx OpenAPI `mopsfin_t187ap05_O`/`mopsfin_t187ap06_O_ci`。修：新增 `_DS_REVENUE`/`_DS_INCOME` 單一資料集清單（上市走 TWSE、上櫃走 TPEx），`/fundamental`、選股三合一、ETF 原因解讀、公司名/產業別對照全部改接；TPEx 損益表期間欄（Year/Season）組成 `115Q1` 顯示。`universe.py` 代號庫同步補上櫃三率/EPS（`mopsfin_t187ap06_O_ci`）與發行股數/市值（`mopsfin_t187ap03_O` IssueShares）。實測：上櫃 3529 力旺/5274 信驊 月營收+三率+EPS 完整回傳，上市 2330 不受影響。
+
+**指標統一 / 回測費稅（precision pass）**
+- **統一指標庫（SSOT）**：新增 `src/core/indicators_v3.js`（前端）+ `server/indicators.py`（後端）,兩份演算法完全對齊（SMA/EMA/RSI/KD/MACD/BB/ATR）。所有引用端改接統一庫:指標列 Web Worker（經 `INDICATORS_LIB_SRC` 原始碼串進 blob,與主執行緒共用同一份程式）、主圖 SMA/BB overlay、`StratLib`、`window.Backtest`、`pro_v2 mockInd`、`wizard ATR`;後端 `server.py _calc_ind`、`watch_daemon`、`alert_daemon`。
+- **修正（root cause）指標數學**:
+  - 指標列 **KD 完全壞掉**:舊 worker 把 prevK/prevD 直接設成當根 RSV → K=D=RSV,毫無平滑。改為台股慣例 9,3,3 自序列起點逐根迭代（種子 50）。
+  - **RSI 分裂**:顯示/後端用 14 根簡單平均（Cutler）,回測/StratLib 用 Wilder → 同一檔面板與回測訊號對不上。全面統一為 **Wilder 平滑**（TradingView/TA-Lib 標準）。
+  - `pro_v2 mockInd` RSI bug:全漲無跌時 rs 被設 100 → RSI 算出 ≈0.99 而非 100。
+  - **ATR14**:TR 簡單平均 → **Wilder 平滑**（wizard 停損自適應同步修正）。
+  - **MACD**:worker EMA 無種子/無暖身、StratLib signal 以 0 充填暖身期 → EMA 改 SMA 種子,signal 只對有效 line 段計算,暖身期一律 null。
+- **回測精準化（`backtest_v3.js` run/runLS）**:
+  - 進場改「訊號**次一根開盤**」（原同根收盤進場 = 前視偏差,績效高估）;出場訊號亦成交於次根開盤;TP/SL/時間出場維持 EOD 收盤判斷（不模擬盤中觸價,已標注）。
+  - **台股費稅模型**:手續費 0.1425%（買賣各一,可設折扣）+ 證交稅 0.3%（賣出）,`opts.market/cost` 可覆寫,美股預設零費稅。`ret`=淨報酬、`retGross`=毛報酬,summary 新增 `totalReturnGross`/`cost`;回測引擎/策略組合器/腳本 UI 皆顯示「淨 vs 毛」與成本假設。
+- **對齊 selftest**:`tests/indicators_selftest.js`（node）與 `python server/indicators.py` 共用同一組 Lehmer LCG fixture + 凍結期望值（容差 1e-9）,JS/Python 任何一邊分岔立刻紅燈;已併入 server `/selftest`。另新增 `tests/backtest_selftest.js` 驗證次根開盤進場/費稅計算。
+- **效能（GMKtec EVO-T1 96GB/16T,規格記憶於 .cursorrules）**:`MAX_WORKERS` ≥ CPU×4（min 64）、LRU 快取 20000→50000、`request_queue_size` 64→256、SQLite `cache_size` 256MB + `mmap_size` 1GB + `temp_store=MEMORY`。
+
 **新功能**
 - 分析結果一鍵寄送 Telegram/Email（`src/ui/share_v3.js`）：掛到 焦點掃描 / 條件選股 / 供應鏈輪動 / 投組風險。`ShareResult.buttonHTML / wire / send`,沿用後端 `/notify`。
 - ETF 增減碼徽章浮動視窗（`src/core/etf_flow_tip_v3.js`）：自選股徽章 hover/點擊列出哪幾檔 ETF 新增/移除/加減碼,每檔可點載入線型。純事件委派,讀裸 S。

@@ -2,5 +2,21 @@
 本專案為 Stock Terminal v4.1，前端使用 Vanilla JS + TradingView，後端處理高精度技術指標。
 【鐵律】：
 1. 所有的技術指標（RSI, SMA）計算必須精準，不允許任何概略或省略的寫法。
+   - 指標數學單一真理來源：前端 `src/core/indicators_v3.js`、後端 `server/indicators.py`（兩份演算法完全對齊）。
+   - 任何模組不得自帶指標實作；新增指標必須同時加進兩份庫 + 對齊 selftest
+     （`node tests/indicators_selftest.js` 與 `python server/indicators.py` 共用同一組 fixture 與凍結期望值）。
 2. 進行任何修改前，必須確保前後端資料欄位完全對齊。
 3. 拒絕敷衍的程式碼，請完整輸出，減少我的審查與來回修正次數。
+
+【主機硬體規格（記憶）：GMKtec EVO-T1 AI Rig】
+- CPU：Intel Core Ultra 9 285H（6P + 8E + 2LP = 16 執行緒）
+- RAM：96GB Micron DDR5 5600MHz SODIMM（48GB × 2）
+- GPU：Intel Arc 140T（內顯）/ PNY GeForce RTX 5080 OC 16GB（經 Minisforum DEG2 外接）
+- DISK：2TB Lexar NQ790 PCIe Gen4 NVMe
+- PSU：ASUS ROG Thor III 1000W Platinum（Type-C PD 經 DEG2 供電 Mini PC）
+
+【效能方針】：資源用好用滿，以回應時間優先。
+- 執行緒：I/O bound（Yahoo/TWSE 抓取）大幅超額配置 thread pool（`server.py` MAX_WORKERS ≥ CPU×4）。
+- 記憶體：96GB 撐得起大快取——LRU 報價快取（LRU_MAX）、SQLite page cache / mmap（`datastore.py`）盡量放大，不必省。
+- 對外源仍須尊重來源限流（_SRC_MIN_GAP / 熔斷器），加速靠併發與快取，不靠硬打對方 API。
+- GPU（RTX 5080 16GB）保留給本機 LM Studio 推論（AI 副駕），server 端不搶佔。

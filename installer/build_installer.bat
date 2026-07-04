@@ -27,7 +27,7 @@ REM imports them under try/except, so absence degrades gracefully).
 python -m PyInstaller --onefile --console --name server ^
   --distpath installer\build --workpath installer\build\_work --specpath installer\build ^
   --paths server --hidden-import alert_daemon --hidden-import watch_daemon ^
-  --hidden-import datastore --hidden-import portfolio --hidden-import ai_local --hidden-import universe --hidden-import datasources --hidden-import etf_report_lite ^
+  --hidden-import datastore --hidden-import portfolio --hidden-import ai_local --hidden-import universe --hidden-import datasources --hidden-import etf_report_lite --hidden-import indicators ^
   --exclude-module etf_report --exclude-module pandas --exclude-module numpy ^
   --exclude-module matplotlib --exclude-module PIL --exclude-module scipy ^
   --exclude-module lxml --exclude-module openpyxl --exclude-module pytest ^

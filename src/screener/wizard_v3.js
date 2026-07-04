@@ -31,12 +31,10 @@
   const isTw = () => (wz && wz.mkt === 'TW');
   const lots = sh => Math.max(0, Math.floor(sh / 1000) * 1000); // 台股取整張
 
+  // ATR14 — 統一指標庫(Wilder 平滑,SSOT;取代舊版 TR 簡單平均)
   function atr14(h, l, c) {
-    let s = 0, k = 0;
-    for (let i = Math.max(1, c.length - 14); i < c.length; i++) {
-      s += Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1])); k++;
-    }
-    return k ? s / k : 0;
+    const v = window.Indicators ? Indicators.last(Indicators.atr(h, l, c, 14)) : null;
+    return v == null ? 0 : v;
   }
 
   // 近 winBar 內的擺動高低 → 最近的上方壓力 / 下方支撐

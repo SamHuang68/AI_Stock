@@ -41,6 +41,10 @@ def get_conn():
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute('PRAGMA journal_mode=WAL')     # 並發讀寫
     conn.execute('PRAGMA synchronous=NORMAL')
+    # GMKtec EVO-T1(96GB DDR5 / PCIe Gen4 NVMe):快取放大,全市場掃描走記憶體
+    conn.execute('PRAGMA cache_size=-262144')     # 256MB page cache(負值=KB)
+    conn.execute('PRAGMA mmap_size=1073741824')   # 1GB mmap,讀取零拷貝
+    conn.execute('PRAGMA temp_store=MEMORY')      # 暫存表/排序全走 RAM
     return conn
 
 def init_db():
@@ -68,11 +72,30 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3):
                 ts = res['timestamp']
                 q = res['indicators']['quote'][0]
                 rows = []
+                # 單根 OHLC 清洗(與前端 parseYF 同規則,v4.1.1):
+                # Yahoo 偶發回 open/high/low=0(非 None)→ 會存進 DB 汙染回測/選股。
+                #   1) 非正數視為缺值 → 退回當根收盤
+                #   2) high ≥ max(open,close)、low ≤ min(open,close)
+                #   3) 影線超出實體 ±40%(單日不可能)→ 夾回實體
+                def _pos(v):
+                    try:
+                        return v if (v is not None and v == v and v > 0) else None
+                    except TypeError:
+                        return None
                 for i, t in enumerate(ts):
-                    cl = q['close'][i]
+                    cl = _pos(q['close'][i])
                     if cl is None:
                         continue
-                    rows.append((t, q['open'][i], q['high'][i], q['low'][i], cl, q['volume'][i]))
+                    o = _pos(q['open'][i]) or cl
+                    h = _pos(q['high'][i]) or cl
+                    l = _pos(q['low'][i]) or cl
+                    body_hi, body_lo = max(o, cl), min(o, cl)
+                    if h < body_hi: h = body_hi
+                    if l > body_lo: l = body_lo
+                    if h > body_hi * 1.4: h = body_hi
+                    if l < body_lo * 0.6: l = body_lo
+                    v = q['volume'][i]
+                    rows.append((t, o, h, l, cl, (v if (v is not None and v > 0) else 0)))
                 return rows
             except urllib.error.HTTPError as e:
                 last = e

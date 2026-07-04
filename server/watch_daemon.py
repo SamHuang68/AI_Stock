@@ -14,6 +14,8 @@
 import os, json, time, threading, urllib.request, urllib.parse
 from datetime import datetime
 
+import indicators as ta_ind   # 統一指標庫(與前端 indicators_v3.js 對齊,SSOT)
+
 try:
     import alert_daemon
 except Exception as e:
@@ -83,11 +85,12 @@ def _fetch_daily(code, mkt):
                 candles = []
                 for i in range(len(ts)):
                     cl = q['close'][i]
-                    if cl is None:
+                    if not cl or cl <= 0:      # 0/None 皆視為缺值(Yahoo 偶發回 0 非 None)
                         continue
+                    hi = q['high'][i]; lo = q['low'][i]
                     candles.append({
-                        'high': q['high'][i] if q['high'][i] is not None else cl,
-                        'low': q['low'][i] if q['low'][i] is not None else cl,
+                        'high': hi if (hi is not None and hi > 0) else cl,
+                        'low': lo if (lo is not None and lo > 0) else cl,
                         'close': cl,
                         'volume': q['volume'][i] or 0,
                     })
@@ -100,32 +103,19 @@ def _fetch_daily(code, mkt):
     return None
 
 
-# ---- 指標 --------------------------------------------------
+# ---- 指標 — 一律走統一指標庫 indicators.py(SSOT,與前端對齊)----
 def _ind(candles):
     closes = [c['close'] for c in candles]
     highs = [c['high'] for c in candles]
     vols = [c['volume'] for c in candles]
     n = len(closes)
 
-    def sma(p):
-        return sum(closes[-p:]) / p if n >= p else None
-
-    sma20 = sma(20); sma60 = sma(60)
-    # RSI 14
-    g = l = 0.0
-    for i in range(n - 14, n):
-        if i < 1:
-            continue
-        dd = closes[i] - closes[i - 1]
-        if dd > 0: g += dd
-        else: l -= dd
-    rsi = 100.0 if l == 0 else 100 - 100 / (1 + (g / 14) / (l / 14))
-    # BB lower = sma20 - 2*std20
-    bbL = None
-    if sma20 is not None and n >= 20:
-        m = sma20
-        var = sum((x - m) ** 2 for x in closes[-20:]) / 20
-        bbL = m - 2 * (var ** 0.5)
+    sma20 = ta_ind.sma_last(closes, 20)
+    sma60 = ta_ind.sma_last(closes, 60)
+    # RSI 14 — Wilder 平滑(取代舊版 14 根簡單平均)
+    rsi = ta_ind.rsi_last(closes, 14)
+    # BB lower = sma20 - 2*std20(母體標準差)
+    bbL = ta_ind.bb_last(closes, 20, 2)[2]
     v5 = sum(vols[-5:]) / 5 if n >= 5 else 0
     v20 = sum(vols[-20:]) / 20 if n >= 20 else 0
     volRatio = v5 / v20 if v20 > 0 else 0

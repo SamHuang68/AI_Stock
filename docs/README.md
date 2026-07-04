@@ -10,6 +10,7 @@ Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤�
 ### 核心看盤
 - 即時 Yahoo K 線，11 個時間段（1 天 ～ 全部）；台股 + 美股切換
 - 16 項技術指標：RSI / KD / MACD / SMA / BB / ATR / 年化波動% / MaxDD% / 量比 / 乖離 / ETF Flow…
+- **統一指標庫（SSOT）**：全 app 只有一份指標數學（前端 `src/core/indicators_v3.js` + 後端 `server/indicators.py`，演算法完全對齊）— RSI=Wilder 平滑、KD=台股 9,3,3、ATR=Wilder、MACD 標準暖身；指標列 / 主圖 / 回測 / 選股 / 警報看到的數字永遠一致，JS/Python 雙邊 selftest 鎖死不分岔
 - 自選股清單（雙列、拖曳排序）+ 本地 LRU 快取 + 多執行緒併發抓取
 - **代號庫**（🗂）：全台股(含 ETF / 上櫃) + 美股 lookup;市場判定一律由代號決定、永不抓錯,可一鍵更新收錄新上市股 / ETF
 - **資料源管理**（🗄）：所有資料源一表 — 提供者、可靠度（官方 / 第三方 / 本地）、最後更新、筆數;每源可一鍵從可靠來源重抓更新
@@ -29,6 +30,7 @@ Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤�
 - **三合一選股**：技術 × 基本面 × 籌碼 全台股篩選，一鍵載入或加自選
 - **全市場 Screener** + 類股篩選
 - **策略組合器**：樂高式條件組合 → 回測，輸出最大回撤 / 勝率 / 獲利因子 / 年化夏普 / 逐筆明細 + 權益曲線
+- **回測精準模型**：進場 = 訊號**次一根開盤**（無前視偏差）；**台股費稅內建**（手續費 0.1425%×2 + 證交稅 0.3% 賣出，美股預設零費稅），報表同時顯示 總報酬(淨) / (毛) 與成本假設
 - **腳本**：類 Pine 安全 DSL（自寫直譯器、函式白名單、不用 eval），`buy/sell` 回測、`plot` 疊主圖
 - **選股精靈**：回答 4 題（用途 / 週期 / 風險 / 資金）自動體檢個股，一鍵套用 觀察訊號 + 警報 + 持倉/買進計畫 + 支撐壓力畫線 + 研判結論
 - **本機時序 DB**：全市場約 2200 檔日線一鍵回補，選股 / 回測 / 投組讀同一份乾淨資料，掃描由分鐘級變**秒級**
@@ -78,6 +80,16 @@ Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤�
 **首次使用**：通知（🔔）需自行填入 Telegram / Email；AI 報告需在右上 `API KEY` 貼上 `sk-ant-…`；AI 副駕需另裝 [LM Studio](https://lmstudio.ai) 並載入模型；資料骨幹首次跑一次 `python server\datastore.py backfill-universe` 回補全市場。
 
 **可選排程**（系統管理員身分跑一次）：`scripts\install_scheduler.bat`（每交易日更新 ETF 持股）、`scripts\install_chip_scheduler.bat`（更新法人籌碼）。
+
+**自我檢測（改完程式 / 更新後建議跑）**：
+
+```bat
+python server\indicators.py           :: 後端指標庫 selftest
+node tests\indicators_selftest.js     :: 前端指標庫 selftest（與後端同 fixture,任一分岔即紅燈;需 Node.js,無則可跳過）
+node tests\backtest_selftest.js       :: 回測引擎（次根開盤進場 / 台股費稅）selftest
+```
+
+或 server 跑著時開 `http://localhost:18432/selftest`（已含指標對齊測試）。
 
 ---
 

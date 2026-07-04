@@ -94,17 +94,22 @@
     };
     const rows = window.Backtest.scanStrategies(candles, opts);
     lastRows = rows;
-    let h = `<table><thead><tr><th>策略</th><th>次數</th><th>勝率</th><th>賠率</th><th>期望值</th><th>總報酬</th><th>最大回撤</th><th>夏普</th></tr></thead><tbody>`;
+    let h = `<table><thead><tr><th>策略</th><th>次數</th><th>勝率</th><th>賠率</th><th>期望值</th><th>總報酬(淨)</th><th>總報酬(毛)</th><th>最大回撤</th><th>夏普</th></tr></thead><tbody>`;
     rows.forEach((r, i) => {
       h += `<tr data-i="${i}"><td>${r.name}</td><td>${r.count}</td>
         <td>${r.winRate.toFixed(0)}%</td>
         <td>${isFinite(r.payoff) ? r.payoff.toFixed(2) : '∞'}</td>
         <td class="${cls(r.expectancy)}">${cur(r.expectancy)}</td>
         <td class="${cls(r.totalReturn)}">${cur(r.totalReturn)}</td>
+        <td class="${cls(r.totalReturnGross != null ? r.totalReturnGross : r.totalReturn)}">${cur(r.totalReturnGross != null ? r.totalReturnGross : r.totalReturn)}</td>
         <td class="bt3-neg">-${r.maxDD.toFixed(0)}%</td>
         <td>${r.sharpe.toFixed(2)}</td></tr>`;
     });
     h += `</tbody></table>`;
+    const c0 = rows.length && rows[0].cost ? rows[0].cost : null;
+    h += `<div style="font-size:10px;color:#64748b;margin-top:4px">進場=訊號次根開盤(無前視);淨=已扣` +
+      (c0 ? `手續費 ${(c0.fee * 100).toFixed(4)}%×2 + 證交稅 ${(c0.tax * 100).toFixed(2)}%(賣出)` : '費稅') +
+      `;TP/SL 以收盤判斷,未模擬盤中觸價與滑價</div>`;
 
     // 型態命中率（若 PatternV3 可用）
     if (window.PatternV3 && typeof PatternV3.detectPatterns === 'function') {

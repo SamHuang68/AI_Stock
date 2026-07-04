@@ -122,10 +122,18 @@
     });
     p.chart = chart;
 
+    // K 棒/量柱顏色依「該格標的本身市場」(台股紅漲綠跌/美股綠漲紅跌,同主圖 SSOT)
+    // v4.1.1 修:原寫死美股色,多圖裡的台股格顏色與主圖相反。
+    const _tw = window.Colors ? Colors.isTW(p.sym)
+              : (/^\d/.test(String(p.sym || '')) || /^\^TW/i.test(String(p.sym || '')));
+    const _UP  = _tw ? '#F87171' : '#4ADE80';
+    const _DN  = _tw ? '#4ADE80' : '#F87171';
+    const _UPA = _tw ? 'rgba(248,113,113,0.25)' : 'rgba(74,222,128,0.25)';
+    const _DNA = _tw ? 'rgba(74,222,128,0.25)' : 'rgba(248,113,113,0.25)';
     const cs = chart.addCandlestickSeries({
-      upColor: '#4ADE80', downColor: '#F87171',
-      borderUpColor: '#4ADE80', borderDownColor: '#F87171',
-      wickUpColor: '#4ADE80', wickDownColor: '#F87171',
+      upColor: _UP, downColor: _DN,
+      borderUpColor: _UP, borderDownColor: _DN,
+      wickUpColor: _UP, wickDownColor: _DN,
       priceLineVisible: false,
     });
     cs.setData(candles.map(c => ({ time: tz(c.time), open: c.open, high: c.high, low: c.low, close: c.close })));
@@ -133,7 +141,7 @@
 
     const vs = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol' });
     chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-    vs.setData(candles.map(c => ({ time: tz(c.time), value: c.volume, color: c.close >= c.open ? 'rgba(74,222,128,0.25)' : 'rgba(248,113,113,0.25)' })));
+    vs.setData(candles.map(c => ({ time: tz(c.time), value: c.volume, color: c.close >= c.open ? _UPA : _DNA })));
     p.vs = vs;
 
     if (!isIntraday && candles.length >= 20) {

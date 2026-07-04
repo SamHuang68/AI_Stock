@@ -1,55 +1,55 @@
 // ============================================================
-// Stock Terminal v3.8 — 統一回測引擎 (Unified Backtest Core)
+// Stock Terminal v4.1 — 統一回測引擎 (Unified Backtest Core)
 // ------------------------------------------------------------
 // 一個核心，三種用法：
 //   1. 策略回測：WATCH 8 策略任一 → 勝率 / 賠率 / 期望值 / 權益曲線
 //   2. 型態命中率：pattern_v3 19 型態 → 偵測後 N 日報酬分布
 //   3. 投組回測：多檔 + 資金配置 → 投組權益曲線
-// 自足指標 (SMA/RSI/BB)，不依賴其他模組內部實作。
+// 指標一律委派統一指標庫（src/core/indicators_v3.js,SSOT）。
+// v4.1 精準化：
+//   • 進場 = 訊號「次一根開盤」→ 消除同根收盤進場的前視偏差
+//   • 報酬 = 已扣台股費稅/滑價的淨報酬（毛報酬另存 retGross / totalReturnGross）
+//     台股:手續費 0.1425%(買賣各一,可設折扣) + 證交稅 0.3%(賣出);美股預設 0
+//   • TP/SL 以收盤價判斷（EOD 慣例,不模擬盤中觸價);出場訊號成交於次根開盤
 // 公開 API：window.Backtest
 // ============================================================
 (function () {
   'use strict';
 
-  // ---- 指標 ------------------------------------------------
-  function sma(arr, p) {
-    const out = new Array(arr.length).fill(null);
-    let s = 0;
-    for (let i = 0; i < arr.length; i++) {
-      s += arr[i];
-      if (i >= p) s -= arr[i - p];
-      if (i >= p - 1) out[i] = s / p;
-    }
-    return out;
+  // ---- 指標:一律走統一指標庫（不再自帶實作,永不分岔）----
+  const IND = window.Indicators;
+  function sma(arr, p) { return IND.sma(arr, p); }
+  function rsi(closes, p) { return IND.rsi(closes, p || 14); }
+  function bbLower(closes, p, k) { return IND.bb(closes, p || 20, k || 2).lower; }
+
+  // ---- 台股費稅模型 (v4.1) ----------------------------------
+  // opts.market:'TW'|'US'（未給則讀全域 S.mkt,再預設 TW）
+  // opts.cost:false=不計成本;或 {fee,feeDiscount,tax,slippage} 覆寫預設
+  const TW_COST = { fee: 0.001425, feeDiscount: 1.0, tax: 0.003, slippage: 0 };
+  const US_COST = { fee: 0,        feeDiscount: 1.0, tax: 0,     slippage: 0 };
+  function resolveCost(opts) {
+    if (opts.cost === false) return { fee: 0, tax: 0, slip: 0 };
+    const mkt = opts.market || ((typeof S !== 'undefined' && S.mkt) ? S.mkt : 'TW');
+    const base = (mkt === 'TW') ? TW_COST : US_COST;
+    const c = (opts.cost && typeof opts.cost === 'object') ? opts.cost : {};
+    const disc = (c.feeDiscount != null) ? c.feeDiscount : base.feeDiscount;
+    return {
+      fee: ((c.fee != null) ? c.fee : base.fee) * disc,
+      tax: (c.tax != null) ? c.tax : base.tax,
+      slip: (c.slippage != null) ? c.slippage : base.slippage,
+    };
   }
-  function rsi(closes, p) {
-    p = p || 14;
-    const out = new Array(closes.length).fill(null);
-    let g = 0, l = 0;
-    for (let i = 1; i <= p; i++) {
-      const d = closes[i] - closes[i - 1];
-      if (d >= 0) g += d; else l -= d;
+  // 淨報酬:多=買進成本 entry*(1+fee+slip) vs 賣出淨得 exit*(1-fee-tax-slip)
+  //        空(融券簡化,不含借券費)=放空淨得 entry*(1-fee-tax-slip) vs 回補成本 exit*(1+fee+slip),報酬以 entry 名目計
+  function netReturn(entry, exit, cost, short) {
+    if (!short) {
+      const buy = entry * (1 + cost.fee + cost.slip);
+      const sell = exit * (1 - cost.fee - cost.tax - cost.slip);
+      return sell / buy - 1;
     }
-    g /= p; l /= p;
-    out[p] = 100 - 100 / (1 + (l === 0 ? 100 : g / l));
-    for (let i = p + 1; i < closes.length; i++) {
-      const d = closes[i] - closes[i - 1];
-      g = (g * (p - 1) + (d > 0 ? d : 0)) / p;
-      l = (l * (p - 1) + (d < 0 ? -d : 0)) / p;
-      out[i] = 100 - 100 / (1 + (l === 0 ? 100 : g / l));
-    }
-    return out;
-  }
-  function bbLower(closes, p, k) {
-    p = p || 20; k = k || 2;
-    const m = sma(closes, p);
-    const out = new Array(closes.length).fill(null);
-    for (let i = p - 1; i < closes.length; i++) {
-      let v = 0;
-      for (let j = i - p + 1; j <= i; j++) v += (closes[j] - m[i]) ** 2;
-      out[i] = m[i] - k * Math.sqrt(v / p);
-    }
-    return out;
+    const sellShort = entry * (1 - cost.fee - cost.tax - cost.slip);
+    const cover = exit * (1 + cost.fee + cost.slip);
+    return (sellShort - cover) / entry;
   }
 
   // ---- 策略庫：回傳 entry signal 陣列 (bool/bar) -----------
@@ -79,26 +79,32 @@
 
   // ---- 核心回測 --------------------------------------------
   // candles: [{time,open,high,low,close,volume}]
-  // opts: {tp:0.15, sl:0.08, maxBars:20, short:false}
+  // opts: {tp:0.15, sl:0.08, maxBars:20, short:false, market:'TW'|'US', cost:{...}|false}
+  // v4.1:訊號於第 i 根收盤成立 → 於第 i+1 根「開盤」進場（無前視偏差）;
+  //      TP/SL 自進場當根收盤起逐根檢查;ret=淨報酬(含費稅),retGross=毛報酬。
   function run(candles, signalArr, opts) {
     opts = Object.assign({ tp: 0.15, sl: 0.08, maxBars: 20, short: false }, opts || {});
+    const cost = resolveCost(opts);
     const c = colsOf(candles);
     const trades = [];
     let equity = 1, peak = 1, maxDD = 0;
     const curve = [];
     let i = 0;
     while (i < candles.length) {
-      if (signalArr[i]) {
-        const entry = c.close[i];
-        let exit = entry, exitBar = i, reason = 'time';
-        for (let j = i + 1; j < candles.length && j <= i + opts.maxBars; j++) {
-          const ret = opts.short ? (entry - c.close[j]) / entry : (c.close[j] - entry) / entry;
-          if (ret >= opts.tp) { exit = c.close[j]; exitBar = j; reason = 'tp'; break; }
-          if (ret <= -opts.sl) { exit = c.close[j]; exitBar = j; reason = 'sl'; break; }
+      if (signalArr[i] && i + 1 < candles.length) {
+        const entryBar = i + 1;
+        const entry = c.open[entryBar];
+        let exit = c.close[entryBar], exitBar = entryBar, reason = 'time';
+        for (let j = entryBar; j < candles.length && j <= entryBar + opts.maxBars; j++) {
+          const r = opts.short ? (entry - c.close[j]) / entry : (c.close[j] - entry) / entry;
           exit = c.close[j]; exitBar = j;
+          if (r >= opts.tp) { reason = 'tp'; break; }
+          if (r <= -opts.sl) { reason = 'sl'; break; }
         }
-        let ret = opts.short ? (entry - exit) / entry : (exit - entry) / entry;
-        trades.push({ entryBar: i, exitBar, entry, exit, ret, reason, time: candles[i].time, exitTime: candles[exitBar].time, holdBars: exitBar - i });
+        const retGross = opts.short ? (entry - exit) / entry : (exit - entry) / entry;
+        const ret = netReturn(entry, exit, cost, opts.short);
+        trades.push({ signalBar: i, entryBar, exitBar, entry, exit, ret, retGross, reason,
+                      time: candles[entryBar].time, exitTime: candles[exitBar].time, holdBars: exitBar - entryBar });
         equity *= (1 + ret);
         peak = Math.max(peak, equity);
         maxDD = Math.max(maxDD, (peak - equity) / peak);
@@ -106,13 +112,16 @@
         i = exitBar + 1;
       } else i++;
     }
-    return summarize(trades, equity, maxDD, curve);
+    return summarize(trades, equity, maxDD, curve, cost);
   }
 
-  function summarize(trades, equity, maxDD, curve) {
+  function summarize(trades, equity, maxDD, curve, cost) {
     const n = trades.length;
     const wins = trades.filter(t => t.ret > 0);
     const losses = trades.filter(t => t.ret <= 0);
+    // 毛報酬權益（未含費稅）— 供 UI 對照「含成本 vs 不含成本」
+    let equityGross = 1;
+    for (const t of trades) equityGross *= (1 + (t.retGross != null ? t.retGross : t.ret));
     const avgWin = wins.length ? wins.reduce((s, t) => s + t.ret, 0) / wins.length : 0;
     const avgLoss = losses.length ? losses.reduce((s, t) => s + t.ret, 0) / losses.length : 0;
     const winRate = n ? wins.length / n * 100 : 0;
@@ -141,6 +150,8 @@
       count: n, winRate, wins: wins.length, losses: losses.length,
       avgWin: avgWin * 100, avgLoss: avgLoss * 100, payoff,
       expectancy: expectancy * 100, totalReturn: (equity - 1) * 100,
+      totalReturnGross: (equityGross - 1) * 100,
+      cost: cost || null,
       maxDD: maxDD * 100, sharpe, sharpeAnn,
       profitFactor, avgHoldBars,
       maxWinStreak: winStreak, maxLossStreak: lossStreak,
@@ -152,27 +163,38 @@
   // ---- 進出場雙訊號回測 (給樂高條件器 / 腳本引擎用) -------
   // buyArr[i] 進場、sellArr[j] 出場；tp/sl/maxBars 任一先到也出場。
   // 同一時間只持有一個部位(進場後直到出場才找下一筆)。
+  // v4.1:買進訊號於第 i 根收盤成立 → 第 i+1 根開盤進場;
+  //      出場訊號成交於次根開盤;TP/SL/時間出場成交於觸發當根收盤;
+  //      ret=淨報酬(含費稅),retGross=毛報酬。
   function runLS(candles, buyArr, sellArr, opts) {
     opts = Object.assign({ tp: 0, sl: 0, maxBars: 0, short: false }, opts || {});
+    const cost = resolveCost(opts);
     const c = colsOf(candles);
     const trades = [];
     let equity = 1, peak = 1, maxDD = 0;
     const curve = [];
     let i = 0;
     while (i < candles.length) {
-      if (buyArr[i]) {
-        const entry = c.close[i];
-        let exit = entry, exitBar = i, reason = 'end';
-        for (let j = i + 1; j < candles.length; j++) {
-          const ret = opts.short ? (entry - c.close[j]) / entry : (c.close[j] - entry) / entry;
+      if (buyArr[i] && i + 1 < candles.length) {
+        const entryBar = i + 1;
+        const entry = c.open[entryBar];
+        let exit = c.close[entryBar], exitBar = entryBar, reason = 'end';
+        for (let j = entryBar; j < candles.length; j++) {
+          const r = opts.short ? (entry - c.close[j]) / entry : (c.close[j] - entry) / entry;
           exit = c.close[j]; exitBar = j;
-          if (opts.tp > 0 && ret >= opts.tp) { reason = 'tp'; break; }
-          if (opts.sl > 0 && ret <= -opts.sl) { reason = 'sl'; break; }
-          if (opts.maxBars > 0 && (j - i) >= opts.maxBars) { reason = 'time'; break; }
-          if (sellArr && sellArr[j]) { reason = 'signal'; break; }
+          if (opts.tp > 0 && r >= opts.tp) { reason = 'tp'; break; }
+          if (opts.sl > 0 && r <= -opts.sl) { reason = 'sl'; break; }
+          if (opts.maxBars > 0 && (j - entryBar) >= opts.maxBars) { reason = 'time'; break; }
+          if (sellArr && sellArr[j]) {
+            // 出場訊號於 j 收盤成立 → 次根開盤成交;無次根則以 j 收盤結算
+            if (j + 1 < candles.length) { exit = c.open[j + 1]; exitBar = j + 1; }
+            reason = 'signal'; break;
+          }
         }
-        const ret = opts.short ? (entry - exit) / entry : (exit - entry) / entry;
-        trades.push({ entryBar: i, exitBar, entry, exit, ret, reason, time: candles[i].time, exitTime: candles[exitBar].time, holdBars: exitBar - i });
+        const retGross = opts.short ? (entry - exit) / entry : (exit - entry) / entry;
+        const ret = netReturn(entry, exit, cost, opts.short);
+        trades.push({ signalBar: i, entryBar, exitBar, entry, exit, ret, retGross, reason,
+                      time: candles[entryBar].time, exitTime: candles[exitBar].time, holdBars: exitBar - entryBar });
         equity *= (1 + ret);
         peak = Math.max(peak, equity);
         maxDD = Math.max(maxDD, (peak - equity) / peak);
@@ -180,7 +202,7 @@
         i = exitBar + 1;
       } else i++;
     }
-    return summarize(trades, equity, maxDD, curve);
+    return summarize(trades, equity, maxDD, curve, cost);
   }
 
   function colsOf(candles) {
@@ -209,6 +231,8 @@
 
   // ---- 型態歷史命中率 -------------------------------------
   // detectFn(slice) → truthy 表示在該 slice 末端偵測到型態
+  // 註:此為「偵測日收盤 → N 日後收盤」的統計量(不含費稅/滑價),
+  //     非交易模擬;交易級結論請用 run/runLS。
   function patternHitRate(candles, detectFn, fwd) {
     fwd = fwd || 10;
     const hits = [];

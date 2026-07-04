@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import OrderedDict
 from urllib.parse import urlparse, parse_qs, unquote, quote
 import threading
+import indicators as ta_ind   # 統一指標庫(與前端 src/core/indicators_v3.js 對齊,SSOT)
 try:
     import alert_daemon
 except Exception as _e:
@@ -30,9 +31,10 @@ except Exception as _e:
     print('[ai-local] module import failed:', _e)
 
 PORT = 18432
-# Core Ultra 9 285H = 6P + 8E + 2LP = 16 threads; oversubscribe for I/O-bound YF
-MAX_WORKERS = max(32, (os.cpu_count() or 16) * 2)
-LRU_MAX = 20000  # 96GB RAM → very generous cache
+# GMKtec EVO-T1:Core Ultra 9 285H = 6P + 8E + 2LP = 16 threads / 96GB DDR5(規格見 .cursorrules)
+# I/O-bound(Yahoo/TWSE)→ thread pool 大幅超額配置;RAM 充裕 → 快取放大,回應時間優先
+MAX_WORKERS = max(64, (os.cpu_count() or 16) * 4)
+LRU_MAX = 50000  # 96GB RAM → 台股+美股全 universe 線圖快照全裝得下(60s TTL 控新鮮度)
 
 # ── 專案根目錄 ──
 # 凍結成 .exe(PyInstaller)時用 exe 所在資料夾;一般執行(server/ 下)時用其上一層。
@@ -431,8 +433,9 @@ def _get_tw_names():
     scan('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes',
          ('SecuritiesCompanyCode', 'Code', 'CompanyCode', '公司代號'),
          ('CompanyName', 'SecuritiesCompanyName', '公司名稱', '公司簡稱', 'Name', '名稱'))
-    for ds in ('t187ap05_L', 't187ap05_O'):
-        scan(f'https://openapi.twse.com.tw/v1/opendata/{ds}', ('公司代號', 'Code'), ('公司名稱', '公司簡稱', 'Name'))
+    # 月營收資料集的公司名(上市=TWSE;上櫃=TPEx mopsfin_* — t187ap05_O 不在 TWSE host)
+    scan('https://openapi.twse.com.tw/v1/opendata/t187ap05_L', ('公司代號', 'Code'), ('公司名稱', '公司簡稱', 'Name'))
+    scan('https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O', ('公司代號', 'Code'), ('公司名稱', '公司簡稱', 'Name'))
     if m:
         _TW_NAMES['date'] = today; _TW_NAMES['map'] = m
     return m
@@ -546,9 +549,10 @@ def _get_tw_sectors():
     if _TW_SECTORS['date'] == today and _TW_SECTORS['map']:
         return _TW_SECTORS['map']
     m = {}
-    for ds in ('t187ap05_L', 't187ap05_O'):
+    # 上市=TWSE opendata;上櫃=TPEx mopsfin_*(t187ap05_O 不在 TWSE host,打了只回 302 空)
+    for url in ('https://openapi.twse.com.tw/v1/opendata/t187ap05_L',
+                'https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O'):
         try:
-            url = f'https://openapi.twse.com.tw/v1/opendata/{ds}'
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
             with urllib.request.urlopen(req, timeout=15) as r:
                 arr = json.loads(r.read())
@@ -558,7 +562,7 @@ def _get_tw_sectors():
                 if code and ind:
                     m[code] = ind
         except Exception as e:
-            print(f'[sectors] {ds} failed: {e}')
+            print(f'[sectors] {url} failed: {e}')
     if m:
         _TW_SECTORS['date'] = today
         _TW_SECTORS['map'] = m
@@ -574,6 +578,16 @@ def _pick_num(row, includes, excludes=()):
             except Exception:
                 return None
     return None
+
+# ── 月營收 / 綜合損益 資料集清單(單一真理來源,各處共用) ─────────────
+# 根因修正(v4.1.1 上櫃基本面抓不到):上櫃 t187ap05_O / t187ap06_O_ci 並不在
+# openapi.twse.com.tw(打了只回 302 → 空資料集,快取一整天的空 {}),
+# 實機核對後確認掛在 TPEx OpenAPI:www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O
+# (月營收,中文欄位同上市)與 mopsfin_t187ap06_O_ci(綜合損益,代號欄為英文
+# SecuritiesCompanyCode、EPS 欄「基本每股盈餘（元）」— _openapi_lookup/_pick_num
+# 的中英模糊比對皆可吃)。
+_DS_REVENUE = ['t187ap05_L', 'tpex:mopsfin_t187ap05_O']
+_DS_INCOME  = ['t187ap06_L_ci', 'tpex:mopsfin_t187ap06_O_ci', 't187ap06_L']
 
 def _openapi_lookup(dataset_names, clean_code):
     """從 TWSE/TPEx OpenAPI 全市場資料集找某股。資料集整批快取一天。
@@ -1140,6 +1154,13 @@ def _run_selftests():
     finally:
         _SRC_HEALTH.pop('__test__', None)
 
+    # v4.1 統一指標庫 JS/Python 對齊(同 fixture、同凍結期望值;
+    # node tests/indicators_selftest.js 跑 JS 端,兩邊常數相同 → 分岔立刻紅燈)
+    try:
+        cases.extend(ta_ind.selftest()['cases'])
+    except Exception as _e:
+        cases.append({'name': 'ind:selftest', 'pass': False, 'got': str(_e), 'exp': 'run ok'})
+
     passed = sum(1 for c in cases if c['pass'])
     return {'passed': passed, 'total': len(cases), 'allPass': passed == len(cases), 'cases': cases}
 
@@ -1350,7 +1371,7 @@ def compute_etf_delta(files, date=None):
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
-    request_queue_size = 64
+    request_queue_size = 256   # 96GB/16T 主機:批次掃描高併發時不掉連線
 
 class Handler(SimpleHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'   # enables keep-alive
@@ -2422,7 +2443,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._ok(c); return
         out = {'symbol': sym, 'code': clean, 'date': today, 'revenue': None, 'income': None, 'score': None}
         # 月營收（欄位用「含子字串」模糊比對：TWSE 欄位有前綴如「營業收入-當月營收」）
-        rev = _openapi_lookup(['t187ap05_L', 't187ap05_O'], clean)
+        # 上市走 TWSE、上櫃走 TPEx mopsfin_*(_DS_REVENUE 單一來源,修上櫃全 null)
+        rev = _openapi_lookup(_DS_REVENUE, clean)
         if rev:
             out['revenue'] = {
                 'period':    rev.get('資料年月'),
@@ -2448,7 +2470,7 @@ class Handler(SimpleHTTPRequestHandler):
                     out['_revSource'] = 'MOPS:' + mk
                     break
         # 綜合損益表 → 三率（同樣模糊比對，避免全形/半形括號差異 例 營業毛利（毛損））
-        inc = _openapi_lookup(['t187ap06_L_ci', 't187ap06_O_ci', 't187ap06_L', 't187ap06_O'], clean)
+        inc = _openapi_lookup(_DS_INCOME, clean)
         if inc:
             sales = _pick_num(inc, ['營業收入'], ['成本', '毛利', '費用', '外', '淨額'])
             gross = _pick_num(inc, ['營業毛利'])
@@ -2458,7 +2480,9 @@ class Handler(SimpleHTTPRequestHandler):
             eps = _pick_num(inc, ['基本每股盈餘'])
             pct = lambda a, b: round(a / b * 100, 2) if (a is not None and b) else None
             out['income'] = {
-                'period':       inc.get('資料年度') or inc.get('資料季別') or inc.get('年度'),
+                # TPEx 上櫃損益表期間欄為英文 Year/Season(民國年) → 組成 115Q1 格式
+                'period':       (inc.get('資料年度') or inc.get('資料季別') or inc.get('年度')
+                                 or (f"{inc.get('Year')}Q{inc.get('Season')}" if inc.get('Year') else None)),
                 'sales':        sales, 'eps': eps,
                 'grossMargin':  pct(gross, sales),
                 'opMargin':     pct(op, sales),
@@ -3551,14 +3575,8 @@ class Handler(SimpleHTTPRequestHandler):
         def sma(p, idx):
             if idx + 1 < p: return None
             return sum(closes[idx-p+1:idx+1]) / p
-        # RSI 14
-        g = l = 0
-        for i in range(n-14, n):
-            if i < 1: continue
-            d = closes[i] - closes[i-1]
-            if d > 0: g += d
-            else: l -= d
-        rsi = 100 if l == 0 else 100 - 100/(1 + g/l)
+        # RSI 14 — 統一指標庫(Wilder 平滑,與前端 indicators_v3.js / 回測引擎對齊)
+        rsi = ta_ind.rsi_last(closes, 14)
         # Vol ratio
         v5 = sum(vols[-5:]) / 5 if len(vols) >= 5 else 0
         v20 = sum(vols[-20:]) / 20 if len(vols) >= 20 else 0
@@ -3701,9 +3719,9 @@ class Handler(SimpleHTTPRequestHandler):
         # 補基本面
         fund_txt = ''
         try:
-            rev = _openapi_lookup(['t187ap05_L', 't187ap05_O'], code)
+            rev = _openapi_lookup(_DS_REVENUE, code)
             yoy = _pick_num(rev, ['去年同月增減']) if rev else None
-            inc = _openapi_lookup(['t187ap06_L_ci', 't187ap06_O_ci', 't187ap06_L', 't187ap06_O'], code)
+            inc = _openapi_lookup(_DS_INCOME, code)
             gm = nm = None
             if inc:
                 sales = _pick_num(inc, ['營業收入'], ['成本', '毛利', '費用', '外', '淨額'])
@@ -4227,7 +4245,7 @@ class Handler(SimpleHTTPRequestHandler):
             ok = True
             # 基本面
             if want_fund:
-                revrow = _openapi_lookup(['t187ap05_L', 't187ap05_O'], code)
+                revrow = _openapi_lookup(_DS_REVENUE, code)
                 yoy = _pick_num(revrow, ['去年同月增減']) if revrow else None
                 valrow = _openapi_lookup(['exchangeReport/BWIBBU_ALL', 'BWIBBU_ALL'], code) or \
                     _openapi_lookup(['tpex:tpex_mainboard_peratio_analysis'], code)

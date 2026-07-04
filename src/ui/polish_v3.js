@@ -439,7 +439,9 @@ function applyMarketColorClass(mkt) {
   const orig = window.renderChart;
   window.renderChart = function (candles) {
     // TW/US: swap candle up/down colors before original render reads them
-    const tw = _isTwSym(S.sym) || (S.mkt || 'TW') === 'TW';
+    // v4.1.1:一律依「標的本身」判市場(與 base renderChart 同一份 Colors.isTW 判定);
+    // 舊寫法 || S.mkt==='TW' 會在 sym 判定失效時退回市場鈕,與源頭配色分岔。
+    const tw = _isTwSym(S.sym) || (!S.sym && (S.mkt || 'TW') === 'TW');
     const UP = tw ? '#F87171' : '#4ADE80';   // TW red-up / US green-up
     const DN = tw ? '#4ADE80' : '#F87171';
     // Temporarily override CSS vars for the chart series creation
