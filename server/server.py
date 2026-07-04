@@ -3462,6 +3462,13 @@ class Handler(SimpleHTTPRequestHandler):
             if not _rows or len(_rows) < 70:
                 need_yahoo.append(_s); continue
             _cl = [r[4] for r in _rows]
+            
+            # 異常檢測：若資料庫最新兩日價格出現巨大斷層 (如除權息/分割/異常值) 導致變動 > 11% ➔ 丟給 Yahoo 重抓權威昨收
+            if len(_cl) >= 2:
+                _db_chg = (_cl[-1] - _cl[-2]) / _cl[-2] * 100
+                if abs(_db_chg) > 11.0:
+                    need_yahoo.append(_s); continue
+
             _hi = [r[2] if r[2] is not None else r[4] for r in _rows]
             _lo = [r[3] if r[3] is not None else r[4] for r in _rows]
             _vo = [r[5] if r[5] is not None else 0 for r in _rows]
@@ -3480,8 +3487,8 @@ class Handler(SimpleHTTPRequestHandler):
                     })
             except Exception:
                 pass
-        # Fetch DB-misses in parallel using existing fetch_one
-        futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith('.TW') else s): s for s in need_yahoo}
+        # Fetch DB-misses in parallel using existing fetch_one with nocache=True
+        futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith('.TW') else s, nocache=True): s for s in need_yahoo}
         for fut in as_completed(futures):
             sym, data, _ = fut.result()
             if not data: continue
