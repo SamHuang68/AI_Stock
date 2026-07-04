@@ -956,8 +956,14 @@ function renderChart(candles) {
     // 漲跌基準 = 昨收(前一根收盤)，非開盤；首根無昨收則退回開盤
     const _pc = _prevCloseByTime.get(param.time);
     const _base = (_pc != null && _pc > 0) ? _pc : k.open;
-    // 高於昨收=漲(紅)、低於昨收=跌(綠)、等於昨收=平盤(無色)
-    const col = (k.close > _base) ? upCol : (k.close < _base ? dnCol : 'var(--tlo)');
+    
+    // 奇摩股市對齊：開、高、低、收均以「昨收」為基準比對標色
+    const getValColor = val => (val > _base) ? upCol : (val < _base ? dnCol : 'var(--tlo)');
+    
+    const openCol = getValColor(k.open);
+    const highCol = getValColor(k.high);
+    const lowCol = getValColor(k.low);
+    const col = getValColor(k.close);
     const chgPct = ((k.close - _base) / _base * 100);
 
     // MA values at this time
@@ -977,9 +983,9 @@ function renderChart(candles) {
     ohlcEl.style.display = 'block';
     ohlcEl.innerHTML =
       `<span class="ohlc-d">${ds}</span>` +
-      `<span class="ohlc-k">開</span><span class="ohlc-v" style="color:var(--thi)">${k.open.toFixed(2)}</span>` +
-      `<span class="ohlc-k">高</span><span class="ohlc-v" style="color:${upCol}">${k.high.toFixed(2)}</span>` +
-      `<span class="ohlc-k">低</span><span class="ohlc-v" style="color:${dnCol}">${k.low.toFixed(2)}</span>` +
+      `<span class="ohlc-k">開</span><span class="ohlc-v" style="color:${openCol}">${k.open.toFixed(2)}</span>` +
+      `<span class="ohlc-k">高</span><span class="ohlc-v" style="color:${highCol}">${k.high.toFixed(2)}</span>` +
+      `<span class="ohlc-k">低</span><span class="ohlc-v" style="color:${lowCol}">${k.low.toFixed(2)}</span>` +
       `<span class="ohlc-k">收</span><span class="ohlc-v" style="color:${col}">${k.close.toFixed(2)}</span>` +
       `<span style="color:${col};margin-right:8px">(${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)</span>` +
       (v ? `<span class="ohlc-k">量</span><span class="ohlc-v" style="color:var(--blue)">${formatVol(v.value)}</span>` : '') +
