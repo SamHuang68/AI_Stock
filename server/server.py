@@ -2009,41 +2009,44 @@ class Handler(SimpleHTTPRequestHandler):
         if c is not None:
             self._ok(c); return
 
-        out = self._fetch_keystats_yfinance(sym)
+        def _fetch_all(s):
+            res_out = self._fetch_keystats_yfinance(s)
+            # Fallback 1: v10 direct (may still work for some symbols)
+            if (res_out.get('trailingPE') is None and res_out.get('eps') is None
+                and res_out.get('marketCap') is None):
+                v10 = self._fetch_keystats_v10(s)
+                for k in ('trailingPE','forwardPE','eps','forwardEps','pegRatio','marketCap',
+                          'priceToBook','dividendYield','shortName','longName','currency',
+                          'earningsQuarterlyGrowth','revenueGrowth','regularMarketPrice'):
+                    if res_out.get(k) is None and v10.get(k) is not None:
+                        res_out[k] = v10[k]
+                if v10.get('trailingPE') is not None:
+                    res_out['_source'] = (res_out.get('_source','') + '+v10').strip('+')
+
+            # Fallback 2: HTML scrape
+            if (res_out.get('trailingPE') is None and res_out.get('eps') is None
+                and res_out.get('marketCap') is None):
+                html_out = self._fetch_keystats_html(s)
+                for k in ('trailingPE','eps','marketCap','priceToBook','dividendYield',
+                          'shortName','currency'):
+                    if res_out.get(k) is None and html_out.get(k) is not None:
+                        res_out[k] = html_out[k]
+                if html_out.get('trailingPE') is not None:
+                    res_out['_source'] = (res_out.get('_source','') + '+html').strip('+')
+            return res_out
+
+        out = _fetch_all(sym)
 
         # TW main board miss → try .TWO
         if (sym.endswith('.TW') and not sym.endswith('.TWO')
             and out.get('trailingPE') is None and out.get('eps') is None
             and out.get('marketCap') is None):
             otc = sym[:-3] + '.TWO'
-            otc_out = self._fetch_keystats_yfinance(otc)
+            otc_out = _fetch_all(otc)
             if (otc_out.get('trailingPE') is not None or otc_out.get('eps') is not None
                 or otc_out.get('marketCap') is not None):
                 out = otc_out
                 out['_resolved'] = otc
-
-        # Fallback 1: v10 direct (may still work for some symbols)
-        if (out.get('trailingPE') is None and out.get('eps') is None
-            and out.get('marketCap') is None):
-            v10 = self._fetch_keystats_v10(sym)
-            for k in ('trailingPE','forwardPE','eps','forwardEps','pegRatio','marketCap',
-                      'priceToBook','dividendYield','shortName','longName','currency',
-                      'earningsQuarterlyGrowth','revenueGrowth','regularMarketPrice'):
-                if out.get(k) is None and v10.get(k) is not None:
-                    out[k] = v10[k]
-            if v10.get('trailingPE') is not None:
-                out['_source'] = (out.get('_source','') + '+v10').strip('+')
-
-        # Fallback 2: HTML scrape
-        if (out.get('trailingPE') is None and out.get('eps') is None
-            and out.get('marketCap') is None):
-            html_out = self._fetch_keystats_html(sym)
-            for k in ('trailingPE','eps','marketCap','priceToBook','dividendYield',
-                      'shortName','currency'):
-                if out.get(k) is None and html_out.get(k) is not None:
-                    out[k] = html_out[k]
-            if html_out.get('trailingPE') is not None:
-                out['_source'] = (out.get('_source','') + '+html').strip('+')
 
         body = json.dumps(out, ensure_ascii=False).encode()
         _cache.set(key, body)
@@ -2422,7 +2425,7 @@ class Handler(SimpleHTTPRequestHandler):
             self._ok(c); return
         out = {'symbol': sym, 'code': clean, 'date': today, 'revenue': None, 'income': None, 'score': None}
         # 月營收（欄位用「含子字串」模糊比對：TWSE 欄位有前綴如「營業收入-當月營收」）
-        rev = _openapi_lookup(['t187ap05_L', 't187ap05_O'], clean)
+        rev = _openapi_lookup(['t187ap05_L', 'tpex:mopsfin_t187ap05_O'], clean)
         if rev:
             out['revenue'] = {
                 'period':    rev.get('資料年月'),
@@ -2448,7 +2451,7 @@ class Handler(SimpleHTTPRequestHandler):
                     out['_revSource'] = 'MOPS:' + mk
                     break
         # 綜合損益表 → 三率（同樣模糊比對，避免全形/半形括號差異 例 營業毛利（毛損））
-        inc = _openapi_lookup(['t187ap06_L_ci', 't187ap06_O_ci', 't187ap06_L', 't187ap06_O'], clean)
+        inc = _openapi_lookup(['t187ap06_L_ci', 'tpex:mopsfin_t187ap06_O_ci', 't187ap06_L'], clean)
         if inc:
             sales = _pick_num(inc, ['營業收入'], ['成本', '毛利', '費用', '外', '淨額'])
             gross = _pick_num(inc, ['營業毛利'])
