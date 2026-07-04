@@ -7,6 +7,12 @@
 
 ## v4.1 — 體驗打磨 / 欄位標準 / 顏色管理
 
+**修正（v4.1.1 root cause）：異常巨棒 / 台股 K 棒顏色 / 上櫃基本面**
+- **插到 0 的異常巨棒**：Yahoo 偶發回單根 `open/high/low = 0`（是 0 不是 null，實測 00631L 7/1 `o=h=l=0 c=39.49`），`parseYF` 的 `q.open[i] ?? q.close[i]` 擋不住 0 → 畫出下影插到 0 的假巨棒。修：`parseYF` 單根 OHLC 清洗——非正數一律視為缺值退回當根收盤、強制 `high≥max(o,c)`/`low≤min(o,c)`、影線超出實體 ±40%（單日不可能，台股漲跌停 ±10%）夾回實體。`datastore.fetch_yahoo_daily`（進 DB 的資料）與 watch/alert daemon 抓線同規則清洗，避免壞棒汙染回測/選股/訊號。
+- **台股 K 棒顏色（紅漲綠跌）源頭修正**：base `renderChart` 原寫死美股綠漲紅跌、靠 `polish_v3` 事後 `applyOptions` 補救——補丁時序一失效台股就顯示美股色。改：建立系列時就依「標的本身市場」（`Colors.isTW`，SSOT）直接套對色（K 棒 + 量柱），polish 再套色成為同值冪等操作。同步修：`realtime_v3` 量柱寫死美股綠漲（模組僅台股用 → 紅漲綠跌）、多圖 `multichart_v3` 寫死美股色（改依各格標的市場）、`pro_v2` 部位熱力圖 P&L 西式綠=賺（改台股慣例賺=紅）、polish 判市場對齊為「僅依標的本身」。
+- **當日 K 棒方向定義修正**：合成當日 K（Yahoo 日線落後時）在 meta 缺 `regularMarketOpen` 時原本拿「昨收」充當開盤 → K 棒紅綠變成「收盤 vs 昨收」。修：先打 `/quote` 拿真開盤（含 day high/low 備援）再退昨收。K 棒本體方向 = 收盤 vs 當日開盤；漲跌% 標示 = 收盤 vs 昨收——兩者不可混用。
+- **上櫃基本面抓不到（root cause）**：上櫃月營收/綜合損益資料集 `t187ap05_O`/`t187ap06_O_ci` 並不在 `openapi.twse.com.tw`（打了只回 302 → 空資料集快取一整天），實機核對確認掛在 TPEx OpenAPI `mopsfin_t187ap05_O`/`mopsfin_t187ap06_O_ci`。修：新增 `_DS_REVENUE`/`_DS_INCOME` 單一資料集清單（上市走 TWSE、上櫃走 TPEx），`/fundamental`、選股三合一、ETF 原因解讀、公司名/產業別對照全部改接；TPEx 損益表期間欄（Year/Season）組成 `115Q1` 顯示。`universe.py` 代號庫同步補上櫃三率/EPS（`mopsfin_t187ap06_O_ci`）與發行股數/市值（`mopsfin_t187ap03_O` IssueShares）。實測：上櫃 3529 力旺/5274 信驊 月營收+三率+EPS 完整回傳，上市 2330 不受影響。
+
 **指標統一 / 回測費稅（precision pass）**
 - **統一指標庫（SSOT）**：新增 `src/core/indicators_v3.js`（前端）+ `server/indicators.py`（後端）,兩份演算法完全對齊（SMA/EMA/RSI/KD/MACD/BB/ATR）。所有引用端改接統一庫:指標列 Web Worker（經 `INDICATORS_LIB_SRC` 原始碼串進 blob,與主執行緒共用同一份程式）、主圖 SMA/BB overlay、`StratLib`、`window.Backtest`、`pro_v2 mockInd`、`wizard ATR`;後端 `server.py _calc_ind`、`watch_daemon`、`alert_daemon`。
 - **修正（root cause）指標數學**:

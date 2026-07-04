@@ -603,9 +603,10 @@ function renderPortfolioRisk() {
   h += '<div style="padding:8px 12px;display:grid;grid-template-columns:repeat(2,1fr);gap:4px">';
   for (const item of m.items) {
     const wt = item.val / m.totalValue;
+    // P&L 一律台股慣例:賺=紅、賠=綠(同 Colors.gain;v4.1.1 修原本西式綠=賺)
     const col = item.pnl >= 0
-      ? `rgba(74,222,128,${0.25 + Math.min(0.6, Math.abs(item.pnlPct) / 30)})`
-      : `rgba(248,113,113,${0.25 + Math.min(0.6, Math.abs(item.pnlPct) / 30)})`;
+      ? `rgba(248,113,113,${0.25 + Math.min(0.6, Math.abs(item.pnlPct) / 30)})`
+      : `rgba(74,222,128,${0.25 + Math.min(0.6, Math.abs(item.pnlPct) / 30)})`;
     h += `<div class="heatcell" data-pro="goto-pos" data-sym="${item.code}" style="background:${col};grid-column:span ${wt > 0.4 ? 2 : 1}">
       <div class="heatcell-sym">${item.code}</div>
       <div class="heatcell-pnl">${item.pnlPct >= 0 ? '+' : ''}${item.pnlPct.toFixed(1)}%</div>

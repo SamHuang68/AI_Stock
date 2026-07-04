@@ -85,11 +85,12 @@ def _fetch_daily(code, mkt):
                 candles = []
                 for i in range(len(ts)):
                     cl = q['close'][i]
-                    if cl is None:
+                    if not cl or cl <= 0:      # 0/None 皆視為缺值(Yahoo 偶發回 0 非 None)
                         continue
+                    hi = q['high'][i]; lo = q['low'][i]
                     candles.append({
-                        'high': q['high'][i] if q['high'][i] is not None else cl,
-                        'low': q['low'][i] if q['low'][i] is not None else cl,
+                        'high': hi if (hi is not None and hi > 0) else cl,
+                        'low': lo if (lo is not None and lo > 0) else cl,
                         'close': cl,
                         'volume': q['volume'][i] or 0,
                     })

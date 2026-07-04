@@ -491,14 +491,28 @@ function parseYF(raw) {
     if (!res) return null;
     const q = (res.indicators?.quote?.[0]) || {};   // 盤中空資料時 Yahoo 可能無 indicators
     const ts = res.timestamp || [];                  // 空 → candles=[](回空而非丟例外)
-    let candles = ts.map((t,i)=>({
-      time: t,
-      open:  q.open[i]  ?? q.close[i],
-      high:  q.high[i]  ?? q.close[i],
-      low:   q.low[i]   ?? q.close[i],
-      close: q.close[i] ?? 0,
-      volume: q.volume[i] ?? 0,
-    })).filter(c=>c.close!=null&&c.close>0);
+    // ── 單根 OHLC 清洗 (v4.1.1 修「插到 0 的異常巨棒」) ─────────────
+    // 根因:Yahoo 偶發回 open/high/low = 0(是 0 不是 null,?? 擋不住,實測 00631L
+    // 7/1 o=h=l=0 c=39.49)→ 畫出下影插到 0 的假巨棒。修:
+    //   1) 非正數/非有限值一律視為缺值 → 退回當根收盤(_pos)。
+    //   2) 強制 OHLC 一致性:high ≥ max(open,close)、low ≤ min(open,close)。
+    //   3) 壞 tick 護欄:影線超出實體 ±40%(單日不可能,台股漲跌停 ±10%)→ 夾回實體。
+    const _pos = v => (v != null && isFinite(v) && v > 0) ? v : null;
+    let candles = [];
+    for (let i = 0; i < ts.length; i++) {
+      const close = _pos(q.close?.[i]);
+      if (close == null) continue;                   // 無有效收盤 → 整根丟棄(原行為)
+      let open = _pos(q.open?.[i]) ?? close;
+      let high = _pos(q.high?.[i]) ?? close;
+      let low  = _pos(q.low?.[i])  ?? close;
+      const bodyHi = Math.max(open, close), bodyLo = Math.min(open, close);
+      if (high < bodyHi) high = bodyHi;
+      if (low  > bodyLo) low  = bodyLo;
+      if (high > bodyHi * 1.4) high = bodyHi;        // 壞 tick 上影
+      if (low  < bodyLo * 0.6) low  = bodyLo;        // 壞 tick 下影
+      candles.push({ time: ts[i], open, high, low, close,
+                     volume: (q.volume?.[i] != null && isFinite(q.volume[i]) && q.volume[i] > 0) ? q.volume[i] : 0 });
+    }
     // ── 日線異常驗證 (v3.9 Phase-0 護航) ──────────────────────────
     // 剔除「孤立尖刺」壞點:某根收盤較前後兩根皆 >40% 落差(且隨即回復)。
     // 跳空/漲跌停會「持續」(下一根接近壞值)故不會被誤刪;只殺立即回復的離群單根。
@@ -628,10 +642,26 @@ async function loadSym(sym, mkt, silent) {
       // 嚴禁用 meta.chartPreviousClose：那是「請求區間起點」前一日的收盤
       // (6mo 區間 = 半年前的價!)，曾造成合成K 開15.95/收33.43/+109% 假爆量K。
       const _prevC = _num(_last.close);
-      let _o = _num(_meta.regularMarketOpen) ?? _prevC ?? _rmp;
-      // open 是昨收近似值時可能落在當日高低之外(跳空日) → 夾進 [DayLow, DayHigh]
-      const _dh = _num(_meta.regularMarketDayHigh);
-      const _dl = _num(_meta.regularMarketDayLow);
+      let _o = _num(_meta.regularMarketOpen);
+      let _dh = _num(_meta.regularMarketDayHigh);
+      let _dl = _num(_meta.regularMarketDayLow);
+      // v4.1.1:meta 缺當日開盤時,先打 /quote 拿「真開盤」再退昨收。
+      // 直接拿昨收充當開盤會讓 K 棒紅綠變成「收盤 vs 昨收」——
+      // K 棒本體方向的正確定義是「收盤 vs 當日開盤」(台股紅漲綠跌同理),
+      // 漲跌% 標示才以昨收為基準,兩者不可混用。
+      if (_o == null) {
+        try {
+          const _q2 = await fetch(`${SERVER}/quote/${encodeURIComponent(yfsym)}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null);
+          if (_myLoad !== window.__loadSeq) return;   // 切股 race 守衛
+          if (_q2) {
+            if (_q2.open > 0) _o = _q2.open;
+            if (_dh == null && _q2.high > 0) _dh = _q2.high;
+            if (_dl == null && _q2.low > 0) _dl = _q2.low;
+          }
+        } catch {}
+      }
+      if (_o == null) _o = _prevC ?? _rmp;   // 最後備援(無任何當日開盤資訊)
+      // open 備援值可能落在當日高低之外(跳空日) → 夾進 [DayLow, DayHigh]
       const _h0 = _dh ?? Math.max(_rmp, _o);
       const _l0 = _dl ?? Math.min(_rmp, _o);
       if (_o > _h0) _o = _h0;
@@ -782,10 +812,21 @@ function renderChart(candles) {
   });
   S.chart = chart;
 
+  // ── K 棒/量柱顏色:建立系列時就依「標的本身市場」決定(SSOT: Colors.isTW) ──
+  // 台股 紅漲綠跌 / 美股 綠漲紅跌;單根方向 = 收盤 vs 當日開盤(K 棒本體),
+  // 漲跌% 標示才用昨收。v4.1.1 根因修正:原本寫死美股色、靠 polish_v3 事後
+  // applyOptions 補救 → 補丁時序一失效台股就顯示美股色;改為源頭直接套對色,
+  // polish 的再套色成為同值冪等操作。
+  const _twCandle = window.Colors ? Colors.isTW(S.sym)
+                  : (/^\d/.test(S.sym || '') || /^\^TW/i.test(S.sym || ''));
+  const _UP  = _twCandle ? '#F87171' : '#4ADE80';
+  const _DN  = _twCandle ? '#4ADE80' : '#F87171';
+  const _UPA = _twCandle ? 'rgba(248,113,113,0.25)' : 'rgba(74,222,128,0.25)';
+  const _DNA = _twCandle ? 'rgba(74,222,128,0.25)' : 'rgba(248,113,113,0.25)';
   const cs = chart.addCandlestickSeries({
-    upColor:'#4ADE80',downColor:'#F87171',
-    borderUpColor:'#4ADE80',borderDownColor:'#F87171',
-    wickUpColor:'#4ADE80',wickDownColor:'#F87171',
+    upColor:_UP,downColor:_DN,
+    borderUpColor:_UP,borderDownColor:_DN,
+    wickUpColor:_UP,wickDownColor:_DN,
     lastValueVisible:false, priceLineVisible:false,   // 原生現價框關掉，改用 polish_v3 的「今/昨」小標籤
   });
   const lcd = candles.map(c=>({time:tz(c.time),open:c.open,high:c.high,low:c.low,close:c.close}));
@@ -870,7 +911,7 @@ function renderChart(candles) {
       priceScaleId:'vol',
     });
     chart.priceScale('vol').applyOptions({scaleMargins:{top:0.8,bottom:0}});
-    vs.setData(candles.map(c=>({time:tz(c.time),value:c.volume,color:c.close>=c.open?'rgba(74,222,128,0.25)':'rgba(248,113,113,0.25)'})));
+    vs.setData(candles.map(c=>({time:tz(c.time),value:c.volume,color:c.close>=c.open?_UPA:_DNA})));
     S.volSeries = vs;
   } else {
     S.volSeries = null;

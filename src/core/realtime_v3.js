@@ -48,11 +48,13 @@
         lastCumVol = cumVol;
         try { S.chartSeries.update(curBar); } catch (e) { /* 圖剛重建時忽略 */ }
         if (S.dotSeries) { try { S.dotSeries.update({ time: bucket, value: q.price }); } catch (e) {} }   // 十字圓點線同步
-        // 量柱同步:本分鐘量 = 累積量 − 本分鐘起始累積量(漲綠跌紅,同主圖)
+        // 量柱同步:本分鐘量 = 累積量 − 本分鐘起始累積量。
+        // 本模組僅台股盤中(activeIntradayTW)→ 台股慣例紅漲綠跌
+        // (v4.1.1 修:原寫死美股綠漲,realtime 更新的量柱與主圖顏色相反)。
         if (S.volSeries) {
           var bv = Math.max(0, cumVol - (bucketBaseVol || 0));
           var up = curBar.close >= curBar.open;
-          try { S.volSeries.update({ time: bucket, value: bv, color: up ? 'rgba(74,222,128,0.25)' : 'rgba(248,113,113,0.25)' }); } catch (e) {}
+          try { S.volSeries.update({ time: bucket, value: bv, color: up ? 'rgba(248,113,113,0.25)' : 'rgba(74,222,128,0.25)' }); } catch (e) {}
         }
         // 即時心跳標(右上角):讓使用者一眼確認 realtime 在跳 + 最後更新時間(等同 Yahoo「HH:MM 更新」)
         var hb = document.getElementById('rt-hb');
