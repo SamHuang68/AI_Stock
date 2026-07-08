@@ -598,20 +598,90 @@ function renderPortfolioRisk() {
     }
     h += '</div>';
   }
-  // Heatmap
-  h += '<div class="stat-sect">部位熱力圖</div>';
-  h += '<div style="padding:8px 12px;display:grid;grid-template-columns:repeat(2,1fr);gap:4px">';
-  for (const item of m.items) {
+  // Donut Chart & Position Allocation List
+  h += '<div class="stat-sect">持股比例圖</div>';
+  
+  // SVG Donut Chart
+  let svgCircles = '';
+  let accumPercent = 0;
+  const C = 251.327; // 2 * pi * 40
+  const colors = [];
+  const hueStep = 360 / Math.max(5, m.items.length);
+  
+  m.items.forEach((item, idx) => {
     const wt = item.val / m.totalValue;
-    const col = item.pnl >= 0
-      ? `rgba(74,222,128,${0.25 + Math.min(0.6, Math.abs(item.pnlPct) / 30)})`
-      : `rgba(248,113,113,${0.25 + Math.min(0.6, Math.abs(item.pnlPct) / 30)})`;
-    h += `<div class="heatcell" data-pro="goto-pos" data-sym="${item.code}" style="background:${col};grid-column:span ${wt > 0.4 ? 2 : 1}">
-      <div class="heatcell-sym">${item.code}</div>
-      <div class="heatcell-pnl">${item.pnlPct >= 0 ? '+' : ''}${item.pnlPct.toFixed(1)}%</div>
-      <div class="heatcell-pnl" style="font-size:8px;opacity:.85">${(wt*100).toFixed(0)}%</div>
-    </div>`;
-  }
+    const dashArray = `${(wt * C).toFixed(3)} ${C}`;
+    const dashOffset = `-${(accumPercent * C).toFixed(3)}`;
+    accumPercent += wt;
+    
+    // 使用高雅的 HSL 色調
+    const color = `hsl(${idx * hueStep}, 65%, 50%)`;
+    colors.push(color);
+    
+    svgCircles += `<circle cx="50" cy="50" r="40" 
+      fill="transparent" 
+      stroke="${color}" 
+      stroke-width="10" 
+      stroke-dasharray="${dashArray}" 
+      stroke-dashoffset="${dashOffset}" 
+      transform="rotate(-90 50 50)"
+      style="transition: stroke-width 0.2s ease, filter 0.2s ease; cursor: pointer;"
+      class="pf-donut-segment"
+      data-sym="${item.code}"
+      data-pct="${(wt * 100).toFixed(1)}"
+      data-val="${Math.round(item.val).toLocaleString()}"
+      data-pro="goto-pos"
+    ></circle>`;
+  });
+
+  h += `
+  <div style="display:flex; justify-content:center; padding:15px 12px; background:var(--bg); border-bottom:1px solid var(--border)">
+    <div style="position:relative; width:130px; height:130px;">
+      <svg viewBox="0 0 100 100" width="100%" height="100%">
+        <circle cx="50" cy="50" r="40" fill="transparent" stroke="var(--border)" stroke-width="10" style="opacity:0.15"></circle>
+        ${svgCircles}
+      </svg>
+      <div id="pf-donut-center" style="position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; text-align:center;">
+        <span id="pf-donut-center-lbl" style="font-size:9px; color:var(--tlo); text-transform:uppercase; letter-spacing:0.5px;">總市值</span>
+        <span id="pf-donut-center-val" style="font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700; color:var(--text); margin-top:2px;">${Math.round(m.totalValue).toLocaleString()}</span>
+        <span id="pf-donut-center-sub" style="font-size:8px; color:var(--tlo); margin-top:1px;">${m.items.length} 檔持股</span>
+      </div>
+    </div>
+  </div>
+  `;
+
+  // Legend / Portfolio details list
+  h += '<div class="stat-sect">持股部位比例</div>';
+  h += '<div style="padding:6px 12px; display:flex; flex-direction:column; gap:6px;">';
+  m.items.forEach((item, idx) => {
+    const wt = item.val / m.totalValue;
+    const color = colors[idx];
+    const pnlCol = item.pnlPct >= 0 ? 'var(--green)' : 'var(--red)';
+    const pnlBg = item.pnlPct >= 0 ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)';
+    const barCol = item.pnlPct >= 0 ? 'var(--green)' : 'var(--red)';
+    
+    h += `
+    <div class="pf-item-row" data-pro="goto-pos" data-sym="${item.code}" style="cursor:pointer; display:flex; flex-direction:column; gap:4px; padding:6px 8px; border-radius:4px; transition:background 0.2s ease;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}"></span>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; color:var(--text);">${item.code}</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:9.5px; font-weight:bold; padding:1px 4px; border-radius:3px; color:${pnlCol}; background:${pnlBg}">${item.pnlPct >= 0 ? '+' : ''}${item.pnlPct.toFixed(1)}%</span>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text); opacity:0.8;">${(wt*100).toFixed(1)}%</span>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; font-size:9px; color:var(--tlo);">
+        <span>市值 $${Math.round(item.val).toLocaleString()}</span>
+        <span>${item.shares.toLocaleString()} 股</span>
+      </div>
+      <div style="width:100%; height:3px; background:rgba(255,255,255,0.06); border-radius:1.5px; overflow:hidden; margin-top:2px;">
+        <div style="width:${(wt*100).toFixed(1)}%; height:100%; background:${barCol}; border-radius:1.5px;"></div>
+      </div>
+    </div>
+    `;
+  });
   h += '</div>';
   return h;
 }
@@ -1049,3 +1119,56 @@ window.removeLine        = removeLine;
 window.clearLines        = clearLines;
 window.computePortfolioMetrics = computePortfolioMetrics;
 window.fireSignalNotifications = fireSignalNotifications;
+
+// ── Portfolio Donut Chart Interactive Events ────────────────
+(function injectPortfolioStyles() {
+  if (document.getElementById('pf-styles')) return;
+  const s = document.createElement('style');
+  s.id = 'pf-styles';
+  s.textContent = `
+    .pf-item-row:hover {
+      background: rgba(255, 255, 255, 0.04) !important;
+    }
+  `;
+  document.head.appendChild(s);
+})();
+
+document.addEventListener('mouseover', ev => {
+  const el = ev.target.closest('.pf-donut-segment');
+  if (!el) return;
+  el.setAttribute('stroke-width', '13');
+  el.style.filter = 'drop-shadow(0px 0px 3px rgba(255,255,255,0.2))';
+  
+  const lbl = document.getElementById('pf-donut-center-lbl');
+  const val = document.getElementById('pf-donut-center-val');
+  const sub = document.getElementById('pf-donut-center-sub');
+  if (lbl && val && sub) {
+    lbl.textContent = el.dataset.sym;
+    lbl.style.color = el.getAttribute('stroke');
+    lbl.style.fontWeight = 'bold';
+    val.textContent = `${el.dataset.pct}%`;
+    sub.textContent = `$${el.dataset.val}`;
+  }
+});
+
+document.addEventListener('mouseout', ev => {
+  const el = ev.target.closest('.pf-donut-segment');
+  if (!el) return;
+  el.setAttribute('stroke-width', '10');
+  el.style.filter = 'none';
+  
+  const lbl = document.getElementById('pf-donut-center-lbl');
+  const val = document.getElementById('pf-donut-center-val');
+  const sub = document.getElementById('pf-donut-center-sub');
+  
+  if (typeof computePortfolioMetrics === 'function') {
+    const metrics = computePortfolioMetrics();
+    if (metrics && lbl && val && sub) {
+      lbl.textContent = '總市值';
+      lbl.style.color = 'var(--tlo)';
+      lbl.style.fontWeight = 'normal';
+      val.textContent = Math.round(metrics.totalValue).toLocaleString();
+      sub.textContent = `${metrics.items.length} 檔持股`;
+    }
+  }
+});
