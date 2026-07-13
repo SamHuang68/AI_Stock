@@ -398,7 +398,19 @@ def _get_tw_names():
     today = _date.today().strftime('%Y%m%d')
     if _TW_NAMES['date'] == today and _TW_NAMES['map']:
         return _TW_NAMES['map']
+    
     m = {}
+    # ── 本地備份讀取防線 ────────────────────────────────────
+    # 優先載入上次成功儲存的名稱對照表，確保即使 OpenAPI 斷連或限流，依然有完整的股票代號可用
+    data_dir = os.path.join(_BASE, 'data')
+    backup_path = os.path.join(data_dir, 'tw_names_backup.json')
+    if os.path.exists(backup_path):
+        try:
+            with open(backup_path, 'r', encoding='utf-8') as f:
+                m = json.load(f)
+        except Exception:
+            pass
+
     def scan(url, code_keys, name_keys):
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
@@ -427,13 +439,29 @@ def _get_tw_names():
                     m[code] = name
         except Exception as e:
             print(f'[names] scan failed {url}: {e}')
+
     scan('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL', ('Code',), ('Name', '名稱', '證券名稱'))
     scan('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes',
          ('SecuritiesCompanyCode', 'Code', 'CompanyCode', '公司代號'),
          ('CompanyName', 'SecuritiesCompanyName', '公司名稱', '公司簡稱', 'Name', '名稱'))
     for ds in ('t187ap05_L', 't187ap05_O'):
         scan(f'https://openapi.twse.com.tw/v1/opendata/{ds}', ('公司代號', 'Code'), ('公司名稱', '公司簡稱', 'Name'))
+    
     if m:
+        # ── 「只增不減」安全覆寫 ──────────────────────────────
+        # 只有在新掃描後的資料總數大於等於舊備份時才寫入，防範部分 API 失敗導致備份檔萎縮
+        try:
+            old_count = 0
+            if os.path.exists(backup_path):
+                with open(backup_path, 'r', encoding='utf-8') as f:
+                    old_count = len(json.load(f))
+            if len(m) >= old_count:
+                os.makedirs(data_dir, exist_ok=True)
+                with open(backup_path, 'w', encoding='utf-8') as f:
+                    json.dump(m, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print('[names] backup save failed:', e)
+            
         _TW_NAMES['date'] = today; _TW_NAMES['map'] = m
     return m
 
