@@ -139,9 +139,12 @@
   function applyToPos(code, cur) {
     if (cur == null || !isFinite(cur)) return;
     if (typeof S !== 'undefined' && S.positions && S.positions[code]) {
-      S.positions[code].lastPrice = cur;
-      S.positions[code].lastUpdate = Date.now();
-      _posDirty = true;
+      const p = S.positions[code];
+      if (p.lastPrice !== cur) {
+        p.lastPrice = cur;
+        p.lastUpdate = Date.now();
+        _posDirty = true;
+      }
     }
   }
   let _posDirty = false;
