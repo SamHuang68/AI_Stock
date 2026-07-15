@@ -273,10 +273,15 @@ def _check_composite(r, cfg):
     prev = r.get('_last_fired')
     r['_last_fired'] = satisfied
     if satisfied and not prev:
+        now = time.time()
+        # 5 分鐘 (300 秒) 冷卻防範震盪重複推播
+        if now - r.get('_last_fired_time', 0) < 300:
+            return True
+        r['_last_fired_time'] = now
         combine = (r.get('combine') or 'AND').upper()
         text = f"🎯 {r.get('sym')} 複合警示成立（{combine}）：{detail}　{r.get('note', '')}".strip()
         notify(cfg, text)
-        _state['fired'].append({'t': time.time(), 'text': text})
+        _state['fired'].append({'t': now, 'text': text})
         _state['fired'] = _state['fired'][-100:]
     return True
 
@@ -314,10 +319,15 @@ def _check_once():
         crossed = (typ == 'cross_up' and prev == 'below' and side == 'above') or \
                   (typ == 'cross_down' and prev == 'above' and side == 'below')
         if crossed:
+            now = time.time()
+            # 5 分鐘 (300 秒) 冷卻防範在價格突破線來回震盪時的警報轟炸
+            if now - r.get('_last_fired_time', 0) < 300:
+                continue
+            r['_last_fired_time'] = now
             arrow = '突破↑ 過壓力' if typ == 'cross_up' else '跌破↓ 破支撐'
             text = f"⚠️ {r.get('sym')} {arrow} {target} (現價 {price})  {r.get('note', '')}".strip()
             notify(cfg, text)
-            _state['fired'].append({'t': time.time(), 'text': text})
+            _state['fired'].append({'t': now, 'text': text})
             _state['fired'] = _state['fired'][-100:]
     if changed:
         save_rules(rules)
