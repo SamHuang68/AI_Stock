@@ -310,12 +310,34 @@ def _check_once():
             _state['last_quotes'][r.get('sym')] = price
         target = float(r.get('price', 0))
         typ = r.get('type', 'cross_up')
-        side = 'above' if price >= target else 'below'
         prev = r.get('_last_side')
-        r['_last_side'] = side
-        changed = True
         if prev is None:
-            continue  # 第一次只記錄基準，不觸發
+            # 第一次初始化，不觸發
+            side = 'above' if price >= target else 'below'
+            r['_last_side'] = side
+            changed = True
+            continue
+            
+        # 遲滯門檻 (Hysteresis Band = 1.0%)：過濾臨界點微幅抖動。
+        # 只有在價格顯著向相反方向回退 1% 時，才允許重置狀態供下一次觸發。
+        hysteresis = 0.01
+        if prev == 'above':
+            if typ == 'cross_up':
+                # 只有當價格跌回低於壓力位 1% (即限額線) 時，才允許重置為 below 供下次觸發突破
+                side = 'below' if price < target * (1.0 - hysteresis) else 'above'
+            else:
+                side = 'below' if price < target else 'above'
+        else: # prev == 'below'
+            if typ == 'cross_down':
+                # 只有當價格漲回高於支撐位 1% 時，才允許重置為 above 供下次觸發跌破
+                side = 'above' if price > target * (1.0 + hysteresis) else 'below'
+            else:
+                side = 'above' if price >= target else 'below'
+
+        if side != prev:
+            r['_last_side'] = side
+            changed = True
+            
         crossed = (typ == 'cross_up' and prev == 'below' and side == 'above') or \
                   (typ == 'cross_down' and prev == 'above' and side == 'below')
         if crossed:
