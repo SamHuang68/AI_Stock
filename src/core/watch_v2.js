@@ -355,9 +355,11 @@ const PRESETS = [
 function ensureStockWatch(sym, mkt) {
   const code = sym.toUpperCase().trim();
   if (!S.watches[code]) {
+    const wlItem = (typeof S !== 'undefined' && S.wl) ? S.wl.find(x => x.t === code) : null;
     S.watches[code] = {
       sym: code,
       mkt: mkt || S.mkt || 'TW',
+      name: wlItem?.name || '',
       notes: '',
       addedAt: Date.now(),
       signals: [],
@@ -545,15 +547,42 @@ function renderStockCard(w) {
   const lastPrice = isActive ? S.data?.candles?.[S.data.candles.length-1]?.close
                               : (w.signals[0]?.lastEval?.price);
 
+  // ── 觀察股中文名稱反查與補完機制 ──
+  if (!w.name) {
+    const wlItem = (typeof S !== 'undefined' && S.wl) ? S.wl.find(x => x.t === w.sym) : null;
+    if (wlItem && wlItem.name) {
+      w.name = wlItem.name;
+      if (typeof saveWatches === 'function') { try { saveWatches(); } catch {} }
+    } else {
+      if (!w._fetchingName) {
+        w._fetchingName = true;
+        fetch((window.SERVER || 'http://localhost:18432') + '/search?q=' + encodeURIComponent(w.sym))
+          .then(r => r.json())
+          .then(res => {
+            const found = res?.results?.find(x => x.t === w.sym);
+            if (found && found.name) {
+              w.name = found.name;
+              if (typeof saveWatches === 'function') { try { saveWatches(); } catch {} }
+              if (typeof window.renderWatchPanel === 'function') { try { window.renderWatchPanel(); } catch {} }
+            }
+          }).catch(() => {}).finally(() => { delete w._fetchingName; });
+      }
+    }
+  }
+  const companyName = w.name || w.sym;
+
   let h = `<div style="border-bottom:2px solid var(--border);background:${isActive?'var(--gold-s)':'transparent'}">`;
 
   // ── Card header (clickable to load) ──
   h += `<div data-act="goto-watch" data-sym="${w.sym}" data-mkt="${w.mkt || 'TW'}"
        style="display:flex;justify-content:space-between;align-items:center;padding:9px 12px;cursor:pointer;gap:6px"
        title="點擊載入 ${w.sym} 圖表">
-    <div style="display:flex;align-items:baseline;gap:8px;min-width:0;flex:1">
-      <span style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:${isActive?'var(--gold)':'var(--thi)'};letter-spacing:.5px">${w.sym}</span>
-      <span style="font-family:monospace;font-size:9.5px;color:var(--tlo)">${lastPrice != null ? lastPrice.toFixed(2) : '—'}</span>
+    <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">
+      <div style="display:flex;flex-direction:column;min-width:0;flex:1">
+        <span style="font-size:13px;font-weight:700;color:${isActive?'var(--gold)':'var(--thi)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${companyName}</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--tlo);margin-top:2px;letter-spacing:.3px">${w.sym}</span>
+      </div>
+      <span style="font-family:monospace;font-size:11px;font-weight:600;color:var(--thi);white-space:nowrap">${lastPrice != null ? lastPrice.toFixed(2) : '—'}</span>
     </div>
     <div style="display:flex;align-items:center;gap:5px">
       <span style="font-family:monospace;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:${biasM.bg};color:${biasM.col};white-space:nowrap">${conf.biasIcon} ${conf.biasLbl}</span>
