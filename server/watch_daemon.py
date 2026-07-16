@@ -213,20 +213,65 @@ def check_once():
         for sig in sigs:
             status, detail = _eval(sig.get('strategy'), ind, sig.get('params'))
             key = f"{code}:{sig.get('id')}"
-            prev = state.get(key)
-            if status in ('trigger', 'broken') and prev != status:
+            
+            # 讀取與標準化舊狀態
+            raw_prev = state.get(key)
+            if isinstance(raw_prev, dict):
+                prev_status = raw_prev.get('status')
+                last_fired = raw_prev.get('last_fired_time', 0)
+                fired_px = raw_prev.get('fired_price')
+            else:
+                prev_status = raw_prev
+                last_fired = 0
+                fired_px = None
+                
+            now = time.time()
+            cur_px = ind['close']
+            
+            # --- 1. 觸發狀態升級 ---
+            if status in ('trigger', 'broken') and prev_status != status:
+                # 5 分鐘 (300 秒) 冷卻防線
+                if now - last_fired < 300:
+                    # 依然更新狀態防止重複判定，但本次跳過發送
+                    state[key] = {
+                        'status': status,
+                        'last_fired_time': last_fired,  # 保留上一次的觸發時間
+                        'fired_price': fired_px or cur_px
+                    }
+                    continue
+                
+                # 發送警報
                 icon = '🎯' if status == 'trigger' else '⚠️'
                 lbl = _STRAT_LBL.get(sig.get('strategy'), sig.get('strategy'))
-                text = f"{icon} {code} — {lbl}：{detail}（現價 {ind['close']:.2f}）"
+                text = f"{icon} {code} — {lbl}：{detail}（現價 {cur_px:.2f}）"
                 if alert_daemon:
                     alert_daemon.notify(cfg, text, subject=f'WATCH 訊號 {code}')
                 _log(text)
-                _state['fired'].append({'t': time.time(), 'text': text})
+                _state['fired'].append({'t': now, 'text': text})
                 _state['fired'] = _state['fired'][-100:]
-                state[key] = status
+                
+                state[key] = {
+                    'status': status,
+                    'last_fired_time': now,
+                    'fired_price': cur_px
+                }
                 fired += 1
-            elif status not in ('trigger', 'broken') and prev:
-                del state[key]
+                
+            # --- 2. 重置狀態過濾 (Hysteresis) ---
+            elif status not in ('trigger', 'broken') and prev_status:
+                # 遲滯過濾：只有當最新價格與觸發時價格相比，變動大於 1.0% 時，才允許重置
+                if fired_px is not None:
+                    pct_change = abs(cur_px - fired_px) / fired_px
+                    if pct_change < 0.01:
+                        # 變動不夠大，拒絕重置狀態！強行保持原狀態
+                        continue
+                
+                # 變動夠大或無紀錄，重置為待機狀態
+                state[key] = {
+                    'status': None,
+                    'last_fired_time': last_fired,  # 保留歷史觸發時間供冷卻參考
+                    'fired_price': None
+                }
     _save_state(state)
     _state['last_run'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     if fired:
