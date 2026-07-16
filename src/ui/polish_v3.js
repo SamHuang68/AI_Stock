@@ -80,15 +80,23 @@ function _isTwSym(s) { return window.Colors ? Colors.isTW(s) : (/^\d/.test(Strin
 .wlchip-grip { flex-shrink: 0; }
 .wlchip-t {
   display: block !important;
-  font-size: 11px !important;
-  line-height: 1.1 !important;
-  letter-spacing: .3px !important;
+  font-size: 10px !important;
+  line-height: 1.05 !important;
+  letter-spacing: .2px !important;
+}
+.wlchip-c {
+  display: block !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 7.5px !important;
+  color: var(--tlo) !important;
+  line-height: 1 !important;
+  margin-top: 0.5px !important;
 }
 .wlchip-p {
   display: block !important;
   font-size: 8.5px !important;
   line-height: 1 !important;
-  margin-top: 1px !important;
+  margin-top: 0.5px !important;
 }
 .wlchip > .wlchip-t,
 .wlchip > .wlchip-p {
@@ -98,6 +106,7 @@ function _isTwSym(s) { return window.Colors ? Colors.isTW(s) : (/^\d/.test(Strin
 .wlchip-stack {
   display: flex; flex-direction: column; align-items: flex-start;
   justify-content: center; line-height: 1; min-width: 0; flex-shrink: 1;
+  padding: 2px 0 !important;
 }
 .wlchip-rm { flex-shrink: 0; }
 
@@ -693,14 +702,33 @@ function renderKeystatsSection(ks) {
     const ct = document.getElementById('wlchips');
     if (!ct) return;
     ct.querySelectorAll('.wlchip').forEach(chip => {
+      const sym = chip.dataset.sym;
+      const mkt = chip.dataset.mkt;
+      const w = (typeof S !== 'undefined' && S.wl) ? S.wl.find(x => x.t === sym && x.m === mkt) : null;
+      const hasName = w && w.name && w.name !== w.t;
+
       if (chip.dataset._stacked) return;
+
       const t = chip.querySelector('.wlchip-t');
       const p = chip.querySelector('.wlchip-p');
       if (!t || !p || t.parentElement !== chip) return;
+
       const stack = document.createElement('div');
       stack.className = 'wlchip-stack';
       chip.insertBefore(stack, t);
-      stack.appendChild(t);
+
+      if (hasName) {
+        t.textContent = w.name;
+        stack.appendChild(t);
+        const codeSpan = document.createElement('span');
+        codeSpan.className = 'wlchip-c';
+        codeSpan.textContent = w.t;
+        stack.appendChild(codeSpan);
+      } else {
+        t.textContent = sym;
+        stack.appendChild(t);
+      }
+
       stack.appendChild(p);
       chip.dataset._stacked = '1';
     });
