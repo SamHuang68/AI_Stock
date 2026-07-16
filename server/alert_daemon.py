@@ -365,9 +365,23 @@ def _loop():
         time.sleep(max(15, int(cfg.get('poll_seconds', 60))))
 
 
+_lock_socket = None
+
 def start():
+    global _lock_socket
     if _state['thread'] and _state['thread'].is_alive():
         return
+    # 嘗試佔用 Port 18433 作為進程單例鎖，防止背景殘存重複實例發信
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(('127.0.0.1', 18433))
+        s.listen(1)
+        _lock_socket = s
+    except OSError:
+        _log("[alert] alert_daemon already running on port 18433, skip start.")
+        return
+
     _state['stop'] = False
     t = threading.Thread(target=_loop, daemon=True, name='alert-daemon')
     t.start()

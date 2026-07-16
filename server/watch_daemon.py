@@ -288,9 +288,23 @@ def _loop():
         time.sleep(max(60, int(cfg.get('watch_poll_seconds', 300))))
 
 
+_lock_socket = None
+
 def start():
+    global _lock_socket
     if _state['thread'] and _state['thread'].is_alive():
         return
+    # 嘗試佔用 Port 18434 作為進程單例鎖，防止背景殘存重複實例發信
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(('127.0.0.1', 18434))
+        s.listen(1)
+        _lock_socket = s
+    except OSError:
+        _log("[watch] watch_daemon already running on port 18434, skip start.")
+        return
+
     _state['stop'] = False
     t = threading.Thread(target=_loop, daemon=True, name='watch-daemon')
     t.start()
