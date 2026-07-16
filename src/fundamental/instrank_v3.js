@@ -68,9 +68,91 @@
       : `<div style="padding:14px;color:#64748b">無資料（T86 多為盤後發布，建議收盤後查）。</div>`)
       + `<div class="ir-note">外資買超榜＝權值與 AI 供應鏈主力動向；投信買超＝中小成長股認養。連續買超天數越長代表趨勢性買盤。點列載入線型。台股紅=買超綠=賣超。</div>`;
     bindTabs();
-    body.querySelectorAll('.ir-row').forEach(el => el.onclick = () => {
-      const c = el.getAttribute('data-code');
-      if (typeof loadSym === 'function') { loadSym(c, 'TW'); close(); }
+    // ── Tooltip 元素創建與事件註冊 ──
+    let tip = document.getElementById('ir-tooltip');
+    if (!tip) {
+      tip = document.createElement('div');
+      tip.id = 'ir-tooltip';
+      document.body.appendChild(tip);
+      const ts = document.createElement('style');
+      ts.textContent = `
+        #ir-tooltip {
+          position: fixed; pointer-events: none; z-index: 10000; display: none;
+          background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(8px);
+          border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px;
+          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6); padding: 8px 12px;
+          color: #e2e8f0; font-family: monospace; font-size: 11px; line-height: 1.45;
+          min-width: 140px;
+        }
+        .ir-tip-title { font-weight: 700; color: #94a3b8; font-size: 9px; margin-bottom: 2px; }
+        .ir-tip-px { font-size: 14px; font-weight: 700; color: #fff; }
+        .ir-tip-chg { font-weight: 700; font-size: 11px; margin-left: 6px; }
+      `;
+      document.head.appendChild(ts);
+    }
+
+    let hoveredCode = null;
+
+    body.querySelectorAll('.ir-row').forEach(el => {
+      const code = el.getAttribute('data-code');
+      const name = el.querySelector('span')?.textContent || '';
+
+      el.onclick = () => {
+        hoveredCode = null;
+        tip.style.display = 'none';
+        if (typeof loadSym === 'function') { loadSym(code, 'TW'); close(); }
+      };
+
+      el.addEventListener('mouseenter', async (e) => {
+        hoveredCode = code;
+        tip.style.display = 'block';
+        tip.innerHTML = `<div class="ir-tip-title">${code} ${name}</div><div style="color:#64748b;font-size:10px">載入中…</div>`;
+        
+        tip.style.left = (e.clientX + 14) + 'px';
+        tip.style.top = (e.clientY + 14) + 'px';
+
+        try {
+          const res = await fetch(`${SRV}/twquote?code=${encodeURIComponent(code)}`, { cache: 'no-store' });
+          if (!res.ok) return;
+          const q = await res.json();
+          if (hoveredCode !== code) return;
+
+          if (q && q.price > 0) {
+            const px = q.price;
+            let chgPct = 0;
+            if (q.prevClose > 0) {
+              chgPct = (px - q.prevClose) / q.prevClose * 100;
+            }
+            const color = chgPct > 0 ? 'var(--red)' : chgPct < 0 ? 'var(--green)' : 'var(--thi)';
+            const chgTxt = (chgPct >= 0 ? '+' : '') + chgPct.toFixed(2) + '%';
+            
+            tip.innerHTML = `
+              <div class="ir-tip-title">${code} ${name}</div>
+              <div style="display:flex;align-items:baseline;margin-top:2px">
+                <span class="ir-tip-px">${px.toFixed(2)}</span>
+                <span class="ir-tip-chg" style="color:${color}">${chgTxt}</span>
+              </div>
+              <div style="font-size:8px;color:#64748b;margin-top:4px">昨收 ${q.prevClose ? q.prevClose.toFixed(2) : '—'}</div>
+            `;
+          } else {
+            tip.innerHTML = `<div class="ir-tip-title">${code} ${name}</div><div style="color:#ef4444;font-size:10px">無報價</div>`;
+          }
+        } catch (err) {
+          if (hoveredCode === code) {
+            tip.innerHTML = `<div class="ir-tip-title">${code} ${name}</div><div style="color:#ef4444;font-size:10px">連線錯誤</div>`;
+          }
+        }
+      });
+
+      el.addEventListener('mousemove', (e) => {
+        tip.style.left = (e.clientX + 14) + 'px';
+        tip.style.top = (e.clientY + 14) + 'px';
+      });
+
+      el.addEventListener('mouseleave', () => {
+        hoveredCode = null;
+        tip.style.display = 'none';
+      });
     });
   }
 
@@ -96,7 +178,12 @@
     m.style.display = 'flex';
     render();
   }
-  function close() { const m = document.getElementById('ir-modal'); if (m) m.style.display = 'none'; }
+  function close() {
+    const m = document.getElementById('ir-modal');
+    if (m) m.style.display = 'none';
+    const tip = document.getElementById('ir-tooltip');
+    if (tip) tip.style.display = 'none';
+  }
 
   window.instRankOpen = open;
   window.instRankClose = close;
