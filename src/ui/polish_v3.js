@@ -171,6 +171,7 @@ const MKT_INDICES = [
   {sym:'^TWII', name:'加權'},
   {sym:'__TXF__', name:'台指期'},   // TAIFEX 即時(含夜盤)，特例來源 /txf
   {sym:'^TWOII', name:'櫃買'},
+  {sym:'__MARGIN_RATIO__', name:'融資維持'},
   {sym:'^SOX',  name:'費半',  redUp:false},   // 美股:漲綠跌紅
   {sym:'^GSPC', name:'S&P500',redUp:false},
   {sym:'^IXIC', name:'NASDAQ',redUp:false},
@@ -236,7 +237,7 @@ function fmtIdx(v) {
 
 async function refreshMktBar() {
   try {
-    const syms = MKT_INDICES.filter(m => m.sym !== '__TXF__').map(m => m.sym).join(',');
+    const syms = MKT_INDICES.filter(m => m.sym !== '__TXF__' && m.sym !== '__MARGIN_RATIO__').map(m => m.sym).join(',');
     // v3.3 改 range=5d：原 range=2d 只有兩根 K，遇到 Yahoo 日線資料落後
     //   於 regularMarketPrice 時無法做時間軸交叉驗證，會直接用「昨日的
     //   昨日 vs 前日」算出昨日的 % 變化（櫃買/日經顯示 0.00% 即此 bug）。
@@ -299,6 +300,50 @@ async function refreshMktBar() {
   try { await refreshTwIndexCells(); } catch (e) { console.warn('[polish-v3] twindex failed:', e); }
   // 台指期(含夜盤) — TAIFEX 特例來源
   try { await refreshTxfCell(); } catch (e) { console.warn('[polish-v3] txf failed:', e); }
+  // 大盤融資維持率 — 本地特例數據
+  try { await refreshMarginRatioCell(); } catch (e) { console.warn('[polish-v3] margin ratio cell failed:', e); }
+}
+
+async function refreshMarginRatioCell() {
+  try {
+    const r = await fetch(`${SERVER_P}/yf/__MARGIN_RATIO__?range=5d`, {cache:'no-store'});
+    if (!r.ok) return;
+    const d = await r.json();
+    const res = d?.chart?.result?.[0];
+    if (!res) return;
+    const tsArr = res.timestamp || [];
+    const rawCloses = res.indicators?.quote?.[0]?.close || [];
+    const valid = [];
+    for (let i = 0; i < Math.min(tsArr.length, rawCloses.length); i++) {
+      if (rawCloses[i] != null && isFinite(rawCloses[i])) {
+        valid.push(rawCloses[i]);
+      }
+    }
+    if (valid.length < 1) return;
+    const cur = valid[valid.length - 1];
+    const prev = valid.length >= 2 ? valid[valid.length - 2] : cur;
+    const delta = cur - prev;
+    const cell = document.querySelector(`[data-mkt-sym="__MARGIN_RATIO__"]`);
+    if (!cell) return;
+    
+    cell.classList.remove('loading');
+    cell.querySelector('.px').textContent = cur.toFixed(2) + '%';
+    
+    const dir = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+    const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
+    const _mc = window.Colors ? Colors.dirRU(true, delta) : ''; // 增加為紅、減少為綠
+    
+    const dEl = cell.querySelector('.delta');
+    dEl.className = 'delta ' + dir;
+    if (_mc) dEl.style.color = _mc;
+    dEl.textContent = sign + Math.abs(delta).toFixed(2) + '%';
+    
+    const ch = cell.querySelector('.ch');
+    ch.className = 'ch ' + dir;
+    if (_mc) ch.style.color = _mc;
+    const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '－';
+    ch.textContent = arrow + (prev > 0 ? (delta / prev * 100).toFixed(2) : '0.00') + '%';
+  } catch (e) { console.warn('[polish-v3] margin ratio cell refresh failed:', e); }
 }
 
 // TWSE MIS 即時：加權(t00)→^TWII、櫃買(o00)→^TWOII。

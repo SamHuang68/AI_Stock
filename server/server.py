@@ -908,10 +908,94 @@ YF_HEADERS = {
 YF_RANGE = os.environ.get('YF_RANGE', '5y')   # 5y 約 1250 K 線；可設 max / 10y / 2y
 YF_INTERVAL = os.environ.get('YF_INTERVAL', '1d')
 
+def get_margin_ratio_chart_json():
+    """從 SQLite bars 表載入大盤融資維持率歷史時序，並非同步觸發數據更新。"""
+    try:
+        import datastore
+        # 啟動背景線程更新/同步最新數據
+        threading.Thread(target=datastore.backfill_margin_ratio, daemon=True).start()
+        
+        rows = datastore.get_margin_ratio_bars()
+        if not rows:
+            # 若無數據，先同步一次 (同步等待)
+            datastore.backfill_margin_ratio()
+            rows = datastore.get_margin_ratio_bars()
+            
+        timestamps = []
+        opens = []
+        highs = []
+        lows = []
+        closes = []
+        volumes = []
+        for ts, o, h, l, cl, v in rows:
+            timestamps.append(ts)
+            opens.append(o)
+            highs.append(h)
+            lows.append(l)
+            closes.append(cl)
+            volumes.append(int(v or 0))
+            
+        last_px = closes[-1] if closes else 160.0
+        prev_close = closes[-2] if len(closes) >= 2 else last_px
+        last_ts = timestamps[-1] if timestamps else int(time.time())
+        
+        res = {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {
+                            "currency": "TWD",
+                            "symbol": "__MARGIN_RATIO__",
+                            "exchangeName": "TAI",
+                            "instrumentType": "INDEX",
+                            "firstTradeDate": timestamps[0] if timestamps else 1420070400,
+                            "regularMarketTime": last_ts,
+                            "gmtoffset": 28800,
+                            "timezone": "TST",
+                            "exchangeTimezoneName": "Asia/Taipei",
+                            "regularMarketPrice": last_px,
+                            "chartPreviousClose": prev_close,
+                            "previousClose": prev_close,
+                            "scale": 3,
+                            "priceHint": 2,
+                            "dataGranularity": "1d",
+                            "range": "max",
+                            "validRanges": ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
+                        },
+                        "timestamp": timestamps,
+                        "indicators": {
+                            "quote": [
+                                {
+                                    "open": opens,
+                                    "high": highs,
+                                    "low": lows,
+                                    "close": closes,
+                                    "volume": volumes
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "error": None
+            }
+        }
+        return json.dumps(res).encode('utf-8')
+    except Exception as e:
+        print('[server] get_margin_ratio_chart_json failed:', e)
+        return b'{"chart":{"result":null,"error":"failed"}}'
+
 def fetch_one(sym, rng=None, interval=None, nocache=False):
     """Fetch Yahoo chart JSON for sym. nocache=True bypasses _cache entirely
     (used by wl_live_v3.js so each watchlist poll always gets fresh data —
     the LRUCache has no TTL so cached entries would otherwise serve forever)."""
+    if sym == '__MARGIN_RATIO__':
+        try:
+            data = get_margin_ratio_chart_json()
+            return sym, data, False
+        except Exception as e:
+            print('[server] fetch_one for __MARGIN_RATIO__ failed:', e)
+            return sym, None, False
+
     rng = rng or YF_RANGE
     interval = interval or YF_INTERVAL
     cache_key = f'{sym}|{interval}|{rng}'
@@ -1769,6 +1853,9 @@ class Handler(SimpleHTTPRequestHandler):
         q = (qs.get('q', [''])[0] or '').strip()
         if not q:
             self._ok(b'{"results":[]}'); return
+        if q.upper() in ('__MARGIN_RATIO__', '融資維持率', '大盤融資維持率'):
+            self._ok(json.dumps({'results': [{'t': '__MARGIN_RATIO__', 'name': '大盤融資維持率', 'm': 'TW'}]}, ensure_ascii=False).encode())
+            return
         try:
             names = _get_tw_names()           # {code: name}
         except Exception:
@@ -2025,6 +2112,16 @@ class Handler(SimpleHTTPRequestHandler):
     # v3.0 endpoints
     # ──────────────────────────────────────────────────────────
     def _handle_keystats(self, sym):
+        if sym == '__MARGIN_RATIO__':
+            res = {
+                'shortName': '大盤融資維持率',
+                'longName': '大盤融資維持率 (Margin Maintenance Ratio)',
+                'currency': 'TWD',
+                'regularMarketPrice': 163.5,
+                'marketCap': None
+            }
+            self._ok(json.dumps(res, ensure_ascii=False).encode('utf-8'))
+            return
         """Fetch market cap / P/E / EPS / PEG / growth.
         v3.5 strategy (because Yahoo v10 quoteSummary now requires crumb auth):
           1) yfinance.Ticker(sym).info  — handles cookie/crumb internally (PRIMARY)
