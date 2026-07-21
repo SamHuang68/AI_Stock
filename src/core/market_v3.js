@@ -17,6 +17,8 @@
     // 市場判定(永不失敗、對新代號也正確):US 表命中→US;TW 表/格式→TW;字母→US。
     of: function (code) {
       code = String(code || '').toUpperCase();
+      // 合成指數／本地序列：台股語意（紅漲綠跌、不附 .TW）
+      if (code === '__MARGIN_RATIO__' || code === '__TXF__') return 'TW';
       if (_us && _us[code]) return 'US';
       if (_tw && _tw[code]) return 'TW';
       return isTwFmt(code) ? 'TW' : 'US';

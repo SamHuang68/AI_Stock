@@ -908,78 +908,11 @@ YF_HEADERS = {
 YF_RANGE = os.environ.get('YF_RANGE', '5y')   # 5y 約 1250 K 線；可設 max / 10y / 2y
 YF_INTERVAL = os.environ.get('YF_INTERVAL', '1d')
 
-def get_margin_ratio_chart_json():
-    """從 SQLite bars 表載入大盤融資維持率歷史時序，並非同步觸發數據更新。"""
+def get_margin_ratio_chart_json(rng=None):
+    """大盤融資維持率 Yahoo-compatible chart JSON（多年歷史 + 今日 TWSE）。"""
     try:
-        import datastore
-        # 啟動背景線程更新/同步最新數據
-        threading.Thread(target=datastore.backfill_margin_ratio, daemon=True).start()
-        
-        rows = datastore.get_margin_ratio_bars()
-        if not rows:
-            # 若無數據，先同步一次 (同步等待)
-            datastore.backfill_margin_ratio()
-            rows = datastore.get_margin_ratio_bars()
-            
-        timestamps = []
-        opens = []
-        highs = []
-        lows = []
-        closes = []
-        volumes = []
-        for ts, o, h, l, cl, v in rows:
-            timestamps.append(ts)
-            opens.append(o)
-            highs.append(h)
-            lows.append(l)
-            closes.append(cl)
-            volumes.append(int(v or 0))
-            
-        last_px = closes[-1] if closes else 160.0
-        prev_close = closes[-2] if len(closes) >= 2 else last_px
-        last_ts = timestamps[-1] if timestamps else int(time.time())
-        
-        res = {
-            "chart": {
-                "result": [
-                    {
-                        "meta": {
-                            "currency": "TWD",
-                            "symbol": "__MARGIN_RATIO__",
-                            "exchangeName": "TAI",
-                            "instrumentType": "INDEX",
-                            "firstTradeDate": timestamps[0] if timestamps else 1420070400,
-                            "regularMarketTime": last_ts,
-                            "gmtoffset": 28800,
-                            "timezone": "TST",
-                            "exchangeTimezoneName": "Asia/Taipei",
-                            "regularMarketPrice": last_px,
-                            "chartPreviousClose": prev_close,
-                            "previousClose": prev_close,
-                            "scale": 3,
-                            "priceHint": 2,
-                            "dataGranularity": "1d",
-                            "range": "max",
-                            "validRanges": ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
-                        },
-                        "timestamp": timestamps,
-                        "indicators": {
-                            "quote": [
-                                {
-                                    "open": opens,
-                                    "high": highs,
-                                    "low": lows,
-                                    "close": closes,
-                                    "volume": volumes
-                                }
-                            ]
-                        }
-                    }
-                ],
-                "error": None
-            }
-        }
-        return json.dumps(res).encode('utf-8')
+        import margin_ratio as mr
+        return mr.chart_json(range_key=(rng or 'max'))
     except Exception as e:
         print('[server] get_margin_ratio_chart_json failed:', e)
         return b'{"chart":{"result":null,"error":"failed"}}'
@@ -988,13 +921,13 @@ def fetch_one(sym, rng=None, interval=None, nocache=False):
     """Fetch Yahoo chart JSON for sym. nocache=True bypasses _cache entirely
     (used by wl_live_v3.js so each watchlist poll always gets fresh data —
     the LRUCache has no TTL so cached entries would otherwise serve forever)."""
-    if sym == '__MARGIN_RATIO__':
+    if sym == '__MARGIN_RATIO__' or sym.startswith('__MARGIN_RATIO__'):
         try:
-            data = get_margin_ratio_chart_json()
-            return sym, data, False
+            data = get_margin_ratio_chart_json(rng)
+            return '__MARGIN_RATIO__', data, False
         except Exception as e:
             print('[server] fetch_one for __MARGIN_RATIO__ failed:', e)
-            return sym, None, False
+            return '__MARGIN_RATIO__', None, False
 
     rng = rng or YF_RANGE
     interval = interval or YF_INTERVAL
@@ -1534,6 +1467,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_stockfut()
         elif p == '/twindex' or p.startswith('/twindex?'):
             self._handle_twindex()
+        elif p == '/margin_ratio' or p.startswith('/margin_ratio?'):
+            self._handle_margin_ratio()
         elif p == '/search' or p.startswith('/search?'):
             self._handle_search()
         elif p == '/ai-key/status':
@@ -1614,6 +1549,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_universe_refresh()
         elif p == '/datasource/refresh':
             self._handle_datasource_refresh()
+        elif p == '/margin_ratio/backfill':
+            self._handle_margin_ratio_backfill()
         elif p == '/ai-report':
             self._handle_ai_report()
         elif p == '/etf-reason':
@@ -2112,15 +2049,38 @@ class Handler(SimpleHTTPRequestHandler):
     # v3.0 endpoints
     # ──────────────────────────────────────────────────────────
     def _handle_keystats(self, sym):
-        if sym == '__MARGIN_RATIO__':
-            res = {
-                'shortName': '大盤融資維持率',
-                'longName': '大盤融資維持率 (Margin Maintenance Ratio)',
-                'currency': 'TWD',
-                'regularMarketPrice': 163.5,
-                'marketCap': None
-            }
-            self._ok(json.dumps(res, ensure_ascii=False).encode('utf-8'))
+        raw_sym = (sym or '').strip()
+        base_sym = raw_sym.replace('.TWO', '').replace('.TW', '')
+        if base_sym == '__MARGIN_RATIO__' or raw_sym.startswith('__MARGIN_RATIO__'):
+            try:
+                import margin_ratio as mr
+                m = mr.meta_summary()
+                res = {
+                    'shortName': m.get('name') or '大盤融資維持率',
+                    'longName': m.get('longName') or '大盤融資維持率 (Margin Maintenance Ratio)',
+                    'currency': 'TWD',
+                    'regularMarketPrice': m.get('current'),
+                    'regularMarketPreviousClose': m.get('previous'),
+                    'fiftyTwoWeekHigh': m.get('max'),
+                    'fiftyTwoWeekLow': m.get('min'),
+                    'marketCap': None,
+                    'marginMeta': {
+                        'count': m.get('count'),
+                        'firstDate': m.get('firstDate'),
+                        'lastDate': m.get('lastDate'),
+                        'avg': m.get('avg'),
+                        'delta': m.get('delta'),
+                        'deltaPct': m.get('deltaPct'),
+                        'riskZone': m.get('riskZone'),
+                        'riskZones': m.get('riskZones'),
+                        'formula': m.get('formula'),
+                        'source': m.get('source'),
+                        'reference': m.get('reference'),
+                    },
+                }
+                self._ok(json.dumps(res, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self._err('margin keystats failed: ' + str(e), 500)
             return
         """Fetch market cap / P/E / EPS / PEG / growth.
         v3.5 strategy (because Yahoo v10 quoteSummary now requires crumb auth):
@@ -4248,6 +4208,48 @@ class Handler(SimpleHTTPRequestHandler):
         if out['ok']:
             _cache.set(key, body)
         self._ok(body)
+
+    def _handle_margin_ratio_backfill(self):
+        """POST /margin_ratio/backfill — 背景回補歷史（full=1 從 2001 起）。"""
+        try:
+            length = int(self.headers.get('Content-Length', 0) or 0)
+            body = json.loads(self.rfile.read(length) or b'{}') if length else {}
+        except Exception:
+            body = {}
+        qs = parse_qs(urlparse(self.path).query)
+        full = bool(body.get('full')) or (qs.get('full', ['0'])[0] in ('1', 'true'))
+        max_days = body.get('max') or (qs.get('max', [None])[0])
+        md = int(max_days) if max_days else None
+        try:
+            import margin_ratio as mr
+            started = mr.start_background_backfill(full=full, max_days=md)
+            m = mr.meta_summary()
+            m['backfillStarted'] = bool(started)
+            self._ok(json.dumps(m, ensure_ascii=False).encode('utf-8'))
+        except Exception as e:
+            self._err('margin backfill failed: ' + str(e), 500)
+
+    def _handle_margin_ratio(self):
+        """GET /margin_ratio — 大盤融資維持率 meta（歷史深度、風險區、回補狀態）。
+           ?action=backfill&full=1 可觸發背景歷史回補。"""
+        qs = parse_qs(urlparse(self.path).query)
+        action = (qs.get('action', [''])[0] or '').strip().lower()
+        try:
+            import margin_ratio as mr
+            if action == 'backfill':
+                full = (qs.get('full', ['0'])[0] or '0') in ('1', 'true', 'yes')
+                max_days = qs.get('max', [None])[0]
+                md = int(max_days) if max_days else None
+                started = mr.start_background_backfill(full=full, max_days=md)
+                m = mr.meta_summary()
+                m['backfillStarted'] = bool(started)
+                self._ok(json.dumps(m, ensure_ascii=False).encode('utf-8'))
+                return
+            if action == 'today':
+                mr.refresh_today(force=True)
+            self._ok(json.dumps(mr.meta_summary(), ensure_ascii=False).encode('utf-8'))
+        except Exception as e:
+            self._err('margin_ratio failed: ' + str(e), 500)
 
     # ── 總經數據 (v3.9 P4) ─────────────────────────────────
     def _handle_macro(self, series):

@@ -560,7 +560,10 @@ async function loadSym(sym, mkt, silent) {
   clearInd();
 
   // Build YF ticker（^ 開頭=指數，如 ^TWII/^GSPC/^SOX，原樣不加 .TW）
-  const yfsym = (sym[0] === '^') ? sym : (mkt==='TW' ? sym+'.TW' : sym);
+  // 合成序列 __XXX__（大盤融資維持率等）亦不加 .TW，直接打本地 /yf 特例。
+  const yfsym = (sym[0] === '^' || (sym.startsWith('__') && sym.endsWith('__')))
+    ? sym
+    : (mkt==='TW' ? sym+'.TW' : sym);
   let rdef = currentRangeDef();
 
   // ── 日線壞源護航 (v3.9 Phase-0) ──────────────────────────────

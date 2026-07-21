@@ -216,7 +216,11 @@ const MKT_INDICES = [
     if (!cell) return;
     const sym = cell.getAttribute('data-mkt-sym');
     if (!sym || sym === '__TXF__') return;
-    if (typeof loadSym === 'function') loadSym(sym, 'US');
+    // 融資維持率等合成序列：交由 Market.of / loadSym 判定為 TW（紅漲綠跌），勿強制 US
+    if (typeof loadSym === 'function') {
+      const mkt = (typeof Market !== 'undefined' && Market.of) ? Market.of(sym) : 'US';
+      loadSym(sym, mkt);
+    }
   });
   // 點擊提示樣式
   const st = document.createElement('style');
@@ -311,6 +315,7 @@ async function refreshMarginRatioCell() {
     const d = await r.json();
     const res = d?.chart?.result?.[0];
     if (!res) return;
+    const meta = res.meta || {};
     const tsArr = res.timestamp || [];
     const rawCloses = res.indicators?.quote?.[0]?.close || [];
     const valid = [];
@@ -320,31 +325,180 @@ async function refreshMarginRatioCell() {
       }
     }
     if (valid.length < 1) return;
-    const cur = valid[valid.length - 1];
-    const prev = valid.length >= 2 ? valid[valid.length - 2] : cur;
-    const delta = cur - prev;
+    // 優先用 meta 即時／權威值（與主圖一致）
+    const cur = (meta.regularMarketPrice != null && isFinite(meta.regularMarketPrice))
+      ? meta.regularMarketPrice : valid[valid.length - 1];
+    const prev = (meta.regularMarketPreviousClose != null && isFinite(meta.regularMarketPreviousClose))
+      ? meta.regularMarketPreviousClose
+      : (meta.previousClose != null && isFinite(meta.previousClose))
+        ? meta.previousClose
+        : (valid.length >= 2 ? valid[valid.length - 2] : cur);
+    const delta = cur - prev;           // 百分點 (pp)
     const cell = document.querySelector(`[data-mkt-sym="__MARGIN_RATIO__"]`);
     if (!cell) return;
-    
+
     cell.classList.remove('loading');
     cell.querySelector('.px').textContent = cur.toFixed(2) + '%';
-    
+
+    // 風險色：≤140 偏警戒底色（不覆蓋漲跌色）
+    if (cur <= 140) cell.style.boxShadow = 'inset 0 0 0 1px rgba(239,68,68,.45)';
+    else if (cur <= 150) cell.style.boxShadow = 'inset 0 0 0 1px rgba(249,115,22,.35)';
+    else cell.style.boxShadow = '';
+
     const dir = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
     const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
     const _mc = window.Colors ? Colors.dirRU(true, delta) : ''; // 增加為紅、減少為綠
-    
+
     const dEl = cell.querySelector('.delta');
     dEl.className = 'delta ' + dir;
     if (_mc) dEl.style.color = _mc;
-    dEl.textContent = sign + Math.abs(delta).toFixed(2) + '%';
-    
+    // 日變化以百分點顯示（與維持率單位一致）
+    dEl.textContent = sign + Math.abs(delta).toFixed(2) + 'pp';
+
     const ch = cell.querySelector('.ch');
     ch.className = 'ch ' + dir;
     if (_mc) ch.style.color = _mc;
     const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '－';
     ch.textContent = arrow + (prev > 0 ? (delta / prev * 100).toFixed(2) : '0.00') + '%';
+    cell.title = '大盤融資維持率 ' + cur.toFixed(2) + '%（點擊載入歷史圖 · TWSE／MacroMicro 對齊公式）';
   } catch (e) { console.warn('[polish-v3] margin ratio cell refresh failed:', e); }
 }
+
+// ============================================================
+// 大盤融資維持率 — 圖表風險區間 + 歷史資訊列（MacroMicro 對齊）
+// ============================================================
+(function marginRatioChartEnhance() {
+  const ZONE_DEFAULTS = [
+    { level: 130, label: '危險 130', color: '#ef4444' },
+    { level: 140, label: '警戒 140', color: '#f97316' },
+    { level: 150, label: '偏弱 150', color: '#eab308' },
+    { level: 166, label: '門檻 166', color: '#38bdf8' },
+  ];
+  let _lines = [];
+  let _metaCache = null;
+
+  function clearLines() {
+    if (!S.chartSeries) { _lines = []; return; }
+    for (const pl of _lines) {
+      try { S.chartSeries.removePriceLine(pl); } catch (e) {}
+    }
+    _lines = [];
+  }
+
+  function ensureBanner() {
+    let el = document.getElementById('margin-ratio-banner');
+    if (el) return el;
+    const host = document.getElementById('chart-info') || document.getElementById('left');
+    if (!host) return null;
+    el = document.createElement('div');
+    el.id = 'margin-ratio-banner';
+    el.style.cssText = [
+      'display:none', 'margin:4px 8px 0', 'padding:6px 10px',
+      'font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+      'color:#cbd5e1', 'background:linear-gradient(90deg,rgba(56,189,248,.08),rgba(15,23,42,.2))',
+      'border:1px solid rgba(56,189,248,.25)', 'border-radius:4px',
+    ].join(';');
+    host.parentNode.insertBefore(el, host.nextSibling);
+    return el;
+  }
+
+  function hideBanner() {
+    const el = document.getElementById('margin-ratio-banner');
+    if (el) el.style.display = 'none';
+  }
+
+  function renderBanner(m) {
+    const el = ensureBanner();
+    if (!el || !m) return;
+    const zone = m.riskZone;
+    const zoneHtml = zone
+      ? `<span style="color:${zone.color || '#f97316'};font-weight:700">◎ ${zone.label || ''}</span>`
+      : `<span style="color:#4ade80">◎ 正常區（&gt;166%）</span>`;
+    const bf = m.backfill || {};
+    const bfNote = bf.running
+      ? ` · 回補中 ${bf.done || 0}/${bf.total || '?'} (${bf.phase || ''})`
+      : '';
+    el.innerHTML =
+      `<b style="color:#7dd3fc">大盤融資維持率</b> ` +
+      `<b style="color:#f8fafc;font-size:13px">${(m.current != null ? m.current.toFixed(2) : '--')}%</b> ` +
+      zoneHtml +
+      `<span style="color:#94a3b8"> · 歷史 ${m.firstDate || '—'} → ${m.lastDate || '—'}（${m.count || 0} 日）` +
+      ` · 區間 ${m.min != null ? m.min.toFixed(1) : '—'}–${m.max != null ? m.max.toFixed(1) : '—'}%` +
+      ` · 均 ${m.avg != null ? m.avg.toFixed(1) : '—'}%</span>` +
+      `<div style="color:#64748b;margin-top:2px">公式：${m.formula || 'Σ(融資市值,不含ETF)/融資金額×100'} · 來源 ${m.source || 'TWSE'}${bfNote}` +
+      ` · <a href="${m.reference || 'https://www.macromicro.me/charts/53117/taiwan-taiex-maintenance-margin'}" target="_blank" rel="noopener" style="color:#38bdf8">MacroMicro 對照</a>` +
+      ` · <button type="button" id="margin-bf-btn" style="cursor:pointer;background:#0f172a;color:#7dd3fc;border:1px solid #334155;border-radius:3px;padding:1px 6px;font:inherit">回補全歷史</button></div>`;
+    el.style.display = 'block';
+    const btn = document.getElementById('margin-bf-btn');
+    if (btn) {
+      btn.onclick = async () => {
+        btn.disabled = true;
+        btn.textContent = '啟動中…';
+        try {
+          await fetch(`${SERVER_P}/margin_ratio?action=backfill&full=1`, { cache: 'no-store' });
+          btn.textContent = '已背景回補';
+          setTimeout(() => applyMarginEnhance(true), 2500);
+        } catch (e) {
+          btn.textContent = '失敗';
+          btn.disabled = false;
+        }
+      };
+    }
+  }
+
+  function applyZones(zones) {
+    clearLines();
+    if (!S.chartSeries || typeof S.chartSeries.createPriceLine !== 'function') return;
+    const list = (zones && zones.length) ? zones : ZONE_DEFAULTS;
+    const LS = (window.LightweightCharts && LightweightCharts.LineStyle)
+      ? LightweightCharts.LineStyle.Dashed : 2;
+    for (const z of list) {
+      try {
+        const pl = S.chartSeries.createPriceLine({
+          price: z.level,
+          color: z.color || '#64748b',
+          lineWidth: 1,
+          lineStyle: LS,
+          axisLabelVisible: true,
+          title: z.label || String(z.level),
+        });
+        _lines.push(pl);
+      } catch (e) {}
+    }
+  }
+
+  async function applyMarginEnhance(forceMeta) {
+    if (S.sym !== '__MARGIN_RATIO__') {
+      clearLines();
+      hideBanner();
+      return;
+    }
+    // 價格顯示加 %
+    const pEl = document.getElementById('ci-price');
+    if (pEl && pEl.textContent && !pEl.textContent.includes('%')) {
+      pEl.textContent = pEl.textContent.trim() + '%';
+    }
+    const nEl = document.getElementById('ci-name');
+    if (nEl) nEl.textContent = '大盤融資維持率';
+    try {
+      if (forceMeta || !_metaCache) {
+        const r = await fetch(`${SERVER_P}/margin_ratio`, { cache: 'no-store' });
+        if (r.ok) _metaCache = await r.json();
+      }
+    } catch (e) {}
+    applyZones(_metaCache && _metaCache.riskZones);
+    renderBanner(_metaCache || {
+      current: S.data && S.data.candles && S.data.candles.length
+        ? S.data.candles[S.data.candles.length - 1].close : null,
+      formula: 'Σ(融資市值,不含ETF)/融資金額×100',
+      source: 'TWSE',
+    });
+  }
+
+  window.addEventListener('symLoaded', () => {
+    setTimeout(() => applyMarginEnhance(true), 80);
+  });
+})();
 
 // TWSE MIS 即時：加權(t00)→^TWII、櫃買(o00)→^TWOII。
 // 有有效 price 才覆寫 Yahoo 值；盤前無成交(price=null)則保留 Yahoo。
@@ -667,7 +821,10 @@ async function fetchKeyStats(sym, mkt) {
   if (!sym) return null;
   const key = sym + '|' + (mkt || 'TW');
   if (_keystatsCache[key]) return _keystatsCache[key];
-  const yfsym = mkt === 'TW' ? sym + '.TW' : sym;
+  // 合成序列不加 .TW
+  const yfsym = (String(sym).startsWith('__') && String(sym).endsWith('__'))
+    ? sym
+    : (mkt === 'TW' ? sym + '.TW' : sym);
   try {
     const r = await fetch(`${SERVER_P}/keystats/${yfsym}`, {cache:'no-store'});
     if (!r.ok) return null;
@@ -715,6 +872,23 @@ function fmtBig(n, unit) {
 })();
 
 function renderKeystatsSection(ks) {
+  // 大盤融資維持率：顯示歷史／風險區，而非本益比
+  if (S.sym === '__MARGIN_RATIO__' || (ks && ks.marginMeta)) {
+    const m = (ks && ks.marginMeta) || {};
+    const cur = ks.regularMarketPrice != null ? ks.regularMarketPrice : m.current;
+    const zone = m.riskZone;
+    let h = '<div id="keystats-sect"><div class="stat-sect">融資維持率 · 總覽</div>';
+    h += `<div class="keystat-row"><span class="k">最新</span><span class="v">${cur != null ? cur.toFixed(2) + '%' : '--'}</span></div>`;
+    h += `<div class="keystat-row"><span class="k">日變化</span><span class="v">${m.delta != null ? ((m.delta >= 0 ? '+' : '') + m.delta.toFixed(2) + 'pp') : '--'}</span></div>`;
+    h += `<div class="keystat-row"><span class="k">歷史高低</span><span class="v">${m.min != null ? m.min.toFixed(2) : '--'}% ～ ${m.max != null ? m.max.toFixed(2) : '--'}%</span></div>`;
+    h += `<div class="keystat-row"><span class="k">歷史均値</span><span class="v">${m.avg != null ? m.avg.toFixed(2) + '%' : '--'}</span></div>`;
+    h += `<div class="keystat-row"><span class="k">樣本數</span><span class="v">${m.count != null ? m.count : '--'} 日（${m.firstDate || '—'} → ${m.lastDate || '—'}）</span></div>`;
+    h += `<div class="keystat-row"><span class="k">風險區</span><span class="v" style="color:${zone && zone.color ? zone.color : 'var(--thi)'}">${zone ? (zone.label || '') : '正常（>166%）'}</span></div>`;
+    if (m.formula) h += `<div style="padding:4px 12px;font-family:monospace;font-size:8px;color:var(--tf)">${m.formula}</div>`;
+    if (m.source) h += `<div style="padding:0 12px 6px;font-family:monospace;font-size:8px;color:var(--tf)">來源：${m.source}</div>`;
+    h += '</div>';
+    return h;
+  }
   const mc = ks.marketCap;
   const pe = ks.trailingPE;
   const pb = ks.priceToBook;

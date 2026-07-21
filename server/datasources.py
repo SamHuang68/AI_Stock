@@ -105,6 +105,22 @@ def _st_catalog():
     return {'updated': _mtime(p), 'count': n}
 
 
+def _st_margin_ratio():
+    p = os.path.join(DATA, 'margin_ratio_history.csv')
+    n = 0
+    try:
+        import sqlite3
+        db = os.path.join(DATA, 'market.db')
+        con = sqlite3.connect(db)
+        n = con.execute(
+            "SELECT COUNT(*) FROM bars WHERE symbol='__MARGIN_RATIO__'"
+        ).fetchone()[0]
+        con.close()
+    except Exception:
+        pass
+    return {'updated': _mtime(p), 'count': n}
+
+
 # ── Registry(順序即顯示順序) ──────────────────────────────
 def _registry():
     return [
@@ -114,6 +130,10 @@ def _registry():
         {'id': 'db', 'name': '本機日線歷史庫', 'provider': 'Yahoo Finance v8',
          'reliability': 'vendor', 'kind': 'db', 'updatable': True,
          'desc': '全市場日線(選股/回測/投組共用);更新=補近月', 'status': _st_db()},
+        {'id': 'margin_ratio', 'name': '大盤融資維持率', 'provider': 'TWSE (MacroMicro-aligned)',
+         'reliability': 'official', 'kind': 'db', 'updatable': True,
+         'desc': 'Σ(融資市值,不含ETF)/融資金額；seed CSV + TWSE 歷史回補 + 今日即時',
+         'status': _st_margin_ratio()},
         {'id': 'etf', 'name': '主動 ETF 每日持股', 'provider': 'MoneyDJ + TWSE',
          'reliability': 'vendor', 'kind': 'file', 'updatable': True,
          'desc': '主動 ETF 完整持股快照,算每日加減碼 delta', 'status': _st_etf()},
@@ -146,6 +166,8 @@ def refresh(sid):
             return {'ok': False, 'error': str(e)}
     if sid == 'db':
         return _spawn('datastore.py', 'update')
+    if sid == 'margin_ratio':
+        return _spawn('margin_ratio.py', 'backfill', '--full')
     if sid == 'etf':
         return _spawn('etf_delta_tracker.py')
     if sid == 'chip':

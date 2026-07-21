@@ -221,139 +221,18 @@ def get_bars(sym, limit=None):
     return rows[-limit:] if limit else rows
 
 def _fetch_overall_margin_ratio_twse():
-    """使用 TWSE 官方 OpenAPI 數據與公式計算最新台股大盤融資維持率。"""
-    try:
-        import json
-        # 1. 取得每檔股票融資今日餘額 (張)
-        url_margin = "https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN"
-        req = urllib.request.Request(url_margin, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            rows_margin = json.loads(resp.read())
-            
-        per_stock = {}
-        for r in rows_margin:
-            if not isinstance(r, dict): continue
-            code = r.get("股票代號")
-            lots_str = r.get("融資今日餘額")
-            if code and lots_str:
-                try:
-                    lots = float(str(lots_str).replace(",", ""))
-                    per_stock[str(code).strip()] = lots
-                except Exception: pass
+    """委派 margin_ratio：TWSE 公式、分子不含 ETF（對齊 MacroMicro）。"""
+    import margin_ratio as mr
+    return mr.fetch_today_ratio_live()
 
-        # 2. 取得每檔股票收盤價
-        url_closes = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
-        req = urllib.request.Request(url_closes, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            rows_closes = json.loads(resp.read())
-            
-        closes = {}
-        for r in rows_closes:
-            if not isinstance(r, dict): continue
-            code = r.get("Code")
-            cl_str = r.get("ClosingPrice")
-            if code and cl_str:
-                try:
-                    cl = float(str(cl_str).replace(",", ""))
-                    closes[str(code).strip()] = cl
-                except Exception: pass
-
-        # 3. 取得大盤總融資金額 (元)
-        url_total = "https://www.twse.com.tw/exchangeReport/MI_MARGN?response=json&selectType=MS"
-        req = urllib.request.Request(url_total, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            payload = json.loads(resp.read())
-            
-        total_loan = None
-        if payload.get("stat") == "OK":
-            for table in payload.get("tables", []):
-                fields = table.get("fields") or []
-                data = table.get("data") or []
-                if "今日餘額" not in fields: continue
-                idx = fields.index("今日餘額")
-                for row in data:
-                    if not row: continue
-                    if "融資金額" in str(row[0]):
-                        try:
-                            val = float(str(row[idx]).replace(",", ""))
-                            total_loan = val * 1000  # 仟元 -> 元
-                            break
-                        except Exception: pass
-                if total_loan: break
-
-        # 4. 計算加權擔保品市值
-        if not per_stock or not closes or not total_loan or total_loan <= 0:
-            return None
-            
-        collateral_value = 0.0
-        for code, lots in per_stock.items():
-            close = closes.get(code)
-            if close is not None and lots > 0:
-                collateral_value += lots * 1000.0 * close
-                
-        if collateral_value <= 0:
-            return None
-            
-        ratio = (collateral_value / total_loan) * 100
-        return ratio
-    except Exception as e:
-        print('[twse] margin ratio calculation failed:', e)
-        return None
-
-def backfill_margin_ratio():
-    """從 afk13e43/Stock_Notice GitHub 下載大盤融資維持率歷史 CSV 並寫入 bars 表。"""
-    url = 'https://raw.githubusercontent.com/afk13e43/Stock_Notice/main/history/tw_history.csv'
-    try:
-        import csv
-        from datetime import datetime, date
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            lines = resp.read().decode('utf-8').splitlines()
-        
-        reader = csv.DictReader(lines)
-        rows = []
-        for row in reader:
-            dt_str = row.get('date')
-            ratio_str = row.get('margin_ratio_pct')
-            if not dt_str or not ratio_str:
-                continue
-            try:
-                dt = datetime.strptime(dt_str, '%Y-%m-%d')
-                ts = int(dt.timestamp())
-                val = float(ratio_str)
-                if val <= 0:
-                    continue
-                rows.append((ts, val, val, val, val, 0))
-            except Exception:
-                continue
-        
-        if rows:
-            upsert_bars('__MARGIN_RATIO__', 'TW', rows)
-            print(f'[db] __MARGIN_RATIO__: stored {len(rows)} bars from CSV')
-    except Exception as e:
-        print('[db] csv backfill failed:', e)
-
-    # 嘗試計算並追加今日最新值
-    try:
-        ratio = _fetch_overall_margin_ratio_twse()
-        if ratio and ratio > 0:
-            from datetime import datetime, date
-            today = date.today()
-            dt = datetime(today.year, today.month, today.day)
-            ts = int(dt.timestamp())
-            upsert_bars('__MARGIN_RATIO__', 'TW', [(ts, ratio, ratio, ratio, ratio, 0)])
-            print(f'[db] __MARGIN_RATIO__: computed today value {ratio:.2f}%')
-    except Exception as e:
-        print('[db] today margin ratio compute failed:', e)
-    return 0
+def backfill_margin_ratio(full=False, max_days=None):
+    """委派 margin_ratio：seed 歷史 CSV + TWSE 回補 + 今日即時。"""
+    import margin_ratio as mr
+    return mr.backfill_margin_ratio(full=full, max_days=max_days)
 
 def get_margin_ratio_bars():
-    with closing(get_conn()) as conn:
-        cur = conn.execute(
-            "SELECT ts, open, high, low, close, volume FROM bars "
-            "WHERE symbol = '__MARGIN_RATIO__' ORDER BY ts"
-        )
-        return cur.fetchall()
+    import margin_ratio as mr
+    return mr.get_bars()
 
 def _cli():
     a = sys.argv[1:]
@@ -365,7 +244,15 @@ def _cli():
         backfill(a[1], a[2] if len(a) > 2 else 'TW', a[3] if len(a) > 3 else '10y')
     elif cmd == 'backfill_margin':
         init_db()
-        backfill_margin_ratio()
+        full = any(x in ('--full', 'full') for x in a[1:])
+        max_days = None
+        for i, x in enumerate(a):
+            if x == '--max' and i + 1 < len(a):
+                try:
+                    max_days = int(a[i + 1])
+                except Exception:
+                    pass
+        backfill_margin_ratio(full=full, max_days=max_days)
     elif cmd == 'update':
         init_db()
         update(a[1], a[2] if len(a) > 2 else 'TW')
@@ -395,7 +282,7 @@ def _cli():
         print(f'bars: {n[0]:,}  symbols: {n[1]:,}  db: {DB_PATH}')
     else:
         print('usage: init | backfill SYM [TW|US] [range] | update SYM [TW|US] | '
-              'backfill_margin | '
+              'backfill_margin [--full] [--max N] | '
               'backfill-universe [range] [workers] | update-universe [workers] | '
               'backfill-many "a,b,c" [TW|US] [range] | query SYM [N] | stats')
 
