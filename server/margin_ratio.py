@@ -208,11 +208,15 @@ def _parse_lots_from_tables(tables: Sequence[dict], exclude_etf: bool = True) ->
 
 
 def _fetch_closes_for_date(d: date) -> Dict[str, float]:
+    """TWSE MI_INDEX 收盤價（官方僅自 2004-02-11 起）。"""
     ymd = d.strftime('%Y%m%d')
-    payload = _http_json(
-        f'https://www.twse.com.tw/exchangeReport/MI_INDEX'
-        f'?response=json&date={ymd}&type=ALLBUT0999'
-    )
+    try:
+        payload = _http_json(
+            f'https://www.twse.com.tw/exchangeReport/MI_INDEX'
+            f'?response=json&date={ymd}&type=ALLBUT0999'
+        )
+    except Exception:
+        return {}
     closes: Dict[str, float] = {}
     if str(payload.get('stat', '')).upper() not in ('OK',):
         return closes
@@ -230,6 +234,84 @@ def _fetch_closes_for_date(d: date) -> Dict[str, float]:
                 closes[code] = cl
         break
     return closes
+
+
+# Yahoo 收盤價快取（補 TWSE MI_INDEX 2004-02-11 以前的官方缺口）
+_MI_INDEX_START = date(2004, 2, 11)
+_yahoo_series_cache: Dict[str, Dict[date, float]] = {}
+_yahoo_fail: set = set()
+
+
+def _fetch_yahoo_series(code: str, start: date, end: date) -> Dict[date, float]:
+    """抓單一代號日線收盤（.TW / .TWO），結果快取於記憶體。404 快速跳過。"""
+    code = str(code).strip()
+    if code in _yahoo_series_cache:
+        return _yahoo_series_cache[code]
+    if code in _yahoo_fail:
+        return {}
+    p1 = int(datetime(start.year, start.month, start.day, tzinfo=TZ_TPE).timestamp()) - 86400
+    p2 = int(datetime(end.year, end.month, end.day, tzinfo=TZ_TPE).timestamp()) + 86400
+    mapping: Dict[date, float] = {}
+    for suf in ('.TW', '.TWO'):
+        # 每個後綴只打 query1；404 立刻換後綴，避免 4 倍節流浪費
+        url = (
+            f'https://query1.finance.yahoo.com/v8/finance/chart/'
+            f'{urllib.parse.quote(code + suf)}'
+            f'?interval=1d&period1={p1}&period2={p2}'
+        )
+        try:
+            _throttle()
+            req = urllib.request.Request(url, headers=_UA)
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                raw = resp.read()
+            payload = json.loads(raw.decode('utf-8'))
+            res = (payload.get('chart') or {}).get('result') or []
+            if not res:
+                continue
+            ts_list = res[0].get('timestamp') or []
+            q = (res[0].get('indicators') or {}).get('quote') or [{}]
+            closes = (q[0] or {}).get('close') or []
+            for i, ts in enumerate(ts_list):
+                if i >= len(closes) or closes[i] is None:
+                    continue
+                try:
+                    cl = float(closes[i])
+                except Exception:
+                    continue
+                if cl <= 0:
+                    continue
+                mapping[datetime.fromtimestamp(int(ts), tz=TZ_TPE).date()] = cl
+            if mapping:
+                _yahoo_series_cache[code] = mapping
+                return mapping
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                continue  # 試下一個後綴
+            continue
+        except Exception:
+            continue
+    _yahoo_fail.add(code)
+    _yahoo_series_cache[code] = {}
+    return {}
+
+
+def _closes_from_yahoo(codes_ordered: Sequence[str], d: date,
+                       span_start: Optional[date] = None,
+                       span_end: Optional[date] = None,
+                       min_hits: int = 30) -> Dict[str, float]:
+    """依優先序取 Yahoo 收盤；已快取／已失敗者秒回，其餘逐檔補齊。"""
+    span_start = span_start or date(2000, 12, 1)
+    span_end = span_end or date(2004, 3, 1)
+    out: Dict[str, float] = {}
+    for code in codes_ordered:
+        if not code or not str(code)[0].isdigit():
+            continue
+        c = str(code)
+        series = _fetch_yahoo_series(c, span_start, span_end)
+        cl = series.get(d)
+        if cl is not None and cl > 0:
+            out[c] = cl
+    return out
 
 
 def _fetch_margin_tables(d: date, select_type: str) -> List[dict]:
@@ -251,33 +333,55 @@ def _fetch_margin_tables(d: date, select_type: str) -> List[dict]:
     return list(payload.get('tables') or [])
 
 
-def compute_ratio_for_date(d: date) -> Optional[float]:
-    """計算指定交易日大盤融資維持率（分子不含 ETF）。失敗回 None。"""
-    try:
-        closes = _fetch_closes_for_date(d)
-        if not closes:
-            return None
-        stock_tables = _fetch_margin_tables(d, 'STOCK')
-        lots = _parse_lots_from_tables(stock_tables, exclude_etf=True)
-        loan = _parse_loan_from_tables(stock_tables)
-        if not lots:
-            try:
-                all_tables = _fetch_margin_tables(d, 'ALL')
-            except Exception:
-                all_tables = []
-            lots = _parse_lots_from_tables(all_tables, exclude_etf=True)
-            if loan is None:
-                loan = _parse_loan_from_tables(all_tables)
+def _margin_lots_and_loan(d: date) -> Tuple[Dict[str, float], Optional[float]]:
+    stock_tables = _fetch_margin_tables(d, 'STOCK')
+    lots = _parse_lots_from_tables(stock_tables, exclude_etf=True)
+    loan = _parse_loan_from_tables(stock_tables)
+    if not lots:
+        try:
+            all_tables = _fetch_margin_tables(d, 'ALL')
+        except Exception:
+            all_tables = []
+        lots = _parse_lots_from_tables(all_tables, exclude_etf=True)
         if loan is None:
-            for st in ('MS', 'ALL'):
-                try:
-                    loan = _parse_loan_from_tables(_fetch_margin_tables(d, st))
-                except Exception:
-                    loan = None
-                if loan is not None:
-                    break
+            loan = _parse_loan_from_tables(all_tables)
+    if loan is None:
+        for st in ('MS', 'ALL'):
+            try:
+                loan = _parse_loan_from_tables(_fetch_margin_tables(d, st))
+            except Exception:
+                loan = None
+            if loan is not None:
+                break
+    return lots, loan
+
+
+def compute_ratio_for_date(d: date) -> Optional[float]:
+    """計算指定交易日大盤融資維持率（分子不含 ETF）。失敗回 None。
+
+    收盤價來源：
+      1) TWSE MI_INDEX（≥ 2004-02-11）
+      2) Yahoo 個股日線快取（補 2001～2004-02-10 官方缺口）
+    """
+    try:
+        lots, loan = _margin_lots_and_loan(d)
         if not lots or not loan or loan <= 0:
             return None
+
+        closes = _fetch_closes_for_date(d) if d >= _MI_INDEX_START else {}
+        if not closes:
+            # 官方無收盤價（或當日 MI_INDEX 失敗）→ Yahoo 後備
+            # 融資餘額大的優先，提高覆蓋率並利於早停
+            ordered = [c for c, _ in sorted(lots.items(), key=lambda kv: kv[1], reverse=True)]
+            closes = _closes_from_yahoo(
+                ordered, d,
+                span_start=date(2000, 12, 1),
+                span_end=max(d, date(2004, 3, 15)),
+                min_hits=30,
+            )
+        if not closes:
+            return None
+
         collateral = 0.0
         used = 0
         for code, lot in lots.items():
@@ -288,7 +392,9 @@ def compute_ratio_for_date(d: date) -> Optional[float]:
                 continue
             collateral += lot * 1000.0 * cl
             used += 1
-        if used < 50 or collateral <= 0:
+        # 早期年份 Yahoo 覆蓋率較低；至少要有一定代表性
+        min_used = 30 if d < _MI_INDEX_START else 50
+        if used < min_used or collateral <= 0:
             return None
         return collateral / loan * 100.0
     except Exception as e:
