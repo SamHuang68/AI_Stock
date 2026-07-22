@@ -69,14 +69,18 @@ def _save_draw_store(d):
 #   台灣 CPI 走 FRED 的 OECD 序列(避開 .tw 直連)；景氣對策信號走國發會 best-effort。
 _macro_cache = {}   # {series_key: (yyyymmdd, payload_bytes)}
 MACRO_SERIES = {
-    'us10y':       {'p': 'fred', 'id': 'DGS10',             'label': '美國10年期公債殖利率', 'unit': '%'},
-    'us2y':        {'p': 'fred', 'id': 'DGS2',              'label': '美國2年期公債殖利率',  'unit': '%'},
-    'spread10y2y': {'p': 'fred', 'id': 'T10Y2Y',           'label': '美10Y-2Y利差(倒掛<0)', 'unit': '%'},
-    'us_cpi':      {'p': 'fred', 'id': 'CPIAUCSL',          'label': '美國CPI指數',          'unit': ''},
-    'fedfunds':    {'p': 'fred', 'id': 'FEDFUNDS',          'label': '美國聯邦基金利率',     'unit': '%'},
-    'unrate':      {'p': 'fred', 'id': 'UNRATE',            'label': '美國失業率',           'unit': '%'},
-    'tw_cpi':      {'p': 'twcpi',                           'label': '台灣CPI指數',          'unit': ''},
-    'tw_light':    {'p': 'ndc',                             'label': '台灣景氣對策信號(分數)', 'unit': '分'},
+    'us10y':            {'p': 'fred', 'id': 'DGS10',             'label': '美國10年期公債殖利率', 'unit': '%'},
+    'us2y':             {'p': 'fred', 'id': 'DGS2',              'label': '美國2年期公債殖利率',  'unit': '%'},
+    'spread10y2y':      {'p': 'fred', 'id': 'T10Y2Y',           'label': '美10Y-2Y利差(倒掛<0)', 'unit': '%'},
+    'us_cpi':           {'p': 'fred', 'id': 'CPIAUCSL',          'label': '美國CPI指數',          'unit': ''},
+    'us_cpi_yoy':       {'p': 'fred', 'id': 'CPALTT01USM659N',   'label': '美國CPI年增率(YoY)',   'unit': '%'},
+    'fedfunds':         {'p': 'fred', 'id': 'FEDFUNDS',          'label': '美國聯邦基金利率',     'unit': '%'},
+    'unrate':           {'p': 'fred', 'id': 'UNRATE',            'label': '美國失業率',           'unit': '%'},
+    'baml_ig':          {'p': 'fred', 'id': 'BAMLCC0A0CMTRIV',   'label': '美林投資級公司債總報酬', 'unit': 'Index'},
+    'baml_hy':          {'p': 'fred', 'id': 'BAMLHY0A0HYMTRIV',   'label': '美林高收益公司債總報酬', 'unit': 'Index'},
+    'tw_discount_rate': {'p': 'fred', 'id': 'INTDSRTWM193N',     'label': '台灣央行重貼現率',     'unit': '%'},
+    'tw_cpi':           {'p': 'twcpi',                           'label': '台灣CPI指數',          'unit': ''},
+    'tw_light':         {'p': 'ndc',                             'label': '台灣景氣對策信號(分數)', 'unit': '分'},
 }
 
 def _fetch_fred_csv(series_id, cosd):
