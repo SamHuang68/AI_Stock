@@ -742,22 +742,30 @@ async function loadSym(sym, mkt, silent) {
     : (prev ? prev.close : null);
   const chgPct = (_prevRef != null && _prevRef > 0)
     ? ((last.close - _prevRef) / _prevRef * 100) : 0;
-  document.getElementById('ci-price').textContent = last.close.toFixed(2);
+  document.getElementById('ci-price').textContent = last.close.toFixed(2) + (sym === '__MARGIN_RATIO__' ? '%' : '');
   const ci = document.getElementById('ci-chg');
   ci.textContent = (chgPct>=0?'+':'')+chgPct.toFixed(2)+'%';
   // 台股紅漲綠跌(以昨收為基準),美股/其他綠漲紅跌;平盤無色
-  const _ciTw = (mkt === 'TW' || /^\^TW/.test(sym || ''));
+  const _ciTw = (mkt === 'TW' || /^\^TW/.test(sym || '') || sym === '__MARGIN_RATIO__');
   ci.style.color = chgPct > 0 ? (_ciTw ? 'var(--red)' : 'var(--green)')
                  : chgPct < 0 ? (_ciTw ? 'var(--green)' : 'var(--red)')
                  : 'var(--thi)';
-  document.getElementById('ci-name').textContent = parsed.name;
+  document.getElementById('ci-name').textContent = (sym === '__MARGIN_RATIO__')
+    ? '大盤融資維持率'
+    : parsed.name;
 
-  // compute indicators
-  S.ind = await runWorker(parsed.candles);
-  if (_myLoad !== window.__loadSeq) return;   // 切股 race：指標算完前已切別檔→不覆寫
-  renderInd(S.ind, last, mkt);
-  if (S.ind) updateEtfFlowInd();
-  renderRpanel();
+  // compute indicators — 融資維持率為總經折線，略過技術指標
+  if (sym === '__MARGIN_RATIO__') {
+    S.ind = null;
+    try { clearInd(); } catch (e) {}
+  } else {
+    S.ind = await runWorker(parsed.candles);
+    if (_myLoad !== window.__loadSeq) return;   // 切股 race：指標算完前已切別檔→不覆寫
+    renderInd(S.ind, last, mkt);
+    if (S.ind) updateEtfFlowInd();
+  }
+  try { renderRpanel(); } catch (e) { console.error('[v1] renderRpanel threw:', e); }
+  try { window.dispatchEvent(new CustomEvent('symLoaded', {detail:{sym: S.sym, mkt: S.mkt}})); } catch(e){}
 
   // update wl chip price
   updateWlPrice(sym, last.close, chgPct);
