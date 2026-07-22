@@ -422,7 +422,7 @@ async function refreshMarginRatioCell() {
       `<b style="color:#7dd3fc">大盤融資維持率</b> ` +
       `<b style="color:#f8fafc;font-size:13px">${(m.current != null ? m.current.toFixed(2) : '--')}%</b> ` +
       zoneHtml +
-      `<span style="color:#94a3b8"> · 歷史 ${m.firstDate || '—'} → ${m.lastDate || '—'}（${m.count || 0} 日）` +
+      `<span style="color:#94a3b8"> · 折線圖（MacroMicro 風格）· 歷史 ${m.firstDate || '—'} → ${m.lastDate || '—'}（${m.count || 0} 日）` +
       ` · 區間 ${m.min != null ? m.min.toFixed(1) : '—'}–${m.max != null ? m.max.toFixed(1) : '—'}%` +
       ` · 均 ${m.avg != null ? m.avg.toFixed(1) : '—'}%</span>` +
       `<div style="color:#64748b;margin-top:2px">公式：${m.formula || 'Σ(融資市值,不含ETF)/融資金額×100'} · 來源 ${m.source || 'TWSE'}${bfNote}` +
@@ -656,6 +656,14 @@ function applyMarketColorClass(mkt) {
 
     orig.apply(this, arguments);
 
+    // 融資維持率已是折線圖 — 略過 K 線／量柱重色
+    if (S.sym === '__MARGIN_RATIO__') {
+      setTimeout(() => {
+        try { if (typeof renderChartLegend === 'function') renderChartLegend(); } catch (e) {}
+      }, 30);
+      return;
+    }
+
     // After orig renders, post-process:
     setTimeout(() => {
       try {
@@ -807,6 +815,16 @@ function renderChartLegend() {
     lg.style.cursor = 'pointer';
     lg.addEventListener('click', e => { e.stopPropagation(); lg.classList.toggle('collapsed'); });
     east.appendChild(lg);
+  }
+  // 融資維持率：折線圖圖例（MacroMicro 風格）
+  if (S.sym === '__MARGIN_RATIO__') {
+    lg.innerHTML =
+      `<div class="lg-row" style="color:#38BDF8"><span class="lg-swatch" style="background:#38BDF8"></span>大盤融資維持率</div>` +
+      `<div class="lg-row" style="color:#38bdf8"><span class="lg-dash" style="width:9px;border-color:#38bdf8"></span>門檻 166%</div>` +
+      `<div class="lg-row" style="color:#eab308"><span class="lg-dash" style="width:9px;border-color:#eab308"></span>偏弱 150%</div>` +
+      `<div class="lg-row" style="color:#f97316"><span class="lg-dash" style="width:9px;border-color:#f97316"></span>警戒 140%</div>` +
+      `<div class="lg-row" style="color:#ef4444"><span class="lg-dash" style="width:9px;border-color:#ef4444"></span>危險 130%</div>`;
+    return;
   }
   // 不顯示 K 線紅/綠（一眼可見不必標註），只標均線/BB/昨收這些「需要解碼」的線
   // v3.9 去重:SMA20/SMA60/BB 已在 OHLC 資訊行用對應顏色+數值標示,色塊圖例只留「昨收」(虛線較不易辨識)

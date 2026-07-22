@@ -206,7 +206,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
-<link rel="stylesheet" href="src/ui/mobile_v2.css?v=1784653123">
+<link rel="stylesheet" href="src/ui/mobile_v2.css?v=1784684456">
 </head>
 <body>
 <div id="app">
@@ -550,6 +550,11 @@ async function loadSym(sym, mkt, silent) {
   // 市場一律由代號決定(權威表 Market 優先,代號格式兜底):數字/^TW=台股、字母=美股。
   // 不靠 TW/US 市場鈕 → 永不抓錯標的;對未收錄的新上市也正確。
   mkt = window.Market ? Market.of(sym) : ((/^\d/.test(sym) || /^\^TW/i.test(sym)) ? 'TW' : 'US');
+  // 大盤融資維持率：預設拉全歷史（MacroMicro 風格長週期折線）
+  if (sym === '__MARGIN_RATIO__' && S.range !== 'max') {
+    S.range = 'max';
+    try { if (typeof renderRangeBar === 'function') renderRangeBar(); } catch (e) {}
+  }
   const _myLoad = (window.__loadSeq = (window.__loadSeq || 0) + 1);   // 切股 race 守衛
   S.sym = sym; S.mkt = mkt;
   document.getElementById('syminput').value = sym;
@@ -567,6 +572,10 @@ async function loadSym(sym, mkt, silent) {
     ? sym
     : (mkt==='TW' ? sym+'.TW' : sym);
   let rdef = currentRangeDef();
+  // 融資維持率：永遠日線（後端也是日頻），避免 max 預設 1wk 造成語意混淆
+  if (sym === '__MARGIN_RATIO__') {
+    rdef = Object.assign({}, rdef, { interval: '1d' });
+  }
 
   // ── 日線壞源護航 (v3.9 Phase-0) ──────────────────────────────
   // Yahoo 對某些指數(^TWOII 櫃買)各端點互斥、日線整段錯亂(419/269/105),
@@ -763,8 +772,11 @@ function renderChart(candles) {
   const wrap = document.getElementById('chart-wrap');
   if (S.chart) { S.chart.remove(); S.chart=null; }
 
+  // 大盤融資維持率：MacroMicro 風格連續折線（非 K 線／非布林）
+  const isMarginRatio = (S.sym === '__MARGIN_RATIO__');
+
   // intraday (1d range, 5m interval) → show HH:mm; daily/weekly → date only
-  const isIntraday = S.range === '1d';
+  const isIntraday = !isMarginRatio && S.range === '1d';
 
   // ── 時區平移：使用者本地時區 (v3.6) ──────────────────────────
   // lightweight-charts 預設用 UTC 顯示。台北使用者看 13:30 收盤的台股會
@@ -790,13 +802,15 @@ function renderChart(candles) {
     },
     rightPriceScale:{borderColor:'#1A2740',
       // 盤中(1天)加大上下留白 → 把當日小波動壓平(flatten),不再撐滿全高顯得震盪劇烈
-      scaleMargins: isIntraday ? {top:0.30,bottom:0.30} : {top:0.05,bottom:0.18}},
+      // 融資維持率：稍加大上下留白，讓風險線與走勢可讀
+      scaleMargins: isMarginRatio ? {top:0.08,bottom:0.10}
+                  : (isIntraday ? {top:0.30,bottom:0.30} : {top:0.05,bottom:0.18})},
     timeScale:{
       borderColor:'#1A2740',
       timeVisible: isIntraday,
       secondsVisible: false,
       rightOffset: 2,         // tiny right padding so latest candle isn't glued to axis
-      barSpacing: 6,          // baseline spacing, fitContent will scale it
+      barSpacing: isMarginRatio ? 2 : 6,  // 長歷史折線較密
       minBarSpacing: 0.5,     // allow squish for 'max' range with many bars
       fixLeftEdge: true,
       fixRightEdge: true,
@@ -806,6 +820,72 @@ function renderChart(candles) {
     handleScale:{mouseWheel:true,pinch:true,axisPressedMouseMove:true},
   });
   S.chart = chart;
+
+  // ── 融資維持率：MacroMicro 風格單一折線 + 淡色面積（無 K 線／無 SMA／無布林）──
+  if (isMarginRatio) {
+    const lineData = candles.map(c => ({ time: tz(c.time), value: c.close }));
+    const area = chart.addAreaSeries({
+      lineColor: '#38BDF8',
+      topColor: 'rgba(56,189,248,0.28)',
+      bottomColor: 'rgba(56,189,248,0.02)',
+      lineWidth: 2,
+      lastValueVisible: true,
+      priceLineVisible: false,
+      crosshairMarkerVisible: true,
+      crosshairMarkerRadius: 5,
+      crosshairMarkerBorderColor: '#7DD3FC',
+      crosshairMarkerBackgroundColor: '#0EA5E9',
+      priceFormat: { type: 'custom', formatter: v => (v != null && isFinite(v) ? v.toFixed(2) + '%' : '') },
+    });
+    area.setData(lineData);
+    S.chartSeries = area;
+    S.dotSeries = area;
+    S.volSeries = null;
+    S.overlaySeries = {};
+    S.wsSeries = null;
+    S.wsLeftSeries = null;
+    chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.10 } });
+
+    const _prevCloseByTime = new Map();
+    for (let i = 0; i < candles.length; i++) {
+      _prevCloseByTime.set(tz(candles[i].time), i > 0 ? candles[i - 1].close : null);
+    }
+
+    chart.subscribeCrosshairMove(param => {
+      const ohlcEl = document.getElementById('ci-ohlc');
+      if (!ohlcEl) return;
+      if (!param || !param.point || !param.time || !param.seriesData) {
+        ohlcEl.style.display = 'none';
+        return;
+      }
+      const pt = param.seriesData.get(area);
+      if (!pt || pt.value == null) { ohlcEl.style.display = 'none'; return; }
+      const d = new Date(typeof param.time === 'number' ? param.time * 1000 : Date.parse(param.time));
+      const ds = `${d.getUTCFullYear()}/${String(d.getUTCMonth()+1).padStart(2,'0')}/${String(d.getUTCDate()).padStart(2,'0')}`;
+      const prev = _prevCloseByTime.get(param.time);
+      const delta = (prev != null && prev > 0) ? (pt.value - prev) : null;
+      const chgPct = (delta != null && prev > 0) ? (delta / prev * 100) : null;
+      const up = delta != null && delta > 0;
+      const dn = delta != null && delta < 0;
+      const col = up ? 'var(--red)' : (dn ? 'var(--green)' : 'var(--tlo)');
+      ohlcEl.style.display = 'block';
+      ohlcEl.innerHTML =
+        `<span class="ohlc-d">${ds}</span>` +
+        `<span class="ohlc-k">維持率</span><span class="ohlc-v" style="color:${col}">${pt.value.toFixed(2)}%</span>` +
+        (delta != null
+          ? `<span style="color:${col};margin-left:6px">${up ? '+' : ''}${delta.toFixed(2)}pp` +
+            (chgPct != null ? ` (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)` : '') + `</span>`
+          : '');
+    });
+
+    requestAnimationFrame(() => chart.timeScale().fitContent());
+    const ro = new ResizeObserver(() => {
+      chart.applyOptions({ width: wrap.clientWidth, height: wrap.clientHeight });
+      chart.timeScale().fitContent();
+    });
+    ro.observe(wrap);
+    return;
+  }
 
   const cs = chart.addCandlestickSeries({
     upColor:'#4ADE80',downColor:'#F87171',
@@ -902,9 +982,9 @@ function renderChart(candles) {
     chart.priceScale('right').applyOptions({scaleMargins:{top:0.06,bottom:0.04}});  // 無量→價格滿版
   }
 
-  // ── SMA + Bollinger Bands overlay (skip on intraday) ──
+  // ── SMA + Bollinger Bands overlay (skip on intraday / 融資維持率折線圖) ──
   S.overlaySeries = {};
-  if (!isIntraday && candles.length >= 20) {
+  if (!isIntraday && S.sym !== '__MARGIN_RATIO__' && candles.length >= 20) {
     const closes = candles.map(c => c.close);
     const sma = (n, i) => {
       if (i + 1 < n) return null;
@@ -1667,67 +1747,67 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
 });
 </script>
-<script src="src/core/colors_v3.js?v=1784653123"></script>
-<script src="src/core/market_v3.js?v=1784653123"></script>
-<script src="src/core/fields_v3.js?v=1784653123"></script>
-<script src="src/ui/share_v3.js?v=1784653123"></script>
-<script src="src/ui/datasources_v3.js?v=1784653123"></script>
-<script src="src/core/etf_flow_tip_v3.js?v=1784653123"></script>
-<script src="src/core/position_v2.js?v=1784653123"></script>
-<script src="src/core/watch_v2.js?v=1784653123"></script>
-<script src="src/core/info_v2.js?v=1784653123"></script>
-<script src="src/core/pro_v2.js?v=1784653123"></script>
-<script src="src/chart/volume_profile_v3.js?v=1784653123"></script>
-<script src="src/chart/pattern_v3.js?v=1784653123"></script>
-<script src="src/core/live_v2.js?v=1784653123"></script>
-<script src="src/fundamental/chip_v3.js?v=1784653123"></script>
-<script src="src/fundamental/fundamental_v3.js?v=1784653123"></script>
-<script src="src/screener/screener_v3.js?v=1784653123"></script>
-<script src="src/ai/ai_report_v3.js?v=1784653123"></script>
-<script src="src/ui/polish_v3.js?v=1784653123"></script>
-<script src="src/core/wl_live_v3.js?v=1784653123"></script>
-<script src="src/fundamental/plan_history_v3.js?v=1784653123"></script>
-<script src="src/fundamental/plan_position_v3.js?v=1784653123"></script>
-<script src="src/fundamental/plan_v3.js?v=1784653123"></script>
-<script src="src/ui/pdf_import_v3.js?v=1784653123"></script>
-<script src="src/ui/pdf_export_v3.js?v=1784653123"></script>
-<script src="src/core/peg_v3.js?v=1784653123"></script>
-<script src="src/alert/alert_v3.js?v=1784653123"></script>
-<script src="src/alert/alert_push_v3.js?v=1784653123"></script>
-<script src="src/screener/backtest_v3.js?v=1784653123"></script>
-<script src="src/screener/backtest_ui_v3.js?v=1784653123"></script>
-<script src="src/ui/enhance_v3.js?v=1784653123"></script>
-<script src="src/chart/aftermarket_v3.js?v=1784653123"></script>
-<script src="src/chart/overnight_v3.js?v=1784653123"></script>
-<script src="src/fundamental/supplychain_v3.js?v=1784653123"></script>
-<script src="src/portfolio/portfolio_v3.js?v=1784653123"></script>
-<script src="src/fundamental/chainmom_v3.js?v=1784653123"></script>
-<script src="src/fundamental/valuation_v3.js?v=1784653123"></script>
-<script src="src/fundamental/marketflow_v3.js?v=1784653123"></script>
-<script src="src/fundamental/instrank_v3.js?v=1784653123"></script>
-<script src="src/alert/calendar_v3.js?v=1784653123"></script>
-<script src="src/chart/multichart_v3.js?v=1784653123"></script>
-<script src="src/chart/spread_v3.js?v=1784653123"></script>
-<script src="src/chart/hotkeys_v3.js?v=1784653123"></script>
-<script src="src/screener/strategy_builder_v3.js?v=1784653123"></script>
-<script src="src/screener/strategy_script_v3.js?v=1784653123"></script>
-<script src="src/chart/drawtools_v3.js?v=1784653123"></script>
-<script src="src/screener/screener3_v3.js?v=1784653123"></script>
-<script src="src/core/etf_v3.js?v=1784653123"></script>
-<script src="src/fundamental/stockfut_v3.js?v=1784653123"></script>
-<script src="src/core/indices_v3.js?v=1784653123"></script>
-<script src="src/alert/datahealth_v3.js?v=1784653123"></script>
-<script src="src/alert/toast_v3.js?v=1784653123"></script>
-<script src="src/alert/settle_v3.js?v=1784653123"></script>
-<script src="src/ai/cmdpalette_v3.js?v=1784653123"></script>
-<script src="src/ui/dragwin_v3.js?v=1784653123"></script>
-<script src="src/core/liverefresh_v3.js?v=1784653123"></script>
-<script src="src/core/namesearch_v3.js?v=1784653123"></script>
-<script src="src/core/realtime_v3.js?v=1784653123"></script>
-<script src="src/ai/focus_v3.js?v=1784653123"></script>
-<script src="src/ai/copilot_v3.js?v=1784653123"></script>
-<script src="src/screener/wizard_v3.js?v=1784653123"></script>
-<script src="src/ui/toolbar_v3.js?v=1784653123"></script>
+<script src="src/core/colors_v3.js?v=1784684456"></script>
+<script src="src/core/market_v3.js?v=1784684456"></script>
+<script src="src/core/fields_v3.js?v=1784684456"></script>
+<script src="src/ui/share_v3.js?v=1784684456"></script>
+<script src="src/ui/datasources_v3.js?v=1784684456"></script>
+<script src="src/core/etf_flow_tip_v3.js?v=1784684456"></script>
+<script src="src/core/position_v2.js?v=1784684456"></script>
+<script src="src/core/watch_v2.js?v=1784684456"></script>
+<script src="src/core/info_v2.js?v=1784684456"></script>
+<script src="src/core/pro_v2.js?v=1784684456"></script>
+<script src="src/chart/volume_profile_v3.js?v=1784684456"></script>
+<script src="src/chart/pattern_v3.js?v=1784684456"></script>
+<script src="src/core/live_v2.js?v=1784684456"></script>
+<script src="src/fundamental/chip_v3.js?v=1784684456"></script>
+<script src="src/fundamental/fundamental_v3.js?v=1784684456"></script>
+<script src="src/screener/screener_v3.js?v=1784684456"></script>
+<script src="src/ai/ai_report_v3.js?v=1784684456"></script>
+<script src="src/ui/polish_v3.js?v=1784684456"></script>
+<script src="src/core/wl_live_v3.js?v=1784684456"></script>
+<script src="src/fundamental/plan_history_v3.js?v=1784684456"></script>
+<script src="src/fundamental/plan_position_v3.js?v=1784684456"></script>
+<script src="src/fundamental/plan_v3.js?v=1784684456"></script>
+<script src="src/ui/pdf_import_v3.js?v=1784684456"></script>
+<script src="src/ui/pdf_export_v3.js?v=1784684456"></script>
+<script src="src/core/peg_v3.js?v=1784684456"></script>
+<script src="src/alert/alert_v3.js?v=1784684456"></script>
+<script src="src/alert/alert_push_v3.js?v=1784684456"></script>
+<script src="src/screener/backtest_v3.js?v=1784684456"></script>
+<script src="src/screener/backtest_ui_v3.js?v=1784684456"></script>
+<script src="src/ui/enhance_v3.js?v=1784684456"></script>
+<script src="src/chart/aftermarket_v3.js?v=1784684456"></script>
+<script src="src/chart/overnight_v3.js?v=1784684456"></script>
+<script src="src/fundamental/supplychain_v3.js?v=1784684456"></script>
+<script src="src/portfolio/portfolio_v3.js?v=1784684456"></script>
+<script src="src/fundamental/chainmom_v3.js?v=1784684456"></script>
+<script src="src/fundamental/valuation_v3.js?v=1784684456"></script>
+<script src="src/fundamental/marketflow_v3.js?v=1784684456"></script>
+<script src="src/fundamental/instrank_v3.js?v=1784684456"></script>
+<script src="src/alert/calendar_v3.js?v=1784684456"></script>
+<script src="src/chart/multichart_v3.js?v=1784684456"></script>
+<script src="src/chart/spread_v3.js?v=1784684456"></script>
+<script src="src/chart/hotkeys_v3.js?v=1784684456"></script>
+<script src="src/screener/strategy_builder_v3.js?v=1784684456"></script>
+<script src="src/screener/strategy_script_v3.js?v=1784684456"></script>
+<script src="src/chart/drawtools_v3.js?v=1784684456"></script>
+<script src="src/screener/screener3_v3.js?v=1784684456"></script>
+<script src="src/core/etf_v3.js?v=1784684456"></script>
+<script src="src/fundamental/stockfut_v3.js?v=1784684456"></script>
+<script src="src/core/indices_v3.js?v=1784684456"></script>
+<script src="src/alert/datahealth_v3.js?v=1784684456"></script>
+<script src="src/alert/toast_v3.js?v=1784684456"></script>
+<script src="src/alert/settle_v3.js?v=1784684456"></script>
+<script src="src/ai/cmdpalette_v3.js?v=1784684456"></script>
+<script src="src/ui/dragwin_v3.js?v=1784684456"></script>
+<script src="src/core/liverefresh_v3.js?v=1784684456"></script>
+<script src="src/core/namesearch_v3.js?v=1784684456"></script>
+<script src="src/core/realtime_v3.js?v=1784684456"></script>
+<script src="src/ai/focus_v3.js?v=1784684456"></script>
+<script src="src/ai/copilot_v3.js?v=1784684456"></script>
+<script src="src/screener/wizard_v3.js?v=1784684456"></script>
+<script src="src/ui/toolbar_v3.js?v=1784684456"></script>
 </body>
 </html>
 <script>
