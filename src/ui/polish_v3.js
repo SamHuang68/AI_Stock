@@ -640,12 +640,239 @@ function applyMarketColorClass(mkt) {
   });
 })();
 
+// ============================================================
+// 大盤融資維持率 — MacroMicro 雙軸折線（完全覆寫，不走 K 線）
+// 放在 polish（外部 ?v= cache-bust）以免 HTML 內嵌舊版 renderChart 仍畫蠟燭
+// ============================================================
+function renderMarginRatioMacroChart(candles) {
+  const wrap = document.getElementById('chart-wrap');
+  if (!wrap || typeof LightweightCharts === 'undefined') {
+    console.warn('[margin-chart] chart-wrap / LightweightCharts missing');
+    return;
+  }
+  if (!candles || !candles.length) {
+    console.warn('[margin-chart] no candles');
+    return;
+  }
+
+  if (S.chart) {
+    try { S.chart.remove(); } catch (e) {}
+    S.chart = null;
+  }
+
+  const userTzOffset = -new Date().getTimezoneOffset() * 60;
+  S.tzOffset = userTzOffset;
+  const tz = (t) => (t == null ? t : t + userTzOffset);
+  const _marginLoadId = window.__loadSeq;
+
+  const chart = LightweightCharts.createChart(wrap, {
+    width: wrap.clientWidth,
+    height: wrap.clientHeight,
+    layout: { background: { color: '#060A12' }, textColor: '#5A6A82' },
+    grid: { vertLines: { color: '#0F1A2B' }, horzLines: { color: '#0F1A2B' } },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Magnet,
+      vertLine: { color: 'rgba(245,197,24,.55)', width: 1, style: 2, labelVisible: true, labelBackgroundColor: '#B8860B' },
+      horzLine: { color: 'rgba(245,197,24,.55)', width: 1, style: 2, labelVisible: true, labelBackgroundColor: '#B8860B' },
+    },
+    leftPriceScale: {
+      visible: true,
+      borderColor: '#1A2740',
+      scaleMargins: { top: 0.08, bottom: 0.10 },
+    },
+    rightPriceScale: {
+      visible: true,
+      borderColor: '#1A2740',
+      scaleMargins: { top: 0.08, bottom: 0.10 },
+    },
+    timeScale: {
+      borderColor: '#1A2740',
+      timeVisible: false,
+      secondsVisible: false,
+      rightOffset: 2,
+      barSpacing: 2,
+      minBarSpacing: 0.5,
+      fixLeftEdge: true,
+      fixRightEdge: true,
+      lockVisibleTimeRangeOnResize: true,
+    },
+    handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+    handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+  });
+  S.chart = chart;
+
+  const lineData = candles.map(c => ({ time: tz(c.time), value: c.close }));
+  const area = chart.addAreaSeries({
+    priceScaleId: 'left',
+    lineColor: '#38BDF8',
+    topColor: 'rgba(56,189,248,0.22)',
+    bottomColor: 'rgba(56,189,248,0.02)',
+    lineWidth: 2,
+    lastValueVisible: true,
+    priceLineVisible: false,
+    crosshairMarkerVisible: true,
+    crosshairMarkerRadius: 5,
+    crosshairMarkerBorderColor: '#7DD3FC',
+    crosshairMarkerBackgroundColor: '#0EA5E9',
+    priceFormat: {
+      type: 'custom',
+      formatter: v => (v != null && isFinite(v) ? v.toFixed(2) + '%' : ''),
+    },
+  });
+  area.setData(lineData);
+  S.chartSeries = area;
+  S.dotSeries = area;
+  S.volSeries = null;
+  S.overlaySeries = {};
+  S.wsSeries = null;
+  S.wsLeftSeries = null;
+  S.twiiSeries = null;
+  S._prevLine = null;
+  S._marginMacroChart = true; // 偵測標記：確認已走折線路徑
+
+  const _prevCloseByTime = new Map();
+  for (let i = 0; i < candles.length; i++) {
+    _prevCloseByTime.set(tz(candles[i].time), i > 0 ? candles[i - 1].close : null);
+  }
+  const _twiiByTime = new Map();
+
+  chart.subscribeCrosshairMove(param => {
+    const ohlcEl = document.getElementById('ci-ohlc');
+    if (!ohlcEl) return;
+    if (!param || !param.point || !param.time || !param.seriesData) {
+      ohlcEl.style.display = 'none';
+      return;
+    }
+    const pt = param.seriesData.get(area);
+    if (!pt || pt.value == null) { ohlcEl.style.display = 'none'; return; }
+    const d = new Date(typeof param.time === 'number' ? param.time * 1000 : Date.parse(param.time));
+    const ds = `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}`;
+    const prev = _prevCloseByTime.get(param.time);
+    const delta = (prev != null && prev > 0) ? (pt.value - prev) : null;
+    const chgPct = (delta != null && prev > 0) ? (delta / prev * 100) : null;
+    const up = delta != null && delta > 0;
+    const dn = delta != null && delta < 0;
+    const col = up ? 'var(--red)' : (dn ? 'var(--green)' : 'var(--tlo)');
+    const twii = _twiiByTime.get(param.time);
+    const twiiHtml = (twii != null && isFinite(twii))
+      ? `<span class="ohlc-k" style="margin-left:10px">加權(R)</span><span class="ohlc-v" style="color:#F59E0B">${twii.toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>`
+      : '';
+    ohlcEl.style.display = 'block';
+    ohlcEl.innerHTML =
+      `<span class="ohlc-d">${ds}</span>` +
+      `<span class="ohlc-k">維持率(L)</span><span class="ohlc-v" style="color:${col}">${pt.value.toFixed(2)}%</span>` +
+      (delta != null
+        ? `<span style="color:${col};margin-left:6px">${up ? '+' : ''}${delta.toFixed(2)}pp` +
+          (chgPct != null ? ` (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)` : '') + `</span>`
+        : '') +
+      twiiHtml;
+  });
+
+  // 右軸加權指數
+  (async () => {
+    try {
+      if (typeof fetchYF !== 'function' || typeof parseYF !== 'function') return;
+      const rdef = (typeof currentRangeDef === 'function') ? currentRangeDef() : { range: 'max', interval: '1d' };
+      const raw = await fetchYF('^TWII', { range: (rdef && rdef.range) || 'max', interval: '1d' });
+      if (_marginLoadId !== window.__loadSeq || S.sym !== '__MARGIN_RATIO__' || S.chart !== chart) return;
+      const parsed = parseYF(raw);
+      if (!parsed || !parsed.candles || !parsed.candles.length) return;
+      const twiiData = parsed.candles.map(c => ({ time: tz(c.time), value: c.close }));
+      _twiiByTime.clear();
+      for (const p of twiiData) _twiiByTime.set(p.time, p.value);
+      const twiiLine = chart.addLineSeries({
+        priceScaleId: 'right',
+        color: '#F59E0B',
+        lineWidth: 1.5,
+        lastValueVisible: true,
+        priceLineVisible: false,
+        crosshairMarkerVisible: true,
+        crosshairMarkerRadius: 4,
+        crosshairMarkerBorderColor: '#FCD34D',
+        crosshairMarkerBackgroundColor: '#F59E0B',
+        priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+      });
+      twiiLine.setData(twiiData);
+      S.twiiSeries = twiiLine;
+      S.overlaySeries = Object.assign({}, S.overlaySeries, { twii: twiiLine });
+      try { if (typeof renderChartLegend === 'function') renderChartLegend(); } catch (e) {}
+    } catch (e) {
+      console.warn('[margin-chart] TWII overlay failed:', e);
+    }
+  })();
+
+  // Header 強制顯示正確名稱／%
+  try {
+    const last = candles[candles.length - 1];
+    const pEl = document.getElementById('ci-price');
+    if (pEl && last) pEl.textContent = Number(last.close).toFixed(2) + '%';
+    const nEl = document.getElementById('ci-name');
+    if (nEl) nEl.textContent = '大盤融資維持率';
+    const info = document.getElementById('chart-info');
+    if (info) info.style.display = '';
+    const loading = document.getElementById('chart-loading');
+    if (loading) loading.style.display = 'none';
+  } catch (e) {}
+
+  requestAnimationFrame(() => {
+    try { chart.timeScale().fitContent(); } catch (e) {}
+  });
+  if (!wrap._marginRo) {
+    wrap._marginRo = new ResizeObserver(() => {
+      if (!S.chart || S.sym !== '__MARGIN_RATIO__') return;
+      try {
+        S.chart.applyOptions({ width: wrap.clientWidth, height: wrap.clientHeight });
+        S.chart.timeScale().fitContent();
+      } catch (e) {}
+    });
+    wrap._marginRo.observe(wrap);
+  }
+  console.log('[margin-chart] MacroMicro dual-axis area rendered', candles.length, 'pts');
+}
+
+// loadSym：融資維持率強制 max 日線 + TW 市場（避免舊 HTML 仍停在 6月 K 線）
+(function patchLoadSymMargin() {
+  if (typeof loadSym !== 'function') return setTimeout(patchLoadSymMargin, 100);
+  if (window._marginLoadSymPatched) return;
+  window._marginLoadSymPatched = true;
+  const orig = window.loadSym;
+  window.loadSym = function (sym, mkt, silent) {
+    const s = String(sym || '').toUpperCase().trim();
+    if (s === '__MARGIN_RATIO__') {
+      S.range = 'max';
+      try { if (typeof renderRangeBar === 'function') renderRangeBar(); } catch (e) {}
+      mkt = 'TW';
+      S.mkt = 'TW';
+      try { if (typeof setMktUI === 'function') setMktUI('TW'); } catch (e) {}
+    }
+    return orig.call(this, sym, mkt, silent);
+  };
+})();
+
 (function patchRenderChartPolish() {
   if (typeof renderChart !== 'function') return setTimeout(patchRenderChartPolish, 100);
   if (window._polishChartPatched) return;
   window._polishChartPatched = true;
   const orig = window.renderChart;
   window.renderChart = function (candles) {
+    // ★ 融資維持率：完全接管，絕不呼叫舊版 K 線 orig（就算 HTML 內嵌仍是蠟燭版）
+    if (S.sym === '__MARGIN_RATIO__') {
+      try {
+        renderMarginRatioMacroChart(candles || (S.data && S.data.candles) || []);
+      } catch (e) {
+        console.error('[margin-chart] render failed:', e);
+      }
+      setTimeout(() => {
+        try { if (typeof renderChartLegend === 'function') renderChartLegend(); } catch (e) {}
+        try {
+          window.dispatchEvent(new CustomEvent('symLoaded', { detail: { sym: S.sym, mkt: S.mkt } }));
+        } catch (e) {}
+      }, 40);
+      return;
+    }
+
+    S._marginMacroChart = false;
+
     // TW/US: swap candle up/down colors before original render reads them
     const tw = _isTwSym(S.sym) || (S.mkt || 'TW') === 'TW';
     const UP = tw ? '#F87171' : '#4ADE80';   // TW red-up / US green-up
@@ -655,14 +882,6 @@ function applyMarketColorClass(mkt) {
     document.documentElement.style.setProperty('--chart-down', DN);
 
     orig.apply(this, arguments);
-
-    // 融資維持率已是折線圖 — 略過 K 線／量柱重色
-    if (S.sym === '__MARGIN_RATIO__') {
-      setTimeout(() => {
-        try { if (typeof renderChartLegend === 'function') renderChartLegend(); } catch (e) {}
-      }, 30);
-      return;
-    }
 
     // After orig renders, post-process:
     setTimeout(() => {
@@ -754,6 +973,37 @@ function applyMarketColorClass(mkt) {
       } catch (e) { console.warn('[polish-v3] post-render error:', e); }
     }, 60);
   };
+})();
+
+// drawtools 等模組在 polish 之後才 wrap renderChart → 延遲再掛一層最外層，
+// 保證融資維持率永遠不落入內層舊版 K 線路徑。
+(function ensureMarginChartOutermost() {
+  function install() {
+    if (typeof window.renderChart !== 'function') return setTimeout(install, 120);
+    if (window.renderChart && window.renderChart._marginOuter) return;
+    const inner = window.renderChart;
+    function outer(candles) {
+      if (window.S && S.sym === '__MARGIN_RATIO__') {
+        try {
+          renderMarginRatioMacroChart(candles || (S.data && S.data.candles) || []);
+        } catch (e) {
+          console.error('[margin-chart] outer render failed:', e);
+        }
+        setTimeout(() => {
+          try { if (typeof renderChartLegend === 'function') renderChartLegend(); } catch (e) {}
+          try {
+            window.dispatchEvent(new CustomEvent('symLoaded', { detail: { sym: S.sym, mkt: S.mkt } }));
+          } catch (e) {}
+        }, 40);
+        return;
+      }
+      return inner.apply(this, arguments);
+    }
+    outer._marginOuter = true;
+    window.renderChart = outer;
+  }
+  setTimeout(install, 800);
+  setTimeout(install, 2000);
 })();
 
 // 在右側價格軸「對應價位高度」放昨收/今收小標籤（不橫跨、不蓋 K 線）
