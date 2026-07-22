@@ -448,6 +448,10 @@ async function refreshMarginRatioCell() {
 
   function applyZones(zones) {
     clearLines();
+    // MarketChart 已畫風險虛線且用浮動窗標註 → 勿再疊軸上標籤
+    if (window.MarketChart && window.S && (S._marketChartId || MarketChart.resolve(S.sym))) {
+      return;
+    }
     if (!S.chartSeries || typeof S.chartSeries.createPriceLine !== 'function') return;
     const list = (zones && zones.length) ? zones : ZONE_DEFAULTS;
     const LS = (window.LightweightCharts && LightweightCharts.LineStyle)
@@ -459,8 +463,8 @@ async function refreshMarginRatioCell() {
           color: z.color || '#64748b',
           lineWidth: 1,
           lineStyle: LS,
-          axisLabelVisible: true,
-          title: z.label || String(z.level),
+          axisLabelVisible: false,
+          title: '',
         });
         _lines.push(pl);
       } catch (e) {}
@@ -722,7 +726,7 @@ function _renderMarginRatioMacroChartFallback(candles) {
     topColor: 'rgba(56,189,248,0.22)',
     bottomColor: 'rgba(56,189,248,0.02)',
     lineWidth: 2,
-    lastValueVisible: true,
+    lastValueVisible: false,
     priceLineVisible: false,
     crosshairMarkerVisible: true,
     crosshairMarkerRadius: 5,
@@ -798,7 +802,7 @@ function _renderMarginRatioMacroChartFallback(candles) {
         priceScaleId: 'right',
         color: '#F59E0B',
         lineWidth: 1.5,
-        lastValueVisible: true,
+        lastValueVisible: false,
         priceLineVisible: false,
         crosshairMarkerVisible: true,
         crosshairMarkerRadius: 4,

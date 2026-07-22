@@ -11,7 +11,7 @@
 (function MarketChartV3() {
   'use strict';
 
-  const VER = '3.1.0';
+  const VER = '3.1.1';
   const LOG = (...a) => console.log('%c[MarketChart ' + VER + ']', 'color:#38BDF8;font-weight:700', ...a);
   const WARN = (...a) => console.warn('[MarketChart]', ...a);
 
@@ -135,7 +135,7 @@
     ],
   });
 
-  // ── UI badge：一眼確認走的是 MarketChart，不是 K 線 ────────────
+  // ── UI badge + 浮動資訊窗（不畫在軸上）────────────────────────
   function ensureBadge(def) {
     let el = document.getElementById('market-chart-badge');
     if (!el) {
@@ -165,6 +165,88 @@
   function hideBadge() {
     const el = document.getElementById('market-chart-badge');
     if (el) el.style.display = 'none';
+    hideFloat();
+  }
+
+  /** 圖內浮動資訊卡：十字游標／最新值／風險區 — 絕不使用軸上 label */
+  function ensureFloat() {
+    let el = document.getElementById('market-chart-float');
+    if (el) return el;
+    const wrap = document.getElementById('chart-wrap');
+    if (!wrap) return null;
+    if (getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+    el = document.createElement('div');
+    el.id = 'market-chart-float';
+    el.style.cssText = [
+      'position:absolute', 'top:36px', 'left:12px', 'z-index:28',
+      'min-width:200px', 'max-width:min(360px,70%)',
+      'padding:8px 10px', 'border-radius:6px',
+      'font:11px/1.45 JetBrains Mono,ui-monospace,monospace',
+      'color:#e2e8f0', 'background:rgba(6,10,18,.92)',
+      'border:1px solid rgba(56,189,248,.35)',
+      'box-shadow:0 8px 24px rgba(0,0,0,.45)',
+      'pointer-events:none', 'display:none',
+    ].join(';');
+    wrap.appendChild(el);
+    return el;
+  }
+
+  function hideFloat() {
+    const el = document.getElementById('market-chart-float');
+    if (el) el.style.display = 'none';
+  }
+
+  function riskZoneFor(def, value) {
+    const lines = (def && def.riskLines) ? def.riskLines.slice().sort((a, b) => b.level - a.level) : [];
+    // 由高到低：高於最高門檻 = 正常；否則落在第一個 level >= value 的區間之下
+    if (value == null || !isFinite(value) || !lines.length) return null;
+    const sortedAsc = lines.slice().sort((a, b) => a.level - b.level);
+    for (const z of sortedAsc) {
+      if (value <= z.level) return z;
+    }
+    return { level: sortedAsc[sortedAsc.length - 1].level, label: '正常區', color: '#4ade80' };
+  }
+
+  function updateFloat(def, opts) {
+    const el = ensureFloat();
+    if (!el || !def) return;
+    opts = opts || {};
+    const value = opts.value;
+    const prev = opts.prev;
+    const dateStr = opts.dateStr;
+    const dual = opts.dual;
+    const zone = riskZoneFor(def, value);
+    const delta = (prev != null && value != null) ? (value - prev) : null;
+    const chgPct = (delta != null && prev > 0) ? (delta / prev * 100) : null;
+    const up = delta != null && delta > 0;
+    const dn = delta != null && delta < 0;
+    const col = up ? '#f87171' : (dn ? '#4ade80' : '#94a3b8');
+
+    let zonesHtml = '';
+    for (const z of (def.riskLines || [])) {
+      zonesHtml += `<span style="color:${z.color};margin-right:8px">― ${z.label}</span>`;
+    }
+
+    el.innerHTML =
+      `<div style="color:#7dd3fc;font-weight:700;margin-bottom:4px">${def.name}</div>` +
+      (dateStr ? `<div style="color:#94a3b8;margin-bottom:2px">${dateStr}</div>` : '') +
+      `<div style="font-size:15px;font-weight:700;color:${col}">` +
+        (value != null ? def.valueFormat(value) : '—') +
+        (delta != null
+          ? ` <span style="font-size:11px;font-weight:600">${up ? '+' : ''}${delta.toFixed(2)}${def.unit === '%' ? 'pp' : ''}` +
+            (chgPct != null ? ` (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)` : '') + `</span>`
+          : '') +
+      `</div>` +
+      (def.dualAxis && dual != null
+        ? `<div style="margin-top:4px;color:${def.dualAxis.color}">${def.dualAxis.name}(R) ${Number(dual).toLocaleString('en-US', { maximumFractionDigits: 2 })}</div>`
+        : '') +
+      (zone
+        ? `<div style="margin-top:6px;color:${zone.color};font-weight:700">◎ ${zone.label}${zone.level != null && zone.label !== '正常區' ? '' : (value != null && value > 166 ? '（>166%）' : '')}</div>`
+        : '') +
+      (zonesHtml
+        ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(148,163,184,.25);font-size:10px;color:#94a3b8">風險線（僅圖內虛線，不佔軸）<br>${zonesHtml}</div>`
+        : '');
+    el.style.display = 'block';
   }
 
   function setHeader(def, last, prev) {
@@ -188,6 +270,9 @@
       if (info) info.style.display = 'block';
       const loading = document.getElementById('chart-loading');
       if (loading) loading.style.display = 'none';
+      // 隱藏舊的軸旁 OHLC 列，改走浮動窗
+      const ohlcEl = document.getElementById('ci-ohlc');
+      if (ohlcEl) ohlcEl.style.display = 'none';
     } catch (e) {}
   }
 
@@ -197,13 +282,14 @@
       ? LightweightCharts.LineStyle.Dashed : 2;
     for (const z of lines) {
       try {
+        // 只畫虛線，不在 Y 軸生成標籤／標題（避免蓋軸）
         series.createPriceLine({
           price: z.level,
           color: z.color || '#64748b',
           lineWidth: 1,
           lineStyle: LS,
-          axisLabelVisible: true,
-          title: z.label || String(z.level),
+          axisLabelVisible: false,
+          title: '',
         });
       } catch (e) {}
     }
@@ -253,24 +339,25 @@
       grid: { vertLines: { color: '#0F1A2B' }, horzLines: { color: '#0F1A2B' } },
       crosshair: {
         mode: LightweightCharts.CrosshairMode.Magnet,
-        vertLine: { color: 'rgba(245,197,24,.55)', width: 1, style: 2, labelVisible: true, labelBackgroundColor: '#B8860B' },
-        horzLine: { color: 'rgba(245,197,24,.55)', width: 1, style: 2, labelVisible: true, labelBackgroundColor: '#B8860B' },
+        // 軸上不顯示十字游標數值泡泡（改走左上浮動窗）
+        vertLine: { color: 'rgba(245,197,24,.45)', width: 1, style: 2, labelVisible: false },
+        horzLine: { color: 'rgba(245,197,24,.45)', width: 1, style: 2, labelVisible: false },
       },
       leftPriceScale: {
         visible: true,
         borderColor: '#1A2740',
-        scaleMargins: { top: 0.08, bottom: 0.10 },
+        scaleMargins: { top: 0.10, bottom: 0.12 },
       },
       rightPriceScale: {
         visible: hasDual,
         borderColor: '#1A2740',
-        scaleMargins: { top: 0.08, bottom: 0.10 },
+        scaleMargins: { top: 0.10, bottom: 0.12 },
       },
       timeScale: {
         borderColor: '#1A2740',
         timeVisible: false,
         secondsVisible: false,
-        rightOffset: 2,
+        rightOffset: 8,
         barSpacing: 2,
         minBarSpacing: 0.5,
         fixLeftEdge: true,
@@ -300,7 +387,7 @@
         priceScaleId: 'left',
         color: def.color,
         lineWidth: 2,
-        lastValueVisible: true,
+        lastValueVisible: false,   // 不在軸上貼現價標籤
         priceLineVisible: false,
         crosshairMarkerVisible: true,
         crosshairMarkerRadius: 5,
@@ -313,7 +400,7 @@
         topColor: def.topColor,
         bottomColor: def.bottomColor,
         lineWidth: 2,
-        lastValueVisible: true,
+        lastValueVisible: false,
         priceLineVisible: false,
         crosshairMarkerVisible: true,
         crosshairMarkerRadius: 5,
@@ -336,37 +423,32 @@
     const dualByTime = new Map();
 
     chart.subscribeCrosshairMove(param => {
+      // 軸上 OHLC 列關閉；資訊只進浮動窗
       const ohlcEl = document.getElementById('ci-ohlc');
-      if (!ohlcEl) return;
+      if (ohlcEl) ohlcEl.style.display = 'none';
+
       if (!param || !param.point || !param.time || !param.seriesData) {
-        ohlcEl.style.display = 'none';
+        // 游標離開：回到最新值
+        const last = points[points.length - 1];
+        const prev = points.length >= 2 ? points[points.length - 2].value : null;
+        updateFloat(def, {
+          value: last.value,
+          prev,
+          dateStr: null,
+          dual: dualByTime.get(tz(last.time)),
+        });
         return;
       }
       const pt = param.seriesData.get(primary);
-      if (!pt || pt.value == null) { ohlcEl.style.display = 'none'; return; }
+      if (!pt || pt.value == null) return;
       const d = new Date(typeof param.time === 'number' ? param.time * 1000 : Date.parse(param.time));
       const ds = `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}`;
-      const prev = prevByTime.get(param.time);
-      const delta = (prev != null && prev > 0) ? (pt.value - prev) : null;
-      const chgPct = (delta != null && prev > 0) ? (delta / prev * 100) : null;
-      const up = delta != null && delta > 0;
-      const dn = delta != null && delta < 0;
-      const col = up ? 'var(--red)' : (dn ? 'var(--green)' : 'var(--tlo)');
-      const dual = dualByTime.get(param.time);
-      const dualHtml = (def.dualAxis && dual != null && isFinite(dual))
-        ? `<span class="ohlc-k" style="margin-left:10px">${def.dualAxis.name}(R)</span>` +
-          `<span class="ohlc-v" style="color:${def.dualAxis.color}">${Number(dual).toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>`
-        : '';
-      ohlcEl.style.display = 'block';
-      ohlcEl.innerHTML =
-        `<span class="ohlc-d">${ds}</span>` +
-        `<span class="ohlc-k">${def.shortName || def.name}(L)</span>` +
-        `<span class="ohlc-v" style="color:${col}">${def.valueFormat(pt.value)}</span>` +
-        (delta != null
-          ? `<span style="color:${col};margin-left:6px">${up ? '+' : ''}${delta.toFixed(2)}${def.unit === '%' ? 'pp' : ''}` +
-            (chgPct != null ? ` (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)` : '') + `</span>`
-          : '') +
-        dualHtml;
+      updateFloat(def, {
+        value: pt.value,
+        prev: prevByTime.get(param.time),
+        dateStr: ds,
+        dual: dualByTime.get(param.time),
+      });
     });
 
     // 右軸對照序列（如加權）
@@ -397,7 +479,7 @@
             priceScaleId: def.dualAxis.priceScaleId || 'right',
             color: def.dualAxis.color,
             lineWidth: 1.5,
-            lastValueVisible: true,
+            lastValueVisible: false,  // 不在右軸貼現價標籤
             priceLineVisible: false,
             crosshairMarkerVisible: true,
             crosshairMarkerRadius: 4,
@@ -417,6 +499,11 @@
 
     ensureBadge(def);
     renderLegend(def);
+    const lastPt = points[points.length - 1];
+    const prevPt = points.length >= 2 ? points[points.length - 2].value : null;
+    setHeader(def, lastPt.value, prevPt);
+    updateFloat(def, { value: lastPt.value, prev: prevPt, dateStr: null, dual: null });
+
     requestAnimationFrame(() => {
       try { chart.timeScale().fitContent(); } catch (e) {}
     });
@@ -431,10 +518,7 @@
       wrap._mcRo.observe(wrap);
     }
 
-    const last = points[points.length - 1].value;
-    const prev = points.length >= 2 ? points[points.length - 2].value : null;
-    setHeader(def, last, prev);
-    LOG('rendered', def.id, points.length, 'pts · NO candlestick');
+    LOG('rendered', def.id, points.length, 'pts · float panel · NO axis labels');
   }
 
   function pointsFromYF(raw) {
