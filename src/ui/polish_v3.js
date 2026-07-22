@@ -422,7 +422,7 @@ async function refreshMarginRatioCell() {
       `<b style="color:#7dd3fc">大盤融資維持率</b> ` +
       `<b style="color:#f8fafc;font-size:13px">${(m.current != null ? m.current.toFixed(2) : '--')}%</b> ` +
       zoneHtml +
-      `<span style="color:#94a3b8"> · 折線圖（MacroMicro 風格）· 歷史 ${m.firstDate || '—'} → ${m.lastDate || '—'}（${m.count || 0} 日）` +
+      `<span style="color:#94a3b8"> · 雙軸折線（維持率L／加權R）· 歷史 ${m.firstDate || '—'} → ${m.lastDate || '—'}（${m.count || 0} 日）` +
       ` · 區間 ${m.min != null ? m.min.toFixed(1) : '—'}–${m.max != null ? m.max.toFixed(1) : '—'}%` +
       ` · 均 ${m.avg != null ? m.avg.toFixed(1) : '—'}%</span>` +
       `<div style="color:#64748b;margin-top:2px">公式：${m.formula || 'Σ(融資市值,不含ETF)/融資金額×100'} · 來源 ${m.source || 'TWSE'}${bfNote}` +
@@ -816,10 +816,11 @@ function renderChartLegend() {
     lg.addEventListener('click', e => { e.stopPropagation(); lg.classList.toggle('collapsed'); });
     east.appendChild(lg);
   }
-  // 融資維持率：折線圖圖例（MacroMicro 風格）
+  // 融資維持率：雙軸折線圖例（MacroMicro：維持率L + 加權R）
   if (S.sym === '__MARGIN_RATIO__') {
     lg.innerHTML =
-      `<div class="lg-row" style="color:#38BDF8"><span class="lg-swatch" style="background:#38BDF8"></span>大盤融資維持率</div>` +
+      `<div class="lg-row" style="color:#38BDF8"><span class="lg-swatch" style="background:#38BDF8"></span>融資維持率 (L)</div>` +
+      `<div class="lg-row" style="color:#F59E0B"><span class="lg-swatch" style="background:#F59E0B"></span>加權指數 (R)</div>` +
       `<div class="lg-row" style="color:#38bdf8"><span class="lg-dash" style="width:9px;border-color:#38bdf8"></span>門檻 166%</div>` +
       `<div class="lg-row" style="color:#eab308"><span class="lg-dash" style="width:9px;border-color:#eab308"></span>偏弱 150%</div>` +
       `<div class="lg-row" style="color:#f97316"><span class="lg-dash" style="width:9px;border-color:#f97316"></span>警戒 140%</div>` +

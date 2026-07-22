@@ -805,9 +805,15 @@ function renderChart(candles) {
       vertLine:{color:'rgba(245,197,24,.55)',width:1,style:2,labelVisible:true,labelBackgroundColor:'#B8860B'},
       horzLine:{color:'rgba(245,197,24,.55)',width:1,style:2,labelVisible:true,labelBackgroundColor:'#B8860B'},
     },
+    // MacroMicro 雙軸：左=融資維持率%、右=加權指數；一般 K 線僅用右軸
+    leftPriceScale: isMarginRatio ? {
+      visible: true,
+      borderColor: '#1A2740',
+      scaleMargins: { top: 0.08, bottom: 0.10 },
+    } : { visible: false },
     rightPriceScale:{borderColor:'#1A2740',
       // 盤中(1天)加大上下留白 → 把當日小波動壓平(flatten),不再撐滿全高顯得震盪劇烈
-      // 融資維持率：稍加大上下留白，讓風險線與走勢可讀
+      // 融資維持率：右軸給加權指數，略加大上下留白
       scaleMargins: isMarginRatio ? {top:0.08,bottom:0.10}
                   : (isIntraday ? {top:0.30,bottom:0.30} : {top:0.05,bottom:0.18})},
     timeScale:{
@@ -826,12 +832,14 @@ function renderChart(candles) {
   });
   S.chart = chart;
 
-  // ── 融資維持率：MacroMicro 風格單一折線 + 淡色面積（無 K 線／無 SMA／無布林）──
+  // ── 融資維持率：MacroMicro 風格雙軸折線（左維持率 / 右加權；無 K 線／無 SMA／無布林）──
   if (isMarginRatio) {
+    const _marginLoadId = window.__loadSeq;
     const lineData = candles.map(c => ({ time: tz(c.time), value: c.close }));
     const area = chart.addAreaSeries({
+      priceScaleId: 'left',
       lineColor: '#38BDF8',
-      topColor: 'rgba(56,189,248,0.28)',
+      topColor: 'rgba(56,189,248,0.22)',
       bottomColor: 'rgba(56,189,248,0.02)',
       lineWidth: 2,
       lastValueVisible: true,
@@ -849,12 +857,23 @@ function renderChart(candles) {
     S.overlaySeries = {};
     S.wsSeries = null;
     S.wsLeftSeries = null;
-    chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.10 } });
+    S.twiiSeries = null;
+    chart.priceScale('left').applyOptions({
+      visible: true,
+      borderColor: '#1A2740',
+      scaleMargins: { top: 0.08, bottom: 0.10 },
+    });
+    chart.priceScale('right').applyOptions({
+      visible: true,
+      borderColor: '#1A2740',
+      scaleMargins: { top: 0.08, bottom: 0.10 },
+    });
 
     const _prevCloseByTime = new Map();
     for (let i = 0; i < candles.length; i++) {
       _prevCloseByTime.set(tz(candles[i].time), i > 0 ? candles[i - 1].close : null);
     }
+    const _twiiByTime = new Map();
 
     chart.subscribeCrosshairMove(param => {
       const ohlcEl = document.getElementById('ci-ohlc');
@@ -873,15 +892,52 @@ function renderChart(candles) {
       const up = delta != null && delta > 0;
       const dn = delta != null && delta < 0;
       const col = up ? 'var(--red)' : (dn ? 'var(--green)' : 'var(--tlo)');
+      const twii = _twiiByTime.get(param.time);
+      const twiiHtml = (twii != null && isFinite(twii))
+        ? `<span class="ohlc-k" style="margin-left:10px">加權</span><span class="ohlc-v" style="color:#F59E0B">${twii.toLocaleString('en-US',{maximumFractionDigits:2})}</span>`
+        : '';
       ohlcEl.style.display = 'block';
       ohlcEl.innerHTML =
         `<span class="ohlc-d">${ds}</span>` +
-        `<span class="ohlc-k">維持率</span><span class="ohlc-v" style="color:${col}">${pt.value.toFixed(2)}%</span>` +
+        `<span class="ohlc-k">維持率(L)</span><span class="ohlc-v" style="color:${col}">${pt.value.toFixed(2)}%</span>` +
         (delta != null
           ? `<span style="color:${col};margin-left:6px">${up ? '+' : ''}${delta.toFixed(2)}pp` +
             (chgPct != null ? ` (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)` : '') + `</span>`
-          : '');
+          : '') +
+        twiiHtml;
     });
+
+    // 右軸：加權股價指數（MacroMicro 同圖對照）
+    (async () => {
+      try {
+        const rdef = currentRangeDef();
+        const raw = await fetchYF('^TWII', { range: rdef.range || 'max', interval: '1d' });
+        if (_marginLoadId !== window.__loadSeq || S.sym !== '__MARGIN_RATIO__' || S.chart !== chart) return;
+        const parsed = parseYF(raw);
+        if (!parsed || !parsed.candles || !parsed.candles.length) return;
+        const twiiData = parsed.candles.map(c => ({ time: tz(c.time), value: c.close }));
+        _twiiByTime.clear();
+        for (const p of twiiData) _twiiByTime.set(p.time, p.value);
+        const twiiLine = chart.addLineSeries({
+          priceScaleId: 'right',
+          color: '#F59E0B',
+          lineWidth: 1.5,
+          lastValueVisible: true,
+          priceLineVisible: false,
+          crosshairMarkerVisible: true,
+          crosshairMarkerRadius: 4,
+          crosshairMarkerBorderColor: '#FCD34D',
+          crosshairMarkerBackgroundColor: '#F59E0B',
+          priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+        });
+        twiiLine.setData(twiiData);
+        S.twiiSeries = twiiLine;
+        S.overlaySeries = Object.assign({}, S.overlaySeries, { twii: twiiLine });
+        try { if (typeof renderChartLegend === 'function') renderChartLegend(); } catch (e) {}
+      } catch (e) {
+        console.warn('[margin] TWII overlay failed:', e);
+      }
+    })();
 
     requestAnimationFrame(() => chart.timeScale().fitContent());
     const ro = new ResizeObserver(() => {
