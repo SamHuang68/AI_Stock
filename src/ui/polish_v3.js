@@ -641,10 +641,24 @@ function applyMarketColorClass(mkt) {
 })();
 
 // ============================================================
-// 大盤融資維持率 — MacroMicro 雙軸折線（完全覆寫，不走 K 線）
-// 放在 polish（外部 ?v= cache-bust）以免 HTML 內嵌舊版 renderChart 仍畫蠟燭
+// 大盤融資維持率 — 已迁至 src/chart/market_chart_v3.js（MarketChart）
+// polish 僅保留 shim：MarketChart 優先，未載入才走本地後備。
 // ============================================================
 function renderMarginRatioMacroChart(candles) {
+  if (window.MarketChart && typeof MarketChart.render === 'function') {
+    const def = MarketChart.resolve('__MARGIN_RATIO__');
+    const pts = (candles && candles.length)
+      ? candles.map(c => ({ time: c.time, value: c.close }))
+      : ((window.S && S.data && S.data.candles) || []).map(c => ({ time: c.time, value: c.close }));
+    if (def && pts.length) {
+      MarketChart.render(def, pts);
+      return;
+    }
+  }
+  _renderMarginRatioMacroChartFallback(candles);
+}
+
+function _renderMarginRatioMacroChartFallback(candles) {
   const wrap = document.getElementById('chart-wrap');
   if (!wrap || typeof LightweightCharts === 'undefined') {
     console.warn('[margin-chart] chart-wrap / LightweightCharts missing');
@@ -830,35 +844,26 @@ function renderMarginRatioMacroChart(candles) {
   console.log('[margin-chart] MacroMicro dual-axis area rendered', candles.length, 'pts');
 }
 
-// loadSym：融資維持率強制 max 日線 + TW 市場（避免舊 HTML 仍停在 6月 K 線）
-(function patchLoadSymMargin() {
-  if (typeof loadSym !== 'function') return setTimeout(patchLoadSymMargin, 100);
-  if (window._marginLoadSymPatched) return;
-  window._marginLoadSymPatched = true;
-  const orig = window.loadSym;
-  window.loadSym = function (sym, mkt, silent) {
-    const s = String(sym || '').toUpperCase().trim();
-    if (s === '__MARGIN_RATIO__') {
-      S.range = 'max';
-      try { if (typeof renderRangeBar === 'function') renderRangeBar(); } catch (e) {}
-      mkt = 'TW';
-      S.mkt = 'TW';
-      try { if (typeof setMktUI === 'function') setMktUI('TW'); } catch (e) {}
-    }
-    return orig.call(this, sym, mkt, silent);
-  };
-})();
-
+// 融資維持率 load/render 改由 MarketChart 模組攔截；此處不再重複 wrap loadSym。
+// 若 MarketChart 尚未載入，仍擋掉 K 線重色路徑。
 (function patchRenderChartPolish() {
   if (typeof renderChart !== 'function') return setTimeout(patchRenderChartPolish, 100);
   if (window._polishChartPatched) return;
   window._polishChartPatched = true;
   const orig = window.renderChart;
   window.renderChart = function (candles) {
-    // ★ 融資維持率：完全接管，絕不呼叫舊版 K 線 orig（就算 HTML 內嵌仍是蠟燭版）
-    if (S.sym === '__MARGIN_RATIO__') {
+    // MarketChart 優先；否則本地後備折線（絕不走下方 K 線重色）
+    if (S.sym === '__MARGIN_RATIO__' || (window.MarketChart && MarketChart.resolve(S.sym))) {
       try {
-        renderMarginRatioMacroChart(candles || (S.data && S.data.candles) || []);
+        if (window.MarketChart && MarketChart.resolve(S.sym)) {
+          const def = MarketChart.resolve(S.sym);
+          const pts = (candles && candles.length)
+            ? candles.map(c => ({ time: c.time, value: c.close }))
+            : ((S.data && S.data.candles) || []).map(c => ({ time: c.time, value: c.close }));
+          MarketChart.render(def, pts);
+        } else {
+          renderMarginRatioMacroChart(candles || (S.data && S.data.candles) || []);
+        }
       } catch (e) {
         console.error('[margin-chart] render failed:', e);
       }
@@ -975,36 +980,8 @@ function renderMarginRatioMacroChart(candles) {
   };
 })();
 
-// drawtools 等模組在 polish 之後才 wrap renderChart → 延遲再掛一層最外層，
-// 保證融資維持率永遠不落入內層舊版 K 線路徑。
-(function ensureMarginChartOutermost() {
-  function install() {
-    if (typeof window.renderChart !== 'function') return setTimeout(install, 120);
-    if (window.renderChart && window.renderChart._marginOuter) return;
-    const inner = window.renderChart;
-    function outer(candles) {
-      if (window.S && S.sym === '__MARGIN_RATIO__') {
-        try {
-          renderMarginRatioMacroChart(candles || (S.data && S.data.candles) || []);
-        } catch (e) {
-          console.error('[margin-chart] outer render failed:', e);
-        }
-        setTimeout(() => {
-          try { if (typeof renderChartLegend === 'function') renderChartLegend(); } catch (e) {}
-          try {
-            window.dispatchEvent(new CustomEvent('symLoaded', { detail: { sym: S.sym, mkt: S.mkt } }));
-          } catch (e) {}
-        }, 40);
-        return;
-      }
-      return inner.apply(this, arguments);
-    }
-    outer._marginOuter = true;
-    window.renderChart = outer;
-  }
-  setTimeout(install, 800);
-  setTimeout(install, 2000);
-})();
+// MarketChart 模組會維持最外層 hook；此處不再延遲重掛，避免與 MarketChart 搶 renderChart。
+// （舊 ensureMarginChartOutermost 已移除）
 
 // 在右側價格軸「對應價位高度」放昨收/今收小標籤（不橫跨、不蓋 K 線）
 // 像原生現價標一樣貼在軸上，今收=漲跌色、昨收=灰。

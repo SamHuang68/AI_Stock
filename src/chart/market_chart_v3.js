@@ -1,0 +1,668 @@
+// ============================================================
+// Market Chart Module v3 — 總經 / 大盤折線圖（與個股 K 線完全隔離）
+// ------------------------------------------------------------
+// 設計目標：
+//   1. 融資維持率、未來利率／利差／CPI 等「非 OHLC」序列，不走 candlestick
+//      + SMA + 布林 + 量柱 pipeline。
+//   2. 新增圖表只需 MarketChart.register({...})，不必改 stock_terminal.html。
+//   3. 以最外層 hook 攔截 loadSym / renderChart / setRange / go，
+//      即使其他模組後掛 K 線 patch，也會被定期重掛蓋過。
+// ============================================================
+(function MarketChartV3() {
+  'use strict';
+
+  const VER = '3.1.0';
+  const LOG = (...a) => console.log('%c[MarketChart ' + VER + ']', 'color:#38BDF8;font-weight:700', ...a);
+  const WARN = (...a) => console.warn('[MarketChart]', ...a);
+
+  function serverBase() {
+    if (window.SERVER) return window.SERVER;
+    if (typeof location !== 'undefined' && location.origin && location.origin !== 'null') return location.origin;
+    return 'http://localhost:18432';
+  }
+
+  /**
+   * @typedef {Object} MarketChartDef
+   * @property {string} id
+   * @property {string} name
+   * @property {string} [shortName]
+   * @property {'TW'|'US'} [market]
+   * @property {string} [unit]
+   * @property {string} [defaultRange]  e.g. 'max'
+   * @property {string} [interval]      e.g. '1d'
+   * @property {'area'|'line'} [style]
+   * @property {string} [color]
+   * @property {string} [topColor]
+   * @property {string} [bottomColor]
+   * @property {{symbol:string,name:string,color:string,priceScaleId?:string}|null} [dualAxis]
+   * @property {{level:number,label:string,color:string}[]} [riskLines]
+   * @property {(v:number)=>string} [valueFormat]
+   * @property {string[]} [aliases]
+   * @property {string} [yfPath]  override fetch path segment (default = id)
+   */
+
+  /** @type {Record<string, MarketChartDef>} */
+  const REGISTRY = Object.create(null);
+
+  /** @type {Record<string, string>} alias → id */
+  const ALIAS = Object.create(null);
+
+  function register(def) {
+    if (!def || !def.id) throw new Error('MarketChart.register: id required');
+    const id = String(def.id).toUpperCase();
+    const copy = Object.assign({
+      market: 'TW',
+      unit: '',
+      defaultRange: 'max',
+      interval: '1d',
+      style: 'area',
+      color: '#38BDF8',
+      topColor: 'rgba(56,189,248,0.22)',
+      bottomColor: 'rgba(56,189,248,0.02)',
+      dualAxis: null,
+      riskLines: [],
+      aliases: [],
+      valueFormat: (v) => (v != null && isFinite(v) ? Number(v).toFixed(2) : ''),
+    }, def, { id });
+    REGISTRY[id] = copy;
+    ALIAS[id] = id;
+    for (const a of (copy.aliases || [])) {
+      ALIAS[String(a).toUpperCase().trim()] = id;
+    }
+    LOG('registered', id, copy.name);
+    return copy;
+  }
+
+  function resolve(sym) {
+    if (sym == null) return null;
+    const raw = String(sym).trim();
+    if (!raw) return null;
+    const up = raw.toUpperCase();
+    // 完整命中
+    if (ALIAS[up]) return REGISTRY[ALIAS[up]];
+    // 允許使用者打 __MARGIN_ / MARGIN_RATIO / 融資維持 等前綴
+    for (const id of Object.keys(REGISTRY)) {
+      if (up === id || id.startsWith(up) || up.startsWith(id.replace(/_+$/, ''))) {
+        return REGISTRY[id];
+      }
+      const d = REGISTRY[id];
+      if (d.shortName && up === String(d.shortName).toUpperCase()) return d;
+      if (d.name && up === String(d.name).toUpperCase()) return d;
+    }
+    // 中文別名（不分大小寫無意義，直接比）
+    for (const id of Object.keys(REGISTRY)) {
+      const d = REGISTRY[id];
+      for (const a of (d.aliases || [])) {
+        if (raw === a || up === String(a).toUpperCase()) return d;
+      }
+    }
+    return null;
+  }
+
+  function isMarketChart(sym) {
+    return !!resolve(sym) || !!(window.S && resolve(S.sym));
+  }
+
+  // ── 內建：大盤融資維持率（MacroMicro 雙軸）─────────────────────
+  register({
+    id: '__MARGIN_RATIO__',
+    name: '大盤融資維持率',
+    shortName: '融資維持',
+    market: 'TW',
+    unit: '%',
+    defaultRange: 'max',
+    interval: '1d',
+    style: 'area',
+    color: '#38BDF8',
+    topColor: 'rgba(56,189,248,0.22)',
+    bottomColor: 'rgba(56,189,248,0.02)',
+    dualAxis: {
+      symbol: '^TWII',
+      name: '加權指數',
+      color: '#F59E0B',
+      priceScaleId: 'right',
+    },
+    riskLines: [
+      { level: 166, label: '門檻 166', color: '#38bdf8' },
+      { level: 150, label: '偏弱 150', color: '#eab308' },
+      { level: 140, label: '警戒 140', color: '#f97316' },
+      { level: 130, label: '危險 130', color: '#ef4444' },
+    ],
+    valueFormat: (v) => (v != null && isFinite(v) ? Number(v).toFixed(2) + '%' : ''),
+    aliases: [
+      '融資維持率', '大盤融資維持率', '融資維持',
+      '__MARGIN__', '__MARGIN_RATIO', 'MARGIN_RATIO', 'MARGIN',
+    ],
+  });
+
+  // ── UI badge：一眼確認走的是 MarketChart，不是 K 線 ────────────
+  function ensureBadge(def) {
+    let el = document.getElementById('market-chart-badge');
+    if (!el) {
+      const host = document.getElementById('chart-wrap') || document.getElementById('left');
+      if (!host) return;
+      el = document.createElement('div');
+      el.id = 'market-chart-badge';
+      el.style.cssText = [
+        'position:absolute', 'top:8px', 'right:12px', 'z-index:30',
+        'padding:3px 8px', 'border-radius:3px',
+        'font:10px/1.3 JetBrains Mono,ui-monospace,monospace',
+        'color:#7dd3fc', 'background:rgba(8,15,30,.85)',
+        'border:1px solid rgba(56,189,248,.45)', 'pointer-events:none',
+      ].join(';');
+      const wrap = document.getElementById('chart-wrap');
+      if (wrap) {
+        if (getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+        wrap.appendChild(el);
+      } else {
+        host.appendChild(el);
+      }
+    }
+    el.textContent = 'MarketChart ' + VER + ' · 折線 · ' + (def ? def.shortName || def.name : '');
+    el.style.display = def ? 'block' : 'none';
+  }
+
+  function hideBadge() {
+    const el = document.getElementById('market-chart-badge');
+    if (el) el.style.display = 'none';
+  }
+
+  function setHeader(def, last, prev) {
+    try {
+      const nEl = document.getElementById('ci-name');
+      if (nEl) nEl.textContent = def.name;
+      const pEl = document.getElementById('ci-price');
+      if (pEl && last != null) pEl.textContent = def.valueFormat(last);
+      const cEl = document.getElementById('ci-chg');
+      if (cEl && last != null && prev != null && prev > 0) {
+        const chg = (last - prev) / prev * 100;
+        cEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+        const tw = def.market === 'TW';
+        cEl.style.color = chg > 0 ? (tw ? 'var(--red)' : 'var(--green)')
+                        : chg < 0 ? (tw ? 'var(--green)' : 'var(--red)')
+                        : 'var(--thi)';
+      }
+      const inp = document.getElementById('syminput');
+      if (inp) inp.value = def.id;
+      const info = document.getElementById('chart-info');
+      if (info) info.style.display = 'block';
+      const loading = document.getElementById('chart-loading');
+      if (loading) loading.style.display = 'none';
+    } catch (e) {}
+  }
+
+  function applyRiskLines(series, lines) {
+    if (!series || typeof series.createPriceLine !== 'function' || !lines || !lines.length) return;
+    const LS = (window.LightweightCharts && LightweightCharts.LineStyle)
+      ? LightweightCharts.LineStyle.Dashed : 2;
+    for (const z of lines) {
+      try {
+        series.createPriceLine({
+          price: z.level,
+          color: z.color || '#64748b',
+          lineWidth: 1,
+          lineStyle: LS,
+          axisLabelVisible: true,
+          title: z.label || String(z.level),
+        });
+      } catch (e) {}
+    }
+  }
+
+  function renderLegend(def) {
+    try {
+      if (typeof renderChartLegend === 'function') renderChartLegend();
+    } catch (e) {}
+    // 若尚無 legend，補一個簡易列
+    const lg = document.getElementById('chart-legend');
+    if (!lg || !def) return;
+    let h = `<div class="lg-row" style="color:${def.color}"><span class="lg-swatch" style="background:${def.color}"></span>${def.name} (L)</div>`;
+    if (def.dualAxis) {
+      h += `<div class="lg-row" style="color:${def.dualAxis.color}"><span class="lg-swatch" style="background:${def.dualAxis.color}"></span>${def.dualAxis.name} (R)</div>`;
+    }
+    for (const z of (def.riskLines || [])) {
+      h += `<div class="lg-row" style="color:${z.color}"><span class="lg-dash" style="width:9px;border-color:${z.color}"></span>${z.label}</div>`;
+    }
+    lg.innerHTML = h;
+  }
+
+  /**
+   * 純折線／面積渲染 — 絕不建立 CandlestickSeries
+   */
+  function render(def, points) {
+    const wrap = document.getElementById('chart-wrap');
+    if (!wrap) { WARN('no #chart-wrap'); return; }
+    if (typeof LightweightCharts === 'undefined') { WARN('LightweightCharts missing'); return; }
+    if (!points || !points.length) { WARN('no points'); return; }
+
+    if (window.S && S.chart) {
+      try { S.chart.remove(); } catch (e) {}
+      S.chart = null;
+    }
+
+    const userTzOffset = -new Date().getTimezoneOffset() * 60;
+    if (window.S) S.tzOffset = userTzOffset;
+    const tz = (t) => (t == null ? t : t + userTzOffset);
+    const loadId = window.__loadSeq;
+    const hasDual = !!(def.dualAxis && def.dualAxis.symbol);
+
+    const chart = LightweightCharts.createChart(wrap, {
+      width: wrap.clientWidth,
+      height: wrap.clientHeight,
+      layout: { background: { color: '#060A12' }, textColor: '#5A6A82' },
+      grid: { vertLines: { color: '#0F1A2B' }, horzLines: { color: '#0F1A2B' } },
+      crosshair: {
+        mode: LightweightCharts.CrosshairMode.Magnet,
+        vertLine: { color: 'rgba(245,197,24,.55)', width: 1, style: 2, labelVisible: true, labelBackgroundColor: '#B8860B' },
+        horzLine: { color: 'rgba(245,197,24,.55)', width: 1, style: 2, labelVisible: true, labelBackgroundColor: '#B8860B' },
+      },
+      leftPriceScale: {
+        visible: true,
+        borderColor: '#1A2740',
+        scaleMargins: { top: 0.08, bottom: 0.10 },
+      },
+      rightPriceScale: {
+        visible: hasDual,
+        borderColor: '#1A2740',
+        scaleMargins: { top: 0.08, bottom: 0.10 },
+      },
+      timeScale: {
+        borderColor: '#1A2740',
+        timeVisible: false,
+        secondsVisible: false,
+        rightOffset: 2,
+        barSpacing: 2,
+        minBarSpacing: 0.5,
+        fixLeftEdge: true,
+        fixRightEdge: true,
+        lockVisibleTimeRangeOnResize: true,
+      },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+    });
+
+    if (window.S) {
+      S.chart = chart;
+      S.volSeries = null;
+      S.overlaySeries = {};
+      S.wsSeries = null;
+      S.wsLeftSeries = null;
+      S.twiiSeries = null;
+      S._prevLine = null;
+      S._marketChartId = def.id;
+      S._marginMacroChart = (def.id === '__MARGIN_RATIO__');
+    }
+
+    const lineData = points.map(p => ({ time: tz(p.time), value: p.value }));
+    let primary;
+    if (def.style === 'line') {
+      primary = chart.addLineSeries({
+        priceScaleId: 'left',
+        color: def.color,
+        lineWidth: 2,
+        lastValueVisible: true,
+        priceLineVisible: false,
+        crosshairMarkerVisible: true,
+        crosshairMarkerRadius: 5,
+        priceFormat: { type: 'custom', formatter: def.valueFormat },
+      });
+    } else {
+      primary = chart.addAreaSeries({
+        priceScaleId: 'left',
+        lineColor: def.color,
+        topColor: def.topColor,
+        bottomColor: def.bottomColor,
+        lineWidth: 2,
+        lastValueVisible: true,
+        priceLineVisible: false,
+        crosshairMarkerVisible: true,
+        crosshairMarkerRadius: 5,
+        crosshairMarkerBorderColor: '#7DD3FC',
+        crosshairMarkerBackgroundColor: def.color,
+        priceFormat: { type: 'custom', formatter: def.valueFormat },
+      });
+    }
+    primary.setData(lineData);
+    if (window.S) {
+      S.chartSeries = primary;
+      S.dotSeries = primary;
+    }
+    applyRiskLines(primary, def.riskLines);
+
+    const prevByTime = new Map();
+    for (let i = 0; i < points.length; i++) {
+      prevByTime.set(tz(points[i].time), i > 0 ? points[i - 1].value : null);
+    }
+    const dualByTime = new Map();
+
+    chart.subscribeCrosshairMove(param => {
+      const ohlcEl = document.getElementById('ci-ohlc');
+      if (!ohlcEl) return;
+      if (!param || !param.point || !param.time || !param.seriesData) {
+        ohlcEl.style.display = 'none';
+        return;
+      }
+      const pt = param.seriesData.get(primary);
+      if (!pt || pt.value == null) { ohlcEl.style.display = 'none'; return; }
+      const d = new Date(typeof param.time === 'number' ? param.time * 1000 : Date.parse(param.time));
+      const ds = `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}`;
+      const prev = prevByTime.get(param.time);
+      const delta = (prev != null && prev > 0) ? (pt.value - prev) : null;
+      const chgPct = (delta != null && prev > 0) ? (delta / prev * 100) : null;
+      const up = delta != null && delta > 0;
+      const dn = delta != null && delta < 0;
+      const col = up ? 'var(--red)' : (dn ? 'var(--green)' : 'var(--tlo)');
+      const dual = dualByTime.get(param.time);
+      const dualHtml = (def.dualAxis && dual != null && isFinite(dual))
+        ? `<span class="ohlc-k" style="margin-left:10px">${def.dualAxis.name}(R)</span>` +
+          `<span class="ohlc-v" style="color:${def.dualAxis.color}">${Number(dual).toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>`
+        : '';
+      ohlcEl.style.display = 'block';
+      ohlcEl.innerHTML =
+        `<span class="ohlc-d">${ds}</span>` +
+        `<span class="ohlc-k">${def.shortName || def.name}(L)</span>` +
+        `<span class="ohlc-v" style="color:${col}">${def.valueFormat(pt.value)}</span>` +
+        (delta != null
+          ? `<span style="color:${col};margin-left:6px">${up ? '+' : ''}${delta.toFixed(2)}${def.unit === '%' ? 'pp' : ''}` +
+            (chgPct != null ? ` (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)` : '') + `</span>`
+          : '') +
+        dualHtml;
+    });
+
+    // 右軸對照序列（如加權）
+    if (hasDual) {
+      (async () => {
+        try {
+          const range = (window.S && S.range) || def.defaultRange || 'max';
+          const url = `${serverBase()}/yf/${encodeURIComponent(def.dualAxis.symbol)}?range=${encodeURIComponent(range)}&interval=1d`;
+          const r = await fetch(url, { cache: 'no-store' });
+          if (!r.ok) return;
+          const raw = await r.json();
+          if (loadId !== window.__loadSeq || !window.S || S.sym !== def.id || S.chart !== chart) return;
+          const res = raw && raw.chart && raw.chart.result && raw.chart.result[0];
+          if (!res) return;
+          const q = (res.indicators && res.indicators.quote && res.indicators.quote[0]) || {};
+          const ts = res.timestamp || [];
+          const dualData = [];
+          for (let i = 0; i < ts.length; i++) {
+            const c = q.close && q.close[i];
+            if (c != null && isFinite(c) && c > 0) {
+              const t = tz(ts[i]);
+              dualData.push({ time: t, value: c });
+              dualByTime.set(t, c);
+            }
+          }
+          if (!dualData.length) return;
+          const dualLine = chart.addLineSeries({
+            priceScaleId: def.dualAxis.priceScaleId || 'right',
+            color: def.dualAxis.color,
+            lineWidth: 1.5,
+            lastValueVisible: true,
+            priceLineVisible: false,
+            crosshairMarkerVisible: true,
+            crosshairMarkerRadius: 4,
+            priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+          });
+          dualLine.setData(dualData);
+          if (window.S) {
+            S.twiiSeries = dualLine;
+            S.overlaySeries = Object.assign({}, S.overlaySeries, { dual: dualLine });
+          }
+          renderLegend(def);
+        } catch (e) {
+          WARN('dual axis failed', e);
+        }
+      })();
+    }
+
+    ensureBadge(def);
+    renderLegend(def);
+    requestAnimationFrame(() => {
+      try { chart.timeScale().fitContent(); } catch (e) {}
+    });
+    if (!wrap._mcRo) {
+      wrap._mcRo = new ResizeObserver(() => {
+        if (!window.S || !S.chart || !S._marketChartId) return;
+        try {
+          S.chart.applyOptions({ width: wrap.clientWidth, height: wrap.clientHeight });
+          S.chart.timeScale().fitContent();
+        } catch (e) {}
+      });
+      wrap._mcRo.observe(wrap);
+    }
+
+    const last = points[points.length - 1].value;
+    const prev = points.length >= 2 ? points[points.length - 2].value : null;
+    setHeader(def, last, prev);
+    LOG('rendered', def.id, points.length, 'pts · NO candlestick');
+  }
+
+  function pointsFromYF(raw) {
+    try {
+      const res = raw && raw.chart && raw.chart.result && raw.chart.result[0];
+      if (!res) return [];
+      const q = (res.indicators && res.indicators.quote && res.indicators.quote[0]) || {};
+      const ts = res.timestamp || [];
+      const out = [];
+      for (let i = 0; i < ts.length; i++) {
+        const c = q.close && q.close[i];
+        if (c != null && isFinite(c) && c > 0) out.push({ time: ts[i], value: c });
+      }
+      return out;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /**
+   * 完整載入流程 — 不呼叫個股 loadSym 內的 K 線／指標路徑
+   */
+  async function load(symOrId, opts) {
+    opts = opts || {};
+    const def = resolve(symOrId);
+    if (!def) return false;
+
+    window.__loadSeq = (window.__loadSeq || 0) + 1;
+    const myLoad = window.__loadSeq;
+
+    if (!window.S) window.S = {};
+    S.sym = def.id;
+    S.mkt = def.market || 'TW';
+    S.range = opts.range || def.defaultRange || 'max';
+    S.ind = null;
+    S._marketChartId = def.id;
+
+    try {
+      if (typeof setMktUI === 'function') setMktUI(S.mkt);
+      if (typeof renderRangeBar === 'function') renderRangeBar();
+      if (typeof clearInd === 'function') clearInd();
+    } catch (e) {}
+
+    if (!opts.silent) {
+      try {
+        if (typeof setStat === 'function') setStat('載入 ' + def.name + '…');
+        const loading = document.getElementById('chart-loading');
+        if (loading) {
+          loading.style.display = 'flex';
+          loading.textContent = '載入 ' + def.name + '（MarketChart 折線）…';
+        }
+        const info = document.getElementById('chart-info');
+        if (info) info.style.display = 'none';
+      } catch (e) {}
+    }
+
+    const path = def.yfPath || def.id;
+    const url = `${serverBase()}/yf/${encodeURIComponent(path)}?range=${encodeURIComponent(S.range)}&interval=${encodeURIComponent(def.interval || '1d')}`;
+    let raw = null;
+    try {
+      const r = await fetch(url, { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      raw = await r.json();
+    } catch (e) {
+      WARN('fetch failed', url, e);
+      try {
+        const loading = document.getElementById('chart-loading');
+        if (loading) { loading.style.display = 'flex'; loading.textContent = '載入失敗'; }
+        if (typeof setStat === 'function') setStat('載入失敗 · ' + def.id);
+      } catch (e2) {}
+      return false;
+    }
+    if (myLoad !== window.__loadSeq) return false;
+
+    const points = pointsFromYF(raw);
+    if (!points.length) {
+      try {
+        const loading = document.getElementById('chart-loading');
+        if (loading) { loading.style.display = 'flex'; loading.textContent = '無資料'; }
+        if (typeof setStat === 'function') setStat('無資料 · ' + def.id);
+      } catch (e) {}
+      return false;
+    }
+
+    // 轉成舊 pipeline 相容的 candles（僅 close；供其他面板讀 S.data）
+    const candles = points.map(p => ({
+      time: p.time, open: p.value, high: p.value, low: p.value, close: p.value, volume: 0,
+    }));
+    S.data = { candles, name: def.name, meta: (raw.chart && raw.chart.result && raw.chart.result[0] && raw.chart.result[0].meta) || {} };
+
+    render(def, points);
+
+    try {
+      window.dispatchEvent(new CustomEvent('symLoaded', { detail: { sym: def.id, mkt: S.mkt, marketChart: true } }));
+    } catch (e) {}
+    try {
+      if (typeof setStat === 'function') setStat('OK · MarketChart · ' + def.id);
+    } catch (e) {}
+    return true;
+  }
+
+  // ── Hooks：攔截個股 K 線入口 ───────────────────────────────────
+  let _hookInstalled = false;
+  let _innerLoadSym = null;
+  let _innerRenderChart = null;
+  let _innerSetRange = null;
+  let _innerGo = null;
+
+  function wrapLoadSym() {
+    if (typeof window.loadSym !== 'function') return false;
+    if (window.loadSym._marketChartWrapped) return true;
+    _innerLoadSym = window.loadSym;
+    async function mcLoadSym(sym, mkt, silent) {
+      const def = resolve(sym);
+      if (def) {
+        LOG('intercept loadSym → MarketChart', def.id);
+        return load(def.id, { silent: !!silent });
+      }
+      if (window.S) S._marketChartId = null;
+      hideBadge();
+      return _innerLoadSym.apply(this, arguments);
+    }
+    mcLoadSym._marketChartWrapped = true;
+    window.loadSym = mcLoadSym;
+    return true;
+  }
+
+  function wrapRenderChart() {
+    if (typeof window.renderChart !== 'function') return false;
+    // 永遠重掛成最外層
+    const current = window.renderChart;
+    if (current._marketChartOuter) return true;
+    _innerRenderChart = current;
+    function mcRenderChart(candles) {
+      const def = (window.S && resolve(S.sym)) || null;
+      if (def) {
+        LOG('intercept renderChart → MarketChart', def.id);
+        const pts = (candles && candles.length)
+          ? candles.map(c => ({ time: c.time, value: c.close }))
+          : ((S.data && S.data.candles) || []).map(c => ({ time: c.time, value: c.close }));
+        render(def, pts);
+        return;
+      }
+      if (window.S) S._marketChartId = null;
+      hideBadge();
+      return _innerRenderChart.apply(this, arguments);
+    }
+    mcRenderChart._marketChartOuter = true;
+    window.renderChart = mcRenderChart;
+    return true;
+  }
+
+  function wrapSetRange() {
+    if (typeof window.setRange !== 'function') return false;
+    if (window.setRange._marketChartWrapped) return true;
+    _innerSetRange = window.setRange;
+    function mcSetRange(key) {
+      if (window.S && resolve(S.sym)) {
+        if (S.range === key) return;
+        S.range = key;
+        try { if (typeof renderRangeBar === 'function') renderRangeBar(); } catch (e) {}
+        return load(S.sym, { range: key });
+      }
+      return _innerSetRange.apply(this, arguments);
+    }
+    mcSetRange._marketChartWrapped = true;
+    window.setRange = mcSetRange;
+    return true;
+  }
+
+  function wrapGo() {
+    if (typeof window.go !== 'function') return false;
+    if (window.go._marketChartWrapped) return true;
+    _innerGo = window.go;
+    function mcGo() {
+      const sym = (document.getElementById('syminput')?.value || '').trim();
+      const def = resolve(sym);
+      if (def) {
+        if (document.getElementById('syminput')) document.getElementById('syminput').value = def.id;
+        return load(def.id);
+      }
+      return _innerGo.apply(this, arguments);
+    }
+    mcGo._marketChartWrapped = true;
+    window.go = mcGo;
+    return true;
+  }
+
+  function installHooks() {
+    const a = wrapLoadSym();
+    const b = wrapRenderChart();
+    const c = wrapSetRange();
+    const d = wrapGo();
+    // renderChart 可能被其他模組再次 wrap → 每次強制搶回最外層
+    if (typeof window.renderChart === 'function' && !window.renderChart._marketChartOuter) {
+      wrapRenderChart();
+    }
+    if (a || b || c || d) {
+      if (!_hookInstalled) {
+        _hookInstalled = true;
+        LOG('hooks installed');
+      }
+    }
+    return a && b;
+  }
+
+  // 啟動：等核心函式出現後掛鉤，並定期維持最外層
+  (function boot() {
+    let tries = 0;
+    function tick() {
+      tries++;
+      installHooks();
+      if (tries < 40) setTimeout(tick, 150);
+    }
+    tick();
+    setInterval(installHooks, 1500);
+  })();
+
+  window.MarketChart = {
+    version: VER,
+    registry: REGISTRY,
+    register,
+    resolve,
+    isMarketChart,
+    load,
+    render,
+    ensureBadge,
+  };
+
+  LOG('module ready — register() more series as needed');
+})();

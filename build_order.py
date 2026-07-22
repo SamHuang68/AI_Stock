@@ -26,9 +26,11 @@ DEPS = {
     'strategy_builder_v3.js': ['backtest_v3.js'],     # 提供 window.StratLib
     'strategy_script_v3.js':  ['strategy_builder_v3.js'],  # 依賴 StratLib
     'wizard_v3.js':         ['strategy_builder_v3.js', 'backtest_v3.js', 'drawtools_v3.js'],
+    # 總經折線模組必須蓋過所有 renderChart/loadSym patch（含 toolbar 之後仍可能掛的）
+    'market_chart_v3.js':   ['toolbar_v3.js', 'polish_v3.js', 'drawtools_v3.js'],
 }
-# 必須永遠排在最後的（整理所有功能鈕）
-LAST = ['toolbar_v3.js']
+# 必須永遠排在最後的（market_chart 蓋過 K 線；toolbar 次末整理按鈕）
+LAST = ['toolbar_v3.js', 'market_chart_v3.js']
 
 def order_scripts(scripts):
     """穩定拓樸排序：盡量保持原順序，只在違反相依時把節點往後挪。"""
@@ -88,7 +90,12 @@ def _selftest():
     bad[i_b], bad[i_s] = bad[i_s], bad[i_b]
     fixed = order_scripts(bad)
     assert fixed.index('strategy_script_v3.js') > fixed.index('strategy_builder_v3.js'), 'dep not enforced'
-    assert fixed[-1] == 'toolbar_v3.js', 'toolbar not last'
+    assert fixed[-1] == 'toolbar_v3.js', 'toolbar not last (when market_chart absent)'
+    # market_chart 必須絕對最後
+    with_mc = _CURRENT + ['market_chart_v3.js']
+    fixed_mc = order_scripts(with_mc)
+    assert fixed_mc[-1] == 'market_chart_v3.js', 'market_chart not last'
+    assert fixed_mc.index('toolbar_v3.js') < fixed_mc.index('market_chart_v3.js')
     print('build_order self-test PASSED：目前順序零變動，且相依/最後位置可強制修正。')
 
 if __name__ == '__main__':
