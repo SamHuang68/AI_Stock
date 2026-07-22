@@ -290,7 +290,8 @@ const LS_KEY_HIST = 'st_hist_v2';
 const LS_KEY_KEY  = 'st_apikey';
 const LS_KEY_WL   = 'st_wl';
 const BATCH_CONCURRENCY = 3;
-const SERVER = 'http://localhost:18432';
+// 同源相對路徑：避免頁面開在 127.0.0.1、API 卻打 localhost（或反之）導致載入卡住
+const SERVER = (typeof location !== 'undefined' && location.origin) ? location.origin : 'http://localhost:18432';
 
 // ── STATE ───────────────────────────────────────────────────────
 let S = {

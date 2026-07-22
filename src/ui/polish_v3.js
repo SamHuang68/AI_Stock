@@ -9,7 +9,7 @@
 //   6. STATS 補 MKT CAP / P/E / P/B / Yield（從 /keystats 取）
 // ============================================================
 
-const SERVER_P = window.SERVER || `http://localhost:18432`;
+const SERVER_P = window.SERVER || ((typeof location !== 'undefined' && location.origin) ? location.origin : 'http://localhost:18432');
 
 // 台股代號判定(數字開頭如 2308/00685L,或 ^TW 指數)。台股紅綠慣例應依「標的本身」,
 // 不受 TW/US 市場鈕(S.mkt)影響 —— 否則在 US 鈕時看台股/台股指數會套成美股慣例。
