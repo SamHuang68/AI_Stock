@@ -71,9 +71,28 @@ Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤�
 
 > 需求：Windows 10/11 + Python 3.10+（純 stdlib，**不用 pip**）+ 現代瀏覽器。確認：cmd 打 `python --version`。
 
-1. **解壓縮**到任一資料夾（例 `C:\Tools\Stock_Terminal\`）。
-2. **雙擊 `scripts\start_terminal_v3.bat`** — 自動 build、開瀏覽器、啟動本機 server（port 18432）。
+1. **解壓縮／clone**到任一資料夾（例 `C:\Users\Sam\AI_Stock\`）。
+2. **雙擊 `scripts\go.bat`** — 自動 rebuild、重啟 server、開瀏覽器（port 18432）。
 3. 上方輸入框打代號按 **GO**（台股 `2330`；美股先點 `US` 再打 `AAPL`）。
+
+### 每次 AI／Git 更新後（建議固定流程）
+
+```powershell
+cd C:\Users\Sam\AI_Stock
+scripts\go.bat pull
+```
+
+這會：`git pull`（若本機改過 `stock_terminal_v2.html` 會自動 stash）→ `build_v2.py` → 殺掉舊 :18432 → 重啟 server → 開瀏覽器。  
+開頁後 **Ctrl+F5**；雙軸卡技術面 tag 應出現 `tech·383`。
+
+| 指令 | 用途 |
+|------|------|
+| `scripts\go.bat` | 日常啟動（不 pull） |
+| `scripts\go.bat pull` | **更新後用這個**（維持目前分支） |
+| `scripts\go.bat pull cursor/某分支` | 切分支 + pull + 重建 + 重啟 |
+| `scripts\go.bat rebuild` | 只重建＋重啟（不開瀏覽器） |
+
+舊捷徑 `start_terminal_v3.bat` / `rebuild_and_restart.bat` 仍可用，內部已轉呼叫 `go.bat`。
 
 **首次使用**：通知（🔔）需自行填入 Telegram / Email；AI 報告需在右上 `API KEY` 貼上 `sk-ant-…`；AI 副駕需另裝 [LM Studio](https://lmstudio.ai) 並載入模型；資料骨幹首次跑一次 `python server\datastore.py backfill-universe` 回補全市場。
 

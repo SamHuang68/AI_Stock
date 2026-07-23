@@ -81,6 +81,12 @@ node_modules/
 # Stray test/junk file
 _tb_test.js
 
+# Ad-hoc scratch probes (use tests/ for real tests)
+scratch/
+
+# Cursor / agent leftover prompts (project rules live in .cursorrules)
+.agent/
+
 # Installer build artifacts (PyInstaller + Inno Setup output)
 installer/build/
 installer/dist_installer/
