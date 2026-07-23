@@ -17,7 +17,7 @@ try:
     import etf_report
 except Exception as _e:
     etf_report = None
-    print('[etf-report] module import failed:', _e)
+    print('[etf-report] etf_report unavailable — using etf_report_lite (no pandas)')
 try:
     import watch_daemon
 except Exception as _e:

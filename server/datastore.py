@@ -20,6 +20,7 @@ from contextlib import closing
 
 # 進程內全域寫入鎖
 _db_write_lock = threading.Lock()
+_db_ready_logged = False
 
 # 凍結成 exe 時用 exe 目錄;一般執行(server/ 下)時用其上一層 → data/ 在專案根
 if getattr(sys, 'frozen', False):
@@ -48,10 +49,14 @@ def get_conn():
     return conn
 
 def init_db():
+    global _db_ready_logged
     with closing(get_conn()) as conn:
         with conn:
             conn.executescript(SCHEMA)
-    print('[db] ready:', DB_PATH)
+    # 多 worker / 重複呼叫時只印一次，避免刷屏
+    if not _db_ready_logged:
+        print('[db] ready:', DB_PATH)
+        _db_ready_logged = True
 
 def _yf_symbol(sym, market):
     if sym.startswith('^'):
