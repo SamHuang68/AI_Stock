@@ -98,7 +98,7 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3):
             time.sleep(min(8, 0.8 * (2 ** attempt)) + random.random())   # 指數退避 + 抖動
     raise RuntimeError(f'fetch failed for {ysym}: {last}')
 
-def upsert_bars(sym, market, rows):
+def upsert_bars(sym, market, rows, recompute_ind=True):
     with _db_write_lock:
         with closing(get_conn()) as conn:
             with conn:
@@ -108,7 +108,14 @@ def upsert_bars(sym, market, rows):
                 conn.execute('INSERT OR REPLACE INTO meta(symbol,market,name,last_update) '
                              'VALUES(?,?,COALESCE((SELECT name FROM meta WHERE symbol=?),?),?)',
                              (sym, market, sym, sym, int(time.time())))
-    return len(rows)
+    n = len(rows)
+    if recompute_ind and n > 0:
+        try:
+            import ind_cache as ic
+            ic.recompute_tip(sym, market)
+        except Exception as e:
+            print(f'[db] ind_tip recompute {sym}: {e}')
+    return n
 
 def backfill(sym, market='TW', rng='10y'):
     rows = fetch_yahoo_daily(sym, market, rng)
@@ -384,7 +391,31 @@ def _cli():
     elif cmd == 'backfill-universe':
         backfill_universe('TW', a[1] if len(a) > 1 else '5y', int(a[2]) if len(a) > 2 else 8)
     elif cmd == 'update-universe':
-        backfill_universe('TW', '1mo', int(a[1]) if len(a) > 1 else 8)
+        # 對已有檔做近月增量（舊實作 rng=1mo+resume 會跳過已有檔，等於沒更新）
+        init_db()
+        workers = int(a[1]) if len(a) > 1 else 6
+        codes = fetch_tw_universe()
+        print(f'[db] update-universe: {len(codes)} 檔, workers={workers}')
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        ok = fail = 0
+        t0 = time.time()
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {ex.submit(update, c, 'TW'): c for c in codes}
+            for i, fut in enumerate(as_completed(futs), 1):
+                try:
+                    fut.result(); ok += 1
+                except Exception:
+                    fail += 1
+                if i % 200 == 0:
+                    print(f'  ...{i}/{len(codes)} ok={ok} fail={fail}')
+        print(f'[db] update-universe done ok={ok} fail={fail} ({int(time.time()-t0)}s)')
+    elif cmd == 'prefetch':
+        init_db()
+        import ind_cache as ic
+        codes = [x.strip() for x in (a[1] if len(a) > 1 else '').split(',') if x.strip()]
+        depth = a[2] if len(a) > 2 else '5y'
+        items = [{'t': c, 'm': 'TW'} for c in codes]
+        print(json.dumps(ic.prefetch_many(items, depth=depth), ensure_ascii=False, indent=2))
     elif cmd == 'query':
         for ts, o, h, l, cl, v in get_bars(a[1], int(a[2]) if len(a) > 2 else 10):
             print(time.strftime('%Y-%m-%d', time.gmtime(ts)),
@@ -393,10 +424,16 @@ def _cli():
         with closing(get_conn()) as conn:
             n = conn.execute('SELECT COUNT(*), COUNT(DISTINCT symbol) FROM bars').fetchone()
         print(f'bars: {n[0]:,}  symbols: {n[1]:,}  db: {DB_PATH}')
+        try:
+            import ind_cache as ic
+            print('ind_tip:', ic.status_summary())
+        except Exception as e:
+            print('ind_tip: (n/a)', e)
     else:
         print('usage: init | backfill SYM [TW|US] [range] | update SYM [TW|US] | '
               'backfill_margin | '
               'backfill-universe [range] [workers] | update-universe [workers] | '
+              'prefetch "a,b,c" [depth] | '
               'backfill-many "a,b,c" [TW|US] [range] | query SYM [N] | stats')
 
 if __name__ == '__main__':
