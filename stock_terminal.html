@@ -1230,18 +1230,27 @@ clearInd();
 
 function renderInd(ind, last, mkt) {
   if (!ind) return;
+  // 顯示用小數位：震盪類 1 位、價位／MACD 2 位（禁止 raw float 長尾）
+  const DEC = {
+    rsi14: 1, K: 1, D: 1, annVol: 1, maxdd: 1, volRatio: 2, d2SMA20: 2,
+    macd: 2, macdSig: 2, macdHist: 2,
+    sma5: 2, sma20: 2, sma60: 2, bbU: 2, bbL: 2, bbM: 2, atr14: 2,
+  };
   for (const d of IND_DEFS) {
     const el = document.getElementById('ig-'+d.k);
     if (!el) continue;
     let v = ind[d.k];
-    if (v == null) { el.textContent='--'; continue; }
-    if (typeof v === 'number') v = v.toFixed(2);
-    el.textContent = v;
-    // color RSI, KD — 用數值比，避免字串字典序
-    const num = parseFloat(v);
-    if (d.k==='rsi14' && Number.isFinite(num)) el.style.color = num>70?'var(--red)':num<30?'var(--green)':'var(--thi)';
-    if (d.k==='macdHist' && Number.isFinite(num)) el.style.color = num>=0?'var(--green)':'var(--red)';
-    if (d.k==='d2SMA20' && Number.isFinite(num)) el.style.color = num>=0?'var(--green)':'var(--red)';
+    if (v == null || v === '' || v === '-') { el.textContent='--'; continue; }
+    const num = (typeof v === 'number') ? v : parseFloat(v);
+    if (Number.isFinite(num)) {
+      const dp = DEC[d.k] != null ? DEC[d.k] : 2;
+      el.textContent = num.toFixed(dp);
+      if (d.k==='rsi14') el.style.color = num>70?'var(--red)':num<30?'var(--green)':'var(--thi)';
+      if (d.k==='macdHist') el.style.color = num>=0?'var(--green)':'var(--red)';
+      if (d.k==='d2SMA20') el.style.color = num>=0?'var(--green)':'var(--red)';
+    } else {
+      el.textContent = String(v);
+    }
   }
   // also show price vs BBands
   const price = last?.close;
@@ -1410,13 +1419,23 @@ function renderStats() {
     ['52W HIGH',m['fiftyTwoWeekHigh']?.toFixed(2)||'--'],
     ['52W LOW',m['fiftyTwoWeekLow']?.toFixed(2)||'--'],
   ];
+  const fmtN = (v, dp) => {
+    if (v == null || v === '' || v === '-') return '--';
+    const n = typeof v === 'number' ? v : parseFloat(v);
+    return Number.isFinite(n) ? n.toFixed(dp) : '--';
+  };
   const indRows = S.ind ? [
-    ['RSI 14',S.ind.rsi14],['KD K/D',`${S.ind.K} / ${S.ind.D}`],
-    ['MACD',S.ind.macd],['Signal',S.ind.macdSig],
-    ['BB Upper',S.ind.bbU],['BB Lower',S.ind.bbL],
-    ['ATR 14',S.ind.atr14],['Ann Vol',S.ind.annVol+'%'],
-    ['MaxDD 60d',S.ind.maxdd+'%'],['Vol Ratio',S.ind.volRatio],
-    ['D2 SMA20',S.ind.d2SMA20!=null?S.ind.d2SMA20+'%':'--'],
+    ['RSI 14', fmtN(S.ind.rsi14, 1)],
+    ['KD K/D', `${fmtN(S.ind.K, 1)} / ${fmtN(S.ind.D, 1)}`],
+    ['MACD', fmtN(S.ind.macd, 2)],
+    ['Signal', fmtN(S.ind.macdSig, 2)],
+    ['BB Upper', fmtN(S.ind.bbU, 2)],
+    ['BB Lower', fmtN(S.ind.bbL, 2)],
+    ['ATR 14', fmtN(S.ind.atr14, 2)],
+    ['Ann Vol', fmtN(S.ind.annVol, 1) + (S.ind.annVol != null ? '%' : '')],
+    ['MaxDD 60d', fmtN(S.ind.maxdd, 1) + (S.ind.maxdd != null ? '%' : '')],
+    ['Vol Ratio', fmtN(S.ind.volRatio, 2)],
+    ['D2 SMA20', S.ind.d2SMA20 != null ? fmtN(S.ind.d2SMA20, 2) + '%' : '--'],
   ] : [];
   return `
     <div class="stat-hdr">價格資訊 · ${S.sym}</div>

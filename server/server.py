@@ -936,11 +936,86 @@ _cache = LRUCache(LRU_MAX, ttl_seconds=60)
 _pool  = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix='yf')
 
 YF_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'application/json,*/*',
     'Accept-Language': 'en-US,en;q=0.9',
     'Referer': 'https://finance.yahoo.com/',
 }
+
+# Yahoo v10 quoteSummary 需 crumb；無 yfinance 時用 cookie jar 自取（進程內快取）
+_yf_crumb_lock = threading.Lock()
+_yf_crumb = {'value': None, 'ts': 0.0, 'opener': None}
+
+def _yahoo_crumb_opener(force=False):
+    """回傳 (opener, crumb)。失敗回 (None, None)。"""
+    import http.cookiejar
+    global _yf_crumb
+    now = time.time()
+    with _yf_crumb_lock:
+        if (not force and _yf_crumb['value'] and _yf_crumb['opener']
+                and (now - _yf_crumb['ts']) < 3600):
+            return _yf_crumb['opener'], _yf_crumb['value']
+        cj = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+        try:
+            # 觸發 cookie（404 也沒關係，重點是 Set-Cookie）
+            try:
+                opener.open(urllib.request.Request('https://fc.yahoo.com', headers=YF_HEADERS), timeout=10)
+            except Exception:
+                pass
+            try:
+                opener.open(urllib.request.Request('https://finance.yahoo.com/', headers=YF_HEADERS), timeout=12)
+            except Exception:
+                pass
+            resp = opener.open(
+                urllib.request.Request('https://query1.finance.yahoo.com/v1/test/getcrumb', headers=YF_HEADERS),
+                timeout=10,
+            )
+            crumb = resp.read().decode('utf-8', 'replace').strip()
+            if not crumb or '<' in crumb or len(crumb) > 80:
+                print('[yahoo-crumb] invalid crumb payload')
+                return None, None
+            _yf_crumb = {'value': crumb, 'ts': now, 'opener': opener}
+            return opener, crumb
+        except Exception as e:
+            print('[yahoo-crumb] failed:', type(e).__name__, e)
+            return None, None
+
+
+def _yahoo_quote_summary(sym, modules='summaryDetail,defaultKeyStatistics,price,financialData'):
+    """帶 crumb 打 v10 quoteSummary；回 result[0] dict 或 None。"""
+    opener, crumb = _yahoo_crumb_opener()
+    if not opener or not crumb:
+        return None
+    url = (
+        f'https://query1.finance.yahoo.com/v10/finance/quoteSummary/{quote(sym)}'
+        f'?modules={modules}&crumb={quote(crumb)}'
+    )
+    try:
+        with opener.open(urllib.request.Request(url, headers=YF_HEADERS), timeout=12) as resp:
+            data = json.loads(resp.read().decode('utf-8', 'replace'))
+        qs = data.get('quoteSummary') or {}
+        result = qs.get('result') or []
+        if result:
+            return result[0]
+        # crumb 過期 → 強制重取再試一次
+        err = qs.get('error') or {}
+        if err:
+            opener, crumb = _yahoo_crumb_opener(force=True)
+            if not opener or not crumb:
+                return None
+            url = (
+                f'https://query1.finance.yahoo.com/v10/finance/quoteSummary/{quote(sym)}'
+                f'?modules={modules}&crumb={quote(crumb)}'
+            )
+            with opener.open(urllib.request.Request(url, headers=YF_HEADERS), timeout=12) as resp:
+                data = json.loads(resp.read().decode('utf-8', 'replace'))
+            result = ((data.get('quoteSummary') or {}).get('result') or [])
+            return result[0] if result else None
+    except Exception as e:
+        print(f'[yahoo-v10-crumb] {sym} failed:', type(e).__name__, e)
+    return None
+
 
 YF_RANGE = os.environ.get('YF_RANGE', '5y')   # 5y 約 1250 K 線；可設 max / 10y / 2y
 YF_INTERVAL = os.environ.get('YF_INTERVAL', '1d')
@@ -2245,7 +2320,7 @@ class Handler(SimpleHTTPRequestHandler):
 
         def _fetch_all(s):
             res_out = self._fetch_keystats_yfinance(s)
-            # Fallback 1: v10 direct (may still work for some symbols)
+            # Fallback 1: v10 + crumb（無 yfinance / info 空時也能拿到 PE／市值）
             if (res_out.get('trailingPE') is None and res_out.get('eps') is None
                 and res_out.get('marketCap') is None):
                 v10 = self._fetch_keystats_v10(s)
@@ -2255,19 +2330,81 @@ class Handler(SimpleHTTPRequestHandler):
                           'regularMarketPrice','grossMargin','opMargin','netMargin','roe'):
                     if res_out.get(k) is None and v10.get(k) is not None:
                         res_out[k] = v10[k]
-                if v10.get('trailingPE') is not None:
-                    res_out['_source'] = (res_out.get('_source','') + '+v10').strip('+')
+                if v10.get('trailingPE') is not None or v10.get('marketCap') is not None:
+                    res_out['_source'] = (res_out.get('_source','') + '+' + (v10.get('_source') or 'v10')).strip('+')
 
             # Fallback 2: HTML scrape
             if (res_out.get('trailingPE') is None and res_out.get('eps') is None
                 and res_out.get('marketCap') is None):
                 html_out = self._fetch_keystats_html(s)
                 for k in ('trailingPE','eps','marketCap','priceToBook','dividendYield',
-                          'shortName','currency'):
+                          'shortName','currency','regularMarketPrice'):
                     if res_out.get(k) is None and html_out.get(k) is not None:
                         res_out[k] = html_out[k]
                 if html_out.get('trailingPE') is not None:
                     res_out['_source'] = (res_out.get('_source','') + '+html').strip('+')
+
+            # Fallback 3: 台股官方 BWIBBU（本益比／淨值比／殖利率）— 不依賴 Yahoo
+            clean = s.replace('.TWO', '').replace('.TW', '').strip().upper()
+            if _CODE4.match(clean) and (
+                res_out.get('trailingPE') is None or res_out.get('priceToBook') is None
+                or res_out.get('dividendYield') is None
+            ):
+                row = _openapi_lookup(['exchangeReport/BWIBBU_ALL', 'BWIBBU_ALL'], clean)
+                src = 'TWSE BWIBBU'
+                if not row:
+                    row = _openapi_lookup(['tpex:tpex_mainboard_peratio_analysis'], clean)
+                    src = 'TPEx peratio'
+                if row:
+                    pe = (_pick_num(row, ['本益比']) or _pick_num(row, ['PEratio'])
+                          or _pick_num(row, ['PriceEarningRatio']))
+                    pb = (_pick_num(row, ['股價淨值比']) or _pick_num(row, ['PBratio'])
+                          or _pick_num(row, ['PriceBookRatio']))
+                    yld = _pick_num(row, ['殖利率']) or _pick_num(row, ['Yield'])
+                    if res_out.get('trailingPE') is None and pe is not None:
+                        res_out['trailingPE'] = pe
+                    if res_out.get('priceToBook') is None and pb is not None:
+                        res_out['priceToBook'] = pb
+                    if res_out.get('dividendYield') is None and yld is not None:
+                        res_out['dividendYield'] = yld
+                    if not res_out.get('shortName'):
+                        res_out['shortName'] = row.get('Name') or row.get('證券名稱')
+                    res_out['currency'] = res_out.get('currency') or 'TWD'
+                    res_out['_source'] = (res_out.get('_source', '') + '+' + src).strip('+')
+                    # 有價＋本益比 → 反推 EPS
+                    if res_out.get('eps') is None and pe and res_out.get('regularMarketPrice'):
+                        try:
+                            res_out['eps'] = round(float(res_out['regularMarketPrice']) / float(pe), 2)
+                        except Exception:
+                            pass
+
+            # Fallback 4: Yahoo chart meta（價／名稱／52W；市值／PE 通常沒有）
+            if res_out.get('regularMarketPrice') is None or res_out.get('shortName') is None:
+                try:
+                    u = f'https://query1.finance.yahoo.com/v8/finance/chart/{quote(s)}?range=5d&interval=1d'
+                    req = urllib.request.Request(u, headers=YF_HEADERS)
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        jj = json.loads(resp.read().decode('utf-8', 'replace'))
+                    meta = ((jj.get('chart') or {}).get('result') or [{}])[0].get('meta') or {}
+                    if res_out.get('regularMarketPrice') is None and meta.get('regularMarketPrice') is not None:
+                        res_out['regularMarketPrice'] = meta.get('regularMarketPrice')
+                    if res_out.get('shortName') is None:
+                        res_out['shortName'] = meta.get('shortName') or meta.get('longName')
+                    if res_out.get('longName') is None:
+                        res_out['longName'] = meta.get('longName')
+                    if res_out.get('currency') is None:
+                        res_out['currency'] = meta.get('currency')
+                    # 有 PE＋價但無 EPS → 反推
+                    if (res_out.get('eps') is None and res_out.get('trailingPE')
+                            and res_out.get('regularMarketPrice')):
+                        try:
+                            res_out['eps'] = round(
+                                float(res_out['regularMarketPrice']) / float(res_out['trailingPE']), 2)
+                        except Exception:
+                            pass
+                    res_out['_source'] = (res_out.get('_source', '') + '+chart').strip('+')
+                except Exception as e:
+                    print(f'[keystats-chart] {s} failed: {e}')
             return res_out
 
         out = _fetch_all(sym)
@@ -2364,24 +2501,26 @@ class Handler(SimpleHTTPRequestHandler):
         return out
 
     def _fetch_keystats_v10(self, sym):
-        """Yahoo v10 quoteSummary — returns clean JSON for exact symbol.
-        Modules: summaryDetail (PE, marketCap, yield), defaultKeyStatistics
-        (EPS, pegRatio, forwardEps), price (shortName), financialData (growth%).
-        """
+        """Yahoo v10 quoteSummary — 優先帶 crumb（無 yfinance 也能用）；失敗再試無 crumb。"""
         out = {'symbol': sym, '_source': 'yahoo-v10'}
         try:
-            modules = 'summaryDetail,defaultKeyStatistics,price,financialData'
-            url = f'https://query1.finance.yahoo.com/v10/finance/quoteSummary/{sym}?modules={modules}'
-            req = urllib.request.Request(url, headers=YF_HEADERS)
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode('utf-8', 'replace'))
-            qs = data.get('quoteSummary') or {}
-            result = qs.get('result') or []
-            if not result:
-                err = qs.get('error')
-                out['_error'] = str(err) if err else 'no result'
-                return out
-            r0 = result[0]
+            r0 = _yahoo_quote_summary(sym)
+            if not r0:
+                # 舊路徑（常 401）；保留做最後一搏
+                modules = 'summaryDetail,defaultKeyStatistics,price,financialData'
+                url = f'https://query1.finance.yahoo.com/v10/finance/quoteSummary/{sym}?modules={modules}'
+                req = urllib.request.Request(url, headers=YF_HEADERS)
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read().decode('utf-8', 'replace'))
+                qs = data.get('quoteSummary') or {}
+                result = qs.get('result') or []
+                if not result:
+                    err = qs.get('error')
+                    out['_error'] = str(err) if err else 'no result'
+                    return out
+                r0 = result[0]
+            else:
+                out['_source'] = 'yahoo-v10-crumb'
             sd = r0.get('summaryDetail') or {}
             ks = r0.get('defaultKeyStatistics') or {}
             pr = r0.get('price') or {}

@@ -93,7 +93,7 @@ if "%OPEN_BROWSER%"=="1" (
 
 echo.
 echo  開啟後請 Ctrl+F5 硬重新整理。
-echo  雙軸卡技術面 tag 應出現 tech·385（沒有 = 舊快取）。
+echo  雙軸卡技術面 tag 應出現 tech·386（沒有 = 舊快取）。
 echo.
 if /I "%MODE%"=="pull" (
     echo  下次 AI 更新後只要再跑:

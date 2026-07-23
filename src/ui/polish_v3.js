@@ -1153,15 +1153,15 @@ function fmtBig(n, unit) {
     if (!S.sym) return h;
     // Async fetch and inject — find element and update after render
     fetchKeyStats(S.sym, S.mkt).then(ks => {
-      if (!ks) return;
-      // Update existing MKT CAP cell (if v1 stats has one)
       const sect = document.getElementById('keystats-sect');
-      const html = renderKeystatsSection(ks);
+      const html = ks
+        ? renderKeystatsSection(ks)
+        : `<div id="keystats-sect"><div class="stat-sect">關鍵估值 · ${S.sym}</div>` +
+          `<div style="padding:12px;font-family:monospace;font-size:10px;color:var(--tlo);text-align:center">關鍵估值暫無資料<br><span style="font-size:9px;color:var(--tf)">Yahoo／官方估值皆未回傳</span></div></div>`;
       if (sect) sect.outerHTML = html;
       else {
         const rp = document.getElementById('rpanel');
         if (!rp || S.tab !== 'stats') return;
-        // Insert before chip-sect if exists, else append
         const chipSect = document.getElementById('chip-sect');
         if (chipSect) chipSect.insertAdjacentHTML('beforebegin', html);
         else rp.insertAdjacentHTML('beforeend', html);
@@ -1173,6 +1173,10 @@ function fmtBig(n, unit) {
 })();
 
 function renderKeystatsSection(ks) {
+  if (!ks) {
+    return `<div id="keystats-sect"><div class="stat-sect">關鍵估值</div>` +
+      `<div style="padding:12px;font-family:monospace;font-size:10px;color:var(--tlo);text-align:center">無資料</div></div>`;
+  }
   // 大盤融資維持率：顯示歷史／風險區，而非本益比
   if (S.sym === '__MARGIN_RATIO__' || (ks && ks.marginMeta)) {
     const m = (ks && ks.marginMeta) || {};
