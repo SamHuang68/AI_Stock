@@ -9,10 +9,11 @@
 //
 // v3.8.5 (2026-07-23): 美股基本面評分（Yahoo 成長+三率，與台股同一 _fundamental_score）
 //   雙軸卡／STATS 基本面不再鎖 TW；tag tech·385。
+// v3.8.7 (2026-07-23): 台股大盤體質評分（^TWII/^TWOII/融資維持）；合成序列略過 canon yf。
 // ============================================================
 (function () {
   'use strict';
-  const ENH_VER = '386';  // 雙軸卡可見版本戳（確認不是瀏覽器舊快取）
+  const ENH_VER = '387';  // 雙軸卡可見版本戳（確認不是瀏覽器舊快取）
   try { console.info('[enhance] dual-score engine tech·' + ENH_VER); } catch (_) {}
 
   // ---- 樣式 ------------------------------------------------
@@ -119,8 +120,18 @@
 
   // 抓「標準基底」1y 日線算技術面分數：槓桿/反向取本體（反向翻轉），
   // 一般股票取自身。存快取後重繪雙軸卡。
+  function _isSynthOrMacro(sym) {
+    const s = String(sym || '').toUpperCase();
+    return (s.startsWith('__') && s.endsWith('__')) || s === '^TWOII';
+  }
+
   async function computeCanonTech(sym, mkt) {
     const key = sym + '|' + (mkt || 'TW');
+    // 合成序列／壞日線指數：不打 Yahoo 個股 1y（會 404 或錯資料）
+    if (_isSynthOrMacro(sym)) {
+      _canonFail[key] = true;
+      return;
+    }
     try {
       const SRV = window.SERVER || 'http://localhost:18432';
       const lev = LEVERAGE_MAP[sym];
@@ -128,6 +139,7 @@
       let yf;
       if (/^\^/.test(target)) yf = target;
       else if (lev) yf = /^[0-9]/.test(target) ? target + '.TW' : target;
+      else if (String(target).startsWith('__') && String(target).endsWith('__')) yf = target;
       else yf = (mkt === 'TW') ? target + '.TW' : target;
       const r = await fetch(`${SRV}/yf/${encodeURIComponent(yf)}?range=1y&interval=1d`, { cache: 'no-store' });
       if (!r.ok) { _canonFail[key] = true; return; }
@@ -147,7 +159,7 @@
           card.outerHTML = dualCardHtml(null);
           if (window.fetchFund) fetchFund(S.sym, S.mkt).then(f => {
             const c2 = document.querySelector('#rpanel .dual-card');
-            if (c2 && S.tab === 'stats') c2.outerHTML = dualCardHtml(f && f.score != null ? f.score : null);
+            if (c2 && S.tab === 'stats') c2.outerHTML = dualCardHtml(f && f.score != null ? f.score : null, f);
           });
         }
       }
@@ -158,22 +170,30 @@
     const base = s == null ? '—' : s >= 65 ? '🟢 偏多' : s >= 45 ? '⚖️ 中性' : '🔴 偏空';
     return `${base} · tech·${ENH_VER}`;
   };
-  const fundTag = s => s == null ? '—' : s >= 70 ? '🟢 體質佳' : s >= 50 ? '🟡 中性' : '🔴 偏弱';
+  const fundTag = (s, kind) => {
+    if (s == null) return '—';
+    if (kind === 'market') return s >= 70 ? '🟢 偏熱／偏強' : s >= 50 ? '🟡 中性' : '🔴 偏弱／偏冷';
+    return s >= 70 ? '🟢 體質佳' : s >= 50 ? '🟡 中性' : '🔴 偏弱';
+  };
 
-  function dualCardHtml(fundScore) {
+  function dualCardHtml(fundScore, fundPayload) {
     const t = techScoreResolved();
     const sym = (typeof S !== 'undefined' && S.sym) ? S.sym.toUpperCase() : '';
     const lev = LEVERAGE_MAP[sym];
+    const isMarket = fundPayload && fundPayload.kind === 'market';
     const techLbl = lev
       ? `技術面 <span style="font-size:8px;color:var(--tf)">(依本體 ${lev.base} · 1Y日線)</span>`
-      : `技術面 <span style="font-size:8px;color:var(--tf)">(1Y日線)</span>`;
+      : (_isSynthOrMacro(sym)
+        ? `技術面 <span style="font-size:8px;color:var(--tf)">(總經／無標準日線)</span>`
+        : `技術面 <span style="font-size:8px;color:var(--tf)">(1Y日線)</span>`);
+    const fundLbl = isMarket ? '大盤體質' : '基本面';
     return `<div class="dual-card" data-enh-ver="${ENH_VER}">
       <div class="dual-half"><div class="lbl">${techLbl}</div>
         <div class="score" style="color:${scoreCol(t)}">${t == null ? '—' : t}</div>
         <div class="tag" style="color:${scoreCol(t)}">${techTag(t)}</div></div>
-      <div class="dual-half"><div class="lbl">基本面</div>
+      <div class="dual-half"><div class="lbl">${fundLbl}</div>
         <div class="score" style="color:${scoreCol(fundScore)}">${fundScore == null ? '—' : fundScore}</div>
-        <div class="tag" style="color:${scoreCol(fundScore)}">${fundTag(fundScore)}</div></div>
+        <div class="tag" style="color:${scoreCol(fundScore)}">${fundTag(fundScore, isMarket ? 'market' : null)}</div></div>
     </div>`;
   }
 
@@ -218,7 +238,7 @@
         fetchFund(S.sym, S.mkt).then(f => {
           if (S.tab !== 'stats') return;
           const card = document.querySelector('#rpanel .dual-card');
-          if (card) card.outerHTML = dualCardHtml(f && f.score != null ? f.score : null);
+          if (card) card.outerHTML = dualCardHtml(f && f.score != null ? f.score : null, f);
         });
       }
       return head + base;

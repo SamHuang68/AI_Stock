@@ -639,6 +639,12 @@ async function loadSym(sym, mkt, silent) {
       + `<br><span style="color:var(--muted,#888);font-size:12px">來源:${_tq?_tq.source:'—'}・另見底部大盤列</span></div>`;
     document.getElementById('chart-info').style.display = 'none';
     setStat(sym+'：無可信日線,僅即時值('+(_tq?_tq.source:'—')+')');
+    // 仍刷新右側 STATS／大盤體質（勿 early-return 導致基本面空白）
+    S.data = null;
+    S.ind = null;
+    try { clearInd(); } catch (e) {}
+    try { renderRpanel(); } catch (e) { console.error('[v1] renderRpanel threw:', e); }
+    try { window.dispatchEvent(new CustomEvent('symLoaded', {detail:{sym: S.sym, mkt: S.mkt, badDaily: true}})); } catch(e){}
     return;
   }
 

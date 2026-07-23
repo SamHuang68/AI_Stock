@@ -1040,6 +1040,9 @@
         if (myLoad !== window.__loadSeq) return false;
         renderMulti(def, payload);
         try {
+          if (typeof renderRpanel === 'function') renderRpanel();
+        } catch (e) {}
+        try {
           window.dispatchEvent(new CustomEvent('symLoaded', { detail: { sym: def.id, mkt: S.mkt, marketChart: true, multi: true } }));
         } catch (e) {}
         try {
@@ -1093,6 +1096,9 @@
 
     render(def, points);
 
+    try {
+      if (typeof renderRpanel === 'function') renderRpanel();
+    } catch (e) {}
     try {
       window.dispatchEvent(new CustomEvent('symLoaded', { detail: { sym: def.id, mkt: S.mkt, marketChart: true } }));
     } catch (e) {}

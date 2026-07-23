@@ -1122,12 +1122,13 @@ async function fetchKeyStats(sym, mkt) {
   if (!sym) return null;
   const key = sym + '|' + (mkt || 'TW');
   if (_keystatsCache[key]) return _keystatsCache[key];
-  // 合成序列不加 .TW
-  const yfsym = (String(sym).startsWith('__') && String(sym).endsWith('__'))
+  // 指數(^…)／合成序列(__…__) 不加 .TW（避免 ^TWII.TW 404）
+  const s = String(sym);
+  const yfsym = (s[0] === '^' || (s.startsWith('__') && s.endsWith('__')))
     ? sym
     : (mkt === 'TW' ? sym + '.TW' : sym);
   try {
-    const r = await fetch(`${SERVER_P}/keystats/${yfsym}`, {cache:'no-store'});
+    const r = await fetch(`${SERVER_P}/keystats/${encodeURIComponent(yfsym)}`, {cache:'no-store'});
     if (!r.ok) return null;
     const data = await r.json();
     _keystatsCache[key] = data;
@@ -1205,6 +1206,28 @@ function renderKeystatsSection(ks) {
     if (m.source) h += `<div style="padding:0 12px 6px;font-family:monospace;font-size:8px;color:var(--tf)">來源：${m.source}</div>`;
     h += '</div>';
     return h;
+  }
+  // 台股大盤指數：市場摘要（中位本益比＋體質支柱）
+  if (ks.kind === 'market' || (ks.marketMeta && ks.marketMeta.rows)) {
+    const mm = ks.marketMeta || {};
+    let h = '<div id="keystats-sect"><div class="stat-sect">大盤摘要 · ' + S.sym + '</div>';
+    if (mm.score != null)
+      h += `<div class="keystat-row"><span class="k">體質評分</span><span class="v">${mm.score}</span></div>`;
+    (mm.rows || []).forEach(row => {
+      h += `<div class="keystat-row"><span class="k">${row.k}</span><span class="v">${row.v}` +
+        (row.score != null ? ` <span style="font-size:9px;color:var(--tlo)">(${Math.round(row.score)})</span>` : '') +
+        `</span></div>`;
+    });
+    if (ks.trailingPE != null)
+      h += `<div class="keystat-row"><span class="k">全市場本益比中位</span><span class="v">${Number(ks.trailingPE).toFixed(1)}</span></div>`;
+    if (ks._source) h += `<div style="padding:4px 12px;font-family:monospace;font-size:8px;color:var(--tf)">資料源：${ks._source}</div>`;
+    h += '</div>';
+    return h;
+  }
+  // 指數／總經：明確說明無個股估值
+  if (ks.kind === 'index' || ks.kind === 'macro' || ks._note) {
+    return `<div id="keystats-sect"><div class="stat-sect">關鍵估值 · ${S.sym}</div>` +
+      `<div style="padding:12px;font-family:monospace;font-size:10px;color:var(--tlo);text-align:center">${ks._note || '指數／總經無個股估值'}</div></div>`;
   }
   const mc = ks.marketCap;
   const pe = ks.trailingPE;

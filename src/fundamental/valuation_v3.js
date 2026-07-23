@@ -52,7 +52,9 @@
     const mkt = isTw ? 'TW' : 'US';
     if (!sym) { body.innerHTML = '請先載入一檔股票。'; return; }
     body.innerHTML = '載入中…';
-    const yfSym = (mkt === 'TW') ? (sym.includes('.') ? sym : sym + '.TW') : sym;
+    const yfSym = (mkt === 'TW' && !/^\^/.test(String(sym)) && !(String(sym).startsWith('__') && String(sym).endsWith('__')))
+      ? (sym.includes('.') ? sym : sym + '.TW')
+      : sym;
 
     let v = {}, hist = [];
     try { v = await fetch(`${SRV}/valuation/${encodeURIComponent(sym)}`, { cache: 'no-store' }).then(r => r.json()); } catch (e) {}

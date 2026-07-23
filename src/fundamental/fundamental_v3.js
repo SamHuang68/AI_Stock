@@ -4,7 +4,8 @@
 // 在 STATS 分頁加「基本面」section：
 //   • TW：月營收 當月 / YoY / MoM / 累計YoY + 三率（TWSE OpenAPI）
 //   • US：營收／盈餘成長 + 三率（Yahoo keystats，與 /valuation 同源）
-//   • 基本面評分 0~100（成長性 + 獲利性；台美同一公式）
+//   • 台股大盤（^TWII/^TWOII／融資維持）：大盤體質（量能+法人+融資+估值）
+//   • 基本面評分 0~100（個股：成長+獲利；大盤：四支柱平均）
 // 與技術面雙軸卡並列。
 // ============================================================
 (function () {
@@ -34,22 +35,58 @@
   const pctStr = v => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
   const marginCol = v => window.Colors ? Colors.warn(v, { lo: 8 })
     : (v == null ? 'var(--tlo)' : v < 8 ? 'var(--orange)' : 'var(--thi)');
+  const pillarCol = s => window.Colors ? Colors.quality(s, 70, 50)
+    : (s == null ? 'var(--tlo)' : s >= 70 ? 'var(--red)' : s >= 50 ? 'var(--orange)' : 'var(--green)');
 
-  function scoreBadge(s) {
+  function scoreBadge(s, kind) {
     if (s == null) return '';
     const col = window.Colors ? Colors.quality(s, 70, 50) : (s >= 70 ? 'var(--red)' : s >= 50 ? 'var(--orange)' : 'var(--green)');
-    const lbl = s >= 70 ? '體質佳' : s >= 50 ? '中性' : '偏弱';
+    const lbl = kind === 'market'
+      ? (s >= 70 ? '偏熱／偏強' : s >= 50 ? '中性' : '偏弱／偏冷')
+      : (s >= 70 ? '體質佳' : s >= 50 ? '中性' : '偏弱');
     return `<span style="display:inline-block;padding:1px 8px;border-radius:10px;background:${col};color:#0b1220;font-weight:700;font-size:11px">${s} ${lbl}</span>`;
   }
 
-  function render(f) {
-    const isUs = f && (f.market === 'US' || (S && S.mkt === 'US'));
-    if (!f || (!f.revenue && !f.income)) {
-      const hint = isUs
-        ? 'Yahoo 成長／三率暫無資料（可檢查本機是否可連 Yahoo / 已裝 yfinance）'
-        : 'TWSE OpenAPI 僅上市櫃普通股；金融/ETF 部分欄位缺';
-      return `<div style="padding:14px 12px;text-align:center;color:var(--tlo);font-family:monospace;font-size:10px;line-height:1.7">無基本面資料<br><span style="font-size:9px;color:var(--tf)">${hint}</span></div>`;
+  function renderMarket(f) {
+    const title = f.title || '大盤體質';
+    let h = '';
+    if (f.score != null)
+      h += `<div class="stat-row" style="font-weight:700"><span class="stat-k">${title}評分</span><span class="stat-v">${scoreBadge(f.score, 'market')}</span></div>`;
+    const rows = f.marketRows || [];
+    if (rows.length) {
+      h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span class="stat-k">四大支柱</span><span class="stat-v">量能·法人·融資·估值</span></div>`;
+      rows.forEach(row => {
+        const sc = row.score;
+        h += `<div class="stat-row"><span class="stat-k">${row.k}</span>` +
+          `<span class="stat-v">${row.v}` +
+          (sc != null ? ` <span style="color:${pillarCol(sc)};font-size:9px">(${Math.round(sc)})</span>` : '') +
+          `</span></div>`;
+      });
+    } else {
+      h += `<div style="padding:10px 12px;color:var(--tlo);font-family:monospace;font-size:10px">大盤資料暫缺（量能／法人／融資／本益比）</div>`;
     }
+    h += `<div style="padding:6px 12px 0;font-family:monospace;font-size:8.5px;color:var(--tf);line-height:1.5">資料：${f._source || 'TWSE marketflow + 融資維持率 + 全市場本益比中位'}（非個股財報）</div>`;
+    return h;
+  }
+
+  function renderEmpty(f) {
+    const note = (f && f._note) || '';
+    const isUs = f && (f.market === 'US' || (S && S.mkt === 'US'));
+    const kind = f && f.kind;
+    let hint;
+    if (kind === 'macro' || kind === 'index')
+      hint = note || (kind === 'macro' ? '總經序列無個股基本面' : '指數無公司財報評分');
+    else if (isUs)
+      hint = 'Yahoo 成長／三率暫無資料（可檢查本機是否可連 Yahoo / 已裝 yfinance）';
+    else
+      hint = 'TWSE OpenAPI 僅上市櫃普通股；金融/ETF 部分欄位缺';
+    return `<div style="padding:14px 12px;text-align:center;color:var(--tlo);font-family:monospace;font-size:10px;line-height:1.7">無基本面資料<br><span style="font-size:9px;color:var(--tf)">${hint}</span></div>`;
+  }
+
+  function render(f) {
+    if (f && f.kind === 'market') return renderMarket(f);
+    const isUs = f && (f.market === 'US' || (S && S.mkt === 'US'));
+    if (!f || (!f.revenue && !f.income)) return renderEmpty(f);
     let h = '';
     if (f.score != null)
       h += `<div class="stat-row" style="font-weight:700"><span class="stat-k">基本面評分</span><span class="stat-v">${scoreBadge(f.score)}</span></div>`;
@@ -91,12 +128,13 @@
     window.renderStats = function () {
       let h = orig.apply(this, arguments);
       if (!S.sym) return h;
-      // 台／美皆顯示基本面；籌碼等仍僅台股（資料源限制）
+      // 台／美／大盤皆顯示基本面區塊；籌碼等仍僅台股（資料源限制）
       fetchFund(S.sym, S.mkt).then(f => {
         const stats = document.getElementById('rpanel');
         if (!stats || S.tab !== 'stats') return;
         const ex = document.getElementById('fund-sect');
-        const html = `<div id="fund-sect"><div class="stat-sect">基本面 · ${S.sym}</div>${render(f)}</div>`;
+        const sectTitle = (f && f.kind === 'market') ? (f.title || '大盤體質') : '基本面';
+        const html = `<div id="fund-sect"><div class="stat-sect">${sectTitle} · ${S.sym}</div>${render(f)}</div>`;
         if (ex) ex.outerHTML = html;
         else stats.insertAdjacentHTML('beforeend', html);
       });

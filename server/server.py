@@ -798,6 +798,228 @@ def _fundamental_score(out):
     parts = growth or profit
     return round(sum(parts) / len(parts))
 
+
+def _is_index_sym(sym: str) -> bool:
+    """任一市場指數代號（^ 開頭或常見別名）。"""
+    s = (sym or '').strip().upper()
+    return s.startswith('^') or s in ('TWII', 'TWOII', 'TAIEX')
+
+
+def _is_tw_index_sym(sym: str) -> bool:
+    """台股大盤指數（可走大盤體質評分）。美股 ^GSPC 等不可誤套。"""
+    s = (sym or '').strip().upper().replace('.TW', '').replace('.TWO', '')
+    return s in ('^TWII', '^TWOII', 'TWII', 'TWOII', 'TAIEX', '^TAIEX')
+
+
+def _is_macro_sym(sym: str) -> bool:
+    s = (sym or '').strip().upper()
+    return s.startswith('__') and s.endswith('__')
+
+
+def _is_tw_market_fund_sym(sym: str) -> bool:
+    """可計算「大盤體質」的代號：台指／融資維持／台股合成序列。"""
+    s = (sym or '').strip().upper().replace('.TW', '').replace('.TWO', '')
+    if _is_tw_index_sym(s):
+        return True
+    if s in ('__MARGIN_RATIO__', '__MARGIN__'):
+        return True
+    if s.startswith('__TW_') and s.endswith('__'):
+        return True
+    return False
+
+
+def _universe_median_pe():
+    """從 data/universe.json twmeta 算上市櫃本益比中位數（濾掉異常）。"""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'universe.json')
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+        pes = []
+        for _code, m in (data.get('twmeta') or {}).items():
+            if not isinstance(m, dict):
+                continue
+            pe = m.get('pe')
+            try:
+                pe = float(pe)
+            except Exception:
+                continue
+            if 3 <= pe <= 80:
+                pes.append(pe)
+        if not pes:
+            return None
+        pes.sort()
+        return round(pes[len(pes) // 2], 2)
+    except Exception as e:
+        print('[market-fund] median PE failed:', e)
+        return None
+
+
+def _score_tw_market(mf: dict, margin_meta: dict, median_pe) -> tuple:
+    """大盤體質 0~100：量能 25% + 法人 25% + 融資安全 25% + 估值 25%。"""
+    import math
+    parts = []
+    detail = {}
+
+    # 量能：成交金額（元）— 8000億中性、1.2兆偏熱
+    turns = (mf or {}).get('turnover') or []
+    amt = turns[-1]['amount'] if turns else None
+    if amt is not None:
+        yi = float(amt) / 1e8  # 億
+        # 400億→弱、8000億→50、12000億→高
+        vol_sc = max(0.0, min(100.0, 50.0 + 50.0 * math.tanh((yi - 8000.0) / 4000.0)))
+        parts.append(vol_sc)
+        detail['turnoverYi'] = round(yi, 1)
+        detail['volumeScore'] = round(vol_sc, 1)
+
+    # 法人：外資+投信+自營 買賣差（元）— 以 ±300億 作軟飽和
+    inst = (mf or {}).get('inst') or {}
+    net = 0.0
+    n_have = 0
+    for k in ('foreign', 'trust', 'dealer'):
+        if inst.get(k) is not None:
+            net += float(inst[k])
+            n_have += 1
+    if n_have:
+        yi_net = net / 1e8
+        inst_sc = max(0.0, min(100.0, 50.0 + 50.0 * math.tanh(yi_net / 300.0)))
+        parts.append(inst_sc)
+        detail['instNetYi'] = round(yi_net, 1)
+        detail['instScore'] = round(inst_sc, 1)
+
+    # 融資維持率：越高越安全（相對 166% 中性；130% 危險）
+    cur = (margin_meta or {}).get('current')
+    if cur is not None:
+        # 130→~15、150→~35、166→50、180→~65、200→~80
+        m_sc = max(0.0, min(100.0, 50.0 + 50.0 * math.tanh((float(cur) - 166.0) / 30.0)))
+        parts.append(m_sc)
+        detail['marginRatio'] = round(float(cur), 2)
+        detail['marginScore'] = round(m_sc, 1)
+        rz = (margin_meta or {}).get('riskZone')
+        if rz:
+            detail['riskZone'] = rz.get('label')
+
+    # 估值：全市場本益比中位數 — 越低越好（12→高分、25→中、40→低）
+    if median_pe is not None:
+        pe_sc = max(0.0, min(100.0, 50.0 - 50.0 * math.tanh((float(median_pe) - 18.0) / 12.0)))
+        parts.append(pe_sc)
+        detail['medianPE'] = median_pe
+        detail['valuationScore'] = round(pe_sc, 1)
+
+    if not parts:
+        return None, detail
+    return round(sum(parts) / len(parts)), detail
+
+
+def _build_tw_market_fundamental(sym: str) -> dict:
+    """^TWII / ^TWOII / __MARGIN_RATIO__ 大盤體質評分 payload。"""
+    from datetime import date as _date
+    today = _date.today().strftime('%Y%m%d')
+    clean = (sym or '').replace('.TW', '').replace('.TWO', '').strip().upper()
+    out = {
+        'symbol': sym,
+        'code': clean,
+        'date': today,
+        'market': 'TW',
+        'kind': 'market',
+        'title': '大盤體質',
+        'revenue': None,
+        'income': None,
+        'score': None,
+        'pillars': None,
+        '_source': 'TWSE marketflow + margin + universe PE',
+    }
+    # 重用 /marketflow 快取
+    mf = None
+    try:
+        key = f'marketflow:{_date.today().strftime("%Y-%m-%d")}'
+        # marketflow cache key uses Y-m-d in handler... check: key = f'marketflow:{today.strftime("%Y-%m-%d")}'
+        cached = _cache.get(f'marketflow:{_date.today().strftime("%Y-%m-%d")}')
+        if cached:
+            mf = json.loads(cached.decode('utf-8') if isinstance(cached, (bytes, bytearray)) else cached)
+    except Exception:
+        mf = None
+    if mf is None:
+        # 輕量同步抓（與 _handle_marketflow 同資料源）
+        mf = {'turnover': [], 'inst': None, 'margin': None}
+        try:
+            ym1 = _date.today().strftime('%Y%m01')
+            url = f'https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date={ym1}&response=json'
+            with urllib.request.urlopen(urllib.request.Request(url, headers=YF_HEADERS), timeout=12) as resp:
+                d = json.loads(resp.read())
+            if d.get('stat') in ('OK', 'ok'):
+                fields = d.get('fields') or []
+                rows = d.get('data') or []
+                i_amt = next((i for i, f in enumerate(fields) if '成交金額' in f), 1)
+                i_date = next((i for i, f in enumerate(fields) if '日期' in f), 0)
+                for row in rows:
+                    try:
+                        amt = float(str(row[i_amt]).replace(',', ''))
+                        mf['turnover'].append({'date': str(row[i_date]).strip(), 'amount': amt})
+                    except Exception:
+                        pass
+        except Exception as e:
+            print('[market-fund] FMTQIK', e)
+        try:
+            from datetime import timedelta
+            for back in range(0, 7):
+                dd = (_date.today() - timedelta(days=back)).strftime('%Y%m%d')
+                url = f'https://www.twse.com.tw/rwd/zh/fund/BFI82U?dayDate={dd}&type=day&response=json'
+                with urllib.request.urlopen(urllib.request.Request(url, headers=YF_HEADERS), timeout=12) as resp:
+                    d = json.loads(resp.read())
+                if d.get('stat') not in ('OK', 'ok'):
+                    continue
+                fields = d.get('fields') or []
+                rows = d.get('data') or []
+                i_name = next((i for i, f in enumerate(fields) if '單位名稱' in f or '買賣別' in f), 0)
+                i_net = next((i for i, f in enumerate(fields) if '買賣差' in f or '買賣超' in f), len(fields) - 1)
+                inst = {'foreign': None, 'trust': None, 'dealer': None, 'date': dd}
+                for row in rows:
+                    nm = str(row[i_name])
+                    try:
+                        net = float(str(row[i_net]).replace(',', ''))
+                    except Exception:
+                        continue
+                    if '外' in nm:
+                        inst['foreign'] = (inst['foreign'] or 0) + net
+                    elif '投信' in nm:
+                        inst['trust'] = net
+                    elif '自營' in nm:
+                        inst['dealer'] = (inst['dealer'] or 0) + net
+                if any(v is not None for k, v in inst.items() if k != 'date'):
+                    mf['inst'] = inst
+                    break
+        except Exception as e:
+            print('[market-fund] BFI82U', e)
+
+    margin_meta = {}
+    try:
+        import margin_ratio as mr
+        margin_meta = mr.meta_summary() or {}
+    except Exception as e:
+        print('[market-fund] margin meta', e)
+
+    median_pe = _universe_median_pe()
+    score, detail = _score_tw_market(mf, margin_meta, median_pe)
+    out['score'] = score
+    out['pillars'] = detail
+    # 給前端類似 revenue/income 的可讀列（不走個股三率）
+    out['marketRows'] = []
+    if detail.get('turnoverYi') is not None:
+        out['marketRows'].append({'k': '成交金額', 'v': f"{detail['turnoverYi']:.0f} 億", 'score': detail.get('volumeScore')})
+    if detail.get('instNetYi') is not None:
+        sign = '+' if detail['instNetYi'] >= 0 else ''
+        out['marketRows'].append({'k': '三大法人合計', 'v': f"{sign}{detail['instNetYi']:.1f} 億", 'score': detail.get('instScore')})
+    if detail.get('marginRatio') is not None:
+        out['marketRows'].append({
+            'k': '融資維持率',
+            'v': f"{detail['marginRatio']:.2f}%" + (f"（{detail['riskZone']}）" if detail.get('riskZone') else ''),
+            'score': detail.get('marginScore'),
+        })
+    if detail.get('medianPE') is not None:
+        out['marketRows'].append({'k': '全市場本益比中位', 'v': f"{detail['medianPE']:.1f}x", 'score': detail.get('valuationScore')})
+    return out
+
+
 def _chip_streak(clean_code):
     """從 chip_history 反向算外資/投信連續買(>0)賣(<0)超天數"""
     if not os.path.isdir(CHIP_HISTORY_PATH):
@@ -1567,7 +1789,7 @@ class Handler(SimpleHTTPRequestHandler):
         if p.startswith('/yf/batch'):
             self._handle_batch()
         elif p.startswith('/yf/'):
-            sym = p[4:].split('?')[0]
+            sym = unquote(p[4:].split('?')[0])
             if not _safe_sym(sym): self._err('bad symbol', 400); return
             self._handle_single(sym)
         elif p.startswith('/etf-delta'):
@@ -1579,7 +1801,7 @@ class Handler(SimpleHTTPRequestHandler):
         elif p == '/quote-batch' or p.startswith('/quote-batch?'):
             self._handle_quote_batch()
         elif p.startswith('/quote/'):
-            sym = p[7:].split('?')[0]
+            sym = unquote(p[7:].split('?')[0])
             if not _safe_sym(sym): self._err('bad symbol', 400); return
             self._handle_quote(sym)
         elif p == '/bars' or p.startswith('/bars?'):
@@ -1589,16 +1811,16 @@ class Handler(SimpleHTTPRequestHandler):
         elif p == '/datasources' or p.startswith('/datasources?'):
             self._handle_datasources()
         elif p.startswith('/chip/'):
-            sym = p[6:].split('?')[0]
+            sym = unquote(p[6:].split('?')[0])
             self._handle_chip(sym)
         elif p.startswith('/keystats/'):
-            sym = p[10:].split('?')[0]
+            sym = unquote(p[10:].split('?')[0])
             self._handle_keystats(sym)
         elif p.startswith('/fundamental/'):
-            sym = p[13:].split('?')[0]
+            sym = unquote(p[13:].split('?')[0])
             self._handle_fundamental(sym)
         elif p.startswith('/valuation/'):
-            sym = p[11:].split('?')[0]
+            sym = unquote(p[11:].split('?')[0])
             self._handle_valuation(sym)
         elif p == '/marketflow' or p.startswith('/marketflow?'):
             self._handle_marketflow()
@@ -2305,6 +2527,49 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e:
                 self._err('margin keystats failed: ' + str(e), 500)
             return
+        # 台股大盤指數：回「市場摘要」而非個股本益比（Yahoo ^TWII.TW 會 404）
+        if _is_tw_index_sym(base_sym) or _is_tw_market_fund_sym(base_sym):
+            try:
+                fund = _build_tw_market_fundamental(base_sym)
+                pillars = fund.get('pillars') or {}
+                import margin_ratio as mr
+                m = mr.meta_summary() or {}
+                res = {
+                    'shortName': '加權指數' if 'TWII' in base_sym.upper() and 'TWO' not in base_sym.upper()
+                                 else ('櫃買指數' if 'TWOII' in base_sym.upper() else '大盤'),
+                    'currency': 'TWD',
+                    'marketCap': None,
+                    'trailingPE': pillars.get('medianPE'),
+                    'priceToBook': None,
+                    'dividendYield': None,
+                    'eps': None,
+                    'kind': 'market',
+                    'marketMeta': {
+                        'score': fund.get('score'),
+                        'title': fund.get('title') or '大盤體質',
+                        'rows': fund.get('marketRows') or [],
+                        'pillars': pillars,
+                        'marginRatio': m.get('current'),
+                        'riskZone': (m.get('riskZone') or {}).get('label') if isinstance(m.get('riskZone'), dict) else m.get('riskZone'),
+                    },
+                    '_source': fund.get('_source') or 'TWSE marketflow + margin + universe PE',
+                }
+                self._ok(json.dumps(res, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self._err('market keystats failed: ' + str(e), 500)
+            return
+        # 其他指數／合成序列：明確空估值（避免 ^GSPC.TW / __US_*.TW）
+        if _is_index_sym(base_sym) or _is_macro_sym(base_sym):
+            res = {
+                'shortName': base_sym,
+                'marketCap': None, 'trailingPE': None, 'priceToBook': None,
+                'dividendYield': None, 'eps': None,
+                'kind': 'index' if _is_index_sym(base_sym) else 'macro',
+                '_note': '指數／總經序列無個股估值欄位',
+                '_source': 'n/a',
+            }
+            self._ok(json.dumps(res, ensure_ascii=False).encode('utf-8'))
+            return
         """Fetch market cap / P/E / EPS / PEG / growth.
         v3.5 strategy (because Yahoo v10 quoteSummary now requires crumb auth):
           1) yfinance.Ticker(sym).info  — handles cookie/crumb internally (PRIMARY)
@@ -2882,11 +3147,36 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _handle_fundamental(self, sym):
         """基本面：成長 + 獲利三率 + 評分 0~100。
-           TW：TWSE OpenAPI 月營收 / 綜合損益表
-           US：Yahoo keystats（revenueGrowth / earningsGrowth + margins）— 與估值同源鏈"""
+           TW 個股：TWSE OpenAPI；US 個股：Yahoo keystats
+           大盤指數（^TWII/^TWOII）／融資維持率：大盤體質（量能+法人+融資+估值）"""
         from datetime import date as _date
         today = _date.today().strftime('%Y%m%d')
         clean = sym.replace('.TW', '').replace('.TWO', '').strip().upper()
+        # 台股大盤／融資維持／台合成序列 → 大盤體質（非個股財報）
+        if _is_tw_market_fund_sym(clean):
+            key = f'fund:MKT:{clean}:{today}'
+            c = _cache.get(key)
+            if c is not None:
+                self._ok(c); return
+            out = _build_tw_market_fundamental(sym)
+            body = json.dumps(out, ensure_ascii=False).encode()
+            _cache.set(key, body)
+            self._ok(body)
+            return
+        # 美總經／其他指數／合成序列：無公司財報，回明確空狀態（勿誤走 Yahoo 公司）
+        if _is_macro_sym(clean) or _is_index_sym(clean):
+            is_us = clean.startswith('__US_') or (clean.startswith('^') and not _is_tw_index_sym(clean))
+            out = {
+                'symbol': sym, 'code': clean, 'date': today,
+                'market': 'US' if is_us else 'TW',
+                'kind': 'macro' if _is_macro_sym(clean) else 'index',
+                'title': '總經序列' if _is_macro_sym(clean) else '指數',
+                'revenue': None, 'income': None, 'score': None,
+                '_note': ('總經追蹤圖無個股基本面評分' if _is_macro_sym(clean)
+                          else '非台股大盤指數，無大盤體質／公司財報評分'),
+            }
+            self._ok(json.dumps(out, ensure_ascii=False).encode()); return
+
         is_tw = bool(_CODE4.match(clean)) or sym.endswith('.TW') or sym.endswith('.TWO')
         key = f'fund:{"TW" if is_tw else "US"}:{clean}:{today}'
         c = _cache.get(key)

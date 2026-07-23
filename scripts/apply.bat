@@ -10,7 +10,7 @@ setlocal
 cd /d "%~dp0.."
 
 set "BR=%~1"
-if "%BR%"=="" set "BR=cursor/mktcap-fix-4e66"
+if "%BR%"=="" set "BR=cursor/market-fund-blank-4e66"
 
 echo.
 echo === APPLY %BR% ===
@@ -58,7 +58,7 @@ echo Done. Now on:
 git branch --show-current
 git rev-parse --short HEAD
 echo.
-echo 請 Ctrl+F5。MKT CAP 應有數值（不再 --）
+echo 請 Ctrl+F5。確認 badge tech·387；^TWII／融資維持應有「大盤體質」評分
 echo.
 pause
 endlocal

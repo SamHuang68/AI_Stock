@@ -206,7 +206,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
-<link rel="stylesheet" href="src/ui/mobile_v2.css?v=1784833084">
+<link rel="stylesheet" href="src/ui/mobile_v2.css?v=1784833813">
 </head>
 <body>
 <div id="app">
@@ -641,6 +641,12 @@ async function loadSym(sym, mkt, silent) {
       + `<br><span style="color:var(--muted,#888);font-size:12px">來源:${_tq?_tq.source:'—'}・另見底部大盤列</span></div>`;
     document.getElementById('chart-info').style.display = 'none';
     setStat(sym+'：無可信日線,僅即時值('+(_tq?_tq.source:'—')+')');
+    // 仍刷新右側 STATS／大盤體質（勿 early-return 導致基本面空白）
+    S.data = null;
+    S.ind = null;
+    try { clearInd(); } catch (e) {}
+    try { renderRpanel(); } catch (e) { console.error('[v1] renderRpanel threw:', e); }
+    try { window.dispatchEvent(new CustomEvent('symLoaded', {detail:{sym: S.sym, mkt: S.mkt, badDaily: true}})); } catch(e){}
     return;
   }
 
@@ -1875,68 +1881,68 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
 });
 </script>
-<script src="src/core/colors_v3.js?v=1784833084"></script>
-<script src="src/core/market_v3.js?v=1784833084"></script>
-<script src="src/core/fields_v3.js?v=1784833084"></script>
-<script src="src/ui/share_v3.js?v=1784833084"></script>
-<script src="src/ui/datasources_v3.js?v=1784833084"></script>
-<script src="src/core/etf_flow_tip_v3.js?v=1784833084"></script>
-<script src="src/core/position_v2.js?v=1784833084"></script>
-<script src="src/core/watch_v2.js?v=1784833084"></script>
-<script src="src/core/info_v2.js?v=1784833084"></script>
-<script src="src/core/pro_v2.js?v=1784833084"></script>
-<script src="src/chart/volume_profile_v3.js?v=1784833084"></script>
-<script src="src/chart/pattern_v3.js?v=1784833084"></script>
-<script src="src/core/live_v2.js?v=1784833084"></script>
-<script src="src/fundamental/chip_v3.js?v=1784833084"></script>
-<script src="src/fundamental/fundamental_v3.js?v=1784833084"></script>
-<script src="src/screener/screener_v3.js?v=1784833084"></script>
-<script src="src/ai/ai_report_v3.js?v=1784833084"></script>
-<script src="src/ui/polish_v3.js?v=1784833084"></script>
-<script src="src/core/wl_live_v3.js?v=1784833084"></script>
-<script src="src/fundamental/plan_history_v3.js?v=1784833084"></script>
-<script src="src/fundamental/plan_position_v3.js?v=1784833084"></script>
-<script src="src/fundamental/plan_v3.js?v=1784833084"></script>
-<script src="src/ui/pdf_import_v3.js?v=1784833084"></script>
-<script src="src/ui/pdf_export_v3.js?v=1784833084"></script>
-<script src="src/core/peg_v3.js?v=1784833084"></script>
-<script src="src/alert/alert_v3.js?v=1784833084"></script>
-<script src="src/alert/alert_push_v3.js?v=1784833084"></script>
-<script src="src/screener/backtest_v3.js?v=1784833084"></script>
-<script src="src/screener/backtest_ui_v3.js?v=1784833084"></script>
-<script src="src/ui/enhance_v3.js?v=1784833084"></script>
-<script src="src/chart/aftermarket_v3.js?v=1784833084"></script>
-<script src="src/chart/overnight_v3.js?v=1784833084"></script>
-<script src="src/fundamental/supplychain_v3.js?v=1784833084"></script>
-<script src="src/portfolio/portfolio_v3.js?v=1784833084"></script>
-<script src="src/fundamental/chainmom_v3.js?v=1784833084"></script>
-<script src="src/fundamental/valuation_v3.js?v=1784833084"></script>
-<script src="src/fundamental/marketflow_v3.js?v=1784833084"></script>
-<script src="src/fundamental/instrank_v3.js?v=1784833084"></script>
-<script src="src/alert/calendar_v3.js?v=1784833084"></script>
-<script src="src/chart/multichart_v3.js?v=1784833084"></script>
-<script src="src/chart/spread_v3.js?v=1784833084"></script>
-<script src="src/chart/hotkeys_v3.js?v=1784833084"></script>
-<script src="src/screener/strategy_builder_v3.js?v=1784833084"></script>
-<script src="src/screener/strategy_script_v3.js?v=1784833084"></script>
-<script src="src/chart/drawtools_v3.js?v=1784833084"></script>
-<script src="src/screener/screener3_v3.js?v=1784833084"></script>
-<script src="src/core/etf_v3.js?v=1784833084"></script>
-<script src="src/fundamental/stockfut_v3.js?v=1784833084"></script>
-<script src="src/core/indices_v3.js?v=1784833084"></script>
-<script src="src/alert/datahealth_v3.js?v=1784833084"></script>
-<script src="src/alert/toast_v3.js?v=1784833084"></script>
-<script src="src/alert/settle_v3.js?v=1784833084"></script>
-<script src="src/ai/cmdpalette_v3.js?v=1784833084"></script>
-<script src="src/ui/dragwin_v3.js?v=1784833084"></script>
-<script src="src/core/liverefresh_v3.js?v=1784833084"></script>
-<script src="src/core/namesearch_v3.js?v=1784833084"></script>
-<script src="src/core/realtime_v3.js?v=1784833084"></script>
-<script src="src/ai/focus_v3.js?v=1784833084"></script>
-<script src="src/ai/copilot_v3.js?v=1784833084"></script>
-<script src="src/screener/wizard_v3.js?v=1784833084"></script>
-<script src="src/ui/toolbar_v3.js?v=1784833084"></script>
-<script src="src/chart/market_chart_v3.js?v=1784833084"></script>
+<script src="src/core/colors_v3.js?v=1784833813"></script>
+<script src="src/core/market_v3.js?v=1784833813"></script>
+<script src="src/core/fields_v3.js?v=1784833813"></script>
+<script src="src/ui/share_v3.js?v=1784833813"></script>
+<script src="src/ui/datasources_v3.js?v=1784833813"></script>
+<script src="src/core/etf_flow_tip_v3.js?v=1784833813"></script>
+<script src="src/core/position_v2.js?v=1784833813"></script>
+<script src="src/core/watch_v2.js?v=1784833813"></script>
+<script src="src/core/info_v2.js?v=1784833813"></script>
+<script src="src/core/pro_v2.js?v=1784833813"></script>
+<script src="src/chart/volume_profile_v3.js?v=1784833813"></script>
+<script src="src/chart/pattern_v3.js?v=1784833813"></script>
+<script src="src/core/live_v2.js?v=1784833813"></script>
+<script src="src/fundamental/chip_v3.js?v=1784833813"></script>
+<script src="src/fundamental/fundamental_v3.js?v=1784833813"></script>
+<script src="src/screener/screener_v3.js?v=1784833813"></script>
+<script src="src/ai/ai_report_v3.js?v=1784833813"></script>
+<script src="src/ui/polish_v3.js?v=1784833813"></script>
+<script src="src/core/wl_live_v3.js?v=1784833813"></script>
+<script src="src/fundamental/plan_history_v3.js?v=1784833813"></script>
+<script src="src/fundamental/plan_position_v3.js?v=1784833813"></script>
+<script src="src/fundamental/plan_v3.js?v=1784833813"></script>
+<script src="src/ui/pdf_import_v3.js?v=1784833813"></script>
+<script src="src/ui/pdf_export_v3.js?v=1784833813"></script>
+<script src="src/core/peg_v3.js?v=1784833813"></script>
+<script src="src/alert/alert_v3.js?v=1784833813"></script>
+<script src="src/alert/alert_push_v3.js?v=1784833813"></script>
+<script src="src/screener/backtest_v3.js?v=1784833813"></script>
+<script src="src/screener/backtest_ui_v3.js?v=1784833813"></script>
+<script src="src/ui/enhance_v3.js?v=1784833813"></script>
+<script src="src/chart/aftermarket_v3.js?v=1784833813"></script>
+<script src="src/chart/overnight_v3.js?v=1784833813"></script>
+<script src="src/fundamental/supplychain_v3.js?v=1784833813"></script>
+<script src="src/portfolio/portfolio_v3.js?v=1784833813"></script>
+<script src="src/fundamental/chainmom_v3.js?v=1784833813"></script>
+<script src="src/fundamental/valuation_v3.js?v=1784833813"></script>
+<script src="src/fundamental/marketflow_v3.js?v=1784833813"></script>
+<script src="src/fundamental/instrank_v3.js?v=1784833813"></script>
+<script src="src/alert/calendar_v3.js?v=1784833813"></script>
+<script src="src/chart/multichart_v3.js?v=1784833813"></script>
+<script src="src/chart/spread_v3.js?v=1784833813"></script>
+<script src="src/chart/hotkeys_v3.js?v=1784833813"></script>
+<script src="src/screener/strategy_builder_v3.js?v=1784833813"></script>
+<script src="src/screener/strategy_script_v3.js?v=1784833813"></script>
+<script src="src/chart/drawtools_v3.js?v=1784833813"></script>
+<script src="src/screener/screener3_v3.js?v=1784833813"></script>
+<script src="src/core/etf_v3.js?v=1784833813"></script>
+<script src="src/fundamental/stockfut_v3.js?v=1784833813"></script>
+<script src="src/core/indices_v3.js?v=1784833813"></script>
+<script src="src/alert/datahealth_v3.js?v=1784833813"></script>
+<script src="src/alert/toast_v3.js?v=1784833813"></script>
+<script src="src/alert/settle_v3.js?v=1784833813"></script>
+<script src="src/ai/cmdpalette_v3.js?v=1784833813"></script>
+<script src="src/ui/dragwin_v3.js?v=1784833813"></script>
+<script src="src/core/liverefresh_v3.js?v=1784833813"></script>
+<script src="src/core/namesearch_v3.js?v=1784833813"></script>
+<script src="src/core/realtime_v3.js?v=1784833813"></script>
+<script src="src/ai/focus_v3.js?v=1784833813"></script>
+<script src="src/ai/copilot_v3.js?v=1784833813"></script>
+<script src="src/screener/wizard_v3.js?v=1784833813"></script>
+<script src="src/ui/toolbar_v3.js?v=1784833813"></script>
+<script src="src/chart/market_chart_v3.js?v=1784833813"></script>
 </body>
 </html>
 <script>
