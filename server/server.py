@@ -2320,28 +2320,29 @@ class Handler(SimpleHTTPRequestHandler):
 
         def _fetch_all(s):
             res_out = self._fetch_keystats_yfinance(s)
-            # Fallback 1: v10 + crumb（無 yfinance / info 空時也能拿到 PE／市值）
-            if (res_out.get('trailingPE') is None and res_out.get('eps') is None
-                and res_out.get('marketCap') is None):
+            # Fallback 1: v10 + crumb — 缺 PE 或 缺市值都要補（舊條件用 AND 會漏掉市值）
+            if (res_out.get('trailingPE') is None or res_out.get('marketCap') is None
+                    or res_out.get('eps') is None or res_out.get('priceToBook') is None):
                 v10 = self._fetch_keystats_v10(s)
                 for k in ('trailingPE','forwardPE','eps','forwardEps','pegRatio','marketCap',
                           'priceToBook','dividendYield','shortName','longName','currency',
                           'earningsQuarterlyGrowth','revenueGrowth','earningsGrowth',
-                          'regularMarketPrice','grossMargin','opMargin','netMargin','roe'):
+                          'regularMarketPrice','grossMargin','opMargin','netMargin','roe',
+                          'sharesOutstanding'):
                     if res_out.get(k) is None and v10.get(k) is not None:
                         res_out[k] = v10[k]
                 if v10.get('trailingPE') is not None or v10.get('marketCap') is not None:
                     res_out['_source'] = (res_out.get('_source','') + '+' + (v10.get('_source') or 'v10')).strip('+')
 
             # Fallback 2: HTML scrape
-            if (res_out.get('trailingPE') is None and res_out.get('eps') is None
-                and res_out.get('marketCap') is None):
+            if (res_out.get('trailingPE') is None or res_out.get('marketCap') is None
+                    or res_out.get('eps') is None):
                 html_out = self._fetch_keystats_html(s)
                 for k in ('trailingPE','eps','marketCap','priceToBook','dividendYield',
                           'shortName','currency','regularMarketPrice'):
                     if res_out.get(k) is None and html_out.get(k) is not None:
                         res_out[k] = html_out[k]
-                if html_out.get('trailingPE') is not None:
+                if html_out.get('trailingPE') is not None or html_out.get('marketCap') is not None:
                     res_out['_source'] = (res_out.get('_source','') + '+html').strip('+')
 
             # Fallback 3: 台股官方 BWIBBU（本益比／淨值比／殖利率）— 不依賴 Yahoo
@@ -2378,7 +2379,7 @@ class Handler(SimpleHTTPRequestHandler):
                         except Exception:
                             pass
 
-            # Fallback 4: Yahoo chart meta（價／名稱／52W；市值／PE 通常沒有）
+            # Fallback 4: Yahoo chart meta（價／名稱）
             if res_out.get('regularMarketPrice') is None or res_out.get('shortName') is None:
                 try:
                     u = f'https://query1.finance.yahoo.com/v8/finance/chart/{quote(s)}?range=5d&interval=1d'
@@ -2394,7 +2395,6 @@ class Handler(SimpleHTTPRequestHandler):
                         res_out['longName'] = meta.get('longName')
                     if res_out.get('currency') is None:
                         res_out['currency'] = meta.get('currency')
-                    # 有 PE＋價但無 EPS → 反推
                     if (res_out.get('eps') is None and res_out.get('trailingPE')
                             and res_out.get('regularMarketPrice')):
                         try:
@@ -2405,6 +2405,58 @@ class Handler(SimpleHTTPRequestHandler):
                     res_out['_source'] = (res_out.get('_source', '') + '+chart').strip('+')
                 except Exception as e:
                     print(f'[keystats-chart] {s} failed: {e}')
+
+            # Fallback 5: 市值 — shares × price；台股可用實收資本額／面額推算
+            if res_out.get('marketCap') is None:
+                px = res_out.get('regularMarketPrice')
+                shares = res_out.get('sharesOutstanding')
+                if shares and px:
+                    try:
+                        res_out['marketCap'] = float(shares) * float(px)
+                        res_out['_source'] = (res_out.get('_source', '') + '+shares*px').strip('+')
+                    except Exception:
+                        pass
+            if res_out.get('marketCap') is None and _CODE4.match(clean):
+                px = res_out.get('regularMarketPrice')
+                try:
+                    crow = _openapi_lookup(['opendata/t187ap03_L', 't187ap03_L'], clean)
+                    if not crow:
+                        crow = _openapi_lookup(['tpex:mopsfin_t187ap03_O'], clean)
+                    if crow:
+                        capital = _pick_num(crow, ['實收資本額'])
+                        # 面額字串如「新台幣 10.0000元」→ 抽數字，預設 10
+                        face_raw = crow.get('普通股每股面額') or crow.get('每股面額') or '10'
+                        face = 10.0
+                        try:
+                            import re as _re2
+                            mface = _re2.search(r'([\d.]+)', str(face_raw).replace(',', ''))
+                            if mface:
+                                face = float(mface.group(1)) or 10.0
+                        except Exception:
+                            face = 10.0
+                        if capital and face > 0:
+                            if px is None:
+                                srow = _openapi_lookup(['exchangeReport/STOCK_DAY_ALL'], clean)
+                                if srow:
+                                    px = _pick_num(srow, ['ClosingPrice']) or _pick_num(srow, ['收盤'])
+                                    if px is not None:
+                                        res_out['regularMarketPrice'] = px
+                            if px:
+                                shares = float(capital) / float(face)
+                                res_out['marketCap'] = shares * float(px)
+                                res_out['sharesOutstanding'] = shares
+                                res_out['currency'] = res_out.get('currency') or 'TWD'
+                                res_out['_source'] = (res_out.get('_source', '') + '+TWSE資本額').strip('+')
+                except Exception as e:
+                    print(f'[keystats-tw-mcap] {clean} failed: {e}')
+
+            # shares × price 再補一次（US 從 v10 拿到股數後）
+            if res_out.get('marketCap') is None and res_out.get('sharesOutstanding') and res_out.get('regularMarketPrice'):
+                try:
+                    res_out['marketCap'] = float(res_out['sharesOutstanding']) * float(res_out['regularMarketPrice'])
+                    res_out['_source'] = (res_out.get('_source', '') + '+shares*px').strip('+')
+                except Exception:
+                    pass
             return res_out
 
         out = _fetch_all(sym)
@@ -2449,6 +2501,9 @@ class Handler(SimpleHTTPRequestHandler):
             out['pegRatio']          = (info.get('trailingPegRatio')
                                         or info.get('pegRatio'))
             out['marketCap']         = info.get('marketCap')
+            out['sharesOutstanding'] = (
+                info.get('sharesOutstanding') or info.get('impliedSharesOutstanding')
+            )
             # 殖利率:yfinance 的 dividendYield 在不同版本是小數(0.025)或百分比(2.5),
             # 舊的「<1 就×100」會把真實低於 1% 的殖利率(如台達電 0.59%)誤放大成 59%。
             # 改:優先用「每股配息 ÷ 價格」無歧義計算;無配息率才退回 dividendYield(僅極小值當比例×100)
@@ -2536,6 +2591,10 @@ class Handler(SimpleHTTPRequestHandler):
             out['forwardEps']    = raw(ks, 'forwardEps')
             out['pegRatio']      = raw(ks, 'pegRatio')
             out['marketCap']     = raw(sd, 'marketCap') or raw(pr, 'marketCap')
+            out['sharesOutstanding'] = (
+                raw(ks, 'sharesOutstanding') or raw(pr, 'sharesOutstanding')
+                or raw(fd, 'sharesOutstanding')
+            )
             dy = raw(sd, 'dividendYield')
             out['dividendYield'] = (dy * 100) if dy is not None else None
             out['currency']      = pr.get('currency') or sd.get('currency')

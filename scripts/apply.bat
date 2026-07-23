@@ -3,14 +3,14 @@ REM ============================================================
 REM  強制套用指定遠端分支（解決「修正沒 apply」）
 REM  用法（在專案根目錄）:
 REM    scripts\apply.bat
-REM    scripts\apply.bat cursor/keystats-ind-format-4e66
+REM    scripts\apply.bat cursor/mktcap-fix-4e66
 REM ============================================================
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0.."
 
 set "BR=%~1"
-if "%BR%"=="" set "BR=cursor/keystats-ind-format-4e66"
+if "%BR%"=="" set "BR=cursor/mktcap-fix-4e66"
 
 echo.
 echo === APPLY %BR% ===
@@ -58,8 +58,7 @@ echo Done. Now on:
 git branch --show-current
 git rev-parse --short HEAD
 echo.
-echo 請 Ctrl+F5。技術面 tag 應為 tech·386
-echo 關鍵估值應有 P/E、市值等（不再一直「載入中」）
+echo 請 Ctrl+F5。MKT CAP 應有數值（不再 --）
 echo.
 pause
 endlocal

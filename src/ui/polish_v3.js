@@ -1153,6 +1153,18 @@ function fmtBig(n, unit) {
     if (!S.sym) return h;
     // Async fetch and inject — find element and update after render
     fetchKeyStats(S.sym, S.mkt).then(ks => {
+      // 回填 STATS 上方「MKT CAP」列（Yahoo chart meta 沒有市值，先前永遠 --）
+      if (ks && ks.marketCap != null) {
+        const el = document.getElementById('rp-MKTCAP');
+        if (el) {
+          const cur = ks.currency || (S.mkt === 'TW' ? 'TWD' : 'USD');
+          el.textContent = fmtBig(ks.marketCap) + ' ' + cur;
+        }
+        // 同步進 S.data.meta，後續重繪／PDF 也能用
+        try {
+          if (S.data && S.data.meta) S.data.meta.marketCap = ks.marketCap;
+        } catch (_) {}
+      }
       const sect = document.getElementById('keystats-sect');
       const html = ks
         ? renderKeystatsSection(ks)
