@@ -11,9 +11,49 @@
 (function MarketChartV3() {
   'use strict';
 
-  const VER = '3.2.2';
+  const VER = '3.3.0';
   const LOG = (...a) => console.log('%c[MarketChart ' + VER + ']', 'color:#38BDF8;font-weight:700', ...a);
   const WARN = (...a) => console.warn('[MarketChart]', ...a);
+
+  /** 美利率債等圖：序列視覺覆寫（線寬／虛線／面積） */
+  const SERIES_STYLE = {
+    '__US_RATES_CREDIT__': {
+      fedfunds: { lineWidth: 2, lineStyle: 2, color: '#CBD5E1', lastValueVisible: true },
+      us10y:    { lineWidth: 2.5, lineStyle: 0, color: '#FBBF24', lastValueVisible: true },
+      baml_ig:  { lineWidth: 2, lineStyle: 0, color: '#38BDF8', lastValueVisible: true, area: true,
+                  topColor: 'rgba(56,189,248,0.18)', bottomColor: 'rgba(56,189,248,0.01)' },
+      baml_hy:  { lineWidth: 2, lineStyle: 0, color: '#FB7185', lastValueVisible: true, area: true,
+                  topColor: 'rgba(251,113,133,0.16)', bottomColor: 'rgba(251,113,133,0.01)' },
+      _axis: { left: '利率 %', right: '總報酬指數' },
+      _subtitle: 'Fed／10Y（左） vs 美林 IG／HY 總報酬（右）',
+    },
+    '__US_CPI_FIN__': {
+      us_cpi_yoy: { lineWidth: 1, color: '#7DD3FC' },
+      fedfunds:   { lineWidth: 1, color: '#4ADE80' },
+      xlf:        { lineWidth: 2.5, color: '#F59E0B', lastValueVisible: true },
+      _axis: { left: '%', right: 'XLF' },
+    },
+    '__TW_RATES__': {
+      discount: { lineWidth: 2.5, color: '#38BDF8', lastValueVisible: true },
+      secured:  { lineWidth: 2, color: '#F87171' },
+      short:    { lineWidth: 2, color: '#4ADE80' },
+      _axis: { left: '利率 %', right: '' },
+    },
+    '__TW_MARGIN_MIX__': {
+      yoy:  { lineWidth: 2.5, color: '#38BDF8', lastValueVisible: true },
+      twii: { lineWidth: 1.5, color: '#F87171', lastValueVisible: true },
+      _axis: { left: 'YoY %', right: '加權' },
+    },
+  };
+
+  function hexToRgba(hex, a) {
+    const h = String(hex || '').replace('#', '');
+    if (h.length !== 6) return `rgba(56,189,248,${a})`;
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},${a})`;
+  }
 
   const DENSITY_PRESETS = [
     { key: 'today',  label: '僅今日', tip: '只重抓最新一筆，不回補歷史' },
@@ -407,6 +447,191 @@
     if (el) el.style.display = 'none';
     hideRefreshBtn();
     hideFloat();
+    hideSeriesPanel();
+    hideAxisLabels();
+  }
+
+  function getSeriesVis(chartId) {
+    try {
+      const raw = localStorage.getItem(SERIES_VIS_LS + chartId);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return null;
+  }
+  function setSeriesVis(chartId, map) {
+    try { localStorage.setItem(SERIES_VIS_LS + chartId, JSON.stringify(map)); } catch (e) {}
+  }
+
+  function hideSeriesPanel() {
+    const el = document.getElementById('market-chart-series-panel');
+    if (el) el.style.display = 'none';
+  }
+
+  function hideAxisLabels() {
+    const el = document.getElementById('market-chart-axis-labels');
+    if (el) el.style.display = 'none';
+  }
+
+  function ensureAxisLabels(def, stylePack) {
+    const wrap = document.getElementById('chart-wrap');
+    if (!wrap) return;
+    if (getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+    let el = document.getElementById('market-chart-axis-labels');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'market-chart-axis-labels';
+      wrap.appendChild(el);
+    }
+    const axis = (stylePack && stylePack._axis) || {};
+    if (!axis.left && !axis.right) {
+      el.style.display = 'none';
+      return;
+    }
+    el.style.cssText = [
+      'position:absolute', 'inset:0', 'z-index:12', 'pointer-events:none',
+      'font:9px/1.2 JetBrains Mono,ui-monospace,monospace', 'color:#64748b',
+    ].join(';');
+    el.innerHTML =
+      (axis.left
+        ? `<div style="position:absolute;left:8px;top:48%;transform:translateY(-50%) rotate(-90deg);transform-origin:left center;letter-spacing:1px;white-space:nowrap">${axis.left}</div>`
+        : '') +
+      (axis.right
+        ? `<div style="position:absolute;right:8px;top:48%;transform:translateY(-50%) rotate(90deg);transform-origin:right center;letter-spacing:1px;white-space:nowrap">${axis.right}</div>`
+        : '');
+    el.style.display = 'block';
+  }
+
+  /**
+   * 多序列浮動面板：各指標獨立開關 + 全開／全關
+   */
+  function ensureSeriesPanel(def, apiSeries) {
+    const wrap = document.getElementById('chart-wrap');
+    if (!wrap || !def || !apiSeries || !apiSeries.length) {
+      hideSeriesPanel();
+      return;
+    }
+    if (getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+
+    let panel = document.getElementById('market-chart-series-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'market-chart-series-panel';
+      wrap.appendChild(panel);
+    }
+    panel.style.cssText = [
+      'position:absolute', 'left:12px', 'bottom:14px', 'z-index:29',
+      'min-width:210px', 'max-width:min(320px,78%)',
+      'padding:8px 10px 10px', 'border-radius:8px',
+      'font:11px/1.4 JetBrains Mono,ui-monospace,monospace',
+      'color:#e2e8f0', 'background:rgba(6,12,22,.94)',
+      'border:1px solid rgba(100,116,139,.45)',
+      'box-shadow:0 10px 28px rgba(0,0,0,.5)',
+      'backdrop-filter:blur(6px)', 'pointer-events:auto',
+    ].join(';');
+
+    const saved = getSeriesVis(def.id) || {};
+    // 預設全開；若 localStorage 有值則沿用
+    apiSeries.forEach(e => {
+      const k = e.meta.key;
+      const on = (saved[k] === undefined) ? true : !!saved[k];
+      e.visible = on;
+      try { e.seriesObj.applyOptions({ visible: on }); } catch (err) {}
+    });
+
+    const stylePack = SERIES_STYLE[def.id] || {};
+    const subtitle = stylePack._subtitle
+      ? `<div style="color:#64748b;font-size:9px;margin:2px 0 6px;line-height:1.35">${stylePack._subtitle}</div>`
+      : '';
+
+    let rows = '';
+    for (const e of apiSeries) {
+      const k = e.meta.key;
+      const col = e.meta.color || '#94a3b8';
+      const scale = e.meta.scale === 'right' ? 'R' : 'L';
+      const checked = e.visible ? 'checked' : '';
+      const lastStr = e.meta.unit === '%'
+        ? Number(e.last).toFixed(2) + '%'
+        : Number(e.last).toLocaleString('en-US', { maximumFractionDigits: 2 });
+      rows +=
+        `<label class="mc-series-row" data-key="${k}" style="display:flex;align-items:center;gap:7px;padding:3px 0;cursor:pointer;user-select:none;opacity:${e.visible ? 1 : 0.45}">` +
+          `<input type="checkbox" data-series-key="${k}" ${checked} style="accent-color:${col};width:13px;height:13px;cursor:pointer;flex-shrink:0">` +
+          `<span style="width:8px;height:8px;border-radius:2px;background:${col};flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,.12)"></span>` +
+          `<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${e.visible ? '#e2e8f0' : '#64748b'}">${e.meta.name}</span>` +
+          `<span style="color:#64748b;font-size:9px">${scale}</span>` +
+          `<span class="mc-series-last" style="color:${col};font-size:10px;font-weight:700;min-width:52px;text-align:right">${lastStr}</span>` +
+        `</label>`;
+    }
+
+    panel.innerHTML =
+      `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px">` +
+        `<div style="color:#94a3b8;font-size:10px;letter-spacing:.6px;font-weight:700">序列顯示</div>` +
+        `<div style="display:flex;gap:4px">` +
+          `<button type="button" data-mc-vis="all" style="padding:2px 7px;border-radius:4px;border:1px solid rgba(56,189,248,.45);background:rgba(14,30,55,.9);color:#7dd3fc;font:10px JetBrains Mono,monospace;cursor:pointer">全開</button>` +
+          `<button type="button" data-mc-vis="none" style="padding:2px 7px;border-radius:4px;border:1px solid rgba(148,163,184,.35);background:rgba(14,20,35,.9);color:#94a3b8;font:10px JetBrains Mono,monospace;cursor:pointer">全關</button>` +
+        `</div>` +
+      `</div>` +
+      subtitle +
+      `<div style="border-top:1px solid rgba(148,163,184,.2);padding-top:4px">${rows}</div>`;
+
+    panel.style.display = 'block';
+
+    panel.onclick = function (ev) {
+      const btn = ev.target && ev.target.closest && ev.target.closest('[data-mc-vis]');
+      if (!btn) return;
+      const mode = btn.getAttribute('data-mc-vis');
+      const on = mode === 'all';
+      const map = {};
+      apiSeries.forEach(e => {
+        e.visible = on;
+        map[e.meta.key] = on;
+        try { e.seriesObj.applyOptions({ visible: on }); } catch (err) {}
+      });
+      setSeriesVis(def.id, map);
+      panel.querySelectorAll('input[data-series-key]').forEach(inp => {
+        inp.checked = on;
+        const row = inp.closest('.mc-series-row');
+        if (row) {
+          row.style.opacity = on ? '1' : '0.45';
+          const nameEl = row.children[2];
+          if (nameEl) nameEl.style.color = on ? '#e2e8f0' : '#64748b';
+        }
+      });
+      syncRightScale(apiSeries);
+    };
+
+    panel.onchange = function (ev) {
+      const t = ev.target;
+      if (!t || !t.matches || !t.matches('input[data-series-key]')) return;
+      const key = t.getAttribute('data-series-key');
+      const entry = apiSeries.find(e => e.meta.key === key);
+      if (!entry) return;
+      entry.visible = !!t.checked;
+      try { entry.seriesObj.applyOptions({ visible: entry.visible }); } catch (err) {}
+      const map = {};
+      apiSeries.forEach(e => { map[e.meta.key] = !!e.visible; });
+      setSeriesVis(def.id, map);
+      const row = t.closest('.mc-series-row');
+      if (row) {
+        row.style.opacity = entry.visible ? '1' : '0.45';
+        const nameEl = row.children[2];
+        if (nameEl) nameEl.style.color = entry.visible ? '#e2e8f0' : '#64748b';
+      }
+      syncRightScale(apiSeries);
+    };
+
+    if (window.S) S._marketApiSeries = apiSeries;
+  }
+
+  function syncRightScale(apiSeries) {
+    if (!window.S || !S.chart) return;
+    const anyRight = apiSeries.some(e => e.visible && e.meta.scale === 'right');
+    const anyLeft = apiSeries.some(e => e.visible && e.meta.scale !== 'right');
+    try {
+      S.chart.applyOptions({
+        rightPriceScale: { visible: anyRight },
+        leftPriceScale: { visible: anyLeft || !anyRight },
+      });
+    } catch (e) {}
   }
 
   /** 圖內浮動資訊卡：十字游標／最新值／風險區 — 絕不使用軸上 label */
@@ -488,6 +713,16 @@
         ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(148,163,184,.25);font-size:10px;color:#94a3b8">風險線（僅圖內虛線，不佔軸）<br>${zonesHtml}</div>`
         : '') +
       (opts.extraHtml ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(148,163,184,.2)">${opts.extraHtml}</div>` : '');
+    // 多序列圖：資訊卡靠右上，避開左下序列開關面板
+    if (def && def.multi) {
+      el.style.left = 'auto';
+      el.style.right = '12px';
+      el.style.top = '56px';
+    } else {
+      el.style.left = '12px';
+      el.style.right = 'auto';
+      el.style.top = '36px';
+    }
     el.style.display = 'block';
   }
 
@@ -771,7 +1006,7 @@
   }
 
   /**
-   * 多序列 MacroMicro 風格渲染（左／右軸、折線／柱狀）
+   * 多序列 MacroMicro 風格渲染（左／右軸、折線／柱狀／面積）
    * @param {object} def MarketChart def
    * @param {object} payload /macro/chart 回應
    */
@@ -790,22 +1025,46 @@
     if (window.S) S.tzOffset = userTzOffset;
     const tz = (t) => (t == null ? t : t + userTzOffset);
     const hasRight = seriesList.some(s => s.scale === 'right' && (s.points || []).length);
+    const stylePack = SERIES_STYLE[def.id] || {};
+    const LineStyle = (LightweightCharts.LineStyle) || { Solid: 0, Dotted: 1, Dashed: 2 };
 
     const chart = LightweightCharts.createChart(wrap, {
       width: wrap.clientWidth,
       height: wrap.clientHeight,
-      layout: { background: { color: '#060A12' }, textColor: '#5A6A82' },
-      grid: { vertLines: { color: '#0F1A2B' }, horzLines: { color: '#0F1A2B' } },
+      layout: {
+        background: { color: '#070B14' },
+        textColor: '#64748b',
+        fontFamily: "JetBrains Mono, ui-monospace, Menlo, monospace",
+        fontSize: 11,
+      },
+      grid: {
+        vertLines: { color: 'rgba(30,41,59,.55)', style: LineStyle.Dotted },
+        horzLines: { color: 'rgba(30,41,59,.55)', style: LineStyle.Dotted },
+      },
       crosshair: {
         mode: LightweightCharts.CrosshairMode.Magnet,
-        vertLine: { color: 'rgba(245,197,24,.45)', width: 1, style: 2, labelVisible: false },
-        horzLine: { color: 'rgba(245,197,24,.45)', width: 1, style: 2, labelVisible: false },
+        vertLine: {
+          color: 'rgba(148,163,184,.45)', width: 1, style: LineStyle.Dashed,
+          labelVisible: true, labelBackgroundColor: '#1e293b',
+        },
+        horzLine: {
+          color: 'rgba(148,163,184,.35)', width: 1, style: LineStyle.Dashed,
+          labelVisible: true, labelBackgroundColor: '#1e293b',
+        },
       },
-      leftPriceScale: { visible: true, borderColor: '#1A2740', scaleMargins: { top: 0.10, bottom: 0.12 } },
-      rightPriceScale: { visible: hasRight, borderColor: '#1A2740', scaleMargins: { top: 0.10, bottom: 0.12 } },
+      leftPriceScale: {
+        visible: true, borderColor: 'rgba(51,65,85,.8)',
+        scaleMargins: { top: 0.08, bottom: 0.10 },
+        entireTextOnly: true,
+      },
+      rightPriceScale: {
+        visible: hasRight, borderColor: 'rgba(51,65,85,.8)',
+        scaleMargins: { top: 0.08, bottom: 0.10 },
+        entireTextOnly: true,
+      },
       timeScale: {
-        borderColor: '#1A2740', timeVisible: false, secondsVisible: false,
-        rightOffset: 8, barSpacing: 2, minBarSpacing: 0.5,
+        borderColor: 'rgba(51,65,85,.8)', timeVisible: false, secondsVisible: false,
+        rightOffset: 10, barSpacing: 3, minBarSpacing: 0.5,
         fixLeftEdge: true, fixRightEdge: true, lockVisibleTimeRangeOnResize: true,
       },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
@@ -821,7 +1080,7 @@
       S._marketMulti = true;
     }
 
-    const apiSeries = []; // {meta, seriesObj, byTime}
+    const apiSeries = []; // {meta, seriesObj, byTime, visible, last, prev}
     let primaryApi = null;
 
     for (const s of seriesList) {
@@ -839,36 +1098,62 @@
       if (!lineData.length) continue;
 
       const scaleId = s.scale === 'right' ? 'right' : 'left';
+      const ov = stylePack[s.key] || {};
+      const color = ov.color || s.color || '#38BDF8';
       const isHist = s.style === 'histogram' || s.style === 'bar';
+      const useArea = !!(ov.area) && !isHist;
       let obj;
       const fmt = s.unit === '%'
         ? { type: 'custom', formatter: v => (v != null && isFinite(v) ? v.toFixed(2) + '%' : '') }
         : { type: 'price', precision: 2, minMove: 0.01 };
+      const showLast = ov.lastValueVisible !== false;
 
       if (isHist) {
         obj = chart.addHistogramSeries({
           priceScaleId: scaleId,
-          color: s.color || '#38BDF8',
+          color: color,
           base: 0,
-          lastValueVisible: false,
+          lastValueVisible: !!ov.lastValueVisible,
           priceLineVisible: false,
           priceFormat: fmt,
         });
-      } else {
-        obj = chart.addLineSeries({
+      } else if (useArea && typeof chart.addAreaSeries === 'function') {
+        obj = chart.addAreaSeries({
           priceScaleId: scaleId,
-          color: s.color || '#38BDF8',
-          lineWidth: scaleId === 'right' ? 1.5 : 2,
-          lastValueVisible: false,
+          lineColor: color,
+          topColor: ov.topColor || hexToRgba(color, 0.18),
+          bottomColor: ov.bottomColor || hexToRgba(color, 0.01),
+          lineWidth: ov.lineWidth != null ? ov.lineWidth : 2,
+          lastValueVisible: showLast,
           priceLineVisible: false,
           crosshairMarkerVisible: true,
           crosshairMarkerRadius: 4,
           priceFormat: fmt,
         });
+      } else {
+        const ls = {
+          priceScaleId: scaleId,
+          color: color,
+          lineWidth: ov.lineWidth != null ? ov.lineWidth : (scaleId === 'right' ? 1.75 : 2.25),
+          lastValueVisible: showLast,
+          priceLineVisible: false,
+          crosshairMarkerVisible: true,
+          crosshairMarkerRadius: 4,
+          priceFormat: fmt,
+        };
+        if (ov.lineStyle != null && LineStyle) {
+          ls.lineStyle = ov.lineStyle;
+        }
+        obj = chart.addLineSeries(ls);
       }
+      // 覆寫 meta 色（面板／圖例一致）
+      s.color = color;
       obj.setData(lineData);
-      const entry = { meta: s, seriesObj: obj, byTime, last: lineData[lineData.length - 1].value,
-        prev: lineData.length >= 2 ? lineData[lineData.length - 2].value : null };
+      const entry = {
+        meta: s, seriesObj: obj, byTime, visible: true,
+        last: lineData[lineData.length - 1].value,
+        prev: lineData.length >= 2 ? lineData[lineData.length - 2].value : null,
+      };
       apiSeries.push(entry);
       if (!primaryApi && scaleId === 'left') primaryApi = entry;
       if (window.S) S.overlaySeries[s.key] = obj;
@@ -880,12 +1165,26 @@
       S.dotSeries = primaryApi.seriesObj;
     }
 
-    // legend
+    // legend（右側簡列，詳細操作改走浮動面板）
     const lg = document.getElementById('chart-legend');
     if (lg) {
       lg.innerHTML = apiSeries.map(e =>
         `<div class="lg-row" style="color:${e.meta.color}"><span class="lg-swatch" style="background:${e.meta.color}"></span>${e.meta.name} (${e.meta.scale === 'right' ? 'R' : 'L'})</div>`
       ).join('');
+    }
+
+    function visibleRowsHtml(atTime) {
+      const rows = [];
+      for (const e of apiSeries) {
+        if (!e.visible) continue;
+        const val = (atTime != null && e.byTime.has(atTime)) ? e.byTime.get(atTime) : e.last;
+        if (val == null) continue;
+        rows.push(`<div style="display:flex;justify-content:space-between;gap:12px;color:${e.meta.color};margin-top:2px">` +
+          `<span>${e.meta.name}</span>` +
+          `<span style="font-weight:700">${e.meta.unit === '%' ? Number(val).toFixed(2) + '%' : Number(val).toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>` +
+          `</div>`);
+      }
+      return rows.join('');
     }
 
     chart.subscribeCrosshairMove(param => {
@@ -898,34 +1197,29 @@
             prev: primaryApi.prev,
             dateStr: null,
             dual: null,
-            extraHtml: apiSeries.map(e =>
-              `<div style="color:${e.meta.color};margin-top:2px">${e.meta.name}: ${
-                e.meta.unit === '%' ? Number(e.last).toFixed(2) + '%' : Number(e.last).toLocaleString('en-US', { maximumFractionDigits: 2 })
-              }</div>`
-            ).join(''),
+            extraHtml: visibleRowsHtml(null),
           });
         }
         return;
       }
       const d = new Date(typeof param.time === 'number' ? param.time * 1000 : Date.parse(param.time));
       const ds = `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}`;
-      let primVal = null, primPrev = null;
+      let primVal = null;
       const rows = [];
       for (const e of apiSeries) {
+        if (!e.visible) continue;
         const pt = param.seriesData.get(e.seriesObj);
         const v = pt && pt.value != null ? pt.value : e.byTime.get(param.time);
         if (v == null) continue;
-        if (e === primaryApi) {
-          primVal = v;
-          // approx prev: not exact without ordered map; skip
-        }
-        rows.push(`<div style="color:${e.meta.color};margin-top:2px">${e.meta.name}: ${
-          e.meta.unit === '%' ? Number(v).toFixed(2) + '%' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 })
-        }</div>`);
+        if (e === primaryApi) primVal = v;
+        rows.push(`<div style="display:flex;justify-content:space-between;gap:12px;color:${e.meta.color};margin-top:2px">` +
+          `<span>${e.meta.name}</span>` +
+          `<span style="font-weight:700">${e.meta.unit === '%' ? Number(v).toFixed(2) + '%' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>` +
+          `</div>`);
       }
       updateFloat(def, {
         value: primVal != null ? primVal : (primaryApi && primaryApi.last),
-        prev: primPrev,
+        prev: null,
         dateStr: ds,
         dual: null,
         extraHtml: rows.join(''),
@@ -933,26 +1227,21 @@
     });
 
     ensureBadge(def);
+    ensureAxisLabels(def, stylePack);
+    ensureSeriesPanel(def, apiSeries);
+
     if (primaryApi) {
       setHeader(def, primaryApi.last, primaryApi.prev);
       updateFloat(def, {
         value: primaryApi.last,
         prev: primaryApi.prev,
-        extraHtml: apiSeries.map(e =>
-          `<div style="color:${e.meta.color};margin-top:2px">${e.meta.name}: ${
-            e.meta.unit === '%' ? Number(e.last).toFixed(2) + '%' : Number(e.last).toLocaleString('en-US', { maximumFractionDigits: 2 })
-          }</div>`
-        ).join(''),
+        extraHtml: (stylePack._subtitle
+          ? `<div style="color:#64748b;font-size:9px;margin-bottom:4px">${stylePack._subtitle}</div>`
+          : '') + visibleRowsHtml(null),
       });
     }
 
-    // stash candles for compatibility
     if (window.S && primaryApi) {
-      const candles = [];
-      primaryApi.byTime.forEach((v, t) => {
-        // reverse tz for storage? keep chart times only for display; S.data used lightly
-      });
-      // rebuild from payload primary points
       const primMeta = primaryApi.meta;
       const candles2 = (primMeta.points || []).map(p => {
         const u = dateToUnix(p.date);
