@@ -11,38 +11,42 @@
 (function MarketChartV3() {
   'use strict';
 
-  const VER = '3.3.0';
-  const LOG = (...a) => console.log('%c[MarketChart ' + VER + ']', 'color:#38BDF8;font-weight:700', ...a);
+  const VER = '3.3.1';
+  const LOG = (...a) => console.log('%c[MarketChart ' + VER + ']', 'color:#64748b', ...a);
   const WARN = (...a) => console.warn('[MarketChart]', ...a);
 
-  /** 美利率債等圖：序列視覺覆寫（線寬／虛線／面積） */
+  /**
+   * 專業終端配色（低飽和、細線、無面積填色）
+   * 參考 Bloomberg / TradingView 總經圖慣例：利率左軸、指數右軸。
+   */
   const SERIES_STYLE = {
     '__US_RATES_CREDIT__': {
-      fedfunds: { lineWidth: 2, lineStyle: 2, color: '#CBD5E1', lastValueVisible: true },
-      us10y:    { lineWidth: 2.5, lineStyle: 0, color: '#FBBF24', lastValueVisible: true },
-      baml_ig:  { lineWidth: 2, lineStyle: 0, color: '#38BDF8', lastValueVisible: true, area: true,
-                  topColor: 'rgba(56,189,248,0.18)', bottomColor: 'rgba(56,189,248,0.01)' },
-      baml_hy:  { lineWidth: 2, lineStyle: 0, color: '#FB7185', lastValueVisible: true, area: true,
-                  topColor: 'rgba(251,113,133,0.16)', bottomColor: 'rgba(251,113,133,0.01)' },
-      _axis: { left: '利率 %', right: '總報酬指數' },
-      _subtitle: 'Fed／10Y（左） vs 美林 IG／HY 總報酬（右）',
+      fedfunds: { lineWidth: 1.5, lineStyle: 2, color: '#94A3B8', lastValueVisible: false },
+      us10y:    { lineWidth: 2,   lineStyle: 0, color: '#D4A574', lastValueVisible: false },
+      baml_ig:  { lineWidth: 1.75, lineStyle: 0, color: '#6B9BB8', lastValueVisible: false },
+      baml_hy:  { lineWidth: 1.75, lineStyle: 0, color: '#B89595', lastValueVisible: false },
+      _axis: { left: 'L · %', right: 'R · Index' },
+      _shortNames: { fedfunds: 'Fed', us10y: '10Y', baml_ig: 'IG', baml_hy: 'HY' },
     },
     '__US_CPI_FIN__': {
-      us_cpi_yoy: { lineWidth: 1, color: '#7DD3FC' },
-      fedfunds:   { lineWidth: 1, color: '#4ADE80' },
-      xlf:        { lineWidth: 2.5, color: '#F59E0B', lastValueVisible: true },
-      _axis: { left: '%', right: 'XLF' },
+      us_cpi_yoy: { lineWidth: 1.5, color: '#7A9EB8' },
+      fedfunds:   { lineWidth: 1.5, lineStyle: 2, color: '#8FA88F' },
+      xlf:        { lineWidth: 2, color: '#C4A35A', lastValueVisible: false },
+      _axis: { left: 'L · %', right: 'R · XLF' },
+      _shortNames: { us_cpi_yoy: 'CPI', fedfunds: 'Fed', xlf: 'XLF' },
     },
     '__TW_RATES__': {
-      discount: { lineWidth: 2.5, color: '#38BDF8', lastValueVisible: true },
-      secured:  { lineWidth: 2, color: '#F87171' },
-      short:    { lineWidth: 2, color: '#4ADE80' },
-      _axis: { left: '利率 %', right: '' },
+      discount: { lineWidth: 2, color: '#6B9BB8', lastValueVisible: false },
+      secured:  { lineWidth: 1.5, color: '#B89595' },
+      short:    { lineWidth: 1.5, color: '#8FA88F' },
+      _axis: { left: 'L · %', right: '' },
+      _shortNames: { discount: '重貼', secured: '擔保', short: '短融' },
     },
     '__TW_MARGIN_MIX__': {
-      yoy:  { lineWidth: 2.5, color: '#38BDF8', lastValueVisible: true },
-      twii: { lineWidth: 1.5, color: '#F87171', lastValueVisible: true },
-      _axis: { left: 'YoY %', right: '加權' },
+      yoy:  { lineWidth: 2, color: '#6B9BB8', lastValueVisible: false },
+      twii: { lineWidth: 1.5, color: '#B89595', lastValueVisible: false },
+      _axis: { left: 'L · YoY%', right: 'R · 加權' },
+      _shortNames: { yoy: '融資比', twii: '加權' },
     },
   };
 
@@ -257,13 +261,6 @@
       if (!host) return;
       el = document.createElement('div');
       el.id = 'market-chart-badge';
-      el.style.cssText = [
-        'position:absolute', 'top:8px', 'right:12px', 'z-index:30',
-        'padding:3px 8px', 'border-radius:3px',
-        'font:10px/1.3 JetBrains Mono,ui-monospace,monospace',
-        'color:#7dd3fc', 'background:rgba(8,15,30,.85)',
-        'border:1px solid rgba(56,189,248,.45)', 'pointer-events:none',
-      ].join(';');
       const wrap = document.getElementById('chart-wrap');
       if (wrap) {
         if (getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
@@ -272,8 +269,20 @@
         host.appendChild(el);
       }
     }
-    el.textContent = 'MarketChart ' + VER + ' · 折線 · ' + (def ? def.shortName || def.name : '');
-    el.style.display = def ? 'block' : 'none';
+    // 多序列圖：不貼版本徽章（減少噪音）；單序列仍顯示精簡標籤
+    if (def && def.multi) {
+      el.style.display = 'none';
+    } else {
+      el.style.cssText = [
+        'position:absolute', 'top:8px', 'right:12px', 'z-index:30',
+        'padding:2px 6px', 'border-radius:2px',
+        'font:9px/1.2 JetBrains Mono,ui-monospace,monospace',
+        'color:#64748b', 'background:rgba(8,12,20,.75)',
+        'border:1px solid rgba(51,65,85,.5)', 'pointer-events:none',
+      ].join(';');
+      el.textContent = def ? (def.shortName || def.name) : '';
+      el.style.display = def ? 'block' : 'none';
+    }
     ensureRefreshBtn(def);
   }
 
@@ -288,27 +297,29 @@
       bar = document.createElement('div');
       bar.id = 'market-chart-refresh-bar';
       bar.style.cssText = [
-        'position:absolute', 'top:8px', 'right:12px', 'z-index:31',
-        'margin-top:22px', 'display:flex', 'align-items:center', 'gap:6px',
-        'pointer-events:auto',
+        'position:absolute', 'top:6px', 'right:8px', 'z-index:31',
+        'display:flex', 'align-items:center', 'gap:4px',
+        'pointer-events:auto', 'opacity:0.55', 'transition:opacity .15s',
       ].join(';');
+      bar.onmouseenter = () => { bar.style.opacity = '1'; };
+      bar.onmouseleave = () => { bar.style.opacity = '0.55'; };
 
       const densWrap = document.createElement('label');
       densWrap.id = 'market-chart-density-wrap';
       densWrap.style.cssText = [
-        'display:flex', 'align-items:center', 'gap:4px',
-        'padding:3px 6px', 'border-radius:4px',
-        'font:10px/1.2 JetBrains Mono,ui-monospace,monospace',
-        'color:#94a3b8', 'background:rgba(14,30,55,.95)',
-        'border:1px solid rgba(56,189,248,.35)',
+        'display:flex', 'align-items:center', 'gap:3px',
+        'padding:2px 5px', 'border-radius:2px',
+        'font:9px/1.2 JetBrains Mono,ui-monospace,monospace',
+        'color:#64748b', 'background:rgba(10,14,22,.8)',
+        'border:1px solid rgba(51,65,85,.55)',
       ].join(';');
-      densWrap.innerHTML = '<span style="white-space:nowrap">密度</span>';
+      densWrap.innerHTML = '<span style="white-space:nowrap;opacity:.8">密度</span>';
       const sel = document.createElement('select');
       sel.id = 'market-chart-density';
       sel.style.cssText = [
-        'background:#0b1220', 'color:#e0f2fe', 'border:none',
-        'font:10px/1.2 JetBrains Mono,ui-monospace,monospace',
-        'padding:2px 2px', 'cursor:pointer', 'outline:none', 'max-width:88px',
+        'background:transparent', 'color:#94a3b8', 'border:none',
+        'font:9px/1.2 JetBrains Mono,ui-monospace,monospace',
+        'padding:1px 0', 'cursor:pointer', 'outline:none', 'max-width:72px',
       ].join(';');
       for (const p of DENSITY_PRESETS) {
         const opt = document.createElement('option');
@@ -331,14 +342,14 @@
       btn.id = 'market-chart-refresh';
       btn.type = 'button';
       btn.style.cssText = [
-        'padding:4px 10px', 'border-radius:4px',
-        'font:11px/1.2 JetBrains Mono,ui-monospace,monospace',
-        'color:#e0f2fe', 'background:rgba(14,30,55,.95)',
-        'border:1px solid rgba(56,189,248,.55)', 'cursor:pointer',
-        'box-shadow:0 4px 14px rgba(0,0,0,.35)', 'white-space:nowrap',
+        'padding:2px 7px', 'border-radius:2px',
+        'font:9px/1.2 JetBrains Mono,ui-monospace,monospace',
+        'color:#94a3b8', 'background:rgba(10,14,22,.8)',
+        'border:1px solid rgba(51,65,85,.55)', 'cursor:pointer',
+        'white-space:nowrap',
       ].join(';');
-      btn.title = '依左側密度重抓／回補此追蹤圖（免指令）';
-      btn.textContent = '↻ 更新資料';
+      btn.title = '重抓／回補此追蹤圖';
+      btn.textContent = '更新';
       btn.addEventListener('click', onRefreshClick);
       bar.appendChild(btn);
 
@@ -354,7 +365,7 @@
 
     if (btn) {
       btn.disabled = false;
-      btn.textContent = '↻ 更新資料';
+      btn.textContent = '更新';
       btn.dataset.chartId = def.id;
     }
     // 密度選項對融資比／全部追蹤有意義；其他圖仍顯示但僅今日有效
@@ -487,22 +498,24 @@
       el.style.display = 'none';
       return;
     }
+    // 角落小標，不旋轉、不擋圖
     el.style.cssText = [
       'position:absolute', 'inset:0', 'z-index:12', 'pointer-events:none',
-      'font:9px/1.2 JetBrains Mono,ui-monospace,monospace', 'color:#64748b',
+      'font:9px/1 JetBrains Mono,ui-monospace,monospace', 'color:#475569',
     ].join(';');
     el.innerHTML =
       (axis.left
-        ? `<div style="position:absolute;left:8px;top:48%;transform:translateY(-50%) rotate(-90deg);transform-origin:left center;letter-spacing:1px;white-space:nowrap">${axis.left}</div>`
+        ? `<div style="position:absolute;left:6px;top:8px;letter-spacing:.4px">${axis.left}</div>`
         : '') +
       (axis.right
-        ? `<div style="position:absolute;right:8px;top:48%;transform:translateY(-50%) rotate(90deg);transform-origin:right center;letter-spacing:1px;white-space:nowrap">${axis.right}</div>`
+        ? `<div style="position:absolute;right:6px;top:8px;letter-spacing:.4px">${axis.right}</div>`
         : '');
     el.style.display = 'block';
   }
 
   /**
-   * 多序列浮動面板：各指標獨立開關 + 全開／全關
+   * 底部 chip 圖例（TradingView 風格）：點擊開關；含全開／全關
+   * 不佔大塊卡片，不遮主圖。
    */
   function ensureSeriesPanel(def, apiSeries) {
     const wrap = document.getElementById('chart-wrap');
@@ -518,19 +531,11 @@
       panel.id = 'market-chart-series-panel';
       wrap.appendChild(panel);
     }
-    panel.style.cssText = [
-      'position:absolute', 'left:12px', 'bottom:14px', 'z-index:29',
-      'min-width:210px', 'max-width:min(320px,78%)',
-      'padding:8px 10px 10px', 'border-radius:8px',
-      'font:11px/1.4 JetBrains Mono,ui-monospace,monospace',
-      'color:#e2e8f0', 'background:rgba(6,12,22,.94)',
-      'border:1px solid rgba(100,116,139,.45)',
-      'box-shadow:0 10px 28px rgba(0,0,0,.5)',
-      'backdrop-filter:blur(6px)', 'pointer-events:auto',
-    ].join(';');
 
+    const stylePack = SERIES_STYLE[def.id] || {};
+    const shorts = stylePack._shortNames || {};
     const saved = getSeriesVis(def.id) || {};
-    // 預設全開；若 localStorage 有值則沿用
+
     apiSeries.forEach(e => {
       const k = e.meta.key;
       const on = (saved[k] === undefined) ? true : !!saved[k];
@@ -538,88 +543,96 @@
       try { e.seriesObj.applyOptions({ visible: on }); } catch (err) {}
     });
 
-    const stylePack = SERIES_STYLE[def.id] || {};
-    const subtitle = stylePack._subtitle
-      ? `<div style="color:#64748b;font-size:9px;margin:2px 0 6px;line-height:1.35">${stylePack._subtitle}</div>`
-      : '';
+    panel.style.cssText = [
+      'position:absolute', 'left:8px', 'bottom:8px', 'right:auto', 'top:auto',
+      'z-index:29', 'max-width:calc(100% - 16px)',
+      'display:flex', 'flex-wrap:wrap', 'align-items:center', 'gap:4px',
+      'padding:0', 'background:transparent', 'border:none', 'box-shadow:none',
+      'backdrop-filter:none', 'pointer-events:auto',
+      'font:10px/1.2 JetBrains Mono,ui-monospace,monospace',
+    ].join(';');
 
-    let rows = '';
-    for (const e of apiSeries) {
+    function chipHtml(e) {
       const k = e.meta.key;
       const col = e.meta.color || '#94a3b8';
-      const scale = e.meta.scale === 'right' ? 'R' : 'L';
-      const checked = e.visible ? 'checked' : '';
+      const label = shorts[k] || e.meta.name;
+      const on = e.visible;
       const lastStr = e.meta.unit === '%'
-        ? Number(e.last).toFixed(2) + '%'
-        : Number(e.last).toLocaleString('en-US', { maximumFractionDigits: 2 });
-      rows +=
-        `<label class="mc-series-row" data-key="${k}" style="display:flex;align-items:center;gap:7px;padding:3px 0;cursor:pointer;user-select:none;opacity:${e.visible ? 1 : 0.45}">` +
-          `<input type="checkbox" data-series-key="${k}" ${checked} style="accent-color:${col};width:13px;height:13px;cursor:pointer;flex-shrink:0">` +
-          `<span style="width:8px;height:8px;border-radius:2px;background:${col};flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,.12)"></span>` +
-          `<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${e.visible ? '#e2e8f0' : '#64748b'}">${e.meta.name}</span>` +
-          `<span style="color:#64748b;font-size:9px">${scale}</span>` +
-          `<span class="mc-series-last" style="color:${col};font-size:10px;font-weight:700;min-width:52px;text-align:right">${lastStr}</span>` +
-        `</label>`;
+        ? Number(e.last).toFixed(2)
+        : Number(e.last).toLocaleString('en-US', { maximumFractionDigits: 1 });
+      return `<button type="button" class="mc-chip" data-series-key="${k}" title="${e.meta.name}（${e.meta.scale === 'right' ? '右軸' : '左軸'}）· 點擊開關"` +
+        ` style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:2px;cursor:pointer;` +
+        `font:inherit;border:1px solid ${on ? col + '66' : 'rgba(51,65,85,.7)'};` +
+        `background:${on ? 'rgba(15,20,30,.88)' : 'rgba(10,14,20,.55)'};` +
+        `color:${on ? '#cbd5e1' : '#475569'};opacity:${on ? 1 : 0.55}">` +
+        `<span style="width:10px;height:2px;background:${on ? col : '#334155'};flex-shrink:0"></span>` +
+        `<span>${label}</span>` +
+        `<span style="color:${on ? col : '#475569'};font-weight:600;font-variant-numeric:tabular-nums">${lastStr}</span>` +
+        `</button>`;
     }
 
     panel.innerHTML =
-      `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px">` +
-        `<div style="color:#94a3b8;font-size:10px;letter-spacing:.6px;font-weight:700">序列顯示</div>` +
-        `<div style="display:flex;gap:4px">` +
-          `<button type="button" data-mc-vis="all" style="padding:2px 7px;border-radius:4px;border:1px solid rgba(56,189,248,.45);background:rgba(14,30,55,.9);color:#7dd3fc;font:10px JetBrains Mono,monospace;cursor:pointer">全開</button>` +
-          `<button type="button" data-mc-vis="none" style="padding:2px 7px;border-radius:4px;border:1px solid rgba(148,163,184,.35);background:rgba(14,20,35,.9);color:#94a3b8;font:10px JetBrains Mono,monospace;cursor:pointer">全關</button>` +
-        `</div>` +
-      `</div>` +
-      subtitle +
-      `<div style="border-top:1px solid rgba(148,163,184,.2);padding-top:4px">${rows}</div>`;
+      apiSeries.map(chipHtml).join('') +
+      `<button type="button" data-mc-vis="all" title="全部顯示" style="padding:3px 7px;border-radius:2px;cursor:pointer;font:inherit;` +
+        `border:1px solid rgba(71,85,105,.6);background:rgba(15,20,30,.75);color:#64748b">全開</button>` +
+      `<button type="button" data-mc-vis="none" title="全部隱藏" style="padding:3px 7px;border-radius:2px;cursor:pointer;font:inherit;` +
+        `border:1px solid rgba(51,65,85,.5);background:rgba(10,14,20,.55);color:#475569">全關</button>`;
 
-    panel.style.display = 'block';
+    panel.style.display = 'flex';
+
+    function refreshChips() {
+      panel.querySelectorAll('.mc-chip').forEach(btn => {
+        const key = btn.getAttribute('data-series-key');
+        const entry = apiSeries.find(e => e.meta.key === key);
+        if (!entry) return;
+        const col = entry.meta.color || '#94a3b8';
+        const on = entry.visible;
+        const lastStr = entry.meta.unit === '%'
+          ? Number(entry.last).toFixed(2)
+          : Number(entry.last).toLocaleString('en-US', { maximumFractionDigits: 1 });
+        btn.style.borderColor = on ? col + '66' : 'rgba(51,65,85,.7)';
+        btn.style.background = on ? 'rgba(15,20,30,.88)' : 'rgba(10,14,20,.55)';
+        btn.style.color = on ? '#cbd5e1' : '#475569';
+        btn.style.opacity = on ? '1' : '0.55';
+        const sw = btn.children[0];
+        const val = btn.children[2];
+        if (sw) sw.style.background = on ? col : '#334155';
+        if (val) { val.style.color = on ? col : '#475569'; val.textContent = lastStr; }
+      });
+    }
 
     panel.onclick = function (ev) {
-      const btn = ev.target && ev.target.closest && ev.target.closest('[data-mc-vis]');
-      if (!btn) return;
-      const mode = btn.getAttribute('data-mc-vis');
-      const on = mode === 'all';
-      const map = {};
-      apiSeries.forEach(e => {
-        e.visible = on;
-        map[e.meta.key] = on;
-        try { e.seriesObj.applyOptions({ visible: on }); } catch (err) {}
-      });
-      setSeriesVis(def.id, map);
-      panel.querySelectorAll('input[data-series-key]').forEach(inp => {
-        inp.checked = on;
-        const row = inp.closest('.mc-series-row');
-        if (row) {
-          row.style.opacity = on ? '1' : '0.45';
-          const nameEl = row.children[2];
-          if (nameEl) nameEl.style.color = on ? '#e2e8f0' : '#64748b';
-        }
-      });
-      syncRightScale(apiSeries);
-    };
-
-    panel.onchange = function (ev) {
-      const t = ev.target;
-      if (!t || !t.matches || !t.matches('input[data-series-key]')) return;
-      const key = t.getAttribute('data-series-key');
+      const allBtn = ev.target && ev.target.closest && ev.target.closest('[data-mc-vis]');
+      if (allBtn) {
+        const on = allBtn.getAttribute('data-mc-vis') === 'all';
+        const map = {};
+        apiSeries.forEach(e => {
+          e.visible = on;
+          map[e.meta.key] = on;
+          try { e.seriesObj.applyOptions({ visible: on }); } catch (err) {}
+        });
+        setSeriesVis(def.id, map);
+        refreshChips();
+        syncRightScale(apiSeries);
+        return;
+      }
+      const chip = ev.target && ev.target.closest && ev.target.closest('.mc-chip');
+      if (!chip) return;
+      const key = chip.getAttribute('data-series-key');
       const entry = apiSeries.find(e => e.meta.key === key);
       if (!entry) return;
-      entry.visible = !!t.checked;
+      entry.visible = !entry.visible;
       try { entry.seriesObj.applyOptions({ visible: entry.visible }); } catch (err) {}
       const map = {};
       apiSeries.forEach(e => { map[e.meta.key] = !!e.visible; });
       setSeriesVis(def.id, map);
-      const row = t.closest('.mc-series-row');
-      if (row) {
-        row.style.opacity = entry.visible ? '1' : '0.45';
-        const nameEl = row.children[2];
-        if (nameEl) nameEl.style.color = entry.visible ? '#e2e8f0' : '#64748b';
-      }
+      refreshChips();
       syncRightScale(apiSeries);
     };
+    panel.onchange = null;
 
     if (window.S) S._marketApiSeries = apiSeries;
+    syncRightScale(apiSeries);
   }
 
   function syncRightScale(apiSeries) {
@@ -713,15 +726,28 @@
         ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(148,163,184,.25);font-size:10px;color:#94a3b8">風險線（僅圖內虛線，不佔軸）<br>${zonesHtml}</div>`
         : '') +
       (opts.extraHtml ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(148,163,184,.2)">${opts.extraHtml}</div>` : '');
-    // 多序列圖：資訊卡靠右上，避開左下序列開關面板
     if (def && def.multi) {
-      el.style.left = 'auto';
-      el.style.right = '12px';
-      el.style.top = '56px';
+      el.style.cssText = [
+        'position:absolute', 'top:28px', 'left:50%', 'transform:translateX(-50%)', 'z-index:28',
+        'min-width:0', 'max-width:min(420px,86%)',
+        'padding:6px 10px', 'border-radius:2px',
+        'font:10px/1.4 JetBrains Mono,ui-monospace,monospace',
+        'color:#cbd5e1', 'background:rgba(10,14,20,.92)',
+        'border:1px solid rgba(51,65,85,.65)',
+        'box-shadow:0 4px 16px rgba(0,0,0,.4)',
+        'pointer-events:none',
+      ].join(';');
+      // multi：精簡標題，不要大號漲跌
+      if (opts.extraHtml) {
+        el.innerHTML =
+          (dateStr ? `<div style="color:#64748b;margin-bottom:3px;text-align:center">${dateStr}</div>` : '') +
+          opts.extraHtml;
+      }
     } else {
       el.style.left = '12px';
       el.style.right = 'auto';
       el.style.top = '36px';
+      el.style.transform = '';
     }
     el.style.display = 'block';
   }
@@ -1032,39 +1058,39 @@
       width: wrap.clientWidth,
       height: wrap.clientHeight,
       layout: {
-        background: { color: '#070B14' },
-        textColor: '#64748b',
+        background: { color: '#0A0E14' },
+        textColor: '#5C6B7A',
         fontFamily: "JetBrains Mono, ui-monospace, Menlo, monospace",
-        fontSize: 11,
+        fontSize: 10,
       },
       grid: {
-        vertLines: { color: 'rgba(30,41,59,.55)', style: LineStyle.Dotted },
-        horzLines: { color: 'rgba(30,41,59,.55)', style: LineStyle.Dotted },
+        vertLines: { color: 'rgba(255,255,255,.03)' },
+        horzLines: { color: 'rgba(255,255,255,.04)' },
       },
       crosshair: {
         mode: LightweightCharts.CrosshairMode.Magnet,
         vertLine: {
-          color: 'rgba(148,163,184,.45)', width: 1, style: LineStyle.Dashed,
-          labelVisible: true, labelBackgroundColor: '#1e293b',
+          color: 'rgba(148,163,184,.28)', width: 1, style: LineStyle.Dashed,
+          labelVisible: true, labelBackgroundColor: '#151b24',
         },
         horzLine: {
-          color: 'rgba(148,163,184,.35)', width: 1, style: LineStyle.Dashed,
-          labelVisible: true, labelBackgroundColor: '#1e293b',
+          color: 'rgba(148,163,184,.20)', width: 1, style: LineStyle.Dashed,
+          labelVisible: true, labelBackgroundColor: '#151b24',
         },
       },
       leftPriceScale: {
-        visible: true, borderColor: 'rgba(51,65,85,.8)',
-        scaleMargins: { top: 0.08, bottom: 0.10 },
+        visible: true, borderVisible: false,
+        scaleMargins: { top: 0.06, bottom: 0.14 },
         entireTextOnly: true,
       },
       rightPriceScale: {
-        visible: hasRight, borderColor: 'rgba(51,65,85,.8)',
-        scaleMargins: { top: 0.08, bottom: 0.10 },
+        visible: hasRight, borderVisible: false,
+        scaleMargins: { top: 0.06, bottom: 0.14 },
         entireTextOnly: true,
       },
       timeScale: {
-        borderColor: 'rgba(51,65,85,.8)', timeVisible: false, secondsVisible: false,
-        rightOffset: 10, barSpacing: 3, minBarSpacing: 0.5,
+        borderVisible: false, timeVisible: false, secondsVisible: false,
+        rightOffset: 8, barSpacing: 2.5, minBarSpacing: 0.4,
         fixLeftEdge: true, fixRightEdge: true, lockVisibleTimeRangeOnResize: true,
       },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
@@ -1101,7 +1127,7 @@
       const ov = stylePack[s.key] || {};
       const color = ov.color || s.color || '#38BDF8';
       const isHist = s.style === 'histogram' || s.style === 'bar';
-      const useArea = !!(ov.area) && !isHist;
+      const useArea = false; // 專業線圖：不用面積填色
       let obj;
       const fmt = s.unit === '%'
         ? { type: 'custom', formatter: v => (v != null && isFinite(v) ? v.toFixed(2) + '%' : '') }
@@ -1165,13 +1191,9 @@
       S.dotSeries = primaryApi.seriesObj;
     }
 
-    // legend（右側簡列，詳細操作改走浮動面板）
+    // 多序列：圖例改底部 chip，清空右側舊 legend 避免重複
     const lg = document.getElementById('chart-legend');
-    if (lg) {
-      lg.innerHTML = apiSeries.map(e =>
-        `<div class="lg-row" style="color:${e.meta.color}"><span class="lg-swatch" style="background:${e.meta.color}"></span>${e.meta.name} (${e.meta.scale === 'right' ? 'R' : 'L'})</div>`
-      ).join('');
-    }
+    if (lg) lg.innerHTML = '';
 
     function visibleRowsHtml(atTime) {
       const rows = [];
@@ -1191,15 +1213,7 @@
       const ohlcEl = document.getElementById('ci-ohlc');
       if (ohlcEl) ohlcEl.style.display = 'none';
       if (!param || !param.point || !param.time || !param.seriesData) {
-        if (primaryApi) {
-          updateFloat(def, {
-            value: primaryApi.last,
-            prev: primaryApi.prev,
-            dateStr: null,
-            dual: null,
-            extraHtml: visibleRowsHtml(null),
-          });
-        }
+        hideFloat();
         return;
       }
       const d = new Date(typeof param.time === 'number' ? param.time * 1000 : Date.parse(param.time));
@@ -1232,13 +1246,7 @@
 
     if (primaryApi) {
       setHeader(def, primaryApi.last, primaryApi.prev);
-      updateFloat(def, {
-        value: primaryApi.last,
-        prev: primaryApi.prev,
-        extraHtml: (stylePack._subtitle
-          ? `<div style="color:#64748b;font-size:9px;margin-bottom:4px">${stylePack._subtitle}</div>`
-          : '') + visibleRowsHtml(null),
-      });
+      hideFloat(); // 常駐浮層太吵；數值看底部 chip，細節靠十字游標
     }
 
     if (window.S && primaryApi) {

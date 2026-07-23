@@ -58,7 +58,7 @@ echo Done. Now on:
 git branch --show-current
 git rev-parse --short HEAD
 echo.
-echo 請 Ctrl+F5。美利率債有序列開關面板；底部「大盤／市場」雙 tab
+echo 請 Ctrl+F5。美利率債改專業線圖（底部 chip 開關）；底部「大盤／市場」雙 tab
 echo.
 pause
 endlocal
