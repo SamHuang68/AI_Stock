@@ -58,7 +58,7 @@ echo Done. Now on:
 git branch --show-current
 git rev-parse --short HEAD
 echo.
-echo 請 Ctrl+F5。確認 badge tech·387；^TWII／融資維持應有「大盤體質」評分
+echo 請 Ctrl+F5。確認 badge tech·388；點大盤列「櫃買」「台指期」應有 K 線
 echo.
 pause
 endlocal

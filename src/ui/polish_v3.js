@@ -198,7 +198,7 @@ const MKT_INDICES = [
       // v3.1 觀察清單風格雙列：
       //   行 1：指數名（小灰）+ 加權值（大字）
       //   行 2：▲漲跌值 ▲漲跌% （小字、台股紅漲綠跌）
-      `<div class="mkt-cell loading${m.sym==='__TXF__'?' nochart':''}" data-mkt-sym="${m.sym}" title="${m.sym==='__TXF__'?'台指期(無獨立K線)':'點擊載入 '+m.name+' K 線'}">
+      `<div class="mkt-cell loading" data-mkt-sym="${m.sym}" title="點擊載入 ${m.name} K 線">
         <div class="row1">
           <span class="nm">${m.name}</span>
           <span class="px">--</span>
@@ -214,13 +214,12 @@ const MKT_INDICES = [
   if (indbar) left.insertBefore(bar, indbar.nextSibling);
   else left.appendChild(bar);
   // v3.9:點下面大盤 cell 直接帶出該指數/期貨 K 線(事件委派)。
-  //   指數(^...)/商品期(=F)一律用 'US' 市場避免被附 .TW;台指期無 K 線符號故略過。
+  //   指數(^...)/商品期(=F)一律用 'US' 市場避免被附 .TW — 但台股指數／台指期走 Market.of。
   bar.addEventListener('click', function (e) {
     const cell = e.target.closest && e.target.closest('.mkt-cell');
     if (!cell) return;
     const sym = cell.getAttribute('data-mkt-sym');
-    if (!sym || sym === '__TXF__') return;
-    // 融資維持率等合成序列：交由 Market.of / loadSym 判定為 TW（紅漲綠跌），勿強制 US
+    if (!sym) return;
     if (typeof loadSym === 'function') {
       const mkt = (typeof Market !== 'undefined' && Market.of) ? Market.of(sym) : 'US';
       loadSym(sym, mkt);
@@ -229,8 +228,7 @@ const MKT_INDICES = [
   // 點擊提示樣式
   const st = document.createElement('style');
   st.textContent = '.mkt-cell{cursor:pointer;transition:background .12s}' +
-    '.mkt-cell:hover{background:rgba(255,255,255,.06)}' +
-    '.mkt-cell.nochart{cursor:default}.mkt-cell.nochart:hover{background:none}';
+    '.mkt-cell:hover{background:rgba(255,255,255,.06)}';
   document.head.appendChild(st);
   refreshMktBar();
   setInterval(refreshMktBar, 60_000);

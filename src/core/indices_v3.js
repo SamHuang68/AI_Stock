@@ -10,8 +10,8 @@
   'use strict';
   const INDICES = [
     { t: '^TWII', m: 'TW', name: '加權' },
-    // 櫃買 ^TWOII 已移除：Yahoo 該指數各端點互斥(日線/quote/live 給 419/269/105 不一)，皆不可信。
-    //   實際櫃買約 419~430(2026-06 TPEx 官方/財報狗),只有 TWSE MIS otc_o00 正確;見底部大盤列。
+    { t: '^TWOII', m: 'TW', name: '櫃買' },  // 日線改走 TPEx st41（server tw_index_charts）
+    { t: '__TXF__', m: 'TW', name: '台指期' },
     { t: '^DJI', m: 'US', name: '道瓊' },
     { t: '^GSPC', m: 'US', name: 'S&P500' },
     { t: '^IXIC', m: 'US', name: '那斯達克' },
@@ -34,21 +34,8 @@
 
   window.addIndices = addIndices;
 
-  // 自動清除先前一鍵加入的櫃買 ^TWOII(Yahoo 該指數資料壞:chart 419/quote 269/live 105 三種值、
-  //   會顯示 +56% 假漲幅亂跳)。櫃買即時值請看底部大盤列(TWSE MIS otc_o00 才正確)。
-  (function cleanupBadIndex() {
-    if (typeof S === 'undefined' || !Array.isArray(S.wl)) return setTimeout(cleanupBadIndex, 200);
-    const i = S.wl.findIndex(w => w && w.t === '^TWOII');
-    if (i >= 0) {
-      S.wl.splice(i, 1);
-      if (typeof saveWl === 'function') saveWl();
-      if (typeof renderWl === 'function') renderWl();
-      console.log('[indices] removed broken ^TWOII (Yahoo data unreliable)');
-    }
-  })();
-
-  // v3.9: 📈指數 按鈕已停用 — 改成直接點下方大盤列 cell 帶出 K 線(polish_v3),不需再把指數加進自選股。
-  //   window.addIndices 仍保留(可手動呼叫);cleanupBadIndex 安全機制續行。
+  // v3.9: 📈指數 按鈕已停用 — 改成直接點下方大盤列 cell 帶出 K 線(polish_v3)。
+  //   櫃買／台指期日線已由 server/tw_index_charts 覆寫，不再自動清除 ^TWOII。
   // (function inject() {
   //   if (!document.getElementById('pro-tools')) return setTimeout(inject, 150);
   //   if (document.getElementById('btn-indices')) return;

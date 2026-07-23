@@ -13,7 +13,7 @@
 // ============================================================
 (function () {
   'use strict';
-  const ENH_VER = '387';  // 雙軸卡可見版本戳（確認不是瀏覽器舊快取）
+  const ENH_VER = '388';  // 雙軸卡可見版本戳（確認不是瀏覽器舊快取）
   try { console.info('[enhance] dual-score engine tech·' + ENH_VER); } catch (_) {}
 
   // ---- 樣式 ------------------------------------------------
@@ -122,7 +122,10 @@
   // 一般股票取自身。存快取後重繪雙軸卡。
   function _isSynthOrMacro(sym) {
     const s = String(sym || '').toUpperCase();
-    return (s.startsWith('__') && s.endsWith('__')) || s === '^TWOII';
+    // 台指期／櫃買／加權：有可信日線，可算技術面
+    if (s === '__TXF__' || s === '^TWOII' || s === '^TWII') return false;
+    // 其餘 __XXX__ 總經／融資折線：無標準股價技術指標
+    return (s.startsWith('__') && s.endsWith('__'));
   }
 
   async function computeCanonTech(sym, mkt) {

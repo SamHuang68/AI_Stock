@@ -1297,6 +1297,24 @@ def fetch_one(sym, rng=None, interval=None, nocache=False):
             print('[server] fetch_one for __MARGIN_RATIO__ failed:', e)
             return '__MARGIN_RATIO__', None, False
 
+    # 櫃買指數／台指期：官方／FinMind 日線覆寫（Yahoo ^TWOII 不可信；TXF 無連續 Yahoo 代號）
+    try:
+        import tw_index_charts as tic
+        _raw = unquote(str(sym or ''))
+        if tic.is_tw_index_chart_sym(_raw) or tic.is_tw_index_chart_sym(str(sym or '')):
+            canon = '__TXF__' if 'TXF' in str(sym).upper() else '^TWOII'
+            cache_key = f'{canon}|1d|{rng or "max"}'
+            if not nocache:
+                cached = _cache.get(cache_key)
+                if cached is not None:
+                    return canon, cached, True
+            data = tic.chart_json(canon, range_key=(rng or 'max'))
+            if not nocache and data:
+                _cache.set(cache_key, data)
+            return canon, data, False
+    except Exception as e:
+        print('[server] fetch_one tw_index_charts failed:', e)
+
     _sym_up = str(sym or '').upper()
     if _sym_up in _MACRO_TRACK_IDS or any(_sym_up.startswith(x) for x in _MACRO_TRACK_IDS):
         try:
@@ -2052,10 +2070,14 @@ class Handler(SimpleHTTPRequestHandler):
         results = {}
         futures = {_pool.submit(fetch_one, s, rng, interval, nocache): s for s in syms}
         for fut in as_completed(futures):
-            sym, data, _ = fut.result()
+            req_sym = futures[fut]
+            _ret_sym, data, _ = fut.result()
             if data:
-                try: results[sym] = json.loads(data)
-                except Exception: pass
+                try:
+                    # 以請求代號為 key（覆寫路徑可能回傳 canonical id）
+                    results[req_sym] = json.loads(data)
+                except Exception:
+                    pass
         self._ok(json.dumps(results).encode())
 
     def _handle_twquote(self):
