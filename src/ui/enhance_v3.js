@@ -7,12 +7,14 @@
 // 4. 分頁記憶 (切股票後保留上次看的分頁)
 // 須在 fundamental_v3.js / volume_profile_v3.js 之後載入。
 //
-// v3.8.2 (2026-07-23): 修正 techScore 字串比較 / Wilder RSI / 正確 KD
-//   → 雙軸卡標籤會顯示「tech·382」以確認已載入此版。
+// v3.8.3 (2026-07-23): 修正 techScore 字串比較 / Wilder RSI / 正確 KD
+//   → 雙軸卡「技術面」分數下方 tag 必顯示「tech·383」。
+//   若仍見技術面=0 且無 tech·383 → 本機未 pull 此分支，或瀏覽器舊快取。
 // ============================================================
 (function () {
   'use strict';
-  const ENH_VER = '382';  // 雙軸卡可見版本戳（確認不是瀏覽器舊快取）
+  const ENH_VER = '383';  // 雙軸卡可見版本戳（確認不是瀏覽器舊快取）
+  try { console.info('[enhance] dual-score engine tech·' + ENH_VER); } catch (_) {}
 
   // ---- 樣式 ------------------------------------------------
   function style() {
@@ -130,7 +132,10 @@
     } catch (e) { _canonFail[key] = true; }
   }
   const scoreCol = s => window.Colors ? Colors.quality(s, 65, 45) : (s == null ? 'var(--tlo)' : s >= 65 ? 'var(--red)' : s >= 45 ? 'var(--orange)' : 'var(--green)');
-  const techTag = s => s == null ? '—' : s >= 65 ? '🟢 偏多' : s >= 45 ? '⚖️ 中性' : '🔴 偏空';
+  const techTag = s => {
+    const base = s == null ? '—' : s >= 65 ? '🟢 偏多' : s >= 45 ? '⚖️ 中性' : '🔴 偏空';
+    return `${base} · tech·${ENH_VER}`;
+  };
   const fundTag = s => s == null ? '—' : s >= 70 ? '🟢 體質佳' : s >= 50 ? '🟡 中性' : '🔴 偏弱';
 
   function dualCardHtml(fundScore) {
@@ -140,7 +145,7 @@
     const techLbl = lev
       ? `技術面 <span style="font-size:8px;color:var(--tf)">(依本體 ${lev.base} · 1Y日線)</span>`
       : `技術面 <span style="font-size:8px;color:var(--tf)">(1Y日線)</span>`;
-    return `<div class="dual-card">
+    return `<div class="dual-card" data-enh-ver="${ENH_VER}">
       <div class="dual-half"><div class="lbl">${techLbl}</div>
         <div class="score" style="color:${scoreCol(t)}">${t == null ? '—' : t}</div>
         <div class="tag" style="color:${scoreCol(t)}">${techTag(t)}</div></div>
