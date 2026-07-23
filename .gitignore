@@ -91,3 +91,6 @@ installer/dist_installer/
 data/market.db
 data/market.db-wal
 data/market.db-shm
+data/macro_track.db
+data/macro_track.db-wal
+data/macro_track.db-shm

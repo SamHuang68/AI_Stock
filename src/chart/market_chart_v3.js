@@ -11,7 +11,7 @@
 (function MarketChartV3() {
   'use strict';
 
-  const VER = '3.1.1';
+  const VER = '3.2.0';
   const LOG = (...a) => console.log('%c[MarketChart ' + VER + ']', 'color:#38BDF8;font-weight:700', ...a);
   const WARN = (...a) => console.warn('[MarketChart]', ...a);
 
@@ -135,6 +135,60 @@
     ],
   });
 
+  // ── MacroMicro 四組追蹤圖（多序列；資料走 /macro/chart/<id>）────
+  register({
+    id: '__TW_RATES__',
+    name: '台灣指標利率',
+    shortName: '台利率',
+    market: 'TW',
+    unit: '%',
+    defaultRange: 'max',
+    multi: true,
+    endpoint: '/macro/chart/__TW_RATES__',
+    years: 25,
+    valueFormat: (v) => (v != null && isFinite(v) ? Number(v).toFixed(3) + '%' : ''),
+    aliases: ['台利率', '台灣指標利率', '重貼現率', 'TW_RATES'],
+  });
+  register({
+    id: '__TW_MARGIN_MIX__',
+    name: '上櫃／上市融資張數比年增',
+    shortName: '融資比YoY',
+    market: 'TW',
+    unit: '%',
+    defaultRange: 'max',
+    multi: true,
+    endpoint: '/macro/chart/__TW_MARGIN_MIX__',
+    years: 20,
+    valueFormat: (v) => (v != null && isFinite(v) ? Number(v).toFixed(2) + '%' : ''),
+    aliases: ['融資比', '融資比YoY', '上櫃上市融資', 'TW_MARGIN_MIX'],
+  });
+  register({
+    id: '__US_RATES_CREDIT__',
+    name: '美國利率 vs 公司債總報酬',
+    shortName: '美利率債',
+    market: 'US',
+    unit: '%',
+    defaultRange: 'max',
+    multi: true,
+    endpoint: '/macro/chart/__US_RATES_CREDIT__',
+    years: 25,
+    valueFormat: (v) => (v != null && isFinite(v) ? Number(v).toFixed(2) : ''),
+    aliases: ['美利率債', '公司債', 'BAML', 'US_RATES_CREDIT'],
+  });
+  register({
+    id: '__US_CPI_FIN__',
+    name: '美國CPI＆基準利率 vs 金融股',
+    shortName: 'CPI金融',
+    market: 'US',
+    unit: '%',
+    defaultRange: 'max',
+    multi: true,
+    endpoint: '/macro/chart/__US_CPI_FIN__',
+    years: 20,
+    valueFormat: (v) => (v != null && isFinite(v) ? Number(v).toFixed(2) : ''),
+    aliases: ['CPI金融', '金融股', 'US_CPI_FIN'],
+  });
+
   // ── UI badge + 浮動資訊窗（不畫在軸上）────────────────────────
   function ensureBadge(def) {
     let el = document.getElementById('market-chart-badge');
@@ -245,7 +299,8 @@
         : '') +
       (zonesHtml
         ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(148,163,184,.25);font-size:10px;color:#94a3b8">風險線（僅圖內虛線，不佔軸）<br>${zonesHtml}</div>`
-        : '');
+        : '') +
+      (opts.extraHtml ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(148,163,184,.2)">${opts.extraHtml}</div>` : '');
     el.style.display = 'block';
   }
 
@@ -521,6 +576,218 @@
     LOG('rendered', def.id, points.length, 'pts · float panel · NO axis labels');
   }
 
+  function dateToUnix(dstr) {
+    try {
+      const d = new Date(dstr + 'T00:00:00Z');
+      return Math.floor(d.getTime() / 1000);
+    } catch (e) { return null; }
+  }
+
+  /**
+   * 多序列 MacroMicro 風格渲染（左／右軸、折線／柱狀）
+   * @param {object} def MarketChart def
+   * @param {object} payload /macro/chart 回應
+   */
+  function renderMulti(def, payload) {
+    const wrap = document.getElementById('chart-wrap');
+    if (!wrap || typeof LightweightCharts === 'undefined') { WARN('no chart env'); return; }
+    const seriesList = (payload && payload.series) || [];
+    if (!seriesList.length) { WARN('no series in payload'); return; }
+
+    if (window.S && S.chart) {
+      try { S.chart.remove(); } catch (e) {}
+      S.chart = null;
+    }
+
+    const userTzOffset = -new Date().getTimezoneOffset() * 60;
+    if (window.S) S.tzOffset = userTzOffset;
+    const tz = (t) => (t == null ? t : t + userTzOffset);
+    const hasRight = seriesList.some(s => s.scale === 'right' && (s.points || []).length);
+
+    const chart = LightweightCharts.createChart(wrap, {
+      width: wrap.clientWidth,
+      height: wrap.clientHeight,
+      layout: { background: { color: '#060A12' }, textColor: '#5A6A82' },
+      grid: { vertLines: { color: '#0F1A2B' }, horzLines: { color: '#0F1A2B' } },
+      crosshair: {
+        mode: LightweightCharts.CrosshairMode.Magnet,
+        vertLine: { color: 'rgba(245,197,24,.45)', width: 1, style: 2, labelVisible: false },
+        horzLine: { color: 'rgba(245,197,24,.45)', width: 1, style: 2, labelVisible: false },
+      },
+      leftPriceScale: { visible: true, borderColor: '#1A2740', scaleMargins: { top: 0.10, bottom: 0.12 } },
+      rightPriceScale: { visible: hasRight, borderColor: '#1A2740', scaleMargins: { top: 0.10, bottom: 0.12 } },
+      timeScale: {
+        borderColor: '#1A2740', timeVisible: false, secondsVisible: false,
+        rightOffset: 8, barSpacing: 2, minBarSpacing: 0.5,
+        fixLeftEdge: true, fixRightEdge: true, lockVisibleTimeRangeOnResize: true,
+      },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+    });
+
+    if (window.S) {
+      S.chart = chart;
+      S.volSeries = null;
+      S.overlaySeries = {};
+      S._marketChartId = def.id;
+      S._marginMacroChart = false;
+      S._marketMulti = true;
+    }
+
+    const apiSeries = []; // {meta, seriesObj, byTime}
+    let primaryApi = null;
+
+    for (const s of seriesList) {
+      const pts = s.points || [];
+      if (!pts.length) continue;
+      const lineData = [];
+      const byTime = new Map();
+      for (const p of pts) {
+        const u = dateToUnix(p.date);
+        if (u == null || p.value == null || !isFinite(p.value)) continue;
+        const t = tz(u);
+        lineData.push({ time: t, value: p.value });
+        byTime.set(t, p.value);
+      }
+      if (!lineData.length) continue;
+
+      const scaleId = s.scale === 'right' ? 'right' : 'left';
+      const isHist = s.style === 'histogram' || s.style === 'bar';
+      let obj;
+      const fmt = s.unit === '%'
+        ? { type: 'custom', formatter: v => (v != null && isFinite(v) ? v.toFixed(2) + '%' : '') }
+        : { type: 'price', precision: 2, minMove: 0.01 };
+
+      if (isHist) {
+        obj = chart.addHistogramSeries({
+          priceScaleId: scaleId,
+          color: s.color || '#38BDF8',
+          base: 0,
+          lastValueVisible: false,
+          priceLineVisible: false,
+          priceFormat: fmt,
+        });
+      } else {
+        obj = chart.addLineSeries({
+          priceScaleId: scaleId,
+          color: s.color || '#38BDF8',
+          lineWidth: scaleId === 'right' ? 1.5 : 2,
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: true,
+          crosshairMarkerRadius: 4,
+          priceFormat: fmt,
+        });
+      }
+      obj.setData(lineData);
+      const entry = { meta: s, seriesObj: obj, byTime, last: lineData[lineData.length - 1].value,
+        prev: lineData.length >= 2 ? lineData[lineData.length - 2].value : null };
+      apiSeries.push(entry);
+      if (!primaryApi && scaleId === 'left') primaryApi = entry;
+      if (window.S) S.overlaySeries[s.key] = obj;
+    }
+
+    if (!primaryApi && apiSeries.length) primaryApi = apiSeries[0];
+    if (window.S && primaryApi) {
+      S.chartSeries = primaryApi.seriesObj;
+      S.dotSeries = primaryApi.seriesObj;
+    }
+
+    // legend
+    const lg = document.getElementById('chart-legend');
+    if (lg) {
+      lg.innerHTML = apiSeries.map(e =>
+        `<div class="lg-row" style="color:${e.meta.color}"><span class="lg-swatch" style="background:${e.meta.color}"></span>${e.meta.name} (${e.meta.scale === 'right' ? 'R' : 'L'})</div>`
+      ).join('');
+    }
+
+    chart.subscribeCrosshairMove(param => {
+      const ohlcEl = document.getElementById('ci-ohlc');
+      if (ohlcEl) ohlcEl.style.display = 'none';
+      if (!param || !param.point || !param.time || !param.seriesData) {
+        if (primaryApi) {
+          updateFloat(def, {
+            value: primaryApi.last,
+            prev: primaryApi.prev,
+            dateStr: null,
+            dual: null,
+            extraHtml: apiSeries.map(e =>
+              `<div style="color:${e.meta.color};margin-top:2px">${e.meta.name}: ${
+                e.meta.unit === '%' ? Number(e.last).toFixed(2) + '%' : Number(e.last).toLocaleString('en-US', { maximumFractionDigits: 2 })
+              }</div>`
+            ).join(''),
+          });
+        }
+        return;
+      }
+      const d = new Date(typeof param.time === 'number' ? param.time * 1000 : Date.parse(param.time));
+      const ds = `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}`;
+      let primVal = null, primPrev = null;
+      const rows = [];
+      for (const e of apiSeries) {
+        const pt = param.seriesData.get(e.seriesObj);
+        const v = pt && pt.value != null ? pt.value : e.byTime.get(param.time);
+        if (v == null) continue;
+        if (e === primaryApi) {
+          primVal = v;
+          // approx prev: not exact without ordered map; skip
+        }
+        rows.push(`<div style="color:${e.meta.color};margin-top:2px">${e.meta.name}: ${
+          e.meta.unit === '%' ? Number(v).toFixed(2) + '%' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 })
+        }</div>`);
+      }
+      updateFloat(def, {
+        value: primVal != null ? primVal : (primaryApi && primaryApi.last),
+        prev: primPrev,
+        dateStr: ds,
+        dual: null,
+        extraHtml: rows.join(''),
+      });
+    });
+
+    ensureBadge(def);
+    if (primaryApi) {
+      setHeader(def, primaryApi.last, primaryApi.prev);
+      updateFloat(def, {
+        value: primaryApi.last,
+        prev: primaryApi.prev,
+        extraHtml: apiSeries.map(e =>
+          `<div style="color:${e.meta.color};margin-top:2px">${e.meta.name}: ${
+            e.meta.unit === '%' ? Number(e.last).toFixed(2) + '%' : Number(e.last).toLocaleString('en-US', { maximumFractionDigits: 2 })
+          }</div>`
+        ).join(''),
+      });
+    }
+
+    // stash candles for compatibility
+    if (window.S && primaryApi) {
+      const candles = [];
+      primaryApi.byTime.forEach((v, t) => {
+        // reverse tz for storage? keep chart times only for display; S.data used lightly
+      });
+      // rebuild from payload primary points
+      const primMeta = primaryApi.meta;
+      const candles2 = (primMeta.points || []).map(p => {
+        const u = dateToUnix(p.date);
+        return { time: u, open: p.value, high: p.value, low: p.value, close: p.value, volume: 0 };
+      }).filter(c => c.time != null);
+      S.data = { candles: candles2, name: def.name };
+    }
+
+    requestAnimationFrame(() => { try { chart.timeScale().fitContent(); } catch (e) {} });
+    if (!wrap._mcRo) {
+      wrap._mcRo = new ResizeObserver(() => {
+        if (!window.S || !S.chart || !S._marketChartId) return;
+        try {
+          S.chart.applyOptions({ width: wrap.clientWidth, height: wrap.clientHeight });
+          S.chart.timeScale().fitContent();
+        } catch (e) {}
+      });
+      wrap._mcRo.observe(wrap);
+    }
+    LOG('rendered MULTI', def.id, apiSeries.map(e => e.meta.key + ':' + e.byTime.size).join(', '));
+  }
+
   function pointsFromYF(raw) {
     try {
       const res = raw && raw.chart && raw.chart.result && raw.chart.result[0];
@@ -573,6 +840,34 @@
         const info = document.getElementById('chart-info');
         if (info) info.style.display = 'none';
       } catch (e) {}
+    }
+
+    // 多序列追蹤圖：走 /macro/chart/<id>
+    if (def.multi && def.endpoint) {
+      const years = def.years || 20;
+      const url = `${serverBase()}${def.endpoint}?years=${years}`;
+      try {
+        const r = await fetch(url, { cache: 'no-store' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const payload = await r.json();
+        if (myLoad !== window.__loadSeq) return false;
+        renderMulti(def, payload);
+        try {
+          window.dispatchEvent(new CustomEvent('symLoaded', { detail: { sym: def.id, mkt: S.mkt, marketChart: true, multi: true } }));
+        } catch (e) {}
+        try {
+          if (typeof setStat === 'function') setStat('OK · MarketChart · ' + def.id);
+        } catch (e) {}
+        return true;
+      } catch (e) {
+        WARN('multi fetch failed', url, e);
+        try {
+          const loading = document.getElementById('chart-loading');
+          if (loading) { loading.style.display = 'flex'; loading.textContent = '載入失敗'; }
+          if (typeof setStat === 'function') setStat('載入失敗 · ' + def.id);
+        } catch (e2) {}
+        return false;
+      }
     }
 
     const path = def.yfPath || def.id;
@@ -745,6 +1040,7 @@
     isMarketChart,
     load,
     render,
+    renderMulti,
     ensureBadge,
   };
 

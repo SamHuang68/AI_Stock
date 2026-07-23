@@ -172,6 +172,10 @@ const MKT_INDICES = [
   {sym:'__TXF__', name:'台指期'},   // TAIFEX 即時(含夜盤)，特例來源 /txf
   {sym:'^TWOII', name:'櫃買'},
   {sym:'__MARGIN_RATIO__', name:'融資維持'},
+  {sym:'__TW_RATES__', name:'台利率'},
+  {sym:'__TW_MARGIN_MIX__', name:'融資比YoY'},
+  {sym:'__US_RATES_CREDIT__', name:'美利率債'},
+  {sym:'__US_CPI_FIN__', name:'CPI金融'},
   {sym:'^SOX',  name:'費半',  redUp:false},   // 美股:漲綠跌紅
   {sym:'^GSPC', name:'S&P500',redUp:false},
   {sym:'^IXIC', name:'NASDAQ',redUp:false},
@@ -241,7 +245,7 @@ function fmtIdx(v) {
 
 async function refreshMktBar() {
   try {
-    const syms = MKT_INDICES.filter(m => m.sym !== '__TXF__' && m.sym !== '__MARGIN_RATIO__').map(m => m.sym).join(',');
+    const syms = MKT_INDICES.filter(m => m.sym !== '__TXF__' && !(m.sym.startsWith('__') && m.sym.endsWith('__'))).map(m => m.sym).join(',');
     // v3.3 改 range=5d：原 range=2d 只有兩根 K，遇到 Yahoo 日線資料落後
     //   於 regularMarketPrice 時無法做時間軸交叉驗證，會直接用「昨日的
     //   昨日 vs 前日」算出昨日的 % 變化（櫃買/日經顯示 0.00% 即此 bug）。
@@ -306,6 +310,53 @@ async function refreshMktBar() {
   try { await refreshTxfCell(); } catch (e) { console.warn('[polish-v3] txf failed:', e); }
   // 大盤融資維持率 — 本地特例數據
   try { await refreshMarginRatioCell(); } catch (e) { console.warn('[polish-v3] margin ratio cell failed:', e); }
+  // MacroMicro 追蹤圖格（台利率／融資比／美利率債／CPI金融）
+  try { await refreshMacroTrackCells(); } catch (e) { console.warn('[polish-v3] macro track cells failed:', e); }
+}
+
+async function refreshMacroTrackCells() {
+  const ids = ['__TW_RATES__', '__TW_MARGIN_MIX__', '__US_RATES_CREDIT__', '__US_CPI_FIN__'];
+  await Promise.all(ids.map(async (id) => {
+    const cell = document.querySelector(`[data-mkt-sym="${id}"]`);
+    if (!cell) return;
+    try {
+      const r = await fetch(`${SERVER_P}/macro/chart/${encodeURIComponent(id)}?years=2`, { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      const series = (d && d.series) || [];
+      // 取左軸第一條有點的序列當格上數值
+      let primary = series.find(s => s.scale === 'left' && s.points && s.points.length);
+      if (!primary) primary = series.find(s => s.points && s.points.length);
+      if (!primary || !primary.points.length) return;
+      const pts = primary.points;
+      const cur = pts[pts.length - 1].value;
+      const prev = pts.length >= 2 ? pts[pts.length - 2].value : cur;
+      const delta = cur - prev;
+      const unit = primary.unit || '';
+      cell.classList.remove('loading');
+      const px = cell.querySelector('.px');
+      if (px) {
+        px.textContent = (Math.abs(cur) >= 100 ? cur.toFixed(1) : cur.toFixed(2)) + (unit === '%' ? '%' : '');
+      }
+      const dir = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+      const tw = !(id.indexOf('__US_') === 0);
+      const _mc = window.Colors ? Colors.dirRU(tw, delta) : '';
+      const dEl = cell.querySelector('.delta');
+      if (dEl) {
+        dEl.className = 'delta ' + dir;
+        if (_mc) dEl.style.color = _mc;
+        dEl.textContent = (delta >= 0 ? '+' : '') + delta.toFixed(2) + (unit === '%' ? 'pp' : '');
+      }
+      const ch = cell.querySelector('.ch');
+      if (ch) {
+        ch.className = 'ch ' + dir;
+        if (_mc) ch.style.color = _mc;
+        const pct = prev ? (delta / prev * 100) : 0;
+        ch.textContent = (delta >= 0 ? '▲' : '▼') + Math.abs(pct).toFixed(2) + '%';
+      }
+      cell.title = (d.name || id) + ' · 點擊載入 MacroMicro 風格追蹤圖';
+    } catch (e) { /* ignore per-cell */ }
+  }));
 }
 
 async function refreshMarginRatioCell() {

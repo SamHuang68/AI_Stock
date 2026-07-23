@@ -79,6 +79,10 @@ MACRO_SERIES = {
     'baml_ig':          {'p': 'fred', 'id': 'BAMLCC0A0CMTRIV',   'label': '美林投資級公司債總報酬', 'unit': 'Index'},
     'baml_hy':          {'p': 'fred', 'id': 'BAMLHY0A0HYMTRIV',   'label': '美林高收益公司債總報酬', 'unit': 'Index'},
     'tw_discount_rate': {'p': 'fred', 'id': 'INTDSRTWM193N',     'label': '台灣央行重貼現率',     'unit': '%'},
+    # CBC 利率走廊（種子／官網；FRED INTDSRTWM193N 已 404）
+    'tw_discount':      {'p': 'cbc',  'id': 'discount',          'label': '台灣重貼現率',         'unit': '%'},
+    'tw_secured_rate':  {'p': 'cbc',  'id': 'secured',           'label': '台灣擔保放款融通利率', 'unit': '%'},
+    'tw_short_rate':    {'p': 'cbc',  'id': 'short',             'label': '台灣短期融通利率',     'unit': '%'},
     'tw_cpi':           {'p': 'twcpi',                           'label': '台灣CPI指數',          'unit': ''},
     'tw_light':         {'p': 'ndc',                             'label': '台灣景氣對策信號(分數)', 'unit': '分'},
 }
@@ -921,6 +925,40 @@ def get_margin_ratio_chart_json(rng=None):
         print('[server] get_margin_ratio_chart_json failed:', e)
         return b'{"chart":{"result":null,"error":"failed"}}'
 
+def get_macro_track_chart_json(sym, rng=None):
+    """MacroMicro 風格多序列追蹤圖 → Yahoo-compatible（主序列）。完整多序列走 /macro/chart/<id>。"""
+    try:
+        import macro_track as mt
+        years = 25
+        if rng in ('1y', '12mo'):
+            years = 1
+        elif rng in ('2y',):
+            years = 2
+        elif rng in ('5y',):
+            years = 5
+        elif rng in ('10y',):
+            years = 10
+        full = mt.get_chart(sym, years=years)
+        primary = None
+        for s in full.get('series') or []:
+            if s.get('scale') == 'left' and s.get('points'):
+                primary = s
+                break
+        if not primary:
+            for s in full.get('series') or []:
+                if s.get('points'):
+                    primary = s
+                    break
+        pts = (primary or {}).get('points') or []
+        return mt.points_to_yf_like(pts, full['id'], full['name'])
+    except Exception as e:
+        print('[server] get_macro_track_chart_json failed:', e)
+        return {'chart': {'result': None, 'error': str(e)}}
+
+_MACRO_TRACK_IDS = (
+    '__TW_RATES__', '__TW_MARGIN_MIX__', '__US_RATES_CREDIT__', '__US_CPI_FIN__',
+)
+
 def fetch_one(sym, rng=None, interval=None, nocache=False):
     """Fetch Yahoo chart JSON for sym. nocache=True bypasses _cache entirely
     (used by wl_live_v3.js so each watchlist poll always gets fresh data —
@@ -932,6 +970,21 @@ def fetch_one(sym, rng=None, interval=None, nocache=False):
         except Exception as e:
             print('[server] fetch_one for __MARGIN_RATIO__ failed:', e)
             return '__MARGIN_RATIO__', None, False
+
+    _sym_up = str(sym or '').upper()
+    if _sym_up in _MACRO_TRACK_IDS or any(_sym_up.startswith(x) for x in _MACRO_TRACK_IDS):
+        try:
+            # normalize to canonical id
+            cid = next((x for x in _MACRO_TRACK_IDS if _sym_up.startswith(x.rstrip('_')) or _sym_up == x), _sym_up)
+            if cid not in _MACRO_TRACK_IDS:
+                cid = _sym_up if _sym_up in _MACRO_TRACK_IDS else None
+            if cid:
+                data = get_macro_track_chart_json(cid, rng)
+                body = data if isinstance(data, (bytes, bytearray)) else json.dumps(data).encode()
+                return cid, body, False
+        except Exception as e:
+            print('[server] fetch_one macro_track failed:', e)
+            return sym, None, False
 
     rng = rng or YF_RANGE
     interval = interval or YF_INTERVAL
@@ -1796,6 +1849,30 @@ class Handler(SimpleHTTPRequestHandler):
             self._ok(b'{"results":[]}'); return
         if q.upper() in ('__MARGIN_RATIO__', '融資維持率', '大盤融資維持率'):
             self._ok(json.dumps({'results': [{'t': '__MARGIN_RATIO__', 'name': '大盤融資維持率', 'm': 'TW'}]}, ensure_ascii=False).encode())
+            return
+        _macro_q = {
+            '__TW_RATES__': ('台灣指標利率', 'TW'),
+            '台利率': ('台灣指標利率', 'TW'),
+            '重貼現率': ('台灣指標利率', 'TW'),
+            '__TW_MARGIN_MIX__': ('上櫃／上市融資張數比年增', 'TW'),
+            '融資比': ('上櫃／上市融資張數比年增', 'TW'),
+            '__US_RATES_CREDIT__': ('美國利率 vs 公司債總報酬', 'US'),
+            '美利率債': ('美國利率 vs 公司債總報酬', 'US'),
+            '__US_CPI_FIN__': ('美國CPI＆基準利率 vs 金融股', 'US'),
+            'CPI金融': ('美國CPI＆基準利率 vs 金融股', 'US'),
+        }
+        if q.upper() in _macro_q or q in _macro_q:
+            key = q.upper() if q.upper() in _macro_q else q
+            # map alias to canonical id
+            _alias_to_id = {
+                '台利率': '__TW_RATES__', '重貼現率': '__TW_RATES__',
+                '融資比': '__TW_MARGIN_MIX__', '美利率債': '__US_RATES_CREDIT__', 'CPI金融': '__US_CPI_FIN__',
+            }
+            tid = key if key.startswith('__') else _alias_to_id.get(q, key)
+            name, mkt = _macro_q.get(key) or _macro_q.get(q) or (tid, 'TW')
+            if not tid.startswith('__'):
+                tid = _alias_to_id.get(q, tid)
+            self._ok(json.dumps({'results': [{'t': tid, 'name': name, 'm': mkt}]}, ensure_ascii=False).encode())
             return
         try:
             names = _get_tw_names()           # {code: name}
@@ -4255,14 +4332,59 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as e:
             self._err('margin_ratio failed: ' + str(e), 500)
 
-    # ── 總經數據 (v3.9 P4) ─────────────────────────────────
+    # ── 總經數據 (v3.9 P4) + MacroMicro 追蹤圖 (v4.1) ─────────
     def _handle_macro(self, series):
         from datetime import date as _date, timedelta as _td
         series = (series or '').strip()
+        # /macro/charts — 多序列追蹤圖目錄
+        if series in ('charts', 'track', 'track/list'):
+            try:
+                import macro_track as mt
+                self._ok(json.dumps({'charts': mt.list_charts()}, ensure_ascii=False).encode()); return
+            except Exception as e:
+                self._err('macro charts list failed: ' + str(e), 500); return
+        # /macro/chart/<ID> — 完整多序列
+        if series.startswith('chart/') or series.startswith('track/'):
+            cid = series.split('/', 1)[1].strip()
+            qs = parse_qs(urlparse(self.path).query)
+            yrs = qs.get('years', ['25'])[0]
+            try:
+                yrs = max(1, min(40, int(yrs)))
+            except Exception:
+                yrs = 25
+            try:
+                import macro_track as mt
+                data = mt.get_chart(cid, years=yrs)
+                self._ok(json.dumps(data, ensure_ascii=False).encode()); return
+            except KeyError:
+                self._err('unknown macro chart: ' + cid, 404); return
+            except Exception as e:
+                self._err('macro chart failed: ' + str(e), 500); return
+        # /macro/track/backfill-mix — 觸發融資比回補（query years/step）
+        if series in ('backfill-mix', 'track/backfill-mix'):
+            qs = parse_qs(urlparse(self.path).query)
+            start = qs.get('start', ['2018-01-01'])[0]
+            step = int(qs.get('step', ['14'])[0] or 14)
+            def _run():
+                try:
+                    import macro_track as mt
+                    y, m, d = map(int, start.split('-'))
+                    n = mt.backfill_margin_mix(_date(y, m, d), step_days=max(1, step))
+                    print('[macro_track] backfill-mix done', n)
+                except Exception as e:
+                    print('[macro_track] backfill-mix failed', e)
+            threading.Thread(target=_run, daemon=True).start()
+            self._ok(json.dumps({'ok': True, 'started': True, 'start': start, 'step': step}).encode()); return
+
         if series == '' or series == 'list':
             cat = [{'key': k, 'label': v['label'], 'unit': v.get('unit', ''), 'provider': v['p']}
                    for k, v in MACRO_SERIES.items()]
-            self._ok(json.dumps({'series': cat}, ensure_ascii=False).encode()); return
+            try:
+                import macro_track as mt
+                charts = mt.list_charts()
+            except Exception:
+                charts = []
+            self._ok(json.dumps({'series': cat, 'charts': charts}, ensure_ascii=False).encode()); return
         spec = MACRO_SERIES.get(series)
         if not spec:
             self._err('unknown macro series: ' + series, 404); return
@@ -4299,6 +4421,15 @@ class Handler(SimpleHTTPRequestHandler):
                 out['source'] = '國發會 NDC' if out['points'] else None
                 if not out['points']:
                     out['note'] = '國發會景氣信號解析失敗。樣本：' + (_macro_debug.get('tw_light', '(無回應)'))
+            elif spec['p'] == 'cbc':
+                # 台灣央行利率走廊（種子／抓取）
+                import macro_track as mt
+                cbc = mt.load_cbc_daily()
+                key = spec.get('id') or series
+                out['points'] = cbc.get(key, [])
+                out['source'] = 'CBC'
+                if not out['points']:
+                    out['note'] = 'CBC 利率種子空白'
         except Exception as e:
             out['note'] = '抓取失敗：' + str(e)
         body = json.dumps(out, ensure_ascii=False).encode()

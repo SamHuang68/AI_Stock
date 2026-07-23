@@ -18,7 +18,13 @@
     of: function (code) {
       code = String(code || '').toUpperCase();
       // 合成指數／本地序列：台股語意（紅漲綠跌、不附 .TW）
-      if (code === '__MARGIN_RATIO__' || code === '__TXF__') return 'TW';
+      if (code === '__MARGIN_RATIO__' || code === '__TXF__'
+          || code === '__TW_RATES__' || code === '__TW_MARGIN_MIX__'
+          || code === '__US_RATES_CREDIT__' || code === '__US_CPI_FIN__') {
+        // 合成序列：台股語意（利率／融資）或美股語意由 id 前綴判斷
+        if (code.indexOf('__US_') === 0) return 'US';
+        return 'TW';
+      }
       if (_us && _us[code]) return 'US';
       if (_tw && _tw[code]) return 'TW';
       return isTwFmt(code) ? 'TW' : 'US';
