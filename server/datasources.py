@@ -196,7 +196,7 @@ def list_sources():
     return {'sources': _registry(), 'now': int(time.time())}
 
 
-def refresh(sid):
+def refresh(sid, density=None, dense=None, step=None, years=None):
     if sid == 'universe':
         try:
             import universe
@@ -211,7 +211,7 @@ def refresh(sid):
     if sid == 'macro_tracks':
         try:
             import macro_track as mt
-            return mt.refresh_all(dense=True)
+            return mt.refresh_all(density=density or 'month', dense=dense, step=step, years=years)
         except Exception as e:
             return {'ok': False, 'error': str(e)}
     if sid == 'macro_tw_rates':
@@ -223,7 +223,13 @@ def refresh(sid):
     if sid == 'macro_tw_margin_mix':
         try:
             import macro_track as mt
-            return mt.refresh_chart('__TW_MARGIN_MIX__', dense=True)
+            return mt.refresh_chart(
+                '__TW_MARGIN_MIX__',
+                density=density or 'month',
+                dense=dense if dense is not None else True,
+                step=step,
+                years=years,
+            )
         except Exception as e:
             return {'ok': False, 'error': str(e)}
     if sid == 'macro_us_rates_credit':

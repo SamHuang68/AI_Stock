@@ -83,11 +83,20 @@
 
   async function doRefresh(id, btn) {
     var stEl = document.getElementById('ds-st');
+    var densEl = document.getElementById('ds-density');
+    var density = (densEl && densEl.value) || 'month';
+    try { localStorage.setItem('mc-track-density', density); } catch (e) {}
     if (btn) { btn.disabled = true; btn.textContent = '更新中…'; }
-    if (stEl) stEl.textContent = '更新 ' + id + '…(從可靠來源重抓)';
+    if (stEl) stEl.textContent = '更新 ' + id + '…(密度：' + density + ')';
     try {
+      var body = { id: id };
+      // 指數追蹤／融資比帶密度
+      if (String(id).indexOf('macro') === 0 || id === 'margin_ratio') {
+        body.density = density;
+        body.dense = density !== 'today';
+      }
       var r = await fetch(SRV + '/datasource/refresh', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id })
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       }).then(function (x) { return x.json(); });
       if (stEl) stEl.textContent = r && r.ok
         ? (r.started ? ('✓ ' + id + ' 已在背景更新,稍後重開此視窗看結果' + (r.note ? '(' + r.note + ')' : '')) : ('✓ ' + id + ' 更新完成' + (r.count != null ? '(' + r.count.toLocaleString() + ' 筆)' : '')))
@@ -104,11 +113,28 @@
       m.innerHTML = '<div id="ds-box"><h3>🗄 資料源管理<span class="x" onclick="document.getElementById(\'ds-modal\').style.display=\'none\'">×</span></h3>' +
         '<div style="font-size:9.5px;color:#5a6a82;margin-bottom:8px">每個資料源的提供者、可靠度與最後更新;可更新的一鍵重抓可靠來源。</div>' +
         '<div id="ds-list"><div style="padding:18px;color:#8aa">載入中…</div></div>' +
-        '<div id="ds-foot"><span id="ds-st"></span><button class="ds-btn" id="ds-all">↻ 全部更新</button></div></div>';
+        '<div id="ds-foot">' +
+          '<span id="ds-st"></span>' +
+          '<label style="font-size:10px;color:#8aa;display:flex;align-items:center;gap:4px;white-space:nowrap" title="融資比／指數追蹤回補抽樣密度">' +
+            '密度 <select id="ds-density" style="background:#13233b;color:#cfe3ff;border:1px solid #2f4a6e;border-radius:4px;padding:3px 6px;font:10px monospace">' +
+              '<option value="today">僅今日</option>' +
+              '<option value="month" selected>月抽樣</option>' +
+              '<option value="biweek">雙週</option>' +
+              '<option value="week">週抽樣</option>' +
+              '<option value="day">日(最密)</option>' +
+            '</select>' +
+          '</label>' +
+          '<button class="ds-btn" id="ds-all">↻ 全部更新</button>' +
+        '</div></div>';
       document.body.appendChild(m);
       m.addEventListener('click', function (e) { if (e.target === m) m.style.display = 'none'; });
     }
     m.style.display = 'flex';
+    try {
+      var dens = localStorage.getItem('mc-track-density');
+      var densEl = document.getElementById('ds-density');
+      if (densEl && dens) densEl.value = dens;
+    } catch (e) {}
     await fetchList(); render();
   }
   window.datasourcesOpen = open;

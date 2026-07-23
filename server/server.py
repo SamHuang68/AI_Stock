@@ -1607,7 +1607,7 @@ class Handler(SimpleHTTPRequestHandler):
         elif p == '/datasource/refresh':
             self._handle_datasource_refresh()
         elif p == '/macro/refresh' or p.startswith('/macro/refresh/'):
-            # UI 一鍵更新追蹤圖（POST body 可帶 {id, dense}）
+            # UI 一鍵更新追蹤圖（POST body 可帶 {id, dense, density, step, years}）
             try:
                 n = int(self.headers.get('Content-Length') or 0)
             except Exception:
@@ -1622,12 +1622,25 @@ class Handler(SimpleHTTPRequestHandler):
             cid = (body.get('id') or (qs.get('id', [None])[0]) or 'ALL')
             if p.startswith('/macro/refresh/'):
                 cid = p.split('/macro/refresh/', 1)[1].split('?')[0] or cid
-            dense = body.get('dense', True)
+            dense = body.get('dense', qs.get('dense', [True])[0])
             if isinstance(dense, str):
                 dense = dense.lower() in ('1', 'true', 'yes')
+            density = body.get('density') or (qs.get('density', [None])[0])
+            step = body.get('step', qs.get('step', [None])[0])
+            years = body.get('years', qs.get('years', [None])[0])
+            try:
+                step = int(step) if step not in (None, '') else None
+            except Exception:
+                step = None
+            try:
+                years = int(years) if years not in (None, '') else None
+            except Exception:
+                years = None
             try:
                 import macro_track as mt
-                data = mt.refresh_chart(str(cid), dense=bool(dense))
+                data = mt.refresh_chart(
+                    str(cid), dense=bool(dense), density=density, step=step, years=years,
+                )
                 self._ok(json.dumps(data, ensure_ascii=False).encode())
             except Exception as e:
                 self._err('macro refresh failed: ' + str(e), 500)
@@ -3461,12 +3474,28 @@ class Handler(SimpleHTTPRequestHandler):
             self._err('datasources failed: ' + str(e), 500)
 
     def _handle_datasource_refresh(self):
-        """POST /datasource/refresh body:{id} → 一鍵更新該來源(重抓可靠來源)。"""
+        """POST /datasource/refresh body:{id, density?, dense?, step?, years?} → 一鍵更新該來源。"""
         try:
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length) or b'{}')
             import datasources
-            self._ok(json.dumps(datasources.refresh((body.get('id') or '').strip()), ensure_ascii=False).encode())
+            step = body.get('step')
+            years = body.get('years')
+            try:
+                step = int(step) if step not in (None, '') else None
+            except Exception:
+                step = None
+            try:
+                years = int(years) if years not in (None, '') else None
+            except Exception:
+                years = None
+            self._ok(json.dumps(datasources.refresh(
+                (body.get('id') or '').strip(),
+                density=body.get('density'),
+                dense=body.get('dense'),
+                step=step,
+                years=years,
+            ), ensure_ascii=False).encode())
         except Exception as e:
             self._err('datasource refresh failed: ' + str(e), 500)
 
@@ -4409,9 +4438,20 @@ class Handler(SimpleHTTPRequestHandler):
                 cid = series.split('/', 1)[1].strip() or 'ALL'
             cid = (qs.get('id', [cid])[0] or cid).strip()
             dense = (qs.get('dense', ['1'])[0] or '1').lower() in ('1', 'true', 'yes')
+            density = qs.get('density', [None])[0]
+            step = qs.get('step', [None])[0]
+            years = qs.get('years', [None])[0]
+            try:
+                step = int(step) if step not in (None, '') else None
+            except Exception:
+                step = None
+            try:
+                years = int(years) if years not in (None, '') else None
+            except Exception:
+                years = None
             try:
                 import macro_track as mt
-                data = mt.refresh_chart(cid, dense=dense)
+                data = mt.refresh_chart(cid, dense=dense, density=density, step=step, years=years)
                 self._ok(json.dumps(data, ensure_ascii=False).encode()); return
             except Exception as e:
                 self._err('macro refresh failed: ' + str(e), 500); return

@@ -11,9 +11,29 @@
 (function MarketChartV3() {
   'use strict';
 
-  const VER = '3.2.1';
+  const VER = '3.2.2';
   const LOG = (...a) => console.log('%c[MarketChart ' + VER + ']', 'color:#38BDF8;font-weight:700', ...a);
   const WARN = (...a) => console.warn('[MarketChart]', ...a);
+
+  const DENSITY_PRESETS = [
+    { key: 'today',  label: '僅今日', tip: '只重抓最新一筆，不回補歷史' },
+    { key: 'month',  label: '月抽樣', tip: '每 30 日一筆 · 約 8 年（預設）' },
+    { key: 'biweek', label: '雙週',   tip: '每 14 日一筆 · 約 10 年' },
+    { key: 'week',   label: '週抽樣', tip: '每 7 日一筆 · 約 12 年' },
+    { key: 'day',    label: '日(最密)', tip: '每個交易日 · 約 5 年（較久）' },
+  ];
+  const DENSITY_LS = 'mc-track-density';
+
+  function getDensity() {
+    try {
+      const v = localStorage.getItem(DENSITY_LS);
+      if (v && DENSITY_PRESETS.some(p => p.key === v)) return v;
+    } catch (e) {}
+    return 'month';
+  }
+  function setDensity(key) {
+    try { localStorage.setItem(DENSITY_LS, key); } catch (e) {}
+  }
 
   function serverBase() {
     if (window.SERVER) return window.SERVER;
@@ -217,61 +237,137 @@
     ensureRefreshBtn(def);
   }
 
-  /** 圖表右上角「↻ 更新」— 免 CLI / curl */
+  /** 圖表右上角：密度選項 +「↻ 更新」— 免 CLI / curl */
   function ensureRefreshBtn(def) {
     const wrap = document.getElementById('chart-wrap');
     if (!wrap) return;
     if (getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
-    let btn = document.getElementById('market-chart-refresh');
-    if (!btn) {
-      btn = document.createElement('button');
+
+    let bar = document.getElementById('market-chart-refresh-bar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'market-chart-refresh-bar';
+      bar.style.cssText = [
+        'position:absolute', 'top:8px', 'right:12px', 'z-index:31',
+        'margin-top:22px', 'display:flex', 'align-items:center', 'gap:6px',
+        'pointer-events:auto',
+      ].join(';');
+
+      const densWrap = document.createElement('label');
+      densWrap.id = 'market-chart-density-wrap';
+      densWrap.style.cssText = [
+        'display:flex', 'align-items:center', 'gap:4px',
+        'padding:3px 6px', 'border-radius:4px',
+        'font:10px/1.2 JetBrains Mono,ui-monospace,monospace',
+        'color:#94a3b8', 'background:rgba(14,30,55,.95)',
+        'border:1px solid rgba(56,189,248,.35)',
+      ].join(';');
+      densWrap.innerHTML = '<span style="white-space:nowrap">密度</span>';
+      const sel = document.createElement('select');
+      sel.id = 'market-chart-density';
+      sel.style.cssText = [
+        'background:#0b1220', 'color:#e0f2fe', 'border:none',
+        'font:10px/1.2 JetBrains Mono,ui-monospace,monospace',
+        'padding:2px 2px', 'cursor:pointer', 'outline:none', 'max-width:88px',
+      ].join(';');
+      for (const p of DENSITY_PRESETS) {
+        const opt = document.createElement('option');
+        opt.value = p.key;
+        opt.textContent = p.label;
+        opt.title = p.tip;
+        sel.appendChild(opt);
+      }
+      sel.value = getDensity();
+      sel.addEventListener('change', () => {
+        setDensity(sel.value);
+        const tip = DENSITY_PRESETS.find(p => p.key === sel.value);
+        sel.title = tip ? tip.tip : '';
+        if (typeof setStat === 'function' && tip) setStat('密度：' + tip.label + ' · ' + tip.tip);
+      });
+      densWrap.appendChild(sel);
+      bar.appendChild(densWrap);
+
+      const btn = document.createElement('button');
       btn.id = 'market-chart-refresh';
       btn.type = 'button';
       btn.style.cssText = [
-        'position:absolute', 'top:8px', 'right:12px', 'z-index:31',
-        'margin-top:22px', 'padding:4px 10px', 'border-radius:4px',
+        'padding:4px 10px', 'border-radius:4px',
         'font:11px/1.2 JetBrains Mono,ui-monospace,monospace',
         'color:#e0f2fe', 'background:rgba(14,30,55,.95)',
         'border:1px solid rgba(56,189,248,.55)', 'cursor:pointer',
-        'box-shadow:0 4px 14px rgba(0,0,0,.35)',
+        'box-shadow:0 4px 14px rgba(0,0,0,.35)', 'white-space:nowrap',
       ].join(';');
-      btn.title = '重抓此追蹤圖資料（免指令）';
-      wrap.appendChild(btn);
+      btn.title = '依左側密度重抓／回補此追蹤圖（免指令）';
+      btn.textContent = '↻ 更新資料';
       btn.addEventListener('click', onRefreshClick);
+      bar.appendChild(btn);
+
+      wrap.appendChild(bar);
     }
+
+    const btn = document.getElementById('market-chart-refresh');
+    const densWrap = document.getElementById('market-chart-density-wrap');
+    const sel = document.getElementById('market-chart-density');
     const show = !!(def && (def.multi || def.id === '__MARGIN_RATIO__'));
-    btn.style.display = show ? 'block' : 'none';
-    if (show) {
+    bar.style.display = show ? 'flex' : 'none';
+    if (!show) return;
+
+    if (btn) {
       btn.disabled = false;
       btn.textContent = '↻ 更新資料';
       btn.dataset.chartId = def.id;
     }
+    // 密度選項對融資比／全部追蹤有意義；其他圖仍顯示但僅今日有效
+    if (densWrap) {
+      const needsDensity = def.id === '__TW_MARGIN_MIX__' || def.id === '__MARGIN_RATIO__';
+      densWrap.style.opacity = needsDensity ? '1' : '0.55';
+      densWrap.title = needsDensity
+        ? '融資比歷史回補抽樣密度'
+        : '此圖主要重抓最新；密度選項在「融資比YoY」最有用';
+    }
+    if (sel) {
+      sel.value = getDensity();
+      const tip = DENSITY_PRESETS.find(p => p.key === sel.value);
+      sel.title = tip ? tip.tip : '';
+    }
   }
 
   function hideRefreshBtn() {
+    const bar = document.getElementById('market-chart-refresh-bar');
+    if (bar) bar.style.display = 'none';
     const btn = document.getElementById('market-chart-refresh');
-    if (btn) btn.style.display = 'none';
+    if (btn && !bar) btn.style.display = 'none';
   }
 
   async function onRefreshClick(ev) {
-    const btn = ev.currentTarget || document.getElementById('market-chart-refresh');
+    const btn = (ev && ev.currentTarget) || document.getElementById('market-chart-refresh');
     if (!btn || btn.disabled) return;
     const id = btn.dataset.chartId || (window.S && S.sym) || '';
     const def = resolve(id);
     if (!def) return;
+    const density = (document.getElementById('market-chart-density') || {}).value || getDensity();
+    setDensity(density);
+    const densMeta = DENSITY_PRESETS.find(p => p.key === density) || DENSITY_PRESETS[1];
+
     btn.disabled = true;
     const prev = btn.textContent;
     btn.textContent = '更新中…';
     try {
-      if (typeof setStat === 'function') setStat('更新 ' + def.name + '…');
+      if (typeof setStat === 'function') {
+        setStat('更新 ' + def.name + '…（密度：' + densMeta.label + '）');
+      }
       if (def.id === '__MARGIN_RATIO__') {
         await fetch(serverBase() + '/margin_ratio?action=backfill&full=1', { cache: 'no-store' });
         btn.textContent = '已啟動回補';
       } else {
-        const r = await fetch(serverBase() + '/macro/refresh/' + encodeURIComponent(def.id) + '?dense=1', {
+        const r = await fetch(serverBase() + '/macro/refresh/' + encodeURIComponent(def.id), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: def.id, dense: true }),
+          body: JSON.stringify({
+            id: def.id,
+            density: density,
+            dense: density !== 'today',
+          }),
           cache: 'no-store',
         });
         const j = await r.json().catch(() => ({}));
@@ -280,12 +376,14 @@
         }
         btn.textContent = j.started ? '背景回補中' : '✓ 已更新';
         if (typeof setStat === 'function') {
+          const densNote = (j.density && j.density.label)
+            ? (' · ' + j.density.label + (j.density.step ? '/每' + j.density.step + '日' : ''))
+            : (' · ' + densMeta.label);
           setStat(j.started
-            ? ('✓ ' + def.name + ' 已更新，歷史回補背景進行中')
-            : ('✓ ' + def.name + ' 已更新' + (j.count != null ? ' · ' + j.count + ' 筆' : '')));
+            ? ('✓ ' + def.name + ' 已更新，歷史回補背景進行中' + densNote)
+            : ('✓ ' + def.name + ' 已更新' + (j.count != null ? ' · ' + j.count + ' 筆' : '') + densNote));
         }
       }
-      // 重載圖表
       setTimeout(() => {
         load(def.id, { silent: true }).finally(() => {
           const b = document.getElementById('market-chart-refresh');

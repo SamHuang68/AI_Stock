@@ -905,10 +905,58 @@ def primary_points_for_yf(chart_id: str) -> Dict[str, Any]:
 # ── 一鍵更新（UI 按鈕用，免 CLI）────────────────────────────
 _REFRESH_LOCK = {'running': False, 'last': None, 'note': ''}
 
+# 密度預設：step=抽樣間隔天數；years=往回幾年；dense=是否啟動歷史回補
+DENSITY_PRESETS = {
+    'today':  {'label': '僅今日', 'step': 0,  'years': 0,  'dense': False},
+    'month':  {'label': '月抽樣', 'step': 30, 'years': 8,  'dense': True},
+    'biweek': {'label': '雙週',   'step': 14, 'years': 10, 'dense': True},
+    'week':   {'label': '週抽樣', 'step': 7,  'years': 12, 'dense': True},
+    'day':    {'label': '日(最密)', 'step': 1, 'years': 5,  'dense': True},
+}
+
+
+def resolve_density(density: Optional[str] = None, dense: Optional[bool] = None,
+                    step: Optional[int] = None, years: Optional[int] = None) -> Dict[str, Any]:
+    """合併 UI 密度選項與顯式 step/years。"""
+    key = str(density or '').strip().lower() or None
+    preset = DENSITY_PRESETS.get(key) if key else None
+    if preset:
+        out = dict(preset)
+        out['key'] = key
+    else:
+        # 相容舊 dense 旗標
+        if dense is False:
+            out = dict(DENSITY_PRESETS['today'])
+            out['key'] = 'today'
+        else:
+            out = dict(DENSITY_PRESETS['month'])
+            out['key'] = 'month'
+    if step is not None:
+        try:
+            out['step'] = max(0, int(step))
+        except Exception:
+            pass
+    if years is not None:
+        try:
+            out['years'] = max(0, min(25, int(years)))
+        except Exception:
+            pass
+    out['dense'] = bool(out.get('step', 0) > 0 and out.get('years', 0) > 0 and out.get('dense', True))
+    if out.get('step', 0) <= 0:
+        out['dense'] = False
+    return out
+
 
 def status_summary() -> Dict[str, Any]:
     """給 /datasources 與 UI 顯示用。"""
-    out: Dict[str, Any] = {'charts': {}, 'refresh': dict(_REFRESH_LOCK)}
+    out: Dict[str, Any] = {
+        'charts': {},
+        'refresh': dict(_REFRESH_LOCK),
+        'densityPresets': [
+            {'key': k, 'label': v['label'], 'step': v['step'], 'years': v['years']}
+            for k, v in DENSITY_PRESETS.items()
+        ],
+    }
     # CBC
     cbc_n = 0
     if os.path.isfile(CBC_DAILY):
@@ -957,18 +1005,21 @@ def status_summary() -> Dict[str, Any]:
     return out
 
 
-def refresh_chart(chart_id: str, dense: bool = False) -> Dict[str, Any]:
+def refresh_chart(chart_id: str, dense: bool = False, density: Optional[str] = None,
+                  step: Optional[int] = None, years: Optional[int] = None) -> Dict[str, Any]:
     """
     一鍵更新單一追蹤圖。
-    dense=True 時，融資比會在背景加密度回補（免 CLI）。
+    density / step / years 控制融資比歷史回補密度（免 CLI）。
     """
+    dens = resolve_density(density=density, dense=dense, step=step, years=years)
     cid = str(chart_id or '').upper().strip()
     if cid in ('ALL', '*', 'MACRO_TRACKS'):
-        return refresh_all(dense=dense)
+        return refresh_all(dense=dens['dense'], density=dens.get('key'),
+                           step=dens.get('step'), years=dens.get('years'))
     if cid not in CHARTS:
         return {'ok': False, 'error': 'unknown chart ' + cid}
 
-    result: Dict[str, Any] = {'ok': True, 'id': cid, 'actions': []}
+    result: Dict[str, Any] = {'ok': True, 'id': cid, 'actions': [], 'density': dens}
 
     if cid == '__TW_RATES__':
         try:
@@ -998,21 +1049,31 @@ def refresh_chart(chart_id: str, dense: bool = False) -> Dict[str, Any]:
             yoy_n = len(load_margin_mix_yoy())
             result['actions'].append({'action': 'refresh-today', 'row': today, 'yoyPoints': yoy_n})
             result['count'] = yoy_n
-            if dense:
-                # 背景回補：近 8 年、每 30 日一筆（可點按鈕，不必下指令）
-                start = date.today() - timedelta(days=8 * 365)
+            if dens.get('dense') and dens.get('step', 0) > 0 and dens.get('years', 0) > 0:
+                step_days = int(dens['step'])
+                yrs = int(dens['years'])
+                start = date.today() - timedelta(days=yrs * 365)
                 result['started'] = True
-                result['note'] = f'已背景回補自 {start.isoformat()}（每 30 日）'
-                result['actions'].append({'action': 'backfill-mix', 'start': start.isoformat(), 'step': 30})
+                result['note'] = f'已背景回補自 {start.isoformat()}（每 {step_days} 日 · {yrs} 年）'
+                result['actions'].append({
+                    'action': 'backfill-mix',
+                    'start': start.isoformat(),
+                    'step': step_days,
+                    'years': yrs,
+                    'density': dens.get('key'),
+                })
 
                 def _run():
                     _REFRESH_LOCK['running'] = True
-                    _REFRESH_LOCK['note'] = 'backfill-mix'
+                    _REFRESH_LOCK['note'] = f"backfill-mix step={step_days}"
                     try:
-                        n = backfill_margin_mix(start, step_days=30)
+                        n = backfill_margin_mix(start, step_days=step_days)
                         _recompute_all_yoy()
                         export_margin_mix_csv()
-                        _REFRESH_LOCK['last'] = {'ok': True, 'n': n, 'at': time.time()}
+                        _REFRESH_LOCK['last'] = {
+                            'ok': True, 'n': n, 'at': time.time(),
+                            'step': step_days, 'years': yrs,
+                        }
                     except Exception as e:
                         _REFRESH_LOCK['last'] = {'ok': False, 'error': str(e), 'at': time.time()}
                     finally:
@@ -1044,12 +1105,21 @@ def refresh_chart(chart_id: str, dense: bool = False) -> Dict[str, Any]:
     return result
 
 
-def refresh_all(dense: bool = False) -> Dict[str, Any]:
+def refresh_all(dense: bool = False, density: Optional[str] = None,
+                step: Optional[int] = None, years: Optional[int] = None) -> Dict[str, Any]:
     """一次更新四張追蹤圖。"""
-    out = {'ok': True, 'results': {}, 'started': False}
+    dens = resolve_density(density=density, dense=dense, step=step, years=years)
+    out = {'ok': True, 'results': {}, 'started': False, 'density': dens}
     for cid in CHARTS:
-        # 融資比預設也做 dense（使用者按「全部更新」期望補歷史）
-        r = refresh_chart(cid, dense=dense or (cid == '__TW_MARGIN_MIX__'))
+        # 融資比套用密度；其他圖不受 step 影響
+        use_dense = dens['dense'] if cid == '__TW_MARGIN_MIX__' else False
+        r = refresh_chart(
+            cid,
+            dense=use_dense or (cid == '__TW_MARGIN_MIX__' and dens['dense']),
+            density=dens.get('key') if cid == '__TW_MARGIN_MIX__' else 'today',
+            step=dens.get('step') if cid == '__TW_MARGIN_MIX__' else None,
+            years=dens.get('years') if cid == '__TW_MARGIN_MIX__' else None,
+        )
         out['results'][cid] = r
         if not r.get('ok'):
             out['ok'] = False
@@ -1068,6 +1138,7 @@ if __name__ == '__main__':
     ap.add_argument('--years', type=int, default=25)
     ap.add_argument('--id', default='ALL')
     ap.add_argument('--dense', action='store_true')
+    ap.add_argument('--density', default='month', help='today|month|biweek|week|day')
     args = ap.parse_args()
     if args.cmd == 'scrape-cbc':
         ch = scrape_cbc_rate_changes()
@@ -1086,7 +1157,10 @@ if __name__ == '__main__':
             print(cid, 'ok', c['ok'], [(s['key'], len(s['points']), s.get('source')) for s in c['series']])
         print('seeds written under', SEED_DIR)
     elif args.cmd == 'refresh':
-        print(json.dumps(refresh_chart(args.id, dense=args.dense), ensure_ascii=False, indent=2))
+        print(json.dumps(
+            refresh_chart(args.id, dense=args.dense, density=args.density, step=args.step, years=args.years),
+            ensure_ascii=False, indent=2,
+        ))
     elif args.cmd == 'demo':
         for cid in CHARTS:
             try:
