@@ -83,7 +83,7 @@ scripts\go.bat pull
 ```
 
 這會：`git pull`（若本機改過 `stock_terminal_v2.html` 會自動 stash）→ `build_v2.py` → 殺掉舊 :18432 → 重啟 server → 開瀏覽器。  
-開頁後 **Ctrl+F5**；雙軸卡技術面 tag 應出現 `tech·383`。
+開頁後 **Ctrl+F5**；雙軸卡技術面 tag 應出現 `tech·384`。
 
 | 指令 | 用途 |
 |------|------|

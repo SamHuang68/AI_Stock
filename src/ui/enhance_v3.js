@@ -7,13 +7,14 @@
 // 4. 分頁記憶 (切股票後保留上次看的分頁)
 // 須在 fundamental_v3.js / volume_profile_v3.js 之後載入。
 //
-// v3.8.3 (2026-07-23): 修正 techScore 字串比較 / Wilder RSI / 正確 KD
-//   → 雙軸卡「技術面」分數下方 tag 必顯示「tech·383」。
-//   若仍見技術面=0 且無 tech·383 → 本機未 pull 此分支，或瀏覽器舊快取。
+// v3.8.4 (2026-07-23): 技術面改連續訊號（台／美同一公式）
+//   根因：二元 MACD/KD/均線在空頭共振時硬疊到 0（SNPS/CDNS 看起來像壞掉）。
+//   改連續權重後深空頭約 5~25「偏空」，不再無差別夾死在 0。
+//   雙軸卡 tag 顯示 tech·384。
 // ============================================================
 (function () {
   'use strict';
-  const ENH_VER = '383';  // 雙軸卡可見版本戳（確認不是瀏覽器舊快取）
+  const ENH_VER = '384';  // 雙軸卡可見版本戳（確認不是瀏覽器舊快取）
   try { console.info('[enhance] dual-score engine tech·' + ENH_VER); } catch (_) {}
 
   // ---- 樣式 ------------------------------------------------
@@ -54,17 +55,25 @@
   const _canonFail = {};   // 'SYM|MKT' -> true(抓不到，fallback 用畫面指標)
 
   // ---- 技術面分數 0~100（可傳入指定 ind/candles，否則用目前載入個股）----
-  // 公式（基底 50，最後 clamp 0~100）：
-  //   RSI14 Wilder：±20（(rsi-50)*0.8）
-  //   MACD vs Signal：+12 / −12
-  //   KD K vs D：+8 / −8
-  //   收盤 vs SMA20：+10 / −10
-  //   SMA20 vs SMA60：+10 / −10
-  // 注意：ind 各欄必須是 number；字串比較會讓負 MACD 誤判（2308 曾因此變 0）。
+  // 台股／美股同一公式（技術指標無市場邊界；勿拆兩套以免不可比）。
+  // 基底 50，各項連續加減（避免二元訊號空頭共振 → 無差別夾成 0）：
+  //   RSI14 Wilder：±15  （(rsi-50)*0.6）
+  //   MACD hist：  ±10  （對股價比例做 tanh，非單純金叉／死叉）
+  //   KD：         ±8   （(K-D)*0.4；K≈D 時接近 0，不再誤扣滿額）
+  //   收盤 vs SMA20：±10（% 乖離 tanh）
+  //   SMA20 vs SMA60：±10（% 乖離 tanh）
+  // ind 各欄必須是 number（字串比較會讓負 MACD 誤判）。
   function _n(v) {
     if (v == null || v === '' || v === '-') return null;
     const x = typeof v === 'number' ? v : parseFloat(v);
     return Number.isFinite(x) ? x : null;
+  }
+  function _tanh(x) {
+    // 純手寫，避免依賴 Math.tanh 舊環境差異；行為等同標準 tanh
+    if (x > 20) return 1;
+    if (x < -20) return -1;
+    const e = Math.exp(2 * x);
+    return (e - 1) / (e + 1);
   }
   function techScore(ind, candles) {
     ind = ind || ((typeof S !== 'undefined') && S.ind);
@@ -77,11 +86,26 @@
     const macd = _n(ind.macd), macdSig = _n(ind.macdSig);
     const K = _n(ind.K), D = _n(ind.D);
     const sma20 = _n(ind.sma20), sma60 = _n(ind.sma60);
-    if (rsi != null) add(Math.max(-20, Math.min(20, (rsi - 50) * 0.8)));
-    if (macd != null && macdSig != null) add(macd > macdSig ? 12 : -12);
-    if (K != null && D != null) add(K > D ? 8 : -8);
-    if (cur != null && sma20 != null) add(cur > sma20 ? 10 : -10);
-    if (sma20 != null && sma60 != null) add(sma20 > sma60 ? 10 : -10);
+
+    if (rsi != null) add(Math.max(-15, Math.min(15, (rsi - 50) * 0.6)));
+
+    if (macd != null && macdSig != null && cur != null && Math.abs(cur) > 0) {
+      const hist = macd - macdSig;
+      const scale = Math.max(Math.abs(cur) * 0.0015, 1e-9);
+      add(Math.max(-10, Math.min(10, 10 * _tanh(hist / scale / 3))));
+    }
+
+    if (K != null && D != null) add(Math.max(-8, Math.min(8, (K - D) * 0.4)));
+
+    if (cur != null && sma20 != null && sma20 !== 0) {
+      const pct = (cur / sma20 - 1) * 100;
+      add(10 * _tanh(pct / 4));
+    }
+    if (sma20 != null && sma60 != null && sma60 !== 0) {
+      const pct = (sma20 / sma60 - 1) * 100;
+      add(10 * _tanh(pct / 3));
+    }
+
     if (!parts) return null;
     return Math.max(0, Math.min(100, Math.round(score)));
   }
