@@ -7,14 +7,12 @@
 // 4. 分頁記憶 (切股票後保留上次看的分頁)
 // 須在 fundamental_v3.js / volume_profile_v3.js 之後載入。
 //
-// v3.8.4 (2026-07-23): 技術面改連續訊號（台／美同一公式）
-//   根因：二元 MACD/KD/均線在空頭共振時硬疊到 0（SNPS/CDNS 看起來像壞掉）。
-//   改連續權重後深空頭約 5~25「偏空」，不再無差別夾死在 0。
-//   雙軸卡 tag 顯示 tech·384。
+// v3.8.5 (2026-07-23): 美股基本面評分（Yahoo 成長+三率，與台股同一 _fundamental_score）
+//   雙軸卡／STATS 基本面不再鎖 TW；tag tech·385。
 // ============================================================
 (function () {
   'use strict';
-  const ENH_VER = '384';  // 雙軸卡可見版本戳（確認不是瀏覽器舊快取）
+  const ENH_VER = '385';  // 雙軸卡可見版本戳（確認不是瀏覽器舊快取）
   try { console.info('[enhance] dual-score engine tech·' + ENH_VER); } catch (_) {}
 
   // ---- 樣式 ------------------------------------------------
@@ -216,7 +214,7 @@
       const mktU = S.mkt || 'TW';
       if (symU && _canonTech[symU + '|' + mktU] == null && !_canonFail[symU + '|' + mktU])
         computeCanonTech(symU, mktU);
-      if (window.fetchFund && S.sym && S.mkt === 'TW') {
+      if (window.fetchFund && S.sym) {
         fetchFund(S.sym, S.mkt).then(f => {
           if (S.tab !== 'stats') return;
           const card = document.querySelector('#rpanel .dual-card');

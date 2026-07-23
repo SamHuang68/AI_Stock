@@ -2251,7 +2251,8 @@ class Handler(SimpleHTTPRequestHandler):
                 v10 = self._fetch_keystats_v10(s)
                 for k in ('trailingPE','forwardPE','eps','forwardEps','pegRatio','marketCap',
                           'priceToBook','dividendYield','shortName','longName','currency',
-                          'earningsQuarterlyGrowth','revenueGrowth','regularMarketPrice'):
+                          'earningsQuarterlyGrowth','revenueGrowth','earningsGrowth',
+                          'regularMarketPrice','grossMargin','opMargin','netMargin','roe'):
                     if res_out.get(k) is None and v10.get(k) is not None:
                         res_out[k] = v10[k]
                 if v10.get('trailingPE') is not None:
@@ -2339,6 +2340,24 @@ class Handler(SimpleHTTPRequestHandler):
             out['earningsQuarterlyGrowth'] = (qg * 100) if qg is not None else None
             rg = info.get('revenueGrowth')
             out['revenueGrowth']     = (rg * 100) if rg is not None else None
+            eg = info.get('earningsGrowth')
+            out['earningsGrowth']    = (eg * 100) if eg is not None else None
+            # 三率：yfinance 多為 0~1 小數 → 轉成百分比，供 /fundamental 美股評分
+            def _margin_pct(v):
+                if v is None:
+                    return None
+                try:
+                    x = float(v)
+                except Exception:
+                    return None
+                if abs(x) <= 1.5:
+                    x *= 100.0
+                return round(x, 2)
+            out['grossMargin'] = _margin_pct(info.get('grossMargins'))
+            out['opMargin']    = _margin_pct(info.get('operatingMargins'))
+            out['netMargin']   = _margin_pct(info.get('profitMargins'))
+            roe = info.get('returnOnEquity')
+            out['roe'] = _margin_pct(roe)
         except Exception as e:
             print(f'[keystats-yf] {sym} failed: {e}')
             out['_error'] = str(e)
@@ -2388,6 +2407,22 @@ class Handler(SimpleHTTPRequestHandler):
             out['earningsQuarterlyGrowth'] = (qg * 100) if qg is not None else None
             rg = raw(fd, 'revenueGrowth')
             out['revenueGrowth'] = (rg * 100) if rg is not None else None
+            eg = raw(fd, 'earningsGrowth')
+            out['earningsGrowth'] = (eg * 100) if eg is not None else None
+            def _margin_pct(v):
+                if v is None:
+                    return None
+                try:
+                    x = float(v)
+                except Exception:
+                    return None
+                if abs(x) <= 1.5:
+                    x *= 100.0
+                return round(x, 2)
+            out['grossMargin'] = _margin_pct(raw(fd, 'grossMargins'))
+            out['opMargin']    = _margin_pct(raw(fd, 'operatingMargins'))
+            out['netMargin']   = _margin_pct(raw(fd, 'profitMargins'))
+            out['roe']         = _margin_pct(raw(fd, 'returnOnEquity'))
         except Exception as e:
             print(f'[keystats-v10] {sym} failed: {e}')
             out['_error'] = str(e)
@@ -2648,16 +2683,81 @@ class Handler(SimpleHTTPRequestHandler):
         self._ok(body)
 
     def _handle_fundamental(self, sym):
-        """基本面 (v3.8)：月營收 YoY/MoM + 損益表三率 + 基本面評分
-           資料源：TWSE OpenAPI 全市場資料集 (上市 _L / 上櫃 _O)，整批快取一天"""
+        """基本面：成長 + 獲利三率 + 評分 0~100。
+           TW：TWSE OpenAPI 月營收 / 綜合損益表
+           US：Yahoo keystats（revenueGrowth / earningsGrowth + margins）— 與估值同源鏈"""
         from datetime import date as _date
         today = _date.today().strftime('%Y%m%d')
         clean = sym.replace('.TW', '').replace('.TWO', '').strip().upper()
-        key = f'fund:{clean}:{today}'
+        is_tw = bool(_CODE4.match(clean)) or sym.endswith('.TW') or sym.endswith('.TWO')
+        key = f'fund:{"TW" if is_tw else "US"}:{clean}:{today}'
         c = _cache.get(key)
         if c is not None:
             self._ok(c); return
-        out = {'symbol': sym, 'code': clean, 'date': today, 'revenue': None, 'income': None, 'score': None}
+
+        out = {
+            'symbol': sym, 'code': clean, 'date': today,
+            'market': 'TW' if is_tw else 'US',
+            'revenue': None, 'income': None, 'score': None,
+        }
+
+        if not is_tw:
+            # 美股：共用 /keystats 鏈（yfinance → v10 → html），對齊成長／三率後走同一套 _fundamental_score
+            ks = self._fetch_keystats_yfinance(clean)
+            need = (
+                ks.get('revenueGrowth') is None
+                and ks.get('earningsGrowth') is None
+                and ks.get('grossMargin') is None
+                and ks.get('opMargin') is None
+                and ks.get('netMargin') is None
+                and ks.get('eps') is None
+            )
+            if need or (
+                ks.get('grossMargin') is None and ks.get('opMargin') is None
+                and ks.get('revenueGrowth') is None
+            ):
+                v10 = self._fetch_keystats_v10(clean)
+                for k in ('revenueGrowth', 'earningsGrowth', 'earningsQuarterlyGrowth',
+                          'grossMargin', 'opMargin', 'netMargin', 'roe', 'eps',
+                          'regularMarketPrice', '_source'):
+                    if ks.get(k) is None and v10.get(k) is not None:
+                        ks[k] = v10[k]
+            # 成長：營收 YoY + 盈餘成長（季／年；有哪個用哪個）
+            yoy = ks.get('revenueGrowth')
+            earn = ks.get('earningsGrowth')
+            if earn is None:
+                earn = ks.get('earningsQuarterlyGrowth')
+            if yoy is not None or earn is not None:
+                out['revenue'] = {
+                    'period': 'Yahoo TTM',
+                    'monthRev': None,
+                    'yoyPct': yoy,
+                    'momPct': None,
+                    'cumRev': None,
+                    'cumYoyPct': earn,
+                    'label': '營收／盈餘成長',
+                }
+            if (ks.get('grossMargin') is not None or ks.get('opMargin') is not None
+                    or ks.get('netMargin') is not None or ks.get('eps') is not None):
+                out['income'] = {
+                    'period': 'Yahoo TTM',
+                    'sales': None,
+                    'eps': ks.get('eps'),
+                    'grossMargin': ks.get('grossMargin'),
+                    'opMargin': ks.get('opMargin'),
+                    'netMargin': ks.get('netMargin'),
+                    'roe': ks.get('roe'),
+                }
+            out['_source'] = ks.get('_source') or 'yahoo-keystats'
+            if ks.get('_error') and not out['revenue'] and not out['income']:
+                out['_error'] = ks.get('_error')
+            out['score'] = _fundamental_score(out)
+            body = json.dumps(out, ensure_ascii=False).encode()
+            _cache.set(key, body)
+            self._ok(body)
+            return
+
+        # ── 台股 ──────────────────────────────────────────────
         # 月營收（欄位用「含子字串」模糊比對：TWSE 欄位有前綴如「營業收入-當月營收」）
         rev = _openapi_lookup(['t187ap05_L', 'tpex:mopsfin_t187ap05_O'], clean)
         if rev:

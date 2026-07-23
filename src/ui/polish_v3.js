@@ -1202,6 +1202,20 @@ function renderKeystatsSection(ks) {
   h += `<div class="keystat-row"><span class="k">股價淨值比 P/B</span><span class="v" style="color:${pb != null ? (window.Colors ? Colors.warn(pb, {hi:5}) : (pb > 5 ? 'var(--orange)' : 'var(--thi)')) : 'var(--tlo)'}">${pb != null ? pb.toFixed(2) : '--'}</span></div>`;
   h += `<div class="keystat-row"><span class="k">殖利率 Yield</span><span class="v" style="color:${yld != null ? (window.Colors ? Colors.warn(yld, {hi:15}) : (yld > 15 ? 'var(--orange)' : 'var(--thi)')) : 'var(--tlo)'}">${yld != null ? yld.toFixed(2) + '%' : '--'}</span></div>`;
   if (eps != null) h += `<div class="keystat-row"><span class="k">EPS</span><span class="v">${eps.toFixed(2)} ${epsCurrency}</span></div>`;
+  const rg = ks.revenueGrowth, eg = ks.earningsGrowth != null ? ks.earningsGrowth : ks.earningsQuarterlyGrowth;
+  if (rg != null || eg != null) {
+    const gCol = v => window.Colors ? Colors.growth(S.sym, v) : 'var(--thi)';
+    const gStr = v => v == null ? '--' : ((v >= 0 ? '+' : '') + Number(v).toFixed(1) + '%');
+    if (rg != null) h += `<div class="keystat-row"><span class="k">營收成長</span><span class="v" style="color:${gCol(rg)}">${gStr(rg)}</span></div>`;
+    if (eg != null) h += `<div class="keystat-row"><span class="k">盈餘成長</span><span class="v" style="color:${gCol(eg)}">${gStr(eg)}</span></div>`;
+  }
+  if (ks.grossMargin != null || ks.opMargin != null || ks.netMargin != null) {
+    const mCol = v => window.Colors ? Colors.warn(v, { lo: 8 }) : 'var(--thi)';
+    const mStr = v => v == null ? '--' : Number(v).toFixed(1) + '%';
+    if (ks.grossMargin != null) h += `<div class="keystat-row"><span class="k">毛利率</span><span class="v" style="color:${mCol(ks.grossMargin)}">${mStr(ks.grossMargin)}</span></div>`;
+    if (ks.opMargin != null) h += `<div class="keystat-row"><span class="k">營益率</span><span class="v" style="color:${mCol(ks.opMargin)}">${mStr(ks.opMargin)}</span></div>`;
+    if (ks.netMargin != null) h += `<div class="keystat-row"><span class="k">淨利率</span><span class="v" style="color:${mCol(ks.netMargin)}">${mStr(ks.netMargin)}</span></div>`;
+  }
   if (ks._source) h += `<div style="padding:4px 12px;font-family:monospace;font-size:8px;color:var(--tf)">資料源：${ks._source}</div>`;
   h += '</div>';
   return h;
