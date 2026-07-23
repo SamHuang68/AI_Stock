@@ -58,7 +58,7 @@ echo Done. Now on:
 git branch --show-current
 git rev-parse --short HEAD
 echo.
-echo 請 Ctrl+F5。確認 badge tech·388；點大盤列「櫃買」「台指期」應有 K 線
+echo 請 Ctrl+F5。底部改「大盤／市場」雙 tab；櫃買／台指期有 K 線；badge tech·388
 echo.
 pause
 endlocal

@@ -23,28 +23,50 @@ function _isTwSym(s) { return window.Colors ? Colors.isTW(s) : (/^\d/.test(Strin
 /* (1) 隱藏底部指標列 — 改為大盤總覽 */
 #indbar { display: none !important; }
 
-/* 大盤總覽跑馬燈 — v3.1 觀察清單 chip 風格
-   排版：行 1 = 名稱(灰小) 加權值(大白)；行 2 = ▲值 ▲% (小，紅漲綠跌台股慣例)
-   配色：固定台股慣例 — 紅漲綠跌（不依 body.market-* class 切換）
+/* 大盤總覽 — 兩個 tab（大盤／市場）避免一列塞滿混淆
+   左側垂直 tab，右側單一 panel 顯示對應格
 */
 #mkt-bar {
-  min-height: 76px; max-height: 92px;
+  display: flex; align-items: stretch;
+  min-height: 72px; max-height: 88px;
   background: var(--bg2); border-top: 1px solid var(--border);
   flex-shrink: 0; overflow: hidden;
   font-family: 'JetBrains Mono', monospace; font-size: 10px;
 }
-/* v3.8: 大盤改 2 列 grid (column flow，8 指數 → 4 欄 x 2 列) */
-#mkt-bar-inner {
+#mkt-bar-tabs {
+  display: flex; flex-direction: column; flex-shrink: 0;
+  width: 40px; border-right: 1px solid var(--border); background: var(--bg);
+}
+.mkt-tab {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  writing-mode: vertical-rl; text-orientation: mixed;
+  letter-spacing: 2px; font-size: 11px; font-weight: 700;
+  color: var(--tlo); background: transparent; border: none;
+  border-bottom: 1px solid var(--border); cursor: pointer;
+  padding: 0; font-family: inherit;
+}
+.mkt-tab:last-child { border-bottom: none; }
+.mkt-tab:hover { color: var(--thi); background: rgba(255,255,255,.04); }
+.mkt-tab.on {
+  color: var(--thi); background: var(--bg2);
+  box-shadow: inset 2px 0 0 var(--gold, #F5C518);
+}
+#mkt-bar-panels { flex: 1; min-width: 0; position: relative; }
+.mkt-panel { display: none; height: 100%; }
+.mkt-panel.on { display: block; }
+#mkt-bar-inner, .mkt-bar-inner {
   display: grid; grid-template-rows: repeat(2, 1fr);
   grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
-  gap: 0; padding: 0;
+  gap: 0; padding: 0; height: 100%;
 }
 .mkt-cell {
   display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
   padding: 3px 12px; border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border); min-height: 36px;
   white-space: nowrap; min-width: 0; gap: 1px; overflow: hidden;
+  cursor: pointer; transition: background .12s;
 }
+.mkt-cell:hover { background: rgba(255,255,255,.06); }
 .mkt-cell .row1 {
   display: flex; align-items: baseline; gap: 6px;
 }
@@ -64,7 +86,7 @@ function _isTwSym(s) { return window.Colors ? Colors.isTW(s) : (/^\d/.test(Strin
 .mkt-cell.loading .px,
 .mkt-cell.loading .delta,
 .mkt-cell.loading .ch { color: var(--tf); }
-/* 紅漲綠跌 — 大盤一律台股慣例 */
+/* 紅漲綠跌 — 大盤一律台股慣例（美股格由 JS 依 redUp 覆寫） */
 .mkt-cell .up   { color: var(--red); }
 .mkt-cell .down { color: var(--green); }
 .mkt-cell .flat { color: var(--tlo); }
@@ -165,57 +187,114 @@ body.market-us .price-down, body.market-us .neg { color: var(--red) !important; 
 })();
 
 // ============================================================
-// (1) Market overview ticker bar — replaces removed indbar
+// (1) Market overview ticker bar — 大盤 / 市場 雙 tab
+// ------------------------------------------------------------
+// 大盤：台股現貨／期／融資／台總經
+// 市場：美總經／全球指數／商品
 // ============================================================
-const MKT_INDICES = [
-  {sym:'^TWII', name:'加權'},
-  {sym:'__TXF__', name:'台指期'},   // TAIFEX 即時(含夜盤)，特例來源 /txf
-  {sym:'^TWOII', name:'櫃買'},
-  {sym:'__MARGIN_RATIO__', name:'融資維持'},
-  {sym:'__TW_RATES__', name:'台利率'},
-  {sym:'__TW_MARGIN_MIX__', name:'融資比YoY'},
-  {sym:'__US_RATES_CREDIT__', name:'美利率債'},
-  {sym:'__US_CPI_FIN__', name:'CPI金融'},
-  {sym:'^SOX',  name:'費半',  redUp:false},   // 美股:漲綠跌紅
-  {sym:'^GSPC', name:'S&P500',redUp:false},
-  {sym:'^IXIC', name:'NASDAQ',redUp:false},
-  {sym:'^DJI',  name:'道瓊',  redUp:false},
-  {sym:'^N225', name:'日經'},
-  {sym:'^HSI',  name:'恆生'},
-  {sym:'^KS11', name:'韓國'},      // KOSPI
-  {sym:'GC=F',  name:'黃金'},      // COMEX 黃金期貨
-  {sym:'SI=F',  name:'白銀'},      // COMEX 白銀期貨
-  {sym:'CL=F',  name:'原油'},      // WTI 原油期貨
-];
+const MKT_TABS = {
+  tw: {
+    id: 'tw',
+    label: '大盤',
+    title: '台股大盤（加權／期／櫃買／融資／台利率）',
+    items: [
+      {sym:'^TWII', name:'加權'},
+      {sym:'__TXF__', name:'台指期'},
+      {sym:'^TWOII', name:'櫃買'},
+      {sym:'__MARGIN_RATIO__', name:'融資維持'},
+      {sym:'__TW_RATES__', name:'台利率'},
+      {sym:'__TW_MARGIN_MIX__', name:'融資比YoY'},
+    ],
+  },
+  mkt: {
+    id: 'mkt',
+    label: '市場',
+    title: '全球市場（美總經／指數／商品）',
+    items: [
+      {sym:'__US_RATES_CREDIT__', name:'美利率債'},
+      {sym:'__US_CPI_FIN__', name:'CPI金融'},
+      {sym:'^SOX',  name:'費半',  redUp:false},
+      {sym:'^GSPC', name:'S&P500',redUp:false},
+      {sym:'^IXIC', name:'NASDAQ',redUp:false},
+      {sym:'^DJI',  name:'道瓊',  redUp:false},
+      {sym:'^N225', name:'日經'},
+      {sym:'^HSI',  name:'恆生'},
+      {sym:'^KS11', name:'韓國'},
+      {sym:'GC=F',  name:'黃金'},
+      {sym:'SI=F',  name:'白銀'},
+      {sym:'CL=F',  name:'原油'},
+    ],
+  },
+};
+// 扁平清單（refresh 迴圈仍用）
+const MKT_INDICES = [].concat(MKT_TABS.tw.items, MKT_TABS.mkt.items);
+
+function _mktCellHtml(m) {
+  return `<div class="mkt-cell loading" data-mkt-sym="${m.sym}" title="點擊載入 ${m.name}">
+    <div class="row1">
+      <span class="nm">${m.name}</span>
+      <span class="px">--</span>
+    </div>
+    <div class="row2">
+      <span class="delta">--</span>
+      <span class="ch">--</span>
+    </div>
+  </div>`;
+}
+
+function setMktBarTab(tabId, persist) {
+  const id = (tabId === 'mkt') ? 'mkt' : 'tw';
+  const bar = document.getElementById('mkt-bar');
+  if (!bar) return;
+  bar.querySelectorAll('.mkt-tab').forEach(btn => {
+    btn.classList.toggle('on', btn.getAttribute('data-mkt-tab') === id);
+  });
+  bar.querySelectorAll('.mkt-panel').forEach(p => {
+    p.classList.toggle('on', p.getAttribute('data-mkt-panel') === id);
+  });
+  if (persist !== false) {
+    try { localStorage.setItem('stockTerminal.mktBarTab', id); } catch (_) {}
+  }
+}
 
 (function injectMktBar() {
   if (!document.getElementById('left')) return setTimeout(injectMktBar, 100);
   if (document.getElementById('mkt-bar')) return;
+
+  let saved = 'tw';
+  try {
+    const v = localStorage.getItem('stockTerminal.mktBarTab');
+    if (v === 'mkt' || v === 'tw') saved = v;
+  } catch (_) {}
+
   const bar = document.createElement('div');
   bar.id = 'mkt-bar';
-  bar.innerHTML = '<div id="mkt-bar-inner">' +
-    MKT_INDICES.map(m =>
-      // v3.1 觀察清單風格雙列：
-      //   行 1：指數名（小灰）+ 加權值（大字）
-      //   行 2：▲漲跌值 ▲漲跌% （小字、台股紅漲綠跌）
-      `<div class="mkt-cell loading" data-mkt-sym="${m.sym}" title="點擊載入 ${m.name} K 線">
-        <div class="row1">
-          <span class="nm">${m.name}</span>
-          <span class="px">--</span>
-        </div>
-        <div class="row2">
-          <span class="delta">--</span>
-          <span class="ch">--</span>
-        </div>
-      </div>`
-    ).join('') + '</div>';
+  bar.innerHTML =
+    `<div id="mkt-bar-tabs" role="tablist" aria-label="大盤與市場">` +
+      Object.values(MKT_TABS).map(t =>
+        `<button type="button" class="mkt-tab${t.id === saved ? ' on' : ''}" role="tab"` +
+        ` data-mkt-tab="${t.id}" title="${t.title}" aria-selected="${t.id === saved}">${t.label}</button>`
+      ).join('') +
+    `</div>` +
+    `<div id="mkt-bar-panels">` +
+      Object.values(MKT_TABS).map(t =>
+        `<div class="mkt-panel${t.id === saved ? ' on' : ''}" data-mkt-panel="${t.id}" role="tabpanel">` +
+          `<div class="mkt-bar-inner">${t.items.map(_mktCellHtml).join('')}</div>` +
+        `</div>`
+      ).join('') +
+    `</div>`;
+
   const left = document.getElementById('left');
   const indbar = document.getElementById('indbar');
   if (indbar) left.insertBefore(bar, indbar.nextSibling);
   else left.appendChild(bar);
-  // v3.9:點下面大盤 cell 直接帶出該指數/期貨 K 線(事件委派)。
-  //   指數(^...)/商品期(=F)一律用 'US' 市場避免被附 .TW — 但台股指數／台指期走 Market.of。
+
   bar.addEventListener('click', function (e) {
+    const tabBtn = e.target.closest && e.target.closest('.mkt-tab');
+    if (tabBtn) {
+      setMktBarTab(tabBtn.getAttribute('data-mkt-tab'));
+      return;
+    }
     const cell = e.target.closest && e.target.closest('.mkt-cell');
     if (!cell) return;
     const sym = cell.getAttribute('data-mkt-sym');
@@ -225,11 +304,8 @@ const MKT_INDICES = [
       loadSym(sym, mkt);
     }
   });
-  // 點擊提示樣式
-  const st = document.createElement('style');
-  st.textContent = '.mkt-cell{cursor:pointer;transition:background .12s}' +
-    '.mkt-cell:hover{background:rgba(255,255,255,.06)}';
-  document.head.appendChild(st);
+
+  window.setMktBarTab = setMktBarTab;
   refreshMktBar();
   setInterval(refreshMktBar, 60_000);
 })();
