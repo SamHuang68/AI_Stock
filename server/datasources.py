@@ -121,6 +121,26 @@ def _st_margin_ratio():
     return {'updated': _mtime(p), 'count': n}
 
 
+def _st_macro_chart(cid):
+    try:
+        import macro_track as mt
+        st = mt.status_summary().get('charts', {}).get(cid) or {}
+        return {'updated': st.get('updated') or 0, 'count': st.get('count') or 0}
+    except Exception:
+        return {'updated': 0, 'count': 0}
+
+
+def _st_macro_all():
+    try:
+        import macro_track as mt
+        charts = mt.status_summary().get('charts') or {}
+        n = sum(int(v.get('count') or 0) for v in charts.values())
+        ts = max((int(v.get('updated') or 0) for v in charts.values()), default=0)
+        return {'updated': ts, 'count': n}
+    except Exception:
+        return {'updated': 0, 'count': 0}
+
+
 # ── Registry(順序即顯示順序) ──────────────────────────────
 def _registry():
     return [
@@ -134,6 +154,26 @@ def _registry():
          'reliability': 'official', 'kind': 'db', 'updatable': True,
          'desc': 'Σ(融資市值,不含ETF)/融資金額；seed CSV + TWSE 歷史回補 + 今日即時',
          'status': _st_margin_ratio()},
+        {'id': 'macro_tracks', 'name': '指數追蹤圖(全部)', 'provider': 'CBC · TWSE/TPEx · NY Fed · H.15 · BLS · Yahoo',
+         'reliability': 'official', 'kind': 'file', 'updatable': True,
+         'desc': '台利率／融資比YoY／美利率債／CPI金融 — 一鍵全更新（融資比會背景加密度）',
+         'status': _st_macro_all()},
+        {'id': 'macro_tw_rates', 'name': '台灣指標利率', 'provider': 'CBC 利率走廊',
+         'reliability': 'official', 'kind': 'file', 'updatable': True,
+         'desc': '重貼現／擔保放款／短期融通 — 重抓央行頁並展開日序列',
+         'status': _st_macro_chart('__TW_RATES__')},
+        {'id': 'macro_tw_margin_mix', 'name': '上櫃／上市融資比年增', 'provider': 'TWSE + TPEx',
+         'reliability': 'official', 'kind': 'db', 'updatable': True,
+         'desc': '今日融資張數比 + 背景回補近 8 年（免 CLI）',
+         'status': _st_macro_chart('__TW_MARGIN_MIX__')},
+        {'id': 'macro_us_rates_credit', 'name': '美國利率 vs 公司債', 'provider': 'NY Fed / H.15 / Yahoo LQD·HYG',
+         'reliability': 'vendor', 'kind': 'file', 'updatable': True,
+         'desc': 'Fed＋10Y＋IG/HY 種子重抓（FRED 可達時優先）',
+         'status': _st_macro_chart('__US_RATES_CREDIT__')},
+        {'id': 'macro_us_cpi_fin', 'name': '美國CPI＆Fed vs 金融股', 'provider': 'BLS · NY Fed · Yahoo XLF',
+         'reliability': 'official', 'kind': 'file', 'updatable': True,
+         'desc': 'CPI YoY＋基準利率＋XLF 種子重抓',
+         'status': _st_macro_chart('__US_CPI_FIN__')},
         {'id': 'etf', 'name': '主動 ETF 每日持股', 'provider': 'MoneyDJ + TWSE',
          'reliability': 'vendor', 'kind': 'file', 'updatable': True,
          'desc': '主動 ETF 完整持股快照,算每日加減碼 delta', 'status': _st_etf()},
@@ -168,6 +208,36 @@ def refresh(sid):
         return _spawn('datastore.py', 'update')
     if sid == 'margin_ratio':
         return _spawn('margin_ratio.py', 'backfill', '--full')
+    if sid == 'macro_tracks':
+        try:
+            import macro_track as mt
+            return mt.refresh_all(dense=True)
+        except Exception as e:
+            return {'ok': False, 'error': str(e)}
+    if sid == 'macro_tw_rates':
+        try:
+            import macro_track as mt
+            return mt.refresh_chart('__TW_RATES__')
+        except Exception as e:
+            return {'ok': False, 'error': str(e)}
+    if sid == 'macro_tw_margin_mix':
+        try:
+            import macro_track as mt
+            return mt.refresh_chart('__TW_MARGIN_MIX__', dense=True)
+        except Exception as e:
+            return {'ok': False, 'error': str(e)}
+    if sid == 'macro_us_rates_credit':
+        try:
+            import macro_track as mt
+            return mt.refresh_chart('__US_RATES_CREDIT__')
+        except Exception as e:
+            return {'ok': False, 'error': str(e)}
+    if sid == 'macro_us_cpi_fin':
+        try:
+            import macro_track as mt
+            return mt.refresh_chart('__US_CPI_FIN__')
+        except Exception as e:
+            return {'ok': False, 'error': str(e)}
     if sid == 'etf':
         return _spawn('etf_delta_tracker.py')
     if sid == 'chip':

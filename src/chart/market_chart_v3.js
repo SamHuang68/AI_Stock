@@ -11,7 +11,7 @@
 (function MarketChartV3() {
   'use strict';
 
-  const VER = '3.2.0';
+  const VER = '3.2.1';
   const LOG = (...a) => console.log('%c[MarketChart ' + VER + ']', 'color:#38BDF8;font-weight:700', ...a);
   const WARN = (...a) => console.warn('[MarketChart]', ...a);
 
@@ -189,7 +189,7 @@
     aliases: ['CPI金融', '金融股', 'US_CPI_FIN'],
   });
 
-  // ── UI badge + 浮動資訊窗（不畫在軸上）────────────────────────
+  // ── UI badge + 更新按鈕 + 浮動資訊窗（不畫在軸上）──────────
   function ensureBadge(def) {
     let el = document.getElementById('market-chart-badge');
     if (!el) {
@@ -214,11 +214,100 @@
     }
     el.textContent = 'MarketChart ' + VER + ' · 折線 · ' + (def ? def.shortName || def.name : '');
     el.style.display = def ? 'block' : 'none';
+    ensureRefreshBtn(def);
+  }
+
+  /** 圖表右上角「↻ 更新」— 免 CLI / curl */
+  function ensureRefreshBtn(def) {
+    const wrap = document.getElementById('chart-wrap');
+    if (!wrap) return;
+    if (getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+    let btn = document.getElementById('market-chart-refresh');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.id = 'market-chart-refresh';
+      btn.type = 'button';
+      btn.style.cssText = [
+        'position:absolute', 'top:8px', 'right:12px', 'z-index:31',
+        'margin-top:22px', 'padding:4px 10px', 'border-radius:4px',
+        'font:11px/1.2 JetBrains Mono,ui-monospace,monospace',
+        'color:#e0f2fe', 'background:rgba(14,30,55,.95)',
+        'border:1px solid rgba(56,189,248,.55)', 'cursor:pointer',
+        'box-shadow:0 4px 14px rgba(0,0,0,.35)',
+      ].join(';');
+      btn.title = '重抓此追蹤圖資料（免指令）';
+      wrap.appendChild(btn);
+      btn.addEventListener('click', onRefreshClick);
+    }
+    const show = !!(def && (def.multi || def.id === '__MARGIN_RATIO__'));
+    btn.style.display = show ? 'block' : 'none';
+    if (show) {
+      btn.disabled = false;
+      btn.textContent = '↻ 更新資料';
+      btn.dataset.chartId = def.id;
+    }
+  }
+
+  function hideRefreshBtn() {
+    const btn = document.getElementById('market-chart-refresh');
+    if (btn) btn.style.display = 'none';
+  }
+
+  async function onRefreshClick(ev) {
+    const btn = ev.currentTarget || document.getElementById('market-chart-refresh');
+    if (!btn || btn.disabled) return;
+    const id = btn.dataset.chartId || (window.S && S.sym) || '';
+    const def = resolve(id);
+    if (!def) return;
+    btn.disabled = true;
+    const prev = btn.textContent;
+    btn.textContent = '更新中…';
+    try {
+      if (typeof setStat === 'function') setStat('更新 ' + def.name + '…');
+      if (def.id === '__MARGIN_RATIO__') {
+        await fetch(serverBase() + '/margin_ratio?action=backfill&full=1', { cache: 'no-store' });
+        btn.textContent = '已啟動回補';
+      } else {
+        const r = await fetch(serverBase() + '/macro/refresh/' + encodeURIComponent(def.id) + '?dense=1', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: def.id, dense: true }),
+          cache: 'no-store',
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || (j && j.ok === false)) {
+          throw new Error((j && j.error) || ('HTTP ' + r.status));
+        }
+        btn.textContent = j.started ? '背景回補中' : '✓ 已更新';
+        if (typeof setStat === 'function') {
+          setStat(j.started
+            ? ('✓ ' + def.name + ' 已更新，歷史回補背景進行中')
+            : ('✓ ' + def.name + ' 已更新' + (j.count != null ? ' · ' + j.count + ' 筆' : '')));
+        }
+      }
+      // 重載圖表
+      setTimeout(() => {
+        load(def.id, { silent: true }).finally(() => {
+          const b = document.getElementById('market-chart-refresh');
+          if (b) {
+            b.disabled = false;
+            b.textContent = '↻ 更新資料';
+          }
+        });
+      }, 600);
+    } catch (e) {
+      WARN('refresh failed', e);
+      btn.textContent = '失敗';
+      btn.disabled = false;
+      if (typeof setStat === 'function') setStat('更新失敗 · ' + (e && e.message ? e.message : e));
+      setTimeout(() => { if (btn) btn.textContent = prev || '↻ 更新資料'; }, 2500);
+    }
   }
 
   function hideBadge() {
     const el = document.getElementById('market-chart-badge');
     if (el) el.style.display = 'none';
+    hideRefreshBtn();
     hideFloat();
   }
 
@@ -1042,6 +1131,11 @@
     render,
     renderMulti,
     ensureBadge,
+    refresh: function (id) {
+      const btn = document.getElementById('market-chart-refresh');
+      if (btn && id) btn.dataset.chartId = id;
+      return onRefreshClick({ currentTarget: btn });
+    },
   };
 
   LOG('module ready — register() more series as needed');

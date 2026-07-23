@@ -902,13 +902,172 @@ def primary_points_for_yf(chart_id: str) -> Dict[str, Any]:
     return points_to_yf_like(pts, data['id'], data['name'])
 
 
+# ── 一鍵更新（UI 按鈕用，免 CLI）────────────────────────────
+_REFRESH_LOCK = {'running': False, 'last': None, 'note': ''}
+
+
+def status_summary() -> Dict[str, Any]:
+    """給 /datasources 與 UI 顯示用。"""
+    out: Dict[str, Any] = {'charts': {}, 'refresh': dict(_REFRESH_LOCK)}
+    # CBC
+    cbc_n = 0
+    if os.path.isfile(CBC_DAILY):
+        try:
+            with open(CBC_DAILY, encoding='utf-8') as f:
+                cbc_n = max(0, sum(1 for _ in f) - 1)
+        except Exception:
+            pass
+    out['charts']['__TW_RATES__'] = {
+        'updated': int(os.path.getmtime(CBC_DAILY)) if os.path.isfile(CBC_DAILY) else 0,
+        'count': cbc_n,
+        'name': CHARTS['__TW_RATES__']['name'],
+    }
+    # margin mix
+    mix_n = 0
+    try:
+        conn = _db()
+        mix_n = conn.execute('SELECT COUNT(*) FROM margin_mix WHERE yoy IS NOT NULL').fetchone()[0]
+        conn.close()
+    except Exception:
+        pass
+    mix_path = MARGIN_MIX_CSV if os.path.isfile(MARGIN_MIX_CSV) else DB_PATH
+    out['charts']['__TW_MARGIN_MIX__'] = {
+        'updated': int(os.path.getmtime(mix_path)) if os.path.isfile(mix_path) else 0,
+        'count': mix_n,
+        'name': CHARTS['__TW_MARGIN_MIX__']['name'],
+    }
+    # US seeds
+    for cid in ('__US_RATES_CREDIT__', '__US_CPI_FIN__'):
+        seeds = [s.get('seed') for s in CHARTS[cid]['series'] if s.get('seed')]
+        paths = [_seed_path(n) for n in seeds if n and os.path.isfile(_seed_path(n))]
+        n = 0
+        ts = 0
+        for p in paths:
+            ts = max(ts, int(os.path.getmtime(p)))
+            try:
+                with open(p, encoding='utf-8') as f:
+                    n = max(n, max(0, sum(1 for _ in f) - 1))
+            except Exception:
+                pass
+        out['charts'][cid] = {
+            'updated': ts,
+            'count': n,
+            'name': CHARTS[cid]['name'],
+        }
+    return out
+
+
+def refresh_chart(chart_id: str, dense: bool = False) -> Dict[str, Any]:
+    """
+    一鍵更新單一追蹤圖。
+    dense=True 時，融資比會在背景加密度回補（免 CLI）。
+    """
+    cid = str(chart_id or '').upper().strip()
+    if cid in ('ALL', '*', 'MACRO_TRACKS'):
+        return refresh_all(dense=dense)
+    if cid not in CHARTS:
+        return {'ok': False, 'error': 'unknown chart ' + cid}
+
+    result: Dict[str, Any] = {'ok': True, 'id': cid, 'actions': []}
+
+    if cid == '__TW_RATES__':
+        try:
+            ch = scrape_cbc_rate_changes()
+            if ch:
+                save_cbc_changes(ch)
+                result['actions'].append({'action': 'scrape-cbc', 'changes': len(ch)})
+                result['count'] = len(ch)
+            else:
+                # 至少確認種子可讀
+                cbc = load_cbc_daily()
+                n = len(cbc.get('discount') or [])
+                result['actions'].append({'action': 'load-seed', 'points': n})
+                result['count'] = n
+                if n == 0:
+                    result['ok'] = False
+                    result['error'] = 'CBC 抓取失敗且無種子'
+        except Exception as e:
+            result['ok'] = False
+            result['error'] = str(e)
+
+    elif cid == '__TW_MARGIN_MIX__':
+        try:
+            today = refresh_margin_mix_today()
+            _recompute_all_yoy()
+            export_margin_mix_csv()
+            yoy_n = len(load_margin_mix_yoy())
+            result['actions'].append({'action': 'refresh-today', 'row': today, 'yoyPoints': yoy_n})
+            result['count'] = yoy_n
+            if dense:
+                # 背景回補：近 8 年、每 30 日一筆（可點按鈕，不必下指令）
+                start = date.today() - timedelta(days=8 * 365)
+                result['started'] = True
+                result['note'] = f'已背景回補自 {start.isoformat()}（每 30 日）'
+                result['actions'].append({'action': 'backfill-mix', 'start': start.isoformat(), 'step': 30})
+
+                def _run():
+                    _REFRESH_LOCK['running'] = True
+                    _REFRESH_LOCK['note'] = 'backfill-mix'
+                    try:
+                        n = backfill_margin_mix(start, step_days=30)
+                        _recompute_all_yoy()
+                        export_margin_mix_csv()
+                        _REFRESH_LOCK['last'] = {'ok': True, 'n': n, 'at': time.time()}
+                    except Exception as e:
+                        _REFRESH_LOCK['last'] = {'ok': False, 'error': str(e), 'at': time.time()}
+                    finally:
+                        _REFRESH_LOCK['running'] = False
+                        _REFRESH_LOCK['note'] = ''
+
+                import threading
+                threading.Thread(target=_run, daemon=True).start()
+        except Exception as e:
+            result['ok'] = False
+            result['error'] = str(e)
+
+    elif cid in ('__US_RATES_CREDIT__', '__US_CPI_FIN__'):
+        try:
+            # 強制走線上備援並回寫 seed
+            data = get_chart(cid, years=int(CHARTS[cid].get('years') or 25))
+            counts = {s['key']: len(s.get('points') or []) for s in data.get('series') or []}
+            result['actions'].append({'action': 'seed-us', 'counts': counts, 'sources': {
+                s['key']: s.get('source') for s in data.get('series') or []
+            }})
+            result['count'] = sum(counts.values())
+            result['ok'] = bool(data.get('ok'))
+            if not result['ok']:
+                result['error'] = '美國序列抓取失敗'
+        except Exception as e:
+            result['ok'] = False
+            result['error'] = str(e)
+
+    return result
+
+
+def refresh_all(dense: bool = False) -> Dict[str, Any]:
+    """一次更新四張追蹤圖。"""
+    out = {'ok': True, 'results': {}, 'started': False}
+    for cid in CHARTS:
+        # 融資比預設也做 dense（使用者按「全部更新」期望補歷史）
+        r = refresh_chart(cid, dense=dense or (cid == '__TW_MARGIN_MIX__'))
+        out['results'][cid] = r
+        if not r.get('ok'):
+            out['ok'] = False
+        if r.get('started'):
+            out['started'] = True
+            out['note'] = r.get('note') or out.get('note')
+    return out
+
+
 if __name__ == '__main__':
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['scrape-cbc', 'backfill-mix', 'demo', 'export-mix', 'seed-us'])
+    ap.add_argument('cmd', choices=['scrape-cbc', 'backfill-mix', 'demo', 'export-mix', 'seed-us', 'refresh'])
     ap.add_argument('--start', default='2015-01-01')
     ap.add_argument('--step', type=int, default=14)
     ap.add_argument('--years', type=int, default=25)
+    ap.add_argument('--id', default='ALL')
+    ap.add_argument('--dense', action='store_true')
     args = ap.parse_args()
     if args.cmd == 'scrape-cbc':
         ch = scrape_cbc_rate_changes()
@@ -926,6 +1085,8 @@ if __name__ == '__main__':
             c = get_chart(cid, years=args.years)
             print(cid, 'ok', c['ok'], [(s['key'], len(s['points']), s.get('source')) for s in c['series']])
         print('seeds written under', SEED_DIR)
+    elif args.cmd == 'refresh':
+        print(json.dumps(refresh_chart(args.id, dense=args.dense), ensure_ascii=False, indent=2))
     elif args.cmd == 'demo':
         for cid in CHARTS:
             try:

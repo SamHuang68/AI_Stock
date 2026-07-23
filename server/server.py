@@ -1606,6 +1606,31 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_universe_refresh()
         elif p == '/datasource/refresh':
             self._handle_datasource_refresh()
+        elif p == '/macro/refresh' or p.startswith('/macro/refresh/'):
+            # UI 一鍵更新追蹤圖（POST body 可帶 {id, dense}）
+            try:
+                n = int(self.headers.get('Content-Length') or 0)
+            except Exception:
+                n = 0
+            body = {}
+            if n > 0:
+                try:
+                    body = json.loads(self.rfile.read(n).decode('utf-8') or '{}')
+                except Exception:
+                    body = {}
+            qs = parse_qs(urlparse(self.path).query)
+            cid = (body.get('id') or (qs.get('id', [None])[0]) or 'ALL')
+            if p.startswith('/macro/refresh/'):
+                cid = p.split('/macro/refresh/', 1)[1].split('?')[0] or cid
+            dense = body.get('dense', True)
+            if isinstance(dense, str):
+                dense = dense.lower() in ('1', 'true', 'yes')
+            try:
+                import macro_track as mt
+                data = mt.refresh_chart(str(cid), dense=bool(dense))
+                self._ok(json.dumps(data, ensure_ascii=False).encode())
+            except Exception as e:
+                self._err('macro refresh failed: ' + str(e), 500)
         elif p == '/margin_ratio/backfill':
             self._handle_margin_ratio_backfill()
         elif p == '/ai-report':
@@ -4375,6 +4400,21 @@ class Handler(SimpleHTTPRequestHandler):
                     print('[macro_track] backfill-mix failed', e)
             threading.Thread(target=_run, daemon=True).start()
             self._ok(json.dumps({'ok': True, 'started': True, 'start': start, 'step': step}).encode()); return
+
+        # /macro/refresh 或 /macro/refresh/<ID> — UI 一鍵更新（免 CLI）
+        if series == 'refresh' or series.startswith('refresh/'):
+            qs = parse_qs(urlparse(self.path).query)
+            cid = 'ALL'
+            if series.startswith('refresh/'):
+                cid = series.split('/', 1)[1].strip() or 'ALL'
+            cid = (qs.get('id', [cid])[0] or cid).strip()
+            dense = (qs.get('dense', ['1'])[0] or '1').lower() in ('1', 'true', 'yes')
+            try:
+                import macro_track as mt
+                data = mt.refresh_chart(cid, dense=dense)
+                self._ok(json.dumps(data, ensure_ascii=False).encode()); return
+            except Exception as e:
+                self._err('macro refresh failed: ' + str(e), 500); return
 
         if series == '' or series == 'list':
             cat = [{'key': k, 'label': v['label'], 'unit': v.get('unit', ''), 'provider': v['p']}
