@@ -74,6 +74,8 @@ _backfill_state = {
 }
 _refresh_lock = threading.Lock()
 _last_today_refresh = 0.0
+_seed_ensured = False
+_seed_ensured_n = 0
 _TODAY_REFRESH_TTL = 300  # 今日值最短 5 分鐘重算一次
 
 
@@ -607,6 +609,10 @@ def _store_points(ds, points: Iterable[Tuple[int, float]]) -> int:
 def ensure_seed_loaded(ds=None) -> int:
     """把本地 seed CSV 灌進 DB。若 seed 不存在／過短，不採用第三方短序列當權威，
     改以近期 TWSE 官方重算（分子不含 ETF）建立可用起點。"""
+    global _seed_ensured, _seed_ensured_n
+    # 同進程重複呼叫（多條 API / worker 初始化）只灌一次，避免刷屏與重複 upsert
+    if _seed_ensured and _seed_ensured_n > 0:
+        return _seed_ensured_n
     ds = ds or _import_datastore()
     ds.init_db()
     points = load_seed_csv(SEED_CSV)
@@ -632,6 +638,8 @@ def ensure_seed_loaded(ds=None) -> int:
         return 0
     n = _store_points(ds, points)
     print(f'[margin] seed → DB {n} bars (file={SEED_CSV})')
+    _seed_ensured = True
+    _seed_ensured_n = n
     return n
 
 

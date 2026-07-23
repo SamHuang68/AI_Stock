@@ -26,6 +26,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -523,26 +524,61 @@ def _save_seed_csv(name: str, pts: List[Dict[str, Any]]) -> None:
 
 
 # ── FRED / Yahoo / NY Fed / H.15 / BLS adapters ───────────────
+# FRED 在部分網路（含台灣家用／雲端 egress）常連不上：一次失敗即熔斷整進程，
+# 改走 NY Fed / H.15 / BLS / Yahoo 備援，避免 8s×N 序列 Timeout 刷屏拖慢 mkt-bar。
+_FRED_LOCK = threading.Lock()
+_FRED_CIRCUIT_OPEN = False
+_FRED_CIRCUIT_REASON = ''
+
+
+def fred_circuit_open() -> bool:
+    return _FRED_CIRCUIT_OPEN or (
+        os.environ.get('MACRO_SKIP_FRED', '').strip().lower() in ('1', 'true', 'yes')
+    )
+
+
+def _fred_timeout_sec() -> float:
+    raw = os.environ.get('MACRO_FRED_TIMEOUT', '3').strip()
+    try:
+        return max(1.0, min(15.0, float(raw)))
+    except Exception:
+        return 3.0
+
+
 def _fred_points(series_id: str, years: int = 25) -> List[Dict[str, Any]]:
-    """FRED 優先；雲端常 HTTP/2 失敗或逾時，失敗回 []（短逾時，不重試）。"""
-    # 環境可設 MACRO_SKIP_FRED=1 直接跳過（雲端／受限網路）
-    if os.environ.get('MACRO_SKIP_FRED', '').strip() in ('1', 'true', 'yes'):
+    """FRED CSV；失敗回 []。熔斷後整進程不再打 FRED（備援／種子接手）。"""
+    global _FRED_CIRCUIT_OPEN, _FRED_CIRCUIT_REASON
+    if fred_circuit_open():
         return []
     cosd = (date.today() - timedelta(days=years * 366)).strftime('%Y-%m-%d')
     url = f'https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}&cosd={cosd}'
-    try:
-        req = urllib.request.Request(url, headers=UA_BROWSER)
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            text = resp.read().decode('utf-8', 'replace')
-    except Exception as e:
-        print('[macro_track] FRED', series_id, type(e).__name__, e)
-        return []
+    # 序列化：並發請求只允許一次實際連線；其餘在熔斷後立刻跳過
+    with _FRED_LOCK:
+        if fred_circuit_open():
+            return []
+        try:
+            req = urllib.request.Request(url, headers=UA_BROWSER)
+            with urllib.request.urlopen(req, timeout=_fred_timeout_sec()) as resp:
+                text = resp.read().decode('utf-8', 'replace')
+        except Exception as e:
+            _FRED_CIRCUIT_OPEN = True
+            _FRED_CIRCUIT_REASON = f'{type(e).__name__}: {e}'
+            print(
+                f'[macro_track] FRED circuit OPEN after {series_id} '
+                f'({_FRED_CIRCUIT_REASON}) — skip FRED for this process; use seed/fallback'
+            )
+            return []
     if not text or ('DATE' not in text[:80].upper() and 'observation' not in text[:80].lower()):
-        # 非 CSV（挑戰頁／空）
-        if text and len(text) < 500:
-            print('[macro_track] FRED non-csv', series_id, text[:120].replace('\n', ' '))
-        elif not text:
-            print('[macro_track] FRED empty', series_id)
+        # 非 CSV（挑戰頁／空）— 也視為 FRED 不可用，避免每序列重試
+        with _FRED_LOCK:
+            if not _FRED_CIRCUIT_OPEN:
+                _FRED_CIRCUIT_OPEN = True
+                snippet = (text[:120].replace('\n', ' ') if text else '(empty)')
+                _FRED_CIRCUIT_REASON = f'non-csv: {snippet}'
+                print(
+                    f'[macro_track] FRED circuit OPEN after {series_id} '
+                    f'({_FRED_CIRCUIT_REASON}) — skip FRED for this process; use seed/fallback'
+                )
         return []
     pts = []
     for ln in text.splitlines()[1:]:
@@ -729,13 +765,20 @@ def _filter_years(pts: List[Dict[str, Any]], years: int) -> List[Dict[str, Any]]
     return [p for p in pts if p.get('date', '') >= cut]
 
 
-def _resolve_series_points(s: Dict[str, Any], years: int) -> Tuple[List[Dict[str, Any]], str]:
+def _resolve_series_points(
+    s: Dict[str, Any], years: int, force_live: bool = False
+) -> Tuple[List[Dict[str, Any]], str]:
     """
-    解析單序列：seed → 主來源 → fallback。
-    若線上抓到較新資料，回寫 seed。
+    解析單序列：預設優先本地 seed（圖表秒開）；force_live=True（更新鈕）才打網路。
+    線上順序：FRED（可熔斷）→ fallback → 合併回寫 seed。
     """
     seed_name = s.get('seed')
     seed_pts = _load_seed_csv(seed_name)
+
+    # 一般讀圖：有種子就直接用，避免 FRED Timeout 拖慢每次切換
+    if seed_pts and not force_live:
+        return seed_pts, f'seed:{seed_name}'
+
     live: List[Dict[str, Any]] = []
     note = ''
 
@@ -790,7 +833,8 @@ def _resolve_series_points(s: Dict[str, Any], years: int) -> Tuple[List[Dict[str
 
 
 # ── Chart assembly ────────────────────────────────────────────
-def get_chart(chart_id: str, years: Optional[int] = None) -> Dict[str, Any]:
+def get_chart(chart_id: str, years: Optional[int] = None,
+              force_live: bool = False) -> Dict[str, Any]:
     cid = str(chart_id or '').upper()
     meta = CHARTS.get(cid)
     if not meta:
@@ -832,7 +876,7 @@ def get_chart(chart_id: str, years: Optional[int] = None) -> Dict[str, Any]:
 
     elif cid in ('__US_RATES_CREDIT__', '__US_CPI_FIN__'):
         for s in meta['series']:
-            pts, note = _resolve_series_points(s, yrs)
+            pts, note = _resolve_series_points(s, yrs, force_live=force_live)
             out_series.append({
                 'key': s['key'], 'name': s['name'], 'scale': s['scale'],
                 'color': s['color'], 'style': s.get('style', 'line'), 'unit': s.get('unit', ''),
@@ -1088,12 +1132,16 @@ def refresh_chart(chart_id: str, dense: bool = False, density: Optional[str] = N
 
     elif cid in ('__US_RATES_CREDIT__', '__US_CPI_FIN__'):
         try:
-            # 強制走線上備援並回寫 seed
-            data = get_chart(cid, years=int(CHARTS[cid].get('years') or 25))
+            # 強制走線上（FRED→備援）並回寫 seed；FRED 熔斷後仍走備援
+            data = get_chart(
+                cid,
+                years=int(CHARTS[cid].get('years') or 25),
+                force_live=True,
+            )
             counts = {s['key']: len(s.get('points') or []) for s in data.get('series') or []}
             result['actions'].append({'action': 'seed-us', 'counts': counts, 'sources': {
                 s['key']: s.get('source') for s in data.get('series') or []
-            }})
+            }, 'fredCircuit': fred_circuit_open()})
             result['count'] = sum(counts.values())
             result['ok'] = bool(data.get('ok'))
             if not result['ok']:
