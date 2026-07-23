@@ -48,6 +48,12 @@
   const _canonFail = {};   // 'SYM|MKT' -> true(抓不到，fallback 用畫面指標)
 
   // ---- 技術面分數 0~100（可傳入指定 ind/candles，否則用目前載入個股）----
+  // 優先用本機 /indicators tip（預熱快取）；失敗才打 Yahoo 1y。
+  function _n(v) {
+    if (v == null || v === '' || v === '-') return null;
+    const x = typeof v === 'number' ? v : parseFloat(v);
+    return Number.isFinite(x) ? x : null;
+  }
   function techScore(ind, candles) {
     ind = ind || ((typeof S !== 'undefined') && S.ind);
     candles = candles || (S.data && S.data.candles) || [];
@@ -55,11 +61,15 @@
     const cur = candles.length ? candles[candles.length - 1].close : null;
     let score = 50, parts = 0;
     const add = v => { score += v; parts++; };
-    if (ind.rsi14 != null) add(Math.max(-20, Math.min(20, (ind.rsi14 - 50) * 0.8)));
-    if (ind.macd != null && ind.macdSig != null) add(ind.macd > ind.macdSig ? 12 : -12);
-    if (ind.K != null && ind.D != null) add(ind.K > ind.D ? 8 : -8);
-    if (cur != null && ind.sma20 != null) add(cur > ind.sma20 ? 10 : -10);
-    if (ind.sma20 != null && ind.sma60 != null) add(ind.sma20 > ind.sma60 ? 10 : -10);
+    const rsi = _n(ind.rsi14);
+    const macd = _n(ind.macd), macdSig = _n(ind.macdSig != null ? ind.macdSig : ind.macd_sig);
+    const K = _n(ind.K != null ? ind.K : ind.k), D = _n(ind.D != null ? ind.D : ind.d);
+    const sma20 = _n(ind.sma20), sma60 = _n(ind.sma60);
+    if (rsi != null) add(Math.max(-20, Math.min(20, (rsi - 50) * 0.8)));
+    if (macd != null && macdSig != null) add(macd > macdSig ? 12 : -12);
+    if (K != null && D != null) add(K > D ? 8 : -8);
+    if (cur != null && sma20 != null) add(cur > sma20 ? 10 : -10);
+    if (sma20 != null && sma60 != null) add(sma20 > sma60 ? 10 : -10);
     if (!parts) return null;
     return Math.max(0, Math.min(100, Math.round(score)));
   }
@@ -73,14 +83,37 @@
     return null;                               // 計算中 → 顯示 —，算好後重繪
   }
 
-  // 抓「標準基底」1y 日線算技術面分數：槓桿/反向取本體（反向翻轉），
-  // 一般股票取自身。存快取後重繪雙軸卡。
+  // 抓「標準基底」技術面：① /indicators tip（預熱）② Yahoo 1y fallback
   async function computeCanonTech(sym, mkt) {
     const key = sym + '|' + (mkt || 'TW');
     try {
       const SRV = window.SERVER || 'http://localhost:18432';
       const lev = LEVERAGE_MAP[sym];
       const target = lev ? lev.base : sym;
+      const code = String(target).replace(/^\^/, '').replace(/\.TW$/i, '').replace(/\.TWO$/i, '');
+
+      // ① 本機 tip（增量預熱後幾乎秒回）
+      if (!/^\^/.test(target)) {
+        try {
+          const ir = await fetch(`${SRV}/indicators/${encodeURIComponent(code)}?market=${encodeURIComponent(mkt || 'TW')}&ensure=1`, { cache: 'no-store' });
+          if (ir.ok) {
+            const ij = await ir.json();
+            let sc = ij && (ij.techScore != null ? ij.techScore : (ij.ind && ij.ind.tech_score));
+            if (sc == null && ij && ij.ind) sc = techScore({
+              rsi14: ij.ind.rsi14, macd: ij.ind.macd, macdSig: ij.ind.macd_sig,
+              K: ij.ind.k, D: ij.ind.d, sma20: ij.ind.sma20, sma60: ij.ind.sma60,
+            }, [{ close: ij.ind.close }]);
+            if (sc != null && isFinite(sc)) {
+              if (lev && lev.inverse) sc = 100 - sc;
+              _canonTech[key] = sc;
+              _redrawDual(sym);
+              return;
+            }
+          }
+        } catch (e) { /* fall through */ }
+      }
+
+      // ② Yahoo 1y fallback（舊路徑）
       let yf;
       if (/^\^/.test(target)) yf = target;
       else if (lev) yf = /^[0-9]/.test(target) ? target + '.TW' : target;
@@ -94,20 +127,23 @@
       if (!ind) { _canonFail[key] = true; return; }
       let sc = techScore(ind, parsed.candles);
       if (sc == null) { _canonFail[key] = true; return; }
-      if (lev && lev.inverse) sc = 100 - sc;   // 反向 ETF 與本體相反
+      if (lev && lev.inverse) sc = 100 - sc;
       _canonTech[key] = sc;
-      if (typeof S !== 'undefined' && S.tab === 'stats' && (S.sym || '').toUpperCase() === sym) {
-        const card = document.querySelector('#rpanel .dual-card');
-        if (card) {
-          // 保留目前基本面分數（從畫面讀回）後重繪
-          card.outerHTML = dualCardHtml(null);
-          if (window.fetchFund) fetchFund(S.sym, S.mkt).then(f => {
-            const c2 = document.querySelector('#rpanel .dual-card');
-            if (c2 && S.tab === 'stats') c2.outerHTML = dualCardHtml(f && f.score != null ? f.score : null);
-          });
-        }
-      }
+      _redrawDual(sym);
     } catch (e) { _canonFail[key] = true; }
+  }
+
+  function _redrawDual(sym) {
+    if (typeof S !== 'undefined' && S.tab === 'stats' && (S.sym || '').toUpperCase() === sym) {
+      const card = document.querySelector('#rpanel .dual-card');
+      if (card) {
+        card.outerHTML = dualCardHtml(null);
+        if (window.fetchFund) fetchFund(S.sym, S.mkt).then(f => {
+          const c2 = document.querySelector('#rpanel .dual-card');
+          if (c2 && S.tab === 'stats') c2.outerHTML = dualCardHtml(f && f.score != null ? f.score : null);
+        });
+      }
+    }
   }
   const scoreCol = s => window.Colors ? Colors.quality(s, 65, 45) : (s == null ? 'var(--tlo)' : s >= 65 ? 'var(--red)' : s >= 45 ? 'var(--orange)' : 'var(--green)');
   const techTag = s => s == null ? '—' : s >= 65 ? '🟢 偏多' : s >= 45 ? '⚖️ 中性' : '🔴 偏空';

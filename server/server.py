@@ -1494,6 +1494,10 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_quote(sym)
         elif p == '/bars' or p.startswith('/bars?'):
             self._handle_bars()
+        elif p == '/indicators' or p.startswith('/indicators/') or p.startswith('/indicators?'):
+            self._handle_indicators()
+        elif p == '/prefetch' or p.startswith('/prefetch?'):
+            self._handle_prefetch_get()
         elif p == '/universe' or p.startswith('/universe?'):
             self._handle_universe()
         elif p == '/datasources' or p.startswith('/datasources?'):
@@ -1618,6 +1622,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_universe_refresh()
         elif p == '/datasource/refresh':
             self._handle_datasource_refresh()
+        elif p == '/prefetch':
+            self._handle_prefetch_post()
         elif p == '/ai-report':
             self._handle_ai_report()
         elif p == '/etf-reason':
@@ -3347,11 +3353,13 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _handle_bars(self):
         """v4.0: GET /bars?sym=2330&market=TW → 本機 DB 日線 {candles:[{time,open,high,low,close,volume}]}。
-           DB 沒有/太少則即時抓 Yahoo 5y 並寫回(供回測深度歷史用)。"""
+           DB 沒有/太少則即時抓 Yahoo 5y 並寫回(供回測深度歷史用)。
+           ?with=ind 時附上 ind_tip（長歷史指標快取）。"""
         try:
             qs = parse_qs(urlparse(self.path).query)
             sym = (qs.get('sym', [''])[0]).strip()
             market = (qs.get('market', ['TW'])[0]).strip() or 'TW'
+            with_ind = (qs.get('with', [''])[0] or '').lower() in ('ind', '1', 'tip', 'indicators')
             if not sym:
                 self._err('missing sym', 400); return
             code = sym.replace('.TW', '').replace('.TWO', '')
@@ -3368,9 +3376,138 @@ class Handler(SimpleHTTPRequestHandler):
                 print('[bars] datastore failed:', e)
             candles = [{'time': r[0], 'open': r[1], 'high': r[2], 'low': r[3],
                         'close': r[4], 'volume': r[5]} for r in (rows or [])]
-            self._ok(json.dumps({'sym': code, 'candles': candles}).encode())
+            out = {'sym': code, 'candles': candles, 'source': 'db'}
+            if with_ind:
+                try:
+                    import ind_cache as ic
+                    tip = ic.get_tip(code)
+                    if tip is None or ic.tip_stale(code):
+                        tip = ic.recompute_tip(code, market)
+                    out['ind'] = tip
+                except Exception as e:
+                    out['ind'] = None
+                    out['indError'] = str(e)
+            self._ok(json.dumps(out, ensure_ascii=False).encode())
         except Exception as e:
             self._err('bars failed: ' + str(e), 500)
+
+    def _handle_indicators(self):
+        """GET /indicators/<sym>?market=TW&ensure=1
+           回傳本機 ind_tip（RSI/SMA/MACD/KD/techScore）。
+           ensure=1：若落後則增量補 bar + 重算（不重抓整段歷史）。"""
+        try:
+            path = self.path.split('?')[0]
+            qs = parse_qs(urlparse(self.path).query)
+            sym = ''
+            if path.startswith('/indicators/'):
+                sym = path[len('/indicators/'):].strip()
+            if not sym:
+                sym = (qs.get('sym', [''])[0] or '').strip()
+            market = (qs.get('market', ['TW'])[0] or 'TW').strip()
+            ensure = (qs.get('ensure', ['0'])[0] or '0').lower() in ('1', 'true', 'yes')
+            depth = qs.get('depth', ['5y'])[0] or '5y'
+            if not sym:
+                self._err('missing sym', 400); return
+            code = sym.replace('.TW', '').replace('.TWO', '').upper()
+            import ind_cache as ic
+            if ensure:
+                r = ic.ensure_symbol(code, market, depth=depth, force=False)
+                tip = r.get('tip')
+                self._ok(json.dumps({
+                    'ok': bool(r.get('ok')),
+                    'symbol': code,
+                    'market': market,
+                    'ind': tip,
+                    'techScore': r.get('techScore'),
+                    'actions': r.get('actions'),
+                    'source': 'ensure',
+                }, ensure_ascii=False).encode())
+                return
+            tip = ic.get_tip(code)
+            if tip is None:
+                # 有 bar 就直接重算，不必等 ensure
+                tip = ic.recompute_tip(code, market)
+            self._ok(json.dumps({
+                'ok': tip is not None,
+                'symbol': code,
+                'market': market,
+                'ind': tip,
+                'techScore': (tip or {}).get('tech_score'),
+                'source': 'cache' if tip else 'empty',
+            }, ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('indicators failed: ' + str(e), 500)
+
+    def _handle_prefetch_get(self):
+        """GET /prefetch?syms=2330,2308&market=TW — 輕量狀態／觸發背景預熱。"""
+        qs = parse_qs(urlparse(self.path).query)
+        syms = [s.strip() for s in (qs.get('syms', [''])[0] or '').split(',') if s.strip()]
+        market = (qs.get('market', ['TW'])[0] or 'TW').strip()
+        if not syms:
+            try:
+                import ind_cache as ic
+                self._ok(json.dumps({'ok': True, 'status': ic.status_summary()}, ensure_ascii=False).encode())
+            except Exception as e:
+                self._err(str(e), 500)
+            return
+        # 背景跑，立刻回
+        items = [{'t': s, 'm': market} for s in syms]
+        depth = qs.get('depth', ['5y'])[0] or '5y'
+
+        def _run():
+            try:
+                import ind_cache as ic
+                r = ic.prefetch_many(items, depth=depth, workers=4)
+                print('[prefetch] done', r.get('okCount'), '/', r.get('count'), r.get('elapsedMs'), 'ms')
+            except Exception as e:
+                print('[prefetch] failed', e)
+
+        threading.Thread(target=_run, daemon=True).start()
+        self._ok(json.dumps({'ok': True, 'started': True, 'count': len(items), 'depth': depth}, ensure_ascii=False).encode())
+
+    def _handle_prefetch_post(self):
+        """POST /prefetch body:{syms:[{t,m}], depth?, force?, sync?}
+           sync=true 同步回結果；否則背景預熱（開機／自選變更用）。"""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length) or b'{}')
+        except Exception as e:
+            self._err('bad body: ' + str(e), 400); return
+        items = body.get('syms') or body.get('symbols') or []
+        if isinstance(items, str):
+            items = [{'t': s.strip(), 'm': 'TW'} for s in items.split(',') if s.strip()]
+        norm = []
+        for it in items:
+            if isinstance(it, str):
+                norm.append({'t': it, 'm': 'TW'})
+            elif isinstance(it, dict):
+                t = (it.get('t') or it.get('sym') or '').strip()
+                if t:
+                    norm.append({'t': t, 'm': (it.get('m') or it.get('market') or 'TW')})
+        if not norm:
+            self._err('syms empty', 400); return
+        depth = body.get('depth') or '5y'
+        force = bool(body.get('force'))
+        sync = bool(body.get('sync'))
+        if sync:
+            try:
+                import ind_cache as ic
+                r = ic.prefetch_many(norm, depth=depth, force=force, workers=4)
+                self._ok(json.dumps(r, ensure_ascii=False).encode())
+            except Exception as e:
+                self._err('prefetch failed: ' + str(e), 500)
+            return
+
+        def _run():
+            try:
+                import ind_cache as ic
+                r = ic.prefetch_many(norm, depth=depth, force=force, workers=4)
+                print('[prefetch] done', r.get('okCount'), '/', r.get('count'), r.get('elapsedMs'), 'ms')
+            except Exception as e:
+                print('[prefetch] failed', e)
+
+        threading.Thread(target=_run, daemon=True).start()
+        self._ok(json.dumps({'ok': True, 'started': True, 'count': len(norm), 'depth': depth}, ensure_ascii=False).encode())
 
     def _handle_universe(self):
         """GET /universe → 全台股+美股 code↔name lookup(權威判市場 / 補名 / 驗存在)。讀快取,缺則建。"""

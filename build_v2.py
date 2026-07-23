@@ -12,9 +12,10 @@ SRC  = os.path.join(ROOT, 'stock_terminal.html')
 DST  = os.path.join(ROOT, 'stock_terminal_v2.html')
 
 # Scripts injected (in order):
-V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,須最先載入)
+V2_SCRIPTS = [              'src/core/colors_v3.js',   # 顏色管理表(單一真理來源,須最先載入)
               'src/core/market_v3.js',   # 台股/美股 universe lookup(權威判市場+名稱,可更新)
               'src/core/fields_v3.js',   # 欄位型別定義+全域滾輪防護(單一真理來源,須最先載入)
+              'src/core/prefetch_v3.js', # 自選長歷史指標增量預熱（/prefetch + ind_tip）
               'src/ui/share_v3.js',      # 分析結果寄送 Telegram/Email(單一來源,各分析面板共用)
               'src/ui/datasources_v3.js',# 資料源管理表 + 一鍵更新
               'src/core/etf_flow_tip_v3.js',  # 自選股 ETF 增減碼徽章浮動視窗(列出是哪幾檔 ETF)

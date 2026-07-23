@@ -105,6 +105,14 @@ def _st_catalog():
     return {'updated': _mtime(p), 'count': n}
 
 
+def _st_ind_tip():
+    try:
+        import ind_cache as ic
+        return ic.status_summary()
+    except Exception:
+        return {'updated': 0, 'count': 0}
+
+
 # ── Registry(順序即顯示順序) ──────────────────────────────
 def _registry():
     return [
@@ -113,7 +121,11 @@ def _registry():
          'desc': '全台股(含 ETF/上櫃)+ 美股 代號↔名稱,判市場與驗證存在', 'status': _st_universe()},
         {'id': 'db', 'name': '本機日線歷史庫', 'provider': 'Yahoo Finance v8',
          'reliability': 'vendor', 'kind': 'db', 'updatable': True,
-         'desc': '全市場日線(選股/回測/投組共用);更新=補近月', 'status': _st_db()},
+         'desc': '全市場日線增量更新(近月);選股/回測/投組/指標預熱共用', 'status': _st_db()},
+        {'id': 'ind_tip', 'name': '技術指標 tip 快取', 'provider': '本機 market.db · ind_tip',
+         'reliability': 'local', 'kind': 'db', 'updatable': True,
+         'desc': 'RSI/SMA/MACD/KD/techScore 長歷史 tip；只對落後檔增量重算',
+         'status': _st_ind_tip()},
         {'id': 'etf', 'name': '主動 ETF 每日持股', 'provider': 'MoneyDJ + TWSE',
          'reliability': 'vendor', 'kind': 'file', 'updatable': True,
          'desc': '主動 ETF 完整持股快照,算每日加減碼 delta', 'status': _st_etf()},
@@ -145,7 +157,11 @@ def refresh(sid):
         except Exception as e:
             return {'ok': False, 'error': str(e)}
     if sid == 'db':
-        return _spawn('datastore.py', 'update')
+        # 修正：應跑 update-universe（近月增量），不是無參數 update
+        return _spawn('datastore.py', 'update-universe')
+    if sid == 'ind_tip':
+        # 對已有 bars 的代號重算落後 tip（背景）
+        return _spawn('datastore.py', 'update-universe')
     if sid == 'etf':
         return _spawn('etf_delta_tracker.py')
     if sid == 'chip':
