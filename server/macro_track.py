@@ -887,7 +887,7 @@ def get_chart(chart_id: str, years: Optional[int] = None,
     else:
         raise KeyError(cid)
 
-    return {
+    out = {
         'id': meta['id'],
         'name': meta['name'],
         'shortName': meta['shortName'],
@@ -896,7 +896,16 @@ def get_chart(chart_id: str, years: Optional[int] = None,
         'years': yrs,
         'series': out_series,
         'ok': any(len(s.get('points') or []) > 0 for s in out_series),
+        'defaultViewMode': 'rebase' if cid in ('__US_RATES_CREDIT__', '__US_CPI_FIN__') else 'raw',
     }
+    # 美總經圖：附加市場風險評分（利率／信用／通膨／金融股）
+    if cid in ('__US_RATES_CREDIT__', '__US_CPI_FIN__'):
+        try:
+            import market_risk as mr
+            mr.attach_risk_to_chart(cid, out)
+        except Exception as e:
+            print('[macro_track] market_risk attach failed:', e)
+    return out
 
 
 def points_to_yf_like(points: List[Dict[str, Any]], symbol: str, name: str) -> Dict[str, Any]:

@@ -99,6 +99,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 #ci-ohlc .ma-row{font-size:9px;color:var(--tlo);margin-top:3px}
 #ci-ohlc .ma-row span{margin-right:8px}
 .ci-chg{font-size:11px;margin-top:2px}
+#market-score-bar{pointer-events:auto}
+#market-score-bar .msb-mode{display:inline-block;padding:1px 5px;margin-left:2px;border:1px solid rgba(71,85,105,.7);border-radius:2px;color:#64748b;font-size:9px;letter-spacing:.3px}
 
 /* ── INDICATOR BAR (16 cells in 8-col × 2-row grid, no scroll) ── */
 .ig{display:grid;grid-template-rows:repeat(2,34px);grid-auto-flow:column;grid-auto-columns:1fr;width:100%}
@@ -236,6 +238,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
           <div class="ci-price" id="ci-price">--</div>
           <div class="ci-chg" id="ci-chg"></div>
           <div style="font-size:9px;color:var(--tlo);margin-top:3px" id="ci-name"></div>
+          <div id="market-score-bar" style="display:none"></div>
           <div id="ci-ohlc"></div>
         </div>
       </div>

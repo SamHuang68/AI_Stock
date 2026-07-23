@@ -5,6 +5,7 @@
 //   • TW：月營收 當月 / YoY / MoM / 累計YoY + 三率（TWSE OpenAPI）
 //   • US：營收／盈餘成長 + 三率（Yahoo keystats，與 /valuation 同源）
 //   • 台股大盤（^TWII/^TWOII／融資維持）：大盤體質（量能+法人+融資+估值）
+//   • 美總經（美利率債／CPI金融）：市場風險白話摘要（詳細公式見主圖 ?）
 //   • 基本面評分 0~100（個股：成長+獲利；大盤：四支柱平均）
 // 與技術面雙軸卡並列。
 // ============================================================
@@ -16,6 +17,16 @@
     if (!sym) return null;
     mkt = (mkt || 'TW').toUpperCase();
     const key = sym.toUpperCase() + '|' + mkt;
+    // 市場風險／大盤體質可能隨視窗重算 → 優先用主圖最新 payload（須同代號）
+    if (window.S && S._fundPanelPayload && String(S.sym || '').toUpperCase() === String(sym).toUpperCase()) {
+      const live = S._fundPanelPayload;
+      const liveSym = String((live && (live.symbol || live.code)) || (S && S._marketChartId) || '').toUpperCase();
+      const want = String(sym).toUpperCase();
+      if (live && (live.kind === 'market' || live.kind === 'market_risk') &&
+          (!liveSym || liveSym === want || liveSym.replace(/^\^/, '') === want.replace(/^\^/, ''))) {
+        return live;
+      }
+    }
     if (_fCache[key]) return _fCache[key];
     try {
       const r = await fetch(`${SRV}/fundamental/${encodeURIComponent(sym)}`, { cache: 'no-store' });
@@ -37,9 +48,21 @@
     : (v == null ? 'var(--tlo)' : v < 8 ? 'var(--orange)' : 'var(--thi)');
   const pillarCol = s => window.Colors ? Colors.quality(s, 70, 50)
     : (s == null ? 'var(--tlo)' : s >= 70 ? 'var(--red)' : s >= 50 ? 'var(--orange)' : 'var(--green)');
+  const riskCol = s => {
+    if (s == null) return 'var(--tlo)';
+    if (s >= 70) return '#f87171';
+    if (s >= 55) return '#fb923c';
+    if (s >= 45) return '#94a3b8';
+    return '#4ade80';
+  };
 
   function scoreBadge(s, kind) {
     if (s == null) return '';
+    if (kind === 'market_risk') {
+      const col = riskCol(s);
+      const lbl = s >= 70 ? '風險偏高' : s >= 55 ? '風險中偏高' : s >= 45 ? '風險中性' : '風險偏低';
+      return `<span style="display:inline-block;padding:1px 8px;border-radius:10px;background:${col};color:#0b1220;font-weight:700;font-size:11px">${s} ${lbl}</span>`;
+    }
     const col = window.Colors ? Colors.quality(s, 70, 50) : (s >= 70 ? 'var(--red)' : s >= 50 ? 'var(--orange)' : 'var(--green)');
     const lbl = kind === 'market'
       ? (s >= 70 ? '偏熱／偏強' : s >= 50 ? '中性' : '偏弱／偏冷')
@@ -47,25 +70,34 @@
     return `<span style="display:inline-block;padding:1px 8px;border-radius:10px;background:${col};color:#0b1220;font-weight:700;font-size:11px">${s} ${lbl}</span>`;
   }
 
-  function renderMarket(f) {
-    const title = f.title || '大盤體質';
+  /** STATS：只放白話摘要；完整公式在主圖「?」 */
+  function renderPlainMarket(f) {
+    const title = f.title || (f.kind === 'market_risk' ? '市場風險' : '大盤體質');
+    const kind = f.kind === 'market_risk' ? 'market_risk' : 'market';
     let h = '';
     if (f.score != null)
-      h += `<div class="stat-row" style="font-weight:700"><span class="stat-k">${title}評分</span><span class="stat-v">${scoreBadge(f.score, 'market')}</span></div>`;
+      h += `<div class="stat-row" style="font-weight:700"><span class="stat-k">${title}</span><span class="stat-v">${scoreBadge(f.score, kind)}</span></div>`;
+    const plain = f.plainSummary || f.summary || '';
+    if (plain) {
+      h += `<div style="padding:10px 12px;color:var(--text);font-family:monospace;font-size:10.5px;line-height:1.65">${plain}</div>`;
+    }
     const rows = f.marketRows || [];
     if (rows.length) {
-      h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span class="stat-k">四大支柱</span><span class="stat-v">量能·法人·融資·估值</span></div>`;
+      h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span class="stat-k">支柱一覽</span><span class="stat-v">點主圖 ? 看完整算法</span></div>`;
       rows.forEach(row => {
         const sc = row.score;
+        const col = kind === 'market_risk' ? riskCol(sc) : pillarCol(sc);
         h += `<div class="stat-row"><span class="stat-k">${row.k}</span>` +
           `<span class="stat-v">${row.v}` +
-          (sc != null ? ` <span style="color:${pillarCol(sc)};font-size:9px">(${Math.round(sc)})</span>` : '') +
+          (sc != null ? ` <span style="color:${col};font-size:9px">(${Math.round(sc)})</span>` : '') +
           `</span></div>`;
       });
-    } else {
-      h += `<div style="padding:10px 12px;color:var(--tlo);font-family:monospace;font-size:10px">大盤資料暫缺（量能／法人／融資／本益比）</div>`;
+    } else if (!plain) {
+      h += `<div style="padding:10px 12px;color:var(--tlo);font-family:monospace;font-size:10px">資料暫缺</div>`;
     }
-    h += `<div style="padding:6px 12px 0;font-family:monospace;font-size:8.5px;color:var(--tf);line-height:1.5">資料：${f._source || 'TWSE marketflow + 融資維持率 + 全市場本益比中位'}（非個股財報）</div>`;
+    h += `<div style="padding:6px 12px 0;font-family:monospace;font-size:8.5px;color:var(--tf);line-height:1.5">` +
+      `資料：${f._source || '—'} · 詳細公式請點主圖資訊列「?」` +
+      `</div>`;
     return h;
   }
 
@@ -84,7 +116,7 @@
   }
 
   function render(f) {
-    if (f && f.kind === 'market') return renderMarket(f);
+    if (f && (f.kind === 'market' || f.kind === 'market_risk')) return renderPlainMarket(f);
     const isUs = f && (f.market === 'US' || (S && S.mkt === 'US'));
     if (!f || (!f.revenue && !f.income)) return renderEmpty(f);
     let h = '';
@@ -133,7 +165,9 @@
         const stats = document.getElementById('rpanel');
         if (!stats || S.tab !== 'stats') return;
         const ex = document.getElementById('fund-sect');
-        const sectTitle = (f && f.kind === 'market') ? (f.title || '大盤體質') : '基本面';
+        const sectTitle = (f && (f.kind === 'market' || f.kind === 'market_risk'))
+          ? (f.title || (f.kind === 'market_risk' ? '市場風險' : '大盤體質'))
+          : '基本面';
         const html = `<div id="fund-sect"><div class="stat-sect">${sectTitle} · ${S.sym}</div>${render(f)}</div>`;
         if (ex) ex.outerHTML = html;
         else stats.insertAdjacentHTML('beforeend', html);

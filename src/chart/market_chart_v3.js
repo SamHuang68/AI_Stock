@@ -11,9 +11,58 @@
 (function MarketChartV3() {
   'use strict';
 
-  const VER = '3.3.1';
+  const VER = '3.4.0';
   const LOG = (...a) => console.log('%c[MarketChart ' + VER + ']', 'color:#64748b', ...a);
   const WARN = (...a) => console.warn('[MarketChart]', ...a);
+  const VIEW_MODE_LS = 'mc-view-mode';
+  /** 美風險圖預設「對齊」基準 100；其他多序列預設原始 */
+  function defaultViewMode(defId) {
+    const id = String(defId || '').toUpperCase();
+    if (id === '__US_RATES_CREDIT__' || id === '__US_CPI_FIN__') return 'rebase';
+    return 'raw';
+  }
+  function getViewMode(defId) {
+    try {
+      const all = JSON.parse(localStorage.getItem(VIEW_MODE_LS) || '{}');
+      const v = all[String(defId || '').toUpperCase()];
+      if (v === 'rebase' || v === 'raw') return v;
+    } catch (e) {}
+    return defaultViewMode(defId);
+  }
+  function setViewMode(defId, mode) {
+    try {
+      const all = JSON.parse(localStorage.getItem(VIEW_MODE_LS) || '{}');
+      all[String(defId || '').toUpperCase()] = mode;
+      localStorage.setItem(VIEW_MODE_LS, JSON.stringify(all));
+    } catch (e) {}
+  }
+  /** 各序列以第一筆有效值為 100 對齊（相對趨勢） */
+  function rebaseSeriesList(seriesList) {
+    return (seriesList || []).map(s => {
+      const pts = s.points || [];
+      let base = null;
+      for (const p of pts) {
+        if (p && p.value != null && isFinite(p.value) && Number(p.value) !== 0) {
+          base = Number(p.value);
+          break;
+        }
+      }
+      if (base == null) {
+        return Object.assign({}, s, { points: pts.slice(), _rebased: false, _base: null });
+      }
+      const next = pts.map(p => {
+        if (!p || p.value == null || !isFinite(p.value)) return p;
+        return { date: p.date, value: (Number(p.value) / base) * 100 };
+      });
+      return Object.assign({}, s, {
+        points: next,
+        unit: '', // 對齊後為指數 100
+        _rebased: true,
+        _base: base,
+        _rawUnit: s.unit,
+      });
+    });
+  }
 
   /**
    * 專業終端配色（低飽和、細線、無面積填色）
@@ -517,13 +566,14 @@
    * 底部 chip 圖例（TradingView 風格）：點擊開關；含全開／全關
    * 不佔大塊卡片，不遮主圖。
    */
-  function ensureSeriesPanel(def, apiSeries) {
+  function ensureSeriesPanel(def, apiSeries, viewMode) {
     const wrap = document.getElementById('chart-wrap');
     if (!wrap || !def || !apiSeries || !apiSeries.length) {
       hideSeriesPanel();
       return;
     }
     if (getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+    viewMode = viewMode || getViewMode(def.id);
 
     let panel = document.getElementById('market-chart-series-panel');
     if (!panel) {
@@ -552,14 +602,19 @@
       'font:10px/1.2 JetBrains Mono,ui-monospace,monospace',
     ].join(';');
 
+    function chipLastStr(e) {
+      if (viewMode === 'rebase') return Number(e.last).toFixed(1);
+      return e.meta.unit === '%'
+        ? Number(e.last).toFixed(2)
+        : Number(e.last).toLocaleString('en-US', { maximumFractionDigits: 1 });
+    }
+
     function chipHtml(e) {
       const k = e.meta.key;
       const col = e.meta.color || '#94a3b8';
       const label = shorts[k] || e.meta.name;
       const on = e.visible;
-      const lastStr = e.meta.unit === '%'
-        ? Number(e.last).toFixed(2)
-        : Number(e.last).toLocaleString('en-US', { maximumFractionDigits: 1 });
+      const lastStr = chipLastStr(e);
       return `<button type="button" class="mc-chip" data-series-key="${k}" title="${e.meta.name}（${e.meta.scale === 'right' ? '右軸' : '左軸'}）· 點擊開關"` +
         ` style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:2px;cursor:pointer;` +
         `font:inherit;border:1px solid ${on ? col + '66' : 'rgba(51,65,85,.7)'};` +
@@ -587,9 +642,7 @@
         if (!entry) return;
         const col = entry.meta.color || '#94a3b8';
         const on = entry.visible;
-        const lastStr = entry.meta.unit === '%'
-          ? Number(entry.last).toFixed(2)
-          : Number(entry.last).toLocaleString('en-US', { maximumFractionDigits: 1 });
+        const lastStr = chipLastStr(entry);
         btn.style.borderColor = on ? col + '66' : 'rgba(51,65,85,.7)';
         btn.style.background = on ? 'rgba(15,20,30,.88)' : 'rgba(10,14,20,.55)';
         btn.style.color = on ? '#cbd5e1' : '#475569';
@@ -1031,6 +1084,72 @@
     } catch (e) { return null; }
   }
 
+  function formatSeriesValue(meta, val, viewMode) {
+    if (val == null || !isFinite(val)) return '—';
+    if (viewMode === 'rebase') {
+      return Number(val).toFixed(1);
+    }
+    if (meta && meta.unit === '%') return Number(val).toFixed(2) + '%';
+    return Number(val).toLocaleString('en-US', { maximumFractionDigits: 2 });
+  }
+
+  /**
+   * 依目前可見時間窗裁切原始序列，供市場風險重算
+   */
+  function sliceSeriesForVisible(rawSeries, chart) {
+    if (!chart || !rawSeries) return rawSeries || [];
+    let from = null, to = null;
+    try {
+      const vr = chart.timeScale().getVisibleRange();
+      if (vr) { from = vr.from; to = vr.to; }
+    } catch (e) {}
+    if (from == null || to == null) return rawSeries;
+    const userTzOffset = (window.S && S.tzOffset != null)
+      ? S.tzOffset
+      : (-new Date().getTimezoneOffset() * 60);
+    return rawSeries.map(s => {
+      const pts = [];
+      for (const p of s.points || []) {
+        const u = dateToUnix(p.date);
+        if (u == null) continue;
+        const t = u + userTzOffset;
+        if (t >= from && t <= to) pts.push(p);
+      }
+      return Object.assign({}, s, { points: pts.length ? pts : (s.points || []) });
+    });
+  }
+
+  function syncRiskFromPayload(def, payload, chart, opts) {
+    opts = opts || {};
+    const id = def && def.id;
+    if (!id || (id !== '__US_RATES_CREDIT__' && id !== '__US_CPI_FIN__')) return;
+    const raw = (payload && payload.series) || [];
+    const sliced = sliceSeriesForVisible(raw, chart);
+    let risk = null;
+    if (window.MarketScoreBar && typeof MarketScoreBar.recomputeFromSeries === 'function') {
+      risk = MarketScoreBar.recomputeFromSeries(id, sliced);
+      if (payload && payload.risk && payload.risk.algo && risk) risk.algo = payload.risk.algo;
+    } else if (payload && payload.risk) {
+      risk = payload.risk;
+    }
+    if (!risk) return;
+    if (window.S) {
+      S._marketRisk = risk;
+      S._marketRiskAlgo = risk.algo || (payload.risk && payload.risk.algo) || S._marketRiskAlgo;
+      S._fundPanelPayload = risk;
+    }
+    if (window.MarketScoreBar && typeof MarketScoreBar.applyRiskUpdate === 'function') {
+      MarketScoreBar.applyRiskUpdate(risk, {
+        sym: id,
+        viewMode: (window.S && S._marketViewMode) || getViewMode(id),
+        showModeToggle: true,
+      });
+    }
+    if (opts.toast && typeof window.notifyToast === 'function') {
+      notifyToast('視圖已更新', '分數已依目前視圖重算', { level: 'info', skipDesktop: true });
+    }
+  }
+
   /**
    * 多序列 MacroMicro 風格渲染（左／右軸、折線／柱狀／面積）
    * @param {object} def MarketChart def
@@ -1039,8 +1158,11 @@
   function renderMulti(def, payload) {
     const wrap = document.getElementById('chart-wrap');
     if (!wrap || typeof LightweightCharts === 'undefined') { WARN('no chart env'); return; }
-    const seriesList = (payload && payload.series) || [];
-    if (!seriesList.length) { WARN('no series in payload'); return; }
+    const rawSeries = (payload && payload.series) || [];
+    if (!rawSeries.length) { WARN('no series in payload'); return; }
+
+    const viewMode = getViewMode(def.id);
+    const seriesList = viewMode === 'rebase' ? rebaseSeriesList(rawSeries) : rawSeries.map(s => Object.assign({}, s, { points: (s.points || []).slice() }));
 
     if (window.S && S.chart) {
       try { S.chart.remove(); } catch (e) {}
@@ -1048,11 +1170,21 @@
     }
 
     const userTzOffset = -new Date().getTimezoneOffset() * 60;
-    if (window.S) S.tzOffset = userTzOffset;
+    if (window.S) {
+      S.tzOffset = userTzOffset;
+      S._marketViewMode = viewMode;
+      S._marketRawPayload = payload;
+      S._marketChartId = def.id;
+    }
     const tz = (t) => (t == null ? t : t + userTzOffset);
     const hasRight = seriesList.some(s => s.scale === 'right' && (s.points || []).length);
     const stylePack = SERIES_STYLE[def.id] || {};
     const LineStyle = (LightweightCharts.LineStyle) || { Solid: 0, Dotted: 1, Dashed: 2 };
+    // 對齊模式：左右軸皆為相對指數，軸標改寫
+    const axisPack = Object.assign({}, stylePack);
+    if (viewMode === 'rebase') {
+      axisPack._axis = { left: 'L · 對齊100', right: hasRight ? 'R · 對齊100' : '' };
+    }
 
     const chart = LightweightCharts.createChart(wrap, {
       width: wrap.clientWidth,
@@ -1104,10 +1236,25 @@
       S._marketChartId = def.id;
       S._marginMacroChart = false;
       S._marketMulti = true;
+      if (payload && payload.risk) {
+        S._marketRisk = payload.risk;
+        S._marketRiskAlgo = payload.risk.algo || null;
+      }
     }
 
-    const apiSeries = []; // {meta, seriesObj, byTime, visible, last, prev}
+    const apiSeries = []; // {meta, seriesObj, byTime, visible, last, prev, rawByTime}
     let primaryApi = null;
+    // 原始數值對照（十字游標在對齊模式可附帶原始）
+    const rawByKey = {};
+    for (const rs of rawSeries) {
+      const m = new Map();
+      for (const p of rs.points || []) {
+        const u = dateToUnix(p.date);
+        if (u == null || p.value == null || !isFinite(p.value)) continue;
+        m.set(tz(u), p.value);
+      }
+      rawByKey[rs.key] = m;
+    }
 
     for (const s of seriesList) {
       const pts = s.points || [];
@@ -1126,12 +1273,14 @@
       const scaleId = s.scale === 'right' ? 'right' : 'left';
       const ov = stylePack[s.key] || {};
       const color = ov.color || s.color || '#38BDF8';
-      const isHist = s.style === 'histogram' || s.style === 'bar';
+      const isHist = (s.style === 'histogram' || s.style === 'bar') && viewMode !== 'rebase';
       const useArea = false; // 專業線圖：不用面積填色
       let obj;
-      const fmt = s.unit === '%'
-        ? { type: 'custom', formatter: v => (v != null && isFinite(v) ? v.toFixed(2) + '%' : '') }
-        : { type: 'price', precision: 2, minMove: 0.01 };
+      const fmt = (viewMode === 'rebase')
+        ? { type: 'price', precision: 1, minMove: 0.1 }
+        : (s.unit === '%'
+          ? { type: 'custom', formatter: v => (v != null && isFinite(v) ? v.toFixed(2) + '%' : '') }
+          : { type: 'price', precision: 2, minMove: 0.01 });
       const showLast = ov.lastValueVisible !== false;
 
       if (isHist) {
@@ -1179,6 +1328,7 @@
         meta: s, seriesObj: obj, byTime, visible: true,
         last: lineData[lineData.length - 1].value,
         prev: lineData.length >= 2 ? lineData[lineData.length - 2].value : null,
+        rawByTime: rawByKey[s.key] || new Map(),
       };
       apiSeries.push(entry);
       if (!primaryApi && scaleId === 'left') primaryApi = entry;
@@ -1194,20 +1344,6 @@
     // 多序列：圖例改底部 chip，清空右側舊 legend 避免重複
     const lg = document.getElementById('chart-legend');
     if (lg) lg.innerHTML = '';
-
-    function visibleRowsHtml(atTime) {
-      const rows = [];
-      for (const e of apiSeries) {
-        if (!e.visible) continue;
-        const val = (atTime != null && e.byTime.has(atTime)) ? e.byTime.get(atTime) : e.last;
-        if (val == null) continue;
-        rows.push(`<div style="display:flex;justify-content:space-between;gap:12px;color:${e.meta.color};margin-top:2px">` +
-          `<span>${e.meta.name}</span>` +
-          `<span style="font-weight:700">${e.meta.unit === '%' ? Number(val).toFixed(2) + '%' : Number(val).toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>` +
-          `</div>`);
-      }
-      return rows.join('');
-    }
 
     chart.subscribeCrosshairMove(param => {
       const ohlcEl = document.getElementById('ci-ohlc');
@@ -1226,10 +1362,21 @@
         const v = pt && pt.value != null ? pt.value : e.byTime.get(param.time);
         if (v == null) continue;
         if (e === primaryApi) primVal = v;
-        rows.push(`<div style="display:flex;justify-content:space-between;gap:12px;color:${e.meta.color};margin-top:2px">` +
+        let line = `<div style="display:flex;justify-content:space-between;gap:12px;color:${e.meta.color};margin-top:2px">` +
           `<span>${e.meta.name}</span>` +
-          `<span style="font-weight:700">${e.meta.unit === '%' ? Number(v).toFixed(2) + '%' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>` +
-          `</div>`);
+          `<span style="font-weight:700">${formatSeriesValue(e.meta, v, viewMode)}`;
+        // 對齊模式：附帶原始數值
+        if (viewMode === 'rebase') {
+          const rv = e.rawByTime.get(param.time);
+          if (rv != null) {
+            const ru = e.meta._rawUnit || e.meta.unit;
+            line += ` <span style="color:#64748b;font-weight:500;font-size:9px">(` +
+              (ru === '%' ? Number(rv).toFixed(2) + '%' : Number(rv).toLocaleString('en-US', { maximumFractionDigits: 2 })) +
+              `)</span>`;
+          }
+        }
+        line += `</span></div>`;
+        rows.push(line);
       }
       updateFloat(def, {
         value: primVal != null ? primVal : (primaryApi && primaryApi.last),
@@ -1240,12 +1387,43 @@
       });
     });
 
+    // 可見區間變化 → 風險分數重算（節流）
+    let _riskTimer = null;
+    function scheduleRiskSync(toast) {
+      if (_riskTimer) clearTimeout(_riskTimer);
+      _riskTimer = setTimeout(() => {
+        syncRiskFromPayload(def, payload, chart, { toast: !!toast });
+      }, 180);
+    }
+    try {
+      chart.timeScale().subscribeVisibleTimeRangeChange(() => scheduleRiskSync(false));
+    } catch (e) {}
+
     ensureBadge(def);
-    ensureAxisLabels(def, stylePack);
-    ensureSeriesPanel(def, apiSeries);
+    ensureAxisLabels(def, axisPack);
+    ensureSeriesPanel(def, apiSeries, viewMode);
 
     if (primaryApi) {
-      setHeader(def, primaryApi.last, primaryApi.prev);
+      // 對齊模式 header 顯示指數；名稱帶模式標
+      if (viewMode === 'rebase') {
+        try {
+          const nEl = document.getElementById('ci-name');
+          if (nEl) nEl.textContent = def.name + ' · 對齊100';
+          const pEl = document.getElementById('ci-price');
+          if (pEl) pEl.textContent = Number(primaryApi.last).toFixed(1);
+          const cEl = document.getElementById('ci-chg');
+          if (cEl && primaryApi.prev != null && primaryApi.prev > 0) {
+            const chg = (primaryApi.last - primaryApi.prev) / primaryApi.prev * 100;
+            cEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+          }
+          const info = document.getElementById('chart-info');
+          if (info) info.style.display = 'block';
+          const loading = document.getElementById('chart-loading');
+          if (loading) loading.style.display = 'none';
+        } catch (e) {}
+      } else {
+        setHeader(def, primaryApi.last, primaryApi.prev);
+      }
       hideFloat(); // 常駐浮層太吵；數值看底部 chip，細節靠十字游標
     }
 
@@ -1258,6 +1436,8 @@
       S.data = { candles: candles2, name: def.name };
     }
 
+    scheduleRiskSync(false);
+
     requestAnimationFrame(() => { try { chart.timeScale().fitContent(); } catch (e) {} });
     if (!wrap._mcRo) {
       wrap._mcRo = new ResizeObserver(() => {
@@ -1269,7 +1449,24 @@
       });
       wrap._mcRo.observe(wrap);
     }
-    LOG('rendered MULTI', def.id, apiSeries.map(e => e.meta.key + ':' + e.byTime.size).join(', '));
+    LOG('rendered MULTI', def.id, viewMode, apiSeries.map(e => e.meta.key + ':' + e.byTime.size).join(', '));
+  }
+
+  function toggleViewMode() {
+    if (!window.S || !S._marketChartId || !S._marketRawPayload) return;
+    const def = resolve(S._marketChartId);
+    if (!def) return;
+    const cur = getViewMode(def.id);
+    const next = cur === 'rebase' ? 'raw' : 'rebase';
+    setViewMode(def.id, next);
+    if (window.S) S._marketViewMode = next;
+    renderMulti(def, S._marketRawPayload);
+    // renderMulti 內已 scheduleRiskSync；再補一次 toast
+    if (typeof window.notifyToast === 'function') {
+      notifyToast(next === 'rebase' ? '已切換對齊' : '已切換原始', '分數已依目前視圖重算', { level: 'info', skipDesktop: true });
+    } else if (typeof setStat === 'function') {
+      setStat((next === 'rebase' ? '對齊' : '原始') + ' · 分數已依目前視圖重算');
+    }
   }
 
   function pointsFromYF(raw) {
@@ -1532,6 +1729,9 @@
     render,
     renderMulti,
     ensureBadge,
+    toggleViewMode,
+    getViewMode,
+    setViewMode,
     refresh: function (id) {
       const btn = document.getElementById('market-chart-refresh');
       if (btn && id) btn.dataset.chartId = id;

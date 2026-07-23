@@ -1017,6 +1017,13 @@ def _build_tw_market_fundamental(sym: str) -> dict:
         })
     if detail.get('medianPE') is not None:
         out['marketRows'].append({'k': '全市場本益比中位', 'v': f"{detail['medianPE']:.1f}x", 'score': detail.get('valuationScore')})
+    try:
+        import market_risk as mr
+        out = mr.enrich_tw_market_fundamental(out)
+    except Exception as e:
+        print('[market-fund] enrich failed:', e)
+        out.setdefault('direction', 'health')
+        out.setdefault('summary', f"大盤體質 {score}" if score is not None else '大盤體質 —')
     return out
 
 
@@ -3184,6 +3191,49 @@ class Handler(SimpleHTTPRequestHandler):
             body = json.dumps(out, ensure_ascii=False).encode()
             _cache.set(key, body)
             self._ok(body)
+            return
+        # 美總經追蹤圖：市場風險評分（非公司財報）
+        if clean in ('__US_RATES_CREDIT__', '__US_CPI_FIN__'):
+            key = f'fund:RISK:{clean}:{today}'
+            c = _cache.get(key)
+            if c is not None:
+                self._ok(c); return
+            try:
+                import macro_track as mt
+                import market_risk as mr
+                chart = mt.get_chart(clean)
+                risk = (chart.get('risk') if isinstance(chart, dict) else None) or {}
+                if not risk:
+                    risk = (mr.build_us_rates_credit_risk(chart.get('series') or [])
+                            if clean == '__US_RATES_CREDIT__'
+                            else mr.build_us_cpi_fin_risk(chart.get('series') or []))
+                out = {
+                    'symbol': sym, 'code': clean, 'date': today,
+                    'market': 'US',
+                    'kind': 'market_risk',
+                    'title': risk.get('title') or '市場風險',
+                    'direction': 'alert',
+                    'revenue': None, 'income': None,
+                    'score': risk.get('score'),
+                    'label': risk.get('label'),
+                    'summary': risk.get('summary'),
+                    'plainSummary': risk.get('plainSummary'),
+                    'pillars': risk.get('pillars'),
+                    'marketRows': risk.get('marketRows') or [],
+                    'algo': risk.get('algo'),
+                    '_source': risk.get('_source') or 'macro_track + market_risk',
+                }
+                body = json.dumps(out, ensure_ascii=False).encode()
+                _cache.set(key, body)
+                self._ok(body)
+            except Exception as e:
+                print('[fundamental] US market risk failed:', e)
+                self._ok(json.dumps({
+                    'symbol': sym, 'code': clean, 'date': today,
+                    'market': 'US', 'kind': 'market_risk', 'title': '市場風險',
+                    'revenue': None, 'income': None, 'score': None,
+                    '_note': '市場風險計算失敗：' + str(e),
+                }, ensure_ascii=False).encode())
             return
         # 美總經／其他指數／合成序列：無公司財報，回明確空狀態（勿誤走 Yahoo 公司）
         if _is_macro_sym(clean) or _is_index_sym(clean):

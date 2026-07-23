@@ -26,11 +26,12 @@ DEPS = {
     'strategy_builder_v3.js': ['backtest_v3.js'],     # 提供 window.StratLib
     'strategy_script_v3.js':  ['strategy_builder_v3.js'],  # 依賴 StratLib
     'wizard_v3.js':         ['strategy_builder_v3.js', 'backtest_v3.js', 'drawtools_v3.js'],
-    # 總經折線模組必須蓋過所有 renderChart/loadSym patch（含 toolbar 之後仍可能掛的）
-    'market_chart_v3.js':   ['toolbar_v3.js', 'polish_v3.js', 'drawtools_v3.js'],
+    # 主圖評分列須在 toast／基本面後；market_chart 再蓋過所有 patch
+    'market_score_bar_v3.js': ['toast_v3.js', 'fundamental_v3.js'],
+    'market_chart_v3.js':   ['toolbar_v3.js', 'polish_v3.js', 'drawtools_v3.js', 'market_score_bar_v3.js'],
 }
-# 必須永遠排在最後的（market_chart 蓋過 K 線；toolbar 次末整理按鈕）
-LAST = ['toolbar_v3.js', 'market_chart_v3.js']
+# 必須永遠排在最後的（market_chart 蓋過 K 線；score_bar 次末；toolbar 再前）
+LAST = ['toolbar_v3.js', 'market_score_bar_v3.js', 'market_chart_v3.js']
 
 def order_scripts(scripts):
     """穩定拓樸排序：盡量保持原順序，只在違反相依時把節點往後挪。"""
