@@ -206,7 +206,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
-<link rel="stylesheet" href="src/ui/mobile_v2.css?v=1784778724">
+<link rel="stylesheet" href="src/ui/mobile_v2.css?v=1784786555">
 </head>
 <body>
 <div id="app">
@@ -351,55 +351,95 @@ self.onmessage = function(e) {
     }
     return r;
   }
+  // EMA：前 p 期用 SMA 種子（標準 MACD 作法），之後 EMA
   function ema(arr,p){
-    const r=[];const k=2/(p+1);
-    for(let i=0;i<arr.length;i++){
-      if(i===0){r.push(arr[0]);continue;}
-      r.push(arr[i]*k+r[i-1]*(1-k));
-    }
+    const r=new Array(arr.length).fill(null);
+    if(arr.length<p) return r;
+    let s=0; for(let i=0;i<p;i++) s+=arr[i];
+    s/=p; r[p-1]=s;
+    const k=2/(p+1);
+    for(let i=p;i<arr.length;i++){ s=arr[i]*k+s*(1-k); r[i]=s; }
     return r;
+  }
+  // Wilder's RSI（與 server._calc_ind 對齊，禁止簡易末14平均）
+  function rsiWilder(arr,period){
+    if(arr.length<=period) return null;
+    let avgG=0, avgL=0;
+    for(let i=1;i<=period;i++){
+      const d=arr[i]-arr[i-1];
+      if(d>0) avgG+=d; else avgL-=d;
+    }
+    avgG/=period; avgL/=period;
+    for(let i=period+1;i<arr.length;i++){
+      const d=arr[i]-arr[i-1];
+      const g=d>0?d:0, lo=d<0?-d:0;
+      avgG=(avgG*(period-1)+g)/period;
+      avgL=(avgL*(period-1)+lo)/period;
+    }
+    if(avgL===0) return 100;
+    const rs=avgG/avgL;
+    return 100-(100/(1+rs));
+  }
+  // Stochastic KD：RSV(9) → K/D 以 1/3 平滑（完整序列，禁止 K=D 假值）
+  function stochKD(highs,lows,closes,nPeriod,kSmooth,dSmooth){
+    let K=50, D=50;
+    for(let i=0;i<closes.length;i++){
+      const from=Math.max(0,i-nPeriod+1);
+      let hi=-Infinity, lo=Infinity;
+      for(let j=from;j<=i;j++){ if(highs[j]>hi)hi=highs[j]; if(lows[j]<lo)lo=lows[j]; }
+      const rsv=(hi===lo)?50:((closes[i]-lo)/(hi-lo))*100;
+      K=((kSmooth-1)/kSmooth)*K+(1/kSmooth)*rsv;
+      D=((dSmooth-1)/dSmooth)*D+(1/dSmooth)*K;
+    }
+    return {K, D};
   }
   const s5=sma(c,5),s20=sma(c,20),s60=sma(c,60);
   const cur=c[n-1];
-  // RSI14
-  let gains=0,losses=0;
-  for(let i=n-14;i<n;i++){
-    const d=c[i]-c[i-1];
-    if(d>0)gains+=d;else losses-=d;
-  }
-  const avgG=gains/14,avgL=losses/14;
-  const rsi14=avgL===0?100:(100-(100/(1+avgG/avgL)));
-  // MACD
+  const rsi14=rsiWilder(c,14);
+  // MACD (12,26,9)
   const ema12=ema(c,12),ema26=ema(c,26);
-  const macdLine=ema12[n-1]-ema26[n-1];
-  const macdArr=ema12.map((v,i)=>v-ema26[i]);
-  const signal9=ema(macdArr,9)[n-1];
-  const macdHist=macdLine-signal9;
-  // KD (stoch 9)
-  const kp=9;
-  const lo9=Math.min(...l.slice(n-kp)),hi9=Math.max(...h.slice(n-kp));
-  const rsv=hi9===lo9?50:((cur-lo9)/(hi9-lo9))*100;
-  const prevK=(n>1)?rsv:50,prevD=(n>1)?rsv:50;
-  const K=prevK*2/3+rsv/3,D=prevD*2/3+K/3;
+  const macdArr=ema12.map((v,i)=>(v!=null&&ema26[i]!=null)?(v-ema26[i]):null);
+  const firstMacd=macdArr.findIndex(v=>v!=null);
+  let macdLine=null, signal9=null, macdHist=null;
+  if(firstMacd>=0){
+    const sub=macdArr.slice(firstMacd);
+    const sigSub=ema(sub,9);
+    macdLine=sub[sub.length-1];
+    signal9=sigSub[sigSub.length-1];
+    if(macdLine!=null&&signal9!=null) macdHist=macdLine-signal9;
+  }
+  const kd=stochKD(h,l,c,9,3,3);
+  const K=kd.K, D=kd.D;
   // Bollinger 20
   const m20=s20[n-1];
-  let variance=0;
-  for(let i=n-20;i<n;i++)variance+=(c[i]-m20)**2;
-  const std=Math.sqrt(variance/20);
-  const bbU=m20+2*std,bbL=m20-2*std;
-  // ATR14
-  let atrSum=0;
-  for(let i=n-14;i<n;i++){
-    const tr=Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1]));
-    atrSum+=tr;
+  let bbU=null, bbL=null;
+  if(m20!=null&&n>=20){
+    let variance=0;
+    for(let i=n-20;i<n;i++) variance+=(c[i]-m20)**2;
+    const std=Math.sqrt(variance/20);
+    bbU=m20+2*std; bbL=m20-2*std;
   }
-  const atr14=atrSum/14;
+  // ATR14（Wilder）
+  let atr14=null;
+  if(n>14){
+    let atr=0;
+    for(let i=1;i<=14;i++){
+      const tr=Math.max(h[i]-l[i], Math.abs(h[i]-c[i-1]), Math.abs(l[i]-c[i-1]));
+      atr+=tr;
+    }
+    atr/=14;
+    for(let i=15;i<n;i++){
+      const tr=Math.max(h[i]-l[i], Math.abs(h[i]-c[i-1]), Math.abs(l[i]-c[i-1]));
+      atr=(atr*13+tr)/14;
+    }
+    atr14=atr;
+  }
   // AnnVol
   const rets=[];
-  for(let i=Math.max(1,n-60);i<n;i++)rets.push(Math.log(c[i]/c[i-1]));
-  const meanR=rets.reduce((a,b)=>a+b,0)/rets.length;
-  const varR=rets.reduce((a,b)=>a+(b-meanR)**2,0)/rets.length;
-  const annVol=(Math.sqrt(varR)*Math.sqrt(252)*100).toFixed(1);
+  for(let i=Math.max(1,n-60);i<n;i++) rets.push(Math.log(c[i]/c[i-1]));
+  const meanR=rets.length?rets.reduce((a,b)=>a+b,0)/rets.length:0;
+  const varR=rets.length?rets.reduce((a,b)=>a+(b-meanR)**2,0)/rets.length:0;
+  const annVol=rets.length?(Math.sqrt(varR)*Math.sqrt(252)*100):null;
   // MaxDD (60d)
   let peak=c[Math.max(0,n-60)],maxdd=0;
   for(let i=Math.max(1,n-60);i<n;i++){
@@ -408,20 +448,24 @@ self.onmessage = function(e) {
     if(dd>maxdd)maxdd=dd;
   }
   // VolRatio (5d vs 20d avg)
-  const v5avg=v.slice(n-5).reduce((a,b)=>a+b,0)/5;
-  const v20avg=v.slice(n-20).reduce((a,b)=>a+b,0)/20;
-  const volRatio=v20avg>0?(v5avg/v20avg).toFixed(2):'-';
-  // d2SMA20
-  const d2=(cur&&m20)?(((cur-m20)/m20)*100).toFixed(2):null;
+  const v5avg=n>=5?v.slice(n-5).reduce((a,b)=>a+b,0)/5:0;
+  const v20avg=n>=20?v.slice(n-20).reduce((a,b)=>a+b,0)/20:0;
+  const volRatio=v20avg>0?(v5avg/v20avg):null;
+  const d2=(cur!=null&&m20!=null)?(((cur-m20)/m20)*100):null;
+  // 一律回傳 number（顯示端 toFixed）。禁止字串，否則 techScore 的 > 會變字典序比較。
   self.postMessage({
     sma5:s5[n-1], sma20:m20, sma60:s60[n-1],
-    rsi14:rsi14.toFixed(1),
-    macd:macdLine.toFixed(3), macdSig:signal9.toFixed(3), macdHist:macdHist.toFixed(3),
-    K:K.toFixed(1), D:D.toFixed(1),
-    bbU:bbU.toFixed(2), bbL:bbL.toFixed(2), bbM:m20?m20.toFixed(2):null,
-    atr14:atr14.toFixed(2),
-    annVol, maxdd:maxdd.toFixed(1),
-    volRatio, d2SMA20:d2,
+    rsi14: rsi14==null?null:+rsi14,
+    macd: macdLine==null?null:+macdLine,
+    macdSig: signal9==null?null:+signal9,
+    macdHist: macdHist==null?null:+macdHist,
+    K: +K, D: +D,
+    bbU: bbU==null?null:+bbU, bbL: bbL==null?null:+bbL, bbM: m20==null?null:+m20,
+    atr14: atr14==null?null:+atr14,
+    annVol: annVol==null?null:+annVol,
+    maxdd: +maxdd,
+    volRatio: volRatio==null?null:+volRatio,
+    d2SMA20: d2==null?null:+d2,
   });
 };
 `;
@@ -1195,10 +1239,11 @@ function renderInd(ind, last, mkt) {
     if (v == null) { el.textContent='--'; continue; }
     if (typeof v === 'number') v = v.toFixed(2);
     el.textContent = v;
-    // color RSI, KD
-    if (d.k==='rsi14') el.style.color = v>70?'var(--red)':v<30?'var(--green)':'var(--thi)';
-    if (d.k==='macdHist') el.style.color = parseFloat(v)>=0?'var(--green)':'var(--red)';
-    if (d.k==='d2SMA20') el.style.color = parseFloat(v)>=0?'var(--green)':'var(--red)';
+    // color RSI, KD — 用數值比，避免字串字典序
+    const num = parseFloat(v);
+    if (d.k==='rsi14' && Number.isFinite(num)) el.style.color = num>70?'var(--red)':num<30?'var(--green)':'var(--thi)';
+    if (d.k==='macdHist' && Number.isFinite(num)) el.style.color = num>=0?'var(--green)':'var(--red)';
+    if (d.k==='d2SMA20' && Number.isFinite(num)) el.style.color = num>=0?'var(--green)':'var(--red)';
   }
   // also show price vs BBands
   const price = last?.close;
@@ -1811,68 +1856,68 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
 });
 </script>
-<script src="src/core/colors_v3.js?v=1784778724"></script>
-<script src="src/core/market_v3.js?v=1784778724"></script>
-<script src="src/core/fields_v3.js?v=1784778724"></script>
-<script src="src/ui/share_v3.js?v=1784778724"></script>
-<script src="src/ui/datasources_v3.js?v=1784778724"></script>
-<script src="src/core/etf_flow_tip_v3.js?v=1784778724"></script>
-<script src="src/core/position_v2.js?v=1784778724"></script>
-<script src="src/core/watch_v2.js?v=1784778724"></script>
-<script src="src/core/info_v2.js?v=1784778724"></script>
-<script src="src/core/pro_v2.js?v=1784778724"></script>
-<script src="src/chart/volume_profile_v3.js?v=1784778724"></script>
-<script src="src/chart/pattern_v3.js?v=1784778724"></script>
-<script src="src/core/live_v2.js?v=1784778724"></script>
-<script src="src/fundamental/chip_v3.js?v=1784778724"></script>
-<script src="src/fundamental/fundamental_v3.js?v=1784778724"></script>
-<script src="src/screener/screener_v3.js?v=1784778724"></script>
-<script src="src/ai/ai_report_v3.js?v=1784778724"></script>
-<script src="src/ui/polish_v3.js?v=1784778724"></script>
-<script src="src/core/wl_live_v3.js?v=1784778724"></script>
-<script src="src/fundamental/plan_history_v3.js?v=1784778724"></script>
-<script src="src/fundamental/plan_position_v3.js?v=1784778724"></script>
-<script src="src/fundamental/plan_v3.js?v=1784778724"></script>
-<script src="src/ui/pdf_import_v3.js?v=1784778724"></script>
-<script src="src/ui/pdf_export_v3.js?v=1784778724"></script>
-<script src="src/core/peg_v3.js?v=1784778724"></script>
-<script src="src/alert/alert_v3.js?v=1784778724"></script>
-<script src="src/alert/alert_push_v3.js?v=1784778724"></script>
-<script src="src/screener/backtest_v3.js?v=1784778724"></script>
-<script src="src/screener/backtest_ui_v3.js?v=1784778724"></script>
-<script src="src/ui/enhance_v3.js?v=1784778724"></script>
-<script src="src/chart/aftermarket_v3.js?v=1784778724"></script>
-<script src="src/chart/overnight_v3.js?v=1784778724"></script>
-<script src="src/fundamental/supplychain_v3.js?v=1784778724"></script>
-<script src="src/portfolio/portfolio_v3.js?v=1784778724"></script>
-<script src="src/fundamental/chainmom_v3.js?v=1784778724"></script>
-<script src="src/fundamental/valuation_v3.js?v=1784778724"></script>
-<script src="src/fundamental/marketflow_v3.js?v=1784778724"></script>
-<script src="src/fundamental/instrank_v3.js?v=1784778724"></script>
-<script src="src/alert/calendar_v3.js?v=1784778724"></script>
-<script src="src/chart/multichart_v3.js?v=1784778724"></script>
-<script src="src/chart/spread_v3.js?v=1784778724"></script>
-<script src="src/chart/hotkeys_v3.js?v=1784778724"></script>
-<script src="src/screener/strategy_builder_v3.js?v=1784778724"></script>
-<script src="src/screener/strategy_script_v3.js?v=1784778724"></script>
-<script src="src/chart/drawtools_v3.js?v=1784778724"></script>
-<script src="src/screener/screener3_v3.js?v=1784778724"></script>
-<script src="src/core/etf_v3.js?v=1784778724"></script>
-<script src="src/fundamental/stockfut_v3.js?v=1784778724"></script>
-<script src="src/core/indices_v3.js?v=1784778724"></script>
-<script src="src/alert/datahealth_v3.js?v=1784778724"></script>
-<script src="src/alert/toast_v3.js?v=1784778724"></script>
-<script src="src/alert/settle_v3.js?v=1784778724"></script>
-<script src="src/ai/cmdpalette_v3.js?v=1784778724"></script>
-<script src="src/ui/dragwin_v3.js?v=1784778724"></script>
-<script src="src/core/liverefresh_v3.js?v=1784778724"></script>
-<script src="src/core/namesearch_v3.js?v=1784778724"></script>
-<script src="src/core/realtime_v3.js?v=1784778724"></script>
-<script src="src/ai/focus_v3.js?v=1784778724"></script>
-<script src="src/ai/copilot_v3.js?v=1784778724"></script>
-<script src="src/screener/wizard_v3.js?v=1784778724"></script>
-<script src="src/ui/toolbar_v3.js?v=1784778724"></script>
-<script src="src/chart/market_chart_v3.js?v=1784778724"></script>
+<script src="src/core/colors_v3.js?v=1784786555"></script>
+<script src="src/core/market_v3.js?v=1784786555"></script>
+<script src="src/core/fields_v3.js?v=1784786555"></script>
+<script src="src/ui/share_v3.js?v=1784786555"></script>
+<script src="src/ui/datasources_v3.js?v=1784786555"></script>
+<script src="src/core/etf_flow_tip_v3.js?v=1784786555"></script>
+<script src="src/core/position_v2.js?v=1784786555"></script>
+<script src="src/core/watch_v2.js?v=1784786555"></script>
+<script src="src/core/info_v2.js?v=1784786555"></script>
+<script src="src/core/pro_v2.js?v=1784786555"></script>
+<script src="src/chart/volume_profile_v3.js?v=1784786555"></script>
+<script src="src/chart/pattern_v3.js?v=1784786555"></script>
+<script src="src/core/live_v2.js?v=1784786555"></script>
+<script src="src/fundamental/chip_v3.js?v=1784786555"></script>
+<script src="src/fundamental/fundamental_v3.js?v=1784786555"></script>
+<script src="src/screener/screener_v3.js?v=1784786555"></script>
+<script src="src/ai/ai_report_v3.js?v=1784786555"></script>
+<script src="src/ui/polish_v3.js?v=1784786555"></script>
+<script src="src/core/wl_live_v3.js?v=1784786555"></script>
+<script src="src/fundamental/plan_history_v3.js?v=1784786555"></script>
+<script src="src/fundamental/plan_position_v3.js?v=1784786555"></script>
+<script src="src/fundamental/plan_v3.js?v=1784786555"></script>
+<script src="src/ui/pdf_import_v3.js?v=1784786555"></script>
+<script src="src/ui/pdf_export_v3.js?v=1784786555"></script>
+<script src="src/core/peg_v3.js?v=1784786555"></script>
+<script src="src/alert/alert_v3.js?v=1784786555"></script>
+<script src="src/alert/alert_push_v3.js?v=1784786555"></script>
+<script src="src/screener/backtest_v3.js?v=1784786555"></script>
+<script src="src/screener/backtest_ui_v3.js?v=1784786555"></script>
+<script src="src/ui/enhance_v3.js?v=1784786555"></script>
+<script src="src/chart/aftermarket_v3.js?v=1784786555"></script>
+<script src="src/chart/overnight_v3.js?v=1784786555"></script>
+<script src="src/fundamental/supplychain_v3.js?v=1784786555"></script>
+<script src="src/portfolio/portfolio_v3.js?v=1784786555"></script>
+<script src="src/fundamental/chainmom_v3.js?v=1784786555"></script>
+<script src="src/fundamental/valuation_v3.js?v=1784786555"></script>
+<script src="src/fundamental/marketflow_v3.js?v=1784786555"></script>
+<script src="src/fundamental/instrank_v3.js?v=1784786555"></script>
+<script src="src/alert/calendar_v3.js?v=1784786555"></script>
+<script src="src/chart/multichart_v3.js?v=1784786555"></script>
+<script src="src/chart/spread_v3.js?v=1784786555"></script>
+<script src="src/chart/hotkeys_v3.js?v=1784786555"></script>
+<script src="src/screener/strategy_builder_v3.js?v=1784786555"></script>
+<script src="src/screener/strategy_script_v3.js?v=1784786555"></script>
+<script src="src/chart/drawtools_v3.js?v=1784786555"></script>
+<script src="src/screener/screener3_v3.js?v=1784786555"></script>
+<script src="src/core/etf_v3.js?v=1784786555"></script>
+<script src="src/fundamental/stockfut_v3.js?v=1784786555"></script>
+<script src="src/core/indices_v3.js?v=1784786555"></script>
+<script src="src/alert/datahealth_v3.js?v=1784786555"></script>
+<script src="src/alert/toast_v3.js?v=1784786555"></script>
+<script src="src/alert/settle_v3.js?v=1784786555"></script>
+<script src="src/ai/cmdpalette_v3.js?v=1784786555"></script>
+<script src="src/ui/dragwin_v3.js?v=1784786555"></script>
+<script src="src/core/liverefresh_v3.js?v=1784786555"></script>
+<script src="src/core/namesearch_v3.js?v=1784786555"></script>
+<script src="src/core/realtime_v3.js?v=1784786555"></script>
+<script src="src/ai/focus_v3.js?v=1784786555"></script>
+<script src="src/ai/copilot_v3.js?v=1784786555"></script>
+<script src="src/screener/wizard_v3.js?v=1784786555"></script>
+<script src="src/ui/toolbar_v3.js?v=1784786555"></script>
+<script src="src/chart/market_chart_v3.js?v=1784786555"></script>
 </body>
 </html>
 <script>

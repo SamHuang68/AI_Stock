@@ -752,22 +752,51 @@ def _mops_monthly_revenue(market, clean_code):
     return row
 
 def _fundamental_score(out):
-    """0~100 基本面分數：成長性(營收YoY+累計YoY) + 獲利性(三率)"""
-    score, parts = 0, 0
+    """0~100 基本面分數：成長性 50% + 獲利性 50%。
+
+    成長性：單月 YoY、累計 YoY — 用 tanh 軟飽和（避免 YoY 55% 直接頂到 100）。
+      0%→50、±20%≈73/27、±50%≈88/12
+    獲利性：營業利益率、稅後淨利率（可選毛利率）— margin%×3，約 33%→100。
+    """
+    import math
     rev = out.get('revenue') or {}
     inc = out.get('income') or {}
+
+    def soft_growth(pct):
+        try:
+            return max(0.0, min(100.0, 50.0 + 50.0 * math.tanh(float(pct) / 40.0)))
+        except Exception:
+            return None
+
+    def margin_score(m):
+        try:
+            return max(0.0, min(100.0, float(m) * 3.0))
+        except Exception:
+            return None
+
+    growth = []
     if rev.get('yoyPct') is not None:
-        y = rev['yoyPct']
-        score += max(0, min(100, 50 + y)); parts += 1   # YoY 0% → 50 分
+        g = soft_growth(rev['yoyPct'])
+        if g is not None:
+            growth.append(g)
     if rev.get('cumYoyPct') is not None:
-        score += max(0, min(100, 50 + rev['cumYoyPct'])); parts += 1
-    if inc.get('netMargin') is not None:
-        score += max(0, min(100, inc['netMargin'] * 3)); parts += 1   # 淨利率 33%→100
-    if inc.get('opMargin') is not None:
-        score += max(0, min(100, inc['opMargin'] * 3)); parts += 1
-    if not parts:
+        g = soft_growth(rev['cumYoyPct'])
+        if g is not None:
+            growth.append(g)
+
+    profit = []
+    for key in ('opMargin', 'netMargin', 'grossMargin'):
+        if inc.get(key) is not None:
+            m = margin_score(inc[key])
+            if m is not None:
+                profit.append(m)
+
+    if not growth and not profit:
         return None
-    return round(score / parts)
+    if growth and profit:
+        return round(0.5 * (sum(growth) / len(growth)) + 0.5 * (sum(profit) / len(profit)))
+    parts = growth or profit
+    return round(sum(parts) / len(parts))
 
 def _chip_streak(clean_code):
     """從 chip_history 反向算外資/投信連續買(>0)賣(<0)超天數"""

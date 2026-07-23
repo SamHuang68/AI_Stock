@@ -48,6 +48,18 @@
   const _canonFail = {};   // 'SYM|MKT' -> true(抓不到，fallback 用畫面指標)
 
   // ---- 技術面分數 0~100（可傳入指定 ind/candles，否則用目前載入個股）----
+  // 公式（基底 50，最後 clamp 0~100）：
+  //   RSI14 Wilder：±20（(rsi-50)*0.8）
+  //   MACD vs Signal：+12 / −12
+  //   KD K vs D：+8 / −8
+  //   收盤 vs SMA20：+10 / −10
+  //   SMA20 vs SMA60：+10 / −10
+  // 注意：ind 各欄必須是 number；字串比較會讓負 MACD 誤判（2308 曾因此變 0）。
+  function _n(v) {
+    if (v == null || v === '' || v === '-') return null;
+    const x = typeof v === 'number' ? v : parseFloat(v);
+    return Number.isFinite(x) ? x : null;
+  }
   function techScore(ind, candles) {
     ind = ind || ((typeof S !== 'undefined') && S.ind);
     candles = candles || (S.data && S.data.candles) || [];
@@ -55,11 +67,15 @@
     const cur = candles.length ? candles[candles.length - 1].close : null;
     let score = 50, parts = 0;
     const add = v => { score += v; parts++; };
-    if (ind.rsi14 != null) add(Math.max(-20, Math.min(20, (ind.rsi14 - 50) * 0.8)));
-    if (ind.macd != null && ind.macdSig != null) add(ind.macd > ind.macdSig ? 12 : -12);
-    if (ind.K != null && ind.D != null) add(ind.K > ind.D ? 8 : -8);
-    if (cur != null && ind.sma20 != null) add(cur > ind.sma20 ? 10 : -10);
-    if (ind.sma20 != null && ind.sma60 != null) add(ind.sma20 > ind.sma60 ? 10 : -10);
+    const rsi = _n(ind.rsi14);
+    const macd = _n(ind.macd), macdSig = _n(ind.macdSig);
+    const K = _n(ind.K), D = _n(ind.D);
+    const sma20 = _n(ind.sma20), sma60 = _n(ind.sma60);
+    if (rsi != null) add(Math.max(-20, Math.min(20, (rsi - 50) * 0.8)));
+    if (macd != null && macdSig != null) add(macd > macdSig ? 12 : -12);
+    if (K != null && D != null) add(K > D ? 8 : -8);
+    if (cur != null && sma20 != null) add(cur > sma20 ? 10 : -10);
+    if (sma20 != null && sma60 != null) add(sma20 > sma60 ? 10 : -10);
     if (!parts) return null;
     return Math.max(0, Math.min(100, Math.round(score)));
   }
