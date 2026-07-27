@@ -390,18 +390,31 @@ async function refreshMktBar() {
 }
 
 async function refreshMacroTrackCells() {
-  const ids = ['__TW_RATES__', '__TW_MARGIN_MIX__', '__US_RATES_CREDIT__', '__US_CPI_FIN__'];
+  const ids = [
+    '__TW_RATES__', '__TW_MARGIN_MIX__', '__TW_MARGIN_CYCLE__',
+    '__US_RATES_CREDIT__', '__US_CPI_FIN__',
+  ];
+  const preferKey = {
+    '__TW_MARGIN_MIX__': 'yoy',
+    '__TW_MARGIN_CYCLE__': 'margin_ratio',
+    '__TW_RATES__': 'discount',
+    '__US_RATES_CREDIT__': 'fedfunds',
+    '__US_CPI_FIN__': 'us_cpi_yoy',
+  };
   await Promise.all(ids.map(async (id) => {
     const cell = document.querySelector(`[data-mkt-sym="${id}"]`);
     if (!cell) return;
     try {
-      const r = await fetch(`${SERVER_P}/macro/chart/${encodeURIComponent(id)}?years=2`, { cache: 'no-store' });
+      const r = await fetch(`${SERVER_P}/macro/chart/${encodeURIComponent(id)}?years=5`, { cache: 'no-store' });
       if (!r.ok) return;
       const d = await r.json();
       const series = (d && d.series) || [];
-      // 取左軸第一條有點的序列當格上數值
-      let primary = series.find(s => s.scale === 'left' && s.points && s.points.length);
-      if (!primary) primary = series.find(s => s.points && s.points.length);
+      const want = preferKey[id];
+      let primary = want ? series.find(s => s.key === want && s.points && s.points.length) : null;
+      if (!primary) {
+        primary = series.find(s => s.scale === 'left' && s.points && s.points.length);
+      }
+      // 絕不退回右軸加權／指數，避免格上出現 43654 這種指數價
       if (!primary || !primary.points.length) return;
       const pts = primary.points;
       const cur = pts[pts.length - 1].value;
@@ -429,7 +442,7 @@ async function refreshMacroTrackCells() {
         const pct = prev ? (delta / prev * 100) : 0;
         ch.textContent = (delta >= 0 ? '▲' : '▼') + Math.abs(pct).toFixed(2) + '%';
       }
-      cell.title = (d.name || id) + ' · 點擊載入 MacroMicro 風格追蹤圖';
+      cell.title = (d.name || id) + ' · 點擊載入追蹤圖';
     } catch (e) { /* ignore per-cell */ }
   }));
 }
