@@ -26,6 +26,9 @@
     const s = String(sym || '').toUpperCase();
     return s === '__TW_MARGIN_CYCLE__' || s === '__MARGIN_CYCLE__';
   }
+  function isHoldersSym(sym) {
+    return /^__HOLDERS_[0-9A-Z]{4,6}__$/.test(String(sym || '').toUpperCase());
+  }
   function isUsRiskSym(sym) {
     const s = String(sym || '').toUpperCase();
     return s === '__US_RATES_CREDIT__' || s === '__US_CPI_FIN__';
@@ -91,6 +94,14 @@
     if (s >= 55) return '偏熱';
     if (s >= 30) return '修復／中性';
     return '清算區';
+  }
+  function labelConcentrate(s) {
+    if (s == null) return '資料不足';
+    if (s >= 70) return '高度集中';
+    if (s >= 55) return '集中中';
+    if (s >= 45) return '中性';
+    if (s >= 30) return '偏發散';
+    return '發散';
   }
 
   function seriesMap(seriesList) {
@@ -237,6 +248,13 @@
       if (score >= 30) return '#94a3b8';
       return '#4ade80';
     }
+    if (direction === 'concentrate') {
+      // 高度集中偏紅（台股熱）、發散偏綠
+      if (score >= 70) return '#f87171';
+      if (score >= 55) return '#fb923c';
+      if (score >= 45) return '#94a3b8';
+      return '#4ade80';
+    }
     // alert：高分警戒 → 紅／橘
     if (score >= 70) return '#f87171';
     if (score >= 55) return '#fb923c';
@@ -255,7 +273,7 @@
     if (modal) modal.style.display = 'none';
     if (window.S) {
       // 離開大盤／美風險／融資週期圖時清掉，避免 STATS 誤用舊 payload
-      if (!isTwFundSym(S.sym) && !isUsRiskSym(S.sym) && !isMarginCycleSym(S.sym)) {
+      if (!isTwFundSym(S.sym) && !isUsRiskSym(S.sym) && !isMarginCycleSym(S.sym) && !isHoldersSym(S.sym)) {
         S._fundPanelPayload = null;
         S._marketRisk = null;
       }
@@ -270,13 +288,17 @@
     _lastSym = opts.sym || (window.S && S.sym) || '';
     const direction = payload.direction
       || (payload.kind === 'market_risk' ? 'alert'
-        : (payload.kind === 'margin_cycle' ? 'cycle' : 'health'));
+        : (payload.kind === 'margin_cycle' ? 'cycle'
+          : (payload.kind === 'holders' ? 'concentrate' : 'health')));
     const title = payload.title
-      || (direction === 'alert' ? '市場風險' : (direction === 'cycle' ? '融資週期' : '大盤體質'));
+      || (direction === 'alert' ? '市場風險'
+        : (direction === 'cycle' ? '融資週期'
+          : (direction === 'concentrate' ? '籌碼集中度' : '大盤體質')));
     const score = payload.score;
     const label = payload.label
       || (direction === 'alert' ? labelRisk(score)
-        : (direction === 'cycle' ? labelCycle(score) : labelHealth(score)));
+        : (direction === 'cycle' ? labelCycle(score)
+          : (direction === 'concentrate' ? labelConcentrate(score) : labelHealth(score))));
     const summary = payload.summary || (score != null ? `${title} ${score} · ${label}` : `${title} —`);
     const rows = payload.marketRows || [];
     const viewMode = opts.viewMode || (window.S && S._marketViewMode) || null;
@@ -370,7 +392,8 @@
       `<div style="color:#94a3b8;margin-bottom:10px;font-size:11px">` +
         (direction === 'health' ? '分數愈高＝體質愈健康。'
           : (direction === 'cycle' ? '分數愈高＝槓桿愈擴張／偏熱；愈低＝去槓桿／清算區。'
-            : '分數愈高＝愈需警戒。')) +
+            : (direction === 'concentrate' ? '分數愈高＝籌碼愈集中；愈低＝愈發散／散戶化。'
+              : '分數愈高＝愈需警戒。'))) +
         ' 下列公式可對非金融友人說明。' +
       `</div>`;
     if (pillars.length) {
@@ -466,6 +489,19 @@
       return;
     }
 
+    // 籌碼集中度
+    if (isHoldersSym(up)) {
+      let risk = (window.S && S._marketRisk) || null;
+      if (!risk || risk.kind !== 'holders') {
+        const f = await fetchFund(sym);
+        if (f && (f.kind === 'holders' || f.score != null)) risk = f;
+      }
+      if (!risk) { hide(); return; }
+      if (window.S) S._fundPanelPayload = risk;
+      render(risk, { sym: up, showModeToggle: false });
+      return;
+    }
+
     if (isTwFundSym(up)) {
       const f = await fetchFund(sym);
       if (!f || (f.kind !== 'market' && f.score == null)) { hide(); return; }
@@ -501,6 +537,7 @@
     isTwFundSym,
     isUsRiskSym,
     isMarginCycleSym,
+    isHoldersSym,
     openAlgoModal,
   };
   LOG('ready');

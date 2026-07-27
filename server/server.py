@@ -1308,6 +1308,28 @@ def fetch_one(sym, rng=None, interval=None, nocache=False):
             print('[server] fetch_one for __MARGIN_RATIO__ failed:', e)
             return '__MARGIN_RATIO__', None, False
 
+    # 籌碼集中度圖：__HOLDERS_2330__
+    try:
+        import tdcc_holders as th
+        code = th.parse_holders_sym(sym)
+        if code:
+            cid = th.holders_chart_id(code)
+            chart = th.get_chart(code, ensure=True)
+            # 轉成 yf-like 給相容路徑；主路徑走 MarketChart multi
+            try:
+                import macro_track as mt
+                primary = None
+                for s in chart.get('series') or []:
+                    if s.get('points'):
+                        primary = s
+                        break
+                pts = (primary or {}).get('points') or []
+                data = mt.points_to_yf_like(pts, cid, chart.get('name') or cid)
+                return cid, json.dumps(data).encode(), False
+            except Exception:
+                return cid, json.dumps(chart).encode(), False
+    except Exception as e:
+        print('[server] fetch_one holders failed:', e)
     # 櫃買指數／台指期：官方／FinMind 日線覆寫（Yahoo ^TWOII 不可信；TXF 無連續 Yahoo 代號）
     try:
         import tw_index_charts as tic
@@ -1842,6 +1864,9 @@ class Handler(SimpleHTTPRequestHandler):
         elif p.startswith('/chip/'):
             sym = unquote(p[6:].split('?')[0])
             self._handle_chip(sym)
+        elif p.startswith('/holders/'):
+            rest = unquote(p[9:].split('?')[0]).strip('/')
+            self._handle_holders(rest)
         elif p.startswith('/keystats/'):
             sym = unquote(p[10:].split('?')[0])
             self._handle_keystats(sym)
@@ -2246,6 +2271,14 @@ class Handler(SimpleHTTPRequestHandler):
             self._ok(b'{"results":[]}'); return
         if q.upper() in ('__MARGIN_RATIO__', '融資維持率', '大盤融資維持率'):
             self._ok(json.dumps({'results': [{'t': '__MARGIN_RATIO__', 'name': '大盤融資維持率', 'm': 'TW'}]}, ensure_ascii=False).encode())
+            return
+        # 籌碼集中度：集中2330 / holders:2330 / __HOLDERS_2330__
+        import re as _re
+        _hm = _re.match(r'^(?:集中|holders[:/]?|__HOLDERS_)(\d{4,6})(?:__)?$', q, _re.I)
+        if _hm:
+            code = _hm.group(1)
+            tid = f'__HOLDERS_{code}__'
+            self._ok(json.dumps({'results': [{'t': tid, 'name': f'{code} 籌碼集中度', 'm': 'TW'}]}, ensure_ascii=False).encode())
             return
         _macro_q = {
             '__TW_RATES__': ('台灣指標利率', 'TW'),
@@ -2968,6 +3001,48 @@ class Handler(SimpleHTTPRequestHandler):
             out['_error'] = str(e)
         return out
 
+    def _handle_holders(self, rest):
+        """籌碼集中度（TDCC 集保股權分散）。
+           /holders/2330 — 快照+評分
+           /holders/chart/2330 — 多序列圖
+           /holders/refresh — 更新當週
+           /holders/backfill?weeks=104 — 背景回補
+        """
+        try:
+            import tdcc_holders as th
+        except Exception as e:
+            self._err('tdcc_holders import failed: ' + str(e), 500); return
+        rest = (rest or '').strip()
+        qs = parse_qs(urlparse(self.path).query)
+        if rest in ('refresh', 'update'):
+            try:
+                data = th.refresh_latest()
+                self._ok(json.dumps(data, ensure_ascii=False).encode()); return
+            except Exception as e:
+                self._err('holders refresh failed: ' + str(e), 500); return
+        if rest in ('backfill', 'archive'):
+            weeks = int(qs.get('weeks', ['104'])[0] or 104)
+            th.start_background_backfill(weeks=weeks)
+            self._ok(json.dumps({'ok': True, 'started': True, 'weeks': weeks}, ensure_ascii=False).encode()); return
+        if rest.startswith('chart/'):
+            code = rest.split('/', 1)[1].strip()
+            if not code:
+                self._err('missing code', 400); return
+            try:
+                data = th.get_chart(code, ensure=True)
+                self._ok(json.dumps(data, ensure_ascii=False).encode()); return
+            except Exception as e:
+                self._err('holders chart failed: ' + str(e), 500); return
+        # snapshot
+        code = rest.split('/')[0].strip()
+        if not code:
+            self._err('missing code', 400); return
+        try:
+            data = th.stock_snapshot(code)
+            self._ok(json.dumps(data, ensure_ascii=False).encode()); return
+        except Exception as e:
+            self._err('holders failed: ' + str(e), 500); return
+
     def _handle_chip(self, sym):
         """法人籌碼面板：三大法人買賣超 + 融資融券"""
         # Cache by sym+交易日
@@ -3179,6 +3254,20 @@ class Handler(SimpleHTTPRequestHandler):
             _chip_history_record(clean, out)
         except Exception:
             pass
+        # 籌碼集中度（TDCC 週資料；失敗不擋籌碼面板）
+        try:
+            import tdcc_holders as th
+            snap = th.stock_snapshot(clean)
+            out['holders'] = {
+                'ok': snap.get('ok'),
+                'chartId': snap.get('chartId'),
+                'last': snap.get('last'),
+                'points': snap.get('points'),
+                'risk': snap.get('risk'),
+            }
+        except Exception as e:
+            print(f'[chip] holders snapshot failed for {sym}: {e}')
+            out['holders'] = None
         body = json.dumps(out, ensure_ascii=False).encode()
         _cache.set(key, body)
         self._ok(body)
@@ -3190,6 +3279,21 @@ class Handler(SimpleHTTPRequestHandler):
         from datetime import date as _date
         today = _date.today().strftime('%Y%m%d')
         clean = sym.replace('.TW', '').replace('.TWO', '').strip().upper()
+        # 籌碼集中度圖（__HOLDERS_2330__）
+        try:
+            import tdcc_holders as th
+            if th.is_holders_sym(clean) or th.parse_holders_sym(clean):
+                key = f'fund:HOLD:{clean}:{today}'
+                c = _cache.get(key)
+                if c is not None:
+                    self._ok(c); return
+                out = th.fundamental_payload(clean)
+                body = json.dumps(out, ensure_ascii=False).encode()
+                _cache.set(key, body)
+                self._ok(body)
+                return
+        except Exception as e:
+            print('[fundamental] holders failed:', e)
         # 融資週期（槓桿臨界）— 獨立指標，不走大盤體質
         if clean in ('__TW_MARGIN_CYCLE__', '__MARGIN_CYCLE__'):
             key = f'fund:MCYCLE:{today}'

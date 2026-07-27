@@ -11,7 +11,7 @@
 (function MarketChartV3() {
   'use strict';
 
-  const VER = '3.5.0';
+  const VER = '3.6.0';
   const LOG = (...a) => console.log('%c[MarketChart ' + VER + ']', 'color:#64748b', ...a);
   const WARN = (...a) => console.warn('[MarketChart]', ...a);
   const VIEW_MODE_LS = 'mc-view-mode';
@@ -106,6 +106,12 @@
       _shortNames: { margin_ratio: '維持率', twii: '加權', margin_yoy: '餘額YoY', ss_ratio: '券資比' },
       _defaultOff: ['margin_yoy', 'ss_ratio'],
     },
+    '__HOLDERS__': {
+      holders:   { lineWidth: 1, color: '#6B9BB8' },
+      major_pct: { lineWidth: 2, color: '#D4A574', lastValueVisible: false },
+      _axis: { left: 'L · 人數', right: 'R · 大股東%' },
+      _shortNames: { holders: '人數', major_pct: '大股東' },
+    },
   };
 
   function hexToRgba(hex, a) {
@@ -195,11 +201,41 @@
     return copy;
   }
 
+  function parseHoldersCode(sym) {
+    const up = String(sym || '').trim().toUpperCase();
+    let m = up.match(/^__HOLDERS_([0-9A-Z]{4,6})__$/);
+    if (m) return m[1];
+    m = up.match(/^HOLDERS[:\/]([0-9A-Z]{4,6})$/);
+    if (m) return m[1];
+    return null;
+  }
+
+  function holdersDef(code) {
+    const c = String(code).toUpperCase();
+    return {
+      id: `__HOLDERS_${c}__`,
+      name: `${c} 籌碼集中度`,
+      shortName: `${c}集中`,
+      market: 'TW',
+      unit: '',
+      defaultRange: 'max',
+      multi: true,
+      endpoint: `/holders/chart/${c}`,
+      holdersCode: c,
+      valueFormat: (v) => (v != null && isFinite(v) ? Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 }) : ''),
+      aliases: [`集中${c}`, `holders:${c}`],
+    };
+  }
+
   function resolve(sym) {
     if (sym == null) return null;
     const raw = String(sym).trim();
     if (!raw) return null;
     const up = raw.toUpperCase();
+    const hCode = parseHoldersCode(up);
+    if (hCode) return holdersDef(hCode);
+    const zh = raw.match(/^集中\s*([0-9]{4,6})$/);
+    if (zh) return holdersDef(zh[1]);
     // 完整命中
     if (ALIAS[up]) return REGISTRY[ALIAS[up]];
     // 允許使用者打 __MARGIN_ / MARGIN_RATIO / 融資維持 等前綴
@@ -610,7 +646,9 @@
       wrap.appendChild(panel);
     }
 
-    const stylePack = SERIES_STYLE[def.id] || {};
+    const stylePack = SERIES_STYLE[def.id]
+      || (def.holdersCode || String(def.id || '').startsWith('__HOLDERS_') ? SERIES_STYLE['__HOLDERS__'] : null)
+      || {};
     const shorts = stylePack._shortNames || {};
     const defaultOff = new Set(stylePack._defaultOff || []);
     const saved = getSeriesVis(def.id) || {};
@@ -1157,7 +1195,8 @@
     if (!id) return;
     const isUs = (id === '__US_RATES_CREDIT__' || id === '__US_CPI_FIN__');
     const isCycle = (id === '__TW_MARGIN_CYCLE__');
-    if (!isUs && !isCycle) return;
+    const isHolders = !!(def && def.holdersCode) || String(id).startsWith('__HOLDERS_');
+    if (!isUs && !isCycle && !isHolders) return;
     let risk = null;
     if (isUs) {
       const raw = (payload && payload.series) || [];
@@ -1217,7 +1256,9 @@
     }
     const tz = (t) => (t == null ? t : t + userTzOffset);
     const hasRight = seriesList.some(s => s.scale === 'right' && (s.points || []).length);
-    const stylePack = SERIES_STYLE[def.id] || {};
+    const stylePack = SERIES_STYLE[def.id]
+      || (def.holdersCode || String(def.id || '').startsWith('__HOLDERS_') ? SERIES_STYLE['__HOLDERS__'] : null)
+      || {};
     const LineStyle = (LightweightCharts.LineStyle) || { Solid: 0, Dotted: 1, Dashed: 2 };
     // 對齊模式：左右軸皆為相對指數，軸標改寫
     const axisPack = Object.assign({}, stylePack);
@@ -1319,7 +1360,9 @@
         ? { type: 'price', precision: 1, minMove: 0.1 }
         : (s.unit === '%'
           ? { type: 'custom', formatter: v => (v != null && isFinite(v) ? v.toFixed(2) + '%' : '') }
-          : { type: 'price', precision: 2, minMove: 0.01 });
+          : (s.key === 'holders'
+            ? { type: 'custom', formatter: v => (v != null && isFinite(v) ? Math.round(v).toLocaleString('en-US') : '') }
+            : { type: 'price', precision: 2, minMove: 0.01 }));
       const showLast = ov.lastValueVisible !== false;
 
       if (isHist) {

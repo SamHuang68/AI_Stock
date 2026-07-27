@@ -141,6 +141,19 @@ def _st_macro_all():
         return {'updated': 0, 'count': 0}
 
 
+def _st_tdcc_holders():
+    p = os.path.join(DATA, 'tdcc_holders.db')
+    n = 0
+    try:
+        import sqlite3
+        con = sqlite3.connect(p)
+        n = con.execute('SELECT COUNT(*) FROM holders_week').fetchone()[0]
+        con.close()
+    except Exception:
+        pass
+    return {'updated': _mtime(p), 'count': n}
+
+
 # ── Registry(順序即顯示順序) ──────────────────────────────
 def _registry():
     return [
@@ -170,6 +183,10 @@ def _registry():
          'reliability': 'official', 'kind': 'db', 'updatable': True,
          'desc': '維持率／融資餘額YoY／券資比 — 牛熊槓桿臨界觀察',
          'status': _st_macro_chart('__TW_MARGIN_CYCLE__')},
+        {'id': 'tdcc_holders', 'name': '籌碼集中度（集保）', 'provider': 'TDCC 開放資料',
+         'reliability': 'official', 'kind': 'db', 'updatable': True,
+         'desc': '股東人數 vs ≥400張大股東持有率（週）— 可回補歷史',
+         'status': _st_tdcc_holders()},
         {'id': 'macro_us_rates_credit', 'name': '美國利率 vs 公司債', 'provider': 'NY Fed / H.15 / Yahoo LQD·HYG',
          'reliability': 'vendor', 'kind': 'file', 'updatable': True,
          'desc': 'Fed＋10Y＋IG/HY 種子重抓（FRED 可達時優先）',
@@ -246,6 +263,19 @@ def refresh(sid, density=None, dense=None, step=None, years=None):
                 step=step or 14,
                 years=years or 8,
             )
+        except Exception as e:
+            return {'ok': False, 'error': str(e)}
+    if sid == 'tdcc_holders':
+        try:
+            import tdcc_holders as th
+            latest = th.refresh_latest()
+            th.start_background_backfill(weeks=int(years or 104))
+            return {
+                'ok': True,
+                'started': True,
+                'latest': latest,
+                'note': '已更新當週集保，並背景回補歷史週報',
+            }
         except Exception as e:
             return {'ok': False, 'error': str(e)}
     if sid == 'macro_us_rates_credit':
