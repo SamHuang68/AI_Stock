@@ -1275,16 +1275,27 @@ def get_macro_track_chart_json(sym, rng=None):
         elif rng in ('10y',):
             years = 10
         full = mt.get_chart(sym, years=years)
+        series = full.get('series') or []
         primary = None
-        for s in full.get('series') or []:
-            if s.get('scale') == 'left' and s.get('points'):
-                primary = s
-                break
-        if not primary:
-            for s in full.get('series') or []:
-                if s.get('points'):
+        prefer = {
+            '__TW_MARGIN_MIX__': 'yoy',
+            '__TW_MARGIN_CYCLE__': 'margin_ratio',
+            '__TW_RATES__': 'discount',
+            '__US_RATES_CREDIT__': 'fedfunds',
+            '__US_CPI_FIN__': 'us_cpi_yoy',
+        }
+        want = prefer.get(str(sym or '').upper())
+        if want:
+            for s in series:
+                if s.get('key') == want and s.get('points'):
                     primary = s
                     break
+        if not primary:
+            for s in series:
+                if s.get('scale') == 'left' and s.get('points'):
+                    primary = s
+                    break
+        # 絕不退回右軸（加權／XLF 等），避免格上顯示指數價
         pts = (primary or {}).get('points') or []
         return mt.points_to_yf_like(pts, full['id'], full['name'])
     except Exception as e:

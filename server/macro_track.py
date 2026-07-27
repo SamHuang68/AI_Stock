@@ -72,9 +72,10 @@ CHARTS: Dict[str, Dict[str, Any]] = {
         'market': 'TW',
         'defaultRange': 'max',
         'years': 20,
-        'description': '上櫃融資張數÷上市融資張數 年增率 vs 加權指數',
+        'description': '上櫃融資張數÷上市融資張數 年增率 vs 加權指數（絕對比值可選開）',
         'series': [
             {'key': 'yoy', 'name': '上櫃/上市融資比年增率', 'scale': 'left', 'color': '#38BDF8', 'style': 'line', 'unit': '%'},
+            {'key': 'ratio', 'name': '上櫃/上市融資比', 'scale': 'left', 'color': '#64748B', 'style': 'line', 'unit': '%'},
             {'key': 'twii', 'name': '加權指數', 'scale': 'right', 'color': '#F87171', 'style': 'line', 'unit': '',
              'source': 'yahoo', 'symbol': '^TWII'},
         ],
@@ -340,16 +341,23 @@ def fetch_tpex_otc_margin_lots(d: date) -> Optional[float]:
     return None
 
 
+# 稀疏抽樣時，前年同日可能落在空洞；±45 天才能穩定對上月／雙週點
+_YOY_MATCH_DAYS = 45
+
+
 def upsert_margin_mix(d: date, listed: float, otc: float) -> None:
     ratio = (otc / listed * 100.0) if listed and listed > 0 else None
     yoy = None
     prev = d.replace(year=d.year - 1) if d.month != 2 or d.day != 29 else d.replace(year=d.year - 1, day=28)
-    # look up ~1y ago within ±5 days
     conn = _db()
     try:
         rows = conn.execute(
             'SELECT d, ratio FROM margin_mix WHERE d BETWEEN ? AND ? ORDER BY ABS(julianday(d)-julianday(?)) LIMIT 1',
-            ((prev - timedelta(days=5)).isoformat(), (prev + timedelta(days=5)).isoformat(), prev.isoformat()),
+            (
+                (prev - timedelta(days=_YOY_MATCH_DAYS)).isoformat(),
+                (prev + timedelta(days=_YOY_MATCH_DAYS)).isoformat(),
+                prev.isoformat(),
+            ),
         ).fetchall()
         if rows and rows[0][1] is not None and ratio is not None and rows[0][1] != 0:
             yoy = (ratio / float(rows[0][1]) - 1.0) * 100.0
@@ -380,7 +388,7 @@ def refresh_margin_mix_today() -> Optional[Dict[str, Any]]:
 
 
 def load_margin_mix_yoy() -> List[Dict[str, Any]]:
-    """優先 DB，其次 CSV seed。啟動時若 DB 空則匯入 CSV。"""
+    """優先 DB，其次 CSV seed。啟動時合併 CSV → 重算 YoY。"""
     _maybe_import_margin_mix_csv()
     _recompute_all_yoy()
     pts: List[Dict[str, Any]] = []
@@ -405,14 +413,37 @@ def load_margin_mix_yoy() -> List[Dict[str, Any]]:
     return pts
 
 
+def load_margin_mix_ratio() -> List[Dict[str, Any]]:
+    """上櫃／上市融資張數比（絕對值 %）— 不需前年對齊，歷史較連續。"""
+    _maybe_import_margin_mix_csv()
+    pts: List[Dict[str, Any]] = []
+    conn = _db()
+    try:
+        rows = conn.execute(
+            'SELECT d, ratio FROM margin_mix WHERE ratio IS NOT NULL ORDER BY d'
+        ).fetchall()
+        pts = [{'date': r[0], 'value': float(r[1])} for r in rows]
+    finally:
+        conn.close()
+    if pts:
+        return pts
+    if os.path.isfile(MARGIN_MIX_CSV):
+        with open(MARGIN_MIX_CSV, encoding='utf-8') as f:
+            for row in csv.DictReader(f):
+                try:
+                    if row.get('ratio') not in (None, '', 'None'):
+                        pts.append({'date': row['date'], 'value': float(row['ratio'])})
+                except Exception:
+                    pass
+    return pts
+
+
 def _maybe_import_margin_mix_csv() -> None:
+    """合併 CSV seed 進 DB（INSERT OR REPLACE，不因 DB 已有列而跳過）。"""
     if not os.path.isfile(MARGIN_MIX_CSV):
         return
     conn = _db()
     try:
-        n = conn.execute('SELECT COUNT(*) FROM margin_mix').fetchone()[0]
-        if n > 0:
-            return
         with open(MARGIN_MIX_CSV, encoding='utf-8') as f:
             for row in csv.DictReader(f):
                 try:
@@ -450,7 +481,6 @@ def _recompute_all_yoy() -> None:
                 prev = date(y - 1, m, day) if not (m == 2 and day == 29) else date(y - 1, 2, 28)
             except Exception:
                 continue
-            # nearest within ±10 days
             best = None
             best_abs = 999
             for dd, rr in by_d.items():
@@ -459,7 +489,7 @@ def _recompute_all_yoy() -> None:
                 except Exception:
                     continue
                 gap = abs((dt - prev).days)
-                if gap <= 10 and gap < best_abs:
+                if gap <= _YOY_MATCH_DAYS and gap < best_abs:
                     best_abs = gap
                     best = rr
             yoy = None
@@ -874,20 +904,26 @@ def get_chart(chart_id: str, years: Optional[int] = None,
             refresh_margin_mix_today()
         except Exception as e:
             print('[macro_track] refresh margin mix:', e)
+        # 樣本過稀時自動背景雙週回補（不阻塞圖表回傳）
+        try:
+            _maybe_autodense_margin_mix()
+        except Exception as e:
+            print('[macro_track] autodense margin mix:', e)
         yoy = _filter_years(load_margin_mix_yoy(), yrs)
-        s0 = meta['series'][0]
-        out_series.append({
-            'key': s0['key'], 'name': s0['name'], 'scale': s0['scale'],
-            'color': s0['color'], 'style': s0.get('style', 'line'), 'unit': s0.get('unit', ''),
-            'points': yoy, 'source': 'TWSE+TPEx',
-        })
-        twii = _filter_years(_yahoo_closes('^TWII', yrs), yrs)
-        s1 = meta['series'][1]
-        out_series.append({
-            'key': s1['key'], 'name': s1['name'], 'scale': s1['scale'],
-            'color': s1['color'], 'style': s1.get('style', 'line'), 'unit': s1.get('unit', ''),
-            'points': twii, 'source': 'Yahoo ^TWII',
-        })
+        ratio = _filter_years(load_margin_mix_ratio(), yrs)
+        by_key = {
+            'yoy': yoy,
+            'ratio': ratio,
+            'twii': _filter_years(_yahoo_closes('^TWII', yrs), yrs),
+        }
+        for s0 in meta['series']:
+            pts = by_key.get(s0['key'], [])
+            src = 'TWSE+TPEx' if s0['key'] in ('yoy', 'ratio') else 'Yahoo ^TWII'
+            out_series.append({
+                'key': s0['key'], 'name': s0['name'], 'scale': s0['scale'],
+                'color': s0['color'], 'style': s0.get('style', 'line'), 'unit': s0.get('unit', ''),
+                'points': pts, 'source': src,
+            })
 
     elif cid in ('__US_RATES_CREDIT__', '__US_CPI_FIN__'):
         for s in meta['series']:
@@ -959,24 +995,79 @@ def points_to_yf_like(points: List[Dict[str, Any]], symbol: str, name: str) -> D
 
 
 def primary_points_for_yf(chart_id: str) -> Dict[str, Any]:
-    """給 /yf/__CHART__ 用：取左軸第一條有資料的序列。"""
+    """給 /yf/__CHART__ 用：優先取左軸主指標（融資比 → yoy），绝不退回右軸加權。"""
     data = get_chart(chart_id)
+    series = data.get('series') or []
     primary = None
-    for s in data.get('series') or []:
-        if s.get('scale') == 'left' and s.get('points'):
-            primary = s
-            break
+    prefer = {
+        '__TW_MARGIN_MIX__': 'yoy',
+        '__TW_MARGIN_CYCLE__': 'margin_ratio',
+        '__TW_RATES__': 'discount',
+        '__US_RATES_CREDIT__': 'fedfunds',
+        '__US_CPI_FIN__': 'us_cpi_yoy',
+    }
+    want = prefer.get(str(chart_id or '').upper())
+    if want:
+        for s in series:
+            if s.get('key') == want and s.get('points'):
+                primary = s
+                break
     if not primary:
-        for s in data.get('series') or []:
-            if s.get('points'):
+        for s in series:
+            if s.get('scale') == 'left' and s.get('points'):
                 primary = s
                 break
     pts = (primary or {}).get('points') or []
     return points_to_yf_like(pts, data['id'], data['name'])
 
 
-# ── 一鍵更新（UI 按鈕用，免 CLI）────────────────────────────
+_AUTODENSE_STARTED = False
+# ── 一鍵更新／背景回補狀態（須在 autodense 之前定義）────────
 _REFRESH_LOCK = {'running': False, 'last': None, 'note': ''}
+
+
+def _maybe_autodense_margin_mix() -> None:
+    """YoY 點數過少時，背景雙週回補約 10 年（只觸發一次／行程）。"""
+    global _AUTODENSE_STARTED
+    if _AUTODENSE_STARTED or _REFRESH_LOCK.get('running'):
+        return
+    yoy_n = 0
+    total = 0
+    conn = _db()
+    try:
+        yoy_n = conn.execute('SELECT COUNT(*) FROM margin_mix WHERE yoy IS NOT NULL').fetchone()[0]
+        total = conn.execute('SELECT COUNT(*) FROM margin_mix').fetchone()[0]
+    finally:
+        conn.close()
+    if yoy_n >= 80 and total >= 120:
+        return
+    _AUTODENSE_STARTED = True
+    start = date.today() - timedelta(days=10 * 365)
+    step_days = 14
+
+    def _run():
+        _REFRESH_LOCK['running'] = True
+        _REFRESH_LOCK['note'] = f'autodense-mix step={step_days}'
+        try:
+            n = backfill_margin_mix(start, step_days=step_days)
+            _recompute_all_yoy()
+            export_margin_mix_csv()
+            _REFRESH_LOCK['last'] = {
+                'ok': True, 'n': n, 'at': time.time(),
+                'step': step_days, 'years': 10, 'autodense': True,
+            }
+            print(f'[macro_track] autodense margin_mix done n={n}')
+        except Exception as e:
+            _REFRESH_LOCK['last'] = {'ok': False, 'error': str(e), 'at': time.time()}
+            print('[macro_track] autodense failed:', e)
+        finally:
+            _REFRESH_LOCK['running'] = False
+            _REFRESH_LOCK['note'] = ''
+
+    import threading
+    threading.Thread(target=_run, daemon=True).start()
+    print(f'[macro_track] autodense margin_mix started (yoy={yoy_n}, total={total}) from {start}')
+
 
 # 密度預設：step=抽樣間隔天數；years=往回幾年；dense=是否啟動歷史回補
 DENSITY_PRESETS = {

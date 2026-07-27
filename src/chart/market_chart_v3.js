@@ -92,10 +92,13 @@
       _shortNames: { discount: '重貼', secured: '擔保', short: '短融' },
     },
     '__TW_MARGIN_MIX__': {
-      yoy:  { lineWidth: 2, color: '#6B9BB8', lastValueVisible: false },
-      twii: { lineWidth: 1.5, color: '#B89595', lastValueVisible: false },
+      yoy:   { lineWidth: 2, color: '#6B9BB8', lastValueVisible: false },
+      ratio: { lineWidth: 1.25, lineStyle: 2, color: '#64748B', lastValueVisible: false },
+      twii:  { lineWidth: 1.5, color: '#B89595', lastValueVisible: false },
       _axis: { left: 'L · YoY%', right: 'R · 加權' },
-      _shortNames: { yoy: '融資比', twii: '加權' },
+      _shortNames: { yoy: '融資比YoY', ratio: '融資比', twii: '加權' },
+      // 絕對比值與 YoY 量綱不同，預設關閉避免左軸被拉開；需要時 chip 開啟
+      _defaultOff: ['ratio'],
     },
     '__TW_MARGIN_CYCLE__': {
       margin_ratio: { lineWidth: 2.25, color: '#6B9BB8', lastValueVisible: false },
