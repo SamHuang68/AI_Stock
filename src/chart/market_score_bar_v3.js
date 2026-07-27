@@ -19,7 +19,12 @@
   function isTwFundSym(sym) {
     const s = String(sym || '').toUpperCase();
     if (TW_FUND_SYMS.has(s)) return true;
+    if (s === '__TW_MARGIN_CYCLE__' || s === '__MARGIN_CYCLE__') return false;
     return s.startsWith('__TW_') && s.endsWith('__');
+  }
+  function isMarginCycleSym(sym) {
+    const s = String(sym || '').toUpperCase();
+    return s === '__TW_MARGIN_CYCLE__' || s === '__MARGIN_CYCLE__';
   }
   function isUsRiskSym(sym) {
     const s = String(sym || '').toUpperCase();
@@ -79,6 +84,13 @@
     if (s >= 45) return '體質中性';
     if (s >= 30) return '體質偏弱';
     return '體質偏冷';
+  }
+  function labelCycle(s) {
+    if (s == null) return '資料不足';
+    if (s >= 75) return '擁擠高潮';
+    if (s >= 55) return '偏熱';
+    if (s >= 30) return '修復／中性';
+    return '清算區';
   }
 
   function seriesMap(seriesList) {
@@ -215,9 +227,15 @@
   function scoreColor(score, direction) {
     if (score == null) return 'var(--tlo)';
     if (direction === 'health') {
-      // 高分健康 → 紅(台股慣例熱)/綠弱
       if (window.Colors && Colors.quality) return Colors.quality(score, 70, 50);
       return score >= 70 ? 'var(--red)' : score >= 50 ? 'var(--orange)' : 'var(--green)';
+    }
+    if (direction === 'cycle') {
+      // 高潮偏紅警戒、清算偏綠（去槓桿）
+      if (score >= 75) return '#f87171';
+      if (score >= 55) return '#fb923c';
+      if (score >= 30) return '#94a3b8';
+      return '#4ade80';
     }
     // alert：高分警戒 → 紅／橘
     if (score >= 70) return '#f87171';
@@ -236,8 +254,8 @@
     const modal = document.getElementById('market-algo-modal');
     if (modal) modal.style.display = 'none';
     if (window.S) {
-      // 離開大盤／美風險圖時清掉，避免 STATS 誤用舊 payload
-      if (!isTwFundSym(S.sym) && !isUsRiskSym(S.sym)) {
+      // 離開大盤／美風險／融資週期圖時清掉，避免 STATS 誤用舊 payload
+      if (!isTwFundSym(S.sym) && !isUsRiskSym(S.sym) && !isMarginCycleSym(S.sym)) {
         S._fundPanelPayload = null;
         S._marketRisk = null;
       }
@@ -250,10 +268,15 @@
     if (!bar || !payload) { hide(); return; }
     _lastPayload = payload;
     _lastSym = opts.sym || (window.S && S.sym) || '';
-    const direction = payload.direction || (payload.kind === 'market_risk' ? 'alert' : 'health');
-    const title = payload.title || (direction === 'alert' ? '市場風險' : '大盤體質');
+    const direction = payload.direction
+      || (payload.kind === 'market_risk' ? 'alert'
+        : (payload.kind === 'margin_cycle' ? 'cycle' : 'health'));
+    const title = payload.title
+      || (direction === 'alert' ? '市場風險' : (direction === 'cycle' ? '融資週期' : '大盤體質'));
     const score = payload.score;
-    const label = payload.label || (direction === 'alert' ? labelRisk(score) : labelHealth(score));
+    const label = payload.label
+      || (direction === 'alert' ? labelRisk(score)
+        : (direction === 'cycle' ? labelCycle(score) : labelHealth(score)));
     const summary = payload.summary || (score != null ? `${title} ${score} · ${label}` : `${title} —`);
     const rows = payload.marketRows || [];
     const viewMode = opts.viewMode || (window.S && S._marketViewMode) || null;
@@ -345,7 +368,9 @@
     let body =
       `<div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:6px">${title}</div>` +
       `<div style="color:#94a3b8;margin-bottom:10px;font-size:11px">` +
-        (direction === 'health' ? '分數愈高＝體質愈健康。' : '分數愈高＝愈需警戒。') +
+        (direction === 'health' ? '分數愈高＝體質愈健康。'
+          : (direction === 'cycle' ? '分數愈高＝槓桿愈擴張／偏熱；愈低＝去槓桿／清算區。'
+            : '分數愈高＝愈需警戒。')) +
         ' 下列公式可對非金融友人說明。' +
       `</div>`;
     if (pillars.length) {
@@ -428,6 +453,19 @@
       return;
     }
 
+    // 融資週期
+    if (isMarginCycleSym(up)) {
+      let risk = (window.S && S._marketRisk) || null;
+      if (!risk || risk.kind !== 'margin_cycle') {
+        const f = await fetchFund(sym);
+        if (f && (f.kind === 'margin_cycle' || f.score != null)) risk = f;
+      }
+      if (!risk) { hide(); return; }
+      if (window.S) S._fundPanelPayload = risk;
+      render(risk, { sym: up, showModeToggle: false });
+      return;
+    }
+
     if (isTwFundSym(up)) {
       const f = await fetchFund(sym);
       if (!f || (f.kind !== 'market' && f.score == null)) { hide(); return; }
@@ -462,6 +500,7 @@
     recomputeFromSeries,
     isTwFundSym,
     isUsRiskSym,
+    isMarginCycleSym,
     openAlgoModal,
   };
   LOG('ready');

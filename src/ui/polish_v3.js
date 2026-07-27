@@ -196,12 +196,13 @@ const MKT_TABS = {
   tw: {
     id: 'tw',
     label: '大盤',
-    title: '台股大盤（加權／期／櫃買／融資／台利率）',
+    title: '台股大盤（加權／期／櫃買／融資／融資週期／台利率）',
     items: [
       {sym:'^TWII', name:'加權'},
       {sym:'__TXF__', name:'台指期'},
       {sym:'^TWOII', name:'櫃買'},
       {sym:'__MARGIN_RATIO__', name:'融資維持'},
+      {sym:'__TW_MARGIN_CYCLE__', name:'融資週期'},
       {sym:'__TW_RATES__', name:'台利率'},
       {sym:'__TW_MARGIN_MIX__', name:'融資比YoY'},
     ],

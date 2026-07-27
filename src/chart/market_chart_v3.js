@@ -11,7 +11,7 @@
 (function MarketChartV3() {
   'use strict';
 
-  const VER = '3.4.0';
+  const VER = '3.5.0';
   const LOG = (...a) => console.log('%c[MarketChart ' + VER + ']', 'color:#64748b', ...a);
   const WARN = (...a) => console.warn('[MarketChart]', ...a);
   const VIEW_MODE_LS = 'mc-view-mode';
@@ -96,6 +96,15 @@
       twii: { lineWidth: 1.5, color: '#B89595', lastValueVisible: false },
       _axis: { left: 'L · YoY%', right: 'R · 加權' },
       _shortNames: { yoy: '融資比', twii: '加權' },
+    },
+    '__TW_MARGIN_CYCLE__': {
+      margin_ratio: { lineWidth: 2.25, color: '#6B9BB8', lastValueVisible: false },
+      twii:         { lineWidth: 1.5, color: '#D4A574', lastValueVisible: false },
+      margin_yoy:   { lineWidth: 1.25, lineStyle: 2, color: '#B89595', lastValueVisible: false },
+      ss_ratio:     { lineWidth: 1.25, lineStyle: 2, color: '#8FA88F', lastValueVisible: false },
+      _axis: { left: 'L · 維持率%', right: 'R · 加權' },
+      _shortNames: { margin_ratio: '維持率', twii: '加權', margin_yoy: '餘額YoY', ss_ratio: '券資比' },
+      _defaultOff: ['margin_yoy', 'ss_ratio'],
     },
   };
 
@@ -274,6 +283,25 @@
     years: 20,
     valueFormat: (v) => (v != null && isFinite(v) ? Number(v).toFixed(2) + '%' : ''),
     aliases: ['融資比', '融資比YoY', '上櫃上市融資', 'TW_MARGIN_MIX'],
+  });
+  register({
+    id: '__TW_MARGIN_CYCLE__',
+    name: '融資週期（槓桿臨界）',
+    shortName: '融資週期',
+    market: 'TW',
+    unit: '%',
+    defaultRange: 'max',
+    multi: true,
+    endpoint: '/macro/chart/__TW_MARGIN_CYCLE__',
+    years: 20,
+    riskLines: [
+      { level: 166, label: '門檻 166', color: '#38bdf8' },
+      { level: 150, label: '偏弱 150', color: '#eab308' },
+      { level: 140, label: '警戒 140', color: '#f97316' },
+      { level: 130, label: '危險 130', color: '#ef4444' },
+    ],
+    valueFormat: (v) => (v != null && isFinite(v) ? Number(v).toFixed(2) + '%' : ''),
+    aliases: ['融資週期', '槓桿臨界', 'MARGIN_CYCLE', 'TW_MARGIN_CYCLE'],
   });
   register({
     id: '__US_RATES_CREDIT__',
@@ -584,11 +612,15 @@
 
     const stylePack = SERIES_STYLE[def.id] || {};
     const shorts = stylePack._shortNames || {};
+    const defaultOff = new Set(stylePack._defaultOff || []);
     const saved = getSeriesVis(def.id) || {};
 
     apiSeries.forEach(e => {
       const k = e.meta.key;
-      const on = (saved[k] === undefined) ? true : !!saved[k];
+      let on;
+      if (saved[k] !== undefined) on = !!saved[k];
+      else if (e.meta.defaultVisible === false || defaultOff.has(k)) on = false;
+      else on = true;
       e.visible = on;
       try { e.seriesObj.applyOptions({ visible: on }); } catch (err) {}
     });
@@ -1122,13 +1154,20 @@
   function syncRiskFromPayload(def, payload, chart, opts) {
     opts = opts || {};
     const id = def && def.id;
-    if (!id || (id !== '__US_RATES_CREDIT__' && id !== '__US_CPI_FIN__')) return;
-    const raw = (payload && payload.series) || [];
-    const sliced = sliceSeriesForVisible(raw, chart);
+    if (!id) return;
+    const isUs = (id === '__US_RATES_CREDIT__' || id === '__US_CPI_FIN__');
+    const isCycle = (id === '__TW_MARGIN_CYCLE__');
+    if (!isUs && !isCycle) return;
     let risk = null;
-    if (window.MarketScoreBar && typeof MarketScoreBar.recomputeFromSeries === 'function') {
-      risk = MarketScoreBar.recomputeFromSeries(id, sliced);
-      if (payload && payload.risk && payload.risk.algo && risk) risk.algo = payload.risk.algo;
+    if (isUs) {
+      const raw = (payload && payload.series) || [];
+      const sliced = sliceSeriesForVisible(raw, chart);
+      if (window.MarketScoreBar && typeof MarketScoreBar.recomputeFromSeries === 'function') {
+        risk = MarketScoreBar.recomputeFromSeries(id, sliced);
+        if (payload && payload.risk && payload.risk.algo && risk) risk.algo = payload.risk.algo;
+      } else if (payload && payload.risk) {
+        risk = payload.risk;
+      }
     } else if (payload && payload.risk) {
       risk = payload.risk;
     }
@@ -1142,7 +1181,7 @@
       MarketScoreBar.applyRiskUpdate(risk, {
         sym: id,
         viewMode: (window.S && S._marketViewMode) || getViewMode(id),
-        showModeToggle: true,
+        showModeToggle: isUs,
       });
     }
     if (opts.toast && typeof window.notifyToast === 'function') {
@@ -1402,6 +1441,13 @@
     ensureBadge(def);
     ensureAxisLabels(def, axisPack);
     ensureSeriesPanel(def, apiSeries, viewMode);
+
+    // 融資週期：在維持率序列上畫臨界虛線
+    const riskLines = (def && def.riskLines) || (payload && payload.riskLines) || [];
+    if (riskLines.length) {
+      const mmEntry = apiSeries.find(e => e.meta && e.meta.key === 'margin_ratio') || primaryApi;
+      if (mmEntry) applyRiskLines(mmEntry.seriesObj, riskLines);
+    }
 
     if (primaryApi) {
       // 對齊模式 header 顯示指數；名稱帶模式標

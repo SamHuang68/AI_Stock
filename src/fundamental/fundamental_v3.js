@@ -17,12 +17,12 @@
     if (!sym) return null;
     mkt = (mkt || 'TW').toUpperCase();
     const key = sym.toUpperCase() + '|' + mkt;
-    // 市場風險／大盤體質可能隨視窗重算 → 優先用主圖最新 payload（須同代號）
+    // 市場風險／大盤體質／融資週期可能隨視窗重算 → 優先用主圖最新 payload（須同代號）
     if (window.S && S._fundPanelPayload && String(S.sym || '').toUpperCase() === String(sym).toUpperCase()) {
       const live = S._fundPanelPayload;
       const liveSym = String((live && (live.symbol || live.code)) || (S && S._marketChartId) || '').toUpperCase();
       const want = String(sym).toUpperCase();
-      if (live && (live.kind === 'market' || live.kind === 'market_risk') &&
+      if (live && (live.kind === 'market' || live.kind === 'market_risk' || live.kind === 'margin_cycle') &&
           (!liveSym || liveSym === want || liveSym.replace(/^\^/, '') === want.replace(/^\^/, ''))) {
         return live;
       }
@@ -63,6 +63,11 @@
       const lbl = s >= 70 ? '風險偏高' : s >= 55 ? '風險中偏高' : s >= 45 ? '風險中性' : '風險偏低';
       return `<span style="display:inline-block;padding:1px 8px;border-radius:10px;background:${col};color:#0b1220;font-weight:700;font-size:11px">${s} ${lbl}</span>`;
     }
+    if (kind === 'margin_cycle') {
+      const col = s >= 75 ? '#f87171' : s >= 55 ? '#fb923c' : s >= 30 ? '#94a3b8' : '#4ade80';
+      const lbl = s >= 75 ? '擁擠高潮' : s >= 55 ? '偏熱' : s >= 30 ? '修復／中性' : '清算區';
+      return `<span style="display:inline-block;padding:1px 8px;border-radius:10px;background:${col};color:#0b1220;font-weight:700;font-size:11px">${s} ${lbl}</span>`;
+    }
     const col = window.Colors ? Colors.quality(s, 70, 50) : (s >= 70 ? 'var(--red)' : s >= 50 ? 'var(--orange)' : 'var(--green)');
     const lbl = kind === 'market'
       ? (s >= 70 ? '偏熱／偏強' : s >= 50 ? '中性' : '偏弱／偏冷')
@@ -72,8 +77,8 @@
 
   /** STATS：只放白話摘要；完整公式在主圖「?」 */
   function renderPlainMarket(f) {
-    const title = f.title || (f.kind === 'market_risk' ? '市場風險' : '大盤體質');
-    const kind = f.kind === 'market_risk' ? 'market_risk' : 'market';
+    const title = f.title || (f.kind === 'market_risk' ? '市場風險' : (f.kind === 'margin_cycle' ? '融資週期' : '大盤體質'));
+    const kind = f.kind === 'market_risk' ? 'market_risk' : (f.kind === 'margin_cycle' ? 'margin_cycle' : 'market');
     let h = '';
     if (f.score != null)
       h += `<div class="stat-row" style="font-weight:700"><span class="stat-k">${title}</span><span class="stat-v">${scoreBadge(f.score, kind)}</span></div>`;
@@ -86,7 +91,9 @@
       h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span class="stat-k">支柱一覽</span><span class="stat-v">點主圖 ? 看完整算法</span></div>`;
       rows.forEach(row => {
         const sc = row.score;
-        const col = kind === 'market_risk' ? riskCol(sc) : pillarCol(sc);
+        const col = kind === 'market_risk' || kind === 'margin_cycle'
+          ? (sc == null ? 'var(--tlo)' : sc >= 70 ? '#f87171' : sc >= 55 ? '#fb923c' : sc >= 45 ? '#94a3b8' : '#4ade80')
+          : pillarCol(sc);
         h += `<div class="stat-row"><span class="stat-k">${row.k}</span>` +
           `<span class="stat-v">${row.v}` +
           (sc != null ? ` <span style="color:${col};font-size:9px">(${Math.round(sc)})</span>` : '') +
@@ -116,7 +123,7 @@
   }
 
   function render(f) {
-    if (f && (f.kind === 'market' || f.kind === 'market_risk')) return renderPlainMarket(f);
+    if (f && (f.kind === 'market' || f.kind === 'market_risk' || f.kind === 'margin_cycle')) return renderPlainMarket(f);
     const isUs = f && (f.market === 'US' || (S && S.mkt === 'US'));
     if (!f || (!f.revenue && !f.income)) return renderEmpty(f);
     let h = '';
@@ -165,8 +172,8 @@
         const stats = document.getElementById('rpanel');
         if (!stats || S.tab !== 'stats') return;
         const ex = document.getElementById('fund-sect');
-        const sectTitle = (f && (f.kind === 'market' || f.kind === 'market_risk'))
-          ? (f.title || (f.kind === 'market_risk' ? '市場風險' : '大盤體質'))
+        const sectTitle = (f && (f.kind === 'market' || f.kind === 'market_risk' || f.kind === 'margin_cycle'))
+          ? (f.title || (f.kind === 'market_risk' ? '市場風險' : (f.kind === 'margin_cycle' ? '融資週期' : '大盤體質')))
           : '基本面';
         const html = `<div id="fund-sect"><div class="stat-sect">${sectTitle} · ${S.sym}</div>${render(f)}</div>`;
         if (ex) ex.outerHTML = html;
