@@ -115,6 +115,21 @@ CHARTS: Dict[str, Dict[str, Any]] = {
              'source': 'yahoo', 'symbol': 'XLF', 'seed': 'xlf.csv'},
         ],
     },
+    '__TW_MARGIN_CYCLE__': {
+        'id': '__TW_MARGIN_CYCLE__',
+        'name': '融資週期（槓桿臨界）',
+        'shortName': '融資週期',
+        'market': 'TW',
+        'defaultRange': 'max',
+        'years': 20,
+        'description': '維持率臨界＋融資餘額熱度＋券資結構，觀察牛熊槓桿週期',
+        'series': [
+            {'key': 'margin_ratio', 'name': '融資維持率', 'scale': 'left', 'color': '#6B9BB8', 'style': 'line', 'unit': '%'},
+            {'key': 'margin_yoy', 'name': '融資餘額年增率', 'scale': 'left', 'color': '#B89595', 'style': 'line', 'unit': '%'},
+            {'key': 'ss_ratio', 'name': '券資比', 'scale': 'left', 'color': '#8FA88F', 'style': 'line', 'unit': '%'},
+            {'key': 'twii', 'name': '加權指數', 'scale': 'right', 'color': '#D4A574', 'style': 'line', 'unit': ''},
+        ],
+    },
 }
 
 
@@ -884,6 +899,11 @@ def get_chart(chart_id: str, years: Optional[int] = None,
                 'source': note,
             })
 
+    elif cid == '__TW_MARGIN_CYCLE__':
+        import margin_cycle as mc
+        full = mc.get_chart(years=yrs, force_refresh=True)
+        return full
+
     else:
         raise KeyError(cid)
 
@@ -1135,6 +1155,25 @@ def refresh_chart(chart_id: str, dense: bool = False, density: Optional[str] = N
 
                 import threading
                 threading.Thread(target=_run, daemon=True).start()
+        except Exception as e:
+            result['ok'] = False
+            result['error'] = str(e)
+
+    elif cid == '__TW_MARGIN_CYCLE__':
+        try:
+            import margin_cycle as mc
+            today = mc.refresh_today()
+            result['actions'].append({'action': 'refresh-ms-today', 'row': today})
+            yrs = int(dens.get('years') or years or 8)
+            step_days = int(dens.get('step') or step or 14)
+            mc.start_background_backfill(years=yrs, step_days=step_days)
+            result['started'] = True
+            result['note'] = f'已更新今日信用統計，並背景回補約 {yrs} 年（每 {step_days} 日）'
+            rows = mc.load_ms_rows()
+            result['count'] = len(rows)
+            result['actions'].append({
+                'action': 'backfill-ms', 'years': yrs, 'step': step_days, 'points': len(rows),
+            })
         except Exception as e:
             result['ok'] = False
             result['error'] = str(e)

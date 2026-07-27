@@ -817,8 +817,11 @@ def _is_macro_sym(sym: str) -> bool:
 
 
 def _is_tw_market_fund_sym(sym: str) -> bool:
-    """可計算「大盤體質」的代號：台指／融資維持／台股合成序列。"""
+    """可計算「大盤體質」的代號：台指／融資維持／台股合成序列。
+       融資週期（__TW_MARGIN_CYCLE__）為獨立指標，不含在內。"""
     s = (sym or '').strip().upper().replace('.TW', '').replace('.TWO', '')
+    if s in ('__TW_MARGIN_CYCLE__', '__MARGIN_CYCLE__'):
+        return False
     if _is_tw_index_sym(s):
         return True
     if s in ('__MARGIN_RATIO__', '__MARGIN__'):
@@ -1289,7 +1292,8 @@ def get_macro_track_chart_json(sym, rng=None):
         return {'chart': {'result': None, 'error': str(e)}}
 
 _MACRO_TRACK_IDS = (
-    '__TW_RATES__', '__TW_MARGIN_MIX__', '__US_RATES_CREDIT__', '__US_CPI_FIN__',
+    '__TW_RATES__', '__TW_MARGIN_MIX__', '__TW_MARGIN_CYCLE__',
+    '__US_RATES_CREDIT__', '__US_CPI_FIN__',
 )
 
 def fetch_one(sym, rng=None, interval=None, nocache=False):
@@ -2249,6 +2253,9 @@ class Handler(SimpleHTTPRequestHandler):
             '重貼現率': ('台灣指標利率', 'TW'),
             '__TW_MARGIN_MIX__': ('上櫃／上市融資張數比年增', 'TW'),
             '融資比': ('上櫃／上市融資張數比年增', 'TW'),
+            '__TW_MARGIN_CYCLE__': ('融資週期（槓桿臨界）', 'TW'),
+            '融資週期': ('融資週期（槓桿臨界）', 'TW'),
+            '槓桿臨界': ('融資週期（槓桿臨界）', 'TW'),
             '__US_RATES_CREDIT__': ('美國利率 vs 公司債總報酬', 'US'),
             '美利率債': ('美國利率 vs 公司債總報酬', 'US'),
             '__US_CPI_FIN__': ('美國CPI＆基準利率 vs 金融股', 'US'),
@@ -2259,7 +2266,9 @@ class Handler(SimpleHTTPRequestHandler):
             # map alias to canonical id
             _alias_to_id = {
                 '台利率': '__TW_RATES__', '重貼現率': '__TW_RATES__',
-                '融資比': '__TW_MARGIN_MIX__', '美利率債': '__US_RATES_CREDIT__', 'CPI金融': '__US_CPI_FIN__',
+                '融資比': '__TW_MARGIN_MIX__',
+                '融資週期': '__TW_MARGIN_CYCLE__', '槓桿臨界': '__TW_MARGIN_CYCLE__',
+                '美利率債': '__US_RATES_CREDIT__', 'CPI金融': '__US_CPI_FIN__',
             }
             tid = key if key.startswith('__') else _alias_to_id.get(q, key)
             name, mkt = _macro_q.get(key) or _macro_q.get(q) or (tid, 'TW')
@@ -3181,6 +3190,27 @@ class Handler(SimpleHTTPRequestHandler):
         from datetime import date as _date
         today = _date.today().strftime('%Y%m%d')
         clean = sym.replace('.TW', '').replace('.TWO', '').strip().upper()
+        # 融資週期（槓桿臨界）— 獨立指標，不走大盤體質
+        if clean in ('__TW_MARGIN_CYCLE__', '__MARGIN_CYCLE__'):
+            key = f'fund:MCYCLE:{today}'
+            c = _cache.get(key)
+            if c is not None:
+                self._ok(c); return
+            try:
+                import margin_cycle as mc
+                out = mc.fundamental_payload(sym)
+                body = json.dumps(out, ensure_ascii=False).encode()
+                _cache.set(key, body)
+                self._ok(body)
+            except Exception as e:
+                print('[fundamental] margin cycle failed:', e)
+                self._ok(json.dumps({
+                    'symbol': sym, 'code': clean, 'date': today,
+                    'market': 'TW', 'kind': 'margin_cycle', 'title': '融資週期',
+                    'revenue': None, 'income': None, 'score': None,
+                    '_note': '融資週期計算失敗：' + str(e),
+                }, ensure_ascii=False).encode())
+            return
         # 台股大盤／融資維持／台合成序列 → 大盤體質（非個股財報）
         if _is_tw_market_fund_sym(clean):
             key = f'fund:MKT:{clean}:{today}'

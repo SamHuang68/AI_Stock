@@ -166,6 +166,10 @@ def _registry():
          'reliability': 'official', 'kind': 'db', 'updatable': True,
          'desc': '今日融資張數比 + 背景回補近 8 年（免 CLI）',
          'status': _st_macro_chart('__TW_MARGIN_MIX__')},
+        {'id': 'macro_tw_margin_cycle', 'name': '融資週期（槓桿臨界）', 'provider': 'TWSE MI_MARGN + 維持率',
+         'reliability': 'official', 'kind': 'db', 'updatable': True,
+         'desc': '維持率／融資餘額YoY／券資比 — 牛熊槓桿臨界觀察',
+         'status': _st_macro_chart('__TW_MARGIN_CYCLE__')},
         {'id': 'macro_us_rates_credit', 'name': '美國利率 vs 公司債', 'provider': 'NY Fed / H.15 / Yahoo LQD·HYG',
          'reliability': 'vendor', 'kind': 'file', 'updatable': True,
          'desc': 'Fed＋10Y＋IG/HY 種子重抓（FRED 可達時優先）',
@@ -229,6 +233,18 @@ def refresh(sid, density=None, dense=None, step=None, years=None):
                 dense=dense if dense is not None else True,
                 step=step,
                 years=years,
+            )
+        except Exception as e:
+            return {'ok': False, 'error': str(e)}
+    if sid == 'macro_tw_margin_cycle':
+        try:
+            import macro_track as mt
+            return mt.refresh_chart(
+                '__TW_MARGIN_CYCLE__',
+                density=density or 'biweek',
+                dense=True,
+                step=step or 14,
+                years=years or 8,
             )
         except Exception as e:
             return {'ok': False, 'error': str(e)}
