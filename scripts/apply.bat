@@ -10,7 +10,8 @@ setlocal
 cd /d "%~dp0.."
 
 set "BR=%~1"
-if "%BR%"=="" set "BR=cursor/market-fund-blank-4e66"
+REM 預設：含大盤體質／融資週期／TDCC 集中度／README＋分享打包的最新 tip
+if "%BR%"=="" set "BR=cursor/share-dist-readme-4e66"
 
 echo.
 echo === APPLY %BR% ===
