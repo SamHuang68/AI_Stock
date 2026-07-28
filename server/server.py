@@ -1262,50 +1262,22 @@ def get_margin_ratio_chart_json(rng=None):
         return b'{"chart":{"result":null,"error":"failed"}}'
 
 def get_macro_track_chart_json(sym, rng=None):
-    """MacroMicro 風格多序列追蹤圖 → Yahoo-compatible（主序列）。完整多序列走 /macro/chart/<id>。"""
+    """委派 server/macro_api（H2 拆出）；保留符號相容。"""
     try:
-        import macro_track as mt
-        years = 25
-        if rng in ('1y', '12mo'):
-            years = 1
-        elif rng in ('2y',):
-            years = 2
-        elif rng in ('5y',):
-            years = 5
-        elif rng in ('10y',):
-            years = 10
-        full = mt.get_chart(sym, years=years)
-        series = full.get('series') or []
-        primary = None
-        prefer = {
-            '__TW_MARGIN_MIX__': 'yoy',
-            '__TW_MARGIN_CYCLE__': 'margin_ratio',
-            '__TW_RATES__': 'discount',
-            '__US_RATES_CREDIT__': 'fedfunds',
-            '__US_CPI_FIN__': 'us_cpi_yoy',
-        }
-        want = prefer.get(str(sym or '').upper())
-        if want:
-            for s in series:
-                if s.get('key') == want and s.get('points'):
-                    primary = s
-                    break
-        if not primary:
-            for s in series:
-                if s.get('scale') == 'left' and s.get('points'):
-                    primary = s
-                    break
-        # 絕不退回右軸（加權／XLF 等），避免格上顯示指數價
-        pts = (primary or {}).get('points') or []
-        return mt.points_to_yf_like(pts, full['id'], full['name'])
+        import macro_api as ma
+        return ma.get_macro_track_chart_json(sym, rng)
     except Exception as e:
         print('[server] get_macro_track_chart_json failed:', e)
         return {'chart': {'result': None, 'error': str(e)}}
 
-_MACRO_TRACK_IDS = (
-    '__TW_RATES__', '__TW_MARGIN_MIX__', '__TW_MARGIN_CYCLE__',
-    '__US_RATES_CREDIT__', '__US_CPI_FIN__',
-)
+try:
+    import chart_registry as _cr
+    _MACRO_TRACK_IDS = _cr.MACRO_TRACK_IDS
+except Exception:
+    _MACRO_TRACK_IDS = (
+        '__TW_RATES__', '__TW_MARGIN_MIX__', '__TW_MARGIN_CYCLE__',
+        '__US_RATES_CREDIT__', '__US_CPI_FIN__',
+    )
 
 def fetch_one(sym, rng=None, interval=None, nocache=False):
     """Fetch Yahoo chart JSON for sym. nocache=True bypasses _cache entirely
@@ -1329,11 +1301,8 @@ def fetch_one(sym, rng=None, interval=None, nocache=False):
             # 轉成 yf-like 給相容路徑；主路徑走 MarketChart multi
             try:
                 import macro_track as mt
-                primary = None
-                for s in chart.get('series') or []:
-                    if s.get('points'):
-                        primary = s
-                        break
+                import chart_registry as cr
+                primary = cr.pick_primary_series(chart.get('series') or [], cid)
                 pts = (primary or {}).get('points') or []
                 data = mt.points_to_yf_like(pts, cid, chart.get('name') or cid)
                 return cid, json.dumps(data).encode(), False
@@ -4619,35 +4588,33 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _calc_ind(self, closes, highs, lows, vols):
         n = len(closes)
-        def sma(p, idx):
-            if idx + 1 < p: return None
-            return sum(closes[idx-p+1:idx+1]) / p
-
-        # 標準 Wilder's Smoothing RSI 14
-        def calc_rsi_wilders(prices, period=14):
-            if len(prices) <= period:
-                return None
-            gains = []
-            losses = []
-            for i in range(1, len(prices)):
-                diff = prices[i] - prices[i-1]
-                if diff > 0:
-                    gains.append(diff)
-                    losses.append(0.0)
-                else:
-                    gains.append(0.0)
-                    losses.append(-diff)
-            avg_gain = sum(gains[:period]) / period
-            avg_loss = sum(losses[:period]) / period
-            for i in range(period, len(gains)):
-                avg_gain = (avg_gain * 13 + gains[i]) / 14
-                avg_loss = (avg_loss * 13 + losses[i]) / 14
-            if avg_loss == 0:
-                return 100.0
-            rs = avg_gain / avg_loss
-            return 100.0 - (100.0 / (1.0 + rs))
-
-        rsi = calc_rsi_wilders(closes, 14)
+        try:
+            import indicators as _ind
+            def sma(p, idx):
+                return _ind.sma(closes, p, idx)
+            rsi = _ind.rsi_wilders(closes, 14)
+        except Exception:
+            def sma(p, idx):
+                if idx + 1 < p: return None
+                return sum(closes[idx-p+1:idx+1]) / p
+            def calc_rsi_wilders(prices, period=14):
+                if len(prices) <= period:
+                    return None
+                gains, losses = [], []
+                for i in range(1, len(prices)):
+                    diff = prices[i] - prices[i-1]
+                    gains.append(diff if diff > 0 else 0.0)
+                    losses.append(-diff if diff < 0 else 0.0)
+                avg_gain = sum(gains[:period]) / period
+                avg_loss = sum(losses[:period]) / period
+                for i in range(period, len(gains)):
+                    avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+                    avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+                if avg_loss == 0:
+                    return 100.0
+                rs = avg_gain / avg_loss
+                return 100.0 - (100.0 / (1.0 + rs))
+            rsi = calc_rsi_wilders(closes, 14)
         # Vol ratio
         v5 = sum(vols[-5:]) / 5 if len(vols) >= 5 else 0
         v20 = sum(vols[-20:]) / 20 if len(vols) >= 20 else 0
@@ -5559,10 +5526,11 @@ if __name__ == '__main__':
     os.chdir(_BASE)
     d = find_etf_dir()
     files = list_etf_files()
-    print(f'Stock Terminal: http://localhost:{PORT}/stock_terminal.html')
+    print(f'Stock Terminal: http://127.0.0.1:{PORT}/stock_terminal.html')
     print(f'Workers: {MAX_WORKERS}  |  LRU cache: {LRU_MAX} symbols  |  CPU: {os.cpu_count()}')
     print(f'ETF delta path: {d or "NOT FOUND — set ETF_DELTA_PATH in server.py"}')
     print(f'ETF history files: {len(files)}')
+    print(f'Bind: 127.0.0.1:{PORT} (loopback only — housekeeping)')
     if alert_daemon:
         try:
             _ac = alert_daemon.load_config()
@@ -5580,7 +5548,8 @@ if __name__ == '__main__':
         # 打包成 app 時:啟動後自動開瀏覽器(開發模式由 .bat 開,不重複)
         try:
             import webbrowser
-            threading.Timer(1.4, lambda: webbrowser.open(f'http://localhost:{PORT}/stock_terminal_v2.html')).start()
+            threading.Timer(1.4, lambda: webbrowser.open(f'http://127.0.0.1:{PORT}/stock_terminal_v2.html')).start()
         except Exception:
             pass
-    ThreadingHTTPServer(('localhost', PORT), Handler).serve_forever()
+    # H0：只聽 loopback，避免 18432 暴露到區網／公網
+    ThreadingHTTPServer(('127.0.0.1', PORT), Handler).serve_forever()

@@ -16,7 +16,7 @@ set "BR=%~1"
 set "PHASE=%~2"
 
 REM 預設：含大盤體質／融資週期／TDCC 集中度／README＋分享打包的最新 tip
-if "%BR%"=="" set "BR=cursor/share-dist-readme-4e66"
+if "%BR%"=="" set "BR=cursor/housekeeping-h0-h2-4e66"
 
 REM ---------- phase 2: rebuild / restart（checkout 之後的新檔）----------
 if /I "%PHASE%"=="--continue" goto :CONTINUE

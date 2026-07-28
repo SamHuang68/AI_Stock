@@ -181,26 +181,28 @@ jobs:
 
 ---
 
-## 8. 待確認事項
+## 8. 待確認事項 — **已拍板（2026-07-28）**
 
-請你拍板後我可以直接開做（建議預設順序 **H0 → H1 → H2**）：
-
-1. **優先順序是否同意 H0→H5？** 若你更痛的是「server.py 拆分」或「CI」，可把 H2／H1 對調。  
-2. **大 DB 策略**：`tdcc_holders.db`／`margin_cycle.db` 要繼續進 git，還是改「首次啟動下載／回補」？  
-3. **本機綁定**：server 是否改為只聽 `127.0.0.1`（較安全）？  
-4. **功能凍結**：housekeeping 期間是否暫停新指標，只修契約／測試／拆檔？  
-5. **額外限制**：必須維持「零 pip」、Windows bat 工作流不變？
+| 問題 | 決定 |
+|------|------|
+| 優先 H0→H1→H2？ | **是**（本分支實作中） |
+| 大 DB 進 git？ | **否** — 改首次開啟回補；`tdcc_holders.db`／`margin_cycle.db` gitignore |
+| server 只聽 127.0.0.1？ | **是** |
+| housekeeping 暫緩新指標？ | **是** |
 
 ---
 
-## 附錄 · 近期已完成（不必重做）
+## 9. 本輪實作勾選
 
-- 主圖大盤體質／美市場風險／rebase  
-- `__TW_MARGIN_CYCLE__`、TDCC `__HOLDERS_*__`  
-- 融資比 YoY 加密度 + 禁止 fallback 加權（`cursor/margin-mix-yoy-dense-4e66`）  
-- `apply.bat` checkout 自覆寫假失敗  
-- `build_dist.py` 剝除 API Key／觀察股／警報設定  
-- README v4.1 更新  
+- [x] H0 chart_registry 單源 + 回歸測試（禁右軸 fallback）
+- [x] H0 bind `127.0.0.1`
+- [x] H0/H3 大 DB 移出 git／分享包
+- [x] H1 indicators.py + RSI/SMA fixture 測試
+- [x] H1 build_order 對齊 V2_SCRIPTS；GitHub Actions CI
+- [x] H1 build_dist scrub 測試
+- [x] H2 抽出 `macro_api.py`／`indicators.py`（server.py 仍厚，後續可續拆）
+- [ ] H2 續：quote_api／更薄路由（下一 PR）
+- [ ] H4/H5 觀測性與效能（下一波）
 
 ---
 

@@ -390,17 +390,12 @@ async function refreshMktBar() {
 }
 
 async function refreshMacroTrackCells() {
-  const ids = [
-    '__TW_RATES__', '__TW_MARGIN_MIX__', '__TW_MARGIN_CYCLE__',
-    '__US_RATES_CREDIT__', '__US_CPI_FIN__',
-  ];
-  const preferKey = {
-    '__TW_MARGIN_MIX__': 'yoy',
-    '__TW_MARGIN_CYCLE__': 'margin_ratio',
-    '__TW_RATES__': 'discount',
-    '__US_RATES_CREDIT__': 'fedfunds',
-    '__US_CPI_FIN__': 'us_cpi_yoy',
-  };
+  const ids = (window.ChartRegistry && ChartRegistry.MACRO_TRACK_IDS)
+    ? ChartRegistry.MACRO_TRACK_IDS.slice()
+    : [
+      '__TW_RATES__', '__TW_MARGIN_MIX__', '__TW_MARGIN_CYCLE__',
+      '__US_RATES_CREDIT__', '__US_CPI_FIN__',
+    ];
   await Promise.all(ids.map(async (id) => {
     const cell = document.querySelector(`[data-mkt-sym="${id}"]`);
     if (!cell) return;
@@ -409,13 +404,11 @@ async function refreshMacroTrackCells() {
       if (!r.ok) return;
       const d = await r.json();
       const series = (d && d.series) || [];
-      const want = preferKey[id];
-      let primary = want ? series.find(s => s.key === want && s.points && s.points.length) : null;
-      if (!primary) {
-        primary = series.find(s => s.scale === 'left' && s.points && s.points.length);
-      }
+      const primary = (window.ChartRegistry && ChartRegistry.pickPrimarySeries)
+        ? ChartRegistry.pickPrimarySeries(series, id)
+        : series.find(s => s.scale === 'left' && s.points && s.points.length);
       // 絕不退回右軸加權／指數，避免格上出現 43654 這種指數價
-      if (!primary || !primary.points.length) return;
+      if (!primary || !primary.points || !primary.points.length) return;
       const pts = primary.points;
       const cur = pts[pts.length - 1].value;
       const prev = pts.length >= 2 ? pts[pts.length - 2].value : cur;
