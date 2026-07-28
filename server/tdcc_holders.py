@@ -383,21 +383,42 @@ def backfill_archive(weeks: int = 104, step: int = 1) -> int:
 def start_background_backfill(weeks: int = 104):
     if _backfill_state.get('running'):
         return False
+    try:
+        import job_queue as jq
+        if jq.is_busy('tdcc_holders'):
+            return False
 
-    def _run():
-        with _refresh_lock:
-            try:
-                refresh_latest()
-            except Exception as e:
-                print('[tdcc] refresh_latest', e)
-            try:
-                n = backfill_archive(weeks=weeks)
-                print('[tdcc] backfill done inserted-ish', n)
-            except Exception as e:
-                print('[tdcc] backfill', e)
+        def _run():
+            with _refresh_lock:
+                try:
+                    refresh_latest()
+                except Exception as e:
+                    print('[tdcc] refresh_latest', e)
+                try:
+                    n = backfill_archive(weeks=weeks)
+                    print('[tdcc] backfill done inserted-ish', n)
+                except Exception as e:
+                    print('[tdcc] backfill', e)
 
-    threading.Thread(target=_run, daemon=True).start()
-    return True
+        r = jq.submit('tdcc_holders', _run, meta={'weeks': weeks})
+        return bool(r.get('queued'))
+    except Exception:
+        # fallback：無 queue 時維持舊行為
+        def _run():
+            with _refresh_lock:
+                try:
+                    refresh_latest()
+                except Exception as e:
+                    print('[tdcc] refresh_latest', e)
+                try:
+                    n = backfill_archive(weeks=weeks)
+                    print('[tdcc] backfill done inserted-ish', n)
+                except Exception as e:
+                    print('[tdcc] backfill', e)
+
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
+        return True
 
 
 def load_stock_series(code: str) -> List[Dict[str, Any]]:

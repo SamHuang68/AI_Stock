@@ -23,6 +23,7 @@ class TestQuoteApi(unittest.TestCase):
         self.assertIn('margin_cycle', snap)
         self.assertIn('tdcc_holders', snap)
         self.assertIn('margin_ratio', snap)
+        self.assertIn('queue', snap)
 
 
 if __name__ == '__main__':

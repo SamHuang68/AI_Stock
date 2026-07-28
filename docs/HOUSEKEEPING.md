@@ -202,7 +202,7 @@ jobs:
 - [x] H1 build_dist scrub 測試
 - [x] H2 抽出 `macro_api.py`／`indicators.py`／`quote_api.py`／`slog.py`
 - [x] H4 `/health.jobs` 回補進度 + 📡 源面板顯示；server logging → `data/logs/server.log`
-- [ ] H5 效能：回補 queue 統一、screener 增量（下一波）
+- [x] H5 `job_queue` 單 worker + coalesce；選股指標 60s 快取；Yahoo 補洞上限 120
 - [ ] H2 續：AI／ETF 路由再拆（可選）
 
 ---

@@ -63,9 +63,20 @@
       margin_cycle: '融資週期回補',
       tdcc_holders: 'TDCC 集中度回補',
       margin_ratio: '維持率回補',
+      queue: '統一佇列',
     };
     var rows = keys.map(function (k) {
       var j = jobs[k] || {};
+      if (k === 'queue') {
+        var run = j.running ? (j.running.name || '…') : '空閒';
+        var pend = (j.pending && j.pending.length) ? ('排隊 ' + j.pending.join(', ')) : '';
+        return '<div style="padding:6px 10px;border-top:1px solid #2a2a2a">' +
+          '<b style="font-size:11px">統一佇列</b>' +
+          '<span style="float:right;font-size:10px;color:' +
+          (j.running ? '#f1c40f' : '#999') + '">' + run + '</span>' +
+          (pend ? '<div style="font-size:10px;color:#888;margin-top:2px">' + pend + '</div>' : '') +
+          '</div>';
+      }
       var running = j.running ? '進行中' : (j.phase === 'done' ? '完成' : (j.phase || '待命'));
       var note = j.note || j.last_error || (j.last && j.last.error) || '';
       var prog = '';

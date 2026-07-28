@@ -1046,8 +1046,15 @@ def _maybe_autodense_margin_mix() -> None:
             _REFRESH_LOCK['running'] = False
             _REFRESH_LOCK['note'] = ''
 
-    import threading
-    threading.Thread(target=_run, daemon=True).start()
+    try:
+        import job_queue as jq
+        jq.submit(
+            'macro_margin_mix', _run,
+            meta={'autodense': True, 'step': step_days, 'start': start.isoformat()},
+        )
+    except Exception:
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
     print(f'[macro_track] autodense margin_mix started (yoy={yoy_n}, total={total}) from {start}')
 
 
@@ -1226,8 +1233,15 @@ def refresh_chart(chart_id: str, dense: bool = False, density: Optional[str] = N
                         _REFRESH_LOCK['running'] = False
                         _REFRESH_LOCK['note'] = ''
 
-                import threading
-                threading.Thread(target=_run, daemon=True).start()
+                try:
+                    import job_queue as jq
+                    jq.submit(
+                        'macro_margin_mix', _run,
+                        meta={'step': step_days, 'years': yrs, 'start': start.isoformat()},
+                    )
+                except Exception:
+                    import threading
+                    threading.Thread(target=_run, daemon=True).start()
         except Exception as e:
             result['ok'] = False
             result['error'] = str(e)

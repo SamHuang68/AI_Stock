@@ -378,8 +378,18 @@ def start_background_backfill(years: int = 8, step_days: int = 14):
                 _backfill_state['last_error'] = str(e)
                 _backfill_state['running'] = False
 
-    threading.Thread(target=_run, daemon=True).start()
-    return True
+    try:
+        import job_queue as jq
+        if jq.is_busy('margin_cycle'):
+            return False
+        r = jq.submit(
+            'margin_cycle', _run,
+            meta={'years': years, 'step_days': step_days, 'start': start.isoformat()},
+        )
+        return bool(r.get('queued'))
+    except Exception:
+        threading.Thread(target=_run, daemon=True).start()
+        return True
 
 
 def _label_cycle(score: Optional[float]) -> str:

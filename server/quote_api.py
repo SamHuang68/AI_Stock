@@ -209,4 +209,9 @@ def jobs_snapshot() -> Dict[str, Any]:
         out['margin_ratio'] = dict(st) if isinstance(st, dict) else {'note': 'no state attr'}
     except Exception as e:
         out['margin_ratio'] = {'error': str(e)}
+    try:
+        import job_queue as jq
+        out['queue'] = jq.status()
+    except Exception as e:
+        out['queue'] = {'error': str(e)}
     return out

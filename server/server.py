@@ -4418,7 +4418,7 @@ class Handler(SimpleHTTPRequestHandler):
             _lo = [r[3] if r[3] is not None else r[4] for r in _rows]
             _vo = [r[5] if r[5] is not None else 0 for r in _rows]
             try:
-                _ind = self._calc_ind(_cl, _hi, _lo, _vo)
+                _ind = self._screener_ind_cached(_code, _rows, _cl, _hi, _lo, _vo)
                 if self._screener_match(preset or custom, _ind, _cl, _hi, _vo):
                     results.append({
                         'sym': _code,
@@ -4432,6 +4432,10 @@ class Handler(SimpleHTTPRequestHandler):
                     })
             except Exception:
                 pass
+        # H5：Yahoo 補洞限流，避免 DB 空時一次打爆對外 API
+        _yahoo_cap = 120
+        _yahoo_truncated = max(0, len(need_yahoo) - _yahoo_cap)
+        need_yahoo = need_yahoo[:_yahoo_cap]
         # Fetch DB-misses in parallel using existing fetch_one with nocache=True
         futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith('.TW') else s, nocache=True): s for s in need_yahoo}
         for fut in as_completed(futures):
@@ -4505,7 +4509,36 @@ class Handler(SimpleHTTPRequestHandler):
         # 漲/跌幅榜只取前 40 檔避免整包
         if preset in ('top_gainers', 'top_losers'):
             results = results[:40]
-        self._ok(json.dumps({'results': results, 'scanned': len(syms), 'matched': len(results)}, ensure_ascii=False).encode())
+        self._ok(json.dumps({
+            'results': results,
+            'scanned': len(syms),
+            'matched': len(results),
+            'yahooFetched': len(need_yahoo),
+            'yahooTruncated': _yahoo_truncated,
+        }, ensure_ascii=False).encode())
+
+    # H5：選股指標短 TTL 快取（同收盤簽名 60s 內不重算 RSI/SMA）
+    _SCREENER_IND_CACHE = {}
+    _SCREENER_IND_TTL = 60.0
+
+    def _screener_ind_cached(self, code, rows, closes, highs, lows, vols):
+        try:
+            last = rows[-1]
+            sig = (len(rows), last[0], last[4])
+        except Exception:
+            return self._calc_ind(closes, highs, lows, vols)
+        now = time.time()
+        ent = Handler._SCREENER_IND_CACHE.get(code)
+        if ent and ent[0] == sig and ent[2] > now:
+            return ent[1]
+        ind = self._calc_ind(closes, highs, lows, vols)
+        Handler._SCREENER_IND_CACHE[code] = (sig, ind, now + Handler._SCREENER_IND_TTL)
+        if len(Handler._SCREENER_IND_CACHE) > 4000:
+            # 丟棄過期
+            Handler._SCREENER_IND_CACHE = {
+                k: v for k, v in Handler._SCREENER_IND_CACHE.items() if v[2] > now
+            }
+        return ind
 
     def _calc_ind(self, closes, highs, lows, vols):
         n = len(closes)
