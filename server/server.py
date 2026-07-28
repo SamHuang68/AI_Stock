@@ -1253,22 +1253,14 @@ YF_RANGE = os.environ.get('YF_RANGE', '5y')   # 5y 約 1250 K 線；可設 max /
 YF_INTERVAL = os.environ.get('YF_INTERVAL', '1d')
 
 def get_margin_ratio_chart_json(rng=None):
-    """大盤融資維持率 Yahoo-compatible chart JSON（多年歷史 + 今日 TWSE）。"""
-    try:
-        import margin_ratio as mr
-        return mr.chart_json(range_key=(rng or 'max'))
-    except Exception as e:
-        print('[server] get_margin_ratio_chart_json failed:', e)
-        return b'{"chart":{"result":null,"error":"failed"}}'
+    """相容轉發 → quote_api。"""
+    import quote_api as qa
+    return qa.get_margin_ratio_chart_json(rng)
 
 def get_macro_track_chart_json(sym, rng=None):
-    """委派 server/macro_api（H2 拆出）；保留符號相容。"""
-    try:
-        import macro_api as ma
-        return ma.get_macro_track_chart_json(sym, rng)
-    except Exception as e:
-        print('[server] get_macro_track_chart_json failed:', e)
-        return {'chart': {'result': None, 'error': str(e)}}
+    """相容轉發 → quote_api → macro_api。"""
+    import quote_api as qa
+    return qa.get_macro_track_chart_json(sym, rng)
 
 try:
     import chart_registry as _cr
@@ -1280,103 +1272,9 @@ except Exception:
     )
 
 def fetch_one(sym, rng=None, interval=None, nocache=False):
-    """Fetch Yahoo chart JSON for sym. nocache=True bypasses _cache entirely
-    (used by wl_live_v3.js so each watchlist poll always gets fresh data —
-    the LRUCache has no TTL so cached entries would otherwise serve forever)."""
-    if sym == '__MARGIN_RATIO__' or sym.startswith('__MARGIN_RATIO__'):
-        try:
-            data = get_margin_ratio_chart_json(rng)
-            return '__MARGIN_RATIO__', data, False
-        except Exception as e:
-            print('[server] fetch_one for __MARGIN_RATIO__ failed:', e)
-            return '__MARGIN_RATIO__', None, False
-
-    # 籌碼集中度圖：__HOLDERS_2330__
-    try:
-        import tdcc_holders as th
-        code = th.parse_holders_sym(sym)
-        if code:
-            cid = th.holders_chart_id(code)
-            chart = th.get_chart(code, ensure=True)
-            # 轉成 yf-like 給相容路徑；主路徑走 MarketChart multi
-            try:
-                import macro_track as mt
-                import chart_registry as cr
-                primary = cr.pick_primary_series(chart.get('series') or [], cid)
-                pts = (primary or {}).get('points') or []
-                data = mt.points_to_yf_like(pts, cid, chart.get('name') or cid)
-                return cid, json.dumps(data).encode(), False
-            except Exception:
-                return cid, json.dumps(chart).encode(), False
-    except Exception as e:
-        print('[server] fetch_one holders failed:', e)
-    # 櫃買指數／台指期：官方／FinMind 日線覆寫（Yahoo ^TWOII 不可信；TXF 無連續 Yahoo 代號）
-    try:
-        import tw_index_charts as tic
-        _raw = unquote(str(sym or ''))
-        if tic.is_tw_index_chart_sym(_raw) or tic.is_tw_index_chart_sym(str(sym or '')):
-            canon = '__TXF__' if 'TXF' in str(sym).upper() else '^TWOII'
-            cache_key = f'{canon}|1d|{rng or "max"}'
-            if not nocache:
-                cached = _cache.get(cache_key)
-                if cached is not None:
-                    return canon, cached, True
-            data = tic.chart_json(canon, range_key=(rng or 'max'))
-            if not nocache and data:
-                _cache.set(cache_key, data)
-            return canon, data, False
-    except Exception as e:
-        print('[server] fetch_one tw_index_charts failed:', e)
-
-    _sym_up = str(sym or '').upper()
-    if _sym_up in _MACRO_TRACK_IDS or any(_sym_up.startswith(x) for x in _MACRO_TRACK_IDS):
-        try:
-            # normalize to canonical id
-            cid = next((x for x in _MACRO_TRACK_IDS if _sym_up.startswith(x.rstrip('_')) or _sym_up == x), _sym_up)
-            if cid not in _MACRO_TRACK_IDS:
-                cid = _sym_up if _sym_up in _MACRO_TRACK_IDS else None
-            if cid:
-                data = get_macro_track_chart_json(cid, rng)
-                body = data if isinstance(data, (bytes, bytearray)) else json.dumps(data).encode()
-                return cid, body, False
-        except Exception as e:
-            print('[server] fetch_one macro_track failed:', e)
-            return sym, None, False
-
-    rng = rng or YF_RANGE
-    interval = interval or YF_INTERVAL
-    cache_key = f'{sym}|{interval}|{rng}'
-    if not nocache:
-        cached = _cache.get(cache_key)
-        if cached is not None:
-            return sym, cached, True
-    if sym.endswith('.TW') and not sym.endswith('.TWO'):
-        candidates = [sym, sym[:-3]+'.TWO']
-    elif sym.endswith('.TWO'):
-        candidates = [sym, sym[:-4]+'.TW']
-    else:
-        candidates = [sym]
-    _t0 = time.time()
-    for candidate in candidates:
-        for base in ('query1', 'query2'):
-            url = f'https://{base}.finance.yahoo.com/v8/finance/chart/{candidate}?interval={interval}&range={rng}'
-            try:
-                req = urllib.request.Request(url, headers=YF_HEADERS)
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    data = resp.read()
-                parsed = json.loads(data)
-                if parsed.get('chart', {}).get('result'):
-                    if not nocache:
-                        _cache.set(cache_key, data)
-                    _src_record('yahoo', True, int((time.time() - _t0) * 1000))
-                    return sym, data, False
-            except urllib.error.HTTPError as e:
-                if e.code == 404: break
-                continue
-            except Exception:
-                continue
-    _src_record('yahoo', False, int((time.time() - _t0) * 1000), 'all candidates failed')
-    return sym, None, False
+    """相容轉發 → quote_api.fetch_one（configure 後才有 cache／src_record）。"""
+    import quote_api as qa
+    return qa.fetch_one(sym, rng=rng, interval=interval, nocache=nocache)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1420,6 +1318,19 @@ def _src_record(name, ok, ms, err=None):
             if v['fail_streak'] >= _SRC_CB_THRESHOLD:
                 v['open_until'] = time.time() + _SRC_CB_COOLDOWN
 
+
+# H2：注入 quote_api 依賴（須在 _cache / _src_record 就緒後）
+try:
+    import quote_api as _quote_api
+    _quote_api.configure(
+        cache=_cache,
+        src_record=_src_record,
+        yf_headers=YF_HEADERS,
+        yf_range=YF_RANGE,
+        yf_interval=YF_INTERVAL,
+    )
+except Exception as _qa_err:
+    print('[server] quote_api.configure failed:', _qa_err)
 
 def _src_breaker_open(name):
     with _SRC_LOCK:
@@ -1907,16 +1818,26 @@ class Handler(SimpleHTTPRequestHandler):
         elif p == '/health':
             d = find_etf_dir()
             files = list_etf_files()
+            jobs = {}
+            try:
+                import quote_api as qa
+                jobs = qa.jobs_snapshot()
+            except Exception as e:
+                jobs = {'error': str(e)}
             self._ok(json.dumps({
                 'status': 'ok',
+                'bind': '127.0.0.1',
+                'port': PORT,
                 'workers': MAX_WORKERS,
                 'cpu_count': os.cpu_count(),
                 'cache_used': len(_cache),
                 'cache_max': LRU_MAX,
+                'cache_ttl_seconds': getattr(_cache, '_ttl', None),
                 'etf_delta_path': d or 'not found',
                 'etf_history_files': len(files),
-                'sources': _src_snapshot(),   # v3.9 Phase-0: 各對外源健檢
-            }, ensure_ascii=False).encode())
+                'sources': _src_snapshot(),
+                'jobs': jobs,  # H4：回補／刷新進度
+            }, ensure_ascii=False, default=str).encode())
         else:
             # 安全(v3.9 review):SimpleHTTPRequestHandler 預設會把工作目錄所有檔當靜態檔服務。
             # 阻擋敏感檔被下載:金鑰設定(alert_config 含 telegram token/gmail 密碼)、原始碼(.py)、
@@ -5524,13 +5445,26 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     os.chdir(_BASE)
+    try:
+        import slog as _slog
+        _slog.setup('INFO')
+        _log = _slog.get_logger('server')
+    except Exception:
+        _log = None
     d = find_etf_dir()
     files = list_etf_files()
-    print(f'Stock Terminal: http://127.0.0.1:{PORT}/stock_terminal.html')
-    print(f'Workers: {MAX_WORKERS}  |  LRU cache: {LRU_MAX} symbols  |  CPU: {os.cpu_count()}')
-    print(f'ETF delta path: {d or "NOT FOUND — set ETF_DELTA_PATH in server.py"}')
-    print(f'ETF history files: {len(files)}')
-    print(f'Bind: 127.0.0.1:{PORT} (loopback only — housekeeping)')
+    _msg = (
+        f'Stock Terminal: http://127.0.0.1:{PORT}/stock_terminal.html\n'
+        f'Workers: {MAX_WORKERS}  |  LRU cache: {LRU_MAX} symbols (ttl={getattr(_cache, "_ttl", "?")}s)\n'
+        f'ETF delta path: {d or "NOT FOUND — set ETF_DELTA_PATH in server.py"}\n'
+        f'ETF history files: {len(files)}\n'
+        f'Bind: 127.0.0.1:{PORT} (loopback only — housekeeping)'
+    )
+    if _log:
+        for line in _msg.split('\n'):
+            _log.info(line)
+    else:
+        print(_msg)
     if alert_daemon:
         try:
             _ac = alert_daemon.load_config()

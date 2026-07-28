@@ -28,6 +28,7 @@ etf_history/*.txt
 
 logs/
 logs/*
+data/logs/
 
 # Build / distribution outputs (built fresh on demand)
 Stock_Terminal/

@@ -200,9 +200,10 @@ jobs:
 - [x] H1 indicators.py + RSI/SMA fixture 測試
 - [x] H1 build_order 對齊 V2_SCRIPTS；GitHub Actions CI
 - [x] H1 build_dist scrub 測試
-- [x] H2 抽出 `macro_api.py`／`indicators.py`（server.py 仍厚，後續可續拆）
-- [ ] H2 續：quote_api／更薄路由（下一 PR）
-- [ ] H4/H5 觀測性與效能（下一波）
+- [x] H2 抽出 `macro_api.py`／`indicators.py`／`quote_api.py`／`slog.py`
+- [x] H4 `/health.jobs` 回補進度 + 📡 源面板顯示；server logging → `data/logs/server.log`
+- [ ] H5 效能：回補 queue 統一、screener 增量（下一波）
+- [ ] H2 續：AI／ETF 路由再拆（可選）
 
 ---
 

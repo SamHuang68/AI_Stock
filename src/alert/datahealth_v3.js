@@ -55,15 +55,49 @@
     });
   }
 
-  function render(sources) {
+  function renderJobs(jobs) {
+    var keys = Object.keys(jobs || {}).filter(function (k) { return k !== 'error'; });
+    if (!keys.length) return '';
+    var LABELS = {
+      macro_track: '融資比／總經回補',
+      margin_cycle: '融資週期回補',
+      tdcc_holders: 'TDCC 集中度回補',
+      margin_ratio: '維持率回補',
+    };
+    var rows = keys.map(function (k) {
+      var j = jobs[k] || {};
+      var running = j.running ? '進行中' : (j.phase === 'done' ? '完成' : (j.phase || '待命'));
+      var note = j.note || j.last_error || (j.last && j.last.error) || '';
+      var prog = '';
+      if (j.done != null && j.total) prog = ' · ' + j.done + '/' + j.total;
+      return '<div style="padding:6px 10px;border-top:1px solid #2a2a2a">' +
+        '<b style="font-size:11px">' + (LABELS[k] || k) + '</b>' +
+        '<span style="float:right;font-size:10px;color:' +
+        (j.running ? '#f1c40f' : '#999') + '">' + running + prog + '</span>' +
+        (note ? '<div style="font-size:10px;color:#888;margin-top:2px">' +
+          String(note).replace(/</g, '&lt;').slice(0, 120) + '</div>' : '') +
+        '</div>';
+    }).join('');
+    return '<div style="padding:6px 10px;font-size:10px;color:#888;border-top:1px solid #333">' +
+      '背景任務 (H4)</div>' + rows;
+  }
+
+  function render(payload) {
+    var sources = (payload && payload.sources) ? payload.sources : (payload || {});
+    var jobs = (payload && payload.jobs) ? payload.jobs : {};
     var pill = document.getElementById('dh-pill');
     var panel = document.getElementById('dh-panel');
     checkTransitions(sources);
     if (!pill || !panel) return;
     var keys = Object.keys(sources || {});
     pill.style.background = worst(sources);
+    var head = '<div style="padding:6px 10px;font-size:10px;color:#888">資料源健檢 (30s)' +
+      (payload && payload.bind ? ' · ' + payload.bind + ':' + (payload.port || '') : '') +
+      '</div>';
     if (!keys.length) {
-      panel.innerHTML = '<div style="padding:8px 10px;color:#888;font-size:11px">尚無對外請求紀錄</div>';
+      panel.innerHTML = head +
+        '<div style="padding:8px 10px;color:#888;font-size:11px">尚無對外請求紀錄</div>' +
+        renderJobs(jobs);
       return;
     }
     var rows = keys.sort().map(function (k) {
@@ -84,12 +118,12 @@
         '<span style="font-size:10px;color:#e67e22">' + err + '</span>' +
         errLine + '</div>';
     }).join('');
-    panel.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#888">資料源健檢 (30s)</div>' + rows;
+    panel.innerHTML = head + rows + renderJobs(jobs);
   }
 
   function poll() {
     fetch('/health').then(function (r) { return r.json(); })
-      .then(function (j) { render(j && j.sources ? j.sources : {}); })
+      .then(function (j) { render(j || {}); })
       .catch(function () {
         var pill = document.getElementById('dh-pill');
         if (pill) pill.style.background = '#e74c3c';
