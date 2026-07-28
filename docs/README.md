@@ -74,8 +74,10 @@ Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤�
 > 需求：Windows 10/11 + Python 3.10+（純 stdlib，**不用 pip**）+ 現代瀏覽器。確認：`python --version`。
 
 1. **解壓縮**到任一資料夾（例 `C:\Tools\Stock_Terminal\`）。
-2. **雙擊 `scripts\go.bat`** — 自動 rebuild、重啟 server、開瀏覽器（port **18432**）。
+2. **雙擊 `scripts\go.bat`** — 自動 rebuild、重啟 server（**只聽 127.0.0.1:18432**）、開瀏覽器。
 3. 上方輸入框打代號按 **GO**（台股 `2330`；美股先點 `US` 再打 `AAPL`）。
+
+> **首次開啟**「融資週期」「籌碼集中度」等圖時，會背景回補歷史（不再隨 git 附大 DB）。可在資料源面板看進度。
 
 ### 每次 Git 更新後
 
@@ -138,7 +140,7 @@ REM 或雙擊 scripts\build_dist.bat（Windows）
 
 | 用途 | 來源 | 備註 |
 |------|------|------|
-| K 線／報價 | Yahoo Finance v8 chart API | 失敗時 fallback allorigins.win |
+| K 線／報價 | Yahoo Finance v8 chart API | query1／query2 備援；台股指數另走 TWSE／FinMind |
 | 台股指數即時 | TWSE MIS | 加權／櫃買 |
 | 主動 ETF 持股 | MoneyDJ Basic0007B | 全部持股頁 |
 | 法人籌碼 | TWSE 三大法人 | 每日快照 |

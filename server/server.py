@@ -29,6 +29,17 @@ except Exception as _e:
     ai_local = None
     print('[ai-local] module import failed:', _e)
 
+from ai_api import (
+    anthropic_messages as _anthropic_messages,
+    load_ai_key as _load_ai_key,
+)
+from ai_routes import AiRoutesMixin
+from etf_api import (
+    find_etf_dir,
+    list_etf_files,
+)
+from etf_routes import EtfRoutesMixin
+
 PORT = 18432
 # Core Ultra 9 285H = 6P + 8E + 2LP = 16 threads; oversubscribe for I/O-bound YF
 MAX_WORKERS = max(32, (os.cpu_count() or 16) * 2)
@@ -40,14 +51,6 @@ if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# ── ETF Delta path ──────────────────────────────────────────────
-ETF_DELTA_PATH = os.path.join(_BASE, 'data', 'etf_history')
-ETF_CATALOG_FILE = os.path.join(_BASE, 'data', 'etf_catalog.json')
-_ETF_FALLBACKS = [
-    ETF_DELTA_PATH,
-    os.path.join(_BASE, 'data', 'etf_history'),
-]
 
 # ── Chip history (v3.8): 每日法人籌碼快照，用於連續買賣超天數 ──
 CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
@@ -474,35 +477,6 @@ def _get_tw_names():
     return m
 
 
-# ── 自適應 AI 模型 (v3.9) ──────────────────────────────────────────
-# 不寫死模型字串:查 Anthropic /v1/models 自動挑「最新 Sonnet」(API 回傳新→舊),每日快取。
-# Anthropic 出新模型自動跟上,不必每次手改;查不到/失敗退現行有效值。
-_MODEL_CACHE = {'date': '', 'id': 'claude-sonnet-4-6'}
-def _resolve_model(api_key):
-    from datetime import date as _d
-    today = _d.today().strftime('%Y%m%d')
-    if _MODEL_CACHE['date'] == today and _MODEL_CACHE['id']:
-        return _MODEL_CACHE['id']
-    model = 'claude-sonnet-4-6'          # fallback(現行有效)
-    if api_key:
-        try:
-            req = urllib.request.Request('https://api.anthropic.com/v1/models?limit=100',
-                                         headers={'x-api-key': api_key, 'anthropic-version': '2023-06-01'})
-            with urllib.request.urlopen(req, timeout=10) as r:
-                data = json.loads(r.read())
-            ms = [m for m in (data.get('data') or []) if m.get('id')]
-            pick = (next((m for m in ms if 'sonnet' in m['id'].lower()), None)
-                    or next((m for m in ms if 'opus' in m['id'].lower()), None)
-                    or (ms[0] if ms else None))
-            if pick:
-                model = pick['id']
-        except Exception:
-            pass
-    _MODEL_CACHE['date'] = today
-    _MODEL_CACHE['id'] = model
-    return model
-
-
 def _safe_sym(s):
     # 安全(v3.9 review):股票代號白名單,防止把惡意字元(/ @ : ? #)串進 Yahoo URL(SSRF)。
     # 允許:英數 + 指數/期貨/市場常見符號 . ^ = - % _(如 ^TWII、GC=F、2330.TW、%5ETWOII)。
@@ -510,22 +484,6 @@ def _safe_sym(s):
         return False
     return all(c.isalnum() or c in '.^=-%_' for c in s)
 
-
-# ── 伺服器端 AI 金鑰(v3.9 review)──────────────────────────────────
-# 把 Anthropic 金鑰存在 server(本機檔,靜態服務已封鎖)而非瀏覽器 localStorage,
-# 並由 server 串流代理所有 AI 呼叫 → 金鑰不進瀏覽器,免於 XSS/惡意擴充竊取。
-_AI_KEY_FILE = os.path.join(_BASE, 'data', 'ai_key.txt')
-_ai_key_lock = threading.Lock()
-def _load_ai_key():
-    try:
-        with open(_AI_KEY_FILE, encoding='utf-8') as f:
-            return f.read().strip()
-    except Exception:
-        return ''
-def _save_ai_key(k):
-    with _ai_key_lock:
-        with open(_AI_KEY_FILE, 'w', encoding='utf-8') as f:
-            f.write((k or '').strip())
 
 # ── 個股期貨(含夜盤) 整批載入 (v3.9)：CID='' 一次抓全部，避免每檔打 MIS 被限流(520) ──
 #   日盤 MarketType=0(期貨 -F/現貨 -S)、夜盤 MarketType=1(期貨 -M)。快取 45 秒。
@@ -1062,73 +1020,6 @@ def _chip_streak(clean_code):
         return n * sign  # 正=連買天數, 負=連賣天數
     return {'foreign': streak(series['foreign']), 'trust': streak(series['trust'])}
 
-# ── Tracker run state (for /etf-tracker/run + /etf-tracker/status) ──
-_tracker_state = {
-    'running':       False,
-    'startedAt':     None,
-    'finishedAt':    None,
-    'lastDuration':  None,   # seconds
-    'lastReturnCode': None,
-    'lastOutput':    '',
-}
-_tracker_lock = threading.Lock()
-
-def _run_tracker_async():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    tracker = os.path.join(script_dir, 'etf_delta_tracker.py')
-    if not os.path.isfile(tracker):
-        with _tracker_lock:
-            _tracker_state.update({
-                'running': False, 'finishedAt': time.time(),
-                'lastReturnCode': -1, 'lastOutput': 'etf_delta_tracker.py not found',
-            })
-        return
-    start = time.time()
-    try:
-        # Use sys.executable so we hit the same Python that's running server.py
-        proc = subprocess.run(
-            [sys.executable, tracker],
-            cwd=script_dir,
-            capture_output=True, text=True,
-            encoding='utf-8', errors='replace',
-            timeout=300,
-        )
-        out = (proc.stdout or '') + ('\n' + proc.stderr if proc.stderr else '')
-        with _tracker_lock:
-            _tracker_state.update({
-                'running': False,
-                'finishedAt': time.time(),
-                'lastDuration': round(time.time() - start, 1),
-                'lastReturnCode': proc.returncode,
-                'lastOutput': out[-4000:],   # keep last 4KB
-            })
-    except subprocess.TimeoutExpired:
-        with _tracker_lock:
-            _tracker_state.update({
-                'running': False,
-                'finishedAt': time.time(),
-                'lastDuration': round(time.time() - start, 1),
-                'lastReturnCode': -2,
-                'lastOutput': 'tracker timed out (5 minutes)',
-            })
-    except Exception as e:
-        with _tracker_lock:
-            _tracker_state.update({
-                'running': False,
-                'finishedAt': time.time(),
-                'lastDuration': round(time.time() - start, 1),
-                'lastReturnCode': -3,
-                'lastOutput': f'exception: {e}',
-            })
-
-ETF_NAME_MAP = {
-    '00992A':'主動群益科技創新','00981A':'主動統一台股增長',
-    '00987A':'主動台新優勢成長','00994A':'主動第一金台股優',
-    '00982A':'主動群益台灣強棒','00995A':'主動中信台灣卓越',
-    '00980A':'主動野村臺灣優選','00991A':'主動復華未來50',
-    '00996A':'主動兆豐台灣豐收','00984A':'主動安聯台灣高息',
-}
-
 # ── LRU cache with TTL ──────────────────────────────────────────
 # v3.6 加 TTL（預設 60 秒）：原本沒 TTL 造成的「stale price 隨機重現」根因 ——
 # 若 server 啟動後第一次 Yahoo 查到時資料正在 query1/query2 同步落差期間，
@@ -1253,161 +1144,28 @@ YF_RANGE = os.environ.get('YF_RANGE', '5y')   # 5y 約 1250 K 線；可設 max /
 YF_INTERVAL = os.environ.get('YF_INTERVAL', '1d')
 
 def get_margin_ratio_chart_json(rng=None):
-    """大盤融資維持率 Yahoo-compatible chart JSON（多年歷史 + 今日 TWSE）。"""
-    try:
-        import margin_ratio as mr
-        return mr.chart_json(range_key=(rng or 'max'))
-    except Exception as e:
-        print('[server] get_margin_ratio_chart_json failed:', e)
-        return b'{"chart":{"result":null,"error":"failed"}}'
+    """相容轉發 → quote_api。"""
+    import quote_api as qa
+    return qa.get_margin_ratio_chart_json(rng)
 
 def get_macro_track_chart_json(sym, rng=None):
-    """MacroMicro 風格多序列追蹤圖 → Yahoo-compatible（主序列）。完整多序列走 /macro/chart/<id>。"""
-    try:
-        import macro_track as mt
-        years = 25
-        if rng in ('1y', '12mo'):
-            years = 1
-        elif rng in ('2y',):
-            years = 2
-        elif rng in ('5y',):
-            years = 5
-        elif rng in ('10y',):
-            years = 10
-        full = mt.get_chart(sym, years=years)
-        series = full.get('series') or []
-        primary = None
-        prefer = {
-            '__TW_MARGIN_MIX__': 'yoy',
-            '__TW_MARGIN_CYCLE__': 'margin_ratio',
-            '__TW_RATES__': 'discount',
-            '__US_RATES_CREDIT__': 'fedfunds',
-            '__US_CPI_FIN__': 'us_cpi_yoy',
-        }
-        want = prefer.get(str(sym or '').upper())
-        if want:
-            for s in series:
-                if s.get('key') == want and s.get('points'):
-                    primary = s
-                    break
-        if not primary:
-            for s in series:
-                if s.get('scale') == 'left' and s.get('points'):
-                    primary = s
-                    break
-        # 絕不退回右軸（加權／XLF 等），避免格上顯示指數價
-        pts = (primary or {}).get('points') or []
-        return mt.points_to_yf_like(pts, full['id'], full['name'])
-    except Exception as e:
-        print('[server] get_macro_track_chart_json failed:', e)
-        return {'chart': {'result': None, 'error': str(e)}}
+    """相容轉發 → quote_api → macro_api。"""
+    import quote_api as qa
+    return qa.get_macro_track_chart_json(sym, rng)
 
-_MACRO_TRACK_IDS = (
-    '__TW_RATES__', '__TW_MARGIN_MIX__', '__TW_MARGIN_CYCLE__',
-    '__US_RATES_CREDIT__', '__US_CPI_FIN__',
-)
+try:
+    import chart_registry as _cr
+    _MACRO_TRACK_IDS = _cr.MACRO_TRACK_IDS
+except Exception:
+    _MACRO_TRACK_IDS = (
+        '__TW_RATES__', '__TW_MARGIN_MIX__', '__TW_MARGIN_CYCLE__',
+        '__US_RATES_CREDIT__', '__US_CPI_FIN__',
+    )
 
 def fetch_one(sym, rng=None, interval=None, nocache=False):
-    """Fetch Yahoo chart JSON for sym. nocache=True bypasses _cache entirely
-    (used by wl_live_v3.js so each watchlist poll always gets fresh data —
-    the LRUCache has no TTL so cached entries would otherwise serve forever)."""
-    if sym == '__MARGIN_RATIO__' or sym.startswith('__MARGIN_RATIO__'):
-        try:
-            data = get_margin_ratio_chart_json(rng)
-            return '__MARGIN_RATIO__', data, False
-        except Exception as e:
-            print('[server] fetch_one for __MARGIN_RATIO__ failed:', e)
-            return '__MARGIN_RATIO__', None, False
-
-    # 籌碼集中度圖：__HOLDERS_2330__
-    try:
-        import tdcc_holders as th
-        code = th.parse_holders_sym(sym)
-        if code:
-            cid = th.holders_chart_id(code)
-            chart = th.get_chart(code, ensure=True)
-            # 轉成 yf-like 給相容路徑；主路徑走 MarketChart multi
-            try:
-                import macro_track as mt
-                primary = None
-                for s in chart.get('series') or []:
-                    if s.get('points'):
-                        primary = s
-                        break
-                pts = (primary or {}).get('points') or []
-                data = mt.points_to_yf_like(pts, cid, chart.get('name') or cid)
-                return cid, json.dumps(data).encode(), False
-            except Exception:
-                return cid, json.dumps(chart).encode(), False
-    except Exception as e:
-        print('[server] fetch_one holders failed:', e)
-    # 櫃買指數／台指期：官方／FinMind 日線覆寫（Yahoo ^TWOII 不可信；TXF 無連續 Yahoo 代號）
-    try:
-        import tw_index_charts as tic
-        _raw = unquote(str(sym or ''))
-        if tic.is_tw_index_chart_sym(_raw) or tic.is_tw_index_chart_sym(str(sym or '')):
-            canon = '__TXF__' if 'TXF' in str(sym).upper() else '^TWOII'
-            cache_key = f'{canon}|1d|{rng or "max"}'
-            if not nocache:
-                cached = _cache.get(cache_key)
-                if cached is not None:
-                    return canon, cached, True
-            data = tic.chart_json(canon, range_key=(rng or 'max'))
-            if not nocache and data:
-                _cache.set(cache_key, data)
-            return canon, data, False
-    except Exception as e:
-        print('[server] fetch_one tw_index_charts failed:', e)
-
-    _sym_up = str(sym or '').upper()
-    if _sym_up in _MACRO_TRACK_IDS or any(_sym_up.startswith(x) for x in _MACRO_TRACK_IDS):
-        try:
-            # normalize to canonical id
-            cid = next((x for x in _MACRO_TRACK_IDS if _sym_up.startswith(x.rstrip('_')) or _sym_up == x), _sym_up)
-            if cid not in _MACRO_TRACK_IDS:
-                cid = _sym_up if _sym_up in _MACRO_TRACK_IDS else None
-            if cid:
-                data = get_macro_track_chart_json(cid, rng)
-                body = data if isinstance(data, (bytes, bytearray)) else json.dumps(data).encode()
-                return cid, body, False
-        except Exception as e:
-            print('[server] fetch_one macro_track failed:', e)
-            return sym, None, False
-
-    rng = rng or YF_RANGE
-    interval = interval or YF_INTERVAL
-    cache_key = f'{sym}|{interval}|{rng}'
-    if not nocache:
-        cached = _cache.get(cache_key)
-        if cached is not None:
-            return sym, cached, True
-    if sym.endswith('.TW') and not sym.endswith('.TWO'):
-        candidates = [sym, sym[:-3]+'.TWO']
-    elif sym.endswith('.TWO'):
-        candidates = [sym, sym[:-4]+'.TW']
-    else:
-        candidates = [sym]
-    _t0 = time.time()
-    for candidate in candidates:
-        for base in ('query1', 'query2'):
-            url = f'https://{base}.finance.yahoo.com/v8/finance/chart/{candidate}?interval={interval}&range={rng}'
-            try:
-                req = urllib.request.Request(url, headers=YF_HEADERS)
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    data = resp.read()
-                parsed = json.loads(data)
-                if parsed.get('chart', {}).get('result'):
-                    if not nocache:
-                        _cache.set(cache_key, data)
-                    _src_record('yahoo', True, int((time.time() - _t0) * 1000))
-                    return sym, data, False
-            except urllib.error.HTTPError as e:
-                if e.code == 404: break
-                continue
-            except Exception:
-                continue
-    _src_record('yahoo', False, int((time.time() - _t0) * 1000), 'all candidates failed')
-    return sym, None, False
+    """相容轉發 → quote_api.fetch_one（configure 後才有 cache／src_record）。"""
+    import quote_api as qa
+    return qa.fetch_one(sym, rng=rng, interval=interval, nocache=nocache)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1451,6 +1209,19 @@ def _src_record(name, ok, ms, err=None):
             if v['fail_streak'] >= _SRC_CB_THRESHOLD:
                 v['open_until'] = time.time() + _SRC_CB_COOLDOWN
 
+
+# H2：注入 quote_api 依賴（須在 _cache / _src_record 就緒後）
+try:
+    import quote_api as _quote_api
+    _quote_api.configure(
+        cache=_cache,
+        src_record=_src_record,
+        yf_headers=YF_HEADERS,
+        yf_range=YF_RANGE,
+        yf_interval=YF_INTERVAL,
+    )
+except Exception as _qa_err:
+    print('[server] quote_api.configure failed:', _qa_err)
 
 def _src_breaker_open(name):
     with _SRC_LOCK:
@@ -1634,216 +1405,13 @@ def _run_selftests():
     passed = sum(1 for c in cases if c['pass'])
     return {'passed': passed, 'total': len(cases), 'allPass': passed == len(cases), 'cases': cases}
 
-# ── ETF Delta helpers ──────────────────────────────────────────
-def find_etf_dir():
-    for p in _ETF_FALLBACKS:
-        if p and os.path.isdir(p):
-            return p
-    return None
-
-def list_etf_files():
-    d = find_etf_dir()
-    if not d: return []
-    return sorted(glob.glob(os.path.join(d, 'top10_active_etf_holdings_*.json')))
-
-def parse_holdings_json(data):
-    """Flexible parser — handles multiple JSON schema variants."""
-    result = {}
-    if isinstance(data, dict):
-        for k, v in data.items():
-            if k in ('date','updated','meta','summary'): continue
-            if isinstance(v, list):
-                result[k] = v
-            elif isinstance(v, dict):
-                if 'holdings' in v:
-                    result[k] = v['holdings']
-                elif 'data' in v:
-                    result[k] = v['data']
-        if 'etfs' in data:
-            etfs = data['etfs']
-            if isinstance(etfs, dict):
-                for code, etf in etfs.items():
-                    result[code] = etf.get('holdings', etf) if isinstance(etf, dict) else etf
-            elif isinstance(etfs, list):
-                for etf in etfs:
-                    code = etf.get('code') or etf.get('etf_code', '')
-                    result[code] = etf.get('holdings', [])
-    elif isinstance(data, list):
-        for etf in data:
-            code = etf.get('code') or etf.get('etf_code', '')
-            if code:
-                result[code] = etf.get('holdings', [])
-    return result
-
-def get_field(h, *keys):
-    for k in keys:
-        if k in h: return h[k]
-    return None
-
-def _load_enabled_etf_codes():
-    """讀 etf_catalog.json，回傳目前 enabled=true 的 ETF 代號集合（uppercase）"""
-    if not os.path.isfile(ETF_CATALOG_FILE):
-        return None   # None = 不做 server 端過濾（fallback 給全部）
-    try:
-        with open(ETF_CATALOG_FILE, encoding='utf-8') as f:
-            cat = json.load(f)
-        enabled = set()
-        for c in cat.get('categories', []):
-            for e in c.get('etfs', []):
-                if e.get('enabled'):
-                    code = (e.get('code') or '').strip().upper()
-                    if code: enabled.add(code)
-        return enabled if enabled else None
-    except Exception as e:
-        print(f'[catalog filter] load failed: {e}')
-        return None
-
-def compute_etf_delta(files, date=None):
-    if len(files) < 2: return None
-    if date:
-        target = [f for f in files if date in os.path.basename(f)]
-        if not target: return None
-        curr_file = target[-1]
-        idx = files.index(curr_file)
-        if idx == 0: return None
-        prev_file = files[idx - 1]
-    else:
-        curr_file = files[-1]
-        prev_file = files[-2]
-
-    def extract_date(f):
-        return os.path.basename(f).replace('top10_active_etf_holdings_','').replace('.json','')
-
-    curr_date = extract_date(curr_file)
-    prev_date = extract_date(prev_file)
-
-    with open(curr_file, encoding='utf-8') as f:
-        curr_raw = json.load(f)
-    with open(prev_file, encoding='utf-8') as f:
-        prev_raw = json.load(f)
-
-    curr_all = parse_holdings_json(curr_raw)
-    prev_all = parse_holdings_json(prev_raw)
-
-    THRESHOLD = 0.5
-    all_codes = sorted(set(curr_all) | set(prev_all))
-
-    # ── 過濾：只保留 catalog 內 enabled=true 的 ETF（隱藏舊 009 殘留）──
-    enabled_codes = _load_enabled_etf_codes()
-    if enabled_codes is not None:
-        all_codes = [c for c in all_codes if c.upper() in enabled_codes]
-
-    etfs_out = []
-    total_new = total_rm = total_chg = 0
-
-    for code in all_codes:
-        curr_list = curr_all.get(code, [])
-        prev_list = prev_all.get(code, [])
-
-        def to_map(lst):
-            m = {}
-            for h in lst:
-                sym = get_field(h, 'code','symbol','stock_code','ticker')
-                if sym: m[sym] = h
-            return m
-
-        curr_map = to_map(curr_list)
-        prev_map = to_map(prev_list)
-
-        new_stocks, removed, changed = [], [], []
-
-        for sym, h in curr_map.items():
-            w = float(get_field(h,'weight','pct','weight_pct') or 0)
-            if sym not in prev_map:
-                new_stocks.append({
-                    'rank':   get_field(h,'rank','holding_rank') or '-',
-                    'code':   sym,
-                    'name':   get_field(h,'name','stock_name','company_name') or '',
-                    'weight': w,
-                    'shares': int(get_field(h,'shares','quantity','volume') or 0),
-                })
-            else:
-                ph = prev_map[sym]
-                pw = float(get_field(ph,'weight','pct','weight_pct') or 0)
-                delta = round(w - pw, 4)
-                cs = int(get_field(h,'shares','quantity','volume') or 0)
-                ps = int(get_field(ph,'shares','quantity','volume') or 0)
-                sdelta = cs - ps
-                # v3.8: 以張數變化為主、權重變化為輔（對齊朋友報表）
-                if sdelta != 0 or abs(delta) >= THRESHOLD:
-                    changed.append({
-                        'rank':         get_field(h,'rank','holding_rank') or '-',
-                        'prev_rank':    get_field(ph,'rank','holding_rank') or '-',
-                        'code':         sym,
-                        'name':         get_field(h,'name','stock_name','company_name') or '',
-                        'prev_weight':  pw,
-                        'curr_weight':  w,
-                        'delta':        delta,
-                        'prev_shares':  ps,
-                        'curr_shares':  cs,
-                        'shares_delta': sdelta,
-                    })
-
-        for sym, h in prev_map.items():
-            if sym not in curr_map:
-                removed.append({
-                    'rank':        get_field(h,'rank','holding_rank') or '-',
-                    'code':        sym,
-                    'name':        get_field(h,'name','stock_name','company_name') or '',
-                    'prev_weight': float(get_field(h,'weight','pct','weight_pct') or 0),
-                    'prev_shares': int(get_field(h,'shares','quantity','volume') or 0),
-                })
-
-        changed.sort(key=lambda x: abs(x.get('shares_delta') or 0), reverse=True)
-        total_new += len(new_stocks)
-        total_rm  += len(removed)
-        total_chg += len(changed)
-
-        # ── Top 10 當前持股（按 weight 降冪）— 給前端顯示「投資標的一覽」 ──
-        top10 = []
-        try:
-            sorted_curr = sorted(
-                curr_list,
-                key=lambda h: float(get_field(h, 'weight', 'pct', 'weight_pct') or 0),
-                reverse=True,
-            )[:10]
-            for h in sorted_curr:
-                top10.append({
-                    'rank':   get_field(h, 'rank', 'holding_rank') or '-',
-                    'code':   get_field(h, 'code', 'symbol', 'stock_code', 'ticker') or '',
-                    'name':   get_field(h, 'name', 'stock_name', 'company_name') or '',
-                    'weight': float(get_field(h, 'weight', 'pct', 'weight_pct') or 0),
-                    'shares': int(get_field(h, 'shares', 'quantity', 'volume') or 0),
-                })
-        except Exception:
-            pass
-
-        # 即使「無變動」也輸出，讓 Top 10 看得到（v3.1 改：原本要 new/rm/chg 至少一個非空）
-        if new_stocks or removed or changed or top10:
-            etfs_out.append({
-                'code':    code,
-                'name':    ETF_NAME_MAP.get(code, code),
-                'total':   len(curr_list),
-                'new':     new_stocks,
-                'removed': removed,
-                'changed': changed,
-                'top10':   top10,   # v3.1 新增：當前 Top 10 持股
-            })
-
-    return {
-        'date':      curr_date,
-        'prev_date': prev_date,
-        'summary':   {'new': total_new, 'removed': total_rm, 'changed': total_chg},
-        'etfs':      etfs_out,
-    }
-
 # ── Threading HTTP server ──────────────────────────────────────
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
     request_queue_size = 64
 
-class Handler(SimpleHTTPRequestHandler):
+class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'   # enables keep-alive
 
     def do_GET(self):
@@ -1938,16 +1506,26 @@ class Handler(SimpleHTTPRequestHandler):
         elif p == '/health':
             d = find_etf_dir()
             files = list_etf_files()
+            jobs = {}
+            try:
+                import quote_api as qa
+                jobs = qa.jobs_snapshot()
+            except Exception as e:
+                jobs = {'error': str(e)}
             self._ok(json.dumps({
                 'status': 'ok',
+                'bind': '127.0.0.1',
+                'port': PORT,
                 'workers': MAX_WORKERS,
                 'cpu_count': os.cpu_count(),
                 'cache_used': len(_cache),
                 'cache_max': LRU_MAX,
+                'cache_ttl_seconds': getattr(_cache, '_ttl', None),
                 'etf_delta_path': d or 'not found',
                 'etf_history_files': len(files),
-                'sources': _src_snapshot(),   # v3.9 Phase-0: 各對外源健檢
-            }, ensure_ascii=False).encode())
+                'sources': _src_snapshot(),
+                'jobs': jobs,  # H4：回補／刷新進度
+            }, ensure_ascii=False, default=str).encode())
         else:
             # 安全(v3.9 review):SimpleHTTPRequestHandler 預設會把工作目錄所有檔當靜態檔服務。
             # 阻擋敏感檔被下載:金鑰設定(alert_config 含 telegram token/gmail 密碼)、原始碼(.py)、
@@ -2220,57 +1798,9 @@ class Handler(SimpleHTTPRequestHandler):
                 continue
         self._ok(json.dumps(out, ensure_ascii=False).encode())
 
-    def _handle_ai_key_status(self):
-        self._ok(json.dumps({'set': bool(_load_ai_key())}).encode())
 
-    def _handle_ai_key_set(self):
-        try:
-            n = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(n) or b'{}')
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
-        if body.get('clear'):
-            _save_ai_key(''); self._ok(b'{"ok":true,"cleared":true}'); return
-        k = (body.get('key') or '').strip()
-        if not k.startswith('sk-'):
-            self._err('invalid key (need sk-...)', 400); return
-        _save_ai_key(k)
-        self._ok(b'{"ok":true}')
 
-    def _handle_ai_model(self):
-        self._ok(json.dumps({'model': _resolve_model(_load_ai_key())}).encode())
 
-    def _handle_ai_proxy(self):
-        # 用 server 端儲存的金鑰呼叫 Anthropic,回應原樣串回瀏覽器(金鑰不進瀏覽器)。支援 SSE 串流。
-        key = _load_ai_key()
-        if not key:
-            self._err('AI key not set on server', 400); return
-        try:
-            n = int(self.headers.get('Content-Length', 0))
-            raw = self.rfile.read(n) or b'{}'
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
-        try:
-            up = urllib.request.Request('https://api.anthropic.com/v1/messages', data=raw,
-                                        headers={'Content-Type': 'application/json', 'x-api-key': key,
-                                                 'anthropic-version': '2023-06-01'}, method='POST')
-            resp = urllib.request.urlopen(up, timeout=180)
-        except urllib.error.HTTPError as e:
-            self._err('Anthropic %d: %s' % (e.code, e.read().decode('utf-8', 'replace')[:300]), 502); return
-        except Exception as e:
-            self._err('ai-proxy failed: ' + str(e), 502); return
-        try:
-            self.send_response(200)
-            self.send_header('Content-Type', resp.headers.get('Content-Type', 'text/event-stream'))
-            self.send_header('Cache-Control', 'no-cache')
-            self.end_headers()
-            while True:
-                chunk = resp.read(2048)
-                if not chunk:
-                    break
-                self.wfile.write(chunk); self.wfile.flush()
-        except Exception:
-            pass
 
     def _handle_search(self):
         """台股名稱/代號搜尋 (v3.9) — 像 Yahoo 股市打公司名找股票。
@@ -2495,86 +2025,11 @@ class Handler(SimpleHTTPRequestHandler):
                     continue
         self._err('quote fetch failed for ' + sym, 502)
 
-    def _handle_etf_catalog_get(self):
-        """回傳 etf_catalog.json 內容（含全部 ETF 不論 enabled 與否）"""
-        if not os.path.isfile(ETF_CATALOG_FILE):
-            self._err('etf_catalog.json not found', 404); return
-        try:
-            with open(ETF_CATALOG_FILE, 'rb') as f:
-                data = f.read()
-            self._ok(data)
-        except Exception as e:
-            self._err('read catalog failed: ' + str(e), 500)
 
-    def _handle_etf_catalog_post(self):
-        """接收前端 JSON 更新 catalog，整檔覆寫"""
-        try:
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length) if length > 0 else b''
-            # Validate it parses
-            obj = json.loads(body.decode('utf-8'))
-            if 'categories' not in obj:
-                self._err('invalid catalog: missing categories', 400); return
-            # Backup current file before overwrite
-            if os.path.isfile(ETF_CATALOG_FILE):
-                bk = ETF_CATALOG_FILE + '.bak'
-                try:
-                    import shutil
-                    shutil.copyfile(ETF_CATALOG_FILE, bk)
-                except Exception: pass
-            with open(ETF_CATALOG_FILE, 'w', encoding='utf-8') as f:
-                json.dump(obj, f, ensure_ascii=False, indent=2)
-            n = sum(1 for c in obj.get('categories', []) for e in c.get('etfs', []) if e.get('enabled'))
-            self._ok(json.dumps({'ok': True, 'enabledCount': n}).encode())
-        except json.JSONDecodeError as e:
-            self._err('invalid JSON: ' + str(e), 400)
-        except Exception as e:
-            self._err('save catalog failed: ' + str(e), 500)
 
-    def _handle_tracker_run(self):
-        """POST /etf-tracker/run — 啟動背景 thread 跑 etf_delta_tracker.py"""
-        with _tracker_lock:
-            if _tracker_state['running']:
-                self._err('tracker already running', 409); return
-            _tracker_state.update({
-                'running': True, 'startedAt': time.time(),
-                'finishedAt': None, 'lastReturnCode': None, 'lastOutput': '',
-            })
-        t = threading.Thread(target=_run_tracker_async, daemon=True)
-        t.start()
-        self._ok(json.dumps({'ok': True, 'started': True}).encode())
 
-    def _handle_tracker_status(self):
-        """GET /etf-tracker/status — 回傳當前狀態"""
-        with _tracker_lock:
-            state = dict(_tracker_state)
-        self._ok(json.dumps(state, ensure_ascii=False).encode())
 
-    def _handle_etf_delta(self):
-        files = list_etf_files()
-        d = find_etf_dir() or 'not found'
-        if self.path.startswith('/etf-delta/list'):
-            dates = [os.path.basename(f).replace('top10_active_etf_holdings_','').replace('.json','') for f in files]
-            self._ok(json.dumps({'dates': dates, 'dir': d}).encode())
-            return
-        if len(files) < 2:
-            msg = (f'need ≥2 history files; found {len(files)} in dir={d}. '
-                   f'執行 etf_delta_tracker.py 累積每日快照')
-            self._err(msg)
-            return
-        qs = parse_qs(urlparse(self.path).query)
-        date = qs.get('date', [None])[0]
-        try:
-            result = compute_etf_delta(files, date)
-        except Exception as e:
-            self._err(str(e), 500); return
-        if result is None:
-            self._err('delta compute failed'); return
-        self._ok(json.dumps(result, ensure_ascii=False).encode())
 
-    # ──────────────────────────────────────────────────────────
-    # v3.0 endpoints
-    # ──────────────────────────────────────────────────────────
     def _handle_keystats(self, sym):
         raw_sym = (sym or '').strip()
         base_sym = raw_sym.replace('.TWO', '').replace('.TW', '')
@@ -4353,33 +3808,7 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as e:
             self._err('notify failed: ' + str(e), 500)
 
-    def _handle_ai_local(self):
-        """v4.0: POST /ai/local  body:{prompt, context?, model?} → 本機 Ollama 回答。"""
-        try:
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length) or b'{}')
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
-        if not ai_local:
-            self._err('ai_local 模組未載入', 500); return
-        # 串流回應(text/plain):token 邊生邊送,避免大模型久候 timeout
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/plain; charset=utf-8')
-        self.send_header('Cache-Control', 'no-cache')
-        self.send_header('Connection', 'close')   # HTTP/1.1:無 Content-Length → 讀到關閉為止
-        self.end_headers()
-        self.close_connection = True
-        try:
-            for chunk in ai_local.chat_stream(body.get('prompt', ''), body.get('context', ''), body.get('model')):
-                self.wfile.write(chunk.encode('utf-8'))
-                self.wfile.flush()
-        except Exception:
-            pass
 
-    def _handle_ai_local_status(self):
-        """GET /ai/local/status → {ok, models}。Ollama 沒啟動則 ok=false。"""
-        models = ai_local.list_models() if ai_local else None
-        self._ok(json.dumps({'ok': models is not None, 'models': models or []}, ensure_ascii=False).encode())
 
     def _handle_chain_momentum(self):
         """v4.0: POST /chain-momentum  body:{stages:[{stage,codes:[...]}]}
@@ -4528,7 +3957,7 @@ class Handler(SimpleHTTPRequestHandler):
             _lo = [r[3] if r[3] is not None else r[4] for r in _rows]
             _vo = [r[5] if r[5] is not None else 0 for r in _rows]
             try:
-                _ind = self._calc_ind(_cl, _hi, _lo, _vo)
+                _ind = self._screener_ind_cached(_code, _rows, _cl, _hi, _lo, _vo)
                 if self._screener_match(preset or custom, _ind, _cl, _hi, _vo):
                     results.append({
                         'sym': _code,
@@ -4542,6 +3971,10 @@ class Handler(SimpleHTTPRequestHandler):
                     })
             except Exception:
                 pass
+        # H5：Yahoo 補洞限流，避免 DB 空時一次打爆對外 API
+        _yahoo_cap = 120
+        _yahoo_truncated = max(0, len(need_yahoo) - _yahoo_cap)
+        need_yahoo = need_yahoo[:_yahoo_cap]
         # Fetch DB-misses in parallel using existing fetch_one with nocache=True
         futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith('.TW') else s, nocache=True): s for s in need_yahoo}
         for fut in as_completed(futures):
@@ -4615,39 +4048,66 @@ class Handler(SimpleHTTPRequestHandler):
         # 漲/跌幅榜只取前 40 檔避免整包
         if preset in ('top_gainers', 'top_losers'):
             results = results[:40]
-        self._ok(json.dumps({'results': results, 'scanned': len(syms), 'matched': len(results)}, ensure_ascii=False).encode())
+        self._ok(json.dumps({
+            'results': results,
+            'scanned': len(syms),
+            'matched': len(results),
+            'yahooFetched': len(need_yahoo),
+            'yahooTruncated': _yahoo_truncated,
+        }, ensure_ascii=False).encode())
+
+    # H5：選股指標短 TTL 快取（同收盤簽名 60s 內不重算 RSI/SMA）
+    _SCREENER_IND_CACHE = {}
+    _SCREENER_IND_TTL = 60.0
+
+    def _screener_ind_cached(self, code, rows, closes, highs, lows, vols):
+        try:
+            last = rows[-1]
+            sig = (len(rows), last[0], last[4])
+        except Exception:
+            return self._calc_ind(closes, highs, lows, vols)
+        now = time.time()
+        ent = Handler._SCREENER_IND_CACHE.get(code)
+        if ent and ent[0] == sig and ent[2] > now:
+            return ent[1]
+        ind = self._calc_ind(closes, highs, lows, vols)
+        Handler._SCREENER_IND_CACHE[code] = (sig, ind, now + Handler._SCREENER_IND_TTL)
+        if len(Handler._SCREENER_IND_CACHE) > 4000:
+            # 丟棄過期
+            Handler._SCREENER_IND_CACHE = {
+                k: v for k, v in Handler._SCREENER_IND_CACHE.items() if v[2] > now
+            }
+        return ind
 
     def _calc_ind(self, closes, highs, lows, vols):
         n = len(closes)
-        def sma(p, idx):
-            if idx + 1 < p: return None
-            return sum(closes[idx-p+1:idx+1]) / p
-
-        # 標準 Wilder's Smoothing RSI 14
-        def calc_rsi_wilders(prices, period=14):
-            if len(prices) <= period:
-                return None
-            gains = []
-            losses = []
-            for i in range(1, len(prices)):
-                diff = prices[i] - prices[i-1]
-                if diff > 0:
-                    gains.append(diff)
-                    losses.append(0.0)
-                else:
-                    gains.append(0.0)
-                    losses.append(-diff)
-            avg_gain = sum(gains[:period]) / period
-            avg_loss = sum(losses[:period]) / period
-            for i in range(period, len(gains)):
-                avg_gain = (avg_gain * 13 + gains[i]) / 14
-                avg_loss = (avg_loss * 13 + losses[i]) / 14
-            if avg_loss == 0:
-                return 100.0
-            rs = avg_gain / avg_loss
-            return 100.0 - (100.0 / (1.0 + rs))
-
-        rsi = calc_rsi_wilders(closes, 14)
+        try:
+            import indicators as _ind
+            def sma(p, idx):
+                return _ind.sma(closes, p, idx)
+            rsi = _ind.rsi_wilders(closes, 14)
+        except Exception:
+            def sma(p, idx):
+                if idx + 1 < p: return None
+                return sum(closes[idx-p+1:idx+1]) / p
+            def calc_rsi_wilders(prices, period=14):
+                if len(prices) <= period:
+                    return None
+                gains, losses = [], []
+                for i in range(1, len(prices)):
+                    diff = prices[i] - prices[i-1]
+                    gains.append(diff if diff > 0 else 0.0)
+                    losses.append(-diff if diff < 0 else 0.0)
+                avg_gain = sum(gains[:period]) / period
+                avg_loss = sum(losses[:period]) / period
+                for i in range(period, len(gains)):
+                    avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+                    avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+                if avg_loss == 0:
+                    return 100.0
+                rs = avg_gain / avg_loss
+                return 100.0 - (100.0 / (1.0 + rs))
+            rsi = calc_rsi_wilders(closes, 14)
         # Vol ratio
         v5 = sum(vols[-5:]) / 5 if len(vols) >= 5 else 0
         v20 = sum(vols[-20:]) / 20 if len(vols) >= 20 else 0
@@ -4706,71 +4166,6 @@ class Handler(SimpleHTTPRequestHandler):
             return i['volRatio'] and i['volRatio'] > 2 and i['prev'] and c < i['prev']
         return False
 
-    def _handle_ai_report(self):
-        """POST /ai-report — body: {apiKey, positions, watches, marketSym (optional)}"""
-        try:
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length) or b'{}')
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
-        api_key = body.get('apiKey', '').strip() or _load_ai_key()
-        if not api_key:
-            self._err('apiKey required (use sk-ant-...)', 400); return
-        positions = body.get('positions') or {}
-        watches   = body.get('watches') or {}
-        market    = body.get('marketSym') or '^TWII'
-        # Build prompt
-        pos_lines = []
-        for code, p in positions.items():
-            pos_lines.append(f"  - {code}: 進場 {p.get('entry')}、{p.get('shares')} 股、停利 {p.get('target') or '無'}、停損 {p.get('stop') or '無'}、現價 {p.get('lastPrice') or '?'}")
-        watch_lines = []
-        for code, w in watches.items():
-            sigs = w.get('signals', []) if isinstance(w, dict) else []
-            triggered = [s for s in sigs if s.get('lastEval',{}).get('status') == 'trigger']
-            watch_lines.append(f"  - {code}: {len(sigs)} 訊號、{len(triggered)} 觸發")
-        prompt = (
-            f'你是專業台股研究分析師。請為這個人撰寫今日盤前簡報。\n\n'
-            f'# 持倉清單\n' + ('\n'.join(pos_lines) if pos_lines else '  (無)') + '\n\n'
-            f'# 觀察清單\n' + ('\n'.join(watch_lines) if watch_lines else '  (無)') + '\n\n'
-            f'請輸出 Markdown 格式報告，含：\n'
-            f'1. 📊 大盤總結（基於昨日 {market} 表現）\n'
-            f'2. 💼 持倉檢視（每檔含表現、注意事項、行動建議）\n'
-            f'3. 👁 觀察清單重點（觸發訊號分析）\n'
-            f'4. 🎯 今日 3 大重點\n\n'
-            f'語言：繁體中文、口語化、有觀點。長度約 500~800 字。\n\n'
-            f'【重要】股票一律以「代號」為準（上面清單給的就是正確代號）。'
-            f'提到公司名稱時務必與代號正確對應；若你不百分之百確定某代號對應的公司名稱，'
-            f'就只用代號稱呼，嚴禁臆測或填入可能錯誤的名稱（例如不可把 2408 寫成旺宏）。'
-        )
-        # Call Anthropic API
-        try:
-            req_body = json.dumps({
-                'model': _resolve_model(api_key),
-                'max_tokens': 2048,
-                'messages': [{'role':'user', 'content': prompt}],
-            }).encode('utf-8')
-            req = urllib.request.Request(
-                'https://api.anthropic.com/v1/messages',
-                data=req_body,
-                headers={
-                    'Content-Type':       'application/json',
-                    'x-api-key':          api_key,
-                    'anthropic-version':  '2023-06-01',
-                },
-                method='POST',
-            )
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read())
-            text = ''
-            for block in data.get('content', []):
-                if block.get('type') == 'text':
-                    text += block.get('text', '')
-            self._ok(json.dumps({'ok': True, 'report': text, 'model': data.get('model')}).encode())
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode('utf-8', 'replace')
-            self._err(f'Anthropic API HTTP {e.code}: {err_body[:500]}', 502)
-        except Exception as e:
-            self._err('AI report failed: ' + str(e), 500)
 
     def _handle_etf_reason(self):
         """POST /etf-reason — ETF 異動 AI 一句話原因推導 (v3.9 P5)。
@@ -4818,55 +4213,16 @@ class Handler(SimpleHTTPRequestHandler):
             f'結合台灣 AI 供應鏈結構偏多視角但點出短線風險；只回一句話，不要前綴。'
         )
         try:
-            req_body = json.dumps({
-                'model': _resolve_model(api_key), 'max_tokens': 300,
-                'messages': [{'role': 'user', 'content': prompt}],
-            }).encode('utf-8')
-            req = urllib.request.Request('https://api.anthropic.com/v1/messages', data=req_body,
-                                         headers={'Content-Type': 'application/json', 'x-api-key': api_key,
-                                                  'anthropic-version': '2023-06-01'}, method='POST')
-            with urllib.request.urlopen(req, timeout=40) as resp:
-                data = json.loads(resp.read())
-            text = ''.join(b.get('text', '') for b in data.get('content', []) if b.get('type') == 'text')
-            self._ok(json.dumps({'ok': True, 'reason': text.strip(), 'fund': fund_txt}, ensure_ascii=False).encode())
+            text, _ = _anthropic_messages(
+                api_key, [{'role': 'user', 'content': prompt}], max_tokens=300,
+            )
+            self._ok(json.dumps({'ok': True, 'reason': text, 'fund': fund_txt}, ensure_ascii=False).encode())
         except urllib.error.HTTPError as e:
             self._err(f'Anthropic HTTP {e.code}: ' + e.read().decode('utf-8', 'replace')[:300], 502)
         except Exception as e:
             self._err('etf-reason failed: ' + str(e), 500)
 
-    def _handle_ai_note(self):
-        """POST /ai-note — 通用 Anthropic 文字生成 (v3.9 Wizard 體檢結論口語版用)。
-           body: {apiKey, prompt, max_tokens?}。回 {ok, text}。"""
-        try:
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length) or b'{}')
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
-        api_key = (body.get('apiKey') or '').strip() or _load_ai_key()
-        prompt = (body.get('prompt') or '').strip()
-        if not api_key:
-            self._err('apiKey required', 400); return
-        if not prompt:
-            self._err('prompt required', 400); return
-        mt = int(body.get('max_tokens') or 500)
-        try:
-            req_body = json.dumps({
-                'model': _resolve_model(api_key), 'max_tokens': max(64, min(1500, mt)),
-                'messages': [{'role': 'user', 'content': prompt}],
-            }).encode('utf-8')
-            req = urllib.request.Request('https://api.anthropic.com/v1/messages', data=req_body,
-                                         headers={'Content-Type': 'application/json', 'x-api-key': api_key,
-                                                  'anthropic-version': '2023-06-01'}, method='POST')
-            with urllib.request.urlopen(req, timeout=50) as resp:
-                data = json.loads(resp.read())
-            text = ''.join(b.get('text', '') for b in data.get('content', []) if b.get('type') == 'text')
-            self._ok(json.dumps({'ok': True, 'text': text.strip()}, ensure_ascii=False).encode())
-        except urllib.error.HTTPError as e:
-            self._err(f'Anthropic HTTP {e.code}: ' + e.read().decode('utf-8', 'replace')[:300], 502)
-        except Exception as e:
-            self._err('ai-note failed: ' + str(e), 500)
 
-    # ── Alert daemon endpoints (v3.8) ──────────────────────
     def _read_json_body(self):
         length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(length) if length > 0 else b'{}'
@@ -5557,12 +4913,26 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     os.chdir(_BASE)
+    try:
+        import slog as _slog
+        _slog.setup('INFO')
+        _log = _slog.get_logger('server')
+    except Exception:
+        _log = None
     d = find_etf_dir()
     files = list_etf_files()
-    print(f'Stock Terminal: http://localhost:{PORT}/stock_terminal.html')
-    print(f'Workers: {MAX_WORKERS}  |  LRU cache: {LRU_MAX} symbols  |  CPU: {os.cpu_count()}')
-    print(f'ETF delta path: {d or "NOT FOUND — set ETF_DELTA_PATH in server.py"}')
-    print(f'ETF history files: {len(files)}')
+    _msg = (
+        f'Stock Terminal: http://127.0.0.1:{PORT}/stock_terminal.html\n'
+        f'Workers: {MAX_WORKERS}  |  LRU cache: {LRU_MAX} symbols (ttl={getattr(_cache, "_ttl", "?")}s)\n'
+        f'ETF delta path: {d or "NOT FOUND — set ETF_DELTA_PATH in server.py"}\n'
+        f'ETF history files: {len(files)}\n'
+        f'Bind: 127.0.0.1:{PORT} (loopback only — housekeeping)'
+    )
+    if _log:
+        for line in _msg.split('\n'):
+            _log.info(line)
+    else:
+        print(_msg)
     if alert_daemon:
         try:
             _ac = alert_daemon.load_config()
@@ -5580,7 +4950,8 @@ if __name__ == '__main__':
         # 打包成 app 時:啟動後自動開瀏覽器(開發模式由 .bat 開,不重複)
         try:
             import webbrowser
-            threading.Timer(1.4, lambda: webbrowser.open(f'http://localhost:{PORT}/stock_terminal_v2.html')).start()
+            threading.Timer(1.4, lambda: webbrowser.open(f'http://127.0.0.1:{PORT}/stock_terminal_v2.html')).start()
         except Exception:
             pass
-    ThreadingHTTPServer(('localhost', PORT), Handler).serve_forever()
+    # H0：只聽 loopback，避免 18432 暴露到區網／公網
+    ThreadingHTTPServer(('127.0.0.1', PORT), Handler).serve_forever()

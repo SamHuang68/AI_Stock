@@ -63,9 +63,8 @@ DATA_ALLOW_FILES = {
     "universe.json",
     "tw_names_backup.json",
     # public market seeds / caches (not user identity)
+    # tdcc_holders.db / margin_cycle.db：首次開啟圖表時背景回補，不打進分享包
     "macro_track.db",
-    "margin_cycle.db",
-    "tdcc_holders.db",
     "cbc_policy_rates.csv",
     "cbc_policy_rate_changes.csv",
     "tw_margin_mix_daily.csv",

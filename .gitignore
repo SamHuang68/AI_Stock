@@ -28,6 +28,7 @@ etf_history/*.txt
 
 logs/
 logs/*
+data/logs/
 
 # Build / distribution outputs (built fresh on demand)
 Stock_Terminal/
@@ -100,3 +101,17 @@ data/market.db-shm
 data/macro_track.db
 data/macro_track.db-wal
 data/macro_track.db-shm
+
+# H0/H3：大 DB 改首次回補，不再進 git／分享包
+data/tdcc_holders.db
+data/tdcc_holders.db-wal
+data/tdcc_holders.db-shm
+data/margin_cycle.db
+data/margin_cycle.db-wal
+data/margin_cycle.db-shm
+baml_hy.csv
+baml_ig.csv
+fedfunds.csv
+us10y.csv
+us_cpi_yoy.csv
+xlf.csv

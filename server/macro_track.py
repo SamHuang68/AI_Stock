@@ -995,28 +995,10 @@ def points_to_yf_like(points: List[Dict[str, Any]], symbol: str, name: str) -> D
 
 
 def primary_points_for_yf(chart_id: str) -> Dict[str, Any]:
-    """給 /yf/__CHART__ 用：優先取左軸主指標（融資比 → yoy），绝不退回右軸加權。"""
+    """給 /yf/__CHART__ 用：依 chart_registry 主序列，绝不退回右軸加權。"""
+    import chart_registry as cr
     data = get_chart(chart_id)
-    series = data.get('series') or []
-    primary = None
-    prefer = {
-        '__TW_MARGIN_MIX__': 'yoy',
-        '__TW_MARGIN_CYCLE__': 'margin_ratio',
-        '__TW_RATES__': 'discount',
-        '__US_RATES_CREDIT__': 'fedfunds',
-        '__US_CPI_FIN__': 'us_cpi_yoy',
-    }
-    want = prefer.get(str(chart_id or '').upper())
-    if want:
-        for s in series:
-            if s.get('key') == want and s.get('points'):
-                primary = s
-                break
-    if not primary:
-        for s in series:
-            if s.get('scale') == 'left' and s.get('points'):
-                primary = s
-                break
+    primary = cr.pick_primary_series(data.get('series') or [], data.get('id') or chart_id)
     pts = (primary or {}).get('points') or []
     return points_to_yf_like(pts, data['id'], data['name'])
 
@@ -1064,8 +1046,15 @@ def _maybe_autodense_margin_mix() -> None:
             _REFRESH_LOCK['running'] = False
             _REFRESH_LOCK['note'] = ''
 
-    import threading
-    threading.Thread(target=_run, daemon=True).start()
+    try:
+        import job_queue as jq
+        jq.submit(
+            'macro_margin_mix', _run,
+            meta={'autodense': True, 'step': step_days, 'start': start.isoformat()},
+        )
+    except Exception:
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
     print(f'[macro_track] autodense margin_mix started (yoy={yoy_n}, total={total}) from {start}')
 
 
@@ -1244,8 +1233,15 @@ def refresh_chart(chart_id: str, dense: bool = False, density: Optional[str] = N
                         _REFRESH_LOCK['running'] = False
                         _REFRESH_LOCK['note'] = ''
 
-                import threading
-                threading.Thread(target=_run, daemon=True).start()
+                try:
+                    import job_queue as jq
+                    jq.submit(
+                        'macro_margin_mix', _run,
+                        meta={'step': step_days, 'years': yrs, 'start': start.isoformat()},
+                    )
+                except Exception:
+                    import threading
+                    threading.Thread(target=_run, daemon=True).start()
         except Exception as e:
             result['ok'] = False
             result['error'] = str(e)

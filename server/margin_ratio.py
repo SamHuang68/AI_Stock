@@ -800,16 +800,21 @@ def backfill_margin_ratio(full: bool = False, max_days: Optional[int] = None) ->
 def start_background_backfill(full: bool = False, max_days: Optional[int] = None):
     if _backfill_state.get('running'):
         return False
+    try:
+        import job_queue as jq
+        if jq.is_busy('margin_ratio'):
+            return False
+    except Exception:
+        jq = None
+
     if not _backfill_lock.acquire(blocking=False):
         return False
-    # 先佔住 running，避免 chart_json 連打多條執行緒
     _backfill_state['running'] = True
     _backfill_state['phase'] = 'queued'
     _backfill_state['started_at'] = time.time()
 
     def _run():
         try:
-            # backfill_history 自己會 acquire lock → 此處先釋放再交給它
             _backfill_lock.release()
             if full:
                 backfill_history(start=date(2001, 1, 5), resume=True, max_days=max_days)
@@ -832,6 +837,19 @@ def start_background_backfill(full: bool = False, max_days: Optional[int] = None
             except Exception:
                 pass
 
+    if jq is not None:
+        r = jq.submit('margin_ratio', _run, meta={'full': full, 'max_days': max_days})
+        if not r.get('queued'):
+            # 還原佔位
+            _backfill_state['running'] = False
+            _backfill_state['phase'] = 'idle'
+            try:
+                if _backfill_lock.locked():
+                    _backfill_lock.release()
+            except Exception:
+                pass
+            return False
+        return True
     threading.Thread(target=_run, daemon=True, name='margin-backfill').start()
     return True
 
