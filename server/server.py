@@ -1069,6 +1069,27 @@ YF_HEADERS = {
 _yf_crumb_lock = threading.Lock()
 _yf_crumb = {'value': None, 'ts': 0.0, 'opener': None}
 
+# Yahoo keystats 死號負向快取：404/空 info 的代號 1 小時內不再 cascade
+_YF_DEAD_LOCK = threading.Lock()
+_YF_DEAD = {}  # sym -> expire_ts
+
+def _yf_mark_dead(sym, ttl=3600):
+    if not sym:
+        return
+    with _YF_DEAD_LOCK:
+        _YF_DEAD[sym] = time.time() + ttl
+
+def _yf_is_dead(sym):
+    with _YF_DEAD_LOCK:
+        exp = _YF_DEAD.get(sym)
+        if not exp:
+            return False
+        if exp <= time.time():
+            _YF_DEAD.pop(sym, None)
+            return False
+        return True
+
+
 def _yahoo_crumb_opener(force=False):
     """回傳 (opener, crumb)。失敗回 (None, None)。"""
     import http.cookiejar
@@ -1107,6 +1128,8 @@ def _yahoo_crumb_opener(force=False):
 
 def _yahoo_quote_summary(sym, modules='summaryDetail,defaultKeyStatistics,price,financialData'):
     """帶 crumb 打 v10 quoteSummary；回 result[0] dict 或 None。"""
+    if _yf_is_dead(sym):
+        return None
     opener, crumb = _yahoo_crumb_opener()
     if not opener or not crumb:
         return None
@@ -1115,7 +1138,7 @@ def _yahoo_quote_summary(sym, modules='summaryDetail,defaultKeyStatistics,price,
         f'?modules={modules}&crumb={quote(crumb)}'
     )
     try:
-        with opener.open(urllib.request.Request(url, headers=YF_HEADERS), timeout=12) as resp:
+        with opener.open(urllib.request.Request(url, headers=YF_HEADERS), timeout=8) as resp:
             data = json.loads(resp.read().decode('utf-8', 'replace'))
         qs = data.get('quoteSummary') or {}
         result = qs.get('result') or []
@@ -1131,12 +1154,17 @@ def _yahoo_quote_summary(sym, modules='summaryDetail,defaultKeyStatistics,price,
                 f'https://query1.finance.yahoo.com/v10/finance/quoteSummary/{quote(sym)}'
                 f'?modules={modules}&crumb={quote(crumb)}'
             )
-            with opener.open(urllib.request.Request(url, headers=YF_HEADERS), timeout=12) as resp:
+            with opener.open(urllib.request.Request(url, headers=YF_HEADERS), timeout=8) as resp:
                 data = json.loads(resp.read().decode('utf-8', 'replace'))
             result = ((data.get('quoteSummary') or {}).get('result') or [])
             return result[0] if result else None
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 404):
+            _yf_mark_dead(sym)
+        # 降噪：同代號死號只記 TrustedDataLayer，不逐檔 print
+        _src_record('yahoo-keystats', False, 0, f'{e.code}')
     except Exception as e:
-        print(f'[yahoo-v10-crumb] {sym} failed:', type(e).__name__, e)
+        _src_record('yahoo-keystats', False, 0, e)
     return None
 
 
@@ -1181,7 +1209,7 @@ _SRC_LOCK = threading.Lock()
 _SRC_HEALTH = {}        # name -> dict(計數/時間/失敗連續數/熔斷到期)
 _SRC_LAST_CALL = {}     # name -> 上次(預約)呼叫時間, 供節流
 # 每源最小請求間隔(秒):TAIFEX MIS 易 520 故拉長;TWSE MIS 次之;yahoo 不節流(0)
-_SRC_MIN_GAP = {'taifex-mis': 1.0, 'twse-mis': 0.3}
+_SRC_MIN_GAP = {'taifex-mis': 1.0, 'twse-mis': 0.3, 'twse-chip': 0.35, 'yahoo-keystats': 0.2}
 _SRC_CB_THRESHOLD = 4   # 連續失敗達此數 → 開熔斷
 _SRC_CB_COOLDOWN = 30.0 # 熔斷冷卻秒數(期間 fail-fast,不打外部源)
 
@@ -1264,6 +1292,19 @@ def _src_fetch_json(name, url, headers=None, timeout=10, retries=1, data=None):
             if attempt < retries:
                 time.sleep(min(0.5 * (2 ** attempt), 4.0))   # 指數退避
     raise last_exc if last_exc else RuntimeError(name + ' fetch failed')
+
+
+try:
+    import chip_api as _chip_api
+    _chip_api.configure(
+        yf_headers=YF_HEADERS,
+        src_fetch_json=_src_fetch_json,
+        source_breaker_open=SourceBreakerOpen,
+        chip_streak=_chip_streak,
+        chip_history_record=_chip_history_record,
+    )
+except Exception as _ca_err:
+    print('[server] chip_api.configure failed:', _ca_err)
 
 
 def _src_snapshot():
@@ -2120,95 +2161,131 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         if c is not None:
             self._ok(c); return
 
-        def _fetch_all(s):
-            res_out = self._fetch_keystats_yfinance(s)
-            # Fallback 1: v10 + crumb — 缺 PE 或 缺市值都要補（舊條件用 AND 會漏掉市值）
-            if (res_out.get('trailingPE') is None or res_out.get('marketCap') is None
-                    or res_out.get('eps') is None or res_out.get('priceToBook') is None):
-                v10 = self._fetch_keystats_v10(s)
-                for k in ('trailingPE','forwardPE','eps','forwardEps','pegRatio','marketCap',
-                          'priceToBook','dividendYield','shortName','longName','currency',
-                          'earningsQuarterlyGrowth','revenueGrowth','earningsGrowth',
-                          'regularMarketPrice','grossMargin','opMargin','netMargin','roe',
-                          'sharesOutstanding'):
-                    if res_out.get(k) is None and v10.get(k) is not None:
-                        res_out[k] = v10[k]
-                if v10.get('trailingPE') is not None or v10.get('marketCap') is not None:
-                    res_out['_source'] = (res_out.get('_source','') + '+' + (v10.get('_source') or 'v10')).strip('+')
+        def _merge(dst, src, keys, tag=None):
+            for k in keys:
+                if dst.get(k) is None and src.get(k) is not None:
+                    dst[k] = src[k]
+            if tag and (src.get('trailingPE') is not None or src.get('marketCap') is not None
+                        or src.get('regularMarketPrice') is not None):
+                dst['_source'] = (dst.get('_source', '') + '+' + tag).strip('+')
 
-            # Fallback 2: HTML scrape
-            if (res_out.get('trailingPE') is None or res_out.get('marketCap') is None
-                    or res_out.get('eps') is None):
-                html_out = self._fetch_keystats_html(s)
-                for k in ('trailingPE','eps','marketCap','priceToBook','dividendYield',
-                          'shortName','currency','regularMarketPrice'):
-                    if res_out.get(k) is None and html_out.get(k) is not None:
-                        res_out[k] = html_out[k]
-                if html_out.get('trailingPE') is not None or html_out.get('marketCap') is not None:
-                    res_out['_source'] = (res_out.get('_source','') + '+html').strip('+')
-
-            # Fallback 3: 台股官方 BWIBBU（本益比／淨值比／殖利率）— 不依賴 Yahoo
-            clean = s.replace('.TWO', '').replace('.TW', '').strip().upper()
-            if _CODE4.match(clean) and (
-                res_out.get('trailingPE') is None or res_out.get('priceToBook') is None
-                or res_out.get('dividendYield') is None
-            ):
-                row = _openapi_lookup(['exchangeReport/BWIBBU_ALL', 'BWIBBU_ALL'], clean)
-                src = 'TWSE BWIBBU'
-                if not row:
-                    row = _openapi_lookup(['tpex:tpex_mainboard_peratio_analysis'], clean)
-                    src = 'TPEx peratio'
-                if row:
-                    pe = (_pick_num(row, ['本益比']) or _pick_num(row, ['PEratio'])
-                          or _pick_num(row, ['PriceEarningRatio']))
-                    pb = (_pick_num(row, ['股價淨值比']) or _pick_num(row, ['PBratio'])
-                          or _pick_num(row, ['PriceBookRatio']))
-                    yld = _pick_num(row, ['殖利率']) or _pick_num(row, ['Yield'])
-                    if res_out.get('trailingPE') is None and pe is not None:
-                        res_out['trailingPE'] = pe
-                    if res_out.get('priceToBook') is None and pb is not None:
-                        res_out['priceToBook'] = pb
-                    if res_out.get('dividendYield') is None and yld is not None:
-                        res_out['dividendYield'] = yld
-                    if not res_out.get('shortName'):
-                        res_out['shortName'] = row.get('Name') or row.get('證券名稱')
-                    res_out['currency'] = res_out.get('currency') or 'TWD'
-                    res_out['_source'] = (res_out.get('_source', '') + '+' + src).strip('+')
-                    # 有價＋本益比 → 反推 EPS
-                    if res_out.get('eps') is None and pe and res_out.get('regularMarketPrice'):
-                        try:
-                            res_out['eps'] = round(float(res_out['regularMarketPrice']) / float(pe), 2)
-                        except Exception:
-                            pass
-
-            # Fallback 4: Yahoo chart meta（價／名稱）
-            if res_out.get('regularMarketPrice') is None or res_out.get('shortName') is None:
+        def _apply_bwibbu(res_out, clean):
+            """台股官方估值 — 優先於 Yahoo cascade（ETF／上櫃也適用）。"""
+            if not clean or not clean[0].isdigit():
+                return
+            if not (res_out.get('trailingPE') is None or res_out.get('priceToBook') is None
+                    or res_out.get('dividendYield') is None):
+                return
+            row = _openapi_lookup(['exchangeReport/BWIBBU_ALL', 'BWIBBU_ALL'], clean)
+            src = 'TWSE BWIBBU'
+            if not row:
+                row = _openapi_lookup(['tpex:tpex_mainboard_peratio_analysis'], clean)
+                src = 'TPEx peratio'
+            if not row:
+                return
+            pe = (_pick_num(row, ['本益比']) or _pick_num(row, ['PEratio'])
+                  or _pick_num(row, ['PriceEarningRatio']))
+            pb = (_pick_num(row, ['股價淨值比']) or _pick_num(row, ['PBratio'])
+                  or _pick_num(row, ['PriceBookRatio']))
+            yld = _pick_num(row, ['殖利率']) or _pick_num(row, ['Yield'])
+            if res_out.get('trailingPE') is None and pe is not None:
+                res_out['trailingPE'] = pe
+            if res_out.get('priceToBook') is None and pb is not None:
+                res_out['priceToBook'] = pb
+            if res_out.get('dividendYield') is None and yld is not None:
+                res_out['dividendYield'] = yld
+            if not res_out.get('shortName'):
+                res_out['shortName'] = row.get('Name') or row.get('證券名稱')
+            res_out['currency'] = res_out.get('currency') or 'TWD'
+            res_out['_source'] = (res_out.get('_source', '') + '+' + src).strip('+')
+            if res_out.get('eps') is None and pe and res_out.get('regularMarketPrice'):
                 try:
-                    u = f'https://query1.finance.yahoo.com/v8/finance/chart/{quote(s)}?range=5d&interval=1d'
-                    req = urllib.request.Request(u, headers=YF_HEADERS)
-                    with urllib.request.urlopen(req, timeout=10) as resp:
-                        jj = json.loads(resp.read().decode('utf-8', 'replace'))
-                    meta = ((jj.get('chart') or {}).get('result') or [{}])[0].get('meta') or {}
-                    if res_out.get('regularMarketPrice') is None and meta.get('regularMarketPrice') is not None:
-                        res_out['regularMarketPrice'] = meta.get('regularMarketPrice')
-                    if res_out.get('shortName') is None:
-                        res_out['shortName'] = meta.get('shortName') or meta.get('longName')
-                    if res_out.get('longName') is None:
-                        res_out['longName'] = meta.get('longName')
-                    if res_out.get('currency') is None:
-                        res_out['currency'] = meta.get('currency')
-                    if (res_out.get('eps') is None and res_out.get('trailingPE')
-                            and res_out.get('regularMarketPrice')):
-                        try:
-                            res_out['eps'] = round(
-                                float(res_out['regularMarketPrice']) / float(res_out['trailingPE']), 2)
-                        except Exception:
-                            pass
-                    res_out['_source'] = (res_out.get('_source', '') + '+chart').strip('+')
-                except Exception as e:
-                    print(f'[keystats-chart] {s} failed: {e}')
+                    res_out['eps'] = round(float(res_out['regularMarketPrice']) / float(pe), 2)
+                except Exception:
+                    pass
 
-            # Fallback 5: 市值 — shares × price；台股可用實收資本額／面額推算
+        def _fetch_all(s, allow_yahoo_heavy=True):
+            """allow_yahoo_heavy=False：跳過 v10/html（已知死號或 ETF 已有官方估值）。"""
+            clean = s.replace('.TWO', '').replace('.TW', '').strip().upper()
+            is_tw = s.endswith('.TW') or s.endswith('.TWO') or (clean[:1].isdigit() and len(clean) <= 6)
+            res_out = {'symbol': s, '_source': ''}
+
+            # 台股：官方估值先填，減少 Yahoo 401/404 cascade
+            if is_tw:
+                _apply_bwibbu(res_out, clean)
+
+            if _yf_is_dead(s):
+                # 死號：只補 chart 價／名（若也死則跳過）
+                allow_yahoo_heavy = False
+
+            if allow_yahoo_heavy and not _yf_is_dead(s):
+                yf = self._fetch_keystats_yfinance(s)
+                _merge(res_out, yf,
+                       ('trailingPE','forwardPE','eps','forwardEps','pegRatio','marketCap',
+                        'priceToBook','dividendYield','shortName','longName','currency',
+                        'earningsQuarterlyGrowth','revenueGrowth','earningsGrowth',
+                        'regularMarketPrice','grossMargin','opMargin','netMargin','roe',
+                        'sharesOutstanding'),
+                       tag=(yf.get('_source') or 'yfinance') if not yf.get('_error') else None)
+                if yf.get('_error') and 'empty' in str(yf.get('_error')):
+                    _yf_mark_dead(s, ttl=1800)
+
+            need_more = (res_out.get('trailingPE') is None or res_out.get('marketCap') is None
+                         or res_out.get('eps') is None or res_out.get('priceToBook') is None)
+            # 槓桿／反向 ETF 通常無 PE：有價+名即可，不再打 v10/html
+            is_lev_etf = bool(clean.startswith('00') and clean[-1:] in ('L', 'R', 'U', 'S'))
+            if need_more and allow_yahoo_heavy and not _yf_is_dead(s) and not is_lev_etf:
+                v10 = self._fetch_keystats_v10(s)
+                _merge(res_out, v10,
+                       ('trailingPE','forwardPE','eps','forwardEps','pegRatio','marketCap',
+                        'priceToBook','dividendYield','shortName','longName','currency',
+                        'earningsQuarterlyGrowth','revenueGrowth','earningsGrowth',
+                        'regularMarketPrice','grossMargin','opMargin','netMargin','roe',
+                        'sharesOutstanding'),
+                       tag=v10.get('_source') or 'v10')
+
+            need_more = (res_out.get('trailingPE') is None or res_out.get('marketCap') is None
+                         or res_out.get('eps') is None)
+            if need_more and allow_yahoo_heavy and not _yf_is_dead(s) and not is_lev_etf:
+                html_out = self._fetch_keystats_html(s)
+                _merge(res_out, html_out,
+                       ('trailingPE','eps','marketCap','priceToBook','dividendYield',
+                        'shortName','currency','regularMarketPrice'),
+                       tag='html')
+
+            # chart meta（價／名）— 404 → mark dead
+            if res_out.get('regularMarketPrice') is None or res_out.get('shortName') is None:
+                if not _yf_is_dead(s):
+                    try:
+                        u = f'https://query1.finance.yahoo.com/v8/finance/chart/{quote(s)}?range=5d&interval=1d'
+                        req = urllib.request.Request(u, headers=YF_HEADERS)
+                        with urllib.request.urlopen(req, timeout=6) as resp:
+                            jj = json.loads(resp.read().decode('utf-8', 'replace'))
+                        meta = ((jj.get('chart') or {}).get('result') or [{}])[0].get('meta') or {}
+                        if res_out.get('regularMarketPrice') is None and meta.get('regularMarketPrice') is not None:
+                            res_out['regularMarketPrice'] = meta.get('regularMarketPrice')
+                        if res_out.get('shortName') is None:
+                            res_out['shortName'] = meta.get('shortName') or meta.get('longName')
+                        if res_out.get('longName') is None:
+                            res_out['longName'] = meta.get('longName')
+                        if res_out.get('currency') is None:
+                            res_out['currency'] = meta.get('currency')
+                        if (res_out.get('eps') is None and res_out.get('trailingPE')
+                                and res_out.get('regularMarketPrice')):
+                            try:
+                                res_out['eps'] = round(
+                                    float(res_out['regularMarketPrice']) / float(res_out['trailingPE']), 2)
+                            except Exception:
+                                pass
+                        res_out['_source'] = (res_out.get('_source', '') + '+chart').strip('+')
+                    except urllib.error.HTTPError as e:
+                        if e.code in (401, 404):
+                            _yf_mark_dead(s)
+                        _src_record('yahoo-keystats', False, 0, f'chart {e.code}')
+                    except Exception:
+                        _src_record('yahoo-keystats', False, 0, 'chart')
+
+            # 市值推算
             if res_out.get('marketCap') is None:
                 px = res_out.get('regularMarketPrice')
                 shares = res_out.get('sharesOutstanding')
@@ -2218,7 +2295,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                         res_out['_source'] = (res_out.get('_source', '') + '+shares*px').strip('+')
                     except Exception:
                         pass
-            if res_out.get('marketCap') is None and _CODE4.match(clean):
+            if res_out.get('marketCap') is None and clean[:1].isdigit():
                 px = res_out.get('regularMarketPrice')
                 try:
                     crow = _openapi_lookup(['opendata/t187ap03_L', 't187ap03_L'], clean)
@@ -2226,7 +2303,6 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                         crow = _openapi_lookup(['tpex:mopsfin_t187ap03_O'], clean)
                     if crow:
                         capital = _pick_num(crow, ['實收資本額'])
-                        # 面額字串如「新台幣 10.0000元」→ 抽數字，預設 10
                         face_raw = crow.get('普通股每股面額') or crow.get('每股面額') or '10'
                         face = 10.0
                         try:
@@ -2249,30 +2325,32 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                                 res_out['sharesOutstanding'] = shares
                                 res_out['currency'] = res_out.get('currency') or 'TWD'
                                 res_out['_source'] = (res_out.get('_source', '') + '+TWSE資本額').strip('+')
-                except Exception as e:
-                    print(f'[keystats-tw-mcap] {clean} failed: {e}')
-
-            # shares × price 再補一次（US 從 v10 拿到股數後）
+                except Exception:
+                    pass
             if res_out.get('marketCap') is None and res_out.get('sharesOutstanding') and res_out.get('regularMarketPrice'):
                 try:
                     res_out['marketCap'] = float(res_out['sharesOutstanding']) * float(res_out['regularMarketPrice'])
                     res_out['_source'] = (res_out.get('_source', '') + '+shares*px').strip('+')
                 except Exception:
                     pass
+            # 台股再補一次官方估值（Yahoo 可能補了價）
+            if is_tw:
+                _apply_bwibbu(res_out, clean)
             return res_out
 
         out = _fetch_all(sym)
 
-        # TW main board miss → try .TWO
+        # .TW miss → .TWO：僅在「尚無估值／市值」且 .TWO 未列死號時試一次（不再整串 cascade 兩輪）
         if (sym.endswith('.TW') and not sym.endswith('.TWO')
             and out.get('trailingPE') is None and out.get('eps') is None
             and out.get('marketCap') is None):
             otc = sym[:-3] + '.TWO'
-            otc_out = _fetch_all(otc)
-            if (otc_out.get('trailingPE') is not None or otc_out.get('eps') is not None
-                or otc_out.get('marketCap') is not None):
-                out = otc_out
-                out['_resolved'] = otc
+            if not _yf_is_dead(otc):
+                otc_out = _fetch_all(otc, allow_yahoo_heavy=True)
+                if (otc_out.get('trailingPE') is not None or otc_out.get('eps') is not None
+                    or otc_out.get('marketCap') is not None or otc_out.get('regularMarketPrice') is not None):
+                    out = otc_out
+                    out['_resolved'] = otc
 
         body = json.dumps(out, ensure_ascii=False).encode()
         _cache.set(key, body)
@@ -2358,26 +2436,17 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         return out
 
     def _fetch_keystats_v10(self, sym):
-        """Yahoo v10 quoteSummary — 優先帶 crumb（無 yfinance 也能用）；失敗再試無 crumb。"""
+        """Yahoo v10 quoteSummary — 只走 crumb；死號／401／404 負向快取，不再打無 crumb（必 401）。"""
         out = {'symbol': sym, '_source': 'yahoo-v10'}
+        if _yf_is_dead(sym):
+            out['_error'] = 'dead-cached'
+            return out
         try:
             r0 = _yahoo_quote_summary(sym)
             if not r0:
-                # 舊路徑（常 401）；保留做最後一搏
-                modules = 'summaryDetail,defaultKeyStatistics,price,financialData'
-                url = f'https://query1.finance.yahoo.com/v10/finance/quoteSummary/{sym}?modules={modules}'
-                req = urllib.request.Request(url, headers=YF_HEADERS)
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    data = json.loads(resp.read().decode('utf-8', 'replace'))
-                qs = data.get('quoteSummary') or {}
-                result = qs.get('result') or []
-                if not result:
-                    err = qs.get('error')
-                    out['_error'] = str(err) if err else 'no result'
-                    return out
-                r0 = result[0]
-            else:
-                out['_source'] = 'yahoo-v10-crumb'
+                out['_error'] = 'no result'
+                return out
+            out['_source'] = 'yahoo-v10-crumb'
             sd = r0.get('summaryDetail') or {}
             ks = r0.get('defaultKeyStatistics') or {}
             pr = r0.get('price') or {}
@@ -2423,8 +2492,11 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             out['opMargin']    = _margin_pct(raw(fd, 'operatingMargins'))
             out['netMargin']   = _margin_pct(raw(fd, 'profitMargins'))
             out['roe']         = _margin_pct(raw(fd, 'returnOnEquity'))
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 404):
+                _yf_mark_dead(sym)
+            out['_error'] = str(e.code)
         except Exception as e:
-            print(f'[keystats-v10] {sym} failed: {e}')
             out['_error'] = str(e)
         return out
 
@@ -2462,8 +2534,11 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                         except: pass
             if out.get('dividendYield') is not None:
                 out['dividendYield'] *= 100
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 404):
+                _yf_mark_dead(sym)
+            out['_error'] = str(e.code)
         except Exception as e:
-            print(f'[keystats-html] {sym} failed: {e}')
             out['_error'] = str(e)
         return out
 
@@ -2510,232 +2585,20 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._err('holders failed: ' + str(e), 500); return
 
     def _handle_chip(self, sym):
-        """法人籌碼面板：三大法人買賣超 + 融資融券"""
-        # Cache by sym+交易日
-        from datetime import date as _date, timedelta as _td
+        """法人籌碼面板 — 委派 chip_api（全市場快照 + 熔斷 + 非個股短路）。"""
+        import chip_api as ca
         clean = sym.replace('.TW', '').replace('.TWO', '').strip().upper()
+        from datetime import date as _date
         today = _date.today().strftime('%Y%m%d')
-        # 找最近一個「有 T86 資料」的交易日(往回最多 8 天:跳過週末/假日/盤前 17:30 前未更新)。
-        # 原本只抓當日 → 週末或盤前一律「無籌碼」,即使上市權值股(如 2330)也缺;改為退回最近交易日。
-        tdate, _t86 = None, None
-        for _back in range(0, 8):
-            _d = (_date.today() - _td(days=_back)).strftime('%Y%m%d')
-            try:
-                _u = f'https://www.twse.com.tw/rwd/zh/fund/T86?date={_d}&selectType=ALLBUT0999&response=json'
-                with urllib.request.urlopen(urllib.request.Request(_u, headers=YF_HEADERS), timeout=10) as _r:
-                    _j = json.loads(_r.read())
-                if _j.get('stat') in ('OK', 'ok') and _j.get('data'):
-                    tdate, _t86 = _d, _j; break
-            except Exception:
-                continue
-        if tdate is None:
-            tdate = today
-        key = f'chip:{sym}:{tdate}'
+        # 個股短快取（全市場表另有 30 分快照）
+        key = f'chip:{clean}:{today}'
         c = _cache.get(key)
         if c is not None:
             self._ok(c); return
-        # TWSE T86 三大法人買賣超(用上面找到的交易日;_t86 已抓回,不重抓)
-        out = {'symbol': sym, 'date': tdate, 'inst': None, 'margin': None}
-        try:
-            data = _t86 if _t86 is not None else {}
-            if data.get('stat') in ('OK', 'ok'):
-                # Find this symbol's row
-                rows = data.get('data') or []
-                fields = data.get('fields') or []
-                idx_code = next((i for i,f in enumerate(fields) if '證券代號' in f), 0)
-                for row in rows:
-                    if row[idx_code].strip() == clean:
-                        # Extract foreign, investment trust, dealer
-                        def col(keyword, fallback=None):
-                            for i, f in enumerate(fields):
-                                if keyword in f:
-                                    try: return float(row[i].replace(',', '').replace(' ', ''))
-                                    except: return fallback
-                            return fallback
-                        out['inst'] = {
-                            'foreign':       col('外陸資買賣超股數') or col('外資'),
-                            'trust':         col('投信買賣超股數') or col('投信'),
-                            'dealer':        col('自營商買賣超股數') or col('自營商'),
-                            'total':         col('三大法人買賣超股數'),
-                        }
-                        break
-        except Exception as e:
-            print(f'[chip] T86 fetch failed for {sym}: {e}')
-        # 上櫃股 TWSE T86 查不到 → 退 TPEx 三大法人(上櫃個股買賣明細;TPEx OpenAPI 為最新交易日)。
-        # 用關鍵字比對欄位,配對到才填、否則留空(不顯示錯誤數字)。
-        if out['inst'] is None:
-            try:
-                _tu = 'https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading'
-                with urllib.request.urlopen(urllib.request.Request(_tu, headers=YF_HEADERS), timeout=10) as _tr:
-                    _ta = json.loads(_tr.read())
-                if isinstance(_ta, list):
-                    # TPEx OpenAPI JSON 的 key 實測為「英文 PascalCase」(故舊版用中文關鍵字
-                    # '外資'/'三大法人' 比對全 null)。改成中英雙語、且鎖定「淨買賣超(net)」欄位:
-                    # data.gov 確認的中文欄名 + TPEx 英文欄名,並排除子項(不含/自營自行/避險/外資自營商)。
-                    NET = ('買賣超', 'netbuysell', 'net', 'diff', 'buysell')
-
-                    def _num(v):
-                        try:
-                            return float(str(v).replace(',', '').replace(' ', ''))
-                        except Exception:
-                            return None
-
-                    def _pick(row, must, avoid=()):
-                        """挑出『實體淨買賣超』欄位:key 含 must 任一且不含 avoid;
-                        優先取同時含 net 標記者(精準),否則退而取僅含 must 的數值欄。"""
-                        cand = None
-                        for k, v in row.items():
-                            kl = k.lower()
-                            if not any((m in k) or (m.lower() in kl) for m in must):
-                                continue
-                            if any((a in k) or (a.lower() in kl) for a in avoid):
-                                continue
-                            if any((n in k) or (n in kl) for n in NET):
-                                val = _num(v)
-                                if val is not None:
-                                    return val
-                            elif cand is None:
-                                cand = _num(v)
-                        return cand
-
-                    for row in _ta:
-                        if not isinstance(row, dict):
-                            continue
-                        rc = ''
-                        for k, v in row.items():
-                            if ('代號' in k) or ('code' in k.lower()):
-                                rc = str(v).strip(); break
-                        if rc == clean:
-                            out['inst'] = {
-                                'foreign': _pick(row,
-                                                 ('外資及陸資買賣超', 'foreigninvestor', 'foreign', '外資'),
-                                                 avoid=('不含', 'exclud', 'dealer', '自營', 'hedge', '避險', 'self', '自行')),
-                                'trust':   _pick(row,
-                                                 ('投信', 'investmenttrust', 'trust'),
-                                                 avoid=('foreign', '外資', 'dealer', '自營')),
-                                'dealer':  _pick(row,
-                                                 ('自營商買賣超', 'dealer', '自營'),
-                                                 avoid=('foreign', '外資', 'hedge', '避險', 'self', '自行', 'propriet', '不含', 'exclud')),
-                                'total':   _pick(row,
-                                                 ('三大法人', 'totalinstitution', 'institutionalinvestorstotal', 'total'),
-                                                 avoid=('foreign', '外資', 'dealer', '自營', 'trust', '投信')),
-                            }
-                            out['_chipSource'] = 'TPEx'  # 欄位英文 PascalCase:ForeignInvestorsIncludeMainlandAreaInvestors-Difference 等,已實機核對
-                            break
-            except Exception as e:
-                print(f'[chip] TPEx 3insti fetch failed for {sym}: {e}')
-        # TWSE 融資融券 MI_MARGN
-        try:
-            url2 = f'https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={tdate}&selectType=ALL&response=json'
-            req2 = urllib.request.Request(url2, headers=YF_HEADERS)
-            with urllib.request.urlopen(req2, timeout=10) as resp:
-                raw2 = resp.read()
-            data2 = json.loads(raw2)
-            if data2.get('stat') in ('OK', 'ok'):
-                # tables[1] is per-stock data (tables[0] is header summary)
-                tables = data2.get('tables') or []
-                stock_rows = []
-                for t in tables:
-                    if t.get('title', '').find('信用') >= 0 or len(t.get('data', [])) > 100:
-                        stock_rows = t.get('data', [])
-                        fields = t.get('fields', [])
-                        break
-                if stock_rows and fields:
-                    idx_code = next((i for i,f in enumerate(fields) if '股票' in f or '證券代號' in f), 0)
-                    for row in stock_rows:
-                        if row[idx_code].strip() == clean:
-                            def col2(keyword, fallback=None):
-                                for i, f in enumerate(fields):
-                                    if keyword in f:
-                                        try: return float(row[i].replace(',', '').replace(' ', ''))
-                                        except: return fallback
-                                return fallback
-                            out['margin'] = {
-                                'marginBalance':  col2('融資餘額'),
-                                'shortBalance':   col2('融券餘額'),
-                                'marginChange':   col2('融資-買進') or col2('融資增'),
-                                'shortChange':    col2('融券-賣出') or col2('融券增'),
-                            }
-                            break
-        except Exception as e:
-            print(f'[chip] MI_MARGN fetch failed for {sym}: {e}')
-        # 借券賣出餘額 TWT72U (v3.8)
-        try:
-            url3 = f'https://www.twse.com.tw/rwd/zh/marginTrading/TWT72U?date={tdate}&selectType=ALL&response=json'
-            req3 = urllib.request.Request(url3, headers=YF_HEADERS)
-            with urllib.request.urlopen(req3, timeout=10) as resp:
-                data3 = json.loads(resp.read())
-            if data3.get('stat') in ('OK', 'ok'):
-                fields = data3.get('fields') or []
-                rows = data3.get('data') or []
-                idx_code = next((i for i, f in enumerate(fields) if '股票' in f or '代號' in f), 1)
-                for row in rows:
-                    if str(row[idx_code]).strip() == clean:
-                        def col3(keyword, fb=None):
-                            for i, f in enumerate(fields):
-                                if keyword in f:
-                                    try: return float(str(row[i]).replace(',', '').replace(' ', ''))
-                                    except: return fb
-                            return fb
-                        out['shortLend'] = {
-                            'sellVolume':  col3('借券賣出') or col3('當日賣出'),
-                            'balance':     col3('借券賣出餘額') or col3('餘額'),
-                        }
-                        break
-        except Exception as e:
-            print(f'[chip] TWT72U fetch failed for {sym}: {e}')
-        # 當沖比 TWTB4U (v3.8): 當沖成交量 / 總成交量
-        try:
-            url4 = f'https://www.twse.com.tw/rwd/zh/afterTrading/TWTB4U?date={tdate}&response=json'
-            req4 = urllib.request.Request(url4, headers=YF_HEADERS)
-            with urllib.request.urlopen(req4, timeout=10) as resp:
-                data4 = json.loads(resp.read())
-            if data4.get('stat') in ('OK', 'ok'):
-                fields = data4.get('fields') or []
-                rows = data4.get('data') or []
-                idx_code = next((i for i, f in enumerate(fields) if '代號' in f), 0)
-                for row in rows:
-                    if str(row[idx_code]).strip() == clean:
-                        def col4(keyword, fb=None):
-                            for i, f in enumerate(fields):
-                                if keyword in f:
-                                    try: return float(str(row[i]).replace(',', '').replace(' ', '').replace('%', ''))
-                                    except: return fb
-                            return fb
-                        dt_vol = col4('當日沖銷交易成交股數') or col4('當沖成交股數') or col4('成交股數')
-                        out['dayTrade'] = {
-                            'volume':  dt_vol,
-                            'ratioPct': col4('當日沖銷交易比率') or col4('當沖比'),
-                        }
-                        break
-        except Exception as e:
-            print(f'[chip] TWTB4U fetch failed for {sym}: {e}')
-        # 法人連續買賣超天數 (v3.8): 讀 chip_history 快照
-        try:
-            out['streak'] = _chip_streak(clean)
-        except Exception as e:
-            print(f'[chip] streak calc failed for {sym}: {e}')
-        # 寫入今日 chip_history 快照供日後連續天數計算
-        try:
-            _chip_history_record(clean, out)
-        except Exception:
-            pass
-        # 籌碼集中度（TDCC 週資料；失敗不擋籌碼面板）
-        try:
-            import tdcc_holders as th
-            snap = th.stock_snapshot(clean)
-            out['holders'] = {
-                'ok': snap.get('ok'),
-                'chartId': snap.get('chartId'),
-                'last': snap.get('last'),
-                'points': snap.get('points'),
-                'risk': snap.get('risk'),
-            }
-        except Exception as e:
-            print(f'[chip] holders snapshot failed for {sym}: {e}')
-            out['holders'] = None
+        out = ca.build_chip(sym)
         body = json.dumps(out, ensure_ascii=False).encode()
-        _cache.set(key, body)
+        # 非個股也 cache，避免指數切來切去重打
+        _cache.set(key, body, ttl=120)
         self._ok(body)
 
     def _handle_fundamental(self, sym):

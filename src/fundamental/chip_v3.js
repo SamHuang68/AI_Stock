@@ -12,6 +12,8 @@ const _chipCache = {};   // sym → result
 
 async function fetchChip(sym, mkt) {
   if (!sym || mkt !== 'TW') return null;
+  // 指數／總經／合成序列：後端也會短路，前端先擋避免無謂請求
+  if (sym[0] === '^' || (sym.startsWith('__') && sym.endsWith('__'))) return null;
   if (_chipCache[sym]) return _chipCache[sym];
   try {
     const r = await fetch(`${SERVER_C}/chip/${sym}`, {cache:'no-store'});
@@ -59,11 +61,15 @@ function renderChipSection(chip) {
     if (chip.shortLend.sellVolume != null)
       h += `<div class="stat-row"><span class="stat-k">當日借券賣出</span><span class="stat-v">${Math.round(chip.shortLend.sellVolume/1000).toLocaleString()} 張</span></div>`;
   }
-  // v3.8: 當沖比
-  if (chip.dayTrade && chip.dayTrade.ratioPct != null) {
+  // v3.8: 當沖比（無比率時改顯示當沖量，避免 TWTB4U 無 per-stock % 時整列消失）
+  if (chip.dayTrade && (chip.dayTrade.ratioPct != null || chip.dayTrade.volume != null)) {
     const dr = chip.dayTrade.ratioPct;
-    const dc = dr > 30 ? 'var(--red)' : dr > 15 ? 'var(--orange)' : 'var(--tlo)';
-    h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px"><span class="stat-k">當沖比${dr>30?' 🚩':''}</span><span class="stat-v" style="color:${dc}">${dr.toFixed(1)}%</span></div>`;
+    if (dr != null) {
+      const dc = dr > 30 ? 'var(--red)' : dr > 15 ? 'var(--orange)' : 'var(--tlo)';
+      h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px"><span class="stat-k">當沖比${dr>30?' 🚩':''}</span><span class="stat-v" style="color:${dc}">${dr.toFixed(1)}%</span></div>`;
+    } else if (chip.dayTrade.volume != null) {
+      h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px"><span class="stat-k">當沖量</span><span class="stat-v">${Math.round(chip.dayTrade.volume/1000).toLocaleString()} 張</span></div>`;
+    }
   }
   // v3.8: 法人連續買賣超天數
   if (chip.streak && (chip.streak.foreign || chip.streak.trust)) {
