@@ -1512,7 +1512,7 @@ function renderStats() {
     ['MKT CAP',mktCap],
     ['52W HIGH',m['fiftyTwoWeekHigh']?.toFixed(2)||'--'],
     ['52W LOW',m['fiftyTwoWeekLow']?.toFixed(2)||'--'],
-  ];
+  );
   const fmtN = (v, dp) => {
     if (v == null || v === '' || v === '-') return '--';
     const n = typeof v === 'number' ? v : parseFloat(v);
