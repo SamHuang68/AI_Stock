@@ -15,8 +15,8 @@ cd /d "%~dp0.."
 set "BR=%~1"
 set "PHASE=%~2"
 
-REM 預設：含大盤體質／融資週期／TDCC 集中度／README＋分享打包的最新 tip
-if "%BR%"=="" set "BR=cursor/housekeeping-h0-h2-4e66"
+REM 預設：4e66 主線 (housekeeping) + 區間漲跌 tip
+if "%BR%"=="" set "BR=cursor/range-period-change-b5cf"
 
 REM ---------- phase 2: rebuild / restart（checkout 之後的新檔）----------
 if /I "%PHASE%"=="--continue" goto :CONTINUE

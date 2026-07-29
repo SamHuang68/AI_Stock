@@ -67,13 +67,20 @@
           }
         }
         if (hb) hb.textContent = '● 即時 ' + new Date().toLocaleTimeString('zh-TW', { hour12: false }) + ' · MIS';
-        // 右側現價/漲跌即時(台股紅漲綠跌)
+        // 右側現價/漲跌即時(台股紅漲綠跌) — 日漲跌 + 區間漲跌同步
         var cip = document.getElementById('ci-price');
         if (cip) cip.textContent = q.price.toFixed(2);
         if (q.prevClose > 0) {
-          var pc = (q.price - q.prevClose) / q.prevClose * 100;
-          var el = document.getElementById('ci-chg');
-          if (el) { el.textContent = (pc >= 0 ? '+' : '') + pc.toFixed(2) + '%'; el.style.color = pc >= 0 ? 'var(--red)' : 'var(--green)'; }
+          if (typeof updateHeaderChg === 'function') {
+            updateHeaderChg(q.price, q.prevClose,
+              (S.data && S.data.rangeBase) || null,
+              (S.data && S.data.rangeChgLbl) || null,
+              S.mkt, S.sym);
+          } else {
+            var pc = (q.price - q.prevClose) / q.prevClose * 100;
+            var el = document.getElementById('ci-chg');
+            if (el) { el.textContent = (pc >= 0 ? '+' : '') + pc.toFixed(2) + '%'; el.style.color = pc >= 0 ? 'var(--red)' : 'var(--green)'; }
+          }
         }
         // 右側 STATS 面板即時(在 STATS 分頁才有這些 id;否則 guard 跳過)— 解「右側顯示 Yahoo 延遲值」
         function setRp(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; }
@@ -82,6 +89,11 @@
         if (q.prevClose > 0) {
           var dd = q.price - q.prevClose, ddp = dd / q.prevClose * 100;
           setRp('rp-CHANGE', (dd >= 0 ? '+' : '') + dd.toFixed(2) + ' (' + (ddp >= 0 ? '+' : '') + ddp.toFixed(2) + '%)');
+        }
+        if (S.data && S.data.rangeBase > 0 && S.range !== '1d') {
+          var rd = q.price - S.data.rangeBase, rp = rd / S.data.rangeBase * 100;
+          var rl = S.data.rangeChgLbl || '';
+          setRp('rp-RANGE', (rd >= 0 ? '+' : '') + rd.toFixed(2) + ' (' + (rp >= 0 ? '+' : '') + rp.toFixed(2) + '%)' + (rl ? ' · ' + rl : ''));
         }
         if (q.open > 0) setRp('rp-OPEN', q.open.toFixed(2));
         if (q.high > 0) setRp('rp-HIGH', q.high.toFixed(2));

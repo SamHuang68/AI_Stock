@@ -147,8 +147,9 @@ body.market-us .price-down, body.market-us .neg { color: var(--red) !important; 
        chart-info 改兩欄：左=價格/漲跌/名稱(窄欄)，右=OHLC視窗緊貼股價後 + 圖例。
        視窗縮小約一半(字級/間距減)、半透明，避免遮到 K 線。 */
 #ci-row { display: flex; align-items: flex-start; gap: 8px; }
-#ci-row .ci-left { min-width: 0; max-width: 150px; }
+#ci-row .ci-left { min-width: 0; max-width: 200px; }
 #ci-row .ci-left #ci-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ci-row .ci-left .ci-range-chg { font-size: 10px; line-height: 1.35; }
 #ci-east { display: flex; flex-direction: column; align-items: flex-end; }
 #ci-east #ci-ohlc {
   margin-top: 0; font-size: 8px; line-height: 1.5; letter-spacing: .2px;
@@ -714,23 +715,25 @@ function applyMarketColorClass(mkt) {
     };
   }
 })();
-// Patch ci-chg color update (loadSym sets .style.color directly) to use class
+// Patch ci-chg / ci-range-chg：symLoaded 後再對齊顏色與區間漲跌（避免 race）
 (function patchCiChg() {
-  // After symLoaded, fix the ci-chg color via class instead of inline
-  // 與 loadSym 同步邏輯：intraday 用 yesterdayClose（= chartPreviousClose），
-  // daily 用 prev candle close；避免 5min K 倒數第二根當作昨收的色彩誤判。
+  // After symLoaded, 重跑 updateHeaderChg：日漲跌(昨收) + 區間漲跌(rangeBase)
+  // 與 loadSym 同步：intraday 用 yesterdayClose（= chartPreviousClose），
+  // daily 用權威昨收；區間用 chartPreviousClose / trim 前一根。
   window.addEventListener('symLoaded', () => {
-    const el = document.getElementById('ci-chg');
-    if (!el || !S.data?.candles?.length) return;
+    if (!S.data?.candles?.length) return;
     const last = S.data.candles[S.data.candles.length - 1];
     const prev = S.data.candles[S.data.candles.length - 2];
     const ref = (S.data.yesterdayClose != null && S.data.yesterdayClose > 0)
       ? S.data.yesterdayClose
       : (prev ? prev.close : null);
-    if (ref == null) return;
-    // 直接依「目前載入個股的市場」上色(以昨收為基準),不靠全域 body.market-* class —
-    // 因 loadSym 切股不會更新 body class,且全域 class 會牽動混合市場的自選股清單。
-    // 台股:漲紅跌綠;美股:漲綠跌紅;平盤無色。
+    if (typeof updateHeaderChg === 'function') {
+      updateHeaderChg(last.close, ref, S.data.rangeBase, S.data.rangeChgLbl, S.mkt, S.sym);
+      return;
+    }
+    // fallback：舊版無 updateHeaderChg 時只修日漲跌色
+    const el = document.getElementById('ci-chg');
+    if (!el || ref == null) return;
     el.classList.remove('price-up', 'price-down');
     el.style.color = (last.close === ref) ? ''
       : (window.Colors ? Colors.dir(S.sym, last.close - ref)
@@ -765,11 +768,16 @@ function applyMarketColorClass(mkt) {
       const price = ix.price, prev = ix.prevClose, pct = (price - prev) / prev * 100;
       if (S.data) S.data.yesterdayClose = prev;
       const pEl = document.getElementById('ci-price'); if (pEl) pEl.textContent = price.toFixed(2);
-      const cEl = document.getElementById('ci-chg');
-      if (cEl) {
-        cEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
-        cEl.classList.remove('price-up', 'price-down');
-        cEl.style.color = window.Colors ? Colors.dir(sym, pct) : (pct > 0 ? 'var(--red)' : pct < 0 ? 'var(--green)' : '');   // 台股指數紅漲綠跌
+      // 日漲跌 + 區間漲跌一併更新（區間基準不變，只刷新現價差額）
+      if (typeof updateHeaderChg === 'function') {
+        updateHeaderChg(price, prev, S.data && S.data.rangeBase, S.data && S.data.rangeChgLbl, 'TW', sym);
+      } else {
+        const cEl = document.getElementById('ci-chg');
+        if (cEl) {
+          cEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+          cEl.classList.remove('price-up', 'price-down');
+          cEl.style.color = window.Colors ? Colors.dir(sym, pct) : (pct > 0 ? 'var(--red)' : pct < 0 ? 'var(--green)' : '');
+        }
       }
       console.log('[polish-v3] ^TW index header corrected via TWSE (early-session lag):', sym, price, pct.toFixed(2) + '%');
     } catch (e) { /* keep Yahoo on failure */ }
@@ -1160,7 +1168,7 @@ function renderChartLegend() {
   if (!east) {
     const row = document.createElement('div'); row.id = 'ci-row';
     const left = document.createElement('div'); left.className = 'ci-left';
-    ['ci-price', 'ci-chg', 'ci-name'].forEach(id => {
+    ['ci-price', 'ci-chg', 'ci-range-chg', 'ci-name', 'market-score-bar'].forEach(id => {
       const el = document.getElementById(id); if (el) left.appendChild(el);
     });
     east = document.createElement('div'); east.id = 'ci-east';

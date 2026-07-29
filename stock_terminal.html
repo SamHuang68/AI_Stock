@@ -99,6 +99,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 #ci-ohlc .ma-row{font-size:9px;color:var(--tlo);margin-top:3px}
 #ci-ohlc .ma-row span{margin-right:8px}
 .ci-chg{font-size:11px;margin-top:2px}
+.ci-range-chg{font-size:10px;margin-top:1px;opacity:.95}
+.ci-chg .ci-lbl,.ci-range-chg .ci-lbl{color:var(--tlo);font-weight:500;margin-left:4px;opacity:.85}
 #market-score-bar{pointer-events:auto}
 #market-score-bar .msb-mode{display:inline-block;padding:1px 5px;margin-left:2px;border:1px solid rgba(71,85,105,.7);border-radius:2px;color:#64748b;font-size:9px;letter-spacing:.3px}
 
@@ -237,6 +239,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
         <div id="chart-info" style="display:none">
           <div class="ci-price" id="ci-price">--</div>
           <div class="ci-chg" id="ci-chg"></div>
+          <div class="ci-range-chg" id="ci-range-chg" style="display:none"></div>
           <div style="font-size:9px;color:var(--tlo);margin-top:3px" id="ci-name"></div>
           <div id="market-score-bar" style="display:none"></div>
           <div id="ci-ohlc"></div>
@@ -484,18 +487,19 @@ function runWorker(candles) {
 
 // ── YAHOO FINANCE ───────────────────────────────────────────────
 // iOS Stocks-style range presets. trim=N means only show last N bars (for ranges Yahoo doesn't have natively, e.g. 3 weeks).
+// chgLbl = 頂部「區間漲跌」標籤（對齊 Yahoo/iOS：日漲跌外另顯示所選區間漲跌）
 const RANGE_DEFS = [
-  {key:'1d',  lbl:'1天',  range:'1d',  interval:'1m',  trim:null},   // 1分K=對齊 Yahoo「當日」/專業軟體即時盤中(配合 liverefresh 每45s更新)
-  {key:'3w',  lbl:'3周',  range:'1mo', interval:'1d',  trim:15},
-  {key:'1mo', lbl:'1月',  range:'1mo', interval:'1d',  trim:null},
-  {key:'3mo', lbl:'3月',  range:'3mo', interval:'1d',  trim:null},
-  {key:'6mo', lbl:'6月',  range:'6mo', interval:'1d',  trim:null},
-  {key:'ytd', lbl:'YTD',  range:'ytd', interval:'1d',  trim:null},
-  {key:'1y',  lbl:'1年',  range:'1y',  interval:'1d',  trim:null},
-  {key:'2y',  lbl:'2年',  range:'2y',  interval:'1d',  trim:null},
-  {key:'5y',  lbl:'5年',  range:'5y',  interval:'1d',  trim:null},
-  {key:'10y', lbl:'10年', range:'10y', interval:'1d',  trim:null},
-  {key:'max', lbl:'全部', range:'max', interval:'1wk', trim:null},
+  {key:'1d',  lbl:'1天',  chgLbl:'日',     range:'1d',  interval:'1m',  trim:null},   // 1分K=對齊 Yahoo「當日」/專業軟體即時盤中(配合 liverefresh 每45s更新)
+  {key:'3w',  lbl:'3周',  chgLbl:'3周',    range:'1mo', interval:'1d',  trim:15},
+  {key:'1mo', lbl:'1月',  chgLbl:'1月',    range:'1mo', interval:'1d',  trim:null},
+  {key:'3mo', lbl:'3月',  chgLbl:'3月',    range:'3mo', interval:'1d',  trim:null},
+  {key:'6mo', lbl:'6月',  chgLbl:'6月',    range:'6mo', interval:'1d',  trim:null},
+  {key:'ytd', lbl:'YTD',  chgLbl:'年初至今', range:'ytd', interval:'1d',  trim:null},
+  {key:'1y',  lbl:'1年',  chgLbl:'1年',    range:'1y',  interval:'1d',  trim:null},
+  {key:'2y',  lbl:'2年',  chgLbl:'2年',    range:'2y',  interval:'1d',  trim:null},
+  {key:'5y',  lbl:'5年',  chgLbl:'5年',    range:'5y',  interval:'1d',  trim:null},
+  {key:'10y', lbl:'10年', chgLbl:'10年',   range:'10y', interval:'1d',  trim:null},
+  {key:'max', lbl:'全部', chgLbl:'全部',   range:'max', interval:'1wk', trim:null},
 ];
 
 function renderRangeBar() {
@@ -516,6 +520,72 @@ function setRange(key) {
 
 function currentRangeDef() {
   return RANGE_DEFS.find(r => r.key === S.range) || RANGE_DEFS.find(r => r.key === '5y');
+}
+
+/** 漲跌字串：+460.00 (+25.27%) · 6月 （絕對值 + 百分比 + 區間標籤） */
+function fmtChgAbsPct(delta, pct, lbl) {
+  if (delta == null || pct == null || !isFinite(delta) || !isFinite(pct)) return '';
+  const ds = (delta >= 0 ? '+' : '') + delta.toFixed(2);
+  const ps = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+  const tag = lbl ? ` <span class="ci-lbl">${lbl}</span>` : '';
+  return `${ds} (${ps})${tag}`;
+}
+
+/** 依基準價算漲跌絕對值與% */
+function calcChgFromBase(price, base) {
+  if (!(price > 0) || !(base > 0)) return null;
+  const delta = price - base;
+  return { delta, pct: delta / base * 100 };
+}
+
+/**
+ * 更新頂部現價旁漲跌列：
+ *   #ci-chg       = 前一交易日漲跌（昨收基準）
+ *   #ci-range-chg = 所選時間區間漲跌（rangeBase 基準；1天區間與日漲跌重複則隱藏）
+ * 顏色依標的市場慣例（台股紅漲綠跌）。
+ */
+function updateHeaderChg(price, dailyBase, rangeBase, rangeLbl, mkt, sym) {
+  // 台股慣例：個股/指數/^TW* / 融資維持率 / 台指期 → 紅漲綠跌
+  const tw = (mkt === 'TW' || /^\^TW/i.test(sym || '')
+    || sym === '__MARGIN_RATIO__' || sym === '__TXF__');
+  const colorOf = (v) => {
+    if (v == null || !isFinite(v) || v === 0) return 'var(--thi)';
+    if (window.Colors) return Colors.dir(sym, v);
+    return v > 0 ? (tw ? 'var(--red)' : 'var(--green)')
+                 : (tw ? 'var(--green)' : 'var(--red)');
+  };
+  const ci = document.getElementById('ci-chg');
+  if (ci) {
+    const d = calcChgFromBase(price, dailyBase);
+    if (d) {
+      ci.innerHTML = fmtChgAbsPct(d.delta, d.pct, '日');
+      ci.style.color = colorOf(d.delta);
+      ci.classList.remove('price-up', 'price-down');
+    } else {
+      ci.textContent = '';
+      ci.style.color = '';
+    }
+  }
+  const ri = document.getElementById('ci-range-chg');
+  if (ri) {
+    // 1天區間：區間漲跌 ≡ 日漲跌，不重複顯示
+    const showRange = (S.range !== '1d') && rangeBase > 0 && rangeLbl;
+    if (showRange) {
+      const r = calcChgFromBase(price, rangeBase);
+      if (r) {
+        ri.innerHTML = fmtChgAbsPct(r.delta, r.pct, rangeLbl);
+        ri.style.color = colorOf(r.delta);
+        ri.style.display = '';
+        ri.classList.remove('price-up', 'price-down');
+      } else {
+        ri.style.display = 'none';
+        ri.textContent = '';
+      }
+    } else {
+      ri.style.display = 'none';
+      ri.textContent = '';
+    }
+  }
 }
 
 async function fetchYF(sym, rangeDef) {
@@ -667,8 +737,18 @@ async function loadSym(sym, mkt, silent) {
   if (_noteMsg) setStat(_noteMsg);
 
   // trim for ranges Yahoo doesn't have natively (e.g. 3 weeks = last 15 trading days)
+  // 區間漲跌基準：trim 前先取「視窗前一根」收盤；非 trim 用 meta.chartPreviousClose
+  // （= 請求區間起點前一日收盤，對齊 Yahoo/iOS Stocks 區間漲跌口徑）
+  let _rangeBase = null;
   if (rdef.trim && parsed.candles.length > rdef.trim) {
+    const _preIdx = parsed.candles.length - rdef.trim - 1;
+    if (_preIdx >= 0 && parsed.candles[_preIdx].close > 0) {
+      _rangeBase = parsed.candles[_preIdx].close;
+    }
     parsed.candles = parsed.candles.slice(-rdef.trim);
+  } else if (parsed.meta) {
+    const _cp = parsed.meta.chartPreviousClose;
+    if (_cp != null && isFinite(_cp) && _cp > 0) _rangeBase = _cp;
   }
 
   // ── Yahoo data freshness fix (v3.6, v3.8.1 修量0) ────────────
@@ -761,6 +841,20 @@ async function loadSym(sym, mkt, silent) {
     }
   }
 
+  // ── 區間漲跌基準落定（對齊所選時間區間）──────────────────────
+  // 優先用上方抓的 chartPreviousClose / trim 前一根；缺則退回「顯示區間第一根收盤」。
+  // 1天(intraday)不另存（與日漲跌重複，updateHeaderChg 會隱藏）。
+  if (!(_rangeBase > 0) && parsed.candles.length >= 1) {
+    const _fc = parsed.candles[0].close;
+    if (_fc > 0) _rangeBase = _fc;
+  }
+  const _rangeLbl = (rdef && rdef.chgLbl) ? rdef.chgLbl
+    : ((RANGE_DEFS.find(r => r.key === S.range) || {}).chgLbl || S.range);
+  if (_rangeBase > 0) {
+    parsed.rangeBase = _rangeBase;
+    parsed.rangeChgLbl = _rangeLbl;
+  }
+
   S.data = parsed;
   renderChart(parsed.candles);
   document.getElementById('chart-loading').style.display='none';
@@ -776,13 +870,8 @@ async function loadSym(sym, mkt, silent) {
   const chgPct = (_prevRef != null && _prevRef > 0)
     ? ((last.close - _prevRef) / _prevRef * 100) : 0;
   document.getElementById('ci-price').textContent = last.close.toFixed(2) + (sym === '__MARGIN_RATIO__' ? '%' : '');
-  const ci = document.getElementById('ci-chg');
-  ci.textContent = (chgPct>=0?'+':'')+chgPct.toFixed(2)+'%';
-  // 台股紅漲綠跌(以昨收為基準),美股/其他綠漲紅跌;平盤無色
-  const _ciTw = (mkt === 'TW' || /^\^TW/.test(sym || '') || sym === '__MARGIN_RATIO__' || sym === '__TXF__');
-  ci.style.color = chgPct > 0 ? (_ciTw ? 'var(--red)' : 'var(--green)')
-                 : chgPct < 0 ? (_ciTw ? 'var(--green)' : 'var(--red)')
-                 : 'var(--thi)';
+  // 頂部：日漲跌(昨收) + 區間漲跌(所選時間) 同時顯示
+  updateHeaderChg(last.close, _prevRef, parsed.rangeBase, parsed.rangeChgLbl, mkt, sym);
   document.getElementById('ci-name').textContent = (sym === '__MARGIN_RATIO__')
     ? '大盤融資維持率'
     : (sym === '__TXF__')
@@ -1398,13 +1487,26 @@ function renderStats() {
   const m = S.data.meta;
   const last = S.data.candles[S.data.candles.length-1];
   const prev = S.data.candles[S.data.candles.length-2];
-  const chg = prev ? (last.close-prev.close) : 0;
-  const chgPct = prev ? (chg/prev.close*100) : 0;
+  // 日漲跌：權威昨收優先（與頂部 ci-chg 對齊），缺才退前一根 K
+  const _dayBase = (S.data.yesterdayClose != null && S.data.yesterdayClose > 0)
+    ? S.data.yesterdayClose : (prev ? prev.close : null);
+  const chg = (_dayBase > 0) ? (last.close - _dayBase) : 0;
+  const chgPct = (_dayBase > 0) ? (chg / _dayBase * 100) : 0;
+  // 區間漲跌：對齊所選時間區間（與頂部 ci-range-chg 同源）
+  const _rBase = S.data.rangeBase;
+  const _rLbl = S.data.rangeChgLbl || ((typeof currentRangeDef === 'function' ? currentRangeDef() : null) || {}).chgLbl || '';
+  const _rChg = (_rBase > 0) ? (last.close - _rBase) : null;
+  const _rPct = (_rBase > 0) ? (_rChg / _rBase * 100) : null;
   const mktCap = m.marketCap ? (m.marketCap>1e12?(m.marketCap/1e12).toFixed(2)+'T':(m.marketCap>1e9?(m.marketCap/1e9).toFixed(2)+'B':(m.marketCap/1e6).toFixed(0)+'M')) : '--';
   const cur = S.mkt==='TW'?'TWD':'USD';
   const rows = [
     ['PRICE',`${last.close.toFixed(2)} ${cur}`],
     ['CHANGE',`${chg>=0?'+':''}${chg.toFixed(2)} (${chgPct>=0?'+':''}${chgPct.toFixed(2)}%)`],
+  ];
+  if (S.range !== '1d' && _rChg != null && _rPct != null) {
+    rows.push(['RANGE',`${_rChg>=0?'+':''}${_rChg.toFixed(2)} (${_rPct>=0?'+':''}${_rPct.toFixed(2)}%) · ${_rLbl}`]);
+  }
+  rows.push(
     ['OPEN',last.open.toFixed(2)],['HIGH',last.high.toFixed(2)],['LOW',last.low.toFixed(2)],
     ['VOLUME',last.volume>1e6?(last.volume/1e6).toFixed(1)+'M':last.volume?.toLocaleString()],
     ['MKT CAP',mktCap],
