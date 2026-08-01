@@ -62,6 +62,13 @@ function main() {
   const dayOnly = { ok: true, session: 'day', price: 43000, night: null };
   assert(pickNight(dayOnly) == null, 'no night when day-only');
 
+  // 行動預估：台指期夜盤優先於美股連動
+  function actionPct(txfPct, usEst) {
+    return txfPct != null ? txfPct : usEst;
+  }
+  assert(actionPct(-2.46, 0.8) === -2.46, 'TXF night drives action');
+  assert(actionPct(null, 0.8) === 0.8, 'fallback to US estimate');
+
   console.log('txf_night_selftest: PASS');
 }
 
