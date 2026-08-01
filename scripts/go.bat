@@ -13,16 +13,30 @@ REM  feature tips (e.g. housekeeping / range-period-change).
 REM
 REM  NOTE: avoid Chinese / UTF-8 inside "if (...)" blocks — cmd.exe
 REM  can mis-parse multi-byte bytes as ")" and corrupt the script.
+REM
+REM  Windows caveat: "git checkout" may DELETE this running .bat when
+REM  the target branch does not yet contain it. Pull mode therefore
+REM  copies itself to %%TEMP%% and continues from that stable path,
+REM  with an explicit REPO_ROOT (arg4) so TEMP cwd is not used.
 REM ============================================================
 chcp 65001 >nul
 setlocal EnableExtensions EnableDelayedExpansion
-cd /d "%~dp0.."
 
 set "MODE=%~1"
 set "TARGET_BRANCH=%~2"
+set "FROM_TEMP=%~3"
+set "REPO_ROOT=%~4"
 if "%MODE%"=="" set "MODE=run"
 set "OPEN_BROWSER=1"
 if /I "%MODE%"=="rebuild" set "OPEN_BROWSER=0"
+
+if defined REPO_ROOT goto HAVE_ROOT
+cd /d "%~dp0.."
+set "REPO_ROOT=%CD%"
+goto AFTER_ROOT
+:HAVE_ROOT
+cd /d "%REPO_ROOT%"
+:AFTER_ROOT
 
 echo.
 echo ============================================
@@ -30,12 +44,24 @@ echo  Stock Terminal v4.1
 echo  http://localhost:18432/stock_terminal_v2.html
 echo ============================================
 echo.
+echo  repo: %REPO_ROOT%
 for /f "delims=" %%b in ('git branch --show-current 2^>nul') do set "CUR_BRANCH=%%b"
 if defined CUR_BRANCH echo  branch: !CUR_BRANCH!
 echo.
 
 if /I not "%MODE%"=="pull" goto SKIP_PULL
 
+REM ---- pull mode: bootstrap from TEMP before any checkout ----
+if /I "%FROM_TEMP%"=="__from_temp__" goto PULL_BODY
+set "GO_TMP=%TEMP%\ai_stock_go.bat"
+echo [1/4] prepare pull (copy go.bat to TEMP for safe checkout)
+copy /Y "%~f0" "%GO_TMP%" >nul
+if errorlevel 1 goto FAIL_TEMP_COPY
+call "%GO_TMP%" pull "%TARGET_BRANCH%" __from_temp__ "%REPO_ROOT%"
+set "_RC=%ERRORLEVEL%"
+endlocal & exit /b %_RC%
+
+:PULL_BODY
 echo [1/4] git fetch / pull
 
 REM stash any dirty tracked files so checkout/pull is never blocked
@@ -59,17 +85,26 @@ git checkout "%TARGET_BRANCH%"
 if errorlevel 1 goto FAIL_CHECKOUT
 :AFTER_CHECKOUT
 
+REM Prefer explicit remote tip (works even when local branch was stale)
+if "%TARGET_BRANCH%"=="" goto PULL_CURRENT
+echo        fast-forward to origin/%TARGET_BRANCH%
+git merge --ff-only "origin/%TARGET_BRANCH%"
+if errorlevel 1 goto FAIL_PULL
+goto AFTER_PULL
+
+:PULL_CURRENT
 git pull --ff-only
 if errorlevel 1 goto FAIL_PULL
 
+:AFTER_PULL
 for /f "delims=" %%b in ('git branch --show-current 2^>nul') do set "CUR_BRANCH=%%b"
 if defined CUR_BRANCH echo        now on: !CUR_BRANCH!
 echo.
 
-REM After branch switch, re-enter THIS script from disk so later steps
-REM always use the go.bat belonging to the checked-out branch.
-echo        re-launch go.bat from checked-out branch...
-call "%~dp0go.bat" run
+REM Re-enter the repo's go.bat (now restored by merge/pull) for build/run
+if not exist "%REPO_ROOT%\scripts\go.bat" goto FAIL_MISSING_GO
+echo        re-launch scripts\go.bat run from updated tree...
+call "%REPO_ROOT%\scripts\go.bat" run
 exit /b %ERRORLEVEL%
 
 :SKIP_PULL
@@ -103,6 +138,19 @@ pause
 endlocal
 exit /b 0
 
+:FAIL_TEMP_COPY
+echo [FAIL] cannot copy go.bat to TEMP. Check %%TEMP%% permissions.
+pause
+exit /b 1
+
+:FAIL_MISSING_GO
+echo [FAIL] scripts\go.bat missing after pull/checkout.
+echo        Manual recovery:
+echo          git merge --ff-only origin/main
+echo          scripts\go.bat
+pause
+exit /b 1
+
 :FAIL_STASH
 echo [FAIL] git stash failed. Try: git stash push -m "manual"
 pause
@@ -121,8 +169,11 @@ pause
 exit /b 1
 
 :FAIL_PULL
-echo [FAIL] git pull failed. Resolve conflicts or check network.
-echo        Example: scripts\go.bat pull cursor/range-period-change-b5cf
+echo [FAIL] git pull / fast-forward failed.
+echo        Manual recovery if stuck behind origin/main:
+echo          git checkout main
+echo          git merge --ff-only origin/main
+echo          scripts\go.bat
 pause
 exit /b 1
 
