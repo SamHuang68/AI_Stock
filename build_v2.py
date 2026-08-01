@@ -15,6 +15,7 @@ DST  = os.path.join(ROOT, 'stock_terminal_v2.html')
 V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,須最先載入)
               'src/core/market_v3.js',   # 台股/美股 universe lookup(權威判市場+名稱,可更新)
               'src/core/fields_v3.js',   # 欄位型別定義+全域滾輪防護(單一真理來源,須最先載入)
+              'src/core/chart_registry_v3.js',  # H0: macro/特殊圖 primaryKey（須在 polish 前）
               'src/ui/share_v3.js',      # 分析結果寄送 Telegram/Email(單一來源,各分析面板共用)
               'src/ui/datasources_v3.js',# 資料源管理表 + 一鍵更新
               'src/core/etf_flow_tip_v3.js',  # 自選股 ETF 增減碼徽章浮動視窗(列出是哪幾檔 ETF)
@@ -70,7 +71,9 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/ai/focus_v3.js',                    # v3.9: 焦點掃描精靈(多訊號組合自動找做多/做空焦點,/focus)
               'src/ai/copilot_v3.js',                  # v4.0: AI 副駕面板(本機 LM Studio,/ai/local)
               'src/screener/wizard_v3.js',                   # v3.9: 加股設定精靈(依賴 StratLib/Backtest/drawtools/setPosition/saveWatches，排最後)
-              'src/ui/toolbar_v3.js']                  # v3.9: 工具列模組化(一階分類+二階下拉,設定驅動;須排最後,整理所有功能鈕)
+              'src/ui/toolbar_v3.js',                  # v3.9: 工具列模組化(一階分類+二階下拉,設定驅動;須排最後,整理所有功能鈕)
+              'src/chart/market_score_bar_v3.js',      # v4.1: 主圖大盤體質／市場風險資訊列（須在 market_chart 前）
+              'src/chart/market_chart_v3.js']          # v4.1: 總經/大盤折線模組（融資維持率等，必須最後掛鉤蓋過 K 線 patch）
 V2_STYLES  = ['src/ui/mobile_v2.css']
 
 # v3.9 P5: 依相依關係自動排序模組(取代人工「須在X後」)。失敗則退回原順序,不影響打包。

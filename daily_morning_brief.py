@@ -57,14 +57,22 @@ import urllib.parse  # noqa: E402
 
 
 def _txf():
+    """回 (price, changePct, ampRate) — 優先 night 區塊（台指期夜盤波動）。"""
     try:
         with urllib.request.urlopen(f'http://localhost:{PORT}/txf', timeout=12) as r:
             d = json.loads(r.read())
-        if d.get('ok'):
-            return d.get('price'), d.get('changePct')
+        if not d.get('ok'):
+            return None, None, None
+        n = d.get('night') if (d.get('night') or {}).get('price') is not None else d
+        price = n.get('price')
+        chg = n.get('changePct')
+        amp = n.get('ampRate')
+        if amp is None and n.get('high') is not None and n.get('low') is not None and n.get('prevClose'):
+            amp = (n['high'] - n['low']) / n['prevClose'] * 100.0
+        return price, chg, amp
     except Exception:
         pass
-    return None, None
+    return None, None, None
 
 
 def _c(p):
@@ -86,8 +94,9 @@ def main():
     est = (comp / wsum) if wsum else None
 
     _, tsm_p = _pct_daily('TSM')        # 台積電 ADR → 2330 隔日先行
-    txf_price, txf_p = _txf()           # 台指期夜盤
+    txf_price, txf_p, txf_amp = _txf()   # 台指期夜盤波動
     _, twii_p = _pct_daily('^TWII')
+    txf_amp_txt = (f'{txf_amp:.2f}%' if txf_amp is not None else '—')
 
     tone = ('資料不足' if est is None else
             '⚠ 強烈開低風險' if est <= -1.5 else '偏弱：開低機率高' if est <= -0.5 else
@@ -103,10 +112,15 @@ def main():
         <div style="font-size:12px;color:#cbd5e1">{tone}</div>
       </div>
 
+      <div style="border:1px solid #334155;border-radius:8px;padding:10px;background:rgba(56,189,248,.06);margin:10px 0">
+        <div style="font-weight:700;color:#38bdf8;font-size:13px">📉 台指期夜盤波動</div>
+        <div style="font-size:13px;margin-top:4px">{('{:,.0f}'.format(txf_price)) if txf_price else '—'} {_c(txf_p)}　振幅 <b style="color:#fbbf24">{txf_amp_txt}</b></div>
+      </div>
+
       <div style="border:1px solid #334155;border-radius:8px;padding:10px;background:rgba(251,191,36,.06);margin:10px 0">
         <div style="font-weight:700;color:#fbbf24;font-size:13px">🔱 TSMC 核心連動（2330）</div>
         <div style="font-size:13px;margin-top:4px">TSM ADR 夜盤 {_c(tsm_p)} → <b>2330 隔日預估 ≈ {_c(tsm_p)}</b>（主要看 TSM ADR）</div>
-        <div style="font-size:11px;color:#94a3b8;margin-top:3px">台指期夜盤 {('{:,.0f}'.format(txf_price)) if txf_price else '—'} {_c(txf_p)}　加權(前日收) {_c(twii_p)}</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:3px">加權(前日收) {_c(twii_p)}</div>
         <div style="font-size:10px;color:#64748b;line-height:1.6;margin-top:5px">長線：TSMC＝AI 核心、先進製程獨佔；TSM/費半漲→2330 隔日多反映。4 大 CSP 投資集中台灣供應鏈(晶圓→3D封裝→CPO→AI伺服器)，台股量能 8000億→1.2兆＋ 結構多頭。</div>
       </div>
 
@@ -117,7 +131,11 @@ def main():
       <div style="margin-top:12px;color:#64748b;font-size:10px">⚠ 僅供參考、非投資建議。Stock Terminal v3.8 自動晨報。</div>
     </div>"""
 
-    text = f"TSMC 核心晨報 {date}\n台股隔日預估 {est:+.2f}% ({tone})\nTSM ADR {tsm_p:+.2f}% → 2330 隔日預估≈{tsm_p:+.2f}%\n台指期夜盤 {txf_p}" if (est is not None and tsm_p is not None) else f"TSMC 核心晨報 {date}（資料不足）"
+    text = (
+        f"TSMC 核心晨報 {date}\n台股隔日預估 {est:+.2f}% ({tone})\n"
+        f"TSM ADR {tsm_p:+.2f}% → 2330 隔日預估≈{tsm_p:+.2f}%\n"
+        f"台指期夜盤 {txf_p} 振幅 {txf_amp_txt}"
+    ) if (est is not None and tsm_p is not None) else f"TSMC 核心晨報 {date}（資料不足）"
 
     cfg = alert_daemon.load_config()
     ok, msg = alert_daemon.push_email(cfg, f'🌅 TSMC 核心晨報 {date}', text, html=html)

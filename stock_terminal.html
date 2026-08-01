@@ -99,6 +99,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 #ci-ohlc .ma-row{font-size:9px;color:var(--tlo);margin-top:3px}
 #ci-ohlc .ma-row span{margin-right:8px}
 .ci-chg{font-size:11px;margin-top:2px}
+.ci-range-chg{font-size:10px;margin-top:1px;opacity:.95}
+.ci-chg .ci-lbl,.ci-range-chg .ci-lbl{color:var(--tlo);font-weight:500;margin-left:4px;opacity:.85}
+#market-score-bar{pointer-events:auto}
+#market-score-bar .msb-mode{display:inline-block;padding:1px 5px;margin-left:2px;border:1px solid rgba(71,85,105,.7);border-radius:2px;color:#64748b;font-size:9px;letter-spacing:.3px}
 
 /* ── INDICATOR BAR (16 cells in 8-col × 2-row grid, no scroll) ── */
 .ig{display:grid;grid-template-rows:repeat(2,34px);grid-auto-flow:column;grid-auto-columns:1fr;width:100%}
@@ -235,7 +239,9 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
         <div id="chart-info" style="display:none">
           <div class="ci-price" id="ci-price">--</div>
           <div class="ci-chg" id="ci-chg"></div>
+          <div class="ci-range-chg" id="ci-range-chg" style="display:none"></div>
           <div style="font-size:9px;color:var(--tlo);margin-top:3px" id="ci-name"></div>
+          <div id="market-score-bar" style="display:none"></div>
           <div id="ci-ohlc"></div>
         </div>
       </div>
@@ -290,7 +296,8 @@ const LS_KEY_HIST = 'st_hist_v2';
 const LS_KEY_KEY  = 'st_apikey';
 const LS_KEY_WL   = 'st_wl';
 const BATCH_CONCURRENCY = 3;
-const SERVER = 'http://localhost:18432';
+// 同源相對路徑：避免頁面開在 127.0.0.1、API 卻打 localhost（或反之）導致載入卡住
+const SERVER = (typeof location !== 'undefined' && location.origin) ? location.origin : 'http://localhost:18432';
 
 // ── STATE ───────────────────────────────────────────────────────
 let S = {
@@ -348,55 +355,95 @@ self.onmessage = function(e) {
     }
     return r;
   }
+  // EMA：前 p 期用 SMA 種子（標準 MACD 作法），之後 EMA
   function ema(arr,p){
-    const r=[];const k=2/(p+1);
-    for(let i=0;i<arr.length;i++){
-      if(i===0){r.push(arr[0]);continue;}
-      r.push(arr[i]*k+r[i-1]*(1-k));
-    }
+    const r=new Array(arr.length).fill(null);
+    if(arr.length<p) return r;
+    let s=0; for(let i=0;i<p;i++) s+=arr[i];
+    s/=p; r[p-1]=s;
+    const k=2/(p+1);
+    for(let i=p;i<arr.length;i++){ s=arr[i]*k+s*(1-k); r[i]=s; }
     return r;
+  }
+  // Wilder's RSI（與 server._calc_ind 對齊，禁止簡易末14平均）
+  function rsiWilder(arr,period){
+    if(arr.length<=period) return null;
+    let avgG=0, avgL=0;
+    for(let i=1;i<=period;i++){
+      const d=arr[i]-arr[i-1];
+      if(d>0) avgG+=d; else avgL-=d;
+    }
+    avgG/=period; avgL/=period;
+    for(let i=period+1;i<arr.length;i++){
+      const d=arr[i]-arr[i-1];
+      const g=d>0?d:0, lo=d<0?-d:0;
+      avgG=(avgG*(period-1)+g)/period;
+      avgL=(avgL*(period-1)+lo)/period;
+    }
+    if(avgL===0) return 100;
+    const rs=avgG/avgL;
+    return 100-(100/(1+rs));
+  }
+  // Stochastic KD：RSV(9) → K/D 以 1/3 平滑（完整序列，禁止 K=D 假值）
+  function stochKD(highs,lows,closes,nPeriod,kSmooth,dSmooth){
+    let K=50, D=50;
+    for(let i=0;i<closes.length;i++){
+      const from=Math.max(0,i-nPeriod+1);
+      let hi=-Infinity, lo=Infinity;
+      for(let j=from;j<=i;j++){ if(highs[j]>hi)hi=highs[j]; if(lows[j]<lo)lo=lows[j]; }
+      const rsv=(hi===lo)?50:((closes[i]-lo)/(hi-lo))*100;
+      K=((kSmooth-1)/kSmooth)*K+(1/kSmooth)*rsv;
+      D=((dSmooth-1)/dSmooth)*D+(1/dSmooth)*K;
+    }
+    return {K, D};
   }
   const s5=sma(c,5),s20=sma(c,20),s60=sma(c,60);
   const cur=c[n-1];
-  // RSI14
-  let gains=0,losses=0;
-  for(let i=n-14;i<n;i++){
-    const d=c[i]-c[i-1];
-    if(d>0)gains+=d;else losses-=d;
-  }
-  const avgG=gains/14,avgL=losses/14;
-  const rsi14=avgL===0?100:(100-(100/(1+avgG/avgL)));
-  // MACD
+  const rsi14=rsiWilder(c,14);
+  // MACD (12,26,9)
   const ema12=ema(c,12),ema26=ema(c,26);
-  const macdLine=ema12[n-1]-ema26[n-1];
-  const macdArr=ema12.map((v,i)=>v-ema26[i]);
-  const signal9=ema(macdArr,9)[n-1];
-  const macdHist=macdLine-signal9;
-  // KD (stoch 9)
-  const kp=9;
-  const lo9=Math.min(...l.slice(n-kp)),hi9=Math.max(...h.slice(n-kp));
-  const rsv=hi9===lo9?50:((cur-lo9)/(hi9-lo9))*100;
-  const prevK=(n>1)?rsv:50,prevD=(n>1)?rsv:50;
-  const K=prevK*2/3+rsv/3,D=prevD*2/3+K/3;
+  const macdArr=ema12.map((v,i)=>(v!=null&&ema26[i]!=null)?(v-ema26[i]):null);
+  const firstMacd=macdArr.findIndex(v=>v!=null);
+  let macdLine=null, signal9=null, macdHist=null;
+  if(firstMacd>=0){
+    const sub=macdArr.slice(firstMacd);
+    const sigSub=ema(sub,9);
+    macdLine=sub[sub.length-1];
+    signal9=sigSub[sigSub.length-1];
+    if(macdLine!=null&&signal9!=null) macdHist=macdLine-signal9;
+  }
+  const kd=stochKD(h,l,c,9,3,3);
+  const K=kd.K, D=kd.D;
   // Bollinger 20
   const m20=s20[n-1];
-  let variance=0;
-  for(let i=n-20;i<n;i++)variance+=(c[i]-m20)**2;
-  const std=Math.sqrt(variance/20);
-  const bbU=m20+2*std,bbL=m20-2*std;
-  // ATR14
-  let atrSum=0;
-  for(let i=n-14;i<n;i++){
-    const tr=Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1]));
-    atrSum+=tr;
+  let bbU=null, bbL=null;
+  if(m20!=null&&n>=20){
+    let variance=0;
+    for(let i=n-20;i<n;i++) variance+=(c[i]-m20)**2;
+    const std=Math.sqrt(variance/20);
+    bbU=m20+2*std; bbL=m20-2*std;
   }
-  const atr14=atrSum/14;
+  // ATR14（Wilder）
+  let atr14=null;
+  if(n>14){
+    let atr=0;
+    for(let i=1;i<=14;i++){
+      const tr=Math.max(h[i]-l[i], Math.abs(h[i]-c[i-1]), Math.abs(l[i]-c[i-1]));
+      atr+=tr;
+    }
+    atr/=14;
+    for(let i=15;i<n;i++){
+      const tr=Math.max(h[i]-l[i], Math.abs(h[i]-c[i-1]), Math.abs(l[i]-c[i-1]));
+      atr=(atr*13+tr)/14;
+    }
+    atr14=atr;
+  }
   // AnnVol
   const rets=[];
-  for(let i=Math.max(1,n-60);i<n;i++)rets.push(Math.log(c[i]/c[i-1]));
-  const meanR=rets.reduce((a,b)=>a+b,0)/rets.length;
-  const varR=rets.reduce((a,b)=>a+(b-meanR)**2,0)/rets.length;
-  const annVol=(Math.sqrt(varR)*Math.sqrt(252)*100).toFixed(1);
+  for(let i=Math.max(1,n-60);i<n;i++) rets.push(Math.log(c[i]/c[i-1]));
+  const meanR=rets.length?rets.reduce((a,b)=>a+b,0)/rets.length:0;
+  const varR=rets.length?rets.reduce((a,b)=>a+(b-meanR)**2,0)/rets.length:0;
+  const annVol=rets.length?(Math.sqrt(varR)*Math.sqrt(252)*100):null;
   // MaxDD (60d)
   let peak=c[Math.max(0,n-60)],maxdd=0;
   for(let i=Math.max(1,n-60);i<n;i++){
@@ -405,20 +452,24 @@ self.onmessage = function(e) {
     if(dd>maxdd)maxdd=dd;
   }
   // VolRatio (5d vs 20d avg)
-  const v5avg=v.slice(n-5).reduce((a,b)=>a+b,0)/5;
-  const v20avg=v.slice(n-20).reduce((a,b)=>a+b,0)/20;
-  const volRatio=v20avg>0?(v5avg/v20avg).toFixed(2):'-';
-  // d2SMA20
-  const d2=(cur&&m20)?(((cur-m20)/m20)*100).toFixed(2):null;
+  const v5avg=n>=5?v.slice(n-5).reduce((a,b)=>a+b,0)/5:0;
+  const v20avg=n>=20?v.slice(n-20).reduce((a,b)=>a+b,0)/20:0;
+  const volRatio=v20avg>0?(v5avg/v20avg):null;
+  const d2=(cur!=null&&m20!=null)?(((cur-m20)/m20)*100):null;
+  // 一律回傳 number（顯示端 toFixed）。禁止字串，否則 techScore 的 > 會變字典序比較。
   self.postMessage({
     sma5:s5[n-1], sma20:m20, sma60:s60[n-1],
-    rsi14:rsi14.toFixed(1),
-    macd:macdLine.toFixed(3), macdSig:signal9.toFixed(3), macdHist:macdHist.toFixed(3),
-    K:K.toFixed(1), D:D.toFixed(1),
-    bbU:bbU.toFixed(2), bbL:bbL.toFixed(2), bbM:m20?m20.toFixed(2):null,
-    atr14:atr14.toFixed(2),
-    annVol, maxdd:maxdd.toFixed(1),
-    volRatio, d2SMA20:d2,
+    rsi14: rsi14==null?null:+rsi14,
+    macd: macdLine==null?null:+macdLine,
+    macdSig: signal9==null?null:+signal9,
+    macdHist: macdHist==null?null:+macdHist,
+    K: +K, D: +D,
+    bbU: bbU==null?null:+bbU, bbL: bbL==null?null:+bbL, bbM: m20==null?null:+m20,
+    atr14: atr14==null?null:+atr14,
+    annVol: annVol==null?null:+annVol,
+    maxdd: +maxdd,
+    volRatio: volRatio==null?null:+volRatio,
+    d2SMA20: d2==null?null:+d2,
   });
 };
 `;
@@ -436,18 +487,19 @@ function runWorker(candles) {
 
 // ── YAHOO FINANCE ───────────────────────────────────────────────
 // iOS Stocks-style range presets. trim=N means only show last N bars (for ranges Yahoo doesn't have natively, e.g. 3 weeks).
+// chgLbl = 頂部「區間漲跌」標籤（對齊 Yahoo/iOS：日漲跌外另顯示所選區間漲跌）
 const RANGE_DEFS = [
-  {key:'1d',  lbl:'1天',  range:'1d',  interval:'1m',  trim:null},   // 1分K=對齊 Yahoo「當日」/專業軟體即時盤中(配合 liverefresh 每45s更新)
-  {key:'3w',  lbl:'3周',  range:'1mo', interval:'1d',  trim:15},
-  {key:'1mo', lbl:'1月',  range:'1mo', interval:'1d',  trim:null},
-  {key:'3mo', lbl:'3月',  range:'3mo', interval:'1d',  trim:null},
-  {key:'6mo', lbl:'6月',  range:'6mo', interval:'1d',  trim:null},
-  {key:'ytd', lbl:'YTD',  range:'ytd', interval:'1d',  trim:null},
-  {key:'1y',  lbl:'1年',  range:'1y',  interval:'1d',  trim:null},
-  {key:'2y',  lbl:'2年',  range:'2y',  interval:'1d',  trim:null},
-  {key:'5y',  lbl:'5年',  range:'5y',  interval:'1d',  trim:null},
-  {key:'10y', lbl:'10年', range:'10y', interval:'1d',  trim:null},
-  {key:'max', lbl:'全部', range:'max', interval:'1wk', trim:null},
+  {key:'1d',  lbl:'1天',  chgLbl:'日',     range:'1d',  interval:'1m',  trim:null},   // 1分K=對齊 Yahoo「當日」/專業軟體即時盤中(配合 liverefresh 每45s更新)
+  {key:'3w',  lbl:'3周',  chgLbl:'3周',    range:'1mo', interval:'1d',  trim:15},
+  {key:'1mo', lbl:'1月',  chgLbl:'1月',    range:'1mo', interval:'1d',  trim:null},
+  {key:'3mo', lbl:'3月',  chgLbl:'3月',    range:'3mo', interval:'1d',  trim:null},
+  {key:'6mo', lbl:'6月',  chgLbl:'6月',    range:'6mo', interval:'1d',  trim:null},
+  {key:'ytd', lbl:'YTD',  chgLbl:'年初至今', range:'ytd', interval:'1d',  trim:null},
+  {key:'1y',  lbl:'1年',  chgLbl:'1年',    range:'1y',  interval:'1d',  trim:null},
+  {key:'2y',  lbl:'2年',  chgLbl:'2年',    range:'2y',  interval:'1d',  trim:null},
+  {key:'5y',  lbl:'5年',  chgLbl:'5年',    range:'5y',  interval:'1d',  trim:null},
+  {key:'10y', lbl:'10年', chgLbl:'10年',   range:'10y', interval:'1d',  trim:null},
+  {key:'max', lbl:'全部', chgLbl:'全部',   range:'max', interval:'1wk', trim:null},
 ];
 
 function renderRangeBar() {
@@ -468,6 +520,72 @@ function setRange(key) {
 
 function currentRangeDef() {
   return RANGE_DEFS.find(r => r.key === S.range) || RANGE_DEFS.find(r => r.key === '5y');
+}
+
+/** 漲跌字串：+460.00 (+25.27%) · 6月 （絕對值 + 百分比 + 區間標籤） */
+function fmtChgAbsPct(delta, pct, lbl) {
+  if (delta == null || pct == null || !isFinite(delta) || !isFinite(pct)) return '';
+  const ds = (delta >= 0 ? '+' : '') + delta.toFixed(2);
+  const ps = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+  const tag = lbl ? ` <span class="ci-lbl">${lbl}</span>` : '';
+  return `${ds} (${ps})${tag}`;
+}
+
+/** 依基準價算漲跌絕對值與% */
+function calcChgFromBase(price, base) {
+  if (!(price > 0) || !(base > 0)) return null;
+  const delta = price - base;
+  return { delta, pct: delta / base * 100 };
+}
+
+/**
+ * 更新頂部現價旁漲跌列：
+ *   #ci-chg       = 前一交易日漲跌（昨收基準）
+ *   #ci-range-chg = 所選時間區間漲跌（rangeBase 基準；1天區間與日漲跌重複則隱藏）
+ * 顏色依標的市場慣例（台股紅漲綠跌）。
+ */
+function updateHeaderChg(price, dailyBase, rangeBase, rangeLbl, mkt, sym) {
+  // 台股慣例：個股/指數/^TW* / 融資維持率 / 台指期 → 紅漲綠跌
+  const tw = (mkt === 'TW' || /^\^TW/i.test(sym || '')
+    || sym === '__MARGIN_RATIO__' || sym === '__TXF__');
+  const colorOf = (v) => {
+    if (v == null || !isFinite(v) || v === 0) return 'var(--thi)';
+    if (window.Colors) return Colors.dir(sym, v);
+    return v > 0 ? (tw ? 'var(--red)' : 'var(--green)')
+                 : (tw ? 'var(--green)' : 'var(--red)');
+  };
+  const ci = document.getElementById('ci-chg');
+  if (ci) {
+    const d = calcChgFromBase(price, dailyBase);
+    if (d) {
+      ci.innerHTML = fmtChgAbsPct(d.delta, d.pct, '日');
+      ci.style.color = colorOf(d.delta);
+      ci.classList.remove('price-up', 'price-down');
+    } else {
+      ci.textContent = '';
+      ci.style.color = '';
+    }
+  }
+  const ri = document.getElementById('ci-range-chg');
+  if (ri) {
+    // 1天區間：區間漲跌 ≡ 日漲跌，不重複顯示
+    const showRange = (S.range !== '1d') && rangeBase > 0 && rangeLbl;
+    if (showRange) {
+      const r = calcChgFromBase(price, rangeBase);
+      if (r) {
+        ri.innerHTML = fmtChgAbsPct(r.delta, r.pct, rangeLbl);
+        ri.style.color = colorOf(r.delta);
+        ri.style.display = '';
+        ri.classList.remove('price-up', 'price-down');
+      } else {
+        ri.style.display = 'none';
+        ri.textContent = '';
+      }
+    } else {
+      ri.style.display = 'none';
+      ri.textContent = '';
+    }
+  }
 }
 
 async function fetchYF(sym, rangeDef) {
@@ -548,6 +666,11 @@ async function loadSym(sym, mkt, silent) {
   // 市場一律由代號決定(權威表 Market 優先,代號格式兜底):數字/^TW=台股、字母=美股。
   // 不靠 TW/US 市場鈕 → 永不抓錯標的;對未收錄的新上市也正確。
   mkt = window.Market ? Market.of(sym) : ((/^\d/.test(sym) || /^\^TW/i.test(sym)) ? 'TW' : 'US');
+  // 大盤融資維持率：預設拉全歷史（MacroMicro 風格長週期折線）
+  if (sym === '__MARGIN_RATIO__' && S.range !== 'max') {
+    S.range = 'max';
+    try { if (typeof renderRangeBar === 'function') renderRangeBar(); } catch (e) {}
+  }
   const _myLoad = (window.__loadSeq = (window.__loadSeq || 0) + 1);   // 切股 race 守衛
   S.sym = sym; S.mkt = mkt;
   document.getElementById('syminput').value = sym;
@@ -560,29 +683,21 @@ async function loadSym(sym, mkt, silent) {
   clearInd();
 
   // Build YF ticker（^ 開頭=指數，如 ^TWII/^GSPC/^SOX，原樣不加 .TW）
-  const yfsym = (sym[0] === '^') ? sym : (mkt==='TW' ? sym+'.TW' : sym);
+  // 合成序列 __XXX__（大盤融資維持率等）亦不加 .TW，直接打本地 /yf 特例。
+  const yfsym = (sym[0] === '^' || (sym.startsWith('__') && sym.endsWith('__')))
+    ? sym
+    : (mkt==='TW' ? sym+'.TW' : sym);
   let rdef = currentRangeDef();
+  // 融資維持率：永遠日線（後端也是日頻），避免 max 預設 1wk 造成語意混淆
+  if (sym === '__MARGIN_RATIO__' || sym === '__TXF__' || sym === '^TWOII') {
+    rdef = Object.assign({}, rdef, { interval: '1d' });
+  }
 
-  // ── 日線壞源護航 (v3.9 Phase-0) ──────────────────────────────
-  // Yahoo 對某些指數(^TWOII 櫃買)各端點互斥、日線整段錯亂(419/269/105),
-  // 且無可信日線歷史源 → 不畫假K。改抓 /quote(後端已改走 TWSE MIS 真值),
-  // 在圖區顯示即時值與來源說明。即時值另見底部大盤列。
-  const BAD_DAILY = ['^TWOII'];
-  if (BAD_DAILY.includes(yfsym)) {
-    let _tq = null;
-    try { _tq = await fetch(`${SERVER}/quote/${encodeURIComponent(yfsym)}`, {cache:'no-store'}).then(r=>r.ok?r.json():null); } catch {}
-    if (_myLoad !== window.__loadSeq) return;
-    const _el = document.getElementById('chart-loading');
-    _el.style.display = 'flex';
-    const _pv = (_tq && _tq.price != null) ? _tq.price.toFixed(2) : '—';
-    const _cp = (_tq && _tq.changePct != null) ? ((_tq.changePct>=0?'+':'')+_tq.changePct.toFixed(2)+'%') : '';
-    _el.innerHTML = `<div style="text-align:center;line-height:1.7">⚠ ${sym} 無可信日線資料源<br>`
-      + `<span style="color:var(--muted,#888);font-size:12px">(Yahoo 此指數日線錯亂,不顯示假K)</span><br>`
-      + `即時值 <b>${_pv}</b> <span style="color:${(_tq&&_tq.changePct>=0)?'var(--green)':'var(--red)'}">${_cp}</span>`
-      + `<br><span style="color:var(--muted,#888);font-size:12px">來源:${_tq?_tq.source:'—'}・另見底部大盤列</span></div>`;
-    document.getElementById('chart-info').style.display = 'none';
-    setStat(sym+'：無可信日線,僅即時值('+(_tq?_tq.source:'—')+')');
-    return;
+  // ── 櫃買／台指期：改走 server 官方／FinMind 日線覆寫（見 tw_index_charts.py）──
+  // 舊 BAD_DAILY(^TWOII) 已移除；強制日線避免分 K 打到不存在的 Yahoo 源。
+  if (yfsym === '^TWOII' || yfsym === '__TXF__') {
+    rdef = Object.assign({}, rdef, { interval: '1d' });
+    if (!rdef.range || rdef.range === '1d') rdef = Object.assign({}, rdef, { range: '1y' });
   }
 
   const raw = await fetchYF(yfsym, rdef);
@@ -622,8 +737,18 @@ async function loadSym(sym, mkt, silent) {
   if (_noteMsg) setStat(_noteMsg);
 
   // trim for ranges Yahoo doesn't have natively (e.g. 3 weeks = last 15 trading days)
+  // 區間漲跌基準：trim 前先取「視窗前一根」收盤；非 trim 用 meta.chartPreviousClose
+  // （= 請求區間起點前一日收盤，對齊 Yahoo/iOS Stocks 區間漲跌口徑）
+  let _rangeBase = null;
   if (rdef.trim && parsed.candles.length > rdef.trim) {
+    const _preIdx = parsed.candles.length - rdef.trim - 1;
+    if (_preIdx >= 0 && parsed.candles[_preIdx].close > 0) {
+      _rangeBase = parsed.candles[_preIdx].close;
+    }
     parsed.candles = parsed.candles.slice(-rdef.trim);
+  } else if (parsed.meta) {
+    const _cp = parsed.meta.chartPreviousClose;
+    if (_cp != null && isFinite(_cp) && _cp > 0) _rangeBase = _cp;
   }
 
   // ── Yahoo data freshness fix (v3.6, v3.8.1 修量0) ────────────
@@ -716,6 +841,20 @@ async function loadSym(sym, mkt, silent) {
     }
   }
 
+  // ── 區間漲跌基準落定（對齊所選時間區間）──────────────────────
+  // 優先用上方抓的 chartPreviousClose / trim 前一根；缺則退回「顯示區間第一根收盤」。
+  // 1天(intraday)不另存（與日漲跌重複，updateHeaderChg 會隱藏）。
+  if (!(_rangeBase > 0) && parsed.candles.length >= 1) {
+    const _fc = parsed.candles[0].close;
+    if (_fc > 0) _rangeBase = _fc;
+  }
+  const _rangeLbl = (rdef && rdef.chgLbl) ? rdef.chgLbl
+    : ((RANGE_DEFS.find(r => r.key === S.range) || {}).chgLbl || S.range);
+  if (_rangeBase > 0) {
+    parsed.rangeBase = _rangeBase;
+    parsed.rangeChgLbl = _rangeLbl;
+  }
+
   S.data = parsed;
   renderChart(parsed.candles);
   document.getElementById('chart-loading').style.display='none';
@@ -730,22 +869,29 @@ async function loadSym(sym, mkt, silent) {
     : (prev ? prev.close : null);
   const chgPct = (_prevRef != null && _prevRef > 0)
     ? ((last.close - _prevRef) / _prevRef * 100) : 0;
-  document.getElementById('ci-price').textContent = last.close.toFixed(2);
-  const ci = document.getElementById('ci-chg');
-  ci.textContent = (chgPct>=0?'+':'')+chgPct.toFixed(2)+'%';
-  // 台股紅漲綠跌(以昨收為基準),美股/其他綠漲紅跌;平盤無色
-  const _ciTw = (mkt === 'TW' || /^\^TW/.test(sym || ''));
-  ci.style.color = chgPct > 0 ? (_ciTw ? 'var(--red)' : 'var(--green)')
-                 : chgPct < 0 ? (_ciTw ? 'var(--green)' : 'var(--red)')
-                 : 'var(--thi)';
-  document.getElementById('ci-name').textContent = parsed.name;
+  document.getElementById('ci-price').textContent = last.close.toFixed(2) + (sym === '__MARGIN_RATIO__' ? '%' : '');
+  // 頂部：日漲跌(昨收) + 區間漲跌(所選時間) 同時顯示
+  updateHeaderChg(last.close, _prevRef, parsed.rangeBase, parsed.rangeChgLbl, mkt, sym);
+  document.getElementById('ci-name').textContent = (sym === '__MARGIN_RATIO__')
+    ? '大盤融資維持率'
+    : (sym === '__TXF__')
+      ? '台指期近月'
+      : (sym === '^TWOII')
+        ? '櫃買指數'
+        : parsed.name;
 
-  // compute indicators
-  S.ind = await runWorker(parsed.candles);
-  if (_myLoad !== window.__loadSeq) return;   // 切股 race：指標算完前已切別檔→不覆寫
-  renderInd(S.ind, last, mkt);
-  if (S.ind) updateEtfFlowInd();
-  renderRpanel();
+  // compute indicators — 融資維持率為總經折線，略過技術指標
+  if (sym === '__MARGIN_RATIO__') {
+    S.ind = null;
+    try { clearInd(); } catch (e) {}
+  } else {
+    S.ind = await runWorker(parsed.candles);
+    if (_myLoad !== window.__loadSeq) return;   // 切股 race：指標算完前已切別檔→不覆寫
+    renderInd(S.ind, last, mkt);
+    if (S.ind) updateEtfFlowInd();
+  }
+  try { renderRpanel(); } catch (e) { console.error('[v1] renderRpanel threw:', e); }
+  try { window.dispatchEvent(new CustomEvent('symLoaded', {detail:{sym: S.sym, mkt: S.mkt}})); } catch(e){}
 
   // update wl chip price
   updateWlPrice(sym, last.close, chgPct);
@@ -757,8 +903,11 @@ function renderChart(candles) {
   const wrap = document.getElementById('chart-wrap');
   if (S.chart) { S.chart.remove(); S.chart=null; }
 
+  // 大盤融資維持率：MacroMicro 風格連續折線（非 K 線／非布林）
+  const isMarginRatio = (S.sym === '__MARGIN_RATIO__');
+
   // intraday (1d range, 5m interval) → show HH:mm; daily/weekly → date only
-  const isIntraday = S.range === '1d';
+  const isIntraday = !isMarginRatio && S.range === '1d';
 
   // ── 時區平移：使用者本地時區 (v3.6) ──────────────────────────
   // lightweight-charts 預設用 UTC 顯示。台北使用者看 13:30 收盤的台股會
@@ -782,15 +931,23 @@ function renderChart(candles) {
       vertLine:{color:'rgba(245,197,24,.55)',width:1,style:2,labelVisible:true,labelBackgroundColor:'#B8860B'},
       horzLine:{color:'rgba(245,197,24,.55)',width:1,style:2,labelVisible:true,labelBackgroundColor:'#B8860B'},
     },
+    // MacroMicro 雙軸：左=融資維持率%、右=加權指數；一般 K 線僅用右軸
+    leftPriceScale: isMarginRatio ? {
+      visible: true,
+      borderColor: '#1A2740',
+      scaleMargins: { top: 0.08, bottom: 0.10 },
+    } : { visible: false },
     rightPriceScale:{borderColor:'#1A2740',
       // 盤中(1天)加大上下留白 → 把當日小波動壓平(flatten),不再撐滿全高顯得震盪劇烈
-      scaleMargins: isIntraday ? {top:0.30,bottom:0.30} : {top:0.05,bottom:0.18}},
+      // 融資維持率：右軸給加權指數，略加大上下留白
+      scaleMargins: isMarginRatio ? {top:0.08,bottom:0.10}
+                  : (isIntraday ? {top:0.30,bottom:0.30} : {top:0.05,bottom:0.18})},
     timeScale:{
       borderColor:'#1A2740',
       timeVisible: isIntraday,
       secondsVisible: false,
       rightOffset: 2,         // tiny right padding so latest candle isn't glued to axis
-      barSpacing: 6,          // baseline spacing, fitContent will scale it
+      barSpacing: isMarginRatio ? 2 : 6,  // 長歷史折線較密
       minBarSpacing: 0.5,     // allow squish for 'max' range with many bars
       fixLeftEdge: true,
       fixRightEdge: true,
@@ -800,6 +957,122 @@ function renderChart(candles) {
     handleScale:{mouseWheel:true,pinch:true,axisPressedMouseMove:true},
   });
   S.chart = chart;
+
+  // ── 融資維持率：MacroMicro 風格雙軸折線（左維持率 / 右加權；無 K 線／無 SMA／無布林）──
+  if (isMarginRatio) {
+    const _marginLoadId = window.__loadSeq;
+    const lineData = candles.map(c => ({ time: tz(c.time), value: c.close }));
+    const area = chart.addAreaSeries({
+      priceScaleId: 'left',
+      lineColor: '#38BDF8',
+      topColor: 'rgba(56,189,248,0.22)',
+      bottomColor: 'rgba(56,189,248,0.02)',
+      lineWidth: 2,
+      lastValueVisible: true,
+      priceLineVisible: false,
+      crosshairMarkerVisible: true,
+      crosshairMarkerRadius: 5,
+      crosshairMarkerBorderColor: '#7DD3FC',
+      crosshairMarkerBackgroundColor: '#0EA5E9',
+      priceFormat: { type: 'custom', formatter: v => (v != null && isFinite(v) ? v.toFixed(2) + '%' : '') },
+    });
+    area.setData(lineData);
+    S.chartSeries = area;
+    S.dotSeries = area;
+    S.volSeries = null;
+    S.overlaySeries = {};
+    S.wsSeries = null;
+    S.wsLeftSeries = null;
+    S.twiiSeries = null;
+    chart.priceScale('left').applyOptions({
+      visible: true,
+      borderColor: '#1A2740',
+      scaleMargins: { top: 0.08, bottom: 0.10 },
+    });
+    chart.priceScale('right').applyOptions({
+      visible: true,
+      borderColor: '#1A2740',
+      scaleMargins: { top: 0.08, bottom: 0.10 },
+    });
+
+    const _prevCloseByTime = new Map();
+    for (let i = 0; i < candles.length; i++) {
+      _prevCloseByTime.set(tz(candles[i].time), i > 0 ? candles[i - 1].close : null);
+    }
+    const _twiiByTime = new Map();
+
+    chart.subscribeCrosshairMove(param => {
+      const ohlcEl = document.getElementById('ci-ohlc');
+      if (!ohlcEl) return;
+      if (!param || !param.point || !param.time || !param.seriesData) {
+        ohlcEl.style.display = 'none';
+        return;
+      }
+      const pt = param.seriesData.get(area);
+      if (!pt || pt.value == null) { ohlcEl.style.display = 'none'; return; }
+      const d = new Date(typeof param.time === 'number' ? param.time * 1000 : Date.parse(param.time));
+      const ds = `${d.getUTCFullYear()}/${String(d.getUTCMonth()+1).padStart(2,'0')}/${String(d.getUTCDate()).padStart(2,'0')}`;
+      const prev = _prevCloseByTime.get(param.time);
+      const delta = (prev != null && prev > 0) ? (pt.value - prev) : null;
+      const chgPct = (delta != null && prev > 0) ? (delta / prev * 100) : null;
+      const up = delta != null && delta > 0;
+      const dn = delta != null && delta < 0;
+      const col = up ? 'var(--red)' : (dn ? 'var(--green)' : 'var(--tlo)');
+      const twii = _twiiByTime.get(param.time);
+      const twiiHtml = (twii != null && isFinite(twii))
+        ? `<span class="ohlc-k" style="margin-left:10px">加權</span><span class="ohlc-v" style="color:#F59E0B">${twii.toLocaleString('en-US',{maximumFractionDigits:2})}</span>`
+        : '';
+      ohlcEl.style.display = 'block';
+      ohlcEl.innerHTML =
+        `<span class="ohlc-d">${ds}</span>` +
+        `<span class="ohlc-k">維持率(L)</span><span class="ohlc-v" style="color:${col}">${pt.value.toFixed(2)}%</span>` +
+        (delta != null
+          ? `<span style="color:${col};margin-left:6px">${up ? '+' : ''}${delta.toFixed(2)}pp` +
+            (chgPct != null ? ` (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)` : '') + `</span>`
+          : '') +
+        twiiHtml;
+    });
+
+    // 右軸：加權股價指數（MacroMicro 同圖對照）
+    (async () => {
+      try {
+        const rdef = currentRangeDef();
+        const raw = await fetchYF('^TWII', { range: rdef.range || 'max', interval: '1d' });
+        if (_marginLoadId !== window.__loadSeq || S.sym !== '__MARGIN_RATIO__' || S.chart !== chart) return;
+        const parsed = parseYF(raw);
+        if (!parsed || !parsed.candles || !parsed.candles.length) return;
+        const twiiData = parsed.candles.map(c => ({ time: tz(c.time), value: c.close }));
+        _twiiByTime.clear();
+        for (const p of twiiData) _twiiByTime.set(p.time, p.value);
+        const twiiLine = chart.addLineSeries({
+          priceScaleId: 'right',
+          color: '#F59E0B',
+          lineWidth: 1.5,
+          lastValueVisible: true,
+          priceLineVisible: false,
+          crosshairMarkerVisible: true,
+          crosshairMarkerRadius: 4,
+          crosshairMarkerBorderColor: '#FCD34D',
+          crosshairMarkerBackgroundColor: '#F59E0B',
+          priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+        });
+        twiiLine.setData(twiiData);
+        S.twiiSeries = twiiLine;
+        S.overlaySeries = Object.assign({}, S.overlaySeries, { twii: twiiLine });
+        try { if (typeof renderChartLegend === 'function') renderChartLegend(); } catch (e) {}
+      } catch (e) {
+        console.warn('[margin] TWII overlay failed:', e);
+      }
+    })();
+
+    requestAnimationFrame(() => chart.timeScale().fitContent());
+    const ro = new ResizeObserver(() => {
+      chart.applyOptions({ width: wrap.clientWidth, height: wrap.clientHeight });
+      chart.timeScale().fitContent();
+    });
+    ro.observe(wrap);
+    return;
+  }
 
   const cs = chart.addCandlestickSeries({
     upColor:'#4ADE80',downColor:'#F87171',
@@ -896,9 +1169,9 @@ function renderChart(candles) {
     chart.priceScale('right').applyOptions({scaleMargins:{top:0.06,bottom:0.04}});  // 無量→價格滿版
   }
 
-  // ── SMA + Bollinger Bands overlay (skip on intraday) ──
+  // ── SMA + Bollinger Bands overlay (skip on intraday / 融資維持率折線圖) ──
   S.overlaySeries = {};
-  if (!isIntraday && candles.length >= 20) {
+  if (!isIntraday && S.sym !== '__MARGIN_RATIO__' && candles.length >= 20) {
     const closes = candles.map(c => c.close);
     const sma = (n, i) => {
       if (i + 1 < n) return null;
@@ -1038,17 +1311,27 @@ clearInd();
 
 function renderInd(ind, last, mkt) {
   if (!ind) return;
+  // 顯示用小數位：震盪類 1 位、價位／MACD 2 位（禁止 raw float 長尾）
+  const DEC = {
+    rsi14: 1, K: 1, D: 1, annVol: 1, maxdd: 1, volRatio: 2, d2SMA20: 2,
+    macd: 2, macdSig: 2, macdHist: 2,
+    sma5: 2, sma20: 2, sma60: 2, bbU: 2, bbL: 2, bbM: 2, atr14: 2,
+  };
   for (const d of IND_DEFS) {
     const el = document.getElementById('ig-'+d.k);
     if (!el) continue;
     let v = ind[d.k];
-    if (v == null) { el.textContent='--'; continue; }
-    if (typeof v === 'number') v = v.toFixed(2);
-    el.textContent = v;
-    // color RSI, KD
-    if (d.k==='rsi14') el.style.color = v>70?'var(--red)':v<30?'var(--green)':'var(--thi)';
-    if (d.k==='macdHist') el.style.color = parseFloat(v)>=0?'var(--green)':'var(--red)';
-    if (d.k==='d2SMA20') el.style.color = parseFloat(v)>=0?'var(--green)':'var(--red)';
+    if (v == null || v === '' || v === '-') { el.textContent='--'; continue; }
+    const num = (typeof v === 'number') ? v : parseFloat(v);
+    if (Number.isFinite(num)) {
+      const dp = DEC[d.k] != null ? DEC[d.k] : 2;
+      el.textContent = num.toFixed(dp);
+      if (d.k==='rsi14') el.style.color = num>70?'var(--red)':num<30?'var(--green)':'var(--thi)';
+      if (d.k==='macdHist') el.style.color = num>=0?'var(--green)':'var(--red)';
+      if (d.k==='d2SMA20') el.style.color = num>=0?'var(--green)':'var(--red)';
+    } else {
+      el.textContent = String(v);
+    }
   }
   // also show price vs BBands
   const price = last?.close;
@@ -1204,26 +1487,49 @@ function renderStats() {
   const m = S.data.meta;
   const last = S.data.candles[S.data.candles.length-1];
   const prev = S.data.candles[S.data.candles.length-2];
-  const chg = prev ? (last.close-prev.close) : 0;
-  const chgPct = prev ? (chg/prev.close*100) : 0;
+  // 日漲跌：權威昨收優先（與頂部 ci-chg 對齊），缺才退前一根 K
+  const _dayBase = (S.data.yesterdayClose != null && S.data.yesterdayClose > 0)
+    ? S.data.yesterdayClose : (prev ? prev.close : null);
+  const chg = (_dayBase > 0) ? (last.close - _dayBase) : 0;
+  const chgPct = (_dayBase > 0) ? (chg / _dayBase * 100) : 0;
+  // 區間漲跌：對齊所選時間區間（與頂部 ci-range-chg 同源）
+  const _rBase = S.data.rangeBase;
+  const _rLbl = S.data.rangeChgLbl || ((typeof currentRangeDef === 'function' ? currentRangeDef() : null) || {}).chgLbl || '';
+  const _rChg = (_rBase > 0) ? (last.close - _rBase) : null;
+  const _rPct = (_rBase > 0) ? (_rChg / _rBase * 100) : null;
   const mktCap = m.marketCap ? (m.marketCap>1e12?(m.marketCap/1e12).toFixed(2)+'T':(m.marketCap>1e9?(m.marketCap/1e9).toFixed(2)+'B':(m.marketCap/1e6).toFixed(0)+'M')) : '--';
   const cur = S.mkt==='TW'?'TWD':'USD';
   const rows = [
     ['PRICE',`${last.close.toFixed(2)} ${cur}`],
     ['CHANGE',`${chg>=0?'+':''}${chg.toFixed(2)} (${chgPct>=0?'+':''}${chgPct.toFixed(2)}%)`],
+  ];
+  if (S.range !== '1d' && _rChg != null && _rPct != null) {
+    rows.push(['RANGE',`${_rChg>=0?'+':''}${_rChg.toFixed(2)} (${_rPct>=0?'+':''}${_rPct.toFixed(2)}%) · ${_rLbl}`]);
+  }
+  rows.push(
     ['OPEN',last.open.toFixed(2)],['HIGH',last.high.toFixed(2)],['LOW',last.low.toFixed(2)],
     ['VOLUME',last.volume>1e6?(last.volume/1e6).toFixed(1)+'M':last.volume?.toLocaleString()],
     ['MKT CAP',mktCap],
     ['52W HIGH',m['fiftyTwoWeekHigh']?.toFixed(2)||'--'],
     ['52W LOW',m['fiftyTwoWeekLow']?.toFixed(2)||'--'],
-  ];
+  );
+  const fmtN = (v, dp) => {
+    if (v == null || v === '' || v === '-') return '--';
+    const n = typeof v === 'number' ? v : parseFloat(v);
+    return Number.isFinite(n) ? n.toFixed(dp) : '--';
+  };
   const indRows = S.ind ? [
-    ['RSI 14',S.ind.rsi14],['KD K/D',`${S.ind.K} / ${S.ind.D}`],
-    ['MACD',S.ind.macd],['Signal',S.ind.macdSig],
-    ['BB Upper',S.ind.bbU],['BB Lower',S.ind.bbL],
-    ['ATR 14',S.ind.atr14],['Ann Vol',S.ind.annVol+'%'],
-    ['MaxDD 60d',S.ind.maxdd+'%'],['Vol Ratio',S.ind.volRatio],
-    ['D2 SMA20',S.ind.d2SMA20!=null?S.ind.d2SMA20+'%':'--'],
+    ['RSI 14', fmtN(S.ind.rsi14, 1)],
+    ['KD K/D', `${fmtN(S.ind.K, 1)} / ${fmtN(S.ind.D, 1)}`],
+    ['MACD', fmtN(S.ind.macd, 2)],
+    ['Signal', fmtN(S.ind.macdSig, 2)],
+    ['BB Upper', fmtN(S.ind.bbU, 2)],
+    ['BB Lower', fmtN(S.ind.bbL, 2)],
+    ['ATR 14', fmtN(S.ind.atr14, 2)],
+    ['Ann Vol', fmtN(S.ind.annVol, 1) + (S.ind.annVol != null ? '%' : '')],
+    ['MaxDD 60d', fmtN(S.ind.maxdd, 1) + (S.ind.maxdd != null ? '%' : '')],
+    ['Vol Ratio', fmtN(S.ind.volRatio, 2)],
+    ['D2 SMA20', S.ind.d2SMA20 != null ? fmtN(S.ind.d2SMA20, 2) + '%' : '--'],
   ] : [];
   return `
     <div class="stat-hdr">價格資訊 · ${S.sym}</div>

@@ -105,6 +105,8 @@
   /* ── Chart area ── */
   #chart-info { font-size: 9px !important; top: 4px !important; left: 6px !important; }
   .ci-price { font-size: 15px !important; }
+  .ci-chg { font-size: 10px !important; }
+  .ci-range-chg { font-size: 9.5px !important; }
   #ci-ohlc { font-size: 9px !important; padding: 4px 6px !important; }
   #ci-ohlc .ma-row { font-size: 8px !important; }
 

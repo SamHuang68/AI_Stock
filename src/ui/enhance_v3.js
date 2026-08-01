@@ -6,9 +6,15 @@
 // 3. 右側面板可收合 (40% <-> 0 全螢幕線型)
 // 4. 分頁記憶 (切股票後保留上次看的分頁)
 // 須在 fundamental_v3.js / volume_profile_v3.js 之後載入。
+//
+// v3.8.5 (2026-07-23): 美股基本面評分（Yahoo 成長+三率，與台股同一 _fundamental_score）
+//   雙軸卡／STATS 基本面不再鎖 TW；tag tech·385。
+// v3.8.7 (2026-07-23): 台股大盤體質評分（^TWII/^TWOII/融資維持）；合成序列略過 canon yf。
 // ============================================================
 (function () {
   'use strict';
+  const ENH_VER = '388';  // 雙軸卡可見版本戳（確認不是瀏覽器舊快取）
+  try { console.info('[enhance] dual-score engine tech·' + ENH_VER); } catch (_) {}
 
   // ---- 樣式 ------------------------------------------------
   function style() {
@@ -48,6 +54,26 @@
   const _canonFail = {};   // 'SYM|MKT' -> true(抓不到，fallback 用畫面指標)
 
   // ---- 技術面分數 0~100（可傳入指定 ind/candles，否則用目前載入個股）----
+  // 台股／美股同一公式（技術指標無市場邊界；勿拆兩套以免不可比）。
+  // 基底 50，各項連續加減（避免二元訊號空頭共振 → 無差別夾成 0）：
+  //   RSI14 Wilder：±15  （(rsi-50)*0.6）
+  //   MACD hist：  ±10  （對股價比例做 tanh，非單純金叉／死叉）
+  //   KD：         ±8   （(K-D)*0.4；K≈D 時接近 0，不再誤扣滿額）
+  //   收盤 vs SMA20：±10（% 乖離 tanh）
+  //   SMA20 vs SMA60：±10（% 乖離 tanh）
+  // ind 各欄必須是 number（字串比較會讓負 MACD 誤判）。
+  function _n(v) {
+    if (v == null || v === '' || v === '-') return null;
+    const x = typeof v === 'number' ? v : parseFloat(v);
+    return Number.isFinite(x) ? x : null;
+  }
+  function _tanh(x) {
+    // 純手寫，避免依賴 Math.tanh 舊環境差異；行為等同標準 tanh
+    if (x > 20) return 1;
+    if (x < -20) return -1;
+    const e = Math.exp(2 * x);
+    return (e - 1) / (e + 1);
+  }
   function techScore(ind, candles) {
     ind = ind || ((typeof S !== 'undefined') && S.ind);
     candles = candles || (S.data && S.data.candles) || [];
@@ -55,11 +81,30 @@
     const cur = candles.length ? candles[candles.length - 1].close : null;
     let score = 50, parts = 0;
     const add = v => { score += v; parts++; };
-    if (ind.rsi14 != null) add(Math.max(-20, Math.min(20, (ind.rsi14 - 50) * 0.8)));
-    if (ind.macd != null && ind.macdSig != null) add(ind.macd > ind.macdSig ? 12 : -12);
-    if (ind.K != null && ind.D != null) add(ind.K > ind.D ? 8 : -8);
-    if (cur != null && ind.sma20 != null) add(cur > ind.sma20 ? 10 : -10);
-    if (ind.sma20 != null && ind.sma60 != null) add(ind.sma20 > ind.sma60 ? 10 : -10);
+    const rsi = _n(ind.rsi14);
+    const macd = _n(ind.macd), macdSig = _n(ind.macdSig);
+    const K = _n(ind.K), D = _n(ind.D);
+    const sma20 = _n(ind.sma20), sma60 = _n(ind.sma60);
+
+    if (rsi != null) add(Math.max(-15, Math.min(15, (rsi - 50) * 0.6)));
+
+    if (macd != null && macdSig != null && cur != null && Math.abs(cur) > 0) {
+      const hist = macd - macdSig;
+      const scale = Math.max(Math.abs(cur) * 0.0015, 1e-9);
+      add(Math.max(-10, Math.min(10, 10 * _tanh(hist / scale / 3))));
+    }
+
+    if (K != null && D != null) add(Math.max(-8, Math.min(8, (K - D) * 0.4)));
+
+    if (cur != null && sma20 != null && sma20 !== 0) {
+      const pct = (cur / sma20 - 1) * 100;
+      add(10 * _tanh(pct / 4));
+    }
+    if (sma20 != null && sma60 != null && sma60 !== 0) {
+      const pct = (sma20 / sma60 - 1) * 100;
+      add(10 * _tanh(pct / 3));
+    }
+
     if (!parts) return null;
     return Math.max(0, Math.min(100, Math.round(score)));
   }
@@ -75,8 +120,21 @@
 
   // 抓「標準基底」1y 日線算技術面分數：槓桿/反向取本體（反向翻轉），
   // 一般股票取自身。存快取後重繪雙軸卡。
+  function _isSynthOrMacro(sym) {
+    const s = String(sym || '').toUpperCase();
+    // 台指期／櫃買／加權：有可信日線，可算技術面
+    if (s === '__TXF__' || s === '^TWOII' || s === '^TWII') return false;
+    // 其餘 __XXX__ 總經／融資折線：無標準股價技術指標
+    return (s.startsWith('__') && s.endsWith('__'));
+  }
+
   async function computeCanonTech(sym, mkt) {
     const key = sym + '|' + (mkt || 'TW');
+    // 合成序列／壞日線指數：不打 Yahoo 個股 1y（會 404 或錯資料）
+    if (_isSynthOrMacro(sym)) {
+      _canonFail[key] = true;
+      return;
+    }
     try {
       const SRV = window.SERVER || 'http://localhost:18432';
       const lev = LEVERAGE_MAP[sym];
@@ -84,6 +142,7 @@
       let yf;
       if (/^\^/.test(target)) yf = target;
       else if (lev) yf = /^[0-9]/.test(target) ? target + '.TW' : target;
+      else if (String(target).startsWith('__') && String(target).endsWith('__')) yf = target;
       else yf = (mkt === 'TW') ? target + '.TW' : target;
       const r = await fetch(`${SRV}/yf/${encodeURIComponent(yf)}?range=1y&interval=1d`, { cache: 'no-store' });
       if (!r.ok) { _canonFail[key] = true; return; }
@@ -103,30 +162,41 @@
           card.outerHTML = dualCardHtml(null);
           if (window.fetchFund) fetchFund(S.sym, S.mkt).then(f => {
             const c2 = document.querySelector('#rpanel .dual-card');
-            if (c2 && S.tab === 'stats') c2.outerHTML = dualCardHtml(f && f.score != null ? f.score : null);
+            if (c2 && S.tab === 'stats') c2.outerHTML = dualCardHtml(f && f.score != null ? f.score : null, f);
           });
         }
       }
     } catch (e) { _canonFail[key] = true; }
   }
   const scoreCol = s => window.Colors ? Colors.quality(s, 65, 45) : (s == null ? 'var(--tlo)' : s >= 65 ? 'var(--red)' : s >= 45 ? 'var(--orange)' : 'var(--green)');
-  const techTag = s => s == null ? '—' : s >= 65 ? '🟢 偏多' : s >= 45 ? '⚖️ 中性' : '🔴 偏空';
-  const fundTag = s => s == null ? '—' : s >= 70 ? '🟢 體質佳' : s >= 50 ? '🟡 中性' : '🔴 偏弱';
+  const techTag = s => {
+    const base = s == null ? '—' : s >= 65 ? '🟢 偏多' : s >= 45 ? '⚖️ 中性' : '🔴 偏空';
+    return `${base} · tech·${ENH_VER}`;
+  };
+  const fundTag = (s, kind) => {
+    if (s == null) return '—';
+    if (kind === 'market') return s >= 70 ? '🟢 偏熱／偏強' : s >= 50 ? '🟡 中性' : '🔴 偏弱／偏冷';
+    return s >= 70 ? '🟢 體質佳' : s >= 50 ? '🟡 中性' : '🔴 偏弱';
+  };
 
-  function dualCardHtml(fundScore) {
+  function dualCardHtml(fundScore, fundPayload) {
     const t = techScoreResolved();
     const sym = (typeof S !== 'undefined' && S.sym) ? S.sym.toUpperCase() : '';
     const lev = LEVERAGE_MAP[sym];
+    const isMarket = fundPayload && fundPayload.kind === 'market';
     const techLbl = lev
       ? `技術面 <span style="font-size:8px;color:var(--tf)">(依本體 ${lev.base} · 1Y日線)</span>`
-      : `技術面 <span style="font-size:8px;color:var(--tf)">(1Y日線)</span>`;
-    return `<div class="dual-card">
+      : (_isSynthOrMacro(sym)
+        ? `技術面 <span style="font-size:8px;color:var(--tf)">(總經／無標準日線)</span>`
+        : `技術面 <span style="font-size:8px;color:var(--tf)">(1Y日線)</span>`);
+    const fundLbl = isMarket ? '大盤體質' : '基本面';
+    return `<div class="dual-card" data-enh-ver="${ENH_VER}">
       <div class="dual-half"><div class="lbl">${techLbl}</div>
         <div class="score" style="color:${scoreCol(t)}">${t == null ? '—' : t}</div>
         <div class="tag" style="color:${scoreCol(t)}">${techTag(t)}</div></div>
-      <div class="dual-half"><div class="lbl">基本面</div>
+      <div class="dual-half"><div class="lbl">${fundLbl}</div>
         <div class="score" style="color:${scoreCol(fundScore)}">${fundScore == null ? '—' : fundScore}</div>
-        <div class="tag" style="color:${scoreCol(fundScore)}">${fundTag(fundScore)}</div></div>
+        <div class="tag" style="color:${scoreCol(fundScore)}">${fundTag(fundScore, isMarket ? 'market' : null)}</div></div>
     </div>`;
   }
 
@@ -167,11 +237,11 @@
       const mktU = S.mkt || 'TW';
       if (symU && _canonTech[symU + '|' + mktU] == null && !_canonFail[symU + '|' + mktU])
         computeCanonTech(symU, mktU);
-      if (window.fetchFund && S.sym && S.mkt === 'TW') {
+      if (window.fetchFund && S.sym) {
         fetchFund(S.sym, S.mkt).then(f => {
           if (S.tab !== 'stats') return;
           const card = document.querySelector('#rpanel .dual-card');
-          if (card) card.outerHTML = dualCardHtml(f && f.score != null ? f.score : null);
+          if (card) card.outerHTML = dualCardHtml(f && f.score != null ? f.score : null, f);
         });
       }
       return head + base;

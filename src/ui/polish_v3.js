@@ -9,7 +9,7 @@
 //   6. STATS 補 MKT CAP / P/E / P/B / Yield（從 /keystats 取）
 // ============================================================
 
-const SERVER_P = window.SERVER || `http://localhost:18432`;
+const SERVER_P = window.SERVER || ((typeof location !== 'undefined' && location.origin) ? location.origin : 'http://localhost:18432');
 
 // 台股代號判定(數字開頭如 2308/00685L,或 ^TW 指數)。台股紅綠慣例應依「標的本身」,
 // 不受 TW/US 市場鈕(S.mkt)影響 —— 否則在 US 鈕時看台股/台股指數會套成美股慣例。
@@ -23,28 +23,50 @@ function _isTwSym(s) { return window.Colors ? Colors.isTW(s) : (/^\d/.test(Strin
 /* (1) 隱藏底部指標列 — 改為大盤總覽 */
 #indbar { display: none !important; }
 
-/* 大盤總覽跑馬燈 — v3.1 觀察清單 chip 風格
-   排版：行 1 = 名稱(灰小) 加權值(大白)；行 2 = ▲值 ▲% (小，紅漲綠跌台股慣例)
-   配色：固定台股慣例 — 紅漲綠跌（不依 body.market-* class 切換）
+/* 大盤總覽 — 兩個 tab（大盤／市場）避免一列塞滿混淆
+   左側垂直 tab，右側單一 panel 顯示對應格
 */
 #mkt-bar {
-  min-height: 76px; max-height: 92px;
+  display: flex; align-items: stretch;
+  min-height: 72px; max-height: 88px;
   background: var(--bg2); border-top: 1px solid var(--border);
   flex-shrink: 0; overflow: hidden;
   font-family: 'JetBrains Mono', monospace; font-size: 10px;
 }
-/* v3.8: 大盤改 2 列 grid (column flow，8 指數 → 4 欄 x 2 列) */
-#mkt-bar-inner {
+#mkt-bar-tabs {
+  display: flex; flex-direction: column; flex-shrink: 0;
+  width: 40px; border-right: 1px solid var(--border); background: var(--bg);
+}
+.mkt-tab {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  writing-mode: vertical-rl; text-orientation: mixed;
+  letter-spacing: 2px; font-size: 11px; font-weight: 700;
+  color: var(--tlo); background: transparent; border: none;
+  border-bottom: 1px solid var(--border); cursor: pointer;
+  padding: 0; font-family: inherit;
+}
+.mkt-tab:last-child { border-bottom: none; }
+.mkt-tab:hover { color: var(--thi); background: rgba(255,255,255,.04); }
+.mkt-tab.on {
+  color: var(--thi); background: var(--bg2);
+  box-shadow: inset 2px 0 0 var(--gold, #F5C518);
+}
+#mkt-bar-panels { flex: 1; min-width: 0; position: relative; }
+.mkt-panel { display: none; height: 100%; }
+.mkt-panel.on { display: block; }
+#mkt-bar-inner, .mkt-bar-inner {
   display: grid; grid-template-rows: repeat(2, 1fr);
   grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
-  gap: 0; padding: 0;
+  gap: 0; padding: 0; height: 100%;
 }
 .mkt-cell {
   display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
   padding: 3px 12px; border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border); min-height: 36px;
   white-space: nowrap; min-width: 0; gap: 1px; overflow: hidden;
+  cursor: pointer; transition: background .12s;
 }
+.mkt-cell:hover { background: rgba(255,255,255,.06); }
 .mkt-cell .row1 {
   display: flex; align-items: baseline; gap: 6px;
 }
@@ -64,7 +86,7 @@ function _isTwSym(s) { return window.Colors ? Colors.isTW(s) : (/^\d/.test(Strin
 .mkt-cell.loading .px,
 .mkt-cell.loading .delta,
 .mkt-cell.loading .ch { color: var(--tf); }
-/* 紅漲綠跌 — 大盤一律台股慣例 */
+/* 紅漲綠跌 — 大盤一律台股慣例（美股格由 JS 依 redUp 覆寫） */
 .mkt-cell .up   { color: var(--red); }
 .mkt-cell .down { color: var(--green); }
 .mkt-cell .flat { color: var(--tlo); }
@@ -125,8 +147,9 @@ body.market-us .price-down, body.market-us .neg { color: var(--red) !important; 
        chart-info 改兩欄：左=價格/漲跌/名稱(窄欄)，右=OHLC視窗緊貼股價後 + 圖例。
        視窗縮小約一半(字級/間距減)、半透明，避免遮到 K 線。 */
 #ci-row { display: flex; align-items: flex-start; gap: 8px; }
-#ci-row .ci-left { min-width: 0; max-width: 150px; }
+#ci-row .ci-left { min-width: 0; max-width: 200px; }
 #ci-row .ci-left #ci-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ci-row .ci-left .ci-range-chg { font-size: 10px; line-height: 1.35; }
 #ci-east { display: flex; flex-direction: column; align-items: flex-end; }
 #ci-east #ci-ohlc {
   margin-top: 0; font-size: 8px; line-height: 1.5; letter-spacing: .2px;
@@ -165,65 +188,126 @@ body.market-us .price-down, body.market-us .neg { color: var(--red) !important; 
 })();
 
 // ============================================================
-// (1) Market overview ticker bar — replaces removed indbar
+// (1) Market overview ticker bar — 大盤 / 市場 雙 tab
+// ------------------------------------------------------------
+// 大盤：台股現貨／期／融資／台總經
+// 市場：美總經／全球指數／商品
 // ============================================================
-const MKT_INDICES = [
-  {sym:'^TWII', name:'加權'},
-  {sym:'__TXF__', name:'台指期'},   // TAIFEX 即時(含夜盤)，特例來源 /txf
-  {sym:'^TWOII', name:'櫃買'},
-  {sym:'__MARGIN_RATIO__', name:'融資維持'},
-  {sym:'^SOX',  name:'費半',  redUp:false},   // 美股:漲綠跌紅
-  {sym:'^GSPC', name:'S&P500',redUp:false},
-  {sym:'^IXIC', name:'NASDAQ',redUp:false},
-  {sym:'^DJI',  name:'道瓊',  redUp:false},
-  {sym:'^N225', name:'日經'},
-  {sym:'^HSI',  name:'恆生'},
-  {sym:'^KS11', name:'韓國'},      // KOSPI
-  {sym:'GC=F',  name:'黃金'},      // COMEX 黃金期貨
-  {sym:'SI=F',  name:'白銀'},      // COMEX 白銀期貨
-  {sym:'CL=F',  name:'原油'},      // WTI 原油期貨
-];
+const MKT_TABS = {
+  tw: {
+    id: 'tw',
+    label: '大盤',
+    title: '台股大盤（加權／期／櫃買／融資／融資週期／台利率）',
+    items: [
+      {sym:'^TWII', name:'加權'},
+      {sym:'__TXF__', name:'台指期'},
+      {sym:'^TWOII', name:'櫃買'},
+      {sym:'__MARGIN_RATIO__', name:'融資維持'},
+      {sym:'__TW_MARGIN_CYCLE__', name:'融資週期'},
+      {sym:'__TW_RATES__', name:'台利率'},
+      {sym:'__TW_MARGIN_MIX__', name:'融資比YoY'},
+    ],
+  },
+  mkt: {
+    id: 'mkt',
+    label: '市場',
+    title: '全球市場（美總經／指數／商品）',
+    items: [
+      {sym:'__US_RATES_CREDIT__', name:'美利率債'},
+      {sym:'__US_CPI_FIN__', name:'CPI金融'},
+      {sym:'^SOX',  name:'費半',  redUp:false},
+      {sym:'^GSPC', name:'S&P500',redUp:false},
+      {sym:'^IXIC', name:'NASDAQ',redUp:false},
+      {sym:'^DJI',  name:'道瓊',  redUp:false},
+      {sym:'^N225', name:'日經'},
+      {sym:'^HSI',  name:'恆生'},
+      {sym:'^KS11', name:'韓國'},
+      {sym:'GC=F',  name:'黃金'},
+      {sym:'SI=F',  name:'白銀'},
+      {sym:'CL=F',  name:'原油'},
+    ],
+  },
+};
+// 扁平清單（refresh 迴圈仍用）
+const MKT_INDICES = [].concat(MKT_TABS.tw.items, MKT_TABS.mkt.items);
+
+function _mktCellHtml(m) {
+  return `<div class="mkt-cell loading" data-mkt-sym="${m.sym}" title="點擊載入 ${m.name}">
+    <div class="row1">
+      <span class="nm">${m.name}</span>
+      <span class="px">--</span>
+    </div>
+    <div class="row2">
+      <span class="delta">--</span>
+      <span class="ch">--</span>
+    </div>
+  </div>`;
+}
+
+function setMktBarTab(tabId, persist) {
+  const id = (tabId === 'mkt') ? 'mkt' : 'tw';
+  const bar = document.getElementById('mkt-bar');
+  if (!bar) return;
+  bar.querySelectorAll('.mkt-tab').forEach(btn => {
+    btn.classList.toggle('on', btn.getAttribute('data-mkt-tab') === id);
+  });
+  bar.querySelectorAll('.mkt-panel').forEach(p => {
+    p.classList.toggle('on', p.getAttribute('data-mkt-panel') === id);
+  });
+  if (persist !== false) {
+    try { localStorage.setItem('stockTerminal.mktBarTab', id); } catch (_) {}
+  }
+}
 
 (function injectMktBar() {
   if (!document.getElementById('left')) return setTimeout(injectMktBar, 100);
   if (document.getElementById('mkt-bar')) return;
+
+  let saved = 'tw';
+  try {
+    const v = localStorage.getItem('stockTerminal.mktBarTab');
+    if (v === 'mkt' || v === 'tw') saved = v;
+  } catch (_) {}
+
   const bar = document.createElement('div');
   bar.id = 'mkt-bar';
-  bar.innerHTML = '<div id="mkt-bar-inner">' +
-    MKT_INDICES.map(m =>
-      // v3.1 觀察清單風格雙列：
-      //   行 1：指數名（小灰）+ 加權值（大字）
-      //   行 2：▲漲跌值 ▲漲跌% （小字、台股紅漲綠跌）
-      `<div class="mkt-cell loading${m.sym==='__TXF__'?' nochart':''}" data-mkt-sym="${m.sym}" title="${m.sym==='__TXF__'?'台指期(無獨立K線)':'點擊載入 '+m.name+' K 線'}">
-        <div class="row1">
-          <span class="nm">${m.name}</span>
-          <span class="px">--</span>
-        </div>
-        <div class="row2">
-          <span class="delta">--</span>
-          <span class="ch">--</span>
-        </div>
-      </div>`
-    ).join('') + '</div>';
+  bar.innerHTML =
+    `<div id="mkt-bar-tabs" role="tablist" aria-label="大盤與市場">` +
+      Object.values(MKT_TABS).map(t =>
+        `<button type="button" class="mkt-tab${t.id === saved ? ' on' : ''}" role="tab"` +
+        ` data-mkt-tab="${t.id}" title="${t.title}" aria-selected="${t.id === saved}">${t.label}</button>`
+      ).join('') +
+    `</div>` +
+    `<div id="mkt-bar-panels">` +
+      Object.values(MKT_TABS).map(t =>
+        `<div class="mkt-panel${t.id === saved ? ' on' : ''}" data-mkt-panel="${t.id}" role="tabpanel">` +
+          `<div class="mkt-bar-inner">${t.items.map(_mktCellHtml).join('')}</div>` +
+        `</div>`
+      ).join('') +
+    `</div>`;
+
   const left = document.getElementById('left');
   const indbar = document.getElementById('indbar');
   if (indbar) left.insertBefore(bar, indbar.nextSibling);
   else left.appendChild(bar);
-  // v3.9:點下面大盤 cell 直接帶出該指數/期貨 K 線(事件委派)。
-  //   指數(^...)/商品期(=F)一律用 'US' 市場避免被附 .TW;台指期無 K 線符號故略過。
+
   bar.addEventListener('click', function (e) {
+    const tabBtn = e.target.closest && e.target.closest('.mkt-tab');
+    if (tabBtn) {
+      setMktBarTab(tabBtn.getAttribute('data-mkt-tab'));
+      return;
+    }
     const cell = e.target.closest && e.target.closest('.mkt-cell');
     if (!cell) return;
     const sym = cell.getAttribute('data-mkt-sym');
-    if (!sym || sym === '__TXF__') return;
-    if (typeof loadSym === 'function') loadSym(sym, 'US');
+    if (!sym) return;
+    if (typeof loadSym === 'function') {
+      const mkt = (typeof Market !== 'undefined' && Market.of) ? Market.of(sym) : 'US';
+      loadSym(sym, mkt);
+    }
   });
-  // 點擊提示樣式
-  const st = document.createElement('style');
-  st.textContent = '.mkt-cell{cursor:pointer;transition:background .12s}' +
-    '.mkt-cell:hover{background:rgba(255,255,255,.06)}' +
-    '.mkt-cell.nochart{cursor:default}.mkt-cell.nochart:hover{background:none}';
-  document.head.appendChild(st);
+
+  window.setMktBarTab = setMktBarTab;
   refreshMktBar();
   setInterval(refreshMktBar, 60_000);
 })();
@@ -237,7 +321,7 @@ function fmtIdx(v) {
 
 async function refreshMktBar() {
   try {
-    const syms = MKT_INDICES.filter(m => m.sym !== '__TXF__' && m.sym !== '__MARGIN_RATIO__').map(m => m.sym).join(',');
+    const syms = MKT_INDICES.filter(m => m.sym !== '__TXF__' && !(m.sym.startsWith('__') && m.sym.endsWith('__'))).map(m => m.sym).join(',');
     // v3.3 改 range=5d：原 range=2d 只有兩根 K，遇到 Yahoo 日線資料落後
     //   於 regularMarketPrice 時無法做時間軸交叉驗證，會直接用「昨日的
     //   昨日 vs 前日」算出昨日的 % 變化（櫃買/日經顯示 0.00% 即此 bug）。
@@ -302,6 +386,59 @@ async function refreshMktBar() {
   try { await refreshTxfCell(); } catch (e) { console.warn('[polish-v3] txf failed:', e); }
   // 大盤融資維持率 — 本地特例數據
   try { await refreshMarginRatioCell(); } catch (e) { console.warn('[polish-v3] margin ratio cell failed:', e); }
+  // MacroMicro 追蹤圖格（台利率／融資比／美利率債／CPI金融）
+  try { await refreshMacroTrackCells(); } catch (e) { console.warn('[polish-v3] macro track cells failed:', e); }
+}
+
+async function refreshMacroTrackCells() {
+  const ids = (window.ChartRegistry && ChartRegistry.MACRO_TRACK_IDS)
+    ? ChartRegistry.MACRO_TRACK_IDS.slice()
+    : [
+      '__TW_RATES__', '__TW_MARGIN_MIX__', '__TW_MARGIN_CYCLE__',
+      '__US_RATES_CREDIT__', '__US_CPI_FIN__',
+    ];
+  await Promise.all(ids.map(async (id) => {
+    const cell = document.querySelector(`[data-mkt-sym="${id}"]`);
+    if (!cell) return;
+    try {
+      const r = await fetch(`${SERVER_P}/macro/chart/${encodeURIComponent(id)}?years=5`, { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      const series = (d && d.series) || [];
+      const primary = (window.ChartRegistry && ChartRegistry.pickPrimarySeries)
+        ? ChartRegistry.pickPrimarySeries(series, id)
+        : series.find(s => s.scale === 'left' && s.points && s.points.length);
+      // 絕不退回右軸加權／指數，避免格上出現 43654 這種指數價
+      if (!primary || !primary.points || !primary.points.length) return;
+      const pts = primary.points;
+      const cur = pts[pts.length - 1].value;
+      const prev = pts.length >= 2 ? pts[pts.length - 2].value : cur;
+      const delta = cur - prev;
+      const unit = primary.unit || '';
+      cell.classList.remove('loading');
+      const px = cell.querySelector('.px');
+      if (px) {
+        px.textContent = (Math.abs(cur) >= 100 ? cur.toFixed(1) : cur.toFixed(2)) + (unit === '%' ? '%' : '');
+      }
+      const dir = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+      const tw = !(id.indexOf('__US_') === 0);
+      const _mc = window.Colors ? Colors.dirRU(tw, delta) : '';
+      const dEl = cell.querySelector('.delta');
+      if (dEl) {
+        dEl.className = 'delta ' + dir;
+        if (_mc) dEl.style.color = _mc;
+        dEl.textContent = (delta >= 0 ? '+' : '') + delta.toFixed(2) + (unit === '%' ? 'pp' : '');
+      }
+      const ch = cell.querySelector('.ch');
+      if (ch) {
+        ch.className = 'ch ' + dir;
+        if (_mc) ch.style.color = _mc;
+        const pct = prev ? (delta / prev * 100) : 0;
+        ch.textContent = (delta >= 0 ? '▲' : '▼') + Math.abs(pct).toFixed(2) + '%';
+      }
+      cell.title = (d.name || id) + ' · 點擊載入追蹤圖';
+    } catch (e) { /* ignore per-cell */ }
+  }));
 }
 
 async function refreshMarginRatioCell() {
@@ -311,6 +448,7 @@ async function refreshMarginRatioCell() {
     const d = await r.json();
     const res = d?.chart?.result?.[0];
     if (!res) return;
+    const meta = res.meta || {};
     const tsArr = res.timestamp || [];
     const rawCloses = res.indicators?.quote?.[0]?.close || [];
     const valid = [];
@@ -320,31 +458,184 @@ async function refreshMarginRatioCell() {
       }
     }
     if (valid.length < 1) return;
-    const cur = valid[valid.length - 1];
-    const prev = valid.length >= 2 ? valid[valid.length - 2] : cur;
-    const delta = cur - prev;
+    // 優先用 meta 即時／權威值（與主圖一致）
+    const cur = (meta.regularMarketPrice != null && isFinite(meta.regularMarketPrice))
+      ? meta.regularMarketPrice : valid[valid.length - 1];
+    const prev = (meta.regularMarketPreviousClose != null && isFinite(meta.regularMarketPreviousClose))
+      ? meta.regularMarketPreviousClose
+      : (meta.previousClose != null && isFinite(meta.previousClose))
+        ? meta.previousClose
+        : (valid.length >= 2 ? valid[valid.length - 2] : cur);
+    const delta = cur - prev;           // 百分點 (pp)
     const cell = document.querySelector(`[data-mkt-sym="__MARGIN_RATIO__"]`);
     if (!cell) return;
-    
+
     cell.classList.remove('loading');
     cell.querySelector('.px').textContent = cur.toFixed(2) + '%';
-    
+
+    // 風險色：≤140 偏警戒底色（不覆蓋漲跌色）
+    if (cur <= 140) cell.style.boxShadow = 'inset 0 0 0 1px rgba(239,68,68,.45)';
+    else if (cur <= 150) cell.style.boxShadow = 'inset 0 0 0 1px rgba(249,115,22,.35)';
+    else cell.style.boxShadow = '';
+
     const dir = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
     const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
     const _mc = window.Colors ? Colors.dirRU(true, delta) : ''; // 增加為紅、減少為綠
-    
+
     const dEl = cell.querySelector('.delta');
     dEl.className = 'delta ' + dir;
     if (_mc) dEl.style.color = _mc;
-    dEl.textContent = sign + Math.abs(delta).toFixed(2) + '%';
-    
+    // 日變化以百分點顯示（與維持率單位一致）
+    dEl.textContent = sign + Math.abs(delta).toFixed(2) + 'pp';
+
     const ch = cell.querySelector('.ch');
     ch.className = 'ch ' + dir;
     if (_mc) ch.style.color = _mc;
     const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '－';
     ch.textContent = arrow + (prev > 0 ? (delta / prev * 100).toFixed(2) : '0.00') + '%';
+    cell.title = '大盤融資維持率 ' + cur.toFixed(2) + '%（點擊載入歷史圖 · TWSE／MacroMicro 對齊公式）';
   } catch (e) { console.warn('[polish-v3] margin ratio cell refresh failed:', e); }
 }
+
+// ============================================================
+// 大盤融資維持率 — 圖表風險區間 + 歷史資訊列（MacroMicro 對齊）
+// ============================================================
+(function marginRatioChartEnhance() {
+  const ZONE_DEFAULTS = [
+    { level: 130, label: '危險 130', color: '#ef4444' },
+    { level: 140, label: '警戒 140', color: '#f97316' },
+    { level: 150, label: '偏弱 150', color: '#eab308' },
+    { level: 166, label: '門檻 166', color: '#38bdf8' },
+  ];
+  let _lines = [];
+  let _metaCache = null;
+
+  function clearLines() {
+    if (!S.chartSeries) { _lines = []; return; }
+    for (const pl of _lines) {
+      try { S.chartSeries.removePriceLine(pl); } catch (e) {}
+    }
+    _lines = [];
+  }
+
+  function ensureBanner() {
+    let el = document.getElementById('margin-ratio-banner');
+    if (el) return el;
+    const host = document.getElementById('chart-info') || document.getElementById('left');
+    if (!host) return null;
+    el = document.createElement('div');
+    el.id = 'margin-ratio-banner';
+    el.style.cssText = [
+      'display:none', 'margin:4px 8px 0', 'padding:6px 10px',
+      'font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+      'color:#cbd5e1', 'background:linear-gradient(90deg,rgba(56,189,248,.08),rgba(15,23,42,.2))',
+      'border:1px solid rgba(56,189,248,.25)', 'border-radius:4px',
+    ].join(';');
+    host.parentNode.insertBefore(el, host.nextSibling);
+    return el;
+  }
+
+  function hideBanner() {
+    const el = document.getElementById('margin-ratio-banner');
+    if (el) el.style.display = 'none';
+  }
+
+  function renderBanner(m) {
+    const el = ensureBanner();
+    if (!el || !m) return;
+    const zone = m.riskZone;
+    const zoneHtml = zone
+      ? `<span style="color:${zone.color || '#f97316'};font-weight:700">◎ ${zone.label || ''}</span>`
+      : `<span style="color:#4ade80">◎ 正常區（&gt;166%）</span>`;
+    const bf = m.backfill || {};
+    const bfNote = bf.running
+      ? ` · 回補中 ${bf.done || 0}/${bf.total || '?'} (${bf.phase || ''})`
+      : '';
+    el.innerHTML =
+      `<b style="color:#7dd3fc">大盤融資維持率</b> ` +
+      `<b style="color:#f8fafc;font-size:13px">${(m.current != null ? m.current.toFixed(2) : '--')}%</b> ` +
+      zoneHtml +
+      `<span style="color:#94a3b8"> · 雙軸折線（維持率L／加權R）· 歷史 ${m.firstDate || '—'} → ${m.lastDate || '—'}（${m.count || 0} 日）` +
+      ` · 區間 ${m.min != null ? m.min.toFixed(1) : '—'}–${m.max != null ? m.max.toFixed(1) : '—'}%` +
+      ` · 均 ${m.avg != null ? m.avg.toFixed(1) : '—'}%</span>` +
+      `<div style="color:#64748b;margin-top:2px">公式：${m.formula || 'Σ(融資市值,不含ETF)/融資金額×100'} · 來源 ${m.source || 'TWSE'}${bfNote}` +
+      ` · <a href="${m.reference || 'https://www.macromicro.me/charts/53117/taiwan-taiex-maintenance-margin'}" target="_blank" rel="noopener" style="color:#38bdf8">MacroMicro 對照</a>` +
+      ` · <button type="button" id="margin-bf-btn" style="cursor:pointer;background:#0f172a;color:#7dd3fc;border:1px solid #334155;border-radius:3px;padding:1px 6px;font:inherit">回補全歷史</button></div>`;
+    el.style.display = 'block';
+    const btn = document.getElementById('margin-bf-btn');
+    if (btn) {
+      btn.onclick = async () => {
+        btn.disabled = true;
+        btn.textContent = '啟動中…';
+        try {
+          await fetch(`${SERVER_P}/margin_ratio?action=backfill&full=1`, { cache: 'no-store' });
+          btn.textContent = '已背景回補';
+          setTimeout(() => applyMarginEnhance(true), 2500);
+        } catch (e) {
+          btn.textContent = '失敗';
+          btn.disabled = false;
+        }
+      };
+    }
+  }
+
+  function applyZones(zones) {
+    clearLines();
+    // MarketChart 已畫風險虛線且用浮動窗標註 → 勿再疊軸上標籤
+    if (window.MarketChart && window.S && (S._marketChartId || MarketChart.resolve(S.sym))) {
+      return;
+    }
+    if (!S.chartSeries || typeof S.chartSeries.createPriceLine !== 'function') return;
+    const list = (zones && zones.length) ? zones : ZONE_DEFAULTS;
+    const LS = (window.LightweightCharts && LightweightCharts.LineStyle)
+      ? LightweightCharts.LineStyle.Dashed : 2;
+    for (const z of list) {
+      try {
+        const pl = S.chartSeries.createPriceLine({
+          price: z.level,
+          color: z.color || '#64748b',
+          lineWidth: 1,
+          lineStyle: LS,
+          axisLabelVisible: false,
+          title: '',
+        });
+        _lines.push(pl);
+      } catch (e) {}
+    }
+  }
+
+  async function applyMarginEnhance(forceMeta) {
+    if (S.sym !== '__MARGIN_RATIO__') {
+      clearLines();
+      hideBanner();
+      return;
+    }
+    // 價格顯示加 %
+    const pEl = document.getElementById('ci-price');
+    if (pEl && pEl.textContent && !pEl.textContent.includes('%')) {
+      pEl.textContent = pEl.textContent.trim() + '%';
+    }
+    const nEl = document.getElementById('ci-name');
+    if (nEl) nEl.textContent = '大盤融資維持率';
+    try {
+      if (forceMeta || !_metaCache) {
+        const r = await fetch(`${SERVER_P}/margin_ratio`, { cache: 'no-store' });
+        if (r.ok) _metaCache = await r.json();
+      }
+    } catch (e) {}
+    applyZones(_metaCache && _metaCache.riskZones);
+    renderBanner(_metaCache || {
+      current: S.data && S.data.candles && S.data.candles.length
+        ? S.data.candles[S.data.candles.length - 1].close : null,
+      formula: 'Σ(融資市值,不含ETF)/融資金額×100',
+      source: 'TWSE',
+    });
+  }
+
+  window.addEventListener('symLoaded', () => {
+    setTimeout(() => applyMarginEnhance(true), 80);
+  });
+})();
 
 // TWSE MIS 即時：加權(t00)→^TWII、櫃買(o00)→^TWOII。
 // 有有效 price 才覆寫 Yahoo 值；盤前無成交(price=null)則保留 Yahoo。
@@ -424,23 +715,25 @@ function applyMarketColorClass(mkt) {
     };
   }
 })();
-// Patch ci-chg color update (loadSym sets .style.color directly) to use class
+// Patch ci-chg / ci-range-chg：symLoaded 後再對齊顏色與區間漲跌（避免 race）
 (function patchCiChg() {
-  // After symLoaded, fix the ci-chg color via class instead of inline
-  // 與 loadSym 同步邏輯：intraday 用 yesterdayClose（= chartPreviousClose），
-  // daily 用 prev candle close；避免 5min K 倒數第二根當作昨收的色彩誤判。
+  // After symLoaded, 重跑 updateHeaderChg：日漲跌(昨收) + 區間漲跌(rangeBase)
+  // 與 loadSym 同步：intraday 用 yesterdayClose（= chartPreviousClose），
+  // daily 用權威昨收；區間用 chartPreviousClose / trim 前一根。
   window.addEventListener('symLoaded', () => {
-    const el = document.getElementById('ci-chg');
-    if (!el || !S.data?.candles?.length) return;
+    if (!S.data?.candles?.length) return;
     const last = S.data.candles[S.data.candles.length - 1];
     const prev = S.data.candles[S.data.candles.length - 2];
     const ref = (S.data.yesterdayClose != null && S.data.yesterdayClose > 0)
       ? S.data.yesterdayClose
       : (prev ? prev.close : null);
-    if (ref == null) return;
-    // 直接依「目前載入個股的市場」上色(以昨收為基準),不靠全域 body.market-* class —
-    // 因 loadSym 切股不會更新 body class,且全域 class 會牽動混合市場的自選股清單。
-    // 台股:漲紅跌綠;美股:漲綠跌紅;平盤無色。
+    if (typeof updateHeaderChg === 'function') {
+      updateHeaderChg(last.close, ref, S.data.rangeBase, S.data.rangeChgLbl, S.mkt, S.sym);
+      return;
+    }
+    // fallback：舊版無 updateHeaderChg 時只修日漲跌色
+    const el = document.getElementById('ci-chg');
+    if (!el || ref == null) return;
     el.classList.remove('price-up', 'price-down');
     el.style.color = (last.close === ref) ? ''
       : (window.Colors ? Colors.dir(S.sym, last.close - ref)
@@ -475,23 +768,260 @@ function applyMarketColorClass(mkt) {
       const price = ix.price, prev = ix.prevClose, pct = (price - prev) / prev * 100;
       if (S.data) S.data.yesterdayClose = prev;
       const pEl = document.getElementById('ci-price'); if (pEl) pEl.textContent = price.toFixed(2);
-      const cEl = document.getElementById('ci-chg');
-      if (cEl) {
-        cEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
-        cEl.classList.remove('price-up', 'price-down');
-        cEl.style.color = window.Colors ? Colors.dir(sym, pct) : (pct > 0 ? 'var(--red)' : pct < 0 ? 'var(--green)' : '');   // 台股指數紅漲綠跌
+      // 日漲跌 + 區間漲跌一併更新（區間基準不變，只刷新現價差額）
+      if (typeof updateHeaderChg === 'function') {
+        updateHeaderChg(price, prev, S.data && S.data.rangeBase, S.data && S.data.rangeChgLbl, 'TW', sym);
+      } else {
+        const cEl = document.getElementById('ci-chg');
+        if (cEl) {
+          cEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+          cEl.classList.remove('price-up', 'price-down');
+          cEl.style.color = window.Colors ? Colors.dir(sym, pct) : (pct > 0 ? 'var(--red)' : pct < 0 ? 'var(--green)' : '');
+        }
       }
       console.log('[polish-v3] ^TW index header corrected via TWSE (early-session lag):', sym, price, pct.toFixed(2) + '%');
     } catch (e) { /* keep Yahoo on failure */ }
   });
 })();
 
+// ============================================================
+// 大盤融資維持率 — 已迁至 src/chart/market_chart_v3.js（MarketChart）
+// polish 僅保留 shim：MarketChart 優先，未載入才走本地後備。
+// ============================================================
+function renderMarginRatioMacroChart(candles) {
+  if (window.MarketChart && typeof MarketChart.render === 'function') {
+    const def = MarketChart.resolve('__MARGIN_RATIO__');
+    const pts = (candles && candles.length)
+      ? candles.map(c => ({ time: c.time, value: c.close }))
+      : ((window.S && S.data && S.data.candles) || []).map(c => ({ time: c.time, value: c.close }));
+    if (def && pts.length) {
+      MarketChart.render(def, pts);
+      return;
+    }
+  }
+  _renderMarginRatioMacroChartFallback(candles);
+}
+
+function _renderMarginRatioMacroChartFallback(candles) {
+  const wrap = document.getElementById('chart-wrap');
+  if (!wrap || typeof LightweightCharts === 'undefined') {
+    console.warn('[margin-chart] chart-wrap / LightweightCharts missing');
+    return;
+  }
+  if (!candles || !candles.length) {
+    console.warn('[margin-chart] no candles');
+    return;
+  }
+
+  if (S.chart) {
+    try { S.chart.remove(); } catch (e) {}
+    S.chart = null;
+  }
+
+  const userTzOffset = -new Date().getTimezoneOffset() * 60;
+  S.tzOffset = userTzOffset;
+  const tz = (t) => (t == null ? t : t + userTzOffset);
+  const _marginLoadId = window.__loadSeq;
+
+  const chart = LightweightCharts.createChart(wrap, {
+    width: wrap.clientWidth,
+    height: wrap.clientHeight,
+    layout: { background: { color: '#060A12' }, textColor: '#5A6A82' },
+    grid: { vertLines: { color: '#0F1A2B' }, horzLines: { color: '#0F1A2B' } },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Magnet,
+      vertLine: { color: 'rgba(245,197,24,.55)', width: 1, style: 2, labelVisible: true, labelBackgroundColor: '#B8860B' },
+      horzLine: { color: 'rgba(245,197,24,.55)', width: 1, style: 2, labelVisible: true, labelBackgroundColor: '#B8860B' },
+    },
+    leftPriceScale: {
+      visible: true,
+      borderColor: '#1A2740',
+      scaleMargins: { top: 0.08, bottom: 0.10 },
+    },
+    rightPriceScale: {
+      visible: true,
+      borderColor: '#1A2740',
+      scaleMargins: { top: 0.08, bottom: 0.10 },
+    },
+    timeScale: {
+      borderColor: '#1A2740',
+      timeVisible: false,
+      secondsVisible: false,
+      rightOffset: 2,
+      barSpacing: 2,
+      minBarSpacing: 0.5,
+      fixLeftEdge: true,
+      fixRightEdge: true,
+      lockVisibleTimeRangeOnResize: true,
+    },
+    handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+    handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+  });
+  S.chart = chart;
+
+  const lineData = candles.map(c => ({ time: tz(c.time), value: c.close }));
+  const area = chart.addAreaSeries({
+    priceScaleId: 'left',
+    lineColor: '#38BDF8',
+    topColor: 'rgba(56,189,248,0.22)',
+    bottomColor: 'rgba(56,189,248,0.02)',
+    lineWidth: 2,
+    lastValueVisible: false,
+    priceLineVisible: false,
+    crosshairMarkerVisible: true,
+    crosshairMarkerRadius: 5,
+    crosshairMarkerBorderColor: '#7DD3FC',
+    crosshairMarkerBackgroundColor: '#0EA5E9',
+    priceFormat: {
+      type: 'custom',
+      formatter: v => (v != null && isFinite(v) ? v.toFixed(2) + '%' : ''),
+    },
+  });
+  area.setData(lineData);
+  S.chartSeries = area;
+  S.dotSeries = area;
+  S.volSeries = null;
+  S.overlaySeries = {};
+  S.wsSeries = null;
+  S.wsLeftSeries = null;
+  S.twiiSeries = null;
+  S._prevLine = null;
+  S._marginMacroChart = true; // 偵測標記：確認已走折線路徑
+
+  const _prevCloseByTime = new Map();
+  for (let i = 0; i < candles.length; i++) {
+    _prevCloseByTime.set(tz(candles[i].time), i > 0 ? candles[i - 1].close : null);
+  }
+  const _twiiByTime = new Map();
+
+  chart.subscribeCrosshairMove(param => {
+    const ohlcEl = document.getElementById('ci-ohlc');
+    if (!ohlcEl) return;
+    if (!param || !param.point || !param.time || !param.seriesData) {
+      ohlcEl.style.display = 'none';
+      return;
+    }
+    const pt = param.seriesData.get(area);
+    if (!pt || pt.value == null) { ohlcEl.style.display = 'none'; return; }
+    const d = new Date(typeof param.time === 'number' ? param.time * 1000 : Date.parse(param.time));
+    const ds = `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}`;
+    const prev = _prevCloseByTime.get(param.time);
+    const delta = (prev != null && prev > 0) ? (pt.value - prev) : null;
+    const chgPct = (delta != null && prev > 0) ? (delta / prev * 100) : null;
+    const up = delta != null && delta > 0;
+    const dn = delta != null && delta < 0;
+    const col = up ? 'var(--red)' : (dn ? 'var(--green)' : 'var(--tlo)');
+    const twii = _twiiByTime.get(param.time);
+    const twiiHtml = (twii != null && isFinite(twii))
+      ? `<span class="ohlc-k" style="margin-left:10px">加權(R)</span><span class="ohlc-v" style="color:#F59E0B">${twii.toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>`
+      : '';
+    ohlcEl.style.display = 'block';
+    ohlcEl.innerHTML =
+      `<span class="ohlc-d">${ds}</span>` +
+      `<span class="ohlc-k">維持率(L)</span><span class="ohlc-v" style="color:${col}">${pt.value.toFixed(2)}%</span>` +
+      (delta != null
+        ? `<span style="color:${col};margin-left:6px">${up ? '+' : ''}${delta.toFixed(2)}pp` +
+          (chgPct != null ? ` (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)` : '') + `</span>`
+        : '') +
+      twiiHtml;
+  });
+
+  // 右軸加權指數
+  (async () => {
+    try {
+      if (typeof fetchYF !== 'function' || typeof parseYF !== 'function') return;
+      const rdef = (typeof currentRangeDef === 'function') ? currentRangeDef() : { range: 'max', interval: '1d' };
+      const raw = await fetchYF('^TWII', { range: (rdef && rdef.range) || 'max', interval: '1d' });
+      if (_marginLoadId !== window.__loadSeq || S.sym !== '__MARGIN_RATIO__' || S.chart !== chart) return;
+      const parsed = parseYF(raw);
+      if (!parsed || !parsed.candles || !parsed.candles.length) return;
+      const twiiData = parsed.candles.map(c => ({ time: tz(c.time), value: c.close }));
+      _twiiByTime.clear();
+      for (const p of twiiData) _twiiByTime.set(p.time, p.value);
+      const twiiLine = chart.addLineSeries({
+        priceScaleId: 'right',
+        color: '#F59E0B',
+        lineWidth: 1.5,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        crosshairMarkerVisible: true,
+        crosshairMarkerRadius: 4,
+        crosshairMarkerBorderColor: '#FCD34D',
+        crosshairMarkerBackgroundColor: '#F59E0B',
+        priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+      });
+      twiiLine.setData(twiiData);
+      S.twiiSeries = twiiLine;
+      S.overlaySeries = Object.assign({}, S.overlaySeries, { twii: twiiLine });
+      try { if (typeof renderChartLegend === 'function') renderChartLegend(); } catch (e) {}
+    } catch (e) {
+      console.warn('[margin-chart] TWII overlay failed:', e);
+    }
+  })();
+
+  // Header 強制顯示正確名稱／%
+  try {
+    const last = candles[candles.length - 1];
+    const pEl = document.getElementById('ci-price');
+    if (pEl && last) pEl.textContent = Number(last.close).toFixed(2) + '%';
+    const nEl = document.getElementById('ci-name');
+    if (nEl) nEl.textContent = '大盤融資維持率';
+    const info = document.getElementById('chart-info');
+    if (info) info.style.display = '';
+    const loading = document.getElementById('chart-loading');
+    if (loading) loading.style.display = 'none';
+  } catch (e) {}
+
+  requestAnimationFrame(() => {
+    try { chart.timeScale().fitContent(); } catch (e) {}
+  });
+  if (!wrap._marginRo) {
+    wrap._marginRo = new ResizeObserver(() => {
+      if (!S.chart || S.sym !== '__MARGIN_RATIO__') return;
+      try {
+        S.chart.applyOptions({ width: wrap.clientWidth, height: wrap.clientHeight });
+        S.chart.timeScale().fitContent();
+      } catch (e) {}
+    });
+    wrap._marginRo.observe(wrap);
+  }
+  console.log('[margin-chart] MacroMicro dual-axis area rendered', candles.length, 'pts');
+}
+
+// 融資維持率 load/render 改由 MarketChart 模組攔截；此處不再重複 wrap loadSym。
+// 若 MarketChart 尚未載入，仍擋掉 K 線重色路徑。
 (function patchRenderChartPolish() {
   if (typeof renderChart !== 'function') return setTimeout(patchRenderChartPolish, 100);
   if (window._polishChartPatched) return;
   window._polishChartPatched = true;
   const orig = window.renderChart;
   window.renderChart = function (candles) {
+    // MarketChart 優先；否則本地後備折線（絕不走下方 K 線重色）
+    if (S.sym === '__MARGIN_RATIO__' || (window.MarketChart && MarketChart.resolve(S.sym))) {
+      try {
+        if (window.MarketChart && MarketChart.resolve(S.sym)) {
+          const def = MarketChart.resolve(S.sym);
+          const pts = (candles && candles.length)
+            ? candles.map(c => ({ time: c.time, value: c.close }))
+            : ((S.data && S.data.candles) || []).map(c => ({ time: c.time, value: c.close }));
+          MarketChart.render(def, pts);
+        } else {
+          renderMarginRatioMacroChart(candles || (S.data && S.data.candles) || []);
+        }
+      } catch (e) {
+        console.error('[margin-chart] render failed:', e);
+      }
+      setTimeout(() => {
+        try { if (typeof renderChartLegend === 'function') renderChartLegend(); } catch (e) {}
+        try {
+          window.dispatchEvent(new CustomEvent('symLoaded', { detail: { sym: S.sym, mkt: S.mkt } }));
+        } catch (e) {}
+      }, 40);
+      return;
+    }
+
+    S._marginMacroChart = false;
+
     // TW/US: swap candle up/down colors before original render reads them
     const tw = _isTwSym(S.sym) || (S.mkt || 'TW') === 'TW';
     const UP = tw ? '#F87171' : '#4ADE80';   // TW red-up / US green-up
@@ -594,6 +1124,9 @@ function applyMarketColorClass(mkt) {
   };
 })();
 
+// MarketChart 模組會維持最外層 hook；此處不再延遲重掛，避免與 MarketChart 搶 renderChart。
+// （舊 ensureMarginChartOutermost 已移除）
+
 // 在右側價格軸「對應價位高度」放昨收/今收小標籤（不橫跨、不蓋 K 線）
 // 像原生現價標一樣貼在軸上，今收=漲跌色、昨收=灰。
 function renderCloseReadout(close, prevClose) {
@@ -635,7 +1168,7 @@ function renderChartLegend() {
   if (!east) {
     const row = document.createElement('div'); row.id = 'ci-row';
     const left = document.createElement('div'); left.className = 'ci-left';
-    ['ci-price', 'ci-chg', 'ci-name'].forEach(id => {
+    ['ci-price', 'ci-chg', 'ci-range-chg', 'ci-name', 'market-score-bar'].forEach(id => {
       const el = document.getElementById(id); if (el) left.appendChild(el);
     });
     east = document.createElement('div'); east.id = 'ci-east';
@@ -654,6 +1187,17 @@ function renderChartLegend() {
     lg.addEventListener('click', e => { e.stopPropagation(); lg.classList.toggle('collapsed'); });
     east.appendChild(lg);
   }
+  // 融資維持率：雙軸折線圖例（MacroMicro：維持率L + 加權R）
+  if (S.sym === '__MARGIN_RATIO__') {
+    lg.innerHTML =
+      `<div class="lg-row" style="color:#38BDF8"><span class="lg-swatch" style="background:#38BDF8"></span>融資維持率 (L)</div>` +
+      `<div class="lg-row" style="color:#F59E0B"><span class="lg-swatch" style="background:#F59E0B"></span>加權指數 (R)</div>` +
+      `<div class="lg-row" style="color:#38bdf8"><span class="lg-dash" style="width:9px;border-color:#38bdf8"></span>門檻 166%</div>` +
+      `<div class="lg-row" style="color:#eab308"><span class="lg-dash" style="width:9px;border-color:#eab308"></span>偏弱 150%</div>` +
+      `<div class="lg-row" style="color:#f97316"><span class="lg-dash" style="width:9px;border-color:#f97316"></span>警戒 140%</div>` +
+      `<div class="lg-row" style="color:#ef4444"><span class="lg-dash" style="width:9px;border-color:#ef4444"></span>危險 130%</div>`;
+    return;
+  }
   // 不顯示 K 線紅/綠（一眼可見不必標註），只標均線/BB/昨收這些「需要解碼」的線
   // v3.9 去重:SMA20/SMA60/BB 已在 OHLC 資訊行用對應顏色+數值標示,色塊圖例只留「昨收」(虛線較不易辨識)
   lg.innerHTML = `<div class="lg-row" style="color:rgba(200,200,200,.55)"><span class="lg-dash" style="width:9px;color:rgba(200,200,200,.55)"></span>昨收</div>`;
@@ -667,9 +1211,13 @@ async function fetchKeyStats(sym, mkt) {
   if (!sym) return null;
   const key = sym + '|' + (mkt || 'TW');
   if (_keystatsCache[key]) return _keystatsCache[key];
-  const yfsym = mkt === 'TW' ? sym + '.TW' : sym;
+  // 指數(^…)／合成序列(__…__) 不加 .TW（避免 ^TWII.TW 404）
+  const s = String(sym);
+  const yfsym = (s[0] === '^' || (s.startsWith('__') && s.endsWith('__')))
+    ? sym
+    : (mkt === 'TW' ? sym + '.TW' : sym);
   try {
-    const r = await fetch(`${SERVER_P}/keystats/${yfsym}`, {cache:'no-store'});
+    const r = await fetch(`${SERVER_P}/keystats/${encodeURIComponent(yfsym)}`, {cache:'no-store'});
     if (!r.ok) return null;
     const data = await r.json();
     _keystatsCache[key] = data;
@@ -695,15 +1243,27 @@ function fmtBig(n, unit) {
     if (!S.sym) return h;
     // Async fetch and inject — find element and update after render
     fetchKeyStats(S.sym, S.mkt).then(ks => {
-      if (!ks) return;
-      // Update existing MKT CAP cell (if v1 stats has one)
+      // 回填 STATS 上方「MKT CAP」列（Yahoo chart meta 沒有市值，先前永遠 --）
+      if (ks && ks.marketCap != null) {
+        const el = document.getElementById('rp-MKTCAP');
+        if (el) {
+          const cur = ks.currency || (S.mkt === 'TW' ? 'TWD' : 'USD');
+          el.textContent = fmtBig(ks.marketCap) + ' ' + cur;
+        }
+        // 同步進 S.data.meta，後續重繪／PDF 也能用
+        try {
+          if (S.data && S.data.meta) S.data.meta.marketCap = ks.marketCap;
+        } catch (_) {}
+      }
       const sect = document.getElementById('keystats-sect');
-      const html = renderKeystatsSection(ks);
+      const html = ks
+        ? renderKeystatsSection(ks)
+        : `<div id="keystats-sect"><div class="stat-sect">關鍵估值 · ${S.sym}</div>` +
+          `<div style="padding:12px;font-family:monospace;font-size:10px;color:var(--tlo);text-align:center">關鍵估值暫無資料<br><span style="font-size:9px;color:var(--tf)">Yahoo／官方估值皆未回傳</span></div></div>`;
       if (sect) sect.outerHTML = html;
       else {
         const rp = document.getElementById('rpanel');
         if (!rp || S.tab !== 'stats') return;
-        // Insert before chip-sect if exists, else append
         const chipSect = document.getElementById('chip-sect');
         if (chipSect) chipSect.insertAdjacentHTML('beforebegin', html);
         else rp.insertAdjacentHTML('beforeend', html);
@@ -715,6 +1275,49 @@ function fmtBig(n, unit) {
 })();
 
 function renderKeystatsSection(ks) {
+  if (!ks) {
+    return `<div id="keystats-sect"><div class="stat-sect">關鍵估值</div>` +
+      `<div style="padding:12px;font-family:monospace;font-size:10px;color:var(--tlo);text-align:center">無資料</div></div>`;
+  }
+  // 大盤融資維持率：顯示歷史／風險區，而非本益比
+  if (S.sym === '__MARGIN_RATIO__' || (ks && ks.marginMeta)) {
+    const m = (ks && ks.marginMeta) || {};
+    const cur = ks.regularMarketPrice != null ? ks.regularMarketPrice : m.current;
+    const zone = m.riskZone;
+    let h = '<div id="keystats-sect"><div class="stat-sect">融資維持率 · 總覽</div>';
+    h += `<div class="keystat-row"><span class="k">最新</span><span class="v">${cur != null ? cur.toFixed(2) + '%' : '--'}</span></div>`;
+    h += `<div class="keystat-row"><span class="k">日變化</span><span class="v">${m.delta != null ? ((m.delta >= 0 ? '+' : '') + m.delta.toFixed(2) + 'pp') : '--'}</span></div>`;
+    h += `<div class="keystat-row"><span class="k">歷史高低</span><span class="v">${m.min != null ? m.min.toFixed(2) : '--'}% ～ ${m.max != null ? m.max.toFixed(2) : '--'}%</span></div>`;
+    h += `<div class="keystat-row"><span class="k">歷史均値</span><span class="v">${m.avg != null ? m.avg.toFixed(2) + '%' : '--'}</span></div>`;
+    h += `<div class="keystat-row"><span class="k">樣本數</span><span class="v">${m.count != null ? m.count : '--'} 日（${m.firstDate || '—'} → ${m.lastDate || '—'}）</span></div>`;
+    h += `<div class="keystat-row"><span class="k">風險區</span><span class="v" style="color:${zone && zone.color ? zone.color : 'var(--thi)'}">${zone ? (zone.label || '') : '正常（>166%）'}</span></div>`;
+    if (m.formula) h += `<div style="padding:4px 12px;font-family:monospace;font-size:8px;color:var(--tf)">${m.formula}</div>`;
+    if (m.source) h += `<div style="padding:0 12px 6px;font-family:monospace;font-size:8px;color:var(--tf)">來源：${m.source}</div>`;
+    h += '</div>';
+    return h;
+  }
+  // 台股大盤指數：市場摘要（中位本益比＋體質支柱）
+  if (ks.kind === 'market' || (ks.marketMeta && ks.marketMeta.rows)) {
+    const mm = ks.marketMeta || {};
+    let h = '<div id="keystats-sect"><div class="stat-sect">大盤摘要 · ' + S.sym + '</div>';
+    if (mm.score != null)
+      h += `<div class="keystat-row"><span class="k">體質評分</span><span class="v">${mm.score}</span></div>`;
+    (mm.rows || []).forEach(row => {
+      h += `<div class="keystat-row"><span class="k">${row.k}</span><span class="v">${row.v}` +
+        (row.score != null ? ` <span style="font-size:9px;color:var(--tlo)">(${Math.round(row.score)})</span>` : '') +
+        `</span></div>`;
+    });
+    if (ks.trailingPE != null)
+      h += `<div class="keystat-row"><span class="k">全市場本益比中位</span><span class="v">${Number(ks.trailingPE).toFixed(1)}</span></div>`;
+    if (ks._source) h += `<div style="padding:4px 12px;font-family:monospace;font-size:8px;color:var(--tf)">資料源：${ks._source}</div>`;
+    h += '</div>';
+    return h;
+  }
+  // 指數／總經：明確說明無個股估值
+  if (ks.kind === 'index' || ks.kind === 'macro' || ks._note) {
+    return `<div id="keystats-sect"><div class="stat-sect">關鍵估值 · ${S.sym}</div>` +
+      `<div style="padding:12px;font-family:monospace;font-size:10px;color:var(--tlo);text-align:center">${ks._note || '指數／總經無個股估值'}</div></div>`;
+  }
   const mc = ks.marketCap;
   const pe = ks.trailingPE;
   const pb = ks.priceToBook;
@@ -727,6 +1330,20 @@ function renderKeystatsSection(ks) {
   h += `<div class="keystat-row"><span class="k">股價淨值比 P/B</span><span class="v" style="color:${pb != null ? (window.Colors ? Colors.warn(pb, {hi:5}) : (pb > 5 ? 'var(--orange)' : 'var(--thi)')) : 'var(--tlo)'}">${pb != null ? pb.toFixed(2) : '--'}</span></div>`;
   h += `<div class="keystat-row"><span class="k">殖利率 Yield</span><span class="v" style="color:${yld != null ? (window.Colors ? Colors.warn(yld, {hi:15}) : (yld > 15 ? 'var(--orange)' : 'var(--thi)')) : 'var(--tlo)'}">${yld != null ? yld.toFixed(2) + '%' : '--'}</span></div>`;
   if (eps != null) h += `<div class="keystat-row"><span class="k">EPS</span><span class="v">${eps.toFixed(2)} ${epsCurrency}</span></div>`;
+  const rg = ks.revenueGrowth, eg = ks.earningsGrowth != null ? ks.earningsGrowth : ks.earningsQuarterlyGrowth;
+  if (rg != null || eg != null) {
+    const gCol = v => window.Colors ? Colors.growth(S.sym, v) : 'var(--thi)';
+    const gStr = v => v == null ? '--' : ((v >= 0 ? '+' : '') + Number(v).toFixed(1) + '%');
+    if (rg != null) h += `<div class="keystat-row"><span class="k">營收成長</span><span class="v" style="color:${gCol(rg)}">${gStr(rg)}</span></div>`;
+    if (eg != null) h += `<div class="keystat-row"><span class="k">盈餘成長</span><span class="v" style="color:${gCol(eg)}">${gStr(eg)}</span></div>`;
+  }
+  if (ks.grossMargin != null || ks.opMargin != null || ks.netMargin != null) {
+    const mCol = v => window.Colors ? Colors.warn(v, { lo: 8 }) : 'var(--thi)';
+    const mStr = v => v == null ? '--' : Number(v).toFixed(1) + '%';
+    if (ks.grossMargin != null) h += `<div class="keystat-row"><span class="k">毛利率</span><span class="v" style="color:${mCol(ks.grossMargin)}">${mStr(ks.grossMargin)}</span></div>`;
+    if (ks.opMargin != null) h += `<div class="keystat-row"><span class="k">營益率</span><span class="v" style="color:${mCol(ks.opMargin)}">${mStr(ks.opMargin)}</span></div>`;
+    if (ks.netMargin != null) h += `<div class="keystat-row"><span class="k">淨利率</span><span class="v" style="color:${mCol(ks.netMargin)}">${mStr(ks.netMargin)}</span></div>`;
+  }
   if (ks._source) h += `<div style="padding:4px 12px;font-family:monospace;font-size:8px;color:var(--tf)">資料源：${ks._source}</div>`;
   h += '</div>';
   return h;
