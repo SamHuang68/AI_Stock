@@ -971,8 +971,8 @@ document.addEventListener('click', ev => {
     tools.className = 'pro-tools';
     tools.innerHTML =
       `<button class="probtn" id="btn-compare" onclick="compareToggle()" title="疊上大盤指數比較相對表現">vs 大盤</button>` +
-      `<button class="probtn" id="btn-vp"      onclick="vpToggle()"      title="成交金額量價分布 + POC/主力成本區 (v3.8)">📊 量價</button>` +
-      `<button class="probtn" id="btn-vp-mode" onclick="window.vpCycleMode&&vpCycleMode()" title="切換 金額/成交量 模式 (v3.8)">$/量</button>` +
+      `<button class="probtn on" id="btn-vp"      onclick="vpToggle()"      title="量價分布常駐預設開啟（量價均衡）；點一下可暫時關閉。圖上浮動鈕切 均衡/只看價/只看量">📊 量價</button>` +
+      `<button class="probtn on" id="btn-vp-mode" onclick="window.vpCycleMode&&vpCycleMode()" title="切換：量價均衡 → 只看價 → 只看量（圖上亦有浮動鈕）">量價均衡</button>` +
       `<button class="probtn" id="btn-bt3"     onclick="window.backtestOpen&&backtestOpen()" title="回測引擎：8 策略勝率 + 型態命中率 (v3.8)">📈 回測</button>` +
       `<button class="probtn" id="btn-alertpush" onclick="window.alertPushOpen&&alertPushOpen()" title="後端警報推播設定 Telegram/Email (v3.8)">🔔 推播</button>` +
       `<button class="probtn" id="btn-overnight" onclick="window.overnightOpen&&overnightOpen()" title="夜盤連動預警：美股期貨→台股隔日預估→持倉停損/觀察買區 (v3.8)">🌙 夜盤</button>` +

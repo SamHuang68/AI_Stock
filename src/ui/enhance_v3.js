@@ -215,7 +215,7 @@
       : cur > vp.vah ? '<span style="color:var(--green)">主力成本之上 (偏多)</span>'
         : cur < vp.val ? '<span style="color:var(--red)">主力成本之下 (偏空)</span>'
           : '<span style="color:var(--orange)">主力成本區內 (盤整)</span>';
-    const modeLbl = { avg: '量價均衡', amt: '金額', vol: '成交量' }[VP.mode] || '';
+    const modeLbl = { avg: '量價均衡', amt: '只看價', vol: '只看量' }[VP.mode] || '';
     return `<div class="vp-panel"><div class="stat-sect">量價分布 · ${modeLbl}</div>
       <div class="stat-row"><span class="stat-k">POC 主力成本</span><span class="stat-v" style="color:#A78BFA">${vp.pocPrice.toFixed(2)}</span></div>
       <div class="stat-row"><span class="stat-k">成本區上緣 VAH</span><span class="stat-v">${vp.vah.toFixed(2)}</span></div>

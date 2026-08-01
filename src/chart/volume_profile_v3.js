@@ -7,23 +7,46 @@
 //   • VAH/VAL Value Area 上下緣 (70% 金額集中區)
 //   • 主力成本區 = VAL ~ VAH，判斷現價在主力成本之上/之下
 //
-// 模式可切換：'amt' 成交金額 (預設) / 'vol' 成交量(張數)
+// 常駐預設：量價均衡 (avg) 開啟。
+// 圖上浮動鈕可切：均衡 / 只看價(金額) / 只看量。
 // 覆寫 pro_v2.js 的 computeVolumeProfile / drawVolumeProfile / vpToggle
 // 必須在 pro_v2.js 之後載入。
 // ============================================================
 (function () {
   'use strict';
 
+  const MODE_KEY = 'st_vp_mode';
+  const MODE_ORDER = ['avg', 'amt', 'vol'];
+  const MODE_LABEL = { avg: '量價均衡', amt: '只看價', vol: '只看量' };
+  const MODE_TITLE = {
+    avg: '量與金額正規化後同權平均（預設）',
+    amt: '只看成交金額（typical×量）分布',
+    vol: '只看成交量（張）分布',
+  };
+
+  function loadMode() {
+    try {
+      const m = localStorage.getItem(MODE_KEY);
+      if (MODE_ORDER.includes(m)) return m;
+    } catch {}
+    return 'avg';
+  }
+  function saveMode(m) {
+    try { localStorage.setItem(MODE_KEY, m); } catch {}
+  }
+
   const VP = {
     bins: 60,            // Y 軸價格切分數
-    mode: 'avg',         // 'avg' = 金額與量正規化平均(預設), 'amt' = 成交金額, 'vol' = 成交量
+    mode: loadMode(),    // 'avg' 均衡 / 'amt' 只看價 / 'vol' 只看量
     vaPct: 0.70,         // Value Area 佔總額比例
-    enabled: false,
+    enabled: true,       // 常駐預設開啟
     canvas: null,
+    floatEl: null,
     ro: null,
     lastVP: null,
   };
   window.VP = VP;
+  if (typeof S !== 'undefined') S.vpEnabled = true;
 
   // ---- 計算量價分布 ----------------------------------------
   function computeVP(candles, bins, mode) {
@@ -92,13 +115,16 @@
     if (v >= 1e4) return (v / 1e4).toFixed(1) + ' 萬';
     return Math.round(v).toLocaleString();
   }
-  const MODE_LABEL = { avg: '量價均衡', amt: '金額', vol: '成交量' };
 
   // ---- 右側 canvas overlay --------------------------------
-  function ensureCanvas() {
+  function chartHost() {
     const chartEl = document.getElementById('chart') ||
       (S.chart && S.chart.chartElement && S.chart.chartElement());
-    const container = chartEl ? chartEl.parentElement || chartEl : null;
+    return chartEl ? (chartEl.parentElement || chartEl) : null;
+  }
+
+  function ensureCanvas() {
+    const container = chartHost();
     if (!container) return null;
     if (VP.canvas && VP.canvas._host === container) return VP.canvas;
     if (VP.canvas) { try { VP.canvas.remove(); } catch {} }
@@ -109,6 +135,81 @@
     container.appendChild(cv);
     VP.canvas = cv;
     return cv;
+  }
+
+  // ---- 浮動模式切換（均衡 / 只看價 / 只看量）--------------
+  function ensureFloatStyle() {
+    if (document.getElementById('vp-float-style')) return;
+    const s = document.createElement('style');
+    s.id = 'vp-float-style';
+    s.textContent = `
+    #vp-float{position:absolute;top:8px;right:72px;z-index:12;display:none;
+      align-items:center;gap:0;padding:2px;border-radius:8px;
+      background:rgba(15,23,42,.88);border:1px solid #334155;
+      box-shadow:0 4px 14px rgba(0,0,0,.35);backdrop-filter:blur(6px);
+      pointer-events:auto;user-select:none}
+    #vp-float .vp-fbtn{appearance:none;border:0;background:transparent;color:#94a3b8;
+      font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;cursor:pointer;
+      line-height:1.2;letter-spacing:.02em}
+    #vp-float .vp-fbtn:hover{color:#e2e8f0;background:rgba(51,65,85,.55)}
+    #vp-float .vp-fbtn.on{color:#0f172a;background:#38bdf8}
+    #vp-float .vp-fbtn.on[data-m="amt"]{background:#fbbf24}
+    #vp-float .vp-fbtn.on[data-m="vol"]{background:#a78bfa;color:#0f172a}
+    @media (max-width:720px){
+      #vp-float{right:8px;top:auto;bottom:36px}
+      #vp-float .vp-fbtn{padding:5px 7px;font-size:10px}
+    }`;
+    document.head.appendChild(s);
+  }
+
+  function ensureFloat() {
+    ensureFloatStyle();
+    const container = chartHost();
+    if (!container) return null;
+    let el = document.getElementById('vp-float');
+    if (el && el._host === container) {
+      VP.floatEl = el;
+      return el;
+    }
+    if (el) { try { el.remove(); } catch {} }
+    el = document.createElement('div');
+    el.id = 'vp-float';
+    el._host = container;
+    el.setAttribute('role', 'group');
+    el.setAttribute('aria-label', '量價模式');
+    el.innerHTML = MODE_ORDER.map(m =>
+      `<button type="button" class="vp-fbtn" data-m="${m}" title="${MODE_TITLE[m]}">${
+        m === 'avg' ? '均衡' : (m === 'amt' ? '只看價' : '只看量')
+      }</button>`
+    ).join('');
+    el.addEventListener('click', e => {
+      const btn = e.target.closest('.vp-fbtn');
+      if (!btn) return;
+      const m = btn.getAttribute('data-m');
+      if (!MODE_ORDER.includes(m)) return;
+      // 從關閉狀態點浮動鈕 → 自動開啟
+      if (!VP.enabled) {
+        VP.enabled = true;
+        syncState();
+        manageOffset(true);
+        ensureCanvas();
+        hookRedraw();
+      }
+      setMode(m);
+    });
+    if (getComputedStyle(container).position === 'static') container.style.position = 'relative';
+    container.appendChild(el);
+    VP.floatEl = el;
+    return el;
+  }
+
+  function syncFloat() {
+    const el = ensureFloat();
+    if (!el) return;
+    el.style.display = VP.enabled ? 'flex' : 'none';
+    el.querySelectorAll('.vp-fbtn').forEach(b => {
+      b.classList.toggle('on', b.getAttribute('data-m') === VP.mode);
+    });
   }
 
   function renderHistogram(vp) {
@@ -201,13 +302,25 @@
 
   // ---- 主繪製 ----------------------------------------------
   function draw() {
-    if (!S.chart || !S.chartSeries || !S.data || !S.data.candles) return;
-    if (!VP.enabled) { clearLines(); if (VP.canvas) VP.canvas.getContext('2d').clearRect(0, 0, 9999, 9999); updateInfo(null); return; }
+    if (!S.chart || !S.chartSeries || !S.data || !S.data.candles) {
+      syncFloat();
+      return;
+    }
+    if (!VP.enabled) {
+      clearLines();
+      if (VP.canvas) {
+        try { VP.canvas.getContext('2d').clearRect(0, 0, 9999, 9999); } catch {}
+      }
+      updateInfo(null);
+      syncFloat();
+      return;
+    }
     const vp = computeVP(S.data.candles, VP.bins, VP.mode);
     VP.lastVP = vp;
     clearLines();              // 不再用橫跨全圖的 price line；改在 renderHistogram 畫右側短線
     renderHistogram(vp);
     updateInfo(vp);
+    syncFloat();
   }
 
   // 重繪 hook：可視範圍 / 縮放改變時重畫直方圖
@@ -248,9 +361,19 @@
   // ---- toggle / mode ---------------------------------------
   function syncBtns() {
     const b = document.getElementById('btn-vp');
-    if (b) b.classList.toggle('on', VP.enabled);
+    if (b) {
+      b.classList.toggle('on', VP.enabled);
+      b.title = VP.enabled
+        ? '量價分布常駐中（點一下暫時關閉）· 圖上浮動鈕可切 均衡/只看價/只看量'
+        : '開啟量價分布（預設量價均衡）';
+    }
     const m = document.getElementById('btn-vp-mode');
-    if (m) m.textContent = MODE_LABEL[VP.mode] || '量價';
+    if (m) {
+      m.textContent = MODE_LABEL[VP.mode] || '量價';
+      m.title = '切換量價模式：均衡 → 只看價 → 只看量（亦可用圖上浮動鈕）';
+      m.classList.toggle('on', VP.enabled);
+    }
+    syncFloat();
   }
   function syncState() { if (typeof S !== 'undefined') S.vpEnabled = VP.enabled; }
   // 開啟量價時把 K 線往左推，右側騰出空間給直方圖；關閉時還原
@@ -271,21 +394,60 @@
     VP.enabled = !VP.enabled;
     syncState();
     manageOffset(VP.enabled);
-    ensureCanvas(); hookRedraw(); draw(); syncBtns();
+    ensureCanvas();
+    ensureFloat();
+    hookRedraw();
+    draw();
+    syncBtns();
   }
   function setMode(m) {
-    VP.mode = ['avg', 'amt', 'vol'].includes(m) ? m : 'avg';
+    VP.mode = MODE_ORDER.includes(m) ? m : 'avg';
+    saveMode(VP.mode);
     syncBtns();
     if (VP.enabled) draw();
+    // STATS 量價面板標籤同步
+    try {
+      if (typeof renderStats === 'function' && document.getElementById('rpanel')) renderStats();
+    } catch {}
   }
   function cycleMode() {
-    const order = ['avg', 'amt', 'vol'];
+    const order = MODE_ORDER;
     setMode(order[(order.indexOf(VP.mode) + 1) % order.length]);
-    if (!VP.enabled) { VP.enabled = true; syncState(); manageOffset(true); ensureCanvas(); hookRedraw(); draw(); syncBtns(); }
+    if (!VP.enabled) {
+      VP.enabled = true;
+      syncState();
+      manageOffset(true);
+      ensureCanvas();
+      ensureFloat();
+      hookRedraw();
+      draw();
+      syncBtns();
+    }
   }
-  // 切股/切區間：renderChart 後 pro_v2 會檢查 S.vpEnabled 呼叫 drawVolumeProfile(=draw)，
-  // 這裡再補一個 symLoaded 監聽確保即時重繪
-  window.addEventListener('symLoaded', () => { if (VP.enabled) setTimeout(draw, 60); });
+
+  function activateDefault() {
+    VP.enabled = true;
+    syncState();
+    manageOffset(true);
+    ensureCanvas();
+    ensureFloat();
+    hookRedraw();
+    draw();
+    syncBtns();
+  }
+
+  // 切股/切區間：renderChart 後 pro_v2 會檢查 S.vpEnabled 呼叫 drawVolumeProfile(=draw)
+  window.addEventListener('symLoaded', () => {
+    if (!VP.enabled) return;
+    setTimeout(() => {
+      manageOffset(true);
+      ensureCanvas();
+      ensureFloat();
+      hookRedraw();
+      draw();
+      syncBtns();
+    }, 60);
+  });
 
   // ---- 覆寫 pro_v2 既有 API (向下相容) ----------------------
   window.computeVolumeProfile = (candles, bins) => computeVP(candles, bins, VP.mode);
@@ -293,7 +455,19 @@
   window.vpToggle = toggle;
   window.vpSetMode = setMode;
   window.vpCycleMode = cycleMode;
+  window.vpActivateDefault = activateDefault;
 
-  // 載入後若 chart 已存在，補 hook
-  document.addEventListener('DOMContentLoaded', () => { setTimeout(() => { ensureCanvas(); hookRedraw(); }, 800); });
+  // 載入後常駐開啟量價均衡（或上次記住的模式）
+  function boot() {
+    syncState();
+    ensureFloatStyle();
+    activateDefault();
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 700));
+  } else {
+    setTimeout(boot, 700);
+  }
+  // chart 可能較晚才建立：再補一次
+  setTimeout(() => { if (VP.enabled) activateDefault(); }, 1800);
 })();
