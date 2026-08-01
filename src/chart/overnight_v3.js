@@ -3,8 +3,8 @@
 // ------------------------------------------------------------
 // 台指期夜盤與台股隔日開盤主要跟著「美股期貨夜盤」走（那斯達克期/標普期/
 // 道瓊期 + 費半）。本模組抓這些 24h 期貨的夜盤漲跌，算出「台股隔日預估」，
-// 並連動你的『持倉停損距離』與『觀察股買區距離』，盤前先規劃進出場。
-// 資料源：server /quote（Yahoo 期貨，US 盤後/夜盤持續更新）。
+// 並顯示「台指期夜盤波動」(OHLC/振幅)，連動持倉停損與觀察股買區。
+// 資料源：server /quote·/yf（美股期貨）、/txf（台指期夜盤，Yahoo+TAIFEX MIS）。
 // 工具列 🌙 夜盤 開啟。
 // ============================================================
 (function () {
@@ -48,8 +48,67 @@
       return { price: cur, changePct };
     } catch { return null; }
   }
+
+  /** /txf → 台指期夜盤波動（優先 d.night，否則 session=night 的主報價） */
+  async function qTxfNight() {
+    try {
+      const r = await fetch(`${SRV}/txf`, { cache: 'no-store' });
+      if (!r.ok) return null;
+      const d = await r.json();
+      if (!d || !d.ok) return null;
+      const n = (d.night && d.night.price != null) ? d.night
+        : (d.session === 'night' && d.price != null) ? d : null;
+      if (!n || n.price == null) return null;
+      let amp = n.ampRate;
+      if (amp == null && n.high != null && n.low != null && n.prevClose > 0) {
+        amp = (n.high - n.low) / n.prevClose * 100;
+      }
+      let changePct = n.changePct;
+      if (changePct == null && n.price != null && n.prevClose > 0) {
+        changePct = (n.price - n.prevClose) / n.prevClose * 100;
+      }
+      let change = n.change;
+      if (change == null && n.price != null && n.prevClose != null) {
+        change = n.price - n.prevClose;
+      }
+      return {
+        price: n.price,
+        prevClose: n.prevClose,
+        change,
+        changePct,
+        open: n.open,
+        high: n.high,
+        low: n.low,
+        ampRate: amp,
+        volume: n.volume,
+        time: n.time || '',
+        source: n.source || d.source || '',
+      };
+    } catch { return null; }
+  }
+
   const col = p => p == null ? 'var(--tlo)' : p > 0 ? 'var(--green)' : p < 0 ? 'var(--red)' : 'var(--tlo)';
+  // 台股／台指期：紅漲綠跌（與 Colors.dir 一致）
+  const twCol = p => {
+    if (p == null) return 'var(--tlo)';
+    if (window.Colors && typeof Colors.dir === 'function') return Colors.dir('__TXF__', p);
+    return p > 0 ? 'var(--red)' : p < 0 ? 'var(--green)' : 'var(--tlo)';
+  };
   const pct = p => p == null ? '—' : (p >= 0 ? '+' : '') + p.toFixed(2) + '%';
+  const fmtIdx = v => v == null || !isFinite(v) ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  const fmtVol = v => v == null || !isFinite(v) ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  const fmtTime = t => {
+    if (!t || String(t).length < 4) return '';
+    const s = String(t).padStart(6, '0');
+    return s.slice(0, 2) + ':' + s.slice(2, 4) + ':' + s.slice(4, 6);
+  };
+  const ampTone = a => {
+    if (a == null) return '波動資料不足';
+    if (a >= 3.5) return '⚠ 高波動：夜盤區間擴大，隔日開盤易跳空';
+    if (a >= 2.0) return '波動偏大：留意開盤落點與停損距離';
+    if (a >= 1.0) return '波動中等';
+    return '波動收斂';
+  };
 
   function style() {
     if (document.getElementById('ovn-style')) return;
@@ -63,8 +122,48 @@
     #ovn-box th:first-child,#ovn-box td:first-child{text-align:left}
     #ovn-box tr{cursor:pointer}
     #ovn-box .gauge{font-size:30px;font-weight:800;text-align:center}
-    #ovn-box button{background:#334155;border:0;color:#fff;border-radius:6px;padding:5px 11px;cursor:pointer}`;
+    #ovn-box .txf-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
+    #ovn-box .txf-cell{background:#111827;border:1px solid #1e293b;border-radius:6px;padding:6px 7px;text-align:center}
+    #ovn-box .txf-cell .k{font-size:9px;color:#64748b}
+    #ovn-box .txf-cell .v{font-size:12px;font-weight:700;margin-top:2px}
+    #ovn-box button{background:#334155;border:0;color:#fff;border-radius:6px;padding:5px 11px;cursor:pointer}
+    @media (max-width:520px){#ovn-box .txf-grid{grid-template-columns:repeat(2,1fr)}}`;
     document.head.appendChild(s);
+  }
+
+  function renderTxfBlock(txf) {
+    if (!txf) {
+      return `<div style="margin:8px 0;padding:8px 10px;border:1px solid #334155;border-radius:8px;background:rgba(56,189,248,.05)">
+        <div style="font-size:12px;font-weight:700;color:#38bdf8">📉 台指期夜盤波動</div>
+        <div style="font-size:11px;color:var(--tf);margin-top:4px">暫無夜盤資料（MIS/Yahoo）</div></div>`;
+    }
+    const cp = txf.changePct;
+    const cCol = twCol(cp);
+    const amp = txf.ampRate;
+    const rangePts = (txf.high != null && txf.low != null) ? (txf.high - txf.low) : null;
+    const deltaTxt = txf.change != null
+      ? ((txf.change >= 0 ? '+' : '') + Math.round(txf.change).toLocaleString('en-US'))
+      : '—';
+    const tTxt = fmtTime(txf.time);
+    return `<div style="margin:8px 0;padding:8px 10px;border:1px solid #334155;border-radius:8px;background:rgba(56,189,248,.06)">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">
+        <div style="font-size:12px;font-weight:700;color:#38bdf8">📉 台指期夜盤波動 <span style="font-size:10px;color:#64748b;font-weight:400">TXF 近月</span></div>
+        <div style="font-size:9px;color:#64748b">${tTxt ? '更新 ' + tTxt : ''} ${txf.source ? '· ' + txf.source : ''}</div>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-top:6px;flex-wrap:wrap">
+        <div style="font-size:22px;font-weight:800;color:${cCol}">${fmtIdx(txf.price)}</div>
+        <div style="font-size:13px;font-weight:700;color:${cCol}">${deltaTxt}（${pct(cp)}）</div>
+        <div style="font-size:11px;color:#94a3b8">昨收 ${fmtIdx(txf.prevClose)}</div>
+      </div>
+      <div class="txf-grid">
+        <div class="txf-cell"><div class="k">開盤</div><div class="v">${fmtIdx(txf.open)}</div></div>
+        <div class="txf-cell"><div class="k">最高</div><div class="v" style="color:var(--red)">${fmtIdx(txf.high)}</div></div>
+        <div class="txf-cell"><div class="k">最低</div><div class="v" style="color:var(--green)">${fmtIdx(txf.low)}</div></div>
+        <div class="txf-cell"><div class="k">振幅</div><div class="v" style="color:${amp != null && amp >= 2 ? '#fbbf24' : '#e2e8f0'}">${amp != null ? amp.toFixed(2) + '%' : '—'}${rangePts != null ? '<div style="font-size:9px;color:#64748b;font-weight:400;margin-top:2px">' + Math.round(rangePts).toLocaleString('en-US') + ' 點</div>' : ''}</div></div>
+      </div>
+      <div style="font-size:10px;color:#94a3b8;margin-top:6px">成交量 ${fmtVol(txf.volume)} · ${ampTone(amp)}</div>
+      <div style="font-size:9px;color:#64748b;margin-top:3px;line-height:1.5">振幅＝(最高−最低)/昨收；夜盤高波動常對應隔日跳空，請對照上方美股期貨預估。</div>
+    </div>`;
   }
 
   async function open() {
@@ -85,9 +184,13 @@
     const body = document.getElementById('ovn-body');
     if (!body) return;
     const quotes = {};
-    await Promise.all(DRIVERS.map(async d => { quotes[d.sym] = await q(d.sym); }));
+    const [, , txf] = await Promise.all([
+      Promise.all(DRIVERS.map(async d => { quotes[d.sym] = await q(d.sym); })),
+      q('TSM').then(v => { quotes.__TSM__ = v; }),
+      qTxfNight(),
+    ]);
     // TSM ADR = 2330 的隔日先行指標（核心連動）
-    const tsm = await q('TSM');
+    const tsm = quotes.__TSM__;
     const tsmPct = (tsm && tsm.changePct != null) ? tsm.changePct : null;
     const soxQ = quotes['^SOX'];
     const soxPct = (soxQ && soxQ.changePct != null) ? soxQ.changePct : null;
@@ -102,7 +205,7 @@
         <td style="color:${col(cp)};font-weight:700">${pct(cp)}</td></tr>`;
     }
     const est = wsum > 0 ? composite / wsum : null;   // 加權台股隔日預估 %
-    const estCol = window.Colors ? Colors.dir('^TWII', est) : col(est);   // 台股隔日預估 → 台股紅漲綠跌
+    const estCol = window.Colors ? Colors.dir('^TWII', est) : twCol(est);   // 台股隔日預估 → 台股紅漲綠跌
     const estTxt = est == null ? '—' : (est >= 0 ? '+' : '') + est.toFixed(2) + '%';
     const tone = est == null ? '資料不足'
       : est <= -1.5 ? '⚠ 強烈開低風險：檢視持倉停損、觀察買區'
@@ -151,6 +254,7 @@
         <div class="gauge" style="color:${estCol}">${estTxt}</div>
         <div style="font-size:11px;color:${estCol}">${tone}</div>
       </div>
+      ${renderTxfBlock(txf)}
       <table><thead><tr><th>夜盤領先指標</th><th>價</th><th>夜盤漲跌</th></tr></thead><tbody>${drows}</tbody></table>
       <div style="margin:8px 0;padding:8px 10px;border:1px solid #334155;border-radius:8px;background:rgba(251,191,36,.06)">
         <div style="font-size:12px;font-weight:700;color:#fbbf24">🔱 TSMC 核心連動（2330）</div>
@@ -169,8 +273,9 @@
       <table><thead><tr><th>代號</th><th>現價</th><th>買進價</th><th>隔日預估價</th></tr></thead>
         <tbody>${wRows || '<tr><td colspan=4 style="text-align:center;color:var(--tf)">觀察清單無自訂買進價訊號</td></tr>'}</tbody></table>
       <div style="font-size:9px;color:var(--tf);line-height:1.7;margin-top:8px;border-top:1px solid #222;padding-top:6px">
-        <b style="color:var(--tlo)">資料來源</b>：Yahoo Finance（即時期貨/指數），經本機 /quote · /yf 代理抓取<br>
+        <b style="color:var(--tlo)">資料來源</b>：Yahoo Finance（美股期貨/指數）經 /yf；台指期夜盤經 /txf（Yahoo TW + TAIFEX MIS 夜盤）<br>
         夜盤指標：那斯達克期 <code>NQ=F</code>(35%) · 標普500期 <code>ES=F</code>(20%) · 道瓊期 <code>YM=F</code>(10%) · 費半 <code>^SOX</code>(35%)；核心連動 <code>TSM</code> ADR<br>
+        台指期夜盤波動：近月 OHLC、振幅％、成交量（振幅＝(高−低)/昨收）<br>
         漲跌基準：各標的前一交易日收盤（遇 null 自動退最近一筆有效值，不帶入 null 計算）<br>
         更新時間：${new Date().toLocaleString('zh-TW', { hour12: false })} · 僅供參考，非投資建議
       </div>

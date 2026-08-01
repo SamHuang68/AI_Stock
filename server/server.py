@@ -4227,92 +4227,252 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         except Exception as e:
             self._err('send failed: ' + str(e), 502)
 
-    def _handle_txf(self):
-        """台指期近一(含夜盤) — 主: Yahoo TW 期貨頁(WTX&) 內嵌 JSON；備援: TAIFEX MIS。
-           回 {ok, price, prevClose, changePct, name, source}；失敗回 debug 供修正。"""
+    def _txf_fnum(self, d, *keys):
+        for k in keys:
+            v = (d or {}).get(k)
+            if v not in (None, '', '-'):
+                try:
+                    return float(str(v).replace(',', '').replace('%', ''))
+                except Exception:
+                    pass
+        return None
+
+    def _txf_mis_session(self, market_type):
+        """TAIFEX MIS 台指期近月：MarketType 0=日盤、1=夜盤。
+           近月以成交量最大列為準（夜盤 QuoteList 常缺 CMonth）。"""
+        url = 'https://mis.taifex.com.tw/futures/api/getQuoteList'
+        payload = json.dumps({
+            'MarketType': str(market_type), 'SymbolType': 'F', 'KindID': '1', 'CID': 'TXF',
+            'ExpireMonth': '', 'RowSize': '全部', 'PageNo': '', 'SortColumn': '', 'AscDesc': 'A',
+        }).encode('utf-8')
+        req = urllib.request.Request(url, data=payload, method='POST', headers={
+            'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0',
+            'Origin': 'https://mis.taifex.com.tw', 'Referer': 'https://mis.taifex.com.tw/futures/',
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        rows = (data.get('RtData') or {}).get('QuoteList') or []
+        if not rows:
+            return None
+        best, best_vol = None, -1.0
+        for row in rows:
+            last = self._txf_fnum(row, 'CLastPrice', 'CLast', 'LastPrice')
+            if last is None:
+                continue
+            vol = self._txf_fnum(row, 'CTotalVolume') or 0.0
+            if vol > best_vol:
+                best, best_vol = row, vol
+        if best is None:
+            best = rows[0]
+        price = self._txf_fnum(best, 'CLastPrice', 'CLast', 'LastPrice')
+        prev = self._txf_fnum(best, 'CRefPrice', 'CYDClose', 'RefPrice')
+        high = self._txf_fnum(best, 'CHighPrice')
+        low = self._txf_fnum(best, 'CLowPrice')
+        opn = self._txf_fnum(best, 'COpenPrice')
+        amp = self._txf_fnum(best, 'CAmpRate')
+        vol = self._txf_fnum(best, 'CTotalVolume')
+        chg = self._txf_fnum(best, 'CDiffRate', 'DiffRate')
+        if chg is None and price is not None and prev:
+            chg = (price - prev) / prev * 100.0
+        if amp is None and high is not None and low is not None and prev:
+            amp = (high - low) / prev * 100.0
+        change = None
+        if price is not None and prev is not None:
+            change = price - prev
+        sess = 'night' if str(market_type) == '1' else 'day'
+        return {
+            'price': price, 'prevClose': prev, 'change': change,
+            'changePct': (round(chg, 4) if chg is not None else None),
+            'open': opn, 'high': high, 'low': low,
+            'ampRate': (round(amp, 4) if amp is not None else None),
+            'volume': vol, 'time': best.get('CTime') or '',
+            'session': sess, 'sessionLabel': '夜盤' if sess == 'night' else '日盤',
+            'name': best.get('DispCName') or best.get('CName') or '台指期近一',
+            'source': 'taifex-mis-' + sess,
+        }
+
+    def _txf_yahoo_quote(self):
+        """Yahoo TW 期貨頁 WTX&：成交/昨收/開高低 + 漲跌%。"""
         import re as _re2
+        url = 'https://tw.stock.yahoo.com/quote/WTX%26'
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+            'Accept-Language': 'zh-TW,zh;q=0.9',
+        })
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            html = resp.read().decode('utf-8', 'replace')
+
+        def span_num(label):
+            m = _re2.search(
+                label + r'</span>\s*<span[^>]*>\s*([0-9,]+\.?[0-9]*)\s*</span>',
+                html,
+            )
+            if m:
+                try:
+                    return float(m.group(1).replace(',', ''))
+                except Exception:
+                    return None
+            # 去標籤備援
+            txt = _re2.sub(r'<[^>]+>', ' ', html).replace('\xa0', ' ')
+            m2 = _re2.search(label + r'[^\d\-]{0,12}([\d,]+\.\d{2})', txt)
+            if m2:
+                try:
+                    return float(m2.group(1).replace(',', ''))
+                except Exception:
+                    return None
+            return None
+
+        price = span_num('成交')
+        prev = span_num('昨收')
+        opn = span_num('開盤')
+        high = span_num('最高')
+        low = span_num('最低')
+        txt = _re2.sub(r'<[^>]+>', ' ', html).replace('\xa0', ' ')
+        mpct = _re2.search(r'漲幅[^\d\-]{0,12}([\d.]+)\s*%', txt)
+        pctmag = float(mpct.group(1)) if mpct else None
+        chg = None
+        if price is not None and prev:
+            chg = (price - prev) / prev * 100.0
+        elif pctmag is not None and price is not None and prev:
+            chg = pctmag * (1 if price >= prev else -1)
+        if price is None:
+            return None, {
+                'price_label_hit': price, 'prev_label_hit': prev,
+                'has_成交': '成交' in txt, 'has_昨收': '昨收' in txt,
+            }
+        amp = None
+        if high is not None and low is not None and prev:
+            amp = (high - low) / prev * 100.0
+        change = (price - prev) if (price is not None and prev is not None) else None
+        return {
+            'price': price, 'prevClose': prev, 'change': change,
+            'changePct': (round(chg, 4) if chg is not None else None),
+            'open': opn, 'high': high, 'low': low,
+            'ampRate': (round(amp, 4) if amp is not None else None),
+            'volume': None, 'time': '',
+            'session': None, 'sessionLabel': None,
+            'name': '台指期近一', 'source': 'yahoo-tw',
+        }, None
+
+    def _txf_is_night_hours(self):
+        """台指期夜盤時段（台北）：15:00–05:00。"""
+        try:
+            from datetime import datetime, timezone, timedelta
+            tw = datetime.now(timezone(timedelta(hours=8)))
+            hm = tw.hour * 100 + tw.minute
+            return hm >= 1500 or hm < 500
+        except Exception:
+            return False
+
+    def _handle_txf(self):
+        """台指期近一(含夜盤波動) — Yahoo TW + TAIFEX MIS 日/夜盤。
+           回 {ok, price, prevClose, change, changePct, open, high, low, ampRate,
+               volume, session, sessionLabel, time, name, source, night:{...}}。
+           night 永遠附夜盤近月 OHLC/振幅，供夜盤面板「台指期夜盤波動」。"""
         key = f'txf:{int(time.time() // 20)}'   # 20s 快取
         c = _cache.get(key)
         if c is not None:
             self._ok(c); return
 
-        # ── 主來源：Yahoo TW 期貨頁 WTX&（使用者指定）──
+        debug = {}
+        yahoo = None
         try:
-            url = 'https://tw.stock.yahoo.com/future/WTX&'
-            req = urllib.request.Request(url, headers={
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                'Accept-Language': 'zh-TW,zh;q=0.9',
-            })
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                html = resp.read().decode('utf-8', 'replace')
-
-            # 頁面 SSR；台指期主報價用「成交/昨收/漲幅」標籤(相對行情表的上市大盤
-            # 用「價位/漲跌(%)」不同標籤)，故去標籤後抓這些就不會抓到大盤。
-            txt = _re2.sub(r'<[^>]+>', ' ', html)
-            txt = txt.replace(' ', ' ')
-
-            def near(label, text):
-                # label 後面(可跨空白/標點)第一個帶兩位小數的數字
-                m = _re2.search(label + r'[^\d\-]{0,12}([\d,]+\.\d{2})', text)
-                if m:
-                    try: return float(m.group(1).replace(',', ''))
-                    except: pass
-                return None
-
-            price = near('成交', txt)
-            prev = near('昨收', txt)
-            mpct = _re2.search(r'漲幅[^\d\-]{0,12}([\d.]+)\s*%', txt)
-            pctmag = float(mpct.group(1)) if mpct else None
-            chg = None
-            if price is not None and prev:
-                chg = (price - prev) / prev * 100          # 帶正負號
-            elif pctmag is not None and price is not None and prev:
-                chg = pctmag * (1 if price >= prev else -1)
-            if price is not None:
-                out = {'ok': True, 'price': price, 'prevClose': prev, 'changePct': chg,
-                       'name': '台指期近一', 'source': 'yahoo-tw'}
-                body = json.dumps(out, ensure_ascii=False).encode()
-                _cache.set(key, body); self._ok(body); return
-            yahoo_debug = {'price_label_hit': price, 'prev_label_hit': prev,
-                           'has_成交': '成交' in txt, 'has_昨收': '昨收' in txt,
-                           'sample': txt[txt.find('台指期近一'): txt.find('台指期近一') + 400] if '台指期近一' in txt else txt[:300]}
+            yahoo, ydbg = self._txf_yahoo_quote()
+            if ydbg:
+                debug['yahoo'] = ydbg
         except Exception as e:
-            yahoo_debug = {'yahoo_error': str(e)}
+            debug['yahoo_error'] = str(e)
 
-        # ── 備援：TAIFEX MIS ──
+        night = None
+        day = None
         try:
-            url = 'https://mis.taifex.com.tw/futures/api/getQuoteList'
-            payload = json.dumps({'MarketType': '0', 'SymbolType': 'F', 'KindID': '1', 'CID': 'TXF',
-                                  'ExpireMonth': '', 'RowSize': '全部', 'PageNo': '', 'SortColumn': '', 'AscDesc': 'A'}).encode('utf-8')
-            req = urllib.request.Request(url, data=payload, method='POST', headers={
-                'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0',
-                'Origin': 'https://mis.taifex.com.tw', 'Referer': 'https://mis.taifex.com.tw/futures/'})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read())
-            rows = (data.get('RtData') or {}).get('QuoteList') or []
-            if rows:
-                def fnum(d, *keys):
-                    for k in keys:
-                        v = d.get(k)
-                        if v not in (None, '', '-'):
-                            try: return float(str(v).replace(',', '').replace('%', ''))
-                            except: pass
-                    return None
-                row = rows[0]
-                price = fnum(row, 'CLastPrice', 'CLast', 'LastPrice')
-                prev = fnum(row, 'CRefPrice', 'CYDClose', 'RefPrice')
-                chg = fnum(row, 'CDiffRate', 'DiffRate')
-                if chg is None and price is not None and prev:
-                    chg = (price - prev) / prev * 100
-                if price is not None:
-                    out = {'ok': True, 'price': price, 'prevClose': prev, 'changePct': chg,
-                           'name': row.get('DispCName') or '台指期', 'source': 'taifex'}
-                    body = json.dumps(out, ensure_ascii=False).encode()
-                    _cache.set(key, body); self._ok(body); return
+            night = self._txf_mis_session(1)
         except Exception as e:
-            yahoo_debug['taifex_error'] = str(e)
+            debug['taifex_night_error'] = str(e)
+        try:
+            day = self._txf_mis_session(0)
+        except Exception as e:
+            debug['taifex_day_error'] = str(e)
 
-        self._ok(json.dumps({'ok': False, 'error': '兩來源皆無法解析', 'debug': yahoo_debug}, ensure_ascii=False).encode())
+        # 主報價：夜盤時段或 Yahoo≈夜盤價 → 夜盤；否則日盤；再退 Yahoo
+        primary = None
+        if night and night.get('price') is not None and (
+            self._txf_is_night_hours()
+            or (yahoo and yahoo.get('price') is not None
+                and abs(yahoo['price'] - night['price']) <= max(2.0, night['price'] * 0.0005))
+            or (not day or day.get('price') is None)
+        ):
+            primary = dict(night)
+            # Yahoo 同期 OHLC 可補 MIS 缺欄
+            if yahoo:
+                for k in ('open', 'high', 'low', 'ampRate', 'prevClose', 'changePct', 'change'):
+                    if primary.get(k) is None and yahoo.get(k) is not None:
+                        primary[k] = yahoo[k]
+                if primary.get('source') and yahoo.get('source'):
+                    primary['source'] = yahoo['source'] + '+' + primary['source']
+        elif day and day.get('price') is not None:
+            primary = dict(day)
+            if yahoo:
+                for k in ('open', 'high', 'low', 'ampRate', 'prevClose', 'changePct', 'change'):
+                    if primary.get(k) is None and yahoo.get(k) is not None:
+                        primary[k] = yahoo[k]
+        elif yahoo and yahoo.get('price') is not None:
+            primary = dict(yahoo)
+            primary['session'] = 'night' if self._txf_is_night_hours() else 'day'
+            primary['sessionLabel'] = '夜盤' if primary['session'] == 'night' else '日盤'
+
+        if primary is None:
+            self._ok(json.dumps(
+                {'ok': False, 'error': '兩來源皆無法解析', 'debug': debug},
+                ensure_ascii=False,
+            ).encode())
+            return
+
+        # 夜盤波動區塊：優先 MIS 夜盤；若無則主報價已是夜盤時複用
+        night_block = None
+        src_night = night if (night and night.get('price') is not None) else None
+        if src_night is None and primary.get('session') == 'night':
+            src_night = primary
+        if src_night is not None:
+            night_block = {
+                'price': src_night.get('price'),
+                'prevClose': src_night.get('prevClose'),
+                'change': src_night.get('change'),
+                'changePct': src_night.get('changePct'),
+                'open': src_night.get('open'),
+                'high': src_night.get('high'),
+                'low': src_night.get('low'),
+                'ampRate': src_night.get('ampRate'),
+                'volume': src_night.get('volume'),
+                'time': src_night.get('time') or '',
+                'session': 'night',
+                'sessionLabel': '夜盤',
+                'source': src_night.get('source') or 'taifex-mis-night',
+            }
+
+        out = {
+            'ok': True,
+            'price': primary.get('price'),
+            'prevClose': primary.get('prevClose'),
+            'change': primary.get('change'),
+            'changePct': primary.get('changePct'),
+            'open': primary.get('open'),
+            'high': primary.get('high'),
+            'low': primary.get('low'),
+            'ampRate': primary.get('ampRate'),
+            'volume': primary.get('volume'),
+            'time': primary.get('time') or '',
+            'session': primary.get('session') or ('night' if self._txf_is_night_hours() else 'day'),
+            'sessionLabel': primary.get('sessionLabel') or (
+                '夜盤' if (primary.get('session') or '') == 'night' else '日盤'
+            ),
+            'name': primary.get('name') or '台指期近一',
+            'source': primary.get('source') or 'unknown',
+            'night': night_block,
+        }
+        body = json.dumps(out, ensure_ascii=False).encode()
+        _cache.set(key, body)
+        self._ok(body)
 
     def _stockfut_one(self, cid, m):
         """從整批快取 m 算單一個股期 {ok,price,changePct,現%,領先,session...}。"""
