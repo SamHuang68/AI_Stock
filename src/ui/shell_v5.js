@@ -2,7 +2,8 @@
  * shell_v5.js  —  Stock Terminal 5.0：側欄殼層 + 視圖路由
  * ----------------------------------------------------------------------------
  * S1：左側導覽軌 + 頂列同步；路由 = 同 HTML show/hide（預設圖表工作區）
- * S2：廣度路由改由 breadth_v5 掛載真實面板（stub:false）
+ * S2：廣度 → breadth_v5
+ * S3：盤後 → afterhours_v5；快訊 → news_v5（事件／結算中樞，非新聞爬蟲）
  *
  * 鐵律：不破壞 #left / #pro-tools / symLoaded / Toolbar 既有行為。
  * ========================================================================== */
@@ -10,14 +11,14 @@
   'use strict';
 
   var STORAGE_KEY = 'st5.shell.route';
-  var VERSION = '5.0-S2';
+  var VERSION = '5.0-S3';
 
   var ROUTES = [
-    { id: 'chart',      label: '圖表',   hint: 'K 線工作區（預設）',     icon: '◈' },
-    { id: 'breadth',    label: '廣度',   hint: '大盤廣度（漲跌家數）',   icon: '▣', stub: false },
-    { id: 'news',       label: '快訊',   hint: '盤中快訊（後續）',       icon: '◉', stub: true },
-    { id: 'afterhours', label: '盤後',   hint: '台股盤後整理（後續）',   icon: '◐', stub: true },
-    { id: 'workspace',  label: '工具',   hint: '回到圖表並開啟指令盤',   icon: '⌘', action: 'cmd' }
+    { id: 'chart',      label: '圖表',   hint: 'K 線工作區（預設）',           icon: '◈' },
+    { id: 'breadth',    label: '廣度',   hint: '大盤廣度（漲跌家數）',         icon: '▣', stub: false },
+    { id: 'news',       label: '快訊',   hint: '事件／結算／警報中樞',         icon: '◉', stub: false },
+    { id: 'afterhours', label: '盤後',   hint: '台指期夜盤＋個股期＋籌碼',     icon: '◐', stub: false },
+    { id: 'workspace',  label: '工具',   hint: '回到圖表並開啟指令盤',         icon: '⌘', action: 'cmd' }
   ];
 
   var state = { route: 'chart', built: false };
@@ -144,7 +145,7 @@
             '<span>' + r.label + '</span></button>';
         }).join('') +
         '<div class="nr-spacer"></div>' +
-        '<div class="nr-foot">S2</div>';
+        '<div class="nr-foot">S3</div>';
 
       var main = document.createElement('div');
       main.id = 'shell-main';
@@ -182,7 +183,7 @@
     } else {
       // 熱重載：更新腳標 / 版本
       var foot = document.querySelector('#navrail .nr-foot');
-      if (foot) foot.textContent = 'S2';
+      if (foot) foot.textContent = 'S3';
     }
 
     state.built = true;
@@ -214,8 +215,15 @@
     try {
       window.dispatchEvent(new CustomEvent('shell:route', { detail: { route: id } }));
     } catch (e) {}
-    if (id === 'breadth' && window.BreadthV5 && typeof window.BreadthV5.activate === 'function') {
-      try { window.BreadthV5.activate(); } catch (err) { console.warn('[shell-v5] breadth activate', err); }
+    var map = {
+      breadth: 'BreadthV5',
+      afterhours: 'AfterhoursV5',
+      news: 'NewsV5'
+    };
+    var key = map[id];
+    if (key && window[key] && typeof window[key].activate === 'function') {
+      try { window[key].activate(); }
+      catch (err) { console.warn('[shell-v5] ' + key + ' activate', err); }
     }
   }
 
@@ -279,7 +287,7 @@
     applyRoute(saved);
     probeHealth();
     setInterval(probeHealth, 60000);
-    console.log('[shell-v5] Stage 2 shell ready · route=' + state.route);
+    console.log('[shell-v5] Stage 3 shell ready · route=' + state.route);
   }
 
   window.ShellV5 = {
