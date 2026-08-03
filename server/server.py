@@ -1498,6 +1498,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._handle_valuation(sym)
         elif p == '/marketflow' or p.startswith('/marketflow?'):
             self._handle_marketflow()
+        elif p == '/breadth' or p.startswith('/breadth?'):
+            self._handle_breadth()
         elif p == '/inst-rank' or p.startswith('/inst-rank?'):
             self._handle_inst_rank()
         elif p == '/events' or p.startswith('/events?'):
@@ -3014,6 +3016,190 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             print(f'[marketflow] MI_MARGN failed: {e}')
         body = json.dumps(out, ensure_ascii=False).encode()
         _cache.set(key, body, ttl=1800)
+        self._ok(body)
+
+    def _handle_breadth(self):
+        """大盤廣度 (v5.0 S2)：TWSE MI_INDEX type=MS 漲跌家數 + 即時指數 + 體質摘要。
+           GET /breadth → {
+             ok, date, source,
+             stocks:{up,limitUp,down,limitDown,unchanged,unmatched,n/a,traded,advRatio,net},
+             market:{...同欄位，整體市場含權證 ETF},
+             turnover:{stockAmt,totalAmt,stockShares,stockTrades},
+             indices:{t00,o00}, score, pillars, marketRows, inst, summary
+           }
+           盤中若當日尚無 MS，往前找最近交易日（最多 12 天）。快取 120s。"""
+        import re as _re
+        from datetime import date as _date, timedelta
+
+        qs = parse_qs(urlparse(self.path).query)
+        force = (qs.get('refresh', ['0'])[0] or '0') in ('1', 'true', 'yes')
+        key = f'breadth:v1:{_date.today().strftime("%Y%m%d")}'
+        if not force:
+            c = _cache.get(key)
+            if c is not None:
+                self._ok(c); return
+
+        def _num(s):
+            if s is None:
+                return None
+            t = str(s).replace(',', '').strip()
+            if not t or t in ('-', '—'):
+                return None
+            try:
+                return float(t)
+            except Exception:
+                return None
+
+        def _pair(s):
+            """'892(113)' → (892, 113)；無括號則 (n, None)。"""
+            t = str(s or '').replace(',', '').strip()
+            m = _re.match(r'^([0-9.]+)\((\d+)\)$', t)
+            if m:
+                return int(float(m.group(1))), int(m.group(2))
+            n = _num(t)
+            return (int(n), None) if n is not None else (None, None)
+
+        def _empty_ad():
+            return {
+                'up': None, 'limitUp': None, 'down': None, 'limitDown': None,
+                'unchanged': None, 'unmatched': None, 'na': None,
+                'traded': None, 'advRatio': None, 'net': None,
+            }
+
+        def _fill_ad(rows, col):
+            """rows: [[類型, 整體市場, 股票], ...]；col=1 整體 / col=2 股票。"""
+            ad = _empty_ad()
+            for row in rows or []:
+                if not row:
+                    continue
+                label = str(row[0])
+                cell = row[col] if len(row) > col else None
+                if '上漲' in label:
+                    ad['up'], ad['limitUp'] = _pair(cell)
+                elif '下跌' in label:
+                    ad['down'], ad['limitDown'] = _pair(cell)
+                elif '持平' in label:
+                    ad['unchanged'], _ = _pair(cell)
+                elif '未成交' in label:
+                    ad['unmatched'], _ = _pair(cell)
+                elif '無比價' in label:
+                    ad['na'], _ = _pair(cell)
+            u, d = ad['up'], ad['down']
+            if u is not None and d is not None:
+                ad['net'] = u - d
+                den = u + d
+                ad['advRatio'] = round(u / den, 4) if den > 0 else None
+                flat = ad['unchanged'] or 0
+                ad['traded'] = u + d + flat
+            return ad
+
+        out = {
+            'ok': False,
+            'date': None,
+            'source': None,
+            'stocks': _empty_ad(),
+            'market': _empty_ad(),
+            'turnover': None,
+            'indices': {},
+            'score': None,
+            'pillars': None,
+            'marketRows': None,
+            'inst': None,
+            'summary': None,
+            'error': None,
+        }
+
+        # ── 1) TWSE MI_INDEX MS：漲跌家數 + 成交統計 ───────────────
+        ms_date = None
+        tables = None
+        for back in range(0, 12):
+            dd = (_date.today() - timedelta(days=back)).strftime('%Y%m%d')
+            for url in (
+                f'https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date={dd}&type=MS&response=json',
+                f'https://www.twse.com.tw/exchangeReport/MI_INDEX?date={dd}&type=MS&response=json',
+            ):
+                try:
+                    req = urllib.request.Request(url, headers=YF_HEADERS)
+                    with urllib.request.urlopen(req, timeout=12) as resp:
+                        d = json.loads(resp.read())
+                    if d.get('stat') not in ('OK', 'ok'):
+                        continue
+                    tables = d.get('tables') or []
+                    if not tables:
+                        # 舊版扁平 data8
+                        data8 = d.get('data8')
+                        if data8:
+                            tables = [{'title': '漲跌證券數合計', 'data': data8}]
+                    if tables:
+                        ms_date = dd
+                        out['source'] = 'TWSE MI_INDEX MS'
+                        break
+                except Exception as e:
+                    print(f'[breadth] MI_INDEX {dd}: {e}')
+                    continue
+            if ms_date:
+                break
+
+        if tables:
+            out['date'] = f'{ms_date[:4]}-{ms_date[4:6]}-{ms_date[6:]}'
+            for t in tables:
+                title = str(t.get('title') or t.get('subtitle') or '')
+                rows = t.get('data') or []
+                has_ad = ('漲跌證券數' in title) or any(
+                    '上漲' in str((r or [''])[0]) for r in rows[:3]
+                )
+                if has_ad and any('上漲' in str((r or [''])[0]) for r in rows):
+                    out['market'] = _fill_ad(rows, 1)
+                    out['stocks'] = _fill_ad(rows, 2)
+                    out['ok'] = out['stocks'].get('up') is not None
+                fields = t.get('fields') or []
+                if '大盤統計' in title or any('成交金額' in str(f) for f in fields):
+                    stock_row = next((r for r in rows if r and str(r[0]).startswith('1.')), None)
+                    total_row = next((r for r in rows if r and '總計' in str(r[0])), None)
+                    sec_row = next((r for r in rows if r and '證券合計' in str(r[0])), None)
+                    pick = sec_row or stock_row
+                    if pick:
+                        out['turnover'] = {
+                            'stockAmt': _num(pick[1]) if len(pick) > 1 else None,
+                            'stockShares': _num(pick[2]) if len(pick) > 2 else None,
+                            'stockTrades': _num(pick[3]) if len(pick) > 3 else None,
+                            'totalAmt': _num(total_row[1]) if total_row and len(total_row) > 1 else None,
+                        }
+
+        # ── 2) 即時指數（MIS）────────────────────────────────────
+        try:
+            out['indices'] = _twse_mis_index('tse_t00.tw|otc_o00.tw')
+        except Exception as e:
+            print('[breadth] twindex', e)
+            out['indices'] = {}
+
+        # ── 3) 大盤體質 + 法人（重用既有建置，失敗不擋廣度）────────
+        try:
+            fund = _build_tw_market_fundamental('^TWII')
+            out['score'] = fund.get('score')
+            out['pillars'] = fund.get('pillars')
+            out['marketRows'] = fund.get('marketRows')
+            out['summary'] = fund.get('summary')
+        except Exception as e:
+            print('[breadth] fundamental', e)
+
+        try:
+            mf_key = f'marketflow:{_date.today().strftime("%Y%m%d")}'
+            # marketflow 實際 key 用 Ymd 無連字號（見 _handle_marketflow）
+            cached_mf = _cache.get(mf_key)
+            if cached_mf is None:
+                cached_mf = _cache.get(f'marketflow:{_date.today().strftime("%Y-%m-%d")}')
+            if cached_mf:
+                mf = json.loads(cached_mf.decode('utf-8') if isinstance(cached_mf, (bytes, bytearray)) else cached_mf)
+                out['inst'] = mf.get('inst')
+        except Exception:
+            pass
+
+        if not out['ok'] and not out['error']:
+            out['error'] = '尚無最近交易日之漲跌家數（可能為休市或 TWSE 尚未公布）'
+
+        body = json.dumps(out, ensure_ascii=False).encode()
+        _cache.set(key, body, ttl=120)
         self._ok(body)
 
     def _handle_inst_rank(self):

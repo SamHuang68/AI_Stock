@@ -1,10 +1,8 @@
 /* ============================================================================
- * shell_v5.js  —  Stock Terminal 5.0 Stage 1：側欄殼層 + 視圖路由
+ * shell_v5.js  —  Stock Terminal 5.0：側欄殼層 + 視圖路由
  * ----------------------------------------------------------------------------
- * S1 範圍（只做殼，不做新資料頁）：
- *   1. 左側導覽軌（nav rail）：圖表工作區為預設；其餘路由為占位，供 S2+ 填入
- *   2. 頂列補上同步狀態／版本標記（不拆掉既有搜尋／市場切換）
- *   3. 路由 = 同 HTML 內 show/hide 面板，不重寫 React、不搬 chart engine
+ * S1：左側導覽軌 + 頂列同步；路由 = 同 HTML show/hide（預設圖表工作區）
+ * S2：廣度路由改由 breadth_v5 掛載真實面板（stub:false）
  *
  * 鐵律：不破壞 #left / #pro-tools / symLoaded / Toolbar 既有行為。
  * ========================================================================== */
@@ -12,11 +10,11 @@
   'use strict';
 
   var STORAGE_KEY = 'st5.shell.route';
-  var VERSION = '5.0-S1';
+  var VERSION = '5.0-S2';
 
   var ROUTES = [
     { id: 'chart',      label: '圖表',   hint: 'K 線工作區（預設）',     icon: '◈' },
-    { id: 'breadth',    label: '廣度',   hint: '大盤廣度（S2）',         icon: '▣', stub: true },
+    { id: 'breadth',    label: '廣度',   hint: '大盤廣度（漲跌家數）',   icon: '▣', stub: false },
     { id: 'news',       label: '快訊',   hint: '盤中快訊（後續）',       icon: '◉', stub: true },
     { id: 'afterhours', label: '盤後',   hint: '台股盤後整理（後續）',   icon: '◐', stub: true },
     { id: 'workspace',  label: '工具',   hint: '回到圖表並開啟指令盤',   icon: '⌘', action: 'cmd' }
@@ -59,6 +57,7 @@
       '#wlbar.shell-hidden{display:none !important}' +
       '.sv-panel{display:none;flex:1;padding:28px 32px;max-width:720px}' +
       '.sv-panel.on{display:block}' +
+      '.sv-mount{min-height:100%}' +
       '.sv-kicker{font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--gold);' +
         'letter-spacing:2px;margin-bottom:8px}' +
       '.sv-title{font-family:\'Noto Serif TC\',serif;font-size:28px;font-weight:700;color:var(--thi);' +
@@ -90,7 +89,7 @@
       '<div class="sv-kicker">STOCK TERMINAL · ' + VERSION + '</div>' +
       '<div class="sv-title">' + route.label + '</div>' +
       '<p class="sv-desc">' + route.hint +
-        '。此頁為 Stage 1 殼層占位：路由與側欄已就緒，資料面板於後續階段接入，' +
+        '。此頁為後續階段占位：路由與側欄已就緒，資料面板尚未接入，' +
         '不影響既有圖表工作區。</p>' +
       '<div class="sv-meta">route = ' + route.id + '</div>' +
       '<button type="button" class="sv-cta" data-shell-back>← 回到圖表工作區</button>';
@@ -104,13 +103,15 @@
 
     injectCSS();
 
-    // 頂列：版本 + 同步狀態（不更動既有搜尋／市場鈕）
     var logo = app.querySelector('#topbar .logo');
     if (logo && !logo.querySelector('.shell-ver')) {
       var ver = document.createElement('span');
       ver.className = 'shell-ver';
       ver.textContent = 'v' + VERSION;
       logo.appendChild(ver);
+    } else if (logo) {
+      var verEl = logo.querySelector('.shell-ver');
+      if (verEl) verEl.textContent = 'v' + VERSION;
     }
     var topbar = $('topbar');
     if (topbar && !$('shell-sync')) {
@@ -127,7 +128,6 @@
       }
     }
 
-    // 包一層 shell-row：navrail + shell-main(#body + 占位視圖)
     if (!$('shell-row')) {
       var row = document.createElement('div');
       row.id = 'shell-row';
@@ -144,7 +144,7 @@
             '<span>' + r.label + '</span></button>';
         }).join('') +
         '<div class="nr-spacer"></div>' +
-        '<div class="nr-foot">S1</div>';
+        '<div class="nr-foot">S2</div>';
 
       var main = document.createElement('div');
       main.id = 'shell-main';
@@ -157,7 +157,11 @@
         p.className = 'sv-panel';
         p.id = 'view-' + r.id;
         p.dataset.route = r.id;
-        p.innerHTML = stubHTML(r);
+        if (r.stub) {
+          p.innerHTML = stubHTML(r);
+        } else {
+          p.innerHTML = '<div class="sv-mount" id="mount-' + r.id + '"></div>';
+        }
         views.appendChild(p);
       });
 
@@ -170,12 +174,15 @@
       rail.addEventListener('click', function (e) {
         var btn = e.target.closest('.nr-btn');
         if (!btn) return;
-        var id = btn.getAttribute('data-route');
-        go(id);
+        go(btn.getAttribute('data-route'));
       });
       views.addEventListener('click', function (e) {
         if (e.target.closest('[data-shell-back]')) go('chart');
       });
+    } else {
+      // 熱重載：更新腳標 / 版本
+      var foot = document.querySelector('#navrail .nr-foot');
+      if (foot) foot.textContent = 'S2';
     }
 
     state.built = true;
@@ -203,13 +210,21 @@
       .finally(function () { clearTimeout(t); });
   }
 
+  function emitRoute(id) {
+    try {
+      window.dispatchEvent(new CustomEvent('shell:route', { detail: { route: id } }));
+    } catch (e) {}
+    if (id === 'breadth' && window.BreadthV5 && typeof window.BreadthV5.activate === 'function') {
+      try { window.BreadthV5.activate(); } catch (err) { console.warn('[shell-v5] breadth activate', err); }
+    }
+  }
+
   function applyRoute(id) {
     var route = null;
     for (var i = 0; i < ROUTES.length; i++) if (ROUTES[i].id === id) route = ROUTES[i];
     if (!route) route = ROUTES[0];
 
     if (route.action === 'cmd') {
-      // 工具捷徑：留在圖表，打開指令盤
       id = 'chart';
       route = ROUTES[0];
       setTimeout(function () {
@@ -239,16 +254,16 @@
     var btns = document.querySelectorAll('#navrail .nr-btn');
     for (var b = 0; b < btns.length; b++) {
       var rid = btns[b].getAttribute('data-route');
-      // workspace 是指令盤捷徑，不高亮；其餘比對目前 route
       btns[b].classList.toggle('on', rid === id && rid !== 'workspace');
     }
 
-    // 從占位頁回圖表時，觸發一次 resize 讓 Lightweight Charts 重算寬度
     if (isChart) {
       setTimeout(function () {
         try { window.dispatchEvent(new Event('resize')); } catch (e) {}
       }, 30);
     }
+
+    emitRoute(id);
   }
 
   function go(id) {
@@ -260,12 +275,11 @@
     if (!ensureStructure()) return setTimeout(boot, 120);
     var saved = 'chart';
     try { saved = localStorage.getItem(STORAGE_KEY) || 'chart'; } catch (e) {}
-    // S1：預設永遠圖表；若上次停在 stub 也允許還原
     if (!saved) saved = 'chart';
     applyRoute(saved);
     probeHealth();
     setInterval(probeHealth, 60000);
-    console.log('[shell-v5] Stage 1 shell ready · route=' + state.route);
+    console.log('[shell-v5] Stage 2 shell ready · route=' + state.route);
   }
 
   window.ShellV5 = {
