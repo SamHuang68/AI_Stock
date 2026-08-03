@@ -3375,44 +3375,65 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         out['updatedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
 
         # ── Overview 儀表板擴充（對齊 tw-pulse 參考圖）──────────────
-        # movers（輕量日排行）
-        movers = _cache_first([f'movers:v1:{ymd}'])
-        if movers is None:
+        # movers / global / macro 並行，避免串行拖到數十秒
+        def _job_movers():
+            m = _cache_first([f'movers:v1:{ymd}'])
+            if m is not None:
+                return m
             try:
-                movers = _fetch_day_movers(8)
-                if movers and movers.get('ok'):
-                    _cache.set(f'movers:v1:{ymd}', json.dumps(movers, ensure_ascii=False).encode(), ttl=300)
+                m = _fetch_day_movers(8)
+                if m and m.get('ok'):
+                    _cache.set(f'movers:v1:{ymd}', json.dumps(m, ensure_ascii=False).encode(), ttl=300)
+                return m
             except Exception as e:
                 print('[pulse] movers', e)
-                movers = {'ok': False, 'gainers': [], 'losers': []}
+                return {'ok': False, 'gainers': [], 'losers': []}
 
-        # 國際／商品（Yahoo 批次）+ 美元指數備援
-        global_q = _cache_first([f'pulse-global:{int(time.time() // 120)}'])
-        if global_q is None:
+        def _job_global():
+            gkey = f'pulse-global:{int(time.time() // 120)}'
+            g = _cache_first([gkey])
+            if g is not None:
+                return g
             try:
-                global_q = _yf_batch_quotes(['^DJI', '^GSPC', '^IXIC', 'CL=F', 'DX-Y.NYB'])
-                if not any(x.get('symbol') == 'DX-Y.NYB' for x in global_q):
-                    global_q += _yf_batch_quotes(['DX=F'])
-                _cache.set(f'pulse-global:{int(time.time() // 120)}',
-                           json.dumps(global_q, ensure_ascii=False).encode(), ttl=120)
+                g = _yf_batch_quotes(['^DJI', '^GSPC', '^IXIC', 'CL=F', 'DX-Y.NYB'])
+                if not any(x.get('symbol') == 'DX-Y.NYB' for x in g):
+                    g = list(g) + _yf_batch_quotes(['DX=F'])
+                _cache.set(gkey, json.dumps(g, ensure_ascii=False).encode(), ttl=120)
+                return g
             except Exception as e:
                 print('[pulse] global', e)
-                global_q = []
+                return []
 
-        us10y = None
-        try:
-            us10y = _macro_latest('us10y', years=5)
-        except Exception as e:
-            print('[pulse] us10y', e)
-
-        eco = []
-        for mk in ('unrate', 'us_cpi_yoy', 'tw_cpi'):
+        def _job_macro():
+            u10 = None
+            eco_rows = []
             try:
-                row = _macro_latest(mk, years=10)
-                if row:
-                    eco.append(row)
+                u10 = _macro_latest('us10y', years=5)
             except Exception as e:
-                print('[pulse] macro', mk, e)
+                print('[pulse] us10y', e)
+            for mk in ('unrate', 'us_cpi_yoy', 'tw_cpi'):
+                try:
+                    row = _macro_latest(mk, years=10)
+                    if row:
+                        eco_rows.append(row)
+                except Exception as e:
+                    print('[pulse] macro', mk, e)
+            return u10, eco_rows
+
+        movers = {'ok': False, 'gainers': [], 'losers': []}
+        global_q = []
+        us10y = None
+        eco = []
+        try:
+            f_m = _pool.submit(_job_movers)
+            f_g = _pool.submit(_job_global)
+            f_e = _pool.submit(_job_macro)
+            movers = f_m.result(timeout=25) or movers
+            global_q = f_g.result(timeout=20) or []
+            us10y, eco = f_e.result(timeout=20)
+            eco = eco or []
+        except Exception as e:
+            print('[pulse] overview parallel', e)
 
         # 事件快訊（非新聞爬蟲）
         flash = []
