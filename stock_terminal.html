@@ -963,21 +963,22 @@ function isNearPeriodHigh(candles, thrPct) {
  */
 function calcPriceScaleMargins(isIntraday, hasVol, candles) {
   if (isIntraday) return { top: 0.30, bottom: 0.30 }; // 盤中壓平小波動
-  const nearHigh = isNearPeriodHigh(candles, 0.04);
+  const nearHigh = isNearPeriodHigh(candles, 0.05);
   // 有量柱時底部留給量能；無量時底部可略收
+  // 頂部留白加大：即使量價鈕已移出圖區，仍避開左上價格／OHLC 圖例
   if (hasVol) {
-    return nearHigh ? { top: 0.22, bottom: 0.18 } : { top: 0.16, bottom: 0.18 };
+    return nearHigh ? { top: 0.20, bottom: 0.18 } : { top: 0.14, bottom: 0.18 };
   }
-  return nearHigh ? { top: 0.24, bottom: 0.10 } : { top: 0.18, bottom: 0.10 };
+  return nearHigh ? { top: 0.22, bottom: 0.10 } : { top: 0.16, bottom: 0.10 };
 }
 
 /**
  * autoscaleInfoProvider：把可視最高價再往上墊一截（大於實際最高），
- * 讓創新高時影線／標籤仍落在浮動視窗下方。
+ * 讓創新高時影線／標籤仍落在圖例下方。
  */
 function makeHighHeadroomAutoscale(candles) {
-  const nearHigh = isNearPeriodHigh(candles, 0.04);
-  const padRatio = nearHigh ? 0.22 : 0.12;
+  const nearHigh = isNearPeriodHigh(candles, 0.05);
+  const padRatio = nearHigh ? 0.18 : 0.10;
   return function (original) {
     const res = (typeof original === 'function') ? original() : null;
     if (!res || !res.priceRange) return res;

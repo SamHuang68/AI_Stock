@@ -137,44 +137,62 @@
     return cv;
   }
 
-  // ---- 浮動模式切換（均衡 / 只看價 / 只看量）--------------
+  // ---- 量價模式切換：固定停在 rangebar 與圖之間（不疊在 K 線上）----
   function ensureFloatStyle() {
     if (document.getElementById('vp-float-style')) return;
     const s = document.createElement('style');
     s.id = 'vp-float-style';
     s.textContent = `
-    #vp-float{position:absolute;top:36px;right:72px;z-index:12;display:none;
-      align-items:center;gap:0;padding:2px;border-radius:8px;
-      background:rgba(15,23,42,.88);border:1px solid #334155;
-      box-shadow:0 4px 14px rgba(0,0,0,.35);backdrop-filter:blur(6px);
-      pointer-events:auto;user-select:none}
+    /* 專用列：插在 #rangebar 與 #chartarea 之間，永不覆蓋 K 線／新高 */
+    #vp-dock{flex:0 0 28px;height:28px;display:none;align-items:center;justify-content:flex-end;
+      gap:8px;padding:0 10px;background:var(--bg2,#0b1220);border-bottom:1px solid var(--border,#1e293b);
+      z-index:6;box-sizing:border-box}
+    #vp-dock.on{display:flex}
+    #vp-dock .vp-dock-lbl{font-size:10px;color:#64748b;letter-spacing:.3px;margin-right:auto}
+    #vp-float{position:static;display:flex;align-items:center;gap:0;padding:2px;border-radius:8px;
+      background:rgba(15,23,42,.95);border:1px solid #334155;pointer-events:auto;user-select:none}
     #vp-float .vp-fbtn{appearance:none;border:0;background:transparent;color:#94a3b8;
-      font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;cursor:pointer;
+      font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer;
       line-height:1.2;letter-spacing:.02em}
     #vp-float .vp-fbtn:hover{color:#e2e8f0;background:rgba(51,65,85,.55)}
     #vp-float .vp-fbtn.on{color:#0f172a;background:#38bdf8}
     #vp-float .vp-fbtn.on[data-m="amt"]{background:#fbbf24}
     #vp-float .vp-fbtn.on[data-m="vol"]{background:#a78bfa;color:#0f172a}
     @media (max-width:720px){
-      #vp-float{right:8px;top:auto;bottom:36px}
-      #vp-float .vp-fbtn{padding:5px 7px;font-size:10px}
+      #vp-dock{padding:0 6px}
+      #vp-float .vp-fbtn{padding:4px 7px;font-size:10px}
+      #vp-dock .vp-dock-lbl{display:none}
     }`;
     document.head.appendChild(s);
   }
 
-  function ensureFloat() {
+  /** 停靠列：插在圖表上方，不進 #chart-wrap，避免遮蔽新高 */
+  function ensureDock() {
     ensureFloatStyle();
-    const container = chartHost();
-    if (!container) return null;
+    let dock = document.getElementById('vp-dock');
+    if (dock) return dock;
+    const chartarea = document.getElementById('chartarea');
+    const left = document.getElementById('left') || (chartarea && chartarea.parentElement);
+    if (!left || !chartarea) return null;
+    dock = document.createElement('div');
+    dock.id = 'vp-dock';
+    dock.innerHTML = '<span class="vp-dock-lbl">量價分布</span>';
+    left.insertBefore(dock, chartarea);
+    return dock;
+  }
+
+  function ensureFloat() {
+    const dock = ensureDock();
+    if (!dock) return null;
     let el = document.getElementById('vp-float');
-    if (el && el._host === container) {
+    if (el && el._host === dock) {
       VP.floatEl = el;
       return el;
     }
     if (el) { try { el.remove(); } catch {} }
     el = document.createElement('div');
     el.id = 'vp-float';
-    el._host = container;
+    el._host = dock;
     el.setAttribute('role', 'group');
     el.setAttribute('aria-label', '量價模式');
     el.innerHTML = MODE_ORDER.map(m =>
@@ -187,7 +205,6 @@
       if (!btn) return;
       const m = btn.getAttribute('data-m');
       if (!MODE_ORDER.includes(m)) return;
-      // 從關閉狀態點浮動鈕 → 自動開啟
       if (!VP.enabled) {
         VP.enabled = true;
         syncState();
@@ -197,14 +214,15 @@
       }
       setMode(m);
     });
-    if (getComputedStyle(container).position === 'static') container.style.position = 'relative';
-    container.appendChild(el);
+    dock.appendChild(el);
     VP.floatEl = el;
     return el;
   }
 
   function syncFloat() {
+    const dock = ensureDock();
     const el = ensureFloat();
+    if (dock) dock.classList.toggle('on', !!VP.enabled);
     if (!el) return;
     el.style.display = VP.enabled ? 'flex' : 'none';
     el.querySelectorAll('.vp-fbtn').forEach(b => {
