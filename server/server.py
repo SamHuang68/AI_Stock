@@ -70,7 +70,8 @@ def _save_draw_store(d):
 
 # v3.9 P4: 總經數據 — 美國走 FRED「免 API key」公開 CSV 下載端點 (fredgraph.csv)。
 #   台灣 CPI 走 FRED 的 OECD 序列(避開 .tw 直連)；景氣對策信號走國發會 best-effort。
-_macro_cache = {}   # {series_key: (yyyymmdd, payload_bytes)}
+_macro_cache = {}   # {series_key: payload_bytes}
+_macro_fail_until = {}  # series_key -> unix ts；失敗後短暫跳過，避免 /pulse 反覆卡死
 MACRO_SERIES = {
     'us10y':            {'p': 'fred', 'id': 'DGS10',             'label': '美國10年期公債殖利率', 'unit': '%'},
     'us2y':             {'p': 'fred', 'id': 'DGS2',              'label': '美國2年期公債殖利率',  'unit': '%'},
@@ -90,21 +91,25 @@ MACRO_SERIES = {
     'tw_light':         {'p': 'ndc',                             'label': '台灣景氣對策信號(分數)', 'unit': '分'},
 }
 
-def _fetch_fred_csv(series_id, cosd):
+def _fetch_fred_csv(series_id, cosd, timeout=8, retries=1):
     """FRED 免 key CSV：https://fred.stlouisfed.org/graph/fredgraph.csv?id=ID&cosd=YYYY-MM-DD
-       回 [{date, value}]；缺值以 '.' 表示，略過。含重試(逾時偶發)。"""
+       回 [{date, value}]；缺值以 '.' 表示，略過。
+       timeout/retries 可調：/pulse 路徑用短逾時，避免單源拖垮總覽刷新。"""
     url = f'https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}&cosd={cosd}'
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'text/csv'})
     text = None
     last_err = None
-    for attempt in range(3):
+    attempts = max(1, int(retries or 1))
+    to = max(2.0, float(timeout or 8))
+    for attempt in range(attempts):
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=to) as resp:
                 text = resp.read().decode('utf-8', 'replace')
             break
         except Exception as e:
             last_err = e
-            time.sleep(1.5 * (attempt + 1))
+            if attempt + 1 < attempts:
+                time.sleep(0.35 * (attempt + 1))
     if text is None:
         raise last_err if last_err else RuntimeError('fred fetch failed')
     pts = []
@@ -1482,23 +1487,51 @@ def _fetch_day_movers(n=8):
                 'mkt': 'TW',
             })
 
-    try:
+    def _get_json(url, timeout=8):
         req = urllib.request.Request(
-            'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL',
-            headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
-        with urllib.request.urlopen(req, timeout=18) as resp:
-            ingest_twse(json.loads(resp.read()))
-    except Exception as e:
-        print('[movers] TWSE', e)
+            url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
 
-    try:
-        req = urllib.request.Request(
-            'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes',
-            headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
-        with urllib.request.urlopen(req, timeout=18) as resp:
-            ingest_tpex(json.loads(resp.read()))
-    except Exception as e:
-        print('[movers] TPEx', e)
+    # TWSE + TPEx 並行（本函式可能在 thread pool 內執行，用獨立短線程避免巢狀死鎖）
+    twse_rows = None
+    tpex_rows = None
+    err_twse = err_tpex = None
+
+    def _twse():
+        nonlocal twse_rows, err_twse
+        try:
+            twse_rows = _get_json(
+                'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL', timeout=8)
+        except Exception as e:
+            err_twse = e
+
+    def _tpex():
+        nonlocal tpex_rows, err_tpex
+        try:
+            tpex_rows = _get_json(
+                'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes', timeout=8)
+        except Exception as e:
+            err_tpex = e
+
+    t1 = threading.Thread(target=_twse, daemon=True)
+    t2 = threading.Thread(target=_tpex, daemon=True)
+    t1.start(); t2.start()
+    t1.join(9); t2.join(9)
+    if twse_rows is not None:
+        try:
+            ingest_twse(twse_rows)
+        except Exception as e:
+            print('[movers] TWSE ingest', e)
+    elif err_twse:
+        print('[movers] TWSE', err_twse)
+    if tpex_rows is not None:
+        try:
+            ingest_tpex(tpex_rows)
+        except Exception as e:
+            print('[movers] TPEx ingest', e)
+    elif err_tpex:
+        print('[movers] TPEx', err_tpex)
 
     if not rows:
         return {'ok': False, 'date': date_s, 'gainers': [], 'losers': [], 'source': None, 'error': 'no rows'}
@@ -1515,8 +1548,9 @@ def _fetch_day_movers(n=8):
     }
 
 
-def _macro_latest(series_key, years=10):
-    """讀 MACRO_SERIES 最後一點（走 _macro_cache，與 /macro/<key> 同源）。失敗回 None。"""
+def _macro_latest(series_key, years=10, timeout=8, retries=1, allow_fetch=True):
+    """讀 MACRO_SERIES 最後一點（走 _macro_cache，與 /macro/<key> 同源）。失敗回 None。
+       /pulse 請用 timeout<=4、retries=1，避免 FRED 不通時拖垮總覽。"""
     from datetime import date as _date, timedelta as _td
     spec = MACRO_SERIES.get(series_key)
     if not spec:
@@ -1530,7 +1564,11 @@ def _macro_latest(series_key, years=10):
             d = json.loads(cached.decode('utf-8') if isinstance(cached, (bytes, bytearray)) else cached)
         except Exception:
             d = None
-    if d is None:
+    if d is None and allow_fetch:
+        # 失敗冷卻：同一系列短時間不重抓
+        until = _macro_fail_until.get(ckey) or 0
+        if until > time.time():
+            return None
         cosd = (today - _td(days=years * 366)).strftime('%Y-%m-%d')
         out = {
             'series': series_key, 'label': spec['label'], 'unit': spec.get('unit', ''),
@@ -1538,7 +1576,7 @@ def _macro_latest(series_key, years=10):
         }
         try:
             if spec['p'] == 'fred':
-                out['points'] = _fetch_fred_csv(spec['id'], cosd)
+                out['points'] = _fetch_fred_csv(spec['id'], cosd, timeout=timeout, retries=retries)
                 out['source'] = f'FRED {spec["id"]}'
             elif spec['p'] == 'twcpi':
                 out['points'] = _fetch_tw_cpi(max(12, years * 12))
@@ -1548,11 +1586,14 @@ def _macro_latest(series_key, years=10):
                 out['source'] = '國發會 NDC' if out['points'] else None
         except Exception as e:
             out['note'] = str(e)
+            _macro_fail_until[ckey] = time.time() + 600  # 10 分鐘內略過
         if out['points']:
             body = json.dumps(out, ensure_ascii=False).encode()
             _macro_cache[ckey] = body
+            _macro_fail_until.pop(ckey, None)
             d = out
         else:
+            _macro_fail_until[ckey] = time.time() + 600
             return None
     pts = (d or {}).get('points') or []
     if not pts:
@@ -1569,28 +1610,27 @@ def _macro_latest(series_key, years=10):
 
 
 def _yf_batch_quotes(syms):
-    """輕量 Yahoo 批次：[{symbol,name,price,changePct}]。"""
-    out = []
+    """輕量 Yahoo 批次：[{symbol,name,price,changePct}]。並行抓取，總預算約 6s。"""
     labels = {
         '^DJI': '道瓊', '^GSPC': 'S&P 500', '^IXIC': '那斯達克',
         'CL=F': 'WTI 原油', 'DX-Y.NYB': '美元指數', 'DX=F': '美元指數',
     }
-    for sym in syms:
+
+    def _one(sym):
         try:
             ov = _trusted_quote_override(sym)
             if ov and ov.get('price') is not None:
-                out.append({
+                return {
                     'symbol': sym, 'name': labels.get(sym, sym),
                     'price': ov['price'], 'changePct': ov.get('changePct'),
                     'source': ov.get('source') or 'override',
-                })
-                continue
+                }
             _, data, _ = fetch_one(sym, '5d', '1d', False)
             if not data:
-                continue
+                return None
             res = (json.loads(data).get('chart') or {}).get('result') or []
             if not res:
-                continue
+                return None
             m = res[0].get('meta') or {}
             cur = m.get('regularMarketPrice')
             if cur is None:
@@ -1598,14 +1638,41 @@ def _yf_batch_quotes(syms):
                 cur = next((c for c in reversed(cls) if c is not None), None)
             prev = _yf_prevclose(m)
             if cur is None or not prev:
-                continue
-            out.append({
+                return None
+            return {
                 'symbol': sym, 'name': labels.get(sym, m.get('shortName') or sym),
                 'price': cur, 'changePct': (cur - prev) / prev * 100.0,
                 'source': 'yahoo',
-            })
+            }
         except Exception as e:
             print('[pulse-global]', sym, e)
+            return None
+
+    out = []
+    # 獨立小池，避免佔滿全域 _pool 造成巢狀等待
+    with ThreadPoolExecutor(max_workers=min(6, max(2, len(syms or [])))) as ex:
+        futs = [ex.submit(_one, s) for s in (syms or [])]
+        try:
+            for f in as_completed(futs, timeout=6):
+                try:
+                    row = f.result()
+                except Exception:
+                    row = None
+                if row:
+                    out.append(row)
+        except Exception:
+            # 逾時：帶走已完成的
+            for f in futs:
+                if f.done():
+                    try:
+                        row = f.result()
+                        if row:
+                            out.append(row)
+                    except Exception:
+                        pass
+    # 保序
+    order = {s: i for i, s in enumerate(syms or [])}
+    out.sort(key=lambda r: order.get(r.get('symbol'), 999))
     return out
 
 
@@ -3381,7 +3448,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         out['updatedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
 
         # ── Overview 儀表板擴充（對齊 tw-pulse 參考圖）──────────────
-        # movers / global / macro 並行，避免串行拖到數十秒
+        # movers / global / macro 並行；總預算 ~8s（FRED 在此環境常逾時，必須 fail-fast）
+        PULSE_SIDE_BUDGET = 8.0
+
         def _job_movers():
             m = _cache_first([f'movers:v1:{ymd}'])
             if m is not None:
@@ -3402,8 +3471,11 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 return g
             try:
                 g = _yf_batch_quotes(['^DJI', '^GSPC', '^IXIC', 'CL=F', 'DX-Y.NYB'])
-                if not any(x.get('symbol') == 'DX-Y.NYB' for x in g):
-                    g = list(g) + _yf_batch_quotes(['DX=F'])
+                if not any(x.get('symbol') == 'DX-Y.NYB' for x in (g or [])):
+                    # 僅在缺美元指數時補一槍，不重抓整批
+                    extra = _yf_batch_quotes(['DX=F'])
+                    if extra:
+                        g = list(g or []) + list(extra)
                 _cache.set(gkey, json.dumps(g, ensure_ascii=False).encode(), ttl=120)
                 return g
             except Exception as e:
@@ -3411,15 +3483,20 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 return []
 
         def _job_macro():
+            """快取優先；未命中才短逾時抓 FRED（timeout=3, retries=1）。"""
             u10 = None
             eco_rows = []
             try:
-                u10 = _macro_latest('us10y', years=5)
+                u10 = _macro_latest('us10y', years=5, timeout=3, retries=1)
             except Exception as e:
                 print('[pulse] us10y', e)
             for mk in ('unrate', 'us_cpi_yoy', 'tw_cpi'):
                 try:
-                    row = _macro_latest(mk, years=10)
+                    # 先只讀快取；沒有再短抓（tw_cpi 走政府源，允許稍長）
+                    row = _macro_latest(mk, years=10, timeout=3, retries=1,
+                                        allow_fetch=(mk == 'tw_cpi'))
+                    if row is None and mk != 'tw_cpi':
+                        row = _macro_latest(mk, years=10, timeout=3, retries=1, allow_fetch=True)
                     if row:
                         eco_rows.append(row)
                 except Exception as e:
@@ -3430,14 +3507,40 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         global_q = []
         us10y = None
         eco = []
+        # 獨立 executor：並行等待用 wait()，不再串行 .result(25)+.result(20)
         try:
-            f_m = _pool.submit(_job_movers)
-            f_g = _pool.submit(_job_global)
-            f_e = _pool.submit(_job_macro)
-            movers = f_m.result(timeout=25) or movers
-            global_q = f_g.result(timeout=20) or []
-            us10y, eco = f_e.result(timeout=20)
-            eco = eco or []
+            from concurrent.futures import wait as _fut_wait
+            with ThreadPoolExecutor(max_workers=3, thread_name_prefix='pulse-side') as _pex:
+                f_m = _pex.submit(_job_movers)
+                f_g = _pex.submit(_job_global)
+                f_e = _pex.submit(_job_macro)
+                done, _pending = _fut_wait([f_m, f_g, f_e], timeout=PULSE_SIDE_BUDGET)
+                if f_m in done:
+                    try:
+                        movers = f_m.result() or movers
+                    except Exception as e:
+                        print('[pulse] movers result', e)
+                if f_g in done:
+                    try:
+                        global_q = f_g.result() or []
+                    except Exception as e:
+                        print('[pulse] global result', e)
+                if f_e in done:
+                    try:
+                        us10y, eco = f_e.result()
+                        eco = eco or []
+                    except Exception as e:
+                        print('[pulse] macro result', e)
+                else:
+                    # macro 逾時：仍試讀既有快取（不觸發網路）
+                    try:
+                        us10y = _macro_latest('us10y', years=5, allow_fetch=False)
+                        for mk in ('unrate', 'us_cpi_yoy', 'tw_cpi'):
+                            row = _macro_latest(mk, years=10, allow_fetch=False)
+                            if row:
+                                eco.append(row)
+                    except Exception:
+                        pass
         except Exception as e:
             print('[pulse] overview parallel', e)
 
@@ -3561,20 +3664,33 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             'lsRatio': ls_ratio,
         }
 
-        # Yahoo 補齊加權 OHLC（MIS 若缺 h/l）
+        # Yahoo 補齊加權 OHLC（MIS 若缺 h/l）— 最多等 3s，不拖垮整包
         ohlc = out['overview']['ohlc']
         if ohlc.get('high') is None or ohlc.get('low') is None or ohlc.get('open') is None:
-            try:
-                _, data, _ = fetch_one('^TWII', '5d', '1d', False)
-                if data:
-                    res = (json.loads(data).get('chart') or {}).get('result') or []
+            _ohlc_box = {'data': None, 'err': None}
+
+            def _ohlc_job():
+                try:
+                    _, data, _ = fetch_one('^TWII', '5d', '1d', False)
+                    _ohlc_box['data'] = data
+                except Exception as e:
+                    _ohlc_box['err'] = e
+
+            th = threading.Thread(target=_ohlc_job, daemon=True)
+            th.start()
+            th.join(3.0)
+            if _ohlc_box['data']:
+                try:
+                    res = (json.loads(_ohlc_box['data']).get('chart') or {}).get('result') or []
                     if res:
                         q = ((res[0].get('indicators') or {}).get('quote') or [{}])[0]
+
                         def _last(arr):
                             for x in reversed(arr or []):
                                 if x is not None:
                                     return x
                             return None
+
                         if ohlc.get('open') is None:
                             ohlc['open'] = _last(q.get('open'))
                         if ohlc.get('high') is None:
@@ -3582,8 +3698,10 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                         if ohlc.get('low') is None:
                             ohlc['low'] = _last(q.get('low'))
                         ohlc['source'] = (ohlc.get('source') or '') + '+yahoo'
-            except Exception as e:
-                print('[pulse] twii ohlc', e)
+                except Exception as e:
+                    print('[pulse] twii ohlc', e)
+            elif _ohlc_box['err']:
+                print('[pulse] twii ohlc', _ohlc_box['err'])
 
         body = json.dumps(out, ensure_ascii=False).encode()
         if out.get('ok'):

@@ -630,29 +630,56 @@
   function refresh(force) {
     var body = ensureMount();
     if (!body) return;
-    body.innerHTML = '<div class="pl-loading">載入總覽儀表板…</div>';
+    var btn = $('pl-refresh');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '↻ 更新中…';
+    }
+    // stale-while-revalidate：已有畫面時不整頁清空（體感延遲主因）
+    if (!lastPack) {
+      body.innerHTML = '<div class="pl-loading">載入總覽儀表板…</div>';
+    } else {
+      var tone = $('pl-tone');
+      if (tone && tone.textContent.indexOf('更新中') < 0) {
+        tone.textContent = (tone.textContent || '—') + ' · 更新中…';
+      }
+    }
+    // 手動刷新打穿聚合快取；子源（movers/global/macro）仍走各自 TTL，伺服器側預算 ≤8s
     var q = force ? '/pulse?refresh=1' : '/pulse';
+    var t0 = Date.now();
     Promise.all([jget(q), fetchWlQuotes()]).then(function (arr) {
       var pulse = arr[0];
       if (!pulse || !pulse.ok) {
-        body.innerHTML = '<div class="pl-note">脈動載入失敗' +
-          (pulse && pulse.error ? '：' + pulse.error : '（請重啟 server）') +
-          ' <button type="button" class="pl-btn" id="pl-retry">重試</button></div>';
-        var retry = $('pl-retry');
-        if (retry) retry.onclick = function () { refresh(true); };
+        if (!lastPack) {
+          body.innerHTML = '<div class="pl-note">脈動載入失敗' +
+            (pulse && pulse.error ? '：' + pulse.error : '（請重啟 server）') +
+            ' <button type="button" class="pl-btn" id="pl-retry">重試</button></div>';
+          var retry = $('pl-retry');
+          if (retry) retry.onclick = function () { refresh(true); };
+        }
         warmCaches();
         return;
       }
       render({ pulse: pulse, wlQuotes: arr[1] || {} });
+      var ms = Date.now() - t0;
+      var sub = $('pl-sub');
+      if (sub) sub.textContent = (sub.textContent || '') + ' · ' + ms + 'ms';
+      // 資料不完整：只暖快取 + soft 再取；禁止再打 refresh=1（舊邏輯會再卡 20s+）
       if ((pulse.dataCompleteness != null && pulse.dataCompleteness < 90) || !pulse.breadthOk) {
         warmCaches();
         setTimeout(function () {
           if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'pulse') {
-            jget('/pulse?refresh=1').then(function (p2) {
+            jget('/pulse').then(function (p2) {
               if (p2 && p2.ok) render({ pulse: p2, wlQuotes: arr[1] || {} });
             });
           }
-        }, 2800);
+        }, 1600);
+      }
+    }).finally(function () {
+      var b = $('pl-refresh');
+      if (b) {
+        b.disabled = false;
+        b.textContent = '↻ 重新整理';
       }
     });
   }
