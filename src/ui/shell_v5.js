@@ -4,6 +4,7 @@
  * S1：左側導覽軌 + 頂列同步；路由 = 同 HTML show/hide（預設圖表工作區）
  * S2：廣度 → breadth_v5
  * S3：盤後 → afterhours_v5；快訊 → news_v5（事件／結算中樞，非新聞爬蟲）
+ * S4：脈動 → pulse_v5（TW Pulse 總覽；側欄首位，預設仍還原圖表）
  *
  * 鐵律：不破壞 #left / #pro-tools / symLoaded / Toolbar 既有行為。
  * ========================================================================== */
@@ -11,14 +12,15 @@
   'use strict';
 
   var STORAGE_KEY = 'st5.shell.route';
-  var VERSION = '5.0-S3';
+  var VERSION = '5.0-S4';
 
   var ROUTES = [
-    { id: 'chart',      label: '圖表',   hint: 'K 線工作區（預設）',           icon: '◈' },
-    { id: 'breadth',    label: '廣度',   hint: '大盤廣度（漲跌家數）',         icon: '▣', stub: false },
-    { id: 'news',       label: '快訊',   hint: '事件／結算／警報中樞',         icon: '◉', stub: false },
-    { id: 'afterhours', label: '盤後',   hint: '台指期夜盤＋個股期＋籌碼',     icon: '◐', stub: false },
-    { id: 'workspace',  label: '工具',   hint: '回到圖表並開啟指令盤',         icon: '⌘', action: 'cmd' }
+    { id: 'pulse',      label: '脈動',   hint: '市場脈動總覽（指數／廣度／籌碼）', icon: '◎', stub: false },
+    { id: 'chart',      label: '圖表',   hint: 'K 線工作區（預設）',               icon: '◈' },
+    { id: 'breadth',    label: '廣度',   hint: '大盤廣度（漲跌家數）',             icon: '▣', stub: false },
+    { id: 'news',       label: '快訊',   hint: '事件／結算／警報中樞',             icon: '◉', stub: false },
+    { id: 'afterhours', label: '盤後',   hint: '台指期夜盤＋個股期＋籌碼',         icon: '◐', stub: false },
+    { id: 'workspace',  label: '工具',   hint: '回到圖表並開啟指令盤',             icon: '⌘', action: 'cmd' }
   ];
 
   var state = { route: 'chart', built: false };
@@ -145,7 +147,7 @@
             '<span>' + r.label + '</span></button>';
         }).join('') +
         '<div class="nr-spacer"></div>' +
-        '<div class="nr-foot">S3</div>';
+        '<div class="nr-foot">S4</div>';
 
       var main = document.createElement('div');
       main.id = 'shell-main';
@@ -182,8 +184,33 @@
       });
     } else {
       // 熱重載：更新腳標 / 版本
-      var foot = document.querySelector('#navrail .nr-foot');
-      if (foot) foot.textContent = 'S3';
+      var rail = $('navrail');
+      if (rail) {
+        rail.innerHTML =
+          '<div class="nr-brand">ST<small>5.0</small></div>' +
+          ROUTES.map(function (r) {
+            return '<button type="button" class="nr-btn" data-route="' + r.id + '" title="' +
+              r.hint.replace(/"/g, '') + '">' +
+              '<span class="nr-ico" aria-hidden="true">' + r.icon + '</span>' +
+              '<span>' + r.label + '</span></button>';
+          }).join('') +
+          '<div class="nr-spacer"></div>' +
+          '<div class="nr-foot">S4</div>';
+      }
+      // 熱更新：補上後加的路由面板（如 pulse）
+      var views = $('shell-views');
+      if (views) {
+        ROUTES.forEach(function (r) {
+          if (r.id === 'chart' || r.action) return;
+          if ($('view-' + r.id)) return;
+          var p = document.createElement('section');
+          p.className = 'sv-panel';
+          p.id = 'view-' + r.id;
+          p.dataset.route = r.id;
+          p.innerHTML = r.stub ? stubHTML(r) : '<div class="sv-mount" id="mount-' + r.id + '"></div>';
+          views.appendChild(p);
+        });
+      }
     }
 
     state.built = true;
@@ -216,6 +243,7 @@
       window.dispatchEvent(new CustomEvent('shell:route', { detail: { route: id } }));
     } catch (e) {}
     var map = {
+      pulse: 'PulseV5',
       breadth: 'BreadthV5',
       afterhours: 'AfterhoursV5',
       news: 'NewsV5'
@@ -227,19 +255,24 @@
     }
   }
 
+  function findRoute(id) {
+    for (var i = 0; i < ROUTES.length; i++) if (ROUTES[i].id === id) return ROUTES[i];
+    return null;
+  }
+
   function applyRoute(id) {
-    var route = null;
-    for (var i = 0; i < ROUTES.length; i++) if (ROUTES[i].id === id) route = ROUTES[i];
-    if (!route) route = ROUTES[0];
+    var route = findRoute(id) || findRoute('chart') || ROUTES[0];
 
     if (route.action === 'cmd') {
       id = 'chart';
-      route = ROUTES[0];
+      route = findRoute('chart') || ROUTES[0];
       setTimeout(function () {
         var b = $('btn-cmdp');
         if (b) b.click();
         else if (window.cmdPaletteOpen) window.cmdPaletteOpen();
       }, 0);
+    } else {
+      id = route.id;
     }
 
     state.route = id;
@@ -287,7 +320,7 @@
     applyRoute(saved);
     probeHealth();
     setInterval(probeHealth, 60000);
-    console.log('[shell-v5] Stage 3 shell ready · route=' + state.route);
+    console.log('[shell-v5] Stage 4 shell ready · route=' + state.route);
   }
 
   window.ShellV5 = {
