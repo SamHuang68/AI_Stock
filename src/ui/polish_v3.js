@@ -130,8 +130,6 @@ function _isTwSym(s) { return window.Colors ? Colors.isTW(s) : (/^\d/.test(Strin
   justify-content: center; line-height: 1; min-width: 0; flex-shrink: 1;
   padding: 2px 0 !important;
 }
-.wlchip-rm { flex-shrink: 0; }
-
 /* (#2) 線型視窗上限 — 不超過 viewport 62%，下方留空給未來面板/可增大 wlbar */
 #chartarea {
   max-height: 62vh;
@@ -147,9 +145,12 @@ body.market-us .price-down, body.market-us .neg { color: var(--red) !important; 
        chart-info 改兩欄：左=價格/漲跌/名稱(窄欄)，右=OHLC視窗緊貼股價後 + 圖例。
        視窗縮小約一半(字級/間距減)、半透明，避免遮到 K 線。 */
 #ci-row { display: flex; align-items: flex-start; gap: 8px; }
-#ci-row .ci-left { min-width: 0; max-width: 200px; }
+#ci-row .ci-left { min-width: 0; max-width: 220px; }
 #ci-row .ci-left #ci-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ci-row .ci-left .ci-high { font-size: 12px; font-weight: 700; margin-top: 3px; color: var(--gold); line-height: 1.3; }
+#ci-row .ci-left .ci-high b { color: var(--thi); font-size: 13px; }
 #ci-row .ci-left .ci-range-chg { font-size: 10px; line-height: 1.35; }
+.wlchip-rm { display: none !important; }
 #ci-east { display: flex; flex-direction: column; align-items: flex-end; }
 #ci-east #ci-ohlc {
   margin-top: 0; font-size: 8px; line-height: 1.5; letter-spacing: .2px;
@@ -729,6 +730,9 @@ function applyMarketColorClass(mkt) {
       : (prev ? prev.close : null);
     if (typeof updateHeaderChg === 'function') {
       updateHeaderChg(last.close, ref, S.data.rangeBase, S.data.rangeChgLbl, S.mkt, S.sym);
+      if (typeof updateHeaderHigh === 'function') {
+        updateHeaderHigh(S.data.candles, S.data.rangeChgLbl, last.close);
+      }
       return;
     }
     // fallback：舊版無 updateHeaderChg 時只修日漲跌色
@@ -1168,7 +1172,7 @@ function renderChartLegend() {
   if (!east) {
     const row = document.createElement('div'); row.id = 'ci-row';
     const left = document.createElement('div'); left.className = 'ci-left';
-    ['ci-price', 'ci-chg', 'ci-range-chg', 'ci-name', 'market-score-bar'].forEach(id => {
+    ['ci-price', 'ci-high', 'ci-chg', 'ci-range-chg', 'ci-name', 'market-score-bar'].forEach(id => {
       const el = document.getElementById(id); if (el) left.appendChild(el);
     });
     east = document.createElement('div'); east.id = 'ci-east';

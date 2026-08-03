@@ -166,7 +166,7 @@
    👆 Touch device (any size with touch capability)
    ────────────────────────────────────────────────────────── */
 @media (hover: none) and (pointer: coarse) {
-  .wlchip-rm { opacity: 1 !important; }            /* 觸控沒 hover，移除鈕永遠顯示 */
+  .wlchip-rm { display: none !important; }          /* 移除 ×：改右鍵/長按由桌面右鍵流程；觸控避免誤觸 */
   .heatcell:hover { transform: none !important; }   /* 觸控時 hover scale 會跳 */
   /* Bigger hitboxes */
   .probtn, .rgbtn, .rtab, .wlchip, .wladd { min-height: 32px; }

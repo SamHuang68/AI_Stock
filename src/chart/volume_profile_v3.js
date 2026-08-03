@@ -143,7 +143,7 @@
     const s = document.createElement('style');
     s.id = 'vp-float-style';
     s.textContent = `
-    #vp-float{position:absolute;top:8px;right:72px;z-index:12;display:none;
+    #vp-float{position:absolute;top:36px;right:72px;z-index:12;display:none;
       align-items:center;gap:0;padding:2px;border-radius:8px;
       background:rgba(15,23,42,.88);border:1px solid #334155;
       box-shadow:0 4px 14px rgba(0,0,0,.35);backdrop-filter:blur(6px);

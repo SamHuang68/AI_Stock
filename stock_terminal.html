@@ -66,9 +66,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 .wlchip-t{color:var(--thi);font-weight:700;letter-spacing:.5px}
 .wlchip.active .wlchip-t{color:var(--gold)}
 .wlchip-p{font-size:10px}
-.wlchip-rm{color:var(--tf);font-size:13px;margin-left:1px;padding:0 4px;border-radius:3px;opacity:0;transition:opacity .12s;cursor:pointer;line-height:1}
-.wlchip:hover .wlchip-rm{opacity:.7}
-.wlchip-rm:hover{color:var(--red);background:rgba(248,113,113,.12);opacity:1!important}
+/* 觀察股移除改右鍵（rmWl），不再顯示 × 以免誤觸 */
+.wlchip-rm{display:none!important}
 .wlchip.dragging{opacity:.35}
 .wlchip.drop-before{box-shadow:inset 3px 0 0 var(--gold)}
 .wlchip.drop-after{box-shadow:inset -3px 0 0 var(--gold)}
@@ -98,6 +97,9 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 #ci-ohlc .ohlc-v{font-weight:700;margin-right:8px}
 #ci-ohlc .ma-row{font-size:9px;color:var(--tlo);margin-top:3px}
 #ci-ohlc .ma-row span{margin-right:8px}
+.ci-high{font-size:12px;font-weight:700;margin-top:3px;color:var(--gold);letter-spacing:.3px;line-height:1.3}
+.ci-high b{color:var(--thi);font-size:13px}
+.ci-high .ci-lbl{color:var(--tlo);font-weight:500;margin-left:4px;opacity:.9;font-size:10px}
 .ci-chg{font-size:11px;margin-top:2px}
 .ci-range-chg{font-size:10px;margin-top:1px;opacity:.95}
 .ci-chg .ci-lbl,.ci-range-chg .ci-lbl{color:var(--tlo);font-weight:500;margin-left:4px;opacity:.85}
@@ -238,6 +240,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
         <div id="chart-loading">載入中...</div>
         <div id="chart-info" style="display:none">
           <div class="ci-price" id="ci-price">--</div>
+          <div class="ci-high" id="ci-high" style="display:none"></div>
           <div class="ci-chg" id="ci-chg"></div>
           <div class="ci-range-chg" id="ci-range-chg" style="display:none"></div>
           <div style="font-size:9px;color:var(--tlo);margin-top:3px" id="ci-name"></div>
@@ -536,6 +539,38 @@ function calcChgFromBase(price, base) {
   if (!(price > 0) || !(base > 0)) return null;
   const delta = price - base;
   return { delta, pct: delta / base * 100 };
+}
+
+/**
+ * 更新頂部「區間最高」：取目前載入 K 線 high 的最大值。
+ * 放在左欄 #ci-high，避開圖上右側量價浮動鈕／圖例遮蔽。
+ */
+function updateHeaderHigh(candles, rangeLbl, livePrice) {
+  const el = document.getElementById('ci-high');
+  if (!el) return null;
+  if (!candles || !candles.length) {
+    el.style.display = 'none';
+    el.textContent = '';
+    return null;
+  }
+  let mx = -Infinity;
+  for (let i = 0; i < candles.length; i++) {
+    const h = candles[i] && candles[i].high;
+    if (h != null && isFinite(h) && h > mx) mx = h;
+  }
+  if (livePrice != null && isFinite(livePrice) && livePrice > mx) mx = livePrice;
+  if (!isFinite(mx) || mx <= 0) {
+    el.style.display = 'none';
+    el.textContent = '';
+    return null;
+  }
+  const lbl = rangeLbl || ((typeof S !== 'undefined' && S.data && S.data.rangeChgLbl) ? S.data.rangeChgLbl : '')
+    || ((typeof S !== 'undefined' && S.range) ? S.range : '區間');
+  const unit = (typeof S !== 'undefined' && S.sym === '__MARGIN_RATIO__') ? '%' : '';
+  el.innerHTML = `最高 <b>${mx.toFixed(2)}${unit}</b><span class="ci-lbl">· ${lbl}</span>`;
+  el.style.display = '';
+  if (typeof S !== 'undefined' && S.data) S.data.periodHigh = mx;
+  return mx;
 }
 
 /**
@@ -870,8 +905,9 @@ async function loadSym(sym, mkt, silent) {
   const chgPct = (_prevRef != null && _prevRef > 0)
     ? ((last.close - _prevRef) / _prevRef * 100) : 0;
   document.getElementById('ci-price').textContent = last.close.toFixed(2) + (sym === '__MARGIN_RATIO__' ? '%' : '');
-  // 頂部：日漲跌(昨收) + 區間漲跌(所選時間) 同時顯示
+  // 頂部：日漲跌(昨收) + 區間漲跌(所選時間) 同時顯示；區間最高常駐左欄
   updateHeaderChg(last.close, _prevRef, parsed.rangeBase, parsed.rangeChgLbl, mkt, sym);
+  updateHeaderHigh(parsed.candles, parsed.rangeChgLbl, last.close);
   document.getElementById('ci-name').textContent = (sym === '__MARGIN_RATIO__')
     ? '大盤融資維持率'
     : (sym === '__TXF__')
@@ -1359,11 +1395,10 @@ function renderWl() {
       if(_flow&&_flow.addCount>0) _etfBadge=`<span style="font-family:monospace;font-size:7px;padding:0 3px;margin-left:2px;background:rgba(74,222,128,.15);color:var(--green);border-radius:2px">+${_flow.addCount}</span>`;
       else if(_flow&&_flow.rmCount>0) _etfBadge=`<span style="font-family:monospace;font-size:7px;padding:0 3px;margin-left:2px;background:rgba(248,113,113,.15);color:var(--red);border-radius:2px">-${_flow.rmCount}</span>`;
     }
-    return `<div class="wlchip${isActive?' active':''}" draggable="true" data-sym="${w.t}" data-mkt="${w.m}" onclick="loadSym('${w.t}','${w.m}')" oncontextmenu="rmWl('${w.t}','${w.m}');return false" title="拖曳排序 / 點擊載入 / 右鍵移除">
+    return `<div class="wlchip${isActive?' active':''}" draggable="true" data-sym="${w.t}" data-mkt="${w.m}" onclick="loadSym('${w.t}','${w.m}')" oncontextmenu="rmWl('${w.t}','${w.m}');return false" title="拖曳排序 / 點擊載入 / 右鍵移除自選">
       <span class="wlchip-grip">⋮⋮</span>
       <span class="wlchip-t">${w.name || w.t}</span>
       <span class="wlchip-p ${getPcls(w.chg)}" id="wlp-${w.t}" style="${window.Colors?('color:'+Colors.dir(w.t,w.chg)+' !important'):''}">${w.chg!=null?(w.chg>=0?'+':'')+w.chg.toFixed(2)+'%':''}</span>${_etfBadge}
-      <span class="wlchip-rm" onclick="event.stopPropagation();rmWl('${w.t}','${w.m}')" title="移除">×</span>
     </div>`;
   }).join('');
   attachDragWl();
@@ -1438,6 +1473,8 @@ function addToWl() {
   }
 }
 function rmWl(t,m) {
+  const name = ((S.wl.find(w => w.t === t && w.m === m) || {}).name) || t;
+  if (!confirm('從自選移除「' + name + '」（' + t + '）？')) return;
   S.wl = S.wl.filter(w=>!(w.t===t&&w.m===m)); saveWl(); renderWl();
 }
 
