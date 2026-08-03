@@ -185,7 +185,7 @@
   window.universeOpen = openDlg;
 
   (function () {
-    var spec = { id: 'btn-universe', label: '🗂 代號庫', cat: 'pin', title: '台股/美股 代號庫(lookup)· 可立即更新收錄新上市', onclick: openDlg };
+    var spec = { id: 'btn-universe', label: '🗂 代號庫', cat: 'sys', title: '台股/美股 代號庫(lookup)· 可立即更新收錄新上市', onclick: openDlg };
     (window.Toolbar ? window.Toolbar.register : function (s) { (window.__tbQueue = window.__tbQueue || []).push(s); })(spec);
   })();
 

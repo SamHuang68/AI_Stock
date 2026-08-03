@@ -98,7 +98,7 @@
 
   /* v3.9: 改用 Toolbar 註冊表(模組化) — 取代手寫 #pro-tools 注入樣板 */
   (function () {
-    var spec = { id: 'btn-focus', label: '🎯 焦點', cat: 'pin',
+    var spec = { id: 'btn-focus', label: '🎯 焦點', cat: 'ai',
                  title: '焦點掃描:多訊號組合自動找做多/做空焦點股 (v3.9)', onclick: open };
     (window.Toolbar ? window.Toolbar.register
       : function (s) { (window.__tbQueue = window.__tbQueue || []).push(s); })(spec);

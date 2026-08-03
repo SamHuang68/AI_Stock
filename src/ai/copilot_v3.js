@@ -179,7 +179,7 @@
   window.copilotClose = close;
 
   (function () {
-    var spec = { id: 'btn-copilot', label: '🤖 副駕', cat: 'pin',
+    var spec = { id: 'btn-copilot', label: '🤖 副駕', cat: 'ai',
                  title: 'AI 副駕:本機 LLM 自然語言問盤(附帶你的持倉/個股) (v4.0)', onclick: open };
     (window.Toolbar ? window.Toolbar.register
       : function (s) { (window.__tbQueue = window.__tbQueue || []).push(s); })(spec);

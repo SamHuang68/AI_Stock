@@ -160,7 +160,7 @@ function loadLastAIReport() {
 
 /* v3.9: 改用 Toolbar 註冊表(模組化) — 取代手寫 #pro-tools 注入樣板 */
 (function () {
-  var spec = { id: 'btn-ai-report', label: '🤖 AI報告', cat: 'pin',
+  var spec = { id: 'btn-ai-report', label: '🤖 AI報告', cat: 'ai',
                title: 'Claude AI 每日報告（需先設 API Key）',
                onclick: openAIModal };   // 先開面板,由使用者點「重新生成」才分析
   (window.Toolbar ? window.Toolbar.register

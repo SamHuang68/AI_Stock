@@ -140,7 +140,7 @@
   window.datasourcesOpen = open;
 
   (function () {
-    var spec = { id: 'btn-datasources', label: '🗄 資料源', cat: 'pin', title: '資料源管理:來源/可靠度/最後更新 + 一鍵更新', onclick: open };
+    var spec = { id: 'btn-datasources', label: '🗄 資料源', cat: 'sys', title: '資料源管理:來源/可靠度/最後更新 + 一鍵更新', onclick: open };
     (window.Toolbar ? window.Toolbar.register : function (s) { (window.__tbQueue = window.__tbQueue || []).push(s); })(spec);
   })();
 })();
