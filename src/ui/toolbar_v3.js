@@ -137,6 +137,8 @@
     kids.forEach(function (n) {
       if (n.classList && n.classList.contains('tbg')) return;
       if (n.classList && n.classList.contains('tb-sep')) return;
+      // 量價切換列（#vp-inline）與指令列同行，不可掃進下拉
+      if (n.id === 'vp-inline' || n.id === 'vp-float' || (n.getAttribute && n.getAttribute('data-tb-keep'))) return;
       var id = n.id || (n.querySelector && n.querySelector('.probtn') && n.querySelector('.probtn').id);
       if (!id || ALL_KNOWN[id] || PINSET[id]) return;
       // 後註冊但未指定分類 → 系統
@@ -186,6 +188,9 @@
       var w = document.getElementById('tbg-' + g.key);
       if (w) root.appendChild(w);
     });
+    // 量價切換永遠贴在指令列最右（同一行）
+    var vp = document.getElementById('vp-inline');
+    if (vp && vp.parentElement === root) root.appendChild(vp);
   }
 
   function updateActive() {

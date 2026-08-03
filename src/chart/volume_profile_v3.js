@@ -137,47 +137,53 @@
     return cv;
   }
 
-  // ---- 量價模式切換：固定停在 rangebar 與圖之間（不疊在 K 線上）----
+  // ---- 量價模式：併進 #pro-tools 同一行（不另開一列、不疊 K 線）----
   function ensureFloatStyle() {
     if (document.getElementById('vp-float-style')) return;
     const s = document.createElement('style');
     s.id = 'vp-float-style';
     s.textContent = `
-    /* 專用列：插在 #rangebar 與 #chartarea 之間，永不覆蓋 K 線／新高 */
-    #vp-dock{flex:0 0 28px;height:28px;display:none;align-items:center;justify-content:flex-end;
-      gap:8px;padding:0 10px;background:var(--bg2,#0b1220);border-bottom:1px solid var(--border,#1e293b);
-      z-index:6;box-sizing:border-box}
-    #vp-dock.on{display:flex}
-    #vp-dock .vp-dock-lbl{font-size:10px;color:#64748b;letter-spacing:.3px;margin-right:auto}
-    #vp-float{position:static;display:flex;align-items:center;gap:0;padding:2px;border-radius:8px;
-      background:rgba(15,23,42,.95);border:1px solid #334155;pointer-events:auto;user-select:none}
+    /* 收進指令列右側，與 ⌘指令 / AI / 圖表… 同一行 */
+    #vp-inline{display:none;align-items:center;gap:6px;margin-left:auto;flex-shrink:0;
+      padding-left:8px;border-left:1px solid var(--border,#334155);height:26px}
+    #vp-inline.on{display:inline-flex}
+    #vp-inline .vp-dock-lbl{font-size:10px;color:#64748b;letter-spacing:.2px;white-space:nowrap}
+    #vp-float{position:static;display:inline-flex;align-items:center;gap:0;padding:1px;
+      border-radius:7px;background:rgba(15,23,42,.95);border:1px solid #334155;
+      pointer-events:auto;user-select:none}
     #vp-float .vp-fbtn{appearance:none;border:0;background:transparent;color:#94a3b8;
-      font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer;
-      line-height:1.2;letter-spacing:.02em}
+      font-size:10px;font-weight:600;padding:3px 8px;border-radius:5px;cursor:pointer;
+      line-height:1.2;letter-spacing:.02em;white-space:nowrap}
     #vp-float .vp-fbtn:hover{color:#e2e8f0;background:rgba(51,65,85,.55)}
     #vp-float .vp-fbtn.on{color:#0f172a;background:#38bdf8}
     #vp-float .vp-fbtn.on[data-m="amt"]{background:#fbbf24}
     #vp-float .vp-fbtn.on[data-m="vol"]{background:#a78bfa;color:#0f172a}
+    /* 舊版獨立列若殘留則隱藏 */
+    #vp-dock{display:none !important;height:0 !important;border:0 !important;padding:0 !important;margin:0 !important;overflow:hidden}
     @media (max-width:720px){
-      #vp-dock{padding:0 6px}
-      #vp-float .vp-fbtn{padding:4px 7px;font-size:10px}
-      #vp-dock .vp-dock-lbl{display:none}
+      #vp-inline .vp-dock-lbl{display:none}
+      #vp-float .vp-fbtn{padding:3px 6px;font-size:9px}
     }`;
     document.head.appendChild(s);
   }
 
-  /** 停靠列：插在圖表上方，不進 #chart-wrap，避免遮蔽新高 */
+  /** 掛在 #pro-tools 最右（與指令列同行） */
   function ensureDock() {
     ensureFloatStyle();
-    let dock = document.getElementById('vp-dock');
+    // 清掉舊的獨立列
+    const legacy = document.getElementById('vp-dock');
+    if (legacy && legacy.parentElement) {
+      try { legacy.remove(); } catch {}
+    }
+    let dock = document.getElementById('vp-inline');
     if (dock) return dock;
-    const chartarea = document.getElementById('chartarea');
-    const left = document.getElementById('left') || (chartarea && chartarea.parentElement);
-    if (!left || !chartarea) return null;
+    const tools = document.getElementById('pro-tools');
+    if (!tools) return null;
     dock = document.createElement('div');
-    dock.id = 'vp-dock';
-    dock.innerHTML = '<span class="vp-dock-lbl">量價分布</span>';
-    left.insertBefore(dock, chartarea);
+    dock.id = 'vp-inline';
+    dock.setAttribute('data-tb-keep', '1'); // toolbar 勿當 orphan 掃走
+    dock.innerHTML = '<span class="vp-dock-lbl">量價</span>';
+    tools.appendChild(dock);
     return dock;
   }
 
@@ -193,6 +199,7 @@
     el = document.createElement('div');
     el.id = 'vp-float';
     el._host = dock;
+    el.setAttribute('data-tb-keep', '1');
     el.setAttribute('role', 'group');
     el.setAttribute('aria-label', '量價模式');
     el.innerHTML = MODE_ORDER.map(m =>
@@ -222,9 +229,16 @@
   function syncFloat() {
     const dock = ensureDock();
     const el = ensureFloat();
-    if (dock) dock.classList.toggle('on', !!VP.enabled);
+    if (dock) {
+      dock.classList.toggle('on', !!VP.enabled);
+      // 確保永遠在 pro-tools 最右（toolbar reorder 後補回）
+      const tools = document.getElementById('pro-tools');
+      if (tools && dock.parentElement === tools && tools.lastElementChild !== dock) {
+        tools.appendChild(dock);
+      }
+    }
     if (!el) return;
-    el.style.display = VP.enabled ? 'flex' : 'none';
+    el.style.display = VP.enabled ? 'inline-flex' : 'none';
     el.querySelectorAll('.vp-fbtn').forEach(b => {
       b.classList.toggle('on', b.getAttribute('data-m') === VP.mode);
     });
