@@ -17,6 +17,10 @@
  *   - AI報告 / 副駕 / 焦點 → 「🤖 AI」
  *   - 代號庫 / 資料源 / 快訊 / 健檢 → 「⚙️ 系統」
  *   - 量價模式切換改由 #vp-dock，不再佔工具列
+ *
+ * 2026-08 下拉修復：
+ *   - #pro-tools 不可 overflow-x:auto（會裁切 absolute 選單）
+ *   - 選單 portal 到 document.body + position:fixed，避免被 #chartarea 蓋住
  * ========================================================================== */
 (function () {
   'use strict';
@@ -51,6 +55,7 @@
   var ID2GROUP = {};
   var ALL_KNOWN = {};
   var PINSET = {};
+  var MENUS = {}; // key -> menu element（portal 後仍可靠引用）
   GROUPS.forEach(function (g) {
     g.items.forEach(function (id) { ID2GROUP[id] = g.key; ALL_KNOWN[id] = 1; });
   });
@@ -58,8 +63,13 @@
   Object.keys(HIDDEN).forEach(function (id) { ALL_KNOWN[id] = 1; });
 
   var mo = null;
+  var openKey = null;
 
   function pt() { return document.getElementById('pro-tools'); }
+
+  function menuOf(gkey) {
+    return MENUS[gkey] || document.getElementById('tbg-menu-' + gkey);
+  }
 
   // ── 樣式 ────────────────────────────────────────────────────────────────
   function injectCSS() {
@@ -67,7 +77,8 @@
     var s = document.createElement('style');
     s.id = 'toolbar-v3-css';
     s.textContent =
-      '#pro-tools{align-items:center !important;gap:3px !important;flex-wrap:nowrap;overflow-x:auto}' +
+      /* 不可 overflow-x:auto：會裁切下拉；橫向不夠時由外層 #left 自然伸展 */
+      '#pro-tools{align-items:center !important;gap:3px !important;flex-wrap:wrap;overflow:visible !important;height:auto !important}' +
       '#pro-tools .tb-sep{width:1px;height:16px;background:var(--border,#334155);margin:0 4px;flex-shrink:0;opacity:.8}' +
       '.tbg{position:relative;display:inline-flex;flex-shrink:0}' +
       '.tbg>.tbg-btn{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}' +
@@ -75,12 +86,12 @@
       '.tbg.open>.tbg-btn{color:var(--gold);border-color:var(--gold);background:var(--gold-s)}' +
       '.tbg.open>.tbg-btn .caret{transform:rotate(180deg)}' +
       '.tbg.act>.tbg-btn{border-color:var(--gold-m,#8a6d12)}' +
-      '.tbg-menu{position:absolute;top:calc(100% + 5px);left:0;z-index:99999;' +
+      /* portal 到 body：fixed，不被工具列／圖表區裁切或蓋住 */
+      '.tbg-menu{position:fixed;z-index:200000;display:none;flex-direction:column;gap:3px;' +
         'background:var(--bg2,#0d1117);border:1px solid var(--border,#2a2a2a);' +
-        'border-radius:7px;padding:6px;display:none;flex-direction:column;gap:3px;' +
-        'min-width:148px;max-height:min(70vh,420px);overflow-y:auto;' +
+        'border-radius:7px;padding:6px;min-width:156px;max-height:min(70vh,420px);overflow-y:auto;' +
         'box-shadow:0 12px 34px rgba(0,0,0,.55)}' +
-      '.tbg.open>.tbg-menu{display:flex}' +
+      '.tbg-menu.open{display:flex}' +
       '.tbg-menu>*{margin:0 !important}' +
       '.tbg-menu>.probtn{width:100% !important;justify-content:flex-start !important;height:28px}' +
       '.tbg-menu>span{width:100%}' +
@@ -90,15 +101,49 @@
     document.head.appendChild(s);
   }
 
+  function positionOpenMenu() {
+    if (!openKey) return;
+    var w = document.getElementById('tbg-' + openKey);
+    var menu = menuOf(openKey);
+    if (!w || !menu) return;
+    var btn = w.querySelector('.tbg-btn');
+    if (!btn) return;
+    if (menu.parentElement !== document.body) document.body.appendChild(menu);
+    var r = btn.getBoundingClientRect();
+    menu.style.top = Math.round(r.bottom + 5) + 'px';
+    menu.style.left = Math.round(r.left) + 'px';
+    menu.classList.add('open');
+    // 右側溢出時往左收
+    var mr = menu.getBoundingClientRect();
+    var maxR = window.innerWidth - 8;
+    if (mr.right > maxR) {
+      menu.style.left = Math.max(8, Math.round(maxR - mr.width)) + 'px';
+    }
+    // 下方溢出時往上開
+    var maxB = window.innerHeight - 8;
+    mr = menu.getBoundingClientRect();
+    if (mr.bottom > maxB && r.top > mr.height + 10) {
+      menu.style.top = Math.round(r.top - mr.height - 5) + 'px';
+    }
+  }
+
   // ── 開合控制 ────────────────────────────────────────────────────────────
   function closeAll() {
+    openKey = null;
     var os = document.querySelectorAll('.tbg.open');
     for (var i = 0; i < os.length; i++) os[i].classList.remove('open');
+    var ms = document.querySelectorAll('.tbg-menu.open');
+    for (var j = 0; j < ms.length; j++) ms[j].classList.remove('open');
   }
   function toggle(w) {
+    var key = (w.id || '').replace(/^tbg-/, '');
     var wasOpen = w.classList.contains('open');
     closeAll();
-    if (!wasOpen) w.classList.add('open');
+    if (!wasOpen && key) {
+      openKey = key;
+      w.classList.add('open');
+      positionOpenMenu();
+    }
   }
 
   function nodeToMove(el) {
@@ -120,9 +165,9 @@
     }
     var gkey = ID2GROUP[id];
     if (!gkey) return;
-    var menu = document.querySelector('#tbg-' + gkey + ' > .tbg-menu');
+    var menu = menuOf(gkey);
     if (!menu) return;
-    if (el.closest('#tbg-' + gkey + ' > .tbg-menu')) return;
+    if (el.closest('.tbg-menu') === menu || menu.contains(el)) return;
     menu.appendChild(nodeToMove(el));
   }
 
@@ -131,7 +176,7 @@
   // 未知按鈕（未列在 PINNED/GROUPS）：收進「系統」，避免散落佔版面
   function sweepOrphans() {
     var root = pt(); if (!root) return;
-    var menu = document.querySelector('#tbg-sys > .tbg-menu');
+    var menu = menuOf('sys');
     if (!menu) return;
     var kids = Array.prototype.slice.call(root.children);
     kids.forEach(function (n) {
@@ -211,6 +256,7 @@
     sweepOrphans();
     reorder();
     updateActive();
+    if (openKey) positionOpenMenu();
     if (mo) mo.observe(root, { childList: true });
   }
 
@@ -221,20 +267,41 @@
     GROUPS.forEach(function (g) {
       var w = document.createElement('span'); w.className = 'tbg'; w.id = 'tbg-' + g.key;
       var btn = document.createElement('button'); btn.className = 'probtn tbg-btn';
+      btn.type = 'button';
       btn.title = g.label.replace(/^[^\s]+\s/, '') + '（點擊展開）';
+      btn.setAttribute('aria-haspopup', 'menu');
+      btn.setAttribute('aria-expanded', 'false');
       btn.innerHTML = g.label + ' <span class="caret">▾</span>';
-      btn.onclick = function (e) { e.stopPropagation(); toggle(w); };
-      var menu = document.createElement('div'); menu.className = 'tbg-menu';
-      menu.onclick = function () { setTimeout(closeAll, 0); };
-      w.appendChild(btn); w.appendChild(menu);
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        toggle(w);
+        btn.setAttribute('aria-expanded', w.classList.contains('open') ? 'true' : 'false');
+      };
+      var menu = document.createElement('div');
+      menu.className = 'tbg-menu';
+      menu.id = 'tbg-menu-' + g.key;
+      menu.setAttribute('role', 'menu');
+      menu.onclick = function (e) {
+        e.stopPropagation();
+        setTimeout(closeAll, 0);
+      };
+      MENUS[g.key] = menu;
+      w.appendChild(btn);
+      // 初始掛在分類下，place() 會把按鈕塞進來；開啟時再 portal 到 body
+      w.appendChild(menu);
       root.appendChild(w);
     });
-    document.addEventListener('click', closeAll);
+    document.addEventListener('click', function (e) {
+      if (e.target && (e.target.closest && (e.target.closest('.tbg') || e.target.closest('.tbg-menu')))) return;
+      closeAll();
+    });
+    window.addEventListener('resize', function () { if (openKey) positionOpenMenu(); });
+    window.addEventListener('scroll', function () { if (openKey) positionOpenMenu(); }, true);
 
     mo = new MutationObserver(function () { run(); });
     run();
     setInterval(updateActive, 1200);
-    console.log('[toolbar-v3] reorg: ' + PINNED.length + ' pinned + ' + GROUPS.length + ' groups');
+    console.log('[toolbar-v3] reorg: ' + PINNED.length + ' pinned + ' + GROUPS.length + ' groups (portal menus)');
   }
 
   // cat: 'pin' | 'ai' | 'chart' | 'fund' | 'screen' | 'sys'
@@ -272,7 +339,8 @@
       }
       run();
     },
-    reflow: run
+    reflow: run,
+    closeMenus: closeAll
   };
 
   (function drainQueue() {
