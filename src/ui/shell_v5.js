@@ -6,6 +6,7 @@
  * S3：盤後 → afterhours_v5；快訊 → news_v5（事件／結算中樞，非新聞爬蟲）
  * S4：脈動 → pulse_v5（TW Pulse 總覽；側欄首位，預設仍還原圖表）
  * S5：熱力 → heat_v5（類股熱力 + 焦點掃描輔區）
+ * S6：投組 → book_v5（投組風險：波動／VaR／Beta／曝險）
  *
  * 鐵律：不破壞 #left / #pro-tools / symLoaded / Toolbar 既有行為。
  * ========================================================================== */
@@ -13,13 +14,14 @@
   'use strict';
 
   var STORAGE_KEY = 'st5.shell.route';
-  var VERSION = '5.0-S5';
+  var VERSION = '5.0-S6';
 
   var ROUTES = [
     { id: 'pulse',      label: '脈動',   hint: '市場脈動總覽（指數／廣度／籌碼）', icon: '◎', stub: false },
     { id: 'chart',      label: '圖表',   hint: 'K 線工作區（預設）',               icon: '◈' },
     { id: 'heat',       label: '熱力',   hint: '類股熱力圖＋焦點掃描',             icon: '▦', stub: false },
-    { id: 'breadth',    label: '廣度',   hint: '大盤廣度（漲跌家數）',             icon: '▣', stub: false },
+    { id: 'book',       label: '投組',   hint: '投組風險（波動／VaR／曝險）',       icon: '▣', stub: false },
+    { id: 'breadth',    label: '廣度',   hint: '大盤廣度（漲跌家數）',             icon: '▤', stub: false },
     { id: 'news',       label: '快訊',   hint: '事件／結算／警報中樞',             icon: '◉', stub: false },
     { id: 'afterhours', label: '盤後',   hint: '台指期夜盤＋個股期＋籌碼',         icon: '◐', stub: false },
     { id: 'workspace',  label: '工具',   hint: '回到圖表並開啟指令盤',             icon: '⌘', action: 'cmd' }
@@ -149,7 +151,7 @@
             '<span>' + r.label + '</span></button>';
         }).join('') +
         '<div class="nr-spacer"></div>' +
-        '<div class="nr-foot">S5</div>';
+        '<div class="nr-foot">S6</div>';
 
       var main = document.createElement('div');
       main.id = 'shell-main';
@@ -197,7 +199,7 @@
               '<span>' + r.label + '</span></button>';
           }).join('') +
           '<div class="nr-spacer"></div>' +
-          '<div class="nr-foot">S5</div>';
+          '<div class="nr-foot">S6</div>';
       }
       // 熱更新：補上後加的路由面板（如 pulse）
       var views = $('shell-views');
@@ -247,6 +249,7 @@
     var map = {
       pulse: 'PulseV5',
       heat: 'HeatV5',
+      book: 'BookV5',
       breadth: 'BreadthV5',
       afterhours: 'AfterhoursV5',
       news: 'NewsV5'
@@ -323,7 +326,7 @@
     applyRoute(saved);
     probeHealth();
     setInterval(probeHealth, 60000);
-    console.log('[shell-v5] Stage 5 shell ready · route=' + state.route);
+    console.log('[shell-v5] Stage 6 shell ready · route=' + state.route);
   }
 
   window.ShellV5 = {
