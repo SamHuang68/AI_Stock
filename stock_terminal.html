@@ -935,6 +935,65 @@ async function loadSym(sym, mkt, silent) {
 }
 
 // ── CHART ────────────────────────────────────────────────────────
+/**
+ * 判斷現價／最近高點是否貼近區間最高（創新高或逼近前高）。
+ * 此時 K 線上沿會頂到圖頂，易被量價浮動鈕／OHLC／圖例遮蔽。
+ */
+function isNearPeriodHigh(candles, thrPct) {
+  if (!candles || !candles.length) return false;
+  thrPct = (thrPct != null) ? thrPct : 0.03;
+  let mx = -Infinity;
+  for (let i = 0; i < candles.length; i++) {
+    const h = candles[i] && candles[i].high;
+    if (h != null && isFinite(h) && h > mx) mx = h;
+  }
+  if (!(mx > 0)) return false;
+  const last = candles[candles.length - 1];
+  const tip = Math.max(
+    (last && last.high != null && isFinite(last.high)) ? last.high : -Infinity,
+    (last && last.close != null && isFinite(last.close)) ? last.close : -Infinity
+  );
+  if (!(tip > 0)) return false;
+  return (mx - tip) / mx <= thrPct;
+}
+
+/**
+ * 價格軸上下留白：頂部加大，避免新高時被浮動 UI 遮蔽。
+ * 回 { top, bottom }（LightweightCharts scaleMargins 比例）。
+ */
+function calcPriceScaleMargins(isIntraday, hasVol, candles) {
+  if (isIntraday) return { top: 0.30, bottom: 0.30 }; // 盤中壓平小波動
+  const nearHigh = isNearPeriodHigh(candles, 0.04);
+  // 有量柱時底部留給量能；無量時底部可略收
+  if (hasVol) {
+    return nearHigh ? { top: 0.22, bottom: 0.18 } : { top: 0.16, bottom: 0.18 };
+  }
+  return nearHigh ? { top: 0.24, bottom: 0.10 } : { top: 0.18, bottom: 0.10 };
+}
+
+/**
+ * autoscaleInfoProvider：把可視最高價再往上墊一截（大於實際最高），
+ * 讓創新高時影線／標籤仍落在浮動視窗下方。
+ */
+function makeHighHeadroomAutoscale(candles) {
+  const nearHigh = isNearPeriodHigh(candles, 0.04);
+  const padRatio = nearHigh ? 0.22 : 0.12;
+  return function (original) {
+    const res = (typeof original === 'function') ? original() : null;
+    if (!res || !res.priceRange) return res;
+    const minV = res.priceRange.minValue;
+    const maxV = res.priceRange.maxValue;
+    if (minV == null || maxV == null || !isFinite(minV) || !isFinite(maxV)) return res;
+    const span = Math.max(maxV - minV, Math.abs(maxV) * 0.02, 1e-6);
+    return Object.assign({}, res, {
+      priceRange: {
+        minValue: minV,
+        maxValue: maxV + span * padRatio,
+      },
+    });
+  };
+}
+
 function renderChart(candles) {
   const wrap = document.getElementById('chart-wrap');
   if (S.chart) { S.chart.remove(); S.chart=null; }
@@ -944,6 +1003,11 @@ function renderChart(candles) {
 
   // intraday (1d range, 5m interval) → show HH:mm; daily/weekly → date only
   const isIntraday = !isMarginRatio && S.range === '1d';
+  // 預先判斷是否有量（後面無量分支不再把 top 壓回 0.06）
+  const _hasVolEarly = !isMarginRatio && candles && candles.some(c => c.volume > 0);
+  const _priceMargins = isMarginRatio
+    ? { top: 0.08, bottom: 0.10 }
+    : calcPriceScaleMargins(isIntraday, _hasVolEarly, candles);
 
   // ── 時區平移：使用者本地時區 (v3.6) ──────────────────────────
   // lightweight-charts 預設用 UTC 顯示。台北使用者看 13:30 收盤的台股會
@@ -974,10 +1038,9 @@ function renderChart(candles) {
       scaleMargins: { top: 0.08, bottom: 0.10 },
     } : { visible: false },
     rightPriceScale:{borderColor:'#1A2740',
-      // 盤中(1天)加大上下留白 → 把當日小波動壓平(flatten),不再撐滿全高顯得震盪劇烈
-      // 融資維持率：右軸給加權指數，略加大上下留白
-      scaleMargins: isMarginRatio ? {top:0.08,bottom:0.10}
-                  : (isIntraday ? {top:0.30,bottom:0.30} : {top:0.05,bottom:0.18})},
+      // 頂部留白加大：創新高時 K 線不上頂，避開量價浮動鈕／OHLC／圖例遮蔽
+      // 盤中另加大上下留白以壓平當日小波動；融資維持率雙軸用較小留白
+      scaleMargins: _priceMargins},
     timeScale:{
       borderColor:'#1A2740',
       timeVisible: isIntraday,
@@ -1115,6 +1178,8 @@ function renderChart(candles) {
     borderUpColor:'#4ADE80',borderDownColor:'#F87171',
     wickUpColor:'#4ADE80',wickDownColor:'#F87171',
     lastValueVisible:false, priceLineVisible:false,   // 原生現價框關掉，改用 polish_v3 的「今/昨」小標籤
+    // 可視最高 > 實際最高：創新高時影線仍留在浮動 UI 下方
+    autoscaleInfoProvider: makeHighHeadroomAutoscale(candles),
   });
   const lcd = candles.map(c=>({time:tz(c.time),open:c.open,high:c.high,low:c.low,close:c.close}));
   cs.setData(lcd);
@@ -1188,8 +1253,8 @@ function renderChart(candles) {
   }
   S.chartSeries = cs;
 
-  // v3.9：指數(如 ^SOX/美股指數)Yahoo 無成交量 → 隱藏量柱區，價格用滿高度
-  const _hasVol = candles.some(c => c.volume > 0);
+  // v3.9：指數(如 ^SOX/美股指數)Yahoo 無成交量 → 隱藏量柱區；仍保留頂部 headroom 防遮蔽
+  const _hasVol = _hasVolEarly;
   let vs = null;   // ← 須在函式層宣告:十字游標處理器(param.seriesData.get(vs))會引用,
                    //    否則無量股(隱藏量柱)時 vs 未定義→游標移動拋錯→ci-ohlc 面板填不上而消失
   if (_hasVol) {
@@ -1200,9 +1265,12 @@ function renderChart(candles) {
     chart.priceScale('vol').applyOptions({scaleMargins:{top:0.8,bottom:0}});
     vs.setData(candles.map(c=>({time:tz(c.time),value:c.volume,color:c.close>=c.open?'rgba(74,222,128,0.25)':'rgba(248,113,113,0.25)'})));
     S.volSeries = vs;
+    // 有量：再套一次價格軸留白（確保不被其他 applyOptions 覆寫）
+    chart.priceScale('right').applyOptions({ scaleMargins: _priceMargins });
   } else {
     S.volSeries = null;
-    chart.priceScale('right').applyOptions({scaleMargins:{top:0.06,bottom:0.04}});  // 無量→價格滿版
+    // 無量：價格用較大高度，但頂部仍留 headroom（舊版 top:0.06 會讓新高頂到浮動鈕）
+    chart.priceScale('right').applyOptions({ scaleMargins: _priceMargins });
   }
 
   // ── SMA + Bollinger Bands overlay (skip on intraday / 融資維持率折線圖) ──
