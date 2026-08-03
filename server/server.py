@@ -1360,7 +1360,8 @@ _BAD_YF = {'^TWOII': ('otc_o00.tw', 'o00', 'index')}   # 櫃買:Yahoo 三端點�
 
 
 def _twse_mis_index(ex_ch):
-    """ex_ch('tse_t00.tw' 或 'tse_t00.tw|otc_o00.tw') → {code:{price,prevClose,changePct,name}}。
+    """ex_ch('tse_t00.tw' 或 'tse_t00.tw|otc_o00.tw') →
+       {code:{price,prevClose,changePct,name,open,high,low}}。
        走共用 _src_fetch_json('twse-mis'),享節流/熔斷/健檢。"""
     ms = int(time.time() * 1000)
     url = ('https://mis.twse.com.tw/stock/api/getStockInfo.jsp'
@@ -1387,7 +1388,224 @@ def _twse_mis_index(ex_ch):
             price = fnum(it.get('o'))      # 早盤尚無成交退開盤
         prev = fnum(it.get('y'))
         chg = ((price - prev) / prev * 100) if (price is not None and prev) else None
-        out[code] = {'price': price, 'prevClose': prev, 'changePct': chg, 'name': it.get('n')}
+        out[code] = {
+            'price': price, 'prevClose': prev, 'changePct': chg, 'name': it.get('n'),
+            'open': fnum(it.get('o')), 'high': fnum(it.get('h')), 'low': fnum(it.get('l')),
+        }
+    return out
+
+
+def _fetch_day_movers(n=8):
+    """輕量漲跌幅排行：TWSE STOCK_DAY_ALL + TPEx 上櫃日收盤。
+       回 {ok,date,gainers:[{code,name,price,change,changePct,value}], losers:[...], source}。
+       供 Overview 儀表板；比 POST /screener 快兩個數量級。"""
+    from datetime import date as _date
+
+    def fnum(v):
+        if v in (None, '', '-', '—'):
+            return None
+        try:
+            return float(str(v).replace(',', '').replace('+', '').strip())
+        except Exception:
+            return None
+
+    rows = []
+    date_s = None
+
+    def ingest_twse(arr):
+        nonlocal date_s
+        for r in arr or []:
+            if not isinstance(r, dict):
+                continue
+            code = str(r.get('Code') or '').strip()
+            name = str(r.get('Name') or '').strip()
+            if not code or not name:
+                continue
+            # 排除權證／牛熊（名稱含購售，或非 4 碼個股／00 開頭 ETF）
+            if any(k in name for k in ('購', '售', '牛證', '熊證', '認購', '認售')):
+                continue
+            is_stock = bool(_CODE4.match(code))
+            is_etf = code.startswith('00') and len(code) <= 6
+            if not (is_stock or is_etf):
+                continue
+            close = fnum(r.get('ClosingPrice'))
+            chg = fnum(r.get('Change'))
+            if close is None or chg is None:
+                continue
+            prev = close - chg
+            if not prev:
+                continue
+            pct = chg / prev * 100.0
+            # 權證漏網：單日 ±30% 以上且非槓桿 ETF 代號 → 略過
+            if abs(pct) > 30 and not code.endswith(('L', 'R')):
+                continue
+            val = fnum(r.get('TradeValue'))
+            date_s = date_s or str(r.get('Date') or '').strip() or None
+            rows.append({
+                'code': code, 'name': name, 'price': close, 'change': chg,
+                'changePct': round(pct, 2), 'value': val, 'mkt': 'TW',
+            })
+
+    def ingest_tpex(arr):
+        for r in arr or []:
+            if not isinstance(r, dict):
+                continue
+            code = str(r.get('SecuritiesCompanyCode') or r.get('Code') or r.get('公司代號') or '').strip()
+            name = str(r.get('CompanyName') or r.get('Name') or r.get('公司簡稱') or '').strip()
+            if any(k in name for k in ('購', '售', '牛證', '熊證', '認購', '認售')):
+                continue
+            if not (_CODE4.match(code) or (code.startswith('00') and len(code) <= 6)):
+                continue
+            close = fnum(r.get('Close') or r.get('ClosingPrice') or r.get('收盤'))
+            # TPEx 常見：Change / 漲跌
+            chg = fnum(r.get('Change') or r.get('漲跌'))
+            if close is None:
+                continue
+            if chg is None:
+                # 有些欄位是百分比
+                pct = fnum(r.get('ChangePercent') or r.get('漲跌幅'))
+                if pct is None:
+                    continue
+            else:
+                prev = close - chg
+                if not prev:
+                    continue
+                pct = chg / prev * 100.0
+            if abs(pct) > 30 and not code.endswith(('L', 'R')):
+                continue
+            if any(x['code'] == code for x in rows):
+                continue
+            rows.append({
+                'code': code, 'name': name or code, 'price': close,
+                'change': chg, 'changePct': round(pct, 2),
+                'value': fnum(r.get('TradeValue') or r.get('成交金額')),
+                'mkt': 'TW',
+            })
+
+    try:
+        req = urllib.request.Request(
+            'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL',
+            headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
+        with urllib.request.urlopen(req, timeout=18) as resp:
+            ingest_twse(json.loads(resp.read()))
+    except Exception as e:
+        print('[movers] TWSE', e)
+
+    try:
+        req = urllib.request.Request(
+            'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes',
+            headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
+        with urllib.request.urlopen(req, timeout=18) as resp:
+            ingest_tpex(json.loads(resp.read()))
+    except Exception as e:
+        print('[movers] TPEx', e)
+
+    if not rows:
+        return {'ok': False, 'date': date_s, 'gainers': [], 'losers': [], 'source': None, 'error': 'no rows'}
+
+    rows.sort(key=lambda x: x['changePct'], reverse=True)
+    n = max(1, min(int(n or 8), 30))
+    return {
+        'ok': True,
+        'date': date_s or _date.today().strftime('%Y%m%d'),
+        'gainers': rows[:n],
+        'losers': list(reversed(rows[-n:])),
+        'source': 'TWSE STOCK_DAY_ALL + TPEx daily',
+        'count': len(rows),
+    }
+
+
+def _macro_latest(series_key, years=10):
+    """讀 MACRO_SERIES 最後一點（走 _macro_cache，與 /macro/<key> 同源）。失敗回 None。"""
+    from datetime import date as _date, timedelta as _td
+    spec = MACRO_SERIES.get(series_key)
+    if not spec:
+        return None
+    today = _date.today()
+    ckey = f'{series_key}:{years}:{today.strftime("%Y%m%d")}'
+    cached = _macro_cache.get(ckey)
+    d = None
+    if cached:
+        try:
+            d = json.loads(cached.decode('utf-8') if isinstance(cached, (bytes, bytearray)) else cached)
+        except Exception:
+            d = None
+    if d is None:
+        cosd = (today - _td(days=years * 366)).strftime('%Y-%m-%d')
+        out = {
+            'series': series_key, 'label': spec['label'], 'unit': spec.get('unit', ''),
+            'points': [], 'source': None, 'note': None,
+        }
+        try:
+            if spec['p'] == 'fred':
+                out['points'] = _fetch_fred_csv(spec['id'], cosd)
+                out['source'] = f'FRED {spec["id"]}'
+            elif spec['p'] == 'twcpi':
+                out['points'] = _fetch_tw_cpi(max(12, years * 12))
+                out['source'] = '主計總處 PXWeb' if out['points'] else None
+            elif spec['p'] == 'ndc':
+                out['points'] = _fetch_tw_light()
+                out['source'] = '國發會 NDC' if out['points'] else None
+        except Exception as e:
+            out['note'] = str(e)
+        if out['points']:
+            body = json.dumps(out, ensure_ascii=False).encode()
+            _macro_cache[ckey] = body
+            d = out
+        else:
+            return None
+    pts = (d or {}).get('points') or []
+    if not pts:
+        return None
+    last = pts[-1]
+    return {
+        'key': series_key,
+        'label': d.get('label') or series_key,
+        'unit': d.get('unit') or '',
+        'date': last.get('date'),
+        'value': last.get('value'),
+        'source': d.get('source'),
+    }
+
+
+def _yf_batch_quotes(syms):
+    """輕量 Yahoo 批次：[{symbol,name,price,changePct}]。"""
+    out = []
+    labels = {
+        '^DJI': '道瓊', '^GSPC': 'S&P 500', '^IXIC': '那斯達克',
+        'CL=F': 'WTI 原油', 'DX-Y.NYB': '美元指數', 'DX=F': '美元指數',
+    }
+    for sym in syms:
+        try:
+            ov = _trusted_quote_override(sym)
+            if ov and ov.get('price') is not None:
+                out.append({
+                    'symbol': sym, 'name': labels.get(sym, sym),
+                    'price': ov['price'], 'changePct': ov.get('changePct'),
+                    'source': ov.get('source') or 'override',
+                })
+                continue
+            _, data, _ = fetch_one(sym, '5d', '1d', False)
+            if not data:
+                continue
+            res = (json.loads(data).get('chart') or {}).get('result') or []
+            if not res:
+                continue
+            m = res[0].get('meta') or {}
+            cur = m.get('regularMarketPrice')
+            if cur is None:
+                cls = ((res[0].get('indicators') or {}).get('quote') or [{}])[0].get('close') or []
+                cur = next((c for c in reversed(cls) if c is not None), None)
+            prev = _yf_prevclose(m)
+            if cur is None or not prev:
+                continue
+            out.append({
+                'symbol': sym, 'name': labels.get(sym, m.get('shortName') or sym),
+                'price': cur, 'changePct': (cur - prev) / prev * 100.0,
+                'source': 'yahoo',
+            })
+        except Exception as e:
+            print('[pulse-global]', sym, e)
     return out
 
 
@@ -1502,6 +1720,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._handle_breadth()
         elif p == '/pulse' or p.startswith('/pulse?'):
             self._handle_pulse()
+        elif p == '/movers' or p.startswith('/movers?'):
+            self._handle_movers()
         elif p == '/inst-rank' or p.startswith('/inst-rank?'):
             self._handle_inst_rank()
         elif p == '/events' or p.startswith('/events?'):
@@ -3154,9 +3374,214 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         out['sectors'] = sectors
         out['updatedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
 
+        # ── Overview 儀表板擴充（對齊 tw-pulse 參考圖）──────────────
+        # movers（輕量日排行）
+        movers = _cache_first([f'movers:v1:{ymd}'])
+        if movers is None:
+            try:
+                movers = _fetch_day_movers(8)
+                if movers and movers.get('ok'):
+                    _cache.set(f'movers:v1:{ymd}', json.dumps(movers, ensure_ascii=False).encode(), ttl=300)
+            except Exception as e:
+                print('[pulse] movers', e)
+                movers = {'ok': False, 'gainers': [], 'losers': []}
+
+        # 國際／商品（Yahoo 批次）+ 美元指數備援
+        global_q = _cache_first([f'pulse-global:{int(time.time() // 120)}'])
+        if global_q is None:
+            try:
+                global_q = _yf_batch_quotes(['^DJI', '^GSPC', '^IXIC', 'CL=F', 'DX-Y.NYB'])
+                if not any(x.get('symbol') == 'DX-Y.NYB' for x in global_q):
+                    global_q += _yf_batch_quotes(['DX=F'])
+                _cache.set(f'pulse-global:{int(time.time() // 120)}',
+                           json.dumps(global_q, ensure_ascii=False).encode(), ttl=120)
+            except Exception as e:
+                print('[pulse] global', e)
+                global_q = []
+
+        us10y = None
+        try:
+            us10y = _macro_latest('us10y', years=5)
+        except Exception as e:
+            print('[pulse] us10y', e)
+
+        eco = []
+        for mk in ('unrate', 'us_cpi_yoy', 'tw_cpi'):
+            try:
+                row = _macro_latest(mk, years=10)
+                if row:
+                    eco.append(row)
+            except Exception as e:
+                print('[pulse] macro', mk, e)
+
+        # 事件快訊（非新聞爬蟲）
+        flash = []
+        try:
+            ev = _cache_first([f'events:{ymd}:', f'events:{ymd}'])
+            if isinstance(ev, dict):
+                rev = ev.get('revenue') or {}
+                if rev.get('nextPublishBy'):
+                    if rev.get('daysAway') is not None:
+                        flash.append({
+                            'time': str(rev.get('nextPublishBy')),
+                            'title': f"月營收時程 {rev.get('forMonth') or ''}（尚餘 {rev.get('daysAway')} 天）",
+                            'cat': '總經',
+                        })
+                    else:
+                        flash.append({
+                            'time': str(rev.get('nextPublishBy')),
+                            'title': f"月營收時程 {rev.get('nextPublishBy')}",
+                            'cat': '總經',
+                        })
+                for x in (ev.get('exDividend') or [])[:6]:
+                    flash.append({
+                        'time': x.get('date') or '',
+                        'title': f"除權息 {x.get('code') or ''} {x.get('name') or ''} {x.get('type') or ''}".strip(),
+                        'cat': '個股',
+                        'code': x.get('code'),
+                    })
+        except Exception:
+            pass
+        if not flash:
+            flash.append({
+                'time': out.get('updatedAt') or '',
+                'title': '事件中樞待命（除權息／營收時程）；非新聞爬蟲',
+                'cat': '系統',
+            })
+
+        # 成交金額（億）— breadth.turnover 優先，否則 marketflow 末日
+        turnover_yi = None
+        to_bd = (bd or {}).get('turnover') or {}
+        for k in ('stockAmt', 'totalAmt'):
+            if to_bd.get(k) is not None:
+                try:
+                    turnover_yi = float(to_bd[k]) / 1e8
+                    break
+                except Exception:
+                    pass
+        if turnover_yi is None and mf:
+            turns = mf.get('turnover') or []
+            if turns and turns[-1].get('amount') is not None:
+                turnover_yi = float(turns[-1]['amount']) / 1e8
+        # 前日比（若有兩日）
+        turnover_chg = None
+        if mf and (mf.get('turnover') or []) and len(mf['turnover']) >= 2:
+            try:
+                a = float(mf['turnover'][-1]['amount'])
+                b = float(mf['turnover'][-2]['amount'])
+                if b:
+                    turnover_chg = (a - b) / b * 100.0
+            except Exception:
+                pass
+
+        t00 = indices.get('t00') or {}
+        o00 = indices.get('o00') or {}
+        st = stocks or {}
+        up, dn, flat = st.get('up'), st.get('down'), st.get('unchanged')
+        ls_ratio = None
+        if up is not None and dn not in (None, 0):
+            try:
+                ls_ratio = round(float(up) / float(dn), 2)
+            except Exception:
+                ls_ratio = None
+
+        skip = ('加權', '櫃買', '寶島', '公司治理', '中型', '電子工業', '未含')
+        sec_ranked = []
+        for s in sectors or []:
+            if not isinstance(s, dict):
+                continue
+            nm = str(s.get('name') or '')
+            cp = s.get('changePct')
+            if not nm or cp is None or any(k in nm for k in skip):
+                continue
+            sec_ranked.append({'name': nm, 'changePct': cp, 'close': s.get('close')})
+        sec_ranked.sort(key=lambda x: x['changePct'], reverse=True)
+
+        foreign = (inst or {}).get('foreign')
+        trust = (inst or {}).get('trust')
+        dealer = (inst or {}).get('dealer')
+        total_yi = None
+        if any(v is not None for v in (foreign, trust, dealer)):
+            total_yi = ((foreign or 0) + (trust or 0) + (dealer or 0)) / 1e8
+
+        out['movers'] = movers
+        out['global'] = global_q
+        out['us10y'] = us10y
+        out['economy'] = eco
+        out['flash'] = flash
+        out['overview'] = {
+            'strip': {
+                't00': t00,
+                'o00': o00,
+                'turnoverYi': round(turnover_yi, 1) if turnover_yi is not None else None,
+                'turnoverChgPct': round(turnover_chg, 2) if turnover_chg is not None else None,
+                'up': up, 'down': dn, 'flat': flat,
+                'advRatio': st.get('advRatio'),
+                'lsRatio': ls_ratio,
+                'dataLabel': '官方盤後／即時混成' if out.get('breadthOk') else '部分資料可用',
+            },
+            'ohlc': {
+                'open': t00.get('open'), 'high': t00.get('high'), 'low': t00.get('low'),
+                'prevClose': t00.get('prevClose'), 'price': t00.get('price'),
+                'changePct': t00.get('changePct'), 'name': t00.get('name') or '加權指數',
+            },
+            'institutional': {
+                'foreign': foreign, 'trust': trust, 'dealer': dealer,
+                'totalYi': round(total_yi, 1) if total_yi is not None else None,
+                'date': (inst or {}).get('date'),
+            },
+            'sectorsRanked': sec_ranked[:12],
+            'lsRatio': ls_ratio,
+        }
+
+        # Yahoo 補齊加權 OHLC（MIS 若缺 h/l）
+        ohlc = out['overview']['ohlc']
+        if ohlc.get('high') is None or ohlc.get('low') is None or ohlc.get('open') is None:
+            try:
+                _, data, _ = fetch_one('^TWII', '5d', '1d', False)
+                if data:
+                    res = (json.loads(data).get('chart') or {}).get('result') or []
+                    if res:
+                        q = ((res[0].get('indicators') or {}).get('quote') or [{}])[0]
+                        def _last(arr):
+                            for x in reversed(arr or []):
+                                if x is not None:
+                                    return x
+                            return None
+                        if ohlc.get('open') is None:
+                            ohlc['open'] = _last(q.get('open'))
+                        if ohlc.get('high') is None:
+                            ohlc['high'] = _last(q.get('high'))
+                        if ohlc.get('low') is None:
+                            ohlc['low'] = _last(q.get('low'))
+                        ohlc['source'] = (ohlc.get('source') or '') + '+yahoo'
+            except Exception as e:
+                print('[pulse] twii ohlc', e)
+
         body = json.dumps(out, ensure_ascii=False).encode()
         if out.get('ok'):
             _cache.set(key, body, ttl=45)
+        self._ok(body)
+
+    def _handle_movers(self):
+        """輕量漲跌幅排行 GET /movers?n=8 — TWSE+TPEx 日收盤，供 Overview。"""
+        from datetime import date as _date
+        qs = parse_qs(urlparse(self.path).query)
+        n = qs.get('n', ['8'])[0]
+        try:
+            n = int(n)
+        except Exception:
+            n = 8
+        force = (qs.get('refresh', ['0'])[0] or '0') in ('1', 'true', 'yes')
+        key = f'movers:v1:{_date.today().strftime("%Y%m%d")}'
+        if not force:
+            c = _cache.get(key)
+            if c is not None:
+                self._ok(c); return
+        out = _fetch_day_movers(n)
+        body = json.dumps(out, ensure_ascii=False).encode()
+        if out.get('ok'):
+            _cache.set(key, body, ttl=300)
         self._ok(body)
 
     def _handle_breadth(self):
