@@ -1062,6 +1062,8 @@ class LRUCache:
 
 _cache = LRUCache(LRU_MAX, ttl_seconds=60)
 _pool  = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix='yf')
+# 脈動延伸因子專用：勿佔用全域 _pool，避免 Yahoo／掃描與 extras 互卡
+_pulse_extras_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='pulse-ex')
 
 YF_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -3346,12 +3348,14 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         ymd = today.strftime('%Y%m%d')
         y_m_d = today.strftime('%Y-%m-%d')
 
-        # 延伸因子與體質並行：OI／借券／NHNL／類股（獨立 executor，避免佔滿全域 pool）
+        # 延伸因子與體質並行：OI／借券／NHNL／類股（專用 pool，不佔用全域 _pool）
         extras_fut = None
         try:
             import pulse_extras as _pulse_extras
             extras_budget = 7.5 if force else 5.5
-            extras_fut = _pool.submit(lambda b=extras_budget: _pulse_extras.fetch_all(budget=b))
+            extras_fut = _pulse_extras_pool.submit(
+                lambda b=extras_budget: _pulse_extras.fetch_all(budget=b)
+            )
         except Exception as e:
             print('[pulse] extras submit', e)
 
@@ -3440,6 +3444,15 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         sbl = extras.get('sbl') if isinstance(extras, dict) else None
         nhnl = extras.get('nhnl') if isinstance(extras, dict) else None
 
+        import pulse_intel as pi
+        # sources.sectors 必須用過濾後類股，與因子帳本／完整度對齊
+        sectors_scored = pi.filter_sectors(sectors)
+        nhnl_ok = bool(
+            isinstance(nhnl, dict)
+            and nhnl.get('newHighs') is not None
+            and nhnl.get('newLows') is not None
+            and (nhnl.get('sampleN') or 0) >= pi.NHNL_MIN_SAMPLE
+        )
         sources = {
             'twindex': bool((indices.get('t00') or {}).get('price') is not None),
             'breadth': bool(stocks and stocks.get('advRatio') is not None),
@@ -3448,17 +3461,14 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             'margin': (fund.get('pillars') or {}).get('marginRatio') is not None,
             'valuation': (fund.get('pillars') or {}).get('medianPE') is not None,
             'txf': bool(txf_night and txf_night.get('price') is not None),
-            'sectors': bool(sectors),
+            'sectors': bool(sectors_scored),
             'txOi': bool(isinstance(tx_oi, dict) and tx_oi.get('oi') is not None
                          and tx_oi.get('oiChgPct') is not None),
             'sbl': bool(isinstance(sbl, dict) and sbl.get('sblSellYi') is not None),
-            'nhnl': bool(isinstance(nhnl, dict) and nhnl.get('sampleN')
-                         and nhnl.get('newHighs') is not None
-                         and nhnl.get('newLows') is not None),
+            'nhnl': nhnl_ok,
         }
 
         try:
-            import pulse_intel as pi
             out = pi.build_pulse_intel(
                 health_score=fund.get('score'),
                 pillars=fund.get('pillars'),
@@ -3667,16 +3677,11 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             except Exception:
                 ls_ratio = None
 
-        skip = ('加權', '櫃買', '寶島', '公司治理', '中型', '電子工業', '未含')
-        sec_ranked = []
-        for s in sectors or []:
-            if not isinstance(s, dict):
-                continue
-            nm = str(s.get('name') or '')
-            cp = s.get('changePct')
-            if not nm or cp is None or any(k in nm for k in skip):
-                continue
-            sec_ranked.append({'name': nm, 'changePct': cp, 'close': s.get('close')})
+        try:
+            import pulse_intel as _pi_ov
+            sec_ranked = list(_pi_ov.filter_sectors(sectors))
+        except Exception:
+            sec_ranked = list(sectors_scored) if sectors_scored else []
         sec_ranked.sort(key=lambda x: x['changePct'], reverse=True)
 
         foreign = (inst or {}).get('foreign')

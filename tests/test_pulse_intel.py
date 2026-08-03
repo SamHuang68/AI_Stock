@@ -80,6 +80,7 @@ def test_missing_data_goes_pending_not_fake():
     assert '市場廣度' in names
     assert '三大法人' in names
     assert '類股參與度' in names
+    assert '估值' in names
     assert '期貨未平倉量' in names
     assert '借券賣出壓力' in names
     assert '250日新高／新低家數' in names
@@ -89,6 +90,7 @@ def test_missing_data_goes_pending_not_fake():
     all_names = names | {f['name'] for f in out['positiveFactors'] + out['riskFactors']}
     assert 'Fear & Greed' not in all_names
     assert '外資借券賣超' not in all_names
+    assert out['datasetsTotal'] == len(pi.EXPECTED_DATASETS)
 
 
 def test_concentration_and_divergence_risk():
@@ -163,6 +165,54 @@ def test_nhnl_sample_discloses_coverage():
     assert len(pos) == 1
     assert '樣本' in pos[0]['description']
     assert '非全市場' in pos[0]['description']
+    assert pos[0]['score'] > 0
+
+
+def test_nhnl_risk_and_neutral_zero_score():
+    risk_out = pi.build_pulse_intel(
+        health_score=60, pillars={}, market_rows=[], summary=None,
+        stocks=None, indices={}, inst={}, txf_night=None, sectors=None,
+        nhnl={'newHighs': 1, 'newLows': 8, 'sampleN': 40, 'note': '樣本 40 檔（非全市場）'},
+    )
+    assert any(f['name'] == '250日新高／新低家數' for f in risk_out['riskFactors'])
+
+    neu = pi.build_pulse_intel(
+        health_score=60, pillars={}, market_rows=[], summary=None,
+        stocks=None, indices={}, inst={}, txf_night=None, sectors=None,
+        tx_oi={'oi': 100000, 'oiChgPct': 0.2, 'priceChgPct': 0.1, 'contract': '202608'},
+        sbl={'sblSellYi': 150.0, 'marginSellYi': 20.0},
+        nhnl={'newHighs': 3, 'newLows': 3, 'sampleN': 30, 'note': '樣本 30 檔（非全市場）'},
+    )
+    # 中性訊號：顯示於正面欄但 score=0，不灌水分數
+    oi = [f for f in neu['positiveFactors'] if f['name'] == '期貨未平倉量'][0]
+    sbl_f = [f for f in neu['positiveFactors'] if f['name'] == '借券賣出壓力'][0]
+    nh = [f for f in neu['positiveFactors'] if f['name'] == '250日新高／新低家數'][0]
+    assert oi['score'] == 0.0 and sbl_f['score'] == 0.0 and nh['score'] == 0.0
+    assert neu['positiveFactorScore'] == 0.0
+
+
+def test_tx_oi_short_covering_and_unwind():
+    cover = pi.build_pulse_intel(
+        health_score=60, pillars={}, market_rows=[], summary=None,
+        stocks=None, indices={}, inst={}, txf_night=None, sectors=None,
+        tx_oi={'oi': 90000, 'oiChgPct': -2.5, 'priceChgPct': 0.6, 'contract': '202608'},
+    )
+    assert any('空頭回補' in f['description'] for f in cover['positiveFactors'] if f['name'] == '期貨未平倉量')
+    unwind = pi.build_pulse_intel(
+        health_score=60, pillars={}, market_rows=[], summary=None,
+        stocks=None, indices={}, inst={}, txf_night=None, sectors=None,
+        tx_oi={'oi': 90000, 'oiChgPct': -2.5, 'priceChgPct': -0.8, 'contract': '202608'},
+    )
+    assert any('多頭減倉' in f['description'] for f in unwind['riskFactors'] if f['name'] == '期貨未平倉量')
+
+
+def test_filter_sectors_skips_benchmarks():
+    rows = pi.filter_sectors([
+        {'name': '加權指數', 'changePct': 1.0},
+        {'name': '半導體', 'changePct': 2.0},
+        {'name': '電子工業', 'changePct': 0.5},
+    ])
+    assert [r['name'] for r in rows] == ['半導體']
 
 
 def test_all_extras_raise_completeness():
@@ -206,5 +256,8 @@ if __name__ == '__main__':
     test_tx_oi_short_build_is_risk()
     test_sbl_heavy_is_risk()
     test_nhnl_sample_discloses_coverage()
+    test_nhnl_risk_and_neutral_zero_score()
+    test_tx_oi_short_covering_and_unwind()
+    test_filter_sectors_skips_benchmarks()
     test_all_extras_raise_completeness()
     print('OK pulse_intel')

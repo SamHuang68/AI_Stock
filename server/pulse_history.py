@@ -431,8 +431,8 @@ def history(kind: str = 'breadth', n: int = 40) -> Dict[str, Any]:
                  'totalYi': None if r[4] is None else round(r[4] / 1e8, 1)}
                 for r in rows
             ]}
-        if kind in ('index', 'twii'):
-            sym = '^TWII' if kind != 'twoii' else '^TWOII'
+        if kind in ('index', 'twii', 'twoii'):
+            sym = '^TWOII' if kind == 'twoii' else '^TWII'
             if kind == 'index':
                 sym = '^TWII'
             rows = conn.execute(

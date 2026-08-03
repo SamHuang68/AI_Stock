@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """pulse_extras.py — 脈動因子延伸資料（真實源，禁 mock）
 
-提供：
-  • sectors_light  — TWSE MI_INDEX type=IND 類股漲跌
-  • tx_oi          — FinMind 台指期近月未平倉（日盤 position）
-  • sbl_sell       — TWSE TWTASU 當日借券賣出成交量值（全市場合計）
-  • nhnl           — 流動性樣本 250 日新高／新低家數（誠實標註樣本數）
+公開 JSON 欄位（camelCase，與 /pulse.extras 對齊）：
+  sectors → {ok, date, sectors:[{name, changePct, close}], source}
+  txOi    → {ok, date, contract, oi, oiChgPct, priceChgPct, ...}
+  sbl     → {ok, date, sblSellYi, marginSellYi, ...}
+  nhnl    → {ok, newHighs, newLows, sampleN, note, ...}
 
 設計：短逾時、可快取；失敗回 None，由 pulse_intel 進 pending。
 """
@@ -17,7 +17,7 @@ import sys
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 if getattr(sys, 'frozen', False):
@@ -27,6 +27,11 @@ else:
 
 _UA = {'User-Agent': 'Mozilla/5.0 (compatible; StockTerminal/5.0; +local)', 'Accept': 'application/json'}
 _mem: Dict[str, Tuple[float, Any]] = {}
+
+NHNL_MIN_BARS = 250
+NHNL_MIN_SAMPLE = 12
+NHNL_YAHOO_WORKERS = 6
+NHNL_YAHOO_BUDGET = 7.0
 
 
 def _http_json(url: str, timeout: float = 8):
@@ -72,11 +77,12 @@ def fetch_sectors_light(ttl: float = 300) -> Optional[Dict[str, Any]]:
         ):
             try:
                 d = _http_json(url, timeout=8)
-            except Exception:
+            except Exception as e:
+                print('[pulse-extras] sectors', dd, type(e).__name__, e)
                 continue
             if d.get('stat') not in ('OK', 'ok'):
                 continue
-            sectors = _parse_sector_tables(d)
+            sectors = parse_sector_tables(d)
             if sectors:
                 out = {'ok': True, 'date': dd, 'sectors': sectors, 'source': 'TWSE MI_INDEX IND'}
                 _cache_set(ck, out)
@@ -84,8 +90,9 @@ def fetch_sectors_light(ttl: float = 300) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _parse_sector_tables(data: dict) -> List[dict]:
-    out = []
+def parse_sector_tables(data: dict) -> List[dict]:
+    """解析 MI_INDEX IND tables → 類股列（供單測）。"""
+    out: List[dict] = []
     for t in data.get('tables') or []:
         title = str(t.get('title') or '')
         fields = t.get('fields') or []
@@ -127,8 +134,62 @@ def _parse_sector_tables(data: dict) -> List[dict]:
 
 # ── 台指期 OI ────────────────────────────────────────────────
 
+def compute_tx_oi(by_day: Dict[str, list]) -> Optional[Dict[str, Any]]:
+    """由日→列 計算同契約 OI 變化。換月無法對齊時回 None（進 pending）。"""
+    if len(by_day) < 2:
+        return None
+    days = sorted(by_day.keys())
+
+    def best(day: str, contract: Optional[str] = None):
+        rows = by_day.get(day) or []
+        if contract is not None:
+            rows = [r for r in rows if str(r.get('contract_date') or '') == contract]
+        if not rows:
+            return None
+        return max(rows, key=lambda x: float(x.get('volume') or 0))
+
+    cur_d = days[-1]
+    cur = best(cur_d)
+    if not cur:
+        return None
+    contract = str(cur.get('contract_date') or '')
+    if not contract:
+        return None
+
+    prev = prev_d = None
+    for d in reversed(days[:-1]):
+        p = best(d, contract)
+        if p is not None:
+            prev, prev_d = p, d
+            break
+    if prev is None or prev_d is None:
+        # 換月週：不同契約 OI 不可直接相減
+        return None
+
+    oi0 = _fnum(cur.get('open_interest'))
+    oi1 = _fnum(prev.get('open_interest'))
+    if oi0 is None or oi1 is None or oi1 <= 0:
+        return None
+    px0, px1 = _fnum(cur.get('close')), _fnum(prev.get('close'))
+    px_chg = ((px0 - px1) / px1 * 100.0) if (px0 and px1) else None
+    return {
+        'ok': True,
+        'date': cur_d,
+        'prevDate': prev_d,
+        'contract': contract,
+        'oi': float(oi0),
+        'prevOi': float(oi1),
+        'oiChg': float(oi0) - float(oi1),
+        'oiChgPct': (float(oi0) - float(oi1)) / float(oi1) * 100.0,
+        'close': px0,
+        'priceChgPct': px_chg,
+        'volume': _fnum(cur.get('volume')),
+        'source': 'FinMind TaiwanFuturesDaily TX',
+    }
+
+
 def fetch_tx_oi(ttl: float = 600) -> Optional[Dict[str, Any]]:
-    """FinMind TaiwanFuturesDaily TX：近月（當日量最大）日盤 OI 與日變化。"""
+    """FinMind TaiwanFuturesDaily TX：近月同契約日盤 OI 與日變化。"""
     ck = f'txoi:{date.today().isoformat()}'
     hit = _cache_get(ck, ttl)
     if hit is not None:
@@ -142,7 +203,7 @@ def fetch_tx_oi(ttl: float = 600) -> Optional[Dict[str, Any]]:
     try:
         j = _http_json(url, timeout=12)
     except Exception as e:
-        print('[pulse-extras] tx_oi', e)
+        print('[pulse-extras] tx_oi', type(e).__name__, e)
         return None
     if j.get('status') not in (0, 200, '0', '200', None) and not j.get('data'):
         return None
@@ -156,37 +217,45 @@ def fetch_tx_oi(ttl: float = 600) -> Optional[Dict[str, Any]]:
         d = str(r.get('date') or '')[:10]
         if d:
             by_day.setdefault(d, []).append(r)
-    if len(by_day) < 2:
-        return None
-    days = sorted(by_day.keys())
-    def best(day):
-        return max(by_day[day], key=lambda x: float(x.get('volume') or 0))
-    cur_d, prev_d = days[-1], days[-2]
-    cur, prev = best(cur_d), best(prev_d)
-    oi0, oi1 = float(cur['open_interest']), float(prev['open_interest'])
-    if oi1 <= 0:
-        return None
-    px0, px1 = _fnum(cur.get('close')), _fnum(prev.get('close'))
-    px_chg = ((px0 - px1) / px1 * 100.0) if (px0 and px1) else None
-    out = {
-        'ok': True,
-        'date': cur_d,
-        'prevDate': prev_d,
-        'contract': str(cur.get('contract_date') or ''),
-        'oi': oi0,
-        'prevOi': oi1,
-        'oiChg': oi0 - oi1,
-        'oiChgPct': (oi0 - oi1) / oi1 * 100.0,
-        'close': px0,
-        'priceChgPct': px_chg,
-        'volume': _fnum(cur.get('volume')),
-        'source': 'FinMind TaiwanFuturesDaily TX',
-    }
-    _cache_set(ck, out)
+    out = compute_tx_oi(by_day)
+    if out:
+        _cache_set(ck, out)
     return out
 
 
 # ── 借券賣出 ─────────────────────────────────────────────────
+
+def aggregate_sbl_rows(rows: list, ds: str = '', title: Any = None) -> Optional[Dict[str, Any]]:
+    """TWTASU data 列 → 全市場合計（供單測）。"""
+    if not rows:
+        return None
+    margin_qty = margin_amt = sbl_qty = sbl_amt = 0.0
+    n = 0
+    for row in rows:
+        if not row or len(row) < 5:
+            continue
+        margin_qty += _fnum(row[1]) or 0.0
+        margin_amt += _fnum(row[2]) or 0.0
+        sbl_qty += _fnum(row[3]) or 0.0
+        sbl_amt += _fnum(row[4]) or 0.0
+        n += 1
+    if n <= 0:
+        return None
+    if len(ds) == 8 and ds.isdigit():
+        ds = f'{ds[:4]}-{ds[4:6]}-{ds[6:8]}'
+    return {
+        'ok': True,
+        'date': ds or date.today().isoformat(),
+        'marginSellQty': margin_qty,
+        'marginSellAmt': margin_amt,
+        'sblSellQty': sbl_qty,
+        'sblSellAmt': sbl_amt,
+        'sblSellYi': sbl_amt / 1e8,
+        'marginSellYi': margin_amt / 1e8,
+        'source': 'TWSE TWTASU',
+        'title': title,
+    }
+
 
 def fetch_sbl_sell(ttl: float = 600) -> Optional[Dict[str, Any]]:
     """TWSE TWTASU：當日融券賣出／借券賣出成交量值 → 全市場合計。"""
@@ -201,39 +270,14 @@ def fetch_sbl_sell(ttl: float = 600) -> Optional[Dict[str, Any]]:
         try:
             d = _http_json(url, timeout=10)
         except Exception as e:
-            print('[pulse-extras] sbl', e)
+            print('[pulse-extras] sbl', type(e).__name__, e)
             continue
         if d.get('stat') not in ('OK', 'ok'):
             continue
-        rows = d.get('data') or []
-        if not rows:
-            continue
-        margin_qty = margin_amt = sbl_qty = sbl_amt = 0.0
-        for row in rows:
-            if not row or len(row) < 5:
-                continue
-            margin_qty += _fnum(row[1]) or 0.0
-            margin_amt += _fnum(row[2]) or 0.0
-            sbl_qty += _fnum(row[3]) or 0.0
-            sbl_amt += _fnum(row[4]) or 0.0
-        # 日期：民國 title 或 date 欄
-        ds = str(d.get('date') or '')
-        if len(ds) == 8:
-            ds = f'{ds[:4]}-{ds[4:6]}-{ds[6:8]}'
-        out = {
-            'ok': True,
-            'date': ds or date.today().isoformat(),
-            'marginSellQty': margin_qty,
-            'marginSellAmt': margin_amt,
-            'sblSellQty': sbl_qty,
-            'sblSellAmt': sbl_amt,
-            'sblSellYi': sbl_amt / 1e8,
-            'marginSellYi': margin_amt / 1e8,
-            'source': 'TWSE TWTASU',
-            'title': d.get('title'),
-        }
-        _cache_set(ck, out)
-        return out
+        out = aggregate_sbl_rows(d.get('data') or [], str(d.get('date') or ''), d.get('title'))
+        if out:
+            _cache_set(ck, out)
+            return out
     return None
 
 
@@ -249,17 +293,46 @@ _NHNL_UNIVERSE = [
 ]
 
 
+def count_nhnl(closes_map: Dict[str, List[float]], min_bars: int = NHNL_MIN_BARS) -> Optional[Dict[str, Any]]:
+    """流動性樣本 NHNL。不足 min_bars 的序列排除；樣本 < NHNL_MIN_SAMPLE → None。"""
+    usable = {c: closes for c, closes in closes_map.items() if closes and len(closes) >= min_bars}
+    if len(usable) < NHNL_MIN_SAMPLE:
+        return None
+    nh = nl = 0
+    for closes in usable.values():
+        window = closes[-min_bars:]
+        last = window[-1]
+        hi = max(window)
+        lo = min(window)
+        # 平坦窗不雙計；容許 0.15% 浮點／跳空
+        if hi <= lo * 1.0001:
+            continue
+        if last >= hi * 0.9985:
+            nh += 1
+        elif last <= lo * 1.0015:
+            nl += 1
+    return {
+        'ok': True,
+        'date': date.today().isoformat(),
+        'newHighs': nh,
+        'newLows': nl,
+        'sampleN': len(usable),
+        'universeN': len(_NHNL_UNIVERSE),
+        'windowBars': min_bars,
+        'nhRatio': (nh / (nh + nl)) if (nh + nl) else None,
+        'note': f'流動性樣本 {len(usable)}/{len(_NHNL_UNIVERSE)} 檔（非全市場）',
+    }
+
+
 def fetch_nhnl_sample(ttl: float = 3600) -> Optional[Dict[str, Any]]:
-    """流動性樣本 250 日新高／新低。
-    優先本機 market.db；否則 Yahoo 並行抓取（預算內）。"""
+    """流動性樣本 250 日新高／新低。優先 market.db；否則 Yahoo（需 ≥250 根）。"""
     ck = f'nhnl:{date.today().isoformat()}'
     hit = _cache_get(ck, ttl)
     if hit is not None:
         return hit
 
-    # 1) market.db
+    rows_map: Dict[str, List[float]] = {}
     db_path = os.path.join(_BASE, 'data', 'market.db')
-    rows_map: Dict[str, List[Tuple]] = {}
     if os.path.isfile(db_path):
         try:
             import sqlite3
@@ -269,22 +342,21 @@ def fetch_nhnl_sample(ttl: float = 3600) -> Optional[Dict[str, Any]]:
                         'SELECT close FROM bars WHERE symbol=? AND market=? ORDER BY ts ASC',
                         (code, 'TW')).fetchall()
                     closes = [float(r[0]) for r in bars if r and r[0] is not None]
-                    if len(closes) >= 250:
+                    if len(closes) >= NHNL_MIN_BARS:
                         rows_map[code] = closes
         except Exception as e:
-            print('[pulse-extras] nhnl db', e)
+            print('[pulse-extras] nhnl db', type(e).__name__, e)
 
     source = 'market.db'
-    # 2) Yahoo 補齊不足
     need = [c for c in _NHNL_UNIVERSE if c not in rows_map]
     if need:
         source = 'market.db+yahoo' if rows_map else 'yahoo'
 
         def _one(code: str):
             """直連 Yahoo chart，避免 import server 造成循環依賴。"""
-            last_err = None
             for host in ('query1', 'query2'):
-                url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{code}.TW?range=1y&interval=1d'
+                # 2y 確保交易日 ≥250；不足仍排除，不冒充 250 日
+                url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{code}.TW?range=2y&interval=1d'
                 try:
                     j = _http_json(url, timeout=6)
                     res = (j.get('chart') or {}).get('result') or []
@@ -292,22 +364,25 @@ def fetch_nhnl_sample(ttl: float = 3600) -> Optional[Dict[str, Any]]:
                         continue
                     cls = ((res[0].get('indicators') or {}).get('quote') or [{}])[0].get('close') or []
                     closes = [float(x) for x in cls if x is not None]
-                    return code, closes if len(closes) >= 200 else None  # 1y≈250；允許略少
+                    # 鐵律：不足 250 根不得冒充 250 日新高／新低
+                    return code, closes if len(closes) >= NHNL_MIN_BARS else None
                 except Exception as e:
-                    last_err = e
+                    print('[pulse-extras] nhnl yahoo', code, host, type(e).__name__)
             return code, None
 
-        with ThreadPoolExecutor(max_workers=8) as ex:
+        with ThreadPoolExecutor(max_workers=NHNL_YAHOO_WORKERS, thread_name_prefix='nhnl') as ex:
             futs = [ex.submit(_one, c) for c in need[:36]]
             try:
-                for f in as_completed(futs, timeout=7):
+                for f in as_completed(futs, timeout=NHNL_YAHOO_BUDGET):
                     try:
                         code, closes = f.result()
-                    except Exception:
+                    except Exception as e:
+                        print('[pulse-extras] nhnl fut', type(e).__name__, e)
                         continue
                     if closes:
                         rows_map[code] = closes
-            except Exception:
+            except Exception as e:
+                print('[pulse-extras] nhnl budget', type(e).__name__, e)
                 for f in futs:
                     if f.done():
                         try:
@@ -317,39 +392,16 @@ def fetch_nhnl_sample(ttl: float = 3600) -> Optional[Dict[str, Any]]:
                         except Exception:
                             pass
 
-    if len(rows_map) < 12:
-        return None
-
-    nh = nl = 0
-    for closes in rows_map.values():
-        window = closes[-250:]
-        last = window[-1]
-        hi = max(window)
-        lo = min(window)
-        # 容許 0.15% 浮點／跳空誤差
-        if last >= hi * 0.9985:
-            nh += 1
-        if last <= lo * 1.0015:
-            nl += 1
-
-    out = {
-        'ok': True,
-        'date': date.today().isoformat(),
-        'newHighs': nh,
-        'newLows': nl,
-        'sampleN': len(rows_map),
-        'universeN': len(_NHNL_UNIVERSE),
-        'nhRatio': (nh / (nh + nl)) if (nh + nl) else None,
-        'source': source,
-        'note': f'流動性樣本 {len(rows_map)}/{len(_NHNL_UNIVERSE)} 檔（非全市場）',
-    }
-    _cache_set(ck, out)
+    out = count_nhnl(rows_map)
+    if out:
+        out['source'] = source
+        _cache_set(ck, out)
     return out
 
 
 def fetch_all(budget: float = 8.0) -> Dict[str, Any]:
-    """並行抓取延伸因子，總預算 budget 秒。"""
-    out = {'sectors': None, 'txOi': None, 'sbl': None, 'nhnl': None}
+    """並行抓取延伸因子，總預算 budget 秒。回傳固定鍵：sectors/txOi/sbl/nhnl。"""
+    out: Dict[str, Any] = {'sectors': None, 'txOi': None, 'sbl': None, 'nhnl': None}
     with ThreadPoolExecutor(max_workers=4, thread_name_prefix='pulse-x') as ex:
         futs = {
             ex.submit(fetch_sectors_light): 'sectors',
@@ -363,12 +415,13 @@ def fetch_all(budget: float = 8.0) -> Dict[str, Any]:
                 try:
                     out[key] = f.result()
                 except Exception as e:
-                    print(f'[pulse-extras] {key}', e)
-        except Exception:
+                    print(f'[pulse-extras] {key}', type(e).__name__, e)
+        except Exception as e:
+            print('[pulse-extras] fetch_all budget', type(e).__name__, e)
             for f, key in futs.items():
                 if f.done():
                     try:
                         out[key] = f.result()
-                    except Exception:
-                        pass
+                    except Exception as e2:
+                        print(f'[pulse-extras] {key} late', type(e2).__name__, e2)
     return out

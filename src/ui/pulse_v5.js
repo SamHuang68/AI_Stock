@@ -178,6 +178,13 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .catch(function () { return null; });
   }
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
   function goRoute(id) {
     if (window.ShellV5) window.ShellV5.go(id);
   }
@@ -288,10 +295,10 @@
         (f.score != null ? ' · 權重分 ' + Number(f.score).toFixed(2) : '') +
         ' · 點列可展開／收合細節';
       html += '<div class="pl-fac" tabindex="0" role="button" data-fac="' +
-        String(f.id || '') + '"><div class="hd"><span>' + (f.id || '') + '. ' + (f.name || '') +
-        '</span><span class="' + cls + '">' + scTxt + '</span></div>' +
-        '<div class="ds">' + (f.description || '') + '</div>' +
-        '<div class="more">' + more + '</div></div>';
+        esc(f.id || '') + '"><div class="hd"><span>' + esc(f.id || '') + '. ' + esc(f.name || '') +
+        '</span><span class="' + cls + '">' + esc(scTxt) + '</span></div>' +
+        '<div class="ds">' + esc(f.description || '') + '</div>' +
+        '<div class="more">' + esc(more) + '</div></div>';
     });
     return html + '</div>';
   }
