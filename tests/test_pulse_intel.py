@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""pulse_intel 單元測試 — 分數可覆核、缺資料進 pending。"""
+"""pulse_intel 單元測試 — 分數可覆核、缺資料進 pending、延伸因子專業口徑。"""
 import os
 import sys
 
@@ -37,16 +37,21 @@ def test_health_and_breadth_bullish():
         sources_present={
             'twindex': True, 'breadth': True, 'marketflow': True, 'health': True,
             'margin': True, 'valuation': True, 'txf': True, 'sectors': True,
+            'txOi': False, 'sbl': False, 'nhnl': False,
         },
     )
     assert out['ok'] is True
     assert out['healthScore'] == 72
     assert out['totalScore'] is not None and 55 <= out['totalScore'] <= 90
-    assert out['dataCompleteness'] == 100.0
+    # 8/11 核心+延伸有資料
+    assert out['dataCompleteness'] == round(100.0 * 8 / 11, 1)
     assert any(f['name'] == '市場廣度' for f in out['positiveFactors'])
     assert any(f['name'] == '三大法人' for f in out['positiveFactors'])
-    assert any(f['name'] == '期貨未平倉量' for f in out['pendingFactors'])
-    # pending 不計入正／風險分
+    assert any(f['name'] == '類股參與度' for f in out['positiveFactors'])
+    pending_names = {f['name'] for f in out['pendingFactors']}
+    assert '期貨未平倉量' in pending_names
+    assert '借券賣出壓力' in pending_names
+    assert '250日新高／新低家數' in pending_names
     assert all(f['score'] == 0 for f in out['pendingFactors'])
 
 
@@ -64,6 +69,7 @@ def test_missing_data_goes_pending_not_fake():
         sources_present={
             'twindex': False, 'breadth': False, 'marketflow': False, 'health': False,
             'margin': False, 'valuation': False, 'txf': False, 'sectors': False,
+            'txOi': False, 'sbl': False, 'nhnl': False,
         },
     )
     assert out['ok'] is True
@@ -73,9 +79,16 @@ def test_missing_data_goes_pending_not_fake():
     names = {f['name'] for f in out['pendingFactors']}
     assert '市場廣度' in names
     assert '三大法人' in names
+    assert '類股參與度' in names
     assert '期貨未平倉量' in names
+    assert '借券賣出壓力' in names
+    assert '250日新高／新低家數' in names
     assert out['positiveFactors'] == []
     assert out['riskFactors'] == []
+    # 不用假 Fear&Greed／外資借券賣超（無外資分項）
+    all_names = names | {f['name'] for f in out['positiveFactors'] + out['riskFactors']}
+    assert 'Fear & Greed' not in all_names
+    assert '外資借券賣超' not in all_names
 
 
 def test_concentration_and_divergence_risk():
@@ -104,8 +117,94 @@ def test_concentration_and_divergence_risk():
     assert out['riskScore'] is not None and out['riskScore'] > 20
 
 
+def test_tx_oi_long_build_is_positive():
+    out = pi.build_pulse_intel(
+        health_score=60, pillars={'turnoverYi': 9000.0}, market_rows=[], summary=None,
+        stocks=None, indices={}, inst={}, txf_night=None, sectors=None,
+        tx_oi={'oi': 120000, 'oiChgPct': 2.5, 'priceChgPct': 0.8, 'contract': '202607'},
+        sources_present={'txOi': True},
+    )
+    pos = [f for f in out['positiveFactors'] if f['name'] == '期貨未平倉量']
+    assert len(pos) == 1
+    assert '多方增倉' in pos[0]['description']
+    assert '期貨未平倉量' not in {f['name'] for f in out['pendingFactors']}
+
+
+def test_tx_oi_short_build_is_risk():
+    out = pi.build_pulse_intel(
+        health_score=60, pillars={}, market_rows=[], summary=None,
+        stocks=None, indices={}, inst={}, txf_night=None, sectors=None,
+        tx_oi={'oi': 120000, 'oiChgPct': 2.5, 'priceChgPct': -0.9, 'contract': '202607'},
+    )
+    risk = [f for f in out['riskFactors'] if f['name'] == '期貨未平倉量']
+    assert len(risk) == 1
+    assert '空頭增倉' in risk[0]['description']
+
+
+def test_sbl_heavy_is_risk():
+    out = pi.build_pulse_intel(
+        health_score=60, pillars={'turnoverYi': 5000.0}, market_rows=[], summary=None,
+        stocks=None, indices={}, inst={}, txf_night=None, sectors=None,
+        sbl={'sblSellYi': 320.0, 'marginSellYi': 40.0},
+    )
+    risk = [f for f in out['riskFactors'] if f['name'] == '借券賣出壓力']
+    assert len(risk) == 1
+    assert 'TWTASU' in risk[0]['description']
+
+
+def test_nhnl_sample_discloses_coverage():
+    out = pi.build_pulse_intel(
+        health_score=60, pillars={}, market_rows=[], summary=None,
+        stocks=None, indices={}, inst={}, txf_night=None, sectors=None,
+        nhnl={'newHighs': 12, 'newLows': 2, 'sampleN': 48,
+              'note': '流動性樣本 48/50 檔（非全市場）'},
+    )
+    pos = [f for f in out['positiveFactors'] if f['name'] == '250日新高／新低家數']
+    assert len(pos) == 1
+    assert '樣本' in pos[0]['description']
+    assert '非全市場' in pos[0]['description']
+
+
+def test_all_extras_raise_completeness():
+    out = pi.build_pulse_intel(
+        health_score=70,
+        pillars={
+            'volumeScore': 60.0, 'turnoverYi': 9000.0,
+            'instScore': 55.0, 'instNetYi': 10.0,
+            'marginScore': 55.0, 'marginRatio': 160.0,
+            'valuationScore': 50.0, 'medianPE': 18.0,
+        },
+        market_rows=[], summary=None,
+        stocks={'up': 600, 'down': 400, 'unchanged': 100, 'advRatio': 0.6, 'net': 200},
+        indices={'t00': {'price': 23000.0, 'changePct': 0.5}, 'o00': {'price': 250.0, 'changePct': 0.2}},
+        inst={'foreign': 1e9, 'trust': 0, 'dealer': 0},
+        txf_night={'price': 23100.0, 'changePct': 0.3},
+        sectors=[{'name': '半導體', 'changePct': 1.0}, {'name': '金融', 'changePct': 0.5},
+                 {'name': '塑膠', 'changePct': 0.2}, {'name': '鋼鐵', 'changePct': -0.1}],
+        tx_oi={'oi': 100000, 'oiChgPct': 0.5, 'priceChgPct': 0.1, 'contract': '202607'},
+        sbl={'sblSellYi': 100.0, 'marginSellYi': 20.0},
+        nhnl={'newHighs': 5, 'newLows': 4, 'sampleN': 40, 'note': '流動性樣本 40/50 檔（非全市場）'},
+        sources_present={
+            'twindex': True, 'breadth': True, 'marketflow': True, 'health': True,
+            'margin': True, 'valuation': True, 'txf': True, 'sectors': True,
+            'txOi': True, 'sbl': True, 'nhnl': True,
+        },
+    )
+    assert out['dataCompleteness'] == 100.0
+    pending_names = {f['name'] for f in out['pendingFactors']}
+    assert '期貨未平倉量' not in pending_names
+    assert '借券賣出壓力' not in pending_names
+    assert '250日新高／新低家數' not in pending_names
+    assert '類股參與度' not in pending_names
+
+
 if __name__ == '__main__':
     test_health_and_breadth_bullish()
     test_missing_data_goes_pending_not_fake()
     test_concentration_and_divergence_risk()
+    test_tx_oi_long_build_is_positive()
+    test_tx_oi_short_build_is_risk()
+    test_sbl_heavy_is_risk()
+    test_nhnl_sample_discloses_coverage()
+    test_all_extras_raise_completeness()
     print('OK pulse_intel')

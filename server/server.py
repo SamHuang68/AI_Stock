@@ -3346,6 +3346,15 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         ymd = today.strftime('%Y%m%d')
         y_m_d = today.strftime('%Y-%m-%d')
 
+        # 延伸因子與體質並行：OI／借券／NHNL／類股（獨立 executor，避免佔滿全域 pool）
+        extras_fut = None
+        try:
+            import pulse_extras as _pulse_extras
+            extras_budget = 7.5 if force else 5.5
+            extras_fut = _pool.submit(lambda b=extras_budget: _pulse_extras.fetch_all(budget=b))
+        except Exception as e:
+            print('[pulse] extras submit', e)
+
         # 1) 體質（權威來源）
         fund = {}
         try:
@@ -3404,6 +3413,33 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         elif isinstance(sec, list):
             sectors = sec
 
+        # 延伸因子（類股／OI／借券賣出／250日 NHNL）— 與體質並行，失敗進 pending
+        extras = {'sectors': None, 'txOi': None, 'sbl': None, 'nhnl': None}
+        if extras_fut is not None:
+            try:
+                extras = extras_fut.result(timeout=8.0) or extras
+            except Exception as e:
+                print('[pulse] extras', e)
+                extras = {'sectors': None, 'txOi': None, 'sbl': None, 'nhnl': None}
+
+        if not sectors:
+            ex_sec = extras.get('sectors') if isinstance(extras, dict) else None
+            if isinstance(ex_sec, dict) and ex_sec.get('sectors'):
+                sectors = ex_sec.get('sectors') or []
+                try:
+                    _cache.set(
+                        f'sectors:{ymd}',
+                        json.dumps({'ok': True, 'sectors': sectors, 'source': ex_sec.get('source')},
+                                   ensure_ascii=False).encode(),
+                        ttl=300,
+                    )
+                except Exception:
+                    pass
+
+        tx_oi = extras.get('txOi') if isinstance(extras, dict) else None
+        sbl = extras.get('sbl') if isinstance(extras, dict) else None
+        nhnl = extras.get('nhnl') if isinstance(extras, dict) else None
+
         sources = {
             'twindex': bool((indices.get('t00') or {}).get('price') is not None),
             'breadth': bool(stocks and stocks.get('advRatio') is not None),
@@ -3413,6 +3449,12 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             'valuation': (fund.get('pillars') or {}).get('medianPE') is not None,
             'txf': bool(txf_night and txf_night.get('price') is not None),
             'sectors': bool(sectors),
+            'txOi': bool(isinstance(tx_oi, dict) and tx_oi.get('oi') is not None
+                         and tx_oi.get('oiChgPct') is not None),
+            'sbl': bool(isinstance(sbl, dict) and sbl.get('sblSellYi') is not None),
+            'nhnl': bool(isinstance(nhnl, dict) and nhnl.get('sampleN')
+                         and nhnl.get('newHighs') is not None
+                         and nhnl.get('newLows') is not None),
         }
 
         try:
@@ -3428,6 +3470,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 txf_night=txf_night,
                 sectors=sectors,
                 sources_present=sources,
+                tx_oi=tx_oi if isinstance(tx_oi, dict) else None,
+                sbl=sbl if isinstance(sbl, dict) else None,
+                nhnl=nhnl if isinstance(nhnl, dict) else None,
             )
         except Exception as e:
             print('[pulse] build', e)
@@ -3445,6 +3490,13 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             'inst': inst,
         } if mf else None
         out['sectors'] = sectors
+        out['extras'] = {
+            'txOi': tx_oi if isinstance(tx_oi, dict) else None,
+            'sbl': sbl if isinstance(sbl, dict) else None,
+            'nhnl': nhnl if isinstance(nhnl, dict) else None,
+            'sectorsSource': (extras.get('sectors') or {}).get('source')
+            if isinstance(extras.get('sectors'), dict) else None,
+        }
         out['updatedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
 
         # ── Overview 儀表板擴充（對齊 tw-pulse 參考圖）──────────────

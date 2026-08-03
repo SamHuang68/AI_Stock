@@ -113,13 +113,25 @@ def build_pulse_intel(
     txf_night: Optional[dict],
     sectors: Optional[List[dict]],
     sources_present: Optional[Dict[str, bool]] = None,
+    tx_oi: Optional[dict] = None,
+    sbl: Optional[dict] = None,
+    nhnl: Optional[dict] = None,
 ) -> Dict[str, Any]:
-    """由已對齊之欄位組出脈動情報 payload（純函數，可單測）。"""
+    """由已對齊之欄位組出脈動情報 payload（純函數，可單測）。
+
+    延伸因子（專業金融口徑）：
+      tx_oi — 近月台指 OI 變化 × 價格方向 → 增倉／平倉結構
+      sbl   — 借券賣出金額相對成交 → 融券／借券賣壓
+      nhnl  — 流動性樣本 250 日新高／新低（誠實標註樣本數）
+    """
     pillars = pillars or {}
     stocks = stocks or {}
     indices = indices or {}
     inst = inst or {}
     sources_present = dict(sources_present or {})
+    tx_oi = tx_oi or {}
+    sbl = sbl or {}
+    nhnl = nhnl or {}
 
     t00 = indices.get('t00') or {}
     o00 = indices.get('o00') or {}
@@ -278,11 +290,28 @@ def build_pulse_intel(
     if sec_up_ratio is not None:
         if sec_up_ratio >= 0.55:
             names = '、'.join(s['name'] for s in sec_up[:3])
-            add_pos('類股參與度', f'{len(sec_up)}/{len(sec_list)} 類股上漲' + (f'（強：{names}）' if names else ''), _clamp((sec_up_ratio - 0.50) * 40.0, 0.0, 10.0))
-        elif sec_up_ratio <= 0.35:
-            add_risk('類股輪動失溫', f'僅 {len(sec_up)}/{len(sec_list)} 類股上漲，資金集中或退潮。', _clamp((0.50 - sec_up_ratio) * 30.0, 0.0, 10.0))
-    elif sources_present.get('sectors') is False:
-        add_pending('類股參與度', '類股漲跌尚未載入。')
+            add_pos(
+                '類股參與度',
+                f'{len(sec_up)}/{len(sec_list)} 類股上漲'
+                + (f'（強：{names}）' if names else '')
+                + '｜廣基上漲優於權值獨強。',
+                _clamp((sec_up_ratio - 0.50) * 40.0, 0.0, 10.0),
+            )
+        elif sec_up_ratio <= 0.40:
+            add_risk(
+                '類股輪動失溫',
+                f'僅 {len(sec_up)}/{len(sec_list)} 類股上漲，資金集中或退潮，追價勝率下降。',
+                _clamp((0.50 - sec_up_ratio) * 30.0, 0.0, 10.0),
+            )
+        else:
+            # 中性帶：仍給弱正分，表示輪動尚可
+            add_pos(
+                '類股參與度',
+                f'{len(sec_up)}/{len(sec_list)} 類股上漲，參與度中性。',
+                _clamp((sec_up_ratio - 0.40) * 15.0, 0.0, 4.0),
+            )
+    else:
+        add_pending('類股參與度', '類股漲跌尚未載入（MI_INDEX IND）。')
 
     if conc_gap is not None and conc_gap >= 3.0 and top_sec:
         add_risk(
@@ -291,14 +320,13 @@ def build_pulse_intel(
             _clamp((conc_gap - 3.0) * 2.5, 0.0, 14.0),
         )
 
-    # 夜盤：有價則評；缺則 pending（OI 永遠 pending — 本系統尚未接未平倉）
+    # 夜盤：有價則評；缺則 pending
     if txf_px is not None and txf_cp is not None:
         if t_cp is not None and ((t_cp >= 0 and txf_cp >= 0.3) or (t_cp <= 0 and txf_cp <= -0.3)):
             add_pos('夜盤確認', f'台指期夜盤 {txf_cp:+.2f}% 與現貨方向同向。', _clamp(abs(txf_cp) * 3.0, 0.0, 6.0))
         elif t_cp is not None and ((t_cp > 0.5 and txf_cp < -0.5) or (t_cp < -0.5 and txf_cp > 0.5)):
             add_risk('夜盤背離', f'現貨 {t_cp:+.2f}% vs 夜盤 {txf_cp:+.2f}%，隔日開盤需防缺口。', _clamp(abs(txf_cp - t_cp) * 2.0, 0.0, 10.0))
         elif abs(txf_cp) >= 1.0:
-            # 無現貨對照時仍提示夜盤波動
             if txf_cp > 0:
                 add_pos('夜盤偏多', f'台指期夜盤 {txf_cp:+.2f}%。', _clamp(txf_cp * 2.5, 0.0, 5.0))
             else:
@@ -306,9 +334,110 @@ def build_pulse_intel(
     else:
         add_pending('台指期夜盤', '夜盤報價尚未取得。')
 
-    add_pending('期貨未平倉量', '大台／小台 OI 尚未接入本系統；有資料前不計分。')
-    add_pending('外資借券賣超', '借券賣超屬盤後清算欄位；目前端點未提供，不計分。')
-    add_pending('250日新高／新低家數', '需全市場價量掃描；尚未納入廣度 API，不計分。')
+    # ── 期貨未平倉：OI↑+價↑＝趨勢增倉；OI↑+價↓＝空頭增倉／多殺多；OI↓＝平倉 ──
+    oi = _n(tx_oi.get('oi'))
+    oi_chg_pct = _n(tx_oi.get('oiChgPct'))
+    oi_px_chg = _n(tx_oi.get('priceChgPct'))
+    if oi is not None and oi_chg_pct is not None:
+        contract = tx_oi.get('contract') or '近月'
+        base = f'TX{contract} OI {oi:,.0f}（{oi_chg_pct:+.2f}%）'
+        if oi_px_chg is not None:
+            base += f'｜期價 {oi_px_chg:+.2f}%'
+        if oi_chg_pct >= 1.5 and (oi_px_chg is not None and oi_px_chg >= 0.4):
+            add_pos(
+                '期貨未平倉量',
+                base + '｜價漲+OI增＝多方增倉，趨勢延續機率上升。',
+                _clamp(oi_chg_pct * 1.6 + max(0.0, oi_px_chg) * 0.8, 0.0, 10.0),
+            )
+        elif oi_chg_pct >= 1.5 and (oi_px_chg is not None and oi_px_chg <= -0.4):
+            add_risk(
+                '期貨未平倉量',
+                base + '｜價跌+OI增＝空頭增倉或被迫停損，波動風險升高。',
+                _clamp(oi_chg_pct * 1.8 + abs(min(0.0, oi_px_chg)) * 0.9, 0.0, 12.0),
+            )
+        elif oi_chg_pct <= -2.0 and (oi_px_chg is not None and oi_px_chg <= -0.5):
+            add_risk(
+                '期貨未平倉量',
+                base + '｜價跌+OI減＝多頭減倉／停損出場，動能走弱。',
+                _clamp(abs(oi_chg_pct) * 1.2, 0.0, 9.0),
+            )
+        elif oi_chg_pct <= -2.0 and (oi_px_chg is not None and oi_px_chg >= 0.4):
+            add_pos(
+                '期貨未平倉量',
+                base + '｜價漲+OI減＝空頭回補，短線易有軋空彈。',
+                _clamp(abs(oi_chg_pct) * 1.1, 0.0, 8.0),
+            )
+        else:
+            # 變化不大：中性說明，給極弱分避免永遠空白
+            if abs(oi_chg_pct) >= 0.8:
+                add_pos('期貨未平倉量', base + '｜OI 變化溫和，方向訊號不明顯。', 1.5)
+            else:
+                add_pos('期貨未平倉量', base + '｜OI 持穩。', 1.0)
+    else:
+        add_pending('期貨未平倉量', '大台近月 OI 尚未取得（FinMind／日盤）。')
+
+    # ── 借券賣出：相對成交的空方供給（TWTASU 全市場合計；非外資分項）──
+    sbl_yi = _n(sbl.get('sblSellYi'))
+    margin_yi = _n(sbl.get('marginSellYi'))
+    if sbl_yi is not None:
+        # 相對大盤成交：>4% 偏重、>7% 警戒；絕對值亦參考
+        ratio = None
+        if turnover_yi and turnover_yi > 0:
+            ratio = (sbl_yi / turnover_yi) * 100.0
+        desc = f'借券賣出 {sbl_yi:.1f} 億'
+        if margin_yi is not None:
+            desc += f'｜融券賣出 {margin_yi:.1f} 億'
+        if ratio is not None:
+            desc += f'｜佔成交 {ratio:.2f}%'
+        desc += '（TWSE TWTASU 全市場）。'
+        if (ratio is not None and ratio >= 5.0) or sbl_yi >= 400:
+            add_risk(
+                '借券賣出壓力',
+                desc + '借券賣壓偏重，權值股易見外資／避險放空。',
+                _clamp((ratio or 5.0) * 1.4 + max(0.0, sbl_yi - 250) / 80.0, 0.0, 14.0),
+            )
+        elif (ratio is not None and ratio <= 1.8) or sbl_yi <= 80:
+            add_pos(
+                '借券賣出壓力',
+                desc + '借券賣壓偏輕，空方供給壓力緩和。',
+                _clamp(4.0 - (ratio or 1.5), 0.0, 6.0),
+            )
+        else:
+            add_pos('借券賣出壓力', desc + '借券賣壓中性。', 1.5)
+    else:
+        add_pending('借券賣出壓力', 'TWTASU 借券賣出成交量值尚未載入。')
+
+    # ── 250 日新高／新低：流動性樣本（誠實揭露 sampleN）──
+    nh = _n(nhnl.get('newHighs'))
+    nl = _n(nhnl.get('newLows'))
+    sample_n = _n(nhnl.get('sampleN'))
+    if nh is not None and nl is not None and sample_n and sample_n >= 12:
+        nh_i, nl_i = int(nh), int(nl)
+        note = nhnl.get('note') or f'樣本 {int(sample_n)} 檔'
+        net = nh_i - nl_i
+        breadth = (nh_i / (nh_i + nl_i)) if (nh_i + nl_i) else None
+        desc = f'250日新高 {nh_i}／新低 {nl_i}｜{note}'
+        if breadth is not None:
+            desc += f'｜新高佔比 {breadth * 100:.0f}%'
+        if net >= 4 and nh_i >= 3:
+            add_pos(
+                '250日新高／新低家數',
+                desc + '｜新高擴散，中期動能偏多（樣本非全市場）。',
+                _clamp(net * 1.2 + nh_i * 0.4, 0.0, 10.0),
+            )
+        elif net <= -4 and nl_i >= 3:
+            add_risk(
+                '250日新高／新低家數',
+                desc + '｜新低擴散，中期結構轉弱（樣本非全市場）。',
+                _clamp(abs(net) * 1.3 + nl_i * 0.4, 0.0, 12.0),
+            )
+        else:
+            add_pos('250日新高／新低家數', desc + '｜新高／新低糾結。', 1.5)
+    else:
+        add_pending(
+            '250日新高／新低家數',
+            '流動性樣本掃描尚未完成（需 ≥12 檔有效 250 日序列；非全市場掃描）。',
+        )
 
     pos_sum = round(sum(f['score'] for f in positive), 1)
     risk_abs = round(sum(abs(f['score']) for f in risk), 1)
@@ -329,7 +458,7 @@ def build_pulse_intel(
     else:
         total = None
 
-    # 資料完整度：預期 8 個核心集
+    # 資料完整度：8 核心 + 3 延伸因子（OI／借券／NHNL）
     expected = [
         ('twindex', sources_present.get('twindex', t00.get('price') is not None)),
         ('breadth', sources_present.get('breadth', adv is not None)),
@@ -339,6 +468,9 @@ def build_pulse_intel(
         ('valuation', sources_present.get('valuation', median_pe is not None)),
         ('txf', sources_present.get('txf', txf_px is not None)),
         ('sectors', sources_present.get('sectors', len(sec_list) > 0)),
+        ('txOi', sources_present.get('txOi', oi is not None and oi_chg_pct is not None)),
+        ('sbl', sources_present.get('sbl', sbl_yi is not None)),
+        ('nhnl', sources_present.get('nhnl', nh is not None and nl is not None and bool(sample_n))),
     ]
     have = sum(1 for _, ok in expected if ok)
     completeness = round(100.0 * have / len(expected), 1)
