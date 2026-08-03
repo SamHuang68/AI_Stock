@@ -35,7 +35,7 @@ TXF_CSV = os.path.join(DATA_DIR, 'txf_daily.csv')
 TZ_TPE = timezone(timedelta(hours=8))
 
 _UA = {
-    'User-Agent': 'Mozilla/5.0 (compatible; StockTerminal/4.1; +local)',
+    'User-Agent': 'Mozilla/5.0 (compatible; StockTerminal/5.0; +local)',
     'Accept': 'application/json,text/plain,*/*',
 }
 _lock = threading.Lock()

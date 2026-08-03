@@ -1,4 +1,4 @@
-# Stock Terminal v4.1
+# Stock Terminal v5.0
 
 Bloomberg 風格台／美股研究終端機 — **本機跑、零雲端、純 Python stdlib（不用 pip）**。
 

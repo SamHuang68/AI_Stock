@@ -149,9 +149,9 @@
       mount.innerHTML =
         '<div id="ah-root">' +
           '<div class="ah-head"><div>' +
-            '<div class="ah-kicker">STOCK TERMINAL · 5.0-S3</div>' +
-            '<div class="ah-title">盤後整理</div>' +
-            '<div class="ah-sub" id="ah-sub">台指期夜盤 · 個股期領先 · 籌碼摘要</div>' +
+              '<div class="ah-kicker">STOCK TERMINAL · 5.0</div>' +
+              '<div class="ah-title">盤後數據</div>' +
+              '<div class="ah-sub" id="ah-sub">漲跌排行 · 夜盤 · 籌碼摘要</div>' +
           '</div><div class="ah-actions">' +
             '<button type="button" class="ah-btn" id="ah-refresh">↻ 重新整理</button>' +
             '<button type="button" class="ah-btn" id="ah-open-ovn">夜盤詳情</button>' +
@@ -250,9 +250,30 @@
           '。完整儀表板可用工具列「籌碼基本面 → 資金流」。</div></div>';
     }
 
+    var movers = pack.movers || {};
+    var gain = movers.gainers || movers.up || [];
+    var lose = movers.losers || movers.down || [];
+    function mvTbl(list, title, cls) {
+      var h = '<div class="ah-section" style="margin:0"><h4>' + title + '</h4>';
+      if (!list.length) return h + '<div class="ah-err">尚無排行</div></div>';
+      h += '<table class="ah-tbl"><tr><th>名次</th><th>代號</th><th>名稱</th><th>漲跌幅</th></tr>';
+      list.slice(0, 12).forEach(function (r, i) {
+        h += '<tr class="ah-row" data-code="' + (r.code || '') + '"><td>' + (i + 1) +
+          '</td><td style="color:var(--gold);font-weight:700">' + (r.code || '') +
+          '</td><td>' + (r.name || '') + '</td><td class="' + (cls || twCls(r.changePct)) + '">' +
+          pct(r.changePct) + '</td></tr>';
+      });
+      return h + '</table></div>';
+    }
+    var mvBlock =
+      '<div class="ah-section"><h4>📈 漲跌排行（官方盤後）</h4>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+        mvTbl(gain, '漲幅排行', 'up') + mvTbl(lose, '跌幅排行', 'dn') +
+      '</div><div class="ah-note">來源 /movers · 點列開啟圖表。權證已過濾。</div></div>';
+
     body.innerHTML =
       '<div class="ah-grid">' + cards + '</div>' +
-      txfBlock + futBlock + instBlock +
+      mvBlock + txfBlock + futBlock + instBlock +
       '<div class="ah-note">⚠ 僅供參考、非投資建議。資料源：TAIFEX MIS / TWSE OpenData。</div>';
 
     body.querySelectorAll('tr.ah-row').forEach(function (el) {
@@ -281,9 +302,10 @@
       jget('/txf'),
       jget('/stockfut?cids=' + encodeURIComponent(cids)),
       jget('/marketflow'),
-      jget('/breadth')
+      jget('/breadth'),
+      jget('/movers?n=12')
     ]).then(function (arr) {
-      var txfRaw = arr[0], sf = arr[1], mf = arr[2], bd = arr[3];
+      var txfRaw = arr[0], sf = arr[1], mf = arr[2], bd = arr[3], mv = arr[4];
       var byCid = {};
       ((sf && sf.results) || []).forEach(function (r) { byCid[r.cid] = r; });
       var fut = LIST.map(function (s) {
@@ -291,7 +313,7 @@
       }).sort(function (a, b) {
         return (b.changePct == null ? -999 : b.changePct) - (a.changePct == null ? -999 : a.changePct);
       });
-      render({ txf: normalizeNight(txfRaw), fut: fut, mf: mf || {}, bd: bd || {} });
+      render({ txf: normalizeNight(txfRaw), fut: fut, mf: mf || {}, bd: bd || {}, movers: mv || {} });
     });
   }
 

@@ -100,7 +100,7 @@
         '<div id="bd-root">' +
           '<div class="bd-head">' +
             '<div>' +
-              '<div class="bd-kicker">STOCK TERMINAL · 5.0-S2</div>' +
+              '<div class="bd-kicker">STOCK TERMINAL · 5.0</div>' +
               '<div class="bd-title">大盤廣度</div>' +
               '<div class="bd-sub" id="bd-sub">載入中…</div>' +
             '</div>' +
@@ -223,10 +223,31 @@
         '</div><div class="s">' + (d.summary || '量能／法人／融資／估值') + '</div></div>'
       : '';
 
+    var hist = d._hist || [];
+    var histHtml = '';
+    if (hist.length) {
+      var ls = (up != null && dn) ? (up / Math.max(dn, 1)) : null;
+      histHtml = '<div class="bd-section"><h4>歷史市場廣度（本機歷史庫）</h4>' +
+        '<table style="width:100%;border-collapse:collapse;font-size:11px">' +
+        '<tr style="color:var(--tlo)"><th style="text-align:left;padding:4px">日期</th><th style="padding:4px">上漲</th>' +
+        '<th style="padding:4px">下跌</th><th style="padding:4px">平盤</th><th style="padding:4px">多空比</th></tr>';
+      hist.forEach(function (r) {
+        histHtml += '<tr><td style="padding:4px">' + r.date + '</td><td class="up" style="padding:4px;text-align:right">' +
+          fmt(r.up) + '</td><td class="dn" style="padding:4px;text-align:right">' + fmt(r.down) +
+          '</td><td style="padding:4px;text-align:right">' + fmt(r.flat) +
+          '</td><td style="padding:4px;text-align:right">' +
+          (r.lsRatio != null ? Number(r.lsRatio).toFixed(2) : '—') + '</td></tr>';
+      });
+      histHtml += '</table><div class="bd-note">今日多空比 ' +
+        (ls != null ? ls.toFixed(2) : '—') +
+        ' · 來源 pulse_history.db（同步資料僅 merge 新日）</div></div>';
+    }
+
     body.innerHTML =
       '<div class="bd-grid">' + idxCards + scoreCard + '</div>' +
       bar +
       '<div class="bd-section"><h4>細節</h4><div class="bd-rows">' + rows + '</div></div>' +
+      histHtml +
       (d.error && !d.ok ? '<div class="bd-err">' + d.error + '</div>' : '') +
       '<div class="bd-note">股票欄位為上市「股票」統計（不含權證／ETF 等）；整體市場含全部證券。' +
         '漲跌家數為 TWSE 盤後公布，盤中或休市日自動取最近交易日。台股慣例：紅漲綠跌。⚠ 非投資建議。</div>';
@@ -237,12 +258,20 @@
     if (!body) return;
     body.innerHTML = '<div class="bd-loading">載入廣度資料…</div>';
     var url = SRV + '/breadth' + (force ? '?refresh=1' : '');
-    fetch(url, { cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)); })
-      .then(render)
-      .catch(function (e) {
-        render({ ok: false, error: '載入失敗：' + (e && e.message ? e.message : e) });
-      });
+    Promise.all([
+      fetch(url, { cache: 'no-store' }).then(function (r) {
+        return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status));
+      }),
+      fetch(SRV + '/pulse/history?kind=breadth&n=20', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; })
+    ]).then(function (arr) {
+      var d = arr[0] || {};
+      d._hist = (arr[1] && arr[1].rows) || [];
+      render(d);
+    }).catch(function (e) {
+      render({ ok: false, error: '載入失敗：' + (e && e.message ? e.message : e) });
+    });
   }
 
   function activate() {

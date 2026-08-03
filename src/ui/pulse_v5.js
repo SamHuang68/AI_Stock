@@ -499,9 +499,35 @@
       '<div class="pl-row r3b">' + renderEco(p) + renderFlash(p) + renderWatch(pack.wlQuotes) + '</div>' +
       renderGlobal(p) +
       renderFactors(p) +
-      '<div class="pl-note">Overview 對齊 tw-pulse 參考儀表板；分數與排行均來自本機真實端點（/pulse · /movers）。⚠ 非投資建議。</div>';
+      '<div id="pl-hist" class="pl-loading" style="margin-top:10px">載入脈動歷史…</div>' +
+      '<div class="pl-note">Overview 對齊 tw-pulse 參考儀表板；分數與排行均來自本機真實端點（/pulse · /movers · /pulse/history）。⚠ 非投資建議。</div>';
 
     bind(body);
+    jget('/pulse/history?kind=pulse&n=12').then(function (h) {
+      var box = $('pl-hist');
+      if (!box) return;
+      var rows = (h && h.rows) || [];
+      if (!rows.length) {
+        box.className = 'pl-note';
+        box.textContent = '脈動歷史尚在累積 — 按頂列「同步資料」預抓指數／廣度／法人後，每日 /pulse 會自動 merge 分數。';
+        return;
+      }
+      var html = '<div class="pl-sec"><h4>市場脈搏歷史（本機庫）</h4>' +
+        '<table style="width:100%;border-collapse:collapse;font-size:11px">' +
+        '<tr style="color:var(--tlo)"><th style="text-align:left;padding:4px">日期</th>' +
+        '<th style="padding:4px">健康</th><th style="padding:4px">風險</th><th style="padding:4px">總分</th>' +
+        '<th style="padding:4px">完整度</th><th style="padding:4px">狀態</th></tr>';
+      rows.forEach(function (r) {
+        html += '<tr><td style="padding:4px">' + r.date + '</td><td style="padding:4px;text-align:right">' +
+          (r.health != null ? Number(r.health).toFixed(1) : '—') + '</td><td style="padding:4px;text-align:right">' +
+          (r.risk != null ? Number(r.risk).toFixed(1) : '—') + '</td><td style="padding:4px;text-align:right">' +
+          (r.total != null ? Number(r.total).toFixed(1) : '—') + '</td><td style="padding:4px;text-align:right">' +
+          (r.completeness != null ? Number(r.completeness).toFixed(0) + '%' : '—') +
+          '</td><td style="padding:4px">' + (r.statusText || '') + '</td></tr>';
+      });
+      box.className = '';
+      box.innerHTML = html + '</table></div>';
+    });
   }
 
   function warmCaches() {

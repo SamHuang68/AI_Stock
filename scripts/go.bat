@@ -45,7 +45,7 @@ if errorlevel 1 goto FAIL_CD
 
 echo.
 echo ============================================
-echo  Stock Terminal v4.1
+echo  Stock Terminal v5.0
 echo  http://localhost:18432/stock_terminal_v2.html
 echo ============================================
 echo.

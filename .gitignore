@@ -109,6 +109,9 @@ data/tdcc_holders.db-shm
 data/margin_cycle.db
 data/margin_cycle.db-wal
 data/margin_cycle.db-shm
+data/pulse_history.db
+data/pulse_history.db-wal
+data/pulse_history.db-shm
 baml_hy.csv
 baml_ig.csv
 fedfunds.csv

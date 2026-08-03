@@ -1720,6 +1720,12 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._handle_breadth()
         elif p == '/pulse' or p.startswith('/pulse?'):
             self._handle_pulse()
+        elif p == '/pulse/history' or p.startswith('/pulse/history?'):
+            self._handle_pulse_history()
+        elif p == '/sync' or p.startswith('/sync?'):
+            self._handle_sync()
+        elif p == '/sync/status' or p.startswith('/sync/status?'):
+            self._handle_sync_status()
         elif p == '/movers' or p.startswith('/movers?'):
             self._handle_movers()
         elif p == '/inst-rank' or p.startswith('/inst-rank?'):
@@ -3582,7 +3588,55 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         body = json.dumps(out, ensure_ascii=False).encode()
         if out.get('ok'):
             _cache.set(key, body, ttl=45)
+            # 寫入脈動歷史庫（增量 merge；失敗不擋回應）
+            try:
+                import pulse_history as ph
+                ph.save_pulse_score(out)
+            except Exception as e:
+                print('[pulse] history save', e)
         self._ok(body)
+
+    def _handle_pulse_history(self):
+        """GET /pulse/history?kind=breadth|institutional|index|pulse&n=40"""
+        qs = parse_qs(urlparse(self.path).query)
+        kind = (qs.get('kind', ['breadth'])[0] or 'breadth').lower()
+        n = qs.get('n', ['40'])[0]
+        try:
+            n = int(n)
+        except Exception:
+            n = 40
+        try:
+            import pulse_history as ph
+            self._ok(json.dumps(ph.history(kind=kind, n=n), ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('pulse history failed: ' + str(e), 500)
+
+    def _handle_sync(self):
+        """POST/GET /sync?days=40&full=0 — 背景預抓歷史庫，僅 merge 新日。"""
+        qs = parse_qs(urlparse(self.path).query)
+        days = qs.get('days', ['40'])[0]
+        try:
+            days = max(5, min(120, int(days)))
+        except Exception:
+            days = 40
+        force = (qs.get('full', ['0'])[0] or '0') in ('1', 'true', 'yes')
+        try:
+            import pulse_history as ph
+            started = ph.start_background_sync(days=days, force_full=force)
+            self._ok(json.dumps({
+                'ok': True, 'started': bool(started),
+                'message': '同步已啟動（背景 merge）' if started else '同步進行中',
+                'status': ph.status(),
+            }, ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('sync failed: ' + str(e), 500)
+
+    def _handle_sync_status(self):
+        try:
+            import pulse_history as ph
+            self._ok(json.dumps(ph.status(), ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('sync status failed: ' + str(e), 500)
 
     def _handle_movers(self):
         """輕量漲跌幅排行 GET /movers?n=8 — TWSE+TPEx 日收盤，供 Overview。"""
@@ -5717,11 +5771,20 @@ if __name__ == '__main__':
         _log = None
     d = find_etf_dir()
     files = list_etf_files()
+    # v5.0：脈動歷史庫 init + 背景增量同步（只 merge 新日）
+    try:
+        import pulse_history as _ph
+        _ph.init_db()
+        _ph.start_background_sync(days=40, force_full=False)
+        _ph_msg = f'Pulse history DB: {_ph.DB_PATH} (background merge sync started)'
+    except Exception as _phe:
+        _ph_msg = f'Pulse history unavailable: {_phe}'
     _msg = (
-        f'Stock Terminal: http://127.0.0.1:{PORT}/stock_terminal.html\n'
+        f'Stock Terminal v5.0: http://127.0.0.1:{PORT}/stock_terminal_v2.html\n'
         f'Workers: {MAX_WORKERS}  |  LRU cache: {LRU_MAX} symbols (ttl={getattr(_cache, "_ttl", "?")}s)\n'
         f'ETF delta path: {d or "NOT FOUND — set ETF_DELTA_PATH in server.py"}\n'
         f'ETF history files: {len(files)}\n'
+        f'{_ph_msg}\n'
         f'Bind: 127.0.0.1:{PORT} (loopback only — housekeeping)'
     )
     if _log:

@@ -42,7 +42,7 @@ MARGIN_MIX_CSV = os.path.join(DATA, 'tw_margin_mix_daily.csv')
 DB_PATH = os.path.join(DATA, 'macro_track.db')
 SEED_DIR = os.path.join(DATA, 'macro_seeds')
 
-UA = {'User-Agent': 'Mozilla/5.0 (compatible; StockTerminal/4.1; +local)'}
+UA = {'User-Agent': 'Mozilla/5.0 (compatible; StockTerminal/5.0; +local)'}
 UA_BROWSER = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/csv,application/json,text/html,*/*',
