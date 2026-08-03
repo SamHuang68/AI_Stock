@@ -118,10 +118,17 @@
       '#pl-root .pl-wl th{color:var(--tlo)}' +
       '#pl-root .pl-wl tr{cursor:pointer}#pl-root .pl-wl tr:hover{background:var(--bg3)}' +
       /* factors */
+      '#pl-root .pl-factors{margin-top:12px;scroll-margin-top:12px;padding:2px;border-radius:12px;transition:box-shadow .35s,background .35s}' +
+      '#pl-root .pl-factors.flash{box-shadow:0 0 0 1px var(--gold-m),0 0 24px rgba(245,197,24,.18);background:rgba(245,197,24,.04)}' +
+      '#pl-root .pl-factors > .pl-sec-title{font-family:\'Noto Serif TC\',serif;font-size:16px;font-weight:700;color:var(--thi);margin:0 0 10px;letter-spacing:1px}' +
       '#pl-root .pl-three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:10px}' +
-      '#pl-root .pl-fac{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px;margin-bottom:7px}' +
+      '#pl-root .pl-fac{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px;margin-bottom:7px;cursor:pointer;transition:border-color .14s,background .14s}' +
+      '#pl-root .pl-fac:hover{border-color:var(--gold-m);background:var(--bg3)}' +
+      '#pl-root .pl-fac.open{border-color:var(--gold);background:var(--gold-s)}' +
       '#pl-root .pl-fac .hd{display:flex;justify-content:space-between;gap:8px;font-size:11px;font-weight:700;color:var(--thi)}' +
       '#pl-root .pl-fac .ds{font-size:10px;color:var(--tlo);line-height:1.5;margin-top:3px}' +
+      '#pl-root .pl-fac .more{display:none;margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);font-size:10px;color:var(--text);line-height:1.55}' +
+      '#pl-root .pl-fac.open .more{display:block}' +
       '#pl-root .pl-fac .sc-pos{color:var(--red)}#pl-root .pl-fac .sc-risk{color:var(--cyan)}#pl-root .pl-fac .sc-pend{color:var(--tlo)}' +
       '#pl-root .pl-col{max-height:360px;overflow:auto}' +
       '#pl-root table.pillars{width:100%;border-collapse:collapse;font-size:11px}' +
@@ -214,18 +221,60 @@
       var r = $('pl-refresh');
       if (r) r.onclick = function () { refresh(true); };
       var tf = $('pl-toggle-fac');
-      if (tf) tf.onclick = function () {
-        showFactors = !showFactors;
-        tf.classList.toggle('on', showFactors);
-        if (lastPack) render(lastPack);
-      };
+      if (tf) tf.onclick = function () { focusFactors(); };
       mount.querySelectorAll('[data-go]').forEach(function (b) {
         b.onclick = function () { goRoute(b.getAttribute('data-go')); };
       });
     }
-    var tf2 = $('pl-toggle-fac');
-    if (tf2) tf2.classList.toggle('on', showFactors);
+    syncFactorBtn();
     return $('pl-body');
+  }
+
+  function syncFactorBtn() {
+    var tf = $('pl-toggle-fac');
+    if (!tf) return;
+    tf.classList.toggle('on', !!showFactors);
+    tf.setAttribute('aria-pressed', showFactors ? 'true' : 'false');
+    tf.title = showFactors ? '捲動至因子帳本（再按一次可收合）' : '顯示因子帳本';
+  }
+
+  function scrollToFactors() {
+    var el = $('pl-factors');
+    if (!el) return false;
+    try { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    catch (e) { el.scrollIntoView(true); }
+    el.classList.remove('flash');
+    // reflow so animation retriggers
+    void el.offsetWidth;
+    el.classList.add('flash');
+    setTimeout(function () { el.classList.remove('flash'); }, 1400);
+    return true;
+  }
+
+  /** 因子帳本：優先「顯示並捲動」；已顯示且已在視窗內則收合 */
+  function focusFactors() {
+    var el = $('pl-factors');
+    if (showFactors && el) {
+      var rect = el.getBoundingClientRect();
+      var viewH = window.innerHeight || 800;
+      var inView = rect.top < viewH * 0.85 && rect.bottom > 80;
+      if (inView) {
+        showFactors = false;
+        syncFactorBtn();
+        if (lastPack) render(lastPack);
+        else refresh(false);
+        return;
+      }
+      scrollToFactors();
+      syncFactorBtn();
+      return;
+    }
+    showFactors = true;
+    syncFactorBtn();
+    if (lastPack) render(lastPack);
+    else refresh(false);
+    // render 後下一幀再捲動（DOM 已掛上 #pl-factors）
+    setTimeout(function () { scrollToFactors(); }, 40);
   }
 
   function factorCol(title, cls, list, empty) {
@@ -234,9 +283,15 @@
     list.forEach(function (f) {
       var sc = f.score;
       var scTxt = cls === 'sc-pend' ? '不計分' : (cls === 'sc-pos' ? ((sc >= 0 ? '+' : '') + Number(sc).toFixed(1) + '分') : (Number(sc).toFixed(1) + '分'));
-      html += '<div class="pl-fac"><div class="hd"><span>' + (f.id || '') + '. ' + (f.name || '') +
+      var typ = f.type || (cls === 'sc-risk' ? 'risk' : (cls === 'sc-pend' ? 'pending' : 'positive'));
+      var more = '類型 ' + typ +
+        (f.score != null ? ' · 權重分 ' + Number(f.score).toFixed(2) : '') +
+        ' · 點列可展開／收合細節';
+      html += '<div class="pl-fac" tabindex="0" role="button" data-fac="' +
+        String(f.id || '') + '"><div class="hd"><span>' + (f.id || '') + '. ' + (f.name || '') +
         '</span><span class="' + cls + '">' + scTxt + '</span></div>' +
-        '<div class="ds">' + (f.description || '') + '</div></div>';
+        '<div class="ds">' + (f.description || '') + '</div>' +
+        '<div class="more">' + more + '</div></div>';
     });
     return html + '</div>';
   }
@@ -439,8 +494,13 @@
   }
 
   function renderFactors(p) {
-    if (!showFactors) return '';
+    if (!showFactors) {
+      return '<div id="pl-factors" class="pl-factors" hidden></div>';
+    }
     var rows = p.marketRows || [];
+    var nPos = (p.positiveFactors || []).length;
+    var nRisk = (p.riskFactors || []).length;
+    var nPend = (p.pendingFactors || []).length;
     var pillars = '<div class="pl-sec"><h4>體質支柱</h4>';
     if (!rows.length) pillars += '<div class="pl-note">支柱尚未就緒</div></div>';
     else {
@@ -451,12 +511,16 @@
       });
       pillars += '</table></div>';
     }
-    return pillars +
+    return '<div id="pl-factors" class="pl-factors">' +
+      '<div class="pl-sec-title">因子帳本 · 正 ' + nPos + ' / 風險 ' + nRisk + ' / 未納入 ' + nPend + '</div>' +
+      pillars +
       '<div class="pl-three">' +
         factorCol('正面因素', 'sc-pos', p.positiveFactors, '尚無') +
         factorCol('風險因素', 'sc-risk', p.riskFactors, '尚無') +
         factorCol('尚未納入', 'sc-pend', p.pendingFactors, '無') +
-      '</div>';
+      '</div>' +
+      '<div class="pl-note">分數來自 /pulse 因子帳本；點單列展開細節，頂列「因子帳本」可再次捲動至此。</div>' +
+    '</div>';
   }
 
   function bind(body) {
@@ -466,6 +530,13 @@
     body.querySelectorAll('[data-code]').forEach(function (el) {
       el.onclick = function () {
         openChart(el.getAttribute('data-code'), el.getAttribute('data-mkt') || 'TW');
+      };
+    });
+    body.querySelectorAll('.pl-fac[data-fac]').forEach(function (el) {
+      function toggle() { el.classList.toggle('open'); }
+      el.onclick = toggle;
+      el.onkeydown = function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
       };
     });
   }
@@ -598,6 +669,7 @@
   window.PulseV5 = {
     activate: activate,
     refresh: function () { refresh(true); },
+    focusFactors: focusFactors,
     last: function () { return lastPack; }
   };
 
