@@ -1,11 +1,14 @@
 /* ============================================================================
- * pulse_v5.js  —  Stock Terminal 5.0 Stage 4：TW Pulse 市場脈動總覽
+ * pulse_v5.js  —  Stock Terminal 5.0：TW Pulse 市場脈動情報
  * ----------------------------------------------------------------------------
- * 5 秒掌握盤勢：指數 + 台指期 + 廣度 + 籌碼 + 法人榜 + 類股強弱。
- * 皆既有端點，client 端 Promise.all 組合（無新 scraper）。
- *   GET /twindex /txf /breadth /marketflow
- *   GET /inst-rank?who=foreign&side=buy|sell&n=5
- *   GET /sectors?mkt=TW
+ * Merge：tw-pulse-terminal（Antigravity scratch）之「因子帳本 + 雙軌健康／風險 +
+ * 資料完整度」UX → 綁定真實後端 GET /pulse（pulse_intel.py），禁止 mock 分數。
+ *
+ * 資料：
+ *   GET /pulse              → total/health/risk + factors + snapshot
+ *   GET /inst-rank …        → 外資買賣超 Top（附帶）
+ *   背景預熱 /breadth /sectors → 提高完整度
+ *
  * 掛載：#mount-pulse；側欄「脈動」
  * ========================================================================== */
 (function () {
@@ -13,6 +16,7 @@
 
   var SRV = window.SERVER || '';
   var timer = null;
+  var lastPack = null;
 
   function $(id) { return document.getElementById(id); }
 
@@ -21,7 +25,7 @@
     var s = document.createElement('style');
     s.id = 'pulse-v5-css';
     s.textContent =
-      '#view-pulse.sv-panel{max-width:1120px;padding:18px 22px 28px}' +
+      '#view-pulse.sv-panel{max-width:1180px;padding:18px 22px 32px}' +
       '#pl-root{font-family:\'JetBrains Mono\',monospace;color:var(--text)}' +
       '#pl-root .pl-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}' +
       '#pl-root .pl-kicker{font-size:10px;color:var(--gold);letter-spacing:2px;margin-bottom:4px}' +
@@ -48,6 +52,7 @@
       '#pl-root .pl-bar .su{background:var(--red)}#pl-root .pl-bar .sf{background:#334155}#pl-root .pl-bar .sd{background:var(--green)}' +
       '#pl-root .pl-bar-lbl{display:flex;justify-content:space-between;font-size:10px;color:var(--tlo)}' +
       '#pl-root .pl-two{display:grid;grid-template-columns:1fr 1fr;gap:12px}' +
+      '#pl-root .pl-three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}' +
       '#pl-root table{width:100%;border-collapse:collapse;font-size:11px}' +
       '#pl-root th,#pl-root td{padding:5px 6px;border-bottom:1px solid var(--border);text-align:right}' +
       '#pl-root th:first-child,#pl-root td:first-child,#pl-root th:nth-child(2),#pl-root td:nth-child(2){text-align:left}' +
@@ -64,9 +69,33 @@
       '#pl-root .pl-cell .k{font-size:9px;color:var(--tlo)}#pl-root .pl-cell .v{font-size:14px;font-weight:700;margin-top:3px}' +
       '#pl-root .pl-note{font-size:9px;color:var(--tlo);line-height:1.65;margin-top:12px}' +
       '#pl-root .pl-loading{font-size:11px;color:var(--tlo);padding:20px 0}' +
-      '@media (max-width:900px){' +
+      /* ── Intel（tw-pulse merge）── */
+      '#pl-root .pl-intel{display:grid;grid-template-columns:1.1fr 1fr;gap:12px;margin-top:4px}' +
+      '#pl-root .pl-gauge-wrap{display:flex;align-items:center;gap:18px;flex-wrap:wrap}' +
+      '#pl-root .pl-gauge{width:132px;height:132px;border-radius:50%;' +
+        'background:conic-gradient(var(--gold) var(--pl-deg,0%), rgba(245,197,24,.12) 0);' +
+        'display:flex;align-items:center;justify-content:center;flex-shrink:0;position:relative}' +
+      '#pl-root .pl-gauge::before{content:\'\';position:absolute;inset:10px;border-radius:50%;background:var(--bg2)}' +
+      '#pl-root .pl-gauge-inner{position:relative;z-index:1;text-align:center}' +
+      '#pl-root .pl-gauge-inner .big{font-size:34px;font-weight:800;color:var(--thi);line-height:1}' +
+      '#pl-root .pl-gauge-inner .tag{display:inline-block;margin-top:6px;padding:2px 8px;border-radius:999px;' +
+        'font-size:10px;font-weight:700;background:var(--gold-s);color:var(--gold);border:1px solid var(--gold-m)}' +
+      '#pl-root .pl-mini{display:grid;grid-template-columns:1fr 1fr;gap:8px;flex:1;min-width:200px}' +
+      '#pl-root .pl-mini .m{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px}' +
+      '#pl-root .pl-mini .m .k{font-size:9px;color:var(--tlo);letter-spacing:.5px}' +
+      '#pl-root .pl-mini .m .v{font-size:18px;font-weight:800;margin-top:4px;color:var(--thi)}' +
+      '#pl-root .pl-mini .m .l{font-size:10px;margin-top:3px;font-weight:700}' +
+      '#pl-root .pl-comp{height:8px;border-radius:4px;background:var(--bg3);overflow:hidden;margin-top:8px}' +
+      '#pl-root .pl-comp > i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--gold));border-radius:4px}' +
+      '#pl-root .pl-fac{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px}' +
+      '#pl-root .pl-fac .hd{display:flex;justify-content:space-between;gap:8px;font-size:11px;font-weight:700;color:var(--thi)}' +
+      '#pl-root .pl-fac .ds{font-size:10px;color:var(--tlo);line-height:1.55;margin-top:4px}' +
+      '#pl-root .pl-fac .sc-pos{color:var(--red)}#pl-root .pl-fac .sc-risk{color:var(--cyan)}#pl-root .pl-fac .sc-pend{color:var(--tlo)}' +
+      '#pl-root .pl-col h4 .cnt{color:var(--tlo);font-weight:600}' +
+      '#pl-root .pl-col{max-height:420px;overflow:auto;padding-right:2px}' +
+      '@media (max-width:980px){' +
         '#pl-root .pl-grid{grid-template-columns:repeat(2,minmax(0,1fr))}' +
-        '#pl-root .pl-two,#pl-root .pl-inst{grid-template-columns:1fr}' +
+        '#pl-root .pl-intel,#pl-root .pl-two,#pl-root .pl-three,#pl-root .pl-inst{grid-template-columns:1fr}' +
       '}';
     document.head.appendChild(s);
   }
@@ -77,7 +106,7 @@
   }
   function pct(p) {
     if (p == null || p !== p) return '—';
-    return (p >= 0 ? '+' : '') + p.toFixed(2) + '%';
+    return (p >= 0 ? '+' : '') + Number(p).toFixed(2) + '%';
   }
   function fmt(v, d) {
     if (v == null || !isFinite(v)) return '—';
@@ -104,49 +133,6 @@
     }
   }
 
-  function normalizeNight(d) {
-    if (!d || !d.ok) return null;
-    var n = d.night;
-    if (!n || n.price == null) {
-      if (d.price != null && (d.session === 'night' || d.ampRate != null)) n = d;
-      else return null;
-    }
-    var cp = n.changePct;
-    if (cp == null && n.prevClose > 0) cp = (n.price - n.prevClose) / n.prevClose * 100;
-    return { price: n.price, changePct: cp, ampRate: n.ampRate, source: n.source || d.source };
-  }
-
-  function toneLine(txf, bd) {
-    var parts = [];
-    var cp = txf && txf.changePct;
-    var ar = bd && bd.stocks && bd.stocks.advRatio;
-    var score = bd && bd.score;
-    if (cp != null) {
-      if (cp <= -1.5) parts.push('夜盤偏空');
-      else if (cp <= -0.5) parts.push('夜盤偏弱');
-      else if (cp >= 1.5) parts.push('夜盤偏多');
-      else if (cp >= 0.5) parts.push('夜盤偏強');
-      else parts.push('夜盤中性');
-    }
-    if (ar != null) {
-      if (ar >= 0.65) parts.push('廣度偏多');
-      else if (ar <= 0.35) parts.push('廣度偏空');
-      else parts.push('廣度糾結');
-    }
-    if (score != null) parts.push('體質 ' + score);
-    return parts.length ? parts.join(' · ') : '資料彙整中';
-  }
-
-  function sectorPick(sectors) {
-    // 排除大盤指數名，取漲跌幅極端
-    var skip = /加權|櫃買|寶島|公司治理|中型|電子工業$|未含/;
-    var list = (sectors || []).filter(function (s) {
-      return s && s.name && s.changePct != null && !skip.test(s.name);
-    });
-    list.sort(function (a, b) { return b.changePct - a.changePct; });
-    return { up: list.slice(0, 6), dn: list.slice(-6).reverse() };
-  }
-
   function ensureMount() {
     injectCSS();
     var panel = $('view-pulse');
@@ -163,20 +149,21 @@
       mount.innerHTML =
         '<div id="pl-root">' +
           '<div class="pl-head"><div>' +
-            '<div class="pl-kicker">STOCK TERMINAL · 5.0-S4</div>' +
+            '<div class="pl-kicker">STOCK TERMINAL · PULSE INTEL</div>' +
             '<div class="pl-title">市場脈動</div>' +
-            '<div class="pl-sub" id="pl-sub">指數 · 夜盤 · 廣度 · 籌碼 · 類股</div>' +
+            '<div class="pl-sub" id="pl-sub">健康度 · 風險 · 因子帳本 · 廣度籌碼</div>' +
             '<div class="pl-tone" id="pl-tone">—</div>' +
           '</div><div class="pl-actions">' +
             '<button type="button" class="pl-btn" id="pl-refresh">↻ 重新整理</button>' +
             '<button type="button" class="pl-btn" data-go="breadth">廣度</button>' +
+            '<button type="button" class="pl-btn" data-go="heat">熱力</button>' +
             '<button type="button" class="pl-btn" data-go="afterhours">盤後</button>' +
             '<button type="button" class="pl-btn primary" data-go="chart">圖表</button>' +
           '</div></div>' +
-          '<div id="pl-body" class="pl-loading">載入脈動…</div>' +
+          '<div id="pl-body" class="pl-loading">載入脈動情報…</div>' +
         '</div>';
       var r = $('pl-refresh');
-      if (r) r.onclick = function () { refresh(); };
+      if (r) r.onclick = function () { refresh(true); };
       mount.querySelectorAll('[data-go]').forEach(function (b) {
         b.onclick = function () { goRoute(b.getAttribute('data-go')); };
       });
@@ -184,29 +171,129 @@
     return $('pl-body');
   }
 
+  function factorCol(title, cls, list, empty) {
+    var html = '<div class="pl-sec pl-col"><h4>' + title + ' <span class="cnt">(' + (list || []).length + ')</span></h4>';
+    if (!list || !list.length) {
+      html += '<div class="pl-note">' + empty + '</div></div>';
+      return html;
+    }
+    list.forEach(function (f) {
+      var sc = f.score;
+      var scCls = cls;
+      var scTxt;
+      if (cls === 'sc-pos') scTxt = (sc >= 0 ? '+' : '') + Number(sc).toFixed(1) + '分';
+      else if (cls === 'sc-risk') scTxt = Number(sc).toFixed(1) + '分';
+      else scTxt = '不計分';
+      html += '<div class="pl-fac"><div class="hd"><span>' + (f.id || '') + '. ' + (f.name || '') +
+        '</span><span class="' + scCls + '">' + scTxt + '</span></div>' +
+        '<div class="ds">' + (f.description || '') + '</div></div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function renderIntel(p) {
+    var total = p.totalScore;
+    var deg = (total != null ? Math.max(0, Math.min(100, total)) : 0) * 3.6;
+    var health = p.healthScore;
+    var risk = p.riskScore;
+    var comp = p.dataCompleteness != null ? p.dataCompleteness : 0;
+
+    return '' +
+      '<div class="pl-intel">' +
+        '<div class="pl-sec" style="margin:0">' +
+          '<h4>市場脈動總覽 <span class="cnt">' + (p.model || 'tw-pulse-intel') + '</span></h4>' +
+          '<div class="pl-gauge-wrap">' +
+            '<div class="pl-gauge" style="--pl-deg:' + deg.toFixed(1) + 'deg">' +
+              '<div class="pl-gauge-inner">' +
+                '<div class="big">' + (total != null ? Number(total).toFixed(1) : '—') + '</div>' +
+                '<div class="tag">' + (p.statusText || '—') + '</div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="pl-mini">' +
+              '<div class="m"><div class="k">市場健康度</div><div class="v">' +
+                (health != null ? Number(health).toFixed(1) : '—') +
+                ' <span style="font-size:10px;color:var(--tlo)">/100</span></div>' +
+                '<div class="l" style="color:var(--gold)">' + (p.healthLabel || '') + '</div></div>' +
+              '<div class="m"><div class="k">市場風險度</div><div class="v">' +
+                (risk != null ? Number(risk).toFixed(1) : '—') +
+                ' <span style="font-size:10px;color:var(--tlo)">/100</span></div>' +
+                '<div class="l" style="color:var(--cyan)">' + (p.riskLabel || '') + '</div></div>' +
+              '<div class="m"><div class="k">正面因素得分</div><div class="v up">' +
+                (p.positiveFactorScore != null ? Number(p.positiveFactorScore).toFixed(1) : '—') +
+                '</div><div class="l" style="color:var(--tlo)">已計 ' +
+                ((p.positiveFactors || []).length) + ' 項</div></div>' +
+              '<div class="m"><div class="k">資料完整度</div><div class="v">' +
+                (comp != null ? Number(comp).toFixed(0) + '%' : '—') + '</div>' +
+                '<div class="l" style="color:var(--tlo)">可用 ' +
+                (p.datasetsOk != null ? p.datasetsOk : '—') + '/' +
+                (p.datasetsTotal != null ? p.datasetsTotal : '—') + '</div>' +
+                '<div class="pl-comp"><i style="width:' + comp + '%"></i></div></div>' +
+            '</div>' +
+          '</div>' +
+          (p.summary ? '<div class="pl-note" style="margin-top:10px">' + p.summary + '</div>' : '') +
+        '</div>' +
+        '<div class="pl-sec" style="margin:0">' +
+          '<h4>體質支柱（大盤評分）</h4>' +
+          pillarRows(p.marketRows || []) +
+          '<div class="pl-note">健康度沿用伺服器 _score_tw_market（量能／法人／融資／估值）；' +
+          '風險由因子帳本推導。缺資料進「尚未納入」不灌分。</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="pl-three">' +
+        factorCol('正面因素', 'sc-pos', p.positiveFactors, '尚無正面因子（或資料不足）') +
+        factorCol('風險因素', 'sc-risk', p.riskFactors, '尚未識別顯著風險因子') +
+        factorCol('尚未納入評估', 'sc-pend', p.pendingFactors, '無 pending 項目') +
+      '</div>';
+  }
+
+  function pillarRows(rows) {
+    if (!rows.length) return '<div class="pl-note">體質支柱尚未就緒 — 開啟盤後／廣度可預熱資料。</div>';
+    var html = '<table><tr><th>項目</th><th>數值</th><th>評分</th></tr>';
+    rows.forEach(function (r) {
+      html += '<tr><td>' + (r.k || '') + '</td><td>' + (r.v || '—') + '</td><td>' +
+        (r.score != null ? Number(r.score).toFixed(1) : '—') + '</td></tr>';
+    });
+    html += '</table>';
+    return html;
+  }
+
   function render(pack) {
     var body = ensureMount();
     if (!body) return;
-    var idx = (pack.tw && pack.tw.indices) || {};
-    var t00 = idx.t00 || {}, o00 = idx.o00 || {};
-    var txf = pack.txf;
-    var bd = pack.bd || {};
-    var st = bd.stocks || {};
-    var mf = pack.mf || {};
+    lastPack = pack;
+    var p = pack.pulse || {};
+    var snap = p.snapshot || {};
+    var t00 = snap.t00 || (p.indices && p.indices.t00) || {};
+    var o00 = snap.o00 || (p.indices && p.indices.o00) || {};
+    var txf = snap.txf || p.txf || {};
+    var st = snap.stocks || p.stocks || {};
+    var inst = (snap.inst) || {};
+    var mfInst = (p.marketflow && p.marketflow.inst) || p.inst || {};
+    var foreign = inst.foreign != null ? inst.foreign : mfInst.foreign;
+    var trust = inst.trust != null ? inst.trust : mfInst.trust;
+    var dealer = inst.dealer != null ? inst.dealer : mfInst.dealer;
+    var totalYi = inst.totalYi;
+    if (totalYi == null && (foreign != null || trust != null || dealer != null)) {
+      totalYi = ((foreign || 0) + (trust || 0) + (dealer || 0)) / 1e8;
+    }
+
     var buy = (pack.buy && pack.buy.list) || [];
     var sell = (pack.sell && pack.sell.list) || [];
-    var sec = sectorPick((pack.sec && pack.sec.sectors) || []);
+    var hot = snap.sectorsHot || [];
+    var cold = snap.sectorsCold || [];
 
     var sub = $('pl-sub');
     if (sub) {
       sub.textContent = '更新 ' + new Date().toLocaleTimeString('zh-TW') +
-        (bd.date ? ' · 廣度日 ' + bd.date : '') +
-        (pack.buy && pack.buy.date ? ' · 法人日 ' + pack.buy.date : '');
+        (p.date ? ' · 廣度日 ' + p.date : '') +
+        (pack.buy && pack.buy.date ? ' · 法人日 ' + pack.buy.date : '') +
+        (p.updatedAt ? ' · ' + p.updatedAt.replace('T', ' ') : '');
     }
     var toneEl = $('pl-tone');
     if (toneEl) {
       toneEl.className = 'pl-tone ' + tw(txf && txf.changePct);
-      toneEl.textContent = toneLine(txf, bd);
+      toneEl.textContent = p.tone || '資料彙整中';
     }
 
     var up = st.up, dn = st.down, flat = st.unchanged || 0;
@@ -221,11 +308,12 @@
       '<div class="pl-card"><div class="k">櫃買指數</div><div class="v">' + fmt(o00.price, 2) + '</div>' +
         '<div class="s ' + tw(o00.changePct) + '">' + pct(o00.changePct) + '</div></div>' +
       '<div class="pl-card"><div class="k">台指期夜盤</div><div class="v ' + tw(txf && txf.changePct) + '">' +
-        (txf ? fmt(txf.price) : '—') + '</div>' +
+        (txf && txf.price != null ? fmt(txf.price) : '—') + '</div>' +
         '<div class="s ' + tw(txf && txf.changePct) + '">' + pct(txf && txf.changePct) +
-        (txf && txf.ampRate != null ? ' · 振幅 ' + txf.ampRate.toFixed(2) + '%' : '') + '</div></div>' +
-      '<div class="pl-card"><div class="k">大盤體質</div><div class="v">' + (bd.score != null ? bd.score : '—') + '</div>' +
-        '<div class="s">' + (bd.summary || '量能／法人／融資／估值') + '</div></div>';
+        (txf && txf.ampRate != null ? ' · 振幅 ' + Number(txf.ampRate).toFixed(2) + '%' : '') + '</div></div>' +
+      '<div class="pl-card"><div class="k">大盤體質</div><div class="v">' +
+        (p.healthScore != null ? Number(p.healthScore).toFixed(0) : '—') + '</div>' +
+        '<div class="s">' + (p.healthLabel || p.summary || '量能／法人／融資／估值') + '</div></div>';
 
     var breadth =
       '<div class="pl-sec"><h4>廣度（股票） <a data-go="breadth">詳情 →</a></h4>' +
@@ -236,18 +324,20 @@
         '<div class="sd" style="width:' + pd.toFixed(2) + '%"></div></div>' +
       '<div class="pl-bar-lbl" style="margin-top:6px"><span>上漲比 ' +
         (st.advRatio != null ? (st.advRatio * 100).toFixed(1) + '%' : '—') +
-        '</span><span>淨 ' + (st.net != null ? ((st.net >= 0 ? '+' : '') + st.net) : '—') + '</span></div></div>';
+        '</span><span>淨 ' + (st.net != null ? ((st.net >= 0 ? '+' : '') + st.net) : '—') +
+        (st.limitUp != null ? ' · 漲停 ' + st.limitUp : '') +
+        (st.limitDown != null ? ' · 跌停 ' + st.limitDown : '') +
+        '</span></div></div>';
 
-    var inst = mf.inst;
-    var to = (mf.turnover || []).filter(function (x) { return x.amount != null; });
+    var to = ((p.marketflow && p.marketflow.turnover) || []).filter(function (x) { return x && x.amount != null; });
     var latest = to.length ? to[to.length - 1].amount : null;
-    var total = inst ? ((inst.foreign || 0) + (inst.trust || 0) + (inst.dealer || 0)) : null;
     var flow =
       '<div class="pl-sec"><h4>籌碼摘要</h4><div class="pl-inst">' +
         '<div class="pl-cell"><div class="k">成交金額</div><div class="v">' + yi(latest) + '</div></div>' +
-        '<div class="pl-cell"><div class="k">外資</div><div class="v ' + tw(inst && inst.foreign) + '">' + fyi(inst && inst.foreign) + '</div></div>' +
-        '<div class="pl-cell"><div class="k">投信</div><div class="v ' + tw(inst && inst.trust) + '">' + fyi(inst && inst.trust) + '</div></div>' +
-        '<div class="pl-cell"><div class="k">合計</div><div class="v ' + tw(total) + '">' + fyi(total) + '</div></div>' +
+        '<div class="pl-cell"><div class="k">外資</div><div class="v ' + tw(foreign) + '">' + fyi(foreign) + '</div></div>' +
+        '<div class="pl-cell"><div class="k">投信</div><div class="v ' + tw(trust) + '">' + fyi(trust) + '</div></div>' +
+        '<div class="pl-cell"><div class="k">合計</div><div class="v ' + tw(totalYi) + '">' +
+          (totalYi != null ? ((totalYi >= 0 ? '+' : '') + totalYi.toFixed(0) + ' 億') : '—') + '</div></div>' +
       '</div></div>';
 
     function rankTable(list, title) {
@@ -268,8 +358,8 @@
     var ranks = '<div class="pl-two">' + rankTable(buy, '外資買超 Top') + rankTable(sell, '外資賣超 Top') + '</div>';
 
     function chips(arr, label) {
-      var html = '<div class="pl-sec"><h4>' + label + '</h4><div class="pl-chips">';
-      if (!arr.length) html += '<div class="pl-note">類股資料暫缺</div>';
+      var html = '<div class="pl-sec"><h4>' + label + ' <a data-go="heat">熱力 →</a></h4><div class="pl-chips">';
+      if (!arr.length) html += '<div class="pl-note">類股資料暫缺（開啟熱力可預熱）</div>';
       arr.forEach(function (s) {
         html += '<div class="pl-chip" title="' + s.name + '">' +
           '<div class="nm">' + s.name + '</div>' +
@@ -280,10 +370,12 @@
     }
 
     body.innerHTML =
+      renderIntel(p) +
       '<div class="pl-grid">' + cards + '</div>' +
       breadth + flow + ranks +
-      chips(sec.up, '類股強勢') + chips(sec.dn, '類股弱勢') +
-      '<div class="pl-note">脈動為總覽；細節進廣度／盤後／工具列資金流。點排行載入線型。⚠ 非投資建議。</div>';
+      chips(hot, '類股強勢') + chips(cold, '類股弱勢') +
+      '<div class="pl-note">脈動情報合併自 tw-pulse-terminal 因子帳本 UX，分數由本機 /pulse 依真實欄位計算。' +
+      '細節進廣度／熱力／盤後。點排行載入線型。⚠ 非投資建議。</div>';
 
     body.querySelectorAll('[data-go]').forEach(function (a) {
       a.onclick = function (e) { e.preventDefault(); goRoute(a.getAttribute('data-go')); };
@@ -293,41 +385,58 @@
     });
   }
 
-  function refresh() {
+  function warmCaches() {
+    // 背景預熱，提升下次 /pulse 完整度（不阻塞 UI）
+    jget('/breadth');
+    jget('/sectors?mkt=TW');
+    jget('/marketflow');
+  }
+
+  function refresh(force) {
     var body = ensureMount();
     if (!body) return;
-    body.innerHTML = '<div class="pl-loading">載入脈動…</div>';
+    body.innerHTML = '<div class="pl-loading">載入脈動情報…</div>';
+    var q = force ? '/pulse?refresh=1' : '/pulse';
     Promise.all([
-      jget('/twindex'),
-      jget('/txf'),
-      jget('/breadth'),
-      jget('/marketflow'),
+      jget(q),
       jget('/inst-rank?who=foreign&side=buy&n=5'),
-      jget('/inst-rank?who=foreign&side=sell&n=5'),
-      jget('/sectors?mkt=TW')
+      jget('/inst-rank?who=foreign&side=sell&n=5')
     ]).then(function (arr) {
-      render({
-        tw: arr[0],
-        txf: normalizeNight(arr[1]),
-        bd: arr[2] || {},
-        mf: arr[3] || {},
-        buy: arr[4],
-        sell: arr[5],
-        sec: arr[6]
-      });
+      var pulse = arr[0];
+      if (!pulse || !pulse.ok) {
+        body.innerHTML = '<div class="pl-note">脈動情報載入失敗' +
+          (pulse && pulse.error ? '：' + pulse.error : '（請確認 server 已重啟並含 /pulse）') +
+          '。<button type="button" class="pl-btn" id="pl-retry">重試</button></div>';
+        var retry = $('pl-retry');
+        if (retry) retry.onclick = function () { refresh(true); };
+        warmCaches();
+        return;
+      }
+      render({ pulse: pulse, buy: arr[1], sell: arr[2] });
+      // 完整度不足時預熱後再補一次
+      if ((pulse.dataCompleteness != null && pulse.dataCompleteness < 85) || !pulse.breadthOk) {
+        warmCaches();
+        setTimeout(function () {
+          if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'pulse') {
+            jget('/pulse?refresh=1').then(function (p2) {
+              if (p2 && p2.ok) render({ pulse: p2, buy: arr[1], sell: arr[2] });
+            });
+          }
+        }, 2500);
+      }
     });
   }
 
   function activate() {
     ensureMount();
-    refresh();
+    refresh(false);
     if (timer) clearInterval(timer);
     timer = setInterval(function () {
-      if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'pulse') refresh();
+      if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'pulse') refresh(false);
     }, 50000);
   }
 
-  window.PulseV5 = { activate: activate, refresh: refresh };
+  window.PulseV5 = { activate: activate, refresh: function () { refresh(true); }, last: function () { return lastPack; } };
 
   window.addEventListener('shell:route', function (ev) {
     if (ev && ev.detail && ev.detail.route === 'pulse') activate();

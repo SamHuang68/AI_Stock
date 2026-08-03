@@ -15,10 +15,10 @@
   'use strict';
 
   var STORAGE_KEY = 'st5.shell.route';
-  var VERSION = '5.0-S7';
+  var VERSION = '5.0-P8';
 
   var ROUTES = [
-    { id: 'pulse',      label: '脈動',   hint: '市場脈動總覽（指數／廣度／籌碼）', icon: '◎', stub: false },
+    { id: 'pulse',      label: '脈動',   hint: '市場脈動情報（因子帳本／健康／風險）', icon: '◎', stub: false },
     { id: 'chart',      label: '圖表',   hint: 'K 線工作區（預設）',               icon: '◈' },
     { id: 'scan',       label: '選股',   hint: '三合一選股（技術×基本面×籌碼）',   icon: '🔍', stub: false },
     { id: 'heat',       label: '熱力',   hint: '類股熱力圖＋焦點掃描',             icon: '▦', stub: false },

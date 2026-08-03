@@ -1500,6 +1500,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._handle_marketflow()
         elif p == '/breadth' or p.startswith('/breadth?'):
             self._handle_breadth()
+        elif p == '/pulse' or p.startswith('/pulse?'):
+            self._handle_pulse()
         elif p == '/inst-rank' or p.startswith('/inst-rank?'):
             self._handle_inst_rank()
         elif p == '/events' or p.startswith('/events?'):
@@ -3016,6 +3018,145 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             print(f'[marketflow] MI_MARGN failed: {e}')
         body = json.dumps(out, ensure_ascii=False).encode()
         _cache.set(key, body, ttl=1800)
+        self._ok(body)
+
+    def _handle_pulse(self):
+        """市場脈動情報 (merge tw-pulse-terminal UX)：因子帳本 + 雙軌健康／風險。
+           GET /pulse → pulse_intel.build_pulse_intel(...) + 即時快照欄位。
+           重用 breadth / marketflow / txf / sectors 快取與 _build_tw_market_fundamental；
+           缺資料進 pendingFactors，不捏造分數。快取 45s。"""
+        from datetime import date as _date
+        qs = parse_qs(urlparse(self.path).query)
+        force = (qs.get('refresh', ['0'])[0] or '0') in ('1', 'true', 'yes')
+        key = f'pulse:v1:{_date.today().strftime("%Y%m%d")}:{int(time.time() // 45)}'
+        if not force:
+            c = _cache.get(key)
+            if c is not None:
+                self._ok(c); return
+
+        def _loads(raw):
+            if raw is None:
+                return None
+            try:
+                return json.loads(raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw)
+            except Exception:
+                return None
+
+        def _cache_first(keys):
+            for k in keys:
+                d = _loads(_cache.get(k))
+                if d is not None:
+                    return d
+            return None
+
+        today = _date.today()
+        ymd = today.strftime('%Y%m%d')
+        y_m_d = today.strftime('%Y-%m-%d')
+
+        # 1) 體質（權威來源）
+        fund = {}
+        try:
+            fund = _build_tw_market_fundamental('^TWII') or {}
+        except Exception as e:
+            print('[pulse] fundamental', e)
+            fund = {}
+
+        # 2) 廣度／指數／法人 — 優先快取（由 /breadth /marketflow 預熱）
+        bd = _cache_first([f'breadth:v1:{ymd}'])
+        mf = _cache_first([f'marketflow:{ymd}', f'marketflow:{y_m_d}'])
+        sec = _cache_first([
+            f'sectors:{ymd}',
+            f'sectors:TW:yahoo:{ymd}',
+            f'sectors:TW:{ymd}',
+        ])
+        txf = _cache_first([f'txf:{int(time.time() // 20)}', f'txf:{int(time.time() // 20) - 1}'])
+
+        # 廣度／盤後快取未命中時不呼叫其他 _handle_*（會弄亂 HTTP 回應）。
+        # 改以背景預熱：完整度下降並進 pending；使用者開過「廣度／盤後」後自動變完整。
+        # 指數可直取 MIS；台指期可直取既有解析（不經 _handle_txf）。
+        indices = (bd or {}).get('indices') or {}
+        if not (indices.get('t00') or {}).get('price'):
+            try:
+                indices = _twse_mis_index('tse_t00.tw|otc_o00.tw') or {}
+            except Exception as e:
+                print('[pulse] twindex', e)
+                indices = indices or {}
+
+        stocks = (bd or {}).get('stocks') if bd else None
+        inst = (mf or {}).get('inst') if mf else None
+        if inst is None and bd:
+            inst = bd.get('inst')
+
+        # 夜盤：快取未命中則輕量直取（與 _handle_txf 同源 helper）
+        txf_night = None
+        if txf and txf.get('ok'):
+            n = txf.get('night')
+            if n and n.get('price') is not None:
+                txf_night = n
+            elif txf.get('price') is not None and (
+                txf.get('session') == 'night' or txf.get('ampRate') is not None
+            ):
+                txf_night = txf
+        if txf_night is None:
+            try:
+                n = self._txf_mis_session(1)
+                if n and n.get('price') is not None:
+                    txf_night = n
+            except Exception as e:
+                print('[pulse] txf night', e)
+
+        sectors = []
+        if isinstance(sec, dict):
+            sectors = sec.get('sectors') or sec.get('list') or []
+        elif isinstance(sec, list):
+            sectors = sec
+
+        sources = {
+            'twindex': bool((indices.get('t00') or {}).get('price') is not None),
+            'breadth': bool(stocks and stocks.get('advRatio') is not None),
+            'marketflow': bool(mf and (mf.get('turnover') or mf.get('inst'))),
+            'health': fund.get('score') is not None,
+            'margin': (fund.get('pillars') or {}).get('marginRatio') is not None,
+            'valuation': (fund.get('pillars') or {}).get('medianPE') is not None,
+            'txf': bool(txf_night and txf_night.get('price') is not None),
+            'sectors': bool(sectors),
+        }
+
+        try:
+            import pulse_intel as pi
+            out = pi.build_pulse_intel(
+                health_score=fund.get('score'),
+                pillars=fund.get('pillars'),
+                market_rows=fund.get('marketRows'),
+                summary=fund.get('summary'),
+                stocks=stocks,
+                indices=indices,
+                inst=inst or {},
+                txf_night=txf_night,
+                sectors=sectors,
+                sources_present=sources,
+            )
+        except Exception as e:
+            print('[pulse] build', e)
+            out = {'ok': False, 'error': f'pulse build failed: {e}'}
+
+        # 附帶列表資料供前端一次渲染（減少 round-trip）
+        out['date'] = (bd or {}).get('date')
+        out['breadthOk'] = bool(bd and bd.get('ok'))
+        out['indices'] = indices
+        out['stocks'] = stocks
+        out['inst'] = inst
+        out['txf'] = txf_night
+        out['marketflow'] = {
+            'turnover': (mf or {}).get('turnover'),
+            'inst': inst,
+        } if mf else None
+        out['sectors'] = sectors
+        out['updatedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+
+        body = json.dumps(out, ensure_ascii=False).encode()
+        if out.get('ok'):
+            _cache.set(key, body, ttl=45)
         self._ok(body)
 
     def _handle_breadth(self):
