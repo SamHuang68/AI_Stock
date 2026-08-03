@@ -73,6 +73,7 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/screener/wizard_v3.js',                   # v3.9: 加股設定精靈(依賴 StratLib/Backtest/drawtools/setPosition/saveWatches，排最後)
               'src/ui/shell_v5.js',                    # v5.0: 側欄殼層+視圖路由(show/hide，預設圖表工作區；須在 toolbar 前掛好 DOM)
               'src/ui/pulse_v5.js',                    # v5.0 S4: TW Pulse 市場脈動總覽（組合既有 API，掛 #view-pulse）
+              'src/ui/heat_v5.js',                     # v5.0 S5: 類股熱力+/focus 輔區（掛 #view-heat）
               'src/ui/breadth_v5.js',                  # v5.0 S2: 大盤廣度面板(/breadth，掛 #view-breadth；須在 shell 後)
               'src/ui/afterhours_v5.js',               # v5.0 S3: 盤後整理(/txf+/stockfut+/marketflow，掛 #view-afterhours)
               'src/ui/news_v5.js',                     # v5.0 S3: 快訊中樞(/events+結算日，掛 #view-news；非新聞爬蟲)
