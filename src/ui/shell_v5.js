@@ -66,9 +66,11 @@
       '#shell-views.show{display:flex;flex-direction:column}' +
       '#body.shell-hidden{display:none !important}' +
       '#wlbar.shell-hidden{display:none !important}' +
-      '.sv-panel{display:none;flex:1;padding:28px 32px;max-width:720px}' +
+      '.sv-panel{display:none;flex:1;padding:28px 32px;max-width:720px;min-width:0;box-sizing:border-box}' +
       '.sv-panel.on{display:block}' +
-      '.sv-mount{min-height:100%}' +
+      /* 防 flex 子項 min-content 撑破水平；寬版面板由各模組覆寫 max-width */
+      '#shell-views > .sv-panel{min-width:0}' +
+      '.sv-mount{min-height:100%;min-width:0;max-width:100%;box-sizing:border-box}' +
       '.sv-kicker{font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--gold);' +
         'letter-spacing:2px;margin-bottom:8px}' +
       '.sv-title{font-family:\'Noto Serif TC\',serif;font-size:28px;font-weight:700;color:var(--thi);' +
