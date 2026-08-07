@@ -49,7 +49,7 @@
       document.head.appendChild(s);
     }
     s.textContent =
-      '#shell-row{display:flex;flex:1;min-height:0;min-width:0}' +
+      '#shell-row{display:flex;flex:1 1 0;min-height:0;min-width:0;height:100%}' +
       /* 寬側欄；窄螢幕收成圖示欄 — 品牌固定 Stock Terminal */
       '#navrail{flex:0 0 150px;width:150px;background:linear-gradient(180deg,#0A1220 0%,#070E18 100%);' +
         'border-right:1px solid #132238;display:flex;flex-direction:column;align-items:stretch;' +
