@@ -78,15 +78,18 @@
       '.nr-foot-st .mode-dot{color:var(--cyan);font-weight:600}' +
       '.nr-foot-st .mode-sub{font-size:8px;color:#475569;line-height:1.2}' +
       '#shell-main{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;position:relative}' +
-      '#shell-views{display:none;flex:1;min-height:0;min-width:0;background:#060C16;overflow:auto}' +
-      '#shell-views.show{display:flex;flex-direction:column}' +
+      '#shell-views{display:none!important;flex:1;min-height:0;min-width:0;background:#060C16;overflow:auto}' +
+      '#shell-views.show{display:flex!important;flex-direction:column}' +
       '#shell-views.show:has(#view-pulse.on){overflow:hidden}' +
       '#topbar.shell-hidden{display:none !important}' +
       '#body.shell-hidden{display:none !important}' +
       '#wlbar.shell-hidden{display:none !important}' +
-      '.sv-panel{display:none;flex:1;padding:8px 10px 10px;max-width:none;min-width:0;box-sizing:border-box;min-height:0}' +
-      '.sv-panel.on{display:flex;flex-direction:column}' +
+      /* 非作用中面板強制隱藏，避免「市場總覽」殘留在其他 tab 上方 */
+      '.sv-panel{display:none!important;flex:1;padding:8px 10px 10px;max-width:none;min-width:0;' +
+        'box-sizing:border-box;min-height:0;visibility:hidden;pointer-events:none}' +
+      '.sv-panel.on{display:flex!important;flex-direction:column;visibility:visible;pointer-events:auto}' +
       '#shell-views > .sv-panel{min-width:0}' +
+      '#mkt-bar.shell-hidden{display:none!important}' +
       '.sv-mount{flex:1;min-height:0;min-width:0;max-width:100%;box-sizing:border-box;display:flex;flex-direction:column}' +
       '.sv-kicker{font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--gold);' +
         'letter-spacing:1.5px;margin-bottom:2px}' +
@@ -237,6 +240,8 @@
         p.className = 'sv-panel';
         p.id = 'view-' + r.id;
         p.dataset.route = r.id;
+        p.setAttribute('hidden', '');
+        p.setAttribute('aria-hidden', 'true');
         p.innerHTML = '<div class="sv-mount" id="mount-' + r.id + '"></div>';
         views.appendChild(p);
       });
@@ -244,6 +249,11 @@
       body.parentElement.insertBefore(row, body);
       row.appendChild(rail);
       row.appendChild(main);
+      /* topbar／wlbar 移入 shell-main，僅圖表路由顯示，避免壓在其他 tab 上方 */
+      var topbarEl = $('topbar');
+      var wlEl = $('wlbar');
+      if (topbarEl) main.appendChild(topbarEl);
+      if (wlEl) main.appendChild(wlEl);
       main.appendChild(body);
       main.appendChild(views);
 
@@ -435,10 +445,21 @@
     if (body) body.classList.toggle('shell-hidden', !isChart);
     if (wl) wl.classList.toggle('shell-hidden', !isChart);
     if (views) views.classList.toggle('show', !isChart);
+    /* 圖表底列大盤／市場條僅圖表頁顯示，勿蓋到其他 shell tab */
+    var mktBar = $('mkt-bar');
+    if (mktBar) mktBar.classList.toggle('shell-hidden', !isChart);
 
     var panels = document.querySelectorAll('.sv-panel');
     for (var p = 0; p < panels.length; p++) {
-      panels[p].classList.toggle('on', panels[p].dataset.route === id);
+      var active = panels[p].dataset.route === id;
+      panels[p].classList.toggle('on', active);
+      if (active) {
+        panels[p].removeAttribute('hidden');
+        panels[p].setAttribute('aria-hidden', 'false');
+      } else {
+        panels[p].setAttribute('hidden', '');
+        panels[p].setAttribute('aria-hidden', 'true');
+      }
     }
 
     var btns = document.querySelectorAll('#navrail .nr-btn');

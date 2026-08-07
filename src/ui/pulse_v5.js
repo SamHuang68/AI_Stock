@@ -25,7 +25,8 @@
     }
     s.textContent =
       /* 面板必須受 shell-main 寬度約束，避免頂列 6 卡撐破水平邊界 */
-      '#view-pulse.sv-panel{max-width:100%;width:100%;min-width:0;padding:14px 16px 28px;box-sizing:border-box;overflow-x:hidden}' +
+      /* 僅 .on 時鋪版；禁止無條件 display:flex 以免蓋住其他 tab */
+      '#view-pulse.sv-panel.on{max-width:100%;width:100%;min-width:0;padding:14px 16px 28px;box-sizing:border-box;overflow-x:hidden}' +
       '#pl-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);' +
         'width:100%;max-width:min(1480px,100%);margin:0 auto;min-width:0;box-sizing:border-box}' +
       '#pl-root .pl-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px;min-width:0}' +
@@ -167,7 +168,7 @@
         '#pl-root .pl-three{grid-template-columns:repeat(2,minmax(0,1fr))}' +
       '}' +
       '@media (max-width:820px){' +
-        '#view-pulse.sv-panel{padding:12px 10px 24px}' +
+        '#view-pulse.sv-panel.on{padding:12px 10px 24px}' +
         '#pl-root .pl-row.r3,#pl-root .pl-row.r4,#pl-root .pl-row.r3b,' +
         '#pl-root .pl-three{grid-template-columns:1fr}' +
         '#pl-root .pl-actions{justify-content:flex-start}' +
