@@ -65,7 +65,7 @@
       '.hub-root .hub-head{display:flex;align-items:center;justify-content:space-between;gap:8px;' +
         'margin-bottom:3px;min-width:0;flex:0 0 auto}' +
       '.hub-root .hub-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
-      '.hub-root .hub-kicker{font-size:9px;color:var(--gold);letter-spacing:1.2px;margin:0;font-weight:700}' +
+      '.hub-root .hub-kicker{display:none!important}' +
       '.hub-root .hub-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1;margin:0}' +
       '.hub-root .hub-sep{font-size:9px;color:var(--tlo);margin:0 2px}' +
       '.hub-root .hub-sub{font-size:9px;color:var(--tlo);margin:0;line-height:1.2}' +
@@ -158,7 +158,6 @@
 
   function head(title, sub, actionsHtml) {
     return '<div class="hub-root"><div class="hub-head"><div>' +
-      '<span class="hub-kicker">STOCK TERMINAL · 5.0</span>' +
       '<span class="hub-title">' + title + '</span>' +
       (sub ? '<span class="hub-sep">·</span><span class="hub-sub">' + sub + '</span>' : '') +
       '</div><div class="hub-actions">' + (actionsHtml || '') + '</div></div>';

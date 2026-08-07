@@ -36,7 +36,7 @@
         'box-sizing:border-box;flex:1;min-height:0;display:flex;flex-direction:column}' +
       '#sc-root .sc-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px;min-width:0;flex:0 0 auto}' +
       '#sc-root .sc-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
-      '#sc-root .sc-kicker{font-size:9px;color:var(--gold);letter-spacing:1.2px;margin:0;font-weight:700}' +
+      '#sc-root .sc-kicker{display:none!important}' +
       '#sc-root .sc-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
       '#sc-root .sc-sub{font-size:9px;color:var(--tlo);margin:0}' +
       '#sc-root .sc-actions{display:flex;gap:4px;flex-wrap:nowrap;flex:0 0 auto}' +
@@ -276,7 +276,6 @@
       mount.innerHTML =
         '<div id="sc-root">' +
           '<div class="sc-head"><div>' +
-            '<span class="sc-kicker">STOCK TERMINAL · 5.0</span>' +
             '<span class="sc-title">三合一選股</span>' +
             '<span class="sc-sub">技術 × 基本面 × 籌碼</span>' +
           '</div><div class="sc-actions">' +

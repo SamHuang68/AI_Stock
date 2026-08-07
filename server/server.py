@@ -1544,11 +1544,16 @@ def _fetch_day_movers(n=8):
 
     rows.sort(key=lambda x: x['changePct'], reverse=True)
     n = max(1, min(int(n or 8), 30))
+    # 漲停／跌停近似清單（個股 ±9.5% 以上；供廣度浮動窗／總覽）
+    limit_up = [r for r in rows if (r.get('changePct') or 0) >= 9.5][:40]
+    limit_down = [r for r in reversed(rows) if (r.get('changePct') or 0) <= -9.5][:40]
     return {
         'ok': True,
         'date': date_s or _date.today().strftime('%Y%m%d'),
         'gainers': rows[:n],
         'losers': list(reversed(rows[-n:])),
+        'limitUp': limit_up,
+        'limitDown': limit_down,
         'source': 'TWSE STOCK_DAY_ALL + TPEx daily',
         'count': len(rows),
     }
@@ -1621,6 +1626,7 @@ def _yf_batch_quotes(syms):
         '^DJI': '道瓊', '^GSPC': 'S&P 500', '^IXIC': '那斯達克',
         'CL=F': 'WTI 原油', 'DX-Y.NYB': '美元指數', 'DX=F': '美元指數',
         '^VIX': 'VIX 波動', 'TWD=X': '美元／台幣',
+        '^SOX': '費半 SOX', '^N225': '日經 225', '^KS11': '韓國 KOSPI',
     }
 
     def _one(sym):
@@ -3545,25 +3551,28 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         PULSE_SIDE_BUDGET = 8.0
 
         def _job_movers():
-            m = _cache_first([f'movers:v1:{ymd}'])
+            m = _cache_first([f'movers:v2:{ymd}'])
             if m is not None:
                 return m
             try:
                 m = _fetch_day_movers(8)
                 if m and m.get('ok'):
-                    _cache.set(f'movers:v1:{ymd}', json.dumps(m, ensure_ascii=False).encode(), ttl=300)
+                    _cache.set(f'movers:v2:{ymd}', json.dumps(m, ensure_ascii=False).encode(), ttl=300)
                 return m
             except Exception as e:
                 print('[pulse] movers', e)
                 return {'ok': False, 'gainers': [], 'losers': []}
 
         def _job_global():
-            gkey = f'pulse-global:{int(time.time() // 120)}'
+            gkey = f'pulse-global:v2:{int(time.time() // 120)}'
             g = _cache_first([gkey])
             if g is not None:
                 return g
             try:
-                g = _yf_batch_quotes(['^DJI', '^GSPC', '^IXIC', '^VIX', 'TWD=X', 'DX-Y.NYB'])
+                g = _yf_batch_quotes([
+                    '^DJI', '^GSPC', '^IXIC', '^SOX', '^N225', '^KS11',
+                    '^VIX', 'TWD=X', 'DX-Y.NYB',
+                ])
                 if not any(x.get('symbol') == 'DX-Y.NYB' for x in (g or [])):
                     # 僅在缺美元指數時補一槍，不重抓整批
                     extra = _yf_batch_quotes(['DX=F'])
@@ -3858,7 +3867,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         except Exception:
             n = 8
         force = (qs.get('refresh', ['0'])[0] or '0') in ('1', 'true', 'yes')
-        key = f'movers:v1:{_date.today().strftime("%Y%m%d")}'
+        key = f'movers:v2:{_date.today().strftime("%Y%m%d")}'
         if not force:
             c = _cache.get(key)
             if c is not None:

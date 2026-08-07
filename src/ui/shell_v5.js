@@ -56,13 +56,17 @@
         'padding:8px 6px;gap:1px;z-index:40;flex-shrink:0;overflow-y:auto;overflow-x:hidden;box-sizing:border-box}' +
       '#navrail .nr-brand-st{display:flex;align-items:center;gap:8px;padding:6px 6px 12px;' +
         'border-bottom:1px solid #132238;margin-bottom:6px;user-select:none;flex-shrink:0}' +
-      '#navrail .nr-brand-st .logo-box{width:30px;height:30px;border-radius:7px;background:rgba(245,197,24,.1);' +
-        'border:1px solid rgba(245,197,24,.35);display:flex;align-items:center;justify-content:center;flex-shrink:0;' +
-        'font-family:\'JetBrains Mono\',monospace;font-size:11px;font-weight:800;color:var(--gold)}' +
+      '#navrail .nr-brand-st .logo-box{width:34px;height:34px;border-radius:9px;padding:0;overflow:hidden;' +
+        'flex-shrink:0;border:1px solid rgba(245,197,24,.35);background:#070E18;' +
+        'box-shadow:0 0 0 1px rgba(56,189,248,.12)}' +
+      '#navrail .nr-brand-st .logo-box img{width:100%;height:100%;display:block;object-fit:cover}' +
       '#navrail .nr-brand-st .brand-title{font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:800;' +
         'color:#F1F5F9;line-height:1.1;letter-spacing:.2px}' +
       '#navrail .nr-brand-st .brand-sub{font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;' +
         'color:var(--gold);letter-spacing:.8px;margin-top:2px}' +
+      /* 品牌集中左上：內頁不再重複 STOCK TERMINAL kicker */
+      '.pl-kicker,.hub-kicker,.bd-kicker,.ht-kicker,.ah-kicker,.nw-kicker,.sc-kicker,.bk-kicker,.sv-kicker{' +
+        'display:none!important}' +
       '.nr-btn{display:flex;align-items:center;gap:8px;' +
         'min-height:30px;margin:1px 0;padding:4px 8px;border:1px solid transparent;border-radius:7px;' +
         'background:transparent;color:#94A3B8;cursor:pointer;font-family:\'JetBrains Mono\',monospace;' +
@@ -145,8 +149,8 @@
   }
 
   function railHTML() {
-    return '<div class="nr-brand-st">' +
-      '<div class="logo-box">ST</div>' +
+    return '<div class="nr-brand-st" title="Stock Terminal ' + VERSION + '">' +
+      '<div class="logo-box"><img src="assets/st50-icon.svg" alt="Stock Terminal" width="34" height="34"></div>' +
       '<div class="logo-text">' +
         '<div class="brand-title">Stock Terminal</div>' +
         '<div class="brand-sub">v' + VERSION + '</div>' +

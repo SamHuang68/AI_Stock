@@ -48,7 +48,7 @@
       '#ah-root .ah-head{display:flex;align-items:center;justify-content:space-between;gap:8px;' +
         'margin-bottom:3px;min-width:0;flex:0 0 auto}' +
       '#ah-root .ah-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
-      '#ah-root .ah-kicker{font-size:9px;color:var(--gold);letter-spacing:1.2px;margin:0;font-weight:700}' +
+      '#ah-root .ah-kicker{display:none!important}' +
       '#ah-root .ah-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
       '#ah-root .ah-sub{font-size:9px;color:var(--tlo);margin:0}' +
       '#ah-root .ah-actions{display:flex;gap:4px;flex-wrap:nowrap;justify-content:flex-end;flex:0 0 auto}' +
@@ -181,7 +181,6 @@
         '<div id="ah-root">' +
           '<div class="ah-head">' +
             '<div>' +
-              '<span class="ah-kicker">STOCK TERMINAL · 5.0</span>' +
               '<span class="ah-title">盤後數據</span>' +
               '<span class="ah-sub" id="ah-sub">漲跌排行 · 夜盤 · 籌碼摘要</span>' +
             '</div>' +

@@ -11,6 +11,7 @@
   var SRV = window.SERVER || '';
   var mounted = false;
   var lastData = null;
+  var lastMovers = null;
   var timer = null;
 
   function $(id) { return document.getElementById(id); }
@@ -34,7 +35,7 @@
       '#bd-root .bd-head{display:flex;align-items:center;justify-content:space-between;gap:8px;' +
         'margin-bottom:3px;min-width:0;flex:0 0 auto}' +
       '#bd-root .bd-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
-      '#bd-root .bd-kicker{font-size:9px;color:var(--gold);letter-spacing:1.2px;margin:0;font-weight:700}' +
+      '#bd-root .bd-kicker{display:none!important}' +
       '#bd-root .bd-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
       '#bd-root .bd-sub{font-size:9px;color:var(--tlo);margin:0}' +
       '#bd-root .bd-actions{display:flex;gap:4px;flex-wrap:nowrap;justify-content:flex-end;flex:0 0 auto}' +
@@ -80,7 +81,29 @@
       '#bd-root table.bd-hist th{color:var(--tlo);font-weight:600;position:sticky;top:0;background:var(--bg2);z-index:1}' +
       '#bd-root .bd-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:3px;flex:0 0 auto}' +
       '#bd-root .bd-err{color:var(--orange);font-size:10px;padding:6px 0}' +
-      '#bd-root .bd-loading{color:var(--tlo);font-size:10px;padding:12px 0;letter-spacing:1px}';
+      '#bd-root .bd-loading{color:var(--tlo);font-size:10px;padding:12px 0;letter-spacing:1px}' +
+      /* 漲停／跌停 icon + 浮動清單 */
+      '#bd-root .bd-lim{display:inline-flex;align-items:center;gap:4px;cursor:pointer;position:relative;' +
+        'padding:1px 5px;border-radius:4px;border:1px solid transparent;user-select:none}' +
+      '#bd-root .bd-lim:hover,#bd-root .bd-lim.open{border-color:var(--gold-m);background:var(--gold-s)}' +
+      '#bd-root .bd-lim-ico{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;' +
+        'border-radius:3px;font-size:9px;font-weight:800;line-height:1;flex:0 0 auto}' +
+      '#bd-root .bd-lim-ico.up{background:rgba(248,113,113,.2);color:var(--red);border:1px solid rgba(248,113,113,.45)}' +
+      '#bd-root .bd-lim-ico.dn{background:rgba(74,222,128,.18);color:var(--green);border:1px solid rgba(74,222,128,.4)}' +
+      '#bd-root .bd-pop{display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:80;width:280px;max-height:320px;' +
+        'overflow:auto;background:#0B1220;border:1px solid var(--border);border-radius:8px;' +
+        'box-shadow:0 12px 28px rgba(0,0,0,.55);padding:6px 0}' +
+      '#bd-root .bd-lim.open .bd-pop{display:block}' +
+      '#bd-root .bd-pop-h{padding:4px 10px 6px;font-size:10px;color:var(--gold);font-weight:700;' +
+        'border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:8px}' +
+      '#bd-root .bd-pop-row{display:flex;align-items:center;gap:6px;padding:4px 10px;font-size:10px;cursor:pointer}' +
+      '#bd-root .bd-pop-row:hover{background:var(--bg3)}' +
+      '#bd-root .bd-pop-row .cd{color:var(--gold);font-weight:700;min-width:42px}' +
+      '#bd-root .bd-pop-row .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}' +
+      '#bd-root .bd-pop-row .pc{font-weight:700;min-width:58px;text-align:right}' +
+      '#bd-root .bd-pop-empty{padding:12px 10px;color:var(--tlo);font-size:10px;text-align:center}' +
+      '#bd-root .bd-strip .cell.has-lim{overflow:visible}' +
+      '#bd-root .bd-strip{overflow:visible}';
   }
 
   function fmt(n, dig) {
@@ -106,10 +129,65 @@
     return (v >= 0 ? '+' : '') + (v / 1e8).toFixed(0) + ' 億';
   }
 
-  function stripCell(k, v, s, cls) {
-    return '<div class="cell"><div class="k">' + k + '</div>' +
+  function stripCell(k, v, s, cls, extraCls) {
+    return '<div class="cell' + (extraCls ? ' ' + extraCls : '') + '"><div class="k">' + k + '</div>' +
       '<div class="v' + (cls ? ' ' + cls : '') + '">' + v + '</div>' +
       (s ? '<div class="s' + (cls ? ' ' + cls : '') + '">' + s + '</div>' : '') + '</div>';
+  }
+
+  function limitPopup(side, count, list) {
+    var isUp = side === 'up';
+    var title = isUp ? '漲停清單' : '跌停清單';
+    var ico = isUp ? '▲' : '▼';
+    var rows = '';
+    if (!list || !list.length) {
+      rows = '<div class="bd-pop-empty">尚無' + (isUp ? '漲停' : '跌停') +
+        '標的（±9.5% 近似）· 或資料載入中</div>';
+    } else {
+      list.slice(0, 30).forEach(function (r) {
+        rows += '<div class="bd-pop-row" data-code="' + (r.code || '') + '">' +
+          '<span class="cd">' + (r.code || '') + '</span>' +
+          '<span class="nm">' + (r.name || '') + '</span>' +
+          '<span class="pc ' + clsChg(r.changePct) + '">' + fmtPct(r.changePct) + '</span></div>';
+      });
+    }
+    return '<span class="bd-lim" data-lim="' + side + '" title="點擊查看' + title + '">' +
+      '<span class="bd-lim-ico ' + (isUp ? 'up' : 'dn') + '">' + ico + '</span>' +
+      '<span>' + (isUp ? '漲停 ' : '跌停 ') + fmt(count) + '</span>' +
+      '<div class="bd-pop" role="dialog">' +
+        '<div class="bd-pop-h"><span>' + title + ' · ' + (list ? list.length : 0) + '</span>' +
+          '<span style="color:var(--tlo);font-weight:600">±9.5% 近似</span></div>' +
+        rows +
+      '</div></span>';
+  }
+
+  function bindLimitPopups(root) {
+    if (!root) return;
+    root.querySelectorAll('.bd-lim').forEach(function (el) {
+      el.onclick = function (e) {
+        e.stopPropagation();
+        var open = el.classList.contains('open');
+        root.querySelectorAll('.bd-lim.open').forEach(function (x) { x.classList.remove('open'); });
+        if (!open) el.classList.add('open');
+      };
+    });
+    root.querySelectorAll('.bd-pop-row[data-code]').forEach(function (row) {
+      row.onclick = function (e) {
+        e.stopPropagation();
+        var code = row.getAttribute('data-code');
+        if (code && typeof loadSym === 'function') {
+          loadSym(code, 'TW');
+          if (window.ShellV5) window.ShellV5.go('chart');
+        }
+      };
+    });
+    if (!bindLimitPopups._doc) {
+      bindLimitPopups._doc = true;
+      document.addEventListener('click', function () {
+        var r = $('bd-root');
+        if (r) r.querySelectorAll('.bd-lim.open').forEach(function (x) { x.classList.remove('open'); });
+      });
+    }
   }
 
   function ensureMount() {
@@ -129,7 +207,6 @@
         '<div id="bd-root">' +
           '<div class="bd-head">' +
             '<div>' +
-              '<span class="bd-kicker">STOCK TERMINAL · 5.0</span>' +
               '<span class="bd-title">大盤廣度</span>' +
               '<span class="bd-sub" id="bd-sub">載入中…</span>' +
             '</div>' +
@@ -192,11 +269,20 @@
     }
     var scoreMeter = (d.score != null && V) ? V.scoreMeter(d.score) : '';
 
+    var mv = lastMovers || d._movers || {};
+    var limUpList = mv.limitUp || [];
+    var limDnList = mv.limitDown || [];
+    if (!limUpList.length && (mv.gainers || []).length) {
+      limUpList = (mv.gainers || []).filter(function (r) { return r.changePct != null && r.changePct >= 9.5; });
+    }
+    if (!limDnList.length && (mv.losers || []).length) {
+      limDnList = (mv.losers || []).filter(function (r) { return r.changePct != null && r.changePct <= -9.5; });
+    }
     var strip =
       stripCell('加權指數', t00.price != null ? fmt(t00.price, 2) : '—', fmtPct(t00.changePct), clsChg(t00.changePct)) +
       stripCell('櫃買指數', o00.price != null ? fmt(o00.price, 2) : '—', fmtPct(o00.changePct), clsChg(o00.changePct)) +
-      stripCell('上漲家數', fmt(up), '漲停 ' + fmt(st.limitUp), 'up') +
-      stripCell('下跌家數', fmt(dn), '跌停 ' + fmt(st.limitDown), 'dn') +
+      stripCell('上漲家數', fmt(up), limitPopup('up', st.limitUp, limUpList), null, 'has-lim') +
+      stripCell('下跌家數', fmt(dn), limitPopup('dn', st.limitDown, limDnList), null, 'has-lim') +
       stripCell('淨家數', st.net != null ? ((st.net >= 0 ? '+' : '') + st.net) : '—',
         st.advRatio != null ? '上漲比 ' + (st.advRatio * 100).toFixed(1) + '%' : tone) +
       stripCell('大盤體質', d.score != null ? fmt(d.score) : '—', d.summary || '量能／法人／融資', '');
@@ -228,9 +314,9 @@
     rows += '<div class="bd-row"><span class="rk">市場總成交金額</span><span class="rv">' + yi(to.totalAmt) + '</span></div>';
     rows += '<div class="bd-row"><span class="rk">股票成交筆數</span><span class="rv">' + fmt(to.stockTrades) + '</span></div>';
     rows += '<div class="bd-row"><span class="rk">整體市場上漲</span><span class="rv up">' + fmt(mk.up) +
-      '（漲停 ' + fmt(mk.limitUp) + '）</span></div>';
+      '（' + limitPopup('up', mk.limitUp != null ? mk.limitUp : st.limitUp, limUpList) + '）</span></div>';
     rows += '<div class="bd-row"><span class="rk">整體市場下跌</span><span class="rv dn">' + fmt(mk.down) +
-      '（跌停 ' + fmt(mk.limitDown) + '）</span></div>';
+      '（' + limitPopup('dn', mk.limitDown != null ? mk.limitDown : st.limitDown, limDnList) + '）</span></div>';
     rows += '<div class="bd-row"><span class="rk">股票未成交 / 無比價</span><span class="rv">' +
       fmt(st.unmatched) + ' / ' + fmt(st.na) + '</span></div>';
 
@@ -311,6 +397,8 @@
         '</div>' +
       '</div>' +
       (d.error && !d.ok ? '<div class="bd-err">' + d.error + '</div>' : '');
+    lastData = d;
+    bindLimitPopups($('bd-root'));
   }
 
   function refresh(force) {
@@ -324,10 +412,15 @@
       }),
       fetch(SRV + '/pulse/history?kind=breadth&n=20', { cache: 'no-store' })
         .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; }),
+      fetch(SRV + '/movers?n=30', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
         .catch(function () { return null; })
     ]).then(function (arr) {
       var d = arr[0] || {};
       d._hist = (arr[1] && arr[1].rows) || [];
+      lastMovers = arr[2] || null;
+      d._movers = lastMovers;
       render(d);
     }).catch(function (e) {
       render({ ok: false, error: '載入失敗：' + (e && e.message ? e.message : e) });

@@ -15,6 +15,8 @@
   var timer = null;
   var lastPack = null;
   var showFactors = false;
+  var sectorMkt = 'TW';
+  var sectorCache = { TW: null, US: null };
 
   function $(id) { return document.getElementById(id); }
 
@@ -53,7 +55,7 @@
       '#pl-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
       '#pl-body.pl-expanded{overflow:auto}' +
       /* KPI 細條 */
-      '#pl-root .pl-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;margin:0 0 4px;min-width:0;flex:0 0 auto}' +
+      '#pl-root .pl-strip{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin:0 0 4px;min-width:0;flex:0 0 auto}' +
       '#pl-root .pl-strip .cell{background:linear-gradient(180deg,rgba(17,27,46,.95),rgba(11,18,32,.98));' +
         'border:1px solid var(--border);border-radius:5px;padding:3px 6px;min-width:0;overflow:hidden}' +
       '#pl-root .pl-strip .k{font-size:8px;color:var(--tlo);letter-spacing:.4px;margin-bottom:0;' +
@@ -106,10 +108,14 @@
       '#pl-root .pl-ohlc .box{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px}' +
       '#pl-root .pl-ohlc .box .k{font-size:8px;color:var(--tlo)}' +
       '#pl-root .pl-ohlc .box .v{font-size:12px;font-weight:700;margin-top:1px;color:var(--thi)}' +
-      '#pl-root .pl-trend-pair{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px;flex:0 0 auto}' +
+      '#pl-root .pl-trend-pair{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:4px;flex:0 0 auto}' +
       '#pl-root .pl-trend-pair .tp{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px}' +
       '#pl-root .pl-trend-pair .tp .k{font-size:8px;color:var(--tlo)}' +
       '#pl-root .pl-trend-pair .tp .v{font-size:14px;font-weight:800;margin-top:1px}' +
+      '#pl-root .pl-sec-tog{display:inline-flex;gap:2px;margin-left:auto}' +
+      '#pl-root .pl-sec-tog button{padding:1px 6px;border:1px solid var(--border);border-radius:3px;background:transparent;' +
+        'color:var(--tlo);font-size:8px;font-family:inherit;cursor:pointer}' +
+      '#pl-root .pl-sec-tog button.on{border-color:var(--gold-m);color:var(--gold);background:var(--gold-s)}' +
       '#pl-root .pl-spark{flex:1;min-height:40px;margin:3px 0;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:2px 4px}' +
       '#pl-root .pl-spark svg{width:100%;height:100%;display:block}' +
       /* inst */
@@ -146,6 +152,7 @@
       '#pl-root .pl-list .cd{color:var(--tlo);font-size:9px;margin-right:4px}' +
       /* global / flash / wl */
       '#pl-root .pl-global{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;flex:1;align-content:start;overflow:auto;min-height:0}' +
+      '#pl-root .pl-kicker{display:none!important}' +
       '#pl-root .pl-global .g{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px;min-width:0;overflow:hidden}' +
       '#pl-root .pl-global .g .k{font-size:8px;color:var(--tlo);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#pl-root .pl-global .g .v{font-size:12px;font-weight:800;margin-top:1px;color:var(--thi);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
@@ -257,7 +264,6 @@
       mount.innerHTML =
         '<div id="pl-root">' +
           '<div class="pl-head"><div>' +
-            '<div class="pl-kicker">STOCK TERMINAL · v5.0</div>' +
             '<div class="pl-title">市場總覽</div>' +
             '<div class="pl-tone" id="pl-tone">—</div>' +
             '<div class="pl-sub" id="pl-sub">官方資料 · 一頁雙區</div>' +
@@ -401,6 +407,7 @@
     var s = (ov && ov.strip) || {};
     var t00 = s.t00 || {};
     var o00 = s.o00 || {};
+    var txf = p.txf || {};
     var adv = s.advRatio;
     var tone = breadthToneLabel(adv, s.lsRatio);
     var toneKind = (tone.indexOf('偏多') >= 0 || tone.indexOf('極度偏多') >= 0) ? 'buy'
@@ -408,12 +415,16 @@
     var udfViz = V ? V.segBar(s.up, s.flat, s.down) : '';
     var turnViz = (V && s.turnoverYi != null) ? V.refMeter(s.turnoverYi, [8000, 12000]) : '';
     var advViz = V ? (V.scoreMeter((adv || 0) * 100) + V.chip(tone, toneKind)) : '';
-    var compViz = (V && p.dataCompleteness != null) ? V.scoreMeter(p.dataCompleteness) : '';
+    var txfSess = txf.sessionLabel || (txf.session === 'night' ? '夜盤' : (txf.session === 'day' ? '日盤' : ''));
     return '<div class="pl-strip">' +
       '<div class="cell"><div class="k">加權指數 TAIEX</div><div class="v">' + fmt(t00.price, 2) + '</div>' +
         '<div class="s ' + tw(t00.changePct) + '">' + pct(t00.changePct) + '</div></div>' +
       '<div class="cell"><div class="k">櫃買指數 OTC</div><div class="v">' + fmt(o00.price, 2) + '</div>' +
         '<div class="s ' + tw(o00.changePct) + '">' + pct(o00.changePct) + '</div></div>' +
+      '<div class="cell"><div class="k">台指期 TXF' + (txfSess ? ' · ' + txfSess : '') + '</div><div class="v">' +
+        fmt(txf.price, 0) + '</div>' +
+        '<div class="s ' + tw(txf.changePct) + '">' + pct(txf.changePct) +
+        (txf.ampRate != null ? ' · 振幅 ' + Number(txf.ampRate).toFixed(2) + '%' : '') + '</div></div>' +
       '<div class="cell"><div class="k">成交金額</div><div class="v">' +
         (s.turnoverYi != null ? Number(s.turnoverYi).toFixed(1) + ' 億' : '—') + '</div>' +
         '<div class="s ' + tw(s.turnoverChgPct) + '">' +
@@ -426,12 +437,11 @@
       '<div class="cell"><div class="k">市場廣度</div><div class="v">' +
         (adv != null ? (adv * 100).toFixed(1) + '%' : '—') + '</div>' +
         '<div class="s">' + tone + '</div>' + advViz + '</div>' +
-      '<div class="cell"><div class="k">資料可靠度</div><div class="v" style="font-size:13px">' +
-        '<span class="badge"><span class="dot"></span>' +
-        (p.datasetsOk || 0) + '/' + (p.datasetsTotal || 0) + '</span></div>' +
+      '<div class="cell"><div class="k">漲停 / 跌停</div><div class="v" style="font-size:14px">' +
+        '<span class="up">' + fmt(s.limitUp) + '</span> / <span class="dn">' + fmt(s.limitDown) + '</span></div>' +
         '<div class="s">' + (s.dataLabel || 'LOCAL') +
         (p.dataCompleteness != null ? ' · ' + Number(p.dataCompleteness).toFixed(0) + '%' : '') +
-        '</div>' + compViz + '</div>' +
+        '</div></div>' +
       '</div>';
   }
 
@@ -476,14 +486,20 @@
       '</div>';
   }
 
-  function renderOhlc(ov) {
+  function renderOhlc(ov, p) {
     var o = (ov && ov.ohlc) || {};
+    var txf = (p && p.txf) || {};
+    var txfSess = txf.sessionLabel || (txf.session === 'night' ? '夜盤' : (txf.session === 'day' ? '日盤' : '台指期'));
     return '<div class="pl-sec"><h4>盤勢走勢 <a data-go="chart" data-sym="^TWII" data-mkt="TW">圖表 →</a></h4>' +
       '<div class="pl-trend-pair">' +
         '<div class="tp"><div class="k">加權今日漲幅</div><div class="v ' + tw(o.changePct) + '">' + pct(o.changePct) + '</div>' +
           '<div class="pl-note" style="margin:2px 0 0">現價 ' + fmt(o.price, 2) + '</div></div>' +
         '<div class="tp"><div class="k">櫃買今日漲幅</div><div class="v ' + tw(o.otcChangePct) + '">' + pct(o.otcChangePct) + '</div>' +
           '<div class="pl-note" style="margin:2px 0 0">現價 ' + fmt(o.otcPrice, 2) + '</div></div>' +
+        '<div class="tp"><div class="k">台指期 · ' + esc(txfSess) + '</div><div class="v ' + tw(txf.changePct) + '">' +
+          pct(txf.changePct) + '</div>' +
+          '<div class="pl-note" style="margin:2px 0 0">現價 ' + fmt(txf.price, 0) +
+          (txf.ampRate != null ? ' · 振幅 ' + Number(txf.ampRate).toFixed(2) + '%' : '') + '</div></div>' +
       '</div>' +
       '<div class="pl-spark" id="pl-spark"><div class="pl-note" style="padding:8px">載入近 20 日走勢…</div></div>' +
       '<div class="pl-ohlc">' +
@@ -546,20 +562,59 @@
       '</div></div></div>';
   }
 
+  function sectorsFromPack(ov) {
+    if (sectorMkt === 'US' && sectorCache.US) return sectorCache.US;
+    if (sectorMkt === 'TW' && sectorCache.TW) return sectorCache.TW;
+    return (ov && ov.sectorsRanked) || [];
+  }
+
   function renderSectors(ov) {
-    var list = (ov && ov.sectorsRanked) || [];
+    var list = sectorsFromPack(ov).slice();
+    list.sort(function (a, b) { return Math.abs(b.changePct || 0) - Math.abs(a.changePct || 0); });
     var maxAbs = 1;
     list.forEach(function (s) { maxAbs = Math.max(maxAbs, Math.abs(s.changePct || 0)); });
-    var html = '<div class="pl-sec"><h4>產業輪動 <a data-go="heat">熱力 →</a></h4><div class="pl-fill">';
-    if (!list.length) return html + '<div class="pl-note">類股資料暫缺 — 開啟熱力可預熱</div></div></div>';
+    var usOn = sectorMkt === 'US';
+    var html = '<div class="pl-sec" id="pl-sectors"><h4>產業輪動' +
+      '<span class="pl-sec-tog">' +
+        '<button type="button" data-sec-mkt="TW" class="' + (usOn ? '' : 'on') + '">TW</button>' +
+        '<button type="button" data-sec-mkt="US" class="' + (usOn ? 'on' : '') + '">US</button>' +
+      '</span>' +
+      ' <a data-go="heat">熱力 →</a></h4><div class="pl-fill" id="pl-sectors-body">';
+    if (!list.length) {
+      return html + '<div class="pl-note">' + (usOn ? '美股產業載入中…' : '類股資料暫缺 — 開啟熱力可預熱') +
+        '</div></div></div>';
+    }
     list.slice(0, 10).forEach(function (s) {
       var w = Math.max(4, Math.round(Math.abs(s.changePct) / maxAbs * 100));
-      var col = s.changePct >= 0 ? 'var(--red)' : 'var(--green)';
+      /* 台股紅漲綠跌；美股綠漲紅跌 */
+      var upCol = usOn ? 'var(--green)' : 'var(--red)';
+      var dnCol = usOn ? 'var(--red)' : 'var(--green)';
+      var col = (s.changePct || 0) >= 0 ? upCol : dnCol;
+      /* US：綠漲紅跌 → 借用 .dn/.up 顏色類別對調 */
+      var pcCls = usOn
+        ? ((s.changePct || 0) > 0 ? 'dn' : (s.changePct || 0) < 0 ? 'up' : 'flat')
+        : tw(s.changePct);
       html += '<div class="pl-sbar"><div class="nm" title="' + esc(s.name) + '">' + esc(s.name) + '</div>' +
         '<div class="track"><i style="width:' + w + '%;background:' + col + '"></i></div>' +
-        '<div class="pc ' + tw(s.changePct) + '">' + pct(s.changePct) + '</div></div>';
+        '<div class="pc ' + pcCls + '">' + pct(s.changePct) + '</div></div>';
     });
     return html + '</div></div>';
+  }
+
+  function loadSectorsMkt(mkt) {
+    sectorMkt = mkt || 'TW';
+    if (sectorCache[sectorMkt] && lastPack) {
+      var body = $('pl-body');
+      if (body && lastPack) render(lastPack);
+      return;
+    }
+    jget('/sectors?mkt=' + encodeURIComponent(sectorMkt)).then(function (d) {
+      var rows = (d && d.sectors) || [];
+      sectorCache[sectorMkt] = rows.map(function (s) {
+        return { name: s.name, changePct: s.changePct, close: s.close, symbol: s.symbol };
+      });
+      if (lastPack) render(lastPack);
+    });
   }
 
   function renderMovers(movers, side) {
@@ -619,7 +674,10 @@
         price: p.us10y.value, changePct: null, unit: '%'
       });
     }
-    var prefer = ['^DJI', '^GSPC', '^IXIC', '^VIX', 'TWD=X', 'DX-Y.NYB', 'DX=F', 'US10Y', 'CL=F'];
+    var prefer = [
+      '^DJI', '^GSPC', '^IXIC', '^SOX', '^N225', '^KS11',
+      '^VIX', 'TWD=X', 'DX-Y.NYB', 'DX=F', 'US10Y', 'CL=F'
+    ];
     items.sort(function (a, b) {
       var ia = prefer.indexOf(a.symbol); var ib = prefer.indexOf(b.symbol);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
@@ -629,7 +687,7 @@
       ' <span style="color:var(--cyan);font-weight:700;font-size:9px;margin-left:4px">' + tone + '</span>' +
       ' <a data-go="international">國際 →</a></h4><div class="pl-global">';
     if (!items.length) html += '<div class="pl-note">國際報價載入中…</div>';
-    items.slice(0, 8).forEach(function (x) {
+    items.slice(0, 10).forEach(function (x) {
       var dig = (x.unit === '%' || x.symbol === 'US10Y' || x.symbol === '^VIX' || x.symbol === 'TWD=X') ? 2
         : (x.price > 1000 ? 0 : 2);
       html += '<div class="g"><div class="k">' + esc(x.name || x.symbol) + '</div><div class="v">' +
@@ -774,11 +832,15 @@
           '<div id="pl-hist" class="pl-loading" style="margin-top:6px">載入脈動歷史…</div>' +
         '</div>';
     }
+    if (!sectorCache.TW && ov.sectorsRanked && ov.sectorsRanked.length) {
+      sectorCache.TW = ov.sectorsRanked.slice();
+    }
+
     body.innerHTML =
       renderStrip(ov, p) +
       '<div class="pl-dash">' +
         '<div class="pl-zone z-top">' +
-          renderGauge(p) + renderOhlc(ov) + renderInst(ov) +
+          renderGauge(p) + renderOhlc(ov, p) + renderInst(ov) +
           renderDonut(ov, ov.strip) + renderSectors(ov) +
         '</div>' +
         '<div class="pl-zone z-bot">' +
@@ -789,6 +851,13 @@
       extra;
 
     bind(body);
+    body.querySelectorAll('[data-sec-mkt]').forEach(function (b) {
+      b.onclick = function (e) {
+        e.stopPropagation();
+        loadSectorsMkt(b.getAttribute('data-sec-mkt'));
+      };
+    });
+    if (sectorMkt === 'US' && !sectorCache.US) loadSectorsMkt('US');
 
     jget('/pulse/history?kind=index&n=20').then(function (h) {
       var box = $('pl-spark');

@@ -74,7 +74,7 @@
         'box-sizing:border-box;flex:1;min-height:0;display:flex;flex-direction:column}' +
       '#ht-root .ht-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px;min-width:0;flex:0 0 auto}' +
       '#ht-root .ht-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
-      '#ht-root .ht-kicker{font-size:9px;color:var(--gold);letter-spacing:1.2px;margin:0;font-weight:700}' +
+      '#ht-root .ht-kicker{display:none!important}' +
       '#ht-root .ht-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
       '#ht-root .ht-sub{font-size:9px;color:var(--tlo);margin:0}' +
       '#ht-root .ht-actions{display:flex;gap:4px;flex-wrap:nowrap;align-items:center;flex:0 0 auto}' +
@@ -179,7 +179,6 @@
       mount.innerHTML =
         '<div id="ht-root">' +
           '<div class="ht-head"><div>' +
-            '<span class="ht-kicker">STOCK TERMINAL · 5.0</span>' +
             '<span class="ht-title">類股熱力</span>' +
             '<span class="ht-sub" id="ht-sub">產業漲跌 · 點格載入代表股</span>' +
           '</div><div class="ht-actions">' +

@@ -31,7 +31,7 @@
         'box-sizing:border-box;flex:1;min-height:0;display:flex;flex-direction:column}' +
       '#nw-root .nw-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px;min-width:0;flex:0 0 auto}' +
       '#nw-root .nw-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
-      '#nw-root .nw-kicker{font-size:9px;color:var(--gold);letter-spacing:1.2px;margin:0;font-weight:700}' +
+      '#nw-root .nw-kicker{display:none!important}' +
       '#nw-root .nw-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
       '#nw-root .nw-sub{font-size:9px;color:var(--tlo);margin:0}' +
       '#nw-root .nw-actions{display:flex;gap:4px;flex-wrap:nowrap;flex:0 0 auto}' +
@@ -100,7 +100,6 @@
       mount.innerHTML =
         '<div id="nw-root">' +
           '<div class="nw-head"><div>' +
-            '<span class="nw-kicker">STOCK TERMINAL · 5.0</span>' +
             '<span class="nw-title">快訊</span>' +
             '<span class="nw-sub">事件行事曆 · 結算日 · 警報</span>' +
           '</div><div class="nw-actions">' +

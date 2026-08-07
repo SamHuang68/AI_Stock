@@ -85,7 +85,7 @@
         'box-sizing:border-box;flex:1;min-height:0;display:flex;flex-direction:column}' +
       '#bk-root .bk-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px;min-width:0;flex:0 0 auto}' +
       '#bk-root .bk-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
-      '#bk-root .bk-kicker{font-size:9px;color:var(--gold);letter-spacing:1.2px;margin:0;font-weight:700}' +
+      '#bk-root .bk-kicker{display:none!important}' +
       '#bk-root .bk-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
       '#bk-root .bk-sub{font-size:9px;color:var(--tlo);margin:0}' +
       '#bk-root .bk-actions{display:flex;gap:4px;flex-wrap:nowrap;flex:0 0 auto}' +
@@ -207,7 +207,6 @@
       mount.innerHTML =
         '<div id="bk-root">' +
           '<div class="bk-head"><div>' +
-            '<span class="bk-kicker">STOCK TERMINAL · 5.0</span>' +
             '<span class="bk-title">投組風險</span>' +
             '<span class="bk-sub" id="bk-sub">波動 · VaR · Beta · 產業曝險</span>' +
           '</div><div class="bk-actions">' +
