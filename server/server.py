@@ -1811,23 +1811,45 @@ def _yf_batch_quotes(syms):
                     'price': ov['price'], 'changePct': ov.get('changePct'),
                     'source': ov.get('source') or 'override',
                 }
-            _, data, _ = fetch_one(sym, '5d', '1d', False)
+            # 必須用 range=1d：5d 時 chartPreviousClose 常指更早收盤（^SOX 曾誤成 +9%）
+            _, data, _ = fetch_one(sym, '1d', '1d', False)
+            if not data:
+                # 備援 5d 日線，改用「倒數第二根收盤」當昨收
+                _, data, _ = fetch_one(sym, '5d', '1d', False)
+                use_bar_prev = True
+            else:
+                use_bar_prev = False
             if not data:
                 return None
             res = (json.loads(data).get('chart') or {}).get('result') or []
             if not res:
                 return None
             m = res[0].get('meta') or {}
+            cls = ((res[0].get('indicators') or {}).get('quote') or [{}])[0].get('close') or []
+            valid = [c for c in cls if c is not None]
             cur = m.get('regularMarketPrice')
-            if cur is None:
-                cls = ((res[0].get('indicators') or {}).get('quote') or [{}])[0].get('close') or []
-                cur = next((c for c in reversed(cls) if c is not None), None)
-            prev = _yf_prevclose(m)
+            if cur is None and valid:
+                cur = valid[-1]
+            prev = _yf_prevclose(m, allow_chart_prev=not use_bar_prev)
+            prev_bar = valid[-2] if len(valid) >= 2 else None
+            if prev is None:
+                prev = prev_bar
             if cur is None or not prev:
                 return None
+            chg = (cur - prev) / prev * 100.0
+            # 指數日漲跌異常時改信日線昨收（^SOX 等 Yahoo meta 常飄）
+            bad, _why = _anom_quote(cur, prev, chg, kind='index')
+            if bad and prev_bar is not None and prev_bar > 0:
+                prev = prev_bar
+                chg = (cur - prev) / prev * 100.0
+                bad2, _ = _anom_quote(cur, prev, chg, kind='index')
+                if bad2:
+                    # 仍離譜：回傳價、漲跌標可疑但不捏造
+                    print('[pulse-global] anom', sym, _why, 'barStillBad')
             return {
                 'symbol': sym, 'name': labels.get(sym, m.get('shortName') or sym),
-                'price': cur, 'changePct': (cur - prev) / prev * 100.0,
+                'price': cur, 'changePct': chg,
+                'prevClose': prev,
                 'source': 'yahoo',
             }
         except Exception as e:
@@ -3747,7 +3769,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 return {'ok': False, 'items': []}
 
         def _job_global():
-            gkey = f'pulse-global:v2:{int(time.time() // 120)}'
+            gkey = f'pulse-global:v3:{int(time.time() // 120)}'
             g = _cache_first([gkey])
             if g is not None:
                 return g
