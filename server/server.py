@@ -1768,7 +1768,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
 
     def do_GET(self):
         p = self.path
-        if p == '/' or p == '/index.html' or p == '/stock_terminal_v2.html' or p.startswith('/stock_terminal_v2.html?'):
+        if p in ('/', '/index.html', '/stock_terminal.html', '/stock_terminal_v2.html') or p.startswith('/stock_terminal'):
             self._handle_index()
             return
         elif p.startswith('/yf/batch'):

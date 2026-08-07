@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
-<title>Stock Terminal</title>
+<title>Stock Terminal v5.0 - Market Intelligence / Local DB / AI Copilot</title>
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -212,11 +212,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
+<link rel="stylesheet" href="src/ui/mobile_v2.css?v=1786125589">
 </head>
 <body>
 <div id="app">
   <div id="topbar">
-    <span class="logo">STOCK TERMINAL</span>
+    <span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v5.0</span></span>
     <div class="sep"></div>
     <div style="display:flex;align-items:center;gap:4px">
       <button class="mktbtn on" id="btn-tw" onclick="setMkt('TW')">🇹🇼 TW</button>
@@ -255,8 +256,9 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
       <div id="rtabs">
         <button class="rtab on" onclick="setTab('stats')">STATS</button>
         <button class="rtab" onclick="setTab('research')">RESEARCH</button>
-        <button class="rtab" onclick="setTab('batch')">BATCH</button>
-        <button class="rtab" onclick="setTab('history')">HISTORY</button>
+        <button class="rtab" id="tab-pos" onclick="setTab('position')">POS</button>
+        <button class="rtab" id="tab-watch" onclick="setTab('watch')">WATCH</button>
+        <button class="rtab" id="tab-plan" onclick="setTab('plan')">PLAN</button>
         <button class="rtab" id="tab-etf" onclick="setTab('etf')">ETF△</button>
       </div>
       <div id="rpanel"></div>
@@ -305,7 +307,7 @@ const SERVER = (typeof location !== 'undefined' && location.origin) ? location.o
 // ── STATE ───────────────────────────────────────────────────────
 let S = {
   mkt: 'TW', sym: '', apiKey: '', aiKeySet: false,
-  range: '5y',                 // iOS-style chart range: 1d/3w/1mo/3mo/6mo/ytd/1y/2y/5y/10y/max
+  range: '6mo',                // iOS-style chart range: 1d/3w/1mo/3mo/6mo/ytd/1y/2y/5y/10y/max
   data: null, ind: null,
   analyzing: false, streamText: '', sources: [], phase: '',
   sections: [],
@@ -335,7 +337,7 @@ window.addEventListener('DOMContentLoaded', () => {
   renderWl();
   renderRpanel();
   if (S.wl.length > 0) loadSym(S.wl[0].t, S.wl[0].m);
-  fetchEtfDelta();
+  (window.fetchEtfDelta || fetchEtfDelta)();
   updateKeyBtn();
 });
 
@@ -1572,7 +1574,7 @@ function relTime(ts) {
 function setTab(tab) {
   S.tab = tab;
   document.querySelectorAll('.rtab').forEach((b,i)=>{
-    const tabs=['stats','research','batch','history','etf'];
+    const tabs=['stats','research','position','watch','plan','etf'];
     b.classList.toggle('on', tabs[i]===tab);
   });
   renderRpanel();
@@ -1584,7 +1586,10 @@ function renderRpanel() {
   if (S.tab==='research') { el.innerHTML = renderResearch(); attachResearch(); return; }
   if (S.tab==='batch')    { el.innerHTML = renderBatch(); attachBatch(); return; }
   if (S.tab==='history')  { el.innerHTML = renderHistoryTab(); return; }
-  if (S.tab==='etf')      { el.innerHTML = renderEtfDelta(); return; }
+  if (S.tab==='etf')      { el.innerHTML = (window.renderEtfDelta || renderEtfDelta)(); return; }
+  if (S.tab==='position') { var _ae=document.activeElement; if(!(_ae&&/^pos-(entry|shares|target|stop|notes|unit)$/.test(_ae.id||''))){ el.innerHTML = renderPosition(); attachPosition(); } return; }
+  if (S.tab==='watch')    { el.innerHTML = renderWatch(); attachWatch(); return; }
+  if (S.tab==='plan')     { el.innerHTML = renderPlan(); attachPlan(); return; }
 }
 
 // ── STATS TAB ────────────────────────────────────────────────────
@@ -1640,7 +1645,7 @@ function renderStats() {
   return `
     <div class="stat-hdr">價格資訊 · ${S.sym}</div>
     ${rows.map(([k,v])=>`<div class="stat-row"><span class="stat-k">${k}</span><span class="stat-v" id="rp-${k.replace(/\s+/g,'')}">${v}</span></div>`).join('')}
-    ${renderEtfHoldingsForStock(S.sym)}${S.ind?`<div class="stat-sect">技術指標</div>${indRows.map(([k,v])=>`<div class="stat-row"><span class="stat-k">${k}</span><span class="stat-v">${v||'--'}</span></div>`).join('')}`:''}
+    ${(window.renderEtfHoldingsForStock||renderEtfHoldingsForStock)(S.sym)}${S.ind?`<div class="stat-sect">技術指標</div>${indRows.map(([k,v])=>`<div class="stat-row"><span class="stat-k">${k}</span><span class="stat-v">${v||'--'}</span></div>`).join('')}`:''}
   `;
 }
 
@@ -2070,6 +2075,80 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
 });
 </script>
+<script src="src/core/colors_v3.js?v=1786125589"></script>
+<script src="src/ui/viz_v5.js?v=1786125589"></script>
+<script src="src/core/market_v3.js?v=1786125589"></script>
+<script src="src/core/fields_v3.js?v=1786125589"></script>
+<script src="src/core/chart_registry_v3.js?v=1786125589"></script>
+<script src="src/ui/share_v3.js?v=1786125589"></script>
+<script src="src/ui/datasources_v3.js?v=1786125589"></script>
+<script src="src/core/etf_flow_tip_v3.js?v=1786125589"></script>
+<script src="src/core/position_v2.js?v=1786125589"></script>
+<script src="src/core/watch_v2.js?v=1786125589"></script>
+<script src="src/core/info_v2.js?v=1786125589"></script>
+<script src="src/core/pro_v2.js?v=1786125589"></script>
+<script src="src/chart/volume_profile_v3.js?v=1786125589"></script>
+<script src="src/chart/pattern_v3.js?v=1786125589"></script>
+<script src="src/core/live_v2.js?v=1786125589"></script>
+<script src="src/fundamental/chip_v3.js?v=1786125589"></script>
+<script src="src/fundamental/fundamental_v3.js?v=1786125589"></script>
+<script src="src/screener/screener_v3.js?v=1786125589"></script>
+<script src="src/ai/ai_report_v3.js?v=1786125589"></script>
+<script src="src/ui/polish_v3.js?v=1786125589"></script>
+<script src="src/core/wl_live_v3.js?v=1786125589"></script>
+<script src="src/fundamental/plan_history_v3.js?v=1786125589"></script>
+<script src="src/fundamental/plan_position_v3.js?v=1786125589"></script>
+<script src="src/fundamental/plan_v3.js?v=1786125589"></script>
+<script src="src/ui/pdf_import_v3.js?v=1786125589"></script>
+<script src="src/ui/pdf_export_v3.js?v=1786125589"></script>
+<script src="src/core/peg_v3.js?v=1786125589"></script>
+<script src="src/alert/alert_v3.js?v=1786125589"></script>
+<script src="src/alert/alert_push_v3.js?v=1786125589"></script>
+<script src="src/screener/backtest_v3.js?v=1786125589"></script>
+<script src="src/screener/backtest_ui_v3.js?v=1786125589"></script>
+<script src="src/ui/enhance_v3.js?v=1786125589"></script>
+<script src="src/chart/aftermarket_v3.js?v=1786125589"></script>
+<script src="src/chart/overnight_v3.js?v=1786125589"></script>
+<script src="src/fundamental/supplychain_v3.js?v=1786125589"></script>
+<script src="src/portfolio/portfolio_v3.js?v=1786125589"></script>
+<script src="src/fundamental/chainmom_v3.js?v=1786125589"></script>
+<script src="src/fundamental/valuation_v3.js?v=1786125589"></script>
+<script src="src/fundamental/marketflow_v3.js?v=1786125589"></script>
+<script src="src/fundamental/instrank_v3.js?v=1786125589"></script>
+<script src="src/alert/calendar_v3.js?v=1786125589"></script>
+<script src="src/chart/multichart_v3.js?v=1786125589"></script>
+<script src="src/chart/spread_v3.js?v=1786125589"></script>
+<script src="src/chart/hotkeys_v3.js?v=1786125589"></script>
+<script src="src/screener/strategy_builder_v3.js?v=1786125589"></script>
+<script src="src/screener/strategy_script_v3.js?v=1786125589"></script>
+<script src="src/chart/drawtools_v3.js?v=1786125589"></script>
+<script src="src/screener/screener3_v3.js?v=1786125589"></script>
+<script src="src/core/etf_v3.js?v=1786125589"></script>
+<script src="src/fundamental/stockfut_v3.js?v=1786125589"></script>
+<script src="src/core/indices_v3.js?v=1786125589"></script>
+<script src="src/alert/datahealth_v3.js?v=1786125589"></script>
+<script src="src/alert/toast_v3.js?v=1786125589"></script>
+<script src="src/alert/settle_v3.js?v=1786125589"></script>
+<script src="src/ai/cmdpalette_v3.js?v=1786125589"></script>
+<script src="src/ui/dragwin_v3.js?v=1786125589"></script>
+<script src="src/core/liverefresh_v3.js?v=1786125589"></script>
+<script src="src/core/namesearch_v3.js?v=1786125589"></script>
+<script src="src/core/realtime_v3.js?v=1786125589"></script>
+<script src="src/ai/focus_v3.js?v=1786125589"></script>
+<script src="src/ai/copilot_v3.js?v=1786125589"></script>
+<script src="src/screener/wizard_v3.js?v=1786125589"></script>
+<script src="src/ui/shell_v5.js?v=1786125589"></script>
+<script src="src/ui/hub_v5.js?v=1786125589"></script>
+<script src="src/ui/pulse_v5.js?v=1786125589"></script>
+<script src="src/ui/heat_v5.js?v=1786125589"></script>
+<script src="src/ui/book_v5.js?v=1786125589"></script>
+<script src="src/ui/scan_v5.js?v=1786125589"></script>
+<script src="src/ui/breadth_v5.js?v=1786125589"></script>
+<script src="src/ui/afterhours_v5.js?v=1786125589"></script>
+<script src="src/ui/news_v5.js?v=1786125589"></script>
+<script src="src/ui/toolbar_v3.js?v=1786125589"></script>
+<script src="src/chart/market_score_bar_v3.js?v=1786125589"></script>
+<script src="src/chart/market_chart_v3.js?v=1786125589"></script>
 </body>
 </html>
 <script>
@@ -2133,178 +2212,7 @@ function updateEtfFlowInd() {
   } else { el.textContent='無訊號'; el.style.color='var(--tf)'; }
 }
 
-function renderEtfHoldingsForStock(sym) {
-  if (!S.etfDelta || !sym) return '';
-  const rows = [];
-  for (const etf of (S.etfDelta.etfs||[])) {
-    const n = (etf.new||[]).find(s=>s.code===sym);
-    if (n) { rows.push({code:etf.code,rank:n.rank,weight:n.weight,delta:'新增',dc:'var(--green)'}); continue; }
-    const rm = (etf.removed||[]).find(s=>s.code===sym);
-    if (rm) { rows.push({code:etf.code,rank:'-',weight:rm.prev_weight,delta:'移除',dc:'var(--red)'}); continue; }
-    const chg = (etf.changed||[]).find(s=>s.code===sym);
-    if (chg) { rows.push({code:etf.code,rank:chg.rank,weight:chg.curr_weight,delta:(chg.delta>=0?'+':'')+chg.delta.toFixed(2)+'%',dc:chg.delta>=0?'var(--green)':'var(--red)'}); }
-  }
-  if (!rows.length) return '';
-  return `<div class="stat-sect">ETF 持股動態（今日）</div>` +
-    rows.map(r=>`<div class="stat-row">
-      <span class="stat-k" style="font-size:9px">${r.code} <span style="color:var(--tf)">#${r.rank}</span></span>
-      <span class="stat-v">${r.weight}% <span style="color:${r.dc};margin-left:6px">${r.delta}</span></span>
-    </div>`).join('');
-}
+function renderEtfHoldingsForStock(sym) { return ""; }
 
-// ── ETF Delta Tab ─────────────────────────────────────────────
-let _etfExp = {};
-
-function renderEtfDelta() {
-  if (S.etfLoading) return '<div style="padding:20px;text-align:center;font-family:monospace;font-size:10px;color:var(--tlo)">載入 ETF Delta...</div>';
-  if (!S.etfDelta || S.etfDelta.error) {
-    const err = S.etfErr || '';
-    const needHist = /history|file|need|≥2|dir=/i.test(err);
-    const hint = needHist
-      ? '尚無足夠歷史檔（需 ≥ 2 個交易日）<br><span style="font-size:9px;color:var(--tf)">執行 <code style="color:var(--gold)">python etf_delta_tracker.py --backfill 5</code><br>每天排程一次即可累積</span>'
-      : (err
-          ? `<span style="font-size:9px;color:var(--red)">${err}</span><br><span style="font-size:9px;color:var(--tf)">請確認 server.py 已啟動於 :18432</span>`
-          : '無法連線 ETF Delta<br><span style="font-size:9px;color:var(--tf)">請確認 server.py 已啟動</span>');
-    return `<div style="padding:24px 14px;font-family:monospace;font-size:10px;color:var(--tlo);text-align:center;line-height:1.9">
-      ${hint}<br>
-      <button onclick="fetchEtfDelta()" style="margin-top:14px;padding:5px 16px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--tlo);font-family:monospace;font-size:9px;cursor:pointer">↻ 重試</button>
-    </div>`;
-  }
-
-  const d = S.etfDelta;
-  const s = d.summary;
-
-  // Cross-ETF consensus
-  const newMap = {};
-  for (const etf of (d.etfs||[])) {
-    for (const n of (etf.new||[])) {
-      if (!newMap[n.code]) newMap[n.code] = {code:n.code,name:n.name,etfs:[]};
-      newMap[n.code].etfs.push({etf:etf.code,w:n.weight});
-    }
-  }
-  const consensus = Object.values(newMap).filter(x=>x.etfs.length>=2);
-
-  let h = '';
-
-  // Date bar
-  h += `<div style="padding:5px 12px;font-family:monospace;font-size:9px;color:var(--tlo);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-    <span>📅 ${d.date} vs ${d.prev_date}</span>
-    <button onclick="fetchEtfDelta()" style="padding:1px 7px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--tlo);font-family:monospace;font-size:8px;cursor:pointer">↻</button>
-  </div>`;
-
-  // Summary counts
-  h += `<div style="display:flex;border-bottom:1px solid var(--border)">
-    <div style="flex:1;padding:8px 4px;text-align:center;border-right:1px solid var(--border)">
-      <div style="font-family:monospace;font-size:20px;font-weight:700;color:var(--green)">${s.new}</div>
-      <div style="font-family:monospace;font-size:8px;color:var(--tlo);letter-spacing:1px">新增</div>
-    </div>
-    <div style="flex:1;padding:8px 4px;text-align:center;border-right:1px solid var(--border)">
-      <div style="font-family:monospace;font-size:20px;font-weight:700;color:var(--red)">${s.removed}</div>
-      <div style="font-family:monospace;font-size:8px;color:var(--tlo);letter-spacing:1px">移除</div>
-    </div>
-    <div style="flex:1;padding:8px 4px;text-align:center">
-      <div style="font-family:monospace;font-size:20px;font-weight:700;color:var(--cyan)">${s.changed}</div>
-      <div style="font-family:monospace;font-size:8px;color:var(--tlo);letter-spacing:1px">加減碼</div>
-    </div>
-  </div>`;
-
-  // Consensus
-  if (consensus.length) {
-    h += `<div style="padding:4px 10px;font-family:monospace;font-size:8px;color:var(--tf);letter-spacing:2px;border-bottom:1px solid var(--border);background:var(--bg);text-transform:uppercase">🔥 跨ETF共識新增</div>`;
-    for (const c of consensus) {
-      const etfTxt = c.etfs.map(e=>`${e.etf}(${e.w}%)`).join(' · ');
-      h += `<div onclick="loadSym('${c.code}','TW')" style="padding:7px 10px;border-bottom:1px solid var(--border);cursor:pointer;background:rgba(245,197,24,.04);border-left:2px solid var(--gold);transition:background .12s" onmouseover="this.style.background='rgba(245,197,24,.09)'" onmouseout="this.style.background='rgba(245,197,24,.04)'">
-        <div style="font-family:monospace;font-size:12px;font-weight:700;color:var(--gold)">${c.code} ${c.name}</div>
-        <div style="font-family:monospace;font-size:8px;color:var(--tlo);margin-top:2px">${etfTxt}</div>
-      </div>`;
-    }
-  }
-
-  // All new additions
-  const allNew = (d.etfs||[]).flatMap(e=>(e.new||[]).map(n=>({...n,etfCode:e.code})));
-  if (allNew.length) {
-    h += `<div style="padding:4px 10px;font-family:monospace;font-size:8px;color:var(--tf);letter-spacing:2px;border-bottom:1px solid var(--border);background:var(--bg);text-transform:uppercase">新增持股</div>`;
-    for (const n of allNew) {
-      const pri = n.weight>=2?'高優先':n.weight>=0.5?'中優先':'低優先';
-      const priColor = n.weight>=2?'var(--green)':n.weight>=0.5?'var(--gold)':'var(--tf)';
-      h += `<div onclick="loadSym('${n.code}','TW')" style="display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
-        <span style="font-family:monospace;font-size:11px;font-weight:700;color:var(--thi);min-width:45px">${n.code}</span>
-        <span style="font-family:monospace;font-size:9px;color:var(--tlo);flex:1">${n.name}</span>
-        <span style="font-family:monospace;font-size:10px;color:var(--green);font-weight:700">+${n.weight}%</span>
-        <span style="font-family:monospace;font-size:8px;color:${priColor}">${pri}</span>
-      </div>
-      <div style="padding:2px 10px 5px;font-family:monospace;font-size:8px;color:var(--tf);border-bottom:1px solid var(--border)">${n.etfCode} · #${n.rank} · ${(n.shares||0).toLocaleString()} 股</div>`;
-    }
-    // Batch all button
-    h += `<div style="padding:8px 10px;border-bottom:1px solid var(--border)">
-      <button onclick="etfBatchAllNew()" style="width:100%;padding:6px;background:var(--gold);color:#060A12;border:none;border-radius:5px;font-family:monospace;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:1px">⚡ 一鍵批次 AI 分析所有新增股</button>
-    </div>`;
-  }
-
-  // Per-ETF signal table
-  h += `<div style="padding:4px 10px;font-family:monospace;font-size:8px;color:var(--tf);letter-spacing:2px;border-bottom:1px solid var(--border);background:var(--bg);text-transform:uppercase">各ETF訊號強度（點擊展開）</div>`;
-
-  // Include ETFs with no events too
-  const allEtfCodes = Object.keys(ETF_MAP_NAMES);
-  const etfMap = {};
-  for (const e of (d.etfs||[])) etfMap[e.code] = e;
-
-  for (const code of allEtfCodes) {
-    const etf = etfMap[code] || {code, name:'主動'+ETF_MAP_NAMES[code], new:[], removed:[], changed:[]};
-    const newLen=(etf.new||[]).length, rmLen=(etf.removed||[]).length;
-    const maxDelta = Math.max(0,...(etf.changed||[]).map(c=>Math.abs(c.delta)));
-    let sig='no', sigTxt='無訊號', sigColor='var(--tf)';
-    if (newLen>0)        { sig='hi'; sigTxt=`高 ↑${newLen}新`;   sigColor='var(--green)'; }
-    else if (maxDelta>=1){ sig='md'; sigTxt='中 △';               sigColor='var(--gold)'; }
-    else if (maxDelta>=0.5||rmLen>0){ sig='lo'; sigTxt='低 ○';   sigColor='var(--tlo)'; }
-    const exp = _etfExp[code];
-    h += `<div onclick="toggleEtfExp('${code}')" style="display:flex;align-items:center;gap:6px;padding:5px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
-      <span style="font-family:monospace;font-size:9px;font-weight:700;color:var(--gold);min-width:55px">${code}</span>
-      <span style="font-family:monospace;font-size:8px;color:var(--tlo);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${ETF_MAP_NAMES[code]||''}</span>
-      <span style="font-family:monospace;font-size:8px;font-weight:700;color:${sigColor}">${sigTxt}</span>
-      <span style="font-size:9px;color:var(--tf)">${exp?'▲':'▼'}</span>
-    </div>`;
-    if (exp) {
-      h += `<div style="padding:6px 10px;background:var(--bg);border-bottom:1px solid var(--border)">`;
-      for (const n of (etf.new||[])) h+=`<div style="display:flex;justify-content:space-between;padding:2px 0;font-family:monospace;font-size:9px"><span style="color:var(--thi);min-width:45px">${n.code}</span><span style="color:var(--tlo);flex:1">${n.name}</span><span style="color:var(--green);font-weight:700">新增 +${n.weight}%</span></div>`;
-      for (const r of (etf.removed||[])) h+=`<div style="display:flex;justify-content:space-between;padding:2px 0;font-family:monospace;font-size:9px"><span style="color:var(--thi);min-width:45px">${r.code}</span><span style="color:var(--tlo);flex:1">${r.name}</span><span style="color:var(--red);font-weight:700">移除 ${r.prev_weight}%</span></div>`;
-      for (const c of (etf.changed||[])) {
-        const clr=c.delta>=0?'var(--green)':'var(--red)';
-        h+=`<div style="display:flex;justify-content:space-between;padding:2px 0;font-family:monospace;font-size:9px"><span style="color:var(--thi);min-width:45px">${c.code}</span><span style="color:var(--tlo);flex:1">${c.name}</span><span style="color:${clr};font-weight:700">${c.delta>=0?'+':''}${c.delta.toFixed(2)}%</span></div>`;
-      }
-      if (!newLen && !rmLen && !(etf.changed||[]).length) h+=`<div style="font-family:monospace;font-size:9px;color:var(--tf)">今日無事件</div>`;
-      h += `<div style="display:flex;gap:5px;margin-top:5px">
-        <button onclick="event.stopPropagation();etfAddWl('${code}')" style="padding:2px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--tlo);font-family:monospace;font-size:8px;cursor:pointer">加自選</button>
-        <button onclick="event.stopPropagation();etfAddBatch('${code}')" style="padding:2px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--tlo);font-family:monospace;font-size:8px;cursor:pointer">批次分析</button>
-      </div>`;
-      h += '</div>';
-    }
-  }
-
-  return h;
-}
-
-function toggleEtfExp(code) {
-  _etfExp[code] = !_etfExp[code];
-  if (S.tab==='etf') renderRpanel();
-}
-function etfAddWl(etfCode) {
-  const etf = (S.etfDelta?.etfs||[]).find(e=>e.code===etfCode);
-  if (!etf) return;
-  for (const n of (etf.new||[])) if (!S.wl.find(w=>w.t===n.code&&w.m==='TW')) S.wl.push({t:n.code,m:'TW'});
-  saveWl(); renderWl();
-}
-function etfAddBatch(etfCode) {
-  const etf = (S.etfDelta?.etfs||[]).find(e=>e.code===etfCode);
-  if (!etf) return;
-  for (const n of (etf.new||[])) if (!S.batch.find(b=>b.sym===n.code&&b.mkt==='TW')) S.batch.push({sym:n.code,mkt:'TW',status:'',statusTxt:''});
-  setTab('batch');
-}
-function etfBatchAllNew() {
-  if (!S.etfDelta) return;
-  for (const etf of (S.etfDelta.etfs||[])) {
-    for (const n of (etf.new||[])) if (!S.batch.find(b=>b.sym===n.code&&b.mkt==='TW')) S.batch.push({sym:n.code,mkt:'TW',status:'',statusTxt:''});
-  }
-  setTab('batch');
-}
+// -- v1 ETF section removed by build_v2.py --
 </script>

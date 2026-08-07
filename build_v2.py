@@ -243,8 +243,10 @@ html = re.sub(
 
 with open(DST, 'w', encoding='utf-8') as f:
     f.write(html)
+with open(SRC, 'w', encoding='utf-8') as f:
+    f.write(html)
 
-print(f'[OK] wrote {DST}  ({len(html):,} bytes)')
+print(f'[OK] wrote {DST} & {SRC} ({len(html):,} bytes)')
 print(f'     base:    {SRC}')
 print(f'     modules: {", ".join(V2_SCRIPTS)}')
 print()
