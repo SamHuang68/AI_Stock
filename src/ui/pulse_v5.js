@@ -456,18 +456,23 @@
         '<div class="s ' + tw(s.turnoverChgPct) + '">' +
         (s.turnoverChgPct != null ? pct(s.turnoverChgPct) + ' vs 前日' : '—') + '</div>' +
         turnViz + '</div>' +
-      '<div class="cell"><div class="k">上漲 / 下跌 / 平盤</div><div class="v" style="font-size:14px">' +
+      '<div class="cell" data-go="breadth" title="台股上市股票上漲／下跌／平盤家數（TWSE）" style="cursor:pointer">' +
+        '<div class="k">上漲／下跌／平盤 · 家數</div><div class="v" style="font-size:13px">' +
         '<span class="up">' + fmt(s.up) + '</span> / <span class="dn">' + fmt(s.down) + '</span> / <span class="flat">' + fmt(s.flat) + '</span></div>' +
-        '<div class="s">多空比 ' + (s.lsRatio != null ? s.lsRatio.toFixed(2) : '—') + '</div>' +
+        '<div class="s">上市股票 · 多空比 ' + (s.lsRatio != null ? s.lsRatio.toFixed(2) : '—') + '</div>' +
         udfViz + '</div>' +
       '<div class="cell"><div class="k">市場廣度</div><div class="v">' +
         (adv != null ? (adv * 100).toFixed(1) + '%' : '—') + '</div>' +
         '<div class="s">' + tone + '</div>' + advViz + '</div>' +
-      '<div class="cell"><div class="k">漲停 / 跌停</div><div class="v" style="font-size:14px">' +
-        '<span class="up">' + fmt(s.limitUp) + '</span> / <span class="dn">' + fmt(s.limitDown) + '</span></div>' +
-        '<div class="s">' + (s.dataLabel || 'LOCAL') +
-        (p.dataCompleteness != null ? ' · ' + Number(p.dataCompleteness).toFixed(0) + '%' : '') +
-        '</div></div>' +
+      '<div class="cell" data-go="breadth" title="台股上市股票漲停／跌停家數（TWSE 官方：上漲／下跌括號內家數）。點擊開廣度詳情與清單。" style="cursor:pointer">' +
+        '<div class="k">台股漲跌停 · 家數</div>' +
+        '<div class="v" style="font-size:12px">' +
+          '<span class="up">漲停 ' + fmt(s.limitUp) + '</span>' +
+          '<span style="color:var(--tlo);font-weight:600"> · </span>' +
+          '<span class="dn">跌停 ' + fmt(s.limitDown) + '</span></div>' +
+        '<div class="s">上市股票 · TWSE' +
+          (p.date ? ' · ' + esc(String(p.date)) : '') +
+          ' · 詳情 →</div></div>' +
       '</div>';
   }
 
