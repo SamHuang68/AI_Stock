@@ -994,11 +994,11 @@ def _build_tw_market_fundamental(sym: str) -> dict:
 
 
 def _chip_streak(clean_code):
-    """從 chip_history 反向算外資/投信連續買(>0)賣(<0)超天數"""
+    """從 chip_history 反向算外資/投信/自營商連續買(>0)賣(<0)超天數"""
     if not os.path.isdir(CHIP_HISTORY_PATH):
         return None
     files = sorted(glob.glob(os.path.join(CHIP_HISTORY_PATH, '*.json')), reverse=True)
-    series = {'foreign': [], 'trust': []}
+    series = {'foreign': [], 'trust': [], 'dealer': []}
     for fn in files[:60]:
         try:
             with open(fn, encoding='utf-8') as f: day = json.load(f)
@@ -1023,7 +1023,11 @@ def _chip_streak(clean_code):
             else:
                 break
         return n * sign  # 正=連買天數, 負=連賣天數
-    return {'foreign': streak(series['foreign']), 'trust': streak(series['trust'])}
+    return {
+        'foreign': streak(series['foreign']),
+        'trust': streak(series['trust']),
+        'dealer': streak(series['dealer']),
+    }
 
 # ── LRU cache with TTL ──────────────────────────────────────────
 # v3.6 加 TTL（預設 60 秒）：原本沒 TTL 造成的「stale price 隨機重現」根因 ——
@@ -4024,21 +4028,25 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         self._ok(body)
 
     def _handle_inst_rank(self):
-        """外資/投信買賣超排行榜 (v3.8 #4)：T86 全表排序 + chip_history 連續天數。
-           ?who=foreign|trust ?side=buy|sell ?n=30"""
+        """外資/投信/自營商買賣超排行榜：T86 全表排序 + chip_history 連續天數。
+           ?who=foreign|trust|dealer ?side=buy|sell ?n=30"""
         from datetime import date as _date, timedelta
         qs = parse_qs(urlparse(self.path).query)
         who  = (qs.get('who',  ['foreign'])[0]).lower()
+        if who not in ('foreign', 'trust', 'dealer'):
+            who = 'foreign'
         side = (qs.get('side', ['buy'])[0]).lower()
         n    = min(int(qs.get('n', ['30'])[0] or 30), 100)
         today = _date.today()
-        key = f'instrank:{today.strftime("%Y%m%d")}'
+        # v2：快取列含 dealer；舊 v1 無自營商欄不可再用
+        key = f'instrank:v2:{today.strftime("%Y%m%d")}'
         cached = _cache.get(key)
         rows_data = None
         if cached is not None:
             rows_data = json.loads(cached)
         else:
-            # 往前找最近有資料的交易日
+            # 往前找最近有資料的交易日；欄位對齊 chip_api（避免外資自營商誤中）
+            import chip_api as _ca
             for back in range(0, 7):
                 dd = (today - timedelta(days=back)).strftime('%Y%m%d')
                 try:
@@ -4052,20 +4060,19 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                     raw = d.get('data') or []
                     i_code = next((i for i, f in enumerate(fields) if '證券代號' in f), 0)
                     i_name = next((i for i, f in enumerate(fields) if '證券名稱' in f), 1)
-                    i_for  = next((i for i, f in enumerate(fields) if '外陸資買賣超股數' in f),
-                              next((i for i, f in enumerate(fields) if '外資買賣超' in f or ('外' in f and '買賣超' in f)), None))
-                    i_tru  = next((i for i, f in enumerate(fields) if '投信買賣超股數' in f),
-                              next((i for i, f in enumerate(fields) if '投信' in f and '買賣超' in f), None))
                     parsed = []
                     for r in raw:
-                        def num(i):
-                            try: return float(str(r[i]).replace(',', '').strip())
-                            except Exception: return None
+                        code = str(r[i_code]).strip()
+                        if not code:
+                            continue
                         parsed.append({
-                            'code': str(r[i_code]).strip(),
+                            'code': code,
                             'name': str(r[i_name]).strip(),
-                            'foreign': num(i_for) if i_for is not None else None,
-                            'trust':   num(i_tru) if i_tru is not None else None,
+                            'foreign': _ca._col(fields, r,
+                                                '外陸資買賣超股數(不含外資自營商)',
+                                                '外陸資買賣超股數', '外陸資'),
+                            'trust':   _ca._col(fields, r, '投信買賣超股數', '投信'),
+                            'dealer':  _ca._t86_dealer(fields, r),
                         })
                     rows_data = {'date': dd, 'rows': parsed}
                     _cache.set(key, json.dumps(rows_data, ensure_ascii=False).encode(), ttl=1800)
@@ -4075,11 +4082,11 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         if not rows_data:
             self._ok(json.dumps({'who': who, 'side': side, 'date': '', 'list': [], '_msg': 'T86 unavailable'}, ensure_ascii=False).encode())
             return
-        field = 'foreign' if who == 'foreign' else 'trust'
+        field = who
         items = [x for x in rows_data['rows'] if x.get(field) is not None]
         items.sort(key=lambda x: x[field], reverse=(side == 'buy'))
         top = items[:n]
-        # 連續天數（單位：張，順便 /1000）
+        # 連續天數；lots 單位：張（股/1000）
         for x in top:
             try:
                 st = _chip_streak(x['code'])

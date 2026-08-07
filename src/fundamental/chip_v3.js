@@ -72,13 +72,13 @@ function renderChipSection(chip) {
     }
   }
   // v3.8: 法人連續買賣超天數
-  if (chip.streak && (chip.streak.foreign || chip.streak.trust)) {
+  if (chip.streak && (chip.streak.foreign || chip.streak.trust || chip.streak.dealer)) {
     const badge = (n, who) => {
       if (!n) return '';
       const buy = n > 0;
       return `<span style="display:inline-block;margin:2px 4px 0 0;padding:1px 6px;border-radius:8px;font-size:9px;background:${buy?'rgba(239,68,68,.18)':'rgba(34,197,94,.18)'};color:${buy?'var(--red)':'var(--green)'}">${who}連${buy?'買':'賣'}${Math.abs(n)}日</span>`;
     };
-    h += `<div style="padding:6px 12px 0">${badge(chip.streak.foreign,'外資')}${badge(chip.streak.trust,'投信')}</div>`;
+    h += `<div style="padding:6px 12px 0">${badge(chip.streak.foreign,'外資')}${badge(chip.streak.trust,'投信')}${badge(chip.streak.dealer,'自營')}</div>`;
   }
   // 籌碼集中度（TDCC 週）
   const hold = chip.holders;

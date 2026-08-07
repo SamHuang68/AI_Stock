@@ -45,7 +45,7 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/fundamental/chainmom_v3.js',                 # v4.0: 供應鏈輪動(多時框動能,依賴 SC_CHAINS 須在 supplychain 後)
               'src/fundamental/valuation_v3.js',                # v3.8: 長線估值錨(本益比河流)
               'src/fundamental/marketflow_v3.js',               # v3.8: 大盤資金流儀表板
-              'src/fundamental/instrank_v3.js',                 # v3.8: 外資/投信買賣超排行榜
+              'src/fundamental/instrank_v3.js',                 # 外資/投信/自營商買賣超排行榜
               'src/alert/calendar_v3.js',                 # v3.8: 事件行事曆+提醒
               'src/chart/multichart_v3.js',               # v3.9 P1: 多圖連動布局 (grid overlay)
               'src/chart/spread_v3.js',                   # v3.9 P1: 價差/比值圖
