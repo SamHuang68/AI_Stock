@@ -1834,6 +1834,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._handle_inst_rank()
         elif p == '/events' or p.startswith('/events?'):
             self._handle_events()
+        elif p == '/flash' or p.startswith('/flash?'):
+            self._handle_flash()
         elif p == '/sectors' or p.startswith('/sectors?'):
             self._handle_sectors()
         elif p == '/ai/local/status' or p.startswith('/ai/local/status?'):
@@ -3547,7 +3549,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         out['updatedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
 
         # ── Overview 儀表板擴充（對齊 tw-pulse 參考圖）──────────────
-        # movers / global / macro 並行；總預算 ~8s（FRED 在此環境常逾時，必須 fail-fast）
+        # movers / global / macro / flash 並行；總預算 ~8s（FRED 在此環境常逾時，必須 fail-fast）
         PULSE_SIDE_BUDGET = 8.0
 
         def _job_movers():
@@ -3562,6 +3564,14 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             except Exception as e:
                 print('[pulse] movers', e)
                 return {'ok': False, 'gainers': [], 'losers': []}
+
+        def _job_flash():
+            try:
+                import market_flash as _mf
+                return _mf.build_flash(n=20, force=False)
+            except Exception as e:
+                print('[pulse] flash', e)
+                return {'ok': False, 'items': []}
 
         def _job_global():
             gkey = f'pulse-global:v2:{int(time.time() // 120)}'
@@ -3609,14 +3619,16 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         global_q = []
         us10y = None
         eco = []
+        flash_pack = {'ok': False, 'items': []}
         # 獨立 executor：並行等待用 wait()，不再串行 .result(25)+.result(20)
         try:
             from concurrent.futures import wait as _fut_wait
-            with ThreadPoolExecutor(max_workers=3, thread_name_prefix='pulse-side') as _pex:
+            with ThreadPoolExecutor(max_workers=4, thread_name_prefix='pulse-side') as _pex:
                 f_m = _pex.submit(_job_movers)
                 f_g = _pex.submit(_job_global)
                 f_e = _pex.submit(_job_macro)
-                done, _pending = _fut_wait([f_m, f_g, f_e], timeout=PULSE_SIDE_BUDGET)
+                f_f = _pex.submit(_job_flash)
+                done, _pending = _fut_wait([f_m, f_g, f_e, f_f], timeout=PULSE_SIDE_BUDGET)
                 if f_m in done:
                     try:
                         movers = f_m.result() or movers
@@ -3643,41 +3655,36 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                                 eco.append(row)
                     except Exception:
                         pass
+                if f_f in done:
+                    try:
+                        flash_pack = f_f.result() or flash_pack
+                    except Exception as e:
+                        print('[pulse] flash result', e)
         except Exception as e:
             print('[pulse] overview parallel', e)
 
-        # 事件快訊（非新聞爬蟲）
-        flash = []
+        # 市場快訊：台／美公司重大訊息（market_flash）；行事曆事件僅作少量補充
+        flash = list((flash_pack or {}).get('items') or [])
         try:
             ev = _cache_first([f'events:{ymd}:', f'events:{ymd}'])
             if isinstance(ev, dict):
                 rev = ev.get('revenue') or {}
-                if rev.get('nextPublishBy'):
-                    if rev.get('daysAway') is not None:
-                        flash.append({
-                            'time': str(rev.get('nextPublishBy')),
-                            'title': f"月營收時程 {rev.get('forMonth') or ''}（尚餘 {rev.get('daysAway')} 天）",
-                            'cat': '總經',
-                        })
-                    else:
-                        flash.append({
-                            'time': str(rev.get('nextPublishBy')),
-                            'title': f"月營收時程 {rev.get('nextPublishBy')}",
-                            'cat': '總經',
-                        })
-                for x in (ev.get('exDividend') or [])[:6]:
+                if rev.get('nextPublishBy') and len(flash) < 18:
                     flash.append({
-                        'time': x.get('date') or '',
-                        'title': f"除權息 {x.get('code') or ''} {x.get('name') or ''} {x.get('type') or ''}".strip(),
-                        'cat': '個股',
-                        'code': x.get('code'),
+                        'time': str(rev.get('nextPublishBy')),
+                        'title': f"月營收時程 {rev.get('forMonth') or ''}（尚餘 {rev.get('daysAway')} 天）"
+                                 if rev.get('daysAway') is not None
+                                 else f"月營收時程 {rev.get('nextPublishBy')}",
+                        'cat': '總經',
+                        'mkt': 'TW',
+                        'source': 'events',
                     })
         except Exception:
             pass
         if not flash:
             flash.append({
                 'time': out.get('updatedAt') or '',
-                'title': '事件中樞待命（除權息／營收時程）；非新聞爬蟲',
+                'title': '重大訊息載入中（上市／櫃買重訊＋美股）— 可稍後重試',
                 'cat': '系統',
             })
 
@@ -4131,6 +4138,22 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             if x.get(field) is not None:
                 x['lots'] = round(x[field] / 1000)
         self._ok(json.dumps({'who': who, 'side': side, 'date': rows_data['date'], 'list': top}, ensure_ascii=False).encode())
+
+    def _handle_flash(self):
+        """GET /flash?n=24&refresh=0 — 台／美公司重大訊息（上市櫃重訊＋美股新聞／8-K）。"""
+        qs = parse_qs(urlparse(self.path).query)
+        try:
+            n = int((qs.get('n') or ['24'])[0])
+        except Exception:
+            n = 24
+        force = (qs.get('refresh') or ['0'])[0] in ('1', 'true', 'yes')
+        try:
+            import market_flash as _mf
+            out = _mf.build_flash(n=n, force=force)
+        except Exception as e:
+            print('[flash] handle', e)
+            out = {'ok': False, 'error': str(e), 'items': []}
+        self._ok(json.dumps(out, ensure_ascii=False).encode())
 
     def _handle_events(self):
         """事件行事曆 (v3.8 #1)：

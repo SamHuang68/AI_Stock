@@ -177,8 +177,12 @@
       '#pl-root .pl-global .g .k{font-size:8px;color:var(--tlo);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#pl-root .pl-global .g .v{font-size:12px;font-weight:800;margin-top:1px;color:var(--thi);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#pl-root .pl-flash{flex:1;min-height:0;overflow:auto;font-size:10px}' +
-      '#pl-root .pl-flash .row{padding:3px 0;border-bottom:1px solid var(--border);cursor:pointer}' +
-      '#pl-root .pl-flash .t{color:var(--tlo);font-size:8px;margin-right:4px}' +
+      '#pl-root .pl-flash .row{padding:3px 0;border-bottom:1px solid var(--border);cursor:pointer;line-height:1.35}' +
+      '#pl-root .pl-flash .row:hover{background:var(--bg3)}' +
+      '#pl-root .pl-flash .t{color:var(--tlo);font-size:8px;margin-right:4px;white-space:nowrap}' +
+      '#pl-root .pl-flash .cat{color:var(--cyan);font-size:8px;margin-right:4px;white-space:nowrap}' +
+      '#pl-root .pl-flash .cat.us{color:var(--gold)}' +
+      '#pl-root .pl-flash .ttl{color:var(--text)}' +
       '#pl-root .pl-wl{flex:1;min-height:0;overflow:auto}' +
       '#pl-root .pl-wl table{width:100%;border-collapse:collapse;font-size:10px}' +
       '#pl-root .pl-wl th,#pl-root .pl-wl td{padding:3px 3px;border-bottom:1px solid var(--border);text-align:right}' +
@@ -947,11 +951,19 @@
   function renderFlash(p) {
     var flash = p.flash || [];
     var html = '<div class="pl-sec"><h4>市場快訊 <a data-go="news">中樞 →</a></h4><div class="pl-flash">';
-    flash.slice(0, 12).forEach(function (f) {
-      html += '<div class="row"' + (f.code ? ' data-code="' + esc(f.code) + '"' : '') + '>' +
+    if (!flash.length) {
+      return html + '<div class="pl-note">載入台／美重大訊息中…</div></div></div>';
+    }
+    flash.slice(0, 14).forEach(function (f) {
+      var isUs = (f.mkt === 'US') || (f.cat && String(f.cat).indexOf('美股') >= 0);
+      var catCls = isUs ? 'cat us' : 'cat';
+      html += '<div class="row"' +
+        (f.code ? ' data-code="' + esc(f.code) + '"' : '') +
+        (f.mkt ? ' data-mkt="' + esc(f.mkt) + '"' : '') +
+        (f.url ? ' data-url="' + esc(f.url) + '"' : '') + '>' +
         '<span class="t">' + esc(f.time || '') + '</span>' +
-        '<span style="color:var(--cyan);font-size:9px;margin-right:4px">[' + esc(f.cat || '') + ']</span>' +
-        esc(f.title || '') + '</div>';
+        '<span class="' + catCls + '">[' + esc(f.cat || (isUs ? '美股' : '重訊')) + ']</span>' +
+        '<span class="ttl">' + esc(f.title || '') + '</span></div>';
     });
     return html + '</div></div>';
   }
@@ -1022,6 +1034,11 @@
     });
     body.querySelectorAll('[data-code]').forEach(function (el) {
       el.onclick = function () {
+        var url = el.getAttribute('data-url');
+        /* 美股列：有原文連結時另開分頁；台股重訊以開圖表為主 */
+        if (url && (el.getAttribute('data-mkt') || '') === 'US' && el.classList.contains('row')) {
+          window.open(url, '_blank', 'noopener');
+        }
         openChart(el.getAttribute('data-code'), el.getAttribute('data-mkt') || 'TW');
       };
     });

@@ -1,7 +1,8 @@
 /* ============================================================================
  * news_v5.js  —  Stock Terminal 5.0 Stage 3：快訊中樞（事件／結算／提醒）
  * ----------------------------------------------------------------------------
- * 無新聞 scraper。此頁彙整既有「會主動打擾你」的資訊：
+ * 快訊中樞：
+ *   GET /flash      — 台／美公司重大訊息（上市櫃重訊＋美股新聞／8-K）
  *   GET /events     — 月營收截止、除權息預告
  *   結算日計算      — 每月第三個週三（與 settle_v3 同規則）
  *   GET /alert/status — 後端警報狀態（若有）
@@ -46,11 +47,12 @@
       '#nw-root .nw-strip .k{font-size:8px;color:var(--tlo);letter-spacing:.4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#nw-root .nw-strip .v{font-size:13px;font-weight:800;color:var(--thi);line-height:1.15;margin-top:1px}' +
       '#nw-root .nw-strip .s{font-size:8px;color:var(--tlo);margin-top:0;line-height:1.2}' +
-      '#nw-root .nw-dash{flex:1;min-height:0;display:grid;grid-template-columns:minmax(220px,28%) minmax(0,1fr);gap:4px;overflow:hidden}' +
-      '#nw-root .nw-left,#nw-root .nw-right{min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:4px}' +
+      '#nw-root .nw-dash{flex:1;min-height:0;display:grid;grid-template-columns:minmax(220px,26%) minmax(0,1.2fr) minmax(0,1fr);gap:4px;overflow:hidden}' +
+      '#nw-root .nw-left,#nw-root .nw-mid,#nw-root .nw-right{min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:4px}' +
       '#nw-root .nw-card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;min-width:0;' +
         'display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}' +
-      '#nw-root .nw-card h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;flex:0 0 auto}' +
+      '#nw-root .nw-card h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;flex:0 0 auto;' +
+        'display:flex;justify-content:space-between;align-items:center;gap:6px}' +
       '#nw-root .nw-grid{display:grid;grid-template-columns:1fr;gap:4px;flex:1;align-content:start}' +
       '#nw-root .nw-stat{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px}' +
       '#nw-root .nw-stat .k{font-size:8px;color:var(--tlo)}#nw-root .nw-stat .v{font-size:14px;font-weight:700;color:var(--thi);margin-top:1px;line-height:1.15}' +
@@ -62,9 +64,16 @@
       '#nw-root th{color:var(--tlo);position:sticky;top:0;background:var(--bg2);font-size:9px;z-index:1}' +
       '#nw-root tr.nw-row{cursor:pointer}#nw-root tr.nw-row:hover{background:var(--bg3)}' +
       '#nw-root .nw-table-wrap{flex:1;min-height:0;overflow:auto}' +
+      '#nw-root .nw-flash-list{flex:1;min-height:0;overflow:auto;font-size:10px}' +
+      '#nw-root .nw-flash-list .row{padding:4px 2px;border-bottom:1px solid var(--border);cursor:pointer;line-height:1.35}' +
+      '#nw-root .nw-flash-list .row:hover{background:var(--bg3)}' +
+      '#nw-root .nw-flash-list .t{color:var(--tlo);font-size:8px;margin-right:4px;white-space:nowrap}' +
+      '#nw-root .nw-flash-list .cat{color:var(--cyan);font-size:8px;margin-right:4px}' +
+      '#nw-root .nw-flash-list .cat.us{color:var(--gold)}' +
       '#nw-root .nw-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:2px;flex:0 0 auto}' +
       '#nw-root .nw-loading{font-size:10px;color:var(--tlo);padding:12px 0}' +
-      '#nw-body.nw-loading{display:flex;align-items:center}';
+      '#nw-body.nw-loading{display:flex;align-items:center}' +
+      '@media (max-width:1100px){#nw-root .nw-dash{grid-template-columns:1fr 1fr}#nw-root .nw-left{display:none}}';
   }
 
   function thirdWednesday(y, m) {
@@ -101,7 +110,7 @@
         '<div id="nw-root">' +
           '<div class="nw-head"><div>' +
             '<span class="nw-title">快訊</span>' +
-            '<span class="nw-sub">事件行事曆 · 結算日 · 警報</span>' +
+            '<span class="nw-sub">台美重大訊息 · 事件行事曆 · 結算日</span>' +
           '</div><div class="nw-actions">' +
             '<button type="button" class="nw-btn" id="nw-refresh">↻</button>' +
             '<button type="button" class="nw-btn" id="nw-cal">行事曆</button>' +
@@ -129,10 +138,34 @@
     return $('nw-body');
   }
 
-  function render(ev, alertSt) {
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function renderFlashList(items) {
+    items = items || [];
+    if (!items.length) {
+      return '<div class="nw-note">尚無重大訊息（請確認後端可連線 TWSE／Yahoo）</div>';
+    }
+    return '<div class="nw-flash-list">' + items.slice(0, 40).map(function (f) {
+      var isUs = (f.mkt === 'US') || (f.cat && String(f.cat).indexOf('美股') >= 0);
+      return '<div class="row"' +
+        (f.code ? ' data-code="' + esc(f.code) + '"' : '') +
+        (f.mkt ? ' data-mkt="' + esc(f.mkt) + '"' : '') +
+        (f.url ? ' data-url="' + esc(f.url) + '"' : '') + '>' +
+        '<span class="t">' + esc(f.time || '') + '</span>' +
+        '<span class="cat' + (isUs ? ' us' : '') + '">[' + esc(f.cat || '') + ']</span>' +
+        esc(f.title || '') + '</div>';
+    }).join('') + '</div>';
+  }
+
+  function render(ev, alertSt, flashPack) {
     var body = ensureMount();
     if (!body) return;
     ev = ev || {};
+    flashPack = flashPack || {};
+    var flashItems = flashPack.items || [];
     var settle = nextSettlement();
     var today = new Date();
     today = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -149,6 +182,9 @@
     var rev = ev.revenue || {};
     var revSoon = rev.daysAway != null && rev.daysAway <= 5;
     var ex = ev.exDividend || [];
+    var counts = flashPack.counts || {};
+    var twN = counts.tw != null ? counts.tw : flashItems.filter(function (x) { return x.mkt !== 'US'; }).length;
+    var usN = counts.us != null ? counts.us : flashItems.filter(function (x) { return x.mkt === 'US'; }).length;
 
     var alertLine = '—';
     if (alertSt) {
@@ -178,16 +214,17 @@
     body.classList.remove('nw-loading');
     body.innerHTML =
       '<div class="nw-strip">' +
+        '<div class="cell"><div class="k">台股重訊</div><div class="v">' + twN + '</div>' +
+          '<div class="s">上市＋櫃買精選</div></div>' +
+        '<div class="cell"><div class="k">美股訊息</div><div class="v">' + usN + '</div>' +
+          '<div class="s">權值／半導體＋8-K</div></div>' +
         '<div class="cell"><div class="k">期貨結算</div><div class="v ' + settleCls + '">' + md + '</div>' +
           '<div class="s ' + settleCls + '">' + settleTxt + '</div></div>' +
         '<div class="cell"><div class="k">月營收截止</div><div class="v ' + (revSoon ? 'soon' : '') + '">' +
           (rev.nextPublishBy || '—') + '</div><div class="s">' +
           (rev.forMonth ? rev.forMonth + ' 營收' : '—') +
-          (rev.daysAway != null ? ' · ' + rev.daysAway + ' 天' : '') + '</div></div>' +
-        '<div class="cell"><div class="k">除權息預告</div><div class="v">' + ex.length + '</div>' +
-          '<div class="s">點列開圖表</div></div>' +
-        '<div class="cell"><div class="k">後端警報</div><div class="v" style="font-size:12px">' + alertLine + '</div>' +
-          '<div class="s">推播／規則見系統選單</div></div>' +
+          (rev.daysAway != null ? ' · ' + rev.daysAway + ' 天' : '') +
+          ' · 警報 ' + alertLine + '</div></div>' +
       '</div>' +
       '<div class="nw-dash">' +
         '<div class="nw-left">' +
@@ -196,9 +233,15 @@
             '<div class="nw-stat"><div class="k">月營收公布</div><div class="v" style="font-size:12px">' +
               (rev.nextPublishBy || '—') + '</div>' +
               '<div class="s">上市櫃每月 10 日前公布上月營收</div></div>' +
-            '<div class="nw-stat"><div class="k">用途</div><div class="v" style="font-size:11px">部位節奏</div>' +
-              '<div class="s">非新聞頭條源 · 集中會影響部位的時程</div></div>' +
+            '<div class="nw-stat"><div class="k">除權息預告</div><div class="v">' + ex.length + '</div>' +
+              '<div class="s">右側列表 · 點列開圖表</div></div>' +
           '</div></div>' +
+        '</div>' +
+        '<div class="nw-mid">' +
+          '<div class="nw-card"><h4>台美重大訊息<span style="color:var(--tlo);font-weight:600;font-size:8px">' +
+            (flashPack.updatedAt ? ('更新 ' + String(flashPack.updatedAt).replace('T', ' ')) : '來源 TWSE／TPEx／Yahoo／SEC') +
+            '</span></h4>' + renderFlashList(flashItems) +
+            '<div class="nw-note">台股為公開資訊觀測站每日重大訊息精選；美股為權值／半導體相關新聞與 8-K。點列開圖表，美股另開原文。</div></div>' +
         '</div>' +
         '<div class="nw-right">' +
           '<div class="nw-card"><h4>除權除息預告 · ' + ex.length + ' 筆</h4>' + exTable + '</div>' +
@@ -214,6 +257,22 @@
         }
       };
     });
+    body.querySelectorAll('.nw-flash-list .row').forEach(function (el) {
+      el.onclick = function () {
+        var code = el.getAttribute('data-code');
+        var mkt = el.getAttribute('data-mkt') || 'TW';
+        var url = el.getAttribute('data-url');
+        if (url && mkt === 'US') window.open(url, '_blank', 'noopener');
+        if (code && window.ShellV5 && ShellV5.openChart) {
+          ShellV5.openChart(code, mkt);
+          return;
+        }
+        if (code && typeof loadSym === 'function') {
+          loadSym(code, mkt);
+          if (window.ShellV5) window.ShellV5.go('chart');
+        }
+      };
+    });
   }
 
   function refresh() {
@@ -222,8 +281,9 @@
     body.innerHTML = '<div class="nw-loading">載入快訊…</div>';
     Promise.all([
       fetch(SRV + '/events', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; }),
-      fetch(SRV + '/alert/status', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
-    ]).then(function (arr) { render(arr[0], arr[1]); });
+      fetch(SRV + '/alert/status', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
+      fetch(SRV + '/flash?n=36', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; })
+    ]).then(function (arr) { render(arr[0], arr[1], arr[2]); });
   }
 
   function activate() {
