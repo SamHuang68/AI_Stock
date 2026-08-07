@@ -24,14 +24,14 @@
     { id: 'chart',         label: '圖表', hint: 'K 線工作區（含加權／櫃買指數與總體列）',   icon: '◈' },
     { id: 'breadth',       label: '廣度', hint: '大盤廣度（漲跌家數）',                     icon: '▤' },
     { id: 'heat',          label: '熱力', hint: '類股熱力圖＋焦點掃描',                     icon: '▦' },
-    { id: 'institutional', label: '法人', hint: '三大法人動向與買賣超',                     icon: '🏦' },
-    { id: 'international', label: '國際', hint: '美股／美元／原油與總經',                   icon: '🌐' },
+    { id: 'institutional', label: '法人', hint: '三大法人動向與買賣超',                     icon: '₴' },
+    { id: 'international', label: '國際', hint: '美股／美元／原油與總經',                   icon: '◎' },
     { id: 'afterhours',    label: '盤後', hint: '漲跌排行／籌碼／期貨盤後',                 icon: '◐' },
-    { id: 'signals',       label: '訊號', hint: '策略訊號／焦點掃描結果',                   icon: '🎯' },
+    { id: 'signals',       label: '訊號', hint: '策略訊號／焦點掃描結果',                   icon: '✦' },
     { id: 'watchlist',     label: '自選', hint: '自選股中心（表格式；完整操作在圖表列）',   icon: '★' },
-    { id: 'risk',          label: '風險', hint: '風險事件與脈動風險度',                     icon: '🛡' },
+    { id: 'risk',          label: '風險', hint: '風險事件與脈動風險度',                     icon: '◇' },
     { id: 'news',          label: '快訊', hint: '事件／結算／警報中樞',                     icon: '◉' },
-    { id: 'scan',          label: '選股', hint: '三合一選股（技術×基本面×籌碼）',           icon: '🔍' },
+    { id: 'scan',          label: '選股', hint: '三合一選股（技術×基本面×籌碼）',           icon: '▷' },
     { id: 'book',          label: '投組', hint: '投組風險（波動／VaR／曝險）',               icon: '▣' },
     { id: 'settings',      label: '設定', hint: '同步狀態與資料來源',                       icon: '⚙' },
     { id: 'workspace',     label: '工具', hint: '回到圖表並開啟指令盤',                     icon: '⌘', action: 'cmd' }
@@ -51,22 +51,22 @@
     s.textContent =
       '#shell-row{display:flex;flex:1;min-height:0;min-width:0}' +
       /* 寬側欄；窄螢幕收成圖示欄 — 品牌固定 Stock Terminal */
-      '#navrail{flex:0 0 158px;width:158px;background:#08101C;' +
+      '#navrail{flex:0 0 150px;width:150px;background:linear-gradient(180deg,#0A1220 0%,#070E18 100%);' +
         'border-right:1px solid #132238;display:flex;flex-direction:column;align-items:stretch;' +
         'padding:8px 6px;gap:1px;z-index:40;flex-shrink:0;overflow-y:auto;overflow-x:hidden;box-sizing:border-box}' +
-      '#navrail .nr-brand-st{display:flex;align-items:center;gap:8px;padding:4px 6px 10px;' +
-        'border-bottom:1px solid #132238;margin-bottom:4px;user-select:none;flex-shrink:0}' +
-      '#navrail .nr-brand-st .logo-box{width:28px;height:28px;border-radius:6px;background:var(--gold-s);' +
-        'border:1px solid var(--gold-m);display:flex;align-items:center;justify-content:center;flex-shrink:0;' +
+      '#navrail .nr-brand-st{display:flex;align-items:center;gap:8px;padding:6px 6px 12px;' +
+        'border-bottom:1px solid #132238;margin-bottom:6px;user-select:none;flex-shrink:0}' +
+      '#navrail .nr-brand-st .logo-box{width:30px;height:30px;border-radius:7px;background:rgba(245,197,24,.1);' +
+        'border:1px solid rgba(245,197,24,.35);display:flex;align-items:center;justify-content:center;flex-shrink:0;' +
         'font-family:\'JetBrains Mono\',monospace;font-size:11px;font-weight:800;color:var(--gold)}' +
       '#navrail .nr-brand-st .brand-title{font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:800;' +
-        'color:#E2E8F0;line-height:1.1;letter-spacing:.2px}' +
+        'color:#F1F5F9;line-height:1.1;letter-spacing:.2px}' +
       '#navrail .nr-brand-st .brand-sub{font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;' +
         'color:var(--gold);letter-spacing:.8px;margin-top:2px}' +
       '.nr-btn{display:flex;align-items:center;gap:8px;' +
-        'min-height:32px;margin:1px 0;padding:5px 8px;border:1px solid transparent;border-radius:7px;' +
+        'min-height:30px;margin:1px 0;padding:4px 8px;border:1px solid transparent;border-radius:7px;' +
         'background:transparent;color:#94A3B8;cursor:pointer;font-family:\'JetBrains Mono\',monospace;' +
-        'font-size:11px;font-weight:600;letter-spacing:.2px;transition:all .14s ease;flex-shrink:0;text-align:left}' +
+        'font-size:11px;font-weight:600;letter-spacing:.2px;transition:color .14s ease,background .14s ease,border-color .14s ease;flex-shrink:0;text-align:left}' +
       '.nr-btn .nr-ico{font-size:13px;line-height:1;opacity:.85;width:16px;text-align:center;flex-shrink:0}' +
       '.nr-btn:hover{color:#F8FAFC;background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.06)}' +
       '.nr-btn.on{color:var(--gold);background:var(--gold-s);border-color:var(--gold-m)}' +
