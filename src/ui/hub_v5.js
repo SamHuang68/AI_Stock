@@ -1,7 +1,8 @@
 /* ============================================================================
  * hub_v5.js  —  Stock Terminal 5.0：TW Pulse 對齊模組中樞
  * ----------------------------------------------------------------------------
- * trends / institutional / international / signals / watchlist / risk / settings
+ * institutional / international / signals / watchlist / risk / settings
+ * （trends／指數已併入 ShellV5 → 圖表 ^TWII）
  * 真實 API：/pulse/history · /sync · /movers · /inst-rank · /macro · /focus · /datasources
  * ========================================================================== */
 (function () {
@@ -15,8 +16,9 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .catch(function () { return null; });
   }
-  function goRoute(id) { if (window.ShellV5) window.ShellV5.go(id); }
+  function goRoute(id, opts) { if (window.ShellV5) window.ShellV5.go(id, opts || {}); }
   function openChart(code, mkt) {
+    if (window.ShellV5 && ShellV5.openChart) { ShellV5.openChart(code || '^TWII', mkt || 'TW'); return; }
     if (code && typeof loadSym === 'function') { loadSym(code, mkt || 'TW'); goRoute('chart'); }
   }
   function tw(p) {
@@ -113,45 +115,6 @@
       html += '<i style="height:' + h + 'px;background:' + col + '"></i>';
     });
     return html + '</div>';
-  }
-
-  // ── Trends ───────────────────────────────────────────────
-  function renderTrends(el) {
-    el.innerHTML = head('指數走勢', '加權／櫃買歷史（本機歷史庫 merge）',
-      '<button class="hub-btn" data-sync>同步資料</button><button class="hub-btn primary" data-go="chart">圖表</button>') +
-      '<div id="hub-trends-body" class="hub-note">載入中…</div></div>';
-    bindCommon(el);
-    Promise.all([
-      jget('/pulse/history?kind=index&n=30'),
-      jget('/twindex')
-    ]).then(function (arr) {
-      var hist = arr[0] || {};
-      var live = arr[1] || {};
-      var t00 = (live.indices || {}).t00 || {};
-      var o00 = (live.indices || {}).o00 || {};
-      var rows = (hist.rows || []).slice().reverse();
-      var closes = rows.map(function (r) { return r.close; });
-      var chgs = rows.map(function (r) { return r.changePct || 0; });
-      var body = $('hub-trends-body');
-      if (!body) return;
-      var tbl = '<table><tr><th>日期</th><th>開</th><th>高</th><th>低</th><th>收</th><th>漲跌</th></tr>';
-      (hist.rows || []).slice(0, 15).forEach(function (r) {
-        tbl += '<tr><td>' + r.date + '</td><td>' + fmt(r.open) + '</td><td>' + fmt(r.high) + '</td><td>' +
-          fmt(r.low) + '</td><td>' + fmt(r.close) + '</td><td class="' + tw(r.changePct) + '">' + pct(r.changePct) + '</td></tr>';
-      });
-      tbl += '</table>';
-      body.outerHTML =
-        '<div class="hub-grid">' +
-          '<div class="hub-card"><div class="k">加權指數</div><div class="v">' + fmt(t00.price) + '</div>' +
-            '<div class="' + tw(t00.changePct) + '">' + pct(t00.changePct) + '</div></div>' +
-          '<div class="hub-card"><div class="k">櫃買指數</div><div class="v">' + fmt(o00.price) + '</div>' +
-            '<div class="' + tw(o00.changePct) + '">' + pct(o00.changePct) + '</div></div>' +
-          '<div class="hub-card" style="grid-column:span 2"><div class="k">收盤走勢（歷史庫）</div>' + spark(chgs) +
-            '<div class="hub-note">列數 ' + (hist.rows || []).length + ' · 來源 Yahoo merge → pulse_history.db</div></div>' +
-        '</div><div class="hub-sec"><h4>歷史明細 · ^TWII</h4>' + tbl +
-        '<div class="hub-note">資料來源：Yahoo／本機歷史庫。按「同步資料」只 merge 新日。</div></div>';
-      bindCommon(el);
-    });
   }
 
   // ── Institutional ────────────────────────────────────────
@@ -335,10 +298,18 @@
 
   // ── Watchlist ────────────────────────────────────────────
   function readWl() {
+    /* 與圖表自選同一真相：優先裸 S.wl */
     try {
-      var a = JSON.parse(localStorage.getItem('st_wl') || '[]');
-      return Array.isArray(a) ? a : [];
-    } catch (e) { return []; }
+      if (typeof S !== 'undefined' && Array.isArray(S.wl) && S.wl.length) return S.wl.slice();
+    } catch (e) {}
+    var keys = ['st_wl', 'wl_v2', 'watchlist'];
+    for (var i = 0; i < keys.length; i++) {
+      try {
+        var a = JSON.parse(localStorage.getItem(keys[i]) || '[]');
+        if (Array.isArray(a) && a.length) return a;
+      } catch (e) {}
+    }
+    return [];
   }
   function renderWatchlist(el) {
     el.innerHTML = head('自選股中心', '本機瀏覽器自選＋即時報價',
@@ -528,7 +499,12 @@
 
   function bindCommon(root) {
     root.querySelectorAll('[data-go]').forEach(function (b) {
-      b.onclick = function () { goRoute(b.getAttribute('data-go')); };
+      b.onclick = function () {
+        var opts = {};
+        if (b.getAttribute('data-sym')) opts.sym = b.getAttribute('data-sym');
+        if (b.getAttribute('data-mkt')) opts.mkt = b.getAttribute('data-mkt');
+        goRoute(b.getAttribute('data-go'), opts);
+      };
     });
     root.querySelectorAll('[data-sync]').forEach(function (b) {
       b.onclick = function () {
@@ -551,7 +527,6 @@
   }
 
   var ACTIVATORS = {
-    trends: function () { var el = mount('trends'); if (el) renderTrends(el); },
     institutional: function () { var el = mount('institutional'); if (el) renderInstitutional(el); },
     international: function () { var el = mount('international'); if (el) renderInternational(el); },
     signals: function () { var el = mount('signals'); if (el) renderSignals(el); },
@@ -562,13 +537,20 @@
 
   window.HubV5 = ACTIVATORS;
   // shell emitRoute expects *.activate
-  window.TrendsV5 = { activate: ACTIVATORS.trends, mount: ACTIVATORS.trends };
   window.InstitutionalV5 = { activate: ACTIVATORS.institutional, mount: ACTIVATORS.institutional };
   window.InternationalV5 = { activate: ACTIVATORS.international, mount: ACTIVATORS.international };
   window.SignalsV5 = { activate: ACTIVATORS.signals, mount: ACTIVATORS.signals };
   window.WatchlistV5 = { activate: ACTIVATORS.watchlist, mount: ACTIVATORS.watchlist };
   window.RiskV5 = { activate: ACTIVATORS.risk, mount: ACTIVATORS.risk };
   window.SettingsV5 = { activate: ACTIVATORS.settings, mount: ACTIVATORS.settings };
+  /* 相容舊 TrendsV5 呼叫 → 圖表加權 */
+  window.TrendsV5 = {
+    activate: function () {
+      if (window.ShellV5 && ShellV5.openChart) ShellV5.openChart('^TWII', 'TW');
+      else if (window.ShellV5) ShellV5.go('chart', { sym: '^TWII', mkt: 'TW' });
+    },
+    mount: function () { this.activate(); }
+  };
 
   window.addEventListener('shell:route', function (ev) {
     var id = ev && ev.detail && ev.detail.route;

@@ -1,8 +1,9 @@
 /* ============================================================================
  * shell_v5.js  —  Stock Terminal 5.0：側欄殼層 + 視圖路由
  * ----------------------------------------------------------------------------
- * TW Pulse 對齊：總覽／脈動／指數／廣度／熱力／法人／國際／盤後／
- * 訊號／自選／風險／快訊／設定 + ST 圖表／選股／投組。
+ * TW Pulse 對齊：總覽／圖表／廣度／熱力／法人／國際／盤後／
+ * 訊號／自選／風險／快訊／設定 + 選股／投組。
+ * 「指數」已併入圖表（^TWII K 線＋總體列／indices 自選更完整）。
  * 同步：預抓歷史庫，僅 merge 最近缺漏日（/sync）。
  * 鐵律：不破壞 #left / #pro-tools / symLoaded / Toolbar 既有行為。
  * ========================================================================== */
@@ -12,19 +13,24 @@
   var STORAGE_KEY = 'st5.shell.route';
   var VERSION = '5.0';
 
+  /* 舊 route → 更完整的目的地（圖表／熱力等） */
+  var ROUTE_ALIASES = {
+    trends: { to: 'chart', sym: '^TWII', mkt: 'TW' },   // 指數頁 → 圖表加權
+    index:  { to: 'chart', sym: '^TWII', mkt: 'TW' }
+  };
+
   var ROUTES = [
     { id: 'pulse',         label: '總覽', hint: '市場總覽儀表板（對齊 TW Pulse Overview）', icon: '◎' },
-    { id: 'trends',        label: '指數', hint: '加權／櫃買走勢與歷史庫',                   icon: '📈' },
+    { id: 'chart',         label: '圖表', hint: 'K 線工作區（含加權／櫃買指數與總體列）',   icon: '◈' },
     { id: 'breadth',       label: '廣度', hint: '大盤廣度（漲跌家數）',                     icon: '▤' },
     { id: 'heat',          label: '熱力', hint: '類股熱力圖＋焦點掃描',                     icon: '▦' },
     { id: 'institutional', label: '法人', hint: '三大法人動向與買賣超',                     icon: '🏦' },
     { id: 'international', label: '國際', hint: '美股／美元／原油與總經',                   icon: '🌐' },
     { id: 'afterhours',    label: '盤後', hint: '漲跌排行／籌碼／期貨盤後',                 icon: '◐' },
-    { id: 'signals',       label: '訊號', hint: '策略訊號／焦點掃描',                       icon: '🎯' },
-    { id: 'watchlist',     label: '自選', hint: '自選股中心',                               icon: '★' },
+    { id: 'signals',       label: '訊號', hint: '策略訊號／焦點掃描結果',                   icon: '🎯' },
+    { id: 'watchlist',     label: '自選', hint: '自選股中心（表格式；完整操作在圖表列）',   icon: '★' },
     { id: 'risk',          label: '風險', hint: '風險事件與脈動風險度',                     icon: '🛡' },
     { id: 'news',          label: '快訊', hint: '事件／結算／警報中樞',                     icon: '◉' },
-    { id: 'chart',         label: '圖表', hint: 'K 線工作區',                               icon: '◈' },
     { id: 'scan',          label: '選股', hint: '三合一選股（技術×基本面×籌碼）',           icon: '🔍' },
     { id: 'book',          label: '投組', hint: '投組風險（波動／VaR／曝險）',               icon: '▣' },
     { id: 'settings',      label: '設定', hint: '同步狀態與資料來源',                       icon: '⚙' },
@@ -325,7 +331,6 @@
     } catch (e) {}
     var map = {
       pulse: 'PulseV5',
-      trends: 'TrendsV5',
       breadth: 'BreadthV5',
       heat: 'HeatV5',
       institutional: 'InstitutionalV5',
@@ -351,7 +356,25 @@
     return null;
   }
 
-  function applyRoute(id) {
+  function resolveAlias(id, opts) {
+    opts = opts || {};
+    var a = ROUTE_ALIASES[id];
+    if (!a) return { id: id, opts: opts };
+    return {
+      id: a.to,
+      opts: {
+        sym: opts.sym || a.sym,
+        mkt: opts.mkt || a.mkt
+      }
+    };
+  }
+
+  function applyRoute(id, opts) {
+    opts = opts || {};
+    var resolved = resolveAlias(id, opts);
+    id = resolved.id;
+    opts = resolved.opts;
+
     var route = findRoute(id) || findRoute('chart') || ROUTES[0];
 
     if (route.action === 'cmd') {
@@ -395,18 +418,32 @@
       }, 30);
     }
 
+    if (opts.sym && typeof loadSym === 'function') {
+      var sym = opts.sym, mkt = opts.mkt || 'TW';
+      setTimeout(function () {
+        try { loadSym(sym, mkt); } catch (e) { console.warn('[shell-v5] loadSym', e); }
+      }, isChart ? 40 : 0);
+    }
+
     emitRoute(id);
   }
 
-  function go(id) {
+  function go(id, opts) {
     if (!ensureStructure()) return;
-    applyRoute(id || 'chart');
+    applyRoute(id || 'chart', opts || {});
   }
 
   function boot() {
     if (!ensureStructure()) return setTimeout(boot, 120);
+    /* 移除舊「指數」面板 DOM（若熱更新殘留） */
+    ['trends', 'index'].forEach(function (rid) {
+      var orphan = $('view-' + rid);
+      if (orphan && orphan.parentNode) orphan.parentNode.removeChild(orphan);
+    });
     var saved = 'chart';
     try { saved = localStorage.getItem(STORAGE_KEY) || 'chart'; } catch (e) {}
+    /* 舊「指數」分頁 → 圖表 */
+    if (saved === 'trends' || saved === 'index') saved = 'chart';
     if (!saved || !findRoute(saved)) saved = 'chart';
     applyRoute(saved);
     probeHealth();
@@ -427,11 +464,16 @@
   window.ShellV5 = {
     VERSION: VERSION,
     ROUTES: ROUTES,
+    ALIASES: ROUTE_ALIASES,
     go: go,
     navigate: go,
     route: function () { return state.route; },
     setSync: setSync,
-    sync: function () { runSync(true); }
+    sync: function () { runSync(true); },
+    /** 開圖表並載入代號（指數預設 ^TWII） */
+    openChart: function (sym, mkt) {
+      go('chart', { sym: sym || '^TWII', mkt: mkt || 'TW' });
+    }
   };
 
   if (document.readyState === 'loading') {

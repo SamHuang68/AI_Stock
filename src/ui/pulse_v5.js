@@ -212,10 +212,14 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
   }
-  function goRoute(id) {
-    if (window.ShellV5) window.ShellV5.go(id);
+  function goRoute(id, opts) {
+    if (window.ShellV5) window.ShellV5.go(id, opts || {});
   }
   function openChart(code, mkt) {
+    if (window.ShellV5 && ShellV5.openChart) {
+      ShellV5.openChart(code || '^TWII', mkt || 'TW');
+      return;
+    }
     if (code && typeof loadSym === 'function') {
       loadSym(code, mkt || 'TW');
       goRoute('chart');
@@ -257,7 +261,12 @@
       var tf = $('pl-toggle-fac');
       if (tf) tf.onclick = function () { focusFactors(); };
       mount.querySelectorAll('[data-go]').forEach(function (b) {
-        b.onclick = function () { goRoute(b.getAttribute('data-go')); };
+        b.onclick = function () {
+          var opts = {};
+          if (b.getAttribute('data-sym')) opts.sym = b.getAttribute('data-sym');
+          if (b.getAttribute('data-mkt')) opts.mkt = b.getAttribute('data-mkt');
+          goRoute(b.getAttribute('data-go'), opts);
+        };
       });
     }
     syncFactorBtn();
@@ -455,7 +464,7 @@
 
   function renderOhlc(ov) {
     var o = (ov && ov.ohlc) || {};
-    return '<div class="pl-sec"><h4>市場盤勢走勢 <a data-go="trends">指數 →</a></h4>' +
+    return '<div class="pl-sec"><h4>市場盤勢走勢 <a data-go="chart" data-sym="^TWII" data-mkt="TW">圖表 →</a></h4>' +
       '<div class="pl-trend-pair">' +
         '<div class="tp"><div class="k">加權今日漲幅</div><div class="v ' + tw(o.changePct) + '">' + pct(o.changePct) + '</div>' +
           '<div class="pl-note" style="margin:2px 0 0">現價 ' + fmt(o.price, 2) + '</div></div>' +
@@ -699,7 +708,13 @@
 
   function bind(body) {
     body.querySelectorAll('[data-go]').forEach(function (a) {
-      a.onclick = function (e) { e.preventDefault(); goRoute(a.getAttribute('data-go')); };
+      a.onclick = function (e) {
+        e.preventDefault();
+        var opts = {};
+        if (a.getAttribute('data-sym')) opts.sym = a.getAttribute('data-sym');
+        if (a.getAttribute('data-mkt')) opts.mkt = a.getAttribute('data-mkt');
+        goRoute(a.getAttribute('data-go'), opts);
+      };
     });
     body.querySelectorAll('[data-code]').forEach(function (el) {
       el.onclick = function () {
