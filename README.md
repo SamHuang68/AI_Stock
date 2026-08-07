@@ -17,19 +17,30 @@ Bloomberg 風格台／美股研究終端機 — **本機跑、零雲端、純 Py
 
 需求：Python 3.10+（純標準庫）、現代瀏覽器。Server **只聽** `127.0.0.1:18432`。
 
-### Windows（建議）
+### Windows（PowerShell）
 
-```bat
-cd C:\path\to\AI_Stock
-scripts\go.bat
+在**專案根目錄**執行（不是 `scripts` 子資料夾）：
+
+```powershell
+cd C:\Users\Sam\AI_Stock
+.\scripts\go.bat
+```
+
+若目前已在 `...\AI_Stock\scripts`：
+
+```powershell
+cd ..
+.\scripts\go.bat
 ```
 
 | 指令 | 用途 |
 |------|------|
-| `scripts\go.bat` | rebuild + 重啟 server + 開瀏覽器 |
-| `scripts\go.bat pull` | `git pull` 後同上 |
-| `scripts\go.bat pull <分支>` | 切分支 + pull + 重建 + 重啟 |
-| `scripts\go.bat rebuild` | 只重建＋重啟（不開瀏覽器） |
+| `.\scripts\go.bat` | rebuild + 重啟 server + 開瀏覽器 |
+| `.\scripts\go.bat pull` | `git pull` 後同上 |
+| `.\scripts\go.bat pull <分支>` | 切分支 + pull + 重建 + 重啟 |
+| `.\scripts\go.bat rebuild` | 只重建＋重啟（不開瀏覽器） |
+
+> PowerShell 不要貼 `REM …`（那是 cmd 註解）。路徑請用你本機實際目錄，不要用文件裡的佔位路徑。
 
 ### Linux / macOS
 

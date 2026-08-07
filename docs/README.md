@@ -105,15 +105,17 @@ Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤�
 
 ### 本機指令速查
 
-**Windows**
+**Windows（PowerShell；在專案根目錄）**
 
 ```powershell
-cd C:\Tools\Stock_Terminal
-scripts\go.bat              # rebuild + 重啟 + 瀏覽器
-scripts\go.bat pull         # git pull 後同上
-scripts\go.bat pull <分支>
-scripts\go.bat rebuild      # 不開瀏覽器
+cd C:\Users\Sam\AI_Stock    # 改成你的實際路徑
+.\scripts\go.bat            # rebuild + 重啟 + 瀏覽器
+.\scripts\go.bat pull       # git pull 後同上
+.\scripts\go.bat pull <分支>
+.\scripts\go.bat rebuild    # 不開瀏覽器
 ```
+
+若已在 `scripts` 子資料夾：先 `cd ..` 再跑 `.\scripts\go.bat`。
 
 **Linux / macOS**
 
