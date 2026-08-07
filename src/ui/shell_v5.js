@@ -42,9 +42,12 @@
   function $(id) { return document.getElementById(id); }
 
   function injectCSS() {
-    if ($('shell-v5-css')) return;
-    var s = document.createElement('style');
-    s.id = 'shell-v5-css';
+    var s = $('shell-v5-css');
+    if (!s) {
+      s = document.createElement('style');
+      s.id = 'shell-v5-css';
+      document.head.appendChild(s);
+    }
     s.textContent =
       '#shell-row{display:flex;flex:1;min-height:0;min-width:0}' +
       '#navrail{flex:0 0 58px;width:58px;background:linear-gradient(180deg,#0A1220 0%,#070D18 100%);' +
@@ -70,17 +73,19 @@
         'radial-gradient(1200px 480px at 10% -10%,rgba(245,197,24,.06),transparent 55%),var(--bg);' +
         'overflow:auto}' +
       '#shell-views.show{display:flex;flex-direction:column}' +
+      /* 總覽 compact：鎖一屏，避免殼層再疊一層捲軸 */
+      '#shell-views.show:has(#view-pulse.on){overflow:hidden}' +
       '#body.shell-hidden{display:none !important}' +
       '#wlbar.shell-hidden{display:none !important}' +
-      '.sv-panel{display:none;flex:1;padding:10px 14px 16px;max-width:min(1200px,100%);min-width:0;box-sizing:border-box}' +
-      '.sv-panel.on{display:block}' +
+      '.sv-panel{display:none;flex:1;padding:10px 14px 16px;max-width:min(1200px,100%);min-width:0;box-sizing:border-box;min-height:0}' +
+      '.sv-panel.on{display:flex;flex-direction:column}' +
       /* 資訊面板高密度：標題列／卡片／表格統一收緊 */
       '.sv-panel .sv-kicker{font-size:9px;letter-spacing:1.5px;margin-bottom:2px}' +
       '.sv-panel .sv-title{font-size:20px;margin:0}' +
       '.sv-panel .sv-sub{font-size:10px;margin-top:2px;line-height:1.4}' +
       /* 防 flex 子項 min-content 撑破水平；寬版面板由各模組覆寫 max-width */
       '#shell-views > .sv-panel{min-width:0}' +
-      '.sv-mount{min-height:100%;min-width:0;max-width:100%;box-sizing:border-box}' +
+      '.sv-mount{flex:1;min-height:0;min-width:0;max-width:100%;box-sizing:border-box;display:flex;flex-direction:column}' +
       '.sv-kicker{font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--gold);' +
         'letter-spacing:1.5px;margin-bottom:2px}' +
       '.sv-title{font-family:\'Noto Serif TC\',serif;font-size:20px;font-weight:700;color:var(--thi);' +
@@ -113,7 +118,6 @@
         '.sv-title{font-size:22px}' +
         '#topbar .shell-sync-btn span.lbl{display:none}' +
       '}';
-    document.head.appendChild(s);
   }
 
   function stubHTML(route) {
