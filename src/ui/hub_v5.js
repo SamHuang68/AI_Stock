@@ -131,7 +131,12 @@
       '.hub-root .hub-mag3 .row .val{width:64px;flex-shrink:0;text-align:right;font-weight:700;font-size:13px}' +
       '.hub-root .hub-mag3 .row .bar{flex:1;min-width:0}' +
       '.hub-root .hub-mag3 .vz-mag .vz-track{height:12px}' +
+      '.hub-root .hub-inst-cmt{font-size:10px;line-height:1.5;color:var(--text);margin-top:6px;flex:0 0 auto;' +
+        'padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:5px}' +
+      '.hub-root .hub-inst-cmt b{color:var(--gold);font-weight:700}' +
+      '.hub-root .hub-inst-cmt .up{color:var(--red)}.hub-root .hub-inst-cmt .dn{color:var(--green)}' +
       '.hub-root .hub-dash.hub-cols-wide-left{grid-template-columns:minmax(0,1.7fr) minmax(0,.9fr)}' +
+      '.hub-root .hub-dash.hub-cols-inst{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr) minmax(0,1fr)}' +
       '.hub-root .badge{display:inline-block;padding:0 6px;border-radius:999px;font-size:8px;font-weight:700}' +
       '.hub-root .badge.ok{background:var(--gbg);color:var(--green);border:1px solid var(--gbdr)}' +
       '.hub-root .badge.warn{background:rgba(251,146,60,.12);color:var(--orange);border:1px solid rgba(251,146,60,.35)}' +
@@ -175,9 +180,77 @@
     return html + '</div>';
   }
 
+  function yiNum(v) {
+    if (v == null || !isFinite(v)) return null;
+    return Math.abs(v) >= 1e6 ? v / 1e8 : v;
+  }
+
+  function fmtYiSigned(v) {
+    var y = yiNum(v);
+    if (y == null) return '—';
+    return (y >= 0 ? '+' : '') + y.toFixed(1) + ' 億';
+  }
+
+  /** 法人資金變化評論（不重複頂列數字） */
+  function buildInstComment(inst, histNewestFirst, totalYi) {
+    var parts = [];
+    var f = yiNum(inst.foreign), t = yiNum(inst.trust), d = yiNum(inst.dealer);
+    var tot = totalYi != null && isFinite(totalYi) ? yiNum(totalYi) : (
+      (f != null || t != null || d != null) ? ((f || 0) + (t || 0) + (d || 0)) : null
+    );
+    var rows = (histNewestFirst || []).filter(function (r) {
+      return r && r.totalYi != null && isFinite(r.totalYi);
+    });
+    var chrono = rows.slice().reverse();
+    var streak = 0;
+    if (tot != null && tot !== 0 && chrono.length) {
+      var sign = tot > 0 ? 1 : -1;
+      for (var k = chrono.length - 1; k >= 0; k--) {
+        var v = chrono[k].totalYi;
+        if (v == null || v === 0 || (v > 0 ? 1 : -1) !== sign) break;
+        streak += 1;
+      }
+    }
+    if (streak >= 3) {
+      parts.push(tot > 0
+        ? '合計已連 <b class="up">' + streak + '</b> 日買超，資金偏進攻節奏。'
+        : '合計已連 <b class="dn">' + streak + '</b> 日賣超，資金偏防衛／調節。');
+    } else if (tot != null) {
+      parts.push(tot > 20
+        ? '當日合計明顯買超，短線籌碼偏多。'
+        : tot < -20
+          ? '當日合計明顯賣超，留意權值與指數壓力。'
+          : '當日合計接近平衡，方向性訊號有限。');
+    }
+    if (chrono.length >= 2 && tot != null) {
+      var prev = chrono[chrono.length - 2].totalYi;
+      if (prev != null && isFinite(prev)) {
+        var delta = tot - prev;
+        if (Math.abs(delta) >= 50) {
+          parts.push(delta > 0
+            ? '較前日轉強約 <span class="up">' + fmtYiSigned(delta) + '</span>。'
+            : '較前日轉弱約 <span class="dn">' + fmtYiSigned(delta) + '</span>。');
+        } else if (prev > 0 && tot < 0) {
+          parts.push('合計由買轉賣，資金氛圍轉向謹慎。');
+        } else if (prev < 0 && tot > 0) {
+          parts.push('合計由賣轉買，資金回補跡象。');
+        }
+      }
+    }
+    if (f != null && d != null) {
+      if (f > 30 && d < -30) parts.push('外資偏買、自營偏賣 — 常見結構／避險分歧。');
+      else if (f < -30 && d > 30) parts.push('外資偏賣、自營偏買 — 留意承接能否延續。');
+    }
+    if (t != null && Math.abs(t) >= 20) {
+      parts.push(t > 0 ? '投信偏買，中長線資金仍有佈局。' : '投信偏賣，主動資金偏調節。');
+    }
+    if (!parts.length) parts.push('法人序列載入中或資料不足，暫無趨勢評論。');
+    return parts.slice(0, 3).join(' ');
+  }
+
   // ── Institutional ────────────────────────────────────────
   function renderInstitutional(el) {
-    el.innerHTML = head('法人動向', '三大法人合計＋買賣超排行＋歷史趨勢',
+    el.innerHTML = head('法人動向', '三大法人合計＋資金趨勢評論＋買賣超排行',
       '<button class="hub-btn" data-sync>同步資料</button><button class="hub-btn" data-go="afterhours">盤後</button>') +
       '<div id="hub-inst-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
@@ -197,9 +270,6 @@
       if (inst.foreign != null || inst.trust != null || inst.dealer != null) {
         total = (inst.foreign || 0) + (inst.trust || 0) + (inst.dealer || 0);
       }
-      var maxDay = Math.max(
-        Math.abs(inst.foreign || 0), Math.abs(inst.trust || 0), Math.abs(inst.dealer || 0), 1
-      );
       function rankTbl(list, title) {
         var maxAbs = 0;
         list.forEach(function (r) {
@@ -217,19 +287,20 @@
         });
         return h + '</table></div></div>';
       }
-      var sparkVals = hist.slice().reverse().map(function (r) { return r.totalYi || 0; });
-      var totalSpark = V ? V.sparkBars(sparkVals) : '';
-      var fBar = V ? V.magBar(inst.foreign, maxDay, { fmt: V.fmtYiFromYuan }) : '';
-      var tBar = V ? V.magBar(inst.trust, maxDay, { fmt: V.fmtYiFromYuan }) : '';
-      var dBar = V ? V.magBar(inst.dealer, maxDay, { fmt: V.fmtYiFromYuan }) : '';
-      var magPanel = '<div class="hub-sec"><h4>當日法人量柱</h4><div class="hub-mag3">' +
-        '<div class="row"><span class="lbl">外資</span><span class="val ' + tw(inst.foreign) + '">' + yi(inst.foreign) + '</span><span class="bar">' + fBar + '</span></div>' +
-        '<div class="row"><span class="lbl">投信</span><span class="val ' + tw(inst.trust) + '">' + yi(inst.trust) + '</span><span class="bar">' + tBar + '</span></div>' +
-        '<div class="row"><span class="lbl">自營</span><span class="val ' + tw(inst.dealer) + '">' + yi(inst.dealer) + '</span><span class="bar">' + dBar + '</span></div>' +
-        '</div></div>';
-      var trendPanel = '<div class="hub-sec"><h4>法人資金趨勢</h4><div class="hub-spark-fill">' +
-        (V ? V.sparkLine(sparkVals, { color: 'var(--gold)', h: 220, w: 420 }) : spark(sparkVals)) +
-        '</div><div class="hub-note">日數 ' + hist.length + (inst.date ? ' · 最新法人日 ' + inst.date : '') + '</div></div>';
+      var sparkVals = hist.slice().reverse().map(function (r) { return r.totalYi; })
+        .filter(function (v) { return v != null && isFinite(v); });
+      var lastSpark = sparkVals.length ? sparkVals[sparkVals.length - 1] : null;
+      var sparkCol = lastSpark != null && lastSpark >= 0 ? 'var(--red)' : 'var(--green)';
+      var totalSpark = V && sparkVals.length ? V.sparkBars(sparkVals) : '';
+      var cmtHtml = buildInstComment(inst, hist, total);
+      var trendPanel = '<div class="hub-sec"><h4>法人資金趨勢與評論</h4><div class="hub-spark-fill">' +
+        (V && sparkVals.length >= 2
+          ? V.sparkLine(sparkVals, { color: sparkCol, h: 220, w: 420 })
+          : (sparkVals.length ? spark(sparkVals) : '<div class="hub-empty">尚無本機法人歷史</div>')) +
+        '</div>' +
+        '<div class="hub-inst-cmt">' + cmtHtml + '</div>' +
+        '<div class="hub-note">近 ' + hist.length + ' 日' +
+          (inst.date ? ' · 最新法人日 ' + inst.date : '') + '</div></div>';
       var body = $('hub-inst-body');
       if (!body) return;
       body.innerHTML =
@@ -240,8 +311,8 @@
           '<div class="cell"><div class="k">合計</div><div class="v ' + tw(total) + '">' + yi(total) + '</div>' +
             (totalSpark ? '<div class="s">' + totalSpark + '</div>' : '') + '</div>' +
         '</div>' +
-        '<div class="hub-dash hub-cols-4">' +
-          trendPanel + magPanel + rankTbl(buy, '外資買超') + rankTbl(sell, '外資賣超') +
+        '<div class="hub-dash hub-cols-inst">' +
+          trendPanel + rankTbl(buy, '外資買超') + rankTbl(sell, '外資賣超') +
         '</div>';
       bindCommon(el);
     });

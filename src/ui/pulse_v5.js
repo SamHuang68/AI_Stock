@@ -118,11 +118,21 @@
       '#pl-root .pl-sec-tog button.on{border-color:var(--gold-m);color:var(--gold);background:var(--gold-s)}' +
       '#pl-root .pl-spark{flex:1;min-height:40px;margin:3px 0;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:2px 4px}' +
       '#pl-root .pl-spark svg{width:100%;height:100%;display:block}' +
-      /* inst */
-      '#pl-root .pl-inst4{display:grid;grid-template-columns:1fr 1fr;gap:4px;flex:1;align-content:start}' +
-      '#pl-root .pl-inst4 .c{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:5px 6px;text-align:center}' +
+      /* inst：上方數字、下方趨勢＋評論（不再重複量柱） */
+      '#pl-root .pl-inst4{display:grid;grid-template-columns:1fr 1fr;gap:3px;flex:0 0 auto}' +
+      '#pl-root .pl-inst4 .c{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px;text-align:center}' +
       '#pl-root .pl-inst4 .c .k{font-size:8px;color:var(--tlo)}' +
       '#pl-root .pl-inst4 .c .v{font-size:13px;font-weight:800;margin-top:2px}' +
+      '#pl-root .pl-inst-trend{flex:1;min-height:48px;margin:4px 0 2px;background:var(--bg);border:1px solid var(--border);' +
+        'border-radius:5px;padding:3px 5px;display:flex;flex-direction:column;overflow:hidden}' +
+      '#pl-root .pl-inst-trend .lab{font-size:8px;color:var(--tlo);flex:0 0 auto;margin-bottom:2px;' +
+        'display:flex;justify-content:space-between;gap:6px}' +
+      '#pl-root .pl-inst-trend .chart{flex:1;min-height:36px}' +
+      '#pl-root .pl-inst-trend .chart .vz-spark,#pl-root .pl-inst-trend .chart svg{width:100%!important;height:100%!important;min-height:36px}' +
+      '#pl-root .pl-inst-cmt{font-size:9px;line-height:1.45;color:var(--text);margin-top:2px;flex:0 0 auto;' +
+        'max-height:4.4em;overflow:hidden}' +
+      '#pl-root .pl-inst-cmt b{color:var(--gold);font-weight:700}' +
+      '#pl-root .pl-inst-cmt .up{color:var(--red)}#pl-root .pl-inst-cmt .dn{color:var(--green)}' +
       '#pl-root .pl-chip{display:inline-block;margin:1px 3px 0 0;padding:0 5px;border-radius:999px;border:1px solid var(--border);font-size:8px;color:var(--tlo)}' +
       '#pl-root .pl-tag{display:inline-block;margin-left:3px;padding:0 4px;border-radius:3px;font-size:8px;font-weight:700}' +
       '#pl-root .pl-tag.hot{background:var(--gold-s);color:var(--gold);border:1px solid var(--gold-m)}' +
@@ -510,33 +520,122 @@
       '</div></div>';
   }
 
-  function renderInst(ov) {
-    var V = window.Viz;
-    var i = (ov && ov.institutional) || {};
-    var divNote = '';
-    if (i.foreign != null && i.dealer != null) {
-      if (i.foreign > 0 && i.dealer < 0) divNote = '外資買超、自營賣超 — 常見避險／結構分歧。';
-      else if (i.foreign < 0 && i.dealer > 0) divNote = '外資賣超、自營買超 — 留意承接是否續航。';
-      else if ((i.totalYi != null ? i.totalYi : 0) > 0) divNote = '法人合計偏多，資金面偏進攻。';
-      else if ((i.totalYi != null ? i.totalYi : 0) < 0) divNote = '法人合計偏空，資金面偏防衛。';
-      else divNote = '法人方向分歧有限。';
+  function yiNum(v) {
+    if (v == null || !isFinite(v)) return null;
+    /* 已是億則原樣；否則當元轉億 */
+    return Math.abs(v) >= 1e6 ? v / 1e8 : v;
+  }
+
+  function fmtYiSigned(v) {
+    var y = yiNum(v);
+    if (y == null) return '—';
+    return (y >= 0 ? '+' : '') + y.toFixed(1) + ' 億';
+  }
+
+  /** 依當日法人＋歷史序列產生趨勢評論（不重複上方數字本身） */
+  function buildInstComment(i, histNewestFirst) {
+    var parts = [];
+    var f = yiNum(i.foreign), t = yiNum(i.trust), d = yiNum(i.dealer);
+    var tot = i.totalYi != null && isFinite(i.totalYi) ? Number(i.totalYi) : (
+      (f != null || t != null || d != null) ? ((f || 0) + (t || 0) + (d || 0)) : null
+    );
+    var rows = (histNewestFirst || []).filter(function (r) {
+      return r && r.totalYi != null && isFinite(r.totalYi);
+    });
+    var chrono = rows.slice().reverse(); /* 舊→新 */
+    var streak = 0;
+    if (tot != null && tot !== 0 && chrono.length) {
+      var sign = tot > 0 ? 1 : -1;
+      for (var k = chrono.length - 1; k >= 0; k--) {
+        var v = chrono[k].totalYi;
+        if (v == null || v === 0 || (v > 0 ? 1 : -1) !== sign) break;
+        streak += 1;
+      }
     }
-    var bars = V ? V.magBars([
-      { label: '外資', v: i.foreign, fmt: V.fmtYiFromYuan },
-      { label: '投信', v: i.trust, fmt: V.fmtYiFromYuan },
-      { label: '自營', v: i.dealer, fmt: V.fmtYiFromYuan }
-    ]) : '';
-    var divChip = (V && i.foreign > 0 && i.dealer < 0) ? V.chip('結構分歧', 'warn') : '';
-    return '<div class="pl-sec"><h4>法人資金 <a data-go="institutional">籌碼 →</a></h4><div class="pl-inst4">' +
-      '<div class="c"><div class="k">外資</div><div class="v ' + tw(i.foreign) + '">' + moneyYi(i.foreign) + '</div></div>' +
-      '<div class="c"><div class="k">投信</div><div class="v ' + tw(i.trust) + '">' + moneyYi(i.trust) + '</div></div>' +
-      '<div class="c"><div class="k">自營</div><div class="v ' + tw(i.dealer) + '">' + moneyYi(i.dealer) + '</div></div>' +
-      '<div class="c"><div class="k">合計</div><div class="v ' + tw(i.totalYi) + '">' +
-        (i.totalYi != null ? ((i.totalYi >= 0 ? '+' : '') + Number(i.totalYi).toFixed(1) + ' 億') : '—') +
-      '</div></div></div>' +
-      bars + divChip +
-      '<div class="pl-note">' + (divNote || '單位億元') +
-      (i.date ? ' · 法人日 ' + i.date : '') + '</div></div>';
+    if (streak >= 3) {
+      parts.push(tot > 0
+        ? '合計已連 <b class="up">' + streak + '</b> 日買超，資金偏進攻節奏。'
+        : '合計已連 <b class="dn">' + streak + '</b> 日賣超，資金偏防衛／調節。');
+    } else if (tot != null) {
+      parts.push(tot > 20
+        ? '當日合計明顯買超，短線籌碼偏多。'
+        : tot < -20
+          ? '當日合計明顯賣超，留意權值與指數壓力。'
+          : '當日合計接近平衡，方向性訊號有限。');
+    }
+    if (chrono.length >= 2 && tot != null) {
+      var prev = chrono[chrono.length - 2].totalYi;
+      if (prev != null && isFinite(prev)) {
+        var delta = tot - prev;
+        if (Math.abs(delta) >= 50) {
+          parts.push(delta > 0
+            ? '較前日轉強約 <span class="up">' + fmtYiSigned(delta) + '</span>。'
+            : '較前日轉弱約 <span class="dn">' + fmtYiSigned(delta) + '</span>。');
+        } else if (prev > 0 && tot < 0) {
+          parts.push('合計由買轉賣，資金氛圍轉向謹慎。');
+        } else if (prev < 0 && tot > 0) {
+          parts.push('合計由賣轉買，資金回補跡象。');
+        }
+      }
+    }
+    if (f != null && d != null) {
+      if (f > 30 && d < -30) parts.push('外資偏買、自營偏賣 — 常見結構／避險分歧。');
+      else if (f < -30 && d > 30) parts.push('外資偏賣、自營偏買 — 留意承接能否延續。');
+    }
+    if (t != null && Math.abs(t) >= 20) {
+      parts.push(t > 0 ? '投信偏買，中長線資金仍有佈局。' : '投信偏賣，主動資金偏調節。');
+    }
+    if (!parts.length) parts.push('法人序列載入中或資料不足，暫無趨勢評論。');
+    return parts.slice(0, 3).join(' ');
+  }
+
+  function renderInst(ov) {
+    var i = (ov && ov.institutional) || {};
+    var totalTxt = i.totalYi != null
+      ? ((i.totalYi >= 0 ? '+' : '') + Number(i.totalYi).toFixed(1) + ' 億')
+      : '—';
+    return '<div class="pl-sec"><h4>法人資金 <a data-go="institutional">籌碼 →</a></h4>' +
+      '<div class="pl-inst4">' +
+        '<div class="c"><div class="k">外資</div><div class="v ' + tw(i.foreign) + '">' + moneyYi(i.foreign) + '</div></div>' +
+        '<div class="c"><div class="k">投信</div><div class="v ' + tw(i.trust) + '">' + moneyYi(i.trust) + '</div></div>' +
+        '<div class="c"><div class="k">自營</div><div class="v ' + tw(i.dealer) + '">' + moneyYi(i.dealer) + '</div></div>' +
+        '<div class="c"><div class="k">合計</div><div class="v ' + tw(i.totalYi) + '">' + totalTxt + '</div></div>' +
+      '</div>' +
+      '<div class="pl-inst-trend" id="pl-inst-trend">' +
+        '<div class="lab"><span>合計買賣超趨勢</span><span id="pl-inst-trend-meta">' +
+          (i.date ? '法人日 ' + esc(i.date) : '載入…') + '</span></div>' +
+        '<div class="chart" id="pl-inst-chart"><div class="pl-note" style="padding:6px 0">載入資金序列…</div></div>' +
+      '</div>' +
+      '<div class="pl-inst-cmt" id="pl-inst-cmt">分析資金變化中…</div></div>';
+  }
+
+  function fillInstTrend(ov) {
+    var i = (ov && ov.institutional) || {};
+    jget('/pulse/history?kind=institutional&n=20').then(function (h) {
+      var V = window.Viz;
+      var chart = $('pl-inst-chart');
+      var meta = $('pl-inst-trend-meta');
+      var cmt = $('pl-inst-cmt');
+      var rows = (h && h.rows) || [];
+      var chrono = rows.slice().reverse();
+      var totals = chrono.map(function (r) { return r.totalYi; });
+      if (chart) {
+        if (V && totals.filter(function (v) { return v != null && isFinite(v); }).length >= 2) {
+          var last = totals[totals.length - 1];
+          var col = last >= 0 ? 'var(--red)' : 'var(--green)';
+          chart.innerHTML = V.sparkLine(totals, { color: col, h: 56, w: 280 });
+        } else if (totals.length) {
+          chart.innerHTML = (V ? V.sparkBars(totals) : '<div class="pl-note">序列不足</div>');
+        } else {
+          chart.innerHTML = '<div class="pl-note">尚無本機法人歷史 — 可按同步資料預抓</div>';
+        }
+      }
+      if (meta) {
+        meta.textContent = (rows.length ? ('近 ' + rows.length + ' 日') : '無序列') +
+          (i.date ? ' · ' + i.date : '');
+      }
+      if (cmt) cmt.innerHTML = buildInstComment(i, rows);
+    });
   }
 
   function renderDonut(ov, st) {
@@ -858,6 +957,7 @@
       };
     });
     if (sectorMkt === 'US' && !sectorCache.US) loadSectorsMkt('US');
+    fillInstTrend(ov);
 
     jget('/pulse/history?kind=index&n=20').then(function (h) {
       var box = $('pl-spark');
