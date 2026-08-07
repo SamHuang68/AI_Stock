@@ -66,20 +66,24 @@
       '#shell-views.show{display:flex;flex-direction:column}' +
       '#body.shell-hidden{display:none !important}' +
       '#wlbar.shell-hidden{display:none !important}' +
-      '.sv-panel{display:none;flex:1;padding:28px 32px;max-width:720px;min-width:0;box-sizing:border-box}' +
+      '.sv-panel{display:none;flex:1;padding:10px 14px 16px;max-width:min(1200px,100%);min-width:0;box-sizing:border-box}' +
       '.sv-panel.on{display:block}' +
+      /* 資訊面板高密度：標題列／卡片／表格統一收緊 */
+      '.sv-panel .sv-kicker{font-size:9px;letter-spacing:1.5px;margin-bottom:2px}' +
+      '.sv-panel .sv-title{font-size:20px;margin:0}' +
+      '.sv-panel .sv-sub{font-size:10px;margin-top:2px;line-height:1.4}' +
       /* 防 flex 子項 min-content 撑破水平；寬版面板由各模組覆寫 max-width */
       '#shell-views > .sv-panel{min-width:0}' +
       '.sv-mount{min-height:100%;min-width:0;max-width:100%;box-sizing:border-box}' +
-      '.sv-kicker{font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--gold);' +
-        'letter-spacing:2px;margin-bottom:8px}' +
-      '.sv-title{font-family:\'Noto Serif TC\',serif;font-size:28px;font-weight:700;color:var(--thi);' +
-        'letter-spacing:1px;margin-bottom:10px}' +
-      '.sv-desc{font-size:13px;line-height:1.75;color:var(--text);max-width:36em;margin-bottom:18px}' +
-      '.sv-meta{font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--tlo);letter-spacing:.5px}' +
-      '.sv-cta{display:inline-flex;align-items:center;gap:6px;margin-top:16px;padding:8px 14px;' +
-        'background:var(--gold);color:#060A12;border:none;border-radius:6px;cursor:pointer;' +
-        'font-family:\'JetBrains Mono\',monospace;font-size:11px;font-weight:700;letter-spacing:1px}' +
+      '.sv-kicker{font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--gold);' +
+        'letter-spacing:1.5px;margin-bottom:2px}' +
+      '.sv-title{font-family:\'Noto Serif TC\',serif;font-size:20px;font-weight:700;color:var(--thi);' +
+        'letter-spacing:.5px;margin-bottom:4px;line-height:1.15}' +
+      '.sv-desc{font-size:11px;line-height:1.5;color:var(--text);max-width:42em;margin-bottom:8px}' +
+      '.sv-meta{font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--tlo);letter-spacing:.5px}' +
+      '.sv-cta{display:inline-flex;align-items:center;gap:5px;margin-top:8px;padding:5px 10px;' +
+        'background:var(--gold);color:#060A12;border:none;border-radius:5px;cursor:pointer;' +
+        'font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:700;letter-spacing:.5px}' +
       '.sv-cta:hover{background:#FBBF24}' +
       '#topbar .shell-sync{display:inline-flex;align-items:center;gap:6px;margin-left:4px;' +
         'font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--tlo);letter-spacing:.5px}' +
@@ -99,7 +103,7 @@
       '@media (max-width:720px){' +
         '#navrail{flex-basis:48px;width:48px}' +
         '.nr-btn{min-height:38px;margin:0 3px;font-size:8px}' +
-        '.sv-panel{padding:18px 16px}' +
+        '.sv-panel{padding:10px 12px 14px}' +
         '.sv-title{font-size:22px}' +
         '#topbar .shell-sync-btn span.lbl{display:none}' +
       '}';

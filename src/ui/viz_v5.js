@@ -33,24 +33,24 @@
     var s = document.createElement('style');
     s.id = 'vz-style';
     s.textContent =
-      '.vz-mag{display:flex;align-items:center;gap:6px;min-width:0}' +
-      '.vz-mag .vz-lbl{font-size:9px;color:var(--tlo);min-width:28px;flex-shrink:0}' +
-      '.vz-mag .vz-track{position:relative;flex:1;height:7px;background:var(--bg3,#1e293b);border-radius:4px;overflow:hidden}' +
+      '.vz-mag{display:flex;align-items:center;gap:4px;min-width:0}' +
+      '.vz-mag .vz-lbl{font-size:8px;color:var(--tlo);min-width:24px;flex-shrink:0}' +
+      '.vz-mag .vz-track{position:relative;flex:1;height:5px;background:var(--bg3,#1e293b);border-radius:3px;overflow:hidden}' +
       '.vz-mag .vz-zero{position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(148,163,184,.45);z-index:1}' +
-      '.vz-mag .vz-fill{position:absolute;top:1px;bottom:1px;border-radius:2px}' +
-      '.vz-mag .vz-val{font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;min-width:52px;text-align:right;flex-shrink:0}' +
-      '.vz-mags{display:flex;flex-direction:column;gap:5px;margin-top:6px}' +
-      '.vz-seg{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--bg3,#1e293b);margin-top:5px}' +
+      '.vz-mag .vz-fill{position:absolute;top:0;bottom:0;border-radius:2px}' +
+      '.vz-mag .vz-val{font-size:9px;font-weight:700;font-variant-numeric:tabular-nums;min-width:44px;text-align:right;flex-shrink:0}' +
+      '.vz-mags{display:flex;flex-direction:column;gap:2px;margin-top:3px}' +
+      '.vz-seg{display:flex;height:5px;border-radius:3px;overflow:hidden;background:var(--bg3,#1e293b);margin-top:3px}' +
       '.vz-seg > i{display:block;height:100%;min-width:0}' +
       '.vz-seg > i.up{background:var(--red)}' +
       '.vz-seg > i.flat{background:#475569}' +
       '.vz-seg > i.dn{background:var(--green)}' +
-      '.vz-meter{height:6px;border-radius:3px;background:var(--bg3,#1e293b);overflow:hidden;margin-top:4px}' +
-      '.vz-meter > i{display:block;height:100%;border-radius:3px}' +
-      '.vz-dual{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px}' +
-      '.vz-dual .vz-d{font-size:9px;color:var(--tlo)}' +
-      '.vz-dual .vz-d b{display:block;color:var(--thi);font-size:11px;margin:2px 0}' +
-      '.vz-chip{display:inline-block;margin:2px 4px 0 0;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700;line-height:1.5}' +
+      '.vz-meter{height:4px;border-radius:2px;background:var(--bg3,#1e293b);overflow:hidden;margin-top:2px}' +
+      '.vz-meter > i{display:block;height:100%;border-radius:2px}' +
+      '.vz-dual{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:2px}' +
+      '.vz-dual .vz-d{font-size:8px;color:var(--tlo)}' +
+      '.vz-dual .vz-d b{display:block;color:var(--thi);font-size:10px;margin:1px 0}' +
+      '.vz-chip{display:inline-block;margin:0 3px 0 0;padding:0 5px;border-radius:6px;font-size:8px;font-weight:700;line-height:1.55}' +
       '.vz-chip.buy{background:rgba(239,68,68,.18);color:var(--red)}' +
       '.vz-chip.sell{background:rgba(34,197,94,.18);color:var(--green)}' +
       '.vz-chip.ok{background:rgba(34,197,94,.15);color:var(--green)}' +
@@ -60,22 +60,22 @@
       '.vz-chip.hot{background:rgba(239,68,68,.2);color:var(--red)}' +
       '.vz-chip.cold{background:rgba(34,197,94,.2);color:var(--green)}' +
       '.vz-chip.lim{background:rgba(251,191,36,.2);color:var(--gold,#fbbf24)}' +
-      '.vz-badge{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700}' +
+      '.vz-badge{display:inline-flex;align-items:center;gap:3px;padding:0 5px;border-radius:6px;font-size:8px;font-weight:700}' +
       '.vz-badge.ok{background:rgba(34,197,94,.15);color:var(--green)}' +
       '.vz-badge.warn{background:rgba(251,146,60,.18);color:var(--orange)}' +
       '.vz-badge.err{background:rgba(239,68,68,.18);color:var(--red)}' +
       '.vz-badge.mid{background:rgba(148,163,184,.12);color:var(--tlo)}' +
-      '.vz-heat{display:inline-block;padding:1px 5px;border-radius:3px;font-weight:700;font-variant-numeric:tabular-nums}' +
-      '.vz-ref{position:relative;height:8px;border-radius:4px;background:var(--bg3,#1e293b);margin-top:5px;overflow:visible}' +
-      '.vz-ref > i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,var(--cyan),var(--gold))}' +
-      '.vz-ref .vz-tick{position:absolute;top:-2px;bottom:-2px;width:1px;background:rgba(248,250,252,.35)}' +
-      '.vz-ref .vz-tick-lbl{position:absolute;top:10px;font-size:8px;color:var(--tf,#64748b);transform:translateX(-50%);white-space:nowrap}' +
-      '.vz-spark{display:block;width:100%;height:36px;margin-top:4px}' +
-      '.vz-sparkbars{display:flex;align-items:flex-end;gap:1px;height:28px;margin-top:4px}' +
+      '.vz-heat{display:inline-block;padding:0 4px;border-radius:2px;font-weight:700;font-variant-numeric:tabular-nums}' +
+      '.vz-ref{position:relative;height:5px;border-radius:3px;background:var(--bg3,#1e293b);margin-top:3px;margin-bottom:10px;overflow:visible}' +
+      '.vz-ref > i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--cyan),var(--gold))}' +
+      '.vz-ref .vz-tick{position:absolute;top:-1px;bottom:-1px;width:1px;background:rgba(248,250,252,.35)}' +
+      '.vz-ref .vz-tick-lbl{position:absolute;top:7px;font-size:7px;color:var(--tf,#64748b);transform:translateX(-50%);white-space:nowrap}' +
+      '.vz-spark{display:block;width:100%;height:28px;margin-top:2px}' +
+      '.vz-sparkbars{display:flex;align-items:flex-end;gap:1px;height:18px;margin-top:2px}' +
       '.vz-sparkbars i{flex:1;min-width:2px;border-radius:1px 1px 0 0;opacity:.9}' +
-      '.vz-zone{position:relative;height:10px;border-radius:5px;background:linear-gradient(90deg,#4ade80 0%,#fbbf24 40%,#fb923c 70%,#f87171 100%);margin:6px 0 2px}' +
-      '.vz-zone .vz-mark{position:absolute;top:-3px;width:2px;height:16px;background:#fff;border-radius:1px;box-shadow:0 0 0 1px rgba(0,0,0,.4)}' +
-      '.vz-rowbar{display:inline-block;height:5px;border-radius:2px;vertical-align:middle;margin-left:6px;max-width:72px}';
+      '.vz-zone{position:relative;height:7px;border-radius:4px;background:linear-gradient(90deg,#4ade80 0%,#fbbf24 40%,#fb923c 70%,#f87171 100%);margin:3px 0 1px}' +
+      '.vz-zone .vz-mark{position:absolute;top:-2px;width:2px;height:11px;background:#fff;border-radius:1px;box-shadow:0 0 0 1px rgba(0,0,0,.4)}' +
+      '.vz-rowbar{display:inline-block;height:4px;border-radius:2px;vertical-align:middle;margin-left:4px;max-width:56px}';
     document.head.appendChild(s);
   }
 
@@ -205,7 +205,7 @@
       return '<span class="vz-tick" style="left:' + left + '%"></span>' +
         '<span class="vz-tick-lbl" style="left:' + left + '%">' + (t >= 10000 ? (t / 10000).toFixed(1) + '兆' : t + '億') + '</span>';
     }).join('');
-    return '<div class="vz-ref" style="margin-bottom:14px"><i style="width:' + w.toFixed(1) + '%"></i>' + marks + '</div>';
+    return '<div class="vz-ref"><i style="width:' + w.toFixed(1) + '%"></i>' + marks + '</div>';
   }
 
   /** 融資維持率水位（zones 由高到低或低到高皆可；value 越高越安全時用綠→紅反轉） */

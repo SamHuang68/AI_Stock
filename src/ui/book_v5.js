@@ -78,7 +78,7 @@
       '#bk-root{font-family:\'JetBrains Mono\',monospace;color:var(--text)}' +
       '#bk-root .bk-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}' +
       '#bk-root .bk-kicker{font-size:10px;color:var(--gold);letter-spacing:2px;margin-bottom:4px}' +
-      '#bk-root .bk-title{font-family:\'Noto Serif TC\',serif;font-size:26px;font-weight:700;color:var(--thi)}' +
+      '#bk-root .bk-title{font-family:\'Noto Serif TC\',serif;font-size:18px;font-weight:700;color:var(--thi);line-height:1.15}' +
       '#bk-root .bk-sub{font-size:11px;color:var(--tlo);margin-top:4px}' +
       '#bk-root .bk-actions{display:flex;gap:8px;flex-wrap:wrap}' +
       '#bk-root .bk-btn{padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);' +

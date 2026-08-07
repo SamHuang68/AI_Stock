@@ -46,7 +46,7 @@ function renderChipSection(chip) {
     const totChip = V ? V.chip(tot > 0 ? '合計偏多' : tot < 0 ? '合計偏空' : '合計中性', tot > 0 ? 'hot' : tot < 0 ? 'cold' : 'mid') : '';
     h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span class="stat-k">三大法人合計</span><span class="stat-v" style="color:${tc}">${signN(tot)} ${totChip}</span></div>`;
     if (V) {
-      h += `<div style="padding:2px 12px 6px">${V.magBars([
+      h += `<div style="padding:1px 10px 3px">${V.magBars([
         { label: '外資', v: chip.inst.foreign, fmt: (x) => signN(x) },
         { label: '投信', v: chip.inst.trust, fmt: (x) => signN(x) },
         { label: '自營', v: chip.inst.dealer, fmt: (x) => signN(x) },

@@ -29,7 +29,7 @@
       '#sc-root{font-family:\'JetBrains Mono\',monospace;color:var(--text)}' +
       '#sc-root .sc-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}' +
       '#sc-root .sc-kicker{font-size:10px;color:var(--gold);letter-spacing:2px;margin-bottom:4px}' +
-      '#sc-root .sc-title{font-family:\'Noto Serif TC\',serif;font-size:26px;font-weight:700;color:var(--thi)}' +
+      '#sc-root .sc-title{font-family:\'Noto Serif TC\',serif;font-size:18px;font-weight:700;color:var(--thi);line-height:1.15}' +
       '#sc-root .sc-sub{font-size:11px;color:var(--tlo);margin-top:4px}' +
       '#sc-root .sc-actions{display:flex;gap:8px;flex-wrap:wrap}' +
       '#sc-root .sc-btn{padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);' +
