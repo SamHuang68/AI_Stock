@@ -170,12 +170,14 @@
       '#pl-root .pl-list li:hover{background:var(--bg3)}' +
       '#pl-root .pl-list .nm{color:var(--thi);font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#pl-root .pl-list .cd{color:var(--tlo);font-size:9px;margin-right:4px}' +
-      /* global / flash / wl */
+      /* global：名稱一列；指數數值＋漲跌幅同一列（漲跌在右側，避免溢出） */
       '#pl-root .pl-global{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;flex:1;align-content:start;overflow:auto;min-height:0}' +
       '#pl-root .pl-kicker{display:none!important}' +
-      '#pl-root .pl-global .g{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px;min-width:0;overflow:hidden}' +
-      '#pl-root .pl-global .g .k{font-size:8px;color:var(--tlo);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#pl-root .pl-global .g .v{font-size:12px;font-weight:800;margin-top:1px;color:var(--thi);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#pl-root .pl-global .g{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:3px 5px;min-width:0;overflow:hidden}' +
+      '#pl-root .pl-global .g .k{font-size:8px;color:var(--tlo);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:1px}' +
+      '#pl-root .pl-global .g .row{display:flex;align-items:baseline;justify-content:space-between;gap:4px;min-width:0}' +
+      '#pl-root .pl-global .g .v{font-size:11px;font-weight:800;color:var(--thi);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 auto}' +
+      '#pl-root .pl-global .g .s{font-size:9px;font-weight:700;flex:0 0 auto;white-space:nowrap;text-align:right;letter-spacing:-0.2px}' +
       '#pl-root .pl-flash{flex:1;min-height:0;overflow:auto;font-size:10px}' +
       '#pl-root .pl-flash .row{padding:3px 0;border-bottom:1px solid var(--border);cursor:pointer;line-height:1.35}' +
       '#pl-root .pl-flash .row:hover{background:var(--bg3)}' +
@@ -926,11 +928,14 @@
     items.slice(0, 10).forEach(function (x) {
       var dig = (x.unit === '%' || x.symbol === 'US10Y' || x.symbol === '^VIX' || x.symbol === 'TWD=X') ? 2
         : (x.price > 1000 ? 0 : 2);
-      html += '<div class="g"><div class="k">' + esc(x.name || x.symbol) + '</div><div class="v">' +
-        fmt(x.price, dig) +
-        (x.unit === '%' || x.symbol === 'US10Y' ? '%' : '') + '</div>' +
-        '<div class="s ' + tw(x.changePct) + '" style="font-size:9px;font-weight:700;margin-top:1px">' +
-        (x.changePct != null ? pct(x.changePct) : '—') + '</div></div>';
+      var px = fmt(x.price, dig) + (x.unit === '%' || x.symbol === 'US10Y' ? '%' : '');
+      html += '<div class="g"><div class="k">' + esc(x.name || x.symbol) + '</div>' +
+        '<div class="row">' +
+          '<div class="v">' + px + '</div>' +
+          '<div class="s ' + tw(x.changePct) + '">' +
+            (x.changePct != null ? pct(x.changePct) : '—') +
+          '</div>' +
+        '</div></div>';
     });
     return html + '</div></div>';
   }
