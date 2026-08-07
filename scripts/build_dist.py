@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Build a shareable Stock Terminal v4.1 zip.
+Build a shareable Stock Terminal v5.0 zip.
 
 Strips private user data (API keys, watches, alert config, draw store,
-personal chip snapshots) and internal revision notes.
+personal chip snapshots), regenerable local DBs, and internal revision notes.
 
 Usage:
   python scripts/build_dist.py
-  python scripts/build_dist.py --out /path/to/Stock_Terminal_v4.1.zip
+  python scripts/build_dist.py --out /path/to/Stock_Terminal_v5.0.zip
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 STAGE_NAME = "Stock_Terminal"
-ZIP_NAME = "Stock_Terminal_v4.1.zip"
+ZIP_NAME = "Stock_Terminal_v5.0.zip"
 
 # Never copy these basenames anywhere under the stage tree
 SECRET_BASENAMES = {
@@ -58,12 +58,12 @@ SKIP_DIR_NAMES = {
 }
 
 # Under data/: only allow these (plus empty history folders + README)
+# 刻意不含：market.db / pulse_history.db / tdcc_holders.db / margin_cycle.db（可重建大庫）
 DATA_ALLOW_FILES = {
     "etf_catalog.json",
     "universe.json",
     "tw_names_backup.json",
     # public market seeds / caches (not user identity)
-    # tdcc_holders.db / margin_cycle.db：首次開啟圖表時背景回補，不打進分享包
     "macro_track.db",
     "cbc_policy_rates.csv",
     "cbc_policy_rate_changes.csv",
@@ -71,6 +71,22 @@ DATA_ALLOW_FILES = {
     "txf_daily.csv",
     "margin_ratio_history.csv",
     "twoii_daily.csv",
+}
+
+# Hard-block regenerable / personal DBs even if listed elsewhere
+DATA_BLOCK_FILES = {
+    "market.db",
+    "market.db-wal",
+    "market.db-shm",
+    "pulse_history.db",
+    "pulse_history.db-wal",
+    "pulse_history.db-shm",
+    "tdcc_holders.db",
+    "tdcc_holders.db-wal",
+    "tdcc_holders.db-shm",
+    "margin_cycle.db",
+    "margin_cycle.db-wal",
+    "margin_cycle.db-shm",
 }
 
 DATA_ALLOW_DIRS = {
@@ -86,6 +102,8 @@ HISTORY_KEEP = {"readme.txt"}
 def is_secret_name(name: str) -> bool:
     lower = name.lower()
     if lower in {s.lower() for s in SECRET_BASENAMES}:
+        return True
+    if lower in {s.lower() for s in DATA_BLOCK_FILES}:
         return True
     if any(lower.endswith(suf) for suf in SECRET_SUFFIXES):
         return True
@@ -220,7 +238,7 @@ def verify_no_secrets(zip_path: Path) -> list[str]:
 def build(out: Path | None = None) -> Path:
     os.chdir(ROOT)
     print("=" * 50)
-    print(" Build Stock_Terminal distribution zip (v4.1)")
+    print(" Build Stock_Terminal distribution zip (v5.0)")
     print("=" * 50)
 
     # Fresh v2 HTML if sources present
@@ -285,7 +303,8 @@ def build(out: Path | None = None) -> Path:
     print()
     print(f"[OK] {zip_path.name}  ({size_mb:.1f} MB)")
     print("Recipient: unzip → double-click scripts\\go.bat")
-    print("Private data stripped: API keys, watches, alerts, draw_store, chip/etf history JSON.")
+    print("Private data stripped: API keys, watches, alerts, draw_store,")
+    print("  chip/etf history JSON, market/pulse/tdcc/margin local DBs.")
     return zip_path
 
 

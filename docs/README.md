@@ -1,9 +1,29 @@
-# Stock Terminal v4.1
+# Stock Terminal v5.0
 
 Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤、不需 pip 安裝任何套件**（純 Python stdlib）。
-架構為「瀏覽器前端 ↔ 本機 `server.py` ↔ 外部資料源（Yahoo / MoneyDJ / TWSE / TDCC / FRED）」三層；前端模組依功能分資料夾，新增功能用 `Toolbar.register({...})` 一行掛上。
+架構為「瀏覽器前端 ↔ 本機 `server.py` ↔ 外部資料源（Yahoo / MoneyDJ / TWSE / TDCC / FRED / FinMind）」三層；前端模組依功能分資料夾，新增功能用 `Toolbar.register({...})` 一行掛上。
 
-> **分享版說明**：本發行包已剝除 API Key、觀察股清單、警報設定、畫線雲端記憶等私人檔。收件者需自行在右上角貼 Claude Key、在 🔔 設定 Telegram／Email，觀察股留在本機瀏覽器 `localStorage`。
+> **分享版說明**：本發行包已剝除 API Key、觀察股清單、警報設定、畫線雲端記憶、本機大 DB 等私人／可重建檔。收件者需自行在右上角貼 Claude Key、在 🔔 設定 Telegram／Email，觀察股留在本機瀏覽器 `localStorage`。
+
+---
+
+## 5.0 新功能（TW Pulse）
+
+側欄殼層（ST v5.0）對齊 [tw-pulse-terminal](https://github.com/SamHuang68/tw-pulse-terminal) 資訊架構，總覽一次看完市場結構：
+
+| 區塊 | 說明 |
+|------|------|
+| **市場脈搏與組成** | 總分／明顯偏強階梯、動能、風險、資料可靠度、主要動能／壓力因子 |
+| **市場盤勢走勢** | 加權／櫃買漲幅 + OHLC + 近 20 日收盤折線（本機庫） |
+| **法人分歧與資金** | 外資／投信／自營＋分歧說明 |
+| **市場廣度** | 漲跌家數甜甜圈、多空比、偏多擴張語氣、漲跌停 chip |
+| **產業輪動** | 類股相對強弱條 |
+| **漲停監控／跌幅異常** | 日排行極端值篩選 |
+| **全球市場對台股影響** | 道瓊／S&P／那斯達克／VIX／美元台幣等 |
+| **因子帳本** | 正面／風險／尚未納入（缺資料不計分） |
+| **同步資料** | 頂列按鈕；`pulse_history.db` 只 merge 新日 |
+
+鐵律：不捏造 Fear&Greed、假 VIX 分數、未掃描的「全市場 250 日新高家數」。借券賣壓以 TWTASU 全市場口徑標示（非外資分項）。
 
 ---
 
@@ -66,6 +86,7 @@ Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤�
 
 ### 一致性系統
 - `fields_v3` 欄位型別標準；`colors_v3` 台股紅漲／美股綠漲語意統一
+- RSI／SMA 等技術指標前後端欄位對齊、禁止概略寫法（見 `.cursorrules`）
 
 ---
 
@@ -75,9 +96,9 @@ Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤�
 
 1. **解壓縮**到任一資料夾（例 `C:\Tools\Stock_Terminal\`）。
 2. **雙擊 `scripts\go.bat`** — 自動 rebuild、重啟 server（**只聽 127.0.0.1:18432**）、開瀏覽器。
-3. 上方輸入框打代號按 **GO**（台股 `2330`；美股先點 `US` 再打 `AAPL`）。
+3. 左側點 **總覽** 看 TW Pulse；或上方輸入框打代號按 **GO**（台股 `2330`；美股先點 `US` 再打 `AAPL`）。
 
-> **首次開啟**「融資週期」「籌碼集中度」等圖時，會背景回補歷史（不再隨 git 附大 DB）。可在資料源面板看進度。
+> **首次開啟**「融資週期」「籌碼集中度」等圖時，會背景回補歷史（不再隨 git 附大 DB）。總覽可按頂列 **同步資料** 預熱指數／廣度／法人歷史。
 
 ### 每次 Git 更新後
 
@@ -103,7 +124,7 @@ scripts\go.bat pull
 1. **通知 🔔**：自行填 Telegram Bot Token／Chat ID 或 Email（寫入本機 `data/alert_config.json`，勿分享）。
 2. **AI 報告**：右上 `API KEY` 貼上 `sk-ant-…`（只存瀏覽器；後端亦可放 `data/ai_key.txt`，**勿提交／勿打包**）。
 3. **AI 副駕**：另裝 LM Studio 並載入模型。
-4. **資料骨幹**（可選）：`python server\datastore.py backfill-universe` 回補全市場日線。
+4. **資料骨幹**（可選）：`python server\datastore.py backfill-universe` 回補全市場日線；總覽按 **同步資料**。
 
 **可選排程**（系統管理員跑一次）：`scripts\install_scheduler.bat`（ETF）、`scripts\install_chip_scheduler.bat`（法人籌碼）。
 
@@ -111,14 +132,14 @@ scripts\go.bat pull
 
 ## 打包可分享版（維護者）
 
-剝除觀察股、API Key、警報設定等私人檔後產出 zip：
+剝除觀察股、API Key、警報設定、本機大 DB 等後產出 zip：
 
 ```powershell
 python scripts\build_dist.py
 REM 或雙擊 scripts\build_dist.bat（Windows）
 ```
 
-產出根目錄 **`Stock_Terminal_v4.1.zip`**。收件者解壓後雙擊 `scripts\go.bat` 即可。
+產出根目錄 **`Stock_Terminal_v5.0.zip`**。收件者解壓後雙擊 `scripts\go.bat` 即可。
 
 **發行包刻意排除：**
 
@@ -129,6 +150,7 @@ REM 或雙擊 scripts\build_dist.bat（Windows）
 | 觀察股（後端） | `data/watch_rules.json`、`watch_state.json` |
 | 畫線記憶 | `data/draw_store.json` |
 | 個人籌碼快照 | `data/chip_history/*.json` |
+| 本機大庫 | `market.db`、`pulse_history.db`、`tdcc_holders.db`、`margin_cycle.db` |
 | 內部修訂筆記 | `docs/revision.md` |
 | 建置殘渣 | `__pycache__`、`.git`、既有 zip |
 
@@ -142,11 +164,14 @@ REM 或雙擊 scripts\build_dist.bat（Windows）
 |------|------|------|
 | K 線／報價 | Yahoo Finance v8 chart API | query1／query2 備援；台股指數另走 TWSE／FinMind |
 | 台股指數即時 | TWSE MIS | 加權／櫃買 |
+| 廣度／類股 | TWSE MI_INDEX | 漲跌家數、類股指數 |
+| 台指期 OI | FinMind TaiwanFuturesDaily | 近月同契約日盤 |
+| 借券賣出 | TWSE TWTASU | 全市場合計 |
 | 主動 ETF 持股 | MoneyDJ Basic0007B | 全部持股頁 |
 | 法人籌碼 | TWSE 三大法人 | 每日快照 |
 | 融資維持率／餘額 | TWSE／TPEx 公開資訊 | 融資週期圖 |
 | 集保持股分級 | TDCC opendata | 籌碼集中度 |
-| 美債／信用／CPI | FRED 等公開序列 | 市場風險圖 |
+| 美債／信用／CPI | FRED 等公開序列 | 市場風險圖；逾時 fail-fast |
 
 **所有資料抓取與運算都在你本機跑，零雲端、零追蹤。**
 
@@ -161,3 +186,4 @@ MIT — 自由分享、修改、商用皆可，原作者保留歸功（不強制
 - [Yahoo Finance](https://finance.yahoo.com/) — 報價資料源
 - [臺灣集中保管結算所 TDCC](https://www.tdcc.com.tw/) — 集保持股分級
 - [FRED](https://fred.stlouisfed.org/) — 美國總經序列
+- [tw-pulse-terminal](https://github.com/SamHuang68/tw-pulse-terminal) — 總覽 UX 參考
