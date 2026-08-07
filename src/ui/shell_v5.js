@@ -68,6 +68,7 @@
       '#shell-views{display:none;flex:1;min-height:0;min-width:0;background:#060C16;' +
         'overflow:auto}' +
       '#shell-views.show{display:flex;flex-direction:column}' +
+      '#topbar.shell-hidden{display:none !important}' +
       '#body.shell-hidden{display:none !important}' +
       '#wlbar.shell-hidden{display:none !important}' +
       '.sv-panel{display:none;flex:1;padding:10px 14px 16px;max-width:min(1480px,100%);min-width:0;box-sizing:border-box}' +
@@ -422,11 +423,13 @@
     state.route = id;
     try { localStorage.setItem(STORAGE_KEY, id); } catch (e) {}
 
+    var topbar = $('topbar');
     var body = $('body');
     var wl = $('wlbar');
     var views = $('shell-views');
     var isChart = id === 'chart';
 
+    if (topbar) topbar.classList.toggle('shell-hidden', !isChart);
     if (body) body.classList.toggle('shell-hidden', !isChart);
     if (wl) wl.classList.toggle('shell-hidden', !isChart);
     if (views) views.classList.toggle('show', !isChart);

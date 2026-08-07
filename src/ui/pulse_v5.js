@@ -243,25 +243,8 @@
     if (!$('pl-root')) {
       mount.innerHTML =
         '<div id="pl-root">' +
-          '<div class="pl-head">' +
-            '<div class="pl-head-left">' +
-              '<div class="pl-title">總覽首頁</div>' +
-              '<div class="pl-sub" id="pl-sub">市場即時數據與風險情報</div>' +
-            '</div>' +
-            '<div class="pl-actions">' +
-              '<button type="button" class="pl-btn" id="pl-refresh">↻ 重新整理</button>' +
-              '<button type="button" class="pl-btn primary" data-go="chart">圖表工作區 →</button>' +
-            '</div>' +
-          '</div>' +
           '<div id="pl-body"><div style="padding:20px;text-align:center;color:#64748B">載入總覽儀表板…</div></div>' +
         '</div>';
-      var r = $('pl-refresh');
-      if (r) r.onclick = function () { refresh(true); };
-      mount.querySelectorAll('[data-go]').forEach(function (b) {
-        b.onclick = function () {
-          goRoute(b.getAttribute('data-go'));
-        };
-      });
     }
     return $('pl-body');
   }
