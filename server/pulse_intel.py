@@ -49,8 +49,11 @@ def _n(v) -> Optional[float]:
 
 
 def _label_total(score: Optional[float]) -> str:
+    """對齊 tw-pulse-terminal 狀態階梯（含「明顯偏強」）。"""
     if score is None:
         return '資料不足'
+    if score >= 80:
+        return '明顯偏強'
     if score >= 70:
         return '偏強'
     if score >= 55:

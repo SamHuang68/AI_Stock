@@ -215,6 +215,12 @@ def test_filter_sectors_skips_benchmarks():
     assert [r['name'] for r in rows] == ['半導體']
 
 
+def test_status_label_clearly_strong():
+    assert pi._label_total(85) == '明顯偏強'
+    assert pi._label_total(72) == '偏強'
+    assert pi._label_total(50) == '中性'
+
+
 def test_all_extras_raise_completeness():
     out = pi.build_pulse_intel(
         health_score=70,
@@ -259,5 +265,6 @@ if __name__ == '__main__':
     test_nhnl_risk_and_neutral_zero_score()
     test_tx_oi_short_covering_and_unwind()
     test_filter_sectors_skips_benchmarks()
+    test_status_label_clearly_strong()
     test_all_extras_raise_completeness()
     print('OK pulse_intel')

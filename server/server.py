@@ -1616,6 +1616,7 @@ def _yf_batch_quotes(syms):
     labels = {
         '^DJI': '道瓊', '^GSPC': 'S&P 500', '^IXIC': '那斯達克',
         'CL=F': 'WTI 原油', 'DX-Y.NYB': '美元指數', 'DX=F': '美元指數',
+        '^VIX': 'VIX 波動', 'TWD=X': '美元／台幣',
     }
 
     def _one(sym):
@@ -3532,7 +3533,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             if g is not None:
                 return g
             try:
-                g = _yf_batch_quotes(['^DJI', '^GSPC', '^IXIC', 'CL=F', 'DX-Y.NYB'])
+                g = _yf_batch_quotes(['^DJI', '^GSPC', '^IXIC', '^VIX', 'TWD=X', 'DX-Y.NYB'])
                 if not any(x.get('symbol') == 'DX-Y.NYB' for x in (g or [])):
                     # 僅在缺美元指數時補一槍，不重抓整批
                     extra = _yf_batch_quotes(['DX=F'])
@@ -3703,6 +3704,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 'turnoverYi': round(turnover_yi, 1) if turnover_yi is not None else None,
                 'turnoverChgPct': round(turnover_chg, 2) if turnover_chg is not None else None,
                 'up': up, 'down': dn, 'flat': flat,
+                'limitUp': st.get('limitUp'),
+                'limitDown': st.get('limitDown'),
                 'advRatio': st.get('advRatio'),
                 'lsRatio': ls_ratio,
                 'dataLabel': '官方盤後／即時混成' if out.get('breadthOk') else '部分資料可用',
@@ -3711,6 +3714,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 'open': t00.get('open'), 'high': t00.get('high'), 'low': t00.get('low'),
                 'prevClose': t00.get('prevClose'), 'price': t00.get('price'),
                 'changePct': t00.get('changePct'), 'name': t00.get('name') or '加權指數',
+                'otcChangePct': o00.get('changePct'),
+                'otcPrice': o00.get('price'),
             },
             'institutional': {
                 'foreign': foreign, 'trust': trust, 'dealer': dealer,
