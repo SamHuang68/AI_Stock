@@ -3,7 +3,7 @@
  * ----------------------------------------------------------------------------
  * 資料：GET /breadth（TWSE MI_INDEX MS 漲跌家數 + MIS 指數 + 大盤體質）
  * 掛載：#view-breadth / #mount-breadth（由 shell_v5 路由 show/hide）
- * 不改 chart engine；切回路徑時不拆 DOM。
+ * 大螢幕一頁高密度（pulse 2-zone 風格）
  * ========================================================================== */
 (function () {
   'use strict';
@@ -16,48 +16,71 @@
   function $(id) { return document.getElementById(id); }
 
   function injectCSS() {
-    if ($('breadth-v5-css')) return;
-    var s = document.createElement('style');
-    s.id = 'breadth-v5-css';
+    var s = $('breadth-v5-css');
+    if (!s) {
+      s = document.createElement('style');
+      s.id = 'breadth-v5-css';
+      document.head.appendChild(s);
+    }
     s.textContent =
-      '#view-breadth.sv-panel{max-width:1080px;padding:8px 12px 14px}' +
-      '#bd-root{font-family:\'JetBrains Mono\',monospace;color:var(--text)}' +
-      '#bd-root .bd-head{display:flex;align-items:flex-end;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px}' +
-      '#bd-root .bd-kicker{font-size:9px;color:var(--gold);letter-spacing:1.5px;margin-bottom:1px}' +
-      '#bd-root .bd-title{font-family:\'Noto Serif TC\',serif;font-size:18px;font-weight:700;color:var(--thi);letter-spacing:.5px;line-height:1.15}' +
-      '#bd-root .bd-sub{font-size:10px;color:var(--tlo);margin-top:1px;line-height:1.35}' +
-      '#bd-root .bd-actions{display:flex;gap:5px;align-items:center}' +
-      '#bd-root .bd-btn{padding:4px 9px;border:1px solid var(--border);border-radius:5px;background:var(--bg3);' +
-        'color:var(--text);font-family:\'JetBrains Mono\',monospace;font-size:9px;cursor:pointer}' +
+      '#shell-views:has(#view-breadth.on){overflow:hidden!important}' +
+      '#view-breadth.sv-panel.on{' +
+        'max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
+        'overflow:hidden;display:flex!important;flex-direction:column;flex:1;min-height:0;height:100%}' +
+      '#mount-breadth,#mount-breadth.sv-mount{flex:1;min-height:0;display:flex;flex-direction:column;max-width:none}' +
+      '#bd-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);' +
+        'width:100%;max-width:none;margin:0;min-width:0;box-sizing:border-box;' +
+        'flex:1;min-height:0;display:flex;flex-direction:column}' +
+      '#bd-root .bd-head{display:flex;align-items:center;justify-content:space-between;gap:8px;' +
+        'margin-bottom:3px;min-width:0;flex:0 0 auto}' +
+      '#bd-root .bd-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
+      '#bd-root .bd-kicker{font-size:9px;color:var(--gold);letter-spacing:1.2px;margin:0;font-weight:700}' +
+      '#bd-root .bd-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
+      '#bd-root .bd-sub{font-size:9px;color:var(--tlo);margin:0}' +
+      '#bd-root .bd-actions{display:flex;gap:4px;flex-wrap:nowrap;justify-content:flex-end;flex:0 0 auto}' +
+      '#bd-root .bd-btn{padding:3px 7px;border:1px solid var(--border);border-radius:4px;background:var(--bg3);' +
+        'color:var(--text);font-family:\'JetBrains Mono\',monospace;font-size:9px;cursor:pointer;flex:0 0 auto;white-space:nowrap}' +
       '#bd-root .bd-btn:hover{border-color:var(--bhi);color:var(--thi)}' +
       '#bd-root .bd-btn.primary{background:var(--gold);color:#060A12;border-color:transparent;font-weight:700}' +
       '#bd-root .bd-btn.primary:hover{background:#FBBF24}' +
-      '#bd-root .bd-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin:6px 0}' +
-      '#bd-root .bd-card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;min-height:0}' +
-      '#bd-root .bd-card .k{font-size:8px;color:var(--tlo);letter-spacing:.5px;margin-bottom:2px}' +
-      '#bd-root .bd-card .v{font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
-      '#bd-root .bd-card .s{font-size:9px;color:var(--tlo);margin-top:1px}' +
       '#bd-root .up{color:var(--red)}#bd-root .dn{color:var(--green)}#bd-root .flat{color:var(--tlo)}' +
-      '#bd-root .bd-bar-wrap{margin:4px 0 8px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:7px 9px}' +
-      '#bd-root .bd-bar-lbl{display:flex;justify-content:space-between;font-size:9px;color:var(--tlo);margin-bottom:4px}' +
-      '#bd-root .bd-bar{display:flex;height:10px;border-radius:3px;overflow:hidden;background:var(--bg)}' +
+      '#bd-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
+      '#bd-root .bd-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;margin:0 0 4px;min-width:0;flex:0 0 auto}' +
+      '#bd-root .bd-strip .cell{background:linear-gradient(180deg,rgba(17,27,46,.95),rgba(11,18,32,.98));' +
+        'border:1px solid var(--border);border-radius:5px;padding:3px 6px;min-width:0;overflow:hidden}' +
+      '#bd-root .bd-strip .k{font-size:8px;color:var(--tlo);letter-spacing:.4px;margin-bottom:0;' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#bd-root .bd-strip .v{font-size:12px;font-weight:800;color:var(--thi);line-height:1.15;' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#bd-root .bd-strip .s{font-size:8px;margin-top:0;font-weight:700;line-height:1.2;' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#bd-root .bd-dash{flex:1;min-height:0;display:grid;gap:4px;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
+      '#bd-root .bd-zone{display:grid;gap:4px;min-width:0;min-height:0;height:100%}' +
+      '#bd-root .bd-zone-up{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}' +
+      '#bd-root .bd-zone-lo{grid-template-columns:minmax(0,1fr) minmax(0,1.2fr)}' +
+      '#bd-root .bd-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;' +
+        'min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%}' +
+      '#bd-root .bd-sec h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;' +
+        'display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;gap:4px;font-weight:700}' +
+      '#bd-root .bd-sec > .bd-fill{flex:1;min-height:0;overflow:auto}' +
+      '#bd-root .bd-bar-lbl{display:flex;justify-content:space-between;font-size:9px;color:var(--tlo);margin-bottom:3px;flex:0 0 auto}' +
+      '#bd-root .bd-bar{display:flex;height:10px;border-radius:3px;overflow:hidden;background:var(--bg);flex:0 0 auto}' +
       '#bd-root .bd-bar .seg-up{background:var(--red)}' +
       '#bd-root .bd-bar .seg-flat{background:#334155}' +
       '#bd-root .bd-bar .seg-dn{background:var(--green)}' +
-      '#bd-root .bd-section{margin-top:6px}' +
-      '#bd-root .bd-section h4{font-size:10px;color:var(--gold);letter-spacing:.6px;margin:0 0 4px;font-weight:700}' +
-      '#bd-root .bd-rows{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 12px}' +
-      '#bd-root .bd-row{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-bottom:1px solid var(--border);font-size:10px}' +
-      '#bd-root .bd-row .rk{color:var(--tlo)}#bd-root .bd-row .rv{color:var(--thi);font-weight:700}' +
-      '#bd-root .bd-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:6px}' +
+      '#bd-root .bd-rows{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 10px}' +
+      '#bd-root .bd-row{display:flex;justify-content:space-between;gap:6px;padding:2px 0;border-bottom:1px solid var(--border);font-size:10px}' +
+      '#bd-root .bd-row .rk{color:var(--tlo)}#bd-root .bd-row .rv{color:var(--thi);font-weight:700;text-align:right}' +
+      '#bd-root .bd-score-wrap{display:flex;align-items:center;gap:8px;flex:1;min-height:0;margin-top:4px}' +
+      '#bd-root .bd-spark{flex:0 0 auto;margin-bottom:4px;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:2px 4px;min-height:36px}' +
+      '#bd-root .bd-spark svg{width:100%;height:36px;display:block}' +
+      '#bd-root table.bd-hist{width:100%;border-collapse:collapse;font-size:10px}' +
+      '#bd-root table.bd-hist th,#bd-root table.bd-hist td{padding:2px 4px;border-bottom:1px solid var(--border);text-align:right}' +
+      '#bd-root table.bd-hist th:first-child,#bd-root table.bd-hist td:first-child{text-align:left}' +
+      '#bd-root table.bd-hist th{color:var(--tlo);font-weight:600;position:sticky;top:0;background:var(--bg2);z-index:1}' +
+      '#bd-root .bd-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:3px;flex:0 0 auto}' +
       '#bd-root .bd-err{color:var(--orange);font-size:10px;padding:6px 0}' +
-      '#bd-root .bd-loading{color:var(--tlo);font-size:10px;padding:12px 0;letter-spacing:1px}' +
-      '@media (max-width:900px){' +
-        '#bd-root .bd-grid{grid-template-columns:repeat(2,minmax(0,1fr))}' +
-        '#bd-root .bd-rows{grid-template-columns:1fr}' +
-        '#view-breadth.sv-panel{padding:8px 10px}' +
-      '}';
-    document.head.appendChild(s);
+      '#bd-root .bd-loading{color:var(--tlo);font-size:10px;padding:12px 0;letter-spacing:1px}';
   }
 
   function fmt(n, dig) {
@@ -83,6 +106,12 @@
     return (v >= 0 ? '+' : '') + (v / 1e8).toFixed(0) + ' 億';
   }
 
+  function stripCell(k, v, s, cls) {
+    return '<div class="cell"><div class="k">' + k + '</div>' +
+      '<div class="v' + (cls ? ' ' + cls : '') + '">' + v + '</div>' +
+      (s ? '<div class="s' + (cls ? ' ' + cls : '') + '">' + s + '</div>' : '') + '</div>';
+  }
+
   function ensureMount() {
     injectCSS();
     var panel = $('view-breadth');
@@ -100,9 +129,9 @@
         '<div id="bd-root">' +
           '<div class="bd-head">' +
             '<div>' +
-              '<div class="bd-kicker">STOCK TERMINAL · 5.0</div>' +
-              '<div class="bd-title">大盤廣度</div>' +
-              '<div class="bd-sub" id="bd-sub">載入中…</div>' +
+              '<span class="bd-kicker">STOCK TERMINAL · 5.0</span>' +
+              '<span class="bd-title">大盤廣度</span>' +
+              '<span class="bd-sub" id="bd-sub">載入中…</span>' +
             '</div>' +
             '<div class="bd-actions">' +
               '<button type="button" class="bd-btn" id="bd-refresh">↻ 重新整理</button>' +
@@ -157,37 +186,41 @@
       : st.net > -200 ? '廣度溫和偏空'
       : '廣度偏空（下跌家數明顯較多）';
 
-    var seg = V ? V.segBar(up, flat, dn) : '';
-    var idxCards =
-      '<div class="bd-card"><div class="k">加權指數</div>' +
-        '<div class="v">' + (t00.price != null ? fmt(t00.price, 2) : '—') + '</div>' +
-        '<div class="s ' + clsChg(t00.changePct) + '">' + fmtPct(t00.changePct) + '</div></div>' +
-      '<div class="bd-card"><div class="k">櫃買指數</div>' +
-        '<div class="v">' + (o00.price != null ? fmt(o00.price, 2) : '—') + '</div>' +
-        '<div class="s ' + clsChg(o00.changePct) + '">' + fmtPct(o00.changePct) + '</div></div>' +
-      '<div class="bd-card"><div class="k">上漲家數（股票）</div>' +
-        '<div class="v up">' + fmt(up) + '</div>' +
-        '<div class="s">漲停 ' + fmt(st.limitUp) + '</div></div>' +
-      '<div class="bd-card"><div class="k">下跌家數（股票）</div>' +
-        '<div class="v dn">' + fmt(dn) + '</div>' +
-        '<div class="s">跌停 ' + fmt(st.limitDown) + '</div></div>';
+    var scoreCol = '';
+    if (d.score != null && V && V.qualityColor) {
+      scoreCol = ' style="color:' + V.qualityColor(d.score) + '"';
+    }
+    var scoreMeter = (d.score != null && V) ? V.scoreMeter(d.score) : '';
 
-    var bar =
-      '<div class="bd-bar-wrap">' +
-        '<div class="bd-bar-lbl"><span>股票漲跌結構</span><span>' + tone +
-          (st.advRatio != null ? ' · 上漲比 ' + (st.advRatio * 100).toFixed(1) + '%' : '') +
-          (st.net != null ? ' · 淨 ' + (st.net >= 0 ? '+' : '') + st.net : '') +
+    var strip =
+      stripCell('加權指數', t00.price != null ? fmt(t00.price, 2) : '—', fmtPct(t00.changePct), clsChg(t00.changePct)) +
+      stripCell('櫃買指數', o00.price != null ? fmt(o00.price, 2) : '—', fmtPct(o00.changePct), clsChg(o00.changePct)) +
+      stripCell('上漲家數', fmt(up), '漲停 ' + fmt(st.limitUp), 'up') +
+      stripCell('下跌家數', fmt(dn), '跌停 ' + fmt(st.limitDown), 'dn') +
+      stripCell('淨家數', st.net != null ? ((st.net >= 0 ? '+' : '') + st.net) : '—',
+        st.advRatio != null ? '上漲比 ' + (st.advRatio * 100).toFixed(1) + '%' : tone) +
+      stripCell('大盤體質', d.score != null ? fmt(d.score) : '—', d.summary || '量能／法人／融資', '');
+
+    var seg = V ? V.segBar(up, flat, dn) : '';
+    var breadthBlock =
+      '<div class="bd-sec"><h4>漲跌結構</h4>' +
+        '<div class="bd-bar-lbl"><span>' + tone + '</span><span>' +
+          (st.net != null ? '淨 ' + (st.net >= 0 ? '+' : '') + st.net : '') +
         '</span></div>' +
         (seg || ('<div class="bd-bar" title="紅=上漲 灰=持平 綠=下跌">' +
           '<div class="seg-up" style="width:' + pctUp.toFixed(2) + '%"></div>' +
           '<div class="seg-flat" style="width:' + pctFlat.toFixed(2) + '%"></div>' +
           '<div class="seg-dn" style="width:' + pctDn.toFixed(2) + '%"></div>' +
         '</div>')) +
-        '<div class="bd-bar-lbl" style="margin-top:8px;margin-bottom:0">' +
+        '<div class="bd-bar-lbl" style="margin-top:4px;margin-bottom:0">' +
           '<span class="up">上漲 ' + fmt(up) + '（' + pctUp.toFixed(1) + '%）</span>' +
           '<span class="flat">持平 ' + fmt(flat) + '</span>' +
           '<span class="dn">下跌 ' + fmt(dn) + '（' + pctDn.toFixed(1) + '%）</span>' +
         '</div>' +
+        (d.score != null
+          ? '<div class="bd-score-wrap"><div class="v"' + scoreCol + ' style="font-size:18px;font-weight:800">' +
+              fmt(d.score) + '</div>' + scoreMeter + '</div>'
+          : '') +
       '</div>';
 
     var rows = '';
@@ -219,7 +252,7 @@
       rows += '<div class="bd-row"><span class="rk">三大法人合計</span><span class="rv ' + clsChg(total) + '">' +
         fyi(total) + '</span></div>';
       if (V) {
-        rows += '<div class="bd-row" style="display:block;padding-top:6px">' + V.magBars([
+        rows += '<div class="bd-row" style="display:block;padding-top:4px;grid-column:1/-1;border:none">' + V.magBars([
           { label: '外資', v: inst.foreign, fmt: V.fmtYiFromYuan },
           { label: '投信', v: inst.trust, fmt: V.fmtYiFromYuan },
           { label: '自營', v: inst.dealer, fmt: V.fmtYiFromYuan }
@@ -227,18 +260,11 @@
       }
     }
 
-    var scoreCol = '';
-    if (d.score != null && V && V.qualityColor) {
-      scoreCol = ' style="color:' + V.qualityColor(d.score) + '"';
-    }
-    var scoreMeter = (d.score != null && V) ? V.scoreMeter(d.score) : '';
-    var scoreCard = d.score != null
-      ? '<div class="bd-card"><div class="k">大盤體質</div><div class="v"' + scoreCol + '>' + fmt(d.score) +
-        '</div><div class="s">' + (d.summary || '量能／法人／融資／估值') + '</div>' + scoreMeter + '</div>'
-      : '';
+    var detailBlock =
+      '<div class="bd-sec"><h4>細節</h4><div class="bd-fill"><div class="bd-rows">' + rows + '</div></div></div>';
 
     var hist = d._hist || [];
-    var histHtml = '';
+    var histBlock = '';
     if (hist.length) {
       var ls = (up != null && dn) ? (up / Math.max(dn, 1)) : null;
       var chrono = hist.slice().reverse();
@@ -247,38 +273,44 @@
       });
       var spark = '';
       if (V && lsSeries.filter(function (v) { return v != null && isFinite(v); }).length >= 2) {
-        spark = '<div style="margin-bottom:8px"><div style="font-size:9px;color:var(--tlo)">多空比／淨家數走勢</div>' +
-          V.sparkLine(lsSeries) + '</div>';
+        spark = '<div class="bd-spark">' + V.sparkLine(lsSeries) + '</div>';
       }
-      histHtml = '<div class="bd-section"><h4>歷史市場廣度（本機歷史庫）</h4>' + spark +
-        '<table style="width:100%;border-collapse:collapse;font-size:11px">' +
-        '<tr style="color:var(--tlo)"><th style="text-align:left;padding:4px">日期</th><th style="padding:4px">上漲</th>' +
-        '<th style="padding:4px">下跌</th><th style="padding:4px">平盤</th><th style="padding:4px">多空比</th></tr>';
+      var tbl = '<table class="bd-hist"><tr><th>日期</th><th>上漲</th><th>下跌</th><th>平盤</th><th>多空比</th></tr>';
       hist.forEach(function (r) {
         var lsTxt = r.lsRatio != null ? Number(r.lsRatio).toFixed(2) : '—';
         var lsCell = lsTxt;
         if (V && r.lsRatio != null) {
-          // heat vs 1.0 (balanced): signed distance for color
           lsCell = V.heatCell(lsTxt, r.lsRatio - 1);
         }
-        histHtml += '<tr><td style="padding:4px">' + r.date + '</td><td class="up" style="padding:4px;text-align:right">' +
-          fmt(r.up) + '</td><td class="dn" style="padding:4px;text-align:right">' + fmt(r.down) +
-          '</td><td style="padding:4px;text-align:right">' + fmt(r.flat) +
-          '</td><td style="padding:4px;text-align:right">' + lsCell + '</td></tr>';
+        tbl += '<tr><td>' + r.date + '</td><td class="up">' + fmt(r.up) +
+          '</td><td class="dn">' + fmt(r.down) +
+          '</td><td>' + fmt(r.flat) +
+          '</td><td>' + lsCell + '</td></tr>';
       });
-      histHtml += '</table><div class="bd-note">今日多空比 ' +
-        (ls != null ? ls.toFixed(2) : '—') +
-        ' · 來源 pulse_history.db（同步資料僅 merge 新日）</div></div>';
+      tbl += '</table>';
+      histBlock =
+        '<div class="bd-sec"><h4>歷史廣度</h4>' +
+          '<div class="bd-fill">' + spark + tbl + '</div>' +
+          '<div class="bd-note">今日多空比 ' + (ls != null ? ls.toFixed(2) : '—') +
+            ' · pulse_history.db</div></div>';
     }
 
+    var noteSec =
+      '<div class="bd-sec"><h4>備註</h4><div class="bd-fill">' +
+        '<div class="bd-note" style="margin:0;font-size:9px;line-height:1.5">' +
+        '股票欄位為上市「股票」統計（不含權證／ETF）；整體市場含全部證券。' +
+        '漲跌家數為 TWSE 盤後公布，盤中或休市日自動取最近交易日。台股慣例：紅漲綠跌。僅供參考。</div></div></div>';
+
     body.innerHTML =
-      '<div class="bd-grid">' + idxCards + scoreCard + '</div>' +
-      bar +
-      '<div class="bd-section"><h4>細節</h4><div class="bd-rows">' + rows + '</div></div>' +
-      histHtml +
-      (d.error && !d.ok ? '<div class="bd-err">' + d.error + '</div>' : '') +
-      '<div class="bd-note">股票欄位為上市「股票」統計（不含權證／ETF 等）；整體市場含全部證券。' +
-        '漲跌家數為 TWSE 盤後公布，盤中或休市日自動取最近交易日。台股慣例：紅漲綠跌。⚠ 非投資建議。</div>';
+      '<div class="bd-strip">' + strip + '</div>' +
+      '<div class="bd-dash">' +
+        '<div class="bd-zone bd-zone-up">' + breadthBlock + detailBlock + '</div>' +
+        '<div class="bd-zone bd-zone-lo">' +
+          (histBlock || '<div class="bd-sec"><h4>歷史廣度</h4><div class="bd-fill"><div class="bd-note">尚無本機歷史紀錄</div></div></div>') +
+          noteSec +
+        '</div>' +
+      '</div>' +
+      (d.error && !d.ok ? '<div class="bd-err">' + d.error + '</div>' : '');
   }
 
   function refresh(force) {
@@ -326,7 +358,6 @@
 
   window.addEventListener('shell:route', onRoute);
 
-  // shell 可能先 boot：若當前已在 breadth，補掛一次
   function boot() {
     if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'breadth') {
       activate();

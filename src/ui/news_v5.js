@@ -16,37 +16,46 @@
   function $(id) { return document.getElementById(id); }
 
   function injectCSS() {
-    if ($('news-v5-css')) return;
-    var s = document.createElement('style');
-    s.id = 'news-v5-css';
+    var s = $('news-v5-css');
+    if (!s) {
+      s = document.createElement('style');
+      s.id = 'news-v5-css';
+      document.head.appendChild(s);
+    }
     s.textContent =
-      '#view-news.sv-panel{max-width:860px;padding:8px 12px 14px}' +
-      '#nw-root{font-family:\'JetBrains Mono\',monospace;color:var(--text)}' +
-      '#nw-root .nw-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px}' +
-      '#nw-root .nw-kicker{font-size:10px;color:var(--gold);letter-spacing:2px;margin-bottom:4px}' +
-      '#nw-root .nw-title{font-family:\'Noto Serif TC\',serif;font-size:18px;font-weight:700;color:var(--thi);line-height:1.15}' +
-      '#nw-root .nw-sub{font-size:11px;color:var(--tlo);margin-top:4px}' +
-      '#nw-root .nw-actions{display:flex;gap:8px;flex-wrap:wrap}' +
-      '#nw-root .nw-btn{padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);' +
-        'color:var(--text);font-size:10px;font-family:\'JetBrains Mono\',monospace;cursor:pointer}' +
+      '#shell-views:has(#view-news.on){overflow:hidden!important}' +
+      '#view-news.sv-panel.on{max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
+        'overflow:hidden;display:flex!important;flex-direction:column;flex:1;min-height:0;height:100%}' +
+      '#mount-news,#mount-news.sv-mount{flex:1;min-height:0;display:flex;flex-direction:column;max-width:none}' +
+      '#nw-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);width:100%;max-width:none;margin:0;min-width:0;' +
+        'box-sizing:border-box;flex:1;min-height:0;display:flex;flex-direction:column}' +
+      '#nw-root .nw-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px;min-width:0;flex:0 0 auto}' +
+      '#nw-root .nw-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
+      '#nw-root .nw-kicker{font-size:9px;color:var(--gold);letter-spacing:1.2px;margin:0;font-weight:700}' +
+      '#nw-root .nw-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
+      '#nw-root .nw-sub{font-size:9px;color:var(--tlo);margin:0}' +
+      '#nw-root .nw-actions{display:flex;gap:4px;flex-wrap:nowrap;flex:0 0 auto}' +
+      '#nw-root .nw-btn{padding:3px 7px;border:1px solid var(--border);border-radius:4px;background:var(--bg3);' +
+        'color:var(--text);font-size:9px;font-family:\'JetBrains Mono\',monospace;cursor:pointer;white-space:nowrap}' +
       '#nw-root .nw-btn:hover{border-color:var(--bhi);color:var(--thi)}' +
       '#nw-root .nw-btn.primary{background:var(--gold);color:#060A12;border:none;font-weight:700}' +
-      '#nw-root .nw-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin:10px 0}' +
-      '#nw-root .nw-card h4{margin:0 0 8px;font-size:12px;color:var(--gold)}' +
-      '#nw-root .nw-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}' +
-      '#nw-root .nw-stat{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px}' +
-      '#nw-root .nw-stat .k{font-size:9px;color:var(--tlo)}#nw-root .nw-stat .v{font-size:18px;font-weight:700;color:var(--thi);margin-top:4px}' +
-      '#nw-root .nw-stat .s{font-size:10px;color:var(--tlo);margin-top:3px}' +
+      '#nw-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(220px,28%) minmax(0,1fr);gap:4px;overflow:hidden}' +
+      '#nw-root .nw-left,#nw-root .nw-right{min-height:0;overflow:auto;display:flex;flex-direction:column;gap:4px}' +
+      '#nw-root .nw-card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;min-width:0}' +
+      '#nw-root .nw-card h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px}' +
+      '#nw-root .nw-grid{display:grid;grid-template-columns:1fr;gap:4px}' +
+      '#nw-root .nw-stat{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px}' +
+      '#nw-root .nw-stat .k{font-size:8px;color:var(--tlo)}#nw-root .nw-stat .v{font-size:14px;font-weight:700;color:var(--thi);margin-top:1px;line-height:1.15}' +
+      '#nw-root .nw-stat .s{font-size:8px;color:var(--tlo);margin-top:1px;line-height:1.3}' +
       '#nw-root .soon{color:var(--gold);font-weight:700}' +
       '#nw-root .warn{color:var(--orange)}' +
-      '#nw-root table{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px}' +
-      '#nw-root th,#nw-root td{padding:5px 6px;border-bottom:1px solid var(--border);text-align:left}' +
-      '#nw-root th{color:var(--tlo)}' +
+      '#nw-root table{width:100%;border-collapse:collapse;font-size:10px}' +
+      '#nw-root th,#nw-root td{padding:3px 5px;border-bottom:1px solid var(--border);text-align:left}' +
+      '#nw-root th{color:var(--tlo);position:sticky;top:0;background:var(--bg2);font-size:9px;z-index:1}' +
       '#nw-root tr.nw-row{cursor:pointer}#nw-root tr.nw-row:hover{background:var(--bg3)}' +
-      '#nw-root .nw-note{font-size:9px;color:var(--tlo);line-height:1.65;margin-top:12px}' +
-      '#nw-root .nw-loading{font-size:11px;color:var(--tlo);padding:18px 0}' +
-      '@media (max-width:720px){#nw-root .nw-grid{grid-template-columns:1fr}}';
-    document.head.appendChild(s);
+      '#nw-root .nw-table-wrap{flex:1;min-height:0;overflow:auto}' +
+      '#nw-root .nw-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:2px}' +
+      '#nw-root .nw-loading{font-size:10px;color:var(--tlo);padding:12px 0}';
   }
 
   function thirdWednesday(y, m) {
@@ -82,12 +91,15 @@
       mount.innerHTML =
         '<div id="nw-root">' +
           '<div class="nw-head"><div>' +
-            '<div class="nw-kicker">STOCK TERMINAL · 5.0-S3</div>' +
-            '<div class="nw-title">快訊</div>' +
-            '<div class="nw-sub">事件行事曆 · 結算日 · 警報狀態（非新聞頭條）</div>' +
+            '<span class="nw-kicker">STOCK TERMINAL · 5.0</span>' +
+            '<span class="nw-title">快訊</span>' +
+            '<span class="nw-sub">事件行事曆 · 結算日 · 警報</span>' +
           '</div><div class="nw-actions">' +
-            '<button type="button" class="nw-btn" id="nw-refresh">↻ 重新整理</button>' +
+            '<button type="button" class="nw-btn" id="nw-refresh">↻</button>' +
             '<button type="button" class="nw-btn" id="nw-cal">行事曆</button>' +
+            '<button type="button" class="nw-btn" id="nw-toast">通知</button>' +
+            '<button type="button" class="nw-btn" id="nw-push">推播</button>' +
+            '<button type="button" class="nw-btn" id="nw-ovn">夜盤</button>' +
             '<button type="button" class="nw-btn primary" data-shell-back>← 圖表</button>' +
           '</div></div>' +
           '<div id="nw-body" class="nw-loading">載入快訊…</div>' +
@@ -96,6 +108,15 @@
       if (r) r.onclick = function () { refresh(); };
       var c = $('nw-cal');
       if (c) c.onclick = function () { if (window.calendarOpen) window.calendarOpen(); };
+      var t = $('nw-toast');
+      if (t) t.onclick = function () {
+        var b = document.getElementById('btn-toast');
+        if (b) b.click();
+      };
+      var p = $('nw-push');
+      if (p) p.onclick = function () { if (window.alertPushOpen) window.alertPushOpen(); };
+      var o = $('nw-ovn');
+      if (o) o.onclick = function () { if (window.overnightOpen) window.overnightOpen(); };
     }
     return $('nw-body');
   }
@@ -128,30 +149,32 @@
       else alertLine = alertSt.status || (alertSt.enabled ? '已設定' : '未啟用');
     }
 
-    var html =
-      '<div class="nw-grid">' +
-        '<div class="nw-stat"><div class="k">期貨結算日</div><div class="v ' + settleCls + '">' + md + '</div>' +
-          '<div class="s ' + settleCls + '">' + settleSub + '</div></div>' +
-        '<div class="nw-stat"><div class="k">月營收截止</div><div class="v ' + (revSoon ? 'soon' : '') + '">' +
-          (rev.nextPublishBy || '—') + '</div>' +
-          '<div class="s">' + (rev.forMonth ? rev.forMonth + ' 營收' : '') +
-          (rev.daysAway != null ? ' · ' + rev.daysAway + ' 天後' : '') + '</div></div>' +
-        '<div class="nw-stat"><div class="k">後端警報</div><div class="v" style="font-size:14px">' + alertLine + '</div>' +
-          '<div class="s">推播／規則見系統選單</div></div>' +
+    var left =
+      '<div class="nw-left">' +
+        '<div class="nw-card"><h4>⏱ 時程計數</h4><div class="nw-grid">' +
+          '<div class="nw-stat"><div class="k">期貨結算日</div><div class="v ' + settleCls + '">' + md + '</div>' +
+            '<div class="s ' + settleCls + '">' + settleSub + '</div></div>' +
+          '<div class="nw-stat"><div class="k">月營收截止</div><div class="v ' + (revSoon ? 'soon' : '') + '">' +
+            (rev.nextPublishBy || '—') + '</div>' +
+            '<div class="s">' + (rev.forMonth ? rev.forMonth + ' 營收' : '') +
+            (rev.daysAway != null ? ' · ' + rev.daysAway + ' 天後' : '') + '</div></div>' +
+          '<div class="nw-stat"><div class="k">後端警報</div><div class="v" style="font-size:12px">' + alertLine + '</div>' +
+            '<div class="s">推播／規則見系統選單</div></div>' +
+        '</div></div>' +
+        '<div class="nw-card"><h4>📈 月營收公布</h4>' +
+          (rev.nextPublishBy
+            ? ('<div style="font-size:10px">下次：<span class="' + (revSoon ? 'soon' : '') + '">' + rev.nextPublishBy +
+              '</span>（' + (rev.forMonth || '') + '）</div>' +
+              '<div class="nw-note">上市櫃每月 10 日前須公布上月營收；YoY 是供應鏈動能的即時訊號。</div>')
+            : '<div class="nw-note">無營收時程資料。</div>') +
+        '</div>' +
+        '<div class="nw-note">非新聞頭條源；集中「會影響部位節奏」的時程與提醒。</div>' +
       '</div>';
 
-    html += '<div class="nw-card"><h4>📈 月營收公布</h4>' +
-      (rev.nextPublishBy
-        ? ('<div>下次截止：<span class="' + (revSoon ? 'soon' : '') + '">' + rev.nextPublishBy +
-          '</span>（' + (rev.forMonth || '') + '）</div>' +
-          '<div class="nw-note">上市櫃每月 10 日前須公布上月營收；YoY 是供應鏈動能的即時訊號。</div>')
-        : '<div class="nw-note">無營收時程資料。</div>') +
-      '</div>';
-
-    html += '<div class="nw-card"><h4>💵 除權除息預告</h4>';
+    var exTable = '';
     if (ex.length) {
-      html += '<table><tr><th>日期</th><th>標的</th><th>類型</th></tr>' +
-        ex.slice(0, 40).map(function (e) {
+      exTable = '<div class="nw-table-wrap"><table><tr><th>日期</th><th>標的</th><th>類型</th></tr>' +
+        ex.slice(0, 60).map(function (e) {
           var typ = e.type || '';
           var typCell = typ;
           if (V && typ) {
@@ -161,21 +184,18 @@
           }
           return '<tr class="nw-row" data-code="' + (e.code || '') + '"><td>' + (e.date || '') +
             '</td><td>' + (e.code || '') + ' ' + (e.name || '') + '</td><td>' + typCell + '</td></tr>';
-        }).join('') + '</table>';
+        }).join('') + '</table></div>';
     } else {
-      html += '<div class="nw-note">目前無預告（TWSE 資料集可能未開放或當期無資料）。</div>';
+      exTable = '<div class="nw-note">目前無預告（TWSE 資料集可能未開放或當期無資料）。</div>';
     }
-    html += '</div>';
 
-    html += '<div class="nw-card"><h4>🔔 快捷</h4>' +
-      '<div class="nw-actions">' +
-        '<button type="button" class="nw-btn" id="nw-toast">通知設定</button>' +
-        '<button type="button" class="nw-btn" id="nw-push">推播設定</button>' +
-        '<button type="button" class="nw-btn" id="nw-ovn">夜盤預警</button>' +
-      '</div>' +
-      '<div class="nw-note">此頁不是新聞頭條源；標題／外電請用外部來源。這裡集中「會影響部位節奏」的時程與提醒。</div></div>';
+    var right =
+      '<div class="nw-right">' +
+        '<div class="nw-card" style="flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden">' +
+          '<h4>💵 除權除息預告 · ' + ex.length + ' 筆</h4>' + exTable +
+        '</div></div>';
 
-    body.innerHTML = html;
+    body.innerHTML = left + right;
 
     body.querySelectorAll('tr.nw-row').forEach(function (el) {
       el.onclick = function () {
@@ -186,19 +206,6 @@
         }
       };
     });
-    var t = $('nw-toast');
-    if (t) t.onclick = function () {
-      var b = document.getElementById('btn-toast');
-      if (b) b.click();
-    };
-    var p = $('nw-push');
-    if (p) p.onclick = function () {
-      if (window.alertPushOpen) window.alertPushOpen();
-    };
-    var o = $('nw-ovn');
-    if (o) o.onclick = function () {
-      if (window.overnightOpen) window.overnightOpen();
-    };
   }
 
   function refresh() {

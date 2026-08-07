@@ -7,6 +7,7 @@
  *   GET /marketflow — 量能／三大法人（盤後籌碼）
  *   GET /breadth    — 漲跌家數摘要（S2）
  * 掛載：#mount-afterhours；路由 shell:route=afterhours
+ * 大螢幕一頁高密度（pulse 2-zone 風格）
  * ========================================================================== */
 (function () {
   'use strict';
@@ -29,49 +30,73 @@
   function $(id) { return document.getElementById(id); }
 
   function injectCSS() {
-    if ($('afterhours-v5-css')) return;
-    var s = document.createElement('style');
-    s.id = 'afterhours-v5-css';
+    var s = $('afterhours-v5-css');
+    if (!s) {
+      s = document.createElement('style');
+      s.id = 'afterhours-v5-css';
+      document.head.appendChild(s);
+    }
     s.textContent =
-      '#view-afterhours.sv-panel{max-width:1100px;padding:8px 12px 14px}' +
-      '#ah-root{font-family:\'JetBrains Mono\',monospace;color:var(--text)}' +
-      '#ah-root .ah-head{display:flex;align-items:flex-end;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px}' +
-      '#ah-root .ah-kicker{font-size:9px;color:var(--gold);letter-spacing:1.5px;margin-bottom:1px}' +
-      '#ah-root .ah-title{font-family:\'Noto Serif TC\',serif;font-size:18px;font-weight:700;color:var(--thi);letter-spacing:.5px;line-height:1.15}' +
-      '#ah-root .ah-sub{font-size:10px;color:var(--tlo);margin-top:1px;line-height:1.35}' +
-      '#ah-root .ah-actions{display:flex;gap:5px;flex-wrap:wrap}' +
-      '#ah-root .ah-btn{padding:4px 9px;border:1px solid var(--border);border-radius:5px;background:var(--bg3);' +
-        'color:var(--text);font-family:\'JetBrains Mono\',monospace;font-size:9px;cursor:pointer}' +
+      '#shell-views:has(#view-afterhours.on){overflow:hidden!important}' +
+      '#view-afterhours.sv-panel.on{' +
+        'max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
+        'overflow:hidden;display:flex!important;flex-direction:column;flex:1;min-height:0;height:100%}' +
+      '#mount-afterhours,#mount-afterhours.sv-mount{flex:1;min-height:0;display:flex;flex-direction:column;max-width:none}' +
+      '#ah-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);' +
+        'width:100%;max-width:none;margin:0;min-width:0;box-sizing:border-box;' +
+        'flex:1;min-height:0;display:flex;flex-direction:column}' +
+      '#ah-root .ah-head{display:flex;align-items:center;justify-content:space-between;gap:8px;' +
+        'margin-bottom:3px;min-width:0;flex:0 0 auto}' +
+      '#ah-root .ah-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
+      '#ah-root .ah-kicker{font-size:9px;color:var(--gold);letter-spacing:1.2px;margin:0;font-weight:700}' +
+      '#ah-root .ah-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
+      '#ah-root .ah-sub{font-size:9px;color:var(--tlo);margin:0}' +
+      '#ah-root .ah-actions{display:flex;gap:4px;flex-wrap:nowrap;justify-content:flex-end;flex:0 0 auto}' +
+      '#ah-root .ah-btn{padding:3px 7px;border:1px solid var(--border);border-radius:4px;background:var(--bg3);' +
+        'color:var(--text);font-family:\'JetBrains Mono\',monospace;font-size:9px;cursor:pointer;flex:0 0 auto;white-space:nowrap}' +
       '#ah-root .ah-btn:hover{border-color:var(--bhi);color:var(--thi)}' +
       '#ah-root .ah-btn.primary{background:var(--gold);color:#060A12;border:none;font-weight:700}' +
       '#ah-root .ah-btn.primary:hover{background:#FBBF24}' +
-      '#ah-root .ah-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin:6px 0}' +
-      '#ah-root .ah-card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;min-height:0}' +
-      '#ah-root .ah-card .k{font-size:8px;color:var(--tlo);letter-spacing:.5px;margin-bottom:2px}' +
-      '#ah-root .ah-card .v{font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
-      '#ah-root .ah-card .s{font-size:9px;color:var(--tlo);margin-top:1px}' +
       '#ah-root .up{color:var(--red)}#ah-root .dn{color:var(--green)}#ah-root .flat{color:var(--tlo)}' +
-      '#ah-root .ah-section{margin-top:6px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:7px 9px}' +
-      '#ah-root .ah-section h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.6px}' +
-      '#ah-root .ah-txf{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}' +
-      '#ah-root .ah-cell{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:5px;text-align:center}' +
-      '#ah-root .ah-cell .k{font-size:8px;color:var(--tlo)}#ah-root .ah-cell .v{font-size:11px;font-weight:700;margin-top:1px;color:var(--thi)}' +
+      '#ah-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
+      '#ah-root .ah-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;margin:0 0 4px;min-width:0;flex:0 0 auto}' +
+      '#ah-root .ah-strip .cell{background:linear-gradient(180deg,rgba(17,27,46,.95),rgba(11,18,32,.98));' +
+        'border:1px solid var(--border);border-radius:5px;padding:3px 6px;min-width:0;overflow:hidden}' +
+      '#ah-root .ah-strip .k{font-size:8px;color:var(--tlo);letter-spacing:.4px;margin-bottom:0;' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#ah-root .ah-strip .v{font-size:12px;font-weight:800;color:var(--thi);line-height:1.15;' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#ah-root .ah-strip .s{font-size:8px;margin-top:0;font-weight:700;line-height:1.2;' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#ah-root .ah-strip .viz-hide,#ah-root .ah-strip .viz-meter,#ah-root .ah-strip .viz-seg,' +
+        '#ah-root .ah-strip .viz-chip{display:none!important}' +
+      '#ah-root .ah-dash{flex:1;min-height:0;display:grid;gap:4px;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
+      '#ah-root .ah-zone{display:grid;gap:4px;min-width:0;min-height:0;height:100%}' +
+      '#ah-root .ah-zone-up{grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)}' +
+      '#ah-root .ah-zone-lo{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)}' +
+      '#ah-root .ah-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;' +
+        'min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%}' +
+      '#ah-root .ah-sec h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;' +
+        'display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;gap:4px;font-weight:700}' +
+      '#ah-root .ah-sec > .ah-fill{flex:1;min-height:0;overflow:auto}' +
+      '#ah-root .ah-tone{font-size:10px;margin:0 0 4px;font-weight:700;flex:0 0 auto}' +
+      '#ah-root .ah-ohlc{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;flex:0 0 auto}' +
+      '#ah-root .ah-ohlc .box{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px;text-align:center}' +
+      '#ah-root .ah-ohlc .box .k{font-size:8px;color:var(--tlo)}' +
+      '#ah-root .ah-ohlc .box .v{font-size:12px;font-weight:700;margin-top:1px;color:var(--thi)}' +
       '#ah-root table.ah-tbl{width:100%;border-collapse:collapse;font-size:10px}' +
       '#ah-root table.ah-tbl th,#ah-root table.ah-tbl td{padding:3px 4px;border-bottom:1px solid var(--border);text-align:right}' +
       '#ah-root table.ah-tbl th:first-child,#ah-root table.ah-tbl td:first-child,' +
       '#ah-root table.ah-tbl th:nth-child(2),#ah-root table.ah-tbl td:nth-child(2){text-align:left}' +
-      '#ah-root table.ah-tbl th{color:var(--tlo);font-weight:600}' +
+      '#ah-root table.ah-tbl th{color:var(--tlo);font-weight:600;position:sticky;top:0;background:var(--bg2);z-index:1}' +
       '#ah-root tr.ah-row{cursor:pointer}#ah-root tr.ah-row:hover{background:var(--bg3)}' +
-      '#ah-root .ah-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:6px}' +
+      '#ah-root .ah-inst4{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;flex:0 0 auto;margin-bottom:4px}' +
+      '#ah-root .ah-inst4 .c{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px;text-align:center}' +
+      '#ah-root .ah-inst4 .c .k{font-size:8px;color:var(--tlo)}' +
+      '#ah-root .ah-inst4 .c .v{font-size:12px;font-weight:800;margin-top:1px;color:var(--thi)}' +
+      '#ah-root .ah-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:3px;flex:0 0 auto}' +
       '#ah-root .ah-loading,#ah-root .ah-err{font-size:10px;color:var(--tlo);padding:10px 0}' +
-      '#ah-root .ah-err{color:var(--orange)}' +
-      '#ah-root .ah-tone{font-size:11px;margin:4px 0 0;font-weight:700}' +
-      '@media (max-width:900px){' +
-        '#ah-root .ah-grid{grid-template-columns:repeat(2,minmax(0,1fr))}' +
-        '#ah-root .ah-txf{grid-template-columns:repeat(2,1fr)}' +
-        '#view-afterhours.sv-panel{padding:8px 10px}' +
-      '}';
-    document.head.appendChild(s);
+      '#ah-root .ah-err{color:var(--orange)}';
   }
 
   function twCls(p) {
@@ -148,15 +173,18 @@
     if (!$('ah-root')) {
       mount.innerHTML =
         '<div id="ah-root">' +
-          '<div class="ah-head"><div>' +
-              '<div class="ah-kicker">STOCK TERMINAL · 5.0</div>' +
-              '<div class="ah-title">盤後數據</div>' +
-              '<div class="ah-sub" id="ah-sub">漲跌排行 · 夜盤 · 籌碼摘要</div>' +
-          '</div><div class="ah-actions">' +
-            '<button type="button" class="ah-btn" id="ah-refresh">↻ 重新整理</button>' +
-            '<button type="button" class="ah-btn" id="ah-open-ovn">夜盤詳情</button>' +
-            '<button type="button" class="ah-btn primary" data-shell-back>← 圖表</button>' +
-          '</div></div>' +
+          '<div class="ah-head">' +
+            '<div>' +
+              '<span class="ah-kicker">STOCK TERMINAL · 5.0</span>' +
+              '<span class="ah-title">盤後數據</span>' +
+              '<span class="ah-sub" id="ah-sub">漲跌排行 · 夜盤 · 籌碼摘要</span>' +
+            '</div>' +
+            '<div class="ah-actions">' +
+              '<button type="button" class="ah-btn" id="ah-refresh">↻ 重新整理</button>' +
+              '<button type="button" class="ah-btn" id="ah-open-ovn">夜盤詳情</button>' +
+              '<button type="button" class="ah-btn primary" data-shell-back>← 圖表</button>' +
+            '</div>' +
+          '</div>' +
           '<div id="ah-body" class="ah-loading">載入盤後資料…</div>' +
         '</div>';
       var r = $('ah-refresh');
@@ -167,6 +195,12 @@
       };
     }
     return $('ah-body');
+  }
+
+  function stripCell(k, v, s, cls) {
+    return '<div class="cell"><div class="k">' + k + '</div>' +
+      '<div class="v' + (cls ? ' ' + cls : '') + '">' + v + '</div>' +
+      (s ? '<div class="s' + (cls ? ' ' + cls : '') + '">' + s + '</div>' : '') + '</div>';
   }
 
   function render(pack) {
@@ -182,39 +216,35 @@
         (bd.date ? ' · 廣度日 ' + bd.date : '');
     }
 
-    var flat = st.unchanged != null ? st.unchanged : (st.flat || 0);
-    var breadthSeg = V ? V.segBar(st.up, flat, st.down) : '';
-    var scoreMeter = (V && bd.score != null) ? V.scoreMeter(bd.score) : '';
-    var cards =
-      '<div class="ah-card"><div class="k">台指期夜盤</div>' +
-        '<div class="v ' + twCls(txf && txf.changePct) + '">' + (txf ? fmtN(txf.price) : '—') + '</div>' +
-        '<div class="s ' + twCls(txf && txf.changePct) + '">' + pct(txf && txf.changePct) + '</div></div>' +
-      '<div class="ah-card"><div class="k">夜盤振幅</div>' +
-        '<div class="v">' + (txf && txf.ampRate != null ? txf.ampRate.toFixed(2) + '%' : '—') + '</div>' +
-        '<div class="s">' + (txf ? (txf.sessionLabel || '夜盤') : '無資料') + '</div></div>' +
-      '<div class="ah-card"><div class="k">漲跌家數（股票）</div>' +
-        '<div class="v"><span class="up">' + fmtN(st.up) + '</span> / <span class="dn">' + fmtN(st.down) + '</span></div>' +
-        '<div class="s">淨 ' + (st.net != null ? ((st.net >= 0 ? '+' : '') + st.net) : '—') + '</div>' +
-        breadthSeg + '</div>' +
-      '<div class="ah-card"><div class="k">大盤體質</div>' +
-        '<div class="v">' + (bd.score != null ? bd.score : '—') + '</div>' +
-        '<div class="s">' + (bd.summary || '量能／法人／融資／估值') + '</div>' + scoreMeter + '</div>';
+    var inst = mf.inst;
+    var to = (mf.turnover || []).filter(function (x) { return x.amount != null; });
+    var latestAmt = to.length ? to[to.length - 1].amount : null;
+    var total = inst ? ((inst.foreign || 0) + (inst.trust || 0) + (inst.dealer || 0)) : null;
 
-    var txfBlock = '<div class="ah-section"><h4>📉 台指期夜盤（主訊號）</h4>';
+    var strip =
+      stripCell('台指期夜盤', txf ? fmtN(txf.price) : '—', pct(txf && txf.changePct), twCls(txf && txf.changePct)) +
+      stripCell('夜盤%', pct(txf && txf.changePct), txf ? (txf.sessionLabel || '夜盤') : '—', twCls(txf && txf.changePct)) +
+      stripCell('夜盤振幅', txf && txf.ampRate != null ? txf.ampRate.toFixed(2) + '%' : '—', txf ? fmtN(txf.volume) + ' 口' : '—') +
+      stripCell('漲跌家數', '<span class="up">' + fmtN(st.up) + '</span> / <span class="dn">' + fmtN(st.down) + '</span>',
+        '淨 ' + (st.net != null ? ((st.net >= 0 ? '+' : '') + st.net) : '—')) +
+      stripCell('大盤體質', bd.score != null ? bd.score : '—', bd.summary || '量能／法人／融資') +
+      stripCell('法人合計', fyi(total), yi(latestAmt) + ' 成交');
+
+    var txfBlock = '<div class="ah-sec"><h4>台指期夜盤</h4>';
     if (!txf) {
-      txfBlock += '<div class="ah-err">暫無夜盤資料（請確認 /txf）。日盤時段仍可顯示最近夜盤 OHLC。</div></div>';
+      txfBlock += '<div class="ah-err">暫無夜盤資料（/txf）</div></div>';
     } else {
       txfBlock +=
         '<div class="ah-tone ' + twCls(txf.changePct) + '">' + toneTxf(txf.changePct, txf.ampRate) + '</div>' +
-        '<div class="ah-txf" style="margin-top:10px">' +
-          '<div class="ah-cell"><div class="k">開</div><div class="v">' + fmtN(txf.open) + '</div></div>' +
-          '<div class="ah-cell"><div class="k">高</div><div class="v">' + fmtN(txf.high) + '</div></div>' +
-          '<div class="ah-cell"><div class="k">低</div><div class="v">' + fmtN(txf.low) + '</div></div>' +
-          '<div class="ah-cell"><div class="k">昨收</div><div class="v">' + fmtN(txf.prevClose) + '</div></div>' +
+        '<div class="ah-ohlc">' +
+          '<div class="box"><div class="k">開</div><div class="v">' + fmtN(txf.open) + '</div></div>' +
+          '<div class="box"><div class="k">高</div><div class="v">' + fmtN(txf.high) + '</div></div>' +
+          '<div class="box"><div class="k">低</div><div class="v">' + fmtN(txf.low) + '</div></div>' +
+          '<div class="box"><div class="k">昨收</div><div class="v">' + fmtN(txf.prevClose) + '</div></div>' +
         '</div>' +
         '<div class="ah-note">來源 ' + (txf.source || '—') +
           (txf.volume != null ? ' · 量 ' + fmtN(txf.volume) : '') +
-          '。夜盤%優先作為隔日開盤方向參考；高振幅易跳空。</div></div>';
+          ' · 夜盤%作隔日開盤方向參考</div></div>';
     }
 
     var leadMax = 0;
@@ -239,21 +269,19 @@
     var sess = fut.some(function (r) { return r.session === 'night'; }) ? '夜盤'
       : fut.some(function (r) { return r.session === 'day'; }) ? '日盤' : '—';
     var futBlock =
-      '<div class="ah-section"><h4>🔭 個股期領先（市值前十大）· ' + sess + '</h4>' +
+      '<div class="ah-sec"><h4>個股期領先 · ' + sess + '</h4>' +
+      '<div class="ah-fill">' +
       (rows
         ? '<table class="ah-tbl"><tr><th>代號</th><th>名稱</th><th>期價</th><th>期%</th><th>現%</th><th>領先</th></tr>' +
           rows + '</table>'
         : '<div class="ah-err">個股期資料暫缺</div>') +
-      '<div class="ah-note">領先 = 期% − 現%。正值＝期貨越強、隔日可能續強（夜盤量淺，作方向參考）。點列載入線型。</div></div>';
+      '</div>' +
+      '<div class="ah-note">領先 = 期% − 現% · 點列載入線型</div></div>';
 
-    var inst = mf.inst;
-    var to = (mf.turnover || []).filter(function (x) { return x.amount != null; });
-    var latestAmt = to.length ? to[to.length - 1].amount : null;
-    var instBlock = '<div class="ah-section"><h4>💰 盤後籌碼摘要</h4>';
+    var instBlock = '<div class="ah-sec"><h4>盤後籌碼</h4>';
     if (!inst && latestAmt == null) {
-      instBlock += '<div class="ah-err">資金流尚未更新（FMTQIK/BFI82U 多為收盤後發布）。</div></div>';
+      instBlock += '<div class="ah-err">資金流尚未更新</div></div>';
     } else {
-      var total = inst ? ((inst.foreign || 0) + (inst.trust || 0) + (inst.dealer || 0)) : null;
       var instBars = '';
       var totalChip = '';
       if (V && inst) {
@@ -267,28 +295,29 @@
             total > 0 ? 'buy' : (total < 0 ? 'sell' : 'mid'));
         }
       }
-      instBlock += '<div class="ah-txf">' +
-        '<div class="ah-cell"><div class="k">成交金額</div><div class="v">' + yi(latestAmt) + '</div></div>' +
-        '<div class="ah-cell"><div class="k">外資</div><div class="v ' + twCls(inst && inst.foreign) + '">' + fyi(inst && inst.foreign) + '</div></div>' +
-        '<div class="ah-cell"><div class="k">投信</div><div class="v ' + twCls(inst && inst.trust) + '">' + fyi(inst && inst.trust) + '</div></div>' +
-        '<div class="ah-cell"><div class="k">合計</div><div class="v ' + twCls(total) + '">' + fyi(total) + '</div></div>' +
+      instBlock += '<div class="ah-fill">' +
+        '<div class="ah-inst4">' +
+          '<div class="c"><div class="k">成交金額</div><div class="v">' + yi(latestAmt) + '</div></div>' +
+          '<div class="c"><div class="k">外資</div><div class="v ' + twCls(inst && inst.foreign) + '">' + fyi(inst && inst.foreign) + '</div></div>' +
+          '<div class="c"><div class="k">投信</div><div class="v ' + twCls(inst && inst.trust) + '">' + fyi(inst && inst.trust) + '</div></div>' +
+          '<div class="c"><div class="k">合計</div><div class="v ' + twCls(total) + '">' + fyi(total) + '</div></div>' +
         '</div>' + instBars + totalChip +
-        '<div class="ah-note">法人日 ' + ((inst && inst.date) || mf.date || '—') +
-          '。完整儀表板可用工具列「籌碼基本面 → 資金流」。</div></div>';
+        '</div>' +
+        '<div class="ah-note">法人日 ' + ((inst && inst.date) || mf.date || '—') + '</div></div>';
     }
 
     var movers = pack.movers || {};
     var gain = movers.gainers || movers.up || [];
     var lose = movers.losers || movers.down || [];
     function mvTbl(list, title, cls) {
-      var h = '<div class="ah-section" style="margin:0"><h4>' + title + '</h4>';
-      if (!list.length) return h + '<div class="ah-err">尚無排行</div></div>';
+      var h = '<div class="ah-sec"><h4>' + title + '</h4><div class="ah-fill">';
+      if (!list.length) return h + '<div class="ah-err">尚無排行</div></div></div>';
       var slice = list.slice(0, 12);
       var maxAbs = 0;
       slice.forEach(function (r) {
         if (r.changePct != null && isFinite(r.changePct)) maxAbs = Math.max(maxAbs, Math.abs(r.changePct));
       });
-      h += '<table class="ah-tbl"><tr><th>名次</th><th>代號</th><th>名稱</th><th>漲跌幅</th></tr>';
+      h += '<table class="ah-tbl"><tr><th>#</th><th>代號</th><th>名稱</th><th>漲跌幅</th></tr>';
       slice.forEach(function (r, i) {
         var lim = V ? V.limitChip(r.changePct) : '';
         var bar = V ? V.rowBar(r.changePct, maxAbs) : '';
@@ -297,18 +326,16 @@
           '</td><td>' + (r.name || '') + '</td><td class="' + (cls || twCls(r.changePct)) + '">' +
           pct(r.changePct) + lim + bar + '</td></tr>';
       });
-      return h + '</table></div>';
+      return h + '</table></div></div>';
     }
-    var mvBlock =
-      '<div class="ah-section"><h4>📈 漲跌排行（官方盤後）</h4>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
-        mvTbl(gain, '漲幅排行', 'up') + mvTbl(lose, '跌幅排行', 'dn') +
-      '</div><div class="ah-note">來源 /movers · 點列開啟圖表。權證已過濾。</div></div>';
 
     body.innerHTML =
-      '<div class="ah-grid">' + cards + '</div>' +
-      mvBlock + txfBlock + futBlock + instBlock +
-      '<div class="ah-note">⚠ 僅供參考、非投資建議。資料源：TAIFEX MIS / TWSE OpenData。</div>';
+      '<div class="ah-strip">' + strip + '</div>' +
+      '<div class="ah-dash">' +
+        '<div class="ah-zone ah-zone-up">' + txfBlock + futBlock + '</div>' +
+        '<div class="ah-zone ah-zone-lo">' + instBlock + mvTbl(gain, '漲幅排行', 'up') + mvTbl(lose, '跌幅排行', 'dn') + '</div>' +
+      '</div>' +
+      '<div class="ah-note">僅供參考 · TAIFEX MIS / TWSE OpenData</div>';
 
     body.querySelectorAll('tr.ah-row').forEach(function (el) {
       el.onclick = function () {

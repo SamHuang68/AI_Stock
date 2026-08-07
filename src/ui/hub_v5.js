@@ -4,6 +4,7 @@
  * institutional / international / signals / watchlist / risk / settings
  * （trends／指數已併入 ShellV5 → 圖表 ^TWII）
  * 真實 API：/pulse/history · /sync · /movers · /inst-rank · /macro · /focus · /datasources
+ * 大螢幕一頁高密度（65" 優化，不遷就手機）
  * ========================================================================== */
 (function () {
   'use strict';
@@ -41,44 +42,84 @@
   }
 
   function injectCSS() {
-    if ($('hub-v5-css')) return;
-    var s = document.createElement('style');
-    s.id = 'hub-v5-css';
+    var s = $('hub-v5-css');
+    if (!s) {
+      s = document.createElement('style');
+      s.id = 'hub-v5-css';
+      document.head.appendChild(s);
+    }
     s.textContent =
-      '.hub-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);max-width:1200px}' +
-      '.hub-root .hub-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px}' +
-      '.hub-root .hub-kicker{font-size:9px;color:var(--gold);letter-spacing:1.5px}' +
-      '.hub-root .hub-title{font-family:\'Noto Serif TC\',serif;font-size:18px;font-weight:700;color:var(--thi);margin-top:1px;line-height:1.15}' +
-      '.hub-root .hub-sub{font-size:10px;color:var(--tlo);margin-top:1px;line-height:1.35}' +
-      '.hub-root .hub-btn{padding:4px 9px;border:1px solid var(--border);border-radius:5px;background:var(--bg3);' +
-        'color:var(--text);font-size:9px;cursor:pointer;font-family:inherit}' +
+      '#shell-views:has(#view-institutional.on,#view-international.on,#view-signals.on,' +
+        '#view-watchlist.on,#view-risk.on,#view-settings.on){overflow:hidden!important}' +
+      '#view-institutional.sv-panel.on,#view-international.sv-panel.on,#view-signals.sv-panel.on,' +
+        '#view-watchlist.sv-panel.on,#view-risk.sv-panel.on,#view-settings.sv-panel.on{' +
+        'max-width:none!important;padding:4px 6px 6px;overflow:hidden;display:flex!important;' +
+        'flex-direction:column;height:100%}' +
+      '#mount-institutional,#mount-international,#mount-signals,#mount-watchlist,#mount-risk,#mount-settings,' +
+        '#mount-institutional.sv-mount,#mount-international.sv-mount,#mount-signals.sv-mount,' +
+        '#mount-watchlist.sv-mount,#mount-risk.sv-mount,#mount-settings.sv-mount{' +
+        'flex:1;min-height:0;display:flex;flex-direction:column;max-width:none;width:100%}' +
+      '.hub-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);' +
+        'width:100%;max-width:none;margin:0;min-width:0;box-sizing:border-box;' +
+        'flex:1;min-height:0;display:flex;flex-direction:column}' +
+      '.hub-root .hub-head{display:flex;align-items:center;justify-content:space-between;gap:8px;' +
+        'margin-bottom:3px;min-width:0;flex:0 0 auto}' +
+      '.hub-root .hub-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
+      '.hub-root .hub-kicker{font-size:9px;color:var(--gold);letter-spacing:1.2px;margin:0;font-weight:700}' +
+      '.hub-root .hub-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1;margin:0}' +
+      '.hub-root .hub-sep{font-size:9px;color:var(--tlo);margin:0 2px}' +
+      '.hub-root .hub-sub{font-size:9px;color:var(--tlo);margin:0;line-height:1.2}' +
+      '.hub-root .hub-actions{display:flex;gap:4px;flex-wrap:nowrap;justify-content:flex-end;flex:0 0 auto}' +
+      '.hub-root .hub-btn{padding:3px 7px;border:1px solid var(--border);border-radius:4px;background:var(--bg3);' +
+        'color:var(--text);font-size:9px;cursor:pointer;font-family:inherit;white-space:nowrap;flex:0 0 auto}' +
       '.hub-root .hub-btn.primary{background:var(--gold);color:#060A12;border:none;font-weight:700}' +
       '.hub-root .hub-btn:hover{border-color:var(--bhi);color:var(--thi)}' +
-      '.hub-root .hub-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin:6px 0}' +
-      '.hub-root .hub-card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 8px}' +
-      '.hub-root .hub-card .k{font-size:8px;color:var(--tlo)}' +
-      '.hub-root .hub-card .v{font-size:14px;font-weight:800;color:var(--thi);margin-top:1px;line-height:1.15}' +
-      '.hub-root .hub-sec{background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:7px 9px;margin-top:6px}' +
-      '.hub-root .hub-sec h4{margin:0 0 5px;font-size:10px;color:var(--gold);letter-spacing:.6px;display:flex;justify-content:space-between}' +
+      '.hub-root .hub-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
+      '.hub-root .hub-loading{font-size:10px;color:var(--tlo);padding:8px 0;flex:0 0 auto}' +
+      '.hub-root .hub-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin:0 0 4px;min-width:0;flex:0 0 auto}' +
+      '.hub-root .hub-strip .cell{background:linear-gradient(180deg,rgba(17,27,46,.95),rgba(11,18,32,.98));' +
+        'border:1px solid var(--border);border-radius:5px;padding:3px 6px;min-width:0;overflow:hidden}' +
+      '.hub-root .hub-strip .k{font-size:8px;color:var(--tlo);letter-spacing:.4px;margin-bottom:0;' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '.hub-root .hub-strip .v{font-size:12px;font-weight:800;color:var(--thi);line-height:1.15;' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '.hub-root .hub-strip .s{font-size:8px;margin-top:0;font-weight:700;line-height:1.2;color:var(--tlo)}' +
+      '.hub-root .hub-dash{flex:1;min-height:0;display:grid;gap:4px;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
+      '.hub-root .hub-dash.hub-dash-1{grid-template-rows:minmax(0,1fr)}' +
+      '.hub-root .hub-zone{display:grid;gap:4px;min-width:0;min-height:0;height:100%;' +
+        'grid-template-columns:repeat(2,minmax(0,1fr))}' +
+      '.hub-root .hub-zone.z-3{grid-template-columns:repeat(3,minmax(0,1fr))}' +
+      '.hub-root .hub-zone.z-4{grid-template-columns:repeat(4,minmax(0,1fr))}' +
+      '.hub-root .hub-zone.z-fill{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));align-content:start;overflow:auto}' +
+      '.hub-root .hub-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;' +
+        'min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%;margin:0}' +
+      '.hub-root .hub-sec h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;' +
+        'display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;gap:4px}' +
+      '.hub-root .hub-sec > .hub-fill{flex:1;min-height:0;overflow:auto}' +
+      '.hub-root .hub-card{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px;min-width:0;overflow:hidden}' +
+      '.hub-root .hub-card .k{font-size:8px;color:var(--tlo);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '.hub-root .hub-card .v{font-size:12px;font-weight:800;color:var(--thi);margin-top:1px;line-height:1.15}' +
       '.hub-root .up{color:var(--red)}.hub-root .dn{color:var(--green)}.hub-root .flat{color:var(--tlo)}' +
       '.hub-root table{width:100%;border-collapse:collapse;font-size:10px}' +
-      '.hub-root th,.hub-root td{padding:3px 4px;border-bottom:1px solid var(--border);text-align:right}' +
+      '.hub-root th,.hub-root td{padding:2px 3px;border-bottom:1px solid var(--border);text-align:right}' +
       '.hub-root th:first-child,.hub-root td:first-child,.hub-root th:nth-child(2),.hub-root td:nth-child(2){text-align:left}' +
-      '.hub-root th{color:var(--tlo)}' +
+      '.hub-root th{color:var(--tlo);font-weight:600}' +
       '.hub-root tr[data-code]{cursor:pointer}.hub-root tr[data-code]:hover{background:var(--bg3)}' +
-      '.hub-root .hub-note{font-size:8px;color:var(--tlo);margin-top:3px;line-height:1.35;' +
-        'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}' +
-      '.hub-root .hub-spark{display:flex;align-items:flex-end;gap:1px;height:32px;margin-top:4px}' +
+      '.hub-root .hub-note{font-size:8px;color:var(--tlo);margin-top:3px;line-height:1.35;flex:0 0 auto;' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '.hub-root .hub-spark{display:flex;align-items:flex-end;gap:1px;height:40px;margin-top:2px;flex:1;min-height:32px}' +
       '.hub-root .hub-spark i{flex:1;background:var(--cyan);opacity:.75;border-radius:1px 1px 0 0;min-width:2px}' +
+      '.hub-root .hub-mag3{display:grid;grid-template-columns:1fr;gap:4px;flex:1;min-height:0;align-content:start}' +
+      '.hub-root .hub-mag3 .row{display:flex;align-items:center;gap:6px;font-size:9px}' +
+      '.hub-root .hub-mag3 .row .lbl{width:28px;flex-shrink:0;color:var(--tlo);font-size:8px}' +
+      '.hub-root .hub-mag3 .row .val{width:52px;flex-shrink:0;text-align:right;font-weight:700;font-size:9px}' +
+      '.hub-root .hub-mag3 .row .bar{flex:1;min-width:0}' +
       '.hub-root .badge{display:inline-block;padding:0 6px;border-radius:999px;font-size:8px;font-weight:700}' +
       '.hub-root .badge.ok{background:var(--gbg);color:var(--green);border:1px solid var(--gbdr)}' +
       '.hub-root .badge.warn{background:rgba(251,146,60,.12);color:var(--orange);border:1px solid rgba(251,146,60,.35)}' +
       '.hub-root .badge.err{background:rgba(248,113,113,.12);color:var(--red);border:1px solid rgba(248,113,113,.35)}' +
       '.hub-root .badge.mid{background:rgba(245,197,24,.12);color:var(--gold);border:1px solid var(--gold-m)}' +
-      '.hub-root .hub-two{display:grid;grid-template-columns:1fr 1fr;gap:6px}' +
-      '@media (max-width:900px){.hub-root .hub-grid,.hub-root .hub-two{grid-template-columns:1fr 1fr}}' +
-      '@media (max-width:600px){.hub-root .hub-grid,.hub-root .hub-two{grid-template-columns:1fr}}';
-    document.head.appendChild(s);
+      '.hub-root .hub-empty{font-size:10px;color:var(--tlo);padding:16px 8px;text-align:center}';
   }
 
   function mount(route) {
@@ -99,10 +140,10 @@
 
   function head(title, sub, actionsHtml) {
     return '<div class="hub-root"><div class="hub-head"><div>' +
-      '<div class="hub-kicker">STOCK TERMINAL · 5.0</div>' +
-      '<div class="hub-title">' + title + '</div>' +
-      '<div class="hub-sub">' + (sub || '') + '</div></div>' +
-      '<div style="display:flex;gap:8px;flex-wrap:wrap">' + (actionsHtml || '') + '</div></div>';
+      '<span class="hub-kicker">STOCK TERMINAL · 5.0</span>' +
+      '<span class="hub-title">' + title + '</span>' +
+      (sub ? '<span class="hub-sep">·</span><span class="hub-sub">' + sub + '</span>' : '') +
+      '</div><div class="hub-actions">' + (actionsHtml || '') + '</div></div>';
   }
 
   function spark(vals) {
@@ -121,7 +162,7 @@
   function renderInstitutional(el) {
     el.innerHTML = head('法人動向', '三大法人合計＋買賣超排行＋歷史趨勢',
       '<button class="hub-btn" data-sync>同步資料</button><button class="hub-btn" data-go="afterhours">盤後</button>') +
-      '<div id="hub-inst-body" class="hub-note">載入中…</div></div>';
+      '<div id="hub-inst-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
     Promise.all([
       jget('/marketflow'),
@@ -148,7 +189,7 @@
           var vv = r.foreign != null ? r.foreign : r.net;
           if (vv != null && isFinite(vv)) maxAbs = Math.max(maxAbs, Math.abs(vv));
         });
-        var h = '<div class="hub-sec" style="margin:0"><h4>' + title + '</h4><table><tr><th>#</th><th>代號</th><th>名稱</th><th>外資</th></tr>';
+        var h = '<div class="hub-sec"><h4>' + title + '</h4><div class="hub-fill"><table><tr><th>#</th><th>代號</th><th>名稱</th><th>外資</th></tr>';
         list.forEach(function (r, i) {
           var v = r.foreign != null ? r.foreign : r.net;
           var bar = V ? V.rowBar(v, maxAbs) : '';
@@ -157,25 +198,35 @@
             (r.code || '') + '</td><td>' + (r.name || '') + streak + '</td><td class="' + tw(v) + '">' +
             yi(v) + bar + '</td></tr>';
         });
-        return h + '</table></div>';
+        return h + '</table></div></div>';
       }
       var sparkVals = hist.slice().reverse().map(function (r) { return r.totalYi || 0; });
       var totalSpark = V ? V.sparkBars(sparkVals) : '';
       var fBar = V ? V.magBar(inst.foreign, maxDay, { fmt: V.fmtYiFromYuan }) : '';
       var tBar = V ? V.magBar(inst.trust, maxDay, { fmt: V.fmtYiFromYuan }) : '';
       var dBar = V ? V.magBar(inst.dealer, maxDay, { fmt: V.fmtYiFromYuan }) : '';
+      var magPanel = '<div class="hub-sec"><h4>當日法人量柱</h4><div class="hub-mag3">' +
+        '<div class="row"><span class="lbl">外資</span><span class="val ' + tw(inst.foreign) + '">' + yi(inst.foreign) + '</span><span class="bar">' + fBar + '</span></div>' +
+        '<div class="row"><span class="lbl">投信</span><span class="val ' + tw(inst.trust) + '">' + yi(inst.trust) + '</span><span class="bar">' + tBar + '</span></div>' +
+        '<div class="row"><span class="lbl">自營</span><span class="val ' + tw(inst.dealer) + '">' + yi(inst.dealer) + '</span><span class="bar">' + dBar + '</span></div>' +
+        '</div></div>';
+      var trendPanel = '<div class="hub-sec"><h4>法人資金趨勢（歷史庫）</h4>' +
+        (V ? V.sparkLine(sparkVals, { color: 'var(--gold)' }) : spark(sparkVals)) +
+        '<div class="hub-note">日數 ' + hist.length + (inst.date ? ' · 最新法人日 ' + inst.date : '') + '</div></div>';
       var body = $('hub-inst-body');
       if (!body) return;
-      body.outerHTML =
-        '<div class="hub-grid">' +
-          '<div class="hub-card"><div class="k">外資</div><div class="v ' + tw(inst.foreign) + '">' + yi(inst.foreign) + '</div>' + fBar + '</div>' +
-          '<div class="hub-card"><div class="k">投信</div><div class="v ' + tw(inst.trust) + '">' + yi(inst.trust) + '</div>' + tBar + '</div>' +
-          '<div class="hub-card"><div class="k">自營</div><div class="v ' + tw(inst.dealer) + '">' + yi(inst.dealer) + '</div>' + dBar + '</div>' +
-          '<div class="hub-card"><div class="k">合計</div><div class="v ' + tw(total) + '">' + yi(total) + '</div>' + totalSpark + '</div>' +
+      body.innerHTML =
+        '<div class="hub-strip">' +
+          '<div class="cell"><div class="k">外資</div><div class="v ' + tw(inst.foreign) + '">' + yi(inst.foreign) + '</div></div>' +
+          '<div class="cell"><div class="k">投信</div><div class="v ' + tw(inst.trust) + '">' + yi(inst.trust) + '</div></div>' +
+          '<div class="cell"><div class="k">自營</div><div class="v ' + tw(inst.dealer) + '">' + yi(inst.dealer) + '</div></div>' +
+          '<div class="cell"><div class="k">合計</div><div class="v ' + tw(total) + '">' + yi(total) + '</div>' +
+            (totalSpark ? '<div class="s">' + totalSpark + '</div>' : '') + '</div>' +
         '</div>' +
-        '<div class="hub-sec"><h4>法人資金趨勢（歷史庫）</h4>' + spark(sparkVals) +
-          '<div class="hub-note">日數 ' + hist.length + (inst.date ? ' · 最新法人日 ' + inst.date : '') + '</div></div>' +
-        '<div class="hub-two">' + rankTbl(buy, '外資買超') + rankTbl(sell, '外資賣超') + '</div>';
+        '<div class="hub-dash">' +
+          '<div class="hub-zone">' + trendPanel + magPanel + '</div>' +
+          '<div class="hub-zone">' + rankTbl(buy, '外資買超') + rankTbl(sell, '外資賣超') + '</div>' +
+        '</div>';
       bindCommon(el);
     });
   }
@@ -184,7 +235,7 @@
   function renderInternational(el) {
     el.innerHTML = head('國際市場', '美股指數／美元／原油＋總經序列',
       '<button class="hub-btn" data-sync>同步資料</button><button class="hub-btn" data-go="pulse">總覽</button>') +
-      '<div id="hub-intl-body" class="hub-note">載入中…</div></div>';
+      '<div id="hub-intl-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
     Promise.all([
       jget('/pulse?refresh=0'),
@@ -211,7 +262,8 @@
       var cards = global.map(function (g) {
         return '<div class="hub-card"><div class="k">' + (g.name || g.symbol) + '</div><div class="v">' +
           fmt(g.price, g.unit === '%' ? 2 : (g.price > 1000 ? 0 : 2)) + (g.unit === '%' ? '%' : '') +
-          '</div><div class="' + tw(g.changePct) + '">' + (g.changePct != null ? pct(g.changePct) : '—') + '</div></div>';
+          '</div><div class="' + tw(g.changePct) + '" style="font-size:9px;font-weight:700">' +
+          (g.changePct != null ? pct(g.changePct) : '—') + '</div></div>';
       }).join('');
       var ecoHtml = eco.map(function (e) {
         return '<tr><td>' + e.label + '</td><td>' + (e.pt ? fmt(e.pt.value, 2) + e.unit : '—') +
@@ -224,12 +276,22 @@
       }).join('');
       var body = $('hub-intl-body');
       if (!body) return;
-      body.outerHTML =
-        '<div class="hub-grid">' + (cards || '<div class="hub-note">國際報價載入中／來源暫不可用</div>') + '</div>' +
-        '<div class="hub-sec"><h4>經濟指標</h4><table><tr><th>項目</th><th>數值</th><th>日期</th></tr>' +
-          (ecoHtml || '<tr><td colspan="3">FRED／總經尚未就緒（可於設定同步）</td></tr>') + '</table></div>' +
-        '<div class="hub-sec"><h4>資料來源狀態（歷史庫）</h4><table><tr><th>系列</th><th>資料日</th><th>狀態</th><th>列數</th></tr>' +
-          (ds || '<tr><td colspan="4">尚無同步紀錄 — 按同步資料</td></tr>') + '</table></div>';
+      body.innerHTML =
+        '<div class="hub-dash">' +
+          '<div class="hub-zone" style="grid-template-columns:1fr">' +
+            '<div class="hub-sec"><h4>全球報價</h4><div class="hub-fill hub-zone z-fill" style="display:grid">' +
+              (cards || '<div class="hub-empty">國際報價載入中／來源暫不可用</div>') +
+            '</div></div>' +
+          '</div>' +
+          '<div class="hub-zone">' +
+            '<div class="hub-sec"><h4>經濟指標</h4><div class="hub-fill"><table><tr><th>項目</th><th>數值</th><th>日期</th></tr>' +
+              (ecoHtml || '<tr><td colspan="3">FRED／總經尚未就緒（可於設定同步）</td></tr>') +
+              '</table></div></div>' +
+            '<div class="hub-sec"><h4>資料來源狀態（歷史庫）</h4><div class="hub-fill"><table><tr><th>系列</th><th>資料日</th><th>狀態</th><th>列數</th></tr>' +
+              (ds || '<tr><td colspan="4">尚無同步紀錄 — 按同步資料</td></tr>') +
+              '</table></div></div>' +
+          '</div>' +
+        '</div>';
       bindCommon(el);
     });
   }
@@ -238,7 +300,7 @@
   function renderSignals(el) {
     el.innerHTML = head('策略訊號', '可解釋監控訊號（焦點掃描／選股結果）',
       '<button class="hub-btn" data-go="scan">選股</button><button class="hub-btn primary" id="hub-run-focus">執行焦點掃描</button>') +
-      '<div id="hub-sig-body" class="hub-note">載入中…</div></div>';
+      '<div id="hub-sig-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
     var run = $('hub-run-focus');
     if (run) run.onclick = function () { loadFocus(el, true); };
@@ -246,26 +308,26 @@
   }
   function loadFocus(el, force) {
     var body = $('hub-sig-body');
-    if (body) body.innerHTML = '掃描中…';
+    if (body) body.innerHTML = '<div class="hub-loading">掃描中…</div>';
     jget('/focus' + (force ? '?refresh=1' : '')).then(function (d) {
       var body = $('hub-sig-body');
       if (!body) return;
       var list = (d && (d.longs || d.shorts || d.results || d.list)) || [];
       if (d && d.long) list = list.concat(d.long || []);
       if (d && d.short) list = list.concat(d.short || []);
-      // normalize common shapes
       if (d && d.bull) list = list.concat(d.bull);
       if (d && d.bear) list = list.concat(d.bear);
       if (!list.length && d && Array.isArray(d.items)) list = d.items;
       if (!list.length) {
-        body.outerHTML = '<div class="hub-sec"><h4>策略訊號清單</h4>' +
-          '<div class="hub-note" style="padding:28px;text-align:center">目前沒有新的策略訊號<br>' +
-          '未分類或資料不足的項目不會重複顯示。可按「執行焦點掃描」或前往選股。</div></div>';
+        body.innerHTML =
+          '<div class="hub-dash hub-dash-1"><div class="hub-zone" style="grid-template-columns:1fr">' +
+            '<div class="hub-sec"><h4>策略訊號清單</h4>' +
+            '<div class="hub-empty">目前沒有新的策略訊號 — 可按「執行焦點掃描」或前往選股</div></div></div></div>';
         bindCommon(el);
         return;
       }
       var V = window.Viz;
-      var html = '<div class="hub-sec"><h4>策略訊號清單</h4><table><tr><th>代號</th><th>名稱</th><th>方向</th><th>分數</th><th>說明</th></tr>';
+      var rows = '';
       list.slice(0, 30).forEach(function (r) {
         var code = r.code || r.sym || r.ticker || '';
         var name = r.name || '';
@@ -287,18 +349,21 @@
           var meterScore = Math.abs(scoreNum) <= 1 ? scoreNum * 100 : Math.max(0, Math.min(100, Math.abs(scoreNum)));
           scoreCell = (scoreNum >= 0 ? '+' : '') + Number(scoreNum).toFixed(1) + V.scoreMeter(meterScore);
         }
-        html += '<tr data-code="' + code + '"><td style="color:var(--gold);font-weight:700">' + code +
+        rows += '<tr data-code="' + code + '"><td style="color:var(--gold);font-weight:700">' + code +
           '</td><td>' + name + '</td><td>' + sideCell + '</td><td>' + scoreCell +
           '</td><td style="text-align:left;color:var(--tlo)">' + desc + '</td></tr>';
       });
-      body.outerHTML = html + '</table><div class="hub-note">來源 /focus · 點列開啟圖表</div></div>';
+      body.innerHTML =
+        '<div class="hub-dash hub-dash-1"><div class="hub-zone" style="grid-template-columns:1fr">' +
+          '<div class="hub-sec"><h4>策略訊號清單</h4><div class="hub-fill"><table>' +
+            '<tr><th>代號</th><th>名稱</th><th>方向</th><th>分數</th><th>說明</th></tr>' +
+            rows + '</table></div><div class="hub-note">來源 /focus · 點列開啟圖表</div></div></div></div>';
       bindCommon(el);
     });
   }
 
   // ── Watchlist ────────────────────────────────────────────
   function readWl() {
-    /* 與圖表自選同一真相：優先裸 S.wl */
     try {
       if (typeof S !== 'undefined' && Array.isArray(S.wl) && S.wl.length) return S.wl.slice();
     } catch (e) {}
@@ -314,7 +379,7 @@
   function renderWatchlist(el) {
     el.innerHTML = head('自選股中心', '本機瀏覽器自選＋即時報價',
       '<button class="hub-btn" data-go="chart">圖表管理</button><button class="hub-btn primary" id="hub-wl-refresh">重新整理</button>') +
-      '<div id="hub-wl-body" class="hub-note">載入中…</div></div>';
+      '<div id="hub-wl-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
     var btn = $('hub-wl-refresh');
     if (btn) btn.onclick = function () { fillWl(el); };
@@ -325,7 +390,9 @@
     var body = $('hub-wl-body');
     if (!body) return;
     if (!wl.length) {
-      body.outerHTML = '<div class="hub-sec"><div class="hub-note" style="padding:24px;text-align:center">尚無自選股 — 於圖表按 ＋ 加入</div></div>';
+      body.innerHTML =
+        '<div class="hub-dash hub-dash-1"><div class="hub-zone" style="grid-template-columns:1fr">' +
+          '<div class="hub-sec"><div class="hub-empty">尚無自選股 — 於圖表按 ＋ 加入</div></div></div></div>';
       return;
     }
     var twc = wl.filter(function (w) { return (w.m || 'TW') === 'TW'; }).map(function (w) { return w.t; });
@@ -335,16 +402,37 @@
       usc.length ? jget('/quote-batch?syms=' + encodeURIComponent(usc.join(','))) : Promise.resolve({})
     ]).then(function (arr) {
       var q = Object.assign({}, arr[0] || {}, arr[1] || {});
-      var html = '<div class="hub-sec"><h4>自選與持股監控</h4><table><tr><th>代號</th><th>名稱</th><th>市場</th><th>最新價</th><th>漲跌</th></tr>';
+      var V = window.Viz;
+      var maxChg = 0;
       wl.forEach(function (w) {
         var qq = q[w.t] || q[w.t + '.TW'] || q[w.t + '.TWO'] || {};
-        html += '<tr data-code="' + w.t + '" data-mkt="' + (w.m || 'TW') + '"><td style="color:var(--gold);font-weight:700">' +
+        var ch = qq.changePct != null ? qq.changePct : w.chg;
+        if (ch != null && isFinite(ch)) maxChg = Math.max(maxChg, Math.abs(ch));
+      });
+      if (maxChg < 0.01) maxChg = 1;
+      var rows = '';
+      wl.forEach(function (w) {
+        var qq = q[w.t] || q[w.t + '.TW'] || q[w.t + '.TWO'] || {};
+        var ch = qq.changePct != null ? qq.changePct : w.chg;
+        var bar = V ? V.rowBar(ch, maxChg) : '';
+        rows += '<tr data-code="' + w.t + '" data-mkt="' + (w.m || 'TW') + '"><td style="color:var(--gold);font-weight:700">' +
           w.t + '</td><td>' + (w.name || '') + '</td><td>' + (w.m || 'TW') + '</td><td>' +
-          fmt(qq.price != null ? qq.price : w.price) + '</td><td class="' + tw(qq.changePct != null ? qq.changePct : w.chg) + '">' +
-          pct(qq.changePct != null ? qq.changePct : w.chg) + '</td></tr>';
+          fmt(qq.price != null ? qq.price : w.price) + '</td><td class="' + tw(ch) + '">' +
+          pct(ch) + bar + '</td></tr>';
       });
       var b = $('hub-wl-body');
-      if (b) b.outerHTML = html + '</table></div>';
+      if (!b) return;
+      b.innerHTML =
+        '<div class="hub-strip">' +
+          '<div class="cell"><div class="k">自選總數</div><div class="v">' + wl.length + '</div></div>' +
+          '<div class="cell"><div class="k">台股</div><div class="v">' + twc.length + '</div></div>' +
+          '<div class="cell"><div class="k">美股</div><div class="v">' + usc.length + '</div></div>' +
+          '<div class="cell"><div class="k">報價</div><div class="v">' + (twc.length + usc.length ? '即時' : '—') + '</div></div>' +
+        '</div>' +
+        '<div class="hub-dash hub-dash-1"><div class="hub-zone" style="grid-template-columns:1fr">' +
+          '<div class="hub-sec"><h4>自選與持股監控</h4><div class="hub-fill"><table>' +
+            '<tr><th>代號</th><th>名稱</th><th>市場</th><th>最新價</th><th>漲跌</th></tr>' +
+            rows + '</table></div></div></div></div>';
       bindCommon(el);
     });
   }
@@ -353,7 +441,7 @@
   function renderRisk(el) {
     el.innerHTML = head('風險監控', '由脈動因子與廣度／法人規則產生的風險事件',
       '<button class="hub-btn" data-sync>同步資料</button><button class="hub-btn" data-go="book">投組風險</button>') +
-      '<div id="hub-risk-body" class="hub-note">載入中…</div></div>';
+      '<div id="hub-risk-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
     Promise.all([jget('/pulse'), jget('/pulse/history?kind=pulse&n=15')]).then(function (arr) {
       var p = arr[0] || {};
@@ -387,32 +475,20 @@
       var riskMeter = V ? V.scoreMeter(p.riskScore, { color: 'var(--cyan)' }) : '';
       var healthMeter = V ? V.scoreMeter(p.healthScore) : '';
       var compMeter = V ? V.scoreMeter(p.dataCompleteness) : '';
-      var html = '<div class="hub-grid">' +
-        '<div class="hub-card"><div class="k">市場風險度</div><div class="v">' +
-          (p.riskScore != null ? Number(p.riskScore).toFixed(1) : '—') + '</div>' +
-          '<div class="hub-note">' + (p.riskLabel || '') + '</div>' + riskMeter + '</div>' +
-        '<div class="hub-card"><div class="k">健康度</div><div class="v">' +
-          (p.healthScore != null ? Number(p.healthScore).toFixed(1) : '—') + '</div>' + healthMeter + '</div>' +
-        '<div class="hub-card"><div class="k">風險因子數</div><div class="v">' +
-          ((p.riskFactors || []).length) + '</div></div>' +
-        '<div class="hub-card"><div class="k">完整度</div><div class="v">' +
-          (p.dataCompleteness != null ? Number(p.dataCompleteness).toFixed(0) + '%' : '—') + '</div>' +
-          compMeter + '</div></div>';
-      html += '<div class="hub-sec"><h4>風險事件清單</h4><table><tr><th>時間</th><th>事件</th><th>說明</th><th>範圍</th><th>重要</th></tr>';
+      var eventsRows = '';
       if (!events.length) {
-        html += '<tr><td colspan="5">目前無觸發中的風險事件</td></tr>';
+        eventsRows = '<tr><td colspan="5">目前無觸發中的風險事件</td></tr>';
       } else {
         events.forEach(function (e) {
           var cls = e.severity === '高' ? 'err' : 'mid';
-          html += '<tr><td>' + (e.time || '') + '</td><td>' + e.event + '</td><td style="text-align:left">' +
+          eventsRows += '<tr><td>' + (e.time || '') + '</td><td>' + e.event + '</td><td style="text-align:left">' +
             e.description + '</td><td>' + e.scope + '</td><td><span class="badge ' + cls + '">' + e.severity + '</span></td></tr>';
         });
       }
-      html += '</table></div>';
       var hist = (arr[1] && arr[1].rows) || [];
+      var histPanel = '<div class="hub-sec"><h4>脈動分數歷史</h4>';
       if (hist.length) {
         var chrono = hist.slice().reverse();
-        var sparks = '';
         if (V) {
           var hs = chrono.map(function (r) { return r.health; });
           var rs = chrono.map(function (r) { return r.risk; });
@@ -421,21 +497,45 @@
           var rSp = rs.filter(function (v) { return v != null && isFinite(v); }).length >= 2
             ? V.sparkLine(rs, { color: 'var(--cyan)' }) : '';
           if (hSp || rSp) {
-            sparks = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">' +
+            histPanel += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px;flex:0 0 auto">' +
               (hSp ? '<div><div class="hub-note">健康</div>' + hSp + '</div>' : '') +
               (rSp ? '<div><div class="hub-note">風險</div>' + rSp + '</div>' : '') + '</div>';
           }
         }
-        html += '<div class="hub-sec"><h4>脈動分數歷史</h4>' + sparks +
-          '<table><tr><th>日期</th><th>健康</th><th>風險</th><th>總分</th><th>狀態</th></tr>';
+        histPanel += '<div class="hub-fill"><table><tr><th>日期</th><th>健康</th><th>風險</th><th>總分</th><th>狀態</th></tr>';
         hist.forEach(function (r) {
-          html += '<tr><td>' + r.date + '</td><td>' + fmt(r.health, 1) + '</td><td>' + fmt(r.risk, 1) +
+          histPanel += '<tr><td>' + r.date + '</td><td>' + fmt(r.health, 1) + '</td><td>' + fmt(r.risk, 1) +
             '</td><td>' + fmt(r.total, 1) + '</td><td>' + (r.statusText || '') + '</td></tr>';
         });
-        html += '</table></div>';
+        histPanel += '</table></div>';
+      } else {
+        histPanel += '<div class="hub-empty">尚無歷史紀錄</div>';
       }
+      histPanel += '</div>';
       var body = $('hub-risk-body');
-      if (body) body.outerHTML = html;
+      if (!body) return;
+      body.innerHTML =
+        '<div class="hub-strip">' +
+          '<div class="cell"><div class="k">市場風險度</div><div class="v">' +
+            (p.riskScore != null ? Number(p.riskScore).toFixed(1) : '—') + '</div>' +
+            '<div class="s">' + (p.riskLabel || '') + riskMeter + '</div></div>' +
+          '<div class="cell"><div class="k">健康度</div><div class="v">' +
+            (p.healthScore != null ? Number(p.healthScore).toFixed(1) : '—') + '</div>' +
+            '<div class="s">' + healthMeter + '</div></div>' +
+          '<div class="cell"><div class="k">風險因子數</div><div class="v">' +
+            ((p.riskFactors || []).length) + '</div></div>' +
+          '<div class="cell"><div class="k">完整度</div><div class="v">' +
+            (p.dataCompleteness != null ? Number(p.dataCompleteness).toFixed(0) + '%' : '—') + '</div>' +
+            '<div class="s">' + compMeter + '</div></div>' +
+        '</div>' +
+        '<div class="hub-dash">' +
+          '<div class="hub-zone" style="grid-template-columns:1fr">' +
+            '<div class="hub-sec"><h4>風險事件清單</h4><div class="hub-fill"><table>' +
+              '<tr><th>時間</th><th>事件</th><th>說明</th><th>範圍</th><th>重要</th></tr>' +
+              eventsRows + '</table></div></div>' +
+          '</div>' +
+          '<div class="hub-zone" style="grid-template-columns:1fr">' + histPanel + '</div>' +
+        '</div>';
       bindCommon(el);
     });
   }
@@ -444,7 +544,7 @@
   function renderSettings(el) {
     el.innerHTML = head('設定', '同步狀態 · 資料來源 · 本機歷史庫',
       '<button class="hub-btn primary" data-sync>同步資料</button>') +
-      '<div id="hub-set-body" class="hub-note">載入中…</div></div>';
+      '<div id="hub-set-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
     Promise.all([jget('/sync/status'), jget('/datasources'), jget('/health')]).then(function (arr) {
       var st = arr[0] || {};
@@ -458,41 +558,51 @@
            V.badge('指數 ' + (counts.index || 0), 'mid') + ' ' +
            V.badge('脈動 ' + (counts.pulseScore || 0), 'mid'))
         : ('廣度 ' + (counts.breadth || 0) + ' · 法人 ' + (counts.institutional || 0) +
-          '<br>指數 ' + (counts.index || 0) + ' · 脈動 ' + (counts.pulseScore || 0));
-      var html =
-        '<div class="hub-grid">' +
-          '<div class="hub-card"><div class="k">自動同步</div><div class="v">' +
-            (st.running ? '進行中' : '待命') + '</div>' +
-            '<div><span class="badge ' + (st.running ? 'warn' : 'ok') + '">' +
-            (st.lastOk ? '上次成功 ' + st.lastOk : '尚未成功') + '</span></div></div>' +
-          '<div class="hub-card"><div class="k">歷史庫列數</div><div class="v" style="font-size:14px">' +
-            countChips + '</div></div>' +
-          '<div class="hub-card"><div class="k">Server</div><div class="v" style="font-size:14px">' +
-            (health.status || '—') + '</div><div class="hub-note">Stock Terminal 5.0 · loopback</div></div>' +
-          '<div class="hub-card"><div class="k">策略</div><div class="v" style="font-size:13px">增量 merge</div>' +
-            '<div class="hub-note">只更新新交易日，不重抓整庫</div></div>' +
-        '</div>';
-      html += '<div class="hub-sec"><h4>資料來源狀態（pulse_history）</h4><table><tr><th>資料集</th><th>資料日</th><th>狀態</th><th>說明</th><th>列數</th></tr>';
+          ' · 指數 ' + (counts.index || 0) + ' · 脈動 ' + (counts.pulseScore || 0));
+      var dsRows = '';
       (st.datasets || []).forEach(function (d) {
         var cls = d.status === '同步完成' ? 'ok' : (d.status === '同步失敗' ? 'err' : 'warn');
-        html += '<tr><td>' + d.dataset + '</td><td>' + (d.dataDate || '—') + '</td><td><span class="badge ' + cls + '">' +
+        dsRows += '<tr><td>' + d.dataset + '</td><td>' + (d.dataDate || '—') + '</td><td><span class="badge ' + cls + '">' +
           (d.status || '—') + '</span></td><td style="text-align:left">' + (d.note || '') + '</td><td>' +
           (d.rows != null ? d.rows : '—') + '</td></tr>';
       });
-      if (!(st.datasets || []).length) html += '<tr><td colspan="5">尚無紀錄 — 按「同步資料」啟動預抓</td></tr>';
-      html += '</table><div class="hub-note">DB：' + (st.db || '') + '</div></div>';
+      if (!(st.datasets || []).length) dsRows = '<tr><td colspan="5">尚無紀錄 — 按「同步資料」啟動預抓</td></tr>';
+      var srcPanel = '';
       if (ds && (ds.sources || ds.length)) {
         var list = ds.sources || ds;
-        html += '<div class="hub-sec"><h4>系統資料源</h4><table><tr><th>來源</th><th>狀態</th><th>備註</th></tr>';
+        var srcRows = '';
         (Array.isArray(list) ? list : []).slice(0, 30).forEach(function (x) {
-          html += '<tr><td>' + (x.name || x.id || x.provider || '') + '</td><td>' +
+          srcRows += '<tr><td>' + (x.name || x.id || x.provider || '') + '</td><td>' +
             (x.status || x.reliability || '—') + '</td><td style="text-align:left">' +
             (x.note || x.lastUpdate || '') + '</td></tr>';
         });
-        html += '</table></div>';
+        srcPanel = '<div class="hub-sec"><h4>系統資料源</h4><div class="hub-fill"><table>' +
+          '<tr><th>來源</th><th>狀態</th><th>備註</th></tr>' + srcRows + '</table></div></div>';
+      } else {
+        srcPanel = '<div class="hub-sec"><h4>系統資料源</h4><div class="hub-empty">尚無資料源資訊</div></div>';
       }
       var body = $('hub-set-body');
-      if (body) body.outerHTML = html;
+      if (!body) return;
+      body.innerHTML =
+        '<div class="hub-strip">' +
+          '<div class="cell"><div class="k">自動同步</div><div class="v">' +
+            (st.running ? '進行中' : '待命') + '</div>' +
+            '<div class="s"><span class="badge ' + (st.running ? 'warn' : 'ok') + '">' +
+            (st.lastOk ? '上次成功 ' + st.lastOk : '尚未成功') + '</span></div></div>' +
+          '<div class="cell"><div class="k">歷史庫列數</div><div class="v" style="font-size:11px">' + countChips + '</div></div>' +
+          '<div class="cell"><div class="k">Server</div><div class="v">' + (health.status || '—') + '</div>' +
+            '<div class="s">Stock Terminal 5.0 · loopback</div></div>' +
+          '<div class="cell"><div class="k">策略</div><div class="v">增量 merge</div>' +
+            '<div class="s">只更新新交易日</div></div>' +
+        '</div>' +
+        '<div class="hub-dash">' +
+          '<div class="hub-zone" style="grid-template-columns:1fr">' +
+            '<div class="hub-sec"><h4>資料來源狀態（pulse_history）</h4><div class="hub-fill"><table>' +
+              '<tr><th>資料集</th><th>資料日</th><th>狀態</th><th>說明</th><th>列數</th></tr>' +
+              dsRows + '</table></div><div class="hub-note">DB：' + (st.db || '') + '</div></div>' +
+          '</div>' +
+          '<div class="hub-zone" style="grid-template-columns:1fr">' + srcPanel + '</div>' +
+        '</div>';
       bindCommon(el);
     });
   }
@@ -536,14 +646,12 @@
   };
 
   window.HubV5 = ACTIVATORS;
-  // shell emitRoute expects *.activate
   window.InstitutionalV5 = { activate: ACTIVATORS.institutional, mount: ACTIVATORS.institutional };
   window.InternationalV5 = { activate: ACTIVATORS.international, mount: ACTIVATORS.international };
   window.SignalsV5 = { activate: ACTIVATORS.signals, mount: ACTIVATORS.signals };
   window.WatchlistV5 = { activate: ACTIVATORS.watchlist, mount: ACTIVATORS.watchlist };
   window.RiskV5 = { activate: ACTIVATORS.risk, mount: ACTIVATORS.risk };
   window.SettingsV5 = { activate: ACTIVATORS.settings, mount: ACTIVATORS.settings };
-  /* 相容舊 TrendsV5 呼叫 → 圖表加權 */
   window.TrendsV5 = {
     activate: function () {
       if (window.ShellV5 && ShellV5.openChart) ShellV5.openChart('^TWII', 'TW');

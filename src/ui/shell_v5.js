@@ -80,7 +80,13 @@
       '#shell-main{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;position:relative}' +
       '#shell-views{display:none!important;flex:1;min-height:0;min-width:0;background:#060C16;overflow:auto}' +
       '#shell-views.show{display:flex!important;flex-direction:column}' +
-      '#shell-views.show:has(#view-pulse.on){overflow:hidden}' +
+      /* 高密度一頁視圖：鎖定捲動（各模組亦會覆寫） */
+      '#shell-views.show:has(.sv-panel.on){overflow:hidden}' +
+      '#view-breadth.sv-panel.on,#view-heat.sv-panel.on,#view-afterhours.sv-panel.on,' +
+      '#view-institutional.sv-panel.on,#view-international.sv-panel.on,#view-signals.sv-panel.on,' +
+      '#view-watchlist.sv-panel.on,#view-risk.sv-panel.on,#view-news.sv-panel.on,' +
+      '#view-scan.sv-panel.on,#view-book.sv-panel.on,#view-settings.sv-panel.on,' +
+      '#view-pulse.sv-panel.on{max-width:none!important}' +
       '#topbar.shell-hidden{display:none !important}' +
       '#body.shell-hidden{display:none !important}' +
       '#wlbar.shell-hidden{display:none !important}' +

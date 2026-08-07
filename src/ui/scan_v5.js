@@ -21,50 +21,58 @@
   }
 
   function injectCSS() {
-    if ($('scan-v5-css')) return;
-    var s = document.createElement('style');
-    s.id = 'scan-v5-css';
+    var s = $('scan-v5-css');
+    if (!s) {
+      s = document.createElement('style');
+      s.id = 'scan-v5-css';
+      document.head.appendChild(s);
+    }
     s.textContent =
-      '#view-scan.sv-panel{max-width:1120px;padding:18px 22px 28px}' +
-      '#sc-root{font-family:\'JetBrains Mono\',monospace;color:var(--text)}' +
-      '#sc-root .sc-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}' +
-      '#sc-root .sc-kicker{font-size:10px;color:var(--gold);letter-spacing:2px;margin-bottom:4px}' +
-      '#sc-root .sc-title{font-family:\'Noto Serif TC\',serif;font-size:18px;font-weight:700;color:var(--thi);line-height:1.15}' +
-      '#sc-root .sc-sub{font-size:11px;color:var(--tlo);margin-top:4px}' +
-      '#sc-root .sc-actions{display:flex;gap:8px;flex-wrap:wrap}' +
-      '#sc-root .sc-btn{padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);' +
-        'color:var(--text);font-size:10px;font-family:\'JetBrains Mono\',monospace;cursor:pointer}' +
+      '#shell-views:has(#view-scan.on){overflow:hidden!important}' +
+      '#view-scan.sv-panel.on{max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
+        'overflow:hidden;display:flex!important;flex-direction:column;flex:1;min-height:0;height:100%}' +
+      '#mount-scan,#mount-scan.sv-mount{flex:1;min-height:0;display:flex;flex-direction:column;max-width:none}' +
+      '#sc-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);width:100%;max-width:none;margin:0;min-width:0;' +
+        'box-sizing:border-box;flex:1;min-height:0;display:flex;flex-direction:column}' +
+      '#sc-root .sc-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px;min-width:0;flex:0 0 auto}' +
+      '#sc-root .sc-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
+      '#sc-root .sc-kicker{font-size:9px;color:var(--gold);letter-spacing:1.2px;margin:0;font-weight:700}' +
+      '#sc-root .sc-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
+      '#sc-root .sc-sub{font-size:9px;color:var(--tlo);margin:0}' +
+      '#sc-root .sc-actions{display:flex;gap:4px;flex-wrap:nowrap;flex:0 0 auto}' +
+      '#sc-root .sc-btn{padding:3px 7px;border:1px solid var(--border);border-radius:4px;background:var(--bg3);' +
+        'color:var(--text);font-size:9px;font-family:\'JetBrains Mono\',monospace;cursor:pointer;white-space:nowrap}' +
       '#sc-root .sc-btn:hover{border-color:var(--bhi);color:var(--thi)}' +
       '#sc-root .sc-btn.primary{background:var(--gold);color:#060A12;border:none;font-weight:700}' +
       '#sc-root .sc-btn.primary:hover{background:#FBBF24}' +
-      '#sc-root .sc-cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:8px 0}' +
-      '#sc-root .sc-grp{border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--bg2)}' +
-      '#sc-root .sc-grp h4{margin:0 0 8px;font-size:12px;color:var(--gold)}' +
-      '#sc-root .sc-grp label{display:flex;align-items:center;gap:6px;margin:5px 0;font-size:11px;color:var(--text);flex-wrap:wrap}' +
-      '#sc-root .sc-grp input[type=number]{width:58px;background:var(--bg);border:1px solid var(--border);' +
-        'color:var(--thi);border-radius:4px;padding:3px 5px;font-family:inherit}' +
-      '#sc-root .sc-grp .hint{font-size:9px;color:var(--tlo);margin-top:8px;line-height:1.5}' +
-      '#sc-root .sc-bar{display:flex;gap:8px;align-items:center;margin:10px 0;flex-wrap:wrap}' +
+      '#sc-root .sc-layout{flex:1;min-height:0;display:grid;grid-template-columns:minmax(200px,22%) minmax(0,1fr);gap:4px;overflow:hidden}' +
+      '#sc-root .sc-rail{min-height:0;overflow:auto;display:flex;flex-direction:column;gap:4px;padding-right:2px}' +
+      '#sc-root .sc-main{min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
+      '#sc-root .sc-grp{border:1px solid var(--border);border-radius:6px;padding:5px 7px;background:var(--bg2)}' +
+      '#sc-root .sc-grp h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px}' +
+      '#sc-root .sc-grp label{display:flex;align-items:center;gap:4px;margin:2px 0;font-size:10px;color:var(--text);flex-wrap:wrap}' +
+      '#sc-root .sc-grp input[type=number]{width:52px;background:var(--bg);border:1px solid var(--border);' +
+        'color:var(--thi);border-radius:3px;padding:2px 4px;font-family:inherit;font-size:10px}' +
+      '#sc-root .sc-grp .hint{font-size:8px;color:var(--tlo);margin-top:4px;line-height:1.35}' +
+      '#sc-root .sc-bar{display:flex;gap:6px;align-items:center;margin:0 0 3px;flex:0 0 auto;flex-wrap:wrap}' +
       '#sc-root .sc-bar select{background:var(--bg);border:1px solid var(--border);color:var(--text);' +
-        'border-radius:5px;padding:6px 8px;font-family:inherit;font-size:11px}' +
-      '#sc-root #sc-msg{font-size:11px;color:var(--tlo);min-height:16px;margin:4px 0 8px}' +
-      '#sc-root #sc-results{overflow:auto;max-height:min(52vh,480px);border:1px solid var(--border);border-radius:8px;background:var(--bg2)}' +
-      '#sc-root .sc-rtop{display:flex;align-items:center;gap:10px;padding:8px 10px;position:sticky;top:0;' +
+        'border-radius:4px;padding:3px 6px;font-family:inherit;font-size:10px}' +
+      '#sc-root #sc-msg{font-size:9px;color:var(--tlo);min-height:14px;margin:0 0 3px;flex:0 0 auto}' +
+      '#sc-root #sc-results{flex:1;min-height:0;overflow:auto;border:1px solid var(--border);border-radius:6px;background:var(--bg2)}' +
+      '#sc-root .sc-rtop{display:flex;align-items:center;gap:8px;padding:4px 6px;position:sticky;top:0;' +
         'background:var(--bg2);border-bottom:1px solid var(--border);z-index:1}' +
-      '#sc-root table{width:100%;border-collapse:collapse;font-size:11px}' +
-      '#sc-root th,#sc-root td{padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap}' +
-      '#sc-root th{color:var(--tlo);position:sticky;top:37px;background:var(--bg);font-weight:600}' +
+      '#sc-root table{width:100%;border-collapse:collapse;font-size:10px}' +
+      '#sc-root th,#sc-root td{padding:3px 5px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap}' +
+      '#sc-root th{color:var(--tlo);position:sticky;top:28px;background:var(--bg);font-weight:600;font-size:9px}' +
       '#sc-root td.up{color:var(--red)}#sc-root td.dn{color:var(--green)}' +
       '#sc-root .sc-code{color:var(--gold);font-weight:700;cursor:pointer;text-align:left}' +
-      '#sc-root .sc-nm{color:var(--tlo);text-align:left;max-width:100px;overflow:hidden;text-overflow:ellipsis}' +
-      '#sc-root .sc-add{background:var(--bg3);border:1px solid var(--border);color:var(--green);border-radius:4px;cursor:pointer;padding:1px 7px}' +
-      '#sc-root .sc-note{font-size:9px;color:var(--tlo);line-height:1.65;margin-top:12px}' +
-      '#sc-root .sc-presets{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 4px}' +
-      '#sc-root .sc-chip{padding:4px 9px;border:1px solid var(--border);border-radius:999px;background:transparent;' +
-        'color:var(--tlo);font-size:10px;cursor:pointer;font-family:inherit}' +
-      '#sc-root .sc-chip:hover{border-color:var(--gold-m);color:var(--gold)}' +
-      '@media (max-width:900px){#sc-root .sc-cols{grid-template-columns:1fr}}';
-    document.head.appendChild(s);
+      '#sc-root .sc-nm{color:var(--tlo);text-align:left;max-width:90px;overflow:hidden;text-overflow:ellipsis}' +
+      '#sc-root .sc-add{background:var(--bg3);border:1px solid var(--border);color:var(--green);border-radius:3px;cursor:pointer;padding:0 6px;font-size:9px}' +
+      '#sc-root .sc-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:3px;flex:0 0 auto}' +
+      '#sc-root .sc-presets{display:flex;gap:3px;flex-wrap:wrap;margin:0 0 4px}' +
+      '#sc-root .sc-chip{padding:2px 7px;border:1px solid var(--border);border-radius:999px;background:transparent;' +
+        'color:var(--tlo);font-size:9px;cursor:pointer;font-family:inherit}' +
+      '#sc-root .sc-chip:hover{border-color:var(--gold-m);color:var(--gold)}';
   }
 
   function loadMeta() {
@@ -266,48 +274,51 @@
       mount.innerHTML =
         '<div id="sc-root">' +
           '<div class="sc-head"><div>' +
-            '<div class="sc-kicker">STOCK TERMINAL · 5.0-S7</div>' +
-            '<div class="sc-title">三合一選股</div>' +
-            '<div class="sc-sub">技術 × 基本面 × 籌碼 · 全台股宇集</div>' +
+            '<span class="sc-kicker">STOCK TERMINAL · 5.0</span>' +
+            '<span class="sc-title">三合一選股</span>' +
+            '<span class="sc-sub">技術 × 基本面 × 籌碼</span>' +
           '</div><div class="sc-actions">' +
-            '<button type="button" class="sc-btn primary" id="sc-run">🔍 開始掃描</button>' +
+            '<button type="button" class="sc-btn primary" id="sc-run">🔍 掃描</button>' +
             '<button type="button" class="sc-btn" data-shell-back>← 圖表</button>' +
           '</div></div>' +
-          '<div class="sc-presets">' +
-            '<button type="button" class="sc-chip" data-preset="trend">趨勢多頭</button>' +
-            '<button type="button" class="sc-chip" data-preset="breakout">帶量突破</button>' +
-            '<button type="button" class="sc-chip" data-preset="value">價值殖利</button>' +
-            '<button type="button" class="sc-chip" data-preset="chip">法人連買</button>' +
-            '<button type="button" class="sc-chip" data-preset="clear">清除條件</button>' +
-          '</div>' +
-          '<div class="sc-cols">' +
-            '<div class="sc-grp"><h4>技術面</h4>' +
-              '<label><input type="checkbox" id="sc-sma20"> 站上 SMA20</label>' +
-              '<label><input type="checkbox" id="sc-sma60"> 站上 SMA60</label>' +
-              '<label><input type="checkbox" id="sc-align"> 均線多頭排列</label>' +
-              '<label><input type="checkbox" id="sc-high20"> 創 20 日新高</label>' +
-              '<label>RSI ≥ <input type="number" id="sc-rsimin"> 且 ≤ <input type="number" id="sc-rsimax"></label>' +
-              '<label>量比 ≥ <input type="number" id="sc-volr" step="0.1" placeholder="1.5"></label>' +
+          '<div class="sc-layout">' +
+            '<div class="sc-rail">' +
+              '<div class="sc-presets">' +
+                '<button type="button" class="sc-chip" data-preset="trend">趨勢多頭</button>' +
+                '<button type="button" class="sc-chip" data-preset="breakout">帶量突破</button>' +
+                '<button type="button" class="sc-chip" data-preset="value">價值殖利</button>' +
+                '<button type="button" class="sc-chip" data-preset="chip">法人連買</button>' +
+                '<button type="button" class="sc-chip" data-preset="clear">清除</button>' +
+              '</div>' +
+              '<div class="sc-grp"><h4>技術面</h4>' +
+                '<label><input type="checkbox" id="sc-sma20"> SMA20</label>' +
+                '<label><input type="checkbox" id="sc-sma60"> SMA60</label>' +
+                '<label><input type="checkbox" id="sc-align"> 多頭排列</label>' +
+                '<label><input type="checkbox" id="sc-high20"> 20日新高</label>' +
+                '<label>RSI <input type="number" id="sc-rsimin">–<input type="number" id="sc-rsimax"></label>' +
+                '<label>量比 ≥ <input type="number" id="sc-volr" step="0.1" placeholder="1.5"></label>' +
+              '</div>' +
+              '<div class="sc-grp"><h4>基本面</h4>' +
+                '<label>YoY ≥ <input type="number" id="sc-revyoy" placeholder="20">%</label>' +
+                '<label>PER ≤ <input type="number" id="sc-permax" placeholder="30"></label>' +
+                '<label>殖利 ≥ <input type="number" id="sc-yield" step="0.1" placeholder="3">%</label>' +
+                '<div class="hint">TWSE 月營收／BWIBBU</div>' +
+              '</div>' +
+              '<div class="sc-grp"><h4>籌碼面</h4>' +
+                '<label>投信 ≥ <input type="number" id="sc-trust" placeholder="3">天</label>' +
+                '<label>外資 ≥ <input type="number" id="sc-foreign" placeholder="3">天</label>' +
+                '<div class="hint">chip_history 連續天數</div>' +
+              '</div>' +
+              '<div class="sc-bar">' +
+                '<select id="sc-sector"><option value="">全部產業</option><option value="__TECH__">科技電子整合</option></select>' +
+              '</div>' +
             '</div>' +
-            '<div class="sc-grp"><h4>基本面</h4>' +
-              '<label>月營收 YoY ≥ <input type="number" id="sc-revyoy" placeholder="20"> %</label>' +
-              '<label>PER ≤ <input type="number" id="sc-permax" placeholder="30"></label>' +
-              '<label>殖利率 ≥ <input type="number" id="sc-yield" step="0.1" placeholder="3"> %</label>' +
-              '<div class="hint">TWSE 月營收／BWIBBU；ETF 通常無基本面。</div>' +
-            '</div>' +
-            '<div class="sc-grp"><h4>籌碼面</h4>' +
-              '<label>投信連買 ≥ <input type="number" id="sc-trust" placeholder="3"> 天</label>' +
-              '<label>外資連買 ≥ <input type="number" id="sc-foreign" placeholder="3"> 天</label>' +
-              '<div class="hint">連續天數來自 chip_history（需每日累積）。</div>' +
+            '<div class="sc-main">' +
+              '<div id="sc-msg"></div>' +
+              '<div id="sc-results"></div>' +
+              '<div class="sc-note">/screen3 · 空白=不限 · ⚠ 非投資建議</div>' +
             '</div>' +
           '</div>' +
-          '<div class="sc-bar">' +
-            '<select id="sc-sector"><option value="">全部產業</option><option value="__TECH__">科技電子整合</option></select>' +
-            '<span style="color:var(--tlo);font-size:10px">空白條件=不限。建議至少勾 1～2 個技術條件。</span>' +
-          '</div>' +
-          '<div id="sc-msg"></div>' +
-          '<div id="sc-results"></div>' +
-          '<div class="sc-note">與工具列「選股策略 → 選股」同後端 /screen3。異常漲跌%（資料缺口）會顯示為 —。⚠ 非投資建議。</div>' +
         '</div>';
 
       var run = $('sc-run');
