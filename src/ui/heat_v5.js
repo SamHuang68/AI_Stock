@@ -83,23 +83,28 @@
       '#ht-root .ht-btn:hover{border-color:var(--bhi);color:var(--thi)}' +
       '#ht-root .ht-btn.on{border-color:var(--gold);color:var(--gold);background:var(--gold-s)}' +
       '#ht-root .ht-btn.primary{background:var(--gold);color:#060A12;border:none;font-weight:700}' +
-      '#ht-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
-      '#ht-body .ht-main{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
+      '#ht-body{flex:1;min-height:0;display:grid;gap:4px;overflow:hidden;' +
+        'grid-template-columns:minmax(0,1.55fr) minmax(260px,1fr);grid-template-rows:minmax(0,1fr)}' +
+      '#ht-body .ht-main{min-height:0;display:flex;flex-direction:column;overflow:hidden;' +
+        'background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px}' +
       '#ht-root .ht-legend{display:flex;align-items:center;gap:5px;font-size:8px;color:var(--tlo);margin:0 0 3px;flex:0 0 auto}' +
       '#ht-root .ht-legend i{display:inline-block;width:12px;height:8px;border-radius:2px}' +
       '#ht-root .ht-grid-wrap{flex:1;min-height:0;overflow:auto}' +
-      '#ht-root .ht-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:3px;margin:0}' +
-      '#ht-root .ht-cell{min-height:40px;padding:4px 3px;border-radius:4px;border:1px solid rgba(255,255,255,.06);' +
+      '#ht-root .ht-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:3px;margin:0;' +
+        'align-content:stretch;grid-auto-rows:minmax(56px,1fr);min-height:100%}' +
+      '#ht-root .ht-cell{min-height:48px;padding:5px 4px;border-radius:4px;border:1px solid rgba(255,255,255,.06);' +
         'cursor:pointer;text-align:center;display:flex;flex-direction:column;justify-content:center;gap:1px;' +
         'transition:transform .1s,box-shadow .1s;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.55)}' +
       '#ht-root .ht-cell:hover{transform:scale(1.02);box-shadow:0 2px 10px rgba(0,0,0,.4);z-index:2}' +
-      '#ht-root .ht-cell .nm{font-size:9px;font-weight:700;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#ht-root .ht-cell .pc{font-size:13px;font-weight:700}' +
+      '#ht-root .ht-cell .nm{font-size:10px;font-weight:700;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#ht-root .ht-cell .pc{font-size:14px;font-weight:700}' +
       '#ht-root .ht-cell .px{font-size:8px;opacity:.8}' +
-      '#ht-root .ht-focus-zone{flex:0 0 auto;max-height:38%;min-height:120px;display:flex;flex-direction:column;' +
-        'background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:4px 6px;margin-top:4px;overflow:hidden}' +
-      '#ht-root .ht-focus-zone h4{margin:0 0 3px;font-size:10px;color:var(--gold);letter-spacing:.5px;flex:0 0 auto}' +
-      '#ht-root .ht-two{display:grid;grid-template-columns:1fr 1fr;gap:4px;flex:1;min-height:0;overflow:hidden}' +
+      '#ht-root .ht-focus-zone{min-height:0;display:flex;flex-direction:column;' +
+        'background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;overflow:hidden}' +
+      '#ht-root .ht-focus-zone > h4{margin:0 0 3px;font-size:10px;color:var(--gold);letter-spacing:.5px;flex:0 0 auto}' +
+      '#ht-root .ht-focus-zone > #ht-focus{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
+      '#ht-root .ht-two{display:grid;grid-template-rows:1fr 1fr;gap:4px;flex:1;min-height:0;overflow:hidden}' +
+      '#ht-root .ht-two > div{min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
       '#ht-root .ht-list{flex:1;min-height:0;overflow:auto}' +
       '#ht-root .ht-row{display:flex;align-items:center;gap:5px;padding:2px 3px;border-bottom:1px solid var(--border);' +
         'cursor:pointer;font-size:10px}' +
@@ -108,7 +113,8 @@
       '#ht-root .ht-row .name{flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}' +
       '#ht-root .up{color:var(--red)}#ht-root .dn{color:var(--green)}' +
       '#ht-root .ht-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:2px;flex:0 0 auto}' +
-      '#ht-root .ht-loading{font-size:10px;color:var(--tlo);padding:12px 0}';
+      '#ht-root .ht-loading{font-size:10px;color:var(--tlo);padding:12px 0}' +
+      '#ht-body.ht-loading{display:flex;align-items:center}';
   }
 
   function pctColor(pct, mkt) {
@@ -222,18 +228,18 @@
       box.innerHTML = '<div class="ht-note">焦點掃描暫不可用或仍在載入。</div>';
       return;
     }
-    function col(title, rows, cls) {
+    function col(title, rows) {
       var V = window.Viz;
-      var h = '<div><h4 style="margin:0 0 6px;font-size:11px;color:var(--gold)">' + title +
+      var h = '<div><h4 style="margin:0 0 4px;font-size:10px;color:var(--gold);flex:0 0 auto">' + title +
         ' · ' + rows.length + '</h4><div class="ht-list">';
       if (!rows.length) h += '<div class="ht-note">無符合</div>';
-      rows.slice(0, 12).forEach(function (r) {
+      rows.slice(0, 18).forEach(function (r) {
         h += '<div class="ht-row" data-code="' + r.sym + '">' +
           '<span class="code">' + r.sym + '</span>' +
           '<span class="name">' + (r.name || '') + '</span>' +
           '<span class="' + twCls(r.changePct) + '">' + pct(r.changePct) + '</span>' +
           '<span style="color:var(--gold);font-weight:700;min-width:48px;text-align:right">' +
-          (r.score != null ? r.score + '★' : '') +
+          (r.score != null ? r.score : '') +
           (V && r.score != null ? V.scoreMeter(r.score) : '') +
           '</span></div>';
       });
@@ -243,7 +249,7 @@
       col('做多焦點', j.buy || []) +
       col('做空焦點', j.short || []) +
       '</div>' +
-      '<div class="ht-note">掃描 ' + (j.scanned || '—') + ' 檔 · 點列載入 K 線。完整精靈見工具列 AI → 焦點。</div>';
+      '<div class="ht-note">掃描 ' + (j.scanned || '—') + ' 檔 · 點列載入 K 線</div>';
     box.querySelectorAll('.ht-row').forEach(function (el) {
       el.onclick = function () { openSym(el.getAttribute('data-code'), 'TW'); };
     });
@@ -283,11 +289,12 @@
     }
     grid += '</div>';
 
+    body.classList.remove('ht-loading');
     body.innerHTML =
-      '<div class="ht-main">' + legend +
-        '<div class="ht-grid-wrap">' + grid + '</div></div>' +
-      '<div class="ht-focus-zone"><h4>🎯 焦點掃描</h4><div id="ht-focus" class="ht-loading">掃描中…</div></div>' +
-      '<div class="ht-note">/sectors · 台股代表股／美股 SPDR · ⚠ 非投資建議</div>';
+      '<div class="ht-main"><h4 style="margin:0 0 3px;font-size:10px;color:var(--gold);letter-spacing:.5px;flex:0 0 auto">類股熱力圖</h4>' +
+        legend + '<div class="ht-grid-wrap">' + grid + '</div>' +
+        '<div class="ht-note">/sectors · 台股代表股／美股 SPDR · 非投資建議</div></div>' +
+      '<div class="ht-focus-zone"><h4>焦點掃描</h4><div id="ht-focus" class="ht-loading">掃描中…</div></div>';
 
     body.querySelectorAll('.ht-cell').forEach(function (el) {
       el.onclick = function () {

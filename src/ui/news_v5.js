@@ -39,11 +39,19 @@
         'color:var(--text);font-size:9px;font-family:\'JetBrains Mono\',monospace;cursor:pointer;white-space:nowrap}' +
       '#nw-root .nw-btn:hover{border-color:var(--bhi);color:var(--thi)}' +
       '#nw-root .nw-btn.primary{background:var(--gold);color:#060A12;border:none;font-weight:700}' +
-      '#nw-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(220px,28%) minmax(0,1fr);gap:4px;overflow:hidden}' +
-      '#nw-root .nw-left,#nw-root .nw-right{min-height:0;overflow:auto;display:flex;flex-direction:column;gap:4px}' +
-      '#nw-root .nw-card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;min-width:0}' +
-      '#nw-root .nw-card h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px}' +
-      '#nw-root .nw-grid{display:grid;grid-template-columns:1fr;gap:4px}' +
+      '#nw-body{flex:1;min-height:0;display:flex;flex-direction:column;gap:4px;overflow:hidden}' +
+      '#nw-root .nw-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;flex:0 0 auto}' +
+      '#nw-root .nw-strip .cell{background:linear-gradient(180deg,rgba(17,27,46,.95),rgba(11,18,32,.98));' +
+        'border:1px solid var(--border);border-radius:5px;padding:3px 6px;min-width:0;overflow:hidden}' +
+      '#nw-root .nw-strip .k{font-size:8px;color:var(--tlo);letter-spacing:.4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#nw-root .nw-strip .v{font-size:13px;font-weight:800;color:var(--thi);line-height:1.15;margin-top:1px}' +
+      '#nw-root .nw-strip .s{font-size:8px;color:var(--tlo);margin-top:0;line-height:1.2}' +
+      '#nw-root .nw-dash{flex:1;min-height:0;display:grid;grid-template-columns:minmax(220px,28%) minmax(0,1fr);gap:4px;overflow:hidden}' +
+      '#nw-root .nw-left,#nw-root .nw-right{min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:4px}' +
+      '#nw-root .nw-card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;min-width:0;' +
+        'display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}' +
+      '#nw-root .nw-card h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;flex:0 0 auto}' +
+      '#nw-root .nw-grid{display:grid;grid-template-columns:1fr;gap:4px;flex:1;align-content:start}' +
       '#nw-root .nw-stat{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px}' +
       '#nw-root .nw-stat .k{font-size:8px;color:var(--tlo)}#nw-root .nw-stat .v{font-size:14px;font-weight:700;color:var(--thi);margin-top:1px;line-height:1.15}' +
       '#nw-root .nw-stat .s{font-size:8px;color:var(--tlo);margin-top:1px;line-height:1.3}' +
@@ -54,8 +62,9 @@
       '#nw-root th{color:var(--tlo);position:sticky;top:0;background:var(--bg2);font-size:9px;z-index:1}' +
       '#nw-root tr.nw-row{cursor:pointer}#nw-root tr.nw-row:hover{background:var(--bg3)}' +
       '#nw-root .nw-table-wrap{flex:1;min-height:0;overflow:auto}' +
-      '#nw-root .nw-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:2px}' +
-      '#nw-root .nw-loading{font-size:10px;color:var(--tlo);padding:12px 0}';
+      '#nw-root .nw-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:2px;flex:0 0 auto}' +
+      '#nw-root .nw-loading{font-size:10px;color:var(--tlo);padding:12px 0}' +
+      '#nw-body.nw-loading{display:flex;align-items:center}';
   }
 
   function thirdWednesday(y, m) {
@@ -149,32 +158,10 @@
       else alertLine = alertSt.status || (alertSt.enabled ? '已設定' : '未啟用');
     }
 
-    var left =
-      '<div class="nw-left">' +
-        '<div class="nw-card"><h4>⏱ 時程計數</h4><div class="nw-grid">' +
-          '<div class="nw-stat"><div class="k">期貨結算日</div><div class="v ' + settleCls + '">' + md + '</div>' +
-            '<div class="s ' + settleCls + '">' + settleSub + '</div></div>' +
-          '<div class="nw-stat"><div class="k">月營收截止</div><div class="v ' + (revSoon ? 'soon' : '') + '">' +
-            (rev.nextPublishBy || '—') + '</div>' +
-            '<div class="s">' + (rev.forMonth ? rev.forMonth + ' 營收' : '') +
-            (rev.daysAway != null ? ' · ' + rev.daysAway + ' 天後' : '') + '</div></div>' +
-          '<div class="nw-stat"><div class="k">後端警報</div><div class="v" style="font-size:12px">' + alertLine + '</div>' +
-            '<div class="s">推播／規則見系統選單</div></div>' +
-        '</div></div>' +
-        '<div class="nw-card"><h4>📈 月營收公布</h4>' +
-          (rev.nextPublishBy
-            ? ('<div style="font-size:10px">下次：<span class="' + (revSoon ? 'soon' : '') + '">' + rev.nextPublishBy +
-              '</span>（' + (rev.forMonth || '') + '）</div>' +
-              '<div class="nw-note">上市櫃每月 10 日前須公布上月營收；YoY 是供應鏈動能的即時訊號。</div>')
-            : '<div class="nw-note">無營收時程資料。</div>') +
-        '</div>' +
-        '<div class="nw-note">非新聞頭條源；集中「會影響部位節奏」的時程與提醒。</div>' +
-      '</div>';
-
     var exTable = '';
     if (ex.length) {
       exTable = '<div class="nw-table-wrap"><table><tr><th>日期</th><th>標的</th><th>類型</th></tr>' +
-        ex.slice(0, 60).map(function (e) {
+        ex.slice(0, 80).map(function (e) {
           var typ = e.type || '';
           var typCell = typ;
           if (V && typ) {
@@ -189,13 +176,35 @@
       exTable = '<div class="nw-note">目前無預告（TWSE 資料集可能未開放或當期無資料）。</div>';
     }
 
-    var right =
-      '<div class="nw-right">' +
-        '<div class="nw-card" style="flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden">' +
-          '<h4>💵 除權除息預告 · ' + ex.length + ' 筆</h4>' + exTable +
-        '</div></div>';
-
-    body.innerHTML = left + right;
+    body.classList.remove('nw-loading');
+    body.innerHTML =
+      '<div class="nw-strip">' +
+        '<div class="cell"><div class="k">期貨結算</div><div class="v ' + settleCls + '">' + md + '</div>' +
+          '<div class="s ' + settleCls + '">' + settleTxt + '</div></div>' +
+        '<div class="cell"><div class="k">月營收截止</div><div class="v ' + (revSoon ? 'soon' : '') + '">' +
+          (rev.nextPublishBy || '—') + '</div><div class="s">' +
+          (rev.forMonth ? rev.forMonth + ' 營收' : '—') +
+          (rev.daysAway != null ? ' · ' + rev.daysAway + ' 天' : '') + '</div></div>' +
+        '<div class="cell"><div class="k">除權息預告</div><div class="v">' + ex.length + '</div>' +
+          '<div class="s">點列開圖表</div></div>' +
+        '<div class="cell"><div class="k">後端警報</div><div class="v" style="font-size:12px">' + alertLine + '</div>' +
+          '<div class="s">推播／規則見系統選單</div></div>' +
+      '</div>' +
+      '<div class="nw-dash">' +
+        '<div class="nw-left">' +
+          '<div class="nw-card"><h4>時程重點</h4><div class="nw-grid">' +
+            '<div class="nw-stat"><div class="k">結算節奏</div><div class="v ' + settleCls + '" style="font-size:12px">' + settleSub + '</div></div>' +
+            '<div class="nw-stat"><div class="k">月營收公布</div><div class="v" style="font-size:12px">' +
+              (rev.nextPublishBy || '—') + '</div>' +
+              '<div class="s">上市櫃每月 10 日前公布上月營收</div></div>' +
+            '<div class="nw-stat"><div class="k">用途</div><div class="v" style="font-size:11px">部位節奏</div>' +
+              '<div class="s">非新聞頭條源 · 集中會影響部位的時程</div></div>' +
+          '</div></div>' +
+        '</div>' +
+        '<div class="nw-right">' +
+          '<div class="nw-card"><h4>除權除息預告 · ' + ex.length + ' 筆</h4>' + exTable + '</div>' +
+        '</div>' +
+      '</div>';
 
     body.querySelectorAll('tr.nw-row').forEach(function (el) {
       el.onclick = function () {

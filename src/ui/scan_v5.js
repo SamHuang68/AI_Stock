@@ -278,7 +278,7 @@
             '<span class="sc-title">三合一選股</span>' +
             '<span class="sc-sub">技術 × 基本面 × 籌碼</span>' +
           '</div><div class="sc-actions">' +
-            '<button type="button" class="sc-btn primary" id="sc-run">🔍 掃描</button>' +
+            '<button type="button" class="sc-btn primary" id="sc-run">掃描</button>' +
             '<button type="button" class="sc-btn" data-shell-back>← 圖表</button>' +
           '</div></div>' +
           '<div class="sc-layout">' +

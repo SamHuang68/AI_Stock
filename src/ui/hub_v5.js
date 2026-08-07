@@ -86,34 +86,44 @@
       '.hub-root .hub-strip .s{font-size:8px;margin-top:0;font-weight:700;line-height:1.2;color:var(--tlo)}' +
       '.hub-root .hub-dash{flex:1;min-height:0;display:grid;gap:4px;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
       '.hub-root .hub-dash.hub-dash-1{grid-template-rows:minmax(0,1fr)}' +
+      /* 單列橫向多窗：消除 1fr/1fr 上下對切造成的中空 */
+      '.hub-root .hub-dash.hub-cols-2{grid-template-rows:minmax(0,1fr);grid-template-columns:minmax(0,1fr) minmax(0,1fr)}' +
+      '.hub-root .hub-dash.hub-cols-3{grid-template-rows:minmax(0,1fr);' +
+        'grid-template-columns:minmax(0,1.55fr) minmax(0,1fr) minmax(0,1fr)}' +
+      '.hub-root .hub-dash.hub-cols-4{grid-template-rows:minmax(0,1fr);grid-template-columns:repeat(4,minmax(0,1fr))}' +
       '.hub-root .hub-zone{display:grid;gap:4px;min-width:0;min-height:0;height:100%;' +
         'grid-template-columns:repeat(2,minmax(0,1fr))}' +
       '.hub-root .hub-zone.z-3{grid-template-columns:repeat(3,minmax(0,1fr))}' +
       '.hub-root .hub-zone.z-4{grid-template-columns:repeat(4,minmax(0,1fr))}' +
-      '.hub-root .hub-zone.z-fill{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));align-content:start;overflow:auto}' +
+      '.hub-root .hub-zone.z-fill{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));align-content:start;overflow:auto}' +
       '.hub-root .hub-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;' +
         'min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%;margin:0}' +
       '.hub-root .hub-sec h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;' +
         'display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;gap:4px}' +
       '.hub-root .hub-sec > .hub-fill{flex:1;min-height:0;overflow:auto}' +
-      '.hub-root .hub-card{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px;min-width:0;overflow:hidden}' +
+      '.hub-root .hub-card{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:5px 7px;min-width:0;overflow:hidden}' +
       '.hub-root .hub-card .k{font-size:8px;color:var(--tlo);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '.hub-root .hub-card .v{font-size:12px;font-weight:800;color:var(--thi);margin-top:1px;line-height:1.15}' +
+      '.hub-root .hub-card .v{font-size:14px;font-weight:800;color:var(--thi);margin-top:1px;line-height:1.15}' +
+      '.hub-root .hub-card .chg{font-size:10px;font-weight:700;margin-top:2px}' +
+      '.hub-root .hub-card .bar{margin-top:3px}' +
       '.hub-root .up{color:var(--red)}.hub-root .dn{color:var(--green)}.hub-root .flat{color:var(--tlo)}' +
       '.hub-root table{width:100%;border-collapse:collapse;font-size:10px}' +
       '.hub-root th,.hub-root td{padding:2px 3px;border-bottom:1px solid var(--border);text-align:right}' +
       '.hub-root th:first-child,.hub-root td:first-child,.hub-root th:nth-child(2),.hub-root td:nth-child(2){text-align:left}' +
-      '.hub-root th{color:var(--tlo);font-weight:600}' +
+      '.hub-root th{color:var(--tlo);font-weight:600;position:sticky;top:0;background:var(--bg2);z-index:1}' +
       '.hub-root tr[data-code]{cursor:pointer}.hub-root tr[data-code]:hover{background:var(--bg3)}' +
       '.hub-root .hub-note{font-size:8px;color:var(--tlo);margin-top:3px;line-height:1.35;flex:0 0 auto;' +
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '.hub-root .hub-spark{display:flex;align-items:flex-end;gap:1px;height:40px;margin-top:2px;flex:1;min-height:32px}' +
       '.hub-root .hub-spark i{flex:1;background:var(--cyan);opacity:.75;border-radius:1px 1px 0 0;min-width:2px}' +
-      '.hub-root .hub-mag3{display:grid;grid-template-columns:1fr;gap:4px;flex:1;min-height:0;align-content:start}' +
-      '.hub-root .hub-mag3 .row{display:flex;align-items:center;gap:6px;font-size:9px}' +
-      '.hub-root .hub-mag3 .row .lbl{width:28px;flex-shrink:0;color:var(--tlo);font-size:8px}' +
-      '.hub-root .hub-mag3 .row .val{width:52px;flex-shrink:0;text-align:right;font-weight:700;font-size:9px}' +
+      '.hub-root .hub-spark-fill{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center}' +
+      '.hub-root .hub-spark-fill .vz-spark,.hub-root .hub-spark-fill svg{width:100%!important;height:100%!important;min-height:96px;max-height:160px}' +
+      '.hub-root .hub-mag3{display:grid;grid-template-columns:1fr;gap:10px;flex:1;min-height:0;align-content:center}' +
+      '.hub-root .hub-mag3 .row{display:flex;align-items:center;gap:6px;font-size:10px}' +
+      '.hub-root .hub-mag3 .row .lbl{width:28px;flex-shrink:0;color:var(--tlo);font-size:9px}' +
+      '.hub-root .hub-mag3 .row .val{width:56px;flex-shrink:0;text-align:right;font-weight:700;font-size:11px}' +
       '.hub-root .hub-mag3 .row .bar{flex:1;min-width:0}' +
+      '.hub-root .hub-mag3 .vz-mag .vz-track{height:8px}' +
       '.hub-root .badge{display:inline-block;padding:0 6px;border-radius:999px;font-size:8px;font-weight:700}' +
       '.hub-root .badge.ok{background:var(--gbg);color:var(--green);border:1px solid var(--gbdr)}' +
       '.hub-root .badge.warn{background:rgba(251,146,60,.12);color:var(--orange);border:1px solid rgba(251,146,60,.35)}' +
@@ -210,9 +220,9 @@
         '<div class="row"><span class="lbl">投信</span><span class="val ' + tw(inst.trust) + '">' + yi(inst.trust) + '</span><span class="bar">' + tBar + '</span></div>' +
         '<div class="row"><span class="lbl">自營</span><span class="val ' + tw(inst.dealer) + '">' + yi(inst.dealer) + '</span><span class="bar">' + dBar + '</span></div>' +
         '</div></div>';
-      var trendPanel = '<div class="hub-sec"><h4>法人資金趨勢（歷史庫）</h4>' +
-        (V ? V.sparkLine(sparkVals, { color: 'var(--gold)' }) : spark(sparkVals)) +
-        '<div class="hub-note">日數 ' + hist.length + (inst.date ? ' · 最新法人日 ' + inst.date : '') + '</div></div>';
+      var trendPanel = '<div class="hub-sec"><h4>法人資金趨勢</h4><div class="hub-spark-fill">' +
+        (V ? V.sparkLine(sparkVals, { color: 'var(--gold)', h: 120, w: 320 }) : spark(sparkVals)) +
+        '</div><div class="hub-note">日數 ' + hist.length + (inst.date ? ' · 最新法人日 ' + inst.date : '') + '</div></div>';
       var body = $('hub-inst-body');
       if (!body) return;
       body.innerHTML =
@@ -223,9 +233,8 @@
           '<div class="cell"><div class="k">合計</div><div class="v ' + tw(total) + '">' + yi(total) + '</div>' +
             (totalSpark ? '<div class="s">' + totalSpark + '</div>' : '') + '</div>' +
         '</div>' +
-        '<div class="hub-dash">' +
-          '<div class="hub-zone">' + trendPanel + magPanel + '</div>' +
-          '<div class="hub-zone">' + rankTbl(buy, '外資買超') + rankTbl(sell, '外資賣超') + '</div>' +
+        '<div class="hub-dash hub-cols-4">' +
+          trendPanel + magPanel + rankTbl(buy, '外資買超') + rankTbl(sell, '外資賣超') +
         '</div>';
       bindCommon(el);
     });
@@ -259,11 +268,26 @@
         { label: '美10年債', pt: lastPt(arr[1]), unit: '%' }
       ];
       var st = arr[4] || {};
+      var V = window.Viz;
+      var maxChg = 0;
+      global.forEach(function (g) {
+        if (g.changePct != null && isFinite(g.changePct)) maxChg = Math.max(maxChg, Math.abs(g.changePct));
+      });
+      if (maxChg < 0.01) maxChg = 1;
+      var strip = global.slice(0, 4).map(function (g) {
+        return '<div class="cell"><div class="k">' + (g.name || g.symbol) + '</div><div class="v">' +
+          fmt(g.price, g.unit === '%' ? 2 : (g.price > 1000 ? 0 : 2)) + (g.unit === '%' ? '%' : '') +
+          '</div><div class="s ' + tw(g.changePct) + '">' + (g.changePct != null ? pct(g.changePct) : '—') + '</div></div>';
+      }).join('');
+      while ((strip.match(/class="cell"/g) || []).length < 4) {
+        strip += '<div class="cell"><div class="k">—</div><div class="v">—</div></div>';
+      }
       var cards = global.map(function (g) {
+        var bar = (V && g.changePct != null) ? '<div class="bar">' + V.rowBar(g.changePct, maxChg) + '</div>' : '';
         return '<div class="hub-card"><div class="k">' + (g.name || g.symbol) + '</div><div class="v">' +
           fmt(g.price, g.unit === '%' ? 2 : (g.price > 1000 ? 0 : 2)) + (g.unit === '%' ? '%' : '') +
-          '</div><div class="' + tw(g.changePct) + '" style="font-size:9px;font-weight:700">' +
-          (g.changePct != null ? pct(g.changePct) : '—') + '</div></div>';
+          '</div><div class="chg ' + tw(g.changePct) + '">' +
+          (g.changePct != null ? pct(g.changePct) : '—') + '</div>' + bar + '</div>';
       }).join('');
       var ecoHtml = eco.map(function (e) {
         return '<tr><td>' + e.label + '</td><td>' + (e.pt ? fmt(e.pt.value, 2) + e.unit : '—') +
@@ -277,20 +301,17 @@
       var body = $('hub-intl-body');
       if (!body) return;
       body.innerHTML =
-        '<div class="hub-dash">' +
-          '<div class="hub-zone" style="grid-template-columns:1fr">' +
-            '<div class="hub-sec"><h4>全球報價</h4><div class="hub-fill hub-zone z-fill" style="display:grid">' +
-              (cards || '<div class="hub-empty">國際報價載入中／來源暫不可用</div>') +
-            '</div></div>' +
-          '</div>' +
-          '<div class="hub-zone">' +
-            '<div class="hub-sec"><h4>經濟指標</h4><div class="hub-fill"><table><tr><th>項目</th><th>數值</th><th>日期</th></tr>' +
-              (ecoHtml || '<tr><td colspan="3">FRED／總經尚未就緒（可於設定同步）</td></tr>') +
-              '</table></div></div>' +
-            '<div class="hub-sec"><h4>資料來源狀態（歷史庫）</h4><div class="hub-fill"><table><tr><th>系列</th><th>資料日</th><th>狀態</th><th>列數</th></tr>' +
-              (ds || '<tr><td colspan="4">尚無同步紀錄 — 按同步資料</td></tr>') +
-              '</table></div></div>' +
-          '</div>' +
+        '<div class="hub-strip">' + strip + '</div>' +
+        '<div class="hub-dash hub-cols-3">' +
+          '<div class="hub-sec"><h4>全球報價</h4><div class="hub-fill hub-zone z-fill" style="display:grid">' +
+            (cards || '<div class="hub-empty">國際報價載入中／來源暫不可用</div>') +
+          '</div></div>' +
+          '<div class="hub-sec"><h4>經濟指標</h4><div class="hub-fill"><table><tr><th>項目</th><th>數值</th><th>日期</th></tr>' +
+            (ecoHtml || '<tr><td colspan="3">FRED／總經尚未就緒（可於設定同步）</td></tr>') +
+            '</table></div></div>' +
+          '<div class="hub-sec"><h4>資料來源狀態</h4><div class="hub-fill"><table><tr><th>系列</th><th>資料日</th><th>狀態</th><th>列數</th></tr>' +
+            (ds || '<tr><td colspan="4">尚無同步紀錄 — 按同步資料</td></tr>') +
+            '</table></div></div>' +
         '</div>';
       bindCommon(el);
     });
@@ -320,15 +341,22 @@
       if (!list.length && d && Array.isArray(d.items)) list = d.items;
       if (!list.length) {
         body.innerHTML =
-          '<div class="hub-dash hub-dash-1"><div class="hub-zone" style="grid-template-columns:1fr">' +
+          '<div class="hub-dash hub-dash-1">' +
             '<div class="hub-sec"><h4>策略訊號清單</h4>' +
-            '<div class="hub-empty">目前沒有新的策略訊號 — 可按「執行焦點掃描」或前往選股</div></div></div></div>';
+            '<div class="hub-empty">目前沒有新的策略訊號 — 可按「執行焦點掃描」或前往選股</div></div></div>';
         bindCommon(el);
         return;
       }
       var V = window.Viz;
-      var rows = '';
-      list.slice(0, 30).forEach(function (r) {
+      function classify(r) {
+        var side = r.side || r.dir || r.bias || (r.score != null && r.score < 0 ? '空' : '多');
+        var sideStr = String(side);
+        if (/空|short|bear|sell|偏空/i.test(sideStr)) return 'bear';
+        if (/多|long|bull|buy|偏多/i.test(sideStr)) return 'bull';
+        if (r.score != null && isFinite(r.score) && r.score < 0) return 'bear';
+        return 'bull';
+      }
+      function rowHtml(r) {
         var code = r.code || r.sym || r.ticker || '';
         var name = r.name || '';
         var side = r.side || r.dir || r.bias || (r.score != null && r.score < 0 ? '空' : '多');
@@ -349,15 +377,34 @@
           var meterScore = Math.abs(scoreNum) <= 1 ? scoreNum * 100 : Math.max(0, Math.min(100, Math.abs(scoreNum)));
           scoreCell = (scoreNum >= 0 ? '+' : '') + Number(scoreNum).toFixed(1) + V.scoreMeter(meterScore);
         }
-        rows += '<tr data-code="' + code + '"><td style="color:var(--gold);font-weight:700">' + code +
+        return '<tr data-code="' + code + '"><td style="color:var(--gold);font-weight:700">' + code +
           '</td><td>' + name + '</td><td>' + sideCell + '</td><td>' + scoreCell +
           '</td><td style="text-align:left;color:var(--tlo)">' + desc + '</td></tr>';
+      }
+      var bulls = [], bears = [];
+      list.forEach(function (r) {
+        if (classify(r) === 'bear') bears.push(r);
+        else bulls.push(r);
       });
+      var bullRows = bulls.slice(0, 24).map(rowHtml).join('') ||
+        '<tr><td colspan="5">目前無偏多訊號</td></tr>';
+      var bearRows = bears.slice(0, 24).map(rowHtml).join('') ||
+        '<tr><td colspan="5">目前無偏空訊號</td></tr>';
       body.innerHTML =
-        '<div class="hub-dash hub-dash-1"><div class="hub-zone" style="grid-template-columns:1fr">' +
-          '<div class="hub-sec"><h4>策略訊號清單</h4><div class="hub-fill"><table>' +
+        '<div class="hub-strip">' +
+          '<div class="cell"><div class="k">訊號總數</div><div class="v">' + list.length + '</div></div>' +
+          '<div class="cell"><div class="k">偏多</div><div class="v up">' + bulls.length + '</div></div>' +
+          '<div class="cell"><div class="k">偏空</div><div class="v dn">' + bears.length + '</div></div>' +
+          '<div class="cell"><div class="k">來源</div><div class="v">/focus</div><div class="s">點列開圖表</div></div>' +
+        '</div>' +
+        '<div class="hub-dash hub-cols-2">' +
+          '<div class="hub-sec"><h4>偏多訊號</h4><div class="hub-fill"><table>' +
             '<tr><th>代號</th><th>名稱</th><th>方向</th><th>分數</th><th>說明</th></tr>' +
-            rows + '</table></div><div class="hub-note">來源 /focus · 點列開啟圖表</div></div></div></div>';
+            bullRows + '</table></div></div>' +
+          '<div class="hub-sec"><h4>偏空訊號</h4><div class="hub-fill"><table>' +
+            '<tr><th>代號</th><th>名稱</th><th>方向</th><th>分數</th><th>說明</th></tr>' +
+            bearRows + '</table></div></div>' +
+        '</div>';
       bindCommon(el);
     });
   }
@@ -391,8 +438,8 @@
     if (!body) return;
     if (!wl.length) {
       body.innerHTML =
-        '<div class="hub-dash hub-dash-1"><div class="hub-zone" style="grid-template-columns:1fr">' +
-          '<div class="hub-sec"><div class="hub-empty">尚無自選股 — 於圖表按 ＋ 加入</div></div></div></div>';
+        '<div class="hub-dash hub-dash-1">' +
+          '<div class="hub-sec"><div class="hub-empty">尚無自選股 — 於圖表按 ＋ 加入</div></div></div>';
       return;
     }
     var twc = wl.filter(function (w) { return (w.m || 'TW') === 'TW'; }).map(function (w) { return w.t; });
@@ -410,16 +457,19 @@
         if (ch != null && isFinite(ch)) maxChg = Math.max(maxChg, Math.abs(ch));
       });
       if (maxChg < 0.01) maxChg = 1;
-      var rows = '';
-      wl.forEach(function (w) {
+      function rowOf(w) {
         var qq = q[w.t] || q[w.t + '.TW'] || q[w.t + '.TWO'] || {};
         var ch = qq.changePct != null ? qq.changePct : w.chg;
         var bar = V ? V.rowBar(ch, maxChg) : '';
-        rows += '<tr data-code="' + w.t + '" data-mkt="' + (w.m || 'TW') + '"><td style="color:var(--gold);font-weight:700">' +
-          w.t + '</td><td>' + (w.name || '') + '</td><td>' + (w.m || 'TW') + '</td><td>' +
+        return '<tr data-code="' + w.t + '" data-mkt="' + (w.m || 'TW') + '"><td style="color:var(--gold);font-weight:700">' +
+          w.t + '</td><td>' + (w.name || '') + '</td><td>' +
           fmt(qq.price != null ? qq.price : w.price) + '</td><td class="' + tw(ch) + '">' +
           pct(ch) + bar + '</td></tr>';
-      });
+      }
+      var twRows = wl.filter(function (w) { return (w.m || 'TW') === 'TW'; }).map(rowOf).join('') ||
+        '<tr><td colspan="4">尚無台股自選</td></tr>';
+      var usRows = wl.filter(function (w) { return w.m === 'US'; }).map(rowOf).join('') ||
+        '<tr><td colspan="4">尚無美股自選</td></tr>';
       var b = $('hub-wl-body');
       if (!b) return;
       b.innerHTML =
@@ -429,10 +479,14 @@
           '<div class="cell"><div class="k">美股</div><div class="v">' + usc.length + '</div></div>' +
           '<div class="cell"><div class="k">報價</div><div class="v">' + (twc.length + usc.length ? '即時' : '—') + '</div></div>' +
         '</div>' +
-        '<div class="hub-dash hub-dash-1"><div class="hub-zone" style="grid-template-columns:1fr">' +
-          '<div class="hub-sec"><h4>自選與持股監控</h4><div class="hub-fill"><table>' +
-            '<tr><th>代號</th><th>名稱</th><th>市場</th><th>最新價</th><th>漲跌</th></tr>' +
-            rows + '</table></div></div></div></div>';
+        '<div class="hub-dash hub-cols-2">' +
+          '<div class="hub-sec"><h4>台股自選</h4><div class="hub-fill"><table>' +
+            '<tr><th>代號</th><th>名稱</th><th>最新價</th><th>漲跌</th></tr>' +
+            twRows + '</table></div></div>' +
+          '<div class="hub-sec"><h4>美股自選</h4><div class="hub-fill"><table>' +
+            '<tr><th>代號</th><th>名稱</th><th>最新價</th><th>漲跌</th></tr>' +
+            usRows + '</table></div></div>' +
+        '</div>';
       bindCommon(el);
     });
   }
@@ -528,13 +582,11 @@
             (p.dataCompleteness != null ? Number(p.dataCompleteness).toFixed(0) + '%' : '—') + '</div>' +
             '<div class="s">' + compMeter + '</div></div>' +
         '</div>' +
-        '<div class="hub-dash">' +
-          '<div class="hub-zone" style="grid-template-columns:1fr">' +
-            '<div class="hub-sec"><h4>風險事件清單</h4><div class="hub-fill"><table>' +
-              '<tr><th>時間</th><th>事件</th><th>說明</th><th>範圍</th><th>重要</th></tr>' +
-              eventsRows + '</table></div></div>' +
-          '</div>' +
-          '<div class="hub-zone" style="grid-template-columns:1fr">' + histPanel + '</div>' +
+        '<div class="hub-dash hub-cols-2">' +
+          '<div class="hub-sec"><h4>風險事件清單</h4><div class="hub-fill"><table>' +
+            '<tr><th>時間</th><th>事件</th><th>說明</th><th>範圍</th><th>重要</th></tr>' +
+            eventsRows + '</table></div></div>' +
+          histPanel +
         '</div>';
       bindCommon(el);
     });
@@ -595,13 +647,11 @@
           '<div class="cell"><div class="k">策略</div><div class="v">增量 merge</div>' +
             '<div class="s">只更新新交易日</div></div>' +
         '</div>' +
-        '<div class="hub-dash">' +
-          '<div class="hub-zone" style="grid-template-columns:1fr">' +
-            '<div class="hub-sec"><h4>資料來源狀態（pulse_history）</h4><div class="hub-fill"><table>' +
-              '<tr><th>資料集</th><th>資料日</th><th>狀態</th><th>說明</th><th>列數</th></tr>' +
-              dsRows + '</table></div><div class="hub-note">DB：' + (st.db || '') + '</div></div>' +
-          '</div>' +
-          '<div class="hub-zone" style="grid-template-columns:1fr">' + srcPanel + '</div>' +
+        '<div class="hub-dash hub-cols-2">' +
+          '<div class="hub-sec"><h4>資料來源狀態（pulse_history）</h4><div class="hub-fill"><table>' +
+            '<tr><th>資料集</th><th>資料日</th><th>狀態</th><th>說明</th><th>列數</th></tr>' +
+            dsRows + '</table></div><div class="hub-note">DB：' + (st.db || '') + '</div></div>' +
+          srcPanel +
         '</div>';
       bindCommon(el);
     });
