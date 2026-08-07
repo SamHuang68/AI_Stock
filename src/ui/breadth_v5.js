@@ -359,7 +359,9 @@
       });
       var spark = '';
       if (V && lsSeries.filter(function (v) { return v != null && isFinite(v); }).length >= 2) {
-        spark = '<div class="bd-spark">' + V.sparkLine(lsSeries) + '</div>';
+        spark = '<div class="bd-spark">' + V.sparkLine(lsSeries, {
+          xUnit: '日', yUnit: '倍', yDigits: 2, h: 48, w: 280
+        }) + '</div>';
       }
       var tbl = '<table class="bd-hist"><tr><th>日期</th><th>上漲</th><th>下跌</th><th>平盤</th><th>多空比</th></tr>';
       hist.forEach(function (r) {

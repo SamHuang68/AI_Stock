@@ -29,9 +29,15 @@
   function finite(v) { return v != null && isFinite(v); }
 
   function ensureStyle() {
-    if (document.getElementById('vz-style')) return;
-    var s = document.createElement('style');
-    s.id = 'vz-style';
+    var VER = 'ax2';
+    var s = document.getElementById('vz-style');
+    if (s && s.getAttribute('data-v') === VER) return;
+    if (!s) {
+      s = document.createElement('style');
+      s.id = 'vz-style';
+      document.head.appendChild(s);
+    }
+    s.setAttribute('data-v', VER);
     s.textContent =
       '.vz-mag{display:flex;align-items:center;gap:4px;min-width:0}' +
       '.vz-mag .vz-lbl{font-size:8px;color:var(--tlo);min-width:24px;flex-shrink:0}' +
@@ -71,12 +77,22 @@
       '.vz-ref .vz-tick{position:absolute;top:-1px;bottom:-1px;width:1px;background:rgba(248,250,252,.35)}' +
       '.vz-ref .vz-tick-lbl{position:absolute;top:7px;font-size:7px;color:var(--tf,#64748b);transform:translateX(-50%);white-space:nowrap}' +
       '.vz-spark{display:block;width:100%;height:28px;margin-top:2px}' +
+      '.vz-spark-ax{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto 1fr auto;gap:0 3px;' +
+        'width:100%;height:100%;min-height:inherit;box-sizing:border-box;padding:1px 2px 0}' +
+      '.vz-spark-ax .vz-yunit{grid-column:1;grid-row:1;font-size:7px;color:var(--tf,#64748b);line-height:1;' +
+        'white-space:nowrap;align-self:end;padding-bottom:1px}' +
+      '.vz-spark-ax .vz-ylabs{grid-column:1;grid-row:2;display:flex;flex-direction:column;justify-content:space-between;' +
+        'align-items:flex-end;font-size:7px;color:var(--tlo);line-height:1;font-variant-numeric:tabular-nums;padding:1px 0}' +
+      '.vz-spark-ax .vz-plot{grid-column:2;grid-row:1 / span 2;min-width:0;min-height:0;position:relative;' +
+        'border-left:1px solid rgba(148,163,184,.28);border-bottom:1px solid rgba(148,163,184,.28)}' +
+      '.vz-spark-ax .vz-plot svg{display:block;width:100%;height:100%;min-height:24px}' +
+      '.vz-spark-ax .vz-xunit{grid-column:2;grid-row:3;font-size:7px;color:var(--tf,#64748b);line-height:1.2;' +
+        'text-align:right;padding-top:2px;white-space:nowrap}' +
       '.vz-sparkbars{display:flex;align-items:flex-end;gap:1px;height:18px;margin-top:2px}' +
       '.vz-sparkbars i{flex:1;min-width:2px;border-radius:1px 1px 0 0;opacity:.9}' +
       '.vz-zone{position:relative;height:7px;border-radius:4px;background:linear-gradient(90deg,#4ade80 0%,#fbbf24 40%,#fb923c 70%,#f87171 100%);margin:3px 0 1px}' +
       '.vz-zone .vz-mark{position:absolute;top:-2px;width:2px;height:11px;background:#fff;border-radius:1px;box-shadow:0 0 0 1px rgba(0,0,0,.4)}' +
       '.vz-rowbar{display:inline-block;height:4px;border-radius:2px;vertical-align:middle;margin-left:4px;max-width:56px}';
-    document.head.appendChild(s);
   }
 
   /** 對零軸左右開的幅度條（買超右紅／賣超左綠） */
@@ -243,7 +259,20 @@
     return '<span class="vz-rowbar" style="width:' + w + '%;background:' + gainColor(v) + '"></span>';
   }
 
-  /** SVG 折線 spark */
+  function _fmtAxisY(v, opts) {
+    if (opts && typeof opts.yFmt === 'function') return opts.yFmt(v);
+    if (!finite(v)) return '—';
+    var abs = Math.abs(v);
+    var dig = (opts && opts.yDigits != null) ? opts.yDigits
+      : (abs >= 1000 ? 0 : (abs >= 100 ? 1 : 2));
+    var n = Number(v).toFixed(dig);
+    if (abs >= 1000) {
+      return Math.round(v).toLocaleString('en-US');
+    }
+    return n;
+  }
+
+  /** SVG 折線 spark；opts.xUnit / opts.yUnit 時外掛座標軸單位（HTML，避免 SVG 拉伸變形） */
   function sparkLine(vals, opts) {
     ensureStyle();
     opts = opts || {};
@@ -261,8 +290,21 @@
     }).join(' ');
     var up = arr[arr.length - 1] >= arr[0];
     var stroke = opts.color || (up ? 'var(--red)' : 'var(--green)');
-    return '<svg class="vz-spark" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
+    var svg = '<svg class="vz-spark" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
       '<polyline fill="none" stroke="' + stroke + '" stroke-width="2" points="' + pts + '"/></svg>';
+    var xUnit = opts.xUnit != null ? String(opts.xUnit) : '';
+    var yUnit = opts.yUnit != null ? String(opts.yUnit) : '';
+    if (!xUnit && !yUnit && !opts.axes) return svg;
+    var xLbl = xUnit || '日';
+    var yLbl = yUnit || '';
+    var n = arr.length;
+    return '<div class="vz-spark-ax" title="' +
+      esc((yLbl ? ('Y：' + yLbl + ' · ') : '') + 'X：' + xLbl + ' · n=' + n) + '">' +
+      '<div class="vz-yunit">' + esc(yLbl) + '</div>' +
+      '<div class="vz-ylabs"><span>' + esc(_fmtAxisY(hi, opts)) + '</span>' +
+        '<span>' + esc(_fmtAxisY(lo, opts)) + '</span></div>' +
+      '<div class="vz-plot">' + svg + '</div>' +
+      '<div class="vz-xunit">近 ' + n + ' ' + esc(xLbl) + ' →</div></div>';
   }
 
   /** 正負柱狀 spark */

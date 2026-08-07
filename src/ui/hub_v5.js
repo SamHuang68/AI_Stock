@@ -123,7 +123,8 @@
       '.hub-root .hub-spark{display:flex;align-items:flex-end;gap:1px;height:40px;margin-top:2px;flex:1;min-height:32px}' +
       '.hub-root .hub-spark i{flex:1;background:var(--cyan);opacity:.75;border-radius:1px 1px 0 0;min-width:2px}' +
       '.hub-root .hub-spark-fill{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:stretch}' +
-      '.hub-root .hub-spark-fill .vz-spark,.hub-root .hub-spark-fill svg{width:100%!important;height:100%!important;min-height:140px;flex:1}' +
+      '.hub-root .hub-spark-fill .vz-spark-ax{flex:1;min-height:140px;height:100%}' +
+      '.hub-root .hub-spark-fill .vz-spark,.hub-root .hub-spark-fill svg{width:100%!important;height:100%!important;min-height:120px;flex:1}' +
       '.hub-root .hub-mag3{display:grid;grid-template-columns:1fr;gap:14px;flex:1;min-height:0;align-content:stretch;' +
         'grid-template-rows:repeat(3,minmax(0,1fr));padding:8px 0}' +
       '.hub-root .hub-mag3 .row{display:flex;align-items:center;gap:8px;font-size:11px}' +
@@ -295,11 +296,14 @@
       var cmtHtml = buildInstComment(inst, hist, total);
       var trendPanel = '<div class="hub-sec"><h4>法人資金趨勢與評論</h4><div class="hub-spark-fill">' +
         (V && sparkVals.length >= 2
-          ? V.sparkLine(sparkVals, { color: sparkCol, h: 220, w: 420 })
+          ? V.sparkLine(sparkVals, {
+              color: sparkCol, h: 220, w: 420,
+              xUnit: '日', yUnit: '億', yDigits: 1
+            })
           : (sparkVals.length ? spark(sparkVals) : '<div class="hub-empty">尚無本機法人歷史</div>')) +
         '</div>' +
         '<div class="hub-inst-cmt">' + cmtHtml + '</div>' +
-        '<div class="hub-note">近 ' + hist.length + ' 日' +
+        '<div class="hub-note">近 ' + hist.length + ' 日 · X：交易日 · Y：合計買賣超（億）' +
           (inst.date ? ' · 最新法人日 ' + inst.date : '') + '</div></div>';
       var body = $('hub-inst-body');
       if (!body) return;
@@ -653,13 +657,13 @@
           var hs = chrono.map(function (r) { return r.health; });
           var rs = chrono.map(function (r) { return r.risk; });
           var hSp = hs.filter(function (v) { return v != null && isFinite(v); }).length >= 2
-            ? V.sparkLine(hs, { color: 'var(--gold)' }) : '';
+            ? V.sparkLine(hs, { color: 'var(--gold)', xUnit: '日', yUnit: '分', yDigits: 0 }) : '';
           var rSp = rs.filter(function (v) { return v != null && isFinite(v); }).length >= 2
-            ? V.sparkLine(rs, { color: 'var(--cyan)' }) : '';
+            ? V.sparkLine(rs, { color: 'var(--cyan)', xUnit: '日', yUnit: '分', yDigits: 0 }) : '';
           if (hSp || rSp) {
             histPanel += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px;flex:0 0 auto">' +
-              (hSp ? '<div><div class="hub-note">健康</div>' + hSp + '</div>' : '') +
-              (rSp ? '<div><div class="hub-note">風險</div>' + rSp + '</div>' : '') + '</div>';
+              (hSp ? '<div><div class="hub-note">健康（X：日 · Y：分）</div>' + hSp + '</div>' : '') +
+              (rSp ? '<div><div class="hub-note">風險（X：日 · Y：分）</div>' + rSp + '</div>' : '') + '</div>';
           }
         }
         histPanel += '<div class="hub-fill"><table><tr><th>日期</th><th>健康</th><th>風險</th><th>總分</th><th>狀態</th></tr>';

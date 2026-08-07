@@ -116,8 +116,9 @@
       '#pl-root .pl-sec-tog button{padding:1px 6px;border:1px solid var(--border);border-radius:3px;background:transparent;' +
         'color:var(--tlo);font-size:8px;font-family:inherit;cursor:pointer}' +
       '#pl-root .pl-sec-tog button.on{border-color:var(--gold-m);color:var(--gold);background:var(--gold-s)}' +
-      '#pl-root .pl-spark{flex:1;min-height:40px;margin:3px 0;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:2px 4px}' +
-      '#pl-root .pl-spark svg{width:100%;height:100%;display:block}' +
+      '#pl-root .pl-spark{flex:1;min-height:56px;margin:3px 0;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:2px 4px;display:flex;flex-direction:column}' +
+      '#pl-root .pl-spark .vz-spark-ax{flex:1;min-height:48px}' +
+      '#pl-root .pl-spark svg{width:100%;height:100%;display:block;min-height:28px}' +
       /* inst：上方數字、下方趨勢＋評論（不再重複量柱） */
       '#pl-root .pl-inst4{display:grid;grid-template-columns:1fr 1fr;gap:3px;flex:0 0 auto}' +
       '#pl-root .pl-inst4 .c{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px;text-align:center}' +
@@ -127,8 +128,9 @@
         'border-radius:5px;padding:3px 5px;display:flex;flex-direction:column;overflow:hidden}' +
       '#pl-root .pl-inst-trend .lab{font-size:8px;color:var(--tlo);flex:0 0 auto;margin-bottom:2px;' +
         'display:flex;justify-content:space-between;gap:6px}' +
-      '#pl-root .pl-inst-trend .chart{flex:1;min-height:36px}' +
-      '#pl-root .pl-inst-trend .chart .vz-spark,#pl-root .pl-inst-trend .chart svg{width:100%!important;height:100%!important;min-height:36px}' +
+      '#pl-root .pl-inst-trend .chart{flex:1;min-height:44px}' +
+      '#pl-root .pl-inst-trend .chart .vz-spark-ax{height:100%;min-height:44px}' +
+      '#pl-root .pl-inst-trend .chart .vz-spark,#pl-root .pl-inst-trend .chart svg{width:100%!important;height:100%!important;min-height:28px}' +
       '#pl-root .pl-inst-cmt{font-size:9px;line-height:1.45;color:var(--text);margin-top:2px;flex:0 0 auto;' +
         'max-height:4.4em;overflow:hidden}' +
       '#pl-root .pl-inst-cmt b{color:var(--gold);font-weight:700}' +
@@ -152,8 +154,9 @@
         'border-radius:5px;padding:3px 5px;display:flex;flex-direction:column;overflow:hidden}' +
       '#pl-root .pl-bd-trend .lab{font-size:8px;color:var(--tlo);flex:0 0 auto;margin-bottom:2px;' +
         'display:flex;justify-content:space-between;gap:6px}' +
-      '#pl-root .pl-bd-trend .chart{flex:1;min-height:32px}' +
-      '#pl-root .pl-bd-trend .chart .vz-spark,#pl-root .pl-bd-trend .chart svg{width:100%!important;height:100%!important;min-height:32px}' +
+      '#pl-root .pl-bd-trend .chart{flex:1;min-height:40px}' +
+      '#pl-root .pl-bd-trend .chart .vz-spark-ax{height:100%;min-height:40px}' +
+      '#pl-root .pl-bd-trend .chart .vz-spark,#pl-root .pl-bd-trend .chart svg{width:100%!important;height:100%!important;min-height:24px}' +
       '#pl-root .pl-bd-cmt{font-size:9px;line-height:1.45;color:var(--text);margin-top:2px;flex:0 0 auto;' +
         'max-height:4.4em;overflow:hidden}' +
       '#pl-root .pl-bd-cmt b{color:var(--gold);font-weight:700}' +
@@ -412,6 +415,14 @@
     if (!closes || closes.length < 2) {
       return '<div class="pl-note" style="padding:8px">近 20 日走勢尚在累積（同步資料後顯示）</div>';
     }
+    var V = window.Viz;
+    if (V && V.sparkLine) {
+      return V.sparkLine(closes, {
+        color: closes[closes.length - 1] >= closes[0] ? 'var(--red)' : 'var(--green)',
+        h: 56, w: 280,
+        xUnit: '日', yUnit: '點', yDigits: 0
+      });
+    }
     var lo = Math.min.apply(null, closes), hi = Math.max.apply(null, closes);
     var span = (hi - lo) || 1;
     var w = 280, h = 48, pad = 2;
@@ -420,9 +431,7 @@
       var y = pad + (1 - (c - lo) / span) * (h - pad * 2);
       return x.toFixed(1) + ',' + y.toFixed(1);
     }).join(' ');
-    var last = closes[closes.length - 1];
-    var first = closes[0];
-    var up = last >= first;
+    var up = closes[closes.length - 1] >= closes[0];
     return '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
       '<polyline fill="none" stroke="' + (up ? 'var(--red)' : 'var(--green)') +
       '" stroke-width="2" points="' + pts + '"/></svg>';
@@ -644,7 +653,10 @@
         if (V && totals.filter(function (v) { return v != null && isFinite(v); }).length >= 2) {
           var last = totals[totals.length - 1];
           var col = last >= 0 ? 'var(--red)' : 'var(--green)';
-          chart.innerHTML = V.sparkLine(totals, { color: col, h: 56, w: 280 });
+          chart.innerHTML = V.sparkLine(totals, {
+            color: col, h: 56, w: 280,
+            xUnit: '日', yUnit: '億', yDigits: 1
+          });
         } else if (totals.length) {
           chart.innerHTML = (V ? V.sparkBars(totals) : '<div class="pl-note">序列不足</div>');
         } else {
@@ -652,7 +664,7 @@
         }
       }
       if (meta) {
-        meta.textContent = (rows.length ? ('近 ' + rows.length + ' 日') : '無序列') +
+        meta.textContent = (rows.length ? ('近 ' + rows.length + ' 日 · Y：億') : '無序列') +
           (i.date ? ' · ' + i.date : '');
       }
       if (cmt) cmt.innerHTML = buildInstComment(i, rows);
@@ -789,7 +801,10 @@
         if (V && usable.length >= 2) {
           var last = usable[usable.length - 1];
           var col = last >= 1 ? 'var(--red)' : 'var(--green)';
-          chart.innerHTML = V.sparkLine(usable, { color: col, h: 48, w: 280 });
+          chart.innerHTML = V.sparkLine(usable, {
+            color: col, h: 48, w: 280,
+            xUnit: '日', yUnit: '倍', yDigits: 2
+          });
         } else if (usable.length) {
           chart.innerHTML = V ? V.sparkBars(usable.map(function (v) { return v - 1; })) :
             '<div class="pl-note">序列不足</div>';
@@ -798,7 +813,7 @@
         }
       }
       if (meta) {
-        meta.textContent = (rows.length ? ('近 ' + rows.length + ' 日') : '無序列') +
+        meta.textContent = (rows.length ? ('近 ' + rows.length + ' 日 · Y：倍') : '無序列') +
           (st.lsRatio != null ? ' · 今 ' + Number(st.lsRatio).toFixed(2) : '');
       }
       if (cmt) cmt.innerHTML = buildBreadthComment(st, rows);
@@ -1130,7 +1145,8 @@
       box.innerHTML = sparkSvg(closes);
       if (closes.length) {
         var last = closes[closes.length - 1];
-        box.title = '近 ' + closes.length + ' 日 · 最新收 ' + Number(last).toLocaleString('en-US', { maximumFractionDigits: 2 });
+        box.title = '加權近 ' + closes.length + ' 日 · X：日 · Y：點 · 最新收 ' +
+          Number(last).toLocaleString('en-US', { maximumFractionDigits: 2 });
       }
     });
 
@@ -1150,13 +1166,13 @@
       var sparks = '';
       if (V) {
         var hSpark = healthSeries.filter(function (v) { return v != null && isFinite(v); }).length >= 2
-          ? V.sparkLine(healthSeries, { color: 'var(--gold)' }) : '';
+          ? V.sparkLine(healthSeries, { color: 'var(--gold)', xUnit: '日', yUnit: '分', yDigits: 0 }) : '';
         var rSpark = riskSeries.filter(function (v) { return v != null && isFinite(v); }).length >= 2
-          ? V.sparkLine(riskSeries, { color: 'var(--cyan)' }) : '';
+          ? V.sparkLine(riskSeries, { color: 'var(--cyan)', xUnit: '日', yUnit: '分', yDigits: 0 }) : '';
         if (hSpark || rSpark) {
           sparks = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">' +
-            (hSpark ? '<div><div style="font-size:9px;color:var(--tlo)">動能</div>' + hSpark + '</div>' : '') +
-            (rSpark ? '<div><div style="font-size:9px;color:var(--tlo)">風險</div>' + rSpark + '</div>' : '') +
+            (hSpark ? '<div><div style="font-size:9px;color:var(--tlo)">動能（X：日 · Y：分）</div>' + hSpark + '</div>' : '') +
+            (rSpark ? '<div><div style="font-size:9px;color:var(--tlo)">風險（X：日 · Y：分）</div>' + rSpark + '</div>' : '') +
             '</div>';
         }
       }
