@@ -95,17 +95,20 @@
         'grid-template-columns:repeat(2,minmax(0,1fr))}' +
       '.hub-root .hub-zone.z-3{grid-template-columns:repeat(3,minmax(0,1fr))}' +
       '.hub-root .hub-zone.z-4{grid-template-columns:repeat(4,minmax(0,1fr))}' +
-      '.hub-root .hub-zone.z-fill{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));align-content:start;overflow:auto}' +
+      '.hub-root .hub-zone.z-fill{grid-template-columns:repeat(auto-fill,minmax(128px,1fr));' +
+        'align-content:stretch;grid-auto-rows:minmax(78px,1fr);overflow:auto;flex:1;min-height:0}' +
       '.hub-root .hub-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;' +
         'min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%;margin:0}' +
       '.hub-root .hub-sec h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;' +
         'display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;gap:4px}' +
       '.hub-root .hub-sec > .hub-fill{flex:1;min-height:0;overflow:auto}' +
-      '.hub-root .hub-card{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:5px 7px;min-width:0;overflow:hidden}' +
-      '.hub-root .hub-card .k{font-size:8px;color:var(--tlo);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '.hub-root .hub-card .v{font-size:14px;font-weight:800;color:var(--thi);margin-top:1px;line-height:1.15}' +
-      '.hub-root .hub-card .chg{font-size:10px;font-weight:700;margin-top:2px}' +
-      '.hub-root .hub-card .bar{margin-top:3px}' +
+      '.hub-root .hub-card{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:8px 9px;min-width:0;' +
+        'overflow:hidden;display:flex;flex-direction:column;justify-content:center;height:100%;box-sizing:border-box}' +
+      '.hub-root .hub-card .k{font-size:9px;color:var(--tlo);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '.hub-root .hub-card .v{font-size:18px;font-weight:800;color:var(--thi);margin-top:2px;line-height:1.15}' +
+      '.hub-root .hub-card .chg{font-size:11px;font-weight:700;margin-top:3px}' +
+      '.hub-root .hub-card .bar{margin-top:4px}' +
+      '.hub-root .hub-card .bar .vz-rowbar{height:6px;max-width:100%;display:block;width:100%}' +
       '.hub-root .up{color:var(--red)}.hub-root .dn{color:var(--green)}.hub-root .flat{color:var(--tlo)}' +
       '.hub-root table{width:100%;border-collapse:collapse;font-size:10px}' +
       '.hub-root th,.hub-root td{padding:2px 3px;border-bottom:1px solid var(--border);text-align:right}' +
@@ -116,14 +119,17 @@
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '.hub-root .hub-spark{display:flex;align-items:flex-end;gap:1px;height:40px;margin-top:2px;flex:1;min-height:32px}' +
       '.hub-root .hub-spark i{flex:1;background:var(--cyan);opacity:.75;border-radius:1px 1px 0 0;min-width:2px}' +
-      '.hub-root .hub-spark-fill{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center}' +
-      '.hub-root .hub-spark-fill .vz-spark,.hub-root .hub-spark-fill svg{width:100%!important;height:100%!important;min-height:96px;max-height:160px}' +
-      '.hub-root .hub-mag3{display:grid;grid-template-columns:1fr;gap:10px;flex:1;min-height:0;align-content:center}' +
-      '.hub-root .hub-mag3 .row{display:flex;align-items:center;gap:6px;font-size:10px}' +
-      '.hub-root .hub-mag3 .row .lbl{width:28px;flex-shrink:0;color:var(--tlo);font-size:9px}' +
-      '.hub-root .hub-mag3 .row .val{width:56px;flex-shrink:0;text-align:right;font-weight:700;font-size:11px}' +
+      '.hub-root .hub-spark-fill{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:stretch}' +
+      '.hub-root .hub-spark-fill .vz-spark,.hub-root .hub-spark-fill svg{width:100%!important;height:100%!important;min-height:140px;flex:1}' +
+      '.hub-root .hub-mag3{display:grid;grid-template-columns:1fr;gap:14px;flex:1;min-height:0;align-content:stretch;' +
+        'grid-template-rows:repeat(3,minmax(0,1fr));padding:8px 0}' +
+      '.hub-root .hub-mag3 .row{display:flex;align-items:center;gap:8px;font-size:11px}' +
+      '.hub-root .hub-mag3 .row .lbl{width:32px;flex-shrink:0;color:var(--tlo);font-size:10px}' +
+      '.hub-root .hub-mag3 .row .val{width:64px;flex-shrink:0;text-align:right;font-weight:700;font-size:13px}' +
       '.hub-root .hub-mag3 .row .bar{flex:1;min-width:0}' +
-      '.hub-root .hub-mag3 .vz-mag .vz-track{height:8px}' +
+      '.hub-root .hub-mag3 .vz-mag .vz-track{height:12px}' +
+      '.hub-root .hub-dash.hub-cols-wide-left{grid-template-rows:minmax(0,1fr);' +
+        'grid-template-columns:minmax(0,1.7fr) minmax(0,.9fr)}' +
       '.hub-root .badge{display:inline-block;padding:0 6px;border-radius:999px;font-size:8px;font-weight:700}' +
       '.hub-root .badge.ok{background:var(--gbg);color:var(--green);border:1px solid var(--gbdr)}' +
       '.hub-root .badge.warn{background:rgba(251,146,60,.12);color:var(--orange);border:1px solid rgba(251,146,60,.35)}' +
@@ -176,9 +182,9 @@
     bindCommon(el);
     Promise.all([
       jget('/marketflow'),
-      jget('/inst-rank?who=foreign&side=buy&n=8'),
-      jget('/inst-rank?who=foreign&side=sell&n=8'),
-      jget('/pulse/history?kind=institutional&n=20')
+      jget('/inst-rank?who=foreign&side=buy&n=18'),
+      jget('/inst-rank?who=foreign&side=sell&n=18'),
+      jget('/pulse/history?kind=institutional&n=40')
     ]).then(function (arr) {
       var V = window.Viz;
       var mf = arr[0] || {};
@@ -221,7 +227,7 @@
         '<div class="row"><span class="lbl">自營</span><span class="val ' + tw(inst.dealer) + '">' + yi(inst.dealer) + '</span><span class="bar">' + dBar + '</span></div>' +
         '</div></div>';
       var trendPanel = '<div class="hub-sec"><h4>法人資金趨勢</h4><div class="hub-spark-fill">' +
-        (V ? V.sparkLine(sparkVals, { color: 'var(--gold)', h: 120, w: 320 }) : spark(sparkVals)) +
+        (V ? V.sparkLine(sparkVals, { color: 'var(--gold)', h: 220, w: 420 }) : spark(sparkVals)) +
         '</div><div class="hub-note">日數 ' + hist.length + (inst.date ? ' · 最新法人日 ' + inst.date : '') + '</div></div>';
       var body = $('hub-inst-body');
       if (!body) return;
@@ -386,10 +392,13 @@
         if (classify(r) === 'bear') bears.push(r);
         else bulls.push(r);
       });
-      var bullRows = bulls.slice(0, 24).map(rowHtml).join('') ||
+      var bullRows = bulls.slice(0, 40).map(rowHtml).join('') ||
         '<tr><td colspan="5">目前無偏多訊號</td></tr>';
-      var bearRows = bears.slice(0, 24).map(rowHtml).join('') ||
+      var bearRows = bears.slice(0, 40).map(rowHtml).join('') ||
         '<tr><td colspan="5">目前無偏空訊號</td></tr>';
+      var dashCls = (!bears.length && bulls.length) ? 'hub-cols-wide-left'
+        : (!bulls.length && bears.length) ? 'hub-cols-2'
+        : 'hub-cols-2';
       body.innerHTML =
         '<div class="hub-strip">' +
           '<div class="cell"><div class="k">訊號總數</div><div class="v">' + list.length + '</div></div>' +
@@ -397,11 +406,11 @@
           '<div class="cell"><div class="k">偏空</div><div class="v dn">' + bears.length + '</div></div>' +
           '<div class="cell"><div class="k">來源</div><div class="v">/focus</div><div class="s">點列開圖表</div></div>' +
         '</div>' +
-        '<div class="hub-dash hub-cols-2">' +
-          '<div class="hub-sec"><h4>偏多訊號</h4><div class="hub-fill"><table>' +
+        '<div class="hub-dash ' + dashCls + '">' +
+          '<div class="hub-sec"><h4>偏多訊號 · ' + bulls.length + '</h4><div class="hub-fill"><table>' +
             '<tr><th>代號</th><th>名稱</th><th>方向</th><th>分數</th><th>說明</th></tr>' +
             bullRows + '</table></div></div>' +
-          '<div class="hub-sec"><h4>偏空訊號</h4><div class="hub-fill"><table>' +
+          '<div class="hub-sec"><h4>偏空訊號 · ' + bears.length + '</h4><div class="hub-fill"><table>' +
             '<tr><th>代號</th><th>名稱</th><th>方向</th><th>分數</th><th>說明</th></tr>' +
             bearRows + '</table></div></div>' +
         '</div>';

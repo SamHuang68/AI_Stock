@@ -59,6 +59,8 @@
         'border-radius:4px;padding:3px 6px;font-family:inherit;font-size:10px}' +
       '#sc-root #sc-msg{font-size:9px;color:var(--tlo);min-height:14px;margin:0 0 3px;flex:0 0 auto}' +
       '#sc-root #sc-results{flex:1;min-height:0;overflow:auto;border:1px solid var(--border);border-radius:6px;background:var(--bg2)}' +
+      '#sc-root #sc-results .sc-empty{padding:24px 12px;text-align:center;color:var(--tlo);font-size:11px;line-height:1.5}' +
+      '#sc-root #sc-results .sc-empty b{color:var(--gold);font-weight:700}' +
       '#sc-root .sc-rtop{display:flex;align-items:center;gap:8px;padding:4px 6px;position:sticky;top:0;' +
         'background:var(--bg2);border-bottom:1px solid var(--border);z-index:1}' +
       '#sc-root table{width:100%;border-collapse:collapse;font-size:10px}' +
@@ -315,8 +317,8 @@
             '</div>' +
             '<div class="sc-main">' +
               '<div id="sc-msg"></div>' +
-              '<div id="sc-results"></div>' +
-              '<div class="sc-note">/screen3 · 空白=不限 · ⚠ 非投資建議</div>' +
+              '<div id="sc-results"><div class="sc-empty">已套用「趨勢多頭」條件<br>按 <b>掃描</b> 或稍候自動執行</div></div>' +
+              '<div class="sc-note">/screen3 · 空白=不限 · 非投資建議</div>' +
             '</div>' +
           '</div>' +
         '</div>';
@@ -340,6 +342,14 @@
     ensureMount();
     loadMeta();
     if (lastResults.length) renderResults(lastResults);
+    else {
+      /* 進頁自動掃一次，避免結果區空白 */
+      setTimeout(function () {
+        if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'scan' && !lastResults.length) {
+          scan();
+        }
+      }, 350);
+    }
   }
 
   window.ScanV5 = {
