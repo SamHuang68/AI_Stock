@@ -755,6 +755,49 @@ def _h15_us10y(years: int = 25) -> List[Dict[str, Any]]:
     return pts
 
 
+def _bls_unrate(years: int = 25) -> List[Dict[str, Any]]:
+    """BLS 失業率（LNS14000000，季節調整）。公開 API 每次最多約 10 年。"""
+    end_y = date.today().year
+    start_y = max(1980, end_y - years - 1)
+    pts: List[Dict[str, Any]] = []
+    y = start_y
+    while y <= end_y:
+        y2 = min(y + 9, end_y)
+        payload = json.dumps({
+            'seriesid': ['LNS14000000'],
+            'startyear': str(y),
+            'endyear': str(y2),
+        }).encode()
+        try:
+            req = urllib.request.Request(
+                'https://api.bls.gov/publicAPI/v2/timeseries/data/',
+                data=payload,
+                headers={**UA_BROWSER, 'Content-Type': 'application/json'},
+            )
+            with urllib.request.urlopen(req, timeout=40) as resp:
+                d = json.loads(resp.read().decode('utf-8', 'replace'))
+            series = ((d.get('Results') or {}).get('series') or [{}])[0]
+            for row in series.get('data') or []:
+                per = str(row.get('period') or '')
+                if not per.startswith('M'):
+                    continue
+                try:
+                    yy = int(row['year'])
+                    mm = int(per[1:])
+                    pts.append({
+                        'date': f'{yy:04d}-{mm:02d}-01',
+                        'value': float(row['value']),
+                    })
+                except Exception:
+                    pass
+        except Exception as e:
+            print('[macro_track] BLS UNRATE', y, e)
+        y = y2 + 1
+        time.sleep(0.15)
+    by_d = {p['date']: p for p in pts}
+    return [by_d[k] for k in sorted(by_d.keys())]
+
+
 def _bls_cpi_yoy(years: int = 25) -> List[Dict[str, Any]]:
     """BLS CPI-U NSA（CUUR0000SA0）→ 年增率 %。公開 API 每次最多約 10 年，分段抓。"""
     end_y = date.today().year
@@ -859,6 +902,14 @@ def _resolve_series_points(
             live = _bls_cpi_yoy(years)
             if live:
                 note = 'BLS CPI-U NSA YoY'
+        elif fb == 'bls_unrate':
+            live = _bls_unrate(years)
+            if live:
+                note = 'BLS UNRATE'
+        elif fb == 'yahoo' and s.get('symbol'):
+            live = _yahoo_closes(s['symbol'], years=years, adj=False)
+            if live:
+                note = f"Yahoo {s['symbol']}"
 
     if live:
         # merge: prefer live, keep older seed points not in live

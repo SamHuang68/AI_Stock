@@ -68,33 +68,76 @@ def _save_draw_store(d):
     with open(DRAW_STORE_FILE, 'w', encoding='utf-8') as f:
         json.dump(d, f, ensure_ascii=False)
 
-# v3.9 P4: 總經數據 — 美國走 FRED「免 API key」公開 CSV 下載端點 (fredgraph.csv)。
-#   台灣 CPI 走 FRED 的 OECD 序列(避開 .tw 直連)；景氣對策信號走國發會 best-effort。
+# v3.9 P4: 總經數據 — FRED 優先；台灣家用／雲端常連不上 → Yahoo／BLS／NY Fed／本地 seed 備援。
 _macro_cache = {}   # {series_key: payload_bytes}
 _macro_fail_until = {}  # series_key -> unix ts；失敗後短暫跳過，避免 /pulse 反覆卡死
+# seed/fallback/symbol 對齊 macro_track._resolve_series_points
 MACRO_SERIES = {
-    'us10y':            {'p': 'fred', 'id': 'DGS10',             'label': '美國10年期公債殖利率', 'unit': '%'},
-    'us2y':             {'p': 'fred', 'id': 'DGS2',              'label': '美國2年期公債殖利率',  'unit': '%'},
-    'spread10y2y':      {'p': 'fred', 'id': 'T10Y2Y',           'label': '美10Y-2Y利差(倒掛<0)', 'unit': '%'},
-    'us_cpi':           {'p': 'fred', 'id': 'CPIAUCSL',          'label': '美國CPI指數',          'unit': ''},
-    'us_cpi_yoy':       {'p': 'fred', 'id': 'CPALTT01USM659N',   'label': '美國CPI年增率(YoY)',   'unit': '%'},
-    'fedfunds':         {'p': 'fred', 'id': 'FEDFUNDS',          'label': '美國聯邦基金利率',     'unit': '%'},
-    'unrate':           {'p': 'fred', 'id': 'UNRATE',            'label': '美國失業率',           'unit': '%'},
-    'baml_ig':          {'p': 'fred', 'id': 'BAMLCC0A0CMTRIV',   'label': '美林投資級公司債總報酬', 'unit': 'Index'},
-    'baml_hy':          {'p': 'fred', 'id': 'BAMLHY0A0HYMTRIV',   'label': '美林高收益公司債總報酬', 'unit': 'Index'},
-    'tw_discount_rate': {'p': 'fred', 'id': 'INTDSRTWM193N',     'label': '台灣央行重貼現率',     'unit': '%'},
+    'us10y':            {'p': 'fred', 'id': 'DGS10', 'label': '美國10年期公債殖利率', 'unit': '%',
+                         'seed': 'us10y.csv', 'fallback': 'h15_10y', 'symbol': '^TNX'},
+    'us2y':             {'p': 'fred', 'id': 'DGS2', 'label': '美國2年期公債殖利率', 'unit': '%',
+                         'seed': 'us2y.csv', 'fallback': 'yahoo', 'symbol': '^IRX'},  # 近似：3M 短率代理
+    'us5y':             {'p': 'yahoo', 'id': '^FVX', 'label': '美國5年期公債殖利率', 'unit': '%',
+                         'seed': 'us5y.csv', 'symbol': '^FVX'},
+    'us30y':            {'p': 'yahoo', 'id': '^TYX', 'label': '美國30年期公債殖利率', 'unit': '%',
+                         'seed': 'us30y.csv', 'symbol': '^TYX'},
+    'us_tbill_3m':      {'p': 'yahoo', 'id': '^IRX', 'label': '美國3個月國庫券殖利率', 'unit': '%',
+                         'seed': 'us_tbill_3m.csv', 'symbol': '^IRX'},
+    'spread10y2y':      {'p': 'fred', 'id': 'T10Y2Y', 'label': '美10Y-2Y利差(倒掛<0)', 'unit': '%',
+                         'seed': 'spread10y2y.csv'},
+    'us_cpi':           {'p': 'fred', 'id': 'CPIAUCSL', 'label': '美國CPI指數', 'unit': ''},
+    'us_cpi_yoy':       {'p': 'fred', 'id': 'CPALTT01USM659N', 'label': '美國CPI年增率(YoY)', 'unit': '%',
+                         'seed': 'us_cpi_yoy.csv', 'fallback': 'bls_cpi_yoy'},
+    'fedfunds':         {'p': 'fred', 'id': 'FEDFUNDS', 'label': '美國聯邦基金利率', 'unit': '%',
+                         'seed': 'fedfunds.csv', 'fallback': 'nyfed_effr'},
+    'unrate':           {'p': 'fred', 'id': 'UNRATE', 'label': '美國失業率', 'unit': '%',
+                         'seed': 'unrate.csv', 'fallback': 'bls_unrate'},
+    'move':             {'p': 'yahoo', 'id': '^MOVE', 'label': 'MOVE 美債波動指數', 'unit': '',
+                         'seed': 'move.csv', 'symbol': '^MOVE'},
+    'vix':              {'p': 'yahoo', 'id': '^VIX', 'label': 'VIX 恐慌指數', 'unit': '',
+                         'seed': 'vix.csv', 'symbol': '^VIX'},
+    'dxy':              {'p': 'yahoo', 'id': 'DX-Y.NYB', 'label': '美元指數 DXY', 'unit': '',
+                         'seed': 'dxy.csv', 'symbol': 'DX-Y.NYB'},
+    'wti':              {'p': 'yahoo', 'id': 'CL=F', 'label': 'WTI 原油', 'unit': 'USD',
+                         'seed': 'wti.csv', 'symbol': 'CL=F'},
+    'gold':             {'p': 'yahoo', 'id': 'GC=F', 'label': '黃金期貨', 'unit': 'USD',
+                         'seed': 'gold.csv', 'symbol': 'GC=F'},
+    'copper':           {'p': 'yahoo', 'id': 'HG=F', 'label': '銅期貨', 'unit': 'USD',
+                         'seed': 'copper.csv', 'symbol': 'HG=F'},
+    'btc':              {'p': 'yahoo', 'id': 'BTC-USD', 'label': '比特幣', 'unit': 'USD',
+                         'seed': 'btc.csv', 'symbol': 'BTC-USD'},
+    'baml_ig':          {'p': 'fred', 'id': 'BAMLCC0A0CMTRIV', 'label': '美林投資級公司債總報酬', 'unit': 'Index',
+                         'seed': 'baml_ig.csv', 'fallback': 'yahoo_adj', 'symbol': 'LQD'},
+    'baml_hy':          {'p': 'fred', 'id': 'BAMLHY0A0HYMTRIV', 'label': '美林高收益公司債總報酬', 'unit': 'Index',
+                         'seed': 'baml_hy.csv', 'fallback': 'yahoo_adj', 'symbol': 'HYG'},
+    'tw_discount_rate': {'p': 'fred', 'id': 'INTDSRTWM193N', 'label': '台灣央行重貼現率', 'unit': '%'},
     # CBC 利率走廊（種子／官網；FRED INTDSRTWM193N 已 404）
-    'tw_discount':      {'p': 'cbc',  'id': 'discount',          'label': '台灣重貼現率',         'unit': '%'},
-    'tw_secured_rate':  {'p': 'cbc',  'id': 'secured',           'label': '台灣擔保放款融通利率', 'unit': '%'},
-    'tw_short_rate':    {'p': 'cbc',  'id': 'short',             'label': '台灣短期融通利率',     'unit': '%'},
-    'tw_cpi':           {'p': 'twcpi',                           'label': '台灣CPI指數',          'unit': ''},
-    'tw_light':         {'p': 'ndc',                             'label': '台灣景氣對策信號(分數)', 'unit': '分'},
+    'tw_discount':      {'p': 'cbc',  'id': 'discount', 'label': '台灣重貼現率', 'unit': '%'},
+    'tw_secured_rate':  {'p': 'cbc',  'id': 'secured', 'label': '台灣擔保放款融通利率', 'unit': '%'},
+    'tw_short_rate':    {'p': 'cbc',  'id': 'short', 'label': '台灣短期融通利率', 'unit': '%'},
+    'tw_cpi':           {'p': 'twcpi', 'label': '台灣CPI指數', 'unit': ''},
+    'tw_light':         {'p': 'ndc', 'label': '台灣景氣對策信號(分數)', 'unit': '分'},
 }
+
+# 國際頁「經濟指標」預設清單（順序即顯示順序）
+MACRO_ECONOMY_KEYS = (
+    'fedfunds', 'us10y', 'us5y', 'us30y', 'us_tbill_3m',
+    'unrate', 'us_cpi_yoy', 'vix', 'move', 'dxy',
+    'wti', 'gold', 'copper', 'btc',
+    'baml_hy', 'tw_discount',
+)
 
 def _fetch_fred_csv(series_id, cosd, timeout=8, retries=1):
     """FRED 免 key CSV：https://fred.stlouisfed.org/graph/fredgraph.csv?id=ID&cosd=YYYY-MM-DD
        回 [{date, value}]；缺值以 '.' 表示，略過。
-       timeout/retries 可調：/pulse 路徑用短逾時，避免單源拖垮總覽刷新。"""
+       timeout/retries 可調：/pulse 路徑用短逾時，避免單源拖垮總覽刷新。
+       若 macro_track 已熔斷 FRED，直接跳過避免空等。"""
+    try:
+        import macro_track as _mt
+        if _mt.fred_circuit_open():
+            return []
+    except Exception:
+        pass
     url = f'https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}&cosd={cosd}'
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'text/csv'})
     text = None
@@ -111,6 +154,13 @@ def _fetch_fred_csv(series_id, cosd, timeout=8, retries=1):
             if attempt + 1 < attempts:
                 time.sleep(0.35 * (attempt + 1))
     if text is None:
+        # 通知 macro_track 熔斷，後續改走備援
+        try:
+            import macro_track as _mt
+            _mt._FRED_CIRCUIT_OPEN = True
+            _mt._FRED_CIRCUIT_REASON = f'{type(last_err).__name__}: {last_err}'
+        except Exception:
+            pass
         raise last_err if last_err else RuntimeError('fred fetch failed')
     pts = []
     for ln in text.splitlines()[1:]:           # 跳過表頭
@@ -125,6 +175,135 @@ def _fetch_fred_csv(series_id, cosd, timeout=8, retries=1):
         except Exception:
             pass
     return pts
+
+
+def _macro_resolve_points(series_key, years=10, force_live=False):
+    """統一解析 MACRO_SERIES：FRED／Yahoo／CBC／種子／BLS／NY Fed 備援。
+       回 (points, source_note)。"""
+    spec = MACRO_SERIES.get(series_key)
+    if not spec:
+        return [], 'unknown'
+    years = max(1, min(30, int(years or 10)))
+    prov = spec.get('p')
+    try:
+        import macro_track as mt
+    except Exception as e:
+        mt = None
+        print('[macro] import macro_track', e)
+
+    # Yahoo 直連（含 seed 合併）
+    if prov == 'yahoo' and mt is not None:
+        s = {
+            'source': 'yahoo',
+            'symbol': spec.get('symbol') or spec.get('id'),
+            'seed': spec.get('seed'),
+            'fallback': spec.get('fallback') or 'yahoo',
+        }
+        pts, note = mt._resolve_series_points(s, years, force_live=force_live)
+        return mt._filter_years(pts, years), note or f"Yahoo {s.get('symbol')}"
+
+    # FRED + seed/fallback（macro_track 路徑：種子秒開，force_live 才打網）
+    if prov == 'fred' and mt is not None and (spec.get('seed') or spec.get('fallback') or spec.get('symbol')):
+        s = {
+            'source': 'fred',
+            'fred': spec.get('id'),
+            'seed': spec.get('seed'),
+            'fallback': spec.get('fallback'),
+            'symbol': spec.get('symbol'),
+        }
+        pts, note = mt._resolve_series_points(s, years, force_live=force_live)
+        if pts:
+            return mt._filter_years(pts, years), note
+        # 最後嘗試 Yahoo 代號
+        if spec.get('symbol'):
+            ypts = mt._yahoo_closes(spec['symbol'], years=years)
+            if ypts:
+                return mt._filter_years(ypts, years), f"Yahoo {spec['symbol']}"
+        return [], note or 'empty'
+
+    # 既有專屬來源
+    if prov == 'twcpi':
+        pts = _fetch_tw_cpi(max(12, years * 12))
+        return pts, ('主計總處 PXWeb' if pts else 'twcpi-empty')
+    if prov == 'ndc':
+        pts = _fetch_tw_light()
+        return pts, ('國發會 NDC' if pts else 'ndc-empty')
+    if prov == 'cbc':
+        if mt is None:
+            return [], 'cbc-no-mt'
+        cbc = mt.load_cbc_daily()
+        key = spec.get('id') or series_key
+        pts = cbc.get(key, [])
+        if mt:
+            pts = mt._filter_years(pts, years)
+        return pts, ('CBC' if pts else 'cbc-empty')
+
+    # 純 FRED（無 seed）
+    if prov == 'fred':
+        from datetime import date as _date, timedelta as _td
+        cosd = (_date.today() - _td(days=years * 366)).strftime('%Y-%m-%d')
+        try:
+            pts = _fetch_fred_csv(spec['id'], cosd, timeout=3, retries=1)
+            return pts, (f'FRED {spec["id"]}' if pts else 'fred-empty')
+        except Exception as e:
+            return [], f'fred-fail:{e}'
+    return [], 'unsupported'
+
+
+def _macro_payload(series_key, years=10, force_live=False):
+    spec = MACRO_SERIES.get(series_key) or {}
+    pts, note = _macro_resolve_points(series_key, years=years, force_live=force_live)
+    out = {
+        'series': series_key,
+        'label': spec.get('label') or series_key,
+        'unit': spec.get('unit') or '',
+        'points': pts,
+        'source': note if pts and not str(note).startswith('seed:') else (note if pts else None),
+        'note': None if pts else (note or '無資料'),
+    }
+    if pts and str(note).startswith('seed:'):
+        out['source'] = note
+        out['note'] = '目前使用本機種子／快取；按同步可嘗試線上更新'
+    return out
+
+
+def _macro_economy_snapshot(years=5, force_live=False):
+    """國際頁經濟指標一次回傳最新值。"""
+    items = []
+    for key in MACRO_ECONOMY_KEYS:
+        if key not in MACRO_SERIES:
+            continue
+        payload = _macro_payload(key, years=years, force_live=force_live)
+        pts = payload.get('points') or []
+        last = pts[-1] if pts else None
+        prev = pts[-2] if len(pts) >= 2 else None
+        chg = None
+        if last and prev and prev.get('value') not in (None, 0):
+            try:
+                chg = float(last['value']) - float(prev['value'])
+            except Exception:
+                chg = None
+        items.append({
+            'key': key,
+            'label': payload.get('label'),
+            'unit': payload.get('unit') or '',
+            'value': None if not last else last.get('value'),
+            'date': None if not last else last.get('date'),
+            'prevValue': None if not prev else prev.get('value'),
+            'change': None if chg is None else round(chg, 4),
+            'source': payload.get('source'),
+            'ok': bool(last and last.get('value') is not None),
+            'note': payload.get('note'),
+        })
+    ok_n = sum(1 for x in items if x.get('ok'))
+    return {
+        'ok': ok_n > 0,
+        'years': years,
+        'updatedAt': time.strftime('%Y-%m-%dT%H:%M:%S'),
+        'counts': {'total': len(items), 'ok': ok_n},
+        'items': items,
+        'hint': 'FRED 不通時自動改 Yahoo／BLS／NY Fed／本機種子',
+    }
 
 _macro_debug = {}   # 解析失敗時放樣本，供前端 note 顯示給使用者
 
@@ -1560,9 +1739,9 @@ def _fetch_day_movers(n=8):
 
 
 def _macro_latest(series_key, years=10, timeout=8, retries=1, allow_fetch=True):
-    """讀 MACRO_SERIES 最後一點（走 _macro_cache，與 /macro/<key> 同源）。失敗回 None。
+    """讀 MACRO_SERIES 最後一點（走 _macro_cache／種子／備援，與 /macro/<key> 同源）。失敗回 None。
        /pulse 請用 timeout<=4、retries=1，避免 FRED 不通時拖垮總覽。"""
-    from datetime import date as _date, timedelta as _td
+    from datetime import date as _date
     spec = MACRO_SERIES.get(series_key)
     if not spec:
         return None
@@ -1576,36 +1755,30 @@ def _macro_latest(series_key, years=10, timeout=8, retries=1, allow_fetch=True):
         except Exception:
             d = None
     if d is None and allow_fetch:
-        # 失敗冷卻：同一系列短時間不重抓
         until = _macro_fail_until.get(ckey) or 0
         if until > time.time():
-            return None
-        cosd = (today - _td(days=years * 366)).strftime('%Y-%m-%d')
-        out = {
-            'series': series_key, 'label': spec['label'], 'unit': spec.get('unit', ''),
-            'points': [], 'source': None, 'note': None,
-        }
-        try:
-            if spec['p'] == 'fred':
-                out['points'] = _fetch_fred_csv(spec['id'], cosd, timeout=timeout, retries=retries)
-                out['source'] = f'FRED {spec["id"]}'
-            elif spec['p'] == 'twcpi':
-                out['points'] = _fetch_tw_cpi(max(12, years * 12))
-                out['source'] = '主計總處 PXWeb' if out['points'] else None
-            elif spec['p'] == 'ndc':
-                out['points'] = _fetch_tw_light()
-                out['source'] = '國發會 NDC' if out['points'] else None
-        except Exception as e:
-            out['note'] = str(e)
-            _macro_fail_until[ckey] = time.time() + 600  # 10 分鐘內略過
-        if out['points']:
-            body = json.dumps(out, ensure_ascii=False).encode()
-            _macro_cache[ckey] = body
-            _macro_fail_until.pop(ckey, None)
-            d = out
+            # 冷卻期間仍嘗試種子秒開（force_live=False）
+            try:
+                d = _macro_payload(series_key, years=years, force_live=False)
+                if not (d.get('points') or []):
+                    return None
+            except Exception:
+                return None
         else:
-            _macro_fail_until[ckey] = time.time() + 600
-            return None
+            try:
+                # pulse 路徑不 force_live：有種子秒回；無種子才走 Yahoo／BLS
+                d = _macro_payload(series_key, years=years, force_live=False)
+            except Exception as e:
+                _macro_fail_until[ckey] = time.time() + 300
+                print('[macro] latest', series_key, e)
+                return None
+            if d.get('points'):
+                body = json.dumps(d, ensure_ascii=False).encode()
+                _macro_cache[ckey] = body
+                _macro_fail_until.pop(ckey, None)
+            else:
+                _macro_fail_until[ckey] = time.time() + 300
+                return None
     pts = (d or {}).get('points') or []
     if not pts:
         return None
@@ -5741,6 +5914,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             except Exception as e:
                 self._err('macro refresh failed: ' + str(e), 500); return
 
+        qs = parse_qs(urlparse(self.path).query)
         if series == '' or series == 'list':
             cat = [{'key': k, 'label': v['label'], 'unit': v.get('unit', ''), 'provider': v['p']}
                    for k, v in MACRO_SERIES.items()]
@@ -5749,56 +5923,47 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 charts = mt.list_charts()
             except Exception:
                 charts = []
-            self._ok(json.dumps({'series': cat, 'charts': charts}, ensure_ascii=False).encode()); return
+            self._ok(json.dumps({'series': cat, 'charts': charts,
+                                 'economyKeys': list(MACRO_ECONOMY_KEYS)}, ensure_ascii=False).encode()); return
+        if series == 'economy':
+            yrs = qs.get('years', ['5'])[0]
+            try:
+                yrs = max(1, min(30, int(yrs)))
+            except Exception:
+                yrs = 5
+            force = (qs.get('refresh') or ['0'])[0] in ('1', 'true', 'yes')
+            try:
+                snap = _macro_economy_snapshot(years=yrs, force_live=force)
+            except Exception as e:
+                print('[macro] economy', e)
+                snap = {'ok': False, 'error': str(e), 'items': []}
+            self._ok(json.dumps(snap, ensure_ascii=False).encode()); return
         spec = MACRO_SERIES.get(series)
         if not spec:
             self._err('unknown macro series: ' + series, 404); return
-        qs = parse_qs(urlparse(self.path).query)
         yrs = qs.get('years', ['10'])[0]
         try:
             yrs = max(1, min(30, int(yrs)))
         except Exception:
             yrs = 10
+        force = (qs.get('refresh') or ['0'])[0] in ('1', 'true', 'yes')
         today = _date.today()
-        cosd = (today - _td(days=yrs * 366)).strftime('%Y-%m-%d')
         ckey = f'{series}:{yrs}:{today.strftime("%Y%m%d")}'
-        cached = _macro_cache.get(ckey)
-        if cached:
-            self._ok(cached); return
-        out = {'series': series, 'label': spec['label'], 'unit': spec.get('unit', ''),
-               'points': [], 'source': None, 'note': None}
+        if not force:
+            cached = _macro_cache.get(ckey)
+            if cached:
+                self._ok(cached); return
         try:
-            if spec['p'] == 'fred':
-                out['points'] = _fetch_fred_csv(spec['id'], cosd)
-                out['source'] = f'FRED {spec["id"]}'
-                if not out['points']:
-                    out['note'] = '查無資料（FRED 端點未回傳）'
-            elif spec['p'] == 'twcpi':
-                yrs2 = qs.get('years', ['10'])[0]
-                try: mlen = max(12, min(360, int(yrs2) * 12))
-                except Exception: mlen = 120
-                out['points'] = _fetch_tw_cpi(mlen)
-                out['source'] = '主計總處 PXWeb' if out['points'] else None
-                if not out['points']:
-                    out['note'] = '主計總處 CPI 解析失敗。樣本：' + (_macro_debug.get('tw_cpi', '(無回應)'))
-            elif spec['p'] == 'ndc':
-                out['points'] = _fetch_tw_light()
-                out['source'] = '國發會 NDC' if out['points'] else None
-                if not out['points']:
-                    out['note'] = '國發會景氣信號解析失敗。樣本：' + (_macro_debug.get('tw_light', '(無回應)'))
-            elif spec['p'] == 'cbc':
-                # 台灣央行利率走廊（種子／抓取）
-                import macro_track as mt
-                cbc = mt.load_cbc_daily()
-                key = spec.get('id') or series
-                out['points'] = cbc.get(key, [])
-                out['source'] = 'CBC'
-                if not out['points']:
-                    out['note'] = 'CBC 利率種子空白'
+            out = _macro_payload(series, years=yrs, force_live=force)
+            if not out.get('points') and spec.get('p') == 'twcpi':
+                out['note'] = '主計總處 CPI 解析失敗。樣本：' + (_macro_debug.get('tw_cpi', '(無回應)'))
+            if not out.get('points') and spec.get('p') == 'ndc':
+                out['note'] = '國發會景氣信號解析失敗。樣本：' + (_macro_debug.get('tw_light', '(無回應)'))
         except Exception as e:
-            out['note'] = '抓取失敗：' + str(e)
+            out = {'series': series, 'label': spec['label'], 'unit': spec.get('unit', ''),
+                   'points': [], 'source': None, 'note': '抓取失敗：' + str(e)}
         body = json.dumps(out, ensure_ascii=False).encode()
-        if out['points']:
+        if out.get('points'):
             _macro_cache[ckey] = body
         self._ok(body)
 

@@ -320,32 +320,35 @@
 
   // ── International ────────────────────────────────────────
   function renderInternational(el) {
-    el.innerHTML = head('國際市場', '美股指數／美元／原油＋總經序列',
+    el.innerHTML = head('國際市場', '美股指數／美元／原油＋總經（Yahoo／BLS／種子備援）',
+      '<button class="hub-btn" id="hub-eco-refresh">更新指標</button>' +
       '<button class="hub-btn" data-sync>同步資料</button><button class="hub-btn" data-go="pulse">總覽</button>') +
       '<div id="hub-intl-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
+    var ecoBtn = $('hub-eco-refresh');
+    if (ecoBtn) ecoBtn.onclick = function () { loadInternational(el, true); };
+    loadInternational(el, false);
+  }
+
+  function loadInternational(el, forceEco) {
+    var body = $('hub-intl-body');
+    if (body) body.innerHTML = '<div class="hub-loading">載入國際／總經…</div>';
+    var ecoUrl = '/macro/economy?years=5' + (forceEco ? '&refresh=1' : '');
     Promise.all([
       jget('/pulse?refresh=0'),
-      jget('/macro/us10y?years=2'),
-      jget('/macro/unrate?years=5'),
-      jget('/macro/us_cpi_yoy?years=5'),
+      jget(ecoUrl),
       jget('/sync/status')
     ]).then(function (arr) {
       var pulse = arr[0] || {};
+      var ecoPack = arr[1] || {};
+      var st = arr[2] || {};
       var global = pulse.global || [];
-      if (pulse.us10y) {
-        global = global.concat([{ name: '美10年債', price: pulse.us10y.value, changePct: null, unit: '%' }]);
+      if (pulse.us10y && pulse.us10y.value != null) {
+        global = global.concat([{
+          name: '美10年債', price: pulse.us10y.value, changePct: null, unit: '%'
+        }]);
       }
-      function lastPt(d) {
-        var pts = (d && d.points) || [];
-        return pts.length ? pts[pts.length - 1] : null;
-      }
-      var eco = [
-        { label: '美國失業率', pt: lastPt(arr[2]), unit: '%' },
-        { label: '美國CPI年增', pt: lastPt(arr[3]), unit: '%' },
-        { label: '美10年債', pt: lastPt(arr[1]), unit: '%' }
-      ];
-      var st = arr[4] || {};
+      var ecoItems = ecoPack.items || [];
       var V = window.Viz;
       var maxChg = 0;
       global.forEach(function (g) {
@@ -367,10 +370,27 @@
           '</div><div class="chg ' + tw(g.changePct) + '">' +
           (g.changePct != null ? pct(g.changePct) : '—') + '</div>' + bar + '</div>';
       }).join('');
-      var ecoHtml = eco.map(function (e) {
-        return '<tr><td>' + e.label + '</td><td>' + (e.pt ? fmt(e.pt.value, 2) + e.unit : '—') +
-          '</td><td>' + (e.pt ? e.pt.date : '—') + '</td></tr>';
+      function ecoVal(it) {
+        if (!it || it.value == null || !isFinite(it.value)) return '—';
+        var u = it.unit || '';
+        var d = (u === '%' || u === '') ? 2 : (Math.abs(it.value) >= 1000 ? 0 : 2);
+        return fmt(it.value, d) + (u === '%' ? '%' : (u === 'USD' ? '' : (u ? ' ' + u : '')));
+      }
+      function ecoChg(it) {
+        if (it == null || it.change == null || !isFinite(it.change)) return '—';
+        var u = it.unit || '';
+        var sign = it.change > 0 ? '+' : '';
+        if (u === '%') return '<span class="' + tw(it.change) + '">' + sign + Number(it.change).toFixed(2) + '</span>';
+        return '<span class="' + tw(it.change) + '">' + sign + Number(it.change).toFixed(2) + '</span>';
+      }
+      var ecoHtml = ecoItems.map(function (it) {
+        var src = it.source ? String(it.source).replace(/^seed:/, '種子 ') : '—';
+        return '<tr><td>' + (it.label || it.key) + '</td><td class="' +
+          (it.ok ? '' : 'flat') + '">' + ecoVal(it) + '</td><td>' + ecoChg(it) +
+          '</td><td>' + (it.date || '—') + '</td><td style="color:var(--tlo);font-size:9px">' + src + '</td></tr>';
       }).join('');
+      var ecoOk = (ecoPack.counts && ecoPack.counts.ok) || ecoItems.filter(function (x) { return x.ok; }).length;
+      var ecoTotal = (ecoPack.counts && ecoPack.counts.total) || ecoItems.length;
       var ds = (st.datasets || []).map(function (d) {
         var cls = d.status === '同步完成' ? 'ok' : (d.status === '同步失敗' ? 'err' : 'warn');
         return '<tr><td>' + d.dataset + '</td><td>' + (d.dataDate || '—') + '</td><td><span class="badge ' + cls + '">' +
@@ -384,14 +404,19 @@
           '<div class="hub-sec"><h4>全球報價</h4><div class="hub-fill hub-zone z-fill" style="display:grid">' +
             (cards || '<div class="hub-empty">國際報價載入中／來源暫不可用</div>') +
           '</div></div>' +
-          '<div class="hub-sec"><h4>經濟指標</h4><div class="hub-fill"><table><tr><th>項目</th><th>數值</th><th>日期</th></tr>' +
-            (ecoHtml || '<tr><td colspan="3">FRED／總經尚未就緒（可於設定同步）</td></tr>') +
-            '</table></div></div>' +
+          '<div class="hub-sec"><h4>經濟指標 · ' + ecoOk + '/' + ecoTotal +
+            '</h4><div class="hub-fill"><table><tr><th>項目</th><th>數值</th><th>變化</th><th>日期</th><th>來源</th></tr>' +
+            (ecoHtml || '<tr><td colspan="5">總經尚未就緒 — 按「更新指標」</td></tr>') +
+            '</table></div>' +
+            '<div class="hub-note">' + (ecoPack.hint || 'FRED 不通時改 Yahoo／BLS／種子') +
+            (ecoPack.updatedAt ? ' · ' + String(ecoPack.updatedAt).replace('T', ' ') : '') + '</div></div>' +
           '<div class="hub-sec"><h4>資料來源狀態</h4><div class="hub-fill"><table><tr><th>系列</th><th>資料日</th><th>狀態</th><th>列數</th></tr>' +
             (ds || '<tr><td colspan="4">尚無同步紀錄 — 按同步資料</td></tr>') +
             '</table></div></div>' +
         '</div>';
       bindCommon(el);
+      var ecoBtn = $('hub-eco-refresh');
+      if (ecoBtn) ecoBtn.onclick = function () { loadInternational(el, true); };
     });
   }
 
