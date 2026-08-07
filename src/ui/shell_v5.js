@@ -166,6 +166,8 @@
     p.className = 'sv-panel';
     p.id = 'view-' + r.id;
     p.dataset.route = r.id;
+    p.setAttribute('hidden', '');
+    p.setAttribute('aria-hidden', 'true');
     p.innerHTML = r.stub ? stubHTML(r) : '<div class="sv-mount" id="mount-' + r.id + '"></div>';
     views.appendChild(p);
   }
