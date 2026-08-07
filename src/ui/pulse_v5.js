@@ -138,16 +138,26 @@
       '#pl-root .pl-tag.hot{background:var(--gold-s);color:var(--gold);border:1px solid var(--gold-m)}' +
       '#pl-root .pl-tag.cold{background:rgba(56,189,248,.08);color:var(--cyan);border:1px solid rgba(56,189,248,.25)}' +
       '#pl-root .pl-tag.ok{background:rgba(34,197,94,.08);color:var(--green);border:1px solid rgba(34,197,94,.25)}' +
-      /* donut */
-      '#pl-root .pl-donut-wrap{display:flex;align-items:center;gap:8px;flex:1;min-height:0}' +
-      '#pl-root .pl-donut{width:78px;height:78px;border-radius:50%;flex-shrink:0;position:relative;' +
+      /* donut／廣度：上方結構、下方多空比趨勢＋評論（不再只重複漲跌停） */
+      '#pl-root .pl-donut-wrap{display:flex;align-items:center;gap:8px;flex:0 0 auto}' +
+      '#pl-root .pl-donut{width:64px;height:64px;border-radius:50%;flex-shrink:0;position:relative;' +
         'background:conic-gradient(var(--red) 0 var(--pl-u,0%), #334155 var(--pl-u,0%) var(--pl-uf,0%), var(--green) var(--pl-uf,0%) 100%)}' +
-      '#pl-root .pl-donut::before{content:\'\';position:absolute;inset:20px;border-radius:50%;background:var(--bg2)}' +
+      '#pl-root .pl-donut::before{content:\'\';position:absolute;inset:16px;border-radius:50%;background:var(--bg2)}' +
       '#pl-root .pl-donut .mid{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:1}' +
-      '#pl-root .pl-donut .mid b{font-size:14px;color:var(--thi)}' +
-      '#pl-root .pl-donut .mid span{font-size:8px;color:var(--tlo)}' +
-      '#pl-root .pl-leg{font-size:10px;line-height:1.45}' +
+      '#pl-root .pl-donut .mid b{font-size:12px;color:var(--thi)}' +
+      '#pl-root .pl-donut .mid span{font-size:7px;color:var(--tlo)}' +
+      '#pl-root .pl-leg{font-size:9px;line-height:1.4;min-width:0;flex:1}' +
       '#pl-root .pl-leg i{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:4px}' +
+      '#pl-root .pl-bd-trend{flex:1;min-height:44px;margin:4px 0 2px;background:var(--bg);border:1px solid var(--border);' +
+        'border-radius:5px;padding:3px 5px;display:flex;flex-direction:column;overflow:hidden}' +
+      '#pl-root .pl-bd-trend .lab{font-size:8px;color:var(--tlo);flex:0 0 auto;margin-bottom:2px;' +
+        'display:flex;justify-content:space-between;gap:6px}' +
+      '#pl-root .pl-bd-trend .chart{flex:1;min-height:32px}' +
+      '#pl-root .pl-bd-trend .chart .vz-spark,#pl-root .pl-bd-trend .chart svg{width:100%!important;height:100%!important;min-height:32px}' +
+      '#pl-root .pl-bd-cmt{font-size:9px;line-height:1.45;color:var(--text);margin-top:2px;flex:0 0 auto;' +
+        'max-height:4.4em;overflow:hidden}' +
+      '#pl-root .pl-bd-cmt b{color:var(--gold);font-weight:700}' +
+      '#pl-root .pl-bd-cmt .up{color:var(--red)}#pl-root .pl-bd-cmt .dn{color:var(--green)}' +
       /* sectors */
       '#pl-root .pl-sbar{display:flex;align-items:center;gap:5px;margin:2px 0;font-size:10px}' +
       '#pl-root .pl-sbar .nm{width:56px;flex-shrink:0;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
@@ -638,6 +648,79 @@
     });
   }
 
+  /** 依當日廣度＋歷史序列產生趨勢評論（不重複頂列／圓餅數字本身） */
+  function buildBreadthComment(st, histNewestFirst) {
+    var parts = [];
+    var up = st.up, dn = st.down, flat = st.flat != null ? st.flat : st.unchanged;
+    var ls = st.lsRatio;
+    if (ls == null && up != null && dn) ls = up / Math.max(dn, 1);
+    var adv = st.advRatio;
+    var net = st.net;
+    if (net == null && up != null && dn != null) net = up - dn;
+    var rows = (histNewestFirst || []).filter(function (r) {
+      return r && (r.lsRatio != null || (r.up != null && r.down != null));
+    });
+    var chrono = rows.slice().reverse();
+    function rowLs(r) {
+      if (r.lsRatio != null && isFinite(r.lsRatio)) return Number(r.lsRatio);
+      if (r.up != null && r.down) return r.up / Math.max(r.down, 1);
+      return null;
+    }
+    var streak = 0;
+    if (ls != null && ls !== 1 && chrono.length) {
+      var bull = ls > 1;
+      for (var k = chrono.length - 1; k >= 0; k--) {
+        var v = rowLs(chrono[k]);
+        if (v == null || v === 1 || (v > 1) !== bull) break;
+        streak += 1;
+      }
+    }
+    if (streak >= 3) {
+      parts.push(ls > 1
+        ? '多空比已連 <b class="up">' + streak + '</b> 日偏多，上漲面持續擴張。'
+        : '多空比已連 <b class="dn">' + streak + '</b> 日偏空，上漲面持續收縮。');
+    } else if (ls != null) {
+      parts.push(ls >= 2
+        ? '多空比明顯偏多，短線參與面寬。'
+        : ls <= 0.5
+          ? '多空比明顯偏空，短線承壓面廣。'
+          : '多空比接近均衡，方向性訊號有限。');
+    }
+    if (chrono.length >= 2 && ls != null) {
+      var prevLs = rowLs(chrono[chrono.length - 2]);
+      if (prevLs != null && isFinite(prevLs)) {
+        var dLs = ls - prevLs;
+        if (Math.abs(dLs) >= 0.35) {
+          parts.push(dLs > 0
+            ? '較前日多空比轉強約 <span class="up">+' + dLs.toFixed(2) + '</span>。'
+            : '較前日多空比轉弱約 <span class="dn">' + dLs.toFixed(2) + '</span>。');
+        } else if (prevLs > 1 && ls < 1) {
+          parts.push('多空比由多轉空，廣度氛圍轉向謹慎。');
+        } else if (prevLs < 1 && ls > 1) {
+          parts.push('多空比由空轉多，廣度回溫跡象。');
+        }
+      }
+      var prevNet = chrono[chrono.length - 2].net;
+      if (net != null && prevNet != null && isFinite(prevNet) && Math.abs(net - prevNet) >= 200) {
+        parts.push(net > prevNet
+          ? '淨上漲家數較前日明顯增加。'
+          : '淨上漲家數較前日明顯減少。');
+      }
+    }
+    if (adv != null) {
+      if (adv >= 0.70) parts.push('上漲占比逾七成，擴散偏強。');
+      else if (adv <= 0.35) parts.push('上漲占比偏低，擴散偏弱。');
+    }
+    /* 漲跌停僅在極端時評論，避免只複述家數 */
+    var lu = st.limitUp, ld = st.limitDown;
+    if (lu != null && ld != null) {
+      if (lu >= 40 && ld <= 2) parts.push('漲停潮偏熱，留意短線過熱。');
+      else if (ld >= 10 && lu <= 5) parts.push('跌停家數偏多，防禦情緒升溫。');
+    }
+    if (!parts.length) parts.push('廣度序列載入中或資料不足，暫無趨勢評論。');
+    return parts.slice(0, 3).join(' ');
+  }
+
   function renderDonut(ov, st) {
     st = st || (ov && ov.strip) || {};
     var up = st.up || 0, dn = st.down || 0, flat = st.flat || st.unchanged || 0;
@@ -645,20 +728,70 @@
     var pu = sum ? 100 * up / sum : 0;
     var pf = sum ? 100 * (up + flat) / sum : pu;
     var ls = ov && ov.lsRatio != null ? ov.lsRatio : st.lsRatio;
-    var tone = breadthToneLabel(st.advRatio, ls);
-    return '<div class="pl-sec"><h4>市場廣度 <a data-go="breadth">詳情 →</a></h4><div class="pl-donut-wrap">' +
-      '<div class="pl-donut" style="--pl-u:' + pu.toFixed(2) + '%;--pl-uf:' + pf.toFixed(2) + '%">' +
-        '<div class="mid"><b>' + (ls != null ? Number(ls).toFixed(2) : '—') + '</b><span>多空比</span></div></div>' +
-      '<div class="pl-leg">' +
-        '<div><i style="background:var(--red)"></i>上漲 <b class="up">' + fmt(up) + '</b></div>' +
-        '<div><i style="background:#334155"></i>平盤 <b class="flat">' + fmt(flat) + '</b></div>' +
-        '<div><i style="background:var(--green)"></i>下跌 <b class="dn">' + fmt(dn) + '</b></div>' +
-        '<div style="margin-top:6px;font-weight:700;color:var(--cyan)">' + tone + '</div>' +
-        '<div style="margin-top:4px">' +
-          '<span class="pl-chip">漲停 ' + (st.limitUp != null ? fmt(st.limitUp) : '—') + '</span>' +
-          '<span class="pl-chip">跌停 ' + (st.limitDown != null ? fmt(st.limitDown) : '—') + '</span>' +
+    var advTxt = st.advRatio != null ? (st.advRatio * 100).toFixed(1) + '%' : '—';
+    var net = st.net;
+    if (net == null && (st.up != null || st.down != null)) net = (st.up || 0) - (st.down || 0);
+    var netTxt = net != null ? ((net >= 0 ? '+' : '') + net) : '—';
+    return '<div class="pl-sec"><h4>市場廣度 <a data-go="breadth">詳情 →</a></h4>' +
+      '<div class="pl-donut-wrap">' +
+        '<div class="pl-donut" style="--pl-u:' + pu.toFixed(2) + '%;--pl-uf:' + pf.toFixed(2) + '%">' +
+          '<div class="mid"><b>' + (ls != null ? Number(ls).toFixed(2) : '—') + '</b><span>多空比</span></div></div>' +
+        '<div class="pl-leg">' +
+          '<div><i style="background:var(--red)"></i>上漲 <b class="up">' + fmt(up) + '</b></div>' +
+          '<div><i style="background:#334155"></i>平盤 <b class="flat">' + fmt(flat) + '</b></div>' +
+          '<div><i style="background:var(--green)"></i>下跌 <b class="dn">' + fmt(dn) + '</b></div>' +
+          '<div style="margin-top:3px;color:var(--tlo)">淨 <b class="' + tw(net) + '">' + netTxt +
+            '</b> · 上漲比 ' + advTxt + '</div>' +
         '</div>' +
-      '</div></div></div>';
+      '</div>' +
+      '<div class="pl-bd-trend" id="pl-bd-trend">' +
+        '<div class="lab"><span>多空比趨勢</span><span id="pl-bd-trend-meta">載入…</span></div>' +
+        '<div class="chart" id="pl-bd-chart"><div class="pl-note" style="padding:6px 0">載入廣度序列…</div></div>' +
+      '</div>' +
+      '<div class="pl-bd-cmt" id="pl-bd-cmt">分析廣度變化中…</div></div>';
+  }
+
+  function fillBreadthTrend(ov) {
+    var st = Object.assign({}, (ov && ov.strip) || {});
+    if (ov && ov.lsRatio != null && st.lsRatio == null) st.lsRatio = ov.lsRatio;
+    jget('/pulse/history?kind=breadth&n=20').then(function (h) {
+      var V = window.Viz;
+      var chart = $('pl-bd-chart');
+      var meta = $('pl-bd-trend-meta');
+      var cmt = $('pl-bd-cmt');
+      var rows = (h && h.rows) || [];
+      /* 當日 strip 缺欄時，用歷史最新一筆對齊評論／meta（與詳情頁同源） */
+      if (rows.length && (st.up == null || st.lsRatio == null || st.advRatio == null)) {
+        var latest = rows[0];
+        ['up', 'down', 'flat', 'limitUp', 'limitDown', 'advRatio', 'net', 'lsRatio'].forEach(function (k) {
+          if (st[k] == null && latest[k] != null) st[k] = latest[k];
+        });
+      }
+      var chrono = rows.slice().reverse();
+      var lsSeries = chrono.map(function (r) {
+        if (r.lsRatio != null && isFinite(r.lsRatio)) return Number(r.lsRatio);
+        if (r.up != null && r.down) return r.up / Math.max(r.down, 1);
+        return null;
+      });
+      var usable = lsSeries.filter(function (v) { return v != null && isFinite(v); });
+      if (chart) {
+        if (V && usable.length >= 2) {
+          var last = usable[usable.length - 1];
+          var col = last >= 1 ? 'var(--red)' : 'var(--green)';
+          chart.innerHTML = V.sparkLine(usable, { color: col, h: 48, w: 280 });
+        } else if (usable.length) {
+          chart.innerHTML = V ? V.sparkBars(usable.map(function (v) { return v - 1; })) :
+            '<div class="pl-note">序列不足</div>';
+        } else {
+          chart.innerHTML = '<div class="pl-note">尚無本機廣度歷史 — 可按同步資料預抓</div>';
+        }
+      }
+      if (meta) {
+        meta.textContent = (rows.length ? ('近 ' + rows.length + ' 日') : '無序列') +
+          (st.lsRatio != null ? ' · 今 ' + Number(st.lsRatio).toFixed(2) : '');
+      }
+      if (cmt) cmt.innerHTML = buildBreadthComment(st, rows);
+    });
   }
 
   function sectorsFromPack(ov) {
@@ -958,6 +1091,7 @@
     });
     if (sectorMkt === 'US' && !sectorCache.US) loadSectorsMkt('US');
     fillInstTrend(ov);
+    fillBreadthTrend(ov);
 
     jget('/pulse/history?kind=index&n=20').then(function (h) {
       var box = $('pl-spark');
