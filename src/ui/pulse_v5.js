@@ -243,23 +243,46 @@
     if (!$('pl-root')) {
       mount.innerHTML =
         '<div id="pl-root">' +
+          '<div class="pl-head">' +
+            '<div class="pl-head-left">' +
+              '<div class="pl-title">TW Pulse · 市場總覽</div>' +
+              '<div class="pl-sub" id="pl-sub">官方資料混成 · 缺資料不灌假分數</div>' +
+            '</div>' +
+            '<div class="pl-actions">' +
+              '<button type="button" class="pl-btn" id="pl-refresh">↻ 重新整理</button>' +
+              '<button type="button" class="pl-btn primary" data-go="chart" data-sym="^TWII" data-mkt="TW">圖表</button>' +
+            '</div>' +
+          '</div>' +
           '<div id="pl-body"><div style="padding:20px;text-align:center;color:#64748B">載入總覽儀表板…</div></div>' +
         '</div>';
+      var rbtn = $('pl-refresh');
+      if (rbtn) rbtn.onclick = function () { refresh(true); };
+      mount.querySelectorAll('[data-go]').forEach(function (b) {
+        b.onclick = function () {
+          goRoute(b.getAttribute('data-go'), {
+            sym: b.getAttribute('data-sym') || undefined,
+            mkt: b.getAttribute('data-mkt') || undefined
+          });
+        };
+      });
     }
     return $('pl-body');
   }
 
-  /* Card 1: Semi-circle Arc Gauge */
+  /* Card 1: Semi-circle Arc Gauge — 缺資料顯示 —，禁止灌假分數 */
   function renderCardPulseGauge(p) {
-    var score = p.totalScore != null ? p.totalScore : 85.0;
-    var pctVal = Math.max(0, Math.min(100, score)) / 100;
-    
-    var health = p.healthScore != null ? Number(p.healthScore).toFixed(1) : '71.8';
-    var risk = p.riskScore != null ? Number(p.riskScore).toFixed(1) : '39.4';
-    var comp = p.dataCompleteness != null ? Number(p.dataCompleteness).toFixed(1) : '70.8';
-    var datasetsOk = p.datasetsOk != null ? p.datasetsOk : 17;
-    var datasetsTotal = p.datasetsTotal != null ? p.datasetsTotal : 24;
-    var statusText = p.statusText || '明顯偏強';
+    var score = p.totalScore;
+    var pctVal = (score != null && isFinite(score)) ? Math.max(0, Math.min(100, score)) / 100 : 0;
+    var health = p.healthScore != null ? Number(p.healthScore).toFixed(1) : '—';
+    var risk = p.riskScore != null ? Number(p.riskScore).toFixed(1) : '—';
+    var comp = p.dataCompleteness != null ? Number(p.dataCompleteness).toFixed(1) : '—';
+    var datasetsOk = p.datasetsOk != null ? p.datasetsOk : 0;
+    var datasetsTotal = p.datasetsTotal != null ? p.datasetsTotal : 0;
+    var statusText = p.statusText || '資料彙整中';
+    var drivers = (p.positiveFactors || []).slice(0, 3).map(function (f) { return f.name; }).filter(Boolean);
+    var pressures = (p.riskFactors || []).slice(0, 3).map(function (f) { return f.name; }).filter(Boolean);
+    var healthLbl = p.healthLabel || '';
+    var riskLbl = p.riskLabel || '';
 
     var svgArc = 
       '<svg viewBox="0 0 140 80">' +
@@ -283,23 +306,24 @@
         '<div class="arc-gauge-box">' +
           svgArc +
           '<div class="arc-score-val">' +
-            '<span class="num">' + Number(score).toFixed(1) + '</span><span class="den"> /100</span>' +
+            '<span class="num">' + (score != null && isFinite(score) ? Number(score).toFixed(1) : '—') + '</span><span class="den"> /100</span>' +
           '</div>' +
           '<div class="arc-badge">' + esc(statusText) + '</div>' +
         '</div>' +
         '<div class="gauge-sub-box">' +
-          '<div class="sub-metric-row"><span class="lbl">市場動能</span><span class="val">' + health + ' /100<span class="tag">(強勢偏高)</span></span></div>' +
-          '<div class="sub-metric-row"><span class="lbl">市場風險</span><span class="val">' + risk + ' /100<span class="tag" style="color:#10B981">(偏低)</span></span></div>' +
+          '<div class="sub-metric-row"><span class="lbl">市場動能</span><span class="val">' + health + ' /100' +
+            (healthLbl ? '<span class="tag">(' + esc(healthLbl) + ')</span>' : '') + '</span></div>' +
+          '<div class="sub-metric-row"><span class="lbl">市場風險</span><span class="val">' + risk + ' /100' +
+            (riskLbl ? '<span class="tag" style="color:#10B981">(' + esc(riskLbl) + ')</span>' : '') + '</span></div>' +
           '<div class="sub-metric-row"><span class="lbl">資料可信度</span><span class="val">' + comp + '%</span></div>' +
-          '<div class="progress-bar-bg"><div class="progress-bar-fill" style="width:' + comp + '%"></div></div>' +
+          '<div class="progress-bar-bg"><div class="progress-bar-fill" style="width:' + (p.dataCompleteness != null ? Number(p.dataCompleteness) : 0) + '%"></div></div>' +
           '<div style="font-size:9px;color:#64748B;text-align:right;margin-top:1px">' + datasetsOk + '/' + datasetsTotal + ' 資料集正常</div>' +
         '</div>' +
       '</div>' +
       '<div class="pulse-details">' +
-        '<div class="pulse-detail-item"><span class="k">較前日</span><span class="v up">+28.8</span></div>' +
-        '<div class="pulse-detail-item"><span class="k">主要推動</span><span class="v">市場廣度、加權指數、櫃買指數</span></div>' +
-        '<div class="pulse-detail-item"><span class="k">主要壓力</span><span class="v">產業成交過度集中</span></div>' +
-        '<div class="pulse-detail-item"><span class="k">評分依據</span><span class="v">加權、櫃買、廣度、法人、產聚、風險模型</span></div>' +
+        '<div class="pulse-detail-item"><span class="k">主要推動</span><span class="v">' + esc(drivers.length ? drivers.join('、') : '—') + '</span></div>' +
+        '<div class="pulse-detail-item"><span class="k">主要壓力</span><span class="v">' + esc(pressures.length ? pressures.join('、') : '—') + '</span></div>' +
+        '<div class="pulse-detail-item"><span class="k">摘要</span><span class="v">' + esc(p.summary || '缺資料不灌假分數') + '</span></div>' +
       '</div>' +
     '</div>';
   }
@@ -307,37 +331,20 @@
   /* Card 2: Market Trend Chart with OHLC */
   function renderCardTrendChart(ov) {
     var o = (ov && ov.ohlc) || {};
-    var price = o.price != null ? fmt(o.price, 1) : '44,611.6';
-    var openPx = o.open != null ? fmt(o.open, 2) : '43,809.83';
-    var highPx = o.high != null ? fmt(o.high, 2) : '44,980.31';
-    var lowPx = o.low != null ? fmt(o.low, 2) : '43,809.83';
-    var closePx = o.price != null ? fmt(o.price, 2) : '43,360.66';
-
-    var svgArea = 
-      '<svg viewBox="0 0 320 80" preserveAspectRatio="none" style="width:100%;height:100%">' +
-        '<defs>' +
-          '<linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">' +
-            '<stop offset="0%" stop-color="#0EA5E9" stop-opacity="0.35"/>' +
-            '<stop offset="100%" stop-color="#0EA5E9" stop-opacity="0"/>' +
-          '</linearGradient>' +
-        '</defs>' +
-        '<path d="M 0 50 Q 40 25, 80 40 T 160 55 T 240 20 T 320 30 L 320 80 L 0 80 Z" fill="url(#areaGrad)"/>' +
-        '<path d="M 0 50 Q 40 25, 80 40 T 160 55 T 240 20 T 320 30" fill="none" stroke="#38BDF8" stroke-width="2"/>' +
-        '<circle cx="240" cy="20" r="3.5" fill="#38BDF8"/>' +
-        '<circle cx="320" cy="30" r="3.5" fill="#38BDF8"/>' +
-        '<text x="5" y="15" fill="#64748B" font-size="8">45,631.59</text>' +
-        '<text x="5" y="72" fill="#64748B" font-size="8">39,933.3</text>' +
-        '<text x="5" y="78" fill="#475569" font-size="7.5">07/15</text>' +
-        '<text x="290" y="78" fill="#475569" font-size="7.5">08/05</text>' +
-      '</svg>';
+    var price = fmt(o.price, 2);
+    var openPx = fmt(o.open, 2);
+    var highPx = fmt(o.high, 2);
+    var lowPx = fmt(o.low, 2);
+    var closePx = fmt(o.prevClose != null ? o.prevClose : o.price, 2);
 
     return '<div class="tw-card">' +
       '<div class="tw-card-head">' +
         '<div class="tw-card-title">市場趨勢走勢</div>' +
         '<a class="tw-card-link" data-go="chart" data-sym="^TWII" data-mkt="TW">詳情 →</a>' +
       '</div>' +
-      '<div style="font-size:11px;color:#64748B;margin-bottom:4px"><b style="color:#F8FAFC">近 20 日官方收盤趨勢</b> <span style="color:#38BDF8;font-weight:700">' + price + '</span> · 11 筆正式資料</div>' +
-      '<div class="trend-chart-area">' + svgArea + '</div>' +
+      '<div style="font-size:11px;color:#64748B;margin-bottom:4px"><b style="color:#F8FAFC">近 20 日官方收盤趨勢</b> <span style="color:#38BDF8;font-weight:700">' + price + '</span>' +
+        (o.changePct != null ? ' <span class="' + tw(o.changePct) + '">' + pct(o.changePct) + '</span>' : '') + '</div>' +
+      '<div class="trend-chart-area" id="pl-spark"><div style="padding:16px;color:#64748B;font-size:11px">載入近 20 日走勢…</div></div>' +
       '<div class="ohlc-4grid">' +
         '<div class="ohlc-box"><div class="k">開盤</div><div class="v">' + openPx + '</div></div>' +
         '<div class="ohlc-box"><div class="k">最高</div><div class="v">' + highPx + '</div></div>' +
@@ -350,15 +357,28 @@
   /* Card 3: Institutional Divergence & Money Flow */
   function renderCardInstFlow(ov) {
     var i = (ov && ov.institutional) || {};
-    var foreign = i.foreign != null ? i.foreign : 873.3e8;
-    var trust = i.trust != null ? i.trust : 98.7e8;
-    var dealer = i.dealer != null ? i.dealer : 3.9e8;
-    var totalYi = i.totalYi != null ? i.totalYi : 975.9;
+    var foreign = i.foreign;
+    var trust = i.trust;
+    var dealer = i.dealer;
+    var totalYi = i.totalYi;
 
     function fYi(v) {
-      if (v == null) return '—';
+      if (v == null || !isFinite(v)) return '—';
       var x = Math.abs(v) > 1e5 ? v / 1e8 : v;
-      return (x >= 0 ? '+' : '') + x.toFixed(1) + ' 億';
+      return (x >= 0 ? '+' : '') + Number(x).toFixed(1) + ' 億';
+    }
+    var note = i.date ? ('法人日 ' + i.date) : '單位億元';
+    var consTitle = '法人方向';
+    var consSub = '資料彙整中';
+    var consTag = '—';
+    if (foreign != null && trust != null && dealer != null) {
+      var signs = [foreign, trust, dealer].map(function (v) { return v > 0 ? 1 : (v < 0 ? -1 : 0); });
+      var buyN = signs.filter(function (s) { return s > 0; }).length;
+      var sellN = signs.filter(function (s) { return s < 0; }).length;
+      if (buyN === 3) { consTitle = '法人一致偏多'; consTag = '3/3'; consSub = '外資、投信、自營同步買超'; }
+      else if (sellN === 3) { consTitle = '法人一致偏空'; consTag = '3/3'; consSub = '外資、投信、自營同步賣超'; }
+      else if (foreign > 0 && dealer < 0) { consTitle = '結構分歧'; consTag = buyN + '/3'; consSub = '外資買超、自營賣超'; }
+      else { consTitle = '法人分歧'; consTag = buyN + '/3 偏多'; consSub = note; }
     }
 
     return '<div class="tw-card">' +
@@ -368,28 +388,30 @@
       '</div>' +
       '<div class="inst-list">' +
         '<div class="inst-item">' +
-          '<div class="left"><span class="name">外資</span><span class="meta">5日 +718.8 億 · 連買 2 日</span></div>' +
+          '<div class="left"><span class="name">外資</span><span class="meta">' + esc(note) + '</span></div>' +
           '<div class="amt ' + tw(foreign) + '">' + fYi(foreign) + '</div>' +
         '</div>' +
         '<div class="inst-item">' +
-          '<div class="left"><span class="name">投信</span><span class="meta">5日 +809.0 億 · 連買 11 日</span></div>' +
+          '<div class="left"><span class="name">投信</span><span class="meta">' + esc(note) + '</span></div>' +
           '<div class="amt ' + tw(trust) + '">' + fYi(trust) + '</div>' +
         '</div>' +
         '<div class="inst-item">' +
-          '<div class="left"><span class="name">自營商</span><span class="meta">5日 -545.4 億 · 連買 2 日</span></div>' +
+          '<div class="left"><span class="name">自營商</span><span class="meta">' + esc(note) + '</span></div>' +
           '<div class="amt ' + tw(dealer) + '">' + fYi(dealer) + '</div>' +
         '</div>' +
       '</div>' +
       '<div class="inst-total-row">' +
-        '<span class="lbl">法人合計 <span style="font-size:9.5px;color:#64748B;font-weight:400">(占成交 7.028%)</span></span>' +
-        '<span class="val ' + tw(totalYi) + '">' + (totalYi >= 0 ? '+' : '') + Number(totalYi).toFixed(1) + ' 億</span>' +
+        '<span class="lbl">法人合計</span>' +
+        '<span class="val ' + tw(totalYi) + '">' +
+          (totalYi != null && isFinite(totalYi) ? ((totalYi >= 0 ? '+' : '') + Number(totalYi).toFixed(1) + ' 億') : '—') +
+        '</span>' +
       '</div>' +
       '<div class="inst-consensus-box">' +
         '<div class="c-head">' +
-          '<span class="c-title">法人一致偏多</span>' +
-          '<span class="c-tag">方向一致性 3/3</span>' +
+          '<span class="c-title">' + esc(consTitle) + '</span>' +
+          '<span class="c-tag">' + esc(consTag) + '</span>' +
         '</div>' +
-        '<div class="c-sub">外資、投信、自營商同步買超</div>' +
+        '<div class="c-sub">' + esc(consSub) + '</div>' +
       '</div>' +
     '</div>';
   }
@@ -397,16 +419,24 @@
   /* Card 4: Donut Breadth */
   function renderCardBreadth(ov, st) {
     st = st || (ov && ov.strip) || {};
-    var up = st.up || 591, dn = st.down || 172, flat = st.flat || 69;
-    var sum = up + dn + flat || 832;
-    var ls = st.lsRatio != null ? st.lsRatio : 3.44;
-    var advPct = st.advRatio != null ? (st.advRatio * 100).toFixed(1) : '71.0';
-
-    var svgDonut = 
+    var up = st.up != null ? st.up : 0;
+    var dn = st.down != null ? st.down : 0;
+    var flat = (st.flat != null ? st.flat : st.unchanged) || 0;
+    var sum = up + dn + flat;
+    var ls = st.lsRatio != null ? st.lsRatio : (ov && ov.lsRatio);
+    var advPct = st.advRatio != null ? (st.advRatio * 100).toFixed(1) : '—';
+    var circ = 2 * Math.PI * 32;
+    var pu = sum ? up / sum : 0;
+    var pd = sum ? dn / sum : 0;
+    var upLen = circ * pu;
+    var dnLen = circ * pd;
+    var svgDonut =
       '<svg viewBox="0 0 80 80">' +
         '<circle cx="40" cy="40" r="32" fill="none" stroke="#1E293B" stroke-width="10"/>' +
-        '<circle cx="40" cy="40" r="32" fill="none" stroke="#FF4D4D" stroke-width="10" stroke-dasharray="201" stroke-dashoffset="60"/>' +
-        '<circle cx="40" cy="40" r="32" fill="none" stroke="#22C55E" stroke-width="10" stroke-dasharray="201" stroke-dashoffset="160"/>' +
+        '<circle cx="40" cy="40" r="32" fill="none" stroke="#FF4D4D" stroke-width="10" ' +
+          'stroke-dasharray="' + upLen.toFixed(2) + ' ' + circ.toFixed(2) + '" stroke-dashoffset="0" transform="rotate(-90 40 40)"/>' +
+        '<circle cx="40" cy="40" r="32" fill="none" stroke="#22C55E" stroke-width="10" ' +
+          'stroke-dasharray="' + dnLen.toFixed(2) + ' ' + circ.toFixed(2) + '" stroke-dashoffset="' + (-upLen).toFixed(2) + '" transform="rotate(-90 40 40)"/>' +
       '</svg>';
 
     return '<div class="tw-card">' +
@@ -426,7 +456,7 @@
         '</div>' +
       '</div>' +
       '<div class="breadth-sub-metrics">' +
-        '<div class="item"><span class="k">多空比</span><span class="v">' + Number(ls).toFixed(2) + '</span></div>' +
+        '<div class="item"><span class="k">多空比</span><span class="v">' + (ls != null && isFinite(ls) ? Number(ls).toFixed(2) : '—') + '</span></div>' +
         '<div class="item"><span class="k">上漲占比</span><span class="v">' + advPct + '%</span></div>' +
         '<div class="item" style="text-align:right"><span class="k">較前一交易日</span><span class="v up">+9.2 %</span></div>' +
       '</div>' +
@@ -439,15 +469,9 @@
 
   /* Card 5: Sector Rotation */
   function renderCardSectors(ov) {
-    var list = (ov && ov.sectorsRanked) || [
-      { name: '半導體', changePct: 2.33, note: '5日資料不足 · 漲度 80% · 偏強' },
-      { name: '金融', changePct: 1.36, note: '5日資料不足 · 漲度 73% · 偏強' },
-      { name: '電子零組件', changePct: 1.75, note: '5日資料不足 · 漲度 70% · 強' },
-      { name: '航運', changePct: 0.68, note: '5日資料不足 · 漲度 80% · 將強' },
-      { name: '生技', changePct: 0.66, note: '5日資料不足 · 漲度 67% · 將強' },
-      { name: '綠能', changePct: 0.43, note: '5日資料不足 · 漲度 63% · 將強' },
-      { name: '營建', changePct: 0.39, note: '5日資料不足 · 漲度 46% · 中性' }
-    ];
+    var list = (ov && ov.sectorsRanked) || [];
+    var maxAbs = 1;
+    list.forEach(function (s) { maxAbs = Math.max(maxAbs, Math.abs(s.changePct || 0)); });
 
     var html = '<div class="tw-card">' +
       '<div class="tw-card-head">' +
@@ -456,13 +480,18 @@
       '</div>' +
       '<div class="sector-list">';
 
+    if (!list.length) {
+      return html + '<div style="padding:8px 0;color:#64748B;font-size:11px">類股資料暫缺 — 開啟熱力可預熱</div></div></div>';
+    }
     list.slice(0, 7).forEach(function (s) {
       var pctVal = s.changePct || 0;
-      var w = Math.min(100, Math.max(10, Math.abs(pctVal) * 35));
-      var col = pctVal >= 0 ? '#10B981' : '#EF4444';
-      var note = s.note || '5日動能觀察中';
+      var w = Math.max(4, Math.round(Math.abs(pctVal) / maxAbs * 100));
+      /* 台股慣例：漲紅跌綠 */
+      var col = pctVal >= 0 ? '#FF4D4D' : '#22C55E';
+      var note = s.note || '';
       html += '<div class="sector-row">' +
-        '<div class="s-info"><span class="s-name">' + esc(s.name) + '</span><span class="s-sub">' + esc(note) + '</span></div>' +
+        '<div class="s-info"><span class="s-name">' + esc(s.name) + '</span>' +
+          (note ? '<span class="s-sub">' + esc(note) + '</span>' : '') + '</div>' +
         '<div class="s-bar-wrap">' +
           '<div class="s-bar-bg"><div class="s-bar-fill" style="width:' + w + '%;background:' + col + '"></div></div>' +
           '<span class="s-pct ' + tw(pctVal) + '">' + pct(pctVal) + '</span>' +
@@ -479,27 +508,14 @@
     var isGainers = side === 'gainers';
     var title = isGainers ? '漲停監控' : '跌幅異常';
 
-    var fallbackGainers = [
-      { code: '6213', name: '勝茂', changePct: 10.0, amt: '90.1 億' },
-      { code: '8039', name: '台虹', changePct: 10.0, amt: '16.9 億' },
-      { code: '7610', name: '聯友金屬-創', changePct: 10.0, amt: '4.3 億' },
-      { code: '8050', name: '廣積', changePct: 10.0, amt: '3.8 億' },
-      { code: '6727', name: '亞泰金屬', changePct: 10.0, amt: '2.9 億' },
-      { code: '2465', name: '震旦', changePct: 10.0, amt: '2.5 億' },
-      { code: '4971', name: 'IET-KY', changePct: 10.0, amt: '9871 萬' }
-    ];
-
-    var fallbackLosers = [
-      { code: '2305', name: '全友', changePct: -9.97, amt: '2.7 億' },
-      { code: '4442', name: '錸寶-KY', changePct: -9.85, amt: '5907 萬' },
-      { code: '6488', name: '環球晶', changePct: -8.40, amt: '242.4 億' },
-      { code: '3131', name: '弘塑', changePct: -7.68, amt: '32.6 億' },
-      { code: '3229', name: '晟鈦', changePct: -7.33, amt: '4455 萬' },
-      { code: '5475', name: '德宏', changePct: -7.09, amt: '13.9 億' },
-      { code: '7734', name: '印能科技', changePct: -6.78, amt: '12.2 億' }
-    ];
-
-    var list = (raw.length ? raw : (isGainers ? fallbackGainers : fallbackLosers)).slice(0, 7);
+    var list = raw.slice();
+    if (isGainers) {
+      var lim = raw.filter(function (r) { return r.changePct != null && r.changePct >= 9.5; });
+      list = (lim.length ? lim : raw).slice(0, 7);
+    } else {
+      var bad = raw.filter(function (r) { return r.changePct != null && r.changePct <= -7; });
+      list = (bad.length ? bad : raw).slice(0, 7);
+    }
 
     var html = '<div class="tw-card">' +
       '<div class="tw-card-head">' +
@@ -508,16 +524,20 @@
       '</div>' +
       '<div class="num-list">';
 
+    if (!list.length) {
+      html += '<div style="padding:10px 0;color:#64748B;font-size:11px">' +
+        (isGainers ? '尚無接近／觸及漲停標的' : '尚無大幅下跌標的') + '</div>';
+    }
     list.forEach(function (r, idx) {
-      var cp = r.changePct != null ? r.changePct : 0;
-      var amtStr = r.amt || (r.volume != null ? fmt(r.volume) + ' 張' : '熱門成交');
-      var tagStr = Math.abs(cp) >= 9.5 ? (isGainers ? '漲停' : '跌停') : '成交';
+      var cp = r.changePct;
+      var amtStr = r.amt || (r.volume != null ? fmt(r.volume) + ' 張' : '');
+      var tagStr = (cp != null && Math.abs(cp) >= 9.5) ? (isGainers ? '漲停' : '跌停') : '';
       html += '<div class="num-item" data-code="' + esc(r.code || '') + '">' +
         '<div class="left-grp">' +
           '<div class="idx-badge">' + (idx + 1) + '</div>' +
           '<div style="display:flex;flex-direction:column">' +
             '<span class="stk-name">' + esc(r.name || r.code) + ' <span style="font-size:9px;color:#64748B">(' + esc(r.code) + ')</span></span>' +
-            '<span class="stk-meta">' + tagStr + ' · ' + amtStr + '</span>' +
+            '<span class="stk-meta">' + esc([tagStr, amtStr].filter(Boolean).join(' · ') || '—') + '</span>' +
           '</div>' +
         '</div>' +
         '<div class="pct-val ' + tw(cp) + '">' + pct(cp) + '</div>' +
@@ -529,35 +549,40 @@
 
   /* Card 8: Global Market Impact */
   function renderCardGlobal(p) {
-    var fallback = [
-      { name: 'Dow Jones', price: 54349.12, changePct: 0.49, status: '2026/08/05 已收盤' },
-      { name: 'S&P 500', price: 7723.55, changePct: -0.17, status: '2026/08/05 已收盤' },
-      { name: 'Nasdaq', price: 26584.99, changePct: 2.59, status: '2026/08/04 已收盤' },
-      { name: 'VIX', price: 16.5, changePct: 4.04, status: '2026/08/04 已收盤' },
-      { name: '美元/新台幣', price: 32.27, changePct: -0.34, status: '2026/07/31 已收盤' }
-    ];
+    var list = (p.global && p.global.length) ? p.global.slice() : [];
+    var prefer = ['^DJI', '^GSPC', '^IXIC', '^VIX', 'TWD=X', 'DX-Y.NYB', 'DX=F', 'CL=F'];
+    list.sort(function (a, b) {
+      var ia = prefer.indexOf(a.symbol); var ib = prefer.indexOf(b.symbol);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+    var n = 0, sum = 0;
+    list.forEach(function (x) {
+      if (x && x.changePct != null && isFinite(x.changePct) && x.symbol !== '^VIX') {
+        n += 1; sum += x.changePct;
+      }
+    });
+    var tone = !n ? '資料彙整中' : (sum / n >= 0.6 ? '偏多' : (sum / n <= -0.6 ? '偏空' : '中性'));
 
-    var list = (p.global && p.global.length) ? p.global : fallback;
-
-    var html = '<div class="tw-card" style="grid-column:1/-1">' +
+    var html = '<div class="tw-card">' +
       '<div class="tw-card-head">' +
         '<div class="tw-card-title">全球市場對台股影響</div>' +
         '<a class="tw-card-link" data-go="international">詳情 →</a>' +
       '</div>' +
       '<div class="global-impact-head">' +
-        '<span class="pill">全球影響方向 中性</span>' +
-        '<span class="sub">規則判讀：非常規頻率，持續台積電ADR、平穩體市場</span>' +
+        '<span class="pill">全球影響方向 ' + esc(tone) + '</span>' +
+        '<span class="sub">真實報價均幅粗分，非預測</span>' +
       '</div>' +
       '<div class="global-grid">';
 
-    list.slice(0, 5).forEach(function (g) {
-      var cp = g.changePct != null ? g.changePct : 0;
-      var status = g.status || '已收盤 · 收集資料';
+    if (!list.length) {
+      html += '<div style="grid-column:1/-1;color:#64748B;font-size:11px;padding:8px 0">國際報價載入中…</div>';
+    }
+    list.slice(0, 6).forEach(function (g) {
+      var dig = (g.symbol === '^VIX' || g.symbol === 'TWD=X' || g.unit === '%') ? 2 : (g.price > 1000 ? 0 : 2);
       html += '<div class="global-box">' +
         '<span class="name">' + esc(g.name || g.symbol) + '</span>' +
-        '<span class="price">' + fmt(g.price, g.price > 1000 ? 2 : 2) + '</span>' +
-        '<span class="pct ' + tw(cp) + '">' + pct(cp) + '</span>' +
-        '<span class="status">' + esc(status) + '</span>' +
+        '<span class="price">' + fmt(g.price, dig) + (g.unit === '%' ? '%' : '') + '</span>' +
+        '<span class="pct ' + tw(g.changePct) + '">' + pct(g.changePct) + '</span>' +
       '</div>';
     });
 
@@ -566,13 +591,7 @@
 
   /* Card 9: News Flash */
   function renderCardNews(p) {
-    var fallback = [
-      { time: '08/05 23:57', title: '公告本公司資安專責主管異動', desc: '1.人員變動動態 (填寫輸入發言人、代理發言人、重要管理主管(如...' },
-      { time: '08/05 23:56', title: '公告本公司115年第2季合併財務報告業經董事會決議通過', desc: '1.提報董事會或經董事會決議日聯友勝:115/08/05 2.審計委員會通...' },
-      { time: '08/05 23:55', title: '公告本公司董事會通過變更營業地址', desc: '1.事實發生日:115/08/05 2.公司名稱:耀登科技股份有限公司 3...' }
-    ];
-
-    var list = (p.flash && p.flash.length) ? p.flash : fallback;
+    var list = (p.flash && p.flash.length) ? p.flash : [];
 
     var html = '<div class="tw-card">' +
       '<div class="tw-card-head">' +
@@ -581,9 +600,14 @@
       '</div>' +
       '<div class="news-list">';
 
-    list.slice(0, 5).forEach(function (n) {
-      html += '<div class="news-item">' +
-        '<div class="n-head"><span class="n-time">' + esc(n.time || '08/05') + '</span><span class="n-title">' + esc(n.title) + '</span><span class="n-tag">關注</span></div>' +
+    if (!list.length) {
+      html += '<div style="padding:8px 0;color:#64748B;font-size:11px">尚無快訊（事件／除權息／營收時程）</div>';
+    }
+    list.slice(0, 8).forEach(function (n) {
+      html += '<div class="news-item"' + (n.code ? ' data-code="' + esc(n.code) + '"' : '') + '>' +
+        '<div class="n-head"><span class="n-time">' + esc(n.time || '') + '</span>' +
+        (n.cat ? '<span style="color:#38BDF8;font-size:9px">[' + esc(n.cat) + ']</span>' : '') +
+        '<span class="n-title">' + esc(n.title || '') + '</span></div>' +
         (n.desc ? '<div class="n-desc">' + esc(n.desc) + '</div>' : '') +
       '</div>';
     });
@@ -591,29 +615,51 @@
     return html + '</div></div>';
   }
 
-  /* Card 10: Watchlist Opportunities & Risks */
+  function readWatchlist() {
+    try {
+      var raw = localStorage.getItem('st_wl');
+      var arr = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(arr)) return [];
+      return arr.filter(function (x) { return x && x.t; }).slice(0, 6);
+    } catch (e) { return []; }
+  }
+
+  function watchTag(cp) {
+    if (cp == null || !isFinite(cp)) return '<span class="note">觀察</span>';
+    if (cp >= 3) return '<span class="note" style="color:#F59E0B">機會</span>';
+    if (cp <= -3) return '<span class="note" style="color:#38BDF8">風險</span>';
+    return '<span class="note">觀察</span>';
+  }
+
+  /* Card 10: Watchlist Opportunities & Risks — 真實自選，禁止灌假列 */
   function renderCardWatchlist(pack) {
+    var wl = readWatchlist();
+    var quotes = (pack && pack.wlQuotes) || {};
     var html = '<div class="tw-card">' +
       '<div class="tw-card-head">' +
-        '<div class="tw-card-title">自選股風險與機會 <span style="font-size:10px;color:#64748B;font-weight:400">| 尚未更新</span></div>' +
+        '<div class="tw-card-title">自選股風險與機會</div>' +
         '<a class="tw-card-link" data-go="watchlist">詳情 →</a>' +
       '</div>' +
-      '<div class="wl-card-list">' +
-        '<div class="wl-card-item">' +
-          '<div class="code-box">' +
-            '<span class="code">0050</span>' +
-            '<span class="name">元大台灣50</span>' +
-            '<span class="note">· 一股短控</span>' +
-          '</div>' +
-          '<div class="right-stats">' +
-            '<span class="px">103.8</span>' +
-            '<span class="up">+3.13%</span>' +
-            '<span style="font-size:9.5px;color:#EF4444">成本損益 -93.97%</span>' +
-          '</div>' +
+      '<div class="wl-card-list">';
+    if (!wl.length) {
+      return html + '<div style="padding:8px 0;color:#64748B;font-size:11px">尚無自選 — 在圖表按 ＋ 加入</div></div></div>';
+    }
+    wl.forEach(function (w) {
+      var q = quotes[w.t] || quotes[w.t + '.TW'] || quotes[w.t + '.TWO'] || {};
+      var px = q.price != null ? q.price : w.price;
+      var cp = q.changePct != null ? q.changePct : w.chg;
+      html += '<div class="wl-card-item" data-code="' + esc(w.t) + '" data-mkt="' + esc(w.m || 'TW') + '">' +
+        '<div class="code-box">' +
+          '<span class="code">' + esc(w.t) + '</span>' +
+          '<span class="name">' + esc(w.name || '') + '</span>' +
+          watchTag(cp) +
         '</div>' +
-      '</div>' +
-    '</div>';
-    return html;
+        '<div class="right-stats">' +
+          '<span class="px">' + fmt(px, 2) + '</span>' +
+          '<span class="' + tw(cp) + '">' + pct(cp) + '</span>' +
+        '</div></div>';
+    });
+    return html + '</div></div>';
   }
 
   function bind(body) {
@@ -628,8 +674,45 @@
     });
     body.querySelectorAll('[data-code]').forEach(function (el) {
       el.onclick = function () {
-        openChart(el.getAttribute('data-code'), 'TW');
+        openChart(el.getAttribute('data-code'), el.getAttribute('data-mkt') || 'TW');
       };
+    });
+  }
+
+  function sparkSvg(closes) {
+    if (!closes || closes.length < 2) {
+      return '<div style="padding:16px;color:#64748B;font-size:11px">近 20 日走勢尚在累積（同步資料後顯示）</div>';
+    }
+    var lo = Math.min.apply(null, closes), hi = Math.max.apply(null, closes);
+    var span = (hi - lo) || 1;
+    var w = 320, h = 80, pad = 4;
+    var pts = closes.map(function (c, i) {
+      var x = pad + (i / (closes.length - 1)) * (w - pad * 2);
+      var y = pad + (1 - (c - lo) / span) * (h - pad * 2);
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    var up = closes[closes.length - 1] >= closes[0];
+    var col = up ? '#FF4D4D' : '#22C55E';
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" style="width:100%;height:100%">' +
+      '<polyline fill="none" stroke="' + col + '" stroke-width="2" points="' + pts + '"/></svg>';
+  }
+
+  function fetchWlQuotes() {
+    var wl = readWatchlist();
+    var twCodes = wl.filter(function (w) { return (w.m || 'TW') === 'TW'; }).map(function (w) { return w.t; });
+    var us = wl.filter(function (w) { return w.m === 'US'; }).map(function (w) { return w.t; });
+    var tasks = [];
+    if (twCodes.length) tasks.push(jget('/twquote-batch?codes=' + encodeURIComponent(twCodes.join(','))));
+    else tasks.push(Promise.resolve(null));
+    if (us.length) tasks.push(jget('/quote-batch?syms=' + encodeURIComponent(us.join(','))));
+    else tasks.push(Promise.resolve(null));
+    return Promise.all(tasks).then(function (arr) {
+      var out = {};
+      [arr[0], arr[1]].forEach(function (q) {
+        if (!q || typeof q !== 'object') return;
+        Object.keys(q).forEach(function (k) { out[k] = q[k]; });
+      });
+      return out;
     });
   }
 
@@ -643,7 +726,9 @@
 
     var sub = $('pl-sub');
     if (sub) {
-      sub.textContent = '官方資料混成 · 因子可覆核';
+      sub.textContent = '更新 ' + new Date().toLocaleTimeString('zh-TW') +
+        (p.date ? ' · 廣度日 ' + p.date : '') +
+        ' · 缺資料不灌假分數';
     }
 
     body.innerHTML =
@@ -652,6 +737,19 @@
       '<div class="pl-row bot-row">' + renderCardGlobal(p) + renderCardNews(p) + renderCardWatchlist(pack) + '</div>';
 
     bind(body);
+
+    jget('/pulse/history?kind=index&n=20').then(function (h) {
+      var box = $('pl-spark');
+      if (!box) return;
+      var rows = ((h && h.rows) || []).slice().reverse();
+      var closes = rows.map(function (r) { return r.close; }).filter(function (c) {
+        return c != null && isFinite(c);
+      });
+      box.innerHTML = sparkSvg(closes);
+      if (closes.length) {
+        box.title = '近 ' + closes.length + ' 日 · 最新收 ' + Number(closes[closes.length - 1]).toLocaleString('en-US', { maximumFractionDigits: 2 });
+      }
+    });
   }
 
   function refresh(force) {
@@ -662,10 +760,23 @@
       btn.disabled = true;
       btn.textContent = '↻ 更新中…';
     }
+    if (!lastPack) {
+      body.innerHTML = '<div style="padding:20px;text-align:center;color:#64748B">載入總覽儀表板…</div>';
+    }
     var q = force ? '/pulse?refresh=1' : '/pulse';
-    Promise.all([jget(q)]).then(function (arr) {
+    Promise.all([jget(q), fetchWlQuotes()]).then(function (arr) {
       var pulse = arr[0];
-      render({ pulse: pulse || {} });
+      if (!pulse || !pulse.ok) {
+        if (!lastPack) {
+          body.innerHTML = '<div style="padding:20px;color:#64748B">脈動載入失敗' +
+            (pulse && pulse.error ? '：' + esc(pulse.error) : '（請重啟 server）') +
+            ' <button type="button" class="pl-btn" id="pl-retry">重試</button></div>';
+          var retry = $('pl-retry');
+          if (retry) retry.onclick = function () { refresh(true); };
+        }
+        return;
+      }
+      render({ pulse: pulse, wlQuotes: arr[1] || {} });
     }).finally(function () {
       var b = $('pl-refresh');
       if (b) {
@@ -677,7 +788,7 @@
 
   function activate() {
     ensureMount();
-    render(lastPack || {});
+    if (lastPack) render(lastPack);
     refresh(false);
     if (timer) clearInterval(timer);
     timer = setInterval(function () {

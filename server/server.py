@@ -2014,9 +2014,13 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         self.end_headers()
 
     def end_headers(self):
-        if hasattr(self, 'path') and self.path.endswith('.html'):
+        # HTML／JS 開發期禁止快取，避免 shell/pulse 修好後仍載到舊殼層
+        p = getattr(self, 'path', '') or ''
+        path_only = p.split('?', 1)[0]
+        if path_only.endswith(('.html', '.js', '.css')):
             self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
             self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
         self.send_header('Access-Control-Allow-Origin', '*')
         super().end_headers()
 

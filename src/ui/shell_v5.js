@@ -11,33 +11,47 @@
   'use strict';
 
   var STORAGE_KEY = 'st5.shell.route';
-  var V  var ROUTES = [
-    { id: 'pulse',         label: '總覽首頁', hint: '市場總覽儀表板（對齊 TW Pulse Overview）', icon: '⊞' },
-    { id: 'signals',       label: '市場脈動', hint: '市場脈動與體質因子',                 icon: '📈' },
-    { id: 'chart',         label: '指數走勢', hint: 'K 線工作區（含加權／櫃買指數與總體列）',   icon: '📉' },
-    { id: 'breadth',       label: '市場溫度', hint: '大盤廣度與溫度結構（漲跌家數）',         icon: '📊' },
-    { id: 'heat',          label: '產業熱力圖', hint: '類股熱力圖＋焦點掃描',                 icon: '▦' },
-    { id: 'institutional', label: '法人動向', hint: '三大法人動向與買賣超',                 icon: '🏦' },
-    { id: 'international', label: '國際市場', hint: '美股／美元／原油與總經',               icon: '🌐' },
-    { id: 'afterhours',    label: '盤後數據', hint: '漲跌排行／籌碼／期貨盤後',             icon: '◐' },
-    { id: 'scan',          label: '策略訊號', hint: '策略訊號與三合一選股',                 icon: '🎯' },
-    { id: 'watchlist',     label: '自選股中心', hint: '自選股中心（表格式與風險機會）',       icon: '☆' },
-    { id: 'risk',          label: '風險監控', hint: '風險事件與脈動風險度',                 icon: '🛡' },
-    { id: 'news',          label: '新聞快訊', hint: '事件／結算／警報中樞',                 icon: '◉' },
-    { id: 'settings',      label: '設定', hint: '同步狀態與資料來源',                   icon: '⚙' }
+  var VERSION = '5.0';
+
+  /* 舊 route → 更完整的目的地（圖表／熱力等） */
+  var ROUTE_ALIASES = {
+    trends: { to: 'chart', sym: '^TWII', mkt: 'TW' },   // 指數頁 → 圖表加權
+    index:  { to: 'chart', sym: '^TWII', mkt: 'TW' }
+  };
+
+  var ROUTES = [
+    { id: 'pulse',         label: '總覽', hint: '市場總覽儀表板（對齊 TW Pulse Overview）', icon: '◎' },
+    { id: 'chart',         label: '圖表', hint: 'K 線工作區（含加權／櫃買指數與總體列）',   icon: '◈' },
+    { id: 'breadth',       label: '廣度', hint: '大盤廣度（漲跌家數）',                     icon: '▤' },
+    { id: 'heat',          label: '熱力', hint: '類股熱力圖＋焦點掃描',                     icon: '▦' },
+    { id: 'institutional', label: '法人', hint: '三大法人動向與買賣超',                     icon: '🏦' },
+    { id: 'international', label: '國際', hint: '美股／美元／原油與總經',                   icon: '🌐' },
+    { id: 'afterhours',    label: '盤後', hint: '漲跌排行／籌碼／期貨盤後',                 icon: '◐' },
+    { id: 'signals',       label: '訊號', hint: '策略訊號／焦點掃描結果',                   icon: '🎯' },
+    { id: 'watchlist',     label: '自選', hint: '自選股中心（表格式；完整操作在圖表列）',   icon: '★' },
+    { id: 'risk',          label: '風險', hint: '風險事件與脈動風險度',                     icon: '🛡' },
+    { id: 'news',          label: '快訊', hint: '事件／結算／警報中樞',                     icon: '◉' },
+    { id: 'scan',          label: '選股', hint: '三合一選股（技術×基本面×籌碼）',           icon: '🔍' },
+    { id: 'book',          label: '投組', hint: '投組風險（波動／VaR／曝險）',               icon: '▣' },
+    { id: 'settings',      label: '設定', hint: '同步狀態與資料來源',                       icon: '⚙' },
+    { id: 'workspace',     label: '工具', hint: '回到圖表並開啟指令盤',                     icon: '⌘', action: 'cmd' }
   ];
 
-  var state = { route: 'chart', built: false, syncing: false };
+  var state = { route: 'pulse', built: false, syncing: false };
 
   function $(id) { return document.getElementById(id); }
 
   function injectCSS() {
-    if ($('shell-v5-css')) return;
-    var s = document.createElement('style');
-    s.id = 'shell-v5-css';
+    var s = $('shell-v5-css');
+    if (!s) {
+      s = document.createElement('style');
+      s.id = 'shell-v5-css';
+      document.head.appendChild(s);
+    }
     s.textContent =
       '#shell-row{display:flex;flex:1;min-height:0;min-width:0}' +
-      '#navrail{flex:0 0 185px;width:185px;background:#08101C;' +
+      /* TW Pulse 寬側欄（參考圖）；窄螢幕收成圖示欄 */
+      '#navrail{flex:0 0 168px;width:168px;background:#08101C;' +
         'border-right:1px solid #132238;display:flex;flex-direction:column;align-items:stretch;' +
         'padding:10px 8px;gap:2px;z-index:40;flex-shrink:0;overflow-y:auto;overflow-x:hidden;box-sizing:border-box}' +
       '#navrail .nr-brand-tw{display:flex;align-items:center;gap:8px;padding:6px 6px 12px;' +
@@ -54,30 +68,27 @@
         'font-size:12px;font-weight:600;letter-spacing:.2px;transition:all .14s ease;flex-shrink:0;text-align:left}' +
       '.nr-btn .nr-ico{font-size:14px;line-height:1;opacity:.8;width:16px;text-align:center;flex-shrink:0}' +
       '.nr-btn:hover{color:#F8FAFC;background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.06)}' +
-      '.nr-btn.on{color:#F8FAFC;background:linear-gradient(90deg, rgba(14,165,233,0.18) 0%, rgba(14,165,233,0.04) 100%);' +
+      '.nr-btn.on{color:#F8FAFC;background:linear-gradient(90deg,rgba(14,165,233,0.18) 0%,rgba(14,165,233,0.04) 100%);' +
         'border-color:rgba(14,165,233,0.35);box-shadow:inset 3px 0 0 #0EA5E9}' +
       '.nr-btn.on .nr-ico{opacity:1;color:#38BDF8}' +
       '.nr-spacer{flex:1;min-height:12px}' +
       '.nr-foot-tw{padding:8px 6px 4px;font-family:\'Noto Sans TC\',sans-serif;' +
-        'font-size:10px;color:#64748B;border-top:1px solid #132238;margin-top:6px;flex-shrink:0;display:flex;flex-direction:column;gap:3px}' +
-      '.nr-foot-tw .mode-dot{color:#38BDF8;font-weight:600;display:flex;align-items:center;gap:4px}' +
+        'font-size:10px;color:#64748B;border-top:1px solid #132238;margin-top:6px;flex-shrink:0;' +
+        'display:flex;flex-direction:column;gap:3px}' +
+      '.nr-foot-tw .mode-dot{color:#38BDF8;font-weight:600}' +
       '.nr-foot-tw .mode-sub{font-size:8.5px;color:#475569;line-height:1.2}' +
-      '.nr-foot-tw .logout{margin-top:4px;color:#94A3B8;cursor:pointer;display:inline-flex;align-items:center;gap:4px;font-size:10px}' +
-      '.nr-foot-tw .logout:hover{color:#F8FAFC}' +
       '#shell-main{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;position:relative}' +
-      '#shell-views{display:none;flex:1;min-height:0;min-width:0;background:#060C16;' +
-        'overflow:auto}' +
+      '#shell-views{display:none;flex:1;min-height:0;min-width:0;background:#060C16;overflow:auto}' +
       '#shell-views.show{display:flex;flex-direction:column}' +
+      '#shell-views.show:has(#view-pulse.on){overflow:hidden}' +
+      /* 非圖表：隱藏舊 topbar／圖表工作區，只留 shell 面板 */
       '#topbar.shell-hidden{display:none !important}' +
       '#body.shell-hidden{display:none !important}' +
       '#wlbar.shell-hidden{display:none !important}' +
-      '.sv-panel{display:none;flex:1;padding:10px 14px 16px;max-width:min(1480px,100%);min-width:0;box-sizing:border-box}' +
-      '.sv-panel.on{display:block}' +
-      '.sv-panel .sv-kicker{font-size:9px;letter-spacing:1.5px;margin-bottom:2px}' +
-      '.sv-panel .sv-title{font-size:20px;margin:0}' +
-      '.sv-panel .sv-sub{font-size:10px;margin-top:2px;line-height:1.4}' +
+      '.sv-panel{display:none;flex:1;padding:10px 14px 16px;max-width:min(1480px,100%);min-width:0;box-sizing:border-box;min-height:0}' +
+      '.sv-panel.on{display:flex;flex-direction:column}' +
       '#shell-views > .sv-panel{min-width:0}' +
-      '.sv-mount{min-height:100%;min-width:0;max-width:100%;box-sizing:border-box}' +
+      '.sv-mount{flex:1;min-height:0;min-width:0;max-width:100%;box-sizing:border-box;display:flex;flex-direction:column}' +
       '.sv-kicker{font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--gold);' +
         'letter-spacing:1.5px;margin-bottom:2px}' +
       '.sv-title{font-family:\'Noto Serif TC\',serif;font-size:20px;font-weight:700;color:var(--thi);' +
@@ -106,11 +117,12 @@
       '@media (max-width:1024px){' +
         '#navrail{flex-basis:56px;width:56px;padding:6px 4px}' +
         '#navrail .nr-brand-tw .brand-title,#navrail .nr-brand-tw .brand-sub,' +
-        '#navrail .nr-foot-tw .mode-sub,#navrail .nr-foot-tw .logout{display:none}' +
+        '#navrail .nr-foot-tw .mode-sub{display:none}' +
         '.nr-btn{justify-content:center;padding:6px 0;font-size:10px}' +
         '.nr-btn span:not(.nr-ico){display:none}' +
+        '.sv-panel{padding:10px 12px 14px}' +
+        '#topbar .shell-sync-btn span.lbl{display:none}' +
       '}';
-    document.head.appendChild(s);
   }
 
   function stubHTML(route) {
@@ -131,8 +143,7 @@
       '<div class="logo-text">' +
         '<div class="brand-title">TW Pulse</div>' +
         '<div class="brand-sub">MARKET INTELLIGENCE</div>' +
-      '</div>' +
-      '</div>' +
+      '</div></div>' +
       ROUTES.map(function (r) {
         return '<button type="button" class="nr-btn" data-route="' + r.id + '" title="' +
           r.hint.replace(/"/g, '') + '">' +
@@ -141,27 +152,9 @@
       }).join('') +
       '<div class="nr-spacer"></div>' +
       '<div class="nr-foot-tw">' +
-        '<div class="mode-dot">● 本機展示模式</div>' +
+        '<div class="mode-dot">● 本機展示 · v' + VERSION + '</div>' +
         '<div class="mode-sub">個人資料僅存在此瀏覽器</div>' +
-        '<div class="logout">[→ 登出</div>' +
       '</div>';
-  }'<div class="sv-title">' + route.label + '</div>' +
-      '<p class="sv-desc">' + route.hint +
-        '。面板載入中或尚未掛接資料模組。</p>' +
-      '<div class="sv-meta">route = ' + route.id + '</div>' +
-      '<button type="button" class="sv-cta" data-shell-back>← 回到圖表工作區</button>';
-  }
-
-  function railHTML() {
-    return '<div class="nr-brand">ST<small>v' + VERSION + '</small></div>' +
-      ROUTES.map(function (r) {
-        return '<button type="button" class="nr-btn" data-route="' + r.id + '" title="' +
-          r.hint.replace(/"/g, '') + '">' +
-          '<span class="nr-ico" aria-hidden="true">' + r.icon + '</span>' +
-          '<span>' + r.label + '</span></button>';
-      }).join('') +
-      '<div class="nr-spacer"></div>' +
-      '<div class="nr-foot">INTEL</div>';
   }
 
   function ensurePanel(r) {
@@ -372,13 +365,17 @@
       settings: 'SettingsV5'
     };
     var key = map[id];
-    if (key) {
-      if (window[key] && typeof window[key].activate === 'function') {
-        try { window[key].activate(); }
-        catch (err) { console.warn('[shell-v5] ' + key + ' activate', err); }
-      } else if (retries < 15) {
-        setTimeout(function () { emitRoute(id, retries + 1); }, 50);
-      }
+    if (!key) return;
+    if (window[key] && typeof window[key].activate === 'function') {
+      try { window[key].activate(); }
+      catch (err) { console.warn('[shell-v5] ' + key + ' activate', err); }
+      return;
+    }
+    /* 模組尚未載入：短重試，避免開成空白舊介面 */
+    if (retries < 20) {
+      setTimeout(function () { emitRoute(id, retries + 1); }, 50);
+    } else {
+      console.warn('[shell-v5] module not ready: ' + key + ' (route=' + id + ')');
     }
   }
 
@@ -422,6 +419,14 @@
 
     state.route = id;
     try { localStorage.setItem(STORAGE_KEY, id); } catch (e) {}
+    try {
+      if (window.history && window.history.replaceState) {
+        var base = window.location.pathname + (window.location.search || '');
+        window.history.replaceState(null, '', base + '#' + id);
+      } else {
+        window.location.hash = id;
+      }
+    } catch (e2) {}
 
     var topbar = $('topbar');
     var body = $('body');
@@ -463,7 +468,7 @@
 
   function go(id, opts) {
     if (!ensureStructure()) return;
-    applyRoute(id || 'chart', opts || {});
+    applyRoute(id || 'pulse', opts || {});
   }
 
   function boot() {
@@ -474,17 +479,25 @@
       if (orphan && orphan.parentNode) orphan.parentNode.removeChild(orphan);
     });
     var saved = 'pulse';
-    var hash = (window.location.hash || '').replace('#', '').trim();
+    var hash = (window.location.hash || '').replace(/^#/, '').trim();
     if (hash && findRoute(hash)) {
       saved = hash;
     } else {
       try { saved = localStorage.getItem(STORAGE_KEY) || 'pulse'; } catch (e) {}
     }
-    if (saved === 'trends' || saved === 'index') saved = 'pulse';
-    if (!saved || !findRoute(saved)) saved = 'pulse';
-    applyRoute(saved);
+    /* 舊「指數」分頁 → 圖表加權；非法 route → 總覽 */
+    if (saved === 'trends' || saved === 'index') {
+      applyRoute('chart', { sym: '^TWII', mkt: 'TW' });
+    } else {
+      if (!saved || !findRoute(saved)) saved = 'pulse';
+      applyRoute(saved);
+    }
     probeHealth();
     setInterval(probeHealth, 60000);
+    window.addEventListener('hashchange', function () {
+      var h = (window.location.hash || '').replace(/^#/, '').trim();
+      if (h && findRoute(h) && h !== state.route) go(h);
+    });
     /* 歷史庫過薄時自動背景 merge（不打擾） */
     setTimeout(function () {
       fetch('/sync/status', { cache: 'no-store' })
