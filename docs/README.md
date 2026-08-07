@@ -14,12 +14,13 @@ Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤�
 | 區塊 | 說明 |
 |------|------|
 | **市場脈搏與組成** | 總分／明顯偏強階梯、動能、風險、資料可靠度、主要動能／壓力因子 |
-| **市場盤勢走勢** | 加權／櫃買漲幅 + OHLC + 近 20 日收盤折線（本機庫） |
-| **法人分歧與資金** | 外資／投信／自營＋分歧說明 |
-| **市場廣度** | 漲跌家數甜甜圈、多空比、偏多擴張語氣、漲跌停 chip |
-| **產業輪動** | 類股相對強弱條 |
-| **漲停監控／跌幅異常** | 日排行極端值篩選 |
-| **全球市場對台股影響** | 道瓊／S&P／那斯達克／VIX／美元台幣等 |
+| **市場盤勢走勢** | 加權／櫃買／**台指期** + OHLC + 近 20 日收盤折線（本機庫） |
+| **法人資金** | 外資／投信／自營／合計 + **合計買賣超趨勢圖與評論**（不重複量柱） |
+| **市場廣度** | 漲跌結構甜甜圈 + **多空比趨勢與評論**（漲跌停僅極端時評論） |
+| **產業輪動** | 類股相對強弱條；面板內 **TW／US** 切換 |
+| **漲停監控／跌幅異常** | 日排行極端值；廣度頁漲跌停 ▲▼ 浮動公司清單 |
+| **全球市場對台股影響** | 道瓊／S&P／那斯達克／**費半 SOX**／**日經**／**KOSPI**／VIX／美元台幣等 |
+| **市場快訊** | **台／美公司重大訊息**（上市櫃重訊＋美股新聞／SEC 8-K；`GET /flash`） |
 | **因子帳本** | 正面／風險／尚未納入（缺資料不計分） |
 | **同步資料** | 頂列按鈕；`pulse_history.db` 只 merge 新日 |
 
@@ -92,30 +93,53 @@ Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤�
 
 ## 快速開始（3 步）
 
-> 需求：Windows 10/11 + Python 3.10+（純 stdlib，**不用 pip**）+ 現代瀏覽器。確認：`python --version`。
+> 需求：Python 3.10+（純 stdlib，**不用 pip**）+ 現代瀏覽器。Windows 10/11 或 Linux／macOS。確認：`python --version`／`python3 --version`。
 
-1. **解壓縮**到任一資料夾（例 `C:\Tools\Stock_Terminal\`）。
-2. **雙擊 `scripts\go.bat`** — 自動 rebuild、重啟 server（**只聽 127.0.0.1:18432**）、開瀏覽器。
-3. 左側點 **總覽** 看市場儀表板；或上方輸入框打代號按 **GO**（台股 `2330`；美股先點 `US` 再打 `AAPL`）。
+1. **解壓縮或 clone**到任一資料夾。
+2. **啟動**（server **只聽 127.0.0.1:18432**）：
+   - Windows：雙擊或執行 `scripts\go.bat`
+   - Linux／macOS：`chmod +x scripts/go.sh && ./scripts/go.sh`
+3. 左側點 **總覽** 看市場儀表板；或上方輸入框打代號按 **GO**（台股 `2330`；美股先點 `US` 再打 `AAPL`）。開頁後 **Ctrl+F5**。
 
 > **首次開啟**「融資週期」「籌碼集中度」等圖時，會背景回補歷史（不再隨 git 附大 DB）。總覽可按頂列 **同步資料** 預熱指數／廣度／法人歷史。
 
-### 每次 Git 更新後
+### 本機指令速查
+
+**Windows**
 
 ```powershell
 cd C:\Tools\Stock_Terminal
-scripts\go.bat pull
+scripts\go.bat              # rebuild + 重啟 + 瀏覽器
+scripts\go.bat pull         # git pull 後同上
+scripts\go.bat pull <分支>
+scripts\go.bat rebuild      # 不開瀏覽器
 ```
 
-這會：`git pull`（若本機改過 `stock_terminal_v2.html` 會自動 stash）→ `build_v2.py` → 殺掉舊 :18432 → 重啟 → 開瀏覽器。開頁後 **Ctrl+F5**。
+**Linux / macOS**
+
+```bash
+cd /path/to/Stock_Terminal
+./scripts/go.sh
+./scripts/go.sh pull
+./scripts/go.sh pull <branch>
+./scripts/go.sh rebuild
+```
+
+**手動**
+
+```bash
+python3 build_v2.py
+python3 server/server.py
+# → http://127.0.0.1:18432/stock_terminal_v2.html#pulse
+```
 
 | 指令 | 用途 |
 |------|------|
-| `scripts\go.bat` | 日常啟動（不 pull） |
-| `scripts\go.bat pull` | 更新後用（維持目前分支） |
-| `scripts\go.bat pull cursor/某分支` | 切分支 + pull + 重建 + 重啟 |
-| `scripts\go.bat rebuild` | 只重建＋重啟（不開瀏覽器） |
-| `scripts\apply.bat <分支名>` | 一鍵套用指定功能分支 |
+| `scripts\go.bat` / `./scripts/go.sh` | 日常啟動（不 pull） |
+| `… pull` | 更新後用（維持目前分支） |
+| `… pull <分支>` | 切分支 + pull + 重建 + 重啟 |
+| `… rebuild` | 只重建＋重啟（不開瀏覽器） |
+| `scripts\apply.bat <分支名>` | Windows 一鍵套用指定功能分支 |
 
 舊捷徑 `start_terminal_v3.bat` / `rebuild_and_restart.bat` 仍可用。
 
@@ -139,7 +163,11 @@ python scripts\build_dist.py
 REM 或雙擊 scripts\build_dist.bat（Windows）
 ```
 
-產出根目錄 **`Stock_Terminal_v5.0.zip`**。收件者解壓後雙擊 `scripts\go.bat` 即可。
+```bash
+python3 scripts/build_dist.py
+```
+
+產出根目錄 **`Stock_Terminal_v5.0.zip`**。收件者解壓後：Windows 用 `scripts\go.bat`；Linux／macOS 用 `./scripts/go.sh`。
 
 **發行包刻意排除：**
 
@@ -169,6 +197,8 @@ REM 或雙擊 scripts\build_dist.bat（Windows）
 | 借券賣出 | TWSE TWTASU | 全市場合計 |
 | 主動 ETF 持股 | MoneyDJ Basic0007B | 全部持股頁 |
 | 法人籌碼 | TWSE 三大法人 | 每日快照 |
+| 上市／櫃買重訊 | TWSE `t187ap04_L`／TPEx `mopsfin_t187ap04_O` | `/flash`、總覽市場快訊 |
+| 美股公司訊息 | Yahoo Finance news＋SEC 8-K | 權值／半導體籃；標題需點名 |
 | 融資維持率／餘額 | TWSE／TPEx 公開資訊 | 融資週期圖 |
 | 集保持股分級 | TDCC opendata | 籌碼集中度 |
 | 美債／信用／CPI | FRED 等公開序列 | 市場風險圖；逾時 fail-fast |

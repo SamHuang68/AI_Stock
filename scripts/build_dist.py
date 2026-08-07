@@ -253,7 +253,7 @@ def build(out: Path | None = None) -> Path:
         shutil.rmtree(stage)
     stage.mkdir(parents=True)
 
-    print("Staging src / server / scripts / docs ...")
+    print("Staging src / server / scripts / docs / assets ...")
     n = 0
     n += copy_tree_filtered(ROOT / "src", stage / "src")
     n += copy_tree_filtered(ROOT / "server", stage / "server")
@@ -261,6 +261,8 @@ def build(out: Path | None = None) -> Path:
     # docs without revision.md (filtered by SECRET_BASENAMES)
     if (ROOT / "docs").is_dir():
         n += copy_tree_filtered(ROOT / "docs", stage / "docs")
+    if (ROOT / "assets").is_dir():
+        n += copy_tree_filtered(ROOT / "assets", stage / "assets")
 
     print("Staging root files ...")
     for fn in (
