@@ -17,7 +17,7 @@ var V  var ROUTES = [
 - 預設 route → pulse；URL hash `#pulse`
 - HTML／JS no-cache；`/` 與 `stock_terminal.html` 導向 v2
 - go.bat 開 `#pulse`
-- TW Pulse 寬側欄 branding
+- 寬側欄／一屏 compact（產品名維持 Stock Terminal 5.0，非外部參考程式名）
 - pulse 10 卡視覺改版（已清掉假資料 fallback）
 
 ## 本次接手修復

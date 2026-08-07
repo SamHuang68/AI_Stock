@@ -7,9 +7,9 @@ Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤�
 
 ---
 
-## 5.0 新功能（TW Pulse）
+## 5.0 新功能（總覽儀表板）
 
-側欄殼層（ST v5.0）對齊 [tw-pulse-terminal](https://github.com/SamHuang68/tw-pulse-terminal) 資訊架構，總覽一次看完市場結構：
+側欄殼層（**Stock Terminal v5.0**）採一屏高密度總覽；版面密度參考 [tw-pulse-terminal](https://github.com/SamHuang68/tw-pulse-terminal)（僅參考，產品名不變），一次看完市場結構：
 
 | 區塊 | 說明 |
 |------|------|
@@ -96,7 +96,7 @@ Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤�
 
 1. **解壓縮**到任一資料夾（例 `C:\Tools\Stock_Terminal\`）。
 2. **雙擊 `scripts\go.bat`** — 自動 rebuild、重啟 server（**只聽 127.0.0.1:18432**）、開瀏覽器。
-3. 左側點 **總覽** 看 TW Pulse；或上方輸入框打代號按 **GO**（台股 `2330`；美股先點 `US` 再打 `AAPL`）。
+3. 左側點 **總覽** 看市場儀表板；或上方輸入框打代號按 **GO**（台股 `2330`；美股先點 `US` 再打 `AAPL`）。
 
 > **首次開啟**「融資週期」「籌碼集中度」等圖時，會背景回補歷史（不再隨 git 附大 DB）。總覽可按頂列 **同步資料** 預熱指數／廣度／法人歷史。
 

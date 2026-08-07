@@ -1,5 +1,5 @@
 /* ============================================================================
- * hub_v5.js  —  Stock Terminal 5.0：TW Pulse 對齊模組中樞
+ * hub_v5.js  —  Stock Terminal 5.0：總覽周邊模組中樞
  * ----------------------------------------------------------------------------
  * institutional / international / signals / watchlist / risk / settings
  * （trends／指數已併入 ShellV5 → 圖表 ^TWII）

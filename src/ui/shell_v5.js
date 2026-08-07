@@ -1,8 +1,8 @@
 /* ============================================================================
  * shell_v5.js  —  Stock Terminal 5.0：側欄殼層 + 視圖路由
  * ----------------------------------------------------------------------------
- * TW Pulse 對齊：總覽／圖表／廣度／熱力／法人／國際／盤後／
- * 訊號／自選／風險／快訊／設定 + 選股／投組。
+ * 總覽儀表板（版面參考外部 compact dashboard；產品名為 Stock Terminal）。
+ * 路由：總覽／圖表／廣度／熱力／法人／國際／盤後／訊號／自選／風險／快訊／選股／投組／設定。
  * 「指數」已併入圖表（^TWII K 線＋總體列／indices 自選更完整）。
  * 同步：預抓歷史庫，僅 merge 最近缺漏日（/sync）。
  * 鐵律：不破壞 #left / #pro-tools / symLoaded / Toolbar 既有行為。
@@ -20,7 +20,7 @@
   };
 
   var ROUTES = [
-    { id: 'pulse',         label: '總覽', hint: '市場總覽儀表板（對齊 TW Pulse Overview）', icon: '◎' },
+    { id: 'pulse',         label: '總覽', hint: '市場總覽儀表板（一屏高密度）', icon: '◎' },
     { id: 'chart',         label: '圖表', hint: 'K 線工作區（含加權／櫃買指數與總體列）',   icon: '◈' },
     { id: 'breadth',       label: '廣度', hint: '大盤廣度（漲跌家數）',                     icon: '▤' },
     { id: 'heat',          label: '熱力', hint: '類股熱力圖＋焦點掃描',                     icon: '▦' },
@@ -50,42 +50,41 @@
     }
     s.textContent =
       '#shell-row{display:flex;flex:1;min-height:0;min-width:0}' +
-      /* TW Pulse 寬側欄（參考圖）；窄螢幕收成圖示欄 */
-      '#navrail{flex:0 0 168px;width:168px;background:#08101C;' +
+      /* 寬側欄；窄螢幕收成圖示欄 — 品牌固定 Stock Terminal */
+      '#navrail{flex:0 0 158px;width:158px;background:#08101C;' +
         'border-right:1px solid #132238;display:flex;flex-direction:column;align-items:stretch;' +
-        'padding:10px 8px;gap:2px;z-index:40;flex-shrink:0;overflow-y:auto;overflow-x:hidden;box-sizing:border-box}' +
-      '#navrail .nr-brand-tw{display:flex;align-items:center;gap:8px;padding:6px 6px 12px;' +
-        'border-bottom:1px solid #132238;margin-bottom:6px;user-select:none;flex-shrink:0}' +
-      '#navrail .nr-brand-tw .logo-box{width:28px;height:28px;border-radius:6px;background:rgba(16,185,129,0.12);' +
-        'border:1px solid rgba(16,185,129,0.3);display:flex;align-items:center;justify-content:center;flex-shrink:0}' +
-      '#navrail .nr-brand-tw .brand-title{font-family:\'Noto Sans TC\',sans-serif;font-size:14px;font-weight:800;' +
-        'color:#E2E8F0;line-height:1;letter-spacing:.3px}' +
-      '#navrail .nr-brand-tw .brand-sub{font-family:\'JetBrains Mono\',monospace;font-size:7.5px;font-weight:700;' +
-        'color:#64748B;letter-spacing:1px;margin-top:3px}' +
-      '.nr-btn{display:flex;align-items:center;gap:9px;' +
-        'min-height:34px;margin:1px 0;padding:6px 10px;border:1px solid transparent;border-radius:8px;' +
-        'background:transparent;color:#94A3B8;cursor:pointer;font-family:\'Noto Sans TC\',sans-serif;' +
-        'font-size:12px;font-weight:600;letter-spacing:.2px;transition:all .14s ease;flex-shrink:0;text-align:left}' +
-      '.nr-btn .nr-ico{font-size:14px;line-height:1;opacity:.8;width:16px;text-align:center;flex-shrink:0}' +
+        'padding:8px 6px;gap:1px;z-index:40;flex-shrink:0;overflow-y:auto;overflow-x:hidden;box-sizing:border-box}' +
+      '#navrail .nr-brand-st{display:flex;align-items:center;gap:8px;padding:4px 6px 10px;' +
+        'border-bottom:1px solid #132238;margin-bottom:4px;user-select:none;flex-shrink:0}' +
+      '#navrail .nr-brand-st .logo-box{width:28px;height:28px;border-radius:6px;background:var(--gold-s);' +
+        'border:1px solid var(--gold-m);display:flex;align-items:center;justify-content:center;flex-shrink:0;' +
+        'font-family:\'JetBrains Mono\',monospace;font-size:11px;font-weight:800;color:var(--gold)}' +
+      '#navrail .nr-brand-st .brand-title{font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:800;' +
+        'color:#E2E8F0;line-height:1.1;letter-spacing:.2px}' +
+      '#navrail .nr-brand-st .brand-sub{font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;' +
+        'color:var(--gold);letter-spacing:.8px;margin-top:2px}' +
+      '.nr-btn{display:flex;align-items:center;gap:8px;' +
+        'min-height:32px;margin:1px 0;padding:5px 8px;border:1px solid transparent;border-radius:7px;' +
+        'background:transparent;color:#94A3B8;cursor:pointer;font-family:\'JetBrains Mono\',monospace;' +
+        'font-size:11px;font-weight:600;letter-spacing:.2px;transition:all .14s ease;flex-shrink:0;text-align:left}' +
+      '.nr-btn .nr-ico{font-size:13px;line-height:1;opacity:.85;width:16px;text-align:center;flex-shrink:0}' +
       '.nr-btn:hover{color:#F8FAFC;background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.06)}' +
-      '.nr-btn.on{color:#F8FAFC;background:linear-gradient(90deg,rgba(14,165,233,0.18) 0%,rgba(14,165,233,0.04) 100%);' +
-        'border-color:rgba(14,165,233,0.35);box-shadow:inset 3px 0 0 #0EA5E9}' +
-      '.nr-btn.on .nr-ico{opacity:1;color:#38BDF8}' +
-      '.nr-spacer{flex:1;min-height:12px}' +
-      '.nr-foot-tw{padding:8px 6px 4px;font-family:\'Noto Sans TC\',sans-serif;' +
-        'font-size:10px;color:#64748B;border-top:1px solid #132238;margin-top:6px;flex-shrink:0;' +
-        'display:flex;flex-direction:column;gap:3px}' +
-      '.nr-foot-tw .mode-dot{color:#38BDF8;font-weight:600}' +
-      '.nr-foot-tw .mode-sub{font-size:8.5px;color:#475569;line-height:1.2}' +
+      '.nr-btn.on{color:var(--gold);background:var(--gold-s);border-color:var(--gold-m)}' +
+      '.nr-btn.on .nr-ico{opacity:1}' +
+      '.nr-spacer{flex:1;min-height:10px}' +
+      '.nr-foot-st{padding:8px 6px 4px;font-family:\'JetBrains Mono\',monospace;' +
+        'font-size:9px;color:#64748B;border-top:1px solid #132238;margin-top:4px;flex-shrink:0;' +
+        'display:flex;flex-direction:column;gap:2px}' +
+      '.nr-foot-st .mode-dot{color:var(--cyan);font-weight:600}' +
+      '.nr-foot-st .mode-sub{font-size:8px;color:#475569;line-height:1.2}' +
       '#shell-main{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;position:relative}' +
       '#shell-views{display:none;flex:1;min-height:0;min-width:0;background:#060C16;overflow:auto}' +
       '#shell-views.show{display:flex;flex-direction:column}' +
       '#shell-views.show:has(#view-pulse.on){overflow:hidden}' +
-      /* 非圖表：隱藏舊 topbar／圖表工作區，只留 shell 面板 */
       '#topbar.shell-hidden{display:none !important}' +
       '#body.shell-hidden{display:none !important}' +
       '#wlbar.shell-hidden{display:none !important}' +
-      '.sv-panel{display:none;flex:1;padding:10px 14px 16px;max-width:min(1480px,100%);min-width:0;box-sizing:border-box;min-height:0}' +
+      '.sv-panel{display:none;flex:1;padding:8px 10px 10px;max-width:none;min-width:0;box-sizing:border-box;min-height:0}' +
       '.sv-panel.on{display:flex;flex-direction:column}' +
       '#shell-views > .sv-panel{min-width:0}' +
       '.sv-mount{flex:1;min-height:0;min-width:0;max-width:100%;box-sizing:border-box;display:flex;flex-direction:column}' +
@@ -116,11 +115,11 @@
       '#topbar .logo>span[style*="FBBF24"]{display:none !important}' +
       '@media (max-width:1024px){' +
         '#navrail{flex-basis:56px;width:56px;padding:6px 4px}' +
-        '#navrail .nr-brand-tw .brand-title,#navrail .nr-brand-tw .brand-sub,' +
-        '#navrail .nr-foot-tw .mode-sub{display:none}' +
+        '#navrail .nr-brand-st .brand-title,#navrail .nr-brand-st .brand-sub,' +
+        '#navrail .nr-foot-st .mode-sub{display:none}' +
         '.nr-btn{justify-content:center;padding:6px 0;font-size:10px}' +
         '.nr-btn span:not(.nr-ico){display:none}' +
-        '.sv-panel{padding:10px 12px 14px}' +
+        '.sv-panel{padding:8px 8px 10px}' +
         '#topbar .shell-sync-btn span.lbl{display:none}' +
       '}';
   }
@@ -136,13 +135,11 @@
   }
 
   function railHTML() {
-    return '<div class="nr-brand-tw">' +
-      '<div class="logo-box">' +
-        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>' +
-      '</div>' +
+    return '<div class="nr-brand-st">' +
+      '<div class="logo-box">ST</div>' +
       '<div class="logo-text">' +
-        '<div class="brand-title">TW Pulse</div>' +
-        '<div class="brand-sub">MARKET INTELLIGENCE</div>' +
+        '<div class="brand-title">Stock Terminal</div>' +
+        '<div class="brand-sub">v' + VERSION + '</div>' +
       '</div></div>' +
       ROUTES.map(function (r) {
         return '<button type="button" class="nr-btn" data-route="' + r.id + '" title="' +
@@ -151,9 +148,9 @@
           '<span>' + r.label + '</span></button>';
       }).join('') +
       '<div class="nr-spacer"></div>' +
-      '<div class="nr-foot-tw">' +
-        '<div class="mode-dot">● 本機展示 · v' + VERSION + '</div>' +
-        '<div class="mode-sub">個人資料僅存在此瀏覽器</div>' +
+      '<div class="nr-foot-st">' +
+        '<div class="mode-dot">● LOCAL · v' + VERSION + '</div>' +
+        '<div class="mode-sub">本機資料 · 非投資建議</div>' +
       '</div>';
   }
 
