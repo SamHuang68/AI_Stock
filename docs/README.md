@@ -204,6 +204,7 @@ python3 scripts/build_dist.py
 | 融資維持率／餘額 | TWSE／TPEx 公開資訊 | 融資週期圖 |
 | 集保持股分級 | TDCC opendata | 籌碼集中度 |
 | 美債／信用／CPI | FRED 等公開序列 | 市場風險圖；逾時 fail-fast |
+| 經濟指標面板 | `/macro/economy` | FRED 不通時改 Yahoo／BLS／NY Fed／`data/macro_seeds`；含 Fed／公債曲線／失業率／CPI／VIX／MOVE／DXY／原油／金銅／BTC／台重貼現 |
 
 **所有資料抓取與運算都在你本機跑，零雲端、零追蹤。**
 
