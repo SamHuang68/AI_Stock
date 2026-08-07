@@ -350,7 +350,8 @@
     }).finally(function () { clearTimeout(t); });
   }
 
-  function emitRoute(id) {
+  function emitRoute(id, retries) {
+    retries = retries || 0;
     try {
       window.dispatchEvent(new CustomEvent('shell:route', { detail: { route: id } }));
     } catch (e) {}
@@ -370,9 +371,13 @@
       settings: 'SettingsV5'
     };
     var key = map[id];
-    if (key && window[key] && typeof window[key].activate === 'function') {
-      try { window[key].activate(); }
-      catch (err) { console.warn('[shell-v5] ' + key + ' activate', err); }
+    if (key) {
+      if (window[key] && typeof window[key].activate === 'function') {
+        try { window[key].activate(); }
+        catch (err) { console.warn('[shell-v5] ' + key + ' activate', err); }
+      } else if (retries < 15) {
+        setTimeout(function () { emitRoute(id, retries + 1); }, 50);
+      }
     }
   }
 

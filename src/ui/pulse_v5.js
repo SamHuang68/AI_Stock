@@ -221,6 +221,16 @@
   function ensureMount() {
     injectCSS();
     var panel = $('view-pulse');
+    if (!panel) {
+      var views = $('shell-views');
+      if (views) {
+        panel = document.createElement('section');
+        panel.className = 'sv-panel';
+        panel.id = 'view-pulse';
+        panel.dataset.route = 'pulse';
+        views.appendChild(panel);
+      }
+    }
     if (!panel) return null;
     var mount = $('mount-pulse');
     if (!mount) {
@@ -684,6 +694,7 @@
 
   function activate() {
     ensureMount();
+    render(lastPack || {});
     refresh(false);
     if (timer) clearInterval(timer);
     timer = setInterval(function () {
