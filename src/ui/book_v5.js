@@ -252,11 +252,28 @@
         ' · 更新 ' + new Date().toLocaleTimeString('zh-TW');
     }
 
+    var V = window.Viz;
+    var var95 = p.var95 || 0;
+    var vol = p.vol || 0;
+    // VaR：日風險 >2% 警示、>4% 危險；相關性以 0–100% 刻度，>50/70 警示
+    var varMeter = V ? V.ratioMeter(Math.abs(var95), 2, 4) : '';
+    var corrMeter = V ? V.ratioMeter(Math.abs(avgCorr) * 100, 50, 70) : '';
+    var betaViz = '';
+    if (V && isFinite(pBeta)) {
+      betaViz = V.magBar(pBeta - 1, 1, {
+        label: 'β−1',
+        fmt: function () { return pBeta.toFixed(2); }
+      });
+    }
     var h = '<div class="bk-cards">' +
-      '<div class="bk-card"><div class="lab">年化波動</div><div class="val">' + (p.vol || 0).toFixed(1) + '%</div></div>' +
-      '<div class="bk-card"><div class="lab">1日 95% VaR</div><div class="val">' + (p.var95 || 0).toFixed(2) + '%</div></div>' +
-      '<div class="bk-card"><div class="lab">平均相關性</div><div class="val">' + avgCorr.toFixed(2) + '</div></div>' +
-      '<div class="bk-card"><div class="lab">投組 Beta</div><div class="val">' + pBeta.toFixed(2) + '</div></div>' +
+      '<div class="bk-card"><div class="lab">年化波動</div><div class="val">' + vol.toFixed(1) + '%</div>' +
+        (V ? V.scoreMeter(Math.min(100, vol * 2), { hi: 40, mid: 25 }) : '') + '</div>' +
+      '<div class="bk-card"><div class="lab">1日 95% VaR</div><div class="val">' + var95.toFixed(2) + '%</div>' +
+        varMeter + '</div>' +
+      '<div class="bk-card"><div class="lab">平均相關性</div><div class="val">' + avgCorr.toFixed(2) + '</div>' +
+        corrMeter + '</div>' +
+      '<div class="bk-card"><div class="lab">投組 Beta</div><div class="val">' + pBeta.toFixed(2) + '</div>' +
+        betaViz + '</div>' +
       '<div class="bk-card"><div class="lab">持倉檔數</div><div class="val">' + codes.length + '</div></div>' +
       '<div class="bk-card"><div class="lab">樣本天數</div><div class="val">' + (p.days || 0) + '</div></div>' +
       '</div>';

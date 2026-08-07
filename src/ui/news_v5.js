@@ -111,6 +111,11 @@
     var md = (settle.getMonth() + 1) + '/' + settle.getDate();
     var settleCls = days <= 3 ? 'warn' : '';
     var settleTxt = days === 0 ? '今日結算' : ('還有 ' + days + ' 天');
+    var V = window.Viz;
+    var settleSub = settleTxt + '（第三個週三）';
+    if (V && days <= 3) {
+      settleSub = V.badge(settleTxt, days <= 1 ? 'err' : 'warn') + ' <span class="' + settleCls + '">（第三個週三）</span>';
+    }
 
     var rev = ev.revenue || {};
     var revSoon = rev.daysAway != null && rev.daysAway <= 5;
@@ -126,7 +131,7 @@
     var html =
       '<div class="nw-grid">' +
         '<div class="nw-stat"><div class="k">期貨結算日</div><div class="v ' + settleCls + '">' + md + '</div>' +
-          '<div class="s ' + settleCls + '">' + settleTxt + '（第三個週三）</div></div>' +
+          '<div class="s ' + settleCls + '">' + settleSub + '</div></div>' +
         '<div class="nw-stat"><div class="k">月營收截止</div><div class="v ' + (revSoon ? 'soon' : '') + '">' +
           (rev.nextPublishBy || '—') + '</div>' +
           '<div class="s">' + (rev.forMonth ? rev.forMonth + ' 營收' : '') +
@@ -147,8 +152,15 @@
     if (ex.length) {
       html += '<table><tr><th>日期</th><th>標的</th><th>類型</th></tr>' +
         ex.slice(0, 40).map(function (e) {
+          var typ = e.type || '';
+          var typCell = typ;
+          if (V && typ) {
+            if (typ.indexOf('息') >= 0) typCell = V.chip('除息', 'hot');
+            else if (typ.indexOf('權') >= 0) typCell = V.chip('除權', 'mid');
+            else typCell = V.chip(typ, 'mid');
+          }
           return '<tr class="nw-row" data-code="' + (e.code || '') + '"><td>' + (e.date || '') +
-            '</td><td>' + (e.code || '') + ' ' + (e.name || '') + '</td><td>' + (e.type || '') + '</td></tr>';
+            '</td><td>' + (e.code || '') + ' ' + (e.name || '') + '</td><td>' + typCell + '</td></tr>';
         }).join('') + '</table>';
     } else {
       html += '<div class="nw-note">目前無預告（TWSE 資料集可能未開放或當期無資料）。</div>';

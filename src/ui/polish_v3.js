@@ -1288,8 +1288,12 @@ function renderKeystatsSection(ks) {
     const m = (ks && ks.marginMeta) || {};
     const cur = ks.regularMarketPrice != null ? ks.regularMarketPrice : m.current;
     const zone = m.riskZone;
+    const V = window.Viz;
     let h = '<div id="keystats-sect"><div class="stat-sect">融資維持率 · 總覽</div>';
     h += `<div class="keystat-row"><span class="k">最新</span><span class="v">${cur != null ? cur.toFixed(2) + '%' : '--'}</span></div>`;
+    if (V && cur != null && isFinite(cur)) {
+      h += `<div style="padding:0 12px 4px">${V.zoneMark(cur, 120, 200)}</div>`;
+    }
     h += `<div class="keystat-row"><span class="k">日變化</span><span class="v">${m.delta != null ? ((m.delta >= 0 ? '+' : '') + m.delta.toFixed(2) + 'pp') : '--'}</span></div>`;
     h += `<div class="keystat-row"><span class="k">歷史高低</span><span class="v">${m.min != null ? m.min.toFixed(2) : '--'}% ～ ${m.max != null ? m.max.toFixed(2) : '--'}%</span></div>`;
     h += `<div class="keystat-row"><span class="k">歷史均値</span><span class="v">${m.avg != null ? m.avg.toFixed(2) + '%' : '--'}</span></div>`;

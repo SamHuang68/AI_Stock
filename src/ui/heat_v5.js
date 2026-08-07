@@ -213,6 +213,7 @@
       return;
     }
     function col(title, rows, cls) {
+      var V = window.Viz;
       var h = '<div><h4 style="margin:0 0 6px;font-size:11px;color:var(--gold)">' + title +
         ' · ' + rows.length + '</h4><div class="ht-list">';
       if (!rows.length) h += '<div class="ht-note">無符合</div>';
@@ -221,8 +222,10 @@
           '<span class="code">' + r.sym + '</span>' +
           '<span class="name">' + (r.name || '') + '</span>' +
           '<span class="' + twCls(r.changePct) + '">' + pct(r.changePct) + '</span>' +
-          '<span style="color:var(--gold);font-weight:700;min-width:28px;text-align:right">' +
-          (r.score != null ? r.score + '★' : '') + '</span></div>';
+          '<span style="color:var(--gold);font-weight:700;min-width:48px;text-align:right">' +
+          (r.score != null ? r.score + '★' : '') +
+          (V && r.score != null ? V.scoreMeter(r.score) : '') +
+          '</span></div>';
       });
       return h + '</div></div>';
     }

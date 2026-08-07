@@ -170,6 +170,7 @@
   }
 
   function render(pack) {
+    var V = window.Viz;
     var body = ensureMount();
     if (!body) return;
     var txf = pack.txf, fut = pack.fut || [], mf = pack.mf || {}, bd = pack.bd || {};
@@ -181,6 +182,9 @@
         (bd.date ? ' · 廣度日 ' + bd.date : '');
     }
 
+    var flat = st.unchanged != null ? st.unchanged : (st.flat || 0);
+    var breadthSeg = V ? V.segBar(st.up, flat, st.down) : '';
+    var scoreMeter = (V && bd.score != null) ? V.scoreMeter(bd.score) : '';
     var cards =
       '<div class="ah-card"><div class="k">台指期夜盤</div>' +
         '<div class="v ' + twCls(txf && txf.changePct) + '">' + (txf ? fmtN(txf.price) : '—') + '</div>' +
@@ -190,10 +194,11 @@
         '<div class="s">' + (txf ? (txf.sessionLabel || '夜盤') : '無資料') + '</div></div>' +
       '<div class="ah-card"><div class="k">漲跌家數（股票）</div>' +
         '<div class="v"><span class="up">' + fmtN(st.up) + '</span> / <span class="dn">' + fmtN(st.down) + '</span></div>' +
-        '<div class="s">淨 ' + (st.net != null ? ((st.net >= 0 ? '+' : '') + st.net) : '—') + '</div></div>' +
+        '<div class="s">淨 ' + (st.net != null ? ((st.net >= 0 ? '+' : '') + st.net) : '—') + '</div>' +
+        breadthSeg + '</div>' +
       '<div class="ah-card"><div class="k">大盤體質</div>' +
         '<div class="v">' + (bd.score != null ? bd.score : '—') + '</div>' +
-        '<div class="s">' + (bd.summary || '量能／法人／融資／估值') + '</div></div>';
+        '<div class="s">' + (bd.summary || '量能／法人／融資／估值') + '</div>' + scoreMeter + '</div>';
 
     var txfBlock = '<div class="ah-section"><h4>📉 台指期夜盤（主訊號）</h4>';
     if (!txf) {
@@ -212,15 +217,24 @@
           '。夜盤%優先作為隔日開盤方向參考；高振幅易跳空。</div></div>';
     }
 
+    var leadMax = 0;
+    fut.forEach(function (r) {
+      if (r.lead != null && isFinite(r.lead)) leadMax = Math.max(leadMax, Math.abs(r.lead));
+    });
     var rows = fut.map(function (r) {
       var lead = r.lead == null ? '—' : ((r.lead >= 0 ? '+' : '') + r.lead.toFixed(2));
+      var leadExtra = '';
+      if (V && r.lead != null && isFinite(r.lead)) {
+        leadExtra = V.rowBar(r.lead, leadMax || 1) +
+          V.chip(r.lead >= 0 ? '期>現' : '期<現', r.lead >= 0 ? 'buy' : 'sell');
+      }
       return '<tr class="ah-row" data-code="' + r.code + '">' +
         '<td style="color:var(--gold);font-weight:700">' + r.code + '</td>' +
         '<td>' + r.name + '</td>' +
         '<td>' + (r.price != null ? r.price : '—') + '</td>' +
         '<td class="' + twCls(r.changePct) + '">' + pct(r.changePct) + '</td>' +
         '<td class="' + twCls(r.spotChangePct) + '">' + pct(r.spotChangePct) + '</td>' +
-        '<td class="' + twCls(r.lead) + '">' + lead + '</td></tr>';
+        '<td class="' + twCls(r.lead) + '">' + lead + leadExtra + '</td></tr>';
     }).join('');
     var sess = fut.some(function (r) { return r.session === 'night'; }) ? '夜盤'
       : fut.some(function (r) { return r.session === 'day'; }) ? '日盤' : '—';
@@ -240,12 +254,25 @@
       instBlock += '<div class="ah-err">資金流尚未更新（FMTQIK/BFI82U 多為收盤後發布）。</div></div>';
     } else {
       var total = inst ? ((inst.foreign || 0) + (inst.trust || 0) + (inst.dealer || 0)) : null;
+      var instBars = '';
+      var totalChip = '';
+      if (V && inst) {
+        instBars = V.magBars([
+          { label: '外資', v: inst.foreign, fmt: V.fmtYiFromYuan },
+          { label: '投信', v: inst.trust, fmt: V.fmtYiFromYuan },
+          { label: '合計', v: total, fmt: V.fmtYiFromYuan }
+        ]);
+        if (total != null) {
+          totalChip = V.chip(total > 0 ? '合計偏多' : (total < 0 ? '合計偏空' : '合計中性'),
+            total > 0 ? 'buy' : (total < 0 ? 'sell' : 'mid'));
+        }
+      }
       instBlock += '<div class="ah-txf">' +
         '<div class="ah-cell"><div class="k">成交金額</div><div class="v">' + yi(latestAmt) + '</div></div>' +
         '<div class="ah-cell"><div class="k">外資</div><div class="v ' + twCls(inst && inst.foreign) + '">' + fyi(inst && inst.foreign) + '</div></div>' +
         '<div class="ah-cell"><div class="k">投信</div><div class="v ' + twCls(inst && inst.trust) + '">' + fyi(inst && inst.trust) + '</div></div>' +
         '<div class="ah-cell"><div class="k">合計</div><div class="v ' + twCls(total) + '">' + fyi(total) + '</div></div>' +
-        '</div>' +
+        '</div>' + instBars + totalChip +
         '<div class="ah-note">法人日 ' + ((inst && inst.date) || mf.date || '—') +
           '。完整儀表板可用工具列「籌碼基本面 → 資金流」。</div></div>';
     }
@@ -256,12 +283,19 @@
     function mvTbl(list, title, cls) {
       var h = '<div class="ah-section" style="margin:0"><h4>' + title + '</h4>';
       if (!list.length) return h + '<div class="ah-err">尚無排行</div></div>';
+      var slice = list.slice(0, 12);
+      var maxAbs = 0;
+      slice.forEach(function (r) {
+        if (r.changePct != null && isFinite(r.changePct)) maxAbs = Math.max(maxAbs, Math.abs(r.changePct));
+      });
       h += '<table class="ah-tbl"><tr><th>名次</th><th>代號</th><th>名稱</th><th>漲跌幅</th></tr>';
-      list.slice(0, 12).forEach(function (r, i) {
+      slice.forEach(function (r, i) {
+        var lim = V ? V.limitChip(r.changePct) : '';
+        var bar = V ? V.rowBar(r.changePct, maxAbs) : '';
         h += '<tr class="ah-row" data-code="' + (r.code || '') + '"><td>' + (i + 1) +
           '</td><td style="color:var(--gold);font-weight:700">' + (r.code || '') +
           '</td><td>' + (r.name || '') + '</td><td class="' + (cls || twCls(r.changePct)) + '">' +
-          pct(r.changePct) + '</td></tr>';
+          pct(r.changePct) + lim + bar + '</td></tr>';
       });
       return h + '</table></div>';
     }

@@ -119,6 +119,7 @@
   }
 
   function render(d) {
+    var V = window.Viz;
     var body = ensureMount();
     if (!body) return;
     lastData = d;
@@ -156,6 +157,7 @@
       : st.net > -200 ? '廣度溫和偏空'
       : '廣度偏空（下跌家數明顯較多）';
 
+    var seg = V ? V.segBar(up, flat, dn) : '';
     var idxCards =
       '<div class="bd-card"><div class="k">加權指數</div>' +
         '<div class="v">' + (t00.price != null ? fmt(t00.price, 2) : '—') + '</div>' +
@@ -176,11 +178,11 @@
           (st.advRatio != null ? ' · 上漲比 ' + (st.advRatio * 100).toFixed(1) + '%' : '') +
           (st.net != null ? ' · 淨 ' + (st.net >= 0 ? '+' : '') + st.net : '') +
         '</span></div>' +
-        '<div class="bd-bar" title="紅=上漲 灰=持平 綠=下跌">' +
+        (seg || ('<div class="bd-bar" title="紅=上漲 灰=持平 綠=下跌">' +
           '<div class="seg-up" style="width:' + pctUp.toFixed(2) + '%"></div>' +
           '<div class="seg-flat" style="width:' + pctFlat.toFixed(2) + '%"></div>' +
           '<div class="seg-dn" style="width:' + pctDn.toFixed(2) + '%"></div>' +
-        '</div>' +
+        '</div>')) +
         '<div class="bd-bar-lbl" style="margin-top:8px;margin-bottom:0">' +
           '<span class="up">上漲 ' + fmt(up) + '（' + pctUp.toFixed(1) + '%）</span>' +
           '<span class="flat">持平 ' + fmt(flat) + '</span>' +
@@ -216,27 +218,53 @@
         fyi(inst.dealer) + '</span></div>';
       rows += '<div class="bd-row"><span class="rk">三大法人合計</span><span class="rv ' + clsChg(total) + '">' +
         fyi(total) + '</span></div>';
+      if (V) {
+        rows += '<div class="bd-row" style="display:block;padding-top:6px">' + V.magBars([
+          { label: '外資', v: inst.foreign, fmt: V.fmtYiFromYuan },
+          { label: '投信', v: inst.trust, fmt: V.fmtYiFromYuan },
+          { label: '自營', v: inst.dealer, fmt: V.fmtYiFromYuan }
+        ]) + '</div>';
+      }
     }
 
+    var scoreCol = '';
+    if (d.score != null && V && V.qualityColor) {
+      scoreCol = ' style="color:' + V.qualityColor(d.score) + '"';
+    }
+    var scoreMeter = (d.score != null && V) ? V.scoreMeter(d.score) : '';
     var scoreCard = d.score != null
-      ? '<div class="bd-card"><div class="k">大盤體質</div><div class="v">' + fmt(d.score) +
-        '</div><div class="s">' + (d.summary || '量能／法人／融資／估值') + '</div></div>'
+      ? '<div class="bd-card"><div class="k">大盤體質</div><div class="v"' + scoreCol + '>' + fmt(d.score) +
+        '</div><div class="s">' + (d.summary || '量能／法人／融資／估值') + '</div>' + scoreMeter + '</div>'
       : '';
 
     var hist = d._hist || [];
     var histHtml = '';
     if (hist.length) {
       var ls = (up != null && dn) ? (up / Math.max(dn, 1)) : null;
-      histHtml = '<div class="bd-section"><h4>歷史市場廣度（本機歷史庫）</h4>' +
+      var chrono = hist.slice().reverse();
+      var lsSeries = chrono.map(function (r) {
+        return r.lsRatio != null ? r.lsRatio : (r.net != null ? r.net : null);
+      });
+      var spark = '';
+      if (V && lsSeries.filter(function (v) { return v != null && isFinite(v); }).length >= 2) {
+        spark = '<div style="margin-bottom:8px"><div style="font-size:9px;color:var(--tlo)">多空比／淨家數走勢</div>' +
+          V.sparkLine(lsSeries) + '</div>';
+      }
+      histHtml = '<div class="bd-section"><h4>歷史市場廣度（本機歷史庫）</h4>' + spark +
         '<table style="width:100%;border-collapse:collapse;font-size:11px">' +
         '<tr style="color:var(--tlo)"><th style="text-align:left;padding:4px">日期</th><th style="padding:4px">上漲</th>' +
         '<th style="padding:4px">下跌</th><th style="padding:4px">平盤</th><th style="padding:4px">多空比</th></tr>';
       hist.forEach(function (r) {
+        var lsTxt = r.lsRatio != null ? Number(r.lsRatio).toFixed(2) : '—';
+        var lsCell = lsTxt;
+        if (V && r.lsRatio != null) {
+          // heat vs 1.0 (balanced): signed distance for color
+          lsCell = V.heatCell(lsTxt, r.lsRatio - 1);
+        }
         histHtml += '<tr><td style="padding:4px">' + r.date + '</td><td class="up" style="padding:4px;text-align:right">' +
           fmt(r.up) + '</td><td class="dn" style="padding:4px;text-align:right">' + fmt(r.down) +
           '</td><td style="padding:4px;text-align:right">' + fmt(r.flat) +
-          '</td><td style="padding:4px;text-align:right">' +
-          (r.lsRatio != null ? Number(r.lsRatio).toFixed(2) : '—') + '</td></tr>';
+          '</td><td style="padding:4px;text-align:right">' + lsCell + '</td></tr>';
       });
       histHtml += '</table><div class="bd-note">今日多空比 ' +
         (ls != null ? ls.toFixed(2) : '—') +

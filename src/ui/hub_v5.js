@@ -165,6 +165,7 @@
       jget('/inst-rank?who=foreign&side=sell&n=8'),
       jget('/pulse/history?kind=institutional&n=20')
     ]).then(function (arr) {
+      var V = window.Viz;
       var mf = arr[0] || {};
       var inst = mf.inst || {};
       var buy = (arr[1] && arr[1].list) || [];
@@ -174,24 +175,39 @@
       if (inst.foreign != null || inst.trust != null || inst.dealer != null) {
         total = (inst.foreign || 0) + (inst.trust || 0) + (inst.dealer || 0);
       }
+      var maxDay = Math.max(
+        Math.abs(inst.foreign || 0), Math.abs(inst.trust || 0), Math.abs(inst.dealer || 0), 1
+      );
       function rankTbl(list, title) {
+        var maxAbs = 0;
+        list.forEach(function (r) {
+          var vv = r.foreign != null ? r.foreign : r.net;
+          if (vv != null && isFinite(vv)) maxAbs = Math.max(maxAbs, Math.abs(vv));
+        });
         var h = '<div class="hub-sec" style="margin:0"><h4>' + title + '</h4><table><tr><th>#</th><th>代號</th><th>名稱</th><th>外資</th></tr>';
         list.forEach(function (r, i) {
           var v = r.foreign != null ? r.foreign : r.net;
+          var bar = V ? V.rowBar(v, maxAbs) : '';
+          var streak = (V && r.streak) ? V.streakChip(r.streak, '外資') : '';
           h += '<tr data-code="' + (r.code || '') + '"><td>' + (i + 1) + '</td><td style="color:var(--gold);font-weight:700">' +
-            (r.code || '') + '</td><td>' + (r.name || '') + '</td><td class="' + tw(v) + '">' + yi(v) + '</td></tr>';
+            (r.code || '') + '</td><td>' + (r.name || '') + streak + '</td><td class="' + tw(v) + '">' +
+            yi(v) + bar + '</td></tr>';
         });
         return h + '</table></div>';
       }
       var sparkVals = hist.slice().reverse().map(function (r) { return r.totalYi || 0; });
+      var totalSpark = V ? V.sparkBars(sparkVals) : '';
+      var fBar = V ? V.magBar(inst.foreign, maxDay, { fmt: V.fmtYiFromYuan }) : '';
+      var tBar = V ? V.magBar(inst.trust, maxDay, { fmt: V.fmtYiFromYuan }) : '';
+      var dBar = V ? V.magBar(inst.dealer, maxDay, { fmt: V.fmtYiFromYuan }) : '';
       var body = $('hub-inst-body');
       if (!body) return;
       body.outerHTML =
         '<div class="hub-grid">' +
-          '<div class="hub-card"><div class="k">外資</div><div class="v ' + tw(inst.foreign) + '">' + yi(inst.foreign) + '</div></div>' +
-          '<div class="hub-card"><div class="k">投信</div><div class="v ' + tw(inst.trust) + '">' + yi(inst.trust) + '</div></div>' +
-          '<div class="hub-card"><div class="k">自營</div><div class="v ' + tw(inst.dealer) + '">' + yi(inst.dealer) + '</div></div>' +
-          '<div class="hub-card"><div class="k">合計</div><div class="v ' + tw(total) + '">' + yi(total) + '</div></div>' +
+          '<div class="hub-card"><div class="k">外資</div><div class="v ' + tw(inst.foreign) + '">' + yi(inst.foreign) + '</div>' + fBar + '</div>' +
+          '<div class="hub-card"><div class="k">投信</div><div class="v ' + tw(inst.trust) + '">' + yi(inst.trust) + '</div>' + tBar + '</div>' +
+          '<div class="hub-card"><div class="k">自營</div><div class="v ' + tw(inst.dealer) + '">' + yi(inst.dealer) + '</div>' + dBar + '</div>' +
+          '<div class="hub-card"><div class="k">合計</div><div class="v ' + tw(total) + '">' + yi(total) + '</div>' + totalSpark + '</div>' +
         '</div>' +
         '<div class="hub-sec"><h4>法人資金趨勢（歷史庫）</h4>' + spark(sparkVals) +
           '<div class="hub-note">日數 ' + hist.length + (inst.date ? ' · 最新法人日 ' + inst.date : '') + '</div></div>' +
@@ -284,6 +300,7 @@
         bindCommon(el);
         return;
       }
+      var V = window.Viz;
       var html = '<div class="hub-sec"><h4>策略訊號清單</h4><table><tr><th>代號</th><th>名稱</th><th>方向</th><th>分數</th><th>說明</th></tr>';
       list.slice(0, 30).forEach(function (r) {
         var code = r.code || r.sym || r.ticker || '';
@@ -291,9 +308,24 @@
         var side = r.side || r.dir || r.bias || (r.score != null && r.score < 0 ? '空' : '多');
         var score = r.score != null ? r.score : (r.confidence != null ? r.confidence : '—');
         var desc = r.reason || r.description || r.why || '';
+        var sideStr = String(side);
+        var bull = /多|long|bull|buy|偏多/i.test(sideStr);
+        var bear = /空|short|bear|sell|偏空/i.test(sideStr);
+        var sideCell = sideStr;
+        if (V) {
+          if (bull) sideCell = V.chip('偏多', 'buy');
+          else if (bear) sideCell = V.chip('偏空', 'sell');
+          else sideCell = V.chip(sideStr, 'mid');
+        }
+        var scoreNum = typeof score === 'number' ? score : parseFloat(score);
+        var scoreCell = score;
+        if (V && scoreNum === scoreNum) {
+          var meterScore = Math.abs(scoreNum) <= 1 ? scoreNum * 100 : Math.max(0, Math.min(100, Math.abs(scoreNum)));
+          scoreCell = (scoreNum >= 0 ? '+' : '') + Number(scoreNum).toFixed(1) + V.scoreMeter(meterScore);
+        }
         html += '<tr data-code="' + code + '"><td style="color:var(--gold);font-weight:700">' + code +
-          '</td><td>' + name + '</td><td>' + side + '</td><td>' + score + '</td><td style="text-align:left;color:var(--tlo)">' +
-          desc + '</td></tr>';
+          '</td><td>' + name + '</td><td>' + sideCell + '</td><td>' + scoreCell +
+          '</td><td style="text-align:left;color:var(--tlo)">' + desc + '</td></tr>';
       });
       body.outerHTML = html + '</table><div class="hub-note">來源 /focus · 點列開啟圖表</div></div>';
       bindCommon(el);
@@ -379,16 +411,21 @@
           scope: '台股', severity: '高'
         });
       }
+      var V = window.Viz;
+      var riskMeter = V ? V.scoreMeter(p.riskScore, { color: 'var(--cyan)' }) : '';
+      var healthMeter = V ? V.scoreMeter(p.healthScore) : '';
+      var compMeter = V ? V.scoreMeter(p.dataCompleteness) : '';
       var html = '<div class="hub-grid">' +
         '<div class="hub-card"><div class="k">市場風險度</div><div class="v">' +
           (p.riskScore != null ? Number(p.riskScore).toFixed(1) : '—') + '</div>' +
-          '<div class="hub-note">' + (p.riskLabel || '') + '</div></div>' +
+          '<div class="hub-note">' + (p.riskLabel || '') + '</div>' + riskMeter + '</div>' +
         '<div class="hub-card"><div class="k">健康度</div><div class="v">' +
-          (p.healthScore != null ? Number(p.healthScore).toFixed(1) : '—') + '</div></div>' +
+          (p.healthScore != null ? Number(p.healthScore).toFixed(1) : '—') + '</div>' + healthMeter + '</div>' +
         '<div class="hub-card"><div class="k">風險因子數</div><div class="v">' +
           ((p.riskFactors || []).length) + '</div></div>' +
         '<div class="hub-card"><div class="k">完整度</div><div class="v">' +
-          (p.dataCompleteness != null ? Number(p.dataCompleteness).toFixed(0) + '%' : '—') + '</div></div></div>';
+          (p.dataCompleteness != null ? Number(p.dataCompleteness).toFixed(0) + '%' : '—') + '</div>' +
+          compMeter + '</div></div>';
       html += '<div class="hub-sec"><h4>風險事件清單</h4><table><tr><th>時間</th><th>事件</th><th>說明</th><th>範圍</th><th>重要</th></tr>';
       if (!events.length) {
         html += '<tr><td colspan="5">目前無觸發中的風險事件</td></tr>';
@@ -402,7 +439,23 @@
       html += '</table></div>';
       var hist = (arr[1] && arr[1].rows) || [];
       if (hist.length) {
-        html += '<div class="hub-sec"><h4>脈動分數歷史</h4><table><tr><th>日期</th><th>健康</th><th>風險</th><th>總分</th><th>狀態</th></tr>';
+        var chrono = hist.slice().reverse();
+        var sparks = '';
+        if (V) {
+          var hs = chrono.map(function (r) { return r.health; });
+          var rs = chrono.map(function (r) { return r.risk; });
+          var hSp = hs.filter(function (v) { return v != null && isFinite(v); }).length >= 2
+            ? V.sparkLine(hs, { color: 'var(--gold)' }) : '';
+          var rSp = rs.filter(function (v) { return v != null && isFinite(v); }).length >= 2
+            ? V.sparkLine(rs, { color: 'var(--cyan)' }) : '';
+          if (hSp || rSp) {
+            sparks = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">' +
+              (hSp ? '<div><div class="hub-note">健康</div>' + hSp + '</div>' : '') +
+              (rSp ? '<div><div class="hub-note">風險</div>' + rSp + '</div>' : '') + '</div>';
+          }
+        }
+        html += '<div class="hub-sec"><h4>脈動分數歷史</h4>' + sparks +
+          '<table><tr><th>日期</th><th>健康</th><th>風險</th><th>總分</th><th>狀態</th></tr>';
         hist.forEach(function (r) {
           html += '<tr><td>' + r.date + '</td><td>' + fmt(r.health, 1) + '</td><td>' + fmt(r.risk, 1) +
             '</td><td>' + fmt(r.total, 1) + '</td><td>' + (r.statusText || '') + '</td></tr>';
@@ -425,7 +478,15 @@
       var st = arr[0] || {};
       var ds = arr[1];
       var health = arr[2] || {};
+      var V = window.Viz;
       var counts = st.counts || {};
+      var countChips = V
+        ? (V.badge('廣度 ' + (counts.breadth || 0), 'mid') + ' ' +
+           V.badge('法人 ' + (counts.institutional || 0), 'mid') + ' ' +
+           V.badge('指數 ' + (counts.index || 0), 'mid') + ' ' +
+           V.badge('脈動 ' + (counts.pulseScore || 0), 'mid'))
+        : ('廣度 ' + (counts.breadth || 0) + ' · 法人 ' + (counts.institutional || 0) +
+          '<br>指數 ' + (counts.index || 0) + ' · 脈動 ' + (counts.pulseScore || 0));
       var html =
         '<div class="hub-grid">' +
           '<div class="hub-card"><div class="k">自動同步</div><div class="v">' +
@@ -433,8 +494,7 @@
             '<div><span class="badge ' + (st.running ? 'warn' : 'ok') + '">' +
             (st.lastOk ? '上次成功 ' + st.lastOk : '尚未成功') + '</span></div></div>' +
           '<div class="hub-card"><div class="k">歷史庫列數</div><div class="v" style="font-size:14px">' +
-            '廣度 ' + (counts.breadth || 0) + ' · 法人 ' + (counts.institutional || 0) +
-            '<br>指數 ' + (counts.index || 0) + ' · 脈動 ' + (counts.pulseScore || 0) + '</div></div>' +
+            countChips + '</div></div>' +
           '<div class="hub-card"><div class="k">Server</div><div class="v" style="font-size:14px">' +
             (health.status || '—') + '</div><div class="hub-note">Stock Terminal 5.0 · loopback</div></div>' +
           '<div class="hub-card"><div class="k">策略</div><div class="v" style="font-size:13px">增量 merge</div>' +

@@ -162,6 +162,11 @@
       el.innerHTML = '<div style="color:var(--tlo);padding:18px;text-align:center">無符合條件的個股</div>';
       return;
     }
+    var V = window.Viz;
+    var maxVol = 0;
+    rows.forEach(function (r) {
+      if (r.volRatio != null && isFinite(r.volRatio)) maxVol = Math.max(maxVol, Math.abs(r.volRatio));
+    });
     var h = '<div class="sc-rtop"><button type="button" class="sc-btn" id="sc-addall">＋ 全部加入自選</button>' +
       '<span style="color:var(--tlo);font-size:10px">點代號載入線型 · 顯示前 ' + rows.length + ' 檔</span></div>';
     h += '<table><thead><tr><th>代號</th><th>名稱</th><th>價</th><th>漲跌</th><th>RSI</th><th>量比</th>' +
@@ -170,17 +175,35 @@
       var chgCls = r.changePct >= 0 ? 'up' : 'dn';
       var streak = function (v) { return v == null ? '—' : (v > 0 ? '+' + v : v); };
       var chgAbs = r.changePct != null && Math.abs(r.changePct) < 30;
+      var rsiCell = (V && r.rsi14 != null && isFinite(r.rsi14))
+        ? '<td>' + V.heatCell(String(r.rsi14), r.rsi14 - 50, 'TW') + '</td>'
+        : cell(r.rsi14);
+      var volTxt = r.volRatio == null ? '—' : r.volRatio;
+      var volCell = '<td>' + volTxt +
+        ((V && maxVol && r.volRatio != null) ? V.rowBar(r.volRatio, maxVol) : '') + '</td>';
+      var yoyTxt = r.revYoy == null ? '—' : (r.revYoy + '%');
+      var yoyCol = r.revYoy == null ? '' : (window.Colors && Colors.growth
+        ? Colors.growth(r.sym || 'TW', r.revYoy)
+        : (r.revYoy >= 0 ? 'var(--red)' : 'var(--green)'));
+      var yoyCell = r.revYoy == null
+        ? cell(null)
+        : '<td style="color:' + yoyCol + '">' + yoyTxt + '</td>';
+      var trustCell = (V && r.trustStreak)
+        ? '<td>' + V.streakChip(r.trustStreak, '') + '</td>'
+        : cell(streak(r.trustStreak), r.trustStreak > 0 ? 'up' : (r.trustStreak < 0 ? 'dn' : ''));
+      var foreignCell = (V && r.foreignStreak)
+        ? '<td>' + V.streakChip(r.foreignStreak, '') + '</td>'
+        : cell(streak(r.foreignStreak), r.foreignStreak > 0 ? 'up' : (r.foreignStreak < 0 ? 'dn' : ''));
       h += '<tr>' +
         '<td class="sc-code" data-sym="' + esc(r.sym) + '">' + esc(r.sym) + '</td>' +
         '<td class="sc-nm">' + esc(r.name || '') + '</td>' +
         cell(r.close) +
         cell(chgAbs ? ((r.changePct >= 0 ? '+' : '') + r.changePct + '%') : '—', chgAbs ? chgCls : '') +
-        cell(r.rsi14) + cell(r.volRatio) +
-        cell(r.revYoy == null ? null : r.revYoy + '%', r.revYoy >= 0 ? 'up' : 'dn') +
+        rsiCell + volCell +
+        yoyCell +
         cell(r.per) +
         cell(r['yield'] == null ? null : r['yield'] + '%') +
-        cell(streak(r.trustStreak), r.trustStreak > 0 ? 'up' : (r.trustStreak < 0 ? 'dn' : '')) +
-        cell(streak(r.foreignStreak), r.foreignStreak > 0 ? 'up' : (r.foreignStreak < 0 ? 'dn' : '')) +
+        trustCell + foreignCell +
         '<td><button type="button" class="sc-add" data-sym="' + esc(r.sym) + '">＋</button></td></tr>';
     });
     h += '</tbody></table>';

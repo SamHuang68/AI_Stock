@@ -371,11 +371,18 @@
   }
 
   function renderStrip(ov, p) {
+    var V = window.Viz;
     var s = (ov && ov.strip) || {};
     var t00 = s.t00 || {};
     var o00 = s.o00 || {};
     var adv = s.advRatio;
     var tone = breadthToneLabel(adv, s.lsRatio);
+    var toneKind = (tone.indexOf('偏多') >= 0 || tone.indexOf('極度偏多') >= 0) ? 'buy'
+      : (tone.indexOf('偏空') >= 0 || tone.indexOf('極度偏空') >= 0) ? 'sell' : 'mid';
+    var udfViz = V ? V.segBar(s.up, s.flat, s.down) : '';
+    var turnViz = (V && s.turnoverYi != null) ? V.refMeter(s.turnoverYi, [8000, 12000]) : '';
+    var advViz = V ? (V.scoreMeter((adv || 0) * 100) + V.chip(tone, toneKind)) : '';
+    var compViz = (V && p.dataCompleteness != null) ? V.scoreMeter(p.dataCompleteness) : '';
     return '<div class="pl-strip">' +
       '<div class="cell"><div class="k">加權指數 TAIEX</div><div class="v">' + fmt(t00.price, 2) + '</div>' +
         '<div class="s ' + tw(t00.changePct) + '">' + pct(t00.changePct) + '</div></div>' +
@@ -384,28 +391,33 @@
       '<div class="cell"><div class="k">成交金額</div><div class="v">' +
         (s.turnoverYi != null ? Number(s.turnoverYi).toFixed(1) + ' 億' : '—') + '</div>' +
         '<div class="s ' + tw(s.turnoverChgPct) + '">' +
-        (s.turnoverChgPct != null ? pct(s.turnoverChgPct) + ' vs 前日' : '—') + '</div></div>' +
+        (s.turnoverChgPct != null ? pct(s.turnoverChgPct) + ' vs 前日' : '—') + '</div>' +
+        turnViz + '</div>' +
       '<div class="cell"><div class="k">上漲 / 下跌 / 平盤</div><div class="v" style="font-size:14px">' +
         '<span class="up">' + fmt(s.up) + '</span> / <span class="dn">' + fmt(s.down) + '</span> / <span class="flat">' + fmt(s.flat) + '</span></div>' +
-        '<div class="s">多空比 ' + (s.lsRatio != null ? s.lsRatio.toFixed(2) : '—') + '</div></div>' +
+        '<div class="s">多空比 ' + (s.lsRatio != null ? s.lsRatio.toFixed(2) : '—') + '</div>' +
+        udfViz + '</div>' +
       '<div class="cell"><div class="k">市場廣度</div><div class="v">' +
         (adv != null ? (adv * 100).toFixed(1) + '%' : '—') + '</div>' +
-        '<div class="s">' + tone + '</div></div>' +
+        '<div class="s">' + tone + '</div>' + advViz + '</div>' +
       '<div class="cell"><div class="k">資料可靠度</div><div class="v" style="font-size:13px">' +
         '<span class="badge"><span class="dot"></span>' +
         (p.datasetsOk || 0) + '/' + (p.datasetsTotal || 0) + '</span></div>' +
         '<div class="s">' + (s.dataLabel || 'LOCAL') +
         (p.dataCompleteness != null ? ' · ' + Number(p.dataCompleteness).toFixed(0) + '%' : '') +
-        '</div></div>' +
+        '</div>' + compViz + '</div>' +
       '</div>';
   }
 
   function renderGauge(p) {
+    var V = window.Viz;
     var total = p.totalScore;
     var deg = (total != null ? Math.max(0, Math.min(100, total)) : 0) * 3.6;
     var comp = p.dataCompleteness != null ? p.dataCompleteness : 0;
     var drivers = factorNames(p.positiveFactors, 3);
     var pressures = factorNames(p.riskFactors, 3);
+    var healthMeter = V ? V.scoreMeter(p.healthScore) : '';
+    var riskMeter = V ? V.scoreMeter(p.riskScore, { color: 'var(--cyan)' }) : '';
     return '<div class="pl-sec"><h4>市場脈搏與組成 <a data-go="pulse">因子 →</a></h4><div class="pl-gauge-wrap">' +
       '<div class="pl-gauge" style="--pl-deg:' + deg.toFixed(1) + 'deg"><div class="pl-gauge-inner">' +
         '<div class="big">' + (total != null ? Number(total).toFixed(1) : '—') + '</div>' +
@@ -414,11 +426,13 @@
         '<div class="m"><div class="k">市場動能</div><div class="v">' +
           (p.healthScore != null ? Number(p.healthScore).toFixed(1) : '—') +
           '<span style="font-size:10px;color:var(--tlo);font-weight:600"> /100</span></div>' +
-          '<div class="l" style="color:var(--gold)">' + (p.healthLabel || '') + '</div></div>' +
+          '<div class="l" style="color:var(--gold)">' + (p.healthLabel || '') + '</div>' +
+          healthMeter + '</div>' +
         '<div class="m"><div class="k">市場風險</div><div class="v">' +
           (p.riskScore != null ? Number(p.riskScore).toFixed(1) : '—') +
           '<span style="font-size:10px;color:var(--tlo);font-weight:600"> /100</span></div>' +
-          '<div class="l" style="color:var(--cyan)">' + (p.riskLabel || '') + '</div></div>' +
+          '<div class="l" style="color:var(--cyan)">' + (p.riskLabel || '') + '</div>' +
+          riskMeter + '</div>' +
         '<div class="m"><div class="k">正面因素</div><div class="v up">' +
           (p.positiveFactorScore != null ? Number(p.positiveFactorScore).toFixed(1) : '—') + '</div>' +
           '<div class="l" style="color:var(--tlo)">' + ((p.positiveFactors || []).length) + ' 項</div></div>' +
@@ -456,6 +470,7 @@
   }
 
   function renderInst(ov) {
+    var V = window.Viz;
     var i = (ov && ov.institutional) || {};
     var divNote = '';
     if (i.foreign != null && i.dealer != null) {
@@ -465,6 +480,12 @@
       else if ((i.totalYi != null ? i.totalYi : 0) < 0) divNote = '法人合計偏空，資金面偏防衛。';
       else divNote = '法人方向分歧有限。';
     }
+    var bars = V ? V.magBars([
+      { label: '外資', v: i.foreign, fmt: V.fmtYiFromYuan },
+      { label: '投信', v: i.trust, fmt: V.fmtYiFromYuan },
+      { label: '自營', v: i.dealer, fmt: V.fmtYiFromYuan }
+    ]) : '';
+    var divChip = (V && i.foreign > 0 && i.dealer < 0) ? V.chip('結構分歧', 'warn') : '';
     return '<div class="pl-sec"><h4>法人分歧與資金 <a data-go="institutional">籌碼 →</a></h4><div class="pl-inst4">' +
       '<div class="c"><div class="k">外資</div><div class="v ' + tw(i.foreign) + '">' + moneyYi(i.foreign) + '</div></div>' +
       '<div class="c"><div class="k">投信</div><div class="v ' + tw(i.trust) + '">' + moneyYi(i.trust) + '</div></div>' +
@@ -472,6 +493,7 @@
       '<div class="c"><div class="k">合計</div><div class="v ' + tw(i.totalYi) + '">' +
         (i.totalYi != null ? ((i.totalYi >= 0 ? '+' : '') + Number(i.totalYi).toFixed(1) + ' 億') : '—') +
       '</div></div></div>' +
+      bars + divChip +
       '<div class="pl-note">' + (divNote || '單位億元') +
       (i.date ? ' · 法人日 ' + i.date : '') + '</div></div>';
   }
@@ -516,6 +538,7 @@
   }
 
   function renderMovers(movers, side) {
+    var V = window.Viz;
     var raw = (movers && movers[side]) || [];
     var list = raw.slice();
     var title, empty;
@@ -530,14 +553,20 @@
       title = '跌幅異常';
       empty = '尚無大幅下跌標的';
     }
+    var maxAbs = 0;
+    list.forEach(function (r) {
+      if (r.changePct != null && isFinite(r.changePct)) maxAbs = Math.max(maxAbs, Math.abs(r.changePct));
+    });
     var html = '<div class="pl-sec"><h4>' + title +
       (movers && movers.date ? ' <span style="color:var(--tlo);font-weight:600">' + movers.date + '</span>' : '') +
       ' <a data-go="afterhours">盤後 →</a></h4><ul class="pl-list">';
     if (!list.length) return html + '<li style="cursor:default;color:var(--tlo)">' + empty + '</li></ul></div>';
     list.forEach(function (r) {
+      var limChip = V ? V.limitChip(r.changePct) : '';
+      var bar = V ? V.rowBar(r.changePct, maxAbs) : '';
       html += '<li data-code="' + esc(r.code || '') + '"><span class="nm"><span class="cd">' +
         esc(r.code || '') + '</span>' + esc(r.name || '') + '</span><span class="' + tw(r.changePct) + '">' +
-        pct(r.changePct) + '</span></li>';
+        pct(r.changePct) + limChip + bar + '</span></li>';
     });
     return html + '</ul></div>';
   }
@@ -733,6 +762,7 @@
     });
 
     jget('/pulse/history?kind=pulse&n=12').then(function (h) {
+      var V = window.Viz;
       var box = $('pl-hist');
       if (!box) return;
       var rows = (h && h.rows) || [];
@@ -741,7 +771,23 @@
         box.textContent = '脈動歷史尚在累積 — 按頂列「同步資料」預抓指數／廣度／法人後，每日 /pulse 會自動 merge 分數。';
         return;
       }
-      var html = '<div class="pl-sec"><h4>市場脈搏歷史（本機庫）</h4>' +
+      var chrono = rows.slice().reverse();
+      var healthSeries = chrono.map(function (r) { return r.health; });
+      var riskSeries = chrono.map(function (r) { return r.risk; });
+      var sparks = '';
+      if (V) {
+        var hSpark = healthSeries.filter(function (v) { return v != null && isFinite(v); }).length >= 2
+          ? V.sparkLine(healthSeries, { color: 'var(--gold)' }) : '';
+        var rSpark = riskSeries.filter(function (v) { return v != null && isFinite(v); }).length >= 2
+          ? V.sparkLine(riskSeries, { color: 'var(--cyan)' }) : '';
+        if (hSpark || rSpark) {
+          sparks = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">' +
+            (hSpark ? '<div><div style="font-size:9px;color:var(--tlo)">動能</div>' + hSpark + '</div>' : '') +
+            (rSpark ? '<div><div style="font-size:9px;color:var(--tlo)">風險</div>' + rSpark + '</div>' : '') +
+            '</div>';
+        }
+      }
+      var html = '<div class="pl-sec"><h4>市場脈搏歷史（本機庫）</h4>' + sparks +
         '<table style="width:100%;border-collapse:collapse;font-size:11px">' +
         '<tr style="color:var(--tlo)"><th style="text-align:left;padding:4px">日期</th>' +
         '<th style="padding:4px">動能</th><th style="padding:4px">風險</th><th style="padding:4px">總分</th>' +

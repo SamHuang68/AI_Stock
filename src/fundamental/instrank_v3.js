@@ -56,12 +56,19 @@
     const list = (d && d.list) || [];
     const buy = side === 'buy';
     const cls = buy ? 'ir-up' : 'ir-dn';
+    const V = window.Viz;
+    let maxAbs = 0;
+    list.forEach(x => { if (x.lots != null && isFinite(x.lots)) maxAbs = Math.max(maxAbs, Math.abs(x.lots)); });
     const rowHtml = (x, rank) => {
       const st = x.streak;
-      const stTxt = (st == null || st === 0) ? '' :
-        (st > 0 ? `<span class="ir-up">連買${st}</span>` : `<span class="ir-dn">連賣${Math.abs(st)}</span>`);
+      const stTxt = V
+        ? V.streakChip(st, '')
+        : ((st == null || st === 0) ? '' :
+          (st > 0 ? `<span class="ir-up">連買${st}</span>` : `<span class="ir-dn">連賣${Math.abs(st)}</span>`));
+      const lotsTxt = x.lots == null ? '—' : (x.lots >= 0 ? '+' : '') + x.lots.toLocaleString();
+      const bar = (V && maxAbs && x.lots != null) ? V.rowBar(x.lots, maxAbs) : '';
       return `<tr class="ir-row" data-code="${x.code}"><td>${rank}</td><td>${x.code} <span style="color:#64748b">${x.name || ''}</span></td>
-        <td class="${cls}">${x.lots == null ? '—' : (x.lots >= 0 ? '+' : '') + x.lots.toLocaleString()}</td>
+        <td class="${cls}">${lotsTxt}${bar}</td>
         <td>${stTxt}</td></tr>`;
     };
     const buildTbl = (slice, offset) =>

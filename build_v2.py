@@ -13,6 +13,7 @@ DST  = os.path.join(ROOT, 'stock_terminal_v2.html')
 
 # Scripts injected (in order):
 V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,須最先載入)
+              'src/ui/viz_v5.js',        # v5.0: 文字→視覺共用元件(須在 colors 後、各面板前)
               'src/core/market_v3.js',   # 台股/美股 universe lookup(權威判市場+名稱,可更新)
               'src/core/fields_v3.js',   # 欄位型別定義+全域滾輪防護(單一真理來源,須最先載入)
               'src/core/chart_registry_v3.js',  # H0: macro/特殊圖 primaryKey（須在 polish 前）
