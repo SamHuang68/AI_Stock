@@ -203,7 +203,7 @@
 
     var seg = V ? V.segBar(up, flat, dn) : '';
     var breadthBlock =
-      '<div class="bd-sec"><h4>漲跌結構</h4>' +
+      '<div class="bd-sec"><h4>漲跌結構</h4><div class="bd-fill" style="display:flex;flex-direction:column;gap:8px;justify-content:center">' +
         '<div class="bd-bar-lbl"><span>' + tone + '</span><span>' +
           (st.net != null ? '淨 ' + (st.net >= 0 ? '+' : '') + st.net : '') +
         '</span></div>' +
@@ -212,16 +212,16 @@
           '<div class="seg-flat" style="width:' + pctFlat.toFixed(2) + '%"></div>' +
           '<div class="seg-dn" style="width:' + pctDn.toFixed(2) + '%"></div>' +
         '</div>')) +
-        '<div class="bd-bar-lbl" style="margin-top:4px;margin-bottom:0">' +
+        '<div class="bd-bar-lbl" style="margin:0">' +
           '<span class="up">上漲 ' + fmt(up) + '（' + pctUp.toFixed(1) + '%）</span>' +
           '<span class="flat">持平 ' + fmt(flat) + '</span>' +
           '<span class="dn">下跌 ' + fmt(dn) + '（' + pctDn.toFixed(1) + '%）</span>' +
         '</div>' +
         (d.score != null
-          ? '<div class="bd-score-wrap"><div class="v"' + scoreCol + ' style="font-size:18px;font-weight:800">' +
+          ? '<div class="bd-score-wrap"><div class="v"' + scoreCol + ' style="font-size:28px;font-weight:800">' +
               fmt(d.score) + '</div>' + scoreMeter + '</div>'
           : '') +
-      '</div>';
+      '</div></div>';
 
     var rows = '';
     rows += '<div class="bd-row"><span class="rk">股票成交金額</span><span class="rv">' + yi(to.stockAmt) + '</span></div>';
