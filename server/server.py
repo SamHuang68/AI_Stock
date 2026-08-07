@@ -1793,13 +1793,89 @@ def _macro_latest(series_key, years=10, timeout=8, retries=1, allow_fetch=True):
     }
 
 
+def _yf_mktbar_day_change(res):
+    """與前端 polish_v3.refreshMktBar（圖表→市場）完全一致的日漲跌口徑。
+
+    輸入：Yahoo chart.result[0]（建議 range=5d&interval=1d，與 mkt-bar 同源）。
+    公式：
+      cur  = regularMarketPrice（有效）否則最後一根日線收盤
+      prev = regularMarketPreviousClose（有效）
+           否則倒數第二根日線收盤
+           否則 chartPreviousClose || previousClose
+      chgPct = (cur - prev) / prev * 100
+    回 {price, prevClose, changePct} 或 None。
+    """
+    if not res:
+        return None
+    meta = res.get('meta') or {}
+    ts_arr = res.get('timestamp') or []
+    raw_closes = ((res.get('indicators') or {}).get('quote') or [{}])[0].get('close') or []
+    valid = []
+    n = min(len(ts_arr), len(raw_closes))
+    for i in range(n):
+        c, t = raw_closes[i], ts_arr[i]
+        if c is None or t is None:
+            continue
+        try:
+            cf = float(c)
+        except (TypeError, ValueError):
+            continue
+        if cf != cf:  # NaN
+            continue
+        valid.append((t, cf))
+    if len(valid) < 1:
+        return None
+    last_c = valid[-1][1]
+    prev_bar = valid[-2][1] if len(valid) >= 2 else None
+
+    def _pos(v):
+        if v is None:
+            return None
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        if f != f or f <= 0:
+            return None
+        return f
+
+    rmp = _pos(meta.get('regularMarketPrice'))
+    rmpc = _pos(meta.get('regularMarketPreviousClose'))
+    cur = rmp if rmp is not None else last_c
+    if rmpc is not None:
+        prev = rmpc
+    elif prev_bar is not None:
+        prev = prev_bar
+    else:
+        prev = _pos(meta.get('chartPreviousClose')) or _pos(meta.get('previousClose'))
+    if cur is None or prev is None or prev <= 0:
+        return None
+    try:
+        cur_f = float(cur)
+        prev_f = float(prev)
+    except (TypeError, ValueError):
+        return None
+    if cur_f != cur_f or prev_f != prev_f or prev_f <= 0:
+        return None
+    return {
+        'price': cur_f,
+        'prevClose': prev_f,
+        'changePct': (cur_f - prev_f) / prev_f * 100.0,
+    }
+
+
 def _yf_batch_quotes(syms):
-    """輕量 Yahoo 批次：[{symbol,name,price,changePct}]。並行抓取，總預算約 6s。"""
+    """輕量 Yahoo 批次：[{symbol,name,price,changePct}]。
+
+    與圖表→市場（/yf/batch?range=5d&interval=1d + refreshMktBar）同源同公式，
+    避免 pulse 全球影響另開 1d/chartPreviousClose 口徑造成 SOX 等漲幅不一致。
+    """
     labels = {
-        '^DJI': '道瓊', '^GSPC': 'S&P 500', '^IXIC': '那斯達克',
-        'CL=F': 'WTI 原油', 'DX-Y.NYB': '美元指數', 'DX=F': '美元指數',
+        '^DJI': '道瓊', '^GSPC': 'S&P500', '^IXIC': 'NASDAQ',
+        'CL=F': '原油', 'GC=F': '黃金', 'SI=F': '白銀',
+        'DX-Y.NYB': '美元指數', 'DX=F': '美元指數',
         '^VIX': 'VIX 波動', 'TWD=X': '美元／台幣',
-        '^SOX': '費半 SOX', '^N225': '日經 225', '^KS11': '韓國 KOSPI',
+        '^SOX': '費半', '^N225': '日經', '^KS11': '韓國', '^HSI': '恆生',
     }
 
     def _one(sym):
@@ -1809,48 +1885,27 @@ def _yf_batch_quotes(syms):
                 return {
                     'symbol': sym, 'name': labels.get(sym, sym),
                     'price': ov['price'], 'changePct': ov.get('changePct'),
+                    'prevClose': ov.get('prevClose'),
                     'source': ov.get('source') or 'override',
                 }
-            # 必須用 range=1d：5d 時 chartPreviousClose 常指更早收盤（^SOX 曾誤成 +9%）
-            _, data, _ = fetch_one(sym, '1d', '1d', False)
-            if not data:
-                # 備援 5d 日線，改用「倒數第二根收盤」當昨收
-                _, data, _ = fetch_one(sym, '5d', '1d', False)
-                use_bar_prev = True
-            else:
-                use_bar_prev = False
+            # 與 mkt-bar 相同：range=5d&interval=1d
+            _, data, _ = fetch_one(sym, '5d', '1d', False)
             if not data:
                 return None
             res = (json.loads(data).get('chart') or {}).get('result') or []
             if not res:
                 return None
-            m = res[0].get('meta') or {}
-            cls = ((res[0].get('indicators') or {}).get('quote') or [{}])[0].get('close') or []
-            valid = [c for c in cls if c is not None]
-            cur = m.get('regularMarketPrice')
-            if cur is None and valid:
-                cur = valid[-1]
-            prev = _yf_prevclose(m, allow_chart_prev=not use_bar_prev)
-            prev_bar = valid[-2] if len(valid) >= 2 else None
-            if prev is None:
-                prev = prev_bar
-            if cur is None or not prev:
+            q = _yf_mktbar_day_change(res[0])
+            if not q:
                 return None
-            chg = (cur - prev) / prev * 100.0
-            # 指數日漲跌異常時改信日線昨收（^SOX 等 Yahoo meta 常飄）
-            bad, _why = _anom_quote(cur, prev, chg, kind='index')
-            if bad and prev_bar is not None and prev_bar > 0:
-                prev = prev_bar
-                chg = (cur - prev) / prev * 100.0
-                bad2, _ = _anom_quote(cur, prev, chg, kind='index')
-                if bad2:
-                    # 仍離譜：回傳價、漲跌標可疑但不捏造
-                    print('[pulse-global] anom', sym, _why, 'barStillBad')
+            m = res[0].get('meta') or {}
             return {
-                'symbol': sym, 'name': labels.get(sym, m.get('shortName') or sym),
-                'price': cur, 'changePct': chg,
-                'prevClose': prev,
-                'source': 'yahoo',
+                'symbol': sym,
+                'name': labels.get(sym, m.get('shortName') or sym),
+                'price': q['price'],
+                'changePct': q['changePct'],
+                'prevClose': q['prevClose'],
+                'source': 'yahoo-mktbar',
             }
         except Exception as e:
             print('[pulse-global]', sym, e)
@@ -1916,6 +1971,26 @@ def _run_selftests():
     ck('prevclose:退chartPrev', _yf_prevclose({'chartPreviousClose': 50}), 50)
     ck('prevclose:空meta回None', _yf_prevclose({}), None)
     ck('prevclose:None回None', _yf_prevclose(None), None)
+
+    # _yf_mktbar_day_change：與圖表→市場 refreshMktBar 同源公式
+    _mkt_res = {
+        'meta': {'regularMarketPrice': 110.0, 'regularMarketPreviousClose': 100.0,
+                 'chartPreviousClose': 80.0, 'previousClose': 90.0},
+        'timestamp': [1, 2, 3],
+        'indicators': {'quote': [{'close': [95.0, 100.0, 108.0]}]},
+    }
+    _mkt_q = _yf_mktbar_day_change(_mkt_res)
+    ck('mktbar:rmpc優先', round(_mkt_q['changePct'], 4) if _mkt_q else None, 10.0)
+    ck('mktbar:price用rmp', _mkt_q['price'] if _mkt_q else None, 110.0)
+    _mkt_res2 = {
+        'meta': {'regularMarketPrice': 108.0, 'chartPreviousClose': 50.0},
+        'timestamp': [1, 2, 3],
+        'indicators': {'quote': [{'close': [95.0, 100.0, 108.0]}]},
+    }
+    _mkt_q2 = _yf_mktbar_day_change(_mkt_res2)
+    # 無 RMPC → 用倒數第二根日線 100，而非誤用 chartPreviousClose 50
+    ck('mktbar:無rmpc用日線昨收', round(_mkt_q2['changePct'], 4) if _mkt_q2 else None, 8.0)
+    ck('mktbar:無rmpc prev=100', _mkt_q2['prevClose'] if _mkt_q2 else None, 100.0)
 
     # _anom_quote 報價異常驗證
     ck('anom:正常指數不suspect', _anom_quote(430, 429, 0.2, 'index')[0], False)
@@ -3769,11 +3844,13 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 return {'ok': False, 'items': []}
 
         def _job_global():
-            gkey = f'pulse-global:v3:{int(time.time() // 120)}'
+            # v4：與圖表→市場 /yf/batch range=5d + refreshMktBar 公式對齊
+            gkey = f'pulse-global:v4:{int(time.time() // 120)}'
             g = _cache_first([gkey])
             if g is not None:
                 return g
             try:
+                # 指數列優先吃市場 tab 同源標的（SOX/美股/日韓）；另補 VIX／匯率／美元
                 g = _yf_batch_quotes([
                     '^DJI', '^GSPC', '^IXIC', '^SOX', '^N225', '^KS11',
                     '^VIX', 'TWD=X', 'DX-Y.NYB',

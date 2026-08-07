@@ -354,6 +354,7 @@ async function refreshMktBar() {
       // 漲跌基準一律用 Yahoo 官方昨收 regularMarketPreviousClose(與主圖一致)。
       // 原本用日線陣列推算(prevC),外資指數(^KS11/^SOX)遇 Yahoo 落後/壞 tick 會算出
       // -8% 等離譜值且與主圖不一致 → 改吃官方昨收,只在缺時才退回陣列。
+      // 後端 pulse 全球影響 (_yf_mktbar_day_change) 必須與此公式完全一致。
       const _rmpc = meta.regularMarketPreviousClose;
       const cur = (rmp != null && isFinite(rmp) && rmp > 0) ? rmp : last.c;
       const prev = (_rmpc != null && isFinite(_rmpc) && _rmpc > 0) ? _rmpc
