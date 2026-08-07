@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 REM ============================================================
 REM  Stock Terminal — sole local launch / update script
 REM ------------------------------------------------------------
@@ -46,7 +46,7 @@ if errorlevel 1 goto FAIL_CD
 echo.
 echo ============================================
 echo  Stock Terminal v5.0
-echo  http://localhost:18432/stock_terminal_v2.html
+echo  http://localhost:18432/#pulse
 echo ============================================
 echo.
 echo  repo: %REPO_ROOT%
@@ -144,7 +144,7 @@ timeout /t 2 /nobreak >nul
 echo.
 
 echo [4/4] done
-if "%OPEN_BROWSER%"=="1" start "" "http://localhost:18432/stock_terminal_v2.html"
+if "%OPEN_BROWSER%"=="1" start "" "http://localhost:18432/#pulse"
 
 echo.
 echo  Opened. Press Ctrl+F5 to hard-reload.
