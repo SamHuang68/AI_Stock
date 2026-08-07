@@ -11,30 +11,20 @@
   'use strict';
 
   var STORAGE_KEY = 'st5.shell.route';
-  var VERSION = '5.0';
-
-  /* 舊 route → 更完整的目的地（圖表／熱力等） */
-  var ROUTE_ALIASES = {
-    trends: { to: 'chart', sym: '^TWII', mkt: 'TW' },   // 指數頁 → 圖表加權
-    index:  { to: 'chart', sym: '^TWII', mkt: 'TW' }
-  };
-
-  var ROUTES = [
-    { id: 'pulse',         label: '總覽', hint: '市場總覽儀表板（對齊 TW Pulse Overview）', icon: '◎' },
-    { id: 'chart',         label: '圖表', hint: 'K 線工作區（含加權／櫃買指數與總體列）',   icon: '◈' },
-    { id: 'breadth',       label: '廣度', hint: '大盤廣度（漲跌家數）',                     icon: '▤' },
-    { id: 'heat',          label: '熱力', hint: '類股熱力圖＋焦點掃描',                     icon: '▦' },
-    { id: 'institutional', label: '法人', hint: '三大法人動向與買賣超',                     icon: '🏦' },
-    { id: 'international', label: '國際', hint: '美股／美元／原油與總經',                   icon: '🌐' },
-    { id: 'afterhours',    label: '盤後', hint: '漲跌排行／籌碼／期貨盤後',                 icon: '◐' },
-    { id: 'signals',       label: '訊號', hint: '策略訊號／焦點掃描結果',                   icon: '🎯' },
-    { id: 'watchlist',     label: '自選', hint: '自選股中心（表格式；完整操作在圖表列）',   icon: '★' },
-    { id: 'risk',          label: '風險', hint: '風險事件與脈動風險度',                     icon: '🛡' },
-    { id: 'news',          label: '快訊', hint: '事件／結算／警報中樞',                     icon: '◉' },
-    { id: 'scan',          label: '選股', hint: '三合一選股（技術×基本面×籌碼）',           icon: '🔍' },
-    { id: 'book',          label: '投組', hint: '投組風險（波動／VaR／曝險）',               icon: '▣' },
-    { id: 'settings',      label: '設定', hint: '同步狀態與資料來源',                       icon: '⚙' },
-    { id: 'workspace',     label: '工具', hint: '回到圖表並開啟指令盤',                     icon: '⌘', action: 'cmd' }
+  var V  var ROUTES = [
+    { id: 'pulse',         label: '總覽首頁', hint: '市場總覽儀表板（對齊 TW Pulse Overview）', icon: '⊞' },
+    { id: 'signals',       label: '市場脈動', hint: '市場脈動與體質因子',                 icon: '📈' },
+    { id: 'chart',         label: '指數走勢', hint: 'K 線工作區（含加權／櫃買指數與總體列）',   icon: '📉' },
+    { id: 'breadth',       label: '市場溫度', hint: '大盤廣度與溫度結構（漲跌家數）',         icon: '📊' },
+    { id: 'heat',          label: '產業熱力圖', hint: '類股熱力圖＋焦點掃描',                 icon: '▦' },
+    { id: 'institutional', label: '法人動向', hint: '三大法人動向與買賣超',                 icon: '🏦' },
+    { id: 'international', label: '國際市場', hint: '美股／美元／原油與總經',               icon: '🌐' },
+    { id: 'afterhours',    label: '盤後數據', hint: '漲跌排行／籌碼／期貨盤後',             icon: '◐' },
+    { id: 'scan',          label: '策略訊號', hint: '策略訊號與三合一選股',                 icon: '🎯' },
+    { id: 'watchlist',     label: '自選股中心', hint: '自選股中心（表格式與風險機會）',       icon: '☆' },
+    { id: 'risk',          label: '風險監控', hint: '風險事件與脈動風險度',                 icon: '🛡' },
+    { id: 'news',          label: '新聞快訊', hint: '事件／結算／警報中樞',                 icon: '◉' },
+    { id: 'settings',      label: '設定', hint: '同步狀態與資料來源',                   icon: '⚙' }
   ];
 
   var state = { route: 'chart', built: false, syncing: false };
@@ -42,50 +32,51 @@
   function $(id) { return document.getElementById(id); }
 
   function injectCSS() {
-    var s = $('shell-v5-css');
-    if (!s) {
-      s = document.createElement('style');
-      s.id = 'shell-v5-css';
-      document.head.appendChild(s);
-    }
+    if ($('shell-v5-css')) return;
+    var s = document.createElement('style');
+    s.id = 'shell-v5-css';
     s.textContent =
       '#shell-row{display:flex;flex:1;min-height:0;min-width:0}' +
-      '#navrail{flex:0 0 58px;width:58px;background:linear-gradient(180deg,#0A1220 0%,#070D18 100%);' +
-        'border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:stretch;' +
-        'padding:6px 0;gap:1px;z-index:40;flex-shrink:0;overflow-y:auto;overflow-x:hidden}' +
-      '#navrail .nr-brand{font-family:\'JetBrains Mono\',monospace;font-size:9px;font-weight:700;' +
-        'color:var(--gold);letter-spacing:1px;text-align:center;padding:4px 0 8px;line-height:1.2;' +
-        'border-bottom:1px solid var(--border);margin-bottom:4px;user-select:none;flex-shrink:0}' +
-      '#navrail .nr-brand small{display:block;color:var(--tlo);font-weight:600;letter-spacing:.5px;margin-top:2px;font-size:8px}' +
-      '.nr-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;' +
-        'min-height:42px;margin:0 5px;padding:3px 2px;border:1px solid transparent;border-radius:8px;' +
-        'background:transparent;color:var(--tlo);cursor:pointer;font-family:\'JetBrains Mono\',monospace;' +
-        'font-size:9px;letter-spacing:.2px;transition:background .14s,color .14s,border-color .14s;flex-shrink:0}' +
-      '.nr-btn .nr-ico{font-size:13px;line-height:1;opacity:.85}' +
-      '.nr-btn:hover{color:var(--thi);background:var(--bg3);border-color:var(--border)}' +
-      '.nr-btn.on{color:var(--gold);background:var(--gold-s);border-color:var(--gold-m)}' +
-      '.nr-btn.on .nr-ico{opacity:1}' +
-      '.nr-spacer{flex:1;min-height:8px}' +
-      '.nr-foot{padding:6px 4px 2px;text-align:center;font-family:\'JetBrains Mono\',monospace;' +
-        'font-size:8px;color:var(--tf);letter-spacing:.5px;border-top:1px solid var(--border);margin-top:4px;flex-shrink:0}' +
+      '#navrail{flex:0 0 185px;width:185px;background:#08101C;' +
+        'border-right:1px solid #132238;display:flex;flex-direction:column;align-items:stretch;' +
+        'padding:10px 8px;gap:2px;z-index:40;flex-shrink:0;overflow-y:auto;overflow-x:hidden;box-sizing:border-box}' +
+      '#navrail .nr-brand-tw{display:flex;align-items:center;gap:8px;padding:6px 6px 12px;' +
+        'border-bottom:1px solid #132238;margin-bottom:6px;user-select:none;flex-shrink:0}' +
+      '#navrail .nr-brand-tw .logo-box{width:28px;height:28px;border-radius:6px;background:rgba(16,185,129,0.12);' +
+        'border:1px solid rgba(16,185,129,0.3);display:flex;align-items:center;justify-content:center;flex-shrink:0}' +
+      '#navrail .nr-brand-tw .brand-title{font-family:\'Noto Sans TC\',sans-serif;font-size:14px;font-weight:800;' +
+        'color:#E2E8F0;line-height:1;letter-spacing:.3px}' +
+      '#navrail .nr-brand-tw .brand-sub{font-family:\'JetBrains Mono\',monospace;font-size:7.5px;font-weight:700;' +
+        'color:#64748B;letter-spacing:1px;margin-top:3px}' +
+      '.nr-btn{display:flex;align-items:center;gap:9px;' +
+        'min-height:34px;margin:1px 0;padding:6px 10px;border:1px solid transparent;border-radius:8px;' +
+        'background:transparent;color:#94A3B8;cursor:pointer;font-family:\'Noto Sans TC\',sans-serif;' +
+        'font-size:12px;font-weight:600;letter-spacing:.2px;transition:all .14s ease;flex-shrink:0;text-align:left}' +
+      '.nr-btn .nr-ico{font-size:14px;line-height:1;opacity:.8;width:16px;text-align:center;flex-shrink:0}' +
+      '.nr-btn:hover{color:#F8FAFC;background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.06)}' +
+      '.nr-btn.on{color:#F8FAFC;background:linear-gradient(90deg, rgba(14,165,233,0.18) 0%, rgba(14,165,233,0.04) 100%);' +
+        'border-color:rgba(14,165,233,0.35);box-shadow:inset 3px 0 0 #0EA5E9}' +
+      '.nr-btn.on .nr-ico{opacity:1;color:#38BDF8}' +
+      '.nr-spacer{flex:1;min-height:12px}' +
+      '.nr-foot-tw{padding:8px 6px 4px;font-family:\'Noto Sans TC\',sans-serif;' +
+        'font-size:10px;color:#64748B;border-top:1px solid #132238;margin-top:6px;flex-shrink:0;display:flex;flex-direction:column;gap:3px}' +
+      '.nr-foot-tw .mode-dot{color:#38BDF8;font-weight:600;display:flex;align-items:center;gap:4px}' +
+      '.nr-foot-tw .mode-sub{font-size:8.5px;color:#475569;line-height:1.2}' +
+      '.nr-foot-tw .logout{margin-top:4px;color:#94A3B8;cursor:pointer;display:inline-flex;align-items:center;gap:4px;font-size:10px}' +
+      '.nr-foot-tw .logout:hover{color:#F8FAFC}' +
       '#shell-main{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;position:relative}' +
-      '#shell-views{display:none;flex:1;min-height:0;min-width:0;background:' +
-        'radial-gradient(1200px 480px at 10% -10%,rgba(245,197,24,.06),transparent 55%),var(--bg);' +
+      '#shell-views{display:none;flex:1;min-height:0;min-width:0;background:#060C16;' +
         'overflow:auto}' +
       '#shell-views.show{display:flex;flex-direction:column}' +
-      /* 總覽 compact：鎖一屏，避免殼層再疊一層捲軸 */
-      '#shell-views.show:has(#view-pulse.on){overflow:hidden}' +
       '#body.shell-hidden{display:none !important}' +
       '#wlbar.shell-hidden{display:none !important}' +
-      '.sv-panel{display:none;flex:1;padding:10px 14px 16px;max-width:min(1200px,100%);min-width:0;box-sizing:border-box;min-height:0}' +
-      '.sv-panel.on{display:flex;flex-direction:column}' +
-      /* 資訊面板高密度：標題列／卡片／表格統一收緊 */
+      '.sv-panel{display:none;flex:1;padding:10px 14px 16px;max-width:min(1480px,100%);min-width:0;box-sizing:border-box}' +
+      '.sv-panel.on{display:block}' +
       '.sv-panel .sv-kicker{font-size:9px;letter-spacing:1.5px;margin-bottom:2px}' +
       '.sv-panel .sv-title{font-size:20px;margin:0}' +
       '.sv-panel .sv-sub{font-size:10px;margin-top:2px;line-height:1.4}' +
-      /* 防 flex 子項 min-content 撑破水平；寬版面板由各模組覆寫 max-width */
       '#shell-views > .sv-panel{min-width:0}' +
-      '.sv-mount{flex:1;min-height:0;min-width:0;max-width:100%;box-sizing:border-box;display:flex;flex-direction:column}' +
+      '.sv-mount{min-height:100%;min-width:0;max-width:100%;box-sizing:border-box}' +
       '.sv-kicker{font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--gold);' +
         'letter-spacing:1.5px;margin-bottom:2px}' +
       '.sv-title{font-family:\'Noto Serif TC\',serif;font-size:20px;font-weight:700;color:var(--thi);' +
@@ -111,19 +102,49 @@
       '#topbar .logo .shell-ver{margin-left:6px;font-size:9px;color:var(--gold);letter-spacing:1px;font-weight:700}' +
       '#topbar .logo [data-v2-banner] span,' +
       '#topbar .logo>span[style*="FBBF24"]{display:none !important}' +
-      '@media (max-width:720px){' +
-        '#navrail{flex-basis:48px;width:48px}' +
-        '.nr-btn{min-height:38px;margin:0 3px;font-size:8px}' +
-        '.sv-panel{padding:10px 12px 14px}' +
-        '.sv-title{font-size:22px}' +
-        '#topbar .shell-sync-btn span.lbl{display:none}' +
+      '@media (max-width:1024px){' +
+        '#navrail{flex-basis:56px;width:56px;padding:6px 4px}' +
+        '#navrail .nr-brand-tw .brand-title,#navrail .nr-brand-tw .brand-sub,' +
+        '#navrail .nr-foot-tw .mode-sub,#navrail .nr-foot-tw .logout{display:none}' +
+        '.nr-btn{justify-content:center;padding:6px 0;font-size:10px}' +
+        '.nr-btn span:not(.nr-ico){display:none}' +
       '}';
+    document.head.appendChild(s);
   }
 
   function stubHTML(route) {
     return '' +
       '<div class="sv-kicker">STOCK TERMINAL · ' + VERSION + '</div>' +
       '<div class="sv-title">' + route.label + '</div>' +
+      '<p class="sv-desc">' + route.hint +
+        '。面板載入中或尚未掛接資料模組。</p>' +
+      '<div class="sv-meta">route = ' + route.id + '</div>' +
+      '<button type="button" class="sv-cta" data-shell-back>← 回到圖表工作區</button>';
+  }
+
+  function railHTML() {
+    return '<div class="nr-brand-tw">' +
+      '<div class="logo-box">' +
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>' +
+      '</div>' +
+      '<div class="logo-text">' +
+        '<div class="brand-title">TW Pulse</div>' +
+        '<div class="brand-sub">MARKET INTELLIGENCE</div>' +
+      '</div>' +
+      '</div>' +
+      ROUTES.map(function (r) {
+        return '<button type="button" class="nr-btn" data-route="' + r.id + '" title="' +
+          r.hint.replace(/"/g, '') + '">' +
+          '<span class="nr-ico" aria-hidden="true">' + r.icon + '</span>' +
+          '<span>' + r.label + '</span></button>';
+      }).join('') +
+      '<div class="nr-spacer"></div>' +
+      '<div class="nr-foot-tw">' +
+        '<div class="mode-dot">● 本機展示模式</div>' +
+        '<div class="mode-sub">個人資料僅存在此瀏覽器</div>' +
+        '<div class="logout">[→ 登出</div>' +
+      '</div>';
+  }'<div class="sv-title">' + route.label + '</div>' +
       '<p class="sv-desc">' + route.hint +
         '。面板載入中或尚未掛接資料模組。</p>' +
       '<div class="sv-meta">route = ' + route.id + '</div>' +
