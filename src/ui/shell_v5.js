@@ -77,11 +77,11 @@
         'display:flex;flex-direction:column;gap:2px}' +
       '.nr-foot-st .mode-dot{color:var(--cyan);font-weight:600}' +
       '.nr-foot-st .mode-sub{font-size:8px;color:#475569;line-height:1.2}' +
-      '#shell-main{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;position:relative}' +
-      '#shell-views{display:none!important;flex:1;min-height:0;min-width:0;background:#060C16;overflow:auto}' +
-      '#shell-views.show{display:flex!important;flex-direction:column}' +
+      '#shell-main{display:flex;flex-direction:column;flex:1 1 0;min-width:0;min-height:0;height:100%;position:relative}' +
+      '#shell-views{display:none!important;flex:1 1 0;min-height:0;min-width:0;height:100%;background:#060C16;overflow:auto}' +
+      '#shell-views.show{display:flex!important;flex-direction:column;flex:1 1 0;min-height:0;height:100%}' +
       /* 高密度一頁視圖：鎖定捲動（各模組亦會覆寫） */
-      '#shell-views.show:has(.sv-panel.on){overflow:hidden}' +
+      '#shell-views.show:has(.sv-panel.on){overflow:hidden;flex:1 1 0;min-height:0}' +
       '#view-breadth.sv-panel.on,#view-heat.sv-panel.on,#view-afterhours.sv-panel.on,' +
       '#view-institutional.sv-panel.on,#view-international.sv-panel.on,#view-signals.sv-panel.on,' +
       '#view-watchlist.sv-panel.on,#view-risk.sv-panel.on,#view-news.sv-panel.on,' +
@@ -91,12 +91,13 @@
       '#body.shell-hidden{display:none !important}' +
       '#wlbar.shell-hidden{display:none !important}' +
       /* 非作用中面板強制隱藏，避免「市場總覽」殘留在其他 tab 上方 */
-      '.sv-panel{display:none!important;flex:1;padding:8px 10px 10px;max-width:none;min-width:0;' +
-        'box-sizing:border-box;min-height:0;visibility:hidden;pointer-events:none}' +
-      '.sv-panel.on{display:flex!important;flex-direction:column;visibility:visible;pointer-events:auto}' +
+      '.sv-panel{display:none!important;flex:1 1 0;padding:8px 10px 10px;max-width:none;min-width:0;' +
+        'box-sizing:border-box;min-height:0;height:100%;visibility:hidden;pointer-events:none}' +
+      '.sv-panel.on{display:flex!important;flex-direction:column;visibility:visible;pointer-events:auto;' +
+        'flex:1 1 0;min-height:0;height:100%}' +
       '#shell-views > .sv-panel{min-width:0}' +
       '#mkt-bar.shell-hidden{display:none!important}' +
-      '.sv-mount{flex:1;min-height:0;min-width:0;max-width:100%;box-sizing:border-box;display:flex;flex-direction:column}' +
+      '.sv-mount{flex:1 1 0;min-height:0;height:100%;min-width:0;max-width:100%;box-sizing:border-box;display:flex;flex-direction:column}' +
       '.sv-kicker{font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--gold);' +
         'letter-spacing:1.5px;margin-bottom:2px}' +
       '.sv-title{font-family:\'Noto Serif TC\',serif;font-size:20px;font-weight:700;color:var(--thi);' +
