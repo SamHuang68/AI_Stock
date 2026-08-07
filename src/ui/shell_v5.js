@@ -465,11 +465,15 @@
       var orphan = $('view-' + rid);
       if (orphan && orphan.parentNode) orphan.parentNode.removeChild(orphan);
     });
-    var saved = 'chart';
-    try { saved = localStorage.getItem(STORAGE_KEY) || 'chart'; } catch (e) {}
-    /* 舊「指數」分頁 → 圖表 */
-    if (saved === 'trends' || saved === 'index') saved = 'chart';
-    if (!saved || !findRoute(saved)) saved = 'chart';
+    var saved = 'pulse';
+    var hash = (window.location.hash || '').replace('#', '').trim();
+    if (hash && findRoute(hash)) {
+      saved = hash;
+    } else {
+      try { saved = localStorage.getItem(STORAGE_KEY) || 'pulse'; } catch (e) {}
+    }
+    if (saved === 'trends' || saved === 'index') saved = 'pulse';
+    if (!saved || !findRoute(saved)) saved = 'pulse';
     applyRoute(saved);
     probeHealth();
     setInterval(probeHealth, 60000);
