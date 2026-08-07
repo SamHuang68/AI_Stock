@@ -1747,9 +1747,31 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
 class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'   # enables keep-alive
 
+    def _handle_index(self):
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        fn = os.path.join(base_dir, 'stock_terminal_v2.html')
+        if not os.path.exists(fn):
+            fn = os.path.join(base_dir, 'stock_terminal.html')
+        try:
+            with open(fn, 'rb') as f:
+                content = f.read()
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
+            self.send_header('Content-Length', str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+        except Exception as e:
+            self._err('failed to read index HTML: ' + str(e), 500)
+
     def do_GET(self):
         p = self.path
-        if p.startswith('/yf/batch'):
+        if p == '/' or p == '/index.html' or p == '/stock_terminal_v2.html' or p.startswith('/stock_terminal_v2.html?'):
+            self._handle_index()
+            return
+        elif p.startswith('/yf/batch'):
             self._handle_batch()
         elif p.startswith('/yf/'):
             sym = unquote(p[4:].split('?')[0])
