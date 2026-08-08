@@ -997,7 +997,7 @@
       if (!logo.querySelector('.shell-logo-ico')) {
         var ico = document.createElement('img');
         ico.className = 'shell-logo-ico';
-        ico.src = 'assets/st50-icon.svg';
+        ico.src = RING_LOGO;
         ico.alt = '';
         ico.width = 18;
         ico.height = 18;
