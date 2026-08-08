@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 REM ============================================================
 REM  Stock Terminal — sole local launch / update script
 REM ------------------------------------------------------------
@@ -43,18 +43,50 @@ cd /d "%REPO_ROOT%"
 if errorlevel 1 goto FAIL_CD
 :AFTER_ROOT
 
+REM ---- Tip UX only: never silently fall back to main / pre-tip branches ----
+set "TIP_BRANCH=cursor/st51-docs-ux-on-tip-3497"
+if exist "%REPO_ROOT%\TIP_BRANCH" (
+  set /p TIP_BRANCH=<"%REPO_ROOT%\TIP_BRANCH"
+)
+for /f "tokens=* delims= " %%v in ("!TIP_BRANCH!") do set "TIP_BRANCH=%%v"
+
+set "ST_VER=5.0"
+if exist "%REPO_ROOT%\VERSION" (
+  set /p ST_VER=<"%REPO_ROOT%\VERSION"
+)
+for /f "tokens=* delims= " %%v in ("!ST_VER!") do set "ST_VER=%%v"
+
 echo.
 echo ============================================
-echo  Stock Terminal v5.0
+echo  Stock Terminal v!ST_VER!  - tip UX
 echo  http://localhost:18432/#pulse
 echo ============================================
 echo.
 echo  repo: %REPO_ROOT%
+echo  tip:  !TIP_BRANCH!
 for /f "delims=" %%b in ('git branch --show-current 2^>nul') do set "CUR_BRANCH=%%b"
 if defined CUR_BRANCH echo  branch: !CUR_BRANCH!
 echo.
 
+REM pull mode recovers FROM legacy -> tip. run/rebuild while ON legacy is blocked.
+if /I "%MODE%"=="pull" goto AFTER_CUR_GUARD
+if /I "%FORCE_LEGACY%"=="1" goto AFTER_CUR_GUARD
+if /I "!CUR_BRANCH!"=="main" goto FAIL_LEGACY_CURRENT
+if /I "!CUR_BRANCH!"=="master" goto FAIL_LEGACY_CURRENT
+if /I "!CUR_BRANCH!"=="cursor/http-client-pool-3497" goto FAIL_LEGACY_CURRENT
+:AFTER_CUR_GUARD
+
 if /I not "%MODE%"=="pull" goto SKIP_PULL
+
+REM pull with empty target -> always tip UX branch
+if "%TARGET_BRANCH%"=="" set "TARGET_BRANCH=!TIP_BRANCH!"
+
+REM Block checkout targets that drop tip UX
+if /I "%FORCE_LEGACY%"=="1" goto AFTER_LEGACY_GUARD
+if /I "%TARGET_BRANCH%"=="main" goto FAIL_LEGACY_TARGET
+if /I "%TARGET_BRANCH%"=="master" goto FAIL_LEGACY_TARGET
+if /I "%TARGET_BRANCH%"=="cursor/http-client-pool-3497" goto FAIL_LEGACY_TARGET
+:AFTER_LEGACY_GUARD
 
 REM ---- pull mode: MUST leave the in-repo file before git ops ----
 if /I "%FROM_TEMP%"=="__from_temp__" goto PULL_BODY
@@ -148,12 +180,28 @@ if "%OPEN_BROWSER%"=="1" start "" "http://localhost:18432/#pulse"
 
 echo.
 echo  Opened. Press Ctrl+F5 to hard-reload.
-echo  Next AI update:  scripts\go.bat pull
-echo  Or force tip:    scripts\apply.bat cursor/range-period-change-b5cf
+echo  Next:  scripts\go.bat pull
+echo  Tip:   scripts\go.bat pull !TIP_BRANCH!
 echo.
 pause
 endlocal
 exit /b 0
+
+:FAIL_LEGACY_CURRENT
+echo [BLOCK] Current branch is NOT tip UX: !CUR_BRANCH!
+echo        Tip UX only. Switch with:
+echo          scripts\go.bat pull !TIP_BRANCH!
+echo        Override not recommended: set FORCE_LEGACY=1
+pause
+exit /b 2
+
+:FAIL_LEGACY_TARGET
+echo [BLOCK] Refusing checkout of legacy branch: %TARGET_BRANCH%
+echo        That line drops tip UX back to old UI. Tip only:
+echo          scripts\go.bat pull !TIP_BRANCH!
+echo        Override not recommended: set FORCE_LEGACY=1
+pause
+exit /b 2
 
 :FAIL_CD
 echo [FAIL] cannot cd to repo root.
@@ -172,8 +220,7 @@ exit /b 1
 :FAIL_MISSING_GO
 echo [FAIL] scripts\go.bat missing after pull/checkout.
 echo        Manual recovery:
-echo          git merge --ff-only origin/main
-echo          scripts\go.bat
+echo          scripts\go.bat pull !TIP_BRANCH!
 pause
 exit /b 1
 
@@ -190,16 +237,14 @@ exit /b 1
 :FAIL_CHECKOUT
 echo [FAIL] git checkout %TARGET_BRANCH% failed.
 echo        Try: git stash push -m "manual before switch"
-echo             scripts\go.bat pull %TARGET_BRANCH%
+echo             scripts\go.bat pull !TIP_BRANCH!
 pause
 exit /b 1
 
 :FAIL_PULL
 echo [FAIL] git pull / fast-forward failed.
-echo        Manual recovery if stuck behind origin/main:
-echo          git checkout main
-echo          git merge --ff-only origin/main
-echo          scripts\go.bat
+echo        Stay on tip UX:
+echo          scripts\go.bat pull !TIP_BRANCH!
 pause
 exit /b 1
 

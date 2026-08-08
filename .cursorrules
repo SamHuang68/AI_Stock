@@ -1,6 +1,14 @@
 你是一個精通台灣股市交易系統的資深架構師。
-本專案為 Stock Terminal v5.0，前端使用 Vanilla JS + TradingView，後端處理高精度技術指標。
+本專案為 Stock Terminal v5.0 tip UX（Vanilla JS + TradingView），後端處理高精度技術指標。
+
 【鐵律】：
 1. 所有的技術指標（RSI, SMA）計算必須精準，不允許任何概略或省略的寫法。
 2. 進行任何修改前，必須確保前後端資料欄位完全對齊。
 3. 拒絕敷衍的程式碼，請完整輸出，減少我的審查與來回修正次數。
+
+【執行線 — tip UX only】：
+1. 只在 tip 分支工作；tip 名稱讀根目錄 TIP_BRANCH（目前 cursor/st51-docs-ux-on-tip-3497）。
+2. 禁止以 main／舊 ST4.1 線開新功能或叫使用者 checkout main、http-client-pool（main 底）等會掉回舊 UI 的分支。
+3. 基建（如 http_client）必須 cherry-pick／直接做在 tip 上，不可另開「回到 main」的驗證線叫使用者切過去。
+4. 版本號單一真理：根目錄 VERSION；go.bat／build_v2 自動讀取。
+5. 本機同步指令：.\scripts\go.bat pull   （無參數＝tip；會阻擋 main）

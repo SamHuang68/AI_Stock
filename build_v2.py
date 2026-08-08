@@ -11,6 +11,23 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC  = os.path.join(ROOT, 'stock_terminal.html')
 DST  = os.path.join(ROOT, 'stock_terminal_v2.html')
 
+
+def _read_version():
+    """單一真理：根目錄 VERSION。"""
+    path = os.path.join(ROOT, 'VERSION')
+    try:
+        with open(path, 'r', encoding='utf-8') as vf:
+            for line in vf:
+                v = line.strip()
+                if v and not v.startswith('#'):
+                    return v
+    except Exception:
+        pass
+    return '5.0'
+
+
+ST_VERSION = _read_version()
+
 # Scripts injected (in order):
 V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,須最先載入)
               'src/ui/viz_v5.js',        # v5.0: 文字→視覺共用元件(須在 colors 後、各面板前)
@@ -107,10 +124,10 @@ for css in V2_STYLES:
 with open(SRC, 'r', encoding='utf-8') as f:
     html = f.read()
 
-# 1) Update title
+# 1) Update title（跟 VERSION）
 html = re.sub(
     r'<title>[^<]*</title>',
-    '<title>Stock Terminal v5.0 - Market Intelligence / Local DB / AI Copilot</title>',
+    f'<title>Stock Terminal v{ST_VERSION} - Market Intelligence / Local DB / AI Copilot</title>',
     html, count=1)
 
 # 2a) POS tab
@@ -232,23 +249,38 @@ if '</body>' in html:
 else:
     html += '\n' + script_block
 
-# 6) banner
+# 6) banner（跟 VERSION）
 if 'data-v2-banner' not in html:
     html = html.replace(
         '<span class="logo">STOCK TERMINAL</span>',
-        '<span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v5.0</span></span>',
+        f'<span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v{ST_VERSION}</span></span>',
         1)
-# Bump existing banner to v5.0
 html = re.sub(
-    r'(data-v2-banner>STOCK TERMINAL <span[^>]+>)v[0-9]+\.\d+(</span>)',
-    r'\g<1>v5.0\g<2>', html, count=1)
+    r'(data-v2-banner>STOCK TERMINAL <span[^>]+>)v[0-9]+(?:\.\d+)*(?:-[A-Za-z0-9.]+)?(</span>)',
+    rf'\g<1>v{ST_VERSION}\g<2>', html, count=1)
 
 with open(DST, 'w', encoding='utf-8') as f:
     f.write(html)
 with open(SRC, 'w', encoding='utf-8') as f:
     f.write(html)
 
+shell_js = os.path.join(ROOT, 'src', 'ui', 'shell_v5.js')
+if os.path.isfile(shell_js):
+    try:
+        with open(shell_js, 'r', encoding='utf-8') as sf:
+            shell_src = sf.read()
+        shell_new, n = re.subn(
+            r"var VERSION = '[^']*';",
+            f"var VERSION = '{ST_VERSION}';",
+            shell_src, count=1)
+        if n and shell_new != shell_src:
+            with open(shell_js, 'w', encoding='utf-8') as sf:
+                sf.write(shell_new)
+    except Exception as e:
+        print('[warn] shell version stamp:', e)
+
 print(f'[OK] wrote {DST} & {SRC} ({len(html):,} bytes)')
+print(f'     version: v{ST_VERSION}  (from VERSION)  tip UX')
 print(f'     base:    {SRC}')
 print(f'     modules: {", ".join(V2_SCRIPTS)}')
 print()
