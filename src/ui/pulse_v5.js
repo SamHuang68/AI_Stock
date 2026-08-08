@@ -82,24 +82,30 @@
       '#pl-root .pl-strip .pl-idx-spark .vz-spark{width:100%;height:14px;display:block}' +
       '#pl-root .pl-strip .vz-chip{margin-top:1px;font-size:8px;padding:0 4px;line-height:1.35}' +
       '#pl-root .pl-strip .vz-meter{margin-top:1px;height:3px}' +
-      /* 上下兩區 · 一行五框（鐵律）。內容不得以 min-content 撐爆欄寬，否則會裁成「一行兩框」 */
+      /* 上下兩區 · 一行五框（鐵律）。
+         用 flex + width:0 等分，比 grid 更能防止內容 min-content 撐成「一行兩框」。 */
       '#pl-root .pl-dash{flex:1 1 0;min-height:0;width:100%;max-width:100%;display:grid;gap:6px;' +
         'grid-template-columns:minmax(0,1fr)!important;' +
         'grid-template-rows:minmax(0,1fr) minmax(0,1fr);overflow:hidden}' +
-      '#pl-root .pl-zone{display:grid!important;gap:6px;width:100%;max-width:100%;' +
+      '#pl-root .pl-zone{display:flex!important;flex-direction:row!important;flex-wrap:nowrap!important;' +
+        'align-items:stretch;gap:6px;width:100%;max-width:100%;' +
         'min-width:0!important;min-height:0;height:100%;overflow:hidden!important;' +
-        'grid-template-columns:repeat(5,minmax(0,1fr))!important;' +
-        'grid-auto-flow:row!important}' +
-      '#pl-root .pl-zone > .pl-sec{min-width:0!important;max-width:100%!important;width:auto!important;' +
+        'box-sizing:border-box}' +
+      '#pl-root .pl-zone > .pl-sec{' +
+        'flex:1 1 0%!important;width:0!important;min-width:0!important;max-width:none!important;' +
         'overflow:hidden!important;box-sizing:border-box}' +
       '#pl-root .pl-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;' +
         'min-width:0!important;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%}' +
       /* spark／軸標不得 nowrap 撐爆五欄 */
-      '#pl-root .vz-spark-ax{max-width:100%!important;min-width:0!important;overflow:hidden}' +
-      '#pl-root .vz-spark-ax .vz-xunit,#pl-root .vz-spark-ax .vz-yunit{' +
-        'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}' +
-      '#pl-root .pl-spark,#pl-root .pl-inst-trend,#pl-root .pl-bd-trend{min-width:0!important;max-width:100%;overflow:hidden}' +
-      '#pl-root svg{max-width:100%}' +
+      '#pl-root .vz-spark-ax{max-width:100%!important;min-width:0!important;width:100%!important;overflow:hidden;' +
+        'grid-template-columns:minmax(0,auto) minmax(0,1fr)!important}' +
+      '#pl-root .vz-spark-ax .vz-xunit,#pl-root .vz-spark-ax .vz-yunit,' +
+      '#pl-root .vz-spark-ax .vz-ylabs,#pl-root .vz-spark-ax .vz-xlabs{' +
+        'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;min-width:0}' +
+      '#pl-root .pl-spark,#pl-root .pl-inst-trend,#pl-root .pl-bd-trend,' +
+      '#pl-root .pl-inst-trend .chart,#pl-root .pl-bd-trend .chart{' +
+        'min-width:0!important;max-width:100%;width:100%;overflow:hidden}' +
+      '#pl-root svg{max-width:100%!important;width:100%!important}' +
       '#pl-root .pl-sec h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;' +
         'display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;gap:4px;flex-wrap:wrap}' +
       '#pl-root .pl-sec h4 a{color:var(--cyan);cursor:pointer;font-size:8px;font-weight:600;text-decoration:none;white-space:nowrap}' +
@@ -398,9 +404,9 @@
       mount.innerHTML =
         '<div id="pl-root">' +
           '<div class="pl-head"><div>' +
-            '<div class="pl-title">市場總覽</div>' +
+            '<div class="pl-title">市場總覽 <span id="pl-layout-badge" style="font-size:10px;font-weight:700;letter-spacing:.04em;padding:1px 7px;border-radius:999px;border:1px solid rgba(34,211,238,.45);background:rgba(34,211,238,.12);color:#67e8f9;vertical-align:middle">5×2</span></div>' +
             '<div class="pl-tone" id="pl-tone">—</div>' +
-            '<div class="pl-sub" id="pl-sub">官方資料 · 一行五框 × 上下兩區</div>' +
+            '<div class="pl-sub" id="pl-sub">官方資料 · 鐵律：一行五框 × 上下兩區</div>' +
           '</div><div class="pl-actions">' +
             '<button type="button" class="pl-btn" id="pl-refresh">↻ 重新整理</button>' +
             '<button type="button" class="pl-btn" id="pl-toggle-fac">因子帳本</button>' +
@@ -536,13 +542,13 @@
     if (V && V.sparkLine) {
       return V.sparkLine(closes, {
         color: closes[closes.length - 1] >= closes[0] ? 'var(--red)' : 'var(--green)',
-        h: 72, w: 280,
+        h: 72, w: 120,
         xUnit: '日', yUnit: '點', yDigits: 0
       });
     }
     var lo = Math.min.apply(null, closes), hi = Math.max.apply(null, closes);
     var span = (hi - lo) || 1;
-    var w = 280, h = 64, pad = 2;
+    var w = 120, h = 64, pad = 2;
     var pts = closes.map(function (c, i) {
       var x = pad + (i / (closes.length - 1)) * (w - pad * 2);
       var y = pad + (1 - (c - lo) / span) * (h - pad * 2);
@@ -1060,7 +1066,7 @@
           var last = totals[totals.length - 1];
           var col = last >= 0 ? 'var(--red)' : 'var(--green)';
           chart.innerHTML = V.sparkLine(totals, {
-            color: col, h: 56, w: 280,
+            color: col, h: 56, w: 120,
             xUnit: '日', yUnit: '億', yDigits: 1
           });
         } else if (totals.length) {
@@ -1070,6 +1076,7 @@
             '<b>尚無本機法人歷史</b>可按同步資料預抓</div>';
         }
       }
+      enforceFiveCol($('pl-body'));
       if (meta) {
         meta.textContent = (rows.length ? ('近 ' + rows.length + ' 日 · Y：億') : '無序列') +
           (display.date ? ' · ' + display.date : '') +
@@ -1222,7 +1229,7 @@
           var last = usable[usable.length - 1];
           var col = last >= 1 ? 'var(--red)' : 'var(--green)';
           chart.innerHTML = V.sparkLine(usable, {
-            color: col, h: 48, w: 280,
+            color: col, h: 48, w: 120,
             xUnit: '日', yUnit: '倍', yDigits: 2
           });
         } else if (usable.length) {
@@ -1232,6 +1239,7 @@
           chart.innerHTML = '<div class="pl-note">尚無本機廣度歷史 — 可按同步資料預抓</div>';
         }
       }
+      enforceFiveCol($('pl-body'));
       if (meta) {
         meta.textContent = (rows.length ? ('近 ' + rows.length + ' 日 · Y：倍') : '無序列') +
           (st.lsRatio != null ? ' · 今 ' + Number(st.lsRatio).toFixed(2) : '');
@@ -1684,37 +1692,43 @@
     });
   }
 
-  /** 核武：強制每區正好 5 欄可見，避免內容 min-content 把後三框裁出視窗外 */
+  /** 核武：flex 等分五框（width:0 + flex:1 1 0%），內容再寬也裁在框內 */
   function enforceFiveCol(root) {
     if (!root) return;
     var zones = root.querySelectorAll('.pl-zone');
     var nTop = 0, nBot = 0;
     for (var zi = 0; zi < zones.length; zi++) {
       var z = zones[zi];
-      z.style.setProperty('display', 'grid', 'important');
-      z.style.setProperty('grid-template-columns', 'repeat(5, minmax(0, 1fr))', 'important');
-      z.style.setProperty('grid-auto-flow', 'row', 'important');
+      z.style.setProperty('display', 'flex', 'important');
+      z.style.setProperty('flex-direction', 'row', 'important');
+      z.style.setProperty('flex-wrap', 'nowrap', 'important');
       z.style.setProperty('width', '100%', 'important');
       z.style.setProperty('max-width', '100%', 'important');
       z.style.setProperty('min-width', '0', 'important');
       z.style.setProperty('overflow', 'hidden', 'important');
+      z.style.removeProperty('grid-template-columns');
       var kids = z.children;
       for (var ki = 0; ki < kids.length; ki++) {
+        kids[ki].style.setProperty('flex', '1 1 0%', 'important');
+        kids[ki].style.setProperty('width', '0', 'important');
         kids[ki].style.setProperty('min-width', '0', 'important');
-        kids[ki].style.setProperty('max-width', '100%', 'important');
+        kids[ki].style.setProperty('max-width', 'none', 'important');
         kids[ki].style.setProperty('overflow', 'hidden', 'important');
       }
       if (zi === 0) nTop = kids.length;
       if (zi === 1) nBot = kids.length;
     }
-    console.log('[pulse-v5] layout=5col-2zone boxes=' + nTop + '+' + nBot +
-      ' zoneW=' + (zones[0] ? Math.round(zones[0].clientWidth) : 0));
+    var badge = $('pl-layout-badge');
+    if (badge) {
+      badge.textContent = (nTop === 5 && nBot === 5) ? '5×2' : ('⚠' + nTop + '+' + nBot);
+      badge.style.borderColor = (nTop === 5 && nBot === 5) ? 'rgba(34,211,238,.45)' : 'rgba(248,113,113,.55)';
+      badge.style.color = (nTop === 5 && nBot === 5) ? '#67e8f9' : '#fca5a5';
+    }
+    console.log('[pulse-v5] layout=5col-2zone(flex) boxes=' + nTop + '+' + nBot +
+      ' zoneW=' + (zones[0] ? Math.round(zones[0].clientWidth) : 0) +
+      ' boxW=' + (zones[0] && zones[0].children[0] ? Math.round(zones[0].children[0].clientWidth) : 0));
     if (nTop !== 5 || nBot !== 5) {
       console.warn('[pulse-v5] EXPECTED 5+5 boxes, got ' + nTop + '+' + nBot);
-    }
-    if (zones[0] && zones[0].scrollWidth > zones[0].clientWidth + 8) {
-      console.warn('[pulse-v5] zone overflow scrollW=' + zones[0].scrollWidth +
-        ' clientW=' + zones[0].clientWidth + ' — content still forcing width');
     }
   }
 
@@ -1756,12 +1770,12 @@
       sectorCache.TW = ov.sectorsRanked.slice();
     }
 
-    /* 一行五框 × 上下兩區（一屏鎖定）— 勿再改回 4 欄／媒體查詢壓成 2 欄 */
-    var zoneStyle = 'display:grid;grid-template-columns:repeat(5,minmax(0,1fr));' +
+    /* 一行五框 × 上下兩區（一屏鎖定）— flex 等分；禁止再改回 2/4 欄 */
+    var zoneStyle = 'display:flex;flex-direction:row;flex-wrap:nowrap;align-items:stretch;' +
       'gap:6px;width:100%;min-width:0;overflow:hidden;height:100%;box-sizing:border-box';
     body.innerHTML =
       renderStrip(ov, p) +
-      '<div class="pl-dash" data-layout="5col-2zone">' +
+      '<div class="pl-dash" data-layout="5col-2zone-flex">' +
         '<div class="pl-zone z-top" style="' + zoneStyle + '">' +
           renderGauge(p) + renderOhlc(ov, p) + renderInst(ov) +
           renderDonut(ov, ov.strip) + renderSectors(ov) +
@@ -1774,6 +1788,10 @@
       extra;
 
     enforceFiveCol(body);
+    /* 非同步圖表回來後再鎖一次，避免後填內容把欄位撐歪 */
+    setTimeout(function () { enforceFiveCol(body); }, 0);
+    setTimeout(function () { enforceFiveCol(body); }, 400);
+    setTimeout(function () { enforceFiveCol(body); }, 1200);
 
     bind(body);
     body.querySelectorAll('[data-sec-mkt]').forEach(function (b) {
