@@ -1016,6 +1016,91 @@ def _universe_median_pe():
         return None
 
 
+try:
+    from turnover_quant import volume_score_yi as _volume_score_yi
+    from turnover_quant import turnover_quant as _turnover_quant
+except Exception:
+    def _volume_score_yi(yi: float) -> float:
+        import math
+        return max(0.0, min(100.0, 50.0 + 50.0 * math.tanh((float(yi) - 8000.0) / 4000.0)))
+
+    def _turnover_quant(turns, latest_yi=None):
+        return {'yi': None, 'chgPct': None, 'ma5Yi': None, 'vsMa5Pct': None,
+                'z20': None, 'volumeScore': None, 'streak': None,
+                'trend': None, 'level': None, 'n': 0}
+
+
+def _fmtqik_turnover(min_n: int = 12) -> list:
+    """TWSE FMTQIK 近月（必要時補上月）日成交金額列：[{date, amount, index?, chg?}]。
+       供 /pulse 量能量化；快取 30 分。失敗回 []。"""
+    from datetime import date as _date, timedelta
+    today = _date.today()
+    key = f'fmtqik:v1:{today.strftime("%Y%m%d")}'
+    c = _cache.get(key)
+    if c is not None:
+        try:
+            return json.loads(c.decode('utf-8') if isinstance(c, (bytes, bytearray)) else c)
+        except Exception:
+            pass
+
+    def _month(ym1: str):
+        url = f'https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date={ym1}&response=json'
+        try:
+            import http_client as _hc
+            d = _hc.fetch_json(url, timeout=12, retries=1, headers=YF_HEADERS)
+        except Exception:
+            req = urllib.request.Request(url, headers=YF_HEADERS)
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                d = json.loads(resp.read())
+        if d.get('stat') not in ('OK', 'ok'):
+            return []
+        fields = d.get('fields') or []
+        rows = d.get('data') or []
+        i_date = next((i for i, f in enumerate(fields) if '日期' in f), 0)
+        i_amt = next((i for i, f in enumerate(fields) if '成交金額' in f), 1)
+        i_idx = next((i for i, f in enumerate(fields) if '指數' in f), None)
+        i_chg = next((i for i, f in enumerate(fields) if '漲跌點數' in f), None)
+        out = []
+        for row in rows:
+            try:
+                amt = float(str(row[i_amt]).replace(',', ''))
+            except Exception:
+                continue
+            rec = {'date': str(row[i_date]).strip(), 'amount': amt}
+            if i_idx is not None:
+                try:
+                    rec['index'] = float(str(row[i_idx]).replace(',', ''))
+                except Exception:
+                    pass
+            if i_chg is not None:
+                try:
+                    rec['chg'] = float(str(row[i_chg]).replace(',', ''))
+                except Exception:
+                    pass
+            out.append(rec)
+        return out
+
+    rows = _month(today.strftime('%Y%m01'))
+    if len(rows) < min_n:
+        first = today.replace(day=1)
+        prev_last = first - timedelta(days=1)
+        rows = _month(prev_last.strftime('%Y%m01')) + rows
+    # 去重保序
+    seen = set()
+    uniq = []
+    for r in rows:
+        k = r.get('date')
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        uniq.append(r)
+    try:
+        _cache.set(key, json.dumps(uniq, ensure_ascii=False).encode(), ttl=1800)
+    except Exception:
+        pass
+    return uniq
+
+
 def _score_tw_market(mf: dict, margin_meta: dict, median_pe) -> tuple:
     """大盤體質 0~100：量能 25% + 法人 25% + 融資安全 25% + 估值 25%。"""
     import math
@@ -1027,8 +1112,7 @@ def _score_tw_market(mf: dict, margin_meta: dict, median_pe) -> tuple:
     amt = turns[-1]['amount'] if turns else None
     if amt is not None:
         yi = float(amt) / 1e8  # 億
-        # 400億→弱、8000億→50、12000億→高
-        vol_sc = max(0.0, min(100.0, 50.0 + 50.0 * math.tanh((yi - 8000.0) / 4000.0)))
+        vol_sc = _volume_score_yi(yi)
         parts.append(vol_sc)
         detail['turnoverYi'] = round(yi, 1)
         detail['volumeScore'] = round(vol_sc, 1)
@@ -3869,6 +3953,10 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                     out['margin'] = {'raw': rows[:6]} if rows else None
         except Exception as e:
             print(f'[marketflow] MI_MARGN failed: {e}')
+        try:
+            out['turnoverQuant'] = _turnover_quant(out.get('turnover') or [])
+        except Exception:
+            out['turnoverQuant'] = None
         body = json.dumps(out, ensure_ascii=False).encode()
         _cache.set(key, body, ttl=1800)
         self._ok(body)
@@ -3881,7 +3969,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         from datetime import date as _date
         qs = parse_qs(urlparse(self.path).query)
         force = (qs.get('refresh', ['0'])[0] or '0') in ('1', 'true', 'yes')
-        key = f'pulse:v1:{_date.today().strftime("%Y%m%d")}:{int(time.time() // 45)}'
+        key = f'pulse:v2:{_date.today().strftime("%Y%m%d")}:{int(time.time() // 45)}'
         if not force:
             c = _cache.get(key)
             if c is not None:
@@ -4214,7 +4302,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 'cat': '系統',
             })
 
-        # 成交金額（億）— breadth.turnover 優先，否則 marketflow 末日
+        # 成交金額（億）— breadth.turnover 優先；序列用 marketflow／FMTQIK 量化趨勢
         turnover_yi = None
         to_bd = (bd or {}).get('turnover') or {}
         for k in ('stockAmt', 'totalAmt'):
@@ -4224,20 +4312,22 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                     break
                 except Exception:
                     pass
-        if turnover_yi is None and mf:
-            turns = mf.get('turnover') or []
-            if turns and turns[-1].get('amount') is not None:
-                turnover_yi = float(turns[-1]['amount']) / 1e8
-        # 前日比（若有兩日）
-        turnover_chg = None
-        if mf and (mf.get('turnover') or []) and len(mf['turnover']) >= 2:
+        turns = (mf or {}).get('turnover') if mf else None
+        if not turns:
             try:
-                a = float(mf['turnover'][-1]['amount'])
-                b = float(mf['turnover'][-2]['amount'])
-                if b:
-                    turnover_chg = (a - b) / b * 100.0
+                turns = _fmtqik_turnover()
+            except Exception as e:
+                print('[pulse] fmtqik', e)
+                turns = []
+        if turnover_yi is None and turns:
+            try:
+                turnover_yi = float(turns[-1]['amount']) / 1e8
             except Exception:
                 pass
+        tq = _turnover_quant(turns or [], latest_yi=turnover_yi)
+        if turnover_yi is None and tq.get('yi') is not None:
+            turnover_yi = tq['yi']
+        turnover_chg = tq.get('chgPct')
 
         t00 = indices.get('t00') or {}
         o00 = indices.get('o00') or {}
@@ -4275,6 +4365,14 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 'o00': o00,
                 'turnoverYi': round(turnover_yi, 1) if turnover_yi is not None else None,
                 'turnoverChgPct': round(turnover_chg, 2) if turnover_chg is not None else None,
+                'turnoverMa5Yi': tq.get('ma5Yi'),
+                'turnoverVsMa5Pct': tq.get('vsMa5Pct'),
+                'turnoverZ20': tq.get('z20'),
+                'volumeScore': tq.get('volumeScore'),
+                'turnoverStreak': tq.get('streak'),
+                'turnoverTrend': tq.get('trend'),
+                'turnoverLevel': tq.get('level'),
+                'turnoverN': tq.get('n'),
                 'up': up, 'down': dn, 'flat': flat,
                 'limitUp': st.get('limitUp'),
                 'limitDown': st.get('limitDown'),

@@ -472,9 +472,25 @@
     var tone = breadthToneLabel(adv, s.lsRatio);
     var toneKind = (tone.indexOf('偏多') >= 0 || tone.indexOf('極度偏多') >= 0) ? 'buy'
       : (tone.indexOf('偏空') >= 0 || tone.indexOf('極度偏空') >= 0) ? 'sell' : 'mid';
-    /* strip 已用 CSS 隱藏 viz；不再生死碼量柱／分數條（細節在各面板） */
+    /* strip 已用 CSS 隱藏 viz；成交金額保留量能分／vs5 日量化列 */
     var udfViz = '';
-    var turnViz = '';
+    var turnTone = s.turnoverTrend || s.turnoverLevel || '';
+    var turnKind = (s.turnoverVsMa5Pct != null && s.turnoverVsMa5Pct >= 8) ? 'buy'
+      : (s.turnoverVsMa5Pct != null && s.turnoverVsMa5Pct <= -8) ? 'sell'
+      : (s.volumeScore != null && s.volumeScore >= 60) ? 'buy'
+      : (s.volumeScore != null && s.volumeScore <= 40) ? 'sell' : 'mid';
+    var turnChip = (V && turnTone) ? V.chip(turnTone, turnKind) : '';
+    var turnMeter = (V && s.turnoverYi != null) ? V.refMeter(s.turnoverYi, [8000, 12000]) : '';
+    var turnBits = [];
+    if (s.turnoverChgPct != null) turnBits.push(pct(s.turnoverChgPct) + '日');
+    if (s.turnoverVsMa5Pct != null) turnBits.push(pct(s.turnoverVsMa5Pct) + 'vs5');
+    if (s.volumeScore != null) turnBits.push('分' + Number(s.volumeScore).toFixed(0));
+    if (s.turnoverZ20 != null) turnBits.push('Z' + Number(s.turnoverZ20).toFixed(1));
+    if (s.turnoverStreak) {
+      turnBits.push((s.turnoverStreak > 0 ? '連放' : '連縮') + Math.abs(s.turnoverStreak));
+    }
+    var turnSub = turnBits.length ? turnBits.join(' · ') : '—';
+    var turnTip = '量能量化：vs前日／vs5日均／量能分(8000億=50)／近20日Z／連續放縮；水位 8000／12000 億';
     var advViz = V ? V.chip(tone, toneKind) : '';
     var txfSess = txf.sessionLabel || (txf.session === 'night' ? '夜盤' : (txf.session === 'day' ? '日盤' : ''));
     return '<div class="pl-strip">' +
@@ -486,11 +502,12 @@
         fmt(txf.price, 0) + '</div>' +
         '<div class="s ' + tw(txf.changePct) + '">' + chgWithPct(txf, 0, 2) +
         (txf.ampRate != null ? ' · 振幅 ' + Number(txf.ampRate).toFixed(2) + '%' : '') + '</div></div>' +
-      '<div class="cell"><div class="k">成交金額</div><div class="v">' +
-        (s.turnoverYi != null ? Number(s.turnoverYi).toFixed(1) + ' 億' : '—') + '</div>' +
-        '<div class="s ' + tw(s.turnoverChgPct) + '">' +
-        (s.turnoverChgPct != null ? pct(s.turnoverChgPct) + ' vs 前日' : '—') + '</div>' +
-        turnViz + '</div>' +
+      '<div class="cell" title="' + turnTip + '"><div class="k">成交金額 · 量能</div><div class="v">' +
+        (s.turnoverYi != null ? Number(s.turnoverYi).toFixed(1) + ' 億' : '—') +
+        (s.turnoverLevel ? ' <span style="font-size:9px;color:var(--tlo);font-weight:700">' + esc(s.turnoverLevel) + '</span>' : '') +
+        '</div>' +
+        '<div class="s ' + tw(s.turnoverVsMa5Pct != null ? s.turnoverVsMa5Pct : s.turnoverChgPct) + '">' +
+          turnSub + '</div>' + turnChip + turnMeter + '</div>' +
       '<div class="cell" data-go="breadth" title="台股上市股票上漲／下跌／平盤家數（TWSE）" style="cursor:pointer">' +
         '<div class="k">上漲／下跌／平盤 · 家數</div><div class="v" style="font-size:13px">' +
         '<span class="up">' + fmt(s.up) + '</span> / <span class="dn">' + fmt(s.down) + '</span> / <span class="flat">' + fmt(s.flat) + '</span></div>' +

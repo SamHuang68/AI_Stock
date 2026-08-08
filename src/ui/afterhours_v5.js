@@ -363,7 +363,15 @@
       stripCell('漲跌家數', '<span class="up">' + fmtN(st.up) + '</span> / <span class="dn">' + fmtN(st.down) + '</span>',
         '淨 ' + (st.net != null ? ((st.net >= 0 ? '+' : '') + st.net) : '—')) +
       stripCell('大盤體質', bd.score != null ? bd.score : '—', bd.summary || '量能／法人／融資') +
-      stripCell('成交金額', yi(latestAmt), (mf.date || '量能')) +
+      stripCell('成交金額', yi(latestAmt), (function () {
+        var tq = mf.turnoverQuant || {};
+        var bits = [];
+        if (tq.chgPct != null) bits.push((tq.chgPct >= 0 ? '+' : '') + Number(tq.chgPct).toFixed(1) + '%日');
+        if (tq.vsMa5Pct != null) bits.push((tq.vsMa5Pct >= 0 ? '+' : '') + Number(tq.vsMa5Pct).toFixed(1) + '%vs5');
+        if (tq.volumeScore != null) bits.push('分' + Number(tq.volumeScore).toFixed(0));
+        if (tq.trend) bits.push(tq.trend);
+        return bits.length ? bits.join(' · ') : (mf.date || '量能');
+      })()) +
       stripCell('法人合計', fyi(total),
         '外 ' + fyi(inst && inst.foreign) + ' · 投 ' + fyi(inst && inst.trust));
 
