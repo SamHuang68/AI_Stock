@@ -165,6 +165,10 @@ ok(/FAIL_TIP_HTML/.test(goBat) && /st5-tip-boot/.test(goBat) && /#pulse/.test(go
 const goSh = fs.readFileSync(path.join(root, 'scripts/go.sh'), 'utf8');
 ok(/TIP_BRANCH/.test(goSh) && /http-client-pool/.test(goSh) && /#pulse/.test(goSh),
   'go.sh enforces tip branch and opens #pulse');
+ok(fs.existsSync(path.join(root, 'scripts/go.ps1')), 'scripts/go.ps1 exists for PowerShell');
+const goPs = fs.readFileSync(path.join(root, 'scripts/go.ps1'), 'utf8');
+ok(/tipUx/.test(goPs) && /st5-tip-boot/.test(goPs) && /#pulse/.test(goPs),
+  'go.ps1 verifies tip health/HTML and opens #pulse');
 
 const srv = fs.readFileSync(path.join(root, 'server/server.py'), 'utf8');
 ok(/X-Stock-Terminal-UX/.test(srv) && /tipUx/.test(srv) && /\/#pulse/.test(srv),
