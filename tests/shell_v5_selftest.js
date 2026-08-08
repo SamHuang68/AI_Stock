@@ -173,10 +173,34 @@ ok(/RING_ROUTES/.test(shell) && /st-ring/.test(shell) && /openRing/.test(shell) 
   /toggleRing/.test(shell) && /auxclick/.test(shell) && /st-ring-fab/.test(shell) &&
   /sr-hub/.test(shell) && /sr-item/.test(shell),
   'shell MX-style gesture ring (middle-click / \\\\ / fab)');
-ok(/ringPushFolder/.test(shell) && /chartToolFolderItems/.test(shell) &&
-  /toolbarGroupItems/.test(shell) && /folder: 'fund'/.test(shell) &&
-  /folder: 'screen'/.test(shell) && /has-kids/.test(shell) && /ringPop/.test(shell),
-  'shell ring hierarchical drill-down (chart → 籌碼/選股 → tools)');
+ok(/ringAnalysisTree/.test(shell) && /ringPushChildren/.test(shell) &&
+  /renderRingLayers/.test(shell) && /sr-layer\.locked/.test(shell) &&
+  /RING_MAX_DEPTH/.test(shell) && /has-kids/.test(shell) && /ringPop/.test(shell) &&
+  /ringFolder\('market'/.test(shell) && /ringFolder\('price'/.test(shell) &&
+  /ringFolder\('flow'/.test(shell) && /ringFolder\('screen'/.test(shell),
+  'shell ring 3-layer analysis taxonomy (locked outer + active inner)');
+/* 樹深度約束：任一分支 children 巢狀 ≤ RING_MAX_DEPTH（靜態掃描） */
+(function () {
+  var maxNest = 0;
+  function walk(src, from, depth) {
+    var i = src.indexOf(from);
+    if (i < 0) return;
+    var slice = src.slice(i, i + 900);
+    var kids = (slice.match(/ringFolder\(/g) || []).length +
+      (slice.match(/ringClick\(/g) || []).length;
+    if (depth > maxNest) maxNest = depth;
+    if (/ringFolder\('tech'/.test(slice) || /ringFolder\('flow-tools'/.test(slice) ||
+        /ringFolder\('fundamentals'/.test(slice) || /ringFolder\('screen-tools'/.test(slice) ||
+        /ringFolder\('ai-tools'/.test(slice) || /ringFolder\('sys'/.test(slice)) {
+      if (depth + 1 > maxNest) maxNest = depth + 1;
+    }
+  }
+  walk(shell, "ringFolder('market'", 1);
+  walk(shell, "ringFolder('price'", 1);
+  walk(shell, "ringFolder('flow'", 1);
+  ok(maxNest <= 3 && /RING_MAX_DEPTH = 3/.test(shell),
+    'shell ring analysis tree capped at 3 layers');
+})();
 ok(/isNavOpen/.test(hotkeys) && /setNavOpen\(false\)/.test(hotkeys),
   'Esc closes floating nav before returning to chart');
 ok(/st5-tip-boot/.test(shell) && /st5-booted/.test(shell) && /TIP_UX/.test(shell),
