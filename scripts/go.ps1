@@ -137,15 +137,19 @@ Stop-PortListeners -PortNum $Port
 Write-Host "[start] python server\server.py (cwd=$Root)"
 $logDir = Join-Path $Root 'logs'
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
-$log = Join-Path $logDir 'server_go_ps.log'
+$logOut = Join-Path $logDir 'server_go_ps.out.log'
+$logErr = Join-Path $logDir 'server_go_ps.err.log'
+# PowerShell 禁止 stdout/stderr 導向同一檔；分開寫
 $p = Start-Process -FilePath 'python' `
   -ArgumentList 'server\server.py' `
   -WorkingDirectory $Root `
   -WindowStyle Minimized `
-  -RedirectStandardOutput $log `
-  -RedirectStandardError $log `
+  -RedirectStandardOutput $logOut `
+  -RedirectStandardError $logErr `
   -PassThru
-Write-Host "       server PID $($p.Id)  log=$log"
+Write-Host "       server PID $($p.Id)"
+Write-Host "       stdout=$logOut"
+Write-Host "       stderr=$logErr"
 
 Wait-TipServer
 Assert-IndexIsTip
