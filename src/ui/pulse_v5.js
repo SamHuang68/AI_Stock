@@ -1,22 +1,25 @@
 /* ============================================================================
  * pulse_v5.js  —  Stock Terminal 5.0：市場總覽儀表板
  * ----------------------------------------------------------------------------
- * 大螢幕一頁高密度（一行五框 × 上下兩區）：
+ * 大螢幕一頁高密度（一行四框 × 上下兩區 + 底帶）：
  *   頂列 KPI（加權／櫃買／台指期／量能／家數廣度／漲跌停）— 去重後 6 格
- *   上區 5 窗：脈動(綜合|體質|風險三燈)｜加權盤勢｜法人｜廣度｜產業
- *   下區 5 窗：漲停(產業標籤)｜跌幅｜全球｜快訊(TW/US)｜自選(TW/US·內滾)
+ *   上區 4 窗：脈動(綜合|體質|風險)｜加權盤勢｜法人｜廣度
+ *   下區 4 窗：產業｜近漲停｜跌幅｜自選
+ *   底帶 2 格：全球｜快訊（固定高度資訊帶，不是把主格壓成兩欄）
+ *   禁止：@media 把欄數壓成 2、4col-priority 整頁下捲重排、改回 5 欄當預設
  *   產業輪動 hover ↔ 近漲跌停同產業高亮；法人合計 Z／分位／排名
  *   因子／歷史預設收合（按鈕展開）
  * 產品名 Stock Terminal 5.0；資料：GET /pulse — 真實欄位，禁止 mock。
  * 版面錨點（勿改字串；go.ps1／selftest 依此核對本機是否跑到舊樹）：
- *   PULSE_LAYOUT_ANCHOR_3cab212
+ *   PULSE_LAYOUT_ANCHOR_4col2z
  * ========================================================================== */
 (function () {
   'use strict';
 
-  /* 本機若看不到標題旁「實測 5+5」，代表瀏覽器／server 仍在跑舊 pulse_v5.js */
-  var LAYOUT_ANCHOR = 'PULSE_LAYOUT_ANCHOR_3cab212';
-  var LAYOUT_CONTRACT = '5col-2zone';
+  /* 本機若看不到標題旁「實測 4+4」，代表瀏覽器／server 仍在跑舊 pulse_v5.js */
+  var LAYOUT_ANCHOR = 'PULSE_LAYOUT_ANCHOR_4col2z';
+  var LAYOUT_CONTRACT = '4col-2zone';
+  var LAYOUT_COLS = 4;
 
   var SRV = window.SERVER || '';
   var timer = null;
@@ -30,7 +33,7 @@
 
   function $(id) { return document.getElementById(id); }
 
-  /** 實測 DOM 欄數；用於分辨「程式是五框但本機仍載到舊兩框 JS」 */
+  /** 實測 DOM 欄數＝4+4；若變成 2 欄立刻紅標（防 media／舊 JS） */
   function probeLayoutCols() {
     var zones = document.querySelectorAll('#pl-root .pl-zone');
     var parts = [];
@@ -41,13 +44,23 @@
       var cols = (gtc && gtc !== 'none') ? gtc.trim().split(/\s+/).length : 0;
       var kids = z.children ? z.children.length : 0;
       parts.push(cols + '/' + kids);
-      if (cols !== 5 || kids !== 5) ok = false;
+      if (cols !== LAYOUT_COLS || kids !== LAYOUT_COLS) ok = false;
+    }
+    var foot = document.querySelector('#pl-root .pl-foot');
+    if (foot) {
+      var fgtc = window.getComputedStyle(foot).gridTemplateColumns || '';
+      var fcols = (fgtc && fgtc !== 'none') ? fgtc.trim().split(/\s+/).length : 0;
+      if (fcols !== 2 || foot.children.length !== 2) ok = false;
+      parts.push('foot' + fcols + '/' + foot.children.length);
+    } else {
+      ok = false;
+      parts.push('foot0/0');
     }
     var probe = $('pl-layout-probe');
     if (probe) {
       probe.textContent = ok
-        ? ('實測 5+5 · ' + LAYOUT_CONTRACT)
-        : ('⚠實測 ' + (parts.join(' + ') || '0') + ' · 非五框＝舊 JS／舊 server');
+        ? ('實測 4+4 · ' + LAYOUT_CONTRACT)
+        : ('⚠實測 ' + (parts.join(' + ') || '0') + ' · 非四框＝舊 JS／被壓欄');
       probe.style.borderColor = ok ? 'rgba(34,211,238,.45)' : 'rgba(248,113,113,.65)';
       probe.style.color = ok ? '#67e8f9' : '#fecaca';
       probe.style.background = ok ? 'rgba(34,211,238,.12)' : 'rgba(248,113,113,.15)';
@@ -68,7 +81,7 @@
       document.head.appendChild(s);
     }
     s.textContent =
-      /* 一屏鎖定：上下兩區各 5 窗，大螢幕塞滿資訊 */
+      /* 一屏鎖定：上下兩區各 4 窗 + 底帶；禁止整頁當預設下捲 */
       '#shell-views:has(#view-pulse.on){overflow:hidden!important}' +
       '#view-pulse.sv-panel.on{' +
         'max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
@@ -77,6 +90,7 @@
       '#pl-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);' +
         'width:100%;max-width:none;margin:0;min-width:0;box-sizing:border-box;' +
         'flex:1;min-height:0;display:flex;flex-direction:column}' +
+      /* 鐵律：本檔不得出現把 .pl-zone 壓成 2 欄的 @media */
       /* 單列微標題 */
       '#pl-root .pl-head{display:flex;align-items:center;justify-content:space-between;gap:8px;' +
         'margin-bottom:3px;min-width:0;flex:0 0 auto}' +
@@ -117,13 +131,23 @@
       '#pl-root .pl-strip .pl-idx-spark .vz-spark{width:100%;height:14px;display:block}' +
       '#pl-root .pl-strip .vz-chip{margin-top:1px;font-size:8px;padding:0 4px;line-height:1.35}' +
       '#pl-root .pl-strip .vz-meter{margin-top:1px;height:3px}' +
-      /* 上下兩區 · 一行五框 */
-      '#pl-root .pl-dash{flex:1;min-height:0;display:grid;gap:6px;' +
-        'grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
-      '#pl-root .pl-zone{display:grid;gap:6px;min-width:0;min-height:0;height:100%;' +
-        'grid-template-columns:repeat(5,minmax(0,1fr))}' +
+      /* 上下兩區 · 一行四框（2D：兩列等高 × 四欄等寬；內容不得撐破欄寬） */
+      '#pl-root .pl-dash{flex:1 1 0;min-height:0;width:100%;max-width:100%;display:grid;gap:6px;' +
+        'grid-template-columns:minmax(0,1fr);' +
+        'grid-template-rows:minmax(0,1fr) minmax(0,1fr);overflow:hidden}' +
+      '#pl-root .pl-zone{display:grid;gap:6px;min-width:0;min-height:0;height:100%;width:100%;max-width:100%;' +
+        'overflow:hidden;box-sizing:border-box;' +
+        'grid-template-columns:repeat(4,minmax(0,1fr))}' +
+      '#pl-root .pl-zone > .pl-sec{min-width:0;max-width:100%;overflow:hidden}' +
+      /* 底帶：全球｜快訊（固定比例，不參與把主區壓成兩欄） */
+      '#pl-root .pl-foot{flex:0 0 26%;min-height:120px;max-height:34%;display:grid;gap:6px;' +
+        'grid-template-columns:repeat(2,minmax(0,1fr));min-width:0;overflow:hidden;margin-top:6px}' +
+      '#pl-root .pl-foot > .pl-sec{min-width:0;overflow:hidden;height:100%}' +
       '#pl-root .pl-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;' +
         'min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%}' +
+      '#pl-root .vz-spark-ax,#pl-root .pl-spark,#pl-root .pl-inst-trend,#pl-root .pl-bd-trend{' +
+        'min-width:0;max-width:100%;overflow:hidden}' +
+      '#pl-root svg{max-width:100%;width:100%}' +
       '#pl-root .pl-sec h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;' +
         'display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;gap:4px;flex-wrap:wrap}' +
       '#pl-root .pl-sec h4 a{color:var(--cyan);cursor:pointer;font-size:8px;font-weight:600;text-decoration:none;white-space:nowrap}' +
@@ -424,7 +448,7 @@
           '<div class="pl-head"><div>' +
             '<div class="pl-title">市場總覽 <span id="pl-layout-probe" style="font-size:10px;font-weight:700;letter-spacing:.03em;padding:1px 7px;border-radius:999px;border:1px solid rgba(34,211,238,.45);background:rgba(34,211,238,.12);color:#67e8f9;vertical-align:middle">實測…</span></div>' +
             '<div class="pl-tone" id="pl-tone">—</div>' +
-            '<div class="pl-sub" id="pl-sub">官方資料 · 一行五框 × 上下兩區 · ' + LAYOUT_ANCHOR + '</div>' +
+            '<div class="pl-sub" id="pl-sub">官方資料 · 一行四框 × 上下兩區 · ' + LAYOUT_ANCHOR + '</div>' +
           '</div><div class="pl-actions">' +
             '<button type="button" class="pl-btn" id="pl-refresh">↻ 重新整理</button>' +
             '<button type="button" class="pl-btn" id="pl-toggle-fac">因子帳本</button>' +
@@ -1746,18 +1770,23 @@
       sectorCache.TW = ov.sectorsRanked.slice();
     }
 
-    /* 一行五框 × 上下兩區（一屏鎖定）— 錨點 3cab212，禁止改 2/4 欄 */
+    /* 一行四框 × 上下兩區（一屏鎖定）+ 底帶全球｜快訊
+       禁止：@media 壓成 2 欄、4col-priority 整頁下捲 */
     body.innerHTML =
       renderStrip(ov, p) +
       '<div class="pl-dash" data-layout="' + LAYOUT_CONTRACT + '">' +
         '<div class="pl-zone z-top">' +
           renderGauge(p) + renderOhlc(ov, p) + renderInst(ov) +
-          renderDonut(ov, ov.strip) + renderSectors(ov) +
+          renderDonut(ov, ov.strip) +
         '</div>' +
         '<div class="pl-zone z-bot">' +
+          renderSectors(ov) +
           renderMovers(movers, 'gainers') + renderMovers(movers, 'losers') +
-          renderGlobal(p) + renderFlash(p) + renderWatch(pack.wlQuotes) +
+          renderWatch(pack.wlQuotes) +
         '</div>' +
+      '</div>' +
+      '<div class="pl-foot" data-layout="foot-2">' +
+        renderGlobal(p) + renderFlash(p) +
       '</div>' +
       extra;
 

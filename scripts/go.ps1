@@ -183,15 +183,18 @@ function Assert-TipHtml {
   if (-not (Test-Path $pulse)) { throw "missing $pulse" }
   $pjs = Get-Content $pulse -Raw -Encoding UTF8
   if ($pjs -match '4col-priority') {
-    throw "pulse_v5.js still has 4-col layout — reset tip branch and rebuild"
+    throw "pulse_v5.js has banned 4col-priority scroll layout — refuse"
   }
-  if ($pjs -notmatch '5col-2zone' -or $pjs -notmatch 'repeat\(5,minmax\(0,1fr\)\)') {
-    throw "pulse_v5.js missing 5-col×2-zone layout markers"
+  if ($pjs -match 'max-width:1280') {
+    throw "pulse_v5.js has media breakpoint that previously crushed columns to 2 — refuse"
   }
-  if ($pjs -notmatch 'PULSE_LAYOUT_ANCHOR_3cab212') {
-    throw "pulse_v5.js missing PULSE_LAYOUT_ANCHOR_3cab212 — wrong/old tree"
+  if ($pjs -notmatch '4col-2zone' -or $pjs -notmatch 'repeat\(4,minmax\(0,1fr\)\)') {
+    throw "pulse_v5.js missing 4-col×2-zone layout markers"
   }
-  Write-Host '[ok] pulse layout = 一行五框 × 上下兩區 (5col-2zone + ANCHOR_3cab212)'
+  if ($pjs -notmatch 'PULSE_LAYOUT_ANCHOR_4col2z') {
+    throw "pulse_v5.js missing PULSE_LAYOUT_ANCHOR_4col2z — wrong/old tree"
+  }
+  Write-Host '[ok] pulse layout = 一行四框 × 上下兩區 (4col-2zone + ANCHOR_4col2z)'
 }
 
 function Wait-TipServer {
@@ -229,16 +232,16 @@ function Assert-IndexIsTip {
 
   $pjs = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/src/ui/pulse_v5.js" -UseBasicParsing -TimeoutSec 5
   $ptxt = $pjs.Content
-  if ($ptxt -match '4col-priority') {
-    throw 'Server is still serving 4-col pulse_v5.js — kill ALL python on :18432 and retry'
+  if ($ptxt -match '4col-priority' -or $ptxt -match 'max-width:1280') {
+    throw 'Server pulse_v5.js still has banned 2-col crush / scroll-priority layout'
   }
-  if ($ptxt -notmatch '5col-2zone' -or $ptxt -notmatch 'repeat\(5,minmax\(0,1fr\)\)') {
-    throw 'Server pulse_v5.js is not 5-col×2-zone — wrong tree / stale process'
+  if ($ptxt -notmatch '4col-2zone' -or $ptxt -notmatch 'repeat\(4,minmax\(0,1fr\)\)') {
+    throw 'Server pulse_v5.js is not 4-col×2-zone — wrong tree / stale process'
   }
-  if ($ptxt -notmatch 'PULSE_LAYOUT_ANCHOR_3cab212') {
-    throw 'Server pulse_v5.js missing PULSE_LAYOUT_ANCHOR_3cab212 — STALE process. Kill listeners and retry.'
+  if ($ptxt -notmatch 'PULSE_LAYOUT_ANCHOR_4col2z') {
+    throw 'Server pulse_v5.js missing PULSE_LAYOUT_ANCHOR_4col2z — STALE process. Kill listeners and retry.'
   }
-  Write-Host '[ok] GET /src/ui/pulse_v5.js is 5col-2zone + ANCHOR_3cab212'
+  Write-Host '[ok] GET /src/ui/pulse_v5.js is 4col-2zone + ANCHOR_4col2z'
 }
 
 function Assert-ListenerNotBlocked {
@@ -363,6 +366,6 @@ Write-Host '  Server window title MUST be: Stock Terminal Server v5 tip'
 Write-Host '  If you see hermes-agent\venv\...\python.exe = WRONG (script bug / old script)'
 Write-Host '  1) Close ALL localhost:18432 tabs'
 Write-Host '  2) Ctrl+F5'
-Write-Host '  3) Title badge must show: 實測 5+5'
-Write-Host '  4) F12: PULSE_LAYOUT_ANCHOR_3cab212 ... ok=true'
+Write-Host '  3) Title badge must show: 實測 4+4'
+Write-Host '  4) F12: PULSE_LAYOUT_ANCHOR_4col2z ... ok=true'
 Write-Host ''

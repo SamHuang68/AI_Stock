@@ -62,9 +62,15 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-findstr /C:"PULSE_LAYOUT_ANCHOR_3cab212" "src\ui\pulse_v5.js" >nul
+findstr /C:"PULSE_LAYOUT_ANCHOR_4col2z" "src\ui\pulse_v5.js" >nul
 if errorlevel 1 (
-  echo [FAIL] pulse_v5.js missing layout anchor — wrong tree.
+  echo [FAIL] pulse_v5.js missing layout anchor 4col2z — wrong tree.
+  pause
+  exit /b 1
+)
+findstr /C:"max-width:1280" "src\ui\pulse_v5.js" >nul
+if not errorlevel 1 (
+  echo [FAIL] pulse_v5.js still contains max-width:1280 media crush — refuse.
   pause
   exit /b 1
 )
@@ -78,7 +84,7 @@ echo.
 echo go.ps1 exit=!RC!
 echo If browser still 兩框: open logs\SERVER_BOOT.txt and http://127.0.0.1:18432/health
 echo Server window title must be: Stock Terminal Server v5 tip
-echo Browser badge must show: 實測 5+5
+echo Browser badge must show: 實測 4+4
 echo.
 pause
 exit /b !RC!
