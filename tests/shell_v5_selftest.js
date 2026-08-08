@@ -169,6 +169,10 @@ ok(/NAV_KEY/.test(shell) && /toggleNav/.test(shell) && /nr-edge/.test(shell) &&
   'shell floating hideable navrail wired');
 ok(/isNavOpen/.test(shell) && /setNavOpen/.test(shell),
   'ShellV5 exposes nav open API');
+ok(/RING_ROUTES/.test(shell) && /st-ring/.test(shell) && /openRing/.test(shell) &&
+  /toggleRing/.test(shell) && /auxclick/.test(shell) && /st-ring-fab/.test(shell) &&
+  /sr-hub/.test(shell) && /sr-item/.test(shell),
+  'shell MX-style gesture ring (middle-click / \\\\ / fab)');
 ok(/isNavOpen/.test(hotkeys) && /setNavOpen\(false\)/.test(hotkeys),
   'Esc closes floating nav before returning to chart');
 ok(/st5-tip-boot/.test(shell) && /st5-booted/.test(shell) && /TIP_UX/.test(shell),

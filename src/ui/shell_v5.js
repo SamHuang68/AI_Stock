@@ -63,6 +63,14 @@
     'international', 'afterhours', 'ai', 'news', 'scan'
   ];
 
+  /* MX Master 風格功能轉盤：固定 8 扇（由上順時針），其餘仍走側欄 */
+  var RING_ROUTES = [
+    'pulse', 'chart', 'breadth', 'heat',
+    'institutional', 'international', 'ai', 'news'
+  ];
+  var RING_R = 108; /* 扇區中心半徑 px */
+  var ringState = { open: false, cx: 0, cy: 0, hi: -1 };
+
   var PANEL_MAP = {
     pulse: 'PulseV5',
     breadth: 'BreadthV5',
@@ -199,7 +207,52 @@
         '#navrail{width:148px}' +
         '.sv-panel{padding:8px 8px 10px}' +
         '#topbar .shell-sync-btn span.lbl{display:none}' +
-      '}';
+      '}' +
+      /* ── MX Master 風格功能轉盤（Gesture Ring）── */
+      '#st-ring{position:fixed;inset:0;z-index:240;display:none;pointer-events:none}' +
+      '#st-ring.on{display:block;pointer-events:auto}' +
+      '#st-ring .sr-backdrop{position:absolute;inset:0;background:rgba(2,8,18,.55);' +
+        'backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);border:0;padding:0;cursor:default}' +
+      '#st-ring .sr-wheel{position:absolute;width:0;height:0;transform:translate(-50%,-50%);' +
+        'pointer-events:none}' +
+      '#st-ring.on .sr-wheel{animation:sr-pop .18s cubic-bezier(.2,1.2,.4,1) both}' +
+      '@keyframes sr-pop{from{opacity:0;transform:translate(-50%,-50%) scale(.55)}' +
+        'to{opacity:1;transform:translate(-50%,-50%) scale(1)}}' +
+      '#st-ring .sr-hub{position:absolute;left:0;top:0;width:44px;height:44px;margin:-22px 0 0 -22px;' +
+        'border-radius:50%;border:1px solid rgba(248,113,113,.55);' +
+        'background:radial-gradient(circle at 40% 35%,#fb7185,#b91c1c 70%);' +
+        'color:#fff;font:800 16px/44px "JetBrains Mono",monospace;text-align:center;' +
+        'cursor:pointer;pointer-events:auto;box-shadow:0 0 0 4px rgba(185,28,28,.18),0 8px 28px rgba(0,0,0,.45);' +
+        'transition:transform .12s ease,box-shadow .12s ease}' +
+      '#st-ring .sr-hub:hover,#st-ring .sr-hub.hi{transform:scale(1.08);' +
+        'box-shadow:0 0 0 5px rgba(251,113,133,.28),0 10px 32px rgba(0,0,0,.5)}' +
+      '#st-ring .sr-item{position:absolute;left:0;top:0;width:56px;height:56px;margin:-28px 0 0 -28px;' +
+        'border-radius:50%;border:1px solid rgba(30,51,77,.95);' +
+        'background:radial-gradient(circle at 35% 30%,#1a2740,#0b1524 72%);' +
+        'color:#cbd5e1;cursor:pointer;pointer-events:auto;' +
+        'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;' +
+        'box-shadow:0 6px 18px rgba(0,0,0,.4);transition:transform .12s ease,border-color .12s,color .12s,background .12s}' +
+      '#st-ring .sr-item .sr-ico{font-size:15px;line-height:1;opacity:.92}' +
+      '#st-ring .sr-item .sr-lbl{font:700 9px/1 "JetBrains Mono",monospace;letter-spacing:.2px;opacity:.9}' +
+      '#st-ring .sr-item:hover,#st-ring .sr-item.hi{transform:scale(1.12);' +
+        'border-color:rgba(245,197,24,.65);color:var(--gold);' +
+        'background:radial-gradient(circle at 35% 30%,#243552,#101c30 72%);' +
+        'box-shadow:0 0 0 2px rgba(245,197,24,.18),0 8px 22px rgba(0,0,0,.5)}' +
+      '#st-ring .sr-item.on{border-color:rgba(56,189,248,.55);color:#7dd3fc}' +
+      '#st-ring .sr-item.on.hi,#st-ring .sr-item.on:hover{border-color:rgba(245,197,24,.7);color:var(--gold)}' +
+      '#st-ring .sr-tip{position:absolute;left:50%;top:78px;transform:translateX(-50%);' +
+        'font:600 10px/1.3 "JetBrains Mono",monospace;color:#94a3b8;white-space:nowrap;' +
+        'pointer-events:none;text-shadow:0 1px 8px rgba(0,0,0,.8)}' +
+      '#nr-edge .nr-edge-ring{font-size:11px;opacity:.85;margin-top:2px}' +
+      '#st-ring-fab{position:fixed;right:14px;bottom:14px;z-index:90;width:40px;height:40px;' +
+        'border-radius:50%;border:1px solid rgba(245,197,24,.4);' +
+        'background:radial-gradient(circle at 35% 30%,#1e2d48,#0c1626);color:var(--gold);' +
+        'font:800 15px/1 "JetBrains Mono",monospace;cursor:pointer;' +
+        'box-shadow:0 6px 20px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;' +
+        'transition:transform .14s ease,border-color .14s,box-shadow .14s}' +
+      '#st-ring-fab:hover{transform:scale(1.06);border-color:var(--gold);' +
+        'box-shadow:0 0 0 3px rgba(245,197,24,.15),0 8px 24px rgba(0,0,0,.5)}' +
+      '#st-ring-fab[hidden]{display:none!important}';
   }
 
   function readNavOpen() {
@@ -259,16 +312,176 @@
       '<div class="nr-spacer"></div>' +
       '<div class="nr-foot-st">' +
         '<div class="mode-dot">● LOCAL · v' + VERSION + '</div>' +
-        '<div class="mode-sub">[ 側欄 · Esc 關閉 · 非投資建議</div>' +
+        '<div class="mode-sub">[ 側欄 · \\／中鍵轉盤 · Esc 關閉</div>' +
       '</div>';
   }
 
   function edgeHTML() {
-    return '<button type="button" class="nr-edge" id="nr-edge" title="展開功能選單（[ 或 Ctrl/⌘B）" ' +
+    return '<button type="button" class="nr-edge" id="nr-edge" title="展開側欄（[／Ctrl⌘B）· 轉盤（中鍵或 \\）" ' +
       'aria-label="展開功能選單" aria-expanded="false">' +
       '<span class="nr-edge-ico" aria-hidden="true">›</span>' +
       '<span class="nr-edge-lbl">選單</span>' +
+      '<span class="nr-edge-ring" aria-hidden="true">◎</span>' +
       '</button>';
+  }
+
+  function ringRoutes() {
+    return RING_ROUTES.map(function (id) {
+      return findRoute(id) || { id: id, label: id, icon: '·', hint: id };
+    });
+  }
+
+  function ensureRing() {
+    if ($('st-ring')) return $('st-ring');
+    var root = document.createElement('div');
+    root.id = 'st-ring';
+    root.setAttribute('aria-hidden', 'true');
+    root.innerHTML =
+      '<button type="button" class="sr-backdrop" id="st-ring-bd" aria-label="關閉功能轉盤"></button>' +
+      '<div class="sr-wheel" id="st-ring-wheel" role="menu" aria-label="功能轉盤">' +
+        '<button type="button" class="sr-hub" id="st-ring-hub" title="關閉" aria-label="關閉轉盤">✕</button>' +
+        '<div class="sr-tip" id="st-ring-tip">中鍵／\\ 開轉盤 · Esc 關閉</div>' +
+      '</div>';
+    document.body.appendChild(root);
+    var wheel = $('st-ring-wheel');
+    var items = ringRoutes();
+    items.forEach(function (r, i) {
+      var ang = -Math.PI / 2 + i * (Math.PI * 2 / items.length);
+      var x = Math.cos(ang) * RING_R;
+      var y = Math.sin(ang) * RING_R;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'sr-item';
+      btn.setAttribute('role', 'menuitem');
+      btn.setAttribute('data-route', r.id);
+      btn.setAttribute('data-idx', String(i));
+      btn.title = (r.hint || r.label) + ' · ' + r.label;
+      btn.style.transform = 'translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px)';
+      btn.innerHTML = '<span class="sr-ico" aria-hidden="true">' + r.icon + '</span>' +
+        '<span class="sr-lbl">' + r.label + '</span>';
+      wheel.appendChild(btn);
+    });
+    root.addEventListener('click', onRingClick);
+    root.addEventListener('pointermove', onRingPointer);
+    return root;
+  }
+
+  function ensureRingFab() {
+    if ($('st-ring-fab')) return;
+    var fab = document.createElement('button');
+    fab.type = 'button';
+    fab.id = 'st-ring-fab';
+    fab.title = '功能轉盤（中鍵或 \\）';
+    fab.setAttribute('aria-label', '開啟功能轉盤');
+    fab.textContent = '◎';
+    fab.addEventListener('click', function (e) {
+      e.preventDefault();
+      openRing(window.innerWidth - 80, window.innerHeight - 80);
+    });
+    document.body.appendChild(fab);
+  }
+
+  function paintRingActive() {
+    var items = document.querySelectorAll('#st-ring .sr-item');
+    for (var i = 0; i < items.length; i++) {
+      var on = items[i].getAttribute('data-route') === state.route;
+      items[i].classList.toggle('on', on);
+    }
+  }
+
+  function setRingHighlight(idx) {
+    ringState.hi = idx;
+    var items = document.querySelectorAll('#st-ring .sr-item');
+    for (var i = 0; i < items.length; i++) {
+      items[i].classList.toggle('hi', i === idx);
+    }
+    var hub = $('st-ring-hub');
+    if (hub) hub.classList.toggle('hi', idx === -2);
+    var tip = $('st-ring-tip');
+    if (!tip) return;
+    if (idx === -2) {
+      tip.textContent = '關閉轉盤';
+      return;
+    }
+    if (idx < 0) {
+      tip.textContent = '指向扇區切換 · Esc／✕ 關閉';
+      return;
+    }
+    var r = ringRoutes()[idx];
+    tip.textContent = r ? (r.label + ' — ' + (r.hint || '')) : '';
+  }
+
+  function ringIndexFromPoint(clientX, clientY) {
+    var dx = clientX - ringState.cx;
+    var dy = clientY - ringState.cy;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 28) return -2; /* hub */
+    if (dist < 52 || dist > RING_R + 40) return -1;
+    var ang = Math.atan2(dy, dx); /* -PI..PI, 0=east */
+    var n = RING_ROUTES.length;
+    var step = (Math.PI * 2) / n;
+    var norm = ang + Math.PI / 2; /* 0 = top */
+    if (norm < 0) norm += Math.PI * 2;
+    var idx = Math.round(norm / step) % n;
+    if (idx < 0) idx += n;
+    return idx;
+  }
+
+  function onRingPointer(e) {
+    if (!ringState.open) return;
+    setRingHighlight(ringIndexFromPoint(e.clientX, e.clientY));
+  }
+
+  function onRingClick(e) {
+    if (!ringState.open) return;
+    if (e.target.closest('#st-ring-bd') || e.target.closest('#st-ring-hub')) {
+      e.preventDefault();
+      closeRing();
+      return;
+    }
+    var item = e.target.closest('.sr-item');
+    if (!item) return;
+    e.preventDefault();
+    var rid = item.getAttribute('data-route');
+    closeRing();
+    if (rid) go(rid);
+  }
+
+  function openRing(clientX, clientY) {
+    ensureRing();
+    ensureRingFab();
+    var pad = 140;
+    var x = Math.max(pad, Math.min(window.innerWidth - pad, clientX || window.innerWidth / 2));
+    var y = Math.max(pad, Math.min(window.innerHeight - pad, clientY || window.innerHeight / 2));
+    ringState.open = true;
+    ringState.cx = x;
+    ringState.cy = y;
+    var root = $('st-ring');
+    var wheel = $('st-ring-wheel');
+    if (!root || !wheel) return;
+    wheel.style.left = x + 'px';
+    wheel.style.top = y + 'px';
+    root.classList.add('on');
+    root.setAttribute('aria-hidden', 'false');
+    paintRingActive();
+    setRingHighlight(-1);
+    setNavOpen(false);
+  }
+
+  function closeRing() {
+    if (!ringState.open && !$('st-ring')) return;
+    ringState.open = false;
+    ringState.hi = -1;
+    var root = $('st-ring');
+    if (root) {
+      root.classList.remove('on');
+      root.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  function toggleRing(clientX, clientY) {
+    if (ringState.open) closeRing();
+    else openRing(clientX, clientY);
   }
 
   function ensureNavChrome(row) {
@@ -291,6 +504,12 @@
       edge._nrBound = true;
       edge.addEventListener('click', function (e) {
         e.preventDefault();
+        /* 點轉盤圖示 → 開功能轉盤；其餘 → 展開側欄 */
+        if (e.target.closest('.nr-edge-ring')) {
+          var rect = edge.getBoundingClientRect();
+          openRing(rect.right + 120, rect.top + rect.height / 2);
+          return;
+        }
         setNavOpen(true);
       });
     }
@@ -425,6 +644,7 @@
       main.appendChild(views);
 
       ensureNavChrome(row);
+      ensureRingFab();
       rail.addEventListener('click', onNavrailClick);
       views.addEventListener('click', function (e) {
         if (e.target.closest('[data-shell-back]')) go('chart');
@@ -440,6 +660,7 @@
         }
       }
       ensureNavChrome(row2);
+      ensureRingFab();
       ROUTES.forEach(ensurePanel);
     }
 
@@ -662,6 +883,7 @@
       if (on) btns[b].setAttribute('aria-current', 'page');
       else btns[b].removeAttribute('aria-current');
     }
+    if (ringState.open) paintRingActive();
 
     if (isChart) {
       setTimeout(function () {
@@ -740,7 +962,10 @@
         .catch(function () {});
     }, 2800);
     document.addEventListener('keydown', onShellKey, true);
-    console.log('[shell-v5] Stock Terminal ' + VERSION + ' · tip UX · route=' + state.route);
+    document.addEventListener('auxclick', onShellAuxClick, true);
+    document.addEventListener('mousedown', onShellMiddleDown, true);
+    console.log('[shell-v5] Stock Terminal ' + VERSION + ' · tip UX · route=' + state.route +
+      ' · ring=中鍵/\\\\');
   }
 
   function inEditable(el) {
@@ -753,16 +978,52 @@
   function onShellKey(e) {
     if (inEditable(e.target)) return;
     var meta = e.metaKey || e.ctrlKey;
-    /* Esc：先關浮動側欄，再交 hotkeys_v3 回圖表 */
-    if (e.key === 'Escape' && state.navOpen) {
+    /* Esc：先關轉盤，再關浮動側欄 */
+    if (e.key === 'Escape') {
+      if (ringState.open) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeRing();
+        return;
+      }
+      if (state.navOpen) {
+        e.preventDefault();
+        e.stopPropagation();
+        setNavOpen(false);
+        return;
+      }
+    }
+    /* \\：功能轉盤（MX Master 風格） */
+    if (e.key === '\\' && !e.altKey && !meta) {
       e.preventDefault();
-      e.stopPropagation();
-      setNavOpen(false);
+      toggleRing(window.innerWidth / 2, window.innerHeight / 2);
       return;
+    }
+    /* 轉盤開啟時：方向鍵／數字環選；Enter 確認 */
+    if (ringState.open) {
+      var n = RING_ROUTES.length;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        setRingHighlight(((ringState.hi < 0 ? -1 : ringState.hi) + 1 + n) % n);
+        return;
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        setRingHighlight(((ringState.hi < 0 ? 0 : ringState.hi) - 1 + n) % n);
+        return;
+      }
+      if (e.key === 'Enter' && ringState.hi >= 0) {
+        e.preventDefault();
+        var pick = RING_ROUTES[ringState.hi];
+        closeRing();
+        if (pick) go(pick);
+        return;
+      }
     }
     /* [ 或 Ctrl/⌘B：切換浮動側欄 */
     if (e.key === '[' || (meta && (e.key === 'b' || e.key === 'B'))) {
       e.preventDefault();
+      closeRing();
       toggleNav();
       return;
     }
@@ -771,8 +1032,24 @@
       var rid = HOTKEY_ROUTES[idx];
       if (rid) {
         e.preventDefault();
+        closeRing();
         go(rid);
       }
+    }
+  }
+
+  function onShellAuxClick(e) {
+    if (inEditable(e.target)) return;
+    /* 滑鼠中鍵：在游標處開／關功能轉盤（類 MX Master Gesture Button） */
+    if (e.button === 1) {
+      e.preventDefault();
+      toggleRing(e.clientX, e.clientY);
+    }
+  }
+
+  function onShellMiddleDown(e) {
+    if (e.button === 1 && !inEditable(e.target)) {
+      e.preventDefault(); /* 避免中鍵自動捲動 */
     }
   }
 
@@ -781,6 +1058,7 @@
     TIP_UX: TIP_UX,
     ROUTES: ROUTES,
     HOTKEY_ROUTES: HOTKEY_ROUTES,
+    RING_ROUTES: RING_ROUTES,
     ALIASES: ROUTE_ALIASES,
     go: go,
     navigate: go,
@@ -788,6 +1066,10 @@
     toggleNav: toggleNav,
     setNavOpen: setNavOpen,
     isNavOpen: function () { return !!state.navOpen; },
+    openRing: openRing,
+    closeRing: closeRing,
+    toggleRing: toggleRing,
+    isRingOpen: function () { return !!ringState.open; },
     setSync: setSync,
     sync: function () { runSync(true); },
     softBadge: function (mountId, on, text) {
