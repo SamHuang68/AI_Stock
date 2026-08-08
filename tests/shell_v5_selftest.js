@@ -46,6 +46,12 @@ const build = fs.readFileSync(path.join(root, 'build_v2.py'), 'utf8');
 ok(build.indexOf('src/ui/ai_v5.js') >= 0 && build.indexOf('src/ui/bridge_v5.js') >= 0,
   'ai_v5 + bridge_v5 in build_v2');
 
+const hub = fs.readFileSync(path.join(root, 'src/ui/hub_v5.js'), 'utf8');
+ok(/hub-inst-hero/.test(hub), 'institutional hero strip');
+ok(/data-who="trust"/.test(hub) && /data-who="dealer"/.test(hub), 'institutional who tabs');
+ok(/fmtLots/.test(hub) && /單位：張/.test(hub), 'institutional ranks use 張');
+ok(/magBars/.test(hub) && /refMeter/.test(hub), 'institutional magBars + turnover meter');
+
 if (failed) {
   console.error('\n' + failed + ' failure(s)');
   process.exit(1);

@@ -136,20 +136,49 @@
       '.hub-root .hub-mag3 .row .val{width:64px;flex-shrink:0;text-align:right;font-weight:700;font-size:13px}' +
       '.hub-root .hub-mag3 .row .bar{flex:1;min-width:0}' +
       '.hub-root .hub-mag3 .vz-mag .vz-track{height:12px}' +
-      '.hub-root .hub-inst-cmt{font-size:10px;line-height:1.5;color:var(--text);margin-top:6px;flex:0 0 auto;' +
-        'padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:5px}' +
+      '.hub-root .hub-inst-cmt{font-size:11px;line-height:1.5;color:var(--text);margin-top:6px;flex:0 0 auto;' +
+        'padding:7px 9px;background:var(--bg);border:1px solid var(--border);border-radius:5px}' +
       '.hub-root .hub-inst-cmt b{color:var(--gold);font-weight:700}' +
       '.hub-root .hub-inst-cmt .up{color:var(--red)}.hub-root .hub-inst-cmt .dn{color:var(--green)}' +
       '.hub-root .hub-dash.hub-cols-wide-left{grid-template-columns:minmax(0,1.7fr) minmax(0,.9fr)}' +
-      /* 左：趨勢整高；右：買／賣超上下鋪滿 */
-      '.hub-root .hub-dash.hub-cols-inst{grid-template-columns:minmax(0,1.45fr) minmax(0,1fr)}' +
-      '.hub-root .badge{display:inline-block;padding:0 6px;border-radius:999px;font-size:8px;font-weight:700}' +
+      /* 左趨勢／右排行：右欄略寬（可操作清單優先） */
+      '.hub-root .hub-dash.hub-cols-inst{grid-template-columns:minmax(0,1.05fr) minmax(0,1.2fr)}' +
+      /* 法人頁英雄列：合計｜結構｜量能 */
+      '.hub-root .hub-inst-hero{display:grid;grid-template-columns:minmax(140px,.9fr) minmax(0,1.6fr) minmax(0,1.1fr);' +
+        'gap:4px;margin:0 0 4px;flex:0 0 auto;min-width:0;min-height:0}' +
+      '.hub-root .hub-inst-hero > div{background:linear-gradient(180deg,rgba(17,27,46,.95),rgba(11,18,32,.98));' +
+        'border:1px solid var(--border);border-radius:6px;padding:6px 8px;min-width:0;overflow:hidden;' +
+        'display:flex;flex-direction:column;justify-content:center}' +
+      '.hub-root .hub-inst-hero .k{font-size:8px;color:var(--tlo);letter-spacing:.4px;margin-bottom:2px}' +
+      '.hub-root .hub-inst-hero .big{font-size:22px;font-weight:800;line-height:1.1;color:var(--thi);font-variant-numeric:tabular-nums}' +
+      '.hub-root .hub-inst-hero .sub{font-size:9px;margin-top:3px;color:var(--tlo);display:flex;align-items:center;gap:6px;flex-wrap:wrap}' +
+      '.hub-root .hub-inst-hero .hub-inst-comp .vz-mags{gap:5px}' +
+      '.hub-root .hub-inst-hero .hub-inst-comp .vz-mag .vz-track{height:10px}' +
+      '.hub-root .hub-inst-hero .hub-inst-flow .v{font-size:15px;font-weight:800;color:var(--thi);line-height:1.15}' +
+      '.hub-root .hub-inst-hero .hub-inst-flow .s{font-size:8px;color:var(--tlo);margin-top:2px}' +
+      '.hub-root .hub-inst-rank{display:flex;flex-direction:column;min-width:0;min-height:0;height:100%;gap:4px}' +
+      '.hub-root .hub-seg{display:flex;gap:0;flex:0 0 auto;border:1px solid var(--border);border-radius:5px;overflow:hidden;width:fit-content}' +
+      '.hub-root .hub-seg button{padding:3px 10px;border:0;border-right:1px solid var(--border);background:var(--bg);' +
+        'color:var(--tlo);font-family:inherit;font-size:10px;font-weight:600;cursor:pointer;line-height:1.3}' +
+      '.hub-root .hub-seg button:last-child{border-right:0}' +
+      '.hub-root .hub-seg button:hover{color:var(--thi);background:var(--bg3)}' +
+      '.hub-root .hub-seg button.on{background:var(--gold);color:#060A12;font-weight:800}' +
+      '.hub-root .hub-inst-rankhd{display:flex;align-items:center;justify-content:space-between;gap:8px;flex:0 0 auto}' +
+      '.hub-root .hub-inst-rankhd .meta{font-size:8px;color:var(--tlo);white-space:nowrap}' +
+      '.hub-root .hub-inst-rank .hub-zone{flex:1;min-height:0}' +
+      '.hub-root .hub-inst-rank table{font-size:10px}' +
+      '.hub-root .hub-inst-rank th:nth-child(3),.hub-root .hub-inst-rank td:nth-child(3){text-align:left}' +
+      '.hub-root .hub-inst-rank .lots{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}' +
+      '.hub-root .hub-inst-rank .vz-rowbar{display:inline-block;height:4px;margin-left:4px;vertical-align:middle;max-width:48px}' +
+      '.hub-root .badge{display:inline-block;padding:0 6px;border-radius:3px;font-size:8px;font-weight:700}' +
       '.hub-root .badge.ok{background:var(--gbg);color:var(--green);border:1px solid var(--gbdr)}' +
       '.hub-root .badge.warn{background:rgba(251,146,60,.12);color:var(--orange);border:1px solid rgba(251,146,60,.35)}' +
       '.hub-root .badge.err{background:rgba(248,113,113,.12);color:var(--red);border:1px solid rgba(248,113,113,.35)}' +
       '.hub-root .badge.mid{background:rgba(245,197,24,.12);color:var(--gold);border:1px solid var(--gold-m)}' +
       '.hub-root .hub-empty{font-size:10px;color:var(--tlo);padding:16px 8px;text-align:center}';
   }
+
+  var instWho = 'foreign';
 
   function mount(route) {
     injectCSS();
@@ -255,20 +284,47 @@
   }
 
   // ── Institutional ────────────────────────────────────────
-  function renderInstitutional(el) {
-    var soft = !!el.querySelector('#hub-inst-body .hub-strip');
+  function whoLabel(w) {
+    return w === 'trust' ? '投信' : w === 'dealer' ? '自營' : '外資';
+  }
+  function fmtLots(lots) {
+    if (lots == null || !isFinite(lots)) return '—';
+    return (lots >= 0 ? '+' : '') + Math.round(lots).toLocaleString('en-US');
+  }
+  function toneChip(totalYuan, V) {
+    if (totalYuan == null || !isFinite(totalYuan)) return '';
+    var yiVal = Math.abs(totalYuan) > 1e5 ? totalYuan / 1e8 : totalYuan;
+    var kind = yiVal > 20 ? 'buy' : yiVal < -20 ? 'sell' : 'mid';
+    var txt = yiVal > 20 ? '合計偏多' : yiVal < -20 ? '合計偏空' : '合計中性';
+    return V ? V.chip(txt, kind) : ('<span class="badge mid">' + txt + '</span>');
+  }
+  function turnoverTone(latestYi) {
+    if (latestYi == null || !isFinite(latestYi)) return '量能資料不足';
+    if (latestYi >= 12000) return '爆量（≥1.2 兆）';
+    if (latestYi >= 10000) return '明顯放量（兆級）';
+    if (latestYi >= 8000) return '量能健康（≥8000 億）';
+    return '量縮（低於 8000 億）';
+  }
+
+  function renderInstitutional(el, opts) {
+    opts = opts || {};
+    var soft = !!el.querySelector('#hub-inst-body .hub-inst-hero, #hub-inst-body .hub-strip');
     if (!soft) {
-      el.innerHTML = head('法人動向', '三大法人合計＋資金趨勢評論＋買賣超排行',
-        '<button class="hub-btn" data-sync>同步資料</button><button class="hub-btn" data-go="afterhours">盤後</button>') +
-        '<div id="hub-inst-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
+      el.innerHTML = head('法人動向', 'BFI82U 合計結構 · T86 買賣超排行 · 近月資金趨勢',
+        '<button class="hub-btn" data-sync>同步資料</button>' +
+        '<button class="hub-btn" data-go="pulse">總覽</button>' +
+        '<button class="hub-btn" data-go="afterhours">盤後</button>') +
+        '<div id="hub-inst-body" class="hub-body"><div class="hub-loading">載入法人資料…</div></div></div>';
       bindCommon(el);
     } else if (window.ShellV5 && window.ShellV5.softBadge) {
       window.ShellV5.softBadge('mount-institutional', true, '更新中…');
     }
+    if (opts.who) instWho = opts.who;
+    var who = instWho || 'foreign';
     Promise.all([
       jget('/marketflow'),
-      jget('/inst-rank?who=foreign&side=buy&n=28'),
-      jget('/inst-rank?who=foreign&side=sell&n=28'),
+      jget('/inst-rank?who=' + encodeURIComponent(who) + '&side=buy&n=40'),
+      jget('/inst-rank?who=' + encodeURIComponent(who) + '&side=sell&n=40'),
       jget('/pulse/history?kind=institutional&n=40')
     ]).then(function (arr) {
       var V = window.Viz;
@@ -276,67 +332,135 @@
       var inst = mf.inst || {};
       var buy = (arr[1] && arr[1].list) || [];
       var sell = (arr[2] && arr[2].list) || [];
+      var buyDate = (arr[1] && arr[1].date) || '';
+      var sellDate = (arr[2] && arr[2].date) || '';
       var hist = (arr[3] && arr[3].rows) || [];
       var total = null;
       if (inst.foreign != null || inst.trust != null || inst.dealer != null) {
         total = (inst.foreign || 0) + (inst.trust || 0) + (inst.dealer || 0);
       }
-      function rankTbl(list, title) {
+      var to = (mf.turnover || []).filter(function (x) { return x && x.amount != null; });
+      var latestAmt = to.length ? to[to.length - 1].amount : null;
+      var latestYi = latestAmt != null ? latestAmt / 1e8 : null;
+      var wLab = whoLabel(who);
+
+      function rankTbl(list, title, side) {
         var maxAbs = 0;
         list.forEach(function (r) {
-          var vv = r.foreign != null ? r.foreign : r.net;
-          if (vv != null && isFinite(vv)) maxAbs = Math.max(maxAbs, Math.abs(vv));
+          if (r.lots != null && isFinite(r.lots)) maxAbs = Math.max(maxAbs, Math.abs(r.lots));
         });
-        var h = '<div class="hub-sec"><h4>' + title + '</h4><div class="hub-fill"><table><tr><th>#</th><th>代號</th><th>名稱</th><th>外資</th></tr>';
+        var h = '<div class="hub-sec"><h4>' + title +
+          '<span style="color:var(--tlo);font-weight:600;font-size:8px">單位：張</span></h4>' +
+          '<div class="hub-fill"><table><tr><th>#</th><th>代號</th><th>名稱</th><th>張數</th><th>連續</th></tr>';
         if (!list.length) {
-          h += '</table><div class="hub-empty">尚無排行</div>';
+          h += '</table><div class="hub-empty">尚無排行（T86 多為盤後更新）</div>';
         } else {
           list.forEach(function (r, i) {
-            var v = r.foreign != null ? r.foreign : r.net;
-            var bar = V ? V.rowBar(v, maxAbs) : '';
-            var streak = (V && r.streak) ? V.streakChip(r.streak, '外資') : '';
-            h += '<tr data-code="' + (r.code || '') + '"><td>' + (i + 1) + '</td><td style="color:var(--gold);font-weight:700">' +
-              (r.code || '') + '</td><td>' + (r.name || '') + streak + '</td><td class="' + tw(v) + '">' +
-              yi(v) + bar + '</td></tr>';
+            var lots = r.lots;
+            var bar = (V && lots != null && maxAbs) ? V.rowBar(lots, maxAbs) : '';
+            var streak = (V && r.streak) ? V.streakChip(r.streak, '') : '';
+            h += '<tr data-code="' + (r.code || '') + '">' +
+              '<td>' + (i + 1) + '</td>' +
+              '<td style="color:var(--gold);font-weight:700">' + (r.code || '') + '</td>' +
+              '<td>' + (r.name || '') + '</td>' +
+              '<td class="lots ' + tw(side === 'buy' ? 1 : -1) + '">' + fmtLots(lots) + bar + '</td>' +
+              '<td>' + streak + '</td></tr>';
           });
           h += '</table>';
         }
         return h + '</div></div>';
       }
+
       var sparkVals = hist.slice().reverse().map(function (r) { return r.totalYi; })
         .filter(function (v) { return v != null && isFinite(v); });
       var lastSpark = sparkVals.length ? sparkVals[sparkVals.length - 1] : null;
       var sparkCol = lastSpark != null && lastSpark >= 0 ? 'var(--red)' : 'var(--green)';
-      var totalSpark = V && sparkVals.length ? V.sparkBars(sparkVals) : '';
       var cmtHtml = buildInstComment(inst, hist, total);
-      var trendPanel = '<div class="hub-sec"><h4>法人資金趨勢與評論</h4><div class="hub-spark-fill">' +
-        (V && sparkVals.length >= 2
-          ? V.sparkLine(sparkVals, {
-              color: sparkCol, h: 280, w: 520,
-              xUnit: '日', yUnit: '億', yDigits: 1
-            })
-          : (sparkVals.length ? spark(sparkVals) : '<div class="hub-empty">尚無本機法人歷史</div>')) +
-        '</div>' +
-        '<div class="hub-inst-cmt">' + cmtHtml + '</div>' +
-        '<div class="hub-note">近 ' + hist.length + ' 日 · X：交易日 · Y：合計買賣超（億）' +
-          (inst.date ? ' · 最新法人日 ' + inst.date : '') + '</div></div>';
-      var body = $('hub-inst-body');
-      if (!body) return;
-      body.innerHTML =
-        '<div class="hub-strip">' +
-          '<div class="cell"><div class="k">外資</div><div class="v ' + tw(inst.foreign) + '">' + yi(inst.foreign) + '</div></div>' +
-          '<div class="cell"><div class="k">投信</div><div class="v ' + tw(inst.trust) + '">' + yi(inst.trust) + '</div></div>' +
-          '<div class="cell"><div class="k">自營</div><div class="v ' + tw(inst.dealer) + '">' + yi(inst.dealer) + '</div></div>' +
-          '<div class="cell"><div class="k">合計</div><div class="v ' + tw(total) + '">' + yi(total) + '</div>' +
-            (totalSpark ? '<div class="s">' + totalSpark + '</div>' : '') + '</div>' +
-        '</div>' +
-        '<div class="hub-dash hub-cols-inst">' +
-          trendPanel +
-          '<div class="hub-zone z-stack">' +
-            rankTbl(buy, '外資買超') + rankTbl(sell, '外資賣超') +
+      var yiFmt = function (v) {
+        if (v == null || !isFinite(v)) return '—';
+        return (v >= 0 ? '+' : '') + v.toFixed(1) + ' 億';
+      };
+      var fYi = function (yuan) {
+        if (yuan == null || !isFinite(yuan)) return null;
+        return Math.abs(yuan) > 1e5 ? yuan / 1e8 : yuan;
+      };
+      var bars = (V && (inst.foreign != null || inst.trust != null || inst.dealer != null))
+        ? V.magBars([
+            { label: '外資', v: fYi(inst.foreign), fmt: yiFmt },
+            { label: '投信', v: fYi(inst.trust), fmt: yiFmt },
+            { label: '自營', v: fYi(inst.dealer), fmt: yiFmt }
+          ])
+        : '';
+      var flowMeter = (V && latestYi != null) ? V.refMeter(latestYi, [8000, 12000]) : '';
+      var totalTone = toneChip(total, V);
+
+      var hero =
+        '<div class="hub-inst-hero">' +
+          '<div class="hub-inst-total">' +
+            '<div class="k">三大法人合計 · 買賣超</div>' +
+            '<div class="big ' + tw(total) + '">' + yi(total) + '</div>' +
+            '<div class="sub">' + totalTone +
+              '<span>法人日 ' + ((inst && inst.date) || mf.date || '—') + '</span></div>' +
+          '</div>' +
+          '<div class="hub-inst-comp">' +
+            '<div class="k">結構拆解（外資／投信／自營）</div>' +
+            (bars || '<div class="hub-empty" style="padding:8px 0">法人金額尚未更新</div>') +
+          '</div>' +
+          '<div class="hub-inst-flow">' +
+            '<div class="k">大盤成交金額</div>' +
+            '<div class="v">' + (latestYi != null ? latestYi.toFixed(0) + ' 億' : '—') + '</div>' +
+            '<div class="s">' + turnoverTone(latestYi) + '</div>' +
+            flowMeter +
           '</div>' +
         '</div>';
+
+      var trendPanel = '<div class="hub-sec"><h4>合計買賣超趨勢' +
+        '<span style="color:var(--tlo);font-weight:600;font-size:8px">近 ' + hist.length + ' 日 · 億</span></h4>' +
+        '<div class="hub-spark-fill">' +
+        (V && sparkVals.length >= 2
+          ? V.sparkLine(sparkVals, {
+              color: sparkCol, h: 240, w: 480,
+              xUnit: '日', yUnit: '億', yDigits: 1
+            })
+          : (sparkVals.length ? spark(sparkVals) : '<div class="hub-empty">尚無本機法人歷史 — 按「同步資料」預抓</div>')) +
+        '</div>' +
+        '<div class="hub-inst-cmt">' + cmtHtml + '</div>' +
+        '<div class="hub-note">Y：合計買賣超（億）· 不重複上方結構數字 · BFI82U</div></div>';
+
+      var seg =
+        '<div class="hub-seg" id="hub-inst-who">' +
+          '<button type="button" data-who="foreign"' + (who === 'foreign' ? ' class="on"' : '') + '>外資</button>' +
+          '<button type="button" data-who="trust"' + (who === 'trust' ? ' class="on"' : '') + '>投信</button>' +
+          '<button type="button" data-who="dealer"' + (who === 'dealer' ? ' class="on"' : '') + '>自營</button>' +
+        '</div>';
+      var rankDate = buyDate || sellDate || '';
+      var rankPanel =
+        '<div class="hub-inst-rank">' +
+          '<div class="hub-inst-rankhd">' + seg +
+            '<span class="meta">T86 · ' + wLab + ' · ' + (rankDate || '—') + ' · 點列載入線型</span>' +
+          '</div>' +
+          '<div class="hub-zone">' +
+            rankTbl(buy, wLab + '買超', 'buy') +
+            rankTbl(sell, wLab + '賣超', 'sell') +
+          '</div>' +
+        '</div>';
+
+      var body = $('hub-inst-body');
+      if (!body) return;
+      body.innerHTML = hero +
+        '<div class="hub-dash hub-cols-inst">' + trendPanel + rankPanel + '</div>';
       bindCommon(el);
+      var whoBar = $('hub-inst-who');
+      if (whoBar) {
+        whoBar.querySelectorAll('button[data-who]').forEach(function (b) {
+          b.onclick = function () {
+            var next = b.getAttribute('data-who');
+            if (!next || next === instWho) return;
+            instWho = next;
+            renderInstitutional(el, { who: next });
+          };
+        });
+      }
     }).finally(function () {
       if (window.ShellV5 && window.ShellV5.softBadge) {
         window.ShellV5.softBadge('mount-institutional', false);
