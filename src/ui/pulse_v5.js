@@ -1,12 +1,13 @@
 /* ============================================================================
  * pulse_v5.js  —  Stock Terminal 5.0：市場總覽儀表板
  * ----------------------------------------------------------------------------
- * 大螢幕一頁高密度（65" 優化，不遷就手機）：
- *   頂列 KPI（加權／櫃買／台指期／量能／家數廣度／漲跌停）— 去重後 6 格
- *   上區 5 窗：脈動(綜合|體質|風險三燈)｜加權盤勢｜法人｜廣度｜產業
- *   下區 5 窗：漲停(產業標籤)｜跌幅｜全球｜快訊(TW/US)｜自選(TW/US·內滾)
- *   產業輪動 hover ↔ 近漲跌停同產業高亮；法人合計 Z／分位／排名
- *   因子／歷史預設收合（按鈕展開）
+ * 版面：頂列 KPI 黏著 + 一排 4 框網格，可超過一頁下捲。
+ * 排序權重（交易決策頻率高 → 低；越少用越靠下）：
+ *   P0 盤勢決策：脈動｜加權盤勢｜法人｜廣度
+ *   P1 標的機會：產業｜近漲停｜近跌幅｜自選
+ *   P2 外部連動：全球｜總經
+ *   P3 資訊流　：快訊（最底，下捲才見）
+ * 聯動：產業 hover ↔ 近漲跌停；法人合計 Z／分位；因子／歷史預設收合。
  * 產品名 Stock Terminal 5.0；資料：GET /pulse — 真實欄位，禁止 mock。
  * ========================================================================== */
 (function () {
@@ -32,15 +33,15 @@
       document.head.appendChild(s);
     }
     s.textContent =
-      /* 一屏鎖定：上下兩區各 5 窗，大螢幕塞滿資訊 */
+      /* 可超過一頁：殼層鎖外框，#pl-body 內捲（KPI 黏頂） */
       '#shell-views:has(#view-pulse.on){overflow:hidden!important}' +
       '#view-pulse.sv-panel.on{' +
         'max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
         'overflow:hidden;display:flex!important;flex-direction:column;flex:1;min-height:0;height:100%}' +
-      '#mount-pulse,#mount-pulse.sv-mount{flex:1;min-height:0;display:flex;flex-direction:column;max-width:none}' +
+      '#mount-pulse,#mount-pulse.sv-mount{flex:1;min-height:0;display:flex;flex-direction:column;max-width:none;overflow:hidden}' +
       '#pl-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);' +
         'width:100%;max-width:none;margin:0;min-width:0;box-sizing:border-box;' +
-        'flex:1;min-height:0;display:flex;flex-direction:column}' +
+        'flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
       /* 單列微標題 */
       '#pl-root .pl-head{display:flex;align-items:center;justify-content:space-between;gap:8px;' +
         'margin-bottom:3px;min-width:0;flex:0 0 auto}' +
@@ -59,10 +60,11 @@
       /* 系統狀態色（勿與紅漲綠跌混用） */
       '#pl-root .pl-st-pos{color:var(--gold)}#pl-root .pl-st-risk{color:var(--cyan)}' +
       '#pl-root .pl-st-mid{color:#94a3b8}' +
-      '#pl-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
-      '#pl-body.pl-expanded{overflow:auto}' +
-      /* KPI 細條：6 格（家數+廣度合併，去重） */
-      '#pl-root .pl-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin:0 0 6px;min-width:0;flex:0 0 auto}' +
+      '#pl-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto;overscroll-behavior:contain}' +
+      /* KPI 細條：6 格；下捲時黏頂 */
+      '#pl-root .pl-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin:0 0 6px;min-width:0;flex:0 0 auto;' +
+        'position:sticky;top:0;z-index:5;padding:2px 0 4px;' +
+        'background:linear-gradient(180deg,#060C16 70%,rgba(6,12,22,.92))}' +
       '#pl-root .pl-strip .cell{background:linear-gradient(180deg,rgba(17,27,46,.95),rgba(11,18,32,.98));' +
         'border:1px solid var(--border);border-radius:5px;padding:4px 7px;min-width:0;overflow:hidden}' +
       '#pl-root .pl-strip .cell.hero{border-color:rgba(245,197,24,.35);' +
@@ -81,19 +83,30 @@
       '#pl-root .pl-strip .pl-idx-spark .vz-spark{width:100%;height:14px;display:block}' +
       '#pl-root .pl-strip .vz-chip{margin-top:1px;font-size:8px;padding:0 4px;line-height:1.35}' +
       '#pl-root .pl-strip .vz-meter{margin-top:1px;height:3px}' +
-      /* 上下兩區 */
-      '#pl-root .pl-dash{flex:1;min-height:0;display:grid;gap:6px;' +
-        'grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
-      '#pl-root .pl-zone{display:grid;gap:6px;min-width:0;min-height:0;height:100%;' +
-        'grid-template-columns:repeat(5,minmax(0,1fr))}' +
+      /* 一排 4 框；高度固定以便框內自滾，整頁可下捲超過一屏 */
+      '#pl-root .pl-dash{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;' +
+        'align-content:start;flex:0 0 auto;min-width:0;padding-bottom:8px}' +
       '#pl-root .pl-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;' +
-        'min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%}' +
+        'min-width:0;overflow:hidden;display:flex;flex-direction:column;' +
+        'height:300px;min-height:300px;box-sizing:border-box}' +
+      '#pl-root .pl-sec.pl-wide{grid-column:span 2;height:260px;min-height:260px}' +
+      '#pl-root .pl-sec.pl-full{grid-column:1 / -1;height:auto;min-height:200px;max-height:320px}' +
       '#pl-root .pl-sec h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;' +
         'display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;gap:4px;flex-wrap:wrap}' +
       '#pl-root .pl-sec h4 a{color:var(--cyan);cursor:pointer;font-size:8px;font-weight:600;text-decoration:none;white-space:nowrap}' +
       '#pl-root .pl-sec h4 a:hover{color:var(--gold)}' +
       '#pl-root .pl-sec-hint{font-size:8px;color:#64748b;font-weight:600;margin-right:auto}' +
       '#pl-root .pl-sec > .pl-fill{flex:1;min-height:0;overflow:auto}' +
+      '#pl-root .pl-pri{display:inline-block;margin-right:4px;padding:0 4px;border-radius:3px;font-size:7px;font-weight:800;' +
+        'letter-spacing:.3px;color:#64748b;border:1px solid #1e334d;background:rgba(15,23,42,.5);vertical-align:1px}' +
+      '#pl-root .pl-pri.p0{color:var(--gold);border-color:var(--gold-m);background:var(--gold-s)}' +
+      '#pl-root .pl-pri.p1{color:var(--cyan);border-color:rgba(56,189,248,.35);background:rgba(56,189,248,.08)}' +
+      '#pl-root .pl-pri.p2{color:#94a3b8}' +
+      '#pl-root .pl-pri.p3{color:#64748b}' +
+      '@media (max-width:1280px){' +
+        '#pl-root .pl-dash{grid-template-columns:repeat(2,minmax(0,1fr))}' +
+        '#pl-root .pl-sec.pl-wide,#pl-root .pl-sec.pl-full{grid-column:span 2}' +
+      '}' +
       '#pl-root .pl-note{font-size:8px;color:#94a3b8;line-height:1.35;margin-top:3px;flex:0 0 auto}' +
       '#pl-root .pl-loading{font-size:10px;color:#94a3b8;padding:12px 0}' +
       '#pl-root .pl-stale{display:inline-block;margin-left:4px;padding:0 5px;border-radius:3px;font-size:8px;font-weight:700;' +
@@ -715,7 +728,7 @@
       var chk = 0.7 * Number(health) + 0.3 * (100 - Number(risk));
       formulaBits += ' → <b>' + chk.toFixed(1) + '</b>';
     }
-    return '<div class="pl-sec"><h4>市場脈動 <a data-go="pulse">因子 →</a></h4>' +
+    return '<div class="pl-sec" data-pri="p0"><h4>市場脈動 <a data-go="pulse">因子 →</a></h4>' +
       '<div class="pl-score3">' +
         '<div class="sc main" title="綜合脈動（母分）＝0.7×大盤體質＋0.3×(100−風險)">' +
           '<div class="k"><span>綜合脈動</span></div>' +
@@ -791,7 +804,7 @@
       rangeHtml = '<div class="pl-note" style="margin-top:4px">' +
         chgWithPct(twiiObj, 2, 2) + ' · 櫃買／台指期見頂列</div>';
     }
-    return '<div class="pl-sec"><h4>加權盤勢' +
+    return '<div class="pl-sec" data-pri="p0"><h4>加權盤勢' +
       '<span class="pl-sec-hint">櫃買／台指期見頂列</span>' +
       '<a data-go="chart" data-sym="^TWII" data-mkt="TW">圖表 →</a></h4>' +
       '<div class="pl-spark" id="pl-spark">' + sparkBoot + '</div>' +
@@ -964,7 +977,7 @@
     var totalTxt = i.totalYi != null
       ? ((i.totalYi >= 0 ? '+' : '') + Number(i.totalYi).toFixed(1) + ' 億')
       : '—';
-    return '<div class="pl-sec"><h4>法人資金' +
+    return '<div class="pl-sec" data-pri="p0"><h4>法人資金' +
       '<span class="pl-stale" id="pl-inst-stale"' + (empty ? '' : ' hidden') + '>' +
         (empty ? '當日尚未公布' : '') +
       '</span>' +
@@ -1163,7 +1176,7 @@
     var net = st.net;
     if (net == null && (st.up != null || st.down != null)) net = (st.up || 0) - (st.down || 0);
     var netTxt = net != null ? ((net >= 0 ? '+' : '') + net) : '—';
-    return '<div class="pl-sec"><h4>市場廣度 <a data-go="breadth">詳情 →</a></h4>' +
+    return '<div class="pl-sec" data-pri="p0"><h4>市場廣度 <a data-go="breadth">詳情 →</a></h4>' +
       '<div class="pl-donut-wrap">' +
         '<div class="pl-donut" style="--pl-u:' + pu.toFixed(2) + '%;--pl-uf:' + pf.toFixed(2) + '%">' +
           '<div class="mid"><b>' + (ls != null ? Number(ls).toFixed(2) : '—') + '</b><span>多空比</span></div></div>' +
@@ -1261,13 +1274,13 @@
     var maxAbs = 1;
     list.forEach(function (s) { maxAbs = Math.max(maxAbs, Math.abs(s.changePct || 0)); });
     var usOn = sectorMkt === 'US';
-    var html = '<div class="pl-sec" id="pl-sectors"><h4>產業輪動' +
+    var html = '<div class="pl-sec" id="pl-sectors" data-pri="p1"><h4>產業輪動' +
       '<span class="pl-sec-tog">' +
         '<button type="button" data-sec-mkt="TW" class="' + (usOn ? '' : 'on') + '">TW</button>' +
         '<button type="button" data-sec-mkt="US" class="' + (usOn ? 'on' : '') + '">US</button>' +
       '</span>' +
       ' <a data-go="heat">熱力 →</a></h4><div class="pl-fill" id="pl-sectors-body">' +
-      (usOn ? '' : '<div class="pl-note" style="margin:0 0 3px">懸停高亮左側同產業近漲跌停</div>');
+      (usOn ? '' : '<div class="pl-note" style="margin:0 0 3px">懸停高亮同產業近漲跌停</div>');
     if (!list.length) {
       return html + '<div class="pl-note">' + (usOn ? '美股產業載入中…' : '類股資料暫缺 — 開啟熱力可預熱') +
         '</div></div></div>';
@@ -1341,7 +1354,7 @@
     list.forEach(function (r) {
       if (r.changePct != null && isFinite(r.changePct)) maxAbs = Math.max(maxAbs, Math.abs(r.changePct));
     });
-    var html = '<div class="pl-sec pl-movers" data-movers-side="' + side + '"><h4>' + title +
+    var html = '<div class="pl-sec pl-movers" data-pri="p1" data-movers-side="' + side + '"><h4>' + title +
       (movers && movers.date ? ' <span style="color:#94a3b8;font-weight:600">' + movers.date + '</span>' : '') +
       (note ? ' <span style="color:#94a3b8;font-weight:600;font-size:9px">' + note + '</span>' : '') +
       ' <a data-go="afterhours">盤後 →</a></h4><ul class="pl-list">';
@@ -1463,7 +1476,7 @@
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
     });
     var tone = globalImpactTone(items);
-    var html = '<div class="pl-sec"><h4>全球影響' +
+    var html = '<div class="pl-sec pl-wide" data-pri="p2"><h4>全球影響' +
       ' <span style="color:var(--cyan);font-weight:700;font-size:9px;margin-left:4px">' + tone + '</span>' +
       ' <a data-go="international">國際 →</a></h4><div class="pl-global">';
     if (!items.length) html += '<div class="pl-note">國際報價載入中…</div>';
@@ -1490,15 +1503,18 @@
 
   function renderEco(p) {
     var eco = p.economy || [];
-    var html = '<div class="pl-sec"><h4>總經數據</h4>';
-    if (!eco.length) return html + '<div class="pl-note">FRED／主計總處序列尚未就緒</div></div>';
+    var html = '<div class="pl-sec pl-wide" data-pri="p2"><h4>總經數據' +
+      '<span class="pl-sec-hint">外部連動 · P2</span></h4><div class="pl-fill">';
+    if (!eco.length) {
+      return html + '<div class="pl-note">FRED／主計總處序列尚未就緒</div></div></div>';
+    }
     eco.forEach(function (e) {
-      html += '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:11px">' +
+      html += '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:10px">' +
         '<span style="color:var(--tlo)">' + esc(e.label || e.key) + '</span>' +
         '<span style="font-weight:700;color:var(--thi)">' + fmt(e.value, 2) + esc(e.unit || '') +
         '<span style="color:var(--tlo);font-weight:500;margin-left:6px;font-size:9px">' + esc(e.date || '') + '</span></span></div>';
     });
-    return html + '</div>';
+    return html + '</div></div>';
   }
 
   function flashIsUs(f) {
@@ -1522,7 +1538,8 @@
   function renderFlash(p) {
     var flash = p.flash || [];
     var shown = filterFlash(flash);
-    var html = '<div class="pl-sec" id="pl-flash-sec"><h4>市場快訊' +
+    var html = '<div class="pl-sec pl-full" id="pl-flash-sec" data-pri="p3"><h4>市場快訊' +
+      '<span class="pl-sec-hint">資訊流 · 下捲可見</span>' +
       '<span class="pl-flash-tools">' +
         '<input type="search" class="pl-flash-q" id="pl-flash-q" placeholder="搜代號/關鍵字" ' +
           'value="' + esc(flashQ) + '" aria-label="快訊關鍵字搜尋" />' +
@@ -1570,7 +1587,7 @@
     var wl = filterWatchlist(wlAll);
     var nTw = wlAll.filter(function (w) { return !watchIsUs(w); }).length;
     var nUs = wlAll.filter(watchIsUs).length;
-    var html = '<div class="pl-sec pl-wl" id="pl-watch-sec"><h4>自選風險' +
+    var html = '<div class="pl-sec pl-wl" id="pl-watch-sec" data-pri="p1"><h4>自選風險' +
       '<span class="pl-sec-tog">' +
         '<button type="button" data-watch-mkt="ALL" class="' + (watchMkt === 'ALL' ? 'on' : '') +
           '" title="全部 ' + wlAll.length + '">全部</button>' +
@@ -1695,7 +1712,7 @@
       toneEl.textContent = p.tone || '資料彙整中';
     }
 
-    body.className = showFactors ? 'pl-expanded' : '';
+    body.className = '';
     var extra = '';
     if (showFactors) {
       extra =
@@ -1708,17 +1725,25 @@
       sectorCache.TW = ov.sectorsRanked.slice();
     }
 
+    /* 排序：P0 盤勢決策 → P1 標的機會 → P2 外部連動 → P3 快訊（最底） */
     body.innerHTML =
       renderStrip(ov, p) +
-      '<div class="pl-dash">' +
-        '<div class="pl-zone z-top">' +
-          renderGauge(p) + renderOhlc(ov, p) + renderInst(ov) +
-          renderDonut(ov, ov.strip) + renderSectors(ov) +
-        '</div>' +
-        '<div class="pl-zone z-bot">' +
-          renderMovers(movers, 'gainers') + renderMovers(movers, 'losers') +
-          renderGlobal(p) + renderFlash(p) + renderWatch(pack.wlQuotes) +
-        '</div>' +
+      '<div class="pl-dash" data-layout="4col-priority">' +
+        /* P0 */
+        renderGauge(p) +
+        renderOhlc(ov, p) +
+        renderInst(ov) +
+        renderDonut(ov, ov.strip) +
+        /* P1 */
+        renderSectors(ov) +
+        renderMovers(movers, 'gainers') +
+        renderMovers(movers, 'losers') +
+        renderWatch(pack.wlQuotes) +
+        /* P2 */
+        renderGlobal(p) +
+        renderEco(p) +
+        /* P3 — 下捲才見 */
+        renderFlash(p) +
       '</div>' +
       extra;
 
