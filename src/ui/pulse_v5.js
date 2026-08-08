@@ -137,21 +137,32 @@
       '#pl-root .pl-empty{flex:1;min-height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;' +
         'gap:4px;text-align:center;color:#94a3b8;font-size:9px;line-height:1.4;padding:8px;' +
         'border:1px dashed rgba(148,163,184,.25);border-radius:6px;background:rgba(15,23,42,.35)}' +
+      /* hidden 必須蓋過 .pl-empty{display:flex}，否則法人窗會露出空白虛線框 */
+      '#pl-root .pl-empty[hidden]{display:none!important}' +
       '#pl-root .pl-empty b{color:var(--thi);font-size:10px}' +
-      /* 市場脈動：母分（綜合）＋子項（體質70%／風險30%），算式透明 */
-      '#pl-root .pl-score3{display:grid;grid-template-columns:1.35fr 1fr 1fr;gap:4px;flex:0 0 auto;align-items:stretch}' +
-      '#pl-root .pl-score3 .sc{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:5px 6px;min-width:0}' +
+      /* 市場脈動：綜合一列，體質／風險上下兩行橫書（禁止窄欄把字折成直排） */
+      '#pl-root .pl-score3{display:flex;flex-direction:column;gap:4px;flex:0 0 auto;min-width:0}' +
+      '#pl-root .pl-score3 .sc{background:var(--bg);border:1px solid var(--border);border-radius:5px;' +
+        'padding:5px 8px;min-width:0;display:grid;grid-template-columns:minmax(0,1.1fr) auto minmax(0,1fr);' +
+        'align-items:center;column-gap:8px;row-gap:2px}' +
       '#pl-root .pl-score3 .sc.main{border-color:rgba(245,197,24,.45);' +
-        'background:linear-gradient(180deg,rgba(36,48,72,.98),rgba(14,22,38,.98));padding:6px 8px}' +
+        'background:linear-gradient(180deg,rgba(36,48,72,.98),rgba(14,22,38,.98));padding:6px 8px;' +
+        'grid-template-columns:minmax(0,1fr) auto}' +
       '#pl-root .pl-score3 .sc.child{opacity:.95}' +
-      '#pl-root .pl-score3 .sc .k{font-size:8px;color:#94a3b8;letter-spacing:.3px;' +
-        'display:flex;justify-content:space-between;align-items:baseline;gap:4px}' +
+      '#pl-root .pl-score3 .sc .k{font-size:9px;color:#94a3b8;letter-spacing:.3px;min-width:0;' +
+        'display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 6px;' +
+        'writing-mode:horizontal-tb;text-orientation:mixed}' +
       '#pl-root .pl-score3 .sc .k .w{color:var(--gold);font-weight:700;font-size:8px;white-space:nowrap}' +
-      '#pl-root .pl-score3 .sc .v{font-size:15px;font-weight:800;color:var(--thi);line-height:1.15;margin-top:2px}' +
+      '#pl-root .pl-score3 .sc .v{font-size:16px;font-weight:800;color:var(--thi);line-height:1.15;' +
+        'white-space:nowrap;font-variant-numeric:tabular-nums;justify-self:end}' +
       '#pl-root .pl-score3 .sc.main .v{font-size:22px;letter-spacing:-0.3px}' +
-      '#pl-root .pl-score3 .sc .l{font-size:8px;font-weight:700;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#pl-root .pl-score3 .sc .l{font-size:9px;font-weight:700;min-width:0;overflow:hidden;' +
+        'text-overflow:ellipsis;white-space:nowrap;writing-mode:horizontal-tb;text-orientation:mixed}' +
+      '#pl-root .pl-score3 .sc.main .l{grid-column:1 / -1}' +
       '#pl-root .pl-score3 .sc .l.pos{color:var(--gold)}' +
       '#pl-root .pl-score3 .sc .l.risk{color:var(--cyan)}' +
+      '#pl-root .pl-score3 .sc .meter{grid-column:1 / -1;margin-top:2px}' +
+      '#pl-root .pl-score3 .sc .meter .vz-meter,#pl-root .pl-score3 .sc .vz-meter{margin-top:0}' +
       '#pl-root .pl-score-formula{font-size:8px;color:#64748b;margin:3px 0 0;line-height:1.35;flex:0 0 auto}' +
       '#pl-root .pl-score-formula b{color:#94a3b8;font-weight:700}' +
       '#pl-root .pl-score-meta{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;flex:0 0 auto}' +
@@ -756,15 +767,21 @@
         '<div class="sc main" title="綜合脈動（母分）＝0.7×大盤體質＋0.3×(100−風險)">' +
           '<div class="k"><span>綜合脈動</span></div>' +
           '<div class="v">' + (total != null ? Number(total).toFixed(1) : '—') + '</div>' +
-          '<div class="l pos">' + esc(p.statusText || '—') + '</div>' + totalMeter + '</div>' +
+          '<div class="l pos">' + esc(p.statusText || '—') + '</div>' +
+          (totalMeter ? '<div class="meter">' + totalMeter + '</div>' : '') +
+        '</div>' +
         '<div class="sc child" title="大盤體質子項（量能＋法人＋融資＋估值），權重 70%">' +
           '<div class="k"><span>大盤體質</span><span class="w">權重 70%</span></div>' +
           '<div class="v">' + (health != null ? Number(health).toFixed(1) : '—') + '</div>' +
-          '<div class="l pos">' + esc(p.healthLabel || '—') + '</div>' + healthMeter + '</div>' +
+          '<div class="l pos">' + esc(p.healthLabel || '—') + '</div>' +
+          (healthMeter ? '<div class="meter">' + healthMeter + '</div>' : '') +
+        '</div>' +
         '<div class="sc child" title="風險因子軟封頂（越高越警戒）；綜合取 30%×(100−風險)">' +
           '<div class="k"><span>風險</span><span class="w">權重 30%</span></div>' +
           '<div class="v">' + (risk != null ? Number(risk).toFixed(1) : '—') + '</div>' +
-          '<div class="l risk">' + esc(p.riskLabel || '—') + '</div>' + riskMeter + '</div>' +
+          '<div class="l risk">' + esc(p.riskLabel || '—') + '</div>' +
+          (riskMeter ? '<div class="meter">' + riskMeter + '</div>' : '') +
+        '</div>' +
       '</div>' +
       '<div class="pl-score-formula" title="與 /pulse 後端算式一致">' + formulaBits + '</div>' +
       '<div class="pl-score-meta">' +

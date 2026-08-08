@@ -105,6 +105,11 @@ ok(/instFlowQuant/.test(pl) && /rankLabel/.test(pl) && /pl-inst-ctx/.test(pl) &&
   'pulse institutional shows Z/percentile/rank + compact stale tag');
 ok(/pl-score3/.test(pl) && /綜合脈動/.test(pl) && /大盤體質/.test(pl) && /權重 70%/.test(pl) && /權重 30%/.test(pl),
   'pulse score trio shows parent 綜合 + child weights 70/30');
+ok(/pl-empty\[hidden\]\{display:none!important\}/.test(pl),
+  'pulse empty[hidden] overrides display:flex (no blank inst box)');
+ok(/pl-score3\{display:flex;flex-direction:column/.test(pl) &&
+  /writing-mode:horizontal-tb/.test(pl),
+  'pulse score 體質／風險 stack as horizontal-text rows');
 ok(/正面因子/.test(pl) && /風險因子/.test(pl) && /計入風險分/.test(pl) && !/主要動能/.test(pl),
   'pulse drivers labeled 正面／風險因子 (not 主要動能)');
 ok(/大盤體質（X：日/.test(pl) && !/>動能</.test(pl),
