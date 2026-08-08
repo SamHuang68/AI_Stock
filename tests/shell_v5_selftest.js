@@ -182,6 +182,9 @@ ok(/ringAnalysisTree/.test(shell) && /ringPushChildren/.test(shell) &&
 ok(/itemOffsetOnLayer/.test(shell) && /clampWheelForActive/.test(shell) &&
   /下一層以點選功能為圓心/.test(shell) && /paintRingAnchor/.test(shell),
   'shell ring drills next layer centered on picked item (not re-centered)');
+ok(/onRingWheel/.test(shell) && /wheelAcc/.test(shell) && /sr-orbit/.test(shell) &&
+  /--sr-x/.test(shell) && /box-shadow/.test(shell) && /conic-gradient/.test(shell),
+  'shell ring 3D orbit/bevel + mouse-wheel cyclic select');
 /* 樹深度約束：任一分支 children 巢狀 ≤ RING_MAX_DEPTH（靜態掃描） */
 (function () {
   var maxNest = 0;

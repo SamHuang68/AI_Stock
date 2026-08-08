@@ -75,6 +75,7 @@
     wx: 0, wy: 0,   /* wheel 原點（螢幕座標） */
     cx: 0, cy: 0,   /* 作用層圓心（螢幕座標，供命中／游標） */
     hi: -1,
+    wheelAcc: 0,    /* 滾輪累積，過閾值才換選 */
     layers: [],     /* [{ title, items, pickedId, ox, oy }] 最多 3；ox/oy 相對 wheel */
     items: []       /* = 作用層 items */
   };
@@ -252,68 +253,177 @@
         '.sv-panel{padding:8px 8px 10px}' +
         '#topbar .shell-sync-btn span.lbl{display:none}' +
       '}' +
-      /* ── 功能轉盤：最多 3 層同心圓；上層透明鎖定、作用層可點 ── */
+      /* ── 功能轉盤：立體軌道／鈕；上層鎖定；滾輪循環選取 ── */
       '#st-ring{position:fixed;inset:0;z-index:240;display:none;pointer-events:none}' +
       '#st-ring.on{display:block;pointer-events:auto}' +
-      '#st-ring .sr-backdrop{position:absolute;inset:0;background:rgba(2,8,18,.58);' +
-        'backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);border:0;padding:0;cursor:default}' +
+      '#st-ring .sr-backdrop{position:absolute;inset:0;' +
+        'background:radial-gradient(ellipse at center,rgba(8,16,28,.42) 0%,rgba(2,8,18,.72) 70%);' +
+        'backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);border:0;padding:0;cursor:default}' +
       '#st-ring .sr-wheel{position:absolute;width:0;height:0;transform:translate(-50%,-50%);' +
         'pointer-events:none}' +
-      '#st-ring.on .sr-wheel{animation:sr-pop .18s cubic-bezier(.2,1.2,.4,1) both}' +
+      '#st-ring.on .sr-wheel{animation:sr-pop .2s cubic-bezier(.2,1.2,.4,1) both}' +
       '@keyframes sr-pop{from{opacity:0;transform:translate(-50%,-50%) scale(.55)}' +
         'to{opacity:1;transform:translate(-50%,-50%) scale(1)}}' +
       '#st-ring .sr-layers{position:absolute;left:0;top:0;width:0;height:0}' +
       '#st-ring .sr-layer{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;' +
         'transition:opacity .16s ease}' +
-      '#st-ring .sr-layer.locked{opacity:.26;filter:saturate(.35) brightness(.85)}' +
+      /* 軌道圓：雙框＋內外陰影＋斜光漸層 */
+      '#st-ring .sr-orbit{position:absolute;left:0;top:0;border-radius:50%;pointer-events:none;' +
+        'box-sizing:border-box;z-index:0;' +
+        'background:radial-gradient(circle,' +
+          'transparent calc(50% - 3.5px),' +
+          'rgba(245,197,24,.14) calc(50% - 2.5px),' +
+          'rgba(56,189,248,.22) calc(50% - 1px),' +
+          'rgba(15,23,42,.95) 50%,' +
+          'transparent calc(50% + 1px));' +
+        'box-shadow:' +
+          '0 0 0 1px rgba(30,41,59,.75),' +
+          '0 10px 28px rgba(0,0,0,.42),' +
+          '0 0 24px rgba(56,189,248,.08),' +
+          'inset 0 2px 4px rgba(255,255,255,.07),' +
+          'inset 0 -3px 8px rgba(0,0,0,.45)}' +
+      '#st-ring .sr-orbit::before{content:"";position:absolute;inset:8%;border-radius:50%;' +
+        'background:conic-gradient(from 200deg,' +
+          'rgba(245,197,24,.28),rgba(148,163,184,.08),rgba(56,189,248,.22),' +
+          'rgba(148,163,184,.06),rgba(245,197,24,.28));' +
+        '-webkit-mask:radial-gradient(circle,transparent 66%,#000 67%,#000 71%,transparent 72%);' +
+        'mask:radial-gradient(circle,transparent 66%,#000 67%,#000 71%,transparent 72%);' +
+        'opacity:.85;pointer-events:none}' +
+      '#st-ring .sr-orbit::after{content:"";position:absolute;inset:18%;border-radius:50%;' +
+        'box-shadow:inset 0 0 28px rgba(0,0,0,.35);pointer-events:none}' +
+      '#st-ring .sr-layer.locked{opacity:.28;filter:saturate(.4) brightness(.82)}' +
       '#st-ring .sr-layer.locked .sr-item{pointer-events:none!important;cursor:default;' +
-        'box-shadow:none;border-color:rgba(30,51,77,.55)}' +
-      '#st-ring .sr-layer.locked .sr-item.picked{opacity:1;filter:none;border-color:rgba(245,197,24,.45);' +
-        'color:rgba(245,197,24,.75);box-shadow:0 0 0 1px rgba(245,197,24,.12)}' +
+        'box-shadow:0 2px 8px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.04)!important;' +
+        'border-color:rgba(51,65,85,.65)!important}' +
+      '#st-ring .sr-layer.locked .sr-orbit{opacity:.55;filter:grayscale(.2)}' +
+      '#st-ring .sr-layer.locked .sr-item.picked{opacity:1;filter:none;' +
+        'border-color:rgba(245,197,24,.5)!important;color:rgba(245,197,24,.8);' +
+        'box-shadow:0 0 0 1px rgba(245,197,24,.18),0 4px 12px rgba(0,0,0,.35)!important}' +
       '#st-ring .sr-layer.active{opacity:1;filter:none;z-index:2}' +
       '#st-ring .sr-layer.active .sr-item{pointer-events:auto}' +
-      '#st-ring .sr-hub{position:absolute;left:0;top:0;width:44px;height:44px;margin:-22px 0 0 -22px;' +
-        'border-radius:50%;border:1px solid rgba(248,113,113,.55);z-index:5;' +
-        'background:radial-gradient(circle at 40% 35%,#fb7185,#b91c1c 70%);' +
-        'color:#fff;font:800 16px/44px "JetBrains Mono",monospace;text-align:center;' +
-        'cursor:pointer;pointer-events:auto;box-shadow:0 0 0 4px rgba(185,28,28,.18),0 8px 28px rgba(0,0,0,.45);' +
-        'transition:transform .12s ease,box-shadow .12s ease}' +
-      '#st-ring .sr-hub:hover,#st-ring .sr-hub.hi{transform:scale(1.08);' +
-        'box-shadow:0 0 0 5px rgba(251,113,133,.28),0 10px 32px rgba(0,0,0,.5)}' +
-      '#st-ring .sr-hub.back{border-color:rgba(56,189,248,.55);' +
-        'background:radial-gradient(circle at 40% 35%,#38bdf8,#0369a1 70%)}' +
-      '#st-ring .sr-item{position:absolute;left:0;top:0;width:54px;height:54px;margin:-27px 0 0 -27px;' +
-        'border-radius:50%;border:1px solid rgba(30,51,77,.95);' +
-        'background:radial-gradient(circle at 35% 30%,#1a2740,#0b1524 72%);' +
-        'color:#cbd5e1;cursor:pointer;' +
+      /* 中心鈕：立體金屬感 */
+      '#st-ring .sr-hub{position:absolute;left:0;top:0;width:46px;height:46px;margin:-23px 0 0 -23px;' +
+        'border-radius:50%;z-index:5;border:1px solid rgba(254,202,202,.55);' +
+        'background:' +
+          'radial-gradient(circle at 32% 28%,rgba(254,226,226,.95) 0%,transparent 36%),' +
+          'radial-gradient(circle at 70% 78%,rgba(127,29,29,.55) 0%,transparent 45%),' +
+          'linear-gradient(160deg,#fb7185 0%,#e11d48 42%,#9f1239 100%);' +
+        'color:#fff;font:800 16px/46px "JetBrains Mono",monospace;text-align:center;' +
+        'cursor:pointer;pointer-events:auto;' +
+        'box-shadow:' +
+          '0 0 0 3px rgba(185,28,28,.22),' +
+          '0 1px 0 rgba(255,255,255,.35) inset,' +
+          '0 -2px 6px rgba(0,0,0,.35) inset,' +
+          '0 10px 26px rgba(0,0,0,.5),' +
+          '0 0 20px rgba(244,63,94,.22);' +
+        'transition:transform .12s ease,box-shadow .12s ease,filter .12s}' +
+      '#st-ring .sr-hub:hover,#st-ring .sr-hub.hi{transform:scale(1.08);filter:brightness(1.06);' +
+        'box-shadow:' +
+          '0 0 0 4px rgba(251,113,133,.32),' +
+          '0 1px 0 rgba(255,255,255,.4) inset,' +
+          '0 -2px 6px rgba(0,0,0,.35) inset,' +
+          '0 12px 30px rgba(0,0,0,.55),' +
+          '0 0 26px rgba(251,113,133,.28)}' +
+      '#st-ring .sr-hub.back{border-color:rgba(186,230,253,.55);' +
+        'background:' +
+          'radial-gradient(circle at 32% 28%,rgba(224,242,254,.95) 0%,transparent 36%),' +
+          'radial-gradient(circle at 70% 78%,rgba(12,74,110,.55) 0%,transparent 45%),' +
+          'linear-gradient(160deg,#38bdf8 0%,#0284c7 45%,#075985 100%);' +
+        'box-shadow:' +
+          '0 0 0 3px rgba(3,105,161,.28),' +
+          '0 1px 0 rgba(255,255,255,.35) inset,' +
+          '0 -2px 6px rgba(0,0,0,.35) inset,' +
+          '0 10px 26px rgba(0,0,0,.5),' +
+          '0 0 20px rgba(56,189,248,.22)}' +
+      '#st-ring .sr-hub.back:hover,#st-ring .sr-hub.back.hi{' +
+        'box-shadow:' +
+          '0 0 0 4px rgba(56,189,248,.35),' +
+          '0 1px 0 rgba(255,255,255,.4) inset,' +
+          '0 -2px 6px rgba(0,0,0,.35) inset,' +
+          '0 12px 30px rgba(0,0,0,.55),' +
+          '0 0 26px rgba(56,189,248,.3)}' +
+      /* 功能鈕：斜光＋內外陰影＋邊框漸層感（位置用 --sr-x/--sr-y） */
+      '#st-ring .sr-item{position:absolute;left:0;top:0;width:56px;height:56px;margin:-28px 0 0 -28px;' +
+        'border-radius:50%;z-index:1;' +
+        'border:1px solid rgba(100,116,139,.55);' +
+        'background:' +
+          'radial-gradient(circle at 30% 24%,rgba(226,232,240,.22) 0%,transparent 38%),' +
+          'radial-gradient(circle at 70% 80%,rgba(0,0,0,.55) 0%,transparent 48%),' +
+          'linear-gradient(155deg,#243548 0%,#152337 48%,#0a1422 100%);' +
+        'color:#e2e8f0;cursor:pointer;' +
         'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;' +
-        'box-shadow:0 6px 18px rgba(0,0,0,.4);transition:transform .12s ease,border-color .12s,color .12s,opacity .16s}' +
-      '#st-ring .sr-item .sr-ico{font-size:14px;line-height:1;opacity:.92}' +
-      '#st-ring .sr-item .sr-lbl{font:700 9px/1 "JetBrains Mono",monospace;letter-spacing:.15px;opacity:.9}' +
-      '#st-ring .sr-layer.active .sr-item:hover,#st-ring .sr-layer.active .sr-item.hi{transform:scale(1.12);' +
-        'border-color:rgba(245,197,24,.65);color:var(--gold);' +
-        'background:radial-gradient(circle at 35% 30%,#243552,#101c30 72%);' +
-        'box-shadow:0 0 0 2px rgba(245,197,24,.18),0 8px 22px rgba(0,0,0,.5)}' +
-      '#st-ring .sr-item.on{border-color:rgba(56,189,248,.55);color:#7dd3fc}' +
+        'transform:translate(var(--sr-x,0px),var(--sr-y,0px));' +
+        'box-shadow:' +
+          '0 1px 0 rgba(255,255,255,.14) inset,' +
+          '0 -2px 5px rgba(0,0,0,.45) inset,' +
+          '0 0 0 1px rgba(15,23,42,.85),' +
+          '0 8px 18px rgba(0,0,0,.48),' +
+          '0 2px 4px rgba(0,0,0,.35);' +
+        'transition:transform .13s cubic-bezier(.2,1.1,.4,1),border-color .12s,color .12s,' +
+          'box-shadow .13s,filter .12s,opacity .16s}' +
+      '#st-ring .sr-item::before{content:"";position:absolute;inset:3px;border-radius:50%;' +
+        'background:linear-gradient(150deg,rgba(255,255,255,.16) 0%,rgba(255,255,255,.03) 40%,transparent 58%);' +
+        'pointer-events:none;z-index:0}' +
+      '#st-ring .sr-item .sr-ico,#st-ring .sr-item .sr-lbl{position:relative;z-index:1}' +
+      '#st-ring .sr-item .sr-ico{font-size:14px;line-height:1;opacity:.95;' +
+        'text-shadow:0 1px 2px rgba(0,0,0,.55)}' +
+      '#st-ring .sr-item .sr-lbl{font:700 9px/1 "JetBrains Mono",monospace;letter-spacing:.15px;opacity:.92;' +
+        'text-shadow:0 1px 2px rgba(0,0,0,.5)}' +
+      '#st-ring .sr-layer.active .sr-item:hover,#st-ring .sr-layer.active .sr-item.hi{' +
+        'transform:translate(var(--sr-x,0px),var(--sr-y,0px)) scale(1.12);' +
+        'border-color:rgba(250,204,21,.75);color:var(--gold);' +
+        'background:' +
+          'radial-gradient(circle at 30% 24%,rgba(253,224,71,.28) 0%,transparent 40%),' +
+          'radial-gradient(circle at 70% 80%,rgba(0,0,0,.4) 0%,transparent 48%),' +
+          'linear-gradient(155deg,#2f4560 0%,#1a2c44 50%,#101c30 100%);' +
+        'box-shadow:' +
+          '0 1px 0 rgba(255,255,255,.22) inset,' +
+          '0 -2px 5px rgba(0,0,0,.4) inset,' +
+          '0 0 0 2px rgba(245,197,24,.28),' +
+          '0 0 18px rgba(245,197,24,.18),' +
+          '0 10px 24px rgba(0,0,0,.55)}' +
+      '#st-ring .sr-item.on{border-color:rgba(56,189,248,.7);color:#7dd3fc;' +
+        'box-shadow:' +
+          '0 1px 0 rgba(255,255,255,.16) inset,' +
+          '0 -2px 5px rgba(0,0,0,.4) inset,' +
+          '0 0 0 2px rgba(56,189,248,.22),' +
+          '0 0 14px rgba(56,189,248,.16),' +
+          '0 8px 18px rgba(0,0,0,.48)}' +
       '#st-ring .sr-item.has-kids::after{content:"›";position:absolute;right:5px;top:50%;' +
-        'transform:translateY(-50%);font-size:10px;color:var(--gold);opacity:.9}' +
+        'transform:translateY(-50%);font-size:10px;color:var(--gold);opacity:.95;z-index:1;' +
+        'text-shadow:0 0 6px rgba(245,197,24,.45)}' +
       '#st-ring .sr-tip{position:absolute;left:50%;top:86px;transform:translateX(-50%);z-index:5;' +
         'font:600 10px/1.3 "JetBrains Mono",monospace;color:#94a3b8;white-space:nowrap;' +
-        'pointer-events:none;text-shadow:0 1px 8px rgba(0,0,0,.8);max-width:300px;' +
-        'overflow:hidden;text-overflow:ellipsis}' +
-      '#st-ring .sr-level{position:absolute;left:50%;top:-100px;transform:translateX(-50%);z-index:5;' +
+        'pointer-events:none;text-shadow:0 1px 8px rgba(0,0,0,.8);max-width:320px;' +
+        'overflow:hidden;text-overflow:ellipsis;' +
+        'padding:3px 8px;border-radius:999px;background:rgba(8,15,28,.55);' +
+        'border:1px solid rgba(51,65,85,.45);backdrop-filter:blur(2px)}' +
+      '#st-ring .sr-level{position:absolute;left:50%;top:-108px;transform:translateX(-50%);z-index:5;' +
         'font:700 9px/1.35 "JetBrains Mono",monospace;color:var(--gold);letter-spacing:.3px;' +
-        'white-space:nowrap;pointer-events:none;text-shadow:0 1px 8px rgba(0,0,0,.8);text-align:center}' +
+        'white-space:nowrap;pointer-events:none;text-shadow:0 1px 8px rgba(0,0,0,.8);text-align:center;' +
+        'padding:3px 8px;border-radius:999px;background:rgba(8,15,28,.5);' +
+        'border:1px solid rgba(245,197,24,.22)}' +
       '#st-ring .sr-level .sr-crumb{color:#64748b;font-weight:600}' +
       '#nr-edge .nr-edge-ring{font-size:11px;opacity:.85;margin-top:2px}' +
-      '#st-ring-fab{position:fixed;right:14px;bottom:14px;z-index:90;width:40px;height:40px;' +
-        'border-radius:50%;border:1px solid rgba(245,197,24,.4);' +
-        'background:radial-gradient(circle at 35% 30%,#1e2d48,#0c1626);color:var(--gold);' +
-        'font:800 15px/1 "JetBrains Mono",monospace;cursor:pointer;' +
-        'box-shadow:0 6px 20px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;' +
+      '#st-ring-fab{position:fixed;right:14px;bottom:14px;z-index:90;width:42px;height:42px;' +
+        'border-radius:50%;border:1px solid rgba(245,197,24,.45);' +
+        'background:' +
+          'radial-gradient(circle at 32% 28%,rgba(253,224,71,.2) 0%,transparent 40%),' +
+          'linear-gradient(155deg,#1e2d48 0%,#0c1626 100%);' +
+        'color:var(--gold);font:800 15px/1 "JetBrains Mono",monospace;cursor:pointer;' +
+        'box-shadow:' +
+          '0 1px 0 rgba(255,255,255,.12) inset,' +
+          '0 -2px 5px rgba(0,0,0,.4) inset,' +
+          '0 8px 22px rgba(0,0,0,.5),' +
+          '0 0 12px rgba(245,197,24,.12);' +
+        'display:flex;align-items:center;justify-content:center;' +
         'transition:transform .14s ease,border-color .14s,box-shadow .14s}' +
       '#st-ring-fab:hover{transform:scale(1.06);border-color:var(--gold);' +
-        'box-shadow:0 0 0 3px rgba(245,197,24,.15),0 8px 24px rgba(0,0,0,.5)}' +
+        'box-shadow:' +
+          '0 1px 0 rgba(255,255,255,.18) inset,' +
+          '0 -2px 5px rgba(0,0,0,.4) inset,' +
+          '0 0 0 3px rgba(245,197,24,.16),' +
+          '0 10px 26px rgba(0,0,0,.55)}' +
       '#st-ring-fab[hidden]{display:none!important}';
   }
 
@@ -517,11 +627,12 @@
         '<div class="sr-level" id="st-ring-level">L1 · 分析主選單</div>' +
         '<div class="sr-layers" id="st-ring-layers"></div>' +
         '<button type="button" class="sr-hub" id="st-ring-hub" title="關閉" aria-label="關閉轉盤">✕</button>' +
-        '<div class="sr-tip" id="st-ring-tip">中鍵／\\ · 點 › 從該點開下一層</div>' +
+        '<div class="sr-tip" id="st-ring-tip">滾輪循環選 · 點 › 從該點開下一層</div>' +
       '</div>';
     document.body.appendChild(root);
     root.addEventListener('click', onRingClick);
     root.addEventListener('pointermove', onRingPointer);
+    root.addEventListener('wheel', onRingWheel, { passive: false });
     return root;
   }
 
@@ -627,6 +738,15 @@
       var layerEl = document.createElement('div');
       layerEl.className = 'sr-layer ' + (locked ? 'locked' : 'active');
       layerEl.setAttribute('data-layer', String(li));
+      /* 立體軌道圓（以該層圓心繪製） */
+      var orbit = document.createElement('div');
+      orbit.className = 'sr-orbit';
+      orbit.setAttribute('aria-hidden', 'true');
+      var diam = RING_R * 2;
+      orbit.style.width = diam + 'px';
+      orbit.style.height = diam + 'px';
+      orbit.style.transform = 'translate(' + (ox - RING_R) + 'px,' + (oy - RING_R) + 'px)';
+      layerEl.appendChild(orbit);
       var items = layer.items || [];
       var n = items.length || 1;
       items.forEach(function (r, idx) {
@@ -645,7 +765,8 @@
         btn.setAttribute('data-id', r.id);
         if (r.route) btn.setAttribute('data-route', r.route);
         btn.title = (r.hint || r.label) + (r.children && r.children.length ? ' · 由此展開下一層' : '');
-        btn.style.transform = 'translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px)';
+        btn.style.setProperty('--sr-x', x.toFixed(1) + 'px');
+        btn.style.setProperty('--sr-y', y.toFixed(1) + 'px');
         /* 已展開的父項落在下一層圓心（中心鈕），鎖定層隱藏避免疊在 hub 上 */
         if (locked && layer.pickedId && layer.pickedId === r.id) {
           btn.style.visibility = 'hidden';
@@ -710,6 +831,7 @@
     }
     if (idx < 0) {
       tip.textContent = 'L' + ringDepth() + '/' + RING_MAX_DEPTH +
+        ' · 滾輪循環' +
         (deep ? ' · 上層鎖定 · ‹ 返回' : ' · 點 › 從該點開下一層');
       return;
     }
@@ -740,6 +862,28 @@
   function onRingPointer(e) {
     if (!ringState.open) return;
     setRingHighlight(ringIndexFromPoint(e.clientX, e.clientY));
+  }
+
+  /** 滾輪循環選取作用層功能（觸控板小步長累積後再換） */
+  function onRingWheel(e) {
+    if (!ringState.open) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var n = ringState.items.length || 0;
+    if (!n) return;
+    var delta = e.deltaY;
+    if (!delta && e.deltaX) delta = e.deltaX;
+    if (!delta) return;
+    /* deltaMode: 0=pixel, 1=line, 2=page */
+    if (e.deltaMode === 1) delta *= 16;
+    if (e.deltaMode === 2) delta *= 48;
+    ringState.wheelAcc += delta;
+    var step = 36;
+    if (Math.abs(ringState.wheelAcc) < step) return;
+    var dir = ringState.wheelAcc > 0 ? 1 : -1;
+    ringState.wheelAcc = 0;
+    var cur = ringState.hi < 0 ? (dir > 0 ? -1 : 0) : ringState.hi;
+    setRingHighlight((cur + dir + n * 8) % n);
   }
 
   function ringPushChildren(item, idx) {
@@ -830,6 +974,8 @@
     var x = Math.max(pad, Math.min(window.innerWidth - pad, clientX || window.innerWidth / 2));
     var y = Math.max(pad, Math.min(window.innerHeight - pad, clientY || window.innerHeight / 2));
     ringState.open = true;
+    ringState.hi = -1;
+    ringState.wheelAcc = 0;
     ringState.wx = x;
     ringState.wy = y;
     ringState.cx = x;
@@ -856,6 +1002,7 @@
     if (!ringState.open && !$('st-ring')) return;
     ringState.open = false;
     ringState.hi = -1;
+    ringState.wheelAcc = 0;
     ringState.wx = 0;
     ringState.wy = 0;
     ringState.cx = 0;
