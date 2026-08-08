@@ -112,9 +112,13 @@ ok(/pl-empty\[hidden\]\{display:none!important\}/.test(pl),
   'pulse empty[hidden] overrides display:flex (no blank inst box)');
 ok(/pl-sec h4\{[^}]*font-size:11px/.test(pl) &&
   /pl-flash \.row\{[^}]*line-height:1\.5/.test(pl) &&
-  /pl-wl th,#pl-root \.pl-wl td\{padding:6px 5px/.test(pl) &&
-  /pl-inst-trend\{[^}]*flex:1\.35/.test(pl),
-  'pulse comfort pass: header hierarchy, flash line-height, wl pad, taller trends');
+  /pl-wl th,#pl-root \.pl-wl td\{padding:6px 5px/.test(pl),
+  'pulse comfort pass: header hierarchy, flash line-height, wl pad');
+ok(/function moneyYiCell/.test(pl) && /moneyYiCell\(i\.foreign\)/.test(pl) &&
+  /pl-inst4 \.c \.v\{[^}]*font-size:10px/.test(pl) &&
+  /pl-score-formula\{[^}]*font-size:8px/.test(pl) &&
+  /pl-score3 \.sc\.main \.v\{font-size:18px/.test(pl),
+  'pulse score/inst dense cards use smaller type + short 億 cells');
 ok(/pl-score3\{display:grid;grid-template-columns:1\.35fr 1fr 1fr/.test(pl) &&
   /writing-mode:horizontal-tb/.test(pl) &&
   /pl-score3 \.sc\{[^}]*flex-direction:column/.test(pl),

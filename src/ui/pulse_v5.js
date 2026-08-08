@@ -143,40 +143,44 @@
       /* hidden 必須蓋過 .pl-empty{display:flex}，否則法人窗會露出空白虛線框 */
       '#pl-root .pl-empty[hidden]{display:none!important}' +
       '#pl-root .pl-empty b{color:var(--thi);font-size:10px}' +
-      /* 市場脈動三框：左→右（綜合｜體質｜風險）；框內上下橫書，禁止窄欄把字折成直排 */
-      '#pl-root .pl-score3{display:grid;grid-template-columns:1.35fr 1fr 1fr;gap:4px;flex:0 0 auto;' +
+      /* 市場脈動：高密度卡內字級必須偏小，否則公式／底部 meta 會被 pl-sec overflow 裁切 */
+      '#pl-root .pl-score3{display:grid;grid-template-columns:1.35fr 1fr 1fr;gap:3px;flex:0 0 auto;' +
         'align-items:stretch;min-width:0}' +
       '#pl-root .pl-score3 .sc{background:var(--bg);border:1px solid var(--border);border-radius:5px;' +
-        'padding:5px 6px;min-width:0;display:flex;flex-direction:column;gap:2px;' +
+        'padding:4px 5px;min-width:0;display:flex;flex-direction:column;gap:1px;' +
         'writing-mode:horizontal-tb;text-orientation:mixed}' +
       '#pl-root .pl-score3 .sc.main{border-color:rgba(245,197,24,.45);' +
-        'background:linear-gradient(180deg,rgba(36,48,72,.98),rgba(14,22,38,.98));padding:6px 8px}' +
+        'background:linear-gradient(180deg,rgba(36,48,72,.98),rgba(14,22,38,.98));padding:4px 6px}' +
       '#pl-root .pl-score3 .sc.child{opacity:.95}' +
-      '#pl-root .pl-score3 .sc .k{font-size:9px;color:#a8b6c8;letter-spacing:.3px;min-width:0;' +
-        'display:flex;flex-wrap:nowrap;align-items:baseline;justify-content:space-between;gap:4px;' +
+      '#pl-root .pl-score3 .sc .k{font-size:8px;color:#a8b6c8;letter-spacing:.2px;min-width:0;' +
+        'display:flex;flex-wrap:nowrap;align-items:baseline;justify-content:space-between;gap:3px;' +
         'writing-mode:horizontal-tb;overflow:hidden}' +
       '#pl-root .pl-score3 .sc .k > span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#pl-root .pl-score3 .sc .k .w{color:#e8c84a;font-weight:700;font-size:9px;white-space:nowrap;flex:0 0 auto}' +
-      '#pl-root .pl-score3 .sc .v{font-size:15px;font-weight:800;color:var(--thi);line-height:1.2;' +
-        'white-space:nowrap;font-variant-numeric:tabular-nums;margin:2px 0 3px}' +
-      '#pl-root .pl-score3 .sc.main .v{font-size:22px;letter-spacing:-0.3px}' +
-      '#pl-root .pl-score3 .sc .l{font-size:9px;font-weight:700;min-width:0;overflow:hidden;' +
+      '#pl-root .pl-score3 .sc .k .w{color:#e8c84a;font-weight:700;font-size:7px;white-space:nowrap;flex:0 0 auto}' +
+      '#pl-root .pl-score3 .sc .v{font-size:14px;font-weight:800;color:var(--thi);line-height:1.15;' +
+        'white-space:nowrap;font-variant-numeric:tabular-nums;margin:1px 0 2px}' +
+      '#pl-root .pl-score3 .sc.main .v{font-size:18px;letter-spacing:-0.3px}' +
+      '#pl-root .pl-score3 .sc .l{font-size:8px;font-weight:700;min-width:0;overflow:hidden;' +
         'text-overflow:ellipsis;white-space:nowrap;writing-mode:horizontal-tb}' +
       '#pl-root .pl-score3 .sc .l.pos{color:var(--gold)}' +
       '#pl-root .pl-score3 .sc .l.risk{color:var(--cyan)}' +
-      '#pl-root .pl-score3 .sc .meter{margin-top:2px;min-width:0}' +
+      '#pl-root .pl-score3 .sc .meter{margin-top:1px;min-width:0}' +
       '#pl-root .pl-score3 .sc .meter .vz-meter,#pl-root .pl-score3 .sc .vz-meter{margin-top:0}' +
-      '#pl-root .pl-score-formula{font-size:9px;color:#94a3b8;margin:4px 0 0;line-height:1.4;flex:0 0 auto}' +
+      '#pl-root .pl-score-formula{font-size:8px;color:#94a3b8;margin:3px 0 0;line-height:1.35;flex:0 0 auto;' +
+        'min-width:0;max-width:100%;overflow:hidden;white-space:normal;word-break:break-word;' +
+        'overflow-wrap:anywhere}' +
       '#pl-root .pl-score-formula b{color:#cbd5e1;font-weight:700}' +
-      '#pl-root .pl-score-meta{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;flex:0 0 auto}' +
-      '#pl-root .pl-score-meta .m{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px}' +
-      '#pl-root .pl-score-meta .m .k{font-size:9px;color:#a8b6c8}' +
-      '#pl-root .pl-score-meta .m .v{font-size:12px;font-weight:800;margin-top:2px;color:var(--thi)}' +
-      '#pl-root .pl-comp{height:4px;border-radius:2px;background:var(--bg3);overflow:hidden;margin-top:3px}' +
+      '#pl-root .pl-score-meta{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-top:3px;flex:0 0 auto;min-width:0}' +
+      '#pl-root .pl-score-meta .m{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:3px 5px;min-width:0}' +
+      '#pl-root .pl-score-meta .m .k{font-size:8px;color:#a8b6c8}' +
+      '#pl-root .pl-score-meta .m .v{font-size:11px;font-weight:800;margin-top:1px;color:var(--thi);' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#pl-root .pl-comp{height:3px;border-radius:2px;background:var(--bg3);overflow:hidden;margin-top:2px}' +
       '#pl-root .pl-comp > i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--gold))}' +
-      '#pl-root .pl-drivers{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;font-size:9px;flex:1;min-height:0}' +
-      '#pl-root .pl-drivers .box{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px;min-height:0;overflow:auto}' +
-      '#pl-root .pl-drivers .box .k{color:#a8b6c8;margin-bottom:2px;font-size:9px;font-weight:700}' +
+      '#pl-root .pl-drivers{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-top:3px;font-size:8px;' +
+        'flex:1 1 0;min-height:0}' +
+      '#pl-root .pl-drivers .box{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:3px 5px;min-height:0;overflow:auto}' +
+      '#pl-root .pl-drivers .box .k{color:#a8b6c8;margin-bottom:1px;font-size:8px;font-weight:700}' +
       '#pl-root .pl-drivers .box .k span{color:#94a3b8;font-weight:600}' +
       '#pl-root .pl-drivers .box li{margin:1px 0;color:var(--text);list-style:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       /* OHLC / 加權盤勢（不再重複頂列三指數） */
@@ -199,22 +203,26 @@
         'border-radius:5px;padding:4px 6px;display:flex;flex-direction:column}' +
       '#pl-root .pl-spark .vz-spark-ax{flex:1;min-height:72px}' +
       '#pl-root .pl-spark svg{width:100%;height:100%;display:block;min-height:48px}' +
-      /* inst：一行四格數字 → 趨勢框吃滿剩餘高度（勿再 2×2 搶垂直空間） */
-      '#pl-root .pl-inst4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;flex:0 0 auto}' +
-      '#pl-root .pl-inst4 .c{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 5px;text-align:center;min-width:0}' +
-      '#pl-root .pl-inst4 .c .k{font-size:9px;color:#a8b6c8}' +
-      '#pl-root .pl-inst4 .c .v{font-size:13px;font-weight:800;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#pl-root .pl-inst-trend{flex:1.35 1 0;min-height:0;margin:6px 0 2px;background:var(--bg);border:1px solid var(--border);' +
-        'border-radius:5px;padding:4px 6px;display:flex;flex-direction:column;overflow:hidden;min-width:0}' +
-      '#pl-root .pl-inst-trend .lab{font-size:9px;color:#a8b6c8;flex:0 0 auto;margin-bottom:3px;' +
-        'display:flex;justify-content:space-between;gap:6px;min-width:0;overflow:hidden}' +
-      '#pl-root .pl-inst-trend .chart{flex:1 1 0;min-height:56px;min-width:0;position:relative}' +
-      '#pl-root .pl-inst-trend .chart .vz-spark-ax{height:100%;min-height:0;max-width:100%;min-width:0}' +
-      '#pl-root .pl-inst-trend .chart .vz-plot{min-width:0;min-height:0}' +
+      /* inst：一行四格；數值用短格式（無「億」）+ 小字，避免 -407.2 億 被 ellipsis 裁成 -407… */
+      '#pl-root .pl-inst4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;flex:0 0 auto}' +
+      '#pl-root .pl-inst4 .c{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:3px 2px;text-align:center;min-width:0}' +
+      '#pl-root .pl-inst4 .c .k{font-size:8px;color:#a8b6c8;line-height:1.2}' +
+      '#pl-root .pl-inst4 .c .v{font-size:10px;font-weight:800;margin-top:2px;line-height:1.15;' +
+        'font-variant-numeric:tabular-nums;letter-spacing:-0.2px;white-space:nowrap;' +
+        'overflow:visible;max-width:100%}' +
+      '#pl-root .pl-inst-trend{flex:1 1 0;min-height:0;margin:4px 0 2px;background:var(--bg);border:1px solid var(--border);' +
+        'border-radius:5px;padding:3px 5px;display:flex;flex-direction:column;overflow:hidden;min-width:0}' +
+      '#pl-root .pl-inst-trend .lab{font-size:8px;color:#a8b6c8;flex:0 0 auto;margin-bottom:2px;' +
+        'display:flex;justify-content:space-between;gap:4px;min-width:0;overflow:hidden}' +
+      '#pl-root .pl-inst-trend .lab > span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#pl-root .pl-inst-trend .chart{flex:1 1 0;min-height:0;min-width:0;overflow:hidden;position:relative}' +
+      '#pl-root .pl-inst-trend .chart .vz-spark-ax{height:100%;min-height:0;max-width:100%;min-width:0;overflow:hidden}' +
+      '#pl-root .pl-inst-trend .chart .vz-yunit,#pl-root .pl-inst-trend .chart .vz-ylabs{font-size:6px}' +
+      '#pl-root .pl-inst-trend .chart .vz-plot{min-width:0;min-height:0;overflow:hidden}' +
       '#pl-root .pl-inst-trend .chart .vz-plot svg{width:100%;height:100%;min-width:0;min-height:0;' +
         'max-width:100%;max-height:100%;margin:0;display:block;box-sizing:border-box}' +
-      '#pl-root .pl-inst-cmt{font-size:9px;line-height:1.4;color:var(--text);margin-top:2px;flex:0 1 auto;' +
-        'max-height:2.4em;min-height:0;overflow:hidden}' +
+      '#pl-root .pl-inst-cmt{font-size:8px;line-height:1.35;color:var(--text);margin-top:2px;flex:0 0 auto;' +
+        'max-height:2.7em;min-height:0;overflow:hidden}' +
       '#pl-root .pl-inst-cmt b{color:var(--gold);font-weight:700}' +
       '#pl-root .pl-inst-cmt .up{color:var(--red)}#pl-root .pl-inst-cmt .dn{color:var(--green)}' +
       '#pl-root .pl-chip{display:inline-block;margin:1px 3px 0 0;padding:0 5px;border-radius:999px;border:1px solid var(--border);font-size:8px;color:#94a3b8}' +
@@ -243,17 +251,17 @@
       '#pl-root .pl-donut .mid span{font-size:8px;color:#a8b6c8}' +
       '#pl-root .pl-leg{font-size:9px;line-height:1.45;min-width:0;flex:1;color:#cbd5e1}' +
       '#pl-root .pl-leg i{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:4px}' +
-      '#pl-root .pl-bd-trend{flex:1.35 1 0;min-height:0;margin:6px 0 2px;background:var(--bg);border:1px solid var(--border);' +
-        'border-radius:5px;padding:4px 6px;display:flex;flex-direction:column;overflow:hidden;min-width:0}' +
-      '#pl-root .pl-bd-trend .lab{font-size:9px;color:#a8b6c8;flex:0 0 auto;margin-bottom:3px;' +
-        'display:flex;justify-content:space-between;gap:6px;min-width:0;overflow:hidden}' +
-      '#pl-root .pl-bd-trend .chart{flex:1 1 0;min-height:56px;min-width:0;position:relative}' +
-      '#pl-root .pl-bd-trend .chart .vz-spark-ax{height:100%;min-height:0;max-width:100%;min-width:0}' +
-      '#pl-root .pl-bd-trend .chart .vz-plot{min-width:0;min-height:0}' +
+      '#pl-root .pl-bd-trend{flex:1 1 0;min-height:0;margin:4px 0 2px;background:var(--bg);border:1px solid var(--border);' +
+        'border-radius:5px;padding:3px 5px;display:flex;flex-direction:column;overflow:hidden;min-width:0}' +
+      '#pl-root .pl-bd-trend .lab{font-size:8px;color:#a8b6c8;flex:0 0 auto;margin-bottom:2px;' +
+        'display:flex;justify-content:space-between;gap:4px;min-width:0;overflow:hidden}' +
+      '#pl-root .pl-bd-trend .chart{flex:1 1 0;min-height:0;min-width:0;overflow:hidden;position:relative}' +
+      '#pl-root .pl-bd-trend .chart .vz-spark-ax{height:100%;min-height:0;max-width:100%;min-width:0;overflow:hidden}' +
+      '#pl-root .pl-bd-trend .chart .vz-plot{min-width:0;min-height:0;overflow:hidden}' +
       '#pl-root .pl-bd-trend .chart .vz-plot svg{width:100%;height:100%;min-width:0;min-height:0;' +
         'max-width:100%;max-height:100%;margin:0;display:block;box-sizing:border-box}' +
-      '#pl-root .pl-bd-cmt{font-size:9px;line-height:1.4;color:var(--text);margin-top:2px;flex:0 1 auto;' +
-        'max-height:2.4em;min-height:0;overflow:hidden}' +
+      '#pl-root .pl-bd-cmt{font-size:8px;line-height:1.35;color:var(--text);margin-top:2px;flex:0 0 auto;' +
+        'max-height:2.7em;min-height:0;overflow:hidden}' +
       '#pl-root .pl-bd-cmt b{color:var(--gold);font-weight:700}' +
       '#pl-root .pl-bd-cmt .up{color:var(--red)}#pl-root .pl-bd-cmt .dn{color:var(--green)}' +
       /* sectors + 與近漲跌停聯動高亮 */
@@ -314,7 +322,7 @@
       '#pl-root .pl-wl tr{cursor:pointer}#pl-root .pl-wl tr:hover{background:var(--bg3)}' +
       '#pl-root .pl-wl td.px{padding-right:8px}' +
       '#pl-root .pl-wl .mkt{font-size:9px;color:#94a3b8;font-weight:600;margin-left:3px}' +
-      '#pl-root .pl-inst-ctx{font-size:8px;font-weight:700;color:#94a3b8;margin-left:2px}' +
+      '#pl-root .pl-inst-ctx{display:none}' + /* Z/P 改由趨勢 meta／title 承載，免搶四格寬 */
       /* factors footer（展開時可捲） */
       '#pl-root .pl-extra{flex:0 0 auto;margin-top:4px}' +
       '#pl-root .pl-factors{margin-top:4px;scroll-margin-top:8px;padding:2px;border-radius:8px;transition:box-shadow .35s,background .35s}' +
@@ -386,6 +394,12 @@
     if (v == null || !isFinite(v)) return '—';
     var x = Math.abs(v) > 1e5 ? v / 1e8 : v;
     return (x >= 0 ? '+' : '') + x.toFixed(1) + ' 億';
+  }
+  /** tip 法人四格專用：省略「億」以免窄欄 ellipsis；完整值放 title */
+  function moneyYiCell(v) {
+    if (v == null || !isFinite(v)) return '—';
+    var x = Math.abs(v) > 1e5 ? v / 1e8 : v;
+    return (x >= 0 ? '+' : '') + x.toFixed(1);
   }
   function jget(url) {
     return fetch(SRV + url, { cache: 'no-store' })
@@ -799,7 +813,7 @@
     var healthMeter = V ? V.scoreMeter(health) : '';
     var riskMeter = V ? V.scoreMeter(risk, { color: 'var(--cyan)' }) : '';
     /* 母分綜合＝0.7×大盤體質＋0.3×(100−風險)；子項並列但視覺降級 */
-    var formulaBits = '綜合 = <b>70%</b>×大盤體質 + <b>30%</b>×(100−風險)';
+    var formulaBits = '綜合=<b>70%</b>×體質+<b>30%</b>×(100−風險)';
     if (health != null && risk != null && total != null) {
       var chk = 0.7 * Number(health) + 0.3 * (100 - Number(risk));
       formulaBits += ' → <b>' + chk.toFixed(1) + '</b>';
@@ -829,10 +843,10 @@
       '<div class="pl-score-meta">' +
         '<div class="m"><div class="k">正面因子合計</div><div class="v pl-st-pos">' +
           (p.positiveFactorScore != null ? Number(p.positiveFactorScore).toFixed(1) : '—') +
-          '<span class="pl-st-mid" style="font-size:9px;font-weight:600"> · ' +
+          '<span class="pl-st-mid" style="font-size:8px;font-weight:600"> · ' +
             ((p.positiveFactors || []).length) + ' 項</span></div></div>' +
         '<div class="m"><div class="k">資料可靠度</div><div class="v">' + Number(comp).toFixed(0) + '%' +
-          '<span class="pl-st-mid" style="font-size:9px;font-weight:600"> · ' +
+          '<span class="pl-st-mid" style="font-size:8px;font-weight:600"> · ' +
             (p.datasetsOk || 0) + '/' + (p.datasetsTotal || 0) + '</span></div>' +
           '<div class="pl-comp"><i style="width:' + comp + '%"></i></div></div>' +
       '</div>' +
@@ -1020,21 +1034,22 @@
     var box = $('pl-inst4');
     if (!box) return;
     var totalTxt = i.totalYi != null
-      ? ((i.totalYi >= 0 ? '+' : '') + Number(i.totalYi).toFixed(1) + ' 億')
+      ? ((i.totalYi >= 0 ? '+' : '') + Number(i.totalYi).toFixed(1))
       : '—';
     var q = opts.quant || {};
-    /* Z／P／排名改掛 title＋趨勢 meta，避免四格合計欄被 ctx 撐高擠壓線圖 */
-    var totTip = q.bits
-      ? ('title="法人合計相對近' + (q.n || 20) +
-        '日：' + esc(q.bits) + '（Z＝標準差位／P＝分位／買賣超排名）"')
-      : '';
+    /* 單位億掛 title；Z／P 僅 title＋趨勢 meta，不進四格 */
+    var tipBase = '單位：億';
+    var totTip = 'title="' + tipBase +
+      (q.bits ? (' · 近' + (q.n || 20) + '日 ' + esc(q.bits) + '（Z／P／排名）') : '') + '"';
     box.innerHTML =
-      '<div class="c"><div class="k">外資</div><div class="v ' + tw(i.foreign) + '">' + moneyYi(i.foreign) + '</div></div>' +
-      '<div class="c"><div class="k">投信</div><div class="v ' + tw(i.trust) + '">' + moneyYi(i.trust) + '</div></div>' +
-      '<div class="c"><div class="k">自營</div><div class="v ' + tw(i.dealer) + '">' + moneyYi(i.dealer) + '</div></div>' +
-      '<div class="c" ' + totTip + '><div class="k">合計' +
-        (q.bits ? ' <span class="pl-inst-ctx">' + esc(q.bits) + '</span>' : '') +
-        '</div><div class="v ' + tw(i.totalYi) + '">' + totalTxt + '</div></div>';
+      '<div class="c" title="' + tipBase + '"><div class="k">外資</div><div class="v ' + tw(i.foreign) + '">' +
+        moneyYiCell(i.foreign) + '</div></div>' +
+      '<div class="c" title="' + tipBase + '"><div class="k">投信</div><div class="v ' + tw(i.trust) + '">' +
+        moneyYiCell(i.trust) + '</div></div>' +
+      '<div class="c" title="' + tipBase + '"><div class="k">自營</div><div class="v ' + tw(i.dealer) + '">' +
+        moneyYiCell(i.dealer) + '</div></div>' +
+      '<div class="c" ' + totTip + '><div class="k">合計</div><div class="v ' + tw(i.totalYi) + '">' +
+        totalTxt + '</div></div>';
     box.style.display = '';
     var badge = $('pl-inst-stale');
     if (badge) {
@@ -1060,7 +1075,7 @@
     var i = (ov && ov.institutional) || {};
     var empty = instDayEmpty(i);
     var totalTxt = i.totalYi != null
-      ? ((i.totalYi >= 0 ? '+' : '') + Number(i.totalYi).toFixed(1) + ' 億')
+      ? ((i.totalYi >= 0 ? '+' : '') + Number(i.totalYi).toFixed(1))
       : '—';
     return '<div class="pl-sec" data-pri="p0"><h4>法人資金' +
       '<span class="pl-stale" id="pl-inst-stale"' + (empty ? '' : ' hidden') + '>' +
@@ -1069,19 +1084,19 @@
       '<a data-go="institutional">籌碼 →</a></h4>' +
       '<div class="pl-empty" id="pl-inst-empty" hidden></div>' +
       '<div class="pl-inst4" id="pl-inst4">' +
-        '<div class="c"><div class="k">外資</div><div class="v ' + tw(i.foreign) + '">' +
-          (empty ? '…' : moneyYi(i.foreign)) + '</div></div>' +
-        '<div class="c"><div class="k">投信</div><div class="v ' + tw(i.trust) + '">' +
-          (empty ? '…' : moneyYi(i.trust)) + '</div></div>' +
-        '<div class="c"><div class="k">自營</div><div class="v ' + tw(i.dealer) + '">' +
-          (empty ? '…' : moneyYi(i.dealer)) + '</div></div>' +
-        '<div class="c"><div class="k">合計</div><div class="v ' + tw(i.totalYi) + '">' +
+        '<div class="c" title="單位：億"><div class="k">外資</div><div class="v ' + tw(i.foreign) + '">' +
+          (empty ? '…' : moneyYiCell(i.foreign)) + '</div></div>' +
+        '<div class="c" title="單位：億"><div class="k">投信</div><div class="v ' + tw(i.trust) + '">' +
+          (empty ? '…' : moneyYiCell(i.trust)) + '</div></div>' +
+        '<div class="c" title="單位：億"><div class="k">自營</div><div class="v ' + tw(i.dealer) + '">' +
+          (empty ? '…' : moneyYiCell(i.dealer)) + '</div></div>' +
+        '<div class="c" title="單位：億"><div class="k">合計</div><div class="v ' + tw(i.totalYi) + '">' +
           (empty ? '…' : totalTxt) + '</div></div>' +
       '</div>' +
       '<div class="pl-inst-trend" id="pl-inst-trend">' +
-        '<div class="lab"><span>合計買賣超趨勢</span><span id="pl-inst-trend-meta">' +
+        '<div class="lab"><span>合計買賣超 · 億</span><span id="pl-inst-trend-meta">' +
           (i.date ? '法人日 ' + esc(i.date) : '載入…') + '</span></div>' +
-        '<div class="chart" id="pl-inst-chart"><div class="pl-note" style="padding:6px 0">載入資金序列…</div></div>' +
+        '<div class="chart" id="pl-inst-chart"><div class="pl-note" style="padding:4px 0">載入資金序列…</div></div>' +
       '</div>' +
       '<div class="pl-inst-cmt" id="pl-inst-cmt">分析資金變化中…</div></div>';
   }
@@ -1146,8 +1161,8 @@
           var last = totals[totals.length - 1];
           var col = last >= 0 ? 'var(--red)' : 'var(--green)';
           chart.innerHTML = V.sparkLine(totals, {
-            color: col, h: 52, w: 240,
-            xUnit: '日', yUnit: '億', yDigits: 1,
+            color: col, h: 36, w: 200,
+            xUnit: '日', yUnit: '億', yDigits: 0,
             compact: true
           });
         } else if (totals.length) {
@@ -1309,7 +1324,7 @@
           var last = usable[usable.length - 1];
           var col = last >= 1 ? 'var(--red)' : 'var(--green)';
           chart.innerHTML = V.sparkLine(usable, {
-            color: col, h: 52, w: 240,
+            color: col, h: 36, w: 200,
             xUnit: '日', yUnit: '倍', yDigits: 2,
             compact: true
           });
