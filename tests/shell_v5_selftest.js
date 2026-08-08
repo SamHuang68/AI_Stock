@@ -70,6 +70,12 @@ ok(/自營/.test(ah) && /成交金額/.test(ah), 'afterhours strip has 成交／
 const bd = fs.readFileSync(path.join(root, 'src/ui/breadth_v5.js'), 'utf8');
 ok(/強弱榜/.test(bd), 'breadth movers replace note panel');
 ok(/結構條不重複/.test(bd) || /結構只用 magBars/.test(bd), 'breadth avoids inst number+bar dup');
+ok(/官方≠清單/.test(bd) || /官方漲停家數/.test(bd), 'breadth limit popup separates official vs approx list');
+
+const pl = fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8');
+ok(/上市漲跌停 · 官方/.test(pl), 'pulse strip labels official limit counts');
+ok(/近漲停/.test(pl) && /≠頂列官方家數/.test(pl), 'pulse movers panel not branded as official limit');
+ok(/movers\.limitUp/.test(pl), 'pulse prefers movers.limitUp for near-limit list');
 
 const nw = fs.readFileSync(path.join(root, 'src/ui/news_v5.js'), 'utf8');
 ok(/nw-mkt-seg/.test(nw) && /flashMkt/.test(nw), 'news TW/US filter');

@@ -169,8 +169,10 @@
   function limitChip(chgPct) {
     ensureStyle();
     if (!finite(chgPct)) return '';
-    if (chgPct >= 9.5) return '<span class="vz-chip lim">漲停</span>';
-    if (chgPct <= -9.5) return '<span class="vz-chip lim">跌停</span>';
+    if (chgPct >= 9.9) return '<span class="vz-chip lim">近漲停</span>';
+    if (chgPct <= -9.9) return '<span class="vz-chip lim">近跌停</span>';
+    if (chgPct >= 9.5) return '<span class="vz-chip lim">強勢</span>';
+    if (chgPct <= -9.5) return '<span class="vz-chip lim">弱勢</span>';
     return '';
   }
 

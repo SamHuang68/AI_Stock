@@ -137,12 +137,12 @@
 
   function limitPopup(side, count, list) {
     var isUp = side === 'up';
-    var title = isUp ? '漲停清單' : '跌停清單';
+    var title = isUp ? '官方漲停家數' : '官方跌停家數';
     var ico = isUp ? '▲' : '▼';
     var rows = '';
     if (!list || !list.length) {
-      rows = '<div class="bd-pop-empty">尚無' + (isUp ? '漲停' : '跌停') +
-        '標的（±9.5% 近似）· 或資料載入中</div>';
+      rows = '<div class="bd-pop-empty">尚無近' + (isUp ? '漲停' : '跌停') +
+        '標的（上市普通股 ≥9.9% 近似）· 清單長度≠上方官方家數</div>';
     } else {
       list.slice(0, 30).forEach(function (r) {
         rows += '<div class="bd-pop-row" data-code="' + (r.code || '') + '">' +
@@ -151,12 +151,13 @@
           '<span class="pc ' + clsChg(r.changePct) + '">' + fmtPct(r.changePct) + '</span></div>';
       });
     }
-    return '<span class="bd-lim" data-lim="' + side + '" title="點擊查看' + title + '">' +
+    return '<span class="bd-lim" data-lim="' + side + '" title="數字＝證交所官方括號家數；清單＝近漲跌停近似（≥9.9%、上市普通股）">' +
       '<span class="bd-lim-ico ' + (isUp ? 'up' : 'dn') + '">' + ico + '</span>' +
       '<span>' + (isUp ? '漲停 ' : '跌停 ') + fmt(count) + '</span>' +
       '<div class="bd-pop" role="dialog">' +
-        '<div class="bd-pop-h"><span>' + title + ' · ' + (list ? list.length : 0) + '</span>' +
-          '<span style="color:var(--tlo);font-weight:600">±9.5% 近似</span></div>' +
+        '<div class="bd-pop-h"><span>' + title + ' ' + fmt(count) +
+          ' · 近似列 ' + (list ? list.length : 0) + '</span>' +
+          '<span style="color:var(--tlo);font-weight:600">官方≠清單</span></div>' +
         rows +
       '</div></span>';
   }
@@ -272,11 +273,18 @@
     var mv = lastMovers || d._movers || {};
     var limUpList = mv.limitUp || [];
     var limDnList = mv.limitDown || [];
+    /* fallback：僅上市普通股 ≥9.9%（與後端 limitUp 對齊；家數仍≠官方括號） */
     if (!limUpList.length && (mv.gainers || []).length) {
-      limUpList = (mv.gainers || []).filter(function (r) { return r.changePct != null && r.changePct >= 9.5; });
+      limUpList = (mv.gainers || []).filter(function (r) {
+        return r && r.ex !== 'TPEx' && r.changePct != null && r.changePct >= 9.9 &&
+          /^[1-9]\d{3}$/.test(String(r.code || ''));
+      });
     }
     if (!limDnList.length && (mv.losers || []).length) {
-      limDnList = (mv.losers || []).filter(function (r) { return r.changePct != null && r.changePct <= -9.5; });
+      limDnList = (mv.losers || []).filter(function (r) {
+        return r && r.ex !== 'TPEx' && r.changePct != null && r.changePct <= -9.9 &&
+          /^[1-9]\d{3}$/.test(String(r.code || ''));
+      });
     }
     var strip =
       stripCell('加權指數', t00.price != null ? fmt(t00.price, 2) : '—', fmtPct(t00.changePct), clsChg(t00.changePct)) +

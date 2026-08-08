@@ -474,13 +474,13 @@
       '<div class="cell"><div class="k">市場廣度</div><div class="v">' +
         (adv != null ? (adv * 100).toFixed(1) + '%' : '—') + '</div>' +
         '<div class="s">' + tone + '</div>' + advViz + '</div>' +
-      '<div class="cell" data-go="breadth" title="台股上市股票漲停／跌停家數（TWSE 官方：上漲／下跌括號內家數）。點擊開廣度詳情與清單。" style="cursor:pointer">' +
-        '<div class="k">台股漲跌停 · 家數</div>' +
+      '<div class="cell" data-go="breadth" title="證交所 MI_INDEX「股票」欄：上漲／下跌括號內＝官方漲停／跌停家數（上市普通股）。與下方「近漲停」清單家數不同（清單為 ≥9.9% 近似、不含櫃買／ETF）。點擊開廣度詳情。" style="cursor:pointer">' +
+        '<div class="k">上市漲跌停 · 官方</div>' +
         '<div class="v" style="font-size:12px">' +
           '<span class="up">漲停 ' + fmt(s.limitUp) + '</span>' +
           '<span style="color:var(--tlo);font-weight:600"> · </span>' +
           '<span class="dn">跌停 ' + fmt(s.limitDown) + '</span></div>' +
-        '<div class="s">上市股票 · TWSE' +
+        '<div class="s">證交所括號' +
           (p.date ? ' · ' + esc(String(p.date)) : '') +
           ' · 詳情 →</div></div>' +
       '</div>';
@@ -878,19 +878,32 @@
 
   function renderMovers(movers, side) {
     var V = window.Viz;
-    var raw = (movers && movers[side]) || [];
-    var list = raw.slice();
-    var title, empty;
+    var list = [];
+    var title, empty, note;
     if (side === 'gainers') {
-      var lim = raw.filter(function (r) { return r.changePct != null && r.changePct >= 9.5; });
-      list = (lim.length ? lim : raw).slice(0, 10);
-      title = '漲停監控';
-      empty = '尚無接近／觸及漲停標的';
+      /* 優先用後端 limitUp（上市普通股 ≥9.9%）；勿與頂列官方括號家數混為一談 */
+      list = ((movers && movers.limitUp) || []).slice(0, 10);
+      if (!list.length) {
+        var raw = (movers && movers.gainers) || [];
+        list = raw.filter(function (r) {
+          return r && r.ex !== 'TPEx' && r.changePct != null && r.changePct >= 9.9 &&
+            /^[1-9]\d{3}$/.test(String(r.code || ''));
+        }).slice(0, 10);
+      }
+      title = '近漲停';
+      empty = '尚無上市個股接近漲停（≥9.9%）';
+      note = '上市≥9.9%・≠頂列官方家數';
     } else {
-      var bad = raw.filter(function (r) { return r.changePct != null && r.changePct <= -7; });
-      list = (bad.length ? bad : raw).slice(0, 10);
+      var bad = ((movers && movers.limitDown) || []).slice();
+      if (!bad.length) {
+        bad = ((movers && movers.losers) || []).filter(function (r) {
+          return r && r.changePct != null && r.changePct <= -7;
+        });
+      }
+      list = bad.slice(0, 10);
       title = '跌幅異常';
       empty = '尚無大幅下跌標的';
+      note = '';
     }
     var maxAbs = 0;
     list.forEach(function (r) {
@@ -898,6 +911,7 @@
     });
     var html = '<div class="pl-sec"><h4>' + title +
       (movers && movers.date ? ' <span style="color:var(--tlo);font-weight:600">' + movers.date + '</span>' : '') +
+      (note ? ' <span style="color:var(--tlo);font-weight:600;font-size:9px">' + note + '</span>' : '') +
       ' <a data-go="afterhours">盤後 →</a></h4><ul class="pl-list">';
     if (!list.length) return html + '<li style="cursor:default;color:var(--tlo)">' + empty + '</li></ul></div>';
     list.forEach(function (r) {
