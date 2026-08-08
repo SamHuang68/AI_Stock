@@ -237,6 +237,27 @@ for css in V2_STYLES:
 if 'name="viewport"' not in html:
     html = html.replace('<head>', '<head>\n<meta name="viewport" content="width=device-width,initial-scale=1.0">', 1)
 
+# tip UX boot：無 hash → #pulse；shell 掛上前隱藏舊圖表殼（防合完／重開閃回舊 UI）
+TIP_BOOT = (
+    '<!-- tip-ux-boot -->\n'
+    '<meta name="st-ux" content="tip">\n'
+    '<style id="st5-tip-boot">'
+    'html:not(.st5-booted) #body,html:not(.st5-booted) #wlbar,html:not(.st5-booted) #mkt-bar'
+    '{display:none!important}'
+    '</style>\n'
+    '<script id="st5-tip-hash">'
+    '(function(){try{var h=(location.hash||"").replace(/^#/,"").trim();'
+    'if(!h){location.replace(location.pathname+location.search+"#pulse");}}catch(e){}})();'
+    '</script>\n'
+)
+# 避免重複注入
+html = re.sub(r'<!-- tip-ux-boot -->[\s\S]*?<script id="st5-tip-hash">[\s\S]*?</script>\s*', '', html)
+if 'id="st5-tip-boot"' not in html:
+    if '<head>' in html:
+        html = html.replace('<head>', '<head>\n' + TIP_BOOT, 1)
+    else:
+        html = TIP_BOOT + html
+
 css_block = ''.join(f'<link rel="stylesheet" href="{css}?v={ts}">\n' for css in V2_STYLES)
 if '</head>' in html:
     html = html.replace('</head>', css_block + '</head>', 1)
@@ -279,10 +300,18 @@ if os.path.isfile(shell_js):
     except Exception as e:
         print('[warn] shell version stamp:', e)
 
+# tip UX 契約：建置失敗硬停，避免使用者開到半套舊殼
+if 'shell_v5.js' not in html or 'pulse_v5.js' not in html:
+    print('[FAIL] tip UX modules missing from built HTML (shell_v5 / pulse_v5)')
+    sys.exit(1)
+if 'id="st5-tip-boot"' not in html:
+    print('[FAIL] tip UX boot CSS/hash guard missing from built HTML')
+    sys.exit(1)
+
 print(f'[OK] wrote {DST} & {SRC} ({len(html):,} bytes)')
 print(f'     version: v{ST_VERSION}  (from VERSION)  tip UX')
 print(f'     base:    {SRC}')
 print(f'     modules: {", ".join(V2_SCRIPTS)}')
 print()
-print('Open in browser:')
-print(f'  http://localhost:18432/stock_terminal_v2.html')
+print('Open in browser (tip UX only):')
+print(f'  http://localhost:18432/#pulse')

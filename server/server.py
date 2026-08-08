@@ -2422,18 +2422,33 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'   # enables keep-alive
 
     def _handle_index(self):
+        """tip UX only：一律送 tip 建置產物；缺 shell_v5／pulse_v5 視為壞樹。"""
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        fn = os.path.join(base_dir, 'stock_terminal_v2.html')
+        fn_v2 = os.path.join(base_dir, 'stock_terminal_v2.html')
+        fn_v1 = os.path.join(base_dir, 'stock_terminal.html')
+        fn = fn_v2 if os.path.exists(fn_v2) else fn_v1
         if not os.path.exists(fn):
-            fn = os.path.join(base_dir, 'stock_terminal.html')
+            self._err('tip UX HTML missing — run: python build_v2.py', 500)
+            return
         try:
             with open(fn, 'rb') as f:
                 content = f.read()
+            # 契約：tip 建置必須注入 shell_v5 + pulse_v5；否則使用者會看到舊圖表殼
+            low = content[: min(len(content), 2_000_000)].lower()
+            if b'shell_v5.js' not in low or b'pulse_v5.js' not in low:
+                self._err(
+                    'HTML is not tip UX (missing shell_v5/pulse_v5). '
+                    'Stay on TIP_BRANCH and run: python build_v2.py && .\\scripts\\go.bat',
+                    500,
+                )
+                return
+            # 無 hash 時由頁首腳本導向 #pulse（見 build_v2 tip-boot）；回應加 tip 標記
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
             self.send_header('Pragma', 'no-cache')
             self.send_header('Expires', '0')
+            self.send_header('X-Stock-Terminal-UX', 'tip')
             self.send_header('Content-Length', str(len(content)))
             self.end_headers()
             self.wfile.write(content)
@@ -2561,8 +2576,31 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 http_stats = _hc.client_stats()
             except Exception:
                 http_stats = None
+            tip_branch = None
+            st_ver = '5.0'
+            try:
+                _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                _tb = os.path.join(_root, 'TIP_BRANCH')
+                if os.path.isfile(_tb):
+                    with open(_tb, 'r', encoding='utf-8') as _tf:
+                        tip_branch = (_tf.read() or '').strip() or None
+                _vf = os.path.join(_root, 'VERSION')
+                if os.path.isfile(_vf):
+                    with open(_vf, 'r', encoding='utf-8') as _vfh:
+                        for _ln in _vfh:
+                            _v = _ln.strip()
+                            if _v and not _v.startswith('#'):
+                                st_ver = _v
+                                break
+            except Exception:
+                pass
             self._ok(json.dumps({
                 'status': 'ok',
+                'ux': 'tip',
+                'tipUx': True,
+                'version': st_ver,
+                'tipBranch': tip_branch,
+                'openUrl': f'http://127.0.0.1:{PORT}/#pulse',
                 'bind': '127.0.0.1',
                 'port': PORT,
                 'workers': MAX_WORKERS,
@@ -6589,7 +6627,7 @@ if __name__ == '__main__':
     except Exception as _phe:
         _ph_msg = f'Pulse history unavailable: {_phe}'
     _msg = (
-        f'Stock Terminal v5.0: http://127.0.0.1:{PORT}/stock_terminal_v2.html\n'
+        f'Stock Terminal v5.0 tip UX: http://127.0.0.1:{PORT}/#pulse\n'
         f'Workers: {MAX_WORKERS}  |  LRU cache: {LRU_MAX} symbols (ttl={getattr(_cache, "_ttl", "?")}s)\n'
         f'ETF delta path: {d or "NOT FOUND — set ETF_DELTA_PATH in server.py"}\n'
         f'ETF history files: {len(files)}\n'
@@ -6615,11 +6653,12 @@ if __name__ == '__main__':
         except Exception as _e:
             print('[alert] start failed:', _e)
     if getattr(sys, 'frozen', False):
-        # 打包成 app 時:啟動後自動開瀏覽器(開發模式由 .bat 開,不重複)
+        # 打包成 app 時:啟動後自動開 tip 總覽（#pulse）；絕不开無 hash 舊圖表殼
         try:
             import webbrowser
-            threading.Timer(1.4, lambda: webbrowser.open(f'http://127.0.0.1:{PORT}/stock_terminal_v2.html')).start()
+            threading.Timer(1.4, lambda: webbrowser.open(f'http://127.0.0.1:{PORT}/#pulse')).start()
         except Exception:
             pass
     # H0：只聽 loopback，避免 18432 暴露到區網／公網
     ThreadingHTTPServer(('127.0.0.1', PORT), Handler).serve_forever()
+

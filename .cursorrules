@@ -12,3 +12,4 @@
 3. 基建（如 http_client）必須 cherry-pick／直接做在 tip 上，不可另開「回到 main」的驗證線叫使用者切過去。
 4. 版本號單一真理：根目錄 VERSION；go.bat／build_v2 自動讀取。
 5. 本機同步指令：.\scripts\go.bat pull   （無參數＝tip；會阻擋 main）
+6. 開頁永遠 http://localhost:18432/#pulse；無 hash 不得還原舊圖表殼。合完／重開若見舊 UI＝錯分支或未 rebuild，立刻 go.bat pull tip。

@@ -1,18 +1,34 @@
 /* ============================================================================
- * shell_v5.js  —  Stock Terminal 5.0：側欄殼層 + 視圖路由
+ * shell_v5.js  —  Stock Terminal 5.0：側欄殼層 + 視圖路由（tip UX only）
  * ----------------------------------------------------------------------------
- * 總覽儀表板（版面參考外部 compact dashboard；產品名為 Stock Terminal）。
+ * tip UX 唯一執行線：預設 #pulse；無 hash 絕不還原舊圖表殼。
+ * 啟動前隱藏 #body／#wlbar，避免 shell 尚未掛上時閃出舊 UI。
  * 路由：總覽／圖表／廣度／熱力／法人／國際／盤後／訊號／AI／自選／風險／快訊／選股／投組／設定。
- * 「指數」已併入圖表（^TWII K 線＋總體列／indices 自選更完整）。
- * 同步：預抓歷史庫，僅 merge 最近缺漏日（/sync）。
  * 鐵律：不破壞 #left / #pro-tools / symLoaded / Toolbar 既有行為。
  * ========================================================================== */
 (function () {
   'use strict';
 
+  /* 立刻隱藏舊圖表殼，避免 JS 尚未 boot 時露出 ST4 版面 */
+  try {
+    if (!document.getElementById('st5-tip-boot')) {
+      var bootCss = document.createElement('style');
+      bootCss.id = 'st5-tip-boot';
+      bootCss.textContent =
+        'html:not(.st5-booted) #body,' +
+        'html:not(.st5-booted) #wlbar,' +
+        'html:not(.st5-booted) #mkt-bar{display:none!important}' +
+        'html:not(.st5-booted) body::before{' +
+          'content:"Stock Terminal tip UX · loading…";display:block;padding:18px 20px;' +
+          'font:700 12px/1.4 "JetBrains Mono",monospace;color:#F5C518;letter-spacing:.4px}';
+      (document.head || document.documentElement).appendChild(bootCss);
+    }
+  } catch (eBoot) {}
+
   var STORAGE_KEY = 'st5.shell.route';
   var NAV_KEY = 'st5.shell.navOpen';
   var VERSION = '5.0';
+  var TIP_UX = true;
 
   /* 舊 route → 更完整的目的地（圖表／熱力等） */
   var ROUTE_ALIASES = {
@@ -675,12 +691,25 @@
       var orphan = $('view-' + rid);
       if (orphan && orphan.parentNode) orphan.parentNode.removeChild(orphan);
     });
+    /*
+     * tip UX only：
+     * - 有合法 hash → 跟 hash（含使用者主動開 #chart）
+     * - 無 hash → 一律 #pulse（絕不吃 localStorage 的 chart，避免合完／重開閃回舊圖表殼）
+     */
     var saved = 'pulse';
     var hash = (window.location.hash || '').replace(/^#/, '').trim();
     if (hash && findRoute(hash)) {
       saved = hash;
     } else {
-      try { saved = localStorage.getItem(STORAGE_KEY) || 'pulse'; } catch (e) {}
+      saved = 'pulse';
+      try {
+        if (window.history && window.history.replaceState) {
+          var base = window.location.pathname + (window.location.search || '');
+          window.history.replaceState(null, '', base + '#pulse');
+        } else {
+          window.location.hash = 'pulse';
+        }
+      } catch (eHash) {}
     }
     /* 舊「指數」分頁 → 圖表加權；非法 route → 總覽 */
     if (saved === 'trends' || saved === 'index') {
@@ -689,6 +718,11 @@
       if (!saved || !findRoute(saved)) saved = 'pulse';
       applyRoute(saved);
     }
+    try {
+      document.documentElement.classList.add('st5-booted');
+      document.documentElement.setAttribute('data-st5-ux', 'tip');
+      document.documentElement.setAttribute('data-st5-route', state.route);
+    } catch (eBootCls) {}
     probeHealth();
     setInterval(probeHealth, 60000);
     window.addEventListener('hashchange', function () {
@@ -706,7 +740,7 @@
         .catch(function () {});
     }, 2800);
     document.addEventListener('keydown', onShellKey, true);
-    console.log('[shell-v5] Stock Terminal ' + VERSION + ' · route=' + state.route);
+    console.log('[shell-v5] Stock Terminal ' + VERSION + ' · tip UX · route=' + state.route);
   }
 
   function inEditable(el) {
@@ -744,6 +778,7 @@
 
   window.ShellV5 = {
     VERSION: VERSION,
+    TIP_UX: TIP_UX,
     ROUTES: ROUTES,
     HOTKEY_ROUTES: HOTKEY_ROUTES,
     ALIASES: ROUTE_ALIASES,

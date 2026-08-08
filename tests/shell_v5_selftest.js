@@ -147,6 +147,28 @@ ok(/isNavOpen/.test(shell) && /setNavOpen/.test(shell),
   'ShellV5 exposes nav open API');
 ok(/isNavOpen/.test(hotkeys) && /setNavOpen\(false\)/.test(hotkeys),
   'Esc closes floating nav before returning to chart');
+ok(/st5-tip-boot/.test(shell) && /st5-booted/.test(shell) && /TIP_UX/.test(shell),
+  'shell tip-boot hides legacy chart chrome before boot');
+ok(/無 hash → 一律 #pulse/.test(shell) || /一律 #pulse/.test(shell),
+  'shell hashless open forces pulse (no localStorage chart restore)');
+ok(!/saved = localStorage\.getItem\(STORAGE_KEY\) \|\| 'pulse'/.test(shell),
+  'shell no longer restores route from localStorage on cold open');
+
+const buildPy = fs.readFileSync(path.join(root, 'build_v2.py'), 'utf8');
+ok(/st5-tip-boot/.test(buildPy) && /#pulse/.test(buildPy) && /tip UX modules missing/.test(buildPy),
+  'build_v2 injects tip-boot and fails without tip modules');
+
+const goBat = fs.readFileSync(path.join(root, 'scripts/go.bat'), 'utf8');
+ok(/FAIL_TIP_HTML/.test(goBat) && /st5-tip-boot/.test(goBat) && /#pulse/.test(goBat),
+  'go.bat refuses non-tip HTML and opens #pulse');
+
+const goSh = fs.readFileSync(path.join(root, 'scripts/go.sh'), 'utf8');
+ok(/TIP_BRANCH/.test(goSh) && /http-client-pool/.test(goSh) && /#pulse/.test(goSh),
+  'go.sh enforces tip branch and opens #pulse');
+
+const srv = fs.readFileSync(path.join(root, 'server/server.py'), 'utf8');
+ok(/X-Stock-Terminal-UX/.test(srv) && /tipUx/.test(srv) && /\/#pulse/.test(srv),
+  'server marks tip UX and opens /#pulse');
 
 const nw = fs.readFileSync(path.join(root, 'src/ui/news_v5.js'), 'utf8');
 ok(/nw-mkt-seg/.test(nw) && /flashMkt/.test(nw), 'news TW/US filter');

@@ -163,6 +163,13 @@ echo.
 echo [2/4] build_v2.py
 python build_v2.py
 if errorlevel 1 goto FAIL_BUILD
+REM tip UX contract: refuse to open a tree that would flash the old chart shell
+findstr /C:"shell_v5.js" "%REPO_ROOT%\stock_terminal_v2.html" >nul
+if errorlevel 1 goto FAIL_TIP_HTML
+findstr /C:"pulse_v5.js" "%REPO_ROOT%\stock_terminal_v2.html" >nul
+if errorlevel 1 goto FAIL_TIP_HTML
+findstr /C:"st5-tip-boot" "%REPO_ROOT%\stock_terminal_v2.html" >nul
+if errorlevel 1 goto FAIL_TIP_HTML
 echo.
 
 echo [3/4] restart server on :18432
@@ -252,3 +259,10 @@ exit /b 1
 echo [FAIL] build_v2.py failed
 pause
 exit /b 1
+
+:FAIL_TIP_HTML
+echo [FAIL] Built HTML is NOT tip UX - missing shell_v5 / pulse_v5 / st5-tip-boot.
+echo        You are about to open the OLD chart shell. Stay on tip:
+echo          scripts\go.bat pull !TIP_BRANCH!
+pause
+exit /b 3
