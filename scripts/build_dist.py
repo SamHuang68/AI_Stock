@@ -271,6 +271,9 @@ def build(out: Path | None = None) -> Path:
         "build_v2.py",
         "build_order.py",
         "README.md",
+        "START_TIP.cmd",
+        "TIP_BRANCH",
+        "VERSION",
         ".cursorrules",
         ".gitignore",
     ):
@@ -304,7 +307,7 @@ def build(out: Path | None = None) -> Path:
     size_mb = zip_path.stat().st_size / (1024 * 1024)
     print()
     print(f"[OK] {zip_path.name}  ({size_mb:.1f} MB)")
-    print("Recipient: unzip → double-click scripts\\go.bat")
+    print("Recipient: unzip → read docs/TIP_UX.md → START_TIP.cmd (or scripts\\go.bat)")
     print("Private data stripped: API keys, watches, alerts, draw_store,")
     print("  chip/etf history JSON, market/pulse/tdcc/margin local DBs.")
     return zip_path

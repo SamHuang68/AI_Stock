@@ -5,12 +5,13 @@
 
 ---
 
-## v5.0 — 總覽儀表板 + 側欄殼層（含 ST icon tip）
+## v5.0 — 總覽儀表板 + 分析轉盤（tip UX；無側欄）
 
 **產品殼層**
-- `shell_v5`：側欄路由（總覽／圖表／廣度／熱力／法人／國際／盤後／訊號／自選／風險／快訊／選股／投組／設定）；預設 `#pulse`；歷史庫 merge 同步。
-- 品牌：`assets/st50-icon.svg` 左上 ST monogram；內頁隱藏重複 kicker；圖表頂列同步小 icon + favicon。
-- 舊「指數」路由 alias → 圖表 `^TWII`。
+- `shell_v5`：分析轉盤導航（最多三層，投資分析分類）；涵蓋原側欄全部 ROUTES；預設 `#pulse` 並 **boot 自動 openRing**；歷史庫 merge 同步。
+- **移除 navrail／nr-edge／nr-backdrop**；`[`／Ctrl+B 改開轉盤。
+- 品牌：`assets/st50-icon.svg` 置於**轉盤中心**（+ 頂列小 icon + favicon）；內頁隱藏重複 kicker。
+- 對外導覽：`docs/TIP_UX.md`（Mermaid／SVG／概念圖）；示意 `assets/tip-ring-schematic.svg`。
 
 **總覽與情報**
 - `pulse_v5`：`GET /pulse` 一屏高密度（台指期、法人趨勢、廣度多空比、產業 TW/US、全球 SOX／日經／KOSPI、台美快訊 `/flash`、因子帳本）。
@@ -19,11 +20,12 @@
 - 廣度漲跌停浮動清單；真實資料計分（缺源「尚未納入」、不捏造 Fear&Greed）。
 
 **體驗打磨（本 tip 續）**
-- 定時面板 soft refresh（廣度／熱力／盤後／快訊／法人／國際）；離頁 `deactivate` 清輪詢。
-- `Esc`（無模態）→ 圖表；`Alt+Shift+1…0` 切側欄；nav `aria-current`。
+- 轉盤：點選項為下一層圓心、上層透明鎖定、立體軌道質感、滾輪循環選取。
+- 定時面板 soft refresh；離頁 `deactivate` 清輪詢。
+- `Alt+Shift+1…0` 直達常用路由；`Esc` 先關轉盤／浮層。
 
-**下一弧（AI 中樞 + 工具列橋接）**
-- `ai_v5`：側欄 AI 室 — 報告／副駕／焦點入口 + `/focus` 摘要。
+**AI 中樞 + 工具列橋接**
+- `ai_v5`：AI 室 — 報告／副駕／焦點入口 + `/focus` 摘要。
 - `bridge_v5`：`screener3Open`→scan、`portfolioOpen`→book、`marketFlowOpen`／`instRankOpen`→institutional、AI 三鈕→ai（再開模態）。
 
 ---

@@ -3,13 +3,16 @@
 Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤、不需 pip 安裝任何套件**（純 Python stdlib）。
 架構為「瀏覽器前端 ↔ 本機 `server.py` ↔ 外部資料源（Yahoo / MoneyDJ / TWSE / TDCC / FRED / FinMind）」三層；前端模組依功能分資料夾，新增功能用 `Toolbar.register({...})` 一行掛上。
 
-> **分享版說明**：本發行包已剝除 API Key、觀察股清單、警報設定、畫線雲端記憶、本機大 DB 等私人／可重建檔。收件者需自行在右上角貼 Claude Key、在 🔔 設定 Telegram／Email，觀察股留在本機瀏覽器 `localStorage`。
+> **分享版說明**：本發行包已剝除 API Key、觀察股清單、警報設定、畫線雲端記憶、本機大 DB 等私人／可重建檔。收件者需自行在右上角貼 Claude Key、在 🔔 設定 Telegram／Email，觀察股留在本機瀏覽器 `localStorage`。  
+> **tip UX 圖示導覽（轉盤／總覽／快捷）** → **[TIP_UX.md](./TIP_UX.md)**
+
+![分析轉盤概念](../assets/docs/tip-ring-hero.png)
 
 ---
 
-## 5.0 新功能（總覽儀表板）
+## 5.0 新功能（總覽＋分析轉盤）
 
-側欄殼層（**Stock Terminal v5.0**）採一屏高密度總覽；版面密度參考 [tw-pulse-terminal](https://github.com/SamHuang68/tw-pulse-terminal)（僅參考，產品名不變），一次看完市場結構：
+**Stock Terminal v5.0 tip UX**：無側欄；開機進總覽並彈出**分析轉盤**（中心 ST 5.0 logo）。一屏高密度總覽參考 [tw-pulse-terminal](https://github.com/SamHuang68/tw-pulse-terminal)（僅參考，產品名不變）。
 
 | 區塊 | 說明 |
 |------|------|
@@ -26,17 +29,26 @@ Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤�
 
 鐵律：不捏造 Fear&Greed、假 VIX 分數、未掃描的「全市場 250 日新高家數」。借券賣壓以 TWTASU 全市場口徑標示（非外資分項）。
 
-### 側欄路由與品牌
+### 分析轉盤導航與品牌
 
-| 路由 | 說明 |
+```mermaid
+flowchart LR
+  Boot[開啟] --> Pulse[#pulse 總覽]
+  Pulse --> Ring[自動彈出轉盤]
+  Ring --> L1[L1 分析域]
+  L1 --> L2[L2 子域／頁面]
+  L2 --> L3[L3 工具鈕]
+```
+
+| 項目 | 說明 |
 |------|------|
-| 總覽 `#pulse` | 開機預設；一屏市場脈搏 |
-| 圖表 | K 線工作區（含指數／總體列）；`Esc` 自側欄返回 |
-| 廣度／熱力／法人／國際／盤後／訊號／**AI**／自選／風險／快訊／選股／投組／設定 | 對應 `*_v5`／`hub_v5`／`ai_v5` 面板 |
+| 總覽 `#pulse` | **開機預設**；一屏市場脈搏 |
+| 轉盤 L1 | 總覽／行情／籌碼／選股／廣度／國際／AI／工作台 |
+| 品牌 | `assets/st50-icon.svg`（**轉盤中心**＋頂列小圖＋favicon） |
+| 手勢 | 中鍵／`\`／`[`／滾輪循環；最多三層；上層透明鎖定 |
+| 快捷 | `Alt+Shift+1…0` 直達常用路由；`?` 完整鍵盤表 |
 
-- 品牌標誌：`assets/st50-icon.svg`（側欄＋圖表頂列小圖＋favicon）
-- 快捷：`Alt+Shift+1…0` 切常用路由；`?` 看完整鍵盤表
-- 工具列橋接：選股→選股室、投組→投組、資金流／法人榜→法人、AI 三鈕→AI 中樞
+圖示範例與操作路徑 → **[TIP_UX.md](./TIP_UX.md)** · 結構 SVG → [`assets/tip-ring-schematic.svg`](../assets/tip-ring-schematic.svg)
 
 ---
 
@@ -109,9 +121,9 @@ Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤�
 
 1. **解壓縮或 clone**到任一資料夾。
 2. **啟動**（server **只聽 127.0.0.1:18432**）：
-   - Windows：雙擊或執行 `scripts\go.bat`
+   - Windows：雙擊根目錄 **`START_TIP.cmd`**（或 `scripts\go.bat`）
    - Linux／macOS：`chmod +x scripts/go.sh && ./scripts/go.sh`
-3. 左側點 **總覽** 看市場儀表板；或上方輸入框打代號按 **GO**（台股 `2330`；美股先點 `US` 再打 `AAPL`）。開頁後 **Ctrl+F5**。
+3. 開頁進 **總覽** 並**自動彈出轉盤**；用轉盤選功能，或上方輸入框打代號 **GO**（台股 `2330`；美股先點 `US` 再打 `AAPL`）。開頁後 **Ctrl+F5**。
 
 > **首次開啟**「融資週期」「籌碼集中度」等圖時，會背景回補歷史（不再隨 git 附大 DB）。總覽可按頂列 **同步資料** 預熱指數／廣度／法人歷史。
 
