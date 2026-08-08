@@ -63,13 +63,53 @@
     'international', 'afterhours', 'ai', 'news', 'scan'
   ];
 
-  /* MX Master 風格功能轉盤：固定 8 扇（由上順時針），其餘仍走側欄 */
+  /* MX Master 風格功能轉盤：根層 8 扇；圖表可下鑽 Toolbar 分組（籌碼／選股…） */
   var RING_ROUTES = [
     'pulse', 'chart', 'breadth', 'heat',
     'institutional', 'international', 'ai', 'news'
   ];
   var RING_R = 108; /* 扇區中心半徑 px */
-  var ringState = { open: false, cx: 0, cy: 0, hi: -1 };
+  var ringState = {
+    open: false, cx: 0, cy: 0, hi: -1,
+    stack: [],   /* [{ title, items }] */
+    items: []    /* 目前層扇區 */
+  };
+  /* Toolbar 按鈕短標（DOM 未掛時備援） */
+  var RING_BTN_META = {
+    'btn-valuation': { label: '估值', icon: '⚓' },
+    'btn-marketflow': { label: '資金', icon: '💰' },
+    'btn-instrank': { label: '法人榜', icon: '🏆' },
+    'btn-supplychain': { label: '供應鏈', icon: '🔗' },
+    'btn-stockfut': { label: '個股期', icon: '🔭' },
+    'btn-portfolio': { label: '投組', icon: '▣' },
+    'btn-chainmom': { label: '鏈動能', icon: '⛓' },
+    'btn-screener3': { label: '三合一', icon: '🔬' },
+    'btn-screener': { label: '篩選', icon: '🔍' },
+    'btn-patterns': { label: '型態', icon: '〰' },
+    'btn-stratbuilder': { label: '策略', icon: '🧱' },
+    'btn-bt3': { label: '回測', icon: '📈' },
+    'btn-wizard': { label: '精靈', icon: '🧙' },
+    'btn-stratscript': { label: '腳本', icon: '📝' },
+    'btn-ai-report': { label: '報告', icon: '🤖' },
+    'btn-copilot': { label: '副駕', icon: '✦' },
+    'btn-focus': { label: '焦點', icon: '◎' },
+    'btn-vp': { label: '量價', icon: '📊' },
+    'btn-multichart': { label: '多圖', icon: '▦' },
+    'btn-spread': { label: '價差', icon: '⇄' },
+    'btn-compare': { label: '比較', icon: '⧉' },
+    'btn-overnight': { label: '夜盤', icon: '☾' },
+    'btn-drawtools': { label: '畫線', icon: '✎' },
+    'btn-replay': { label: '重播', icon: '▷' },
+    'btn-universe': { label: '代號庫', icon: '📚' },
+    'btn-datasources': { label: '資料源', icon: '🗄' },
+    'btn-calendar': { label: '行事曆', icon: '📅' },
+    'btn-alertpush': { label: '推播', icon: '🔔' },
+    'btn-toast': { label: '提示', icon: '💬' },
+    'btn-live': { label: '即時', icon: '●' },
+    'btn-datahealth': { label: '健檢', icon: '❤' },
+    'btn-hotkeys': { label: '快捷', icon: '⌨' },
+    'btn-cmdp': { label: '指令', icon: '⌘' }
+  };
 
   var PANEL_MAP = {
     pulse: 'PulseV5',
@@ -240,9 +280,17 @@
         'box-shadow:0 0 0 2px rgba(245,197,24,.18),0 8px 22px rgba(0,0,0,.5)}' +
       '#st-ring .sr-item.on{border-color:rgba(56,189,248,.55);color:#7dd3fc}' +
       '#st-ring .sr-item.on.hi,#st-ring .sr-item.on:hover{border-color:rgba(245,197,24,.7);color:var(--gold)}' +
+      '#st-ring .sr-item.has-kids::after{content:"›";position:absolute;right:6px;top:50%;' +
+        'transform:translateY(-50%);font-size:10px;color:var(--gold);opacity:.85}' +
+      '#st-ring .sr-hub.back{border-color:rgba(56,189,248,.55);' +
+        'background:radial-gradient(circle at 40% 35%,#38bdf8,#0369a1 70%)}' +
       '#st-ring .sr-tip{position:absolute;left:50%;top:78px;transform:translateX(-50%);' +
         'font:600 10px/1.3 "JetBrains Mono",monospace;color:#94a3b8;white-space:nowrap;' +
-        'pointer-events:none;text-shadow:0 1px 8px rgba(0,0,0,.8)}' +
+        'pointer-events:none;text-shadow:0 1px 8px rgba(0,0,0,.8);max-width:280px;' +
+        'overflow:hidden;text-overflow:ellipsis}' +
+      '#st-ring .sr-level{position:absolute;left:50%;top:-92px;transform:translateX(-50%);' +
+        'font:700 9px/1 "JetBrains Mono",monospace;color:var(--gold);letter-spacing:.4px;' +
+        'white-space:nowrap;pointer-events:none;text-shadow:0 1px 8px rgba(0,0,0,.8)}' +
       '#nr-edge .nr-edge-ring{font-size:11px;opacity:.85;margin-top:2px}' +
       '#st-ring-fab{position:fixed;right:14px;bottom:14px;z-index:90;width:40px;height:40px;' +
         'border-radius:50%;border:1px solid rgba(245,197,24,.4);' +
@@ -325,10 +373,81 @@
       '</button>';
   }
 
-  function ringRoutes() {
-    return RING_ROUTES.map(function (id) {
-      return findRoute(id) || { id: id, label: id, icon: '·', hint: id };
+  function btnMeta(id) {
+    var m = RING_BTN_META[id] || {};
+    var el = document.getElementById(id);
+    var raw = '';
+    if (el) {
+      raw = String(el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!raw && el.title) raw = String(el.title).split(/[：:(]/)[0];
+    }
+    /* 去掉常見前綴 emoji／符號，取中文短標 */
+    raw = raw.replace(/^[^\u4e00-\u9fffA-Za-z0-9]+/, '').trim();
+    var label = m.label || (raw ? raw.slice(0, 3) : id.replace(/^btn-/, '').slice(0, 4));
+    var hint = (el && el.title) || m.label || id;
+    return { label: label, icon: m.icon || '·', hint: hint };
+  }
+
+  function toolbarGroupItems(gkey) {
+    var groups = (window.Toolbar && window.Toolbar.CONFIG && window.Toolbar.CONFIG.GROUPS) || [];
+    var g = null;
+    for (var i = 0; i < groups.length; i++) {
+      if (groups[i].key === gkey) { g = groups[i]; break; }
+    }
+    if (!g) return [];
+    return g.items.map(function (id) {
+      var meta = btnMeta(id);
+      return {
+        id: 'click:' + id,
+        label: meta.label,
+        icon: meta.icon,
+        hint: meta.hint,
+        clickId: id
+      };
     });
+  }
+
+  /** 圖表工具層：對應 Toolbar 一階分類（籌碼基本面／選股策略…） */
+  function chartToolFolderItems() {
+    return [
+      { id: 'chart', label: 'K線', icon: '◈', hint: '進入圖表工作區', route: 'chart' },
+      { id: 'tb-fund', label: '籌碼', icon: '₴', hint: '籌碼基本面', folder: 'fund',
+        folderTitle: '籌碼基本面' },
+      { id: 'tb-screen', label: '選股', icon: '▷', hint: '選股策略', folder: 'screen',
+        folderTitle: '選股策略' },
+      { id: 'tb-ai', label: 'AI', icon: '✧', hint: 'AI 報告／副駕／焦點', folder: 'ai',
+        folderTitle: 'AI 工具' },
+      { id: 'tb-chart', label: '圖工', icon: '▦', hint: '量價／多圖／畫線…', folder: 'chart',
+        folderTitle: '圖表工具' },
+      { id: 'tb-sys', label: '系統', icon: '⚙', hint: '代號庫／資料源／快捷', folder: 'sys',
+        folderTitle: '系統' },
+      { id: 'cmd', label: '指令', icon: '⌘', hint: '指令盤', clickId: 'btn-cmdp' }
+    ];
+  }
+
+  function ringRootItems() {
+    return RING_ROUTES.map(function (id) {
+      var r = findRoute(id) || { id: id, label: id, icon: '·', hint: id };
+      var item = {
+        id: r.id,
+        label: r.label,
+        icon: r.icon,
+        hint: r.hint,
+        route: r.id
+      };
+      /* 圖表：可下鑽工具列分組（籌碼／選股…） */
+      if (id === 'chart') {
+        item.folder = 'chartTools';
+        item.folderTitle = '圖表功能';
+        item.hint = (r.hint || '圖表') + ' · 點選展開籌碼／選股等子項';
+      }
+      return item;
+    });
+  }
+
+  function resolveFolder(folderKey) {
+    if (folderKey === 'chartTools') return chartToolFolderItems();
+    return toolbarGroupItems(folderKey);
   }
 
   function ensureRing() {
@@ -339,31 +458,56 @@
     root.innerHTML =
       '<button type="button" class="sr-backdrop" id="st-ring-bd" aria-label="關閉功能轉盤"></button>' +
       '<div class="sr-wheel" id="st-ring-wheel" role="menu" aria-label="功能轉盤">' +
+        '<div class="sr-level" id="st-ring-level">主選單</div>' +
         '<button type="button" class="sr-hub" id="st-ring-hub" title="關閉" aria-label="關閉轉盤">✕</button>' +
-        '<div class="sr-tip" id="st-ring-tip">中鍵／\\ 開轉盤 · Esc 關閉</div>' +
+        '<div class="sr-tip" id="st-ring-tip">中鍵／\\ 開轉盤 · 有 › 可下鑽</div>' +
       '</div>';
     document.body.appendChild(root);
-    var wheel = $('st-ring-wheel');
-    var items = ringRoutes();
-    items.forEach(function (r, i) {
-      var ang = -Math.PI / 2 + i * (Math.PI * 2 / items.length);
-      var x = Math.cos(ang) * RING_R;
-      var y = Math.sin(ang) * RING_R;
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'sr-item';
-      btn.setAttribute('role', 'menuitem');
-      btn.setAttribute('data-route', r.id);
-      btn.setAttribute('data-idx', String(i));
-      btn.title = (r.hint || r.label) + ' · ' + r.label;
-      btn.style.transform = 'translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px)';
-      btn.innerHTML = '<span class="sr-ico" aria-hidden="true">' + r.icon + '</span>' +
-        '<span class="sr-lbl">' + r.label + '</span>';
-      wheel.appendChild(btn);
-    });
     root.addEventListener('click', onRingClick);
     root.addEventListener('pointermove', onRingPointer);
     return root;
+  }
+
+  function paintRingHub() {
+    var hub = $('st-ring-hub');
+    if (!hub) return;
+    var deep = ringState.stack.length > 0;
+    hub.textContent = deep ? '‹' : '✕';
+    hub.title = deep ? '返回上一層' : '關閉';
+    hub.setAttribute('aria-label', hub.title);
+    hub.classList.toggle('back', deep);
+  }
+
+  function rebuildRingWheel(items, title) {
+    var wheel = $('st-ring-wheel');
+    if (!wheel) return;
+    ringState.items = items || [];
+    var old = wheel.querySelectorAll('.sr-item');
+    for (var i = 0; i < old.length; i++) old[i].parentNode.removeChild(old[i]);
+    var n = ringState.items.length || 1;
+    var radius = n <= 6 ? RING_R : (n <= 8 ? RING_R : RING_R + 10);
+    ringState.items.forEach(function (r, idx) {
+      var ang = -Math.PI / 2 + idx * (Math.PI * 2 / n);
+      var x = Math.cos(ang) * radius;
+      var y = Math.sin(ang) * radius;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'sr-item' + (r.folder ? ' has-kids' : '');
+      btn.setAttribute('role', 'menuitem');
+      btn.setAttribute('data-idx', String(idx));
+      btn.setAttribute('data-id', r.id);
+      if (r.route) btn.setAttribute('data-route', r.route);
+      btn.title = (r.hint || r.label) + (r.folder ? ' · 展開子項' : '');
+      btn.style.transform = 'translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px)';
+      btn.innerHTML = '<span class="sr-ico" aria-hidden="true">' + (r.icon || '·') + '</span>' +
+        '<span class="sr-lbl">' + r.label + '</span>';
+      wheel.appendChild(btn);
+    });
+    var level = $('st-ring-level');
+    if (level) level.textContent = title || '主選單';
+    paintRingHub();
+    paintRingActive();
+    setRingHighlight(-1);
   }
 
   function ensureRingFab() {
@@ -371,7 +515,7 @@
     var fab = document.createElement('button');
     fab.type = 'button';
     fab.id = 'st-ring-fab';
-    fab.title = '功能轉盤（中鍵或 \\）';
+    fab.title = '功能轉盤（中鍵或 \\）· 可下鑽圖表子功能';
     fab.setAttribute('aria-label', '開啟功能轉盤');
     fab.textContent = '◎';
     fab.addEventListener('click', function (e) {
@@ -382,33 +526,43 @@
   }
 
   function paintRingActive() {
-    var items = document.querySelectorAll('#st-ring .sr-item');
-    for (var i = 0; i < items.length; i++) {
-      var on = items[i].getAttribute('data-route') === state.route;
-      items[i].classList.toggle('on', on);
+    var nodes = document.querySelectorAll('#st-ring .sr-item');
+    for (var i = 0; i < nodes.length; i++) {
+      var route = nodes[i].getAttribute('data-route');
+      var on = !!route && route === state.route;
+      var item = ringState.items[i];
+      if (item && item.clickId) {
+        var el = document.getElementById(item.clickId);
+        if (el && el.classList.contains('on')) on = true;
+      }
+      nodes[i].classList.toggle('on', on);
     }
   }
 
   function setRingHighlight(idx) {
     ringState.hi = idx;
-    var items = document.querySelectorAll('#st-ring .sr-item');
-    for (var i = 0; i < items.length; i++) {
-      items[i].classList.toggle('hi', i === idx);
+    var nodes = document.querySelectorAll('#st-ring .sr-item');
+    for (var i = 0; i < nodes.length; i++) {
+      nodes[i].classList.toggle('hi', i === idx);
     }
     var hub = $('st-ring-hub');
     if (hub) hub.classList.toggle('hi', idx === -2);
     var tip = $('st-ring-tip');
     if (!tip) return;
+    var deep = ringState.stack.length > 0;
     if (idx === -2) {
-      tip.textContent = '關閉轉盤';
+      tip.textContent = deep ? '返回上一層' : '關閉轉盤';
       return;
     }
     if (idx < 0) {
-      tip.textContent = '指向扇區切換 · Esc／✕ 關閉';
+      tip.textContent = deep
+        ? '子層 · 指向扇區 · ‹ 返回 · Esc 關閉'
+        : '指向扇區 · 有 › 可下鑽 · Esc／✕ 關閉';
       return;
     }
-    var r = ringRoutes()[idx];
-    tip.textContent = r ? (r.label + ' — ' + (r.hint || '')) : '';
+    var r = ringState.items[idx];
+    if (!r) { tip.textContent = ''; return; }
+    tip.textContent = r.label + (r.folder ? ' ›' : '') + ' — ' + (r.hint || '');
   }
 
   function ringIndexFromPoint(clientX, clientY) {
@@ -416,11 +570,12 @@
     var dy = clientY - ringState.cy;
     var dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < 28) return -2; /* hub */
-    if (dist < 52 || dist > RING_R + 40) return -1;
-    var ang = Math.atan2(dy, dx); /* -PI..PI, 0=east */
-    var n = RING_ROUTES.length;
+    var n = ringState.items.length || RING_ROUTES.length;
+    var radius = n <= 6 ? RING_R : (n <= 8 ? RING_R : RING_R + 10);
+    if (dist < 52 || dist > radius + 42) return -1;
+    var ang = Math.atan2(dy, dx);
     var step = (Math.PI * 2) / n;
-    var norm = ang + Math.PI / 2; /* 0 = top */
+    var norm = ang + Math.PI / 2;
     if (norm < 0) norm += Math.PI * 2;
     var idx = Math.round(norm / step) % n;
     if (idx < 0) idx += n;
@@ -432,30 +587,94 @@
     setRingHighlight(ringIndexFromPoint(e.clientX, e.clientY));
   }
 
+  function ringPushFolder(item) {
+    var kids = resolveFolder(item.folder);
+    if (!kids.length) {
+      if (window.UI && window.UI.toast) window.UI.toast('此分類暫無可用工具', 1600);
+      return;
+    }
+    /* 進入圖表工具前先切到 chart，確保 #pro-tools 按鈕可點 */
+    if (item.folder === 'chartTools' || item.folder === 'fund' || item.folder === 'screen' ||
+        item.folder === 'ai' || item.folder === 'chart' || item.folder === 'sys') {
+      if (state.route !== 'chart') go('chart');
+    }
+    ringState.stack.push({
+      title: item.folderTitle || item.label,
+      items: kids
+    });
+    rebuildRingWheel(kids, item.folderTitle || item.label);
+  }
+
+  function ringPop() {
+    if (!ringState.stack.length) {
+      closeRing();
+      return;
+    }
+    ringState.stack.pop();
+    if (!ringState.stack.length) {
+      rebuildRingWheel(ringRootItems(), '主選單');
+      return;
+    }
+    var top = ringState.stack[ringState.stack.length - 1];
+    rebuildRingWheel(top.items, top.title);
+  }
+
+  function activateRingItem(item) {
+    if (!item) return;
+    if (item.folder) {
+      ringPushFolder(item);
+      return;
+    }
+    if (item.clickId) {
+      closeRing();
+      if (state.route !== 'chart' && item.clickId.indexOf('btn-') === 0) {
+        go('chart');
+      }
+      setTimeout(function () {
+        var el = document.getElementById(item.clickId);
+        if (el) {
+          try { el.click(); } catch (err) { console.warn('[st-ring] click', item.clickId, err); }
+        } else if (window.UI && window.UI.toast) {
+          window.UI.toast('找不到工具：' + item.label, 1800);
+        }
+      }, state.route === 'chart' ? 40 : 120);
+      return;
+    }
+    if (item.route) {
+      closeRing();
+      go(item.route);
+    }
+  }
+
   function onRingClick(e) {
     if (!ringState.open) return;
-    if (e.target.closest('#st-ring-bd') || e.target.closest('#st-ring-hub')) {
+    if (e.target.closest('#st-ring-bd')) {
       e.preventDefault();
       closeRing();
       return;
     }
-    var item = e.target.closest('.sr-item');
-    if (!item) return;
+    if (e.target.closest('#st-ring-hub')) {
+      e.preventDefault();
+      ringPop();
+      return;
+    }
+    var node = e.target.closest('.sr-item');
+    if (!node) return;
     e.preventDefault();
-    var rid = item.getAttribute('data-route');
-    closeRing();
-    if (rid) go(rid);
+    var idx = parseInt(node.getAttribute('data-idx'), 10);
+    activateRingItem(ringState.items[idx]);
   }
 
   function openRing(clientX, clientY) {
     ensureRing();
     ensureRingFab();
-    var pad = 140;
+    var pad = 150;
     var x = Math.max(pad, Math.min(window.innerWidth - pad, clientX || window.innerWidth / 2));
     var y = Math.max(pad, Math.min(window.innerHeight - pad, clientY || window.innerHeight / 2));
     ringState.open = true;
     ringState.cx = x;
     ringState.cy = y;
+    ringState.stack = [];
     var root = $('st-ring');
     var wheel = $('st-ring-wheel');
     if (!root || !wheel) return;
@@ -463,8 +682,7 @@
     wheel.style.top = y + 'px';
     root.classList.add('on');
     root.setAttribute('aria-hidden', 'false');
-    paintRingActive();
-    setRingHighlight(-1);
+    rebuildRingWheel(ringRootItems(), '主選單');
     setNavOpen(false);
   }
 
@@ -472,6 +690,8 @@
     if (!ringState.open && !$('st-ring')) return;
     ringState.open = false;
     ringState.hi = -1;
+    ringState.stack = [];
+    ringState.items = [];
     var root = $('st-ring');
     if (root) {
       root.classList.remove('on');
@@ -978,12 +1198,13 @@
   function onShellKey(e) {
     if (inEditable(e.target)) return;
     var meta = e.metaKey || e.ctrlKey;
-    /* Esc：先關轉盤，再關浮動側欄 */
+    /* Esc：轉盤有子層先返回，否則關轉盤；再關側欄 */
     if (e.key === 'Escape') {
       if (ringState.open) {
         e.preventDefault();
         e.stopPropagation();
-        closeRing();
+        if (ringState.stack.length) ringPop();
+        else closeRing();
         return;
       }
       if (state.navOpen) {
@@ -993,15 +1214,21 @@
         return;
       }
     }
+    /* Backspace：轉盤子層返回 */
+    if (ringState.open && e.key === 'Backspace') {
+      e.preventDefault();
+      ringPop();
+      return;
+    }
     /* \\：功能轉盤（MX Master 風格） */
     if (e.key === '\\' && !e.altKey && !meta) {
       e.preventDefault();
       toggleRing(window.innerWidth / 2, window.innerHeight / 2);
       return;
     }
-    /* 轉盤開啟時：方向鍵／數字環選；Enter 確認 */
+    /* 轉盤開啟時：方向鍵環選；Enter 確認／下鑽 */
     if (ringState.open) {
-      var n = RING_ROUTES.length;
+      var n = ringState.items.length || 1;
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
         e.preventDefault();
         setRingHighlight(((ringState.hi < 0 ? -1 : ringState.hi) + 1 + n) % n);
@@ -1014,9 +1241,7 @@
       }
       if (e.key === 'Enter' && ringState.hi >= 0) {
         e.preventDefault();
-        var pick = RING_ROUTES[ringState.hi];
-        closeRing();
-        if (pick) go(pick);
+        activateRingItem(ringState.items[ringState.hi]);
         return;
       }
     }

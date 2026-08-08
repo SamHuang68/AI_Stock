@@ -173,6 +173,10 @@ ok(/RING_ROUTES/.test(shell) && /st-ring/.test(shell) && /openRing/.test(shell) 
   /toggleRing/.test(shell) && /auxclick/.test(shell) && /st-ring-fab/.test(shell) &&
   /sr-hub/.test(shell) && /sr-item/.test(shell),
   'shell MX-style gesture ring (middle-click / \\\\ / fab)');
+ok(/ringPushFolder/.test(shell) && /chartToolFolderItems/.test(shell) &&
+  /toolbarGroupItems/.test(shell) && /folder: 'fund'/.test(shell) &&
+  /folder: 'screen'/.test(shell) && /has-kids/.test(shell) && /ringPop/.test(shell),
+  'shell ring hierarchical drill-down (chart → 籌碼/選股 → tools)');
 ok(/isNavOpen/.test(hotkeys) && /setNavOpen\(false\)/.test(hotkeys),
   'Esc closes floating nav before returning to chart');
 ok(/st5-tip-boot/.test(shell) && /st5-booted/.test(shell) && /TIP_UX/.test(shell),
