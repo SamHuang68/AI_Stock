@@ -111,10 +111,11 @@
     ['Space', '下一檔自選股'],
     ['Shift+Space', '上一檔自選股'],
     ['Alt+1…0', '切換時框 (1天/3周/1月/3月/6月/YTD/1年/2年/5年/10年)'],
+    ['Alt+Shift+1…0', '側欄路由 (總覽/圖表/廣度/熱力/法人/國際/盤後/訊號/快訊/選股)'],
     ['Alt+M', '多圖連動布局'],
     ['Alt+D', '價差 / 比值圖'],
     ['Alt+T', '趨勢線 (畫線工具)'],
-    ['Esc', '關閉快搜 / 浮層'],
+    ['Esc', '關閉快搜 / 浮層；無浮層時側欄視圖回圖表'],
     ['?', '顯示 / 隱藏本快捷表'],
   ];
   function toggleHelp() {
@@ -140,8 +141,16 @@
     }
     if (inEditable(e.target)) return;
 
-    // Esc 關浮層
-    if (e.key === 'Escape') { closeAnyModal(); return; }
+    // Esc 關浮層；若無浮層且在側欄視圖 → 回圖表
+    if (e.key === 'Escape') {
+      if (closeAnyModal()) return;
+      if (window.ShellV5 && typeof window.ShellV5.route === 'function' &&
+          window.ShellV5.route() !== 'chart' && typeof window.ShellV5.go === 'function') {
+        e.preventDefault();
+        window.ShellV5.go('chart');
+      }
+      return;
+    }
 
     // ? 快捷表 (Shift+/)
     if (e.key === '?') { e.preventDefault(); toggleHelp(); return; }

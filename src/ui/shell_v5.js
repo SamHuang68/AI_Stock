@@ -37,7 +37,29 @@
     { id: 'workspace',     label: '工具', hint: '回到圖表並開啟指令盤',                     icon: '⌘', action: 'cmd' }
   ];
 
-  var state = { route: 'pulse', built: false, syncing: false };
+  var state = { route: 'pulse', built: false, syncing: false, prevRoute: null };
+
+  /* Alt+Shift+1…0 → 側欄（避開 Alt+數字 時框） */
+  var HOTKEY_ROUTES = [
+    'pulse', 'chart', 'breadth', 'heat', 'institutional',
+    'international', 'afterhours', 'signals', 'news', 'scan'
+  ];
+
+  var PANEL_MAP = {
+    pulse: 'PulseV5',
+    breadth: 'BreadthV5',
+    heat: 'HeatV5',
+    institutional: 'InstitutionalV5',
+    international: 'InternationalV5',
+    afterhours: 'AfterhoursV5',
+    signals: 'SignalsV5',
+    watchlist: 'WatchlistV5',
+    risk: 'RiskV5',
+    news: 'NewsV5',
+    scan: 'ScanV5',
+    book: 'BookV5',
+    settings: 'SettingsV5'
+  };
 
   function $(id) { return document.getElementById(id); }
 
@@ -75,7 +97,14 @@
       '.nr-btn:hover{color:#F8FAFC;background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.06)}' +
       '.nr-btn.on{color:var(--gold);background:var(--gold-s);border-color:var(--gold-m)}' +
       '.nr-btn.on .nr-ico{opacity:1}' +
+      '.nr-btn:focus-visible{outline:2px solid var(--gold);outline-offset:1px}' +
       '.nr-spacer{flex:1;min-height:10px}' +
+      '.sv-soft-badge{position:sticky;top:0;z-index:3;display:none;align-items:center;gap:6px;' +
+        'padding:3px 8px;margin:0 0 6px;font-family:\'JetBrains Mono\',monospace;font-size:9px;' +
+        'color:var(--gold);background:rgba(245,197,24,.08);border:1px solid var(--gold-m);border-radius:5px;align-self:flex-start}' +
+      '.sv-soft-badge.on{display:inline-flex}' +
+      '#topbar .logo .shell-logo-ico{width:18px;height:18px;border-radius:4px;margin-right:6px;' +
+        'vertical-align:middle;border:1px solid rgba(245,197,24,.35);object-fit:cover}' +
       '.nr-foot-st{padding:8px 6px 4px;font-family:\'JetBrains Mono\',monospace;' +
         'font-size:9px;color:#64748B;border-top:1px solid #132238;margin-top:4px;flex-shrink:0;' +
         'display:flex;flex-direction:column;gap:2px}' +
@@ -157,7 +186,7 @@
       '</div></div>' +
       ROUTES.map(function (r) {
         return '<button type="button" class="nr-btn" data-route="' + r.id + '" title="' +
-          r.hint.replace(/"/g, '') + '">' +
+          r.hint.replace(/"/g, '') + ' (Alt+Shift)" aria-label="' + r.label + '">' +
           '<span class="nr-ico" aria-hidden="true">' + r.icon + '</span>' +
           '<span>' + r.label + '</span></button>';
       }).join('') +
@@ -192,14 +221,33 @@
     injectCSS();
 
     var logo = app.querySelector('#topbar .logo');
-    if (logo && !logo.querySelector('.shell-ver')) {
-      var ver = document.createElement('span');
-      ver.className = 'shell-ver';
-      ver.textContent = 'v' + VERSION;
-      logo.appendChild(ver);
-    } else if (logo) {
-      var verEl = logo.querySelector('.shell-ver');
-      if (verEl) verEl.textContent = 'v' + VERSION;
+    if (logo) {
+      if (!logo.querySelector('.shell-logo-ico')) {
+        var ico = document.createElement('img');
+        ico.className = 'shell-logo-ico';
+        ico.src = 'assets/st50-icon.svg';
+        ico.alt = '';
+        ico.width = 18;
+        ico.height = 18;
+        logo.insertBefore(ico, logo.firstChild);
+      }
+      if (!logo.querySelector('.shell-ver')) {
+        var ver = document.createElement('span');
+        ver.className = 'shell-ver';
+        ver.textContent = 'v' + VERSION;
+        logo.appendChild(ver);
+      } else {
+        logo.querySelector('.shell-ver').textContent = 'v' + VERSION;
+      }
+    }
+    /* favicon：與側欄 ST icon 同一資產 */
+    if (!document.querySelector('link[data-st50-favicon]')) {
+      var fav = document.createElement('link');
+      fav.rel = 'icon';
+      fav.type = 'image/svg+xml';
+      fav.href = 'assets/st50-icon.svg';
+      fav.setAttribute('data-st50-favicon', '1');
+      document.head.appendChild(fav);
     }
 
     var topbar = $('topbar');
@@ -364,27 +412,26 @@
     }).finally(function () { clearTimeout(t); });
   }
 
+  function panelApi(id) {
+    var key = PANEL_MAP[id];
+    return key && window[key] ? window[key] : null;
+  }
+
+  function deactivateRoute(id) {
+    if (!id || id === 'chart') return;
+    var api = panelApi(id);
+    if (api && typeof api.deactivate === 'function') {
+      try { api.deactivate(); }
+      catch (err) { console.warn('[shell-v5] deactivate ' + id, err); }
+    }
+  }
+
   function emitRoute(id, retries) {
     retries = retries || 0;
     try {
       window.dispatchEvent(new CustomEvent('shell:route', { detail: { route: id } }));
     } catch (e) {}
-    var map = {
-      pulse: 'PulseV5',
-      breadth: 'BreadthV5',
-      heat: 'HeatV5',
-      institutional: 'InstitutionalV5',
-      international: 'InternationalV5',
-      afterhours: 'AfterhoursV5',
-      signals: 'SignalsV5',
-      watchlist: 'WatchlistV5',
-      risk: 'RiskV5',
-      news: 'NewsV5',
-      scan: 'ScanV5',
-      book: 'BookV5',
-      settings: 'SettingsV5'
-    };
-    var key = map[id];
+    var key = PANEL_MAP[id];
     if (!key) return;
     if (window[key] && typeof window[key].activate === 'function') {
       try { window[key].activate(); }
@@ -437,7 +484,11 @@
       id = route.id;
     }
 
+    if (state.prevRoute && state.prevRoute !== id) {
+      deactivateRoute(state.prevRoute);
+    }
     state.route = id;
+    state.prevRoute = id;
     try { localStorage.setItem(STORAGE_KEY, id); } catch (e) {}
     try {
       if (window.history && window.history.replaceState) {
@@ -478,7 +529,10 @@
     var btns = document.querySelectorAll('#navrail .nr-btn');
     for (var b = 0; b < btns.length; b++) {
       var rid = btns[b].getAttribute('data-route');
-      btns[b].classList.toggle('on', rid === id && rid !== 'workspace');
+      var on = rid === id && rid !== 'workspace';
+      btns[b].classList.toggle('on', on);
+      if (on) btns[b].setAttribute('aria-current', 'page');
+      else btns[b].removeAttribute('aria-current');
     }
 
     if (isChart) {
@@ -539,18 +593,52 @@
         })
         .catch(function () {});
     }, 2800);
+    document.addEventListener('keydown', onShellKey, true);
     console.log('[shell-v5] Stock Terminal ' + VERSION + ' · route=' + state.route);
+  }
+
+  function inEditable(el) {
+    if (!el) return false;
+    var tag = (el.tagName || '').toUpperCase();
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    return !!el.isContentEditable;
+  }
+
+  function onShellKey(e) {
+    if (inEditable(e.target)) return;
+    /* Esc → 圖表由 hotkeys_v3 統一（先關模態） */
+    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && /^[0-9]$/.test(e.key)) {
+      var idx = e.key === '0' ? 9 : (parseInt(e.key, 10) - 1);
+      var rid = HOTKEY_ROUTES[idx];
+      if (rid) {
+        e.preventDefault();
+        go(rid);
+      }
+    }
   }
 
   window.ShellV5 = {
     VERSION: VERSION,
     ROUTES: ROUTES,
+    HOTKEY_ROUTES: HOTKEY_ROUTES,
     ALIASES: ROUTE_ALIASES,
     go: go,
     navigate: go,
     route: function () { return state.route; },
     setSync: setSync,
     sync: function () { runSync(true); },
+    softBadge: function (mountId, on, text) {
+      var mount = $(mountId);
+      if (!mount) return;
+      var b = mount.querySelector('.sv-soft-badge');
+      if (!b) {
+        b = document.createElement('div');
+        b.className = 'sv-soft-badge';
+        mount.insertBefore(b, mount.firstChild);
+      }
+      b.textContent = text || '更新中…';
+      b.classList.toggle('on', !!on);
+    },
     /** 開圖表並載入代號（指數預設 ^TWII） */
     openChart: function (sym, mkt) {
       go('chart', { sym: sym || '^TWII', mkt: mkt || 'TW' });

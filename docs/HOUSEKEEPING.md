@@ -1,6 +1,6 @@
 # AI_Stock 專案 Code Review 與修正計畫
 
-> Stock Terminal v4.1 · Housekeeping（功能潮後整理）  
+> Stock Terminal v5.0 · Housekeeping（功能潮後整理；側欄／總覽見 revision v5.0）  
 > 基準分支參考：`cursor/margin-mix-yoy-dense-4e66`（含大盤體質／融資週期／TDCC／融資比加密度／分享打包）  
 > 產出目的：把「能跑」收斂成「可維護、可回歸、可分享」。
 

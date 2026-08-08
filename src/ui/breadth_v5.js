@@ -403,10 +403,15 @@
     bindLimitPopups($('bd-root'));
   }
 
-  function refresh(force) {
+  function refresh(force, opts) {
+    opts = opts || {};
     var body = ensureMount();
     if (!body) return;
-    body.innerHTML = '<div class="bd-loading">載入廣度資料…</div>';
+    var soft = !!opts.soft || !!lastData || !!body.querySelector('.bd-grid, .bd-section, .bd-card');
+    if (window.ShellV5 && window.ShellV5.softBadge) {
+      window.ShellV5.softBadge('mount-breadth', soft, '更新中…');
+    }
+    if (!soft) body.innerHTML = '<div class="bd-loading">載入廣度資料…</div>';
     var url = SRV + '/breadth' + (force ? '?refresh=1' : '');
     Promise.all([
       fetch(url, { cache: 'no-store' }).then(function (r) {
@@ -425,19 +430,27 @@
       d._movers = lastMovers;
       render(d);
     }).catch(function (e) {
-      render({ ok: false, error: '載入失敗：' + (e && e.message ? e.message : e) });
+      if (!soft) render({ ok: false, error: '載入失敗：' + (e && e.message ? e.message : e) });
+    }).finally(function () {
+      if (window.ShellV5 && window.ShellV5.softBadge) {
+        window.ShellV5.softBadge('mount-breadth', false);
+      }
     });
   }
 
   function activate() {
     ensureMount();
-    refresh(false);
+    refresh(false, { soft: !!lastData });
     if (timer) clearInterval(timer);
     timer = setInterval(function () {
       if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'breadth') {
-        refresh(false);
+        refresh(false, { soft: true });
       }
     }, 60000);
+  }
+
+  function deactivate() {
+    if (timer) { clearInterval(timer); timer = null; }
   }
 
   function onRoute(ev) {
@@ -447,6 +460,7 @@
 
   window.BreadthV5 = {
     activate: activate,
+    deactivate: deactivate,
     refresh: refresh,
     last: function () { return lastData; }
   };

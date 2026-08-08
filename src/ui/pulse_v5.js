@@ -1286,8 +1286,13 @@
     }, 50000);
   }
 
+  function deactivate() {
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+
   window.PulseV5 = {
     activate: activate,
+    deactivate: deactivate,
     refresh: function () { refresh(true); },
     focusFactors: focusFactors,
     last: function () { return lastPack; }

@@ -353,6 +353,7 @@
 
   window.ScanV5 = {
     activate: activate,
+    deactivate: function () {},
     scan: scan,
     last: function () { return lastResults; }
   };

@@ -5,6 +5,25 @@
 
 ---
 
+## v5.0 — 總覽儀表板 + 側欄殼層（含 ST icon tip）
+
+**產品殼層**
+- `shell_v5`：側欄路由（總覽／圖表／廣度／熱力／法人／國際／盤後／訊號／自選／風險／快訊／選股／投組／設定）；預設 `#pulse`；歷史庫 merge 同步。
+- 品牌：`assets/st50-icon.svg` 左上 ST monogram；內頁隱藏重複 kicker；圖表頂列同步小 icon + favicon。
+- 舊「指數」路由 alias → 圖表 `^TWII`。
+
+**總覽與情報**
+- `pulse_v5`：`GET /pulse` 一屏高密度（台指期、法人趨勢、廣度多空比、產業 TW/US、全球 SOX／日經／KOSPI、台美快訊 `/flash`、因子帳本）。
+- `hub_v5`：法人／國際／訊號／自選／風險／設定分頁。
+- `viz_v5`：共用 spark／bar；近 20 日趨勢圖 X/Y 軸單位。
+- 廣度漲跌停浮動清單；真實資料計分（缺源「尚未納入」、不捏造 Fear&Greed）。
+
+**體驗打磨（本 tip 續）**
+- 定時面板 soft refresh（廣度／熱力／盤後／快訊／法人／國際）；離頁 `deactivate` 清輪詢。
+- `Esc`（無模態）→ 圖表；`Alt+Shift+1…0` 切側欄；nav `aria-current`。
+
+---
+
 ## v4.1 — 體驗打磨 / 欄位標準 / 顏色管理
 
 **新功能**

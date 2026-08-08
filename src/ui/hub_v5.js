@@ -251,10 +251,15 @@
 
   // ── Institutional ────────────────────────────────────────
   function renderInstitutional(el) {
-    el.innerHTML = head('法人動向', '三大法人合計＋資金趨勢評論＋買賣超排行',
-      '<button class="hub-btn" data-sync>同步資料</button><button class="hub-btn" data-go="afterhours">盤後</button>') +
-      '<div id="hub-inst-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
-    bindCommon(el);
+    var soft = !!el.querySelector('#hub-inst-body .hub-strip');
+    if (!soft) {
+      el.innerHTML = head('法人動向', '三大法人合計＋資金趨勢評論＋買賣超排行',
+        '<button class="hub-btn" data-sync>同步資料</button><button class="hub-btn" data-go="afterhours">盤後</button>') +
+        '<div id="hub-inst-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
+      bindCommon(el);
+    } else if (window.ShellV5 && window.ShellV5.softBadge) {
+      window.ShellV5.softBadge('mount-institutional', true, '更新中…');
+    }
     Promise.all([
       jget('/marketflow'),
       jget('/inst-rank?who=foreign&side=buy&n=18'),
@@ -319,6 +324,10 @@
           trendPanel + rankTbl(buy, '外資買超') + rankTbl(sell, '外資賣超') +
         '</div>';
       bindCommon(el);
+    }).finally(function () {
+      if (window.ShellV5 && window.ShellV5.softBadge) {
+        window.ShellV5.softBadge('mount-institutional', false);
+      }
     });
   }
 
@@ -336,7 +345,11 @@
 
   function loadInternational(el, forceEco) {
     var body = $('hub-intl-body');
-    if (body) body.innerHTML = '<div class="hub-loading">載入國際／總經…</div>';
+    var soft = !!(body && body.querySelector('.hub-dash, .hub-strip, .cell'));
+    if (body && !soft) body.innerHTML = '<div class="hub-loading">載入國際／總經…</div>';
+    if (soft && window.ShellV5 && window.ShellV5.softBadge) {
+      window.ShellV5.softBadge('mount-international', true, '更新中…');
+    }
     var ecoUrl = '/macro/economy?years=5' + (forceEco ? '&refresh=1' : '');
     Promise.all([
       jget('/pulse?refresh=0'),
@@ -421,6 +434,10 @@
       bindCommon(el);
       var ecoBtn = $('hub-eco-refresh');
       if (ecoBtn) ecoBtn.onclick = function () { loadInternational(el, true); };
+    }).finally(function () {
+      if (window.ShellV5 && window.ShellV5.softBadge) {
+        window.ShellV5.softBadge('mount-international', false);
+      }
     });
   }
 
@@ -805,13 +822,17 @@
     settings: function () { var el = mount('settings'); if (el) renderSettings(el); }
   };
 
+  function hubApi(fn) {
+    return { activate: fn, deactivate: function () {}, mount: fn };
+  }
+
   window.HubV5 = ACTIVATORS;
-  window.InstitutionalV5 = { activate: ACTIVATORS.institutional, mount: ACTIVATORS.institutional };
-  window.InternationalV5 = { activate: ACTIVATORS.international, mount: ACTIVATORS.international };
-  window.SignalsV5 = { activate: ACTIVATORS.signals, mount: ACTIVATORS.signals };
-  window.WatchlistV5 = { activate: ACTIVATORS.watchlist, mount: ACTIVATORS.watchlist };
-  window.RiskV5 = { activate: ACTIVATORS.risk, mount: ACTIVATORS.risk };
-  window.SettingsV5 = { activate: ACTIVATORS.settings, mount: ACTIVATORS.settings };
+  window.InstitutionalV5 = hubApi(ACTIVATORS.institutional);
+  window.InternationalV5 = hubApi(ACTIVATORS.international);
+  window.SignalsV5 = hubApi(ACTIVATORS.signals);
+  window.WatchlistV5 = hubApi(ACTIVATORS.watchlist);
+  window.RiskV5 = hubApi(ACTIVATORS.risk);
+  window.SettingsV5 = hubApi(ACTIVATORS.settings);
   window.TrendsV5 = {
     activate: function () {
       if (window.ShellV5 && ShellV5.openChart) ShellV5.openChart('^TWII', 'TW');

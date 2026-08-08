@@ -385,7 +385,12 @@
     analyze(h);
   }
 
-  window.BookV5 = { activate: activate, refresh: activate, last: function () { return lastData; } };
+  window.BookV5 = {
+    activate: activate,
+    deactivate: function () {},
+    refresh: activate,
+    last: function () { return lastData; }
+  };
 
   window.addEventListener('shell:route', function (ev) {
     if (ev && ev.detail && ev.detail.route === 'book') activate();

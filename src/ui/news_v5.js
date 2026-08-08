@@ -275,27 +275,43 @@
     });
   }
 
-  function refresh() {
+  function refresh(opts) {
+    opts = opts || {};
     var body = ensureMount();
     if (!body) return;
-    body.innerHTML = '<div class="nw-loading">載入快訊…</div>';
+    var soft = !!opts.soft || !!body.querySelector('.nw-grid, .nw-card, .nw-flash');
+    if (window.ShellV5 && window.ShellV5.softBadge) {
+      window.ShellV5.softBadge('mount-news', soft, '更新中…');
+    }
+    if (!soft) body.innerHTML = '<div class="nw-loading">載入快訊…</div>';
     Promise.all([
       fetch(SRV + '/events', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; }),
       fetch(SRV + '/alert/status', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
       fetch(SRV + '/flash?n=36', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; })
-    ]).then(function (arr) { render(arr[0], arr[1], arr[2]); });
+    ]).then(function (arr) { render(arr[0], arr[1], arr[2]); })
+      .finally(function () {
+        if (window.ShellV5 && window.ShellV5.softBadge) {
+          window.ShellV5.softBadge('mount-news', false);
+        }
+      });
   }
 
   function activate() {
     ensureMount();
-    refresh();
+    refresh({ soft: !!$('nw-body') && !$('nw-body').querySelector('.nw-loading') });
     if (timer) clearInterval(timer);
     timer = setInterval(function () {
-      if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'news') refresh();
+      if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'news') {
+        refresh({ soft: true });
+      }
     }, 120000);
   }
 
-  window.NewsV5 = { activate: activate, refresh: refresh };
+  function deactivate() {
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+
+  window.NewsV5 = { activate: activate, deactivate: deactivate, refresh: refresh };
 
   window.addEventListener('shell:route', function (ev) {
     if (ev && ev.detail && ev.detail.route === 'news') activate();

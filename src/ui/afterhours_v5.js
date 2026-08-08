@@ -360,10 +360,15 @@
       .catch(function () { return null; });
   }
 
-  function refresh() {
+  function refresh(opts) {
+    opts = opts || {};
     var body = ensureMount();
     if (!body) return;
-    body.innerHTML = '<div class="ah-loading">載入盤後資料…</div>';
+    var soft = !!opts.soft || !!body.querySelector('.ah-grid, .ah-section');
+    if (window.ShellV5 && window.ShellV5.softBadge) {
+      window.ShellV5.softBadge('mount-afterhours', soft, '更新中…');
+    }
+    if (!soft) body.innerHTML = '<div class="ah-loading">載入盤後資料…</div>';
     var cids = LIST.map(function (x) { return x.cid; }).join(',');
     Promise.all([
       jget('/txf'),
@@ -381,19 +386,29 @@
         return (b.changePct == null ? -999 : b.changePct) - (a.changePct == null ? -999 : a.changePct);
       });
       render({ txf: normalizeNight(txfRaw), fut: fut, mf: mf || {}, bd: bd || {}, movers: mv || {} });
+    }).finally(function () {
+      if (window.ShellV5 && window.ShellV5.softBadge) {
+        window.ShellV5.softBadge('mount-afterhours', false);
+      }
     });
   }
 
   function activate() {
     ensureMount();
-    refresh();
+    refresh({ soft: !!$('ah-body') && !$('ah-body').querySelector('.ah-loading') });
     if (timer) clearInterval(timer);
     timer = setInterval(function () {
-      if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'afterhours') refresh();
+      if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'afterhours') {
+        refresh({ soft: true });
+      }
     }, 45000);
   }
 
-  window.AfterhoursV5 = { activate: activate, refresh: refresh };
+  function deactivate() {
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+
+  window.AfterhoursV5 = { activate: activate, deactivate: deactivate, refresh: refresh };
 
   window.addEventListener('shell:route', function (ev) {
     if (ev && ev.detail && ev.detail.route === 'afterhours') activate();

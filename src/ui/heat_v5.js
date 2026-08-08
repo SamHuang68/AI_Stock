@@ -322,10 +322,15 @@
       });
   }
 
-  function refresh(forceFocus) {
+  function refresh(forceFocus, opts) {
+    opts = opts || {};
     var body = ensureMount();
     if (!body) return;
-    body.innerHTML = '<div class="ht-loading">載入類股…</div>';
+    var soft = !!opts.soft || !!state.last || !!body.querySelector('.ht-grid');
+    if (window.ShellV5 && window.ShellV5.softBadge) {
+      window.ShellV5.softBadge('mount-heat', soft, '更新中…');
+    }
+    if (!soft) body.innerHTML = '<div class="ht-loading">載入類股…</div>';
     fetch(SRV + '/sectors?mkt=' + encodeURIComponent(state.mkt), { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
@@ -335,22 +340,31 @@
       })
       .catch(function () {
         var b = ensureMount();
-        if (b) b.innerHTML = '<div class="ht-loading">載入失敗</div>';
+        if (b && !soft) b.innerHTML = '<div class="ht-loading">載入失敗</div>';
+      })
+      .finally(function () {
+        if (window.ShellV5 && window.ShellV5.softBadge) {
+          window.ShellV5.softBadge('mount-heat', false);
+        }
       });
   }
 
   function activate() {
     ensureMount();
-    refresh(false);
+    refresh(false, { soft: !!state.last });
     if (timer) clearInterval(timer);
     timer = setInterval(function () {
       if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'heat') {
-        refresh(false);
+        refresh(false, { soft: true });
       }
     }, 60000);
   }
 
-  window.HeatV5 = { activate: activate, refresh: refresh };
+  function deactivate() {
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+
+  window.HeatV5 = { activate: activate, deactivate: deactivate, refresh: refresh };
 
   window.addEventListener('shell:route', function (ev) {
     if (ev && ev.detail && ev.detail.route === 'heat') activate();
