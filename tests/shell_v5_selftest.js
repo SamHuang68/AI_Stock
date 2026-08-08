@@ -84,6 +84,9 @@ ok(/GC=F/.test(pl) && /HG=F/.test(pl) && /x\.role/.test(pl),
   'pulse global prefer includes gold and copper with role');
 ok(/turnoverVsMa5Pct/.test(pl) && /volumeScore/.test(pl) && /成交金額 · 量能/.test(pl),
   'pulse strip shows turnover quant vs5 / score');
+ok(/t00Trend/.test(pl) && /o00Trend/.test(pl) && /txfTrend/.test(pl) &&
+  /trendQuantBits/.test(pl) && /renderTrendCell/.test(pl),
+  'pulse strip shows TAIEX/OTC/TXF trend quant like turnover');
 
 const nw = fs.readFileSync(path.join(root, 'src/ui/news_v5.js'), 'utf8');
 ok(/nw-mkt-seg/.test(nw) && /flashMkt/.test(nw), 'news TW/US filter');

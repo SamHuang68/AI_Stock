@@ -68,6 +68,10 @@
       '#pl-root .pl-strip .dot{width:4px;height:4px;border-radius:50%;background:var(--green);box-shadow:0 0 4px var(--green);flex-shrink:0}' +
       '#pl-root .pl-strip .viz-hide,#pl-root .pl-strip .viz-meter,#pl-root .pl-strip .viz-seg,' +
         '#pl-root .pl-strip .viz-chip{display:none!important}' +
+      '#pl-root .pl-strip .pl-idx-spark{height:16px;margin-top:1px;opacity:.9}' +
+      '#pl-root .pl-strip .pl-idx-spark .vz-spark{width:100%;height:16px;display:block}' +
+      '#pl-root .pl-strip .vz-chip{margin-top:1px;font-size:8px;padding:0 4px;line-height:1.35}' +
+      '#pl-root .pl-strip .vz-meter{margin-top:1px;height:3px}' +
       /* 上下兩區 */
       '#pl-root .pl-dash{flex:1;min-height:0;display:grid;gap:4px;' +
         'grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
@@ -462,17 +466,72 @@
       '" stroke-width="2" points="' + pts + '"/></svg>';
   }
 
+  /** 價格／指數趨勢量化列（與成交金額量能同構） */
+  function trendQuantBits(tr, streakUpLabel, streakDnLabel) {
+    tr = tr || {};
+    var bits = [];
+    if (tr.chgPct != null) bits.push(pct(tr.chgPct) + '日');
+    if (tr.vsMa5Pct != null) bits.push(pct(tr.vsMa5Pct) + 'vs5');
+    if (tr.momScore != null) bits.push('分' + Number(tr.momScore).toFixed(0));
+    if (tr.z20 != null) bits.push('Z' + Number(tr.z20).toFixed(1));
+    if (tr.streak) {
+      bits.push((tr.streak > 0 ? (streakUpLabel || '連漲') : (streakDnLabel || '連跌')) +
+        Math.abs(tr.streak));
+    }
+    return bits.length ? bits.join(' · ') : '';
+  }
+
+  function trendQuantKind(tr) {
+    tr = tr || {};
+    if (tr.vsMa5Pct != null && tr.vsMa5Pct >= 1) return 'buy';
+    if (tr.vsMa5Pct != null && tr.vsMa5Pct <= -1) return 'sell';
+    if (tr.momScore != null && tr.momScore >= 60) return 'buy';
+    if (tr.momScore != null && tr.momScore <= 40) return 'sell';
+    return 'mid';
+  }
+
+  function renderTrendCell(opts) {
+    var V = window.Viz;
+    var tr = opts.trend || {};
+    var tone = tr.trend || tr.level || '';
+    var kind = trendQuantKind(tr);
+    var chip = (V && tone) ? V.chip(tone, kind) : '';
+    var meter = (V && tr.momScore != null && V.scoreMeter) ? V.scoreMeter(tr.momScore) : '';
+    var spark = '';
+    if (V && V.sparkLine && tr.spark && tr.spark.length >= 2) {
+      spark = '<div class="pl-idx-spark">' + V.sparkLine(tr.spark, {
+        h: 18, w: 120, grid: false,
+        color: (tr.spark[tr.spark.length - 1] >= tr.spark[0]) ? 'var(--red)' : 'var(--green)'
+      }) + '</div>';
+    }
+    var sub = trendQuantBits(tr);
+    if (!sub && opts.fallbackSub) sub = opts.fallbackSub;
+    if (!sub) sub = '—';
+    var tip = opts.tip || '趨勢量化：vs前日／vs5日均／動能分／近20日Z／連續漲跌';
+    var levelHtml = tr.level
+      ? ' <span style="font-size:9px;color:var(--tlo);font-weight:700">' + esc(tr.level) + '</span>'
+      : '';
+    var toneCls = tw(tr.vsMa5Pct != null ? tr.vsMa5Pct : tr.chgPct);
+    return '<div class="cell" title="' + tip + '"><div class="k">' + opts.k + '</div>' +
+      '<div class="v">' + opts.vHtml + levelHtml + '</div>' +
+      '<div class="s ' + toneCls + '">' + sub + '</div>' +
+      chip + meter + spark + '</div>';
+  }
+
   function renderStrip(ov, p) {
     var V = window.Viz;
     var s = (ov && ov.strip) || {};
     var t00 = s.t00 || {};
     var o00 = s.o00 || {};
     var txf = p.txf || {};
+    var t00Tr = s.t00Trend || {};
+    var o00Tr = s.o00Trend || {};
+    var txfTr = s.txfTrend || {};
     var adv = s.advRatio;
     var tone = breadthToneLabel(adv, s.lsRatio);
     var toneKind = (tone.indexOf('偏多') >= 0 || tone.indexOf('極度偏多') >= 0) ? 'buy'
       : (tone.indexOf('偏空') >= 0 || tone.indexOf('極度偏空') >= 0) ? 'sell' : 'mid';
-    /* strip 已用 CSS 隱藏 viz；成交金額保留量能分／vs5 日量化列 */
+    /* strip 已用 CSS 隱藏舊 viz-*；成交／指數保留 vz chip／meter／spark 量化列 */
     var udfViz = '';
     var turnTone = s.turnoverTrend || s.turnoverLevel || '';
     var turnKind = (s.turnoverVsMa5Pct != null && s.turnoverVsMa5Pct >= 8) ? 'buy'
@@ -493,15 +552,33 @@
     var turnTip = '量能量化：vs前日／vs5日均／量能分(8000億=50)／近20日Z／連續放縮；水位 8000／12000 億';
     var advViz = V ? V.chip(tone, toneKind) : '';
     var txfSess = txf.sessionLabel || (txf.session === 'night' ? '夜盤' : (txf.session === 'day' ? '日盤' : ''));
+    var idxTip = '趨勢量化：vs前日／vs5日均／動能分／近20日Z／連續漲跌（與成交金額量能同構）';
+    var t00Fb = chgWithPct(t00, 2, 2);
+    var o00Fb = chgWithPct(o00, 2, 2);
+    var txfFb = chgWithPct(txf, 0, 2) +
+      (txf.ampRate != null ? ' · 振幅 ' + Number(txf.ampRate).toFixed(2) + '%' : '');
     return '<div class="pl-strip">' +
-      '<div class="cell"><div class="k">加權指數 TAIEX</div><div class="v">' + fmt(t00.price, 2) + '</div>' +
-        '<div class="s ' + tw(t00.changePct) + '">' + chgWithPct(t00, 2, 2) + '</div></div>' +
-      '<div class="cell"><div class="k">櫃買指數 OTC</div><div class="v">' + fmt(o00.price, 2) + '</div>' +
-        '<div class="s ' + tw(o00.changePct) + '">' + chgWithPct(o00, 2, 2) + '</div></div>' +
-      '<div class="cell"><div class="k">台指期 TXF' + (txfSess ? ' · ' + txfSess : '') + '</div><div class="v">' +
-        fmt(txf.price, 0) + '</div>' +
-        '<div class="s ' + tw(txf.changePct) + '">' + chgWithPct(txf, 0, 2) +
-        (txf.ampRate != null ? ' · 振幅 ' + Number(txf.ampRate).toFixed(2) + '%' : '') + '</div></div>' +
+      renderTrendCell({
+        k: '加權指數 TAIEX',
+        vHtml: fmt(t00.price, 2),
+        trend: t00Tr,
+        fallbackSub: t00Fb,
+        tip: idxTip + ' · 加權'
+      }) +
+      renderTrendCell({
+        k: '櫃買指數 OTC',
+        vHtml: fmt(o00.price, 2),
+        trend: o00Tr,
+        fallbackSub: o00Fb,
+        tip: idxTip + ' · 櫃買'
+      }) +
+      renderTrendCell({
+        k: '台指期 TXF' + (txfSess ? ' · ' + txfSess : ''),
+        vHtml: fmt(txf.price, 0),
+        trend: txfTr,
+        fallbackSub: txfFb,
+        tip: idxTip + ' · 台指期'
+      }) +
       '<div class="cell" title="' + turnTip + '"><div class="k">成交金額 · 量能</div><div class="v">' +
         (s.turnoverYi != null ? Number(s.turnoverYi).toFixed(1) + ' 億' : '—') +
         (s.turnoverLevel ? ' <span style="font-size:9px;color:var(--tlo);font-weight:700">' + esc(s.turnoverLevel) + '</span>' : '') +

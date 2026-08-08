@@ -1030,6 +1030,54 @@ except Exception:
                 'trend': None, 'level': None, 'n': 0}
 
 
+try:
+    from trend_quant import price_series_quant as _price_series_quant
+except Exception:
+    def _price_series_quant(closes, latest=None):
+        return {
+            'close': None, 'chgPct': None, 'ma5': None, 'vsMa5Pct': None,
+            'z20': None, 'momScore': None, 'streak': None,
+            'trend': None, 'level': None, 'n': 0, 'spark': [],
+        }
+
+
+def _fmtqik_index_closes(turns) -> list:
+    """FMTQIK 列中的加權指數收盤序列（舊→新）。"""
+    out = []
+    for t in turns or []:
+        try:
+            if t.get('index') is not None:
+                v = float(t['index'])
+                if v > 0:
+                    out.append(v)
+        except Exception:
+            continue
+    return out
+
+
+def _tw_index_closes(symbol: str, n: int = 30) -> list:
+    """櫃買／台指期近 n 日收盤；CSV 過期超過 5 日才允許網路補齊。"""
+    try:
+        import tw_index_charts as _tic
+        from datetime import date as _date, datetime as _dt, timedelta as _td
+        allow_net = False
+        sym_u = (symbol or '').upper()
+        path = _tic.TWOII_CSV if 'TWO' in sym_u else _tic.TXF_CSV
+        rows = _tic._read_csv(path)
+        if rows:
+            try:
+                last = _dt.strptime(rows[-1][0], '%Y-%m-%d').date()
+                allow_net = (_date.today() - last) > _td(days=5)
+            except Exception:
+                allow_net = True
+        else:
+            allow_net = True
+        return list(_tic.recent_closes(symbol, n=n, allow_network=allow_net) or [])
+    except Exception as e:
+        print('[pulse] tw_index_closes', symbol, e)
+        return []
+
+
 def _fmtqik_turnover(min_n: int = 12) -> list:
     """TWSE FMTQIK 近月（必要時補上月）日成交金額列：[{date, amount, index?, chg?}]。
        供 /pulse 量能量化；快取 30 分。失敗回 []。"""
@@ -4331,6 +4379,31 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
 
         t00 = indices.get('t00') or {}
         o00 = indices.get('o00') or {}
+        # 加權／櫃買／台指期：與成交金額同構的趨勢量化（vs5／Z／連漲跌／動能分）
+        try:
+            t00_closes = _fmtqik_index_closes(turns)
+            t00_trend = _price_series_quant(t00_closes, latest=t00.get('price'))
+        except Exception as e:
+            print('[pulse] t00 trend', e)
+            t00_trend = _price_series_quant([], latest=t00.get('price'))
+        try:
+            o00_closes = _tw_index_closes('^TWOII', n=30)
+            o00_trend = _price_series_quant(o00_closes, latest=o00.get('price'))
+        except Exception as e:
+            print('[pulse] o00 trend', e)
+            o00_trend = _price_series_quant([], latest=o00.get('price'))
+        try:
+            # strip 顯示的台指期價（夜盤優先）覆寫連續日線末端
+            txf_live = None
+            if isinstance(txf_night, dict):
+                txf_live = txf_night.get('price')
+            if txf_live is None and isinstance(txf, dict):
+                txf_live = txf.get('price')
+            txf_closes = _tw_index_closes('__TXF__', n=30)
+            txf_trend = _price_series_quant(txf_closes, latest=txf_live)
+        except Exception as e:
+            print('[pulse] txf trend', e)
+            txf_trend = _price_series_quant([])
         st = stocks or {}
         up, dn, flat = st.get('up'), st.get('down'), st.get('unchanged')
         ls_ratio = None
@@ -4363,6 +4436,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             'strip': {
                 't00': t00,
                 'o00': o00,
+                't00Trend': t00_trend,
+                'o00Trend': o00_trend,
+                'txfTrend': txf_trend,
                 'turnoverYi': round(turnover_yi, 1) if turnover_yi is not None else None,
                 'turnoverChgPct': round(turnover_chg, 2) if turnover_chg is not None else None,
                 'turnoverMa5Yi': tq.get('ma5Yi'),
