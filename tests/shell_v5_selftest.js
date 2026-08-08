@@ -175,6 +175,8 @@ ok(/Resolve-StockPython/.test(goPs) && /Test-BlockedPython/.test(goPs) &&
   /hermes/.test(goPs) && /Stock Terminal Server v5 tip/.test(goPs) &&
   /PULSE_LAYOUT_ANCHOR_4col2z/.test(goPs),
   'go.ps1 blocks hermes python and launches titled live server console');
+ok(/data-layout="4col-priority"/.test(goPs) && /max-width:\\s\*1280px/.test(goPs),
+  'go.ps1 bans real 4col-priority DOM/CSS only (not comment text)');
 ok(/ST_PYTHON/.test(goBat) && /hermes-agent/.test(goBat) && /FAIL_PYTHON_HERMES/.test(goBat),
   'go.bat also resolves python and blocks hermes');
 

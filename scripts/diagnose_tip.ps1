@@ -13,8 +13,8 @@ $go = Join-Path $Root 'scripts\go.ps1'
 $pulse = Join-Path $Root 'src\ui\pulse_v5.js'
 Write-Host ("go.ps1 has Resolve-StockPython: " + ((Test-Path $go) -and ((Get-Content $go -Raw) -match 'Resolve-StockPython')))
 Write-Host ("pulse has ANCHOR_4col2z:      " + ((Test-Path $pulse) -and ((Get-Content $pulse -Raw) -match 'PULSE_LAYOUT_ANCHOR_4col2z')))
-Write-Host ("pulse has 4col-priority:      " + ((Test-Path $pulse) -and ((Get-Content $pulse -Raw) -match '4col-priority')))
-Write-Host ("pulse has media 1280 crush:   " + ((Test-Path $pulse) -and ((Get-Content $pulse -Raw) -match 'max-width:1280')))
+Write-Host ("pulse has data-layout 4col-priority: " + ((Test-Path $pulse) -and ((Get-Content $pulse -Raw) -match 'data-layout="4col-priority"')))
+Write-Host ("pulse has media 1280px crush:        " + ((Test-Path $pulse) -and ((Get-Content $pulse -Raw) -match 'max-width:\s*1280px')))
 
 Write-Host ''
 Write-Host '--- where python ---'

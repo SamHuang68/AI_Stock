@@ -182,10 +182,11 @@ function Assert-TipHtml {
   $pulse = Join-Path $Root 'src\ui\pulse_v5.js'
   if (-not (Test-Path $pulse)) { throw "missing $pulse" }
   $pjs = Get-Content $pulse -Raw -Encoding UTF8
-  if ($pjs -match '4col-priority') {
+  # 只擋實際 DOM／CSS，不擋註解裡的「禁止 4col-priority」字樣
+  if ($pjs -match 'data-layout="4col-priority"') {
     throw "pulse_v5.js has banned 4col-priority scroll layout — refuse"
   }
-  if ($pjs -match 'max-width:1280') {
+  if ($pjs -match 'max-width:\s*1280px') {
     throw "pulse_v5.js has media breakpoint that previously crushed columns to 2 — refuse"
   }
   if ($pjs -notmatch '4col-2zone' -or $pjs -notmatch 'repeat\(4,minmax\(0,1fr\)\)') {
@@ -232,7 +233,7 @@ function Assert-IndexIsTip {
 
   $pjs = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/src/ui/pulse_v5.js" -UseBasicParsing -TimeoutSec 5
   $ptxt = $pjs.Content
-  if ($ptxt -match '4col-priority' -or $ptxt -match 'max-width:1280') {
+  if ($ptxt -match 'data-layout="4col-priority"' -or $ptxt -match 'max-width:\s*1280px') {
     throw 'Server pulse_v5.js still has banned 2-col crush / scroll-priority layout'
   }
   if ($ptxt -notmatch '4col-2zone' -or $ptxt -notmatch 'repeat\(4,minmax\(0,1fr\)\)') {

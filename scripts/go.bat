@@ -190,7 +190,9 @@ findstr /C:"st5-tip-boot" "%REPO_ROOT%\stock_terminal_v2.html" >nul
 if errorlevel 1 goto FAIL_TIP_HTML
 findstr /C:"PULSE_LAYOUT_ANCHOR_4col2z" "%REPO_ROOT%\src\ui\pulse_v5.js" >nul
 if errorlevel 1 goto FAIL_TIP_HTML
-findstr /C:"max-width:1280" "%REPO_ROOT%\src\ui\pulse_v5.js" >nul
+findstr /C:"max-width:1280px" "%REPO_ROOT%\src\ui\pulse_v5.js" >nul
+if not errorlevel 1 goto FAIL_TIP_HTML
+findstr /C:"data-layout=\"4col-priority\"" "%REPO_ROOT%\src\ui\pulse_v5.js" >nul
 if not errorlevel 1 goto FAIL_TIP_HTML
 echo.
 
