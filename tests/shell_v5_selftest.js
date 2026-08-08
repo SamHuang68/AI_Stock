@@ -117,11 +117,13 @@ ok(/basisPts/.test(pl) && /正價差/.test(pl) && /逆價差/.test(pl) && /Basis
   'pulse strip shows TXF–TAIEX basis');
 ok(/pl-flash-q/.test(pl) && /flashQ/.test(pl) && /搜代號\/關鍵字/.test(pl),
   'pulse flash has keyword search beside TW/US tabs');
-ok(/data-layout="5col-2zone"/.test(pl) && /repeat\(5,minmax\(0,1fr\)\)/.test(pl) &&
-  /pl-zone z-top/.test(pl) && /pl-zone z-bot/.test(pl),
-  'pulse dash restored to 5-col × 2-zone (一行五框)');
+ok(/data-layout="5col-2zone"/.test(pl) && /repeat\(5,minmax\(0,1fr\)\)!important/.test(pl) &&
+  /pl-zone z-top/.test(pl) && /pl-zone z-bot/.test(pl) && !/4col-priority/.test(pl),
+  'pulse dash forced 5-col × 2-zone (一行五框, not 4-col)');
 ok(/#pl-body\{[^}]*overflow:hidden/.test(pl) && /pl-expanded\{overflow:auto\}/.test(pl),
   'pulse one-screen lock; scroll only when factors expanded');
+ok(/一行五框×上下兩區/.test(pl) && /layout=5col-2zone boxes=/.test(pl),
+  'pulse surfaces 5×2 layout marker in UI/console');
 (function () {
   var orderBlock = pl.slice(pl.indexOf('data-layout="5col-2zone"'), pl.indexOf('extra;'));
   ok(orderBlock.indexOf('z-top') < orderBlock.indexOf('z-bot') &&

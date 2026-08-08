@@ -81,11 +81,12 @@
       '#pl-root .pl-strip .pl-idx-spark .vz-spark{width:100%;height:14px;display:block}' +
       '#pl-root .pl-strip .vz-chip{margin-top:1px;font-size:8px;padding:0 4px;line-height:1.35}' +
       '#pl-root .pl-strip .vz-meter{margin-top:1px;height:3px}' +
-      /* 上下兩區 · 一行五框 */
-      '#pl-root .pl-dash{flex:1;min-height:0;display:grid;gap:6px;' +
+      /* 上下兩區 · 一行五框（強制 5 欄，禁止再被窄寬度壓成 2 欄） */
+      '#pl-root .pl-dash{flex:1 1 0;min-height:0;display:grid;gap:6px;' +
         'grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
-      '#pl-root .pl-zone{display:grid;gap:6px;min-width:0;min-height:0;height:100%;' +
-        'grid-template-columns:repeat(5,minmax(0,1fr))}' +
+      '#pl-root .pl-zone{display:grid!important;gap:6px;min-width:0;min-height:0;height:100%;' +
+        'grid-template-columns:repeat(5,minmax(0,1fr))!important}' +
+      '#pl-root .pl-zone > .pl-sec{min-width:0;max-width:100%}' +
       '#pl-root .pl-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;' +
         'min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%}' +
       '#pl-root .pl-sec h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;' +
@@ -388,7 +389,7 @@
           '<div class="pl-head"><div>' +
             '<div class="pl-title">市場總覽</div>' +
             '<div class="pl-tone" id="pl-tone">—</div>' +
-            '<div class="pl-sub" id="pl-sub">官方資料 · 一頁雙區</div>' +
+            '<div class="pl-sub" id="pl-sub">官方資料 · 一行五框 × 上下兩區</div>' +
           '</div><div class="pl-actions">' +
             '<button type="button" class="pl-btn" id="pl-refresh">↻ 重新整理</button>' +
             '<button type="button" class="pl-btn" id="pl-toggle-fac">因子帳本</button>' +
@@ -1682,7 +1683,7 @@
 
     var sub = $('pl-sub');
     if (sub) {
-      sub.textContent = '更新 ' + new Date().toLocaleTimeString('zh-TW') +
+      sub.textContent = '一行五框×上下兩區 · 更新 ' + new Date().toLocaleTimeString('zh-TW') +
         (p.date ? ' · 廣度日 ' + p.date : '') +
         (p.updatedAt ? ' · ' + String(p.updatedAt).replace('T', ' ') : '');
     }
@@ -1710,7 +1711,7 @@
       sectorCache.TW = ov.sectorsRanked.slice();
     }
 
-    /* 一行五框 × 上下兩區（一屏鎖定） */
+    /* 一行五框 × 上下兩區（一屏鎖定）— 勿再改回 4 欄／媒體查詢壓成 2 欄 */
     body.innerHTML =
       renderStrip(ov, p) +
       '<div class="pl-dash" data-layout="5col-2zone">' +
@@ -1724,6 +1725,16 @@
         '</div>' +
       '</div>' +
       extra;
+
+    try {
+      var zones = body.querySelectorAll('.pl-zone');
+      var nTop = zones[0] ? zones[0].querySelectorAll(':scope > .pl-sec').length : 0;
+      var nBot = zones[1] ? zones[1].querySelectorAll(':scope > .pl-sec').length : 0;
+      console.log('[pulse-v5] layout=5col-2zone boxes=' + nTop + '+' + nBot);
+      if (nTop !== 5 || nBot !== 5) {
+        console.warn('[pulse-v5] EXPECTED 5+5 boxes, got ' + nTop + '+' + nBot);
+      }
+    } catch (eLay) {}
 
     bind(body);
     body.querySelectorAll('[data-sec-mkt]').forEach(function (b) {

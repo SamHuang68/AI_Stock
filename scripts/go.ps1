@@ -75,6 +75,18 @@ function Assert-TipHtml {
     }
   }
   Write-Host '[ok] HTML contains shell_v5 + pulse_v5 + st5-tip-boot'
+
+  # 版面契約：必須是一行五框（5col-2zone），禁止還停在 4 欄壓成兩框的舊改動
+  $pulse = Join-Path $Root 'src\ui\pulse_v5.js'
+  if (-not (Test-Path $pulse)) { throw "missing $pulse" }
+  $pjs = Get-Content $pulse -Raw -Encoding UTF8
+  if ($pjs -match '4col-priority' -or $pjs -match 'repeat\(4,minmax\(0,1fr\)\)') {
+    throw "pulse_v5.js still has 4-col layout — reset tip branch and rebuild"
+  }
+  if ($pjs -notmatch '5col-2zone' -or $pjs -notmatch 'repeat\(5,minmax\(0,1fr\)\)') {
+    throw "pulse_v5.js missing 5-col×2-zone layout markers"
+  }
+  Write-Host '[ok] pulse layout = 一行五框 × 上下兩區 (5col-2zone)'
 }
 
 function Wait-TipServer {
@@ -109,14 +121,26 @@ function Assert-IndexIsTip {
     throw 'GET / missing st5-tip-boot — still serving OLD HTML'
   }
   Write-Host '[ok] GET / is tip UX HTML'
+
+  $pjs = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/src/ui/pulse_v5.js" -UseBasicParsing -TimeoutSec 5
+  $ptxt = $pjs.Content
+  if ($ptxt -match '4col-priority') {
+    throw 'Server is still serving 4-col pulse_v5.js — kill ALL python on :18432 and retry'
+  }
+  if ($ptxt -notmatch '5col-2zone' -or $ptxt -notmatch 'repeat\(5,minmax\(0,1fr\)\)') {
+    throw 'Server pulse_v5.js is not 5-col×2-zone — wrong tree / stale process'
+  }
+  Write-Host '[ok] GET /src/ui/pulse_v5.js is 5col-2zone'
 }
 
 Write-Banner
 
 if ($Pull) {
-  Write-Host "[pull] fetch + checkout $TipBranch"
+  Write-Host "[pull] fetch + hard reset $TipBranch (discard local HTML drift)"
   git fetch origin $TipBranch
   git checkout -B $TipBranch "origin/$TipBranch"
+  git reset --hard "origin/$TipBranch"
+  git checkout -- "src/ui/pulse_v5.js" "src/ui/shell_v5.js" "stock_terminal.html" "stock_terminal_v2.html" 2>$null
 }
 
 Assert-TipBranch
