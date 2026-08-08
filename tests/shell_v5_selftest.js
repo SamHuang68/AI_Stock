@@ -111,10 +111,12 @@ ok(/pl-score3/.test(pl) && />綜合</.test(pl) && /大盤體質/.test(pl) &&
   'pulse score trio: compact 綜合 + child weights 70/30 (label short, title full)');
 ok(/pl-empty\[hidden\]\{display:none!important\}/.test(pl),
   'pulse empty[hidden] overrides display:flex (no blank inst box)');
-ok(/pl-sec h4\{[^}]*font-size:11px/.test(pl) &&
-  /pl-flash \.row\{[^}]*line-height:1\.5/.test(pl) &&
-  /pl-wl th,#pl-root \.pl-wl td\{padding:6px 5px/.test(pl),
-  'pulse comfort pass: header hierarchy, flash line-height, wl pad');
+ok(/pl-sec h4\{[^}]*font-size:10px/.test(pl) &&
+  /pl-flash \.row\{[^}]*line-height:1\.35/.test(pl) &&
+  /pl-wl th,#pl-root \.pl-wl td\{padding:4px 4px/.test(pl) &&
+  /pl-dash\{[^}]*gap:6px/.test(pl) &&
+  /pl-strip \.v\{[^}]*font-size:14px/.test(pl),
+  'pulse density rebalance after font upsizing (strip/h4/flash/wl/gutter)');
 ok(/function moneyYiCell/.test(pl) && /moneyYiCell\(i\.foreign\)/.test(pl) &&
   /pl-inst4 \.c \.v\{[^}]*font-size:10px/.test(pl) &&
   /pl-score-formula\{[^}]*font-size:8px/.test(pl) &&
