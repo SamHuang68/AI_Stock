@@ -6653,7 +6653,7 @@ if __name__ == '__main__':
         except Exception as _e:
             print('[alert] start failed:', _e)
     if getattr(sys, 'frozen', False):
-        # 打包成 app 時:啟動後自動開 tip 總覽（#pulse）；絕不开無 hash 舊圖表殼
+        # 打包成 app 時:啟動後自動開 tip 總覽（#pulse）；絕不開無 hash 舊圖表殼
         try:
             import webbrowser
             threading.Timer(1.4, lambda: webbrowser.open(f'http://127.0.0.1:{PORT}/#pulse')).start()
