@@ -80,9 +80,16 @@ def _fetch_json(url: str, timeout: float = 8):
         except Exception:
             return None
     try:
-        req = urllib.request.Request(url, headers=_YF_HEADERS)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
+        try:
+            import http_client as _hc
+        except Exception:
+            _hc = None
+        if _hc is not None:
+            raw = _hc.fetch_bytes(url, timeout=timeout, retries=0, headers=_YF_HEADERS or {})
+        else:
+            req = urllib.request.Request(url, headers=_YF_HEADERS)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read()
         if not raw or raw.lstrip()[:1] in (b'<', b''):
             return None
         return json.loads(raw)

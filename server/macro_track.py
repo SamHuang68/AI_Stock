@@ -168,14 +168,26 @@ def _db() -> sqlite3.Connection:
 
 
 def _http_json(url: str, timeout: int = 25) -> Any:
-    req = urllib.request.Request(url, headers={**UA, 'Accept': 'application/json,text/html,*/*'})
+    headers = {**UA, 'Accept': 'application/json,text/html,*/*'}
+    try:
+        import http_client as _hc
+    except Exception:
+        _hc = None
+    if _hc is not None:
+        return _hc.fetch_json(url, timeout=timeout, retries=1, headers=headers)
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read()
-    text = raw.decode('utf-8-sig', 'replace')
-    return json.loads(text)
+    return json.loads(raw.decode('utf-8-sig', 'replace'))
 
 
 def _http_text(url: str, timeout: int = 25) -> str:
+    try:
+        import http_client as _hc
+    except Exception:
+        _hc = None
+    if _hc is not None:
+        return _hc.fetch_text(url, timeout=timeout, retries=1, headers=UA)
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read().decode('utf-8', 'replace')
