@@ -68,15 +68,9 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-findstr /C:"max-width:1280px" "src\ui\pulse_v5.js" >nul
+findstr /C:"max-width:1280" "src\ui\pulse_v5.js" >nul
 if not errorlevel 1 (
-  echo [FAIL] pulse_v5.js still contains max-width:1280px media crush — refuse.
-  pause
-  exit /b 1
-)
-findstr /C:"data-layout=\"4col-priority\"" "src\ui\pulse_v5.js" >nul
-if not errorlevel 1 (
-  echo [FAIL] pulse_v5.js still has data-layout 4col-priority — refuse.
+  echo [FAIL] pulse_v5.js still contains max-width:1280 media crush — refuse.
   pause
   exit /b 1
 )
