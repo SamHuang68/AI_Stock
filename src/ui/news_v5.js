@@ -13,6 +13,8 @@
 
   var SRV = window.SERVER || '';
   var timer = null;
+  var flashMkt = 'all'; /* all | TW | US */
+  var lastPack = null;
 
   function $(id) { return document.getElementById(id); }
 
@@ -70,6 +72,11 @@
       '#nw-root .nw-flash-list .t{color:var(--tlo);font-size:8px;margin-right:4px;white-space:nowrap}' +
       '#nw-root .nw-flash-list .cat{color:var(--cyan);font-size:8px;margin-right:4px}' +
       '#nw-root .nw-flash-list .cat.us{color:var(--gold)}' +
+      '#nw-root .nw-seg{display:flex;gap:0;border:1px solid var(--border);border-radius:4px;overflow:hidden}' +
+      '#nw-root .nw-seg button{padding:2px 8px;border:0;border-right:1px solid var(--border);background:var(--bg);' +
+        'color:var(--tlo);font-family:inherit;font-size:9px;font-weight:600;cursor:pointer}' +
+      '#nw-root .nw-seg button:last-child{border-right:0}' +
+      '#nw-root .nw-seg button.on{background:var(--gold);color:#060A12;font-weight:800}' +
       '#nw-root .nw-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:2px;flex:0 0 auto}' +
       '#nw-root .nw-loading{font-size:10px;color:var(--tlo);padding:12px 0}' +
       '#nw-body.nw-loading{display:flex;align-items:center}' +
@@ -145,10 +152,19 @@
 
   function renderFlashList(items) {
     items = items || [];
-    if (!items.length) {
-      return '<div class="nw-note">尚無重大訊息（請確認後端可連線 TWSE／Yahoo）</div>';
+    if (flashMkt === 'TW') {
+      items = items.filter(function (f) {
+        return f.mkt !== 'US' && !(f.cat && String(f.cat).indexOf('美股') >= 0);
+      });
+    } else if (flashMkt === 'US') {
+      items = items.filter(function (f) {
+        return f.mkt === 'US' || (f.cat && String(f.cat).indexOf('美股') >= 0);
+      });
     }
-    return '<div class="nw-flash-list">' + items.slice(0, 40).map(function (f) {
+    if (!items.length) {
+      return '<div class="nw-note">此篩選尚無訊息</div>';
+    }
+    return '<div class="nw-flash-list">' + items.slice(0, 50).map(function (f) {
       var isUs = (f.mkt === 'US') || (f.cat && String(f.cat).indexOf('美股') >= 0);
       return '<div class="row"' +
         (f.code ? ' data-code="' + esc(f.code) + '"' : '') +
@@ -165,6 +181,7 @@
     if (!body) return;
     ev = ev || {};
     flashPack = flashPack || {};
+    lastPack = { ev: ev, alertSt: alertSt, flashPack: flashPack };
     var flashItems = flashPack.items || [];
     var settle = nextSettlement();
     var today = new Date();
@@ -174,10 +191,6 @@
     var settleCls = days <= 3 ? 'warn' : '';
     var settleTxt = days === 0 ? '今日結算' : ('還有 ' + days + ' 天');
     var V = window.Viz;
-    var settleSub = settleTxt + '（第三個週三）';
-    if (V && days <= 3) {
-      settleSub = V.badge(settleTxt, days <= 1 ? 'err' : 'warn') + ' <span class="' + settleCls + '">（第三個週三）</span>';
-    }
 
     var rev = ev.revenue || {};
     var revSoon = rev.daysAway != null && rev.daysAway <= 5;
@@ -187,10 +200,14 @@
     var usN = counts.us != null ? counts.us : flashItems.filter(function (x) { return x.mkt === 'US'; }).length;
 
     var alertLine = '—';
+    var alertDetail = '未連線';
     if (alertSt) {
-      if (alertSt.running === true || alertSt.ok === true) alertLine = '運行中';
-      else if (alertSt.error) alertLine = '異常';
-      else alertLine = alertSt.status || (alertSt.enabled ? '已設定' : '未啟用');
+      if (alertSt.running === true || alertSt.ok === true) { alertLine = '運行中'; alertDetail = '後端警報服務正常'; }
+      else if (alertSt.error) { alertLine = '異常'; alertDetail = String(alertSt.error).slice(0, 80); }
+      else {
+        alertLine = alertSt.status || (alertSt.enabled ? '已設定' : '未啟用');
+        alertDetail = alertSt.enabled ? '規則已載入' : '可於工具列開啟通知設定';
+      }
     }
 
     var exTable = '';
@@ -211,6 +228,13 @@
       exTable = '<div class="nw-note">目前無預告（TWSE 資料集可能未開放或當期無資料）。</div>';
     }
 
+    var seg =
+      '<div class="nw-seg" id="nw-mkt-seg">' +
+        '<button type="button" data-mkt="all"' + (flashMkt === 'all' ? ' class="on"' : '') + '>全部</button>' +
+        '<button type="button" data-mkt="TW"' + (flashMkt === 'TW' ? ' class="on"' : '') + '>台股</button>' +
+        '<button type="button" data-mkt="US"' + (flashMkt === 'US' ? ' class="on"' : '') + '>美股</button>' +
+      '</div>';
+
     body.classList.remove('nw-loading');
     body.innerHTML =
       '<div class="nw-strip">' +
@@ -219,7 +243,7 @@
         '<div class="cell"><div class="k">美股訊息</div><div class="v">' + usN + '</div>' +
           '<div class="s">權值／半導體＋8-K</div></div>' +
         '<div class="cell"><div class="k">期貨結算</div><div class="v ' + settleCls + '">' + md + '</div>' +
-          '<div class="s ' + settleCls + '">' + settleTxt + '</div></div>' +
+          '<div class="s ' + settleCls + '">' + settleTxt + ' · 第三週三</div></div>' +
         '<div class="cell"><div class="k">月營收截止</div><div class="v ' + (revSoon ? 'soon' : '') + '">' +
           (rev.nextPublishBy || '—') + '</div><div class="s">' +
           (rev.forMonth ? rev.forMonth + ' 營收' : '—') +
@@ -228,20 +252,24 @@
       '</div>' +
       '<div class="nw-dash">' +
         '<div class="nw-left">' +
-          '<div class="nw-card"><h4>時程重點</h4><div class="nw-grid">' +
-            '<div class="nw-stat"><div class="k">結算節奏</div><div class="v ' + settleCls + '" style="font-size:12px">' + settleSub + '</div></div>' +
-            '<div class="nw-stat"><div class="k">月營收公布</div><div class="v" style="font-size:12px">' +
-              (rev.nextPublishBy || '—') + '</div>' +
-              '<div class="s">上市櫃每月 10 日前公布上月營收</div></div>' +
-            '<div class="nw-stat"><div class="k">除權息預告</div><div class="v">' + ex.length + '</div>' +
-              '<div class="s">右側列表 · 點列開圖表</div></div>' +
+          '<div class="nw-card"><h4>警報與捷徑</h4><div class="nw-grid">' +
+            '<div class="nw-stat"><div class="k">警報狀態</div><div class="v" style="font-size:12px">' + esc(alertLine) +
+              '</div><div class="s">' + esc(alertDetail) + '</div></div>' +
+            '<div class="nw-stat"><div class="k">除權息預告</div><div class="v">' + ex.length +
+              '</div><div class="s">右側完整列表</div></div>' +
+            '<div class="nw-stat"><div class="k">捷徑</div><div class="s" style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">' +
+              '<button type="button" class="nw-btn" data-go="afterhours">盤後</button>' +
+              '<button type="button" class="nw-btn" data-go="institutional">法人</button>' +
+              '<button type="button" class="nw-btn" id="nw-open-cal">行事曆</button>' +
+            '</div></div>' +
           '</div></div>' +
         '</div>' +
         '<div class="nw-mid">' +
-          '<div class="nw-card"><h4>台美重大訊息<span style="color:var(--tlo);font-weight:600;font-size:8px">' +
-            (flashPack.updatedAt ? ('更新 ' + String(flashPack.updatedAt).replace('T', ' ')) : '來源 TWSE／TPEx／Yahoo／SEC') +
+          '<div class="nw-card"><h4>重大訊息 ' + seg +
+            '<span style="color:var(--tlo);font-weight:600;font-size:8px">' +
+            (flashPack.updatedAt ? ('更新 ' + String(flashPack.updatedAt).replace('T', ' ')) : 'TWSE／Yahoo／SEC') +
             '</span></h4>' + renderFlashList(flashItems) +
-            '<div class="nw-note">台股為公開資訊觀測站每日重大訊息精選；美股為權值／半導體相關新聞與 8-K。點列開圖表，美股另開原文。</div></div>' +
+            '<div class="nw-note">點列開圖表；美股另開原文。篩選不重抓資料。</div></div>' +
         '</div>' +
         '<div class="nw-right">' +
           '<div class="nw-card"><h4>除權除息預告 · ' + ex.length + ' 筆</h4>' + exTable + '</div>' +
@@ -273,6 +301,26 @@
         }
       };
     });
+    var segEl = $('nw-mkt-seg');
+    if (segEl) {
+      segEl.querySelectorAll('button[data-mkt]').forEach(function (b) {
+        b.onclick = function () {
+          var m = b.getAttribute('data-mkt');
+          if (!m || m === flashMkt) return;
+          flashMkt = m;
+          if (lastPack) render(lastPack.ev, lastPack.alertSt, lastPack.flashPack);
+        };
+      });
+    }
+    body.querySelectorAll('[data-go]').forEach(function (b) {
+      b.onclick = function () {
+        if (window.ShellV5) window.ShellV5.go(b.getAttribute('data-go'));
+      };
+    });
+    var cal = $('nw-open-cal');
+    if (cal) cal.onclick = function () {
+      if (typeof window.calendarOpen === 'function') window.calendarOpen();
+    };
   }
 
   function refresh(opts) {

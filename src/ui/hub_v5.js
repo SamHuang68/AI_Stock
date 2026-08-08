@@ -509,17 +509,32 @@
         if (g.changePct != null && isFinite(g.changePct)) maxChg = Math.max(maxChg, Math.abs(g.changePct));
       });
       if (maxChg < 0.01) maxChg = 1;
-      var strip = global.slice(0, 4).map(function (g) {
-        return '<div class="cell"><div class="k">' + (g.name || g.symbol) + '</div><div class="v">' +
-          fmt(g.price, g.unit === '%' ? 2 : (g.price > 1000 ? 0 : 2)) + (g.unit === '%' ? '%' : '') +
-          '</div><div class="s ' + tw(g.changePct) + '">' + (g.changePct != null ? pct(g.changePct) : '—') + '</div></div>';
-      }).join('');
-      while ((strip.match(/class="cell"/g) || []).length < 4) {
-        strip += '<div class="cell"><div class="k">—</div><div class="v">—</div></div>';
-      }
+      /* 頂列 KPI：掃描／總經就緒／同步狀態（不重複下方報價卡） */
+      var ecoOkPre = (ecoPack.counts && ecoPack.counts.ok) || ecoItems.filter(function (x) { return x.ok; }).length;
+      var ecoTotalPre = (ecoPack.counts && ecoPack.counts.total) || ecoItems.length;
+      var upN = 0, dnN = 0;
+      global.forEach(function (g) {
+        if (g.changePct > 0) upN++;
+        else if (g.changePct < 0) dnN++;
+      });
+      var strip =
+        '<div class="cell"><div class="k">全球報價</div><div class="v">' + global.length + '</div>' +
+          '<div class="s"><span class="up">' + upN + '</span> / <span class="dn">' + dnN + '</span></div></div>' +
+        '<div class="cell"><div class="k">總經指標</div><div class="v">' + ecoOkPre + '/' + ecoTotalPre + '</div>' +
+          '<div class="s">' + (ecoPack.updatedAt ? String(ecoPack.updatedAt).replace('T', ' ').slice(0, 16) : '按更新指標') + '</div></div>' +
+        '<div class="cell"><div class="k">同步系列</div><div class="v">' + ((st.datasets || []).length) + '</div>' +
+          '<div class="s">資料來源狀態</div></div>' +
+        '<div class="cell"><div class="k">美10Y</div><div class="v">' +
+          (pulse.us10y && pulse.us10y.value != null ? fmt(pulse.us10y.value, 2) + '%' : '—') +
+          '</div><div class="s">殖利率</div></div>';
       var cards = global.map(function (g) {
         var bar = (V && g.changePct != null) ? '<div class="bar">' + V.rowBar(g.changePct, maxChg) + '</div>' : '';
-        return '<div class="hub-card"><div class="k">' + (g.name || g.symbol) + '</div><div class="v">' +
+        var sym = g.symbol || g.sym || '';
+        var mkt = /TWD|TWSE|台|\.TW/i.test(String(g.name || '')) ? 'TW' : 'US';
+        var click = sym
+          ? ' data-code="' + sym.replace(/"/g, '') + '" data-mkt="' + mkt + '" style="cursor:pointer"'
+          : '';
+        return '<div class="hub-card"' + click + '><div class="k">' + (g.name || g.symbol) + '</div><div class="v">' +
           fmt(g.price, g.unit === '%' ? 2 : (g.price > 1000 ? 0 : 2)) + (g.unit === '%' ? '%' : '') +
           '</div><div class="chg ' + tw(g.changePct) + '">' +
           (g.changePct != null ? pct(g.changePct) : '—') + '</div>' + bar + '</div>';
@@ -555,7 +570,9 @@
       body.innerHTML =
         '<div class="hub-strip">' + strip + '</div>' +
         '<div class="hub-dash hub-cols-3">' +
-          '<div class="hub-sec"><h4>全球報價</h4><div class="hub-fill hub-zone z-fill" style="display:grid">' +
+          '<div class="hub-sec"><h4>全球報價 · ' + global.length +
+            '<span style="color:var(--tlo);font-weight:600;font-size:8px">點卡開圖表</span></h4>' +
+            '<div class="hub-fill hub-zone z-fill" style="display:grid">' +
             (cards || '<div class="hub-empty">國際報價載入中／來源暫不可用</div>') +
           '</div></div>' +
           '<div class="hub-sec"><h4>經濟指標 · ' + ecoOk + '/' + ecoTotal +
@@ -569,6 +586,11 @@
             '</table></div></div>' +
         '</div>';
       bindCommon(el);
+      body.querySelectorAll('.hub-card[data-code]').forEach(function (card) {
+        card.onclick = function () {
+          openChart(card.getAttribute('data-code'), card.getAttribute('data-mkt') || 'US');
+        };
+      });
       var ecoBtn = $('hub-eco-refresh');
       if (ecoBtn) ecoBtn.onclick = function () { loadInternational(el, true); };
     }).finally(function () {
@@ -590,86 +612,86 @@
   }
   function loadFocus(el, force) {
     var body = $('hub-sig-body');
-    if (body) body.innerHTML = '<div class="hub-loading">掃描中…</div>';
+    var soft = !!(body && body.querySelector('.hub-strip, .hub-dash'));
+    if (body && !soft) body.innerHTML = '<div class="hub-loading">掃描中…</div>';
+    if (soft && window.ShellV5 && window.ShellV5.softBadge) {
+      window.ShellV5.softBadge('mount-signals', true, '掃描中…');
+    }
     jget('/focus' + (force ? '?refresh=1' : '')).then(function (d) {
       var body = $('hub-sig-body');
       if (!body) return;
-      var list = (d && (d.longs || d.shorts || d.results || d.list)) || [];
-      if (d && d.long) list = list.concat(d.long || []);
-      if (d && d.short) list = list.concat(d.short || []);
-      if (d && d.bull) list = list.concat(d.bull);
-      if (d && d.bear) list = list.concat(d.bear);
-      if (!list.length && d && Array.isArray(d.items)) list = d.items;
-      if (!list.length) {
+      d = d || {};
+      /* 契約：buy / short（與 heat_v5、ai_v5 一致）；相容舊別名 */
+      var bulls = (d.buy || d.long || d.bull || d.longs || []).slice();
+      var bears = (d.short || d.bear || d.shorts || []).slice();
+      if (!bulls.length && !bears.length && Array.isArray(d.list)) {
+        d.list.forEach(function (r) {
+          var side = String(r.side || r.dir || r.bias || '');
+          if (/空|short|bear|sell/i.test(side) || (r.score != null && r.score < 0)) bears.push(r);
+          else bulls.push(r);
+        });
+      }
+      var scanned = d.scanned != null ? d.scanned : (bulls.length + bears.length);
+      if (!bulls.length && !bears.length) {
         body.innerHTML =
+          '<div class="hub-strip">' +
+            '<div class="cell"><div class="k">掃描檔數</div><div class="v">' + scanned + '</div></div>' +
+            '<div class="cell"><div class="k">做多</div><div class="v up">0</div></div>' +
+            '<div class="cell"><div class="k">做空</div><div class="v dn">0</div></div>' +
+            '<div class="cell"><div class="k">狀態</div><div class="v">無訊號</div><div class="s">按掃描或選股</div></div>' +
+          '</div>' +
           '<div class="hub-dash hub-dash-1">' +
             '<div class="hub-sec"><h4>策略訊號清單</h4>' +
-            '<div class="hub-empty">目前沒有新的策略訊號 — 可按「執行焦點掃描」或前往選股</div></div></div>';
+            '<div class="hub-empty">目前沒有焦點訊號 — 按「執行焦點掃描」或前往選股</div></div></div>';
         bindCommon(el);
         return;
       }
       var V = window.Viz;
-      function classify(r) {
-        var side = r.side || r.dir || r.bias || (r.score != null && r.score < 0 ? '空' : '多');
-        var sideStr = String(side);
-        if (/空|short|bear|sell|偏空/i.test(sideStr)) return 'bear';
-        if (/多|long|bull|buy|偏多/i.test(sideStr)) return 'bull';
-        if (r.score != null && isFinite(r.score) && r.score < 0) return 'bear';
-        return 'bull';
-      }
-      function rowHtml(r) {
+      function rowHtml(r, sideKind) {
         var code = r.code || r.sym || r.ticker || '';
         var name = r.name || '';
-        var side = r.side || r.dir || r.bias || (r.score != null && r.score < 0 ? '空' : '多');
-        var score = r.score != null ? r.score : (r.confidence != null ? r.confidence : '—');
-        var desc = r.reason || r.description || r.why || '';
-        var sideStr = String(side);
-        var bull = /多|long|bull|buy|偏多/i.test(sideStr);
-        var bear = /空|short|bear|sell|偏空/i.test(sideStr);
-        var sideCell = sideStr;
-        if (V) {
-          if (bull) sideCell = V.chip('偏多', 'buy');
-          else if (bear) sideCell = V.chip('偏空', 'sell');
-          else sideCell = V.chip(sideStr, 'mid');
-        }
-        var scoreNum = typeof score === 'number' ? score : parseFloat(score);
-        var scoreCell = score;
-        if (V && scoreNum === scoreNum) {
-          var meterScore = Math.abs(scoreNum) <= 1 ? scoreNum * 100 : Math.max(0, Math.min(100, Math.abs(scoreNum)));
-          scoreCell = (scoreNum >= 0 ? '+' : '') + Number(scoreNum).toFixed(1) + V.scoreMeter(meterScore);
+        var score = r.score != null ? r.score : (r.confidence != null ? r.confidence : null);
+        var desc = '';
+        if (Array.isArray(r.signals) && r.signals.length) desc = r.signals.slice(0, 3).join(' · ');
+        else desc = r.reason || r.description || r.why || r.signal || '';
+        var sideCell = sideKind === 'bear'
+          ? (V ? V.chip('做空', 'sell') : '做空')
+          : (V ? V.chip('做多', 'buy') : '做多');
+        var scoreCell = '—';
+        if (score != null && isFinite(score)) {
+          var meterScore = Math.abs(score) <= 1 ? score * 100 : Math.max(0, Math.min(100, Math.abs(score)));
+          scoreCell = (score >= 0 ? '+' : '') + Number(score).toFixed(1);
+          if (V) scoreCell += V.scoreMeter(meterScore);
         }
         return '<tr data-code="' + code + '"><td style="color:var(--gold);font-weight:700">' + code +
           '</td><td>' + name + '</td><td>' + sideCell + '</td><td>' + scoreCell +
           '</td><td style="text-align:left;color:var(--tlo)">' + desc + '</td></tr>';
       }
-      var bulls = [], bears = [];
-      list.forEach(function (r) {
-        if (classify(r) === 'bear') bears.push(r);
-        else bulls.push(r);
-      });
-      var bullRows = bulls.slice(0, 40).map(rowHtml).join('') ||
-        '<tr><td colspan="5">目前無偏多訊號</td></tr>';
-      var bearRows = bears.slice(0, 40).map(rowHtml).join('') ||
-        '<tr><td colspan="5">目前無偏空訊號</td></tr>';
-      var dashCls = (!bears.length && bulls.length) ? 'hub-cols-wide-left'
-        : (!bulls.length && bears.length) ? 'hub-cols-2'
-        : 'hub-cols-2';
+      var bullRows = bulls.slice(0, 40).map(function (r) { return rowHtml(r, 'bull'); }).join('') ||
+        '<tr><td colspan="5">目前無做多訊號</td></tr>';
+      var bearRows = bears.slice(0, 40).map(function (r) { return rowHtml(r, 'bear'); }).join('') ||
+        '<tr><td colspan="5">目前無做空訊號</td></tr>';
       body.innerHTML =
         '<div class="hub-strip">' +
-          '<div class="cell"><div class="k">訊號總數</div><div class="v">' + list.length + '</div></div>' +
-          '<div class="cell"><div class="k">偏多</div><div class="v up">' + bulls.length + '</div></div>' +
-          '<div class="cell"><div class="k">偏空</div><div class="v dn">' + bears.length + '</div></div>' +
-          '<div class="cell"><div class="k">來源</div><div class="v">/focus</div><div class="s">點列開圖表</div></div>' +
+          '<div class="cell"><div class="k">掃描檔數</div><div class="v">' + scanned + '</div><div class="s">焦點掃描</div></div>' +
+          '<div class="cell"><div class="k">做多</div><div class="v up">' + bulls.length + '</div></div>' +
+          '<div class="cell"><div class="k">做空</div><div class="v dn">' + bears.length + '</div></div>' +
+          '<div class="cell"><div class="k">合計</div><div class="v">' + (bulls.length + bears.length) +
+            '</div><div class="s">點列開圖表</div></div>' +
         '</div>' +
-        '<div class="hub-dash ' + dashCls + '">' +
-          '<div class="hub-sec"><h4>偏多訊號 · ' + bulls.length + '</h4><div class="hub-fill"><table>' +
-            '<tr><th>代號</th><th>名稱</th><th>方向</th><th>分數</th><th>說明</th></tr>' +
+        '<div class="hub-dash hub-cols-2">' +
+          '<div class="hub-sec"><h4>做多焦點 · ' + bulls.length + '</h4><div class="hub-fill"><table>' +
+            '<tr><th>代號</th><th>名稱</th><th>方向</th><th>分數</th><th>訊號</th></tr>' +
             bullRows + '</table></div></div>' +
-          '<div class="hub-sec"><h4>偏空訊號 · ' + bears.length + '</h4><div class="hub-fill"><table>' +
-            '<tr><th>代號</th><th>名稱</th><th>方向</th><th>分數</th><th>說明</th></tr>' +
+          '<div class="hub-sec"><h4>做空焦點 · ' + bears.length + '</h4><div class="hub-fill"><table>' +
+            '<tr><th>代號</th><th>名稱</th><th>方向</th><th>分數</th><th>訊號</th></tr>' +
             bearRows + '</table></div></div>' +
         '</div>';
       bindCommon(el);
+    }).finally(function () {
+      if (window.ShellV5 && window.ShellV5.softBadge) {
+        window.ShellV5.softBadge('mount-signals', false);
+      }
     });
   }
 
@@ -702,8 +724,22 @@
     if (!body) return;
     if (!wl.length) {
       body.innerHTML =
-        '<div class="hub-dash hub-dash-1">' +
-          '<div class="hub-sec"><div class="hub-empty">尚無自選股 — 於圖表按 ＋ 加入</div></div></div>';
+        '<div class="hub-strip">' +
+          '<div class="cell"><div class="k">自選總數</div><div class="v">0</div></div>' +
+          '<div class="cell"><div class="k">台股</div><div class="v">0</div></div>' +
+          '<div class="cell"><div class="k">美股</div><div class="v">0</div></div>' +
+          '<div class="cell"><div class="k">下一步</div><div class="v" style="font-size:11px">加入自選</div></div>' +
+        '</div>' +
+        '<div class="hub-dash hub-cols-2">' +
+          '<div class="hub-sec"><h4>尚未加入自選</h4>' +
+            '<div class="hub-empty">於圖表按 ＋ 加入，或從選股／熱力點進個股後加入</div>' +
+            '<div class="hub-note"><button class="hub-btn" data-go="scan">選股</button> ' +
+            '<button class="hub-btn" data-go="heat">熱力</button> ' +
+            '<button class="hub-btn primary" data-go="chart">圖表</button></div></div>' +
+          '<div class="hub-sec"><h4>用法</h4><div class="hub-fill" style="padding:8px;font-size:10px;color:var(--tlo);line-height:1.55">' +
+            '自選存於本機瀏覽器。<br>台股走 /twquote-batch，美股走 /quote-batch。<br>點列即可載入線型。</div></div>' +
+        '</div>';
+      bindCommon(el);
       return;
     }
     var twc = wl.filter(function (w) { return (w.m || 'TW') === 'TW'; }).map(function (w) { return w.t; });
@@ -715,25 +751,37 @@
       var q = Object.assign({}, arr[0] || {}, arr[1] || {});
       var V = window.Viz;
       var maxChg = 0;
+      var upN = 0, dnN = 0;
       wl.forEach(function (w) {
         var qq = q[w.t] || q[w.t + '.TW'] || q[w.t + '.TWO'] || {};
         var ch = qq.changePct != null ? qq.changePct : w.chg;
-        if (ch != null && isFinite(ch)) maxChg = Math.max(maxChg, Math.abs(ch));
+        if (ch != null && isFinite(ch)) {
+          maxChg = Math.max(maxChg, Math.abs(ch));
+          if (ch > 0) upN++; else if (ch < 0) dnN++;
+        }
       });
       if (maxChg < 0.01) maxChg = 1;
+      function volOf(qq) {
+        var v = qq.volume != null ? qq.volume : (qq.vol != null ? qq.vol : qq.regularMarketVolume);
+        if (v == null || !isFinite(v)) return '—';
+        if (v >= 1e8) return (v / 1e8).toFixed(1) + ' 億股';
+        if (v >= 1e4) return (v / 1e4).toFixed(0) + ' 萬';
+        return Math.round(v).toLocaleString('en-US');
+      }
       function rowOf(w) {
         var qq = q[w.t] || q[w.t + '.TW'] || q[w.t + '.TWO'] || {};
         var ch = qq.changePct != null ? qq.changePct : w.chg;
         var bar = V ? V.rowBar(ch, maxChg) : '';
+        var name = w.name || qq.name || qq.shortName || '';
         return '<tr data-code="' + w.t + '" data-mkt="' + (w.m || 'TW') + '"><td style="color:var(--gold);font-weight:700">' +
-          w.t + '</td><td>' + (w.name || '') + '</td><td>' +
+          w.t + '</td><td>' + name + '</td><td>' +
           fmt(qq.price != null ? qq.price : w.price) + '</td><td class="' + tw(ch) + '">' +
-          pct(ch) + bar + '</td></tr>';
+          pct(ch) + bar + '</td><td style="color:var(--tlo)">' + volOf(qq) + '</td></tr>';
       }
       var twRows = wl.filter(function (w) { return (w.m || 'TW') === 'TW'; }).map(rowOf).join('') ||
-        '<tr><td colspan="4">尚無台股自選</td></tr>';
+        '<tr><td colspan="5">尚無台股自選</td></tr>';
       var usRows = wl.filter(function (w) { return w.m === 'US'; }).map(rowOf).join('') ||
-        '<tr><td colspan="4">尚無美股自選</td></tr>';
+        '<tr><td colspan="5">尚無美股自選</td></tr>';
       var b = $('hub-wl-body');
       if (!b) return;
       b.innerHTML =
@@ -741,14 +789,15 @@
           '<div class="cell"><div class="k">自選總數</div><div class="v">' + wl.length + '</div></div>' +
           '<div class="cell"><div class="k">台股</div><div class="v">' + twc.length + '</div></div>' +
           '<div class="cell"><div class="k">美股</div><div class="v">' + usc.length + '</div></div>' +
-          '<div class="cell"><div class="k">報價</div><div class="v">' + (twc.length + usc.length ? '即時' : '—') + '</div></div>' +
+          '<div class="cell"><div class="k">漲／跌</div><div class="v"><span class="up">' + upN +
+            '</span> / <span class="dn">' + dnN + '</span></div></div>' +
         '</div>' +
         '<div class="hub-dash hub-cols-2">' +
-          '<div class="hub-sec"><h4>台股自選</h4><div class="hub-fill"><table>' +
-            '<tr><th>代號</th><th>名稱</th><th>最新價</th><th>漲跌</th></tr>' +
+          '<div class="hub-sec"><h4>台股自選 · ' + twc.length + '</h4><div class="hub-fill"><table>' +
+            '<tr><th>代號</th><th>名稱</th><th>最新價</th><th>漲跌</th><th>量</th></tr>' +
             twRows + '</table></div></div>' +
-          '<div class="hub-sec"><h4>美股自選</h4><div class="hub-fill"><table>' +
-            '<tr><th>代號</th><th>名稱</th><th>最新價</th><th>漲跌</th></tr>' +
+          '<div class="hub-sec"><h4>美股自選 · ' + usc.length + '</h4><div class="hub-fill"><table>' +
+            '<tr><th>代號</th><th>名稱</th><th>最新價</th><th>漲跌</th><th>量</th></tr>' +
             usRows + '</table></div></div>' +
         '</div>';
       bindCommon(el);

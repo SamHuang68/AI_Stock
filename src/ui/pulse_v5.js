@@ -447,9 +447,10 @@
     var tone = breadthToneLabel(adv, s.lsRatio);
     var toneKind = (tone.indexOf('偏多') >= 0 || tone.indexOf('極度偏多') >= 0) ? 'buy'
       : (tone.indexOf('偏空') >= 0 || tone.indexOf('極度偏空') >= 0) ? 'sell' : 'mid';
-    var udfViz = V ? V.segBar(s.up, s.flat, s.down) : '';
-    var turnViz = (V && s.turnoverYi != null) ? V.refMeter(s.turnoverYi, [8000, 12000]) : '';
-    var advViz = V ? (V.scoreMeter((adv || 0) * 100) + V.chip(tone, toneKind)) : '';
+    /* strip 已用 CSS 隱藏 viz；不再生死碼量柱／分數條（細節在各面板） */
+    var udfViz = '';
+    var turnViz = '';
+    var advViz = V ? V.chip(tone, toneKind) : '';
     var txfSess = txf.sessionLabel || (txf.session === 'night' ? '夜盤' : (txf.session === 'day' ? '日盤' : ''));
     return '<div class="pl-strip">' +
       '<div class="cell"><div class="k">加權指數 TAIEX</div><div class="v">' + fmt(t00.price, 2) + '</div>' +

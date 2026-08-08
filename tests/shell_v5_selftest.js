@@ -51,6 +51,25 @@ ok(/hub-inst-hero/.test(hub), 'institutional hero strip');
 ok(/data-who="trust"/.test(hub) && /data-who="dealer"/.test(hub), 'institutional who tabs');
 ok(/fmtLots/.test(hub) && /單位：張/.test(hub), 'institutional ranks use 張');
 ok(/magBars/.test(hub) && /refMeter/.test(hub), 'institutional magBars + turnover meter');
+ok(/d\.buy \|\| d\.long/.test(hub) || /focus\.buy/.test(hub) || /d\.buy \|\|/.test(hub),
+  'signals use /focus buy field');
+ok(/hub-card\[data-code\]/.test(hub) || /data-code="' \+ sym/.test(hub),
+  'international cards clickable');
+
+const ai = fs.readFileSync(path.join(root, 'src/ui/ai_v5.js'), 'utf8');
+ok(/ai5-strip/.test(ai) && /ai5-dash/.test(ai), 'ai professional strip+dash');
+ok(/focus\.buy/.test(ai) || /buy \|\| focus\.long/.test(ai), 'ai maps focus.buy');
+ok(!/ai5-card/.test(ai) || /ai5-tools/.test(ai), 'ai launcher not card-grid only');
+
+const ah = fs.readFileSync(path.join(root, 'src/ui/afterhours_v5.js'), 'utf8');
+ok(/自營/.test(ah) && /成交金額/.test(ah), 'afterhours strip has 成交／籌碼含自營');
+
+const bd = fs.readFileSync(path.join(root, 'src/ui/breadth_v5.js'), 'utf8');
+ok(/強弱榜/.test(bd), 'breadth movers replace note panel');
+ok(/結構條不重複/.test(bd) || /結構只用 magBars/.test(bd), 'breadth avoids inst number+bar dup');
+
+const nw = fs.readFileSync(path.join(root, 'src/ui/news_v5.js'), 'utf8');
+ok(/nw-mkt-seg/.test(nw) && /flashMkt/.test(nw), 'news TW/US filter');
 
 if (failed) {
   console.error('\n' + failed + ' failure(s)');

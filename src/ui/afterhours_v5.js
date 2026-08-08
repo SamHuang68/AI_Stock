@@ -355,13 +355,17 @@
     var total = inst ? ((inst.foreign || 0) + (inst.trust || 0) + (inst.dealer || 0)) : null;
 
     var strip =
-      stripCell('台指期夜盤', txf ? fmtN(txf.price) : '—', pct(txf && txf.changePct), twCls(txf && txf.changePct)) +
-      stripCell('夜盤%', pct(txf && txf.changePct), txf ? (txf.sessionLabel || '夜盤') : '—', twCls(txf && txf.changePct)) +
-      stripCell('夜盤振幅', txf && txf.ampRate != null ? txf.ampRate.toFixed(2) + '%' : '—', txf ? fmtN(txf.volume) + ' 口' : '—') +
+      stripCell('台指期夜盤', txf ? fmtN(txf.price) : '—',
+        (pct(txf && txf.changePct) + (txf && txf.sessionLabel ? ' · ' + txf.sessionLabel : '')),
+        twCls(txf && txf.changePct)) +
+      stripCell('夜盤振幅', txf && txf.ampRate != null ? txf.ampRate.toFixed(2) + '%' : '—',
+        txf ? fmtN(txf.volume) + ' 口' : '—') +
       stripCell('漲跌家數', '<span class="up">' + fmtN(st.up) + '</span> / <span class="dn">' + fmtN(st.down) + '</span>',
         '淨 ' + (st.net != null ? ((st.net >= 0 ? '+' : '') + st.net) : '—')) +
       stripCell('大盤體質', bd.score != null ? bd.score : '—', bd.summary || '量能／法人／融資') +
-      stripCell('法人合計', fyi(total), yi(latestAmt) + ' 成交');
+      stripCell('成交金額', yi(latestAmt), (mf.date || '量能')) +
+      stripCell('法人合計', fyi(total),
+        '外 ' + fyi(inst && inst.foreign) + ' · 投 ' + fyi(inst && inst.trust));
 
     var txfBlock = '<div class="ah-sec"><h4>台指期夜盤</h4>';
     if (!txf) {
@@ -418,9 +422,9 @@
       var mktLine = buildMktLine(bd, txf);
       instBlock += '<div class="ah-fill">' +
         '<div class="ah-inst4">' +
-          '<div class="c"><div class="k">成交金額</div><div class="v">' + yi(latestAmt) + '</div></div>' +
           '<div class="c"><div class="k">外資</div><div class="v ' + twCls(inst && inst.foreign) + '">' + fyi(inst && inst.foreign) + '</div></div>' +
           '<div class="c"><div class="k">投信</div><div class="v ' + twCls(inst && inst.trust) + '">' + fyi(inst && inst.trust) + '</div></div>' +
+          '<div class="c"><div class="k">自營</div><div class="v ' + twCls(inst && inst.dealer) + '">' + fyi(inst && inst.dealer) + '</div></div>' +
           '<div class="c"><div class="k">合計</div><div class="v ' + twCls(total) + '">' + fyi(total) + '</div></div>' +
         '</div>' +
         '<div class="ah-inst-trend" id="ah-inst-trend">' +

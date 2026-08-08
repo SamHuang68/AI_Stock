@@ -329,25 +329,28 @@
     }
     if (inst) {
       var total = (inst.foreign || 0) + (inst.trust || 0) + (inst.dealer || 0);
-      rows += '<div class="bd-row"><span class="rk">外資（' + (inst.date || '') + '）</span><span class="rv ' +
-        clsChg(inst.foreign) + '">' + fyi(inst.foreign) + '</span></div>';
-      rows += '<div class="bd-row"><span class="rk">投信</span><span class="rv ' + clsChg(inst.trust) + '">' +
-        fyi(inst.trust) + '</span></div>';
-      rows += '<div class="bd-row"><span class="rk">自營商</span><span class="rv ' + clsChg(inst.dealer) + '">' +
-        fyi(inst.dealer) + '</span></div>';
-      rows += '<div class="bd-row"><span class="rk">三大法人合計</span><span class="rv ' + clsChg(total) + '">' +
-        fyi(total) + '</span></div>';
+      rows += '<div class="bd-row"><span class="rk">三大法人合計（' + (inst.date || '') + '）</span><span class="rv ' +
+        clsChg(total) + '">' + fyi(total) + '</span></div>';
+      /* 結構只用 magBars，避免與數字列重複 */
       if (V) {
         rows += '<div class="bd-row" style="display:block;padding-top:4px;grid-column:1/-1;border:none">' + V.magBars([
           { label: '外資', v: inst.foreign, fmt: V.fmtYiFromYuan },
           { label: '投信', v: inst.trust, fmt: V.fmtYiFromYuan },
           { label: '自營', v: inst.dealer, fmt: V.fmtYiFromYuan }
         ]) + '</div>';
+      } else {
+        rows += '<div class="bd-row"><span class="rk">外資</span><span class="rv ' + clsChg(inst.foreign) + '">' +
+          fyi(inst.foreign) + '</span></div>';
+        rows += '<div class="bd-row"><span class="rk">投信</span><span class="rv ' + clsChg(inst.trust) + '">' +
+          fyi(inst.trust) + '</span></div>';
+        rows += '<div class="bd-row"><span class="rk">自營</span><span class="rv ' + clsChg(inst.dealer) + '">' +
+          fyi(inst.dealer) + '</span></div>';
       }
     }
 
     var detailBlock =
-      '<div class="bd-sec"><h4>細節</h4><div class="bd-fill"><div class="bd-rows">' + rows + '</div></div></div>';
+      '<div class="bd-sec"><h4>量能／法人細節</h4><div class="bd-fill"><div class="bd-rows">' + rows + '</div></div>' +
+        '<div class="bd-note">股票＝上市股票統計；法人＝BFI82U · 結構條不重複合計數字</div></div>';
 
     var hist = d._hist || [];
     var histBlock = '';
@@ -383,11 +386,35 @@
             ' · pulse_history.db</div></div>';
     }
 
-    var noteSec =
-      '<div class="bd-sec"><h4>備註</h4><div class="bd-fill">' +
-        '<div class="bd-note" style="margin:0;font-size:9px;line-height:1.5">' +
-        '股票欄位為上市「股票」統計（不含權證／ETF）；整體市場含全部證券。' +
-        '漲跌家數為 TWSE 盤後公布，盤中或休市日自動取最近交易日。台股慣例：紅漲綠跌。僅供參考。</div></div></div>';
+    function limHalf(list, title, cls) {
+      var maxAbs = 0;
+      var slice = list.slice(0, 12);
+      slice.forEach(function (r) {
+        if (r.changePct != null && isFinite(r.changePct)) maxAbs = Math.max(maxAbs, Math.abs(r.changePct));
+      });
+      var h = '<div><div style="font-size:9px;color:var(--tlo);margin:0 0 3px;font-weight:700">' + title +
+        ' · ' + list.length + '</div>';
+      if (!slice.length) return h + '<div class="bd-note">尚無</div></div>';
+      h += '<table class="bd-hist"><tr><th>#</th><th>代號</th><th>漲跌</th></tr>';
+      slice.forEach(function (r, i) {
+        var bar = (V && r.changePct != null) ? V.rowBar(r.changePct, maxAbs || 1) : '';
+        h += '<tr class="bd-row-click" data-code="' + (r.code || '') + '" style="cursor:pointer">' +
+          '<td>' + (i + 1) + '</td><td style="color:var(--gold);font-weight:700" title="' +
+          (r.name || '') + '">' + (r.code || '') + '</td><td class="' + (cls || clsChg(r.changePct)) + '">' +
+          fmtPct(r.changePct) + bar + '</td></tr>';
+      });
+      return h + '</table></div>';
+    }
+    var upList = limUpList.length ? limUpList : (mv.gainers || []);
+    var dnList = limDnList.length ? limDnList : (mv.losers || []);
+    var upTitle = limUpList.length ? '漲停／強勢' : '漲幅前列';
+    var dnTitle = limDnList.length ? '跌停／弱勢' : '跌幅前列';
+    var moversSec =
+      '<div class="bd-sec"><h4>強弱榜<span style="color:var(--tlo);font-weight:600;font-size:8px">/movers</span></h4>' +
+        '<div class="bd-fill" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;align-content:start">' +
+          limHalf(upList, upTitle, 'up') + limHalf(dnList, dnTitle, 'dn') +
+        '</div>' +
+        '<div class="bd-note">點列開圖表 · 紅漲綠跌</div></div>';
 
     body.innerHTML =
       '<div class="bd-strip">' + strip + '</div>' +
@@ -395,10 +422,19 @@
         '<div class="bd-zone bd-zone-up">' + breadthBlock + detailBlock + '</div>' +
         '<div class="bd-zone bd-zone-lo">' +
           (histBlock || '<div class="bd-sec"><h4>歷史廣度</h4><div class="bd-fill"><div class="bd-note">尚無本機歷史紀錄</div></div></div>') +
-          noteSec +
+          moversSec +
         '</div>' +
       '</div>' +
       (d.error && !d.ok ? '<div class="bd-err">' + d.error + '</div>' : '');
+    body.querySelectorAll('tr.bd-row-click[data-code]').forEach(function (tr) {
+      tr.onclick = function () {
+        var c = tr.getAttribute('data-code');
+        if (c && typeof loadSym === 'function') {
+          if (window.ShellV5 && ShellV5.openChart) ShellV5.openChart(c, 'TW');
+          else { loadSym(c, 'TW'); if (window.ShellV5) window.ShellV5.go('chart'); }
+        }
+      };
+    });
     lastData = d;
     bindLimitPopups($('bd-root'));
   }
@@ -407,7 +443,7 @@
     opts = opts || {};
     var body = ensureMount();
     if (!body) return;
-    var soft = !!opts.soft || !!lastData || !!body.querySelector('.bd-grid, .bd-section, .bd-card');
+    var soft = !!opts.soft || !!lastData || !!body.querySelector('.bd-strip, .bd-dash, .bd-sec');
     if (window.ShellV5 && window.ShellV5.softBadge) {
       window.ShellV5.softBadge('mount-breadth', soft, '更新中…');
     }
