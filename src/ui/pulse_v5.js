@@ -101,15 +101,22 @@
         'gap:4px;text-align:center;color:#94a3b8;font-size:9px;line-height:1.4;padding:8px;' +
         'border:1px dashed rgba(148,163,184,.25);border-radius:6px;background:rgba(15,23,42,.35)}' +
       '#pl-root .pl-empty b{color:var(--thi);font-size:10px}' +
-      /* 市場脈動：三燈橫卡（綜合／體質／風險），不再用大圓環佔黃金區 */
-      '#pl-root .pl-score3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;flex:0 0 auto}' +
+      /* 市場脈動：母分（綜合）＋子項（體質70%／風險30%），算式透明 */
+      '#pl-root .pl-score3{display:grid;grid-template-columns:1.35fr 1fr 1fr;gap:4px;flex:0 0 auto;align-items:stretch}' +
       '#pl-root .pl-score3 .sc{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:5px 6px;min-width:0}' +
-      '#pl-root .pl-score3 .sc.main{border-color:rgba(245,197,24,.40);background:linear-gradient(180deg,rgba(28,38,58,.98),rgba(14,22,38,.98))}' +
-      '#pl-root .pl-score3 .sc .k{font-size:8px;color:#94a3b8;letter-spacing:.3px}' +
-      '#pl-root .pl-score3 .sc .v{font-size:18px;font-weight:800;color:var(--thi);line-height:1.15;margin-top:2px}' +
+      '#pl-root .pl-score3 .sc.main{border-color:rgba(245,197,24,.45);' +
+        'background:linear-gradient(180deg,rgba(36,48,72,.98),rgba(14,22,38,.98));padding:6px 8px}' +
+      '#pl-root .pl-score3 .sc.child{opacity:.95}' +
+      '#pl-root .pl-score3 .sc .k{font-size:8px;color:#94a3b8;letter-spacing:.3px;' +
+        'display:flex;justify-content:space-between;align-items:baseline;gap:4px}' +
+      '#pl-root .pl-score3 .sc .k .w{color:var(--gold);font-weight:700;font-size:8px;white-space:nowrap}' +
+      '#pl-root .pl-score3 .sc .v{font-size:15px;font-weight:800;color:var(--thi);line-height:1.15;margin-top:2px}' +
+      '#pl-root .pl-score3 .sc.main .v{font-size:22px;letter-spacing:-0.3px}' +
       '#pl-root .pl-score3 .sc .l{font-size:8px;font-weight:700;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#pl-root .pl-score3 .sc .l.pos{color:var(--gold)}' +
       '#pl-root .pl-score3 .sc .l.risk{color:var(--cyan)}' +
+      '#pl-root .pl-score-formula{font-size:8px;color:#64748b;margin:3px 0 0;line-height:1.35;flex:0 0 auto}' +
+      '#pl-root .pl-score-formula b{color:#94a3b8;font-weight:700}' +
       '#pl-root .pl-score-meta{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;flex:0 0 auto}' +
       '#pl-root .pl-score-meta .m{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px}' +
       '#pl-root .pl-score-meta .m .k{font-size:8px;color:#94a3b8}' +
@@ -118,7 +125,8 @@
       '#pl-root .pl-comp > i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--gold))}' +
       '#pl-root .pl-drivers{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;font-size:9px;flex:1;min-height:0}' +
       '#pl-root .pl-drivers .box{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px;min-height:0;overflow:auto}' +
-      '#pl-root .pl-drivers .box .k{color:#94a3b8;margin-bottom:2px;font-size:8px}' +
+      '#pl-root .pl-drivers .box .k{color:#94a3b8;margin-bottom:2px;font-size:8px;font-weight:700}' +
+      '#pl-root .pl-drivers .box .k span{color:#64748b;font-weight:600}' +
       '#pl-root .pl-drivers .box li{margin:1px 0;color:var(--text);list-style:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       /* OHLC / 加權盤勢（不再重複頂列三指數） */
       '#pl-root .pl-ohlc{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;flex:0 0 auto}' +
@@ -657,24 +665,30 @@
     var totalMeter = V ? V.scoreMeter(total) : '';
     var healthMeter = V ? V.scoreMeter(health) : '';
     var riskMeter = V ? V.scoreMeter(risk, { color: 'var(--cyan)' }) : '';
-    /* 綜合＝0.7×體質＋0.3×(100−風險)；勿再標「動能」造成與體質衝突 */
+    /* 母分綜合＝0.7×大盤體質＋0.3×(100−風險)；子項並列但視覺降級 */
+    var formulaBits = '綜合 = <b>70%</b>×大盤體質 + <b>30%</b>×(100−風險)';
+    if (health != null && risk != null && total != null) {
+      var chk = 0.7 * Number(health) + 0.3 * (100 - Number(risk));
+      formulaBits += ' → <b>' + chk.toFixed(1) + '</b>';
+    }
     return '<div class="pl-sec"><h4>市場脈動 <a data-go="pulse">因子 →</a></h4>' +
       '<div class="pl-score3">' +
-        '<div class="sc main" title="綜合脈動＝0.7×體質＋0.3×(100−風險)">' +
-          '<div class="k">綜合</div><div class="v">' +
-            (total != null ? Number(total).toFixed(1) : '—') + '</div>' +
+        '<div class="sc main" title="綜合脈動（母分）＝0.7×大盤體質＋0.3×(100−風險)">' +
+          '<div class="k"><span>綜合脈動</span></div>' +
+          '<div class="v">' + (total != null ? Number(total).toFixed(1) : '—') + '</div>' +
           '<div class="l pos">' + esc(p.statusText || '—') + '</div>' + totalMeter + '</div>' +
-        '<div class="sc" title="大盤體質（量能＋法人＋融資＋估值）">' +
-          '<div class="k">體質</div><div class="v">' +
-            (health != null ? Number(health).toFixed(1) : '—') + '</div>' +
+        '<div class="sc child" title="大盤體質子項（量能＋法人＋融資＋估值），權重 70%">' +
+          '<div class="k"><span>大盤體質</span><span class="w">權重 70%</span></div>' +
+          '<div class="v">' + (health != null ? Number(health).toFixed(1) : '—') + '</div>' +
           '<div class="l pos">' + esc(p.healthLabel || '—') + '</div>' + healthMeter + '</div>' +
-        '<div class="sc" title="風險因子軟封頂分數（越高越警戒）">' +
-          '<div class="k">風險</div><div class="v">' +
-            (risk != null ? Number(risk).toFixed(1) : '—') + '</div>' +
+        '<div class="sc child" title="風險因子軟封頂（越高越警戒）；綜合取 30%×(100−風險)">' +
+          '<div class="k"><span>風險</span><span class="w">權重 30%</span></div>' +
+          '<div class="v">' + (risk != null ? Number(risk).toFixed(1) : '—') + '</div>' +
           '<div class="l risk">' + esc(p.riskLabel || '—') + '</div>' + riskMeter + '</div>' +
       '</div>' +
+      '<div class="pl-score-formula" title="與 /pulse 後端算式一致">' + formulaBits + '</div>' +
       '<div class="pl-score-meta">' +
-        '<div class="m"><div class="k">正面因素</div><div class="v pl-st-pos">' +
+        '<div class="m"><div class="k">正面因子合計</div><div class="v pl-st-pos">' +
           (p.positiveFactorScore != null ? Number(p.positiveFactorScore).toFixed(1) : '—') +
           '<span class="pl-st-mid" style="font-size:9px;font-weight:600"> · ' +
             ((p.positiveFactors || []).length) + ' 項</span></div></div>' +
@@ -684,10 +698,10 @@
           '<div class="pl-comp"><i style="width:' + comp + '%"></i></div></div>' +
       '</div>' +
       '<div class="pl-drivers">' +
-        '<div class="box"><div class="k">主要動能</div><ul>' +
+        '<div class="box"><div class="k">正面因子 <span>· 支撐訊號</span></div><ul>' +
           (drivers.length ? drivers.map(function (n) { return '<li>· ' + esc(n) + '</li>'; }).join('') : '<li class="pl-st-mid">—</li>') +
         '</ul></div>' +
-        '<div class="box"><div class="k">主要壓力</div><ul>' +
+        '<div class="box"><div class="k">風險因子 <span>· 計入風險分</span></div><ul>' +
           (pressures.length ? pressures.map(function (n) { return '<li>· ' + esc(n) + '</li>'; }).join('') : '<li class="pl-st-mid">—</li>') +
         '</ul></div></div>' +
       '</div>';
@@ -1668,7 +1682,7 @@
           ? V.sparkLine(riskSeries, { color: 'var(--cyan)', xUnit: '日', yUnit: '分', yDigits: 0 }) : '';
         if (hSpark || rSpark) {
           sparks = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">' +
-            (hSpark ? '<div><div style="font-size:9px;color:var(--tlo)">動能（X：日 · Y：分）</div>' + hSpark + '</div>' : '') +
+            (hSpark ? '<div><div style="font-size:9px;color:var(--tlo)">大盤體質（X：日 · Y：分）</div>' + hSpark + '</div>' : '') +
             (rSpark ? '<div><div style="font-size:9px;color:var(--tlo)">風險（X：日 · Y：分）</div>' + rSpark + '</div>' : '') +
             '</div>';
         }
@@ -1676,7 +1690,7 @@
       var html = '<div class="pl-sec"><h4>市場脈搏歷史（本機庫）</h4>' + sparks +
         '<table style="width:100%;border-collapse:collapse;font-size:11px">' +
         '<tr style="color:var(--tlo)"><th style="text-align:left;padding:4px">日期</th>' +
-        '<th style="padding:4px">動能</th><th style="padding:4px">風險</th><th style="padding:4px">總分</th>' +
+        '<th style="padding:4px">體質</th><th style="padding:4px">風險</th><th style="padding:4px">綜合</th>' +
         '<th style="padding:4px">可靠度</th><th style="padding:4px">狀態</th></tr>';
       rows.forEach(function (r) {
         html += '<tr><td style="padding:4px">' + esc(r.date) + '</td><td style="padding:4px;text-align:right">' +

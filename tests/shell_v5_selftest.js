@@ -101,8 +101,12 @@ ok(/data-watch-mkt/.test(pl) && /filterWatchlist/.test(pl) && /pl-wl-scroll/.tes
   'pulse watchlist has TW/US tabs and fixed scroll region');
 ok(/instFlowQuant/.test(pl) && /rankLabel/.test(pl) && /pl-inst-ctx/.test(pl),
   'pulse institutional shows Z/percentile/rank context');
-ok(/pl-score3/.test(pl) && /綜合/.test(pl) && /體質/.test(pl) && !/市場動能/.test(pl),
-  'pulse gauge collapsed to 綜合｜體質｜風險 trio (no mislabeled 動能)');
+ok(/pl-score3/.test(pl) && /綜合脈動/.test(pl) && /大盤體質/.test(pl) && /權重 70%/.test(pl) && /權重 30%/.test(pl),
+  'pulse score trio shows parent 綜合 + child weights 70/30');
+ok(/正面因子/.test(pl) && /風險因子/.test(pl) && /計入風險分/.test(pl) && !/主要動能/.test(pl),
+  'pulse drivers labeled 正面／風險因子 (not 主要動能)');
+ok(/大盤體質（X：日/.test(pl) && !/>動能</.test(pl),
+  'pulse history labels health as 體質 not 動能');
 ok(/industryLabel/.test(pl) && /bindSectorMoverLink/.test(pl) && /data-sector-key/.test(pl),
   'pulse movers industry tags + sector hover link');
 
