@@ -173,7 +173,6 @@ ok(/Resolve-StockPython/.test(goPs) && /Test-BlockedPython/.test(goPs) &&
   /hermes/.test(goPs) && /Stock Terminal Server v5 tip/.test(goPs) &&
   /PULSE_LAYOUT_ANCHOR_3cab212/.test(goPs),
   'go.ps1 blocks hermes python and launches titled live server console');
-const goBat = fs.readFileSync(path.join(root, 'scripts/go.bat'), 'utf8');
 ok(/ST_PYTHON/.test(goBat) && /hermes-agent/.test(goBat) && /FAIL_PYTHON_HERMES/.test(goBat),
   'go.bat also resolves python and blocks hermes');
 
