@@ -106,8 +106,9 @@ ok(/data-watch-mkt/.test(pl) && /filterWatchlist/.test(pl) && /pl-wl-scroll/.tes
 ok(/instFlowQuant/.test(pl) && /rankLabel/.test(pl) && /pl-inst-ctx/.test(pl) &&
   /pl-inst-stale/.test(pl) && /當日尚未公布/.test(pl),
   'pulse institutional shows Z/percentile/rank + compact stale tag');
-ok(/pl-score3/.test(pl) && /綜合脈動/.test(pl) && /大盤體質/.test(pl) && /權重 70%/.test(pl) && /權重 30%/.test(pl),
-  'pulse score trio shows parent 綜合 + child weights 70/30');
+ok(/pl-score3/.test(pl) && />綜合</.test(pl) && /大盤體質/.test(pl) &&
+  /class="w">70%</.test(pl) && /class="w">30%</.test(pl) && /權重 70%/.test(pl),
+  'pulse score trio: compact 綜合 + child weights 70/30 (label short, title full)');
 ok(/pl-empty\[hidden\]\{display:none!important\}/.test(pl),
   'pulse empty[hidden] overrides display:flex (no blank inst box)');
 ok(/pl-sec h4\{[^}]*font-size:11px/.test(pl) &&
@@ -117,12 +118,15 @@ ok(/pl-sec h4\{[^}]*font-size:11px/.test(pl) &&
 ok(/function moneyYiCell/.test(pl) && /moneyYiCell\(i\.foreign\)/.test(pl) &&
   /pl-inst4 \.c \.v\{[^}]*font-size:10px/.test(pl) &&
   /pl-score-formula\{[^}]*font-size:8px/.test(pl) &&
-  /pl-score3 \.sc\.main \.v\{font-size:18px/.test(pl),
+  /pl-score3 \.sc\.main \.v\{font-size:14px/.test(pl),
   'pulse score/inst dense cards use smaller type + short 億 cells');
-ok(/pl-score3\{display:grid;grid-template-columns:1\.35fr 1fr 1fr/.test(pl) &&
+ok(/pl-score3\{display:grid;grid-template-columns:minmax\(0,0\.9fr\) minmax\(0,1\.05fr\) minmax\(0,1\.05fr\)/.test(pl) &&
   /writing-mode:horizontal-tb/.test(pl) &&
   /pl-score3 \.sc\{[^}]*flex-direction:column/.test(pl),
-  'pulse score 三框左到右；框內上下橫書（非直排字）');
+  'pulse score 三框左到右（綜合 compact 窄欄）；框內上下橫書');
+ok(/pl-global \.g \.v\{[^}]*font-size:9px/.test(pl) &&
+  /pl-global \.g \.k \.role\{display:none\}/.test(pl),
+  'pulse global compact type; role only in title');
 ok(/正面因子/.test(pl) && /風險因子/.test(pl) && /計入風險分/.test(pl) && !/主要動能/.test(pl),
   'pulse drivers labeled 正面／風險因子 (not 主要動能)');
 ok(/大盤體質（X：日/.test(pl) && !/>動能</.test(pl),

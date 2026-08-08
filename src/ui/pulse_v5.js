@@ -143,29 +143,30 @@
       /* hidden 必須蓋過 .pl-empty{display:flex}，否則法人窗會露出空白虛線框 */
       '#pl-root .pl-empty[hidden]{display:none!important}' +
       '#pl-root .pl-empty b{color:var(--thi);font-size:10px}' +
-      /* 市場脈動：高密度卡內字級必須偏小，否則公式／底部 meta 會被 pl-sec overflow 裁切 */
-      '#pl-root .pl-score3{display:grid;grid-template-columns:1.35fr 1fr 1fr;gap:3px;flex:0 0 auto;' +
-        'align-items:stretch;min-width:0}' +
-      '#pl-root .pl-score3 .sc{background:var(--bg);border:1px solid var(--border);border-radius:5px;' +
-        'padding:4px 5px;min-width:0;display:flex;flex-direction:column;gap:1px;' +
-        'writing-mode:horizontal-tb;text-orientation:mixed}' +
+      /* 市場脈動：綜合框 compact（勿再 1.35fr 搶寬），留給右邊體質／風險完整顯示 */
+      '#pl-root .pl-score3{display:grid;grid-template-columns:minmax(0,0.9fr) minmax(0,1.05fr) minmax(0,1.05fr);' +
+        'gap:3px;flex:0 0 auto;align-items:stretch;min-width:0}' +
+      '#pl-root .pl-score3 .sc{background:var(--bg);border:1px solid var(--border);border-radius:4px;' +
+        'padding:3px 4px;min-width:0;display:flex;flex-direction:column;gap:0;' +
+        'writing-mode:horizontal-tb;text-orientation:mixed;overflow:hidden}' +
       '#pl-root .pl-score3 .sc.main{border-color:rgba(245,197,24,.45);' +
-        'background:linear-gradient(180deg,rgba(36,48,72,.98),rgba(14,22,38,.98));padding:4px 6px}' +
+        'background:linear-gradient(180deg,rgba(36,48,72,.98),rgba(14,22,38,.98));padding:3px 4px}' +
       '#pl-root .pl-score3 .sc.child{opacity:.95}' +
-      '#pl-root .pl-score3 .sc .k{font-size:8px;color:#a8b6c8;letter-spacing:.2px;min-width:0;' +
-        'display:flex;flex-wrap:nowrap;align-items:baseline;justify-content:space-between;gap:3px;' +
+      '#pl-root .pl-score3 .sc .k{font-size:7px;color:#a8b6c8;letter-spacing:.15px;min-width:0;' +
+        'display:flex;flex-wrap:nowrap;align-items:baseline;justify-content:space-between;gap:2px;' +
         'writing-mode:horizontal-tb;overflow:hidden}' +
       '#pl-root .pl-score3 .sc .k > span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#pl-root .pl-score3 .sc .k .w{color:#e8c84a;font-weight:700;font-size:7px;white-space:nowrap;flex:0 0 auto}' +
-      '#pl-root .pl-score3 .sc .v{font-size:14px;font-weight:800;color:var(--thi);line-height:1.15;' +
-        'white-space:nowrap;font-variant-numeric:tabular-nums;margin:1px 0 2px}' +
-      '#pl-root .pl-score3 .sc.main .v{font-size:18px;letter-spacing:-0.3px}' +
-      '#pl-root .pl-score3 .sc .l{font-size:8px;font-weight:700;min-width:0;overflow:hidden;' +
+      '#pl-root .pl-score3 .sc .v{font-size:13px;font-weight:800;color:var(--thi);line-height:1.1;' +
+        'white-space:nowrap;font-variant-numeric:tabular-nums;margin:1px 0}' +
+      /* 綜合與子項同級 compact，勿再放大搶空間 */
+      '#pl-root .pl-score3 .sc.main .v{font-size:14px;letter-spacing:-0.2px}' +
+      '#pl-root .pl-score3 .sc .l{font-size:7px;font-weight:700;min-width:0;overflow:hidden;' +
         'text-overflow:ellipsis;white-space:nowrap;writing-mode:horizontal-tb}' +
       '#pl-root .pl-score3 .sc .l.pos{color:var(--gold)}' +
       '#pl-root .pl-score3 .sc .l.risk{color:var(--cyan)}' +
-      '#pl-root .pl-score3 .sc .meter{margin-top:1px;min-width:0}' +
-      '#pl-root .pl-score3 .sc .meter .vz-meter,#pl-root .pl-score3 .sc .vz-meter{margin-top:0}' +
+      '#pl-root .pl-score3 .sc .meter{margin-top:1px;min-width:0;max-height:4px;overflow:hidden}' +
+      '#pl-root .pl-score3 .sc .meter .vz-meter,#pl-root .pl-score3 .sc .vz-meter{margin-top:0;height:3px}' +
       '#pl-root .pl-score-formula{font-size:8px;color:#94a3b8;margin:3px 0 0;line-height:1.35;flex:0 0 auto;' +
         'min-width:0;max-width:100%;overflow:hidden;white-space:normal;word-break:break-word;' +
         'overflow-wrap:anywhere}' +
@@ -286,19 +287,20 @@
       '#pl-root .pl-list .cd{color:#a8b6c8;font-size:9px;margin-right:4px}' +
       '#pl-root .pl-list .ind{display:inline-block;margin-left:3px;padding:0 4px;border-radius:3px;font-size:8px;font-weight:700;' +
         'color:var(--cyan);background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.25);vertical-align:1px}' +
-      /* global：名稱一列；指數數值＋漲跌幅同一列（漲跌在右側，避免溢出） */
-      '#pl-root .pl-global{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;flex:1;align-content:start;overflow:auto;min-height:0}' +
+      /* global：compact 字級；role 僅 title，避免窄格裁切點位／漲跌 */
+      '#pl-root .pl-global{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;flex:1 1 0;' +
+        'align-content:start;overflow:auto;min-height:0;min-width:0}' +
       '#pl-root .pl-kicker{display:none!important}' +
-      '#pl-root .pl-global .g{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:3px 5px;min-width:0;overflow:hidden}' +
-      '#pl-root .pl-global .g .k{font-size:8px;color:var(--tlo);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:1px;' +
-        'display:flex;justify-content:space-between;gap:4px;align-items:baseline}' +
-      '#pl-root .pl-global .g .k .abbr{color:var(--thi);font-weight:800;letter-spacing:.3px}' +
-      '#pl-root .pl-global .g .k .role{color:#64748b;font-weight:600;font-size:7px;overflow:hidden;text-overflow:ellipsis}' +
-      '#pl-root .pl-global .g .row{display:flex;align-items:baseline;justify-content:space-between;gap:4px;min-width:0}' +
-      '#pl-root .pl-global .g .v{font-size:11px;font-weight:800;color:var(--thi);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 auto;' +
-        'font-variant-numeric:tabular-nums}' +
-      '#pl-root .pl-global .g .s{font-size:9px;font-weight:700;flex:0 0 auto;white-space:nowrap;text-align:right;letter-spacing:-0.2px;' +
-        'font-variant-numeric:tabular-nums;min-width:3.6em}' +
+      '#pl-root .pl-global .g{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:2px 4px;min-width:0;overflow:hidden}' +
+      '#pl-root .pl-global .g .k{font-size:7px;color:var(--tlo);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:0;' +
+        'display:flex;justify-content:space-between;gap:2px;align-items:baseline}' +
+      '#pl-root .pl-global .g .k .abbr{color:var(--thi);font-weight:800;letter-spacing:.2px}' +
+      '#pl-root .pl-global .g .k .role{display:none}' +
+      '#pl-root .pl-global .g .row{display:flex;align-items:baseline;justify-content:space-between;gap:3px;min-width:0}' +
+      '#pl-root .pl-global .g .v{font-size:9px;font-weight:800;color:var(--thi);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 auto;' +
+        'font-variant-numeric:tabular-nums;letter-spacing:-0.2px}' +
+      '#pl-root .pl-global .g .s{font-size:8px;font-weight:700;flex:0 0 auto;white-space:nowrap;text-align:right;letter-spacing:-0.3px;' +
+        'font-variant-numeric:tabular-nums;min-width:2.8em}' +
       '#pl-root .pl-flash-tools{display:flex;align-items:center;gap:4px;flex:1 1 auto;min-width:0;justify-content:flex-end}' +
       '#pl-root .pl-flash-q{width:72px;min-width:56px;max-width:96px;padding:1px 5px;border:1px solid var(--border);border-radius:3px;' +
         'background:var(--bg);color:var(--thi);font-size:8px;font-family:inherit}' +
@@ -821,19 +823,19 @@
     return '<div class="pl-sec" data-pri="p0"><h4>市場脈動 <a data-go="pulse">因子 →</a></h4>' +
       '<div class="pl-score3">' +
         '<div class="sc main" title="綜合脈動（母分）＝0.7×大盤體質＋0.3×(100−風險)">' +
-          '<div class="k"><span>綜合脈動</span></div>' +
+          '<div class="k"><span>綜合</span></div>' +
           '<div class="v">' + (total != null ? Number(total).toFixed(1) : '—') + '</div>' +
           '<div class="l pos">' + esc(p.statusText || '—') + '</div>' +
           (totalMeter ? '<div class="meter">' + totalMeter + '</div>' : '') +
         '</div>' +
         '<div class="sc child" title="大盤體質子項（量能＋法人＋融資＋估值），權重 70%">' +
-          '<div class="k"><span>大盤體質</span><span class="w">權重 70%</span></div>' +
+          '<div class="k"><span>大盤體質</span><span class="w">70%</span></div>' +
           '<div class="v">' + (health != null ? Number(health).toFixed(1) : '—') + '</div>' +
           '<div class="l pos">' + esc(p.healthLabel || '—') + '</div>' +
           (healthMeter ? '<div class="meter">' + healthMeter + '</div>' : '') +
         '</div>' +
         '<div class="sc child" title="風險因子軟封頂（越高越警戒）；綜合取 30%×(100−風險)">' +
-          '<div class="k"><span>風險</span><span class="w">權重 30%</span></div>' +
+          '<div class="k"><span>風險</span><span class="w">30%</span></div>' +
           '<div class="v">' + (risk != null ? Number(risk).toFixed(1) : '—') + '</div>' +
           '<div class="l risk">' + esc(p.riskLabel || '—') + '</div>' +
           (riskMeter ? '<div class="meter">' + riskMeter + '</div>' : '') +
