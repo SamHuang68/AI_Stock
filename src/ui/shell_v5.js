@@ -2,7 +2,7 @@
  * shell_v5.js  —  Stock Terminal 5.0：側欄殼層 + 視圖路由
  * ----------------------------------------------------------------------------
  * 總覽儀表板（版面參考外部 compact dashboard；產品名為 Stock Terminal）。
- * 路由：總覽／圖表／廣度／熱力／法人／國際／盤後／訊號／自選／風險／快訊／選股／投組／設定。
+ * 路由：總覽／圖表／廣度／熱力／法人／國際／盤後／訊號／AI／自選／風險／快訊／選股／投組／設定。
  * 「指數」已併入圖表（^TWII K 線＋總體列／indices 自選更完整）。
  * 同步：預抓歷史庫，僅 merge 最近缺漏日（/sync）。
  * 鐵律：不破壞 #left / #pro-tools / symLoaded / Toolbar 既有行為。
@@ -28,6 +28,7 @@
     { id: 'international', label: '國際', hint: '美股／美元／原油與總經',                   icon: '◎' },
     { id: 'afterhours',    label: '盤後', hint: '漲跌排行／籌碼／期貨盤後',                 icon: '◐' },
     { id: 'signals',       label: '訊號', hint: '策略訊號／焦點掃描結果',                   icon: '✦' },
+    { id: 'ai',            label: 'AI',   hint: 'AI 報告／副駕／焦點掃描中樞',               icon: '✧' },
     { id: 'watchlist',     label: '自選', hint: '自選股中心（表格式；完整操作在圖表列）',   icon: '★' },
     { id: 'risk',          label: '風險', hint: '風險事件與脈動風險度',                     icon: '◇' },
     { id: 'news',          label: '快訊', hint: '事件／結算／警報中樞',                     icon: '◉' },
@@ -42,7 +43,7 @@
   /* Alt+Shift+1…0 → 側欄（避開 Alt+數字 時框） */
   var HOTKEY_ROUTES = [
     'pulse', 'chart', 'breadth', 'heat', 'institutional',
-    'international', 'afterhours', 'signals', 'news', 'scan'
+    'international', 'afterhours', 'ai', 'news', 'scan'
   ];
 
   var PANEL_MAP = {
@@ -53,6 +54,7 @@
     international: 'InternationalV5',
     afterhours: 'AfterhoursV5',
     signals: 'SignalsV5',
+    ai: 'AiV5',
     watchlist: 'WatchlistV5',
     risk: 'RiskV5',
     news: 'NewsV5',
@@ -87,7 +89,7 @@
       '#navrail .nr-brand-st .brand-sub{font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;' +
         'color:var(--gold);letter-spacing:.8px;margin-top:2px}' +
       /* 品牌集中左上：內頁不再重複 STOCK TERMINAL kicker */
-      '.pl-kicker,.hub-kicker,.bd-kicker,.ht-kicker,.ah-kicker,.nw-kicker,.sc-kicker,.bk-kicker,.sv-kicker{' +
+      '.pl-kicker,.hub-kicker,.bd-kicker,.ht-kicker,.ah-kicker,.nw-kicker,.sc-kicker,.bk-kicker,.sv-kicker,.ai5-kicker{' +
         'display:none!important}' +
       '.nr-btn{display:flex;align-items:center;gap:8px;' +
         'min-height:30px;margin:1px 0;padding:4px 8px;border:1px solid transparent;border-radius:7px;' +
@@ -117,7 +119,7 @@
       '#shell-views.show:has(.sv-panel.on){overflow:hidden;flex:1 1 0;min-height:0}' +
       '#view-breadth.sv-panel.on,#view-heat.sv-panel.on,#view-afterhours.sv-panel.on,' +
       '#view-institutional.sv-panel.on,#view-international.sv-panel.on,#view-signals.sv-panel.on,' +
-      '#view-watchlist.sv-panel.on,#view-risk.sv-panel.on,#view-news.sv-panel.on,' +
+      '#view-ai.sv-panel.on,#view-watchlist.sv-panel.on,#view-risk.sv-panel.on,#view-news.sv-panel.on,' +
       '#view-scan.sv-panel.on,#view-book.sv-panel.on,#view-settings.sv-panel.on,' +
       '#view-pulse.sv-panel.on{max-width:none!important}' +
       '#topbar.shell-hidden{display:none !important}' +

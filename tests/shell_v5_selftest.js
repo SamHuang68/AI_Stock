@@ -26,17 +26,25 @@ ok(/softBadge/.test(shell), 'softBadge helper');
 ok(/data-st50-favicon/.test(shell), 'favicon wired');
 ok(/shell-logo-ico/.test(shell), 'topbar logo icon');
 
-['pulse', 'chart', 'breadth', 'heat', 'institutional', 'scan', 'book', 'settings'].forEach(function (id) {
+['pulse', 'chart', 'breadth', 'heat', 'institutional', 'ai', 'scan', 'book', 'settings'].forEach(function (id) {
   ok(new RegExp("id: '" + id + "'").test(shell), 'route ' + id);
 });
 
 ok(/ShellV5\.go\('chart'\)/.test(hotkeys), 'Esc → chart in hotkeys');
 ok(/Alt\+Shift\+1/.test(hotkeys), 'Alt+Shift help row');
+ok(/ai: 'AiV5'/.test(shell), 'AiV5 in PANEL_MAP');
 
-['breadth_v5.js', 'heat_v5.js', 'afterhours_v5.js', 'news_v5.js', 'pulse_v5.js'].forEach(function (f) {
+['breadth_v5.js', 'heat_v5.js', 'afterhours_v5.js', 'news_v5.js', 'pulse_v5.js', 'ai_v5.js'].forEach(function (f) {
   const t = fs.readFileSync(path.join(root, 'src/ui', f), 'utf8');
   ok(/deactivate/.test(t), f + ' has deactivate');
 });
+
+const bridge = fs.readFileSync(path.join(root, 'src/ui/bridge_v5.js'), 'utf8');
+ok(/portfolioOpen/.test(bridge) && /marketFlowOpen/.test(bridge) && /openAIModal/.test(bridge),
+  'bridge_v5 wraps portfolio/marketflow/AI');
+const build = fs.readFileSync(path.join(root, 'build_v2.py'), 'utf8');
+ok(build.indexOf('src/ui/ai_v5.js') >= 0 && build.indexOf('src/ui/bridge_v5.js') >= 0,
+  'ai_v5 + bridge_v5 in build_v2');
 
 if (failed) {
   console.error('\n' + failed + ' failure(s)');

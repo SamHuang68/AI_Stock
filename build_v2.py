@@ -72,15 +72,17 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/ai/focus_v3.js',                    # v3.9: 焦點掃描精靈(多訊號組合自動找做多/做空焦點,/focus)
               'src/ai/copilot_v3.js',                  # v4.0: AI 副駕面板(本機 LM Studio,/ai/local)
               'src/screener/wizard_v3.js',                   # v3.9: 加股設定精靈(依賴 StratLib/Backtest/drawtools/setPosition/saveWatches，排最後)
-              'src/ui/shell_v5.js',                    # v5.0: 側欄殼層+視圖路由(show/hide，預設圖表工作區；須在 toolbar 前掛好 DOM)
+              'src/ui/shell_v5.js',                    # v5.0: 側欄殼層+視圖路由(show/hide，預設 #pulse；須在 toolbar 前掛好 DOM)
               'src/ui/hub_v5.js',                      # v5.0: TW Pulse 對齊模組（指數/法人/國際/訊號/自選/風險/設定）
-              'src/ui/pulse_v5.js',                    # v5.0 S4: TW Pulse 市場脈動總覽（組合既有 API，掛 #view-pulse）
-              'src/ui/heat_v5.js',                     # v5.0 S5: 類股熱力+/focus 輔區（掛 #view-heat）
-              'src/ui/book_v5.js',                     # v5.0 S6: 投組風險側欄（POST /portfolio，掛 #view-book）
-              'src/ui/scan_v5.js',                     # v5.0 S7: 三合一選股側欄（POST /screen3，掛 #view-scan；收官）
-              'src/ui/breadth_v5.js',                  # v5.0 S2: 大盤廣度面板(/breadth，掛 #view-breadth；須在 shell 後)
-              'src/ui/afterhours_v5.js',               # v5.0 S3: 盤後整理(/txf+/stockfut+/marketflow，掛 #view-afterhours)
-              'src/ui/news_v5.js',                     # v5.0 S3: 快訊中樞(/events+結算日，掛 #view-news；非新聞爬蟲)
+              'src/ui/pulse_v5.js',                    # v5.0: TW Pulse 市場脈動總覽（組合既有 API，掛 #view-pulse）
+              'src/ui/heat_v5.js',                     # v5.0: 類股熱力+/focus 輔區（掛 #view-heat）
+              'src/ui/book_v5.js',                     # v5.0: 投組風險側欄（POST /portfolio，掛 #view-book）
+              'src/ui/scan_v5.js',                     # v5.0: 三合一選股側欄（POST /screen3，掛 #view-scan）
+              'src/ui/ai_v5.js',                       # v5.0: AI 中樞（報告/副駕/焦點，掛 #view-ai）
+              'src/ui/breadth_v5.js',                  # v5.0: 大盤廣度面板(/breadth，掛 #view-breadth；須在 shell 後)
+              'src/ui/afterhours_v5.js',               # v5.0: 盤後整理(/txf+/stockfut+/marketflow，掛 #view-afterhours)
+              'src/ui/news_v5.js',                     # v5.0: 快訊中樞(/events+結算日，掛 #view-news；非新聞爬蟲)
+              'src/ui/bridge_v5.js',                   # v5.0: 工具列→側欄橋接（須在 *Open 定義後、toolbar 前）
               'src/ui/toolbar_v3.js',                  # v3.9: 工具列模組化(一階分類+二階下拉,設定驅動;須排最後,整理所有功能鈕)
               'src/chart/market_score_bar_v3.js',      # v4.1: 主圖大盤體質／市場風險資訊列（須在 market_chart 前）
               'src/chart/market_chart_v3.js']          # v4.1: 總經/大盤折線模組（融資維持率等，必須最後掛鉤蓋過 K 線 patch）

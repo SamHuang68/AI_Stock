@@ -22,6 +22,10 @@
 - 定時面板 soft refresh（廣度／熱力／盤後／快訊／法人／國際）；離頁 `deactivate` 清輪詢。
 - `Esc`（無模態）→ 圖表；`Alt+Shift+1…0` 切側欄；nav `aria-current`。
 
+**下一弧（AI 中樞 + 工具列橋接）**
+- `ai_v5`：側欄 AI 室 — 報告／副駕／焦點入口 + `/focus` 摘要。
+- `bridge_v5`：`screener3Open`→scan、`portfolioOpen`→book、`marketFlowOpen`／`instRankOpen`→institutional、AI 三鈕→ai（再開模態）。
+
 ---
 
 ## v4.1 — 體驗打磨 / 欄位標準 / 顏色管理
