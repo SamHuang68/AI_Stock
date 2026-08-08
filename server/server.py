@@ -1906,11 +1906,35 @@ def _fetch_day_movers(n=8):
 
     limit_up = [r for r in rows if _near_twse_eq(r, 'up')][:40]
     limit_down = [r for r in reversed(rows) if _near_twse_eq(r, 'down')][:40]
+
+    # 產業別（OpenAPI 月營收「產業別」）— 供總覽近漲跌停標籤／與類股輪動聯動
+    try:
+        smap = _get_tw_sectors() or {}
+    except Exception as e:
+        print('[movers] sectors map', e)
+        smap = {}
+
+    def _tag_industry(lst):
+        for r in lst or []:
+            code = str(r.get('code') or '')
+            ind = smap.get(code)
+            if ind:
+                r['industry'] = ind
+                # 短標：去掉尾「業」以對齊 MI_INDEX 類股簡稱（半導體業→半導體）
+                r['industryShort'] = ind[:-1] if ind.endswith('業') and len(ind) > 2 else ind
+        return lst
+
+    _tag_industry(rows)
+    _tag_industry(limit_up)
+    _tag_industry(limit_down)
+    gainers = _tag_industry(rows[:n])
+    losers = _tag_industry(list(reversed(rows[-n:])))
+
     return {
         'ok': True,
         'date': date_s or _date.today().strftime('%Y%m%d'),
-        'gainers': rows[:n],
-        'losers': list(reversed(rows[-n:])),
+        'gainers': gainers,
+        'losers': losers,
         'limitUp': limit_up,
         'limitDown': limit_down,
         'limitThreshold': NEAR_LIMIT,
@@ -4212,13 +4236,13 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         PULSE_SIDE_BUDGET = 8.0
 
         def _job_movers():
-            m = _cache_first([f'movers:v3:{ymd}'])
+            m = _cache_first([f'movers:v4:{ymd}'])
             if m is not None:
                 return m
             try:
                 m = _fetch_day_movers(8)
                 if m and m.get('ok'):
-                    _cache.set(f'movers:v3:{ymd}', json.dumps(m, ensure_ascii=False).encode(), ttl=300)
+                    _cache.set(f'movers:v4:{ymd}', json.dumps(m, ensure_ascii=False).encode(), ttl=300)
                 return m
             except Exception as e:
                 print('[pulse] movers', e)
@@ -4574,7 +4598,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         except Exception:
             n = 8
         force = (qs.get('refresh', ['0'])[0] or '0') in ('1', 'true', 'yes')
-        key = f'movers:v3:{_date.today().strftime("%Y%m%d")}'
+        key = f'movers:v4:{_date.today().strftime("%Y%m%d")}'
         if not force:
             c = _cache.get(key)
             if c is not None:

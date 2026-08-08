@@ -3,9 +3,9 @@
  * ----------------------------------------------------------------------------
  * 大螢幕一頁高密度（65" 優化，不遷就手機）：
  *   頂列 KPI（加權／櫃買／台指期／量能／家數廣度／漲跌停）— 去重後 6 格
- *   上區 5 窗：脈動｜加權盤勢(圖+OHLC)｜法人｜廣度｜產業
- *   下區 5 窗：漲停｜跌幅｜全球｜快訊(TW/US)｜自選(TW/US·內滾)
- *   法人合計附 Z20／分位／近N日買賣超排名
+ *   上區 5 窗：脈動(綜合|體質|風險三燈)｜加權盤勢｜法人｜廣度｜產業
+ *   下區 5 窗：漲停(產業標籤)｜跌幅｜全球｜快訊(TW/US)｜自選(TW/US·內滾)
+ *   產業輪動 hover ↔ 近漲跌停同產業高亮；法人合計 Z／分位／排名
  *   因子／歷史預設收合（按鈕展開）
  * 產品名 Stock Terminal 5.0；資料：GET /pulse — 真實欄位，禁止 mock。
  * ========================================================================== */
@@ -101,26 +101,24 @@
         'gap:4px;text-align:center;color:#94a3b8;font-size:9px;line-height:1.4;padding:8px;' +
         'border:1px dashed rgba(148,163,184,.25);border-radius:6px;background:rgba(15,23,42,.35)}' +
       '#pl-root .pl-empty b{color:var(--thi);font-size:10px}' +
-      /* gauge compact */
-      '#pl-root .pl-gauge-wrap{display:flex;align-items:center;gap:8px;flex:1;min-height:0}' +
-      '#pl-root .pl-gauge{width:88px;height:88px;border-radius:50%;flex-shrink:0;' +
-        'background:conic-gradient(var(--gold) var(--pl-deg,0%), rgba(245,197,24,.10) 0);' +
-        'display:flex;align-items:center;justify-content:center;position:relative}' +
-      '#pl-root .pl-gauge::before{content:\'\';position:absolute;inset:8px;border-radius:50%;background:var(--bg2)}' +
-      '#pl-root .pl-gauge-inner{position:relative;z-index:1;text-align:center}' +
-      '#pl-root .pl-gauge-inner .big{font-size:20px;font-weight:800;color:var(--thi);line-height:1}' +
-      '#pl-root .pl-gauge-inner .tag{display:inline-block;margin-top:2px;padding:1px 6px;border-radius:999px;' +
-        'font-size:8px;font-weight:700;background:var(--gold-s);color:var(--gold);border:1px solid var(--gold-m)}' +
-      '#pl-root .pl-mini{display:grid;grid-template-columns:1fr 1fr;gap:4px;flex:1;min-width:0}' +
-      '#pl-root .pl-mini .m{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px}' +
-      '#pl-root .pl-mini .m .k{font-size:8px;color:var(--tlo)}' +
-      '#pl-root .pl-mini .m .v{font-size:13px;font-weight:800;margin-top:1px;color:var(--thi)}' +
-      '#pl-root .pl-mini .m .l{font-size:8px;margin-top:1px;font-weight:700}' +
+      /* 市場脈動：三燈橫卡（綜合／體質／風險），不再用大圓環佔黃金區 */
+      '#pl-root .pl-score3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;flex:0 0 auto}' +
+      '#pl-root .pl-score3 .sc{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:5px 6px;min-width:0}' +
+      '#pl-root .pl-score3 .sc.main{border-color:rgba(245,197,24,.40);background:linear-gradient(180deg,rgba(28,38,58,.98),rgba(14,22,38,.98))}' +
+      '#pl-root .pl-score3 .sc .k{font-size:8px;color:#94a3b8;letter-spacing:.3px}' +
+      '#pl-root .pl-score3 .sc .v{font-size:18px;font-weight:800;color:var(--thi);line-height:1.15;margin-top:2px}' +
+      '#pl-root .pl-score3 .sc .l{font-size:8px;font-weight:700;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#pl-root .pl-score3 .sc .l.pos{color:var(--gold)}' +
+      '#pl-root .pl-score3 .sc .l.risk{color:var(--cyan)}' +
+      '#pl-root .pl-score-meta{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;flex:0 0 auto}' +
+      '#pl-root .pl-score-meta .m{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px}' +
+      '#pl-root .pl-score-meta .m .k{font-size:8px;color:#94a3b8}' +
+      '#pl-root .pl-score-meta .m .v{font-size:12px;font-weight:800;margin-top:1px;color:var(--thi)}' +
       '#pl-root .pl-comp{height:4px;border-radius:2px;background:var(--bg3);overflow:hidden;margin-top:3px}' +
       '#pl-root .pl-comp > i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--gold))}' +
-      '#pl-root .pl-drivers{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;font-size:9px;flex:0 0 auto}' +
-      '#pl-root .pl-drivers .box{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px}' +
-      '#pl-root .pl-drivers .box .k{color:var(--tlo);margin-bottom:2px;font-size:8px}' +
+      '#pl-root .pl-drivers{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;font-size:9px;flex:1;min-height:0}' +
+      '#pl-root .pl-drivers .box{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px;min-height:0;overflow:auto}' +
+      '#pl-root .pl-drivers .box .k{color:#94a3b8;margin-bottom:2px;font-size:8px}' +
       '#pl-root .pl-drivers .box li{margin:1px 0;color:var(--text);list-style:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       /* OHLC / 加權盤勢（不再重複頂列三指數） */
       '#pl-root .pl-ohlc{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;flex:0 0 auto}' +
@@ -185,18 +183,26 @@
         'max-height:4.4em;overflow:hidden}' +
       '#pl-root .pl-bd-cmt b{color:var(--gold);font-weight:700}' +
       '#pl-root .pl-bd-cmt .up{color:var(--red)}#pl-root .pl-bd-cmt .dn{color:var(--green)}' +
-      /* sectors */
-      '#pl-root .pl-sbar{display:flex;align-items:center;gap:5px;margin:2px 0;font-size:10px}' +
+      /* sectors + 與近漲跌停聯動高亮 */
+      '#pl-root .pl-sbar{display:flex;align-items:center;gap:5px;margin:2px 0;font-size:10px;' +
+        'cursor:pointer;border-radius:3px;padding:1px 2px;transition:background .12s,box-shadow .12s,opacity .12s}' +
       '#pl-root .pl-sbar .nm{width:56px;flex-shrink:0;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#pl-root .pl-sbar .track{flex:1;height:6px;background:var(--bg);border-radius:3px;overflow:hidden}' +
       '#pl-root .pl-sbar .track > i{display:block;height:100%;border-radius:3px}' +
       '#pl-root .pl-sbar .pc{width:48px;text-align:right;font-weight:700;flex-shrink:0;font-size:10px}' +
+      '#pl-root .pl-sbar.hi{background:rgba(245,197,24,.10);box-shadow:inset 2px 0 0 var(--gold)}' +
+      '#pl-root .pl-sbar.dim{opacity:.4}' +
       /* lists */
       '#pl-root .pl-list{list-style:none;margin:0;padding:0;flex:1;min-height:0;overflow:auto}' +
-      '#pl-root .pl-list li{display:flex;justify-content:space-between;gap:4px;padding:3px 1px;border-bottom:1px solid var(--border);cursor:pointer;font-size:10px}' +
+      '#pl-root .pl-list li{display:flex;justify-content:space-between;gap:4px;padding:3px 1px;border-bottom:1px solid var(--border);cursor:pointer;font-size:10px;' +
+        'border-radius:3px;transition:background .12s,box-shadow .12s,opacity .12s}' +
       '#pl-root .pl-list li:hover{background:var(--bg3)}' +
+      '#pl-root .pl-list li.hi{background:rgba(245,197,24,.10);box-shadow:inset 2px 0 0 var(--gold)}' +
+      '#pl-root .pl-list li.dim{opacity:.35}' +
       '#pl-root .pl-list .nm{color:var(--thi);font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#pl-root .pl-list .cd{color:var(--tlo);font-size:9px;margin-right:4px}' +
+      '#pl-root .pl-list .cd{color:#94a3b8;font-size:9px;margin-right:4px}' +
+      '#pl-root .pl-list .ind{display:inline-block;margin-left:3px;padding:0 4px;border-radius:3px;font-size:8px;font-weight:700;' +
+        'color:var(--cyan);background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.25);vertical-align:1px}' +
       /* global：名稱一列；指數數值＋漲跌幅同一列（漲跌在右側，避免溢出） */
       '#pl-root .pl-global{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;flex:1;align-content:start;overflow:auto;min-height:0}' +
       '#pl-root .pl-kicker{display:none!important}' +
@@ -643,34 +649,40 @@
   function renderGauge(p) {
     var V = window.Viz;
     var total = p.totalScore;
-    var deg = (total != null ? Math.max(0, Math.min(100, total)) : 0) * 3.6;
+    var health = p.healthScore;
+    var risk = p.riskScore;
     var comp = p.dataCompleteness != null ? p.dataCompleteness : 0;
     var drivers = factorNames(p.positiveFactors, 3);
     var pressures = factorNames(p.riskFactors, 3);
-    var healthMeter = V ? V.scoreMeter(p.healthScore) : '';
-    var riskMeter = V ? V.scoreMeter(p.riskScore, { color: 'var(--cyan)' }) : '';
-    return '<div class="pl-sec"><h4>市場脈動 <a data-go="pulse">因子 →</a></h4><div class="pl-gauge-wrap">' +
-      '<div class="pl-gauge" style="--pl-deg:' + deg.toFixed(1) + 'deg"><div class="pl-gauge-inner">' +
-        '<div class="big">' + (total != null ? Number(total).toFixed(1) : '—') + '</div>' +
-        '<div class="tag">' + (p.statusText || '—') + '</div></div></div>' +
-      '<div class="pl-mini">' +
-        '<div class="m"><div class="k">市場動能</div><div class="v">' +
-          (p.healthScore != null ? Number(p.healthScore).toFixed(1) : '—') +
-          '<span style="font-size:10px;color:var(--tlo);font-weight:600"> /100</span></div>' +
-          '<div class="l" style="color:var(--gold)">' + (p.healthLabel || '') + '</div>' +
-          healthMeter + '</div>' +
-        '<div class="m"><div class="k">市場風險</div><div class="v">' +
-          (p.riskScore != null ? Number(p.riskScore).toFixed(1) : '—') +
-          '<span style="font-size:10px;color:var(--tlo);font-weight:600"> /100</span></div>' +
-          '<div class="l" style="color:var(--cyan)">' + (p.riskLabel || '') + '</div>' +
-          riskMeter + '</div>' +
+    var totalMeter = V ? V.scoreMeter(total) : '';
+    var healthMeter = V ? V.scoreMeter(health) : '';
+    var riskMeter = V ? V.scoreMeter(risk, { color: 'var(--cyan)' }) : '';
+    /* 綜合＝0.7×體質＋0.3×(100−風險)；勿再標「動能」造成與體質衝突 */
+    return '<div class="pl-sec"><h4>市場脈動 <a data-go="pulse">因子 →</a></h4>' +
+      '<div class="pl-score3">' +
+        '<div class="sc main" title="綜合脈動＝0.7×體質＋0.3×(100−風險)">' +
+          '<div class="k">綜合</div><div class="v">' +
+            (total != null ? Number(total).toFixed(1) : '—') + '</div>' +
+          '<div class="l pos">' + esc(p.statusText || '—') + '</div>' + totalMeter + '</div>' +
+        '<div class="sc" title="大盤體質（量能＋法人＋融資＋估值）">' +
+          '<div class="k">體質</div><div class="v">' +
+            (health != null ? Number(health).toFixed(1) : '—') + '</div>' +
+          '<div class="l pos">' + esc(p.healthLabel || '—') + '</div>' + healthMeter + '</div>' +
+        '<div class="sc" title="風險因子軟封頂分數（越高越警戒）">' +
+          '<div class="k">風險</div><div class="v">' +
+            (risk != null ? Number(risk).toFixed(1) : '—') + '</div>' +
+          '<div class="l risk">' + esc(p.riskLabel || '—') + '</div>' + riskMeter + '</div>' +
+      '</div>' +
+      '<div class="pl-score-meta">' +
         '<div class="m"><div class="k">正面因素</div><div class="v pl-st-pos">' +
-          (p.positiveFactorScore != null ? Number(p.positiveFactorScore).toFixed(1) : '—') + '</div>' +
-          '<div class="l pl-st-mid">' + ((p.positiveFactors || []).length) + ' 項</div></div>' +
-        '<div class="m"><div class="k">資料可靠度</div><div class="v">' + Number(comp).toFixed(0) + '%</div>' +
-          '<div class="l pl-st-mid">' + (p.datasetsOk || 0) + '/' + (p.datasetsTotal || 0) + ' 資料源</div>' +
+          (p.positiveFactorScore != null ? Number(p.positiveFactorScore).toFixed(1) : '—') +
+          '<span class="pl-st-mid" style="font-size:9px;font-weight:600"> · ' +
+            ((p.positiveFactors || []).length) + ' 項</span></div></div>' +
+        '<div class="m"><div class="k">資料可靠度</div><div class="v">' + Number(comp).toFixed(0) + '%' +
+          '<span class="pl-st-mid" style="font-size:9px;font-weight:600"> · ' +
+            (p.datasetsOk || 0) + '/' + (p.datasetsTotal || 0) + '</span></div>' +
           '<div class="pl-comp"><i style="width:' + comp + '%"></i></div></div>' +
-      '</div></div>' +
+      '</div>' +
       '<div class="pl-drivers">' +
         '<div class="box"><div class="k">主要動能</div><ul>' +
           (drivers.length ? drivers.map(function (n) { return '<li>· ' + esc(n) + '</li>'; }).join('') : '<li class="pl-st-mid">—</li>') +
@@ -1143,6 +1155,27 @@
     return (ov && ov.sectorsRanked) || [];
   }
 
+  /** 產業別名正規化：半導體業／半導體 → 可互相比對的 key */
+  function sectorKey(name) {
+    return String(name || '')
+      .replace(/業$/g, '')
+      .replace(/[\s　]/g, '')
+      .toLowerCase();
+  }
+
+  function sectorKeysMatch(a, b) {
+    var ka = sectorKey(a), kb = sectorKey(b);
+    if (!ka || !kb) return false;
+    return ka === kb || ka.indexOf(kb) >= 0 || kb.indexOf(ka) >= 0;
+  }
+
+  function industryLabel(r) {
+    if (!r) return '';
+    return r.industryShort || (r.industry ? (
+      r.industry.endsWith('業') && r.industry.length > 2 ? r.industry.slice(0, -1) : r.industry
+    ) : '');
+  }
+
   function renderSectors(ov) {
     var list = sectorsFromPack(ov).slice();
     list.sort(function (a, b) { return Math.abs(b.changePct || 0) - Math.abs(a.changePct || 0); });
@@ -1154,7 +1187,8 @@
         '<button type="button" data-sec-mkt="TW" class="' + (usOn ? '' : 'on') + '">TW</button>' +
         '<button type="button" data-sec-mkt="US" class="' + (usOn ? 'on' : '') + '">US</button>' +
       '</span>' +
-      ' <a data-go="heat">熱力 →</a></h4><div class="pl-fill" id="pl-sectors-body">';
+      ' <a data-go="heat">熱力 →</a></h4><div class="pl-fill" id="pl-sectors-body">' +
+      (usOn ? '' : '<div class="pl-note" style="margin:0 0 3px">懸停高亮左側同產業近漲跌停</div>');
     if (!list.length) {
       return html + '<div class="pl-note">' + (usOn ? '美股產業載入中…' : '類股資料暫缺 — 開啟熱力可預熱') +
         '</div></div></div>';
@@ -1169,7 +1203,10 @@
       var pcCls = usOn
         ? ((s.changePct || 0) > 0 ? 'dn' : (s.changePct || 0) < 0 ? 'up' : 'flat')
         : tw(s.changePct);
-      html += '<div class="pl-sbar"><div class="nm" title="' + esc(s.name) + '">' + esc(s.name) + '</div>' +
+      var sk = sectorKey(s.name);
+      html += '<div class="pl-sbar" data-sector="' + esc(s.name || '') + '" data-sector-key="' + esc(sk) + '"' +
+        ' title="' + esc(s.name || '') + (usOn ? '' : ' — 懸停聯動近漲跌停') + '">' +
+        '<div class="nm">' + esc(s.name) + '</div>' +
         '<div class="track"><i style="width:' + w + '%;background:' + col + '"></i></div>' +
         '<div class="pc ' + pcCls + '">' + pct(s.changePct) + '</div></div>';
     });
@@ -1225,19 +1262,76 @@
     list.forEach(function (r) {
       if (r.changePct != null && isFinite(r.changePct)) maxAbs = Math.max(maxAbs, Math.abs(r.changePct));
     });
-    var html = '<div class="pl-sec"><h4>' + title +
-      (movers && movers.date ? ' <span style="color:var(--tlo);font-weight:600">' + movers.date + '</span>' : '') +
-      (note ? ' <span style="color:var(--tlo);font-weight:600;font-size:9px">' + note + '</span>' : '') +
+    var html = '<div class="pl-sec pl-movers" data-movers-side="' + side + '"><h4>' + title +
+      (movers && movers.date ? ' <span style="color:#94a3b8;font-weight:600">' + movers.date + '</span>' : '') +
+      (note ? ' <span style="color:#94a3b8;font-weight:600;font-size:9px">' + note + '</span>' : '') +
       ' <a data-go="afterhours">盤後 →</a></h4><ul class="pl-list">';
-    if (!list.length) return html + '<li style="cursor:default;color:var(--tlo)">' + empty + '</li></ul></div>';
+    if (!list.length) return html + '<li style="cursor:default;color:#94a3b8">' + empty + '</li></ul></div>';
     list.forEach(function (r) {
       var limChip = V ? V.limitChip(r.changePct) : '';
       var bar = V ? V.rowBar(r.changePct, maxAbs) : '';
-      html += '<li data-code="' + esc(r.code || '') + '"><span class="nm"><span class="cd">' +
-        esc(r.code || '') + '</span>' + esc(r.name || '') + '</span><span class="' + tw(r.changePct) + '">' +
+      var ind = industryLabel(r);
+      var indFull = r.industry || ind;
+      var sk = sectorKey(ind || indFull);
+      var indHtml = ind
+        ? '<span class="ind" title="' + esc(indFull) + '">' + esc(ind) + '</span>'
+        : '';
+      html += '<li data-code="' + esc(r.code || '') + '"' +
+        (indFull ? ' data-industry="' + esc(indFull) + '"' : '') +
+        (sk ? ' data-sector-key="' + esc(sk) + '"' : '') +
+        '><span class="nm"><span class="cd">' +
+        esc(r.code || '') + '</span>' + esc(r.name || '') + indHtml +
+        '</span><span class="' + tw(r.changePct) + '">' +
         pct(r.changePct) + limChip + bar + '</span></li>';
     });
     return html + '</ul></div>';
+  }
+
+  /** 產業輪動 ↔ 近漲跌停：hover 雙向高亮同產業 */
+  function bindSectorMoverLink(root) {
+    if (!root) return;
+    var bars = root.querySelectorAll('#pl-sectors-body .pl-sbar[data-sector-key]');
+    var movers = root.querySelectorAll('.pl-movers .pl-list li[data-sector-key]');
+    if (!bars.length || !movers.length) return;
+
+    function clear() {
+      bars.forEach(function (el) { el.classList.remove('hi', 'dim'); });
+      movers.forEach(function (el) { el.classList.remove('hi', 'dim'); });
+    }
+
+    function highlightByKey(key) {
+      if (!key) { clear(); return; }
+      var any = false;
+      movers.forEach(function (el) {
+        var match = sectorKeysMatch(key, el.getAttribute('data-sector-key'));
+        el.classList.toggle('hi', match);
+        el.classList.toggle('dim', !match);
+        if (match) any = true;
+      });
+      bars.forEach(function (el) {
+        var match = sectorKeysMatch(key, el.getAttribute('data-sector-key'));
+        el.classList.toggle('hi', match);
+        el.classList.toggle('dim', any ? !match : false);
+      });
+      if (!any) {
+        /* 無對應個股時只亮產業列本身 */
+        bars.forEach(function (el) {
+          var match = sectorKeysMatch(key, el.getAttribute('data-sector-key'));
+          el.classList.toggle('hi', match);
+          el.classList.remove('dim');
+        });
+        movers.forEach(function (el) { el.classList.remove('hi', 'dim'); });
+      }
+    }
+
+    bars.forEach(function (el) {
+      el.onmouseenter = function () { highlightByKey(el.getAttribute('data-sector-key')); };
+      el.onmouseleave = clear;
+    });
+    movers.forEach(function (el) {
+      el.onmouseenter = function () { highlightByKey(el.getAttribute('data-sector-key')); };
+      el.onmouseleave = clear;
+    });
   }
 
   function globalImpactTone(items) {
@@ -1533,6 +1627,7 @@
         if (lastPack) render(lastPack);
       };
     });
+    if (sectorMkt === 'TW') bindSectorMoverLink(body);
     if (sectorMkt === 'US' && !sectorCache.US) loadSectorsMkt('US');
     fillInstTrend(ov);
     fillBreadthTrend(ov);

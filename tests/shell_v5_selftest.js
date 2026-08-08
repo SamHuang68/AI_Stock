@@ -101,6 +101,10 @@ ok(/data-watch-mkt/.test(pl) && /filterWatchlist/.test(pl) && /pl-wl-scroll/.tes
   'pulse watchlist has TW/US tabs and fixed scroll region');
 ok(/instFlowQuant/.test(pl) && /rankLabel/.test(pl) && /pl-inst-ctx/.test(pl),
   'pulse institutional shows Z/percentile/rank context');
+ok(/pl-score3/.test(pl) && /綜合/.test(pl) && /體質/.test(pl) && !/市場動能/.test(pl),
+  'pulse gauge collapsed to 綜合｜體質｜風險 trio (no mislabeled 動能)');
+ok(/industryLabel/.test(pl) && /bindSectorMoverLink/.test(pl) && /data-sector-key/.test(pl),
+  'pulse movers industry tags + sector hover link');
 
 const nw = fs.readFileSync(path.join(root, 'src/ui/news_v5.js'), 'utf8');
 ok(/nw-mkt-seg/.test(nw) && /flashMkt/.test(nw), 'news TW/US filter');
