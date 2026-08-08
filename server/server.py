@@ -81,18 +81,12 @@ def _pulse_layout_probe():
     try:
         with open(path, 'r', encoding='utf-8', errors='replace') as fh:
             txt = fh.read(200000)
-        if 'PULSE_LAYOUT_ANCHOR_4col2z' in txt:
-            out['layoutAnchor'] = 'PULSE_LAYOUT_ANCHOR_4col2z'
-        elif 'PULSE_LAYOUT_ANCHOR_3cab212' in txt:
+        if 'PULSE_LAYOUT_ANCHOR_3cab212' in txt:
             out['layoutAnchor'] = 'PULSE_LAYOUT_ANCHOR_3cab212'
-        if '4col-2zone' in txt:
-            out['layoutContract'] = '4col-2zone'
-        elif '5col-2zone' in txt:
+        if '5col-2zone' in txt:
             out['layoutContract'] = '5col-2zone'
-        out['hasFourCol'] = 'repeat(4,minmax(0,1fr))' in txt or 'repeat(4, minmax(0, 1fr))' in txt
         out['hasFiveCol'] = 'repeat(5,minmax(0,1fr))' in txt or 'repeat(5, minmax(0, 1fr))' in txt
-        out['hasFourColPriority'] = 'data-layout="4col-priority"' in txt
-        out['hasMediaCrush1280'] = 'max-width:1280px' in txt or 'max-width: 1280px' in txt
+        out['hasFourColPriority'] = '4col-priority' in txt
     except Exception as exc:
         out['error'] = str(exc)
     return out
@@ -6698,13 +6692,8 @@ if __name__ == '__main__':
         sys.exit(2)
     _probe0 = _pulse_layout_probe()
     _boot_trace('pulseLayout=%s' % json.dumps(_probe0, ensure_ascii=False))
-    if (
-        _probe0.get('hasFourColPriority')
-        or _probe0.get('hasMediaCrush1280')
-        or _probe0.get('layoutAnchor') != 'PULSE_LAYOUT_ANCHOR_4col2z'
-        or _probe0.get('layoutContract') != '4col-2zone'
-    ):
-        _boot_trace('WARN pulse_v5.js is not tip 4col-2zone anchor — wrong tree / not pulled')
+    if _probe0.get('hasFourColPriority') or not _probe0.get('layoutAnchor'):
+        _boot_trace('WARN pulse_v5.js is not tip 5col anchor — wrong tree / not pulled')
     try:
         import slog as _slog
         _slog.setup('INFO')

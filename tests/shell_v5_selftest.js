@@ -117,29 +117,27 @@ ok(/basisPts/.test(pl) && /正價差/.test(pl) && /逆價差/.test(pl) && /Basis
   'pulse strip shows TXF–TAIEX basis');
 ok(/pl-flash-q/.test(pl) && /flashQ/.test(pl) && /搜代號\/關鍵字/.test(pl),
   'pulse flash has keyword search beside TW/US tabs');
-ok(/data-layout=/.test(pl) && /LAYOUT_CONTRACT\s*=\s*'4col-2zone'/.test(pl) &&
-  /grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/.test(pl) &&
-  /pl-zone z-top/.test(pl) && /pl-zone z-bot/.test(pl) && /pl-foot/.test(pl) &&
-  /PULSE_LAYOUT_ANCHOR_4col2z/.test(pl) && /probeLayoutCols/.test(pl) &&
-  !/data-layout="4col-priority"/.test(pl) && !/max-width:\s*1280px/.test(pl) &&
+ok(/data-layout=/.test(pl) && /LAYOUT_CONTRACT/.test(pl) &&
+  /grid-template-columns:repeat\(5,minmax\(0,1fr\)\)/.test(pl) &&
+  /pl-zone z-top/.test(pl) && /pl-zone z-bot/.test(pl) &&
+  /PULSE_LAYOUT_ANCHOR_3cab212/.test(pl) && /probeLayoutCols/.test(pl) &&
+  !/4col-priority/.test(pl) && !/max-width:1280/.test(pl) &&
   !/5col-2zone-flex/.test(pl) && !/enforceFiveCol/.test(pl),
-  'pulse dash is 4col-2zone + foot + runtime probe (no media crush)');
+  'pulse dash is known-good 5col-2zone + runtime probe (anchor 3cab212)');
 ok(/#pl-body\{[^}]*overflow:hidden/.test(pl) && /pl-expanded\{overflow:auto\}/.test(pl),
   'pulse one-screen lock; scroll only when factors expanded');
-ok(/pl-layout-probe/.test(pl) && /實測 4\+4/.test(pl) && /一行四框/.test(pl),
-  'pulse surfaces 實測 4+4 probe for stale-JS detection');
+ok(/pl-layout-probe/.test(pl) && /實測 5\+5/.test(pl) && /一行五框/.test(pl),
+  'pulse surfaces 實測 5+5 probe for stale-JS detection');
 (function () {
   var start = pl.indexOf("data-layout=\"' + LAYOUT_CONTRACT");
-  if (start < 0) start = pl.indexOf('data-layout="4col-2zone"');
+  if (start < 0) start = pl.indexOf('data-layout="5col-2zone"');
   var orderBlock = pl.slice(start, pl.indexOf('extra;'));
   ok(orderBlock.indexOf('z-top') < orderBlock.indexOf('z-bot') &&
-    orderBlock.indexOf('renderGauge') < orderBlock.indexOf('renderDonut') &&
-    orderBlock.indexOf('renderDonut') < orderBlock.indexOf('z-bot') &&
-    orderBlock.indexOf('renderSectors') < orderBlock.indexOf('renderWatch') &&
-    orderBlock.indexOf('pl-foot') >= 0 &&
-    orderBlock.indexOf('renderGlobal') < orderBlock.indexOf('renderFlash') &&
-    orderBlock.indexOf('renderFlash') > orderBlock.indexOf('z-bot'),
-    'pulse 4+4 order: decision row, then sectors/movers/watch, foot global/flash');
+    orderBlock.indexOf('renderGauge') < orderBlock.indexOf('renderSectors') &&
+    orderBlock.indexOf('renderSectors') < orderBlock.indexOf('z-bot') &&
+    orderBlock.indexOf('renderMovers') < orderBlock.indexOf('renderFlash') &&
+    orderBlock.indexOf('renderFlash') < orderBlock.indexOf('renderWatch'),
+    'pulse 5+5 order: top decision row then bottom movers/global/flash/watch');
 })();
 
 ok(/NAV_KEY/.test(shell) && /toggleNav/.test(shell) && /nr-edge/.test(shell) &&
@@ -173,7 +171,7 @@ ok(/tipUx/.test(goPs) && /st5-tip-boot/.test(goPs) && /#pulse/.test(goPs),
   'go.ps1 verifies tip health/HTML and opens #pulse');
 ok(/Resolve-StockPython/.test(goPs) && /Test-BlockedPython/.test(goPs) &&
   /hermes/.test(goPs) && /Stock Terminal Server v5 tip/.test(goPs) &&
-  /PULSE_LAYOUT_ANCHOR_4col2z/.test(goPs),
+  /PULSE_LAYOUT_ANCHOR_3cab212/.test(goPs),
   'go.ps1 blocks hermes python and launches titled live server console');
 ok(/ST_PYTHON/.test(goBat) && /hermes-agent/.test(goBat) && /FAIL_PYTHON_HERMES/.test(goBat),
   'go.bat also resolves python and blocks hermes');
