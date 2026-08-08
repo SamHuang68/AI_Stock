@@ -86,7 +86,10 @@ function Assert-TipHtml {
   if ($pjs -notmatch '5col-2zone' -or $pjs -notmatch 'repeat\(5,minmax\(0,1fr\)\)') {
     throw "pulse_v5.js missing 5-col×2-zone layout markers"
   }
-  Write-Host '[ok] pulse layout = 一行五框 × 上下兩區 (5col-2zone)'
+  if ($pjs -notmatch 'PULSE_LAYOUT_ANCHOR_3cab212') {
+    throw "pulse_v5.js missing PULSE_LAYOUT_ANCHOR_3cab212 — wrong/old tree"
+  }
+  Write-Host '[ok] pulse layout = 一行五框 × 上下兩區 (5col-2zone + ANCHOR_3cab212)'
 }
 
 function Wait-TipServer {
@@ -130,7 +133,10 @@ function Assert-IndexIsTip {
   if ($ptxt -notmatch '5col-2zone' -or $ptxt -notmatch 'repeat\(5,minmax\(0,1fr\)\)') {
     throw 'Server pulse_v5.js is not 5-col×2-zone — wrong tree / stale process'
   }
-  Write-Host '[ok] GET /src/ui/pulse_v5.js is 5col-2zone'
+  if ($ptxt -notmatch 'PULSE_LAYOUT_ANCHOR_3cab212') {
+    throw 'Server pulse_v5.js missing PULSE_LAYOUT_ANCHOR_3cab212 — STALE python still serving old tree. Kill ALL python.exe and retry.'
+  }
+  Write-Host '[ok] GET /src/ui/pulse_v5.js is 5col-2zone + ANCHOR_3cab212'
 }
 
 Write-Banner
@@ -182,9 +188,14 @@ Write-Host "[open] $Url"
 Start-Process $Url
 
 Write-Host ''
-Write-Host 'DONE. In browser:'
-Write-Host '  1) URL must be http://localhost:18432/#pulse'
-Write-Host '  2) Ctrl+F5'
-Write-Host '  3) F12 Console must show: [shell-v5] Stock Terminal 5.0 · tip UX · route=pulse'
-Write-Host '  4) If still old UI: hard-close ALL browser tabs for localhost:18432, then re-run this script'
+Write-Host 'DONE. In browser (必看):'
+Write-Host "  HEAD=$head"
+Write-Host '  1) 關掉所有 localhost:18432 分頁（含小視窗）'
+Write-Host '  2) URL = http://localhost:18432/#pulse'
+Write-Host '  3) Ctrl+F5'
+Write-Host '  4) 標題「市場總覽」旁必須出現藍標：實測 5+5'
+Write-Host '  5) F12 Console 必須有: PULSE_LAYOUT_ANCHOR_3cab212 ... ok=true'
+Write-Host '  6) 若仍兩框且沒有「實測 5+5」= 舊 JS／舊 python，執行:'
+Write-Host '       Get-Process python* | Stop-Process -Force'
+Write-Host '       然後重跑本腳本 -Pull'
 Write-Host ''

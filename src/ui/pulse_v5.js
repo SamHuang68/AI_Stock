@@ -8,9 +8,15 @@
  *   產業輪動 hover ↔ 近漲跌停同產業高亮；法人合計 Z／分位／排名
  *   因子／歷史預設收合（按鈕展開）
  * 產品名 Stock Terminal 5.0；資料：GET /pulse — 真實欄位，禁止 mock。
+ * 版面錨點（勿改字串；go.ps1／selftest 依此核對本機是否跑到舊樹）：
+ *   PULSE_LAYOUT_ANCHOR_3cab212
  * ========================================================================== */
 (function () {
   'use strict';
+
+  /* 本機若看不到標題旁「實測 5+5」，代表瀏覽器／server 仍在跑舊 pulse_v5.js */
+  var LAYOUT_ANCHOR = 'PULSE_LAYOUT_ANCHOR_3cab212';
+  var LAYOUT_CONTRACT = '5col-2zone';
 
   var SRV = window.SERVER || '';
   var timer = null;
@@ -23,6 +29,36 @@
   var watchMkt = 'ALL'; /* ALL | TW | US */
 
   function $(id) { return document.getElementById(id); }
+
+  /** 實測 DOM 欄數；用於分辨「程式是五框但本機仍載到舊兩框 JS」 */
+  function probeLayoutCols() {
+    var zones = document.querySelectorAll('#pl-root .pl-zone');
+    var parts = [];
+    var ok = zones.length === 2;
+    for (var i = 0; i < zones.length; i++) {
+      var z = zones[i];
+      var gtc = window.getComputedStyle(z).gridTemplateColumns || '';
+      var cols = (gtc && gtc !== 'none') ? gtc.trim().split(/\s+/).length : 0;
+      var kids = z.children ? z.children.length : 0;
+      parts.push(cols + '/' + kids);
+      if (cols !== 5 || kids !== 5) ok = false;
+    }
+    var probe = $('pl-layout-probe');
+    if (probe) {
+      probe.textContent = ok
+        ? ('實測 5+5 · ' + LAYOUT_CONTRACT)
+        : ('⚠實測 ' + (parts.join(' + ') || '0') + ' · 非五框＝舊 JS／舊 server');
+      probe.style.borderColor = ok ? 'rgba(34,211,238,.45)' : 'rgba(248,113,113,.65)';
+      probe.style.color = ok ? '#67e8f9' : '#fecaca';
+      probe.style.background = ok ? 'rgba(34,211,238,.12)' : 'rgba(248,113,113,.15)';
+      probe.title = LAYOUT_ANCHOR;
+    }
+    try {
+      console.log('[pulse-v5] ' + LAYOUT_ANCHOR + ' contract=' + LAYOUT_CONTRACT +
+        ' probe=' + (parts.join('+') || 'none') + ' ok=' + ok);
+    } catch (e) {}
+    return ok;
+  }
 
   function injectCSS() {
     var s = $('pulse-v5-css');
@@ -386,9 +422,9 @@
       mount.innerHTML =
         '<div id="pl-root">' +
           '<div class="pl-head"><div>' +
-            '<div class="pl-title">市場總覽</div>' +
+            '<div class="pl-title">市場總覽 <span id="pl-layout-probe" style="font-size:10px;font-weight:700;letter-spacing:.03em;padding:1px 7px;border-radius:999px;border:1px solid rgba(34,211,238,.45);background:rgba(34,211,238,.12);color:#67e8f9;vertical-align:middle">實測…</span></div>' +
             '<div class="pl-tone" id="pl-tone">—</div>' +
-            '<div class="pl-sub" id="pl-sub">官方資料 · 一頁雙區</div>' +
+            '<div class="pl-sub" id="pl-sub">官方資料 · 一行五框 × 上下兩區 · ' + LAYOUT_ANCHOR + '</div>' +
           '</div><div class="pl-actions">' +
             '<button type="button" class="pl-btn" id="pl-refresh">↻ 重新整理</button>' +
             '<button type="button" class="pl-btn" id="pl-toggle-fac">因子帳本</button>' +
@@ -1710,10 +1746,10 @@
       sectorCache.TW = ov.sectorsRanked.slice();
     }
 
-    /* 一行五框 × 上下兩區（一屏鎖定） */
+    /* 一行五框 × 上下兩區（一屏鎖定）— 錨點 3cab212，禁止改 2/4 欄 */
     body.innerHTML =
       renderStrip(ov, p) +
-      '<div class="pl-dash" data-layout="5col-2zone">' +
+      '<div class="pl-dash" data-layout="' + LAYOUT_CONTRACT + '">' +
         '<div class="pl-zone z-top">' +
           renderGauge(p) + renderOhlc(ov, p) + renderInst(ov) +
           renderDonut(ov, ov.strip) + renderSectors(ov) +
@@ -1724,6 +1760,10 @@
         '</div>' +
       '</div>' +
       extra;
+
+    probeLayoutCols();
+    setTimeout(probeLayoutCols, 0);
+    setTimeout(probeLayoutCols, 500);
 
     bind(body);
     body.querySelectorAll('[data-sec-mkt]').forEach(function (b) {

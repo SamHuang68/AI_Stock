@@ -117,18 +117,21 @@ ok(/basisPts/.test(pl) && /正價差/.test(pl) && /逆價差/.test(pl) && /Basis
   'pulse strip shows TXF–TAIEX basis');
 ok(/pl-flash-q/.test(pl) && /flashQ/.test(pl) && /搜代號\/關鍵字/.test(pl),
   'pulse flash has keyword search beside TW/US tabs');
-ok(/data-layout="5col-2zone"/.test(pl) &&
+ok(/data-layout=/.test(pl) && /LAYOUT_CONTRACT/.test(pl) &&
   /grid-template-columns:repeat\(5,minmax\(0,1fr\)\)/.test(pl) &&
   /pl-zone z-top/.test(pl) && /pl-zone z-bot/.test(pl) &&
+  /PULSE_LAYOUT_ANCHOR_3cab212/.test(pl) && /probeLayoutCols/.test(pl) &&
   !/4col-priority/.test(pl) && !/max-width:1280/.test(pl) &&
   !/5col-2zone-flex/.test(pl) && !/enforceFiveCol/.test(pl),
-  'pulse dash is known-good 5col-2zone (git 3cab212; not patched flex/2col)');
+  'pulse dash is known-good 5col-2zone + runtime probe (anchor 3cab212)');
 ok(/#pl-body\{[^}]*overflow:hidden/.test(pl) && /pl-expanded\{overflow:auto\}/.test(pl),
   'pulse one-screen lock; scroll only when factors expanded');
-ok(/一行五框 × 上下兩區/.test(pl) || /一行五框/.test(pl),
-  'pulse surfaces 一行五框 layout contract in source');
+ok(/pl-layout-probe/.test(pl) && /實測 5\+5/.test(pl) && /一行五框/.test(pl),
+  'pulse surfaces 實測 5+5 probe for stale-JS detection');
 (function () {
-  var orderBlock = pl.slice(pl.indexOf('data-layout="5col-2zone"'), pl.indexOf('extra;'));
+  var start = pl.indexOf("data-layout=\"' + LAYOUT_CONTRACT");
+  if (start < 0) start = pl.indexOf('data-layout="5col-2zone"');
+  var orderBlock = pl.slice(start, pl.indexOf('extra;'));
   ok(orderBlock.indexOf('z-top') < orderBlock.indexOf('z-bot') &&
     orderBlock.indexOf('renderGauge') < orderBlock.indexOf('renderSectors') &&
     orderBlock.indexOf('renderSectors') < orderBlock.indexOf('z-bot') &&
