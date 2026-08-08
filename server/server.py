@@ -4416,9 +4416,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         except Exception as e:
             print('[pulse] o00 trend', e)
             o00_trend = _price_series_quant([], latest=o00.get('price'))
+        txf_live = None
         try:
             # strip 顯示的台指期價（夜盤優先）覆寫連續日線末端
-            txf_live = None
             if isinstance(txf_night, dict):
                 txf_live = txf_night.get('price')
             if txf_live is None and isinstance(txf, dict):
@@ -4428,6 +4428,21 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         except Exception as e:
             print('[pulse] txf trend', e)
             txf_trend = _price_series_quant([])
+        # 台指期 − 加權現貨＝Basis（正價差／逆價差）；與前端 strip.basisPts／basisPct 對齊
+        basis_pts = None
+        basis_pct = None
+        try:
+            t00_px = t00.get('price')
+            if txf_live is not None and t00_px is not None:
+                t00_f = float(t00_px)
+                txf_f = float(txf_live)
+                basis_pts = round(txf_f - t00_f, 2)
+                if t00_f > 0:
+                    basis_pct = round(basis_pts / t00_f * 100.0, 3)
+        except Exception as e:
+            print('[pulse] basis', e)
+            basis_pts = None
+            basis_pct = None
         st = stocks or {}
         up, dn, flat = st.get('up'), st.get('down'), st.get('unchanged')
         ls_ratio = None
@@ -4463,6 +4478,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 't00Trend': t00_trend,
                 'o00Trend': o00_trend,
                 'txfTrend': txf_trend,
+                'basisPts': basis_pts,
+                'basisPct': basis_pct,
                 'turnoverYi': round(turnover_yi, 1) if turnover_yi is not None else None,
                 'turnoverChgPct': round(turnover_chg, 2) if turnover_chg is not None else None,
                 'turnoverMa5Yi': tq.get('ma5Yi'),

@@ -11,6 +11,7 @@
   'use strict';
 
   var STORAGE_KEY = 'st5.shell.route';
+  var NAV_KEY = 'st5.shell.navOpen';
   var VERSION = '5.0';
 
   /* 舊 route → 更完整的目的地（圖表／熱力等） */
@@ -38,7 +39,7 @@
     { id: 'workspace',     label: '工具', hint: '回到圖表並開啟指令盤',                     icon: '⌘', action: 'cmd' }
   ];
 
-  var state = { route: 'pulse', built: false, syncing: false, prevRoute: null };
+  var state = { route: 'pulse', built: false, syncing: false, prevRoute: null, navOpen: false };
 
   /* Alt+Shift+1…0 → 側欄（避開 Alt+數字 時框） */
   var HOTKEY_ROUTES = [
@@ -73,21 +74,42 @@
       document.head.appendChild(s);
     }
     s.textContent =
-      '#shell-row{display:flex;flex:1 1 0;min-height:0;min-width:0;height:100%}' +
-      /* 寬側欄；窄螢幕收成圖示欄 — 品牌固定 Stock Terminal */
-      '#navrail{flex:0 0 150px;width:150px;background:linear-gradient(180deg,#0A1220 0%,#070E18 100%);' +
+      /* 主區全寬；側欄浮動疊加，隱藏時釋出 ~150px 可視區 */
+      '#shell-row{display:flex;flex:1 1 0;min-height:0;min-width:0;height:100%;position:relative}' +
+      '#shell-main{display:flex;flex-direction:column;flex:1 1 0;min-width:0;min-height:0;height:100%;position:relative;width:100%}' +
+      '#navrail{position:absolute;left:0;top:0;bottom:0;width:156px;' +
+        'background:linear-gradient(180deg,#0A1220 0%,#070E18 100%);' +
         'border-right:1px solid #132238;display:flex;flex-direction:column;align-items:stretch;' +
-        'padding:8px 6px;gap:1px;z-index:40;flex-shrink:0;overflow-y:auto;overflow-x:hidden;box-sizing:border-box}' +
+        'padding:8px 6px;gap:1px;z-index:80;overflow-y:auto;overflow-x:hidden;box-sizing:border-box;' +
+        'transform:translateX(0);transition:transform .2s ease,box-shadow .2s ease;' +
+        'box-shadow:8px 0 28px rgba(0,0,0,.45)}' +
+      '#shell-row.nr-collapsed #navrail{transform:translateX(-100%);pointer-events:none;box-shadow:none}' +
+      '#nr-backdrop{display:none;position:absolute;inset:0;z-index:70;background:rgba(2,6,14,.35);border:none;padding:0;cursor:pointer}' +
+      '#shell-row.nr-open #nr-backdrop{display:block}' +
+      '#nr-edge{position:absolute;left:0;top:50%;transform:translateY(-50%);z-index:85;' +
+        'display:none;flex-direction:column;align-items:center;justify-content:center;gap:4px;' +
+        'width:22px;min-height:72px;padding:8px 0;border:1px solid #1e334d;border-left:none;' +
+        'border-radius:0 8px 8px 0;background:linear-gradient(180deg,#0E1A2C,#0A1220);' +
+        'color:var(--gold);cursor:pointer;font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:800;' +
+        'letter-spacing:.5px;box-shadow:4px 0 16px rgba(0,0,0,.35)}' +
+      '#nr-edge:hover{background:#132238;color:#FBBF24}' +
+      '#shell-row.nr-collapsed #nr-edge{display:flex}' +
+      '#nr-edge .nr-edge-ico{font-size:12px;line-height:1}' +
+      '#nr-edge .nr-edge-lbl{writing-mode:vertical-rl;text-orientation:mixed;font-size:9px;letter-spacing:1px}' +
       '#navrail .nr-brand-st{display:flex;align-items:center;gap:8px;padding:6px 6px 12px;' +
         'border-bottom:1px solid #132238;margin-bottom:6px;user-select:none;flex-shrink:0}' +
       '#navrail .nr-brand-st .logo-box{width:34px;height:34px;border-radius:9px;padding:0;overflow:hidden;' +
         'flex-shrink:0;border:1px solid rgba(245,197,24,.35);background:#070E18;' +
         'box-shadow:0 0 0 1px rgba(56,189,248,.12)}' +
       '#navrail .nr-brand-st .logo-box img{width:100%;height:100%;display:block;object-fit:cover}' +
+      '#navrail .nr-brand-st .logo-text{flex:1;min-width:0}' +
       '#navrail .nr-brand-st .brand-title{font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:800;' +
         'color:#F1F5F9;line-height:1.1;letter-spacing:.2px}' +
       '#navrail .nr-brand-st .brand-sub{font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;' +
         'color:var(--gold);letter-spacing:.8px;margin-top:2px}' +
+      '#navrail .nr-hide{flex:0 0 auto;width:26px;height:26px;border:1px solid #1e334d;border-radius:6px;' +
+        'background:transparent;color:#94A3B8;cursor:pointer;font-size:14px;line-height:1;padding:0}' +
+      '#navrail .nr-hide:hover{color:var(--gold);border-color:var(--gold-m)}' +
       /* 品牌集中左上：內頁不再重複 STOCK TERMINAL kicker */
       '.pl-kicker,.hub-kicker,.bd-kicker,.ht-kicker,.ah-kicker,.nw-kicker,.sc-kicker,.bk-kicker,.sv-kicker,.ai5-kicker{' +
         'display:none!important}' +
@@ -112,7 +134,6 @@
         'display:flex;flex-direction:column;gap:2px}' +
       '.nr-foot-st .mode-dot{color:var(--cyan);font-weight:600}' +
       '.nr-foot-st .mode-sub{font-size:8px;color:#475569;line-height:1.2}' +
-      '#shell-main{display:flex;flex-direction:column;flex:1 1 0;min-width:0;min-height:0;height:100%;position:relative}' +
       '#shell-views{display:none!important;flex:1 1 0;min-height:0;min-width:0;height:100%;background:#060C16;overflow:auto}' +
       '#shell-views.show{display:flex!important;flex-direction:column;flex:1 1 0;min-height:0;height:100%}' +
       /* 高密度一頁視圖：鎖定捲動（各模組亦會覆寫） */
@@ -159,15 +180,40 @@
       '#topbar .logo [data-v2-banner] span,' +
       '#topbar .logo>span[style*="FBBF24"]{display:none !important}' +
       '@media (max-width:1024px){' +
-        '#navrail{flex-basis:56px;width:56px;padding:6px 4px}' +
-        '#navrail .nr-brand-st .brand-title,#navrail .nr-brand-st .brand-sub,' +
-        '#navrail .nr-foot-st .mode-sub{display:none}' +
-        '.nr-btn{justify-content:center;padding:6px 0;font-size:10px}' +
-        '.nr-btn span:not(.nr-ico){display:none}' +
+        '#navrail{width:148px}' +
         '.sv-panel{padding:8px 8px 10px}' +
         '#topbar .shell-sync-btn span.lbl{display:none}' +
       '}';
   }
+
+  function readNavOpen() {
+    try {
+      var v = localStorage.getItem(NAV_KEY);
+      if (v === null || v === undefined) return false; /* 預設隱藏，放大總覽可視區 */
+      return v === '1' || v === 'true';
+    } catch (e) { return false; }
+  }
+
+  function applyNavOpen(open) {
+    state.navOpen = !!open;
+    var row = $('shell-row');
+    if (!row) return;
+    row.classList.toggle('nr-open', state.navOpen);
+    row.classList.toggle('nr-collapsed', !state.navOpen);
+    var rail = $('navrail');
+    if (rail) {
+      rail.setAttribute('aria-hidden', state.navOpen ? 'false' : 'true');
+      if (state.navOpen) rail.removeAttribute('inert');
+      else rail.setAttribute('inert', '');
+    }
+    var edge = $('nr-edge');
+    if (edge) edge.setAttribute('aria-expanded', state.navOpen ? 'true' : 'false');
+    try { localStorage.setItem(NAV_KEY, state.navOpen ? '1' : '0'); } catch (e) {}
+  }
+
+  function setNavOpen(open) { applyNavOpen(open); }
+
+  function toggleNav() { applyNavOpen(!state.navOpen); }
 
   function stubHTML(route) {
     return '' +
@@ -185,7 +231,9 @@
       '<div class="logo-text">' +
         '<div class="brand-title">Stock Terminal</div>' +
         '<div class="brand-sub">v' + VERSION + '</div>' +
-      '</div></div>' +
+      '</div>' +
+      '<button type="button" class="nr-hide" id="nr-hide" title="隱藏側欄（[ 或 Ctrl/⌘B）" aria-label="隱藏側欄">‹</button>' +
+      '</div>' +
       ROUTES.map(function (r) {
         return '<button type="button" class="nr-btn" data-route="' + r.id + '" title="' +
           r.hint.replace(/"/g, '') + ' (Alt+Shift)" aria-label="' + r.label + '">' +
@@ -195,8 +243,48 @@
       '<div class="nr-spacer"></div>' +
       '<div class="nr-foot-st">' +
         '<div class="mode-dot">● LOCAL · v' + VERSION + '</div>' +
-        '<div class="mode-sub">本機資料 · 非投資建議</div>' +
+        '<div class="mode-sub">[ 側欄 · Esc 關閉 · 非投資建議</div>' +
       '</div>';
+  }
+
+  function edgeHTML() {
+    return '<button type="button" class="nr-edge" id="nr-edge" title="展開功能選單（[ 或 Ctrl/⌘B）" ' +
+      'aria-label="展開功能選單" aria-expanded="false">' +
+      '<span class="nr-edge-ico" aria-hidden="true">›</span>' +
+      '<span class="nr-edge-lbl">選單</span>' +
+      '</button>';
+  }
+
+  function ensureNavChrome(row) {
+    if (!row) return;
+    if (!$('nr-edge')) {
+      row.insertAdjacentHTML('beforeend', edgeHTML());
+    }
+    if (!$('nr-backdrop')) {
+      var bd = document.createElement('button');
+      bd.type = 'button';
+      bd.id = 'nr-backdrop';
+      bd.className = 'nr-backdrop';
+      bd.setAttribute('aria-label', '關閉側欄');
+      bd.setAttribute('tabindex', '-1');
+      row.appendChild(bd);
+    }
+    var edge = $('nr-edge');
+    var backdrop = $('nr-backdrop');
+    if (edge && !edge._nrBound) {
+      edge._nrBound = true;
+      edge.addEventListener('click', function (e) {
+        e.preventDefault();
+        setNavOpen(true);
+      });
+    }
+    if (backdrop && !backdrop._nrBound) {
+      backdrop._nrBound = true;
+      backdrop.addEventListener('click', function (e) {
+        e.preventDefault();
+        setNavOpen(false);
+      });
+    }
   }
 
   function ensurePanel(r) {
@@ -320,22 +408,44 @@
       main.appendChild(body);
       main.appendChild(views);
 
-      rail.addEventListener('click', function (e) {
-        var btn = e.target.closest('.nr-btn');
-        if (!btn) return;
-        go(btn.getAttribute('data-route'));
-      });
+      ensureNavChrome(row);
+      rail.addEventListener('click', onNavrailClick);
       views.addEventListener('click', function (e) {
         if (e.target.closest('[data-shell-back]')) go('chart');
       });
     } else {
+      var row2 = $('shell-row');
       var rail2 = $('navrail');
-      if (rail2) rail2.innerHTML = railHTML();
+      if (rail2) {
+        rail2.innerHTML = railHTML();
+        if (!rail2._nrClickBound) {
+          rail2._nrClickBound = true;
+          rail2.addEventListener('click', onNavrailClick);
+        }
+      }
+      ensureNavChrome(row2);
       ROUTES.forEach(ensurePanel);
     }
 
+    applyNavOpen(readNavOpen());
     state.built = true;
     return true;
+  }
+
+  function onNavrailClick(e) {
+    var hide = e.target.closest('#nr-hide');
+    if (hide) {
+      e.preventDefault();
+      setNavOpen(false);
+      return;
+    }
+    var btn = e.target.closest('.nr-btn');
+    if (!btn) return;
+    go(btn.getAttribute('data-route'));
+    /* 窄螢幕導航後收合，把可視區留給內容 */
+    if (window.matchMedia && window.matchMedia('(max-width: 1100px)').matches) {
+      setNavOpen(false);
+    }
   }
 
   function setSync(mode, text) {
@@ -608,7 +718,20 @@
 
   function onShellKey(e) {
     if (inEditable(e.target)) return;
-    /* Esc → 圖表由 hotkeys_v3 統一（先關模態） */
+    var meta = e.metaKey || e.ctrlKey;
+    /* Esc：先關浮動側欄，再交 hotkeys_v3 回圖表 */
+    if (e.key === 'Escape' && state.navOpen) {
+      e.preventDefault();
+      e.stopPropagation();
+      setNavOpen(false);
+      return;
+    }
+    /* [ 或 Ctrl/⌘B：切換浮動側欄 */
+    if (e.key === '[' || (meta && (e.key === 'b' || e.key === 'B'))) {
+      e.preventDefault();
+      toggleNav();
+      return;
+    }
     if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && /^[0-9]$/.test(e.key)) {
       var idx = e.key === '0' ? 9 : (parseInt(e.key, 10) - 1);
       var rid = HOTKEY_ROUTES[idx];
@@ -627,6 +750,9 @@
     go: go,
     navigate: go,
     route: function () { return state.route; },
+    toggleNav: toggleNav,
+    setNavOpen: setNavOpen,
+    isNavOpen: function () { return !!state.navOpen; },
     setSync: setSync,
     sync: function () { runSync(true); },
     softBadge: function (mountId, on, text) {

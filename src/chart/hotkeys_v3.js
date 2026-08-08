@@ -141,9 +141,15 @@
     }
     if (inEditable(e.target)) return;
 
-    // Esc 關浮層；若無浮層且在側欄視圖 → 回圖表
+    // Esc 關浮層／浮動側欄；若無浮層且在側欄視圖 → 回圖表
     if (e.key === 'Escape') {
       if (closeAnyModal()) return;
+      if (window.ShellV5 && typeof window.ShellV5.isNavOpen === 'function' &&
+          window.ShellV5.isNavOpen() && typeof window.ShellV5.setNavOpen === 'function') {
+        e.preventDefault();
+        window.ShellV5.setNavOpen(false);
+        return;
+      }
       if (window.ShellV5 && typeof window.ShellV5.route === 'function' &&
           window.ShellV5.route() !== 'chart' && typeof window.ShellV5.go === 'function') {
         e.preventDefault();

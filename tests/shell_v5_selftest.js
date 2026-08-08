@@ -93,14 +93,16 @@ ok(/漲跌家數 · 廣度/.test(pl) && /repeat\(6,/.test(pl),
   'pulse strip merges breadth into 6-col KPI row');
 ok(/data-flash-mkt/.test(pl) && /filterFlash/.test(pl) && /flashMkt/.test(pl),
   'pulse flash has TW/US/ALL tabs');
-ok(/instDayEmpty/.test(pl) && /前一交易日/.test(pl) && /paintInstCells/.test(pl),
-  'pulse institutional falls back to prior session');
-ok(/pl-tag\.ok\{[^}]*#94a3b8/.test(pl) && /pl-st-pos/.test(pl),
-  'pulse status colors separated from price red/green');
-ok(/data-watch-mkt/.test(pl) && /filterWatchlist/.test(pl) && /pl-wl-scroll/.test(pl),
-  'pulse watchlist has TW/US tabs and fixed scroll region');
-ok(/instFlowQuant/.test(pl) && /rankLabel/.test(pl) && /pl-inst-ctx/.test(pl),
-  'pulse institutional shows Z/percentile/rank context');
+ok(/instDayEmpty/.test(pl) && /預覽前一日/.test(pl) && /paintInstCells/.test(pl),
+  'pulse institutional falls back to prior session via compact tag');
+ok(/pl-tag\.ok\{/.test(pl) && /#64748b/.test(pl) && /pl-st-pos/.test(pl),
+  'pulse watch tags are status dots (not price red/green)');
+ok(/data-watch-mkt/.test(pl) && /filterWatchlist/.test(pl) && /pl-wl-scroll/.test(pl) &&
+  /c-px/.test(pl) && /c-chg/.test(pl) && /c-tag/.test(pl),
+  'pulse watchlist has TW/US tabs, fixed columns, and scroll region');
+ok(/instFlowQuant/.test(pl) && /rankLabel/.test(pl) && /pl-inst-ctx/.test(pl) &&
+  /pl-inst-stale/.test(pl) && /當日尚未公布/.test(pl),
+  'pulse institutional shows Z/percentile/rank + compact stale tag');
 ok(/pl-score3/.test(pl) && /綜合脈動/.test(pl) && /大盤體質/.test(pl) && /權重 70%/.test(pl) && /權重 30%/.test(pl),
   'pulse score trio shows parent 綜合 + child weights 70/30');
 ok(/正面因子/.test(pl) && /風險因子/.test(pl) && /計入風險分/.test(pl) && !/主要動能/.test(pl),
@@ -109,6 +111,20 @@ ok(/大盤體質（X：日/.test(pl) && !/>動能</.test(pl),
   'pulse history labels health as 體質 not 動能');
 ok(/industryLabel/.test(pl) && /bindSectorMoverLink/.test(pl) && /data-sector-key/.test(pl),
   'pulse movers industry tags + sector hover link');
+ok(/globalAbbr/.test(pl) && /'DJI'/.test(pl) && /'SPX'/.test(pl) && /'NDX'/.test(pl) && /'SOX'/.test(pl),
+  'pulse global uses short ticker labels');
+ok(/basisPts/.test(pl) && /正價差/.test(pl) && /逆價差/.test(pl) && /Basis＝期貨−現貨/.test(pl),
+  'pulse strip shows TXF–TAIEX basis');
+ok(/pl-flash-q/.test(pl) && /flashQ/.test(pl) && /搜代號\/關鍵字/.test(pl),
+  'pulse flash has keyword search beside TW/US tabs');
+
+ok(/NAV_KEY/.test(shell) && /toggleNav/.test(shell) && /nr-edge/.test(shell) &&
+  /nr-backdrop/.test(shell) && /nr-collapsed/.test(shell) && /nr-hide/.test(shell),
+  'shell floating hideable navrail wired');
+ok(/isNavOpen/.test(shell) && /setNavOpen/.test(shell),
+  'ShellV5 exposes nav open API');
+ok(/isNavOpen/.test(hotkeys) && /setNavOpen\(false\)/.test(hotkeys),
+  'Esc closes floating nav before returning to chart');
 
 const nw = fs.readFileSync(path.join(root, 'src/ui/news_v5.js'), 'utf8');
 ok(/nw-mkt-seg/.test(nw) && /flashMkt/.test(nw), 'news TW/US filter');
