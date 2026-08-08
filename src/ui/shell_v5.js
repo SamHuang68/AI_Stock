@@ -15,7 +15,8 @@
   'use strict';
 
   var STORAGE_KEY = 'st5.shell.route';
-  var VERSION = '5.0-S7';
+  /* 顯示版號：建置時由 build_v2.py 依根目錄 VERSION 覆寫；預設與 VERSION 檔對齊 */
+  var VERSION = '5.0';
 
   var ROUTES = [
     { id: 'pulse',      label: '脈動',   hint: '市場脈動總覽（指數／廣度／籌碼）', icon: '◎', stub: false },

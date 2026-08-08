@@ -11,6 +11,23 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC  = os.path.join(ROOT, 'stock_terminal.html')
 DST  = os.path.join(ROOT, 'stock_terminal_v2.html')
 
+
+def _read_version():
+    """單一真理：根目錄 VERSION（一行，如 5.0）。缺檔則 5.0。"""
+    path = os.path.join(ROOT, 'VERSION')
+    try:
+        with open(path, 'r', encoding='utf-8') as vf:
+            for line in vf:
+                v = line.strip()
+                if v and not v.startswith('#'):
+                    return v
+    except Exception:
+        pass
+    return '5.0'
+
+
+ST_VERSION = _read_version()
+
 # Scripts injected (in order):
 V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,須最先載入)
               'src/core/market_v3.js',   # 台股/美股 universe lookup(權威判市場+名稱,可更新)
@@ -103,10 +120,10 @@ for css in V2_STYLES:
 with open(SRC, 'r', encoding='utf-8') as f:
     html = f.read()
 
-# 1) Update title
+# 1) Update title（版本跟 VERSION 檔）
 html = re.sub(
     r'<title>[^<]*</title>',
-    '<title>Stock Terminal v4.1 - Local DB / Portfolio / AI Copilot</title>',
+    f'<title>Stock Terminal v{ST_VERSION} - Local DB / Portfolio / AI Copilot</title>',
     html, count=1)
 
 # 2a) POS tab
@@ -228,21 +245,54 @@ if '</body>' in html:
 else:
     html += '\n' + script_block
 
-# 6) banner
+# 6) banner（版本跟 VERSION 檔，避免卡在舊號）
 if 'data-v2-banner' not in html:
     html = html.replace(
         '<span class="logo">STOCK TERMINAL</span>',
-        '<span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v4.1</span></span>',
+        f'<span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v{ST_VERSION}</span></span>',
         1)
-# Bump existing banner to v4.1
 html = re.sub(
-    r'(data-v2-banner>STOCK TERMINAL <span[^>]+>)v[0-9]+\.\d+(</span>)',
-    r'\g<1>v4.1\g<2>', html, count=1)
+    r'(data-v2-banner>STOCK TERMINAL <span[^>]+>)v[0-9]+(?:\.\d+)*(?:-[A-Za-z0-9.]+)?(</span>)',
+    rf'\g<1>v{ST_VERSION}\g<2>', html, count=1)
 
 with open(DST, 'w', encoding='utf-8') as f:
     f.write(html)
 
+# 6b) 同步 shell_v5.js 顯示版號（外部 script，需改源檔）
+shell_js = os.path.join(ROOT, 'src', 'ui', 'shell_v5.js')
+if os.path.isfile(shell_js):
+    try:
+        with open(shell_js, 'r', encoding='utf-8') as sf:
+            shell_src = sf.read()
+        shell_new, n = re.subn(
+            r"var VERSION = '[^']*';",
+            f"var VERSION = '{ST_VERSION}';",
+            shell_src, count=1)
+        if n and shell_new != shell_src:
+            with open(shell_js, 'w', encoding='utf-8') as sf:
+                sf.write(shell_new)
+    except Exception as e:
+        print('[warn] shell version stamp:', e)
+
+# 同步 stock_terminal.html 標題／banner（go.bat 有時也開 base）
+try:
+    with open(SRC, 'r', encoding='utf-8') as f:
+        base_html = f.read()
+    base_html = re.sub(
+        r'<title>[^<]*</title>',
+        f'<title>Stock Terminal v{ST_VERSION} - Local DB / Portfolio / AI Copilot</title>',
+        base_html, count=1)
+    if 'data-v2-banner' in base_html:
+        base_html = re.sub(
+            r'(data-v2-banner>STOCK TERMINAL <span[^>]+>)v[0-9]+(?:\.\d+)*(?:-[A-Za-z0-9.]+)?(</span>)',
+            rf'\g<1>v{ST_VERSION}\g<2>', base_html, count=1)
+    with open(SRC, 'w', encoding='utf-8') as f:
+        f.write(base_html)
+except Exception as e:
+    print('[warn] base html version stamp:', e)
+
 print(f'[OK] wrote {DST}  ({len(html):,} bytes)')
+print(f'     version: v{ST_VERSION}  (from VERSION)')
 print(f'     base:    {SRC}')
 print(f'     modules: {", ".join(V2_SCRIPTS)}')
 print()

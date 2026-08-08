@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Build a shareable Stock Terminal v4.1 zip.
+Build a shareable Stock Terminal zip（版本讀根目錄 VERSION）。
 
 Strips private user data (API keys, watches, alert config, draw store,
 personal chip snapshots) and internal revision notes.
 
 Usage:
   python scripts/build_dist.py
-  python scripts/build_dist.py --out /path/to/Stock_Terminal_v4.1.zip
+  python scripts/build_dist.py --out /path/to/Stock_Terminal_v5.0.zip
 """
 from __future__ import annotations
 
@@ -21,7 +21,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 STAGE_NAME = "Stock_Terminal"
-ZIP_NAME = "Stock_Terminal_v4.1.zip"
+
+
+def _read_version() -> str:
+    try:
+        for line in (ROOT / 'VERSION').read_text(encoding='utf-8').splitlines():
+            v = line.strip()
+            if v and not v.startswith('#'):
+                return v
+    except Exception:
+        pass
+    return '5.0'
+
+
+ST_VERSION = _read_version()
+ZIP_NAME = f"Stock_Terminal_v{ST_VERSION}.zip"
 
 # Never copy these basenames anywhere under the stage tree
 SECRET_BASENAMES = {
@@ -220,7 +234,7 @@ def verify_no_secrets(zip_path: Path) -> list[str]:
 def build(out: Path | None = None) -> Path:
     os.chdir(ROOT)
     print("=" * 50)
-    print(" Build Stock_Terminal distribution zip (v4.1)")
+    print(f" Build Stock_Terminal distribution zip (v{ST_VERSION})")
     print("=" * 50)
 
     # Fresh v2 HTML if sources present

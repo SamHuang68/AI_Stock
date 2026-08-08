@@ -43,9 +43,17 @@ cd /d "%REPO_ROOT%"
 if errorlevel 1 goto FAIL_CD
 :AFTER_ROOT
 
+REM Version from repo root VERSION file - single source of truth with build_v2.py
+set "ST_VER=5.0"
+if exist "%REPO_ROOT%\VERSION" (
+  set /p ST_VER=<"%REPO_ROOT%\VERSION"
+)
+REM trim accidental spaces
+for /f "tokens=* delims= " %%v in ("!ST_VER!") do set "ST_VER=%%v"
+
 echo.
 echo ============================================
-echo  Stock Terminal v4.1
+echo  Stock Terminal v!ST_VER!
 echo  http://localhost:18432/stock_terminal_v2.html
 echo ============================================
 echo.
