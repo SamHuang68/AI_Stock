@@ -65,16 +65,18 @@
 
   /* 功能轉盤：最多 3 層；依投資分析邏輯分類；上層保留半透明鎖定 */
   var RING_MAX_DEPTH = 3;
-  var RING_R = 112; /* 作用層半徑 */
-  var RING_R_STEP = 40; /* 每鎖一層往外推 */
+  var RING_R = 112; /* 各層轉盤半徑（下一層以點選項為圓心） */
   var RING_ROUTES = [
     'market', 'price', 'flow', 'screen',
     'breadth', 'global', 'ai', 'desk'
   ];
   var ringState = {
-    open: false, cx: 0, cy: 0, hi: -1,
-    layers: [],  /* [{ title, items, pickedId }] 最多 3 */
-    items: []    /* = 作用層 items */
+    open: false,
+    wx: 0, wy: 0,   /* wheel 原點（螢幕座標） */
+    cx: 0, cy: 0,   /* 作用層圓心（螢幕座標，供命中／游標） */
+    hi: -1,
+    layers: [],     /* [{ title, items, pickedId, ox, oy }] 最多 3；ox/oy 相對 wheel */
+    items: []       /* = 作用層 items */
   };
   /* Toolbar 按鈕短標（DOM 未掛時備援） */
   var RING_BTN_META = {
@@ -515,7 +517,7 @@
         '<div class="sr-level" id="st-ring-level">L1 · 分析主選單</div>' +
         '<div class="sr-layers" id="st-ring-layers"></div>' +
         '<button type="button" class="sr-hub" id="st-ring-hub" title="關閉" aria-label="關閉轉盤">✕</button>' +
-        '<div class="sr-tip" id="st-ring-tip">中鍵／\\ · 最多三層 · 上層透明鎖定</div>' +
+        '<div class="sr-tip" id="st-ring-tip">中鍵／\\ · 點 › 從該點開下一層</div>' +
       '</div>';
     document.body.appendChild(root);
     root.addEventListener('click', onRingClick);
@@ -524,6 +526,68 @@
   }
 
   function ringDepth() { return ringState.layers.length; }
+
+  function activeLayer() {
+    var d = ringDepth();
+    return d ? ringState.layers[d - 1] : null;
+  }
+
+  function itemOffsetOnLayer(layer, idx) {
+    var items = (layer && layer.items) || [];
+    var n = items.length || 1;
+    var ang = -Math.PI / 2 + idx * (Math.PI * 2 / n);
+    return {
+      ox: (layer.ox || 0) + Math.cos(ang) * RING_R,
+      oy: (layer.oy || 0) + Math.sin(ang) * RING_R
+    };
+  }
+
+  function syncActiveCenter() {
+    var a = activeLayer();
+    if (!a) return;
+    ringState.cx = ringState.wx + (a.ox || 0);
+    ringState.cy = ringState.wy + (a.oy || 0);
+  }
+
+  /* 作用層圓心貼近螢幕邊緣時平移 wheel，避免下一層轉盤被裁切 */
+  function clampWheelForActive() {
+    var a = activeLayer();
+    if (!a) return;
+    var ax = ringState.wx + (a.ox || 0);
+    var ay = ringState.wy + (a.oy || 0);
+    var pad = RING_R + 48;
+    var nx = Math.max(pad, Math.min(window.innerWidth - pad, ax));
+    var ny = Math.max(pad, Math.min(window.innerHeight - pad, ay));
+    ringState.wx += nx - ax;
+    ringState.wy += ny - ay;
+    var wheel = $('st-ring-wheel');
+    if (wheel) {
+      wheel.style.left = ringState.wx + 'px';
+      wheel.style.top = ringState.wy + 'px';
+    }
+    syncActiveCenter();
+  }
+
+  function paintRingAnchor() {
+    var a = activeLayer();
+    var ox = a ? (a.ox || 0) : 0;
+    var oy = a ? (a.oy || 0) : 0;
+    var hub = $('st-ring-hub');
+    if (hub) {
+      hub.style.left = ox + 'px';
+      hub.style.top = oy + 'px';
+    }
+    var tip = $('st-ring-tip');
+    if (tip) {
+      tip.style.left = ox + 'px';
+      tip.style.top = (oy + 86) + 'px';
+    }
+    var level = $('st-ring-level');
+    if (level) {
+      level.style.left = ox + 'px';
+      level.style.top = (oy - 100) + 'px';
+    }
+  }
 
   function paintRingHub() {
     var hub = $('st-ring-hub');
@@ -547,13 +611,6 @@
     level.innerHTML = parts.join(' › ') || 'L1 · 分析主選單';
   }
 
-  function layerRadius(layerIndex, depth) {
-    /* 作用層 = RING_R；每鎖定一層往外 +STEP */
-    var lockedSteps = (depth - 1) - layerIndex;
-    if (lockedSteps < 0) lockedSteps = 0;
-    return RING_R + lockedSteps * RING_R_STEP;
-  }
-
   function renderRingLayers() {
     var host = $('st-ring-layers');
     if (!host) return;
@@ -561,9 +618,12 @@
     var depth = ringDepth();
     if (!depth) return;
     var activeIdx = depth - 1;
+    syncActiveCenter();
+    paintRingAnchor();
     ringState.layers.forEach(function (layer, li) {
       var locked = li < activeIdx;
-      var radius = layerRadius(li, depth);
+      var ox = layer.ox || 0;
+      var oy = layer.oy || 0;
       var layerEl = document.createElement('div');
       layerEl.className = 'sr-layer ' + (locked ? 'locked' : 'active');
       layerEl.setAttribute('data-layer', String(li));
@@ -571,8 +631,8 @@
       var n = items.length || 1;
       items.forEach(function (r, idx) {
         var ang = -Math.PI / 2 + idx * (Math.PI * 2 / n);
-        var x = Math.cos(ang) * radius;
-        var y = Math.sin(ang) * radius;
+        var x = ox + Math.cos(ang) * RING_R;
+        var y = oy + Math.sin(ang) * RING_R;
         var btn = document.createElement('button');
         btn.type = 'button';
         var cls = 'sr-item';
@@ -584,8 +644,13 @@
         btn.setAttribute('data-idx', String(idx));
         btn.setAttribute('data-id', r.id);
         if (r.route) btn.setAttribute('data-route', r.route);
-        btn.title = (r.hint || r.label) + (r.children && r.children.length ? ' · 展開下一層' : '');
+        btn.title = (r.hint || r.label) + (r.children && r.children.length ? ' · 由此展開下一層' : '');
         btn.style.transform = 'translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px)';
+        /* 已展開的父項落在下一層圓心（中心鈕），鎖定層隱藏避免疊在 hub 上 */
+        if (locked && layer.pickedId && layer.pickedId === r.id) {
+          btn.style.visibility = 'hidden';
+          btn.setAttribute('aria-hidden', 'true');
+        }
         btn.innerHTML = '<span class="sr-ico" aria-hidden="true">' + (r.icon || '·') + '</span>' +
           '<span class="sr-lbl">' + r.label + '</span>';
         layerEl.appendChild(btn);
@@ -645,7 +710,7 @@
     }
     if (idx < 0) {
       tip.textContent = 'L' + ringDepth() + '/' + RING_MAX_DEPTH +
-        (deep ? ' · 上層透明鎖定 · ‹ 返回' : ' · 點 › 開下一層轉盤');
+        (deep ? ' · 上層鎖定 · ‹ 返回' : ' · 點 › 從該點開下一層');
       return;
     }
     var r = ringState.items[idx];
@@ -677,7 +742,7 @@
     setRingHighlight(ringIndexFromPoint(e.clientX, e.clientY));
   }
 
-  function ringPushChildren(item) {
+  function ringPushChildren(item, idx) {
     var kids = item.children || [];
     if (!kids.length) return;
     if (ringDepth() >= RING_MAX_DEPTH) {
@@ -686,12 +751,18 @@
     }
     if (ringNeedsChart(item) && state.route !== 'chart') go('chart');
     var cur = ringState.layers[ringDepth() - 1];
-    if (cur) cur.pickedId = item.id;
+    if (!cur) return;
+    cur.pickedId = item.id;
+    var off = itemOffsetOnLayer(cur, idx | 0);
+    /* 下一層以點選功能為圓心（非原轉盤置中） */
     ringState.layers.push({
       title: item.label,
       items: kids,
-      pickedId: null
+      pickedId: null,
+      ox: off.ox,
+      oy: off.oy
     });
+    clampWheelForActive();
     renderRingLayers();
   }
 
@@ -703,13 +774,14 @@
     ringState.layers.pop();
     var cur = ringState.layers[ringDepth() - 1];
     if (cur) cur.pickedId = null;
+    clampWheelForActive();
     renderRingLayers();
   }
 
-  function activateRingItem(item) {
+  function activateRingItem(item, idx) {
     if (!item) return;
     if (item.children && item.children.length) {
-      ringPushChildren(item);
+      ringPushChildren(item, idx);
       return;
     }
     if (item.clickId) {
@@ -748,23 +820,26 @@
     if (!node) return;
     e.preventDefault();
     var idx = parseInt(node.getAttribute('data-idx'), 10);
-    activateRingItem(ringState.items[idx]);
+    activateRingItem(ringState.items[idx], idx);
   }
 
   function openRing(clientX, clientY) {
     ensureRing();
     ensureRingFab();
-    /* 三層時外圈 ≈ RING_R + 2*STEP + 半鈕；預留邊距避免裁切 */
-    var pad = RING_R + RING_R_STEP * 2 + 48;
+    var pad = RING_R + 48;
     var x = Math.max(pad, Math.min(window.innerWidth - pad, clientX || window.innerWidth / 2));
     var y = Math.max(pad, Math.min(window.innerHeight - pad, clientY || window.innerHeight / 2));
     ringState.open = true;
+    ringState.wx = x;
+    ringState.wy = y;
     ringState.cx = x;
     ringState.cy = y;
     ringState.layers = [{
       title: '分析主選單',
       items: ringAnalysisTree(),
-      pickedId: null
+      pickedId: null,
+      ox: 0,
+      oy: 0
     }];
     var root = $('st-ring');
     var wheel = $('st-ring-wheel');
@@ -781,6 +856,10 @@
     if (!ringState.open && !$('st-ring')) return;
     ringState.open = false;
     ringState.hi = -1;
+    ringState.wx = 0;
+    ringState.wy = 0;
+    ringState.cx = 0;
+    ringState.cy = 0;
     ringState.layers = [];
     ringState.items = [];
     var root = $('st-ring');
@@ -1334,7 +1413,7 @@
       }
       if (e.key === 'Enter' && ringState.hi >= 0) {
         e.preventDefault();
-        activateRingItem(ringState.items[ringState.hi]);
+        activateRingItem(ringState.items[ringState.hi], ringState.hi);
         return;
       }
     }

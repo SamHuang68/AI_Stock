@@ -179,6 +179,9 @@ ok(/ringAnalysisTree/.test(shell) && /ringPushChildren/.test(shell) &&
   /ringFolder\('market'/.test(shell) && /ringFolder\('price'/.test(shell) &&
   /ringFolder\('flow'/.test(shell) && /ringFolder\('screen'/.test(shell),
   'shell ring 3-layer analysis taxonomy (locked outer + active inner)');
+ok(/itemOffsetOnLayer/.test(shell) && /clampWheelForActive/.test(shell) &&
+  /下一層以點選功能為圓心/.test(shell) && /paintRingAnchor/.test(shell),
+  'shell ring drills next layer centered on picked item (not re-centered)');
 /* 樹深度約束：任一分支 children 巢狀 ≤ RING_MAX_DEPTH（靜態掃描） */
 (function () {
   var maxNest = 0;
