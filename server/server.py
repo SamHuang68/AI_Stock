@@ -331,33 +331,50 @@ def _norm_ym(s):
     return None
 
 def _http_json(url, timeout=15):
-    req = urllib.request.Request(url, headers={
+    """對外 JSON：走統一 http_client（連線池／Keep-Alive／退避）。"""
+    headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept': 'application/json,text/plain,*/*',
         'Accept-Language': 'zh-TW,zh;q=0.9',
-    })
+    }
+    try:
+        import http_client as _hc
+    except Exception:
+        _hc = None
+    if _hc is not None:
+        return _hc.fetch_json(url, timeout=timeout, retries=1, headers=headers)
+    # 備援：僅在 http_client 無法載入時走舊路徑
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode('utf-8-sig', 'replace'))
 
 def _http_text(url, timeout=15):
     """抓原始文字。政府 CSV 常為 Big5，依序試多種編碼。"""
-    req = urllib.request.Request(url, headers={
+    headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept': 'text/csv,application/json,text/plain,*/*',
         'Accept-Language': 'zh-TW,zh;q=0.9',
-    })
-    raw = None
-    last_err = None
-    for attempt in range(2):
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw = resp.read()
-            break
-        except Exception as e:
-            last_err = e
-            time.sleep(1.2)
-    if raw is None:
-        raise last_err if last_err else RuntimeError('http_text failed')
+    }
+    try:
+        import http_client as _hc
+    except Exception:
+        _hc = None
+    if _hc is not None:
+        raw = _hc.fetch_bytes(url, timeout=timeout, retries=1, headers=headers)
+    else:
+        raw = None
+        last_err = None
+        for attempt in range(2):
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    raw = resp.read()
+                break
+            except Exception as e:
+                last_err = e
+                time.sleep(1.2)
+        if raw is None:
+            raise last_err if last_err else RuntimeError('http_text failed')
     for enc in ('utf-8-sig', 'utf-8', 'big5', 'cp950'):
         try:
             return raw.decode(enc)
@@ -1462,17 +1479,34 @@ def _src_throttle(name):
 
 def _src_fetch_json(name, url, headers=None, timeout=10, retries=1, data=None):
     """經 健檢/節流/熔斷/退避 的對外 JSON 抓取。
-       熔斷開啟 → 擲 SourceBreakerOpen;最終失敗 → 擲原始例外。data 給定則為 POST。"""
+       熔斷開啟 → 擲 SourceBreakerOpen;最終失敗 → 擲原始例外。data 給定則為 POST。
+       傳輸層走 http_client（連線池／Keep-Alive）；熔斷與節流語意不變。"""
     if _src_breaker_open(name):
         raise SourceBreakerOpen(name)
     last_exc = None
+    try:
+        import http_client as _hc
+    except Exception:
+        _hc = None
     for attempt in range(retries + 1):
         _src_throttle(name)
         t0 = time.time()
         try:
-            req = urllib.request.Request(url, headers=headers or {}, data=data)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw = resp.read()
+            if _hc is not None:
+                # retries=0：退避／重試由本層控制，避免雙重重試拉長 latency
+                resp = _hc.request(
+                    'POST' if data is not None else 'GET',
+                    url,
+                    headers=headers or {},
+                    data=data,
+                    timeout=timeout,
+                    retries=0,
+                )
+                raw = resp.body
+            else:
+                req = urllib.request.Request(url, headers=headers or {}, data=data)
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    raw = resp.read()
             parsed = json.loads(raw)
             _src_record(name, True, int((time.time() - t0) * 1000))
             return parsed
@@ -2365,6 +2399,12 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 jobs = qa.jobs_snapshot()
             except Exception as e:
                 jobs = {'error': str(e)}
+            http_stats = None
+            try:
+                import http_client as _hc
+                http_stats = _hc.client_stats()
+            except Exception:
+                http_stats = None
             self._ok(json.dumps({
                 'status': 'ok',
                 'bind': '127.0.0.1',
@@ -2378,6 +2418,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 'etf_history_files': len(files),
                 'sources': _src_snapshot(),
                 'jobs': jobs,  # H4：回補／刷新進度
+                'httpClient': http_stats,  # 連線池／重試統計
             }, ensure_ascii=False, default=str).encode())
         else:
             # 安全(v3.9 review):SimpleHTTPRequestHandler 預設會把工作目錄所有檔當靜態檔服務。
