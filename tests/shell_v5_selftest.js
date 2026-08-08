@@ -117,27 +117,19 @@ ok(/basisPts/.test(pl) && /正價差/.test(pl) && /逆價差/.test(pl) && /Basis
   'pulse strip shows TXF–TAIEX basis');
 ok(/pl-flash-q/.test(pl) && /flashQ/.test(pl) && /搜代號\/關鍵字/.test(pl),
   'pulse flash has keyword search beside TW/US tabs');
-ok(/data-layout="4col-priority"/.test(pl) && /repeat\(4,minmax\(0,1fr\)\)/.test(pl) &&
-  !/pl-zone/.test(pl) && !/z-top/.test(pl),
-  'pulse dash is scrollable 4-column priority grid (no 5-col zones)');
-ok(/#pl-body\{[^}]*overflow:auto/.test(pl) && /position:sticky/.test(pl),
-  'pulse body scrolls and KPI strip sticks');
-/* DOM 順序：P0→P1→P2→P3（快訊最底） */
+ok(/data-layout="5col-2zone"/.test(pl) && /repeat\(5,minmax\(0,1fr\)\)/.test(pl) &&
+  /pl-zone z-top/.test(pl) && /pl-zone z-bot/.test(pl),
+  'pulse dash restored to 5-col × 2-zone (一行五框)');
+ok(/#pl-body\{[^}]*overflow:hidden/.test(pl) && /pl-expanded\{overflow:auto\}/.test(pl),
+  'pulse one-screen lock; scroll only when factors expanded');
 (function () {
-  var iGauge = pl.indexOf('data-pri="p0"><h4>市場脈動');
-  var iWatch = pl.indexOf('id="pl-watch-sec" data-pri="p1"');
-  var iGlobal = pl.indexOf('pl-sec pl-wide" data-pri="p2"><h4>全球影響');
-  var iFlash = pl.indexOf('pl-sec pl-full" id="pl-flash-sec" data-pri="p3"');
-  var iRender = pl.indexOf('/* P0 */');
-  var iRenderFlash = pl.indexOf('/* P3 — 下捲才見 */');
-  ok(iGauge > 0 && iWatch > 0 && iGlobal > 0 && iFlash > 0, 'pulse priority markers present');
-  ok(iRender > 0 && iRenderFlash > iRender, 'pulse render order comment places flash last');
-  var orderBlock = pl.slice(pl.indexOf('data-layout="4col-priority"'), pl.indexOf('extra;'));
-  ok(orderBlock.indexOf('renderGauge') < orderBlock.indexOf('renderSectors') &&
-    orderBlock.indexOf('renderWatch') < orderBlock.indexOf('renderGlobal') &&
-    orderBlock.indexOf('renderGlobal') < orderBlock.indexOf('renderFlash') &&
-    orderBlock.indexOf('renderEco') < orderBlock.indexOf('renderFlash'),
-    'pulse panel order: decision → opportunity → external → flash last');
+  var orderBlock = pl.slice(pl.indexOf('data-layout="5col-2zone"'), pl.indexOf('extra;'));
+  ok(orderBlock.indexOf('z-top') < orderBlock.indexOf('z-bot') &&
+    orderBlock.indexOf('renderGauge') < orderBlock.indexOf('renderSectors') &&
+    orderBlock.indexOf('renderSectors') < orderBlock.indexOf('z-bot') &&
+    orderBlock.indexOf('renderMovers') < orderBlock.indexOf('renderFlash') &&
+    orderBlock.indexOf('renderFlash') < orderBlock.indexOf('renderWatch'),
+    'pulse 5+5 order: top decision row then bottom movers/global/flash/watch');
 })();
 
 ok(/NAV_KEY/.test(shell) && /toggleNav/.test(shell) && /nr-edge/.test(shell) &&

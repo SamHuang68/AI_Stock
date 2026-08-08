@@ -1,13 +1,12 @@
 /* ============================================================================
  * pulse_v5.js  —  Stock Terminal 5.0：市場總覽儀表板
  * ----------------------------------------------------------------------------
- * 版面：頂列 KPI 黏著 + 一排 4 框網格，可超過一頁下捲。
- * 排序權重（交易決策頻率高 → 低；越少用越靠下）：
- *   P0 盤勢決策：脈動｜加權盤勢｜法人｜廣度
- *   P1 標的機會：產業｜近漲停｜近跌幅｜自選
- *   P2 外部連動：全球｜總經
- *   P3 資訊流　：快訊（最底，下捲才見）
- * 聯動：產業 hover ↔ 近漲跌停；法人合計 Z／分位；因子／歷史預設收合。
+ * 大螢幕一頁高密度（一行五框 × 上下兩區）：
+ *   頂列 KPI（加權／櫃買／台指期／量能／家數廣度／漲跌停）— 去重後 6 格
+ *   上區 5 窗：脈動(綜合|體質|風險三燈)｜加權盤勢｜法人｜廣度｜產業
+ *   下區 5 窗：漲停(產業標籤)｜跌幅｜全球｜快訊(TW/US)｜自選(TW/US·內滾)
+ *   產業輪動 hover ↔ 近漲跌停同產業高亮；法人合計 Z／分位／排名
+ *   因子／歷史預設收合（按鈕展開）
  * 產品名 Stock Terminal 5.0；資料：GET /pulse — 真實欄位，禁止 mock。
  * ========================================================================== */
 (function () {
@@ -33,15 +32,15 @@
       document.head.appendChild(s);
     }
     s.textContent =
-      /* 可超過一頁：殼層鎖外框，#pl-body 內捲（KPI 黏頂） */
+      /* 一屏鎖定：上下兩區各 5 窗，大螢幕塞滿資訊 */
       '#shell-views:has(#view-pulse.on){overflow:hidden!important}' +
       '#view-pulse.sv-panel.on{' +
         'max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
         'overflow:hidden;display:flex!important;flex-direction:column;flex:1;min-height:0;height:100%}' +
-      '#mount-pulse,#mount-pulse.sv-mount{flex:1;min-height:0;display:flex;flex-direction:column;max-width:none;overflow:hidden}' +
+      '#mount-pulse,#mount-pulse.sv-mount{flex:1;min-height:0;display:flex;flex-direction:column;max-width:none}' +
       '#pl-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);' +
         'width:100%;max-width:none;margin:0;min-width:0;box-sizing:border-box;' +
-        'flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
+        'flex:1;min-height:0;display:flex;flex-direction:column}' +
       /* 單列微標題 */
       '#pl-root .pl-head{display:flex;align-items:center;justify-content:space-between;gap:8px;' +
         'margin-bottom:3px;min-width:0;flex:0 0 auto}' +
@@ -60,11 +59,10 @@
       /* 系統狀態色（勿與紅漲綠跌混用） */
       '#pl-root .pl-st-pos{color:var(--gold)}#pl-root .pl-st-risk{color:var(--cyan)}' +
       '#pl-root .pl-st-mid{color:#94a3b8}' +
-      '#pl-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto;overscroll-behavior:contain}' +
-      /* KPI 細條：6 格；下捲時黏頂 */
-      '#pl-root .pl-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin:0 0 6px;min-width:0;flex:0 0 auto;' +
-        'position:sticky;top:0;z-index:5;padding:2px 0 4px;' +
-        'background:linear-gradient(180deg,#060C16 70%,rgba(6,12,22,.92))}' +
+      '#pl-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
+      '#pl-body.pl-expanded{overflow:auto}' +
+      /* KPI 細條：6 格（家數+廣度合併，去重） */
+      '#pl-root .pl-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin:0 0 6px;min-width:0;flex:0 0 auto}' +
       '#pl-root .pl-strip .cell{background:linear-gradient(180deg,rgba(17,27,46,.95),rgba(11,18,32,.98));' +
         'border:1px solid var(--border);border-radius:5px;padding:4px 7px;min-width:0;overflow:hidden}' +
       '#pl-root .pl-strip .cell.hero{border-color:rgba(245,197,24,.35);' +
@@ -83,30 +81,19 @@
       '#pl-root .pl-strip .pl-idx-spark .vz-spark{width:100%;height:14px;display:block}' +
       '#pl-root .pl-strip .vz-chip{margin-top:1px;font-size:8px;padding:0 4px;line-height:1.35}' +
       '#pl-root .pl-strip .vz-meter{margin-top:1px;height:3px}' +
-      /* 一排 4 框；高度固定以便框內自滾，整頁可下捲超過一屏 */
-      '#pl-root .pl-dash{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;' +
-        'align-content:start;flex:0 0 auto;min-width:0;padding-bottom:8px}' +
+      /* 上下兩區 · 一行五框 */
+      '#pl-root .pl-dash{flex:1;min-height:0;display:grid;gap:6px;' +
+        'grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
+      '#pl-root .pl-zone{display:grid;gap:6px;min-width:0;min-height:0;height:100%;' +
+        'grid-template-columns:repeat(5,minmax(0,1fr))}' +
       '#pl-root .pl-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;' +
-        'min-width:0;overflow:hidden;display:flex;flex-direction:column;' +
-        'height:300px;min-height:300px;box-sizing:border-box}' +
-      '#pl-root .pl-sec.pl-wide{grid-column:span 2;height:260px;min-height:260px}' +
-      '#pl-root .pl-sec.pl-full{grid-column:1 / -1;height:auto;min-height:200px;max-height:320px}' +
+        'min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%}' +
       '#pl-root .pl-sec h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;' +
         'display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;gap:4px;flex-wrap:wrap}' +
       '#pl-root .pl-sec h4 a{color:var(--cyan);cursor:pointer;font-size:8px;font-weight:600;text-decoration:none;white-space:nowrap}' +
       '#pl-root .pl-sec h4 a:hover{color:var(--gold)}' +
       '#pl-root .pl-sec-hint{font-size:8px;color:#64748b;font-weight:600;margin-right:auto}' +
       '#pl-root .pl-sec > .pl-fill{flex:1;min-height:0;overflow:auto}' +
-      '#pl-root .pl-pri{display:inline-block;margin-right:4px;padding:0 4px;border-radius:3px;font-size:7px;font-weight:800;' +
-        'letter-spacing:.3px;color:#64748b;border:1px solid #1e334d;background:rgba(15,23,42,.5);vertical-align:1px}' +
-      '#pl-root .pl-pri.p0{color:var(--gold);border-color:var(--gold-m);background:var(--gold-s)}' +
-      '#pl-root .pl-pri.p1{color:var(--cyan);border-color:rgba(56,189,248,.35);background:rgba(56,189,248,.08)}' +
-      '#pl-root .pl-pri.p2{color:#94a3b8}' +
-      '#pl-root .pl-pri.p3{color:#64748b}' +
-      '@media (max-width:1280px){' +
-        '#pl-root .pl-dash{grid-template-columns:repeat(2,minmax(0,1fr))}' +
-        '#pl-root .pl-sec.pl-wide,#pl-root .pl-sec.pl-full{grid-column:span 2}' +
-      '}' +
       '#pl-root .pl-note{font-size:8px;color:#94a3b8;line-height:1.35;margin-top:3px;flex:0 0 auto}' +
       '#pl-root .pl-loading{font-size:10px;color:#94a3b8;padding:12px 0}' +
       '#pl-root .pl-stale{display:inline-block;margin-left:4px;padding:0 5px;border-radius:3px;font-size:8px;font-weight:700;' +
@@ -1476,7 +1463,7 @@
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
     });
     var tone = globalImpactTone(items);
-    var html = '<div class="pl-sec pl-wide" data-pri="p2"><h4>全球影響' +
+    var html = '<div class="pl-sec"><h4>全球影響' +
       ' <span style="color:var(--cyan);font-weight:700;font-size:9px;margin-left:4px">' + tone + '</span>' +
       ' <a data-go="international">國際 →</a></h4><div class="pl-global">';
     if (!items.length) html += '<div class="pl-note">國際報價載入中…</div>';
@@ -1503,8 +1490,7 @@
 
   function renderEco(p) {
     var eco = p.economy || [];
-    var html = '<div class="pl-sec pl-wide" data-pri="p2"><h4>總經數據' +
-      '<span class="pl-sec-hint">外部連動 · P2</span></h4><div class="pl-fill">';
+    var html = '<div class="pl-sec"><h4>總經數據</h4><div class="pl-fill">';
     if (!eco.length) {
       return html + '<div class="pl-note">FRED／主計總處序列尚未就緒</div></div></div>';
     }
@@ -1538,8 +1524,7 @@
   function renderFlash(p) {
     var flash = p.flash || [];
     var shown = filterFlash(flash);
-    var html = '<div class="pl-sec pl-full" id="pl-flash-sec" data-pri="p3"><h4>市場快訊' +
-      '<span class="pl-sec-hint">資訊流 · 下捲可見</span>' +
+    var html = '<div class="pl-sec" id="pl-flash-sec"><h4>市場快訊' +
       '<span class="pl-flash-tools">' +
         '<input type="search" class="pl-flash-q" id="pl-flash-q" placeholder="搜代號/關鍵字" ' +
           'value="' + esc(flashQ) + '" aria-label="快訊關鍵字搜尋" />' +
@@ -1712,7 +1697,7 @@
       toneEl.textContent = p.tone || '資料彙整中';
     }
 
-    body.className = '';
+    body.className = showFactors ? 'pl-expanded' : '';
     var extra = '';
     if (showFactors) {
       extra =
@@ -1725,25 +1710,18 @@
       sectorCache.TW = ov.sectorsRanked.slice();
     }
 
-    /* 排序：P0 盤勢決策 → P1 標的機會 → P2 外部連動 → P3 快訊（最底） */
+    /* 一行五框 × 上下兩區（一屏鎖定） */
     body.innerHTML =
       renderStrip(ov, p) +
-      '<div class="pl-dash" data-layout="4col-priority">' +
-        /* P0 */
-        renderGauge(p) +
-        renderOhlc(ov, p) +
-        renderInst(ov) +
-        renderDonut(ov, ov.strip) +
-        /* P1 */
-        renderSectors(ov) +
-        renderMovers(movers, 'gainers') +
-        renderMovers(movers, 'losers') +
-        renderWatch(pack.wlQuotes) +
-        /* P2 */
-        renderGlobal(p) +
-        renderEco(p) +
-        /* P3 — 下捲才見 */
-        renderFlash(p) +
+      '<div class="pl-dash" data-layout="5col-2zone">' +
+        '<div class="pl-zone z-top">' +
+          renderGauge(p) + renderOhlc(ov, p) + renderInst(ov) +
+          renderDonut(ov, ov.strip) + renderSectors(ov) +
+        '</div>' +
+        '<div class="pl-zone z-bot">' +
+          renderMovers(movers, 'gainers') + renderMovers(movers, 'losers') +
+          renderGlobal(p) + renderFlash(p) + renderWatch(pack.wlQuotes) +
+        '</div>' +
       '</div>' +
       extra;
 
