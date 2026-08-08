@@ -4,7 +4,8 @@
  * 大螢幕一頁高密度（65" 優化，不遷就手機）：
  *   頂列 KPI（加權／櫃買／台指期／量能／家數廣度／漲跌停）— 去重後 6 格
  *   上區 5 窗：脈動｜加權盤勢(圖+OHLC)｜法人｜廣度｜產業
- *   下區 5 窗：漲停｜跌幅｜全球｜快訊(TW/US)｜自選
+ *   下區 5 窗：漲停｜跌幅｜全球｜快訊(TW/US)｜自選(TW/US·內滾)
+ *   法人合計附 Z20／分位／近N日買賣超排名
  *   因子／歷史預設收合（按鈕展開）
  * 產品名 Stock Terminal 5.0；資料：GET /pulse — 真實欄位，禁止 mock。
  * ========================================================================== */
@@ -18,6 +19,7 @@
   var sectorMkt = 'TW';
   var sectorCache = { TW: null, US: null };
   var flashMkt = 'ALL'; /* ALL | TW | US */
+  var watchMkt = 'ALL'; /* ALL | TW | US */
 
   function $(id) { return document.getElementById(id); }
 
@@ -212,12 +214,18 @@
       '#pl-root .pl-flash .cat.us{color:var(--gold)}' +
       '#pl-root .pl-flash .ttl{color:var(--text);min-width:0;flex:1 1 auto;overflow:hidden;' +
         'text-overflow:ellipsis;white-space:nowrap}' +
-      '#pl-root .pl-wl{flex:1;min-height:0;overflow:auto}' +
+      /* 自選：區塊本身不溢；表體固定內滾，避免壓到底部 status／量價列 */
+      '#pl-root .pl-sec.pl-wl{overflow:hidden;min-height:0}' +
+      '#pl-root .pl-wl-scroll{flex:1 1 0;min-height:0;overflow:auto;overscroll-behavior:contain}' +
       '#pl-root .pl-wl table{width:100%;border-collapse:collapse;font-size:10px}' +
       '#pl-root .pl-wl th,#pl-root .pl-wl td{padding:3px 3px;border-bottom:1px solid var(--border);text-align:right}' +
       '#pl-root .pl-wl th:first-child,#pl-root .pl-wl td:first-child{text-align:left}' +
-      '#pl-root .pl-wl th{color:var(--tlo)}' +
+      '#pl-root .pl-wl th{color:#94a3b8;position:sticky;top:0;background:var(--bg2);z-index:1}' +
       '#pl-root .pl-wl tr{cursor:pointer}#pl-root .pl-wl tr:hover{background:var(--bg3)}' +
+      '#pl-root .pl-wl .mkt{font-size:8px;color:#64748b;font-weight:600;margin-left:3px}' +
+      '#pl-root .pl-inst-ctx{display:block;font-size:8px;font-weight:700;margin-top:2px;color:#94a3b8;' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#pl-root .pl-inst4 .c .v{font-size:12px}' +
       /* factors footer（展開時可捲） */
       '#pl-root .pl-extra{flex:0 0 auto;margin-top:4px}' +
       '#pl-root .pl-factors{margin-top:4px;scroll-margin-top:8px;padding:2px;border-radius:8px;transition:box-shadow .35s,background .35s}' +
@@ -443,8 +451,20 @@
       var raw = localStorage.getItem('st_wl');
       var arr = raw ? JSON.parse(raw) : [];
       if (!Array.isArray(arr)) return [];
-      return arr.filter(function (x) { return x && x.t; }).slice(0, 8);
+      /* 內滾＋分頁後可多載；報價批次仍有上限 */
+      return arr.filter(function (x) { return x && x.t; }).slice(0, 36);
     } catch (e) { return []; }
+  }
+
+  function watchIsUs(w) {
+    return !!(w && (w.m === 'US' || w.mkt === 'US'));
+  }
+
+  function filterWatchlist(list) {
+    var all = list || [];
+    if (watchMkt === 'US') return all.filter(watchIsUs);
+    if (watchMkt === 'TW') return all.filter(function (w) { return !watchIsUs(w); });
+    return all;
   }
 
   function breadthToneLabel(adv, ls) {
@@ -787,6 +807,49 @@
     return i.foreign == null && i.trust == null && i.dealer == null && i.totalYi == null;
   }
 
+  /** 法人合計序列脈絡：Z20／分位／近 N 日買賣超排名（與頂列指數 Z 同構） */
+  function instFlowQuant(seriesYi, currentYi) {
+    var empty = { z20: null, pctile: null, rank: null, rankLabel: null, n: 0, bits: '' };
+    var series = [];
+    (seriesYi || []).forEach(function (v) {
+      if (v != null && isFinite(v)) series.push(Number(v));
+    });
+    var cur = currentYi != null && isFinite(currentYi) ? Number(currentYi) : null;
+    if (cur != null) {
+      if (!series.length) series = [cur];
+      else if (Math.abs(series[series.length - 1] - cur) <= 0.05) series[series.length - 1] = cur;
+      else series.push(cur);
+    }
+    if (!series.length || cur == null) return empty;
+    var w = series.length >= 20 ? series.slice(-20) : series.slice();
+    var n = w.length;
+    var mu = w.reduce(function (a, b) { return a + b; }, 0) / n;
+    var varSum = w.reduce(function (a, b) { return a + (b - mu) * (b - mu); }, 0) / n;
+    var sd = Math.sqrt(varSum);
+    var z20 = sd > 1e-9 ? (cur - mu) / sd : null;
+    var le = 0;
+    w.forEach(function (v) { if (v <= cur) le += 1; });
+    var pctile = Math.round(100 * le / n); /* P10＝偏極端賣超側 */
+    var sortedAsc = w.slice().sort(function (a, b) { return a - b; });
+    var rankAsc = sortedAsc.indexOf(cur) + 1; /* 1＝最賣超 */
+    var rankDesc = n - rankAsc + 1; /* 1＝最買超 */
+    var rankLabel = null;
+    if (cur < 0 && rankAsc <= 5) rankLabel = '近' + n + '日賣超#' + rankAsc;
+    else if (cur > 0 && rankDesc <= 5) rankLabel = '近' + n + '日買超#' + rankDesc;
+    var bits = [];
+    if (z20 != null) bits.push('Z' + (z20 >= 0 ? '+' : '') + z20.toFixed(1));
+    if (pctile != null) bits.push('P' + pctile);
+    if (rankLabel) bits.push(rankLabel);
+    return {
+      z20: z20 != null ? Math.round(z20 * 100) / 100 : null,
+      pctile: pctile,
+      rank: cur < 0 ? rankAsc : rankDesc,
+      rankLabel: rankLabel,
+      n: n,
+      bits: bits.join(' · ')
+    };
+  }
+
   function paintInstCells(i, opts) {
     opts = opts || {};
     var box = $('pl-inst4');
@@ -794,11 +857,16 @@
     var totalTxt = i.totalYi != null
       ? ((i.totalYi >= 0 ? '+' : '') + Number(i.totalYi).toFixed(1) + ' 億')
       : '—';
+    var q = opts.quant || {};
+    var ctx = q.bits
+      ? '<span class="pl-inst-ctx" title="法人合計相對近' + (q.n || 20) +
+        '日：Z＝標準差位／P＝分位（越低越偏賣超）／買賣超排名">' + esc(q.bits) + '</span>'
+      : '';
     box.innerHTML =
       '<div class="c"><div class="k">外資</div><div class="v ' + tw(i.foreign) + '">' + moneyYi(i.foreign) + '</div></div>' +
       '<div class="c"><div class="k">投信</div><div class="v ' + tw(i.trust) + '">' + moneyYi(i.trust) + '</div></div>' +
       '<div class="c"><div class="k">自營</div><div class="v ' + tw(i.dealer) + '">' + moneyYi(i.dealer) + '</div></div>' +
-      '<div class="c"><div class="k">合計</div><div class="v ' + tw(i.totalYi) + '">' + totalTxt + '</div></div>';
+      '<div class="c"><div class="k">合計</div><div class="v ' + tw(i.totalYi) + '">' + totalTxt + ctx + '</div></div>';
     var badge = $('pl-inst-stale');
     if (badge) {
       if (opts.stale && opts.date) {
@@ -862,13 +930,8 @@
           ),
           date: latest.date
         };
-        /* foreign 等若為元，paint／moneyYi 會自動轉億 */
         stale = true;
-        paintInstCells(display, { stale: true, date: latest.date });
-      } else if (!instDayEmpty(i)) {
-        paintInstCells(i, { stale: false });
-      } else if (chart) {
-        /* 連歷史也沒有 */
+      } else if (instDayEmpty(i) && !rows.length) {
         paintInstCells({}, { stale: false });
         var empty = $('pl-inst-empty');
         if (empty) {
@@ -878,6 +941,17 @@
       }
       var chrono = rows.slice().reverse();
       var totals = chrono.map(function (r) { return r.totalYi; });
+      /* 歷史不含當日時，用 display.totalYi 補末端再算 Z／分位 */
+      var histForZ = totals.slice();
+      if (display.totalYi != null && isFinite(display.totalYi)) {
+        if (!histForZ.length || Math.abs(histForZ[histForZ.length - 1] - display.totalYi) > 0.05) {
+          /* 若 rows 已是 display 那日，totals 末端已含；否則不重複 append 於 quant 內處理 */
+        }
+      }
+      var quant = instFlowQuant(histForZ, display.totalYi);
+      if (!instDayEmpty(display)) {
+        paintInstCells(display, { stale: stale, date: display.date, quant: quant });
+      }
       if (chart) {
         if (V && totals.filter(function (v) { return v != null && isFinite(v); }).length >= 2) {
           var last = totals[totals.length - 1];
@@ -896,9 +970,21 @@
       if (meta) {
         meta.textContent = (rows.length ? ('近 ' + rows.length + ' 日 · Y：億') : '無序列') +
           (display.date ? ' · ' + display.date : '') +
-          (stale ? ' · 前交易日' : '');
+          (stale ? ' · 前交易日' : '') +
+          (quant.bits ? ' · ' + quant.bits : '');
       }
-      if (cmt) cmt.innerHTML = buildInstComment(display, rows);
+      if (cmt) {
+        var base = buildInstComment(display, rows);
+        if (quant.rankLabel) {
+          base = '合計處 <b>' + esc(quant.rankLabel) + '</b>' +
+            (quant.z20 != null ? '（Z' + (quant.z20 >= 0 ? '+' : '') + quant.z20.toFixed(1) +
+              ' · P' + quant.pctile + '）' : '') + '。 ' + base;
+        } else if (quant.z20 != null && Math.abs(quant.z20) >= 1.2) {
+          base = '合計偏離近' + quant.n + '日均值約 <b>Z' +
+            (quant.z20 >= 0 ? '+' : '') + quant.z20.toFixed(1) + '</b>（P' + quant.pctile + '）。 ' + base;
+        }
+        cmt.innerHTML = base;
+      }
     });
   }
 
@@ -1272,20 +1358,47 @@
   }
 
   function renderWatch(quotes) {
-    var wl = readWatchlist();
-    var html = '<div class="pl-sec pl-wl"><h4>自選風險 <a data-go="watchlist">自選 →</a></h4>';
-    if (!wl.length) return html + '<div class="pl-note">尚無自選 — 在圖表按 ＋ 加入</div></div>';
-    html += '<table><tr><th>代號</th><th>現價</th><th>漲跌</th><th>標籤</th></tr>';
+    var wlAll = readWatchlist();
+    var wl = filterWatchlist(wlAll);
+    var nTw = wlAll.filter(function (w) { return !watchIsUs(w); }).length;
+    var nUs = wlAll.filter(watchIsUs).length;
+    var html = '<div class="pl-sec pl-wl" id="pl-watch-sec"><h4>自選風險' +
+      '<span class="pl-sec-tog">' +
+        '<button type="button" data-watch-mkt="ALL" class="' + (watchMkt === 'ALL' ? 'on' : '') +
+          '" title="全部 ' + wlAll.length + '">全部</button>' +
+        '<button type="button" data-watch-mkt="TW" class="' + (watchMkt === 'TW' ? 'on' : '') +
+          '" title="台股 ' + nTw + '">台股</button>' +
+        '<button type="button" data-watch-mkt="US" class="' + (watchMkt === 'US' ? 'on' : '') +
+          '" title="美股 ' + nUs + '">美股</button>' +
+      '</span>' +
+      '<a data-go="watchlist">自選 →</a></h4>';
+    if (!wlAll.length) {
+      return html + '<div class="pl-note">尚無自選 — 在圖表按 ＋ 加入</div></div>';
+    }
+    if (!wl.length) {
+      return html + '<div class="pl-empty" style="min-height:48px;border:none">' +
+        '<b>此市場無自選</b>可切換「全部」或至自選頁新增</div></div>';
+    }
+    html += '<div class="pl-wl-scroll"><table><tr><th>代號</th><th>現價</th><th>漲跌</th><th>標籤</th></tr>';
     wl.forEach(function (w) {
+      var mkt = watchIsUs(w) ? 'US' : (w.m || 'TW');
       var q = (quotes && (quotes[w.t] || quotes[w.t + '.TW'] || quotes[w.t + '.TWO'])) || {};
       var px = q.price != null ? q.price : w.price;
       var cp = q.changePct != null ? q.changePct : w.chg;
-      html += '<tr data-code="' + esc(w.t) + '" data-mkt="' + esc(w.m || 'TW') + '"><td style="color:var(--gold);font-weight:700">' +
-        esc(w.t) + (w.name ? ' <span style="color:var(--tlo);font-weight:500">' + esc(w.name) + '</span>' : '') +
-        '</td><td>' + fmt(px, 2) + '</td><td class="' + tw(cp) + '">' + pct(cp) + '</td><td>' +
+      var dig = mkt === 'US' ? 2 : 2;
+      var unit = mkt === 'US' ? '<span class="mkt">USD</span>' : '';
+      /* 美股漲跌色：綠漲紅跌（與產業 US 一致） */
+      var cpCls = mkt === 'US'
+        ? ((cp > 0) ? 'dn' : (cp < 0) ? 'up' : 'flat')
+        : tw(cp);
+      html += '<tr data-code="' + esc(w.t) + '" data-mkt="' + esc(mkt) + '">' +
+        '<td style="color:var(--gold);font-weight:700">' +
+          esc(w.t) + unit +
+          (w.name ? ' <span style="color:#94a3b8;font-weight:500">' + esc(w.name) + '</span>' : '') +
+        '</td><td>' + fmt(px, dig) + '</td><td class="' + cpCls + '">' + pct(cp) + '</td><td>' +
         watchTag(cp) + '</td></tr>';
     });
-    return html + '</table></div>';
+    return html + '</table></div></div>';
   }
 
   function renderFactors(p) {
@@ -1410,6 +1523,13 @@
       b.onclick = function (e) {
         e.stopPropagation();
         flashMkt = b.getAttribute('data-flash-mkt') || 'ALL';
+        if (lastPack) render(lastPack);
+      };
+    });
+    body.querySelectorAll('[data-watch-mkt]').forEach(function (b) {
+      b.onclick = function (e) {
+        e.stopPropagation();
+        watchMkt = b.getAttribute('data-watch-mkt') || 'ALL';
         if (lastPack) render(lastPack);
       };
     });

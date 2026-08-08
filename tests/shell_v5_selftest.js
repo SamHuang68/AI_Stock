@@ -97,6 +97,10 @@ ok(/instDayEmpty/.test(pl) && /前一交易日/.test(pl) && /paintInstCells/.tes
   'pulse institutional falls back to prior session');
 ok(/pl-tag\.ok\{[^}]*#94a3b8/.test(pl) && /pl-st-pos/.test(pl),
   'pulse status colors separated from price red/green');
+ok(/data-watch-mkt/.test(pl) && /filterWatchlist/.test(pl) && /pl-wl-scroll/.test(pl),
+  'pulse watchlist has TW/US tabs and fixed scroll region');
+ok(/instFlowQuant/.test(pl) && /rankLabel/.test(pl) && /pl-inst-ctx/.test(pl),
+  'pulse institutional shows Z/percentile/rank context');
 
 const nw = fs.readFileSync(path.join(root, 'src/ui/news_v5.js'), 'utf8');
 ok(/nw-mkt-seg/.test(nw) && /flashMkt/.test(nw), 'news TW/US filter');
