@@ -202,12 +202,16 @@
       '#pl-root .pl-inst4 .c .k{font-size:8px;color:var(--tlo)}' +
       '#pl-root .pl-inst4 .c .v{font-size:13px;font-weight:800;margin-top:2px}' +
       '#pl-root .pl-inst-trend{flex:1;min-height:48px;margin:4px 0 2px;background:var(--bg);border:1px solid var(--border);' +
-        'border-radius:5px;padding:3px 5px;display:flex;flex-direction:column;overflow:hidden}' +
+        'border-radius:5px;padding:3px 5px;display:flex;flex-direction:column;overflow:hidden;min-width:0}' +
       '#pl-root .pl-inst-trend .lab{font-size:8px;color:var(--tlo);flex:0 0 auto;margin-bottom:2px;' +
-        'display:flex;justify-content:space-between;gap:6px}' +
-      '#pl-root .pl-inst-trend .chart{flex:1;min-height:44px}' +
-      '#pl-root .pl-inst-trend .chart .vz-spark-ax{height:100%;min-height:44px}' +
-      '#pl-root .pl-inst-trend .chart .vz-spark,#pl-root .pl-inst-trend .chart svg{width:100%!important;height:100%!important;min-height:28px}' +
+        'display:flex;justify-content:space-between;gap:6px;min-width:0;overflow:hidden}' +
+      '#pl-root .pl-inst-trend .chart{flex:1;min-height:44px;min-width:0;overflow:hidden;position:relative}' +
+      '#pl-root .pl-inst-trend .chart .vz-spark-ax{height:100%;min-height:44px;max-width:100%;overflow:hidden;' +
+        'grid-template-rows:auto minmax(0,1fr) auto auto}' +
+      /* 線只能在 .vz-plot 內；禁止 svg height:100% 吃滿整個 chart 導致跑出框 */
+      '#pl-root .pl-inst-trend .chart .vz-plot{overflow:hidden;min-width:0;min-height:0;max-height:100%}' +
+      '#pl-root .pl-inst-trend .chart .vz-plot svg{width:100%;height:100%;min-height:0;max-height:100%;' +
+        'margin:0;display:block;box-sizing:border-box}' +
       '#pl-root .pl-inst-cmt{font-size:9px;line-height:1.45;color:var(--text);margin-top:2px;flex:0 0 auto;' +
         'max-height:4.4em;overflow:hidden}' +
       '#pl-root .pl-inst-cmt b{color:var(--gold);font-weight:700}' +
@@ -239,12 +243,15 @@
       '#pl-root .pl-leg{font-size:9px;line-height:1.4;min-width:0;flex:1}' +
       '#pl-root .pl-leg i{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:4px}' +
       '#pl-root .pl-bd-trend{flex:1;min-height:44px;margin:4px 0 2px;background:var(--bg);border:1px solid var(--border);' +
-        'border-radius:5px;padding:3px 5px;display:flex;flex-direction:column;overflow:hidden}' +
+        'border-radius:5px;padding:3px 5px;display:flex;flex-direction:column;overflow:hidden;min-width:0}' +
       '#pl-root .pl-bd-trend .lab{font-size:8px;color:var(--tlo);flex:0 0 auto;margin-bottom:2px;' +
-        'display:flex;justify-content:space-between;gap:6px}' +
-      '#pl-root .pl-bd-trend .chart{flex:1;min-height:40px}' +
-      '#pl-root .pl-bd-trend .chart .vz-spark-ax{height:100%;min-height:40px}' +
-      '#pl-root .pl-bd-trend .chart .vz-spark,#pl-root .pl-bd-trend .chart svg{width:100%!important;height:100%!important;min-height:24px}' +
+        'display:flex;justify-content:space-between;gap:6px;min-width:0;overflow:hidden}' +
+      '#pl-root .pl-bd-trend .chart{flex:1;min-height:40px;min-width:0;overflow:hidden;position:relative}' +
+      '#pl-root .pl-bd-trend .chart .vz-spark-ax{height:100%;min-height:40px;max-width:100%;overflow:hidden;' +
+        'grid-template-rows:auto minmax(0,1fr) auto auto}' +
+      '#pl-root .pl-bd-trend .chart .vz-plot{overflow:hidden;min-width:0;min-height:0;max-height:100%}' +
+      '#pl-root .pl-bd-trend .chart .vz-plot svg{width:100%;height:100%;min-height:0;max-height:100%;' +
+        'margin:0;display:block;box-sizing:border-box}' +
       '#pl-root .pl-bd-cmt{font-size:9px;line-height:1.45;color:var(--text);margin-top:2px;flex:0 0 auto;' +
         'max-height:4.4em;overflow:hidden}' +
       '#pl-root .pl-bd-cmt b{color:var(--gold);font-weight:700}' +

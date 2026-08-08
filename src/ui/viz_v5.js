@@ -77,15 +77,16 @@
       '.vz-ref .vz-tick{position:absolute;top:-1px;bottom:-1px;width:1px;background:rgba(248,250,252,.35)}' +
       '.vz-ref .vz-tick-lbl{position:absolute;top:7px;font-size:7px;color:var(--tf,#64748b);transform:translateX(-50%);white-space:nowrap}' +
       '.vz-spark{display:block;width:100%;height:28px;margin-top:2px}' +
-      '.vz-spark-ax{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto 1fr auto auto;gap:0 4px;' +
-        'width:100%;height:100%;min-height:inherit;box-sizing:border-box;padding:1px 2px 0}' +
+      '.vz-spark-ax{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto minmax(0,1fr) auto auto;gap:0 4px;' +
+        'width:100%;height:100%;min-height:inherit;box-sizing:border-box;padding:1px 2px 0;overflow:hidden}' +
       '.vz-spark-ax .vz-yunit{grid-column:1;grid-row:1;font-size:7px;color:var(--tf,#64748b);line-height:1;' +
         'white-space:nowrap;align-self:end;padding-bottom:1px;font-weight:700}' +
       '.vz-spark-ax .vz-ylabs{grid-column:1;grid-row:2;display:flex;flex-direction:column;justify-content:space-between;' +
         'align-items:flex-end;font-size:7px;color:var(--tlo);line-height:1;font-variant-numeric:tabular-nums;padding:1px 0;gap:0}' +
-      '.vz-spark-ax .vz-plot{grid-column:2;grid-row:1 / span 2;min-width:0;min-height:0;position:relative;' +
+      '.vz-spark-ax .vz-plot{grid-column:2;grid-row:1 / span 2;min-width:0;min-height:0;position:relative;overflow:hidden;' +
         'border-left:1px solid rgba(148,163,184,.35);border-bottom:1px solid rgba(148,163,184,.35)}' +
-      '.vz-spark-ax .vz-plot svg{display:block;width:100%;height:100%;min-height:24px}' +
+      /* 軸內 plot 的 svg 不可沿用 .vz-spark 的 margin-top，否則線會擠出框底 */
+      '.vz-spark-ax .vz-plot svg{display:block;width:100%;height:100%;min-height:0;max-height:100%;margin:0}' +
       '.vz-spark-ax .vz-xlabs{grid-column:2;grid-row:3;display:flex;justify-content:space-between;' +
         'font-size:7px;color:var(--tlo);line-height:1.2;font-variant-numeric:tabular-nums;padding-top:2px}' +
       '.vz-spark-ax .vz-xunit{grid-column:1 / span 2;grid-row:4;font-size:7px;color:var(--tf,#64748b);line-height:1.2;' +
@@ -307,9 +308,11 @@
       midLine = '<line x1="' + pad + '" y1="' + my.toFixed(1) + '" x2="' + (w - pad) +
         '" y2="' + my.toFixed(1) + '" stroke="rgba(148,163,184,.22)" stroke-width="1"/>';
     }
-    var svg = '<svg class="vz-spark" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
+    var svg = '<svg class="vz-spark" viewBox="0 0 ' + w + ' ' + h +
+      '" preserveAspectRatio="none" overflow="hidden">' +
       midLine + zeroLine +
-      '<polyline fill="none" stroke="' + stroke + '" stroke-width="2" points="' + pts + '"/></svg>';
+      '<polyline fill="none" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"' +
+      ' stroke-linejoin="round" points="' + pts + '"/></svg>';
     var xUnit = opts.xUnit != null ? String(opts.xUnit) : '';
     var yUnit = opts.yUnit != null ? String(opts.yUnit) : '';
     if (!xUnit && !yUnit && !opts.axes) return svg;
