@@ -52,6 +52,63 @@ if getattr(sys, 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+
+def _is_blocked_python(exe_path=None):
+    """Hermes / agent venv steals PATH 'python' and leaves a blank console + stale UI."""
+    p = (exe_path or sys.executable or '').replace('/', '\\').lower()
+    needles = (
+        'hermes',
+        'hermes-agent',
+        '\\cursor\\agent',
+        'antigravity',
+    )
+    return any(n in p for n in needles)
+
+
+def _pulse_layout_probe():
+    """Return tip layout markers from on-disk pulse_v5.js (for /health diagnostics)."""
+    path = os.path.join(_BASE, 'src', 'ui', 'pulse_v5.js')
+    out = {
+        'pulseJsPath': path,
+        'pulseJsExists': os.path.isfile(path),
+        'layoutAnchor': None,
+        'layoutContract': None,
+        'hasFiveCol': False,
+        'hasFourColPriority': False,
+    }
+    if not out['pulseJsExists']:
+        return out
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+            txt = fh.read(200000)
+        if 'PULSE_LAYOUT_ANCHOR_3cab212' in txt:
+            out['layoutAnchor'] = 'PULSE_LAYOUT_ANCHOR_3cab212'
+        if '5col-2zone' in txt:
+            out['layoutContract'] = '5col-2zone'
+        out['hasFiveCol'] = 'repeat(5,minmax(0,1fr))' in txt or 'repeat(5, minmax(0, 1fr))' in txt
+        out['hasFourColPriority'] = '4col-priority' in txt
+    except Exception as exc:
+        out['error'] = str(exc)
+    return out
+
+
+def _boot_trace(msg):
+    """Always-on boot breadcrumb — survives blank Hermes consoles (no stdout)."""
+    line = time.strftime('%Y-%m-%d %H:%M:%S') + ' | ' + str(msg)
+    try:
+        log_dir = os.path.join(_BASE, 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        with open(os.path.join(log_dir, 'SERVER_BOOT.txt'), 'a', encoding='utf-8') as fh:
+            fh.write(line + '\n')
+            fh.flush()
+    except Exception:
+        pass
+    try:
+        print(line, flush=True)
+    except Exception:
+        pass
+
+
 # ── Chip history (v3.8): 每日法人籌碼快照，用於連續買賣超天數 ──
 CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
 
@@ -331,33 +388,50 @@ def _norm_ym(s):
     return None
 
 def _http_json(url, timeout=15):
-    req = urllib.request.Request(url, headers={
+    """對外 JSON：走統一 http_client（連線池／Keep-Alive／退避）。"""
+    headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept': 'application/json,text/plain,*/*',
         'Accept-Language': 'zh-TW,zh;q=0.9',
-    })
+    }
+    try:
+        import http_client as _hc
+    except Exception:
+        _hc = None
+    if _hc is not None:
+        return _hc.fetch_json(url, timeout=timeout, retries=1, headers=headers)
+    # 備援：僅在 http_client 無法載入時走舊路徑
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode('utf-8-sig', 'replace'))
 
 def _http_text(url, timeout=15):
     """抓原始文字。政府 CSV 常為 Big5，依序試多種編碼。"""
-    req = urllib.request.Request(url, headers={
+    headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept': 'text/csv,application/json,text/plain,*/*',
         'Accept-Language': 'zh-TW,zh;q=0.9',
-    })
-    raw = None
-    last_err = None
-    for attempt in range(2):
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw = resp.read()
-            break
-        except Exception as e:
-            last_err = e
-            time.sleep(1.2)
-    if raw is None:
-        raise last_err if last_err else RuntimeError('http_text failed')
+    }
+    try:
+        import http_client as _hc
+    except Exception:
+        _hc = None
+    if _hc is not None:
+        raw = _hc.fetch_bytes(url, timeout=timeout, retries=1, headers=headers)
+    else:
+        raw = None
+        last_err = None
+        for attempt in range(2):
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    raw = resp.read()
+                break
+            except Exception as e:
+                last_err = e
+                time.sleep(1.2)
+        if raw is None:
+            raise last_err if last_err else RuntimeError('http_text failed')
     for enc in ('utf-8-sig', 'utf-8', 'big5', 'cp950'):
         try:
             return raw.decode(enc)
@@ -999,6 +1073,139 @@ def _universe_median_pe():
         return None
 
 
+try:
+    from turnover_quant import volume_score_yi as _volume_score_yi
+    from turnover_quant import turnover_quant as _turnover_quant
+except Exception:
+    def _volume_score_yi(yi: float) -> float:
+        import math
+        return max(0.0, min(100.0, 50.0 + 50.0 * math.tanh((float(yi) - 8000.0) / 4000.0)))
+
+    def _turnover_quant(turns, latest_yi=None):
+        return {'yi': None, 'chgPct': None, 'ma5Yi': None, 'vsMa5Pct': None,
+                'z20': None, 'volumeScore': None, 'streak': None,
+                'trend': None, 'level': None, 'n': 0}
+
+
+try:
+    from trend_quant import price_series_quant as _price_series_quant
+except Exception:
+    def _price_series_quant(closes, latest=None):
+        return {
+            'close': None, 'chgPct': None, 'ma5': None, 'vsMa5Pct': None,
+            'z20': None, 'momScore': None, 'streak': None,
+            'trend': None, 'level': None, 'n': 0, 'spark': [],
+        }
+
+
+def _fmtqik_index_closes(turns) -> list:
+    """FMTQIK 列中的加權指數收盤序列（舊→新）。"""
+    out = []
+    for t in turns or []:
+        try:
+            if t.get('index') is not None:
+                v = float(t['index'])
+                if v > 0:
+                    out.append(v)
+        except Exception:
+            continue
+    return out
+
+
+def _tw_index_closes(symbol: str, n: int = 30) -> list:
+    """櫃買／台指期近 n 日收盤；CSV 過期超過 5 日才允許網路補齊。"""
+    try:
+        import tw_index_charts as _tic
+        from datetime import date as _date, datetime as _dt, timedelta as _td
+        allow_net = False
+        sym_u = (symbol or '').upper()
+        path = _tic.TWOII_CSV if 'TWO' in sym_u else _tic.TXF_CSV
+        rows = _tic._read_csv(path)
+        if rows:
+            try:
+                last = _dt.strptime(rows[-1][0], '%Y-%m-%d').date()
+                allow_net = (_date.today() - last) > _td(days=5)
+            except Exception:
+                allow_net = True
+        else:
+            allow_net = True
+        return list(_tic.recent_closes(symbol, n=n, allow_network=allow_net) or [])
+    except Exception as e:
+        print('[pulse] tw_index_closes', symbol, e)
+        return []
+
+
+def _fmtqik_turnover(min_n: int = 12) -> list:
+    """TWSE FMTQIK 近月（必要時補上月）日成交金額列：[{date, amount, index?, chg?}]。
+       供 /pulse 量能量化；快取 30 分。失敗回 []。"""
+    from datetime import date as _date, timedelta
+    today = _date.today()
+    key = f'fmtqik:v1:{today.strftime("%Y%m%d")}'
+    c = _cache.get(key)
+    if c is not None:
+        try:
+            return json.loads(c.decode('utf-8') if isinstance(c, (bytes, bytearray)) else c)
+        except Exception:
+            pass
+
+    def _month(ym1: str):
+        url = f'https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date={ym1}&response=json'
+        try:
+            import http_client as _hc
+            d = _hc.fetch_json(url, timeout=12, retries=1, headers=YF_HEADERS)
+        except Exception:
+            req = urllib.request.Request(url, headers=YF_HEADERS)
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                d = json.loads(resp.read())
+        if d.get('stat') not in ('OK', 'ok'):
+            return []
+        fields = d.get('fields') or []
+        rows = d.get('data') or []
+        i_date = next((i for i, f in enumerate(fields) if '日期' in f), 0)
+        i_amt = next((i for i, f in enumerate(fields) if '成交金額' in f), 1)
+        i_idx = next((i for i, f in enumerate(fields) if '指數' in f), None)
+        i_chg = next((i for i, f in enumerate(fields) if '漲跌點數' in f), None)
+        out = []
+        for row in rows:
+            try:
+                amt = float(str(row[i_amt]).replace(',', ''))
+            except Exception:
+                continue
+            rec = {'date': str(row[i_date]).strip(), 'amount': amt}
+            if i_idx is not None:
+                try:
+                    rec['index'] = float(str(row[i_idx]).replace(',', ''))
+                except Exception:
+                    pass
+            if i_chg is not None:
+                try:
+                    rec['chg'] = float(str(row[i_chg]).replace(',', ''))
+                except Exception:
+                    pass
+            out.append(rec)
+        return out
+
+    rows = _month(today.strftime('%Y%m01'))
+    if len(rows) < min_n:
+        first = today.replace(day=1)
+        prev_last = first - timedelta(days=1)
+        rows = _month(prev_last.strftime('%Y%m01')) + rows
+    # 去重保序
+    seen = set()
+    uniq = []
+    for r in rows:
+        k = r.get('date')
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        uniq.append(r)
+    try:
+        _cache.set(key, json.dumps(uniq, ensure_ascii=False).encode(), ttl=1800)
+    except Exception:
+        pass
+    return uniq
+
+
 def _score_tw_market(mf: dict, margin_meta: dict, median_pe) -> tuple:
     """大盤體質 0~100：量能 25% + 法人 25% + 融資安全 25% + 估值 25%。"""
     import math
@@ -1010,8 +1217,7 @@ def _score_tw_market(mf: dict, margin_meta: dict, median_pe) -> tuple:
     amt = turns[-1]['amount'] if turns else None
     if amt is not None:
         yi = float(amt) / 1e8  # 億
-        # 400億→弱、8000億→50、12000億→高
-        vol_sc = max(0.0, min(100.0, 50.0 + 50.0 * math.tanh((yi - 8000.0) / 4000.0)))
+        vol_sc = _volume_score_yi(yi)
         parts.append(vol_sc)
         detail['turnoverYi'] = round(yi, 1)
         detail['volumeScore'] = round(vol_sc, 1)
@@ -1462,17 +1668,34 @@ def _src_throttle(name):
 
 def _src_fetch_json(name, url, headers=None, timeout=10, retries=1, data=None):
     """經 健檢/節流/熔斷/退避 的對外 JSON 抓取。
-       熔斷開啟 → 擲 SourceBreakerOpen;最終失敗 → 擲原始例外。data 給定則為 POST。"""
+       熔斷開啟 → 擲 SourceBreakerOpen;最終失敗 → 擲原始例外。data 給定則為 POST。
+       傳輸層走 http_client（連線池／Keep-Alive）；熔斷與節流語意不變。"""
     if _src_breaker_open(name):
         raise SourceBreakerOpen(name)
     last_exc = None
+    try:
+        import http_client as _hc
+    except Exception:
+        _hc = None
     for attempt in range(retries + 1):
         _src_throttle(name)
         t0 = time.time()
         try:
-            req = urllib.request.Request(url, headers=headers or {}, data=data)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw = resp.read()
+            if _hc is not None:
+                # retries=0：退避／重試由本層控制，避免雙重重試拉長 latency
+                resp = _hc.request(
+                    'POST' if data is not None else 'GET',
+                    url,
+                    headers=headers or {},
+                    data=data,
+                    timeout=timeout,
+                    retries=0,
+                )
+                raw = resp.body
+            else:
+                req = urllib.request.Request(url, headers=headers or {}, data=data)
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    raw = resp.read()
             parsed = json.loads(raw)
             _src_record(name, True, int((time.time() - t0) * 1000))
             return parsed
@@ -1577,9 +1800,11 @@ def _twse_mis_index(ex_ch):
         if price is None:
             price = fnum(it.get('o'))      # 早盤尚無成交退開盤
         prev = fnum(it.get('y'))
-        chg = ((price - prev) / prev * 100) if (price is not None and prev) else None
+        chg_pct = ((price - prev) / prev * 100) if (price is not None and prev) else None
+        chg_pts = (price - prev) if (price is not None and prev is not None) else None
         out[code] = {
-            'price': price, 'prevClose': prev, 'changePct': chg, 'name': it.get('n'),
+            'price': price, 'prevClose': prev, 'change': chg_pts, 'changePct': chg_pct,
+            'name': it.get('n'),
             'open': fnum(it.get('o')), 'high': fnum(it.get('h')), 'low': fnum(it.get('l')),
         }
     return out
@@ -1633,7 +1858,7 @@ def _fetch_day_movers(n=8):
             date_s = date_s or str(r.get('Date') or '').strip() or None
             rows.append({
                 'code': code, 'name': name, 'price': close, 'change': chg,
-                'changePct': round(pct, 2), 'value': val, 'mkt': 'TW',
+                'changePct': round(pct, 2), 'value': val, 'mkt': 'TW', 'ex': 'TWSE',
             })
 
     def ingest_tpex(arr):
@@ -1669,7 +1894,7 @@ def _fetch_day_movers(n=8):
                 'code': code, 'name': name or code, 'price': close,
                 'change': chg, 'changePct': round(pct, 2),
                 'value': fnum(r.get('TradeValue') or r.get('成交金額')),
-                'mkt': 'TW',
+                'mkt': 'TW', 'ex': 'TPEx',
             })
 
     def _get_json(url, timeout=8):
@@ -1723,16 +1948,54 @@ def _fetch_day_movers(n=8):
 
     rows.sort(key=lambda x: x['changePct'], reverse=True)
     n = max(1, min(int(n or 8), 30))
-    # 漲停／跌停近似清單（個股 ±9.5% 以上；供廣度浮動窗／總覽）
-    limit_up = [r for r in rows if (r.get('changePct') or 0) >= 9.5][:40]
-    limit_down = [r for r in reversed(rows) if (r.get('changePct') or 0) <= -9.5][:40]
+    # 近漲跌停近似清單：僅上市（TWSE）普通股、|漲跌|≥9.9%。
+    # 家數仍可能 ≠ 證交所 MI_INDEX「股票」欄括號（官方含特殊漲跌幅／撮合判定）。
+    NEAR_LIMIT = 9.9
+
+    def _near_twse_eq(r, side):
+        code = str(r.get('code') or '')
+        if r.get('ex') != 'TWSE' or not _CODE4.match(code):
+            return False
+        pct = r.get('changePct')
+        if pct is None:
+            return False
+        return (pct >= NEAR_LIMIT) if side == 'up' else (pct <= -NEAR_LIMIT)
+
+    limit_up = [r for r in rows if _near_twse_eq(r, 'up')][:40]
+    limit_down = [r for r in reversed(rows) if _near_twse_eq(r, 'down')][:40]
+
+    # 產業別（OpenAPI 月營收「產業別」）— 供總覽近漲跌停標籤／與類股輪動聯動
+    try:
+        smap = _get_tw_sectors() or {}
+    except Exception as e:
+        print('[movers] sectors map', e)
+        smap = {}
+
+    def _tag_industry(lst):
+        for r in lst or []:
+            code = str(r.get('code') or '')
+            ind = smap.get(code)
+            if ind:
+                r['industry'] = ind
+                # 短標：去掉尾「業」以對齊 MI_INDEX 類股簡稱（半導體業→半導體）
+                r['industryShort'] = ind[:-1] if ind.endswith('業') and len(ind) > 2 else ind
+        return lst
+
+    _tag_industry(rows)
+    _tag_industry(limit_up)
+    _tag_industry(limit_down)
+    gainers = _tag_industry(rows[:n])
+    losers = _tag_industry(list(reversed(rows[-n:])))
+
     return {
         'ok': True,
         'date': date_s or _date.today().strftime('%Y%m%d'),
-        'gainers': rows[:n],
-        'losers': list(reversed(rows[-n:])),
+        'gainers': gainers,
+        'losers': losers,
         'limitUp': limit_up,
         'limitDown': limit_down,
+        'limitThreshold': NEAR_LIMIT,
+        'limitNote': '近漲跌停近似：上市普通股 |漲跌|≥9.9%，不含 ETF／櫃買；家數≠證交所官方括號',
         'source': 'TWSE STOCK_DAY_ALL + TPEx daily',
         'count': len(rows),
     }
@@ -1872,22 +2135,34 @@ def _yf_batch_quotes(syms):
     """
     labels = {
         '^DJI': '道瓊', '^GSPC': 'S&P500', '^IXIC': 'NASDAQ',
-        'CL=F': '原油', 'GC=F': '黃金', 'SI=F': '白銀',
+        'CL=F': '原油', 'GC=F': '黃金', 'HG=F': '銅', 'SI=F': '白銀',
         'DX-Y.NYB': '美元指數', 'DX=F': '美元指數',
         '^VIX': 'VIX 波動', 'TWD=X': '美元／台幣',
         '^SOX': '費半', '^N225': '日經', '^KS11': '韓國', '^HSI': '恆生',
+    }
+    # 解讀標籤：國際面板／總覽全球影響用（不影響報價計算）
+    roles = {
+        'GC=F': '避險指標',
+        'HG=F': '產業景氣循環',
+        '^VIX': '恐慌指標',
+        'CL=F': '能源景氣',
+        'DX-Y.NYB': '資金流向',
+        'DX=F': '資金流向',
     }
 
     def _one(sym):
         try:
             ov = _trusted_quote_override(sym)
             if ov and ov.get('price') is not None:
-                return {
+                row = {
                     'symbol': sym, 'name': labels.get(sym, sym),
                     'price': ov['price'], 'changePct': ov.get('changePct'),
                     'prevClose': ov.get('prevClose'),
                     'source': ov.get('source') or 'override',
                 }
+                if sym in roles:
+                    row['role'] = roles[sym]
+                return row
             # 與 mkt-bar 相同：range=5d&interval=1d
             _, data, _ = fetch_one(sym, '5d', '1d', False)
             if not data:
@@ -1899,7 +2174,7 @@ def _yf_batch_quotes(syms):
             if not q:
                 return None
             m = res[0].get('meta') or {}
-            return {
+            row = {
                 'symbol': sym,
                 'name': labels.get(sym, m.get('shortName') or sym),
                 'price': q['price'],
@@ -1907,6 +2182,9 @@ def _yf_batch_quotes(syms):
                 'prevClose': q['prevClose'],
                 'source': 'yahoo-mktbar',
             }
+            if sym in roles:
+                row['role'] = roles[sym]
+            return row
         except Exception as e:
             print('[pulse-global]', sym, e)
             return None
@@ -2015,6 +2293,183 @@ def _run_selftests():
     return {'passed': passed, 'total': len(cases), 'allPass': passed == len(cases), 'cases': cases}
 
 # ── Threading HTTP server ──────────────────────────────────────
+def _build_breadth_payload(force=False):
+    """建置 /breadth 與 /pulse 共用的廣度 payload；結果寫入 breadth:v1:{ymd} 快取。"""
+    import re as _re
+    from datetime import date as _date, timedelta
+
+    key = f'breadth:v1:{_date.today().strftime("%Y%m%d")}'
+    if not force:
+        c = _cache.get(key)
+        if c is not None:
+            try:
+                return json.loads(c.decode('utf-8') if isinstance(c, (bytes, bytearray)) else c)
+            except Exception:
+                pass
+
+    def _num(s):
+        if s is None:
+            return None
+        t = str(s).replace(',', '').strip()
+        if not t or t in ('-', '—'):
+            return None
+        try:
+            return float(t)
+        except Exception:
+            return None
+
+    def _pair(s):
+        """'892(113)' → (892, 113)；無括號則 (n, None)。"""
+        t = str(s or '').replace(',', '').strip()
+        m = _re.match(r'^([0-9.]+)\((\d+)\)$', t)
+        if m:
+            return int(float(m.group(1))), int(m.group(2))
+        n = _num(t)
+        return (int(n), None) if n is not None else (None, None)
+
+    def _empty_ad():
+        return {
+            'up': None, 'limitUp': None, 'down': None, 'limitDown': None,
+            'unchanged': None, 'unmatched': None, 'na': None,
+            'traded': None, 'advRatio': None, 'net': None,
+        }
+
+    def _fill_ad(rows, col):
+        """rows: [[類型, 整體市場, 股票], ...]；col=1 整體 / col=2 股票。"""
+        ad = _empty_ad()
+        for row in rows or []:
+            if not row:
+                continue
+            label = str(row[0])
+            cell = row[col] if len(row) > col else None
+            if '上漲' in label:
+                ad['up'], ad['limitUp'] = _pair(cell)
+            elif '下跌' in label:
+                ad['down'], ad['limitDown'] = _pair(cell)
+            elif '持平' in label:
+                ad['unchanged'], _ = _pair(cell)
+            elif '未成交' in label:
+                ad['unmatched'], _ = _pair(cell)
+            elif '無比價' in label:
+                ad['na'], _ = _pair(cell)
+        u, d = ad['up'], ad['down']
+        if u is not None and d is not None:
+            ad['net'] = u - d
+            den = u + d
+            ad['advRatio'] = round(u / den, 4) if den > 0 else None
+            flat = ad['unchanged'] or 0
+            ad['traded'] = u + d + flat
+        return ad
+
+    out = {
+        'ok': False,
+        'date': None,
+        'source': None,
+        'stocks': _empty_ad(),
+        'market': _empty_ad(),
+        'turnover': None,
+        'indices': {},
+        'score': None,
+        'pillars': None,
+        'marketRows': None,
+        'inst': None,
+        'summary': None,
+        'error': None,
+        'limitDef': '證交所 MI_INDEX「股票」欄：上漲／下跌括號內＝漲停／跌停家數（上市普通股官方統計）',
+    }
+
+    # ── 1) TWSE MI_INDEX MS：漲跌家數 + 成交統計 ───────────────
+    ms_date = None
+    tables = None
+    for back in range(0, 12):
+        dd = (_date.today() - timedelta(days=back)).strftime('%Y%m%d')
+        for url in (
+            f'https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date={dd}&type=MS&response=json',
+            f'https://www.twse.com.tw/exchangeReport/MI_INDEX?date={dd}&type=MS&response=json',
+        ):
+            try:
+                req = urllib.request.Request(url, headers=YF_HEADERS)
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    d = json.loads(resp.read())
+                if d.get('stat') not in ('OK', 'ok'):
+                    continue
+                tables = d.get('tables') or []
+                if not tables:
+                    data8 = d.get('data8')
+                    if data8:
+                        tables = [{'title': '漲跌證券數合計', 'data': data8}]
+                if tables:
+                    ms_date = dd
+                    out['source'] = 'TWSE MI_INDEX MS'
+                    break
+            except Exception as e:
+                print(f'[breadth] MI_INDEX {dd}: {e}')
+                continue
+        if ms_date:
+            break
+
+    if tables:
+        out['date'] = f'{ms_date[:4]}-{ms_date[4:6]}-{ms_date[6:]}'
+        for t in tables:
+            title = str(t.get('title') or t.get('subtitle') or '')
+            rows = t.get('data') or []
+            has_ad = ('漲跌證券數' in title) or any(
+                '上漲' in str((r or [''])[0]) for r in rows[:3]
+            )
+            if has_ad and any('上漲' in str((r or [''])[0]) for r in rows):
+                out['market'] = _fill_ad(rows, 1)
+                out['stocks'] = _fill_ad(rows, 2)
+                out['ok'] = out['stocks'].get('up') is not None
+            fields = t.get('fields') or []
+            if '大盤統計' in title or any('成交金額' in str(f) for f in fields):
+                stock_row = next((r for r in rows if r and str(r[0]).startswith('1.')), None)
+                total_row = next((r for r in rows if r and '總計' in str(r[0])), None)
+                sec_row = next((r for r in rows if r and '證券合計' in str(r[0])), None)
+                pick = sec_row or stock_row
+                if pick:
+                    out['turnover'] = {
+                        'stockAmt': _num(pick[1]) if len(pick) > 1 else None,
+                        'stockShares': _num(pick[2]) if len(pick) > 2 else None,
+                        'stockTrades': _num(pick[3]) if len(pick) > 3 else None,
+                        'totalAmt': _num(total_row[1]) if total_row and len(total_row) > 1 else None,
+                    }
+
+    # ── 2) 即時指數（MIS）────────────────────────────────────
+    try:
+        out['indices'] = _twse_mis_index('tse_t00.tw|otc_o00.tw')
+    except Exception as e:
+        print('[breadth] twindex', e)
+        out['indices'] = {}
+
+    # ── 3) 大盤體質 + 法人（重用既有建置，失敗不擋廣度）────────
+    try:
+        fund = _build_tw_market_fundamental('^TWII')
+        out['score'] = fund.get('score')
+        out['pillars'] = fund.get('pillars')
+        out['marketRows'] = fund.get('marketRows')
+        out['summary'] = fund.get('summary')
+    except Exception as e:
+        print('[breadth] fundamental', e)
+
+    try:
+        mf_key = f'marketflow:{_date.today().strftime("%Y%m%d")}'
+        cached_mf = _cache.get(mf_key)
+        if cached_mf is None:
+            cached_mf = _cache.get(f'marketflow:{_date.today().strftime("%Y-%m-%d")}')
+        if cached_mf:
+            mf = json.loads(cached_mf.decode('utf-8') if isinstance(cached_mf, (bytes, bytearray)) else cached_mf)
+            out['inst'] = mf.get('inst')
+    except Exception:
+        pass
+
+    if not out['ok'] and not out['error']:
+        out['error'] = '尚無最近交易日之漲跌家數（可能為休市或 TWSE 尚未公布）'
+
+    body = json.dumps(out, ensure_ascii=False).encode()
+    _cache.set(key, body, ttl=120)
+    return out
+
+
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -2024,18 +2479,33 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'   # enables keep-alive
 
     def _handle_index(self):
+        """tip UX only：一律送 tip 建置產物；缺 shell_v5／pulse_v5 視為壞樹。"""
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        fn = os.path.join(base_dir, 'stock_terminal_v2.html')
+        fn_v2 = os.path.join(base_dir, 'stock_terminal_v2.html')
+        fn_v1 = os.path.join(base_dir, 'stock_terminal.html')
+        fn = fn_v2 if os.path.exists(fn_v2) else fn_v1
         if not os.path.exists(fn):
-            fn = os.path.join(base_dir, 'stock_terminal.html')
+            self._err('tip UX HTML missing — run: python build_v2.py', 500)
+            return
         try:
             with open(fn, 'rb') as f:
                 content = f.read()
+            # 契約：tip 建置必須注入 shell_v5 + pulse_v5；否則使用者會看到舊圖表殼
+            low = content[: min(len(content), 2_000_000)].lower()
+            if b'shell_v5.js' not in low or b'pulse_v5.js' not in low:
+                self._err(
+                    'HTML is not tip UX (missing shell_v5/pulse_v5). '
+                    'Stay on TIP_BRANCH and run: python build_v2.py && .\\scripts\\go.bat',
+                    500,
+                )
+                return
+            # 無 hash 時由頁首腳本導向 #pulse（見 build_v2 tip-boot）；回應加 tip 標記
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
             self.send_header('Pragma', 'no-cache')
             self.send_header('Expires', '0')
+            self.send_header('X-Stock-Terminal-UX', 'tip')
             self.send_header('Content-Length', str(len(content)))
             self.end_headers()
             self.wfile.write(content)
@@ -2157,10 +2627,44 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 jobs = qa.jobs_snapshot()
             except Exception as e:
                 jobs = {'error': str(e)}
+            http_stats = None
+            try:
+                import http_client as _hc
+                http_stats = _hc.client_stats()
+            except Exception:
+                http_stats = None
+            tip_branch = None
+            st_ver = '5.0'
+            try:
+                _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                _tb = os.path.join(_root, 'TIP_BRANCH')
+                if os.path.isfile(_tb):
+                    with open(_tb, 'r', encoding='utf-8') as _tf:
+                        tip_branch = (_tf.read() or '').strip() or None
+                _vf = os.path.join(_root, 'VERSION')
+                if os.path.isfile(_vf):
+                    with open(_vf, 'r', encoding='utf-8') as _vfh:
+                        for _ln in _vfh:
+                            _v = _ln.strip()
+                            if _v and not _v.startswith('#'):
+                                st_ver = _v
+                                break
+            except Exception:
+                pass
+            _probe = _pulse_layout_probe()
             self._ok(json.dumps({
                 'status': 'ok',
+                'ux': 'tip',
+                'tipUx': True,
+                'version': st_ver,
+                'tipBranch': tip_branch,
+                'openUrl': f'http://127.0.0.1:{PORT}/#pulse',
                 'bind': '127.0.0.1',
                 'port': PORT,
+                'baseDir': _BASE,
+                'pythonExe': sys.executable,
+                'pythonBlocked': _is_blocked_python(),
+                'pulseLayout': _probe,
                 'workers': MAX_WORKERS,
                 'cpu_count': os.cpu_count(),
                 'cache_used': len(_cache),
@@ -2170,6 +2674,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 'etf_history_files': len(files),
                 'sources': _src_snapshot(),
                 'jobs': jobs,  # H4：回補／刷新進度
+                'httpClient': http_stats,  # 連線池／重試統計
             }, ensure_ascii=False, default=str).encode())
         else:
             # 安全(v3.9 review):SimpleHTTPRequestHandler 預設會把工作目錄所有檔當靜態檔服務。
@@ -3620,6 +4125,10 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                     out['margin'] = {'raw': rows[:6]} if rows else None
         except Exception as e:
             print(f'[marketflow] MI_MARGN failed: {e}')
+        try:
+            out['turnoverQuant'] = _turnover_quant(out.get('turnover') or [])
+        except Exception:
+            out['turnoverQuant'] = None
         body = json.dumps(out, ensure_ascii=False).encode()
         _cache.set(key, body, ttl=1800)
         self._ok(body)
@@ -3632,7 +4141,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         from datetime import date as _date
         qs = parse_qs(urlparse(self.path).query)
         force = (qs.get('refresh', ['0'])[0] or '0') in ('1', 'true', 'yes')
-        key = f'pulse:v1:{_date.today().strftime("%Y%m%d")}:{int(time.time() // 45)}'
+        key = f'pulse:v2:{_date.today().strftime("%Y%m%d")}:{int(time.time() // 45)}'
         if not force:
             c = _cache.get(key)
             if c is not None:
@@ -3676,8 +4185,14 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             print('[pulse] fundamental', e)
             fund = {}
 
-        # 2) 廣度／指數／法人 — 優先快取（由 /breadth /marketflow 預熱）
+        # 2) 廣度／指數／法人 — 優先快取；miss 時內聯建置（不經 _handle_*，避免弄亂 HTTP）
         bd = _cache_first([f'breadth:v1:{ymd}'])
+        if not (isinstance(bd, dict) and bd.get('ok')):
+            try:
+                bd = _build_breadth_payload(force=False)
+            except Exception as e:
+                print('[pulse] breadth hydrate', e)
+                bd = bd if isinstance(bd, dict) else None
         mf = _cache_first([f'marketflow:{ymd}', f'marketflow:{y_m_d}'])
         sec = _cache_first([
             f'sectors:{ymd}',
@@ -3686,8 +4201,6 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         ])
         txf = _cache_first([f'txf:{int(time.time() // 20)}', f'txf:{int(time.time() // 20) - 1}'])
 
-        # 廣度／盤後快取未命中時不呼叫其他 _handle_*（會弄亂 HTTP 回應）。
-        # 改以背景預熱：完整度下降並進 pending；使用者開過「廣度／盤後」後自動變完整。
         # 指數可直取 MIS；台指期可直取既有解析（不經 _handle_txf）。
         indices = (bd or {}).get('indices') or {}
         if not (indices.get('t00') or {}).get('price'):
@@ -3823,13 +4336,13 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         PULSE_SIDE_BUDGET = 8.0
 
         def _job_movers():
-            m = _cache_first([f'movers:v2:{ymd}'])
+            m = _cache_first([f'movers:v4:{ymd}'])
             if m is not None:
                 return m
             try:
                 m = _fetch_day_movers(8)
                 if m and m.get('ok'):
-                    _cache.set(f'movers:v2:{ymd}', json.dumps(m, ensure_ascii=False).encode(), ttl=300)
+                    _cache.set(f'movers:v4:{ymd}', json.dumps(m, ensure_ascii=False).encode(), ttl=300)
                 return m
             except Exception as e:
                 print('[pulse] movers', e)
@@ -3844,16 +4357,17 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 return {'ok': False, 'items': []}
 
         def _job_global():
-            # v4：與圖表→市場 /yf/batch range=5d + refreshMktBar 公式對齊
-            gkey = f'pulse-global:v4:{int(time.time() // 120)}'
+            # v5：v4 口徑 + 黃金（避險）／銅（景氣循環）
+            gkey = f'pulse-global:v5:{int(time.time() // 120)}'
             g = _cache_first([gkey])
             if g is not None:
                 return g
             try:
-                # 指數列優先吃市場 tab 同源標的（SOX/美股/日韓）；另補 VIX／匯率／美元
+                # 指數列優先吃市場 tab 同源標的（SOX/美股/日韓）；
+                # 另補 VIX／匯率／美元／黃金（避險）／銅（產業景氣循環）
                 g = _yf_batch_quotes([
                     '^DJI', '^GSPC', '^IXIC', '^SOX', '^N225', '^KS11',
-                    '^VIX', 'TWD=X', 'DX-Y.NYB',
+                    '^VIX', 'TWD=X', 'DX-Y.NYB', 'GC=F', 'HG=F',
                 ])
                 if not any(x.get('symbol') == 'DX-Y.NYB' for x in (g or [])):
                     # 僅在缺美元指數時補一槍，不重抓整批
@@ -3960,7 +4474,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 'cat': '系統',
             })
 
-        # 成交金額（億）— breadth.turnover 優先，否則 marketflow 末日
+        # 成交金額（億）— breadth.turnover 優先；序列用 marketflow／FMTQIK 量化趨勢
         turnover_yi = None
         to_bd = (bd or {}).get('turnover') or {}
         for k in ('stockAmt', 'totalAmt'):
@@ -3970,23 +4484,65 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                     break
                 except Exception:
                     pass
-        if turnover_yi is None and mf:
-            turns = mf.get('turnover') or []
-            if turns and turns[-1].get('amount') is not None:
-                turnover_yi = float(turns[-1]['amount']) / 1e8
-        # 前日比（若有兩日）
-        turnover_chg = None
-        if mf and (mf.get('turnover') or []) and len(mf['turnover']) >= 2:
+        turns = (mf or {}).get('turnover') if mf else None
+        if not turns:
             try:
-                a = float(mf['turnover'][-1]['amount'])
-                b = float(mf['turnover'][-2]['amount'])
-                if b:
-                    turnover_chg = (a - b) / b * 100.0
+                turns = _fmtqik_turnover()
+            except Exception as e:
+                print('[pulse] fmtqik', e)
+                turns = []
+        if turnover_yi is None and turns:
+            try:
+                turnover_yi = float(turns[-1]['amount']) / 1e8
             except Exception:
                 pass
+        tq = _turnover_quant(turns or [], latest_yi=turnover_yi)
+        if turnover_yi is None and tq.get('yi') is not None:
+            turnover_yi = tq['yi']
+        turnover_chg = tq.get('chgPct')
 
         t00 = indices.get('t00') or {}
         o00 = indices.get('o00') or {}
+        # 加權／櫃買／台指期：與成交金額同構的趨勢量化（vs5／Z／連漲跌／動能分）
+        try:
+            t00_closes = _fmtqik_index_closes(turns)
+            t00_trend = _price_series_quant(t00_closes, latest=t00.get('price'))
+        except Exception as e:
+            print('[pulse] t00 trend', e)
+            t00_trend = _price_series_quant([], latest=t00.get('price'))
+        try:
+            o00_closes = _tw_index_closes('^TWOII', n=30)
+            o00_trend = _price_series_quant(o00_closes, latest=o00.get('price'))
+        except Exception as e:
+            print('[pulse] o00 trend', e)
+            o00_trend = _price_series_quant([], latest=o00.get('price'))
+        txf_live = None
+        try:
+            # strip 顯示的台指期價（夜盤優先）覆寫連續日線末端
+            if isinstance(txf_night, dict):
+                txf_live = txf_night.get('price')
+            if txf_live is None and isinstance(txf, dict):
+                txf_live = txf.get('price')
+            txf_closes = _tw_index_closes('__TXF__', n=30)
+            txf_trend = _price_series_quant(txf_closes, latest=txf_live)
+        except Exception as e:
+            print('[pulse] txf trend', e)
+            txf_trend = _price_series_quant([])
+        # 台指期 − 加權現貨＝Basis（正價差／逆價差）；與前端 strip.basisPts／basisPct 對齊
+        basis_pts = None
+        basis_pct = None
+        try:
+            t00_px = t00.get('price')
+            if txf_live is not None and t00_px is not None:
+                t00_f = float(t00_px)
+                txf_f = float(txf_live)
+                basis_pts = round(txf_f - t00_f, 2)
+                if t00_f > 0:
+                    basis_pct = round(basis_pts / t00_f * 100.0, 3)
+        except Exception as e:
+            print('[pulse] basis', e)
+            basis_pts = None
+            basis_pct = None
         st = stocks or {}
         up, dn, flat = st.get('up'), st.get('down'), st.get('unchanged')
         ls_ratio = None
@@ -4019,8 +4575,21 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             'strip': {
                 't00': t00,
                 'o00': o00,
+                't00Trend': t00_trend,
+                'o00Trend': o00_trend,
+                'txfTrend': txf_trend,
+                'basisPts': basis_pts,
+                'basisPct': basis_pct,
                 'turnoverYi': round(turnover_yi, 1) if turnover_yi is not None else None,
                 'turnoverChgPct': round(turnover_chg, 2) if turnover_chg is not None else None,
+                'turnoverMa5Yi': tq.get('ma5Yi'),
+                'turnoverVsMa5Pct': tq.get('vsMa5Pct'),
+                'turnoverZ20': tq.get('z20'),
+                'volumeScore': tq.get('volumeScore'),
+                'turnoverStreak': tq.get('streak'),
+                'turnoverTrend': tq.get('trend'),
+                'turnoverLevel': tq.get('level'),
+                'turnoverN': tq.get('n'),
                 'up': up, 'down': dn, 'flat': flat,
                 'limitUp': st.get('limitUp'),
                 'limitDown': st.get('limitDown'),
@@ -4146,7 +4715,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         except Exception:
             n = 8
         force = (qs.get('refresh', ['0'])[0] or '0') in ('1', 'true', 'yes')
-        key = f'movers:v2:{_date.today().strftime("%Y%m%d")}'
+        key = f'movers:v4:{_date.today().strftime("%Y%m%d")}'
         if not force:
             c = _cache.get(key)
             if c is not None:
@@ -4167,179 +4736,10 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
              indices:{t00,o00}, score, pillars, marketRows, inst, summary
            }
            盤中若當日尚無 MS，往前找最近交易日（最多 12 天）。快取 120s。"""
-        import re as _re
-        from datetime import date as _date, timedelta
-
         qs = parse_qs(urlparse(self.path).query)
         force = (qs.get('refresh', ['0'])[0] or '0') in ('1', 'true', 'yes')
-        key = f'breadth:v1:{_date.today().strftime("%Y%m%d")}'
-        if not force:
-            c = _cache.get(key)
-            if c is not None:
-                self._ok(c); return
-
-        def _num(s):
-            if s is None:
-                return None
-            t = str(s).replace(',', '').strip()
-            if not t or t in ('-', '—'):
-                return None
-            try:
-                return float(t)
-            except Exception:
-                return None
-
-        def _pair(s):
-            """'892(113)' → (892, 113)；無括號則 (n, None)。"""
-            t = str(s or '').replace(',', '').strip()
-            m = _re.match(r'^([0-9.]+)\((\d+)\)$', t)
-            if m:
-                return int(float(m.group(1))), int(m.group(2))
-            n = _num(t)
-            return (int(n), None) if n is not None else (None, None)
-
-        def _empty_ad():
-            return {
-                'up': None, 'limitUp': None, 'down': None, 'limitDown': None,
-                'unchanged': None, 'unmatched': None, 'na': None,
-                'traded': None, 'advRatio': None, 'net': None,
-            }
-
-        def _fill_ad(rows, col):
-            """rows: [[類型, 整體市場, 股票], ...]；col=1 整體 / col=2 股票。"""
-            ad = _empty_ad()
-            for row in rows or []:
-                if not row:
-                    continue
-                label = str(row[0])
-                cell = row[col] if len(row) > col else None
-                if '上漲' in label:
-                    ad['up'], ad['limitUp'] = _pair(cell)
-                elif '下跌' in label:
-                    ad['down'], ad['limitDown'] = _pair(cell)
-                elif '持平' in label:
-                    ad['unchanged'], _ = _pair(cell)
-                elif '未成交' in label:
-                    ad['unmatched'], _ = _pair(cell)
-                elif '無比價' in label:
-                    ad['na'], _ = _pair(cell)
-            u, d = ad['up'], ad['down']
-            if u is not None and d is not None:
-                ad['net'] = u - d
-                den = u + d
-                ad['advRatio'] = round(u / den, 4) if den > 0 else None
-                flat = ad['unchanged'] or 0
-                ad['traded'] = u + d + flat
-            return ad
-
-        out = {
-            'ok': False,
-            'date': None,
-            'source': None,
-            'stocks': _empty_ad(),
-            'market': _empty_ad(),
-            'turnover': None,
-            'indices': {},
-            'score': None,
-            'pillars': None,
-            'marketRows': None,
-            'inst': None,
-            'summary': None,
-            'error': None,
-        }
-
-        # ── 1) TWSE MI_INDEX MS：漲跌家數 + 成交統計 ───────────────
-        ms_date = None
-        tables = None
-        for back in range(0, 12):
-            dd = (_date.today() - timedelta(days=back)).strftime('%Y%m%d')
-            for url in (
-                f'https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date={dd}&type=MS&response=json',
-                f'https://www.twse.com.tw/exchangeReport/MI_INDEX?date={dd}&type=MS&response=json',
-            ):
-                try:
-                    req = urllib.request.Request(url, headers=YF_HEADERS)
-                    with urllib.request.urlopen(req, timeout=12) as resp:
-                        d = json.loads(resp.read())
-                    if d.get('stat') not in ('OK', 'ok'):
-                        continue
-                    tables = d.get('tables') or []
-                    if not tables:
-                        # 舊版扁平 data8
-                        data8 = d.get('data8')
-                        if data8:
-                            tables = [{'title': '漲跌證券數合計', 'data': data8}]
-                    if tables:
-                        ms_date = dd
-                        out['source'] = 'TWSE MI_INDEX MS'
-                        break
-                except Exception as e:
-                    print(f'[breadth] MI_INDEX {dd}: {e}')
-                    continue
-            if ms_date:
-                break
-
-        if tables:
-            out['date'] = f'{ms_date[:4]}-{ms_date[4:6]}-{ms_date[6:]}'
-            for t in tables:
-                title = str(t.get('title') or t.get('subtitle') or '')
-                rows = t.get('data') or []
-                has_ad = ('漲跌證券數' in title) or any(
-                    '上漲' in str((r or [''])[0]) for r in rows[:3]
-                )
-                if has_ad and any('上漲' in str((r or [''])[0]) for r in rows):
-                    out['market'] = _fill_ad(rows, 1)
-                    out['stocks'] = _fill_ad(rows, 2)
-                    out['ok'] = out['stocks'].get('up') is not None
-                fields = t.get('fields') or []
-                if '大盤統計' in title or any('成交金額' in str(f) for f in fields):
-                    stock_row = next((r for r in rows if r and str(r[0]).startswith('1.')), None)
-                    total_row = next((r for r in rows if r and '總計' in str(r[0])), None)
-                    sec_row = next((r for r in rows if r and '證券合計' in str(r[0])), None)
-                    pick = sec_row or stock_row
-                    if pick:
-                        out['turnover'] = {
-                            'stockAmt': _num(pick[1]) if len(pick) > 1 else None,
-                            'stockShares': _num(pick[2]) if len(pick) > 2 else None,
-                            'stockTrades': _num(pick[3]) if len(pick) > 3 else None,
-                            'totalAmt': _num(total_row[1]) if total_row and len(total_row) > 1 else None,
-                        }
-
-        # ── 2) 即時指數（MIS）────────────────────────────────────
-        try:
-            out['indices'] = _twse_mis_index('tse_t00.tw|otc_o00.tw')
-        except Exception as e:
-            print('[breadth] twindex', e)
-            out['indices'] = {}
-
-        # ── 3) 大盤體質 + 法人（重用既有建置，失敗不擋廣度）────────
-        try:
-            fund = _build_tw_market_fundamental('^TWII')
-            out['score'] = fund.get('score')
-            out['pillars'] = fund.get('pillars')
-            out['marketRows'] = fund.get('marketRows')
-            out['summary'] = fund.get('summary')
-        except Exception as e:
-            print('[breadth] fundamental', e)
-
-        try:
-            mf_key = f'marketflow:{_date.today().strftime("%Y%m%d")}'
-            # marketflow 實際 key 用 Ymd 無連字號（見 _handle_marketflow）
-            cached_mf = _cache.get(mf_key)
-            if cached_mf is None:
-                cached_mf = _cache.get(f'marketflow:{_date.today().strftime("%Y-%m-%d")}')
-            if cached_mf:
-                mf = json.loads(cached_mf.decode('utf-8') if isinstance(cached_mf, (bytes, bytearray)) else cached_mf)
-                out['inst'] = mf.get('inst')
-        except Exception:
-            pass
-
-        if not out['ok'] and not out['error']:
-            out['error'] = '尚無最近交易日之漲跌家數（可能為休市或 TWSE 尚未公布）'
-
-        body = json.dumps(out, ensure_ascii=False).encode()
-        _cache.set(key, body, ttl=120)
-        self._ok(body)
+        out = _build_breadth_payload(force=force)
+        self._ok(json.dumps(out, ensure_ascii=False).encode())
 
     def _handle_inst_rank(self):
         """外資/投信/自營商買賣超排行榜：T86 全表排序 + chip_history 連續天數。
@@ -6272,6 +6672,28 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     os.chdir(_BASE)
+    _boot_trace('boot begin exe=%s base=%s' % (sys.executable, _BASE))
+    if _is_blocked_python():
+        _boot_trace('FATAL refuse blocked python (hermes/agent): %s' % sys.executable)
+        sys.stderr.write(
+            '\n============================================================\n'
+            ' FATAL: refusing Hermes/agent python\n'
+            '   %s\n'
+            ' This is why you see a BLANK console and 一行兩框 UI.\n'
+            ' Fix: double-click START_TIP.cmd in the repo root\n'
+            '   (or install python.org Python and re-run scripts\\go.ps1 -Pull)\n'
+            ' Boot log: %s\n'
+            '============================================================\n' % (
+                sys.executable,
+                os.path.join(_BASE, 'logs', 'SERVER_BOOT.txt'),
+            )
+        )
+        sys.stderr.flush()
+        sys.exit(2)
+    _probe0 = _pulse_layout_probe()
+    _boot_trace('pulseLayout=%s' % json.dumps(_probe0, ensure_ascii=False))
+    if _probe0.get('hasFourColPriority') or not _probe0.get('layoutAnchor'):
+        _boot_trace('WARN pulse_v5.js is not tip 5col anchor — wrong tree / not pulled')
     try:
         import slog as _slog
         _slog.setup('INFO')
@@ -6289,7 +6711,9 @@ if __name__ == '__main__':
     except Exception as _phe:
         _ph_msg = f'Pulse history unavailable: {_phe}'
     _msg = (
-        f'Stock Terminal v5.0: http://127.0.0.1:{PORT}/stock_terminal_v2.html\n'
+        f'Stock Terminal v5.0 tip UX: http://127.0.0.1:{PORT}/#pulse\n'
+        f'Python: {sys.executable}\n'
+        f'Layout: {_probe0.get("layoutAnchor")} / {_probe0.get("layoutContract")}\n'
         f'Workers: {MAX_WORKERS}  |  LRU cache: {LRU_MAX} symbols (ttl={getattr(_cache, "_ttl", "?")}s)\n'
         f'ETF delta path: {d or "NOT FOUND — set ETF_DELTA_PATH in server.py"}\n'
         f'ETF history files: {len(files)}\n'
@@ -6315,11 +6739,12 @@ if __name__ == '__main__':
         except Exception as _e:
             print('[alert] start failed:', _e)
     if getattr(sys, 'frozen', False):
-        # 打包成 app 時:啟動後自動開瀏覽器(開發模式由 .bat 開,不重複)
+        # 打包成 app 時:啟動後自動開 tip 總覽（#pulse）；絕不開無 hash 舊圖表殼
         try:
             import webbrowser
-            threading.Timer(1.4, lambda: webbrowser.open(f'http://127.0.0.1:{PORT}/stock_terminal_v2.html')).start()
+            threading.Timer(1.4, lambda: webbrowser.open(f'http://127.0.0.1:{PORT}/#pulse')).start()
         except Exception:
             pass
     # H0：只聽 loopback，避免 18432 暴露到區網／公網
     ThreadingHTTPServer(('127.0.0.1', PORT), Handler).serve_forever()
+

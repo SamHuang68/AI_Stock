@@ -77,17 +77,26 @@
       '.vz-ref .vz-tick{position:absolute;top:-1px;bottom:-1px;width:1px;background:rgba(248,250,252,.35)}' +
       '.vz-ref .vz-tick-lbl{position:absolute;top:7px;font-size:7px;color:var(--tf,#64748b);transform:translateX(-50%);white-space:nowrap}' +
       '.vz-spark{display:block;width:100%;height:28px;margin-top:2px}' +
-      '.vz-spark-ax{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto 1fr auto;gap:0 3px;' +
-        'width:100%;height:100%;min-height:inherit;box-sizing:border-box;padding:1px 2px 0}' +
+      '.vz-spark-ax{display:grid;grid-template-columns:auto minmax(0,1fr);' +
+        'grid-template-rows:auto minmax(0,1fr) auto auto;gap:0 4px;' +
+        'width:100%;height:100%;min-width:0;min-height:0;box-sizing:border-box;padding:1px 2px 0}' +
+      /* tip 小卡：省略底部 X 單位列（與 .lab meta 重複），騰出 plot 高度 */
+      '.vz-spark-ax.vz-compact{grid-template-rows:auto minmax(0,1fr) auto}' +
+      '.vz-spark-ax.vz-compact .vz-xunit{display:none}' +
       '.vz-spark-ax .vz-yunit{grid-column:1;grid-row:1;font-size:7px;color:var(--tf,#64748b);line-height:1;' +
-        'white-space:nowrap;align-self:end;padding-bottom:1px}' +
+        'white-space:nowrap;align-self:end;padding-bottom:1px;font-weight:700}' +
       '.vz-spark-ax .vz-ylabs{grid-column:1;grid-row:2;display:flex;flex-direction:column;justify-content:space-between;' +
-        'align-items:flex-end;font-size:7px;color:var(--tlo);line-height:1;font-variant-numeric:tabular-nums;padding:1px 0}' +
-      '.vz-spark-ax .vz-plot{grid-column:2;grid-row:1 / span 2;min-width:0;min-height:0;position:relative;' +
-        'border-left:1px solid rgba(148,163,184,.28);border-bottom:1px solid rgba(148,163,184,.28)}' +
-      '.vz-spark-ax .vz-plot svg{display:block;width:100%;height:100%;min-height:24px}' +
-      '.vz-spark-ax .vz-xunit{grid-column:2;grid-row:3;font-size:7px;color:var(--tf,#64748b);line-height:1.2;' +
-        'text-align:right;padding-top:2px;white-space:nowrap}' +
+        'align-items:flex-end;font-size:7px;color:var(--tlo);line-height:1;font-variant-numeric:tabular-nums;padding:1px 0;gap:0;' +
+        'min-width:0;overflow:hidden}' +
+      '.vz-spark-ax .vz-plot{grid-column:2;grid-row:1 / span 2;min-width:0;min-height:0;position:relative;overflow:hidden;' +
+        'border-left:1px solid rgba(148,163,184,.35);border-bottom:1px solid rgba(148,163,184,.35)}' +
+      /* 軸內 plot 的 svg 不可沿用 .vz-spark 的 margin-top，否則線會擠出框底 */
+      '.vz-spark-ax .vz-plot svg{display:block;width:100%;height:100%;min-width:0;min-height:0;' +
+        'max-width:100%;max-height:100%;margin:0}' +
+      '.vz-spark-ax .vz-xlabs{grid-column:2;grid-row:3;display:flex;justify-content:space-between;' +
+        'font-size:7px;color:var(--tlo);line-height:1.2;font-variant-numeric:tabular-nums;padding-top:2px}' +
+      '.vz-spark-ax .vz-xunit{grid-column:1 / span 2;grid-row:4;font-size:7px;color:var(--tf,#64748b);line-height:1.2;' +
+        'text-align:right;padding-top:1px;white-space:nowrap}' +
       '.vz-sparkbars{display:flex;align-items:flex-end;gap:1px;height:18px;margin-top:2px}' +
       '.vz-sparkbars i{flex:1;min-width:2px;border-radius:1px 1px 0 0;opacity:.9}' +
       '.vz-zone{position:relative;height:7px;border-radius:4px;background:linear-gradient(90deg,#4ade80 0%,#fbbf24 40%,#fb923c 70%,#f87171 100%);margin:3px 0 1px}' +
@@ -167,8 +176,10 @@
   function limitChip(chgPct) {
     ensureStyle();
     if (!finite(chgPct)) return '';
-    if (chgPct >= 9.5) return '<span class="vz-chip lim">漲停</span>';
-    if (chgPct <= -9.5) return '<span class="vz-chip lim">跌停</span>';
+    if (chgPct >= 9.9) return '<span class="vz-chip lim">近漲停</span>';
+    if (chgPct <= -9.9) return '<span class="vz-chip lim">近跌停</span>';
+    if (chgPct >= 9.5) return '<span class="vz-chip lim">強勢</span>';
+    if (chgPct <= -9.5) return '<span class="vz-chip lim">弱勢</span>';
     return '';
   }
 
@@ -272,7 +283,7 @@
     return n;
   }
 
-  /** SVG 折線 spark；opts.xUnit / opts.yUnit 時外掛座標軸單位（HTML，避免 SVG 拉伸變形） */
+  /** SVG 折線 spark；opts.xUnit / opts.yUnit 時外掛座標軸單位與刻度（HTML，避免 SVG 拉伸變形） */
   function sparkLine(vals, opts) {
     ensureStyle();
     opts = opts || {};
@@ -282,6 +293,7 @@
     }
     var lo = Math.min.apply(null, arr), hi = Math.max.apply(null, arr);
     var span = (hi - lo) || 1;
+    var mid = (hi + lo) / 2;
     var w = opts.w || 240, h = opts.h || 36, pad = 2;
     var pts = arr.map(function (c, i) {
       var x = pad + (i / (arr.length - 1)) * (w - pad * 2);
@@ -290,21 +302,45 @@
     }).join(' ');
     var up = arr[arr.length - 1] >= arr[0];
     var stroke = opts.color || (up ? 'var(--red)' : 'var(--green)');
-    var svg = '<svg class="vz-spark" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
-      '<polyline fill="none" stroke="' + stroke + '" stroke-width="2" points="' + pts + '"/></svg>';
+    var zeroLine = '';
+    if (lo < 0 && hi > 0) {
+      var zy = pad + (1 - (0 - lo) / span) * (h - pad * 2);
+      zeroLine = '<line x1="' + pad + '" y1="' + zy.toFixed(1) + '" x2="' + (w - pad) +
+        '" y2="' + zy.toFixed(1) + '" stroke="rgba(148,163,184,.45)" stroke-width="1" stroke-dasharray="3,2"/>';
+    }
+    var midLine = '';
+    if (opts.grid !== false) {
+      var my = pad + (1 - (mid - lo) / span) * (h - pad * 2);
+      midLine = '<line x1="' + pad + '" y1="' + my.toFixed(1) + '" x2="' + (w - pad) +
+        '" y2="' + my.toFixed(1) + '" stroke="rgba(148,163,184,.22)" stroke-width="1"/>';
+    }
+    var svg = '<svg class="vz-spark" viewBox="0 0 ' + w + ' ' + h +
+      '" preserveAspectRatio="none" overflow="hidden">' +
+      midLine + zeroLine +
+      '<polyline fill="none" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"' +
+      ' stroke-linejoin="round" points="' + pts + '"/></svg>';
     var xUnit = opts.xUnit != null ? String(opts.xUnit) : '';
     var yUnit = opts.yUnit != null ? String(opts.yUnit) : '';
     if (!xUnit && !yUnit && !opts.axes) return svg;
     var xLbl = xUnit || '日';
     var yLbl = yUnit || '';
     var n = arr.length;
-    return '<div class="vz-spark-ax" title="' +
-      esc((yLbl ? ('Y：' + yLbl + ' · ') : '') + 'X：' + xLbl + ' · n=' + n) + '">' +
-      '<div class="vz-yunit">' + esc(yLbl) + '</div>' +
+    var xMid = Math.max(1, Math.round((n + 1) / 2));
+    var compact = !!opts.compact;
+    var tip = (yLbl ? ('Y：' + yLbl + ' · ') : '') + 'X：' + xLbl + ' · n=' + n;
+    return '<div class="vz-spark-ax' + (compact ? ' vz-compact' : '') + '" title="' +
+      esc(tip) + '">' +
+      '<div class="vz-yunit">' + esc(yLbl ? ('Y·' + yLbl) : 'Y') + '</div>' +
       '<div class="vz-ylabs"><span>' + esc(_fmtAxisY(hi, opts)) + '</span>' +
+        '<span>' + esc(_fmtAxisY(mid, opts)) + '</span>' +
         '<span>' + esc(_fmtAxisY(lo, opts)) + '</span></div>' +
       '<div class="vz-plot">' + svg + '</div>' +
-      '<div class="vz-xunit">近 ' + n + ' ' + esc(xLbl) + ' →</div></div>';
+      '<div class="vz-xlabs"><span>1</span><span>' + xMid + '</span><span>' + n + '</span></div>' +
+      (compact ? '' : (
+        '<div class="vz-xunit">X：' + esc(xLbl) + (yLbl ? (' · Y：' + esc(yLbl)) : '') +
+          ' · 近 ' + n + ' ' + esc(xLbl) + '</div>'
+      )) +
+      '</div>';
   }
 
   /** 正負柱狀 spark */

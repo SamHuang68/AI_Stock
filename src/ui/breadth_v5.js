@@ -116,6 +116,27 @@
     var s = (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
     return s;
   }
+  function chgWithPct(obj, ptDigits) {
+    if (!obj) return '—';
+    var chg = obj.change;
+    if (chg == null && obj.price != null && obj.prevClose != null &&
+        isFinite(obj.price) && isFinite(obj.prevClose)) {
+      chg = Number(obj.price) - Number(obj.prevClose);
+    }
+    var p = obj.changePct;
+    var pts = null;
+    if (chg != null && isFinite(chg)) {
+      var d = ptDigits == null ? 2 : ptDigits;
+      var body = Math.abs(chg).toLocaleString('en-US', {
+        maximumFractionDigits: d, minimumFractionDigits: d
+      });
+      pts = (chg > 0 ? '+' : chg < 0 ? '-' : '') + body;
+    }
+    if (pts == null && (p == null || p !== p)) return '—';
+    if (pts == null) return fmtPct(p);
+    if (p == null || p !== p) return pts;
+    return pts + ' · ' + fmtPct(p);
+  }
   function clsChg(n) {
     if (n == null || n !== n) return 'flat';
     return n > 0 ? 'up' : n < 0 ? 'dn' : 'flat';
@@ -137,12 +158,12 @@
 
   function limitPopup(side, count, list) {
     var isUp = side === 'up';
-    var title = isUp ? '漲停清單' : '跌停清單';
+    var title = isUp ? '官方漲停家數' : '官方跌停家數';
     var ico = isUp ? '▲' : '▼';
     var rows = '';
     if (!list || !list.length) {
-      rows = '<div class="bd-pop-empty">尚無' + (isUp ? '漲停' : '跌停') +
-        '標的（±9.5% 近似）· 或資料載入中</div>';
+      rows = '<div class="bd-pop-empty">尚無近' + (isUp ? '漲停' : '跌停') +
+        '標的（上市普通股 ≥9.9% 近似）· 清單長度≠上方官方家數</div>';
     } else {
       list.slice(0, 30).forEach(function (r) {
         rows += '<div class="bd-pop-row" data-code="' + (r.code || '') + '">' +
@@ -151,12 +172,13 @@
           '<span class="pc ' + clsChg(r.changePct) + '">' + fmtPct(r.changePct) + '</span></div>';
       });
     }
-    return '<span class="bd-lim" data-lim="' + side + '" title="點擊查看' + title + '">' +
+    return '<span class="bd-lim" data-lim="' + side + '" title="數字＝證交所官方括號家數；清單＝近漲跌停近似（≥9.9%、上市普通股）">' +
       '<span class="bd-lim-ico ' + (isUp ? 'up' : 'dn') + '">' + ico + '</span>' +
       '<span>' + (isUp ? '漲停 ' : '跌停 ') + fmt(count) + '</span>' +
       '<div class="bd-pop" role="dialog">' +
-        '<div class="bd-pop-h"><span>' + title + ' · ' + (list ? list.length : 0) + '</span>' +
-          '<span style="color:var(--tlo);font-weight:600">±9.5% 近似</span></div>' +
+        '<div class="bd-pop-h"><span>' + title + ' ' + fmt(count) +
+          ' · 近似列 ' + (list ? list.length : 0) + '</span>' +
+          '<span style="color:var(--tlo);font-weight:600">官方≠清單</span></div>' +
         rows +
       '</div></span>';
   }
@@ -272,15 +294,22 @@
     var mv = lastMovers || d._movers || {};
     var limUpList = mv.limitUp || [];
     var limDnList = mv.limitDown || [];
+    /* fallback：僅上市普通股 ≥9.9%（與後端 limitUp 對齊；家數仍≠官方括號） */
     if (!limUpList.length && (mv.gainers || []).length) {
-      limUpList = (mv.gainers || []).filter(function (r) { return r.changePct != null && r.changePct >= 9.5; });
+      limUpList = (mv.gainers || []).filter(function (r) {
+        return r && r.ex !== 'TPEx' && r.changePct != null && r.changePct >= 9.9 &&
+          /^[1-9]\d{3}$/.test(String(r.code || ''));
+      });
     }
     if (!limDnList.length && (mv.losers || []).length) {
-      limDnList = (mv.losers || []).filter(function (r) { return r.changePct != null && r.changePct <= -9.5; });
+      limDnList = (mv.losers || []).filter(function (r) {
+        return r && r.ex !== 'TPEx' && r.changePct != null && r.changePct <= -9.9 &&
+          /^[1-9]\d{3}$/.test(String(r.code || ''));
+      });
     }
     var strip =
-      stripCell('加權指數', t00.price != null ? fmt(t00.price, 2) : '—', fmtPct(t00.changePct), clsChg(t00.changePct)) +
-      stripCell('櫃買指數', o00.price != null ? fmt(o00.price, 2) : '—', fmtPct(o00.changePct), clsChg(o00.changePct)) +
+      stripCell('加權指數', t00.price != null ? fmt(t00.price, 2) : '—', chgWithPct(t00, 2), clsChg(t00.changePct)) +
+      stripCell('櫃買指數', o00.price != null ? fmt(o00.price, 2) : '—', chgWithPct(o00, 2), clsChg(o00.changePct)) +
       stripCell('上漲家數', fmt(up), limitPopup('up', st.limitUp, limUpList), null, 'has-lim') +
       stripCell('下跌家數', fmt(dn), limitPopup('dn', st.limitDown, limDnList), null, 'has-lim') +
       stripCell('淨家數', st.net != null ? ((st.net >= 0 ? '+' : '') + st.net) : '—',
@@ -329,25 +358,28 @@
     }
     if (inst) {
       var total = (inst.foreign || 0) + (inst.trust || 0) + (inst.dealer || 0);
-      rows += '<div class="bd-row"><span class="rk">外資（' + (inst.date || '') + '）</span><span class="rv ' +
-        clsChg(inst.foreign) + '">' + fyi(inst.foreign) + '</span></div>';
-      rows += '<div class="bd-row"><span class="rk">投信</span><span class="rv ' + clsChg(inst.trust) + '">' +
-        fyi(inst.trust) + '</span></div>';
-      rows += '<div class="bd-row"><span class="rk">自營商</span><span class="rv ' + clsChg(inst.dealer) + '">' +
-        fyi(inst.dealer) + '</span></div>';
-      rows += '<div class="bd-row"><span class="rk">三大法人合計</span><span class="rv ' + clsChg(total) + '">' +
-        fyi(total) + '</span></div>';
+      rows += '<div class="bd-row"><span class="rk">三大法人合計（' + (inst.date || '') + '）</span><span class="rv ' +
+        clsChg(total) + '">' + fyi(total) + '</span></div>';
+      /* 結構只用 magBars，避免與數字列重複 */
       if (V) {
         rows += '<div class="bd-row" style="display:block;padding-top:4px;grid-column:1/-1;border:none">' + V.magBars([
           { label: '外資', v: inst.foreign, fmt: V.fmtYiFromYuan },
           { label: '投信', v: inst.trust, fmt: V.fmtYiFromYuan },
           { label: '自營', v: inst.dealer, fmt: V.fmtYiFromYuan }
         ]) + '</div>';
+      } else {
+        rows += '<div class="bd-row"><span class="rk">外資</span><span class="rv ' + clsChg(inst.foreign) + '">' +
+          fyi(inst.foreign) + '</span></div>';
+        rows += '<div class="bd-row"><span class="rk">投信</span><span class="rv ' + clsChg(inst.trust) + '">' +
+          fyi(inst.trust) + '</span></div>';
+        rows += '<div class="bd-row"><span class="rk">自營</span><span class="rv ' + clsChg(inst.dealer) + '">' +
+          fyi(inst.dealer) + '</span></div>';
       }
     }
 
     var detailBlock =
-      '<div class="bd-sec"><h4>細節</h4><div class="bd-fill"><div class="bd-rows">' + rows + '</div></div></div>';
+      '<div class="bd-sec"><h4>量能／法人細節</h4><div class="bd-fill"><div class="bd-rows">' + rows + '</div></div>' +
+        '<div class="bd-note">股票＝上市股票統計；法人＝BFI82U · 結構條不重複合計數字</div></div>';
 
     var hist = d._hist || [];
     var histBlock = '';
@@ -383,11 +415,35 @@
             ' · pulse_history.db</div></div>';
     }
 
-    var noteSec =
-      '<div class="bd-sec"><h4>備註</h4><div class="bd-fill">' +
-        '<div class="bd-note" style="margin:0;font-size:9px;line-height:1.5">' +
-        '股票欄位為上市「股票」統計（不含權證／ETF）；整體市場含全部證券。' +
-        '漲跌家數為 TWSE 盤後公布，盤中或休市日自動取最近交易日。台股慣例：紅漲綠跌。僅供參考。</div></div></div>';
+    function limHalf(list, title, cls) {
+      var maxAbs = 0;
+      var slice = list.slice(0, 12);
+      slice.forEach(function (r) {
+        if (r.changePct != null && isFinite(r.changePct)) maxAbs = Math.max(maxAbs, Math.abs(r.changePct));
+      });
+      var h = '<div><div style="font-size:9px;color:var(--tlo);margin:0 0 3px;font-weight:700">' + title +
+        ' · ' + list.length + '</div>';
+      if (!slice.length) return h + '<div class="bd-note">尚無</div></div>';
+      h += '<table class="bd-hist"><tr><th>#</th><th>代號</th><th>漲跌</th></tr>';
+      slice.forEach(function (r, i) {
+        var bar = (V && r.changePct != null) ? V.rowBar(r.changePct, maxAbs || 1) : '';
+        h += '<tr class="bd-row-click" data-code="' + (r.code || '') + '" style="cursor:pointer">' +
+          '<td>' + (i + 1) + '</td><td style="color:var(--gold);font-weight:700" title="' +
+          (r.name || '') + '">' + (r.code || '') + '</td><td class="' + (cls || clsChg(r.changePct)) + '">' +
+          fmtPct(r.changePct) + bar + '</td></tr>';
+      });
+      return h + '</table></div>';
+    }
+    var upList = limUpList.length ? limUpList : (mv.gainers || []);
+    var dnList = limDnList.length ? limDnList : (mv.losers || []);
+    var upTitle = limUpList.length ? '漲停／強勢' : '漲幅前列';
+    var dnTitle = limDnList.length ? '跌停／弱勢' : '跌幅前列';
+    var moversSec =
+      '<div class="bd-sec"><h4>強弱榜<span style="color:var(--tlo);font-weight:600;font-size:8px">/movers</span></h4>' +
+        '<div class="bd-fill" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;align-content:start">' +
+          limHalf(upList, upTitle, 'up') + limHalf(dnList, dnTitle, 'dn') +
+        '</div>' +
+        '<div class="bd-note">點列開圖表 · 紅漲綠跌</div></div>';
 
     body.innerHTML =
       '<div class="bd-strip">' + strip + '</div>' +
@@ -395,18 +451,32 @@
         '<div class="bd-zone bd-zone-up">' + breadthBlock + detailBlock + '</div>' +
         '<div class="bd-zone bd-zone-lo">' +
           (histBlock || '<div class="bd-sec"><h4>歷史廣度</h4><div class="bd-fill"><div class="bd-note">尚無本機歷史紀錄</div></div></div>') +
-          noteSec +
+          moversSec +
         '</div>' +
       '</div>' +
       (d.error && !d.ok ? '<div class="bd-err">' + d.error + '</div>' : '');
+    body.querySelectorAll('tr.bd-row-click[data-code]').forEach(function (tr) {
+      tr.onclick = function () {
+        var c = tr.getAttribute('data-code');
+        if (c && typeof loadSym === 'function') {
+          if (window.ShellV5 && ShellV5.openChart) ShellV5.openChart(c, 'TW');
+          else { loadSym(c, 'TW'); if (window.ShellV5) window.ShellV5.go('chart'); }
+        }
+      };
+    });
     lastData = d;
     bindLimitPopups($('bd-root'));
   }
 
-  function refresh(force) {
+  function refresh(force, opts) {
+    opts = opts || {};
     var body = ensureMount();
     if (!body) return;
-    body.innerHTML = '<div class="bd-loading">載入廣度資料…</div>';
+    var soft = !!opts.soft || !!lastData || !!body.querySelector('.bd-strip, .bd-dash, .bd-sec');
+    if (window.ShellV5 && window.ShellV5.softBadge) {
+      window.ShellV5.softBadge('mount-breadth', soft, '更新中…');
+    }
+    if (!soft) body.innerHTML = '<div class="bd-loading">載入廣度資料…</div>';
     var url = SRV + '/breadth' + (force ? '?refresh=1' : '');
     Promise.all([
       fetch(url, { cache: 'no-store' }).then(function (r) {
@@ -425,19 +495,27 @@
       d._movers = lastMovers;
       render(d);
     }).catch(function (e) {
-      render({ ok: false, error: '載入失敗：' + (e && e.message ? e.message : e) });
+      if (!soft) render({ ok: false, error: '載入失敗：' + (e && e.message ? e.message : e) });
+    }).finally(function () {
+      if (window.ShellV5 && window.ShellV5.softBadge) {
+        window.ShellV5.softBadge('mount-breadth', false);
+      }
     });
   }
 
   function activate() {
     ensureMount();
-    refresh(false);
+    refresh(false, { soft: !!lastData });
     if (timer) clearInterval(timer);
     timer = setInterval(function () {
       if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'breadth') {
-        refresh(false);
+        refresh(false, { soft: true });
       }
     }, 60000);
+  }
+
+  function deactivate() {
+    if (timer) { clearInterval(timer); timer = null; }
   }
 
   function onRoute(ev) {
@@ -447,6 +525,7 @@
 
   window.BreadthV5 = {
     activate: activate,
+    deactivate: deactivate,
     refresh: refresh,
     last: function () { return lastData; }
   };

@@ -11,6 +11,23 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC  = os.path.join(ROOT, 'stock_terminal.html')
 DST  = os.path.join(ROOT, 'stock_terminal_v2.html')
 
+
+def _read_version():
+    """單一真理：根目錄 VERSION。"""
+    path = os.path.join(ROOT, 'VERSION')
+    try:
+        with open(path, 'r', encoding='utf-8') as vf:
+            for line in vf:
+                v = line.strip()
+                if v and not v.startswith('#'):
+                    return v
+    except Exception:
+        pass
+    return '5.0'
+
+
+ST_VERSION = _read_version()
+
 # Scripts injected (in order):
 V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,須最先載入)
               'src/ui/viz_v5.js',        # v5.0: 文字→視覺共用元件(須在 colors 後、各面板前)
@@ -72,15 +89,17 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/ai/focus_v3.js',                    # v3.9: 焦點掃描精靈(多訊號組合自動找做多/做空焦點,/focus)
               'src/ai/copilot_v3.js',                  # v4.0: AI 副駕面板(本機 LM Studio,/ai/local)
               'src/screener/wizard_v3.js',                   # v3.9: 加股設定精靈(依賴 StratLib/Backtest/drawtools/setPosition/saveWatches，排最後)
-              'src/ui/shell_v5.js',                    # v5.0: 側欄殼層+視圖路由(show/hide，預設圖表工作區；須在 toolbar 前掛好 DOM)
+              'src/ui/shell_v5.js',                    # v5.0: 側欄殼層+視圖路由(show/hide，預設 #pulse；須在 toolbar 前掛好 DOM)
               'src/ui/hub_v5.js',                      # v5.0: TW Pulse 對齊模組（指數/法人/國際/訊號/自選/風險/設定）
-              'src/ui/pulse_v5.js',                    # v5.0 S4: TW Pulse 市場脈動總覽（組合既有 API，掛 #view-pulse）
-              'src/ui/heat_v5.js',                     # v5.0 S5: 類股熱力+/focus 輔區（掛 #view-heat）
-              'src/ui/book_v5.js',                     # v5.0 S6: 投組風險側欄（POST /portfolio，掛 #view-book）
-              'src/ui/scan_v5.js',                     # v5.0 S7: 三合一選股側欄（POST /screen3，掛 #view-scan；收官）
-              'src/ui/breadth_v5.js',                  # v5.0 S2: 大盤廣度面板(/breadth，掛 #view-breadth；須在 shell 後)
-              'src/ui/afterhours_v5.js',               # v5.0 S3: 盤後整理(/txf+/stockfut+/marketflow，掛 #view-afterhours)
-              'src/ui/news_v5.js',                     # v5.0 S3: 快訊中樞(/events+結算日，掛 #view-news；非新聞爬蟲)
+              'src/ui/pulse_v5.js',                    # v5.0: TW Pulse 市場脈動總覽（組合既有 API，掛 #view-pulse）
+              'src/ui/heat_v5.js',                     # v5.0: 類股熱力+/focus 輔區（掛 #view-heat）
+              'src/ui/book_v5.js',                     # v5.0: 投組風險側欄（POST /portfolio，掛 #view-book）
+              'src/ui/scan_v5.js',                     # v5.0: 三合一選股側欄（POST /screen3，掛 #view-scan）
+              'src/ui/ai_v5.js',                       # v5.0: AI 中樞（報告/副駕/焦點，掛 #view-ai）
+              'src/ui/breadth_v5.js',                  # v5.0: 大盤廣度面板(/breadth，掛 #view-breadth；須在 shell 後)
+              'src/ui/afterhours_v5.js',               # v5.0: 盤後整理(/txf+/stockfut+/marketflow，掛 #view-afterhours)
+              'src/ui/news_v5.js',                     # v5.0: 快訊中樞(/events+結算日，掛 #view-news；非新聞爬蟲)
+              'src/ui/bridge_v5.js',                   # v5.0: 工具列→側欄橋接（須在 *Open 定義後、toolbar 前）
               'src/ui/toolbar_v3.js',                  # v3.9: 工具列模組化(一階分類+二階下拉,設定驅動;須排最後,整理所有功能鈕)
               'src/chart/market_score_bar_v3.js',      # v4.1: 主圖大盤體質／市場風險資訊列（須在 market_chart 前）
               'src/chart/market_chart_v3.js']          # v4.1: 總經/大盤折線模組（融資維持率等，必須最後掛鉤蓋過 K 線 patch）
@@ -105,10 +124,10 @@ for css in V2_STYLES:
 with open(SRC, 'r', encoding='utf-8') as f:
     html = f.read()
 
-# 1) Update title
+# 1) Update title（跟 VERSION）
 html = re.sub(
     r'<title>[^<]*</title>',
-    '<title>Stock Terminal v5.0 - Market Intelligence / Local DB / AI Copilot</title>',
+    f'<title>Stock Terminal v{ST_VERSION} - Market Intelligence / Local DB / AI Copilot</title>',
     html, count=1)
 
 # 2a) POS tab
@@ -218,6 +237,27 @@ for css in V2_STYLES:
 if 'name="viewport"' not in html:
     html = html.replace('<head>', '<head>\n<meta name="viewport" content="width=device-width,initial-scale=1.0">', 1)
 
+# tip UX boot：無 hash → #pulse；shell 掛上前隱藏舊圖表殼（防合完／重開閃回舊 UI）
+TIP_BOOT = (
+    '<!-- tip-ux-boot -->\n'
+    '<meta name="st-ux" content="tip">\n'
+    '<style id="st5-tip-boot">'
+    'html:not(.st5-booted) #body,html:not(.st5-booted) #wlbar,html:not(.st5-booted) #mkt-bar'
+    '{display:none!important}'
+    '</style>\n'
+    '<script id="st5-tip-hash">'
+    '(function(){try{var h=(location.hash||"").replace(/^#/,"").trim();'
+    'if(!h){location.replace(location.pathname+location.search+"#pulse");}}catch(e){}})();'
+    '</script>\n'
+)
+# 避免重複注入
+html = re.sub(r'<!-- tip-ux-boot -->[\s\S]*?<script id="st5-tip-hash">[\s\S]*?</script>\s*', '', html)
+if 'id="st5-tip-boot"' not in html:
+    if '<head>' in html:
+        html = html.replace('<head>', '<head>\n' + TIP_BOOT, 1)
+    else:
+        html = TIP_BOOT + html
+
 css_block = ''.join(f'<link rel="stylesheet" href="{css}?v={ts}">\n' for css in V2_STYLES)
 if '</head>' in html:
     html = html.replace('</head>', css_block + '</head>', 1)
@@ -230,25 +270,48 @@ if '</body>' in html:
 else:
     html += '\n' + script_block
 
-# 6) banner
+# 6) banner（跟 VERSION）
 if 'data-v2-banner' not in html:
     html = html.replace(
         '<span class="logo">STOCK TERMINAL</span>',
-        '<span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v5.0</span></span>',
+        f'<span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v{ST_VERSION}</span></span>',
         1)
-# Bump existing banner to v5.0
 html = re.sub(
-    r'(data-v2-banner>STOCK TERMINAL <span[^>]+>)v[0-9]+\.\d+(</span>)',
-    r'\g<1>v5.0\g<2>', html, count=1)
+    r'(data-v2-banner>STOCK TERMINAL <span[^>]+>)v[0-9]+(?:\.\d+)*(?:-[A-Za-z0-9.]+)?(</span>)',
+    rf'\g<1>v{ST_VERSION}\g<2>', html, count=1)
 
 with open(DST, 'w', encoding='utf-8') as f:
     f.write(html)
 with open(SRC, 'w', encoding='utf-8') as f:
     f.write(html)
 
+shell_js = os.path.join(ROOT, 'src', 'ui', 'shell_v5.js')
+if os.path.isfile(shell_js):
+    try:
+        with open(shell_js, 'r', encoding='utf-8') as sf:
+            shell_src = sf.read()
+        shell_new, n = re.subn(
+            r"var VERSION = '[^']*';",
+            f"var VERSION = '{ST_VERSION}';",
+            shell_src, count=1)
+        if n and shell_new != shell_src:
+            with open(shell_js, 'w', encoding='utf-8') as sf:
+                sf.write(shell_new)
+    except Exception as e:
+        print('[warn] shell version stamp:', e)
+
+# tip UX 契約：建置失敗硬停，避免使用者開到半套舊殼
+if 'shell_v5.js' not in html or 'pulse_v5.js' not in html:
+    print('[FAIL] tip UX modules missing from built HTML (shell_v5 / pulse_v5)')
+    sys.exit(1)
+if 'id="st5-tip-boot"' not in html:
+    print('[FAIL] tip UX boot CSS/hash guard missing from built HTML')
+    sys.exit(1)
+
 print(f'[OK] wrote {DST} & {SRC} ({len(html):,} bytes)')
+print(f'     version: v{ST_VERSION}  (from VERSION)  tip UX')
 print(f'     base:    {SRC}')
 print(f'     modules: {", ".join(V2_SCRIPTS)}')
 print()
-print('Open in browser:')
-print(f'  http://localhost:18432/stock_terminal_v2.html')
+print('Open in browser (tip UX only):')
+print(f'  http://localhost:18432/#pulse')
