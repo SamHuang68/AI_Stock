@@ -1577,9 +1577,11 @@ def _twse_mis_index(ex_ch):
         if price is None:
             price = fnum(it.get('o'))      # 早盤尚無成交退開盤
         prev = fnum(it.get('y'))
-        chg = ((price - prev) / prev * 100) if (price is not None and prev) else None
+        chg_pct = ((price - prev) / prev * 100) if (price is not None and prev) else None
+        chg_pts = (price - prev) if (price is not None and prev is not None) else None
         out[code] = {
-            'price': price, 'prevClose': prev, 'changePct': chg, 'name': it.get('n'),
+            'price': price, 'prevClose': prev, 'change': chg_pts, 'changePct': chg_pct,
+            'name': it.get('n'),
             'open': fnum(it.get('o')), 'high': fnum(it.get('h')), 'low': fnum(it.get('l')),
         }
     return out

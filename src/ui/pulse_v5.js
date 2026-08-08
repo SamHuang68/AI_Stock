@@ -229,6 +229,31 @@
     d = d == null ? 0 : d;
     return Number(v).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
   }
+  /** 漲跌點數（帶正負號）；優先用 change，否則 price − prevClose */
+  function chgPts(obj, d) {
+    if (!obj) return null;
+    var chg = obj.change;
+    if (chg == null && obj.price != null && obj.prevClose != null &&
+        isFinite(obj.price) && isFinite(obj.prevClose)) {
+      chg = Number(obj.price) - Number(obj.prevClose);
+    }
+    if (chg == null || !isFinite(chg)) return null;
+    d = d == null ? 2 : d;
+    var n = Number(chg);
+    var body = Math.abs(n).toLocaleString('en-US', {
+      maximumFractionDigits: d, minimumFractionDigits: d
+    });
+    return (n > 0 ? '+' : n < 0 ? '-' : '') + body;
+  }
+  /** 「+170.79 · +0.38%」；點數與％皆無則 — */
+  function chgWithPct(obj, ptDigits, pctDigits) {
+    var pts = chgPts(obj, ptDigits);
+    var p = obj && obj.changePct;
+    if (pts == null && (p == null || p !== p)) return '—';
+    if (pts == null) return pct(p, pctDigits);
+    if (p == null || p !== p) return pts;
+    return pts + ' · ' + pct(p, pctDigits);
+  }
   function yi(v) {
     if (v == null || !isFinite(v)) return '—';
     // accept 元 or already 億 (heuristic: |v| > 1e5 → 元)
@@ -454,12 +479,12 @@
     var txfSess = txf.sessionLabel || (txf.session === 'night' ? '夜盤' : (txf.session === 'day' ? '日盤' : ''));
     return '<div class="pl-strip">' +
       '<div class="cell"><div class="k">加權指數 TAIEX</div><div class="v">' + fmt(t00.price, 2) + '</div>' +
-        '<div class="s ' + tw(t00.changePct) + '">' + pct(t00.changePct) + '</div></div>' +
+        '<div class="s ' + tw(t00.changePct) + '">' + chgWithPct(t00, 2, 2) + '</div></div>' +
       '<div class="cell"><div class="k">櫃買指數 OTC</div><div class="v">' + fmt(o00.price, 2) + '</div>' +
-        '<div class="s ' + tw(o00.changePct) + '">' + pct(o00.changePct) + '</div></div>' +
+        '<div class="s ' + tw(o00.changePct) + '">' + chgWithPct(o00, 2, 2) + '</div></div>' +
       '<div class="cell"><div class="k">台指期 TXF' + (txfSess ? ' · ' + txfSess : '') + '</div><div class="v">' +
         fmt(txf.price, 0) + '</div>' +
-        '<div class="s ' + tw(txf.changePct) + '">' + pct(txf.changePct) +
+        '<div class="s ' + tw(txf.changePct) + '">' + chgWithPct(txf, 0, 2) +
         (txf.ampRate != null ? ' · 振幅 ' + Number(txf.ampRate).toFixed(2) + '%' : '') + '</div></div>' +
       '<div class="cell"><div class="k">成交金額</div><div class="v">' +
         (s.turnoverYi != null ? Number(s.turnoverYi).toFixed(1) + ' 億' : '—') + '</div>' +
@@ -531,14 +556,27 @@
     var o = (ov && ov.ohlc) || {};
     var txf = (p && p.txf) || {};
     var txfSess = txf.sessionLabel || (txf.session === 'night' ? '夜盤' : (txf.session === 'day' ? '日盤' : '台指期'));
+    var strip = (ov && ov.strip) || {};
+    var otcObj = {
+      price: (strip.o00 && strip.o00.price != null) ? strip.o00.price : o.otcPrice,
+      prevClose: strip.o00 ? strip.o00.prevClose : null,
+      changePct: (strip.o00 && strip.o00.changePct != null) ? strip.o00.changePct : o.otcChangePct,
+      change: strip.o00 ? strip.o00.change : null
+    };
+    var twiiObj = {
+      price: o.price, prevClose: o.prevClose, changePct: o.changePct,
+      change: (o.price != null && o.prevClose != null) ? (o.price - o.prevClose) : null
+    };
     return '<div class="pl-sec"><h4>盤勢走勢 <a data-go="chart" data-sym="^TWII" data-mkt="TW">圖表 →</a></h4>' +
       '<div class="pl-trend-pair">' +
-        '<div class="tp"><div class="k">加權今日漲幅</div><div class="v ' + tw(o.changePct) + '">' + pct(o.changePct) + '</div>' +
+        '<div class="tp"><div class="k">加權今日漲幅</div><div class="v ' + tw(o.changePct) + '">' +
+          chgWithPct(twiiObj, 2, 2) + '</div>' +
           '<div class="pl-note" style="margin:2px 0 0">現價 ' + fmt(o.price, 2) + '</div></div>' +
-        '<div class="tp"><div class="k">櫃買今日漲幅</div><div class="v ' + tw(o.otcChangePct) + '">' + pct(o.otcChangePct) + '</div>' +
-          '<div class="pl-note" style="margin:2px 0 0">現價 ' + fmt(o.otcPrice, 2) + '</div></div>' +
+        '<div class="tp"><div class="k">櫃買今日漲幅</div><div class="v ' + tw(otcObj.changePct) + '">' +
+          chgWithPct(otcObj, 2, 2) + '</div>' +
+          '<div class="pl-note" style="margin:2px 0 0">現價 ' + fmt(otcObj.price != null ? otcObj.price : o.otcPrice, 2) + '</div></div>' +
         '<div class="tp"><div class="k">台指期 · ' + esc(txfSess) + '</div><div class="v ' + tw(txf.changePct) + '">' +
-          pct(txf.changePct) + '</div>' +
+          chgWithPct(txf, 0, 2) + '</div>' +
           '<div class="pl-note" style="margin:2px 0 0">現價 ' + fmt(txf.price, 0) +
           (txf.ampRate != null ? ' · 振幅 ' + Number(txf.ampRate).toFixed(2) + '%' : '') + '</div></div>' +
       '</div>' +

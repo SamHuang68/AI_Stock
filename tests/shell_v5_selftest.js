@@ -76,6 +76,8 @@ const pl = fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8');
 ok(/上市漲跌停 · 官方/.test(pl), 'pulse strip labels official limit counts');
 ok(/近漲停/.test(pl) && /≠頂列官方家數/.test(pl), 'pulse movers panel not branded as official limit');
 ok(/movers\.limitUp/.test(pl), 'pulse prefers movers.limitUp for near-limit list');
+ok(/function chgWithPct/.test(pl) && /chgWithPct\(t00/.test(pl) && /chgWithPct\(txf/.test(pl),
+  'pulse strip shows change points + pct for TAIEX/OTC/TXF');
 
 const nw = fs.readFileSync(path.join(root, 'src/ui/news_v5.js'), 'utf8');
 ok(/nw-mkt-seg/.test(nw) && /flashMkt/.test(nw), 'news TW/US filter');

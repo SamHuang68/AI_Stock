@@ -116,6 +116,27 @@
     var s = (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
     return s;
   }
+  function chgWithPct(obj, ptDigits) {
+    if (!obj) return '—';
+    var chg = obj.change;
+    if (chg == null && obj.price != null && obj.prevClose != null &&
+        isFinite(obj.price) && isFinite(obj.prevClose)) {
+      chg = Number(obj.price) - Number(obj.prevClose);
+    }
+    var p = obj.changePct;
+    var pts = null;
+    if (chg != null && isFinite(chg)) {
+      var d = ptDigits == null ? 2 : ptDigits;
+      var body = Math.abs(chg).toLocaleString('en-US', {
+        maximumFractionDigits: d, minimumFractionDigits: d
+      });
+      pts = (chg > 0 ? '+' : chg < 0 ? '-' : '') + body;
+    }
+    if (pts == null && (p == null || p !== p)) return '—';
+    if (pts == null) return fmtPct(p);
+    if (p == null || p !== p) return pts;
+    return pts + ' · ' + fmtPct(p);
+  }
   function clsChg(n) {
     if (n == null || n !== n) return 'flat';
     return n > 0 ? 'up' : n < 0 ? 'dn' : 'flat';
@@ -287,8 +308,8 @@
       });
     }
     var strip =
-      stripCell('加權指數', t00.price != null ? fmt(t00.price, 2) : '—', fmtPct(t00.changePct), clsChg(t00.changePct)) +
-      stripCell('櫃買指數', o00.price != null ? fmt(o00.price, 2) : '—', fmtPct(o00.changePct), clsChg(o00.changePct)) +
+      stripCell('加權指數', t00.price != null ? fmt(t00.price, 2) : '—', chgWithPct(t00, 2), clsChg(t00.changePct)) +
+      stripCell('櫃買指數', o00.price != null ? fmt(o00.price, 2) : '—', chgWithPct(o00, 2), clsChg(o00.changePct)) +
       stripCell('上漲家數', fmt(up), limitPopup('up', st.limitUp, limUpList), null, 'has-lim') +
       stripCell('下跌家數', fmt(dn), limitPopup('dn', st.limitDown, limDnList), null, 'has-lim') +
       stripCell('淨家數', st.net != null ? ((st.net >= 0 ? '+' : '') + st.net) : '—',
