@@ -77,16 +77,22 @@
       '.vz-ref .vz-tick{position:absolute;top:-1px;bottom:-1px;width:1px;background:rgba(248,250,252,.35)}' +
       '.vz-ref .vz-tick-lbl{position:absolute;top:7px;font-size:7px;color:var(--tf,#64748b);transform:translateX(-50%);white-space:nowrap}' +
       '.vz-spark{display:block;width:100%;height:28px;margin-top:2px}' +
-      '.vz-spark-ax{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto minmax(0,1fr) auto auto;gap:0 4px;' +
-        'width:100%;height:100%;min-height:inherit;box-sizing:border-box;padding:1px 2px 0;overflow:hidden}' +
+      '.vz-spark-ax{display:grid;grid-template-columns:auto minmax(0,1fr);' +
+        'grid-template-rows:auto minmax(0,1fr) auto auto;gap:0 4px;' +
+        'width:100%;height:100%;min-width:0;min-height:0;box-sizing:border-box;padding:1px 2px 0}' +
+      /* tip 小卡：省略底部 X 單位列（與 .lab meta 重複），騰出 plot 高度 */
+      '.vz-spark-ax.vz-compact{grid-template-rows:auto minmax(0,1fr) auto}' +
+      '.vz-spark-ax.vz-compact .vz-xunit{display:none}' +
       '.vz-spark-ax .vz-yunit{grid-column:1;grid-row:1;font-size:7px;color:var(--tf,#64748b);line-height:1;' +
         'white-space:nowrap;align-self:end;padding-bottom:1px;font-weight:700}' +
       '.vz-spark-ax .vz-ylabs{grid-column:1;grid-row:2;display:flex;flex-direction:column;justify-content:space-between;' +
-        'align-items:flex-end;font-size:7px;color:var(--tlo);line-height:1;font-variant-numeric:tabular-nums;padding:1px 0;gap:0}' +
+        'align-items:flex-end;font-size:7px;color:var(--tlo);line-height:1;font-variant-numeric:tabular-nums;padding:1px 0;gap:0;' +
+        'min-width:0;overflow:hidden}' +
       '.vz-spark-ax .vz-plot{grid-column:2;grid-row:1 / span 2;min-width:0;min-height:0;position:relative;overflow:hidden;' +
         'border-left:1px solid rgba(148,163,184,.35);border-bottom:1px solid rgba(148,163,184,.35)}' +
       /* 軸內 plot 的 svg 不可沿用 .vz-spark 的 margin-top，否則線會擠出框底 */
-      '.vz-spark-ax .vz-plot svg{display:block;width:100%;height:100%;min-height:0;max-height:100%;margin:0}' +
+      '.vz-spark-ax .vz-plot svg{display:block;width:100%;height:100%;min-width:0;min-height:0;' +
+        'max-width:100%;max-height:100%;margin:0}' +
       '.vz-spark-ax .vz-xlabs{grid-column:2;grid-row:3;display:flex;justify-content:space-between;' +
         'font-size:7px;color:var(--tlo);line-height:1.2;font-variant-numeric:tabular-nums;padding-top:2px}' +
       '.vz-spark-ax .vz-xunit{grid-column:1 / span 2;grid-row:4;font-size:7px;color:var(--tf,#64748b);line-height:1.2;' +
@@ -320,16 +326,21 @@
     var yLbl = yUnit || '';
     var n = arr.length;
     var xMid = Math.max(1, Math.round((n + 1) / 2));
-    return '<div class="vz-spark-ax" title="' +
-      esc((yLbl ? ('Y：' + yLbl + ' · ') : '') + 'X：' + xLbl + ' · n=' + n) + '">' +
+    var compact = !!opts.compact;
+    var tip = (yLbl ? ('Y：' + yLbl + ' · ') : '') + 'X：' + xLbl + ' · n=' + n;
+    return '<div class="vz-spark-ax' + (compact ? ' vz-compact' : '') + '" title="' +
+      esc(tip) + '">' +
       '<div class="vz-yunit">' + esc(yLbl ? ('Y·' + yLbl) : 'Y') + '</div>' +
       '<div class="vz-ylabs"><span>' + esc(_fmtAxisY(hi, opts)) + '</span>' +
         '<span>' + esc(_fmtAxisY(mid, opts)) + '</span>' +
         '<span>' + esc(_fmtAxisY(lo, opts)) + '</span></div>' +
       '<div class="vz-plot">' + svg + '</div>' +
       '<div class="vz-xlabs"><span>1</span><span>' + xMid + '</span><span>' + n + '</span></div>' +
-      '<div class="vz-xunit">X：' + esc(xLbl) + (yLbl ? (' · Y：' + esc(yLbl)) : '') +
-        ' · 近 ' + n + ' ' + esc(xLbl) + '</div></div>';
+      (compact ? '' : (
+        '<div class="vz-xunit">X：' + esc(xLbl) + (yLbl ? (' · Y：' + esc(yLbl)) : '') +
+          ' · 近 ' + n + ' ' + esc(xLbl) + '</div>'
+      )) +
+      '</div>';
   }
 
   /** 正負柱狀 spark */
