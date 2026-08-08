@@ -107,9 +107,10 @@ ok(/pl-score3/.test(pl) && /綜合脈動/.test(pl) && /大盤體質/.test(pl) &&
   'pulse score trio shows parent 綜合 + child weights 70/30');
 ok(/pl-empty\[hidden\]\{display:none!important\}/.test(pl),
   'pulse empty[hidden] overrides display:flex (no blank inst box)');
-ok(/pl-score3\{display:flex;flex-direction:column/.test(pl) &&
-  /writing-mode:horizontal-tb/.test(pl),
-  'pulse score 體質／風險 stack as horizontal-text rows');
+ok(/pl-score3\{display:grid;grid-template-columns:1\.35fr 1fr 1fr/.test(pl) &&
+  /writing-mode:horizontal-tb/.test(pl) &&
+  /pl-score3 \.sc\{[^}]*flex-direction:column/.test(pl),
+  'pulse score 三框左到右；框內上下橫書（非直排字）');
 ok(/正面因子/.test(pl) && /風險因子/.test(pl) && /計入風險分/.test(pl) && !/主要動能/.test(pl),
   'pulse drivers labeled 正面／風險因子 (not 主要動能)');
 ok(/大盤體質（X：日/.test(pl) && !/>動能</.test(pl),
