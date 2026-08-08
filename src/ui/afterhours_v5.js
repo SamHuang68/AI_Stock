@@ -78,7 +78,7 @@
         'min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%}' +
       '#ah-root .ah-sec h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;' +
         'display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;gap:4px;font-weight:700}' +
-      '#ah-root .ah-sec > .ah-fill{flex:1;min-height:0;overflow:auto}' +
+      '#ah-root .ah-sec > .ah-fill{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column}' +
       '#ah-root .ah-tone{font-size:11px;margin:0 0 6px;font-weight:700;flex:0 0 auto}' +
       '#ah-root .ah-ohlc{display:grid;grid-template-columns:repeat(2,1fr);gap:5px;flex:1;align-content:stretch;' +
         'grid-auto-rows:minmax(0,1fr);min-height:0}' +
@@ -92,12 +92,24 @@
       '#ah-root table.ah-tbl th:nth-child(2),#ah-root table.ah-tbl td:nth-child(2){text-align:left}' +
       '#ah-root table.ah-tbl th{color:var(--tlo);font-weight:600;position:sticky;top:0;background:var(--bg2);z-index:1}' +
       '#ah-root tr.ah-row{cursor:pointer}#ah-root tr.ah-row:hover{background:var(--bg3)}' +
-      '#ah-root .ah-inst4{display:grid;grid-template-columns:1fr 1fr;gap:5px;flex:1;align-content:stretch;' +
-        'grid-auto-rows:minmax(0,1fr);min-height:0;margin-bottom:0}' +
-      '#ah-root .ah-inst4 .c{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:8px 6px;' +
+      '#ah-root .ah-inst4{display:grid;grid-template-columns:1fr 1fr;gap:4px;flex:0 0 auto;' +
+        'min-height:0;margin-bottom:4px}' +
+      '#ah-root .ah-inst4 .c{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:6px 5px;' +
         'text-align:center;display:flex;flex-direction:column;justify-content:center}' +
       '#ah-root .ah-inst4 .c .k{font-size:9px;color:var(--tlo)}' +
-      '#ah-root .ah-inst4 .c .v{font-size:14px;font-weight:800;margin-top:2px;color:var(--thi)}' +
+      '#ah-root .ah-inst4 .c .v{font-size:13px;font-weight:800;margin-top:1px;color:var(--thi)}' +
+      '#ah-root .ah-inst-trend{flex:1;min-height:48px;margin:0 0 2px;background:var(--bg);border:1px solid var(--border);' +
+        'border-radius:5px;padding:4px 6px;display:flex;flex-direction:column;min-width:0}' +
+      '#ah-root .ah-inst-trend .lab{font-size:8px;color:var(--tlo);flex:0 0 auto;margin-bottom:2px;' +
+        'display:flex;justify-content:space-between;gap:6px;align-items:baseline}' +
+      '#ah-root .ah-inst-trend .chart{flex:1;min-height:44px}' +
+      '#ah-root .ah-inst-trend .chart .vz-spark-ax{height:100%;min-height:44px}' +
+      '#ah-root .ah-inst-trend .chart .vz-spark,#ah-root .ah-inst-trend .chart svg{width:100%!important;height:100%!important;min-height:28px}' +
+      '#ah-root .ah-inst-cmt{font-size:9px;line-height:1.45;color:var(--text);margin-top:2px;flex:0 0 auto}' +
+      '#ah-root .ah-inst-cmt b{color:var(--gold);font-weight:700}' +
+      '#ah-root .ah-inst-cmt .up{color:var(--red)}#ah-root .ah-inst-cmt .dn{color:var(--green)}' +
+      '#ah-root .ah-inst-mkt{font-size:8px;color:var(--tlo);line-height:1.4;margin-top:3px;flex:0 0 auto;' +
+        'padding-top:3px;border-top:1px solid var(--border)}' +
       '#ah-root .ah-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:2px;flex:0 0 auto;' +
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#ah-root .ah-loading,#ah-root .ah-err{font-size:10px;color:var(--tlo);padding:10px 0}' +
@@ -141,6 +153,122 @@
       else if (amp >= 2.0) parts.push('波動偏大');
     }
     return parts.join(' · ');
+  }
+
+  /** 元 → 億（與 pulse/history totalYi 對齊） */
+  function yiNum(v) {
+    if (v == null || !isFinite(v)) return null;
+    return Number(v) / 1e8;
+  }
+  function fmtYiSigned(y) {
+    if (y == null || !isFinite(y)) return '—';
+    return (y >= 0 ? '+' : '') + y.toFixed(1) + ' 億';
+  }
+
+  /** 依當日法人＋歷史序列產生趨勢評論（不重複上方數字本身） */
+  function buildInstComment(inst, histNewestFirst) {
+    var parts = [];
+    var f = yiNum(inst && inst.foreign);
+    var t = yiNum(inst && inst.trust);
+    var d = yiNum(inst && inst.dealer);
+    var tot = (f != null || t != null || d != null) ? ((f || 0) + (t || 0) + (d || 0)) : null;
+    var rows = (histNewestFirst || []).filter(function (r) {
+      return r && r.totalYi != null && isFinite(r.totalYi);
+    });
+    var chrono = rows.slice().reverse();
+    var streak = 0;
+    if (tot != null && tot !== 0 && chrono.length) {
+      var sign = tot > 0 ? 1 : -1;
+      for (var k = chrono.length - 1; k >= 0; k--) {
+        var v = chrono[k].totalYi;
+        if (v == null || v === 0 || (v > 0 ? 1 : -1) !== sign) break;
+        streak += 1;
+      }
+    }
+    if (streak >= 3) {
+      parts.push(tot > 0
+        ? '合計已連 <b class="up">' + streak + '</b> 日買超，資金偏進攻節奏。'
+        : '合計已連 <b class="dn">' + streak + '</b> 日賣超，資金偏防衛／調節。');
+    } else if (tot != null) {
+      parts.push(tot > 20
+        ? '當日合計明顯買超，短線籌碼偏多。'
+        : tot < -20
+          ? '當日合計明顯賣超，留意權值與指數壓力。'
+          : '當日合計接近平衡，方向性訊號有限。');
+    }
+    if (chrono.length >= 2 && tot != null) {
+      var prev = chrono[chrono.length - 2].totalYi;
+      if (prev != null && isFinite(prev)) {
+        var delta = tot - prev;
+        if (Math.abs(delta) >= 50) {
+          parts.push(delta > 0
+            ? '較前日轉強約 <span class="up">' + fmtYiSigned(delta) + '</span>。'
+            : '較前日轉弱約 <span class="dn">' + fmtYiSigned(delta) + '</span>。');
+        } else if (prev > 0 && tot < 0) {
+          parts.push('合計由買轉賣，資金氛圍轉向謹慎。');
+        } else if (prev < 0 && tot > 0) {
+          parts.push('合計由賣轉買，資金回補跡象。');
+        }
+      }
+    }
+    if (f != null && d != null) {
+      if (f > 30 && d < -30) parts.push('外資偏買、自營偏賣 — 常見結構／避險分歧。');
+      else if (f < -30 && d > 30) parts.push('外資偏賣、自營偏買 — 留意承接能否延續。');
+    }
+    if (t != null && Math.abs(t) >= 20) {
+      parts.push(t > 0 ? '投信偏買，中長線資金仍有佈局。' : '投信偏賣，主動資金偏調節。');
+    }
+    if (!parts.length) parts.push('法人序列載入中或資料不足，暫無趨勢評論。');
+    return parts.slice(0, 3).join(' ');
+  }
+
+  function buildMktLine(bd, txf) {
+    var st = (bd && bd.stocks) || {};
+    var bits = [];
+    if (bd && bd.summary) bits.push(bd.summary);
+    else if (bd && bd.score != null) bits.push('大盤體質 ' + bd.score);
+    if (st.up != null && st.down != null) {
+      var net = st.net != null ? st.net : (st.up - st.down);
+      bits.push('漲跌淨 ' + (net >= 0 ? '+' : '') + net);
+    }
+    if (txf && txf.changePct != null) {
+      bits.push('夜盤 ' + pct(txf.changePct) + ' · ' + toneTxf(txf.changePct, txf.ampRate).split(' · ')[0]);
+    }
+    return bits.length ? bits.join(' · ') : '市場廣度／夜盤訊號載入中';
+  }
+
+  function fillAhInstTrend(inst) {
+    jget('/pulse/history?kind=institutional&n=20').then(function (h) {
+      var V = window.Viz;
+      var chart = $('ah-inst-chart');
+      var meta = $('ah-inst-trend-meta');
+      var cmt = $('ah-inst-cmt');
+      if (!chart && !meta && !cmt) return;
+      var rows = (h && h.rows) || [];
+      var chrono = rows.slice().reverse();
+      var totals = chrono.map(function (r) { return r.totalYi; });
+      if (chart) {
+        if (V && totals.filter(function (v) { return v != null && isFinite(v); }).length >= 2) {
+          var last = totals[totals.length - 1];
+          var col = last >= 0 ? 'var(--red)' : 'var(--green)';
+          chart.innerHTML = V.sparkLine(totals, {
+            color: col, h: 56, w: 280,
+            xUnit: '日', yUnit: '億', yDigits: 1
+          });
+        } else if (totals.length && V && V.sparkBars) {
+          chart.innerHTML = V.sparkBars(totals);
+        } else if (totals.length) {
+          chart.innerHTML = '<div class="ah-err" style="padding:6px 0">序列不足</div>';
+        } else {
+          chart.innerHTML = '<div class="ah-err" style="padding:6px 0">尚無本機法人歷史 — 可按同步資料預抓</div>';
+        }
+      }
+      if (meta) {
+        meta.textContent = (rows.length ? ('近 ' + rows.length + ' 日 · Y：億') : '無序列') +
+          (inst && inst.date ? ' · ' + inst.date : '');
+      }
+      if (cmt) cmt.innerHTML = buildInstComment(inst || {}, rows);
+    });
   }
 
   function normalizeNight(d) {
@@ -287,28 +415,25 @@
     if (!inst && latestAmt == null) {
       instBlock += '<div class="ah-err">資金流尚未更新</div></div>';
     } else {
-      var instBars = '';
-      var totalChip = '';
-      if (V && inst) {
-        instBars = V.magBars([
-          { label: '外資', v: inst.foreign, fmt: V.fmtYiFromYuan },
-          { label: '投信', v: inst.trust, fmt: V.fmtYiFromYuan },
-          { label: '合計', v: total, fmt: V.fmtYiFromYuan }
-        ]);
-        if (total != null) {
-          totalChip = V.chip(total > 0 ? '合計偏多' : (total < 0 ? '合計偏空' : '合計中性'),
-            total > 0 ? 'buy' : (total < 0 ? 'sell' : 'mid'));
-        }
-      }
+      var mktLine = buildMktLine(bd, txf);
       instBlock += '<div class="ah-fill">' +
         '<div class="ah-inst4">' +
           '<div class="c"><div class="k">成交金額</div><div class="v">' + yi(latestAmt) + '</div></div>' +
           '<div class="c"><div class="k">外資</div><div class="v ' + twCls(inst && inst.foreign) + '">' + fyi(inst && inst.foreign) + '</div></div>' +
           '<div class="c"><div class="k">投信</div><div class="v ' + twCls(inst && inst.trust) + '">' + fyi(inst && inst.trust) + '</div></div>' +
           '<div class="c"><div class="k">合計</div><div class="v ' + twCls(total) + '">' + fyi(total) + '</div></div>' +
-        '</div>' + instBars + totalChip +
         '</div>' +
-        '<div class="ah-note">法人日 ' + ((inst && inst.date) || mf.date || '—') + '</div></div>';
+        '<div class="ah-inst-trend" id="ah-inst-trend">' +
+          '<div class="lab"><span>合計買賣超趨勢</span><span id="ah-inst-trend-meta">' +
+            ((inst && inst.date) ? ('法人日 ' + inst.date) : '載入…') +
+          '</span></div>' +
+          '<div class="chart" id="ah-inst-chart"><div class="ah-err" style="padding:6px 0">載入資金序列…</div></div>' +
+        '</div>' +
+        '<div class="ah-inst-cmt" id="ah-inst-cmt">分析資金變化中…</div>' +
+        '<div class="ah-inst-mkt">' + mktLine + '</div>' +
+        '</div>' +
+        '<div class="ah-note">法人日 ' + ((inst && inst.date) || mf.date || '—') +
+          ' · 趨勢不重複上方數字</div></div>';
     }
 
     var movers = pack.movers || {};
@@ -352,6 +477,7 @@
         }
       };
     });
+    if (inst || latestAmt != null) fillAhInstTrend(inst || {});
   }
 
   function jget(url) {
@@ -364,7 +490,7 @@
     opts = opts || {};
     var body = ensureMount();
     if (!body) return;
-    var soft = !!opts.soft || !!body.querySelector('.ah-grid, .ah-section');
+    var soft = !!opts.soft || !!body.querySelector('.ah-strip, .ah-dash, .ah-sec');
     if (window.ShellV5 && window.ShellV5.softBadge) {
       window.ShellV5.softBadge('mount-afterhours', soft, '更新中…');
     }
