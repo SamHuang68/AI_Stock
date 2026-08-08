@@ -1,8 +1,10 @@
 # Stock Terminal v5.0 — tip UX only (PowerShell)
 # Usage (from repo root):
+#   DOUBLE-CLICK:  START_TIP.cmd   ← preferred when Hermes steals python
 #   powershell -ExecutionPolicy Bypass -File .\scripts\go.ps1
 #   powershell -ExecutionPolicy Bypass -File .\scripts\go.ps1 -Pull
 #   powershell -ExecutionPolicy Bypass -File .\scripts\go.ps1 -RebuildOnly
+#   powershell -ExecutionPolicy Bypass -File .\scripts\diagnose_tip.ps1
 #
 # CRITICAL: never use Hermes / agent venv python.exe — that opens a blank
 # console and leaves an old :18432 process serving 兩框 UI.

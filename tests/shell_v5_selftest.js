@@ -179,6 +179,15 @@ ok(/ST_PYTHON/.test(goBat) && /hermes-agent/.test(goBat) && /FAIL_PYTHON_HERMES/
 const srv = fs.readFileSync(path.join(root, 'server/server.py'), 'utf8');
 ok(/X-Stock-Terminal-UX/.test(srv) && /tipUx/.test(srv) && /\/#pulse/.test(srv),
   'server marks tip UX and opens /#pulse');
+ok(/_is_blocked_python/.test(srv) && /_pulse_layout_probe/.test(srv) &&
+  /SERVER_BOOT\.txt/.test(srv) && /refusing Hermes/.test(srv) &&
+  /pulseLayout/.test(srv) && /pythonBlocked/.test(srv),
+  'server refuses hermes python and exposes pulseLayout on /health');
+ok(fs.existsSync(path.join(root, 'START_TIP.cmd')), 'START_TIP.cmd exists at repo root');
+const startTip = fs.readFileSync(path.join(root, 'START_TIP.cmd'), 'utf8');
+ok(/Resolve-StockPython/.test(startTip) && /taskkill/.test(startTip) && /go\.ps1/.test(startTip),
+  'START_TIP.cmd kills python, verifies tip files, runs go.ps1');
+ok(fs.existsSync(path.join(root, 'scripts/diagnose_tip.ps1')), 'scripts/diagnose_tip.ps1 exists');
 
 const nw = fs.readFileSync(path.join(root, 'src/ui/news_v5.js'), 'utf8');
 ok(/nw-mkt-seg/.test(nw) && /flashMkt/.test(nw), 'news TW/US filter');

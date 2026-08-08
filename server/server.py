@@ -52,6 +52,63 @@ if getattr(sys, 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+
+def _is_blocked_python(exe_path=None):
+    """Hermes / agent venv steals PATH 'python' and leaves a blank console + stale UI."""
+    p = (exe_path or sys.executable or '').replace('/', '\\').lower()
+    needles = (
+        'hermes',
+        'hermes-agent',
+        '\\cursor\\agent',
+        'antigravity',
+    )
+    return any(n in p for n in needles)
+
+
+def _pulse_layout_probe():
+    """Return tip layout markers from on-disk pulse_v5.js (for /health diagnostics)."""
+    path = os.path.join(_BASE, 'src', 'ui', 'pulse_v5.js')
+    out = {
+        'pulseJsPath': path,
+        'pulseJsExists': os.path.isfile(path),
+        'layoutAnchor': None,
+        'layoutContract': None,
+        'hasFiveCol': False,
+        'hasFourColPriority': False,
+    }
+    if not out['pulseJsExists']:
+        return out
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+            txt = fh.read(200000)
+        if 'PULSE_LAYOUT_ANCHOR_3cab212' in txt:
+            out['layoutAnchor'] = 'PULSE_LAYOUT_ANCHOR_3cab212'
+        if '5col-2zone' in txt:
+            out['layoutContract'] = '5col-2zone'
+        out['hasFiveCol'] = 'repeat(5,minmax(0,1fr))' in txt or 'repeat(5, minmax(0, 1fr))' in txt
+        out['hasFourColPriority'] = '4col-priority' in txt
+    except Exception as exc:
+        out['error'] = str(exc)
+    return out
+
+
+def _boot_trace(msg):
+    """Always-on boot breadcrumb — survives blank Hermes consoles (no stdout)."""
+    line = time.strftime('%Y-%m-%d %H:%M:%S') + ' | ' + str(msg)
+    try:
+        log_dir = os.path.join(_BASE, 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        with open(os.path.join(log_dir, 'SERVER_BOOT.txt'), 'a', encoding='utf-8') as fh:
+            fh.write(line + '\n')
+            fh.flush()
+    except Exception:
+        pass
+    try:
+        print(line, flush=True)
+    except Exception:
+        pass
+
+
 # ── Chip history (v3.8): 每日法人籌碼快照，用於連續買賣超天數 ──
 CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
 
@@ -2594,6 +2651,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                                 break
             except Exception:
                 pass
+            _probe = _pulse_layout_probe()
             self._ok(json.dumps({
                 'status': 'ok',
                 'ux': 'tip',
@@ -2603,6 +2661,10 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 'openUrl': f'http://127.0.0.1:{PORT}/#pulse',
                 'bind': '127.0.0.1',
                 'port': PORT,
+                'baseDir': _BASE,
+                'pythonExe': sys.executable,
+                'pythonBlocked': _is_blocked_python(),
+                'pulseLayout': _probe,
                 'workers': MAX_WORKERS,
                 'cpu_count': os.cpu_count(),
                 'cache_used': len(_cache),
@@ -6610,6 +6672,28 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     os.chdir(_BASE)
+    _boot_trace('boot begin exe=%s base=%s' % (sys.executable, _BASE))
+    if _is_blocked_python():
+        _boot_trace('FATAL refuse blocked python (hermes/agent): %s' % sys.executable)
+        sys.stderr.write(
+            '\n============================================================\n'
+            ' FATAL: refusing Hermes/agent python\n'
+            '   %s\n'
+            ' This is why you see a BLANK console and 一行兩框 UI.\n'
+            ' Fix: double-click START_TIP.cmd in the repo root\n'
+            '   (or install python.org Python and re-run scripts\\go.ps1 -Pull)\n'
+            ' Boot log: %s\n'
+            '============================================================\n' % (
+                sys.executable,
+                os.path.join(_BASE, 'logs', 'SERVER_BOOT.txt'),
+            )
+        )
+        sys.stderr.flush()
+        sys.exit(2)
+    _probe0 = _pulse_layout_probe()
+    _boot_trace('pulseLayout=%s' % json.dumps(_probe0, ensure_ascii=False))
+    if _probe0.get('hasFourColPriority') or not _probe0.get('layoutAnchor'):
+        _boot_trace('WARN pulse_v5.js is not tip 5col anchor — wrong tree / not pulled')
     try:
         import slog as _slog
         _slog.setup('INFO')
@@ -6628,6 +6712,8 @@ if __name__ == '__main__':
         _ph_msg = f'Pulse history unavailable: {_phe}'
     _msg = (
         f'Stock Terminal v5.0 tip UX: http://127.0.0.1:{PORT}/#pulse\n'
+        f'Python: {sys.executable}\n'
+        f'Layout: {_probe0.get("layoutAnchor")} / {_probe0.get("layoutContract")}\n'
         f'Workers: {MAX_WORKERS}  |  LRU cache: {LRU_MAX} symbols (ttl={getattr(_cache, "_ttl", "?")}s)\n'
         f'ETF delta path: {d or "NOT FOUND — set ETF_DELTA_PATH in server.py"}\n'
         f'ETF history files: {len(files)}\n'
