@@ -82,14 +82,24 @@
       '#pl-root .pl-strip .pl-idx-spark .vz-spark{width:100%;height:14px;display:block}' +
       '#pl-root .pl-strip .vz-chip{margin-top:1px;font-size:8px;padding:0 4px;line-height:1.35}' +
       '#pl-root .pl-strip .vz-meter{margin-top:1px;height:3px}' +
-      /* 上下兩區 · 一行五框（強制 5 欄，禁止再被窄寬度壓成 2 欄） */
-      '#pl-root .pl-dash{flex:1 1 0;min-height:0;display:grid;gap:6px;' +
-        'grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
-      '#pl-root .pl-zone{display:grid!important;gap:6px;min-width:0;min-height:0;height:100%;' +
-        'grid-template-columns:repeat(5,minmax(0,1fr))!important}' +
-      '#pl-root .pl-zone > .pl-sec{min-width:0;max-width:100%}' +
+      /* 上下兩區 · 一行五框（鐵律）。內容不得以 min-content 撐爆欄寬，否則會裁成「一行兩框」 */
+      '#pl-root .pl-dash{flex:1 1 0;min-height:0;width:100%;max-width:100%;display:grid;gap:6px;' +
+        'grid-template-columns:minmax(0,1fr)!important;' +
+        'grid-template-rows:minmax(0,1fr) minmax(0,1fr);overflow:hidden}' +
+      '#pl-root .pl-zone{display:grid!important;gap:6px;width:100%;max-width:100%;' +
+        'min-width:0!important;min-height:0;height:100%;overflow:hidden!important;' +
+        'grid-template-columns:repeat(5,minmax(0,1fr))!important;' +
+        'grid-auto-flow:row!important}' +
+      '#pl-root .pl-zone > .pl-sec{min-width:0!important;max-width:100%!important;width:auto!important;' +
+        'overflow:hidden!important;box-sizing:border-box}' +
       '#pl-root .pl-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;' +
-        'min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%}' +
+        'min-width:0!important;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%}' +
+      /* spark／軸標不得 nowrap 撐爆五欄 */
+      '#pl-root .vz-spark-ax{max-width:100%!important;min-width:0!important;overflow:hidden}' +
+      '#pl-root .vz-spark-ax .vz-xunit,#pl-root .vz-spark-ax .vz-yunit{' +
+        'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}' +
+      '#pl-root .pl-spark,#pl-root .pl-inst-trend,#pl-root .pl-bd-trend{min-width:0!important;max-width:100%;overflow:hidden}' +
+      '#pl-root svg{max-width:100%}' +
       '#pl-root .pl-sec h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;' +
         'display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;gap:4px;flex-wrap:wrap}' +
       '#pl-root .pl-sec h4 a{color:var(--cyan);cursor:pointer;font-size:8px;font-weight:600;text-decoration:none;white-space:nowrap}' +
@@ -1674,6 +1684,40 @@
     });
   }
 
+  /** 核武：強制每區正好 5 欄可見，避免內容 min-content 把後三框裁出視窗外 */
+  function enforceFiveCol(root) {
+    if (!root) return;
+    var zones = root.querySelectorAll('.pl-zone');
+    var nTop = 0, nBot = 0;
+    for (var zi = 0; zi < zones.length; zi++) {
+      var z = zones[zi];
+      z.style.setProperty('display', 'grid', 'important');
+      z.style.setProperty('grid-template-columns', 'repeat(5, minmax(0, 1fr))', 'important');
+      z.style.setProperty('grid-auto-flow', 'row', 'important');
+      z.style.setProperty('width', '100%', 'important');
+      z.style.setProperty('max-width', '100%', 'important');
+      z.style.setProperty('min-width', '0', 'important');
+      z.style.setProperty('overflow', 'hidden', 'important');
+      var kids = z.children;
+      for (var ki = 0; ki < kids.length; ki++) {
+        kids[ki].style.setProperty('min-width', '0', 'important');
+        kids[ki].style.setProperty('max-width', '100%', 'important');
+        kids[ki].style.setProperty('overflow', 'hidden', 'important');
+      }
+      if (zi === 0) nTop = kids.length;
+      if (zi === 1) nBot = kids.length;
+    }
+    console.log('[pulse-v5] layout=5col-2zone boxes=' + nTop + '+' + nBot +
+      ' zoneW=' + (zones[0] ? Math.round(zones[0].clientWidth) : 0));
+    if (nTop !== 5 || nBot !== 5) {
+      console.warn('[pulse-v5] EXPECTED 5+5 boxes, got ' + nTop + '+' + nBot);
+    }
+    if (zones[0] && zones[0].scrollWidth > zones[0].clientWidth + 8) {
+      console.warn('[pulse-v5] zone overflow scrollW=' + zones[0].scrollWidth +
+        ' clientW=' + zones[0].clientWidth + ' — content still forcing width');
+    }
+  }
+
   function render(pack) {
     var body = ensureMount();
     if (!body) return;
@@ -1713,29 +1757,23 @@
     }
 
     /* 一行五框 × 上下兩區（一屏鎖定）— 勿再改回 4 欄／媒體查詢壓成 2 欄 */
+    var zoneStyle = 'display:grid;grid-template-columns:repeat(5,minmax(0,1fr));' +
+      'gap:6px;width:100%;min-width:0;overflow:hidden;height:100%;box-sizing:border-box';
     body.innerHTML =
       renderStrip(ov, p) +
       '<div class="pl-dash" data-layout="5col-2zone">' +
-        '<div class="pl-zone z-top">' +
+        '<div class="pl-zone z-top" style="' + zoneStyle + '">' +
           renderGauge(p) + renderOhlc(ov, p) + renderInst(ov) +
           renderDonut(ov, ov.strip) + renderSectors(ov) +
         '</div>' +
-        '<div class="pl-zone z-bot">' +
+        '<div class="pl-zone z-bot" style="' + zoneStyle + '">' +
           renderMovers(movers, 'gainers') + renderMovers(movers, 'losers') +
           renderGlobal(p) + renderFlash(p) + renderWatch(pack.wlQuotes) +
         '</div>' +
       '</div>' +
       extra;
 
-    try {
-      var zones = body.querySelectorAll('.pl-zone');
-      var nTop = zones[0] ? zones[0].querySelectorAll(':scope > .pl-sec').length : 0;
-      var nBot = zones[1] ? zones[1].querySelectorAll(':scope > .pl-sec').length : 0;
-      console.log('[pulse-v5] layout=5col-2zone boxes=' + nTop + '+' + nBot);
-      if (nTop !== 5 || nBot !== 5) {
-        console.warn('[pulse-v5] EXPECTED 5+5 boxes, got ' + nTop + '+' + nBot);
-      }
-    } catch (eLay) {}
+    enforceFiveCol(body);
 
     bind(body);
     body.querySelectorAll('[data-sec-mkt]').forEach(function (b) {
