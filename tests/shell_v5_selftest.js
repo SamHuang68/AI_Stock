@@ -20,7 +20,8 @@ ok(/VERSION = '5\.0'/.test(shell), 'VERSION is 5.0');
 ok(/st50-icon\.svg/.test(shell), 'ST icon asset referenced');
 ok(fs.existsSync(path.join(root, 'assets/st50-icon.svg')), 'assets/st50-icon.svg exists');
 ok(/HOTKEY_ROUTES/.test(shell), 'HOTKEY_ROUTES defined');
-ok(/aria-current/.test(shell), 'aria-current on nav');
+ok(/stripLegacyNav/.test(shell) && /#navrail,#nr-edge,#nr-backdrop\{display:none/.test(shell),
+  'shell strips legacy sidebar (navrail removed)');
 ok(/deactivateRoute/.test(shell), 'deactivate on leave');
 ok(/softBadge/.test(shell), 'softBadge helper');
 ok(/data-st50-favicon/.test(shell), 'favicon wired');
@@ -164,11 +165,6 @@ ok(/pl-layout-probe/.test(pl) && /實測 5\+5/.test(pl) && /一行五框/.test(p
     'pulse 5+5 order: top decision row then bottom movers/global/flash/watch');
 })();
 
-ok(/NAV_KEY/.test(shell) && /toggleNav/.test(shell) && /nr-edge/.test(shell) &&
-  /nr-backdrop/.test(shell) && /nr-collapsed/.test(shell) && /nr-hide/.test(shell),
-  'shell floating hideable navrail wired');
-ok(/isNavOpen/.test(shell) && /setNavOpen/.test(shell),
-  'ShellV5 exposes nav open API');
 ok(/RING_ROUTES/.test(shell) && /st-ring/.test(shell) && /openRing/.test(shell) &&
   /toggleRing/.test(shell) && /auxclick/.test(shell) && /st-ring-fab/.test(shell) &&
   /sr-hub/.test(shell) && /sr-item/.test(shell),
@@ -185,6 +181,21 @@ ok(/itemOffsetOnLayer/.test(shell) && /clampWheelForActive/.test(shell) &&
 ok(/onRingWheel/.test(shell) && /wheelAcc/.test(shell) && /sr-orbit/.test(shell) &&
   /--sr-x/.test(shell) && /box-shadow/.test(shell) && /conic-gradient/.test(shell),
   'shell ring 3D orbit/bevel + mouse-wheel cyclic select');
+ok(/RING_LOGO/.test(shell) && /st50-icon\.svg/.test(shell) && /sr-hub-ver/.test(shell) &&
+  /sr-logo/.test(shell) && /Stock Terminal/.test(shell),
+  'shell ring hub shows Stock Terminal 5.0 logo');
+/* 側欄 ROUTES 全數涵蓋於轉盤（workspace → btn-cmdp） */
+(function () {
+  var routeIds = [
+    'pulse', 'chart', 'breadth', 'heat', 'institutional', 'international',
+    'afterhours', 'signals', 'ai', 'watchlist', 'risk', 'news', 'scan', 'book', 'settings'
+  ];
+  var missing = routeIds.filter(function (id) {
+    return shell.indexOf("ringRoute('" + id + "'") < 0;
+  });
+  ok(missing.length === 0 && /btn-cmdp/.test(shell) && /ringCoversRoute/.test(shell),
+    'shell ring covers all sidebar routes' + (missing.length ? ' missing=' + missing.join(',') : ''));
+})();
 /* 樹深度約束：任一分支 children 巢狀 ≤ RING_MAX_DEPTH（靜態掃描） */
 (function () {
   var maxNest = 0;
@@ -192,8 +203,6 @@ ok(/onRingWheel/.test(shell) && /wheelAcc/.test(shell) && /sr-orbit/.test(shell)
     var i = src.indexOf(from);
     if (i < 0) return;
     var slice = src.slice(i, i + 900);
-    var kids = (slice.match(/ringFolder\(/g) || []).length +
-      (slice.match(/ringClick\(/g) || []).length;
     if (depth > maxNest) maxNest = depth;
     if (/ringFolder\('tech'/.test(slice) || /ringFolder\('flow-tools'/.test(slice) ||
         /ringFolder\('fundamentals'/.test(slice) || /ringFolder\('screen-tools'/.test(slice) ||
@@ -207,8 +216,8 @@ ok(/onRingWheel/.test(shell) && /wheelAcc/.test(shell) && /sr-orbit/.test(shell)
   ok(maxNest <= 3 && /RING_MAX_DEPTH = 3/.test(shell),
     'shell ring analysis tree capped at 3 layers');
 })();
-ok(/isNavOpen/.test(hotkeys) && /setNavOpen\(false\)/.test(hotkeys),
-  'Esc closes floating nav before returning to chart');
+ok(/isRingOpen/.test(hotkeys) && /側欄已移除/.test(hotkeys),
+  'Esc hotkeys aware sidebar removed (ring is primary nav)');
 ok(/st5-tip-boot/.test(shell) && /st5-booted/.test(shell) && /TIP_UX/.test(shell),
   'shell tip-boot hides legacy chart chrome before boot');
 ok(/無 hash → 一律 #pulse/.test(shell) || /一律 #pulse/.test(shell),

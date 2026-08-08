@@ -141,13 +141,12 @@
     }
     if (inEditable(e.target)) return;
 
-    // Esc 關浮層／浮動側欄；若無浮層且在側欄視圖 → 回圖表
+    // Esc 關浮層；若無浮層且在非圖表視圖 → 回圖表（側欄已移除，導航改轉盤）
     if (e.key === 'Escape') {
       if (closeAnyModal()) return;
-      if (window.ShellV5 && typeof window.ShellV5.isNavOpen === 'function' &&
-          window.ShellV5.isNavOpen() && typeof window.ShellV5.setNavOpen === 'function') {
-        e.preventDefault();
-        window.ShellV5.setNavOpen(false);
+      if (window.ShellV5 && typeof window.ShellV5.isRingOpen === 'function' &&
+          window.ShellV5.isRingOpen() && typeof window.ShellV5.closeRing === 'function') {
+        /* shell 自己的 keydown 會先處理轉盤；此處僅兜底 */
         return;
       }
       if (window.ShellV5 && typeof window.ShellV5.route === 'function' &&
