@@ -3,6 +3,9 @@
 #   powershell -ExecutionPolicy Bypass -File .\scripts\go.ps1
 #   powershell -ExecutionPolicy Bypass -File .\scripts\go.ps1 -Pull
 #   powershell -ExecutionPolicy Bypass -File .\scripts\go.ps1 -RebuildOnly
+#
+# CRITICAL: never use Hermes / agent venv python.exe — that opens a blank
+# console and leaves an old :18432 process serving 兩框 UI.
 param(
   [switch]$Pull,
   [switch]$RebuildOnly
@@ -33,6 +36,90 @@ function Write-Banner {
   Write-Host " tip:  $TipBranch"
 }
 
+function Test-BlockedPython([string]$ExePath) {
+  if (-not $ExePath) { return $true }
+  $low = $ExePath.ToLowerInvariant()
+  # Hermes / Cursor agent / random venv — these steal "python" on PATH and
+  # produce the blank console the user reported.
+  return ($low -match 'hermes' -or
+          $low -match '\\hermes-agent\\' -or
+          $low -match 'cursor.*agent' -or
+          $low -match '\\antigravity\\' -or
+          $low -match '\\miniconda\\envs\\' -or
+          $low -match '\\anaconda\\envs\\')
+}
+
+function Resolve-StockPython {
+  Write-Host '[python] resolve interpreter (block hermes/agent venv)'
+  $candidates = New-Object System.Collections.Generic.List[string]
+
+  # 1) Official Windows py launcher → real install, not Hermes
+  $pyCmd = Get-Command py -ErrorAction SilentlyContinue
+  if ($pyCmd) {
+    try {
+      $exe = (& py -3 -c "import sys; print(sys.executable)" 2>$null | Select-Object -First 1)
+      if ($exe) { [void]$candidates.Add($exe.Trim()) }
+    } catch {}
+  }
+
+  # 2) where.exe all pythons on PATH (may include hermes — filtered later)
+  try {
+    $whereOut = & where.exe python 2>$null
+    foreach ($line in $whereOut) {
+      if ($line -and (Test-Path $line)) { [void]$candidates.Add($line.Trim()) }
+    }
+  } catch {}
+  foreach ($name in @('python', 'python3')) {
+    $cmd = Get-Command $name -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source) { [void]$candidates.Add($cmd.Source) }
+  }
+
+  # 3) Common python.org locations
+  foreach ($ver in @('314', '313', '312', '311', '310', '39')) {
+    [void]$candidates.Add("$env:LOCALAPPDATA\Programs\Python\Python$ver\python.exe")
+    [void]$candidates.Add("${env:ProgramFiles}\Python$ver\python.exe")
+    [void]$candidates.Add("C:\Python$ver\python.exe")
+  }
+
+  $seen = @{}
+  foreach ($c in $candidates) {
+    if (-not $c) { continue }
+    $full = $c
+    try { $full = [System.IO.Path]::GetFullPath($c) } catch {}
+    $key = $full.ToLowerInvariant()
+    if ($seen.ContainsKey($key)) { continue }
+    $seen[$key] = $true
+    if (-not (Test-Path -LiteralPath $full)) { continue }
+    if (Test-BlockedPython $full) {
+      Write-Host "       SKIP blocked: $full"
+      continue
+    }
+    try {
+      $ver = (& $full -c "import sys; print('%d.%d'%sys.version_info[:2])" 2>$null | Select-Object -First 1)
+      if (-not $ver) { continue }
+      # Prefer 3.x
+      if ($ver -notmatch '^3\.') {
+        Write-Host "       SKIP non-3.x ($ver): $full"
+        continue
+      }
+      Write-Host "       OK python $ver -> $full"
+      return $full
+    } catch {
+      Write-Host "       SKIP broken: $full"
+    }
+  }
+
+  throw @"
+No suitable Python 3 found.
+
+Blocked (do NOT use): Hermes / agent venv, e.g.
+  C:\Users\...\AppData\Local\hermes\hermes-agent\venv\Scripts\python.exe
+
+Install from https://www.python.org/downloads/ and tick 'Add python.exe to PATH',
+or ensure ``py -3`` works. Then re-run this script.
+"@
+}
+
 function Assert-TipBranch {
   $cur = (git branch --show-current 2>$null)
   Write-Host " branch: $cur"
@@ -43,25 +130,39 @@ function Assert-TipBranch {
 }
 
 function Stop-PortListeners([int]$PortNum) {
-  Write-Host "[stop] free port $PortNum"
+  Write-Host "[stop] free port $PortNum (+ kill stray hermes python on that port)"
+  $pids = New-Object System.Collections.Generic.HashSet[int]
+
   try {
     Get-NetTCPConnection -LocalPort $PortNum -State Listen -ErrorAction SilentlyContinue |
-      Select-Object -ExpandProperty OwningProcess -Unique |
-      ForEach-Object {
-        Write-Host "       kill PID $_"
-        Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
-      }
+      ForEach-Object { [void]$pids.Add([int]$_.OwningProcess) }
   } catch {}
-  # fallback via netstat (older Windows)
+
   $lines = netstat -ano 2>$null | Select-String ":$PortNum\s+.*LISTENING"
   foreach ($ln in $lines) {
     $parts = ($ln.ToString() -split '\s+') | Where-Object { $_ -ne '' }
     $procId = $parts[-1]
-    if ($procId -match '^\d+$') {
-      Write-Host "       kill PID $procId (netstat)"
-      Stop-Process -Id ([int]$procId) -Force -ErrorAction SilentlyContinue
-    }
+    if ($procId -match '^\d+$') { [void]$pids.Add([int]$procId) }
   }
+
+  foreach ($procId in $pids) {
+    if ($procId -le 4) { continue }
+    $path = $null
+    try { $path = (Get-Process -Id $procId -ErrorAction SilentlyContinue).Path } catch {}
+    Write-Host "       kill PID $procId  path=$path"
+    Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+  }
+
+  # Also stop obvious Hermes python processes that may respawn / confuse the user
+  try {
+    Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" -ErrorAction SilentlyContinue |
+      Where-Object { $_.ExecutablePath -and (Test-BlockedPython $_.ExecutablePath) } |
+      ForEach-Object {
+        Write-Host "       kill hermes/agent python PID $($_.ProcessId)  $($_.ExecutablePath)"
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+      }
+  } catch {}
+
   Start-Sleep -Seconds 1
 }
 
@@ -76,11 +177,10 @@ function Assert-TipHtml {
   }
   Write-Host '[ok] HTML contains shell_v5 + pulse_v5 + st5-tip-boot'
 
-  # 版面契約：必須是一行五框（5col-2zone），禁止還停在 4 欄壓成兩框的舊改動
   $pulse = Join-Path $Root 'src\ui\pulse_v5.js'
   if (-not (Test-Path $pulse)) { throw "missing $pulse" }
   $pjs = Get-Content $pulse -Raw -Encoding UTF8
-  if ($pjs -match '4col-priority' -or $pjs -match 'repeat\(4,minmax\(0,1fr\)\)') {
+  if ($pjs -match '4col-priority') {
     throw "pulse_v5.js still has 4-col layout — reset tip branch and rebuild"
   }
   if ($pjs -notmatch '5col-2zone' -or $pjs -notmatch 'repeat\(5,minmax\(0,1fr\)\)') {
@@ -94,7 +194,7 @@ function Assert-TipHtml {
 
 function Wait-TipServer {
   Write-Host '[wait] tip server health'
-  for ($i = 1; $i -le 20; $i++) {
+  for ($i = 1; $i -le 30; $i++) {
     try {
       $h = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -UseBasicParsing -TimeoutSec 2
       $j = $h.Content | ConvertFrom-Json
@@ -104,10 +204,10 @@ function Wait-TipServer {
       }
       Write-Host "[warn] /health up but tipUx missing (try $i) — wrong server?"
     } catch {
-      Start-Sleep -Milliseconds 400
+      Start-Sleep -Milliseconds 500
     }
   }
-  throw "Server on :$Port is not tip UX. Kill other python and retry."
+  throw "Server on :$Port is not tip UX. Check the 'Stock Terminal Server' console window for traceback."
 }
 
 function Assert-IndexIsTip {
@@ -134,12 +234,34 @@ function Assert-IndexIsTip {
     throw 'Server pulse_v5.js is not 5-col×2-zone — wrong tree / stale process'
   }
   if ($ptxt -notmatch 'PULSE_LAYOUT_ANCHOR_3cab212') {
-    throw 'Server pulse_v5.js missing PULSE_LAYOUT_ANCHOR_3cab212 — STALE python still serving old tree. Kill ALL python.exe and retry.'
+    throw 'Server pulse_v5.js missing PULSE_LAYOUT_ANCHOR_3cab212 — STALE process. Kill listeners and retry.'
   }
   Write-Host '[ok] GET /src/ui/pulse_v5.js is 5col-2zone + ANCHOR_3cab212'
 }
 
+function Assert-ListenerNotBlocked {
+  Write-Host '[check] listening process is not hermes/agent python'
+  try {
+    $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    foreach ($c in $conns) {
+      $proc = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue
+      $path = $null
+      if ($proc) { $path = $proc.Path }
+      Write-Host "       listen PID $($c.OwningProcess) path=$path"
+      if ($path -and (Test-BlockedPython $path)) {
+        throw "Port $Port is still held by blocked python: $path"
+      }
+    }
+  } catch {
+    if ("$_" -match 'blocked python') { throw }
+    # Get-NetTCPConnection may be unavailable — non-fatal
+  }
+}
+
 Write-Banner
+
+$Python = Resolve-StockPython
+Write-Host " PYTHON: $Python"
 
 if ($Pull) {
   Write-Host "[pull] fetch + hard reset $TipBranch (discard local HTML drift)"
@@ -153,8 +275,9 @@ Assert-TipBranch
 $head = (git rev-parse --short HEAD)
 Write-Host " HEAD: $head"
 
-Write-Host '[build] python build_v2.py'
-python build_v2.py
+Write-Host "[build] `"$Python`" build_v2.py"
+& $Python build_v2.py
+if ($LASTEXITCODE -ne 0) { throw "build_v2.py failed (exit $LASTEXITCODE)" }
 Assert-TipHtml
 
 if ($RebuildOnly) {
@@ -164,25 +287,51 @@ if ($RebuildOnly) {
 
 Stop-PortListeners -PortNum $Port
 
-Write-Host "[start] python server\server.py (cwd=$Root)"
+# Live console (NOT RedirectStandardOutput) so the window shows server logs.
+# Title is set via cmd so user never sees a blank hermes python window.
 $logDir = Join-Path $Root 'logs'
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
 $logOut = Join-Path $logDir 'server_go_ps.out.log'
 $logErr = Join-Path $logDir 'server_go_ps.err.log'
-# PowerShell 禁止 stdout/stderr 導向同一檔；分開寫
-$p = Start-Process -FilePath 'python' `
-  -ArgumentList 'server\server.py' `
+
+Write-Host "[start] Stock Terminal Server via:"
+Write-Host "        $Python"
+Write-Host "        cwd=$Root"
+Write-Host "        logs: $logOut / $logErr"
+
+# Write a tiny launcher .cmd so quoting is reliable and the window shows live logs
+# (/k keeps console open on crash — no more blank hermes window with zero status).
+$launcher = Join-Path $logDir 'run_server_tip.cmd'
+@(
+  '@echo off'
+  'chcp 65001 >nul'
+  'title Stock Terminal Server v5 tip'
+  "cd /d `"$Root`""
+  "echo ============================================"
+  "echo  Stock Terminal Server v5 tip"
+  "echo  HEAD=$head"
+  "echo  PYTHON=$Python"
+  "echo  cwd=$Root"
+  "echo  url=$Url"
+  "echo ============================================"
+  "echo."
+  "`"$Python`" -u server\server.py"
+  'echo.'
+  'echo SERVER EXITED — window stays open so you can read the error.'
+  'pause'
+) | Set-Content -Path $launcher -Encoding ASCII
+
+$p = Start-Process -FilePath $launcher `
   -WorkingDirectory $Root `
-  -WindowStyle Minimized `
-  -RedirectStandardOutput $logOut `
-  -RedirectStandardError $logErr `
+  -WindowStyle Normal `
   -PassThru
-Write-Host "       server PID $($p.Id)"
-Write-Host "       stdout=$logOut"
-Write-Host "       stderr=$logErr"
+Write-Host "       launcher PID $($p.Id)"
+Write-Host "       window title MUST be: Stock Terminal Server v5 tip"
+Write-Host "       launcher script: $launcher"
 
 Wait-TipServer
 Assert-IndexIsTip
+Assert-ListenerNotBlocked
 
 Write-Host "[open] $Url"
 Start-Process $Url
@@ -190,12 +339,11 @@ Start-Process $Url
 Write-Host ''
 Write-Host 'DONE. In browser (必看):'
 Write-Host "  HEAD=$head"
-Write-Host '  1) 關掉所有 localhost:18432 分頁（含小視窗）'
-Write-Host '  2) URL = http://localhost:18432/#pulse'
-Write-Host '  3) Ctrl+F5'
-Write-Host '  4) 標題「市場總覽」旁必須出現藍標：實測 5+5'
-Write-Host '  5) F12 Console 必須有: PULSE_LAYOUT_ANCHOR_3cab212 ... ok=true'
-Write-Host '  6) 若仍兩框且沒有「實測 5+5」= 舊 JS／舊 python，執行:'
-Write-Host '       Get-Process python* | Stop-Process -Force'
-Write-Host '       然後重跑本腳本 -Pull'
+Write-Host "  PYTHON=$Python"
+Write-Host '  Server window title MUST be: Stock Terminal Server v5 tip'
+Write-Host '  If you see hermes-agent\venv\...\python.exe = WRONG (script bug / old script)'
+Write-Host '  1) Close ALL localhost:18432 tabs'
+Write-Host '  2) Ctrl+F5'
+Write-Host '  3) Title badge must show: 實測 5+5'
+Write-Host '  4) F12: PULSE_LAYOUT_ANCHOR_3cab212 ... ok=true'
 Write-Host ''

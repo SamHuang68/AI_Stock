@@ -160,8 +160,26 @@ exit /b %ERRORLEVEL%
 echo [1/4] skip git pull - use: scripts\go.bat pull
 echo.
 
-echo [2/4] build_v2.py
-python build_v2.py
+echo [2/4] resolve python + build_v2.py
+REM Prefer py -3 / python.org; NEVER use hermes-agent venv (blank window + stale UI)
+set "ST_PYTHON="
+where py >nul 2>&1
+if not errorlevel 1 (
+  for /f "delims=" %%P in ('py -3 -c "import sys; print(sys.executable)" 2^>nul') do set "ST_PYTHON=%%P"
+)
+if not defined ST_PYTHON (
+  for /f "delims=" %%P in ('where python 2^>nul') do (
+    if not defined ST_PYTHON (
+      echo %%P | findstr /I "hermes hermes-agent antigravity" >nul
+      if errorlevel 1 set "ST_PYTHON=%%P"
+    )
+  )
+)
+if not defined ST_PYTHON goto FAIL_PYTHON
+echo !ST_PYTHON! | findstr /I "hermes hermes-agent" >nul
+if not errorlevel 1 goto FAIL_PYTHON_HERMES
+echo  PYTHON: !ST_PYTHON!
+"!ST_PYTHON!" build_v2.py
 if errorlevel 1 goto FAIL_BUILD
 REM tip UX contract: refuse to open a tree that would flash the old chart shell
 findstr /C:"shell_v5.js" "%REPO_ROOT%\stock_terminal_v2.html" >nul
@@ -169,6 +187,8 @@ if errorlevel 1 goto FAIL_TIP_HTML
 findstr /C:"pulse_v5.js" "%REPO_ROOT%\stock_terminal_v2.html" >nul
 if errorlevel 1 goto FAIL_TIP_HTML
 findstr /C:"st5-tip-boot" "%REPO_ROOT%\stock_terminal_v2.html" >nul
+if errorlevel 1 goto FAIL_TIP_HTML
+findstr /C:"PULSE_LAYOUT_ANCHOR_3cab212" "%REPO_ROOT%\src\ui\pulse_v5.js" >nul
 if errorlevel 1 goto FAIL_TIP_HTML
 echo.
 
@@ -178,7 +198,15 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":18432" ^| findstr "LISTENIN
     taskkill /F /PID %%a >nul 2>&1
 )
 timeout /t 1 /nobreak >nul
-start "Stock Terminal Server" /MIN cmd /c "python server\server.py"
+if not exist "%REPO_ROOT%\logs" mkdir "%REPO_ROOT%\logs"
+> "%REPO_ROOT%\logs\run_server_tip.cmd" echo @echo off
+>>"%REPO_ROOT%\logs\run_server_tip.cmd" echo chcp 65001 ^>nul
+>>"%REPO_ROOT%\logs\run_server_tip.cmd" echo title Stock Terminal Server v5 tip
+>>"%REPO_ROOT%\logs\run_server_tip.cmd" echo cd /d "%REPO_ROOT%"
+>>"%REPO_ROOT%\logs\run_server_tip.cmd" echo echo PYTHON=!ST_PYTHON!
+>>"%REPO_ROOT%\logs\run_server_tip.cmd" echo "!ST_PYTHON!" -u server\server.py
+>>"%REPO_ROOT%\logs\run_server_tip.cmd" echo pause
+start "Stock Terminal Server v5 tip" "%REPO_ROOT%\logs\run_server_tip.cmd"
 timeout /t 2 /nobreak >nul
 echo.
 
@@ -187,6 +215,8 @@ if "%OPEN_BROWSER%"=="1" start "" "http://localhost:18432/#pulse"
 
 echo.
 echo  Opened. Press Ctrl+F5 to hard-reload.
+echo  Server window title must be: Stock Terminal Server v5 tip
+echo  Browser badge must show: 5+5
 echo  Next:  scripts\go.bat pull
 echo  Tip:   scripts\go.bat pull !TIP_BRANCH!
 echo.
@@ -261,8 +291,24 @@ pause
 exit /b 1
 
 :FAIL_TIP_HTML
-echo [FAIL] Built HTML is NOT tip UX - missing shell_v5 / pulse_v5 / st5-tip-boot.
+echo [FAIL] Built HTML is NOT tip UX - missing shell_v5 / pulse_v5 / st5-tip-boot / layout anchor.
 echo        You are about to open the OLD chart shell. Stay on tip:
 echo          scripts\go.bat pull !TIP_BRANCH!
 pause
 exit /b 3
+
+:FAIL_PYTHON
+echo [FAIL] No suitable Python 3 found.
+echo        Install https://www.python.org/downloads/ and tick Add to PATH,
+echo        or ensure: py -3 -c "import sys; print(sys.executable)"
+echo        Do NOT use Hermes agent venv python.
+pause
+exit /b 4
+
+:FAIL_PYTHON_HERMES
+echo [FAIL] Resolved python is Hermes/agent venv — blocked.
+echo        Path: !ST_PYTHON!
+echo        That opens a blank window and keeps serving old 兩框 UI.
+echo        Fix PATH / install python.org Python, then retry.
+pause
+exit /b 4
