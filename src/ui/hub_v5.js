@@ -89,7 +89,8 @@
       '.hub-root .hub-dash.hub-dash-1{grid-template-rows:minmax(0,1fr)}' +
       /* 單列橫向多窗：消除 1fr/1fr 上下對切造成的中空 */
       '.hub-root .hub-dash.hub-cols-2,.hub-root .hub-dash.hub-cols-3,' +
-      '.hub-root .hub-dash.hub-cols-4,.hub-root .hub-dash.hub-cols-wide-left{' +
+      '.hub-root .hub-dash.hub-cols-4,.hub-root .hub-dash.hub-cols-wide-left,' +
+      '.hub-root .hub-dash.hub-cols-inst{' +
         'flex:1 1 0;min-height:0;height:100%;align-items:stretch;grid-template-rows:minmax(0,1fr)}' +
       '.hub-root .hub-dash.hub-cols-2{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}' +
       '.hub-root .hub-dash.hub-cols-3{grid-template-columns:minmax(0,1.55fr) minmax(0,1fr) minmax(0,1fr)}' +
@@ -98,6 +99,9 @@
         'grid-template-columns:repeat(2,minmax(0,1fr))}' +
       '.hub-root .hub-zone.z-3{grid-template-columns:repeat(3,minmax(0,1fr))}' +
       '.hub-root .hub-zone.z-4{grid-template-columns:repeat(4,minmax(0,1fr))}' +
+      /* 右欄上下鋪滿：買超／賣超各佔半高，消除下半留白 */
+      '.hub-root .hub-zone.z-stack{grid-template-columns:minmax(0,1fr);' +
+        'grid-template-rows:minmax(0,1fr) minmax(0,1fr);align-content:stretch}' +
       '.hub-root .hub-zone.z-fill{grid-template-columns:repeat(auto-fill,minmax(128px,1fr));' +
         'align-content:stretch;grid-auto-rows:minmax(78px,1fr);overflow:auto;flex:1;min-height:0}' +
       '.hub-root .hub-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;' +
@@ -137,7 +141,8 @@
       '.hub-root .hub-inst-cmt b{color:var(--gold);font-weight:700}' +
       '.hub-root .hub-inst-cmt .up{color:var(--red)}.hub-root .hub-inst-cmt .dn{color:var(--green)}' +
       '.hub-root .hub-dash.hub-cols-wide-left{grid-template-columns:minmax(0,1.7fr) minmax(0,.9fr)}' +
-      '.hub-root .hub-dash.hub-cols-inst{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr) minmax(0,1fr)}' +
+      /* 左：趨勢整高；右：買／賣超上下鋪滿 */
+      '.hub-root .hub-dash.hub-cols-inst{grid-template-columns:minmax(0,1.45fr) minmax(0,1fr)}' +
       '.hub-root .badge{display:inline-block;padding:0 6px;border-radius:999px;font-size:8px;font-weight:700}' +
       '.hub-root .badge.ok{background:var(--gbg);color:var(--green);border:1px solid var(--gbdr)}' +
       '.hub-root .badge.warn{background:rgba(251,146,60,.12);color:var(--orange);border:1px solid rgba(251,146,60,.35)}' +
@@ -262,8 +267,8 @@
     }
     Promise.all([
       jget('/marketflow'),
-      jget('/inst-rank?who=foreign&side=buy&n=18'),
-      jget('/inst-rank?who=foreign&side=sell&n=18'),
+      jget('/inst-rank?who=foreign&side=buy&n=28'),
+      jget('/inst-rank?who=foreign&side=sell&n=28'),
       jget('/pulse/history?kind=institutional&n=40')
     ]).then(function (arr) {
       var V = window.Viz;
@@ -283,15 +288,20 @@
           if (vv != null && isFinite(vv)) maxAbs = Math.max(maxAbs, Math.abs(vv));
         });
         var h = '<div class="hub-sec"><h4>' + title + '</h4><div class="hub-fill"><table><tr><th>#</th><th>代號</th><th>名稱</th><th>外資</th></tr>';
-        list.forEach(function (r, i) {
-          var v = r.foreign != null ? r.foreign : r.net;
-          var bar = V ? V.rowBar(v, maxAbs) : '';
-          var streak = (V && r.streak) ? V.streakChip(r.streak, '外資') : '';
-          h += '<tr data-code="' + (r.code || '') + '"><td>' + (i + 1) + '</td><td style="color:var(--gold);font-weight:700">' +
-            (r.code || '') + '</td><td>' + (r.name || '') + streak + '</td><td class="' + tw(v) + '">' +
-            yi(v) + bar + '</td></tr>';
-        });
-        return h + '</table></div></div>';
+        if (!list.length) {
+          h += '</table><div class="hub-empty">尚無排行</div>';
+        } else {
+          list.forEach(function (r, i) {
+            var v = r.foreign != null ? r.foreign : r.net;
+            var bar = V ? V.rowBar(v, maxAbs) : '';
+            var streak = (V && r.streak) ? V.streakChip(r.streak, '外資') : '';
+            h += '<tr data-code="' + (r.code || '') + '"><td>' + (i + 1) + '</td><td style="color:var(--gold);font-weight:700">' +
+              (r.code || '') + '</td><td>' + (r.name || '') + streak + '</td><td class="' + tw(v) + '">' +
+              yi(v) + bar + '</td></tr>';
+          });
+          h += '</table>';
+        }
+        return h + '</div></div>';
       }
       var sparkVals = hist.slice().reverse().map(function (r) { return r.totalYi; })
         .filter(function (v) { return v != null && isFinite(v); });
@@ -302,7 +312,7 @@
       var trendPanel = '<div class="hub-sec"><h4>法人資金趨勢與評論</h4><div class="hub-spark-fill">' +
         (V && sparkVals.length >= 2
           ? V.sparkLine(sparkVals, {
-              color: sparkCol, h: 220, w: 420,
+              color: sparkCol, h: 280, w: 520,
               xUnit: '日', yUnit: '億', yDigits: 1
             })
           : (sparkVals.length ? spark(sparkVals) : '<div class="hub-empty">尚無本機法人歷史</div>')) +
@@ -321,7 +331,10 @@
             (totalSpark ? '<div class="s">' + totalSpark + '</div>' : '') + '</div>' +
         '</div>' +
         '<div class="hub-dash hub-cols-inst">' +
-          trendPanel + rankTbl(buy, '外資買超') + rankTbl(sell, '外資賣超') +
+          trendPanel +
+          '<div class="hub-zone z-stack">' +
+            rankTbl(buy, '外資買超') + rankTbl(sell, '外資賣超') +
+          '</div>' +
         '</div>';
       bindCommon(el);
     }).finally(function () {
