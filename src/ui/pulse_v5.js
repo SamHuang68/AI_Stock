@@ -987,7 +987,7 @@
     }
     var prefer = [
       '^DJI', '^GSPC', '^IXIC', '^SOX', '^N225', '^KS11',
-      '^VIX', 'TWD=X', 'DX-Y.NYB', 'DX=F', 'US10Y', 'CL=F'
+      '^VIX', 'GC=F', 'HG=F', 'TWD=X', 'DX-Y.NYB', 'DX=F', 'US10Y', 'CL=F'
     ];
     items.sort(function (a, b) {
       var ia = prefer.indexOf(a.symbol); var ib = prefer.indexOf(b.symbol);
@@ -998,11 +998,13 @@
       ' <span style="color:var(--cyan);font-weight:700;font-size:9px;margin-left:4px">' + tone + '</span>' +
       ' <a data-go="international">國際 →</a></h4><div class="pl-global">';
     if (!items.length) html += '<div class="pl-note">國際報價載入中…</div>';
-    items.slice(0, 10).forEach(function (x) {
-      var dig = (x.unit === '%' || x.symbol === 'US10Y' || x.symbol === '^VIX' || x.symbol === 'TWD=X') ? 2
+    items.slice(0, 12).forEach(function (x) {
+      var dig = (x.unit === '%' || x.symbol === 'US10Y' || x.symbol === '^VIX' || x.symbol === 'TWD=X' ||
+        x.symbol === 'HG=F') ? 2
         : (x.price > 1000 ? 0 : 2);
       var px = fmt(x.price, dig) + (x.unit === '%' || x.symbol === 'US10Y' ? '%' : '');
-      html += '<div class="g"><div class="k">' + esc(x.name || x.symbol) + '</div>' +
+      var role = x.role ? ' · ' + esc(x.role) : '';
+      html += '<div class="g"><div class="k">' + esc(x.name || x.symbol) + role + '</div>' +
         '<div class="row">' +
           '<div class="v">' + px + '</div>' +
           '<div class="s ' + tw(x.changePct) + '">' +

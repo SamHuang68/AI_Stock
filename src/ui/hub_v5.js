@@ -487,7 +487,7 @@
 
   // ── International ────────────────────────────────────────
   function renderInternational(el) {
-    el.innerHTML = head('國際市場', '美股指數／美元／原油＋總經（Yahoo／BLS／種子備援）',
+    el.innerHTML = head('國際市場', '美股指數／美元／黃金（避險）／銅（景氣循環）＋總經（Yahoo／BLS／種子備援）',
       '<button class="hub-btn" id="hub-eco-refresh">更新指標</button>' +
       '<button class="hub-btn" data-sync>同步資料</button><button class="hub-btn" data-go="pulse">總覽</button>') +
       '<div id="hub-intl-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
@@ -551,10 +551,16 @@
         var click = sym
           ? ' data-code="' + sym.replace(/"/g, '') + '" data-mkt="' + mkt + '" style="cursor:pointer"'
           : '';
+        var dig = g.unit === '%' ? 2
+          : (sym === 'HG=F' || sym === 'TWD=X' || sym === '^VIX') ? 2
+          : (g.price > 1000 ? 0 : 2);
+        var role = g.role
+          ? '<div class="s" style="color:var(--cyan);font-weight:600;margin-top:2px">' + g.role + '</div>'
+          : '';
         return '<div class="hub-card"' + click + '><div class="k">' + (g.name || g.symbol) + '</div><div class="v">' +
-          fmt(g.price, g.unit === '%' ? 2 : (g.price > 1000 ? 0 : 2)) + (g.unit === '%' ? '%' : '') +
+          fmt(g.price, dig) + (g.unit === '%' ? '%' : '') +
           '</div><div class="chg ' + tw(g.changePct) + '">' +
-          (g.changePct != null ? pct(g.changePct) : '—') + '</div>' + bar + '</div>';
+          (g.changePct != null ? pct(g.changePct) : '—') + '</div>' + role + bar + '</div>';
       }).join('');
       function ecoVal(it) {
         if (!it || it.value == null || !isFinite(it.value)) return '—';

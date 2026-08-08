@@ -1888,22 +1888,34 @@ def _yf_batch_quotes(syms):
     """
     labels = {
         '^DJI': '道瓊', '^GSPC': 'S&P500', '^IXIC': 'NASDAQ',
-        'CL=F': '原油', 'GC=F': '黃金', 'SI=F': '白銀',
+        'CL=F': '原油', 'GC=F': '黃金', 'HG=F': '銅', 'SI=F': '白銀',
         'DX-Y.NYB': '美元指數', 'DX=F': '美元指數',
         '^VIX': 'VIX 波動', 'TWD=X': '美元／台幣',
         '^SOX': '費半', '^N225': '日經', '^KS11': '韓國', '^HSI': '恆生',
+    }
+    # 解讀標籤：國際面板／總覽全球影響用（不影響報價計算）
+    roles = {
+        'GC=F': '避險指標',
+        'HG=F': '產業景氣循環',
+        '^VIX': '恐慌指標',
+        'CL=F': '能源景氣',
+        'DX-Y.NYB': '資金流向',
+        'DX=F': '資金流向',
     }
 
     def _one(sym):
         try:
             ov = _trusted_quote_override(sym)
             if ov and ov.get('price') is not None:
-                return {
+                row = {
                     'symbol': sym, 'name': labels.get(sym, sym),
                     'price': ov['price'], 'changePct': ov.get('changePct'),
                     'prevClose': ov.get('prevClose'),
                     'source': ov.get('source') or 'override',
                 }
+                if sym in roles:
+                    row['role'] = roles[sym]
+                return row
             # 與 mkt-bar 相同：range=5d&interval=1d
             _, data, _ = fetch_one(sym, '5d', '1d', False)
             if not data:
@@ -1915,7 +1927,7 @@ def _yf_batch_quotes(syms):
             if not q:
                 return None
             m = res[0].get('meta') or {}
-            return {
+            row = {
                 'symbol': sym,
                 'name': labels.get(sym, m.get('shortName') or sym),
                 'price': q['price'],
@@ -1923,6 +1935,9 @@ def _yf_batch_quotes(syms):
                 'prevClose': q['prevClose'],
                 'source': 'yahoo-mktbar',
             }
+            if sym in roles:
+                row['role'] = roles[sym]
+            return row
         except Exception as e:
             print('[pulse-global]', sym, e)
             return None
@@ -4041,16 +4056,17 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 return {'ok': False, 'items': []}
 
         def _job_global():
-            # v4：與圖表→市場 /yf/batch range=5d + refreshMktBar 公式對齊
-            gkey = f'pulse-global:v4:{int(time.time() // 120)}'
+            # v5：v4 口徑 + 黃金（避險）／銅（景氣循環）
+            gkey = f'pulse-global:v5:{int(time.time() // 120)}'
             g = _cache_first([gkey])
             if g is not None:
                 return g
             try:
-                # 指數列優先吃市場 tab 同源標的（SOX/美股/日韓）；另補 VIX／匯率／美元
+                # 指數列優先吃市場 tab 同源標的（SOX/美股/日韓）；
+                # 另補 VIX／匯率／美元／黃金（避險）／銅（產業景氣循環）
                 g = _yf_batch_quotes([
                     '^DJI', '^GSPC', '^IXIC', '^SOX', '^N225', '^KS11',
-                    '^VIX', 'TWD=X', 'DX-Y.NYB',
+                    '^VIX', 'TWD=X', 'DX-Y.NYB', 'GC=F', 'HG=F',
                 ])
                 if not any(x.get('symbol') == 'DX-Y.NYB' for x in (g or [])):
                     # 僅在缺美元指數時補一槍，不重抓整批

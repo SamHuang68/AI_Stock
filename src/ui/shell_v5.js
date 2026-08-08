@@ -25,7 +25,7 @@
     { id: 'breadth',       label: '廣度', hint: '大盤廣度（漲跌家數）',                     icon: '▤' },
     { id: 'heat',          label: '熱力', hint: '類股熱力圖＋焦點掃描',                     icon: '▦' },
     { id: 'institutional', label: '法人', hint: '三大法人動向與買賣超',                     icon: '₴' },
-    { id: 'international', label: '國際', hint: '美股／美元／原油與總經',                   icon: '◎' },
+    { id: 'international', label: '國際', hint: '美股／美元／黃金避險／銅景氣與總經',         icon: '◎' },
     { id: 'afterhours',    label: '盤後', hint: '漲跌排行／籌碼／期貨盤後',                 icon: '◐' },
     { id: 'signals',       label: '訊號', hint: '策略訊號／焦點掃描結果',                   icon: '✦' },
     { id: 'ai',            label: 'AI',   hint: 'AI 報告／副駕／焦點掃描中樞',               icon: '✧' },

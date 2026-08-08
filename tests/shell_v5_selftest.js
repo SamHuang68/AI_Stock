@@ -58,6 +58,8 @@ ok(/d\.buy \|\| d\.long/.test(hub) || /focus\.buy/.test(hub) || /d\.buy \|\|/.te
   'signals use /focus buy field');
 ok(/hub-card\[data-code\]/.test(hub) || /data-code="' \+ sym/.test(hub),
   'international cards clickable');
+ok(/黃金（避險）/.test(hub) && /銅（景氣循環）/.test(hub) && /g\.role/.test(hub),
+  'international shows gold hedge + copper cycle roles');
 
 const ai = fs.readFileSync(path.join(root, 'src/ui/ai_v5.js'), 'utf8');
 ok(/ai5-strip/.test(ai) && /ai5-dash/.test(ai), 'ai professional strip+dash');
@@ -78,6 +80,8 @@ ok(/近漲停/.test(pl) && /≠頂列官方家數/.test(pl), 'pulse movers panel
 ok(/movers\.limitUp/.test(pl), 'pulse prefers movers.limitUp for near-limit list');
 ok(/function chgWithPct/.test(pl) && /chgWithPct\(t00/.test(pl) && /chgWithPct\(txf/.test(pl),
   'pulse strip shows change points + pct for TAIEX/OTC/TXF');
+ok(/GC=F/.test(pl) && /HG=F/.test(pl) && /x\.role/.test(pl),
+  'pulse global prefer includes gold and copper with role');
 
 const nw = fs.readFileSync(path.join(root, 'src/ui/news_v5.js'), 'utf8');
 ok(/nw-mkt-seg/.test(nw) && /flashMkt/.test(nw), 'news TW/US filter');
