@@ -87,6 +87,16 @@ ok(/turnoverVsMa5Pct/.test(pl) && /volumeScore/.test(pl) && /成交金額 · 量
 ok(/t00Trend/.test(pl) && /o00Trend/.test(pl) && /txfTrend/.test(pl) &&
   /trendQuantBits/.test(pl) && /renderTrendCell/.test(pl),
   'pulse strip shows TAIEX/OTC/TXF trend quant like turnover');
+ok(/加權盤勢/.test(pl) && /櫃買／台指期見頂列/.test(pl) && !/pl-trend-pair/.test(pl),
+  'pulse OHLC panel integrated — no duplicate index chips');
+ok(/漲跌家數 · 廣度/.test(pl) && /repeat\(6,/.test(pl),
+  'pulse strip merges breadth into 6-col KPI row');
+ok(/data-flash-mkt/.test(pl) && /filterFlash/.test(pl) && /flashMkt/.test(pl),
+  'pulse flash has TW/US/ALL tabs');
+ok(/instDayEmpty/.test(pl) && /前一交易日/.test(pl) && /paintInstCells/.test(pl),
+  'pulse institutional falls back to prior session');
+ok(/pl-tag\.ok\{[^}]*#94a3b8/.test(pl) && /pl-st-pos/.test(pl),
+  'pulse status colors separated from price red/green');
 
 const nw = fs.readFileSync(path.join(root, 'src/ui/news_v5.js'), 'utf8');
 ok(/nw-mkt-seg/.test(nw) && /flashMkt/.test(nw), 'news TW/US filter');
