@@ -141,8 +141,8 @@
       '.hub-root .hub-inst-cmt b{color:var(--gold);font-weight:700}' +
       '.hub-root .hub-inst-cmt .up{color:var(--red)}.hub-root .hub-inst-cmt .dn{color:var(--green)}' +
       '.hub-root .hub-dash.hub-cols-wide-left{grid-template-columns:minmax(0,1.7fr) minmax(0,.9fr)}' +
-      /* 左趨勢／右排行：右欄略寬（可操作清單優先） */
-      '.hub-root .hub-dash.hub-cols-inst{grid-template-columns:minmax(0,1.05fr) minmax(0,1.2fr)}' +
+      /* 左趨勢約 1/3｜右排行約 2/3（避免線圖搶版面） */
+      '.hub-root .hub-dash.hub-cols-inst{grid-template-columns:minmax(0,1fr) minmax(0,2fr)}' +
       /* 法人頁英雄列：合計｜結構｜量能 */
       '.hub-root .hub-inst-hero{display:grid;grid-template-columns:minmax(140px,.9fr) minmax(0,1.6fr) minmax(0,1.1fr);' +
         'gap:4px;margin:0 0 4px;flex:0 0 auto;min-width:0;min-height:0}' +
@@ -156,6 +156,10 @@
       '.hub-root .hub-inst-hero .hub-inst-comp .vz-mag .vz-track{height:10px}' +
       '.hub-root .hub-inst-hero .hub-inst-flow .v{font-size:15px;font-weight:800;color:var(--thi);line-height:1.15}' +
       '.hub-root .hub-inst-hero .hub-inst-flow .s{font-size:8px;color:var(--tlo);margin-top:2px}' +
+      '.hub-root .hub-dash.hub-cols-inst .hub-spark-fill{flex:1;min-height:0}' +
+      '.hub-root .hub-dash.hub-cols-inst .hub-spark-fill .vz-spark-ax{min-height:96px}' +
+      '.hub-root .hub-dash.hub-cols-inst .hub-spark-fill .vz-spark,' +
+      '.hub-root .hub-dash.hub-cols-inst .hub-spark-fill svg{min-height:72px}' +
       '.hub-root .hub-inst-rank{display:flex;flex-direction:column;min-width:0;min-height:0;height:100%;gap:4px}' +
       '.hub-root .hub-seg{display:flex;gap:0;flex:0 0 auto;border:1px solid var(--border);border-radius:5px;overflow:hidden;width:fit-content}' +
       '.hub-root .hub-seg button{padding:3px 10px;border:0;border-right:1px solid var(--border);background:var(--bg);' +
@@ -166,10 +170,20 @@
       '.hub-root .hub-inst-rankhd{display:flex;align-items:center;justify-content:space-between;gap:8px;flex:0 0 auto}' +
       '.hub-root .hub-inst-rankhd .meta{font-size:8px;color:var(--tlo);white-space:nowrap}' +
       '.hub-root .hub-inst-rank .hub-zone{flex:1;min-height:0}' +
-      '.hub-root .hub-inst-rank table{font-size:10px}' +
-      '.hub-root .hub-inst-rank th:nth-child(3),.hub-root .hub-inst-rank td:nth-child(3){text-align:left}' +
-      '.hub-root .hub-inst-rank .lots{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}' +
-      '.hub-root .hub-inst-rank .vz-rowbar{display:inline-block;height:4px;margin-left:4px;vertical-align:middle;max-width:48px}' +
+      '.hub-root .hub-inst-rank table{font-size:10px;table-layout:fixed;width:100%}' +
+      '.hub-root .hub-inst-rank th:nth-child(1),.hub-root .hub-inst-rank td:nth-child(1){width:28px}' +
+      '.hub-root .hub-inst-rank th:nth-child(2),.hub-root .hub-inst-rank td:nth-child(2){width:52px}' +
+      '.hub-root .hub-inst-rank th:nth-child(3),.hub-root .hub-inst-rank td:nth-child(3){text-align:left;' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '.hub-root .hub-inst-rank th:nth-child(4),.hub-root .hub-inst-rank td:nth-child(4){width:88px}' +
+      '.hub-root .hub-inst-rank th:nth-child(5),.hub-root .hub-inst-rank td:nth-child(5){width:72px;white-space:nowrap}' +
+      '.hub-root .hub-inst-rank .lots{font-variant-numeric:tabular-nums;font-weight:700;' +
+        'white-space:normal;vertical-align:middle;overflow:hidden}' +
+      '.hub-root .hub-inst-rank .lots .lots-num{display:block;line-height:1.2}' +
+      '.hub-root .hub-inst-rank .lots .lots-bar{display:block;margin-top:2px;height:4px;max-width:100%;overflow:hidden}' +
+      '.hub-root .hub-inst-rank .lots .vz-rowbar{display:block;margin-left:0;max-width:100%;height:4px}' +
+      '.hub-root .hub-inst-rank .streak{text-align:right;vertical-align:middle}' +
+      '.hub-root .hub-inst-rank .streak .vz-chip{margin:0;max-width:100%;overflow:hidden;text-overflow:ellipsis}' +
       '.hub-root .badge{display:inline-block;padding:0 6px;border-radius:3px;font-size:8px;font-weight:700}' +
       '.hub-root .badge.ok{background:var(--gbg);color:var(--green);border:1px solid var(--gbdr)}' +
       '.hub-root .badge.warn{background:rgba(251,146,60,.12);color:var(--orange);border:1px solid rgba(251,146,60,.35)}' +
@@ -362,9 +376,12 @@
             h += '<tr data-code="' + (r.code || '') + '">' +
               '<td>' + (i + 1) + '</td>' +
               '<td style="color:var(--gold);font-weight:700">' + (r.code || '') + '</td>' +
-              '<td>' + (r.name || '') + '</td>' +
-              '<td class="lots ' + tw(side === 'buy' ? 1 : -1) + '">' + fmtLots(lots) + bar + '</td>' +
-              '<td>' + streak + '</td></tr>';
+              '<td title="' + (r.name || '') + '">' + (r.name || '') + '</td>' +
+              '<td class="lots ' + tw(side === 'buy' ? 1 : -1) + '">' +
+                '<span class="lots-num">' + fmtLots(lots) + '</span>' +
+                (bar ? '<span class="lots-bar">' + bar + '</span>' : '') +
+              '</td>' +
+              '<td class="streak">' + streak + '</td></tr>';
           });
           h += '</table>';
         }
@@ -415,17 +432,17 @@
         '</div>';
 
       var trendPanel = '<div class="hub-sec"><h4>合計買賣超趨勢' +
-        '<span style="color:var(--tlo);font-weight:600;font-size:8px">近 ' + hist.length + ' 日 · 億</span></h4>' +
+        '<span style="color:var(--tlo);font-weight:600;font-size:8px">X：日 · Y：億</span></h4>' +
         '<div class="hub-spark-fill">' +
         (V && sparkVals.length >= 2
           ? V.sparkLine(sparkVals, {
-              color: sparkCol, h: 240, w: 480,
-              xUnit: '日', yUnit: '億', yDigits: 1
+              color: sparkCol, h: 160, w: 320,
+              xUnit: '日', yUnit: '億', yDigits: 1, axes: true
             })
           : (sparkVals.length ? spark(sparkVals) : '<div class="hub-empty">尚無本機法人歷史 — 按「同步資料」預抓</div>')) +
         '</div>' +
         '<div class="hub-inst-cmt">' + cmtHtml + '</div>' +
-        '<div class="hub-note">Y：合計買賣超（億）· 不重複上方結構數字 · BFI82U</div></div>';
+        '<div class="hub-note">刻度：Y 高／中／低（億）· X 日序 · 零軸虛線 · BFI82U</div></div>';
 
       var seg =
         '<div class="hub-seg" id="hub-inst-who">' +

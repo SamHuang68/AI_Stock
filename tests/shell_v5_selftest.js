@@ -51,6 +51,9 @@ ok(/hub-inst-hero/.test(hub), 'institutional hero strip');
 ok(/data-who="trust"/.test(hub) && /data-who="dealer"/.test(hub), 'institutional who tabs');
 ok(/fmtLots/.test(hub) && /單位：張/.test(hub), 'institutional ranks use 張');
 ok(/magBars/.test(hub) && /refMeter/.test(hub), 'institutional magBars + turnover meter');
+ok(/minmax\(0,1fr\) minmax\(0,2fr\)/.test(hub), 'institutional chart ~1/3 width');
+ok(/lots-bar/.test(hub) && /class="streak"/.test(hub), 'institutional lots bar separated from streak');
+ok(/vz-xlabs/.test(fs.readFileSync(path.join(root, 'src/ui/viz_v5.js'), 'utf8')), 'sparkLine X tick labels');
 ok(/d\.buy \|\| d\.long/.test(hub) || /focus\.buy/.test(hub) || /d\.buy \|\|/.test(hub),
   'signals use /focus buy field');
 ok(/hub-card\[data-code\]/.test(hub) || /data-code="' \+ sym/.test(hub),
