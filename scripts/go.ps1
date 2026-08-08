@@ -266,16 +266,33 @@ $Python = Resolve-StockPython
 Write-Host " PYTHON: $Python"
 
 if ($Pull) {
-  Write-Host "[pull] fetch + hard reset $TipBranch (discard local HTML drift)"
+  Write-Host "[pull] fetch + FORCE reset $TipBranch (discard local HTML drift)"
+  Write-Host "       NOTE: local edits to stock_terminal*.html will be discarded"
   git fetch origin $TipBranch
-  git checkout -B $TipBranch "origin/$TipBranch"
+  if ($LASTEXITCODE -ne 0) { throw "git fetch failed" }
+  # -f：避免「local changes would be overwritten」後腳本卻繼續用舊 HEAD（災難根因）
+  git checkout -f -B $TipBranch "origin/$TipBranch"
+  if ($LASTEXITCODE -ne 0) { throw "git checkout -f failed — refuse to continue on stale HEAD" }
   git reset --hard "origin/$TipBranch"
-  git checkout -- "src/ui/pulse_v5.js" "src/ui/shell_v5.js" "stock_terminal.html" "stock_terminal_v2.html" 2>$null
+  if ($LASTEXITCODE -ne 0) { throw "git reset --hard failed" }
+  $expect = (git rev-parse "origin/$TipBranch").Trim()
+  $got = (git rev-parse HEAD).Trim()
+  if ($got -ne $expect) {
+    throw "pull incomplete: HEAD=$got expected=$expect — aborting (will NOT start old server)"
+  }
+  Write-Host "       synced HEAD=$($got.Substring(0,7))"
 }
 
 Assert-TipBranch
 $head = (git rev-parse --short HEAD)
 Write-Host " HEAD: $head"
+if ($Pull) {
+  # 舊 go.ps1 特徵：沒有 Resolve-StockPython。若仍看到 RedirectStandardOutput 啟動＝拉碼失敗。
+  $self = Get-Content -LiteralPath $PSCommandPath -Raw -Encoding UTF8
+  if ($self -notmatch 'Resolve-StockPython' -or $self -match 'RedirectStandardOutput') {
+    throw "This go.ps1 is STALE (pre-hermes-fix). Delete scripts\\go.ps1 cache and re-run START_TIP.cmd"
+  }
+}
 
 Write-Host "[build] `"$Python`" build_v2.py"
 & $Python build_v2.py

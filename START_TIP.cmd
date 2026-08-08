@@ -40,9 +40,10 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-git checkout -B !TIP_BRANCH! origin/!TIP_BRANCH!
+REM -f discards local stock_terminal*.html so checkout cannot abort and leave stale HEAD
+git checkout -f -B !TIP_BRANCH! origin/!TIP_BRANCH!
 if errorlevel 1 (
-  echo [FAIL] git checkout failed
+  echo [FAIL] git checkout -f failed
   pause
   exit /b 1
 )
