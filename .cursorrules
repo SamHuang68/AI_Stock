@@ -25,3 +25,17 @@
    指令：`git checkout 3cab212 -- src/ui/pulse_v5.js`（必要時連 `viz_v5.js`），再 rebuild；勿重寫 CSS 賭運氣。
 5. 密度／文字截斷等問題用欄內排版、簡寫、色點解決，不得用減少每列框數當解法。
 6. 使用者說「退回／無效／一行兩框」時：先還原錨點版面，再對照實際 DOM/CSS＝5+5；勿辯稱「已是 tip UX」、勿繼續在壞樹上修。
+
+【血淚教訓 — go.ps1／Hermes 空白窗，禁止再犯】：
+根因（腳本是 agent 寫的，責任在腳本設計，不是「使用者裝了 Hermes」就能卸責）：
+1. `ef11cfe`／`9f89a4a` 的 go.ps1 用裸字串 `Start-Process -FilePath 'python'` 與 `python build_v2.py`。
+   Windows 依 PATH 解析 → 若 PATH 前方是 `hermes-agent\venv\Scripts\python.exe` 就會被叫到。
+2. 同版 `-Pull` 用 `git checkout -B` 且**不檢查 `$LASTEXITCODE`**。
+   Windows PowerShell 5.1 的 `$ErrorActionPreference='Stop'` **不會**因 git.exe 失敗而中止。
+   於是 local `stock_terminal.html` 擋住 checkout 後，腳本仍用舊 HEAD（如 `9f89a4a`，當時仍含 4 欄／兩框）繼續 build／start。
+3. `RedirectStandardOutput/Error` + Minimized → 視窗標題是 Hermes 路徑、內容空白無 log，掩蓋失敗。
+鐵律：
+- 禁止裸呼叫 `python`／`python3`；必須解析絕對路徑，並封鎖 hermes／agent venv。
+- 任何 `git fetch/checkout/reset` 後必須核對 `$LASTEXITCODE` 與 `HEAD == origin/tip`；失敗立刻 throw，禁止續跑。
+- Server 視窗必須有標題與 live log（禁止只 Redirect 成空白窗）。
+- 本機首選：`START_TIP.cmd`。
