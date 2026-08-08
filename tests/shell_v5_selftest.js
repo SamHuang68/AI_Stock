@@ -110,6 +110,11 @@ ok(/pl-score3/.test(pl) && /綜合脈動/.test(pl) && /大盤體質/.test(pl) &&
   'pulse score trio shows parent 綜合 + child weights 70/30');
 ok(/pl-empty\[hidden\]\{display:none!important\}/.test(pl),
   'pulse empty[hidden] overrides display:flex (no blank inst box)');
+ok(/pl-sec h4\{[^}]*font-size:11px/.test(pl) &&
+  /pl-flash \.row\{[^}]*line-height:1\.5/.test(pl) &&
+  /pl-wl th,#pl-root \.pl-wl td\{padding:6px 5px/.test(pl) &&
+  /pl-inst-trend\{[^}]*flex:1\.35/.test(pl),
+  'pulse comfort pass: header hierarchy, flash line-height, wl pad, taller trends');
 ok(/pl-score3\{display:grid;grid-template-columns:1\.35fr 1fr 1fr/.test(pl) &&
   /writing-mode:horizontal-tb/.test(pl) &&
   /pl-score3 \.sc\{[^}]*flex-direction:column/.test(pl),
