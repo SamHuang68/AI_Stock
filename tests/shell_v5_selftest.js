@@ -220,8 +220,9 @@ ok(/isRingOpen/.test(hotkeys) && /側欄已移除/.test(hotkeys),
   'Esc hotkeys aware sidebar removed (ring is primary nav)');
 ok(/st5-tip-boot/.test(shell) && /st5-booted/.test(shell) && /TIP_UX/.test(shell),
   'shell tip-boot hides legacy chart chrome before boot');
-ok(/無 hash → 一律 #pulse/.test(shell) || /一律 #pulse/.test(shell),
-  'shell hashless open forces pulse (no localStorage chart restore)');
+ok(/開啟預設總覽/.test(shell) && /applyRoute\('pulse'\)/.test(shell) &&
+  /openRing\(window\.innerWidth \/ 2/.test(shell) && /ring=auto/.test(shell),
+  'shell boot defaults to pulse and auto-opens ring');
 ok(!/saved = localStorage\.getItem\(STORAGE_KEY\) \|\| 'pulse'/.test(shell),
   'shell no longer restores route from localStorage on cold open');
 

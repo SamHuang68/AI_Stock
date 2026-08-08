@@ -1,7 +1,7 @@
 /* ============================================================================
  * shell_v5.js  —  Stock Terminal 5.0：轉盤殼層 + 視圖路由（tip UX only）
  * ----------------------------------------------------------------------------
- * tip UX 唯一執行線：預設 #pulse；無 hash 絕不還原舊圖表殼。
+ * tip UX 唯一執行線：開啟一律 #pulse（總覽）並自動彈出分析轉盤。
  * 導航改由分析轉盤（中鍵／\\／FAB）；側欄已移除，ROUTES 全數掛入轉盤樹。
  * 啟動前隱藏 #body／#wlbar，避免 shell 尚未掛上時閃出舊 UI。
  * 鐵律：不破壞 #left / #pro-tools / symLoaded / Toolbar 既有行為。
@@ -1320,32 +1320,19 @@
       if (orphan && orphan.parentNode) orphan.parentNode.removeChild(orphan);
     });
     /*
-     * tip UX only：
-     * - 有合法 hash → 跟 hash（含使用者主動開 #chart）
-     * - 無 hash → 一律 #pulse（絕不吃 localStorage 的 chart，避免合完／重開閃回舊圖表殼）
+     * tip UX only：開啟預設總覽 + 彈出轉盤
+     * - 一律 #pulse（絕不吃 localStorage／舊 hash 的 chart）
+     * - boot 後自動 openRing（中心）；之後仍可由 hashchange 切頁
      */
-    var saved = 'pulse';
-    var hash = (window.location.hash || '').replace(/^#/, '').trim();
-    if (hash && findRoute(hash)) {
-      saved = hash;
-    } else {
-      saved = 'pulse';
-      try {
-        if (window.history && window.history.replaceState) {
-          var base = window.location.pathname + (window.location.search || '');
-          window.history.replaceState(null, '', base + '#pulse');
-        } else {
-          window.location.hash = 'pulse';
-        }
-      } catch (eHash) {}
-    }
-    /* 舊「指數」分頁 → 圖表加權；非法 route → 總覽 */
-    if (saved === 'trends' || saved === 'index') {
-      applyRoute('chart', { sym: '^TWII', mkt: 'TW' });
-    } else {
-      if (!saved || !findRoute(saved)) saved = 'pulse';
-      applyRoute(saved);
-    }
+    try {
+      if (window.history && window.history.replaceState) {
+        var base = window.location.pathname + (window.location.search || '');
+        window.history.replaceState(null, '', base + '#pulse');
+      } else {
+        window.location.hash = 'pulse';
+      }
+    } catch (eHash) {}
+    applyRoute('pulse');
     try {
       document.documentElement.classList.add('st5-booted');
       document.documentElement.setAttribute('data-st5-ux', 'tip');
@@ -1370,8 +1357,13 @@
     document.addEventListener('keydown', onShellKey, true);
     document.addEventListener('auxclick', onShellAuxClick, true);
     document.addEventListener('mousedown', onShellMiddleDown, true);
-    console.log('[shell-v5] Stock Terminal ' + VERSION + ' · tip UX · route=' + state.route +
-      ' · ring=中鍵/\\\\/[ · no-sidebar');
+    /* 開啟即彈出分析轉盤（畫面中央） */
+    setTimeout(function () {
+      if (!ringState.open) {
+        openRing(window.innerWidth / 2, window.innerHeight / 2);
+      }
+    }, 180);
+    console.log('[shell-v5] Stock Terminal ' + VERSION + ' · tip UX · route=pulse · ring=auto');
   }
 
   function inEditable(el) {
