@@ -262,8 +262,8 @@
       '#pl-root .pl-wl td.tag{text-align:center;width:12%;padding-left:0;padding-right:0}' +
       '#pl-root .pl-wl td.px,#pl-root .pl-wl td.chg{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}' +
       '#pl-root .pl-wl th:nth-child(2),#pl-root .pl-wl th:nth-child(3){text-align:right}' +
-      '#pl-root .pl-wl .nm-only{color:#94a3b8;font-weight:500;font-size:8px;display:block;' +
-        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}' +
+      '#pl-root .pl-wl .nm-only{color:#94a3b8;font-weight:500;font-size:7px;display:block;' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;line-height:1.2}' +
       /* donut／廣度：上方結構、下方多空比趨勢＋評論（不再只重複漲跌停） */
       '#pl-root .pl-donut-wrap{display:flex;align-items:center;gap:6px;flex:0 0 auto;min-width:0}' +
       '#pl-root .pl-donut{width:48px;height:48px;border-radius:50%;flex-shrink:0;position:relative;' +
@@ -350,19 +350,23 @@
       '#pl-root .pl-flash .cat.us{color:var(--gold)}' +
       '#pl-root .pl-flash .ttl{color:#e2e8f0;font-size:8px;min-width:0;overflow:hidden;' +
         'text-overflow:ellipsis;white-space:nowrap;letter-spacing:-0.15px}' +
-      /* 自選：區塊本身不溢；表體固定內滾，避免壓到底部 status／量價列 */
+      /* 自選風險：縮字符合版面（與近漲停／快訊／產業輪動同級） */
       '#pl-root .pl-sec.pl-wl{overflow:hidden;min-height:0}' +
+      '#pl-root .pl-wl .pl-sec-tog button{font-size:7px;padding:1px 5px}' +
       '#pl-root .pl-wl-scroll{flex:1 1 0;min-height:0;overflow:auto;overscroll-behavior:contain}' +
-      '#pl-root .pl-wl table{width:100%;border-collapse:collapse;font-size:9px;table-layout:fixed}' +
-      '#pl-root .pl-wl th,#pl-root .pl-wl td{padding:4px 4px;border-bottom:1px solid rgba(26,39,64,.85);text-align:right}' +
+      '#pl-root .pl-wl table{width:100%;border-collapse:collapse;font-size:8px;table-layout:fixed}' +
+      '#pl-root .pl-wl th,#pl-root .pl-wl td{padding:4px 4px;border-bottom:1px solid rgba(26,39,64,.85);text-align:right;' +
+        'line-height:1.25}' +
       '#pl-root .pl-wl th:first-child,#pl-root .pl-wl td:first-child{text-align:left}' +
-      '#pl-root .pl-wl th{color:#a8b6c8;position:sticky;top:0;background:rgba(17,27,46,.98);z-index:1;font-size:8px}' +
+      '#pl-root .pl-wl th{color:#a8b6c8;position:sticky;top:0;background:rgba(17,27,46,.98);z-index:1;font-size:7px}' +
       '#pl-root .pl-wl tr{cursor:pointer}' +
       '#pl-root .pl-wl tr:nth-child(even){background:rgba(148,163,184,.035)}' +
       '#pl-root .pl-wl tr:hover{background:rgba(22,34,64,.88)}' +
-      '#pl-root .pl-wl td.px{padding-right:6px}' +
-      '#pl-root .pl-wl td.px,#pl-root .pl-wl td.chg{font-size:9px}' +
-      '#pl-root .pl-wl .mkt{font-size:8px;color:#94a3b8;font-weight:600;margin-left:3px}' +
+      '#pl-root .pl-wl td.px{padding-right:5px}' +
+      '#pl-root .pl-wl td.px,#pl-root .pl-wl td.chg{font-size:8px;font-variant-numeric:tabular-nums;letter-spacing:-0.25px}' +
+      '#pl-root .pl-wl td:first-child{font-size:8px;font-weight:700;letter-spacing:-0.15px}' +
+      '#pl-root .pl-wl .mkt{font-size:7px;color:#94a3b8;font-weight:600;margin-left:2px}' +
+      '#pl-root .pl-wl .pl-tag{width:7px;height:7px}' +
       '#pl-root .pl-inst-ctx{display:none}' + /* Z/P 改由趨勢 meta／title 承載，免搶四格寬 */
       /* factors footer（展開時可捲） */
       '#pl-root .pl-extra{flex:0 0 auto;margin-top:4px}' +

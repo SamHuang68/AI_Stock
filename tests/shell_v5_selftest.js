@@ -125,6 +125,9 @@ ok(/pl-list li\{[^}]*font-size:8px/.test(pl) && /pl-flash\{[^}]*font-size:8px/.t
 ok(/pl-sbar\{[^}]*font-size:8px/.test(pl) && /pl-sbar \.pc\{[^}]*font-size:8px/.test(pl) &&
   /#pl-sectors \.pl-note\{font-size:7px/.test(pl),
   'pulse 產業輪動縮字符合版面');
+ok(/pl-wl table\{[^}]*font-size:8px/.test(pl) && /pl-wl td\.px,#pl-root \.pl-wl td\.chg\{font-size:8px/.test(pl) &&
+  /pl-wl \.nm-only\{[^}]*font-size:7px/.test(pl),
+  'pulse 自選風險縮字符合版面');
 ok(/data-watch-mkt/.test(pl) && /filterWatchlist/.test(pl) && /pl-wl-scroll/.test(pl) &&
   /c-px/.test(pl) && /c-chg/.test(pl) && /c-tag/.test(pl),
   'pulse watchlist has TW/US tabs, fixed columns, and scroll region');
