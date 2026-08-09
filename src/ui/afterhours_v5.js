@@ -79,13 +79,9 @@
       '#ah-root .ah-sec h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;' +
         'display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;gap:4px;font-weight:700}' +
       '#ah-root .ah-sec > .ah-fill{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column}' +
-      '#ah-root .ah-tone{font-size:11px;margin:0 0 6px;font-weight:700;flex:0 0 auto}' +
-      '#ah-root .ah-ohlc{display:grid;grid-template-columns:repeat(2,1fr);gap:5px;flex:1;align-content:stretch;' +
-        'grid-auto-rows:minmax(0,1fr);min-height:0}' +
-      '#ah-root .ah-ohlc .box{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:8px 6px;' +
-        'text-align:center;display:flex;flex-direction:column;justify-content:center}' +
-      '#ah-root .ah-ohlc .box .k{font-size:9px;color:var(--tlo)}' +
-      '#ah-root .ah-ohlc .box .v{font-size:15px;font-weight:700;margin-top:2px;color:var(--thi)}' +
+      '#ah-root .ah-sec.ah-ovn{padding:5px 6px}' +
+      '#ah-root .ah-sec.ah-ovn > .ah-fill{padding-right:2px}' +
+      '#ah-root #ah-ovn-host.ovn-embed{flex:1;min-height:0}' +
       '#ah-root table.ah-tbl{width:100%;border-collapse:collapse;font-size:10px}' +
       '#ah-root table.ah-tbl th,#ah-root table.ah-tbl td{padding:3px 4px;border-bottom:1px solid var(--border);text-align:right}' +
       '#ah-root table.ah-tbl th:first-child,#ah-root table.ah-tbl td:first-child,' +
@@ -375,22 +371,14 @@
       stripCell('法人合計', fyi(total),
         '外 ' + fyi(inst && inst.foreign) + ' · 投 ' + fyi(inst && inst.trust));
 
-    var txfBlock = '<div class="ah-sec"><h4>台指期夜盤</h4>';
-    if (!txf) {
-      txfBlock += '<div class="ah-err">暫無夜盤資料（/txf）</div></div>';
-    } else {
-      txfBlock +=
-        '<div class="ah-tone ' + twCls(txf.changePct) + '">' + toneTxf(txf.changePct, txf.ampRate) + '</div>' +
-        '<div class="ah-ohlc">' +
-          '<div class="box"><div class="k">開</div><div class="v">' + fmtN(txf.open) + '</div></div>' +
-          '<div class="box"><div class="k">高</div><div class="v">' + fmtN(txf.high) + '</div></div>' +
-          '<div class="box"><div class="k">低</div><div class="v">' + fmtN(txf.low) + '</div></div>' +
-          '<div class="box"><div class="k">昨收</div><div class="v">' + fmtN(txf.prevClose) + '</div></div>' +
+    /* 左欄改掛載 overnight_v3 現有夜盤面板（雙 gauge／TXF OHLC／美股連動／TSMC／停損） */
+    var txfBlock =
+      '<div class="ah-sec ah-ovn">' +
+        '<h4>夜盤連動預警<span style="font-size:8px;color:var(--tlo);font-weight:600">台指期 · 美股連動</span></h4>' +
+        '<div class="ah-fill" id="ah-ovn-host">' +
+          '<div class="ah-loading">載入夜盤面板…</div>' +
         '</div>' +
-        '<div class="ah-note">來源 ' + (txf.source || '—') +
-          (txf.volume != null ? ' · 量 ' + fmtN(txf.volume) : '') +
-          ' · 夜盤%作隔日開盤方向參考</div></div>';
-    }
+      '</div>';
 
     var leadMax = 0;
     fut.forEach(function (r) {
@@ -490,6 +478,18 @@
       };
     });
     if (inst || latestAmt != null) fillAhInstTrend(inst || {});
+    mountOvernightPanel();
+  }
+
+  function mountOvernightPanel() {
+    var host = $('ah-ovn-host');
+    if (!host) return;
+    if (typeof window.overnightRenderInto === 'function') {
+      window.overnightRenderInto(host, { embedded: true });
+      return;
+    }
+    /* overnight 模組尚未就緒時退回精簡 OHLC（與頂列同源 /txf） */
+    host.innerHTML = '<div class="ah-err">夜盤模組載入中…請按「夜盤詳情」或重新整理</div>';
   }
 
   function jget(url) {

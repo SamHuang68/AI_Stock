@@ -84,6 +84,12 @@ ok(!/ai5-card/.test(ai) || /ai5-tools/.test(ai), 'ai launcher not card-grid only
 
 const ah = fs.readFileSync(path.join(root, 'src/ui/afterhours_v5.js'), 'utf8');
 ok(/自營/.test(ah) && /成交金額/.test(ah), 'afterhours strip has 成交／籌碼含自營');
+ok(/ah-ovn-host/.test(ah) && /overnightRenderInto/.test(ah) && /mountOvernightPanel/.test(ah) &&
+  !/ah-ohlc/.test(ah),
+  'afterhours left column embeds overnight panel (not crude OHLC)');
+const ovn = fs.readFileSync(path.join(root, 'src/chart/overnight_v3.js'), 'utf8');
+ok(/overnightRenderInto/.test(ovn) && /function renderInto/.test(ovn) && /ovn-embed/.test(ovn),
+  'overnight exposes renderInto for afterhours embed');
 
 const bd = fs.readFileSync(path.join(root, 'src/ui/breadth_v5.js'), 'utf8');
 ok(/強弱榜/.test(bd), 'breadth movers replace note panel');
