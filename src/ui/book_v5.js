@@ -129,32 +129,58 @@
   function wdStripHtml() {
     try {
       if (!window.WaveDeckBridge || typeof WaveDeckBridge.hintForSymbol !== 'function') {
-        return '<div class="bk-wd"><div class="t">WAVEDECK</div>橋接未載入</div>';
+        return '<div class="bk-wd" id="bk-wd-strip"><div class="t">WAVEDECK</div>橋接未載入</div>';
       }
+      var stream = typeof WaveDeckBridge.streamStatus === 'function' ? WaveDeckBridge.streamStatus() : null;
       var h = WaveDeckBridge.hintForSymbol('TXF');
+      var chipBit = (typeof WaveDeckBridge.chipHtml === 'function')
+        ? WaveDeckBridge.chipHtml('TXF')
+        : '';
       if (!h) {
-        return '<div class="bk-wd"><div class="t">WAVEDECK</div>執行台未連線或尚無狀態（可開 START_WAVEDECK）</div>';
+        return '<div class="bk-wd" id="bk-wd-strip"><div class="t">WAVEDECK</div>' +
+          (stream && stream.offline ? '串流失聯（REST 後援中）' : '執行台未連線或尚無狀態（可開 START_WAVEDECK）') +
+          '</div>';
       }
-      var inv = h.invalidation
-        ? ((h.invalidation.side === 'below' ? '跌破' : '突破') + ' ' + h.invalidation.price)
-        : '—';
+      var inv = h.invalidation_price != null
+        ? String(h.invalidation_price)
+        : (h.invalidation ? String(h.invalidation.price) : '—');
       var conf = (h.confidence != null && isFinite(h.confidence))
         ? Math.round(Number(h.confidence) * 100) + '%' : '—';
-      var bias = (h.biasLong != null ? Math.round(Number(h.biasLong) * 100) + '%多' : '') +
-        (h.biasShort != null ? '／' + Math.round(Number(h.biasShort) * 100) + '%空' : '');
       var spill = (h.spillover != null && isFinite(h.spillover))
         ? Math.round(Number(h.spillover) * 100) + '%' : '—';
       var rot = h.rotation || '—';
-      return '<div class="bk-wd"><div class="t">WAVEDECK · 執行狀態</div>' +
-        '標的 <b>' + esc(h.symbol) + '</b> · 動作 <b>' + esc(h.action) + '</b> · 信心 <b>' + conf + '</b><br>' +
-        '部位 <b>' + esc(h.qty != null ? h.qty : '—') + '</b> · 模式 <b>' + esc(h.mode) + '</b> · FSM <b>' + esc(h.fsm) + '</b><br>' +
-        '失效 <b>' + esc(inv) + '</b>' + (bias ? ' · 偏向 ' + esc(bias) : '') + '<br>' +
+      var dir = h.direction || '—';
+      return '<div class="bk-wd" id="bk-wd-strip"><div class="t">WAVEDECK · 執行狀態 ' + chipBit + '</div>' +
+        '標的 <b>' + esc(h.symbol) + '</b> · 方向 <b>' + esc(dir) + '</b> · 動作 <b>' + esc(h.action) + '</b> · 信心 <b>' + conf + '</b><br>' +
+        '部位 <b>' + esc(h.position_size != null ? h.position_size : (h.qty != null ? h.qty : '—')) +
+        '</b> · 模式 <b>' + esc(h.wd_mode || h.mode) + '</b> · FSM <b>' + esc(h.fsm) + '</b><br>' +
+        '防守／失效 <b>' + esc(inv) + '</b><br>' +
         '宏觀風格 <b>' + esc(h.style != null ? h.style : '—') + '</b> · 輪動 <b>' + esc(rot) +
         '</b> · 外溢 <b>' + esc(spill) + '</b>' +
         '</div>';
     } catch (e) {
       return '';
     }
+  }
+
+  function _bindWdChipLive() {
+    if (_bindWdChipLive._on) return;
+    _bindWdChipLive._on = true;
+    var refresh = function () {
+      var el = document.getElementById('bk-wd-strip');
+      if (!el) return;
+      var html = wdStripHtml();
+      if (!html) return;
+      var wrap = document.createElement('div');
+      wrap.innerHTML = html;
+      var neu = wrap.firstChild;
+      if (neu && el.parentNode) el.parentNode.replaceChild(neu, el);
+    };
+    try {
+      window.addEventListener('wavedeck:chip', refresh);
+      window.addEventListener('wavedeck:full_sync', refresh);
+      window.addEventListener('wavedeck:stream', refresh);
+    } catch (e) {}
   }
 
   function bars(obj, color) {
@@ -356,16 +382,23 @@
           return;
         }
         var paint = function () { render(x.d); };
-        var pull = window.WaveDeckBridge && (
-          typeof WaveDeckBridge.fetchChipState === 'function'
-            ? WaveDeckBridge.fetchChipState
-            : WaveDeckBridge.fetchState
-        );
-        if (typeof pull === 'function') {
-          // Prefer ST bus cache (WD async push) — avoid blocking Book on WD pull
-          pull.call(WaveDeckBridge, false).then(paint).catch(paint);
-        } else {
+        _bindWdChipLive();
+        var stream = window.WaveDeckBridge && typeof WaveDeckBridge.streamStatus === 'function'
+          ? WaveDeckBridge.streamStatus() : null;
+        // SSE store warm → paint immediately; else one REST hydrate
+        if (stream && stream.ok && stream.chips > 0) {
           paint();
+        } else {
+          var pull = window.WaveDeckBridge && (
+            typeof WaveDeckBridge.fetchChipState === 'function'
+              ? WaveDeckBridge.fetchChipState
+              : WaveDeckBridge.fetchState
+          );
+          if (typeof pull === 'function') {
+            pull.call(WaveDeckBridge, false).then(paint).catch(paint);
+          } else {
+            paint();
+          }
         }
       })
       .catch(function (e) {

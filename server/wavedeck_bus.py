@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Stock Terminal ↔ WaveDeck reverse bus + shared cost meter.
+"""Stock Terminal ↔ WaveDeck reverse bus + shared cost meter + SSE fan-out.
 
-WD → ST: POST /bridge/wavedeck（部位／FSM／成本回報）
+WD → ST: POST /bridge/wavedeck（部位／FSM／成本回報；狀態變更推播）
+ST → Browser: GET /bridge/wavedeck/stream（SSE；FULL_SYNC／POSITION_STATE_CHANGE）
 ST 計價：本機 LLM 呼叫次數、雲端估算 USD；合併 WD costs 供頂列／Pulse 顯示。
+
+Chip payload 極度輕量：不含 K 線／推論全文，僅 UI 必要欄位。
 """
 from __future__ import annotations
 
 import json
+import queue
 import threading
 import time
 from copy import deepcopy
@@ -23,6 +27,7 @@ STORE = DATA / 'wavedeck_bus.json'
 WD_PORTS = (18433, 18434, 18765, 28765, 38433, 8765)
 
 _lock = threading.RLock()
+_subscribers: list[queue.Queue] = []
 _state: dict[str, Any] = {
     'report': None,  # last WD → ST payload
     'report_at': None,
@@ -159,6 +164,9 @@ def accept_report(body: dict[str, Any]) -> dict[str, Any]:
         'received_at': _now_iso(),
         'received_epoch_ms': int(time.time() * 1000),
     }
+    # Lightweight chip (also accept pre-built chip from WD if present)
+    chip_in = body.get('chip') if isinstance(body.get('chip'), dict) else None
+    report['chip'] = chip_in or chip_from_report(report)
 
     with _lock:
         _state['report'] = report
@@ -194,6 +202,11 @@ def accept_report(body: dict[str, Any]) -> dict[str, Any]:
                 pass
         c['updated_at'] = report['received_at']
     _save()
+    # Fan-out to SSE browsers (non-blocking)
+    try:
+        broadcast(make_event('POSITION_STATE_CHANGE', report['chip'], report=report))
+    except Exception:
+        pass
     return snapshot()
 
 
@@ -270,6 +283,12 @@ def snapshot() -> dict[str, Any]:
             'combined_usd_est': round(st_cloud + wd_day, 4),
             'wd_provider': costs.get('wd_provider'),
         },
+        'chip': (report or {}).get('chip') if isinstance(report, dict) else None,
+        'chips': (
+            [(report or {}).get('chip')]
+            if isinstance(report, dict) and (report or {}).get('chip')
+            else []
+        ),
         'ts': _now_iso(),
         'epoch_ms': now_ms,
     }
@@ -278,3 +297,153 @@ def snapshot() -> dict[str, Any]:
 def last_report() -> Optional[dict[str, Any]]:
     with _lock:
         return deepcopy(_state['report'])
+
+
+def _norm_sym(sym: Any) -> str:
+    s = str(sym or 'TXF').upper().replace('.TW', '').replace('.TWO', '').strip()
+    return s or 'TXF'
+
+
+def _market_of(sym: str) -> str:
+    if sym in {'TXF', 'TX', 'TWII', '^TWII', 'MXF'} or (sym.isdigit() and len(sym) <= 6):
+        return 'TW'
+    return 'US'
+
+
+def chip_from_report(report: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """Build lightweight POSITION_STATE chip for ST UI (no bars / no LLM text)."""
+    if not isinstance(report, dict):
+        return None
+    pos = report.get('positions') if isinstance(report.get('positions'), dict) else {}
+    ai = report.get('ai') if isinstance(report.get('ai'), dict) else {}
+    inv = ai.get('invalidation') if isinstance(ai.get('invalidation'), dict) else {}
+    ov = report.get('st_overlay') if isinstance(report.get('st_overlay'), dict) else {}
+    qty_raw = pos.get('account')
+    if qty_raw is None:
+        qty_raw = pos.get('txt_target')
+    try:
+        qty_i = int(qty_raw) if qty_raw is not None else 0
+    except Exception:
+        qty_i = 0
+    if qty_i > 0:
+        direction = 'LONG'
+    elif qty_i < 0:
+        direction = 'SHORT'
+    else:
+        direction = 'EMPTY'
+    sym = _norm_sym(report.get('symbol'))
+    mode = str(report.get('mode') or 'paper').lower()
+    try:
+        inv_px = float(inv['price']) if inv.get('price') is not None else None
+    except Exception:
+        inv_px = None
+    try:
+        conf = float(ai['confidence']) if ai.get('confidence') is not None else None
+    except Exception:
+        conf = None
+    return {
+        'symbol': sym,
+        'market': _market_of(sym),
+        'direction': direction,
+        'position_size': abs(qty_i),
+        'invalidation_price': inv_px,
+        'invalidation_side': str(inv.get('side') or 'below')[:12],
+        'wd_mode': 'REAL' if mode == 'live' else 'PAPER',
+        'ai_confidence': conf,
+        'action': ai.get('action'),
+        'action_label': ai.get('action_label'),
+        'fsm': report.get('fsm'),
+        'style': report.get('style'),
+        'fail_safe': bool(ov.get('fail_safe')),
+        'spillover_prob': ov.get('spillover_prob'),
+        'macro_style': ov.get('aggressiveness'),
+        'rotation': ov.get('rotation'),
+        'hot_stage': ov.get('hot_stage'),
+        'link_status': (report.get('st_link') or {}).get('status') if isinstance(report.get('st_link'), dict) else None,
+    }
+
+
+def make_event(
+    event_type: str,
+    data: Any,
+    *,
+    report: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """SSE / bus event envelope."""
+    snap_costs = None
+    try:
+        with _lock:
+            c = deepcopy(_state.get('costs') or {})
+        wd_day = float(c.get('wd_day_usd') or 0)
+        st_cloud = float(c.get('st_cloud_usd_est') or 0)
+        snap_costs = {
+            'combined_usd_est': round(st_cloud + wd_day, 4),
+            'wd_day_usd': wd_day,
+            'wd_provider': c.get('wd_provider'),
+            'st_local_calls': int(c.get('st_local_calls') or 0),
+        }
+    except Exception:
+        snap_costs = None
+    return {
+        'event_type': str(event_type or 'POSITION_STATE_CHANGE'),
+        'timestamp': int(time.time()),
+        'data': data,
+        'costs': snap_costs,
+        'push_reason': (report or {}).get('push_reason') if isinstance(report, dict) else None,
+        'st_link': (report or {}).get('st_link') if isinstance(report, dict) else None,
+    }
+
+
+def full_sync_event() -> dict[str, Any]:
+    """On SSE connect: push all known chips so ST UI matches WD."""
+    with _lock:
+        report = deepcopy(_state.get('report'))
+    chip = None
+    if isinstance(report, dict):
+        chip = report.get('chip') or chip_from_report(report)
+    positions = [chip] if chip else []
+    return make_event('FULL_SYNC', {'positions': positions}, report=report if isinstance(report, dict) else None)
+
+
+def subscribe(maxsize: int = 32) -> queue.Queue:
+    q: queue.Queue = queue.Queue(maxsize=max(4, int(maxsize)))
+    with _lock:
+        _subscribers.append(q)
+    return q
+
+
+def unsubscribe(q: queue.Queue) -> None:
+    with _lock:
+        try:
+            _subscribers.remove(q)
+        except ValueError:
+            pass
+
+
+def broadcast(event: dict[str, Any]) -> int:
+    """Deliver event to all SSE subscribers; drop oldest if a queue is full."""
+    if not isinstance(event, dict):
+        return 0
+    with _lock:
+        subs = list(_subscribers)
+    n = 0
+    for q in subs:
+        try:
+            q.put_nowait(event)
+            n += 1
+        except queue.Full:
+            try:
+                q.get_nowait()
+            except Exception:
+                pass
+            try:
+                q.put_nowait(event)
+                n += 1
+            except Exception:
+                pass
+    return n
+
+
+def subscriber_count() -> int:
+    with _lock:
+        return len(_subscribers)

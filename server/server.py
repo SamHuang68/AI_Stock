@@ -1582,6 +1582,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 'jobs': jobs,  # H4：回補／刷新進度
                 'wavedeck': wd_bus,
             }, ensure_ascii=False, default=str).encode())
+        elif p == '/bridge/wavedeck/stream' or p.startswith('/bridge/wavedeck/stream?'):
+            self._handle_wavedeck_sse()
         elif p == '/bridge/wavedeck' or p.startswith('/bridge/wavedeck?'):
             self._handle_wavedeck_bridge_get()
         elif p == '/api/cost-meter' or p.startswith('/api/cost-meter?'):
@@ -1762,6 +1764,62 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._ok(json.dumps(wdb.snapshot(), ensure_ascii=False).encode())
         except Exception as e:
             self._err('wavedeck bus: ' + str(e), 500)
+
+    def _handle_wavedeck_sse(self):
+        """ST → Browser SSE：FULL_SYNC 後推播 POSITION_STATE_CHANGE（取代輪詢）。"""
+        import queue as _queue
+        try:
+            import wavedeck_bus as wdb
+        except Exception as e:
+            self._err('wavedeck bus: ' + str(e), 500)
+            return
+        q = wdb.subscribe()
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+            self.send_header('Cache-Control', 'no-cache, no-transform')
+            self.send_header('Connection', 'keep-alive')
+            self.send_header('X-Accel-Buffering', 'no')
+            self.end_headers()
+
+            def _write_event(evt: dict) -> None:
+                et = str(evt.get('event_type') or 'message')
+                payload = json.dumps(evt, ensure_ascii=False, default=str)
+                chunk = ('event: %s\ndata: %s\n\n' % (et, payload)).encode('utf-8')
+                self.wfile.write(chunk)
+                self.wfile.flush()
+
+            # Reconnect handshake: full chip snapshot
+            _write_event(wdb.full_sync_event())
+            while True:
+                try:
+                    evt = q.get(timeout=15.0)
+                except _queue.Empty:
+                    # keep-alive comment (EventSource auto-reconnect on drop)
+                    try:
+                        self.wfile.write(b': ping\n\n')
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        break
+                    continue
+                if not isinstance(evt, dict):
+                    continue
+                try:
+                    _write_event(evt)
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    break
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        except Exception as e:
+            try:
+                sys.stderr.write('[st] wavedeck sse: %s\n' % e)
+            except Exception:
+                pass
+        finally:
+            try:
+                wdb.unsubscribe(q)
+            except Exception:
+                pass
 
     def _handle_wavedeck_bridge_post(self):
         """WaveDeck → ST 反向繁線：收 FSM／部位／成本。"""

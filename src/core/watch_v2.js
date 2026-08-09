@@ -517,50 +517,59 @@ const BIAS_META = {
 };
 
 // ── Render: WATCH tab ──────────────────────────────────────
-function _wdChipHtml(code) {
+function _wdChipHtml(code, lastPrice) {
   try {
-    if (!window.WaveDeckBridge || typeof WaveDeckBridge.hintForSymbol !== 'function') return '';
-    const h = WaveDeckBridge.hintForSymbol(code);
+    if (!window.WaveDeckBridge) return '';
+    if (typeof WaveDeckBridge.chipHtml === 'function') {
+      return WaveDeckBridge.chipHtml(code, { lastPrice: lastPrice });
+    }
+    if (typeof WaveDeckBridge.hintForSymbol !== 'function') return '';
+    const h = WaveDeckBridge.hintForSymbol(code, null, lastPrice);
     if (!h) return '';
+    if (h.linkOffline) {
+      return `<span data-wd-chip="${String(code || '').toUpperCase()}" title="WaveDeck 失聯" style="font-family:monospace;font-size:8.5px;font-weight:700;padding:2px 6px;border-radius:3px;background:rgba(148,163,184,.08);color:#94a3b8;border:1px solid rgba(148,163,184,.45);white-space:nowrap">WD 失聯</span>`;
+    }
     if (h.macroOnly) {
       const spill = (h.spillover != null && isFinite(h.spillover))
         ? Math.round(Number(h.spillover) * 100) + '%' : '';
       const tip = ['宏觀覆寫', h.style != null && ('風格 ' + h.style),
-        h.rotation && ('輪動 ' + h.rotation), spill && ('外溢 ' + spill),
-        h.scStage && ('鏈段 ' + h.scStage), h.hotStage && ('最強 ' + h.hotStage), h.mode]
+        h.rotation && ('輪動 ' + h.rotation), spill && ('外溢 ' + spill), h.mode]
         .filter(Boolean).join(' · ');
       const label = h.style != null ? ('MAC ' + h.style) : 'MAC';
-      const scShort = h.scStage
-        ? String(h.scStage).split('／')[0].split('/')[0].slice(0, 4)
-        : '';
-      return `<span title="WaveDeck: ${tip}" style="font-family:monospace;font-size:8.5px;font-weight:700;padding:2px 6px;border-radius:3px;background:rgba(148,163,184,.1);color:#94a3b8;border:1px solid rgba(148,163,184,.35);white-space:nowrap">WD ${label}${spill ? ' · ' + spill : ''}${scShort ? ' · ' + scShort : ''}</span>`;
+      return `<span data-wd-chip="${String(code || '').toUpperCase()}" title="WaveDeck: ${tip}" style="font-family:monospace;font-size:8.5px;font-weight:700;padding:2px 6px;border-radius:3px;background:rgba(148,163,184,.1);color:#94a3b8;border:1px solid rgba(148,163,184,.35);white-space:nowrap">WD ${label}${spill ? ' · ' + spill : ''}</span>`;
     }
-    const inv = h.invalidation
-      ? ((h.invalidation.side === 'below' ? '跌破' : '突破') + ' ' + h.invalidation.price)
-      : '';
-    const conf = (h.confidence != null && isFinite(h.confidence))
-      ? Math.round(Number(h.confidence) * 100) + '%' : '';
-    const tip = [h.action, conf && ('信心 ' + conf), inv && ('失效 ' + inv), h.mode].filter(Boolean).join(' · ');
-    return `<span title="WaveDeck: ${tip}" style="font-family:monospace;font-size:8.5px;font-weight:700;padding:2px 6px;border-radius:3px;background:rgba(103,232,249,.1);color:var(--cyan);border:1px solid rgba(103,232,249,.35);white-space:nowrap">WD ${h.action}${conf ? ' ' + conf : ''}${inv ? ' · ' + inv : ''}</span>`;
+    const dirZh = h.direction === 'LONG' ? '多' : h.direction === 'SHORT' ? '空' : '觀望';
+    const size = h.position_size != null ? h.position_size : (h.qty != null ? Math.abs(Number(h.qty)) : 0);
+    const invPx = h.invalidation_price != null ? h.invalidation_price
+      : (h.invalidation && h.invalidation.price);
+    const label = (h.direction === 'EMPTY' || !size)
+      ? ((h.wd_mode === 'PAPER' || h.mode === 'paper' ? '紙上' : '實盤') + ' | ' + dirZh)
+      : (dirZh + ' ' + size + (invPx != null ? (' | 防守 ' + invPx) : ''));
+    const tip = h.tip || [h.action, invPx != null && ('失效 ' + invPx), h.mode].filter(Boolean).join(' · ');
+    return `<span data-wd-chip="${String(code || '').toUpperCase()}" title="WaveDeck: ${tip}" style="font-family:monospace;font-size:8.5px;font-weight:700;padding:2px 6px;border-radius:3px;background:rgba(103,232,249,.1);color:var(--cyan);border:1px solid rgba(103,232,249,.35);white-space:nowrap">WD ${label}</span>`;
   } catch (_) { return ''; }
 }
 
 function _wdWatchRefreshOnce() {
+  // SSE primary: chips patch via wavedeck:chip → paintChipNodes.
+  // REST fallback only when stream offline / store empty (throttled).
   if (!window.WaveDeckBridge) return;
+  var st = typeof WaveDeckBridge.streamStatus === 'function' ? WaveDeckBridge.streamStatus() : null;
+  if (st && st.ok && st.chips > 0) return;
   var pull = typeof WaveDeckBridge.fetchChipState === 'function'
     ? WaveDeckBridge.fetchChipState
     : WaveDeckBridge.fetchState;
   if (typeof pull !== 'function') return;
   if (_wdWatchRefreshOnce._busy) return;
-  if (_wdWatchRefreshOnce._paintedAt && (Date.now() - _wdWatchRefreshOnce._paintedAt) < 8000) return;
+  if (_wdWatchRefreshOnce._paintedAt && (Date.now() - _wdWatchRefreshOnce._paintedAt) < 15000) return;
   _wdWatchRefreshOnce._busy = true;
-  // Prefer ST bus (WD async push) — no N× pull against WD
-  pull.call(WaveDeckBridge, false).then(function (st) {
+  pull.call(WaveDeckBridge, false).then(function (s) {
     _wdWatchRefreshOnce._busy = false;
-    if (!st) return;
+    if (!s) return;
     _wdWatchRefreshOnce._paintedAt = Date.now();
     try {
-      if (typeof window.renderWatchPanel === 'function') window.renderWatchPanel();
+      if (typeof WaveDeckBridge.paintChipNodes === 'function') WaveDeckBridge.paintChipNodes('');
+      else if (typeof window.renderWatchPanel === 'function') window.renderWatchPanel();
     } catch (_) {}
   }).catch(function () { _wdWatchRefreshOnce._busy = false; });
 }
@@ -636,7 +645,7 @@ function renderStockCard(w) {
       <span style="font-family:monospace;font-size:11px;font-weight:600;color:var(--thi);white-space:nowrap">${lastPrice != null ? lastPrice.toFixed(2) : '—'}</span>
     </div>
     <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;justify-content:flex-end">
-      ${_wdChipHtml(w.sym)}
+      ${_wdChipHtml(w.sym, lastPrice)}
       <span style="font-family:monospace;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:${biasM.bg};color:${biasM.col};white-space:nowrap">${conf.biasIcon} ${conf.biasLbl}</span>
       <span data-act="remove-stock" data-sym="${w.sym}" title="移除整檔" style="color:var(--tf);font-size:13px;padding:0 4px;cursor:pointer;border-radius:3px;font-weight:700">×</span>
     </div>

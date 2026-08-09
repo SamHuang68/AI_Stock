@@ -267,6 +267,36 @@ class WaveDeckSmoke(unittest.TestCase):
                 inv = ((snap.get("ai") or {}).get("invalidation") or {})
                 self.assertGreater(float(inv.get("price")), 44000)
 
+    def test_st_push_chip_lightweight(self):
+        from server.st_push import build_report, _chip_from_snap
+
+        snap = {
+            "fsm": "InPosition",
+            "mode": "paper",
+            "style": 55,
+            "symbol": "TXF",
+            "kill_switch": False,
+            "ai": {
+                "action": "HOLD",
+                "action_label": "維持續抱",
+                "confidence": 0.7,
+                "invalidation": {"side": "below", "price": 44800},
+            },
+            "positions": {"account": 2, "txt_target": 2},
+            "costs": {},
+            "account": {},
+            "st_overlay": {"delever": False, "spillover_prob": 0.5},
+            "st_link": {"status": "ok"},
+        }
+        chip = _chip_from_snap(snap)
+        self.assertEqual(chip["direction"], "LONG")
+        self.assertEqual(chip["position_size"], 2)
+        self.assertEqual(chip["wd_mode"], "PAPER")
+        self.assertNotIn("candles", chip)
+        rep = build_report(snap, reason="unit")
+        self.assertEqual(rep["event_type"], "POSITION_STATE_CHANGE")
+        self.assertEqual(rep["chip"]["invalidation_price"], 44800)
+
 
 if __name__ == "__main__":
     unittest.main()

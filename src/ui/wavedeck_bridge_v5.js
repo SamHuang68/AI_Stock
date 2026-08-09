@@ -4,7 +4,9 @@
  * - 側欄「執行」→ open()
  * - syncFromMarket({score, advRatio, rotationHealth, spilloverProb, …})
  *   → POST /bridge/st（節流／去重；輪動／外溢寫入 meta）
- * - fetchCostMeter / lastWdReport ← ST GET /bridge/wavedeck（反向繁線）
+ * - WD→ST→Browser：SSE /bridge/wavedeck/stream（FULL_SYNC／POSITION_STATE_CHANGE）
+ *   取代 Watch／Book 對 WD 的 REST 輪詢；chip 以 symbol 字典原子更新
+ * - fetchCostMeter / lastWdReport ← ST GET /bridge/wavedeck（REST 後援）
  * - styleFromScore：廣度＋體質＋輪動＋外溢 → 進場風格 35–65
  * 鐵律：失敗僅 toast／console，不阻斷 ST 主流程。
  * ========================================================================== */
@@ -358,6 +360,14 @@
   var _stateAt = 0;
   var STATE_TTL_MS = 8000;
 
+  /** symbol → lightweight POSITION_STATE chip (SSE / bus). */
+  var _chipStore = Object.create(null);
+  var _stream = null;
+  var _streamOk = false;
+  var _streamRetry = null;
+  var _macroChip = null; // last macro overlay soft-chip fields
+  var _linkOffline = false;
+
   function stateFromBusReport(report) {
     if (!report) return null;
     return {
@@ -372,8 +382,169 @@
       costs: report.costs || {},
       account: report.account || {},
       st_link: report.st_link || {},
+      chip: report.chip || null,
       fromBus: true
     };
+  }
+
+  function normSym(code) {
+    return String(code || '').toUpperCase().replace(/\.TW|\.TWO/g, '').trim();
+  }
+
+  function chipToHint(chip, opts) {
+    opts = opts || {};
+    if (!chip) return null;
+    var dir = chip.direction || 'EMPTY';
+    var qty = chip.position_size != null ? chip.position_size : 0;
+    var inv = chip.invalidation_price != null
+      ? { price: chip.invalidation_price, side: chip.invalidation_side || 'below' }
+      : null;
+    var mode = (chip.wd_mode === 'REAL') ? 'live' : 'paper';
+    var macroOnly = !!opts.macroOnly;
+    return {
+      symbol: chip.symbol,
+      market: chip.market || 'TW',
+      direction: dir,
+      position_size: qty,
+      action: chip.action_label || chip.action || (macroOnly ? '宏觀' : '—'),
+      action_label: chip.action_label || chip.action,
+      confidence: chip.ai_confidence,
+      invalidation: inv,
+      invalidation_price: chip.invalidation_price,
+      qty: dir === 'SHORT' ? -qty : qty,
+      mode: mode,
+      wd_mode: chip.wd_mode || 'PAPER',
+      fsm: chip.fsm || '—',
+      style: chip.macro_style != null ? chip.macro_style : chip.style,
+      spillover: chip.spillover_prob,
+      rotation: chip.rotation,
+      hotStage: chip.hot_stage || null,
+      fail_safe: !!chip.fail_safe,
+      linkOffline: !!opts.linkOffline,
+      macroOnly: macroOnly,
+      compact: true
+    };
+  }
+
+  function upsertChip(chip, meta) {
+    if (!chip || !chip.symbol) return;
+    var sym = normSym(chip.symbol);
+    chip = Object.assign({}, chip, { symbol: sym });
+    _chipStore[sym] = chip;
+    // TXF aliases
+    if (sym === 'TXF' || sym === 'TX') {
+      _chipStore.TXF = chip;
+      _chipStore.TX = chip;
+    }
+    if (chip.macro_style != null || chip.spillover_prob != null) {
+      _macroChip = {
+        style: chip.macro_style != null ? chip.macro_style : chip.style,
+        spillover: chip.spillover_prob,
+        rotation: chip.rotation,
+        hotStage: chip.hot_stage,
+        fail_safe: !!chip.fail_safe
+      };
+    }
+    _linkOffline = false;
+    try {
+      window.dispatchEvent(new CustomEvent('wavedeck:chip', {
+        detail: {
+          symbol: sym,
+          chip: chip,
+          hint: chipToHint(chip),
+          event_type: (meta && meta.event_type) || 'POSITION_STATE_CHANGE',
+          costs: meta && meta.costs,
+          timestamp: meta && meta.timestamp
+        }
+      }));
+    } catch (e) {}
+  }
+
+  function applyStreamEvent(evt) {
+    if (!evt || typeof evt !== 'object') return;
+    var et = evt.event_type || 'POSITION_STATE_CHANGE';
+    if (evt.costs) {
+      _costCache = Object.assign(_costCache || { ok: true }, { costs: evt.costs, ok: true });
+      _costAt = Date.now();
+    }
+    if (et === 'FULL_SYNC') {
+      var pack = evt.data || {};
+      var list = Array.isArray(pack.positions) ? pack.positions : [];
+      _chipStore = Object.create(null);
+      for (var i = 0; i < list.length; i++) upsertChip(list[i], { event_type: 'FULL_SYNC', costs: evt.costs, timestamp: evt.timestamp });
+      try {
+        window.dispatchEvent(new CustomEvent('wavedeck:full_sync', { detail: evt }));
+      } catch (e2) {}
+      return;
+    }
+    if (et === 'LINK_STATUS') {
+      var st = (evt.data && evt.data.status) || '';
+      _linkOffline = (st === 'down' || st === 'offline');
+      try {
+        window.dispatchEvent(new CustomEvent('wavedeck:link', { detail: evt.data || {} }));
+      } catch (e3) {}
+      return;
+    }
+    // POSITION_STATE_CHANGE
+    if (evt.data && evt.data.symbol) {
+      upsertChip(evt.data, { event_type: et, costs: evt.costs, timestamp: evt.timestamp });
+    }
+  }
+
+  function setStreamOk(ok) {
+    var prev = _streamOk;
+    _streamOk = !!ok;
+    if (prev !== _streamOk) {
+      _linkOffline = !_streamOk;
+      try {
+        window.dispatchEvent(new CustomEvent('wavedeck:stream', {
+          detail: { ok: _streamOk, offline: _linkOffline }
+        }));
+      } catch (e) {}
+    }
+  }
+
+  function startChipStream() {
+    if (typeof EventSource === 'undefined') return;
+    if (_stream) {
+      try { _stream.close(); } catch (e0) {}
+      _stream = null;
+    }
+    var url = (ST_URL || '') + '/bridge/wavedeck/stream';
+    try {
+      _stream = new EventSource(url);
+    } catch (e1) {
+      setStreamOk(false);
+      scheduleStreamRetry();
+      return;
+    }
+    _stream.addEventListener('FULL_SYNC', function (ev) {
+      try { applyStreamEvent(JSON.parse(ev.data)); setStreamOk(true); } catch (e) {}
+    });
+    _stream.addEventListener('POSITION_STATE_CHANGE', function (ev) {
+      try { applyStreamEvent(JSON.parse(ev.data)); setStreamOk(true); } catch (e) {}
+    });
+    _stream.addEventListener('LINK_STATUS', function (ev) {
+      try { applyStreamEvent(JSON.parse(ev.data)); } catch (e) {}
+    });
+    _stream.onmessage = function (ev) {
+      try { applyStreamEvent(JSON.parse(ev.data)); setStreamOk(true); } catch (e) {}
+    };
+    _stream.onopen = function () { setStreamOk(true); };
+    _stream.onerror = function () {
+      setStreamOk(false);
+      try { if (_stream) _stream.close(); } catch (e2) {}
+      _stream = null;
+      scheduleStreamRetry();
+    };
+  }
+
+  function scheduleStreamRetry() {
+    if (_streamRetry) return;
+    _streamRetry = setTimeout(function () {
+      _streamRetry = null;
+      startChipStream();
+    }, 4000);
   }
 
   function fetchState(force) {
@@ -389,13 +560,30 @@
           var st = j && j.state ? j.state : null;
           _stateCache = st;
           _stateAt = Date.now();
+          if (st && st.symbol) {
+            // seed chip store from WD pull fallback
+            var syn = stateFromBusReport(st);
+            if (syn) {
+              var fakeReport = {
+                symbol: syn.symbol,
+                mode: syn.mode,
+                fsm: syn.fsm,
+                style: syn.style,
+                ai: syn.ai,
+                positions: syn.positions,
+                st_overlay: syn.st_overlay,
+                st_link: syn.st_link
+              };
+              // derive via REST meter path when possible
+            }
+          }
           return st;
         })
         .catch(function () { return null; });
     });
   }
 
-  /** ST reverse bus / shared cost meter. */
+  /** ST reverse bus / shared cost meter (REST fallback; SSE is primary). */
   function fetchCostMeter(force) {
     var now = Date.now();
     if (!force && _costCache && (now - _costAt) < COST_TTL_MS) {
@@ -408,12 +596,13 @@
         if (j && j.ok) {
           _costCache = j;
           _costAt = Date.now();
-          // Prefer async-pushed bus for chip cache (no WD pull)
           var syn = stateFromBusReport(j.report);
           if (syn) {
             _stateCache = syn;
             _stateAt = Date.now();
           }
+          if (j.chip) upsertChip(j.chip, { event_type: 'REST_SNAPSHOT', costs: j.costs });
+          else if (j.report && j.report.chip) upsertChip(j.report.chip, { event_type: 'REST_SNAPSHOT', costs: j.costs });
         }
         return j;
       })
@@ -421,10 +610,40 @@
   }
 
   /**
-   * Chip/UI state: prefer ST bus cache (WD push), fallback pull WD.
-   * Avoids N-symbol polling against WD during watchlist paint.
+   * Chip/UI state: prefer SSE chip store → ST bus REST → WD pull.
    */
   function fetchChipState(force) {
+    var keys = Object.keys(_chipStore);
+    if (!force && keys.length) {
+      var primary = _chipStore.TXF || _chipStore[keys[0]];
+      if (primary) {
+        return Promise.resolve({
+          symbol: primary.symbol,
+          mode: primary.wd_mode === 'REAL' ? 'live' : 'paper',
+          fsm: primary.fsm,
+          style: primary.style,
+          ai: {
+            action: primary.action,
+            action_label: primary.action_label,
+            confidence: primary.ai_confidence,
+            invalidation: primary.invalidation_price != null
+              ? { price: primary.invalidation_price, side: primary.invalidation_side || 'below' }
+              : {}
+          },
+          positions: {
+            account: primary.direction === 'SHORT'
+              ? -primary.position_size
+              : primary.position_size
+          },
+          st_overlay: {
+            aggressiveness: primary.macro_style,
+            spillover_prob: primary.spillover_prob,
+            fail_safe: primary.fail_safe
+          },
+          fromChipStore: true
+        });
+      }
+    }
     return fetchCostMeter(!!force).then(function (meter) {
       if (meter && meter.report) {
         var syn = stateFromBusReport(meter.report);
@@ -438,15 +657,134 @@
     return (_costCache && _costCache.report) || null;
   }
 
-  function normSym(code) {
-    return String(code || '').toUpperCase().replace(/\.TW|\.TWO/g, '').trim();
+  function getChip(code) {
+    var want = normSym(code);
+    if (!want) return _chipStore.TXF || null;
+    return _chipStore[want] || null;
   }
 
-  /** Return compact WD hint for a symbol (TXF match or macro-only for equities). */
-  function hintForSymbol(code, state) {
-    var st = state || _stateCache;
-    if (!st) return null;
+  function streamStatus() {
+    return { ok: _streamOk, offline: _linkOffline, chips: Object.keys(_chipStore).length };
+  }
+
+  /** Near invalidation (<1%) → alert styling. */
+  function nearInvalidation(chipOrHint, lastPrice) {
+    var px = Number(lastPrice);
+    var inv = null;
+    if (chipOrHint && chipOrHint.invalidation_price != null) inv = Number(chipOrHint.invalidation_price);
+    else if (chipOrHint && chipOrHint.invalidation && chipOrHint.invalidation.price != null) {
+      inv = Number(chipOrHint.invalidation.price);
+    }
+    if (!isFinite(px) || !isFinite(inv) || inv === 0) return false;
+    return Math.abs(px - inv) / Math.abs(inv) < 0.01;
+  }
+
+  /**
+   * Compact chip HTML for Watch／Book atomic paint.
+   * @param {string} code
+   * @param {{lastPrice?:number}|number} [optsOrPrice]
+   */
+  function chipHtml(code, optsOrPrice) {
+    var opts = (optsOrPrice != null && typeof optsOrPrice === 'object') ? optsOrPrice : { lastPrice: optsOrPrice };
     var want = normSym(code);
+    var h = hintForSymbol(want, null, opts.lastPrice);
+    if (!h) return '';
+    var alert = !!h.alert || nearInvalidation(h, opts.lastPrice);
+    var offline = !!h.linkOffline || _linkOffline;
+    var border = offline ? 'rgba(148,163,184,.45)'
+      : alert ? 'rgba(251,146,60,.85)'
+      : h.macroOnly ? 'rgba(148,163,184,.35)'
+      : (h.wd_mode === 'REAL' || h.mode === 'live') ? 'rgba(52,211,153,.55)' : 'rgba(103,232,249,.35)';
+    var color = offline ? '#94a3b8'
+      : alert ? '#fb923c'
+      : h.macroOnly ? '#94a3b8'
+      : (h.wd_mode === 'REAL' || h.mode === 'live') ? '#34d399' : 'var(--cyan)';
+    var bg = offline ? 'rgba(148,163,184,.08)'
+      : alert ? 'rgba(251,146,60,.12)'
+      : h.macroOnly ? 'rgba(148,163,184,.1)'
+      : 'rgba(103,232,249,.1)';
+    var anim = alert && !offline ? 'animation:wdChipPulse 1.1s ease-in-out infinite;' : '';
+    var label;
+    if (offline) {
+      label = 'WD 失聯';
+    } else if (h.macroOnly) {
+      var spill = (h.spillover != null && isFinite(h.spillover))
+        ? Math.round(Number(h.spillover) * 100) + '%' : '';
+      label = 'MAC' + (h.style != null ? ' ' + h.style : '') + (spill ? ' · ' + spill : '');
+    } else {
+      var dirZh = h.direction === 'LONG' ? '多' : h.direction === 'SHORT' ? '空' : '觀望';
+      var size = h.position_size != null ? h.position_size : (h.qty != null ? Math.abs(h.qty) : 0);
+      var invTxt = h.invalidation_price != null
+        ? ('防守 ' + h.invalidation_price)
+        : (h.invalidation && h.invalidation.price != null ? ('防守 ' + h.invalidation.price) : '');
+      if (h.direction === 'EMPTY' || !size) {
+        label = (h.wd_mode === 'PAPER' || h.mode === 'paper' ? '紙上' : '實盤') + ' | ' + dirZh;
+      } else {
+        label = dirZh + ' ' + size + (invTxt ? ' | ' + invTxt : '');
+      }
+    }
+    var tip = h.tip || [
+      offline ? 'WaveDeck 串流中斷' : 'WaveDeck',
+      h.action,
+      (h.confidence != null && isFinite(h.confidence)) && ('AI 信心 ' + Math.round(Number(h.confidence) * 100) + '%'),
+      h.invalidation_price != null && ('失效價 ' + h.invalidation_price),
+      h.fsm && ('FSM ' + h.fsm),
+      h.wd_mode || h.mode,
+      alert && '接近防守線'
+    ].filter(Boolean).join(' · ');
+    return '<span data-wd-chip="' + want + '" title="' + String(tip).replace(/"/g, '&quot;') + '" style="font-family:monospace;font-size:8.5px;font-weight:700;padding:2px 6px;border-radius:3px;background:' + bg + ';color:' + color + ';border:1px solid ' + border + ';white-space:nowrap;' + anim + '">WD ' + label + '</span>';
+  }
+
+  /** Return compact WD hint for a symbol (chip store → bus state → macro). */
+  function hintForSymbol(code, state, lastPrice) {
+    var want = normSym(code);
+    if (_linkOffline && !getChip(want) && !(_chipStore.TXF)) {
+      return {
+        symbol: want || 'TXF',
+        linkOffline: true,
+        macroOnly: false,
+        action: '失聯',
+        tip: 'WaveDeck 串流中斷 — 請檢查 WD／ST 連線'
+      };
+    }
+    var chip = getChip(want);
+    if (!chip && (want === 'TXF' || want === 'TX' || want === '^TWII' || want === 'TWII')) {
+      chip = _chipStore.TXF || _chipStore.TX || null;
+    }
+    if (chip) {
+      var h = chipToHint(chip, { linkOffline: _linkOffline });
+      h.alert = nearInvalidation(chip, lastPrice);
+      h.tip = [
+        h.action,
+        (h.confidence != null && isFinite(h.confidence)) && ('AI 信心度 ' + Math.round(Number(h.confidence) * 100) + '%'),
+        h.invalidation_price != null && ('預期結構防守 ' + h.invalidation_price),
+        '模式 ' + (h.wd_mode || h.mode),
+        h.fsm && ('FSM ' + h.fsm),
+        h.fail_safe && 'Fail-safe',
+        h.alert && '現價距失效價 <1%'
+      ].filter(Boolean).join(' · ');
+      return h;
+    }
+
+    var st = state || _stateCache;
+    if (!st) {
+      // Soft macro chip for equities when only overlay known
+      if (_macroChip && want && want !== 'TXF' && want !== 'TX') {
+        return {
+          symbol: want,
+          action: 'MACRO',
+          action_label: '宏觀',
+          style: _macroChip.style,
+          spillover: _macroChip.spillover,
+          rotation: _macroChip.rotation,
+          hotStage: _macroChip.hotStage,
+          macroOnly: true,
+          mode: 'paper',
+          tip: '宏觀覆寫 · 風格 ' + (_macroChip.style != null ? _macroChip.style : '—')
+        };
+      }
+      return null;
+    }
     var wdSym = normSym(st.symbol || 'TXF');
     var match = !want || want === wdSym ||
       (want === 'TXF' && (wdSym === 'TXF' || wdSym === 'TX')) ||
@@ -457,7 +795,6 @@
     var ov = st.st_overlay || {};
 
     if (!match) {
-      // Non-TXF equities: expose macro overlay (style / spillover) as soft chip
       if (ov.aggressiveness == null && !ov.note && ov.spillover_prob == null) return null;
       var stage = null;
       try {
@@ -479,27 +816,69 @@
         macroOnly: true
       };
     }
+    var qty = pos.account != null ? pos.account : pos.txt_target;
+    var qn = Number(qty) || 0;
     return {
       symbol: wdSym,
+      direction: qn > 0 ? 'LONG' : qn < 0 ? 'SHORT' : 'EMPTY',
+      position_size: Math.abs(qn),
       action: ai.action_label || ai.action || '—',
       confidence: ai.confidence,
       biasLong: ai.bias_long,
       biasShort: ai.bias_short,
       invalidation: inv.price != null ? { price: inv.price, side: inv.side || 'below' } : null,
-      qty: pos.account != null ? pos.account : pos.txt_target,
+      invalidation_price: inv.price,
+      qty: qty,
       mode: st.mode || 'paper',
+      wd_mode: (st.mode === 'live') ? 'REAL' : 'PAPER',
       fsm: st.fsm || '—',
       style: st.style,
       spillover: ov.spillover_prob,
       rotation: ov.rotation,
       hotStage: ov.hot_stage || null,
       leaders: ov.leaders || [],
-      macroOnly: false
+      macroOnly: false,
+      alert: nearInvalidation({ invalidation_price: inv.price }, lastPrice)
     };
   }
 
+  function ensureChipPulseStyle() {
+    if (document.getElementById('wd-chip-pulse-style')) return;
+    var s = document.createElement('style');
+    s.id = 'wd-chip-pulse-style';
+    s.textContent = '@keyframes wdChipPulse{0%,100%{opacity:1}50%{opacity:.55}}';
+    document.head.appendChild(s);
+  }
+
+  /** Atomic DOM patch: only nodes with data-wd-chip=symbol. */
+  function paintChipNodes(symbol, lastPrice) {
+    ensureChipPulseStyle();
+    var want = normSym(symbol);
+    var nodes = document.querySelectorAll('[data-wd-chip]');
+    if (!nodes || !nodes.length) return 0;
+    var n = 0;
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      var sym = normSym(el.getAttribute('data-wd-chip'));
+      if (want && sym !== want && !(want === 'TXF' && (sym === 'TXF' || sym === 'TX' || sym === '^TWII'))) {
+        // still allow macro soft chips refresh on FULL_SYNC (want empty)
+        if (want) continue;
+      }
+      var html = chipHtml(sym, { lastPrice: lastPrice });
+      if (!html) continue;
+      var wrap = document.createElement('div');
+      wrap.innerHTML = html;
+      var neu = wrap.firstChild;
+      if (neu && el.parentNode) {
+        el.parentNode.replaceChild(neu, el);
+        n++;
+      }
+    }
+    return n;
+  }
+
   window.WaveDeckBridge = {
-    VERSION: '5.0-WD7',
+    VERSION: '5.0-WD8',
     base: function () { return BASE; },
     open: open,
     pushOverlay: pushOverlay,
@@ -515,10 +894,32 @@
     fetchState: fetchState,
     fetchChipState: fetchChipState,
     hintForSymbol: hintForSymbol,
+    chipHtml: chipHtml,
+    getChip: getChip,
+    paintChipNodes: paintChipNodes,
+    nearInvalidation: nearInvalidation,
+    streamStatus: streamStatus,
+    startChipStream: startChipStream,
     fetchCostMeter: fetchCostMeter,
     lastWdReport: lastWdReport,
     stateFromBusReport: stateFromBusReport
   };
 
-  try { console.log('[wavedeck-bridge] ready → ' + BASE); } catch (e) {}
+  try {
+    ensureChipPulseStyle();
+    startChipStream();
+    window.addEventListener('wavedeck:chip', function (ev) {
+      var d = ev && ev.detail;
+      if (!d) return;
+      paintChipNodes(d.symbol);
+    });
+    window.addEventListener('wavedeck:stream', function () {
+      paintChipNodes('');
+    });
+    window.addEventListener('wavedeck:full_sync', function () {
+      paintChipNodes('');
+    });
+  } catch (eBoot) {}
+
+  try { console.log('[wavedeck-bridge] ready → ' + BASE + ' · SSE chip stream'); } catch (e) {}
 })();

@@ -60,6 +60,49 @@ class WaveDeckBusSmoke(unittest.TestCase):
                 self.assertEqual(snap2["costs"]["st_local_calls"], 2)
                 self.assertEqual(snap2["costs"]["st_cloud_calls"], 1)
                 self.assertAlmostEqual(snap2["costs"]["combined_usd_est"], 1.53)
+                chip = snap["report"].get("chip") or snap.get("chip")
+                self.assertIsNotNone(chip)
+                self.assertEqual(chip["symbol"], "TXF")
+                self.assertEqual(chip["direction"], "LONG")
+                self.assertEqual(chip["position_size"], 1)
+
+    def test_chip_payload_and_sse_broadcast(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = Path(td) / "wavedeck_bus.json"
+            with mock.patch.object(wdb, "DATA", Path(td)), mock.patch.object(wdb, "STORE", store):
+                with wdb._lock:
+                    wdb._state["report"] = None
+                    wdb._subscribers.clear()
+                q = wdb.subscribe()
+                try:
+                    wdb.accept_report(
+                        {
+                            "fsm": "InPosition",
+                            "mode": "live",
+                            "symbol": "2330",
+                            "ai": {
+                                "action": "HOLD",
+                                "confidence": 0.65,
+                                "invalidation": {"side": "below", "price": 935.0},
+                            },
+                            "positions": {"account": 2},
+                            "st_overlay": {"aggressiveness": 40, "delever": True},
+                        }
+                    )
+                    evt = q.get(timeout=1.0)
+                    self.assertEqual(evt["event_type"], "POSITION_STATE_CHANGE")
+                    d = evt["data"]
+                    self.assertEqual(d["symbol"], "2330")
+                    self.assertEqual(d["market"], "TW")
+                    self.assertEqual(d["direction"], "LONG")
+                    self.assertEqual(d["position_size"], 2)
+                    self.assertAlmostEqual(float(d["invalidation_price"]), 935.0)
+                    self.assertEqual(d["wd_mode"], "REAL")
+                    sync = wdb.full_sync_event()
+                    self.assertEqual(sync["event_type"], "FULL_SYNC")
+                    self.assertEqual(len(sync["data"]["positions"]), 1)
+                finally:
+                    wdb.unsubscribe(q)
 
 
 if __name__ == "__main__":

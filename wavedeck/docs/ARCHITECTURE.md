@@ -179,8 +179,8 @@ stateDiagram-v2
 | 決策上下文 | `handle_signal` 帶入 `st_spillover_prob`／`st_hot_stage`／`st_delever` 供 AI／啟發式 |
 | 啟發式／閘門 | 外溢&lt;0.30 → 觀望／追價高；&lt;0.20 → 禁止新單；降載口數減半 |
 | Pulse AI 摘要 | 本機 `POST /ai/local`（LM Studio）；失敗則規則後援；計入共享成本 |
-| Watch／Book ← WD | `WaveDeckBridge.fetchChipState` 優先讀 ST bus 快取（WD 異步推播）；fallback 才 pull WD |
-| WD → ST 反向繁線 | 狀態機／覆寫／Fail-safe 變更時 `st_push.push_async`；Console 仍可週期補推 |
+| Watch／Book ← WD | **SSE** `GET /bridge/wavedeck/stream`（FULL_SYNC／POSITION_STATE_CHANGE）→ symbol chip 字典原子重繪；REST 僅作冷啟動／失聯 fallback |
+| WD → ST 反向繁線 | 狀態機變更 `st_push.push_async`（REST POST，含輕量 `chip`）；ST bus 再 SSE 扇出至瀏覽器 |
 | 共享成本計數器 | ST `GET /bridge/wavedeck`／`/api/cost-meter`；頂列 WD 燈 title 顯示合計；`/health.wavedeck` 含 age_sec／fresh |
 | LLM 成本累計 | OpenAI `usage`→USD；Ollama 計本機次；啟發式 $0；回報至 ST 合併 |
 | Heartbeat／Fail-safe | WD 每 5s ping ST `/health`；斷線或覆寫過期 → 風格 35、降載、收緊失效、禁新單 |
@@ -189,8 +189,31 @@ stateDiagram-v2
 
 協定路徑（本機）：
 - ST → WD：`http://127.0.0.1:18433/bridge/st`
-- WD → ST：`http://127.0.0.1:18432/bridge/wavedeck`
+- WD → ST：`http://127.0.0.1:18432/bridge/wavedeck`（REST push）
+- ST → Browser：`http://127.0.0.1:18432/bridge/wavedeck/stream`（SSE）
 - Override／Gate：`/api/override-alpha`、`/api/llm-gate`
+
+### 5.2 Chip payload（輕量、無 K 線）
+
+```json
+{
+  "event_type": "POSITION_STATE_CHANGE",
+  "timestamp": 1723238545,
+  "data": {
+    "symbol": "TXF",
+    "market": "TW",
+    "direction": "LONG",
+    "position_size": 2,
+    "invalidation_price": 44800,
+    "invalidation_side": "below",
+    "wd_mode": "PAPER",
+    "ai_confidence": 0.65
+  }
+}
+```
+
+- 連線時先推 `FULL_SYNC`（`data.positions[]`）
+- 前端 `data-wd-chip` 節點原子替換；距失效價 &lt;1% 警示；SSE 斷線顯示「WD 失聯」
 
 ### 5.1 欄位契約（camelCase ↔ snake_case）
 
@@ -231,8 +254,14 @@ stateDiagram-v2
 - 狀態機變更異步推播；Watch／Book chip 讀 bus
 - `llm_gate`：WD P1 vs ST 摘要 defer
 
+### v1.8（已交付 · SSE chip 推播）
+- ST `GET /bridge/wavedeck/stream` SSE fan-out（取代瀏覽器 REST 輪詢）
+- 輕量 POSITION_STATE chip + FULL_SYNC；原子 `data-wd-chip` 重繪
+- 近防守警示／失聯灰標
+
 ### v2
 - 可選 Redis 熱狀態、Docker Compose、雲端模型 opt-in、正式簽章 Webhook
+- 可選 WD↔ST 雙向 WebSocket（目前 SSE 已覆蓋單向狀態廣播）
 
 ---
 

@@ -444,6 +444,23 @@
         if (p && p.style != null) setWdSync('ok', 'WD ' + p.style + (p.delever ? '↓' : ''));
         else probeWaveDeck();
       });
+      // SSE chip / stream → top lamp without REST polling
+      window.addEventListener('wavedeck:chip', function (ev) {
+        var d = ev && ev.detail;
+        var chip = d && d.chip;
+        if (!chip) return;
+        var dir = chip.direction === 'LONG' ? '多' : chip.direction === 'SHORT' ? '空' : '平';
+        var style = chip.macro_style != null ? chip.macro_style : chip.style;
+        var txt = 'WD' + (style != null ? (' ' + style) : '') + ' · ' + dir;
+        if (chip.fail_safe) txt += ' · FS';
+        setWdSync(chip.fail_safe ? 'warn' : 'ok', txt);
+        if (d.costs) paintWdCostTip({ ok: true, costs: d.costs, report: { ai: { action: chip.action } } });
+      });
+      window.addEventListener('wavedeck:stream', function (ev) {
+        var d = ev && ev.detail;
+        if (d && d.offline) setWdSync('warn', 'WD 失聯');
+        else if (d && d.ok) probeWaveDeck();
+      });
     } catch (e) {}
     console.log('[shell-v5] Stage 7 shell ready · route=' + state.route);
   }
