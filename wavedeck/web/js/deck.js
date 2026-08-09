@@ -80,10 +80,10 @@
 
     var p = s.positions || {};
     $('posKv').innerHTML = [
-      ['AI 最近建議部位', p.ai_suggested],
-      ['TXT 目前目標部位', p.txt_target],
-      ['策略部位', p.strategy],
-      ['帳戶實際部位', p.account]
+      ['AI 建議', p.ai_suggested],
+      ['TXT 目標', p.txt_target],
+      ['策略', p.strategy],
+      ['帳戶', p.account]
     ].map(function (row) {
       return '<div class="kv-row"><span class="lab">' + row[0] + '</span><span class="val">' + row[1] + '</span></div>';
     }).join('');
@@ -154,8 +154,8 @@
 
     var ex = s.exec || {};
     $('execKv').innerHTML = [
-      ['最近 AI 動作', ex.last_ai_action],
-      ['最近下單動作', ex.last_order_action],
+      ['AI 動作', ex.last_ai_action],
+      ['下單', ex.last_order_action],
       ['價格', ex.price],
       ['口數', ex.lots]
     ].map(function (row) {
