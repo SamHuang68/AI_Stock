@@ -4,3 +4,18 @@
 1. 所有的技術指標（RSI, SMA）計算必須精準，不允許任何概略或省略的寫法。
 2. 進行任何修改前，必須確保前後端資料欄位完全對齊。
 3. 拒絕敷衍的程式碼，請完整輸出，減少我的審查與來回修正次數。
+
+【Windows 本機啟動／同步 — 已踩過的常見錯，禁止再犯】：
+1. `.cmd` 訊息一律用 ASCII（或確保 Big5/系統碼頁可顯示）。勿在 cmd 腳本寫 UTF-8 中文：
+   繁中 Windows 主控台預設 CP950/Big5，UTF-8 無 BOM 會亂碼，使用者無法讀錯誤訊息。
+2. 禁止假設「解壓／checkout 後路徑只有一層」。zip 解到已存在的 `wavedeck\` 常變成
+   `wavedeck\wavedeck\...`。啟動腳本必須以「找得到 `run.py`」自癒定位 home，
+   並容忍 root 與套件目錄兩種呼叫；根啟動器勿盲目 `call wavedeck\...` 疊加路徑。
+3. 勿用 `python server\server.py` 當套件入口：script 目錄進 `sys.path` 會陰影同名
+   `server` 套件。一律 `python run.py`（或 `-m`），並在入口清掉 script-dir shadowing。
+4. Windows `WinError 10013` ≠ 權限不足這麼簡單：埠常在 excluded port range。
+   預設埠綁定失敗要自動換備援埠，寫入 port 檔，瀏覽器／等待腳本讀實際埠再開 URL。
+5. 等待就緒不要依賴「另一個相對路徑的 .ps1」當唯一路徑：用內嵌 PowerShell 或
+   絕對路徑（`%~dp0` 解析後驗證檔案存在）；先 `/health` 成功再開瀏覽器。
+6. 給使用者的同步指令優先 `git checkout origin/<branch> -- <paths>`；同步包／zip
+   必須附「解壓到 repo 根、檢查無雙層目錄」說明，並提供攤平腳本備援。
