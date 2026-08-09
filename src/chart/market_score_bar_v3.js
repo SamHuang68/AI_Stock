@@ -344,16 +344,20 @@
     html += `</div>`;
 
     if (_expanded && rows.length) {
+      const V = window.Viz;
       html += `<div class="msb-pillars" style="margin-top:4px;padding:6px 8px;border-radius:2px;` +
         `background:rgba(10,14,20,.88);border:1px solid rgba(51,65,85,.65)">`;
       for (const r of rows) {
         const sc = r.score;
         const pc = scoreColor(sc, direction);
-        html += `<div style="display:flex;justify-content:space-between;gap:10px;margin-top:2px">` +
+        html += `<div style="margin-top:4px">` +
+          `<div style="display:flex;justify-content:space-between;gap:10px">` +
           `<span style="color:#94a3b8">${r.k}</span>` +
           `<span style="color:#cbd5e1">${r.v || '—'}` +
           (sc != null ? ` <span style="color:${pc};font-weight:700">(${Math.round(sc)})</span>` : '') +
-          `</span></div>`;
+          `</span></div>` +
+          (V && sc != null ? V.scoreMeter(sc, { color: pc }) : '') +
+          `</div>`;
       }
       html += `</div>`;
     }
@@ -374,6 +378,27 @@
         }
       }
     };
+
+    // TW 大盤體質 → WaveDeck 宏觀覆寫（節流／去重在 bridge）
+    // 若 Pulse 已推過含外溢／輪動的較完整 payload，略過以免空欄位覆寫
+    if (direction === 'health' && score != null && window.WaveDeckBridge &&
+        typeof window.WaveDeckBridge.syncFromMarket === 'function') {
+      try {
+        var last = window.WaveDeckBridge.lastSync && window.WaveDeckBridge.lastSync();
+        var meta = last && last.payload && last.payload.meta;
+        var richer = meta && (meta.spillover_prob != null || meta.rotation) &&
+          (meta.source === 'pulse_v5' || meta.source === 'pulse');
+        if (!richer) {
+          window.WaveDeckBridge.syncFromMarket({
+            score: score,
+            label: label,
+            summary: payload.plainSummary || summary,
+            source: 'market_score_bar',
+            silent: true
+          });
+        }
+      } catch (e) { /* never block chart */ }
+    }
   }
 
   function openAlgoModal(payload) {

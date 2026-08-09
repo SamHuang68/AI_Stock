@@ -89,6 +89,11 @@ class AiRoutesMixin:
         self.end_headers()
         self.close_connection = True
         try:
+            import wavedeck_bus as wdb
+            wdb.record_st_local(1)
+        except Exception:
+            pass
+        try:
             for chunk in al.chat_stream(body.get('prompt', ''), body.get('context', ''), body.get('model')):
                 self.wfile.write(chunk.encode('utf-8'))
                 self.wfile.flush()
@@ -144,6 +149,11 @@ class AiRoutesMixin:
             text, data = ai_api.anthropic_messages(
                 api_key, [{'role': 'user', 'content': prompt}], max_tokens=2048,
             )
+            try:
+                import wavedeck_bus as wdb
+                wdb.record_st_cloud(usd=0.04, calls=1)
+            except Exception:
+                pass
             self._ok(json.dumps({'ok': True, 'report': text, 'model': data.get('model')}).encode())
         except urllib.error.HTTPError as e:
             err_body = e.read().decode('utf-8', 'replace')
@@ -169,6 +179,11 @@ class AiRoutesMixin:
                 api_key, [{'role': 'user', 'content': prompt}],
                 max_tokens=max(64, min(1500, mt)),
             )
+            try:
+                import wavedeck_bus as wdb
+                wdb.record_st_cloud(usd=0.02, calls=1)
+            except Exception:
+                pass
             self._ok(json.dumps({'ok': True, 'text': text}, ensure_ascii=False).encode())
         except urllib.error.HTTPError as e:
             self._err(f'Anthropic HTTP {e.code}: ' + e.read().decode('utf-8', 'replace')[:300], 502)

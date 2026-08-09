@@ -27,12 +27,25 @@
     .dual-half .score{font-size:26px;font-weight:800;line-height:1.1;font-family:'JetBrains Mono',monospace}
     .dual-half .tag{font-size:9px;font-weight:700}
     .vp-panel .stat-k{color:var(--tlo)}
-    #right-collapse{position:absolute;top:50%;transform:translateY(-50%);z-index:60;
-      width:18px;height:54px;background:var(--bg2);border:1px solid var(--border);border-right:none;
-      border-radius:6px 0 0 6px;cursor:pointer;color:var(--tlo);font-size:11px;
-      display:flex;align-items:center;justify-content:center;transition:right .15s}
-    #right-collapse:hover{color:var(--thi)}
-    body.right-collapsed #right{flex:0 0 0!important;width:0!important;overflow:hidden;border:none}
+    /* position:fixed — 不受 ST5 shell 包一層 #shell-main 影響；z-index 高於 topbar/navrail */
+    #right-collapse{position:fixed;top:50%;transform:translateY(-50%);z-index:200;
+      width:20px;height:64px;background:var(--bg2);border:1px solid var(--border);
+      border-radius:8px 0 0 8px;cursor:pointer;color:var(--tlo);font-size:14px;font-weight:700;
+      display:flex;align-items:center;justify-content:center;transition:right .15s,background .15s,color .15s,box-shadow .15s;
+      box-shadow:-2px 0 8px rgba(0,0,0,.35);user-select:none;-webkit-user-select:none;
+      padding:0;line-height:1;font-family:'JetBrains Mono',monospace}
+    #right-collapse:hover{color:var(--thi);background:var(--bg3);border-color:var(--bhi)}
+    #right-collapse.chart-hidden{display:none!important}
+    /* 收合後按鈕貼右緣：加寬＋金色邊，避免「找不到展開鈕 → 以為壞掉」 */
+    body.right-collapsed #right-collapse{
+      width:28px;height:72px;right:0!important;color:var(--gold);
+      background:var(--gold-s);border-color:var(--gold-m);
+      box-shadow:-3px 0 14px rgba(245,197,24,.28)}
+    body.right-collapsed #right-collapse:hover{background:var(--gold-m);color:var(--thi)}
+    body.right-collapsed #right{
+      flex:0 0 0!important;width:0!important;min-width:0!important;max-width:0!important;
+      overflow:hidden!important;border:none!important;padding:0!important;opacity:0!important;
+      pointer-events:none!important}
     `;
     document.head.appendChild(s);
   }
@@ -249,30 +262,99 @@
   })();
 
   // ---- 右側收合按鈕 ----------------------------------------
+  // ST5 shell 會把 #body 包進 #shell-main；按鈕改 fixed 掛在 viewport，
+  // 並在 shell:route / resize 後重算位置。收合態加寬金色邊，避免找不到展開鈕。
   function injectCollapse() {
     const right = document.getElementById('right');
     if (!right) return setTimeout(injectCollapse, 200);
     if (document.getElementById('right-collapse')) return;
-    const btn = document.createElement('div');
+
+    const btn = document.createElement('button');
     btn.id = 'right-collapse';
-    btn.title = '收合 / 展開功能分析區';
+    btn.type = 'button';
+    btn.title = '收合 / 展開功能分析區（快捷鍵 ]）';
+    btn.setAttribute('aria-label', '收合 / 展開功能分析區');
     btn.textContent = '⟩';
     document.body.appendChild(btn);
-    const place = () => {
+
+    function onChartRoute() {
+      try {
+        if (window.ShellV5 && typeof window.ShellV5.route === 'function') {
+          return window.ShellV5.route() === 'chart';
+        }
+      } catch (_) {}
+      const body = document.getElementById('body');
+      return !(body && body.classList.contains('shell-hidden'));
+    }
+
+    function place() {
+      const chart = onChartRoute();
+      btn.classList.toggle('chart-hidden', !chart);
+      if (!chart) return;
       const collapsed = document.body.classList.contains('right-collapsed');
-      btn.style.right = collapsed ? '0px' : (right.getBoundingClientRect().width + 'px');
+      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
       btn.textContent = collapsed ? '⟨' : '⟩';
-    };
-    btn.onclick = () => {
+      btn.title = (collapsed ? '展開功能分析區' : '收合功能分析區') + '（快捷鍵 ]）';
+      if (collapsed) {
+        btn.style.right = '0px';
+        return;
+      }
+      // #right 尚未 layout（寬度 0）時先貼右緣，下一幀 / resize 再對齊分隔線
+      const w = right.getBoundingClientRect().width;
+      btn.style.right = (w > 8 ? w : 0) + 'px';
+    }
+
+    function afterToggle() {
+      place();
+      try { window.dispatchEvent(new Event('resize')); } catch (_) {}
+      if (window.VP && VP.enabled && window.drawVolumeProfile) {
+        try { drawVolumeProfile(); } catch (_) {}
+      }
+    }
+
+    function toggle() {
+      if (!onChartRoute()) return;
       document.body.classList.toggle('right-collapsed');
-      try { localStorage.setItem('stockTerminal.rightCollapsed', document.body.classList.contains('right-collapsed') ? '1' : '0'); } catch {}
-      setTimeout(() => { place(); try { window.dispatchEvent(new Event('resize')); } catch {}
-        if (window.VP && VP.enabled && window.drawVolumeProfile) drawVolumeProfile(); }, 180);
-    };
-    if (localStorage.getItem('stockTerminal.rightCollapsed') === '1')
+      const collapsed = document.body.classList.contains('right-collapsed');
+      try { localStorage.setItem('stockTerminal.rightCollapsed', collapsed ? '1' : '0'); } catch (_) {}
+      // 雙 rAF：等 flex 收合／展開完成再量寬
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () { afterToggle(); });
+      });
+      setTimeout(afterToggle, 200);
+    }
+
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggle();
+    });
+
+    if (localStorage.getItem('stockTerminal.rightCollapsed') === '1') {
       document.body.classList.add('right-collapsed');
+    }
+
     place();
     window.addEventListener('resize', place);
+    window.addEventListener('shell:route', function () {
+      setTimeout(place, 40);
+    });
+    // shell_v5 較晚 boot：延遲再對齊一次，避免按鈕停在錯誤 right
+    setTimeout(place, 120);
+    setTimeout(place, 600);
+
+    // 快捷鍵 ]：圖表工作區收合／展開右側分析區（不搶 input/textarea）
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== ']' || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target;
+      const tag = (t && t.tagName) ? t.tagName.toUpperCase() : '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
+      if (!onChartRoute()) return;
+      e.preventDefault();
+      toggle();
+    });
+
+    window.toggleRightPanel = toggle;
   }
 
   // ---- 分頁記憶 --------------------------------------------

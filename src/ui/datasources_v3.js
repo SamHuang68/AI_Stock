@@ -53,7 +53,28 @@
     } catch (e) { _data = null; return null; }
   }
 
+  function statusBadge(s) {
+    var V = window.Viz;
+    var st = s.status;
+    // 純文字 status → ok/warn/err badge
+    if (typeof st === 'string' && st) {
+      var kind = /失敗|錯誤|error|fail/i.test(st) ? 'err'
+        : /完成|正常|ok|ready|即時/i.test(st) ? 'ok' : 'warn';
+      return V ? V.badge(st, kind) : '<span class="ds-badge" style="background:#334155;color:#cbd5e1">' + esc(st) + '</span>';
+    }
+    st = st || {};
+    if (s.kind === 'live') return V ? V.badge('即時', 'ok') : '<span class="ds-badge" style="background:#4ADE8022;color:#4ADE80">即時</span>';
+    if (s.kind === 'daily') return V ? V.badge('每日', 'ok') : '<span class="ds-badge" style="background:#4ADE8022;color:#4ADE80">每日</span>';
+    var ts = st.updated || 0;
+    if (!ts) return V ? V.badge('無資料', 'err') : '<span class="ds-badge" style="background:#ef444422;color:#ef4444">無資料</span>';
+    var ageH = (Date.now() / 1000 - ts) / 3600;
+    if (ageH <= 36) return V ? V.badge('新鮮', 'ok') : '<span class="ds-badge" style="background:#4ADE8022;color:#4ADE80">新鮮</span>';
+    if (ageH <= 24 * 7) return V ? V.badge('偏舊', 'warn') : '<span class="ds-badge" style="background:#FB923C22;color:#FB923C">偏舊</span>';
+    return V ? V.badge('過期', 'err') : '<span class="ds-badge" style="background:#ef444422;color:#ef4444">過期</span>';
+  }
+
   function rowHtml(s) {
+    var V = window.Viz;
     var rel = RELY[s.reliability] || RELY.local;
     var st = s.status || {};
     var when = (s.kind === 'live') ? '即時' : (s.kind === 'daily') ? '每日自動' : ago(st.updated);
@@ -61,8 +82,11 @@
     var btn = s.updatable
       ? '<button class="ds-btn" data-ds="' + esc(s.id) + '">↻ 更新</button>'
       : '<span style="color:#5a6a82;font-size:9px">' + (s.kind === 'live' ? '免更新' : s.kind === 'daily' ? '自動' : '手動') + '</span>';
+    var relBadge = V
+      ? V.badge(rel.t, s.reliability === 'official' ? 'ok' : s.reliability === 'vendor' ? 'warn' : 'mid')
+      : '<span class="ds-badge" style="background:' + rel.c + '22;color:' + rel.c + '">' + rel.t + '</span>';
     return '<tr><td><div class="nm">' + esc(s.name) + '</div>' +
-      '<div class="pv"><span class="ds-badge" style="background:' + rel.c + '22;color:' + rel.c + '">' + rel.t + '</span>' + esc(s.provider) + '</div>' +
+      '<div class="pv">' + relBadge + ' ' + statusBadge(s) + ' ' + esc(s.provider) + '</div>' +
       '<div class="ds">' + esc(s.desc) + '</div></td>' +
       '<td style="text-align:right;white-space:nowrap"><div style="color:#cbd5e1">' + when + '</div><div style="color:#5a6a82;font-size:9px;margin-top:2px">' + cnt + ' · ' + (KIND[s.kind] || '') + '</div></td>' +
       '<td style="text-align:right">' + btn + '</td></tr>';

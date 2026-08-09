@@ -77,6 +77,10 @@ data/alert_config.json
 data/alert_rules.json
 data/watch_rules.json
 data/watch_state.json
+data/wavedeck_bus.json
+data/pulse_history.db
+data/override_alpha.db
+data/llm_gate.json
 # Node test tooling accidentally installed during refactor
 node_modules/
 # Stray test/junk file
@@ -109,6 +113,10 @@ data/tdcc_holders.db-shm
 data/margin_cycle.db
 data/margin_cycle.db-wal
 data/margin_cycle.db-shm
+data/pulse_history.db
+data/pulse_history.db-wal
+data/pulse_history.db-shm
+data/stock_python.path
 baml_hy.csv
 baml_ig.csv
 fedfunds.csv

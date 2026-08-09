@@ -80,9 +80,16 @@ def _fetch_json(url: str, timeout: float = 8):
         except Exception:
             return None
     try:
-        req = urllib.request.Request(url, headers=_YF_HEADERS)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
+        try:
+            import http_client as _hc
+        except Exception:
+            _hc = None
+        if _hc is not None:
+            raw = _hc.fetch_bytes(url, timeout=timeout, retries=0, headers=_YF_HEADERS or {})
+        else:
+            req = urllib.request.Request(url, headers=_YF_HEADERS)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read()
         if not raw or raw.lstrip()[:1] in (b'<', b''):
             return None
         return json.loads(raw)
@@ -114,22 +121,69 @@ def _idx(fields, *hints, default=0):
     return default
 
 
-def _col(fields, row, *keywords):
-    """依關鍵字挑欄；較長／較精準的 keyword 優先，避免『借券餘額』誤中『前日借券餘額』。"""
+def _col(fields, row, *keywords, avoid=()):
+    """依關鍵字挑欄。
+
+    優先順序：
+      1. 欄名完全等於 keyword
+      2. 較長 keyword 的子字串命中
+      3. 同分數時取較短欄名（較精準）
+
+    避免『自營商買賣超股數』誤中『外資自營商買賣超股數』、
+    『借券餘額』誤中『前日借券餘額』。
+    avoid: 欄名含任一子字串則略過。
+    """
     ranked = sorted(keywords, key=lambda k: -len(k))
-    best_i, best_len = None, -1
+    best = None  # (score, index); score = (exact, kw_len, -field_len)
     for i, f in enumerate(fields or []):
-        fs = str(f)
+        fs = str(f).strip()
+        if avoid and any(a in fs for a in avoid):
+            continue
         for kw in ranked:
-            if kw in fs and len(kw) > best_len:
-                # 若要『本日』卻命中『前日』→ 跳過
+            if fs == kw:
+                score = (3, len(kw), -len(fs))
+            elif kw in fs:
                 if '本日' in kw and '前日' in fs:
                     continue
-                best_i, best_len = i, len(kw)
-                break
-    if best_i is None or best_i >= len(row):
+                score = (2, len(kw), -len(fs))
+            else:
+                continue
+            if best is None or score > best[0]:
+                best = (score, i)
+            break
+    if best is None or best[1] >= len(row):
         return None
-    return _num(row[best_i])
+    return _num(row[best[1]])
+
+
+def _t86_dealer(fields, row):
+    """自營商合計：僅接受欄名完全等於『自營商買賣超股數』；缺則自行買賣+避險。"""
+    for i, f in enumerate(fields or []):
+        if str(f).strip() == '自營商買賣超股數':
+            return _num(row[i]) if i < len(row) else None
+    self_net = None
+    hedge_net = None
+    for i, f in enumerate(fields or []):
+        fs = str(f).strip()
+        if fs == '自營商買賣超股數(自行買賣)':
+            self_net = _num(row[i]) if i < len(row) else None
+        elif fs == '自營商買賣超股數(避險)':
+            hedge_net = _num(row[i]) if i < len(row) else None
+    if self_net is None and hedge_net is None:
+        return None
+    return (self_net or 0.0) + (hedge_net or 0.0)
+
+
+def _margn_pair(fields, row, name):
+    """MI_MARGN 個股表欄名重複（融資／融券各有『今日餘額』『買進』等）。
+
+    name: '今日餘額' | '買進' | '賣出' | '前日餘額'
+    回傳 (融資欄, 融券欄) 數值；單位與 TWSE 原始相同（餘額為張）。
+    """
+    idxs = [i for i, f in enumerate(fields or []) if str(f).strip() == name]
+    a = _num(row[idxs[0]]) if len(idxs) > 0 and idxs[0] < len(row) else None
+    b = _num(row[idxs[1]]) if len(idxs) > 1 and idxs[1] < len(row) else None
+    return a, b
 
 
 def snap_t86(tdate: str) -> Optional[Dict[str, dict]]:
@@ -152,9 +206,12 @@ def snap_t86(tdate: str) -> Optional[Dict[str, dict]]:
             if not code:
                 continue
             by[code] = {
-                'foreign': _col(fields, row, '外陸資買賣超股數', '外資'),
+                # 外陸資：用『外陸資*』關鍵字，不會命中『外資自營商*』
+                # （勿 avoid『外資自營商』——欄名常含『不含外資自營商』會被誤殺）
+                'foreign': _col(fields, row, '外陸資買賣超股數(不含外資自營商)',
+                                '外陸資買賣超股數', '外陸資'),
                 'trust':   _col(fields, row, '投信買賣超股數', '投信'),
-                'dealer':  _col(fields, row, '自營商買賣超股數', '自營商'),
+                'dealer':  _t86_dealer(fields, row),
                 'total':   _col(fields, row, '三大法人買賣超股數'),
             }
     _snap_set(key, by, err=(by is None))
@@ -175,7 +232,10 @@ def snap_margn(tdate: str) -> Optional[Dict[str, dict]]:
         for t in (data.get('tables') or []):
             rows = t.get('data') or []
             fields = t.get('fields') or []
-            if len(rows) < 50 and '信用' not in str(t.get('title') or ''):
+            # 只吃個股彙總表（有『代號』）；略過『信用交易統計』摘要表
+            if not any('代號' in str(f) for f in fields):
+                continue
+            if not rows:
                 continue
             ic = _idx(fields, '證券代號', '股票', '代號')
             for row in rows:
@@ -184,11 +244,26 @@ def snap_margn(tdate: str) -> Optional[Dict[str, dict]]:
                 code = str(row[ic]).strip()
                 if not code or not code[0].isdigit():
                     continue
+                # TWSE 欄名重複：第 1 組=融資、第 2 組=融券；餘額單位為張
+                mb_lot, sb_lot = _margn_pair(fields, row, '今日餘額')
+                # 具名欄位後備（若 TWSE 改版）
+                if mb_lot is None:
+                    mb_lot = _col(fields, row, '融資餘額', '融資今日餘額')
+                if sb_lot is None:
+                    sb_lot = _col(fields, row, '融券餘額', '融券今日餘額')
+                m_buy, s_buy = _margn_pair(fields, row, '買進')
+                m_sell, s_sell = _margn_pair(fields, row, '賣出')
+                # 張 → 股（前端 chip_v3 以 /1000 顯示張）
+                mb = mb_lot * 1000.0 if mb_lot is not None else None
+                sb = sb_lot * 1000.0 if sb_lot is not None else None
                 by[code] = {
-                    'marginBalance': _col(fields, row, '融資餘額'),
-                    'shortBalance':  _col(fields, row, '融券餘額'),
-                    'marginChange':  _col(fields, row, '融資-買進', '融資增'),
-                    'shortChange':   _col(fields, row, '融券-賣出', '融券增'),
+                    'marginBalance': mb,
+                    'shortBalance':  sb,
+                    # 增減以張計（買進−賣出）；乘 1000 與餘額同單位（股）
+                    'marginChange':  ((m_buy or 0) - (m_sell or 0)) * 1000.0
+                                    if (m_buy is not None or m_sell is not None) else None,
+                    'shortChange':   ((s_buy or 0) - (s_sell or 0)) * 1000.0
+                                    if (s_buy is not None or s_sell is not None) else None,
                 }
         if not by:
             by = None
