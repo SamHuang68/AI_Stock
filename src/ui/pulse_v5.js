@@ -128,8 +128,6 @@
       '#pl-root .pl-strip .dot{width:4px;height:4px;border-radius:50%;background:var(--cyan);box-shadow:0 0 4px var(--cyan);flex-shrink:0}' +
       '#pl-root .pl-strip .viz-hide,#pl-root .pl-strip .viz-meter,#pl-root .pl-strip .viz-seg,' +
         '#pl-root .pl-strip .viz-chip{display:none!important}' +
-      '#pl-root .pl-strip .pl-idx-spark{height:12px;margin-top:1px;opacity:.85}' +
-      '#pl-root .pl-strip .pl-idx-spark .vz-spark{width:100%;height:12px;display:block}' +
       '#pl-root .pl-strip .vz-chip{display:none!important}' + /* 單顆 chip 改為全型態 tab 列 */
       '#pl-root .pl-strip .vz-meter{margin-top:1px;height:3px}' +
       /* 市場趨勢型態 tabs：全列可見，當前 highlight、其餘反灰 */
@@ -1022,13 +1020,6 @@
     var tone = tr.trend || '';
     var tabs = renderTrendTabs(tone, opts.tabs || IDX_TREND_TABS);
     var meter = (V && tr.momScore != null && V.scoreMeter) ? V.scoreMeter(tr.momScore) : '';
-    var spark = '';
-    if (V && V.sparkLine && tr.spark && tr.spark.length >= 2) {
-      spark = '<div class="pl-idx-spark">' + V.sparkLine(tr.spark, {
-        h: 16, w: 120, grid: false, marks: false,
-        color: (tr.spark[tr.spark.length - 1] >= tr.spark[0]) ? 'var(--red)' : 'var(--green)'
-      }) + '</div>';
-    }
     var fullBits = trendQuantBits(tr, opts.streakUpLabel, opts.streakDnLabel);
     var subHtml = trendPrimarySub(tr, opts.streakUpLabel, opts.streakDnLabel);
     if (!subHtml && opts.fallbackSub) subHtml = opts.fallbackSub;
@@ -1040,11 +1031,12 @@
       ? ' <span style="font-size:9px;color:#94a3b8;font-weight:700">' + esc(tr.level) + '</span>'
       : '';
     var toneCls = tw(tr.chgPct != null ? tr.chgPct : tr.vsMa5Pct);
+    /* 頂列不再畫 spark 趨勢線（扁線無意義）；動能分仍用 meter */
     return '<div class="cell' + (opts.hero ? ' hero' : '') + '" title="' + esc(tip) + '">' +
       '<div class="k">' + opts.k + '</div>' +
       '<div class="v">' + opts.vHtml + levelHtml + '</div>' +
       '<div class="s ' + toneCls + '">' + subHtml + '</div>' +
-      tabs + meter + spark + '</div>';
+      tabs + meter + '</div>';
   }
 
   function renderStrip(ov, p) {

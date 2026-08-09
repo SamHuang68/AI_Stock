@@ -104,6 +104,9 @@ ok(/turnoverVsMa5Pct/.test(pl) && /volumeScore/.test(pl) && /成交金額 · 量
 ok(/t00Trend/.test(pl) && /o00Trend/.test(pl) && /txfTrend/.test(pl) &&
   /trendQuantBits/.test(pl) && /renderTrendCell/.test(pl),
   'pulse strip shows TAIEX/OTC/TXF trend quant like turnover');
+ok(/function renderTrendCell/.test(pl) && !/pl-idx-spark/.test(pl) &&
+  /tabs \+ meter/.test(pl),
+  'pulse strip trend cells drop sparkline; keep tabs + meter');
 ok(/function renderTrendTabs/.test(pl) && /IDX_TREND_TABS/.test(pl) &&
   /TURN_TREND_TABS/.test(pl) && /BREADTH_TREND_TABS/.test(pl) &&
   /連漲趨升/.test(pl) && /溫和上行/.test(pl) && /區間震盪/.test(pl) &&
