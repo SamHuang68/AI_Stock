@@ -19,3 +19,9 @@
    絕對路徑（`%~dp0` 解析後驗證檔案存在）；先 `/health` 成功再開瀏覽器。
 6. 給使用者的同步指令優先 `git checkout origin/<branch> -- <paths>`；同步包／zip
    必須附「解壓到 repo 根、檢查無雙層目錄」說明，並提供攤平腳本備援。
+7. 【對使用者下指令：只用 PowerShell】使用者本機 shell 是 PowerShell（`PS C:\Users\Sam\AI_Stock>`）。
+   回覆中的可複製指令必須是 PowerShell 語法，禁止給 CMD-only 寫法（例如 `cd /d`、
+   裸 `scripts\go.bat` 而不說明、或假設 `cmd.exe`）。正確範例：
+   `cd C:\Users\Sam\AI_Stock`、`git pull origin <branch>`、
+   `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\go.ps1`、
+   `.\START_WAVEDECK.cmd`（可從 PS 呼叫）。勿再給 `/workspace` 雲端路徑當本機路徑。
