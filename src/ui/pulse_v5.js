@@ -321,7 +321,7 @@
       '#pl-root .pl-movers .pl-sec-hint,#pl-root .pl-movers h4 > span{font-size:7px!important}' +
       '#pl-root .pl-movers .vz-chip{font-size:6px;padding:0 3px;line-height:1.2}' +
       '#pl-root .pl-movers .vz-rowbar{max-width:36px;height:3px;margin-left:2px}' +
-      /* global：compact 字級；role 僅 title，避免窄格裁切點位／漲跌 */
+      /* global：每格＝點位數字 + 漲跌點／%；含原油 */
       '#pl-root .pl-global{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;flex:1 1 0;' +
         'align-content:start;overflow:auto;min-height:0;min-width:0}' +
       '#pl-root .pl-kicker{display:none!important}' +
@@ -331,10 +331,10 @@
       '#pl-root .pl-global .g .k .abbr{color:var(--thi);font-weight:800;letter-spacing:.2px}' +
       '#pl-root .pl-global .g .k .role{display:none}' +
       '#pl-root .pl-global .g .row{display:flex;align-items:baseline;justify-content:space-between;gap:3px;min-width:0}' +
-      '#pl-root .pl-global .g .v{font-size:9px;font-weight:800;color:var(--thi);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 auto;' +
-        'font-variant-numeric:tabular-nums;letter-spacing:-0.2px}' +
-      '#pl-root .pl-global .g .s{font-size:8px;font-weight:700;flex:0 0 auto;white-space:nowrap;text-align:right;letter-spacing:-0.3px;' +
-        'font-variant-numeric:tabular-nums;min-width:2.8em}' +
+      '#pl-root .pl-global .g .v{font-size:8px;font-weight:800;color:var(--thi);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 auto;' +
+        'font-variant-numeric:tabular-nums;letter-spacing:-0.25px}' +
+      '#pl-root .pl-global .g .s{font-size:7px;font-weight:700;flex:0 0 auto;white-space:nowrap;text-align:right;letter-spacing:-0.35px;' +
+        'font-variant-numeric:tabular-nums;min-width:0;max-width:58%}' +
       /* 市場快訊：縮字＋單行，避免標題跳行 */
       '#pl-root .pl-flash-tools{display:flex;align-items:center;gap:3px;flex:1 1 auto;min-width:0;justify-content:flex-end}' +
       '#pl-root .pl-flash-q{width:64px;min-width:48px;max-width:88px;padding:1px 4px;border:1px solid var(--border);border-radius:3px;' +
@@ -1904,6 +1904,30 @@
     return n.length > 6 ? n.slice(0, 6) : n;
   }
 
+  /** 全球影響右側：漲跌點數 + ％（有點位必顯示數字） */
+  function globalChgLabel(x, dig) {
+    var bits = [];
+    var pts = null;
+    if (x && x.change != null && isFinite(Number(x.change))) pts = Number(x.change);
+    else if (x && x.price != null && x.prevClose != null &&
+        isFinite(Number(x.price)) && isFinite(Number(x.prevClose))) {
+      pts = Number(x.price) - Number(x.prevClose);
+    }
+    /* 美債殖利率左側已是％點位，右側只顯示變動％（若有） */
+    if (pts != null && x.symbol !== 'US10Y') {
+      var pdig = dig;
+      if (x.symbol === 'TWD=X') pdig = 3;
+      else if (x.symbol === 'CL=F' || x.symbol === 'GC=F' || x.symbol === 'HG=F') pdig = 2;
+      else if (Number(x.price) >= 1000) pdig = 0;
+      var ptsTxt = chgPts({ change: pts }, pdig);
+      if (ptsTxt) bits.push(ptsTxt);
+    }
+    if (x && x.changePct != null && isFinite(Number(x.changePct))) {
+      bits.push(pct(x.changePct));
+    }
+    return bits.length ? bits.join(' · ') : '—';
+  }
+
   function renderGlobal(p) {
     var g = p.global || [];
     var items = g.slice();
@@ -1915,7 +1939,7 @@
     }
     var prefer = [
       '^DJI', '^GSPC', '^IXIC', '^SOX', '^N225', '^KS11',
-      '^VIX', 'GC=F', 'HG=F', 'TWD=X', 'DX-Y.NYB', 'DX=F', 'US10Y', 'CL=F'
+      '^VIX', 'GC=F', 'HG=F', 'CL=F', 'TWD=X', 'DX-Y.NYB', 'DX=F', 'US10Y'
     ];
     items.sort(function (a, b) {
       var ia = prefer.indexOf(a.symbol); var ib = prefer.indexOf(b.symbol);
@@ -1926,21 +1950,24 @@
       ' <span class="' + biasCls(tone) + '" style="font-weight:700;font-size:9px;margin-left:4px">' + tone + '</span>' +
       ' <a data-go="international">國際 →</a></h4><div class="pl-global">';
     if (!items.length) html += '<div class="pl-note">國際報價載入中…</div>';
-    items.slice(0, 12).forEach(function (x) {
+    items.slice(0, 14).forEach(function (x) {
       var dig = (x.unit === '%' || x.symbol === 'US10Y' || x.symbol === '^VIX' || x.symbol === 'TWD=X' ||
-        x.symbol === 'HG=F') ? 2
+        x.symbol === 'HG=F' || x.symbol === 'CL=F') ? 2
         : (x.price > 1000 ? 0 : 2);
+      if (x.symbol === 'TWD=X') dig = 3;
       var px = fmt(x.price, dig) + (x.unit === '%' || x.symbol === 'US10Y' ? '%' : '');
       var abbr = globalAbbr(x);
-      var full = (x.name || x.symbol || abbr) + (x.role ? ' · ' + x.role : '');
+      var full = (x.name || x.symbol || abbr) + (x.role ? ' · ' + x.role : '') +
+        (x.price != null ? (' · ' + px) : '');
+      var chgLbl = globalChgLabel(x, dig);
       html += '<div class="g" title="' + esc(full) + '">' +
         '<div class="k"><span class="abbr">' + esc(abbr) + '</span>' +
           (x.role ? '<span class="role">' + esc(x.role) + '</span>' : '') +
         '</div>' +
         '<div class="row">' +
-          '<div class="v">' + px + '</div>' +
-          '<div class="s ' + tw(x.changePct) + '">' +
-            (x.changePct != null ? pct(x.changePct) : '—') +
+          '<div class="v" title="點位">' + px + '</div>' +
+          '<div class="s ' + tw(x.changePct) + '" title="漲跌點 · ％">' +
+            chgLbl +
           '</div>' +
         '</div></div>';
     });

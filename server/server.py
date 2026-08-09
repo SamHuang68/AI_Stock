@@ -4577,17 +4577,17 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 return {'ok': False, 'items': []}
 
         def _job_global():
-            # v5：v4 口徑 + 黃金（避險）／銅（景氣循環）
-            gkey = f'pulse-global:v5:{int(time.time() // 120)}'
+            # v6：v5 + WTI 原油（CL=F／能源景氣）
+            gkey = f'pulse-global:v6:{int(time.time() // 120)}'
             g = _cache_first([gkey])
             if g is not None:
                 return g
             try:
                 # 指數列優先吃市場 tab 同源標的（SOX/美股/日韓）；
-                # 另補 VIX／匯率／美元／黃金（避險）／銅（產業景氣循環）
+                # 另補 VIX／匯率／美元／黃金／銅／原油
                 g = _yf_batch_quotes([
                     '^DJI', '^GSPC', '^IXIC', '^SOX', '^N225', '^KS11',
-                    '^VIX', 'TWD=X', 'DX-Y.NYB', 'GC=F', 'HG=F',
+                    '^VIX', 'TWD=X', 'DX-Y.NYB', 'GC=F', 'HG=F', 'CL=F',
                 ])
                 if not any(x.get('symbol') == 'DX-Y.NYB' for x in (g or [])):
                     # 僅在缺美元指數時補一槍，不重抓整批

@@ -94,8 +94,9 @@ ok(/近漲停/.test(pl) && /≠頂列官方家數/.test(pl), 'pulse movers panel
 ok(/movers\.limitUp/.test(pl), 'pulse prefers movers.limitUp for near-limit list');
 ok(/function chgWithPct/.test(pl) && /chgWithPct\(t00/.test(pl) && /chgWithPct\(txf/.test(pl),
   'pulse strip shows change points + pct for TAIEX/OTC/TXF');
-ok(/GC=F/.test(pl) && /HG=F/.test(pl) && /x\.role/.test(pl),
-  'pulse global prefer includes gold and copper with role');
+ok(/GC=F/.test(pl) && /HG=F/.test(pl) && /CL=F/.test(pl) && /x\.role/.test(pl) &&
+  /function globalChgLabel/.test(pl) && /slice\(0, 14\)/.test(pl),
+  'pulse global prefer includes gold/copper/oil + price with chg pts/%');
 ok(/turnoverVsMa5Pct/.test(pl) && /volumeScore/.test(pl) && /成交金額 · 量能/.test(pl),
   'pulse strip shows turnover quant vs5 / score');
 ok(/t00Trend/.test(pl) && /o00Trend/.test(pl) && /txfTrend/.test(pl) &&
@@ -154,7 +155,7 @@ ok(/pl-score3\{display:grid;grid-template-columns:minmax\(0,0\.9fr\) minmax\(0,1
   /writing-mode:horizontal-tb/.test(pl) &&
   /pl-score3 \.sc\{[^}]*flex-direction:column/.test(pl),
   'pulse score 三框左到右（綜合 compact 窄欄）；框內上下橫書');
-ok(/pl-global \.g \.v\{[^}]*font-size:9px/.test(pl) &&
+ok(/pl-global \.g \.v\{[^}]*font-size:8px/.test(pl) &&
   /pl-global \.g \.k \.role\{display:none\}/.test(pl),
   'pulse global compact type; role only in title');
 ok(/正面因子/.test(pl) && /風險因子/.test(pl) && /計入風險分/.test(pl) && !/主要動能/.test(pl),
