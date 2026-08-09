@@ -147,10 +147,15 @@ ok(/pl-sec h4\{[^}]*font-size:10px/.test(pl) &&
   /pl-strip \.v\{[^}]*font-size:14px/.test(pl),
   'pulse density rebalance after font upsizing (strip/h4/flash/wl/gutter)');
 ok(/function moneyYiCell/.test(pl) && /moneyYiCell\(i\.foreign\)/.test(pl) &&
-  /pl-inst4 \.c \.v\{[^}]*font-size:10px/.test(pl) &&
+  /pl-inst4 \.c \.v,#pl-root \.pl-bd4 \.c \.v\{[^}]*font-size:10px/.test(pl) &&
   /pl-score-formula\{[^}]*font-size:8px/.test(pl) &&
   /pl-score3 \.sc\.main \.v\{font-size:14px/.test(pl),
   'pulse score/inst dense cards use smaller type + short 億 cells');
+ok(/pl-bd4/.test(pl) && /function paintBreadthCells/.test(pl) &&
+  /pl-inst4,#pl-root \.pl-bd4\{display:grid;grid-template-columns:repeat\(4/.test(pl) &&
+  /pl-inst-trend,#pl-root \.pl-bd-trend\{flex:1 1 0/.test(pl) &&
+  !/pl-donut-wrap/.test(pl),
+  'pulse 市場廣度：四格 KPI＋線圖面板對齊法人資金');
 ok(/pl-score3\{display:grid;grid-template-columns:minmax\(0,0\.9fr\) minmax\(0,1\.05fr\) minmax\(0,1\.05fr\)/.test(pl) &&
   /writing-mode:horizontal-tb/.test(pl) &&
   /pl-score3 \.sc\{[^}]*flex-direction:column/.test(pl),
