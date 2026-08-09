@@ -153,13 +153,16 @@ ok(/pl-empty\[hidden\]\{display:none!important\}/.test(pl),
 ok(/pl-sec h4\{[^}]*font-size:10px/.test(pl) &&
   /pl-flash \.row\{[^}]*line-height:1\.35/.test(pl) &&
   /pl-wl th,#pl-root \.pl-wl td\{padding:4px 4px/.test(pl) &&
-  /pl-dash\{[^}]*gap:6px/.test(pl) &&
+  /pl-zone\{[^}]*gap:6px/.test(pl) &&
   /pl-strip \.v\{[^}]*font-size:14px/.test(pl),
   'pulse density rebalance after font upsizing (strip/h4/flash/wl/gutter)');
-ok(/#pl-body\{[^}]*grid-template-rows:minmax\(108px,0\.82fr\) minmax\(0,2\.35fr\)/.test(pl) &&
-  /pl-dash\{[^}]*grid-template-rows:minmax\(0,1\.45fr\) minmax\(0,0\.7fr\)/.test(pl) &&
-  /pl-idx-spark\{[^}]*min-height:30px/.test(pl) && /h: 48/.test(pl),
-  'pulse shrinks bot row; strip spark gets vertical room');
+ok(/#pl-body\{[^}]*grid-template-rows:minmax\(0,1fr\) minmax\(0,1fr\) minmax\(0,1fr\)/.test(pl) &&
+  /pl-dash\{display:contents\}/.test(pl) &&
+  /pl-idx-spark\{[^}]*min-height:22px/.test(pl) && /h: 48/.test(pl),
+  'pulse three rows equal 1fr; dash contents; strip spark still readable');
+ok(/pl-global \.g \.k \.abbr\{[^}]*min-width:2em/.test(pl) &&
+  /chgShort/.test(pl) && /max-width:46%/.test(pl),
+  'pulse global keeps ticker visible; pct short, full chg in title');
 ok(/function moneyYiCell/.test(pl) && /moneyYiCell\(i\.foreign\)/.test(pl) &&
   /pl-inst4 \.c \.v,#pl-root \.pl-bd4 \.c \.v,#pl-root \.pl-ohlc4 \.c \.v\{[^}]*font-size:10px/.test(pl) &&
   /pl-score-formula\{[^}]*font-size:8px/.test(pl) &&
@@ -199,8 +202,8 @@ ok(/data-layout=/.test(pl) && /LAYOUT_CONTRACT/.test(pl) &&
   !/4col-priority/.test(pl) && !/max-width:1280/.test(pl) &&
   !/5col-2zone-flex/.test(pl) && !/enforceFiveCol/.test(pl),
   'pulse dash is known-good 5col-2zone + runtime probe (anchor 3cab212)');
-ok(/#pl-body\{[^}]*overflow:hidden/.test(pl) && /pl-expanded\{overflow:auto/.test(pl),
-  'pulse one-screen lock; scroll only when factors expanded');
+ok(/#pl-body\{[^}]*overflow:auto/.test(pl) && /pl-expanded\{overflow:auto/.test(pl),
+  'pulse body allows scroll to avoid clipped panels');
 ok(/pl-layout-probe/.test(pl) && /實測 5\+5/.test(pl) && /一行五框/.test(pl),
   'pulse surfaces 實測 5+5 probe for stale-JS detection');
 (function () {

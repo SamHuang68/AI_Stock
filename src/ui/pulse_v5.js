@@ -107,11 +107,11 @@
       /* 體質／風險分數：金／青，勿當漲跌色 */
       '#pl-root .pl-st-pos{color:var(--gold)}#pl-root .pl-st-risk{color:var(--cyan)}' +
       '#pl-root .pl-st-mid{color:#94a3b8}' +
-      /* 垂直比例：頂列(線圖)吃高度；第三排壓縮；中排決策窗居中 */
+      /* 三排平均分（頂 KPI／中決策／底列表各 1fr）；溢出可下拉，避免硬裁切遮蔽 */
       '#pl-body{flex:1;min-height:0;display:grid!important;' +
-        'grid-template-rows:minmax(108px,0.82fr) minmax(0,2.35fr);gap:6px;overflow:hidden}' +
-      '#pl-body.pl-expanded{overflow:auto;grid-template-rows:minmax(108px,0.7fr) minmax(0,1.6fr) auto}' +
-      /* KPI 頂列：格內 flex，spark 吃剩餘高度（不再固定 12px 扁線） */
+        'grid-template-rows:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);gap:6px;overflow:auto}' +
+      '#pl-body.pl-expanded{overflow:auto;grid-template-rows:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto}' +
+      /* KPI 頂列：格內 flex，spark 吃剩餘高度 */
       '#pl-root .pl-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;' +
         'margin:0;min-width:0;min-height:0;height:100%;align-items:stretch}' +
       '#pl-root .pl-strip .cell{background:linear-gradient(180deg,rgba(17,27,46,.95),rgba(11,18,32,.98));' +
@@ -125,20 +125,21 @@
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums;' +
         'margin-bottom:1px;flex:0 0 auto}' +
       '#pl-root .pl-strip .cell.hero .v{font-size:15px;letter-spacing:-0.2px}' +
-      '#pl-root .pl-strip .s{font-size:10px;margin-top:0;font-weight:800;line-height:1.25;' +
+      '#pl-root .pl-strip .s{font-size:9px;margin-top:0;font-weight:800;line-height:1.25;' +
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums;flex:0 0 auto}' +
-      '#pl-root .pl-strip .s .pl-subq{font-size:8px;font-weight:600;color:#94a3b8;margin-left:3px}' +
+      '#pl-root .pl-strip .s .pl-subq{font-size:7px;font-weight:600;color:#94a3b8;margin-left:3px}' +
       '#pl-root .pl-strip .badge{display:inline-flex;align-items:center;gap:3px;font-size:8px;color:var(--cyan)}' +
       '#pl-root .pl-strip .dot{width:4px;height:4px;border-radius:50%;background:var(--cyan);box-shadow:0 0 4px var(--cyan);flex-shrink:0}' +
       '#pl-root .pl-strip .viz-hide,#pl-root .pl-strip .viz-meter,#pl-root .pl-strip .viz-seg,' +
         '#pl-root .pl-strip .viz-chip{display:none!important}' +
-      '#pl-root .pl-strip .pl-ttabs{flex:0 0 auto}' +
+      '#pl-root .pl-strip .pl-ttabs{flex:0 0 auto;max-height:2.6em;overflow:hidden}' +
       '#pl-root .pl-strip .vz-meter{margin-top:1px;height:3px;flex:0 0 auto}' +
-      '#pl-root .pl-strip .vz-ref{margin-top:2px;margin-bottom:2px;height:6px;flex:1 1 0;min-height:8px}' +
-      '#pl-root .pl-strip .vz-ref .vz-tick-lbl{top:7px;font-size:6px}' +
-      '#pl-root .pl-strip .pl-idx-spark{flex:1 1 0;min-height:30px;margin-top:2px;opacity:.95;' +
+      '#pl-root .pl-strip .pl-turn-meter{flex:1 1 0;min-height:18px;margin-top:2px;display:flex;align-items:center}' +
+      '#pl-root .pl-strip .pl-turn-meter .vz-ref{margin:0;height:6px;width:100%;flex:1 1 auto}' +
+      '#pl-root .pl-strip .pl-turn-meter .vz-ref .vz-tick-lbl{display:none}' +
+      '#pl-root .pl-strip .pl-idx-spark{flex:1 1 0;min-height:22px;margin-top:2px;opacity:.95;' +
         'min-width:0;overflow:hidden;display:flex;align-items:stretch}' +
-      '#pl-root .pl-strip .pl-idx-spark .vz-spark{width:100%;height:100%;min-height:30px;display:block;margin:0}' +
+      '#pl-root .pl-strip .pl-idx-spark .vz-spark{width:100%;height:100%;min-height:22px;display:block;margin:0}' +
       '#pl-root .pl-strip .vz-chip{display:none!important}' + /* 單顆 chip 改為全型態 tab 列 */
       /* 市場趨勢型態 tabs：全列可見，當前 highlight、其餘反灰 */
       '#pl-root .pl-ttabs{display:flex;flex-wrap:wrap;gap:2px;margin-top:2px;min-width:0}' +
@@ -152,11 +153,10 @@
         'background:rgba(34,197,94,.14)}' +
       '#pl-root .pl-ttabs span.on.mid{color:#cbd5e1;border-color:rgba(148,163,184,.5);' +
         'background:rgba(148,163,184,.14)}' +
-      /* 中排決策窗略高、底排列表壓縮 */
-      '#pl-root .pl-dash{min-height:0;height:100%;display:grid;gap:6px;' +
-        'grid-template-rows:minmax(0,1.45fr) minmax(0,0.7fr)}' +
-      '#pl-root .pl-zone{display:grid;gap:6px;min-width:0;min-height:0;height:100%;' +
-        'grid-template-columns:repeat(5,minmax(0,1fr))}' +
+      /* dash 透傳：z-top／z-bot 成為 body 的第 2／3 列，三排等分 */
+      '#pl-root .pl-dash{display:contents}' +
+      '#pl-root .pl-zone{display:grid;gap:6px;min-width:0;min-height:0;' +
+        'grid-template-columns:repeat(5,minmax(0,1fr));align-content:stretch}' +
       '#pl-root .z-bot .pl-sec{padding:6px 8px}' +
       '#pl-root .z-bot .pl-sec h4{margin:0 0 4px}' +
       /* Widget 殼：略提亮底＋微亮邊框，與 --bg 頁底拉開層級 */
@@ -319,20 +319,22 @@
       '#pl-root .pl-movers .pl-sec-hint,#pl-root .pl-movers h4 > span{font-size:7px!important}' +
       '#pl-root .pl-movers .vz-chip{font-size:6px;padding:0 3px;line-height:1.2}' +
       '#pl-root .pl-movers .vz-rowbar{max-width:36px;height:3px;margin-left:2px}' +
-      /* global：每格＝點位數字 + 漲跌點／%；含原油 */
+      /* global：代號優先可見；漲跌欄不得擠掉 abbr；內容可捲 */
       '#pl-root .pl-global{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;flex:1 1 0;' +
-        'align-content:start;overflow:auto;min-height:0;min-width:0}' +
+        'align-content:start;overflow:auto;overscroll-behavior:contain;min-height:0;min-width:0}' +
       '#pl-root .pl-kicker{display:none!important}' +
-      '#pl-root .pl-global .g{background:rgba(6,10,18,.45);border:1px solid rgba(42,61,92,.7);border-radius:4px;padding:3px 5px;min-width:0;overflow:hidden}' +
-      '#pl-root .pl-global .g .k{font-size:7px;color:var(--tlo);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:0;' +
-        'display:flex;justify-content:space-between;gap:2px;align-items:baseline}' +
-      '#pl-root .pl-global .g .k .abbr{color:var(--thi);font-weight:800;letter-spacing:.2px}' +
+      '#pl-root .pl-global .g{background:rgba(6,10,18,.45);border:1px solid rgba(42,61,92,.7);border-radius:4px;' +
+        'padding:3px 4px;min-width:0;overflow:hidden;display:flex;flex-direction:column;gap:1px}' +
+      '#pl-root .pl-global .g .k{font-size:8px;color:var(--tlo);margin-bottom:0;flex:0 0 auto;' +
+        'display:flex;justify-content:flex-start;gap:2px;align-items:baseline;min-width:0}' +
+      '#pl-root .pl-global .g .k .abbr{color:var(--thi);font-weight:800;letter-spacing:0;' +
+        'flex:0 0 auto;min-width:2em;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#pl-root .pl-global .g .k .role{display:none}' +
-      '#pl-root .pl-global .g .row{display:flex;align-items:baseline;justify-content:space-between;gap:3px;min-width:0}' +
-      '#pl-root .pl-global .g .v{font-size:8px;font-weight:800;color:var(--thi);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 auto;' +
-        'font-variant-numeric:tabular-nums;letter-spacing:-0.25px}' +
-      '#pl-root .pl-global .g .s{font-size:7px;font-weight:700;flex:0 0 auto;white-space:nowrap;text-align:right;letter-spacing:-0.35px;' +
-        'font-variant-numeric:tabular-nums;min-width:0;max-width:58%}' +
+      '#pl-root .pl-global .g .row{display:flex;align-items:baseline;justify-content:space-between;gap:4px;min-width:0;flex:0 0 auto}' +
+      '#pl-root .pl-global .g .v{font-size:8px;font-weight:800;color:var(--thi);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' +
+        'min-width:0;flex:1 1 auto;font-variant-numeric:tabular-nums;letter-spacing:-0.2px}' +
+      '#pl-root .pl-global .g .s{font-size:7px;font-weight:700;flex:0 1 auto;white-space:nowrap;text-align:right;letter-spacing:-0.2px;' +
+        'font-variant-numeric:tabular-nums;min-width:0;max-width:46%;overflow:hidden;text-overflow:ellipsis}' +
       /* 市場快訊：縮字＋單行；市場 tab 與自選風險同級（7px） */
       '#pl-root .pl-flash-tools{display:flex;align-items:center;gap:3px;flex:1 1 auto;min-width:0;justify-content:flex-end}' +
       '#pl-root #pl-flash-sec .pl-sec-tog button{font-size:7px;padding:1px 5px}' +
@@ -1129,12 +1131,12 @@
     return '<div class="pl-strip">' +
       renderTrendCell({
         k: '加權指數 TAIEX', hero: true,
-        vHtml: fmt(t00.price, 2),
+        vHtml: fmt(t00.price, 0),
         trend: t00Tr, fallbackSub: t00Fb, tip: idxTip + ' · 加權'
       }) +
       renderTrendCell({
         k: '櫃買指數 OTC',
-        vHtml: fmt(o00.price, 2),
+        vHtml: fmt(o00.price, 0),
         trend: o00Tr, fallbackSub: o00Fb, tip: idxTip + ' · 櫃買'
       }) +
       renderTrendCell({
@@ -1147,11 +1149,12 @@
         trend: txfTr, fallbackSub: txfFb, tip: txfTip
       }) +
       '<div class="cell hero" title="' + turnTip + '"><div class="k">成交金額 · 量能</div><div class="v">' +
-        (s.turnoverYi != null ? Number(s.turnoverYi).toFixed(1) + ' 億' : '—') +
+        (s.turnoverYi != null ? Math.round(Number(s.turnoverYi)).toLocaleString('en-US') + ' 億' : '—') +
         (s.turnoverLevel ? ' <span style="font-size:9px;color:#94a3b8;font-weight:700">' + esc(s.turnoverLevel) + '</span>' : '') +
         '</div>' +
         '<div class="s ' + tw(s.turnoverVsMa5Pct != null ? s.turnoverVsMa5Pct : s.turnoverChgPct) + '">' +
-          turnSub + '</div>' + turnTabs + turnMeter + '</div>' +
+          turnSub + '</div>' + turnTabs +
+        '<div class="pl-idx-spark pl-turn-meter" title="' + turnTip + '">' + turnMeter + '</div></div>' +
       '<div class="cell" data-go="breadth" title="上市上漲／下跌／平盤家數＋廣度占比／多空比（詳情見中排廣度窗）· 當前 ' +
         esc(tone) + '" style="cursor:pointer">' +
         '<div class="k">漲跌家數 · 廣度</div><div class="v" style="font-size:12px">' +
@@ -2025,19 +2028,24 @@
         x.symbol === 'HG=F' || x.symbol === 'CL=F') ? 2
         : (x.price > 1000 ? 0 : 2);
       if (x.symbol === 'TWD=X') dig = 3;
+      if (x.symbol === 'GC=F') dig = 0;
       var px = fmt(x.price, dig) + (x.unit === '%' || x.symbol === 'US10Y' ? '%' : '');
       var abbr = globalAbbr(x);
+      var chgFull = globalChgLabel(x, dig);
+      /* 畫面只顯％，完整「點·％」掛 title，避免右側欄擠掉代號 */
+      var chgShort = (x.changePct != null && isFinite(Number(x.changePct)))
+        ? pct(x.changePct, 1) : (chgFull === '—' ? '—' : chgFull);
       var full = (x.name || x.symbol || abbr) + (x.role ? ' · ' + x.role : '') +
-        (x.price != null ? (' · ' + px) : '');
-      var chgLbl = globalChgLabel(x, dig);
+        (x.price != null ? (' · ' + px) : '') +
+        (chgFull && chgFull !== '—' ? (' · ' + chgFull) : '');
       html += '<div class="g" title="' + esc(full) + '">' +
         '<div class="k"><span class="abbr">' + esc(abbr) + '</span>' +
           (x.role ? '<span class="role">' + esc(x.role) + '</span>' : '') +
         '</div>' +
         '<div class="row">' +
           '<div class="v" title="點位">' + px + '</div>' +
-          '<div class="s ' + tw(x.changePct) + '" title="漲跌點 · ％">' +
-            chgLbl +
+          '<div class="s ' + tw(x.changePct) + '" title="' + esc(chgFull) + '">' +
+            chgShort +
           '</div>' +
         '</div></div>';
     });
