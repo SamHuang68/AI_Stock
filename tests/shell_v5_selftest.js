@@ -170,6 +170,9 @@ ok(/basisPts/.test(pl) && /正價差/.test(pl) && /逆價差/.test(pl) && /Basis
   'pulse strip shows TXF–TAIEX basis');
 ok(/pl-flash-q/.test(pl) && /flashQ/.test(pl) && /搜代號\/關鍵字/.test(pl),
   'pulse flash has keyword search beside TW/US tabs');
+ok(/#pl-flash-sec \.pl-sec-tog button\{font-size:7px/.test(pl) &&
+  /pl-wl \.pl-sec-tog button\{font-size:7px/.test(pl),
+  'pulse flash market tabs match watchlist tab font size');
 ok(/data-layout=/.test(pl) && /LAYOUT_CONTRACT/.test(pl) &&
   /grid-template-columns:repeat\(5,minmax\(0,1fr\)\)/.test(pl) &&
   /pl-zone z-top/.test(pl) && /pl-zone z-bot/.test(pl) &&

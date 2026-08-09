@@ -335,8 +335,9 @@
         'font-variant-numeric:tabular-nums;letter-spacing:-0.25px}' +
       '#pl-root .pl-global .g .s{font-size:7px;font-weight:700;flex:0 0 auto;white-space:nowrap;text-align:right;letter-spacing:-0.35px;' +
         'font-variant-numeric:tabular-nums;min-width:0;max-width:58%}' +
-      /* 市場快訊：縮字＋單行，避免標題跳行 */
+      /* 市場快訊：縮字＋單行；市場 tab 與自選風險同級（7px） */
       '#pl-root .pl-flash-tools{display:flex;align-items:center;gap:3px;flex:1 1 auto;min-width:0;justify-content:flex-end}' +
+      '#pl-root #pl-flash-sec .pl-sec-tog button{font-size:7px;padding:1px 5px}' +
       '#pl-root .pl-flash-q{width:64px;min-width:48px;max-width:88px;padding:1px 4px;border:1px solid var(--border);border-radius:3px;' +
         'background:var(--bg);color:var(--thi);font-size:7px;font-family:inherit}' +
       '#pl-root .pl-flash-q:focus{outline:none;border-color:var(--gold-m)}' +
