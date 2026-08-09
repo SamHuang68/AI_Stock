@@ -173,7 +173,8 @@ stateDiagram-v2
 |---------|----------------|
 | 宏觀偏多 + 輪動健康 | 進場風格 → 積極（如 65） |
 | 跌停家數異常／VIX 急升 | 風控降載：新單口數減半、移動停利收緊 |
-| 側欄「執行」／橋接 | `WaveDeckBridge.open()` → `http://127.0.0.1:18433/`；可選 `pushOverlay` |
+| 側欄「執行」／橋接 | `WaveDeckBridge.open()` → `http://127.0.0.1:18433/` |
+| Pulse／大盤體質 → WD | `WaveDeckBridge.syncFromMarket({score, advRatio})` → `POST /bridge/st`（風格／降載；節流 60s） |
 | ST 心跳失敗 | WaveDeck 亮黃燈；不自動加倉 |
 
 協定路徑（本機）：

@@ -374,6 +374,20 @@
         }
       }
     };
+
+    // TW 大盤體質 → WaveDeck 宏觀覆寫（節流／去重在 bridge）
+    if (direction === 'health' && score != null && window.WaveDeckBridge &&
+        typeof window.WaveDeckBridge.syncFromMarket === 'function') {
+      try {
+        window.WaveDeckBridge.syncFromMarket({
+          score: score,
+          label: label,
+          summary: payload.plainSummary || summary,
+          source: 'market_score_bar',
+          silent: true
+        });
+      } catch (e) { /* never block chart */ }
+    }
   }
 
   function openAlgoModal(payload) {

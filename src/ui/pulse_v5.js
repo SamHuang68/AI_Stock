@@ -28,12 +28,15 @@
       '#pl-root .pl-title{font-family:\'Noto Serif TC\',serif;font-size:26px;font-weight:700;color:var(--thi)}' +
       '#pl-root .pl-sub{font-size:11px;color:var(--tlo);margin-top:4px}' +
       '#pl-root .pl-tone{margin-top:6px;font-size:13px;font-weight:700}' +
+      '#pl-root .pl-wd{margin-top:4px;font-size:10px;color:var(--tlo)}' +
+      '#pl-root .pl-wd b{color:var(--cyan)}' +
       '#pl-root .pl-actions{display:flex;gap:8px;flex-wrap:wrap}' +
       '#pl-root .pl-btn{padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);' +
         'color:var(--text);font-size:10px;font-family:\'JetBrains Mono\',monospace;cursor:pointer}' +
       '#pl-root .pl-btn:hover{border-color:var(--bhi);color:var(--thi)}' +
       '#pl-root .pl-btn.primary{background:var(--gold);color:#060A12;border:none;font-weight:700}' +
       '#pl-root .pl-btn.primary:hover{background:#FBBF24}' +
+      '#pl-root .pl-btn.wd{border-color:rgba(103,232,249,.35);color:var(--cyan)}' +
       '#pl-root .pl-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0}' +
       '#pl-root .pl-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;min-height:76px}' +
       '#pl-root .pl-card .k{font-size:9px;color:var(--tlo);letter-spacing:1px;margin-bottom:6px}' +
@@ -167,8 +170,10 @@
             '<div class="pl-title">市場脈動</div>' +
             '<div class="pl-sub" id="pl-sub">指數 · 夜盤 · 廣度 · 籌碼 · 類股</div>' +
             '<div class="pl-tone" id="pl-tone">—</div>' +
+            '<div class="pl-wd" id="pl-wd">WaveDeck 覆寫：—</div>' +
           '</div><div class="pl-actions">' +
             '<button type="button" class="pl-btn" id="pl-refresh">↻ 重新整理</button>' +
+            '<button type="button" class="pl-btn wd" id="pl-push-wd" title="將廣度／體質推送到 WaveDeck">→ WD</button>' +
             '<button type="button" class="pl-btn" data-go="breadth">廣度</button>' +
             '<button type="button" class="pl-btn" data-go="afterhours">盤後</button>' +
             '<button type="button" class="pl-btn primary" data-go="chart">圖表</button>' +
@@ -177,11 +182,55 @@
         '</div>';
       var r = $('pl-refresh');
       if (r) r.onclick = function () { refresh(); };
+      var pwd = $('pl-push-wd');
+      if (pwd) pwd.onclick = function () { pushWd(true); };
       mount.querySelectorAll('[data-go]').forEach(function (b) {
         b.onclick = function () { goRoute(b.getAttribute('data-go')); };
       });
     }
     return $('pl-body');
+  }
+
+  var _lastMacro = null;
+
+  function setWdLine(text) {
+    var el = $('pl-wd');
+    if (el) el.innerHTML = text || 'WaveDeck 覆寫：—';
+  }
+
+  function pushWd(force) {
+    if (!window.WaveDeckBridge || typeof window.WaveDeckBridge.syncFromMarket !== 'function') {
+      setWdLine('WaveDeck 覆寫：<b>橋接未載入</b>');
+      return Promise.resolve();
+    }
+    var m = _lastMacro || {};
+    return window.WaveDeckBridge.syncFromMarket({
+      score: m.score,
+      advRatio: m.advRatio,
+      label: m.label,
+      summary: m.summary,
+      source: 'pulse_v5',
+      force: !!force,
+      silent: !force
+    }).then(function (res) {
+      if (!res) return;
+      if (res.skipped) {
+        var last = window.WaveDeckBridge.lastSync && window.WaveDeckBridge.lastSync();
+        if (last && last.payload) {
+          setWdLine('WaveDeck 覆寫：風格 <b>' + last.payload.style + '</b>' +
+            (last.payload.delever ? ' · 降載' : '') + '（節流中）');
+        } else {
+          setWdLine('WaveDeck 覆寫：待命（' + (res.reason || 'skip') + '）');
+        }
+        return;
+      }
+      if (res.ok && res.payload) {
+        setWdLine('WaveDeck 覆寫：風格 <b>' + res.payload.style + '</b>' +
+          (res.payload.delever ? ' · <b>降載</b>' : '') + ' · 已推送');
+      } else if (res.ok === false) {
+        setWdLine('WaveDeck 覆寫：<b>失敗</b>（' + (res.error || '—') + '）');
+      }
+    });
   }
 
   function render(pack) {
@@ -208,6 +257,20 @@
       toneEl.className = 'pl-tone ' + tw(txf && txf.changePct);
       toneEl.textContent = toneLine(txf, bd);
     }
+
+    _lastMacro = {
+      score: bd.score,
+      advRatio: st.advRatio,
+      label: bd.label || null,
+      summary: bd.summary || bd.plainSummary || null
+    };
+    // Prefer dedicated TW market fundamental score when pack carries it
+    if (pack.fund && pack.fund.score != null) {
+      _lastMacro.score = pack.fund.score;
+      _lastMacro.label = pack.fund.label || _lastMacro.label;
+      _lastMacro.summary = pack.fund.plainSummary || pack.fund.summary || _lastMacro.summary;
+    }
+    pushWd(false);
 
     var up = st.up, dn = st.down, flat = st.unchanged || 0;
     var sum = (up || 0) + (dn || 0) + flat;
@@ -304,7 +367,8 @@
       jget('/marketflow'),
       jget('/inst-rank?who=foreign&side=buy&n=5'),
       jget('/inst-rank?who=foreign&side=sell&n=5'),
-      jget('/sectors?mkt=TW')
+      jget('/sectors?mkt=TW'),
+      jget('/fundamental/^TWII')
     ]).then(function (arr) {
       render({
         tw: arr[0],
@@ -313,7 +377,8 @@
         mf: arr[3] || {},
         buy: arr[4],
         sell: arr[5],
-        sec: arr[6]
+        sec: arr[6],
+        fund: arr[7] || null
       });
     });
   }
