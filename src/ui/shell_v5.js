@@ -128,13 +128,36 @@
       var sync = document.createElement('div');
       sync.id = 'shell-sync';
       sync.className = 'shell-sync';
-      sync.innerHTML = '<span class="ss-dot" aria-hidden="true"></span><span id="shell-sync-txt">LOCAL</span>';
+      sync.title = 'Stock Terminal /health';
+      sync.innerHTML = '<span class="ss-dot" aria-hidden="true"></span><span id="shell-sync-txt">ST …</span>';
       var status = $('statusbar');
       if (status && status.parentElement === topbar) topbar.insertBefore(sync, status);
       else {
         var keybtn = $('keybtn');
         if (keybtn) topbar.insertBefore(sync, keybtn);
         else topbar.appendChild(sync);
+      }
+    }
+    if (topbar && !$('shell-wd-sync')) {
+      var wds = document.createElement('div');
+      wds.id = 'shell-wd-sync';
+      wds.className = 'shell-sync warn';
+      wds.title = 'WaveDeck 連線／最近宏觀覆寫（點擊開啟）';
+      wds.style.cursor = 'pointer';
+      wds.innerHTML = '<span class="ss-dot" aria-hidden="true"></span><span id="shell-wd-sync-txt">WD …</span>';
+      wds.onclick = function () {
+        if (window.WaveDeckBridge && typeof window.WaveDeckBridge.open === 'function') {
+          window.WaveDeckBridge.open();
+        } else {
+          window.open(window.WAVEDECK_URL || 'http://127.0.0.1:18433/', '_blank', 'noopener');
+        }
+      };
+      var stSync = $('shell-sync');
+      if (stSync && stSync.parentElement === topbar) {
+        if (stSync.nextSibling) topbar.insertBefore(wds, stSync.nextSibling);
+        else topbar.appendChild(wds);
+      } else {
+        topbar.appendChild(wds);
       }
     }
 
@@ -231,7 +254,17 @@
     el.classList.remove('warn', 'err');
     if (mode === 'warn') el.classList.add('warn');
     if (mode === 'err') el.classList.add('err');
-    txt.textContent = text || 'LOCAL';
+    txt.textContent = text || 'ST';
+  }
+
+  function setWdSync(mode, text) {
+    var el = $('shell-wd-sync');
+    var txt = $('shell-wd-sync-txt');
+    if (!el || !txt) return;
+    el.classList.remove('warn', 'err');
+    if (mode === 'warn') el.classList.add('warn');
+    if (mode === 'err') el.classList.add('err');
+    txt.textContent = text || 'WD';
   }
 
   function probeHealth() {
@@ -240,9 +273,29 @@
     var t = setTimeout(function () { if (ctrl) ctrl.abort(); }, 2500);
     fetch('/health', { signal: ctrl && ctrl.signal })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
-      .then(function () { setSync('ok', 'SYNC OK'); })
-      .catch(function () { setSync('warn', 'LOCAL'); })
+      .then(function () { setSync('ok', 'ST OK'); })
+      .catch(function () { setSync('warn', 'ST LOCAL'); })
       .finally(function () { clearTimeout(t); });
+    probeWaveDeck();
+  }
+
+  function probeWaveDeck() {
+    if (!window.WaveDeckBridge || typeof window.WaveDeckBridge.ping !== 'function') {
+      setWdSync('warn', 'WD —');
+      return;
+    }
+    window.WaveDeckBridge.ping().then(function (ok) {
+      if (!ok) {
+        setWdSync('warn', 'WD OFF');
+        return;
+      }
+      var last = window.WaveDeckBridge.lastSync && window.WaveDeckBridge.lastSync();
+      if (last && last.payload) {
+        setWdSync('ok', 'WD ' + last.payload.style + (last.payload.delever ? '↓' : ''));
+      } else {
+        setWdSync('ok', 'WD OK');
+      }
+    }).catch(function () { setWdSync('warn', 'WD OFF'); });
   }
 
   function emitRoute(id) {
@@ -340,6 +393,13 @@
     applyRoute(saved);
     probeHealth();
     setInterval(probeHealth, 60000);
+    try {
+      window.addEventListener('wavedeck:overlay', function (ev) {
+        var p = ev && ev.detail;
+        if (p && p.style != null) setWdSync('ok', 'WD ' + p.style + (p.delever ? '↓' : ''));
+        else probeWaveDeck();
+      });
+    } catch (e) {}
     console.log('[shell-v5] Stage 7 shell ready · route=' + state.route);
   }
 
@@ -348,7 +408,9 @@
     ROUTES: ROUTES,
     go: go,
     route: function () { return state.route; },
-    setSync: setSync
+    setSync: setSync,
+    setWdSync: setWdSync,
+    probeWaveDeck: probeWaveDeck
   };
 
   if (document.readyState === 'loading') {

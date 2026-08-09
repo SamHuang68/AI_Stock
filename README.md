@@ -16,9 +16,16 @@ Bloomberg 風格台／美股研究終端機 — **本機跑、零雲端、純 Py
 
 微觀下單／AI 判斷／風控艦橋，與本終端分工：
 
+| | Stock Terminal (`:18432`) | WaveDeck (`:18433`) |
+|--|--|--|
+| 角色 | 宏觀觀測指揮塔 | 微觀執行艦橋 |
+| 連動 | Pulse／大盤體質 → `WaveDeckBridge.syncFromMarket` | `POST /bridge/st` 收風格／降載 |
+| 回寫 | Watch chip、投組狀態條讀 `/api/state` | AI 失效價／部位／信心 |
+
 - 專案目錄：[`wavedeck/`](wavedeck/)
-- 啟動：`cd wavedeck && python3 server/server.py` → `http://127.0.0.1:18433/`
+- 啟動：`.\START_WAVEDECK.cmd` 或 `cd wavedeck && python3 run.py`
 - 架構：[`wavedeck/docs/ARCHITECTURE.md`](wavedeck/docs/ARCHITECTURE.md)
+- 側欄「執行」開啟艦橋；頂列 **WD** 燈可點擊開啟；Pulse「→ WD」「AI 摘要」
 
 ## 分享版注意
 

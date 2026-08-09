@@ -204,10 +204,33 @@
   }
 
   var _lastMacro = null;
+  var _prevBand = null;
+
+  function styleBand(score, adv) {
+    if (window.WaveDeckBridge && typeof window.WaveDeckBridge.styleFromScore === 'function') {
+      return window.WaveDeckBridge.styleFromScore(score, adv);
+    }
+    return null;
+  }
 
   function setWdLine(text) {
     var el = $('pl-wd');
     if (el) el.innerHTML = text || 'WaveDeck 覆寫：—';
+  }
+
+  function maybeAnnounceFlip(m) {
+    var band = styleBand(m.score, m.advRatio);
+    if (band == null) return;
+    if (_prevBand == null) { _prevBand = band; return; }
+    if (_prevBand === band) return;
+    var prev = _prevBand;
+    _prevBand = band;
+    var msg = '宏觀風格帶切換 ' + prev + ' → ' + band +
+      (Number(m.score) < 35 ? '（建議降載）' : '');
+    if (typeof window.notifyToast === 'function') {
+      try { window.notifyToast(msg); } catch (e) {}
+    }
+    setWdLine('WaveDeck 覆寫：風格帶 <b>' + prev + '→' + band + '</b> · 推送中…');
   }
 
   function ruleFallbackSummary(m) {
@@ -377,6 +400,7 @@
       _lastMacro.label = pack.fund.label || _lastMacro.label;
       _lastMacro.summary = pack.fund.plainSummary || pack.fund.summary || _lastMacro.summary;
     }
+    maybeAnnounceFlip(_lastMacro);
     pushWd(false);
 
     var up = st.up, dn = st.down, flat = st.unchanged || 0;
