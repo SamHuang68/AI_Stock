@@ -58,5 +58,5 @@ if (Test-Path $boot) {
 }
 
 Write-Host ''
-Write-Host 'Expected OK: layoutAnchor=PULSE_LAYOUT_ANCHOR_3cab212, pythonBlocked=False, no hermes path'
+Write-Host 'Expected OK: layoutAnchor=PULSE_LAYOUT_ANCHOR_3cab212; python from data\stock_python.path pin'
 Write-Host 'Fix: double-click START_TIP.cmd in repo root'

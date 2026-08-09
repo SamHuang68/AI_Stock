@@ -53,8 +53,13 @@ else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def _is_blocked_python(exe_path=None):
-    """Hermes / agent venv steals PATH 'python' and leaves a blank console + stale UI."""
+def _is_tooling_python(exe_path=None):
+    """Heuristic: interpreter lives under an agent/tooling venv (not a ban list).
+
+    Launchers must pin an absolute Stock Python path; server does NOT refuse to
+    start for Hermes/etc. — that was treating a script bug as a product ban.
+    /health still reports the flag for diagnostics.
+    """
     p = (exe_path or sys.executable or '').replace('/', '\\').lower()
     needles = (
         'hermes',
@@ -63,6 +68,11 @@ def _is_blocked_python(exe_path=None):
         'antigravity',
     )
     return any(n in p for n in needles)
+
+
+def _is_blocked_python(exe_path=None):
+    """Deprecated alias — kept for /health clients; never used to exit."""
+    return _is_tooling_python(exe_path)
 
 
 def _pulse_layout_probe():
@@ -6883,23 +6893,17 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
 if __name__ == '__main__':
     os.chdir(_BASE)
     _boot_trace('boot begin exe=%s base=%s' % (sys.executable, _BASE))
-    if _is_blocked_python():
-        _boot_trace('FATAL refuse blocked python (hermes/agent): %s' % sys.executable)
+    # Do NOT exit for tooling pythons — launchers pin absolute path instead.
+    # Soft warn only so a mis-resolved PATH never becomes a hard product ban.
+    if _is_tooling_python():
+        _boot_trace('WARN tooling python (prefer pinned Stock Python via go.ps1): %s' % sys.executable)
         sys.stderr.write(
-            '\n============================================================\n'
-            ' FATAL: refusing Hermes/agent python\n'
-            '   %s\n'
-            ' This is why you see a BLANK console and 一行兩框 UI.\n'
-            ' Fix: double-click START_TIP.cmd in the repo root\n'
-            '   (or install python.org Python and re-run scripts\\go.ps1 -Pull)\n'
-            ' Boot log: %s\n'
-            '============================================================\n' % (
-                sys.executable,
-                os.path.join(_BASE, 'logs', 'SERVER_BOOT.txt'),
-            )
+            '[warn] Running under tooling/agent python:\n'
+            '       %s\n'
+            '       Prefer: scripts\\go.ps1 (pins absolute Stock Python).\n'
+            '       Server will still start.\n' % sys.executable
         )
         sys.stderr.flush()
-        sys.exit(2)
     _probe0 = _pulse_layout_probe()
     _boot_trace('pulseLayout=%s' % json.dumps(_probe0, ensure_ascii=False))
     if _probe0.get('hasFourColPriority') or not _probe0.get('layoutAnchor'):

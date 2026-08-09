@@ -1,13 +1,13 @@
-# Stock Terminal v5.0 — tip UX only (PowerShell)
+# Stock Terminal v5.0 — tip UX + WaveDeck integrate (PowerShell)
 # Usage (from repo root):
-#   DOUBLE-CLICK:  START_TIP.cmd   ← preferred when Hermes steals python
+#   DOUBLE-CLICK:  START_TIP.cmd
 #   powershell -ExecutionPolicy Bypass -File .\scripts\go.ps1
 #   powershell -ExecutionPolicy Bypass -File .\scripts\go.ps1 -Pull
 #   powershell -ExecutionPolicy Bypass -File .\scripts\go.ps1 -RebuildOnly
-#   powershell -ExecutionPolicy Bypass -File .\scripts\diagnose_tip.ps1
 #
-# CRITICAL: never use Hermes / agent venv python.exe — that opens a blank
-# console and leaves an old :18432 process serving 兩框 UI.
+# Discipline: NEVER launch with bare PATH "python". Always resolve an absolute
+# interpreter, pin it to data\stock_python.path, and reuse the pin. Tooling
+# venvs (Hermes/agent) are deprioritized — not banned as a product policy.
 param(
   [switch]$Pull,
   [switch]$RebuildOnly
@@ -38,11 +38,10 @@ function Write-Banner {
   Write-Host " tip:  $TipBranch"
 }
 
-function Test-BlockedPython([string]$ExePath) {
+function Test-ToolingPython([string]$ExePath) {
+  # Soft ranking only — not a ban. Prefer system / python.org installs.
   if (-not $ExePath) { return $true }
   $low = $ExePath.ToLowerInvariant()
-  # Hermes / Cursor agent / random venv — these steal "python" on PATH and
-  # produce the blank console the user reported.
   return ($low -match 'hermes' -or
           $low -match '\\hermes-agent\\' -or
           $low -match 'cursor.*agent' -or
@@ -51,40 +50,82 @@ function Test-BlockedPython([string]$ExePath) {
           $low -match '\\anaconda\\envs\\')
 }
 
-function Resolve-StockPython {
-  Write-Host '[python] resolve interpreter (block hermes/agent venv)'
-  $candidates = New-Object System.Collections.Generic.List[string]
+function Save-StockPythonPin([string]$ExePath) {
+  $pinDir = Join-Path $Root 'data'
+  if (-not (Test-Path $pinDir)) { New-Item -ItemType Directory -Path $pinDir | Out-Null }
+  $pin = Join-Path $pinDir 'stock_python.path'
+  Set-Content -LiteralPath $pin -Value $ExePath -Encoding ASCII
+  Write-Host "[python] pinned -> $pin"
+}
 
-  # 1) Official Windows py launcher → real install, not Hermes
+function Read-StockPythonPin {
+  $pin = Join-Path $Root 'data\stock_python.path'
+  if (-not (Test-Path -LiteralPath $pin)) { return $null }
+  $p = (Get-Content -LiteralPath $pin -Raw).Trim()
+  if ($p -and (Test-Path -LiteralPath $p)) { return $p }
+  return $null
+}
+
+function Test-PythonUsable([string]$ExePath) {
+  try {
+    $ver = (& $ExePath -c "import sys; print('%d.%d'%sys.version_info[:2])" 2>$null | Select-Object -First 1)
+    if (-not $ver) { return $false }
+    if ($ver -notmatch '^3\.') { return $false }
+    return $true
+  } catch { return $false }
+}
+
+function Resolve-StockPython {
+  Write-Host '[python] resolve absolute Stock Python (pin; deprioritize tooling venvs)'
+
+  # 0) Explicit override
+  if ($env:ST_PYTHON -and (Test-Path -LiteralPath $env:ST_PYTHON)) {
+    if (Test-PythonUsable $env:ST_PYTHON) {
+      Write-Host "       OK ST_PYTHON -> $($env:ST_PYTHON)"
+      Save-StockPythonPin $env:ST_PYTHON
+      return $env:ST_PYTHON
+    }
+  }
+
+  # 1) Reuse previous pin (stable across PATH churn)
+  $pinned = Read-StockPythonPin
+  if ($pinned -and -not (Test-ToolingPython $pinned) -and (Test-PythonUsable $pinned)) {
+    Write-Host "       OK pin -> $pinned"
+    return $pinned
+  }
+
+  $preferred = New-Object System.Collections.Generic.List[string]
+  $fallback = New-Object System.Collections.Generic.List[string]
+
+  # 2) py -3 (Windows launcher → usually python.org)
   $pyCmd = Get-Command py -ErrorAction SilentlyContinue
   if ($pyCmd) {
     try {
       $exe = (& py -3 -c "import sys; print(sys.executable)" 2>$null | Select-Object -First 1)
-      if ($exe) { [void]$candidates.Add($exe.Trim()) }
+      if ($exe) { [void]$preferred.Add($exe.Trim()) }
     } catch {}
   }
 
-  # 2) where.exe all pythons on PATH (may include hermes — filtered later)
+  # 3) Known python.org locations (high priority)
+  foreach ($ver in @('314', '313', '312', '311', '310', '39')) {
+    [void]$preferred.Add("$env:LOCALAPPDATA\Programs\Python\Python$ver\python.exe")
+    [void]$preferred.Add("${env:ProgramFiles}\Python$ver\python.exe")
+    [void]$preferred.Add("C:\Python$ver\python.exe")
+  }
+
+  # 4) PATH entries last (may include tooling) — split by ranking
   try {
     $whereOut = & where.exe python 2>$null
     foreach ($line in $whereOut) {
-      if ($line -and (Test-Path $line)) { [void]$candidates.Add($line.Trim()) }
+      if ($line -and (Test-Path $line)) {
+        if (Test-ToolingPython $line) { [void]$fallback.Add($line.Trim()) }
+        else { [void]$preferred.Add($line.Trim()) }
+      }
     }
   } catch {}
-  foreach ($name in @('python', 'python3')) {
-    $cmd = Get-Command $name -ErrorAction SilentlyContinue
-    if ($cmd -and $cmd.Source) { [void]$candidates.Add($cmd.Source) }
-  }
-
-  # 3) Common python.org locations
-  foreach ($ver in @('314', '313', '312', '311', '310', '39')) {
-    [void]$candidates.Add("$env:LOCALAPPDATA\Programs\Python\Python$ver\python.exe")
-    [void]$candidates.Add("${env:ProgramFiles}\Python$ver\python.exe")
-    [void]$candidates.Add("C:\Python$ver\python.exe")
-  }
 
   $seen = @{}
-  foreach ($c in $candidates) {
+  foreach ($c in ($preferred + $fallback)) {
     if (-not $c) { continue }
     $full = $c
     try { $full = [System.IO.Path]::GetFullPath($c) } catch {}
@@ -92,33 +133,41 @@ function Resolve-StockPython {
     if ($seen.ContainsKey($key)) { continue }
     $seen[$key] = $true
     if (-not (Test-Path -LiteralPath $full)) { continue }
-    if (Test-BlockedPython $full) {
-      Write-Host "       SKIP blocked: $full"
+    $tooling = Test-ToolingPython $full
+    if ($tooling -and -not $env:ST_ALLOW_TOOLING_PYTHON) {
+      Write-Host "       defer tooling python: $full"
       continue
     }
-    try {
-      $ver = (& $full -c "import sys; print('%d.%d'%sys.version_info[:2])" 2>$null | Select-Object -First 1)
-      if (-not $ver) { continue }
-      # Prefer 3.x
-      if ($ver -notmatch '^3\.') {
-        Write-Host "       SKIP non-3.x ($ver): $full"
-        continue
+    if (-not (Test-PythonUsable $full)) {
+      Write-Host "       SKIP unusable: $full"
+      continue
+    }
+    Write-Host "       OK -> $full"
+    Save-StockPythonPin $full
+    return $full
+  }
+
+  # Last resort: allow tooling only if explicitly opted in, else clear error
+  foreach ($c in $fallback) {
+    if ($c -and (Test-Path $c) -and (Test-PythonUsable $c)) {
+      if ($env:ST_ALLOW_TOOLING_PYTHON) {
+        Write-Host "       OK tooling (ST_ALLOW_TOOLING_PYTHON) -> $c"
+        Save-StockPythonPin $c
+        return $c
       }
-      Write-Host "       OK python $ver -> $full"
-      return $full
-    } catch {
-      Write-Host "       SKIP broken: $full"
     }
   }
 
   throw @"
-No suitable Python 3 found.
+No usable Python 3 absolute path found.
 
-Blocked (do NOT use): Hermes / agent venv, e.g.
-  C:\Users\...\AppData\Local\hermes\hermes-agent\venv\Scripts\python.exe
+Fix (pick one):
+  1) Install https://www.python.org/downloads/ and ensure ``py -3`` works
+  2) Set env ST_PYTHON to your python.exe absolute path, then re-run
+  3) Emergency only: `$env:ST_ALLOW_TOOLING_PYTHON=1` then re-run
 
-Install from https://www.python.org/downloads/ and tick 'Add python.exe to PATH',
-or ensure ``py -3`` works. Then re-run this script.
+Root cause of past blank windows: scripts called bare ``python`` on PATH.
+This launcher pins an absolute path under data\stock_python.path instead.
 "@
 }
 
@@ -132,7 +181,8 @@ function Assert-TipBranch {
 }
 
 function Stop-PortListeners([int]$PortNum) {
-  Write-Host "[stop] free port $PortNum (+ kill stray hermes python on that port)"
+  # Only free OUR port — never taskkill every python.exe on the machine.
+  Write-Host "[stop] free port $PortNum (listeners only)"
   $pids = New-Object System.Collections.Generic.HashSet[int]
 
   try {
@@ -154,16 +204,6 @@ function Stop-PortListeners([int]$PortNum) {
     Write-Host "       kill PID $procId  path=$path"
     Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
   }
-
-  # Also stop obvious Hermes python processes that may respawn / confuse the user
-  try {
-    Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" -ErrorAction SilentlyContinue |
-      Where-Object { $_.ExecutablePath -and (Test-BlockedPython $_.ExecutablePath) } |
-      ForEach-Object {
-        Write-Host "       kill hermes/agent python PID $($_.ProcessId)  $($_.ExecutablePath)"
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-      }
-  } catch {}
 
   Start-Sleep -Seconds 1
 }
@@ -230,7 +270,7 @@ function Assert-IndexIsTip {
   $pjs = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/src/ui/pulse_v5.js" -UseBasicParsing -TimeoutSec 5
   $ptxt = $pjs.Content
   if ($ptxt -match '4col-priority') {
-    throw 'Server is still serving 4-col pulse_v5.js — kill ALL python on :18432 and retry'
+    throw 'Server is still serving 4-col pulse_v5.js — free :18432 listener and retry'
   }
   if ($ptxt -notmatch '5col-2zone' -or $ptxt -notmatch 'repeat\(5,minmax\(0,1fr\)\)') {
     throw 'Server pulse_v5.js is not 5-col×2-zone — wrong tree / stale process'
@@ -241,8 +281,8 @@ function Assert-IndexIsTip {
   Write-Host '[ok] GET /src/ui/pulse_v5.js is 5col-2zone + ANCHOR_3cab212'
 }
 
-function Assert-ListenerNotBlocked {
-  Write-Host '[check] listening process is not hermes/agent python'
+function Assert-ListenerMatchesPin {
+  Write-Host '[check] :18432 listener uses pinned Stock Python (warn only if tooling)'
   try {
     $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     foreach ($c in $conns) {
@@ -250,12 +290,11 @@ function Assert-ListenerNotBlocked {
       $path = $null
       if ($proc) { $path = $proc.Path }
       Write-Host "       listen PID $($c.OwningProcess) path=$path"
-      if ($path -and (Test-BlockedPython $path)) {
-        throw "Port $Port is still held by blocked python: $path"
+      if ($path -and (Test-ToolingPython $path)) {
+        Write-Host "       WARN listener is tooling python — launcher should have pinned Stock Python"
       }
     }
   } catch {
-    if ("$_" -match 'blocked python') { throw }
     # Get-NetTCPConnection may be unavailable — non-fatal
   }
 }
@@ -290,7 +329,7 @@ if ($Pull) {
   # 舊 go.ps1 特徵：沒有 Resolve-StockPython。若仍看到 RedirectStandardOutput 啟動＝拉碼失敗。
   $self = Get-Content -LiteralPath $PSCommandPath -Raw -Encoding UTF8
   if ($self -notmatch 'Resolve-StockPython' -or $self -match 'RedirectStandardOutput') {
-    throw "This go.ps1 is STALE (pre-hermes-fix). Delete scripts\\go.ps1 cache and re-run START_TIP.cmd"
+    throw "This go.ps1 is STALE (pre pin-python fix). Re-pull tip and re-run START_TIP.cmd"
   }
 }
 
@@ -306,26 +345,24 @@ if ($RebuildOnly) {
 
 Stop-PortListeners -PortNum $Port
 
-# Live console (NOT RedirectStandardOutput) so the window shows server logs.
-# Title is set via cmd so user never sees a blank hermes python window.
+# Live console (NOT RedirectStandardOutput) — absolute PYTHON from pin.
 $logDir = Join-Path $Root 'logs'
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
 $logOut = Join-Path $logDir 'server_go_ps.out.log'
 $logErr = Join-Path $logDir 'server_go_ps.err.log'
 
-Write-Host "[start] Stock Terminal Server via:"
+Write-Host "[start] Stock Terminal Server via pinned absolute python:"
 Write-Host "        $Python"
 Write-Host "        cwd=$Root"
 Write-Host "        logs: $logOut / $logErr"
 
-# Write a tiny launcher .cmd so quoting is reliable and the window shows live logs
-# (/k keeps console open on crash — no more blank hermes window with zero status).
 $launcher = Join-Path $logDir 'run_server_tip.cmd'
 @(
   '@echo off'
   'chcp 65001 >nul'
   'title Stock Terminal Server v5 tip'
   "cd /d `"$Root`""
+  'set ST_LAUNCHED_BY=go.ps1'
   "echo ============================================"
   "echo  Stock Terminal Server v5 tip"
   "echo  HEAD=$head"
@@ -350,19 +387,15 @@ Write-Host "       launcher script: $launcher"
 
 Wait-TipServer
 Assert-IndexIsTip
-Assert-ListenerNotBlocked
+Assert-ListenerMatchesPin
 
 Write-Host "[open] $Url"
 Start-Process $Url
 
 Write-Host ''
-Write-Host 'DONE. In browser (必看):'
+Write-Host 'DONE.'
 Write-Host "  HEAD=$head"
-Write-Host "  PYTHON=$Python"
-Write-Host '  Server window title MUST be: Stock Terminal Server v5 tip'
-Write-Host '  If you see hermes-agent\venv\...\python.exe = WRONG (script bug / old script)'
-Write-Host '  1) Close ALL localhost:18432 tabs'
-Write-Host '  2) Ctrl+F5'
-Write-Host '  3) Title badge must show: 實測 5+5'
-Write-Host '  4) F12: PULSE_LAYOUT_ANCHOR_3cab212 ... ok=true'
+Write-Host "  PYTHON=$Python  (pinned in data\stock_python.path)"
+Write-Host '  Server window title: Stock Terminal Server v5 tip'
+Write-Host '  Browser: Ctrl+F5 → badge 實測 5+5'
 Write-Host ''

@@ -1,8 +1,8 @@
 @echo off
 REM ============================================================
 REM  Stock Terminal tip UX — DOUBLE-CLICK THIS FILE
-REM  Forces git tip branch, kills ALL python (incl. Hermes),
-REM  then launches scripts\go.ps1 -Pull with a real Python.
+REM  Forces git tip branch, frees :18432 only, then go.ps1
+REM  (go.ps1 pins absolute Stock Python — never bare PATH python).
 REM ============================================================
 chcp 65001 >nul
 setlocal EnableExtensions EnableDelayedExpansion
@@ -16,14 +16,12 @@ if not exist "build_v2.py" (
 
 echo.
 echo ============================================
-echo  START_TIP — kill python + pull tip + go.ps1
+echo  START_TIP — free :18432 + pull tip + go.ps1
 echo  repo: %CD%
 echo ============================================
 echo.
 
-echo [0] kill ALL python.exe / pythonw.exe (incl. hermes blank window)
-taskkill /F /IM python.exe /T >nul 2>&1
-taskkill /F /IM pythonw.exe /T >nul 2>&1
+echo [0] free port 18432 only (do NOT kill every python.exe on the PC)
 for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":18432" ^| findstr "LISTENING"') do (
   echo      kill port 18432 PID %%a
   taskkill /F /PID %%a >nul 2>&1

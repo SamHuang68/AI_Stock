@@ -116,6 +116,7 @@ data/margin_cycle.db-shm
 data/pulse_history.db
 data/pulse_history.db-wal
 data/pulse_history.db-shm
+data/stock_python.path
 baml_hy.csv
 baml_ig.csv
 fedfunds.csv
