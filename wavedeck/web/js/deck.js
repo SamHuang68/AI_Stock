@@ -1,4 +1,4 @@
-/* WaveDeck console — ST shell layout + ST APIs (:18432) + WD APIs */
+/* WaveDeck — Wave AI bridge UI + ST (:18432) macro APIs */
 (function () {
   'use strict';
 
@@ -33,14 +33,6 @@
     return v.toLocaleString('en-US');
   }
 
-  function setSync(el, txtEl, mode, text) {
-    if (!el || !txtEl) return;
-    el.classList.remove('warn', 'err');
-    if (mode === 'warn') el.classList.add('warn');
-    if (mode === 'err') el.classList.add('err');
-    txtEl.textContent = text || '—';
-  }
-
   async function api(path, opts) {
     var r = await fetch(path, Object.assign({
       headers: { 'Content-Type': 'application/json' },
@@ -72,7 +64,6 @@
     return map[v] || String(v);
   }
 
-  /** Map ST market score (0–100ish) → WaveDeck style 35/50/65 band. */
   function styleFromScore(score, advRatio) {
     var s = Number(score);
     var adv = Number(advRatio);
@@ -90,6 +81,13 @@
     return Math.max(20, Math.min(90, Math.round(hint)));
   }
 
+  function syncStylePresets(style) {
+    var n = Number(style);
+    document.querySelectorAll('.preset').forEach(function (btn) {
+      btn.classList.toggle('on', Number(btn.getAttribute('data-style')) === n);
+    });
+  }
+
   function render(s) {
     state = s;
     $('clock').textContent = s.updated_at || '—';
@@ -99,13 +97,12 @@
     $('webhookStatus').textContent = (s.transport && s.transport.last_webhook_status) || '待命';
     $('transport').textContent = ((s.transport && s.transport.tunnel) || 'local') + ' · ' + ((s.transport && s.transport.domain) || '');
 
-    var chips = $('healthChips');
     var L = s.lights || {};
-    chips.innerHTML = [
+    $('healthChips').innerHTML = [
       ['系統', L.system],
-      ['券商', L.broker_api],
-      ['同步', L.position_sync],
-      ['急停', L.kill_switch]
+      ['券商 API', L.broker_api],
+      ['部位同步', L.position_sync],
+      ['緊急停止', L.kill_switch]
     ].map(function (pair) {
       var cls = 'chip ' + (pair[1] === 'ok' || pair[1] === 'run' || pair[1] === 'off' ? 'ok' : (pair[1] === 'on' || pair[1] === 'halt' ? 'bad' : 'warn'));
       return '<span class="' + cls + '"><i class="dot"></i>' + pair[0] + ' · ' + lightLabel(pair[1]) + '</span>';
@@ -123,10 +120,10 @@
 
     var p = s.positions || {};
     $('posKv').innerHTML = [
-      ['AI 建議', p.ai_suggested],
-      ['TXT 目標', p.txt_target],
-      ['策略', p.strategy],
-      ['帳戶', p.account]
+      ['AI 最近建議部位', p.ai_suggested],
+      ['TXT 目前目標部位', p.txt_target],
+      ['策略部位', p.strategy],
+      ['帳戶實際部位', p.account]
     ].map(function (row) {
       return '<div class="kv-row"><span class="lab">' + row[0] + '</span><span class="val">' + row[1] + '</span></div>';
     }).join('');
@@ -134,12 +131,13 @@
     var style = Number(s.style || 50);
     $('styleRange').value = String(style);
     $('styleVal').textContent = String(style);
+    syncStylePresets(style);
 
     var no = s.no_overnight || {};
     $('noOvernight').innerHTML =
-      '<h3>不留倉 · ' + (no.enabled ? '啟用' : '關閉') + '</h3>' +
-      '<p>收盤前 ' + (no.block_new_before_close_min || 15) + ' 分禁新單；' +
-      (no.force_flat_time || '13:40') + ' 強平。</p>';
+      '<div class="box-hd">不留倉保護 · ' + (no.enabled ? '啟用' : '關閉') + '</div>' +
+      '<p>收盤前 ' + (no.block_new_before_close_min || 15) + ' 分鐘禁新單；' +
+      (no.force_flat_time || '13:40') + ' 強制平倉。' + (no.note ? ' ' + no.note : '') + '</p>';
 
     var ai = s.ai || {};
     $('aiLabel').textContent = ai.action_label || ai.action || '—';
@@ -162,29 +160,28 @@
     $('aiProcess').innerHTML =
       '<div>路由 <span>' + (proc.route || '—') + '</span></div>' +
       '<div>追價風險 <span>' + (proc.chase_risk || '—') + '</span></div>' +
-      '<div>執行閘門 <span>' + (proc.gate || '—') + '</span>' +
-      (proc.gate_reasons && proc.gate_reasons.length ? ' · ' + proc.gate_reasons.join('／') : '') +
-      '</div>' +
-      '<div>更新 <span>' + (ai.updated_at || '—') + '</span></div>';
+      '<div>執行閘門 <span>' + (proc.gate || '—') + '</span></div>' +
+      '<div>閘門原因 <span>' + ((proc.gate_reasons && proc.gate_reasons.length) ? proc.gate_reasons.join('／') : '—') + '</span></div>' +
+      '<div>更新 <span>' + (ai.updated_at || '—') + '</span></div>' +
+      '<div>提供者 <span>' + (ai.provider || (s.costs && s.costs.provider) || '—') + '</span></div>';
 
     var lightNames = {
-      webhook: 'Webhook',
+      webhook: 'Webhook 接收',
       openai_or_local: '決策引擎',
-      email_monitor: 'Email',
-      order_signal_file: '訊號檔',
+      email_monitor: 'Email 監控',
+      order_signal_file: '下單訊號檔',
       st_bridge: 'ST 橋接',
-      risk_watchdog: '風控',
-      audit_db: '稽核',
-      ui_push: 'UI',
-      broker_api: '券商',
+      risk_watchdog: '風控看門狗',
+      audit_db: '稽核資料庫',
+      ui_push: 'UI 推送',
+      broker_api: '券商 API',
       position_sync: '部位同步',
-      system: '系統',
-      kill_switch: '急停'
+      system: '系統核心',
+      kill_switch: '緊急停止'
     };
     $('lights').innerHTML = Object.keys(lightNames).map(function (k) {
       var v = (s.lights || {})[k] || 'ok';
-      var cls = lightClass(v);
-      return '<div class="light ' + cls + '"><i></i><span class="name">' + lightNames[k] + '</span><span class="st">' + lightLabel(v) + '</span></div>';
+      return '<div class="light ' + lightClass(v) + '"><i></i><span class="name">' + lightNames[k] + '</span><span class="st">' + lightLabel(v) + '</span></div>';
     }).join('');
 
     var a = s.account || {};
@@ -193,12 +190,12 @@
       '<div class="a"><div class="k">昨日餘額</div><div class="v">' + money(a.yesterday_balance) + '</div></div>' +
       '<div class="a"><div class="k">當前權益</div><div class="v">' + money(a.equity) + '</div></div>' +
       '<div class="a"><div class="k">權益變動</div><div class="v ' + (chg < 0 ? 'down' : 'up') + '">' + money(chg) + '</div></div>' +
-      '<div class="a"><div class="k">券商</div><div class="v">' + (a.broker_api || '—') + '</div></div>';
+      '<div class="a"><div class="k">券商連線</div><div class="v">' + (a.broker_api || '—') + '</div></div>';
 
     var ex = s.exec || {};
     $('execKv').innerHTML = [
-      ['AI 動作', ex.last_ai_action],
-      ['下單', ex.last_order_action],
+      ['最近 AI 動作', ex.last_ai_action],
+      ['最近下單動作', ex.last_order_action],
       ['價格', ex.price],
       ['口數', ex.lots]
     ].map(function (row) {
@@ -207,19 +204,18 @@
 
     var c = s.costs || {};
     $('costKv').innerHTML =
-      '<div class="a"><div class="k">本次</div><div class="v">' + c.session_usd + '</div></div>' +
-      '<div class="a"><div class="k">今日</div><div class="v">' + c.day_usd + '</div></div>' +
-      '<div class="a"><div class="k">本月</div><div class="v">' + c.month_usd + '</div></div>' +
-      '<div class="a"><div class="k">源</div><div class="v">' + (c.provider || '—') + '</div></div>';
+      '<div class="a"><div class="k">本次 USD</div><div class="v">' + c.session_usd + '</div></div>' +
+      '<div class="a"><div class="k">今日 USD</div><div class="v">' + c.day_usd + '</div></div>' +
+      '<div class="a"><div class="k">本月 USD</div><div class="v">' + c.month_usd + '</div></div>' +
+      '<div class="a"><div class="k">提供者</div><div class="v">' + (c.provider || '—') + '</div></div>';
 
     var prov = (c.provider || 'heuristic').toLowerCase();
     if (prov !== 'heuristic' && prov !== 'ollama' && prov !== 'openai') prov = 'heuristic';
-    if ($('providerSelect') && $('providerSelect').value !== prov) {
-      $('providerSelect').value = prov;
-    }
+    if ($('providerSelect') && $('providerSelect').value !== prov) $('providerSelect').value = prov;
+
     var mode = (s.mode || 'paper').toLowerCase();
-    if ($('btnModePaper')) $('btnModePaper').classList.toggle('primary', mode === 'paper');
-    if ($('btnModeLive')) $('btnModeLive').classList.toggle('primary', mode === 'live');
+    $('btnModePaper').classList.toggle('cyan', mode === 'paper');
+    $('btnModeLive').classList.toggle('cyan', mode === 'live');
 
     var t = s.transport || {};
     $('transportKv').innerHTML = [
@@ -232,20 +228,28 @@
     }).join('');
   }
 
+  async function setStyle(n) {
+    var j = await api('/api/style', { method: 'POST', body: JSON.stringify({ style: Number(n) }) });
+    render(j.state);
+    toast('進場風格 → ' + n);
+  }
+
   async function refreshWd() {
     var j = await api('/api/state');
     render(j.state);
-    setSync($('wdSync'), $('wdSyncTxt'), 'ok', 'WD OK');
+    if ($('wdSyncTxt')) $('wdSyncTxt').textContent = 'OK';
   }
 
   async function refreshSt() {
     var health = await jget(ST + '/health');
     if (!health) {
-      setSync($('stSync'), $('stSyncTxt'), 'warn', 'ST OFF');
-      $('stNote').textContent = 'ST :18432 未連線（請先開 Stock Terminal）';
+      if ($('stSyncTxt')) $('stSyncTxt').textContent = 'ST OFF';
+      if ($('stNote') && !(state && state.st_overlay && state.st_overlay.note)) {
+        $('stNote').textContent = 'ST :18432 未連線（可先開 Stock Terminal）';
+      }
       return;
     }
-    setSync($('stSync'), $('stSyncTxt'), 'ok', 'ST OK');
+    if ($('stSyncTxt')) $('stSyncTxt').textContent = 'ST OK';
 
     var pack = await Promise.all([
       jget(ST + '/twindex'),
@@ -260,29 +264,25 @@
     var px = t00.price;
     var chg = t00.changePct;
     var twEl = $('stTwii');
-    var twPct = $('stTwiiPct');
     if (twEl) {
       twEl.textContent = (px != null && isFinite(px)) ? Number(px).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '—';
       twEl.classList.remove('up', 'dn');
       if (chg > 0) twEl.classList.add('up');
       if (chg < 0) twEl.classList.add('dn');
     }
-    if (twPct) {
-      twPct.textContent = (chg == null || !isFinite(chg)) ? '—' : ((chg >= 0 ? '+' : '') + Number(chg).toFixed(2) + '%');
-    }
+    $('stTwiiPct').textContent = (chg == null || !isFinite(chg)) ? '—' : ((chg >= 0 ? '+' : '') + Number(chg).toFixed(2) + '%');
 
     var stocks = br.stocks || {};
     var adv = stocks.advRatio;
-    var up = stocks.up;
-    var down = stocks.down;
     $('stAdv').textContent = (adv != null && isFinite(adv)) ? (Math.round(adv * 100) + '%') : '—';
-    $('stBreadth').textContent = (up != null || down != null) ? ('漲' + (up || 0) + '／跌' + (down || 0)) : (br.date || '—');
+    $('stBreadth').textContent = (stocks.up != null || stocks.down != null)
+      ? ('漲' + (stocks.up || 0) + '／跌' + (stocks.down || 0))
+      : (br.date || '—');
 
     var score = fund.score != null ? fund.score : br.score;
-    var label = fund.label || br.label || '—';
     stCtx.score = score;
     $('stScore').textContent = (score != null && isFinite(score)) ? Math.round(Number(score)) : '—';
-    $('stScoreLbl').textContent = label;
+    $('stScoreLbl').textContent = fund.label || br.label || '—';
 
     var hint = styleFromScore(score, adv);
     stCtx.styleHint = hint;
@@ -291,59 +291,57 @@
     stCtx.note = 'ST 體質 ' + (score != null ? Math.round(Number(score)) : '—') +
       ' · 建議風格 ' + hint +
       (stCtx.delever ? ' · 建議降載' : '') +
-      (summary ? (' · ' + String(summary).slice(0, 80)) : '');
-    if (!(state && state.st_overlay && state.st_overlay.note)) {
-      $('stNote').textContent = stCtx.note;
-    }
+      (summary ? (' · ' + String(summary).slice(0, 72)) : '');
+
+    if (!(state && state.st_overlay && state.st_overlay.note)) $('stNote').textContent = stCtx.note;
     if (!(state && state.st_overlay && state.st_overlay.aggressiveness != null)) {
       $('stStyle').textContent = '建議 ' + hint;
     }
     $('stDelever').textContent = (state && state.st_overlay && state.st_overlay.delever)
-      ? '是'
-      : (stCtx.delever ? '建議是' : '否');
+      ? '是' : (stCtx.delever ? '建議是' : '否');
   }
 
   async function applyStHint() {
-    if (stCtx.styleHint == null) {
-      await refreshSt();
-    }
-    if (stCtx.styleHint == null) throw new Error('尚無 ST 建議（確認 :18432 有資料）');
+    if (stCtx.styleHint == null) await refreshSt();
+    if (stCtx.styleHint == null) throw new Error('尚無 ST 建議（確認 :18432）');
     var body = {
       style: stCtx.styleHint,
       delever: !!stCtx.delever,
       note: stCtx.note || ('ST 建議風格 ' + stCtx.styleHint)
     };
-    var j = await api('/bridge/st', { method: 'POST', body: JSON.stringify(body) });
-    // also set local style slider
+    await api('/bridge/st', { method: 'POST', body: JSON.stringify(body) });
     var j2 = await api('/api/style', { method: 'POST', body: JSON.stringify({ style: stCtx.styleHint }) });
-    render(j2.state || j.state);
+    render(j2.state);
     toast('已套用 ST 建議風格 → ' + stCtx.styleHint);
   }
 
   async function boot() {
-    setSync($('wdSync'), $('wdSyncTxt'), 'warn', 'WD …');
-    setSync($('stSync'), $('stSyncTxt'), 'warn', 'ST …');
-
     try {
       await refreshWd();
     } catch (e) {
-      setSync($('wdSync'), $('wdSyncTxt'), 'err', 'WD ERR');
+      if ($('wdSyncTxt')) $('wdSyncTxt').textContent = 'ERR';
       throw e;
     }
     refreshSt().catch(function () {});
 
-    setInterval(function () { refreshWd().catch(function () { setSync($('wdSync'), $('wdSyncTxt'), 'err', 'WD ERR'); }); }, 2000);
-    setInterval(function () { refreshSt().catch(function () { setSync($('stSync'), $('stSyncTxt'), 'warn', 'ST OFF'); }); }, 15000);
+    setInterval(function () {
+      refreshWd().catch(function () { if ($('wdSyncTxt')) $('wdSyncTxt').textContent = 'ERR'; });
+    }, 2000);
+    setInterval(function () {
+      refreshSt().catch(function () { if ($('stSyncTxt')) $('stSyncTxt').textContent = 'ST OFF'; });
+    }, 15000);
 
     $('styleRange').addEventListener('input', function () {
       $('styleVal').textContent = this.value;
+      syncStylePresets(this.value);
     });
-    $('styleRange').addEventListener('change', async function () {
-      try {
-        var j = await api('/api/style', { method: 'POST', body: JSON.stringify({ style: Number(this.value) }) });
-        render(j.state);
-        toast('進場風格 → ' + this.value);
-      } catch (e) { toast(String(e.message || e)); }
+    $('styleRange').addEventListener('change', function () {
+      setStyle(this.value).catch(function (e) { toast(String(e.message || e)); });
+    });
+    document.querySelectorAll('.preset').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        setStyle(btn.getAttribute('data-style')).catch(function (e) { toast(String(e.message || e)); });
+      });
     });
 
     document.querySelectorAll('[data-cmd]').forEach(function (btn) {
@@ -366,10 +364,7 @@
 
     $('providerSelect').addEventListener('change', async function () {
       try {
-        var j = await api('/api/provider', {
-          method: 'POST',
-          body: JSON.stringify({ provider: this.value })
-        });
+        var j = await api('/api/provider', { method: 'POST', body: JSON.stringify({ provider: this.value }) });
         render(j.state);
         toast('決策源 → ' + j.provider);
       } catch (e) { toast(String(e.message || e)); }
@@ -382,7 +377,6 @@
         toast('模式 → paper');
       } catch (e) { toast(String(e.message || e)); }
     });
-
     $('btnModeLive').addEventListener('click', async function () {
       try {
         var j = await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'live' }) });
@@ -390,7 +384,6 @@
         toast('模式 → live／TXT');
       } catch (e) { toast(String(e.message || e)); }
     });
-
     $('btnSyncTxt').addEventListener('click', async function () {
       try {
         var j = await api('/api/sync_txt', { method: 'POST', body: '{}' });
@@ -412,9 +405,7 @@
 
     $('btnAudit').addEventListener('click', async function () {
       var j = await api('/api/audit?limit=12');
-      var lines = (j.items || []).map(function (it) {
-        return '#' + it.id + ' ' + it.ts + ' ' + it.kind;
-      });
+      var lines = (j.items || []).map(function (it) { return '#' + it.id + ' ' + it.ts + ' ' + it.kind; });
       toast(lines[0] ? lines.slice(0, 3).join(' · ') : '尚無稽核');
       console.log('[WaveDeck audit]', j.items);
     });
@@ -422,11 +413,8 @@
     $('btnOpenST').addEventListener('click', function () {
       window.open(ST + '/#pulse', '_blank', 'noopener');
     });
-
     $('btnPullSt').addEventListener('click', async function () {
-      try {
-        await applyStHint();
-      } catch (e) { toast(String(e.message || e)); }
+      try { await applyStHint(); } catch (e) { toast(String(e.message || e)); }
     });
   }
 

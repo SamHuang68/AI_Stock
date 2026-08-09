@@ -7,56 +7,73 @@
   <link rel="stylesheet" href="/css/deck.css" />
 </head>
 <body>
-  <div id="app">
-    <!-- ST-style topbar -->
-    <header id="topbar">
-      <div class="logo">WAVEDECK <small>× ST</small></div>
-      <div class="sep"></div>
-      <div class="tb-meta">
-        <span>FSM <b id="fsm">—</b></span>
-        <span>MODE <b id="mode">paper</b></span>
-        <span>TV <b id="lastTv">—</b></span>
-      </div>
-      <div class="tb-spacer"></div>
-      <div class="shell-sync" id="stSync" title="Stock Terminal /health"><span class="ss-dot"></span><span id="stSyncTxt">ST …</span></div>
-      <div class="shell-sync" id="wdSync" title="WaveDeck /health"><span class="ss-dot"></span><span id="wdSyncTxt">WD …</span></div>
-      <div class="tb-clock" id="clock">—</div>
-    </header>
-
-    <!-- ST pulse-like macro strip (live from :18432) -->
-    <section id="macrobar">
-      <div class="mb-card"><div class="k">加權</div><div class="v" id="stTwii">—</div><div class="s" id="stTwiiPct">—</div></div>
-      <div class="mb-card"><div class="k">廣度 adv</div><div class="v" id="stAdv">—</div><div class="s" id="stBreadth">—</div></div>
-      <div class="mb-card"><div class="k">大盤體質</div><div class="v" id="stScore">—</div><div class="s" id="stScoreLbl">—</div></div>
-      <div class="mb-card grow">
-        <div class="k">ST → WD 覆寫</div>
-        <div class="mb-row">
-          <span>降載 <b id="stDelever">否</b></span>
-          <span>風格 <b id="stStyle">—</b></span>
-          <span class="note" id="stNote">拉取 ST /fundamental／/breadth…</span>
-          <button type="button" class="tb-btn" id="btnPullSt">套用 ST 建議風格</button>
+  <div class="app" id="app">
+    <!-- 參考圖：頂列品牌｜中間狀態｜右側健康膠囊 -->
+    <header class="top">
+      <div class="brand">
+        <div class="brand-mark">WD</div>
+        <div>
+          <h1>WaveDeck <span>× 下單大師</span></h1>
+          <p>AI 判斷 · 目標部位 · ST 宏觀覆寫 · 風控閘門</p>
         </div>
       </div>
-      <div class="mb-card"><div class="k">Webhook</div><div class="v sm" id="webhookStatus">待命</div><div class="s" id="transport">—</div></div>
-    </section>
+      <div class="top-mid">
+        <div>本機時間 <strong id="clock">—</strong></div>
+        <div>最近 TV <strong id="lastTv">—</strong></div>
+        <div>處理 <strong id="webhookStatus">待命</strong> · FSM <strong id="fsm">—</strong> · <strong id="mode">paper</strong></div>
+      </div>
+      <div class="top-health" id="healthChips"></div>
+    </header>
 
-    <!-- ST body: left rail + main + right -->
-    <div id="body">
-      <aside id="left">
-        <div class="sec-hd">部位四欄</div>
-        <div class="kv" id="posKv"></div>
-        <div class="sec-hd">AI 進場風格</div>
-        <div class="slider-labels"><span>保守 35</span><span>50</span><span>積極 65</span></div>
-        <input id="styleRange" type="range" min="20" max="90" step="1" value="50" />
-        <div class="style-readout"><span>當前</span><strong id="styleVal">50</strong></div>
-        <div class="guard" id="noOvernight"></div>
-        <div class="sec-hd">健康燈（本機）</div>
-        <div class="chip-row" id="healthChips"></div>
+    <!-- 參考圖：左｜中（主）｜右 -->
+    <section class="cols">
+      <aside class="col left">
+        <div class="box">
+          <div class="box-hd">部位與執行狀態</div>
+          <div class="kv" id="posKv"></div>
+        </div>
+
+        <div class="box">
+          <div class="box-hd">AI 進場風格</div>
+          <div class="style-presets">
+            <button type="button" class="preset" data-style="35">保守 35</button>
+            <button type="button" class="preset" data-style="50">均衡 50</button>
+            <button type="button" class="preset" data-style="65">積極 65</button>
+          </div>
+          <div class="slider-labels"><span>20</span><span>自訂</span><span>90</span></div>
+          <input id="styleRange" type="range" min="20" max="90" step="1" value="50" />
+          <div class="style-readout">當前 <strong id="styleVal">50</strong></div>
+        </div>
+
+        <div class="box guard" id="noOvernight"></div>
+
+        <div class="box">
+          <div class="box-hd">最新執行 · API 費用</div>
+          <div class="kv" id="execKv"></div>
+          <div class="acct tight" id="costKv"></div>
+        </div>
+
+        <div class="box st-box">
+          <div class="box-hd">ST 宏觀（:18432） <span class="pill" id="stSyncTxt">ST …</span></div>
+          <div class="st-grid">
+            <div><span class="k">加權</span><b id="stTwii">—</b><i id="stTwiiPct">—</i></div>
+            <div><span class="k">廣度</span><b id="stAdv">—</b><i id="stBreadth">—</i></div>
+            <div><span class="k">體質</span><b id="stScore">—</b><i id="stScoreLbl">—</i></div>
+          </div>
+          <div class="st-note" id="stNote">等待 Stock Terminal…</div>
+          <div class="st-actions">
+            <span>降載 <b id="stDelever">否</b> · 覆寫風格 <b id="stStyle">—</b></span>
+            <button type="button" class="btn sm cyan" id="btnPullSt">套用 ST 建議</button>
+          </div>
+        </div>
       </aside>
 
-      <main id="main">
-        <section class="panel ai-panel">
-          <div class="sec-hd">AI 最新判斷 <span class="tag" id="aiEvent">—</span></div>
+      <section class="col center">
+        <div class="box ai-box">
+          <div class="box-hd">
+            AI 最新判斷
+            <span class="tag" id="aiEvent">—</span>
+          </div>
           <div class="ai-hero">
             <div class="ai-action">
               <div class="lbl" id="aiLabel">—</div>
@@ -64,62 +81,67 @@
             </div>
           </div>
           <div class="bias">
-            <div class="b long"><span class="k">偏多</span><em id="biasLong">—</em></div>
-            <div class="b short"><span class="k">偏空</span><em id="biasShort">—</em></div>
+            <div class="b long"><span class="k">偏多機會</span><em id="biasLong">—</em></div>
+            <div class="b short"><span class="k">偏空機會</span><em id="biasShort">—</em></div>
           </div>
           <p class="summary" id="aiSummary">—</p>
           <div class="tags" id="aiTags"></div>
           <div class="process" id="aiProcess"></div>
-        </section>
+        </div>
+      </section>
 
-        <section class="panel">
-          <div class="sec-hd">系統運行燈號</div>
+      <aside class="col right">
+        <div class="box">
+          <div class="box-hd">系統運行燈號</div>
           <div class="lights" id="lights"></div>
-        </section>
-      </main>
-
-      <aside id="right">
-        <div class="sec-hd">帳戶與風險</div>
-        <div class="acct" id="acct"></div>
-        <div class="sec-hd">執行對照</div>
-        <div class="kv" id="execKv"></div>
-        <div class="sec-hd">API 成本</div>
-        <div class="acct" id="costKv"></div>
-        <div class="sec-hd">TradingView / 傳輸</div>
-        <p class="summary sm" id="transportBlurb">Webhook · 本機 loopback（與 ST 同機）</p>
-        <div class="kv" id="transportKv"></div>
+        </div>
+        <div class="box">
+          <div class="box-hd">帳戶與風險</div>
+          <div class="acct" id="acct"></div>
+        </div>
+        <div class="box">
+          <div class="box-hd">TradingView / 傳輸</div>
+          <p class="summary dim" id="transportBlurb">Webhook + 本機通道。預設綁 127.0.0.1。</p>
+          <div class="kv" id="transportKv"></div>
+          <div class="muted-line">通道 <span id="transport">—</span> · WD <span id="wdSyncTxt">…</span></div>
+        </div>
       </aside>
-    </div>
+    </section>
 
-    <!-- ST-style bottom control bar -->
-    <footer id="indbar">
-      <span class="ib-lab">DECISION</span>
-      <label class="ctrl-select">
-        <span>源</span>
-        <select id="providerSelect" aria-label="決策提供者">
-          <option value="heuristic">Heuristic</option>
-          <option value="ollama">Ollama</option>
-          <option value="openai">OpenAI</option>
-        </select>
-      </label>
-      <button class="btn" id="btnModePaper" type="button">paper</button>
-      <button class="btn" id="btnModeLive" type="button">live/TXT</button>
-      <button class="btn" id="btnSyncTxt" type="button">同步 TXT</button>
-      <span class="ib-sep"></span>
-      <span class="ib-lab">SYS</span>
-      <button class="btn primary" data-cmd="start">啟動</button>
-      <button class="btn" data-cmd="stop">停止</button>
-      <button class="btn" data-cmd="restart">重啟</button>
-      <button class="btn" data-cmd="refresh">重整</button>
-      <button class="btn primary" id="btnDemo">模擬 TV</button>
-      <span class="ib-sep"></span>
-      <span class="ib-lab">VIEW</span>
-      <button class="btn ghost" id="btnAudit">稽核</button>
-      <button class="btn ghost" id="btnOpenST">開 ST 脈動</button>
-      <span class="ib-sep"></span>
-      <span class="ib-lab">KILL</span>
-      <button class="btn danger" id="btnKill">緊急 ON</button>
-      <button class="btn" id="btnKillOff">解除</button>
+    <!-- 參考圖：底部分組控制列 -->
+    <footer class="foot">
+      <div class="foot-row">
+        <span class="foot-lab">DECISION / BROKER</span>
+        <label class="ctrl-select">
+          <span>決策源</span>
+          <select id="providerSelect">
+            <option value="heuristic">Heuristic</option>
+            <option value="ollama">Ollama</option>
+            <option value="openai">OpenAI</option>
+          </select>
+        </label>
+        <button class="btn" id="btnModePaper" type="button">紙上 paper</button>
+        <button class="btn" id="btnModeLive" type="button">實盤 live／TXT</button>
+        <button class="btn" id="btnSyncTxt" type="button">同步 TXT 部位</button>
+      </div>
+      <div class="foot-row">
+        <span class="foot-lab">SYSTEM CONTROL</span>
+        <button class="btn primary" data-cmd="start">啟動系統</button>
+        <button class="btn" data-cmd="stop">停止</button>
+        <button class="btn" data-cmd="restart">重啟</button>
+        <button class="btn" data-cmd="refresh">重新整理</button>
+        <button class="btn cyan" id="btnDemo">模擬 TV 事件</button>
+      </div>
+      <div class="foot-row">
+        <span class="foot-lab">VIEW &amp; TOOLS</span>
+        <button class="btn ghost" id="btnAudit">AI／稽核紀錄</button>
+        <button class="btn ghost" id="btnOpenST">開啟 Stock Terminal</button>
+      </div>
+      <div class="foot-row">
+        <span class="foot-lab">EMERGENCY</span>
+        <button class="btn danger" id="btnKill">啟用緊急停止</button>
+        <button class="btn" id="btnKillOff">解除緊急停止</button>
+      </div>
     </footer>
   </div>
 
