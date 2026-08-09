@@ -25,8 +25,9 @@
 
 ```bash
 cd wavedeck
-python3 server/server.py
-# Windows: py -3 server\server.py
+python3 run.py
+# Windows: 雙擊 START_WAVEDECK.cmd  或  py -3 run.py
+# （勿用 python server\server.py，Windows 易 import 撞名導致起不來）
 ```
 
 開啟：

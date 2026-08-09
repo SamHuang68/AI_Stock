@@ -14,7 +14,10 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
-sys.path.insert(0, str(ROOT))
+# Avoid shadowing: `python server/server.py` puts this directory on sys.path[0],
+# so `import server` would load this file instead of the package.
+_SCRIPT_DIR = str(Path(__file__).resolve().parent)
+sys.path = [str(ROOT)] + [p for p in sys.path if p not in ("", ".", _SCRIPT_DIR)]
 
 from server import audit  # noqa: E402
 from server.engine import (  # noqa: E402
