@@ -228,19 +228,34 @@
     return '<div class="vz-meter"><i style="width:' + w.toFixed(1) + '%;background:' + col + '"></i></div>';
   }
 
-  /** 成交額對參考刻度（億） */
-  function refMeter(valueYi, ticks) {
+  /** 數值對參考刻度水位條（成交額億／動能分等）。
+   *  opts.max 固定刻度上限（動能分用 100）；未設則 max(ticks, value)
+   *  opts.tickFmt(t) 自訂刻度文字；未設則沿用億／兆
+   *  opts.color 可覆寫填色（預設 CSS 青→金漸層）
+   */
+  function refMeter(valueYi, ticks, opts) {
     ensureStyle();
+    opts = opts || {};
     ticks = ticks || [8000, 12000];
     if (!finite(valueYi)) return '';
-    var max = Math.max.apply(null, ticks.concat([valueYi, 1]));
-    var w = Math.min(100, 100 * valueYi / max);
+    var max = opts.max != null && finite(opts.max)
+      ? Number(opts.max)
+      : Math.max.apply(null, ticks.concat([valueYi, 1]));
+    if (!(max > 0)) max = 1;
+    var w = Math.max(0, Math.min(100, 100 * Number(valueYi) / max));
     var marks = ticks.map(function (t) {
       var left = (100 * t / max).toFixed(1);
+      var lab = typeof opts.tickFmt === 'function'
+        ? opts.tickFmt(t)
+        : (t >= 10000 ? (t / 10000).toFixed(1) + '兆' : t + '億');
       return '<span class="vz-tick" style="left:' + left + '%"></span>' +
-        '<span class="vz-tick-lbl" style="left:' + left + '%">' + (t >= 10000 ? (t / 10000).toFixed(1) + '兆' : t + '億') + '</span>';
+        '<span class="vz-tick-lbl" style="left:' + left + '%">' + esc(String(lab)) + '</span>';
     }).join('');
-    return '<div class="vz-ref"><i style="width:' + w.toFixed(1) + '%"></i>' + marks + '</div>';
+    var fillStyle = 'width:' + w.toFixed(1) + '%' +
+      (opts.color ? (';background:' + opts.color) : '');
+    return '<div class="vz-ref"' +
+      (opts.title ? (' title="' + esc(String(opts.title)) + '"') : '') +
+      '><i style="' + fillStyle + '"></i>' + marks + '</div>';
   }
 
   /** 融資維持率水位（zones 由高到低或低到高皆可；value 越高越安全時用綠→紅反轉） */

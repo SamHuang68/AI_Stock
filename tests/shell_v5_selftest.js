@@ -107,6 +107,10 @@ ok(/t00Trend/.test(pl) && /o00Trend/.test(pl) && /txfTrend/.test(pl) &&
 ok(/function renderTrendCell/.test(pl) && !/pl-idx-spark/.test(pl) &&
   /tabs \+ meter/.test(pl),
   'pulse strip trend cells drop sparkline; keep tabs + meter');
+ok(/refMeter\(Number\(tr\.momScore\), \[40, 60\]/.test(pl) &&
+  /max:\s*100/.test(pl) && /pl-strip \.vz-ref\{[^}]*width:100%/.test(pl) &&
+  /opts\.max/.test(fs.readFileSync(path.join(root, 'src/ui/viz_v5.js'), 'utf8')),
+  'pulse strip momScore bar uses same refMeter width/ticks as turnover');
 ok(/function renderTrendTabs/.test(pl) && /IDX_TREND_TABS/.test(pl) &&
   /TURN_TREND_TABS/.test(pl) && /BREADTH_TREND_TABS/.test(pl) &&
   /連漲趨升/.test(pl) && /溫和上行/.test(pl) && /區間震盪/.test(pl) &&

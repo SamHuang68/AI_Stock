@@ -129,7 +129,11 @@
       '#pl-root .pl-strip .viz-hide,#pl-root .pl-strip .viz-meter,#pl-root .pl-strip .viz-seg,' +
         '#pl-root .pl-strip .viz-chip{display:none!important}' +
       '#pl-root .pl-strip .vz-chip{display:none!important}' + /* 單顆 chip 改為全型態 tab 列 */
-      '#pl-root .pl-strip .vz-meter{margin-top:1px;height:3px}' +
+      /* 頂列水位 bar：指數動能／成交金額共用 vz-ref，全寬＋刻度對齊 */
+      '#pl-root .pl-strip .vz-meter{display:none!important}' +
+      '#pl-root .pl-strip .vz-ref{margin-top:3px;margin-bottom:11px;height:5px;width:100%;' +
+        'border-radius:3px;box-sizing:border-box;flex:0 0 auto}' +
+      '#pl-root .pl-strip .vz-ref .vz-tick-lbl{font-size:6px;top:6px}' +
       /* 市場趨勢型態 tabs：全列可見，當前 highlight、其餘反灰 */
       '#pl-root .pl-ttabs{display:flex;flex-wrap:wrap;gap:2px;margin-top:2px;min-width:0}' +
       '#pl-root .pl-ttabs span{font-size:6px;line-height:1.25;padding:1px 3px;border-radius:3px;' +
@@ -1019,7 +1023,15 @@
     var tr = opts.trend || {};
     var tone = tr.trend || '';
     var tabs = renderTrendTabs(tone, opts.tabs || IDX_TREND_TABS);
-    var meter = (V && tr.momScore != null && V.scoreMeter) ? V.scoreMeter(tr.momScore) : '';
+    /* 動能分水位：與成交金額同一套 vz-ref（全寬軌道＋刻度），刻度 40／60、上限 100 */
+    var meter = '';
+    if (V && V.refMeter && tr.momScore != null && isFinite(Number(tr.momScore))) {
+      meter = V.refMeter(Number(tr.momScore), [40, 60], {
+        max: 100,
+        tickFmt: function (t) { return '分' + t; },
+        title: '動能分 ' + Number(tr.momScore).toFixed(0) + '／100（刻度 40／60）'
+      });
+    }
     var fullBits = trendQuantBits(tr, opts.streakUpLabel, opts.streakDnLabel);
     var subHtml = trendPrimarySub(tr, opts.streakUpLabel, opts.streakDnLabel);
     if (!subHtml && opts.fallbackSub) subHtml = opts.fallbackSub;
@@ -1031,7 +1043,7 @@
       ? ' <span style="font-size:9px;color:#94a3b8;font-weight:700">' + esc(tr.level) + '</span>'
       : '';
     var toneCls = tw(tr.chgPct != null ? tr.chgPct : tr.vsMa5Pct);
-    /* 頂列不再畫 spark 趨勢線（扁線無意義）；動能分仍用 meter */
+    /* 頂列不再畫 spark；水位 bar 與成交金額 refMeter 同構 */
     return '<div class="cell' + (opts.hero ? ' hero' : '') + '" title="' + esc(tip) + '">' +
       '<div class="k">' + opts.k + '</div>' +
       '<div class="v">' + opts.vHtml + levelHtml + '</div>' +
