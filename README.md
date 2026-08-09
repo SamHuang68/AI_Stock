@@ -27,6 +27,90 @@ Bloomberg 風格台／美股研究終端機 — **本機跑、零雲端、純 Py
 - 架構：[`wavedeck/docs/ARCHITECTURE.md`](wavedeck/docs/ARCHITECTURE.md)
 - 側欄「執行」開啟艦橋；頂列 **WD** 燈可點擊開啟；Pulse「→ WD」「AI 摘要」
 
+### ST ↔ WD 串接邏輯 Map
+
+```mermaid
+flowchart TB
+  subgraph browser ["Browser UI"]
+    pulse["Pulse / Breadth / Heat"]
+    watch["Watch / Book chips"]
+    shell["Shell WD lamp"]
+    bridgeJs["WaveDeckBridge.js"]
+  end
+
+  subgraph st ["Stock Terminal :18432"]
+    stApi["server.py"]
+    bus["wavedeck_bus"]
+    sse["SSE /bridge/wavedeck/stream"]
+    oa["override_alpha.db"]
+    gate["llm_gate.json"]
+    stLlm["LM Studio :1234"]
+  end
+
+  subgraph wd ["WaveDeck :18433"]
+    wdApi["run.py / server"]
+    stLink["st_link heartbeat 5s"]
+    engine["engine + risk gate"]
+    stPush["st_push async"]
+    wdLlm["Ollama :11434"]
+    fsm["FSM / positions / invalidation"]
+  end
+
+  pulse -->|"syncFromMarket style/delever/spill"| bridgeJs
+  bridgeJs -->|"POST /bridge/st"| wdApi
+  wdApi --> engine
+  engine --> fsm
+  fsm -->|"state change"| stPush
+  stPush -->|"POST /bridge/wavedeck + chip"| stApi
+  stApi --> bus
+  bus --> sse
+  sse -->|"FULL_SYNC / POSITION_STATE_CHANGE"| bridgeJs
+  bridgeJs -->|"atomic data-wd-chip"| watch
+  bridgeJs --> shell
+
+  stLink -->|"GET /health"| stApi
+  stLink -->|"fail-safe style35 delever tighten inv"| engine
+
+  engine -.->|"P1 acquire"| gate
+  stApi -.->|"ST defer if WD busy"| gate
+  stApi --> stLlm
+  engine --> wdLlm
+  wdApi -->|"POST /api/override-alpha"| oa
+```
+
+閉環時序：
+
+```mermaid
+sequenceDiagram
+  participant UI as ST Browser
+  participant ST as ST :18432
+  participant WD as WD :18433
+
+  UI->>WD: POST /bridge/st macro overlay
+  WD->>WD: apply style / delever / spillover
+  WD->>ST: POST /api/override-alpha risk-off log
+  WD->>ST: POST /bridge/wavedeck chip push
+  ST->>UI: SSE POSITION_STATE_CHANGE
+  UI->>UI: paint chip only
+
+  loop every 5s
+    WD->>ST: GET /health
+    alt ST down or overlay stale
+      WD->>WD: Fail-safe
+      WD->>ST: push fail_safe chip
+      ST->>UI: SSE update
+    end
+  end
+```
+
+關鍵路徑：
+
+1. **ST → WD**：`POST http://127.0.0.1:18433/bridge/st`（事件驅動）
+2. **WD → ST**：`POST http://127.0.0.1:18432/bridge/wavedeck`（輕量 `chip`）
+3. **ST → UI**：`GET http://127.0.0.1:18432/bridge/wavedeck/stream`（SSE）
+4. **韌性**：WD 每 5s ping ST；斷線 → 風格 35／降載／收緊失效／禁新單
+5. **算力**：`data/llm_gate.json` WD=P1；ST Pulse 可 defer
+
 ## 分享版注意
 
 發行 zip（`scripts/build_dist.py`）**不含**：
