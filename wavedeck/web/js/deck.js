@@ -164,10 +164,10 @@
 
     var c = s.costs || {};
     $('costKv').innerHTML =
-      '<div class="a"><div class="k">本次 USD</div><div class="v">' + c.session_usd + '</div></div>' +
-      '<div class="a"><div class="k">今日 USD</div><div class="v">' + c.day_usd + '</div></div>' +
-      '<div class="a"><div class="k">本月 USD</div><div class="v">' + c.month_usd + '</div></div>' +
-      '<div class="a"><div class="k">提供者</div><div class="v">' + (c.provider || '—') + '</div></div>';
+      '<div class="a"><div class="k">本次</div><div class="v">' + c.session_usd + '</div></div>' +
+      '<div class="a"><div class="k">今日</div><div class="v">' + c.day_usd + '</div></div>' +
+      '<div class="a"><div class="k">本月</div><div class="v">' + c.month_usd + '</div></div>' +
+      '<div class="a"><div class="k">源</div><div class="v">' + (c.provider || '—') + '</div></div>';
 
     var prov = (c.provider || 'heuristic').toLowerCase();
     if (prov !== 'heuristic' && prov !== 'ollama' && prov !== 'openai') prov = 'heuristic';
