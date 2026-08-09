@@ -42,7 +42,7 @@ MARGIN_MIX_CSV = os.path.join(DATA, 'tw_margin_mix_daily.csv')
 DB_PATH = os.path.join(DATA, 'macro_track.db')
 SEED_DIR = os.path.join(DATA, 'macro_seeds')
 
-UA = {'User-Agent': 'Mozilla/5.0 (compatible; StockTerminal/4.1; +local)'}
+UA = {'User-Agent': 'Mozilla/5.0 (compatible; StockTerminal/5.0; +local)'}
 UA_BROWSER = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/csv,application/json,text/html,*/*',
@@ -168,14 +168,26 @@ def _db() -> sqlite3.Connection:
 
 
 def _http_json(url: str, timeout: int = 25) -> Any:
-    req = urllib.request.Request(url, headers={**UA, 'Accept': 'application/json,text/html,*/*'})
+    headers = {**UA, 'Accept': 'application/json,text/html,*/*'}
+    try:
+        import http_client as _hc
+    except Exception:
+        _hc = None
+    if _hc is not None:
+        return _hc.fetch_json(url, timeout=timeout, retries=1, headers=headers)
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read()
-    text = raw.decode('utf-8-sig', 'replace')
-    return json.loads(text)
+    return json.loads(raw.decode('utf-8-sig', 'replace'))
 
 
 def _http_text(url: str, timeout: int = 25) -> str:
+    try:
+        import http_client as _hc
+    except Exception:
+        _hc = None
+    if _hc is not None:
+        return _hc.fetch_text(url, timeout=timeout, retries=1, headers=UA)
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read().decode('utf-8', 'replace')
@@ -755,6 +767,49 @@ def _h15_us10y(years: int = 25) -> List[Dict[str, Any]]:
     return pts
 
 
+def _bls_unrate(years: int = 25) -> List[Dict[str, Any]]:
+    """BLS 失業率（LNS14000000，季節調整）。公開 API 每次最多約 10 年。"""
+    end_y = date.today().year
+    start_y = max(1980, end_y - years - 1)
+    pts: List[Dict[str, Any]] = []
+    y = start_y
+    while y <= end_y:
+        y2 = min(y + 9, end_y)
+        payload = json.dumps({
+            'seriesid': ['LNS14000000'],
+            'startyear': str(y),
+            'endyear': str(y2),
+        }).encode()
+        try:
+            req = urllib.request.Request(
+                'https://api.bls.gov/publicAPI/v2/timeseries/data/',
+                data=payload,
+                headers={**UA_BROWSER, 'Content-Type': 'application/json'},
+            )
+            with urllib.request.urlopen(req, timeout=40) as resp:
+                d = json.loads(resp.read().decode('utf-8', 'replace'))
+            series = ((d.get('Results') or {}).get('series') or [{}])[0]
+            for row in series.get('data') or []:
+                per = str(row.get('period') or '')
+                if not per.startswith('M'):
+                    continue
+                try:
+                    yy = int(row['year'])
+                    mm = int(per[1:])
+                    pts.append({
+                        'date': f'{yy:04d}-{mm:02d}-01',
+                        'value': float(row['value']),
+                    })
+                except Exception:
+                    pass
+        except Exception as e:
+            print('[macro_track] BLS UNRATE', y, e)
+        y = y2 + 1
+        time.sleep(0.15)
+    by_d = {p['date']: p for p in pts}
+    return [by_d[k] for k in sorted(by_d.keys())]
+
+
 def _bls_cpi_yoy(years: int = 25) -> List[Dict[str, Any]]:
     """BLS CPI-U NSA（CUUR0000SA0）→ 年增率 %。公開 API 每次最多約 10 年，分段抓。"""
     end_y = date.today().year
@@ -859,6 +914,14 @@ def _resolve_series_points(
             live = _bls_cpi_yoy(years)
             if live:
                 note = 'BLS CPI-U NSA YoY'
+        elif fb == 'bls_unrate':
+            live = _bls_unrate(years)
+            if live:
+                note = 'BLS UNRATE'
+        elif fb == 'yahoo' and s.get('symbol'):
+            live = _yahoo_closes(s['symbol'], years=years, adj=False)
+            if live:
+                note = f"Yahoo {s['symbol']}"
 
     if live:
         # merge: prefer live, keep older seed points not in live

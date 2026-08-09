@@ -1,0 +1,13 @@
+data/runtime_state.json
+data/wavedeck_config.json
+data/wavedeck_secrets.json
+data/wavedeck_audit.db
+data/wavedeck.port
+data/master/
+data/*.db-wal
+data/*.db-shm
+data/*key*
+data/.env*
+__pycache__/
+*.pyc
+.DS_Store

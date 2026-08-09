@@ -85,8 +85,11 @@
     const title = f.title || (f.kind === 'market_risk' ? '市場風險' : (f.kind === 'margin_cycle' ? '融資週期' : (f.kind === 'holders' ? '籌碼集中度' : '大盤體質')));
     const kind = f.kind === 'market_risk' ? 'market_risk' : (f.kind === 'margin_cycle' ? 'margin_cycle' : (f.kind === 'holders' ? 'holders' : 'market'));
     let h = '';
-    if (f.score != null)
+    const V = window.Viz;
+    if (f.score != null) {
       h += `<div class="stat-row" style="font-weight:700"><span class="stat-k">${title}</span><span class="stat-v">${scoreBadge(f.score, kind)}</span></div>`;
+      if (V) h += `<div style="padding:0 12px 4px">${V.scoreMeter(f.score)}</div>`;
+    }
     const plain = f.plainSummary || f.summary || '';
     if (plain) {
       h += `<div style="padding:10px 12px;color:var(--text);font-family:monospace;font-size:10.5px;line-height:1.65">${plain}</div>`;
@@ -103,6 +106,7 @@
           `<span class="stat-v">${row.v}` +
           (sc != null ? ` <span style="color:${col};font-size:9px">(${Math.round(sc)})</span>` : '') +
           `</span></div>`;
+        if (V && sc != null) h += `<div style="padding:0 12px 2px">${V.scoreMeter(sc, { color: col })}</div>`;
       });
     } else if (!plain) {
       h += `<div style="padding:10px 12px;color:var(--tlo);font-family:monospace;font-size:10px">資料暫缺</div>`;
@@ -132,8 +136,11 @@
     const isUs = f && (f.market === 'US' || (S && S.mkt === 'US'));
     if (!f || (!f.revenue && !f.income)) return renderEmpty(f);
     let h = '';
-    if (f.score != null)
+    const V = window.Viz;
+    if (f.score != null) {
       h += `<div class="stat-row" style="font-weight:700"><span class="stat-k">基本面評分</span><span class="stat-v">${scoreBadge(f.score)}</span></div>`;
+      if (V) h += `<div style="padding:0 12px 4px">${V.scoreMeter(f.score)}</div>`;
+    }
     const r = f.revenue;
     if (r) {
       if (isUs || r.monthRev == null) {

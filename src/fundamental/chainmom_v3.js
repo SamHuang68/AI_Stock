@@ -48,13 +48,16 @@
 
   function flowNode(r) {
     if (!r.n) return '<div class="cm-node cm-empty">' + esc(r.stage) + ' · 無 DB 資料</div>';
+    var V = window.Viz;
     var flow = r.accel == null ? '' : (r.accel > 0.05 ? '<span class="cm-flow cm-in">▲資金流入</span>' : r.accel < -0.05 ? '<span class="cm-flow cm-out">▼退潮</span>' : '');
     var ld = (r.leaders || []).map(function (l) { return esc(l.name) + ' ' + fmt(l.ret20); }).join('、');
+    var spark = V ? V.sparkBars([r.mom5, r.mom20, r.mom60]) : '';
     return '<div class="cm-node" style="border-left-color:' + momCol(r.mom20) + '">' +
       '<div class="cm-nm">' + esc(r.stage) + ' ' + flow + '</div>' +
       '<div class="cm-mom"><span>5日 <b style="color:' + momCol(r.mom5) + '">' + fmt(r.mom5) + '</b></span>' +
       '<span>20日 <b style="color:' + momCol(r.mom20) + '">' + fmt(r.mom20) + '</b></span>' +
       '<span>60日 <b style="color:' + momCol(r.mom60) + '">' + fmt(r.mom60) + '</b></span></div>' +
+      spark +
       (ld ? '<div class="cm-ld">領漲:' + ld + '</div>' : '') + '</div>';
   }
 

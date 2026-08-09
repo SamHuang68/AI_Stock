@@ -59,46 +59,88 @@
   function $(id) { return document.getElementById(id); }
 
   function injectCSS() {
-    if ($('heat-v5-css')) return;
-    var s = document.createElement('style');
-    s.id = 'heat-v5-css';
+    var s = $('heat-v5-css');
+    if (!s) {
+      s = document.createElement('style');
+      s.id = 'heat-v5-css';
+      document.head.appendChild(s);
+    }
     s.textContent =
-      '#view-heat.sv-panel{max-width:1180px;padding:18px 22px 28px}' +
-      '#ht-root{font-family:\'JetBrains Mono\',monospace;color:var(--text)}' +
-      '#ht-root .ht-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}' +
-      '#ht-root .ht-kicker{font-size:10px;color:var(--gold);letter-spacing:2px;margin-bottom:4px}' +
-      '#ht-root .ht-title{font-family:\'Noto Serif TC\',serif;font-size:26px;font-weight:700;color:var(--thi)}' +
-      '#ht-root .ht-sub{font-size:11px;color:var(--tlo);margin-top:4px}' +
-      '#ht-root .ht-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}' +
-      '#ht-root .ht-btn{padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);' +
-        'color:var(--text);font-size:10px;font-family:\'JetBrains Mono\',monospace;cursor:pointer}' +
+      '#shell-views:has(#view-heat.on){overflow:hidden!important}' +
+      '#view-heat.sv-panel.on{max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
+        'overflow:hidden;display:flex!important;flex-direction:column;flex:1;min-height:0;height:100%}' +
+      '#mount-heat,#mount-heat.sv-mount{flex:1;min-height:0;display:flex;flex-direction:column;max-width:none}' +
+      '#ht-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);width:100%;max-width:none;margin:0;min-width:0;' +
+        'box-sizing:border-box;flex:1;min-height:0;display:flex;flex-direction:column}' +
+      '#ht-root .ht-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px;min-width:0;flex:0 0 auto}' +
+      '#ht-root .ht-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
+      '#ht-root .ht-kicker{display:none!important}' +
+      '#ht-root .ht-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
+      '#ht-root .ht-sub{font-size:9px;color:var(--tlo);margin:0}' +
+      '#ht-root .ht-actions{display:flex;gap:4px;flex-wrap:nowrap;align-items:center;flex:0 0 auto}' +
+      '#ht-root .ht-btn{padding:3px 7px;border:1px solid var(--border);border-radius:4px;background:var(--bg3);' +
+        'color:var(--text);font-size:9px;font-family:\'JetBrains Mono\',monospace;cursor:pointer;white-space:nowrap}' +
       '#ht-root .ht-btn:hover{border-color:var(--bhi);color:var(--thi)}' +
       '#ht-root .ht-btn.on{border-color:var(--gold);color:var(--gold);background:var(--gold-s)}' +
       '#ht-root .ht-btn.primary{background:var(--gold);color:#060A12;border:none;font-weight:700}' +
-      '#ht-root .ht-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:6px;margin:10px 0 16px}' +
-      '#ht-root .ht-cell{min-height:78px;padding:10px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.06);' +
-        'cursor:pointer;text-align:center;display:flex;flex-direction:column;justify-content:center;gap:3px;' +
-        'transition:transform .12s,box-shadow .12s;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.55)}' +
-      '#ht-root .ht-cell:hover{transform:scale(1.03);box-shadow:0 4px 14px rgba(0,0,0,.45);z-index:2}' +
-      '#ht-root .ht-cell .nm{font-size:11px;font-weight:700;line-height:1.25}' +
+      '#ht-body{flex:1;min-height:0;display:grid;gap:4px;overflow:hidden;' +
+        'grid-template-columns:minmax(0,1.55fr) minmax(260px,1fr);grid-template-rows:minmax(0,1fr)}' +
+      '#ht-body .ht-main{min-height:0;display:flex;flex-direction:column;overflow:hidden;' +
+        'background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px}' +
+      '#ht-root .ht-legend{display:flex;align-items:center;gap:5px;font-size:8px;color:var(--tlo);margin:0 0 3px;flex:0 0 auto}' +
+      '#ht-root .ht-legend i{display:inline-block;width:12px;height:8px;border-radius:2px}' +
+      '#ht-root .ht-grid-wrap{flex:1;min-height:0;overflow:auto}' +
+      '#ht-root .ht-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:4px;margin:0;' +
+        'align-content:stretch;grid-auto-rows:minmax(64px,1fr);min-height:100%;height:100%}' +
+      '#ht-root .ht-cell{min-height:56px;padding:6px 5px;border-radius:5px;border:1px solid rgba(255,255,255,.06);' +
+        'cursor:pointer;text-align:center;display:flex;flex-direction:column;justify-content:center;gap:2px;' +
+        'transition:transform .1s,box-shadow .1s;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.55)}' +
+      '#ht-root .ht-cell:hover{transform:scale(1.02);box-shadow:0 2px 10px rgba(0,0,0,.4);z-index:2}' +
+      '#ht-root .ht-cell .nm{font-size:11px;font-weight:700;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#ht-root .ht-cell .pc{font-size:16px;font-weight:700}' +
-      '#ht-root .ht-cell .px{font-size:9px;opacity:.8}' +
-      '#ht-root .ht-legend{display:flex;align-items:center;gap:6px;font-size:9px;color:var(--tlo);margin:4px 0 10px}' +
-      '#ht-root .ht-legend i{display:inline-block;width:14px;height:10px;border-radius:2px}' +
-      '#ht-root .ht-sec{margin-top:14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px}' +
-      '#ht-root .ht-sec h4{margin:0 0 8px;font-size:11px;color:var(--gold);letter-spacing:1px}' +
-      '#ht-root .ht-two{display:grid;grid-template-columns:1fr 1fr;gap:10px}' +
-      '#ht-root .ht-list{max-height:280px;overflow:auto}' +
-      '#ht-root .ht-row{display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid var(--border);' +
-        'cursor:pointer;font-size:11px}' +
+      '#ht-root .ht-cell .px{font-size:9px;opacity:.85}' +
+      '#ht-root .ht-focus-zone{min-height:0;display:flex;flex-direction:column;' +
+        'background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;overflow:hidden}' +
+      '#ht-root .ht-focus-zone > h4{margin:0 0 3px;font-size:10px;color:var(--gold);letter-spacing:.5px;flex:0 0 auto}' +
+      '#ht-root .ht-focus-zone > #ht-focus{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
+      '#ht-root .ht-two{display:grid;grid-template-rows:minmax(0,1fr) minmax(0,1fr);gap:4px;flex:1;min-height:0;overflow:hidden}' +
+      '#ht-root .ht-two > div{min-height:0;display:flex;flex-direction:column;overflow:hidden;' +
+        'background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 5px}' +
+      '#ht-root .ht-list{flex:1;min-height:0;overflow:auto}' +
+      '#ht-root .ht-row{display:flex;align-items:center;gap:5px;padding:2px 3px;border-bottom:1px solid var(--border);' +
+        'cursor:pointer;font-size:10px}' +
       '#ht-root .ht-row:hover{background:var(--bg3)}' +
-      '#ht-root .ht-row .code{color:var(--gold);font-weight:700;min-width:48px}' +
-      '#ht-root .ht-row .name{flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#ht-root .ht-row .code{color:var(--gold);font-weight:700;min-width:42px;font-size:9px}' +
+      '#ht-root .ht-row .name{flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}' +
       '#ht-root .up{color:var(--red)}#ht-root .dn{color:var(--green)}' +
-      '#ht-root .ht-note{font-size:9px;color:var(--tlo);line-height:1.65;margin-top:12px}' +
-      '#ht-root .ht-loading{font-size:11px;color:var(--tlo);padding:20px 0}' +
-      '@media (max-width:800px){#ht-root .ht-two{grid-template-columns:1fr}}';
-    document.head.appendChild(s);
+      '#ht-root .ht-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:2px;flex:0 0 auto}' +
+      '#ht-root .ht-loading{font-size:10px;color:var(--tlo);padding:12px 0}' +
+      '#ht-root .ht-wd{margin:0 0 4px;padding:6px 8px;border-radius:6px;background:var(--bg2);' +
+        'border:1px solid rgba(103,232,249,.28);font-size:9px;line-height:1.45;color:var(--tlo)}' +
+      '#ht-root .ht-wd b{color:var(--cyan)}' +
+      '#ht-body.ht-loading{display:flex;align-items:center}';
+  }
+
+  function wdStripHtml() {
+    try {
+      if (!window.WaveDeckBridge) return '';
+      var last = window.WaveDeckBridge.lastSync && window.WaveDeckBridge.lastSync();
+      var p = last && last.payload;
+      var meta = (p && p.meta) || {};
+      if (!p) {
+        return '<div class="ht-wd">WaveDeck：尚無宏觀覆寫（可開脈動或 START_WAVEDECK）</div>';
+      }
+      var spill = meta.spillover_prob != null
+        ? Math.round(Number(meta.spillover_prob) * 100) + '%' : '—';
+      return '<div class="ht-wd">WaveDeck 覆寫 · 風格 <b>' + p.style + '</b>' +
+        (p.delever ? ' · <b>降載</b>' : '') +
+        ' · 外溢 <b>' + spill + '</b>' +
+        (meta.rotation ? (' · 輪動 <b>' + meta.rotation + '</b>') : '') +
+        (meta.hot_stage ? (' · 最強 <b>' + meta.hot_stage + '</b>') : '') +
+        '</div>';
+    } catch (e) {
+      return '';
+    }
   }
 
   function pctColor(pct, mkt) {
@@ -162,14 +204,13 @@
       mount.innerHTML =
         '<div id="ht-root">' +
           '<div class="ht-head"><div>' +
-            '<div class="ht-kicker">STOCK TERMINAL · 5.0-S5</div>' +
-            '<div class="ht-title">類股熱力</div>' +
-            '<div class="ht-sub" id="ht-sub">產業漲跌色塊 · 點格載入代表股</div>' +
+            '<span class="ht-title">類股熱力</span>' +
+            '<span class="ht-sub" id="ht-sub">產業漲跌 · 點格載入代表股</span>' +
           '</div><div class="ht-actions">' +
-            '<button type="button" class="ht-btn on" data-mkt="TW">🇹🇼 TW</button>' +
-            '<button type="button" class="ht-btn" data-mkt="US">🇺🇸 US</button>' +
-            '<button type="button" class="ht-btn on" data-sort="chg">依漲跌</button>' +
-            '<button type="button" class="ht-btn" data-sort="name">依名稱</button>' +
+            '<button type="button" class="ht-btn on" data-mkt="TW">TW</button>' +
+            '<button type="button" class="ht-btn" data-mkt="US">US</button>' +
+            '<button type="button" class="ht-btn on" data-sort="chg">漲跌</button>' +
+            '<button type="button" class="ht-btn" data-sort="name">名稱</button>' +
             '<button type="button" class="ht-btn" id="ht-refresh">↻</button>' +
             '<button type="button" class="ht-btn primary" data-shell-back>← 圖表</button>' +
           '</div></div>' +
@@ -212,17 +253,20 @@
       box.innerHTML = '<div class="ht-note">焦點掃描暫不可用或仍在載入。</div>';
       return;
     }
-    function col(title, rows, cls) {
-      var h = '<div><h4 style="margin:0 0 6px;font-size:11px;color:var(--gold)">' + title +
+    function col(title, rows) {
+      var V = window.Viz;
+      var h = '<div><h4 style="margin:0 0 4px;font-size:10px;color:var(--gold);flex:0 0 auto">' + title +
         ' · ' + rows.length + '</h4><div class="ht-list">';
       if (!rows.length) h += '<div class="ht-note">無符合</div>';
-      rows.slice(0, 12).forEach(function (r) {
+      rows.slice(0, 18).forEach(function (r) {
         h += '<div class="ht-row" data-code="' + r.sym + '">' +
           '<span class="code">' + r.sym + '</span>' +
           '<span class="name">' + (r.name || '') + '</span>' +
           '<span class="' + twCls(r.changePct) + '">' + pct(r.changePct) + '</span>' +
-          '<span style="color:var(--gold);font-weight:700;min-width:28px;text-align:right">' +
-          (r.score != null ? r.score + '★' : '') + '</span></div>';
+          '<span style="color:var(--gold);font-weight:700;min-width:48px;text-align:right">' +
+          (r.score != null ? r.score : '') +
+          (V && r.score != null ? V.scoreMeter(r.score) : '') +
+          '</span></div>';
       });
       return h + '</div></div>';
     }
@@ -230,7 +274,7 @@
       col('做多焦點', j.buy || []) +
       col('做空焦點', j.short || []) +
       '</div>' +
-      '<div class="ht-note">掃描 ' + (j.scanned || '—') + ' 檔 · 點列載入 K 線。完整精靈見工具列 AI → 焦點。</div>';
+      '<div class="ht-note">掃描 ' + (j.scanned || '—') + ' 檔 · 點列載入 K 線</div>';
     box.querySelectorAll('.ht-row').forEach(function (el) {
       el.onclick = function () { openSym(el.getAttribute('data-code'), 'TW'); };
     });
@@ -270,9 +314,13 @@
     }
     grid += '</div>';
 
-    body.innerHTML = legend + grid +
-      '<div class="ht-sec"><h4>🎯 焦點掃描（背景）</h4><div id="ht-focus" class="ht-loading">掃描中…</div></div>' +
-      '<div class="ht-note">熱力來自 /sectors；台股點格載入代表股，美股點格載入對應 SPDR。⚠ 非投資建議。</div>';
+    body.classList.remove('ht-loading');
+    body.innerHTML =
+      wdStripHtml() +
+      '<div class="ht-main"><h4 style="margin:0 0 3px;font-size:10px;color:var(--gold);letter-spacing:.5px;flex:0 0 auto">類股熱力圖</h4>' +
+        legend + '<div class="ht-grid-wrap">' + grid + '</div>' +
+        '<div class="ht-note">/sectors · 台股代表股／美股 SPDR · 非投資建議</div></div>' +
+      '<div class="ht-focus-zone"><h4>焦點掃描</h4><div id="ht-focus" class="ht-loading">掃描中…</div></div>';
 
     body.querySelectorAll('.ht-cell').forEach(function (el) {
       el.onclick = function () {
@@ -300,10 +348,15 @@
       });
   }
 
-  function refresh(forceFocus) {
+  function refresh(forceFocus, opts) {
+    opts = opts || {};
     var body = ensureMount();
     if (!body) return;
-    body.innerHTML = '<div class="ht-loading">載入類股…</div>';
+    var soft = !!opts.soft || !!state.last || !!body.querySelector('.ht-grid');
+    if (window.ShellV5 && window.ShellV5.softBadge) {
+      window.ShellV5.softBadge('mount-heat', soft, '更新中…');
+    }
+    if (!soft) body.innerHTML = '<div class="ht-loading">載入類股…</div>';
     fetch(SRV + '/sectors?mkt=' + encodeURIComponent(state.mkt), { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
@@ -313,22 +366,31 @@
       })
       .catch(function () {
         var b = ensureMount();
-        if (b) b.innerHTML = '<div class="ht-loading">載入失敗</div>';
+        if (b && !soft) b.innerHTML = '<div class="ht-loading">載入失敗</div>';
+      })
+      .finally(function () {
+        if (window.ShellV5 && window.ShellV5.softBadge) {
+          window.ShellV5.softBadge('mount-heat', false);
+        }
       });
   }
 
   function activate() {
     ensureMount();
-    refresh(false);
+    refresh(false, { soft: !!state.last });
     if (timer) clearInterval(timer);
     timer = setInterval(function () {
       if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'heat') {
-        refresh(false);
+        refresh(false, { soft: true });
       }
     }, 60000);
   }
 
-  window.HeatV5 = { activate: activate, refresh: refresh };
+  function deactivate() {
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+
+  window.HeatV5 = { activate: activate, deactivate: deactivate, refresh: refresh };
 
   window.addEventListener('shell:route', function (ev) {
     if (ev && ev.detail && ev.detail.route === 'heat') activate();

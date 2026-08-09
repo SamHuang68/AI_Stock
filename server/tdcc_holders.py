@@ -42,7 +42,7 @@ ARCHIVE_RAW = (
 )
 
 UA = {
-    'User-Agent': 'Mozilla/5.0 (compatible; StockTerminal/4.1; TDCC holders)',
+    'User-Agent': 'Mozilla/5.0 (compatible; StockTerminal/5.0; TDCC holders)',
     'Accept': 'text/csv,text/plain,*/*',
 }
 
