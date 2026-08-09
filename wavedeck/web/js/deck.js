@@ -313,13 +313,26 @@
       : (yb > 0 ? Math.max(0, (yb - eq) / yb * 100) : 0);
     var ddLim = (a.daily_dd_limit_pct != null) ? Number(a.daily_dd_limit_pct) : 5;
     var ddCls = ddPct >= ddLim ? 'down' : (ddPct >= ddLim * 0.6 ? 'down' : '');
+    /* 種子／參考 Wave AI 權益數：僅攻能驗證，勿當成使用者實盤持倉 */
+    var src = String(a.source || a.ref || 'wave_ai_ref');
+    var isRef = src === 'wave_ai_ref' || src === 'reference' || src === 'demo' || a.reference === true;
+    var noteEl = $('acctNote');
+    if (noteEl) {
+      noteEl.textContent = isRef
+        ? '數值來自參考 Wave AI，僅供攻能驗證，非本機實盤持倉／權益。'
+        : ('帳戶來源：' + src);
+      noteEl.className = 'acct-note' + (isRef ? '' : ' live');
+    }
     $('acct').innerHTML =
-      '<div class="a"><div class="k">昨日餘額</div><div class="v">' + money(a.yesterday_balance) + '</div></div>' +
-      '<div class="a"><div class="k">當前權益</div><div class="v">' + money(a.equity) + '</div></div>' +
+      '<div class="a"><div class="k">昨日餘額' + (isRef ? '（參考）' : '') + '</div><div class="v">' + money(a.yesterday_balance) + '</div></div>' +
+      '<div class="a"><div class="k">當前權益' + (isRef ? '（參考）' : '') + '</div><div class="v">' + money(a.equity) + '</div></div>' +
       '<div class="a"><div class="k">權益變動</div><div class="v ' + (chg < 0 ? 'down' : 'up') + '">' + money(chg) + '</div></div>' +
       '<div class="a"><div class="k">單日回撤</div><div class="v ' + ddCls + '">' +
         (ddPct ? (ddPct.toFixed(2) + '% / ' + ddLim + '%') : ('0% / ' + ddLim + '%')) + '</div></div>' +
-      '<div class="a"><div class="k">券商連線</div><div class="v">' + (a.broker_api || '—') + '</div></div>';
+      '<div class="a"><div class="k">券商連線</div><div class="v">' + (a.broker_api || '—') + '</div></div>' +
+      (isRef
+        ? '<div class="a wide"><div class="k">資料性質</div><div class="v dim">Wave AI 參考樣本 · 非實盤</div></div>'
+        : '');
 
     var ex = s.exec || {};
     $('execKv').innerHTML = [

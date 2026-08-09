@@ -66,6 +66,7 @@ Windows 亦可雙擊 `START_WAVEDECK.cmd`。
 ## 與 Stock Terminal 銜接
 
 版面美感對齊「Wave AI × 下單大師」參考艦橋（三欄＋頂列健康膠囊＋底部分組控制）。
+**「帳戶與風險」面板數值為 Wave AI 參考樣本，僅供攻能驗證，非本機實盤持倉／權益。**
 功能層讀 ST 既有端點（`:18432`）：`/health`、`/twindex`、`/breadth`、`/fundamental/^TWII`。
 
 | 方向 | 端點 |

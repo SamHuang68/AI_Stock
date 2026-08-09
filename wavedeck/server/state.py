@@ -42,6 +42,9 @@ def _default_state() -> dict[str, Any]:
             "account": 1,
         },
         "account": {
+            # Wave AI 參考艦橋樣本權益 — 僅供攻能驗證，非使用者實盤持倉
+            "source": "wave_ai_ref",
+            "reference": True,
             "yesterday_balance": 72312,
             "equity": 59888,
             "equity_change": -12424,

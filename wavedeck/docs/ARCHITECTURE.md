@@ -150,7 +150,7 @@ stateDiagram-v2
 - 單日最大虧損 → Kill Switch
 - 不留倉：收盤前禁新單 + 強制平倉時點
 - 追價風險評估、部位上限、ST 降載（口數 ×0.5、停利緊縮）
-- 權益／昨餘／變動即時面板
+- 權益／昨餘／變動面板（種子數值來自參考 Wave AI，`account.source=wave_ai_ref`，僅供攻能驗證，非使用者實盤持倉）
 
 ### 4.4 Execution Gate & Broker Adapter
 - 閘門檢查清單：狀態允許？風控放行？部位校準一致？紙上／實盤？
