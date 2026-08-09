@@ -267,6 +267,23 @@ input[type="range"] {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
   padding: 12px 14px;
 }
+.ctrl-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 600 10px var(--mono);
+  color: var(--muted);
+  letter-spacing: .4px;
+}
+.ctrl-select select {
+  background: var(--panel-2, #0c1526);
+  color: var(--text);
+  border: 1px solid var(--line, #24324a);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: 600 11px var(--mono);
+  min-width: 118px;
+}
 .controls .group-label {
   width: 100%; color: var(--dim); font: 700 10px/1 var(--mono);
   letter-spacing: .08em; margin-top: 4px;

@@ -8,11 +8,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from server.broker import PaperBroker, TxtMasterBroker, _parse_lots  # noqa: E402
+from server.config import set_broker_kind, set_mode, set_provider  # noqa: E402
 from server.decision import HeuristicProvider  # noqa: E402
+from server.providers import infer_with_fallback  # noqa: E402
 from server.risk import evaluate_gate  # noqa: E402
 
 
@@ -45,6 +49,82 @@ class WaveDeckSmoke(unittest.TestCase):
         text = p.read_text(encoding="utf-8")
         self.assertIn("WaveDeck", text)
         self.assertIn("執行閘門", text)
+        self.assertIn("v1.5", text)
+
+    def test_parse_lots(self):
+        self.assertEqual(_parse_lots("TXF 2\n", "TXF"), 2)
+        self.assertEqual(_parse_lots("2330=3", "2330"), 3)
+        self.assertEqual(_parse_lots("7"), 7)
+
+    def test_paper_broker_enter(self):
+        st = {"positions": {"ai_suggested": 0, "txt_target": 0, "strategy": 0, "account": 0}, "exec": {"price": 1}}
+        out = PaperBroker().apply_intent(st, {"action": "ENTER_LONG", "action_label": "偏多進場"}, 2)
+        self.assertEqual(out["positions"]["txt_target"], 2)
+        self.assertEqual(out["positions"]["account"], 2)
+
+    def test_txt_master_roundtrip(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = {
+                "provider": "heuristic",
+                "mode": "live",
+                "broker": {
+                    "kind": "txt_master",
+                    "txt_dir": td,
+                    "target_file": "target_position.txt",
+                    "account_file": "account_position.txt",
+                    "strategy_file": "strategy_position.txt",
+                    "signal_file": "order_signal.txt",
+                },
+            }
+            with mock.patch("server.broker.load_config", return_value=cfg):
+                Path(td, "account_position.txt").write_text("TXF 0\n", encoding="utf-8")
+                Path(td, "strategy_position.txt").write_text("TXF 0\n", encoding="utf-8")
+                br = TxtMasterBroker()
+                st = {
+                    "symbol": "TXF",
+                    "positions": {"ai_suggested": 0, "txt_target": 0, "strategy": 0, "account": 0},
+                    "exec": {"price": 45020},
+                }
+                applied = br.apply_intent(st, {"action": "ENTER_LONG", "action_label": "偏多"}, 1)
+                self.assertEqual(applied["positions"]["txt_target"], 1)
+                target = Path(td, "target_position.txt").read_text(encoding="utf-8")
+                self.assertIn("TXF", target)
+                self.assertIn("1", target)
+                signal = Path(td, "order_signal.txt").read_text(encoding="utf-8")
+                self.assertIn("ENTER_LONG", signal)
+
+    def test_infer_fallback_on_provider_error(self):
+        class Boom:
+            name = "ollama"
+
+            def infer(self, ctx):
+                raise RuntimeError("down")
+
+        with mock.patch("server.providers.resolve_provider", return_value=Boom()):
+            d, err = infer_with_fallback(
+                {"style": 50, "event": "X", "positions": {"account": 1}, "price": 1},
+                "ollama",
+            )
+        self.assertIsNotNone(err)
+        self.assertEqual(d["provider"], "heuristic")
+        self.assertIn("heuristic", d["process"]["route"])
+
+    def test_config_helpers_validate(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = Path(td) / "wavedeck_config.json"
+            with mock.patch("server.config.CONFIG_PATH", cfg_path), mock.patch(
+                "server.config.DATA", Path(td)
+            ):
+                cfg_path.write_text("{}", encoding="utf-8")
+                c = set_provider("ollama")
+                self.assertEqual(c["provider"], "ollama")
+                c = set_mode("live")
+                self.assertEqual(c["mode"], "live")
+                self.assertEqual(c["broker"]["kind"], "txt_master")
+                c = set_broker_kind("paper")
+                self.assertEqual(c["broker"]["kind"], "paper")
+                with self.assertRaises(ValueError):
+                    set_provider("nope")
 
 
 if __name__ == "__main__":

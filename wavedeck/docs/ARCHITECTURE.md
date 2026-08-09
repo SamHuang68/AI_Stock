@@ -173,7 +173,7 @@ stateDiagram-v2
 |---------|----------------|
 | 宏觀偏多 + 輪動健康 | 進場風格 → 積極（如 65） |
 | 跌停家數異常／VIX 急升 | 風控降載：新單口數減半、移動停利收緊 |
-| 使用者自轉盤開「執行台」 | `window.open`／內嵌 iframe 至 WaveDeck（同機 127.0.0.1） |
+| 側欄「執行」／橋接 | `WaveDeckBridge.open()` → `http://127.0.0.1:18433/`；可選 `pushOverlay` |
 | ST 心跳失敗 | WaveDeck 亮黃燈；不自動加倉 |
 
 協定路徑（本機）：
@@ -188,12 +188,14 @@ stateDiagram-v2
 - Python **stdlib** `http.server` + 背景執行緒（與 ST 一致、免 pip）
 - SQLite 稽核庫 `data/wavedeck_audit.db`
 - 前端 Vanilla JS + CSS（高密度艦橋 UI）
-- `HeuristicProvider` 可離線演示；預留 Ollama／OpenAI adapter 介面
+- `HeuristicProvider` 可離線演示
 
-### v1.5
-- Ollama 本機推論接線
-- 下單大師 TXT 實倉讀寫
-- ST tip 轉盤「工作台 → WaveDeck」入口
+### v1.5（已交付）
+- **決策 adapter**：`heuristic`｜`ollama`｜`openai`（失敗自動 fallback 啟發式）
+- **Broker**：`PaperBroker`｜`TxtMasterBroker`（`data/master/*.txt` 四欄對帳）
+- **模式**：預設 `paper`；`live` 明確切換後才寫下單大師 TXT
+- **ST 入口**：側欄「執行」→ `http://127.0.0.1:18433/`（`shell_v5` + `wavedeck_bridge_v5`）
+- API：`/api/provider`、`/api/mode`、`/api/broker`、`/api/sync_txt`、`/api/config`
 
 ### v2
 - 可選 Redis 熱狀態、Docker Compose、雲端模型 opt-in、正式簽章 Webhook

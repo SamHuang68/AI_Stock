@@ -74,4 +74,7 @@ PROVIDERS: dict[str, DecisionProvider] = {
 
 
 def get_provider(name: str | None = None) -> DecisionProvider:
-    return PROVIDERS.get(name or "heuristic") or PROVIDERS["heuristic"]
+    """Resolve heuristic / ollama / openai (see providers.py)."""
+    from .providers import resolve_provider
+
+    return resolve_provider(name)

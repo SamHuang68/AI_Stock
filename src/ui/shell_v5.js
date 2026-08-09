@@ -26,6 +26,7 @@
     { id: 'breadth',    label: '廣度',   hint: '大盤廣度（漲跌家數）',             icon: '▤', stub: false },
     { id: 'news',       label: '快訊',   hint: '事件／結算／警報中樞',             icon: '◉', stub: false },
     { id: 'afterhours', label: '盤後',   hint: '台指期夜盤＋個股期＋籌碼',         icon: '◐', stub: false },
+    { id: 'wavedeck',   label: '執行',   hint: '開啟 WaveDeck 浪潮執行台（微觀下單艦橋）', icon: '⚡', action: 'wavedeck' },
     { id: 'workspace',  label: '工具',   hint: '回到圖表並開啟指令盤',             icon: '⌘', action: 'cmd' }
   ];
 
@@ -271,6 +272,16 @@
 
   function applyRoute(id) {
     var route = findRoute(id) || findRoute('chart') || ROUTES[0];
+
+    if (route.action === 'wavedeck') {
+      var url = (window.WAVEDECK_URL || 'http://127.0.0.1:18433/');
+      if (window.WaveDeckBridge && typeof window.WaveDeckBridge.open === 'function') {
+        window.WaveDeckBridge.open(url);
+      } else {
+        window.open(url, '_blank', 'noopener');
+      }
+      return;
+    }
 
     if (route.action === 'cmd') {
       id = 'chart';

@@ -7,7 +7,6 @@ import json
 import mimetypes
 import os
 import sys
-import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -18,12 +17,35 @@ WEB = ROOT / "web"
 sys.path.insert(0, str(ROOT))
 
 from server import audit  # noqa: E402
-from server.engine import apply_st_bridge, handle_signal  # noqa: E402
+from server.engine import (  # noqa: E402
+    apply_st_bridge,
+    get_runtime_config,
+    handle_signal,
+    set_broker,
+    set_decision_provider,
+    set_exec_mode,
+    sync_broker_positions,
+)
+from server.config import load_config  # noqa: E402
 from server.state import RUNTIME, now_iso  # noqa: E402
 
 HOST = os.environ.get("WAVEDECK_HOST", "127.0.0.1")
 PORT = int(os.environ.get("WAVEDECK_PORT", "18433"))
 SECRET = os.environ.get("WAVEDECK_SECRET", "")
+
+
+def _boot_sync_config() -> None:
+    """Align runtime mode/provider lights with local config on start."""
+    try:
+        cfg = load_config()
+        kind = ((cfg.get("broker") or {}).get("kind") or "paper")
+        RUNTIME.patch(
+            mode=str(cfg.get("mode") or "paper"),
+            costs={"provider": str(cfg.get("provider") or "heuristic")},
+            account={"broker_api": kind},
+        )
+    except Exception as exc:
+        sys.stderr.write(f"[wavedeck] boot config sync skipped: {exc}\n")
 
 
 def _json(handler: BaseHTTPRequestHandler, code: int, obj: Any) -> None:
@@ -32,6 +54,7 @@ def _json(handler: BaseHTTPRequestHandler, code: int, obj: Any) -> None:
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(raw)))
     handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Access-Control-Allow-Origin", "*")
     handler.end_headers()
     handler.wfile.write(raw)
 
@@ -54,7 +77,7 @@ def _check_secret(handler: BaseHTTPRequestHandler) -> bool:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "WaveDeck/0.1"
+    server_version = "WaveDeck/0.1.5"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("[wavedeck] " + (fmt % args) + "\n")
@@ -80,10 +103,14 @@ class Handler(BaseHTTPRequestHandler):
                     "version": (ROOT / "VERSION").read_text(encoding="utf-8").strip(),
                     "ts": now_iso(),
                     "fsm": RUNTIME.snapshot().get("fsm"),
+                    "mode": RUNTIME.snapshot().get("mode"),
+                    "provider": (RUNTIME.snapshot().get("costs") or {}).get("provider"),
                 },
             )
         if path == "/api/state":
             return _json(self, 200, {"ok": True, "state": RUNTIME.snapshot()})
+        if path == "/api/config":
+            return _json(self, 200, get_runtime_config())
         if path == "/api/audit":
             q = parse_qs(u.query)
             lim = int((q.get("limit") or ["40"])[0])
@@ -128,6 +155,27 @@ class Handler(BaseHTTPRequestHandler):
             style = max(1, min(99, style))
             return _json(self, 200, {"ok": True, "state": RUNTIME.patch(style=style)})
 
+        if path == "/api/provider":
+            try:
+                return _json(self, 200, set_decision_provider(str(body.get("provider") or "heuristic")))
+            except ValueError as exc:
+                return _json(self, 400, {"ok": False, "error": str(exc)})
+
+        if path == "/api/mode":
+            try:
+                return _json(self, 200, set_exec_mode(str(body.get("mode") or "paper")))
+            except ValueError as exc:
+                return _json(self, 400, {"ok": False, "error": str(exc)})
+
+        if path == "/api/broker":
+            try:
+                return _json(self, 200, set_broker(str(body.get("kind") or body.get("broker") or "paper")))
+            except ValueError as exc:
+                return _json(self, 400, {"ok": False, "error": str(exc)})
+
+        if path == "/api/sync_txt":
+            return _json(self, 200, sync_broker_positions())
+
         if path == "/api/kill":
             on = bool(body.get("on"))
             return _json(self, 200, {"ok": True, "state": RUNTIME.set_kill(on)})
@@ -146,14 +194,13 @@ class Handler(BaseHTTPRequestHandler):
                 RUNTIME.set_fsm("Idle")
                 RUNTIME.patch(lights={"system": "run"})
             elif cmd == "refresh":
-                pass
+                sync_broker_positions()
             else:
                 return _json(self, 400, {"ok": False, "error": "unknown cmd"})
             audit.write("control", {"cmd": cmd})
             return _json(self, 200, {"ok": True, "state": RUNTIME.snapshot()})
 
         if path == "/api/demo_tick":
-            # Convenience: run a timed market review for UI demos
             return _json(
                 self,
                 200,
@@ -170,6 +217,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    _boot_sync_config()
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     print("=" * 52)
     print(f" WaveDeck · 浪潮執行台  http://{HOST}:{PORT}/")

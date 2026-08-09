@@ -74,7 +74,29 @@ curl -s -X POST http://127.0.0.1:18433/bridge/st \
   -d '{"style":65,"delever":false,"note":"宏觀偏多，風格轉積極"}'
 ```
 
-預設 **paper** 模式；實盤需明確切換（v1.5 接下單大師 TXT adapter）。
+預設 **paper** 模式；實盤需在艦橋明確切「實盤 live／TXT」。
+
+### v0.1.5 決策源與券商
+
+| 項目 | 說明 |
+|------|------|
+| 決策源 | Console 選 Heuristic／Ollama／OpenAI；失敗自動回退啟發式 |
+| Ollama | 本機 `http://127.0.0.1:11434`，模型見 `data/wavedeck_config.json` |
+| OpenAI | `OPENAI_API_KEY` 或 `data/wavedeck_secrets.json`（勿提交） |
+| 紙上 | `PaperBroker` 只改記憶體部位 |
+| 實盤 TXT | `TxtMasterBroker` 寫 `data/master/target_position.txt` 並讀策略／帳戶 TXT |
+| ST 入口 | Stock Terminal 側欄 **執行** → 開啟 WaveDeck |
+
+```bash
+# 切決策源
+curl -s -X POST http://127.0.0.1:18433/api/provider \
+  -H 'Content-Type: application/json' -d '{"provider":"ollama"}'
+
+# 切 live（下單大師 TXT）並同步部位
+curl -s -X POST http://127.0.0.1:18433/api/mode \
+  -H 'Content-Type: application/json' -d '{"mode":"live"}'
+curl -s -X POST http://127.0.0.1:18433/api/sync_txt -d '{}'
+```
 
 ---
 

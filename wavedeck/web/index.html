@@ -117,6 +117,19 @@
     </section>
 
     <footer class="panel controls">
+      <div class="group-label">DECISION / BROKER</div>
+      <label class="ctrl-select">
+        <span>決策源</span>
+        <select id="providerSelect" aria-label="決策提供者">
+          <option value="heuristic">Heuristic</option>
+          <option value="ollama">Ollama</option>
+          <option value="openai">OpenAI</option>
+        </select>
+      </label>
+      <button class="btn" id="btnModePaper" type="button">紙上 paper</button>
+      <button class="btn" id="btnModeLive" type="button">實盤 live／TXT</button>
+      <button class="btn" id="btnSyncTxt" type="button">同步 TXT 部位</button>
+
       <div class="group-label">SYSTEM CONTROL</div>
       <button class="btn primary" data-cmd="start">啟動</button>
       <button class="btn" data-cmd="stop">停止</button>

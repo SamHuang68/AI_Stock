@@ -169,6 +169,15 @@
       '<div class="a"><div class="k">本月 USD</div><div class="v">' + c.month_usd + '</div></div>' +
       '<div class="a"><div class="k">提供者</div><div class="v">' + (c.provider || '—') + '</div></div>';
 
+    var prov = (c.provider || 'heuristic').toLowerCase();
+    if (prov !== 'heuristic' && prov !== 'ollama' && prov !== 'openai') prov = 'heuristic';
+    if ($('providerSelect') && $('providerSelect').value !== prov) {
+      $('providerSelect').value = prov;
+    }
+    var mode = (s.mode || 'paper').toLowerCase();
+    if ($('btnModePaper')) $('btnModePaper').classList.toggle('primary', mode === 'paper');
+    if ($('btnModeLive')) $('btnModeLive').classList.toggle('primary', mode === 'live');
+
     var t = s.transport || {};
     $('transportKv').innerHTML = [
       ['Webhook', t.webhook],
@@ -217,6 +226,41 @@
         var j = await api('/api/demo_tick', { method: 'POST', body: '{}' });
         render(j.state);
         toast('已模擬 TIMED_MARKET_REVIEW');
+      } catch (e) { toast(String(e.message || e)); }
+    });
+
+    $('providerSelect').addEventListener('change', async function () {
+      try {
+        var j = await api('/api/provider', {
+          method: 'POST',
+          body: JSON.stringify({ provider: this.value })
+        });
+        render(j.state);
+        toast('決策源 → ' + j.provider);
+      } catch (e) { toast(String(e.message || e)); }
+    });
+
+    $('btnModePaper').addEventListener('click', async function () {
+      try {
+        var j = await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'paper' }) });
+        render(j.state);
+        toast('模式 → paper（模擬盤）');
+      } catch (e) { toast(String(e.message || e)); }
+    });
+
+    $('btnModeLive').addEventListener('click', async function () {
+      try {
+        var j = await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'live' }) });
+        render(j.state);
+        toast('模式 → live（下單大師 TXT）');
+      } catch (e) { toast(String(e.message || e)); }
+    });
+
+    $('btnSyncTxt').addEventListener('click', async function () {
+      try {
+        var j = await api('/api/sync_txt', { method: 'POST', body: '{}' });
+        render(j.state);
+        toast('已同步 TXT 部位（' + (j.broker || '') + '）');
       } catch (e) { toast(String(e.message || e)); }
     });
 
