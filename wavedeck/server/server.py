@@ -194,6 +194,14 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 style = 50
             style = max(1, min(99, style))
+            # Fail-safe sticky: never raise aggressiveness above cap while degraded
+            try:
+                from server.st_link import FAIL_SAFE_STYLE, fail_safe_active
+
+                if fail_safe_active() and style > FAIL_SAFE_STYLE:
+                    style = FAIL_SAFE_STYLE
+            except Exception:
+                pass
             return _json(self, 200, {"ok": True, "state": RUNTIME.patch(style=style)})
 
         if path == "/api/provider":
@@ -226,7 +234,31 @@ class Handler(BaseHTTPRequestHandler):
                 push_async(snap, reason="kill", force=True)
             except Exception:
                 pass
-            return _json(self, 200, {"ok": True, "state": snap})
+            return _json(self, 200, {"ok": True, "state": snap, "mode": "pause_new"})
+
+        if path == "/api/panic":
+            # Pause new risk-on AND flatten via TXT / paper broker
+            from server.broker import panic_flatten
+
+            RUNTIME.set_kill(True)
+            flat = panic_flatten(RUNTIME.snapshot())
+            patch_kw: dict[str, Any] = {
+                "positions": flat.get("positions"),
+                "exec": flat.get("exec"),
+                "lights": {**(flat.get("lights") or {}), "kill_switch": "on", "system": "halt"},
+            }
+            if isinstance(flat.get("account"), dict):
+                patch_kw["account"] = flat["account"]
+            RUNTIME.patch(**{k: v for k, v in patch_kw.items() if v is not None})
+            snap = RUNTIME.set_kill(True)
+            audit.write("panic_flatten", {"positions": snap.get("positions")})
+            try:
+                from server.st_push import push_async
+
+                push_async(snap, reason="panic", force=True)
+            except Exception:
+                pass
+            return _json(self, 200, {"ok": True, "state": snap, "mode": "panic_flatten"})
 
         if path == "/api/control":
             cmd = str(body.get("cmd") or "")

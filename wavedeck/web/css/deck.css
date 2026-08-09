@@ -170,6 +170,16 @@ html, body {
   color: var(--cyan2);
   background: rgba(62, 198, 224, 0.08);
 }
+.preset.locked,
+.preset:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+input[type="range"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .slider-labels {
   display: flex; justify-content: space-between;
   color: var(--dim); font: 600 9px/1 var(--mono); margin-bottom: 2px;

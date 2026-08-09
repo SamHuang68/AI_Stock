@@ -2,10 +2,14 @@
 """Risk watchdog — can override AI."""
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import Any
 
 from .state import TZ8
+
+# Entry confidence floor (heuristic/LLM). 0 = disabled.
+MIN_ENTRY_CONFIDENCE = float(os.environ.get("WD_MIN_ENTRY_CONFIDENCE", "0.70"))
 
 
 def evaluate_gate(state: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
@@ -50,10 +54,9 @@ def evaluate_gate(state: dict[str, Any], decision: dict[str, Any]) -> dict[str, 
     except Exception:
         spill = None
 
-    # Fail-safe / ST link down: block new risk-on
-    if (st.get("fail_safe") or link.get("fail_safe") or link.get("status") == "down") and decision.get(
-        "action"
-    ) in {"ENTER_LONG", "ENTER_SHORT"}:
+    # Fail-safe / ST link down: block new risk-on + hard delever
+    fail_safe = bool(st.get("fail_safe") or link.get("fail_safe") or link.get("status") == "down")
+    if fail_safe and decision.get("action") in {"ENTER_LONG", "ENTER_SHORT"}:
         allow = False
         reasons.append("Fail-safe／ST 斷線：禁止新單")
 
@@ -64,9 +67,23 @@ def evaluate_gate(state: dict[str, Any], decision: dict[str, Any]) -> dict[str, 
         allow = False
         reasons.append("外溢極低：禁止新單")
 
-    if st.get("delever"):
+    # Confidence floor for new risk-on (skip if provider left confidence null)
+    try:
+        conf = float(decision["confidence"]) if decision.get("confidence") is not None else None
+    except Exception:
+        conf = None
+    if (
+        MIN_ENTRY_CONFIDENCE > 0
+        and conf is not None
+        and conf < MIN_ENTRY_CONFIDENCE
+        and decision.get("action") in {"ENTER_LONG", "ENTER_SHORT"}
+    ):
+        allow = False
+        reasons.append(f"信心度 {conf:.0%} < 門檻 {MIN_ENTRY_CONFIDENCE:.0%}")
+
+    if st.get("delever") or fail_safe:
         lots = max(1, lots // 2)
-        reasons.append("ST 降載：口數減半")
+        reasons.append("ST 降載：口數減半" if not fail_safe else "Fail-safe 降載：口數減半")
     elif spill is not None and spill < 0.35 and decision.get("action") in {
         "ENTER_LONG", "ENTER_SHORT"
     }:

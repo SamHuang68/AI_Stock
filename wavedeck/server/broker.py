@@ -89,6 +89,50 @@ def write_order_signal(action: str, lots: int, price: float, symbol: str = "TXF"
     return fp
 
 
+def write_invalidation_txt(price: float, side: str = "below", symbol: str = "TXF") -> Path:
+    """Side-channel for 下單大師／外部盯盤：失效價（軟停損參考）。"""
+    fp = _txt_dir() / "invalidation.txt"
+    fp.write_text(
+        f"{symbol} {str(side or 'below')} {float(price):.0f}\n",
+        encoding="utf-8",
+    )
+    return fp
+
+
+def panic_flatten(state: dict[str, Any]) -> dict[str, Any]:
+    """Kill-side flatten: target 0 + EXIT signal for 下單大師／紙上帳戶。"""
+    symbol = str(state.get("symbol") or "TXF")
+    price = float((state.get("exec") or {}).get("price") or 0)
+    broker = get_broker()
+    decision = {
+        "action": "EXIT",
+        "action_label": "急停全平",
+        "confidence": 1.0,
+        "process": {"gate": "PANIC", "gate_reasons": ["panic_flatten"]},
+    }
+    applied = broker.apply_intent(state, decision, 0)
+    # Always write TXT side files even if paper broker skipped disk
+    try:
+        write_txt_target(0, symbol)
+        write_order_signal("EXIT", 0, price, symbol)
+    except Exception:
+        pass
+    pos = dict(applied.get("positions") or state.get("positions") or {})
+    pos["ai_suggested"] = 0
+    pos["txt_target"] = 0
+    return {
+        "positions": pos,
+        "exec": {
+            **dict(state.get("exec") or {}),
+            "last_ai_action": "急停全平",
+            "last_order_action": applied.get("order_action") or "急停全平→TXT",
+            "lots": 0,
+        },
+        "lights": dict(applied.get("lights") or {}),
+        "account": dict(applied.get("account") or {}),
+    }
+
+
 def now_line() -> str:
     from .state import now_iso
     return now_iso()

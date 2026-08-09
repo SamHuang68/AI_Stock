@@ -183,15 +183,24 @@
     }).join('');
 
     var ov = s.st_overlay || {};
-    $('stDelever').textContent = ov.delever ? '是' : (stCtx.delever ? '建議是' : '否');
+    var link = s.st_link || {};
+    var fsOn = !!(ov.fail_safe || link.fail_safe);
+    // Fail-safe sticky: force warn lamps in UI even if a stale ok leaked into state
+    if (fsOn) {
+      L = Object.assign({}, L, {
+        st_bridge: (link.status === 'down' || link.fail_safe_kind === 'heartbeat') ? 'bad' : 'warn',
+        risk_watchdog: 'warn'
+      });
+      s = Object.assign({}, s, { lights: L });
+    }
+    $('stDelever').textContent = (ov.delever || fsOn) ? '是' : (stCtx.delever ? '建議是' : '否');
     $('stStyle').textContent = (ov.aggressiveness != null)
       ? ov.aggressiveness
       : (stCtx.styleHint != null ? ('建議 ' + stCtx.styleHint) : '—');
     paintSpillMeter(ov);
-    var link = s.st_link || {};
-    if (ov.fail_safe || link.fail_safe) {
+    if (fsOn) {
       $('stNote').textContent = '⚠ Fail-safe：' + (ov.fail_safe_reason || link.fail_safe_reason || 'ST 連線異常') +
-        ' · 風格已保守／降載／失效收緊';
+        ' · 風格已鎖定保守／降載／失效收緊（禁止調高風格）';
     } else if (ov.note) {
       $('stNote').textContent = ov.note;
     } else if (stCtx.note) {
@@ -212,6 +221,12 @@
     $('styleRange').value = String(style);
     $('styleVal').textContent = String(style);
     syncStylePresets(style);
+    // Lock aggressiveness controls while fail-safe is sticky
+    if ($('styleRange')) $('styleRange').disabled = fsOn;
+    document.querySelectorAll('.preset').forEach(function (btn) {
+      btn.disabled = fsOn;
+      btn.classList.toggle('locked', fsOn);
+    });
 
     var no = s.no_overnight || {};
     $('noOvernight').innerHTML =
@@ -261,6 +276,10 @@
     };
     $('lights').innerHTML = Object.keys(lightNames).map(function (k) {
       var v = (s.lights || {})[k] || 'ok';
+      if (k === 'st_bridge' && fsOn) {
+        v = (link.status === 'down' || link.fail_safe_kind === 'heartbeat') ? 'bad' : 'warn';
+      }
+      if (k === 'risk_watchdog' && fsOn) v = 'warn';
       return '<div class="light ' + lightClass(v) + '"><i></i><span class="name">' + lightNames[k] + '</span><span class="st">' + lightLabel(v) + '</span></div>';
     }).join('');
 
@@ -319,6 +338,11 @@
   }
 
   async function setStyle(n) {
+    var fs = state && ((state.st_overlay && state.st_overlay.fail_safe) || (state.st_link && state.st_link.fail_safe));
+    if (fs && Number(n) > 35) {
+      toast('Fail-safe 中：風格鎖定 ≤ 35');
+      n = 35;
+    }
     var j = await api('/api/style', { method: 'POST', body: JSON.stringify({ style: Number(n) }) });
     render(j.state);
     toast('進場風格 → ' + n);
@@ -425,7 +449,8 @@
       (stCtx.spilloverProb != null ? (' · 外溢 ' + Math.round(Number(stCtx.spilloverProb) * 100) + '%') : '') +
       (summary ? (' · ' + String(summary).slice(0, 56)) : '');
 
-    if (!(ov && ov.note)) $('stNote').textContent = stCtx.note;
+    // Never overwrite Fail-safe banner with soft ST hint text
+    if (!(ov && (ov.fail_safe || ov.note))) $('stNote').textContent = stCtx.note;
     if (!(ov && ov.aggressiveness != null)) {
       $('stStyle').textContent = '建議 ' + hint;
     }
@@ -436,6 +461,10 @@
   async function applyStHint() {
     if (stCtx.styleHint == null) await refreshSt();
     if (stCtx.styleHint == null) throw new Error('尚無 ST 建議（確認 :18432）');
+    var fs = state && ((state.st_overlay && state.st_overlay.fail_safe) || (state.st_link && state.st_link.fail_safe));
+    if (fs) {
+      toast('Fail-safe 中：套用 ST 會刷新宏觀覆寫並解除 Fail-safe（風格仍先鎖 ≤35）');
+    }
     var body = {
       style: stCtx.styleHint,
       delever: !!stCtx.delever,
@@ -534,14 +563,28 @@
     });
 
     $('btnKill').addEventListener('click', async function () {
-      var j = await api('/api/kill', { method: 'POST', body: JSON.stringify({ on: true }) });
-      render(j.state);
-      toast('緊急停止已啟用');
+      try {
+        var j = await api('/api/kill', { method: 'POST', body: JSON.stringify({ on: true }) });
+        render(j.state);
+        toast('已暫停新單（部位保留）');
+      } catch (e) { toast(String(e.message || e)); }
     });
+    if ($('btnPanic')) {
+      $('btnPanic').addEventListener('click', async function () {
+        if (!window.confirm('確認急停並全平？將暫停新單並寫入目標部位 0（EXIT）。')) return;
+        try {
+          var j = await api('/api/panic', { method: 'POST', body: '{}' });
+          render(j.state);
+          toast('急停並全平已送出');
+        } catch (e) { toast(String(e.message || e)); }
+      });
+    }
     $('btnKillOff').addEventListener('click', async function () {
-      var j = await api('/api/kill', { method: 'POST', body: JSON.stringify({ on: false }) });
-      render(j.state);
-      toast('緊急停止已解除');
+      try {
+        var j = await api('/api/kill', { method: 'POST', body: JSON.stringify({ on: false }) });
+        render(j.state);
+        toast('緊急停止已解除');
+      } catch (e) { toast(String(e.message || e)); }
     });
 
     $('btnAudit').addEventListener('click', async function () {

@@ -265,6 +265,30 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
         "local_calls": int(prev_costs.get("local_calls") or 0) + local_n,
         "cloud_calls": int(prev_costs.get("cloud_calls") or 0) + cloud_n,
     }
+    # Preserve fail-safe tightened invalidation if new decision would loosen it
+    prev_ai = RUNTIME.snapshot().get("ai") or {}
+    prev_inv = prev_ai.get("invalidation") if isinstance(prev_ai.get("invalidation"), dict) else {}
+    new_inv = decision.get("invalidation") if isinstance(decision.get("invalidation"), dict) else {}
+    link = RUNTIME.snapshot().get("st_link") or {}
+    ov = RUNTIME.snapshot().get("st_overlay") or {}
+    if (link.get("fail_safe") or ov.get("fail_safe")) and prev_inv.get("price") is not None:
+        try:
+            side = str(prev_inv.get("side") or new_inv.get("side") or "below")
+            prev_px = float(prev_inv["price"])
+            new_px = float(new_inv["price"]) if new_inv.get("price") is not None else None
+            keep = False
+            if new_px is None:
+                keep = True
+            elif side == "below" and prev_px > new_px:
+                keep = True  # keep tighter (higher) long stop
+            elif side == "above" and prev_px < new_px:
+                keep = True
+            if keep:
+                decision = dict(decision)
+                decision["invalidation"] = dict(prev_inv)
+        except Exception:
+            pass
+
     snap = RUNTIME.patch(
         ai=decision,
         positions=pos,
@@ -274,6 +298,19 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
             "last_webhook_status": "AI 完成" if gate["allow"] else "閘門阻擋",
         },
     )
+    # Soft-sync invalidation → TXT side file for 下單大師
+    try:
+        inv = (snap.get("ai") or {}).get("invalidation") or {}
+        if inv.get("price") is not None:
+            from .broker import write_invalidation_txt
+
+            write_invalidation_txt(
+                float(inv["price"]),
+                str(inv.get("side") or "below"),
+                symbol=str(snap.get("symbol") or "TXF"),
+            )
+    except Exception:
+        pass
     audit.write(
         "decision",
         {

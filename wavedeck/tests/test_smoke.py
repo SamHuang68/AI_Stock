@@ -244,7 +244,7 @@ class WaveDeckSmoke(unittest.TestCase):
         self.assertTrue(any("Fail-safe" in r for r in g["reasons"]))
 
     def test_apply_fail_safe_tightens_style(self):
-        from server.st_link import apply_fail_safe
+        from server.st_link import apply_fail_safe, enforce_fail_safe
         from server.state import RUNTIME
 
         with tempfile.TemporaryDirectory() as td:
@@ -264,8 +264,51 @@ class WaveDeckSmoke(unittest.TestCase):
                 self.assertEqual(snap.get("style"), 35)
                 self.assertTrue((snap.get("st_overlay") or {}).get("fail_safe"))
                 self.assertTrue((snap.get("st_link") or {}).get("fail_safe"))
+                self.assertEqual((snap.get("lights") or {}).get("st_bridge"), "bad")
                 inv = ((snap.get("ai") or {}).get("invalidation") or {})
                 self.assertGreater(float(inv.get("price")), 44000)
+                # Sticky: even if style drifts up, enforce clamps back
+                RUNTIME.patch(style=60, st_overlay={"delever": False, "fail_safe": True})
+                snap2 = enforce_fail_safe("宏觀覆寫過期 94s", tighten=False)
+                self.assertEqual(snap2.get("style"), 35)
+                self.assertTrue((snap2.get("st_overlay") or {}).get("delever"))
+                self.assertEqual((snap2.get("lights") or {}).get("st_bridge"), "warn")
+
+    def test_entry_confidence_floor(self):
+        st = {
+            "kill_switch": False,
+            "fsm": "Idle",
+            "account": {"yesterday_balance": 100, "equity": 100},
+            "no_overnight": {"enabled": False},
+            "st_overlay": {},
+            "st_link": {"status": "ok"},
+            "style": 60,
+            "exec": {"lots": 1},
+        }
+        g = evaluate_gate(
+            st,
+            {"action": "ENTER_LONG", "confidence": 0.62, "process": {"chase_risk": "low"}},
+        )
+        self.assertFalse(g["allow"])
+        self.assertTrue(any("信心度" in r for r in g["reasons"]))
+
+    def test_panic_flatten_writes_zero_target(self):
+        from server.broker import panic_flatten, write_invalidation_txt
+        from server import broker as broker_mod
+
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.object(broker_mod, "_txt_dir", return_value=Path(td)):
+                st = {
+                    "symbol": "TXF",
+                    "exec": {"price": 45020, "lots": 2},
+                    "positions": {"ai_suggested": 2, "txt_target": 2, "strategy": 2, "account": 2},
+                }
+                out = panic_flatten(st)
+                self.assertEqual((out.get("positions") or {}).get("txt_target"), 0)
+                self.assertTrue((Path(td) / "target_position.txt").is_file())
+                self.assertIn("EXIT", (Path(td) / "order_signal.txt").read_text(encoding="utf-8"))
+                write_invalidation_txt(45019, "below", "TXF")
+                self.assertIn("45019", (Path(td) / "invalidation.txt").read_text(encoding="utf-8"))
 
     def test_st_push_chip_lightweight(self):
         from server.st_push import build_report, _chip_from_snap
