@@ -1,0 +1,9 @@
+data/runtime_state.json
+data/wavedeck_audit.db
+data/*.db-wal
+data/*.db-shm
+data/*key*
+data/.env*
+__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WaveDeck · 浪潮執行台</title>
+  <link rel="stylesheet" href="/css/deck.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="brandbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">WD</div>
+        <div>
+          <h1>WaveDeck <span>× Stock Terminal</span></h1>
+          <p>浪潮執行台 · 微觀判斷／風控閘門／券商橋接</p>
+        </div>
+      </div>
+      <div class="brand-meta">
+        <div>本機時間 <strong id="clock">—</strong></div>
+        <div>FSM <strong id="fsm">—</strong> · 模式 <strong id="mode">paper</strong></div>
+        <div>最近 TV 事件 <strong id="lastTv">—</strong></div>
+      </div>
+    </header>
+
+    <section class="status-row">
+      <div class="panel">
+        <div class="panel-hd"><h2>Webhook / 處理</h2></div>
+        <div class="panel-bd">
+          <div class="chip-row">
+            <span class="chip info"><i class="dot"></i>最新處理：<b id="webhookStatus">待命</b></span>
+            <span class="chip"><i class="dot"></i>通道 <b id="transport">—</b></span>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-hd"><h2>系統健康</h2></div>
+        <div class="panel-bd chip-row" id="healthChips"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-hd"><h2>ST 聯動覆寫</h2></div>
+        <div class="panel-bd">
+          <div class="chip-row">
+            <span class="chip"><i class="dot"></i>降載 <b id="stDelever">否</b></span>
+            <span class="chip"><i class="dot"></i>覆寫風格 <b id="stStyle">—</b></span>
+          </div>
+          <p class="summary" id="stNote" style="margin-top:8px">等待 Stock Terminal 推送宏觀參數。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="main">
+      <aside class="panel">
+        <div class="panel-hd"><h2>部位與執行狀態</h2></div>
+        <div class="panel-bd">
+          <div class="kv" id="posKv"></div>
+          <div class="slider-wrap">
+            <div class="panel-hd" style="padding:12px 0 0"><h2>AI 進場風格</h2></div>
+            <div class="slider-labels"><span>保守 35</span><span>均衡 50</span><span>積極 65</span></div>
+            <input id="styleRange" type="range" min="20" max="90" step="1" value="50" />
+            <div class="style-readout">
+              <span class="lab" style="color:var(--muted)">當前</span>
+              <strong id="styleVal">50</strong>
+            </div>
+          </div>
+          <div class="guard" id="noOvernight">
+            <h3>不留倉保護 · 啟用</h3>
+            <p>收盤前禁止新單；指定時間強制平倉。</p>
+          </div>
+        </div>
+      </aside>
+
+      <section class="panel">
+        <div class="panel-hd"><h2>AI 最新判斷</h2><span class="tag" id="aiEvent">—</span></div>
+        <div class="panel-bd">
+          <div class="ai-hero">
+            <div class="ai-action">
+              <div class="lbl" id="aiLabel">—</div>
+              <div class="pct" id="aiConf">—</div>
+            </div>
+          </div>
+          <div class="bias">
+            <div class="b long"><span class="k" style="color:var(--dim);font:600 10px var(--mono)">偏多</span><em id="biasLong">—</em></div>
+            <div class="b short"><span class="k" style="color:var(--dim);font:600 10px var(--mono)">偏空</span><em id="biasShort">—</em></div>
+          </div>
+          <p class="summary" id="aiSummary">—</p>
+          <div class="tags" id="aiTags"></div>
+          <div class="process" id="aiProcess"></div>
+        </div>
+      </section>
+
+      <aside class="panel">
+        <div class="panel-hd"><h2>系統運行燈號</h2></div>
+        <div class="panel-bd">
+          <div class="lights" id="lights"></div>
+          <div class="panel-hd" style="padding:14px 0 0"><h2>帳戶與風險</h2></div>
+          <div class="acct" id="acct"></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="bottom">
+      <div class="panel">
+        <div class="panel-hd"><h2>執行對照 · API 成本</h2></div>
+        <div class="panel-bd">
+          <div class="kv" id="execKv"></div>
+          <div class="acct" id="costKv" style="margin-top:10px"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-hd"><h2>TradingView / 傳輸</h2></div>
+        <div class="panel-bd">
+          <p class="summary" id="transportBlurb">Webhook + 本機通道。預設僅綁 127.0.0.1；對外請自建 Named Tunnel。</p>
+          <div class="kv" id="transportKv" style="margin-top:10px"></div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="panel controls">
+      <div class="group-label">SYSTEM CONTROL</div>
+      <button class="btn primary" data-cmd="start">啟動</button>
+      <button class="btn" data-cmd="stop">停止</button>
+      <button class="btn" data-cmd="restart">重啟</button>
+      <button class="btn" data-cmd="refresh">重新整理</button>
+      <button class="btn primary" id="btnDemo">模擬 TV 事件</button>
+
+      <div class="group-label">VIEW &amp; TOOLS</div>
+      <button class="btn ghost" id="btnAudit">AI／稽核紀錄</button>
+      <button class="btn ghost" id="btnOpenST">開啟 Stock Terminal</button>
+
+      <div class="group-label">EMERGENCY</div>
+      <button class="btn danger" id="btnKill">緊急停止 ON</button>
+      <button class="btn" id="btnKillOff">解除停止</button>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="/js/deck.js"></script>
+</body>
+</html>
