@@ -72,6 +72,7 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/ai/copilot_v3.js',                  # v4.0: AI 副駕面板(本機 LM Studio,/ai/local)
               'src/screener/wizard_v3.js',                   # v3.9: 加股設定精靈(依賴 StratLib/Backtest/drawtools/setPosition/saveWatches，排最後)
               'src/ui/shell_v5.js',                    # v5.0: 側欄殼層+視圖路由(show/hide，預設圖表工作區；須在 toolbar 前掛好 DOM)
+              'src/ui/wavedeck_bridge_v5.js',          # v5.0: WaveDeck 浪潮執行台入口／ST→WD 橋接
               'src/ui/pulse_v5.js',                    # v5.0 S4: TW Pulse 市場脈動總覽（組合既有 API，掛 #view-pulse）
               'src/ui/heat_v5.js',                     # v5.0 S5: 類股熱力+/focus 輔區（掛 #view-heat）
               'src/ui/book_v5.js',                     # v5.0 S6: 投組風險側欄（POST /portfolio，掛 #view-book）

@@ -12,6 +12,14 @@ Bloomberg 風格台／美股研究終端機 — **本機跑、零雲端、純 Py
 
 > 融資週期／TDCC 集中度等大 DB **不隨 git／分享包**；首次開圖會背景回補。
 
+## 連動子專案：WaveDeck（浪潮執行台）
+
+微觀下單／AI 判斷／風控艦橋，與本終端分工：
+
+- 專案目錄：[`wavedeck/`](wavedeck/)
+- 啟動：`cd wavedeck && python3 server/server.py` → `http://127.0.0.1:18433/`
+- 架構：[`wavedeck/docs/ARCHITECTURE.md`](wavedeck/docs/ARCHITECTURE.md)
+
 ## 分享版注意
 
 發行 zip（`scripts/build_dist.py`）**不含**：
