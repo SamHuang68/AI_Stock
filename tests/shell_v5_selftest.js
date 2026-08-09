@@ -234,6 +234,14 @@ ok(/itemOffsetOnLayer/.test(shell) && /clampWheelForActive/.test(shell) &&
 ok(/onRingWheel/.test(shell) && /wheelAcc/.test(shell) && /sr-orbit/.test(shell) &&
   /--sr-x/.test(shell) && /box-shadow/.test(shell) && /conic-gradient/.test(shell),
   'shell ring 3D orbit/bevel + mouse-wheel cyclic select');
+ok(/function ringWheelSlots/.test(shell) && /slots\.push\(-2\)/.test(shell) &&
+  /ringDepth\(\) > 1/.test(shell) && /hi === -2/.test(shell) &&
+  /function ringPopTo/.test(shell) && /data-ring-pop-to/.test(shell) &&
+  /sr-crumb/.test(shell) && /BrowserBack/.test(shell) && /button === 3/.test(shell) &&
+  /ringPop: ringPop/.test(shell) && /ringPopTo: ringPopTo/.test(shell),
+  'shell ring back: wheel hub slot + Esc/Backspace/crumb/side-button pop layer');
+ok(/ShellV5\.ringPop/.test(hotkeys),
+  'hotkeys Esc fallback calls ShellV5.ringPop while ring open');
 ok(/RING_LOGO/.test(shell) && /st50-icon\.svg/.test(shell) && /sr-hub-ver/.test(shell) &&
   /sr-logo/.test(shell) && /Stock Terminal/.test(shell),
   'shell ring hub shows Stock Terminal 5.0 logo');

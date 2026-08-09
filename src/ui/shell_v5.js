@@ -368,10 +368,17 @@
         'border:1px solid rgba(51,65,85,.45);backdrop-filter:blur(2px)}' +
       '#st-ring .sr-level{position:absolute;left:50%;top:-108px;transform:translateX(-50%);z-index:5;' +
         'font:700 9px/1.35 "JetBrains Mono",monospace;color:var(--gold);letter-spacing:.3px;' +
-        'white-space:nowrap;pointer-events:none;text-shadow:0 1px 8px rgba(0,0,0,.8);text-align:center;' +
+        'white-space:nowrap;pointer-events:auto;text-shadow:0 1px 8px rgba(0,0,0,.8);text-align:center;' +
         'padding:3px 8px;border-radius:999px;background:rgba(8,15,28,.5);' +
-        'border:1px solid rgba(245,197,24,.22)}' +
-      '#st-ring .sr-level .sr-crumb{color:#64748b;font-weight:600}' +
+        'border:1px solid rgba(245,197,24,.22);display:flex;flex-wrap:wrap;align-items:center;' +
+        'justify-content:center;gap:2px;max-width:min(72vw,420px)}' +
+      '#st-ring .sr-level .sr-crumb{appearance:none;border:0;background:transparent;padding:1px 4px;' +
+        'margin:0;border-radius:6px;cursor:pointer;color:#94a3b8;font:inherit;letter-spacing:inherit;' +
+        'text-decoration:underline;text-underline-offset:2px;text-decoration-color:rgba(148,163,184,.35)}' +
+      '#st-ring .sr-level .sr-crumb:hover{color:#e2e8f0;background:rgba(255,255,255,.06);' +
+        'text-decoration-color:rgba(245,197,24,.55)}' +
+      '#st-ring .sr-level .sr-crumb:focus-visible{outline:2px solid rgba(245,197,24,.55);outline-offset:1px}' +
+      '#st-ring .sr-level .sr-sep{opacity:.55;pointer-events:none;user-select:none;color:var(--gold)}' +
       '#st-ring-fab{position:fixed;right:14px;bottom:14px;z-index:90;width:42px;height:42px;' +
         'border-radius:50%;border:1px solid rgba(245,197,24,.45);' +
         'background:' +
@@ -653,10 +660,35 @@
     var parts = [];
     for (var i = 0; i < ringState.layers.length; i++) {
       var t = ringState.layers[i].title || ('L' + (i + 1));
-      if (i === ringState.layers.length - 1) parts.push('L' + (i + 1) + ' · ' + t);
-      else parts.push('<span class="sr-crumb">' + t + '</span>');
+      if (i === ringState.layers.length - 1) {
+        parts.push('L' + (i + 1) + ' · ' + t);
+      } else {
+        /* 上層麵包屑可點：一次回到該層（等同多次返回） */
+        parts.push('<button type="button" class="sr-crumb" data-ring-pop-to="' + i + '" title="回到：' +
+          t.replace(/"/g, '&quot;') + '">' + t + '</button>');
+      }
     }
-    level.innerHTML = parts.join(' › ') || 'L1 · 分析主選單';
+    level.innerHTML = parts.join('<span class="sr-sep" aria-hidden="true"> › </span>') || 'L1 · 分析主選單';
+  }
+
+  /** 回到指定層（保留 0..toIdx）；toIdx 缺省＝上一層 */
+  function ringPopTo(toIdx) {
+    if (ringDepth() <= 1) {
+      closeRing();
+      return;
+    }
+    if (toIdx == null || toIdx < 0) {
+      ringPop();
+      return;
+    }
+    toIdx = Math.min(toIdx, ringDepth() - 1);
+    while (ringDepth() - 1 > toIdx) {
+      ringState.layers.pop();
+    }
+    var cur = ringState.layers[ringDepth() - 1];
+    if (cur) cur.pickedId = null;
+    clampWheelForActive();
+    renderRingLayers();
   }
 
   function renderRingLayers() {
@@ -801,13 +833,22 @@
     setRingHighlight(ringIndexFromPoint(e.clientX, e.clientY));
   }
 
-  /** 滾輪循環選取作用層功能（觸控板小步長累積後再換） */
+  /** 滾輪可選槽：作用層項目；有子層時多一格中心「返回」（hi=-2） */
+  function ringWheelSlots() {
+    var n = ringState.items.length || 0;
+    var slots = [];
+    for (var i = 0; i < n; i++) slots.push(i);
+    if (ringDepth() > 1) slots.push(-2);
+    return slots;
+  }
+
+  /** 滾輪循環選取作用層功能（含子層時可滾到中心返回；觸控板小步長累積） */
   function onRingWheel(e) {
     if (!ringState.open) return;
     e.preventDefault();
     e.stopPropagation();
-    var n = ringState.items.length || 0;
-    if (!n) return;
+    var slots = ringWheelSlots();
+    if (!slots.length) return;
     var delta = e.deltaY;
     if (!delta && e.deltaX) delta = e.deltaX;
     if (!delta) return;
@@ -819,8 +860,10 @@
     if (Math.abs(ringState.wheelAcc) < step) return;
     var dir = ringState.wheelAcc > 0 ? 1 : -1;
     ringState.wheelAcc = 0;
-    var cur = ringState.hi < 0 ? (dir > 0 ? -1 : 0) : ringState.hi;
-    setRingHighlight((cur + dir + n * 8) % n);
+    var curSlot = slots.indexOf(ringState.hi);
+    if (curSlot < 0) curSlot = dir > 0 ? -1 : 0;
+    var next = slots[(curSlot + dir + slots.length * 8) % slots.length];
+    setRingHighlight(next);
   }
 
   function ringPushChildren(item, idx) {
@@ -889,6 +932,13 @@
     if (e.target.closest('#st-ring-bd')) {
       e.preventDefault();
       closeRing();
+      return;
+    }
+    var crumb = e.target.closest('[data-ring-pop-to]');
+    if (crumb) {
+      e.preventDefault();
+      var to = parseInt(crumb.getAttribute('data-ring-pop-to'), 10);
+      if (isFinite(to)) ringPopTo(to);
       return;
     }
     if (e.target.closest('#st-ring-hub')) {
@@ -1503,8 +1553,9 @@
   function onShellKey(e) {
     if (inEditable(e.target)) return;
     var meta = e.metaKey || e.ctrlKey;
-    /* Esc：轉盤有子層先返回，否則關轉盤 */
-    if (e.key === 'Escape') {
+    /* Esc／Backspace／BrowserBack／Alt+←：有子層先返回上一層，否則關轉盤 */
+    if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'BrowserBack' ||
+        (e.altKey && e.key === 'ArrowLeft' && ringState.open)) {
       if (ringState.open) {
         e.preventDefault();
         e.stopPropagation();
@@ -1512,32 +1563,36 @@
         return;
       }
     }
-    /* Backspace：轉盤子層返回 */
-    if (ringState.open && e.key === 'Backspace') {
-      e.preventDefault();
-      ringPop();
-      return;
-    }
     /* \\：功能轉盤（MX Master 風格） */
     if (e.key === '\\' && !e.altKey && !meta) {
       e.preventDefault();
       toggleRing(window.innerWidth / 2, window.innerHeight / 2);
       return;
     }
-    /* 轉盤開啟時：方向鍵環選；Enter 確認／下鑽 */
+    /* 轉盤開啟時：方向鍵環選（含子層返回槽）；Enter／Space 確認／下鑽／返回 */
     if (ringState.open) {
-      var n = ringState.items.length || 1;
+      var slots = ringWheelSlots();
+      var sn = slots.length || 1;
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
         e.preventDefault();
-        setRingHighlight(((ringState.hi < 0 ? -1 : ringState.hi) + 1 + n) % n);
+        var cR = slots.indexOf(ringState.hi);
+        if (cR < 0) cR = -1;
+        setRingHighlight(slots[(cR + 1 + sn * 8) % sn]);
         return;
       }
       if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
         e.preventDefault();
-        setRingHighlight(((ringState.hi < 0 ? 0 : ringState.hi) - 1 + n) % n);
+        var cL = slots.indexOf(ringState.hi);
+        if (cL < 0) cL = 0;
+        setRingHighlight(slots[(cL - 1 + sn * 8) % sn]);
         return;
       }
-      if (e.key === 'Enter' && ringState.hi >= 0) {
+      if ((e.key === 'Enter' || e.key === ' ') && ringState.hi === -2) {
+        e.preventDefault();
+        ringPop();
+        return;
+      }
+      if ((e.key === 'Enter' || e.key === ' ') && ringState.hi >= 0) {
         e.preventDefault();
         activateRingItem(ringState.items[ringState.hi], ringState.hi);
         return;
@@ -1566,6 +1621,12 @@
     if (e.button === 1) {
       e.preventDefault();
       toggleRing(e.clientX, e.clientY);
+      return;
+    }
+    /* 滑鼠側鍵「返回」(button 3)：轉盤子層回上一層 */
+    if (e.button === 3 && ringState.open) {
+      e.preventDefault();
+      ringPop();
     }
   }
 
@@ -1593,6 +1654,8 @@
     openRing: openRing,
     closeRing: closeRing,
     toggleRing: toggleRing,
+    ringPop: ringPop,
+    ringPopTo: ringPopTo,
     isRingOpen: function () { return !!ringState.open; },
     ringDepth: function () { return ringDepth(); },
     ringAnalysisTree: ringAnalysisTree,

@@ -141,12 +141,15 @@
     }
     if (inEditable(e.target)) return;
 
-    // Esc 關浮層；若無浮層且在非圖表視圖 → 回圖表（側欄已移除，導航改轉盤）
+    // Esc 關浮層；轉盤開啟時回上一層（或關轉盤）；否則非圖表視圖 → 回圖表
+    // （側欄已移除，導航改轉盤；此處兜底呼叫 ShellV5.ringPop）
     if (e.key === 'Escape') {
       if (closeAnyModal()) return;
       if (window.ShellV5 && typeof window.ShellV5.isRingOpen === 'function' &&
-          window.ShellV5.isRingOpen() && typeof window.ShellV5.closeRing === 'function') {
-        /* shell 自己的 keydown 會先處理轉盤；此處僅兜底 */
+          window.ShellV5.isRingOpen()) {
+        e.preventDefault();
+        if (typeof window.ShellV5.ringPop === 'function') window.ShellV5.ringPop();
+        else if (typeof window.ShellV5.closeRing === 'function') window.ShellV5.closeRing();
         return;
       }
       if (window.ShellV5 && typeof window.ShellV5.route === 'function' &&
