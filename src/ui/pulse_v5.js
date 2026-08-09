@@ -3,7 +3,7 @@
  * ----------------------------------------------------------------------------
  * 大螢幕一頁高密度（一行五框 × 上下兩區）：
  *   頂列 KPI（加權／櫃買／台指期／量能／家數廣度／漲跌停）— 去重後 6 格
- *   上區 5 窗：脈動(綜合|體質|風險三燈)｜加權盤勢｜法人｜廣度(四格＋線圖對齊法人)｜產業
+ *   上區 5 窗：脈動(綜合|體質|風險三燈)｜加權盤勢(四格＋線圖對齊法人)｜法人｜廣度｜產業
  *   下區 5 窗：漲停(產業標籤)｜跌幅｜全球｜快訊(TW/US)｜自選(TW/US·內滾)
  *   產業輪動 hover ↔ 近漲跌停同產業高亮；法人合計 Z／分位／排名
  *   因子／歷史預設收合（按鈕展開）
@@ -200,58 +200,53 @@
       '#pl-root .pl-drivers .box .k{color:#a8b6c8;margin-bottom:1px;font-size:8px;font-weight:700}' +
       '#pl-root .pl-drivers .box .k span{color:#94a3b8;font-weight:600}' +
       '#pl-root .pl-drivers .box li{margin:1px 0;color:var(--text);list-style:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      /* OHLC / 加權盤勢：維持一行四格，僅縮小數值字級以免尾數被 ellipsis 遮掉 */
-      '#pl-root .pl-ohlc{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;flex:0 0 auto}' +
-      '#pl-root .pl-ohlc .box{background:rgba(6,10,18,.45);border:1px solid rgba(42,61,92,.7);border-radius:5px;padding:4px 5px;min-width:0}' +
-      '#pl-root .pl-ohlc .box .k{font-size:8px;color:#a8b6c8}' +
-      '#pl-root .pl-ohlc .box .v{font-size:9px;font-weight:700;margin-top:1px;color:var(--thi);' +
-        'font-variant-numeric:tabular-nums;letter-spacing:-0.35px;white-space:nowrap;' +
-        'overflow:hidden;line-height:1.15}' +
-      '#pl-root .pl-range{margin-top:3px;flex:0 0 auto}' +
-      '#pl-root .pl-range .lab{display:flex;justify-content:space-between;font-size:8px;color:#a8b6c8;margin-bottom:2px;gap:4px;min-width:0}' +
-      '#pl-root .pl-range .lab > span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#pl-root .pl-range .track{height:5px;border-radius:3px;background:var(--bg3);position:relative;overflow:visible}' +
-      '#pl-root .pl-range .track > i{display:block;height:100%;border-radius:3px;' +
-        'background:linear-gradient(90deg,var(--green),var(--gold),var(--red));opacity:.55}' +
-      '#pl-root .pl-range .mark{position:absolute;top:-2px;width:2px;height:9px;background:var(--thi);' +
-        'border-radius:1px;transform:translateX(-50%);box-shadow:0 0 0 1px rgba(0,0,0,.35)}' +
       '#pl-root .pl-sec-tog{display:inline-flex;gap:2px;margin-left:auto}' +
       '#pl-root .pl-sec-tog button{padding:1px 6px;border:1px solid var(--border);border-radius:3px;background:transparent;' +
         'color:#94a3b8;font-size:8px;font-family:inherit;cursor:pointer}' +
       '#pl-root .pl-sec-tog button.on{border-color:var(--gold-m);color:var(--gold);background:var(--gold-s)}' +
-      '#pl-root .pl-spark{flex:1 1 0;min-height:0;margin:3px 0 4px;background:rgba(6,10,18,.55);' +
-        'border:1px solid rgba(42,61,92,.75);border-radius:5px;padding:5px 7px;' +
-        'display:flex;flex-direction:column;overflow:hidden}' +
-      '#pl-root .pl-spark .vz-spark-ax{flex:1;min-height:0;height:100%;overflow:hidden}' +
-      '#pl-root .pl-spark svg{width:100%;height:100%;display:block;min-height:0;max-height:100%;margin:0}' +
-      /* 法人／廣度共用：上方一行四格 KPI，中間 flex 拉高線圖，底評論 */
-      '#pl-root .pl-inst4,#pl-root .pl-bd4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;flex:0 0 auto}' +
-      '#pl-root .pl-inst4 .c,#pl-root .pl-bd4 .c{background:rgba(6,10,18,.45);border:1px solid rgba(42,61,92,.7);border-radius:5px;padding:4px 2px;text-align:center;min-width:0}' +
-      '#pl-root .pl-inst4 .c .k,#pl-root .pl-bd4 .c .k{font-size:8px;color:#a8b6c8;line-height:1.2}' +
-      '#pl-root .pl-inst4 .c .v,#pl-root .pl-bd4 .c .v{font-size:10px;font-weight:800;margin-top:2px;line-height:1.15;' +
+      /* 加權／法人／廣度共用：上方一行四格 KPI，中間 flex 拉高線圖，底評論 */
+      '#pl-root .pl-inst4,#pl-root .pl-bd4,#pl-root .pl-ohlc4{' +
+        'display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;flex:0 0 auto}' +
+      '#pl-root .pl-inst4 .c,#pl-root .pl-bd4 .c,#pl-root .pl-ohlc4 .c{' +
+        'background:rgba(6,10,18,.45);border:1px solid rgba(42,61,92,.7);border-radius:5px;padding:4px 2px;text-align:center;min-width:0}' +
+      '#pl-root .pl-inst4 .c .k,#pl-root .pl-bd4 .c .k,#pl-root .pl-ohlc4 .c .k{' +
+        'font-size:8px;color:#a8b6c8;line-height:1.2}' +
+      '#pl-root .pl-inst4 .c .v,#pl-root .pl-bd4 .c .v,#pl-root .pl-ohlc4 .c .v{' +
+        'font-size:10px;font-weight:800;margin-top:2px;line-height:1.15;' +
         'font-variant-numeric:tabular-nums;letter-spacing:-0.2px;white-space:nowrap;' +
         'overflow:visible;max-width:100%}' +
-      '#pl-root .pl-inst-trend,#pl-root .pl-bd-trend{flex:1 1 0;min-height:0;margin:5px 0 3px;background:rgba(6,10,18,.55);' +
+      /* 加權 OHLC 點位較長（如 44,450.19）：略縮字級，避免裁切 */
+      '#pl-root .pl-ohlc4 .c .v{font-size:9px;letter-spacing:-0.35px;color:var(--thi)}' +
+      '#pl-root .pl-inst-trend,#pl-root .pl-bd-trend,#pl-root .pl-ohlc-trend{' +
+        'flex:1 1 0;min-height:0;margin:5px 0 3px;background:rgba(6,10,18,.55);' +
         'border:1px solid rgba(42,61,92,.75);border-radius:5px;padding:5px 7px;' +
         'display:flex;flex-direction:column;overflow:hidden;min-width:0}' +
-      '#pl-root .pl-inst-trend .lab,#pl-root .pl-bd-trend .lab{font-size:8px;color:#a8b6c8;flex:0 0 auto;margin-bottom:3px;' +
+      '#pl-root .pl-inst-trend .lab,#pl-root .pl-bd-trend .lab,#pl-root .pl-ohlc-trend .lab{' +
+        'font-size:8px;color:#a8b6c8;flex:0 0 auto;margin-bottom:3px;' +
         'display:flex;justify-content:space-between;gap:4px;min-width:0;overflow:hidden}' +
-      '#pl-root .pl-inst-trend .lab > span:last-child,#pl-root .pl-bd-trend .lab > span:last-child{' +
+      '#pl-root .pl-inst-trend .lab > span:last-child,#pl-root .pl-bd-trend .lab > span:last-child,' +
+        '#pl-root .pl-ohlc-trend .lab > span:last-child{' +
         'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#pl-root .pl-inst-trend .chart,#pl-root .pl-bd-trend .chart{flex:1 1 0;min-height:0;min-width:0;overflow:hidden;position:relative}' +
-      '#pl-root .pl-inst-trend .chart .vz-spark-ax,#pl-root .pl-bd-trend .chart .vz-spark-ax{' +
+      '#pl-root .pl-inst-trend .chart,#pl-root .pl-bd-trend .chart,#pl-root .pl-ohlc-trend .chart{' +
+        'flex:1 1 0;min-height:0;min-width:0;overflow:hidden;position:relative}' +
+      '#pl-root .pl-inst-trend .chart .vz-spark-ax,#pl-root .pl-bd-trend .chart .vz-spark-ax,' +
+        '#pl-root .pl-ohlc-trend .chart .vz-spark-ax{' +
         'height:100%;min-height:0;max-width:100%;min-width:0;overflow:hidden}' +
       '#pl-root .pl-inst-trend .chart .vz-yunit,#pl-root .pl-inst-trend .chart .vz-ylabs,' +
-        '#pl-root .pl-bd-trend .chart .vz-yunit,#pl-root .pl-bd-trend .chart .vz-ylabs{font-size:6px}' +
-      '#pl-root .pl-inst-trend .chart .vz-plot,#pl-root .pl-bd-trend .chart .vz-plot{min-width:0;min-height:0;overflow:hidden}' +
-      '#pl-root .pl-inst-trend .chart .vz-plot svg,#pl-root .pl-bd-trend .chart .vz-plot svg{' +
+        '#pl-root .pl-bd-trend .chart .vz-yunit,#pl-root .pl-bd-trend .chart .vz-ylabs,' +
+        '#pl-root .pl-ohlc-trend .chart .vz-yunit,#pl-root .pl-ohlc-trend .chart .vz-ylabs{font-size:6px}' +
+      '#pl-root .pl-inst-trend .chart .vz-plot,#pl-root .pl-bd-trend .chart .vz-plot,' +
+        '#pl-root .pl-ohlc-trend .chart .vz-plot{min-width:0;min-height:0;overflow:hidden}' +
+      '#pl-root .pl-inst-trend .chart .vz-plot svg,#pl-root .pl-bd-trend .chart .vz-plot svg,' +
+        '#pl-root .pl-ohlc-trend .chart .vz-plot svg{' +
         'width:100%;height:100%;min-width:0;min-height:0;' +
         'max-width:100%;max-height:100%;margin:0;display:block;box-sizing:border-box}' +
-      '#pl-root .pl-inst-cmt,#pl-root .pl-bd-cmt{font-size:8px;line-height:1.35;color:var(--text);margin-top:2px;flex:0 0 auto;' +
+      '#pl-root .pl-inst-cmt,#pl-root .pl-bd-cmt,#pl-root .pl-ohlc-cmt{' +
+        'font-size:8px;line-height:1.35;color:var(--text);margin-top:2px;flex:0 0 auto;' +
         'max-height:2.7em;min-height:0;overflow:hidden}' +
-      '#pl-root .pl-inst-cmt b,#pl-root .pl-bd-cmt b{color:var(--gold);font-weight:700}' +
-      '#pl-root .pl-inst-cmt .up,#pl-root .pl-bd-cmt .up{color:var(--red)}' +
-      '#pl-root .pl-inst-cmt .dn,#pl-root .pl-bd-cmt .dn{color:var(--green)}' +
+      '#pl-root .pl-inst-cmt b,#pl-root .pl-bd-cmt b,#pl-root .pl-ohlc-cmt b{color:var(--gold);font-weight:700}' +
+      '#pl-root .pl-inst-cmt .up,#pl-root .pl-bd-cmt .up,#pl-root .pl-ohlc-cmt .up{color:var(--red)}' +
+      '#pl-root .pl-inst-cmt .dn,#pl-root .pl-bd-cmt .dn,#pl-root .pl-ohlc-cmt .dn{color:var(--green)}' +
       '#pl-root .pl-chip{display:inline-block;margin:1px 3px 0 0;padding:0 5px;border-radius:999px;border:1px solid var(--border);font-size:8px;color:#94a3b8}' +
       /* 自選標籤＝純色點（省寬；機會金／風險淡紅／觀察灰青），勿用漲跌綠 */
       '#pl-root .pl-tag{display:inline-flex;align-items:center;justify-content:center;width:8px;height:8px;' +
@@ -907,13 +902,13 @@
 
   function sparkSvg(closes) {
     if (!closes || closes.length < 2) {
-      return '<div class="pl-note" style="padding:8px">近 20 日走勢尚在累積（同步資料後顯示）</div>';
+      return '<div class="pl-note" style="padding:4px 0">近 20 日走勢尚在累積（同步資料後顯示）</div>';
     }
     var V = window.Viz;
     if (V && V.sparkLine) {
       return V.sparkLine(closes, {
         color: closes[closes.length - 1] >= closes[0] ? 'var(--red)' : 'var(--green)',
-        h: 56, w: 240, compact: true,
+        h: 36, w: 200, compact: true,
         xUnit: '日', yUnit: '點', yDigits: 0
       });
     }
@@ -1186,7 +1181,20 @@
       '</div>';
   }
 
-  /** 加權盤勢：頂列已含三指數報價／趨勢，此窗專責「近 20 日走勢 + 當日 OHLC／區間位置」 */
+  /** 加權盤勢評論：日內位置／漲跌／振幅（不重複四格 OHLC 數字） */
+  function buildOhlcComment(o, twiiObj, ampPct, rangePos) {
+    var parts = [];
+    if (rangePos != null) {
+      var band = rangePos >= 0.67 ? '偏高位' : rangePos <= 0.33 ? '偏低位' : '中段';
+      parts.push('日內位置 <b>' + band + '</b>（' + (rangePos * 100).toFixed(0) + '%）');
+    }
+    parts.push('<span class="' + tw(o && o.changePct) + '">' + chgWithPct(twiiObj, 2, 2) + '</span>');
+    if (ampPct != null) parts.push('振幅 ' + ampPct.toFixed(2) + '%');
+    if (!parts.length) parts.push('櫃買／台指期見頂列');
+    return parts.join(' · ');
+  }
+
+  /** 加權盤勢：結構對齊法人資金（上四格 OHLC → 中線圖 → 底評論） */
   function renderOhlc(ov, p) {
     var o = (ov && ov.ohlc) || {};
     var strip = (ov && ov.strip) || {};
@@ -1209,33 +1217,25 @@
     if (t00Tr.spark && t00Tr.spark.length >= 2) {
       sparkBoot = sparkSvg(t00Tr.spark);
     } else {
-      sparkBoot = '<div class="pl-note" style="padding:8px">載入近 20 日走勢…</div>';
+      sparkBoot = '<div class="pl-note" style="padding:4px 0">載入近 20 日走勢…</div>';
     }
-    var rangeHtml = '';
-    if (rangePos != null) {
-      rangeHtml =
-        '<div class="pl-range" title="現價在當日高低區間的相對位置">' +
-          '<div class="lab"><span>日內位置 · 低→高</span><span class="' + tw(o.changePct) + '">' +
-            chgWithPct(twiiObj, 2, 2) +
-            (ampPct != null ? ' · 振幅 ' + ampPct.toFixed(2) + '%' : '') +
-          '</span></div>' +
-          '<div class="track"><i style="width:100%"></i>' +
-            '<span class="mark" style="left:' + (rangePos * 100).toFixed(1) + '%"></span></div>' +
-        '</div>';
-    } else {
-      rangeHtml = '<div class="pl-note" style="margin-top:4px">' +
-        chgWithPct(twiiObj, 2, 2) + ' · 櫃買／台指期見頂列</div>';
-    }
+    var metaBoot = t00Tr.spark && t00Tr.spark.length
+      ? ('近 ' + t00Tr.spark.length + ' 日 · Y：點')
+      : '載入…';
     return '<div class="pl-sec" data-pri="p0"><h4>加權盤勢' +
       '<span class="pl-sec-hint">櫃買／台指期見頂列</span>' +
       '<a data-go="chart" data-sym="^TWII" data-mkt="TW">圖表 →</a></h4>' +
-      '<div class="pl-spark" id="pl-spark">' + sparkBoot + '</div>' +
-      '<div class="pl-ohlc">' +
-      '<div class="box"><div class="k">開盤</div><div class="v">' + fmt(o.open, 2) + '</div></div>' +
-      '<div class="box"><div class="k">最高</div><div class="v">' + fmt(o.high, 2) + '</div></div>' +
-      '<div class="box"><div class="k">最低</div><div class="v">' + fmt(o.low, 2) + '</div></div>' +
-      '<div class="box"><div class="k">昨收</div><div class="v">' + fmt(o.prevClose, 2) + '</div></div>' +
-      '</div>' + rangeHtml + '</div>';
+      '<div class="pl-ohlc4" id="pl-ohlc4">' +
+        '<div class="c" title="當日開盤"><div class="k">開盤</div><div class="v">' + fmt(o.open, 2) + '</div></div>' +
+        '<div class="c" title="當日最高"><div class="k">最高</div><div class="v">' + fmt(o.high, 2) + '</div></div>' +
+        '<div class="c" title="當日最低"><div class="k">最低</div><div class="v">' + fmt(o.low, 2) + '</div></div>' +
+        '<div class="c" title="昨收"><div class="k">昨收</div><div class="v">' + fmt(o.prevClose, 2) + '</div></div>' +
+      '</div>' +
+      '<div class="pl-ohlc-trend" id="pl-ohlc-trend">' +
+        '<div class="lab"><span>近 20 日 · 點</span><span id="pl-ohlc-trend-meta">' + metaBoot + '</span></div>' +
+        '<div class="chart" id="pl-ohlc-chart">' + sparkBoot + '</div>' +
+      '</div>' +
+      '<div class="pl-ohlc-cmt" id="pl-ohlc-cmt">' + buildOhlcComment(o, twiiObj, ampPct, rangePos) + '</div></div>';
   }
 
   function yiNum(v) {
@@ -2275,17 +2275,21 @@
     fillBreadthTrend(ov);
 
     jget('/pulse/history?kind=index&n=20').then(function (h) {
-      var box = $('pl-spark');
-      if (!box) return;
+      var chart = $('pl-ohlc-chart') || $('pl-spark');
+      var meta = $('pl-ohlc-trend-meta');
+      if (!chart) return;
       var rows = ((h && h.rows) || []).slice().reverse();
       var closes = rows.map(function (r) { return r.close; }).filter(function (c) {
         return c != null && isFinite(c);
       });
-      box.innerHTML = sparkSvg(closes);
+      chart.innerHTML = sparkSvg(closes);
       if (closes.length) {
         var last = closes[closes.length - 1];
-        box.title = '加權近 ' + closes.length + ' 日 · X：日 · Y：點 · 最新收 ' +
-          Number(last).toLocaleString('en-US', { maximumFractionDigits: 2 });
+        var lastTxt = Number(last).toLocaleString('en-US', { maximumFractionDigits: 2 });
+        chart.title = '加權近 ' + closes.length + ' 日 · X：日 · Y：點 · 最新收 ' + lastTxt;
+        if (meta) meta.textContent = '近 ' + closes.length + ' 日 · Y：點 · 收 ' + lastTxt;
+      } else if (meta) {
+        meta.textContent = '無序列';
       }
     });
 

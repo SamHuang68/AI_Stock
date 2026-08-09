@@ -104,9 +104,10 @@ ok(/t00Trend/.test(pl) && /o00Trend/.test(pl) && /txfTrend/.test(pl) &&
   'pulse strip shows TAIEX/OTC/TXF trend quant like turnover');
 ok(/加權盤勢/.test(pl) && /櫃買／台指期見頂列/.test(pl) && !/pl-trend-pair/.test(pl),
   'pulse OHLC panel integrated — no duplicate index chips');
-ok(/pl-ohlc\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/.test(pl) &&
-  /pl-ohlc \.box \.v\{font-size:9px/.test(pl) && !/pl-ohlc-now/.test(pl) && !/function fmtIdx/.test(pl),
-  'pulse 加權盤勢：維持四格，僅縮小 OHLC 數值字級');
+ok(/pl-ohlc4/.test(pl) && /pl-ohlc-trend/.test(pl) && /function buildOhlcComment/.test(pl) &&
+  /pl-inst4,#pl-root \.pl-bd4,#pl-root \.pl-ohlc4\{/.test(pl) &&
+  /pl-ohlc4 \.c \.v\{font-size:9px/.test(pl) && !/pl-ohlc-now/.test(pl) && !/function fmtIdx/.test(pl),
+  'pulse 加權盤勢：四格 KPI＋線圖面板對齊法人資金');
 ok(/漲跌家數 · 廣度/.test(pl) && /repeat\(6,/.test(pl),
   'pulse strip merges breadth into 6-col KPI row');
 ok(/data-flash-mkt/.test(pl) && /filterFlash/.test(pl) && /flashMkt/.test(pl),
@@ -147,13 +148,13 @@ ok(/pl-sec h4\{[^}]*font-size:10px/.test(pl) &&
   /pl-strip \.v\{[^}]*font-size:14px/.test(pl),
   'pulse density rebalance after font upsizing (strip/h4/flash/wl/gutter)');
 ok(/function moneyYiCell/.test(pl) && /moneyYiCell\(i\.foreign\)/.test(pl) &&
-  /pl-inst4 \.c \.v,#pl-root \.pl-bd4 \.c \.v\{[^}]*font-size:10px/.test(pl) &&
+  /pl-inst4 \.c \.v,#pl-root \.pl-bd4 \.c \.v,#pl-root \.pl-ohlc4 \.c \.v\{[^}]*font-size:10px/.test(pl) &&
   /pl-score-formula\{[^}]*font-size:8px/.test(pl) &&
   /pl-score3 \.sc\.main \.v\{font-size:14px/.test(pl),
   'pulse score/inst dense cards use smaller type + short 億 cells');
 ok(/pl-bd4/.test(pl) && /function paintBreadthCells/.test(pl) &&
-  /pl-inst4,#pl-root \.pl-bd4\{display:grid;grid-template-columns:repeat\(4/.test(pl) &&
-  /pl-inst-trend,#pl-root \.pl-bd-trend\{flex:1 1 0/.test(pl) &&
+  /pl-inst4,#pl-root \.pl-bd4,#pl-root \.pl-ohlc4\{/.test(pl) &&
+  /pl-inst-trend,#pl-root \.pl-bd-trend,#pl-root \.pl-ohlc-trend\{/.test(pl) &&
   !/pl-donut-wrap/.test(pl),
   'pulse 市場廣度：四格 KPI＋線圖面板對齊法人資金');
 ok(/pl-score3\{display:grid;grid-template-columns:minmax\(0,0\.9fr\) minmax\(0,1\.05fr\) minmax\(0,1\.05fr\)/.test(pl) &&
