@@ -35,7 +35,7 @@ TXF_CSV = os.path.join(DATA_DIR, 'txf_daily.csv')
 TZ_TPE = timezone(timedelta(hours=8))
 
 _UA = {
-    'User-Agent': 'Mozilla/5.0 (compatible; StockTerminal/4.1; +local)',
+    'User-Agent': 'Mozilla/5.0 (compatible; StockTerminal/5.0; +local)',
     'Accept': 'application/json,text/plain,*/*',
 }
 _lock = threading.Lock()
@@ -422,3 +422,43 @@ def chart_json(symbol: str, range_key: Optional[str] = 'max') -> bytes:
 def is_tw_index_chart_sym(sym: str) -> bool:
     s = (sym or '').strip().upper()
     return s in ('^TWOII', 'TWOII', '%5ETWOII', '__TXF__', 'TXF', '__TXF')
+
+
+def recent_closes(symbol: str, n: int = 30, allow_network: bool = False) -> List[float]:
+    """近 n 日收盤價（舊→新）。預設只讀記憶體／CSV，不觸發網路。
+
+    allow_network=True 時走 ensure_*（可能補齊過期 CSV）。
+    """
+    sym = (symbol or '').strip().upper()
+    rows: List[Tuple] = []
+    if sym in ('^TWOII', 'TWOII', '%5ETWOII'):
+        if allow_network:
+            try:
+                rows = ensure_twoii()
+            except Exception as e:
+                print('[tw-index] recent_closes TWOII net', e)
+                rows = []
+        if not rows:
+            cached = _mem.get('^TWOII')
+            rows = (cached[1] if cached else None) or _read_csv(TWOII_CSV)
+    elif sym in ('__TXF__', 'TXF', '__TXF'):
+        if allow_network:
+            try:
+                rows = ensure_txf()
+            except Exception as e:
+                print('[tw-index] recent_closes TXF net', e)
+                rows = []
+        if not rows:
+            cached = _mem.get('__TXF__')
+            rows = (cached[1] if cached else None) or _read_csv(TXF_CSV)
+    else:
+        return []
+    out: List[float] = []
+    for r in rows[-max(1, int(n)):]:
+        try:
+            c = float(r[4])
+            if c > 0:
+                out.append(c)
+        except Exception:
+            continue
+    return out

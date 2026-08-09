@@ -69,6 +69,13 @@
     let instCard = '';
     if (d.inst) {
       const i = d.inst, total = (i.foreign || 0) + (i.trust || 0) + (i.dealer || 0);
+      const V = window.Viz;
+      const yiFmt = v => v == null || !isFinite(v) ? '—' : (v >= 0 ? '+' : '') + v.toFixed(0) + ' 億';
+      const bars = V ? V.magBars([
+        { label: '外資', v: yi(i.foreign), fmt: yiFmt },
+        { label: '投信', v: yi(i.trust), fmt: yiFmt },
+        { label: '自營', v: yi(i.dealer), fmt: yiFmt },
+      ]) : '';
       instCard = `<div class="mf-card"><h4>🏦 三大法人買賣超（${i.date || ''}）</h4>
         <div class="mf-inst">
           <div><div class="k">外資</div><div class="v ${cls(i.foreign)}">${fyi(i.foreign)}</div></div>
@@ -76,6 +83,7 @@
           <div><div class="k">自營商</div><div class="v ${cls(i.dealer)}">${fyi(i.dealer)}</div></div>
           <div><div class="k">合計</div><div class="v ${cls(total)}">${fyi(total)}</div></div>
         </div>
+        ${bars ? `<div style="padding:4px 2px 2px">${bars}</div>` : ''}
         <div class="mf-note">外資是台股權值股(含 2330)的主要邊際買盤，方向常領先大盤；投信偏中小型成長股。台股紅=買超、綠=賣超。</div></div>`;
     }
 

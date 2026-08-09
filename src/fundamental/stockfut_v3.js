@@ -63,16 +63,26 @@
     results.sort((a, b) => (b.changePct == null ? -999 : b.changePct) - (a.changePct == null ? -999 : a.changePct));
     const sess = results.some(r => r.session === 'night') ? 'night' : (results.some(r => r.session === 'day') ? 'day' : null);
     const sessTxt = sess === 'night' ? '🌙 夜盤(盤後)' : sess === 'day' ? '☀ 日盤' : '—';
-    let h = `<div style="font-size:11px;color:#94a3b8;margin-bottom:6px">盤別：<b style="color:#fbbf24">${sessTxt}</b>　期%、現% 皆對昨收；領先=期%−現%</div>`;
+    const V = window.Viz;
+    const sessChip = V
+      ? (sess === 'night' ? V.chip('夜盤', 'warn') : sess === 'day' ? V.chip('日盤', 'ok') : V.chip('—', 'mid'))
+      : `<b style="color:#fbbf24">${sessTxt}</b>`;
+    let maxLead = 0;
+    results.forEach(r => { if (r.lead != null && isFinite(r.lead)) maxLead = Math.max(maxLead, Math.abs(r.lead)); });
+    let h = `<div style="font-size:11px;color:#94a3b8;margin-bottom:6px">盤別：${sessChip}　期%、現% 皆對昨收；領先=期%−現%</div>`;
     h += `<table class="sf-tbl"><tr><th>代號</th><th>名稱</th><th>期價</th><th>期%</th><th>現%</th><th>領先</th></tr>`;
     for (const r of results) {
       const leadTxt = r.lead == null ? '—' : (r.lead >= 0 ? '+' : '') + r.lead.toFixed(2);
+      const leadBar = (V && maxLead && r.lead != null) ? V.rowBar(r.lead, maxLead) : '';
+      const leadChip = (V && r.lead != null)
+        ? V.chip(r.lead > 0 ? '期>現' : r.lead < 0 ? '期<現' : '期=現', r.lead > 0 ? 'hot' : r.lead < 0 ? 'cold' : 'mid')
+        : '';
       h += `<tr class="sf-row" data-code="${r.code}">
         <td class="sf-c">${r.code}</td><td class="sf-n">${r.name}</td>
         <td>${r.price != null ? r.price : '—'}</td>
         <td class="${pcls(r.changePct)}">${fmt(r.changePct)}</td>
         <td class="${pcls(r.spotChangePct)}">${fmt(r.spotChangePct)}</td>
-        <td class="${pcls(r.lead)}" title="期%−現%；正=期貨比現股強，隔日可能續強">${leadTxt}</td></tr>`;
+        <td class="${pcls(r.lead)}" title="期%−現%；正=期貨比現股強，隔日可能續強">${leadTxt}${leadBar}${leadChip}</td></tr>`;
     }
     h += `</table>`;
     body.innerHTML = h;

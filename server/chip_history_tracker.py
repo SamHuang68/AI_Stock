@@ -35,16 +35,24 @@ def parse_and_save(day):
     rows = data.get('data') or []
     idx_code = next((i for i, f in enumerate(fields) if '證券代號' in f), 0)
 
-    def col_idx(keyword):
+    def col_idx(keyword, *, exact=False, avoid=()):
         for i, f in enumerate(fields):
-            if keyword in f:
+            fs = str(f).strip()
+            if avoid and any(a in fs for a in avoid):
+                continue
+            if exact:
+                if fs == keyword:
+                    return i
+            elif keyword in fs:
                 return i
         return None
 
-    i_for = col_idx('外陸資買賣超股數') or col_idx('外資')
+    i_for = col_idx('外陸資買賣超股數(不含外資自營商)', exact=True) \
+        or col_idx('外陸資買賣超股數') or col_idx('外資', avoid=('外資自營商',))
     i_trust = col_idx('投信買賣超股數') or col_idx('投信')
-    i_deal = col_idx('自營商買賣超股數') or col_idx('自營商')
-    i_tot = col_idx('三大法人買賣超股數')
+    # 必須完全相符，否則會誤中『外資自營商買賣超股數』
+    i_deal = col_idx('自營商買賣超股數', exact=True)
+    i_tot = col_idx('三大法人買賣超股數', exact=True) or col_idx('三大法人買賣超股數')
 
     def num(row, i):
         if i is None:

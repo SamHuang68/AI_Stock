@@ -70,60 +70,73 @@
   }
 
   function injectCSS() {
-    if ($('book-v5-css')) return;
-    var s = document.createElement('style');
-    s.id = 'book-v5-css';
+    var s = $('book-v5-css');
+    if (!s) {
+      s = document.createElement('style');
+      s.id = 'book-v5-css';
+      document.head.appendChild(s);
+    }
     s.textContent =
-      '#view-book.sv-panel{max-width:1080px;padding:18px 22px 28px}' +
-      '#bk-root{font-family:\'JetBrains Mono\',monospace;color:var(--text)}' +
-      '#bk-root .bk-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}' +
-      '#bk-root .bk-kicker{font-size:10px;color:var(--gold);letter-spacing:2px;margin-bottom:4px}' +
-      '#bk-root .bk-title{font-family:\'Noto Serif TC\',serif;font-size:26px;font-weight:700;color:var(--thi)}' +
-      '#bk-root .bk-sub{font-size:11px;color:var(--tlo);margin-top:4px}' +
-      '#bk-root .bk-actions{display:flex;gap:8px;flex-wrap:wrap}' +
-      '#bk-root .bk-btn{padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);' +
-        'color:var(--text);font-size:10px;font-family:\'JetBrains Mono\',monospace;cursor:pointer}' +
+      '#shell-views:has(#view-book.on){overflow:hidden!important}' +
+      '#view-book.sv-panel.on{max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
+        'overflow:hidden;display:flex!important;flex-direction:column;flex:1;min-height:0;height:100%}' +
+      '#mount-book,#mount-book.sv-mount{flex:1;min-height:0;display:flex;flex-direction:column;max-width:none}' +
+      '#bk-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);width:100%;max-width:none;margin:0;min-width:0;' +
+        'box-sizing:border-box;flex:1;min-height:0;display:flex;flex-direction:column}' +
+      '#bk-root .bk-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px;min-width:0;flex:0 0 auto}' +
+      '#bk-root .bk-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
+      '#bk-root .bk-kicker{display:none!important}' +
+      '#bk-root .bk-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
+      '#bk-root .bk-sub{font-size:9px;color:var(--tlo);margin:0}' +
+      '#bk-root .bk-actions{display:flex;gap:4px;flex-wrap:nowrap;flex:0 0 auto}' +
+      '#bk-root .bk-btn{padding:3px 7px;border:1px solid var(--border);border-radius:4px;background:var(--bg3);' +
+        'color:var(--text);font-size:9px;font-family:\'JetBrains Mono\',monospace;cursor:pointer;white-space:nowrap}' +
       '#bk-root .bk-btn:hover{border-color:var(--bhi);color:var(--thi)}' +
       '#bk-root .bk-btn.on{border-color:var(--gold);color:var(--gold);background:var(--gold-s)}' +
       '#bk-root .bk-btn.primary{background:var(--gold);color:#060A12;border:none;font-weight:700}' +
+      '#bk-root .bk-edit-wrap{flex:0 0 auto;margin-bottom:3px}' +
+      '#bk-root .bk-edit-toggle{font-size:9px;color:var(--tlo);cursor:pointer;padding:2px 0;user-select:none}' +
+      '#bk-root .bk-edit-toggle:hover{color:var(--gold)}' +
       '#bk-root #bk-edit{width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);' +
-        'color:var(--thi);border-radius:8px;padding:8px;font-size:12px;font-family:\'JetBrains Mono\',monospace;' +
-        'min-height:64px;resize:vertical;margin:8px 0 12px}' +
-      '#bk-root .bk-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:8px 0 14px}' +
-      '#bk-root .bk-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 12px}' +
-      '#bk-root .bk-card .lab{font-size:9px;color:var(--tlo);letter-spacing:1px}' +
-      '#bk-root .bk-card .val{font-size:18px;font-weight:700;color:var(--thi);margin-top:4px}' +
-      '#bk-root .bk-h{font-size:11px;color:var(--gold);letter-spacing:1px;margin:14px 0 8px;font-weight:700;' +
-        'border-left:3px solid var(--gold);padding-left:8px}' +
-      '#bk-root .bk-row{display:flex;align-items:center;gap:8px;margin:3px 0;font-size:11px}' +
-      '#bk-root .bk-row .nm{width:130px;flex:0 0 130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#bk-root .bk-bar{flex:1;background:var(--bg);border-radius:4px;height:12px;overflow:hidden}' +
+        'color:var(--thi);border-radius:5px;padding:4px 6px;font-size:10px;font-family:\'JetBrains Mono\',monospace;' +
+        'min-height:36px;max-height:72px;resize:vertical;margin:2px 0 0;display:none}' +
+      '#bk-root #bk-edit.open{display:block}' +
+      '#bk-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
+      '#bk-root .bk-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;margin:0 0 4px;flex:0 0 auto;min-width:0}' +
+      '#bk-root .bk-card{background:var(--bg2);border:1px solid var(--border);border-radius:5px;padding:3px 6px;min-width:0;overflow:hidden}' +
+      '#bk-root .bk-card .lab{font-size:8px;color:var(--tlo);letter-spacing:.4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#bk-root .bk-card .val{font-size:12px;font-weight:800;color:var(--thi);margin-top:0;line-height:1.15}' +
+      '#bk-root .bk-zone{flex:1;min-height:0;display:grid;grid-template-columns:minmax(220px,32%) minmax(0,1fr);gap:4px;overflow:hidden}' +
+      '#bk-root .bk-left,#bk-root .bk-right{min-height:0;overflow:auto;display:flex;flex-direction:column;gap:4px}' +
+      '#bk-root .bk-panel{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;min-width:0}' +
+      '#bk-root .bk-h{font-size:10px;color:var(--gold);letter-spacing:.5px;margin:0 0 4px;font-weight:700;' +
+        'border-left:2px solid var(--gold);padding-left:6px;flex:0 0 auto}' +
+      '#bk-root .bk-row{display:flex;align-items:center;gap:6px;margin:2px 0;font-size:10px}' +
+      '#bk-root .bk-row .nm{width:110px;flex:0 0 110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}' +
+      '#bk-root .bk-bar{flex:1;background:var(--bg);border-radius:3px;height:8px;overflow:hidden}' +
       '#bk-root .bk-bar i{display:block;height:100%;background:#60a5fa}' +
-      '#bk-root .bk-row .pc{width:48px;flex:0 0 48px;text-align:right}' +
-      '#bk-root .bk-cn{display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:6px;' +
-        'background:var(--bg);border:1px solid var(--border);opacity:.4;margin:2px 0}' +
+      '#bk-root .bk-row .pc{width:42px;flex:0 0 42px;text-align:right;font-size:9px}' +
+      '#bk-root .bk-cn{display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:5px;' +
+        'background:var(--bg);border:1px solid var(--border);opacity:.4;margin:1px 0}' +
       '#bk-root .bk-cn.on{opacity:1;border-color:var(--gold-m)}' +
-      '#bk-root .bk-cn-nm{width:140px;flex:0 0 140px;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#bk-root .bk-cn-bar{flex:1;height:11px;background:var(--bg3);border-radius:4px;overflow:hidden}' +
+      '#bk-root .bk-cn-nm{width:120px;flex:0 0 120px;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#bk-root .bk-cn-bar{flex:1;height:8px;background:var(--bg3);border-radius:3px;overflow:hidden}' +
       '#bk-root .bk-cn-bar i{display:block;height:100%;background:var(--gold)}' +
-      '#bk-root .bk-cn-pc{width:46px;flex:0 0 46px;text-align:right;font-size:11px}' +
-      '#bk-root .bk-cn-arr{text-align:center;color:var(--tf);font-size:9px;margin:1px 0}' +
-      '#bk-root table{width:100%;border-collapse:collapse;font-size:11px}' +
-      '#bk-root th,#bk-root td{padding:5px 6px;border-bottom:1px solid var(--border);text-align:right}' +
+      '#bk-root .bk-cn-pc{width:40px;flex:0 0 40px;text-align:right;font-size:9px}' +
+      '#bk-root .bk-cn-arr{text-align:center;color:var(--tf);font-size:8px;margin:0}' +
+      '#bk-root table{width:100%;border-collapse:collapse;font-size:10px}' +
+      '#bk-root th,#bk-root td{padding:3px 5px;border-bottom:1px solid var(--border);text-align:right}' +
       '#bk-root th:first-child,#bk-root td:first-child{text-align:left}' +
-      '#bk-root th{color:var(--tlo)}' +
+      '#bk-root th{color:var(--tlo);font-size:9px}' +
       '#bk-root tr.bk-sym{cursor:pointer}#bk-root tr.bk-sym:hover{background:var(--bg3)}' +
-      '#bk-root .bk-hm{font-size:9px;margin-top:4px;table-layout:fixed}' +
-      '#bk-root .bk-hm td,#bk-root .bk-hm th{padding:2px 3px;border:1px solid var(--bg);text-align:center}' +
-      '#bk-root .bk-hm th.nm,#bk-root .bk-hm td.nm{text-align:left;color:var(--tlo);white-space:nowrap}' +
-      '#bk-root .bk-note{font-size:9px;color:var(--tlo);line-height:1.65;margin-top:12px}' +
-      '#bk-root .bk-loading{font-size:11px;color:var(--tlo);padding:16px 0}' +
-      '#bk-root .bk-err{color:var(--orange);font-size:11px;padding:12px 0}' +
-      '#bk-root .bk-wd{margin:0 0 12px;padding:10px 12px;border-radius:8px;background:var(--bg2);' +
-        'border:1px solid rgba(103,232,249,.28);font-size:11px;line-height:1.55}' +
-      '#bk-root .bk-wd .t{color:var(--cyan);font-weight:700;letter-spacing:1px;font-size:10px;margin-bottom:4px}' +
+      '#bk-root .bk-hm th.nm,#bk-root .bk-hm td.nm{text-align:left;color:var(--tlo);white-space:nowrap;font-size:8px}' +
+      '#bk-root .bk-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:2px;flex:0 0 auto}' +
+      '#bk-root .bk-loading{font-size:10px;color:var(--tlo);padding:12px 0}' +
+      '#bk-root .bk-err{color:var(--orange);font-size:10px;padding:8px 0}' +
+      '#bk-root .bk-wd{margin:0 0 4px;padding:6px 8px;border-radius:6px;background:var(--bg2);' +
+        'border:1px solid rgba(103,232,249,.28);font-size:9px;line-height:1.45}' +
+      '#bk-root .bk-wd .t{color:var(--cyan);font-weight:700;letter-spacing:1px;font-size:8px;margin-bottom:2px}' +
       '#bk-root .bk-wd b{color:var(--thi)}';
-    document.head.appendChild(s);
   }
 
   function wdStripHtml() {
@@ -253,19 +266,29 @@
       mount.innerHTML =
         '<div id="bk-root">' +
           '<div class="bk-head"><div>' +
-            '<div class="bk-kicker">STOCK TERMINAL · 5.0-S6</div>' +
-            '<div class="bk-title">投組風險</div>' +
-            '<div class="bk-sub" id="bk-sub">波動 · VaR · Beta · 產業／供應鏈曝險</div>' +
+            '<span class="bk-title">投組風險</span>' +
+            '<span class="bk-sub" id="bk-sub">波動 · VaR · Beta · 產業曝險</span>' +
           '</div><div class="bk-actions">' +
-            '<button type="button" class="bk-btn" data-src="pos">用持倉</button>' +
-            '<button type="button" class="bk-btn" data-src="watch">用自選</button>' +
-            '<button type="button" class="bk-btn primary" id="bk-run">重新分析</button>' +
+            '<button type="button" class="bk-btn" data-src="pos">持倉</button>' +
+            '<button type="button" class="bk-btn" data-src="watch">自選</button>' +
+            '<button type="button" class="bk-btn" id="bk-edit-toggle">成分 ▾</button>' +
+            '<button type="button" class="bk-btn primary" id="bk-run">分析</button>' +
             '<button type="button" class="bk-btn" data-shell-back>← 圖表</button>' +
           '</div></div>' +
-          '<textarea id="bk-edit" placeholder="每行：代號 權重（權重可省略=1）  例：2330 40">' +
-            esc(holdingsToText(init)) + '</textarea>' +
+          '<div class="bk-edit-wrap">' +
+            '<textarea id="bk-edit" placeholder="每行：代號 權重（可省略=1）  例：2330 40">' +
+              esc(holdingsToText(init)) + '</textarea>' +
+          '</div>' +
           '<div id="bk-body" class="bk-loading">待命</div>' +
         '</div>';
+      var editToggle = $('bk-edit-toggle');
+      var editTa = $('bk-edit');
+      if (editToggle && editTa) {
+        editToggle.onclick = function () {
+          var open = editTa.classList.toggle('open');
+          editToggle.textContent = open ? '成分 ▴' : '成分 ▾';
+        };
+      }
       mount.querySelectorAll('[data-src]').forEach(function (b) {
         b.onclick = function () {
           source = b.getAttribute('data-src');
@@ -313,42 +336,64 @@
         ' · 更新 ' + new Date().toLocaleTimeString('zh-TW');
     }
 
-    var h = wdStripHtml() + '<div class="bk-cards">' +
-      '<div class="bk-card"><div class="lab">年化波動</div><div class="val">' + (p.vol || 0).toFixed(1) + '%</div></div>' +
-      '<div class="bk-card"><div class="lab">1日 95% VaR</div><div class="val">' + (p.var95 || 0).toFixed(2) + '%</div></div>' +
-      '<div class="bk-card"><div class="lab">平均相關性</div><div class="val">' + avgCorr.toFixed(2) + '</div></div>' +
-      '<div class="bk-card"><div class="lab">投組 Beta</div><div class="val">' + pBeta.toFixed(2) + '</div></div>' +
+    var V = window.Viz;
+    var var95 = p.var95 || 0;
+    var vol = p.vol || 0;
+    // VaR：日風險 >2% 警示、>4% 危險；相關性以 0–100% 刻度，>50/70 警示
+    var varMeter = V ? V.ratioMeter(Math.abs(var95), 2, 4) : '';
+    var corrMeter = V ? V.ratioMeter(Math.abs(avgCorr) * 100, 50, 70) : '';
+    var betaViz = '';
+    if (V && isFinite(pBeta)) {
+      betaViz = V.magBar(pBeta - 1, 1, {
+        label: 'β−1',
+        fmt: function () { return pBeta.toFixed(2); }
+      });
+    }
+    var h = wdStripHtml() + '<div class="bk-strip">' +
+      '<div class="bk-card"><div class="lab">年化波動</div><div class="val">' + vol.toFixed(1) + '%</div>' +
+        (V ? V.scoreMeter(Math.min(100, vol * 2), { hi: 40, mid: 25 }) : '') + '</div>' +
+      '<div class="bk-card"><div class="lab">1日 95% VaR</div><div class="val">' + var95.toFixed(2) + '%</div>' +
+        varMeter + '</div>' +
+      '<div class="bk-card"><div class="lab">平均相關性</div><div class="val">' + avgCorr.toFixed(2) + '</div>' +
+        corrMeter + '</div>' +
+      '<div class="bk-card"><div class="lab">投組 Beta</div><div class="val">' + pBeta.toFixed(2) + '</div>' +
+        betaViz + '</div>' +
       '<div class="bk-card"><div class="lab">持倉檔數</div><div class="val">' + codes.length + '</div></div>' +
       '<div class="bk-card"><div class="lab">樣本天數</div><div class="val">' + (p.days || 0) + '</div></div>' +
       '</div>';
 
-    h += '<div class="bk-h">供應鏈曝險</div>' + chainDiagram(chainExp);
-    h += '<div class="bk-h">產業曝險</div>' + bars(d.sector, '#60a5fa');
+    h += '<div class="bk-zone">';
+    h += '<div class="bk-left">' +
+      '<div class="bk-panel"><div class="bk-h">供應鏈曝險</div>' + chainDiagram(chainExp) + '</div>' +
+      '<div class="bk-panel"><div class="bk-h">產業曝險</div>' + bars(d.sector, '#60a5fa') + '</div>' +
+      '</div>';
 
-    h += '<div class="bk-h">個股（依權重）</div><table><thead><tr><th>個股</th><th>權重</th><th>年化波動</th><th>Beta</th></tr></thead><tbody>';
+    h += '<div class="bk-right">' +
+      '<div class="bk-panel"><div class="bk-h">個股（依權重）</div>' +
+      '<table><thead><tr><th>個股</th><th>權重</th><th>波動</th><th>Beta</th></tr></thead><tbody>';
     codes.map(function (c) { return [c, stocks[c]]; })
       .sort(function (a, b) { return (b[1].weight || 0) - (a[1].weight || 0); })
       .forEach(function (e) {
         var s = e[1];
         h += '<tr class="bk-sym" data-code="' + esc(e[0]) + '"><td>' + esc(s.name || e[0]) +
-          ' <span style="color:var(--tlo)">' + esc(e[0]) + '</span></td><td>' +
+          ' <span style="color:var(--tlo);font-size:9px">' + esc(e[0]) + '</span></td><td>' +
           (s.weight || 0).toFixed(1) + '%</td><td>' +
           (s.vol != null ? s.vol.toFixed(1) + '%' : '—') + '</td><td>' +
           (s.beta != null ? s.beta.toFixed(2) : '—') + '</td></tr>';
       });
-    h += '</tbody></table>';
+    h += '</tbody></table></div>';
 
     if (codes.length >= 2) {
       var hmCodes = codes.map(function (c) { return [c, stocks[c].weight || 0]; })
         .sort(function (a, b) { return b[1] - a[1]; }).slice(0, 10).map(function (e) { return e[0]; });
-      h += '<div class="bk-h">相關性熱力' + (codes.length > 10 ? '（前 10）' : '') + '</div>' +
-        heatmap(hmCodes, stocks, d.corr || {});
+      h += '<div class="bk-panel"><div class="bk-h">相關性熱力' + (codes.length > 10 ? '（前10）' : '') + '</div>' +
+        heatmap(hmCodes, stocks, d.corr || {}) + '</div>';
     }
+    h += '</div></div>';
 
-    h += '<div class="bk-note">波動／VaR／Beta 取本機 DB 約 5 年日線（對 ' + esc(d.benchmark || '^TWII') +
-      '）。平均相關性越高＝分散效果越有限。' +
-      (d.skipped && d.skipped.length ? ' 略過無資料：' + esc(d.skipped.join('、')) : '') +
-      ' 完整模態窗仍可用工具列「籌碼基本面 → 投組」。⚠ 非投資建議。</div>';
+    h += '<div class="bk-note">/portfolio · 5年日線 vs ' + esc(d.benchmark || '^TWII') +
+      (d.skipped && d.skipped.length ? ' · 略過：' + esc(d.skipped.join('、')) : '') +
+      ' · ⚠ 非投資建議</div>';
 
     body.innerHTML = h;
     body.querySelectorAll('tr.bk-sym').forEach(function (el) {
@@ -417,7 +462,12 @@
     analyze(h);
   }
 
-  window.BookV5 = { activate: activate, refresh: activate, last: function () { return lastData; } };
+  window.BookV5 = {
+    activate: activate,
+    deactivate: function () {},
+    refresh: activate,
+    last: function () { return lastData; }
+  };
 
   window.addEventListener('shell:route', function (ev) {
     if (ev && ev.detail && ev.detail.route === 'book') activate();

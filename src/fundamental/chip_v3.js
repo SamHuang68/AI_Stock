@@ -38,21 +38,40 @@ function renderChipSection(chip) {
   if (!chip || (!chip.inst && !chip.margin && !(chip.holders && chip.holders.ok))) {
     return '<div style="padding:14px 12px;text-align:center;color:var(--tlo);font-family:monospace;font-size:10px;line-height:1.7">無籌碼資料<br><span style="font-size:9px;color:var(--tf)">TWSE 資料盤後 17:30 後更新；ETF / 興櫃股無資料</span></div>';
   }
+  const V = window.Viz;
   let h = '';
   if (chip.inst) {
     const tot = (chip.inst.foreign||0) + (chip.inst.trust||0) + (chip.inst.dealer||0);
     const tc  = colorN(tot);
-    h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span class="stat-k">三大法人合計</span><span class="stat-v" style="color:${tc}">${signN(tot)}</span></div>`;
-    h += `<div class="stat-row"><span class="stat-k">外資</span><span class="stat-v" style="color:${colorN(chip.inst.foreign)}">${signN(chip.inst.foreign)}</span></div>`;
-    h += `<div class="stat-row"><span class="stat-k">投信</span><span class="stat-v" style="color:${colorN(chip.inst.trust)}">${signN(chip.inst.trust)}</span></div>`;
-    h += `<div class="stat-row"><span class="stat-k">自營商</span><span class="stat-v" style="color:${colorN(chip.inst.dealer)}">${signN(chip.inst.dealer)}</span></div>`;
+    const totChip = V ? V.chip(tot > 0 ? '合計偏多' : tot < 0 ? '合計偏空' : '合計中性', tot > 0 ? 'hot' : tot < 0 ? 'cold' : 'mid') : '';
+    h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span class="stat-k">三大法人合計</span><span class="stat-v" style="color:${tc}">${signN(tot)} ${totChip}</span></div>`;
+    if (V) {
+      h += `<div style="padding:1px 10px 3px">${V.magBars([
+        { label: '外資', v: chip.inst.foreign, fmt: (x) => signN(x) },
+        { label: '投信', v: chip.inst.trust, fmt: (x) => signN(x) },
+        { label: '自營', v: chip.inst.dealer, fmt: (x) => signN(x) },
+      ])}</div>`;
+    } else {
+      h += `<div class="stat-row"><span class="stat-k">外資</span><span class="stat-v" style="color:${colorN(chip.inst.foreign)}">${signN(chip.inst.foreign)}</span></div>`;
+      h += `<div class="stat-row"><span class="stat-k">投信</span><span class="stat-v" style="color:${colorN(chip.inst.trust)}">${signN(chip.inst.trust)}</span></div>`;
+      h += `<div class="stat-row"><span class="stat-k">自營商</span><span class="stat-v" style="color:${colorN(chip.inst.dealer)}">${signN(chip.inst.dealer)}</span></div>`;
+    }
   }
   if (chip.margin) {
-    h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px"><span class="stat-k">融資餘額</span><span class="stat-v">${chip.margin.marginBalance != null ? Math.round(chip.margin.marginBalance/1000).toLocaleString() + ' 張' : '—'}</span></div>`;
-    h += `<div class="stat-row"><span class="stat-k">融券餘額</span><span class="stat-v">${chip.margin.shortBalance != null ? Math.round(chip.margin.shortBalance/1000).toLocaleString() + ' 張' : '—'}</span></div>`;
+    const mb = chip.margin.marginBalance != null ? chip.margin.marginBalance / 1000 : null;
+    const sb = chip.margin.shortBalance != null ? chip.margin.shortBalance / 1000 : null;
+    h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px"><span class="stat-k">融資／融券</span><span class="stat-v"></span></div>`;
+    if (V) {
+      h += `<div style="padding:2px 12px">${V.dualBars('融資餘額', mb, '融券餘額', sb, '張')}</div>`;
+    } else {
+      h += `<div class="stat-row"><span class="stat-k">融資餘額</span><span class="stat-v">${mb != null ? Math.round(mb).toLocaleString() + ' 張' : '—'}</span></div>`;
+      h += `<div class="stat-row"><span class="stat-k">融券餘額</span><span class="stat-v">${sb != null ? Math.round(sb).toLocaleString() + ' 張' : '—'}</span></div>`;
+    }
     if (chip.margin.marginBalance && chip.margin.shortBalance != null) {
       const ratio = chip.margin.shortBalance / chip.margin.marginBalance * 100;
-      h += `<div class="stat-row"><span class="stat-k">券資比</span><span class="stat-v" style="color:${ratio > 30 ? 'var(--red)' : ratio > 10 ? 'var(--orange)' : 'var(--green)'}">${ratio.toFixed(1)}%</span></div>`;
+      const rc = ratio > 30 ? 'var(--red)' : ratio > 10 ? 'var(--orange)' : 'var(--green)';
+      h += `<div class="stat-row"><span class="stat-k">券資比</span><span class="stat-v" style="color:${rc}">${ratio.toFixed(1)}%</span></div>`;
+      if (V) h += `<div style="padding:0 12px 4px">${V.ratioMeter(ratio, 10, 30)}</div>`;
     }
   }
   // v3.8: 借券賣出
@@ -66,19 +85,17 @@ function renderChipSection(chip) {
     const dr = chip.dayTrade.ratioPct;
     if (dr != null) {
       const dc = dr > 30 ? 'var(--red)' : dr > 15 ? 'var(--orange)' : 'var(--tlo)';
-      h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px"><span class="stat-k">當沖比${dr>30?' 🚩':''}</span><span class="stat-v" style="color:${dc}">${dr.toFixed(1)}%</span></div>`;
+      const flag = dr > 30 ? (V ? V.chip('高當沖', 'err') : ' 🚩') : '';
+      h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px"><span class="stat-k">當沖比</span><span class="stat-v" style="color:${dc}">${dr.toFixed(1)}% ${flag}</span></div>`;
+      if (V) h += `<div style="padding:0 12px 4px">${V.ratioMeter(dr, 15, 30)}</div>`;
     } else if (chip.dayTrade.volume != null) {
       h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px"><span class="stat-k">當沖量</span><span class="stat-v">${Math.round(chip.dayTrade.volume/1000).toLocaleString()} 張</span></div>`;
     }
   }
   // v3.8: 法人連續買賣超天數
-  if (chip.streak && (chip.streak.foreign || chip.streak.trust)) {
-    const badge = (n, who) => {
-      if (!n) return '';
-      const buy = n > 0;
-      return `<span style="display:inline-block;margin:2px 4px 0 0;padding:1px 6px;border-radius:8px;font-size:9px;background:${buy?'rgba(239,68,68,.18)':'rgba(34,197,94,.18)'};color:${buy?'var(--red)':'var(--green)'}">${who}連${buy?'買':'賣'}${Math.abs(n)}日</span>`;
-    };
-    h += `<div style="padding:6px 12px 0">${badge(chip.streak.foreign,'外資')}${badge(chip.streak.trust,'投信')}</div>`;
+  if (chip.streak && (chip.streak.foreign || chip.streak.trust || chip.streak.dealer)) {
+    const badge = (n, who) => V ? V.streakChip(n, who) : (n ? `<span style="display:inline-block;margin:2px 4px 0 0;padding:1px 6px;border-radius:8px;font-size:9px;background:${n>0?'rgba(239,68,68,.18)':'rgba(34,197,94,.18)'};color:${n>0?'var(--red)':'var(--green)'}">${who}連${n>0?'買':'賣'}${Math.abs(n)}日</span>` : '');
+    h += `<div style="padding:6px 12px 0">${badge(chip.streak.foreign,'外資')}${badge(chip.streak.trust,'投信')}${badge(chip.streak.dealer,'自營')}</div>`;
   }
   // 籌碼集中度（TDCC 週）
   const hold = chip.holders;
