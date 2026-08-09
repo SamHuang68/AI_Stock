@@ -65,9 +65,13 @@ Windows 亦可雙擊 `START_WAVEDECK.cmd`。
 
 ## 與 Stock Terminal 銜接
 
+版面沿用 ST 殼層（topbar／左欄／主區／底 indbar）與同一套 CSS token。
+宏觀條讀 ST 既有端點（`:18432`）：`/health`、`/twindex`、`/breadth`、`/fundamental/^TWII`。
+
 | 方向 | 端點 |
 |------|------|
 | ST → WaveDeck | `POST http://127.0.0.1:18433/bridge/st` |
+| Console「套用 ST 建議風格」 | 讀 ST 上表 → 寫 `/bridge/st` + `/api/style` |
 | TV／訊號 | `POST http://127.0.0.1:18433/webhook` |
 | 狀態 | `GET  http://127.0.0.1:18433/api/state` |
 

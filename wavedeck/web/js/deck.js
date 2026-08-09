@@ -1,8 +1,13 @@
-/* WaveDeck console — poll state + controls */
+/* WaveDeck console — ST shell layout + ST APIs (:18432) + WD APIs */
 (function () {
   'use strict';
 
+  var ST = (typeof window.ST_URL === 'string' && window.ST_URL)
+    ? String(window.ST_URL).replace(/\/?$/, '')
+    : 'http://127.0.0.1:18432';
+
   var state = null;
+  var stCtx = { styleHint: null, delever: false, note: '', score: null };
   var toastTimer = null;
 
   function $(id) { return document.getElementById(id); }
@@ -28,6 +33,14 @@
     return v.toLocaleString('en-US');
   }
 
+  function setSync(el, txtEl, mode, text) {
+    if (!el || !txtEl) return;
+    el.classList.remove('warn', 'err');
+    if (mode === 'warn') el.classList.add('warn');
+    if (mode === 'err') el.classList.add('err');
+    txtEl.textContent = text || '—';
+  }
+
   async function api(path, opts) {
     var r = await fetch(path, Object.assign({
       headers: { 'Content-Type': 'application/json' },
@@ -38,10 +51,16 @@
     return j;
   }
 
+  function jget(url) {
+    return fetch(url, { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; });
+  }
+
   function lightClass(v) {
     if (v === 'ok' || v === 'run' || v === 'off' || v === 'idle') return '';
     if (v === 'warn' || v === 'stop') return 'warn';
-    if (v === 'bad' || v === 'halt' || v === 'on') return v === 'on' ? 'bad' : 'bad';
+    if (v === 'bad' || v === 'halt' || v === 'on') return 'bad';
     return '';
   }
 
@@ -51,6 +70,24 @@
       idle: '待命', warn: '注意', bad: '異常', halt: '停止', stop: '停止'
     };
     return map[v] || String(v);
+  }
+
+  /** Map ST market score (0–100ish) → WaveDeck style 35/50/65 band. */
+  function styleFromScore(score, advRatio) {
+    var s = Number(score);
+    var adv = Number(advRatio);
+    if (!isFinite(s)) s = 50;
+    var hint = 50;
+    if (s >= 70) hint = 65;
+    else if (s >= 55) hint = 55;
+    else if (s >= 45) hint = 50;
+    else if (s >= 30) hint = 40;
+    else hint = 35;
+    if (isFinite(adv)) {
+      if (adv < 0.35) hint = Math.min(hint, 40);
+      if (adv > 0.65) hint = Math.max(hint, 55);
+    }
+    return Math.max(20, Math.min(90, Math.round(hint)));
   }
 
   function render(s) {
@@ -66,17 +103,23 @@
     var L = s.lights || {};
     chips.innerHTML = [
       ['系統', L.system],
-      ['券商 API', L.broker_api],
-      ['部位同步', L.position_sync],
-      ['緊急停止', L.kill_switch]
+      ['券商', L.broker_api],
+      ['同步', L.position_sync],
+      ['急停', L.kill_switch]
     ].map(function (pair) {
       var cls = 'chip ' + (pair[1] === 'ok' || pair[1] === 'run' || pair[1] === 'off' ? 'ok' : (pair[1] === 'on' || pair[1] === 'halt' ? 'bad' : 'warn'));
       return '<span class="' + cls + '"><i class="dot"></i>' + pair[0] + ' · ' + lightLabel(pair[1]) + '</span>';
     }).join('');
 
-    $('stDelever').textContent = (s.st_overlay && s.st_overlay.delever) ? '是' : '否';
-    $('stStyle').textContent = (s.st_overlay && s.st_overlay.aggressiveness != null) ? s.st_overlay.aggressiveness : '—';
-    $('stNote').textContent = (s.st_overlay && s.st_overlay.note) || '等待 Stock Terminal 推送宏觀參數。';
+    $('stDelever').textContent = (s.st_overlay && s.st_overlay.delever) ? '是' : (stCtx.delever ? '建議是' : '否');
+    $('stStyle').textContent = (s.st_overlay && s.st_overlay.aggressiveness != null)
+      ? s.st_overlay.aggressiveness
+      : (stCtx.styleHint != null ? ('建議 ' + stCtx.styleHint) : '—');
+    if (s.st_overlay && s.st_overlay.note) {
+      $('stNote').textContent = s.st_overlay.note;
+    } else if (stCtx.note) {
+      $('stNote').textContent = stCtx.note;
+    }
 
     var p = s.positions || {};
     $('posKv').innerHTML = [
@@ -94,9 +137,9 @@
 
     var no = s.no_overnight || {};
     $('noOvernight').innerHTML =
-      '<h3>不留倉保護 · ' + (no.enabled ? '啟用' : '關閉') + '</h3>' +
-      '<p>收盤前 ' + (no.block_new_before_close_min || 15) + ' 分鐘禁新單；' +
-      (no.force_flat_time || '13:40') + ' 強制平倉。' + (no.note ? ' ' + no.note : '') + '</p>';
+      '<h3>不留倉 · ' + (no.enabled ? '啟用' : '關閉') + '</h3>' +
+      '<p>收盤前 ' + (no.block_new_before_close_min || 15) + ' 分禁新單；' +
+      (no.force_flat_time || '13:40') + ' 強平。</p>';
 
     var ai = s.ai || {};
     $('aiLabel').textContent = ai.action_label || ai.action || '—';
@@ -125,18 +168,18 @@
       '<div>更新 <span>' + (ai.updated_at || '—') + '</span></div>';
 
     var lightNames = {
-      webhook: 'Webhook 接收',
+      webhook: 'Webhook',
       openai_or_local: '決策引擎',
-      email_monitor: 'Email 監控',
-      order_signal_file: '下單訊號檔',
+      email_monitor: 'Email',
+      order_signal_file: '訊號檔',
       st_bridge: 'ST 橋接',
-      risk_watchdog: '風控看門狗',
-      audit_db: '稽核資料庫',
-      ui_push: 'UI 推送',
-      broker_api: '券商 API',
+      risk_watchdog: '風控',
+      audit_db: '稽核',
+      ui_push: 'UI',
+      broker_api: '券商',
       position_sync: '部位同步',
-      system: '系統核心',
-      kill_switch: '緊急停止'
+      system: '系統',
+      kill_switch: '急停'
     };
     $('lights').innerHTML = Object.keys(lightNames).map(function (k) {
       var v = (s.lights || {})[k] || 'ok';
@@ -150,7 +193,7 @@
       '<div class="a"><div class="k">昨日餘額</div><div class="v">' + money(a.yesterday_balance) + '</div></div>' +
       '<div class="a"><div class="k">當前權益</div><div class="v">' + money(a.equity) + '</div></div>' +
       '<div class="a"><div class="k">權益變動</div><div class="v ' + (chg < 0 ? 'down' : 'up') + '">' + money(chg) + '</div></div>' +
-      '<div class="a"><div class="k">券商連線</div><div class="v">' + (a.broker_api || '—') + '</div></div>';
+      '<div class="a"><div class="k">券商</div><div class="v">' + (a.broker_api || '—') + '</div></div>';
 
     var ex = s.exec || {};
     $('execKv').innerHTML = [
@@ -189,16 +232,108 @@
     }).join('');
   }
 
-  async function refresh() {
+  async function refreshWd() {
     var j = await api('/api/state');
     render(j.state);
+    setSync($('wdSync'), $('wdSyncTxt'), 'ok', 'WD OK');
+  }
+
+  async function refreshSt() {
+    var health = await jget(ST + '/health');
+    if (!health) {
+      setSync($('stSync'), $('stSyncTxt'), 'warn', 'ST OFF');
+      $('stNote').textContent = 'ST :18432 未連線（請先開 Stock Terminal）';
+      return;
+    }
+    setSync($('stSync'), $('stSyncTxt'), 'ok', 'ST OK');
+
+    var pack = await Promise.all([
+      jget(ST + '/twindex'),
+      jget(ST + '/breadth'),
+      jget(ST + '/fundamental/^TWII')
+    ]);
+    var tw = pack[0] || {};
+    var br = pack[1] || {};
+    var fund = pack[2] || {};
+
+    var t00 = (tw.indices && (tw.indices.t00 || tw.indices.T00)) || {};
+    var px = t00.price;
+    var chg = t00.changePct;
+    var twEl = $('stTwii');
+    var twPct = $('stTwiiPct');
+    if (twEl) {
+      twEl.textContent = (px != null && isFinite(px)) ? Number(px).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '—';
+      twEl.classList.remove('up', 'dn');
+      if (chg > 0) twEl.classList.add('up');
+      if (chg < 0) twEl.classList.add('dn');
+    }
+    if (twPct) {
+      twPct.textContent = (chg == null || !isFinite(chg)) ? '—' : ((chg >= 0 ? '+' : '') + Number(chg).toFixed(2) + '%');
+    }
+
+    var stocks = br.stocks || {};
+    var adv = stocks.advRatio;
+    var up = stocks.up;
+    var down = stocks.down;
+    $('stAdv').textContent = (adv != null && isFinite(adv)) ? (Math.round(adv * 100) + '%') : '—';
+    $('stBreadth').textContent = (up != null || down != null) ? ('漲' + (up || 0) + '／跌' + (down || 0)) : (br.date || '—');
+
+    var score = fund.score != null ? fund.score : br.score;
+    var label = fund.label || br.label || '—';
+    stCtx.score = score;
+    $('stScore').textContent = (score != null && isFinite(score)) ? Math.round(Number(score)) : '—';
+    $('stScoreLbl').textContent = label;
+
+    var hint = styleFromScore(score, adv);
+    stCtx.styleHint = hint;
+    stCtx.delever = isFinite(score) && Number(score) < 35;
+    var summary = fund.plainSummary || fund.summary || br.summary || '';
+    stCtx.note = 'ST 體質 ' + (score != null ? Math.round(Number(score)) : '—') +
+      ' · 建議風格 ' + hint +
+      (stCtx.delever ? ' · 建議降載' : '') +
+      (summary ? (' · ' + String(summary).slice(0, 80)) : '');
+    if (!(state && state.st_overlay && state.st_overlay.note)) {
+      $('stNote').textContent = stCtx.note;
+    }
+    if (!(state && state.st_overlay && state.st_overlay.aggressiveness != null)) {
+      $('stStyle').textContent = '建議 ' + hint;
+    }
+    $('stDelever').textContent = (state && state.st_overlay && state.st_overlay.delever)
+      ? '是'
+      : (stCtx.delever ? '建議是' : '否');
+  }
+
+  async function applyStHint() {
+    if (stCtx.styleHint == null) {
+      await refreshSt();
+    }
+    if (stCtx.styleHint == null) throw new Error('尚無 ST 建議（確認 :18432 有資料）');
+    var body = {
+      style: stCtx.styleHint,
+      delever: !!stCtx.delever,
+      note: stCtx.note || ('ST 建議風格 ' + stCtx.styleHint)
+    };
+    var j = await api('/bridge/st', { method: 'POST', body: JSON.stringify(body) });
+    // also set local style slider
+    var j2 = await api('/api/style', { method: 'POST', body: JSON.stringify({ style: stCtx.styleHint }) });
+    render(j2.state || j.state);
+    toast('已套用 ST 建議風格 → ' + stCtx.styleHint);
   }
 
   async function boot() {
-    await refresh();
-    setInterval(function () {
-      refresh().catch(function () {});
-    }, 2000);
+    setSync($('wdSync'), $('wdSyncTxt'), 'warn', 'WD …');
+    setSync($('stSync'), $('stSyncTxt'), 'warn', 'ST …');
+
+    try {
+      await refreshWd();
+    } catch (e) {
+      setSync($('wdSync'), $('wdSyncTxt'), 'err', 'WD ERR');
+      throw e;
+    }
+    refreshSt().catch(function () {});
+
+    setInterval(function () { refreshWd().catch(function () { setSync($('wdSync'), $('wdSyncTxt'), 'err', 'WD ERR'); }); }, 2000);
+    setInterval(function () { refreshSt().catch(function () { setSync($('stSync'), $('stSyncTxt'), 'warn', 'ST OFF'); }); }, 15000);
 
     $('styleRange').addEventListener('input', function () {
       $('styleVal').textContent = this.value;
@@ -244,7 +379,7 @@
       try {
         var j = await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'paper' }) });
         render(j.state);
-        toast('模式 → paper（模擬盤）');
+        toast('模式 → paper');
       } catch (e) { toast(String(e.message || e)); }
     });
 
@@ -252,7 +387,7 @@
       try {
         var j = await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'live' }) });
         render(j.state);
-        toast('模式 → live（下單大師 TXT）');
+        toast('模式 → live／TXT');
       } catch (e) { toast(String(e.message || e)); }
     });
 
@@ -260,7 +395,7 @@
       try {
         var j = await api('/api/sync_txt', { method: 'POST', body: '{}' });
         render(j.state);
-        toast('已同步 TXT 部位（' + (j.broker || '') + '）');
+        toast('已同步 TXT（' + (j.broker || '') + '）');
       } catch (e) { toast(String(e.message || e)); }
     });
 
@@ -285,7 +420,13 @@
     });
 
     $('btnOpenST').addEventListener('click', function () {
-      window.open('http://127.0.0.1:18432/#pulse', '_blank');
+      window.open(ST + '/#pulse', '_blank', 'noopener');
+    });
+
+    $('btnPullSt').addEventListener('click', async function () {
+      try {
+        await applyStHint();
+      } catch (e) { toast(String(e.message || e)); }
     });
   }
 

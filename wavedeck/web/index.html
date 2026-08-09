@@ -7,73 +7,56 @@
   <link rel="stylesheet" href="/css/deck.css" />
 </head>
 <body>
-  <div class="app" id="app">
-    <header class="brandbar">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true">WD</div>
-        <div>
-          <h1>WaveDeck <span>× ST</span></h1>
-          <p>浪潮執行台 · 判斷／閘門／橋接</p>
-        </div>
+  <div id="app">
+    <!-- ST-style topbar -->
+    <header id="topbar">
+      <div class="logo">WAVEDECK <small>× ST</small></div>
+      <div class="sep"></div>
+      <div class="tb-meta">
+        <span>FSM <b id="fsm">—</b></span>
+        <span>MODE <b id="mode">paper</b></span>
+        <span>TV <b id="lastTv">—</b></span>
       </div>
-      <div class="brand-meta">
-        <span>時間 <strong id="clock">—</strong></span>
-        <span>FSM <strong id="fsm">—</strong></span>
-        <span>模式 <strong id="mode">paper</strong></span>
-        <span>TV <strong id="lastTv">—</strong></span>
-      </div>
+      <div class="tb-spacer"></div>
+      <div class="shell-sync" id="stSync" title="Stock Terminal /health"><span class="ss-dot"></span><span id="stSyncTxt">ST …</span></div>
+      <div class="shell-sync" id="wdSync" title="WaveDeck /health"><span class="ss-dot"></span><span id="wdSyncTxt">WD …</span></div>
+      <div class="tb-clock" id="clock">—</div>
     </header>
 
-    <section class="status-row">
-      <div class="panel thin">
-        <div class="panel-hd"><h2>Webhook</h2></div>
-        <div class="panel-bd">
-          <div class="chip-row">
-            <span class="chip info"><i class="dot"></i><b id="webhookStatus">待命</b></span>
-            <span class="chip"><i class="dot"></i><b id="transport">—</b></span>
-          </div>
+    <!-- ST pulse-like macro strip (live from :18432) -->
+    <section id="macrobar">
+      <div class="mb-card"><div class="k">加權</div><div class="v" id="stTwii">—</div><div class="s" id="stTwiiPct">—</div></div>
+      <div class="mb-card"><div class="k">廣度 adv</div><div class="v" id="stAdv">—</div><div class="s" id="stBreadth">—</div></div>
+      <div class="mb-card"><div class="k">大盤體質</div><div class="v" id="stScore">—</div><div class="s" id="stScoreLbl">—</div></div>
+      <div class="mb-card grow">
+        <div class="k">ST → WD 覆寫</div>
+        <div class="mb-row">
+          <span>降載 <b id="stDelever">否</b></span>
+          <span>風格 <b id="stStyle">—</b></span>
+          <span class="note" id="stNote">拉取 ST /fundamental／/breadth…</span>
+          <button type="button" class="tb-btn" id="btnPullSt">套用 ST 建議風格</button>
         </div>
       </div>
-      <div class="panel thin">
-        <div class="panel-hd"><h2>健康</h2></div>
-        <div class="panel-bd chip-row" id="healthChips"></div>
-      </div>
-      <div class="panel thin">
-        <div class="panel-hd"><h2>ST 覆寫</h2></div>
-        <div class="panel-bd">
-          <div class="chip-row">
-            <span class="chip"><i class="dot"></i>降載 <b id="stDelever">否</b></span>
-            <span class="chip"><i class="dot"></i>風格 <b id="stStyle">—</b></span>
-          </div>
-          <p class="summary one-line" id="stNote">等待 ST 宏觀參數。</p>
-        </div>
-      </div>
+      <div class="mb-card"><div class="k">Webhook</div><div class="v sm" id="webhookStatus">待命</div><div class="s" id="transport">—</div></div>
     </section>
 
-    <section class="deck-grid">
-      <aside class="panel">
-        <div class="panel-hd"><h2>部位</h2></div>
-        <div class="panel-bd">
-          <div class="kv" id="posKv"></div>
-          <div class="slider-wrap">
-            <div class="panel-hd sub"><h2>進場風格</h2></div>
-            <div class="slider-labels"><span>35</span><span>50</span><span>65</span></div>
-            <input id="styleRange" type="range" min="20" max="90" step="1" value="50" />
-            <div class="style-readout">
-              <span class="lab">當前</span>
-              <strong id="styleVal">50</strong>
-            </div>
-          </div>
-          <div class="guard" id="noOvernight">
-            <h3>不留倉 · 啟用</h3>
-            <p>收盤前禁新單；指定時間強平。</p>
-          </div>
-        </div>
+    <!-- ST body: left rail + main + right -->
+    <div id="body">
+      <aside id="left">
+        <div class="sec-hd">部位四欄</div>
+        <div class="kv" id="posKv"></div>
+        <div class="sec-hd">AI 進場風格</div>
+        <div class="slider-labels"><span>保守 35</span><span>50</span><span>積極 65</span></div>
+        <input id="styleRange" type="range" min="20" max="90" step="1" value="50" />
+        <div class="style-readout"><span>當前</span><strong id="styleVal">50</strong></div>
+        <div class="guard" id="noOvernight"></div>
+        <div class="sec-hd">健康燈（本機）</div>
+        <div class="chip-row" id="healthChips"></div>
       </aside>
 
-      <section class="panel ai-panel">
-        <div class="panel-hd"><h2>AI 判斷</h2><span class="tag" id="aiEvent">—</span></div>
-        <div class="panel-bd">
+      <main id="main">
+        <section class="panel ai-panel">
+          <div class="sec-hd">AI 最新判斷 <span class="tag" id="aiEvent">—</span></div>
           <div class="ai-hero">
             <div class="ai-action">
               <div class="lbl" id="aiLabel">—</div>
@@ -84,35 +67,33 @@
             <div class="b long"><span class="k">偏多</span><em id="biasLong">—</em></div>
             <div class="b short"><span class="k">偏空</span><em id="biasShort">—</em></div>
           </div>
-          <p class="summary clamp" id="aiSummary">—</p>
+          <p class="summary" id="aiSummary">—</p>
           <div class="tags" id="aiTags"></div>
           <div class="process" id="aiProcess"></div>
-        </div>
-      </section>
+        </section>
 
-      <aside class="panel">
-        <div class="panel-hd"><h2>燈號</h2></div>
-        <div class="panel-bd">
+        <section class="panel">
+          <div class="sec-hd">系統運行燈號</div>
           <div class="lights" id="lights"></div>
-          <div class="panel-hd sub"><h2>帳戶</h2></div>
-          <div class="acct" id="acct"></div>
-        </div>
-      </aside>
+        </section>
+      </main>
 
-      <aside class="panel side-stack">
-        <div class="panel-hd"><h2>執行 · 成本</h2></div>
-        <div class="panel-bd">
-          <div class="kv" id="execKv"></div>
-          <div class="acct compact" id="costKv"></div>
-          <div class="panel-hd sub"><h2>傳輸</h2></div>
-          <p class="summary one-line" id="transportBlurb">Webhook · 本機 127.0.0.1</p>
-          <div class="kv" id="transportKv"></div>
-        </div>
+      <aside id="right">
+        <div class="sec-hd">帳戶與風險</div>
+        <div class="acct" id="acct"></div>
+        <div class="sec-hd">執行對照</div>
+        <div class="kv" id="execKv"></div>
+        <div class="sec-hd">API 成本</div>
+        <div class="acct" id="costKv"></div>
+        <div class="sec-hd">TradingView / 傳輸</div>
+        <p class="summary sm" id="transportBlurb">Webhook · 本機 loopback（與 ST 同機）</p>
+        <div class="kv" id="transportKv"></div>
       </aside>
-    </section>
+    </div>
 
-    <footer class="panel controls">
-      <span class="group-label">DECISION</span>
+    <!-- ST-style bottom control bar -->
+    <footer id="indbar">
+      <span class="ib-lab">DECISION</span>
       <label class="ctrl-select">
         <span>源</span>
         <select id="providerSelect" aria-label="決策提供者">
@@ -124,19 +105,19 @@
       <button class="btn" id="btnModePaper" type="button">paper</button>
       <button class="btn" id="btnModeLive" type="button">live/TXT</button>
       <button class="btn" id="btnSyncTxt" type="button">同步 TXT</button>
-
-      <span class="group-label">SYS</span>
+      <span class="ib-sep"></span>
+      <span class="ib-lab">SYS</span>
       <button class="btn primary" data-cmd="start">啟動</button>
       <button class="btn" data-cmd="stop">停止</button>
       <button class="btn" data-cmd="restart">重啟</button>
       <button class="btn" data-cmd="refresh">重整</button>
       <button class="btn primary" id="btnDemo">模擬 TV</button>
-
-      <span class="group-label">VIEW</span>
+      <span class="ib-sep"></span>
+      <span class="ib-lab">VIEW</span>
       <button class="btn ghost" id="btnAudit">稽核</button>
-      <button class="btn ghost" id="btnOpenST">開 ST</button>
-
-      <span class="group-label">KILL</span>
+      <button class="btn ghost" id="btnOpenST">開 ST 脈動</button>
+      <span class="ib-sep"></span>
+      <span class="ib-lab">KILL</span>
       <button class="btn danger" id="btnKill">緊急 ON</button>
       <button class="btn" id="btnKillOff">解除</button>
     </footer>
