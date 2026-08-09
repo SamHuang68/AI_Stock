@@ -97,8 +97,33 @@
       '#ht-root .up{color:var(--red)}#ht-root .dn{color:var(--green)}' +
       '#ht-root .ht-note{font-size:9px;color:var(--tlo);line-height:1.65;margin-top:12px}' +
       '#ht-root .ht-loading{font-size:11px;color:var(--tlo);padding:20px 0}' +
+      '#ht-root .ht-wd{margin:0 0 10px;padding:8px 12px;border-radius:8px;background:var(--bg2);' +
+        'border:1px solid rgba(103,232,249,.28);font-size:11px;line-height:1.5;color:var(--tlo)}' +
+      '#ht-root .ht-wd b{color:var(--cyan)}' +
       '@media (max-width:800px){#ht-root .ht-two{grid-template-columns:1fr}}';
     document.head.appendChild(s);
+  }
+
+  function wdStripHtml() {
+    try {
+      if (!window.WaveDeckBridge) return '';
+      var last = window.WaveDeckBridge.lastSync && window.WaveDeckBridge.lastSync();
+      var p = last && last.payload;
+      var meta = (p && p.meta) || {};
+      if (!p) {
+        return '<div class="ht-wd">WaveDeck：尚無宏觀覆寫（可開脈動或 START_WAVEDECK）</div>';
+      }
+      var spill = meta.spillover_prob != null
+        ? Math.round(Number(meta.spillover_prob) * 100) + '%' : '—';
+      return '<div class="ht-wd">WaveDeck 覆寫 · 風格 <b>' + p.style + '</b>' +
+        (p.delever ? ' · <b>降載</b>' : '') +
+        ' · 外溢 <b>' + spill + '</b>' +
+        (meta.rotation ? (' · 輪動 <b>' + meta.rotation + '</b>') : '') +
+        (meta.hot_stage ? (' · 最強 <b>' + meta.hot_stage + '</b>') : '') +
+        '</div>';
+    } catch (e) {
+      return '';
+    }
   }
 
   function pctColor(pct, mkt) {
@@ -270,7 +295,7 @@
     }
     grid += '</div>';
 
-    body.innerHTML = legend + grid +
+    body.innerHTML = wdStripHtml() + legend + grid +
       '<div class="ht-sec"><h4>🎯 焦點掃描（背景）</h4><div id="ht-focus" class="ht-loading">掃描中…</div></div>' +
       '<div class="ht-note">熱力來自 /sectors；台股點格載入代表股，美股點格載入對應 SPDR。⚠ 非投資建議。</div>';
 

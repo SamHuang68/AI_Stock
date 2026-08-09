@@ -1555,6 +1555,18 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 jobs = qa.jobs_snapshot()
             except Exception as e:
                 jobs = {'error': str(e)}
+            wd_bus = None
+            try:
+                import wavedeck_bus as wdb
+                snap = wdb.snapshot()
+                wd_bus = snap.get('wavedeck') or {
+                    'report_at': snap.get('report_at'),
+                    'age_sec': snap.get('age_sec'),
+                    'fresh': snap.get('fresh'),
+                    'combined_usd_est': (snap.get('costs') or {}).get('combined_usd_est'),
+                }
+            except Exception as e:
+                wd_bus = {'error': str(e)}
             self._ok(json.dumps({
                 'status': 'ok',
                 'bind': '127.0.0.1',
@@ -1568,6 +1580,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 'etf_history_files': len(files),
                 'sources': _src_snapshot(),
                 'jobs': jobs,  # H4：回補／刷新進度
+                'wavedeck': wd_bus,
             }, ensure_ascii=False, default=str).encode())
         elif p == '/bridge/wavedeck' or p.startswith('/bridge/wavedeck?'):
             self._handle_wavedeck_bridge_get()

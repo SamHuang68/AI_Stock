@@ -230,6 +230,26 @@
       (d.error && !d.ok ? '<div class="bd-err">' + d.error + '</div>' : '') +
       '<div class="bd-note">股票欄位為上市「股票」統計（不含權證／ETF 等）；整體市場含全部證券。' +
         '漲跌家數為 TWSE 盤後公布，盤中或休市日自動取最近交易日。台股慣例：紅漲綠跌。⚠ 非投資建議。</div>';
+
+    // Soft push breadth → WaveDeck（節流在 bridge；Pulse 有更完整外溢時不覆蓋）
+    try {
+      if (window.WaveDeckBridge && typeof window.WaveDeckBridge.syncFromMarket === 'function') {
+        var last = window.WaveDeckBridge.lastSync && window.WaveDeckBridge.lastSync();
+        var lastMeta = last && last.payload && last.payload.meta;
+        var hasRicher = lastMeta && (lastMeta.spillover_prob != null || lastMeta.rotation);
+        if (!hasRicher) {
+          var st = d.stocks || {};
+          window.WaveDeckBridge.syncFromMarket({
+            score: d.score,
+            advRatio: st.advRatio,
+            label: d.label || null,
+            summary: d.summary || d.plainSummary || null,
+            source: 'breadth_v5',
+            silent: true
+          });
+        }
+      }
+    } catch (e) { /* never block breadth */ }
   }
 
   function refresh(force) {

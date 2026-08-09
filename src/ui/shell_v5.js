@@ -283,6 +283,9 @@
     var el = $('shell-wd-sync');
     if (!el) return;
     var tip = 'WaveDeck 連線／最近宏觀覆寫（點擊開啟）';
+    if (meter && meter.age_sec != null) {
+      tip += ' · 回報年齡 ' + meter.age_sec + 's' + (meter.fresh ? '（新鮮）' : '（偏舊）');
+    }
     if (meter && meter.costs) {
       var c = meter.costs;
       tip += ' · 成本合計≈$' + (c.combined_usd_est != null ? c.combined_usd_est : '—') +
@@ -296,6 +299,11 @@
         (r.ai && r.ai.action_label ? ' · ' + r.ai.action_label : '');
     }
     el.title = tip;
+    // Stale reverse-bus: soften lamp when report older than 45s
+    if (meter && meter.report && meter.age_sec != null && Number(meter.age_sec) > 45) {
+      el.classList.remove('err');
+      el.classList.add('warn');
+    }
   }
 
   function shortWdAction(report) {

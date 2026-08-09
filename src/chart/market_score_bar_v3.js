@@ -376,16 +376,23 @@
     };
 
     // TW 大盤體質 → WaveDeck 宏觀覆寫（節流／去重在 bridge）
+    // 若 Pulse 已推過含外溢／輪動的較完整 payload，略過以免空欄位覆寫
     if (direction === 'health' && score != null && window.WaveDeckBridge &&
         typeof window.WaveDeckBridge.syncFromMarket === 'function') {
       try {
-        window.WaveDeckBridge.syncFromMarket({
-          score: score,
-          label: label,
-          summary: payload.plainSummary || summary,
-          source: 'market_score_bar',
-          silent: true
-        });
+        var last = window.WaveDeckBridge.lastSync && window.WaveDeckBridge.lastSync();
+        var meta = last && last.payload && last.payload.meta;
+        var richer = meta && (meta.spillover_prob != null || meta.rotation) &&
+          (meta.source === 'pulse_v5' || meta.source === 'pulse');
+        if (!richer) {
+          window.WaveDeckBridge.syncFromMarket({
+            score: score,
+            label: label,
+            summary: payload.plainSummary || summary,
+            source: 'market_score_bar',
+            silent: true
+          });
+        }
       } catch (e) { /* never block chart */ }
     }
   }

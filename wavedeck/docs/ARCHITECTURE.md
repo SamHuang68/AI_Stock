@@ -181,12 +181,25 @@ stateDiagram-v2
 | Pulse AI 摘要 | 本機 `POST /ai/local`（LM Studio）；失敗則規則後援；計入共享成本 |
 | Watch／Book ← WD | `WaveDeckBridge.fetchState` → TXF chip／個股 MACRO 風格 chip／執行狀態條 |
 | WD → ST 反向繁線 | Console 每 ~12s `POST /bridge/wavedeck`（FSM／部位／成本） |
-| 共享成本計數器 | ST `GET /bridge/wavedeck`／`/api/cost-meter`；頂列 WD 燈 title 顯示合計 |
+| 共享成本計數器 | ST `GET /bridge/wavedeck`／`/api/cost-meter`；頂列 WD 燈 title 顯示合計；`/health.wavedeck` 含 age_sec／fresh |
+| LLM 成本累計 | OpenAI `usage`→USD；Ollama 計本機次；啟發式 $0；回報至 ST 合併 |
 | ST 心跳失敗 | WaveDeck 亮黃燈；不自動加倉 |
 
 協定路徑（本機）：
 - ST → WD：`http://127.0.0.1:18433/bridge/st`
 - WD → ST：`http://127.0.0.1:18432/bridge/wavedeck`
+
+### 5.1 欄位契約（camelCase ↔ snake_case）
+
+| FE（bridge／Pulse） | Wire `meta`／overlay | 決策 ctx |
+|--------------------|----------------------|----------|
+| `spilloverProb` | `spillover_prob` | `st_spillover_prob` |
+| `rotationHealth` / `rotation` | `rotation` | `st_rotation` |
+| `hotStage` | `hot_stage` | `st_hot_stage` |
+| `advRatio` | `advRatio` | —（風格用） |
+| `score` | `score` | `st_score` |
+| `delever` | `delever` | `st_delever` |
+| `leaders` | `leaders` | — |
 
 ---
 
@@ -204,6 +217,10 @@ stateDiagram-v2
 - **模式**：預設 `paper`；`live` 明確切換後才寫下單大師 TXT
 - **ST 入口**：側欄「執行」→ `http://127.0.0.1:18433/`（`shell_v5` + `wavedeck_bridge_v5`）
 - API：`/api/provider`、`/api/mode`、`/api/broker`、`/api/sync_txt`、`/api/config`
+
+### v1.6（已交付 · ST 閉環）
+- 反向繁線、共享成本、供應鏈外溢精算、啟發式／閘門外溢、外溢儀表、Heat／Breadth 掛鉤
+- ST `/health.wavedeck` freshness；OpenAI usage 成本累計
 
 ### v2
 - 可選 Redis 熱狀態、Docker Compose、雲端模型 opt-in、正式簽章 Webhook

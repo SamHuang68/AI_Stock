@@ -137,6 +137,9 @@ class HeuristicProvider:
                 "eff_style": eff_style,
                 "st_spillover_prob": spill,
             },
+            "cost_usd": 0.0,
+            "local_calls": 0,
+            "cloud_calls": 0,
             "updated_at": now_iso(),
             "provider": self.name,
         }

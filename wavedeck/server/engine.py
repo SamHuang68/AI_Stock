@@ -231,14 +231,26 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
     execu["last_ai_action"] = decision["action_label"]
     # Persist preferred provider used (may be fallback heuristic)
     used = decision.get("provider") or preferred
-    if used != preferred and preferred != "heuristic":
-        # keep config preference; only reflect actual route in costs.session note via provider field
-        pass
+    prev_costs = dict(RUNTIME.snapshot().get("costs") or {})
+    try:
+        delta = float(decision.get("cost_usd") or 0)
+    except Exception:
+        delta = 0.0
+    local_n = int(decision.get("local_calls") or 0)
+    cloud_n = int(decision.get("cloud_calls") or 0)
+    cost_patch = {
+        "provider": used,
+        "session_usd": round(float(prev_costs.get("session_usd") or 0) + delta, 6),
+        "day_usd": round(float(prev_costs.get("day_usd") or 0) + delta, 6),
+        "month_usd": round(float(prev_costs.get("month_usd") or 0) + delta, 6),
+        "local_calls": int(prev_costs.get("local_calls") or 0) + local_n,
+        "cloud_calls": int(prev_costs.get("cloud_calls") or 0) + cloud_n,
+    }
     snap = RUNTIME.patch(
         ai=decision,
         positions=pos,
         exec=execu,
-        costs={"provider": used},
+        costs=cost_patch,
         transport={
             "last_webhook_status": "AI 完成" if gate["allow"] else "閘門阻擋",
         },

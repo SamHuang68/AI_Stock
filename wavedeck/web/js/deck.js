@@ -7,7 +7,10 @@
     : 'http://127.0.0.1:18432';
 
   var state = null;
-  var stCtx = { styleHint: null, delever: false, note: '', score: null };
+  var stCtx = {
+    styleHint: null, delever: false, note: '', score: null,
+    advRatio: null, rotation: null, spilloverProb: null, hotStage: null, leaders: []
+  };
   var toastTimer = null;
   var _lastReportAt = 0;
   var REPORT_MIN_MS = 12000;
@@ -99,7 +102,9 @@
     }).catch(function () { /* ST 未開則靜默 */ });
   }
 
-  function styleFromScore(score, advRatio) {
+  /** Align with WaveDeckBridge.styleFromScore (rotation + spillover). */
+  function styleFromScore(score, advRatio, opts) {
+    opts = opts || {};
     var s = Number(score);
     var adv = Number(advRatio);
     if (!isFinite(s)) s = 50;
@@ -113,7 +118,41 @@
       if (adv < 0.35) hint = Math.min(hint, 40);
       if (adv > 0.65) hint = Math.max(hint, 55);
     }
+    var rot = opts.rotationHealth || opts.rotation || null;
+    if (rot === 'broad') hint = Math.min(90, hint + 5);
+    if (rot === 'narrow') hint = Math.max(20, hint - 5);
+    var spill = Number(opts.spilloverProb);
+    if (isFinite(spill)) {
+      if (spill < 0.35) hint = Math.min(hint, 40);
+      else if (spill > 0.65) hint = Math.max(hint, Math.min(65, hint + 5));
+    }
     return Math.max(20, Math.min(90, Math.round(hint)));
+  }
+
+  function paintSpillMeter(ov) {
+    ov = ov || {};
+    var meter = $('spillMeter');
+    var pctEl = $('stSpillPct');
+    var bar = $('stSpillBar');
+    var rotEl = $('stSpillRot');
+    var hotEl = $('stSpillHot');
+    if (!meter || !pctEl) return;
+    var spill = ov.spillover_prob;
+    if (spill == null && stCtx.spilloverProb != null) spill = stCtx.spilloverProb;
+    var n = Number(spill);
+    if (!isFinite(n)) {
+      pctEl.textContent = '—';
+      if (bar) bar.style.width = '0%';
+      meter.classList.remove('low', 'mid', 'high');
+    } else {
+      var pct = Math.round(n * 100);
+      pctEl.textContent = pct + '%';
+      if (bar) bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+      meter.classList.remove('low', 'mid', 'high');
+      meter.classList.add(n < 0.30 ? 'low' : (n > 0.65 ? 'high' : 'mid'));
+    }
+    if (rotEl) rotEl.textContent = '輪動 ' + (ov.rotation || stCtx.rotation || '—');
+    if (hotEl) hotEl.textContent = '最強段 ' + (ov.hot_stage || stCtx.hotStage || '—');
   }
 
   function syncStylePresets(style) {
@@ -148,13 +187,9 @@
     $('stStyle').textContent = (ov.aggressiveness != null)
       ? ov.aggressiveness
       : (stCtx.styleHint != null ? ('建議 ' + stCtx.styleHint) : '—');
+    paintSpillMeter(ov);
     if (ov.note) {
-      var extra = '';
-      if (ov.rotation) extra += ' · 輪動 ' + ov.rotation;
-      if (ov.spillover_prob != null && isFinite(Number(ov.spillover_prob))) {
-        extra += ' · 外溢 ' + Math.round(Number(ov.spillover_prob) * 100) + '%';
-      }
-      $('stNote').textContent = ov.note + (ov.note.indexOf('外溢') >= 0 ? '' : extra);
+      $('stNote').textContent = ov.note;
     } else if (stCtx.note) {
       $('stNote').textContent = stCtx.note;
     }
@@ -247,10 +282,12 @@
     var stc = window.__stCostMeter || null;
     var combined = stc && stc.costs ? stc.costs.combined_usd_est : null;
     $('costKv').innerHTML =
-      '<div class="a"><div class="k">本次 USD</div><div class="v">' + c.session_usd + '</div></div>' +
-      '<div class="a"><div class="k">今日 USD</div><div class="v">' + c.day_usd + '</div></div>' +
-      '<div class="a"><div class="k">本月 USD</div><div class="v">' + c.month_usd + '</div></div>' +
+      '<div class="a"><div class="k">本次 USD</div><div class="v">' + (c.session_usd != null ? c.session_usd : 0) + '</div></div>' +
+      '<div class="a"><div class="k">今日 USD</div><div class="v">' + (c.day_usd != null ? c.day_usd : 0) + '</div></div>' +
+      '<div class="a"><div class="k">本月 USD</div><div class="v">' + (c.month_usd != null ? c.month_usd : 0) + '</div></div>' +
       '<div class="a"><div class="k">提供者</div><div class="v">' + (c.provider || '—') + '</div></div>' +
+      '<div class="a"><div class="k">本機／雲端次</div><div class="v">' +
+        (c.local_calls || 0) + '/' + (c.cloud_calls || 0) + '</div></div>' +
       (combined != null
         ? '<div class="a"><div class="k">ST+WD 合計</div><div class="v">' + combined + '</div></div>'
         : '') +
@@ -353,24 +390,37 @@
 
     var score = fund.score != null ? fund.score : br.score;
     stCtx.score = score;
+    stCtx.advRatio = adv;
     $('stScore').textContent = (score != null && isFinite(score)) ? Math.round(Number(score)) : '—';
     $('stScoreLbl').textContent = fund.label || br.label || '—';
 
-    var hint = styleFromScore(score, adv);
+    // Prefer spillover/rotation already on WD overlay (from Pulse); else breadth-only
+    var ov = (state && state.st_overlay) || {};
+    stCtx.rotation = ov.rotation || stCtx.rotation;
+    stCtx.spilloverProb = ov.spillover_prob != null ? ov.spillover_prob : stCtx.spilloverProb;
+    stCtx.hotStage = ov.hot_stage || stCtx.hotStage;
+    stCtx.leaders = ov.leaders || stCtx.leaders;
+
+    var hint = styleFromScore(score, adv, {
+      rotation: stCtx.rotation,
+      spilloverProb: stCtx.spilloverProb
+    });
     stCtx.styleHint = hint;
-    stCtx.delever = isFinite(score) && Number(score) < 35;
+    stCtx.delever = (isFinite(score) && Number(score) < 35) ||
+      (stCtx.spilloverProb != null && Number(stCtx.spilloverProb) < 0.30);
     var summary = fund.plainSummary || fund.summary || br.summary || '';
     stCtx.note = 'ST 體質 ' + (score != null ? Math.round(Number(score)) : '—') +
       ' · 建議風格 ' + hint +
       (stCtx.delever ? ' · 建議降載' : '') +
-      (summary ? (' · ' + String(summary).slice(0, 72)) : '');
+      (stCtx.spilloverProb != null ? (' · 外溢 ' + Math.round(Number(stCtx.spilloverProb) * 100) + '%') : '') +
+      (summary ? (' · ' + String(summary).slice(0, 56)) : '');
 
-    if (!(state && state.st_overlay && state.st_overlay.note)) $('stNote').textContent = stCtx.note;
-    if (!(state && state.st_overlay && state.st_overlay.aggressiveness != null)) {
+    if (!(ov && ov.note)) $('stNote').textContent = stCtx.note;
+    if (!(ov && ov.aggressiveness != null)) {
       $('stStyle').textContent = '建議 ' + hint;
     }
-    $('stDelever').textContent = (state && state.st_overlay && state.st_overlay.delever)
-      ? '是' : (stCtx.delever ? '建議是' : '否');
+    $('stDelever').textContent = (ov && ov.delever) ? '是' : (stCtx.delever ? '建議是' : '否');
+    paintSpillMeter(ov);
   }
 
   async function applyStHint() {
@@ -379,7 +429,16 @@
     var body = {
       style: stCtx.styleHint,
       delever: !!stCtx.delever,
-      note: stCtx.note || ('ST 建議風格 ' + stCtx.styleHint)
+      note: stCtx.note || ('ST 建議風格 ' + stCtx.styleHint),
+      meta: {
+        score: stCtx.score,
+        advRatio: stCtx.advRatio,
+        source: 'wavedeck-console',
+        rotation: stCtx.rotation || null,
+        spillover_prob: stCtx.spilloverProb != null ? Number(stCtx.spilloverProb) : null,
+        hot_stage: stCtx.hotStage || null,
+        leaders: stCtx.leaders || []
+      }
     };
     await api('/bridge/st', { method: 'POST', body: JSON.stringify(body) });
     var j2 = await api('/api/style', { method: 'POST', body: JSON.stringify({ style: stCtx.styleHint }) });

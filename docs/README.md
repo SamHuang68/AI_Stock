@@ -65,7 +65,14 @@ Bloomberg 風格的個股研究終端機。**本機跑、零雲端、零追蹤�
 - 複合警示、行事曆、資料源健檢
 
 ### 一致性系統
-- `fields_v3` 欄位型別標準；`colors_v3` 台股紅漲／美股綠漲語意統一
+- `欄位型別` `fields_v3`；`colors_v3` 台股紅漲／美股綠漲語意統一
+
+### WaveDeck 浪潮執行台（子專案）
+微觀下單／AI 判斷／風控艦橋，與本終端分工（ST `:18432` 宏觀 ↔ WD `:18433` 執行）：
+- 目錄：[`wavedeck/`](../wavedeck/)；架構見 [`wavedeck/docs/ARCHITECTURE.md`](../wavedeck/docs/ARCHITECTURE.md)
+- 啟動：`START_WAVEDECK.cmd` 或 `cd wavedeck && python3 run.py`
+- 閉環：Pulse／供應鏈外溢 → `POST /bridge/st`；WD → `POST /bridge/wavedeck`；共享成本見 `/health.wavedeck`
+- 側欄「執行」、頂列 **WD** 燈、Watch MACRO／Book 執行條
 
 ---
 

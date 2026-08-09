@@ -30,7 +30,34 @@ def _clamp01(x: Any, default: float = 0.5) -> float:
     return max(0.0, min(1.0, v))
 
 
-def _normalize(raw: dict[str, Any], event: str, provider: str) -> dict[str, Any]:
+def estimate_openai_usd(usage: dict[str, Any] | None, model: str = "gpt-4o-mini") -> float:
+    """Rough USD estimate from OpenAI-style usage (gpt-4o-mini defaults)."""
+    usage = usage or {}
+    try:
+        prompt = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+        completion = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+    except Exception:
+        return 0.0
+    # Default rates USD / 1M tokens (gpt-4o-mini ballpark)
+    in_rate, out_rate = 0.15, 0.60
+    m = (model or "").lower()
+    if "gpt-4o" in m and "mini" not in m:
+        in_rate, out_rate = 2.50, 10.00
+    elif "gpt-3.5" in m:
+        in_rate, out_rate = 0.50, 1.50
+    usd = (prompt * in_rate + completion * out_rate) / 1_000_000.0
+    return round(max(0.0, usd), 6)
+
+
+def _normalize(
+    raw: dict[str, Any],
+    event: str,
+    provider: str,
+    *,
+    cost_usd: float = 0.0,
+    local_calls: int = 0,
+    cloud_calls: int = 0,
+) -> dict[str, Any]:
     action = str(raw.get("action") or "HOLD").upper()
     if action not in ACTIONS:
         action = "HOLD"
@@ -64,6 +91,9 @@ def _normalize(raw: dict[str, Any], event: str, provider: str) -> dict[str, Any]
             "chase_risk": str(raw.get("chase_risk") or "medium"),
             "gate": "PENDING",
         },
+        "cost_usd": round(float(cost_usd or 0), 6),
+        "local_calls": int(local_calls or 0),
+        "cloud_calls": int(cloud_calls or 0),
         "updated_at": now_iso(),
         "provider": provider,
     }
@@ -129,7 +159,8 @@ class OllamaProvider:
             timeout,
         )
         raw = _extract_json(str(out.get("response") or ""))
-        return _normalize(raw, event, self.name)
+        # Local inference: $0, count calls for shared meter
+        return _normalize(raw, event, self.name, cost_usd=0.0, local_calls=1)
 
 
 class OpenAIProvider:
@@ -163,7 +194,8 @@ class OpenAIProvider:
         )
         content = (((out.get("choices") or [{}])[0]).get("message") or {}).get("content") or ""
         raw = _extract_json(str(content))
-        return _normalize(raw, event, self.name)
+        usd = estimate_openai_usd(out.get("usage") if isinstance(out.get("usage"), dict) else {}, model)
+        return _normalize(raw, event, self.name, cost_usd=usd, cloud_calls=1)
 
 
 def resolve_provider(name: str | None = None):

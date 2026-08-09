@@ -26,6 +26,7 @@ _lock = threading.RLock()
 _state: dict[str, Any] = {
     'report': None,  # last WD → ST payload
     'report_at': None,
+    'report_epoch_ms': None,
     'costs': {
         'st_local_calls': 0,
         'st_cloud_calls': 0,
@@ -33,6 +34,8 @@ _state: dict[str, Any] = {
         'wd_session_usd': 0.0,
         'wd_day_usd': 0.0,
         'wd_month_usd': 0.0,
+        'wd_local_calls': 0,
+        'wd_cloud_calls': 0,
         'wd_provider': None,
         'updated_at': None,
     },
@@ -56,6 +59,9 @@ def _load() -> None:
                 if raw.get('report') is not None:
                     _state['report'] = raw['report']
                     _state['report_at'] = raw.get('report_at')
+                    _state['report_epoch_ms'] = raw.get('report_epoch_ms')
+                    if _state['report_epoch_ms'] is None and isinstance(raw.get('report'), dict):
+                        _state['report_epoch_ms'] = raw['report'].get('received_epoch_ms')
     except Exception:
         pass
 
@@ -67,6 +73,7 @@ def _save() -> None:
             payload = {
                 'report': _state.get('report'),
                 'report_at': _state.get('report_at'),
+                'report_epoch_ms': _state.get('report_epoch_ms'),
                 'costs': _state.get('costs'),
             }
         tmp = STORE.with_suffix('.tmp')
@@ -128,21 +135,29 @@ def accept_report(body: dict[str, Any]) -> dict[str, Any]:
             'delever': ov.get('delever'),
             'rotation': ov.get('rotation'),
             'spillover_prob': ov.get('spillover_prob'),
+            'hot_stage': ov.get('hot_stage'),
+            'leaders': (ov.get('leaders') or [])[:6] if isinstance(ov.get('leaders'), list) else [],
+            'chain_breadth': ov.get('chain_breadth'),
+            'chain_contig': ov.get('chain_contig'),
             'note': (str(ov.get('note') or ''))[:200],
         },
         'costs': {
             'session_usd': costs.get('session_usd'),
             'day_usd': costs.get('day_usd'),
             'month_usd': costs.get('month_usd'),
+            'local_calls': costs.get('local_calls'),
+            'cloud_calls': costs.get('cloud_calls'),
             'provider': costs.get('provider'),
         },
         'source': str(body.get('source') or 'wavedeck')[:64],
         'received_at': _now_iso(),
+        'received_epoch_ms': int(time.time() * 1000),
     }
 
     with _lock:
         _state['report'] = report
         _state['report_at'] = report['received_at']
+        _state['report_epoch_ms'] = report['received_epoch_ms']
         c = _state['costs']
         if costs.get('session_usd') is not None:
             try:
@@ -161,6 +176,16 @@ def accept_report(body: dict[str, Any]) -> dict[str, Any]:
                 pass
         if costs.get('provider'):
             c['wd_provider'] = str(costs['provider'])[:40]
+        if costs.get('local_calls') is not None:
+            try:
+                c['wd_local_calls'] = int(costs['local_calls'])
+            except Exception:
+                pass
+        if costs.get('cloud_calls') is not None:
+            try:
+                c['wd_cloud_calls'] = int(costs['cloud_calls'])
+            except Exception:
+                pass
         c['updated_at'] = report['received_at']
     _save()
     return snapshot()
@@ -191,15 +216,29 @@ def snapshot() -> dict[str, Any]:
         costs = deepcopy(_state['costs'])
         report = deepcopy(_state['report'])
         report_at = _state.get('report_at')
+        report_epoch = _state.get('report_epoch_ms')
+        if report_epoch is None and isinstance(report, dict):
+            report_epoch = report.get('received_epoch_ms')
+    now_ms = int(time.time() * 1000)
+    age_sec = None
+    if report_epoch is not None:
+        try:
+            age_sec = max(0.0, round((now_ms - int(report_epoch)) / 1000.0, 1))
+        except Exception:
+            age_sec = None
+    # Fresh = report within last 30s (WD polls ~2s, reports ~12s)
+    fresh = bool(age_sec is not None and age_sec <= 30.0)
     wd_day = float(costs.get('wd_day_usd') or 0)
     st_cloud = float(costs.get('st_cloud_usd_est') or 0)
+    ov = (report or {}).get('st_overlay') if isinstance(report, dict) else {}
     return {
         'ok': True,
         'service': 'StockTerminal',
         'bridge': 'wavedeck',
         'report': report,
         'report_at': report_at,
-        'fresh': bool(report_at),  # UI may compute age
+        'age_sec': age_sec,
+        'fresh': fresh,
         'costs': {
             'st_local_calls': int(costs.get('st_local_calls') or 0),
             'st_cloud_calls': int(costs.get('st_cloud_calls') or 0),
@@ -207,12 +246,26 @@ def snapshot() -> dict[str, Any]:
             'wd_session_usd': float(costs.get('wd_session_usd') or 0),
             'wd_day_usd': wd_day,
             'wd_month_usd': float(costs.get('wd_month_usd') or 0),
+            'wd_local_calls': int(costs.get('wd_local_calls') or 0),
+            'wd_cloud_calls': int(costs.get('wd_cloud_calls') or 0),
             'wd_provider': costs.get('wd_provider'),
             'combined_usd_est': round(st_cloud + wd_day, 4),
             'updated_at': costs.get('updated_at'),
         },
+        'wavedeck': {
+            'report_at': report_at,
+            'age_sec': age_sec,
+            'fresh': fresh,
+            'fsm': (report or {}).get('fsm') if isinstance(report, dict) else None,
+            'mode': (report or {}).get('mode') if isinstance(report, dict) else None,
+            'style': (report or {}).get('style') if isinstance(report, dict) else None,
+            'spillover_prob': ov.get('spillover_prob') if isinstance(ov, dict) else None,
+            'hot_stage': ov.get('hot_stage') if isinstance(ov, dict) else None,
+            'combined_usd_est': round(st_cloud + wd_day, 4),
+            'wd_provider': costs.get('wd_provider'),
+        },
         'ts': _now_iso(),
-        'epoch_ms': int(time.time() * 1000),
+        'epoch_ms': now_ms,
     }
 
 

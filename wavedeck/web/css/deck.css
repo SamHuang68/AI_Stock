@@ -199,6 +199,30 @@ input[type="range"] { width: 100%; accent-color: var(--cyan); }
 .st-grid b.up { color: #ff6b6b; }
 .st-grid b.dn { color: var(--green); }
 .st-grid i { display: block; font: 600 9px/1.2 var(--mono); color: var(--muted); font-style: normal; margin-top: 2px; }
+.spill-meter {
+  margin: 0 0 6px; padding: 6px 8px; border-radius: 7px;
+  background: rgba(6, 10, 16, 0.55); border: 1px solid rgba(42, 54, 72, 0.8);
+}
+.spill-meter .spill-hd {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font: 600 9px var(--mono); color: var(--dim); margin-bottom: 4px;
+}
+.spill-meter .spill-hd strong { font: 700 13px var(--mono); color: var(--cyan); }
+.spill-meter.low .spill-hd strong { color: var(--bad); }
+.spill-meter.mid .spill-hd strong { color: var(--warn); }
+.spill-meter.high .spill-hd strong { color: var(--green); }
+.spill-bar {
+  height: 6px; border-radius: 3px; background: rgba(42, 54, 72, 0.9); overflow: hidden;
+}
+.spill-bar i {
+  display: block; height: 100%; width: 0; border-radius: 3px;
+  background: linear-gradient(90deg, var(--bad), var(--warn), var(--green));
+  transition: width .25s ease;
+}
+.spill-meter .spill-sub {
+  display: flex; justify-content: space-between; gap: 6px; margin-top: 4px;
+  font: 600 9px/1.2 var(--mono); color: var(--muted);
+}
 .st-note {
   font: 600 10px/1.35 var(--mono); color: var(--muted);
   margin-bottom: 6px;

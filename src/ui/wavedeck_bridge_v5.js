@@ -432,6 +432,7 @@
         spillover: ov.spillover_prob,
         rotation: ov.rotation,
         hotStage: ov.hot_stage || null,
+        leaders: ov.leaders || [],
         scStage: stage,
         mode: st.mode || 'paper',
         fsm: st.fsm || '—',
@@ -451,12 +452,14 @@
       style: st.style,
       spillover: ov.spillover_prob,
       rotation: ov.rotation,
+      hotStage: ov.hot_stage || null,
+      leaders: ov.leaders || [],
       macroOnly: false
     };
   }
 
   window.WaveDeckBridge = {
-    VERSION: '5.0-WD5',
+    VERSION: '5.0-WD6',
     base: function () { return BASE; },
     open: open,
     pushOverlay: pushOverlay,

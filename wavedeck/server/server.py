@@ -90,7 +90,7 @@ def _check_secret(handler: BaseHTTPRequestHandler) -> bool:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "WaveDeck/0.1.11"
+    server_version = "WaveDeck/0.1.12"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("[wavedeck] " + (fmt % args) + "\n")

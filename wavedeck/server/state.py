@@ -72,9 +72,11 @@ def _default_state() -> dict[str, Any]:
             "lots": 1,
         },
         "costs": {
-            "session_usd": 0.12,
-            "day_usd": 1.45,
-            "month_usd": 28.6,
+            "session_usd": 0.0,
+            "day_usd": 0.0,
+            "month_usd": 0.0,
+            "local_calls": 0,
+            "cloud_calls": 0,
             "provider": "heuristic",
         },
         "transport": {
