@@ -208,9 +208,42 @@ def resolve_provider(name: str | None = None):
     return HeuristicProvider()
 
 
+def _llm_gate_acquire() -> None:
+    """WD = P1 on shared GPU / LM instance."""
+    try:
+        import sys
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[2]
+        sys.path.insert(0, str(root / "server")) if str(root / "server") not in sys.path else None
+        import llm_gate as lg  # type: ignore
+
+        lg.acquire("wd", ttl_sec=90)
+    except Exception:
+        pass
+
+
+def _llm_gate_release() -> None:
+    try:
+        import sys
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[2]
+        if str(root / "server") not in sys.path:
+            sys.path.insert(0, str(root / "server"))
+        import llm_gate as lg  # type: ignore
+
+        lg.release("wd")
+    except Exception:
+        pass
+
+
 def infer_with_fallback(ctx: dict[str, Any], name: str | None = None) -> tuple[dict[str, Any], str | None]:
     """Try configured provider; fall back to heuristic on error."""
     primary = resolve_provider(name)
+    need_gate = primary.name in {"ollama", "openai"}
+    if need_gate:
+        _llm_gate_acquire()
     try:
         return primary.infer(ctx), None
     except Exception as exc:
@@ -221,3 +254,6 @@ def infer_with_fallback(ctx: dict[str, Any], name: str | None = None) -> tuple[d
         fb["summary"] = f"〔{primary.name} 失敗：{exc}〕改用啟發式。 " + fb["summary"]
         fb["provider"] = "heuristic"
         return fb, str(exc)
+    finally:
+        if need_gate:
+            _llm_gate_release()

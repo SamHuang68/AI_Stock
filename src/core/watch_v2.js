@@ -546,11 +546,16 @@ function _wdChipHtml(code) {
 }
 
 function _wdWatchRefreshOnce() {
-  if (!window.WaveDeckBridge || typeof WaveDeckBridge.fetchState !== 'function') return;
+  if (!window.WaveDeckBridge) return;
+  var pull = typeof WaveDeckBridge.fetchChipState === 'function'
+    ? WaveDeckBridge.fetchChipState
+    : WaveDeckBridge.fetchState;
+  if (typeof pull !== 'function') return;
   if (_wdWatchRefreshOnce._busy) return;
   if (_wdWatchRefreshOnce._paintedAt && (Date.now() - _wdWatchRefreshOnce._paintedAt) < 8000) return;
   _wdWatchRefreshOnce._busy = true;
-  WaveDeckBridge.fetchState(false).then(function (st) {
+  // Prefer ST bus (WD async push) — no N× pull against WD
+  pull.call(WaveDeckBridge, false).then(function (st) {
     _wdWatchRefreshOnce._busy = false;
     if (!st) return;
     _wdWatchRefreshOnce._paintedAt = Date.now();

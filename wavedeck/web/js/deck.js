@@ -188,7 +188,11 @@
       ? ov.aggressiveness
       : (stCtx.styleHint != null ? ('建議 ' + stCtx.styleHint) : '—');
     paintSpillMeter(ov);
-    if (ov.note) {
+    var link = s.st_link || {};
+    if (ov.fail_safe || link.fail_safe) {
+      $('stNote').textContent = '⚠ Fail-safe：' + (ov.fail_safe_reason || link.fail_safe_reason || 'ST 連線異常') +
+        ' · 風格已保守／降載／失效收緊';
+    } else if (ov.note) {
       $('stNote').textContent = ov.note;
     } else if (stCtx.note) {
       $('stNote').textContent = stCtx.note;
@@ -357,7 +361,13 @@
       }
       return;
     }
-    if ($('stSyncTxt')) $('stSyncTxt').textContent = 'ST OK';
+    var link = (state && state.st_link) || {};
+    if ($('stSyncTxt')) {
+      if (link.fail_safe) $('stSyncTxt').textContent = 'FS';
+      else if (link.status === 'down') $('stSyncTxt').textContent = 'ST ↓';
+      else if (link.status === 'warn') $('stSyncTxt').textContent = 'ST ?';
+      else $('stSyncTxt').textContent = 'ST OK';
+    }
     refreshStCost().catch(function () {});
 
     var pack = await Promise.all([

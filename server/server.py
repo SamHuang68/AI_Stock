@@ -1586,6 +1586,10 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._handle_wavedeck_bridge_get()
         elif p == '/api/cost-meter' or p.startswith('/api/cost-meter?'):
             self._handle_wavedeck_bridge_get()
+        elif p == '/api/override-alpha' or p.startswith('/api/override-alpha?'):
+            self._handle_override_alpha_get()
+        elif p == '/api/llm-gate' or p.startswith('/api/llm-gate?'):
+            self._handle_llm_gate_get()
         else:
             # 安全(v3.9 review):SimpleHTTPRequestHandler 預設會把工作目錄所有檔當靜態檔服務。
             # 阻擋敏感檔被下載:金鑰設定(alert_config 含 telegram token/gmail 密碼)、原始碼(.py)、
@@ -1609,7 +1613,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 or o.startswith('http://127.0.0.1:%d' % PORT)):
             return True
         p = self.path.split('?')[0]
-        if p in ('/bridge/wavedeck', '/api/cost-meter'):
+        if p in ('/bridge/wavedeck', '/api/cost-meter', '/api/override-alpha',
+                 '/api/override-alpha/review', '/api/llm-gate'):
             try:
                 import wavedeck_bus as wdb
                 return wdb.is_wavedeck_origin(o)
@@ -1641,6 +1646,12 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._handle_ai_local()
         elif p == '/bridge/wavedeck':
             self._handle_wavedeck_bridge_post()
+        elif p == '/api/override-alpha':
+            self._handle_override_alpha_post()
+        elif p == '/api/override-alpha/review':
+            self._handle_override_alpha_review()
+        elif p == '/api/llm-gate':
+            self._handle_llm_gate_post()
         elif p == '/notify':
             self._handle_notify()
         elif p == '/universe/refresh':
@@ -1770,6 +1781,91 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._ok(json.dumps(snap, ensure_ascii=False).encode())
         except Exception as e:
             self._err('wavedeck bus: ' + str(e), 500)
+
+    def _handle_override_alpha_get(self):
+        try:
+            import override_alpha as oa
+            qs = parse_qs(urlparse(self.path).query)
+            lim = int((qs.get('limit') or ['40'])[0])
+            self._ok(json.dumps({'ok': True, 'items': oa.recent(lim)}, ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('override-alpha: ' + str(e), 500)
+
+    def _handle_override_alpha_post(self):
+        try:
+            n = int(self.headers.get('Content-Length') or 0)
+        except Exception:
+            n = 0
+        body = {}
+        if n > 0:
+            try:
+                body = json.loads(self.rfile.read(n).decode('utf-8') or '{}')
+            except Exception:
+                body = {}
+        try:
+            import override_alpha as oa
+            self._ok(json.dumps(oa.log_event(body if isinstance(body, dict) else {}), ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('override-alpha: ' + str(e), 500)
+
+    def _handle_override_alpha_review(self):
+        """盤後：用本機 LLM 回顧覆寫 log（低優先；WD 忙碌則 defer）。"""
+        try:
+            import override_alpha as oa
+            import llm_gate as lg
+            if lg.wd_busy():
+                self._err('WD 推論優先中，請稍後再跑覆寫回顧', 503)
+                return
+            if not lg.wait_or_defer('st', wait_sec=1.0, ttl_sec=120):
+                self._err('LLM gate busy', 503)
+                return
+            try:
+                ctx = oa.summary_for_review(30)
+                import ai_local as al
+                prompt = (
+                    '你是台股宏觀風控研究員。根據「ST Override Alpha Log」評估：'
+                    '1) 降載／保守覆寫是否及時 2) 是否有過度降載 3) 建議調整的體質／外溢閾值。'
+                    '只根據提供的 log，勿編造。結尾加「⚠ 非投資建議」。'
+                )
+                out = al.chat(prompt, context=ctx)
+                self._ok(json.dumps({'ok': True, 'review': out, 'log_preview': ctx[:1500]}, ensure_ascii=False).encode())
+            finally:
+                lg.release('st')
+        except Exception as e:
+            self._err('override-alpha review: ' + str(e), 500)
+
+    def _handle_llm_gate_get(self):
+        try:
+            import llm_gate as lg
+            self._ok(json.dumps(lg.status(), ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('llm-gate: ' + str(e), 500)
+
+    def _handle_llm_gate_post(self):
+        try:
+            n = int(self.headers.get('Content-Length') or 0)
+        except Exception:
+            n = 0
+        body = {}
+        if n > 0:
+            try:
+                body = json.loads(self.rfile.read(n).decode('utf-8') or '{}')
+            except Exception:
+                body = {}
+        try:
+            import llm_gate as lg
+            op = str(body.get('op') or 'status')
+            owner = str(body.get('owner') or 'st')
+            if op == 'acquire':
+                ok = lg.acquire(owner, float(body.get('ttl_sec') or 90))
+                self._ok(json.dumps({'ok': ok, **lg.status()}, ensure_ascii=False).encode())
+            elif op == 'release':
+                lg.release(owner)
+                self._ok(json.dumps(lg.status(), ensure_ascii=False).encode())
+            else:
+                self._ok(json.dumps(lg.status(), ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('llm-gate: ' + str(e), 500)
 
     def _handle_single(self, sym):
         qs = parse_qs(urlparse(self.path).query)

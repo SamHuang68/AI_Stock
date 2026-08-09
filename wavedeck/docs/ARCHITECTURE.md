@@ -179,15 +179,18 @@ stateDiagram-v2
 | 決策上下文 | `handle_signal` 帶入 `st_spillover_prob`／`st_hot_stage`／`st_delever` 供 AI／啟發式 |
 | 啟發式／閘門 | 外溢&lt;0.30 → 觀望／追價高；&lt;0.20 → 禁止新單；降載口數減半 |
 | Pulse AI 摘要 | 本機 `POST /ai/local`（LM Studio）；失敗則規則後援；計入共享成本 |
-| Watch／Book ← WD | `WaveDeckBridge.fetchState` → TXF chip／個股 MACRO 風格 chip／執行狀態條 |
-| WD → ST 反向繁線 | Console 每 ~12s `POST /bridge/wavedeck`（FSM／部位／成本） |
+| Watch／Book ← WD | `WaveDeckBridge.fetchChipState` 優先讀 ST bus 快取（WD 異步推播）；fallback 才 pull WD |
+| WD → ST 反向繁線 | 狀態機／覆寫／Fail-safe 變更時 `st_push.push_async`；Console 仍可週期補推 |
 | 共享成本計數器 | ST `GET /bridge/wavedeck`／`/api/cost-meter`；頂列 WD 燈 title 顯示合計；`/health.wavedeck` 含 age_sec／fresh |
 | LLM 成本累計 | OpenAI `usage`→USD；Ollama 計本機次；啟發式 $0；回報至 ST 合併 |
-| ST 心跳失敗 | WaveDeck 亮黃燈；不自動加倉 |
+| Heartbeat／Fail-safe | WD 每 5s ping ST `/health`；斷線或覆寫過期 → 風格 35、降載、收緊失效、禁新單 |
+| Override Alpha | 風險覆寫寫入 ST `data/override_alpha.db`；`POST /api/override-alpha/review` 盤後本機 LLM 回顧 |
+| LLM 優先權 | 共享 `data/llm_gate.json`：WD=P1（可搶 ST）；ST Pulse／覆寫回顧 defer；實例隔離 ST `:1234`／WD Ollama `:11434` |
 
 協定路徑（本機）：
 - ST → WD：`http://127.0.0.1:18433/bridge/st`
 - WD → ST：`http://127.0.0.1:18432/bridge/wavedeck`
+- Override／Gate：`/api/override-alpha`、`/api/llm-gate`
 
 ### 5.1 欄位契約（camelCase ↔ snake_case）
 
@@ -221,6 +224,12 @@ stateDiagram-v2
 ### v1.6（已交付 · ST 閉環）
 - 反向繁線、共享成本、供應鏈外溢精算、啟發式／閘門外溢、外溢儀表、Heat／Breadth 掛鉤
 - ST `/health.wavedeck` freshness；OpenAI usage 成本累計
+
+### v1.7（已交付 · 韌性／覆寫 alpha／異步 chip／LLM 隔離）
+- WD→ST heartbeat + Fail-safe 降級
+- Override Alpha Tracking + 盤後 review
+- 狀態機變更異步推播；Watch／Book chip 讀 bus
+- `llm_gate`：WD P1 vs ST 摘要 defer
 
 ### v2
 - 可選 Redis 熱狀態、Docker Compose、雲端模型 opt-in、正式簽章 Webhook

@@ -314,7 +314,9 @@
         leaders: leaders,
         hot_stage: ctx.hotStage || ctx.hot_stage || null,
         chain_breadth: ctx.chainBreadth != null ? ctx.chainBreadth : null,
-        chain_contig: ctx.chainContig != null ? ctx.chainContig : null
+        chain_contig: ctx.chainContig != null ? ctx.chainContig : null,
+        twii: (ctx.twii != null && isFinite(Number(ctx.twii))) ? Number(ctx.twii) : null,
+        twii_chg: (ctx.twiiChg != null && isFinite(Number(ctx.twiiChg))) ? Number(ctx.twiiChg) : null
       }
     };
 
@@ -356,6 +358,24 @@
   var _stateAt = 0;
   var STATE_TTL_MS = 8000;
 
+  function stateFromBusReport(report) {
+    if (!report) return null;
+    return {
+      symbol: report.symbol || 'TXF',
+      mode: report.mode,
+      fsm: report.fsm,
+      style: report.style,
+      kill_switch: report.kill_switch,
+      ai: report.ai || {},
+      positions: report.positions || {},
+      st_overlay: report.st_overlay || {},
+      costs: report.costs || {},
+      account: report.account || {},
+      st_link: report.st_link || {},
+      fromBus: true
+    };
+  }
+
   function fetchState(force) {
     var now = Date.now();
     if (!force && _stateCache && (now - _stateAt) < STATE_TTL_MS) {
@@ -388,10 +408,30 @@
         if (j && j.ok) {
           _costCache = j;
           _costAt = Date.now();
+          // Prefer async-pushed bus for chip cache (no WD pull)
+          var syn = stateFromBusReport(j.report);
+          if (syn) {
+            _stateCache = syn;
+            _stateAt = Date.now();
+          }
         }
         return j;
       })
       .catch(function () { return null; });
+  }
+
+  /**
+   * Chip/UI state: prefer ST bus cache (WD push), fallback pull WD.
+   * Avoids N-symbol polling against WD during watchlist paint.
+   */
+  function fetchChipState(force) {
+    return fetchCostMeter(!!force).then(function (meter) {
+      if (meter && meter.report) {
+        var syn = stateFromBusReport(meter.report);
+        if (syn) return syn;
+      }
+      return fetchState(!!force);
+    });
   }
 
   function lastWdReport() {
@@ -459,7 +499,7 @@
   }
 
   window.WaveDeckBridge = {
-    VERSION: '5.0-WD6',
+    VERSION: '5.0-WD7',
     base: function () { return BASE; },
     open: open,
     pushOverlay: pushOverlay,
@@ -473,9 +513,11 @@
     autoEnabled: autoEnabled,
     setAutoEnabled: setAutoEnabled,
     fetchState: fetchState,
+    fetchChipState: fetchChipState,
     hintForSymbol: hintForSymbol,
     fetchCostMeter: fetchCostMeter,
-    lastWdReport: lastWdReport
+    lastWdReport: lastWdReport,
+    stateFromBusReport: stateFromBusReport
   };
 
   try { console.log('[wavedeck-bridge] ready → ' + BASE); } catch (e) {}

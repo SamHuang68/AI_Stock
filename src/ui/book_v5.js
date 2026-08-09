@@ -356,8 +356,14 @@
           return;
         }
         var paint = function () { render(x.d); };
-        if (window.WaveDeckBridge && typeof WaveDeckBridge.fetchState === 'function') {
-          WaveDeckBridge.fetchState(false).then(paint).catch(paint);
+        var pull = window.WaveDeckBridge && (
+          typeof WaveDeckBridge.fetchChipState === 'function'
+            ? WaveDeckBridge.fetchChipState
+            : WaveDeckBridge.fetchState
+        );
+        if (typeof pull === 'function') {
+          // Prefer ST bus cache (WD async push) — avoid blocking Book on WD pull
+          pull.call(WaveDeckBridge, false).then(paint).catch(paint);
         } else {
           paint();
         }

@@ -43,11 +43,19 @@ def evaluate_gate(state: dict[str, Any], decision: dict[str, Any]) -> dict[str, 
             pass
 
     st = state.get("st_overlay") or {}
+    link = state.get("st_link") or {}
     lots = int((state.get("exec") or {}).get("lots") or 1)
     try:
         spill = float(st.get("spillover_prob")) if st.get("spillover_prob") is not None else None
     except Exception:
         spill = None
+
+    # Fail-safe / ST link down: block new risk-on
+    if (st.get("fail_safe") or link.get("fail_safe") or link.get("status") == "down") and decision.get(
+        "action"
+    ) in {"ENTER_LONG", "ENTER_SHORT"}:
+        allow = False
+        reasons.append("Fail-safe／ST 斷線：禁止新單")
 
     # Extreme low spillover: block new risk-on (macro diffusion broken)
     if spill is not None and spill < 0.20 and decision.get("action") in {

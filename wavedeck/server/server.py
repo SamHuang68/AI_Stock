@@ -90,7 +90,7 @@ def _check_secret(handler: BaseHTTPRequestHandler) -> bool:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "WaveDeck/0.1.12"
+    server_version = "WaveDeck/0.1.13"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("[wavedeck] " + (fmt % args) + "\n")
@@ -107,6 +107,7 @@ class Handler(BaseHTTPRequestHandler):
         path = u.path.rstrip("/") or "/"
 
         if path == "/health":
+            snap = RUNTIME.snapshot()
             return _json(
                 self,
                 200,
@@ -115,11 +116,38 @@ class Handler(BaseHTTPRequestHandler):
                     "service": "WaveDeck",
                     "version": (ROOT / "VERSION").read_text(encoding="utf-8").strip(),
                     "ts": now_iso(),
-                    "fsm": RUNTIME.snapshot().get("fsm"),
-                    "mode": RUNTIME.snapshot().get("mode"),
-                    "provider": (RUNTIME.snapshot().get("costs") or {}).get("provider"),
+                    "fsm": snap.get("fsm"),
+                    "mode": snap.get("mode"),
+                    "provider": (snap.get("costs") or {}).get("provider"),
+                    "st_link": snap.get("st_link") or {},
+                    "fail_safe": bool((snap.get("st_overlay") or {}).get("fail_safe")),
                 },
             )
+        if path == "/api/st_link":
+            snap = RUNTIME.snapshot()
+            return _json(
+                self,
+                200,
+                {
+                    "ok": True,
+                    "st_link": snap.get("st_link") or {},
+                    "fail_safe": bool((snap.get("st_overlay") or {}).get("fail_safe")),
+                    "style": snap.get("style"),
+                },
+            )
+        if path == "/api/llm_busy":
+            try:
+                import sys
+                from pathlib import Path as _P
+
+                _root = _P(__file__).resolve().parents[2]
+                if str(_root / "server") not in sys.path:
+                    sys.path.insert(0, str(_root / "server"))
+                import llm_gate as lg  # type: ignore
+
+                return _json(self, 200, lg.status())
+            except Exception as exc:
+                return _json(self, 200, {"ok": True, "held": False, "error": str(exc)})
         if path == "/api/state":
             return _json(self, 200, {"ok": True, "state": RUNTIME.snapshot()})
         if path == "/api/config":
@@ -191,7 +219,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/kill":
             on = bool(body.get("on"))
-            return _json(self, 200, {"ok": True, "state": RUNTIME.set_kill(on)})
+            snap = RUNTIME.set_kill(on)
+            try:
+                from server.st_push import push_async
+
+                push_async(snap, reason="kill", force=True)
+            except Exception:
+                pass
+            return _json(self, 200, {"ok": True, "state": snap})
 
         if path == "/api/control":
             cmd = str(body.get("cmd") or "")
@@ -280,17 +315,30 @@ def main() -> None:
         RUNTIME.patch(transport={"domain": f"{HOST}:{port}", "webhook": "ready"})
     except Exception:
         pass
+    try:
+        from server.st_link import start as start_st_link
+
+        start_st_link()
+    except Exception as exc:
+        sys.stderr.write(f"[wavedeck] st_link heartbeat skip: {exc}\n")
     if port != PORT:
         print(f"[wavedeck] 預設埠 {PORT} 不可用，已改用 {port}")
     print("=" * 52)
     print(f" WaveDeck · 浪潮執行台  http://{HOST}:{port}/")
     print(f" Health                 http://{HOST}:{port}/health")
     print(f" Stock Terminal bridge  POST /bridge/st")
+    print(f" ST heartbeat           every {os.environ.get('WD_ST_HEARTBEAT_SEC', '5')}s → fail-safe")
     print("=" * 52)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\n[wavedeck] bye")
+        try:
+            from server.st_link import stop as stop_st_link
+
+            stop_st_link()
+        except Exception:
+            pass
         httpd.server_close()
 
 

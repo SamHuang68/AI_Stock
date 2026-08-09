@@ -228,6 +228,45 @@ class WaveDeckSmoke(unittest.TestCase):
         self.assertFalse(g["allow"])
         self.assertTrue(any("極低" in r for r in g["reasons"]))
 
+    def test_fail_safe_blocks_new_entries(self):
+        st = {
+            "kill_switch": False,
+            "fsm": "Idle",
+            "account": {"yesterday_balance": 100, "equity": 100},
+            "no_overnight": {"enabled": False},
+            "st_overlay": {"fail_safe": True, "delever": True},
+            "st_link": {"fail_safe": True, "status": "down"},
+            "style": 35,
+            "exec": {"lots": 2},
+        }
+        g = evaluate_gate(st, {"action": "ENTER_LONG", "process": {"chase_risk": "low"}})
+        self.assertFalse(g["allow"])
+        self.assertTrue(any("Fail-safe" in r for r in g["reasons"]))
+
+    def test_apply_fail_safe_tightens_style(self):
+        from server.st_link import apply_fail_safe
+        from server.state import RUNTIME
+
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch("server.state.DATA", Path(td)), mock.patch(
+                "server.state.STATE_PATH", Path(td) / "runtime_state.json"
+            ), mock.patch("server.audit.DATA", Path(td)), mock.patch(
+                "server.st_link.push_async"
+            ):
+                RUNTIME.patch(
+                    style=70,
+                    exec={"price": 45000},
+                    ai={"invalidation": {"side": "below", "price": 44000}, "summary": "ok"},
+                    st_overlay={},
+                    st_link={},
+                )
+                snap = apply_fail_safe("ST 心跳中斷")
+                self.assertEqual(snap.get("style"), 35)
+                self.assertTrue((snap.get("st_overlay") or {}).get("fail_safe"))
+                self.assertTrue((snap.get("st_link") or {}).get("fail_safe"))
+                inv = ((snap.get("ai") or {}).get("invalidation") or {})
+                self.assertGreater(float(inv.get("price")), 44000)
+
 
 if __name__ == "__main__":
     unittest.main()

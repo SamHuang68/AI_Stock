@@ -123,6 +123,7 @@ def accept_report(body: dict[str, Any]) -> dict[str, Any]:
             'action_label': ai.get('action_label'),
             'confidence': ai.get('confidence'),
             'provider': ai.get('provider'),
+            'invalidation': ai.get('invalidation') if isinstance(ai.get('invalidation'), dict) else {},
         },
         'positions': {
             'account': pos.get('account'),
@@ -140,6 +141,8 @@ def accept_report(body: dict[str, Any]) -> dict[str, Any]:
             'chain_breadth': ov.get('chain_breadth'),
             'chain_contig': ov.get('chain_contig'),
             'note': (str(ov.get('note') or ''))[:200],
+            'fail_safe': bool(ov.get('fail_safe')),
+            'fail_safe_reason': (str(ov.get('fail_safe_reason') or ''))[:120],
         },
         'costs': {
             'session_usd': costs.get('session_usd'),
@@ -149,6 +152,9 @@ def accept_report(body: dict[str, Any]) -> dict[str, Any]:
             'cloud_calls': costs.get('cloud_calls'),
             'provider': costs.get('provider'),
         },
+        'account': body.get('account') if isinstance(body.get('account'), dict) else {},
+        'st_link': body.get('st_link') if isinstance(body.get('st_link'), dict) else {},
+        'push_reason': str(body.get('push_reason') or '')[:64],
         'source': str(body.get('source') or 'wavedeck')[:64],
         'received_at': _now_iso(),
         'received_epoch_ms': int(time.time() * 1000),

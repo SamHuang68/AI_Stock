@@ -417,6 +417,8 @@
       chainBreadth: m.chainBreadth,
       chainContig: m.chainContig,
       sectors: m.sectors || null,
+      twii: m.twii,
+      twiiChg: m.twiiChg,
       source: 'pulse_v5',
       force: !!force,
       silent: !force
@@ -493,7 +495,9 @@
       rotationHealth: rot,
       spilloverProb: spill,
       leaders: leaders,
-      sectors: { up: sec.up || [], dn: sec.dn || [] }
+      sectors: { up: sec.up || [], dn: sec.dn || [] },
+      twii: (t00.price != null && isFinite(Number(t00.price))) ? Number(t00.price) : null,
+      twiiChg: (t00.changePct != null && isFinite(Number(t00.changePct))) ? Number(t00.changePct) : null
     };
     // Prefer dedicated TW market fundamental score when pack carries it
     if (pack.fund && pack.fund.score != null) {

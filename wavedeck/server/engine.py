@@ -7,9 +7,12 @@ from typing import Any
 from . import audit
 from .broker import ensure_master_seeds, get_broker
 from .config import load_config, set_broker_kind, set_mode, set_provider
+from .override_notify import notify_async as notify_override_alpha
 from .providers import infer_with_fallback
 from .risk import evaluate_gate
 from .state import RUNTIME, now_iso
+from .st_link import touch_overlay
+from .st_push import push_async
 
 
 def apply_st_bridge(body: dict[str, Any]) -> dict[str, Any]:
@@ -49,10 +52,12 @@ def apply_st_bridge(body: dict[str, Any]) -> dict[str, Any]:
         "source": str(meta.get("source") or body.get("source") or "st-macro")[:64],
         "score": meta.get("score"),
         "advRatio": meta.get("advRatio"),
+        "fail_safe": False,
+        "fail_safe_reason": None,
     }
     patch: dict[str, Any] = {
         "st_overlay": overlay,
-        "lights": {"st_bridge": "ok"},
+        "lights": {"st_bridge": "ok", "risk_watchdog": "ok"},
     }
     if style is not None:
         try:
@@ -60,7 +65,17 @@ def apply_st_bridge(body: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             pass
     snap = RUNTIME.patch(**patch)
+    try:
+        touch_overlay()
+        snap = RUNTIME.snapshot()
+    except Exception:
+        pass
     audit.write("st_bridge", body)
+    try:
+        notify_override_alpha(body, snap)
+        push_async(snap, reason="st_bridge", force=True)
+    except Exception:
+        pass
     return snap
 
 
@@ -87,6 +102,10 @@ def set_exec_mode(mode: str) -> dict[str, Any]:
         },
     )
     audit.write("mode", {"mode": cfg["mode"], "broker": cfg["broker"]["kind"]})
+    try:
+        push_async(snap, reason="mode", force=True)
+    except Exception:
+        pass
     return {"ok": True, "mode": cfg["mode"], "broker": cfg["broker"]["kind"], "state": snap}
 
 
@@ -266,6 +285,10 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
             "broker": get_broker().name,
         },
     )
+    try:
+        push_async(snap, reason="decision:" + str(action), force=True)
+    except Exception:
+        pass
     return {
         "ok": True,
         "decision": decision,
