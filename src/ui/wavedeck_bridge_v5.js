@@ -9,6 +9,14 @@
   'use strict';
 
   var DEFAULT_URL = 'http://127.0.0.1:18433/';
+  var CANDIDATES = [
+    'http://127.0.0.1:18433/',
+    'http://127.0.0.1:18434/',
+    'http://127.0.0.1:18765/',
+    'http://127.0.0.1:28765/',
+    'http://127.0.0.1:38433/',
+    'http://127.0.0.1:8765/'
+  ];
   var BASE = (typeof window.WAVEDECK_URL === 'string' && window.WAVEDECK_URL)
     ? String(window.WAVEDECK_URL).replace(/\/?$/, '/')
     : DEFAULT_URL;
@@ -21,9 +29,37 @@
   }
 
   function open(url) {
-    var target = url || BASE;
-    window.open(target, '_blank', 'noopener');
-    toast('已開啟 WaveDeck');
+    if (url) {
+      window.open(url, '_blank', 'noopener');
+      toast('已開啟 WaveDeck');
+      return;
+    }
+    // 探測實際存活埠（Windows 可能因 excluded range 改埠）
+    var list = [BASE].concat(CANDIDATES);
+    var i = 0;
+    function tryNext() {
+      if (i >= list.length) {
+        window.open(BASE, '_blank', 'noopener');
+        toast('已開啟 WaveDeck（若空白請先 START_WAVEDECK）');
+        return;
+      }
+      var u = list[i++];
+      var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+      var t = setTimeout(function () { if (ctrl) ctrl.abort(); }, 600);
+      fetch(u.replace(/\/?$/, '') + '/health', { signal: ctrl && ctrl.signal, cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+        .then(function () {
+          clearTimeout(t);
+          BASE = u.replace(/\/?$/, '/');
+          window.open(BASE, '_blank', 'noopener');
+          toast('已開啟 WaveDeck · ' + BASE);
+        })
+        .catch(function () {
+          clearTimeout(t);
+          tryNext();
+        });
+    }
+    tryNext();
   }
 
   function pushOverlay(payload) {

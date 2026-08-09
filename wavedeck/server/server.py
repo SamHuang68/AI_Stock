@@ -35,6 +35,16 @@ from server.state import RUNTIME, now_iso  # noqa: E402
 HOST = os.environ.get("WAVEDECK_HOST", "127.0.0.1")
 PORT = int(os.environ.get("WAVEDECK_PORT", "18433"))
 SECRET = os.environ.get("WAVEDECK_SECRET", "")
+# Windows 常把某些埠段列為 excluded（WinError 10013），預設失敗時改試這些埠
+PORT_FALLBACKS = [
+    PORT,
+    18434,
+    18765,
+    28765,
+    38433,
+    8765,
+]
+PORT_FILE = ROOT / "data" / "wavedeck.port"
 
 
 def _boot_sync_config() -> None:
@@ -219,12 +229,62 @@ class Handler(BaseHTTPRequestHandler):
         return _json(self, 404, {"ok": False, "error": "not found"})
 
 
+def _candidate_ports() -> list[int]:
+    seen: set[int] = set()
+    out: list[int] = []
+    for p in PORT_FALLBACKS:
+        try:
+            n = int(p)
+        except Exception:
+            continue
+        if n <= 0 or n in seen:
+            continue
+        seen.add(n)
+        out.append(n)
+    return out
+
+
+def _bind_server() -> tuple[ThreadingHTTPServer, int]:
+    """Bind loopback; on Windows PermissionError(10013) try next ports."""
+    errors: list[str] = []
+    for port in _candidate_ports():
+        try:
+            httpd = ThreadingHTTPServer((HOST, port), Handler)
+            return httpd, port
+        except OSError as exc:
+            # WinError 10013 = excluded/forbidden; 10048 = in use
+            errors.append(f"{HOST}:{port} → {exc}")
+            continue
+    msg = "無法綁定任何埠。嘗試過：\n  - " + "\n  - ".join(errors)
+    msg += (
+        "\n\nWindows 若出現 WinError 10013：該埠可能在 excluded port range。\n"
+        "可改埠：set WAVEDECK_PORT=28765\n"
+        "或查看：netsh interface ipv4 show excludedportrange protocol=tcp"
+    )
+    raise OSError(msg)
+
+
+def _write_port_file(port: int) -> None:
+    try:
+        PORT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        PORT_FILE.write_text(str(port), encoding="utf-8")
+    except Exception as exc:
+        sys.stderr.write(f"[wavedeck] port file skip: {exc}\n")
+
+
 def main() -> None:
     _boot_sync_config()
-    httpd = ThreadingHTTPServer((HOST, PORT), Handler)
+    httpd, port = _bind_server()
+    _write_port_file(port)
+    try:
+        RUNTIME.patch(transport={"domain": f"{HOST}:{port}", "webhook": "ready"})
+    except Exception:
+        pass
+    if port != PORT:
+        print(f"[wavedeck] 預設埠 {PORT} 不可用，已改用 {port}")
     print("=" * 52)
-    print(f" WaveDeck · 浪潮執行台  http://{HOST}:{PORT}/")
-    print(f" Health                 http://{HOST}:{PORT}/health")
+    print(f" WaveDeck · 浪潮執行台  http://{HOST}:{port}/")
+    print(f" Health                 http://{HOST}:{port}/health")
     print(f" Stock Terminal bridge  POST /bridge/st")
     print("=" * 52)
     try:

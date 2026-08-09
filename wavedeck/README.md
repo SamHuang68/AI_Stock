@@ -36,6 +36,10 @@ python3 run.py
 http://127.0.0.1:18433/
 ```
 
+若 Windows 出現 `WinError 10013`（埠被系統保留），伺服器會自動改試
+`18434 / 18765 / 28765 / …`，實際埠寫入 `data/wavedeck.port`。
+亦可手動：`set WAVEDECK_PORT=28765` 再 `py -3 run.py`。
+
 Windows 亦可雙擊 `START_WAVEDECK.cmd`。
 
 ### 艦橋上先按這顆
