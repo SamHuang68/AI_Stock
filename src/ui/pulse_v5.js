@@ -107,31 +107,39 @@
       /* 體質／風險分數：金／青，勿當漲跌色 */
       '#pl-root .pl-st-pos{color:var(--gold)}#pl-root .pl-st-risk{color:var(--cyan)}' +
       '#pl-root .pl-st-mid{color:#94a3b8}' +
-      '#pl-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
-      '#pl-body.pl-expanded{overflow:auto}' +
-      /* KPI 細條：主數值略突出，但不再放大到擠壓 5 欄下區 */
-      '#pl-root .pl-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin:0 0 6px;min-width:0;flex:0 0 auto}' +
+      /* 垂直比例：頂列(線圖)吃高度；第三排壓縮；中排決策窗居中 */
+      '#pl-body{flex:1;min-height:0;display:grid!important;' +
+        'grid-template-rows:minmax(108px,0.82fr) minmax(0,2.35fr);gap:6px;overflow:hidden}' +
+      '#pl-body.pl-expanded{overflow:auto;grid-template-rows:minmax(108px,0.7fr) minmax(0,1.6fr) auto}' +
+      /* KPI 頂列：格內 flex，spark 吃剩餘高度（不再固定 12px 扁線） */
+      '#pl-root .pl-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;' +
+        'margin:0;min-width:0;min-height:0;height:100%;align-items:stretch}' +
       '#pl-root .pl-strip .cell{background:linear-gradient(180deg,rgba(17,27,46,.95),rgba(11,18,32,.98));' +
-        'border:1px solid var(--border);border-radius:5px;padding:4px 6px;min-width:0;overflow:hidden}' +
+        'border:1px solid var(--border);border-radius:5px;padding:4px 6px;min-width:0;min-height:0;' +
+        'overflow:hidden;display:flex;flex-direction:column;height:100%;box-sizing:border-box}' +
       '#pl-root .pl-strip .cell.hero{border-color:rgba(245,197,24,.35);' +
         'background:linear-gradient(180deg,rgba(28,38,58,.98),rgba(14,22,38,.98));box-shadow:inset 0 1px 0 rgba(245,197,24,.08)}' +
       '#pl-root .pl-strip .k{font-size:8px;color:#a8b6c8;letter-spacing:.3px;margin-bottom:1px;' +
-        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 0 auto}' +
       '#pl-root .pl-strip .v{font-size:14px;font-weight:800;color:var(--thi);line-height:1.15;' +
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums;' +
-        'margin-bottom:2px}' +
+        'margin-bottom:1px;flex:0 0 auto}' +
       '#pl-root .pl-strip .cell.hero .v{font-size:15px;letter-spacing:-0.2px}' +
       '#pl-root .pl-strip .s{font-size:10px;margin-top:0;font-weight:800;line-height:1.25;' +
-        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums;flex:0 0 auto}' +
       '#pl-root .pl-strip .s .pl-subq{font-size:8px;font-weight:600;color:#94a3b8;margin-left:3px}' +
       '#pl-root .pl-strip .badge{display:inline-flex;align-items:center;gap:3px;font-size:8px;color:var(--cyan)}' +
       '#pl-root .pl-strip .dot{width:4px;height:4px;border-radius:50%;background:var(--cyan);box-shadow:0 0 4px var(--cyan);flex-shrink:0}' +
       '#pl-root .pl-strip .viz-hide,#pl-root .pl-strip .viz-meter,#pl-root .pl-strip .viz-seg,' +
         '#pl-root .pl-strip .viz-chip{display:none!important}' +
-      '#pl-root .pl-strip .pl-idx-spark{height:12px;margin-top:1px;opacity:.85}' +
-      '#pl-root .pl-strip .pl-idx-spark .vz-spark{width:100%;height:12px;display:block}' +
+      '#pl-root .pl-strip .pl-ttabs{flex:0 0 auto}' +
+      '#pl-root .pl-strip .vz-meter{margin-top:1px;height:3px;flex:0 0 auto}' +
+      '#pl-root .pl-strip .vz-ref{margin-top:2px;margin-bottom:2px;height:6px;flex:1 1 0;min-height:8px}' +
+      '#pl-root .pl-strip .vz-ref .vz-tick-lbl{top:7px;font-size:6px}' +
+      '#pl-root .pl-strip .pl-idx-spark{flex:1 1 0;min-height:30px;margin-top:2px;opacity:.95;' +
+        'min-width:0;overflow:hidden;display:flex;align-items:stretch}' +
+      '#pl-root .pl-strip .pl-idx-spark .vz-spark{width:100%;height:100%;min-height:30px;display:block;margin:0}' +
       '#pl-root .pl-strip .vz-chip{display:none!important}' + /* 單顆 chip 改為全型態 tab 列 */
-      '#pl-root .pl-strip .vz-meter{margin-top:1px;height:3px}' +
       /* 市場趨勢型態 tabs：全列可見，當前 highlight、其餘反灰 */
       '#pl-root .pl-ttabs{display:flex;flex-wrap:wrap;gap:2px;margin-top:2px;min-width:0}' +
       '#pl-root .pl-ttabs span{font-size:6px;line-height:1.25;padding:1px 3px;border-radius:3px;' +
@@ -144,11 +152,13 @@
         'background:rgba(34,197,94,.14)}' +
       '#pl-root .pl-ttabs span.on.mid{color:#cbd5e1;border-color:rgba(148,163,184,.5);' +
         'background:rgba(148,163,184,.14)}' +
-      /* 上下兩區 · 一行五框 · gutter 6px（字級放大後勿再用 8px 吃高度） */
-      '#pl-root .pl-dash{flex:1;min-height:0;display:grid;gap:6px;' +
-        'grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
+      /* 中排決策窗略高、底排列表壓縮 */
+      '#pl-root .pl-dash{min-height:0;height:100%;display:grid;gap:6px;' +
+        'grid-template-rows:minmax(0,1.45fr) minmax(0,0.7fr)}' +
       '#pl-root .pl-zone{display:grid;gap:6px;min-width:0;min-height:0;height:100%;' +
         'grid-template-columns:repeat(5,minmax(0,1fr))}' +
+      '#pl-root .z-bot .pl-sec{padding:6px 8px}' +
+      '#pl-root .z-bot .pl-sec h4{margin:0 0 4px}' +
       /* Widget 殼：略提亮底＋微亮邊框，與 --bg 頁底拉開層級 */
       '#pl-root .pl-sec{background:linear-gradient(180deg,rgba(17,27,46,.98),rgba(11,18,32,.99));' +
         'border:1px solid rgba(42,61,92,.92);box-shadow:inset 0 1px 0 rgba(232,240,255,.045);' +
@@ -1025,7 +1035,7 @@
     var spark = '';
     if (V && V.sparkLine && tr.spark && tr.spark.length >= 2) {
       spark = '<div class="pl-idx-spark">' + V.sparkLine(tr.spark, {
-        h: 16, w: 120, grid: false, marks: false,
+        h: 48, w: 160, grid: false, marks: false, pad: 3, strokeWidth: 2.4,
         color: (tr.spark[tr.spark.length - 1] >= tr.spark[0]) ? 'var(--red)' : 'var(--green)'
       }) + '</div>';
     }
