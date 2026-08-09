@@ -117,8 +117,11 @@ ok(/pl-tag\.ok\{/.test(pl) && /#64748b/.test(pl) && /pl-st-pos/.test(pl),
 ok(/pl-bias-bull/.test(pl) && /pl-bias-bear/.test(pl) && /function biasCls/.test(pl),
   'pulse bias labels use TW red-up / green-down (not cyan for 偏空)');
 ok(/pl-flash \.row:nth-child\(even\)/.test(pl) && /pl-wl tr:nth-child\(even\)/.test(pl) &&
-  /table-layout:fixed/.test(pl) && /pl-flash \.row\{[^}]*grid-template-columns:42px 52px/.test(pl),
+  /table-layout:fixed/.test(pl) && /pl-flash \.row\{[^}]*grid-template-columns:36px 44px/.test(pl),
   'pulse flash/watch lists have zebra striping + fixed columns');
+ok(/pl-list li\{[^}]*font-size:8px/.test(pl) && /pl-flash\{[^}]*font-size:8px/.test(pl) &&
+  /pl-flash \.ttl\{[^}]*font-size:8px/.test(pl) && /pl-movers \.pl-list li > span:last-child/.test(pl),
+  'pulse 近漲停／市場快訊縮字避免跳行');
 ok(/data-watch-mkt/.test(pl) && /filterWatchlist/.test(pl) && /pl-wl-scroll/.test(pl) &&
   /c-px/.test(pl) && /c-chg/.test(pl) && /c-tag/.test(pl),
   'pulse watchlist has TW/US tabs, fixed columns, and scroll region');

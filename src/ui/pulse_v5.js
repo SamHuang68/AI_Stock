@@ -299,18 +299,23 @@
       '#pl-root .pl-sbar .ad .u{color:var(--red)}#pl-root .pl-sbar .ad .d{color:var(--green)}' +
       '#pl-root .pl-sbar.hi{background:rgba(245,197,24,.10);box-shadow:inset 2px 0 0 var(--gold)}' +
       '#pl-root .pl-sbar.dim{opacity:.4}' +
-      /* lists */
+      /* lists（近漲停／跌幅異常：縮字避免跳行） */
       '#pl-root .pl-list{list-style:none;margin:0;padding:0;flex:1 1 0;min-height:0;overflow:auto}' +
-      '#pl-root .pl-list li{display:flex;justify-content:space-between;gap:4px;padding:3px 4px;border-bottom:1px solid rgba(26,39,64,.85);cursor:pointer;font-size:9px;' +
-        'border-radius:3px;transition:background .12s,box-shadow .12s,opacity .12s;line-height:1.35;min-width:0}' +
+      '#pl-root .pl-list li{display:flex;justify-content:space-between;align-items:baseline;gap:3px;padding:2px 3px;border-bottom:1px solid rgba(26,39,64,.85);cursor:pointer;font-size:8px;' +
+        'border-radius:3px;transition:background .12s,box-shadow .12s,opacity .12s;line-height:1.25;min-width:0}' +
       '#pl-root .pl-list li:nth-child(even){background:rgba(148,163,184,.035)}' +
       '#pl-root .pl-list li:hover{background:rgba(22,34,64,.88)}' +
       '#pl-root .pl-list li.hi{background:rgba(245,197,24,.10);box-shadow:inset 2px 0 0 var(--gold)}' +
       '#pl-root .pl-list li.dim{opacity:.35}' +
-      '#pl-root .pl-list .nm{color:var(--thi);font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#pl-root .pl-list .cd{color:#a8b6c8;font-size:8px;margin-right:3px}' +
-      '#pl-root .pl-list .ind{display:inline-block;margin-left:2px;padding:0 3px;border-radius:3px;font-size:7px;font-weight:700;' +
+      '#pl-root .pl-list .nm{color:var(--thi);font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:8px}' +
+      '#pl-root .pl-list .cd{color:#a8b6c8;font-size:7px;margin-right:2px}' +
+      '#pl-root .pl-list .ind{display:inline-block;margin-left:2px;padding:0 2px;border-radius:3px;font-size:6px;font-weight:700;' +
         'color:var(--cyan);background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.25);vertical-align:1px}' +
+      '#pl-root .pl-movers .pl-list li > span:last-child{flex:0 0 auto;white-space:nowrap;font-size:8px;' +
+        'font-variant-numeric:tabular-nums;letter-spacing:-0.25px}' +
+      '#pl-root .pl-movers .pl-sec-hint,#pl-root .pl-movers h4 > span{font-size:7px!important}' +
+      '#pl-root .pl-movers .vz-chip{font-size:6px;padding:0 3px;line-height:1.2}' +
+      '#pl-root .pl-movers .vz-rowbar{max-width:36px;height:3px;margin-left:2px}' +
       /* global：compact 字級；role 僅 title，避免窄格裁切點位／漲跌 */
       '#pl-root .pl-global{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;flex:1 1 0;' +
         'align-content:start;overflow:auto;min-height:0;min-width:0}' +
@@ -325,20 +330,21 @@
         'font-variant-numeric:tabular-nums;letter-spacing:-0.2px}' +
       '#pl-root .pl-global .g .s{font-size:8px;font-weight:700;flex:0 0 auto;white-space:nowrap;text-align:right;letter-spacing:-0.3px;' +
         'font-variant-numeric:tabular-nums;min-width:2.8em}' +
-      '#pl-root .pl-flash-tools{display:flex;align-items:center;gap:4px;flex:1 1 auto;min-width:0;justify-content:flex-end}' +
-      '#pl-root .pl-flash-q{width:72px;min-width:56px;max-width:96px;padding:1px 5px;border:1px solid var(--border);border-radius:3px;' +
-        'background:var(--bg);color:var(--thi);font-size:8px;font-family:inherit}' +
+      /* 市場快訊：縮字＋單行，避免標題跳行 */
+      '#pl-root .pl-flash-tools{display:flex;align-items:center;gap:3px;flex:1 1 auto;min-width:0;justify-content:flex-end}' +
+      '#pl-root .pl-flash-q{width:64px;min-width:48px;max-width:88px;padding:1px 4px;border:1px solid var(--border);border-radius:3px;' +
+        'background:var(--bg);color:var(--thi);font-size:7px;font-family:inherit}' +
       '#pl-root .pl-flash-q:focus{outline:none;border-color:var(--gold-m)}' +
-      '#pl-root .pl-flash{flex:1 1 0;min-height:0;overflow:auto;font-size:9px}' +
-      '#pl-root .pl-flash .row{display:grid;grid-template-columns:42px 52px minmax(0,1fr);align-items:baseline;gap:4px;padding:3px 4px;' +
+      '#pl-root .pl-flash{flex:1 1 0;min-height:0;overflow:auto;font-size:8px}' +
+      '#pl-root .pl-flash .row{display:grid;grid-template-columns:36px 44px minmax(0,1fr);align-items:baseline;gap:3px;padding:2px 3px;' +
         'border-bottom:1px solid rgba(26,39,64,.85);cursor:pointer;line-height:1.35;min-width:0}' +
       '#pl-root .pl-flash .row:nth-child(even){background:rgba(148,163,184,.035)}' +
       '#pl-root .pl-flash .row:hover{background:rgba(22,34,64,.88)}' +
-      '#pl-root .pl-flash .t{color:#a8b6c8;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-      '#pl-root .pl-flash .cat{color:var(--cyan);font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '#pl-root .pl-flash .t{color:#a8b6c8;font-size:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '#pl-root .pl-flash .cat{color:var(--cyan);font-size:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
       '#pl-root .pl-flash .cat.us{color:var(--gold)}' +
-      '#pl-root .pl-flash .ttl{color:#e2e8f0;font-size:9px;min-width:0;overflow:hidden;' +
-        'text-overflow:ellipsis;white-space:nowrap}' +
+      '#pl-root .pl-flash .ttl{color:#e2e8f0;font-size:8px;min-width:0;overflow:hidden;' +
+        'text-overflow:ellipsis;white-space:nowrap;letter-spacing:-0.15px}' +
       /* 自選：區塊本身不溢；表體固定內滾，避免壓到底部 status／量價列 */
       '#pl-root .pl-sec.pl-wl{overflow:hidden;min-height:0}' +
       '#pl-root .pl-wl-scroll{flex:1 1 0;min-height:0;overflow:auto;overscroll-behavior:contain}' +
@@ -1786,8 +1792,8 @@
       if (r.changePct != null && isFinite(r.changePct)) maxAbs = Math.max(maxAbs, Math.abs(r.changePct));
     });
     var html = '<div class="pl-sec pl-movers" data-pri="p1" data-movers-side="' + side + '"><h4>' + title +
-      (movers && movers.date ? ' <span style="color:#94a3b8;font-weight:600">' + movers.date + '</span>' : '') +
-      (note ? ' <span style="color:#94a3b8;font-weight:600;font-size:9px">' + note + '</span>' : '') +
+      (movers && movers.date ? ' <span class="pl-sec-hint" style="margin-right:0">' + movers.date + '</span>' : '') +
+      (note ? ' <span class="pl-sec-hint" style="margin-right:0">' + note + '</span>' : '') +
       ' <a data-go="afterhours">盤後 →</a></h4><ul class="pl-list">';
     if (!list.length) return html + '<li style="cursor:default;color:#94a3b8">' + empty + '</li></ul></div>';
     list.forEach(function (r) {
