@@ -298,6 +298,18 @@
     el.title = tip;
   }
 
+  function shortWdAction(report) {
+    if (!report || !report.ai) return '';
+    var map = {
+      HOLD: '抱', ENTER_LONG: '多', ENTER_SHORT: '空',
+      REDUCE: '減', EXIT: '平'
+    };
+    var act = report.ai.action;
+    if (act && map[act]) return map[act];
+    var lab = report.ai.action_label ? String(report.ai.action_label) : '';
+    return lab ? lab.slice(0, 2) : '';
+  }
+
   function probeWaveDeck() {
     if (!window.WaveDeckBridge || typeof window.WaveDeckBridge.ping !== 'function') {
       setWdSync('warn', 'WD —');
@@ -309,13 +321,16 @@
         return;
       }
       var last = window.WaveDeckBridge.lastSync && window.WaveDeckBridge.lastSync();
-      if (last && last.payload) {
-        setWdSync('ok', 'WD ' + last.payload.style + (last.payload.delever ? '↓' : ''));
-      } else {
-        setWdSync('ok', 'WD OK');
-      }
+      var baseTxt = (last && last.payload)
+        ? ('WD ' + last.payload.style + (last.payload.delever ? '↓' : ''))
+        : 'WD OK';
+      setWdSync('ok', baseTxt);
       if (typeof window.WaveDeckBridge.fetchCostMeter === 'function') {
-        window.WaveDeckBridge.fetchCostMeter(false).then(paintWdCostTip).catch(function () {});
+        window.WaveDeckBridge.fetchCostMeter(false).then(function (meter) {
+          paintWdCostTip(meter);
+          var act = shortWdAction(meter && meter.report);
+          if (act) setWdSync('ok', baseTxt + ' · ' + act);
+        }).catch(function () {});
       }
     }).catch(function () { setWdSync('warn', 'WD OFF'); });
   }

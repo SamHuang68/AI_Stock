@@ -94,6 +94,8 @@ def _prompt(ctx: dict[str, Any]) -> str:
         "欄位：action(HOLD|ENTER_LONG|ENTER_SHORT|EXIT|REDUCE), confidence(0-1), "
         "bias_long(0-1), bias_short(0-1), summary(繁中短句), "
         "invalidation:{price,side}, next_watch:[string], chase_risk(low|medium|high).\n"
+        "若 context 含 st_spillover_prob：<0.30 宜保守／避免新多；>0.65 可略積極。"
+        "st_delever=true 或 st_score<35 時禁止積極加倉。st_hot_stage 可寫進 next_watch。\n"
         f"context={json.dumps(ctx, ensure_ascii=False)}"
     )
 

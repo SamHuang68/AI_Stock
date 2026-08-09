@@ -197,6 +197,37 @@ class WaveDeckSmoke(unittest.TestCase):
         self.assertLess(spillover_from_rotation("narrow", 1, 5), 0.45)
         self.assertAlmostEqual(blend_spillover(0.5, 0.8), 0.68)
 
+    def test_heuristic_respects_low_spillover(self):
+        d = HeuristicProvider().infer(
+            {
+                "style": 65,
+                "event": "TIMED_MARKET_REVIEW",
+                "positions": {"account": 0},
+                "price": 45020,
+                "st_spillover_prob": 0.22,
+                "st_hot_stage": "先進封裝",
+                "st_delever": False,
+            }
+        )
+        self.assertEqual(d["action"], "HOLD")
+        self.assertIn("外溢", d["action_label"])
+        self.assertEqual(d["process"]["chase_risk"], "high")
+        self.assertTrue(any("先進封裝" in w for w in d["next_watch"]))
+
+    def test_gate_blocks_extreme_low_spillover(self):
+        st = {
+            "kill_switch": False,
+            "fsm": "Idle",
+            "account": {"yesterday_balance": 100, "equity": 100},
+            "no_overnight": {"enabled": False},
+            "st_overlay": {"delever": False, "spillover_prob": 0.15},
+            "style": 65,
+            "exec": {"lots": 2},
+        }
+        g = evaluate_gate(st, {"action": "ENTER_LONG", "process": {"chase_risk": "medium"}})
+        self.assertFalse(g["allow"])
+        self.assertTrue(any("極低" in r for r in g["reasons"]))
+
 
 if __name__ == "__main__":
     unittest.main()

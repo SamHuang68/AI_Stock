@@ -41,7 +41,7 @@
       '#pl-root .pl-btn.primary{background:var(--gold);color:#060A12;border:none;font-weight:700}' +
       '#pl-root .pl-btn.primary:hover{background:#FBBF24}' +
       '#pl-root .pl-btn.wd{border-color:rgba(103,232,249,.35);color:var(--cyan)}' +
-      '#pl-root .pl-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0}' +
+      '#pl-root .pl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:12px 0}' +
       '#pl-root .pl-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;min-height:76px}' +
       '#pl-root .pl-card .k{font-size:9px;color:var(--tlo);letter-spacing:1px;margin-bottom:6px}' +
       '#pl-root .pl-card .v{font-size:20px;font-weight:700;color:var(--thi);line-height:1.15}' +
@@ -374,6 +374,13 @@
           _lastMacro.leaders = chain.leaders;
         }
         _lastMacro.chainStages = d.stages;
+        var sv = $('pl-spill-v');
+        var ss = $('pl-spill-s');
+        if (sv) sv.textContent = Math.round(blended * 100) + '%';
+        if (ss) {
+          ss.textContent = (chain.hotStage || '供應鏈') +
+            (chain.contig != null ? (' · 同向 ' + Math.round(Number(chain.contig) * 100) + '%') : '');
+        }
         setWdLine('WaveDeck 覆寫：供應鏈外溢 <b>' + Math.round(blended * 100) + '%</b>' +
           (chain.hotStage ? (' · 最強段 ' + chain.hotStage) : '') + ' · 推送中…');
         return pushWd(false).then(function () { return chain; });
@@ -505,6 +512,12 @@
     var pf = sum ? 100 * flat / sum : 0;
     var pd = sum ? 100 * (dn || 0) / sum : 0;
 
+    var spillPct = (_lastMacro && _lastMacro.spilloverProb != null && isFinite(Number(_lastMacro.spilloverProb)))
+      ? (Math.round(Number(_lastMacro.spilloverProb) * 100) + '%')
+      : '—';
+    var spillSub = (_lastMacro && _lastMacro.rotationHealth)
+      ? ('輪動 ' + _lastMacro.rotationHealth + ' · 精算中')
+      : '類股初估 · 供應鏈精算中';
     var cards =
       '<div class="pl-card"><div class="k">加權指數</div><div class="v">' + fmt(t00.price, 2) + '</div>' +
         '<div class="s ' + tw(t00.changePct) + '">' + pct(t00.changePct) + '</div></div>' +
@@ -515,7 +528,10 @@
         '<div class="s ' + tw(txf && txf.changePct) + '">' + pct(txf && txf.changePct) +
         (txf && txf.ampRate != null ? ' · 振幅 ' + txf.ampRate.toFixed(2) + '%' : '') + '</div></div>' +
       '<div class="pl-card"><div class="k">大盤體質</div><div class="v">' + (bd.score != null ? bd.score : '—') + '</div>' +
-        '<div class="s">' + (bd.summary || '量能／法人／融資／估值') + '</div></div>';
+        '<div class="s">' + (bd.summary || '量能／法人／融資／估值') + '</div></div>' +
+      '<div class="pl-card" id="pl-card-spill"><div class="k">供應鏈外溢</div>' +
+        '<div class="v" id="pl-spill-v">' + spillPct + '</div>' +
+        '<div class="s" id="pl-spill-s">' + spillSub + '</div></div>';
 
     var breadth =
       '<div class="pl-sec"><h4>廣度（股票） <a data-go="breadth">詳情 →</a></h4>' +

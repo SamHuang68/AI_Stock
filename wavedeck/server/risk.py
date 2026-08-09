@@ -44,25 +44,42 @@ def evaluate_gate(state: dict[str, Any], decision: dict[str, Any]) -> dict[str, 
 
     st = state.get("st_overlay") or {}
     lots = int((state.get("exec") or {}).get("lots") or 1)
+    try:
+        spill = float(st.get("spillover_prob")) if st.get("spillover_prob") is not None else None
+    except Exception:
+        spill = None
+
+    # Extreme low spillover: block new risk-on (macro diffusion broken)
+    if spill is not None and spill < 0.20 and decision.get("action") in {
+        "ENTER_LONG", "ENTER_SHORT"
+    }:
+        allow = False
+        reasons.append("外溢極低：禁止新單")
+
     if st.get("delever"):
         lots = max(1, lots // 2)
         reasons.append("ST 降載：口數減半")
-    else:
+    elif spill is not None and spill < 0.35 and decision.get("action") in {
+        "ENTER_LONG", "ENTER_SHORT"
+    }:
         # Soft delever when supply-chain / sector spillover is weak
-        try:
-            spill = float(st.get("spillover_prob")) if st.get("spillover_prob") is not None else None
-        except Exception:
-            spill = None
-        if spill is not None and spill < 0.35 and decision.get("action") in {
-            "ENTER_LONG", "ENTER_SHORT"
-        }:
-            lots = max(1, lots // 2)
-            reasons.append("外溢偏低：新單口數減半")
+        lots = max(1, lots // 2)
+        reasons.append("外溢偏低：新單口數減半")
 
     chase = (decision.get("process") or {}).get("chase_risk") or "medium"
     if chase == "high" and int(state.get("style") or 50) < 55:
         allow = False
         reasons.append("追價風險高且風格偏保守")
+    # High chase + weak spillover even with aggressive style → still block new entries
+    if (
+        chase == "high"
+        and spill is not None
+        and spill < 0.30
+        and decision.get("action") in {"ENTER_LONG", "ENTER_SHORT"}
+    ):
+        allow = False
+        if "外溢偏低＋追價風險：禁止新單" not in reasons:
+            reasons.append("外溢偏低＋追價風險：禁止新單")
 
     return {
         "allow": allow,
