@@ -200,12 +200,19 @@
       '#pl-root .pl-drivers .box .k{color:#a8b6c8;margin-bottom:1px;font-size:8px;font-weight:700}' +
       '#pl-root .pl-drivers .box .k span{color:#94a3b8;font-weight:600}' +
       '#pl-root .pl-drivers .box li{margin:1px 0;color:var(--text);list-style:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      /* OHLC / 加權盤勢（不再重複頂列三指數） */
-      '#pl-root .pl-ohlc{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;flex:0 0 auto}' +
-      '#pl-root .pl-ohlc .box{background:rgba(6,10,18,.45);border:1px solid rgba(42,61,92,.7);border-radius:5px;padding:4px 6px;min-width:0}' +
-      '#pl-root .pl-ohlc .box .k{font-size:8px;color:#a8b6c8}' +
-      '#pl-root .pl-ohlc .box .v{font-size:11px;font-weight:700;margin-top:1px;color:var(--thi);' +
-        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      /* OHLC / 加權盤勢：2×2，數值完整顯示千分位（避免 44,450.19 被 ellipsis 裁切） */
+      '#pl-root .pl-ohlc{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;flex:0 0 auto}' +
+      '#pl-root .pl-ohlc .box{background:rgba(6,10,18,.45);border:1px solid rgba(42,61,92,.7);border-radius:5px;padding:5px 7px;min-width:0}' +
+      '#pl-root .pl-ohlc .box .k{font-size:8px;color:#a8b6c8;letter-spacing:.2px}' +
+      '#pl-root .pl-ohlc .box .v{font-size:12px;font-weight:800;margin-top:2px;color:var(--thi);' +
+        'font-variant-numeric:tabular-nums;letter-spacing:-0.2px;white-space:nowrap;' +
+        'overflow:visible;line-height:1.15}' +
+      '#pl-root .pl-ohlc .box .v.up{color:var(--red)}#pl-root .pl-ohlc .box .v.dn{color:var(--green)}' +
+      '#pl-root .pl-ohlc-now{display:flex;align-items:baseline;justify-content:space-between;gap:6px;' +
+        'margin:0 0 4px;flex:0 0 auto;min-width:0}' +
+      '#pl-root .pl-ohlc-now .px{font-size:16px;font-weight:800;color:var(--thi);font-variant-numeric:tabular-nums;' +
+        'letter-spacing:-0.3px;line-height:1.1}' +
+      '#pl-root .pl-ohlc-now .chg{font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}' +
       '#pl-root .pl-range{margin-top:3px;flex:0 0 auto}' +
       '#pl-root .pl-range .lab{display:flex;justify-content:space-between;font-size:8px;color:#a8b6c8;margin-bottom:2px;gap:4px;min-width:0}' +
       '#pl-root .pl-range .lab > span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
@@ -398,6 +405,18 @@
     if (v == null || !isFinite(v)) return '—';
     d = d == null ? 0 : d;
     return Number(v).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+  }
+  /** 加權指數報價：千分位；整數昨收不強制 .00，開高低維持 2 位 */
+  function fmtIdx(v, mode) {
+    if (v == null || !isFinite(Number(v))) return '—';
+    var n = Number(v);
+    var dig = 2;
+    if (mode === 'prev' || mode === 'auto') {
+      dig = Math.abs(n - Math.round(n)) < 0.005 ? 0 : 2;
+    } else if (mode === 'int') {
+      dig = 0;
+    }
+    return n.toLocaleString('en-US', { maximumFractionDigits: dig, minimumFractionDigits: dig });
   }
   /** 漲跌點數（帶正負號）；優先用 change，否則 price − prevClose */
   function chgPts(obj, d) {
@@ -1192,19 +1211,24 @@
   function renderOhlc(ov, p) {
     var o = (ov && ov.ohlc) || {};
     var strip = (ov && ov.strip) || {};
+    var t00 = strip.t00 || {};
     var t00Tr = strip.t00Trend || {};
+    /* strip 即時價可補 ohlc 缺欄 */
+    var price = o.price != null ? o.price : t00.price;
+    var prevClose = o.prevClose != null ? o.prevClose : t00.prevClose;
+    var changePct = o.changePct != null ? o.changePct : t00.changePct;
     var twiiObj = {
-      price: o.price, prevClose: o.prevClose, changePct: o.changePct,
-      change: (o.price != null && o.prevClose != null) ? (o.price - o.prevClose) : null
+      price: price, prevClose: prevClose, changePct: changePct,
+      change: (price != null && prevClose != null) ? (Number(price) - Number(prevClose)) : (t00.change != null ? t00.change : null)
     };
     var ampPct = null;
-    if (o.high != null && o.low != null && o.prevClose && isFinite(o.prevClose) && o.prevClose !== 0) {
-      ampPct = (Number(o.high) - Number(o.low)) / Number(o.prevClose) * 100;
+    if (o.high != null && o.low != null && prevClose && isFinite(prevClose) && prevClose !== 0) {
+      ampPct = (Number(o.high) - Number(o.low)) / Number(prevClose) * 100;
     }
     var rangePos = null;
-    if (o.high != null && o.low != null && o.price != null &&
+    if (o.high != null && o.low != null && price != null &&
         isFinite(o.high) && isFinite(o.low) && Number(o.high) > Number(o.low)) {
-      rangePos = (Number(o.price) - Number(o.low)) / (Number(o.high) - Number(o.low));
+      rangePos = (Number(price) - Number(o.low)) / (Number(o.high) - Number(o.low));
       rangePos = Math.max(0, Math.min(1, rangePos));
     }
     var sparkBoot = '';
@@ -1213,30 +1237,34 @@
     } else {
       sparkBoot = '<div class="pl-note" style="padding:8px">載入近 20 日走勢…</div>';
     }
+    var nowHtml =
+      '<div class="pl-ohlc-now" title="加權現價">' +
+        '<span class="px ' + tw(changePct) + '">' + fmtIdx(price, 'px') + '</span>' +
+        '<span class="chg ' + tw(changePct) + '">' + chgWithPct(twiiObj, 2, 2) + '</span>' +
+      '</div>';
     var rangeHtml = '';
     if (rangePos != null) {
       rangeHtml =
         '<div class="pl-range" title="現價在當日高低區間的相對位置">' +
-          '<div class="lab"><span>日內位置 · 低→高</span><span class="' + tw(o.changePct) + '">' +
-            chgWithPct(twiiObj, 2, 2) +
-            (ampPct != null ? ' · 振幅 ' + ampPct.toFixed(2) + '%' : '') +
+          '<div class="lab"><span>日內位置 · 低→高</span><span class="' + tw(changePct) + '">' +
+            (ampPct != null ? ('振幅 ' + ampPct.toFixed(2) + '%') : '—') +
           '</span></div>' +
           '<div class="track"><i style="width:100%"></i>' +
             '<span class="mark" style="left:' + (rangePos * 100).toFixed(1) + '%"></span></div>' +
         '</div>';
     } else {
-      rangeHtml = '<div class="pl-note" style="margin-top:4px">' +
-        chgWithPct(twiiObj, 2, 2) + ' · 櫃買／台指期見頂列</div>';
+      rangeHtml = '<div class="pl-note" style="margin-top:4px">櫃買／台指期見頂列</div>';
     }
     return '<div class="pl-sec" data-pri="p0"><h4>加權盤勢' +
       '<span class="pl-sec-hint">櫃買／台指期見頂列</span>' +
       '<a data-go="chart" data-sym="^TWII" data-mkt="TW">圖表 →</a></h4>' +
+      nowHtml +
       '<div class="pl-spark" id="pl-spark">' + sparkBoot + '</div>' +
       '<div class="pl-ohlc">' +
-      '<div class="box"><div class="k">開盤</div><div class="v">' + fmt(o.open, 2) + '</div></div>' +
-      '<div class="box"><div class="k">最高</div><div class="v">' + fmt(o.high, 2) + '</div></div>' +
-      '<div class="box"><div class="k">最低</div><div class="v">' + fmt(o.low, 2) + '</div></div>' +
-      '<div class="box"><div class="k">昨收</div><div class="v">' + fmt(o.prevClose, 2) + '</div></div>' +
+      '<div class="box"><div class="k">開盤</div><div class="v">' + fmtIdx(o.open, 'px') + '</div></div>' +
+      '<div class="box"><div class="k">最高</div><div class="v up">' + fmtIdx(o.high, 'px') + '</div></div>' +
+      '<div class="box"><div class="k">最低</div><div class="v dn">' + fmtIdx(o.low, 'px') + '</div></div>' +
+      '<div class="box"><div class="k">昨收</div><div class="v">' + fmtIdx(prevClose, 'prev') + '</div></div>' +
       '</div>' + rangeHtml + '</div>';
   }
 
