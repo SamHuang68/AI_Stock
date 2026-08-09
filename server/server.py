@@ -1569,6 +1569,10 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 'sources': _src_snapshot(),
                 'jobs': jobs,  # H4：回補／刷新進度
             }, ensure_ascii=False, default=str).encode())
+        elif p == '/bridge/wavedeck' or p.startswith('/bridge/wavedeck?'):
+            self._handle_wavedeck_bridge_get()
+        elif p == '/api/cost-meter' or p.startswith('/api/cost-meter?'):
+            self._handle_wavedeck_bridge_get()
         else:
             # 安全(v3.9 review):SimpleHTTPRequestHandler 預設會把工作目錄所有檔當靜態檔服務。
             # 阻擋敏感檔被下載:金鑰設定(alert_config 含 telegram token/gmail 密碼)、原始碼(.py)、
@@ -1584,11 +1588,21 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     def _origin_ok(self):
         # CSRF 防護(v3.9 review):瀏覽器跨來源寫入會帶 Origin/Referer;非本站一律拒。
         # 同源 fetch 或非瀏覽器本機呼叫可能不帶 → 放行(本機單人工具)。
+        # WaveDeck 反向繁線：允許 loopback WD 埠寫入 /bridge/wavedeck。
         o = self.headers.get('Origin') or self.headers.get('Referer') or ''
         if not o:
             return True
-        return (o.startswith('http://localhost:%d' % PORT)
-                or o.startswith('http://127.0.0.1:%d' % PORT))
+        if (o.startswith('http://localhost:%d' % PORT)
+                or o.startswith('http://127.0.0.1:%d' % PORT)):
+            return True
+        p = self.path.split('?')[0]
+        if p in ('/bridge/wavedeck', '/api/cost-meter'):
+            try:
+                import wavedeck_bus as wdb
+                return wdb.is_wavedeck_origin(o)
+            except Exception:
+                return False
+        return False
 
     def do_POST(self):
         p = self.path.split('?')[0]
@@ -1612,6 +1626,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._handle_chain_momentum()
         elif p == '/ai/local':
             self._handle_ai_local()
+        elif p == '/bridge/wavedeck':
+            self._handle_wavedeck_bridge_post()
         elif p == '/notify':
             self._handle_notify()
         elif p == '/universe/refresh':
@@ -1714,6 +1730,33 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _handle_wavedeck_bridge_get(self):
+        """WD 回報／共享成本計數器（GET /bridge/wavedeck 或 /api/cost-meter）。"""
+        try:
+            import wavedeck_bus as wdb
+            self._ok(json.dumps(wdb.snapshot(), ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('wavedeck bus: ' + str(e), 500)
+
+    def _handle_wavedeck_bridge_post(self):
+        """WaveDeck → ST 反向繁線：收 FSM／部位／成本。"""
+        try:
+            n = int(self.headers.get('Content-Length') or 0)
+        except Exception:
+            n = 0
+        body = {}
+        if n > 0:
+            try:
+                body = json.loads(self.rfile.read(n).decode('utf-8') or '{}')
+            except Exception:
+                body = {}
+        try:
+            import wavedeck_bus as wdb
+            snap = wdb.accept_report(body if isinstance(body, dict) else {})
+            self._ok(json.dumps(snap, ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('wavedeck bus: ' + str(e), 500)
 
     def _handle_single(self, sym):
         qs = parse_qs(urlparse(self.path).query)

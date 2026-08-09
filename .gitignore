@@ -77,6 +77,8 @@ data/alert_config.json
 data/alert_rules.json
 data/watch_rules.json
 data/watch_state.json
+data/wavedeck_bus.json
+data/pulse_history.db
 # Node test tooling accidentally installed during refactor
 node_modules/
 # Stray test/junk file

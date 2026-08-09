@@ -247,10 +247,19 @@
     }
     if (m.rotationHealth === 'broad') bits.push('類股輪動偏廣，風險偏好可略升。');
     if (m.rotationHealth === 'narrow') bits.push('類股輪動偏窄，提防指數上漲、個股跟不上。');
+    if (m.spilloverProb != null && isFinite(Number(m.spilloverProb))) {
+      var sp = Math.round(Number(m.spilloverProb) * 100);
+      bits.push('供應鏈／類股外溢機率約 ' + sp + '%。');
+      if (sp < 35) bits.push('外溢偏低，動能不易擴散至多數族群。');
+    }
     if (m.summary) bits.push(String(m.summary));
     var style = (window.WaveDeckBridge && window.WaveDeckBridge.styleFromScore)
-      ? window.WaveDeckBridge.styleFromScore(m.score, m.advRatio) : null;
-    if (style != null) bits.push('建議 WaveDeck 進場風格 → ' + style + (Number(m.score) < 35 ? '（並考慮降載）' : '') + '。');
+      ? window.WaveDeckBridge.styleFromScore(m.score, m.advRatio, {
+          rotationHealth: m.rotationHealth,
+          spilloverProb: m.spilloverProb
+        }) : null;
+    if (style != null) bits.push('建議 WaveDeck 進場風格 → ' + style +
+      (Number(m.score) < 35 || Number(m.spilloverProb) < 0.30 ? '（並考慮降載）' : '') + '。');
     bits.push('⚠ 非投資建議。');
     return bits.join(' ');
   }
@@ -326,11 +335,19 @@
     if (m.rotationHealth) {
       summary = (summary ? summary + ' · ' : '') + '輪動 ' + m.rotationHealth;
     }
+    if (m.spilloverProb != null && isFinite(Number(m.spilloverProb))) {
+      summary = (summary ? summary + ' · ' : '') +
+        '外溢 ' + Math.round(Number(m.spilloverProb) * 100) + '%';
+    }
     return window.WaveDeckBridge.syncFromMarket({
       score: m.score,
       advRatio: m.advRatio,
       label: m.label,
       summary: summary,
+      rotationHealth: m.rotationHealth,
+      spilloverProb: m.spilloverProb,
+      leaders: m.leaders || [],
+      sectors: m.sectors || null,
       source: 'pulse_v5',
       force: !!force,
       silent: !force
@@ -339,16 +356,22 @@
       if (res.skipped) {
         var last = window.WaveDeckBridge.lastSync && window.WaveDeckBridge.lastSync();
         if (last && last.payload) {
+          var meta = (last.payload.meta) || {};
           setWdLine('WaveDeck 覆寫：風格 <b>' + last.payload.style + '</b>' +
-            (last.payload.delever ? ' · 降載' : '') + '（節流中）');
+            (last.payload.delever ? ' · 降載' : '') +
+            (meta.spillover_prob != null ? (' · 外溢 ' + Math.round(meta.spillover_prob * 100) + '%') : '') +
+            '（節流中）');
         } else {
           setWdLine('WaveDeck 覆寫：待命（' + (res.reason || 'skip') + '）');
         }
         return;
       }
       if (res.ok && res.payload) {
+        var meta2 = res.payload.meta || {};
         setWdLine('WaveDeck 覆寫：風格 <b>' + res.payload.style + '</b>' +
-          (res.payload.delever ? ' · <b>降載</b>' : '') + ' · 已推送');
+          (res.payload.delever ? ' · <b>降載</b>' : '') +
+          (meta2.spillover_prob != null ? (' · 外溢 ' + Math.round(meta2.spillover_prob * 100) + '%') : '') +
+          ' · 已推送');
       } else if (res.ok === false) {
         setWdLine('WaveDeck 覆寫：<b>失敗</b>（' + (res.error || '—') + '）');
       }
@@ -385,6 +408,12 @@
       if (sec.up.length >= 4 && sec.dn.length <= 2) rot = 'broad';
       else if (sec.up.length <= 2 && sec.dn.length >= 4) rot = 'narrow';
     }
+    var leaders = (sec.up || []).slice(0, 4).map(function (s) {
+      return s.name || s.code || '';
+    }).filter(Boolean);
+    var spill = (window.WaveDeckBridge && typeof window.WaveDeckBridge.spilloverFromRotation === 'function')
+      ? window.WaveDeckBridge.spilloverFromRotation(rot, sec)
+      : (rot === 'broad' ? 0.72 : rot === 'narrow' ? 0.30 : 0.50);
 
     _lastMacro = {
       score: bd.score,
@@ -392,7 +421,10 @@
       label: bd.label || null,
       summary: bd.summary || bd.plainSummary || null,
       tone: toneLine(txf, bd),
-      rotationHealth: rot
+      rotationHealth: rot,
+      spilloverProb: spill,
+      leaders: leaders,
+      sectors: { up: sec.up || [], dn: sec.dn || [] }
     };
     // Prefer dedicated TW market fundamental score when pack carries it
     if (pack.fund && pack.fund.score != null) {

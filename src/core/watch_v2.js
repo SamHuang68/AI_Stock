@@ -522,6 +522,15 @@ function _wdChipHtml(code) {
     if (!window.WaveDeckBridge || typeof WaveDeckBridge.hintForSymbol !== 'function') return '';
     const h = WaveDeckBridge.hintForSymbol(code);
     if (!h) return '';
+    if (h.macroOnly) {
+      const spill = (h.spillover != null && isFinite(h.spillover))
+        ? Math.round(Number(h.spillover) * 100) + '%' : '';
+      const tip = ['宏觀覆寫', h.style != null && ('風格 ' + h.style),
+        h.rotation && ('輪動 ' + h.rotation), spill && ('外溢 ' + spill), h.mode]
+        .filter(Boolean).join(' · ');
+      const label = h.style != null ? ('MAC ' + h.style) : 'MAC';
+      return `<span title="WaveDeck: ${tip}" style="font-family:monospace;font-size:8.5px;font-weight:700;padding:2px 6px;border-radius:3px;background:rgba(148,163,184,.1);color:#94a3b8;border:1px solid rgba(148,163,184,.35);white-space:nowrap">WD ${label}${spill ? ' · ' + spill : ''}</span>`;
+    }
     const inv = h.invalidation
       ? ((h.invalidation.side === 'below' ? '跌破' : '突破') + ' ' + h.invalidation.price)
       : '';

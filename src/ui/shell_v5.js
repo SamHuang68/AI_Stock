@@ -279,6 +279,25 @@
     probeWaveDeck();
   }
 
+  function paintWdCostTip(meter) {
+    var el = $('shell-wd-sync');
+    if (!el) return;
+    var tip = 'WaveDeck 連線／最近宏觀覆寫（點擊開啟）';
+    if (meter && meter.costs) {
+      var c = meter.costs;
+      tip += ' · 成本合計≈$' + (c.combined_usd_est != null ? c.combined_usd_est : '—') +
+        '（ST 本機 ' + (c.st_local_calls || 0) + ' 次／雲端≈$' + (c.st_cloud_usd_est || 0) +
+        ' · WD 今日 $' + (c.wd_day_usd || 0) +
+        (c.wd_provider ? ' · ' + c.wd_provider : '') + '）';
+    }
+    if (meter && meter.report) {
+      var r = meter.report;
+      tip += ' · WD 回報 ' + (r.fsm || '—') + '/' + (r.mode || '—') +
+        (r.ai && r.ai.action_label ? ' · ' + r.ai.action_label : '');
+    }
+    el.title = tip;
+  }
+
   function probeWaveDeck() {
     if (!window.WaveDeckBridge || typeof window.WaveDeckBridge.ping !== 'function') {
       setWdSync('warn', 'WD —');
@@ -294,6 +313,9 @@
         setWdSync('ok', 'WD ' + last.payload.style + (last.payload.delever ? '↓' : ''));
       } else {
         setWdSync('ok', 'WD OK');
+      }
+      if (typeof window.WaveDeckBridge.fetchCostMeter === 'function') {
+        window.WaveDeckBridge.fetchCostMeter(false).then(paintWdCostTip).catch(function () {});
       }
     }).catch(function () { setWdSync('warn', 'WD OFF'); });
   }

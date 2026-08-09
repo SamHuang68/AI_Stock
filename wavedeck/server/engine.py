@@ -13,21 +13,46 @@ from .state import RUNTIME, now_iso
 
 
 def apply_st_bridge(body: dict[str, Any]) -> dict[str, Any]:
-    """Stock Terminal macro overlay."""
+    """Stock Terminal macro overlay (style / delever / rotation / spillover)."""
     style = body.get("style")
     delever = bool(body.get("delever"))
     note = str(body.get("note") or "")
+    meta = body.get("meta") if isinstance(body.get("meta"), dict) else {}
+    rotation = meta.get("rotation") or body.get("rotation")
+    leaders = meta.get("leaders") if isinstance(meta.get("leaders"), list) else body.get("leaders")
+    spill = meta.get("spillover_prob")
+    if spill is None:
+        spill = body.get("spillover_prob")
+    try:
+        spill_f = float(spill) if spill is not None else None
+    except Exception:
+        spill_f = None
+    if spill_f is not None:
+        spill_f = max(0.0, min(1.0, spill_f))
+        # 外溢機率過低：市場動能不易擴散 → 強制／加強降載訊號
+        if spill_f < 0.30:
+            delever = True
+            if "外溢低" not in note:
+                note = (note + " · 外溢低").strip(" ·")
+
+    overlay: dict[str, Any] = {
+        "aggressiveness": style,
+        "delever": delever,
+        "note": note[:400],
+        "rotation": str(rotation) if rotation else None,
+        "spillover_prob": spill_f,
+        "leaders": [str(x)[:40] for x in (leaders or [])[:6]],
+        "source": str(meta.get("source") or body.get("source") or "st-macro")[:64],
+        "score": meta.get("score"),
+        "advRatio": meta.get("advRatio"),
+    }
     patch: dict[str, Any] = {
-        "st_overlay": {
-            "aggressiveness": style,
-            "delever": delever,
-            "note": note,
-        },
+        "st_overlay": overlay,
         "lights": {"st_bridge": "ok"},
     }
     if style is not None:
         try:
-            patch["style"] = int(style)
+            patch["style"] = max(1, min(99, int(style)))
         except Exception:
             pass
     snap = RUNTIME.patch(**patch)

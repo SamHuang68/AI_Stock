@@ -174,14 +174,17 @@ stateDiagram-v2
 | 宏觀偏多 + 輪動健康 | 進場風格 → 積極（如 65） |
 | 跌停家數異常／VIX 急升 | 風控降載：新單口數減半、移動停利收緊 |
 | 側欄「執行」／橋接 | `WaveDeckBridge.open()` → `http://127.0.0.1:18433/` |
-| Pulse／大盤體質 → WD | `WaveDeckBridge.syncFromMarket({score, advRatio})` → `POST /bridge/st`（風格／降載；節流 60s） |
-| Pulse AI 摘要 | 本機 `POST /ai/local`（LM Studio）；失敗則規則後援 |
-| Watch／Book ← WD | `WaveDeckBridge.fetchState` → chip／執行狀態條（失效價、部位、信心） |
+| Pulse／大盤體質 → WD | `WaveDeckBridge.syncFromMarket({score, advRatio, rotationHealth, spilloverProb})` → `POST /bridge/st`（風格／降載／外溢；節流 60s） |
+| 輪動外溢 | 類股強弱 → `spillover_prob`；&lt;0.30 強制降載；閘門可對新單減半 |
+| Pulse AI 摘要 | 本機 `POST /ai/local`（LM Studio）；失敗則規則後援；計入共享成本 |
+| Watch／Book ← WD | `WaveDeckBridge.fetchState` → TXF chip／個股 MACRO 風格 chip／執行狀態條 |
+| WD → ST 反向繁線 | Console 每 ~12s `POST /bridge/wavedeck`（FSM／部位／成本） |
+| 共享成本計數器 | ST `GET /bridge/wavedeck`／`/api/cost-meter`；頂列 WD 燈 title 顯示合計 |
 | ST 心跳失敗 | WaveDeck 亮黃燈；不自動加倉 |
 
 協定路徑（本機）：
 - ST → WD：`http://127.0.0.1:18433/bridge/st`
-- WD → ST（可選回報）：`http://127.0.0.1:18432/bridge/wavedeck`（後續在 tip 掛接）
+- WD → ST：`http://127.0.0.1:18432/bridge/wavedeck`
 
 ---
 

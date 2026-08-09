@@ -2,14 +2,19 @@
  * wavedeck_bridge_v5.js — Stock Terminal → WaveDeck 入口與宏觀覆寫
  * ----------------------------------------------------------------------------
  * - 側欄「執行」→ open()
- * - syncFromMarket({score, advRatio, …}) → POST /bridge/st（節流／去重）
- * - styleFromScore：廣度＋體質 → 進場風格 35–65
+ * - syncFromMarket({score, advRatio, rotationHealth, spilloverProb, …})
+ *   → POST /bridge/st（節流／去重；輪動／外溢寫入 meta）
+ * - fetchCostMeter / lastWdReport ← ST GET /bridge/wavedeck（反向繁線）
+ * - styleFromScore：廣度＋體質＋輪動＋外溢 → 進場風格 35–65
  * 鐵律：失敗僅 toast／console，不阻斷 ST 主流程。
  * ========================================================================== */
 (function () {
   'use strict';
 
   var DEFAULT_URL = 'http://127.0.0.1:18433/';
+  var ST_URL = (typeof window.SERVER === 'string' && window.SERVER)
+    ? String(window.SERVER).replace(/\/?$/, '')
+    : '';
   var CANDIDATES = [
     'http://127.0.0.1:18433/',
     'http://127.0.0.1:18434/',
@@ -28,6 +33,9 @@
   var _lastAt = 0;
   var _lastPayload = null;
   var _resolving = null;
+  var _costCache = null;
+  var _costAt = 0;
+  var COST_TTL_MS = 10000;
 
   function toast(msg) {
     if (typeof window.notifyToast === 'function') {
@@ -50,8 +58,18 @@
     try { localStorage.setItem(AUTO_KEY, on ? '1' : '0'); } catch (e) {}
   }
 
-  /** Map ST market score + breadth advRatio → WaveDeck style. */
-  function styleFromScore(score, advRatio) {
+  /**
+   * Map ST market score + breadth + rotation/spillover → WaveDeck style.
+   * @param {number} score
+   * @param {number} advRatio
+   * @param {{rotationHealth?:string, spilloverProb?:number}|number} [optsOrSpill]
+   */
+  function styleFromScore(score, advRatio, optsOrSpill) {
+    var opts = {};
+    if (optsOrSpill != null && typeof optsOrSpill === 'object') opts = optsOrSpill;
+    else if (optsOrSpill != null && isFinite(Number(optsOrSpill))) {
+      opts = { spilloverProb: Number(optsOrSpill) };
+    }
     var s = Number(score);
     var adv = Number(advRatio);
     if (!isFinite(s)) s = 50;
@@ -65,7 +83,32 @@
       if (adv < 0.35) hint = Math.min(hint, 40);
       if (adv > 0.65) hint = Math.max(hint, 55);
     }
+    var rot = opts.rotationHealth || opts.rotation || null;
+    if (rot === 'broad') hint = Math.min(90, hint + 5);
+    if (rot === 'narrow') hint = Math.max(20, hint - 5);
+    var spill = Number(opts.spilloverProb);
+    if (isFinite(spill)) {
+      if (spill < 0.35) hint = Math.min(hint, 40);
+      else if (spill > 0.65) hint = Math.max(hint, Math.min(65, hint + 5));
+    }
     return Math.max(20, Math.min(90, Math.round(hint)));
+  }
+
+  /** Sector rotation + leaders → spillover probability in [0.05, 0.95]. */
+  function spilloverFromRotation(rotationHealth, sectorPack) {
+    var rot = rotationHealth || 'mixed';
+    var up = (sectorPack && sectorPack.up) || [];
+    var dn = (sectorPack && sectorPack.dn) || [];
+    var upN = up.length;
+    var dnN = dn.length;
+    var total = upN + dnN;
+    var base = rot === 'broad' ? 0.72 : rot === 'narrow' ? 0.30 : 0.50;
+    var breadth = total ? (upN / total) : (rot === 'broad' ? 0.6 : rot === 'narrow' ? 0.35 : 0.5);
+    var spill = 0.55 * base + 0.45 * breadth;
+    // Concentration penalty: only 1–2 leaders → harder for gains to spill
+    if (upN > 0 && upN <= 2) spill -= 0.08;
+    if (upN >= 5) spill += 0.06;
+    return Math.max(0.05, Math.min(0.95, Math.round(spill * 100) / 100));
   }
 
   function buildNote(ctx, style, delever) {
@@ -76,6 +119,10 @@
     if (ctx.label) bits.push(String(ctx.label));
     if (ctx.advRatio != null && isFinite(Number(ctx.advRatio))) {
       bits.push('廣度 ' + Math.round(Number(ctx.advRatio) * 100) + '%');
+    }
+    if (ctx.rotationHealth) bits.push('輪動 ' + ctx.rotationHealth);
+    if (ctx.spilloverProb != null && isFinite(Number(ctx.spilloverProb))) {
+      bits.push('外溢 ' + Math.round(Number(ctx.spilloverProb) * 100) + '%');
     }
     bits.push('風格→' + style);
     if (delever) bits.push('降載');
@@ -155,7 +202,9 @@
 
   /**
    * Sync ST macro → WaveDeck overlay.
-   * @param {{score?:number, advRatio?:number, label?:string, summary?:string, force?:boolean, silent?:boolean}} ctx
+   * @param {{score?:number, advRatio?:number, label?:string, summary?:string,
+   *   rotationHealth?:string, spilloverProb?:number, leaders?:string[],
+   *   force?:boolean, silent?:boolean, source?:string}} ctx
    */
   function syncFromMarket(ctx) {
     ctx = ctx || {};
@@ -167,15 +216,23 @@
     if (score == null && (adv == null || !isFinite(Number(adv)))) {
       return Promise.resolve({ skipped: true, reason: 'no-data' });
     }
-    var style = styleFromScore(score, adv);
+    var rot = ctx.rotationHealth || ctx.rotation || null;
+    var spill = ctx.spilloverProb;
+    if (spill == null && ctx.sectors) {
+      spill = spilloverFromRotation(rot, ctx.sectors);
+    }
+    var style = styleFromScore(score, adv, { rotationHealth: rot, spilloverProb: spill });
     var delever = isFinite(Number(score)) && Number(score) < 35;
-    var note = buildNote(ctx, style, delever);
-    var key = style + '|' + (delever ? 1 : 0);
+    if (isFinite(Number(spill)) && Number(spill) < 0.30) delever = true;
+    var note = buildNote(Object.assign({}, ctx, { rotationHealth: rot, spilloverProb: spill }), style, delever);
+    var key = style + '|' + (delever ? 1 : 0) + '|' + (rot || '') + '|' +
+      (isFinite(Number(spill)) ? Math.round(Number(spill) * 20) : '');
     var now = Date.now();
     if (!ctx.force && key === _lastKey && (now - _lastAt) < MIN_INTERVAL_MS) {
       return Promise.resolve({ skipped: true, reason: 'throttle', style: style, delever: delever });
     }
 
+    var leaders = Array.isArray(ctx.leaders) ? ctx.leaders.slice(0, 6) : [];
     var payload = {
       style: style,
       delever: delever,
@@ -184,7 +241,10 @@
         score: score,
         advRatio: adv,
         label: ctx.label || null,
-        source: ctx.source || 'st-macro'
+        source: ctx.source || 'st-macro',
+        rotation: rot,
+        spillover_prob: isFinite(Number(spill)) ? Number(spill) : null,
+        leaders: leaders
       }
     };
 
@@ -245,11 +305,34 @@
     });
   }
 
+  /** ST reverse bus / shared cost meter. */
+  function fetchCostMeter(force) {
+    var now = Date.now();
+    if (!force && _costCache && (now - _costAt) < COST_TTL_MS) {
+      return Promise.resolve(_costCache);
+    }
+    var url = (ST_URL || '') + '/bridge/wavedeck';
+    return fetch(url, { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (j && j.ok) {
+          _costCache = j;
+          _costAt = Date.now();
+        }
+        return j;
+      })
+      .catch(function () { return null; });
+  }
+
+  function lastWdReport() {
+    return (_costCache && _costCache.report) || null;
+  }
+
   function normSym(code) {
     return String(code || '').toUpperCase().replace(/\.TW|\.TWO/g, '').trim();
   }
 
-  /** Return compact WD hint for a symbol (TXF / matching code). */
+  /** Return compact WD hint for a symbol (TXF match or macro-only for equities). */
   function hintForSymbol(code, state) {
     var st = state || _stateCache;
     if (!st) return null;
@@ -258,10 +341,27 @@
     var match = !want || want === wdSym ||
       (want === 'TXF' && (wdSym === 'TXF' || wdSym === 'TX')) ||
       (want === '^TWII' && (wdSym === 'TXF' || wdSym === 'TWII'));
-    if (!match) return null;
     var ai = st.ai || {};
     var inv = ai.invalidation || {};
     var pos = st.positions || {};
+    var ov = st.st_overlay || {};
+
+    if (!match) {
+      // Non-TXF equities: expose macro overlay (style / spillover) as soft chip
+      if (ov.aggressiveness == null && !ov.note && ov.spillover_prob == null) return null;
+      return {
+        symbol: want,
+        action: 'MACRO',
+        action_label: '宏觀',
+        confidence: null,
+        style: ov.aggressiveness != null ? ov.aggressiveness : st.style,
+        spillover: ov.spillover_prob,
+        rotation: ov.rotation,
+        mode: st.mode || 'paper',
+        fsm: st.fsm || '—',
+        macroOnly: true
+      };
+    }
     return {
       symbol: wdSym,
       action: ai.action_label || ai.action || '—',
@@ -272,23 +372,29 @@
       qty: pos.account != null ? pos.account : pos.txt_target,
       mode: st.mode || 'paper',
       fsm: st.fsm || '—',
-      style: st.style
+      style: st.style,
+      spillover: ov.spillover_prob,
+      rotation: ov.rotation,
+      macroOnly: false
     };
   }
 
   window.WaveDeckBridge = {
-    VERSION: '5.0-WD3',
+    VERSION: '5.0-WD4',
     base: function () { return BASE; },
     open: open,
     pushOverlay: pushOverlay,
     ping: ping,
     styleFromScore: styleFromScore,
+    spilloverFromRotation: spilloverFromRotation,
     syncFromMarket: syncFromMarket,
     lastSync: lastSync,
     autoEnabled: autoEnabled,
     setAutoEnabled: setAutoEnabled,
     fetchState: fetchState,
-    hintForSymbol: hintForSymbol
+    hintForSymbol: hintForSymbol,
+    fetchCostMeter: fetchCostMeter,
+    lastWdReport: lastWdReport
   };
 
   try { console.log('[wavedeck-bridge] ready → ' + BASE); } catch (e) {}

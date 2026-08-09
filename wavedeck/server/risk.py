@@ -47,6 +47,17 @@ def evaluate_gate(state: dict[str, Any], decision: dict[str, Any]) -> dict[str, 
     if st.get("delever"):
         lots = max(1, lots // 2)
         reasons.append("ST 降載：口數減半")
+    else:
+        # Soft delever when supply-chain / sector spillover is weak
+        try:
+            spill = float(st.get("spillover_prob")) if st.get("spillover_prob") is not None else None
+        except Exception:
+            spill = None
+        if spill is not None and spill < 0.35 and decision.get("action") in {
+            "ENTER_LONG", "ENTER_SHORT"
+        }:
+            lots = max(1, lots // 2)
+            reasons.append("外溢偏低：新單口數減半")
 
     chase = (decision.get("process") or {}).get("chase_risk") or "medium"
     if chase == "high" and int(state.get("style") or 50) < 55:

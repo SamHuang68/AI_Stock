@@ -70,7 +70,9 @@ Windows 亦可雙擊 `START_WAVEDECK.cmd`。
 
 | 方向 | 端點 |
 |------|------|
-| ST → WaveDeck | `POST http://127.0.0.1:18433/bridge/st` |
+| ST → WaveDeck | `POST http://127.0.0.1:18433/bridge/st`（風格／降載／輪動／外溢） |
+| WaveDeck → ST | `POST http://127.0.0.1:18432/bridge/wavedeck`（FSM／部位／成本回報） |
+| 共享成本 | `GET http://127.0.0.1:18432/bridge/wavedeck` 或 `/api/cost-meter` |
 | Console「套用 ST 建議風格」 | 讀 ST 上表 → 寫 `/bridge/st` + `/api/style` |
 | TV／訊號 | `POST http://127.0.0.1:18433/webhook` |
 | 狀態 | `GET  http://127.0.0.1:18433/api/state` |

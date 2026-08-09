@@ -1,0 +1,221 @@
+# -*- coding: utf-8 -*-
+"""Stock Terminal ↔ WaveDeck reverse bus + shared cost meter.
+
+WD → ST: POST /bridge/wavedeck（部位／FSM／成本回報）
+ST 計價：本機 LLM 呼叫次數、雲端估算 USD；合併 WD costs 供頂列／Pulse 顯示。
+"""
+from __future__ import annotations
+
+import json
+import threading
+import time
+from copy import deepcopy
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+from typing import Any, Optional
+from urllib.parse import urlparse
+
+TZ8 = timezone(timedelta(hours=8))
+DATA = Path(__file__).resolve().parents[1] / 'data'
+STORE = DATA / 'wavedeck_bus.json'
+
+# WaveDeck 預設／fallback 埠（與 bridge JS、run.py 對齊）
+WD_PORTS = (18433, 18434, 18765, 28765, 38433, 8765)
+
+_lock = threading.RLock()
+_state: dict[str, Any] = {
+    'report': None,  # last WD → ST payload
+    'report_at': None,
+    'costs': {
+        'st_local_calls': 0,
+        'st_cloud_calls': 0,
+        'st_cloud_usd_est': 0.0,
+        'wd_session_usd': 0.0,
+        'wd_day_usd': 0.0,
+        'wd_month_usd': 0.0,
+        'wd_provider': None,
+        'updated_at': None,
+    },
+}
+
+
+def _now_iso() -> str:
+    return datetime.now(TZ8).strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _load() -> None:
+    global _state
+    if not STORE.is_file():
+        return
+    try:
+        raw = json.loads(STORE.read_text(encoding='utf-8'))
+        if isinstance(raw, dict):
+            with _lock:
+                if isinstance(raw.get('costs'), dict):
+                    _state['costs'].update(raw['costs'])
+                if raw.get('report') is not None:
+                    _state['report'] = raw['report']
+                    _state['report_at'] = raw.get('report_at')
+    except Exception:
+        pass
+
+
+def _save() -> None:
+    try:
+        DATA.mkdir(parents=True, exist_ok=True)
+        with _lock:
+            payload = {
+                'report': _state.get('report'),
+                'report_at': _state.get('report_at'),
+                'costs': _state.get('costs'),
+            }
+        tmp = STORE.with_suffix('.tmp')
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+        tmp.replace(STORE)
+    except Exception:
+        pass
+
+
+_load()
+
+
+def is_wavedeck_origin(origin_or_referer: str) -> bool:
+    """Allow browser POSTs from WaveDeck loopback consoles."""
+    o = (origin_or_referer or '').strip()
+    if not o:
+        return False
+    try:
+        u = urlparse(o if '://' in o else ('http://' + o))
+        host = (u.hostname or '').lower()
+        if host not in ('127.0.0.1', 'localhost'):
+            return False
+        port = u.port
+        if port is None:
+            port = 80 if (u.scheme or 'http') == 'http' else 443
+        return int(port) in WD_PORTS
+    except Exception:
+        return False
+
+
+def accept_report(body: dict[str, Any]) -> dict[str, Any]:
+    """Ingest WaveDeck runtime snapshot (reverse bus)."""
+    body = body if isinstance(body, dict) else {}
+    ai = body.get('ai') if isinstance(body.get('ai'), dict) else {}
+    costs = body.get('costs') if isinstance(body.get('costs'), dict) else {}
+    pos = body.get('positions') if isinstance(body.get('positions'), dict) else {}
+    ov = body.get('st_overlay') if isinstance(body.get('st_overlay'), dict) else {}
+
+    report = {
+        'fsm': body.get('fsm'),
+        'mode': body.get('mode'),
+        'style': body.get('style'),
+        'symbol': body.get('symbol') or 'TXF',
+        'kill_switch': bool(body.get('kill_switch')),
+        'ai': {
+            'action': ai.get('action'),
+            'action_label': ai.get('action_label'),
+            'confidence': ai.get('confidence'),
+            'provider': ai.get('provider'),
+        },
+        'positions': {
+            'account': pos.get('account'),
+            'txt_target': pos.get('txt_target'),
+            'strategy': pos.get('strategy'),
+            'ai_suggested': pos.get('ai_suggested'),
+        },
+        'st_overlay': {
+            'aggressiveness': ov.get('aggressiveness'),
+            'delever': ov.get('delever'),
+            'rotation': ov.get('rotation'),
+            'spillover_prob': ov.get('spillover_prob'),
+            'note': (str(ov.get('note') or ''))[:200],
+        },
+        'costs': {
+            'session_usd': costs.get('session_usd'),
+            'day_usd': costs.get('day_usd'),
+            'month_usd': costs.get('month_usd'),
+            'provider': costs.get('provider'),
+        },
+        'source': str(body.get('source') or 'wavedeck')[:64],
+        'received_at': _now_iso(),
+    }
+
+    with _lock:
+        _state['report'] = report
+        _state['report_at'] = report['received_at']
+        c = _state['costs']
+        if costs.get('session_usd') is not None:
+            try:
+                c['wd_session_usd'] = float(costs['session_usd'])
+            except Exception:
+                pass
+        if costs.get('day_usd') is not None:
+            try:
+                c['wd_day_usd'] = float(costs['day_usd'])
+            except Exception:
+                pass
+        if costs.get('month_usd') is not None:
+            try:
+                c['wd_month_usd'] = float(costs['month_usd'])
+            except Exception:
+                pass
+        if costs.get('provider'):
+            c['wd_provider'] = str(costs['provider'])[:40]
+        c['updated_at'] = report['received_at']
+    _save()
+    return snapshot()
+
+
+def record_st_local(n: int = 1) -> None:
+    with _lock:
+        _state['costs']['st_local_calls'] = int(_state['costs'].get('st_local_calls') or 0) + max(0, int(n))
+        _state['costs']['updated_at'] = _now_iso()
+    _save()
+
+
+def record_st_cloud(usd: float = 0.02, calls: int = 1) -> None:
+    with _lock:
+        _state['costs']['st_cloud_calls'] = int(_state['costs'].get('st_cloud_calls') or 0) + max(0, int(calls))
+        try:
+            _state['costs']['st_cloud_usd_est'] = round(
+                float(_state['costs'].get('st_cloud_usd_est') or 0) + float(usd), 4
+            )
+        except Exception:
+            pass
+        _state['costs']['updated_at'] = _now_iso()
+    _save()
+
+
+def snapshot() -> dict[str, Any]:
+    with _lock:
+        costs = deepcopy(_state['costs'])
+        report = deepcopy(_state['report'])
+        report_at = _state.get('report_at')
+    wd_day = float(costs.get('wd_day_usd') or 0)
+    st_cloud = float(costs.get('st_cloud_usd_est') or 0)
+    return {
+        'ok': True,
+        'service': 'StockTerminal',
+        'bridge': 'wavedeck',
+        'report': report,
+        'report_at': report_at,
+        'fresh': bool(report_at),  # UI may compute age
+        'costs': {
+            'st_local_calls': int(costs.get('st_local_calls') or 0),
+            'st_cloud_calls': int(costs.get('st_cloud_calls') or 0),
+            'st_cloud_usd_est': st_cloud,
+            'wd_session_usd': float(costs.get('wd_session_usd') or 0),
+            'wd_day_usd': wd_day,
+            'wd_month_usd': float(costs.get('wd_month_usd') or 0),
+            'wd_provider': costs.get('wd_provider'),
+            'combined_usd_est': round(st_cloud + wd_day, 4),
+            'updated_at': costs.get('updated_at'),
+        },
+        'ts': _now_iso(),
+        'epoch_ms': int(time.time() * 1000),
+    }
+
+
+def last_report() -> Optional[dict[str, Any]]:
+    with _lock:
+        return deepcopy(_state['report'])

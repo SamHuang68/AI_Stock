@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 from server.broker import PaperBroker, TxtMasterBroker, _parse_lots  # noqa: E402
 from server.config import set_broker_kind, set_mode, set_provider  # noqa: E402
 from server.decision import HeuristicProvider  # noqa: E402
+from server.engine import apply_st_bridge  # noqa: E402
 from server.providers import infer_with_fallback  # noqa: E402
 from server.risk import evaluate_gate  # noqa: E402
 
@@ -125,6 +126,45 @@ class WaveDeckSmoke(unittest.TestCase):
                 self.assertEqual(c["broker"]["kind"], "paper")
                 with self.assertRaises(ValueError):
                     set_provider("nope")
+
+    def test_st_bridge_spillover_forces_delever(self):
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch("server.state.DATA", Path(td)), mock.patch(
+                "server.state.STATE_PATH", Path(td) / "runtime_state.json"
+            ), mock.patch("server.audit.DATA", Path(td)):
+                snap = apply_st_bridge(
+                    {
+                        "style": 55,
+                        "delever": False,
+                        "note": "test",
+                        "meta": {
+                            "rotation": "narrow",
+                            "spillover_prob": 0.22,
+                            "leaders": ["半導體"],
+                            "source": "unit",
+                        },
+                    }
+                )
+                ov = snap.get("st_overlay") or {}
+                self.assertTrue(ov.get("delever"))
+                self.assertEqual(ov.get("rotation"), "narrow")
+                self.assertAlmostEqual(float(ov.get("spillover_prob")), 0.22)
+                self.assertEqual(snap.get("style"), 55)
+
+    def test_soft_spillover_gate_halves_lots(self):
+        st = {
+            "kill_switch": False,
+            "fsm": "Idle",
+            "account": {"yesterday_balance": 100, "equity": 100},
+            "no_overnight": {"enabled": False},
+            "st_overlay": {"delever": False, "spillover_prob": 0.25},
+            "style": 50,
+            "exec": {"lots": 4},
+        }
+        g = evaluate_gate(st, {"action": "ENTER_LONG", "process": {"chase_risk": "low"}})
+        self.assertTrue(g["allow"])
+        self.assertEqual(g["lots_effective"], 2)
+        self.assertTrue(any("外溢" in r for r in g["reasons"]))
 
 
 if __name__ == "__main__":

@@ -9,6 +9,8 @@
   var state = null;
   var stCtx = { styleHint: null, delever: false, note: '', score: null };
   var toastTimer = null;
+  var _lastReportAt = 0;
+  var REPORT_MIN_MS = 12000;
 
   function $(id) { return document.getElementById(id); }
 
@@ -64,6 +66,39 @@
     return map[v] || String(v);
   }
 
+  /** Push WD runtime → ST reverse bus (POST /bridge/wavedeck). */
+  function reportToSt(s) {
+    if (!s) return;
+    var now = Date.now();
+    if (now - _lastReportAt < REPORT_MIN_MS) return;
+    _lastReportAt = now;
+    var ai = s.ai || {};
+    var body = {
+      fsm: s.fsm,
+      mode: s.mode,
+      style: s.style,
+      symbol: s.symbol,
+      kill_switch: !!s.kill_switch,
+      ai: {
+        action: ai.action,
+        action_label: ai.action_label,
+        confidence: ai.confidence,
+        provider: ai.provider
+      },
+      positions: s.positions || {},
+      costs: s.costs || {},
+      st_overlay: s.st_overlay || {},
+      source: 'wavedeck-console'
+    };
+    fetch(ST + '/bridge/wavedeck', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+      mode: 'cors'
+    }).catch(function () { /* ST 未開則靜默 */ });
+  }
+
   function styleFromScore(score, advRatio) {
     var s = Number(score);
     var adv = Number(advRatio);
@@ -108,12 +143,18 @@
       return '<span class="' + cls + '"><i class="dot"></i>' + pair[0] + ' · ' + lightLabel(pair[1]) + '</span>';
     }).join('');
 
-    $('stDelever').textContent = (s.st_overlay && s.st_overlay.delever) ? '是' : (stCtx.delever ? '建議是' : '否');
-    $('stStyle').textContent = (s.st_overlay && s.st_overlay.aggressiveness != null)
-      ? s.st_overlay.aggressiveness
+    var ov = s.st_overlay || {};
+    $('stDelever').textContent = ov.delever ? '是' : (stCtx.delever ? '建議是' : '否');
+    $('stStyle').textContent = (ov.aggressiveness != null)
+      ? ov.aggressiveness
       : (stCtx.styleHint != null ? ('建議 ' + stCtx.styleHint) : '—');
-    if (s.st_overlay && s.st_overlay.note) {
-      $('stNote').textContent = s.st_overlay.note;
+    if (ov.note) {
+      var extra = '';
+      if (ov.rotation) extra += ' · 輪動 ' + ov.rotation;
+      if (ov.spillover_prob != null && isFinite(Number(ov.spillover_prob))) {
+        extra += ' · 外溢 ' + Math.round(Number(ov.spillover_prob) * 100) + '%';
+      }
+      $('stNote').textContent = ov.note + (ov.note.indexOf('外溢') >= 0 ? '' : extra);
     } else if (stCtx.note) {
       $('stNote').textContent = stCtx.note;
     }
@@ -238,6 +279,7 @@
     var j = await api('/api/state');
     render(j.state);
     if ($('wdSyncTxt')) $('wdSyncTxt').textContent = 'OK';
+    reportToSt(j.state);
   }
 
   async function refreshSt() {
