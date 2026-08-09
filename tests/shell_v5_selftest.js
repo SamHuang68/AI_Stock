@@ -55,6 +55,11 @@ ok(/magBars/.test(hub) && /refMeter/.test(hub), 'institutional magBars + turnove
 ok(/minmax\(0,1fr\) minmax\(0,2fr\)/.test(hub), 'institutional chart ~1/3 width');
 ok(/lots-bar/.test(hub) && /class="streak"/.test(hub), 'institutional lots bar separated from streak');
 (function () {
+  var wd = fs.readFileSync(path.join(root, 'src/ui/wavedeck_bridge_v5.js'), 'utf8');
+  ok(/HEARTBEAT_MS/.test(wd) && /startOverlayHeartbeat/.test(wd),
+    'WaveDeck bridge republishes overlay heartbeat before fail-safe stale');
+})();
+(function () {
   var vz = fs.readFileSync(path.join(root, 'src/ui/viz_v5.js'), 'utf8');
   ok(/vz-xlabs/.test(vz), 'sparkLine X tick labels');
   ok(/linearGradient/.test(vz) && /vz-pt/.test(vz) && /wantFill/.test(vz) && /wantMarks/.test(vz),

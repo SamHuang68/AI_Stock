@@ -30,7 +30,9 @@
     : DEFAULT_URL;
 
   var AUTO_KEY = 'st5.wd.autoOverlay';
-  var MIN_INTERVAL_MS = 60000;
+  /* Same-key heartbeat：至少每 45s 重送一次，避免 WD overlay 因節流超過 90s 過期 */
+  var HEARTBEAT_MS = 45000;
+  var MIN_INTERVAL_MS = 12000;
   var _lastKey = '';
   var _lastAt = 0;
   var _lastPayload = null;
@@ -38,6 +40,7 @@
   var _costCache = null;
   var _costAt = 0;
   var COST_TTL_MS = 10000;
+  var _hbTimer = null;
 
   function toast(msg) {
     if (typeof window.notifyToast === 'function') {
@@ -297,8 +300,14 @@
     var key = style + '|' + (delever ? 1 : 0) + '|' + (rot || '') + '|' +
       (isFinite(Number(spill)) ? Math.round(Number(spill) * 20) : '');
     var now = Date.now();
-    if (!ctx.force && key === _lastKey && (now - _lastAt) < MIN_INTERVAL_MS) {
-      return Promise.resolve({ skipped: true, reason: 'throttle', style: style, delever: delever });
+    // 同鍵：45s 心跳重送；異鍵：12s 去抖
+    if (!ctx.force) {
+      if (key === _lastKey && (now - _lastAt) < HEARTBEAT_MS) {
+        return Promise.resolve({ skipped: true, reason: 'throttle', style: style, delever: delever });
+      }
+      if (key !== _lastKey && (now - _lastAt) < MIN_INTERVAL_MS) {
+        return Promise.resolve({ skipped: true, reason: 'debounce', style: style, delever: delever });
+      }
     }
 
     var leaders = Array.isArray(ctx.leaders) ? ctx.leaders.slice(0, 6) : [];
@@ -920,6 +929,24 @@
       paintChipNodes('');
     });
   } catch (eBoot) {}
+
+  function startOverlayHeartbeat() {
+    if (_hbTimer) return;
+    _hbTimer = setInterval(function () {
+      try {
+        if (!autoEnabled()) return;
+        if (!_lastPayload) return;
+        if (Date.now() - _lastAt < HEARTBEAT_MS - 2000) return;
+        pushOverlay(_lastPayload).then(function () {
+          _lastAt = Date.now();
+          try { console.log('[wavedeck-bridge] overlay heartbeat republish'); } catch (e0) {}
+        }).catch(function (err) {
+          try { console.warn('[wavedeck-bridge] heartbeat', err); } catch (e1) {}
+        });
+      } catch (e2) {}
+    }, 15000);
+  }
+  startOverlayHeartbeat();
 
   try { console.log('[wavedeck-bridge] ready → ' + BASE + ' · SSE chip stream'); } catch (e) {}
 })();

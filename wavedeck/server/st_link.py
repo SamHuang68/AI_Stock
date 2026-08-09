@@ -1,36 +1,54 @@
 # -*- coding: utf-8 -*-
 """ST heartbeat + graceful degradation (fail-safe) for WaveDeck.
 
-Root cause (fixed): fail-safe used to set style=35 once, then any later
-`/api/style` or bridge noise could raise style back (e.g. 60) while the
-Fail-safe banner stayed — looking like 「降載失效」. While fail-safe is
-active we now RE-ENFORCE style/delever/lights every heartbeat tick.
+Root causes addressed:
+1. Fail-safe used to set style=35 once → later style drift to 60 while banner stayed.
+   → Sticky enforce every tick + /api/style clamp.
+2. Overlay stale when ST browser tab stopped pushing → WD now PULLS macro from ST
+   before fail-safe (retry), and ST bridge heartbeat republishes last payload.
+3. Fail-safe banner was appended into ai.summary every tick → UI wash/duplication.
+   → Reason lives on st_link / st_overlay only; summary is scrubbed clean.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
+import urllib.parse
 import urllib.request
 from typing import Any, Optional
 
 from . import audit
+from .risk import daily_dd_ratio, MAX_DAILY_DD, WARN_DAILY_DD
 from .state import RUNTIME, now_iso
 from .st_push import push_async
 
 ST_URL = os.environ.get("ST_URL", "http://127.0.0.1:18432").rstrip("/")
 PING_SEC = float(os.environ.get("WD_ST_HEARTBEAT_SEC", "5"))
+# Soft age: attempt WD←ST pull before hard fail-safe
+OVERLAY_PULL_SEC = float(os.environ.get("WD_ST_OVERLAY_PULL_SEC", "45"))
 # Overlay older than this without bridge update → fail-safe
 OVERLAY_STALE_SEC = float(os.environ.get("WD_ST_OVERLAY_STALE_SEC", "90"))
 # Consecutive ping failures before fail-safe
 FAIL_AFTER = int(os.environ.get("WD_ST_FAIL_AFTER", "2"))
 FAIL_SAFE_STYLE = int(os.environ.get("WD_FAIL_SAFE_STYLE", "35"))
+# When daily DD breaches, also flatten TXT (default: pause new only)
+DD_FLATTEN = os.environ.get("WD_DD_FLATTEN", "0").lower() in ("1", "true", "yes")
+
+_FS_BANNER_RE = re.compile(
+    r"〔Fail-safe：[^\]]*〕(?:\s*風格→保守、降載、收緊失效。?)*\s*",
+    re.UNICODE,
+)
+_FS_CLAUSE_RE = re.compile(r"(?:風格→保守、降載、收緊失效。?\s*)+", re.UNICODE)
 
 _stop = threading.Event()
 _thread: Optional[threading.Thread] = None
 _fail_count = 0
 _lock = threading.Lock()
+_last_pull_at = 0.0
+_dd_locked = False
 
 
 def _default_link() -> dict[str, Any]:
@@ -43,6 +61,8 @@ def _default_link() -> dict[str, Any]:
         "fail_safe": False,
         "fail_safe_reason": "",
         "fail_safe_kind": "",  # stale_overlay | heartbeat
+        "last_pull_at": None,
+        "pull_ok": None,
         "st_port": ST_URL,
     }
 
@@ -56,6 +76,14 @@ def _kind_of(reason: str) -> str:
     return "other"
 
 
+def scrub_fail_safe_summary(text: str | None) -> str:
+    """Remove stacked Fail-safe banners from AI summary body."""
+    t = str(text or "")
+    t = _FS_BANNER_RE.sub("", t)
+    t = _FS_CLAUSE_RE.sub("", t)
+    return re.sub(r"\s{2,}", " ", t).strip()
+
+
 def touch_overlay() -> None:
     """Call when POST /bridge/st succeeds — ST resumed commanding; clear fail-safe."""
     link = dict(RUNTIME.snapshot().get("st_link") or _default_link())
@@ -66,12 +94,18 @@ def touch_overlay() -> None:
     link["fail_safe_reason"] = ""
     link["fail_safe_kind"] = ""
     ov = dict(RUNTIME.snapshot().get("st_overlay") or {})
+    ai = dict(RUNTIME.snapshot().get("ai") or {})
+    cleaned = scrub_fail_safe_summary(ai.get("summary"))
+    patch: dict[str, Any] = {"st_link": link, "lights": {"st_bridge": "ok"}}
     if ov.get("fail_safe"):
         ov["fail_safe"] = False
         ov["fail_safe_reason"] = None
-        RUNTIME.patch(st_link=link, st_overlay=ov, lights={"st_bridge": "ok", "risk_watchdog": "ok"})
-    else:
-        RUNTIME.patch(st_link=link, lights={"st_bridge": "ok"})
+        patch["st_overlay"] = ov
+        patch["lights"] = {"st_bridge": "ok", "risk_watchdog": "ok"}
+    if cleaned != str(ai.get("summary") or ""):
+        ai["summary"] = cleaned
+        patch["ai"] = ai
+    RUNTIME.patch(**patch)
 
 
 def _ping_st() -> bool:
@@ -83,6 +117,104 @@ def _ping_st() -> bool:
         return bool(j.get("status") == "ok" or j.get("ok") is True)
     except Exception:
         return False
+
+
+def _get_json(path: str, timeout: float = 2.5) -> Optional[dict[str, Any]]:
+    try:
+        req = urllib.request.Request(ST_URL + path, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", "replace")
+        j = json.loads(raw)
+        return j if isinstance(j, dict) else None
+    except Exception:
+        return None
+
+
+def _style_from_score(score: Any, adv: Any) -> int:
+    try:
+        s = float(score)
+    except Exception:
+        s = 50.0
+    if s >= 70:
+        hint = 65
+    elif s >= 55:
+        hint = 55
+    elif s >= 45:
+        hint = 50
+    elif s >= 30:
+        hint = 40
+    else:
+        hint = 35
+    try:
+        a = float(adv) if adv is not None else None
+    except Exception:
+        a = None
+    if a is not None:
+        if a < 0.35:
+            hint = min(hint, 40)
+        if a > 0.65:
+            hint = max(hint, 55)
+    return max(20, min(90, int(round(hint))))
+
+
+def pull_st_macro(*, force: bool = False) -> bool:
+    """WD←ST pull: fundamental + breadth → POST-equivalent overlay (clears fail-safe)."""
+    global _last_pull_at
+    now = time.time()
+    if not force and (now - _last_pull_at) < 12.0:
+        return False
+    _last_pull_at = now
+    fund = _get_json("/fundamental/" + urllib.parse.quote("^TWII", safe=""))
+    br = _get_json("/breadth")
+    if not fund and not br:
+        link = dict(RUNTIME.snapshot().get("st_link") or _default_link())
+        link["pull_ok"] = False
+        link["last_pull_at"] = now_iso()
+        RUNTIME.patch(st_link=link)
+        return False
+    fund = fund or {}
+    br = br or {}
+    score = fund.get("score")
+    if score is None:
+        score = br.get("score")
+    adv = (br.get("stocks") or {}).get("advRatio")
+    if score is None and adv is None:
+        link = dict(RUNTIME.snapshot().get("st_link") or _default_link())
+        link["pull_ok"] = False
+        link["last_pull_at"] = now_iso()
+        RUNTIME.patch(st_link=link)
+        return False
+    style = _style_from_score(score, adv)
+    try:
+        delever = score is not None and float(score) < 35
+    except Exception:
+        delever = False
+    note = (
+        f"WD 拉取 ST · 體質 {round(float(score)) if score is not None else '—'}"
+        f" · 風格 {style}"
+        + (" · 降載" if delever else "")
+    )
+    from .engine import apply_st_bridge
+
+    apply_st_bridge(
+        {
+            "style": style,
+            "delever": delever,
+            "note": note,
+            "meta": {
+                "score": score,
+                "advRatio": adv,
+                "label": fund.get("label") or br.get("label"),
+                "source": "wd-st-pull",
+            },
+        }
+    )
+    link = dict(RUNTIME.snapshot().get("st_link") or _default_link())
+    link["pull_ok"] = True
+    link["last_pull_at"] = now_iso()
+    RUNTIME.patch(st_link=link)
+    audit.write("st_pull", {"style": style, "score": score, "advRatio": adv})
+    return True
 
 
 def _overlay_age_sec(link: dict[str, Any]) -> Optional[float]:
@@ -138,17 +270,8 @@ def enforce_fail_safe(reason: str | None = None, *, tighten: bool = False) -> di
     price = float((st.get("exec") or {}).get("price") or 0)
     if tighten:
         ai = _tighten_invalidation(ai, price)
-    prev_sum = str(ai.get("summary") or "")
-    banner = f"〔Fail-safe：{reason}〕風格→保守、降載、收緊失效。"
-    if "Fail-safe" not in prev_sum:
-        ai["summary"] = banner + " " + prev_sum[:500]
-    else:
-        # Refresh age/reason text in summary without stacking duplicates
-        if prev_sum.startswith("〔Fail-safe"):
-            rest = prev_sum.split("〕", 1)
-            tail = rest[1] if len(rest) > 1 else ""
-            # strip leading "風格→…" clause if present
-            ai["summary"] = banner + (tail if tail.startswith(" ") else (" " + tail.lstrip()[:500]))
+    # Never stack banners into summary — badge UI reads fail_safe_reason
+    ai["summary"] = scrub_fail_safe_summary(ai.get("summary"))
 
     link.update(
         {
@@ -191,7 +314,6 @@ def apply_fail_safe(reason: str) -> dict[str, Any]:
     kind = _kind_of(reason)
     already = bool(link.get("fail_safe") or (st.get("st_overlay") or {}).get("fail_safe"))
     same_kind = str(link.get("fail_safe_kind") or "") == kind
-    # First entry or kind change → tighten stop once; every call re-enforces caps
     snap = enforce_fail_safe(reason, tighten=(not already or not same_kind))
     if not already:
         audit.write("fail_safe", {"reason": reason, "kind": kind})
@@ -200,6 +322,56 @@ def apply_fail_safe(reason: str) -> dict[str, Any]:
         audit.write("fail_safe", {"reason": reason, "kind": kind, "upgrade": True})
         push_async(snap, reason="fail_safe", force=True)
     return snap
+
+
+def _enforce_daily_dd() -> None:
+    """Hard stop when session equity drawdown ≥ MAX_DAILY_DD (default 5%)."""
+    global _dd_locked
+    st = RUNTIME.snapshot()
+    ratio = daily_dd_ratio(st)
+    acct = dict(st.get("account") or {})
+    acct["daily_dd_pct"] = round(ratio * 100, 2)
+    acct["daily_dd_limit_pct"] = round(MAX_DAILY_DD * 100, 2)
+    lights: dict[str, Any] = {}
+    if ratio >= WARN_DAILY_DD and ratio < MAX_DAILY_DD:
+        lights["risk_watchdog"] = "warn"
+        RUNTIME.patch(account=acct, lights=lights)
+        return
+    if ratio < MAX_DAILY_DD:
+        if _dd_locked and not st.get("kill_switch"):
+            _dd_locked = False
+        RUNTIME.patch(account=acct)
+        return
+
+    lights["risk_watchdog"] = "bad"
+    RUNTIME.patch(account=acct, lights=lights)
+    if st.get("kill_switch") and _dd_locked:
+        return
+    RUNTIME.set_kill(True)
+    _dd_locked = True
+    audit.write(
+        "daily_dd_lock",
+        {
+            "ratio": ratio,
+            "limit": MAX_DAILY_DD,
+            "yesterday": acct.get("yesterday_balance"),
+            "equity": acct.get("equity"),
+            "flatten": DD_FLATTEN,
+        },
+    )
+    if DD_FLATTEN:
+        try:
+            from .broker import panic_flatten
+
+            flat = panic_flatten(RUNTIME.snapshot())
+            RUNTIME.patch(
+                positions=flat.get("positions"),
+                exec=flat.get("exec"),
+            )
+            RUNTIME.set_kill(True)
+        except Exception:
+            pass
+    push_async(RUNTIME.snapshot(), reason="daily_dd_lock", force=True)
 
 
 def _tick() -> None:
@@ -214,7 +386,6 @@ def _tick() -> None:
             link["last_ok_at"] = now_iso()
             if not link.get("fail_safe"):
                 link["status"] = "ok"
-            # Never paint st_bridge green while fail-safe is sticky
             lamp = "warn" if link.get("fail_safe") else "ok"
             RUNTIME.patch(st_link=link, lights={"st_bridge": lamp})
         else:
@@ -226,19 +397,31 @@ def _tick() -> None:
                 lights={"st_bridge": "warn" if _fail_count < FAIL_AFTER else "bad"},
             )
 
-    # Fail-safe triggers
+    try:
+        _enforce_daily_dd()
+    except Exception:
+        pass
+
     if not ok and _fail_count >= FAIL_AFTER:
         apply_fail_safe("ST 心跳中斷")
         return
 
-    # Refresh link after ping patch
+    link = dict(RUNTIME.snapshot().get("st_link") or _default_link())
+    age = _overlay_age_sec(link)
+    # Soft retry: ST alive but overlay aging / missing → pull macro
+    need_pull = ok and (
+        age is None or age >= OVERLAY_PULL_SEC or bool(link.get("fail_safe"))
+    )
+    if need_pull:
+        if pull_st_macro(force=bool(link.get("fail_safe") and (age is None or age >= OVERLAY_PULL_SEC))):
+            return
+
     link = dict(RUNTIME.snapshot().get("st_link") or _default_link())
     age = _overlay_age_sec(link)
     if age is not None and age > OVERLAY_STALE_SEC:
         apply_fail_safe(f"宏觀覆寫過期 {int(age)}s")
         return
 
-    # Sticky re-enforce every tick while flagged (style drift / lamp green / delever cleared)
     if fail_safe_active():
         enforce_fail_safe(tighten=False)
 

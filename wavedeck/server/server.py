@@ -353,18 +353,32 @@ def main() -> None:
         start_st_link()
     except Exception as exc:
         sys.stderr.write(f"[wavedeck] st_link heartbeat skip: {exc}\n")
+    try:
+        from server.review_loop import start as start_review_loop
+
+        start_review_loop()
+    except Exception as exc:
+        sys.stderr.write(f"[wavedeck] review_loop skip: {exc}\n")
     if port != PORT:
         print(f"[wavedeck] 預設埠 {PORT} 不可用，已改用 {port}")
     print("=" * 52)
     print(f" WaveDeck · 浪潮執行台  http://{HOST}:{port}/")
     print(f" Health                 http://{HOST}:{port}/health")
     print(f" Stock Terminal bridge  POST /bridge/st")
-    print(f" ST heartbeat           every {os.environ.get('WD_ST_HEARTBEAT_SEC', '5')}s → fail-safe")
+    print(f" ST heartbeat           every {os.environ.get('WD_ST_HEARTBEAT_SEC', '5')}s → pull@{os.environ.get('WD_ST_OVERLAY_PULL_SEC', '45')}s / fail-safe@{os.environ.get('WD_ST_OVERLAY_STALE_SEC', '90')}s")
+    print(f" Daily DD lock          {float(os.environ.get('WD_MAX_DAILY_DD', '0.05'))*100:.0f}% (pause new)")
+    print(f" Review loop            in-pos {os.environ.get('WD_REVIEW_INPOS_SEC', '90')}s / idle {os.environ.get('WD_REVIEW_IDLE_SEC', '180')}s")
     print("=" * 52)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\n[wavedeck] bye")
+        try:
+            from server.review_loop import stop as stop_review_loop
+
+            stop_review_loop()
+        except Exception:
+            pass
         try:
             from server.st_link import stop as stop_st_link
 

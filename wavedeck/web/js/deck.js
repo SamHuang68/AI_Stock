@@ -38,6 +38,14 @@
     return v.toLocaleString('en-US');
   }
 
+  function scrubFailSafeText(s) {
+    return String(s || '')
+      .replace(/〔Fail-safe：[^\]]*〕(?:\s*風格→保守、降載、收緊失效。?)*/g, '')
+      .replace(/(?:風格→保守、降載、收緊失效。?\s*)+/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
   async function api(path, opts) {
     var r = await fetch(path, Object.assign({
       headers: { 'Content-Type': 'application/json' },
@@ -193,6 +201,18 @@
       });
       s = Object.assign({}, s, { lights: L });
     }
+    var fsBadge = $('fsBadge');
+    if (fsBadge) {
+      if (fsOn) {
+        fsBadge.hidden = false;
+        fsBadge.className = 'alert-badge' + (link.fail_safe_kind === 'heartbeat' ? ' bad' : '');
+        fsBadge.textContent = 'Fail-safe · ' + (ov.fail_safe_reason || link.fail_safe_reason || 'ST 連線異常') +
+          ' · 風格鎖 ≤35／降載／禁新單';
+      } else {
+        fsBadge.hidden = true;
+        fsBadge.textContent = '';
+      }
+    }
     $('stDelever').textContent = (ov.delever || fsOn) ? '是' : (stCtx.delever ? '建議是' : '否');
     $('stStyle').textContent = (ov.aggressiveness != null)
       ? ov.aggressiveness
@@ -240,7 +260,8 @@
     $('aiEvent').textContent = ai.event || '—';
     $('biasLong').textContent = fmtPct(ai.bias_long);
     $('biasShort').textContent = fmtPct(ai.bias_short);
-    $('aiSummary').textContent = ai.summary || '—';
+    var cleanSum = scrubFailSafeText(ai.summary);
+    $('aiSummary').textContent = cleanSum || '—';
 
     var tags = [];
     if (ai.invalidation) {
@@ -285,10 +306,19 @@
 
     var a = s.account || {};
     var chg = Number(a.equity_change || 0);
+    var yb = Number(a.yesterday_balance || 0);
+    var eq = Number(a.equity || 0);
+    var ddPct = (a.daily_dd_pct != null && isFinite(Number(a.daily_dd_pct)))
+      ? Number(a.daily_dd_pct)
+      : (yb > 0 ? Math.max(0, (yb - eq) / yb * 100) : 0);
+    var ddLim = (a.daily_dd_limit_pct != null) ? Number(a.daily_dd_limit_pct) : 5;
+    var ddCls = ddPct >= ddLim ? 'down' : (ddPct >= ddLim * 0.6 ? 'down' : '');
     $('acct').innerHTML =
       '<div class="a"><div class="k">昨日餘額</div><div class="v">' + money(a.yesterday_balance) + '</div></div>' +
       '<div class="a"><div class="k">當前權益</div><div class="v">' + money(a.equity) + '</div></div>' +
       '<div class="a"><div class="k">權益變動</div><div class="v ' + (chg < 0 ? 'down' : 'up') + '">' + money(chg) + '</div></div>' +
+      '<div class="a"><div class="k">單日回撤</div><div class="v ' + ddCls + '">' +
+        (ddPct ? (ddPct.toFixed(2) + '% / ' + ddLim + '%') : ('0% / ' + ddLim + '%')) + '</div></div>' +
       '<div class="a"><div class="k">券商連線</div><div class="v">' + (a.broker_api || '—') + '</div></div>';
 
     var ex = s.exec || {};
@@ -304,7 +334,17 @@
     var c = s.costs || {};
     var stc = window.__stCostMeter || null;
     var combined = stc && stc.costs ? stc.costs.combined_usd_est : null;
+    var prov = String(c.provider || ai.provider || 'heuristic');
+    var dayUsd = Number(c.day_usd || 0);
+    var dayCap = 5; // soft budget label (USD); env/UI hint only
+    var budgetCls = dayUsd >= dayCap ? 'bad' : (dayUsd >= dayCap * 0.7 ? 'warn' : '');
+    var modeLabel = prov === 'openai' ? 'OpenAI 雲端' : (prov === 'ollama' ? 'Ollama 本機' : 'Heuristic 規則');
     $('costKv').innerHTML =
+      '<div class="cost-mode"><span class="pill">' + modeLabel + '</span>' +
+        (prov === 'openai'
+          ? '<span class="pill ' + budgetCls + '">今日 $' + dayUsd + ' / 警戒 $' + dayCap + '</span>'
+          : '<span class="pill">API 費用 $0（非雲端）</span>') +
+      '</div>' +
       '<div class="a"><div class="k">本次 USD</div><div class="v">' + (c.session_usd != null ? c.session_usd : 0) + '</div></div>' +
       '<div class="a"><div class="k">今日 USD</div><div class="v">' + (c.day_usd != null ? c.day_usd : 0) + '</div></div>' +
       '<div class="a"><div class="k">本月 USD</div><div class="v">' + (c.month_usd != null ? c.month_usd : 0) + '</div></div>' +
@@ -571,7 +611,8 @@
     });
     if ($('btnPanic')) {
       $('btnPanic').addEventListener('click', async function () {
-        if (!window.confirm('確認急停並全平？將暫停新單並寫入目標部位 0（EXIT）。')) return;
+        if (!window.confirm('【二次確認】急停並全平？\n將暫停新單，並寫入目標部位 0（EXIT）給下單大師。')) return;
+        if (!window.confirm('最後確認：立即市價全平訊號？此操作無法從此處撤銷。')) return;
         try {
           var j = await api('/api/panic', { method: 'POST', body: '{}' });
           render(j.state);

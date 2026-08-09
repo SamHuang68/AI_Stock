@@ -10,6 +10,23 @@ from .state import TZ8
 
 # Entry confidence floor (heuristic/LLM). 0 = disabled.
 MIN_ENTRY_CONFIDENCE = float(os.environ.get("WD_MIN_ENTRY_CONFIDENCE", "0.70"))
+# Hard daily equity drawdown vs yesterday_balance (e.g. 0.05 = 5%)
+MAX_DAILY_DD = float(os.environ.get("WD_MAX_DAILY_DD", "0.05"))
+# Soft warn lamp threshold (default 3%)
+WARN_DAILY_DD = float(os.environ.get("WD_WARN_DAILY_DD", "0.03"))
+
+
+def daily_dd_ratio(state: dict[str, Any]) -> float:
+    """Session drawdown ratio vs yesterday_balance; 0 if unknown / flat-or-up."""
+    acct = state.get("account") or {}
+    try:
+        yb = float(acct.get("yesterday_balance") or 0)
+        eq = float(acct.get("equity") or 0)
+    except Exception:
+        return 0.0
+    if yb <= 0:
+        return 0.0
+    return max(0.0, (yb - eq) / yb)
 
 
 def evaluate_gate(state: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
@@ -21,20 +38,21 @@ def evaluate_gate(state: dict[str, Any], decision: dict[str, Any]) -> dict[str, 
         allow = False
         reasons.append("Kill Switch / Halted")
 
-    acct = state.get("account") or {}
-    # Demo threshold: equity drop > 20% of yesterday → block new risk-on
-    yb = float(acct.get("yesterday_balance") or 0)
-    eq = float(acct.get("equity") or 0)
-    if yb > 0 and (yb - eq) / yb >= 0.20 and decision.get("action") in {
+    # Hard daily max drawdown — block new risk-on (and note when already locked)
+    dd = daily_dd_ratio(state)
+    if dd >= MAX_DAILY_DD and decision.get("action") in {
         "ENTER_LONG", "ENTER_SHORT"
     }:
         allow = False
-        reasons.append("單日權益回撤過大")
+        reasons.append(f"單日回撤 {dd:.1%} ≥ 上限 {MAX_DAILY_DD:.0%}：禁止新單")
+    elif dd >= WARN_DAILY_DD and decision.get("action") in {
+        "ENTER_LONG", "ENTER_SHORT"
+    }:
+        reasons.append(f"單日回撤警戒 {dd:.1%}（上限 {MAX_DAILY_DD:.0%}）")
 
     no = state.get("no_overnight") or {}
     if no.get("enabled"):
         now = datetime.now(TZ8)
-        # Simple HH:MM compare for force-flat window demo
         force = str(no.get("force_flat_time") or "13:40")
         try:
             fh, fm = [int(x) for x in force.split(":")[:2]]
@@ -87,7 +105,6 @@ def evaluate_gate(state: dict[str, Any], decision: dict[str, Any]) -> dict[str, 
     elif spill is not None and spill < 0.35 and decision.get("action") in {
         "ENTER_LONG", "ENTER_SHORT"
     }:
-        # Soft delever when supply-chain / sector spillover is weak
         lots = max(1, lots // 2)
         reasons.append("外溢偏低：新單口數減半")
 
@@ -95,7 +112,6 @@ def evaluate_gate(state: dict[str, Any], decision: dict[str, Any]) -> dict[str, 
     if chase == "high" and int(state.get("style") or 50) < 55:
         allow = False
         reasons.append("追價風險高且風格偏保守")
-    # High chase + weak spillover even with aggressive style → still block new entries
     if (
         chase == "high"
         and spill is not None
@@ -111,4 +127,5 @@ def evaluate_gate(state: dict[str, Any], decision: dict[str, Any]) -> dict[str, 
         "gate": "PASS" if allow else "BLOCK",
         "reasons": reasons,
         "lots_effective": lots,
+        "daily_dd": round(dd, 4),
     }

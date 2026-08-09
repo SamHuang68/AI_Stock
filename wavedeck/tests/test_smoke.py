@@ -244,7 +244,7 @@ class WaveDeckSmoke(unittest.TestCase):
         self.assertTrue(any("Fail-safe" in r for r in g["reasons"]))
 
     def test_apply_fail_safe_tightens_style(self):
-        from server.st_link import apply_fail_safe, enforce_fail_safe
+        from server.st_link import apply_fail_safe, enforce_fail_safe, scrub_fail_safe_summary
         from server.state import RUNTIME
 
         with tempfile.TemporaryDirectory() as td:
@@ -256,7 +256,10 @@ class WaveDeckSmoke(unittest.TestCase):
                 RUNTIME.patch(
                     style=70,
                     exec={"price": 45000},
-                    ai={"invalidation": {"side": "below", "price": 44000}, "summary": "ok"},
+                    ai={
+                        "invalidation": {"side": "below", "price": 44000},
+                        "summary": "〔Fail-safe：宏觀覆寫過期 90s〕風格→保守、降載、收緊失效。 支撐 44900",
+                    },
                     st_overlay={},
                     st_link={},
                 )
@@ -267,12 +270,36 @@ class WaveDeckSmoke(unittest.TestCase):
                 self.assertEqual((snap.get("lights") or {}).get("st_bridge"), "bad")
                 inv = ((snap.get("ai") or {}).get("invalidation") or {})
                 self.assertGreater(float(inv.get("price")), 44000)
+                summary = (snap.get("ai") or {}).get("summary") or ""
+                self.assertNotIn("Fail-safe", summary)
+                self.assertNotIn("風格→保守", summary)
+                self.assertIn("支撐", summary)
                 # Sticky: even if style drifts up, enforce clamps back
                 RUNTIME.patch(style=60, st_overlay={"delever": False, "fail_safe": True})
                 snap2 = enforce_fail_safe("宏觀覆寫過期 94s", tighten=False)
                 self.assertEqual(snap2.get("style"), 35)
                 self.assertTrue((snap2.get("st_overlay") or {}).get("delever"))
                 self.assertEqual((snap2.get("lights") or {}).get("st_bridge"), "warn")
+                washed = scrub_fail_safe_summary(
+                    "〔Fail-safe：x〕風格→保守、降載、收緊失效。 〔Fail-safe：y〕風格→保守、降載、收緊失效。 hi"
+                )
+                self.assertEqual(washed, "hi")
+
+    def test_daily_dd_hard_stop(self):
+        st = {
+            "kill_switch": False,
+            "fsm": "Idle",
+            "account": {"yesterday_balance": 72312, "equity": 59888},
+            "no_overnight": {"enabled": False},
+            "st_overlay": {},
+            "st_link": {"status": "ok"},
+            "style": 60,
+            "exec": {"lots": 1},
+        }
+        g = evaluate_gate(st, {"action": "ENTER_LONG", "confidence": 0.9, "process": {"chase_risk": "low"}})
+        self.assertFalse(g["allow"])
+        self.assertTrue(any("單日回撤" in r for r in g["reasons"]))
+        self.assertGreaterEqual(g["daily_dd"], 0.05)
 
     def test_entry_confidence_floor(self):
         st = {
