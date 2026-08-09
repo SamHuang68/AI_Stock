@@ -101,7 +101,10 @@
       '#pl-root .pl-btn.primary{background:var(--gold);color:#060A12;border:none;font-weight:700}' +
       '#pl-root .pl-btn.on{border-color:var(--gold-m);color:var(--gold);background:var(--gold-s)}' +
       '#pl-root .up{color:var(--red)}#pl-root .dn{color:var(--green)}#pl-root .flat{color:var(--tlo)}' +
-      /* 系統狀態色（勿與紅漲綠跌混用） */
+      /* 盤面多空／偏強弱：台股慣例紅漲綠跌（與 .up/.dn 對齊） */
+      '#pl-root .pl-bias-bull{color:var(--red)}#pl-root .pl-bias-bear{color:var(--green)}' +
+      '#pl-root .pl-bias-mid{color:#94a3b8}' +
+      /* 體質／風險分數：金／青，勿當漲跌色 */
       '#pl-root .pl-st-pos{color:var(--gold)}#pl-root .pl-st-risk{color:var(--cyan)}' +
       '#pl-root .pl-st-mid{color:#94a3b8}' +
       '#pl-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
@@ -134,9 +137,12 @@
         'grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
       '#pl-root .pl-zone{display:grid;gap:6px;min-width:0;min-height:0;height:100%;' +
         'grid-template-columns:repeat(5,minmax(0,1fr))}' +
-      '#pl-root .pl-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;' +
+      /* Widget 殼：略提亮底＋微亮邊框，與 --bg 頁底拉開層級 */
+      '#pl-root .pl-sec{background:linear-gradient(180deg,rgba(17,27,46,.98),rgba(11,18,32,.99));' +
+        'border:1px solid rgba(42,61,92,.92);box-shadow:inset 0 1px 0 rgba(232,240,255,.045);' +
+        'border-radius:6px;padding:8px 10px;' +
         'min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%}' +
-      '#pl-root .pl-sec h4{margin:0 0 5px;font-size:10px;font-weight:800;color:#f0d060;letter-spacing:.4px;' +
+      '#pl-root .pl-sec h4{margin:0 0 6px;font-size:10px;font-weight:800;color:#f0d060;letter-spacing:.4px;' +
         'display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;gap:4px;flex-wrap:nowrap;min-width:0}' +
       '#pl-root .pl-sec h4 a{color:var(--cyan);cursor:pointer;font-size:8px;font-weight:600;text-decoration:none;white-space:nowrap;flex:0 0 auto}' +
       '#pl-root .pl-sec h4 a:hover{color:var(--gold)}' +
@@ -195,8 +201,8 @@
       '#pl-root .pl-drivers .box .k span{color:#94a3b8;font-weight:600}' +
       '#pl-root .pl-drivers .box li{margin:1px 0;color:var(--text);list-style:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       /* OHLC / 加權盤勢（不再重複頂列三指數） */
-      '#pl-root .pl-ohlc{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;flex:0 0 auto}' +
-      '#pl-root .pl-ohlc .box{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:3px 5px;min-width:0}' +
+      '#pl-root .pl-ohlc{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;flex:0 0 auto}' +
+      '#pl-root .pl-ohlc .box{background:rgba(6,10,18,.45);border:1px solid rgba(42,61,92,.7);border-radius:5px;padding:4px 6px;min-width:0}' +
       '#pl-root .pl-ohlc .box .k{font-size:8px;color:#a8b6c8}' +
       '#pl-root .pl-ohlc .box .v{font-size:11px;font-weight:700;margin-top:1px;color:var(--thi);' +
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
@@ -212,20 +218,22 @@
       '#pl-root .pl-sec-tog button{padding:1px 6px;border:1px solid var(--border);border-radius:3px;background:transparent;' +
         'color:#94a3b8;font-size:8px;font-family:inherit;cursor:pointer}' +
       '#pl-root .pl-sec-tog button.on{border-color:var(--gold-m);color:var(--gold);background:var(--gold-s)}' +
-      '#pl-root .pl-spark{flex:1 1 0;min-height:0;margin:2px 0 3px;background:var(--bg);border:1px solid var(--border);' +
-        'border-radius:5px;padding:3px 5px;display:flex;flex-direction:column;overflow:hidden}' +
+      '#pl-root .pl-spark{flex:1 1 0;min-height:0;margin:3px 0 4px;background:rgba(6,10,18,.55);' +
+        'border:1px solid rgba(42,61,92,.75);border-radius:5px;padding:5px 7px;' +
+        'display:flex;flex-direction:column;overflow:hidden}' +
       '#pl-root .pl-spark .vz-spark-ax{flex:1;min-height:0;height:100%;overflow:hidden}' +
       '#pl-root .pl-spark svg{width:100%;height:100%;display:block;min-height:0;max-height:100%;margin:0}' +
       /* inst：一行四格；數值用短格式（無「億」）+ 小字，避免 -407.2 億 被 ellipsis 裁成 -407… */
-      '#pl-root .pl-inst4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;flex:0 0 auto}' +
-      '#pl-root .pl-inst4 .c{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:3px 2px;text-align:center;min-width:0}' +
+      '#pl-root .pl-inst4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;flex:0 0 auto}' +
+      '#pl-root .pl-inst4 .c{background:rgba(6,10,18,.45);border:1px solid rgba(42,61,92,.7);border-radius:5px;padding:4px 2px;text-align:center;min-width:0}' +
       '#pl-root .pl-inst4 .c .k{font-size:8px;color:#a8b6c8;line-height:1.2}' +
       '#pl-root .pl-inst4 .c .v{font-size:10px;font-weight:800;margin-top:2px;line-height:1.15;' +
         'font-variant-numeric:tabular-nums;letter-spacing:-0.2px;white-space:nowrap;' +
         'overflow:visible;max-width:100%}' +
-      '#pl-root .pl-inst-trend{flex:1 1 0;min-height:0;margin:4px 0 2px;background:var(--bg);border:1px solid var(--border);' +
-        'border-radius:5px;padding:3px 5px;display:flex;flex-direction:column;overflow:hidden;min-width:0}' +
-      '#pl-root .pl-inst-trend .lab{font-size:8px;color:#a8b6c8;flex:0 0 auto;margin-bottom:2px;' +
+      '#pl-root .pl-inst-trend{flex:1 1 0;min-height:0;margin:5px 0 3px;background:rgba(6,10,18,.55);' +
+        'border:1px solid rgba(42,61,92,.75);border-radius:5px;padding:5px 7px;' +
+        'display:flex;flex-direction:column;overflow:hidden;min-width:0}' +
+      '#pl-root .pl-inst-trend .lab{font-size:8px;color:#a8b6c8;flex:0 0 auto;margin-bottom:3px;' +
         'display:flex;justify-content:space-between;gap:4px;min-width:0;overflow:hidden}' +
       '#pl-root .pl-inst-trend .lab > span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#pl-root .pl-inst-trend .chart{flex:1 1 0;min-height:0;min-width:0;overflow:hidden;position:relative}' +
@@ -246,14 +254,15 @@
       '#pl-root .pl-tag.hot{background:var(--gold);border-color:var(--gold-m);box-shadow:0 0 0 1px rgba(245,197,24,.25)}' +
       '#pl-root .pl-tag.cold{background:#f87171;border-color:rgba(239,68,68,.45);box-shadow:0 0 0 1px rgba(239,68,68,.2)}' +
       '#pl-root .pl-tag.ok{background:#64748b;border-color:rgba(148,163,184,.35)}' +
-      '#pl-root .pl-wl col.c-sym{width:auto}' +
-      '#pl-root .pl-wl col.c-px{width:58px}' +
-      '#pl-root .pl-wl col.c-chg{width:52px}' +
-      '#pl-root .pl-wl col.c-tag{width:18px}' +
-      '#pl-root .pl-wl td.tag{text-align:center;width:18px;padding-left:0;padding-right:0}' +
-      '#pl-root .pl-wl td.px,#pl-root .pl-wl td.chg{font-variant-numeric:tabular-nums;white-space:nowrap}' +
+      '#pl-root .pl-wl col.c-sym{width:40%}' +
+      '#pl-root .pl-wl col.c-px{width:24%}' +
+      '#pl-root .pl-wl col.c-chg{width:24%}' +
+      '#pl-root .pl-wl col.c-tag{width:12%}' +
+      '#pl-root .pl-wl td.tag{text-align:center;width:12%;padding-left:0;padding-right:0}' +
+      '#pl-root .pl-wl td.px,#pl-root .pl-wl td.chg{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}' +
+      '#pl-root .pl-wl th:nth-child(2),#pl-root .pl-wl th:nth-child(3){text-align:right}' +
       '#pl-root .pl-wl .nm-only{color:#94a3b8;font-weight:500;font-size:8px;display:block;' +
-        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:72px}' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}' +
       /* donut／廣度：上方結構、下方多空比趨勢＋評論（不再只重複漲跌停） */
       '#pl-root .pl-donut-wrap{display:flex;align-items:center;gap:6px;flex:0 0 auto;min-width:0}' +
       '#pl-root .pl-donut{width:48px;height:48px;border-radius:50%;flex-shrink:0;position:relative;' +
@@ -264,9 +273,10 @@
       '#pl-root .pl-donut .mid span{font-size:7px;color:#a8b6c8}' +
       '#pl-root .pl-leg{font-size:8px;line-height:1.35;min-width:0;flex:1;color:#cbd5e1;overflow:hidden}' +
       '#pl-root .pl-leg i{display:inline-block;width:6px;height:6px;border-radius:2px;margin-right:3px}' +
-      '#pl-root .pl-bd-trend{flex:1 1 0;min-height:0;margin:4px 0 2px;background:var(--bg);border:1px solid var(--border);' +
-        'border-radius:5px;padding:3px 5px;display:flex;flex-direction:column;overflow:hidden;min-width:0}' +
-      '#pl-root .pl-bd-trend .lab{font-size:8px;color:#a8b6c8;flex:0 0 auto;margin-bottom:2px;' +
+      '#pl-root .pl-bd-trend{flex:1 1 0;min-height:0;margin:5px 0 3px;background:rgba(6,10,18,.55);' +
+        'border:1px solid rgba(42,61,92,.75);border-radius:5px;padding:5px 7px;' +
+        'display:flex;flex-direction:column;overflow:hidden;min-width:0}' +
+      '#pl-root .pl-bd-trend .lab{font-size:8px;color:#a8b6c8;flex:0 0 auto;margin-bottom:3px;' +
         'display:flex;justify-content:space-between;gap:4px;min-width:0;overflow:hidden}' +
       '#pl-root .pl-bd-trend .chart{flex:1 1 0;min-height:0;min-width:0;overflow:hidden;position:relative}' +
       '#pl-root .pl-bd-trend .chart .vz-spark-ax{height:100%;min-height:0;max-width:100%;min-width:0;overflow:hidden}' +
@@ -290,9 +300,10 @@
       '#pl-root .pl-sbar.dim{opacity:.4}' +
       /* lists */
       '#pl-root .pl-list{list-style:none;margin:0;padding:0;flex:1 1 0;min-height:0;overflow:auto}' +
-      '#pl-root .pl-list li{display:flex;justify-content:space-between;gap:4px;padding:3px 1px;border-bottom:1px solid var(--border);cursor:pointer;font-size:9px;' +
+      '#pl-root .pl-list li{display:flex;justify-content:space-between;gap:4px;padding:3px 4px;border-bottom:1px solid rgba(26,39,64,.85);cursor:pointer;font-size:9px;' +
         'border-radius:3px;transition:background .12s,box-shadow .12s,opacity .12s;line-height:1.35;min-width:0}' +
-      '#pl-root .pl-list li:hover{background:var(--bg3)}' +
+      '#pl-root .pl-list li:nth-child(even){background:rgba(148,163,184,.035)}' +
+      '#pl-root .pl-list li:hover{background:rgba(22,34,64,.88)}' +
       '#pl-root .pl-list li.hi{background:rgba(245,197,24,.10);box-shadow:inset 2px 0 0 var(--gold)}' +
       '#pl-root .pl-list li.dim{opacity:.35}' +
       '#pl-root .pl-list .nm{color:var(--thi);font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
@@ -300,10 +311,10 @@
       '#pl-root .pl-list .ind{display:inline-block;margin-left:2px;padding:0 3px;border-radius:3px;font-size:7px;font-weight:700;' +
         'color:var(--cyan);background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.25);vertical-align:1px}' +
       /* global：compact 字級；role 僅 title，避免窄格裁切點位／漲跌 */
-      '#pl-root .pl-global{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;flex:1 1 0;' +
+      '#pl-root .pl-global{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;flex:1 1 0;' +
         'align-content:start;overflow:auto;min-height:0;min-width:0}' +
       '#pl-root .pl-kicker{display:none!important}' +
-      '#pl-root .pl-global .g{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:2px 4px;min-width:0;overflow:hidden}' +
+      '#pl-root .pl-global .g{background:rgba(6,10,18,.45);border:1px solid rgba(42,61,92,.7);border-radius:4px;padding:3px 5px;min-width:0;overflow:hidden}' +
       '#pl-root .pl-global .g .k{font-size:7px;color:var(--tlo);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:0;' +
         'display:flex;justify-content:space-between;gap:2px;align-items:baseline}' +
       '#pl-root .pl-global .g .k .abbr{color:var(--thi);font-weight:800;letter-spacing:.2px}' +
@@ -318,22 +329,25 @@
         'background:var(--bg);color:var(--thi);font-size:8px;font-family:inherit}' +
       '#pl-root .pl-flash-q:focus{outline:none;border-color:var(--gold-m)}' +
       '#pl-root .pl-flash{flex:1 1 0;min-height:0;overflow:auto;font-size:9px}' +
-      '#pl-root .pl-flash .row{display:flex;align-items:baseline;gap:4px;padding:3px 1px;' +
-        'border-bottom:1px solid var(--border);cursor:pointer;line-height:1.35;min-width:0}' +
-      '#pl-root .pl-flash .row:hover{background:var(--bg3)}' +
-      '#pl-root .pl-flash .t{color:#a8b6c8;font-size:8px;white-space:nowrap;flex:0 0 auto}' +
-      '#pl-root .pl-flash .cat{color:var(--cyan);font-size:8px;white-space:nowrap;flex:0 0 auto}' +
+      '#pl-root .pl-flash .row{display:grid;grid-template-columns:42px 52px minmax(0,1fr);align-items:baseline;gap:4px;padding:3px 4px;' +
+        'border-bottom:1px solid rgba(26,39,64,.85);cursor:pointer;line-height:1.35;min-width:0}' +
+      '#pl-root .pl-flash .row:nth-child(even){background:rgba(148,163,184,.035)}' +
+      '#pl-root .pl-flash .row:hover{background:rgba(22,34,64,.88)}' +
+      '#pl-root .pl-flash .t{color:#a8b6c8;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '#pl-root .pl-flash .cat{color:var(--cyan);font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
       '#pl-root .pl-flash .cat.us{color:var(--gold)}' +
-      '#pl-root .pl-flash .ttl{color:#e2e8f0;font-size:9px;min-width:0;flex:1 1 auto;overflow:hidden;' +
+      '#pl-root .pl-flash .ttl{color:#e2e8f0;font-size:9px;min-width:0;overflow:hidden;' +
         'text-overflow:ellipsis;white-space:nowrap}' +
       /* 自選：區塊本身不溢；表體固定內滾，避免壓到底部 status／量價列 */
       '#pl-root .pl-sec.pl-wl{overflow:hidden;min-height:0}' +
       '#pl-root .pl-wl-scroll{flex:1 1 0;min-height:0;overflow:auto;overscroll-behavior:contain}' +
-      '#pl-root .pl-wl table{width:100%;border-collapse:collapse;font-size:9px}' +
-      '#pl-root .pl-wl th,#pl-root .pl-wl td{padding:4px 4px;border-bottom:1px solid var(--border);text-align:right}' +
+      '#pl-root .pl-wl table{width:100%;border-collapse:collapse;font-size:9px;table-layout:fixed}' +
+      '#pl-root .pl-wl th,#pl-root .pl-wl td{padding:4px 4px;border-bottom:1px solid rgba(26,39,64,.85);text-align:right}' +
       '#pl-root .pl-wl th:first-child,#pl-root .pl-wl td:first-child{text-align:left}' +
-      '#pl-root .pl-wl th{color:#a8b6c8;position:sticky;top:0;background:var(--bg2);z-index:1;font-size:8px}' +
-      '#pl-root .pl-wl tr{cursor:pointer}#pl-root .pl-wl tr:hover{background:var(--bg3)}' +
+      '#pl-root .pl-wl th{color:#a8b6c8;position:sticky;top:0;background:rgba(17,27,46,.98);z-index:1;font-size:8px}' +
+      '#pl-root .pl-wl tr{cursor:pointer}' +
+      '#pl-root .pl-wl tr:nth-child(even){background:rgba(148,163,184,.035)}' +
+      '#pl-root .pl-wl tr:hover{background:rgba(22,34,64,.88)}' +
       '#pl-root .pl-wl td.px{padding-right:6px}' +
       '#pl-root .pl-wl td.px,#pl-root .pl-wl td.chg{font-size:9px}' +
       '#pl-root .pl-wl .mkt{font-size:8px;color:#94a3b8;font-weight:600;margin-left:3px}' +
@@ -362,6 +376,18 @@
   function tw(p) {
     if (p == null || p !== p) return 'flat';
     return p > 0 ? 'up' : p < 0 ? 'dn' : 'flat';
+  }
+
+  /** 盤面語氣／偏多空標籤 → 台股紅綠（非體質金／風險青） */
+  function biasCls(label) {
+    var t = String(label || '');
+    if (!t || t === '—' || t.indexOf('彙整') >= 0 || t.indexOf('資料') >= 0) return 'pl-bias-mid';
+    if (t.indexOf('偏多') >= 0 || t.indexOf('偏強') >= 0 || t.indexOf('極度偏多') >= 0 ||
+        (t.indexOf('強') >= 0 && t.indexOf('弱') < 0)) return 'pl-bias-bull';
+    if (t.indexOf('偏空') >= 0 || t.indexOf('偏弱') >= 0 || t.indexOf('極度偏空') >= 0 ||
+        t.indexOf('弱') >= 0 || t.indexOf('風險') >= 0) return 'pl-bias-bear';
+    if (t.indexOf('中性') >= 0 || t.indexOf('糾結') >= 0 || t.indexOf('觀察') >= 0) return 'pl-bias-mid';
+    return 'pl-bias-mid';
   }
   function pct(p, d) {
     if (p == null || p !== p) return '—';
@@ -902,9 +928,13 @@
       return x.toFixed(1) + ',' + y.toFixed(1);
     }).join(' ');
     var up = closes[closes.length - 1] >= closes[0];
+    var col = up ? 'var(--red)' : 'var(--green)';
+    var yBase = (h - pad).toFixed(1);
+    var area = pad.toFixed(1) + ',' + yBase + ' ' + pts + ' ' + (w - pad).toFixed(1) + ',' + yBase;
     return '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
-      '<polyline fill="none" stroke="' + (up ? 'var(--red)' : 'var(--green)') +
-      '" stroke-width="2" points="' + pts + '"/></svg>';
+      '<polygon fill="' + col + '" fill-opacity="0.18" points="' + area + '"/>' +
+      '<polyline fill="none" stroke="' + col +
+      '" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" points="' + pts + '"/></svg>';
   }
 
   /** 價格／指數趨勢量化列（與成交金額量能同構；完整列放 title，畫面只顯主線） */
@@ -1877,7 +1907,7 @@
     });
     var tone = globalImpactTone(items);
     var html = '<div class="pl-sec"><h4>全球影響' +
-      ' <span style="color:var(--cyan);font-weight:700;font-size:9px;margin-left:4px">' + tone + '</span>' +
+      ' <span class="' + biasCls(tone) + '" style="font-weight:700;font-size:9px;margin-left:4px">' + tone + '</span>' +
       ' <a data-go="international">國際 →</a></h4><div class="pl-global">';
     if (!items.length) html += '<div class="pl-note">國際報價載入中…</div>';
     items.slice(0, 12).forEach(function (x) {
@@ -2101,12 +2131,8 @@
     }
     var toneEl = $('pl-tone');
     if (toneEl) {
-      /* 語氣為系統狀態，不用漲跌紅綠 */
-      var t = String(p.tone || '');
-      var stCls = (t.indexOf('偏多') >= 0 || t.indexOf('強') >= 0) ? 'pl-st-pos'
-        : (t.indexOf('偏空') >= 0 || t.indexOf('弱') >= 0 || t.indexOf('風險') >= 0) ? 'pl-st-risk'
-        : 'pl-st-mid';
-      toneEl.className = 'pl-tone ' + stCls;
+      /* 盤面語氣：偏多紅／偏空綠／中性灰（與漲跌慣例一致） */
+      toneEl.className = 'pl-tone ' + biasCls(p.tone);
       toneEl.textContent = p.tone || '資料彙整中';
     }
 

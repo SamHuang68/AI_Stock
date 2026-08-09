@@ -29,7 +29,7 @@
   function finite(v) { return v != null && isFinite(v); }
 
   function ensureStyle() {
-    var VER = 'ax2';
+    var VER = 'ax3';
     var s = document.getElementById('vz-style');
     if (s && s.getAttribute('data-v') === VER) return;
     if (!s) {
@@ -78,25 +78,31 @@
       '.vz-ref .vz-tick-lbl{position:absolute;top:7px;font-size:7px;color:var(--tf,#64748b);transform:translateX(-50%);white-space:nowrap}' +
       '.vz-spark{display:block;width:100%;height:28px;margin-top:2px}' +
       '.vz-spark-ax{display:grid;grid-template-columns:auto minmax(0,1fr);' +
-        'grid-template-rows:auto minmax(0,1fr) auto auto;gap:0 4px;' +
-        'width:100%;height:100%;min-width:0;min-height:0;box-sizing:border-box;padding:1px 2px 0}' +
+        'grid-template-rows:auto minmax(0,1fr) auto auto;gap:0 6px;' +
+        'width:100%;height:100%;min-width:0;min-height:0;box-sizing:border-box;padding:2px 4px 0}' +
       /* tip 小卡：省略底部 X 單位列（與 .lab meta 重複），騰出 plot 高度 */
       '.vz-spark-ax.vz-compact{grid-template-rows:auto minmax(0,1fr) auto}' +
       '.vz-spark-ax.vz-compact .vz-xunit{display:none}' +
       '.vz-spark-ax .vz-yunit{grid-column:1;grid-row:1;font-size:7px;color:var(--tf,#64748b);line-height:1;' +
-        'white-space:nowrap;align-self:end;padding-bottom:1px;font-weight:700}' +
+        'white-space:nowrap;align-self:end;padding-bottom:2px;font-weight:700}' +
       '.vz-spark-ax .vz-ylabs{grid-column:1;grid-row:2;display:flex;flex-direction:column;justify-content:space-between;' +
-        'align-items:flex-end;font-size:7px;color:var(--tlo);line-height:1;font-variant-numeric:tabular-nums;padding:1px 0;gap:0;' +
-        'min-width:0;overflow:hidden}' +
+        'align-items:flex-end;font-size:7px;color:var(--tlo);line-height:1.15;font-variant-numeric:tabular-nums;padding:2px 0;gap:2px;' +
+        'min-width:2.6em;overflow:visible}' +
       '.vz-spark-ax .vz-plot{grid-column:2;grid-row:1 / span 2;min-width:0;min-height:0;position:relative;overflow:hidden;' +
-        'border-left:1px solid rgba(148,163,184,.35);border-bottom:1px solid rgba(148,163,184,.35)}' +
+        'border-left:1px solid rgba(148,163,184,.4);border-bottom:1px solid rgba(148,163,184,.4)}' +
       /* 軸內 plot 的 svg 不可沿用 .vz-spark 的 margin-top，否則線會擠出框底 */
       '.vz-spark-ax .vz-plot svg{display:block;width:100%;height:100%;min-width:0;min-height:0;' +
         'max-width:100%;max-height:100%;margin:0}' +
+      /* 高低點標籤用 HTML 疊在 plot 上，避免 preserveAspectRatio=none 把 SVG 字壓扁 */
+      '.vz-spark-ax .vz-plot .vz-pt{position:absolute;font-size:7px;font-weight:800;line-height:1;' +
+        'pointer-events:none;white-space:nowrap;font-variant-numeric:tabular-nums;' +
+        'text-shadow:0 1px 2px rgba(0,0,0,.9),0 0 4px rgba(0,0,0,.55);z-index:2}' +
+      '.vz-spark-ax .vz-plot .vz-pt.hi{color:var(--thi,#F1F5FA);transform:translate(-50%,-120%)}' +
+      '.vz-spark-ax .vz-plot .vz-pt.lo{color:#94a3b8;transform:translate(-50%,30%)}' +
       '.vz-spark-ax .vz-xlabs{grid-column:2;grid-row:3;display:flex;justify-content:space-between;' +
-        'font-size:7px;color:var(--tlo);line-height:1.2;font-variant-numeric:tabular-nums;padding-top:2px}' +
+        'font-size:7px;color:var(--tlo);line-height:1.2;font-variant-numeric:tabular-nums;padding-top:3px}' +
       '.vz-spark-ax .vz-xunit{grid-column:1 / span 2;grid-row:4;font-size:7px;color:var(--tf,#64748b);line-height:1.2;' +
-        'text-align:right;padding-top:1px;white-space:nowrap}' +
+        'text-align:right;padding-top:2px;white-space:nowrap}' +
       '.vz-sparkbars{display:flex;align-items:flex-end;gap:1px;height:18px;margin-top:2px}' +
       '.vz-sparkbars i{flex:1;min-width:2px;border-radius:1px 1px 0 0;opacity:.9}' +
       '.vz-zone{position:relative;height:7px;border-radius:4px;background:linear-gradient(90deg,#4ade80 0%,#fbbf24 40%,#fb923c 70%,#f87171 100%);margin:3px 0 1px}' +
@@ -283,7 +289,9 @@
     return n;
   }
 
-  /** SVG 折線 spark；opts.xUnit / opts.yUnit 時外掛座標軸單位與刻度（HTML，避免 SVG 拉伸變形） */
+  /** SVG 折線 spark；opts.xUnit / opts.yUnit 時外掛座標軸單位與刻度（HTML，避免 SVG 拉伸變形）
+   *  opts.fill !== false → 面積漸層；opts.marks !== false → 高低點標記／標籤
+   */
   function sparkLine(vals, opts) {
     ensureStyle();
     opts = opts || {};
@@ -294,12 +302,17 @@
     var lo = Math.min.apply(null, arr), hi = Math.max.apply(null, arr);
     var span = (hi - lo) || 1;
     var mid = (hi + lo) / 2;
-    var w = opts.w || 240, h = opts.h || 36, pad = 2;
-    var pts = arr.map(function (c, i) {
+    var w = opts.w || 240, h = opts.h || 36;
+    var pad = opts.pad != null ? opts.pad : 4;
+    var strokeW = opts.strokeWidth != null ? opts.strokeWidth : 2.75;
+    var wantFill = opts.fill !== false;
+    var wantMarks = opts.marks !== false;
+    var xy = arr.map(function (c, i) {
       var x = pad + (i / (arr.length - 1)) * (w - pad * 2);
       var y = pad + (1 - (c - lo) / span) * (h - pad * 2);
-      return x.toFixed(1) + ',' + y.toFixed(1);
-    }).join(' ');
+      return { x: x, y: y, v: c, i: i };
+    });
+    var pts = xy.map(function (p) { return p.x.toFixed(1) + ',' + p.y.toFixed(1); }).join(' ');
     var up = arr[arr.length - 1] >= arr[0];
     var stroke = opts.color || (up ? 'var(--red)' : 'var(--green)');
     var zeroLine = '';
@@ -314,11 +327,39 @@
       midLine = '<line x1="' + pad + '" y1="' + my.toFixed(1) + '" x2="' + (w - pad) +
         '" y2="' + my.toFixed(1) + '" stroke="rgba(148,163,184,.22)" stroke-width="1"/>';
     }
+    var gid = 'vzsg' + Math.abs((arr[0] * 1000 + arr.length * 17 + hi * 3) | 0).toString(36) +
+      (arr[arr.length - 1] | 0).toString(36);
+    var area = '';
+    if (wantFill) {
+      var yBase = (h - pad).toFixed(1);
+      var areaPts = pad.toFixed(1) + ',' + yBase + ' ' + pts + ' ' +
+        (w - pad).toFixed(1) + ',' + yBase;
+      area =
+        '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="0" y2="1">' +
+          '<stop offset="0%" stop-color="' + stroke + '" stop-opacity="0.42"/>' +
+          '<stop offset="100%" stop-color="' + stroke + '" stop-opacity="0.02"/>' +
+        '</linearGradient></defs>' +
+        '<polygon fill="url(#' + gid + ')" points="' + areaPts + '"/>';
+    }
+    var iHi = 0, iLo = 0;
+    for (var i = 1; i < arr.length; i++) {
+      if (arr[i] >= arr[iHi]) iHi = i;
+      if (arr[i] <= arr[iLo]) iLo = i;
+    }
+    var markSvg = '';
+    if (wantMarks) {
+      markSvg =
+        '<circle cx="' + xy[iHi].x.toFixed(1) + '" cy="' + xy[iHi].y.toFixed(1) +
+          '" r="2.4" fill="' + stroke + '" stroke="rgba(6,10,18,.85)" stroke-width="1"/>' +
+        '<circle cx="' + xy[iLo].x.toFixed(1) + '" cy="' + xy[iLo].y.toFixed(1) +
+          '" r="2.4" fill="#94a3b8" stroke="rgba(6,10,18,.85)" stroke-width="1"/>';
+    }
     var svg = '<svg class="vz-spark" viewBox="0 0 ' + w + ' ' + h +
       '" preserveAspectRatio="none" overflow="hidden">' +
-      midLine + zeroLine +
-      '<polyline fill="none" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"' +
-      ' stroke-linejoin="round" points="' + pts + '"/></svg>';
+      area + midLine + zeroLine +
+      '<polyline fill="none" stroke="' + stroke + '" stroke-width="' + strokeW +
+      '" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="' +
+      pts + '"/>' + markSvg + '</svg>';
     var xUnit = opts.xUnit != null ? String(opts.xUnit) : '';
     var yUnit = opts.yUnit != null ? String(opts.yUnit) : '';
     if (!xUnit && !yUnit && !opts.axes) return svg;
@@ -327,14 +368,33 @@
     var n = arr.length;
     var xMid = Math.max(1, Math.round((n + 1) / 2));
     var compact = !!opts.compact;
-    var tip = (yLbl ? ('Y：' + yLbl + ' · ') : '') + 'X：' + xLbl + ' · n=' + n;
+    var tip = (yLbl ? ('Y：' + yLbl + ' · ') : '') + 'X：' + xLbl + ' · n=' + n +
+      ' · 高 ' + _fmtAxisY(hi, opts) + ' / 低 ' + _fmtAxisY(lo, opts);
+    var peakHtml = '';
+    if (wantMarks) {
+      var leftPct = function (idx) {
+        return ((pad + (idx / (n - 1)) * (w - pad * 2)) / w * 100).toFixed(1);
+      };
+      var topPct = function (val) {
+        return ((pad + (1 - (val - lo) / span) * (h - pad * 2)) / h * 100).toFixed(1);
+      };
+      /* 高低同點時略偏左右，避免重疊 */
+      var hiLeft = leftPct(iHi);
+      var loLeft = leftPct(iLo);
+      if (iHi === iLo) loLeft = Math.min(96, Number(loLeft) + 8).toFixed(1);
+      peakHtml =
+        '<span class="vz-pt hi" style="left:' + hiLeft + '%;top:' + topPct(hi) + '%">' +
+          esc(_fmtAxisY(hi, opts)) + '</span>' +
+        '<span class="vz-pt lo" style="left:' + loLeft + '%;top:' + topPct(lo) + '%">' +
+          esc(_fmtAxisY(lo, opts)) + '</span>';
+    }
     return '<div class="vz-spark-ax' + (compact ? ' vz-compact' : '') + '" title="' +
       esc(tip) + '">' +
       '<div class="vz-yunit">' + esc(yLbl ? ('Y·' + yLbl) : 'Y') + '</div>' +
       '<div class="vz-ylabs"><span>' + esc(_fmtAxisY(hi, opts)) + '</span>' +
         '<span>' + esc(_fmtAxisY(mid, opts)) + '</span>' +
         '<span>' + esc(_fmtAxisY(lo, opts)) + '</span></div>' +
-      '<div class="vz-plot">' + svg + '</div>' +
+      '<div class="vz-plot">' + svg + peakHtml + '</div>' +
       '<div class="vz-xlabs"><span>1</span><span>' + xMid + '</span><span>' + n + '</span></div>' +
       (compact ? '' : (
         '<div class="vz-xunit">X：' + esc(xLbl) + (yLbl ? (' · Y：' + esc(yLbl)) : '') +

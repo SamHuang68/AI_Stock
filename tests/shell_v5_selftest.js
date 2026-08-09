@@ -54,7 +54,12 @@ ok(/fmtLots/.test(hub) && /單位：張/.test(hub), 'institutional ranks use 張
 ok(/magBars/.test(hub) && /refMeter/.test(hub), 'institutional magBars + turnover meter');
 ok(/minmax\(0,1fr\) minmax\(0,2fr\)/.test(hub), 'institutional chart ~1/3 width');
 ok(/lots-bar/.test(hub) && /class="streak"/.test(hub), 'institutional lots bar separated from streak');
-ok(/vz-xlabs/.test(fs.readFileSync(path.join(root, 'src/ui/viz_v5.js'), 'utf8')), 'sparkLine X tick labels');
+(function () {
+  var vz = fs.readFileSync(path.join(root, 'src/ui/viz_v5.js'), 'utf8');
+  ok(/vz-xlabs/.test(vz), 'sparkLine X tick labels');
+  ok(/linearGradient/.test(vz) && /vz-pt/.test(vz) && /wantFill/.test(vz) && /wantMarks/.test(vz),
+    'sparkLine area fill + peak/trough marks');
+})();
 ok(/vz-compact/.test(fs.readFileSync(path.join(root, 'src/ui/viz_v5.js'), 'utf8')) &&
   /compact:\s*true/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')),
   'tip spark uses compact axis (no xunit footer)');
@@ -101,6 +106,11 @@ ok(/instDayEmpty/.test(pl) && /預覽前一日/.test(pl) && /paintInstCells/.tes
   'pulse institutional falls back to prior session via compact tag');
 ok(/pl-tag\.ok\{/.test(pl) && /#64748b/.test(pl) && /pl-st-pos/.test(pl),
   'pulse watch tags are status dots (not price red/green)');
+ok(/pl-bias-bull/.test(pl) && /pl-bias-bear/.test(pl) && /function biasCls/.test(pl),
+  'pulse bias labels use TW red-up / green-down (not cyan for 偏空)');
+ok(/pl-flash \.row:nth-child\(even\)/.test(pl) && /pl-wl tr:nth-child\(even\)/.test(pl) &&
+  /table-layout:fixed/.test(pl) && /pl-flash \.row\{[^}]*grid-template-columns:42px 52px/.test(pl),
+  'pulse flash/watch lists have zebra striping + fixed columns');
 ok(/data-watch-mkt/.test(pl) && /filterWatchlist/.test(pl) && /pl-wl-scroll/.test(pl) &&
   /c-px/.test(pl) && /c-chg/.test(pl) && /c-tag/.test(pl),
   'pulse watchlist has TW/US tabs, fixed columns, and scroll region');
