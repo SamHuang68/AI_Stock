@@ -517,16 +517,49 @@ const BIAS_META = {
 };
 
 // ── Render: WATCH tab ──────────────────────────────────────
+function _wdChipHtml(code) {
+  try {
+    if (!window.WaveDeckBridge || typeof WaveDeckBridge.hintForSymbol !== 'function') return '';
+    const h = WaveDeckBridge.hintForSymbol(code);
+    if (!h) return '';
+    const inv = h.invalidation
+      ? ((h.invalidation.side === 'below' ? '跌破' : '突破') + ' ' + h.invalidation.price)
+      : '';
+    const conf = (h.confidence != null && isFinite(h.confidence))
+      ? Math.round(Number(h.confidence) * 100) + '%' : '';
+    const tip = [h.action, conf && ('信心 ' + conf), inv && ('失效 ' + inv), h.mode].filter(Boolean).join(' · ');
+    return `<span title="WaveDeck: ${tip}" style="font-family:monospace;font-size:8.5px;font-weight:700;padding:2px 6px;border-radius:3px;background:rgba(103,232,249,.1);color:var(--cyan);border:1px solid rgba(103,232,249,.35);white-space:nowrap">WD ${h.action}${conf ? ' ' + conf : ''}${inv ? ' · ' + inv : ''}</span>`;
+  } catch (_) { return ''; }
+}
+
+function _wdWatchRefreshOnce() {
+  if (!window.WaveDeckBridge || typeof WaveDeckBridge.fetchState !== 'function') return;
+  if (_wdWatchRefreshOnce._busy) return;
+  if (_wdWatchRefreshOnce._paintedAt && (Date.now() - _wdWatchRefreshOnce._paintedAt) < 8000) return;
+  _wdWatchRefreshOnce._busy = true;
+  WaveDeckBridge.fetchState(false).then(function (st) {
+    _wdWatchRefreshOnce._busy = false;
+    if (!st) return;
+    _wdWatchRefreshOnce._paintedAt = Date.now();
+    try {
+      if (typeof window.renderWatchPanel === 'function') window.renderWatchPanel();
+    } catch (_) {}
+  }).catch(function () { _wdWatchRefreshOnce._busy = false; });
+}
+
 function renderWatch() {
   // Auto-refresh signals for the current symbol's watch
   const code = S.sym?.toUpperCase().trim();
   if (code && S.watches[code]) refreshSignalsForStock(S.watches[code]);
 
+  // Soft-pull WaveDeck state for chips (cached TTL inside bridge)
+  _wdWatchRefreshOnce();
+
   let h = `<div class="stat-hdr">價位觀察清單 · ${Object.keys(S.watches || {}).length} 檔</div>`;
   h += renderWatchListBody();
   h += renderWatchForm();
   h += renderStrategyPlaybook();
-  h += '<div style="padding:14px 12px 18px;font-family:monospace;font-size:8.5px;color:var(--tf);line-height:1.7">⚠ 訊號僅供參考。多訊號共振只提升勝率，不保證獲利。資金管理 > 選股。</div>';
+  h += '<div style="padding:14px 12px 18px;font-family:monospace;font-size:8.5px;color:var(--tf);line-height:1.7">⚠ 訊號僅供參考。多訊號共振只提升勝率，不保證獲利。資金管理 > 選股。WD chip 來自 WaveDeck 執行台狀態。</div>';
   return h;
 }
 
@@ -584,7 +617,8 @@ function renderStockCard(w) {
       </div>
       <span style="font-family:monospace;font-size:11px;font-weight:600;color:var(--thi);white-space:nowrap">${lastPrice != null ? lastPrice.toFixed(2) : '—'}</span>
     </div>
-    <div style="display:flex;align-items:center;gap:5px">
+    <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;justify-content:flex-end">
+      ${_wdChipHtml(w.sym)}
       <span style="font-family:monospace;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:${biasM.bg};color:${biasM.col};white-space:nowrap">${conf.biasIcon} ${conf.biasLbl}</span>
       <span data-act="remove-stock" data-sym="${w.sym}" title="移除整檔" style="color:var(--tf);font-size:13px;padding:0 4px;cursor:pointer;border-radius:3px;font-weight:700">×</span>
     </div>

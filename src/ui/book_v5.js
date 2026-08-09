@@ -118,8 +118,38 @@
       '#bk-root .bk-hm th.nm,#bk-root .bk-hm td.nm{text-align:left;color:var(--tlo);white-space:nowrap}' +
       '#bk-root .bk-note{font-size:9px;color:var(--tlo);line-height:1.65;margin-top:12px}' +
       '#bk-root .bk-loading{font-size:11px;color:var(--tlo);padding:16px 0}' +
-      '#bk-root .bk-err{color:var(--orange);font-size:11px;padding:12px 0}';
+      '#bk-root .bk-err{color:var(--orange);font-size:11px;padding:12px 0}' +
+      '#bk-root .bk-wd{margin:0 0 12px;padding:10px 12px;border-radius:8px;background:var(--bg2);' +
+        'border:1px solid rgba(103,232,249,.28);font-size:11px;line-height:1.55}' +
+      '#bk-root .bk-wd .t{color:var(--cyan);font-weight:700;letter-spacing:1px;font-size:10px;margin-bottom:4px}' +
+      '#bk-root .bk-wd b{color:var(--thi)}';
     document.head.appendChild(s);
+  }
+
+  function wdStripHtml() {
+    try {
+      if (!window.WaveDeckBridge || typeof WaveDeckBridge.hintForSymbol !== 'function') {
+        return '<div class="bk-wd"><div class="t">WAVEDECK</div>橋接未載入</div>';
+      }
+      var h = WaveDeckBridge.hintForSymbol('TXF');
+      if (!h) {
+        return '<div class="bk-wd"><div class="t">WAVEDECK</div>執行台未連線或尚無狀態（可開 START_WAVEDECK）</div>';
+      }
+      var inv = h.invalidation
+        ? ((h.invalidation.side === 'below' ? '跌破' : '突破') + ' ' + h.invalidation.price)
+        : '—';
+      var conf = (h.confidence != null && isFinite(h.confidence))
+        ? Math.round(Number(h.confidence) * 100) + '%' : '—';
+      var bias = (h.biasLong != null ? Math.round(Number(h.biasLong) * 100) + '%多' : '') +
+        (h.biasShort != null ? '／' + Math.round(Number(h.biasShort) * 100) + '%空' : '');
+      return '<div class="bk-wd"><div class="t">WAVEDECK · 執行狀態</div>' +
+        '標的 <b>' + esc(h.symbol) + '</b> · 動作 <b>' + esc(h.action) + '</b> · 信心 <b>' + conf + '</b><br>' +
+        '部位 <b>' + esc(h.qty != null ? h.qty : '—') + '</b> · 模式 <b>' + esc(h.mode) + '</b> · FSM <b>' + esc(h.fsm) + '</b><br>' +
+        '失效 <b>' + esc(inv) + '</b>' + (bias ? ' · 偏向 ' + esc(bias) : '') +
+        '</div>';
+    } catch (e) {
+      return '';
+    }
   }
 
   function bars(obj, color) {
@@ -252,7 +282,7 @@
         ' · 更新 ' + new Date().toLocaleTimeString('zh-TW');
     }
 
-    var h = '<div class="bk-cards">' +
+    var h = wdStripHtml() + '<div class="bk-cards">' +
       '<div class="bk-card"><div class="lab">年化波動</div><div class="val">' + (p.vol || 0).toFixed(1) + '%</div></div>' +
       '<div class="bk-card"><div class="lab">1日 95% VaR</div><div class="val">' + (p.var95 || 0).toFixed(2) + '%</div></div>' +
       '<div class="bk-card"><div class="lab">平均相關性</div><div class="val">' + avgCorr.toFixed(2) + '</div></div>' +
@@ -320,7 +350,12 @@
           body.innerHTML = '<div class="bk-err">分析失敗：' + esc((x.d && x.d.error) || '無資料') + '</div>';
           return;
         }
-        render(x.d);
+        var paint = function () { render(x.d); };
+        if (window.WaveDeckBridge && typeof WaveDeckBridge.fetchState === 'function') {
+          WaveDeckBridge.fetchState(false).then(paint).catch(paint);
+        } else {
+          paint();
+        }
       })
       .catch(function (e) {
         body.innerHTML = '<div class="bk-err">分析失敗：' + esc(e.message || e) + '</div>';

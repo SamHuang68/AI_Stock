@@ -222,8 +222,62 @@
     } : null;
   }
 
+  var _stateCache = null;
+  var _stateAt = 0;
+  var STATE_TTL_MS = 8000;
+
+  function fetchState(force) {
+    var now = Date.now();
+    if (!force && _stateCache && (now - _stateAt) < STATE_TTL_MS) {
+      return Promise.resolve(_stateCache);
+    }
+    return ensureBase().then(function (base) {
+      if (!base) return null;
+      return fetch(base.replace(/\/$/, '') + '/api/state', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          var st = j && j.state ? j.state : null;
+          _stateCache = st;
+          _stateAt = Date.now();
+          return st;
+        })
+        .catch(function () { return null; });
+    });
+  }
+
+  function normSym(code) {
+    return String(code || '').toUpperCase().replace(/\.TW|\.TWO/g, '').trim();
+  }
+
+  /** Return compact WD hint for a symbol (TXF / matching code). */
+  function hintForSymbol(code, state) {
+    var st = state || _stateCache;
+    if (!st) return null;
+    var want = normSym(code);
+    var wdSym = normSym(st.symbol || 'TXF');
+    var match = !want || want === wdSym ||
+      (want === 'TXF' && (wdSym === 'TXF' || wdSym === 'TX')) ||
+      (want === '^TWII' && (wdSym === 'TXF' || wdSym === 'TWII'));
+    if (!match) return null;
+    var ai = st.ai || {};
+    var inv = ai.invalidation || {};
+    var pos = st.positions || {};
+    return {
+      symbol: wdSym,
+      action: ai.action_label || ai.action || '—',
+      confidence: ai.confidence,
+      biasLong: ai.bias_long,
+      biasShort: ai.bias_short,
+      invalidation: inv.price != null ? { price: inv.price, side: inv.side || 'below' } : null,
+      qty: pos.account != null ? pos.account : pos.txt_target,
+      mode: st.mode || 'paper',
+      fsm: st.fsm || '—',
+      style: st.style
+    };
+  }
+
   window.WaveDeckBridge = {
-    VERSION: '5.0-WD2',
+    VERSION: '5.0-WD3',
     base: function () { return BASE; },
     open: open,
     pushOverlay: pushOverlay,
@@ -232,7 +286,9 @@
     syncFromMarket: syncFromMarket,
     lastSync: lastSync,
     autoEnabled: autoEnabled,
-    setAutoEnabled: setAutoEnabled
+    setAutoEnabled: setAutoEnabled,
+    fetchState: fetchState,
+    hintForSymbol: hintForSymbol
   };
 
   try { console.log('[wavedeck-bridge] ready → ' + BASE); } catch (e) {}

@@ -175,6 +175,8 @@ stateDiagram-v2
 | 跌停家數異常／VIX 急升 | 風控降載：新單口數減半、移動停利收緊 |
 | 側欄「執行」／橋接 | `WaveDeckBridge.open()` → `http://127.0.0.1:18433/` |
 | Pulse／大盤體質 → WD | `WaveDeckBridge.syncFromMarket({score, advRatio})` → `POST /bridge/st`（風格／降載；節流 60s） |
+| Pulse AI 摘要 | 本機 `POST /ai/local`（LM Studio）；失敗則規則後援 |
+| Watch／Book ← WD | `WaveDeckBridge.fetchState` → chip／執行狀態條（失效價、部位、信心） |
 | ST 心跳失敗 | WaveDeck 亮黃燈；不自動加倉 |
 
 協定路徑（本機）：

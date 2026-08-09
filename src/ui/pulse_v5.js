@@ -30,6 +30,10 @@
       '#pl-root .pl-tone{margin-top:6px;font-size:13px;font-weight:700}' +
       '#pl-root .pl-wd{margin-top:4px;font-size:10px;color:var(--tlo)}' +
       '#pl-root .pl-wd b{color:var(--cyan)}' +
+      '#pl-root .pl-ai{margin:10px 0 0;padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px}' +
+      '#pl-root .pl-ai h4{margin:0 0 6px;font-size:11px;color:var(--gold);letter-spacing:1px;display:flex;justify-content:space-between;align-items:center}' +
+      '#pl-root .pl-ai .pl-ai-body{font-size:12px;line-height:1.65;color:var(--text);min-height:2.5em;white-space:pre-wrap}' +
+      '#pl-root .pl-ai .pl-ai-meta{margin-top:6px;font-size:9px;color:var(--tlo)}' +
       '#pl-root .pl-actions{display:flex;gap:8px;flex-wrap:wrap}' +
       '#pl-root .pl-btn{padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);' +
         'color:var(--text);font-size:10px;font-family:\'JetBrains Mono\',monospace;cursor:pointer}' +
@@ -174,16 +178,24 @@
           '</div><div class="pl-actions">' +
             '<button type="button" class="pl-btn" id="pl-refresh">↻ 重新整理</button>' +
             '<button type="button" class="pl-btn wd" id="pl-push-wd" title="將廣度／體質推送到 WaveDeck">→ WD</button>' +
+            '<button type="button" class="pl-btn wd" id="pl-ai-sum" title="本機 LLM 盤面摘要（/ai/local）">AI 摘要</button>' +
             '<button type="button" class="pl-btn" data-go="breadth">廣度</button>' +
             '<button type="button" class="pl-btn" data-go="afterhours">盤後</button>' +
             '<button type="button" class="pl-btn primary" data-go="chart">圖表</button>' +
           '</div></div>' +
+          '<div class="pl-ai" id="pl-ai" style="display:none">' +
+            '<h4>大盤 AI 即時語意 <span id="pl-ai-st" style="font-weight:600;color:var(--tlo)"></span></h4>' +
+            '<div class="pl-ai-body" id="pl-ai-body">—</div>' +
+            '<div class="pl-ai-meta" id="pl-ai-meta"></div>' +
+          '</div>' +
           '<div id="pl-body" class="pl-loading">載入脈動…</div>' +
         '</div>';
       var r = $('pl-refresh');
       if (r) r.onclick = function () { refresh(); };
       var pwd = $('pl-push-wd');
       if (pwd) pwd.onclick = function () { pushWd(true); };
+      var pai = $('pl-ai-sum');
+      if (pai) pai.onclick = function () { runAiSummary(); };
       mount.querySelectorAll('[data-go]').forEach(function (b) {
         b.onclick = function () { goRoute(b.getAttribute('data-go')); };
       });
@@ -198,17 +210,104 @@
     if (el) el.innerHTML = text || 'WaveDeck 覆寫：—';
   }
 
+  function ruleFallbackSummary(m) {
+    m = m || {};
+    var bits = [];
+    bits.push('【規則摘要｜本機 LLM 未連線】');
+    if (m.score != null) bits.push('大盤體質 ' + m.score + (m.label ? '（' + m.label + '）' : '') + '。');
+    if (m.advRatio != null && isFinite(Number(m.advRatio))) {
+      var pct = Math.round(Number(m.advRatio) * 100);
+      bits.push('上漲家數比約 ' + pct + '%。');
+      if (pct < 40) bits.push('廣度偏弱，宜降低侵略性、嚴控新單。');
+      else if (pct > 60) bits.push('廣度偏強，可維持偏積極但留意追價。');
+      else bits.push('廣度糾結，宜均衡風格、等待結構確認。');
+    }
+    if (m.rotationHealth === 'broad') bits.push('類股輪動偏廣，風險偏好可略升。');
+    if (m.rotationHealth === 'narrow') bits.push('類股輪動偏窄，提防指數上漲、個股跟不上。');
+    if (m.summary) bits.push(String(m.summary));
+    var style = (window.WaveDeckBridge && window.WaveDeckBridge.styleFromScore)
+      ? window.WaveDeckBridge.styleFromScore(m.score, m.advRatio) : null;
+    if (style != null) bits.push('建議 WaveDeck 進場風格 → ' + style + (Number(m.score) < 35 ? '（並考慮降載）' : '') + '。');
+    bits.push('⚠ 非投資建議。');
+    return bits.join(' ');
+  }
+
+  function runAiSummary() {
+    var box = $('pl-ai');
+    var body = $('pl-ai-body');
+    var st = $('pl-ai-st');
+    var meta = $('pl-ai-meta');
+    if (!box || !body) return;
+    box.style.display = 'block';
+    body.textContent = '思考中…（本機 /ai/local，首次載入可能較久）';
+    if (st) st.textContent = 'LM Studio';
+    if (meta) meta.textContent = '';
+
+    var m = _lastMacro || {};
+    var ctx = [
+      '來源: Stock Terminal Pulse',
+      '大盤體質分數: ' + (m.score != null ? m.score : '未提供'),
+      '體質標籤: ' + (m.label || '未提供'),
+      '上漲家數比 advRatio: ' + (m.advRatio != null ? m.advRatio : '未提供'),
+      '輪動: ' + (m.rotationHealth || '未提供'),
+      '規則摘要: ' + (m.summary || '未提供'),
+      '盤面語氣: ' + (m.tone || '未提供')
+    ].join('\n');
+    var prompt =
+      '請用 4–6 句繁中，根據「目前提供的資料」做台股大盤即時語意解析：' +
+      '1) 多空傾向 2) 廣度與體質是否背離 3) 風險提示 4) 對進場侵略性（保守/均衡/積極）的建議。' +
+      '不可編造未提供的數字。結尾加「⚠ 非投資建議」。';
+
+    fetch(SRV + '/ai/local', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: prompt, context: ctx })
+    }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.body || !r.body.getReader) return r.text().then(function (t) { body.textContent = t; });
+      var reader = r.body.getReader();
+      var dec = new TextDecoder();
+      var acc = '';
+      body.textContent = '';
+      function pump() {
+        return reader.read().then(function (res) {
+          if (res.done) {
+            if (!acc.trim()) {
+              body.textContent = ruleFallbackSummary(m);
+              if (st) st.textContent = '規則後援';
+            } else if (meta) {
+              meta.textContent = '更新 ' + new Date().toLocaleTimeString('zh-TW') + ' · 本機 LLM';
+            }
+            return;
+          }
+          acc += dec.decode(res.value || new Uint8Array(), { stream: true });
+          body.textContent = acc;
+          return pump();
+        });
+      }
+      return pump();
+    }).catch(function () {
+      body.textContent = ruleFallbackSummary(m);
+      if (st) st.textContent = '規則後援（LM Studio 未連線）';
+      if (meta) meta.textContent = '可啟動 LM Studio Local Server 後再按 AI 摘要';
+    });
+  }
+
   function pushWd(force) {
     if (!window.WaveDeckBridge || typeof window.WaveDeckBridge.syncFromMarket !== 'function') {
       setWdLine('WaveDeck 覆寫：<b>橋接未載入</b>');
       return Promise.resolve();
     }
     var m = _lastMacro || {};
+    var summary = m.summary || '';
+    if (m.rotationHealth) {
+      summary = (summary ? summary + ' · ' : '') + '輪動 ' + m.rotationHealth;
+    }
     return window.WaveDeckBridge.syncFromMarket({
       score: m.score,
       advRatio: m.advRatio,
       label: m.label,
-      summary: m.summary,
+      summary: summary,
       source: 'pulse_v5',
       force: !!force,
       silent: !force
@@ -258,11 +357,19 @@
       toneEl.textContent = toneLine(txf, bd);
     }
 
+    var rot = 'mixed';
+    if (sec.up && sec.dn) {
+      if (sec.up.length >= 4 && sec.dn.length <= 2) rot = 'broad';
+      else if (sec.up.length <= 2 && sec.dn.length >= 4) rot = 'narrow';
+    }
+
     _lastMacro = {
       score: bd.score,
       advRatio: st.advRatio,
       label: bd.label || null,
-      summary: bd.summary || bd.plainSummary || null
+      summary: bd.summary || bd.plainSummary || null,
+      tone: toneLine(txf, bd),
+      rotationHealth: rot
     };
     // Prefer dedicated TW market fundamental score when pack carries it
     if (pack.fund && pack.fund.score != null) {
