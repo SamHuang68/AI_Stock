@@ -103,10 +103,9 @@ ok(/t00Trend/.test(pl) && /o00Trend/.test(pl) && /txfTrend/.test(pl) &&
   'pulse strip shows TAIEX/OTC/TXF trend quant like turnover');
 ok(/加權盤勢/.test(pl) && /櫃買／台指期見頂列/.test(pl) && !/pl-trend-pair/.test(pl),
   'pulse OHLC panel integrated — no duplicate index chips');
-ok(/function fmtIdx/.test(pl) && /pl-ohlc-now/.test(pl) &&
-  /pl-ohlc\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/.test(pl) &&
-  /fmtIdx\(o\.open/.test(pl) && /fmtIdx\(prevClose, 'prev'\)/.test(pl),
-  'pulse 加權盤勢：現價列 + 2×2 OHLC + 千分位／昨收整數');
+ok(/pl-ohlc\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/.test(pl) &&
+  /pl-ohlc \.box \.v\{font-size:9px/.test(pl) && !/pl-ohlc-now/.test(pl) && !/function fmtIdx/.test(pl),
+  'pulse 加權盤勢：維持四格，僅縮小 OHLC 數值字級');
 ok(/漲跌家數 · 廣度/.test(pl) && /repeat\(6,/.test(pl),
   'pulse strip merges breadth into 6-col KPI row');
 ok(/data-flash-mkt/.test(pl) && /filterFlash/.test(pl) && /flashMkt/.test(pl),
