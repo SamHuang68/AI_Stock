@@ -288,14 +288,19 @@
         'max-height:2.7em;min-height:0;overflow:hidden}' +
       '#pl-root .pl-bd-cmt b{color:var(--gold);font-weight:700}' +
       '#pl-root .pl-bd-cmt .up{color:var(--red)}#pl-root .pl-bd-cmt .dn{color:var(--green)}' +
-      /* sectors + 與近漲跌停聯動高亮 */
-      '#pl-root .pl-sbar{display:flex;align-items:center;gap:4px;margin:1px 0;font-size:9px;' +
-        'cursor:pointer;border-radius:3px;padding:1px 2px;transition:background .12s,box-shadow .12s,opacity .12s;min-width:0}' +
-      '#pl-root .pl-sbar .nm{width:44px;flex-shrink:0;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#pl-root .pl-sbar .track{flex:1;height:5px;background:var(--bg);border-radius:3px;overflow:hidden;min-width:0}' +
+      /* 產業輪動：縮字符合窄欄（與近漲停／快訊同級） */
+      '#pl-root #pl-sectors .pl-note{font-size:7px;line-height:1.25;margin:0 0 2px}' +
+      '#pl-root #pl-sectors .pl-sec-tog button{font-size:7px;padding:1px 5px}' +
+      '#pl-root .pl-sbar{display:flex;align-items:center;gap:3px;margin:0;font-size:8px;' +
+        'cursor:pointer;border-radius:3px;padding:1px 2px;transition:background .12s,box-shadow .12s,opacity .12s;min-width:0;' +
+        'line-height:1.2}' +
+      '#pl-root .pl-sbar .nm{width:40px;flex-shrink:0;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' +
+        'font-size:8px;letter-spacing:-0.15px}' +
+      '#pl-root .pl-sbar .track{flex:1;height:4px;background:var(--bg);border-radius:3px;overflow:hidden;min-width:0}' +
       '#pl-root .pl-sbar .track > i{display:block;height:100%;border-radius:3px}' +
-      '#pl-root .pl-sbar .pc{width:40px;text-align:right;font-weight:700;flex-shrink:0;font-size:9px}' +
-      '#pl-root .pl-sbar .ad{width:34px;text-align:right;font-size:7px;color:#94a3b8;flex-shrink:0;font-variant-numeric:tabular-nums}' +
+      '#pl-root .pl-sbar .pc{width:36px;text-align:right;font-weight:700;flex-shrink:0;font-size:8px;' +
+        'font-variant-numeric:tabular-nums;letter-spacing:-0.3px;white-space:nowrap}' +
+      '#pl-root .pl-sbar .ad{width:30px;text-align:right;font-size:6px;color:#94a3b8;flex-shrink:0;font-variant-numeric:tabular-nums}' +
       '#pl-root .pl-sbar .ad .u{color:var(--red)}#pl-root .pl-sbar .ad .d{color:var(--green)}' +
       '#pl-root .pl-sbar.hi{background:rgba(245,197,24,.10);box-shadow:inset 2px 0 0 var(--gold)}' +
       '#pl-root .pl-sbar.dim{opacity:.4}' +
