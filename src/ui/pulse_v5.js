@@ -215,8 +215,8 @@
         'font-size:10px;font-weight:800;margin-top:2px;line-height:1.15;' +
         'font-variant-numeric:tabular-nums;letter-spacing:-0.2px;white-space:nowrap;' +
         'overflow:visible;max-width:100%}' +
-      /* 加權 OHLC 點位較長（如 44,450.19）：略縮字級，避免裁切 */
-      '#pl-root .pl-ohlc4 .c .v{font-size:9px;letter-spacing:-0.35px;color:var(--thi)}' +
+      /* 加權 OHLC 整數千分位後對齊法人 10px；細字距避免 44,450 擁擠 */
+      '#pl-root .pl-ohlc4 .c .v{letter-spacing:-0.3px;color:var(--thi)}' +
       '#pl-root .pl-inst-trend,#pl-root .pl-bd-trend,#pl-root .pl-ohlc-trend{' +
         'flex:1 1 0;min-height:0;margin:5px 0 3px;background:rgba(6,10,18,.55);' +
         'border:1px solid rgba(42,61,92,.75);border-radius:5px;padding:5px 7px;' +
@@ -1181,15 +1181,15 @@
       '</div>';
   }
 
-  /** 加權盤勢評論：日內位置／漲跌／振幅（不重複四格 OHLC 數字） */
+  /** 加權盤勢評論：日內位置／漲跌／振幅（不重複四格 OHLC 數字；點數整數、％一位） */
   function buildOhlcComment(o, twiiObj, ampPct, rangePos) {
     var parts = [];
     if (rangePos != null) {
       var band = rangePos >= 0.67 ? '偏高位' : rangePos <= 0.33 ? '偏低位' : '中段';
-      parts.push('日內位置 <b>' + band + '</b>（' + (rangePos * 100).toFixed(0) + '%）');
+      parts.push('日內 <b>' + band + '</b>（' + (rangePos * 100).toFixed(0) + '%）');
     }
-    parts.push('<span class="' + tw(o && o.changePct) + '">' + chgWithPct(twiiObj, 2, 2) + '</span>');
-    if (ampPct != null) parts.push('振幅 ' + ampPct.toFixed(2) + '%');
+    parts.push('<span class="' + tw(o && o.changePct) + '">' + chgWithPct(twiiObj, 0, 1) + '</span>');
+    if (ampPct != null) parts.push('振幅 ' + ampPct.toFixed(1) + '%');
     if (!parts.length) parts.push('櫃買／台指期見頂列');
     return parts.join(' · ');
   }
@@ -1226,10 +1226,10 @@
       '<span class="pl-sec-hint">櫃買／台指期見頂列</span>' +
       '<a data-go="chart" data-sym="^TWII" data-mkt="TW">圖表 →</a></h4>' +
       '<div class="pl-ohlc4" id="pl-ohlc4">' +
-        '<div class="c" title="當日開盤"><div class="k">開盤</div><div class="v">' + fmt(o.open, 2) + '</div></div>' +
-        '<div class="c" title="當日最高"><div class="k">最高</div><div class="v">' + fmt(o.high, 2) + '</div></div>' +
-        '<div class="c" title="當日最低"><div class="k">最低</div><div class="v">' + fmt(o.low, 2) + '</div></div>' +
-        '<div class="c" title="昨收"><div class="k">昨收</div><div class="v">' + fmt(o.prevClose, 2) + '</div></div>' +
+        '<div class="c" title="當日開盤（整數點）"><div class="k">開盤</div><div class="v">' + fmt(o.open, 0) + '</div></div>' +
+        '<div class="c" title="當日最高（整數點）"><div class="k">最高</div><div class="v">' + fmt(o.high, 0) + '</div></div>' +
+        '<div class="c" title="當日最低（整數點）"><div class="k">最低</div><div class="v">' + fmt(o.low, 0) + '</div></div>' +
+        '<div class="c" title="昨收（整數點）"><div class="k">昨收</div><div class="v">' + fmt(o.prevClose, 0) + '</div></div>' +
       '</div>' +
       '<div class="pl-ohlc-trend" id="pl-ohlc-trend">' +
         '<div class="lab"><span>近 20 日 · 點</span><span id="pl-ohlc-trend-meta">' + metaBoot + '</span></div>' +
@@ -1499,7 +1499,12 @@
         }
       }
       if (meta) {
-        meta.textContent = (rows.length ? ('近 ' + rows.length + ' 日 · Y：億') : '無序列') +
+        var metaShort = (rows.length ? ('近 ' + rows.length + ' 日') : '無序列') +
+          (display.date ? ' · ' + display.date : '') +
+          (stale ? ' · 前交易日' : '') +
+          (quant.bits ? ' · ' + quant.bits : '');
+        meta.textContent = metaShort;
+        meta.title = (rows.length ? ('近 ' + rows.length + ' 日 · Y：億') : '無序列') +
           (display.date ? ' · ' + display.date : '') +
           (stale ? ' · 前交易日' : '') +
           (quant.bits ? ' · ' + quant.bits : '');
@@ -1694,9 +1699,11 @@
         if (net == null && (st.up != null || st.down != null)) net = (st.up || 0) - (st.down || 0);
         var advBit = st.advRatio != null ? (' · 上漲比 ' + (Number(st.advRatio) * 100).toFixed(1) + '%') : '';
         var netBit = net != null ? (' · 淨' + (net >= 0 ? '+' : '') + net) : '';
-        meta.textContent = (rows.length ? ('近 ' + rows.length + ' 日 · Y：倍') : '無序列') +
-          (st.lsRatio != null ? ' · 今 ' + Number(st.lsRatio).toFixed(2) : '') +
-          netBit + advBit;
+        var lsBit = st.lsRatio != null ? ('今 ' + Number(st.lsRatio).toFixed(2)) : '';
+        meta.textContent = (rows.length ? ('近 ' + rows.length + ' 日') : '無序列') +
+          (lsBit ? ' · ' + lsBit : '') + netBit;
+        meta.title = (rows.length ? ('近 ' + rows.length + ' 日 · Y：倍') : '無序列') +
+          (lsBit ? ' · ' + lsBit : '') + netBit + advBit;
       }
       if (cmt) cmt.innerHTML = buildBreadthComment(st, rows);
     });
@@ -2285,9 +2292,9 @@
       chart.innerHTML = sparkSvg(closes);
       if (closes.length) {
         var last = closes[closes.length - 1];
-        var lastTxt = Number(last).toLocaleString('en-US', { maximumFractionDigits: 2 });
+        var lastTxt = Math.round(Number(last)).toLocaleString('en-US');
         chart.title = '加權近 ' + closes.length + ' 日 · X：日 · Y：點 · 最新收 ' + lastTxt;
-        if (meta) meta.textContent = '近 ' + closes.length + ' 日 · Y：點 · 收 ' + lastTxt;
+        if (meta) meta.textContent = '近 ' + closes.length + ' 日 · 收 ' + lastTxt;
       } else if (meta) {
         meta.textContent = '無序列';
       }

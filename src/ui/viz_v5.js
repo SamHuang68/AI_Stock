@@ -99,6 +99,8 @@
         'text-shadow:0 1px 2px rgba(0,0,0,.9),0 0 4px rgba(0,0,0,.55);z-index:2}' +
       '.vz-spark-ax .vz-plot .vz-pt.hi{color:var(--thi,#F1F5FA);transform:translate(-50%,-120%)}' +
       '.vz-spark-ax .vz-plot .vz-pt.lo{color:#94a3b8;transform:translate(-50%,30%)}' +
+      /* tip 小卡：高低數字改由 Y 軸刻度承載，隱藏峰谷文字以免蓋住 .lab meta */
+      '.vz-spark-ax.vz-compact .vz-pt{display:none}' +
       '.vz-spark-ax .vz-xlabs{grid-column:2;grid-row:3;display:flex;justify-content:space-between;' +
         'font-size:7px;color:var(--tlo);line-height:1.2;font-variant-numeric:tabular-nums;padding-top:3px}' +
       '.vz-spark-ax .vz-xunit{grid-column:1 / span 2;grid-row:4;font-size:7px;color:var(--tf,#64748b);line-height:1.2;' +
@@ -371,7 +373,8 @@
     var tip = (yLbl ? ('Y：' + yLbl + ' · ') : '') + 'X：' + xLbl + ' · n=' + n +
       ' · 高 ' + _fmtAxisY(hi, opts) + ' / 低 ' + _fmtAxisY(lo, opts);
     var peakHtml = '';
-    if (wantMarks) {
+    /* compact：只留圓點標記，峰谷數字交給 Y 軸，避免上浮文字遮蔽趨勢 .lab */
+    if (wantMarks && !compact) {
       var leftPct = function (idx) {
         return ((pad + (idx / (n - 1)) * (w - pad * 2)) / w * 100).toFixed(1);
       };

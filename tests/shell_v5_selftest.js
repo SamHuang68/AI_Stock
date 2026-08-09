@@ -61,13 +61,15 @@ ok(/lots-bar/.test(hub) && /class="streak"/.test(hub), 'institutional lots bar s
 })();
 (function () {
   var vz = fs.readFileSync(path.join(root, 'src/ui/viz_v5.js'), 'utf8');
+  var pulseSrc = fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8');
   ok(/vz-xlabs/.test(vz), 'sparkLine X tick labels');
   ok(/linearGradient/.test(vz) && /vz-pt/.test(vz) && /wantFill/.test(vz) && /wantMarks/.test(vz),
     'sparkLine area fill + peak/trough marks');
+  ok(/vz-compact \.vz-pt\{display:none\}/.test(vz) && /wantMarks && !compact/.test(vz),
+    'viz compact spark hides peak text labels (no lab occlusion)');
+  ok(/vz-compact/.test(vz) && /compact:\s*true/.test(pulseSrc),
+    'tip spark uses compact axis (no xunit footer)');
 })();
-ok(/vz-compact/.test(fs.readFileSync(path.join(root, 'src/ui/viz_v5.js'), 'utf8')) &&
-  /compact:\s*true/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')),
-  'tip spark uses compact axis (no xunit footer)');
 ok(/d\.buy \|\| d\.long/.test(hub) || /focus\.buy/.test(hub) || /d\.buy \|\|/.test(hub),
   'signals use /focus buy field');
 ok(/hub-card\[data-code\]/.test(hub) || /data-code="' \+ sym/.test(hub),
@@ -106,8 +108,9 @@ ok(/加權盤勢/.test(pl) && /櫃買／台指期見頂列/.test(pl) && !/pl-tre
   'pulse OHLC panel integrated — no duplicate index chips');
 ok(/pl-ohlc4/.test(pl) && /pl-ohlc-trend/.test(pl) && /function buildOhlcComment/.test(pl) &&
   /pl-inst4,#pl-root \.pl-bd4,#pl-root \.pl-ohlc4\{/.test(pl) &&
-  /pl-ohlc4 \.c \.v\{font-size:9px/.test(pl) && !/pl-ohlc-now/.test(pl) && !/function fmtIdx/.test(pl),
-  'pulse 加權盤勢：四格 KPI＋線圖面板對齊法人資金');
+  /fmt\(o\.open, 0\)/.test(pl) && /chgWithPct\(twiiObj, 0, 1\)/.test(pl) &&
+  !/pl-ohlc-now/.test(pl) && !/function fmtIdx/.test(pl),
+  'pulse 加權盤勢：四格整數點＋線圖對齊法人，無小數遮蔽');
 ok(/漲跌家數 · 廣度/.test(pl) && /repeat\(6,/.test(pl),
   'pulse strip merges breadth into 6-col KPI row');
 ok(/data-flash-mkt/.test(pl) && /filterFlash/.test(pl) && /flashMkt/.test(pl),
