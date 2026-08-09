@@ -688,6 +688,38 @@
     return Math.abs(px - inv) / Math.abs(inv) < 0.01;
   }
 
+  /** Plain chip label（無 HTML；頂列 WD 狀態列用，避免 textContent 露出標籤） */
+  function chipLabelFromHint(h) {
+    if (!h) return '';
+    var offline = !!h.linkOffline || _linkOffline;
+    if (offline) return '失聯';
+    if (h.macroOnly) {
+      var spill = (h.spillover != null && isFinite(h.spillover))
+        ? Math.round(Number(h.spillover) * 100) + '%' : '';
+      return 'MAC' + (h.style != null ? ' ' + h.style : '') + (spill ? ' · ' + spill : '');
+    }
+    var dirZh = h.direction === 'LONG' ? '多' : h.direction === 'SHORT' ? '空' : '觀望';
+    var size = h.position_size != null ? h.position_size : (h.qty != null ? Math.abs(h.qty) : 0);
+    var invTxt = h.invalidation_price != null
+      ? ('防守 ' + h.invalidation_price)
+      : (h.invalidation && h.invalidation.price != null ? ('防守 ' + h.invalidation.price) : '');
+    if (h.direction === 'EMPTY' || !size) {
+      return (h.wd_mode === 'PAPER' || h.mode === 'paper' ? '紙上' : '實盤') + ' | ' + dirZh;
+    }
+    return dirZh + ' ' + size + (invTxt ? ' | ' + invTxt : '');
+  }
+
+  /**
+   * Compact plain label for shell status (never HTML).
+   * @param {string} code
+   * @param {{lastPrice?:number}|number} [optsOrPrice]
+   */
+  function chipLabel(code, optsOrPrice) {
+    var opts = (optsOrPrice != null && typeof optsOrPrice === 'object') ? optsOrPrice : { lastPrice: optsOrPrice };
+    var h = hintForSymbol(normSym(code), null, opts.lastPrice);
+    return chipLabelFromHint(h);
+  }
+
   /**
    * Compact chip HTML for Watch／Book atomic paint.
    * @param {string} code
@@ -713,25 +745,7 @@
       : h.macroOnly ? 'rgba(148,163,184,.1)'
       : 'rgba(103,232,249,.1)';
     var anim = alert && !offline ? 'animation:wdChipPulse 1.1s ease-in-out infinite;' : '';
-    var label;
-    if (offline) {
-      label = 'WD 失聯';
-    } else if (h.macroOnly) {
-      var spill = (h.spillover != null && isFinite(h.spillover))
-        ? Math.round(Number(h.spillover) * 100) + '%' : '';
-      label = 'MAC' + (h.style != null ? ' ' + h.style : '') + (spill ? ' · ' + spill : '');
-    } else {
-      var dirZh = h.direction === 'LONG' ? '多' : h.direction === 'SHORT' ? '空' : '觀望';
-      var size = h.position_size != null ? h.position_size : (h.qty != null ? Math.abs(h.qty) : 0);
-      var invTxt = h.invalidation_price != null
-        ? ('防守 ' + h.invalidation_price)
-        : (h.invalidation && h.invalidation.price != null ? ('防守 ' + h.invalidation.price) : '');
-      if (h.direction === 'EMPTY' || !size) {
-        label = (h.wd_mode === 'PAPER' || h.mode === 'paper' ? '紙上' : '實盤') + ' | ' + dirZh;
-      } else {
-        label = dirZh + ' ' + size + (invTxt ? ' | ' + invTxt : '');
-      }
-    }
+    var label = chipLabelFromHint(h);
     var tip = h.tip || [
       offline ? 'WaveDeck 串流中斷' : 'WaveDeck',
       h.action,
@@ -903,6 +917,7 @@
     fetchState: fetchState,
     fetchChipState: fetchChipState,
     hintForSymbol: hintForSymbol,
+    chipLabel: chipLabel,
     chipHtml: chipHtml,
     getChip: getChip,
     paintChipNodes: paintChipNodes,

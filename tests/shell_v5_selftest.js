@@ -248,6 +248,14 @@ ok(/function ringWheelSlots/.test(shell) && /slots\.push\(-2\)/.test(shell) &&
   'shell ring back: wheel hub slot + Esc/Backspace/crumb/side-button pop layer');
 ok(/ShellV5\.ringPop/.test(hotkeys),
   'hotkeys Esc fallback calls ShellV5.ringPop while ring open');
+ok(/function plainWdStatus/.test(shell) && /chipLabel/.test(shell) &&
+  !/setWdSync\('ok', 'WD ' \+ \(d\.symbol \|\| ''\) \+ \(chip \?/.test(shell) &&
+  /#shell-wd-sync\{max-width/.test(shell),
+  'shell WD status uses plain chipLabel + clipped topbar (no raw HTML)');
+const wdBridge = fs.readFileSync(path.join(root, 'src/ui/wavedeck_bridge_v5.js'), 'utf8');
+ok(/function chipLabel/.test(wdBridge) && /chipLabel: chipLabel/.test(wdBridge) &&
+  /chipLabelFromHint/.test(wdBridge),
+  'WaveDeckBridge exports chipLabel for shell status');
 ok(/RING_LOGO/.test(shell) && /st50-icon\.svg/.test(shell) && /sr-hub-ver/.test(shell) &&
   /sr-logo/.test(shell) && /Stock Terminal/.test(shell),
   'shell ring hub shows Stock Terminal 5.0 logo');

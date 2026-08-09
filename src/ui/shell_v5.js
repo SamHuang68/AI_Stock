@@ -188,16 +188,22 @@
         'background:var(--gold);color:#060A12;border:none;border-radius:5px;cursor:pointer;' +
         'font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:700;letter-spacing:.5px}' +
       '.sv-cta:hover{background:#FBBF24}' +
-      '#topbar .shell-sync{display:inline-flex;align-items:center;gap:6px;margin-left:4px;' +
-        'font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--tlo);letter-spacing:.5px}' +
+      '#topbar .shell-sync{display:inline-flex;align-items:center;gap:5px;margin-left:4px;' +
+        'font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--tlo);letter-spacing:.5px;' +
+        'max-width:min(22vw,160px);min-width:0;overflow:hidden;white-space:nowrap;flex:0 1 auto;' +
+        'vertical-align:middle;line-height:1.2}' +
       '#topbar .shell-sync .ss-dot{width:6px;height:6px;border-radius:50%;background:var(--green);' +
         'box-shadow:0 0 6px var(--green);flex-shrink:0}' +
       '#topbar .shell-sync.warn .ss-dot{background:var(--orange);box-shadow:0 0 6px var(--orange)}' +
       '#topbar .shell-sync.err .ss-dot{background:var(--red);box-shadow:0 0 6px var(--red)}' +
-      '#topbar .shell-sync-btn{display:inline-flex;align-items:center;gap:5px;margin-left:8px;' +
-        'padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);' +
+      '#topbar #shell-sync-txt,#topbar #shell-wd-sync-txt{overflow:hidden;text-overflow:ellipsis;' +
+        'white-space:nowrap;min-width:0;max-width:100%}' +
+      '#topbar #shell-wd-sync{max-width:min(28vw,200px)}' +
+      '#topbar .shell-sync-btn{display:inline-flex;align-items:center;gap:5px;margin-left:6px;' +
+        'padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);' +
         'color:var(--thi);font-family:\'JetBrains Mono\',monospace;font-size:10px;cursor:pointer;' +
-        'letter-spacing:.3px}' +
+        'letter-spacing:.3px;flex:0 0 auto;white-space:nowrap;line-height:1.2;' +
+        'writing-mode:horizontal-tb;max-width:none}' +
       '#topbar .shell-sync-btn:hover{border-color:var(--gold-m);color:var(--gold)}' +
       '#topbar .shell-sync-btn:disabled{opacity:.55;cursor:wait}' +
       '#topbar .logo .shell-ver{margin-left:6px;font-size:9px;color:var(--gold);letter-spacing:1px;font-weight:700}' +
@@ -1183,6 +1189,17 @@
     txt.textContent = text || 'LOCAL';
   }
 
+  /** 頂列僅顯示純文字；誤傳 HTML 時剝成可讀短句，避免遮蔽自選列 */
+  function plainWdStatus(text) {
+    var s = text == null ? '' : String(text);
+    if (!s) return 'WD';
+    if (s.indexOf('<') >= 0) {
+      s = s.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+    if (s.length > 36) s = s.slice(0, 34) + '…';
+    return s || 'WD';
+  }
+
   function setWdSync(mode, text) {
     var el = $('shell-wd-sync');
     var txt = $('shell-wd-sync-txt');
@@ -1190,7 +1207,12 @@
     el.classList.remove('warn', 'err');
     if (mode === 'warn') el.classList.add('warn');
     if (mode === 'err') el.classList.add('err');
-    txt.textContent = text || 'WD';
+    var plain = plainWdStatus(text);
+    txt.textContent = plain;
+    /* 完整原文進 title（若無成本 tip 覆蓋）；HTML 則不塞進 title */
+    if (text && String(text).indexOf('<') < 0) {
+      el.setAttribute('data-wd-status', String(text));
+    }
   }
 
   function paintWdCostTip(meter) {
@@ -1507,8 +1529,9 @@
       window.addEventListener('wavedeck:chip', function (ev) {
         var d = ev && ev.detail;
         if (d && d.symbol) {
-          var chip = (typeof WaveDeckBridge.chipHtml === 'function') ? WaveDeckBridge.chipHtml(d.symbol) : '';
-          setWdSync('ok', 'WD ' + (d.symbol || '') + (chip ? ' ' + chip : ''));
+          var lab = (window.WaveDeckBridge && typeof WaveDeckBridge.chipLabel === 'function')
+            ? WaveDeckBridge.chipLabel(d.symbol) : '';
+          setWdSync('ok', 'WD ' + d.symbol + (lab ? ' · ' + lab : ''));
         } else probeWaveDeck();
       });
       window.addEventListener('wavedeck:stream', function (ev) {
