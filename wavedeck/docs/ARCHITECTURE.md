@@ -175,7 +175,8 @@ stateDiagram-v2
 | 跌停家數異常／VIX 急升 | 風控降載：新單口數減半、移動停利收緊 |
 | 側欄「執行」／橋接 | `WaveDeckBridge.open()` → `http://127.0.0.1:18433/` |
 | Pulse／大盤體質 → WD | `WaveDeckBridge.syncFromMarket({score, advRatio, rotationHealth, spilloverProb})` → `POST /bridge/st`（風格／降載／外溢；節流 60s） |
-| 輪動外溢 | 類股強弱 → `spillover_prob`；&lt;0.30 強制降載；閘門可對新單減半 |
+| 輪動外溢 | 類股強弱 → 初估 `spillover_prob`；Pulse 再以 `POST /chain-momentum`＋相鄰同向精算；&lt;0.30 強制降載；閘門可對新單減半 |
+| 決策上下文 | `handle_signal` 帶入 `st_spillover_prob`／`st_hot_stage`／`st_delever` 供 AI／啟發式 |
 | Pulse AI 摘要 | 本機 `POST /ai/local`（LM Studio）；失敗則規則後援；計入共享成本 |
 | Watch／Book ← WD | `WaveDeckBridge.fetchState` → TXF chip／個股 MACRO 風格 chip／執行狀態條 |
 | WD → ST 反向繁線 | Console 每 ~12s `POST /bridge/wavedeck`（FSM／部位／成本） |

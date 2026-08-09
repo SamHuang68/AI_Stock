@@ -244,11 +244,19 @@
     }).join('');
 
     var c = s.costs || {};
+    var stc = window.__stCostMeter || null;
+    var combined = stc && stc.costs ? stc.costs.combined_usd_est : null;
     $('costKv').innerHTML =
       '<div class="a"><div class="k">本次 USD</div><div class="v">' + c.session_usd + '</div></div>' +
       '<div class="a"><div class="k">今日 USD</div><div class="v">' + c.day_usd + '</div></div>' +
       '<div class="a"><div class="k">本月 USD</div><div class="v">' + c.month_usd + '</div></div>' +
-      '<div class="a"><div class="k">提供者</div><div class="v">' + (c.provider || '—') + '</div></div>';
+      '<div class="a"><div class="k">提供者</div><div class="v">' + (c.provider || '—') + '</div></div>' +
+      (combined != null
+        ? '<div class="a"><div class="k">ST+WD 合計</div><div class="v">' + combined + '</div></div>'
+        : '') +
+      (stc && stc.costs
+        ? '<div class="a"><div class="k">ST 本機次</div><div class="v">' + (stc.costs.st_local_calls || 0) + '</div></div>'
+        : '');
 
     var prov = (c.provider || 'heuristic').toLowerCase();
     if (prov !== 'heuristic' && prov !== 'ollama' && prov !== 'openai') prov = 'heuristic';
@@ -282,6 +290,27 @@
     reportToSt(j.state);
   }
 
+  async function refreshStCost() {
+    var meter = await jget(ST + '/api/cost-meter');
+    if (meter && meter.ok) {
+      window.__stCostMeter = meter;
+      if (state) {
+        var c = state.costs || {};
+        var combined = meter.costs && meter.costs.combined_usd_est;
+        if ($('costKv') && combined != null) {
+          // light refresh of cost strip without full re-render
+          var el = $('costKv');
+          if (el && el.innerHTML.indexOf('ST+WD 合計') < 0) {
+            el.innerHTML +=
+              '<div class="a"><div class="k">ST+WD 合計</div><div class="v">' + combined + '</div></div>' +
+              '<div class="a"><div class="k">ST 本機次</div><div class="v">' +
+              ((meter.costs && meter.costs.st_local_calls) || 0) + '</div></div>';
+          }
+        }
+      }
+    }
+  }
+
   async function refreshSt() {
     var health = await jget(ST + '/health');
     if (!health) {
@@ -292,6 +321,7 @@
       return;
     }
     if ($('stSyncTxt')) $('stSyncTxt').textContent = 'ST OK';
+    refreshStCost().catch(function () {});
 
     var pack = await Promise.all([
       jget(ST + '/twindex'),

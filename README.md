@@ -19,8 +19,8 @@ Bloomberg 風格台／美股研究終端機 — **本機跑、零雲端、純 Py
 | | Stock Terminal (`:18432`) | WaveDeck (`:18433`) |
 |--|--|--|
 | 角色 | 宏觀觀測指揮塔 | 微觀執行艦橋 |
-| 連動 | Pulse／大盤體質／輪動外溢 → `WaveDeckBridge.syncFromMarket` | `POST /bridge/st` 收風格／降載／外溢 |
-| 回寫 | Watch chip（TXF／MACRO）、投組狀態條、`GET /bridge/wavedeck` 成本 | Console → `POST /bridge/wavedeck`（FSM／部位／成本） |
+| 連動 | Pulse／大盤體質／供應鏈外溢 → `WaveDeckBridge.syncFromMarket` | `POST /bridge/st` 收風格／降載／外溢／最強鏈段 |
+| 回寫 | Watch MACRO（含鏈段）、Book 執行條、`GET /bridge/wavedeck` 成本 | Console → `POST /bridge/wavedeck`；成本列顯示 ST+WD 合計 |
 
 - 專案目錄：[`wavedeck/`](wavedeck/)
 - 啟動：`.\START_WAVEDECK.cmd` 或 `cd wavedeck && python3 run.py`

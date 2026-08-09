@@ -19,6 +19,11 @@ from server.decision import HeuristicProvider  # noqa: E402
 from server.engine import apply_st_bridge  # noqa: E402
 from server.providers import infer_with_fallback  # noqa: E402
 from server.risk import evaluate_gate  # noqa: E402
+from server.spillover import (  # noqa: E402
+    blend_spillover,
+    spillover_from_chain_stages,
+    spillover_from_rotation,
+)
 
 
 class WaveDeckSmoke(unittest.TestCase):
@@ -165,6 +170,32 @@ class WaveDeckSmoke(unittest.TestCase):
         self.assertTrue(g["allow"])
         self.assertEqual(g["lots_effective"], 2)
         self.assertTrue(any("外溢" in r for r in g["reasons"]))
+
+    def test_chain_spillover_contiguous_high(self):
+        stages = [
+            {"stage": "A", "n": 3, "mom5": 2.0, "mom20": 1.0},
+            {"stage": "B", "n": 3, "mom5": 1.5, "mom20": 0.5},
+            {"stage": "C", "n": 3, "mom5": 1.0, "mom20": 0.2},
+        ]
+        out = spillover_from_chain_stages(stages)
+        self.assertGreaterEqual(out["prob"], 0.70)
+        self.assertEqual(out["contig"], 1.0)
+        self.assertEqual(out["hot_stage"], "A")
+
+    def test_chain_spillover_isolated_low(self):
+        stages = [
+            {"stage": "A", "n": 3, "mom5": 3.0, "mom20": 2.0},
+            {"stage": "B", "n": 3, "mom5": -1.0, "mom20": -0.5},
+            {"stage": "C", "n": 3, "mom5": -0.5, "mom20": 0.0},
+        ]
+        out = spillover_from_chain_stages(stages)
+        self.assertLessEqual(out["prob"], 0.40)
+        self.assertEqual(out["contig"], 0.0)
+
+    def test_blend_and_sector_spillover(self):
+        self.assertGreater(spillover_from_rotation("broad", 5, 1), 0.6)
+        self.assertLess(spillover_from_rotation("narrow", 1, 5), 0.45)
+        self.assertAlmostEqual(blend_spillover(0.5, 0.8), 0.68)
 
 
 if __name__ == "__main__":

@@ -111,6 +111,73 @@
     return Math.max(0.05, Math.min(0.95, Math.round(spill * 100) / 100));
   }
 
+  /**
+   * AI 供應鏈節點動能 → 外溢機率（沿鏈相鄰同向＝動能可擴散）。
+   * @param {Array<{stage?:string,n?:number,mom5?:number,mom20?:number,accel?:number,leaders?:Array}>} stages
+   * @returns {{prob:number, hotStage:?string, leaders:string[], breadth:number, contig:number}}
+   */
+  function spilloverFromChainStages(stages) {
+    stages = Array.isArray(stages) ? stages : [];
+    var withData = stages.filter(function (s) {
+      return s && Number(s.n) > 0 && s.mom5 != null && isFinite(Number(s.mom5));
+    });
+    if (!withData.length) {
+      return { prob: 0.45, hotStage: null, leaders: [], breadth: 0, contig: 0 };
+    }
+    var up = withData.filter(function (s) { return Number(s.mom5) > 0; });
+    var breadth = up.length / withData.length;
+    var contigPairs = 0;
+    var contigPossible = 0;
+    for (var i = 0; i < stages.length - 1; i++) {
+      var a = stages[i];
+      var b = stages[i + 1];
+      if (!a || !b || !a.n || !b.n || a.mom5 == null || b.mom5 == null) continue;
+      if (!isFinite(Number(a.mom5)) || !isFinite(Number(b.mom5))) continue;
+      contigPossible++;
+      if (Number(a.mom5) > 0 && Number(b.mom5) > 0) contigPairs++;
+    }
+    var contig = contigPossible ? contigPairs / contigPossible : 0;
+    var inflow = withData.filter(function (s) {
+      var accel = s.accel;
+      if (accel == null && s.mom5 != null && s.mom20 != null) {
+        accel = Number(s.mom5) - Number(s.mom20);
+      }
+      return accel != null && isFinite(Number(accel)) && Number(accel) > 0.05;
+    }).length;
+    var inflowRatio = inflow / withData.length;
+    var hot = withData.slice().sort(function (x, y) {
+      var mx = Number(x.mom20 != null ? x.mom20 : x.mom5);
+      var my = Number(y.mom20 != null ? y.mom20 : y.mom5);
+      return my - mx;
+    })[0];
+    var leaders = [];
+    if (hot && Array.isArray(hot.leaders)) {
+      leaders = hot.leaders.map(function (l) {
+        return (l && (l.name || l.code)) || '';
+      }).filter(Boolean).slice(0, 4);
+    }
+    // 廣度 40% + 相鄰同向 35% + 加速流入 25%
+    var prob = 0.40 * breadth + 0.35 * contig + 0.25 * Math.min(1, inflowRatio * 2);
+    prob = Math.max(0.05, Math.min(0.95, Math.round(prob * 100) / 100));
+    return {
+      prob: prob,
+      hotStage: hot && hot.stage ? String(hot.stage) : null,
+      leaders: leaders,
+      breadth: Math.round(breadth * 100) / 100,
+      contig: Math.round(contig * 100) / 100
+    };
+  }
+
+  /** Blend sector spillover with supply-chain spillover (chain weighted higher when present). */
+  function blendSpillover(sectorProb, chainResult) {
+    var s = Number(sectorProb);
+    var c = chainResult && isFinite(Number(chainResult.prob)) ? Number(chainResult.prob) : null;
+    if (!isFinite(s) && c == null) return null;
+    if (c == null) return Math.max(0.05, Math.min(0.95, Math.round(s * 100) / 100));
+    if (!isFinite(s)) return c;
+    return Math.max(0.05, Math.min(0.95, Math.round((0.60 * c + 0.40 * s) * 100) / 100));
+  }
+
   function buildNote(ctx, style, delever) {
     var bits = ['ST 宏觀覆寫'];
     if (ctx.score != null && isFinite(Number(ctx.score))) {
@@ -244,7 +311,10 @@
         source: ctx.source || 'st-macro',
         rotation: rot,
         spillover_prob: isFinite(Number(spill)) ? Number(spill) : null,
-        leaders: leaders
+        leaders: leaders,
+        hot_stage: ctx.hotStage || ctx.hot_stage || null,
+        chain_breadth: ctx.chainBreadth != null ? ctx.chainBreadth : null,
+        chain_contig: ctx.chainContig != null ? ctx.chainContig : null
       }
     };
 
@@ -349,6 +419,10 @@
     if (!match) {
       // Non-TXF equities: expose macro overlay (style / spillover) as soft chip
       if (ov.aggressiveness == null && !ov.note && ov.spillover_prob == null) return null;
+      var stage = null;
+      try {
+        if (window.SC_STAGE && want && window.SC_STAGE[want]) stage = window.SC_STAGE[want];
+      } catch (e0) {}
       return {
         symbol: want,
         action: 'MACRO',
@@ -357,6 +431,8 @@
         style: ov.aggressiveness != null ? ov.aggressiveness : st.style,
         spillover: ov.spillover_prob,
         rotation: ov.rotation,
+        hotStage: ov.hot_stage || null,
+        scStage: stage,
         mode: st.mode || 'paper',
         fsm: st.fsm || '—',
         macroOnly: true
@@ -380,13 +456,15 @@
   }
 
   window.WaveDeckBridge = {
-    VERSION: '5.0-WD4',
+    VERSION: '5.0-WD5',
     base: function () { return BASE; },
     open: open,
     pushOverlay: pushOverlay,
     ping: ping,
     styleFromScore: styleFromScore,
     spilloverFromRotation: spilloverFromRotation,
+    spilloverFromChainStages: spilloverFromChainStages,
+    blendSpillover: blendSpillover,
     syncFromMarket: syncFromMarket,
     lastSync: lastSync,
     autoEnabled: autoEnabled,

@@ -35,6 +35,7 @@ def apply_st_bridge(body: dict[str, Any]) -> dict[str, Any]:
             if "外溢低" not in note:
                 note = (note + " · 外溢低").strip(" ·")
 
+    hot_stage = meta.get("hot_stage") or body.get("hot_stage")
     overlay: dict[str, Any] = {
         "aggressiveness": style,
         "delever": delever,
@@ -42,6 +43,9 @@ def apply_st_bridge(body: dict[str, Any]) -> dict[str, Any]:
         "rotation": str(rotation) if rotation else None,
         "spillover_prob": spill_f,
         "leaders": [str(x)[:40] for x in (leaders or [])[:6]],
+        "hot_stage": str(hot_stage)[:80] if hot_stage else None,
+        "chain_breadth": meta.get("chain_breadth"),
+        "chain_contig": meta.get("chain_contig"),
         "source": str(meta.get("source") or body.get("source") or "st-macro")[:64],
         "score": meta.get("score"),
         "advRatio": meta.get("advRatio"),
@@ -162,14 +166,21 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
         or cfg.get("provider")
         or "heuristic"
     )
+    live = RUNTIME.snapshot()
+    ov = live.get("st_overlay") or {}
     ctx = {
-        "style": RUNTIME.snapshot().get("style"),
+        "style": live.get("style"),
         "event": event,
-        "positions": RUNTIME.snapshot().get("positions"),
-        "price": (RUNTIME.snapshot().get("exec") or {}).get("price"),
+        "positions": live.get("positions"),
+        "price": (live.get("exec") or {}).get("price"),
         "source": source,
         "symbol": symbol,
-        "mode": RUNTIME.snapshot().get("mode"),
+        "mode": live.get("mode"),
+        "st_rotation": ov.get("rotation"),
+        "st_spillover_prob": ov.get("spillover_prob"),
+        "st_hot_stage": ov.get("hot_stage"),
+        "st_delever": bool(ov.get("delever")),
+        "st_score": ov.get("score"),
     }
     decision, err = infer_with_fallback(ctx, preferred)
     if err:

@@ -142,10 +142,15 @@
         ? Math.round(Number(h.confidence) * 100) + '%' : '—';
       var bias = (h.biasLong != null ? Math.round(Number(h.biasLong) * 100) + '%多' : '') +
         (h.biasShort != null ? '／' + Math.round(Number(h.biasShort) * 100) + '%空' : '');
+      var spill = (h.spillover != null && isFinite(h.spillover))
+        ? Math.round(Number(h.spillover) * 100) + '%' : '—';
+      var rot = h.rotation || '—';
       return '<div class="bk-wd"><div class="t">WAVEDECK · 執行狀態</div>' +
         '標的 <b>' + esc(h.symbol) + '</b> · 動作 <b>' + esc(h.action) + '</b> · 信心 <b>' + conf + '</b><br>' +
         '部位 <b>' + esc(h.qty != null ? h.qty : '—') + '</b> · 模式 <b>' + esc(h.mode) + '</b> · FSM <b>' + esc(h.fsm) + '</b><br>' +
-        '失效 <b>' + esc(inv) + '</b>' + (bias ? ' · 偏向 ' + esc(bias) : '') +
+        '失效 <b>' + esc(inv) + '</b>' + (bias ? ' · 偏向 ' + esc(bias) : '') + '<br>' +
+        '宏觀風格 <b>' + esc(h.style != null ? h.style : '—') + '</b> · 輪動 <b>' + esc(rot) +
+        '</b> · 外溢 <b>' + esc(spill) + '</b>' +
         '</div>';
     } catch (e) {
       return '';

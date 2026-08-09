@@ -282,12 +282,17 @@
       '體質標籤: ' + (m.label || '未提供'),
       '上漲家數比 advRatio: ' + (m.advRatio != null ? m.advRatio : '未提供'),
       '輪動: ' + (m.rotationHealth || '未提供'),
+      '供應鏈外溢機率: ' + (m.spilloverProb != null ? m.spilloverProb : '未提供'),
+      '供應鏈最強段: ' + (m.hotStage || '未提供'),
+      '鏈上廣度/相鄰同向: ' +
+        (m.chainBreadth != null ? m.chainBreadth : '—') + ' / ' +
+        (m.chainContig != null ? m.chainContig : '—'),
       '規則摘要: ' + (m.summary || '未提供'),
       '盤面語氣: ' + (m.tone || '未提供')
     ].join('\n');
     var prompt =
       '請用 4–6 句繁中，根據「目前提供的資料」做台股大盤即時語意解析：' +
-      '1) 多空傾向 2) 廣度與體質是否背離 3) 風險提示 4) 對進場侵略性（保守/均衡/積極）的建議。' +
+      '1) 多空傾向 2) 廣度與體質是否背離 3) 供應鏈外溢與風險提示 4) 對進場侵略性（保守/均衡/積極）的建議。' +
       '不可編造未提供的數字。結尾加「⚠ 非投資建議」。';
 
     fetch(SRV + '/ai/local', {
@@ -325,6 +330,57 @@
     });
   }
 
+  function scStagesPayload() {
+    try {
+      var ch = (window.SC_CHAINS && window.SC_CHAINS.TW) || null;
+      if (!ch || !ch.length) return null;
+      return ch.map(function (g) {
+        return {
+          stage: g.stage,
+          codes: (g.stocks || []).map(function (pair) { return pair[0]; })
+        };
+      });
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /** Enrich macro with AI supply-chain spillover via POST /chain-momentum. */
+  function enrichChainSpillover() {
+    var stages = scStagesPayload();
+    if (!stages || !window.WaveDeckBridge ||
+        typeof window.WaveDeckBridge.spilloverFromChainStages !== 'function') {
+      return Promise.resolve(null);
+    }
+    return fetch(SRV + '/chain-momentum', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stages: stages }),
+      cache: 'no-store'
+    }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !Array.isArray(d.stages) || !d.stages.length) return null;
+        var chain = window.WaveDeckBridge.spilloverFromChainStages(d.stages);
+        var sectorSpill = _lastMacro && _lastMacro.spilloverProb;
+        var blended = (typeof window.WaveDeckBridge.blendSpillover === 'function')
+          ? window.WaveDeckBridge.blendSpillover(sectorSpill, chain)
+          : chain.prob;
+        if (!_lastMacro) return chain;
+        _lastMacro.spilloverProb = blended;
+        _lastMacro.hotStage = chain.hotStage;
+        _lastMacro.chainBreadth = chain.breadth;
+        _lastMacro.chainContig = chain.contig;
+        if (chain.leaders && chain.leaders.length) {
+          _lastMacro.leaders = chain.leaders;
+        }
+        _lastMacro.chainStages = d.stages;
+        setWdLine('WaveDeck 覆寫：供應鏈外溢 <b>' + Math.round(blended * 100) + '%</b>' +
+          (chain.hotStage ? (' · 最強段 ' + chain.hotStage) : '') + ' · 推送中…');
+        return pushWd(false).then(function () { return chain; });
+      })
+      .catch(function () { return null; });
+  }
+
   function pushWd(force) {
     if (!window.WaveDeckBridge || typeof window.WaveDeckBridge.syncFromMarket !== 'function') {
       setWdLine('WaveDeck 覆寫：<b>橋接未載入</b>');
@@ -339,6 +395,9 @@
       summary = (summary ? summary + ' · ' : '') +
         '外溢 ' + Math.round(Number(m.spilloverProb) * 100) + '%';
     }
+    if (m.hotStage) {
+      summary = (summary ? summary + ' · ' : '') + '最強段 ' + m.hotStage;
+    }
     return window.WaveDeckBridge.syncFromMarket({
       score: m.score,
       advRatio: m.advRatio,
@@ -347,6 +406,9 @@
       rotationHealth: m.rotationHealth,
       spilloverProb: m.spilloverProb,
       leaders: m.leaders || [],
+      hotStage: m.hotStage || null,
+      chainBreadth: m.chainBreadth,
+      chainContig: m.chainContig,
       sectors: m.sectors || null,
       source: 'pulse_v5',
       force: !!force,
@@ -434,6 +496,8 @@
     }
     maybeAnnounceFlip(_lastMacro);
     pushWd(false);
+    // 非阻塞：供應鏈節點動能精算外溢後再覆寫一次（節流內可能 skip）
+    enrichChainSpillover();
 
     var up = st.up, dn = st.down, flat = st.unchanged || 0;
     var sum = (up || 0) + (dn || 0) + flat;
