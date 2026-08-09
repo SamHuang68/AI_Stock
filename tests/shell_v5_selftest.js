@@ -104,6 +104,12 @@ ok(/turnoverVsMa5Pct/.test(pl) && /volumeScore/.test(pl) && /成交金額 · 量
 ok(/t00Trend/.test(pl) && /o00Trend/.test(pl) && /txfTrend/.test(pl) &&
   /trendQuantBits/.test(pl) && /renderTrendCell/.test(pl),
   'pulse strip shows TAIEX/OTC/TXF trend quant like turnover');
+ok(/function renderTrendTabs/.test(pl) && /IDX_TREND_TABS/.test(pl) &&
+  /TURN_TREND_TABS/.test(pl) && /BREADTH_TREND_TABS/.test(pl) &&
+  /連漲趨升/.test(pl) && /溫和上行/.test(pl) && /區間震盪/.test(pl) &&
+  /明顯縮量/.test(pl) && /廣度糾結/.test(pl) &&
+  /pl-ttabs span\.on\.buy/.test(pl) && /opacity:\.38/.test(pl),
+  'pulse strip shows all trend-type tabs with active highlight / others gray');
 ok(/加權盤勢/.test(pl) && /櫃買／台指期見頂列/.test(pl) && !/pl-trend-pair/.test(pl),
   'pulse OHLC panel integrated — no duplicate index chips');
 ok(/pl-ohlc4/.test(pl) && /pl-ohlc-trend/.test(pl) && /function buildOhlcComment/.test(pl) &&

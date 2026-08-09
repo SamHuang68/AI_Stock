@@ -130,8 +130,20 @@
         '#pl-root .pl-strip .viz-chip{display:none!important}' +
       '#pl-root .pl-strip .pl-idx-spark{height:12px;margin-top:1px;opacity:.85}' +
       '#pl-root .pl-strip .pl-idx-spark .vz-spark{width:100%;height:12px;display:block}' +
-      '#pl-root .pl-strip .vz-chip{margin-top:1px;font-size:8px;padding:0 4px;line-height:1.3}' +
+      '#pl-root .pl-strip .vz-chip{display:none!important}' + /* 單顆 chip 改為全型態 tab 列 */
       '#pl-root .pl-strip .vz-meter{margin-top:1px;height:3px}' +
+      /* 市場趨勢型態 tabs：全列可見，當前 highlight、其餘反灰 */
+      '#pl-root .pl-ttabs{display:flex;flex-wrap:wrap;gap:2px;margin-top:2px;min-width:0}' +
+      '#pl-root .pl-ttabs span{font-size:6px;line-height:1.25;padding:1px 3px;border-radius:3px;' +
+        'border:1px solid rgba(71,85,105,.55);color:#64748b;background:rgba(15,23,42,.35);' +
+        'font-weight:600;white-space:nowrap;opacity:.38;letter-spacing:-0.15px}' +
+      '#pl-root .pl-ttabs span.on{opacity:1;font-weight:800}' +
+      '#pl-root .pl-ttabs span.on.buy{color:var(--red);border-color:rgba(239,68,68,.55);' +
+        'background:rgba(239,68,68,.16)}' +
+      '#pl-root .pl-ttabs span.on.sell{color:var(--green);border-color:rgba(34,197,94,.5);' +
+        'background:rgba(34,197,94,.14)}' +
+      '#pl-root .pl-ttabs span.on.mid{color:#cbd5e1;border-color:rgba(148,163,184,.5);' +
+        'background:rgba(148,163,184,.14)}' +
       /* 上下兩區 · 一行五框 · gutter 6px（字級放大後勿再用 8px 吃高度） */
       '#pl-root .pl-dash{flex:1;min-height:0;display:grid;gap:6px;' +
         'grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
@@ -896,6 +908,45 @@
     return '廣度糾結';
   }
 
+  /* 與 server/trend_quant.py、turnover_quant.py、breadthToneLabel 對齊的完整型態表 */
+  var IDX_TREND_TABS = [
+    { id: '連漲趨升', kind: 'buy' },
+    { id: '溫和上行', kind: 'buy' },
+    { id: '單日急漲', kind: 'buy' },
+    { id: '區間震盪', kind: 'mid' },
+    { id: '單日急跌', kind: 'sell' },
+    { id: '溫和下行', kind: 'sell' },
+    { id: '連跌趨降', kind: 'sell' }
+  ];
+  var TURN_TREND_TABS = [
+    { id: '放量趨升', kind: 'buy' },
+    { id: '溫和放量', kind: 'buy' },
+    { id: '單日放量', kind: 'buy' },
+    { id: '量能持穩', kind: 'mid' },
+    { id: '單日縮量', kind: 'sell' },
+    { id: '溫和縮量', kind: 'sell' },
+    { id: '明顯縮量', kind: 'sell' }
+  ];
+  var BREADTH_TREND_TABS = [
+    { id: '極度偏多', kind: 'buy' },
+    { id: '偏多擴張', kind: 'buy' },
+    { id: '廣度糾結', kind: 'mid' },
+    { id: '偏空收縮', kind: 'sell' },
+    { id: '極度偏空', kind: 'sell' }
+  ];
+
+  /** 全型態 tab：當前 highlight（buy/sell/mid），其餘反灰 */
+  function renderTrendTabs(active, catalog) {
+    var cur = active && active !== '—' ? String(active) : '';
+    var html = '<div class="pl-ttabs" title="市場趨勢判斷 · 當前：' + esc(cur || '尚無') + '">';
+    (catalog || []).forEach(function (t) {
+      var on = cur && t.id === cur;
+      html += '<span class="' + (on ? ('on ' + (t.kind || 'mid')) : 'off') +
+        '" title="' + esc(t.id) + (on ? '（當前）' : '') + '">' + esc(t.id) + '</span>';
+    });
+    return html + '</div>';
+  }
+
   function factorNames(list, n) {
     return (list || []).slice(0, n || 3).map(function (f) { return f.name; }).filter(Boolean);
   }
@@ -965,26 +1016,16 @@
     return html;
   }
 
-  function trendQuantKind(tr) {
-    tr = tr || {};
-    if (tr.vsMa5Pct != null && tr.vsMa5Pct >= 1) return 'buy';
-    if (tr.vsMa5Pct != null && tr.vsMa5Pct <= -1) return 'sell';
-    if (tr.momScore != null && tr.momScore >= 60) return 'buy';
-    if (tr.momScore != null && tr.momScore <= 40) return 'sell';
-    return 'mid';
-  }
-
   function renderTrendCell(opts) {
     var V = window.Viz;
     var tr = opts.trend || {};
-    var tone = tr.trend || tr.level || '';
-    var kind = trendQuantKind(tr);
-    var chip = (V && tone) ? V.chip(tone, kind) : '';
+    var tone = tr.trend || '';
+    var tabs = renderTrendTabs(tone, opts.tabs || IDX_TREND_TABS);
     var meter = (V && tr.momScore != null && V.scoreMeter) ? V.scoreMeter(tr.momScore) : '';
     var spark = '';
     if (V && V.sparkLine && tr.spark && tr.spark.length >= 2) {
       spark = '<div class="pl-idx-spark">' + V.sparkLine(tr.spark, {
-        h: 16, w: 120, grid: false,
+        h: 16, w: 120, grid: false, marks: false,
         color: (tr.spark[tr.spark.length - 1] >= tr.spark[0]) ? 'var(--red)' : 'var(--green)'
       }) + '</div>';
     }
@@ -993,6 +1034,7 @@
     if (!subHtml && opts.fallbackSub) subHtml = opts.fallbackSub;
     if (!subHtml) subHtml = '—';
     var tip = (opts.tip || '趨勢量化：vs前日／vs5日均／動能分／近20日Z／連續漲跌') +
+      (tone ? (' · 當前 ' + tone) : '') +
       (fullBits ? (' · ' + fullBits) : '');
     var levelHtml = tr.level
       ? ' <span style="font-size:9px;color:#94a3b8;font-weight:700">' + esc(tr.level) + '</span>'
@@ -1002,7 +1044,7 @@
       '<div class="k">' + opts.k + '</div>' +
       '<div class="v">' + opts.vHtml + levelHtml + '</div>' +
       '<div class="s ' + toneCls + '">' + subHtml + '</div>' +
-      chip + meter + spark + '</div>';
+      tabs + meter + spark + '</div>';
   }
 
   function renderStrip(ov, p) {
@@ -1016,15 +1058,9 @@
     var txfTr = s.txfTrend || {};
     var adv = s.advRatio;
     var tone = breadthToneLabel(adv, s.lsRatio);
-    var toneKind = (tone.indexOf('偏多') >= 0 || tone.indexOf('極度偏多') >= 0) ? 'buy'
-      : (tone.indexOf('偏空') >= 0 || tone.indexOf('極度偏空') >= 0) ? 'sell' : 'mid';
     /* 6 格：指數×3 + 量能 + 家數／廣度合併 + 官方漲跌停（中排 donut 負責結構細節） */
-    var turnTone = s.turnoverTrend || s.turnoverLevel || '';
-    var turnKind = (s.turnoverVsMa5Pct != null && s.turnoverVsMa5Pct >= 8) ? 'buy'
-      : (s.turnoverVsMa5Pct != null && s.turnoverVsMa5Pct <= -8) ? 'sell'
-      : (s.volumeScore != null && s.volumeScore >= 60) ? 'buy'
-      : (s.volumeScore != null && s.volumeScore <= 40) ? 'sell' : 'mid';
-    var turnChip = (V && turnTone) ? V.chip(turnTone, turnKind) : '';
+    var turnTone = s.turnoverTrend || '';
+    var turnTabs = renderTrendTabs(turnTone, TURN_TREND_TABS);
     var turnMeter = (V && s.turnoverYi != null) ? V.refMeter(s.turnoverYi, [8000, 12000]) : '';
     var turnBits = [];
     if (s.turnoverChgPct != null) turnBits.push(pct(s.turnoverChgPct) + '日');
@@ -1049,8 +1085,9 @@
         '<span class="pl-subq">' + turnSoft.join(' · ') + '</span>';
     }
     var turnTip = '量能量化：vs前日／vs5日均／量能分(8000億=50)／近20日Z／連續放縮；水位 8000／12000 億' +
+      (turnTone ? (' · 當前 ' + turnTone) : '') +
       (turnBits.length ? (' · ' + turnBits.join(' · ')) : '');
-    var advChip = V ? V.chip(tone, toneKind === 'buy' || toneKind === 'sell' ? toneKind : 'mid') : '';
+    var advTabs = renderTrendTabs(tone, BREADTH_TREND_TABS);
     var txfSess = txf.sessionLabel || (txf.session === 'night' ? '夜盤' : (txf.session === 'day' ? '日盤' : ''));
     var idxTip = '趨勢量化：vs前日／vs5日均／動能分／近20日Z／連續漲跌（與成交金額量能同構）';
     var t00Fb = chgWithPct(t00, 2, 2);
@@ -1104,12 +1141,13 @@
         (s.turnoverLevel ? ' <span style="font-size:9px;color:#94a3b8;font-weight:700">' + esc(s.turnoverLevel) + '</span>' : '') +
         '</div>' +
         '<div class="s ' + tw(s.turnoverVsMa5Pct != null ? s.turnoverVsMa5Pct : s.turnoverChgPct) + '">' +
-          turnSub + '</div>' + turnChip + turnMeter + '</div>' +
-      '<div class="cell" data-go="breadth" title="上市上漲／下跌／平盤家數＋廣度占比／多空比（詳情見中排廣度窗）" style="cursor:pointer">' +
+          turnSub + '</div>' + turnTabs + turnMeter + '</div>' +
+      '<div class="cell" data-go="breadth" title="上市上漲／下跌／平盤家數＋廣度占比／多空比（詳情見中排廣度窗）· 當前 ' +
+        esc(tone) + '" style="cursor:pointer">' +
         '<div class="k">漲跌家數 · 廣度</div><div class="v" style="font-size:12px">' +
         '<span class="up">' + fmt(s.up) + '</span> / <span class="dn">' + fmt(s.down) + '</span> / <span class="flat">' +
         fmt(s.flat) + '</span></div>' +
-        '<div class="s pl-st-mid">' + bdSub.join(' · ') + '</div>' + advChip + '</div>' +
+        '<div class="s pl-st-mid">' + bdSub.join(' · ') + '</div>' + advTabs + '</div>' +
       '<div class="cell" data-go="breadth" title="證交所 MI_INDEX「股票」欄：上漲／下跌括號內＝官方漲停／跌停家數（上市普通股）。與下方「近漲停」清單家數不同（清單為 ≥9.9% 近似、不含櫃買／ETF）。點擊開廣度詳情。" style="cursor:pointer">' +
         '<div class="k">上市漲跌停 · 官方</div>' +
         '<div class="v" style="font-size:12px">' +
