@@ -5471,27 +5471,50 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         if rsi and rsi > 72 and chg < 0: ss += 1.5; short.append('過熱回落')
         return bs, buy, ss, short
 
-    def _handle_focus(self):
-        """GET /focus — 自動焦點掃描:全台股跑多訊號組合,回最強做多/做空焦點。
-           回 {ok, scanned, buy:[{sym,name,close,changePct,rsi14,score,signals}], short:[...]}。"""
+    # 美股焦點掃描流動池（約 180 檔：權值／各產業龍頭；全市場 5k+ 不適合即時 Yahoo 全掃）
+    _US_FOCUS_UNIVERSE = [
+        'AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'GOOG', 'META', 'TSLA', 'AVGO', 'BRK-B',
+        'JPM', 'V', 'MA', 'UNH', 'XOM', 'LLY', 'JNJ', 'WMT', 'PG', 'HD',
+        'ORCL', 'COST', 'ABBV', 'BAC', 'KO', 'MRK', 'CVX', 'PEP', 'CRM', 'AMD',
+        'TMO', 'CSCO', 'ACN', 'LIN', 'MCD', 'ABT', 'WFC', 'IBM', 'GE', 'PM',
+        'CAT', 'TXN', 'NOW', 'INTU', 'QCOM', 'VZ', 'AMAT', 'ISRG', 'DIS', 'SPGI',
+        'BKNG', 'UBER', 'GS', 'AXP', 'MS', 'BLK', 'ADP', 'PGR', 'SYK', 'TJX',
+        'NEE', 'LOW', 'HON', 'UNP', 'PFE', 'RTX', 'CMCSA', 'T', 'SCHW', 'BA',
+        'PLD', 'ETN', 'C', 'PANW', 'BMY', 'DE', 'ADI', 'LRCX', 'MDT', 'SBUX',
+        'GILD', 'CB', 'MMC', 'SO', 'VRTX', 'FI', 'REGN', 'AMT', 'BSX', 'DUK',
+        'EQIX', 'SHW', 'KLAC', 'CI', 'MO', 'CME', 'WM', 'CDNS', 'SNPS', 'MCK',
+        'PH', 'ICE', 'ZTS', 'ITW', 'EOG', 'CL', 'BDX', 'CSX', 'SLB', 'USB',
+        'EQT', 'APD', 'MSI', 'WELL', 'HCA', 'EMR', 'NOC', 'FCX', 'PNC', 'MAR',
+        'CTAS', 'ORLY', 'AJG', 'AON', 'NXPI', 'FDX', 'GM', 'F', 'NKE', 'ROP',
+        'CARR', 'PCAR', 'PSX', 'AFL', 'TRV', 'COF', 'DHI', 'LEN', 'OXY', 'MPC',
+        'VLO', 'DAL', 'UAL', 'LMT', 'GD', 'CRWD', 'SNOW', 'SHOP', 'SQ', 'PYPL',
+        'COIN', 'HOOD', 'RBLX', 'ABNB', 'DKNG', 'ROKU', 'ZM', 'DOCU', 'NET', 'DDOG',
+        'MU', 'INTC', 'SMCI', 'ARM', 'PLTR', 'ANET', 'DELL', 'HPE', 'HPQ', 'NTAP',
+        'XLE', 'XLF', 'XLK', 'XLV', 'XLY', 'XLP', 'XLI', 'XLB', 'XLU', 'XLRE', 'XLC',
+        'SPY', 'QQQ', 'IWM', 'DIA', 'ARKK',
+    ]
+
+    _FOCUS_CACHE = {}
+    _FOCUS_TTL_SEC = 180
+
+    def _us_focus_name_map(self):
         try:
-            _uni = _get_tw_universe()
+            import universe as _uni
+            data = _uni.load() or {}
+            return data.get('us') or {}
         except Exception:
-            _uni = []
-        qs = parse_qs(urlparse(self.path).query)
-        sector = (qs.get('sector', [''])[0] or '').strip()
-        syms = list(set(_uni or self._TW_TOP200))
-        if sector and sector not in ('全部', 'all', ''):
-            try:
-                smap = _get_tw_sectors()
-                want = _TECH_SECTORS if sector == '__TECH__' else {sector}
-                syms = [s for s in syms if smap.get(str(s).replace('.TW', '').replace('.TWO', '')) in want]
-            except Exception:
-                pass
+            return {}
+
+    def _focus_scan_pool(self, yf_by_code, mkt, name_map):
+        """平行抓 Yahoo K 線 → _calc_ind + _focus_score；回 (buy[], short[], scanned)。"""
         buy, short, scanned = [], [], 0
-        futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith('.TW') else s): s for s in syms}
+        futures = {_pool.submit(fetch_one, yf): code for code, yf in yf_by_code.items()}
         for fut in as_completed(futures):
-            sym, data, _ = fut.result()
+            code = futures[fut]
+            try:
+                sym, data, _ = fut.result()
+            except Exception:
+                continue
             if not data:
                 continue
             try:
@@ -5521,11 +5544,19 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 scanned += 1
                 ind = self._calc_ind(closes, highs, lows, vols)
                 bscore, bsig, sscore, ssig = self._focus_score(ind)
-                code = sym.replace('.TW', '').replace('.TWO', '')
-                name = _get_tw_names().get(code) or meta.get('shortName') or code
-                base = {'sym': code, 'name': name, 'close': round(ind['close'], 2),
-                        'changePct': round(ind['changePct'], 2),
-                        'rsi14': round(ind['rsi14'], 1) if ind['rsi14'] else None}
+                clean = str(code).replace('.TW', '').replace('.TWO', '')
+                name = (name_map.get(clean)
+                        or meta.get('shortName')
+                        or meta.get('symbol')
+                        or clean)
+                base = {
+                    'sym': clean,
+                    'name': name,
+                    'mkt': mkt,
+                    'close': round(ind['close'], 2),
+                    'changePct': round(ind['changePct'], 2),
+                    'rsi14': round(ind['rsi14'], 1) if ind['rsi14'] else None,
+                }
                 if bscore >= 3 and bscore > sscore:
                     r = dict(base); r['score'] = round(bscore, 1); r['signals'] = bsig; buy.append(r)
                 elif sscore >= 3 and sscore > bscore:
@@ -5534,7 +5565,68 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 continue
         buy.sort(key=lambda x: (-x['score'], -(x['changePct'] or 0)))
         short.sort(key=lambda x: (-x['score'], (x['changePct'] or 0)))
-        self._ok(json.dumps({'ok': True, 'scanned': scanned, 'buy': buy[:20], 'short': short[:20]}, ensure_ascii=False).encode())
+        return buy, short, scanned
+
+    def _handle_focus(self):
+        """GET /focus?mkt=TW|US[&sector=…][&refresh=1]
+           自動焦點掃描：同套 RSI/SMA 訊號組合，回最強做多／做空。
+           TW=全台股普通股；US=流動權值／產業龍頭池（含 SPDR）。
+           回 {ok, mkt, scanned, universe, buy:[…], short:[…]}。"""
+        qs = parse_qs(urlparse(self.path).query)
+        mkt = (qs.get('mkt', ['TW'])[0] or 'TW').strip().upper()
+        if mkt not in ('TW', 'US'):
+            mkt = 'TW'
+        sector = (qs.get('sector', [''])[0] or '').strip()
+        refresh = (qs.get('refresh', [''])[0] or '').strip() in ('1', 'true', 'yes')
+        cache_key = mkt + '|' + (sector or '')
+        now = time.time()
+        if not refresh:
+            hit = Handler._FOCUS_CACHE.get(cache_key)
+            if hit and now - hit.get('ts', 0) < Handler._FOCUS_TTL_SEC:
+                self._ok(json.dumps(hit['payload'], ensure_ascii=False).encode())
+                return
+
+        if mkt == 'US':
+            codes = list(dict.fromkeys(self._US_FOCUS_UNIVERSE))
+            yf_by_code = {c: c for c in codes}
+            name_map = self._us_focus_name_map()
+            universe_label = 'us_liquid'
+        else:
+            try:
+                _uni = _get_tw_universe()
+            except Exception:
+                _uni = []
+            codes = list(set(_uni or self._TW_TOP200))
+            if sector and sector not in ('全部', 'all', ''):
+                try:
+                    smap = _get_tw_sectors()
+                    want = _TECH_SECTORS if sector == '__TECH__' else {sector}
+                    codes = [s for s in codes
+                             if smap.get(str(s).replace('.TW', '').replace('.TWO', '')) in want]
+                except Exception:
+                    pass
+            yf_by_code = {}
+            for s in codes:
+                c = str(s).replace('.TW', '').replace('.TWO', '')
+                yf_by_code[c] = c + '.TW' if not str(s).endswith(('.TW', '.TWO')) else str(s)
+            try:
+                name_map = _get_tw_names()
+            except Exception:
+                name_map = {}
+            universe_label = 'tw_all'
+
+        buy, short, scanned = self._focus_scan_pool(yf_by_code, mkt, name_map)
+        payload = {
+            'ok': True,
+            'mkt': mkt,
+            'scanned': scanned,
+            'universe': universe_label,
+            'poolSize': len(yf_by_code),
+            'buy': buy[:20],
+            'short': short[:20],
+        }
+        Handler._FOCUS_CACHE[cache_key] = {'ts': now, 'payload': payload}
+        self._ok(json.dumps(payload, ensure_ascii=False).encode())
 
     def _handle_bars(self):
         """v4.0: GET /bars?sym=2330&market=TW → 本機 DB 日線 {candles:[{time,open,high,low,close,volume}]}。

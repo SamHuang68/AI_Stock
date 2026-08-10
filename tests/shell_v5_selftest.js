@@ -360,6 +360,17 @@ ok(/emitRoute\(id, opts\)/.test(shell) && /activate\(opts\)/.test(shell) &&
   /detail: \{ route: id, opts: opts \}/.test(shell),
   'shell emitRoute forwards route opts into panel activate + shell:route');
 
+ok(/focusByMkt/.test(heat) && /\/focus\?mkt=/.test(heat) &&
+  /焦點掃描 · /.test(heat) && /美股流動池/.test(heat) &&
+  /function chgCls/.test(heat),
+  'heat focus loads /focus?mkt=TW|US and labels US liquid pool');
+
+const srvPy = fs.readFileSync(path.join(root, 'server/server.py'), 'utf8');
+ok(/_US_FOCUS_UNIVERSE/.test(srvPy) && /_focus_scan_pool/.test(srvPy) &&
+  /mkt=TW\|US/.test(srvPy) && /universe_label = 'us_liquid'/.test(srvPy) &&
+  /'mkt': mkt/.test(srvPy),
+  'server /focus supports mkt=US liquid universe + mkt field');
+
 if (failed) {
   console.error('\n' + failed + ' failure(s)');
   process.exit(1);

@@ -2,7 +2,7 @@
  * heat_v5.js  —  Stock Terminal 5.0 Stage 5：類股熱力圖
  * ----------------------------------------------------------------------------
  * 資料：GET /sectors?mkt=TW|US（官方類股／SPDR）
- * 輔區：GET /focus 做多／做空焦點（背景載入，可點進圖表）
+ * 輔區：GET /focus?mkt=TW|US 做多／做空焦點（背景載入，可點進圖表）
  * 掛載：#mount-heat；側欄「熱力」
  * 深鏈：ShellV5.go('heat', { mkt, sector, sectorKey }) — 總覽產業輪動列／熱力 →
  * ========================================================================== */
@@ -15,7 +15,7 @@
     mkt: 'TW',
     sort: 'chg',
     last: null,
-    focus: null,
+    focusByMkt: { TW: null, US: null },
     sector: null,
     sectorKey: null
   };
@@ -200,6 +200,12 @@
     if (p == null || p !== p) return '';
     return p > 0 ? 'up' : p < 0 ? 'dn' : '';
   }
+  /** 台股紅漲綠跌；美股綠漲紅跌（.up=紅 .dn=綠） */
+  function chgCls(p, mkt) {
+    if (p == null || p !== p) return '';
+    if (mkt === 'US') return p > 0 ? 'dn' : p < 0 ? 'up' : '';
+    return twCls(p);
+  }
   function pct(p) {
     if (p == null || p !== p) return '—';
     return (p >= 0 ? '+' : '') + p.toFixed(2) + '%';
@@ -279,7 +285,8 @@
           state.sector = null;
           state.sectorKey = null;
           syncMktButtons();
-          refresh();
+          /* 切市場時強制重抓對應焦點（TW/US 池不同） */
+          refresh(true);
         };
       });
       mount.querySelectorAll('[data-sort]').forEach(function (b) {
@@ -306,6 +313,11 @@
   function renderFocus(j) {
     var box = $('ht-focus');
     if (!box) return;
+    var mkt = (j && j.mkt) || state.mkt || 'TW';
+    var zoneTitle = $('ht-focus-title');
+    if (zoneTitle) {
+      zoneTitle.textContent = '焦點掃描 · ' + mkt;
+    }
     if (!j || !j.ok) {
       box.innerHTML = '<div class="ht-note">焦點掃描暫不可用或仍在載入。</div>';
       return;
@@ -316,10 +328,11 @@
         ' · ' + rows.length + '</h4><div class="ht-list">';
       if (!rows.length) h += '<div class="ht-note">無符合</div>';
       rows.slice(0, 20).forEach(function (r) {
-        h += '<div class="ht-row" data-code="' + esc(r.sym) + '">' +
+        var rowMkt = r.mkt || mkt;
+        h += '<div class="ht-row" data-code="' + esc(r.sym) + '" data-mkt="' + esc(rowMkt) + '">' +
           '<span class="code">' + esc(r.sym) + '</span>' +
           '<span class="name">' + esc(r.name || '') + '</span>' +
-          '<span class="' + twCls(r.changePct) + '">' + pct(r.changePct) + '</span>' +
+          '<span class="' + chgCls(r.changePct, rowMkt) + '">' + pct(r.changePct) + '</span>' +
           '<span style="color:var(--gold);font-weight:700;min-width:48px;text-align:right">' +
           (r.score != null ? r.score : '') +
           (V && r.score != null ? V.scoreMeter(r.score) : '') +
@@ -327,13 +340,18 @@
       });
       return h + '</div></div>';
     }
+    var poolNote = mkt === 'US'
+      ? '美股流動池 ' + (j.poolSize || j.scanned || '—') + ' · 掃描 ' + (j.scanned || '—') + ' 檔'
+      : '掃描 ' + (j.scanned || '—') + ' 檔';
     box.innerHTML = '<div class="ht-two">' +
       col('做多焦點', j.buy || []) +
       col('做空焦點', j.short || []) +
       '</div>' +
-      '<div class="ht-note">掃描 ' + (j.scanned || '—') + ' 檔 · 點列載入 K 線</div>';
+      '<div class="ht-note">' + poolNote + ' · 點列載入 K 線</div>';
     box.querySelectorAll('.ht-row').forEach(function (el) {
-      el.onclick = function () { openSym(el.getAttribute('data-code'), 'TW'); };
+      el.onclick = function () {
+        openSym(el.getAttribute('data-code'), el.getAttribute('data-mkt') || mkt);
+      };
     });
   }
 
@@ -441,7 +459,8 @@
         '<div class="ht-main"><h4><span>類股熱力圖</span>' + focusTag + '</h4>' +
           legend + '<div class="ht-grid-wrap">' + grid + '</div>' +
           '<div class="ht-note">/sectors · 台股代表股／美股 SPDR · 點格載入 K 線 · 非投資建議</div></div>' +
-        '<div class="ht-focus-zone"><h4>焦點掃描</h4><div id="ht-focus" class="ht-loading">掃描中…</div></div>' +
+        '<div class="ht-focus-zone"><h4 id="ht-focus-title">焦點掃描 · ' + mkt + '</h4>' +
+          '<div id="ht-focus" class="ht-loading">掃描中…</div></div>' +
       '</div>';
 
     body.querySelectorAll('.ht-cell').forEach(function (el) {
@@ -454,21 +473,26 @@
 
     applySectorHighlight(body);
 
-    if (state.focus) renderFocus(state.focus);
+    var cachedFocus = state.focusByMkt[mkt];
+    if (cachedFocus) renderFocus(cachedFocus);
   }
 
-  function loadFocus() {
-    fetch(SRV + '/focus', { cache: 'no-store' })
+  function loadFocus(force) {
+    var mkt = state.mkt || 'TW';
+    var url = SRV + '/focus?mkt=' + encodeURIComponent(mkt) + (force ? '&refresh=1' : '');
+    fetch(url, { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) {
-        state.focus = j;
-        if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'heat') {
+        if (j && !j.mkt) j.mkt = mkt;
+        state.focusByMkt[mkt] = j;
+        if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'heat' &&
+            state.mkt === mkt) {
           renderFocus(j);
         }
       })
       .catch(function () {
-        state.focus = null;
-        renderFocus(null);
+        state.focusByMkt[mkt] = null;
+        if (state.mkt === mkt) renderFocus(null);
       });
   }
 
@@ -485,8 +509,9 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         renderHeat(d || { sectors: [] });
-        if (forceFocus || !state.focus) loadFocus();
-        else renderFocus(state.focus);
+        var cached = state.focusByMkt[state.mkt];
+        if (forceFocus || !cached) loadFocus(!!forceFocus);
+        else renderFocus(cached);
       })
       .catch(function () {
         var b = ensureMount();
