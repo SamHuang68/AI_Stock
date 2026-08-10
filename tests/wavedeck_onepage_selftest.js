@@ -18,13 +18,22 @@ function ok(cond, msg) {
   else console.log('OK  ', msg);
 }
 
-ok(/^0\.1\.19/.test(ver), 'VERSION is 0.1.19');
+ok(/^0\.1\.20/.test(ver), 'VERSION is 0.1.20');
 ok(fs.existsSync(path.join(root, 'wavedeck/server/exec_md.py')), 'exec_md module exists');
 ok(/btnExecMd/.test(html) && /aiMarketStatus/.test(html) && /執行 MD/.test(html),
   'console has Wave AI–style exec MD button + status/reasoning slots');
 ok(/exec_md/.test(fs.readFileSync(path.join(root, 'wavedeck/server/engine.py'), 'utf8')) &&
   /enrich_and_maybe_write/.test(fs.readFileSync(path.join(root, 'wavedeck/server/exec_md.py'), 'utf8')),
   'engine hooks exec_md translation layer');
+ok(/waveai-center/.test(html) && /narr-block c2/.test(html) && /narr-block c3/.test(html) &&
+  /aiInvalidation/.test(html) && /layer3/.test(html) && /lyAiAction/.test(html) &&
+  /bias-bars/.test(html) && /市場狀態/.test(html) && /判斷理由/.test(html),
+  'center column is Wave AI C1–C5 narrative layout');
+ok(/minmax\(260px, 1fr\) minmax\(420px, 2\.15fr\)/.test(css) ||
+  /minmax\(420px, 2\.15fr\)/.test(css),
+  'global grid is ~1:2:1 with wide center');
+ok(/#111827/.test(css) && /#1f2937/.test(css) && /#374151/.test(css),
+  'theme tokens align Wave AI dark panels');
 ok(/height:\s*100dvh/.test(css) && /overflow:\s*hidden/.test(css) &&
   /\.app\s*\{[^}]*overflow:\s*hidden/.test(css),
   'deck app locked to one viewport (100dvh, overflow hidden)');

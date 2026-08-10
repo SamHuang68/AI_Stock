@@ -14,7 +14,7 @@
         <div class="brand-mark">WD</div>
         <div>
           <h1>WaveDeck <span>× 下單大師</span></h1>
-          <p>AI 判斷 · 目標部位 · ST 宏觀覆寫 · 風控閘門</p>
+          <p>AI 判斷｜目標倉位｜ST 宏觀覆寫｜風控閘門</p>
         </div>
       </div>
       <div class="top-mid">
@@ -90,30 +90,84 @@
         </div>
       </aside>
 
+      <!-- 中柱：Wave AI 1:1 語意敘事（C1–C5） -->
       <section class="col center">
-        <div class="box ai-box">
-          <div class="box-hd">
-            AI 最新判斷
-            <span class="tag" id="aiEvent">—</span>
-            <button type="button" class="btn sm cyan" id="btnExecMd" title="檢視最新執行細節 Markdown">執行 MD</button>
-          </div>
-          <div class="alert-badge" id="fsBadge" hidden>Fail-safe</div>
-          <div class="ai-hero">
-            <div class="ai-action">
-              <div class="lbl" id="aiLabel">—</div>
-              <div class="pct" id="aiConf">—</div>
+        <div class="box ai-box waveai-center">
+          <!-- C1 決策標題與摘要 -->
+          <header class="c1-head">
+            <div class="c1-left">
+              <div class="c1-kicker">
+                <span>AI 最新判斷</span>
+                <button type="button" class="btn sm cyan" id="btnExecMd" title="檢視最新執行細節 Markdown">執行 MD</button>
+              </div>
+              <div class="c1-time">最後回應 <strong id="aiUpdated">—</strong></div>
+              <span class="event-badge" id="aiEvent">—</span>
+              <div class="alert-badge" id="fsBadge" hidden>Fail-safe</div>
+            </div>
+            <div class="c1-right">
+              <div class="ai-action">
+                <div class="lbl" id="aiLabel">—</div>
+                <div class="pct" id="aiConf">—</div>
+              </div>
+            </div>
+          </header>
+          <div class="bias-bars" aria-label="方向機會">
+            <div class="bias-row long">
+              <span class="k">偏多機會</span>
+              <div class="bar"><i id="biasLongBar" style="width:0%"></i></div>
+              <em id="biasLong">—</em>
+            </div>
+            <div class="bias-row short">
+              <span class="k">偏空機會</span>
+              <div class="bar"><i id="biasShortBar" style="width:0%"></i></div>
+              <em id="biasShort">—</em>
             </div>
           </div>
-          <div class="bias">
-            <div class="b long"><span class="k">偏多機會</span><em id="biasLong">—</em></div>
-            <div class="b short"><span class="k">偏空機會</span><em id="biasShort">—</em></div>
-          </div>
-          <div class="summary-block">
-            <p class="summary status" id="aiMarketStatus">—</p>
-            <p class="summary reason" id="aiReasoning">—</p>
-          </div>
-          <div class="tags" id="aiTags"></div>
-          <div class="process" id="aiProcess"></div>
+
+          <!-- C2 市場狀態 -->
+          <section class="narr-block c2">
+            <h3 class="narr-hd">市場狀態</h3>
+            <div class="narr-body" id="aiMarketStatus">等待決策敘事…</div>
+          </section>
+
+          <!-- C3 判斷理由 -->
+          <section class="narr-block c3">
+            <h3 class="narr-hd">判斷理由</h3>
+            <div class="narr-body" id="aiReasoning">—</div>
+          </section>
+
+          <!-- C4 觀察與失效 -->
+          <section class="narr-block c4">
+            <h3 class="narr-hd">下次觀察與失效條件</h3>
+            <div class="watch-row">
+              <span class="wk">下次觀察</span>
+              <div class="tags" id="aiTags"></div>
+            </div>
+            <div class="inv-box">
+              <span class="inv-lab">失效條件</span>
+              <p class="inv-text" id="aiInvalidation">—</p>
+            </div>
+          </section>
+
+          <!-- C5 三層處理 -->
+          <section class="layer3" aria-label="本事件三層處理結果">
+            <div class="ly">
+              <div class="ly-hd">第一層 · AI 原始</div>
+              <div class="ly-v" id="lyAiAction">—</div>
+              <div class="ly-s">進場準備度 <span id="lyReadiness">—</span></div>
+            </div>
+            <div class="ly">
+              <div class="ly-hd">第二層 · Router</div>
+              <div class="ly-v" id="lyRouter">—</div>
+              <div class="ly-s">Execution Gate <span id="lyGate">—</span></div>
+            </div>
+            <div class="ly">
+              <div class="ly-hd">第三層 · 最終執行</div>
+              <div class="ly-v" id="lyFinal">—</div>
+              <div class="ly-s">錯失機會風險 <span id="lyMiss">—</span></div>
+            </div>
+          </section>
+
           <div class="muted-line" id="execMdMeta">執行細節 MD：—</div>
         </div>
       </section>

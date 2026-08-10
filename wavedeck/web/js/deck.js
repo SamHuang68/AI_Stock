@@ -255,50 +255,79 @@
       (no.force_flat_time || '13:40') + ' 強制平倉。' + (no.note ? ' ' + no.note : '') + '</p>';
 
     var ai = s.ai || {};
+    var proc = ai.process || {};
     $('aiLabel').textContent = ai.action_label || ai.action || '—';
     $('aiConf').textContent = fmtPct(ai.confidence);
-    $('aiEvent').textContent = ai.event || '—';
+    if ($('aiEvent')) $('aiEvent').textContent = ai.event || '—';
+    if ($('aiUpdated')) $('aiUpdated').textContent = ai.updated_at || '—';
+
+    var bl = Number(ai.bias_long);
+    var bs = Number(ai.bias_short);
+    if (!isFinite(bl)) bl = 0;
+    if (!isFinite(bs)) bs = 0;
     $('biasLong').textContent = fmtPct(ai.bias_long);
     $('biasShort').textContent = fmtPct(ai.bias_short);
+    if ($('biasLongBar')) $('biasLongBar').style.width = Math.max(0, Math.min(100, bl * 100)) + '%';
+    if ($('biasShortBar')) $('biasShortBar').style.width = Math.max(0, Math.min(100, bs * 100)) + '%';
+
     var cleanSum = scrubFailSafeText(ai.summary);
     var mStat = scrubFailSafeText(ai.market_status || '');
     var mReason = scrubFailSafeText(ai.reasoning || '');
     if ($('aiMarketStatus')) {
-      $('aiMarketStatus').textContent = mStat || cleanSum || '—';
+      $('aiMarketStatus').textContent = mStat || cleanSum || '等待決策敘事…';
     }
     if ($('aiReasoning')) {
-      $('aiReasoning').textContent = mReason || (mStat ? '' : (cleanSum || '—'));
-      $('aiReasoning').hidden = !mReason && !!mStat;
-    }
-    var em = ai.exec_md || {};
-    if ($('execMdMeta')) {
-      $('execMdMeta').textContent = em.file
-        ? ('執行細節 MD：' + em.file + (em.trigger ? ' · ' + em.trigger : ''))
-        : ('執行細節 MD：待重大節點寫入' + (ai.narrative_source ? ' · 敘事 ' + ai.narrative_source : ''));
+      $('aiReasoning').textContent = mReason || (mStat ? '（判斷理由待敘事層補齊）' : (cleanSum || '—'));
     }
 
+    var invText = scrubFailSafeText(ai.invalidation_text || '');
+    if (!invText && ai.invalidation && ai.invalidation.price != null) {
+      invText = (ai.invalidation.side === 'below' ? '價格有效跌破 ' : '價格有效突破 ') +
+        ai.invalidation.price + '，將使當前結構理由失效。';
+    }
+    if ($('aiInvalidation')) $('aiInvalidation').textContent = invText || '—';
+
     var tags = [];
-    if (ai.invalidation_text) {
-      tags.push('<span class="tag warn" title="' + String(ai.invalidation_text).replace(/"/g, '&quot;') + '">失效條件</span>');
-    }
-    if (ai.invalidation) {
-      tags.push('<span class="tag warn">失效：' + (ai.invalidation.side === 'below' ? '跌破' : '突破') + ' ' + ai.invalidation.price + '</span>');
-    }
     (ai.next_watch || []).forEach(function (t) {
       tags.push('<span class="tag">' + t + '</span>');
     });
-    $('aiTags').innerHTML = tags.join('');
+    if (!tags.length && ai.invalidation) {
+      tags.push('<span class="tag warn">INVALIDATION_' +
+        (ai.invalidation.side === 'below' ? 'BELOW' : 'ABOVE') + '_' + ai.invalidation.price + '</span>');
+    }
+    if ($('aiTags')) $('aiTags').innerHTML = tags.join('') || '<span class="tag">—</span>';
 
-    var proc = ai.process || {};
-    $('aiProcess').innerHTML =
-      '<div>AI 原始 <span>' + (ai.action || '—') + '</span></div>' +
-      '<div>Router <span>' + (proc.route || '—') + '</span></div>' +
-      '<div>追價風險 <span>' + (proc.chase_risk || '—') + '</span></div>' +
-      '<div>執行閘門 <span>' + (proc.gate || '—') + '</span></div>' +
-      '<div>閘門原因 <span>' + ((proc.gate_reasons && proc.gate_reasons.length) ? proc.gate_reasons.join('／') : '—') + '</span></div>' +
-      '<div>更新 <span>' + (ai.updated_at || '—') + '</span></div>' +
-      '<div>提供者 <span>' + (ai.provider || (s.costs && s.costs.provider) || '—') + '</span></div>' +
-      '<div>敘事 <span>' + (ai.narrative_source || '—') + '</span></div>';
+    /* C5 三層處理 — 對齊 Wave AI 透明資訊 */
+    var chaseMap = { low: '低', medium: '中', high: '高' };
+    var chase = String(proc.chase_risk || 'medium');
+    var gateName = proc.gate || '—';
+    var gatePass = /allow|pass|ok|通過/i.test(String(gateName));
+    if ($('lyAiAction')) {
+      $('lyAiAction').textContent = (ai.action_label || ai.action || '—') +
+        (ai.action ? '（' + ai.action + '）' : '');
+    }
+    if ($('lyReadiness')) $('lyReadiness').textContent = chaseMap[chase] || chase;
+    if ($('lyRouter')) $('lyRouter').textContent = proc.route || (ai.event || '—');
+    if ($('lyGate')) $('lyGate').textContent = gateName + (gatePass ? ' · PASS' : '');
+    if ($('lyFinal')) {
+      var finalTxt = gatePass
+        ? ((ai.action_label || ai.action || '—') + ' · 依閘門執行')
+        : ((ai.action_label || ai.action || '—') + ' · 閘門擋下');
+      if ((proc.gate_reasons || []).length) {
+        finalTxt += '（' + proc.gate_reasons.slice(0, 2).join('／') + '）';
+      }
+      $('lyFinal').textContent = finalTxt;
+      $('lyFinal').title = finalTxt;
+    }
+    if ($('lyMiss')) $('lyMiss').textContent = chaseMap[chase] || chase;
+
+    var em = ai.exec_md || {};
+    if ($('execMdMeta')) {
+      $('execMdMeta').textContent = em.file
+        ? ('執行細節 MD：' + em.file + (em.trigger ? ' · ' + em.trigger : '') +
+          (ai.narrative_source ? ' · 敘事 ' + ai.narrative_source : ''))
+        : ('執行細節 MD：待重大節點寫入' + (ai.narrative_source ? ' · 敘事 ' + ai.narrative_source : ''));
+    }
 
     var lightNames = {
       webhook: 'Webhook 接收',
