@@ -50,14 +50,17 @@
     }
     s.textContent =
       '#shell-views:has(#view-institutional.on,#view-international.on,#view-signals.on,' +
-        '#view-watchlist.on,#view-risk.on,#view-settings.on){overflow:hidden!important}' +
+        '#view-watchlist.on,#view-risk.on,#view-factors.on,#view-settings.on){overflow:hidden!important}' +
       '#view-institutional.sv-panel.on,#view-international.sv-panel.on,#view-signals.sv-panel.on,' +
-        '#view-watchlist.sv-panel.on,#view-risk.sv-panel.on,#view-settings.sv-panel.on{' +
+        '#view-watchlist.sv-panel.on,#view-risk.sv-panel.on,#view-factors.sv-panel.on,' +
+        '#view-settings.sv-panel.on{' +
         'max-width:none!important;padding:4px 6px 6px;overflow:hidden;display:flex!important;' +
         'flex-direction:column;flex:1 1 0;min-height:0;height:100%}' +
-      '#mount-institutional,#mount-international,#mount-signals,#mount-watchlist,#mount-risk,#mount-settings,' +
+      '#mount-institutional,#mount-international,#mount-signals,#mount-watchlist,#mount-risk,#mount-factors,' +
+        '#mount-settings,' +
         '#mount-institutional.sv-mount,#mount-international.sv-mount,#mount-signals.sv-mount,' +
-        '#mount-watchlist.sv-mount,#mount-risk.sv-mount,#mount-settings.sv-mount{' +
+        '#mount-watchlist.sv-mount,#mount-risk.sv-mount,#mount-factors.sv-mount,' +
+        '#mount-settings.sv-mount{' +
         'flex:1 1 0;min-height:0;height:100%;display:flex;flex-direction:column;max-width:none;width:100%}' +
       '.hub-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);' +
         'width:100%;max-width:none;margin:0;min-width:0;box-sizing:border-box;' +
@@ -871,6 +874,109 @@
     });
   }
 
+
+  // ── Factors（獨立頁；不再於總覽內嵌展開，避免頂列遮蔽／切頁殘留）──
+  function renderFactors(el) {
+    el.innerHTML = head('因子帳本', '脈動正面／風險／未納入因子（與總覽／風險同源 /pulse）',
+      '<button class="hub-btn" data-sync>同步資料</button>' +
+      '<button class="hub-btn" data-go="risk">風險監控</button>' +
+      '<button class="hub-btn" data-go="pulse">← 總覽</button>' +
+      '<button class="hub-btn primary" data-shell-back>← 儀表板</button>') +
+      '<div id="hub-fac-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
+    bindCommon(el);
+    Promise.all([jget('/pulse'), jget('/pulse/history?kind=pulse&n=12')]).then(function (arr) {
+      var p = arr[0] || {};
+      var hist = (arr[1] && arr[1].rows) || [];
+      var V = window.Viz;
+      function facScope(f) {
+        if (!f) return '台股';
+        if (f.mkt === 'US' || /^AI科技外溢/.test(String(f.name || ''))) return '外溢';
+        return '台股';
+      }
+      function facCol(title, cls, list, empty) {
+        var html = '<div class="hub-sec"><h4>' + title +
+          '<span style="color:var(--tlo);font-weight:600;font-size:10px">(' + (list || []).length + ')</span></h4>' +
+          '<div class="hub-fill">';
+        if (!list || !list.length) return html + '<div class="hub-empty">' + empty + '</div></div></div>';
+        html += '<table><tr><th style="text-align:left">因子</th><th>範圍</th><th>計分</th><th style="text-align:left">說明</th></tr>';
+        list.forEach(function (f) {
+          var sc = f.score;
+          var scTxt = cls === 'pend' ? '不計分'
+            : (cls === 'pos' ? ((sc >= 0 ? '+' : '') + Number(sc).toFixed(1)) : Number(sc).toFixed(1));
+          var scope = facScope(f);
+          var scopeStyle = scope === '外溢' ? ' style="color:var(--cyan);font-weight:700"' : '';
+          html += '<tr><td style="text-align:left;font-weight:700">' +
+            (f.id != null ? (f.id + '. ') : '') + (f.name || '') + '</td><td' + scopeStyle + '>' +
+            scope + '</td><td class="' + (cls === 'pos' ? 'up' : (cls === 'risk' ? 'dn' : 'flat')) + '">' +
+            scTxt + '</td><td style="text-align:left;color:var(--tlo)">' + (f.description || '') + '</td></tr>';
+        });
+        return html + '</table></div></div>';
+      }
+      var rows = p.marketRows || [];
+      var pillars = '<div class="hub-sec"><h4>體質支柱</h4><div class="hub-fill">';
+      if (!rows.length) pillars += '<div class="hub-empty">支柱尚未就緒</div></div></div>';
+      else {
+        pillars += '<table><tr><th style="text-align:left">項目</th><th>數值</th><th>評分</th></tr>';
+        rows.forEach(function (r) {
+          pillars += '<tr><td style="text-align:left">' + (r.k || '') + '</td><td>' + (r.v || '—') +
+            '</td><td>' + (r.score != null ? Number(r.score).toFixed(1) : '—') + '</td></tr>';
+        });
+        pillars += '</table></div></div>';
+      }
+      var nPos = (p.positiveFactors || []).length;
+      var nRisk = (p.riskFactors || []).length;
+      var nPend = (p.pendingFactors || []).length;
+      var histPanel = '<div class="hub-sec"><h4>脈動分數歷史</h4>';
+      if (hist.length && V) {
+        var chrono = hist.slice().reverse();
+        var hs = chrono.map(function (r) { return r.health; });
+        var rs = chrono.map(function (r) { return r.risk; });
+        var hSp = hs.filter(function (v) { return v != null && isFinite(v); }).length >= 2
+          ? V.sparkLine(hs, { color: 'var(--gold)', xUnit: '日', yUnit: '分', yDigits: 0 }) : '';
+        var rSp = rs.filter(function (v) { return v != null && isFinite(v); }).length >= 2
+          ? V.sparkLine(rs, { color: 'var(--cyan)', xUnit: '日', yUnit: '分', yDigits: 0 }) : '';
+        if (hSp || rSp) {
+          histPanel += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px">' +
+            (hSp ? '<div><div class="hub-note">健康</div>' + hSp + '</div>' : '') +
+            (rSp ? '<div><div class="hub-note">風險</div>' + rSp + '</div>' : '') + '</div>';
+        }
+      }
+      if (hist.length) {
+        histPanel += '<div class="hub-fill"><table><tr><th>日期</th><th>健康</th><th>風險</th><th>總分</th><th>狀態</th></tr>';
+        hist.forEach(function (r) {
+          histPanel += '<tr><td>' + r.date + '</td><td>' + fmt(r.health, 1) + '</td><td>' +
+            fmt(r.risk, 1) + '</td><td>' + fmt(r.total, 1) + '</td><td>' + (r.statusText || '') + '</td></tr>';
+        });
+        histPanel += '</table></div>';
+      } else {
+        histPanel += '<div class="hub-empty">尚無歷史</div>';
+      }
+      histPanel += '</div>';
+      var body = $('hub-fac-body');
+      if (!body) return;
+      body.innerHTML =
+        '<div class="hub-strip">' +
+          '<div class="cell"><div class="k">綜合脈動</div><div class="v">' +
+            (p.totalScore != null ? Number(p.totalScore).toFixed(1) : '—') + '</div>' +
+            '<div class="s">' + (p.statusText || '') + '</div></div>' +
+          '<div class="cell"><div class="k">正面因子</div><div class="v up">' + nPos + '</div>' +
+            '<div class="s">合計 ' + (p.positiveFactorScore != null ? Number(p.positiveFactorScore).toFixed(1) : '—') + '</div></div>' +
+          '<div class="cell"><div class="k">風險因子</div><div class="v dn">' + nRisk + '</div>' +
+            '<div class="s">合計 ' + (p.riskFactorScore != null ? Number(p.riskFactorScore).toFixed(1) : '—') + '</div></div>' +
+          '<div class="cell"><div class="k">未納入</div><div class="v">' + nPend + '</div>' +
+            '<div class="s">不計分 pending</div></div>' +
+        '</div>' +
+        '<div class="hub-dash hub-cols-2">' + pillars + histPanel + '</div>' +
+        '<div class="hub-dash hub-cols-3" style="margin-top:4px;grid-template-rows:minmax(0,1fr)">' +
+          facCol('正面因素', 'pos', p.positiveFactors, '尚無') +
+          facCol('風險因素', 'risk', p.riskFactors, '尚無') +
+          facCol('尚未納入', 'pend', p.pendingFactors, '無') +
+        '</div>' +
+        '<div class="hub-note">資料同源 GET /pulse；AI 科技外溢標記為「外溢」。總覽不再內嵌展開本帳本。</div>';
+      bindCommon(el);
+    });
+  }
+
   // ── Risk ─────────────────────────────────────────────────
   function renderRisk(el) {
     el.innerHTML = head('風險監控', '台股主帳本 · AI科技外溢（費半／那指，有資料才計分）',
@@ -1148,6 +1254,7 @@
     signals: function () { var el = mount('signals'); if (el) renderSignals(el); },
     watchlist: function () { var el = mount('watchlist'); if (el) renderWatchlist(el); },
     risk: function () { var el = mount('risk'); if (el) renderRisk(el); },
+    factors: function () { var el = mount('factors'); if (el) renderFactors(el); },
     settings: function () { var el = mount('settings'); if (el) renderSettings(el); }
   };
 
@@ -1161,6 +1268,7 @@
   window.SignalsV5 = hubApi(ACTIVATORS.signals);
   window.WatchlistV5 = hubApi(ACTIVATORS.watchlist);
   window.RiskV5 = hubApi(ACTIVATORS.risk);
+  window.FactorsV5 = hubApi(ACTIVATORS.factors);
   window.SettingsV5 = hubApi(ACTIVATORS.settings);
   window.TrendsV5 = {
     activate: function () {

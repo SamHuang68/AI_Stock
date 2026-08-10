@@ -108,7 +108,8 @@
       '#pl-root .pl-st-pos{color:var(--gold)}#pl-root .pl-st-risk{color:var(--cyan)}' +
       '#pl-root .pl-st-mid{color:#94a3b8}' +
       '#pl-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
-      '#pl-body.pl-expanded{overflow:auto}' +
+      /* 舊 pl-expanded 已廢止：因子帳本改獨立頁，禁止再開 overflow:auto 撐破頂列 */
+      '#pl-body.pl-expanded{overflow:hidden}' +
       /* KPI 細條：主數值略突出，但不再放大到擠壓 5 欄下區 */
       '#pl-root .pl-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin:0 0 6px;min-width:0;flex:0 0 auto}' +
       '#pl-root .pl-strip .cell{background:linear-gradient(180deg,rgba(17,27,46,.95),rgba(11,18,32,.98));' +
@@ -782,7 +783,7 @@
             '<button type="button" class="pl-btn" id="pl-refresh">↻ 重新整理</button>' +
             '<button type="button" class="pl-btn wd" id="pl-push-wd" title="將廣度／體質推送到 WaveDeck">→ WD</button>' +
             '<button type="button" class="pl-btn wd" id="pl-ai-sum" title="本機 LLM 盤面摘要（/ai/local）">AI 摘要</button>' +
-            '<button type="button" class="pl-btn" id="pl-toggle-fac">因子帳本</button>' +
+            '<button type="button" class="pl-btn" data-go="factors" title="開啟因子帳本獨立頁">因子帳本</button>' +
             '<button type="button" class="pl-btn" data-go="breadth">廣度</button>' +
             '<button type="button" class="pl-btn" data-go="heat">熱力</button>' +
             '<button type="button" class="pl-btn" data-go="afterhours">盤後</button>' +
@@ -801,8 +802,6 @@
       if (pwd) pwd.onclick = function () { pushWd(true); };
       var pai = $('pl-ai-sum');
       if (pai) pai.onclick = function () { runAiSummary(); };
-      var tf = $('pl-toggle-fac');
-      if (tf) tf.onclick = function () { focusFactors(); };
       mount.querySelectorAll('[data-go]').forEach(function (b) {
         b.onclick = function () {
           goRoute(b.getAttribute('data-go'), {
@@ -812,17 +811,9 @@
         };
       });
     }
-    syncFactorBtn();
     return $('pl-body');
   }
 
-  function syncFactorBtn() {
-    var tf = $('pl-toggle-fac');
-    if (!tf) return;
-    tf.classList.toggle('on', !!showFactors);
-    tf.setAttribute('aria-pressed', showFactors ? 'true' : 'false');
-    tf.title = showFactors ? '捲動至因子帳本（再按一次可收合）' : '顯示因子帳本';
-  }
 
   function scrollToFactors() {
     var el = $('pl-factors');
@@ -837,31 +828,6 @@
     return true;
   }
 
-  /** 因子帳本：優先「顯示並捲動」；已顯示且已在視窗內則收合 */
-  function focusFactors() {
-    var el = $('pl-factors');
-    if (showFactors && el) {
-      var rect = el.getBoundingClientRect();
-      var viewH = window.innerHeight || 800;
-      var inView = rect.top < viewH * 0.85 && rect.bottom > 80;
-      if (inView) {
-        showFactors = false;
-        syncFactorBtn();
-        if (lastPack) render(lastPack);
-        else refresh(false);
-        return;
-      }
-      scrollToFactors();
-      syncFactorBtn();
-      return;
-    }
-    showFactors = true;
-    syncFactorBtn();
-    if (lastPack) render(lastPack);
-    else refresh(false);
-    // render 後下一幀再捲動（DOM 已掛上 #pl-factors）
-    setTimeout(function () { scrollToFactors(); }, 40);
-  }
 
   function factorCol(title, cls, list, empty) {
     var html = '<div class="pl-sec pl-col"><h4>' + title + ' <span style="color:var(--tlo);font-weight:600">(' + (list || []).length + ')</span></h4>';
@@ -1121,7 +1087,13 @@
     if (s.lsRatio != null) bdSub.push('多空 ' + s.lsRatio.toFixed(2));
     if (adv != null) bdSub.push('廣度 ' + (adv * 100).toFixed(1) + '%');
     bdSub.push(tone);
-    var txfTip = idxTip + ' · 台指期 · Basis＝期貨−現貨（正價差／逆價差）';
+    var txfSrc = txf.source || '';
+    var txfName = txf.name || '台指期近月';
+    var txfTip = '即時報價＝TAIFEX MIS 台指期近月' +
+      (txfSess ? ('（' + txfSess + '）') : '') +
+      (txfSrc ? (' · source ' + txfSrc) : '') +
+      '｜趨勢量化＝FinMind 近月連續（代號 __TXF__，日線）覆寫最新點為當前報價｜' +
+      'Basis＝期貨−加權現貨（盤後＝夜盤期貨−加權最新／昨收）｜顯示名：' + txfName;
     return '<div class="pl-strip">' +
       renderTrendCell({
         k: '加權指數 TAIEX', hero: true,
@@ -1134,7 +1106,7 @@
         trend: o00Tr, fallbackSub: o00Fb, tip: idxTip + ' · 櫃買'
       }) +
       renderTrendCell({
-        k: '台指期 TXF' + (txfSess ? ' · ' + txfSess : '') +
+        k: '台指期近月' + (txfSess ? ' · ' + txfSess : '') +
           (basisPts != null && isFinite(basisPts)
             ? (' · Basis ' + (basisPts >= 0 ? '+' : '') + Number(basisPts).toFixed(1))
             : ''),
@@ -1264,10 +1236,10 @@
       sparkBoot = '<div class="pl-note" style="padding:4px 0">載入近 20 日走勢…</div>';
     }
     var metaBoot = t00Tr.spark && t00Tr.spark.length
-      ? ('近 ' + t00Tr.spark.length + ' 日 · Y：點')
+      ? ('加權 · 近 ' + t00Tr.spark.length + ' 日 · Y：點')
       : '載入…';
     return '<div class="pl-sec" data-pri="p0"><h4>加權盤勢' +
-      '<span class="pl-sec-hint">櫃買／台指期見頂列</span>' +
+      '<span class="pl-sec-hint">線型＝加權 ^TWII（非台指期）；櫃買／台指期近月見頂列</span>' +
       '<a data-go="chart" data-sym="^TWII" data-mkt="TW">圖表 →</a></h4>' +
       '<div class="pl-ohlc4" id="pl-ohlc4">' +
         '<div class="c" title="當日開盤（整數點）"><div class="k">開盤</div><div class="v">' + fmt(o.open, 0) + '</div></div>' +
@@ -1276,7 +1248,7 @@
         '<div class="c" title="昨收（整數點）"><div class="k">昨收</div><div class="v">' + fmt(o.prevClose, 0) + '</div></div>' +
       '</div>' +
       '<div class="pl-ohlc-trend" id="pl-ohlc-trend">' +
-        '<div class="lab"><span>近 20 日 · 點</span><span id="pl-ohlc-trend-meta">' + metaBoot + '</span></div>' +
+        '<div class="lab"><span>加權 ^TWII · 近 20 日</span><span id="pl-ohlc-trend-meta">' + metaBoot + '</span></div>' +
         '<div class="chart" id="pl-ohlc-chart">' + sparkBoot + '</div>' +
       '</div>' +
       '<div class="pl-ohlc-cmt" id="pl-ohlc-cmt">' + buildOhlcComment(o, twiiObj, ampPct, rangePos) + '</div></div>';
@@ -2169,35 +2141,6 @@
     return html + '</table></div></div>';
   }
 
-  function renderFactors(p) {
-    if (!showFactors) {
-      return '<div id="pl-factors" class="pl-factors" hidden></div>';
-    }
-    var rows = p.marketRows || [];
-    var nPos = (p.positiveFactors || []).length;
-    var nRisk = (p.riskFactors || []).length;
-    var nPend = (p.pendingFactors || []).length;
-    var pillars = '<div class="pl-sec"><h4>體質支柱</h4>';
-    if (!rows.length) pillars += '<div class="pl-note">支柱尚未就緒</div></div>';
-    else {
-      pillars += '<table class="pillars"><tr><th>項目</th><th>數值</th><th>評分</th></tr>';
-      rows.forEach(function (r) {
-        pillars += '<tr><td>' + (r.k || '') + '</td><td>' + (r.v || '—') + '</td><td>' +
-          (r.score != null ? Number(r.score).toFixed(1) : '—') + '</td></tr>';
-      });
-      pillars += '</table></div>';
-    }
-    return '<div id="pl-factors" class="pl-factors">' +
-      '<div class="pl-sec-title">因子帳本 · 正 ' + nPos + ' / 風險 ' + nRisk + ' / 未納入 ' + nPend + '</div>' +
-      pillars +
-      '<div class="pl-three">' +
-        factorCol('正面因素', 'sc-pos', p.positiveFactors, '尚無') +
-        factorCol('風險因素', 'sc-risk', p.riskFactors, '尚無') +
-        factorCol('尚未納入', 'sc-pend', p.pendingFactors, '無') +
-      '</div>' +
-      '<div class="pl-note">分數來自 /pulse 因子帳本；點單列展開細節，頂列「因子帳本」可再次捲動至此。</div>' +
-    '</div>';
-  }
 
   function bind(body) {
     body.querySelectorAll('[data-go]').forEach(function (a) {
@@ -2263,15 +2206,9 @@
     pushWd(false);
     enrichChainSpillover();
 
-    body.className = showFactors ? 'pl-expanded' : '';
+    /* 因子帳本改獨立頁 #factors，總覽維持一屏鎖定，禁止 pl-expanded 內嵌展開 */
+    body.className = '';
     var extra = '';
-    if (showFactors) {
-      extra =
-        '<div class="pl-extra">' +
-          renderFactors(p) +
-          '<div id="pl-hist" class="pl-loading" style="margin-top:6px">載入脈動歷史…</div>' +
-        '</div>';
-    }
     if (!sectorCache.TW && ov.sectorsRanked && ov.sectorsRanked.length) {
       sectorCache.TW = ov.sectorsRanked.slice();
     }
@@ -2350,54 +2287,11 @@
       if (closes.length) {
         var last = closes[closes.length - 1];
         var lastTxt = Math.round(Number(last)).toLocaleString('en-US');
-        chart.title = '加權近 ' + closes.length + ' 日 · X：日 · Y：點 · 最新收 ' + lastTxt;
-        if (meta) meta.textContent = '近 ' + closes.length + ' 日 · 收 ' + lastTxt;
+        chart.title = '加權 ^TWII 近 ' + closes.length + ' 日 · X：日 · Y：點 · 最新收 ' + lastTxt;
+        if (meta) meta.textContent = '加權 · 近 ' + closes.length + ' 日 · 收 ' + lastTxt;
       } else if (meta) {
         meta.textContent = '無序列';
       }
-    });
-
-    jget('/pulse/history?kind=pulse&n=12').then(function (h) {
-      var V = window.Viz;
-      var box = $('pl-hist');
-      if (!box) return;
-      var rows = (h && h.rows) || [];
-      if (!rows.length) {
-        box.className = 'pl-note';
-        box.textContent = '脈動歷史尚在累積 — 按頂列「同步資料」預抓指數／廣度／法人後，每日 /pulse 會自動 merge 分數。';
-        return;
-      }
-      var chrono = rows.slice().reverse();
-      var healthSeries = chrono.map(function (r) { return r.health; });
-      var riskSeries = chrono.map(function (r) { return r.risk; });
-      var sparks = '';
-      if (V) {
-        var hSpark = healthSeries.filter(function (v) { return v != null && isFinite(v); }).length >= 2
-          ? V.sparkLine(healthSeries, { color: 'var(--gold)', xUnit: '日', yUnit: '分', yDigits: 0 }) : '';
-        var rSpark = riskSeries.filter(function (v) { return v != null && isFinite(v); }).length >= 2
-          ? V.sparkLine(riskSeries, { color: 'var(--cyan)', xUnit: '日', yUnit: '分', yDigits: 0 }) : '';
-        if (hSpark || rSpark) {
-          sparks = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">' +
-            (hSpark ? '<div><div style="font-size:9px;color:var(--tlo)">大盤體質（X：日 · Y：分）</div>' + hSpark + '</div>' : '') +
-            (rSpark ? '<div><div style="font-size:9px;color:var(--tlo)">風險（X：日 · Y：分）</div>' + rSpark + '</div>' : '') +
-            '</div>';
-        }
-      }
-      var html = '<div class="pl-sec"><h4>市場脈搏歷史（本機庫）</h4>' + sparks +
-        '<table style="width:100%;border-collapse:collapse;font-size:11px">' +
-        '<tr style="color:var(--tlo)"><th style="text-align:left;padding:4px">日期</th>' +
-        '<th style="padding:4px">體質</th><th style="padding:4px">風險</th><th style="padding:4px">綜合</th>' +
-        '<th style="padding:4px">可靠度</th><th style="padding:4px">狀態</th></tr>';
-      rows.forEach(function (r) {
-        html += '<tr><td style="padding:4px">' + esc(r.date) + '</td><td style="padding:4px;text-align:right">' +
-          (r.health != null ? Number(r.health).toFixed(1) : '—') + '</td><td style="padding:4px;text-align:right">' +
-          (r.risk != null ? Number(r.risk).toFixed(1) : '—') + '</td><td style="padding:4px;text-align:right">' +
-          (r.total != null ? Number(r.total).toFixed(1) : '—') + '</td><td style="padding:4px;text-align:right">' +
-          (r.completeness != null ? Number(r.completeness).toFixed(0) + '%' : '—') +
-          '</td><td style="padding:4px">' + esc(r.statusText || '') + '</td></tr>';
-      });
-      box.className = '';
-      box.innerHTML = html + '</table></div>';
     });
   }
 
@@ -2495,13 +2389,25 @@
 
   function deactivate() {
     if (timer) { clearInterval(timer); timer = null; }
+    showFactors = false;
+    var body = $('pl-body');
+    if (body) {
+      body.className = '';
+      body.classList.remove('pl-expanded');
+    }
+    var extra = document.querySelector('#pl-root .pl-extra');
+    if (extra && extra.parentNode) extra.parentNode.removeChild(extra);
   }
 
   window.PulseV5 = {
     activate: activate,
     deactivate: deactivate,
     refresh: function () { refresh(true); },
-    focusFactors: focusFactors,
+    /** 相容舊呼叫：改導向獨立因子頁 */
+    focusFactors: function () {
+      if (window.ShellV5 && ShellV5.go) ShellV5.go('factors');
+      else goRoute('factors');
+    },
     last: function () { return lastPack; }
   };
 

@@ -199,13 +199,13 @@ ok(/pl-global \.g \.v\{[^}]*font-size:8px/.test(pl) &&
   'pulse global compact type; role only in title');
 ok(/正面因子/.test(pl) && /風險因子/.test(pl) && /計入風險分/.test(pl) && !/主要動能/.test(pl),
   'pulse drivers labeled 正面／風險因子 (not 主要動能)');
-ok(/大盤體質（X：日/.test(pl) && !/>動能</.test(pl),
-  'pulse history labels health as 體質 not 動能');
+ok(/大盤體質/.test(pl) && /0\.7×大盤體質/.test(pl) && !/>動能</.test(pl),
+  'pulse score labels health as 體質 not 動能');
 ok(/industryLabel/.test(pl) && /bindSectorMoverLink/.test(pl) && /data-sector-key/.test(pl),
   'pulse movers industry tags + sector hover link');
 ok(/globalAbbr/.test(pl) && /'DJI'/.test(pl) && /'SPX'/.test(pl) && /'NDX'/.test(pl) && /'SOX'/.test(pl),
   'pulse global uses short ticker labels');
-ok(/basisPts/.test(pl) && /正價差/.test(pl) && /逆價差/.test(pl) && /Basis＝期貨−現貨/.test(pl),
+ok(/basisPts/.test(pl) && /正價差/.test(pl) && /逆價差/.test(pl) && /Basis＝期貨−加權現貨/.test(pl),
   'pulse strip shows TXF–TAIEX basis');
 ok(/pl-flash-q/.test(pl) && /flashQ/.test(pl) && /搜代號\/關鍵字/.test(pl),
   'pulse flash has keyword search beside TW/US tabs');
@@ -219,8 +219,10 @@ ok(/data-layout=/.test(pl) && /LAYOUT_CONTRACT/.test(pl) &&
   !/4col-priority/.test(pl) && !/max-width:1280/.test(pl) &&
   !/5col-2zone-flex/.test(pl) && !/enforceFiveCol/.test(pl),
   'pulse dash is known-good 5col-2zone + runtime probe (anchor 3cab212)');
-ok(/#pl-body\{[^}]*overflow:hidden/.test(pl) && /pl-expanded\{overflow:auto\}/.test(pl),
-  'pulse one-screen lock; scroll only when factors expanded');
+ok(/#pl-body\{[^}]*overflow:hidden/.test(pl) && /pl-expanded\{overflow:hidden\}/.test(pl) &&
+  /data-go=\"factors\"/.test(pl) && !/pl-toggle-fac/.test(pl) &&
+  /因子帳本改獨立頁/.test(pl),
+  'pulse one-screen lock; factors go to independent page (no expand)');
 ok(/pl-layout-probe/.test(pl) && /實測 5\+5/.test(pl) && /一行五框/.test(pl),
   'pulse surfaces 實測 5+5 probe for stale-JS detection');
 (function () {
@@ -399,6 +401,15 @@ ok(/← 儀表板/.test(heat) && /data-shell-back/.test(heat) &&
   'heat + hub pages wire ← 儀表板 to goDashboard');
 ok(/← 儀表板/.test(nw) && /data-shell-back/.test(nw),
   'news page has ← 儀表板 back control');
+
+ok(/id: 'factors'/.test(shell) && /FactorsV5/.test(shell) && /ringRoute\('factors'/.test(shell) &&
+  /function renderFactors/.test(hub) && /window\.FactorsV5/.test(hub) &&
+  /ACTIVATORS\.factors/.test(hub),
+  'factors ledger is independent shell route + hub page');
+ok(/台指期近月/.test(pl) && /__TXF__/.test(pl) && /TAIFEX MIS/.test(pl) &&
+  /加權 \^TWII · 近 20 日/.test(pl) && /線型＝加權 \^TWII（非台指期）/.test(pl) &&
+  !/台指期 TXF'/.test(pl),
+  'pulse TXF strip labeled 近月+sources; OHLC spark explicitly ^TWII');
 
 ok(/AI科技外溢/.test(hub) && /factorScope/.test(hub) && /aiSpill/.test(hub) &&
   /spill\.ok/.test(hub) && !/美股流動池漲跌/.test(hub) && !/尚無美股漲幅資料/.test(hub),

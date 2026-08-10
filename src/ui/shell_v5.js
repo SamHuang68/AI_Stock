@@ -48,6 +48,7 @@
     { id: 'ai',            label: 'AI',   hint: 'AI 報告／副駕／焦點掃描中樞',               icon: '✧' },
     { id: 'watchlist',     label: '自選', hint: '自選股中心（表格式；完整操作在圖表列）',   icon: '★' },
     { id: 'risk',          label: '風險', hint: '風險事件與脈動風險度',                     icon: '◇' },
+    { id: 'factors',       label: '因子', hint: '脈動因子帳本（正面／風險／未納入）',         icon: '☰' },
     { id: 'news',          label: '快訊', hint: '事件／結算／警報中樞',                     icon: '◉' },
     { id: 'scan',          label: '選股', hint: '三合一選股（技術×基本面×籌碼）',           icon: '▷' },
     { id: 'book',          label: '投組', hint: '投組風險（波動／VaR／曝險）',               icon: '▣' },
@@ -131,6 +132,7 @@
     ai: 'AiV5',
     watchlist: 'WatchlistV5',
     risk: 'RiskV5',
+    factors: 'FactorsV5',
     news: 'NewsV5',
     scan: 'ScanV5',
     book: 'BookV5',
@@ -167,7 +169,7 @@
       '#shell-views.show:has(.sv-panel.on){overflow:hidden;flex:1 1 0;min-height:0}' +
       '#view-breadth.sv-panel.on,#view-heat.sv-panel.on,#view-afterhours.sv-panel.on,' +
       '#view-institutional.sv-panel.on,#view-international.sv-panel.on,#view-signals.sv-panel.on,' +
-      '#view-ai.sv-panel.on,#view-watchlist.sv-panel.on,#view-risk.sv-panel.on,#view-news.sv-panel.on,' +
+      '#view-ai.sv-panel.on,#view-watchlist.sv-panel.on,#view-risk.sv-panel.on,#view-factors.sv-panel.on,#view-news.sv-panel.on,' +
       '#view-scan.sv-panel.on,#view-book.sv-panel.on,#view-settings.sv-panel.on,' +
       '#view-pulse.sv-panel.on{max-width:none!important}' +
       '#topbar.shell-hidden{display:none !important}' +
@@ -506,7 +508,8 @@
       ringFolder('market', '總覽', '◎', '市場儀表板／快訊／風險', [
         ringRoute('pulse', '儀表板', '◎', '一屏高密度總覽'),
         ringRoute('news', '快訊', '◉', '事件／結算／警報'),
-        ringRoute('risk', '風險', '◇', '風險事件與脈動')
+        ringRoute('risk', '風險', '◇', '風險事件與脈動'),
+        ringRoute('factors', '因子帳本', '☰', '正面／風險／未納入')
       ]),
       ringFolder('price', '行情', '◈', '價格、技術、盤後', [
         ringRoute('chart', 'K線', '◈', '圖表工作區'),
