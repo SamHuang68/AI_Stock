@@ -253,6 +253,12 @@ ok(/function ringWheelSlots/.test(shell) && /slots\.push\(-2\)/.test(shell) &&
   /sr-crumb/.test(shell) && /BrowserBack/.test(shell) && /button === 3/.test(shell) &&
   /ringPop: ringPop/.test(shell) && /ringPopTo: ringPopTo/.test(shell),
   'shell ring back: Esc/Backspace/crumb/side-button pop layer; hub=-2 dashboard');
+ok(/@keyframes sr-spin-in/.test(shell) && /@keyframes sr-spin-out/.test(shell) &&
+  /function animateLayerOut/.test(shell) && /function playLayerEnter/.test(shell) &&
+  /spinIn:\s*true/.test(shell) && /reveal:\s*true/.test(shell) &&
+  /transformOrigin/.test(shell) && /RING_SPIN_IN_MS/.test(shell) &&
+  /prefers-reduced-motion/.test(shell),
+  'shell ring layer spin-in / reverse spin-out wheel animation');
 ok(/function goDashboard/.test(shell) && /goDashboard: goDashboard/.test(shell) &&
   /返回儀表板/.test(shell) && /shell-dash-btn/.test(shell) &&
   /dblclick/.test(shell) && /ensureDashChrome/.test(shell) &&

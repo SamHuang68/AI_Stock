@@ -67,6 +67,8 @@
   /* 功能轉盤：最多 3 層；依投資分析邏輯分類；上層保留半透明鎖定 */
   var RING_MAX_DEPTH = 3;
   var RING_R = 112; /* 各層轉盤半徑（下一層以點選項為圓心） */
+  var RING_SPIN_IN_MS = 520;
+  var RING_SPIN_OUT_MS = 420;
   var RING_ROUTES = [
     'market', 'price', 'flow', 'screen',
     'breadth', 'global', 'ai', 'desk'
@@ -78,7 +80,8 @@
     hi: -1,
     wheelAcc: 0,    /* 滾輪累積，過閾值才換選 */
     layers: [],     /* [{ title, items, pickedId, ox, oy }] 最多 3；ox/oy 相對 wheel */
-    items: []       /* = 作用層 items */
+    items: [],      /* = 作用層 items */
+    animating: false
   };
   /* Toolbar 按鈕短標（DOM 未掛時備援） */
   var RING_BTN_META = {
@@ -226,7 +229,37 @@
         'to{opacity:1;transform:translate(-50%,-50%) scale(1)}}' +
       '#st-ring .sr-layers{position:absolute;left:0;top:0;width:0;height:0}' +
       '#st-ring .sr-layer{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;' +
-        'transition:opacity .16s ease}' +
+        'transition:opacity .22s ease,filter .22s ease;will-change:transform,opacity}' +
+      /* 下鑽：下一層以圓心為軸滾輪式轉入 */
+      '#st-ring .sr-layer.spin-in{animation:sr-spin-in .52s cubic-bezier(.18,.9,.22,1) both;' +
+        'transition:none;z-index:3;pointer-events:none}' +
+      '#st-ring .sr-layer.spin-out{animation:sr-spin-out .42s cubic-bezier(.4,0,.55,1) both;' +
+        'transition:none;z-index:4;pointer-events:none!important}' +
+      '#st-ring .sr-layer.spin-in .sr-item,#st-ring .sr-layer.spin-out .sr-item{pointer-events:none!important}' +
+      '#st-ring .sr-layer.reveal{animation:sr-reveal .36s cubic-bezier(.2,.85,.3,1) both}' +
+      '@keyframes sr-spin-in{' +
+        '0%{opacity:0;transform:rotate(-155deg) scale(.22);filter:blur(3px) brightness(.7)}' +
+        '55%{opacity:1;filter:blur(0) brightness(1.05)}' +
+        '100%{opacity:1;transform:rotate(0deg) scale(1);filter:none}}' +
+      '@keyframes sr-spin-out{' +
+        '0%{opacity:1;transform:rotate(0deg) scale(1);filter:none}' +
+        '100%{opacity:0;transform:rotate(150deg) scale(.2);filter:blur(3px) brightness(.65)}}' +
+      '@keyframes sr-reveal{' +
+        '0%{opacity:.28;filter:saturate(.4) brightness(.82)}' +
+        '100%{opacity:1;filter:none}}' +
+      '#st-ring .sr-layer.spin-in .sr-orbit{animation:sr-orbit-glow .52s ease-out both}' +
+      '#st-ring .sr-layer.spin-out .sr-orbit{animation:sr-orbit-fade .42s ease-in both}' +
+      '@keyframes sr-orbit-glow{0%{opacity:0;filter:blur(4px)}100%{opacity:1;filter:none}}' +
+      '@keyframes sr-orbit-fade{0%{opacity:1}100%{opacity:0;filter:blur(4px)}}' +
+      '#st-ring .sr-layer.spin-in .sr-item{animation:sr-item-in .4s cubic-bezier(.2,1.15,.3,1) both;' +
+        'animation-delay:calc(var(--sr-i, 0) * 26ms)}' +
+      '@keyframes sr-item-in{' +
+        '0%{opacity:0;filter:brightness(.6)}' +
+        '100%{opacity:1;filter:none}}' +
+      '@media (prefers-reduced-motion:reduce){' +
+        '#st-ring .sr-layer.spin-in,#st-ring .sr-layer.spin-out,#st-ring .sr-layer.reveal,' +
+        '#st-ring .sr-layer.spin-in .sr-orbit,#st-ring .sr-layer.spin-out .sr-orbit,' +
+        '#st-ring .sr-layer.spin-in .sr-item{animation-duration:.01ms!important;animation-delay:0s!important}}' +
       /* 軌道圓：雙框＋內外陰影＋斜光漸層 */
       '#st-ring .sr-orbit{position:absolute;left:0;top:0;border-radius:50%;pointer-events:none;' +
         'box-sizing:border-box;z-index:0;' +
@@ -693,21 +726,87 @@
       closeRing();
       return;
     }
+    if (ringState.animating) return;
     if (toIdx == null || toIdx < 0) {
       ringPop();
       return;
     }
     toIdx = Math.min(toIdx, ringDepth() - 1);
-    while (ringDepth() - 1 > toIdx) {
-      ringState.layers.pop();
-    }
-    var cur = ringState.layers[ringDepth() - 1];
-    if (cur) cur.pickedId = null;
-    clampWheelForActive();
-    renderRingLayers();
+    if (toIdx >= ringDepth() - 1) return;
+    animateLayerOut(function () {
+      while (ringDepth() - 1 > toIdx) {
+        ringState.layers.pop();
+      }
+      var cur = ringState.layers[ringDepth() - 1];
+      if (cur) cur.pickedId = null;
+      clampWheelForActive();
+      renderRingLayers({ reveal: true });
+    });
   }
 
-  function renderRingLayers() {
+  function prefersReducedMotion() {
+    try {
+      return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** 作用層滾輪轉出；完成後呼叫 done */
+  function animateLayerOut(done) {
+    var host = $('st-ring-layers');
+    var active = host && host.querySelector('.sr-layer.active');
+    if (!active || prefersReducedMotion()) {
+      if (done) done();
+      return;
+    }
+    ringState.animating = true;
+    active.classList.remove('spin-in', 'reveal');
+    active.classList.add('spin-out');
+    var finished = false;
+    function finish() {
+      if (finished) return;
+      finished = true;
+      active.removeEventListener('animationend', onEnd);
+      clearTimeout(tid);
+      ringState.animating = false;
+      if (done) done();
+    }
+    function onEnd(ev) {
+      if (ev.target !== active) return;
+      finish();
+    }
+    active.addEventListener('animationend', onEnd);
+    var tid = setTimeout(finish, RING_SPIN_OUT_MS + 90);
+  }
+
+  function playLayerEnter(layerEl, mode) {
+    if (!layerEl || prefersReducedMotion()) return;
+    layerEl.classList.remove('spin-in', 'spin-out', 'reveal');
+    /* reflow 以重播同名 animation */
+    void layerEl.offsetWidth;
+    layerEl.classList.add(mode === 'reveal' ? 'reveal' : 'spin-in');
+    ringState.animating = true;
+    var finished = false;
+    function finish() {
+      if (finished) return;
+      finished = true;
+      layerEl.removeEventListener('animationend', onEnd);
+      clearTimeout(tid);
+      layerEl.classList.remove('spin-in', 'reveal');
+      ringState.animating = false;
+    }
+    function onEnd(ev) {
+      if (ev.target !== layerEl) return;
+      finish();
+    }
+    layerEl.addEventListener('animationend', onEnd);
+    var ms = mode === 'reveal' ? 360 : RING_SPIN_IN_MS;
+    var tid = setTimeout(finish, ms + 90);
+  }
+
+  function renderRingLayers(opts) {
+    opts = opts || {};
     var host = $('st-ring-layers');
     if (!host) return;
     host.innerHTML = '';
@@ -723,6 +822,8 @@
       var layerEl = document.createElement('div');
       layerEl.className = 'sr-layer ' + (locked ? 'locked' : 'active');
       layerEl.setAttribute('data-layer', String(li));
+      /* 旋轉軸心＝該層圓心（滾輪轉動視覺） */
+      layerEl.style.transformOrigin = ox.toFixed(1) + 'px ' + oy.toFixed(1) + 'px';
       /* 立體軌道圓（以該層圓心繪製） */
       var orbit = document.createElement('div');
       orbit.className = 'sr-orbit';
@@ -752,6 +853,7 @@
         btn.title = (r.hint || r.label) + (r.children && r.children.length ? ' · 由此展開下一層' : '');
         btn.style.setProperty('--sr-x', x.toFixed(1) + 'px');
         btn.style.setProperty('--sr-y', y.toFixed(1) + 'px');
+        btn.style.setProperty('--sr-i', String(idx));
         /* 已展開的父項落在下一層圓心（中心鈕），鎖定層隱藏避免疊在 hub 上 */
         if (locked && layer.pickedId && layer.pickedId === r.id) {
           btn.style.visibility = 'hidden';
@@ -768,6 +870,10 @@
     paintRingCrumbs();
     paintRingActive();
     setRingHighlight(-1);
+    if (opts.spinIn || opts.reveal) {
+      var activeEl = host.querySelector('.sr-layer.active');
+      playLayerEnter(activeEl, opts.reveal ? 'reveal' : 'spin');
+    }
   }
 
   function ensureRingFab() {
@@ -895,6 +1001,7 @@
   function ringPushChildren(item, idx) {
     var kids = item.children || [];
     if (!kids.length) return;
+    if (ringState.animating) return;
     if (ringDepth() >= RING_MAX_DEPTH) {
       if (window.UI && window.UI.toast) window.UI.toast('已達第三層上限', 1400);
       return;
@@ -913,7 +1020,7 @@
       oy: off.oy
     });
     clampWheelForActive();
-    renderRingLayers();
+    renderRingLayers({ spinIn: true });
   }
 
   function ringPop() {
@@ -921,15 +1028,18 @@
       closeRing();
       return;
     }
-    ringState.layers.pop();
-    var cur = ringState.layers[ringDepth() - 1];
-    if (cur) cur.pickedId = null;
-    clampWheelForActive();
-    renderRingLayers();
+    if (ringState.animating) return;
+    animateLayerOut(function () {
+      ringState.layers.pop();
+      var cur = ringState.layers[ringDepth() - 1];
+      if (cur) cur.pickedId = null;
+      clampWheelForActive();
+      renderRingLayers({ reveal: true });
+    });
   }
 
   function activateRingItem(item, idx) {
-    if (!item) return;
+    if (!item || ringState.animating) return;
     if (item.children && item.children.length) {
       ringPushChildren(item, idx);
       return;
@@ -955,6 +1065,10 @@
 
   function onRingClick(e) {
     if (!ringState.open) return;
+    if (ringState.animating) {
+      e.preventDefault();
+      return;
+    }
     if (e.target.closest('#st-ring-bd')) {
       e.preventDefault();
       closeRing();
@@ -989,6 +1103,7 @@
     ringState.open = true;
     ringState.hi = -1;
     ringState.wheelAcc = 0;
+    ringState.animating = false;
     ringState.wx = x;
     ringState.wy = y;
     ringState.cx = x;
@@ -1007,7 +1122,7 @@
     wheel.style.top = y + 'px';
     root.classList.add('on');
     root.setAttribute('aria-hidden', 'false');
-    renderRingLayers();
+    renderRingLayers({ spinIn: true });
   }
 
   function closeRing() {
@@ -1015,6 +1130,7 @@
     ringState.open = false;
     ringState.hi = -1;
     ringState.wheelAcc = 0;
+    ringState.animating = false;
     ringState.wx = 0;
     ringState.wy = 0;
     ringState.cx = 0;
@@ -1643,6 +1759,11 @@
       if (ringState.open) {
         e.preventDefault();
         e.stopPropagation();
+        if (e.key === 'Escape' && ringState.animating) {
+          closeRing();
+          return;
+        }
+        if (ringState.animating) return;
         ringPop();
         return;
       }
