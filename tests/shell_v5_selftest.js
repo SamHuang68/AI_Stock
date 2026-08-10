@@ -52,8 +52,15 @@ ok(/hub-inst-hero/.test(hub), 'institutional hero strip');
 ok(/data-who="trust"/.test(hub) && /data-who="dealer"/.test(hub), 'institutional who tabs');
 ok(/fmtLots/.test(hub) && /單位：張/.test(hub), 'institutional ranks use 張');
 ok(/magBars/.test(hub) && /refMeter/.test(hub), 'institutional magBars + turnover meter');
-ok(/minmax\(0,1fr\) minmax\(0,2fr\)/.test(hub), 'institutional chart ~1/3 width');
+ok(/minmax\(0,1\.15fr\) minmax\(0,1\.35fr\)/.test(hub), 'institutional chart/rank balanced fit');
 ok(/lots-bar/.test(hub) && /class="streak"/.test(hub), 'institutional lots bar separated from streak');
+ok(/#view-institutional \.hub-title\{font-size:20px/.test(hub) &&
+  /#view-institutional \.vz-spark-ax \.vz-ylabs/.test(hub) &&
+  /hub-inst-comp \.vz-mag \.vz-track\{height:14px/.test(hub) &&
+  /h: 220/.test(hub),
+  'institutional large-screen type fit (title/axes/structure bars)');
+ok(/法人金額尚未更新/.test(hub) && /hub-mag3/.test(hub),
+  'institutional structure fallback when Viz absent');
 (function () {
   var wd = fs.readFileSync(path.join(root, 'src/ui/wavedeck_bridge_v5.js'), 'utf8');
   ok(/HEARTBEAT_MS/.test(wd) && /startOverlayHeartbeat/.test(wd),

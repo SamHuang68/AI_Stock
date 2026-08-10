@@ -141,25 +141,55 @@
       '.hub-root .hub-inst-cmt b{color:var(--gold);font-weight:700}' +
       '.hub-root .hub-inst-cmt .up{color:var(--red)}.hub-root .hub-inst-cmt .dn{color:var(--green)}' +
       '.hub-root .hub-dash.hub-cols-wide-left{grid-template-columns:minmax(0,1.7fr) minmax(0,.9fr)}' +
-      /* 左趨勢約 1/3｜右排行約 2/3（避免線圖搶版面） */
-      '.hub-root .hub-dash.hub-cols-inst{grid-template-columns:minmax(0,1fr) minmax(0,2fr)}' +
+      /* 左趨勢 ≈ 右排行：線圖可讀、排行仍夠寬 */
+      '.hub-root .hub-dash.hub-cols-inst{grid-template-columns:minmax(0,1.15fr) minmax(0,1.35fr)}' +
       /* 法人頁英雄列：合計｜結構｜量能 */
-      '.hub-root .hub-inst-hero{display:grid;grid-template-columns:minmax(140px,.9fr) minmax(0,1.6fr) minmax(0,1.1fr);' +
-        'gap:4px;margin:0 0 4px;flex:0 0 auto;min-width:0;min-height:0}' +
+      '.hub-root .hub-inst-hero{display:grid;grid-template-columns:minmax(160px,.95fr) minmax(0,1.7fr) minmax(0,1.15fr);' +
+        'gap:6px;margin:0 0 6px;flex:0 0 auto;min-width:0;min-height:0}' +
       '.hub-root .hub-inst-hero > div{background:linear-gradient(180deg,rgba(17,27,46,.95),rgba(11,18,32,.98));' +
-        'border:1px solid var(--border);border-radius:6px;padding:6px 8px;min-width:0;overflow:hidden;' +
+        'border:1px solid var(--border);border-radius:6px;padding:8px 10px;min-width:0;overflow:hidden;' +
         'display:flex;flex-direction:column;justify-content:center}' +
-      '.hub-root .hub-inst-hero .k{font-size:8px;color:var(--tlo);letter-spacing:.4px;margin-bottom:2px}' +
-      '.hub-root .hub-inst-hero .big{font-size:22px;font-weight:800;line-height:1.1;color:var(--thi);font-variant-numeric:tabular-nums}' +
-      '.hub-root .hub-inst-hero .sub{font-size:9px;margin-top:3px;color:var(--tlo);display:flex;align-items:center;gap:6px;flex-wrap:wrap}' +
-      '.hub-root .hub-inst-hero .hub-inst-comp .vz-mags{gap:5px}' +
-      '.hub-root .hub-inst-hero .hub-inst-comp .vz-mag .vz-track{height:10px}' +
-      '.hub-root .hub-inst-hero .hub-inst-flow .v{font-size:15px;font-weight:800;color:var(--thi);line-height:1.15}' +
-      '.hub-root .hub-inst-hero .hub-inst-flow .s{font-size:8px;color:var(--tlo);margin-top:2px}' +
+      '.hub-root .hub-inst-hero .k{font-size:10px;color:#94a3b8;letter-spacing:.35px;margin-bottom:3px;font-weight:600}' +
+      '.hub-root .hub-inst-hero .big{font-size:26px;font-weight:800;line-height:1.08;color:var(--thi);font-variant-numeric:tabular-nums}' +
+      '.hub-root .hub-inst-hero .sub{font-size:11px;margin-top:4px;color:#94a3b8;display:flex;align-items:center;gap:8px;flex-wrap:wrap}' +
+      '.hub-root .hub-inst-hero .hub-inst-comp .vz-mags{gap:7px;margin-top:4px}' +
+      '.hub-root .hub-inst-hero .hub-inst-comp .vz-mag{gap:8px}' +
+      '.hub-root .hub-inst-hero .hub-inst-comp .vz-mag .vz-lbl{font-size:12px;min-width:36px;color:var(--text);font-weight:600}' +
+      '.hub-root .hub-inst-hero .hub-inst-comp .vz-mag .vz-val{font-size:13px;min-width:72px;font-weight:800}' +
+      '.hub-root .hub-inst-hero .hub-inst-comp .vz-mag .vz-track{height:14px;border-radius:4px}' +
+      '.hub-root .hub-inst-hero .hub-inst-flow .v{font-size:20px;font-weight:800;color:var(--thi);line-height:1.15;' +
+        'font-variant-numeric:tabular-nums}' +
+      '.hub-root .hub-inst-hero .hub-inst-flow .s{font-size:11px;color:#94a3b8;margin-top:3px;font-weight:600}' +
+      '.hub-root .hub-inst-hero .hub-inst-flow .vz-ref .vz-tick-lbl{font-size:10px}' +
       '.hub-root .hub-dash.hub-cols-inst .hub-spark-fill{flex:1;min-height:0}' +
-      '.hub-root .hub-dash.hub-cols-inst .hub-spark-fill .vz-spark-ax{min-height:96px}' +
+      '.hub-root .hub-dash.hub-cols-inst .hub-spark-fill .vz-spark-ax{min-height:160px}' +
       '.hub-root .hub-dash.hub-cols-inst .hub-spark-fill .vz-spark,' +
-      '.hub-root .hub-dash.hub-cols-inst .hub-spark-fill svg{min-height:72px}' +
+      '.hub-root .hub-dash.hub-cols-inst .hub-spark-fill svg{min-height:120px}' +
+      /* 法人頁：座標軸／峰谷刻度加大（大螢幕可讀） */
+      '#view-institutional .vz-spark-ax .vz-yunit,#view-institutional .vz-spark-ax .vz-xunit,' +
+      '#view-institutional .vz-spark-ax .vz-ylabs,#view-institutional .vz-spark-ax .vz-xlabs,' +
+      '#view-institutional .vz-spark-ax .vz-plot .vz-pt{font-size:11px;line-height:1.25}' +
+      '#view-institutional .vz-spark-ax .vz-ylabs{padding-right:6px;min-width:52px}' +
+      '#view-institutional .vz-spark-ax .vz-plot .vz-pt{font-size:12px;font-weight:800}' +
+      '#view-institutional .hub-title{font-size:20px;letter-spacing:.2px}' +
+      '#view-institutional .hub-sub{font-size:12px;color:#94a3b8;line-height:1.35}' +
+      '#view-institutional .hub-sep{font-size:12px}' +
+      '#view-institutional .hub-btn{font-size:11px;padding:5px 10px}' +
+      '#view-institutional .hub-sec{padding:8px 10px;border-radius:7px}' +
+      '#view-institutional .hub-sec h4{font-size:13px;margin:0 0 6px;letter-spacing:.4px}' +
+      '#view-institutional .hub-sec h4 .hub-h4-meta{font-size:11px!important;color:#94a3b8;font-weight:600}' +
+      '#view-institutional .hub-inst-cmt{font-size:13px;line-height:1.55;padding:10px 12px;margin-top:8px}' +
+      '#view-institutional .hub-note{font-size:11px;white-space:normal;line-height:1.4;color:#94a3b8}' +
+      '#view-institutional .hub-seg button{font-size:12px;padding:5px 14px}' +
+      '#view-institutional .hub-inst-rankhd .meta{font-size:11px;color:#94a3b8}' +
+      '#view-institutional .hub-inst-rank table{font-size:12px}' +
+      '#view-institutional .hub-inst-rank th,#view-institutional .hub-inst-rank td{padding:4px 5px}' +
+      '#view-institutional .hub-inst-rank .lots .lots-num{font-size:13px}' +
+      '#view-institutional .hub-inst-rank .lots .lots-bar{height:5px;margin-top:3px}' +
+      '#view-institutional .hub-inst-rank .lots .vz-rowbar{height:5px}' +
+      '#view-institutional .hub-empty{font-size:12px;padding:18px 10px}' +
+      '#view-institutional .badge{font-size:10px;padding:1px 7px}' +
+      '#view-institutional .hub-inst-hero .vz-chip{font-size:11px;padding:1px 8px;line-height:1.5}' +
       '.hub-root .hub-inst-rank{display:flex;flex-direction:column;min-width:0;min-height:0;height:100%;gap:4px}' +
       '.hub-root .hub-seg{display:flex;gap:0;flex:0 0 auto;border:1px solid var(--border);border-radius:5px;overflow:hidden;width:fit-content}' +
       '.hub-root .hub-seg button{padding:3px 10px;border:0;border-right:1px solid var(--border);background:var(--bg);' +
@@ -364,7 +394,7 @@
           if (r.lots != null && isFinite(r.lots)) maxAbs = Math.max(maxAbs, Math.abs(r.lots));
         });
         var h = '<div class="hub-sec"><h4>' + title +
-          '<span style="color:var(--tlo);font-weight:600;font-size:8px">單位：張</span></h4>' +
+          '<span class="hub-h4-meta" style="color:var(--tlo);font-weight:600">單位：張</span></h4>' +
           '<div class="hub-fill"><table><tr><th>#</th><th>代號</th><th>名稱</th><th>張數</th><th>連續</th></tr>';
         if (!list.length) {
           h += '</table><div class="hub-empty">尚無排行（T86 多為盤後更新）</div>';
@@ -408,6 +438,15 @@
             { label: '自營', v: fYi(inst.dealer), fmt: yiFmt }
           ])
         : '';
+      /* Viz 缺席時仍顯示三大結構數字，避免結構卡空白 */
+      if (!bars && (inst.foreign != null || inst.trust != null || inst.dealer != null)) {
+        bars = '<div class="hub-mag3" style="grid-template-rows:repeat(3,auto);gap:8px;padding:4px 0">' +
+          [['外資', inst.foreign], ['投信', inst.trust], ['自營', inst.dealer]].map(function (pair) {
+            var y = fYi(pair[1]);
+            return '<div class="row"><span class="lbl">' + pair[0] + '</span>' +
+              '<span class="val ' + tw(y) + '">' + yiFmt(y) + '</span></div>';
+          }).join('') + '</div>';
+      }
       var flowMeter = (V && latestYi != null) ? V.refMeter(latestYi, [8000, 12000]) : '';
       var totalTone = toneChip(total, V);
 
@@ -432,11 +471,11 @@
         '</div>';
 
       var trendPanel = '<div class="hub-sec"><h4>合計買賣超趨勢' +
-        '<span style="color:var(--tlo);font-weight:600;font-size:8px">X：日 · Y：億</span></h4>' +
+        '<span class="hub-h4-meta">X：日 · Y：億</span></h4>' +
         '<div class="hub-spark-fill">' +
         (V && sparkVals.length >= 2
           ? V.sparkLine(sparkVals, {
-              color: sparkCol, h: 160, w: 320,
+              color: sparkCol, h: 220, w: 420,
               xUnit: '日', yUnit: '億', yDigits: 1, axes: true
             })
           : (sparkVals.length ? spark(sparkVals) : '<div class="hub-empty">尚無本機法人歷史 — 按「同步資料」預抓</div>')) +
