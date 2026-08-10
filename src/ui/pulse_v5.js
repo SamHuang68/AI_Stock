@@ -236,27 +236,29 @@
         'border:1px solid rgba(42,61,92,.75);border-radius:5px;padding:5px 7px;' +
         'display:flex;flex-direction:column;overflow:hidden;min-width:0}' +
       '#pl-root .pl-inst-trend .lab,#pl-root .pl-bd-trend .lab,#pl-root .pl-ohlc-trend .lab{' +
-        'font-size:8px;color:#a8b6c8;flex:0 0 auto;margin-bottom:3px;' +
+        'font-size:9px;color:#a8b6c8;flex:0 0 auto;margin-bottom:3px;' +
         'display:flex;justify-content:space-between;gap:4px;min-width:0;overflow:hidden}' +
       '#pl-root .pl-inst-trend .lab > span:last-child,#pl-root .pl-bd-trend .lab > span:last-child,' +
         '#pl-root .pl-ohlc-trend .lab > span:last-child{' +
         'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#pl-root .pl-inst-trend .chart,#pl-root .pl-bd-trend .chart,#pl-root .pl-ohlc-trend .chart{' +
-        'flex:1 1 0;min-height:0;min-width:0;overflow:hidden;position:relative}' +
+        'flex:1 1 0;min-height:48px;min-width:0;overflow:visible;position:relative}' +
       '#pl-root .pl-inst-trend .chart .vz-spark-ax,#pl-root .pl-bd-trend .chart .vz-spark-ax,' +
         '#pl-root .pl-ohlc-trend .chart .vz-spark-ax{' +
-        'height:100%;min-height:0;max-width:100%;min-width:0;overflow:hidden}' +
+        'height:100%;min-height:0;max-width:100%;min-width:0;overflow:visible}' +
       '#pl-root .pl-inst-trend .chart .vz-yunit,#pl-root .pl-inst-trend .chart .vz-ylabs,' +
         '#pl-root .pl-bd-trend .chart .vz-yunit,#pl-root .pl-bd-trend .chart .vz-ylabs,' +
-        '#pl-root .pl-ohlc-trend .chart .vz-yunit,#pl-root .pl-ohlc-trend .chart .vz-ylabs{font-size:6px}' +
+        '#pl-root .pl-ohlc-trend .chart .vz-yunit,#pl-root .pl-ohlc-trend .chart .vz-ylabs{font-size:7px}' +
       '#pl-root .pl-inst-trend .chart .vz-plot,#pl-root .pl-bd-trend .chart .vz-plot,' +
-        '#pl-root .pl-ohlc-trend .chart .vz-plot{min-width:0;min-height:0;overflow:hidden}' +
+        '#pl-root .pl-ohlc-trend .chart .vz-plot{min-width:0;min-height:0;overflow:visible}' +
+      '#pl-root .pl-inst-trend .chart .vz-pt,#pl-root .pl-bd-trend .chart .vz-pt,' +
+        '#pl-root .pl-ohlc-trend .chart .vz-pt{font-size:8px;padding:1px 3px;z-index:4}' +
       '#pl-root .pl-inst-trend .chart .vz-plot svg,#pl-root .pl-bd-trend .chart .vz-plot svg,' +
         '#pl-root .pl-ohlc-trend .chart .vz-plot svg{' +
         'width:100%;height:100%;min-width:0;min-height:0;' +
         'max-width:100%;max-height:100%;margin:0;display:block;box-sizing:border-box}' +
       '#pl-root .pl-inst-cmt,#pl-root .pl-bd-cmt,#pl-root .pl-ohlc-cmt{' +
-        'font-size:8px;line-height:1.35;color:var(--text);margin-top:2px;flex:0 0 auto;' +
+        'font-size:9px;line-height:1.35;color:var(--text);margin-top:2px;flex:0 0 auto;' +
         'max-height:2.7em;min-height:0;overflow:hidden}' +
       '#pl-root .pl-inst-cmt b,#pl-root .pl-bd-cmt b,#pl-root .pl-ohlc-cmt b{color:var(--gold);font-weight:700}' +
       '#pl-root .pl-inst-cmt .up,#pl-root .pl-bd-cmt .up,#pl-root .pl-ohlc-cmt .up{color:var(--red)}' +
@@ -961,7 +963,7 @@
     if (V && V.sparkLine) {
       return V.sparkLine(closes, {
         color: closes[closes.length - 1] >= closes[0] ? 'var(--red)' : 'var(--green)',
-        h: 36, w: 200, compact: true,
+        h: 48, w: 220, compact: true,
         xUnit: '日', yUnit: '點', yDigits: 0
       });
     }

@@ -72,10 +72,14 @@ ok(/法人金額尚未更新/.test(hub) && /hub-mag3/.test(hub),
   ok(/vz-xlabs/.test(vz), 'sparkLine X tick labels');
   ok(/linearGradient/.test(vz) && /vz-pt/.test(vz) && /wantFill/.test(vz) && /wantMarks/.test(vz),
     'sparkLine area fill + peak/trough marks');
-  ok(/vz-compact \.vz-pt\{display:none\}/.test(vz) && /wantMarks && !compact/.test(vz),
-    'viz compact spark hides peak text labels (no lab occlusion)');
+  ok(/vz-spark-wrap/.test(vz) && /_peakLabelsHtml/.test(vz) && /vz-pt\.hi\.flip/.test(vz),
+    'viz spark peak labels with wrap + edge flip (anti-occlusion)');
+  ok(!/vz-compact \.vz-pt\{display:none\}/.test(vz) && !/wantMarks && !compact/.test(vz),
+    'viz compact spark keeps peak value labels (not dots-only)');
   ok(/vz-compact/.test(vz) && /compact:\s*true/.test(pulseSrc),
     'tip spark uses compact axis (no xunit footer)');
+  ok(/overflow:visible/.test(pulseSrc) && /\.vz-pt\{font-size:8px/.test(pulseSrc),
+    'tip trend charts allow peak label overflow');
 })();
 ok(/d\.buy \|\| d\.long/.test(hub) || /focus\.buy/.test(hub) || /d\.buy \|\|/.test(hub),
   'signals use /focus buy field');

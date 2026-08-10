@@ -49,11 +49,11 @@
         'margin-bottom:3px;min-width:0;flex:0 0 auto}' +
       '#ah-root .ah-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
       '#ah-root .ah-kicker{display:none!important}' +
-      '#ah-root .ah-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
-      '#ah-root .ah-sub{font-size:9px;color:var(--tlo);margin:0}' +
+      '#ah-root .ah-title{font-family:\'Noto Serif TC\',serif;font-size:17px;font-weight:700;color:var(--thi);line-height:1.1}' +
+      '#ah-root .ah-sub{font-size:11px;color:var(--tlo);margin:0}' +
       '#ah-root .ah-actions{display:flex;gap:4px;flex-wrap:nowrap;justify-content:flex-end;flex:0 0 auto}' +
       '#ah-root .ah-btn{padding:3px 7px;border:1px solid var(--border);border-radius:4px;background:var(--bg3);' +
-        'color:var(--text);font-family:\'JetBrains Mono\',monospace;font-size:9px;cursor:pointer;flex:0 0 auto;white-space:nowrap}' +
+        'color:var(--text);font-family:\'JetBrains Mono\',monospace;font-size:10px;cursor:pointer;flex:0 0 auto;white-space:nowrap}' +
       '#ah-root .ah-btn:hover{border-color:var(--bhi);color:var(--thi)}' +
       '#ah-root .ah-btn.primary{background:var(--gold);color:#060A12;border:none;font-weight:700}' +
       '#ah-root .ah-btn.primary:hover{background:#FBBF24}' +
@@ -62,11 +62,11 @@
       '#ah-root .ah-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;margin:0 0 4px;min-width:0;flex:0 0 auto}' +
       '#ah-root .ah-strip .cell{background:linear-gradient(180deg,rgba(17,27,46,.95),rgba(11,18,32,.98));' +
         'border:1px solid var(--border);border-radius:5px;padding:3px 6px;min-width:0;overflow:hidden}' +
-      '#ah-root .ah-strip .k{font-size:8px;color:var(--tlo);letter-spacing:.4px;margin-bottom:0;' +
+      '#ah-root .ah-strip .k{font-size:10px;color:var(--tlo);letter-spacing:.4px;margin-bottom:0;' +
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#ah-root .ah-strip .v{font-size:12px;font-weight:800;color:var(--thi);line-height:1.15;' +
+      '#ah-root .ah-strip .v{font-size:15px;font-weight:800;color:var(--thi);line-height:1.15;' +
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#ah-root .ah-strip .s{font-size:8px;margin-top:0;font-weight:700;line-height:1.2;' +
+      '#ah-root .ah-strip .s{font-size:10px;margin-top:0;font-weight:700;line-height:1.2;' +
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#ah-root .ah-strip .viz-hide,#ah-root .ah-strip .viz-meter,#ah-root .ah-strip .viz-seg,' +
         '#ah-root .ah-strip .viz-chip{display:none!important}' +
@@ -92,21 +92,23 @@
         'min-height:0;margin-bottom:4px}' +
       '#ah-root .ah-inst4 .c{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:6px 5px;' +
         'text-align:center;display:flex;flex-direction:column;justify-content:center}' +
-      '#ah-root .ah-inst4 .c .k{font-size:9px;color:var(--tlo)}' +
+      '#ah-root .ah-inst4 .c .k{font-size:11px;color:var(--tlo)}' +
       '#ah-root .ah-inst4 .c .v{font-size:13px;font-weight:800;margin-top:1px;color:var(--thi)}' +
       '#ah-root .ah-inst-trend{flex:1;min-height:48px;margin:0 0 2px;background:var(--bg);border:1px solid var(--border);' +
         'border-radius:5px;padding:4px 6px;display:flex;flex-direction:column;min-width:0}' +
-      '#ah-root .ah-inst-trend .lab{font-size:8px;color:var(--tlo);flex:0 0 auto;margin-bottom:2px;' +
+      '#ah-root .ah-inst-trend .lab{font-size:10px;color:var(--tlo);flex:0 0 auto;margin-bottom:2px;' +
         'display:flex;justify-content:space-between;gap:6px;align-items:baseline}' +
-      '#ah-root .ah-inst-trend .chart{flex:1;min-height:44px}' +
-      '#ah-root .ah-inst-trend .chart .vz-spark-ax{height:100%;min-height:44px}' +
-      '#ah-root .ah-inst-trend .chart .vz-spark,#ah-root .ah-inst-trend .chart svg{width:100%!important;height:100%!important;min-height:28px}' +
-      '#ah-root .ah-inst-cmt{font-size:9px;line-height:1.45;color:var(--text);margin-top:2px;flex:0 0 auto}' +
+      '#ah-root .ah-inst-trend .chart{flex:1;min-height:56px;overflow:visible;position:relative}' +
+      '#ah-root .ah-inst-trend .chart .vz-spark-ax{height:100%;min-height:56px;overflow:visible}' +
+      '#ah-root .ah-inst-trend .chart .vz-plot{overflow:visible}' +
+      '#ah-root .ah-inst-trend .chart .vz-pt{font-size:9px;z-index:4}' +
+      '#ah-root .ah-inst-trend .chart .vz-spark,#ah-root .ah-inst-trend .chart svg{width:100%!important;height:100%!important;min-height:36px}' +
+      '#ah-root .ah-inst-cmt{font-size:11px;line-height:1.45;color:var(--text);margin-top:2px;flex:0 0 auto}' +
       '#ah-root .ah-inst-cmt b{color:var(--gold);font-weight:700}' +
       '#ah-root .ah-inst-cmt .up{color:var(--red)}#ah-root .ah-inst-cmt .dn{color:var(--green)}' +
-      '#ah-root .ah-inst-mkt{font-size:8px;color:var(--tlo);line-height:1.4;margin-top:3px;flex:0 0 auto;' +
+      '#ah-root .ah-inst-mkt{font-size:10px;color:var(--tlo);line-height:1.4;margin-top:3px;flex:0 0 auto;' +
         'padding-top:3px;border-top:1px solid var(--border)}' +
-      '#ah-root .ah-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:2px;flex:0 0 auto;' +
+      '#ah-root .ah-note{font-size:10px;color:var(--tlo);line-height:1.4;margin-top:2px;flex:0 0 auto;' +
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#ah-root .ah-loading,#ah-root .ah-err{font-size:10px;color:var(--tlo);padding:10px 0}' +
       '#ah-root .ah-err{color:var(--orange)}' +
@@ -374,7 +376,7 @@
     /* 左欄改掛載 overnight_v3 現有夜盤面板（雙 gauge／TXF OHLC／美股連動／TSMC／停損） */
     var txfBlock =
       '<div class="ah-sec ah-ovn">' +
-        '<h4>夜盤連動預警<span style="font-size:8px;color:var(--tlo);font-weight:600">台指期 · 美股連動</span></h4>' +
+        '<h4>夜盤連動預警<span style="font-size:10px;color:var(--tlo);font-weight:600">台指期 · 美股連動</span></h4>' +
         '<div class="ah-fill" id="ah-ovn-host">' +
           '<div class="ah-loading">載入夜盤面板…</div>' +
         '</div>' +
