@@ -400,19 +400,6 @@ ok(/← 儀表板/.test(heat) && /data-shell-back/.test(heat) &&
 ok(/← 儀表板/.test(nw) && /data-shell-back/.test(nw),
   'news page has ← 儀表板 back control');
 
-ok(/台股體質＋美股/.test(hub) && /factorScope/.test(hub) && /usGainers/.test(hub) &&
-  /美股流動池漲跌/.test(hub) && /us\.gspcChangePct/.test(hub),
-  'risk page scopes TW/US factors and shows US movers + index strip');
-ok(/_us_market_pulse_snapshot/.test(srvPy) && /_US_RISK_LIQUID/.test(srvPy) &&
-  /us_market=us_market/.test(srvPy) && /usGainers/.test(srvPy),
-  'server builds US market snapshot into pulse risk + movers.usGainers');
-(function () {
-  var pi = fs.readFileSync(path.join(root, 'server/pulse_intel.py'), 'utf8');
-  ok(/us_market/.test(pi) && /美股指數偏空/.test(pi) && /美股廣度偏空/.test(pi) &&
-    /tw-us-pulse-intel\/v1/.test(pi) && /mkt: str = 'TW'/.test(pi),
-    'pulse_intel scores US index/VIX/breadth with mkt tag');
-})();
-
 if (failed) {
   console.error('\n' + failed + ' failure(s)');
   process.exit(1);

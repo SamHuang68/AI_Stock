@@ -2227,116 +2227,6 @@ def _yf_batch_quotes(syms):
     return out
 
 
-# 美股風險評估流動池（權值＋SPDR；輕量 Yahoo 日漲跌，非全市場掃描）
-_US_RISK_LIQUID = [
-    'SPY', 'QQQ', 'IWM', 'DIA',
-    'AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA', 'AVGO', 'BRK-B',
-    'JPM', 'V', 'XOM', 'LLY', 'JNJ', 'WMT', 'AMD', 'ORCL', 'COST', 'CRM',
-    'BAC', 'NFLX', 'INTC', 'QCOM', 'AMAT', 'MU', 'PLTR', 'HD', 'PG', 'KO',
-    'XLE', 'XLF', 'XLK', 'XLV', 'XLY', 'XLP', 'XLI', 'XLB', 'XLU', 'XLRE', 'XLC',
-]
-
-
-def _us_market_pulse_snapshot():
-    """組美股風險快照：指數／VIX＋流動池當日廣度與漲跌榜（供 pulse_intel 計分）。
-
-    回 {ok, gspcChangePct, ixicChangePct, djiChangePct, soxChangePct,
-        vixLevel, vixChangePct, up, down, flat, advRatio, sample,
-        gainers, losers, universe}。
-    """
-    bucket = int(time.time() // 120)
-    key = f'pulse-us-mkt:v1:{bucket}'
-    hit = _cache_first([key])
-    if isinstance(hit, dict):
-        return hit
-
-    def _f(v):
-        try:
-            x = float(v)
-            if x != x or abs(x) == float('inf'):
-                return None
-            return x
-        except (TypeError, ValueError):
-            return None
-
-    idx_syms = ['^GSPC', '^IXIC', '^DJI', '^SOX', '^VIX']
-    try:
-        idx_rows = _yf_batch_quotes(idx_syms) or []
-    except Exception as e:
-        print('[pulse] us idx', e)
-        idx_rows = []
-    by = {r.get('symbol'): r for r in idx_rows if isinstance(r, dict) and r.get('symbol')}
-
-    try:
-        liquid = _yf_batch_quotes(list(_US_RISK_LIQUID)) or []
-    except Exception as e:
-        print('[pulse] us liquid', e)
-        liquid = []
-
-    scored = []
-    for r in liquid:
-        if not isinstance(r, dict):
-            continue
-        cp = _f(r.get('changePct'))
-        if cp is None:
-            continue
-        scored.append({
-            'symbol': r.get('symbol'),
-            'name': r.get('name') or r.get('symbol'),
-            'price': r.get('price'),
-            'changePct': cp,
-        })
-    ups = [x for x in scored if x['changePct'] > 0]
-    dns = [x for x in scored if x['changePct'] < 0]
-    flats = [x for x in scored if x['changePct'] == 0]
-    n = len(scored)
-    adv = (len(ups) / n) if n else None
-    ranked = sorted(scored, key=lambda x: x['changePct'], reverse=True)
-
-    def _mrow(x):
-        return {
-            'code': x['symbol'],
-            'sym': x['symbol'],
-            'name': x.get('name') or x['symbol'],
-            'price': x.get('price'),
-            'changePct': round(x['changePct'], 2),
-            'mkt': 'US',
-        }
-
-    gainers = [_mrow(x) for x in ranked[:8]]
-    losers = [_mrow(x) for x in ranked[-8:][::-1]] if ranked else []
-
-    def _cp(sym):
-        return _f((by.get(sym) or {}).get('changePct'))
-
-    def _px(sym):
-        return _f((by.get(sym) or {}).get('price'))
-
-    out = {
-        'ok': bool(by or scored),
-        'gspcChangePct': _cp('^GSPC'),
-        'ixicChangePct': _cp('^IXIC'),
-        'djiChangePct': _cp('^DJI'),
-        'soxChangePct': _cp('^SOX'),
-        'vixLevel': _px('^VIX'),
-        'vixChangePct': _cp('^VIX'),
-        'up': len(ups),
-        'down': len(dns),
-        'flat': len(flats),
-        'advRatio': round(adv, 4) if adv is not None else None,
-        'sample': n,
-        'gainers': gainers,
-        'losers': losers,
-        'universe': 'us_liquid_risk',
-    }
-    if out['ok']:
-        try:
-            _cache.set(key, json.dumps(out, ensure_ascii=False).encode(), ttl=120)
-        except Exception:
-            pass
-    return out
-
-
 def _trusted_quote_override(sym):
     """sym 若為 Yahoo 不可信標的 → 回 {price,prevClose,changePct,source} 否則 None。
        MIS 抓取/熔斷失敗時回 None,讓呼叫端走原 Yahoo 流程(不會比現況更糟)。"""
@@ -4620,15 +4510,6 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             'nhnl': nhnl_ok,
         }
 
-        # 美股指數／流動池：納入風險計分（與 side-job global 共用 Yahoo 口徑；快取 120s）
-        us_market = None
-        try:
-            us_market = _us_market_pulse_snapshot()
-        except Exception as e:
-            print('[pulse] us_market', e)
-            us_market = None
-        sources['usmkt'] = bool(isinstance(us_market, dict) and us_market.get('ok'))
-
         try:
             out = pi.build_pulse_intel(
                 health_score=fund.get('score'),
@@ -4644,7 +4525,6 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 tx_oi=tx_oi if isinstance(tx_oi, dict) else None,
                 sbl=sbl if isinstance(sbl, dict) else None,
                 nhnl=nhnl if isinstance(nhnl, dict) else None,
-                us_market=us_market if isinstance(us_market, dict) else None,
             )
         except Exception as e:
             print('[pulse] build', e)
@@ -4907,19 +4787,6 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             total_yi = ((foreign or 0) + (trust or 0) + (dealer or 0)) / 1e8
 
         out['movers'] = movers
-        # 美股漲跌榜掛在 movers 旁欄（保留 TW gainers/losers 不變）
-        if isinstance(us_market, dict) and us_market.get('ok'):
-            try:
-                movers = dict(movers or {})
-                movers['usGainers'] = list(us_market.get('gainers') or [])
-                movers['usLosers'] = list(us_market.get('losers') or [])
-                movers['usAdvRatio'] = us_market.get('advRatio')
-                movers['usSample'] = us_market.get('sample')
-                movers['usUniverse'] = us_market.get('universe') or 'us_liquid_risk'
-                out['movers'] = movers
-            except Exception as e:
-                print('[pulse] us movers attach', e)
-        out['usMarket'] = us_market if isinstance(us_market, dict) else None
         out['global'] = global_q
         out['us10y'] = us10y
         out['economy'] = eco
