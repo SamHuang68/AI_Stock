@@ -261,9 +261,26 @@
     $('biasLong').textContent = fmtPct(ai.bias_long);
     $('biasShort').textContent = fmtPct(ai.bias_short);
     var cleanSum = scrubFailSafeText(ai.summary);
-    $('aiSummary').textContent = cleanSum || '—';
+    var mStat = scrubFailSafeText(ai.market_status || '');
+    var mReason = scrubFailSafeText(ai.reasoning || '');
+    if ($('aiMarketStatus')) {
+      $('aiMarketStatus').textContent = mStat || cleanSum || '—';
+    }
+    if ($('aiReasoning')) {
+      $('aiReasoning').textContent = mReason || (mStat ? '' : (cleanSum || '—'));
+      $('aiReasoning').hidden = !mReason && !!mStat;
+    }
+    var em = ai.exec_md || {};
+    if ($('execMdMeta')) {
+      $('execMdMeta').textContent = em.file
+        ? ('執行細節 MD：' + em.file + (em.trigger ? ' · ' + em.trigger : ''))
+        : ('執行細節 MD：待重大節點寫入' + (ai.narrative_source ? ' · 敘事 ' + ai.narrative_source : ''));
+    }
 
     var tags = [];
+    if (ai.invalidation_text) {
+      tags.push('<span class="tag warn" title="' + String(ai.invalidation_text).replace(/"/g, '&quot;') + '">失效條件</span>');
+    }
     if (ai.invalidation) {
       tags.push('<span class="tag warn">失效：' + (ai.invalidation.side === 'below' ? '跌破' : '突破') + ' ' + ai.invalidation.price + '</span>');
     }
@@ -274,12 +291,14 @@
 
     var proc = ai.process || {};
     $('aiProcess').innerHTML =
-      '<div>路由 <span>' + (proc.route || '—') + '</span></div>' +
+      '<div>AI 原始 <span>' + (ai.action || '—') + '</span></div>' +
+      '<div>Router <span>' + (proc.route || '—') + '</span></div>' +
       '<div>追價風險 <span>' + (proc.chase_risk || '—') + '</span></div>' +
       '<div>執行閘門 <span>' + (proc.gate || '—') + '</span></div>' +
       '<div>閘門原因 <span>' + ((proc.gate_reasons && proc.gate_reasons.length) ? proc.gate_reasons.join('／') : '—') + '</span></div>' +
       '<div>更新 <span>' + (ai.updated_at || '—') + '</span></div>' +
-      '<div>提供者 <span>' + (ai.provider || (s.costs && s.costs.provider) || '—') + '</span></div>';
+      '<div>提供者 <span>' + (ai.provider || (s.costs && s.costs.provider) || '—') + '</span></div>' +
+      '<div>敘事 <span>' + (ai.narrative_source || '—') + '</span></div>';
 
     var lightNames = {
       webhook: 'Webhook 接收',
@@ -654,6 +673,28 @@
       toast(lines[0] ? lines.slice(0, 3).join(' · ') : '尚無稽核');
       console.log('[WaveDeck audit]', j.items);
     });
+
+    if ($('btnExecMd')) {
+      $('btnExecMd').addEventListener('click', async function () {
+        try {
+          var j = await api('/api/exec_md/latest');
+          var md = j.markdown || '';
+          if (!md) { toast('尚無執行細節 MD'); return; }
+          var w = window.open('', '_blank', 'noopener');
+          if (!w) { console.log(md); toast('已輸出至 console（彈窗被擋）'); return; }
+          w.document.write(
+            '<!doctype html><meta charset="utf-8"><title>' + (j.file || 'exec.md') + '</title>' +
+            '<body style="margin:0;background:#0b111a;color:#d5deea">' +
+            '<pre style="margin:0;padding:16px;font:12px/1.45 ui-monospace,monospace;white-space:pre-wrap">' +
+            md.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre></body>'
+          );
+          w.document.close();
+          toast('執行細節：' + (j.file || 'latest.md'));
+        } catch (e) {
+          toast(String(e.message || e) || '尚無執行細節 MD — 先按模擬 TV');
+        }
+      });
+    }
 
     $('btnOpenST').addEventListener('click', function () {
       window.open(ST + '/#pulse', '_blank', 'noopener');

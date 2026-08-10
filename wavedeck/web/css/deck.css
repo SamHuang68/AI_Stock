@@ -336,19 +336,26 @@ input[type="range"] { width: 100%; accent-color: var(--cyan); height: 14px; }
   background: rgba(232, 93, 106, 0.14);
   color: #ffb4bc;
 }
+.summary-block {
+  display: flex; flex-direction: column; gap: 4px;
+  margin: 0 0 5px; flex: 0 1 auto; min-height: 0; max-height: 28%;
+  overflow: auto;
+}
 .summary {
-  margin: 0 0 5px; padding: 6px 8px; border-radius: 7px;
+  margin: 0; padding: 6px 8px; border-radius: 7px;
   background: rgba(6, 10, 16, 0.55); border: 1px solid var(--line);
   font-size: 11px; line-height: 1.4; color: var(--text);
-  max-height: 3.0em;
-  overflow: hidden;
-  flex: 0 0 auto;
+  white-space: pre-wrap;
 }
+.summary.status { border-color: rgba(62, 198, 224, 0.28); }
+.summary.reason { color: var(--muted); }
 .summary.dim {
   font-size: 10px; color: var(--muted);
   max-height: 2.6em;
   margin-bottom: 4px;
+  overflow: hidden;
 }
+.ai-box .box-hd .btn { text-transform: none; letter-spacing: 0; }
 .tags {
   display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 5px;
   flex: 0 0 auto; max-height: 2.4em; overflow: hidden;

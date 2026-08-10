@@ -314,13 +314,35 @@ def apply_fail_safe(reason: str) -> dict[str, Any]:
     kind = _kind_of(reason)
     already = bool(link.get("fail_safe") or (st.get("st_overlay") or {}).get("fail_safe"))
     same_kind = str(link.get("fail_safe_kind") or "") == kind
-    snap = enforce_fail_safe(reason, tighten=(not already or not same_kind))
+    prev_inv = None
+    try:
+        prev_inv = dict(((st.get("ai") or {}).get("invalidation") or {}))
+    except Exception:
+        prev_inv = None
+    do_tighten = not already or not same_kind
+    snap = enforce_fail_safe(reason, tighten=do_tighten)
     if not already:
         audit.write("fail_safe", {"reason": reason, "kind": kind})
         push_async(snap, reason="fail_safe", force=True)
     elif not same_kind:
         audit.write("fail_safe", {"reason": reason, "kind": kind, "upgrade": True})
         push_async(snap, reason="fail_safe", force=True)
+    # Fail-safe 收緊失效價 → 寫執行細節 MD（盤後可溯源）
+    if do_tighten:
+        try:
+            from . import exec_md
+
+            new_inv = ((snap.get("ai") or {}).get("invalidation") or {})
+            md_meta = exec_md.on_invalidation_trail(
+                snap, reason=reason, prev_inv=prev_inv, new_inv=new_inv
+            )
+            fields = (md_meta or {}).get("ai_fields") or {}
+            if fields:
+                ai2 = dict(snap.get("ai") or {})
+                ai2.update(fields)
+                snap = RUNTIME.patch(ai=ai2)
+        except Exception:
+            pass
     return snap
 
 

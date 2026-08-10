@@ -67,6 +67,17 @@ Windows 亦可雙擊 `START_WAVEDECK.cmd`。
 
 版面對齊「Wave AI × 下單大師」一頁高密度艦橋（`100dvh` 無整頁捲動：三欄＋頂列健康膠囊＋左欄系統控制＋底列決策／急停）。
 **「帳戶與風險」面板數值為 Wave AI 參考樣本，僅供攻能驗證，非本機實盤持倉／權益。**
+
+### 執行細節 Markdown（v0.1.19）
+
+決策後經「狀態翻譯層」產出 Wave AI 風格 MD（市場狀態／判斷理由／失效條件／三層處理），寫入 `data/exec_md/`。
+
+| 項目 | 說明 |
+|------|------|
+| 觸發 | 進出場／FSM 切換、整點級 `TIMED_MARKET_REVIEW`（預設 ≥55 分）、失效價顯著推移、Fail-safe 收緊 |
+| 敘事 | `exec_md.mode=template\|llm\|auto`；`auto` 先試本機 Ollama（≤5s），失敗降級模板 |
+| API | `GET /api/exec_md`、`/api/exec_md/latest`、`/api/exec_md/{file}` |
+| Console | AI 判斷區「執行 MD」按鈕；摘要顯示 `market_status`／`reasoning` |
 功能層讀 ST 既有端點（`:18432`）：`/health`、`/twindex`、`/breadth`、`/fundamental/^TWII`。
 
 | 方向 | 端點 |

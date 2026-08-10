@@ -34,6 +34,20 @@ _DEFAULT = {
         "strategy_file": "strategy_position.txt",
         "signal_file": "order_signal.txt",
     },
+    # Wave AI 風格執行細節 MD（模板必出；auto 時可走本機 Ollama 語意翻譯）
+    "exec_md": {
+        "enabled": True,
+        "mode": "auto",  # template | llm | auto
+        "dir": "data/exec_md",
+        "on_entry_exit": True,
+        "on_timed_review": True,
+        "timed_min_interval_sec": 3300,
+        "on_invalidation_trail": True,
+        "inv_trail_min_pts": 8,
+        "on_fail_safe": True,
+        "llm_timeout_sec": 5,
+        "max_files": 200,
+    },
 }
 
 

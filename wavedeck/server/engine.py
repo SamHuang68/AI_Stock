@@ -147,6 +147,7 @@ def get_runtime_config() -> dict[str, Any]:
             "ollama": cfg.get("ollama"),
             "openai": {k: v for k, v in (cfg.get("openai") or {}).items() if k != "api_key"},
             "txt_dir": (cfg.get("broker") or {}).get("txt_dir"),
+            "exec_md": cfg.get("exec_md") or {},
         },
         "state": st,
     }
@@ -288,6 +289,32 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
                 decision["invalidation"] = dict(prev_inv)
         except Exception:
             pass
+
+    # 狀態翻譯層：Wave AI 風格敘事＋條件寫入執行細節 MD
+    fsm_before = str(st.get("fsm") or "")
+    fsm_after = str(RUNTIME.snapshot().get("fsm") or fsm_before)
+    try:
+        from . import exec_md
+
+        pre_snap = dict(RUNTIME.snapshot())
+        pre_snap["positions"] = pos
+        pre_snap["exec"] = execu
+        md_meta = exec_md.enrich_and_maybe_write(
+            snap=pre_snap,
+            decision=decision,
+            gate=gate,
+            event=event,
+            source=source,
+            fsm_before=fsm_before,
+            fsm_after=fsm_after,
+            prev_ai=prev_ai if isinstance(prev_ai, dict) else None,
+        )
+        fields = (md_meta or {}).get("ai_fields") or {}
+        if fields:
+            decision = dict(decision)
+            decision.update(fields)
+    except Exception:
+        pass
 
     snap = RUNTIME.patch(
         ai=decision,

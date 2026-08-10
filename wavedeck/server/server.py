@@ -157,6 +157,27 @@ class Handler(BaseHTTPRequestHandler):
             lim = int((q.get("limit") or ["40"])[0])
             return _json(self, 200, {"ok": True, "items": audit.recent(lim)})
 
+        if path == "/api/exec_md" or path == "/api/exec_md/latest":
+            from . import exec_md
+
+            q = parse_qs(u.query)
+            if path.endswith("/latest") or (q.get("latest") or ["0"])[0] in ("1", "true"):
+                latest = exec_md.read_latest()
+                if not latest:
+                    return _json(self, 404, {"ok": False, "error": "no exec_md yet — 先跑模擬 TV／決策"})
+                return _json(self, 200, latest)
+            lim = int((q.get("limit") or ["20"])[0])
+            return _json(self, 200, {"ok": True, "items": exec_md.list_recent(lim)})
+
+        if path.startswith("/api/exec_md/"):
+            from . import exec_md
+
+            name = path.split("/api/exec_md/", 1)[-1]
+            one = exec_md.read_file(name)
+            if not one:
+                return _json(self, 404, {"ok": False, "error": "not found"})
+            return _json(self, 200, one)
+
         # static
         rel = "index.html" if path == "/" else path.lstrip("/")
         fp = (WEB / rel).resolve()

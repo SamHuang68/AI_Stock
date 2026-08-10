@@ -95,6 +95,7 @@
           <div class="box-hd">
             AI 最新判斷
             <span class="tag" id="aiEvent">—</span>
+            <button type="button" class="btn sm cyan" id="btnExecMd" title="檢視最新執行細節 Markdown">執行 MD</button>
           </div>
           <div class="alert-badge" id="fsBadge" hidden>Fail-safe</div>
           <div class="ai-hero">
@@ -107,9 +108,13 @@
             <div class="b long"><span class="k">偏多機會</span><em id="biasLong">—</em></div>
             <div class="b short"><span class="k">偏空機會</span><em id="biasShort">—</em></div>
           </div>
-          <p class="summary" id="aiSummary">—</p>
+          <div class="summary-block">
+            <p class="summary status" id="aiMarketStatus">—</p>
+            <p class="summary reason" id="aiReasoning">—</p>
+          </div>
           <div class="tags" id="aiTags"></div>
           <div class="process" id="aiProcess"></div>
+          <div class="muted-line" id="execMdMeta">執行細節 MD：—</div>
         </div>
       </section>
 
