@@ -4,13 +4,21 @@
  * 資料：GET /sectors?mkt=TW|US（官方類股／SPDR）
  * 輔區：GET /focus 做多／做空焦點（背景載入，可點進圖表）
  * 掛載：#mount-heat；側欄「熱力」
+ * 深鏈：ShellV5.go('heat', { mkt, sector, sectorKey }) — 總覽產業輪動列／熱力 →
  * ========================================================================== */
 (function () {
   'use strict';
 
   var SRV = window.SERVER || '';
   var timer = null;
-  var state = { mkt: 'TW', sort: 'chg', last: null, focus: null };
+  var state = {
+    mkt: 'TW',
+    sort: 'chg',
+    last: null,
+    focus: null,
+    sector: null,
+    sectorKey: null
+  };
 
   // 台股類股名 → 代表股（點格載入 K 線）
   var TW_PROXY = [
@@ -51,12 +59,27 @@
     { key: '資訊服務', code: '2474' },
     { key: '文化創意', code: '8446' },
     { key: '農業科技', code: '1216' },
-    { key: '數位雲端', code: '2454' }
+    { key: '數位雲端', code: '2454' },
+    { key: '綠能', code: '6443' },
+    { key: '環保', code: '6443' }
   ];
 
   var SKIP_TW = /加權|櫃買|寶島|公司治理|中型100|未含金融|未含電子|報酬指數|全市場/;
 
   function $(id) { return document.getElementById(id); }
+
+  function sectorKey(name) {
+    return String(name || '')
+      .replace(/業$/g, '')
+      .replace(/[\s　]/g, '')
+      .toLowerCase();
+  }
+
+  function sectorKeysMatch(a, b) {
+    var ka = sectorKey(a), kb = sectorKey(b);
+    if (!ka || !kb) return false;
+    return ka === kb || ka.indexOf(kb) >= 0 || kb.indexOf(ka) >= 0;
+  }
 
   function injectCSS() {
     var s = $('heat-v5-css');
@@ -83,25 +106,44 @@
       '#ht-root .ht-btn:hover{border-color:var(--bhi);color:var(--thi)}' +
       '#ht-root .ht-btn.on{border-color:var(--gold);color:var(--gold);background:var(--gold-s)}' +
       '#ht-root .ht-btn.primary{background:var(--gold);color:#060A12;border:none;font-weight:700}' +
-      '#ht-body{flex:1;min-height:0;display:grid;gap:4px;overflow:hidden;' +
+      /* 直向堆疊：WD／KPI 置頂，主區 2 欄 — 禁止把 .ht-wd 塞進 2 欄 grid 當第 1 格 */
+      '#ht-body{flex:1;min-height:0;display:flex;flex-direction:column;gap:4px;overflow:hidden}' +
+      '#ht-body.ht-loading{display:flex;align-items:center;justify-content:center}' +
+      '#ht-body .ht-wd{flex:0 0 auto;margin:0;padding:5px 8px;border-radius:6px;background:var(--bg2);' +
+        'border:1px solid rgba(103,232,249,.28);font-size:9px;line-height:1.45;color:var(--tlo)}' +
+      '#ht-body .ht-wd b{color:var(--cyan)}' +
+      '#ht-body .ht-kpi{flex:0 0 auto;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}' +
+      '#ht-body .ht-kpi .k{background:var(--bg2);border:1px solid var(--border);border-radius:5px;padding:4px 7px;min-width:0}' +
+      '#ht-body .ht-kpi .k .l{font-size:8px;color:var(--tlo);letter-spacing:.3px}' +
+      '#ht-body .ht-kpi .k .v{font-size:12px;font-weight:700;color:var(--thi);margin-top:1px;' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#ht-body .ht-kpi .k .s{font-size:8px;color:var(--tlo);margin-top:1px}' +
+      '#ht-body .ht-dash{flex:1;min-height:0;display:grid;gap:4px;overflow:hidden;' +
         'grid-template-columns:minmax(0,1.55fr) minmax(260px,1fr);grid-template-rows:minmax(0,1fr)}' +
       '#ht-body .ht-main{min-height:0;display:flex;flex-direction:column;overflow:hidden;' +
         'background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px}' +
+      '#ht-body .ht-main > h4,#ht-root .ht-focus-zone > h4{margin:0 0 3px;font-size:10px;color:var(--gold);' +
+        'letter-spacing:.5px;flex:0 0 auto;display:flex;align-items:baseline;justify-content:space-between;gap:6px}' +
+      '#ht-body .ht-main > h4 .ht-focus-tag{font-size:9px;color:var(--cyan);font-weight:600;letter-spacing:0}' +
       '#ht-root .ht-legend{display:flex;align-items:center;gap:5px;font-size:8px;color:var(--tlo);margin:0 0 3px;flex:0 0 auto}' +
       '#ht-root .ht-legend i{display:inline-block;width:12px;height:8px;border-radius:2px}' +
       '#ht-root .ht-grid-wrap{flex:1;min-height:0;overflow:auto}' +
-      '#ht-root .ht-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:4px;margin:0;' +
-        'align-content:stretch;grid-auto-rows:minmax(64px,1fr);min-height:100%;height:100%}' +
-      '#ht-root .ht-cell{min-height:56px;padding:6px 5px;border-radius:5px;border:1px solid rgba(255,255,255,.06);' +
-        'cursor:pointer;text-align:center;display:flex;flex-direction:column;justify-content:center;gap:2px;' +
-        'transition:transform .1s,box-shadow .1s;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.55)}' +
+      '#ht-root .ht-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:4px;margin:0;' +
+        'align-content:start;grid-auto-rows:minmax(58px,auto)}' +
+      '#ht-root .ht-cell{min-height:54px;padding:5px 4px;border-radius:5px;border:1px solid rgba(255,255,255,.06);' +
+        'cursor:pointer;text-align:center;display:flex;flex-direction:column;justify-content:center;gap:1px;' +
+        'transition:transform .1s,box-shadow .1s,opacity .12s,outline-color .12s;color:#fff;' +
+        'text-shadow:0 1px 2px rgba(0,0,0,.55)}' +
       '#ht-root .ht-cell:hover{transform:scale(1.02);box-shadow:0 2px 10px rgba(0,0,0,.4);z-index:2}' +
-      '#ht-root .ht-cell .nm{font-size:11px;font-weight:700;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#ht-root .ht-cell .pc{font-size:16px;font-weight:700}' +
-      '#ht-root .ht-cell .px{font-size:9px;opacity:.85}' +
+      '#ht-root .ht-cell.hi{outline:2px solid var(--gold);box-shadow:0 0 0 1px rgba(245,197,24,.45),0 4px 14px rgba(0,0,0,.5);' +
+        'z-index:3;transform:scale(1.03)}' +
+      '#ht-root .ht-cell.dim{opacity:.38}' +
+      '#ht-root .ht-cell .nm{font-size:10px;font-weight:700;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#ht-root .ht-cell .pc{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}' +
+      '#ht-root .ht-cell .px{font-size:8px;opacity:.85;font-variant-numeric:tabular-nums}' +
+      '#ht-root .ht-cell .pxcode{font-size:8px;opacity:.7;letter-spacing:.2px}' +
       '#ht-root .ht-focus-zone{min-height:0;display:flex;flex-direction:column;' +
         'background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;overflow:hidden}' +
-      '#ht-root .ht-focus-zone > h4{margin:0 0 3px;font-size:10px;color:var(--gold);letter-spacing:.5px;flex:0 0 auto}' +
       '#ht-root .ht-focus-zone > #ht-focus{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
       '#ht-root .ht-two{display:grid;grid-template-rows:minmax(0,1fr) minmax(0,1fr);gap:4px;flex:1;min-height:0;overflow:hidden}' +
       '#ht-root .ht-two > div{min-height:0;display:flex;flex-direction:column;overflow:hidden;' +
@@ -115,10 +157,10 @@
       '#ht-root .up{color:var(--red)}#ht-root .dn{color:var(--green)}' +
       '#ht-root .ht-note{font-size:8px;color:var(--tlo);line-height:1.35;margin-top:2px;flex:0 0 auto}' +
       '#ht-root .ht-loading{font-size:10px;color:var(--tlo);padding:12px 0}' +
-      '#ht-root .ht-wd{margin:0 0 4px;padding:6px 8px;border-radius:6px;background:var(--bg2);' +
-        'border:1px solid rgba(103,232,249,.28);font-size:9px;line-height:1.45;color:var(--tlo)}' +
-      '#ht-root .ht-wd b{color:var(--cyan)}' +
-      '#ht-body.ht-loading{display:flex;align-items:center}';
+      '@media (max-width:980px){' +
+        '#ht-body .ht-dash{grid-template-columns:1fr;grid-template-rows:minmax(0,1.1fr) minmax(0,.9fr)}' +
+        '#ht-body .ht-kpi{grid-template-columns:repeat(2,minmax(0,1fr))}' +
+      '}';
   }
 
   function wdStripHtml() {
@@ -166,6 +208,13 @@
     if (v == null || !isFinite(v)) return '—';
     return Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
   }
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
 
   function proxyFor(name) {
     for (var i = 0; i < TW_PROXY.length; i++) {
@@ -186,6 +235,14 @@
       rows.sort(function (a, b) { return b.changePct - a.changePct; });
     }
     return rows;
+  }
+
+  function syncMktButtons() {
+    var mount = $('mount-heat');
+    if (!mount) return;
+    mount.querySelectorAll('[data-mkt]').forEach(function (x) {
+      x.classList.toggle('on', x.getAttribute('data-mkt') === state.mkt);
+    });
   }
 
   function ensureMount() {
@@ -219,9 +276,9 @@
       mount.querySelectorAll('[data-mkt]').forEach(function (b) {
         b.onclick = function () {
           state.mkt = b.getAttribute('data-mkt');
-          mount.querySelectorAll('[data-mkt]').forEach(function (x) {
-            x.classList.toggle('on', x.getAttribute('data-mkt') === state.mkt);
-          });
+          state.sector = null;
+          state.sectorKey = null;
+          syncMktButtons();
           refresh();
         };
       });
@@ -258,10 +315,10 @@
       var h = '<div><h4 style="margin:0 0 4px;font-size:10px;color:var(--gold);flex:0 0 auto">' + title +
         ' · ' + rows.length + '</h4><div class="ht-list">';
       if (!rows.length) h += '<div class="ht-note">無符合</div>';
-      rows.slice(0, 18).forEach(function (r) {
-        h += '<div class="ht-row" data-code="' + r.sym + '">' +
-          '<span class="code">' + r.sym + '</span>' +
-          '<span class="name">' + (r.name || '') + '</span>' +
+      rows.slice(0, 20).forEach(function (r) {
+        h += '<div class="ht-row" data-code="' + esc(r.sym) + '">' +
+          '<span class="code">' + esc(r.sym) + '</span>' +
+          '<span class="name">' + esc(r.name || '') + '</span>' +
           '<span class="' + twCls(r.changePct) + '">' + pct(r.changePct) + '</span>' +
           '<span style="color:var(--gold);font-weight:700;min-width:48px;text-align:right">' +
           (r.score != null ? r.score : '') +
@@ -280,6 +337,60 @@
     });
   }
 
+  function kpiHtml(rows, mkt) {
+    var up = 0, dn = 0;
+    var best = null, worst = null;
+    rows.forEach(function (s) {
+      if (s.changePct > 0) up += 1;
+      else if (s.changePct < 0) dn += 1;
+      if (!best || s.changePct > best.changePct) best = s;
+      if (!worst || s.changePct < worst.changePct) worst = s;
+    });
+    var focusBit = state.sector
+      ? ('<div class="k"><div class="l">深鏈聚焦</div><div class="v" style="color:var(--cyan)">' +
+        esc(state.sector) + '</div><div class="s">總覽產業輪動帶入</div></div>')
+      : ('<div class="k"><div class="l">格數</div><div class="v">' + rows.length +
+        '</div><div class="s">' + (mkt === 'TW' ? '台股類股' : '美股 SPDR') + '</div></div>');
+    return '<div class="ht-kpi">' +
+      focusBit +
+      '<div class="k"><div class="l">上漲／下跌</div><div class="v"><span class="up">' + up +
+        '</span>　<span class="dn">' + dn + '</span></div><div class="s">依目前排序篩選</div></div>' +
+      '<div class="k"><div class="l">最強</div><div class="v">' + esc(best ? best.name : '—') +
+        '</div><div class="s ' + twCls(best && best.changePct) + '">' +
+        (best ? pct(best.changePct) : '—') + '</div></div>' +
+      '<div class="k"><div class="l">最弱</div><div class="v">' + esc(worst ? worst.name : '—') +
+        '</div><div class="s ' + twCls(worst && worst.changePct) + '">' +
+        (worst ? pct(worst.changePct) : '—') + '</div></div>' +
+      '</div>';
+  }
+
+  function applySectorHighlight(body) {
+    if (!body) return;
+    var key = state.sectorKey || state.sector;
+    var cells = body.querySelectorAll('.ht-cell');
+    if (!key || !cells.length) {
+      cells.forEach(function (el) {
+        el.classList.remove('hi', 'dim');
+      });
+      return;
+    }
+    var any = false;
+    cells.forEach(function (el) {
+      var match = sectorKeysMatch(key, el.getAttribute('data-sector-key') || el.getAttribute('data-name'));
+      el.classList.toggle('hi', match);
+      if (match) any = true;
+    });
+    cells.forEach(function (el) {
+      if (any) el.classList.toggle('dim', !el.classList.contains('hi'));
+      else el.classList.remove('dim');
+    });
+    var hi = body.querySelector('.ht-cell.hi');
+    if (hi && typeof hi.scrollIntoView === 'function') {
+      try { hi.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+      catch (e) { try { hi.scrollIntoView(false); } catch (e2) {} }
+    }
+  }
+
   function renderHeat(d) {
     var body = ensureMount();
     if (!body) return;
@@ -290,7 +401,8 @@
     if (sub) {
       sub.textContent = (mkt === 'TW' ? '台股類股指數' : '美股 SPDR 產業') +
         ' · ' + rows.length + ' 格 · 資料日 ' + ((d && d.date) || '—') +
-        ' · 更新 ' + new Date().toLocaleTimeString('zh-TW');
+        ' · 更新 ' + new Date().toLocaleTimeString('zh-TW') +
+        (state.sector ? (' · 聚焦 ' + state.sector) : '');
     }
 
     var legend = mkt === 'TW'
@@ -305,22 +417,32 @@
     } else {
       rows.forEach(function (s) {
         var code = mkt === 'US' ? (s.symbol || '') : proxyFor(s.name);
+        var sk = sectorKey(s.name);
         grid += '<div class="ht-cell" style="background:' + pctColor(s.changePct, mkt) + '" data-code="' +
-          (code || '') + '" data-mkt="' + mkt + '" title="' + s.name + (code ? ' → ' + code : '') + '">' +
-          '<div class="nm">' + s.name + '</div>' +
+          esc(code || '') + '" data-mkt="' + mkt + '" data-name="' + esc(s.name) +
+          '" data-sector-key="' + esc(sk) + '" title="' + esc(s.name) + (code ? ' → ' + code : '') + '">' +
+          '<div class="nm">' + esc(s.name) + '</div>' +
           '<div class="pc">' + pct(s.changePct) + '</div>' +
+          (code ? '<div class="pxcode">' + esc(code) + '</div>' : '') +
           '<div class="px">' + fmt(s.close) + '</div></div>';
       });
     }
     grid += '</div>';
 
+    var focusTag = state.sector
+      ? '<span class="ht-focus-tag">← ' + esc(state.sector) + '</span>'
+      : '';
+
     body.classList.remove('ht-loading');
     body.innerHTML =
       wdStripHtml() +
-      '<div class="ht-main"><h4 style="margin:0 0 3px;font-size:10px;color:var(--gold);letter-spacing:.5px;flex:0 0 auto">類股熱力圖</h4>' +
-        legend + '<div class="ht-grid-wrap">' + grid + '</div>' +
-        '<div class="ht-note">/sectors · 台股代表股／美股 SPDR · 非投資建議</div></div>' +
-      '<div class="ht-focus-zone"><h4>焦點掃描</h4><div id="ht-focus" class="ht-loading">掃描中…</div></div>';
+      kpiHtml(rows, mkt) +
+      '<div class="ht-dash">' +
+        '<div class="ht-main"><h4><span>類股熱力圖</span>' + focusTag + '</h4>' +
+          legend + '<div class="ht-grid-wrap">' + grid + '</div>' +
+          '<div class="ht-note">/sectors · 台股代表股／美股 SPDR · 點格載入 K 線 · 非投資建議</div></div>' +
+        '<div class="ht-focus-zone"><h4>焦點掃描</h4><div id="ht-focus" class="ht-loading">掃描中…</div></div>' +
+      '</div>';
 
     body.querySelectorAll('.ht-cell').forEach(function (el) {
       el.onclick = function () {
@@ -329,6 +451,8 @@
         if (c) openSym(c, m);
       };
     });
+
+    applySectorHighlight(body);
 
     if (state.focus) renderFocus(state.focus);
   }
@@ -375,9 +499,27 @@
       });
   }
 
-  function activate() {
+  function applyRouteOpts(opts) {
+    opts = opts || {};
+    var mktChanged = false;
+    if (opts.mkt && (opts.mkt === 'TW' || opts.mkt === 'US') && opts.mkt !== state.mkt) {
+      state.mkt = opts.mkt;
+      mktChanged = true;
+      syncMktButtons();
+    }
+    if (Object.prototype.hasOwnProperty.call(opts, 'sector') ||
+        Object.prototype.hasOwnProperty.call(opts, 'sectorKey')) {
+      state.sector = opts.sector || null;
+      state.sectorKey = opts.sectorKey || (opts.sector ? sectorKey(opts.sector) : null);
+    }
+    return mktChanged;
+  }
+
+  function activate(opts) {
+    opts = opts || {};
+    var mktChanged = applyRouteOpts(opts);
     ensureMount();
-    refresh(false, { soft: !!state.last });
+    refresh(false, { soft: !!state.last && !mktChanged });
     if (timer) clearInterval(timer);
     timer = setInterval(function () {
       if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'heat') {
@@ -390,10 +532,18 @@
     if (timer) { clearInterval(timer); timer = null; }
   }
 
-  window.HeatV5 = { activate: activate, deactivate: deactivate, refresh: refresh };
+  window.HeatV5 = {
+    activate: activate,
+    deactivate: deactivate,
+    refresh: refresh,
+    sectorKey: sectorKey,
+    sectorKeysMatch: sectorKeysMatch
+  };
 
   window.addEventListener('shell:route', function (ev) {
-    if (ev && ev.detail && ev.detail.route === 'heat') activate();
+    if (ev && ev.detail && ev.detail.route === 'heat') {
+      activate((ev.detail && ev.detail.opts) || {});
+    }
   });
 
   function boot() {

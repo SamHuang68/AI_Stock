@@ -1789,10 +1789,12 @@
         '<button type="button" data-sec-mkt="TW" class="' + (usOn ? '' : 'on') + '">TW</button>' +
         '<button type="button" data-sec-mkt="US" class="' + (usOn ? 'on' : '') + '">US</button>' +
       '</span>' +
-      ' <a data-go="heat">熱力 →</a></h4><div class="pl-fill" id="pl-sectors-body">' +
-      (usOn ? '' : '<div class="pl-note" style="margin:0 0 3px">懸停高亮同產業近漲跌停</div>');
+      ' <a data-go="heat" data-mkt="' + (usOn ? 'US' : 'TW') + '" data-sector="">熱力 →</a></h4>' +
+      '<div class="pl-fill" id="pl-sectors-body">' +
+      '<div class="pl-note" style="margin:0 0 3px">點列開熱力並高亮' +
+        (usOn ? '' : ' · 懸停聯動近漲跌停') + '</div>';
     if (!list.length) {
-      return html + '<div class="pl-note">' + (usOn ? '美股產業載入中…' : '類股資料暫缺 — 開啟熱力可預熱') +
+      return html + '<div class="pl-note">' + (usOn ? '美股產業載入中…' : '類股資料暫缺 — 點「熱力 →」開啟') +
         '</div></div></div>';
     }
     list.slice(0, 10).forEach(function (s) {
@@ -1806,8 +1808,10 @@
         ? ((s.changePct || 0) > 0 ? 'dn' : (s.changePct || 0) < 0 ? 'up' : 'flat')
         : tw(s.changePct);
       var sk = sectorKey(s.name);
-      html += '<div class="pl-sbar" data-sector="' + esc(s.name || '') + '" data-sector-key="' + esc(sk) + '"' +
-        ' title="' + esc(s.name || '') + (usOn ? '' : ' — 懸停聯動近漲跌停') + '">' +
+      html += '<div class="pl-sbar" data-go="heat" data-mkt="' + (usOn ? 'US' : 'TW') + '"' +
+        ' data-sector="' + esc(s.name || '') + '" data-sector-key="' + esc(sk) + '"' +
+        ' title="' + esc(s.name || '') + ' — 點擊開啟類股熱力' +
+        (usOn ? '' : ' · 懸停聯動近漲跌停') + '">' +
         '<div class="nm">' + esc(s.name) + '</div>' +
         '<div class="track"><i style="width:' + w + '%;background:' + col + '"></i></div>' +
         '<div class="pc ' + pcCls + '">' + pct(s.changePct) + '</div></div>';
@@ -2197,10 +2201,19 @@
     body.querySelectorAll('[data-go]').forEach(function (a) {
       a.onclick = function (e) {
         e.preventDefault();
-        goRoute(a.getAttribute('data-go'), {
+        e.stopPropagation();
+        var opts = {
           sym: a.getAttribute('data-sym') || undefined,
           mkt: a.getAttribute('data-mkt') || undefined
-        });
+        };
+        /* 產業輪動 → 熱力：帶入 mkt／sector（空字串表示清除聚焦） */
+        if (a.hasAttribute('data-sector')) {
+          opts.sector = a.getAttribute('data-sector') || null;
+        }
+        if (a.hasAttribute('data-sector-key')) {
+          opts.sectorKey = a.getAttribute('data-sector-key') || null;
+        }
+        goRoute(a.getAttribute('data-go'), opts);
       };
     });
     body.querySelectorAll('[data-code]').forEach(function (el) {

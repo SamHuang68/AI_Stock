@@ -339,6 +339,27 @@ ok(fs.existsSync(path.join(root, 'scripts/diagnose_tip.ps1')), 'scripts/diagnose
 const nw = fs.readFileSync(path.join(root, 'src/ui/news_v5.js'), 'utf8');
 ok(/nw-mkt-seg/.test(nw) && /flashMkt/.test(nw), 'news TW/US filter');
 
+/* 類股熱力：版面不得把 .ht-wd 塞進 2 欄 grid（會把焦點掃描擠出並遮蔽） */
+const heat = fs.readFileSync(path.join(root, 'src/ui/heat_v5.js'), 'utf8');
+ok(/#ht-body\{[^}]*flex-direction:column/.test(heat) &&
+  /#ht-body \.ht-dash\{[^}]*grid-template-columns:minmax\(0,1\.55fr\) minmax\(260px,1fr\)/.test(heat) &&
+  /ht-dash/.test(heat) && /ht-kpi/.test(heat) &&
+  !/#ht-body\{[^}]*grid-template-columns:minmax\(0,1\.55fr\)/.test(heat),
+  'heat body stacks WD/KPI above 2-col dash (focus not clipped)');
+ok(/function applyRouteOpts/.test(heat) && /function applySectorHighlight/.test(heat) &&
+  /ht-cell\.hi/.test(heat) && /opts\.sector/.test(heat) &&
+  /activate\(opts\)/.test(heat) && /detail\.opts/.test(heat),
+  'heat activate accepts mkt/sector deep-link and highlights cell');
+ok(/data-go="heat"[^>]*data-mkt=/.test(pl) && /data-sector=""/.test(pl) &&
+  /class="pl-sbar" data-go="heat"/.test(pl),
+  'pulse 產業輪動 熱力→ and sector bars deep-link to heat with mkt/sector');
+ok(/hasAttribute\('data-sector'\)/.test(pl) && /opts\.sectorKey/.test(pl) &&
+  /點列開熱力並高亮/.test(pl),
+  'pulse bind forwards sector/sectorKey to ShellV5.go');
+ok(/emitRoute\(id, opts\)/.test(shell) && /activate\(opts\)/.test(shell) &&
+  /detail: \{ route: id, opts: opts \}/.test(shell),
+  'shell emitRoute forwards route opts into panel activate + shell:route');
+
 if (failed) {
   console.error('\n' + failed + ' failure(s)');
   process.exit(1);

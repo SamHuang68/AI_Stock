@@ -1359,21 +1359,29 @@
     }
   }
 
-  function emitRoute(id, retries) {
+  function emitRoute(id, opts, retries) {
+    /* 相容舊呼叫 emitRoute(id, retriesNumber) */
+    if (typeof opts === 'number') {
+      retries = opts;
+      opts = {};
+    }
+    opts = opts || {};
     retries = retries || 0;
     try {
-      window.dispatchEvent(new CustomEvent('shell:route', { detail: { route: id } }));
+      window.dispatchEvent(new CustomEvent('shell:route', {
+        detail: { route: id, opts: opts }
+      }));
     } catch (e) {}
     var key = PANEL_MAP[id];
     if (!key) return;
     if (window[key] && typeof window[key].activate === 'function') {
-      try { window[key].activate(); }
+      try { window[key].activate(opts); }
       catch (err) { console.warn('[shell-v5] ' + key + ' activate', err); }
       return;
     }
     /* 模組尚未載入：短重試，避免開成空白舊介面 */
     if (retries < 20) {
-      setTimeout(function () { emitRoute(id, retries + 1); }, 50);
+      setTimeout(function () { emitRoute(id, opts, retries + 1); }, 50);
     } else {
       console.warn('[shell-v5] module not ready: ' + key + ' (route=' + id + ')');
     }
@@ -1388,13 +1396,13 @@
     opts = opts || {};
     var a = ROUTE_ALIASES[id];
     if (!a) return { id: id, opts: opts };
-    return {
-      id: a.to,
-      opts: {
-        sym: opts.sym || a.sym,
-        mkt: opts.mkt || a.mkt
-      }
-    };
+    var merged = {};
+    for (var k in opts) {
+      if (Object.prototype.hasOwnProperty.call(opts, k)) merged[k] = opts[k];
+    }
+    if (a.sym && !merged.sym) merged.sym = a.sym;
+    if (a.mkt && !merged.mkt) merged.mkt = a.mkt;
+    return { id: a.to, opts: merged };
   }
 
   function applyRoute(id, opts) {
@@ -1484,7 +1492,7 @@
       }, isChart ? 40 : 0);
     }
 
-    emitRoute(id);
+    emitRoute(id, opts);
   }
 
   function go(id, opts) {
