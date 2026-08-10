@@ -8,7 +8,7 @@
 </head>
 <body>
   <div class="app" id="app">
-    <!-- 參考圖：頂列品牌｜中間狀態｜右側健康膠囊 -->
+    <!-- Wave AI 參考：頂列品牌｜中間狀態｜右側健康膠囊 -->
     <header class="top">
       <div class="brand">
         <div class="brand-mark">WD</div>
@@ -25,12 +25,12 @@
       <div class="top-health" id="healthChips"></div>
     </header>
 
-    <!-- 參考圖：左｜中（主）｜右 -->
+    <!-- 一頁三欄：左執行｜中 AI｜右燈號／帳戶／傳輸 -->
     <section class="cols">
       <aside class="col left">
         <div class="box">
           <div class="box-hd">部位與執行狀態</div>
-          <div class="kv" id="posKv"></div>
+          <div class="kv pos-grid" id="posKv"></div>
         </div>
 
         <div class="box">
@@ -49,7 +49,7 @@
 
         <div class="box">
           <div class="box-hd">最新執行 · API 費用</div>
-          <div class="kv" id="execKv"></div>
+          <div class="kv pos-grid" id="execKv"></div>
           <div class="acct tight" id="costKv"></div>
         </div>
 
@@ -73,8 +73,19 @@
           </div>
           <div class="st-note" id="stNote">等待 Stock Terminal…</div>
           <div class="st-actions">
-            <span>降載 <b id="stDelever">否</b> · 覆寫風格 <b id="stStyle">—</b></span>
-            <button type="button" class="btn sm cyan" id="btnPullSt">套用 ST 建議</button>
+            <span>降載 <b id="stDelever">否</b> · 覆寫 <b id="stStyle">—</b></span>
+            <button type="button" class="btn sm cyan" id="btnPullSt">套用 ST</button>
+          </div>
+        </div>
+
+        <!-- 對齊 Wave AI：系統控制在左欄底部 -->
+        <div class="box sys-box">
+          <div class="box-hd">系統控制</div>
+          <div class="sys-btns">
+            <button class="btn primary" data-cmd="start" type="button">啟動</button>
+            <button class="btn" data-cmd="stop" type="button">停止</button>
+            <button class="btn" data-cmd="restart" type="button">重啟</button>
+            <button class="btn" data-cmd="refresh" type="button">重整</button>
           </div>
         </div>
       </aside>
@@ -103,7 +114,7 @@
       </section>
 
       <aside class="col right">
-        <div class="box">
+        <div class="box lights-box">
           <div class="box-hd">系統運行燈號</div>
           <div class="lights" id="lights"></div>
         </div>
@@ -111,22 +122,21 @@
           <div class="box-hd">帳戶與風險
             <span class="pill warn" title="數值來自參考艦橋 Wave AI，非本機實盤">Wave AI 參考</span>
           </div>
-          <p class="acct-note" id="acctNote">數值來自參考 Wave AI，僅供攻能驗證，非本機實盤持倉／權益。</p>
+          <p class="acct-note" id="acctNote" title="數值來自參考 Wave AI，僅供攻能驗證，非本機實盤持倉／權益。">Wave AI 參考 · 攻能驗證 · 非實盤</p>
           <div class="acct" id="acct"></div>
         </div>
         <div class="box">
           <div class="box-hd">TradingView / 傳輸</div>
-          <p class="summary dim" id="transportBlurb">Webhook + 本機通道。預設綁 127.0.0.1。</p>
-          <div class="kv" id="transportKv"></div>
+          <div class="kv pos-grid" id="transportKv"></div>
           <div class="muted-line">通道 <span id="transport">—</span> · WD <span id="wdSyncTxt">…</span></div>
         </div>
       </aside>
     </section>
 
-    <!-- 參考圖：底部分組控制列 -->
+    <!-- 底列收斂：決策／工具／急停 -->
     <footer class="foot">
       <div class="foot-row">
-        <span class="foot-lab">DECISION / BROKER</span>
+        <span class="foot-lab">DECISION</span>
         <label class="ctrl-select">
           <span>決策源</span>
           <select id="providerSelect">
@@ -136,27 +146,17 @@
           </select>
         </label>
         <button class="btn" id="btnModePaper" type="button">紙上 paper</button>
-        <button class="btn" id="btnModeLive" type="button">實盤 live／TXT</button>
-        <button class="btn" id="btnSyncTxt" type="button">同步 TXT 部位</button>
-      </div>
-      <div class="foot-row">
-        <span class="foot-lab">SYSTEM CONTROL</span>
-        <button class="btn primary" data-cmd="start">啟動系統</button>
-        <button class="btn" data-cmd="stop">停止</button>
-        <button class="btn" data-cmd="restart">重啟</button>
-        <button class="btn" data-cmd="refresh">重新整理</button>
-        <button class="btn cyan" id="btnDemo">模擬 TV 事件</button>
-      </div>
-      <div class="foot-row">
-        <span class="foot-lab">VIEW &amp; TOOLS</span>
-        <button class="btn ghost" id="btnAudit">AI／稽核紀錄</button>
-        <button class="btn ghost" id="btnOpenST">開啟 Stock Terminal</button>
+        <button class="btn" id="btnModeLive" type="button">實盤 live</button>
+        <button class="btn" id="btnSyncTxt" type="button">同步 TXT</button>
+        <button class="btn cyan" id="btnDemo" type="button">模擬 TV</button>
+        <button class="btn ghost" id="btnAudit" type="button">稽核</button>
+        <button class="btn ghost" id="btnOpenST" type="button">開 ST</button>
       </div>
       <div class="foot-row emergency-row">
         <span class="foot-lab">EMERGENCY</span>
-        <button class="btn danger" id="btnKill" title="僅暫停新單，不平倉">暫停新單</button>
-        <button class="btn danger panic" id="btnPanic" title="暫停新單並立即寫入市價全平 TXT">急停並全平</button>
-        <button class="btn" id="btnKillOff">解除緊急停止</button>
+        <button class="btn danger" id="btnKill" title="僅暫停新單，不平倉" type="button">暫停新單</button>
+        <button class="btn danger panic" id="btnPanic" title="暫停新單並立即寫入市價全平 TXT" type="button">急停並全平</button>
+        <button class="btn" id="btnKillOff" type="button">解除急停</button>
       </div>
     </footer>
   </div>

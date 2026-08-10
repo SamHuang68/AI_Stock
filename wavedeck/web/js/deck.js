@@ -229,10 +229,10 @@
 
     var p = s.positions || {};
     $('posKv').innerHTML = [
-      ['AI 最近建議部位', p.ai_suggested],
-      ['TXT 目前目標部位', p.txt_target],
-      ['策略部位', p.strategy],
-      ['帳戶實際部位', p.account]
+      ['AI 建議', p.ai_suggested],
+      ['TXT 目標', p.txt_target],
+      ['策略', p.strategy],
+      ['帳戶', p.account]
     ].map(function (row) {
       return '<div class="kv-row"><span class="lab">' + row[0] + '</span><span class="val">' + row[1] + '</span></div>';
     }).join('');
@@ -319,10 +319,14 @@
     var noteEl = $('acctNote');
     if (noteEl) {
       noteEl.textContent = isRef
+        ? 'Wave AI 參考 · 攻能驗證 · 非實盤'
+        : ('帳戶來源：' + src);
+      noteEl.title = isRef
         ? '數值來自參考 Wave AI，僅供攻能驗證，非本機實盤持倉／權益。'
         : ('帳戶來源：' + src);
       noteEl.className = 'acct-note' + (isRef ? '' : ' live');
     }
+    /* 一頁密度：六格內完成；參考性質改由 pill／acct-note 標示，不再另開 wide 列 */
     $('acct').innerHTML =
       '<div class="a"><div class="k">昨日餘額' + (isRef ? '（參考）' : '') + '</div><div class="v">' + money(a.yesterday_balance) + '</div></div>' +
       '<div class="a"><div class="k">當前權益' + (isRef ? '（參考）' : '') + '</div><div class="v">' + money(a.equity) + '</div></div>' +
@@ -330,14 +334,14 @@
       '<div class="a"><div class="k">單日回撤</div><div class="v ' + ddCls + '">' +
         (ddPct ? (ddPct.toFixed(2) + '% / ' + ddLim + '%') : ('0% / ' + ddLim + '%')) + '</div></div>' +
       '<div class="a"><div class="k">券商連線</div><div class="v">' + (a.broker_api || '—') + '</div></div>' +
-      (isRef
-        ? '<div class="a wide"><div class="k">資料性質</div><div class="v dim">Wave AI 參考樣本 · 非實盤</div></div>'
-        : '');
+      '<div class="a"><div class="k">Email 監控</div><div class="v">' +
+        (((s.lights || {}).email_monitor === 'ok') ? '正常' : lightLabel((s.lights || {}).email_monitor || '—')) +
+      '</div></div>';
 
     var ex = s.exec || {};
     $('execKv').innerHTML = [
-      ['最近 AI 動作', ex.last_ai_action],
-      ['最近下單動作', ex.last_order_action],
+      ['AI 動作', ex.last_ai_action],
+      ['下單', ex.last_order_action],
       ['價格', ex.price],
       ['口數', ex.lots]
     ].map(function (row) {
@@ -384,9 +388,12 @@
       ['Webhook', t.webhook],
       ['Tunnel', t.tunnel],
       ['Domain', t.domain],
-      ['解析錯誤', t.parse_errors]
+      ['解析錯', t.parse_errors]
     ].map(function (row) {
-      return '<div class="kv-row"><span class="lab">' + row[0] + '</span><span class="val">' + row[1] + '</span></div>';
+      var v = row[1] == null ? '—' : String(row[1]);
+      if (v.length > 28) v = v.slice(0, 26) + '…';
+      return '<div class="kv-row" title="' + String(row[1] == null ? '' : row[1]).replace(/"/g, '&quot;') +
+        '"><span class="lab">' + row[0] + '</span><span class="val">' + v + '</span></div>';
     }).join('');
   }
 
