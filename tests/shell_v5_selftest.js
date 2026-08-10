@@ -400,6 +400,19 @@ ok(/← 儀表板/.test(heat) && /data-shell-back/.test(heat) &&
 ok(/← 儀表板/.test(nw) && /data-shell-back/.test(nw),
   'news page has ← 儀表板 back control');
 
+ok(/AI科技外溢/.test(hub) && /factorScope/.test(hub) && /aiSpill/.test(hub) &&
+  /spill\.ok/.test(hub) && !/美股流動池漲跌/.test(hub) && !/尚無美股漲幅資料/.test(hub),
+  'risk page shows AI spillover strip only when data exists (no empty US shell)');
+ok(/apply_ai_tech_spillover/.test(srvPy) && /pulse-global:v7/.test(srvPy) &&
+  /'NVDA', 'AVGO', 'TSM'/.test(srvPy),
+  'server applies AI spillover from global v7 (SOX + NVDA/AVGO/TSM)');
+(function () {
+  var pi = fs.readFileSync(path.join(root, 'server/pulse_intel.py'), 'utf8');
+  ok(/def apply_ai_tech_spillover/.test(pi) && /AI科技外溢偏空/.test(pi) &&
+    /費半/.test(pi) && /no_sox_ixic/.test(pi),
+    'pulse_intel AI tech spillover uses SOX/IXIC, skips when missing');
+})();
+
 if (failed) {
   console.error('\n' + failed + ' failure(s)');
   process.exit(1);

@@ -2149,6 +2149,7 @@ def _yf_batch_quotes(syms):
         'DX-Y.NYB': '美元指數', 'DX=F': '美元指數',
         '^VIX': 'VIX 波動', 'TWD=X': '美元／台幣',
         '^SOX': '費半', '^N225': '日經', '^KS11': '韓國', '^HSI': '恆生',
+        'NVDA': 'NVIDIA', 'AVGO': 'Broadcom', 'TSM': '台積電ADR',
     }
     # 解讀標籤：國際面板／總覽全球影響用（不影響報價計算）
     roles = {
@@ -4577,17 +4578,18 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 return {'ok': False, 'items': []}
 
         def _job_global():
-            # v6：v5 + WTI 原油（CL=F／能源景氣）
-            gkey = f'pulse-global:v6:{int(time.time() // 120)}'
+            # v7：v6 + AI 科技外溢代理（NVDA／AVGO／TSM ADR）— 仍同一 Yahoo 批次，不另開重抓
+            gkey = f'pulse-global:v7:{int(time.time() // 120)}'
             g = _cache_first([gkey])
             if g is not None:
                 return g
             try:
                 # 指數列優先吃市場 tab 同源標的（SOX/美股/日韓）；
-                # 另補 VIX／匯率／美元／黃金／銅／原油
+                # 另補 VIX／匯率／美元／黃金／銅／原油；AI 鏈代理個股
                 g = _yf_batch_quotes([
                     '^DJI', '^GSPC', '^IXIC', '^SOX', '^N225', '^KS11',
                     '^VIX', 'TWD=X', 'DX-Y.NYB', 'GC=F', 'HG=F', 'CL=F',
+                    'NVDA', 'AVGO', 'TSM',
                 ])
                 if not any(x.get('symbol') == 'DX-Y.NYB' for x in (g or [])):
                     # 僅在缺美元指數時補一槍，不重抓整批
@@ -4788,6 +4790,16 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
 
         out['movers'] = movers
         out['global'] = global_q
+        # AI／科技外溢：只吃已抓到的 global（費半／那指／VIX／NVDA…），無資料不改分、不畫空殼
+        try:
+            import pulse_intel as _pi_spill
+            out = _pi_spill.apply_ai_tech_spillover(out, global_q, sectors)
+        except Exception as e:
+            print('[pulse] ai spillover', e)
+            try:
+                out['aiSpill'] = {'ok': False, 'reason': 'apply_failed'}
+            except Exception:
+                pass
         out['us10y'] = us10y
         out['economy'] = eco
         out['flash'] = flash

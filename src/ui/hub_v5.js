@@ -873,7 +873,7 @@
 
   // ── Risk ─────────────────────────────────────────────────
   function renderRisk(el) {
-    el.innerHTML = head('風險監控', '由脈動因子與廣度／法人規則產生的風險事件',
+    el.innerHTML = head('風險監控', '台股主帳本 · AI科技外溢（費半／那指，有資料才計分）',
       '<button class="hub-btn" data-sync>同步資料</button>' +
       '<button class="hub-btn" data-go="book">投組風險</button>' +
       '<button class="hub-btn primary" data-shell-back>← 儀表板</button>') +
@@ -881,6 +881,12 @@
     bindCommon(el);
     Promise.all([jget('/pulse'), jget('/pulse/history?kind=pulse&n=15')]).then(function (arr) {
       var p = arr[0] || {};
+      var spill = p.aiSpill || (p.snapshot && p.snapshot.aiSpill) || {};
+      function factorScope(f) {
+        if (!f) return '台股';
+        if (f.mkt === 'US' || /^AI科技外溢/.test(String(f.name || ''))) return '外溢';
+        return '台股';
+      }
       var events = [];
       (p.riskFactors || []).forEach(function (f) {
         var sev = Math.abs(f.score) >= 10 ? '高' : '中';
@@ -888,7 +894,7 @@
           time: p.updatedAt || p.date || '',
           event: f.name,
           description: f.description,
-          scope: '台股',
+          scope: factorScope(f),
           severity: sev
         });
       });
@@ -911,15 +917,66 @@
       var riskMeter = V ? V.scoreMeter(p.riskScore, { color: 'var(--cyan)' }) : '';
       var healthMeter = V ? V.scoreMeter(p.healthScore) : '';
       var compMeter = V ? V.scoreMeter(p.dataCompleteness) : '';
+      var spillN = (p.riskFactors || []).filter(function (f) { return factorScope(f) === '外溢'; }).length;
+      var twN = (p.riskFactors || []).filter(function (f) { return factorScope(f) === '台股'; }).length;
       var eventsRows = '';
       if (!events.length) {
         eventsRows = '<tr><td colspan="5">目前無觸發中的風險事件</td></tr>';
       } else {
         events.forEach(function (e) {
           var cls = e.severity === '高' ? 'err' : 'mid';
+          var scopeCls = e.scope === '外溢' ? ' style="color:var(--cyan);font-weight:700"' : '';
           eventsRows += '<tr><td>' + (e.time || '') + '</td><td>' + e.event + '</td><td style="text-align:left">' +
-            e.description + '</td><td>' + e.scope + '</td><td><span class="badge ' + cls + '">' + e.severity + '</span></td></tr>';
+            e.description + '</td><td' + scopeCls + '>' + e.scope + '</td><td><span class="badge ' +
+            cls + '">' + e.severity + '</span></td></tr>';
         });
+      }
+      function chgCell(label, v, sub) {
+        if (v == null || !isFinite(Number(v))) return '';
+        var n = Number(v);
+        var cls = n > 0 ? 'up' : (n < 0 ? 'dn' : 'flat');
+        var sign = n > 0 ? '+' : '';
+        return '<div class="cell"><div class="k">' + label + '</div><div class="v ' + cls + '">' +
+          sign + n.toFixed(2) + '%</div>' +
+          (sub ? '<div class="s">' + sub + '</div>' : '') + '</div>';
+      }
+      /* 有費半／那指才顯示外溢列 — 絕不畫空 dash 殼 */
+      var spillStrip = '';
+      if (spill && spill.ok) {
+        var cells =
+          chgCell('費半 SOX', spill.soxChangePct, '半導體鏈') +
+          chgCell('NASDAQ', spill.ixicChangePct, '美科技') +
+          chgCell('S&P500', spill.gspcChangePct, '') +
+          (spill.vixLevel != null
+            ? ('<div class="cell"><div class="k">VIX</div><div class="v">' +
+                Number(spill.vixLevel).toFixed(1) + '</div><div class="s">' +
+                (spill.vixChangePct != null
+                  ? ((spill.vixChangePct > 0 ? '+' : '') + Number(spill.vixChangePct).toFixed(1) + '%')
+                  : '恐慌') + '</div></div>')
+            : '') +
+          chgCell('NVDA', spill.nvdaChangePct, 'AI 代理') +
+          chgCell('AVGO', spill.avgoChangePct, '') +
+          chgCell('TSM', spill.tsmChangePct, 'ADR') +
+          chgCell('台半導類', spill.twSemiChangePct, '對照');
+        if (cells) {
+          var dirLbl = spill.direction === 'risk' ? '偏空外溢'
+            : (spill.direction === 'pos' ? '偏多外溢' : '中性');
+          spillStrip =
+            '<div class="hub-sec" style="margin:4px 0;flex:0 0 auto;height:auto">' +
+              '<h4>AI／科技外溢' +
+                '<span style="color:var(--tlo);font-weight:600;font-size:10px">' + dirLbl +
+                ' · 台股連動主軸</span></h4>' +
+              '<div class="hub-strip" style="margin:0;grid-template-columns:repeat(auto-fit,minmax(88px,1fr))">' +
+                cells +
+              '</div>' +
+              (spill.factorName
+                ? ('<div class="hub-note" style="margin-top:4px;white-space:normal">' +
+                    spill.factorName +
+                    (spill.factorScore != null ? (' · 計分 ' + spill.factorScore) : '') +
+                  '</div>')
+                : '<div class="hub-note" style="margin-top:4px">波幅中性，外溢因子未觸發（不灌水分數）</div>') +
+            '</div>';
+        }
       }
       var hist = (arr[1] && arr[1].rows) || [];
       var histPanel = '<div class="hub-sec"><h4>脈動分數歷史</h4>';
@@ -958,18 +1015,24 @@
           '<div class="cell"><div class="k">健康度</div><div class="v">' +
             (p.healthScore != null ? Number(p.healthScore).toFixed(1) : '—') + '</div>' +
             '<div class="s">' + healthMeter + '</div></div>' +
-          '<div class="cell"><div class="k">風險因子數</div><div class="v">' +
-            ((p.riskFactors || []).length) + '</div></div>' +
+          '<div class="cell"><div class="k">風險因子</div><div class="v">' +
+            ((p.riskFactors || []).length) + '</div>' +
+            '<div class="s">台 ' + twN + (spillN ? (' · 外溢 ' + spillN) : '') + '</div></div>' +
           '<div class="cell"><div class="k">完整度</div><div class="v">' +
             (p.dataCompleteness != null ? Number(p.dataCompleteness).toFixed(0) + '%' : '—') + '</div>' +
             '<div class="s">' + compMeter + '</div></div>' +
         '</div>' +
+        spillStrip +
         '<div class="hub-dash hub-cols-2">' +
-          '<div class="hub-sec"><h4>風險事件清單</h4><div class="hub-fill"><table>' +
+          '<div class="hub-sec"><h4>風險事件清單' +
+            '<span style="color:var(--tlo);font-weight:600;font-size:10px">台股 · AI外溢</span></h4>' +
+            '<div class="hub-fill"><table>' +
             '<tr><th>時間</th><th>事件</th><th>說明</th><th>範圍</th><th>重要</th></tr>' +
             eventsRows + '</table></div></div>' +
           histPanel +
-        '</div>';
+        '</div>' +
+        '<div class="hub-note">外溢口徑：費半為主、那指確認、VIX 放大；對照台半導類與 NVDA／AVGO／TSM。' +
+          '無報價時隱藏本區且不灌水分數（不另抓美股全池）。</div>';
       bindCommon(el);
     });
   }

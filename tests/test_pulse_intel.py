@@ -254,6 +254,54 @@ def test_all_extras_raise_completeness():
     assert '類股參與度' not in pending_names
 
 
+
+def test_ai_tech_spillover_risk_from_sox():
+    base = pi.build_pulse_intel(
+        health_score=60,
+        pillars={'volumeScore': 55.0, 'turnoverYi': 8500.0, 'instScore': 50.0, 'instNetYi': 0.0,
+                 'marginScore': 55.0, 'marginRatio': 168.0, 'valuationScore': 50.0, 'medianPE': 17.0},
+        market_rows=[], summary=None,
+        stocks={'up': 500, 'down': 500, 'unchanged': 100, 'advRatio': 0.5, 'net': 0},
+        indices={'t00': {'price': 22000.0, 'changePct': 0.1}, 'o00': {'price': 250.0, 'changePct': 0.0}},
+        inst={'foreign': 0, 'trust': 0, 'dealer': 0},
+        txf_night={'price': 22000.0, 'changePct': 0.0},
+        sectors=[{'name': '半導體', 'changePct': 1.2}, {'name': '金融', 'changePct': 0.1},
+                 {'name': '塑膠', 'changePct': 0.0}, {'name': '鋼鐵', 'changePct': -0.1}],
+    )
+    before = base['riskScore']
+    out = pi.apply_ai_tech_spillover(base, [
+        {'symbol': '^SOX', 'changePct': -2.8, 'price': 5000},
+        {'symbol': '^IXIC', 'changePct': -2.1, 'price': 16000},
+        {'symbol': '^VIX', 'changePct': 12.0, 'price': 27.5},
+        {'symbol': 'NVDA', 'changePct': -4.5, 'price': 100},
+    ], sectors=[{'name': '半導體', 'changePct': 1.2}, {'name': '金融', 'changePct': 0.1},
+                {'name': '塑膠', 'changePct': 0.0}, {'name': '鋼鐵', 'changePct': -0.1}])
+    assert out['aiSpill']['ok'] is True
+    assert out['aiSpill']['direction'] == 'risk'
+    assert any(f['name'] == 'AI科技外溢偏空' for f in out['riskFactors'])
+    assert any(f.get('mkt') == 'US' for f in out['riskFactors'])
+    assert out['riskScore'] > before
+    assert 'ai-spill' in out['model']
+
+
+def test_ai_tech_spillover_no_data_keeps_score():
+    base = pi.build_pulse_intel(
+        health_score=60,
+        pillars={'volumeScore': 55.0, 'turnoverYi': 8500.0, 'instScore': 50.0, 'instNetYi': 0.0,
+                 'marginScore': 55.0, 'marginRatio': 168.0, 'valuationScore': 50.0, 'medianPE': 17.0},
+        market_rows=[], summary=None,
+        stocks={'up': 500, 'down': 500, 'unchanged': 100, 'advRatio': 0.5, 'net': 0},
+        indices={'t00': {'price': 22000.0, 'changePct': 0.1}, 'o00': {'price': 250.0, 'changePct': 0.0}},
+        inst={}, txf_night={'price': 22000.0, 'changePct': 0.0},
+        sectors=[{'name': '半導體', 'changePct': 0.2}, {'name': '金融', 'changePct': 0.1},
+                 {'name': '塑膠', 'changePct': 0.0}, {'name': '鋼鐵', 'changePct': -0.1}],
+    )
+    out = pi.apply_ai_tech_spillover(dict(base), [], sectors=None)
+    assert out['aiSpill']['ok'] is False
+    assert out['riskScore'] == base['riskScore']
+    assert out['riskFactors'] == base['riskFactors']
+
+
 if __name__ == '__main__':
     test_health_and_breadth_bullish()
     test_missing_data_goes_pending_not_fake()
@@ -267,4 +315,6 @@ if __name__ == '__main__':
     test_filter_sectors_skips_benchmarks()
     test_status_label_clearly_strong()
     test_all_extras_raise_completeness()
+    test_ai_tech_spillover_risk_from_sox()
+    test_ai_tech_spillover_no_data_keeps_score()
     print('OK pulse_intel')

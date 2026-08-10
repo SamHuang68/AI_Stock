@@ -10,6 +10,8 @@
 
 鐵律：不得捏造 Fear&Greed／假 VIX／假 250 日新高家數。
 缺資料 → pendingFactors，完整度下降，不灌水分數。
+AI 科技外溢：可選 apply_ai_tech_spillover()，只吃已抓到的 global（費半／那指／VIX），
+無資料不改分、不強制 pending，避免風險頁畫空殼。
 """
 from __future__ import annotations
 
@@ -93,13 +95,21 @@ def _label_risk(score: Optional[float]) -> str:
     return '風險低檔'
 
 
-def _factor(fid: int, name: str, description: str, score: float, typ: str) -> Dict[str, Any]:
+def _factor(
+    fid: int,
+    name: str,
+    description: str,
+    score: float,
+    typ: str,
+    mkt: str = 'TW',
+) -> Dict[str, Any]:
     return {
         'id': fid,
         'name': name,
         'description': description,
         'score': round(float(score), 1),
         'type': typ,  # positive | risk | pending
+        'mkt': mkt if mkt in ('TW', 'US', 'X') else 'TW',
     }
 
 
@@ -576,3 +586,195 @@ def build_pulse_intel(
             'bottomSector': bot_sec,
         },
     }
+
+
+
+def _quote_map(global_quotes: Optional[List[dict]]) -> Dict[str, dict]:
+    out: Dict[str, dict] = {}
+    for row in global_quotes or []:
+        if not isinstance(row, dict):
+            continue
+        sym = str(row.get('symbol') or '').strip()
+        if sym:
+            out[sym] = row
+    return out
+
+
+def _tw_semi_change(sectors: Optional[List[dict]]) -> Optional[float]:
+    """台股半導體／電子相關類股當日漲跌（有則回傳中位或最強代表）。"""
+    keys = ('半導體', '電子', '光電', '電腦', '通信', '資訊')
+    vals = []
+    for s in filter_sectors(sectors):
+        name = str(s.get('name') or '')
+        cp = _n(s.get('changePct'))
+        if cp is None:
+            continue
+        if any(k in name for k in keys):
+            vals.append(cp)
+    if not vals:
+        return None
+    vals.sort()
+    return vals[len(vals) // 2]
+
+
+def apply_ai_tech_spillover(
+    payload: Dict[str, Any],
+    global_quotes: Optional[List[dict]] = None,
+    sectors: Optional[List[dict]] = None,
+) -> Dict[str, Any]:
+    """用 /pulse 既有 global 報價補強「AI／科技外溢」因子（台股供應鏈連動）。
+
+    設計原則：
+      • 主訊號 = 費半 ^SOX（半導體鏈 ↔ 台積電／權值電子）
+      • 確認 = NASDAQ ^IXIC；放大器 = VIX
+      • 可選對照 = 台股半導體類股；個股代理 NVDA／AVGO／TSM（有才顯示）
+      • 缺資料 → 不改分數、不加假 pending、回傳 spillover.ok=False（前端隱藏區塊）
+      • 權重封頂偏軟（風險 ≤10、正面 ≤8），不壓過台股主帳本
+    """
+    if not isinstance(payload, dict) or not payload.get('ok'):
+        return payload
+
+    qm = _quote_map(global_quotes)
+    sox = _n((qm.get('^SOX') or {}).get('changePct'))
+    ixic = _n((qm.get('^IXIC') or {}).get('changePct'))
+    gspc = _n((qm.get('^GSPC') or {}).get('changePct'))
+    vix_lv = _n((qm.get('^VIX') or {}).get('price'))
+    vix_cp = _n((qm.get('^VIX') or {}).get('changePct'))
+    nvda = _n((qm.get('NVDA') or {}).get('changePct'))
+    avgo = _n((qm.get('AVGO') or {}).get('changePct'))
+    tsm = _n((qm.get('TSM') or {}).get('changePct'))
+    tw_semi = _tw_semi_change(sectors)
+
+    # 至少要有費半或那指，才算有可用外溢訊號
+    if sox is None and ixic is None:
+        snap = dict(payload.get('snapshot') or {})
+        snap['aiSpill'] = {
+            'ok': False,
+            'reason': 'no_sox_ixic',
+        }
+        payload['snapshot'] = snap
+        payload['aiSpill'] = snap['aiSpill']
+        return payload
+
+    lead = sox if sox is not None else ixic
+    bits = []
+    if sox is not None:
+        bits.append(f'費半 {sox:+.2f}%')
+    if ixic is not None:
+        bits.append(f'NASDAQ {ixic:+.2f}%')
+    if gspc is not None:
+        bits.append(f'S&P500 {gspc:+.2f}%')
+    if vix_lv is not None:
+        bits.append(f'VIX {vix_lv:.1f}' + (f'（{vix_cp:+.1f}%）' if vix_cp is not None else ''))
+    proxy_bits = []
+    if nvda is not None:
+        proxy_bits.append(f'NVDA {nvda:+.2f}%')
+    if avgo is not None:
+        proxy_bits.append(f'AVGO {avgo:+.2f}%')
+    if tsm is not None:
+        proxy_bits.append(f'TSM {tsm:+.2f}%')
+    if tw_semi is not None:
+        bits.append(f'台半導類 {tw_semi:+.2f}%')
+    desc_core = '｜'.join(bits)
+
+    risk = list(payload.get('riskFactors') or [])
+    positive = list(payload.get('positiveFactors') or [])
+    next_rid = max([f.get('id') or 0 for f in risk] + [0]) + 1
+    next_pid = max([f.get('id') or 0 for f in positive] + [0]) + 1
+
+    direction = 'flat'
+    factor = None
+
+    # 背離：美科技弱、台半導仍強 → 外溢警戒（隔日缺口風險）
+    diverge = (
+        sox is not None and tw_semi is not None
+        and sox <= -1.2 and tw_semi >= 0.8
+    )
+
+    if lead is not None and lead <= -1.2:
+        pts = _clamp(abs(lead) * 2.2, 0.0, 10.0)
+        if vix_lv is not None and vix_lv >= 25.0:
+            pts = _clamp(pts + min(4.0, (vix_lv - 22.0) * 0.5), 0.0, 12.0)
+        if diverge:
+            pts = _clamp(pts + 2.0, 0.0, 12.0)
+        note = desc_core + '｜半導體鏈偏弱，台股 AI／權值電子隔日外溢風險升高。'
+        if proxy_bits:
+            note += '｜' + '、'.join(proxy_bits)
+        if diverge:
+            note += '｜台半導仍強、美科技轉弱，留意缺口與外資調節。'
+        factor = _factor(next_rid, 'AI科技外溢偏空', note, -abs(pts), 'risk', mkt='US')
+        risk.append(factor)
+        direction = 'risk'
+    elif lead is not None and lead >= 1.2:
+        pts = _clamp(lead * 1.8, 0.0, 8.0)
+        note = desc_core + '｜美科技偏多，有助台股半導體／AI 鏈風險偏好。'
+        if proxy_bits:
+            note += '｜' + '、'.join(proxy_bits)
+        factor = _factor(next_pid, 'AI科技外溢偏多', note, pts, 'positive', mkt='US')
+        positive.append(factor)
+        direction = 'pos'
+    elif diverge:
+        pts = _clamp(abs(sox) * 1.5 + 1.0, 0.0, 8.0)
+        note = desc_core + '｜美科技轉弱但台半導仍強，外溢背離警戒。'
+        factor = _factor(next_rid, 'AI科技外溢背離', note, -abs(pts), 'risk', mkt='US')
+        risk.append(factor)
+        direction = 'risk'
+    else:
+        # 中性：不灌水，僅記錄可讀快照
+        direction = 'flat'
+
+    # 重算風險／總分（與 build_pulse_intel 同一公式）
+    pos_sum = round(sum(float(f.get('score') or 0) for f in positive), 1)
+    risk_abs = round(sum(abs(float(f.get('score') or 0)) for f in risk), 1)
+    hs = _n(payload.get('healthScore'))
+    if risk_abs > 0 or hs is not None:
+        base_risk = risk_abs * 1.15
+        if hs is not None:
+            base_risk = 0.65 * base_risk + 0.35 * max(0.0, 55.0 - hs)
+        risk_score = round(_clamp(base_risk, 0.0, 100.0), 1)
+    else:
+        risk_score = payload.get('riskScore')
+
+    if hs is not None and risk_score is not None:
+        total = round(_clamp(0.70 * hs + 0.30 * (100.0 - risk_score), 0.0, 100.0), 1)
+    else:
+        total = payload.get('totalScore')
+
+    payload['positiveFactors'] = positive
+    payload['riskFactors'] = risk
+    payload['positiveFactorScore'] = pos_sum
+    payload['riskFactorScore'] = -risk_abs
+    payload['riskScore'] = risk_score
+    payload['riskLabel'] = _label_risk(risk_score if isinstance(risk_score, (int, float)) else None)
+    payload['totalScore'] = total
+    payload['statusText'] = _label_total(total if isinstance(total, (int, float)) else None)
+
+    tone = str(payload.get('tone') or '')
+    if direction == 'risk' and 'AI外溢偏空' not in tone:
+        payload['tone'] = (tone + ' · ' if tone else '') + 'AI外溢偏空'
+    elif direction == 'pos' and 'AI外溢偏多' not in tone:
+        payload['tone'] = (tone + ' · ' if tone else '') + 'AI外溢偏多'
+
+    spill = {
+        'ok': True,
+        'direction': direction,
+        'soxChangePct': sox,
+        'ixicChangePct': ixic,
+        'gspcChangePct': gspc,
+        'vixLevel': vix_lv,
+        'vixChangePct': vix_cp,
+        'nvdaChangePct': nvda,
+        'avgoChangePct': avgo,
+        'tsmChangePct': tsm,
+        'twSemiChangePct': tw_semi,
+        'factorName': (factor or {}).get('name'),
+        'factorScore': (factor or {}).get('score'),
+    }
+    snap = dict(payload.get('snapshot') or {})
+    snap['aiSpill'] = spill
+    payload['snapshot'] = snap
+    payload['aiSpill'] = spill
+    # 模型標記：台股主帳本 + 可選 AI 外溢
+    if payload.get('model') == 'tw-pulse-intel/v1':
+        payload['model'] = 'tw-pulse-intel/v1+ai-spill'
+    return payload
