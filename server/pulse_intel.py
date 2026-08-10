@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""TW Pulse Intelligence — 市場脈動因子帳本（真實資料，非 mock）。
+"""TW+US Pulse Intelligence — 市場脈動因子帳本（真實資料，非 mock）。
 
 設計目標（對齊 tw-pulse-terminal UX，分數必須可覆核）：
   • healthScore  = 既有大盤體質 _score_tw_market（0~100）
   • riskScore    = 風險因子絕對分加總後軟封頂（0~100，越高越警戒）
   • totalScore   = 0.70×health + 0.30×(100−risk)
   • positive / risk / pending 三欄因子帳本（pending 不計分）
-  • dataCompleteness = 可用資料集 / 預期資料集
+  • dataCompleteness = 可用資料集 / 預期資料集（台股核心；美股為延伸計分）
+  • 美股：指數（GSPC/IXIC/DJI/SOX）＋VIX＋流動池當日廣度納入風險／正面因子
 
 鐵律：不得捏造 Fear&Greed／假 VIX／假 250 日新高家數。
 缺資料 → pendingFactors，完整度下降，不灌水分數。
@@ -93,13 +94,21 @@ def _label_risk(score: Optional[float]) -> str:
     return '風險低檔'
 
 
-def _factor(fid: int, name: str, description: str, score: float, typ: str) -> Dict[str, Any]:
+def _factor(
+    fid: int,
+    name: str,
+    description: str,
+    score: float,
+    typ: str,
+    mkt: str = 'TW',
+) -> Dict[str, Any]:
     return {
         'id': fid,
         'name': name,
         'description': description,
         'score': round(float(score), 1),
         'type': typ,  # positive | risk | pending
+        'mkt': mkt if mkt in ('TW', 'US') else 'TW',
     }
 
 
@@ -138,6 +147,7 @@ def build_pulse_intel(
     tx_oi: Optional[dict] = None,
     sbl: Optional[dict] = None,
     nhnl: Optional[dict] = None,
+    us_market: Optional[dict] = None,
 ) -> Dict[str, Any]:
     """由已對齊之欄位組出脈動情報 payload（純函數，可單測）。
 
@@ -145,6 +155,7 @@ def build_pulse_intel(
       tx_oi — 近月台指 OI 變化 × 價格方向 → 增倉／平倉結構
       sbl   — 借券賣出金額相對成交 → 融券／借券賣壓
       nhnl  — 流動性樣本 250 日新高／新低（誠實標註樣本數）
+      us_market — 美股指數／VIX／流動池當日廣度（風險監控跨市場）
     """
     pillars = pillars or {}
     stocks = stocks or {}
@@ -154,6 +165,7 @@ def build_pulse_intel(
     tx_oi = tx_oi or {}
     sbl = sbl or {}
     nhnl = nhnl or {}
+    us_market = us_market if isinstance(us_market, dict) else {}
 
     t00 = indices.get('t00') or {}
     o00 = indices.get('o00') or {}
@@ -205,15 +217,15 @@ def build_pulse_intel(
     pending: List[dict] = []
     pid = rid = nd = 0
 
-    def add_pos(name, desc, score):
+    def add_pos(name, desc, score, mkt='TW'):
         """score=0 表示有資料但訊號中性（不灌水分數，仍可顯示於正面欄）。"""
         nonlocal pid
         if score is None or score < 0:
             return
         pid += 1
-        positive.append(_factor(pid, name, desc, score, 'positive'))
+        positive.append(_factor(pid, name, desc, score, 'positive', mkt=mkt))
 
-    def add_risk(name, desc, score):
+    def add_risk(name, desc, score, mkt='TW'):
         """score 傳入負值或正的風險點數；統一存成負分。"""
         nonlocal rid
         if score is None:
@@ -222,12 +234,12 @@ def build_pulse_intel(
         if sc > -0.05:  # 含 0：風險欄不放中性項
             return
         rid += 1
-        risk.append(_factor(rid, name, desc, sc, 'risk'))
+        risk.append(_factor(rid, name, desc, sc, 'risk', mkt=mkt))
 
-    def add_pending(name, desc):
+    def add_pending(name, desc, mkt='TW'):
         nonlocal nd
         nd += 1
-        pending.append(_factor(nd, name, desc, 0.0, 'pending'))
+        pending.append(_factor(nd, name, desc, 0.0, 'pending', mkt=mkt))
 
     # ── 正面因子 ──────────────────────────────────────────────
     if adv is not None:
@@ -470,6 +482,131 @@ def build_pulse_intel(
             f'流動性樣本掃描尚未完成（需 ≥{NHNL_MIN_SAMPLE} 檔有效 250 日序列；非全市場掃描）。',
         )
 
+    # ── 美股風險／正面（指數 + VIX + 流動池廣度；缺資料 → pending，不灌水）──
+    us_ok = bool(us_market.get('ok'))
+    gspc = _n(us_market.get('gspcChangePct'))
+    ixic = _n(us_market.get('ixicChangePct'))
+    dji = _n(us_market.get('djiChangePct'))
+    sox = _n(us_market.get('soxChangePct'))
+    vix_lv = _n(us_market.get('vixLevel'))
+    vix_cp = _n(us_market.get('vixChangePct'))
+    us_adv = _n(us_market.get('advRatio'))
+    us_up = _n(us_market.get('up'))
+    us_dn = _n(us_market.get('down'))
+    us_sample = int(us_market.get('sample') or 0)
+    us_top_loser = None
+    us_losers = us_market.get('losers') or []
+    if isinstance(us_losers, list) and us_losers:
+        us_top_loser = _n((us_losers[0] or {}).get('changePct'))
+
+    if us_ok and any(v is not None for v in (gspc, ixic, dji, sox, vix_lv, us_adv)):
+        # 指數：以 S&P500 為主，NASDAQ／道瓊／費半作確認敘述
+        lead = gspc if gspc is not None else (ixic if ixic is not None else dji)
+        idx_bits = []
+        if gspc is not None:
+            idx_bits.append(f'S&P500 {gspc:+.2f}%')
+        if ixic is not None:
+            idx_bits.append(f'NASDAQ {ixic:+.2f}%')
+        if dji is not None:
+            idx_bits.append(f'道瓊 {dji:+.2f}%')
+        if sox is not None:
+            idx_bits.append(f'費半 {sox:+.2f}%')
+        idx_desc = '｜'.join(idx_bits) if idx_bits else '美股指數'
+        if lead is not None:
+            if lead <= -1.0:
+                # -1%→2.5、-2%→5、-4%→10，封頂 12
+                add_risk(
+                    '美股指數偏空',
+                    idx_desc + '｜外溢至台股權值／ADR 連動風險升高。',
+                    _clamp(abs(lead) * 2.5, 0.0, 12.0),
+                    mkt='US',
+                )
+            elif lead >= 1.0:
+                add_pos(
+                    '美股指數偏多',
+                    idx_desc + '｜風險偏好回溫，有助台股隔日氣氛。',
+                    _clamp(lead * 2.0, 0.0, 10.0),
+                    mkt='US',
+                )
+            elif ixic is not None and ixic <= -1.5 and (gspc is None or gspc > -1.0):
+                add_risk(
+                    '美股科技偏弱',
+                    f'NASDAQ {ixic:+.2f}% 明顯弱於大盤，半導體／權值外溢需警戒。'
+                    + (f'｜費半 {sox:+.2f}%' if sox is not None else ''),
+                    _clamp(abs(ixic) * 1.8, 0.0, 8.0),
+                    mkt='US',
+                )
+            else:
+                add_pos('美股指數', idx_desc + '｜指數波幅中性。', 0.0, mkt='US')
+
+        # VIX：水準與急漲雙軌（真實報價，非假 Fear&Greed）
+        if vix_lv is not None or vix_cp is not None:
+            vix_bits = []
+            if vix_lv is not None:
+                vix_bits.append(f'VIX {vix_lv:.2f}')
+            if vix_cp is not None:
+                vix_bits.append(f'變動 {vix_cp:+.2f}%')
+            vix_desc = '｜'.join(vix_bits)
+            risk_pts = 0.0
+            if vix_lv is not None and vix_lv >= 25.0:
+                risk_pts += _clamp((vix_lv - 20.0) * 0.8, 0.0, 10.0)
+            if vix_cp is not None and vix_cp >= 12.0:
+                risk_pts += _clamp((vix_cp - 8.0) * 0.25, 0.0, 6.0)
+            if risk_pts >= 0.5:
+                add_risk(
+                    'VIX 恐慌升溫',
+                    vix_desc + '｜波動升溫時風險資產易同步回檔。',
+                    _clamp(risk_pts, 0.0, 12.0),
+                    mkt='US',
+                )
+            elif vix_lv is not None and vix_lv <= 15.0:
+                add_pos(
+                    'VIX 低檔',
+                    vix_desc + '｜恐慌指標偏安靜。',
+                    _clamp((15.0 - vix_lv) * 0.6, 0.0, 5.0),
+                    mkt='US',
+                )
+            else:
+                add_pos('VIX 波動', vix_desc + '｜波動中性。', 0.0, mkt='US')
+        else:
+            add_pending('VIX 波動', 'VIX 報價尚未取得。', mkt='US')
+
+        # 流動池當日廣度（us_liquid_risk 樣本，非全市場）
+        if us_adv is not None and us_sample >= 8:
+            sc = _clamp((us_adv - 0.50) * 60.0, 0.0, 12.0)
+            br_desc = (
+                f'流動池上漲比 {(us_adv * 100):.1f}%｜上漲 {int(us_up) if us_up is not None else "—"}'
+                f' / 下跌 {int(us_dn) if us_dn is not None else "—"}｜樣本 {us_sample} 檔'
+            )
+            if us_top_loser is not None and us_top_loser <= -5.0:
+                br_desc += f'｜最大跌幅 {us_top_loser:+.2f}%'
+            if us_adv >= 0.55:
+                add_pos('美股廣度', br_desc + '｜權值池偏多。', sc, mkt='US')
+            elif us_adv <= 0.40:
+                add_risk(
+                    '美股廣度偏空',
+                    br_desc + '｜跌多於漲，外溢防衛訊號。',
+                    _clamp((0.45 - us_adv) * 40.0, 0.0, 10.0),
+                    mkt='US',
+                )
+            else:
+                add_pos('美股廣度', br_desc + '｜多空糾結。', 0.0, mkt='US')
+        elif us_sample > 0:
+            add_pending(
+                '美股廣度',
+                f'流動池樣本僅 {us_sample} 檔（需 ≥8），廣度暫不計分。',
+                mkt='US',
+            )
+        else:
+            add_pending('美股廣度', '美股流動池當日漲跌尚未取得。', mkt='US')
+    else:
+        add_pending(
+            '美股指數',
+            '美股指數／流動池報價尚未取得（網路或休市）；風險評估暫以台股為主。',
+            mkt='US',
+        )
+        add_pending('美股廣度', '美股流動池當日漲跌尚未取得。', mkt='US')
+
     pos_sum = round(sum(f['score'] for f in positive), 1)
     risk_abs = round(sum(abs(f['score']) for f in risk), 1)
     hs = _n(health_score)
@@ -528,10 +665,22 @@ def build_pulse_intel(
             tone_parts.append('廣度糾結')
     if hs is not None:
         tone_parts.append(f'體質 {hs:.0f}')
+    if us_ok and gspc is not None:
+        if gspc <= -1.0:
+            tone_parts.append('美股偏空')
+        elif gspc >= 1.0:
+            tone_parts.append('美股偏多')
+        else:
+            tone_parts.append('美股中性')
+    elif us_ok and us_adv is not None:
+        if us_adv <= 0.40:
+            tone_parts.append('美股廣度偏空')
+        elif us_adv >= 0.55:
+            tone_parts.append('美股廣度偏多')
 
     return {
         'ok': True,
-        'model': 'tw-pulse-intel/v1',
+        'model': 'tw-us-pulse-intel/v1',
         'totalScore': total,
         'statusText': _label_total(total),
         'healthScore': hs,
@@ -574,5 +723,18 @@ def build_pulse_intel(
             'sectorsCold': (sec_dn[:6] if sec_dn else []),
             'topSector': top_sec,
             'bottomSector': bot_sec,
+            'usMarket': {
+                'ok': us_ok,
+                'gspcChangePct': gspc,
+                'ixicChangePct': ixic,
+                'djiChangePct': dji,
+                'soxChangePct': sox,
+                'vixLevel': vix_lv,
+                'vixChangePct': vix_cp,
+                'advRatio': us_adv,
+                'up': int(us_up) if us_up is not None else None,
+                'down': int(us_dn) if us_dn is not None else None,
+                'sample': us_sample if us_sample else None,
+            } if (us_ok or us_market) else None,
         },
     }

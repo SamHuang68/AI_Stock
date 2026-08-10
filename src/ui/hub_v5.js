@@ -873,7 +873,7 @@
 
   // ── Risk ─────────────────────────────────────────────────
   function renderRisk(el) {
-    el.innerHTML = head('風險監控', '由脈動因子與廣度／法人規則產生的風險事件',
+    el.innerHTML = head('風險監控', '台股體質＋美股指數／廣度納入風險評估',
       '<button class="hub-btn" data-sync>同步資料</button>' +
       '<button class="hub-btn" data-go="book">投組風險</button>' +
       '<button class="hub-btn primary" data-shell-back>← 儀表板</button>') +
@@ -881,6 +881,16 @@
     bindCommon(el);
     Promise.all([jget('/pulse'), jget('/pulse/history?kind=pulse&n=15')]).then(function (arr) {
       var p = arr[0] || {};
+      var us = p.usMarket || (p.snapshot && p.snapshot.usMarket) || {};
+      var movers = p.movers || {};
+      function factorScope(f) {
+        if (!f) return '台股';
+        if (f.mkt === 'US' || f.scope === '美股') return '美股';
+        if (f.mkt === 'TW') return '台股';
+        var n = String(f.name || '');
+        if (/^美股|^VIX/.test(n)) return '美股';
+        return '台股';
+      }
       var events = [];
       (p.riskFactors || []).forEach(function (f) {
         var sev = Math.abs(f.score) >= 10 ? '高' : '中';
@@ -888,7 +898,7 @@
           time: p.updatedAt || p.date || '',
           event: f.name,
           description: f.description,
-          scope: '台股',
+          scope: factorScope(f),
           severity: sev
         });
       });
@@ -907,20 +917,95 @@
           scope: '台股', severity: '高'
         });
       }
+      var usAdv = us.advRatio != null ? us.advRatio : movers.usAdvRatio;
+      if (usAdv != null && usAdv <= 0.40) {
+        events.push({
+          time: p.updatedAt || p.date || '',
+          event: '美股流動池廣度偏空',
+          description: '美股流動池上漲比 ' + (usAdv * 100).toFixed(1) + '%，外溢防衛訊號。',
+          scope: '美股',
+          severity: usAdv <= 0.30 ? '高' : '中'
+        });
+      }
+      if (us.gspcChangePct != null && us.gspcChangePct <= -1.5) {
+        events.push({
+          time: p.updatedAt || p.date || '',
+          event: 'S&P500 急跌',
+          description: 'S&P500 ' + (us.gspcChangePct >= 0 ? '+' : '') +
+            Number(us.gspcChangePct).toFixed(2) + '%，台股隔日開盤需防缺口。',
+          scope: '美股',
+          severity: us.gspcChangePct <= -2.5 ? '高' : '中'
+        });
+      }
       var V = window.Viz;
       var riskMeter = V ? V.scoreMeter(p.riskScore, { color: 'var(--cyan)' }) : '';
       var healthMeter = V ? V.scoreMeter(p.healthScore) : '';
       var compMeter = V ? V.scoreMeter(p.dataCompleteness) : '';
+      var usN = (p.riskFactors || []).filter(function (f) { return factorScope(f) === '美股'; }).length;
+      var twN = (p.riskFactors || []).filter(function (f) { return factorScope(f) === '台股'; }).length;
       var eventsRows = '';
       if (!events.length) {
         eventsRows = '<tr><td colspan="5">目前無觸發中的風險事件</td></tr>';
       } else {
         events.forEach(function (e) {
           var cls = e.severity === '高' ? 'err' : 'mid';
+          var scopeCls = e.scope === '美股' ? ' style="color:var(--cyan);font-weight:700"' : '';
           eventsRows += '<tr><td>' + (e.time || '') + '</td><td>' + e.event + '</td><td style="text-align:left">' +
-            e.description + '</td><td>' + e.scope + '</td><td><span class="badge ' + cls + '">' + e.severity + '</span></td></tr>';
+            e.description + '</td><td' + scopeCls + '>' + e.scope + '</td><td><span class="badge ' +
+            cls + '">' + e.severity + '</span></td></tr>';
         });
       }
+      function usChgCell(label, v) {
+        if (v == null || !isFinite(v)) {
+          return '<div class="cell"><div class="k">' + label + '</div><div class="v">—</div></div>';
+        }
+        var cls = v > 0 ? 'up' : (v < 0 ? 'dn' : 'flat');
+        var sign = v > 0 ? '+' : '';
+        return '<div class="cell"><div class="k">' + label + '</div><div class="v ' + cls + '">' +
+          sign + Number(v).toFixed(2) + '%</div></div>';
+      }
+      var usStrip =
+        '<div class="hub-strip" style="grid-template-columns:repeat(5,minmax(0,1fr));margin-top:4px">' +
+          usChgCell('S&P500', us.gspcChangePct) +
+          usChgCell('NASDAQ', us.ixicChangePct) +
+          usChgCell('費半', us.soxChangePct) +
+          '<div class="cell"><div class="k">VIX</div><div class="v">' +
+            (us.vixLevel != null ? Number(us.vixLevel).toFixed(2) : '—') + '</div>' +
+            '<div class="s">' + (us.vixChangePct != null
+              ? ((us.vixChangePct > 0 ? '+' : '') + Number(us.vixChangePct).toFixed(2) + '%')
+              : '') + '</div></div>' +
+          '<div class="cell"><div class="k">美股廣度</div><div class="v">' +
+            (usAdv != null ? (usAdv * 100).toFixed(0) + '%' : '—') + '</div>' +
+            '<div class="s">' +
+              (us.up != null ? ('↑' + us.up + ' ↓' + (us.down != null ? us.down : '—')) : '') +
+              (us.sample != null ? (' · n=' + us.sample) : '') +
+            '</div></div>' +
+        '</div>';
+      function moverRows(list, emptyMsg) {
+        var rows = list || [];
+        if (!rows.length) return '<tr><td colspan="3">' + emptyMsg + '</td></tr>';
+        return rows.slice(0, 6).map(function (r) {
+          var cp = r.changePct;
+          var cls = cp > 0 ? 'up' : (cp < 0 ? 'dn' : 'flat');
+          var sign = cp > 0 ? '+' : '';
+          return '<tr data-code="' + (r.code || r.sym || '') + '" data-mkt="US"><td style="text-align:left">' +
+            (r.code || r.sym || '') + ' ' + (r.name || '') + '</td><td>' +
+            (r.price != null ? Number(r.price).toFixed(2) : '—') +
+            '</td><td class="' + cls + '">' +
+            (cp != null ? (sign + Number(cp).toFixed(2) + '%') : '—') + '</td></tr>';
+        }).join('');
+      }
+      var usGain = movers.usGainers || us.gainers || [];
+      var usLose = movers.usLosers || us.losers || [];
+      var usMoversPanel =
+        '<div class="hub-sec"><h4>美股流動池漲跌' +
+          '<span style="color:var(--tlo);font-weight:600;font-size:10px">外溢監控</span></h4>' +
+          '<div class="hub-fill" style="display:grid;grid-template-columns:1fr 1fr;gap:6px">' +
+            '<div><div class="hub-note">漲幅前列</div><table><tr><th>標的</th><th>價</th><th>%</th></tr>' +
+              moverRows(usGain, '尚無美股漲幅資料') + '</table></div>' +
+            '<div><div class="hub-note">跌幅前列</div><table><tr><th>標的</th><th>價</th><th>%</th></tr>' +
+              moverRows(usLose, '尚無美股跌幅資料') + '</table></div>' +
+          '</div></div>';
       var hist = (arr[1] && arr[1].rows) || [];
       var histPanel = '<div class="hub-sec"><h4>脈動分數歷史</h4>';
       if (hist.length) {
@@ -958,18 +1043,26 @@
           '<div class="cell"><div class="k">健康度</div><div class="v">' +
             (p.healthScore != null ? Number(p.healthScore).toFixed(1) : '—') + '</div>' +
             '<div class="s">' + healthMeter + '</div></div>' +
-          '<div class="cell"><div class="k">風險因子數</div><div class="v">' +
-            ((p.riskFactors || []).length) + '</div></div>' +
+          '<div class="cell"><div class="k">風險因子</div><div class="v">' +
+            ((p.riskFactors || []).length) + '</div>' +
+            '<div class="s">台 ' + twN + ' · 美 ' + usN + '</div></div>' +
           '<div class="cell"><div class="k">完整度</div><div class="v">' +
             (p.dataCompleteness != null ? Number(p.dataCompleteness).toFixed(0) + '%' : '—') + '</div>' +
             '<div class="s">' + compMeter + '</div></div>' +
         '</div>' +
-        '<div class="hub-dash hub-cols-2">' +
-          '<div class="hub-sec"><h4>風險事件清單</h4><div class="hub-fill"><table>' +
+        usStrip +
+        '<div class="hub-dash hub-cols-2" style="margin-top:4px">' +
+          '<div class="hub-sec"><h4>風險事件清單' +
+            '<span style="color:var(--tlo);font-weight:600;font-size:10px">台股 · 美股</span></h4>' +
+            '<div class="hub-fill"><table>' +
             '<tr><th>時間</th><th>事件</th><th>說明</th><th>範圍</th><th>重要</th></tr>' +
             eventsRows + '</table></div></div>' +
           histPanel +
-        '</div>';
+        '</div>' +
+        usMoversPanel +
+        '<div class="hub-note">美股計分口徑：S&P500／NASDAQ／費半／VIX＋流動池（' +
+          (movers.usUniverse || us.universe || 'us_liquid_risk') +
+          '）當日漲跌廣度；缺資料進 pending，不灌水分數。</div>';
       bindCommon(el);
     });
   }

@@ -48,6 +48,8 @@ def test_health_and_breadth_bullish():
     assert any(f['name'] == '市場廣度' for f in out['positiveFactors'])
     assert any(f['name'] == '三大法人' for f in out['positiveFactors'])
     assert any(f['name'] == '類股參與度' for f in out['positiveFactors'])
+    assert all(f.get('mkt') == 'TW' for f in out['positiveFactors'])
+    assert any(f.get('mkt') == 'US' for f in out['pendingFactors'])
     pending_names = {f['name'] for f in out['pendingFactors']}
     assert '期貨未平倉量' in pending_names
     assert '借券賣出壓力' in pending_names
@@ -84,6 +86,8 @@ def test_missing_data_goes_pending_not_fake():
     assert '期貨未平倉量' in names
     assert '借券賣出壓力' in names
     assert '250日新高／新低家數' in names
+    assert '美股指數' in names
+    assert '美股廣度' in names
     assert out['positiveFactors'] == []
     assert out['riskFactors'] == []
     # 不用假 Fear&Greed／外資借券賣超（無外資分項）
@@ -254,6 +258,113 @@ def test_all_extras_raise_completeness():
     assert '類股參與度' not in pending_names
 
 
+
+def test_us_market_bearish_adds_risk():
+    """美股指數／廣度偏空必須進入 riskFactors，且 mkt=US。"""
+    out = pi.build_pulse_intel(
+        health_score=60,
+        pillars={
+            'volumeScore': 55.0, 'turnoverYi': 8500.0,
+            'instScore': 50.0, 'instNetYi': 0.0,
+            'marginScore': 55.0, 'marginRatio': 168.0,
+            'valuationScore': 50.0, 'medianPE': 17.0,
+        },
+        market_rows=[], summary=None,
+        stocks={'up': 500, 'down': 500, 'unchanged': 100, 'advRatio': 0.5, 'net': 0},
+        indices={'t00': {'price': 22000.0, 'changePct': 0.1}, 'o00': {'price': 250.0, 'changePct': 0.0}},
+        inst={'foreign': 0, 'trust': 0, 'dealer': 0},
+        txf_night={'price': 22000.0, 'changePct': 0.0},
+        sectors=[{'name': '半導體', 'changePct': 0.2}, {'name': '金融', 'changePct': 0.1},
+                 {'name': '塑膠', 'changePct': 0.0}, {'name': '鋼鐵', 'changePct': -0.1}],
+        sources_present={
+            'twindex': True, 'breadth': True, 'marketflow': True, 'health': True,
+            'margin': True, 'valuation': True, 'txf': True, 'sectors': True,
+            'txOi': False, 'sbl': False, 'nhnl': False,
+        },
+        us_market={
+            'ok': True,
+            'gspcChangePct': -2.4,
+            'ixicChangePct': -3.1,
+            'djiChangePct': -1.8,
+            'soxChangePct': -4.0,
+            'vixLevel': 28.5,
+            'vixChangePct': 18.0,
+            'up': 8, 'down': 32, 'flat': 0,
+            'advRatio': 0.20,
+            'sample': 40,
+            'losers': [{'sym': 'NVDA', 'changePct': -7.2}],
+            'gainers': [],
+        },
+    )
+    risk_names = {f['name'] for f in out['riskFactors']}
+    assert '美股指數偏空' in risk_names
+    assert 'VIX 恐慌升溫' in risk_names
+    assert '美股廣度偏空' in risk_names
+    us_risk = [f for f in out['riskFactors'] if f.get('mkt') == 'US']
+    assert len(us_risk) >= 3
+    assert all(f['score'] < 0 for f in us_risk)
+    assert out['snapshot']['usMarket']['gspcChangePct'] == -2.4
+    assert out['model'] == 'tw-us-pulse-intel/v1'
+    # 風險分應高於僅台股中性情境
+    base = pi.build_pulse_intel(
+        health_score=60,
+        pillars={
+            'volumeScore': 55.0, 'turnoverYi': 8500.0,
+            'instScore': 50.0, 'instNetYi': 0.0,
+            'marginScore': 55.0, 'marginRatio': 168.0,
+            'valuationScore': 50.0, 'medianPE': 17.0,
+        },
+        market_rows=[], summary=None,
+        stocks={'up': 500, 'down': 500, 'unchanged': 100, 'advRatio': 0.5, 'net': 0},
+        indices={'t00': {'price': 22000.0, 'changePct': 0.1}, 'o00': {'price': 250.0, 'changePct': 0.0}},
+        inst={'foreign': 0, 'trust': 0, 'dealer': 0},
+        txf_night={'price': 22000.0, 'changePct': 0.0},
+        sectors=[{'name': '半導體', 'changePct': 0.2}, {'name': '金融', 'changePct': 0.1},
+                 {'name': '塑膠', 'changePct': 0.0}, {'name': '鋼鐵', 'changePct': -0.1}],
+        sources_present={
+            'twindex': True, 'breadth': True, 'marketflow': True, 'health': True,
+            'margin': True, 'valuation': True, 'txf': True, 'sectors': True,
+            'txOi': False, 'sbl': False, 'nhnl': False,
+        },
+    )
+    assert out['riskScore'] is not None and base['riskScore'] is not None
+    assert out['riskScore'] > base['riskScore']
+
+
+def test_us_market_bullish_positive():
+    out = pi.build_pulse_intel(
+        health_score=65,
+        pillars={'volumeScore': 60.0, 'turnoverYi': 9000.0, 'instScore': 60.0, 'instNetYi': 50.0,
+                 'marginScore': 55.0, 'marginRatio': 170.0, 'valuationScore': 50.0, 'medianPE': 17.0},
+        market_rows=[], summary=None,
+        stocks={'up': 700, 'down': 400, 'unchanged': 100, 'advRatio': 0.64, 'net': 300},
+        indices={'t00': {'price': 23000.0, 'changePct': 0.8}, 'o00': {'price': 260.0, 'changePct': 0.5}},
+        inst={'foreign': 1e9, 'trust': 0, 'dealer': 0},
+        txf_night={'price': 23100.0, 'changePct': 0.5},
+        sectors=[{'name': '半導體', 'changePct': 1.0}, {'name': '金融', 'changePct': 0.5},
+                 {'name': '塑膠', 'changePct': 0.2}, {'name': '鋼鐵', 'changePct': -0.1}],
+        us_market={
+            'ok': True,
+            'gspcChangePct': 1.6,
+            'ixicChangePct': 2.0,
+            'djiChangePct': 1.2,
+            'soxChangePct': 2.5,
+            'vixLevel': 13.2,
+            'vixChangePct': -4.0,
+            'up': 30, 'down': 10, 'flat': 0,
+            'advRatio': 0.75,
+            'sample': 40,
+            'gainers': [{'sym': 'NVDA', 'changePct': 5.0}],
+            'losers': [],
+        },
+    )
+    pos_names = {f['name'] for f in out['positiveFactors']}
+    assert '美股指數偏多' in pos_names
+    assert '美股廣度' in pos_names
+    assert 'VIX 低檔' in pos_names
+    assert all(f.get('mkt') == 'US' for f in out['positiveFactors'] if f['name'].startswith(('美股', 'VIX')))
+
+
 if __name__ == '__main__':
     test_health_and_breadth_bullish()
     test_missing_data_goes_pending_not_fake()
@@ -267,4 +378,6 @@ if __name__ == '__main__':
     test_filter_sectors_skips_benchmarks()
     test_status_label_clearly_strong()
     test_all_extras_raise_completeness()
+    test_us_market_bearish_adds_risk()
+    test_us_market_bullish_positive()
     print('OK pulse_intel')
