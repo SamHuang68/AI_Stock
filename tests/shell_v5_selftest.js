@@ -134,7 +134,7 @@ ok(/function renderTrendTabs/.test(pl) && /IDX_TREND_TABS/.test(pl) &&
   /明顯縮量/.test(pl) && /廣度糾結/.test(pl) &&
   /pl-ttabs span\.on\.buy/.test(pl) && /opacity:\.38/.test(pl),
   'pulse strip shows all trend-type tabs with active highlight / others gray');
-ok(/加權盤勢/.test(pl) && /櫃買／台指期見頂列/.test(pl) && !/pl-trend-pair/.test(pl),
+ok(/加權盤勢/.test(pl) && /線型＝加權 \^TWII（非台指期）/.test(pl) && !/pl-trend-pair/.test(pl),
   'pulse OHLC panel integrated — no duplicate index chips');
 ok(/pl-ohlc4/.test(pl) && /pl-ohlc-trend/.test(pl) && /function buildOhlcComment/.test(pl) &&
   /pl-inst4,#pl-root \.pl-bd4,#pl-root \.pl-ohlc4\{/.test(pl) &&
