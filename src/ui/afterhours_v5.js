@@ -311,7 +311,7 @@
             '<div class="ah-actions">' +
               '<button type="button" class="ah-btn" id="ah-refresh">↻ 重新整理</button>' +
               '<button type="button" class="ah-btn" id="ah-open-ovn">夜盤詳情</button>' +
-              '<button type="button" class="ah-btn primary" data-shell-back>← 圖表</button>' +
+              '<button type="button" class="ah-btn primary" data-shell-back>← 儀表板</button>' +
             '</div>' +
           '</div>' +
           '<div id="ah-body" class="ah-loading">載入盤後資料…</div>' +

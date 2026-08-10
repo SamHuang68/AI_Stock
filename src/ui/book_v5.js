@@ -273,7 +273,7 @@
             '<button type="button" class="bk-btn" data-src="watch">自選</button>' +
             '<button type="button" class="bk-btn" id="bk-edit-toggle">成分 ▾</button>' +
             '<button type="button" class="bk-btn primary" id="bk-run">分析</button>' +
-            '<button type="button" class="bk-btn" data-shell-back>← 圖表</button>' +
+            '<button type="button" class="bk-btn" data-shell-back>← 儀表板</button>' +
           '</div></div>' +
           '<div class="bk-edit-wrap">' +
             '<textarea id="bk-edit" placeholder="每行：代號 權重（可省略=1）  例：2330 40">' +

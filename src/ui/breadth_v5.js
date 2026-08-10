@@ -234,7 +234,7 @@
             '</div>' +
             '<div class="bd-actions">' +
               '<button type="button" class="bd-btn" id="bd-refresh">↻ 重新整理</button>' +
-              '<button type="button" class="bd-btn primary" data-shell-back>← 圖表</button>' +
+              '<button type="button" class="bd-btn primary" data-shell-back>← 儀表板</button>' +
             '</div>' +
           '</div>' +
           '<div id="bd-body" class="bd-loading">載入廣度資料…</div>' +

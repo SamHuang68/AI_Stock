@@ -275,7 +275,7 @@
             '<button type="button" class="ht-btn on" data-sort="chg">漲跌</button>' +
             '<button type="button" class="ht-btn" data-sort="name">名稱</button>' +
             '<button type="button" class="ht-btn" id="ht-refresh">↻</button>' +
-            '<button type="button" class="ht-btn primary" data-shell-back>← 圖表</button>' +
+            '<button type="button" class="ht-btn primary" data-shell-back>← 儀表板</button>' +
           '</div></div>' +
           '<div id="ht-body" class="ht-loading">載入類股…</div>' +
         '</div>';

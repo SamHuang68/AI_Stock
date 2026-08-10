@@ -280,7 +280,7 @@
             '<span class="sc-sub">技術 × 基本面 × 籌碼</span>' +
           '</div><div class="sc-actions">' +
             '<button type="button" class="sc-btn primary" id="sc-run">掃描</button>' +
-            '<button type="button" class="sc-btn" data-shell-back>← 圖表</button>' +
+            '<button type="button" class="sc-btn" data-shell-back>← 儀表板</button>' +
           '</div></div>' +
           '<div class="sc-layout">' +
             '<div class="sc-rail">' +

@@ -404,7 +404,14 @@
           '0 -2px 5px rgba(0,0,0,.4) inset,' +
           '0 0 0 3px rgba(245,197,24,.16),' +
           '0 10px 26px rgba(0,0,0,.55)}' +
-      '#st-ring-fab[hidden]{display:none!important}';
+      '#st-ring-fab[hidden]{display:none!important}' +
+      /* 圖表頂欄 Logo／快捷鈕 → 儀表板 */
+      '#topbar .logo{cursor:pointer}' +
+      '#topbar .logo:hover{filter:brightness(1.08)}' +
+      '#topbar .shell-dash-btn{display:inline-flex;align-items:center;gap:4px;margin-left:8px;' +
+        'padding:3px 9px;border-radius:4px;border:1px solid var(--border);background:var(--bg3);' +
+        'color:var(--thi);font:700 10px/1.2 "JetBrains Mono",monospace;cursor:pointer;white-space:nowrap}' +
+      '#topbar .shell-dash-btn:hover{border-color:var(--gold);color:var(--gold)}';
   }
 
   function stubHTML(route) {
@@ -414,7 +421,7 @@
       '<p class="sv-desc">' + route.hint +
         '。面板載入中或尚未掛接資料模組。</p>' +
       '<div class="sv-meta">route = ' + route.id + '</div>' +
-      '<button type="button" class="sv-cta" data-shell-back>← 回到圖表工作區</button>';
+      '<button type="button" class="sv-cta" data-shell-back>← 返回儀表板</button>';
   }
 
   function btnMeta(id) {
@@ -566,7 +573,7 @@
         '<button type="button" class="sr-hub" id="st-ring-hub" title="Stock Terminal 5.0" aria-label="Stock Terminal 5.0">' +
           '<img class="sr-logo" src="' + RING_LOGO + '" alt="Stock Terminal" width="34" height="34">' +
           '<span class="sr-hub-ver">' + VERSION + '</span>' +
-          '<span class="sr-hub-badge" aria-hidden="true">✕</span>' +
+          '<span class="sr-hub-badge" aria-hidden="true">◎</span>' +
         '</button>' +
         '<div class="sr-tip" id="st-ring-tip">滾輪循環選 · 點 › 從該點開下一層</div>' +
       '</div>';
@@ -641,6 +648,11 @@
     }
   }
 
+  function goDashboard() {
+    closeRing();
+    go('pulse');
+  }
+
   function paintRingHub() {
     var hub = $('st-ring-hub');
     if (!hub) return;
@@ -648,16 +660,14 @@
       hub.innerHTML =
         '<img class="sr-logo" src="' + RING_LOGO + '" alt="Stock Terminal" width="34" height="34">' +
         '<span class="sr-hub-ver">' + VERSION + '</span>' +
-        '<span class="sr-hub-badge" aria-hidden="true">✕</span>';
+        '<span class="sr-hub-badge" aria-hidden="true">◎</span>';
     }
-    var deep = ringDepth() > 1;
     var badge = hub.querySelector('.sr-hub-badge');
-    if (badge) badge.textContent = deep ? '‹' : '✕';
-    hub.title = deep
-      ? '返回上一層 · Stock Terminal ' + VERSION
-      : '關閉轉盤 · Stock Terminal ' + VERSION;
+    if (badge) badge.textContent = '◎';
+    hub.title = '返回儀表板 · Stock Terminal ' + VERSION;
     hub.setAttribute('aria-label', hub.title);
-    hub.classList.toggle('back', deep);
+    /* 中心 Logo 固定為儀表板快捷；子層返回改走 Esc／麵包屑／滾輪上一層 */
+    hub.classList.remove('back');
   }
 
   function paintRingCrumbs() {
@@ -765,12 +775,22 @@
     var fab = document.createElement('button');
     fab.type = 'button';
     fab.id = 'st-ring-fab';
-    fab.title = '分析轉盤（中鍵或 \\）· 最多三層';
-    fab.setAttribute('aria-label', '開啟功能轉盤');
+    fab.title = '分析轉盤（點一下）· 雙擊返回儀表板 · 中鍵或 \\';
+    fab.setAttribute('aria-label', '開啟功能轉盤；雙擊返回儀表板');
     fab.textContent = '◎';
+    var fabTimer = null;
     fab.addEventListener('click', function (e) {
       e.preventDefault();
-      openRing(window.innerWidth - 80, window.innerHeight - 80);
+      if (fabTimer) clearTimeout(fabTimer);
+      fabTimer = setTimeout(function () {
+        fabTimer = null;
+        openRing(window.innerWidth - 80, window.innerHeight - 80);
+      }, 220);
+    });
+    fab.addEventListener('dblclick', function (e) {
+      e.preventDefault();
+      if (fabTimer) { clearTimeout(fabTimer); fabTimer = null; }
+      goDashboard();
     });
     document.body.appendChild(fab);
   }
@@ -801,13 +821,13 @@
     if (!tip) return;
     var deep = ringDepth() > 1;
     if (idx === -2) {
-      tip.textContent = deep ? '返回上一層（上層保持鎖定顯示）' : '關閉轉盤';
+      tip.textContent = '返回儀表板（中心 Logo）';
       return;
     }
     if (idx < 0) {
       tip.textContent = 'L' + ringDepth() + '/' + RING_MAX_DEPTH +
         ' · 滾輪循環' +
-        (deep ? ' · 上層鎖定 · ‹ 返回' : ' · 點 › 從該點開下一層');
+        (deep ? ' · Esc 上一層 · 中心◎儀表板' : ' · 中心◎儀表板 · 點 › 下鑽');
       return;
     }
     var r = ringState.items[idx];
@@ -839,12 +859,12 @@
     setRingHighlight(ringIndexFromPoint(e.clientX, e.clientY));
   }
 
-  /** 滾輪可選槽：作用層項目；有子層時多一格中心「返回」（hi=-2） */
+  /** 滾輪可選槽：作用層項目 + 中心儀表板（hi=-2） */
   function ringWheelSlots() {
     var n = ringState.items.length || 0;
     var slots = [];
     for (var i = 0; i < n; i++) slots.push(i);
-    if (ringDepth() > 1) slots.push(-2);
+    slots.push(-2);
     return slots;
   }
 
@@ -949,7 +969,7 @@
     }
     if (e.target.closest('#st-ring-hub')) {
       e.preventDefault();
-      ringPop();
+      goDashboard();
       return;
     }
     /* 僅作用層可點；鎖定層忽略 */
@@ -1166,7 +1186,7 @@
 
       ensureRingFab();
       views.addEventListener('click', function (e) {
-        if (e.target.closest('[data-shell-back]')) go('chart');
+        if (e.target.closest('[data-shell-back]')) goDashboard();
       });
     } else {
       stripLegacyNav();
@@ -1175,8 +1195,41 @@
     }
 
     stripLegacyNav();
+    ensureDashChrome();
     state.built = true;
     return true;
+  }
+
+  /** 圖表頂欄：Logo 與「儀表板」鈕快捷回總覽 */
+  function ensureDashChrome() {
+    var logo = document.querySelector('#topbar .logo');
+    if (logo && !logo.getAttribute('data-dash-bound')) {
+      logo.setAttribute('data-dash-bound', '1');
+      logo.title = '返回儀表板';
+      logo.addEventListener('click', function (e) {
+        e.preventDefault();
+        goDashboard();
+      });
+    }
+    var topbar = $('topbar');
+    if (topbar && !$('shell-dash-btn')) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = 'shell-dash-btn';
+      btn.className = 'shell-dash-btn';
+      btn.textContent = '← 儀表板';
+      btn.title = '返回市場總覽儀表板';
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        goDashboard();
+      });
+      if (logo && logo.parentNode === topbar) {
+        if (logo.nextSibling) topbar.insertBefore(btn, logo.nextSibling);
+        else topbar.appendChild(btn);
+      } else {
+        topbar.insertBefore(btn, topbar.firstChild);
+      }
+    }
   }
 
   function setSync(mode, text) {
@@ -1620,7 +1673,7 @@
       }
       if ((e.key === 'Enter' || e.key === ' ') && ringState.hi === -2) {
         e.preventDefault();
-        ringPop();
+        goDashboard();
         return;
       }
       if ((e.key === 'Enter' || e.key === ' ') && ringState.hi >= 0) {
@@ -1677,6 +1730,7 @@
     ALIASES: ROUTE_ALIASES,
     go: go,
     navigate: go,
+    goDashboard: goDashboard,
     route: function () { return state.route; },
     /* 側欄已移除：保留 no-op 以免舊 hotkeys 呼叫炸裂 */
     toggleNav: function () { toggleRing(window.innerWidth / 2, window.innerHeight / 2); },

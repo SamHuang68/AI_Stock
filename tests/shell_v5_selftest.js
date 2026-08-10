@@ -248,11 +248,16 @@ ok(/onRingWheel/.test(shell) && /wheelAcc/.test(shell) && /sr-orbit/.test(shell)
   /--sr-x/.test(shell) && /box-shadow/.test(shell) && /conic-gradient/.test(shell),
   'shell ring 3D orbit/bevel + mouse-wheel cyclic select');
 ok(/function ringWheelSlots/.test(shell) && /slots\.push\(-2\)/.test(shell) &&
-  /ringDepth\(\) > 1/.test(shell) && /hi === -2/.test(shell) &&
+  /hi === -2/.test(shell) &&
   /function ringPopTo/.test(shell) && /data-ring-pop-to/.test(shell) &&
   /sr-crumb/.test(shell) && /BrowserBack/.test(shell) && /button === 3/.test(shell) &&
   /ringPop: ringPop/.test(shell) && /ringPopTo: ringPopTo/.test(shell),
-  'shell ring back: wheel hub slot + Esc/Backspace/crumb/side-button pop layer');
+  'shell ring back: Esc/Backspace/crumb/side-button pop layer; hub=-2 dashboard');
+ok(/function goDashboard/.test(shell) && /goDashboard: goDashboard/.test(shell) &&
+  /返回儀表板/.test(shell) && /shell-dash-btn/.test(shell) &&
+  /dblclick/.test(shell) && /ensureDashChrome/.test(shell) &&
+  /data-shell-back>← 返回儀表板/.test(shell),
+  'shell dashboard: goDashboard + stub back + FAB dblclick + topbar');
 ok(/ShellV5\.ringPop/.test(hotkeys),
   'hotkeys Esc fallback calls ShellV5.ringPop while ring open');
 ok(/function plainWdStatus/.test(shell) && /chipLabel/.test(shell) &&
@@ -377,6 +382,13 @@ ok(/_US_FOCUS_UNIVERSE/.test(srvPy) && /_focus_scan_pool/.test(srvPy) &&
   /mkt=TW\|US/.test(srvPy) && /universe_label = 'us_liquid'/.test(srvPy) &&
   /'mkt': mkt/.test(srvPy),
   'server /focus supports mkt=US liquid universe + mkt field');
+
+ok(/← 儀表板/.test(heat) && /data-shell-back/.test(heat) &&
+  /← 儀表板/.test(hub) && /data-shell-back/.test(hub) &&
+  /goDashboard/.test(hub),
+  'heat + hub pages wire ← 儀表板 to goDashboard');
+ok(/← 儀表板/.test(nw) && /data-shell-back/.test(nw),
+  'news page has ← 儀表板 back control');
 
 if (failed) {
   console.error('\n' + failed + ' failure(s)');

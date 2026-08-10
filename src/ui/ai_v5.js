@@ -143,7 +143,7 @@
             '<button type="button" class="ai5-btn" id="ai5-refresh">↻ 重新整理</button>' +
             '<button type="button" class="ai5-btn" data-go="signals">訊號</button>' +
             '<button type="button" class="ai5-btn" data-go="scan">選股</button>' +
-            '<button type="button" class="ai5-btn primary" data-shell-back>← 圖表</button>' +
+            '<button type="button" class="ai5-btn primary" data-shell-back>← 儀表板</button>' +
           '</div></div>' +
           '<div id="ai5-body" class="ai5-loading">載入 AI 中樞…</div>' +
         '</div>';

@@ -124,7 +124,7 @@
             '<button type="button" class="nw-btn" id="nw-toast">通知</button>' +
             '<button type="button" class="nw-btn" id="nw-push">推播</button>' +
             '<button type="button" class="nw-btn" id="nw-ovn">夜盤</button>' +
-            '<button type="button" class="nw-btn primary" data-shell-back>← 圖表</button>' +
+            '<button type="button" class="nw-btn primary" data-shell-back>← 儀表板</button>' +
           '</div></div>' +
           '<div id="nw-body" class="nw-loading">載入快訊…</div>' +
         '</div>';

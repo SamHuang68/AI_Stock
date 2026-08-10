@@ -356,8 +356,8 @@
     if (!soft) {
       el.innerHTML = head('法人動向', 'BFI82U 合計結構 · T86 買賣超排行 · 近月資金趨勢',
         '<button class="hub-btn" data-sync>同步資料</button>' +
-        '<button class="hub-btn" data-go="pulse">總覽</button>' +
-        '<button class="hub-btn" data-go="afterhours">盤後</button>') +
+        '<button class="hub-btn" data-go="afterhours">盤後</button>' +
+        '<button class="hub-btn primary" data-shell-back>← 儀表板</button>') +
         '<div id="hub-inst-body" class="hub-body"><div class="hub-loading">載入法人資料…</div></div></div>';
       bindCommon(el);
     } else if (window.ShellV5 && window.ShellV5.softBadge) {
@@ -528,7 +528,8 @@
   function renderInternational(el) {
     el.innerHTML = head('國際市場', '美股指數／美元／黃金（避險）／銅（景氣循環）＋總經（Yahoo／BLS／種子備援）',
       '<button class="hub-btn" id="hub-eco-refresh">更新指標</button>' +
-      '<button class="hub-btn" data-sync>同步資料</button><button class="hub-btn" data-go="pulse">總覽</button>') +
+      '<button class="hub-btn" data-sync>同步資料</button>' +
+      '<button class="hub-btn primary" data-shell-back>← 儀表板</button>') +
       '<div id="hub-intl-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
     var ecoBtn = $('hub-eco-refresh');
@@ -665,7 +666,9 @@
   // ── Signals ──────────────────────────────────────────────
   function renderSignals(el) {
     el.innerHTML = head('策略訊號', '可解釋監控訊號（焦點掃描／選股結果）',
-      '<button class="hub-btn" data-go="scan">選股</button><button class="hub-btn primary" id="hub-run-focus">執行焦點掃描</button>') +
+      '<button class="hub-btn" data-go="scan">選股</button>' +
+      '<button class="hub-btn primary" id="hub-run-focus">執行焦點掃描</button>' +
+      '<button class="hub-btn" data-shell-back>← 儀表板</button>') +
       '<div id="hub-sig-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
     var run = $('hub-run-focus');
@@ -773,7 +776,9 @@
   }
   function renderWatchlist(el) {
     el.innerHTML = head('自選股中心', '本機瀏覽器自選＋即時報價',
-      '<button class="hub-btn" data-go="chart">圖表管理</button><button class="hub-btn primary" id="hub-wl-refresh">重新整理</button>') +
+      '<button class="hub-btn" data-go="chart">圖表管理</button>' +
+      '<button class="hub-btn primary" id="hub-wl-refresh">重新整理</button>' +
+      '<button class="hub-btn" data-shell-back>← 儀表板</button>') +
       '<div id="hub-wl-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
     var btn = $('hub-wl-refresh');
@@ -869,7 +874,9 @@
   // ── Risk ─────────────────────────────────────────────────
   function renderRisk(el) {
     el.innerHTML = head('風險監控', '由脈動因子與廣度／法人規則產生的風險事件',
-      '<button class="hub-btn" data-sync>同步資料</button><button class="hub-btn" data-go="book">投組風險</button>') +
+      '<button class="hub-btn" data-sync>同步資料</button>' +
+      '<button class="hub-btn" data-go="book">投組風險</button>' +
+      '<button class="hub-btn primary" data-shell-back>← 儀表板</button>') +
       '<div id="hub-risk-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
     Promise.all([jget('/pulse'), jget('/pulse/history?kind=pulse&n=15')]).then(function (arr) {
@@ -970,7 +977,8 @@
   // ── Settings ─────────────────────────────────────────────
   function renderSettings(el) {
     el.innerHTML = head('設定', '同步狀態 · 資料來源 · 本機歷史庫',
-      '<button class="hub-btn primary" data-sync>同步資料</button>') +
+      '<button class="hub-btn" data-sync>同步資料</button>' +
+      '<button class="hub-btn primary" data-shell-back>← 儀表板</button>') +
       '<div id="hub-set-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
     Promise.all([jget('/sync/status'), jget('/datasources'), jget('/health')]).then(function (arr) {
@@ -1039,6 +1047,16 @@
         if (b.getAttribute('data-sym')) opts.sym = b.getAttribute('data-sym');
         if (b.getAttribute('data-mkt')) opts.mkt = b.getAttribute('data-mkt');
         goRoute(b.getAttribute('data-go'), opts);
+      };
+    });
+    root.querySelectorAll('[data-shell-back]').forEach(function (b) {
+      b.onclick = function (e) {
+        e.preventDefault();
+        if (window.ShellV5 && typeof window.ShellV5.goDashboard === 'function') {
+          window.ShellV5.goDashboard();
+        } else {
+          goRoute('pulse');
+        }
       };
     });
     root.querySelectorAll('[data-sync]').forEach(function (b) {
