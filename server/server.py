@@ -55,6 +55,43 @@ else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _breadth_trace(event, **fields):
+    """Persistent, bounded diagnostic trail for official breadth freshness."""
+    try:
+        path = os.path.join(_BASE, 'logs', 'breadth_trace.jsonl')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        row = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'event': event, **fields}
+        with open(path, 'a', encoding='utf-8') as fh:
+            fh.write(json.dumps(row, ensure_ascii=False, default=str) + '\n')
+        # Retain the most recent observations only; trace is diagnostic, not data.
+        if os.path.getsize(path) > 256 * 1024:
+            with open(path, 'r', encoding='utf-8') as fh:
+                tail = fh.readlines()[-500:]
+            with open(path, 'w', encoding='utf-8') as fh:
+                fh.writelines(tail)
+    except Exception:
+        pass
+
+
+def _ui_route_trace(row):
+    """Persist sanitized UI route transitions for click-to-panel debugging."""
+    try:
+        allowed = ('ts', 'event', 'correlationId', 'from', 'to', 'renderedRoute', 'label')
+        clean = {k: str((row or {}).get(k) or '')[:120] for k in allowed}
+        clean['serverTs'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+        path = os.path.join(_BASE, 'logs', 'ui_route_trace.jsonl')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'a', encoding='utf-8') as fh:
+            fh.write(json.dumps(clean, ensure_ascii=False) + '\n')
+        if os.path.getsize(path) > 128 * 1024:
+            with open(path, 'r', encoding='utf-8') as fh:
+                tail = fh.readlines()[-300:]
+            with open(path, 'w', encoding='utf-8') as fh:
+                fh.writelines(tail)
+    except Exception:
+        pass
+
+
 def _is_tooling_python(exe_path=None):
     """Heuristic: interpreter lives under an agent/tooling venv (not a ban list).
 
@@ -2316,7 +2353,11 @@ def _build_breadth_payload(force=False):
         c = _cache.get(key)
         if c is not None:
             try:
-                return json.loads(c.decode('utf-8') if isinstance(c, (bytes, bytearray)) else c)
+                cached = json.loads(c.decode('utf-8') if isinstance(c, (bytes, bytearray)) else c)
+                _breadth_trace('cache_hit', cache_key=key, payload_date=cached.get('date'),
+                               limit_up=(cached.get('stocks') or {}).get('limitUp'),
+                               limit_down=(cached.get('stocks') or {}).get('limitDown'))
+                return cached
             except Exception:
                 pass
 
@@ -2405,6 +2446,8 @@ def _build_breadth_payload(force=False):
                 with urllib.request.urlopen(req, timeout=12) as resp:
                     d = json.loads(resp.read())
                 if d.get('stat') not in ('OK', 'ok'):
+                    _breadth_trace('official_rejected', requested_date=dd, url=url,
+                                   stat=d.get('stat'), response_date=d.get('date'))
                     continue
                 tables = d.get('tables') or []
                 if not tables:
@@ -2414,8 +2457,11 @@ def _build_breadth_payload(force=False):
                 if tables:
                     ms_date = dd
                     out['source'] = 'TWSE MI_INDEX MS'
+                    _breadth_trace('official_selected', requested_date=dd, url=url,
+                                   response_date=d.get('date'), tables=len(tables))
                     break
             except Exception as e:
+                _breadth_trace('official_error', requested_date=dd, url=url, error=str(e))
                 print(f'[breadth] MI_INDEX {dd}: {e}')
                 continue
         if ms_date:
@@ -2446,6 +2492,9 @@ def _build_breadth_payload(force=False):
                         'stockTrades': _num(pick[3]) if len(pick) > 3 else None,
                         'totalAmt': _num(total_row[1]) if total_row and len(total_row) > 1 else None,
                     }
+        _breadth_trace('payload_built', payload_date=out.get('date'), source=out.get('source'),
+                       limit_up=(out.get('stocks') or {}).get('limitUp'),
+                       limit_down=(out.get('stocks') or {}).get('limitDown'))
 
     # ── 2) 即時指數（MIS）────────────────────────────────────
     try:
@@ -2752,7 +2801,15 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         p = self.path.split('?')[0]
         if not self._origin_ok():
             self._err('forbidden (cross-origin)', 403); return
-        if p == '/ai-key':
+        if p == '/diagnostics/ui-route':
+            try:
+                n = min(4096, int(self.headers.get('Content-Length') or 0))
+                body = json.loads(self.rfile.read(n).decode('utf-8') or '{}') if n else {}
+            except Exception:
+                body = {}
+            _ui_route_trace(body)
+            self._ok(json.dumps({'ok': True}).encode())
+        elif p == '/ai-key':
             self._handle_ai_key_set()
         elif p == '/ai-proxy':
             self._handle_ai_proxy()

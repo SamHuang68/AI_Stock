@@ -135,6 +135,22 @@ const pl = fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8');
 ok(/上市漲跌停 · 官方/.test(pl), 'pulse strip labels official limit counts');
 ok(/近漲停/.test(pl) && /≠頂列官方家數/.test(pl), 'pulse movers panel not branded as official limit');
 ok(/movers\.limitUp/.test(pl), 'pulse prefers movers.limitUp for near-limit list');
+ok(/市場脈動 <a data-go="factors">因子 →<\/a>/.test(pl),
+  'pulse factor heading opens the independent factors route');
+ok(/go: 'chart', sym: '\^TWII'/.test(pl) && /go: 'chart', sym: '\^TWOII'/.test(pl) &&
+  /go: 'afterhours', mkt: 'TW'/.test(pl),
+  'pulse headline cards route TAIEX/OTC to charts and TXF/turnover to afterhours');
+ok(/pl-movers[\s\S]*data-go="breadth">廣度 →/.test(pl),
+  'pulse mover panels route to breadth instead of unrelated afterhours');
+ok(/a\.onkeydown[\s\S]*e\.key === 'Enter'[\s\S]*e\.key === ' '/.test(pl),
+  'pulse data-go links support keyboard activation');
+(function () {
+  const targets = Array.from(pl.matchAll(/data-go=["']([^"']+)["']/g)).map(m => m[1]);
+  const missing = Array.from(new Set(targets)).filter(id =>
+    !new RegExp("id: '" + id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "'").test(shell));
+  ok(missing.length === 0, 'every pulse data-go target exists in ShellV5 routes' +
+    (missing.length ? ': ' + missing.join(', ') : ''));
+})();
 ok(/function chgWithPct/.test(pl) && /chgWithPct\(t00/.test(pl) && /chgWithPct\(txf/.test(pl),
   'pulse strip shows change points + pct for TAIEX/OTC/TXF');
 ok(/GC=F/.test(pl) && /HG=F/.test(pl) && /CL=F/.test(pl) && /x\.role/.test(pl) &&

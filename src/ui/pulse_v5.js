@@ -467,6 +467,24 @@
   function goRoute(id, opts) {
     if (window.ShellV5) window.ShellV5.go(id, opts || {});
   }
+  function routeTrace(event, row) {
+    try {
+      var body = Object.assign({ ts: new Date().toISOString(), event: event }, row || {});
+      fetch(SRV + '/diagnostics/ui-route', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body), keepalive: true
+      }).catch(function () {});
+    } catch (e) {}
+  }
+  window.addEventListener('shell:route', function (ev) {
+    var d = (ev && ev.detail) || {};
+    var opts = d.opts || {};
+    if (!opts._traceId) return;
+    routeTrace('route_applied', {
+      correlationId: opts._traceId, to: opts._traceTarget,
+      renderedRoute: d.route, label: opts._traceLabel
+    });
+  });
   function openChart(code, mkt) {
     if (window.ShellV5 && ShellV5.openChart) {
       ShellV5.openChart(code || '^TWII', mkt || 'TW');
@@ -1012,7 +1030,13 @@
       : '';
     var toneCls = tw(tr.chgPct != null ? tr.chgPct : tr.vsMa5Pct);
     /* 頂列不再畫 spark；水位 bar 與成交金額 refMeter 同構 */
-    return '<div class="cell' + (opts.hero ? ' hero' : '') + '" title="' + esc(tip) + '">' +
+    var nav = opts.go
+      ? ' data-go="' + esc(opts.go) + '"' +
+        (opts.sym ? ' data-sym="' + esc(opts.sym) + '"' : '') +
+        (opts.mkt ? ' data-mkt="' + esc(opts.mkt) + '"' : '') +
+        ' role="link" tabindex="0" style="cursor:pointer"'
+      : '';
+    return '<div class="cell' + (opts.hero ? ' hero' : '') + '"' + nav + ' title="' + esc(tip) + '">' +
       '<div class="k">' + opts.k + '</div>' +
       '<div class="v">' + opts.vHtml + levelHtml + '</div>' +
       '<div class="s ' + toneCls + '">' + subHtml + '</div>' +
@@ -1098,12 +1122,14 @@
       renderTrendCell({
         k: '加權指數 TAIEX', hero: true,
         vHtml: fmt(t00.price, 2),
-        trend: t00Tr, fallbackSub: t00Fb, tip: idxTip + ' · 加權'
+        trend: t00Tr, fallbackSub: t00Fb, tip: idxTip + ' · 加權',
+        go: 'chart', sym: '^TWII', mkt: 'TW'
       }) +
       renderTrendCell({
         k: '櫃買指數 OTC',
         vHtml: fmt(o00.price, 2),
-        trend: o00Tr, fallbackSub: o00Fb, tip: idxTip + ' · 櫃買'
+        trend: o00Tr, fallbackSub: o00Fb, tip: idxTip + ' · 櫃買',
+        go: 'chart', sym: '^TWOII', mkt: 'TW'
       }) +
       renderTrendCell({
         k: '台指期近月' + (txfSess ? ' · ' + txfSess : '') +
@@ -1112,9 +1138,10 @@
             : ''),
         hero: true,
         vHtml: fmt(txf.price, 0),
-        trend: txfTr, fallbackSub: txfFb, tip: txfTip
+        trend: txfTr, fallbackSub: txfFb, tip: txfTip,
+        go: 'afterhours', mkt: 'TW'
       }) +
-      '<div class="cell hero" title="' + turnTip + '"><div class="k">成交金額 · 量能</div><div class="v">' +
+      '<div class="cell hero" data-go="afterhours" role="link" tabindex="0" style="cursor:pointer" title="' + turnTip + '"><div class="k">成交金額 · 量能</div><div class="v">' +
         (s.turnoverYi != null ? Number(s.turnoverYi).toFixed(1) + ' 億' : '—') +
         (s.turnoverLevel ? ' <span style="font-size:9px;color:#94a3b8;font-weight:700">' + esc(s.turnoverLevel) + '</span>' : '') +
         '</div>' +
@@ -1155,7 +1182,7 @@
       var chk = 0.7 * Number(health) + 0.3 * (100 - Number(risk));
       formulaBits += ' → <b>' + chk.toFixed(1) + '</b>';
     }
-    return '<div class="pl-sec" data-pri="p0"><h4>市場脈動 <a data-go="pulse">因子 →</a></h4>' +
+    return '<div class="pl-sec" data-pri="p0"><h4>市場脈動 <a data-go="factors">因子 →</a></h4>' +
       '<div class="pl-score3">' +
         '<div class="sc main" title="綜合脈動（母分）＝0.7×大盤體質＋0.3×(100−風險)">' +
           '<div class="k"><span>綜合</span></div>' +
@@ -1845,7 +1872,7 @@
     var html = '<div class="pl-sec pl-movers" data-pri="p1" data-movers-side="' + side + '"><h4>' + title +
       (movers && movers.date ? ' <span class="pl-sec-hint" style="margin-right:0">' + movers.date + '</span>' : '') +
       (note ? ' <span class="pl-sec-hint" style="margin-right:0">' + note + '</span>' : '') +
-      ' <a data-go="afterhours">盤後 →</a></h4><ul class="pl-list">';
+      ' <a data-go="breadth">廣度 →</a></h4><ul class="pl-list">';
     if (!list.length) return html + '<li style="cursor:default;color:#94a3b8">' + empty + '</li></ul></div>';
     list.forEach(function (r) {
       var limChip = V ? V.limitChip(r.changePct) : '';
@@ -2144,12 +2171,19 @@
 
   function bind(body) {
     body.querySelectorAll('[data-go]').forEach(function (a) {
+      if (!a.hasAttribute('tabindex')) a.setAttribute('tabindex', '0');
+      if (!a.hasAttribute('role')) a.setAttribute('role', 'link');
       a.onclick = function (e) {
         e.preventDefault();
         e.stopPropagation();
+        var traceId = 'pulse-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+        var target = a.getAttribute('data-go');
         var opts = {
           sym: a.getAttribute('data-sym') || undefined,
-          mkt: a.getAttribute('data-mkt') || undefined
+          mkt: a.getAttribute('data-mkt') || undefined,
+          _traceId: traceId,
+          _traceTarget: target,
+          _traceLabel: (a.textContent || '').trim()
         };
         /* 產業輪動 → 熱力：帶入 mkt／sector（空字串表示清除聚焦） */
         if (a.hasAttribute('data-sector')) {
@@ -2158,7 +2192,17 @@
         if (a.hasAttribute('data-sector-key')) {
           opts.sectorKey = a.getAttribute('data-sector-key') || null;
         }
-        goRoute(a.getAttribute('data-go'), opts);
+        routeTrace('click_received', {
+          correlationId: traceId, from: 'pulse', to: target,
+          label: opts._traceLabel
+        });
+        goRoute(target, opts);
+      };
+      a.onkeydown = function (e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          a.click();
+        }
       };
     });
     body.querySelectorAll('[data-code]').forEach(function (el) {
