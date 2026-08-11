@@ -960,7 +960,7 @@
     if (tr.momScore != null) bits.push('分' + Number(tr.momScore).toFixed(0));
     if (tr.z20 != null) bits.push('Z' + Number(tr.z20).toFixed(1));
     if (tr.streak) {
-      bits.push((tr.streak > 0 ? (streakUpLabel || '連漲') : (streakDnLabel || '連跌')) +
+      bits.push('日線' + (tr.streak > 0 ? (streakUpLabel || '連漲') : (streakDnLabel || '連跌')) +
         Math.abs(tr.streak));
     }
     return bits.length ? bits.join(' · ') : '';
@@ -972,7 +972,7 @@
     var main = [];
     if (tr.chgPct != null) main.push(pct(tr.chgPct));
     if (tr.streak) {
-      main.push((tr.streak > 0 ? (streakUpLabel || '連漲') : (streakDnLabel || '連跌')) +
+      main.push('日線' + (tr.streak > 0 ? (streakUpLabel || '連漲') : (streakDnLabel || '連跌')) +
         Math.abs(tr.streak));
     }
     var soft = [];
@@ -1004,7 +1004,7 @@
     var subHtml = trendPrimarySub(tr, opts.streakUpLabel, opts.streakDnLabel);
     if (!subHtml && opts.fallbackSub) subHtml = opts.fallbackSub;
     if (!subHtml) subHtml = '—';
-    var tip = (opts.tip || '趨勢量化：vs前日／vs5日均／動能分／近20日Z／連續漲跌') +
+    var tip = (opts.tip || '即時漲跌＝同卡官方報價；日線量化＝vs5日均／動能分／近20日Z／連續漲跌') +
       (tone ? (' · 當前 ' + tone) : '') +
       (fullBits ? (' · ' + fullBits) : '');
     var levelHtml = tr.level
@@ -2354,6 +2354,7 @@
         warmCaches();
         return;
       }
+      if (window.MarketData && window.MarketData.fromPulse) window.MarketData.fromPulse(pulse);
       render({ pulse: pulse, wlQuotes: arr[1] || {} });
       var ms = Date.now() - t0;
       var sub = $('pl-sub');

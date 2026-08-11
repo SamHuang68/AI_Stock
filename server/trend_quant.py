@@ -31,11 +31,16 @@ def momentum_score(vs_ma5_pct: Optional[float], z20: Optional[float] = None,
 
 
 def price_series_quant(closes: Optional[Sequence[float]],
-                       latest: Optional[float] = None) -> Dict[str, Any]:
+                       latest: Optional[float] = None,
+                       quote_change_pct: Optional[float] = None) -> Dict[str, Any]:
     """由收盤價序列＋可選當日即時價，建趨勢量化指標。
 
-    closes: 由舊到新的收盤價
-    回傳：close, chgPct, ma5, vsMa5Pct, z20, momScore, streak, trend, level, n, spark
+    closes: 由舊到新的日線收盤價。
+    latest: 同標的的即時報價，用於更新當前水位／均線偏離。
+    quote_change_pct: 若即時報價提供官方昨收漲跌幅，必須傳入；它優先於
+        日線快取相鄰兩筆的推算，避免換月、夜盤或日線落後時顯示相反方向。
+
+    回傳：chgPct 是即時報價的官方漲跌幅（若有）；streak／trend 仍為日線趨勢。
     """
     empty = {
         'close': None, 'chgPct': None, 'ma5': None, 'vsMa5Pct': None,
@@ -78,7 +83,16 @@ def price_series_quant(closes: Optional[Sequence[float]],
         sd = math.sqrt(var) if var > 0 else 0.0
         if sd > 1e-9:
             z20 = (cur - mu) / sd
-    mom = momentum_score(vs_ma5, z20, chg)
+    quote_chg = None
+    if quote_change_pct is not None:
+        try:
+            candidate = float(quote_change_pct)
+            if math.isfinite(candidate):
+                quote_chg = candidate
+        except Exception:
+            pass
+    display_chg = quote_chg if quote_chg is not None else chg
+    mom = momentum_score(vs_ma5, z20, display_chg)
     streak = 0
     for i in range(len(series) - 1, 0, -1):
         d = series[i] - series[i - 1]
@@ -120,7 +134,8 @@ def price_series_quant(closes: Optional[Sequence[float]],
     spark = [round(x, 4) for x in series[-20:]]
     return {
         'close': round(cur, 4),
-        'chgPct': round(chg, 2) if chg is not None else None,
+        # 即時報價的昨收基準優先；日線相鄰值只在沒有報價時計算備援。
+        'chgPct': round(display_chg, 2) if display_chg is not None else None,
         'ma5': round(ma5, 4) if ma5 is not None else None,
         'vsMa5Pct': round(vs_ma5, 2) if vs_ma5 is not None else None,
         'z20': round(z20, 2) if z20 is not None else None,

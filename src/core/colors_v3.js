@@ -26,7 +26,15 @@
   };
   var HEX = { red: '#F87171', green: '#4ADE80', amber: '#FB923C', neutral: '#F1F5FA', dim: '#5A6A82' };
 
-  function isTW(sym) { sym = String(sym || ''); return /^\d/.test(sym) || /^\^TW/i.test(sym); }
+  function isTW(sym) {
+    // 台股現貨、指數，以及本機台股特例都必須走紅漲綠跌。
+    // __TXF__ 若漏判成美股，圖表／即時列會把跌幅錯畫成紅色。
+    var s = String(sym || '').trim().toUpperCase();
+    return /^\d/.test(s) || /^\^TW/.test(s) ||
+      s === '__TXF__' || s === 'TXF' || s === 'TX' || s === 'MXF' ||
+      s === '__MARGIN_RATIO__' || s === '__MARGIN__' ||
+      /^__TW_/.test(s) || /^__HOLDERS_/.test(s);
+  }
 
   var Colors = {
     PALETTE: PALETTE,

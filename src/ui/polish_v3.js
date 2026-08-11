@@ -320,6 +320,56 @@ function fmtIdx(v) {
   return v.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
 }
 
+/**
+ * 市場總覽列的唯一漲跌上色入口。
+ * 每次資料源覆寫都同時更新 class 與 inline color，避免 Yahoo 先畫的舊色
+ * 殘留到 TWSE／TAIFEX 最新值；redUp=true 為台股／東亞，false 為美股／商品。
+ */
+function applyMktCellTone(cell, value, redUp) {
+  if (!cell) return 'flat';
+  const dir = value > 0 ? 'up' : value < 0 ? 'down' : 'flat';
+  const col = window.Colors && Colors.dirRU
+    ? Colors.dirRU(redUp !== false, value)
+    : (value > 0 ? (redUp !== false ? 'var(--red)' : 'var(--green)')
+      : value < 0 ? (redUp !== false ? 'var(--green)' : 'var(--red)') : 'var(--tlo)');
+  ['.delta', '.ch'].forEach(sel => {
+    const el = cell.querySelector(sel);
+    if (!el) return;
+    el.className = sel.slice(1) + ' ' + dir;
+    el.style.color = col; // overwrite stale inline color from every prior source
+  });
+  return dir;
+}
+
+function renderCanonicalMarketQuote(sym, quote) {
+  const cell = document.querySelector(`[data-mkt-sym="${sym}"]`);
+  const m = quote && (quote.market || quote);
+  if (!cell || !m || m.price == null) return;
+  const delta = m.displayChange != null ? Number(m.displayChange) : (Number(m.price) - Number(m.referencePrice));
+  const pct = m.displayChangePct != null ? Number(m.displayChangePct) : null;
+  cell.classList.remove('loading');
+  cell.querySelector('.px').textContent = fmtIdx(m.price);
+  applyMktCellTone(cell, delta, true);
+  const dEl = cell.querySelector('.delta');
+  const ch = cell.querySelector('.ch');
+  if (dEl) dEl.textContent = isFinite(delta) ? (delta > 0 ? '+' : '') + delta.toFixed(Math.abs(delta) >= 100 ? 0 : 2) : '--';
+  if (ch) ch.textContent = pct != null && isFinite(pct) ? (pct > 0 ? '▲' : pct < 0 ? '▼' : '—') + Math.abs(pct).toFixed(2) + '%' : '--';
+  cell.title = `${m.source || 'unknown'} · ${m.session || 'regular'} · ${m.referenceType || 'previous_close'} · ${m.asOf || ''}`;
+}
+
+window.addEventListener('marketData', function (ev) {
+  const quotes = ev && ev.detail && ev.detail.snapshot && ev.detail.snapshot.quotes;
+  if (!quotes) return;
+  ['^TWII', '^TWOII', '__TXF__'].forEach(sym => renderCanonicalMarketQuote(sym, quotes[sym]));
+  // The selected market chart gets the identical headline reference as Pulse/top bar.
+  const active = window.S && S.sym;
+  const q = active && quotes[active];
+  const m = q && q.market;
+  if (m && typeof updateHeaderChg === 'function' && m.price != null && m.referencePrice != null) {
+    updateHeaderChg(m.price, m.referencePrice, null, m.referenceType, 'TW', active);
+  }
+});
+
 async function refreshMktBar() {
   try {
     const syms = MKT_INDICES.filter(m => m.sym !== '__TXF__' && !(m.sym.startsWith('__') && m.sym.endsWith('__'))).map(m => m.sym).join(',');
@@ -368,24 +418,18 @@ async function refreshMktBar() {
       cell.querySelector('.px').textContent = fmtIdx(cur);
 
       // ── 漲跌色:依各標的市場慣例(台股/東亞 紅漲;美股指數 綠漲)走中央 Colors ──
-      const dir = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+      const dir = applyMktCellTone(cell, delta, m.redUp !== false);
       const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
-      const _mc = window.Colors ? Colors.dirRU(m.redUp !== false, delta) : '';
       const dEl = cell.querySelector('.delta');
-      dEl.className = 'delta ' + dir;
-      if (_mc) dEl.style.color = _mc;
       dEl.textContent = sign + Math.abs(delta).toFixed(Math.abs(delta) >= 100 ? 0 : 2);
       const ch = cell.querySelector('.ch');
-      ch.className = 'ch ' + dir;
-      if (_mc) ch.style.color = _mc;
       const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '－';
       ch.textContent = arrow + Math.abs(chgPct).toFixed(2) + '%';
     }
   } catch (e) { console.warn('[polish-v3] mktbar refresh failed:', e); }
   // 加權/櫃買 — TWSE 即時指數覆寫(修 Yahoo ^TWII 早盤落後一日)
-  try { await refreshTwIndexCells(); } catch (e) { console.warn('[polish-v3] twindex failed:', e); }
+  try { if (window.MarketData) await MarketData.refresh(); } catch (e) { console.warn('[polish-v3] market snapshot failed:', e); }
   // 台指期(含夜盤) — TAIFEX 特例來源
-  try { await refreshTxfCell(); } catch (e) { console.warn('[polish-v3] txf failed:', e); }
   // 大盤融資維持率 — 本地特例數據
   try { await refreshMarginRatioCell(); } catch (e) { console.warn('[polish-v3] margin ratio cell failed:', e); }
   // MacroMicro 追蹤圖格（台利率／融資比／美利率債／CPI金融）
@@ -422,19 +466,14 @@ async function refreshMacroTrackCells() {
       if (px) {
         px.textContent = (Math.abs(cur) >= 100 ? cur.toFixed(1) : cur.toFixed(2)) + (unit === '%' ? '%' : '');
       }
-      const dir = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
       const tw = !(id.indexOf('__US_') === 0);
-      const _mc = window.Colors ? Colors.dirRU(tw, delta) : '';
+      applyMktCellTone(cell, delta, tw);
       const dEl = cell.querySelector('.delta');
       if (dEl) {
-        dEl.className = 'delta ' + dir;
-        if (_mc) dEl.style.color = _mc;
         dEl.textContent = (delta >= 0 ? '+' : '') + delta.toFixed(2) + (unit === '%' ? 'pp' : '');
       }
       const ch = cell.querySelector('.ch');
       if (ch) {
-        ch.className = 'ch ' + dir;
-        if (_mc) ch.style.color = _mc;
         const pct = prev ? (delta / prev * 100) : 0;
         ch.textContent = (delta >= 0 ? '▲' : '▼') + Math.abs(pct).toFixed(2) + '%';
       }
@@ -480,19 +519,14 @@ async function refreshMarginRatioCell() {
     else if (cur <= 150) cell.style.boxShadow = 'inset 0 0 0 1px rgba(249,115,22,.35)';
     else cell.style.boxShadow = '';
 
-    const dir = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
     const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
-    const _mc = window.Colors ? Colors.dirRU(true, delta) : ''; // 增加為紅、減少為綠
+    applyMktCellTone(cell, delta, true); // 增加為紅、減少為綠
 
     const dEl = cell.querySelector('.delta');
-    dEl.className = 'delta ' + dir;
-    if (_mc) dEl.style.color = _mc;
     // 日變化以百分點顯示（與維持率單位一致）
     dEl.textContent = sign + Math.abs(delta).toFixed(2) + 'pp';
 
     const ch = cell.querySelector('.ch');
-    ch.className = 'ch ' + dir;
-    if (_mc) ch.style.color = _mc;
     const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '－';
     ch.textContent = arrow + (prev > 0 ? (delta / prev * 100).toFixed(2) : '0.00') + '%';
     cell.title = '大盤融資維持率 ' + cur.toFixed(2) + '%（點擊載入歷史圖 · TWSE／MacroMicro 對齊公式）';
@@ -660,13 +694,11 @@ async function refreshTwIndexCells() {
     cell.classList.remove('loading');
     cell.querySelector('.px').textContent = fmtIdx(cur);
     if (delta == null || chgPct == null) continue;
-    const dir = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+    applyMktCellTone(cell, delta, true);
     const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
     const dEl = cell.querySelector('.delta');
-    dEl.className = 'delta ' + dir;
     dEl.textContent = sign + Math.abs(delta).toFixed(Math.abs(delta) >= 100 ? 0 : 2);
     const ch = cell.querySelector('.ch');
-    ch.className = 'ch ' + dir;
     const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '－';
     ch.textContent = arrow + Math.abs(chgPct).toFixed(2) + '%';
   }
@@ -682,14 +714,12 @@ async function refreshTxfCell() {
   cell.classList.remove('loading');
   cell.querySelector('.px').textContent = fmtIdx(d.price);
   const chg = d.changePct;
-  const dir = chg > 0 ? 'up' : chg < 0 ? 'down' : 'flat';
+  applyMktCellTone(cell, chg, true);
   const sign = chg > 0 ? '+' : chg < 0 ? '−' : '';
   const delta = (d.prevClose != null) ? (d.price - d.prevClose) : null;
   const dEl = cell.querySelector('.delta');
-  dEl.className = 'delta ' + dir;
   dEl.textContent = delta != null ? sign + Math.abs(delta).toFixed(0) : '';
   const ch = cell.querySelector('.ch');
-  ch.className = 'ch ' + dir;
   const arrow = chg > 0 ? '▲' : chg < 0 ? '▼' : '－';
   ch.textContent = (chg != null) ? arrow + Math.abs(chg).toFixed(2) + '%' : '';
 }

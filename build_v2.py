@@ -107,6 +107,8 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
 V2_STYLES  = ['src/ui/mobile_v2.css']
 
 # v3.9 P5: 依相依關係自動排序模組(取代人工「須在X後」)。失敗則退回原順序,不影響打包。
+V2_SCRIPTS.insert(1, 'src/core/market_data_v5.js')  # canonical market quote store
+
 try:
     from build_order import order_scripts
     V2_SCRIPTS = order_scripts(V2_SCRIPTS)

@@ -36,6 +36,15 @@ class TestPriceSeriesQuant(unittest.TestCase):
         self.assertEqual(q['close'], 110.0)
         self.assertGreater(q['n'], 3)
 
+    def test_quote_change_overrides_stale_daily_series(self):
+        # 期貨夜盤／換月時，日線最後一筆可能與官方昨收基準不同；
+        # 頂列漲跌必須與同卡即時報價一致，而不是拿日線快取反推方向。
+        q = tq.price_series_quant(
+            [43000, 43800, 44280], latest=44719, quote_change_pct=-0.6024)
+        self.assertEqual(q['close'], 44719.0)
+        self.assertAlmostEqual(q['chgPct'], -0.60, places=2)
+        self.assertGreater(q['vsMa5Pct'], 0)  # 日線水位仍可獨立呈現
+
     def test_empty(self):
         q = tq.price_series_quant([])
         self.assertIsNone(q['close'])

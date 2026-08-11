@@ -5,6 +5,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 const root = path.join(__dirname, '..');
 const shell = fs.readFileSync(path.join(root, 'src/ui/shell_v5.js'), 'utf8');
@@ -46,6 +47,29 @@ ok(/portfolioOpen/.test(bridge) && /marketFlowOpen/.test(bridge) && /openAIModal
 const build = fs.readFileSync(path.join(root, 'build_v2.py'), 'utf8');
 ok(build.indexOf('src/ui/ai_v5.js') >= 0 && build.indexOf('src/ui/bridge_v5.js') >= 0,
   'ai_v5 + bridge_v5 in build_v2');
+const colors = fs.readFileSync(path.join(root, 'src/core/colors_v3.js'), 'utf8');
+const polish = fs.readFileSync(path.join(root, 'src/ui/polish_v3.js'), 'utf8');
+const marketData = fs.readFileSync(path.join(root, 'src/core/market_data_v5.js'), 'utf8');
+const server = fs.readFileSync(path.join(root, 'server/server.py'), 'utf8');
+ok(/s === '__TXF__'/.test(colors) && /\^__TW_/.test(colors) && /dirRU/.test(colors),
+  'color contract recognizes TXF and TW local symbols as red-up instruments');
+ok(/function applyMktCellTone/.test(polish) && /overwrite stale inline color/.test(polish) &&
+  /applyMktCellTone\(cell, delta, true\)/.test(polish) &&
+  /applyMktCellTone\(cell, chg, true\)/.test(polish),
+  'market bar resets current-source color for TWSE/TAIFEX overrides');
+ok(/window\.MarketData/.test(marketData) && /marketData/.test(polish) && /\/market\/snapshot/.test(marketData),
+  'market headline surfaces use one canonical snapshot/event store');
+ok(/_allowed_root = \('src\/', 'assets\/'\)/.test(server) && /\/market\/snapshot/.test(server),
+  'server static files are allow-listed and canonical market route is wired');
+(function () {
+  const sandbox = { window: {}, console: { log: function () {} }, isFinite: isFinite };
+  vm.runInNewContext(colors, sandbox);
+  const c = sandbox.window.Colors;
+  ok(c.dir('2330', 1) === 'var(--red)' && c.dir('2330', -1) === 'var(--green)' &&
+    c.dir('__TXF__', -1) === 'var(--green)' &&
+    c.dir('AAPL', 1) === 'var(--green)' && c.dir('AAPL', -1) === 'var(--red)',
+  'directional colors: TW/TXF up=red down=green; US up=green down=red');
+})();
 
 const hub = fs.readFileSync(path.join(root, 'src/ui/hub_v5.js'), 'utf8');
 ok(/hub-inst-hero/.test(hub), 'institutional hero strip');
@@ -121,6 +145,8 @@ ok(/turnoverVsMa5Pct/.test(pl) && /volumeScore/.test(pl) && /成交金額 · 量
 ok(/t00Trend/.test(pl) && /o00Trend/.test(pl) && /txfTrend/.test(pl) &&
   /trendQuantBits/.test(pl) && /renderTrendCell/.test(pl),
   'pulse strip shows TAIEX/OTC/TXF trend quant like turnover');
+ok(/日線' \+ \(tr\.streak/.test(pl) && /即時漲跌＝同卡官方報價/.test(pl),
+  'pulse separates official live change from daily-series streak/trend labels');
 ok(/function renderTrendCell/.test(pl) && !/pl-idx-spark/.test(pl) &&
   /tabs \+ meter/.test(pl),
   'pulse strip trend cells drop sparkline; keep tabs + meter');
@@ -340,20 +366,20 @@ ok(fs.existsSync(path.join(root, 'scripts/go.ps1')), 'scripts/go.ps1 exists for 
 const goPs = fs.readFileSync(path.join(root, 'scripts/go.ps1'), 'utf8');
 ok(/tipUx/.test(goPs) && /st5-tip-boot/.test(goPs) && /#pulse/.test(goPs),
   'go.ps1 verifies tip health/HTML and opens #pulse');
-ok(/Resolve-StockPython/.test(goPs) && /Test-BlockedPython/.test(goPs) &&
-  /hermes/.test(goPs) && /Stock Terminal Server v5 tip/.test(goPs) &&
+ok(/Resolve-StockPython/.test(goPs) && /Test-ToolingPython/.test(goPs) &&
+  /deprioritize tooling venvs/.test(goPs) && /Stock Terminal Server v5 tip/.test(goPs) &&
   /PULSE_LAYOUT_ANCHOR_3cab212/.test(goPs),
-  'go.ps1 blocks hermes python and launches titled live server console');
+  'go.ps1 pins an absolute Python, deprioritizes tooling venvs, and launches a titled live server console');
 ok(/ST_PYTHON/.test(goBat) && /hermes-agent/.test(goBat) && /FAIL_PYTHON_HERMES/.test(goBat),
   'go.bat also resolves python and blocks hermes');
 
 const srv = fs.readFileSync(path.join(root, 'server/server.py'), 'utf8');
 ok(/X-Stock-Terminal-UX/.test(srv) && /tipUx/.test(srv) && /\/#pulse/.test(srv),
   'server marks tip UX and opens /#pulse');
-ok(/_is_blocked_python/.test(srv) && /_pulse_layout_probe/.test(srv) &&
-  /SERVER_BOOT\.txt/.test(srv) && /refusing Hermes/.test(srv) &&
+ok(/_is_tooling_python/.test(srv) && /_pulse_layout_probe/.test(srv) &&
+  /SERVER_BOOT\.txt/.test(srv) && /does NOT refuse/.test(srv) &&
   /pulseLayout/.test(srv) && /pythonBlocked/.test(srv),
-  'server refuses hermes python and exposes pulseLayout on /health');
+  'server reports tooling Python diagnostically and exposes pulseLayout on /health');
 ok(fs.existsSync(path.join(root, 'START_TIP.cmd')), 'START_TIP.cmd exists at repo root');
 const startTip = fs.readFileSync(path.join(root, 'START_TIP.cmd'), 'utf8');
 ok(/Resolve-StockPython/.test(startTip) && /taskkill/.test(startTip) && /go\.ps1/.test(startTip),

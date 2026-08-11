@@ -39,6 +39,8 @@ from etf_api import (
     list_etf_files,
 )
 from etf_routes import EtfRoutesMixin
+from market_contract import attach_quote_contract
+from market_routes import market_snapshot
 
 PORT = 18432
 # Core Ultra 9 285H = 6P + 8E + 2LP = 16 threads; oversubscribe for I/O-bound YF
@@ -1100,7 +1102,7 @@ except Exception:
 try:
     from trend_quant import price_series_quant as _price_series_quant
 except Exception:
-    def _price_series_quant(closes, latest=None):
+    def _price_series_quant(closes, latest=None, quote_change_pct=None):
         return {
             'close': None, 'chgPct': None, 'ma5': None, 'vsMa5Pct': None,
             'z20': None, 'momScore': None, 'streak': None,
@@ -2609,6 +2611,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._handle_stockfut()
         elif p == '/twindex' or p.startswith('/twindex?'):
             self._handle_twindex()
+        elif p == '/market/snapshot' or p.startswith('/market/snapshot?'):
+            self._handle_market_snapshot()
         elif p == '/margin_ratio' or p.startswith('/margin_ratio?'):
             self._handle_margin_ratio()
         elif p == '/search' or p.startswith('/search?'):
@@ -2714,11 +2718,13 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             # 安全(v3.9 review):SimpleHTTPRequestHandler 預設會把工作目錄所有檔當靜態檔服務。
             # 阻擋敏感檔被下載:金鑰設定(alert_config 含 telegram token/gmail 密碼)、原始碼(.py)、
             # 批次檔(.bat)、使用者資料(chip/etf 歷史、backups)、log。本機工具只需服務 UI 資產。
-            _pl = p.split('?')[0].lower()
-            _DENY_EXT = ('.py', '.pyc', '.bat', '.log', '.env')
-            _DENY_SUB = ('alert_config', 'alert_rules', 'ai_key', '/chip_history', '/etf_history',
-                         '/backups', '/__pycache__', '/.git', '/.claude')
-            if '..' in _pl or _pl.endswith(_DENY_EXT) or any(s in _pl for s in _DENY_SUB):
+            # Allow-list public UI files; never serve runtime data, code, logs,
+            # Git metadata, or future credentials from the repository root.
+            _pl = unquote(p.split('?', 1)[0]).replace('\\', '/').lstrip('/')
+            _allowed_root = ('src/', 'assets/')
+            _allowed_file = ('favicon.ico', 'manifest.json', 'robots.txt')
+            if ('..' in _pl or not _pl or
+                    not (_pl.startswith(_allowed_root) or _pl in _allowed_file)):
                 self._err('forbidden', 403); return
             super().do_GET()
 
@@ -4538,6 +4544,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         out['stocks'] = stocks
         out['inst'] = inst
         out['txf'] = txf_night
+        # Canonical snapshot: headline renderers must not recompute a live
+        # change from a daily-series close.
+        out['marketSnapshot'] = market_snapshot(indices, txf_night)
         out['marketflow'] = {
             'turnover': (mf or {}).get('turnover'),
             'inst': inst,
@@ -4728,16 +4737,20 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         # 加權／櫃買／台指期：與成交金額同構的趨勢量化（vs5／Z／連漲跌／動能分）
         try:
             t00_closes = _fmtqik_index_closes(turns)
-            t00_trend = _price_series_quant(t00_closes, latest=t00.get('price'))
+            t00_trend = _price_series_quant(
+                t00_closes, latest=t00.get('price'), quote_change_pct=t00.get('changePct'))
         except Exception as e:
             print('[pulse] t00 trend', e)
-            t00_trend = _price_series_quant([], latest=t00.get('price'))
+            t00_trend = _price_series_quant(
+                [], latest=t00.get('price'), quote_change_pct=t00.get('changePct'))
         try:
             o00_closes = _tw_index_closes('^TWOII', n=30)
-            o00_trend = _price_series_quant(o00_closes, latest=o00.get('price'))
+            o00_trend = _price_series_quant(
+                o00_closes, latest=o00.get('price'), quote_change_pct=o00.get('changePct'))
         except Exception as e:
             print('[pulse] o00 trend', e)
-            o00_trend = _price_series_quant([], latest=o00.get('price'))
+            o00_trend = _price_series_quant(
+                [], latest=o00.get('price'), quote_change_pct=o00.get('changePct'))
         txf_live = None
         try:
             # strip 顯示的台指期價（夜盤優先）覆寫連續日線末端
@@ -4746,7 +4759,11 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             if txf_live is None and isinstance(txf, dict):
                 txf_live = txf.get('price')
             txf_closes = _tw_index_closes('__TXF__', n=30)
-            txf_trend = _price_series_quant(txf_closes, latest=txf_live)
+            # 頂列台指期使用與 p.txf 完全相同的 TAIFEX 即時 session。
+            # 日線只提供 vs5／Z／趨勢；漲跌幅不可從跨日／換月快取反推。
+            txf_trend = _price_series_quant(
+                txf_closes, latest=txf_live,
+                quote_change_pct=(txf_night or {}).get('changePct'))
         except Exception as e:
             print('[pulse] txf trend', e)
             txf_trend = _price_series_quant([])
@@ -6538,6 +6555,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             'source': primary.get('source') or 'unknown',
             'night': night_block,
         }
+        out = attach_quote_contract(
+            out, symbol='__TXF__', market='TW', session=out.get('session'),
+            source=out.get('source'))
         body = json.dumps(out, ensure_ascii=False).encode()
         _cache.set(key, body)
         self._ok(body)
@@ -6616,6 +6636,12 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             out['indices'] = _twse_mis_index('tse_t00.tw|otc_o00.tw')
             out['ok'] = any(v.get('price') is not None for v in out['indices'].values())
             out['source'] = 'twse-mis'
+            out['indices'] = {
+                key: attach_quote_contract(
+                    value, symbol=('^TWII' if key == 't00' else '^TWOII'),
+                    market='TW', source=value.get('source') or out['source'])
+                for key, value in out['indices'].items() if isinstance(value, dict)
+            }
         except SourceBreakerOpen:
             out['error'] = 'twse-mis breaker open'
         except Exception as e:
@@ -6624,6 +6650,20 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         if out['ok']:
             _cache.set(key, body)
         self._ok(body)
+
+    def _handle_market_snapshot(self):
+        """Single canonical source for the market headline surfaces."""
+        try:
+            indices = _twse_mis_index('tse_t00.tw|otc_o00.tw')
+        except Exception:
+            indices = {}
+        try:
+            txf = self._txf_mis_session(1) or self._txf_mis_session(0)
+        except Exception:
+            txf = None
+        out = market_snapshot(indices, txf)
+        out['updatedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+        self._ok(json.dumps(out, ensure_ascii=False).encode())
 
     def _handle_margin_ratio_backfill(self):
         """POST /margin_ratio/backfill — 背景回補歷史（full=1 從 2001 起）。"""

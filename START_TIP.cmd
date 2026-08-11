@@ -1,7 +1,8 @@
 @echo off
 REM ============================================================
 REM  Stock Terminal tip UX — DOUBLE-CLICK THIS FILE
-REM  Forces git tip branch, frees :18432 only, then go.ps1
+REM  Safe local launch: frees :18432 only, then go.ps1.
+REM  It never changes Git state or discards local work.
 REM  (go.ps1 pins absolute Stock Python — never bare PATH python).
 REM ============================================================
 chcp 65001 >nul
@@ -28,31 +29,13 @@ for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":18432" ^| findstr "L
 )
 timeout /t 1 /nobreak >nul
 
-echo [1] git fetch + hard reset tip branch
-set "TIP_BRANCH=cursor/st51-docs-ux-on-tip-3497"
-if exist "TIP_BRANCH" set /p TIP_BRANCH=<TIP_BRANCH
-for /f "tokens=* delims= " %%v in ("!TIP_BRANCH!") do set "TIP_BRANCH=%%v"
-git fetch origin !TIP_BRANCH!
-if errorlevel 1 (
-  echo [FAIL] git fetch failed
-  pause
-  exit /b 1
-)
-REM -f discards local stock_terminal*.html so checkout cannot abort and leave stale HEAD
-git checkout -f -B !TIP_BRANCH! origin/!TIP_BRANCH!
-if errorlevel 1 (
-  echo [FAIL] git checkout -f failed
-  pause
-  exit /b 1
-)
-git reset --hard origin/!TIP_BRANCH!
-if errorlevel 1 (
-  echo [FAIL] git reset failed
-  pause
-  exit /b 1
-)
+echo [1] preserve Git state (no fetch, checkout, or reset)
+for /f %%h in ('git rev-parse --short HEAD 2^>nul') do set "HEAD=%%h"
+git status --short
+echo      HEAD=!HEAD!
+echo      To update deliberately: git fetch origin ^&^& git pull --ff-only
 
-echo [2] verify new go.ps1 is on disk
+echo [2] verify launcher files are on disk
 findstr /C:"Resolve-StockPython" "scripts\go.ps1" >nul
 if errorlevel 1 (
   echo [FAIL] scripts\go.ps1 missing Resolve-StockPython — pull did not update files.
@@ -66,10 +49,9 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-for /f %%h in ('git rev-parse --short HEAD') do set "HEAD=%%h"
-echo      HEAD=!HEAD!  go.ps1 OK  pulse anchor OK
+echo      go.ps1 OK  pulse anchor OK
 
-echo [3] launch scripts\go.ps1  (no -Pull; already reset above)
+echo [3] launch scripts\go.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File "%CD%\scripts\go.ps1"
 set "RC=!ERRORLEVEL!"
 echo.
