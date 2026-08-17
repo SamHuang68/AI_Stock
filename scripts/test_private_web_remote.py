@@ -69,6 +69,19 @@ def main() -> int:
             "WWW-Authenticate", ""
         ).startswith("Basic")
 
+    with open_url(
+        base_url + "/",
+        context=context,
+        headers={"Accept": "text/html"},
+    ) as response:
+        login_page = response.read().decode(errors="replace")
+        result.update(
+            browser_login_page=response.status,
+            browser_login_redirect="/gateway/login?next=/" in response.geturl(),
+            remember_option='name="remember"' in login_page,
+            login_help='/gateway/help' in login_page,
+        )
+
     basic_value = base64.b64encode(f"owner:{owner_token}".encode()).decode()
     with open_url(
         base_url + "/",
@@ -111,7 +124,13 @@ def main() -> int:
         "mode": "isolated-host",
         "upstream": True,
         "unauthenticated_root": 401,
-        "basic_challenge": True,
+        # Browsers use the signed form-login flow; omitting the Basic challenge
+        # prevents Chrome from replacing it with the native credential dialog.
+        "basic_challenge": False,
+        "browser_login_page": 200,
+        "browser_login_redirect": True,
+        "remember_option": True,
+        "login_help": True,
         "owner_page": 200,
         "private_profile": True,
         "wavedeck_disabled": True,

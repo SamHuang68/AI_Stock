@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "projectId": "stock-terminal-v5",
   "objective": "Deploy the verified Stock Terminal workspace as an exact, tested Private Web release, promote it atomically, start the isolated backend and gateway, and verify both local and Tailscale access without exposing secrets or private runtime data.",
-  "status": "in_progress",
+  "status": "complete",
   "updatedAt": "2026-08-17",
   "constraints": {
     "inScope": [
@@ -76,7 +76,7 @@
       "id": "L08-02",
       "title": "Create the authorized exact release commit",
       "owner": "host",
-      "status": "in_progress",
+      "status": "completed",
       "dependsOn": ["L08-01"],
       "successCriteria": "All intended workspace changes are committed with no credentials, private runtime state or ignored secrets"
     },
@@ -84,7 +84,7 @@
       "id": "L08-03",
       "title": "Stage and independently test the exact commit",
       "owner": "host",
-      "status": "pending",
+      "status": "completed",
       "dependsOn": ["L08-02"],
       "successCriteria": "The release tool rebuilds and passes private-Web tests from git archive rather than the dirty worktree"
     },
@@ -92,7 +92,7 @@
       "id": "L08-04",
       "title": "Promote and start the isolated Private Web release",
       "owner": "host",
-      "status": "pending",
+      "status": "completed",
       "dependsOn": ["L08-03"],
       "successCriteria": "Promotion is approved, atomic, preserves runtime data and starts only the owned production ports"
     },
@@ -100,7 +100,7 @@
       "id": "L08-05",
       "title": "Verify local production and Tailscale HTTPS",
       "owner": "host",
-      "status": "pending",
+      "status": "completed",
       "dependsOn": ["L08-04"],
       "successCriteria": "Gateway and backend health pass, authentication is enforced, remote HTML is current and the 00685L volume contract is deployed"
     }
@@ -125,11 +125,16 @@
     "evidence": [
       "Preflight found development ST healthy on 127.0.0.1:18432 and no process on isolated production ports 18434/18435",
       "Private release status reported no active or staged release before deployment",
-      "The release tool requires an exact committed revision and explicit promote approval"
+      "The release tool requires an exact committed revision and explicit promote approval",
+      "Release commit 4f89131e5585cd02964b9966d057fdeef2052d42 was rebuilt from git archive and passed all 24 isolated Private Web regression tests",
+      "Privacy preflight and final ZIP scan passed all 10 distribution tests after replacing the last personalized Windows path with a project-relative path",
+      "Atomic promotion activated release 4f89131e5585; isolated gateway 18434 and backend 18435 are listening while development 18432 remains separate",
+      "Local production returned healthy isolated-host/upstream status, rejected unauthenticated root with 401 and served 00685L volume=168715 lots plus canonical volumeShares=168715000 from TWSE MIS",
+      "Remote https://evo-t1-st.tailbc3519.ts.net passed TLS, Chrome form-login redirect, remember-login control, owner page, reader liveness and blocked remote notify checks"
     ],
     "openP0": [],
     "openP1": [],
-    "verdict": "pending"
+    "verdict": "pass"
   },
   "loopHistory": [
     {
@@ -205,6 +210,16 @@
         "Yahoo fallback prices may be delayed and are now labeled as backup rather than drawn at the current minute; provider latency remains external.",
         "Closing-auction remainder backfill requires an explicit intradayVolumeComplete attestation, so current Yahoo payloads fail closed instead of guessing the final bucket.",
         "TWSE MIS availability and timestamp quality remain provider dependencies, while source transitions and resets are persisted through the existing bounded UI diagnostic trace."
+      ]
+    },
+    {
+      "loopId": "LOOP-008",
+      "result": "pass",
+      "summary": "Created a privacy-clean exact release commit, rebuilt and tested it outside the worktree, promoted it atomically, started the isolated Private Web host and passed local plus Tailscale HTTPS authentication, authorization, availability and deployed-volume contract gates.",
+      "residualRisks": [
+        "The isolated host is a local long-running process; a Windows reboot still requires START_PRIVATE_WEB_HOST.cmd unless a separately approved startup task is configured.",
+        "Tailscale HTTPS availability remains dependent on the local machine, Tailscale service and existing Serve/Funnel configuration.",
+        "The active application release is 4f89131e5585; the later repository-only verification record does not change served application behavior."
       ]
     }
   ],
