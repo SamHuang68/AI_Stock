@@ -15,6 +15,7 @@
     ? window.IntradayVolumeV3.createTracker({ maxContinuityMs: 15000 }) : null;
   var requestSeq = 0, lastAppliedSeq = 0, generation = 0, chartReady = false;
   var lastTraceKey = null;
+  var lastSessionTraceKey = null;
 
   function traceVolume(reason, q, extra) {
     var key = [reason, S && S.sym, q && q.volumeSource, curBucket].join('|');
@@ -28,6 +29,24 @@
           correlationId: 'volume-' + Date.now(), from: 'realtime_v3', to: 'volumeSeries',
           state: reason, currentSource: q && q.volumeSource,
           label: JSON.stringify(extra || {}).slice(0, 110)
+        })
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
+  function traceSession(reason, q, extra) {
+    var sampleTimestampMs = q && (q.timestampMs || q.volumeTimestampMs) || null;
+    var key = [reason, S && S.sym, sampleTimestampMs].join('|');
+    if (key === lastSessionTraceKey) return;
+    lastSessionTraceKey = key;
+    try {
+      fetch('/diagnostics/ui-route', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+        body: JSON.stringify({
+          ts: new Date().toISOString(), event: 'intraday_session_rejected',
+          correlationId: 'session-' + Date.now(), from: 'realtime_v3', to: 'chartSeries',
+          state: reason, currentSource: q && q.source,
+          label: JSON.stringify(extra || {}).slice(0, 160)
         })
       }).catch(function () {});
     } catch (e) {}
@@ -58,14 +77,25 @@
       S.chartSeries && chartReady;
   }
 
-  function inTradingHours() {
-    var d = new Date();                       // 假設機器在台北時區
+  function inTradingHours(nowMs) {
+    var seconds = Number(nowMs) / 1000;
+    if (window.IntradayVolumeV3 && window.IntradayVolumeV3.isTwRegularSessionTimestamp) {
+      return window.IntradayVolumeV3.isTwRegularSessionTimestamp(seconds);
+    }
+    var d = new Date(nowMs);
     var hm = d.getHours() * 60 + d.getMinutes();
-    return hm >= 535 && hm <= 820;            // 08:55–13:40 寬限
+    return hm >= 540 && hm <= 810;            // 台股日盤 09:00–13:30（含收盤撮合）
   }
 
   function tick() {
-    if (document.hidden || !activeIntradayTW() || !inTradingHours()) return;
+    if (document.hidden || !activeIntradayTW()) return;
+    var requestStartedAtMs = Date.now();
+    if (!inTradingHours(requestStartedAtMs)) {
+      traceSession('poll_outside_tw_regular_session', null, {
+        observedAt: new Date(requestStartedAtMs).toISOString(), close: '13:30 Asia/Taipei'
+      });
+      return;
+    }
     var sym = S.sym;
     if (sym !== lastSym) resetFromChart('symbol_change');
     var seq = ++requestSeq;
@@ -80,7 +110,22 @@
         }
         lastAppliedSeq = seq;
         var off = S.tzOffset || 0;
-        var bucket = Math.floor(Date.now() / 1000 / 60) * 60 + off;   // 當前分鐘(tz 平移)
+        var priceRealtime = q.source === 'twse-mis';
+        var sampleTimestampMs = priceRealtime
+          ? Number(q.timestampMs || q.volumeTimestampMs)
+          : Number(q.volumeTimestampMs || q.timestampMs);
+        var bucket = window.IntradayVolumeV3 && window.IntradayVolumeV3.twRegularSessionBucket
+          ? window.IntradayVolumeV3.twRegularSessionBucket(sampleTimestampMs, off) : null;
+        var sameTradeDate = window.IntradayVolumeV3 && window.IntradayVolumeV3.sameTaipeiDate
+          ? window.IntradayVolumeV3.sameTaipeiDate(sampleTimestampMs / 1000, requestStartedAtMs / 1000)
+          : true;
+        if (bucket == null || !sameTradeDate) {
+          traceSession(bucket == null ? 'quote_outside_tw_regular_session' : 'stale_trade_date', q, {
+            requestSeq: seq, sampleTimestampMs: sampleTimestampMs,
+            receivedAt: new Date(requestStartedAtMs).toISOString()
+          });
+          return;
+        }
         var cumVol = window.IntradayVolumeV3
           ? window.IntradayVolumeV3.canonicalShares(q) : null;
         var volumeResult = volumeTracker && cumVol != null ? volumeTracker.observe({
@@ -100,8 +145,6 @@
             sampleTimestampMs: q.volumeTimestampMs || null
           });
         }
-
-        var priceRealtime = q.source === 'twse-mis';
         if (bucket !== curBucket) {
           curBucket = bucket;
           curBar = { time: bucket, open: q.price, high: q.price, low: q.price, close: q.price };

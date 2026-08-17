@@ -11,6 +11,7 @@ import time
 import unittest
 import urllib.error
 import urllib.request
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
@@ -176,6 +177,12 @@ class PrivateWebGatewayTests(unittest.TestCase):
             self.assertEqual(int(response.headers["Content-Length"]), len(html.encode("utf-8")))
         self.assertIn("ST_PRIVATE_WEB_PROFILE", html)
         self.assertIn("wavedeck:false", html)
+        self.assertIn("window.SERVER=", html)
+        self.assertIn("window.location.origin", html)
+        self.assertIn("private-web-boot-", html)
+        self.assertNotIn("mobile-boot-", html)
+        self.assertIn("完整介面載入失敗", html)
+        self.assertNotIn("已切換手機相容圖表", html)
         self.assertLess(html.index("ST_PRIVATE_WEB_PROFILE"), html.index("<body>"))
 
     def test_missing_authentication_is_challenged(self):
@@ -183,7 +190,7 @@ class PrivateWebGatewayTests(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertIn("authentication", payload["error"])
 
-    def test_browser_login_page_has_remember_option_and_cookie_session(self):
+    def test_browser_login_page_creates_persistent_cookie_session(self):
         req = urllib.request.Request(
             self.base + "/",
             headers={"Accept": "text/html"},
@@ -193,8 +200,8 @@ class PrivateWebGatewayTests(unittest.TestCase):
             final_url = response.geturl()
             response_headers = dict(response.headers)
         self.assertEqual(final_url, self.base + "/gateway/login?next=/")
-        self.assertIn("記住我的登入", page)
-        self.assertIn('name="remember"', page)
+        self.assertIn("登入狀態會持續保留", page)
+        self.assertNotIn('name="remember"', page)
         self.assertIn('name="csrf"', page)
         self.assertIn('/gateway/help', page)
         self.assertNotIn("WWW-Authenticate", response_headers)
@@ -202,7 +209,6 @@ class PrivateWebGatewayTests(unittest.TestCase):
         form = urlencode({
             "role": "reader",
             "token": "reader-secret",
-            "remember": "1",
             "next": "/",
             "csrf": gateway._make_login_csrf(self.gateway.settings, urlsplit(self.base).netloc),
         }).encode("utf-8")
@@ -225,8 +231,15 @@ class PrivateWebGatewayTests(unittest.TestCase):
         self.assertIn(gateway.SESSION_COOKIE + "=", set_cookie)
         self.assertIn("HttpOnly", set_cookie)
         self.assertIn("SameSite=Strict", set_cookie)
-        self.assertIn("Max-Age=", set_cookie)
+        self.assertIn(
+            f"Max-Age={gateway.PERSISTENT_SESSION_MAX_AGE_SECONDS}",
+            set_cookie,
+        )
         cookie = set_cookie.split(";", 1)[0]
+        session_value = cookie.split("=", 1)[1]
+        far_future = time.time() + 100 * 365 * 24 * 60 * 60
+        with mock.patch.object(gateway.time, "time", return_value=far_future):
+            self.assertEqual(gateway._read_session(self.gateway.settings, session_value), "reader")
 
         root = urllib.request.Request(self.base + "/", headers={"Cookie": cookie})
         with urllib.request.urlopen(root, timeout=5) as response:
@@ -239,7 +252,8 @@ class PrivateWebGatewayTests(unittest.TestCase):
             page = response.read().decode("utf-8")
         self.assertIn("Stock Terminal 註冊／登入說明", page)
         self.assertIn("Tailscale", page)
-        self.assertIn("記住我的登入", page)
+        self.assertIn("登入狀態不設工作階段期限", page)
+        self.assertNotIn("30 天", page)
 
     def test_login_failure_never_persists_token(self):
         form = urlencode({

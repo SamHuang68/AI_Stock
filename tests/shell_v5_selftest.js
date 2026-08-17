@@ -10,6 +10,7 @@ const vm = require('vm');
 const root = path.join(__dirname, '..');
 const shell = fs.readFileSync(path.join(root, 'src/ui/shell_v5.js'), 'utf8');
 const hotkeys = fs.readFileSync(path.join(root, 'src/chart/hotkeys_v3.js'), 'utf8');
+const sourceHtml = fs.readFileSync(path.join(root, 'stock_terminal.html'), 'utf8');
 
 let failed = 0;
 function ok(cond, msg) {
@@ -647,6 +648,8 @@ ok(/isRingOpen/.test(hotkeys) && /側欄已移除/.test(hotkeys),
   'Esc hotkeys aware sidebar removed (ring is primary nav)');
 ok(/st5-tip-boot/.test(shell) && /st5-booted/.test(shell) && /TIP_UX/.test(shell),
   'shell tip-boot hides legacy chart chrome before boot');
+ok(/const SERVER = window\.SERVER =/.test(sourceHtml) && /location\.origin && location\.origin !== 'null'/.test(sourceHtml),
+  'browser API base is published on window.SERVER and follows the current origin');
 ok(/開啟預設總覽/.test(shell) && /applyRoute\('pulse'\)/.test(shell) &&
   /openRing\(window\.innerWidth \/ 2/.test(shell) && /ring=auto/.test(shell),
   'shell boot defaults to pulse and auto-opens ring');

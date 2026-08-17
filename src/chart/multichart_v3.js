@@ -83,11 +83,14 @@
   // ---- 單格建圖 ----
   function buildPanelChart(p, parsed) {
     if (p.chart) { try { p.chart.remove(); } catch {} p.chart = null; }
-    const candles = (parsed && parsed.candles) ? parsed.candles : [];
-    p.candles = candles;
-    const tz = t => (t == null ? t : t + tzOff());
+    let candles = (parsed && parsed.candles) ? parsed.candles : [];
     const isIntraday = (RANGES.find(x => x.key === p.rg) || {}).interval !== '1d'
       && (RANGES.find(x => x.key === p.rg) || {}).interval !== '1wk';
+    if (isIntraday && window.IntradayVolumeV3) {
+      candles = window.IntradayVolumeV3.filterTwRegularSession(candles, p.mkt).candles;
+    }
+    p.candles = candles;
+    const tz = t => (t == null ? t : t + tzOff());
 
     // ── 最後一根量回補 (對齊主程式 loadSym) ─────────────────────
     // 盤中累計總量不可塞進延遲的最後一分鐘；只有明示完整的收盤快照可補。

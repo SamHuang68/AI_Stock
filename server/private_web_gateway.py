@@ -49,8 +49,10 @@ DEFAULT_READ_TOKEN = ROOT / "data" / "private_web_read.token"
 STARTUP_TRACE = ROOT / "logs" / "private_web_gateway_startup.jsonl"
 CLIENT_TRACE = ROOT / "logs" / "private_web_client.jsonl"
 SESSION_COOKIE = "st_private_session"
-SESSION_TTL_SECONDS = 12 * 60 * 60
-REMEMBER_TTL_SECONDS = 30 * 24 * 60 * 60
+# Browser sessions are intentionally persistent.  The signed payload has no
+# clock expiry; rotating either access token changes the signing key and
+# invalidates every existing session without storing a server-side session DB.
+PERSISTENT_SESSION_MAX_AGE_SECONDS = 10 * 365 * 24 * 60 * 60
 LOGIN_CSRF_TTL_SECONDS = 15 * 60
 
 HOP_BY_HOP = {
@@ -66,9 +68,11 @@ HOP_BY_HOP = {
 
 PRIVATE_PROFILE_BOOT = r'''<script id="st-private-web-profile">
 window.ST_PRIVATE_WEB_PROFILE={profile:"personal-market",wavedeck:false,remoteTrading:false};
+window.SERVER=(window.location&&window.location.origin&&window.location.origin!=="null")?window.location.origin:"http://localhost:18432";
 (function(){
   "use strict";
-  var cid="mobile-boot-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,9);
+  var cid="private-web-boot-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,9);
+  var errorCount=0;
   function clipped(value,limit){return String(value==null?"":value).slice(0,limit||240);}
   function rect(id){
     var node=document.getElementById(id),box=node&&node.getBoundingClientRect();
@@ -95,7 +99,19 @@ window.ST_PRIVATE_WEB_PROFILE={profile:"personal-market",wavedeck:false,remoteTr
     }catch(ignore){}
   }
   window.addEventListener("error",function(ev){
-    send("client_error",{message:clipped(ev&&ev.message,300),source:clipped(ev&&ev.filename,180),line:ev&&ev.lineno||0,column:ev&&ev.colno||0,state:snapshot()});
+    errorCount+=1;
+    if(errorCount>24){
+      if(errorCount===25){send("client_error_suppressed",{count:errorCount,state:snapshot()});}
+      return;
+    }
+    var target=ev&&ev.target;
+    var resource=target&&(target.currentSrc||target.src||target.href)||"";
+    send("client_error",{
+      message:clipped(ev&&ev.message,300),source:clipped(ev&&ev.filename,180),
+      resource:clipped(resource,240),tag:clipped(target&&target.tagName,24),
+      stack:clipped(ev&&ev.error&&ev.error.stack,600),
+      line:ev&&ev.lineno||0,column:ev&&ev.colno||0,state:snapshot()
+    });
   },true);
   window.addEventListener("unhandledrejection",function(ev){
     var reason=ev&&ev.reason;
@@ -122,11 +138,11 @@ window.ST_PRIVATE_WEB_PROFILE={profile:"personal-market",wavedeck:false,remoteTr
       if(topbar){topbar.classList.remove("shell-hidden");}
       if(views){views.classList.remove("show");}
       var app=document.getElementById("app");
-      if(app&&!document.getElementById("st-mobile-recovery")){
+      if(app&&!document.getElementById("st-private-web-recovery")){
         var note=document.createElement("button");
-        note.id="st-mobile-recovery";
+        note.id="st-private-web-recovery";
         note.type="button";
-        note.textContent="已切換手機相容圖表 · 點此重試完整介面";
+        note.textContent="完整介面載入失敗 · 目前顯示基本圖表 · 點此重試";
         note.setAttribute("style","position:fixed;z-index:20050;left:10px;right:10px;bottom:max(10px,env(safe-area-inset-bottom));padding:10px 12px;border:1px solid #536b88;border-radius:10px;background:#101c30;color:#dbeafe;font:700 12px -apple-system,sans-serif;box-shadow:0 8px 26px rgba(0,0,0,.5)");
         note.onclick=function(){location.reload();};
         app.appendChild(note);
@@ -151,11 +167,10 @@ def _session_key(settings: "Settings") -> bytes:
     return hashlib.sha256(b"st-private-web-session-v1\0" + material).digest()
 
 
-def _make_session(settings: "Settings", role: str, ttl_seconds: int) -> str:
+def _make_session(settings: "Settings", role: str) -> str:
     payload = {
-        "v": 1,
+        "v": 2,
         "r": role,
-        "e": int(time.time()) + max(60, int(ttl_seconds)),
         "n": uuid.uuid4().hex[:16],
     }
     encoded = _b64url_encode(
@@ -177,10 +192,16 @@ def _read_session(settings: "Settings", value: str) -> str | None:
             return None
         payload = json.loads(_b64url_decode(encoded).decode("utf-8"))
         role = str(payload.get("r") or "")
-        expires = int(payload.get("e") or 0)
-        if payload.get("v") != 1 or role not in {"owner", "reader"}:
+        version = payload.get("v")
+        if role not in {"owner", "reader"}:
             return None
-        if expires <= int(time.time()):
+        if version == 1:
+            # Accept still-valid legacy sessions during the rollout.  The next
+            # successful form login always creates the persistent v2 contract.
+            expires = int(payload.get("e") or 0)
+            if expires <= int(time.time()):
+                return None
+        elif version != 2:
             return None
         return role
     except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
@@ -665,18 +686,16 @@ class Handler(BaseHTTPRequestHandler):
         host = (self.headers.get("Host") or "").split(":", 1)[0].strip().lower()
         return host.endswith(".ts.net")
 
-    def _cookie_value(self, role: str, remember: bool) -> str:
-        ttl = REMEMBER_TTL_SECONDS if remember else SESSION_TTL_SECONDS
+    def _cookie_value(self, role: str) -> str:
         parts = [
-            f"{SESSION_COOKIE}={_make_session(self.settings, role, ttl)}",
+            f"{SESSION_COOKIE}={_make_session(self.settings, role)}",
             "Path=/",
             "HttpOnly",
             "SameSite=Strict",
+            f"Max-Age={PERSISTENT_SESSION_MAX_AGE_SECONDS}",
         ]
         if self._request_is_https():
             parts.append("Secure")
-        if remember:
-            parts.append(f"Max-Age={REMEMBER_TTL_SECONDS}")
         return "; ".join(parts)
 
     def _clear_cookie_value(self) -> str:
@@ -724,7 +743,7 @@ h1{{font-size:22px;margin:0}}.sub{{margin:4px 0 0;color:var(--muted);font-size:1
 label.title{{display:block;margin:15px 0 7px;color:#b8c8da;font-size:13px;font-weight:700}}
 select,input[type=password]{{width:100%;min-height:46px;border:1px solid #314963;border-radius:10px;background:#07111f;color:#f4f8fc;padding:10px 12px;font-size:16px;outline:none}}
 select:focus,input:focus{{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(103,232,249,.1)}}
-.remember{{display:flex;align-items:flex-start;gap:10px;margin:16px 0;color:#c4d2e2;font-size:14px;line-height:1.45}}.remember input{{width:19px;height:19px;margin:0;accent-color:var(--gold);flex:none}}.remember small{{display:block;color:var(--muted);font-size:11px;margin-top:2px}}
+.session-note{{margin:16px 0;color:#aebed0;font-size:12px;line-height:1.6}}
 button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear-gradient(135deg,#facc15,#e5a70a);color:#09101b;font-size:16px;font-weight:900;cursor:pointer}}
 .error{{margin:0 0 13px;padding:10px 12px;border:1px solid rgba(248,113,113,.5);border-radius:9px;background:rgba(127,29,29,.18);color:#fecaca;font-size:13px}}
 .help{{margin-top:18px;padding-top:15px;border-top:1px solid #203149;color:var(--muted);font-size:12px;line-height:1.65}}.help b{{color:#dce8f5}}.help a{{color:var(--cyan);font-weight:800;text-underline-offset:3px}}
@@ -738,7 +757,7 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
 <select id="role" name="role"><option value="owner">Owner（完整研究權限）</option><option value="reader">Reader（唯讀）</option></select>
 <label class="title" for="token">ST 存取密碼</label>
 <input id="token" name="token" type="password" required autocomplete="current-password" autocapitalize="none" spellcheck="false">
-<label class="remember"><input type="checkbox" name="remember" value="1"><span>記住我的登入<small>在這台裝置保留 30 天；共用裝置請勿勾選。</small></span></label>
+<p class="session-note">登入狀態會持續保留；只有清除本站資料或管理者更換存取密碼後才需要重新登入。</p>
 <button type="submit">安全登入</button>
 </form>
 <div class="help"><b>第一次使用？</b><br>本站不開放自行註冊；請先接受管理者提供的 Tailscale 機器邀請，再使用 Reader 密碼登入。<br><a href="/gateway/help">查看完整註冊／登入說明</a></div>
@@ -752,8 +771,8 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
 :root{--bg:#060a12;--panel:#0d1727;--line:#253851;--text:#dbe7f5;--muted:#91a4ba;--gold:#f5c518;--cyan:#67e8f9;--good:#34d399}
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:radial-gradient(circle at 15% 0,#142641 0,transparent 34%),var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif}body{padding:max(22px,env(safe-area-inset-top)) 16px max(28px,env(safe-area-inset-bottom))}.wrap{width:min(760px,100%);margin:auto}.hero,.section{border:1px solid var(--line);border-radius:16px;background:rgba(13,23,39,.94);box-shadow:0 18px 52px rgba(0,0,0,.35)}.hero{padding:24px;margin-bottom:14px}.section{padding:18px 20px;margin:12px 0}h1{font-size:23px;margin:0 0 8px;color:#fff}h2{font-size:17px;margin:0 0 10px;color:var(--gold)}p,li{font-size:14px;line-height:1.75}p{margin:7px 0;color:var(--muted)}ol,ul{margin:8px 0;padding-left:22px}.tag{display:inline-block;margin-bottom:10px;padding:4px 9px;border:1px solid rgba(52,211,153,.35);border-radius:999px;background:rgba(52,211,153,.1);color:var(--good);font-size:12px;font-weight:800}.warn{color:#fbbf24}.back{display:block;margin-top:16px;padding:13px 16px;border-radius:11px;background:linear-gradient(135deg,#facc15,#e5a70a);color:#09101b;text-align:center;text-decoration:none;font-weight:900}code{color:var(--cyan);word-break:break-word}
 </style></head><body><main class="wrap"><section class="hero"><span class="tag">Tailscale 私有服務</span><h1>Stock Terminal 註冊／登入說明</h1><p>ST 沒有公開註冊。使用資格由管理者透過 Tailscale 邀請授予，之後再以 ST Reader 密碼登入。</p></section>
-<section class="section"><h2>第一次在 iPhone Chrome 使用</h2><ol><li>安裝 Tailscale，接受管理者分享的 <b>ST 主機</b>邀請。</li><li>開啟 Tailscale，確認 VPN 顯示已連線，而且登入的是收到邀請的帳號。</li><li>用 Chrome 開啟管理者提供的 <code>https://…ts.net/</code> 網址。</li><li>身分選 <b>Reader（唯讀）</b>，輸入管理者另外提供的 Reader 密碼。</li><li>私人手機的一般分頁可勾「記住我的登入」；無痕或共用裝置不要勾。</li></ol></section>
-<section class="section"><h2>「記住我的登入」代表什麼？</h2><p>勾選後，這台裝置會保留最長 30 天；未勾選時為 12 小時的工作階段。瀏覽器只保存簽章、HttpOnly 的登入 Cookie，不會把原始密碼寫入網頁儲存空間。管理者輪替密碼後，舊登入會失效。</p></section>
+<section class="section"><h2>第一次在 iPhone Chrome 使用</h2><ol><li>安裝 Tailscale，接受管理者分享的 <b>ST 主機</b>邀請。</li><li>開啟 Tailscale，確認 VPN 顯示已連線，而且登入的是收到邀請的帳號。</li><li>用 Chrome 開啟管理者提供的 <code>https://…ts.net/</code> 網址。</li><li>身分選 <b>Reader（唯讀）</b>，輸入管理者另外提供的 Reader 密碼。</li><li>登入一次後，這台裝置會持續保留登入狀態。</li></ol></section>
+<section class="section"><h2>登入會保留多久？</h2><p>登入狀態不設工作階段期限。瀏覽器只保存簽章、HttpOnly 的登入 Cookie，不會把原始密碼寫入網頁儲存空間。只有清除本站網站資料，或管理者更換 Owner／Reader 存取密碼後，才需要重新登入。</p></section>
 <section class="section"><h2>看見黑畫面時</h2><ol><li>先等 5 秒；ST 會自動嘗試開啟完整總覽，失敗時切換到相容圖表。</li><li>仍空白時關閉該分頁，再從完整 <code>https://…ts.net/</code> 網址重開，不要使用舊的 Basic-auth 書籤。</li><li>確認 Tailscale VPN 仍為已連線；行動網路與 Wi-Fi 切換後可重新連一次。</li><li>若持續發生，把發生時間與 iPhone/iOS 版本交給管理者；系統診斷不會記錄密碼。</li></ol></section>
 <section class="section"><h2>權限與安全</h2><ul><li>一般受邀者只使用 Reader；Owner 保留給管理者。</li><li>不要轉傳 Tailscale 邀請或 ST 密碼。</li><li>離開共用裝置時，在 Chrome 清除 Cookie／網站資料。</li></ul><p class="warn">Tailscale 顯示連線，不代表已取得 ST 權限；機器邀請與 Reader 密碼兩者都需要。</p></section>
 <a class="back" href="/gateway/login">返回安全登入</a></main></body></html>'''
@@ -777,7 +796,6 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             return
         role = (form.get("role") or [""])[0].strip().lower()
         token = (form.get("token") or [""])[0].strip()
-        remember = (form.get("remember") or [""])[0] == "1"
         next_path = self._safe_next((form.get("next") or ["/"])[0])
         request_host = (self.headers.get("Host") or "").strip().lower()
         csrf = (form.get("csrf") or [""])[0]
@@ -806,12 +824,12 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             self._audit("login_failed", 401, role if role in {"owner", "reader"} else "none")
             self._login_page(status=401, error="身分或存取密碼不正確。", next_path=next_path)
             return
-        self._audit("login_succeeded", 303, role, remember=remember)
+        self._audit("login_succeeded", 303, role, persistent=True)
         self._send_html(
             303,
             "<!doctype html><title>登入完成</title>",
             location=next_path,
-            cookie=self._cookie_value(role, remember),
+            cookie=self._cookie_value(role),
         )
 
     def _logout(self) -> None:

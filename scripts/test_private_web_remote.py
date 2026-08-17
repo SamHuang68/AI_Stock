@@ -78,6 +78,7 @@ def main() -> int:
         result.update(
             browser_login_page=response.status,
             browser_login_redirect="/gateway/login?next=/" in response.geturl(),
+            persistent_login_notice="登入狀態會持續保留" in login_page,
             remember_option='name="remember"' in login_page,
             login_help='/gateway/help' in login_page,
         )
@@ -129,7 +130,8 @@ def main() -> int:
         "basic_challenge": False,
         "browser_login_page": 200,
         "browser_login_redirect": True,
-        "remember_option": True,
+        "persistent_login_notice": True,
+        "remember_option": False,
         "login_help": True,
         "owner_page": 200,
         "private_profile": True,

@@ -17,12 +17,37 @@ function sample(tracker, values) {
     realtime: true,
   }, values));
 }
+function twEpoch(hour, minute, second) {
+  return Date.UTC(2026, 7, 17, hour - 8, minute, second || 0) / 1000;
+}
 
 eq(volume.canonicalShares({ volume: 151164, volumeUnit: 'lot', volumeLotSize: 1000 }),
   151164000, 'MIS legacy lots normalize to shares');
 eq(volume.canonicalShares({ volume: 147122.573, volumeShares: 147122573, volumeUnit: 'lot' }),
   147122573, 'canonical Yahoo odd-lot shares are not multiplied again');
 eq(volume.canonicalShares({ volume: null }), null, 'missing cumulative volume remains missing');
+
+ok(volume.isTwRegularSessionTimestamp(twEpoch(9, 0)), 'TW regular session includes the 09:00 open');
+ok(volume.isTwRegularSessionTimestamp(twEpoch(13, 30)), 'TW regular session includes the 13:30 closing auction');
+ok(!volume.isTwRegularSessionTimestamp(twEpoch(8, 59)), 'TW regular session rejects pre-open bars');
+ok(!volume.isTwRegularSessionTimestamp(twEpoch(13, 31)), 'TW regular session rejects every post-close minute');
+eq(volume.twRegularSessionTimestamp(twEpoch(13, 40), { clampAfterClose: true }),
+  twEpoch(13, 30), 'post-close synthetic fallback is capped at the 13:30 close');
+eq(volume.twRegularSessionBucket(twEpoch(13, 30) * 1000, 8 * 3600),
+  twEpoch(13, 30) + 8 * 3600, 'realtime chart bucket uses the exchange timestamp');
+eq(volume.twRegularSessionBucket(twEpoch(13, 40) * 1000, 8 * 3600), null,
+  'a 13:40 exchange timestamp cannot create a realtime bar');
+ok(volume.sameTaipeiDate(twEpoch(9, 0), twEpoch(13, 30)), 'same Taiwan trade date is accepted');
+ok(!volume.sameTaipeiDate(twEpoch(13, 30), twEpoch(13, 30) + 86400),
+  'a prior-day quote is rejected after the next open');
+
+const sessionBars = [8 * 60 + 59, 9 * 60, 13 * 60 + 30, 13 * 60 + 31]
+  .map(minute => ({ time: twEpoch(Math.floor(minute / 60), minute % 60), close: minute }));
+let sessionOut = volume.filterTwRegularSession(sessionBars, 'TW');
+eq([sessionOut.candles.map(x => x.close), sessionOut.dropped], [[540, 810], 2],
+  'TW historical bars are filtered to 09:00–13:30 before render');
+sessionOut = volume.filterTwRegularSession(sessionBars, 'US');
+eq([sessionOut.candles.length, sessionOut.dropped], [4, 0], 'US extended-session data is not changed by the TW contract');
 
 let t = volume.createTracker({ maxContinuityMs: 15000 });
 let out = [];
@@ -113,11 +138,21 @@ eq([out.applied, closeBars[1].volume], [true, 80], 'explicit complete close snap
 const root = path.resolve(__dirname, '..');
 const shell = fs.readFileSync(path.join(root, 'stock_terminal.html'), 'utf8');
 const multi = fs.readFileSync(path.join(root, 'src/chart/multichart_v3.js'), 'utf8');
+const realtime = fs.readFileSync(path.join(root, 'src/core/realtime_v3.js'), 'utf8');
 ok(/_volumeUnknown:\s*true/.test(shell) && /volume:\s*0/.test(shell),
   'synthetic intraday quote never maps session cumulative volume to one minute');
 ok(!/const _rem = _rmv - _sumEx/.test(shell) && !/const _rem = _rmv - _sumEx/.test(multi),
   'main and multi-chart have no unconditional intraday remainder allocator');
 ok(/backfillClosingAuction/.test(shell) && /backfillClosingAuction/.test(multi),
   'all intraday chart surfaces share the same fail-closed auction gate');
+ok(/filterTwRegularSession/.test(shell) && /filterTwRegularSession/.test(multi),
+  'main and multi-chart filter TW intraday history through one regular-session contract');
+ok(/twRegularSessionBucket\(sampleTimestampMs, off\)/.test(realtime) &&
+   !/Math\.floor\(Date\.now\(\) \/ 1000 \/ 60\) \* 60 \+ off/.test(realtime),
+  'realtime bars use the exchange timestamp rather than browser receipt time');
+ok(!/hm\s*<=\s*820/.test(realtime) && /hm\s*<=\s*810/.test(realtime),
+  'realtime poll window ends at 13:30 instead of the old 13:40 grace period');
+ok(/intraday_session_rejected/.test(realtime) && /intraday_session_filtered/.test(shell),
+  'session rejects and historical cleanup remain observable in persistent UI diagnostics');
 
 console.log('intraday_volume_v3_selftest PASSED');

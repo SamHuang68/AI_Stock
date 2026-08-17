@@ -40,9 +40,10 @@ On first use, the setup tool creates two local-only credentials:
 - `reader`: read-only browser/API access for invited users and integrations.
 
 Open `http://127.0.0.1:18434/`. The gateway displays the ST login form. Choose
-the matching role and enter its token; a private device may enable
-`記住我的登入` for a signed 30-day browser session. Without it, the session
-lasts at most 12 hours. This mode proxies directly to
+the matching role and enter its token. The gateway creates a signed,
+persistent browser session with no application-level clock expiry. It remains
+valid until the browser clears the site data or the administrator rotates the
+Owner/Reader access tokens. This mode proxies directly to
 the development ST on `18432`, so code changes are immediately visible.
 Private Web injects the `personal-market` profile before UI boot, so WaveDeck
 navigation and connection probes are disabled while the ordinary local UI is

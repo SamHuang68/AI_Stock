@@ -7,6 +7,9 @@
 })(typeof window !== 'undefined' ? window : this, function () {
   'use strict';
 
+  var TW_OPEN_MINUTE = 9 * 60;
+  var TW_CLOSE_MINUTE = 13 * 60 + 30;
+
   function nonNegative(value) {
     if (value == null || value === '') return null;
     var n = Number(value);
@@ -177,6 +180,65 @@
     return [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()].join('-');
   }
 
+  function isTwRegularSessionTimestamp(timestampSeconds) {
+    var minute = taipeiMinute(timestampSeconds);
+    return minute != null && minute >= TW_OPEN_MINUTE && minute <= TW_CLOSE_MINUTE;
+  }
+
+  function twRegularSessionTimestamp(timestampSeconds, options) {
+    options = options || {};
+    var n = Number(timestampSeconds);
+    if (!isFinite(n) || n <= 0) return null;
+    var minute = taipeiMinute(n);
+    if (minute == null || minute < TW_OPEN_MINUTE) return null;
+    var minuteBucket = Math.floor(n / 60) * 60;
+    if (minute <= TW_CLOSE_MINUTE) return minuteBucket;
+    if (options.clampAfterClose !== true) return null;
+    return minuteBucket - (minute - TW_CLOSE_MINUTE) * 60;
+  }
+
+  function twRegularSessionBucket(timestampMs, chartOffsetSeconds) {
+    var ms = Number(timestampMs);
+    if (!isFinite(ms) || ms <= 0) return null;
+    var timestamp = twRegularSessionTimestamp(ms / 1000);
+    if (timestamp == null) return null;
+    var offset = Number(chartOffsetSeconds);
+    return timestamp + (isFinite(offset) ? offset : 0);
+  }
+
+  function sameTaipeiDate(firstTimestampSeconds, secondTimestampSeconds) {
+    var first = taipeiDateKey(firstTimestampSeconds);
+    var second = taipeiDateKey(secondTimestampSeconds);
+    return first != null && second != null && first === second;
+  }
+
+  function filterTwRegularSession(candles, market) {
+    var source = Array.isArray(candles) ? candles : [];
+    if (market !== 'TW') {
+      return { candles: source.slice(), dropped: 0, firstDroppedTime: null, lastDroppedTime: null };
+    }
+    var kept = [];
+    var dropped = 0;
+    var firstDroppedTime = null;
+    var lastDroppedTime = null;
+    source.forEach(function (candle) {
+      if (candle && isTwRegularSessionTimestamp(candle.time)) {
+        kept.push(candle);
+        return;
+      }
+      dropped += 1;
+      var time = candle && candle.time != null ? Number(candle.time) : null;
+      if (firstDroppedTime == null) firstDroppedTime = time;
+      lastDroppedTime = time;
+    });
+    return {
+      candles: kept,
+      dropped: dropped,
+      firstDroppedTime: firstDroppedTime,
+      lastDroppedTime: lastDroppedTime,
+    };
+  }
+
   function backfillClosingAuction(candles, meta, market) {
     if (market !== 'TW') return { applied: false, reason: 'not_tw' };
     if (!Array.isArray(candles) || candles.length < 2 || !meta) {
@@ -211,5 +273,13 @@
     createTracker: createTracker,
     backfillClosingAuction: backfillClosingAuction,
     taipeiMinute: taipeiMinute,
+    taipeiDateKey: taipeiDateKey,
+    isTwRegularSessionTimestamp: isTwRegularSessionTimestamp,
+    twRegularSessionTimestamp: twRegularSessionTimestamp,
+    twRegularSessionBucket: twRegularSessionBucket,
+    sameTaipeiDate: sameTaipeiDate,
+    filterTwRegularSession: filterTwRegularSession,
+    TW_OPEN_MINUTE: TW_OPEN_MINUTE,
+    TW_CLOSE_MINUTE: TW_CLOSE_MINUTE,
   };
 });
