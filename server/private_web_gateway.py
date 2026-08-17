@@ -577,6 +577,11 @@ class WindowRateLimiter:
 class PrivateWebServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False
+    # Tailscale Serve terminates browser HTTP/2 and can fan one dashboard load
+    # out into dozens of simultaneous loopback requests.  The stdlib default
+    # backlog is only 5, so excess asset connections are rejected by the OS
+    # before Handler/_audit ever sees them and Tailscale surfaces random 502s.
+    request_queue_size = 128
 
     def server_bind(self) -> None:
         # Windows SO_REUSEADDR can allow multiple listeners on the same tuple,

@@ -102,6 +102,9 @@ def _request(url: str, *, method: str = "GET", token: str | None = None,
 
 
 class PrivateWebGatewayTests(unittest.TestCase):
+    def test_gateway_backlog_covers_dashboard_asset_fanout(self):
+        self.assertGreaterEqual(gateway.PrivateWebServer.request_queue_size, 128)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         UpstreamHandler.seen = []
