@@ -12,6 +12,7 @@
 (function () {
   const SRV = window.SERVER || 'http://localhost:18432';
   const _fCache = {};
+  const _fInflight = {};
 
   async function fetchFund(sym, mkt) {
     if (!sym) return null;
@@ -28,13 +29,28 @@
       }
     }
     if (_fCache[key]) return _fCache[key];
-    try {
-      const r = await fetch(`${SRV}/fundamental/${encodeURIComponent(sym)}`, { cache: 'no-store' });
-      if (!r.ok) return null;
-      const d = await r.json();
-      _fCache[key] = d;
-      return d;
-    } catch (e) { console.warn('[fundamental]', e); return null; }
+    if (_fInflight[key]) return _fInflight[key];
+    _fInflight[key] = (async function () {
+      try {
+        const traceId = 'fund-ui-' + Date.now() + '-' + String(sym).replace(/[^A-Z0-9.^_=:-]/gi, '').slice(0, 24);
+        // Correlation id stays in the query string so localhost/127.0.0.1
+        // deployments remain a simple CORS GET (a custom header triggers an
+        // OPTIONS preflight that the lightweight local server does not need).
+        const r = await fetch(`${SRV}/fundamental/${encodeURIComponent(sym)}?traceId=${encodeURIComponent(traceId)}`, {
+          cache: 'no-store'
+        });
+        if (!r.ok) return null;
+        const d = await r.json();
+        _fCache[key] = d;
+        return d;
+      } catch (e) {
+        console.warn('[fundamental]', e);
+        return null;
+      } finally {
+        delete _fInflight[key];
+      }
+    })();
+    return _fInflight[key];
   }
 
   const fmtMoney = v => v == null ? '—' :
@@ -119,12 +135,12 @@
 
   function renderEmpty(f) {
     const note = (f && f._note) || '';
-    const isUs = f && (f.market === 'US' || (S && S.mkt === 'US'));
+    const isIntl = f && (f.market === 'US' || f.market === 'JP' || (S && S.mkt !== 'TW'));
     const kind = f && f.kind;
     let hint;
     if (kind === 'macro' || kind === 'index')
       hint = note || (kind === 'macro' ? '總經序列無個股基本面' : '指數無公司財報評分');
-    else if (isUs)
+    else if (isIntl)
       hint = 'Yahoo 成長／三率暫無資料（可檢查本機是否可連 Yahoo / 已裝 yfinance）';
     else
       hint = 'TWSE OpenAPI 僅上市櫃普通股；金融/ETF 部分欄位缺';
@@ -133,7 +149,7 @@
 
   function render(f) {
     if (f && (f.kind === 'market' || f.kind === 'market_risk' || f.kind === 'margin_cycle' || f.kind === 'holders')) return renderPlainMarket(f);
-    const isUs = f && (f.market === 'US' || (S && S.mkt === 'US'));
+    const isIntl = f && (f.market === 'US' || f.market === 'JP' || (S && S.mkt !== 'TW'));
     if (!f || (!f.revenue && !f.income)) return renderEmpty(f);
     let h = '';
     const V = window.Viz;
@@ -143,7 +159,7 @@
     }
     const r = f.revenue;
     if (r) {
-      if (isUs || r.monthRev == null) {
+      if (isIntl || r.monthRev == null) {
         // 美股：無「月營收」金額，改顯示成長標題
         h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span class="stat-k">成長 ${r.period || ''}</span><span class="stat-v">${r.label || 'Yahoo'}</span></div>`;
         h += `<div class="stat-row"><span class="stat-k">營收成長 YoY</span><span class="stat-v" style="color:${pctCol(r.yoyPct)}">${pctStr(r.yoyPct)}</span></div>`;
@@ -164,7 +180,7 @@
       if (inc.roe != null)
         h += `<div class="stat-row"><span class="stat-k">ROE</span><span class="stat-v" style="color:${marginCol(inc.roe)}">${Number(inc.roe).toFixed(1)}%</span></div>`;
     }
-    const src = isUs
+    const src = isIntl
       ? `資料：Yahoo Finance（${f._source || 'keystats'}）成長 + 三率`
       : '資料：TWSE OpenAPI 月營收 + 綜合損益表';
     h += `<div style="padding:6px 12px 0;font-family:monospace;font-size:8.5px;color:var(--tf);line-height:1.5">${src}</div>`;

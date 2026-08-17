@@ -11,7 +11,7 @@
 
 | 步驟 | 動作 |
 |------|------|
-| 1 | Windows 雙擊根目錄 **`START_TIP.cmd`**（或 `scripts\go.bat`）；Linux／macOS 跑 `./scripts/go.sh` |
+| 1 | Windows 雙擊根目錄 **`START_TIP.cmd`**；`scripts\go.bat` 僅為舊捷徑相容 shim。Linux／macOS 跑 `./scripts/go.sh` |
 | 2 | 瀏覽器開到總覽；**轉盤自動出現**（中心為 Stock Terminal 5.0 logo） |
 | 3 | **滾輪**循環選取 → **Enter** 或滑鼠點選；有 `›` 的項目會從該點開下一層 |
 | 4 | **Esc**／中心徽記：有子層先返回，否則關閉轉盤 |
@@ -24,8 +24,9 @@
 
 ```mermaid
 flowchart LR
-  A[START_TIP / go.*] --> B[build_v2 + server :18432]
-  B --> C[瀏覽器 #pulse 總覽]
+  A[START_TIP] --> B[go.ps1 固定 Python 與安全檢查]
+  B --> C0[build_v2 內容雜湊建置]
+  C0 --> C[server :18432 → 瀏覽器 #pulse]
   C --> D[自動 openRing 畫面中央]
   D --> E{選取}
   E -->|葉節點 route| F[切換面板]
@@ -206,15 +207,22 @@ sequenceDiagram
 **Windows（建議）**
 
 ```powershell
-cd C:\Users\Sam\AI_Stock
+cd C:\Stock_Terminal
 .\START_TIP.cmd
 ```
 
-**同步此 tip 分支後再開**
+需要更新程式時，先確認工作目錄已自行保存，再執行：
 
 ```powershell
-git fetch origin cursor/st51-docs-ux-on-tip-3497
-git reset --hard origin/cursor/st51-docs-ux-on-tip-3497
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\go.ps1 -UpdateOnly
+```
+
+更新器只允許 fast-forward；偵測到未提交變更時會停止，不會自動 stash 或丟棄檔案。
+
+**原始碼 checkout 更新後再開**
+
+```powershell
+git pull --ff-only
 .\START_TIP.cmd
 ```
 

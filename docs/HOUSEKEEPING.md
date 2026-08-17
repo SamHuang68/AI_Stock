@@ -12,8 +12,8 @@
 |------|------|
 | 語言 / 框架 | 後端 **Python 3.10+ stdlib only**（`ThreadingHTTPServer`）；前端 **Vanilla JS + TradingView Lightweight Charts**；無 React／無 pip 依賴 |
 | 架構 | 瀏覽器 ↔ 本機 `server/server.py:18432` ↔ Yahoo／TWSE／TPEx／TDCC／FRED／MoneyDJ |
-| 建置 | `build_v2.py` 把 `src/**`（約 63 支 JS）注入 `stock_terminal.html` → `stock_terminal_v2.html` |
-| 啟動 | `scripts/go.bat`／`scripts/apply.bat`（Windows 本機） |
+| 建置 | `build_v2.py` 以 `stock_terminal.html` 為唯讀輸入，把 `src/**` 注入 `stock_terminal_v2.html`；內容雜湊版號可重現 |
+| 啟動 | `START_TIP.cmd` → `scripts/go.ps1`（Windows canonical）；`go.bat` 只保留相容轉接 |
 | 規模 | `server/` ≈ **12.9k** LOC；`src/` ≈ **21.7k** LOC；單檔最大：`server.py` **~5.6k**、`market_chart_v3.js` **~1.8k** |
 | 核心功能 | 台／美股看盤、技術指標、觀察／持倉、選股回測、ETFΔ、籌碼／基本面、大盤 Macro 追蹤圖、市場風險評分、融資週期、TDCC 集中度、本機 AI／Claude 報告、推播警示 |
 | 鐵律（`.cursorrules`） | RSI／SMA 計算必須精準；前後端欄位必須對齊；拒絕半成品 |
@@ -36,8 +36,8 @@
 | `src/ui/polish_v3.js` | 大盤／市場 tab、格上報價 | 格上數值選錯 series（已見融資比→TWII） |
 | `src/core/fields_v3.js` + `docs/FIELDS.md` | 欄位型別契約 | 新 STATS／macro 欄位未登記會破一致性 |
 | `src/screener/strategy_script_v3.js` | 類 Pine DSL | 刻意不用 `eval`；白名單需持續守門 |
-| `build_v2.py` / `build_order.py` | 模組注入順序 | `build_order._CURRENT` 與實際 `V2_SCRIPTS` **不同步** |
-| `scripts/apply.bat` / `go.bat` | 本機套用／啟動 | checkout 覆寫執行中 bat（已用 `--continue` 緩解） |
+| `build_v2.py` / `build_order.py` | 模組注入順序 | 已加入 AppKernel 相依並以 CI self-test 驗證拓樸；仍應避免新模組只靠註解排序 |
+| `START_TIP.cmd` / `go.ps1` | 本機更新／啟動 | dirty worktree fail-closed；只允許 fetch + fast-forward，正式入口不含 stash／force／reset |
 | `scripts/build_dist.py` | 分享包剝密 | 需與 `.gitignore`／README 私人檔清單保持一致 |
 | `data/*` | seed CSV／DB／universe | regenerable DB 有的追蹤、有的忽略；zip／clone 體積與衝突 |
 

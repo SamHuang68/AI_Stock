@@ -10,11 +10,21 @@
   'use strict';
   var SRV = window.SERVER || '';
   var timers = {};
+  var marketColorTraceSeen = {};
 
   function $(id) { return document.getElementById(id); }
   function jget(url) {
     return fetch(SRV + url, { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; });
+  }
+  function jpost(url, body) {
+    return fetch(SRV + url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+      cache: 'no-store'
+    }).then(function (r) { return r.ok ? r.json() : null; })
       .catch(function () { return null; });
   }
   function goRoute(id, opts) { if (window.ShellV5) window.ShellV5.go(id, opts || {}); }
@@ -25,6 +35,30 @@
   function tw(p) {
     if (p == null || p !== p) return 'flat';
     return p > 0 ? 'up' : p < 0 ? 'dn' : 'flat';
+  }
+  function marketCls(p, market) {
+    if (p == null || p !== p) return 'flat';
+    if (market === 'US') return p > 0 ? 'us-up' : p < 0 ? 'us-down' : 'flat';
+    return tw(p);
+  }
+  function traceMarketColor(surface, symbol, market, value, appliedClass) {
+    if (market !== 'US' || value == null || !isFinite(Number(value)) || Number(value) === 0) return;
+    var expected = Number(value) > 0 ? 'green' : 'red';
+    var key = [surface, symbol, Number(value) > 0 ? 'up' : 'down', appliedClass].join('|');
+    if (marketColorTraceSeen[key]) return;
+    marketColorTraceSeen[key] = true;
+    try {
+      fetch(SRV + '/diagnostics/ui-route', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+        body: JSON.stringify({
+          ts: new Date().toISOString(), event: 'market_color_render_observed',
+          correlationId: 'market-color-' + Date.now(), from: 'hub', to: surface,
+          state: Number(value) > 0 ? 'up' : 'down',
+          label: 'surface=' + surface + ';symbol=' + symbol + ';market=US;value=' + value +
+            ';appliedClass=' + appliedClass + ';expected=' + expected
+        })
+      }).catch(function () {});
+    } catch (e) {}
   }
   function pct(p) {
     if (p == null || p !== p) return '—';
@@ -107,6 +141,26 @@
         'grid-template-rows:minmax(0,1fr) minmax(0,1fr);align-content:stretch}' +
       '.hub-root .hub-zone.z-fill{grid-template-columns:repeat(auto-fill,minmax(128px,1fr));' +
         'align-content:stretch;grid-auto-rows:minmax(78px,1fr);overflow:auto;flex:1;min-height:0}' +
+      '.hub-root .hub-global-panel .hub-zone.z-fill{grid-template-columns:repeat(auto-fit,minmax(118px,1fr));' +
+        'grid-auto-rows:minmax(88px,1fr);scrollbar-gutter:stable}' +
+      '.hub-root .hub-global-panel .hub-card{padding:7px 8px;justify-content:center}' +
+      '.hub-root .hub-global-panel .hub-card .k{white-space:normal;line-height:1.25;min-height:1.25em;max-height:2.5em;' +
+        'display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}' +
+      '.hub-root .hub-global-panel .hub-card .v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}' +
+      '.hub-root .hub-global-panel .hub-card .chg{margin-top:2px;line-height:1.2}' +
+      '.hub-root .hub-global-panel .hub-global-role{color:var(--cyan);font-size:10px;font-weight:700;' +
+        'line-height:1.4;margin-top:2px;padding-bottom:1px;white-space:normal;overflow-wrap:anywhere;min-height:1.4em}' +
+      '.hub-root .hub-global-panel .hub-card .bar{margin-top:3px}' +
+      '.hub-root .hub-economy-panel h4{justify-content:flex-start}' +
+      '.hub-root .hub-economy-panel .hub-year{margin-left:auto;color:var(--cyan);font-size:10px;' +
+        'font-weight:800;letter-spacing:.3px;white-space:nowrap}' +
+      '.hub-root .hub-economy-table{table-layout:fixed}' +
+      '.hub-root .hub-economy-table th:nth-child(1),.hub-root .hub-economy-table td:nth-child(1){width:34%;text-align:left}' +
+      '.hub-root .hub-economy-table th:nth-child(2),.hub-root .hub-economy-table td:nth-child(2){width:15%}' +
+      '.hub-root .hub-economy-table th:nth-child(3),.hub-root .hub-economy-table td:nth-child(3){width:15%}' +
+      '.hub-root .hub-economy-table th:nth-child(4),.hub-root .hub-economy-table td:nth-child(4){width:14%;white-space:nowrap}' +
+      '.hub-root .hub-economy-table th:nth-child(5),.hub-root .hub-economy-table td:nth-child(5){width:22%;' +
+        'white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
       '.hub-root .hub-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;' +
         'min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%;margin:0}' +
       '.hub-root .hub-sec h4{margin:0 0 4px;font-size:12px;color:var(--gold);letter-spacing:.5px;' +
@@ -120,6 +174,7 @@
       '.hub-root .hub-card .bar{margin-top:4px}' +
       '.hub-root .hub-card .bar .vz-rowbar{height:6px;max-width:100%;display:block;width:100%}' +
       '.hub-root .up{color:var(--red)}.hub-root .dn{color:var(--green)}.hub-root .flat{color:var(--tlo)}' +
+      '.hub-root .us-up{color:var(--green)}.hub-root .us-down{color:var(--red)}' +
       '.hub-root table{width:100%;border-collapse:collapse;font-size:10px}' +
       '.hub-root th,.hub-root td{padding:2px 3px;border-bottom:1px solid var(--border);text-align:right}' +
       '.hub-root th:first-child,.hub-root td:first-child,.hub-root th:nth-child(2),.hub-root td:nth-child(2){text-align:left}' +
@@ -577,19 +632,28 @@
         if (g.changePct > 0) upN++;
         else if (g.changePct < 0) dnN++;
       });
+      var ecoYears = ecoItems.map(function (it) {
+        var m = String((it && it.date) || '').match(/^(\d{4})/);
+        return m ? m[1] : '';
+      }).filter(Boolean).sort();
+      var ecoYear = ecoYears.length
+        ? (ecoYears[0] === ecoYears[ecoYears.length - 1]
+          ? ecoYears[0]
+          : ecoYears[0] + '–' + ecoYears[ecoYears.length - 1])
+        : (String(ecoPack.updatedAt || '').match(/^(\d{4})/) || [])[1] || '—';
       var strip =
         '<div class="cell"><div class="k">全球報價</div><div class="v">' + global.length + '</div>' +
-          '<div class="s"><span class="up">' + upN + '</span> / <span class="dn">' + dnN + '</span></div></div>' +
+          '<div class="s"><span class="us-up">' + upN + '</span> / <span class="us-down">' + dnN + '</span></div></div>' +
         '<div class="cell"><div class="k">總經指標</div><div class="v">' + ecoOkPre + '/' + ecoTotalPre + '</div>' +
-          '<div class="s">' + (ecoPack.updatedAt ? String(ecoPack.updatedAt).replace('T', ' ').slice(0, 16) : '按更新指標') + '</div></div>' +
+          '<div class="s">' + (ecoYear !== '—' ? ecoYear + ' 年資料' : '按更新指標') + '</div></div>' +
         '<div class="cell"><div class="k">同步系列</div><div class="v">' + ((st.datasets || []).length) + '</div>' +
           '<div class="s">資料來源狀態</div></div>' +
         '<div class="cell"><div class="k">美10Y</div><div class="v">' +
           (pulse.us10y && pulse.us10y.value != null ? fmt(pulse.us10y.value, 2) + '%' : '—') +
           '</div><div class="s">殖利率</div></div>';
       var cards = global.map(function (g) {
-        var bar = (V && g.changePct != null) ? '<div class="bar">' + V.rowBar(g.changePct, maxChg) + '</div>' : '';
         var sym = g.symbol || g.sym || '';
+        var bar = (V && g.changePct != null) ? '<div class="bar">' + V.rowBar(g.changePct, maxChg, sym) + '</div>' : '';
         var mkt = /TWD|TWSE|台|\.TW/i.test(String(g.name || '')) ? 'TW' : 'US';
         var click = sym
           ? ' data-code="' + sym.replace(/"/g, '') + '" data-mkt="' + mkt + '" style="cursor:pointer"'
@@ -598,11 +662,13 @@
           : (sym === 'HG=F' || sym === 'TWD=X' || sym === '^VIX') ? 2
           : (g.price > 1000 ? 0 : 2);
         var role = g.role
-          ? '<div class="s" style="color:var(--cyan);font-weight:600;margin-top:2px">' + g.role + '</div>'
+          ? '<div class="hub-global-role">' + g.role + '</div>'
           : '';
+        var globalClass = marketCls(g.changePct, 'US');
+        traceMarketColor('hub.international', sym || g.name || '', 'US', g.changePct, globalClass);
         return '<div class="hub-card"' + click + '><div class="k">' + (g.name || g.symbol) + '</div><div class="v">' +
           fmt(g.price, dig) + (g.unit === '%' ? '%' : '') +
-          '</div><div class="chg ' + tw(g.changePct) + '">' +
+          '</div><div class="chg ' + globalClass + '">' +
           (g.changePct != null ? pct(g.changePct) : '—') + '</div>' + role + bar + '</div>';
       }).join('');
       function ecoVal(it) {
@@ -618,11 +684,19 @@
         if (u === '%') return '<span class="' + tw(it.change) + '">' + sign + Number(it.change).toFixed(2) + '</span>';
         return '<span class="' + tw(it.change) + '">' + sign + Number(it.change).toFixed(2) + '</span>';
       }
+      function ecoShortDate(date) {
+        var raw = String(date || '');
+        var m = raw.match(/^\d{4}[-/](\d{1,2})[-/](\d{1,2})/);
+        if (!m) return raw || '—';
+        return String(m[1]).padStart(2, '0') + '/' + String(m[2]).padStart(2, '0');
+      }
       var ecoHtml = ecoItems.map(function (it) {
         var src = it.source ? String(it.source).replace(/^seed:/, '種子 ') : '—';
-        return '<tr><td>' + (it.label || it.key) + '</td><td class="' +
+        var dateTip = it.date ? ' title="資料日 ' + String(it.date).replace(/"/g, '&quot;') + '"' : '';
+        return '<tr' + dateTip + '><td>' + (it.label || it.key) + '</td><td class="' +
           (it.ok ? '' : 'flat') + '">' + ecoVal(it) + '</td><td>' + ecoChg(it) +
-          '</td><td>' + (it.date || '—') + '</td><td style="color:var(--tlo);font-size:9px">' + src + '</td></tr>';
+          '</td><td>' + ecoShortDate(it.date) + '</td><td style="color:var(--tlo);font-size:9px" title="' +
+          src.replace(/"/g, '&quot;') + '">' + src + '</td></tr>';
       }).join('');
       var ecoOk = (ecoPack.counts && ecoPack.counts.ok) || ecoItems.filter(function (x) { return x.ok; }).length;
       var ecoTotal = (ecoPack.counts && ecoPack.counts.total) || ecoItems.length;
@@ -636,13 +710,13 @@
       body.innerHTML =
         '<div class="hub-strip">' + strip + '</div>' +
         '<div class="hub-dash hub-cols-3">' +
-          '<div class="hub-sec"><h4>全球報價 · ' + global.length +
+          '<div class="hub-sec hub-global-panel"><h4>全球報價 · ' + global.length +
             '<span style="color:var(--tlo);font-weight:600;font-size:8px">點卡開圖表</span></h4>' +
             '<div class="hub-fill hub-zone z-fill" style="display:grid">' +
             (cards || '<div class="hub-empty">國際報價載入中／來源暫不可用</div>') +
           '</div></div>' +
-          '<div class="hub-sec"><h4>經濟指標 · ' + ecoOk + '/' + ecoTotal +
-            '</h4><div class="hub-fill"><table><tr><th>項目</th><th>數值</th><th>變化</th><th>日期</th><th>來源</th></tr>' +
+          '<div class="hub-sec hub-economy-panel"><h4>經濟指標 · ' + ecoOk + '/' + ecoTotal +
+            '<span class="hub-year">' + ecoYear + '</span></h4><div class="hub-fill"><table class="hub-economy-table"><tr><th>項目</th><th>數值</th><th>變化</th><th>月/日</th><th>來源</th></tr>' +
             (ecoHtml || '<tr><td colspan="5">總經尚未就緒 — 按「更新指標」</td></tr>') +
             '</table></div>' +
             '<div class="hub-note">' + (ecoPack.hint || 'FRED 不通時改 Yahoo／BLS／種子') +
@@ -841,11 +915,13 @@
       function rowOf(w) {
         var qq = q[w.t] || q[w.t + '.TW'] || q[w.t + '.TWO'] || {};
         var ch = qq.changePct != null ? qq.changePct : w.chg;
-        var bar = V ? V.rowBar(ch, maxChg) : '';
+        var rowClass = marketCls(ch, w.m || 'TW');
+        traceMarketColor('hub.watchlist', w.t, w.m || 'TW', ch, rowClass);
+        var bar = V ? V.rowBar(ch, maxChg, w.t) : '';
         var name = w.name || qq.name || qq.shortName || '';
         return '<tr data-code="' + w.t + '" data-mkt="' + (w.m || 'TW') + '"><td style="color:var(--gold);font-weight:700">' +
           w.t + '</td><td>' + name + '</td><td>' +
-          fmt(qq.price != null ? qq.price : w.price) + '</td><td class="' + tw(ch) + '">' +
+          fmt(qq.price != null ? qq.price : w.price) + '</td><td class="' + rowClass + '">' +
           pct(ch) + bar + '</td><td style="color:var(--tlo)">' + volOf(qq) + '</td></tr>';
       }
       var twRows = wl.filter(function (w) { return (w.m || 'TW') === 'TW'; }).map(rowOf).join('') ||
@@ -1231,7 +1307,7 @@
     root.querySelectorAll('[data-sync]').forEach(function (b) {
       b.onclick = function () {
         b.textContent = '同步中…';
-        jget('/sync?days=40').then(function (r) {
+        jpost('/sync', { days: 40 }).then(function (r) {
           b.textContent = (r && r.started) ? '已啟動' : '進行中';
           if (window.ShellV5 && window.ShellV5.setSync) {
             window.ShellV5.setSync('ok', r && r.started ? 'SYNCING' : 'BUSY');

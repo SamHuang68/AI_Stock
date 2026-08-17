@@ -2,10 +2,21 @@
 """pulse_intel 單元測試 — 分數可覆核、缺資料進 pending、延伸因子專業口徑。"""
 import os
 import sys
+import inspect
+import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 
 import pulse_intel as pi  # noqa: E402
+
+
+def load_tests(loader, tests, pattern):
+    suite = unittest.TestSuite()
+    module = sys.modules[__name__]
+    for name, fn in inspect.getmembers(module, inspect.isfunction):
+        if name.startswith('test_'):
+            suite.addTest(unittest.FunctionTestCase(fn, description=name))
+    return suite
 
 
 def test_health_and_breadth_bullish():

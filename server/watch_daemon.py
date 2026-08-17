@@ -14,6 +14,12 @@
 import os, json, time, threading, urllib.request, urllib.parse
 from datetime import datetime
 
+from daemon_lock import acquire_daemon_lock
+try:
+    from .atomic_store import StoreCorruptError, atomic_write_json, load_json
+except ImportError:
+    from atomic_store import StoreCorruptError, atomic_write_json, load_json
+
 try:
     import alert_daemon
 except Exception as e:
@@ -30,28 +36,26 @@ _state = {'thread': None, 'stop': False, 'last_run': None, 'fired': []}
 # ---- I/O ---------------------------------------------------
 def load_rules():
     try:
-        with open(RULES_FILE, encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
+        return load_json(RULES_FILE, default={}, expected_type=dict)
+    except StoreCorruptError as exc:
+        print('[watch-store] rules unavailable:', type(exc).__name__)
         return {}
 
 def save_rules(d):
-    with open(RULES_FILE, 'w', encoding='utf-8') as f:
-        json.dump(d, f, ensure_ascii=False, indent=2)
+    atomic_write_json(RULES_FILE, d, backup=True, private=True)
 
 def _load_state():
     try:
-        with open(STATE_FILE, encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
+        return load_json(STATE_FILE, default={}, expected_type=dict)
+    except StoreCorruptError as exc:
+        print('[watch-store] state unavailable:', type(exc).__name__)
         return {}
 
 def _save_state(s):
     try:
-        with open(STATE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(s, f, ensure_ascii=False)
-    except Exception:
-        pass
+        atomic_write_json(STATE_FILE, s, backup=True, private=True, indent=None)
+    except Exception as exc:
+        print('[watch-store] state save failed:', type(exc).__name__)
 
 def _log(text):
     try:
@@ -288,21 +292,21 @@ def _loop():
         time.sleep(max(60, int(cfg.get('watch_poll_seconds', 300))))
 
 
-_lock_socket = None
+_lock_handle = None
 
 def start():
-    global _lock_socket
+    global _lock_handle
     if _state['thread'] and _state['thread'].is_alive():
         return
-    # 嘗試佔用 Port 18434 作為進程單例鎖，防止背景殘存重複實例發信
+    # OS file lock prevents duplicate notification workers without consuming a TCP port.
     try:
-        import socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.bind(('127.0.0.1', 18434))
-        s.listen(1)
-        _lock_socket = s
-    except OSError:
-        _log("[watch] watch_daemon already running on port 18434, skip start.")
+        if _lock_handle is None:
+            _lock_handle = acquire_daemon_lock('watch_daemon')
+        if _lock_handle is None:
+            _log("[watch] watch_daemon already running; skip start.")
+            return
+    except OSError as exc:
+        _log("[watch] daemon lock failed: " + str(exc))
         return
 
     _state['stop'] = False

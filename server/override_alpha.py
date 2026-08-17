@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from contextlib import closing
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -33,7 +34,7 @@ def _conn() -> sqlite3.Connection:
 
 def init_db() -> None:
     with _lock:
-        with _conn() as c:
+        with closing(_conn()) as c:
             c.execute(
                 '''CREATE TABLE IF NOT EXISTS override_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,7 +84,7 @@ def log_event(body: dict[str, Any]) -> dict[str, Any]:
         'meta_json': json.dumps(meta, ensure_ascii=False)[:2000],
     }
     with _lock:
-        with _conn() as c:
+        with closing(_conn()) as c:
             cur = c.execute(
                 '''INSERT INTO override_log
                    (ts, style, delever, score, adv_ratio, spillover, rotation, hot_stage,
@@ -104,7 +105,7 @@ def log_event(body: dict[str, Any]) -> dict[str, Any]:
 def recent(limit: int = 40) -> list[dict[str, Any]]:
     lim = max(1, min(200, int(limit)))
     with _lock:
-        with _conn() as c:
+        with closing(_conn()) as c:
             rows = c.execute(
                 'SELECT * FROM override_log ORDER BY id DESC LIMIT ?', (lim,)
             ).fetchall()

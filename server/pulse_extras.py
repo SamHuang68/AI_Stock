@@ -16,9 +16,13 @@ import os
 import sys
 import time
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    from .deadline import BoundedExecutor, Deadline, collect_named
+except ImportError:
+    from deadline import BoundedExecutor, Deadline, collect_named
 
 if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
@@ -32,6 +36,8 @@ NHNL_MIN_BARS = 250
 NHNL_MIN_SAMPLE = 12
 NHNL_YAHOO_WORKERS = 6
 NHNL_YAHOO_BUDGET = 7.0
+_NHNL_EXECUTOR = BoundedExecutor(NHNL_YAHOO_WORKERS, 36, prefix='nhnl')
+_EXTRAS_EXECUTOR = BoundedExecutor(4, 8, prefix='pulse-x')
 
 
 def _http_json(url: str, timeout: float = 8):
@@ -351,14 +357,17 @@ def fetch_nhnl_sample(ttl: float = 3600) -> Optional[Dict[str, Any]]:
     need = [c for c in _NHNL_UNIVERSE if c not in rows_map]
     if need:
         source = 'market.db+yahoo' if rows_map else 'yahoo'
+        deadline = Deadline(NHNL_YAHOO_BUDGET)
 
         def _one(code: str):
             """直連 Yahoo chart，避免 import server 造成循環依賴。"""
             for host in ('query1', 'query2'):
+                if deadline.expired():
+                    return code, None
                 # 2y 確保交易日 ≥250；不足仍排除，不冒充 250 日
                 url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{code}.TW?range=2y&interval=1d'
                 try:
-                    j = _http_json(url, timeout=6)
+                    j = _http_json(url, timeout=min(6.0, max(0.25, deadline.remaining())))
                     res = (j.get('chart') or {}).get('result') or []
                     if not res:
                         continue
@@ -370,27 +379,15 @@ def fetch_nhnl_sample(ttl: float = 3600) -> Optional[Dict[str, Any]]:
                     print('[pulse-extras] nhnl yahoo', code, host, type(e).__name__)
             return code, None
 
-        with ThreadPoolExecutor(max_workers=NHNL_YAHOO_WORKERS, thread_name_prefix='nhnl') as ex:
-            futs = [ex.submit(_one, c) for c in need[:36]]
-            try:
-                for f in as_completed(futs, timeout=NHNL_YAHOO_BUDGET):
-                    try:
-                        code, closes = f.result()
-                    except Exception as e:
-                        print('[pulse-extras] nhnl fut', type(e).__name__, e)
-                        continue
-                    if closes:
-                        rows_map[code] = closes
-            except Exception as e:
-                print('[pulse-extras] nhnl budget', type(e).__name__, e)
-                for f in futs:
-                    if f.done():
-                        try:
-                            code, closes = f.result()
-                            if closes:
-                                rows_map[code] = closes
-                        except Exception:
-                            pass
+        jobs = {code: _NHNL_EXECUTOR.submit(_one, code) for code in need[:36]}
+        results, outcomes = collect_named(
+            jobs, timeout=deadline.remaining(), executor=_NHNL_EXECUTOR)
+        for code, item in results.items():
+            result_code, closes = item
+            if closes:
+                rows_map[result_code or code] = closes
+        if any(value != 'ok' for value in outcomes.values()):
+            print('[pulse-extras] nhnl bounded outcomes', outcomes)
 
     out = count_nhnl(rows_map)
     if out:
@@ -402,26 +399,18 @@ def fetch_nhnl_sample(ttl: float = 3600) -> Optional[Dict[str, Any]]:
 def fetch_all(budget: float = 8.0) -> Dict[str, Any]:
     """並行抓取延伸因子，總預算 budget 秒。回傳固定鍵：sectors/txOi/sbl/nhnl。"""
     out: Dict[str, Any] = {'sectors': None, 'txOi': None, 'sbl': None, 'nhnl': None}
-    with ThreadPoolExecutor(max_workers=4, thread_name_prefix='pulse-x') as ex:
-        futs = {
-            ex.submit(fetch_sectors_light): 'sectors',
-            ex.submit(fetch_tx_oi): 'txOi',
-            ex.submit(fetch_sbl_sell): 'sbl',
-            ex.submit(fetch_nhnl_sample): 'nhnl',
-        }
-        try:
-            for f in as_completed(list(futs.keys()), timeout=budget):
-                key = futs[f]
-                try:
-                    out[key] = f.result()
-                except Exception as e:
-                    print(f'[pulse-extras] {key}', type(e).__name__, e)
-        except Exception as e:
-            print('[pulse-extras] fetch_all budget', type(e).__name__, e)
-            for f, key in futs.items():
-                if f.done():
-                    try:
-                        out[key] = f.result()
-                    except Exception as e2:
-                        print(f'[pulse-extras] {key} late', type(e2).__name__, e2)
+    deadline = Deadline(budget)
+    jobs = {
+        'sectors': _EXTRAS_EXECUTOR.submit(fetch_sectors_light),
+        'txOi': _EXTRAS_EXECUTOR.submit(fetch_tx_oi),
+        'sbl': _EXTRAS_EXECUTOR.submit(fetch_sbl_sell),
+        'nhnl': _EXTRAS_EXECUTOR.submit(fetch_nhnl_sample),
+    }
+    values, outcomes = collect_named(jobs, timeout=deadline.remaining(), executor=_EXTRAS_EXECUTOR)
+    out.update(values)
+    out['_outcomes'] = outcomes
     return out
+
+
+def executor_status() -> Dict[str, Any]:
+    return {'extras': _EXTRAS_EXECUTOR.status(), 'nhnl': _NHNL_EXECUTOR.status()}

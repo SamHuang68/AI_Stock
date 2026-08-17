@@ -5,11 +5,14 @@ Build stock_terminal_v2.html from stock_terminal.html.
 v2 = v1 base + POS tab + WATCH tab + position_v2.js + watch_v2.js.
 Re-run any time you update v1 and want v2 to inherit the changes.
 """
-import os, re, sys, time
+import argparse, hashlib, os, re, sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC  = os.path.join(ROOT, 'stock_terminal.html')
-DST  = os.path.join(ROOT, 'stock_terminal_v2.html')
+_parser = argparse.ArgumentParser(description='Build deterministic Stock Terminal HTML')
+_parser.add_argument('--out', default=os.path.join(ROOT, 'stock_terminal_v2.html'))
+_args = _parser.parse_args()
+DST = os.path.abspath(_args.out)
 
 
 def _read_version():
@@ -30,6 +33,7 @@ ST_VERSION = _read_version()
 
 # Scripts injected (in order):
 V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,須最先載入)
+              'src/core/table_sort_v5.js',  # 全域資料表三段排序（動態面板自動接入）
               'src/ui/viz_v5.js',        # v5.0: 文字→視覺共用元件(須在 colors 後、各面板前)
               'src/core/market_v3.js',   # 台股/美股 universe lookup(權威判市場+名稱,可更新)
               'src/core/fields_v3.js',   # 欄位型別定義+全域滾輪防護(單一真理來源,須最先載入)
@@ -85,6 +89,7 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/ui/dragwin_v3.js',                  # v3.9 Phase-3: 可拖拉功能視窗(標題列拖曳+記憶位置)
               'src/core/liverefresh_v3.js',              # v3.9: 「1天」盤中每45s靜默自動刷新(動態看盤)
               'src/core/namesearch_v3.js',               # v3.9: 代號框打公司名自動完成(/search 反查台股名)
+              'src/core/intraday_volume_v3.js',          # 累積量單位／來源切換／缺分鐘保護（須在 realtime 前）
               'src/core/realtime_v3.js',                 # v3.9: 台股盤中真即時(TWSE MIS 每10s 更新當前分鐘K,解 Yahoo 延遲)
               'src/ai/focus_v3.js',                    # v3.9: 焦點掃描精靈(多訊號組合自動找做多/做空焦點,/focus)
               'src/ai/copilot_v3.js',                  # v4.0: AI 副駕面板(本機 LM Studio,/ai/local)
@@ -93,6 +98,7 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/ui/wavedeck_bridge_v5.js',          # v5.0: WaveDeck 浪潮執行台入口／ST→WD 橋接
               'src/ui/hub_v5.js',                      # v5.0: TW Pulse 對齊模組（指數/法人/國際/訊號/自選/風險/設定）
               'src/ui/pulse_v5.js',                    # v5.0: TW Pulse 市場脈動總覽（組合既有 API，掛 #view-pulse）
+              'src/ui/decision_v5.js',                 # v5.x: 策略決策中心（DecisionContext／Evidence／Scenario Matrix）
               'src/ui/heat_v5.js',                     # v5.0: 類股熱力+/focus 輔區（掛 #view-heat）
               'src/ui/book_v5.js',                     # v5.0: 投組風險側欄（POST /portfolio，掛 #view-book）
               'src/ui/scan_v5.js',                     # v5.0: 三合一選股側欄（POST /screen3，掛 #view-scan）
@@ -101,13 +107,18 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/ui/afterhours_v5.js',               # v5.0: 盤後整理(/txf+/stockfut+/marketflow，掛 #view-afterhours)
               'src/ui/news_v5.js',                     # v5.0: 快訊中樞(/events+結算日，掛 #view-news；非新聞爬蟲)
               'src/ui/bridge_v5.js',                   # v5.0: 工具列→側欄橋接（須在 *Open 定義後、toolbar 前）
+              'src/ui/visual_system_v5.js',            # v5.0: 全站 elevation / border / shadow 視覺契約
+              'src/ui/chart_visual_v5.js',             # v5.0: 圖表工作站色票／層級／膠囊與數據卡契約
               'src/ui/toolbar_v3.js',                  # v3.9: 工具列模組化(一階分類+二階下拉,設定驅動;須排最後,整理所有功能鈕)
               'src/chart/market_score_bar_v3.js',      # v4.1: 主圖大盤體質／市場風險資訊列（須在 market_chart 前）
               'src/chart/market_chart_v3.js']          # v4.1: 總經/大盤折線模組（融資維持率等，必須最後掛鉤蓋過 K 線 patch）
 V2_STYLES  = ['src/ui/mobile_v2.css']
 
 # v3.9 P5: 依相依關係自動排序模組(取代人工「須在X後」)。失敗則退回原順序,不影響打包。
-V2_SCRIPTS.insert(1, 'src/core/market_data_v5.js')  # canonical market quote store
+V2_SCRIPTS.insert(1, 'src/core/app_kernel_v5.js')  # single API + panel lifecycle boundary
+V2_SCRIPTS.insert(2, 'src/core/market_data_v5.js')  # canonical market quote store
+V2_SCRIPTS.insert(3, 'src/core/decision_data_v5.js')  # canonical DecisionContext store
+V2_SCRIPTS.insert(4, 'src/core/market_intel_v5.js')  # shared theme resonance + news/watch linkage
 
 try:
     from build_order import order_scripts
@@ -230,7 +241,12 @@ if 'symLoaded' not in html:
     html = html.replace(LS_OLD, LS_NEW, 1)
 
 # 5) inject scripts + stylesheets
-ts = int(time.time())
+asset_digest = hashlib.sha256(ST_VERSION.encode('utf-8'))
+for asset in V2_SCRIPTS + V2_STYLES:
+    asset_digest.update(asset.encode('utf-8'))
+    with open(os.path.join(ROOT, asset), 'rb') as source:
+        asset_digest.update(source.read())
+revision = asset_digest.hexdigest()[:12]
 for js in V2_SCRIPTS:
     html = re.sub(rf'<script[^>]+{re.escape(js)}[^>]*></script>\s*', '', html)
 html = re.sub(r'<script[^>]+etf_v2\.js[^>]*></script>\s*', '', html)
@@ -261,11 +277,11 @@ if 'id="st5-tip-boot"' not in html:
     else:
         html = TIP_BOOT + html
 
-css_block = ''.join(f'<link rel="stylesheet" href="{css}?v={ts}">\n' for css in V2_STYLES)
+css_block = ''.join(f'<link rel="stylesheet" href="{css}?v={revision}">\n' for css in V2_STYLES)
 if '</head>' in html:
     html = html.replace('</head>', css_block + '</head>', 1)
 
-script_block = ''.join(f'<script src="{js}?v={ts}"></script>\n' for js in V2_SCRIPTS)
+script_block = ''.join(f'<script src="{js}?v={revision}"></script>\n' for js in V2_SCRIPTS)
 if '</body>' in html:
     # 注入到「最後一個」</body>(真正頁尾)。用 rpartition 避免命中 JS 字串裡的字面 </body>。
     _head, _sep, _tail = html.rpartition('</body>')
@@ -283,37 +299,21 @@ html = re.sub(
     r'(data-v2-banner>STOCK TERMINAL <span[^>]+>)v[0-9]+(?:\.\d+)*(?:-[A-Za-z0-9.]+)?(</span>)',
     rf'\g<1>v{ST_VERSION}\g<2>', html, count=1)
 
-with open(DST, 'w', encoding='utf-8') as f:
+os.makedirs(os.path.dirname(DST), exist_ok=True)
+with open(DST, 'w', encoding='utf-8', newline='\n') as f:
     f.write(html)
-with open(SRC, 'w', encoding='utf-8') as f:
-    f.write(html)
-
-shell_js = os.path.join(ROOT, 'src', 'ui', 'shell_v5.js')
-if os.path.isfile(shell_js):
-    try:
-        with open(shell_js, 'r', encoding='utf-8') as sf:
-            shell_src = sf.read()
-        shell_new, n = re.subn(
-            r"var VERSION = '[^']*';",
-            f"var VERSION = '{ST_VERSION}';",
-            shell_src, count=1)
-        if n and shell_new != shell_src:
-            with open(shell_js, 'w', encoding='utf-8') as sf:
-                sf.write(shell_new)
-    except Exception as e:
-        print('[warn] shell version stamp:', e)
 
 # tip UX 契約：建置失敗硬停，避免使用者開到半套舊殼
-if 'shell_v5.js' not in html or 'pulse_v5.js' not in html:
-    print('[FAIL] tip UX modules missing from built HTML (shell_v5 / pulse_v5)')
+if any(x not in html for x in ('app_kernel_v5.js', 'shell_v5.js', 'pulse_v5.js', 'decision_data_v5.js', 'decision_v5.js')):
+    print('[FAIL] tip UX modules missing from built HTML (shell / pulse / DecisionContext)')
     sys.exit(1)
 if 'id="st5-tip-boot"' not in html:
     print('[FAIL] tip UX boot CSS/hash guard missing from built HTML')
     sys.exit(1)
 
-print(f'[OK] wrote {DST} & {SRC} ({len(html):,} bytes)')
+print(f'[OK] wrote {DST} ({len(html):,} bytes, revision {revision})')
 print(f'     version: v{ST_VERSION}  (from VERSION)  tip UX')
-print(f'     base:    {SRC}')
+print(f'     immutable input: {SRC}')
 print(f'     modules: {", ".join(V2_SCRIPTS)}')
 print()
 print('Open in browser (tip UX only):')

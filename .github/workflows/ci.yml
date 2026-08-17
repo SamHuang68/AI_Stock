@@ -5,17 +5,39 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Python syntax
+        run: python -m compileall -q server scripts tests
       - name: Unit tests
         run: python -m unittest discover -s tests -v
       - name: build_order self-test
         run: python build_order.py
+      - name: JavaScript contract self-tests
+        shell: bash
+        run: |
+          for test in tests/*selftest.js; do node "$test"; done
       - name: Build v2 HTML
-        run: python build_v2.py
+        run: python build_v2.py --out stock_terminal_v2.ci.html
+      - name: PowerShell launcher syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path .\scripts\go.ps1), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count) { $errors | Format-List; exit 1 }
       - name: Dist scrub (via unittest)
         run: python -m unittest tests.test_dist_scrub -v

@@ -57,13 +57,19 @@
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#bd-root .bd-dash{flex:1;min-height:0;display:grid;gap:4px;' +
         'grid-template-rows:minmax(0,1fr);' +
-        'grid-template-columns:minmax(0,1.15fr) minmax(0,1fr) minmax(0,1.2fr) minmax(0,.85fr)}' +
+        'grid-template-columns:minmax(200px,.72fr) minmax(245px,.95fr) minmax(265px,1.03fr) minmax(390px,1.4fr)}' +
       '#bd-root .bd-zone,#bd-root .bd-zone-up,#bd-root .bd-zone-lo{display:contents}' +
       '#bd-root .bd-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;' +
         'min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%}' +
       '#bd-root .bd-sec h4{margin:0 0 4px;font-size:12px;color:var(--gold);letter-spacing:.5px;' +
         'display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;gap:4px;font-weight:700}' +
       '#bd-root .bd-sec > .bd-fill{flex:1;min-height:0;overflow:auto}' +
+      '#bd-root .bd-structure .bd-fill{justify-content:flex-start!important;padding-top:8px}' +
+      '#bd-root .bd-structure .bd-score-wrap{flex:0 0 auto;margin-top:10px;min-height:34px}' +
+      '#bd-root .bd-movers .bd-fill{gap:10px!important}' +
+      '#bd-root .bd-movers table.bd-hist{font-size:11px}' +
+      '#bd-root .bd-movers table.bd-hist th,#bd-root .bd-movers table.bd-hist td{padding:4px 5px}' +
+      '#bd-root .bd-movers .vz-rowbar{max-width:72px;height:4px;margin-left:4px}' +
       '#bd-root .bd-bar-lbl{display:flex;justify-content:space-between;font-size:10px;color:var(--tlo);margin-bottom:4px;flex:0 0 auto}' +
       '#bd-root .bd-bar{display:flex;height:18px;border-radius:4px;overflow:hidden;background:var(--bg);flex:0 0 auto}' +
       '#bd-root .bd-bar .seg-up{background:var(--red)}' +
@@ -320,7 +326,7 @@
 
     var seg = V ? V.segBar(up, flat, dn) : '';
     var breadthBlock =
-      '<div class="bd-sec"><h4>漲跌結構</h4><div class="bd-fill" style="display:flex;flex-direction:column;gap:8px;justify-content:center">' +
+      '<div class="bd-sec bd-structure"><h4>漲跌結構</h4><div class="bd-fill" style="display:flex;flex-direction:column;gap:8px;justify-content:center">' +
         '<div class="bd-bar-lbl"><span>' + tone + '</span><span>' +
           (st.net != null ? '淨 ' + (st.net >= 0 ? '+' : '') + st.net : '') +
         '</span></div>' +
@@ -380,7 +386,7 @@
     }
 
     var detailBlock =
-      '<div class="bd-sec"><h4>量能／法人細節</h4><div class="bd-fill"><div class="bd-rows">' + rows + '</div></div>' +
+      '<div class="bd-sec bd-details"><h4>量能／法人細節</h4><div class="bd-fill"><div class="bd-rows">' + rows + '</div></div>' +
         '<div class="bd-note">股票＝上市股票統計；法人＝BFI82U · 結構條不重複合計數字</div></div>';
 
     var hist = d._hist || [];
@@ -411,7 +417,7 @@
       });
       tbl += '</table>';
       histBlock =
-        '<div class="bd-sec"><h4>歷史廣度</h4>' +
+        '<div class="bd-sec bd-history"><h4>歷史廣度</h4>' +
           '<div class="bd-fill">' + spark + tbl + '</div>' +
           '<div class="bd-note">今日多空比 ' + (ls != null ? ls.toFixed(2) : '—') +
             ' · pulse_history.db</div></div>';
@@ -441,7 +447,7 @@
     var upTitle = limUpList.length ? '漲停／強勢' : '漲幅前列';
     var dnTitle = limDnList.length ? '跌停／弱勢' : '跌幅前列';
     var moversSec =
-      '<div class="bd-sec"><h4>強弱榜<span style="color:var(--tlo);font-weight:600;font-size:8px">/movers</span></h4>' +
+      '<div class="bd-sec bd-movers"><h4>強弱榜<span style="color:var(--tlo);font-weight:600;font-size:8px">/movers</span></h4>' +
         '<div class="bd-fill" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;align-content:start">' +
           limHalf(upList, upTitle, 'up') + limHalf(dnList, dnTitle, 'dn') +
         '</div>' +
@@ -452,7 +458,7 @@
       '<div class="bd-dash">' +
         '<div class="bd-zone bd-zone-up">' + breadthBlock + detailBlock + '</div>' +
         '<div class="bd-zone bd-zone-lo">' +
-          (histBlock || '<div class="bd-sec"><h4>歷史廣度</h4><div class="bd-fill"><div class="bd-note">尚無本機歷史紀錄</div></div></div>') +
+          (histBlock || '<div class="bd-sec bd-history"><h4>歷史廣度</h4><div class="bd-fill"><div class="bd-note">尚無本機歷史紀錄</div></div></div>') +
           moversSec +
         '</div>' +
       '</div>' +

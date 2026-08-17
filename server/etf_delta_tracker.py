@@ -33,7 +33,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ── 硬體：96GB RAM / Core Ultra 9 285H → 開大量併發 ─────────────────
+# ── ETF 下載為 I/O 工作；並行度由環境與遠端限制共同決定 ────────────
 MAX_WORKERS  = 32         # 10 檔 ETF × 多來源 fallback，給寬鬆並發
 RETRY_TIMES  = 4
 RETRY_DELAY  = 1.5

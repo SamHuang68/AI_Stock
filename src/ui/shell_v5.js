@@ -28,6 +28,8 @@
   var STORAGE_KEY = 'st5.shell.route';
   var VERSION = '5.0';
   var TIP_UX = true;
+  var PRIVATE_WEB = !!(window.ST_PRIVATE_WEB_PROFILE &&
+    window.ST_PRIVATE_WEB_PROFILE.profile === 'personal-market');
   var RING_LOGO = 'assets/st50-icon.svg';
 
   /* 舊 route → 更完整的目的地（圖表／熱力等） */
@@ -38,6 +40,7 @@
 
   var ROUTES = [
     { id: 'pulse',         label: '總覽', hint: '市場總覽儀表板（一屏高密度）', icon: '◎' },
+    { id: 'decision',      label: '決策', hint: '情境矩陣／行動範圍／證據鏈',                 icon: '◆' },
     { id: 'chart',         label: '圖表', hint: 'K 線工作區（含加權／櫃買指數與總體列）',   icon: '◈' },
     { id: 'breadth',       label: '廣度', hint: '大盤廣度（漲跌家數）',                     icon: '▤' },
     { id: 'heat',          label: '熱力', hint: '類股熱力圖＋焦點掃描',                     icon: '▦' },
@@ -56,6 +59,9 @@
     { id: 'wavedeck',      label: '執行', hint: '開啟 WaveDeck 浪潮執行台（微觀下單艦橋）', icon: '⚡', action: 'wavedeck' },
     { id: 'workspace',     label: '工具', hint: '回到圖表並開啟指令盤',                     icon: '⌘', action: 'cmd' }
   ];
+  if (PRIVATE_WEB) {
+    ROUTES = ROUTES.filter(function (route) { return route.id !== 'wavedeck'; });
+  }
 
   var state = { route: 'pulse', built: false, syncing: false, prevRoute: null };
 
@@ -123,6 +129,7 @@
 
   var PANEL_MAP = {
     pulse: 'PulseV5',
+    decision: 'DecisionV5',
     breadth: 'BreadthV5',
     heat: 'HeatV5',
     institutional: 'InstitutionalV5',
@@ -167,7 +174,7 @@
       '#shell-views.show{display:flex!important;flex-direction:column;flex:1 1 0;min-height:0;height:100%}' +
       /* 高密度一頁視圖：鎖定捲動（各模組亦會覆寫） */
       '#shell-views.show:has(.sv-panel.on){overflow:hidden;flex:1 1 0;min-height:0}' +
-      '#view-breadth.sv-panel.on,#view-heat.sv-panel.on,#view-afterhours.sv-panel.on,' +
+      '#view-decision.sv-panel.on,#view-breadth.sv-panel.on,#view-heat.sv-panel.on,#view-afterhours.sv-panel.on,' +
       '#view-institutional.sv-panel.on,#view-international.sv-panel.on,#view-signals.sv-panel.on,' +
       '#view-ai.sv-panel.on,#view-watchlist.sv-panel.on,#view-risk.sv-panel.on,#view-factors.sv-panel.on,#view-news.sv-panel.on,' +
       '#view-scan.sv-panel.on,#view-book.sv-panel.on,#view-settings.sv-panel.on,' +
@@ -443,10 +450,30 @@
       /* 圖表頂欄 Logo／快捷鈕 → 儀表板 */
       '#topbar .logo{cursor:pointer}' +
       '#topbar .logo:hover{filter:brightness(1.08)}' +
-      '#topbar .shell-dash-btn{display:inline-flex;align-items:center;gap:4px;margin-left:8px;' +
-        'padding:3px 9px;border-radius:4px;border:1px solid var(--border);background:var(--bg3);' +
-        'color:var(--thi);font:700 10px/1.2 "JetBrains Mono",monospace;cursor:pointer;white-space:nowrap}' +
-      '#topbar .shell-dash-btn:hover{border-color:var(--gold);color:var(--gold)}';
+      '#topbar{position:relative;flex-wrap:nowrap;min-height:42px;max-height:42px;overflow:hidden;isolation:isolate}' +
+      '#wlbar{position:relative;z-index:1;isolation:isolate}' +
+      '#topbar #keybtn{order:90;margin-left:auto!important;flex:0 0 auto}' +
+      '#topbar .shell-dash-btn{position:relative;display:inline-flex;align-items:center;gap:6px;margin-left:6px;' +
+        'order:100;flex:0 0 auto;height:28px;padding:3px 10px 3px 4px;overflow:hidden;' +
+        'border-radius:8px;border:1px solid rgba(255,215,78,.82);' +
+        'background:linear-gradient(135deg,#ffe36a 0%,#f5c518 48%,#d99a08 100%);' +
+        'color:#07111d;font:900 10px/1.2 "JetBrains Mono",monospace;cursor:pointer;white-space:nowrap;' +
+        'box-shadow:0 0 0 1px rgba(245,197,24,.16),0 6px 18px rgba(226,169,11,.28),' +
+        'inset 0 1px 0 rgba(255,255,255,.5);text-shadow:0 1px 0 rgba(255,255,255,.24);' +
+        'transition:transform .16s ease,filter .16s ease,box-shadow .16s ease}' +
+      '#topbar .shell-dash-btn:before{content:"";position:absolute;inset:-8px auto -8px -40%;width:34%;' +
+        'transform:skewX(-18deg);background:linear-gradient(90deg,transparent,rgba(255,255,255,.66),transparent);' +
+        'animation:shellDashSheen 3.2s ease-in-out infinite;pointer-events:none}' +
+      '#topbar .shell-dash-btn>*{position:relative;z-index:1}' +
+      '#topbar .shell-dash-glyph{width:20px;height:20px;border-radius:6px;display:inline-flex;align-items:center;' +
+        'justify-content:center;background:linear-gradient(145deg,#14243a,#07111d);' +
+        'border:1px solid rgba(255,255,255,.22);box-shadow:0 2px 7px rgba(0,0,0,.36),0 0 10px rgba(255,221,74,.22)}' +
+      '#topbar .shell-dash-glyph img{width:14px;height:14px;display:block;border-radius:3px}' +
+      '#topbar .shell-dash-btn:hover{filter:brightness(1.08) saturate(1.08);transform:translateY(-1px);' +
+        'box-shadow:0 0 0 2px rgba(245,197,24,.18),0 8px 22px rgba(226,169,11,.36),' +
+        'inset 0 1px 0 rgba(255,255,255,.58)}' +
+      '@keyframes shellDashSheen{0%,62%{left:-40%}82%,100%{left:125%}}' +
+      '@media(prefers-reduced-motion:reduce){#topbar .shell-dash-btn:before{animation:none}}';
   }
 
   function stubHTML(route) {
@@ -507,6 +534,7 @@
     return [
       ringFolder('market', '總覽', '◎', '市場儀表板／快訊／風險', [
         ringRoute('pulse', '儀表板', '◎', '一屏高密度總覽'),
+        ringRoute('decision', '策略決策', '◆', '情境矩陣／行動範圍／證據鏈'),
         ringRoute('news', '快訊', '◉', '事件／結算／警報'),
         ringRoute('risk', '風險', '◇', '風險事件與脈動'),
         ringRoute('factors', '因子帳本', '☰', '正面／風險／未納入')
@@ -558,7 +586,7 @@
       ringFolder('desk', '工作台', '★', '自選、投組、系統（含原側欄「工具」指令盤）', [
         ringRoute('watchlist', '自選', '★', '自選股中心'),
         ringRoute('book', '投組', '▣', '投組風險'),
-        ringRoute('wavedeck', 'WaveDeck', '⚡', '開啟浪潮執行台'),
+        PRIVATE_WEB ? null : ringRoute('wavedeck', 'WaveDeck', '⚡', '開啟浪潮執行台'),
         ringFolder('sys', '系統', '⚙', '指令盤／資料／快捷（原側欄工具＋設定工具）', [
           ringClick('btn-cmdp'), /* workspace／工具 */
           ringClick('btn-universe'), ringClick('btn-datasources'),
@@ -566,7 +594,7 @@
           ringClick('btn-toast'), ringClick('btn-live')
         ]),
         ringRoute('settings', '設定', '⚙', '同步與資料來源')
-      ])
+      ].filter(Boolean))
     ];
   }
 
@@ -1249,7 +1277,7 @@
         topbar.appendChild(sbtn);
       }
     }
-    if (topbar && !$('shell-wd-sync')) {
+    if (topbar && !PRIVATE_WEB && !$('shell-wd-sync')) {
       var wds = document.createElement('div');
       wds.id = 'shell-wd-sync';
       wds.className = 'shell-sync warn';
@@ -1331,23 +1359,26 @@
       });
     }
     var topbar = $('topbar');
-    if (topbar && !$('shell-dash-btn')) {
-      var btn = document.createElement('button');
+    var btn = $('shell-dash-btn');
+    if (topbar && !btn) {
+      btn = document.createElement('button');
       btn.type = 'button';
       btn.id = 'shell-dash-btn';
       btn.className = 'shell-dash-btn';
-      btn.textContent = '← 儀表板';
+      btn.innerHTML = '<span class="shell-dash-glyph" aria-hidden="true"><img src="' + RING_LOGO +
+        '" alt="" width="14" height="14"></span><span class="shell-dash-label">儀表板</span>';
       btn.title = '返回市場總覽儀表板';
       btn.addEventListener('click', function (e) {
         e.preventDefault();
         goDashboard();
       });
-      if (logo && logo.parentNode === topbar) {
-        if (logo.nextSibling) topbar.insertBefore(btn, logo.nextSibling);
+    }
+    if (topbar && btn) {
+      var keybtn = $('keybtn');
+      if (keybtn && keybtn.parentNode === topbar) {
+        if (keybtn.nextSibling) topbar.insertBefore(btn, keybtn.nextSibling);
         else topbar.appendChild(btn);
-      } else {
-        topbar.insertBefore(btn, topbar.firstChild);
-      }
+      } else topbar.appendChild(btn);
     }
   }
 
@@ -1426,6 +1457,7 @@
   }
 
   function probeWaveDeck() {
+    if (PRIVATE_WEB) return;
     if (!window.WaveDeckBridge || typeof window.WaveDeckBridge.ping !== 'function') {
       setWdSync('warn', 'WD —');
       return;
@@ -1477,7 +1509,12 @@
     if (btn) { btn.disabled = true; btn.innerHTML = '⟳ <span class="lbl">同步中…</span>'; }
     setSync('warn', 'SYNCING');
     if (manual) toast('歷史庫合併同步中（僅抓最近缺漏日）…', 3500);
-    fetch('/sync?days=40', { cache: 'no-store' })
+    fetch('/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days: 40 }),
+      cache: 'no-store'
+    })
       .then(function (r) { return r.json(); })
       .then(function () { return pollSyncDone(0); })
       .then(function (st) {
@@ -1514,12 +1551,18 @@
       var n = s && s.counts ? (s.counts.index || 0) : 0;
       setSync('ok', n ? ('DB ' + n) : 'SYNC OK');
     }).finally(function () { clearTimeout(t); });
-    probeWaveDeck();
+    if (!PRIVATE_WEB) probeWaveDeck();
   }
 
   function panelApi(id) {
     var key = PANEL_MAP[id];
-    return key && window[key] ? window[key] : null;
+    var api = key && window[key] ? window[key] : null;
+    if (api && window.AppKernel && !api.__stKernelRegistered) {
+      window.AppKernel.panels.register(id, api);
+      try { Object.defineProperty(api, '__stKernelRegistered', { value: true }); }
+      catch (e) { api.__stKernelRegistered = true; }
+    }
+    return api;
   }
 
   function deactivateRoute(id) {
@@ -1547,7 +1590,11 @@
     var key = PANEL_MAP[id];
     if (!key) return;
     if (window[key] && typeof window[key].activate === 'function') {
-      try { window[key].activate(opts); }
+      try {
+        var api = panelApi(id);
+        if (window.AppKernel && api) window.AppKernel.panels.activate(id, opts);
+        else window[key].activate(opts);
+      }
       catch (err) { console.warn('[shell-v5] ' + key + ' activate', err); }
       return;
     }

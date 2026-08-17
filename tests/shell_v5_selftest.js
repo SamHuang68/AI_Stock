@@ -28,7 +28,7 @@ ok(/softBadge/.test(shell), 'softBadge helper');
 ok(/data-st50-favicon/.test(shell), 'favicon wired');
 ok(/shell-logo-ico/.test(shell), 'topbar logo icon');
 
-['pulse', 'chart', 'breadth', 'heat', 'institutional', 'ai', 'scan', 'book', 'settings'].forEach(function (id) {
+['pulse', 'decision', 'chart', 'breadth', 'heat', 'institutional', 'ai', 'scan', 'book', 'settings'].forEach(function (id) {
   ok(new RegExp("id: '" + id + "'").test(shell), 'route ' + id);
 });
 
@@ -36,7 +36,7 @@ ok(/ShellV5\.go\('chart'\)/.test(hotkeys), 'Esc → chart in hotkeys');
 ok(/Alt\+Shift\+1/.test(hotkeys), 'Alt+Shift help row');
 ok(/ai: 'AiV5'/.test(shell), 'AiV5 in PANEL_MAP');
 
-['breadth_v5.js', 'heat_v5.js', 'afterhours_v5.js', 'news_v5.js', 'pulse_v5.js', 'ai_v5.js'].forEach(function (f) {
+['decision_v5.js', 'breadth_v5.js', 'heat_v5.js', 'afterhours_v5.js', 'news_v5.js', 'pulse_v5.js', 'ai_v5.js'].forEach(function (f) {
   const t = fs.readFileSync(path.join(root, 'src/ui', f), 'utf8');
   ok(/deactivate/.test(t), f + ' has deactivate');
 });
@@ -48,19 +48,280 @@ const build = fs.readFileSync(path.join(root, 'build_v2.py'), 'utf8');
 ok(build.indexOf('src/ui/ai_v5.js') >= 0 && build.indexOf('src/ui/bridge_v5.js') >= 0,
   'ai_v5 + bridge_v5 in build_v2');
 const colors = fs.readFileSync(path.join(root, 'src/core/colors_v3.js'), 'utf8');
+const marketContract = fs.readFileSync(path.join(root, 'src/core/market_v3.js'), 'utf8');
+const fundamental = fs.readFileSync(path.join(root, 'src/fundamental/fundamental_v3.js'), 'utf8');
 const polish = fs.readFileSync(path.join(root, 'src/ui/polish_v3.js'), 'utf8');
 const marketData = fs.readFileSync(path.join(root, 'src/core/market_data_v5.js'), 'utf8');
+const appKernel = fs.readFileSync(path.join(root, 'src/core/app_kernel_v5.js'), 'utf8');
+const decisionData = fs.readFileSync(path.join(root, 'src/core/decision_data_v5.js'), 'utf8');
+const marketIntel = fs.readFileSync(path.join(root, 'src/core/market_intel_v5.js'), 'utf8');
+const decisionUi = fs.readFileSync(path.join(root, 'src/ui/decision_v5.js'), 'utf8');
+const scanUi = fs.readFileSync(path.join(root, 'src/ui/scan_v5.js'), 'utf8');
+const tableSortUi = fs.readFileSync(path.join(root, 'src/core/table_sort_v5.js'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'server/server.py'), 'utf8');
+const sectorHistory = fs.readFileSync(path.join(root, 'server/sector_history.py'), 'utf8');
+const sectorFlow = fs.readFileSync(path.join(root, 'server/sector_flow.py'), 'utf8');
+const decisionEngine = fs.readFileSync(path.join(root, 'server/decision_context.py'), 'utf8');
+const exposureLabEngine = fs.readFileSync(path.join(root, 'server/exposure_lab.py'), 'utf8');
+const visualSystem = fs.readFileSync(path.join(root, 'src/ui/visual_system_v5.js'), 'utf8');
+const chartVisual = fs.readFileSync(path.join(root, 'src/ui/chart_visual_v5.js'), 'utf8');
 ok(/s === '__TXF__'/.test(colors) && /\^__TW_/.test(colors) && /dirRU/.test(colors),
   'color contract recognizes TXF and TW local symbols as red-up instruments');
+ok(/function isJpFmt/.test(marketContract) && /return 'JP'/.test(marketContract) &&
+  /btn-jp/.test(fs.readFileSync(path.join(root, 'stock_terminal.html'), 'utf8')) &&
+  /mkt === 'JP'/.test(fs.readFileSync(path.join(root, 'stock_terminal.html'), 'utf8')),
+  'JP contract canonicalizes Tokyo symbols and exposes a dedicated market selector');
+ok(/function isJP/.test(colors) && /function isRedUp/.test(colors) &&
+  /body\.market-jp \.price-up/.test(polish),
+  'Japan price direction uses red-up/green-down without being classified as TWSE');
+ok(/--vs-surface-0/.test(visualSystem) && /--vs-shadow-2/.test(visualSystem) &&
+  /pl-beginner-hero/.test(visualSystem) && /hub-root \.hub-sec/.test(visualSystem) &&
+  /--vs-beginner-card/.test(visualSystem) && /--vs-beginner-inset/.test(visualSystem) &&
+  /hub-root \.hub-strip \.cell:before/.test(visualSystem) && /dc-root \.dc-feature:before/.test(visualSystem) &&
+  /prefers-reduced-motion/.test(visualSystem) && /visual_system_v5\.js/.test(build),
+  'executive visual system is shared by overview and dense work panels');
+ok(/function themeFor/.test(chartVisual) && /Colors\.isRedUp/.test(chartVisual) &&
+  /candleUp/.test(chartVisual) && /volumeUp/.test(chartVisual) && /score-ring/.test(chartVisual) &&
+  /#chart-search/.test(chartVisual) && /\.vp-poc/.test(chartVisual) && /\.mkt-cell/.test(chartVisual) &&
+  /chart_visual_v5\.js/.test(build),
+  'chart workspace shares one market-aware palette across candles, volume, controls and metric cards');
+ok(/#wlbar\{height:76px!important/.test(chartVisual) && /height:33px!important/.test(chartVisual) &&
+  /wlchip-stack\{padding:1px 0!important;max-height:31px;overflow:visible/.test(chartVisual) &&
+  /wladd\{height:70px/.test(chartVisual),
+  'chart two-row watchlist allocates enough height for name, symbol and change without internal clipping');
+ok(fundamental.includes('?traceId=${encodeURIComponent(traceId)}') &&
+  polish.includes('?traceId=${encodeURIComponent(traceId)}') &&
+  /_fInflight\[key\]/.test(fundamental) && /_keystatsInflight\[key\]/.test(polish) &&
+  !fundamental.includes("headers: { 'X-ST-Trace-ID'") &&
+  !polish.includes("headers: { 'X-ST-Trace-ID'") &&
+  /trace_qs\.get\('traceId'\)/.test(server),
+  'fundamental and keystats use one in-flight simple GET without CORS preflight');
+ok(!/body\.market-us \.price-up,\s*body\.market-us \.pos/.test(polish) &&
+  !/body\.market-tw \.price-up,\s*body\.market-tw \.pos/.test(polish),
+  'active chart market no longer overrides generic pos/neg classes across unrelated panels');
 ok(/function applyMktCellTone/.test(polish) && /overwrite stale inline color/.test(polish) &&
   /applyMktCellTone\(cell, delta, true\)/.test(polish) &&
   /applyMktCellTone\(cell, chg, true\)/.test(polish),
   'market bar resets current-source color for TWSE/TAIFEX overrides');
 ok(/window\.MarketData/.test(marketData) && /marketData/.test(polish) && /\/market\/snapshot/.test(marketData),
   'market headline surfaces use one canonical snapshot/event store');
+ok(/window\.DecisionData/.test(decisionData) && /inflight/.test(decisionData) && /decisionData/.test(decisionUi) &&
+  /decisionSummary/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')) &&
+  /decision_contract_version/.test(fs.readFileSync(path.join(root, 'src/ui/wavedeck_bridge_v5.js'), 'utf8')),
+  'decision surfaces use one canonical DecisionContext store');
+ok(/src\/core\/market_intel_v5\.js/.test(build) && /window\.MarketIntelV5/.test(marketIntel) &&
+  /linkNewsToWatchlist/.test(marketIntel) && /buildThemeResonance/.test(marketIntel),
+  'build includes the shared market-intelligence taxonomy and news/watchlist linker');
+ok(/linkNewsToWatchlist/.test(decisionUi) && /dc-news-watch/.test(decisionUi) && /bindNewsLinks/.test(decisionUi) &&
+  /MarketIntelV5/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')),
+  'decision and pulse share one direct/theme News Impact watchlist contract');
+ok(/成交口徑：上市普通股產業內占比/.test(decisionUi) && /historyDates/.test(decisionUi) &&
+  /turnoverEligible/.test(decisionUi) && /industryTurnoverYi/.test(server) && /sector_history/.test(server) &&
+  /TWSE_COMMON_STOCKS_BY_INDUSTRY/.test(sectorFlow) && /normalize_session_date/.test(sectorFlow) &&
+  /turnoverSessionMatched/.test(server) && /enrich_sector_rows/.test(sectorHistory),
+  'sector flow exposes official-industry turnover scope and persistent RS20 readiness');
+ok(/情境訊號矩陣/.test(decisionUi) && /Evidence Ledger/.test(decisionUi) && /Risk Profile/.test(decisionUi) &&
+  /positionRange/.test(decisionUi) && /observation_pool/.test(decisionUi) &&
+  /observation_pool_not_risk_overlay/.test(decisionUi) && /breadthTrendHtml/.test(decisionUi),
+  'decision page exposes scenario, evidence, transparent risk profile and observation-pool label');
+ok(/function evidenceCategory/.test(decisionUi) && /data-evidence-category/.test(decisionUi) &&
+  /data-evidence-mode/.test(decisionUi) && /data-evidence-scope/.test(decisionUi) &&
+  /dc-evidence-query/.test(decisionUi) && /警示／異常/.test(decisionUi) && /即時資料/.test(decisionUi),
+  'Evidence Ledger groups evidence and supports search, status and market filters');
+ok(/function relativeTimeInfo/.test(decisionUi) && /dc-fresh-dot/.test(decisionUi) &&
+  /前一交易日/.test(decisionUi) && /季度研究基準/.test(decisionUi) &&
+  /function sourceInfo/.test(decisionUi) && /dc-source-link/.test(decisionUi),
+  'Evidence Ledger exposes session-aware freshness and source inspection without raw timestamps dominating');
+ok(/function evidenceObjectHtml/.test(decisionUi) && /3日斜率/.test(decisionUi) && /弱於中線/.test(decisionUi) &&
+  /function divergenceLink/.test(decisionUi) && /dc-linkage/.test(decisionUi) &&
+  !/typeof e\.value === 'object' \? JSON\.stringify\(e\.value\)/.test(decisionUi),
+  'Evidence Ledger formats structured values and links upstream divergence warnings');
+ok(/data-evidence-copy="json"/.test(decisionUi) && /data-evidence-copy="csv"/.test(decisionUi) &&
+  /data-evidence-copy="debug"/.test(decisionUi) && /function evidenceCsv/.test(decisionUi) &&
+  /原始值未改寫/.test(decisionUi),
+  'Evidence Ledger preserves raw audit values and copies JSON, CSV or bounded debug context');
+ok(/function portfolioSwitchHtml/.test(decisionUi) && /dc-portfolio-switch/.test(decisionUi) &&
+  /class="dc-card"><h3 class="dc-portfolio-head"><span>Portfolio Overlay/.test(decisionUi) &&
+  !/<button class="dc-btn" id="dc-use-positions">/.test(decisionUi) &&
+  /data-portfolio-switch-bound/.test(decisionUi) && /root\.addEventListener\('click'/.test(decisionUi) &&
+  /setPortfolioMode: setPortfolioMode/.test(decisionUi),
+  'portfolio source switch lives inside Portfolio Overlay instead of the page header');
+ok(/function scenarioDetail/.test(decisionUi) && /function featureSignal/.test(decisionUi) &&
+  /上漲占比 /.test(decisionUi) && /3\/5日斜率/.test(decisionUi) && /法人 /.test(decisionUi) &&
+  /美國科技 /.test(decisionUi) && /風險負擔/.test(decisionUi) && /risk \? -Math\.abs/.test(decisionUi) &&
+  /dc-scale-legend/.test(decisionUi) && !/JSON\.stringify\(f\.raw/.test(decisionUi),
+  'scenario matrix formats raw evidence as bounded semantic summaries without overflow');
+ok(/Exposure Lab/.test(decisionUi) && /Shadow · 研究上限/.test(decisionUi) &&
+  /<details class="dc-lab" open>/.test(decisionUi) &&
+  /dc-temp/.test(decisionUi) && /dc-thermo/.test(decisionUi) && /曝險壓力/.test(decisionUi) && /過熱/.test(decisionUi) &&
+  /波動壓力/.test(exposureLabEngine) && /融資擁擠/.test(exposureLabEngine) &&
+  /槓桿適配/.test(exposureLabEngine) && /投組曝險/.test(exposureLabEngine) &&
+  /單一最高風險至少保留/.test(exposureLabEngine) &&
+  /<details class="dc-lab-detail"><summary>展開數據與判定依據/.test(decisionUi) &&
+  /#60a5fa/.test(decisionUi) && /#facc15/.test(decisionUi) && /#fb923c/.test(decisionUi) &&
+  /hypotheses\.map/.test(decisionUi) &&
+  !/00685L/.test(decisionUi) && /selectedResearchCeilingPct/.test(decisionUi),
+  'Exposure Lab opens with professional exposure-pressure lights and keeps detailed evidence opt-in');
+ok(/dc-temp-light \.s\{grid-column:1\/-1;text-align:center/.test(decisionUi) &&
+  /num\(x\[1\], 0\)/.test(decisionUi) && /function confidenceIcon/.test(decisionUi) &&
+  /dc-confidence/.test(decisionUi) && /width:54px;height:54px/.test(decisionUi) &&
+  /conic-gradient\(#22d3ee var\(--confidence\)/.test(decisionUi) && /percentage \+ '<small>%/.test(decisionUi) &&
+  /function compactObserved/.test(decisionUi) &&
+  /function indexBreadthVisual/.test(decisionUi) && /function basisVisual/.test(decisionUi) &&
+  /dc-breadth-bar/.test(decisionUi) && /dc-basis-gauge/.test(decisionUi) &&
+  !/JSON\.stringify\(compactObserved\(d\.observed/.test(decisionUi) &&
+  !/ · 信心 ' \+ pct01\(d\.confidence\)/.test(decisionUi),
+  'decision uses visual divergence overlays, breadth structure, basis gauge and rounded confidence icons');
+ok(/function mandatoryControlsHtml/.test(decisionUi) && /dc-mandatory/.test(decisionUi) && /強制限制/.test(decisionUi) &&
+  /breadth_divergence_risk_lock/.test(decisionUi) && /mandatoryControls/.test(decisionEngine),
+  'high-confidence breadth divergence drives explicit Action Envelope red-light controls');
+ok(/function optionsStructureHtml/.test(decisionUi) && /data-layer=\"observed\"/.test(decisionUi) &&
+  /data-layer=\"derived\"/.test(decisionUi) && /data-layer=\"modeled\"/.test(decisionUi) &&
+  /optionsLabOpen = false/.test(decisionUi) && /function bindOptionsLab/.test(decisionUi) &&
+  /data-st-sort=\"off\"/.test(decisionUi) && /\/options\/txo\/refresh/.test(decisionUi) &&
+  /DecisionData\.publish\(ctx, 'options-refresh'\)/.test(decisionUi),
+  'TXO options structure keeps observed, derived and modeled layers distinct in one canonical DecisionContext');
+ok(/topVegaStrikes/.test(decisionUi) && /Modeled Signed VEX/.test(decisionUi) &&
+  /IV \+1 波動率點（1 vol pt）/.test(decisionUi) && /dc-options-density-grid/.test(decisionUi) &&
+  /function optionsHistoryHtml/.test(decisionUi) && /dc-options-change/.test(decisionUi) &&
+  /history\.status|var status = history\.status/.test(decisionUi) && /Number\(current\.contractVersion/.test(decisionUi),
+  'TXO V2 adds direction-neutral Vega density, modeled Signed VEX and same-expiry history without changing collapsed summary');
+ok(!/optionsStructure: context\.optionsStructure/.test(decisionData) &&
+  /台指選擇權結構/.test(decisionUi) && /不推定造市商持倉/.test(decisionUi) &&
+  /Gamma／Vega 密度是方向中立/.test(decisionUi),
+  'options research stays out of the Pulse summary and discloses public-OI limitations');
+ok(/持有 /.test(fs.readFileSync(path.join(root, 'src/core/pro_v2.js'), 'utf8')) &&
+  /今日 /.test(fs.readFileSync(path.join(root, 'src/core/pro_v2.js'), 'utf8')) &&
+  /Colors\.dir\(item\.code/.test(fs.readFileSync(path.join(root, 'src/core/pro_v2.js'), 'utf8')),
+  'POS distinguishes holding return from today change with TW-aware colors');
+ok(/SORT_COLUMNS/.test(scanUi) && /function sortedResults/.test(scanUi) && /function cycleSort/.test(scanUi) &&
+  /data-sort/.test(scanUi) && /aria-sort/.test(scanUi) && /缺值永遠沉底/.test(scanUi),
+  'scan result headers support stable three-state sorting with missing values last');
+ok(/table_sort_v5\.js/.test(build) && /MutationObserver/.test(tableSortUi) && /function enhanceTable/.test(tableSortUi) &&
+  /direction === 'ascending' \? 'descending' : 'none'/.test(tableSortUi) && /升冪與降冪都將缺值固定沉底/.test(tableSortUi) &&
+  /\.pf-hm,\.bk-hm/.test(tableSortUi) && /data-st-sort="off"/.test(scanUi),
+  'all list-style panel tables inherit global three-state sorting while matrix/native tables opt out');
+ok(/↻ 立即更新市場資料/.test(decisionUi) && /\/pulse\?refresh=1/.test(decisionUi) &&
+  /refreshMarketData/.test(decisionUi),
+  'decision empty state can refresh pulse and context without route switching');
+ok(/market_refresh_terminal_success/.test(decisionUi) &&
+  /market_refresh_terminal_failure/.test(decisionUi) &&
+  /st_decision_ui_trace_v1/.test(decisionData),
+  'decision refresh has persistent correlated success/failure trace');
+const pulseBeginner = fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8');
+ok(/st_pulse_view_mode_v1/.test(pulseBeginner) && /\? 'expert' : 'beginner'/.test(pulseBeginner) &&
+  /id="pl-view-beginner"/.test(pulseBeginner) && /id="pl-view-expert"/.test(pulseBeginner),
+  'pulse defaults to beginner mode and preserves an explicit expert switch');
+ok(/pl-beginner-gauge/.test(pulseBeginner) && /市場情緒/.test(pulseBeginner) &&
+  /每 10 家約/.test(pulseBeginner) && /今日上方天花板/.test(pulseBeginner) &&
+  /今日下方地板/.test(pulseBeginner),
+  'beginner mode exposes gauge, plain-language breadth and two safety boundaries');
+ok(/class="marker-halo"/.test(pulseBeginner) && /class="marker"/.test(pulseBeginner) &&
+  /offset="\.32" stop-color="#4ade80"/.test(pulseBeginner) &&
+  /offset="\.82" stop-color="#f87171"/.test(pulseBeginner),
+  'beginner gauge has a visible score marker and cold/steady/warning/overheat color bands');
+ok(/pl-safe-level ceiling/.test(pulseBeginner) && /pl-safe-level floor/.test(pulseBeginner) &&
+  /function beginnerLevelDistance/.test(pulseBeginner) && /距目前 \+/.test(pulseBeginner) && /距目前 -/.test(pulseBeginner),
+  'beginner ceiling and floor are independent cards with distance from the current index');
+ok(/展開進階觀察/.test(pulseBeginner) && /查看專業參數/.test(pulseBeginner) &&
+  /pl-beginner-advanced/.test(pulseBeginner),
+  'beginner progressive disclosure keeps advanced and expert layers opt-in');
+ok(/@media\(min-width:901px\) and \(max-height:740px\)/.test(pulseBeginner) &&
+  /pl-body\.pl-mode-beginner\{overflow-x:hidden;overflow-y:auto;padding:2px 0 8px;scrollbar-gutter:stable\}/.test(pulseBeginner) &&
+  /pl-beginner-advanced:not\(\[hidden\]\)\)\{overflow:auto\}/.test(pulseBeginner),
+  'beginner desktop stays compact and safely scrolls when the viewport cannot contain it');
+ok(/\.pl-weather\.calm\{color:#bae6fd/.test(pulseBeginner) &&
+  /\.pl-weather\.watch\{color:#fde68a/.test(pulseBeginner) &&
+  /\.pl-weather\.alert\{color:#fed7aa/.test(pulseBeginner) && /weather-watch:after/.test(pulseBeginner),
+  'semantic weather uses blue/yellow/orange rather than TW price red/green');
+ok(/NARROW_RALLY:[\s\S]*label: '指數偏強・結構分化'/.test(pulseBeginner) &&
+  !/晴時多雲/.test(pulseBeginner),
+  'beginner regime badge uses professional market structure terminology');
+ok(/data-method-card/.test(pulseBeginner) && /怎麼算？/.test(pulseBeginner) &&
+  /上漲家數 ÷（上漲＋下跌家數）/.test(pulseBeginner) && /class="pl-method-pop" hidden/.test(pulseBeginner),
+  'beginner signal cards disclose a one-line calculation method without changing page height');
+ok(/30 秒可讀完/.test(pulseBeginner) && /beginnerFallbackSummary/.test(pulseBeginner) &&
+  /白話 AI 懶人包/.test(pulseBeginner),
+  'beginner AI summary has a short plain-language prompt and deterministic fallback');
+ok(/id="pl-ai-close" aria-label="關閉 AI 白話懶人包"/.test(pulseBeginner) &&
+  /function toggleAiSummary\(\)/.test(pulseBeginner) && /if \(aiSummaryStarted\)/.test(pulseBeginner) &&
+  /setAiSummaryVisible\(false\)/.test(pulseBeginner) && /收起 30 秒白話 AI 懶人包/.test(pulseBeginner) &&
+  /beginner-mode #pl-ai-sum\{display:none!important\}/.test(pulseBeginner),
+  'AI plain-language summary is dismissible, toggleable and reopens without another request');
+ok(/plAiDrawerIn/.test(pulseBeginner) && /backdrop-filter:blur\(18px\)/.test(pulseBeginner) &&
+  /id="pl-ai-speak"/.test(pulseBeginner) && /SpeechSynthesisUtterance/.test(pulseBeginner) &&
+  /3 大要點速覽/.test(pulseBeginner),
+  'beginner AI uses a glass drawer with bounded speech playback and three-point fallback');
+ok(/三市場趨勢雷達/.test(pulseBeginner) && /台股市場/.test(pulseBeginner) &&
+  /美股市場/.test(pulseBeginner) && /期貨市場/.test(pulseBeginner) &&
+  /漲跌比 /.test(pulseBeginner) && /指數熱度 /.test(pulseBeginner) && /風險偏高/.test(pulseBeginner) &&
+  /▲ \+/.test(pulseBeginner) && /▼ /.test(pulseBeginner),
+  'beginner radar summarizes TW, US and futures direction, heat and risk');
+ok(/\^GSPC/.test(pulseBeginner) && /\^IXIC/.test(pulseBeginner) && /\^SOX/.test(pulseBeginner) &&
+  /\^VIX/.test(pulseBeginner) && /basisPct/.test(pulseBeginner) && /ampRate/.test(pulseBeginner),
+  'beginner radar uses existing US index, VIX and TXF basis/volatility sources');
+ok(pulseBeginner.includes('.pl-radar-card.tw .change.radar-pos,#pl-root .pl-radar-card.fut .change.radar-pos{color:var(--red)}') &&
+  pulseBeginner.includes('.pl-radar-card.us .change.radar-pos{color:var(--green)}') &&
+  /value > 0 \? 'radar-pos' : 'radar-neg'/.test(pulseBeginner) &&
+  pulseBeginner.includes('.pl-risk-pill.high{color:#fed7aa'),
+  'market radar preserves TW red-up/US green-up and separate orange risk semantics');
+ok(/pl-money-split/.test(pulseBeginner) && /外資/.test(pulseBeginner) && /投信/.test(pulseBeginner) &&
+  /自營/.test(pulseBeginner) && /總 OI/.test(pulseBeginner) && /非外資淨部位/.test(pulseBeginner),
+  'beginner cards expose institutional components and honest total-OI semantics');
+ok(/function beginnerDivergence/.test(pulseBeginner) && /結構背離/.test(pulseBeginner) &&
+  /INDEX_UP_BREADTH_DOWN/.test(pulseBeginner),
+  'beginner hero surfaces an explicit index-versus-breadth divergence warning');
+ok(/權值／廣度背離/.test(pulseBeginner) && /divergenceDetails/.test(pulseBeginner) &&
+  /indexStreak/.test(pulseBeginner) && /多空比/.test(pulseBeginner),
+  'pulse and AI summaries consume the canonical multi-day index versus breadth evidence');
+ok(/function buildWatchThemeResonance/.test(pulseBeginner) && /同向參與率＋平均漲跌強度/.test(pulseBeginner) &&
+  /共振熱度/.test(pulseBeginner) && /buildWatchThemeResonance: buildWatchThemeResonance/.test(pulseBeginner),
+  'watchlist opportunity dots expose theme resonance without mislabeling it as historical correlation');
+ok(/function normalizeYiValue/.test(pulseBeginner) && /function formatYiCompact/.test(pulseBeginner) &&
+  /instForeignYi/.test(pulseBeginner) && /formatYiCompact\(value, true\)/.test(pulseBeginner) &&
+  /formatYiCompact: formatYiCompact/.test(pulseBeginner),
+  'beginner institutional amounts normalize raw NTD to yi and use compact dashboard formatting');
+ok(/levelsStale/.test(pulseBeginner) && /歷史壓力參考/.test(pulseBeginner) &&
+  /勿作今日停損依據/.test(pulseBeginner) && /boundary_formula_observed/.test(pulseBeginner),
+  'stale key levels are downgraded from today boundaries and traced with their source values');
+ok(/id="pl-stock-check"/.test(pulseBeginner) && /function stockHealthAssessment/.test(pulseBeginner) &&
+  /stock_health_request_start/.test(pulseBeginner) && /\/twquote\?code=/.test(pulseBeginner) &&
+  /setTimeout\(function \(\) \{ if \(controller\) controller\.abort\(\); \}, 8000\)/.test(pulseBeginner),
+  'beginner stock health check is source-backed, traced and bounded by timeout');
+ok(/function stockHealthFallbackQuote/.test(pulseBeginner) && /stock_health_fallback_start/.test(pulseBeginner) &&
+  /\/quote\/.*code \+ '\.TW'/.test(pulseBeginner) && /MIS盤後備援/.test(pulseBeginner) &&
+  /yahoo-v8-chart · MIS盤後備援/.test(server),
+  'stock health falls back to a labeled Yahoo quote when MIS has no post-close trade field');
+ok(/key_levels_stale/.test(server + decisionEngine) && /keyLevelMeta/.test(decisionEngine) &&
+  /divergenceDetails/.test(decisionEngine),
+  'decision contract suppresses stale key-level triggers and publishes provenance-rich compact metadata');
+ok(/function marketCls/.test(pulseBeginner) && /\.us-up\{color:var\(--green\)/.test(pulseBeginner) &&
+  /marketCls\(x\.changePct, 'US'\)/.test(pulseBeginner) && /marketCls\(cp, mkt\)/.test(pulseBeginner),
+  'pulse global, US sectors and US watchlist use explicit green-up/red-down classes');
+const hubColorSrc = fs.readFileSync(path.join(root, 'src/ui/hub_v5.js'), 'utf8');
+ok(/function marketCls/.test(hubColorSrc) && /hub\.watchlist/.test(hubColorSrc) && /hub\.international/.test(hubColorSrc) &&
+  /V\.rowBar\(ch, maxChg, w\.t\)/.test(hubColorSrc) && /V\.rowBar\(g\.changePct, maxChg, sym\)/.test(hubColorSrc),
+  'international and US watchlist text/bars carry symbol-aware color semantics');
+ok(/hub-global-panel/.test(hubColorSrc) && /hub-global-role/.test(hubColorSrc) &&
+  /min-height:1\.25em;max-height:2\.5em/.test(hubColorSrc) && /line-height:1\.4;margin-top:2px;padding-bottom:1px/.test(hubColorSrc) &&
+  /-webkit-line-clamp:2/.test(hubColorSrc) && /repeat\(auto-fit,minmax\(118px,1fr\)\)/.test(hubColorSrc),
+  'international global quote cards preserve long labels and roles in responsive columns');
+ok(/var ecoYears/.test(hubColorSrc) && /hub-year/.test(hubColorSrc) &&
+  /hub-economy-table/.test(hubColorSrc) && /function ecoShortDate/.test(hubColorSrc) &&
+  /<th>月\/日<\/th><th>來源<\/th>/.test(hubColorSrc) && /title="資料日 /.test(hubColorSrc),
+  'international economy table shows year in heading, month/day per series and full dates in tooltips');
+ok(/us-up/.test(fs.readFileSync(path.join(root, 'src/ui/heat_v5.js'), 'utf8')) &&
+  /chgCls\(best && best\.changePct, mkt\)/.test(fs.readFileSync(path.join(root, 'src/ui/heat_v5.js'), 'utf8')),
+  'US heatmap focus and KPI values use green-up/red-down classes');
+ok(!/id="pl-decision-command"/.test(pulseBeginner) && /data-go="decision"/.test(pulseBeginner),
+  'pulse keeps a compact decision route button without the three-column command strip');
+ok(/dc-command-fold/.test(decisionUi) && /<details class="dc-command-fold">/.test(decisionUi) &&
+  /決策摘要/.test(decisionUi) && /content:"收合"/.test(decisionUi),
+  'decision page owns the market/action/confirmation summary as a default-collapsed section');
 ok(/_allowed_root = \('src\/', 'assets\/'\)/.test(server) && /\/market\/snapshot/.test(server),
   'server static files are allow-listed and canonical market route is wired');
+ok(/\/decision\/context/.test(server) && /\/decision\/history/.test(server) && /\/key-levels/.test(server) &&
+  /decisionEngine/.test(server), 'decision HTTP routes and health status are wired');
 (function () {
   const sandbox = { window: {}, console: { log: function () {} }, isFinite: isFinite };
   vm.runInNewContext(colors, sandbox);
@@ -125,6 +386,13 @@ ok(/ah-ovn-host/.test(ah) && /overnightRenderInto/.test(ah) && /mountOvernightPa
 const ovn = fs.readFileSync(path.join(root, 'src/chart/overnight_v3.js'), 'utf8');
 ok(/overnightRenderInto/.test(ovn) && /function renderInto/.test(ovn) && /ovn-embed/.test(ovn),
   'overnight exposes renderInto for afterhours embed');
+ok(/ovn-signal-grid/.test(ovn) && /ovn-signal-card primary/.test(ovn) && /ovn-signal-card secondary/.test(ovn),
+  'overnight summary uses semantic primary and secondary signal cards');
+ok(/\.ovn-embed \.ovn-signal-grid\{grid-template-columns:1fr/.test(ovn) &&
+  /grid-template-columns:minmax\(0,1fr\) auto/.test(ovn),
+  'embedded overnight summary stacks compact rows instead of squeezing two columns');
+ok(/const usCol = col\(usEst\)/.test(ovn),
+  'US linkage estimate uses US green-up red-down color semantics');
 
 const bd = fs.readFileSync(path.join(root, 'src/ui/breadth_v5.js'), 'utf8');
 ok(/強弱榜/.test(bd), 'breadth movers replace note panel');
@@ -176,8 +444,9 @@ ok(/function renderTrendTabs/.test(pl) && /IDX_TREND_TABS/.test(pl) &&
   /明顯縮量/.test(pl) && /廣度糾結/.test(pl) &&
   /pl-ttabs span\.on\.buy/.test(pl) && /opacity:\.38/.test(pl),
   'pulse strip shows all trend-type tabs with active highlight / others gray');
-ok(/加權盤勢/.test(pl) && /線型＝加權 \^TWII（非台指期）/.test(pl) && !/pl-trend-pair/.test(pl),
-  'pulse OHLC panel integrated — no duplicate index chips');
+ok(/加權盤勢/.test(pl) && /data-sym="\^TWII"/.test(pl) &&
+  !/線型＝加權 \^TWII（非台指期）/.test(pl) && !/pl-trend-pair/.test(pl),
+  'pulse OHLC panel integrated with a compact title and no duplicate index chips');
 ok(/pl-ohlc4/.test(pl) && /pl-ohlc-trend/.test(pl) && /function buildOhlcComment/.test(pl) &&
   /pl-inst4,#pl-root \.pl-bd4,#pl-root \.pl-ohlc4\{/.test(pl) &&
   /fmt\(o\.open, 0\)/.test(pl) && /chgWithPct\(twiiObj, 0, 1\)/.test(pl) &&
@@ -208,6 +477,10 @@ ok(/pl-wl table\{[^}]*font-size:8px/.test(pl) && /pl-wl td\.px,#pl-root \.pl-wl 
 ok(/data-watch-mkt/.test(pl) && /filterWatchlist/.test(pl) && /pl-wl-scroll/.test(pl) &&
   /c-px/.test(pl) && /c-chg/.test(pl) && /c-tag/.test(pl),
   'pulse watchlist has TW/US tabs, fixed columns, and scroll region');
+ok(/pl-wl-head/.test(pl) && /pl-wl-title/.test(pl) &&
+  /#pl-watch-sec \.pl-sec-tog\{[^}]*flex:0 0 auto[^}]*flex-wrap:nowrap/.test(pl) &&
+  /#pl-watch-sec \.pl-sec-tog button\{[^}]*font-size:6\.5px[^}]*padding:1px 3px[^}]*white-space:nowrap/.test(pl),
+  'pulse watchlist ALL/TW/US controls stay compact on one header row');
 ok(/instFlowQuant/.test(pl) && /rankLabel/.test(pl) && /pl-inst-ctx/.test(pl) &&
   /pl-inst-stale/.test(pl) && /當日尚未公布/.test(pl),
   'pulse institutional shows Z/percentile/rank + compact stale tag');
@@ -239,6 +512,10 @@ ok(/pl-score3\{display:grid;grid-template-columns:minmax\(0,0\.9fr\) minmax\(0,1
 ok(/pl-global \.g \.v\{[^}]*font-size:8px/.test(pl) &&
   /pl-global \.g \.k \.role\{display:none\}/.test(pl),
   'pulse global compact type; role only in title');
+ok(/pl-sec\.pl-global-sec\{overflow:hidden;min-height:0\}/.test(pl) &&
+  /pl-global\{[^}]*overflow-y:auto[^}]*overscroll-behavior:contain[^}]*scrollbar-gutter:stable/.test(pl) &&
+  /class="pl-global" tabindex="0" role="region"/.test(pl),
+  'pulse 全球影響在固定格內支援滑鼠、觸控與鍵盤垂直捲動');
 ok(/正面因子/.test(pl) && /風險因子/.test(pl) && /計入風險分/.test(pl) && !/主要動能/.test(pl),
   'pulse drivers labeled 正面／風險因子 (not 主要動能)');
 ok(/大盤體質/.test(pl) && /0\.7×大盤體質/.test(pl) && !/>動能</.test(pl),
@@ -251,9 +528,11 @@ ok(/basisPts/.test(pl) && /正價差/.test(pl) && /逆價差/.test(pl) && /Basis
   'pulse strip shows TXF–TAIEX basis');
 ok(/pl-flash-q/.test(pl) && /flashQ/.test(pl) && /搜代號\/關鍵字/.test(pl),
   'pulse flash has keyword search beside TW/US tabs');
-ok(/#pl-flash-sec \.pl-sec-tog button\{font-size:7px/.test(pl) &&
-  /pl-wl \.pl-sec-tog button\{font-size:7px/.test(pl),
-  'pulse flash market tabs match watchlist tab font size');
+ok(/pl-flash-title/.test(pl) &&
+  /#pl-flash-sec \.pl-sec-tog\{[^}]*flex-wrap:nowrap/.test(pl) &&
+  /#pl-flash-sec \.pl-sec-tog button\{font-size:6\.5px[^}]*white-space:nowrap[^}]*flex:0 0 auto/.test(pl) &&
+  /pl-flash-q\{width:48px;min-width:38px/.test(pl),
+  'pulse flash title, search and ALL/TW/US tabs stay on one compact row');
 ok(/data-layout=/.test(pl) && /LAYOUT_CONTRACT/.test(pl) &&
   /grid-template-columns:repeat\(5,minmax\(0,1fr\)\)/.test(pl) &&
   /pl-zone z-top/.test(pl) && /pl-zone z-bot/.test(pl) &&
@@ -312,6 +591,13 @@ ok(/function goDashboard/.test(shell) && /goDashboard: goDashboard/.test(shell) 
   /dblclick/.test(shell) && /ensureDashChrome/.test(shell) &&
   /data-shell-back>← 返回儀表板/.test(shell),
   'shell dashboard: goDashboard + stub back + FAB dblclick + topbar');
+ok(/#topbar\{position:relative;flex-wrap:nowrap;min-height:42px;max-height:42px;overflow:hidden/.test(shell) &&
+  /#topbar #keybtn\{order:90;margin-left:auto!important/.test(shell) &&
+  /shell-dash-btn\{[^}]*order:100/.test(shell) && /keybtn\.nextSibling/.test(shell),
+  'chart header keeps KEY left of the right-aligned dashboard button and clips before the stock rows');
+ok(/shell-dash-glyph/.test(shell) && /shellDashSheen/.test(shell) &&
+  /linear-gradient\(135deg,#ffe36a/.test(shell) && /RING_LOGO/.test(shell),
+  'chart dashboard action uses the branded glowing icon treatment');
 ok(/ShellV5\.ringPop/.test(hotkeys),
   'hotkeys Esc fallback calls ShellV5.ringPop while ring open');
 ok(/function plainWdStatus/.test(shell) && /chipLabel/.test(shell) &&
@@ -370,10 +656,12 @@ ok(!/saved = localStorage\.getItem\(STORAGE_KEY\) \|\| 'pulse'/.test(shell),
 const buildPy = fs.readFileSync(path.join(root, 'build_v2.py'), 'utf8');
 ok(/st5-tip-boot/.test(buildPy) && /#pulse/.test(buildPy) && /tip UX modules missing/.test(buildPy),
   'build_v2 injects tip-boot and fails without tip modules');
+ok(/app_kernel_v5\.js/.test(buildPy) && /AbortController/.test(appKernel) && /registerPanel/.test(appKernel),
+  'build includes the bounded API and panel lifecycle kernel');
 
 const goBat = fs.readFileSync(path.join(root, 'scripts/go.bat'), 'utf8');
-ok(/FAIL_TIP_HTML/.test(goBat) && /st5-tip-boot/.test(goBat) && /#pulse/.test(goBat),
-  'go.bat refuses non-tip HTML and opens #pulse');
+ok(/go\.ps1/.test(goBat) && /UpdateOnly/.test(goBat) && !/git\s+(pull|stash|reset|checkout)/i.test(goBat),
+  'go.bat is an ASCII compatibility shim with no Git mutation logic');
 
 const goSh = fs.readFileSync(path.join(root, 'scripts/go.sh'), 'utf8');
 ok(/TIP_BRANCH/.test(goSh) && /http-client-pool/.test(goSh) && /#pulse/.test(goSh),
@@ -386,8 +674,9 @@ ok(/Resolve-StockPython/.test(goPs) && /Test-ToolingPython/.test(goPs) &&
   /deprioritize tooling venvs/.test(goPs) && /Stock Terminal Server v5 tip/.test(goPs) &&
   /PULSE_LAYOUT_ANCHOR_3cab212/.test(goPs),
   'go.ps1 pins an absolute Python, deprioritizes tooling venvs, and launches a titled live server console');
-ok(/ST_PYTHON/.test(goBat) && /hermes-agent/.test(goBat) && /FAIL_PYTHON_HERMES/.test(goBat),
-  'go.bat also resolves python and blocks hermes');
+ok(/git status --porcelain/.test(goPs) && /git merge --ff-only/.test(goPs) &&
+  !/git reset --hard/.test(goPs) && !/git stash/.test(goPs),
+  'go.ps1 preserves dirty work and only permits fast-forward updates');
 
 const srv = fs.readFileSync(path.join(root, 'server/server.py'), 'utf8');
 ok(/X-Stock-Terminal-UX/.test(srv) && /tipUx/.test(srv) && /\/#pulse/.test(srv),
@@ -404,6 +693,9 @@ ok(fs.existsSync(path.join(root, 'scripts/diagnose_tip.ps1')), 'scripts/diagnose
 
 const nw = fs.readFileSync(path.join(root, 'src/ui/news_v5.js'), 'utf8');
 ok(/nw-mkt-seg/.test(nw) && /flashMkt/.test(nw), 'news TW/US filter');
+ok(/impact\.tier/.test(nw) && /impact\.scope/.test(nw) && /nw-impact-seg/.test(nw) &&
+  /flashImpact/.test(nw) && /medium_up/.test(nw),
+  'news renders and filters deterministic impact tier and scope');
 
 /* 類股熱力：版面不得把 .ht-wd 塞進 2 欄 grid（會把焦點掃描擠出並遮蔽） */
 const heat = fs.readFileSync(path.join(root, 'src/ui/heat_v5.js'), 'utf8');
@@ -430,12 +722,18 @@ ok(/focusByMkt/.test(heat) && /\/focus\?mkt=/.test(heat) &&
   /焦點掃描 · /.test(heat) && /美股流動池/.test(heat) &&
   /function chgCls/.test(heat),
   'heat focus loads /focus?mkt=TW|US and labels US liquid pool');
+ok(/marketSharePct/.test(heat) && /rs20VsBenchmarkPct/.test(heat) && /無同 scope 成交額/.test(heat),
+  'heat renders sector flow fields without relabeling missing turnover');
 
 const srvPy = fs.readFileSync(path.join(root, 'server/server.py'), 'utf8');
 ok(/_US_FOCUS_UNIVERSE/.test(srvPy) && /_focus_scan_pool/.test(srvPy) &&
   /mkt=TW\|US/.test(srvPy) && /universe_label = 'us_liquid'/.test(srvPy) &&
   /'mkt': mkt/.test(srvPy),
   'server /focus supports mkt=US liquid universe + mkt field');
+ok(/'生技醫療':\s+\['1795', '6446', '1762'\]/.test(srvPy) &&
+  /'油電燃氣':\s+\['6505', '9918', '9926'\]/.test(srvPy) &&
+  !/'生技醫療':\s+\['4904', '3105'\]/.test(srvPy),
+  'TW Yahoo sector fallback uses same-theme proxies and keeps proxy scope explicit');
 
 ok(/← 儀表板/.test(heat) && /data-shell-back/.test(heat) &&
   /← 儀表板/.test(hub) && /data-shell-back/.test(hub) &&
@@ -449,9 +747,9 @@ ok(/id: 'factors'/.test(shell) && /FactorsV5/.test(shell) && /ringRoute\('factor
   /ACTIVATORS\.factors/.test(hub),
   'factors ledger is independent shell route + hub page');
 ok(/台指期近月/.test(pl) && /__TXF__/.test(pl) && /TAIFEX MIS/.test(pl) &&
-  /加權 \^TWII · 近 20 日/.test(pl) && /線型＝加權 \^TWII（非台指期）/.test(pl) &&
+  /加權 \^TWII · 近 20 日/.test(pl) && !/線型＝加權 \^TWII（非台指期）/.test(pl) &&
   !/台指期 TXF'/.test(pl),
-  'pulse TXF strip labeled 近月+sources; OHLC spark explicitly ^TWII');
+  'pulse TXF strip labeled 近月+sources; OHLC spark identifies ^TWII without a redundant header note');
 
 ok(/AI科技外溢/.test(hub) && /factorScope/.test(hub) && /aiSpill/.test(hub) &&
   /spill\.ok/.test(hub) && !/美股流動池漲跌/.test(hub) && !/尚無美股漲幅資料/.test(hub),

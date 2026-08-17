@@ -13,6 +13,9 @@
 (function () {
   'use strict';
 
+  var PRIVATE_WEB_NO_WD = !!(window.ST_PRIVATE_WEB_PROFILE &&
+    window.ST_PRIVATE_WEB_PROFILE.wavedeck === false);
+
   var DEFAULT_URL = 'http://127.0.0.1:18433/';
   var ST_URL = (typeof window.SERVER === 'string' && window.SERVER)
     ? String(window.SERVER).replace(/\/?$/, '')
@@ -199,10 +202,12 @@
     bits.push('風格→' + style);
     if (delever) bits.push('降載');
     if (ctx.summary) bits.push(String(ctx.summary).slice(0, 60));
+    if (ctx.decisionRegime) bits.push('Regime ' + String(ctx.decisionRegime));
     return bits.join(' · ');
   }
 
   function probeUrl(url) {
+    if (PRIVATE_WEB_NO_WD) return Promise.resolve(null);
     var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
     var t = setTimeout(function () { if (ctrl) ctrl.abort(); }, 700);
     return fetch(String(url).replace(/\/?$/, '') + '/health', {
@@ -221,6 +226,7 @@
   }
 
   function ensureBase() {
+    if (PRIVATE_WEB_NO_WD) return Promise.resolve(null);
     if (_resolving) return _resolving;
     _resolving = probeUrl(BASE).then(function (ok) {
       if (ok) return BASE;
@@ -242,6 +248,7 @@
   }
 
   function open(url) {
+    if (PRIVATE_WEB_NO_WD) return;
     if (url) {
       window.open(url, '_blank', 'noopener');
       toast('已開啟 WaveDeck');
@@ -279,6 +286,9 @@
    *   force?:boolean, silent?:boolean, source?:string}} ctx
    */
   function syncFromMarket(ctx) {
+    if (PRIVATE_WEB_NO_WD) {
+      return Promise.resolve({ skipped: true, reason: 'private-web-disabled' });
+    }
     ctx = ctx || {};
     if (!ctx.force && !autoEnabled()) {
       return Promise.resolve({ skipped: true, reason: 'auto-off' });
@@ -327,7 +337,14 @@
         chain_breadth: ctx.chainBreadth != null ? ctx.chainBreadth : null,
         chain_contig: ctx.chainContig != null ? ctx.chainContig : null,
         twii: (ctx.twii != null && isFinite(Number(ctx.twii))) ? Number(ctx.twii) : null,
-        twii_chg: (ctx.twiiChg != null && isFinite(Number(ctx.twiiChg))) ? Number(ctx.twiiChg) : null
+        twii_chg: (ctx.twiiChg != null && isFinite(Number(ctx.twiiChg))) ? Number(ctx.twiiChg) : null,
+        decision_regime: ctx.decisionRegime || null,
+        decision_confidence: (ctx.decisionConfidence != null && isFinite(Number(ctx.decisionConfidence))) ? Number(ctx.decisionConfidence) : null,
+        decision_posture: ctx.decisionPosture || null,
+        decision_invalidation: ctx.decisionInvalidation || null,
+        decision_contract_version: ctx.decisionContractVersion || null,
+        decision_model: ctx.decisionModel || null,
+        decision_as_of: ctx.decisionAsOf || null
       }
     };
 
@@ -514,6 +531,7 @@
   }
 
   function startChipStream() {
+    if (PRIVATE_WEB_NO_WD) return;
     if (typeof EventSource === 'undefined') return;
     if (_stream) {
       try { _stream.close(); } catch (e0) {}
@@ -549,6 +567,7 @@
   }
 
   function scheduleStreamRetry() {
+    if (PRIVATE_WEB_NO_WD) return;
     if (_streamRetry) return;
     _streamRetry = setTimeout(function () {
       _streamRetry = null;
@@ -557,6 +576,7 @@
   }
 
   function fetchState(force) {
+    if (PRIVATE_WEB_NO_WD) return Promise.resolve(null);
     var now = Date.now();
     if (!force && _stateCache && (now - _stateAt) < STATE_TTL_MS) {
       return Promise.resolve(_stateCache);
@@ -594,6 +614,7 @@
 
   /** ST reverse bus / shared cost meter (REST fallback; SSE is primary). */
   function fetchCostMeter(force) {
+    if (PRIVATE_WEB_NO_WD) return Promise.resolve(null);
     var now = Date.now();
     if (!force && _costCache && (now - _costAt) < COST_TTL_MS) {
       return Promise.resolve(_costCache);
@@ -946,6 +967,7 @@
   } catch (eBoot) {}
 
   function startOverlayHeartbeat() {
+    if (PRIVATE_WEB_NO_WD) return;
     if (_hbTimer) return;
     _hbTimer = setInterval(function () {
       try {

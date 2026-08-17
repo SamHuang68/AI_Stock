@@ -1,0 +1,56 @@
+[
+  {
+    "name": "broad-risk-on",
+    "expectedRegime": "BROAD_RISK_ON",
+    "pulse": {
+      "ok": true,
+      "updatedAt": "2026-08-11T08:40:00",
+      "date": "2026-08-11",
+      "marketSnapshot": {"quotes": {"^TWII": {"market": {"displayChangePct": 1.2, "source": "twse-mis", "session": "regular", "referenceType": "previous_close", "asOf": "2026-08-11T08:40:00"}}, "__TXF__": {"market": {"displayChangePct": 1.0, "source": "taifex-mis", "session": "night", "referenceType": "previous_close", "asOf": "2026-08-11T08:40:00"}}}},
+      "stocks": {"up": 720, "down": 280, "advRatio": 0.72, "limitDown": 1},
+      "snapshot": {"stocks": {"up": 720, "down": 280, "advRatio": 0.72, "limitDown": 1}, "inst": {"totalYi": 180}},
+      "healthScore": 76, "riskScore": 24, "dataCompleteness": 91,
+      "breadthScope": "TWSE_STOCKS", "overview": {"strip": {"volumeScore": 72, "t00Trend": {"momScore": 74}}}
+    }
+  },
+  {
+    "name": "narrow-rally",
+    "expectedRegime": "NARROW_RALLY",
+    "pulse": {
+      "ok": true,
+      "updatedAt": "2026-08-11T08:41:00",
+      "date": "2026-08-11",
+      "marketSnapshot": {"quotes": {"^TWII": {"market": {"displayChangePct": 1.0, "source": "twse-mis", "session": "regular", "referenceType": "previous_close", "asOf": "2026-08-11T08:41:00"}}, "__TXF__": {"market": {"displayChangePct": 0.8, "source": "taifex-mis", "session": "night", "referenceType": "previous_close", "asOf": "2026-08-11T08:41:00"}}}},
+      "stocks": {"up": 380, "down": 620, "advRatio": 0.38, "limitDown": 2},
+      "snapshot": {"stocks": {"up": 380, "down": 620, "advRatio": 0.38, "limitDown": 2}, "inst": {"totalYi": 0}},
+      "healthScore": 68, "riskScore": 40, "dataCompleteness": 91,
+      "breadthScope": "TWSE_STOCKS", "overview": {"strip": {"volumeScore": 50, "t00Trend": {"momScore": 68}}}
+    }
+  },
+  {
+    "name": "defensive-risk-off",
+    "expectedRegime": "DEFENSIVE_RISK_OFF",
+    "pulse": {
+      "ok": true,
+      "updatedAt": "2026-08-11T08:42:00",
+      "date": "2026-08-11",
+      "marketSnapshot": {"quotes": {"^TWII": {"market": {"displayChangePct": -1.4, "source": "twse-mis", "session": "regular", "referenceType": "previous_close", "asOf": "2026-08-11T08:42:00"}}, "__TXF__": {"market": {"displayChangePct": -1.6, "source": "taifex-mis", "session": "night", "referenceType": "previous_close", "asOf": "2026-08-11T08:42:00"}}}},
+      "stocks": {"up": 240, "down": 760, "advRatio": 0.24, "limitDown": 8},
+      "snapshot": {"stocks": {"up": 240, "down": 760, "advRatio": 0.24, "limitDown": 8}, "inst": {"totalYi": -220}},
+      "healthScore": 38, "riskScore": 78, "dataCompleteness": 91,
+      "breadthScope": "TWSE_STOCKS", "overview": {"strip": {"volumeScore": 34, "t00Trend": {"momScore": 18}}}
+    }
+  },
+  {
+    "name": "insufficient-data",
+    "expectedRegime": "INSUFFICIENT_DATA",
+    "pulse": {
+      "ok": true,
+      "updatedAt": "2026-08-11T08:43:00",
+      "date": "2026-08-11",
+      "marketSnapshot": {"quotes": {}},
+      "stocks": {}, "snapshot": {}, "dataCompleteness": 18,
+      "breadthScope": "TWSE_STOCKS", "overview": {"strip": {}}
+    }
+  }
+]

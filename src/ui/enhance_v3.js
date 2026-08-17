@@ -203,12 +203,14 @@
         ? `技術面 <span style="font-size:8px;color:var(--tf)">(總經／無標準日線)</span>`
         : `技術面 <span style="font-size:8px;color:var(--tf)">(1Y日線)</span>`);
     const fundLbl = isMarket ? '大盤體質' : '基本面';
+    const techColor = scoreCol(t);
+    const fundColor = scoreCol(fundScore);
     return `<div class="dual-card" data-enh-ver="${ENH_VER}">
-      <div class="dual-half"><div class="lbl">${techLbl}</div>
-        <div class="score" style="color:${scoreCol(t)}">${t == null ? '—' : t}</div>
+      <div class="dual-half" data-score-kind="technical" style="--score-color:${techColor}"><div class="lbl">${techLbl}</div>
+        <div class="score-ring" style="--score:${t == null ? 0 : t};--score-color:${techColor}"><div class="score" style="color:${techColor}">${t == null ? '—' : t}</div></div>
         <div class="tag" style="color:${scoreCol(t)}">${techTag(t)}</div></div>
-      <div class="dual-half"><div class="lbl">${fundLbl}</div>
-        <div class="score" style="color:${scoreCol(fundScore)}">${fundScore == null ? '—' : fundScore}</div>
+      <div class="dual-half" data-score-kind="fundamental" style="--score-color:${fundColor}"><div class="lbl">${fundLbl}</div>
+        <div class="score-ring" style="--score:${fundScore == null ? 0 : fundScore};--score-color:${fundColor}"><div class="score" style="color:${fundColor}">${fundScore == null ? '—' : fundScore}</div></div>
         <div class="tag" style="color:${scoreCol(fundScore)}">${fundTag(fundScore, isMarket ? 'market' : null)}</div></div>
     </div>`;
   }
@@ -225,15 +227,15 @@
     if (!vp) return '';
     const cur = candles[candles.length - 1].close;
     const pos = cur == null ? '—'
-      : cur > vp.vah ? '<span style="color:var(--green)">主力成本之上 (偏多)</span>'
-        : cur < vp.val ? '<span style="color:var(--red)">主力成本之下 (偏空)</span>'
-          : '<span style="color:var(--orange)">主力成本區內 (盤整)</span>';
+      : cur > vp.vah ? '<span class="vp-state above">主力成本之上 (偏多)</span>'
+        : cur < vp.val ? '<span class="vp-state below">主力成本之下 (偏空)</span>'
+          : '<span class="vp-state inside">主力成本區內 (盤整)</span>';
     const modeLbl = { avg: '量價均衡', amt: '只看價', vol: '只看量' }[VP.mode] || '';
     return `<div class="vp-panel"><div class="stat-sect">量價分布 · ${modeLbl}</div>
-      <div class="stat-row"><span class="stat-k">POC 主力成本</span><span class="stat-v" style="color:#A78BFA">${vp.pocPrice.toFixed(2)}</span></div>
-      <div class="stat-row"><span class="stat-k">成本區上緣 VAH</span><span class="stat-v">${vp.vah.toFixed(2)}</span></div>
-      <div class="stat-row"><span class="stat-k">成本區下緣 VAL</span><span class="stat-v">${vp.val.toFixed(2)}</span></div>
-      <div class="stat-row"><span class="stat-k">現價位置</span><span class="stat-v">${pos}</span></div></div>`;
+      <div class="stat-row vp-poc"><span class="stat-k">POC 主力成本</span><span class="stat-v" style="color:#A78BFA">${vp.pocPrice.toFixed(2)}</span></div>
+      <div class="stat-row vp-vah"><span class="stat-k">成本區上緣 VAH</span><span class="stat-v">${vp.vah.toFixed(2)}</span></div>
+      <div class="stat-row vp-val"><span class="stat-k">成本區下緣 VAL</span><span class="stat-v">${vp.val.toFixed(2)}</span></div>
+      <div class="stat-row vp-position"><span class="stat-k">現價位置</span><span class="stat-v">${pos}</span></div></div>`;
   }
 
   // ---- patch renderStats：頂端插雙軸卡 + 量價面板 ----------

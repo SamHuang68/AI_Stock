@@ -11,6 +11,11 @@ import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
+    from .secret_store import load_secret, save_secret
+except ImportError:
+    from secret_store import load_secret, save_secret
+
+try:
     import slog
     log = slog.get_logger('ai_api')
 except Exception:
@@ -20,7 +25,8 @@ _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
 
-_AI_KEY_FILE = os.path.join(_BASE, 'data', 'ai_key.txt')
+_AI_KEY_FILE = os.path.join(_BASE, 'data', 'ai_key.bin')
+_AI_KEY_LEGACY_FILE = os.path.join(_BASE, 'data', 'ai_key.txt')
 _ai_key_lock = threading.Lock()
 
 _MODEL_CACHE = {'date': '', 'id': 'claude-sonnet-4-6'}
@@ -28,16 +34,26 @@ _MODEL_CACHE = {'date': '', 'id': 'claude-sonnet-4-6'}
 
 def load_ai_key() -> str:
     try:
-        with open(_AI_KEY_FILE, encoding='utf-8') as f:
-            return f.read().strip()
-    except Exception:
+        if os.path.isfile(_AI_KEY_FILE):
+            return load_secret(_AI_KEY_FILE).strip()
+        if os.path.isfile(_AI_KEY_LEGACY_FILE):
+            with open(_AI_KEY_LEGACY_FILE, encoding='utf-8-sig') as f:
+                legacy = f.read().strip()
+            save_secret(_AI_KEY_FILE, legacy)
+            # Only remove legacy plaintext after the protected copy round-trips.
+            if load_secret(_AI_KEY_FILE).strip() == legacy:
+                os.unlink(_AI_KEY_LEGACY_FILE)
+            return legacy
+    except Exception as exc:
+        if log:
+            log.warning('AI credential unavailable: %s', type(exc).__name__)
         return ''
+    return ''
 
 
 def save_ai_key(k: str) -> None:
     with _ai_key_lock:
-        with open(_AI_KEY_FILE, 'w', encoding='utf-8') as f:
-            f.write((k or '').strip())
+        save_secret(_AI_KEY_FILE, (k or '').strip())
 
 
 def resolve_model(api_key: Optional[str]) -> str:

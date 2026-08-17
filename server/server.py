@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-"""Stock Terminal local server — ThreadingHTTPServer + ThreadPoolExecutor + LRU cache + ETF Delta
-   Tuned for GMKtec EVO-T1 (Core Ultra 9 285H / 96GB DDR5 / RTX 5080).
-"""
-import os, json, urllib.request, urllib.error, socketserver, glob, time, subprocess, sys, csv, io
+"""Stock Terminal local server — ThreadingHTTPServer + worker pool + LRU cache."""
+import os, json, urllib.request, urllib.error, socketserver, glob, time, subprocess, sys, csv, io, uuid
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import OrderedDict
@@ -39,13 +37,24 @@ from etf_api import (
     list_etf_files,
 )
 from etf_routes import EtfRoutesMixin
-from market_contract import attach_quote_contract
+from decision_routes import DecisionRoutesMixin
+from options_routes import OptionsRoutesMixin
+from market_contract import attach_quote_contract, cumulative_volume_contract
 from market_routes import market_snapshot
+from http_boundary import BodyReadError, is_same_local_origin, read_json_body
+from atomic_store import StoreCorruptError, atomic_write_json, load_json
+import atomic_store as _atomic_store
+from deadline import BoundedExecutor, collect_named
+from keystats_resolution import should_retry_tw_keystats_as_otc as _should_retry_tw_keystats_as_otc
 
-PORT = 18432
-# Core Ultra 9 285H = 6P + 8E + 2LP = 16 threads; oversubscribe for I/O-bound YF
+HOST = os.environ.get('ST_HOST', '127.0.0.1').strip() or '127.0.0.1'
+try:
+    PORT = int(os.environ.get('ST_PORT', '18432'))
+except (TypeError, ValueError):
+    PORT = 18432
+# External data requests are I/O-bound, so use a modestly oversubscribed pool.
 MAX_WORKERS = max(32, (os.cpu_count() or 16) * 2)
-LRU_MAX = 20000  # 96GB RAM → very generous cache
+LRU_MAX = 20000
 
 # ── 專案根目錄 ──
 # 凍結成 .exe(PyInstaller)時用 exe 所在資料夾;一般執行(server/ 下)時用其上一層。
@@ -73,10 +82,65 @@ def _breadth_trace(event, **fields):
         pass
 
 
+def _keystats_trace(event, **fields):
+    """Persist sanitized market-cap acquisition transitions for one symbol."""
+    try:
+        path = os.path.join(_BASE, 'logs', 'keystats_trace.jsonl')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        allowed = (
+            'correlationId', 'symbol', 'cache', 'source', 'hasPrice',
+            'hasShares', 'hasMarketCap', 'resolved', 'error', 'elapsedMs',
+        )
+        row = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'event': event}
+        row.update({k: fields.get(k) for k in allowed if k in fields})
+        with open(path, 'a', encoding='utf-8') as fh:
+            fh.write(json.dumps(row, ensure_ascii=False, default=str) + '\n')
+        if os.path.getsize(path) > 128 * 1024:
+            with open(path, 'r', encoding='utf-8') as fh:
+                tail = fh.readlines()[-300:]
+            with open(path, 'w', encoding='utf-8') as fh:
+                fh.writelines(tail)
+    except Exception:
+        pass
+
+
+_FUNDAMENTAL_TRACE_LOCK = threading.Lock()
+
+
+def _fundamental_trace(event, **fields):
+    """Persist a bounded trace for market classification and model resolution."""
+    try:
+        path = os.path.join(_BASE, 'logs', 'fundamental_trace.jsonl')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        allowed = (
+            'correlationId', 'symbol', 'market', 'kind', 'model', 'source',
+            'cache', 'score', 'sampleCount', 'hasRevenue', 'hasIncome',
+            'stateBefore', 'stateAfter', 'error', 'elapsedMs',
+        )
+        row = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'event': event}
+        row.update({k: fields.get(k) for k in allowed if k in fields})
+        # ThreadingHTTPServer can finish several market requests together;
+        # serialize append + compaction so every JSONL row remains parseable.
+        with _FUNDAMENTAL_TRACE_LOCK:
+            with open(path, 'a', encoding='utf-8') as fh:
+                fh.write(json.dumps(row, ensure_ascii=False, default=str) + '\n')
+            if os.path.getsize(path) > 128 * 1024:
+                with open(path, 'r', encoding='utf-8') as fh:
+                    tail = fh.readlines()[-300:]
+                with open(path, 'w', encoding='utf-8') as fh:
+                    fh.writelines(tail)
+    except Exception:
+        pass
+
+
 def _ui_route_trace(row):
     """Persist sanitized UI route transitions for click-to-panel debugging."""
     try:
-        allowed = ('ts', 'event', 'correlationId', 'from', 'to', 'renderedRoute', 'label')
+        allowed = (
+            'ts', 'event', 'correlationId', 'from', 'to', 'renderedRoute', 'label',
+            'current', 'ceiling', 'floor', 'currentSource', 'levelsSource', 'state',
+            'elapsedMs',
+        )
         clean = {k: str((row or {}).get(k) or '')[:120] for k in allowed}
         clean['serverTs'] = time.strftime('%Y-%m-%dT%H:%M:%S')
         path = os.path.join(_BASE, 'logs', 'ui_route_trace.jsonl')
@@ -166,13 +230,12 @@ DRAW_STORE_FILE = os.path.join(_BASE, 'data', 'draw_store.json')
 _draw_lock = threading.Lock()
 def _load_draw_store():
     try:
-        with open(DRAW_STORE_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
+        return load_json(DRAW_STORE_FILE, default={}, expected_type=dict)
+    except StoreCorruptError as exc:
+        print('[draw-store] unavailable:', type(exc).__name__)
         return {}
 def _save_draw_store(d):
-    with open(DRAW_STORE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(d, f, ensure_ascii=False)
+    atomic_write_json(DRAW_STORE_FILE, d, backup=True, private=True, indent=None)
 
 # v3.9 P4: 總經數據 — FRED 優先；台灣家用／雲端常連不上 → Yahoo／BLS／NY Fed／本地 seed 備援。
 _macro_cache = {}   # {series_key: payload_bytes}
@@ -618,17 +681,16 @@ def _chip_history_record(clean_code, chip_out):
         return
     os.makedirs(CHIP_HISTORY_PATH, exist_ok=True)
     fn = os.path.join(CHIP_HISTORY_PATH, _date.today().strftime('%Y%m%d') + '.json')
-    day = {}
-    if os.path.isfile(fn):
-        try:
-            with open(fn, encoding='utf-8') as f: day = json.load(f)
-        except Exception: day = {}
+    try:
+        day = load_json(fn, default={}, expected_type=dict)
+    except StoreCorruptError as exc:
+        print('[chip-history] unavailable:', type(exc).__name__)
+        return
     day[clean_code] = {
         'foreign': inst.get('foreign'), 'trust': inst.get('trust'),
         'dealer': inst.get('dealer'), 'total': inst.get('total'),
     }
-    with open(fn, 'w', encoding='utf-8') as f:
-        json.dump(day, f, ensure_ascii=False)
+    atomic_write_json(fn, day, backup=True, indent=None)
 
 _openapi_ds = {}   # dataset name → (date, {code: row})
 
@@ -1501,7 +1563,10 @@ class LRUCache:
 _cache = LRUCache(LRU_MAX, ttl_seconds=60)
 _pool  = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix='yf')
 # 脈動延伸因子專用：勿佔用全域 _pool，避免 Yahoo／掃描與 extras 互卡
-_pulse_extras_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='pulse-ex')
+_pulse_extras_pool = BoundedExecutor(2, 2, prefix='pulse-ex')
+_pulse_side_pool = BoundedExecutor(4, 8, prefix='pulse-side')
+_pulse_quote_pool = BoundedExecutor(6, 18, prefix='pulse-global')
+_fundamental_pool = BoundedExecutor(5, 10, prefix='fundamental')
 
 YF_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -1859,7 +1924,7 @@ def _twse_mis_index(ex_ch):
     return out
 
 
-def _fetch_day_movers(n=8):
+def _fetch_day_movers(n=8, target_date=None):
     """輕量漲跌幅排行：TWSE STOCK_DAY_ALL + TPEx 上櫃日收盤。
        回 {ok,date,gainers:[{code,name,price,change,changePct,value}], losers:[...], source}。
        供 Overview 儀表板；比 POST /screener 快兩個數量級。"""
@@ -1875,6 +1940,7 @@ def _fetch_day_movers(n=8):
 
     rows = []
     date_s = None
+    tpex_date_s = None
 
     def ingest_twse(arr):
         nonlocal date_s
@@ -1911,6 +1977,7 @@ def _fetch_day_movers(n=8):
             })
 
     def ingest_tpex(arr):
+        nonlocal tpex_date_s
         for r in arr or []:
             if not isinstance(r, dict):
                 continue
@@ -1918,6 +1985,7 @@ def _fetch_day_movers(n=8):
             name = str(r.get('CompanyName') or r.get('Name') or r.get('公司簡稱') or '').strip()
             if any(k in name for k in ('購', '售', '牛證', '熊證', '認購', '認售')):
                 continue
+            tpex_date_s = tpex_date_s or str(r.get('Date') or '').strip() or None
             if not (_CODE4.match(code) or (code.startswith('00') and len(code) <= 6)):
                 continue
             close = fnum(r.get('Close') or r.get('ClosingPrice') or r.get('收盤'))
@@ -1942,7 +2010,7 @@ def _fetch_day_movers(n=8):
             rows.append({
                 'code': code, 'name': name or code, 'price': close,
                 'change': chg, 'changePct': round(pct, 2),
-                'value': fnum(r.get('TradeValue') or r.get('成交金額')),
+                'value': fnum(r.get('TradeValue') or r.get('TransactionAmount') or r.get('成交金額')),
                 'mkt': 'TW', 'ex': 'TPEx',
             })
 
@@ -1960,8 +2028,18 @@ def _fetch_day_movers(n=8):
     def _twse():
         nonlocal twse_rows, err_twse
         try:
-            twse_rows = _get_json(
-                'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL', timeout=8)
+            if target_date:
+                import sector_flow as _dated_sector_flow
+                day = _dated_sector_flow.normalize_session_date(target_date)
+                payload = _get_json(
+                    'https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date=' +
+                    str(day or target_date) + '&type=ALLBUT0999&response=json', timeout=8)
+                twse_rows = _dated_sector_flow.parse_twse_daily_stock_table(payload)
+                if not twse_rows:
+                    raise ValueError('dated MI_INDEX stock table unavailable')
+            else:
+                twse_rows = _get_json(
+                    'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL', timeout=8)
         except Exception as e:
             err_twse = e
 
@@ -1986,7 +2064,17 @@ def _fetch_day_movers(n=8):
         print('[movers] TWSE', err_twse)
     if tpex_rows is not None:
         try:
-            ingest_tpex(tpex_rows)
+            if target_date:
+                import sector_flow as _session_sector_flow
+                _target_day = _session_sector_flow.normalize_session_date(target_date)
+                _tpex_day = _session_sector_flow.normalize_session_date(
+                    (tpex_rows[0] if tpex_rows else {}).get('Date'))
+                if _target_day and _tpex_day != _target_day:
+                    print('[movers] skip TPEx session mismatch', _tpex_day, _target_day)
+                else:
+                    ingest_tpex(tpex_rows)
+            else:
+                ingest_tpex(tpex_rows)
         except Exception as e:
             print('[movers] TPEx ingest', e)
     elif err_tpex:
@@ -2033,6 +2121,27 @@ def _fetch_day_movers(n=8):
     _tag_industry(rows)
     _tag_industry(limit_up)
     _tag_industry(limit_down)
+    # 同日上市普通股成交額依官方產業分類聚合；這是產業成交占比的分子與同 scope 分母。
+    # ETF／權證／上櫃不混入，避免把不同市場範圍相除。
+    industry_turnover_ntd = {}
+    industry_stock_count = {}
+    try:
+        import sector_flow as _sector_turnover_flow
+        for r in rows:
+            code = str(r.get('code') or '')
+            value = r.get('value')
+            industry = r.get('industry')
+            if r.get('ex') != 'TWSE' or not _CODE4.match(code) or value is None or not industry:
+                continue
+            key_ind = _sector_turnover_flow.normalize_sector_name(industry)
+            industry_turnover_ntd[key_ind] = industry_turnover_ntd.get(key_ind, 0.0) + float(value)
+            industry_stock_count[key_ind] = industry_stock_count.get(key_ind, 0) + 1
+    except Exception as e:
+        print('[movers] industry turnover aggregate', e)
+        industry_turnover_ntd = {}
+        industry_stock_count = {}
+    industry_turnover_yi = {k: round(v / 1e8, 3) for k, v in industry_turnover_ntd.items()}
+    industry_turnover_total_yi = round(sum(industry_turnover_ntd.values()) / 1e8, 3) if industry_turnover_ntd else None
     gainers = _tag_industry(rows[:n])
     losers = _tag_industry(list(reversed(rows[-n:])))
 
@@ -2047,6 +2156,15 @@ def _fetch_day_movers(n=8):
         'limitNote': '近漲跌停近似：上市普通股 |漲跌|≥9.9%，不含 ETF／櫃買；家數≠證交所官方括號',
         'source': 'TWSE STOCK_DAY_ALL + TPEx daily',
         'count': len(rows),
+        'industryTurnoverYi': industry_turnover_yi,
+        'industryTurnoverTotalYi': industry_turnover_total_yi,
+        'industryTurnoverStockCount': industry_stock_count,
+        'industryTurnoverDate': date_s,
+        'tpexDate': tpex_date_s,
+        'industryTurnoverSource': (
+            'TWSE MI_INDEX ALLBUT0999 dated TradeValue + issuer industry classification'
+            if target_date else
+            'TWSE STOCK_DAY_ALL TradeValue + issuer industry classification'),
     }
 
 
@@ -2240,27 +2358,11 @@ def _yf_batch_quotes(syms):
             return None
 
     out = []
-    # 獨立小池，避免佔滿全域 _pool 造成巢狀等待
-    with ThreadPoolExecutor(max_workers=min(6, max(2, len(syms or [])))) as ex:
-        futs = [ex.submit(_one, s) for s in (syms or [])]
-        try:
-            for f in as_completed(futs, timeout=6):
-                try:
-                    row = f.result()
-                except Exception:
-                    row = None
-                if row:
-                    out.append(row)
-        except Exception:
-            # 逾時：帶走已完成的
-            for f in futs:
-                if f.done():
-                    try:
-                        row = f.result()
-                        if row:
-                            out.append(row)
-                    except Exception:
-                        pass
+    jobs = {str(sym): _pulse_quote_pool.submit(_one, sym) for sym in (syms or [])}
+    values, outcomes = collect_named(jobs, timeout=6.0, executor=_pulse_quote_pool)
+    out.extend(row for row in values.values() if row)
+    if any(value != 'ok' for value in outcomes.values()):
+        print('[pulse-global] bounded outcomes', outcomes)
     # 保序
     order = {s: i for i, s in enumerate(syms or [])}
     out.sort(key=lambda r: order.get(r.get('symbol'), 999))
@@ -2537,7 +2639,7 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
     request_queue_size = 64
 
-class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
+class Handler(DecisionRoutesMixin, OptionsRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'   # enables keep-alive
 
     def _handle_index(self):
@@ -2575,6 +2677,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._err('failed to read index HTML: ' + str(e), 500)
 
     def do_GET(self):
+        self._ensure_trace_id()
         p = self.path
         if p in ('/', '/index.html', '/stock_terminal.html', '/stock_terminal_v2.html') or p.startswith('/stock_terminal'):
             self._handle_index()
@@ -2626,8 +2729,18 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._handle_pulse()
         elif p == '/pulse/history' or p.startswith('/pulse/history?'):
             self._handle_pulse_history()
+        elif p == '/decision/context' or p.startswith('/decision/context?'):
+            self._handle_decision_context()
+        elif p == '/decision/history' or p.startswith('/decision/history?'):
+            self._handle_decision_history()
+        elif p == '/options/txo/structure' or p.startswith('/options/txo/structure?'):
+            self._handle_options_structure()
+        elif p == '/options/txo/history' or p.startswith('/options/txo/history?'):
+            self._handle_options_history()
+        elif p == '/key-levels' or p.startswith('/key-levels?'):
+            self._handle_key_levels()
         elif p == '/sync' or p.startswith('/sync?'):
-            self._handle_sync()
+            self._method_not_allowed('POST')
         elif p == '/sync/status' or p.startswith('/sync/status?'):
             self._handle_sync_status()
         elif p == '/movers' or p.startswith('/movers?'):
@@ -2682,6 +2795,17 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._handle_macro('')
         elif p.startswith('/macro/'):
             self._handle_macro(p[len('/macro/'):].split('?')[0])
+        elif p == '/health/live':
+            # Lightweight process-liveness contract for local supervisors.
+            # Keep this free of database, provider, WaveDeck and decision-engine
+            # reads so startup probes cannot create a self-amplifying timeout.
+            self._ok(json.dumps({
+                'ok': True,
+                'status': 'ok',
+                'liveness': True,
+                'bind': HOST,
+                'port': PORT,
+            }, ensure_ascii=False).encode())
         elif p == '/health':
             d = find_etf_dir()
             files = list_etf_files()
@@ -2709,6 +2833,23 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 http_stats = _hc.client_stats()
             except Exception:
                 http_stats = None
+            decision_status = None
+            try:
+                import decision_context as _dc_health
+                decision_status = _dc_health.engine_status()
+            except Exception as e:
+                decision_status = {'error': str(e)}
+            deadline_pools = {
+                'pulseExtrasParent': _pulse_extras_pool.status(),
+                'pulseOverview': _pulse_side_pool.status(),
+                'pulseQuotes': _pulse_quote_pool.status(),
+                'fundamental': _fundamental_pool.status(),
+            }
+            try:
+                import pulse_extras as _pe_health
+                deadline_pools.update(_pe_health.executor_status())
+            except Exception:
+                pass
             tip_branch = None
             st_ver = '5.0'
             try:
@@ -2734,8 +2875,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 'tipUx': True,
                 'version': st_ver,
                 'tipBranch': tip_branch,
-                'openUrl': f'http://127.0.0.1:{PORT}/#pulse',
-                'bind': '127.0.0.1',
+                'openUrl': f'http://{HOST}:{PORT}/#pulse',
+                'bind': HOST,
                 'port': PORT,
                 'baseDir': _BASE,
                 'pythonExe': sys.executable,
@@ -2752,6 +2893,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 'jobs': jobs,  # H4：回補／刷新進度
                 'wavedeck': wd_bus,
                 'httpClient': http_stats,  # 連線池／重試統計
+                'decisionEngine': decision_status,
+                'atomicStore': _atomic_store.status(),
+                'deadlinePools': deadline_pools,
             }, ensure_ascii=False, default=str).encode())
         elif p == '/bridge/wavedeck/stream' or p.startswith('/bridge/wavedeck/stream?'):
             self._handle_wavedeck_sse()
@@ -2777,6 +2921,22 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 self._err('forbidden', 403); return
             super().do_GET()
 
+    @staticmethod
+    def _bridge_cors_path(path):
+        return path in {
+            '/bridge/wavedeck', '/bridge/wavedeck/stream', '/api/cost-meter',
+            '/api/override-alpha', '/api/override-alpha/review', '/api/llm-gate',
+        }
+
+    def _wavedeck_origin_ok(self, origin):
+        if not self._bridge_cors_path(self.path.split('?')[0]):
+            return False
+        try:
+            import wavedeck_bus as wdb
+            return bool(wdb.is_wavedeck_origin(origin))
+        except Exception:
+            return False
+
     def _origin_ok(self):
         # CSRF 防護(v3.9 review):瀏覽器跨來源寫入會帶 Origin/Referer;非本站一律拒。
         # 同源 fetch 或非瀏覽器本機呼叫可能不帶 → 放行(本機單人工具)。
@@ -2784,29 +2944,34 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         o = self.headers.get('Origin') or self.headers.get('Referer') or ''
         if not o:
             return True
-        if (o.startswith('http://localhost:%d' % PORT)
-                or o.startswith('http://127.0.0.1:%d' % PORT)):
+        if is_same_local_origin(o, PORT):
             return True
-        p = self.path.split('?')[0]
-        if p in ('/bridge/wavedeck', '/api/cost-meter', '/api/override-alpha',
-                 '/api/override-alpha/review', '/api/llm-gate'):
-            try:
-                import wavedeck_bus as wdb
-                return wdb.is_wavedeck_origin(o)
-            except Exception:
-                return False
-        return False
+        return self._wavedeck_origin_ok(o)
+
+    def _cors_origin(self):
+        """Only the explicit WaveDeck bridge is cross-origin capable."""
+        origin = self.headers.get('Origin') or ''
+        return origin if origin and self._wavedeck_origin_ok(origin) else None
+
+    def _method_not_allowed(self, allow):
+        body = json.dumps({'error': 'method not allowed', 'traceId': self._ensure_trace_id()}, ensure_ascii=False).encode('utf-8')
+        self.send_response(405)
+        self.send_header('Allow', allow)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self):
+        self._ensure_trace_id()
         p = self.path.split('?')[0]
         if not self._origin_ok():
             self._err('forbidden (cross-origin)', 403); return
         if p == '/diagnostics/ui-route':
             try:
-                n = min(4096, int(self.headers.get('Content-Length') or 0))
-                body = json.loads(self.rfile.read(n).decode('utf-8') or '{}') if n else {}
-            except Exception:
-                body = {}
+                body = read_json_body(self, max_bytes=4096)
+            except BodyReadError as exc:
+                self._err(str(exc), exc.status); return
             _ui_route_trace(body)
             self._ok(json.dumps({'ok': True}).encode())
         elif p == '/ai-key':
@@ -2823,6 +2988,12 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._handle_screen3()
         elif p == '/portfolio':
             self._handle_portfolio()
+        elif p == '/decision/context':
+            self._handle_decision_context_post()
+        elif p == '/options/txo/refresh':
+            self._handle_options_refresh()
+        elif p == '/sync':
+            self._handle_sync()
         elif p == '/chain-momentum':
             self._handle_chain_momentum()
         elif p == '/ai/local':
@@ -2844,15 +3015,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         elif p == '/macro/refresh' or p.startswith('/macro/refresh/'):
             # UI 一鍵更新追蹤圖（POST body 可帶 {id, dense, density, step, years}）
             try:
-                n = int(self.headers.get('Content-Length') or 0)
-            except Exception:
-                n = 0
-            body = {}
-            if n > 0:
-                try:
-                    body = json.loads(self.rfile.read(n).decode('utf-8') or '{}')
-                except Exception:
-                    body = {}
+                body = read_json_body(self, max_bytes=16 * 1024)
+            except BodyReadError as exc:
+                self._err(str(exc), exc.status); return
             qs = parse_qs(urlparse(self.path).query)
             cid = (body.get('id') or (qs.get('id', [None])[0]) or 'ALL')
             if p.startswith('/macro/refresh/'):
@@ -2881,6 +3046,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 self._err('macro refresh failed: ' + str(e), 500)
         elif p == '/margin_ratio/backfill':
             self._handle_margin_ratio_backfill()
+        elif p == '/margin_ratio/refresh':
+            self._handle_margin_ratio_refresh()
         elif p == '/ai-report':
             self._handle_ai_report()
         elif p == '/etf-reason':
@@ -2907,10 +3074,27 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._err('not found', 404)
 
     def do_OPTIONS(self):
+        self._ensure_trace_id()
+        origin = self._cors_origin()
+        if not origin:
+            self._err('forbidden (cross-origin)', 403)
+            return
         self.send_response(204)
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-ST-Trace-ID')
+        self.send_header('Access-Control-Expose-Headers', 'X-ST-Trace-ID')
         self.end_headers()
+
+    def _ensure_trace_id(self):
+        existing = getattr(self, '_trace_id', None)
+        if existing:
+            return existing
+        candidate = str(self.headers.get('X-ST-Trace-ID') or '').strip()
+        if not candidate or len(candidate) > 64 or not all(
+                ch.isalnum() or ch in '._:-' for ch in candidate):
+            candidate = uuid.uuid4().hex[:20]
+        self._trace_id = candidate
+        return candidate
 
     def end_headers(self):
         # HTML／JS 開發期禁止快取，避免 shell/pulse 修好後仍載到舊殼層
@@ -2920,7 +3104,11 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
             self.send_header('Pragma', 'no-cache')
             self.send_header('Expires', '0')
-        self.send_header('Access-Control-Allow-Origin', '*')
+        origin = self._cors_origin()
+        if origin:
+            self.send_header('Access-Control-Allow-Origin', origin)
+            self.send_header('Vary', 'Origin')
+        self.send_header('X-ST-Trace-ID', self._ensure_trace_id())
         super().end_headers()
 
     def _ok(self, body, ct='application/json'):
@@ -2935,7 +3123,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def _err(self, msg, code=404):
-        body = json.dumps({'error': msg}, ensure_ascii=False).encode('utf-8')
+        body = json.dumps({'error': msg, 'traceId': self._ensure_trace_id()}, ensure_ascii=False).encode('utf-8')
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
@@ -3009,15 +3197,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     def _handle_wavedeck_bridge_post(self):
         """WaveDeck → ST 反向繁線：收 FSM／部位／成本。"""
         try:
-            n = int(self.headers.get('Content-Length') or 0)
-        except Exception:
-            n = 0
-        body = {}
-        if n > 0:
-            try:
-                body = json.loads(self.rfile.read(n).decode('utf-8') or '{}')
-            except Exception:
-                body = {}
+            body = read_json_body(self, max_bytes=256 * 1024)
+        except BodyReadError as exc:
+            self._err(str(exc), exc.status); return
         try:
             import wavedeck_bus as wdb
             snap = wdb.accept_report(body if isinstance(body, dict) else {})
@@ -3036,15 +3218,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
 
     def _handle_override_alpha_post(self):
         try:
-            n = int(self.headers.get('Content-Length') or 0)
-        except Exception:
-            n = 0
-        body = {}
-        if n > 0:
-            try:
-                body = json.loads(self.rfile.read(n).decode('utf-8') or '{}')
-            except Exception:
-                body = {}
+            body = read_json_body(self, max_bytes=64 * 1024)
+        except BodyReadError as exc:
+            self._err(str(exc), exc.status); return
         try:
             import override_alpha as oa
             self._ok(json.dumps(oa.log_event(body if isinstance(body, dict) else {}), ensure_ascii=False).encode())
@@ -3086,15 +3262,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
 
     def _handle_llm_gate_post(self):
         try:
-            n = int(self.headers.get('Content-Length') or 0)
-        except Exception:
-            n = 0
-        body = {}
-        if n > 0:
-            try:
-                body = json.loads(self.rfile.read(n).decode('utf-8') or '{}')
-            except Exception:
-                body = {}
+            body = read_json_body(self, max_bytes=16 * 1024)
+        except BodyReadError as exc:
+            self._err(str(exc), exc.status); return
         try:
             import llm_gate as lg
             op = str(body.get('op') or 'status')
@@ -3146,7 +3316,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     def _handle_twquote(self):
         """台股個股『即時』報價 (v3.9) — TWSE MIS getStockInfo,真即時。
            解 Yahoo 免費台股分K 延遲~20min 的問題:盤中即時看盤用此源更新最新K棒。
-           ?code=2330。回 {ok,price,open,high,low,prevClose,volume,name,time}。"""
+           ?code=2330。volume 保持累計張數；volumeShares 為跨來源權威累計股數。"""
         qs = parse_qs(urlparse(self.path).query)
         code = (qs.get('code', [''])[0] or '').strip().upper().replace('.TWO', '').replace('.TW', '')
         if not code:
@@ -3160,6 +3330,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             except Exception:
                 return None
         out = {'ok': False, 'code': code}
+        mis_volume = None
         for ex in ('tse_%s.tw' % code, 'otc_%s.tw' % code):
             try:
                 ms = int(time.time() * 1000)
@@ -3174,6 +3345,11 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 if not arr:
                     continue
                 it = arr[0]
+                candidate_volume = cumulative_volume_contract(
+                    it.get('v'), source_unit='lot', source='twse-mis',
+                    timestamp_ms=it.get('tlong'))
+                if candidate_volume.get('volumeShares') is not None:
+                    mis_volume = candidate_volume
                 # Data Integrity:只用最新『成交』價 z。z='-'(無撮合/收盤後)→ 不推估(試下一個 ex,
                 #   都沒有就回 ok:false 讓前端保留上次真實值)。絕不用開盤價/委買賣價假裝成交價(會灌錯值)。
                 price = fnum(it.get('z'))
@@ -3181,13 +3357,61 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                     continue
                 out = {'ok': True, 'code': code, 'price': price,
                        'open': fnum(it.get('o')), 'high': fnum(it.get('h')), 'low': fnum(it.get('l')),
-                       'prevClose': fnum(it.get('y')), 'volume': fnum(it.get('v')),
-                       'name': it.get('n'), 'time': it.get('t'), 'source': 'twse-mis'}
+                       'prevClose': fnum(it.get('y')),
+                       'name': it.get('n'), 'time': it.get('t'),
+                       'timestampMs': candidate_volume.get('volumeTimestampMs'),
+                       'source': 'twse-mis'}
+                out.update(candidate_volume)
                 break
             except SourceBreakerOpen:
                 out['error'] = 'twse-mis breaker open'; break
             except Exception as e:
                 out['error'] = str(e)
+        # 盤後 MIS 常將最新成交 z 回為「-」。這代表官方即時成交欄位已收盤，
+        # 不代表股票沒有報價；以 Yahoo v8 日資料的真實最新價／昨收作備援。
+        if not out.get('ok'):
+            for candidate in (code + '.TW', code + '.TWO'):
+                try:
+                    _, raw, _ = fetch_one(candidate, '1d', '1d', True)
+                    if not raw:
+                        continue
+                    result = ((json.loads(raw).get('chart') or {}).get('result') or [])
+                    if not result:
+                        continue
+                    r0 = result[0]
+                    meta = r0.get('meta') or {}
+                    quote = ((r0.get('indicators') or {}).get('quote') or [{}])[0]
+                    closes = quote.get('close') or []
+                    price = fnum(meta.get('regularMarketPrice'))
+                    if price is None:
+                        price = next((fnum(v) for v in reversed(closes) if fnum(v) is not None), None)
+                    prev = fnum(_yf_prevclose(meta))
+                    if price is None or prev is None:
+                        continue
+                    yahoo_ts_ms = (int(meta.get('regularMarketTime')) * 1000
+                                   if meta.get('regularMarketTime') else None)
+                    yahoo_volume = cumulative_volume_contract(
+                        meta.get('regularMarketVolume'), source_unit='share',
+                        source='yahoo-v8-chart', timestamp_ms=yahoo_ts_ms)
+                    out = {
+                        'ok': True, 'code': code,
+                        'name': meta.get('shortName') or meta.get('longName') or code,
+                        'price': price, 'prevClose': prev,
+                        'open': fnum(meta.get('regularMarketOpen')),
+                        'high': fnum(meta.get('regularMarketDayHigh')),
+                        'low': fnum(meta.get('regularMarketDayLow')),
+                        'time': (time.strftime('%H:%M:%S', time.localtime(meta.get('regularMarketTime')))
+                                 if meta.get('regularMarketTime') else None),
+                        'timestampMs': yahoo_ts_ms,
+                        'source': 'yahoo-v8-chart · MIS盤後備援',
+                    }
+                    # MIS may stop publishing the last price while its official
+                    # cumulative volume is still current. Keep price and volume
+                    # provenance independent instead of replacing both with Yahoo.
+                    out.update(mis_volume or yahoo_volume)
+                    break
+                except Exception as e:
+                    out['fallbackError'] = str(e)
         self._ok(json.dumps(out, ensure_ascii=False).encode())
 
     def _handle_twquote_batch(self):
@@ -3469,6 +3693,14 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
 
 
     def _handle_keystats(self, sym):
+        trace_qs = parse_qs(urlparse(self.path).query)
+        trace_id = str(
+            self.headers.get('X-ST-Trace-ID')
+            or (trace_qs.get('traceId') or [None])[0]
+            or ('ks-' + str(int(time.time() * 1000)))
+        )[:80]
+        trace_started = time.perf_counter()
+        _keystats_trace('request_received', correlationId=trace_id, symbol=sym)
         raw_sym = (sym or '').strip()
         base_sym = raw_sym.replace('.TWO', '').replace('.TW', '')
         if base_sym == '__MARGIN_RATIO__' or raw_sym.startswith('__MARGIN_RATIO__'):
@@ -3533,6 +3765,41 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             except Exception as e:
                 self._err('market keystats failed: ' + str(e), 500)
             return
+        # 美／日主要指數：和基本面面板共用同一市場體質代理模型。
+        try:
+            import international_fundamental as _intl_ks
+            intl_definition = _intl_ks.index_definition(base_sym)
+        except Exception:
+            intl_definition = None
+        if intl_definition:
+            try:
+                fund = self._build_international_market_fundamental(base_sym)
+                pillars = (fund or {}).get('pillars') or {}
+                res = {
+                    'shortName': (fund or {}).get('title') or base_sym,
+                    'currency': 'JPY' if intl_definition.get('market') == 'JP' else 'USD',
+                    'marketCap': None,
+                    'trailingPE': None,
+                    'priceToBook': None,
+                    'dividendYield': None,
+                    'eps': None,
+                    'kind': 'market',
+                    'marketMeta': {
+                        'score': (fund or {}).get('score'),
+                        'title': (fund or {}).get('title'),
+                        'rows': (fund or {}).get('marketRows') or [],
+                        'pillars': pillars,
+                        'confidence': (fund or {}).get('confidence'),
+                        'model': (fund or {}).get('model'),
+                        'note': (fund or {}).get('_note'),
+                    },
+                    '_source': (fund or {}).get('_source'),
+                }
+                self._ok(json.dumps(res, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self._err('international market keystats failed: ' + str(e), 502)
+            return
+
         # 其他指數／合成序列：明確空估值（避免 ^GSPC.TW / __US_*.TW）
         if _is_index_sym(base_sym) or _is_macro_sym(base_sym):
             res = {
@@ -3556,6 +3823,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         key = f'keystats:{sym}:{int(time.time() // 3600)}'
         c = _cache.get(key)
         if c is not None:
+            _keystats_trace('cache_hit', correlationId=trace_id, symbol=sym, cache=True,
+                            elapsedMs=round((time.perf_counter() - trace_started) * 1000))
             self._ok(c); return
 
         def _merge(dst, src, keys, tag=None):
@@ -3735,12 +4004,11 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 _apply_bwibbu(res_out, clean)
             return res_out
 
+        _keystats_trace('fetch_start', correlationId=trace_id, symbol=sym, cache=False)
         out = _fetch_all(sym)
 
         # .TW miss → .TWO：僅在「尚無估值／市值」且 .TWO 未列死號時試一次（不再整串 cascade 兩輪）
-        if (sym.endswith('.TW') and not sym.endswith('.TWO')
-            and out.get('trailingPE') is None and out.get('eps') is None
-            and out.get('marketCap') is None):
+        if _should_retry_tw_keystats_as_otc(sym, out):
             otc = sym[:-3] + '.TWO'
             if not _yf_is_dead(otc):
                 otc_out = _fetch_all(otc, allow_yahoo_heavy=True)
@@ -3751,6 +4019,12 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
 
         body = json.dumps(out, ensure_ascii=False).encode()
         _cache.set(key, body)
+        _keystats_trace(
+            'fetch_terminal', correlationId=trace_id, symbol=sym, cache=False,
+            source=out.get('_source'), hasPrice=out.get('regularMarketPrice') is not None,
+            hasShares=out.get('sharesOutstanding') is not None,
+            hasMarketCap=out.get('marketCap') is not None, resolved=out.get('_resolved'),
+            error=out.get('_error'), elapsedMs=round((time.perf_counter() - trace_started) * 1000))
         self._ok(body)
 
     def _fetch_keystats_yfinance(self, sym):
@@ -3998,11 +4272,69 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         _cache.set(key, body, ttl=120)
         self._ok(body)
 
+    def _build_international_market_fundamental(self, sym):
+        """Build/cache the disclosed large-cap proxy model for US/JP indices."""
+        import international_fundamental as intl
+        from datetime import date as _date
+
+        symbol = str(sym or '').strip().upper()
+        definition = intl.index_definition(symbol)
+        if not definition:
+            return None
+        cache_key = f'intl-fund:v1:{symbol}:{_date.today().isoformat()}'
+        cached = _cache.get(cache_key)
+        if cached is not None:
+            try:
+                return json.loads(cached.decode('utf-8') if isinstance(cached, bytes) else cached)
+            except Exception:
+                pass
+
+        members = list(definition.get('members') or [])
+
+        def fetch_member(ticker):
+            stats = self._fetch_keystats_yfinance(ticker)
+            need_more = not any(stats.get(k) is not None for k in (
+                'revenueGrowth', 'earningsGrowth', 'earningsQuarterlyGrowth',
+                'opMargin', 'netMargin', 'roe', 'forwardPE', 'trailingPE',
+            ))
+            if need_more:
+                fallback = self._fetch_keystats_v10(ticker)
+                for key in (
+                    'revenueGrowth', 'earningsGrowth', 'earningsQuarterlyGrowth',
+                    'grossMargin', 'opMargin', 'netMargin', 'roe', 'forwardPE',
+                    'trailingPE', 'eps', '_source',
+                ):
+                    if stats.get(key) is None and fallback.get(key) is not None:
+                        stats[key] = fallback[key]
+            return ticker, stats
+
+        member_stats = {}
+        jobs = {ticker: _fundamental_pool.submit(fetch_member, ticker) for ticker in members}
+        values, outcomes = collect_named(jobs, timeout=20.0, executor=_fundamental_pool)
+        for ticker, result in values.items():
+            result_ticker, stats = result
+            member_stats[result_ticker or ticker] = stats
+        if any(value != 'ok' for value in outcomes.values()):
+            print('[fundamental] bounded outcomes', outcomes)
+        out = intl.build_index_fundamental(symbol, member_stats, as_of=_date.today().isoformat())
+        _cache.set(cache_key, json.dumps(out, ensure_ascii=False).encode('utf-8'), ttl=21600)
+        return out
+
     def _handle_fundamental(self, sym):
         """基本面：成長 + 獲利三率 + 評分 0~100。
            TW 個股：TWSE OpenAPI；US 個股：Yahoo keystats
            大盤指數（^TWII/^TWOII）／融資維持率：大盤體質（量能+法人+融資+估值）"""
         from datetime import date as _date
+        import international_fundamental as intl
+        trace_qs = parse_qs(urlparse(self.path).query)
+        trace_id = str(
+            self.headers.get('X-ST-Trace-ID')
+            or (trace_qs.get('traceId') or [None])[0]
+            or ('fund-' + str(int(time.time() * 1000)))
+        )[:80]
+        trace_started = time.perf_counter()
+        _fundamental_trace('request_received', correlationId=trace_id, symbol=sym,
+                           stateBefore='unclassified')
         today = _date.today().strftime('%Y%m%d')
         clean = sym.replace('.TW', '').replace('.TWO', '').strip().upper()
         # 籌碼集中度圖（__HOLDERS_2330__）
@@ -4095,34 +4427,80 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                     '_note': '市場風險計算失敗：' + str(e),
                 }, ensure_ascii=False).encode())
             return
+        # 美／日主要指數：用大型權值股代理樣本估算市場體質。
+        # payload 明示並非完整成分股加權，不與公司財報分數混用。
+        intl_definition = intl.index_definition(clean)
+        if intl_definition:
+            _fundamental_trace(
+                'classified', correlationId=trace_id, symbol=sym,
+                market=intl_definition.get('market'), kind='market',
+                model='LARGE_CAP_PROXY_V1', stateBefore='unclassified',
+                stateAfter='international_index_proxy')
+            try:
+                out = self._build_international_market_fundamental(clean)
+                _fundamental_trace(
+                    'terminal', correlationId=trace_id, symbol=sym,
+                    market=(out or {}).get('market'), kind=(out or {}).get('kind'),
+                    model=(out or {}).get('model'), source=(out or {}).get('_source'),
+                    score=(out or {}).get('score'),
+                    sampleCount=len((out or {}).get('sampleMembers') or []),
+                    stateAfter='renderable',
+                    elapsedMs=round((time.perf_counter() - trace_started) * 1000))
+                self._ok(json.dumps(out, ensure_ascii=False).encode())
+            except Exception as e:
+                _fundamental_trace(
+                    'terminal_error', correlationId=trace_id, symbol=sym,
+                    market=intl_definition.get('market'), kind='market',
+                    model='LARGE_CAP_PROXY_V1', error=str(e)[:180],
+                    stateAfter='error',
+                    elapsedMs=round((time.perf_counter() - trace_started) * 1000))
+                self._err('international fundamental failed: ' + str(e), 502)
+            return
+
         # 美總經／其他指數／合成序列：無公司財報，回明確空狀態（勿誤走 Yahoo 公司）
         if _is_macro_sym(clean) or _is_index_sym(clean):
-            is_us = clean.startswith('__US_') or (clean.startswith('^') and not _is_tw_index_sym(clean))
+            market = intl.market_of_symbol(clean)
             out = {
                 'symbol': sym, 'code': clean, 'date': today,
-                'market': 'US' if is_us else 'TW',
+                'market': market,
                 'kind': 'macro' if _is_macro_sym(clean) else 'index',
                 'title': '總經序列' if _is_macro_sym(clean) else '指數',
                 'revenue': None, 'income': None, 'score': None,
                 '_note': ('總經追蹤圖無個股基本面評分' if _is_macro_sym(clean)
                           else '非台股大盤指數，無大盤體質／公司財報評分'),
             }
+            _fundamental_trace(
+                'terminal', correlationId=trace_id, symbol=sym, market=market,
+                kind=out.get('kind'), score=None, stateAfter='unsupported_index',
+                elapsedMs=round((time.perf_counter() - trace_started) * 1000))
             self._ok(json.dumps(out, ensure_ascii=False).encode()); return
 
-        is_tw = bool(_CODE4.match(clean)) or sym.endswith('.TW') or sym.endswith('.TWO')
-        key = f'fund:{"TW" if is_tw else "US"}:{clean}:{today}'
+        market = intl.market_of_symbol(sym)
+        is_tw = market == 'TW'
+        _fundamental_trace(
+            'classified', correlationId=trace_id, symbol=sym, market=market,
+            kind='stock', stateBefore='unclassified', stateAfter='stock_fetch')
+        key = f'fund:{market}:{clean}:{today}'
         c = _cache.get(key)
         if c is not None:
+            _fundamental_trace(
+                'cache_hit', correlationId=trace_id, symbol=sym, market=market,
+                kind='stock', cache=True,
+                elapsedMs=round((time.perf_counter() - trace_started) * 1000))
             self._ok(c); return
 
         out = {
             'symbol': sym, 'code': clean, 'date': today,
-            'market': 'TW' if is_tw else 'US',
+            'market': market,
             'revenue': None, 'income': None, 'score': None,
         }
 
         if not is_tw:
-            # 美股：共用 /keystats 鏈（yfinance → v10 → html），對齊成長／三率後走同一套 _fundamental_score
+            _fundamental_trace(
+                'external_fetch_start', correlationId=trace_id, symbol=sym,
+                market=market, kind='stock', source='Yahoo Finance',
+                stateBefore='stock_fetch', stateAfter='fetching')
+            # 美／日股：共用 Yahoo keystats，對齊成長／三率後走同一套評分。
             ks = self._fetch_keystats_yfinance(clean)
             need = (
                 ks.get('revenueGrowth') is None
@@ -4174,6 +4552,14 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             out['score'] = _fundamental_score(out)
             body = json.dumps(out, ensure_ascii=False).encode()
             _cache.set(key, body)
+            _fundamental_trace(
+                'terminal', correlationId=trace_id, symbol=sym, market=market,
+                kind='stock', source=out.get('_source'), score=out.get('score'),
+                hasRevenue=out.get('revenue') is not None,
+                hasIncome=out.get('income') is not None,
+                stateAfter='renderable' if (out.get('revenue') or out.get('income')) else 'empty',
+                error=out.get('_error'),
+                elapsedMs=round((time.perf_counter() - trace_started) * 1000))
             self._ok(body)
             return
 
@@ -4233,14 +4619,16 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
            US: 走 /keystats 的 trailingPE / priceToBook（Yahoo）。
            前端用此 EPS_ttm × 倍數 + 歷史股價算河流帶與便宜/昂貴百分位。"""
         from datetime import date as _date
+        import international_fundamental as intl
         today = _date.today().strftime('%Y%m%d')
         clean = sym.replace('.TW', '').replace('.TWO', '').strip().upper()
-        is_tw = bool(_CODE4.match(clean)) or sym.endswith('.TW') or sym.endswith('.TWO')
+        market = intl.market_of_symbol(sym)
+        is_tw = market == 'TW'
         key = f'val:{clean}:{today}'
         c = _cache.get(key)
         if c is not None:
             self._ok(c); return
-        out = {'symbol': sym, 'code': clean, 'date': today, 'market': 'TW' if is_tw else 'US',
+        out = {'symbol': sym, 'code': clean, 'date': today, 'market': market,
                'per': None, 'pbr': None, 'yieldPct': None, 'epsTtm': None, 'price': None}
         if is_tw:
             # v3.8.1：BWIBBU_ALL 正確路徑是 exchangeReport/（舊 opendata/ 404），
@@ -4283,7 +4671,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             if out['per'] and out['price']:
                 out['epsTtm'] = round(out['price'] / out['per'], 2)
         else:
-            # 美股 (v3.8.1)：直打 v10 quoteSummary 需 crumb 常 401 → 全 None。
+            # 美／日股：直打 v10 quoteSummary 需 crumb 常 401 → 全 None。
             # 改共用 /keystats 的取得鏈：yfinance(內建 cookie/crumb) → v10 → HTML scrape。
             # 三個 helper 已統一鍵名：trailingPE/priceToBook/dividendYield(%)/eps/regularMarketPrice。
             ks = self._fetch_keystats_yfinance(clean)
@@ -4525,12 +4913,18 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
 
         # 延伸因子（類股／OI／借券賣出／250日 NHNL）— 與體質並行，失敗進 pending
         extras = {'sectors': None, 'txOi': None, 'sbl': None, 'nhnl': None}
+        extras_outcomes = {}
         if extras_fut is not None:
-            try:
-                extras = extras_fut.result(timeout=8.0) or extras
-            except Exception as e:
-                print('[pulse] extras', e)
-                extras = {'sectors': None, 'txOi': None, 'sbl': None, 'nhnl': None}
+            values, parent_outcomes = collect_named(
+                {'extras': extras_fut}, timeout=8.0, executor=_pulse_extras_pool)
+            candidate = values.get('extras')
+            if isinstance(candidate, dict):
+                extras.update(candidate)
+                extras_outcomes = candidate.get('_outcomes') or {}
+            if parent_outcomes.get('extras') != 'ok':
+                extras_outcomes['aggregate'] = parent_outcomes.get('extras')
+        else:
+            extras_outcomes['aggregate'] = 'saturated'
 
         if not sectors:
             ex_sec = extras.get('sectors') if isinstance(extras, dict) else None
@@ -4597,6 +4991,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         # 附帶列表資料供前端一次渲染（減少 round-trip）
         out['date'] = (bd or {}).get('date')
         out['breadthOk'] = bool(bd and bd.get('ok'))
+        out['breadthSource'] = (bd or {}).get('source') or 'TWSE MI_INDEX MS'
+        out['breadthScope'] = 'TWSE_STOCKS'
         out['indices'] = indices
         out['stocks'] = stocks
         out['inst'] = inst
@@ -4623,13 +5019,14 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         PULSE_SIDE_BUDGET = 8.0
 
         def _job_movers():
-            m = _cache_first([f'movers:v4:{ymd}'])
+            _sector_day = ((sec or {}).get('date') if isinstance(sec, dict) else None) or out.get('date')
+            m = _cache_first([f'movers:v5:{_sector_day or ymd}'])
             if m is not None:
                 return m
             try:
-                m = _fetch_day_movers(8)
+                m = _fetch_day_movers(8, target_date=_sector_day)
                 if m and m.get('ok'):
-                    _cache.set(f'movers:v4:{ymd}', json.dumps(m, ensure_ascii=False).encode(), ttl=300)
+                    _cache.set(f'movers:v5:{_sector_day or ymd}', json.dumps(m, ensure_ascii=False).encode(), ttl=300)
                 return m
             except Exception as e:
                 print('[pulse] movers', e)
@@ -4694,48 +5091,40 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         us10y = None
         eco = []
         flash_pack = {'ok': False, 'items': []}
-        # 獨立 executor：並行等待用 wait()，不再串行 .result(25)+.result(20)
-        try:
-            from concurrent.futures import wait as _fut_wait
-            with ThreadPoolExecutor(max_workers=4, thread_name_prefix='pulse-side') as _pex:
-                f_m = _pex.submit(_job_movers)
-                f_g = _pex.submit(_job_global)
-                f_e = _pex.submit(_job_macro)
-                f_f = _pex.submit(_job_flash)
-                done, _pending = _fut_wait([f_m, f_g, f_e, f_f], timeout=PULSE_SIDE_BUDGET)
-                if f_m in done:
-                    try:
-                        movers = f_m.result() or movers
-                    except Exception as e:
-                        print('[pulse] movers result', e)
-                if f_g in done:
-                    try:
-                        global_q = f_g.result() or []
-                    except Exception as e:
-                        print('[pulse] global result', e)
-                if f_e in done:
-                    try:
-                        us10y, eco = f_e.result()
-                        eco = eco or []
-                    except Exception as e:
-                        print('[pulse] macro result', e)
-                else:
-                    # macro 逾時：仍試讀既有快取（不觸發網路）
-                    try:
-                        us10y = _macro_latest('us10y', years=5, allow_fetch=False)
-                        for mk in ('unrate', 'us_cpi_yoy', 'tw_cpi'):
-                            row = _macro_latest(mk, years=10, allow_fetch=False)
-                            if row:
-                                eco.append(row)
-                    except Exception:
-                        pass
-                if f_f in done:
-                    try:
-                        flash_pack = f_f.result() or flash_pack
-                    except Exception as e:
-                        print('[pulse] flash result', e)
-        except Exception as e:
-            print('[pulse] overview parallel', e)
+        side_jobs = {
+            'movers': _pulse_side_pool.submit(_job_movers),
+            'global': _pulse_side_pool.submit(_job_global),
+            'macro': _pulse_side_pool.submit(_job_macro),
+            'flash': _pulse_side_pool.submit(_job_flash),
+        }
+        side_values, side_outcomes = collect_named(
+            side_jobs, timeout=PULSE_SIDE_BUDGET, executor=_pulse_side_pool)
+        if isinstance(side_values.get('movers'), dict):
+            movers = side_values['movers'] or movers
+        if isinstance(side_values.get('global'), list):
+            global_q = side_values['global'] or []
+        if side_outcomes.get('macro') == 'ok':
+            try:
+                us10y, eco = side_values['macro']
+                eco = eco or []
+            except Exception as exc:
+                side_outcomes['macro'] = f'error:{type(exc).__name__}'
+        else:
+            # Timeout/saturation: cache-only fallback, never another network call.
+            try:
+                us10y = _macro_latest('us10y', years=5, allow_fetch=False)
+                for mk in ('unrate', 'us_cpi_yoy', 'tw_cpi'):
+                    row = _macro_latest(mk, years=10, allow_fetch=False)
+                    if row:
+                        eco.append(row)
+            except Exception:
+                pass
+        if isinstance(side_values.get('flash'), dict):
+            flash_pack = side_values['flash'] or flash_pack
+        out['sourceOutcomes'] = {
+            'extras': extras_outcomes,
+            'overview': side_outcomes,
+        }
 
         # 市場快訊：台／美公司重大訊息（market_flash）；行事曆事件僅作少量補充
         flash = list((flash_pack or {}).get('items') or [])
@@ -4958,6 +5347,108 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             elif _ohlc_box['err']:
                 print('[pulse] twii ohlc', _ohlc_box['err'])
 
+        # Deterministic DecisionContext：重用本包 canonical quote／廣度／因子；
+        # AI 不參與 regime、confidence、levels 或 position range。
+        try:
+            import datastore as _decision_store
+            import benchmark_research as _benchmark_research
+            import decision_context as _decision
+            import key_levels as _key_levels
+            import margin_cycle as _margin_cycle
+            import sector_flow as _sector_flow
+            import sector_history as _sector_history
+
+            _bars = _decision_store.get_bars('^TWII', limit=80)
+            if not _bars:
+                try:
+                    import pulse_history as _ph_levels
+                    _bars = ((_ph_levels.history(kind='index', n=80) or {}).get('rows') or [])
+                except Exception:
+                    _bars = []
+            _levels = _key_levels.calculate_key_levels(
+                _bars, symbol='^TWII', session='regular', source='market.db/pulse-history',
+                as_of=out.get('updatedAt'))
+            try:
+                import pulse_history as _ph_decision
+                _breadth_hist = ((_ph_decision.history(kind='breadth', n=20) or {}).get('rows') or [])
+                _index_hist = ((_ph_decision.history(kind='index', n=80) or {}).get('rows') or [])
+            except Exception:
+                _breadth_hist = []
+                _index_hist = []
+            try:
+                import tw_index_charts as _tw_charts_decision
+                _futures_hist = _tw_charts_decision.recent_rows('__TXF__', n=80, allow_network=False)
+            except Exception:
+                _futures_hist = []
+            try:
+                _margin_state = _margin_cycle.margin_balance_state()
+            except Exception as _margin_exc:
+                _margin_state = {
+                    'available': False, 'reason': str(_margin_exc)[:120],
+                    'source': 'TWSE MI_MARGN MS', 'role': 'risk_brake_only',
+                }
+            # Official Taiwan 50 history is owned by one canonical research
+            # provider.  The request reads cache only; a missing/stale cache is
+            # refreshed in a bounded daemon and remains fail-closed meanwhile.
+            _benchmark_data = _benchmark_research.snapshot(allow_network=True)
+            _sec_source = None
+            if isinstance(extras.get('sectors'), dict):
+                _sec_source = extras.get('sectors', {}).get('source')
+            if not _sec_source and isinstance(sec, dict):
+                _sec_source = sec.get('source') or sec.get('_source')
+            _sec_source = _sec_source or 'TWSE MI_INDEX IND'
+            _sector_session = _sector_flow.normalize_session_date(
+                (sec or {}).get('date') if isinstance(sec, dict) else out.get('date'))
+            _turnover_session = _sector_flow.normalize_session_date(
+                movers.get('industryTurnoverDate') if isinstance(movers, dict) else None)
+            _same_turnover_session = bool(_sector_session and _turnover_session == _sector_session)
+            _industry_turnover = (movers.get('industryTurnoverYi') if
+                                  isinstance(movers, dict) and _same_turnover_session else None)
+            _industry_turnover_total = (movers.get('industryTurnoverTotalYi') if
+                                        isinstance(movers, dict) and _same_turnover_session else None)
+            _sector_rows, _sec_hist_status = _sector_history.enrich_sector_rows(
+                sectors,
+                as_of=(sec or {}).get('date') if isinstance(sec, dict) else out.get('date'),
+                benchmark_bars=_bars,
+                industry_turnover_yi=_industry_turnover,
+                bootstrap=('proxy' not in str(_sec_source).lower()),
+                budget_seconds=4.0,
+            )
+            _turnover_source = (movers.get('industryTurnoverSource') if
+                                isinstance(movers, dict) and _same_turnover_session else None)
+            _sec_flow = _sector_flow.build_sector_flow(
+                _sector_rows, market_scope='TWSE',
+                source=_sec_source + ((' + ' + _turnover_source) if _turnover_source else ''),
+                as_of=(sec or {}).get('date') if isinstance(sec, dict) else out.get('date'),
+                total_turnover_yi=_industry_turnover_total,
+                benchmark_return20_pct=_sec_hist_status.get('benchmarkReturn20Pct'),
+                proxy_basket=('proxy' in str(_sec_source).lower()),
+            )
+            _sec_flow['historyStatus'] = _sec_hist_status
+            _sec_flow['turnoverSource'] = _turnover_source
+            _sec_flow['turnoverDate'] = _turnover_session
+            _sec_flow['turnoverSessionMatched'] = _same_turnover_session
+            try:
+                import options_exposure as _options_exposure
+                _options_structure = _options_exposure.latest_cached()
+            except Exception:
+                _options_structure = None
+            _ctx = _decision.build_and_publish(
+                out, key_levels=_levels, breadth_history=_breadth_hist,
+                index_history=_index_hist, futures_history=_futures_hist,
+                sector_flow=_sec_flow, margin_state=_margin_state,
+                benchmark_data=_benchmark_data,
+                options_structure=_options_structure)
+            out['decisionSummary'] = _decision.compact_context(_ctx)
+        except Exception as e:
+            print('[pulse] decision context', e)
+            try:
+                import decision_context as _decision_fallback
+                out['decisionSummary'] = _decision_fallback.compact_context(
+                    _decision_fallback.empty_context('decision_build_failed'))
+            except Exception:
+                out['decisionSummary'] = None
+
         body = json.dumps(out, ensure_ascii=False).encode()
         if out.get('ok'):
             _cache.set(key, body, ttl=45)
@@ -4985,14 +5476,20 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._err('pulse history failed: ' + str(e), 500)
 
     def _handle_sync(self):
-        """POST/GET /sync?days=40&full=0 — 背景預抓歷史庫，僅 merge 新日。"""
+        """POST /sync — background merge. A read must never start work."""
+        try:
+            body = read_json_body(self, max_bytes=4096)
+        except BodyReadError as exc:
+            self._err(str(exc), exc.status)
+            return
         qs = parse_qs(urlparse(self.path).query)
-        days = qs.get('days', ['40'])[0]
+        days = body.get('days', (qs.get('days') or ['40'])[0])
         try:
             days = max(5, min(120, int(days)))
         except Exception:
             days = 40
-        force = (qs.get('full', ['0'])[0] or '0') in ('1', 'true', 'yes')
+        force_value = body.get('full', (qs.get('full') or ['0'])[0])
+        force = force_value is True or str(force_value or '').lower() in ('1', 'true', 'yes')
         try:
             import pulse_history as ph
             started = ph.start_background_sync(days=days, force_full=force)
@@ -5259,7 +5756,17 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             except Exception as e:
                 print(f'[sectors-us] {sym} failed: {e}')
         if sectors:
-            body = json.dumps({'date': _date.today().strftime('%Y-%m-%d'), 'market': 'US', 'sectors': sectors}, ensure_ascii=False).encode()
+            try:
+                import sector_flow as _sf_us
+                flow = _sf_us.build_sector_flow(
+                    sectors, market_scope='US_SECTOR_ETF_PROXY', source='Yahoo SPDR sector ETFs',
+                    as_of=_date.today().strftime('%Y-%m-%d'), proxy_basket=True)
+                sectors = flow.get('rows') or sectors
+            except Exception:
+                flow = None
+            body = json.dumps({'date': _date.today().strftime('%Y-%m-%d'), 'market': 'US',
+                               'source': 'Yahoo SPDR sector ETFs', 'sectorFlow': flow,
+                               'sectors': sectors}, ensure_ascii=False).encode()
             _cache.set(key, body)
             self._ok(body)
         else:
@@ -5383,7 +5890,16 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 print(f'[sectors] {date_str} all endpoints failed: {last_err}')
 
             if sectors:
-                out = {'date': date_str, 'sectors': sectors}
+                try:
+                    import sector_flow as _sf_tw
+                    flow = _sf_tw.build_sector_flow(
+                        sectors, market_scope='TWSE', source='TWSE MI_INDEX IND',
+                        as_of=f'{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}')
+                    sectors = flow.get('rows') or sectors
+                except Exception:
+                    flow = None
+                out = {'date': date_str, 'source': 'TWSE MI_INDEX IND',
+                       'sectorFlow': flow, 'sectors': sectors}
                 body = json.dumps(out, ensure_ascii=False).encode()
                 _cache.set(key, body)
                 self._ok(body)
@@ -5395,10 +5911,19 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             yahoo_sectors = self._fetch_tw_sectors_via_yahoo(nocache=nocache)
             if yahoo_sectors:
                 from datetime import date as _date
+                try:
+                    import sector_flow as _sf_proxy
+                    flow = _sf_proxy.build_sector_flow(
+                        yahoo_sectors, market_scope='TW_PROXY_BASKET', source='yahoo-proxy',
+                        as_of=_date.today().strftime('%Y-%m-%d'), proxy_basket=True)
+                    yahoo_sectors = flow.get('rows') or yahoo_sectors
+                except Exception:
+                    flow = None
                 out = {
                     'date': _date.today().strftime('%Y-%m-%d'),
                     'market': 'TW',
                     'sectors': yahoo_sectors,
+                    'sectorFlow': flow,
                     '_source': 'yahoo-proxy',
                 }
                 body = json.dumps(out, ensure_ascii=False).encode()
@@ -5423,13 +5948,13 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         '紡織纖維':   ['1402', '1476'],             # 遠東新 / 儒鴻
         '電機機械':   ['1503', '1504'],             # 士電 / 東元
         '化學':       ['1722', '1707'],             # 台肥 / 葡萄王
-        '生技醫療':   ['4904', '3105'],             # 遠傳 (錯誤已知) — 改為實際生技
+        '生技醫療':   ['1795', '6446', '1762'],     # 美時 / 藥華藥 / 中化生
         '航運':       ['2603', '2609', '2615'],     # 長榮 / 陽明 / 萬海
         '汽車':       ['2207', '2204'],             # 和泰車 / 中華
         '營建':       ['2548', '2545'],             # 華固 / 皇翔
         '觀光':       ['2727', '2731'],             # 王品 / 雄獅
         '電信':       ['2412', '3045'],             # 中華電 / 台灣大
-        '油電燃氣':   ['9907', '9917'],             # 統一實 (用作能源 proxy) / 中保
+        '油電燃氣':   ['6505', '9918', '9926'],     # 台塑化 / 欣天然 / 新海
         '玻璃陶瓷':   ['1802', '1815'],             # 台玻 / 富喬
         '造紙':       ['1903', '1904'],             # 士紙 / 正隆
         '橡膠':       ['2105', '2104'],             # 正新 / 中橡
@@ -5770,8 +6295,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     def _handle_datasource_refresh(self):
         """POST /datasource/refresh body:{id, density?, dense?, step?, years?} → 一鍵更新該來源。"""
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length) or b'{}')
+            body = read_json_body(self, max_bytes=16 * 1024)
             import datasources
             step = body.get('step')
             years = body.get('years')
@@ -5790,6 +6314,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                 step=step,
                 years=years,
             ), ensure_ascii=False).encode())
+        except BodyReadError as e:
+            self._err(str(e), e.status)
         except Exception as e:
             self._err('datasource refresh failed: ' + str(e), 500)
 
@@ -5797,10 +6323,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         """v4.0: POST /notify  body:{text, subject?} → 用 alert_config 的 Telegram/Email 寄出
            (把 AI 副駕分析等留存,不會關掉就消失)。回 {ok, results}。"""
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length) or b'{}')
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
+            body = read_json_body(self, max_bytes=64 * 1024)
+        except BodyReadError as e:
+            self._err(str(e), e.status); return
         if not alert_daemon:
             self._err('alert 模組未載入', 500); return
         text = (body.get('text') or '').strip()
@@ -5819,10 +6344,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         """v4.0: POST /chain-momentum  body:{stages:[{stage,codes:[...]}]}
            → 每段 5/20/60 日動能(讀本機 DB)+ 領漲成分股。台股紅漲綠跌。"""
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length) or b'{}')
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
+            body = read_json_body(self, max_bytes=256 * 1024)
+        except BodyReadError as e:
+            self._err(str(e), e.status); return
         stages = body.get('stages') or []
         if not stages:
             self._err('no stages', 400); return
@@ -5888,10 +6412,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         """v4.0: POST /portfolio  body:{holdings:[{sym,weight}]} 或 {symbols:[...]}
            → 投組風險(相關性/波動/VaR/Beta/產業曝險)。讀本機 DB,缺的代號先即時回補。"""
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length) or b'{}')
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
+            body = read_json_body(self, max_bytes=128 * 1024)
+        except BodyReadError as e:
+            self._err(str(e), e.status); return
         holdings = body.get('holdings') or [{'sym': s, 'weight': 1} for s in (body.get('symbols') or [])]
         if not holdings:
             self._err('no holdings', 400); return
@@ -5912,13 +6435,16 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         except Exception as e:
             self._err('portfolio failed: ' + str(e), 500)
 
+    def _decision_sector_map(self):
+        """DecisionRoutesMixin hook：沿用既有 code→產業單一來源。"""
+        return _get_tw_sectors()
+
     def _handle_screener_post(self):
         """POST /screener — body: {preset:'...', symbols:[...] (optional)} or {custom:'...'}"""
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length) or b'{}')
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
+            body = read_json_body(self, max_bytes=512 * 1024)
+        except BodyReadError as e:
+            self._err(str(e), e.status); return
         preset = body.get('preset')
         custom = body.get('custom')
         # 預設掃全台股宇集（上市+上櫃普通股）；抓不到才退回精選清單
@@ -6177,10 +6703,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
            body: {apiKey, code, name, etfs:[...], action, sharesDelta, weightDelta}
            伺服器補基本面(月營收YoY/三率)做上下文，呼叫 Anthropic 回一句話。"""
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length) or b'{}')
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
+            body = read_json_body(self, max_bytes=64 * 1024)
+        except BodyReadError as e:
+            self._err(str(e), e.status); return
         api_key = (body.get('apiKey') or '').strip() or _load_ai_key()
         if not api_key:
             self._err('apiKey required', 400); return
@@ -6228,10 +6753,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             self._err('etf-reason failed: ' + str(e), 500)
 
 
-    def _read_json_body(self):
-        length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(length) if length > 0 else b'{}'
-        return json.loads(body.decode('utf-8'))
+    def _read_json_body(self, max_bytes=256 * 1024, expected_type=dict):
+        return read_json_body(self, max_bytes=max_bytes, expected_type=expected_type)
 
     def _alert_status(self):
         if not alert_daemon:
@@ -6247,11 +6770,13 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         if not alert_daemon:
             self._err('alert daemon unavailable', 503); return
         try:
-            rules = self._read_json_body()
+            rules = self._read_json_body(max_bytes=1024 * 1024, expected_type=list)
             if not isinstance(rules, list):
                 self._err('rules must be a list', 400); return
             alert_daemon.save_rules(rules)
             self._ok(json.dumps({'ok': True, 'count': len(rules)}).encode())
+        except BodyReadError as e:
+            self._err(str(e), e.status)
         except Exception as e:
             self._err('save rules failed: ' + str(e), 500)
 
@@ -6286,6 +6811,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             if cur.get('enabled') and alert_daemon:
                 alert_daemon.start()
             self._ok(json.dumps({'ok': True}).encode())
+        except BodyReadError as e:
+            self._err(str(e), e.status)
         except Exception as e:
             self._err('save config failed: ' + str(e), 500)
 
@@ -6304,11 +6831,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         if not alert_daemon:
             self._err('alert daemon unavailable', 503); return
         try:
-            mode = 'full'
-            try:
-                mode = (self._read_json_body() or {}).get('mode', 'full')
-            except Exception:
-                pass
+            mode = (self._read_json_body(max_bytes=4096) or {}).get('mode', 'full')
             # 自抓 /etf-delta
             with urllib.request.urlopen(f'http://localhost:{PORT}/etf-delta', timeout=30) as r:
                 delta = json.loads(r.read())
@@ -6331,6 +6854,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             if ok:
                 alert_daemon._log('ETF report emailed: ' + subject)
             self._ok(json.dumps({'ok': ok, 'results': {'email': msg}}, ensure_ascii=False).encode())
+        except BodyReadError as e:
+            self._err(str(e), e.status)
         except Exception as e:
             self._err('email report failed: ' + str(e), 500)
 
@@ -6340,9 +6865,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         if not alert_daemon:
             self._err('email module unavailable', 503); return
         try:
-            body = self._read_json_body() or {}
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
+            body = self._read_json_body(max_bytes=2 * 1024 * 1024) or {}
+        except BodyReadError as e:
+            self._err(str(e), e.status); return
         to = (body.get('to') or '').strip()
         subject = (body.get('subject') or 'Stock Terminal AI 報告').strip()
         html = body.get('html') or ''
@@ -6719,16 +7244,15 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         except Exception:
             txf = None
         out = market_snapshot(indices, txf)
-        out['updatedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
         self._ok(json.dumps(out, ensure_ascii=False).encode())
 
     def _handle_margin_ratio_backfill(self):
         """POST /margin_ratio/backfill — 背景回補歷史（full=1 從 2001 起）。"""
         try:
-            length = int(self.headers.get('Content-Length', 0) or 0)
-            body = json.loads(self.rfile.read(length) or b'{}') if length else {}
-        except Exception:
-            body = {}
+            body = read_json_body(self, max_bytes=4096)
+        except BodyReadError as exc:
+            self._err(str(exc), exc.status)
+            return
         qs = parse_qs(urlparse(self.path).query)
         full = bool(body.get('full')) or (qs.get('full', ['0'])[0] in ('1', 'true'))
         max_days = body.get('max') or (qs.get('max', [None])[0])
@@ -6742,24 +7266,27 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         except Exception as e:
             self._err('margin backfill failed: ' + str(e), 500)
 
+    def _handle_margin_ratio_refresh(self):
+        """POST /margin_ratio/refresh — refresh the latest session only."""
+        try:
+            read_json_body(self, max_bytes=1024)
+            import margin_ratio as mr
+            mr.refresh_today(force=True)
+            self._ok(json.dumps(mr.meta_summary(), ensure_ascii=False).encode('utf-8'))
+        except BodyReadError as exc:
+            self._err(str(exc), exc.status)
+        except Exception as exc:
+            self._err('margin refresh failed: ' + str(exc), 500)
+
     def _handle_margin_ratio(self):
-        """GET /margin_ratio — 大盤融資維持率 meta（歷史深度、風險區、回補狀態）。
-           ?action=backfill&full=1 可觸發背景歷史回補。"""
+        """GET /margin_ratio — read-only margin-maintenance metadata."""
         qs = parse_qs(urlparse(self.path).query)
         action = (qs.get('action', [''])[0] or '').strip().lower()
+        if action:
+            self._method_not_allowed('POST')
+            return
         try:
             import margin_ratio as mr
-            if action == 'backfill':
-                full = (qs.get('full', ['0'])[0] or '0') in ('1', 'true', 'yes')
-                max_days = qs.get('max', [None])[0]
-                md = int(max_days) if max_days else None
-                started = mr.start_background_backfill(full=full, max_days=md)
-                m = mr.meta_summary()
-                m['backfillStarted'] = bool(started)
-                self._ok(json.dumps(m, ensure_ascii=False).encode('utf-8'))
-                return
-            if action == 'today':
-                mr.refresh_today(force=True)
             self._ok(json.dumps(mr.meta_summary(), ensure_ascii=False).encode('utf-8'))
         except Exception as e:
             self._err('margin_ratio failed: ' + str(e), 500)
@@ -6890,10 +7417,9 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     # ── 三合一選股 技術+基本面+籌碼 (v3.9 P4) ───────────────
     def _handle_screen3(self):
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length) or b'{}')
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
+            body = read_json_body(self, max_bytes=512 * 1024)
+        except BodyReadError as e:
+            self._err(str(e), e.status); return
         tech = body.get('tech') or {}
         fund = body.get('fund') or {}
         chip = body.get('chip') or {}
@@ -7038,7 +7564,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         if not sym:
             self._err('missing sym', 400); return
         try:
-            body = self._read_json_body()
+            body = self._read_json_body(max_bytes=2 * 1024 * 1024, expected_type=(dict, list))
             objs = body.get('objects') if isinstance(body, dict) else body
             if not isinstance(objs, list):
                 self._err('objects must be a list', 400); return
@@ -7050,6 +7576,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
                     store.pop(sym, None)
                 _save_draw_store(store)
             self._ok(json.dumps({'ok': True, 'sym': sym, 'count': len(objs)}).encode())
+        except BodyReadError as e:
+            self._err(str(e), e.status)
         except Exception as e:
             self._err('save draw failed: ' + str(e), 500)
 
@@ -7063,11 +7591,13 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         if not watch_daemon:
             self._err('watch daemon unavailable', 503); return
         try:
-            rules = self._read_json_body()
+            rules = self._read_json_body(max_bytes=1024 * 1024)
             if not isinstance(rules, dict):
                 self._err('rules must be an object', 400); return
             watch_daemon.save_rules(rules)
             self._ok(json.dumps({'ok': True, 'count': len(rules)}).encode())
+        except BodyReadError as e:
+            self._err(str(e), e.status)
         except Exception as e:
             self._err('save watch rules failed: ' + str(e), 500)
 
@@ -7075,7 +7605,7 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
         if not (watch_daemon and alert_daemon):
             self._err('watch/alert daemon unavailable', 503); return
         try:
-            inc = self._read_json_body()
+            inc = self._read_json_body(max_bytes=16 * 1024)
             cur = alert_daemon.load_config()
             if 'enabled' in inc:
                 cur['watch_enabled'] = bool(inc['enabled'])
@@ -7085,6 +7615,8 @@ class Handler(AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
             if cur.get('watch_enabled'):
                 watch_daemon.start()
             self._ok(json.dumps({'ok': True, 'watch_enabled': cur.get('watch_enabled')}).encode())
+        except BodyReadError as e:
+            self._err(str(e), e.status)
         except Exception as e:
             self._err('save watch config failed: ' + str(e), 500)
 
@@ -7126,14 +7658,14 @@ if __name__ == '__main__':
     except Exception as _phe:
         _ph_msg = f'Pulse history unavailable: {_phe}'
     _msg = (
-        f'Stock Terminal v5.0 tip UX: http://127.0.0.1:{PORT}/#pulse\n'
+        f'Stock Terminal v5.0 tip UX: http://{HOST}:{PORT}/#pulse\n'
         f'Python: {sys.executable}\n'
         f'Layout: {_probe0.get("layoutAnchor")} / {_probe0.get("layoutContract")}\n'
         f'Workers: {MAX_WORKERS}  |  LRU cache: {LRU_MAX} symbols (ttl={getattr(_cache, "_ttl", "?")}s)\n'
         f'ETF delta path: {d or "NOT FOUND — set ETF_DELTA_PATH in server.py"}\n'
         f'ETF history files: {len(files)}\n'
         f'{_ph_msg}\n'
-        f'Bind: 127.0.0.1:{PORT} (loopback only — housekeeping)'
+        f'Bind: {HOST}:{PORT} (loopback only — housekeeping)'
     )
     if _log:
         for line in _msg.split('\n'):
@@ -7157,9 +7689,11 @@ if __name__ == '__main__':
         # 打包成 app 時:啟動後自動開 tip 總覽（#pulse）；絕不開無 hash 舊圖表殼
         try:
             import webbrowser
-            threading.Timer(1.4, lambda: webbrowser.open(f'http://127.0.0.1:{PORT}/#pulse')).start()
+            threading.Timer(1.4, lambda: webbrowser.open(f'http://{HOST}:{PORT}/#pulse')).start()
         except Exception:
             pass
     # H0：只聽 loopback，避免 18432 暴露到區網／公網
-    ThreadingHTTPServer(('127.0.0.1', PORT), Handler).serve_forever()
+    if HOST not in ('127.0.0.1', 'localhost', '::1'):
+        raise RuntimeError('ST_HOST must remain loopback; expose ST through the private web gateway')
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
 

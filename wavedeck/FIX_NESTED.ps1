@@ -1,4 +1,4 @@
-# Fix accidental C:\Users\Sam\AI_Stock\wavedeck\wavedeck nesting from zip extract.
+# Fix accidental Stock_Terminal\wavedeck\wavedeck nesting from zip extract.
 # Run from AI_Stock root:
 #   powershell -ExecutionPolicy Bypass -File .\wavedeck\FIX_NESTED.ps1
 $ErrorActionPreference = 'Stop'

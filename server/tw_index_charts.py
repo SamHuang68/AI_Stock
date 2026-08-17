@@ -462,3 +462,32 @@ def recent_closes(symbol: str, n: int = 30, allow_network: bool = False) -> List
         except Exception:
             continue
     return out
+
+
+def recent_rows(symbol: str, n: int = 80, allow_network: bool = False) -> List[dict]:
+    """Recent official/local-cache OHLC rows (oldest -> newest) with session dates."""
+    sym = (symbol or '').strip().upper()
+    rows: List[Tuple] = []
+    if sym in ('^TWOII', 'TWOII', '%5ETWOII'):
+        if allow_network:
+            try:
+                rows = ensure_twoii()
+            except Exception as exc:
+                print('[tw-index] recent_rows TWOII net', exc)
+        if not rows:
+            cached = _mem.get('^TWOII')
+            rows = (cached[1] if cached else None) or _read_csv(TWOII_CSV)
+    elif sym in ('__TXF__', 'TXF', '__TXF'):
+        if allow_network:
+            try:
+                rows = ensure_txf()
+            except Exception as exc:
+                print('[tw-index] recent_rows TXF net', exc)
+        if not rows:
+            cached = _mem.get('__TXF__')
+            rows = (cached[1] if cached else None) or _read_csv(TXF_CSV)
+    return [
+        {'date': row[0], 'open': row[1], 'high': row[2], 'low': row[3],
+         'close': row[4], 'volume': row[5], 'session': 'day'}
+        for row in rows[-max(1, int(n or 80)):]
+    ]

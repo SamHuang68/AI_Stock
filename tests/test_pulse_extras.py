@@ -2,10 +2,21 @@
 """pulse_extras 單元測試 — 解析／同契約 OI／NHNL 誠實門檻（無網路）。"""
 import os
 import sys
+import inspect
+import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 
 import pulse_extras as px  # noqa: E402
+
+
+def load_tests(loader, tests, pattern):
+    suite = unittest.TestSuite()
+    module = sys.modules[__name__]
+    for name, fn in inspect.getmembers(module, inspect.isfunction):
+        if name.startswith('test_'):
+            suite.addTest(unittest.FunctionTestCase(fn, description=name))
+    return suite
 
 
 def test_parse_sector_tables_strict():

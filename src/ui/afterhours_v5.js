@@ -80,6 +80,9 @@
         'display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;gap:4px;font-weight:700}' +
       '#ah-root .ah-sec > .ah-fill{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column}' +
       '#ah-root .ah-sec.ah-ovn{padding:5px 6px}' +
+      '#ah-root .ah-ovn-head{min-width:0;white-space:nowrap}' +
+      '#ah-root .ah-ovn-head > span:first-child{overflow:hidden;text-overflow:ellipsis}' +
+      '#ah-root .ah-ovn-sub{flex:0 0 auto;font-size:9px;color:var(--tlo);font-weight:600;letter-spacing:0}' +
       '#ah-root .ah-sec.ah-ovn > .ah-fill{padding-right:2px}' +
       '#ah-root #ah-ovn-host.ovn-embed{flex:1;min-height:0}' +
       '#ah-root table.ah-tbl{width:100%;border-collapse:collapse;font-size:10px}' +
@@ -376,7 +379,7 @@
     /* 左欄改掛載 overnight_v3 現有夜盤面板（雙 gauge／TXF OHLC／美股連動／TSMC／停損） */
     var txfBlock =
       '<div class="ah-sec ah-ovn">' +
-        '<h4>夜盤連動預警<span style="font-size:10px;color:var(--tlo);font-weight:600">台指期 · 美股連動</span></h4>' +
+        '<h4 class="ah-ovn-head"><span>夜盤連動預警</span><span class="ah-ovn-sub">台指期 · 美股連動</span></h4>' +
         '<div class="ah-fill" id="ah-ovn-host">' +
           '<div class="ah-loading">載入夜盤面板…</div>' +
         '</div>' +

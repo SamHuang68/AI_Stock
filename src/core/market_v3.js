@@ -11,12 +11,21 @@
   var SRV = window.SERVER || 'http://localhost:18432';
   var _tw = null, _us = null, _twmeta = null, _meta = { updated: 0, counts: {} };
 
-  function isTwFmt(c) { c = String(c || ''); return /^\d/.test(c) || /^\^TW/i.test(c); }
+  function isJpFmt(c) {
+    c = String(c || '').toUpperCase();
+    return c === '^N225' || (/^\d{4}\.T$/.test(c) && !/\.TW(O)?$/.test(c));
+  }
+  function isTwFmt(c) {
+    c = String(c || '').toUpperCase();
+    if (isJpFmt(c)) return false;
+    return /^\d/.test(c) || /^\^TW/i.test(c);
+  }
 
   var Market = {
     // 市場判定(永不失敗、對新代號也正確):US 表命中→US;TW 表/格式→TW;字母→US。
     of: function (code) {
       code = String(code || '').toUpperCase();
+      if (isJpFmt(code)) return 'JP';
       // 合成指數／本地序列：台股語意（紅漲綠跌、不附 .TW）
       if (code === '__MARGIN_RATIO__' || code === '__TXF__'
           || code === '__TW_RATES__' || code === '__TW_MARGIN_MIX__'
@@ -30,6 +39,7 @@
       return isTwFmt(code) ? 'TW' : 'US';
     },
     isTW: function (code) { return this.of(code) === 'TW'; },
+    isJP: function (code) { return this.of(code) === 'JP'; },
     name: function (code) {
       code = String(code || '').toUpperCase();
       return (_tw && _tw[code]) || (_us && _us[code]) || '';

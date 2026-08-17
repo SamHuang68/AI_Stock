@@ -524,7 +524,10 @@
         setStat('更新 ' + def.name + '…（密度：' + densMeta.label + '）');
       }
       if (def.id === '__MARGIN_RATIO__') {
-        await fetch(serverBase() + '/margin_ratio?action=backfill&full=1', { cache: 'no-store' });
+        await fetch(serverBase() + '/margin_ratio/backfill', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ full: true }), cache: 'no-store'
+        });
         btn.textContent = '已啟動回補';
       } else {
         const r = await fetch(serverBase() + '/macro/refresh/' + encodeURIComponent(def.id), {

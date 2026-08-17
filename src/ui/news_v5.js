@@ -14,6 +14,7 @@
   var SRV = window.SERVER || '';
   var timer = null;
   var flashMkt = 'all'; /* all | TW | US */
+  var flashImpact = 'all'; /* all | high | medium_up */
   var lastPack = null;
 
   function $(id) { return document.getElementById(id); }
@@ -55,6 +56,7 @@
         'display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}' +
       '#nw-root .nw-card h4{margin:0 0 4px;font-size:10px;color:var(--gold);letter-spacing:.5px;flex:0 0 auto;' +
         'display:flex;justify-content:space-between;align-items:center;gap:6px}' +
+      '#nw-root .nw-mid .nw-card h4{flex-wrap:wrap}' +
       '#nw-root .nw-grid{display:grid;grid-template-columns:1fr;gap:4px;flex:1;align-content:start}' +
       '#nw-root .nw-stat{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 6px}' +
       '#nw-root .nw-stat .k{font-size:10px;color:var(--tlo)}#nw-root .nw-stat .v{font-size:16px;font-weight:700;color:var(--thi);margin-top:1px;line-height:1.15}' +
@@ -72,12 +74,24 @@
       '#nw-root .nw-flash-list .t{color:var(--tlo);font-size:10px;margin-right:4px;white-space:nowrap}' +
       '#nw-root .nw-flash-list .cat{color:var(--cyan);font-size:10px;margin-right:4px}' +
       '#nw-root .nw-flash-list .cat.us{color:var(--gold)}' +
+      '#nw-root .nw-flash-list .impact{display:inline-flex;padding:0 4px;margin-right:4px;border-radius:999px;' +
+        'font-size:8px;border:1px solid #42516a;color:#9fb0c5;vertical-align:1px}' +
+      '#nw-root .nw-flash-list .impact.high{border-color:#f87171;color:#fecaca}' +
+      '#nw-root .nw-flash-list .impact.medium{border-color:#fb923c;color:#fed7aa}' +
       '#nw-root .nw-seg{display:flex;gap:0;border:1px solid var(--border);border-radius:4px;overflow:hidden}' +
       '#nw-root .nw-seg button{padding:2px 8px;border:0;border-right:1px solid var(--border);background:var(--bg);' +
         'color:var(--tlo);font-family:inherit;font-size:9px;font-weight:600;cursor:pointer}' +
       '#nw-root .nw-seg button:last-child{border-right:0}' +
       '#nw-root .nw-seg button.on{background:var(--gold);color:#060A12;font-weight:800}' +
+      '#nw-root .nw-filterbar{display:flex;align-items:center;gap:4px;min-width:0;flex-wrap:wrap}' +
       '#nw-root .nw-note{font-size:10px;color:var(--tlo);line-height:1.4;margin-top:2px;flex:0 0 auto}' +
+      '#nw-root .nw-empty{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+        'gap:6px;text-align:center;padding:18px;border:1px dashed rgba(148,163,184,.22);border-radius:8px;' +
+        'background:radial-gradient(circle at 50% 18%,rgba(56,189,248,.07),transparent 54%),rgba(5,10,19,.28)}' +
+      '#nw-root .nw-empty-icon{width:34px;height:34px;display:grid;place-items:center;border-radius:50%;' +
+        'border:1px solid rgba(125,211,252,.25);color:var(--cyan);font-size:17px;background:rgba(56,189,248,.06)}' +
+      '#nw-root .nw-empty b{font-size:11px;color:var(--thi)}' +
+      '#nw-root .nw-empty span{max-width:250px;font-size:9px;line-height:1.5;color:var(--tlo)}' +
       '#nw-root .nw-loading{font-size:10px;color:var(--tlo);padding:12px 0}' +
       '#nw-body.nw-loading{display:flex;align-items:center}' +
       '@media (max-width:1100px){#nw-root .nw-dash{grid-template-columns:1fr 1fr}#nw-root .nw-left{display:none}}';
@@ -161,17 +175,28 @@
         return f.mkt === 'US' || (f.cat && String(f.cat).indexOf('美股') >= 0);
       });
     }
+    if (flashImpact === 'high') {
+      items = items.filter(function (f) { return String(((f.impact || {}).tier) || 'LOW').toUpperCase() === 'HIGH'; });
+    } else if (flashImpact === 'medium_up') {
+      items = items.filter(function (f) {
+        return ['HIGH', 'MEDIUM'].indexOf(String(((f.impact || {}).tier) || 'LOW').toUpperCase()) >= 0;
+      });
+    }
     if (!items.length) {
       return '<div class="nw-note">此篩選尚無訊息</div>';
     }
     return '<div class="nw-flash-list">' + items.slice(0, 50).map(function (f) {
       var isUs = (f.mkt === 'US') || (f.cat && String(f.cat).indexOf('美股') >= 0);
+      var impact = f.impact || {};
+      var tier = String(impact.tier || 'LOW').toUpperCase();
+      var impactTitle = [impact.reason, (impact.scope || []).join(' / '), impact.ruleId].filter(Boolean).join(' · ');
       return '<div class="row"' +
         (f.code ? ' data-code="' + esc(f.code) + '"' : '') +
         (f.mkt ? ' data-mkt="' + esc(f.mkt) + '"' : '') +
         (f.url ? ' data-url="' + esc(f.url) + '"' : '') + '>' +
         '<span class="t">' + esc(f.time || '') + '</span>' +
         '<span class="cat' + (isUs ? ' us' : '') + '">[' + esc(f.cat || '') + ']</span>' +
+        '<span class="impact ' + tier.toLowerCase() + '" title="' + esc(impactTitle) + '">' + esc(tier) + '</span>' +
         esc(f.title || '') + '</div>';
     }).join('') + '</div>';
   }
@@ -225,7 +250,8 @@
             '</td><td>' + (e.code || '') + ' ' + (e.name || '') + '</td><td>' + typCell + '</td></tr>';
         }).join('') + '</table></div>';
     } else {
-      exTable = '<div class="nw-note">目前無預告（TWSE 資料集可能未開放或當期無資料）。</div>';
+      exTable = '<div class="nw-empty"><div class="nw-empty-icon" aria-hidden="true">◇</div>' +
+        '<b>目前沒有除權息事件</b><span>當期無公告，或 TWSE 資料集尚未開放；更新後會自動顯示。</span></div>';
     }
 
     var seg =
@@ -233,6 +259,12 @@
         '<button type="button" data-mkt="all"' + (flashMkt === 'all' ? ' class="on"' : '') + '>全部</button>' +
         '<button type="button" data-mkt="TW"' + (flashMkt === 'TW' ? ' class="on"' : '') + '>台股</button>' +
         '<button type="button" data-mkt="US"' + (flashMkt === 'US' ? ' class="on"' : '') + '>美股</button>' +
+      '</div>';
+    var impactSeg =
+      '<div class="nw-seg" id="nw-impact-seg" aria-label="影響層級篩選">' +
+        '<button type="button" data-impact="all"' + (flashImpact === 'all' ? ' class="on"' : '') + '>全層級</button>' +
+        '<button type="button" data-impact="medium_up"' + (flashImpact === 'medium_up' ? ' class="on"' : '') + '>中高</button>' +
+        '<button type="button" data-impact="high"' + (flashImpact === 'high' ? ' class="on"' : '') + '>高影響</button>' +
       '</div>';
 
     body.classList.remove('nw-loading');
@@ -265,7 +297,7 @@
           '</div></div>' +
         '</div>' +
         '<div class="nw-mid">' +
-          '<div class="nw-card"><h4>重大訊息 ' + seg +
+          '<div class="nw-card"><h4><span>重大訊息</span><span class="nw-filterbar">' + seg + impactSeg + '</span>' +
             '<span style="color:var(--tlo);font-weight:600;font-size:8px">' +
             (flashPack.updatedAt ? ('更新 ' + String(flashPack.updatedAt).replace('T', ' ')) : 'TWSE／Yahoo／SEC') +
             '</span></h4>' + renderFlashList(flashItems) +
@@ -308,6 +340,17 @@
           var m = b.getAttribute('data-mkt');
           if (!m || m === flashMkt) return;
           flashMkt = m;
+          if (lastPack) render(lastPack.ev, lastPack.alertSt, lastPack.flashPack);
+        };
+      });
+    }
+    var impactEl = $('nw-impact-seg');
+    if (impactEl) {
+      impactEl.querySelectorAll('button[data-impact]').forEach(function (b) {
+        b.onclick = function () {
+          var tier = b.getAttribute('data-impact');
+          if (!tier || tier === flashImpact) return;
+          flashImpact = tier;
           if (lastPack) render(lastPack.ev, lastPack.alertSt, lastPack.flashPack);
         };
       });

@@ -2,14 +2,16 @@
 # Usage (from repo root):
 #   DOUBLE-CLICK:  START_TIP.cmd
 #   powershell -ExecutionPolicy Bypass -File .\scripts\go.ps1
-#   powershell -ExecutionPolicy Bypass -File .\scripts\go.ps1 -Pull
+#   powershell -ExecutionPolicy Bypass -File .\scripts\go.ps1 -UpdateOnly
 #   powershell -ExecutionPolicy Bypass -File .\scripts\go.ps1 -RebuildOnly
 #
 # Discipline: NEVER launch with bare PATH "python". Always resolve an absolute
 # interpreter, pin it to data\stock_python.path, and reuse the pin. Tooling
 # venvs (Hermes/agent) are deprioritized — not banned as a product policy.
 param(
+  # Backward-compatible safe update+run. Prefer -UpdateOnly, then launch.
   [switch]$Pull,
+  [switch]$UpdateOnly,
   [switch]$RebuildOnly
 )
 
@@ -301,26 +303,43 @@ function Assert-ListenerMatchesPin {
 
 Write-Banner
 
-$Python = Resolve-StockPython
-Write-Host " PYTHON: $Python"
-
-if ($Pull) {
-  Write-Host "[pull] fetch + FORCE reset $TipBranch (discard local HTML drift)"
-  Write-Host "       NOTE: local edits to stock_terminal*.html will be discarded"
+if ($Pull -or $UpdateOnly) {
+  Write-Host "[update] fetch + fast-forward only: $TipBranch"
+  $dirty = @(git status --porcelain 2>$null)
+  if ($LASTEXITCODE -ne 0) { throw "git status failed" }
+  if ($dirty.Count -gt 0) {
+    git status --short
+    throw "BLOCK: worktree is dirty. Commit or preserve changes explicitly; updater will not stash, force, reset, or discard them."
+  }
   git fetch origin $TipBranch
   if ($LASTEXITCODE -ne 0) { throw "git fetch failed" }
-  # -f：避免「local changes would be overwritten」後腳本卻繼續用舊 HEAD（災難根因）
-  git checkout -f -B $TipBranch "origin/$TipBranch"
-  if ($LASTEXITCODE -ne 0) { throw "git checkout -f failed — refuse to continue on stale HEAD" }
-  git reset --hard "origin/$TipBranch"
-  if ($LASTEXITCODE -ne 0) { throw "git reset --hard failed" }
+  $cur = (git branch --show-current 2>$null).Trim()
+  if ($cur -ne $TipBranch) {
+    git show-ref --verify --quiet "refs/heads/$TipBranch"
+    $localExists = ($LASTEXITCODE -eq 0)
+    if ($localExists) {
+      git switch $TipBranch
+    } else {
+      git switch --create $TipBranch --track "origin/$TipBranch"
+    }
+    if ($LASTEXITCODE -ne 0) { throw "git switch failed; no files were forced or reset" }
+  }
+  git merge --ff-only "origin/$TipBranch"
+  if ($LASTEXITCODE -ne 0) { throw "fast-forward failed; updater left local work untouched" }
   $expect = (git rev-parse "origin/$TipBranch").Trim()
   $got = (git rev-parse HEAD).Trim()
   if ($got -ne $expect) {
-    throw "pull incomplete: HEAD=$got expected=$expect — aborting (will NOT start old server)"
+    throw "update incomplete: HEAD=$got expected=$expect"
   }
   Write-Host "       synced HEAD=$($got.Substring(0,7))"
+  if ($UpdateOnly) {
+    Write-Host "[OK] update complete. Re-run START_TIP.cmd to build and launch."
+    exit 0
+  }
 }
+
+$Python = Resolve-StockPython
+Write-Host " PYTHON: $Python"
 
 Assert-TipBranch
 $head = (git rev-parse --short HEAD)

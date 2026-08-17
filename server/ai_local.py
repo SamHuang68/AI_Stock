@@ -4,7 +4,7 @@
 ai_local.py — v5.0 本機 AI 副駕（預設整合 Ollama / LM Studio 本機推論服務）
 
 將使用者問題 + 盤面/持倉資料，送至本機 Ollama / OpenAI 相容 API 進行推論。
-完全本機、零雲端、零 API Key 洩漏風險，充分運用高階 GPU (RTX 5080) 與 RAM 資源。
+完全本機、零雲端、零 API Key 洩漏風險；可使用本機模型服務與可用硬體資源。
 
 依據資安規範：
   1. 優先使用本機端 Ollama 服務 (預設 http://localhost:11434)

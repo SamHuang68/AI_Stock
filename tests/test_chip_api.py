@@ -2,10 +2,21 @@
 """chip_api 欄位對齊：自營商不可誤中外資自營商；融資/融券讀重複『今日餘額』。"""
 import os
 import sys
+import inspect
+import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 
 import chip_api as ca  # noqa: E402
+
+
+def load_tests(loader, tests, pattern):
+    suite = unittest.TestSuite()
+    module = sys.modules[__name__]
+    for name, fn in inspect.getmembers(module, inspect.isfunction):
+        if name.startswith('test_'):
+            suite.addTest(unittest.FunctionTestCase(fn, description=name))
+    return suite
 
 
 # 與 TWSE T86 現行 fields 對齊（含外資自營商欄）

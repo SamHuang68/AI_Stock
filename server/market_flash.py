@@ -421,7 +421,7 @@ def _select_us(items: List[dict], n: int) -> List[dict]:
 
 
 def _public_item(it: dict) -> dict:
-    return {
+    item = {
         'time': it.get('time') or '',
         'ts': it.get('ts') or 0,
         'title': it.get('title') or '',
@@ -433,6 +433,12 @@ def _public_item(it: dict) -> dict:
         'source': it.get('source'),
         'clause': it.get('clause'),
     }
+    try:
+        from news_impact import tag_item
+        item['impact'] = tag_item(item)
+    except Exception:
+        item['impact'] = None
+    return item
 
 
 def build_flash(n: int = 24, force: bool = False) -> Dict[str, Any]:

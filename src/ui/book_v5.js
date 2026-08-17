@@ -133,6 +133,17 @@
       '#bk-root .bk-note{font-size:10px;color:var(--tlo);line-height:1.4;margin-top:2px;flex:0 0 auto}' +
       '#bk-root .bk-loading{font-size:10px;color:var(--tlo);padding:12px 0}' +
       '#bk-root .bk-err{color:var(--orange);font-size:10px;padding:8px 0}' +
+      '#bk-root .bk-empty{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:24px}' +
+      '#bk-root .bk-empty-card{width:min(520px,100%);padding:28px 30px;text-align:center;border-radius:11px;' +
+        'border:1px solid rgba(125,211,252,.2);background:radial-gradient(circle at 50% 0%,rgba(56,189,248,.11),transparent 58%),' +
+        'linear-gradient(145deg,rgba(17,31,50,.9),rgba(7,15,27,.96));box-shadow:0 18px 42px -28px rgba(0,0,0,.95)}' +
+      '#bk-root .bk-empty-icon{width:44px;height:44px;margin:0 auto 10px;display:grid;place-items:center;border-radius:12px;' +
+        'border:1px solid rgba(245,197,24,.3);background:rgba(245,197,24,.08);color:var(--gold);font-size:22px}' +
+      '#bk-root .bk-empty-card b{display:block;color:var(--thi);font-size:14px;margin-bottom:6px}' +
+      '#bk-root .bk-empty-card p{margin:0 auto;color:var(--tlo);font-size:10px;line-height:1.6;max-width:390px}' +
+      '#bk-root .bk-empty-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:16px}' +
+      '#bk-root .bk-empty-steps span{padding:7px 5px;border-radius:6px;border:1px solid rgba(148,163,184,.13);' +
+        'background:rgba(5,10,19,.38);color:var(--text);font-size:9px}' +
       '#bk-root .bk-wd{margin:0 0 4px;padding:6px 8px;border-radius:6px;background:var(--bg2);' +
         'border:1px solid rgba(103,232,249,.28);font-size:9px;line-height:1.45}' +
       '#bk-root .bk-wd .t{color:var(--cyan);font-weight:700;letter-spacing:1px;font-size:10px;margin-bottom:2px}' +
@@ -411,7 +422,11 @@
     var body = ensureMount();
     if (!body) return;
     if (!h || !h.length) {
-      body.innerHTML = '<div class="bk-err">尚無成分股。請用「用持倉／用自選」，或在上方輸入代號權重後按重新分析。</div>';
+      body.innerHTML = '<div class="bk-empty"><div class="bk-empty-card">' +
+        '<div class="bk-empty-icon" aria-hidden="true">▦</div><b>尚未建立投組樣本</b>' +
+        '<p>從上方載入持倉或自選；也可展開編輯區輸入「代號 權重」，再按重新分析。</p>' +
+        '<div class="bk-empty-steps"><span>1 · 選擇來源</span><span>2 · 確認權重</span><span>3 · 重新分析</span></div>' +
+        '</div></div>';
       return;
     }
     body.innerHTML = '<div class="bk-loading">分析中…（首次可能需回補日線）</div>';

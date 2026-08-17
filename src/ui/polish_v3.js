@@ -14,6 +14,10 @@ const SERVER_P = window.SERVER || ((typeof location !== 'undefined' && location.
 // 台股代號判定(數字開頭如 2308/00685L,或 ^TW 指數)。台股紅綠慣例應依「標的本身」,
 // 不受 TW/US 市場鈕(S.mkt)影響 —— 否則在 US 鈕時看台股/台股指數會套成美股慣例。
 function _isTwSym(s) { return window.Colors ? Colors.isTW(s) : (/^\d/.test(String(s || '')) || /^\^TW/i.test(String(s || ''))); }
+function _isRedUpSym(s) {
+  if (window.Colors && Colors.isRedUp) return Colors.isRedUp(s);
+  return _isTwSym(s) || /^\d{4}\.T$/i.test(String(s || '')) || String(s || '').toUpperCase() === '^N225';
+}
 
 // ============================================================
 // CSS injection
@@ -136,10 +140,12 @@ function _isTwSym(s) { return window.Colors ? Colors.isTW(s) : (/^\d/.test(Strin
 }
 
 /* (2) TW/US 顏色慣例 — 預設美股 (.up=green .down=red)，台股反過來 */
-body.market-tw .price-up,   body.market-tw .pos { color: var(--red) !important; }
-body.market-tw .price-down, body.market-tw .neg { color: var(--green) !important; }
-body.market-us .price-up,   body.market-us .pos { color: var(--green) !important; }
-body.market-us .price-down, body.market-us .neg { color: var(--red) !important; }
+body.market-tw .price-up   { color: var(--red) !important; }
+body.market-tw .price-down { color: var(--green) !important; }
+body.market-jp .price-up   { color: var(--red) !important; }
+body.market-jp .price-down { color: var(--green) !important; }
+body.market-us .price-up   { color: var(--green) !important; }
+body.market-us .price-down { color: var(--red) !important; }
 
 /* (3) Chart legend — v3.8.1 整合進大浮動視窗右下角；
        chart-info 改兩欄：左=價格/漲跌/名稱(窄欄)，右=OHLC視窗緊貼股價後 + 圖例。
@@ -604,7 +610,10 @@ async function refreshMarginRatioCell() {
         btn.disabled = true;
         btn.textContent = '啟動中…';
         try {
-          await fetch(`${SERVER_P}/margin_ratio?action=backfill&full=1`, { cache: 'no-store' });
+          await fetch(`${SERVER_P}/margin_ratio/backfill`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ full: true }), cache: 'no-store'
+          });
           btn.textContent = '已背景回補';
           setTimeout(() => applyMarginEnhance(true), 2500);
         } catch (e) {
@@ -728,8 +737,8 @@ async function refreshTxfCell() {
 // (2) TW/US color convention — auto switch on market change
 // ============================================================
 function applyMarketColorClass(mkt) {
-  document.body.classList.remove('market-tw', 'market-us');
-  document.body.classList.add(mkt === 'TW' ? 'market-tw' : 'market-us');
+  document.body.classList.remove('market-tw', 'market-us', 'market-jp');
+  document.body.classList.add(mkt === 'TW' ? 'market-tw' : (mkt === 'JP' ? 'market-jp' : 'market-us'));
 }
 // Initial + on market change
 (function bootMktColor() {
@@ -1058,9 +1067,12 @@ function _renderMarginRatioMacroChartFallback(candles) {
     S._marginMacroChart = false;
 
     // TW/US: swap candle up/down colors before original render reads them
-    const tw = _isTwSym(S.sym) || (S.mkt || 'TW') === 'TW';
-    const UP = tw ? '#F87171' : '#4ADE80';   // TW red-up / US green-up
-    const DN = tw ? '#4ADE80' : '#F87171';
+    const _cvTheme = (window.ChartVisualV5 && typeof window.ChartVisualV5.themeFor === 'function')
+      ? window.ChartVisualV5.themeFor(S.sym, S.mkt) : null;
+    const tw = _cvTheme ? _cvTheme.redUp : _isRedUpSym(S.sym);
+    const UP = _cvTheme ? _cvTheme.candleUp : (tw ? '#F87171' : '#4ADE80');
+    const DN = _cvTheme ? _cvTheme.candleDown : (tw ? '#4ADE80' : '#F87171');
+    const FLAT = _cvTheme ? _cvTheme.candleFlat : '#9CA3AF';
     // Temporarily override CSS vars for the chart series creation
     document.documentElement.style.setProperty('--chart-up', UP);
     document.documentElement.style.setProperty('--chart-down', DN);
@@ -1087,10 +1099,10 @@ function _renderMarginRatioMacroChartFallback(candles) {
             let cCol;
             if (tw) {
               // 台股昨收比對：收>昨收=紅(漲)；收<昨收=綠(跌)；持平=灰
-              cCol = (c.close > _base) ? '#F87171' : (c.close < _base ? '#4ADE80' : '#9CA3AF');
+              cCol = (c.close > _base) ? UP : (c.close < _base ? DN : FLAT);
             } else {
               // 美股開盤比對：收>開=綠(陽)；收<開=紅(陰)；持平=灰
-              cCol = (c.close > c.open) ? '#4ADE80' : (c.close < c.open ? '#F87171' : '#9CA3AF');
+              cCol = (c.close > c.open) ? UP : (c.close < c.open ? DN : FLAT);
             }
             return {
               time: c.time + _tz,
@@ -1107,9 +1119,9 @@ function _renderMarginRatioMacroChartFallback(candles) {
 
         // (b) Volume bars: 重新依市場習慣(台股昨收比對/美股開開比對)進行量柱著色
         if (S.volSeries && S.data?.candles) {
-          const upAlpha = 'rgba(' + (tw ? '248,113,113' : '74,222,128') + ',0.55)';
-          const dnAlpha = 'rgba(' + (tw ? '74,222,128' : '248,113,113') + ',0.55)';
-          const flatAlpha = 'rgba(156,163,175,0.45)';
+          const upAlpha = _cvTheme ? _cvTheme.volumeUp : ('rgba(' + (tw ? '248,113,113' : '74,222,128') + ',0.42)');
+          const dnAlpha = _cvTheme ? _cvTheme.volumeDown : ('rgba(' + (tw ? '74,222,128' : '248,113,113') + ',0.42)');
+          const flatAlpha = _cvTheme ? _cvTheme.volumeFlat : 'rgba(156,163,175,0.30)';
 
           S.volSeries.setData(_cs.map(c => {
             const _pc = _prevMap.get(c.time);
@@ -1171,7 +1183,9 @@ function renderCloseReadout(close, prevClose) {
   ['close-readout', 'ctag-now', 'ctag-prev'].forEach(id => {
     const e = document.getElementById(id); if (e) e.remove();
   });
-  const tw = document.body.classList.contains('market-tw') || S.mkt === 'TW';
+  const _cvTheme = (window.ChartVisualV5 && typeof window.ChartVisualV5.themeFor === 'function')
+    ? window.ChartVisualV5.themeFor(S.sym, S.mkt) : null;
+  const tw = _cvTheme ? _cvTheme.redUp : _isRedUpSym(S.sym);
   // 半字級小標籤，貼在 Y 軸刻度數字右邊（不蓋刻度），對應價位高度
   const mk = (id, price, prefix, color) => {
     if (price == null || price <= 0) return;
@@ -1189,7 +1203,9 @@ function renderCloseReadout(close, prevClose) {
   let nowCol = 'var(--tlo)';
   if (prevClose != null && prevClose > 0) {
     const up = close >= prevClose;
-    nowCol = up ? (tw ? '#f87171' : '#4ade80') : (tw ? '#4ade80' : '#f87171');
+    nowCol = up
+      ? (_cvTheme ? _cvTheme.candleUp : (tw ? '#f87171' : '#4ade80'))
+      : (_cvTheme ? _cvTheme.candleDown : (tw ? '#4ade80' : '#f87171'));
   }
   mk('ctag-now', close, '今', nowCol);
   mk('ctag-prev', prevClose, '昨', 'rgba(190,195,205,.9)');
@@ -1242,22 +1258,35 @@ function renderChartLegend() {
 // (6) Key Stats — fetch MKT CAP / P/E / P/B / Yield from /keystats
 // ============================================================
 const _keystatsCache = {};
+const _keystatsInflight = {};
 async function fetchKeyStats(sym, mkt) {
   if (!sym) return null;
   const key = sym + '|' + (mkt || 'TW');
   if (_keystatsCache[key]) return _keystatsCache[key];
+  if (_keystatsInflight[key]) return _keystatsInflight[key];
   // 指數(^…)／合成序列(__…__) 不加 .TW（避免 ^TWII.TW 404）
   const s = String(sym);
   const yfsym = (s[0] === '^' || (s.startsWith('__') && s.endsWith('__')))
     ? sym
     : (mkt === 'TW' ? sym + '.TW' : sym);
-  try {
-    const r = await fetch(`${SERVER_P}/keystats/${encodeURIComponent(yfsym)}`, {cache:'no-store'});
-    if (!r.ok) return null;
-    const data = await r.json();
-    _keystatsCache[key] = data;
-    return data;
-  } catch (e) { console.warn('[keystats] fetch error:', e); return null; }
+  _keystatsInflight[key] = (async function () {
+    try {
+      const traceId = 'ks-ui-' + Date.now() + '-' + String(yfsym).replace(/[^A-Z0-9.^_=:-]/gi, '').slice(0, 24);
+      const r = await fetch(`${SERVER_P}/keystats/${encodeURIComponent(yfsym)}?traceId=${encodeURIComponent(traceId)}`, {
+        cache:'no-store'
+      });
+      if (!r.ok) return null;
+      const data = await r.json();
+      _keystatsCache[key] = data;
+      return data;
+    } catch (e) {
+      console.warn('[keystats] fetch error:', e);
+      return null;
+    } finally {
+      delete _keystatsInflight[key];
+    }
+  })();
+  return _keystatsInflight[key];
 }
 
 function fmtBig(n, unit) {
@@ -1282,7 +1311,7 @@ function fmtBig(n, unit) {
       if (ks && ks.marketCap != null) {
         const el = document.getElementById('rp-MKTCAP');
         if (el) {
-          const cur = ks.currency || (S.mkt === 'TW' ? 'TWD' : 'USD');
+          const cur = ks.currency || (S.mkt === 'TW' ? 'TWD' : (S.mkt === 'JP' ? 'JPY' : 'USD'));
           el.textContent = fmtBig(ks.marketCap) + ' ' + cur;
         }
         // 同步進 S.data.meta，後續重繪／PDF 也能用
@@ -1362,7 +1391,7 @@ function renderKeystatsSection(ks) {
   const pb = ks.priceToBook;
   const yld = ks.dividendYield;
   const eps = ks.eps;
-  const epsCurrency = ks.currency || (S.mkt === 'TW' ? 'TWD' : 'USD');
+  const epsCurrency = ks.currency || (S.mkt === 'TW' ? 'TWD' : (S.mkt === 'JP' ? 'JPY' : 'USD'));
   let h = '<div id="keystats-sect"><div class="stat-sect">關鍵估值 · ' + S.sym + '</div>';
   h += `<div class="keystat-row"><span class="k">市值 MKT CAP</span><span class="v">${fmtBig(mc)}${mc != null ? ' ' + epsCurrency : ''}</span></div>`;
   h += `<div class="keystat-row"><span class="k">本益比 P/E</span><span class="v" style="color:${pe != null ? (window.Colors ? Colors.warn(pe, {hi:30}) : (pe > 30 ? 'var(--orange)' : 'var(--thi)')) : 'var(--tlo)'}">${pe != null ? pe.toFixed(2) : '--'}</span></div>`;

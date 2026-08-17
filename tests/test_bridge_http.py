@@ -10,6 +10,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+import importlib
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
@@ -19,6 +20,29 @@ sys.path.insert(0, str(ROOT / "server"))
 sys.path.insert(0, str(ROOT / "wavedeck"))
 
 import wavedeck_bus as wdb  # noqa: E402
+
+# The Stock Terminal backend is a ``server/`` namespace while WaveDeck owns an
+# actual package with the same historical name.  Load WD in an isolated module
+# window, retain concrete references, then restore the prior namespace so test
+# discovery order cannot change later imports.
+_prior_server_modules = {
+    name: module for name, module in list(sys.modules.items())
+    if name == 'server' or name.startswith('server.')
+}
+for _name in list(_prior_server_modules):
+    sys.modules.pop(_name, None)
+try:
+    _wd_engine = importlib.import_module('server.engine')
+    wd_server = importlib.import_module('server.server')
+    _wd_providers = importlib.import_module('server.providers')
+    _wd_state = importlib.import_module('server.state')
+    _wd_audit = importlib.import_module('server.audit')
+    apply_st_bridge = _wd_engine.apply_st_bridge
+    estimate_openai_usd = _wd_providers.estimate_openai_usd
+finally:
+    for _name in [name for name in list(sys.modules) if name == 'server' or name.startswith('server.')]:
+        sys.modules.pop(_name, None)
+    sys.modules.update(_prior_server_modules)
 
 
 def _post_json(url: str, body: dict, origin: str | None = None) -> tuple[int, dict]:
@@ -84,15 +108,11 @@ class BridgeHttpSmoke(unittest.TestCase):
                 self.assertAlmostEqual(float(snap["wavedeck"]["spillover_prob"]), 0.71)
 
     def test_wd_bridge_st_http_spillover(self):
-        from server.engine import apply_st_bridge  # noqa: WPS433
-        from server import server as wd_server  # noqa: WPS433
-        from server.state import RUNTIME  # noqa: WPS433
-
         with tempfile.TemporaryDirectory() as td:
             state_path = Path(td) / "runtime_state.json"
-            with mock.patch("server.state.DATA", Path(td)), mock.patch(
-                "server.state.STATE_PATH", state_path
-            ), mock.patch("server.audit.DATA", Path(td)):
+            with mock.patch.object(_wd_state, "DATA", Path(td)), mock.patch.object(
+                _wd_state, "STATE_PATH", state_path
+            ), mock.patch.object(_wd_audit, "DATA", Path(td)):
                 # Direct apply (same as POST /bridge/st handler body)
                 snap = apply_st_bridge(
                     {
@@ -137,9 +157,6 @@ class BridgeHttpSmoke(unittest.TestCase):
                     httpd.server_close()
 
     def test_estimate_openai_usd(self):
-        sys.path.insert(0, str(ROOT / "wavedeck"))
-        from server.providers import estimate_openai_usd  # noqa: WPS433
-
         usd = estimate_openai_usd({"prompt_tokens": 1000, "completion_tokens": 500}, "gpt-4o-mini")
         # 1000*0.15 + 500*0.60 = 150+300 = 450 / 1e6 = 0.00045
         self.assertAlmostEqual(usd, 0.00045)

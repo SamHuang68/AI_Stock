@@ -12,6 +12,20 @@
   var SRV = window.SERVER || '';
   var sectors = [];
   var lastResults = [];
+  var sortState = { key: null, direction: 'original' };
+  var SORT_COLUMNS = [
+    { key: 'sym', label: '代號', type: 'text' },
+    { key: 'name', label: '名稱', type: 'text' },
+    { key: 'close', label: '價', type: 'number' },
+    { key: 'changePct', label: '漲跌', type: 'number' },
+    { key: 'rsi14', label: 'RSI', type: 'number' },
+    { key: 'volRatio', label: '量比', type: 'number' },
+    { key: 'revYoy', label: '營收YoY', type: 'number' },
+    { key: 'per', label: 'PER', type: 'number' },
+    { key: 'yield', label: '殖利', type: 'number' },
+    { key: 'trustStreak', label: '投信', type: 'number' },
+    { key: 'foreignStreak', label: '外資', type: 'number' }
+  ];
 
   function $(id) { return document.getElementById(id); }
   function esc(s) {
@@ -66,6 +80,13 @@
       '#sc-root table{width:100%;border-collapse:collapse;font-size:10px}' +
       '#sc-root th,#sc-root td{padding:3px 5px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap}' +
       '#sc-root th{color:var(--tlo);position:sticky;top:28px;background:var(--bg);font-weight:600;font-size:11px}' +
+      '#sc-root .sc-sort{appearance:none;border:0;background:transparent;color:inherit;font:inherit;font-weight:inherit;' +
+        'padding:2px 1px;cursor:pointer;display:inline-flex;align-items:center;justify-content:flex-end;gap:3px;white-space:nowrap}' +
+      '#sc-root .sc-sort:hover,#sc-root .sc-sort:focus-visible{color:var(--thi);outline:none}' +
+      '#sc-root .sc-sort[aria-sort=ascending],#sc-root .sc-sort[aria-sort=descending]{color:var(--gold)}' +
+      '#sc-root .sc-sort .arrow{display:inline-block;min-width:9px;color:var(--tlo);font-size:8px}' +
+      '#sc-root .sc-sort[aria-sort=ascending] .arrow,#sc-root .sc-sort[aria-sort=descending] .arrow{color:var(--gold)}' +
+      '#sc-root .sc-sort-state{margin-left:auto;color:var(--gold);font-size:9px;white-space:nowrap}' +
       '#sc-root td.up{color:var(--red)}#sc-root td.dn{color:var(--green)}' +
       '#sc-root .sc-code{color:var(--gold);font-weight:700;cursor:pointer;text-align:left}' +
       '#sc-root .sc-nm{color:var(--tlo);text-align:left;max-width:90px;overflow:hidden;text-overflow:ellipsis}' +
@@ -149,6 +170,52 @@
     return '<td class="' + (cls || '') + '">' + (v == null || v === '' ? '—' : v) + '</td>';
   }
 
+  function hasSortValue(value, type) {
+    if (value == null || value === '') return false;
+    return type === 'number' ? isFinite(Number(value)) : String(value).trim() !== '';
+  }
+
+  function sortedResults(rows) {
+    var column = SORT_COLUMNS.find(function (c) { return c.key === sortState.key; });
+    if (!column || sortState.direction === 'original') return rows.slice();
+    var direction = sortState.direction === 'ascending' ? 1 : -1;
+    return rows.map(function (row, index) { return { row: row, index: index }; }).sort(function (a, b) {
+      var av = a.row[column.key];
+      var bv = b.row[column.key];
+      var aHas = hasSortValue(av, column.type);
+      var bHas = hasSortValue(bv, column.type);
+      // 缺值永遠沉底，不因升／降冪翻到最上方。
+      if (!aHas && !bHas) return a.index - b.index;
+      if (!aHas) return 1;
+      if (!bHas) return -1;
+      var compared = column.type === 'number'
+        ? Number(av) - Number(bv)
+        : String(av).localeCompare(String(bv), 'zh-Hant', { numeric: true, sensitivity: 'base' });
+      return compared === 0 ? a.index - b.index : compared * direction;
+    }).map(function (item) { return item.row; });
+  }
+
+  function sortHeader(column) {
+    var active = sortState.key === column.key && sortState.direction !== 'original';
+    var aria = active ? sortState.direction : 'none';
+    var arrow = aria === 'ascending' ? '▲' : (aria === 'descending' ? '▼' : '↕');
+    var next = aria === 'none' ? '升冪' : (aria === 'ascending' ? '降冪' : '原始順序');
+    return '<th><button type="button" class="sc-sort" data-sort="' + esc(column.key) +
+      '" aria-sort="' + aria + '" title="' + esc(column.label) + '：點擊切換為' + next + '">' +
+      esc(column.label) + '<span class="arrow" aria-hidden="true">' + arrow + '</span></button></th>';
+  }
+
+  function cycleSort(key) {
+    if (sortState.key !== key || sortState.direction === 'original') {
+      sortState = { key: key, direction: 'ascending' };
+    } else if (sortState.direction === 'ascending') {
+      sortState.direction = 'descending';
+    } else {
+      sortState = { key: null, direction: 'original' };
+    }
+    renderResults(lastResults);
+  }
+
   function addWl(sym, batch) {
     if (typeof S === 'undefined' || !Array.isArray(S.wl)) return;
     if (!S.wl.find(function (w) { return w.t === sym && w.m === 'TW'; })) {
@@ -172,15 +239,17 @@
       el.innerHTML = '<div style="color:var(--tlo);padding:18px;text-align:center">無符合條件的個股</div>';
       return;
     }
+    rows = sortedResults(rows);
     var V = window.Viz;
     var maxVol = 0;
     rows.forEach(function (r) {
       if (r.volRatio != null && isFinite(r.volRatio)) maxVol = Math.max(maxVol, Math.abs(r.volRatio));
     });
     var h = '<div class="sc-rtop"><button type="button" class="sc-btn" id="sc-addall">＋ 全部加入自選</button>' +
-      '<span style="color:var(--tlo);font-size:10px">點代號載入線型 · 顯示前 ' + rows.length + ' 檔</span></div>';
-    h += '<table><thead><tr><th>代號</th><th>名稱</th><th>價</th><th>漲跌</th><th>RSI</th><th>量比</th>' +
-      '<th>營收YoY</th><th>PER</th><th>殖利</th><th>投信</th><th>外資</th><th></th></tr></thead><tbody>';
+      '<span style="color:var(--tlo);font-size:10px">點代號載入線型 · 顯示前 ' + rows.length + ' 檔</span>' +
+      (sortState.key ? '<span class="sc-sort-state">排序：' + esc((SORT_COLUMNS.find(function (c) { return c.key === sortState.key; }) || {}).label || '') +
+        (sortState.direction === 'ascending' ? ' ▲' : ' ▼') + '</span>' : '') + '</div>';
+    h += '<table class="sc-native-sort" data-st-sort="off"><thead><tr>' + SORT_COLUMNS.map(sortHeader).join('') + '<th aria-label="加入自選"></th></tr></thead><tbody>';
     rows.forEach(function (r) {
       var chgCls = r.changePct >= 0 ? 'up' : 'dn';
       var streak = function (v) { return v == null ? '—' : (v > 0 ? '+' + v : v); };
@@ -220,6 +289,9 @@
     el.innerHTML = h;
     el.querySelectorAll('.sc-code').forEach(function (td) {
       td.onclick = function () { openChart(td.getAttribute('data-sym')); };
+    });
+    el.querySelectorAll('.sc-sort').forEach(function (button) {
+      button.onclick = function () { cycleSort(button.getAttribute('data-sort')); };
     });
     el.querySelectorAll('.sc-add').forEach(function (b) {
       b.onclick = function () { addWl(b.getAttribute('data-sym')); };
@@ -355,7 +427,9 @@
     activate: activate,
     deactivate: function () {},
     scan: scan,
-    last: function () { return lastResults; }
+    last: function () { return lastResults; },
+    sortState: function () { return { key: sortState.key, direction: sortState.direction }; },
+    sortRows: sortedResults
   };
 
   // 工具列選股鈕：若殼層可用則導向側欄選股室

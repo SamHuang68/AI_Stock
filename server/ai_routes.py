@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 
 import ai_api
+from http_boundary import BodyReadError, read_body, read_json_body
 
 
 class AiRoutesMixin:
@@ -15,10 +16,9 @@ class AiRoutesMixin:
 
     def _handle_ai_key_set(self):
         try:
-            n = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(n) or b'{}')
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
+            body = read_json_body(self, max_bytes=16 * 1024)
+        except BodyReadError as e:
+            self._err(str(e), e.status); return
         if body.get('clear'):
             ai_api.save_ai_key('')
             self._ok(b'{"ok":true,"cleared":true}'); return
@@ -36,10 +36,9 @@ class AiRoutesMixin:
         if not key:
             self._err('AI key not set on server', 400); return
         try:
-            n = int(self.headers.get('Content-Length', 0))
-            raw = self.rfile.read(n) or b'{}'
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
+            raw = read_body(self, max_bytes=2 * 1024 * 1024) or b'{}'
+        except BodyReadError as e:
+            self._err(str(e), e.status); return
         try:
             up = urllib.request.Request(
                 'https://api.anthropic.com/v1/messages', data=raw,
@@ -69,10 +68,9 @@ class AiRoutesMixin:
 
     def _handle_ai_local(self):
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length) or b'{}')
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
+            body = read_json_body(self, max_bytes=256 * 1024)
+        except BodyReadError as e:
+            self._err(str(e), e.status); return
         # ai_local 由 server 主模組注入到 mixin 可用名稱
         al = getattr(self, '_ai_local_mod', None)
         try:
@@ -110,10 +108,9 @@ class AiRoutesMixin:
 
     def _handle_ai_report(self):
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length) or b'{}')
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
+            body = read_json_body(self, max_bytes=512 * 1024)
+        except BodyReadError as e:
+            self._err(str(e), e.status); return
         api_key = body.get('apiKey', '').strip() or ai_api.load_ai_key()
         if not api_key:
             self._err('apiKey required (use sk-ant-...)', 400); return
@@ -163,10 +160,9 @@ class AiRoutesMixin:
 
     def _handle_ai_note(self):
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length) or b'{}')
-        except Exception as e:
-            self._err('bad body: ' + str(e), 400); return
+            body = read_json_body(self, max_bytes=64 * 1024)
+        except BodyReadError as e:
+            self._err(str(e), e.status); return
         api_key = (body.get('apiKey') or '').strip() or ai_api.load_ai_key()
         prompt = (body.get('prompt') or '').strip()
         if not api_key:

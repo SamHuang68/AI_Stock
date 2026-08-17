@@ -145,6 +145,16 @@
     #ovn-box .gauge-sm,.ovn-embed .gauge-sm{font-size:20px;font-weight:800;text-align:center;line-height:1.15}
     #ovn-box .dual,.ovn-embed .dual{display:grid;grid-template-columns:1.2fr 1fr;gap:10px;margin-bottom:8px}
     #ovn-box .dual > div,.ovn-embed .dual > div{border:1px solid #1e293b;border-radius:8px;padding:8px 6px;background:#111827}
+    #ovn-box .ovn-signal-card,.ovn-embed .ovn-signal-card{min-width:0;display:grid;grid-template-rows:auto 1fr auto;align-items:center;gap:5px;position:relative;overflow:hidden}
+    #ovn-box .ovn-signal-card::before,.ovn-embed .ovn-signal-card::before{content:"";position:absolute;inset:0 auto 0 0;width:2px;background:#38bdf8;opacity:.7}
+    #ovn-box .ovn-signal-card.secondary::before,.ovn-embed .ovn-signal-card.secondary::before{background:#64748b;opacity:.55}
+    #ovn-box .ovn-signal-head,.ovn-embed .ovn-signal-head{display:flex;align-items:center;justify-content:center;gap:6px;min-width:0}
+    #ovn-box .ovn-signal-kicker,.ovn-embed .ovn-signal-kicker{flex:0 0 auto;border:1px solid rgba(56,189,248,.28);border-radius:999px;padding:1px 5px;color:#7dd3fc;background:rgba(56,189,248,.08);font-size:9px;font-weight:700;letter-spacing:.3px}
+    #ovn-box .ovn-signal-card.secondary .ovn-signal-kicker,.ovn-embed .ovn-signal-card.secondary .ovn-signal-kicker{border-color:rgba(148,163,184,.22);background:rgba(148,163,184,.07);color:#94a3b8}
+    #ovn-box .ovn-signal-name,.ovn-embed .ovn-signal-name{min-width:0;color:#cbd5e1;font-size:10px;font-weight:700;white-space:nowrap}
+    #ovn-box .ovn-signal-value,.ovn-embed .ovn-signal-value{font-variant-numeric:tabular-nums;letter-spacing:-.4px}
+    #ovn-box .ovn-signal-meta,.ovn-embed .ovn-signal-meta{display:flex;align-items:center;justify-content:center;gap:8px;min-width:0;color:#64748b;font-size:10px;line-height:1.25;white-space:nowrap}
+    #ovn-box .ovn-signal-meta strong,.ovn-embed .ovn-signal-meta strong{color:#cbd5e1;font-weight:750;font-variant-numeric:tabular-nums}
     #ovn-box .txf-grid,.ovn-embed .txf-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
     #ovn-box .txf-cell,.ovn-embed .txf-cell{background:#0b1220;border:1px solid #1e293b;border-radius:6px;padding:6px 7px;text-align:center}
     #ovn-box .txf-cell .k,.ovn-embed .txf-cell .k{font-size:9px;color:#64748b}
@@ -153,11 +163,15 @@
     .ovn-embed{color:#e2e8f0;font-size:11px;min-height:0}
     .ovn-embed .gauge{font-size:22px}
     .ovn-embed .gauge-sm{font-size:16px}
-    .ovn-embed .dual{grid-template-columns:1fr 1fr;gap:6px}
-    .ovn-embed .dual > div{padding:6px 4px}
+    .ovn-embed .ovn-signal-grid{grid-template-columns:1fr;gap:5px}
+    .ovn-embed .ovn-signal-grid > .ovn-signal-card{min-height:58px;padding:6px 8px 6px 10px;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;gap:3px 8px}
+    .ovn-embed .ovn-signal-head{justify-content:flex-start}
+    .ovn-embed .ovn-signal-value{grid-column:2;grid-row:1 / span 2;align-self:center;text-align:right;font-size:19px;line-height:1}
+    .ovn-embed .ovn-signal-meta{grid-column:1;grid-row:2;justify-content:flex-start;gap:6px;font-size:9px;overflow:hidden;text-overflow:ellipsis}
+    .ovn-embed .ovn-signal-card.secondary .ovn-signal-meta{font-size:8px;letter-spacing:-.1px}
     .ovn-embed .txf-grid{grid-template-columns:repeat(2,1fr);gap:4px}
-    .ovn-embed table{font-size:10px;margin:2px 0 8px}
-    .ovn-embed th,.ovn-embed td{padding:3px 4px}
+    .ovn-embed table{font-size:10px;margin:2px 0 8px;max-width:100%;table-layout:fixed}
+    .ovn-embed th,.ovn-embed td{min-width:0;padding:3px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .ovn-embed .ovn-foot{font-size:8px!important;line-height:1.55!important}
     .ovn-embed .ovn-tsmc-note{font-size:8px!important;max-height:4.8em;overflow:auto}
     @media (max-width:560px){
@@ -269,7 +283,7 @@
     const actionPct = txfPct != null ? txfPct : usEst;
     const actionSrc = txfPct != null ? '台指期夜盤' : '美股連動預估';
     const txfCol = twCol(txfPct);
-    const usCol = window.Colors ? Colors.dir('^TWII', usEst) : twCol(usEst);
+    const usCol = col(usEst);
     const actionCol = twCol(actionPct);
     const tone = toneOf(actionPct, actionSrc);
     // 分歧提示：台指 vs 美股方向不同
@@ -319,16 +333,16 @@
           <button type="button" data-ovn-close>關閉</button></div>`;
 
     host.innerHTML = `
-      <div class="dual">
-        <div>
-          <div style="font-size:10px;color:#38bdf8;text-align:center">台指期夜盤（主訊號）</div>
-          <div class="gauge" style="color:${txfCol}">${pct(txfPct)}</div>
-          <div style="font-size:11px;text-align:center;color:#94a3b8">${txf ? fmtIdx(txf.price) + '　昨收 ' + fmtIdx(txf.prevClose) : '尚無 /txf 資料'}</div>
+      <div class="dual ovn-signal-grid">
+        <div class="ovn-signal-card primary">
+          <div class="ovn-signal-head"><span class="ovn-signal-kicker">主訊號</span><span class="ovn-signal-name">台指期夜盤</span></div>
+          <div class="gauge ovn-signal-value" style="color:${txfCol}">${pct(txfPct)}</div>
+          <div class="ovn-signal-meta">${txf ? '<strong>' + fmtIdx(txf.price) + '</strong><span>昨收 ' + fmtIdx(txf.prevClose) + '</span>' : '<span>尚無 /txf 資料</span>'}</div>
         </div>
-        <div>
-          <div style="font-size:10px;color:#94a3b8;text-align:center">美股連動預估（輔）</div>
-          <div class="gauge-sm" style="color:${usCol}">${usEst == null ? '—' : pct(usEst)}</div>
-          <div style="font-size:10px;text-align:center;color:#64748b">NQ/ES/YM/SOX 加權</div>
+        <div class="ovn-signal-card secondary">
+          <div class="ovn-signal-head"><span class="ovn-signal-kicker">輔助估計</span><span class="ovn-signal-name">美股連動</span></div>
+          <div class="gauge-sm ovn-signal-value" style="color:${usCol}">${usEst == null ? '—' : pct(usEst)}</div>
+          <div class="ovn-signal-meta"><span>NQ／ES／YM／SOX 加權</span></div>
         </div>
       </div>
       <div style="text-align:center;margin:2px 0 8px">

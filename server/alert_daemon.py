@@ -13,9 +13,17 @@ import os, json, time, threading, urllib.request, urllib.parse, smtplib, ssl
 from email.mime.text import MIMEText
 from datetime import datetime
 
+try:
+    from .atomic_store import StoreCorruptError, atomic_write_json, load_json
+    from .secret_store import load_secret_json, save_secret_json
+except ImportError:
+    from atomic_store import StoreCorruptError, atomic_write_json, load_json
+    from secret_store import load_secret_json, save_secret_json
+
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_FILE = os.path.join(_BASE, 'data', 'alert_config.json')
 RULES_FILE = os.path.join(_BASE, 'data', 'alert_rules.json')
+SECRETS_FILE = os.path.join(_BASE, 'data', 'alert_secrets.bin')
 LOG_DIR = os.path.join(_BASE, 'logs', 'alerts')
 
 _DEFAULT_CONFIG = {
@@ -37,35 +45,67 @@ _lock = threading.Lock()
 
 # ---- config / rules I/O -----------------------------------
 def load_config():
+    default = json.loads(json.dumps(_DEFAULT_CONFIG))
     try:
-        with open(CONFIG_FILE, encoding='utf-8') as f:
-            c = json.load(f)
-        merged = json.loads(json.dumps(_DEFAULT_CONFIG))
+        c = load_json(CONFIG_FILE, default={}, expected_type=dict)
+        merged = default
         merged.update(c)
         for k in ('telegram', 'email', 'webhook'):
             if isinstance(c.get(k), dict):
                 merged[k] = {**_DEFAULT_CONFIG[k], **c[k]}
+        # One-time migration: move legacy plaintext credentials out of JSON.
+        legacy_secret = bool(
+            merged.get('telegram', {}).get('bot_token') or
+            merged.get('email', {}).get('app_password')
+        )
+        if legacy_secret:
+            save_config(merged)
+            merged['telegram']['bot_token'] = ''
+            merged['email']['app_password'] = ''
+        secrets = load_secret_json(SECRETS_FILE)
+        merged['telegram']['bot_token'] = str(secrets.get('telegram_bot_token') or '')
+        merged['email']['app_password'] = str(secrets.get('email_app_password') or '')
         return merged
-    except Exception:
-        return json.loads(json.dumps(_DEFAULT_CONFIG))
+    except (StoreCorruptError, ValueError, OSError) as exc:
+        print('[alert-store] config unavailable:', type(exc).__name__)
+        return default
 
 
 def save_config(c):
-    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(c, f, ensure_ascii=False, indent=2)
+    clean = json.loads(json.dumps(c if isinstance(c, dict) else {}))
+    try:
+        secrets = load_secret_json(SECRETS_FILE)
+    except Exception:
+        secrets = {}
+    for section, field, secret_key in (
+        ('telegram', 'bot_token', 'telegram_bot_token'),
+        ('email', 'app_password', 'email_app_password'),
+    ):
+        part = clean.setdefault(section, {})
+        value = part.get(field)
+        if value == '***set***':
+            pass
+        elif value:
+            secrets[secret_key] = str(value)
+        else:
+            secrets.pop(secret_key, None)
+        part[field] = ''
+    save_secret_json(SECRETS_FILE, secrets)
+    # The config and its recovery copy are deliberately secret-free.
+    atomic_write_json(CONFIG_FILE, clean, backup=False, private=True)
+    atomic_write_json(CONFIG_FILE + '.bak', clean, backup=False, private=True)
 
 
 def load_rules():
     try:
-        with open(RULES_FILE, encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
+        return load_json(RULES_FILE, default=[], expected_type=list)
+    except StoreCorruptError as exc:
+        print('[alert-store] rules unavailable:', type(exc).__name__)
         return []
 
 
 def save_rules(rules):
-    with open(RULES_FILE, 'w', encoding='utf-8') as f:
-        json.dump(rules, f, ensure_ascii=False, indent=2)
+    atomic_write_json(RULES_FILE, rules, backup=True, private=True)
 
 
 # ---- Yahoo 報價 (自足) -------------------------------------

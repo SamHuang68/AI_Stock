@@ -15,7 +15,7 @@ if exist "%~dp0run.py" (
   goto home_ok
 )
 echo [ERR] run.py not found. Run this from the wavedeck folder.
-echo       Expected: C:\Users\Sam\AI_Stock\wavedeck\START_WAVEDECK.cmd
+echo       Expected: ^<project-folder^>\wavedeck\START_WAVEDECK.cmd
 pause
 exit /b 1
 

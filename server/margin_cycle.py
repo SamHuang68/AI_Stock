@@ -258,6 +258,59 @@ def load_ms_rows() -> List[Dict[str, Any]]:
     return out
 
 
+def _percentile_rank(values: List[float], current: float) -> float:
+    vals = sorted(float(x) for x in values if x is not None and math.isfinite(float(x)))
+    if not vals:
+        return 0.0
+    below = sum(1 for x in vals if x < current)
+    equal = sum(1 for x in vals if x == current)
+    return (below + max(0, equal - 1) / 2.0) / max(1, len(vals) - 1) * 100.0
+
+
+def margin_balance_state(rows: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """Return a slow crowding brake from official margin-balance history.
+
+    This state can only reduce a research ceiling.  It must never be used as a
+    standalone buy/sell signal because high balances can persist in a trend.
+    """
+    clean = []
+    for row in rows if rows is not None else load_ms_rows():
+        try:
+            d = date.fromisoformat(str(row.get('date'))[:10])
+            value = float(row.get('margin_amt_k'))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value) and value >= 0:
+            clean.append((d, value))
+    clean.sort(key=lambda x: x[0])
+    if not clean:
+        return {
+            'available': False, 'reason': 'local_margin_history_unavailable',
+            'source': 'TWSE MI_MARGN MS', 'role': 'risk_brake_only',
+        }
+    last_date, current = clean[-1]
+    trailing = [(d, value) for d, value in clean if d >= last_date - timedelta(days=364)]
+    percentile = _percentile_rank([value for _, value in trailing], current)
+    target = last_date - timedelta(days=28)
+    prior_candidates = [(d, value) for d, value in clean if d <= target]
+    prior = prior_candidates[-1] if prior_candidates else None
+    change4w = ((current / prior[1] - 1.0) * 100.0) if prior and prior[1] else None
+    direction = 'unknown'
+    if change4w is not None:
+        direction = 'rising' if change4w > 2.0 else ('decreasing' if change4w < -2.0 else 'flat')
+    return {
+        'available': True,
+        'value': round(current, 2), 'unit': 'thousand_TWD', 'asOf': last_date.isoformat(),
+        'percentile52w': round(percentile, 1),
+        'change4wPct': round(change4w, 2) if change4w is not None else None,
+        'direction': direction, 'samples52w': len(trailing),
+        'source': 'TWSE MI_MARGN MS',
+        'reference': 'latest listed-market margin balance versus trailing 52-week observations',
+        'role': 'risk_brake_only',
+        'confidence': 'medium' if len(trailing) >= 100 else 'low',
+    }
+
+
 def _yoy_series(rows: List[Dict[str, Any]], key: str = 'margin_lots') -> List[Dict[str, Any]]:
     by_d = {r['date']: r.get(key) for r in rows if r.get(key) is not None}
     dates = sorted(by_d.keys())

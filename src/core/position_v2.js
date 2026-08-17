@@ -325,7 +325,13 @@ function renderPositionList() {
       ? (S.data?.candles?.[S.data.candles.length - 1]?.close ?? p.lastPrice)
       : p.lastPrice;
     const pnlPct = ref != null ? ((ref - p.entry) / p.entry * 100) : null;
-    const pnlCol = window.Colors ? Colors.gain(pnlPct) : (pnlPct == null ? 'var(--tlo)' : (pnlPct >= 0 ? 'var(--green)' : 'var(--red)'));
+    const pnlCol = window.Colors ? Colors.dir(code, pnlPct) : (pnlPct == null ? 'var(--tlo)' : (pnlPct >= 0 ? 'var(--red)' : 'var(--green)'));
+    const candles = isActive ? (S.data?.candles || []) : [];
+    const activePrev = candles.length >= 2 ? candles[candles.length - 2]?.close : null;
+    const prevClose = p.prevClose ?? activePrev;
+    const dayChangePct = p.dayChangePct != null ? Number(p.dayChangePct) :
+      (ref != null && prevClose != null && prevClose > 0 ? (ref - prevClose) / prevClose * 100 : null);
+    const dayCol = window.Colors ? Colors.dir(code, dayChangePct) : (dayChangePct == null ? 'var(--tlo)' : (dayChangePct >= 0 ? 'var(--red)' : 'var(--green)'));
     const lotsTxt = (p.shares % 1000 === 0) ? `${p.shares / 1000}張` : `${p.shares}股`;
     h += `<div data-act="goto-pos" data-sym="${code}" data-mkt="${p.mkt || 'TW'}"
        style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:${isActive ? 'var(--gold-s)' : 'transparent'};transition:background .12s"
@@ -337,7 +343,8 @@ function renderPositionList() {
         <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:var(--tlo)">${lotsTxt} @ ${p.entry.toFixed(2)}</span>
       </div>
       <div style="text-align:right">
-        <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:700;color:${pnlCol}">${pnlPct == null ? '—' : (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(1) + '%'}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:700;color:${pnlCol}">${pnlPct == null ? '—' : '持有 ' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(1) + '%'}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:8px;color:${dayCol};margin-top:1px">${dayChangePct == null ? '今日 —' : '今日 ' + (dayChangePct >= 0 ? '+' : '') + dayChangePct.toFixed(1) + '%'}</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:8px;color:var(--tlo);margin-top:1px">${ref != null ? ref.toFixed(2) : '未載入'}</div>
       </div>
     </div>`;

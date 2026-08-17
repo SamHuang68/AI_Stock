@@ -559,8 +559,13 @@ function computePortfolioMetrics() {
     const val  = ref != null ? ref * p.shares : cost;
     const pnl  = ref != null ? (ref - p.entry) * p.shares : 0;
     const pnlPct = ref != null ? ((ref - p.entry) / p.entry * 100) : 0;
+    const activeCandles = code === S.sym?.toUpperCase() ? (S.data?.candles || []) : [];
+    const activePrev = activeCandles.length >= 2 ? activeCandles[activeCandles.length - 2]?.close : null;
+    const prevClose = p.prevClose ?? activePrev;
+    const dayChangePct = p.dayChangePct != null ? Number(p.dayChangePct) :
+      (ref != null && prevClose != null && prevClose > 0 ? (ref - prevClose) / prevClose * 100 : null);
     totalCost += cost; totalValue += val; totalPnl += pnl;
-    items.push({code, cost, val, pnl, pnlPct, ref, shares: p.shares});
+    items.push({code, cost, val, pnl, pnlPct, dayChangePct, ref, shares: p.shares});
   }
   // Sort by market value desc
   items.sort((a, b) => b.val - a.val);
@@ -656,9 +661,10 @@ function renderPortfolioRisk() {
   m.items.forEach((item, idx) => {
     const wt = item.val / m.totalValue;
     const color = colors[idx];
-    const pnlCol = item.pnlPct >= 0 ? 'var(--green)' : 'var(--red)';
-    const pnlBg = item.pnlPct >= 0 ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)';
-    const barCol = item.pnlPct >= 0 ? 'var(--green)' : 'var(--red)';
+    const pnlCol = window.Colors ? Colors.dir(item.code, item.pnlPct) : (item.pnlPct >= 0 ? 'var(--red)' : 'var(--green)');
+    const pnlBg = item.pnlPct >= 0 ? 'rgba(248,113,113,0.1)' : 'rgba(74,222,128,0.1)';
+    const dayCol = window.Colors ? Colors.dir(item.code, item.dayChangePct) : (item.dayChangePct >= 0 ? 'var(--red)' : 'var(--green)');
+    const barCol = color;
     
     h += `
     <div class="pf-item-row" data-pro="goto-pos" data-sym="${item.code}" style="cursor:pointer; display:flex; flex-direction:column; gap:4px; padding:6px 8px; border-radius:4px; transition:background 0.2s ease;">
@@ -668,7 +674,8 @@ function renderPortfolioRisk() {
           <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; color:var(--text);">${item.code}</span>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
-          <span style="font-size:9.5px; font-weight:bold; padding:1px 4px; border-radius:3px; color:${pnlCol}; background:${pnlBg}">${item.pnlPct >= 0 ? '+' : ''}${item.pnlPct.toFixed(1)}%</span>
+          ${item.dayChangePct == null ? '' : `<span title="相較上一交易日收盤" style="font-size:8px;color:${dayCol}">今日 ${item.dayChangePct >= 0 ? '+' : ''}${item.dayChangePct.toFixed(1)}%</span>`}
+          <span title="相較持倉成本" style="font-size:9.5px; font-weight:bold; padding:1px 4px; border-radius:3px; color:${pnlCol}; background:${pnlBg}">持有 ${item.pnlPct >= 0 ? '+' : ''}${item.pnlPct.toFixed(1)}%</span>
           <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text); opacity:0.8;">${(wt*100).toFixed(1)}%</span>
         </div>
       </div>

@@ -290,12 +290,17 @@
     return '<span class="vz-heat" style="color:' + col + ';background:' + bg + '">' + esc(text) + '</span>';
   }
 
-  /** 列內相對幅度小條（一律向右，顏色表方向） */
-  function rowBar(v, maxAbs) {
+  /** 列內相對幅度小條；第三參數可傳標的或 {sym,redUp}，依市場方向上色。 */
+  function rowBar(v, maxAbs, symOrOpts) {
     ensureStyle();
     if (!finite(v) || !maxAbs) return '';
     var w = Math.max(4, Math.round(100 * Math.abs(v) / maxAbs));
-    return '<span class="vz-rowbar" style="width:' + w + '%;background:' + gainColor(v) + '"></span>';
+    var col = gainColor(v);
+    var opts = (symOrOpts && typeof symOrOpts === 'object') ? symOrOpts : {};
+    var sym = typeof symOrOpts === 'string' ? symOrOpts : opts.sym;
+    if (sym && window.Colors && Colors.dir) col = Colors.dir(sym, v);
+    else if (opts.redUp != null && window.Colors && Colors.dirRU) col = Colors.dirRU(!!opts.redUp, v);
+    return '<span class="vz-rowbar" style="width:' + w + '%;background:' + col + '"></span>';
   }
 
   function _fmtAxisY(v, opts) {

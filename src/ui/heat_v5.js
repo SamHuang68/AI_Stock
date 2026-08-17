@@ -118,6 +118,7 @@
       '#ht-body .ht-kpi .k .v{font-size:12px;font-weight:700;color:var(--thi);margin-top:1px;' +
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#ht-body .ht-kpi .k .s{font-size:10px;color:var(--tlo);margin-top:1px}' +
+      '#ht-body .ht-kpi .k .s.us-up{color:var(--green)}#ht-body .ht-kpi .k .s.us-down{color:var(--red)}' +
       '#ht-body .ht-dash{flex:1;min-height:0;display:grid;gap:4px;overflow:hidden;' +
         'grid-template-columns:minmax(0,1.55fr) minmax(260px,1fr);grid-template-rows:minmax(0,1fr)}' +
       '#ht-body .ht-main{min-height:0;display:flex;flex-direction:column;overflow:hidden;' +
@@ -155,6 +156,7 @@
       '#ht-root .ht-row .code{color:var(--gold);font-weight:700;min-width:42px;font-size:9px}' +
       '#ht-root .ht-row .name{flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}' +
       '#ht-root .up{color:var(--red)}#ht-root .dn{color:var(--green)}' +
+      '#ht-root .us-up{color:var(--green)}#ht-root .us-down{color:var(--red)}' +
       '#ht-root .ht-note{font-size:10px;color:var(--tlo);line-height:1.4;margin-top:2px;flex:0 0 auto}' +
       '#ht-root .ht-loading{font-size:10px;color:var(--tlo);padding:12px 0}' +
       '@media (max-width:980px){' +
@@ -200,10 +202,10 @@
     if (p == null || p !== p) return '';
     return p > 0 ? 'up' : p < 0 ? 'dn' : '';
   }
-  /** 台股紅漲綠跌；美股綠漲紅跌（.up=紅 .dn=綠） */
+  /** 台股紅漲綠跌；美股綠漲紅跌，使用獨立類別避免 CSS 語意互換。 */
   function chgCls(p, mkt) {
     if (p == null || p !== p) return '';
-    if (mkt === 'US') return p > 0 ? 'dn' : p < 0 ? 'up' : '';
+    if (mkt === 'US') return p > 0 ? 'us-up' : p < 0 ? 'us-down' : '';
     return twCls(p);
   }
   function pct(p) {
@@ -364,20 +366,22 @@
       if (!best || s.changePct > best.changePct) best = s;
       if (!worst || s.changePct < worst.changePct) worst = s;
     });
+    var flow = (state.last && state.last.sectorFlow) || {};
     var focusBit = state.sector
       ? ('<div class="k"><div class="l">深鏈聚焦</div><div class="v" style="color:var(--cyan)">' +
         esc(state.sector) + '</div><div class="s">總覽產業輪動帶入</div></div>')
-      : ('<div class="k"><div class="l">格數</div><div class="v">' + rows.length +
-        '</div><div class="s">' + (mkt === 'TW' ? '台股類股' : '美股 SPDR') + '</div></div>');
+      : ('<div class="k"><div class="l">資金口徑</div><div class="v" style="font-size:11px">' +
+        esc(flow.label || '漲跌參與') + '</div><div class="s">' + rows.length + ' 格 · 參與 ' +
+        (flow.participationPct == null ? '—' : Number(flow.participationPct).toFixed(0) + '%') + '</div></div>');
     return '<div class="ht-kpi">' +
       focusBit +
-      '<div class="k"><div class="l">上漲／下跌</div><div class="v"><span class="up">' + up +
-        '</span>　<span class="dn">' + dn + '</span></div><div class="s">依目前排序篩選</div></div>' +
+      '<div class="k"><div class="l">上漲／下跌</div><div class="v"><span class="' + chgCls(1, mkt) + '">' + up +
+        '</span>　<span class="' + chgCls(-1, mkt) + '">' + dn + '</span></div><div class="s">依目前排序篩選</div></div>' +
       '<div class="k"><div class="l">最強</div><div class="v">' + esc(best ? best.name : '—') +
-        '</div><div class="s ' + twCls(best && best.changePct) + '">' +
+        '</div><div class="s ' + chgCls(best && best.changePct, mkt) + '">' +
         (best ? pct(best.changePct) : '—') + '</div></div>' +
       '<div class="k"><div class="l">最弱</div><div class="v">' + esc(worst ? worst.name : '—') +
-        '</div><div class="s ' + twCls(worst && worst.changePct) + '">' +
+        '</div><div class="s ' + chgCls(worst && worst.changePct, mkt) + '">' +
         (worst ? pct(worst.changePct) : '—') + '</div></div>' +
       '</div>';
   }
@@ -436,11 +440,15 @@
       rows.forEach(function (s) {
         var code = mkt === 'US' ? (s.symbol || '') : proxyFor(s.name);
         var sk = sectorKey(s.name);
+        var flowBits = [];
+        if (s.marketSharePct != null) flowBits.push('占比 ' + Number(s.marketSharePct).toFixed(1) + '%');
+        if (s.rs20VsBenchmarkPct != null) flowBits.push('RS20 ' + (Number(s.rs20VsBenchmarkPct) >= 0 ? '+' : '') + Number(s.rs20VsBenchmarkPct).toFixed(1));
         grid += '<div class="ht-cell" style="background:' + pctColor(s.changePct, mkt) + '" data-code="' +
           esc(code || '') + '" data-mkt="' + mkt + '" data-name="' + esc(s.name) +
           '" data-sector-key="' + esc(sk) + '" title="' + esc(s.name) + (code ? ' → ' + code : '') + '">' +
           '<div class="nm">' + esc(s.name) + '</div>' +
           '<div class="pc">' + pct(s.changePct) + '</div>' +
+          (flowBits.length ? '<div class="pxcode">' + esc(flowBits.join(' · ')) + '</div>' : '') +
           (code ? '<div class="pxcode">' + esc(code) + '</div>' : '') +
           '<div class="px">' + fmt(s.close) + '</div></div>';
       });
@@ -458,7 +466,8 @@
       '<div class="ht-dash">' +
         '<div class="ht-main"><h4><span>類股熱力圖</span>' + focusTag + '</h4>' +
           legend + '<div class="ht-grid-wrap">' + grid + '</div>' +
-          '<div class="ht-note">/sectors · 台股代表股／美股 SPDR · 點格載入 K 線 · 非投資建議</div></div>' +
+          '<div class="ht-note">/sectors · ' + esc(((d && d.sectorFlow) || {}).label || '漲跌參與') +
+          ' · 無同 scope 成交額時不顯示資金流 · 點格載入 K 線 · 非投資建議</div></div>' +
         '<div class="ht-focus-zone"><h4 id="ht-focus-title">焦點掃描 · ' + mkt + '</h4>' +
           '<div id="ht-focus" class="ht-loading">掃描中…</div></div>' +
       '</div>';

@@ -15,6 +15,11 @@ import sys
 import time
 import urllib.request
 
+try:
+    from .atomic_store import StoreCorruptError, atomic_write_json, load_json
+except ImportError:
+    from atomic_store import StoreCorruptError, atomic_write_json, load_json
+
 if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
 else:
@@ -345,9 +350,7 @@ def build():
     data = {'tw': tw, 'us': us, 'twmeta': twmeta, 'updated': int(time.time()),
             'counts': {'tw': len(tw), 'us': len(us), 'twmeta': len(twmeta)}}
     try:
-        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-        with open(CACHE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False)
+        atomic_write_json(CACHE, data, backup=True, indent=None)
     except Exception as e:
         print(f'[universe] save failed: {e}')
     return data
@@ -356,12 +359,11 @@ def build():
 def load():
     """讀快取;沒有就 build()。"""
     try:
-        with open(CACHE, encoding='utf-8') as f:
-            data = json.load(f)
+        data = load_json(CACHE, default={}, expected_type=dict)
         if data.get('tw') or data.get('us'):
             return data
-    except Exception:
-        pass
+    except StoreCorruptError as exc:
+        print('[universe] cache corrupt:', type(exc).__name__)
     return build()
 
 

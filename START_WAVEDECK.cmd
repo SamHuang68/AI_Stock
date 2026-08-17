@@ -11,9 +11,7 @@ if not defined WD_DIR if exist "%~dp0run.py" set "WD_DIR=%~dp0"
 if not defined WD_DIR (
   echo.
   echo  [ERR] wavedeck\run.py not found under %CD%
-  echo  Sync first:
-  echo    git fetch origin cursor/wavedeck-init-3497
-  echo    git checkout origin/cursor/wavedeck-init-3497 -- wavedeck START_WAVEDECK.cmd
+  echo  Re-extract the complete Stock Terminal distribution and try again.
   echo.
   pause
   exit /b 1
