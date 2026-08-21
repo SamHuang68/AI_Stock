@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "projectId": "stock-terminal-v5",
   "objective": "Deliver and deploy a dual-path EVO-T1 AI analysis architecture: a fast explicitly selected local model and a restricted Hermes deep-analysis route, with truthful provider/model/runtime labels, conservative load-aware time guidance, streaming-safe gateway behavior, and mobile-friendly recovery.",
-  "status": "in_progress",
+  "status": "complete",
   "updatedAt": "2026-08-21",
   "constraints": {
     "inScope": [
@@ -110,7 +110,7 @@
       "id": "L09-06",
       "title": "Commit, stage, promote, deploy and verify the exact release",
       "owner": "host",
-      "status": "in_progress",
+      "status": "completed",
       "dependsOn": ["L09-05"],
       "successCriteria": "A privacy-clean exact commit is staged, promoted and verified through local production and authenticated Tailscale without including runtime data changes"
     }
@@ -135,10 +135,14 @@
       ,"LM Studio live Gate selected google/gemma-4-e4b on EVO-T1, returned the expected local-only response in 17.66 seconds and retained a conservative 300-second user allowance"
       ,"Hermes live Gate selected NVIDIA NIM nvidia/nemotron-3-super-120b-a12b on EVO-T1, returned the expected restricted response in 24.36 seconds and retained a conservative 720-second user allowance"
       ,"Gateway integration tests proved one-byte AI chunks reach the client before upstream completion and a post-header timeout closes cleanly without nested HTTP/1.1 or 502 body text"
+      ,"Exact release b6524f0299e7 passed 38 isolated release tests, was promoted with production data/log preservation and restarted on loopback ports 18434/18435"
+      ,"Authenticated Tailscale HTTPS reported execution=server-side-on-EVO-T1, phoneInference=false, the deployed dual-mode asset and the exact fast/deep model contracts"
+      ,"Remote fast and deep Gates returned HTTP 200 in 4.99 and 13.40 seconds respectively, below the deliberately conservative 300/720-second load-aware guidance"
+      ,"Production AI traces contained request IDs, provider/model/boundary, phases, hashes, lengths and elapsed time only; no prompt, context, output or credential content was persisted"
     ],
     "openP0": [],
     "openP1": [],
-    "verdict": "pending"
+    "verdict": "pass"
   },
   "loopHistory": [
     {
@@ -237,5 +241,5 @@
     "Stock_Terminal_v5.0.zip.sha256",
     "Stock_Terminal_v5.0.manifest.json"
   ],
-  "nextLoop": "Implement LOOP-009 contracts and rerun the full Gate"
+  "nextLoop": null
 }
