@@ -255,6 +255,12 @@ ok(/plAiDrawerIn/.test(pulseBeginner) && /backdrop-filter:blur\(18px\)/.test(pul
   /id="pl-ai-speak"/.test(pulseBeginner) && /SpeechSynthesisUtterance/.test(pulseBeginner) &&
   /3 大要點速覽/.test(pulseBeginner),
   'beginner AI uses a glass drawer with bounded speech playback and three-point fallback');
+ok(/id="pl-ai-fast"/.test(pulseBeginner) && /id="pl-ai-deep"/.test(pulseBeginner) &&
+  /\/ai\/deep/.test(pulseBeginner) && /X-ST-AI-Provider/.test(pulseBeginner) &&
+  /X-ST-AI-Model/.test(pulseBeginner) && /X-ST-AI-Data-Boundary/.test(pulseBeginner) &&
+  /約 5 分鐘/.test(pulseBeginner) && /約 12 分鐘/.test(pulseBeginner) &&
+  /模型載入、上下文預填與推理/.test(pulseBeginner) && /手機只顯示結果/.test(pulseBeginner),
+  'Pulse exposes truthful EVO-T1 fast/deep AI routes with conservative load-aware guidance');
 ok(/三市場趨勢雷達/.test(pulseBeginner) && /台股市場/.test(pulseBeginner) &&
   /美股市場/.test(pulseBeginner) && /期貨市場/.test(pulseBeginner) &&
   /漲跌比 /.test(pulseBeginner) && /指數熱度 /.test(pulseBeginner) && /風險偏高/.test(pulseBeginner) &&

@@ -27,6 +27,7 @@ DEFAULT_CONFIG = {
     "read_rate_per_minute": 240,
     "write_rate_per_minute": 30,
     "upstream_timeout_seconds": 120,
+    "ai_upstream_timeout_seconds": 1200,
     "audit_path": "logs/private_web_audit.jsonl",
     "access_request_path": "data/private_web_access_requests.json",
     "extra_read_paths": [],

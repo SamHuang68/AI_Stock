@@ -155,6 +155,47 @@ Backend and gateway output goes to the production `logs/` directory. If a
 child process exits unexpectedly, the supervisor restarts the pair with a
 bounded restart budget.
 
+## AI execution boundary and duration guidance
+
+Remote Chrome never runs the model. The iPhone or Windows browser sends one
+same-origin request to the authenticated gateway; the gateway forwards it to
+the ST backend on EVO-T1, and EVO-T1 owns model selection and execution.
+
+Two explicit Owner-only modes are available in the Pulse AI drawer:
+
+| Mode | EVO-T1 runtime | Fixed model | Data boundary | Conservative UI guidance |
+| --- | --- | --- | --- | --- |
+| Fast summary | LM Studio | `google/gemma-4-e4b` | local-only | allow about 5 minutes |
+| Deep analysis | restricted Hermes Agent | `nvidia/nemotron-3-super-120b-a12b` | external NVIDIA provider | allow about 12 minutes |
+
+The displayed allowance deliberately includes cold start, model loading or
+provider connection, context prefill, reasoning and transfer. It is not just a
+tokens-per-second estimate and normal runs may finish earlier. The completed
+drawer reports the actual host, provider, model, boundary, request ID and
+elapsed time from response headers rather than trusting browser labels.
+
+Hermes is invoked for a single stateless advisory turn with the `todo` toolset,
+two-turn cap and no terminal, file, browser, messaging, cron or profile tools.
+ST does not run a persistent Hermes Bot: that avoids stale conversational
+memory and prevents a research request from acquiring durable side effects.
+Only the bounded market-summary context is sent to the deep external route;
+the holdings-aware general copilot remains on the fast local route.
+
+The AI gateway timeout is separate from ordinary HTTP traffic and defaults to
+1,200 seconds. It can be changed in local-only `data/private_web.json`:
+
+```json
+{
+  "ai_upstream_timeout_seconds": 1200
+}
+```
+
+The equivalent environment variable is `ST_WEB_AI_UPSTREAM_TIMEOUT`. Do not
+publish LM Studio, Ollama or Hermes ports to the LAN or tailnet. Sanitized
+runtime evidence is written to `logs/ai_runtime_trace.jsonl`; it records only
+request IDs, route metadata, phase, hashes, lengths, elapsed time and error
+type, never prompts, context, model output or credentials.
+
 ## Private HTTPS publication
 
 After host-mode testing succeeds, Tailscale Serve can publish only the gateway
@@ -181,7 +222,7 @@ Owner writes are limited to research calculations and personal state:
 
 - portfolio and DecisionContext calculations;
 - screeners and chain-momentum analysis;
-- local AI research/report requests;
+- fixed-policy fast-local and restricted Hermes deep AI research requests;
 - watch rules/configuration; and
 - chart drawings.
 

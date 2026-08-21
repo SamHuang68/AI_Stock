@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 
@@ -66,7 +67,7 @@ class AiRoutesMixin:
         except Exception:
             pass
 
-    def _handle_ai_local(self):
+    def _stream_ai_runtime(self, mode: str):
         try:
             body = read_json_body(self, max_bytes=256 * 1024)
         except BodyReadError as e:
@@ -80,9 +81,33 @@ class AiRoutesMixin:
             pass
         if not al:
             self._err('ai_local 模組未載入', 500); return
+        request_id = self._ensure_trace_id()
+        try:
+            metadata = al.route_metadata(mode, probe=(mode == 'fast'))
+        except Exception as exc:
+            self._err('AI runtime 狀態讀取失敗: ' + type(exc).__name__, 503); return
+        if not metadata.get('available'):
+            self._err(str(metadata.get('reason') or 'AI runtime 未就緒'), 503); return
+        try:
+            al.trace_event(
+                'http_request_received', request_id=request_id, mode=mode,
+                provider=metadata.get('provider'), model=metadata.get('model'),
+                dataBoundary=metadata.get('dataBoundary'), phase='request-received',
+                inputChars=len(str(body.get('prompt') or '')) + len(str(body.get('context') or '')),
+            )
+        except Exception:
+            pass
         self.send_response(200)
         self.send_header('Content-Type', 'text/plain; charset=utf-8')
-        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-Accel-Buffering', 'no')
+        self.send_header('X-ST-AI-Request-ID', request_id)
+        self.send_header('X-ST-AI-Mode', str(metadata.get('mode') or mode))
+        self.send_header('X-ST-AI-Host', str(metadata.get('host') or 'EVO-T1'))
+        self.send_header('X-ST-AI-Provider', str(metadata.get('provider') or 'unknown'))
+        self.send_header('X-ST-AI-Model', str(metadata.get('model') or 'unknown'))
+        self.send_header('X-ST-AI-Data-Boundary', str(metadata.get('dataBoundary') or 'unknown'))
+        self.send_header('X-ST-AI-Estimate-Seconds', str(int(metadata.get('estimateSeconds') or 0)))
         self.send_header('Connection', 'close')
         self.end_headers()
         self.close_connection = True
@@ -91,20 +116,68 @@ class AiRoutesMixin:
             wdb.record_st_local(1)
         except Exception:
             pass
+        started = time.monotonic()
+        iterator = None
+        output_chars = 0
         try:
-            for chunk in al.chat_stream(body.get('prompt', ''), body.get('context', ''), body.get('model')):
+            if mode == 'deep':
+                iterator = al.deep_stream(
+                    body.get('prompt', ''), body.get('context', ''), request_id=request_id,
+                )
+            else:
+                iterator = al.chat_stream(
+                    body.get('prompt', ''), body.get('context', ''), request_id=request_id,
+                )
+            for chunk in iterator:
+                output_chars += len(chunk)
                 self.wfile.write(chunk.encode('utf-8'))
                 self.wfile.flush()
-        except Exception:
-            pass
+            al.trace_event(
+                'http_stream_completed', request_id=request_id, mode=mode,
+                provider=metadata.get('provider'), model=metadata.get('model'),
+                dataBoundary=metadata.get('dataBoundary'), phase='response-complete',
+                elapsedMs=round((time.monotonic() - started) * 1000), outputChars=output_chars,
+            )
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as exc:
+            al.trace_event(
+                'client_disconnected', request_id=request_id, mode=mode,
+                provider=metadata.get('provider'), model=metadata.get('model'),
+                dataBoundary=metadata.get('dataBoundary'), phase='response-stream',
+                elapsedMs=round((time.monotonic() - started) * 1000), errorType=type(exc).__name__,
+            )
+        except Exception as exc:
+            message = str(exc) if isinstance(exc, getattr(al, 'AiRuntimeError', RuntimeError)) else type(exc).__name__
+            try:
+                self.wfile.write(('\n⚠ ' + message).encode('utf-8'))
+                self.wfile.flush()
+            except (OSError, ValueError):
+                pass
+            al.trace_event(
+                'http_stream_failed', request_id=request_id, mode=mode,
+                provider=metadata.get('provider'), model=metadata.get('model'),
+                dataBoundary=metadata.get('dataBoundary'), phase='response-stream',
+                elapsedMs=round((time.monotonic() - started) * 1000), errorType=type(exc).__name__,
+            )
+        finally:
+            if iterator is not None and hasattr(iterator, 'close'):
+                try:
+                    iterator.close()
+                except Exception:
+                    pass
+
+    def _handle_ai_local(self):
+        self._stream_ai_runtime('fast')
+
+    def _handle_ai_deep(self):
+        self._stream_ai_runtime('deep')
 
     def _handle_ai_local_status(self):
         try:
             import ai_local as al
-            models = al.list_models()
-        except Exception:
-            models = None
-        self._ok(json.dumps({'ok': models is not None, 'models': models or []}, ensure_ascii=False).encode())
+            payload = al.runtime_status()
+        except Exception as exc:
+            payload = {'ok': False, 'error': 'AI runtime status: ' + type(exc).__name__, 'modes': {}}
+        self._ok(json.dumps(payload, ensure_ascii=False).encode())
 
     def _handle_ai_report(self):
         try:

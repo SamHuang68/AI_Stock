@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import sys
 import tempfile
@@ -11,6 +12,7 @@ import time
 import unittest
 import urllib.error
 import urllib.request
+from dataclasses import replace
 from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -30,6 +32,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 class UpstreamHandler(BaseHTTPRequestHandler):
     seen: list[dict] = []
+    ai_stream_mode = "normal"
+    ai_stream_release = threading.Event()
 
     def log_message(self, fmt, *args):
         return
@@ -71,6 +75,24 @@ class UpstreamHandler(BaseHTTPRequestHandler):
                 "body": raw.decode("utf-8"),
             }
         )
+        if self.path == "/ai/local":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("X-ST-AI-Host", "EVO-T1")
+            self.end_headers()
+            self.close_connection = True
+            self.wfile.write(b"A")
+            self.wfile.flush()
+            if self.__class__.ai_stream_mode == "gated":
+                self.__class__.ai_stream_release.wait(3)
+            elif self.__class__.ai_stream_mode == "timeout":
+                time.sleep(1.4)
+            try:
+                self.wfile.write(b"B")
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         self._send({"ok": True})
 
 
@@ -108,6 +130,8 @@ class PrivateWebGatewayTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         UpstreamHandler.seen = []
+        UpstreamHandler.ai_stream_mode = "normal"
+        UpstreamHandler.ai_stream_release = threading.Event()
         self.upstream = ThreadingHTTPServer(("127.0.0.1", 0), UpstreamHandler)
         self.upstream_thread = threading.Thread(target=self.upstream.serve_forever, daemon=True)
         self.upstream_thread.start()
@@ -136,6 +160,7 @@ class PrivateWebGatewayTests(unittest.TestCase):
         self.base = f"http://127.0.0.1:{self.port}"
 
     def tearDown(self):
+        UpstreamHandler.ai_stream_release.set()
         self.gateway.shutdown()
         self.gateway.server_close()
         self.upstream.shutdown()
@@ -488,6 +513,13 @@ class PrivateWebGatewayTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         status, _ = _request(
+            self.base + "/ai/deep",
+            method="POST",
+            token="owner-secret",
+            body={"prompt": "test"},
+        )
+        self.assertEqual(status, 200)
+        status, _ = _request(
             self.base + "/options/txo/refresh",
             method="POST",
             token="owner-secret",
@@ -502,6 +534,55 @@ class PrivateWebGatewayTests(unittest.TestCase):
                 body={},
             )
             self.assertEqual(status, 403, path)
+
+    def test_ai_proxy_forwards_first_small_chunk_without_large_buffer_wait(self):
+        UpstreamHandler.ai_stream_mode = "gated"
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        started = time.monotonic()
+        try:
+            connection.request(
+                "POST", "/ai/local", body=b'{"prompt":"test"}',
+                headers={
+                    "Authorization": "Bearer owner-secret",
+                    "Content-Type": "application/json",
+                    "Content-Length": "17",
+                },
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.read(1), b"A")
+            self.assertLess(time.monotonic() - started, 0.9)
+            UpstreamHandler.ai_stream_release.set()
+            self.assertEqual(response.read(), b"B")
+        finally:
+            UpstreamHandler.ai_stream_release.set()
+            connection.close()
+
+    def test_ai_timeout_after_headers_never_injects_second_http_response(self):
+        UpstreamHandler.ai_stream_mode = "timeout"
+        self.gateway.settings = replace(
+            self.gateway.settings, ai_upstream_timeout_seconds=1,
+        )
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            connection.request(
+                "POST", "/ai/local", body=b'{"prompt":"test"}',
+                headers={
+                    "Authorization": "Bearer owner-secret",
+                    "Content-Type": "application/json",
+                    "Content-Length": "17",
+                },
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            body = response.read()
+            self.assertEqual(body, b"A")
+            self.assertNotIn(b"HTTP/1.1", body)
+            self.assertNotIn(b"ST backend unavailable", body)
+        finally:
+            connection.close()
+        audit = self.gateway.settings.audit_path.read_text(encoding="utf-8")
+        self.assertIn("upstream_stream_aborted", audit)
 
     def test_legacy_get_backfill_query_is_blocked(self):
         status, _ = _request(

@@ -3,7 +3,7 @@
  * ----------------------------------------------------------------------------
  * 自然語言問盤。自動把「當前個股 + 持倉 + 自選」整理成 context 餵給本機 LLM
  * (LM Studio,經 /ai/local)。只送真實資料(data integrity);顏色中性。
- * 模型下拉(讀 /ai/local/status):快問選小模型、深度分析選大模型。
+ * 模型由 ST 後端固定；瀏覽器不可改端點或任意指定模型。
  * ========================================================================== */
 (function () {
   'use strict';
@@ -87,10 +87,12 @@
     try {
       var r = await fetch('/ai/local/status');
       var d = await r.json();
-      if (d.ok && d.models && d.models.length) {
-        sel.innerHTML = d.models.map(function (m) { return '<option value="' + esc(m) + '">' + esc(m) + '</option>'; }).join('');
+      var fast = d && d.modes && d.modes.fast;
+      if (d.ok && fast && fast.available) {
+        sel.innerHTML = '<option value="">' + esc((fast.host || 'EVO-T1') + ' · ' +
+          (fast.provider || 'LM Studio') + ' · ' + (fast.model || '固定模型')) + '</option>';
       } else {
-        sel.innerHTML = '<option value="">(LM Studio 未啟動)</option>';
+        sel.innerHTML = '<option value="">(EVO-T1 快速模型未就緒)</option>';
       }
     } catch (e) {
       sel.innerHTML = '<option value="">(無法連線)</option>';
@@ -102,14 +104,21 @@
     text = text.trim();
     if (!text) return;
     var out = document.getElementById('cp-out');
-    var model = (document.getElementById('cp-model') || {}).value || '';
-    out.innerHTML = '<span style="color:#94a3b8">思考中…(本機模型,首次載入可能較久)</span>';
+    out.innerHTML = '<span style="color:#94a3b8">EVO-T1 正在準備本機快速模型。請預留約 5 分鐘；已包含冷啟動、模型載入、上下文預填與推理，通常會提早完成。</span>';
     var ctx = buildContext();
     try {
       var r = await fetch('/ai/local', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: text, context: ctx, model: model || undefined })
+        body: JSON.stringify({ prompt: text, context: ctx })
       });
+      if (!r.ok) {
+        var errText = await r.text();
+        try { errText = (JSON.parse(errText) || {}).error || errText; } catch (_e) {}
+        throw new Error(String(errText || ('HTTP ' + r.status)).slice(0, 220));
+      }
+      var actualHost = r.headers.get('X-ST-AI-Host') || 'EVO-T1';
+      var actualProvider = r.headers.get('X-ST-AI-Provider') || 'LM Studio';
+      var actualModel = r.headers.get('X-ST-AI-Model') || '固定模型';
       if (!r.body || !r.body.getReader) { out.innerHTML = mdLite(await r.text()); return; }   // 後援
       var reader = r.body.getReader();
       var dec = new TextDecoder();
@@ -123,7 +132,8 @@
         out.scrollTop = out.scrollHeight;
       }
       _lastReply = acc; _lastQ = text;
-      out.innerHTML = mdLite(acc) + '<div class="cp-meta">模型:' + esc(model || '') + (ctx ? ' · 已附帶持倉/個股' : '') +
+      out.innerHTML = mdLite(acc) + '<div class="cp-meta">執行:' + esc(actualHost + ' · ' + actualProvider + ' · ' + actualModel) +
+        ' · 本機資料邊界' + (ctx ? ' · 已附帶持倉/個股' : '') +
         ' <button class="cp-keep" id="cp-keep">📨 寄到 Telegram/Email</button><span id="cp-keep-st" class="cp-keep-st"></span></div>';
       var _kb = document.getElementById('cp-keep'); if (_kb) _kb.onclick = notifyReply;
     } catch (e) {
@@ -138,7 +148,7 @@
     modal.innerHTML =
       '<div id="cp-box">' +
       '<h3>🤖 AI 副駕 <span style="display:flex;gap:8px;align-items:center"><select id="cp-model"><option>載入中…</option></select><span class="x" onclick="window.copilotClose&&copilotClose()">×</span></span></h3>' +
-      '<div class="cp-hint">本機 LM Studio · 完全離線 · 會自動附上你當前個股與持倉資料</div>' +
+      '<div class="cp-hint">EVO-T1 主機端 LM Studio · 固定本機模型 · 手機不執行推理 · 會附上當前個股與持倉資料</div>' +
       '<div id="cp-out">問我關於你的持倉、當前個股、或台股盤面結構的問題。</div>' +
       '<div class="cp-q">' + QUICK.map(function (q, i) { return '<button data-q="' + i + '">' + esc(q) + '</button>'; }).join('') + '</div>' +
       '<div class="cp-in"><textarea id="cp-text" placeholder="用自然語言問…(Enter 送出,Shift+Enter 換行)"></textarea><button id="cp-send">送出</button></div>' +

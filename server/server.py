@@ -2998,6 +2998,8 @@ class Handler(DecisionRoutesMixin, OptionsRoutesMixin, AiRoutesMixin, EtfRoutesM
             self._handle_chain_momentum()
         elif p == '/ai/local':
             self._handle_ai_local()
+        elif p == '/ai/deep':
+            self._handle_ai_deep()
         elif p == '/bridge/wavedeck':
             self._handle_wavedeck_bridge_post()
         elif p == '/api/override-alpha':

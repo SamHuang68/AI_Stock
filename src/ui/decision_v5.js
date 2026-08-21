@@ -1515,7 +1515,7 @@
     if (!lastContext) return;
     var card = $('dc-ai-card'), box = $('dc-ai-body');
     if (card) card.style.display = '';
-    if (box) box.textContent = '解釋中…';
+    if (box) box.textContent = 'EVO-T1 正在準備本機快速模型。請預留約 5 分鐘；此時間已包含冷啟動、模型載入、上下文預填與推理，通常會提早完成。';
     var slim = {
       regime: lastContext.regime, actionEnvelope: lastContext.actionEnvelope,
       divergences: lastContext.divergences, confirmation: lastContext.confirmation,

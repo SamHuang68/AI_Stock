@@ -1,54 +1,56 @@
 {
   "schemaVersion": 1,
   "projectId": "stock-terminal-v5",
-  "objective": "Deploy the verified Stock Terminal workspace as an exact, tested Private Web release, promote it atomically, start the isolated backend and gateway, and verify both local and Tailscale access without exposing secrets or private runtime data.",
-  "status": "complete",
-  "updatedAt": "2026-08-17",
+  "objective": "Deliver and deploy a dual-path EVO-T1 AI analysis architecture: a fast explicitly selected local model and a restricted Hermes deep-analysis route, with truthful provider/model/runtime labels, conservative load-aware time guidance, streaming-safe gateway behavior, and mobile-friendly recovery.",
+  "status": "in_progress",
+  "updatedAt": "2026-08-21",
   "constraints": {
     "inScope": [
-      "commit the authorized complete workspace state as one reproducible release revision",
-      "stage and test the exact commit through private_web_release.py",
-      "atomically promote the isolated Private Web release while preserving runtime data and logs",
-      "start and verify backend, gateway and Tailscale HTTPS access"
+      "reuse the existing /ai/local, Private Web gateway and Pulse AI drawer contracts",
+      "add explicit fast-local and restricted Hermes-deep analysis modes on EVO-T1",
+      "report actual provider, model, data boundary, host and phase-aware conservative duration guidance",
+      "repair gateway streaming, timeout and post-header error behavior",
+      "test, commit, stage, deploy and verify the exact release through authenticated Tailscale access"
     ],
     "outOfScope": [
-      "pushing the repository or publishing a public unauthenticated endpoint",
-      "changing product behavior beyond the already verified workspace",
-      "discarding or rewriting unrelated user-owned changes",
-      "a big-bang framework rewrite"
+      "automatic trading, portfolio mutation or allowing model output to become authoritative market data",
+      "exposing LM Studio, Ollama or Hermes directly to the network/browser",
+      "granting Hermes terminal, file-write, messaging, cron or profile-management authority through ST",
+      "discarding, staging or rewriting unrelated runtime data changes"
     ],
     "assumptions": [
-      "the current dirty worktree is the review target and contains user-owned unfinished work",
-      "TWSE MIS cumulative volume is reported in lots and Yahoo cumulative volume in shares",
-      "the legacy volume field remains cumulative lots for compatibility while volumeShares is canonical",
-      "a skipped polling interval cannot be reconstructed safely from only two cumulative observations",
-      "the correct fail-closed behavior for an ambiguous gap or source switch is to re-baseline rather than invent minute allocation"
+      "the phone is a same-origin remote UI while all AI orchestration runs on EVO-T1",
+      "fast summary remains usable when Hermes or a local model is unavailable",
+      "model load and context prefill can dominate inference time and must be included in estimates",
+      "Hermes' current NVIDIA provider is external and any deep route must label that data boundary",
+      "the existing four modified data files are runtime/user-owned and excluded from implementation commits"
     ],
     "permissions": [
       "modify local project files",
-      "inspect live public quote responses and existing diagnostics",
-      "run local contract, state-machine, build and HTTP checks",
-      "modify scoped quote, chart and test files"
+      "inspect local runtime health, models, Hermes non-secret configuration and existing diagnostics",
+      "modify scoped AI, gateway, Pulse UI, documentation and test files",
+      "run local model, gateway, build, private release and authenticated remote checks",
+      "commit and deploy the completed requested implementation"
     ],
     "availableResources": [
       "local repository and git metadata",
-      "official TWSE MIS and Yahoo quote responses",
-      "existing market quote contract and intraday chart refresh code",
-      "existing Python and JavaScript self-test infrastructure",
-      "three independent advisory reviews under Host single-writer integration"
+      "EVO-T1 RTX 5080, 96GB RAM, LM Studio, Ollama and Hermes Agent",
+      "existing /ai/local route, Pulse AI drawer and isolated Private Web gateway",
+      "existing Python and JavaScript self-test plus exact-release infrastructure",
+      "persisted gateway/host/backend audit logs"
     ],
     "excludedResources": [
       "repository push and unauthenticated public hosting",
       "automatic trade execution or trade recommendations",
       "credentials, private brokerage data or personal lending terms",
-      "widening network access beyond the existing authenticated Tailscale funnel"
+      "direct network exposure of model runtimes or widening access beyond the authenticated Tailscale path"
     ]
   },
   "currentLoop": {
-    "id": "LOOP-008",
-    "title": "Private Web exact-commit deployment",
-    "entryCondition": "LOOP-007 passed and the user explicitly requested deployment",
-    "exitCondition": "An exact committed release is staged, tested, promoted and serving through the authenticated Tailscale URL with healthy isolated backend and gateway"
+    "id": "LOOP-009",
+    "title": "EVO-T1 dual-path AI analysis and streaming reliability",
+    "entryCondition": "The user approved the diagnosed architecture and requested full implementation with load-aware conservative duration guidance",
+    "exitCondition": "Fast local and Hermes deep analysis are explicit, observable, restricted, streaming-safe and deployed through the authenticated remote UI with passing recovery and mobile gates"
   },
   "routing": [
     {
@@ -65,76 +67,78 @@
   ],
   "tasks": [
     {
-      "id": "L08-01",
-      "title": "Audit release scope, runtime mode and private deployment state",
+      "id": "L09-01",
+      "title": "Trace the complete mobile-to-model execution path and freeze contracts",
       "owner": "host",
       "status": "completed",
       "dependsOn": [],
-      "successCriteria": "Git scope, listening processes, install root and current active release are known before mutation"
+      "successCriteria": "The earliest failure, active runtimes, provider precedence, data boundaries, model inventory and existing tests are evidenced before edits"
     },
     {
-      "id": "L08-02",
-      "title": "Create the authorized exact release commit",
+      "id": "L09-02",
+      "title": "Implement explicit fast-local and restricted Hermes-deep backend modes",
       "owner": "host",
       "status": "completed",
-      "dependsOn": ["L08-01"],
-      "successCriteria": "All intended workspace changes are committed with no credentials, private runtime state or ignored secrets"
+      "dependsOn": ["L09-01"],
+      "successCriteria": "Each request has a generated request ID, fixed server-side provider/model policy, truthful metadata, conservative load-aware estimate and no caller-controlled endpoint or unrestricted tools"
     },
     {
-      "id": "L08-03",
-      "title": "Stage and independently test the exact commit",
+      "id": "L09-03",
+      "title": "Repair Private Web gateway streaming and terminal error semantics",
       "owner": "host",
       "status": "completed",
-      "dependsOn": ["L08-02"],
-      "successCriteria": "The release tool rebuilds and passes private-Web tests from git archive rather than the dirty worktree"
+      "dependsOn": ["L09-01"],
+      "successCriteria": "Small streamed chunks reach the client promptly, AI has a bounded route-specific timeout and no second HTTP response is emitted after headers start"
     },
     {
-      "id": "L08-04",
-      "title": "Promote and start the isolated Private Web release",
+      "id": "L09-04",
+      "title": "Add Pulse dual-entry UI with runtime truth and mobile recovery",
       "owner": "host",
       "status": "completed",
-      "dependsOn": ["L08-03"],
-      "successCriteria": "Promotion is approved, atomic, preserves runtime data and starts only the owned production ports"
+      "dependsOn": ["L09-02", "L09-03"],
+      "successCriteria": "Fast and deep actions are distinct, actual host/provider/model/data-boundary metadata is visible, estimates exceed measured load+prefill+inference time and failures fall back without raw HTTP"
     },
     {
-      "id": "L08-05",
-      "title": "Verify local production and Tailscale HTTPS",
+      "id": "L09-05",
+      "title": "Run static, unit, integration, fault, browser and local-runtime Gates",
       "owner": "host",
       "status": "completed",
-      "dependsOn": ["L08-04"],
-      "successCriteria": "Gateway and backend health pass, authentication is enforced, remote HTML is current and the 00685L volume contract is deployed"
+      "dependsOn": ["L09-02", "L09-03", "L09-04"],
+      "successCriteria": "All scoped tests pass, first-byte streaming and post-header timeout recovery are reproduced, and a real EVO-T1 model request completes with matching provider metadata"
+    },
+    {
+      "id": "L09-06",
+      "title": "Commit, stage, promote, deploy and verify the exact release",
+      "owner": "host",
+      "status": "in_progress",
+      "dependsOn": ["L09-05"],
+      "successCriteria": "A privacy-clean exact commit is staged, promoted and verified through local production and authenticated Tailscale without including runtime data changes"
     }
   ],
   "verification": {
     "gate": [
-      "release is built from an exact commit and not from the dirty worktree",
-      "stage tests and privacy boundaries pass",
-      "promotion preserves runtime data and logs and starts only isolated ports 18434/18435",
-      "gateway enforces authentication and reports healthy upstream",
-      "Tailscale HTTPS returns the current login/application surface",
-      "deployed /twquote retains canonical volume fields without a 1000x jump"
+      "all scoped AI requests execute on EVO-T1 and no model runtime is browser-addressable",
+      "provider, model, host, data boundary and estimate are derived from the actual selected route",
+      "fast mode remains useful when the selected runtime is cold or Hermes is unavailable",
+      "Hermes deep mode is server-selected, read-only from ST and visibly identifies external versus local inference",
+      "gateway streams small chunks promptly and never emits nested HTTP after response start",
+      "timeout, disconnect and unavailable-runtime paths are observable and user-readable",
+      "exact release tests, privacy checks, local production and authenticated remote smoke tests pass"
     ],
-    "commands": [
-      "repository contract and ownership scan with rg",
-      "git scope, ignored-secret and release-status inspection",
-      "exact-commit stage with built-in regression tests",
-      "approved atomic promote and isolated host launch",
-      "local gateway/backend health and authenticated behavior checks",
-      "remote Tailscale HTTPS and deployed quote-contract smoke tests"
-    ],
+    "commands": [],
     "evidence": [
-      "Preflight found development ST healthy on 127.0.0.1:18432 and no process on isolated production ports 18434/18435",
-      "Private release status reported no active or staged release before deployment",
-      "The release tool requires an exact committed revision and explicit promote approval",
-      "Release commit 4f89131e5585cd02964b9966d057fdeef2052d42 was rebuilt from git archive and passed all 24 isolated Private Web regression tests",
-      "Privacy preflight and final ZIP scan passed all 10 distribution tests after replacing the last personalized Windows path with a project-relative path",
-      "Atomic promotion activated release 4f89131e5585; isolated gateway 18434 and backend 18435 are listening while development 18432 remains separate",
-      "Local production returned healthy isolated-host/upstream status, rejected unauthenticated root with 401 and served 00685L volume=168715 lots plus canonical volumeShares=168715000 from TWSE MIS",
-      "Remote https://evo-t1-st.tailbc3519.ts.net passed TLS, Chrome form-login redirect, remember-login control, owner page, reader liveness and blocked remote notify checks"
+      "2026-08-21 15:58:42 Private Web audit recorded POST /ai/local TimeoutError after the gateway's 120-second upstream deadline",
+      "The backend sends 200 headers before model generation while the gateway used response.read(64 KiB), which buffered small AI chunks and attempted a second 502 after response start",
+      "EVO-T1 was listening on ST 18435, gateway 18434, Ollama 11434 and LM Studio 1234; the phone performed no inference",
+      "Current ai_local provider precedence selected Ollama nemotron-3.5-lightning while the Pulse UI incorrectly displayed LM Studio",
+      "Hermes Desktop and local serve processes are active, but ST has no Hermes route and Hermes currently resolves nvidia/nemotron-3-super-120b-a12b through an external NVIDIA endpoint"
+      ,"LM Studio live Gate selected google/gemma-4-e4b on EVO-T1, returned the expected local-only response in 17.66 seconds and retained a conservative 300-second user allowance"
+      ,"Hermes live Gate selected NVIDIA NIM nvidia/nemotron-3-super-120b-a12b on EVO-T1, returned the expected restricted response in 24.36 seconds and retained a conservative 720-second user allowance"
+      ,"Gateway integration tests proved one-byte AI chunks reach the client before upstream completion and a post-header timeout closes cleanly without nested HTTP/1.1 or 502 body text"
     ],
     "openP0": [],
     "openP1": [],
-    "verdict": "pass"
+    "verdict": "pending"
   },
   "loopHistory": [
     {
@@ -233,5 +237,5 @@
     "Stock_Terminal_v5.0.zip.sha256",
     "Stock_Terminal_v5.0.manifest.json"
   ],
-  "nextLoop": null
+  "nextLoop": "Implement LOOP-009 contracts and rerun the full Gate"
 }

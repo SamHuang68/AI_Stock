@@ -35,6 +35,10 @@
   var aiSummaryStarted = false;
   var aiSummaryVisible = false;
   var aiSpeechActive = false;
+  var aiSummaryMode = 'fast';
+  var aiSummaryInFlight = false;
+  var aiSummaryWaitTimer = null;
+  var aiRuntimeStatus = null;
   var lastBoundaryTraceSignature = null;
   var marketColorTraceSeen = {};
   var pulseMode = (function () {
@@ -116,9 +120,17 @@
       '#pl-root .pl-wd b{color:var(--cyan)}' +
       '#pl-root .pl-btn.wd{border-color:rgba(103,232,249,.35);color:var(--cyan)}' +
       '#pl-root .pl-ai{margin:4px 0 0;padding:6px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;flex:0 0 auto}' +
-      '#pl-root .pl-ai h4{margin:0 0 4px;font-size:9px;color:var(--gold);letter-spacing:1px;display:flex;justify-content:space-between;align-items:center}' +
+      '#pl-root .pl-ai h4{margin:0 0 4px;font-size:9px;color:var(--gold);letter-spacing:1px;display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap}' +
       '#pl-root .pl-ai .pl-ai-body{font-size:10px;line-height:1.55;color:var(--text);min-height:2em;white-space:pre-wrap}' +
       '#pl-root .pl-ai .pl-ai-meta{margin-top:4px;font-size:8px;color:var(--tlo)}' +
+      '#pl-root .pl-ai-modebar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:3px 0 8px}' +
+      '#pl-root .pl-ai-mode{appearance:none;border:1px solid #344965;border-radius:999px;background:#091525;color:#9fb0c5;' +
+        'padding:4px 9px;font:800 9px/1.25 "Noto Sans TC",sans-serif;cursor:pointer}' +
+      '#pl-root .pl-ai-mode.on{border-color:rgba(103,232,249,.65);background:rgba(14,165,233,.14);color:#cffafe;' +
+        'box-shadow:0 0 16px rgba(14,165,233,.09)}' +
+      '#pl-root .pl-ai-mode.deep.on{border-color:rgba(250,204,21,.62);background:rgba(234,179,8,.12);color:#fde68a}' +
+      '#pl-root .pl-ai-mode:disabled{opacity:.48;cursor:wait}' +
+      '#pl-root .pl-ai-runtime-note{font:700 8px/1.4 "Noto Sans TC",sans-serif;color:#8296ae}' +
       '#pl-root.beginner-mode .pl-ai{position:fixed;z-index:10020;top:34px;right:8px;bottom:8px;width:min(430px,calc(100vw - 16px));' +
         'box-sizing:border-box;margin:0;padding:14px;border:1px solid rgba(125,211,252,.32);border-radius:14px;' +
         'background:rgba(7,16,29,.88);backdrop-filter:blur(18px) saturate(135%);box-shadow:-18px 0 52px rgba(0,0,0,.48);' +
@@ -987,6 +999,18 @@
         ? '收起摘要；結果會保留'
         : '產生 30 秒可讀完的白話市場懶人包';
     }
+    var fastBtn = $('pl-ai-fast');
+    var deepBtn = $('pl-ai-deep');
+    if (fastBtn) {
+      fastBtn.classList.toggle('on', aiSummaryMode === 'fast');
+      fastBtn.disabled = aiSummaryInFlight;
+      fastBtn.setAttribute('aria-pressed', String(aiSummaryMode === 'fast'));
+    }
+    if (deepBtn) {
+      deepBtn.classList.toggle('on', aiSummaryMode === 'deep');
+      deepBtn.disabled = aiSummaryInFlight;
+      deepBtn.setAttribute('aria-pressed', String(aiSummaryMode === 'deep'));
+    }
     var speakBtn = $('pl-ai-speak');
     if (speakBtn) {
       speakBtn.textContent = aiSpeechActive ? '■ 停止' : '🎙 約15秒朗讀';
@@ -1046,20 +1070,99 @@
       setAiSummaryVisible(true);
       return;
     }
-    runAiSummary();
+    runAiSummary('fast');
   }
 
-  function runAiSummary() {
+  function aiModeFallback(mode) {
+    return mode === 'deep' ? {
+      mode: 'deep', host: 'EVO-T1', provider: 'Hermes Agent → NVIDIA',
+      model: 'nvidia/nemotron-3-super-120b-a12b', dataBoundary: 'external-provider',
+      estimateSeconds: 720,
+      estimateLabel: '請預留約 12 分鐘（含 Hermes 啟動、供應商連線、上下文預填與深度推理）'
+    } : {
+      mode: 'fast', host: 'EVO-T1', provider: 'LM Studio', model: 'google/gemma-4-e4b',
+      dataBoundary: 'local-only', estimateSeconds: 300,
+      estimateLabel: '請預留約 5 分鐘（含模型載入、上下文預填與推理）'
+    };
+  }
+
+  function loadAiRuntimeStatus() {
+    return fetch(SRV + '/ai/local/status', { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) throw new Error('status ' + r.status);
+      return r.json();
+    }).then(function (d) {
+      aiRuntimeStatus = d && d.modes ? d : null;
+      return aiRuntimeStatus;
+    }).catch(function () { return null; });
+  }
+
+  function aiRouteLabel(route) {
+    if (!route) return 'EVO-T1';
+    var provider = String(route.provider || 'AI runtime');
+    var model = String(route.model || '未回報模型');
+    var boundary = route.dataBoundary === 'local-only' ? '本機資料邊界' : '外部供應商資料邊界';
+    return String(route.host || 'EVO-T1') + ' · ' + provider + ' · ' + model + ' · ' + boundary;
+  }
+
+  function formatAiDuration(ms) {
+    var sec = Math.max(0, Math.round(Number(ms || 0) / 1000));
+    if (sec < 60) return sec + ' 秒';
+    return Math.floor(sec / 60) + ' 分 ' + (sec % 60) + ' 秒';
+  }
+
+  function stopAiWaitTicker() {
+    if (aiSummaryWaitTimer) clearInterval(aiSummaryWaitTimer);
+    aiSummaryWaitTimer = null;
+  }
+
+  function startAiWaitTicker(startedAt, route, meta) {
+    stopAiWaitTicker();
+    function tick() {
+      if (!meta || !aiSummaryInFlight) return;
+      meta.textContent = aiRouteLabel(route) + ' · 已等待 ' + formatAiDuration(Date.now() - startedAt) +
+        ' · 仍可能在模型載入、上下文預填或推理；請勿重複送出';
+    }
+    tick();
+    aiSummaryWaitTimer = setInterval(tick, 5000);
+  }
+
+  function headerRoute(response, fallback) {
+    var h = response && response.headers;
+    if (!h) return fallback;
+    var seconds = Number(h.get('X-ST-AI-Estimate-Seconds'));
+    return {
+      mode: h.get('X-ST-AI-Mode') || fallback.mode,
+      host: h.get('X-ST-AI-Host') || fallback.host,
+      provider: h.get('X-ST-AI-Provider') || fallback.provider,
+      model: h.get('X-ST-AI-Model') || fallback.model,
+      dataBoundary: h.get('X-ST-AI-Data-Boundary') || fallback.dataBoundary,
+      estimateSeconds: isFinite(seconds) && seconds > 0 ? seconds : fallback.estimateSeconds,
+      requestId: h.get('X-ST-AI-Request-ID') || ''
+    };
+  }
+
+  function friendlyAiError(status, text) {
+    var message = String(text || '').trim();
+    try {
+      var parsed = JSON.parse(message);
+      message = String(parsed.error || parsed.message || message);
+    } catch (e) {}
+    if (!message) message = 'HTTP ' + status;
+    return message.replace(/HTTP\/1\.[01][\s\S]*/g, '連線在回應期間中斷').slice(0, 220);
+  }
+
+  function runAiSummary(mode) {
     var box = $('pl-ai');
     var body = $('pl-ai-body');
     var st = $('pl-ai-st');
     var meta = $('pl-ai-meta');
-    if (!box || !body) return;
+    if (!box || !body || aiSummaryInFlight) return;
+    mode = mode === 'deep' ? 'deep' : 'fast';
+    aiSummaryMode = mode;
+    aiSummaryInFlight = true;
     aiSummaryStarted = true;
     setAiSummaryVisible(true);
-    body.textContent = '思考中…（本機 /ai/local，首次載入可能較久）';
-    if (st) st.textContent = 'LM Studio';
-    if (meta) meta.textContent = '';
+    syncAiSummaryControls();
 
     var m = _lastMacro || {};
     var ctx = [
@@ -1080,34 +1183,56 @@
       '權值與廣度背離: ' + (m.breadthDivergence || '未命中'),
       '自選族群共振: ' + (m.themeResonance || '未提供')
     ].join('\n');
-    var prompt = pulseMode === 'beginner'
+    var fastPrompt = pulseMode === 'beginner'
       ? '請用繁體中文輸出固定 3 點、30 秒可讀完的白話摘要，標題依序是「1. 大盤狀態」「2. 操作策略」「3. 關鍵轉折」。' +
         '向完全不懂股票的人解釋，避免 Z-Score、ATR、advRatio 等術語；若要提廣度，改說「每 10 家約幾家上漲」。' +
         '不可編造未提供數字，不可保證獲利，結尾加「⚠ 非投資建議」。'
       : '請用 4–6 句繁中，根據「目前提供的資料」做台股大盤即時語意解析：' +
         '1) 多空傾向 2) 廣度與體質是否背離 3) 供應鏈外溢與風險提示 4) 對進場侵略性（保守/均衡/積極）的建議。' +
         '不可編造未提供的數字。結尾加「⚠ 非投資建議」。';
+    var deepPrompt = '請以繁體中文提供一份嚴謹、可審核的台股市場深度分析。依序說明：' +
+      '1) 最強支持證據 2) 最強反方證據 3) 指數、廣度、資金與期貨是否衝突 4) 可能失效條件 ' +
+      '5) 仍無法從資料確認的不確定性。限 8–12 句，不得補造資料，不得執行交易或改動任何系統狀態；結尾加「⚠ 非投資建議」。';
+    var fallbackRoute = aiModeFallback(mode);
+    var startedAt = Date.now();
+    var traceId = 'pulse-ai-' + startedAt.toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    var endpoint = mode === 'deep' ? '/ai/deep' : '/ai/local';
+    var activeRoute = fallbackRoute;
+    var waitText = mode === 'deep' ? 'Hermes 深度分析' : '快速摘要';
 
-    fetch(SRV + '/ai/local', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: prompt, context: ctx })
+    return loadAiRuntimeStatus().then(function (runtime) {
+      activeRoute = runtime && runtime.modes && runtime.modes[mode] ? runtime.modes[mode] : fallbackRoute;
+      var estimate = activeRoute.estimateLabel || fallbackRoute.estimateLabel;
+      body.textContent = 'EVO-T1 正在準備' + waitText + '。\n' + estimate +
+        '。通常會提早完成；此時間已納入冷啟動與模型載入，請勿重複送出。';
+      if (mode === 'deep') body.textContent += '\n注意：深度分析會由 EVO-T1 經 Hermes 將本面板市場摘要送至外部 NVIDIA 模型。';
+      if (st) st.textContent = aiRouteLabel(activeRoute);
+      startAiWaitTicker(startedAt, activeRoute, meta);
+      return fetch(SRV + endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-ST-Trace-ID': traceId },
+        body: JSON.stringify({ prompt: mode === 'deep' ? deepPrompt : fastPrompt, context: ctx })
+      });
     }).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      if (!r.body || !r.body.getReader) return r.text().then(function (t) { body.textContent = t; });
+      activeRoute = headerRoute(r, activeRoute);
+      if (st) st.textContent = aiRouteLabel(activeRoute);
+      startAiWaitTicker(startedAt, activeRoute, meta);
+      if (!r.ok) return r.text().then(function (t) { throw new Error(friendlyAiError(r.status, t)); });
+      if (!r.body || !r.body.getReader) return r.text().then(function (t) {
+        if (!t.trim()) throw new Error('AI 未回傳內容');
+        body.textContent = t;
+        return t;
+      });
       var reader = r.body.getReader();
       var dec = new TextDecoder();
       var acc = '';
       function pump() {
         return reader.read().then(function (res) {
           if (res.done) {
-            if (!acc.trim()) {
-              body.textContent = pulseMode === 'beginner' ? beginnerFallbackSummary(m) : ruleFallbackSummary(m);
-              if (st) st.textContent = '規則後援';
-            } else if (meta) {
-              meta.textContent = '更新 ' + new Date().toLocaleTimeString('zh-TW') + ' · 本機 LLM';
-            }
-            return;
+            acc += dec.decode();
+            if (!acc.trim()) throw new Error('AI 未回傳內容');
+            body.textContent = acc;
+            return acc;
           }
           acc += dec.decode(res.value || new Uint8Array(), { stream: true });
           body.textContent = acc;
@@ -1115,10 +1240,19 @@
         });
       }
       return pump();
-    }).catch(function () {
+    }).then(function () {
+      if (meta) meta.textContent = '完成於 ' + new Date().toLocaleTimeString('zh-TW') + ' · 實際耗時 ' +
+        formatAiDuration(Date.now() - startedAt) + ' · ' + aiRouteLabel(activeRoute) +
+        (activeRoute.requestId ? ' · request ' + activeRoute.requestId.slice(0, 12) : '');
+    }).catch(function (err) {
       body.textContent = pulseMode === 'beginner' ? beginnerFallbackSummary(m) : ruleFallbackSummary(m);
-      if (st) st.textContent = '規則後援（LM Studio 未連線）';
-      if (meta) meta.textContent = '可啟動 LM Studio Local Server 後再按 AI 摘要';
+      if (st) st.textContent = (mode === 'deep' ? 'Hermes 深度分析' : '快速摘要') + '未完成 · 規則後援';
+      if (meta) meta.textContent = 'EVO-T1 AI 路徑未完成：' + String(err && err.message || '未知錯誤').slice(0, 220) +
+        ' · 已保留可讀的規則摘要 · trace ' + traceId;
+    }).then(function () {
+      stopAiWaitTicker();
+      aiSummaryInFlight = false;
+      syncAiSummaryControls();
     });
   }
 
@@ -1342,6 +1476,11 @@
             '<h4><span>大盤 AI 即時語意 <span id="pl-ai-st" style="font-weight:600;color:var(--tlo)"></span></span>' +
               '<span class="pl-ai-tools"><button type="button" class="pl-ai-speak" id="pl-ai-speak" aria-pressed="false">🎙 約15秒朗讀</button>' +
               '<button type="button" class="pl-ai-close" id="pl-ai-close" aria-label="關閉 AI 白話懶人包">× 關閉</button></span></h4>' +
+            '<div class="pl-ai-modebar" role="group" aria-label="AI 分析模式">' +
+              '<button type="button" class="pl-ai-mode on" id="pl-ai-fast" aria-pressed="true">⚡ 快速摘要 · 本機</button>' +
+              '<button type="button" class="pl-ai-mode deep" id="pl-ai-deep" aria-pressed="false">◆ Hermes 深度分析 · 外部</button>' +
+              '<span class="pl-ai-runtime-note">所有工作由 EVO-T1 執行；手機只顯示結果</span>' +
+            '</div>' +
             '<div class="pl-ai-body" id="pl-ai-body">—</div>' +
             '<div class="pl-ai-meta" id="pl-ai-meta"></div>' +
           '</div>' +
@@ -1361,6 +1500,10 @@
       if (aiClose) aiClose.onclick = function () { setAiSummaryVisible(false); };
       var aiSpeak = $('pl-ai-speak');
       if (aiSpeak) aiSpeak.onclick = toggleAiSpeech;
+      var aiFast = $('pl-ai-fast');
+      if (aiFast) aiFast.onclick = function () { runAiSummary('fast'); };
+      var aiDeep = $('pl-ai-deep');
+      if (aiDeep) aiDeep.onclick = function () { runAiSummary('deep'); };
       mount.querySelectorAll('[data-go]').forEach(function (b) {
         b.onclick = function () {
           goRoute(b.getAttribute('data-go'), {

@@ -27,6 +27,8 @@ REQUIRED_RELEASE_FILES = {
     "START_PRIVATE_WEB_HOST.cmd",
     "STOP_PRIVATE_WEB.cmd",
     "server/server.py",
+    "server/ai_local.py",
+    "server/ai_routes.py",
     "server/daemon_lock.py",
     "server/private_web_gateway.py",
     "server/private_web_access.py",
@@ -37,6 +39,7 @@ REQUIRED_RELEASE_FILES = {
     "tests/test_health_live.py",
     "tests/test_daemon_lock.py",
     "tests/test_private_web_host.py",
+    "tests/test_ai_local.py",
     "tests/test_private_web_access.py",
     "stock_terminal_v2.html",
 }
@@ -131,6 +134,7 @@ def stage_release(
 
         _run([python, "build_v2.py"], cwd=extracted)
         tests = [
+            "tests.test_ai_local",
             "tests.test_daemon_lock",
             "tests.test_health_live",
             "tests.test_private_web_gateway",

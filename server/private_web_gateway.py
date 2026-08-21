@@ -395,6 +395,7 @@ CONTROL_POST_EXACT = {
     "/options/txo/refresh",
     "/chain-momentum",
     "/ai/local",
+    "/ai/deep",
     "/ai-report",
     "/etf-reason",
     "/ai-note",
@@ -530,6 +531,7 @@ class Settings:
     audit_path: Path
     access_request_path: Path
     client_trace_path: Path = CLIENT_TRACE
+    ai_upstream_timeout_seconds: int = 1200
     extra_read_paths: tuple[str, ...] = ()
     extra_control_paths: tuple[str, ...] = ()
     dev_bypass: bool = False
@@ -610,11 +612,17 @@ class Settings:
             ),
             upstream_timeout_seconds=_env_int(
                 "ST_WEB_UPSTREAM_TIMEOUT", int(cfg.get("upstream_timeout_seconds") or 120),
-                minimum=5, maximum=600,
+                minimum=5, maximum=1800,
             ),
             audit_path=audit_path,
             access_request_path=access_request_path,
             client_trace_path=client_trace_path,
+            ai_upstream_timeout_seconds=_env_int(
+                "ST_WEB_AI_UPSTREAM_TIMEOUT",
+                int(cfg.get("ai_upstream_timeout_seconds") or 1200),
+                minimum=60,
+                maximum=1800,
+            ),
             extra_read_paths=_normalized_extra_paths(cfg.get("extra_read_paths")),
             extra_control_paths=_normalized_extra_paths(cfg.get("extra_control_paths")),
             dev_bypass=dev_bypass,
@@ -1301,6 +1309,13 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
         )
 
     def _proxy(self, role: str) -> None:
+        started = time.monotonic()
+        path_only = urlsplit(self.path).path
+        ai_request = path_only in {"/ai/local", "/ai/deep"}
+        response_started = False
+        upstream_status = 0
+        bytes_forwarded = 0
+        conn: http.client.HTTPConnection | None = None
         content_length_raw = self.headers.get("Content-Length") or "0"
         if self.headers.get("Transfer-Encoding"):
             self._audit("request_rejected", 411, role, reason="chunked_request")
@@ -1338,10 +1353,14 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             conn = http.client.HTTPConnection(
                 self.settings.upstream_host,
                 self.settings.upstream_port,
-                timeout=self.settings.upstream_timeout_seconds,
+                timeout=(
+                    self.settings.ai_upstream_timeout_seconds
+                    if ai_request else self.settings.upstream_timeout_seconds
+                ),
             )
             conn.request(self.command, self.path, body=body, headers=outbound_headers)
             response = conn.getresponse()
+            upstream_status = response.status
             response_headers = response.getheaders()
             content_type = next(
                 (value for key, value in response_headers if key.lower() == "content-type"),
@@ -1377,25 +1396,53 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Connection", "close")
             self.end_headers()
+            response_started = True
             if self.command != "HEAD":
                 if injected_body is not None:
                     self.wfile.write(injected_body)
+                    bytes_forwarded += len(injected_body)
                 else:
                     while True:
-                        chunk = response.read(64 * 1024)
+                        # read1 returns an available HTTP/socket chunk instead
+                        # of waiting to fill a large 64 KiB buffer. This is
+                        # essential for token streams from local AI runtimes.
+                        reader = getattr(response, "read1", response.read)
+                        chunk = reader(8 * 1024)
                         if not chunk:
                             break
                         self.wfile.write(chunk)
-            status = response.status
-            conn.close()
+                        self.wfile.flush()
+                        bytes_forwarded += len(chunk)
             if self.command == "POST":
-                self._audit("write_forwarded", status, role)
+                self._audit(
+                    "write_forwarded", response.status, role,
+                    elapsedMs=round((time.monotonic() - started) * 1000),
+                    bytesForwarded=bytes_forwarded,
+                    streaming=ai_request,
+                )
         except (OSError, http.client.HTTPException) as exc:
-            self._audit("upstream_error", 502, role, errorType=type(exc).__name__)
-            if not self.wfile.closed:
+            event = "upstream_stream_aborted" if response_started else "upstream_error"
+            self._audit(
+                event, 502, role,
+                errorType=type(exc).__name__,
+                upstreamStatus=upstream_status or None,
+                responseStarted=response_started,
+                elapsedMs=round((time.monotonic() - started) * 1000),
+                bytesForwarded=bytes_forwarded,
+                streaming=ai_request,
+            )
+            # Once response headers reached the browser a second HTTP status
+            # would become visible body text. Close the stream instead.
+            if not response_started and not self.wfile.closed:
                 try:
                     self._json(502, {"error": "ST backend unavailable"})
                 except (OSError, ValueError):
+                    pass
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except OSError:
                     pass
 
     def _handle(self) -> None:
