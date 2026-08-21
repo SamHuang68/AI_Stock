@@ -181,6 +181,7 @@
       '#view-pulse.sv-panel.on{max-width:none!important}' +
       '#topbar.shell-hidden{display:none !important}' +
       '#body.shell-hidden{display:none !important}' +
+      '#rpanel-pager.shell-hidden{display:none !important}' +
       '#wlbar.shell-hidden{display:none !important}' +
       /* 非作用中面板強制隱藏，避免「市場總覽」殘留在其他 tab 上方 */
       '.sv-panel{display:none!important;flex:1 1 0;padding:8px 10px 10px;max-width:none;min-width:0;' +
@@ -473,7 +474,16 @@
         'box-shadow:0 0 0 2px rgba(245,197,24,.18),0 8px 22px rgba(226,169,11,.36),' +
         'inset 0 1px 0 rgba(255,255,255,.58)}' +
       '@keyframes shellDashSheen{0%,62%{left:-40%}82%,100%{left:125%}}' +
-      '@media(prefers-reduced-motion:reduce){#topbar .shell-dash-btn:before{animation:none}}';
+      '@media(prefers-reduced-motion:reduce){#topbar .shell-dash-btn:before{animation:none}}' +
+      /* 手機直式統一由 shell-views 擔任唯一捲動容器；內容底部避開浮動轉盤與 iOS safe area。 */
+      '@media(max-width:900px) and (orientation:portrait){' +
+        '#shell-main #shell-views.show{display:block!important;overflow-x:hidden!important;overflow-y:auto!important;' +
+          'height:100%!important;min-height:0!important;overscroll-behavior-y:contain;scroll-padding-bottom:calc(80px + env(safe-area-inset-bottom,0px))}' +
+        '#shell-main #shell-views.show>.sv-panel.on{display:block!important;flex:none!important;height:auto!important;min-height:100%!important;' +
+          'overflow:visible!important;padding-bottom:calc(80px + env(safe-area-inset-bottom,0px))!important}' +
+        '#shell-main #shell-views.show>.sv-panel.on>.sv-mount{display:block!important;height:auto!important;min-height:0!important;overflow:visible!important}' +
+        '#st-ring-fab{bottom:calc(14px + env(safe-area-inset-bottom,0px))}' +
+      '}';
   }
 
   function stubHTML(route) {
@@ -1326,9 +1336,11 @@
       /* topbar／wlbar 移入 shell-main，僅圖表路由顯示，避免壓在其他 tab 上方 */
       var topbarEl = $('topbar');
       var wlEl = $('wlbar');
+      var pagerEl = $('rpanel-pager');
       if (topbarEl) main.appendChild(topbarEl);
       if (wlEl) main.appendChild(wlEl);
       main.appendChild(body);
+      if (pagerEl) main.appendChild(pagerEl);
       main.appendChild(views);
 
       ensureRingFab();
@@ -1339,6 +1351,12 @@
       stripLegacyNav();
       ensureRingFab();
       ROUTES.forEach(ensurePanel);
+      var existingMain = $('shell-main');
+      var existingPager = $('rpanel-pager');
+      var existingViews = $('shell-views');
+      if (existingMain && existingPager && existingPager.parentElement !== existingMain) {
+        existingMain.insertBefore(existingPager, existingViews || null);
+      }
     }
 
     stripLegacyNav();
@@ -1625,6 +1643,30 @@
     return { id: a.to, opts: merged };
   }
 
+  function traceMobilePanelLayout(routeId) {
+    try {
+      if (!window.matchMedia || !window.matchMedia('(max-width:900px)').matches) return;
+      var views = $('shell-views');
+      var panel = $('view-' + routeId);
+      var mount = $('mount-' + routeId);
+      if (!views || !panel) return;
+      var vr = views.getBoundingClientRect();
+      var pr = panel.getBoundingClientRect();
+      fetch('/diagnostics/ui-route', {
+        method: 'POST', headers: {'Content-Type':'application/json'}, keepalive: true,
+        body: JSON.stringify({
+          ts: new Date().toISOString(), event: 'mobile_shell_panel_layout',
+          correlationId: 'mobile-shell-' + Date.now(), from: 'shell-views', to: routeId,
+          state: (window.matchMedia('(orientation:portrait)').matches ? 'portrait' : 'landscape') +
+            '-scroll-' + getComputedStyle(views).overflowY,
+          label: window.innerWidth + 'x' + window.innerHeight + '|views=' + Math.round(vr.height) +
+            '/' + views.scrollHeight + '|panel=' + Math.round(pr.height) +
+            (mount ? '/' + mount.scrollHeight : '')
+        })
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
   function applyRoute(id, opts) {
     opts = opts || {};
     var resolved = resolveAlias(id, opts);
@@ -1673,13 +1715,16 @@
     var topbar = $('topbar');
     var body = $('body');
     var wl = $('wlbar');
+    var pager = $('rpanel-pager');
     var views = $('shell-views');
     var isChart = id === 'chart';
 
     if (topbar) topbar.classList.toggle('shell-hidden', !isChart);
     if (body) body.classList.toggle('shell-hidden', !isChart);
     if (wl) wl.classList.toggle('shell-hidden', !isChart);
+    if (pager) pager.classList.toggle('shell-hidden', !isChart);
     if (views) views.classList.toggle('show', !isChart);
+    try { document.documentElement.setAttribute('data-st5-route', id); } catch (eRouteAttr) {}
     /* 圖表底列大盤／市場條僅圖表頁顯示，勿蓋到其他 shell tab */
     var mktBar = $('mkt-bar');
     if (mktBar) mktBar.classList.toggle('shell-hidden', !isChart);
@@ -1713,6 +1758,7 @@
     }
 
     emitRoute(id, opts);
+    setTimeout(function () { traceMobilePanelLayout(id); }, 180);
   }
 
   function go(id, opts) {

@@ -71,9 +71,9 @@ const mobileCss = fs.readFileSync(path.join(root, 'src/ui/mobile_v2.css'), 'utf8
 ok(/s === '__TXF__'/.test(colors) && /\^__TW_/.test(colors) && /dirRU/.test(colors),
   'color contract recognizes TXF and TW local symbols as red-up instruments');
 ok(/function isJpFmt/.test(marketContract) && /return 'JP'/.test(marketContract) &&
-  /btn-jp/.test(fs.readFileSync(path.join(root, 'stock_terminal.html'), 'utf8')) &&
+  !/id="btn-jp"/.test(fs.readFileSync(path.join(root, 'stock_terminal.html'), 'utf8')) &&
   /mkt === 'JP'/.test(fs.readFileSync(path.join(root, 'stock_terminal.html'), 'utf8')),
-  'JP contract canonicalizes Tokyo symbols and exposes a dedicated market selector');
+  'JP contract remains available for broad-market observation without a stock-trading selector');
 ok(/function isJP/.test(colors) && /function isRedUp/.test(colors) &&
   /body\.market-jp \.price-up/.test(polish),
   'Japan price direction uses red-up/green-down without being classified as TWSE');
@@ -160,11 +160,11 @@ ok(/Exposure Lab/.test(decisionUi) && /Shadow · 研究上限/.test(decisionUi) 
   /波動壓力/.test(exposureLabEngine) && /融資擁擠/.test(exposureLabEngine) &&
   /槓桿適配/.test(exposureLabEngine) && /投組曝險/.test(exposureLabEngine) &&
   /單一最高風險至少保留/.test(exposureLabEngine) &&
-  /<details class="dc-lab-detail"><summary>展開數據與判定依據/.test(decisionUi) &&
+  /<details class="dc-lab-detail" open><summary>數據與判定依據/.test(decisionUi) &&
   /#60a5fa/.test(decisionUi) && /#facc15/.test(decisionUi) && /#fb923c/.test(decisionUi) &&
   /hypotheses\.map/.test(decisionUi) &&
   !/00685L/.test(decisionUi) && /selectedResearchCeilingPct/.test(decisionUi),
-  'Exposure Lab opens with professional exposure-pressure lights and keeps detailed evidence opt-in');
+  'Exposure Lab opens with professional exposure-pressure lights and expanded evidence');
 ok(/dc-temp-light \.s\{grid-column:1\/-1;text-align:center/.test(decisionUi) &&
   /num\(x\[1\], 0\)/.test(decisionUi) && /function confidenceIcon/.test(decisionUi) &&
   /dc-confidence/.test(decisionUi) && /width:54px;height:54px/.test(decisionUi) &&
@@ -180,7 +180,7 @@ ok(/function mandatoryControlsHtml/.test(decisionUi) && /dc-mandatory/.test(deci
   'high-confidence breadth divergence drives explicit Action Envelope red-light controls');
 ok(/function optionsStructureHtml/.test(decisionUi) && /data-layer=\"observed\"/.test(decisionUi) &&
   /data-layer=\"derived\"/.test(decisionUi) && /data-layer=\"modeled\"/.test(decisionUi) &&
-  /optionsLabOpen = false/.test(decisionUi) && /function bindOptionsLab/.test(decisionUi) &&
+  /optionsLabOpen = true/.test(decisionUi) && /function bindOptionsLab/.test(decisionUi) &&
   /data-st-sort=\"off\"/.test(decisionUi) && /\/options\/txo\/refresh/.test(decisionUi) &&
   /DecisionData\.publish\(ctx, 'options-refresh'\)/.test(decisionUi),
   'TXO options structure keeps observed, derived and modeled layers distinct in one canonical DecisionContext');
@@ -318,9 +318,9 @@ ok(/us-up/.test(fs.readFileSync(path.join(root, 'src/ui/heat_v5.js'), 'utf8')) &
   'US heatmap focus and KPI values use green-up/red-down classes');
 ok(!/id="pl-decision-command"/.test(pulseBeginner) && /data-go="decision"/.test(pulseBeginner),
   'pulse keeps a compact decision route button without the three-column command strip');
-ok(/dc-command-fold/.test(decisionUi) && /<details class="dc-command-fold">/.test(decisionUi) &&
+ok(/dc-command-fold/.test(decisionUi) && /<details class="dc-command-fold" open>/.test(decisionUi) &&
   /決策摘要/.test(decisionUi) && /content:"收合"/.test(decisionUi),
-  'decision page owns the market/action/confirmation summary as a default-collapsed section');
+  'decision page owns the market/action/confirmation summary as a default-open section');
 ok(/_allowed_root = \('src\/', 'assets\/'\)/.test(server) && /\/market\/snapshot/.test(server),
   'server static files are allow-listed and canonical market route is wired');
 ok(/\/decision\/context/.test(server) && /\/decision\/history/.test(server) && /\/key-levels/.test(server) &&
@@ -622,14 +622,34 @@ ok(!/class="wlchip-rm"/.test(sourceHtml) &&
   /body > \.wl-action-menu\.open/.test(mobileCss),
   'mobile watchlist requires a long press menu and suppresses the following load click');
 ok(/id="rpanel-pager"/.test(sourceHtml) && /id="rpage-dots"/.test(sourceHtml) &&
-  /const RPANEL_PAGES =/.test(sourceHtml) && /function shiftRtab\(delta\)/.test(sourceHtml) &&
+  /MOBILE_WORKSPACE_PAGES = \[\{key:'chart'/.test(sourceHtml) &&
+  /function goMobileWorkspacePage\(index, reason\)/.test(sourceHtml) &&
+  /data-mobile-workspace-page/.test(sourceHtml) && /function shiftRtab\(delta\)/.test(sourceHtml) &&
   /Math\.abs\(dx\) < 56/.test(sourceHtml) &&
   /#rtabs \{ display: none !important; \}/.test(mobileCss) &&
   /#rpanel-pager[\s\S]*display: grid !important/.test(mobileCss) &&
-  /grid-template-columns: 48px minmax\(0,1fr\) 104px/.test(mobileCss) &&
+  /grid-template-columns: 48px minmax\(0,1fr\) 48px/.test(mobileCss) &&
+  /orientation: portrait/.test(mobileCss) &&
+  /data-mobile-workspace-page="chart"/.test(mobileCss) &&
+  /orientation: landscape/.test(mobileCss) &&
+  /#rtabs \{ display: flex !important; \}/.test(mobileCss) &&
+  /main\.appendChild\(pagerEl\)/.test(shell) &&
+  /pager\.classList\.toggle\('shell-hidden', !isChart\)/.test(shell) &&
+  /data-st5-route/.test(shell) &&
+  /html\[data-st5-route="chart"\] #st-ring-fab/.test(mobileCss) &&
   /#rpage-dots \.rpage-dot\.on/.test(mobileCss) &&
   /window\.updateRpanelPager/.test(position),
-  'mobile analysis workbench uses swipe paging with a persistent bottom page index');
+  'portrait mobile pages the whole chart workspace; landscape keeps the workstation split');
+ok(/mobile_shell_panel_layout/.test(shell) &&
+  /scroll-padding-bottom:calc\(80px \+ env\(safe-area-inset-bottom,0px\)\)/.test(shell) &&
+  /#shell-main #shell-views\.show>\.sv-panel\.on/.test(shell),
+  'portrait shell uses one scroll owner and reserves bottom safe space for all panels');
+ok(/var optionsLabOpen = true/.test(decisionUi) &&
+  /dc-command-fold" open/.test(decisionUi) &&
+  /dc-lab-detail" open/.test(decisionUi) &&
+  /dc-lab-subdetail" open/.test(decisionUi) &&
+  /return '<details open><summary>Risk Profile/.test(decisionUi),
+  'decision research panels are expanded by default');
 ok(/ShellV5\.ringPop/.test(hotkeys),
   'hotkeys Esc fallback calls ShellV5.ringPop while ring open');
 ok(/function plainWdStatus/.test(shell) && /chipLabel/.test(shell) &&

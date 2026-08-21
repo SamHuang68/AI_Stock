@@ -228,7 +228,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
     <div style="display:flex;align-items:center;gap:4px">
       <button class="mktbtn on" id="btn-tw" onclick="setMkt('TW')">🇹🇼 TW</button>
       <button class="mktbtn" id="btn-us" onclick="setMkt('US')">🇺🇸 US</button>
-      <button class="mktbtn" id="btn-jp" onclick="setMkt('JP')">🇯🇵 JP</button>
     </div>
     <div id="chart-search" role="search" aria-label="股票代號搜尋">
       <input id="syminput" placeholder="代號" aria-label="股票代號" maxlength="10" onkeydown="if(event.key==='Enter')go()">
@@ -271,15 +270,15 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
         <button class="rtab" data-tab="etf" id="tab-etf" onclick="setTab('etf')">ETF△</button>
       </div>
       <div id="rpanel"></div>
-      <div id="rpanel-pager" role="group" aria-label="分析頁面導覽">
-        <button type="button" id="rpage-prev" aria-label="上一個分析頁" onclick="shiftRtab(-1)">‹</button>
-        <div class="rpage-state">
-          <div id="rpage-label" aria-live="polite">技術統計 · 1 / 6</div>
-          <div id="rpage-dots" aria-label="分析頁面索引"></div>
-        </div>
-        <button type="button" id="rpage-next" aria-label="下一個分析頁" onclick="shiftRtab(1)">›</button>
-      </div>
     </div>
+  </div>
+  <div id="rpanel-pager" role="group" aria-label="手機圖表工作區頁面導覽">
+    <button type="button" id="rpage-prev" aria-label="上一個工作區頁面" onclick="shiftRtab(-1)">‹</button>
+    <div class="rpage-state">
+      <div id="rpage-label" aria-live="polite">線型圖 · 1 / 7</div>
+      <div id="rpage-dots" aria-label="工作區頁面索引"></div>
+    </div>
+    <button type="button" id="rpage-next" aria-label="下一個工作區頁面" onclick="shiftRtab(1)">›</button>
   </div>
 </div>
 <script>
@@ -355,6 +354,7 @@ window.addEventListener('DOMContentLoaded', () => {
   renderRpanel();
   attachRpanelPager();
   updateRpanelPager();
+  attachMobileWorkspaceTrace();
   if (S.wl.length > 0) loadSym(S.wl[0].t, S.wl[0].m);
   (window.fetchEtfDelta || fetchEtfDelta)();
   updateKeyBtn();
@@ -1743,6 +1743,46 @@ function relTime(ts) {
 }
 
 // ── TABS ─────────────────────────────────────────────────────────
+function traceMobileWorkspaceLayout(reason) {
+  try {
+    const body = document.getElementById('body');
+    const left = document.getElementById('left');
+    const right = document.getElementById('right');
+    if (!body || !left || !right || window.innerWidth > 900) return;
+    const b = body.getBoundingClientRect();
+    const l = left.getBoundingClientRect();
+    const r = right.getBoundingClientRect();
+    const portrait = window.matchMedia('(orientation: portrait)').matches;
+    fetch('/diagnostics/ui-route', {
+      method:'POST', headers:{'Content-Type':'application/json'}, keepalive:true,
+      body:JSON.stringify({
+        ts:new Date().toISOString(), event:'mobile_workspace_layout',
+        correlationId:'mobile-workspace-'+Date.now(), from:'chart-shell', to:'body',
+        state:(portrait ? 'portrait' : 'landscape') + '-' + getComputedStyle(body).flexDirection,
+        label:[reason, window.innerWidth+'x'+window.innerHeight,
+          'body='+Math.round(b.width)+'x'+Math.round(b.height),
+          'left='+Math.round(l.width)+'x'+Math.round(l.height),
+          'right='+Math.round(r.width)+'x'+Math.round(r.height)].join('|')
+      })
+    }).catch(()=>{});
+  } catch {}
+}
+
+function attachMobileWorkspaceTrace() {
+  syncMobileWorkspacePage();
+  traceMobileWorkspaceLayout('boot');
+  let timer = 0;
+  const observe = function () {
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      syncMobileWorkspacePage();
+      traceMobileWorkspaceLayout('viewport');
+    }, 180);
+  };
+  window.addEventListener('resize', observe, {passive:true});
+  window.addEventListener('orientationchange', observe, {passive:true});
+}
+
 const RPANEL_PAGES = [
   {key:'stats', label:'技術統計'},
   {key:'research', label:'研究分析'},
@@ -1751,7 +1791,14 @@ const RPANEL_PAGES = [
   {key:'plan', label:'交易計畫'},
   {key:'etf', label:'ETF 變動'}
 ];
+const MOBILE_WORKSPACE_PAGES = [{key:'chart', label:'線型圖'}].concat(RPANEL_PAGES);
+let _mobileWorkspacePage = 0;
 let _rpanelSwipeStart = null;
+
+function isPortraitMobileWorkspace() {
+  return !!(window.matchMedia &&
+    window.matchMedia('(max-width: 768px) and (orientation: portrait)').matches);
+}
 
 function rpanelPageIndex() {
   const key = (S.tab === 'batch' || S.tab === 'history') ? 'research' : S.tab;
@@ -1760,16 +1807,18 @@ function rpanelPageIndex() {
 }
 
 function updateRpanelPager() {
-  const idx = rpanelPageIndex();
-  const page = RPANEL_PAGES[idx];
+  const mobileWorkspace = isPortraitMobileWorkspace();
+  const pages = mobileWorkspace ? MOBILE_WORKSPACE_PAGES : RPANEL_PAGES;
+  const idx = mobileWorkspace ? _mobileWorkspacePage : rpanelPageIndex();
+  const page = pages[idx] || pages[0];
   const label = document.getElementById('rpage-label');
   const dots = document.getElementById('rpage-dots');
   const prev = document.getElementById('rpage-prev');
   const next = document.getElementById('rpage-next');
-  if (label) label.textContent = page.label + ' · ' + (idx + 1) + ' / ' + RPANEL_PAGES.length;
+  if (label) label.textContent = page.label + ' · ' + (idx + 1) + ' / ' + pages.length;
   if (prev) prev.disabled = idx === 0;
-  if (next) next.disabled = idx === RPANEL_PAGES.length - 1;
-  if (dots) dots.innerHTML = RPANEL_PAGES.map(function (candidate, i) {
+  if (next) next.disabled = idx === pages.length - 1;
+  if (dots) dots.innerHTML = pages.map(function (candidate, i) {
     return '<button type="button" class="rpage-dot' + (i === idx ? ' on' : '') + '"' +
       ' aria-label="前往' + candidate.label + '" aria-current="' + (i === idx ? 'page' : 'false') + '"' +
       ' onclick="goRpanelPage(' + i + ')"></button>';
@@ -1777,11 +1826,68 @@ function updateRpanelPager() {
 }
 
 function goRpanelPage(index) {
+  if (isPortraitMobileWorkspace()) {
+    goMobileWorkspacePage(index, 'dot');
+    return;
+  }
   const next = RPANEL_PAGES[Math.max(0, Math.min(RPANEL_PAGES.length - 1, Number(index) || 0))];
   if (next) setTab(next.key);
 }
 
+function syncMobileWorkspacePage(reason) {
+  const body = document.getElementById('body');
+  if (!body) return;
+  if (!isPortraitMobileWorkspace()) {
+    body.removeAttribute('data-mobile-workspace-page');
+    body.removeAttribute('data-mobile-workspace-key');
+    updateRpanelPager();
+    return;
+  }
+  const page = MOBILE_WORKSPACE_PAGES[_mobileWorkspacePage] || MOBILE_WORKSPACE_PAGES[0];
+  body.setAttribute('data-mobile-workspace-page', page.key === 'chart' ? 'chart' : 'analysis');
+  body.setAttribute('data-mobile-workspace-key', page.key);
+  updateRpanelPager();
+  if (page.key === 'chart') {
+    setTimeout(function () { try { window.dispatchEvent(new Event('resize')); } catch {} }, 30);
+  }
+  if (reason) {
+    try {
+      fetch('/diagnostics/ui-route', {
+        method:'POST', headers:{'Content-Type':'application/json'}, keepalive:true,
+        body:JSON.stringify({
+          ts:new Date().toISOString(), event:'mobile_workspace_page_changed',
+          correlationId:'mobile-workspace-page-'+Date.now(), from:reason, to:page.key,
+          state:'page-'+(_mobileWorkspacePage + 1)+'-of-'+MOBILE_WORKSPACE_PAGES.length,
+          label:window.innerWidth+'x'+window.innerHeight
+        })
+      }).catch(()=>{});
+    } catch {}
+  }
+}
+
+function goMobileWorkspacePage(index, reason) {
+  const value = Number(index);
+  const nextIndex = Math.max(0, Math.min(MOBILE_WORKSPACE_PAGES.length - 1,
+    Number.isFinite(value) ? value : 0));
+  _mobileWorkspacePage = nextIndex;
+  const page = MOBILE_WORKSPACE_PAGES[nextIndex];
+  if (page && page.key !== 'chart' && S.tab !== page.key) {
+    S.tab = page.key;
+    document.querySelectorAll('.rtab').forEach(function (button) {
+      button.classList.toggle('on', button.dataset.tab === page.key);
+    });
+    renderRpanel();
+  }
+  const panel = document.getElementById('rpanel');
+  if (panel) panel.scrollTop = 0;
+  syncMobileWorkspacePage(reason || 'pager');
+}
+
 function shiftRtab(delta) {
+  if (isPortraitMobileWorkspace()) {
+    goMobileWorkspacePage(_mobileWorkspacePage + delta, delta > 0 ? 'next' : 'prev');
+    return;
+  }
   const current = rpanelPageIndex();
   const next = Math.max(0, Math.min(RPANEL_PAGES.length - 1, current + delta));
   if (next === current) return;
@@ -1792,23 +1898,31 @@ function shiftRtab(delta) {
 
 function attachRpanelPager() {
   const panel = document.getElementById('rpanel');
-  if (!panel || panel.dataset.swipePager === '1') return;
-  panel.dataset.swipePager = '1';
-  panel.addEventListener('pointerdown', function (ev) {
-    if (ev.pointerType !== 'touch' && ev.pointerType !== 'pen') return;
-    if (ev.target && ev.target.closest && ev.target.closest('button,a,input,textarea,select,[contenteditable="true"]')) return;
-    _rpanelSwipeStart = {x:ev.clientX, y:ev.clientY, at:Date.now(), pointerId:ev.pointerId};
-  }, {passive:true});
-  panel.addEventListener('pointerup', function (ev) {
-    const start = _rpanelSwipeStart;
-    _rpanelSwipeStart = null;
-    if (!start || ev.pointerId !== start.pointerId || Date.now() - start.at > 1200) return;
-    const dx = ev.clientX - start.x;
-    const dy = ev.clientY - start.y;
-    if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.35) return;
-    shiftRtab(dx < 0 ? 1 : -1);
-  }, {passive:true});
-  panel.addEventListener('pointercancel', function () { _rpanelSwipeStart = null; }, {passive:true});
+  const left = document.getElementById('left');
+  function bind(surface, chartEdgeOnly) {
+    if (!surface || surface.dataset.swipePager === '1') return;
+    surface.dataset.swipePager = '1';
+    surface.addEventListener('pointerdown', function (ev) {
+      if (!isPortraitMobileWorkspace()) return;
+      if (ev.pointerType !== 'touch' && ev.pointerType !== 'pen') return;
+      if (ev.target && ev.target.closest && ev.target.closest('button,a,input,textarea,select,[contenteditable="true"]')) return;
+      if (chartEdgeOnly && ev.clientX < window.innerWidth - Math.max(28, window.innerWidth * .07)) return;
+      _rpanelSwipeStart = {x:ev.clientX, y:ev.clientY, at:Date.now(), pointerId:ev.pointerId};
+    }, {passive:true, capture:true});
+    surface.addEventListener('pointerup', function (ev) {
+      const start = _rpanelSwipeStart;
+      _rpanelSwipeStart = null;
+      if (!start || ev.pointerId !== start.pointerId || Date.now() - start.at > 1200) return;
+      const dx = ev.clientX - start.x;
+      const dy = ev.clientY - start.y;
+      if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.35) return;
+      shiftRtab(dx < 0 ? 1 : -1);
+    }, {passive:true, capture:true});
+    surface.addEventListener('pointercancel', function () { _rpanelSwipeStart = null; }, {passive:true, capture:true});
+  }
+  bind(panel, false);
+  bind(left, true);
+  syncMobileWorkspacePage();
 }
 
 function setTab(tab) {
@@ -1816,8 +1930,14 @@ function setTab(tab) {
   document.querySelectorAll('.rtab').forEach(b=>{
     b.classList.toggle('on', b.dataset.tab===tab);
   });
-  updateRpanelPager();
   renderRpanel();
+  if (isPortraitMobileWorkspace()) {
+    const idx = RPANEL_PAGES.findIndex(function (page) { return page.key === tab; });
+    if (idx >= 0) _mobileWorkspacePage = idx + 1;
+    syncMobileWorkspacePage('tab');
+  } else {
+    updateRpanelPager();
+  }
 }
 
 function renderRpanel() {

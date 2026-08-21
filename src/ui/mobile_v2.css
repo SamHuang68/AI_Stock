@@ -1,5 +1,5 @@
 /* ============================================================
-   Stock Terminal v2.0 — Mobile / Tablet Responsive CSS
+   Stock Terminal v5.0 — Mobile / Tablet Responsive CSS
    ------------------------------------------------------------
    Breakpoints:
      ≤ 768px  → 手機（直式優先）
@@ -7,7 +7,7 @@
      > 1280px → 桌機（保持原樣）
 
    策略：
-     • 手機把右側面板變底部抽屜（drawer），主圖佔滿
+     • 手機直式以整個工作區分頁；橫式維持線型＋分析同屏
      • 觸控按鈕至少 36px 高
      • 隱藏部分裝飾性元素（grip 圖示、長標籤）
      • indbar 改為水平捲動（16 個指標放不下兩列）
@@ -16,6 +16,8 @@
 /* ──────────────────────────────────────────────────────────
    📱 Mobile (≤ 768px)
    ────────────────────────────────────────────────────────── */
+#body.shell-hidden + #rpanel-pager { display: none !important; }
+
 @media (max-width: 768px) {
 
   /* ── Layout: stack vertically ── */
@@ -36,7 +38,7 @@
   #right.collapsed #rpanel { display: none; }
   #right.collapsed #rpanel-pager { display: none !important; }
 
-  /* Six squeezed labels become one bottom pager with arrows + position dots. */
+  /* Portrait workspace pager: chart + six analysis pages. */
   #rtabs { display: none !important; }
   #rpanel {
     min-height: 0;
@@ -46,7 +48,7 @@
   }
   #rpanel-pager {
     display: grid !important;
-    grid-template-columns: 48px minmax(0,1fr) 104px;
+    grid-template-columns: 48px minmax(0,1fr) 48px;
     align-items: center;
     min-height: 44px;
     flex: 0 0 44px;
@@ -68,7 +70,7 @@
     touch-action: manipulation;
   }
   #rpanel-pager > button:disabled { opacity: .25; color: var(--tlo); }
-  #rpage-next { justify-self: start; margin-left: 8px !important; }
+  #rpage-next { justify-self: center; margin-left: auto !important; }
   #rpanel-pager .rpage-state { min-width: 0; text-align: center; }
   #rpage-label {
     color: var(--thi);
@@ -237,6 +239,73 @@
   .rgbtn { font-size: 8.5px !important; min-width: 36px !important; }
   #right { height: 50vh; max-height: none; }
   #live-panel { bottom: calc(50vh + 8px) !important; }
+}
+
+/* ──────────────────────────────────────────────────────────
+   📱 Phone portrait: page the WHOLE chart workspace.
+   The chart is page 1; analysis tabs are pages 2–7.  This fixes
+   the old 48–50vh bottom sheet that could leave only ~56px for K lines.
+   ────────────────────────────────────────────────────────── */
+@media (max-width: 768px) and (orientation: portrait) {
+  #body {
+    flex-direction: row !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+  #body > #left,
+  #body > #right {
+    width: 100% !important;
+    height: 100% !important;
+    max-height: none !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    flex: 1 1 100% !important;
+  }
+  #body[data-mobile-workspace-page="chart"] > #left { display: flex !important; }
+  #body[data-mobile-workspace-page="chart"] > #right { display: none !important; }
+  #body[data-mobile-workspace-page="analysis"] > #left { display: none !important; }
+  #body[data-mobile-workspace-page="analysis"] > #right { display: flex !important; }
+  #right {
+    border-left: 0 !important;
+    border-top: 0 !important;
+  }
+  #rpanel { flex: 1 1 0 !important; min-height: 0 !important; }
+  #rpanel-pager { flex: 0 0 auto !important; }
+  html[data-st5-route="chart"] #st-ring-fab {
+    bottom: calc(62px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  #live-panel {
+    bottom: calc(50px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+/* Phone landscape already has enough width.  Do not page it: restore the
+   workstation's line-chart + analysis split and its regular analysis tabs. */
+@media (max-width: 900px) and (orientation: landscape) {
+  #body { flex-direction: row !important; overflow: hidden !important; }
+  #body > #left {
+    display: flex !important;
+    width: auto !important;
+    height: 100% !important;
+    flex: 1 1 60% !important;
+  }
+  #body > #right {
+    display: flex !important;
+    width: 40% !important;
+    height: 100% !important;
+    max-height: none !important;
+    flex: 0 0 40% !important;
+    border-left: 1px solid var(--border) !important;
+    border-top: 0 !important;
+  }
+  #rtabs { display: flex !important; }
+  #rpanel-pager { display: none !important; }
+  #live-panel {
+    left: auto !important;
+    right: calc(40% + 8px) !important;
+    bottom: 52px !important;
+    width: min(220px, 30vw) !important;
+  }
 }
 
 /* ──────────────────────────────────────────────────────────

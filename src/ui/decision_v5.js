@@ -7,7 +7,7 @@
   var lastHoldings = [];
   var riskDraft = {};
   var portfolioMode = 'actual';
-  var optionsLabOpen = false;
+  var optionsLabOpen = true;
   var optionsRefreshStarted = false;
   var evidenceView = { category: 'all', mode: 'all', scope: 'all', query: '' };
 
@@ -1311,7 +1311,7 @@
     }).join('');
     var validation = lab.externalValidation || {};
     return '<details class="dc-lab" open><summary><span>中長期曝險研究 · Exposure Lab</span><span class="tag">Shadow · 研究上限</span></summary>' +
-      temperature + '<details class="dc-lab-detail"><summary>展開數據與判定依據</summary>' +
+      temperature + '<details class="dc-lab-detail" open><summary>數據與判定依據</summary>' +
       '<div class="dc-lab-authority"><div><b>月度核心</b><span>' + esc(core.asOf || '—') + ' 建立 · 凍結至 ' + esc(core.frozenUntil || '—') +
         '</span></div><div><b>週度健康</b><span>' + esc(weekly.headline || '監控資料不足') + ' · 只複查、不調倉</span></div><div><b>基準</b><span>' +
         esc(lab.selectedBenchmarkId || '—') + '</span></div></div>' +
@@ -1333,7 +1333,7 @@
         '</div></div><div class="dc-lab-box"><div class="k">模型治理</div><div class="v">週度擇時未通過外部 OOS</div><div class="s">' +
         esc(validation.status || '—') + ' · ST 重現 ' + esc(validation.stReproduced ? '完成' : '尚未完成') + '</div></div></div>' +
       '<div class="dc-scroll dc-lab-scroll"><table class="dc-lab-table" data-st-sort="off"><tr><th>底層</th><th>TSMC 權重</th><th>模型長期報酬</th><th>中長期波動</th><th>正二效率差 M<br><small>Base；Bear/Bull</small></th><th>狀態</th></tr>' + rows + '</table></div>' +
-      '<details class="dc-lab-subdetail"><summary>模型假設、商品機制與外部驗證</summary>' +
+      '<details class="dc-lab-subdetail" open><summary>模型假設、商品機制與外部驗證</summary>' +
       '<div class="dc-lab-grid"><div class="dc-lab-box"><div class="k">核心假設</div><div class="v">Forward EPS ' + num(assumptions.tsmcForwardEps, 1) +
         ' · 合理 P/E ' + num(baseFairPe, 1) +
         '</div><div class="s">台積電成長／其他成分成長／股息／估值皆為模型假設。</div></div>' +
@@ -1359,7 +1359,7 @@
     var envelope = ctx.actionEnvelope || {};
     var range = envelope.positionRange;
     var constraints = envelope.constraints || [];
-    return '<details><summary>Risk Profile（八欄完整才會產生倉位範圍）</summary><div class="dc-risk-grid">' +
+    return '<details open><summary>Risk Profile（八欄完整才會產生倉位範圍）</summary><div class="dc-risk-grid">' +
       fields.map(function (f) { return '<label>' + esc(f[1]) + '<input data-risk="' + f[0] + '" type="' + f[2] +
         '" value="' + esc(riskDraft[f[0]] || '') + '"></label>'; }).join('') + '</div>' +
       '<div style="display:flex;gap:6px;align-items:center;margin-top:7px"><button class="dc-btn primary" id="dc-risk-apply">套用透明公式</button>' +
@@ -1429,7 +1429,7 @@
       ' · contract ' + (ctx.contractVersion || 1);
     var sc = ctx.scenario || {};
     body.innerHTML =
-      '<details class="dc-command-fold"><summary><span class="name">決策摘要</span><span class="brief">' +
+      '<details class="dc-command-fold" open><summary><span class="name">決策摘要</span><span class="brief">' +
         esc(r.label || r.id || '等待市場狀態') + ' · ' + esc(label(a.posture)) +
         '</span></summary><div class="dc-command"><div class="box regime"><div class="k">市場狀態</div><div class="v">' + esc(r.id || '—') +
         '</div><div class="s">' + esc(r.label || '') + ' · 信心 ' + pct01(r.confidence) + ' · 資料 ' + pct01(q.completeness) + '</div></div>' +
