@@ -126,6 +126,7 @@ class PrivateWebGatewayTests(unittest.TestCase):
             write_rate_per_minute=100,
             upstream_timeout_seconds=5,
             audit_path=Path(self.temp.name) / "audit.jsonl",
+            access_request_path=Path(self.temp.name) / "access_requests.json",
             client_trace_path=Path(self.temp.name) / "client.jsonl",
         )
         self.gateway = gateway.PrivateWebServer(("127.0.0.1", 0), gateway.Handler, settings)
@@ -222,6 +223,7 @@ class PrivateWebGatewayTests(unittest.TestCase):
             headers={
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Origin": self.base,
+                "Tailscale-User-Login": "applicant@example.com",
             },
         )
         opener = urllib.request.build_opener(NoRedirect)
@@ -253,10 +255,138 @@ class PrivateWebGatewayTests(unittest.TestCase):
         req = urllib.request.Request(self.base + "/gateway/help", headers={"Accept": "text/html"})
         with urllib.request.urlopen(req, timeout=5) as response:
             page = response.read().decode("utf-8")
-        self.assertIn("Stock Terminal 註冊／登入說明", page)
+        self.assertIn("手機與 Windows 外部連線圖文教學", page)
         self.assertIn("Tailscale", page)
-        self.assertIn("登入狀態不設工作階段期限", page)
+        self.assertIn("iPhone Chrome", page)
+        self.assertIn("Windows Chrome", page)
+        self.assertIn("/gateway/request-access", page)
         self.assertNotIn("30 天", page)
+
+    def test_access_request_form_is_public_but_never_auto_grants_access(self):
+        with urllib.request.urlopen(self.base + "/gateway/request-access", timeout=5) as response:
+            page = response.read().decode("utf-8")
+        self.assertIn("申請 Stock Terminal Reader 使用權", page)
+        self.assertIn('name="csrf"', page)
+        self.assertIn("申請不等於自動開通", page)
+
+        form = urlencode({
+            "display_name": "Test Reader",
+            "contact_email": "reader@example.com",
+            "tailscale_email": "tail@example.com",
+            "platform": "iphone",
+            "note": "Chrome",
+            "consent": "yes",
+            "csrf": gateway._make_form_csrf(
+                self.gateway.settings,
+                urlsplit(self.base).netloc,
+                "access-request",
+            ),
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            self.base + "/gateway/request-access",
+            data=form,
+            method="POST",
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": self.base,
+            },
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            result_page = response.read().decode("utf-8")
+            self.assertEqual(response.status, 201)
+        self.assertIn("申請已安全送出", result_page)
+        rows = self.gateway.access_store.list_requests()
+        self.assertEqual(rows[0]["status"], "pending")
+        audit = self.gateway.settings.audit_path.read_text(encoding="utf-8")
+        self.assertIn("access_request_submitted", audit)
+        self.assertNotIn("reader@example.com", audit)
+        self.assertNotIn("Test Reader", audit)
+        self.assertNotIn("applicant@example.com", audit)
+        self.assertIn("anon-", audit)
+
+    def test_access_request_rejects_cross_origin_submission(self):
+        form = urlencode({
+            "display_name": "Test Reader",
+            "contact_email": "reader@example.com",
+            "tailscale_email": "tail@example.com",
+            "platform": "windows",
+            "consent": "yes",
+            "csrf": gateway._make_form_csrf(
+                self.gateway.settings,
+                urlsplit(self.base).netloc,
+                "access-request",
+            ),
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            self.base + "/gateway/request-access",
+            data=form,
+            method="POST",
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": "https://evil.example",
+            },
+        )
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            urllib.request.urlopen(req, timeout=5)
+        self.assertEqual(raised.exception.code, 403)
+        raised.exception.close()
+        self.assertEqual(self.gateway.access_store.list_requests(), [])
+
+    def test_admin_panel_is_owner_only_and_updates_without_logging_pii(self):
+        row, _ = self.gateway.access_store.create(
+            display_name="Private Reader",
+            contact_email="private@example.com",
+            tailscale_email="tail-private@example.com",
+            platform="both",
+        )
+        status, payload = _request(
+            self.base + "/gateway/admin", token="reader-secret"
+        )
+        self.assertEqual(status, 403)
+        self.assertIn("owner", payload["error"])
+
+        credential = base64.b64encode(b"owner:owner-secret").decode()
+        req = urllib.request.Request(
+            self.base + "/gateway/admin",
+            headers={"Authorization": "Basic " + credential, "Accept": "text/html"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            page = response.read().decode("utf-8")
+        self.assertIn("Private Web 存取管理", page)
+        self.assertIn("private@example.com", page)
+        self.assertNotIn("owner-secret", page)
+        self.assertNotIn("reader-secret", page)
+
+        form = urlencode({
+            "request_id": row["id"],
+            "status": "active",
+            "admin_note": "Identity checked",
+            "csrf": gateway._make_form_csrf(
+                self.gateway.settings,
+                urlsplit(self.base).netloc,
+                "access-admin",
+            ),
+        }).encode("utf-8")
+        update = urllib.request.Request(
+            self.base + "/gateway/admin/action",
+            data=form,
+            method="POST",
+            headers={
+                "Authorization": "Basic " + credential,
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": self.base,
+            },
+        )
+        opener = urllib.request.build_opener(NoRedirect)
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            opener.open(update, timeout=5)
+        self.assertEqual(raised.exception.code, 303)
+        raised.exception.close()
+        self.assertEqual(self.gateway.access_store.list_requests()[0]["status"], "active")
+        audit = self.gateway.settings.audit_path.read_text(encoding="utf-8")
+        self.assertIn("access_request_status_changed", audit)
+        self.assertNotIn("private@example.com", audit)
+        self.assertNotIn("Private Reader", audit)
 
     def test_login_failure_never_persists_token(self):
         form = urlencode({

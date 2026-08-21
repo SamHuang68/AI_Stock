@@ -41,11 +41,20 @@ from pathlib import Path
 from typing import Iterable
 from urllib.parse import parse_qs, quote, urlsplit
 
+from private_web_access import (
+    AccessRequestStore,
+    AccessValidationError,
+    render_admin_page,
+    render_help_page,
+    render_request_page,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "data" / "private_web.json"
 DEFAULT_OWNER_TOKEN = ROOT / "data" / "private_web_owner.token"
 DEFAULT_READ_TOKEN = ROOT / "data" / "private_web_read.token"
+DEFAULT_ACCESS_REQUESTS = ROOT / "data" / "private_web_access_requests.json"
 STARTUP_TRACE = ROOT / "logs" / "private_web_gateway_startup.jsonl"
 CLIENT_TRACE = ROOT / "logs" / "private_web_client.jsonl"
 SESSION_COOKIE = "st_private_session"
@@ -245,6 +254,56 @@ def _valid_login_csrf(settings: "Settings", value: str, request_host: str) -> bo
         payload = json.loads(_b64url_decode(encoded).decode("utf-8"))
         return (
             payload.get("v") == 1
+            and int(payload.get("e") or 0) > int(time.time())
+            and str(payload.get("h") or "") == request_host.strip().lower()[:200]
+        )
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+
+
+def _make_form_csrf(settings: "Settings", request_host: str, purpose: str) -> str:
+    clean_purpose = re.sub(r"[^a-z0-9_-]", "", purpose.lower())[:40]
+    payload = {
+        "v": 1,
+        "p": clean_purpose,
+        "h": request_host.strip().lower()[:200],
+        "e": int(time.time()) + LOGIN_CSRF_TTL_SECONDS,
+        "n": uuid.uuid4().hex[:20],
+    }
+    encoded = _b64url_encode(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    )
+    signature = _b64url_encode(
+        hmac.new(
+            _session_key(settings),
+            ("form-csrf\0" + clean_purpose + "\0" + encoded).encode("ascii"),
+            hashlib.sha256,
+        ).digest()
+    )
+    return encoded + "." + signature
+
+
+def _valid_form_csrf(
+    settings: "Settings", value: str, request_host: str, purpose: str
+) -> bool:
+    if not value or len(value) > 2048:
+        return False
+    clean_purpose = re.sub(r"[^a-z0-9_-]", "", purpose.lower())[:40]
+    try:
+        encoded, signature = value.split(".", 1)
+        expected = _b64url_encode(
+            hmac.new(
+                _session_key(settings),
+                ("form-csrf\0" + clean_purpose + "\0" + encoded).encode("ascii"),
+                hashlib.sha256,
+            ).digest()
+        )
+        if not hmac.compare_digest(signature, expected):
+            return False
+        payload = json.loads(_b64url_decode(encoded).decode("utf-8"))
+        return (
+            payload.get("v") == 1
+            and payload.get("p") == clean_purpose
             and int(payload.get("e") or 0) > int(time.time())
             and str(payload.get("h") or "") == request_host.strip().lower()[:200]
         )
@@ -469,6 +528,7 @@ class Settings:
     write_rate_per_minute: int
     upstream_timeout_seconds: int
     audit_path: Path
+    access_request_path: Path
     client_trace_path: Path = CLIENT_TRACE
     extra_read_paths: tuple[str, ...] = ()
     extra_control_paths: tuple[str, ...] = ()
@@ -513,6 +573,13 @@ class Settings:
         client_trace_path = Path(client_trace_value)
         if not client_trace_path.is_absolute():
             client_trace_path = ROOT / client_trace_path
+        access_request_value = os.environ.get(
+            "ST_WEB_ACCESS_REQUEST_PATH",
+            str(cfg.get("access_request_path") or DEFAULT_ACCESS_REQUESTS),
+        )
+        access_request_path = Path(access_request_value)
+        if not access_request_path.is_absolute():
+            access_request_path = ROOT / access_request_path
         instance_id = re.sub(
             r"[^A-Za-z0-9._-]", "", os.environ.get("ST_WEB_INSTANCE_ID", "")
         )[:96]
@@ -546,6 +613,7 @@ class Settings:
                 minimum=5, maximum=600,
             ),
             audit_path=audit_path,
+            access_request_path=access_request_path,
             client_trace_path=client_trace_path,
             extra_read_paths=_normalized_extra_paths(cfg.get("extra_read_paths")),
             extra_control_paths=_normalized_extra_paths(cfg.get("extra_control_paths")),
@@ -599,6 +667,7 @@ class PrivateWebServer(ThreadingHTTPServer):
         self.settings = settings
         self.rate_limiter = WindowRateLimiter()
         self.audit_lock = threading.Lock()
+        self.access_store = AccessRequestStore(settings.access_request_path)
 
 
 def _path_matches(path: str, exact: set[str], prefixes: tuple[str, ...]) -> bool:
@@ -765,23 +834,192 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
 <p class="session-note">登入狀態會持續保留；只有清除本站資料或管理者更換存取密碼後才需要重新登入。</p>
 <button type="submit">安全登入</button>
 </form>
-<div class="help"><b>第一次使用？</b><br>本站不開放自行註冊；請先接受管理者提供的 Tailscale 機器邀請，再使用 Reader 密碼登入。<br><a href="/gateway/help">查看完整註冊／登入說明</a></div>
+<div class="help"><b>第一次使用？</b><br>先接受管理者提供的 Tailscale 主機分享，再送出 Reader 使用權申請。申請不會自動開通。<br><a href="/gateway/request-access">申請使用權</a>　·　<a href="/gateway/help">查看手機／Windows 圖文教學</a>　·　<a href="/gateway/admin">Owner 後台</a></div>
 </main></body></html>'''
         self._send_html(status, page)
 
     def _login_help_page(self) -> None:
-        page = '''<!doctype html><html lang="zh-TW"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Stock Terminal 登入說明</title><style>
-:root{--bg:#060a12;--panel:#0d1727;--line:#253851;--text:#dbe7f5;--muted:#91a4ba;--gold:#f5c518;--cyan:#67e8f9;--good:#34d399}
-*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:radial-gradient(circle at 15% 0,#142641 0,transparent 34%),var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif}body{padding:max(22px,env(safe-area-inset-top)) 16px max(28px,env(safe-area-inset-bottom))}.wrap{width:min(760px,100%);margin:auto}.hero,.section{border:1px solid var(--line);border-radius:16px;background:rgba(13,23,39,.94);box-shadow:0 18px 52px rgba(0,0,0,.35)}.hero{padding:24px;margin-bottom:14px}.section{padding:18px 20px;margin:12px 0}h1{font-size:23px;margin:0 0 8px;color:#fff}h2{font-size:17px;margin:0 0 10px;color:var(--gold)}p,li{font-size:14px;line-height:1.75}p{margin:7px 0;color:var(--muted)}ol,ul{margin:8px 0;padding-left:22px}.tag{display:inline-block;margin-bottom:10px;padding:4px 9px;border:1px solid rgba(52,211,153,.35);border-radius:999px;background:rgba(52,211,153,.1);color:var(--good);font-size:12px;font-weight:800}.warn{color:#fbbf24}.back{display:block;margin-top:16px;padding:13px 16px;border-radius:11px;background:linear-gradient(135deg,#facc15,#e5a70a);color:#09101b;text-align:center;text-decoration:none;font-weight:900}code{color:var(--cyan);word-break:break-word}
-</style></head><body><main class="wrap"><section class="hero"><span class="tag">Tailscale 私有服務</span><h1>Stock Terminal 註冊／登入說明</h1><p>ST 沒有公開註冊。使用資格由管理者透過 Tailscale 邀請授予，之後再以 ST Reader 密碼登入。</p></section>
-<section class="section"><h2>第一次在 iPhone Chrome 使用</h2><ol><li>安裝 Tailscale，接受管理者分享的 <b>ST 主機</b>邀請。</li><li>開啟 Tailscale，確認 VPN 顯示已連線，而且登入的是收到邀請的帳號。</li><li>用 Chrome 開啟管理者提供的 <code>https://…ts.net/</code> 網址。</li><li>身分選 <b>Reader（唯讀）</b>，輸入管理者另外提供的 Reader 密碼。</li><li>登入一次後，這台裝置會持續保留登入狀態。</li></ol></section>
-<section class="section"><h2>登入會保留多久？</h2><p>登入狀態不設工作階段期限。瀏覽器只保存簽章、HttpOnly 的登入 Cookie，不會把原始密碼寫入網頁儲存空間。只有清除本站網站資料，或管理者更換 Owner／Reader 存取密碼後，才需要重新登入。</p></section>
-<section class="section"><h2>看見黑畫面時</h2><ol><li>先等 5 秒；ST 會自動嘗試開啟完整總覽，失敗時切換到相容圖表。</li><li>仍空白時關閉該分頁，再從完整 <code>https://…ts.net/</code> 網址重開，不要使用舊的 Basic-auth 書籤。</li><li>確認 Tailscale VPN 仍為已連線；行動網路與 Wi-Fi 切換後可重新連一次。</li><li>若持續發生，把發生時間與 iPhone/iOS 版本交給管理者；系統診斷不會記錄密碼。</li></ol></section>
-<section class="section"><h2>權限與安全</h2><ul><li>一般受邀者只使用 Reader；Owner 保留給管理者。</li><li>不要轉傳 Tailscale 邀請或 ST 密碼。</li><li>離開共用裝置時，在 Chrome 清除 Cookie／網站資料。</li></ul><p class="warn">Tailscale 顯示連線，不代表已取得 ST 權限；機器邀請與 Reader 密碼兩者都需要。</p></section>
-<a class="back" href="/gateway/login">返回安全登入</a></main></body></html>'''
-        self._send_html(200, page)
+        host = (self.headers.get("Host") or "localhost").strip()
+        scheme = "https" if self._request_is_https() else "http"
+        self._send_html(200, render_help_page(service_url=f"{scheme}://{host}/"))
+
+    def _read_form(self, *, maximum: int = 16_384) -> dict[str, str]:
+        if self.headers.get("Transfer-Encoding"):
+            raise AccessValidationError("請求格式不支援。")
+        try:
+            content_length = int(self.headers.get("Content-Length") or "0")
+        except ValueError as exc:
+            raise AccessValidationError("表單格式不正確。") from exc
+        if content_length < 1 or content_length > maximum:
+            raise AccessValidationError("表單內容大小不正確。")
+        try:
+            parsed = parse_qs(
+                self.rfile.read(content_length).decode("utf-8"),
+                keep_blank_values=True,
+                max_num_fields=24,
+            )
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise AccessValidationError("表單格式不正確。") from exc
+        return {key: values[0] if values else "" for key, values in parsed.items()}
+
+    def _form_origin_allowed(self) -> bool:
+        origin = (self.headers.get("Origin") or "").strip()
+        if not origin or origin.lower() == "null":
+            return True
+        try:
+            return urlsplit(origin).netloc.lower() == (
+                self.headers.get("Host") or ""
+            ).strip().lower()
+        except ValueError:
+            return False
+
+    def _access_request_page(
+        self,
+        *,
+        status: int = 200,
+        values: dict[str, object] | None = None,
+        error: str = "",
+        receipt: str = "",
+        duplicate: bool = False,
+    ) -> None:
+        csrf = _make_form_csrf(
+            self.settings,
+            self.headers.get("Host") or "",
+            "access-request",
+        )
+        self._send_html(
+            status,
+            render_request_page(
+                csrf=csrf,
+                values=values,
+                error=error,
+                receipt=receipt,
+                duplicate=duplicate,
+            ),
+        )
+
+    def _access_request_post(self) -> None:
+        try:
+            form = self._read_form()
+        except AccessValidationError as exc:
+            self._access_request_page(status=400, error=str(exc))
+            return
+        request_host = (self.headers.get("Host") or "").strip().lower()
+        if not _valid_form_csrf(
+            self.settings,
+            form.get("csrf", ""),
+            request_host,
+            "access-request",
+        ):
+            self._audit("access_request_csrf_rejected", 403)
+            self._access_request_page(status=403, values=form, error="申請頁已過期，請重新整理後再試。")
+            return
+        if not self._form_origin_allowed():
+            self._audit("access_request_origin_rejected", 403)
+            self._access_request_page(status=403, error="申請來源驗證失敗，請重新開啟本站。")
+            return
+        if form.get("consent") != "yes":
+            self._access_request_page(status=400, values=form, error="請先確認申請與安全聲明。")
+            return
+        try:
+            row, created = self.server.access_store.create(  # type: ignore[attr-defined]
+                display_name=form.get("display_name"),
+                contact_email=form.get("contact_email"),
+                tailscale_email=form.get("tailscale_email"),
+                platform=form.get("platform"),
+                note=form.get("note"),
+            )
+        except AccessValidationError as exc:
+            self._access_request_page(status=400, values=form, error=str(exc))
+            return
+        except (OSError, RuntimeError):
+            self._audit("access_request_store_failed", 503)
+            self._access_request_page(status=503, error="申請資料暫時無法保存，請稍後再試。")
+            return
+        request_id = str(row.get("id") or "")
+        self._audit(
+            "access_request_submitted" if created else "access_request_duplicate",
+            201 if created else 200,
+            requestIdRef=request_id,
+        )
+        self._access_request_page(
+            status=201 if created else 200,
+            receipt=request_id,
+            duplicate=not created,
+        )
+
+    def _admin_page(self, *, status: int = 200, error: str = "") -> None:
+        try:
+            requests = self.server.access_store.list_requests()  # type: ignore[attr-defined]
+        except (OSError, RuntimeError):
+            requests = []
+            status = 503
+            error = "申請資料暫時無法讀取，請檢查本機資料檔與備份。"
+            self._audit("access_request_store_failed", 503, "owner")
+        query = parse_qs(urlsplit(self.path).query)
+        notice = "申請狀態已更新。" if (query.get("updated") or [""])[0] == "1" else ""
+        csrf = _make_form_csrf(
+            self.settings,
+            self.headers.get("Host") or "",
+            "access-admin",
+        )
+        self._send_html(
+            status,
+            render_admin_page(
+                requests=requests,
+                csrf=csrf,
+                mode=self.settings.mode,
+                instance_id=self.settings.instance_id,
+                notice=notice,
+                error=error,
+            ),
+        )
+
+    def _admin_post(self, auth_kind: str) -> None:
+        try:
+            form = self._read_form()
+        except AccessValidationError as exc:
+            self._admin_page(status=400, error=str(exc))
+            return
+        request_host = (self.headers.get("Host") or "").strip().lower()
+        if not _valid_form_csrf(
+            self.settings,
+            form.get("csrf", ""),
+            request_host,
+            "access-admin",
+        ):
+            self._audit("access_admin_csrf_rejected", 403, "owner")
+            self._admin_page(status=403, error="管理頁已過期，請重新整理後再試。")
+            return
+        if not self._origin_ok(auth_kind):
+            self._audit("access_admin_origin_rejected", 403, "owner")
+            self._admin_page(status=403, error="管理操作來源驗證失敗。")
+            return
+        try:
+            row = self.server.access_store.update_status(  # type: ignore[attr-defined]
+                form.get("request_id"),
+                status=form.get("status"),
+                admin_note=form.get("admin_note"),
+            )
+        except AccessValidationError as exc:
+            self._admin_page(status=400, error=str(exc))
+            return
+        except (OSError, RuntimeError):
+            self._audit("access_request_store_failed", 503, "owner")
+            self._admin_page(status=503, error="申請資料暫時無法更新。")
+            return
+        self._audit(
+            "access_request_status_changed",
+            303,
+            "owner",
+            requestIdRef=str(row.get("id") or ""),
+            newStatus=str(row.get("status") or ""),
+        )
+        self._send_html(
+            303,
+            "<!doctype html><title>狀態已更新</title>",
+            location="/gateway/admin?updated=1",
+        )
 
     def _login_post(self) -> None:
         if self.headers.get("Transfer-Encoding"):
@@ -864,6 +1102,13 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
         return peer
 
     def _audit(self, event: str, status: int, role: str = "none", **details: object) -> None:
+        client = self._client_identity()
+        if event.startswith("access_"):
+            # Access-application events must remain correlatable without
+            # persisting a Tailscale login email or forwarded client identity.
+            client = "anon-" + hashlib.sha256(
+                ("private-web-access-audit\0" + client).encode("utf-8")
+            ).hexdigest()[:16]
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "component": "private_web_gateway",
@@ -873,7 +1118,7 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             "path": urlsplit(self.path).path,
             "status": status,
             "role": role,
-            "client": self._client_identity(),
+            "client": client,
             **details,
         }
         try:
@@ -1172,6 +1417,24 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
         if path == "/gateway/help" and self.command in {"GET", "HEAD"}:
             self._login_help_page()
             return
+        if path == "/gateway/request-access":
+            if self.command in {"GET", "HEAD"}:
+                self._access_request_page()
+                return
+            if self.command == "POST":
+                if not self.server.rate_limiter.allow(  # type: ignore[attr-defined]
+                    self._client_identity(), "access-request", 4
+                ):
+                    self._audit("access_request_rate_limited", 429)
+                    self._access_request_page(
+                        status=429,
+                        error="申請送出過於頻繁，請稍後再試。",
+                    )
+                    return
+                self._access_request_post()
+                return
+            self._json(405, {"error": "GET or POST required"})
+            return
         if path == "/gateway/login":
             if self.command in {"GET", "HEAD"}:
                 next_path = (parse_qs(urlsplit(self.path).query).get("next") or ["/"])[0]
@@ -1193,7 +1456,11 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
         if role == "none":
             self._audit("authentication_failed", 401)
             accepts_html = "text/html" in (self.headers.get("Accept") or "").lower()
-            if self.command in {"GET", "HEAD"} and accepts_html and path in STATIC_EXACT:
+            if (
+                self.command in {"GET", "HEAD"}
+                and accepts_html
+                and (path in STATIC_EXACT or path == "/gateway/admin")
+            ):
                 target = path or "/"
                 if urlsplit(self.path).query:
                     target += "?" + urlsplit(self.path).query
@@ -1210,6 +1477,19 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
         if not self.server.rate_limiter.allow(self._client_identity(), bucket, limit):  # type: ignore[attr-defined]
             self._audit("rate_limited", 429, role)
             self._json(429, {"error": "rate limit exceeded"})
+            return
+        if path in {"/gateway/admin", "/gateway/admin/action"}:
+            if role != "owner":
+                self._audit("access_admin_denied", 403, role)
+                self._json(403, {"error": "owner role required"})
+                return
+            if path == "/gateway/admin" and self.command in {"GET", "HEAD"}:
+                self._admin_page()
+                return
+            if path == "/gateway/admin/action" and self.command == "POST":
+                self._admin_post(auth_kind)
+                return
+            self._json(405, {"error": "unsupported admin method"})
             return
         if path == "/gateway/client-log":
             if self.command != "POST":
@@ -1305,13 +1585,19 @@ def main() -> None:
         pid=os.getpid(),
         elapsedMs=round((time.monotonic() - bind_started) * 1000),
     )
-    pid_path = ROOT / "data" / "private_web_gateway.pid"
+    pid_value = os.environ.get(
+        "ST_WEB_PID_PATH",
+        str(ROOT / "data" / "private_web_gateway.pid"),
+    )
+    pid_path = Path(pid_value)
+    if not pid_path.is_absolute():
+        pid_path = ROOT / pid_path
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(os.getpid()) + "\n", encoding="ascii")
     print(
         f"Private Web ST gateway: http://{settings.listen_host}:{settings.listen_port}/\n"
         f"Upstream ST: http://{settings.upstream_host}:{settings.upstream_port}\n"
-        "Profile: personal-market (WaveDeck/trading/admin routes disabled)"
+        "Profile: personal-market (access review enabled; trading and credential routes disabled)"
     )
     try:
         server.serve_forever()

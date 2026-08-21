@@ -65,6 +65,7 @@ BLOCKED_BASENAMES = {
     "private_web.json",
     "private_web_owner.token",
     "private_web_read.token",
+    "private_web_access_requests.json",
     "private_web_gateway.pid",
     "private_web_host.pid",
     ".cursorrules",
@@ -180,7 +181,7 @@ TREE_ALLOW = (
 # share ZIP.  It is released separately by private_web_release.py from an exact
 # committed revision.
 PRIVATE_WEB_ONLY_PATHS = {
-    "server": ("private_web_gateway.py",),
+    "server": ("private_web_gateway.py", "private_web_access.py"),
     "scripts": (
         "private_web_host.py",
         "private_web_release.py",
@@ -188,6 +189,7 @@ PRIVATE_WEB_ONLY_PATHS = {
     ),
     "tests": (
         "test_private_web_gateway.py",
+        "test_private_web_access.py",
         "test_private_web_host.py",
         "test_private_web_release.py",
     ),

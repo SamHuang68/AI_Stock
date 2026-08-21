@@ -49,8 +49,22 @@ Private Web injects the `personal-market` profile before UI boot, so WaveDeck
 navigation and connection probes are disabled while the ordinary local UI is
 unchanged.
 
-For Tailscale invitations, Reader onboarding, iPhone steps and black-screen
-troubleshooting, see [Private Web ST 註冊、邀請與登入指南](PRIVATE_WEB_LOGIN_GUIDE.md).
+For Tailscale device sharing, Reader applications, iPhone/Windows Chrome
+onboarding, Owner review and black-screen troubleshooting, see
+[Private Web ST 外部連線、申請與登入圖文指南](PRIVATE_WEB_LOGIN_GUIDE.md).
+
+The gateway provides three server-rendered workflow pages:
+
+- `/gateway/help`: detailed connection and onboarding guide;
+- `/gateway/request-access`: local Reader access application (no automatic grant);
+- `/gateway/admin`: Owner-only request ledger and status workflow.
+
+Access applications are stored only in
+`data/private_web_access_requests.json`. The file contains personal data, is
+atomically written with a private backup, and is excluded from Git, the normal
+share archive and gateway audit details. The Owner panel deliberately does not
+store Tailscale API keys, invitation links or ST credentials. Tailscale device
+sharing and revocation remain explicit actions in the official Machines page.
 
 The unauthenticated health endpoint is intentionally minimal:
 
@@ -190,6 +204,7 @@ The following files are local-only and ignored by Git/share builds:
 - `data/private_web.json`
 - `data/private_web_owner.token`
 - `data/private_web_read.token`
+- `data/private_web_access_requests.json`
 - `logs/private_web_audit.jsonl`
 - `logs/private_web_client.jsonl`
 

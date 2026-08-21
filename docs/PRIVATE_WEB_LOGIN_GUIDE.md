@@ -1,57 +1,165 @@
-# Private Web ST 註冊、邀請與登入指南
+# Private Web ST 外部連線、申請與登入圖文指南
 
-Private Web ST 是經由 Tailscale 分享的私人服務，不是公開網站，因此沒有「任何人都能自行註冊」的帳號系統。使用者必須同時取得：
+這份手冊適用於 iPhone + Chrome、Windows 10/11 + Chrome，以及 Stock Terminal Private Web 的 Reader 使用者與 Owner 管理者。
 
-1. 管理者授予的 Tailscale 機器存取權；
-2. Stock Terminal 的 `Reader` 存取密碼。
+Private Web ST 不是公開網站。完整開通需要兩道獨立權限：
 
-兩項缺一不可。請勿使用 Tailscale Funnel，也不要在路由器上開放 ST 的 `18432`、`18434` 或 `18435` 連接埠。
+1. **Tailscale 私網權限**：Owner 只分享運行 ST 的指定主機；
+2. **ST Reader 權限**：使用者送出申請，Owner 審核後另行交付 Reader 密碼。
 
-## 一般使用者：第一次從 iPhone 登入
+> 申請不等於自動開通。ST 後台不會自動操作 Tailscale，也不保存 Tailscale API 金鑰、邀請連結或 ST 密碼。
 
-### 1. 接受 Tailscale 邀請
+## 一眼看懂完整流程
 
-管理者會用 Tailscale 分享 ST 主機。請用收到邀請的同一個電子郵件帳號接受邀請；邀請只代表可連到該主機，不會取得管理者的整個網路。
-
-### 2. 確認 VPN 已連線
-
-1. 從 App Store 安裝 Tailscale。
-2. 登入收到邀請的帳號。
-3. 在 Tailscale App 確認 VPN 為已連線，且能看到管理者分享的 ST 主機。
-4. 若剛從 Wi-Fi 切換到行動網路，先關閉再重新開啟 Tailscale VPN。
-
-### 3. 開啟正確網址
-
-在 iPhone 的 Chrome 開啟管理者提供的完整 HTTPS 網址：
-
-```text
-https://<管理者提供的主機名稱>.ts.net/
+```mermaid
+flowchart LR
+    A[申請人提供<br/>Tailscale 登入信箱] --> B[Owner 在 Tailscale<br/>分享指定 ST 主機]
+    B --> C[申請人接受邀請<br/>並連上 VPN]
+    C --> D[Chrome 開啟<br/>https://主機.ts.net/]
+    D --> E[送出 ST Reader<br/>使用權申請]
+    E --> F[Owner 後台審核]
+    F --> G[另一安全管道<br/>交付 Reader 密碼]
+    G --> H[Reader 登入 ST]
 ```
 
-不要把 `18432`、`18434` 或 `18435` 加到網址，也不要使用 `http://`。
+| 階段 | 使用者看見什麼 | Owner 要做什麼 |
+| --- | --- | --- |
+| 尚未分享主機 | 完全連不到 `.ts.net` | 在 Tailscale Machines 分享 ST 主機 |
+| 已連 Tailscale、未開 ST | 可看登入、教學、申請頁 | 從 ST Owner 後台審核申請 |
+| 已開通 | 可用 Reader 進入市場研究介面 | 標記已開通；需要時撤銷 |
 
-### 4. 選擇登入身分
+## 申請人：先準備 Tailscale 帳號
 
-- 一般受邀者選 `Reader（唯讀）`。
-- `Owner` 僅供主機管理者使用，不應分享給其他人。
+Tailscale 使用 Google、Microsoft、Apple 或組織允許的 SSO 身分登入。請準備一個你能長期使用的登入信箱，並把同一個信箱提供給 Owner。
 
-輸入管理者透過另一個安全管道提供的 Reader 密碼後，按「安全登入」。
+Owner 會從 Tailscale 的 **Machines** 頁分享一台固定 ST 主機。這種方式只讓你連到被分享的主機，不會讓你加入或看見 Owner 的整個 tailnet。
 
-### 5. 登入狀態
+- [Tailscale：邀請使用者與分享裝置的差異](https://tailscale.com/docs/reference/inviting-vs-sharing)
+- [Tailscale：分享裝置官方說明](https://tailscale.com/docs/features/sharing)
 
-- 登入一次後，ST 會在這台裝置持續保留登入狀態，不設工作階段期限。
-- 清除這個 `.ts.net` 網站的 Cookie／網站資料後，需要重新登入。
-- 管理者更換 Owner／Reader 存取密碼後，所有舊登入會立即失效。
+## iPhone + Chrome 第一次連線
 
-ST 不把原始密碼寫入 `localStorage` 或可由頁面 JavaScript 讀取的 Cookie。瀏覽器保存的是簽章且 `HttpOnly` 的長期登入 Cookie。
+### 1. 安裝 Tailscale
 
-## 管理者：邀請一位 Reader
+1. 從 App Store 安裝 Tailscale；iOS 需符合官方當前最低版本。
+2. 開啟 App，點 `Get Started`。
+3. 接受 iOS 建立 VPN 設定的提示。
+4. 使用收到分享邀請的帳號登入。
+5. 接受 ST 主機分享，確認 Tailscale 顯示 `Connected`。
 
-### 1. 只分享 ST 主機
+[Tailscale iOS 官方安裝說明](https://tailscale.com/docs/install/ios)
 
-在 Tailscale 管理介面找到運行 ST 的主機，使用機器分享功能將該機器分享給指定使用者。優先使用指定電子郵件或一次性邀請，不要為了 ST 將整個 tailnet 開放給對方。
+```text
+┌──────────────────────────┐
+│ Tailscale                │
+│ ● Connected              │
+│                          │
+│ Shared machine           │
+│ ST host             ✓    │
+└──────────────────────────┘
+```
 
-### 2. 另外交付 Reader 密碼
+### 2. 用 Chrome 開啟 ST
+
+在 iPhone Chrome 輸入 Owner 提供的完整 HTTPS 網址：
+
+```text
+https://<Owner 提供的 ST 主機名稱>.ts.net/
+```
+
+- 不要加入 `18432`、`18434` 或 `18435`；
+- 不要改成 `http://`；
+- 不要使用舊的 Basic-auth 書籤；
+- 行動網路與 Wi-Fi 切換後若停止更新，先重新連一次 Tailscale。
+
+### 3. 尚未開通時送出 Reader 申請
+
+在登入頁選 **申請使用權**，填寫姓名／稱呼、聯絡信箱、Tailscale 登入信箱、預計使用裝置與必要的補充說明。
+
+送出後記下 `ST-YYYYMMDD-XXXXXX` 申請編號。申請資料只保存在 ST 主機本機，供 Owner 審核與撤銷追蹤。
+
+### 4. 收到核准後登入
+
+1. 回到 ST 登入頁；
+2. 身分選 `Reader（唯讀）`；
+3. 輸入 Owner 透過另一個安全管道提供的 Reader 密碼；
+4. 點 **安全登入**。
+
+登入狀態不設應用層工作階段期限。Chrome 只保存簽章且 `HttpOnly` 的 Cookie；原始密碼不寫入 `localStorage`。下列情況才需重新登入：
+
+- 清除該 `.ts.net` 網站的 Cookie／網站資料；
+- 使用無痕模式並關閉分頁；
+- Owner 輪替 Owner／Reader 存取密碼。
+
+## Windows + Chrome 第一次連線
+
+### 1. 安裝並登入 Tailscale
+
+1. 從 Tailscale 官方頁下載 Windows 安裝程式；
+2. 完成安裝後，在 Windows 系統匣找到 Tailscale 圖示；
+3. 右鍵圖示，選 `Log in`；
+4. 使用收到分享邀請的帳號登入；
+5. 接受 ST 主機分享，確認狀態為已連線。
+
+[Tailscale Windows 官方安裝說明](https://tailscale.com/docs/install/windows)
+
+```text
+Windows 系統匣
+      │
+      ▼
+[ Tailscale ● Connected ]
+      │
+      ▼
+Chrome → https://<ST 主機>.ts.net/
+```
+
+### 2. 申請與登入 ST
+
+後續與 iPhone 相同：尚未開通先送出 Reader 申請；Owner 核准後選 Reader 並輸入 ST 密碼。請勿把 Owner 身分當成一般使用者選項。
+
+## Owner：從後台管理申請
+
+Owner 登入後開啟：
+
+```text
+https://<ST 主機>.ts.net/gateway/admin
+```
+
+後台提供：
+
+- 待審核、處理中、已開通與撤銷數量；
+- 申請人的聯絡信箱、Tailscale 帳號與裝置；
+- `待審核 → 已核准 → 已送 Tailscale 邀請 → 已開通` 狀態追蹤；
+- 未核准與已撤銷狀態；
+- 直接前往 Tailscale Machines 的按鈕。
+
+後台**不會**顯示或保存 Owner／Reader 密碼，也不會自動呼叫 Tailscale API。
+
+### 建議審核順序
+
+```mermaid
+stateDiagram-v2
+    [*] --> 待審核
+    待審核 --> 已核准: 身分與用途確認
+    待審核 --> 未核准: 無法核對或不符合用途
+    已核准 --> 已送Tailscale邀請: Machines → Share
+    已送Tailscale邀請 --> 已開通: 邀請接受 + Reader 密碼交付
+    已開通 --> 已撤銷: 停止使用或風險事件
+    未核准 --> 待審核: 重新審查
+    已撤銷 --> 待審核: 重新申請
+```
+
+### 在 Tailscale 分享主機
+
+1. 開啟 [Tailscale Machines](https://console.tailscale.com/admin/machines)；
+2. 找到運行 ST 的主機；
+3. 開啟該機器動作選單，選 `Share`；
+4. 建議使用 Email 對指定對象發出單人邀請；
+5. 等待對方接受，再於 ST 後台標記進度。
+
+邀請連結應視同密碼。若使用手動連結，官方目前說明未使用的分享邀請會過期；實際期限與功能仍以 Tailscale 管理頁顯示為準。
+
+### 交付 Reader 密碼
 
 Reader 密碼保存在主機本機：
 
@@ -61,20 +169,16 @@ Set-Location $repo
 $reader = (Get-Content data\private_web_read.token -Raw).Trim()
 ```
 
-請用與 Tailscale 邀請不同的安全管道交付，且不要在對話截圖、Git、README 或公開分享包中放入密碼。絕對不要把 `private_web_owner.token` 提供給受邀者。
+- 使用不同於 Tailscale 邀請的安全管道交付；
+- 不要貼進 ST 後台備註；
+- 不要放在 Git、README、公開分享包、Email 主旨或截圖；
+- 永遠不要把 `private_web_owner.token` 交給受邀者。
 
-### 3. 提供三項資訊
+## 撤銷與密碼輪替
 
-只需告知受邀者：
+只撤銷單一使用者時：在 Tailscale Machines 撤銷該主機分享，再於 ST Owner 後台把申請標記為 `已撤銷`。
 
-1. Tailscale 機器邀請；
-2. `https://…ts.net/` 完整網址；
-3. Reader 密碼。
-
-### 4. 撤銷存取
-
-- 只撤銷某位使用者：在 Tailscale 移除該主機分享。
-- Reader 密碼疑似外洩：輪替兩組 ST 存取密碼並重啟 Private Web ST：
+Reader 密碼疑似外洩時，輪替兩組 ST 存取密碼並重啟 Private Web ST：
 
 ```powershell
 $repo = 'C:\path\to\AI_Stock'
@@ -84,27 +188,32 @@ py -3 scripts\setup_private_web.py --rotate
 .\START_PRIVATE_WEB_HOST.cmd
 ```
 
-輪替會讓所有舊的瀏覽器工作階段與 API Token 失效，因此應重新透過安全管道交付新的 Reader 密碼。
+輪替會讓所有既有瀏覽器登入與 API Token 失效。
 
-## iPhone 黑畫面排除
+## 連線與黑畫面排除
 
-新版 Gateway 會記錄不含密碼的啟動階段，並在完整介面 5 秒內未完成啟動時，自動嘗試進入總覽；仍失敗則顯示相容圖表與重試按鈕。
+| 狀況 | 檢查順序 |
+| --- | --- |
+| 完全打不開 `.ts.net` | 邀請是否接受 → Tailscale 帳號是否正確 → VPN 是否 Connected → 網址是否完整 HTTPS |
+| Tailscale 已連線但仍無法進入 | 確認被分享的是正確 ST 主機；若使用自訂 policy，檢查雙方 access controls |
+| 顯示 ST 密碼錯誤 | 身分應選 Reader；確認 Owner 是否剛輪替密碼 |
+| 登入後又回登入頁 | 退出無痕模式；確認 Cookie 未被清除；檢查內容阻擋器 |
+| 登入後黑畫面 | 關閉分頁後從完整網址重開；記錄發生時間、裝置與 Chrome 版本 |
+| 換 Wi-Fi／行動網路後停止更新 | 重新連接 Tailscale，再重新整理 ST |
 
-依序檢查：
-
-1. 等候 5 秒，確認是否出現總覽或「已切換手機相容圖表」。
-2. 關閉該 Chrome 分頁，再從完整 `https://…ts.net/` 網址重新開啟。
-3. 確認 Tailscale VPN 仍顯示已連線，且帳號正確。
-4. Chrome 若保留舊的原生 Basic-auth 狀態，先關閉所有 ST 分頁並完全結束 Chrome 後重開；仍無效時，在 Chrome 的「清除瀏覽資料」中清除 Cookie／網站資料後再登入。這可能同時登出其他網站。
-5. 開啟以下健康檢查網址；應看到 `"ok":true`：
+健康檢查網址：
 
 ```text
-https://<管理者提供的主機名稱>.ts.net/gateway/health
+https://<ST 主機>.ts.net/gateway/health
 ```
 
-6. 仍無法顯示時，把發生時間、iPhone 型號、iOS 版本與畫面交給管理者。
+正常時至少應看到：
 
-管理者可檢查：
+```json
+{"ok": true, "gateway": "private-web", "upstream": true}
+```
+
+管理者本機診斷：
 
 ```powershell
 $repo = 'C:\path\to\AI_Stock'
@@ -115,18 +224,13 @@ Get-Content logs\private_web_audit.jsonl -Tail 50
 Get-Content logs\private_web_client.jsonl -Tail 50
 ```
 
-`private_web_audit.jsonl` 記錄登入成功／失敗與被拒絕的請求；`private_web_client.jsonl` 記錄 UI 啟動階段、視窗尺寸與錯誤類型。兩者都不記錄登入密碼、Authorization Header 或請求本文。
-
-## 常見狀況
-
-| 狀況 | 判斷與處理 |
-| --- | --- |
-| Tailscale 已連線但網站打不開 | 確認已接受正確主機分享，並使用 `https://…ts.net/`，不是本機 IP 或連接埠。 |
-| 顯示密碼錯誤 | 檢查是否把 Reader 密碼配成 Owner 身分，或管理者是否已輪替密碼。 |
-| 登入後又回登入頁 | Chrome 可能處於無痕模式、Cookie 已被清除，或管理者剛更換存取密碼；改用一般分頁並暫停可能攔截本站的內容阻擋器。 |
-| 換網路後停止更新 | 重新連接 Tailscale VPN，再重新整理 ST。 |
-| 共用裝置曾登入 ST | 清除該 `.ts.net` 網站資料，並通知管理者評估是否撤銷分享。 |
+稽核紀錄不保存表單內容、Authorization Header、ST 密碼或申請人的姓名／信箱；只記申請編號、狀態、事件與技術性請求資訊。
 
 ## 安全邊界
 
-Reader 只能讀取市場、報價、基本面、廣度、總經、Pulse 與 DecisionContext 等核准資料。通知設定、密碼管理、遠端回補、WaveDeck、交易與券商操作不會經由 Private Web ST 開放。
+- 不使用 Tailscale Funnel；Funnel 是公開網際網路入口。
+- 不在路由器開放 ST 的 `18432`、`18434` 或 `18435`。
+- 一般受邀者只使用 Reader；Owner 只供主機管理者。
+- Reader 只能讀取核准的市場、報價、基本面、廣度、總經、Pulse 與 DecisionContext 等資料。
+- 通知設定、密碼管理、遠端回補、WaveDeck、交易與券商操作不經由 Private Web ST 開放。
+- 申請檔 `data/private_web_access_requests.json` 含個人資料，只留在正式主機，不進 Git 或一般分享包。

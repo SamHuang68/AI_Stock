@@ -81,6 +81,15 @@ def main() -> int:
             persistent_login_notice="登入狀態會持續保留" in login_page,
             remember_option='name="remember"' in login_page,
             login_help='/gateway/help' in login_page,
+            access_request_link='/gateway/request-access' in login_page,
+            admin_link='/gateway/admin' in login_page,
+        )
+
+    with open_url(base_url + "/gateway/request-access", context=context) as response:
+        request_page = response.read().decode(errors="replace")
+        result.update(
+            access_request_page=response.status,
+            access_request_notice="申請不等於自動開通" in request_page,
         )
 
     basic_value = base64.b64encode(f"owner:{owner_token}".encode()).decode()
@@ -95,6 +104,20 @@ def main() -> int:
             owner_page=response.status,
             private_profile='id="st-private-web-profile"' in page,
             wavedeck_disabled="wavedeck:false" in compact_page,
+        )
+
+    with open_url(
+        base_url + "/gateway/admin",
+        context=context,
+        headers={"Authorization": "Basic " + basic_value},
+    ) as response:
+        admin_page = response.read().decode(errors="replace")
+        result.update(
+            owner_admin_page=response.status,
+            owner_admin_title="Private Web 存取管理" in admin_page,
+            owner_admin_no_secret_labels=(
+                "owner_token" not in admin_page and "reader_token" not in admin_page
+            ),
         )
 
     with open_url(
@@ -133,9 +156,16 @@ def main() -> int:
         "persistent_login_notice": True,
         "remember_option": False,
         "login_help": True,
+        "access_request_link": True,
+        "admin_link": True,
+        "access_request_page": 200,
+        "access_request_notice": True,
         "owner_page": 200,
         "private_profile": True,
         "wavedeck_disabled": True,
+        "owner_admin_page": 200,
+        "owner_admin_title": True,
+        "owner_admin_no_secret_labels": True,
         "reader_liveness": True,
         "blocked_notify": 403,
     }

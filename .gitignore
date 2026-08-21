@@ -134,6 +134,8 @@ data/stock_python.path
 data/private_web.json
 data/private_web_owner.token
 data/private_web_read.token
+data/private_web_access_requests.json
+data/private_web_access_requests.json.*
 data/private_web_gateway.pid
 data/private_web_host.pid
 data/runtime_locks/

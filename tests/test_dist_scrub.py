@@ -95,13 +95,17 @@ class TestDistScrub(unittest.TestCase):
             "Stock_Terminal/START_PRIVATE_WEB.cmd",
             "Stock_Terminal/START_PRIVATE_WEB_HOST.cmd",
             "Stock_Terminal/server/private_web_gateway.py",
+            "Stock_Terminal/server/private_web_access.py",
             "Stock_Terminal/scripts/private_web_host.py",
             "Stock_Terminal/scripts/private_web_release.py",
             "Stock_Terminal/scripts/setup_private_web.py",
             "Stock_Terminal/tests/test_private_web_gateway.py",
+            "Stock_Terminal/tests/test_private_web_access.py",
             "Stock_Terminal/tests/test_private_web_host.py",
             "Stock_Terminal/tests/test_private_web_release.py",
             "Stock_Terminal/docs/PRIVATE_WEB_ST.md",
+            "Stock_Terminal/docs/PRIVATE_WEB_LOGIN_GUIDE.md",
+            "Stock_Terminal/data/private_web_access_requests.json",
         }
         self.assertFalse(forbidden & self.names, forbidden & self.names)
 

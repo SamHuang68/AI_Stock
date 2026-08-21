@@ -29,6 +29,7 @@ REQUIRED_RELEASE_FILES = {
     "server/server.py",
     "server/daemon_lock.py",
     "server/private_web_gateway.py",
+    "server/private_web_access.py",
     "scripts/private_web_host.py",
     "scripts/setup_private_web.py",
     "docs/PRIVATE_WEB_ST.md",
@@ -36,6 +37,7 @@ REQUIRED_RELEASE_FILES = {
     "tests/test_health_live.py",
     "tests/test_daemon_lock.py",
     "tests/test_private_web_host.py",
+    "tests/test_private_web_access.py",
     "stock_terminal_v2.html",
 }
 PRIVATE_RELEASE_EXCLUDES = {"wavedeck", "START_WAVEDECK.cmd"}
@@ -132,6 +134,7 @@ def stage_release(
             "tests.test_daemon_lock",
             "tests.test_health_live",
             "tests.test_private_web_gateway",
+            "tests.test_private_web_access",
             "tests.test_private_web_host",
             "tests.test_private_web_release",
         ]
