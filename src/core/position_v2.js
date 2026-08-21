@@ -622,6 +622,7 @@ window.attachPosition = attachPosition;
       const btab = m ? m[1] : null;
       b.classList.toggle('on', btab === tab);
     });
+    if (typeof window.updateRpanelPager === 'function') window.updateRpanelPager();
     renderRpanel();
   };
 

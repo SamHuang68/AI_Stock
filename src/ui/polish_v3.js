@@ -156,7 +156,6 @@ body.market-us .price-down { color: var(--red) !important; }
 #ci-row .ci-left .ci-high { font-size: 12px; font-weight: 700; margin-top: 3px; color: var(--gold); line-height: 1.3; }
 #ci-row .ci-left .ci-high b { color: var(--thi); font-size: 13px; }
 #ci-row .ci-left .ci-range-chg { font-size: 10px; line-height: 1.35; }
-.wlchip-rm { display: none !important; }
 #ci-east { display: flex; flex-direction: column; align-items: flex-end; }
 #ci-east #ci-ohlc {
   margin-top: 0; font-size: 8px; line-height: 1.5; letter-spacing: .2px;

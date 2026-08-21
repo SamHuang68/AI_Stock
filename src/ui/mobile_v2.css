@@ -25,8 +25,8 @@
   /* Right panel becomes bottom sheet */
   #right {
     width: 100% !important;
-    height: 40vh;
-    max-height: 380px;
+    height: 48vh;
+    max-height: 440px;
     border-left: none !important;
     border-top: 1px solid var(--border);
     flex-shrink: 0;
@@ -34,21 +34,64 @@
   }
   #right.collapsed { height: 36px !important; }
   #right.collapsed #rpanel { display: none; }
+  #right.collapsed #rpanel-pager { display: none !important; }
 
-  /* Drag handle to toggle collapsed state */
-  #rtabs::before {
-    content: '═';
-    display: flex;
+  /* Six squeezed labels become one bottom pager with arrows + position dots. */
+  #rtabs { display: none !important; }
+  #rpanel {
+    min-height: 0;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+  }
+  #rpanel-pager {
+    display: grid !important;
+    grid-template-columns: 48px minmax(0,1fr) 104px;
     align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 14px;
-    color: var(--tlo);
-    background: var(--bg);
-    cursor: pointer;
-    font-size: 14px;
-    letter-spacing: -2px;
-    margin-bottom: -2px;
+    min-height: 44px;
+    flex: 0 0 44px;
+    border-top: 1px solid rgba(148,163,184,.16);
+    background: linear-gradient(180deg,rgba(15,23,42,.97),rgba(5,10,18,.99));
+    box-shadow: 0 -8px 22px rgba(0,0,0,.22);
+    padding-bottom: env(safe-area-inset-bottom,0px);
+    z-index: 8;
+  }
+  #rpanel-pager > button {
+    width: 38px;
+    height: 34px;
+    margin: 0 auto;
+    border: 1px solid rgba(103,232,249,.20);
+    border-radius: 9px;
+    background: rgba(30,41,59,.72);
+    color: var(--cyan);
+    font: 700 25px/1 'JetBrains Mono',monospace;
+    touch-action: manipulation;
+  }
+  #rpanel-pager > button:disabled { opacity: .25; color: var(--tlo); }
+  #rpage-next { justify-self: start; margin-left: 8px !important; }
+  #rpanel-pager .rpage-state { min-width: 0; text-align: center; }
+  #rpage-label {
+    color: var(--thi);
+    font: 700 10px/1.2 'JetBrains Mono',monospace;
+    letter-spacing: .5px;
+    white-space: nowrap;
+  }
+  #rpage-dots { display: flex; justify-content: center; align-items: center; gap: 7px; margin-top: 5px; }
+  #rpage-dots .rpage-dot {
+    width: 7px;
+    height: 7px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: #334155;
+    box-shadow: none;
+    touch-action: manipulation;
+  }
+  #rpage-dots .rpage-dot.on {
+    width: 18px;
+    border-radius: 999px;
+    background: linear-gradient(90deg,var(--gold),#fb923c);
+    box-shadow: 0 0 10px rgba(245,197,24,.35);
   }
 
   /* ── Topbar: tighter ── */
@@ -68,32 +111,55 @@
   /* ── Watchlist bar: keep 2 rows but slimmer ── */
   #wlbar { height: 56px !important; }
   #wlchips { grid-template-rows: repeat(2, 1fr) !important; }
-  .wlchip { height: 28px !important; padding: 0 32px 0 7px !important; font-size: 10px !important; }
+  .wlchip { height: 28px !important; padding: 0 7px !important; font-size: 10px !important; }
   .wlchip-grip { display: none !important; }   /* 觸控不需要拖把手提示 */
   .wlchip-p { font-size: 9px !important; }
-  #wlchips .wlchip .wlchip-rm {
-    display: inline-flex !important;
+  .wlchip.wl-holding::after {
+    content: '';
     position: absolute;
-    right: 2px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 26px;
-    height: 26px;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: 1px solid rgba(248,113,113,.34);
-    border-radius: 6px;
-    background: rgba(127,29,29,.16);
-    color: #fda4af;
-    font: 800 16px/1 'JetBrains Mono', monospace;
-    cursor: pointer;
-    touch-action: manipulation;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: var(--gold);
+    transform-origin: left;
+    animation: wlHoldProgress .55s linear both;
   }
-  #wlchips .wlchip .wlchip-rm:active {
-    background: rgba(239,68,68,.26);
-    border-color: rgba(248,113,113,.65);
+  .wlchip.wl-menu-open {
+    background: rgba(245,197,24,.13) !important;
+    box-shadow: inset 0 0 0 1px rgba(245,197,24,.42),0 0 12px rgba(245,197,24,.12) !important;
   }
+  @keyframes wlHoldProgress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  body > .wl-action-menu.open {
+    display: block;
+    position: fixed;
+    width: 194px;
+    z-index: 10020;
+    padding: 8px;
+    border: 1px solid rgba(148,163,184,.26);
+    border-radius: 12px;
+    background: rgba(11,18,32,.98);
+    box-shadow: 0 18px 45px rgba(0,0,0,.52),inset 0 1px 0 rgba(255,255,255,.05);
+    backdrop-filter: blur(16px);
+  }
+  .wl-menu-head { padding: 5px 7px 9px; border-bottom: 1px solid rgba(148,163,184,.14); }
+  .wl-menu-head span { display: block; color: var(--thi); font: 700 12px/1.2 'JetBrains Mono',monospace; }
+  .wl-menu-head small { display: block; margin-top: 3px; color: var(--tlo); font: 9px/1.2 'JetBrains Mono',monospace; }
+  .wl-action-menu button {
+    display: block;
+    width: 100%;
+    min-height: 40px;
+    margin-top: 6px;
+    border: 1px solid rgba(148,163,184,.14);
+    border-radius: 8px;
+    background: rgba(30,41,59,.62);
+    color: var(--text);
+    font: 700 11px/1 'JetBrains Mono',monospace;
+    text-align: left;
+    padding: 0 12px;
+  }
+  .wl-action-menu .wl-menu-remove { color: #fda4af; border-color: rgba(248,113,113,.24); }
+  .wl-action-menu .wl-menu-cancel { color: var(--tlo); }
   .wladd { height: 56px !important; padding: 0 10px !important; }
 
   /* ── Range bar: smaller buttons ── */
@@ -138,7 +204,7 @@
     top: auto !important;
     right: 8px !important;
     left: 8px !important;
-    bottom: calc(40vh + 8px) !important;
+    bottom: calc(48vh + 8px) !important;
     width: auto !important;
   }
 
@@ -169,7 +235,8 @@
   #topbar .logo { display: none; }
   .mktbtn span { display: none; }   /* show only flag */
   .rgbtn { font-size: 8.5px !important; min-width: 36px !important; }
-  #right { height: 45vh; }
+  #right { height: 50vh; max-height: none; }
+  #live-panel { bottom: calc(50vh + 8px) !important; }
 }
 
 /* ──────────────────────────────────────────────────────────

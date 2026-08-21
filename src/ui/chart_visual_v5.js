@@ -209,7 +209,6 @@ html.st-vs5 .mkt-cell .ch:before{content:"· ";color:#536178}
   }
   html.st-vs5 #topbar .shell-dash-btn .shell-dash-label{display:none!important}
   html.st-vs5 #topbar .shell-dash-btn .shell-dash-glyph{width:23px;height:23px}
-  html.st-vs5 #wlchips .wlchip{padding-right:32px!important}
   html.st-vs5 #chart-search #syminput{width:88px}
   html.st-vs5 .dual-half{min-height:102px}
   html.st-vs5 #ctag-now,html.st-vs5 #ctag-prev{right:1px!important}

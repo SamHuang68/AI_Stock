@@ -10,6 +10,7 @@ const vm = require('vm');
 const root = path.join(__dirname, '..');
 const shell = fs.readFileSync(path.join(root, 'src/ui/shell_v5.js'), 'utf8');
 const hotkeys = fs.readFileSync(path.join(root, 'src/chart/hotkeys_v3.js'), 'utf8');
+const position = fs.readFileSync(path.join(root, 'src/core/position_v2.js'), 'utf8');
 const sourceHtml = fs.readFileSync(path.join(root, 'stock_terminal.html'), 'utf8');
 
 let failed = 0;
@@ -609,12 +610,26 @@ ok(/aria-label', '返回儀表板'/.test(shell) &&
   /#topbar \.shell-dash-btn\{[\s\S]*position:absolute!important;right:4px;top:5px/.test(chartVisual) &&
   /shell-dash-label\{display:none!important\}/.test(chartVisual),
   'mobile chart keeps an icon-only dashboard action pinned in the visible topbar');
-ok(/class="wlchip-rm"/.test(sourceHtml) &&
-  /event\.stopPropagation\(\);rmWl/.test(sourceHtml) &&
-  /#wlchips \.wlchip \.wlchip-rm[\s\S]*display: inline-flex !important/.test(mobileCss) &&
-  /#wlchips \.wlchip\{padding-right:32px!important\}/.test(chartVisual) &&
-  !/@media \(hover: none\)[\s\S]*\.wlchip-rm \{ display: none/.test(mobileCss),
-  'mobile watchlist exposes a touch-safe remove control while preserving confirmation');
+ok(!/class="wlchip-rm"/.test(sourceHtml) &&
+  /aria-haspopup="menu"/.test(sourceHtml) &&
+  /function attachLongPressWl/.test(sourceHtml) &&
+  /openWlActionMenu\(chip\)/.test(sourceHtml) &&
+  /_wlSuppressClickUntil = Date\.now\(\) \+ 900/.test(sourceHtml) &&
+  /}, 550\)/.test(sourceHtml) &&
+  /wl-menu-remove/.test(sourceHtml) &&
+  /if \(!confirm\('從自選移除/.test(sourceHtml) &&
+  /\.wlchip\.wl-holding::after/.test(mobileCss) &&
+  /body > \.wl-action-menu\.open/.test(mobileCss),
+  'mobile watchlist requires a long press menu and suppresses the following load click');
+ok(/id="rpanel-pager"/.test(sourceHtml) && /id="rpage-dots"/.test(sourceHtml) &&
+  /const RPANEL_PAGES =/.test(sourceHtml) && /function shiftRtab\(delta\)/.test(sourceHtml) &&
+  /Math\.abs\(dx\) < 56/.test(sourceHtml) &&
+  /#rtabs \{ display: none !important; \}/.test(mobileCss) &&
+  /#rpanel-pager[\s\S]*display: grid !important/.test(mobileCss) &&
+  /grid-template-columns: 48px minmax\(0,1fr\) 104px/.test(mobileCss) &&
+  /#rpage-dots \.rpage-dot\.on/.test(mobileCss) &&
+  /window\.updateRpanelPager/.test(position),
+  'mobile analysis workbench uses swipe paging with a persistent bottom page index');
 ok(/ShellV5\.ringPop/.test(hotkeys),
   'hotkeys Esc fallback calls ShellV5.ringPop while ring open');
 ok(/function plainWdStatus/.test(shell) && /chipLabel/.test(shell) &&

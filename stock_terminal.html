@@ -47,6 +47,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 #splitter{display:none}
 #rtabs{display:flex;border-bottom:1px solid var(--border);height:36px;flex-shrink:0}
 #rpanel{flex:1;overflow-y:auto;min-height:0}
+#rpanel-pager{display:none}
 
 /* ── TOP BAR ── */
 .logo{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--gold);font-weight:700;letter-spacing:2px;white-space:nowrap}
@@ -71,8 +72,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 .wlchip-t{color:var(--thi);font-weight:700;letter-spacing:.5px}
 .wlchip.active .wlchip-t{color:var(--gold)}
 .wlchip-p{font-size:10px}
-/* 桌機保留右鍵移除；手機由 responsive CSS 顯示明確的 × 按鈕。 */
-.wlchip-rm{display:none!important}
+/* 桌機保留右鍵移除；手機以長按選單避免誤觸。 */
+.wl-action-menu{display:none}
 .wlchip.dragging{opacity:.35}
 .wlchip.drop-before{box-shadow:inset 3px 0 0 var(--gold)}
 .wlchip.drop-after{box-shadow:inset -3px 0 0 var(--gold)}
@@ -262,14 +263,22 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
     <div id="splitter" title="拖曳調整線型 / 功能區寬度"></div>
     <div id="right">
       <div id="rtabs">
-        <button class="rtab on" onclick="setTab('stats')">STATS</button>
-        <button class="rtab" onclick="setTab('research')">RESEARCH</button>
-        <button class="rtab" id="tab-pos" onclick="setTab('position')">POS</button>
-        <button class="rtab" id="tab-watch" onclick="setTab('watch')">WATCH</button>
-        <button class="rtab" id="tab-plan" onclick="setTab('plan')">PLAN</button>
-        <button class="rtab" id="tab-etf" onclick="setTab('etf')">ETF△</button>
+        <button class="rtab on" data-tab="stats" onclick="setTab('stats')">STATS</button>
+        <button class="rtab" data-tab="research" onclick="setTab('research')">RESEARCH</button>
+        <button class="rtab" data-tab="position" id="tab-pos" onclick="setTab('position')">POS</button>
+        <button class="rtab" data-tab="watch" id="tab-watch" onclick="setTab('watch')">WATCH</button>
+        <button class="rtab" data-tab="plan" id="tab-plan" onclick="setTab('plan')">PLAN</button>
+        <button class="rtab" data-tab="etf" id="tab-etf" onclick="setTab('etf')">ETF△</button>
       </div>
       <div id="rpanel"></div>
+      <div id="rpanel-pager" role="group" aria-label="分析頁面導覽">
+        <button type="button" id="rpage-prev" aria-label="上一個分析頁" onclick="shiftRtab(-1)">‹</button>
+        <div class="rpage-state">
+          <div id="rpage-label" aria-live="polite">技術統計 · 1 / 6</div>
+          <div id="rpage-dots" aria-label="分析頁面索引"></div>
+        </div>
+        <button type="button" id="rpage-next" aria-label="下一個分析頁" onclick="shiftRtab(1)">›</button>
+      </div>
     </div>
   </div>
 </div>
@@ -344,6 +353,8 @@ window.addEventListener('DOMContentLoaded', () => {
   S.wl = loadWl();
   renderWl();
   renderRpanel();
+  attachRpanelPager();
+  updateRpanelPager();
   if (S.wl.length > 0) loadSym(S.wl[0].t, S.wl[0].m);
   (window.fetchEtfDelta || fetchEtfDelta)();
   updateKeyBtn();
@@ -1511,6 +1522,7 @@ function loadWl() {
 function saveWl() { localStorage.setItem(LS_KEY_WL, JSON.stringify(S.wl)); }
 
 function renderWl() {
+  cancelWlLongPress();
   const ct = document.getElementById('wlchips');
   ct.innerHTML = S.wl.map(w=>{
     const isActive = w.t===S.sym && w.m===S.mkt;
@@ -1520,11 +1532,10 @@ function renderWl() {
       if(_flow&&_flow.addCount>0) _etfBadge=`<span style="font-family:monospace;font-size:7px;padding:0 3px;margin-left:2px;background:rgba(74,222,128,.15);color:var(--green);border-radius:2px">+${_flow.addCount}</span>`;
       else if(_flow&&_flow.rmCount>0) _etfBadge=`<span style="font-family:monospace;font-size:7px;padding:0 3px;margin-left:2px;background:rgba(248,113,113,.15);color:var(--red);border-radius:2px">-${_flow.rmCount}</span>`;
     }
-    return `<div class="wlchip${isActive?' active':''}" draggable="true" data-sym="${w.t}" data-mkt="${w.m}" onclick="loadSym('${w.t}','${w.m}')" oncontextmenu="rmWl('${w.t}','${w.m}');return false" title="拖曳排序 / 點擊載入 / 右鍵或 × 移除自選">
+    return `<div class="wlchip${isActive?' active':''}" draggable="true" data-sym="${w.t}" data-mkt="${w.m}" aria-haspopup="menu" onclick="loadSym('${w.t}','${w.m}')" oncontextmenu="rmWl('${w.t}','${w.m}');return false" title="點擊載入 / 手機長按操作 / 桌機拖曳或右鍵移除">
       <span class="wlchip-grip">⋮⋮</span>
       <span class="wlchip-t">${w.name || w.t}</span>
       <span class="wlchip-p ${getPcls(w.chg)}" id="wlp-${w.t}" style="${window.Colors?('color:'+Colors.dir(w.t,w.chg)+' !important'):''}">${w.chg!=null?(w.chg>=0?'+':'')+w.chg.toFixed(2)+'%':''}</span>${_etfBadge}
-      <button type="button" class="wlchip-rm" draggable="false" aria-label="移除自選 ${w.t}" title="移除自選" onpointerdown="event.stopPropagation()" onclick="event.stopPropagation();rmWl('${w.t}','${w.m}')">×</button>
     </div>`;
   }).join('');
   attachDragWl();
@@ -1532,10 +1543,116 @@ function renderWl() {
 
 // Drag-and-drop reordering for watchlist chips
 let _dragSrcChip = null;
+let _wlLongPressTimer = null;
+let _wlPressStart = null;
+let _wlSuppressClickUntil = 0;
+let _wlMenuTarget = null;
+
+function ensureWlActionMenu() {
+  let menu = document.getElementById('wl-action-menu');
+  if (menu) return menu;
+  menu = document.createElement('div');
+  menu.id = 'wl-action-menu';
+  menu.className = 'wl-action-menu';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', '觀察股操作');
+  menu.innerHTML = '<div class="wl-menu-head"><span id="wl-menu-name">觀察股</span><small id="wl-menu-code"></small></div>' +
+    '<button type="button" class="wl-menu-remove" role="menuitem">移除自選</button>' +
+    '<button type="button" class="wl-menu-cancel" role="menuitem">取消</button>';
+  document.body.appendChild(menu);
+  menu.querySelector('.wl-menu-remove').addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    const target = _wlMenuTarget;
+    closeWlActionMenu();
+    if (target) rmWl(target.sym, target.mkt);
+  });
+  menu.querySelector('.wl-menu-cancel').addEventListener('click', function (ev) {
+    ev.stopPropagation(); closeWlActionMenu();
+  });
+  document.addEventListener('pointerdown', function (ev) {
+    if (menu.classList.contains('open') && !menu.contains(ev.target)) closeWlActionMenu();
+  });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape') closeWlActionMenu();
+  });
+  window.addEventListener('resize', closeWlActionMenu);
+  return menu;
+}
+
+function openWlActionMenu(chip) {
+  const menu = ensureWlActionMenu();
+  const sym = chip.dataset.sym || '';
+  const mkt = chip.dataset.mkt || '';
+  const item = S.wl.find(w => w.t === sym && w.m === mkt) || {};
+  _wlMenuTarget = {sym, mkt};
+  menu.querySelector('#wl-menu-name').textContent = item.name || sym;
+  menu.querySelector('#wl-menu-code').textContent = (item.name && item.name !== sym ? sym + ' · ' : '') + mkt;
+  menu.classList.add('open');
+  menu.style.visibility = 'hidden';
+  const chipRect = chip.getBoundingClientRect();
+  requestAnimationFrame(function () {
+    const menuRect = menu.getBoundingClientRect();
+    const left = Math.max(8, Math.min(window.innerWidth - menuRect.width - 8, chipRect.left));
+    const below = chipRect.bottom + 6;
+    const top = below + menuRect.height <= window.innerHeight - 8
+      ? below : Math.max(8, chipRect.top - menuRect.height - 6);
+    menu.style.left = Math.round(left) + 'px';
+    menu.style.top = Math.round(top) + 'px';
+    menu.style.visibility = 'visible';
+    chip.classList.add('wl-menu-open');
+  });
+}
+
+function closeWlActionMenu() {
+  const menu = document.getElementById('wl-action-menu');
+  if (menu) { menu.classList.remove('open'); menu.style.visibility = ''; }
+  document.querySelectorAll('.wlchip.wl-menu-open').forEach(chip => chip.classList.remove('wl-menu-open'));
+  _wlMenuTarget = null;
+}
+
+function cancelWlLongPress(chip) {
+  if (_wlLongPressTimer) clearTimeout(_wlLongPressTimer);
+  _wlLongPressTimer = null;
+  _wlPressStart = null;
+  if (chip) chip.classList.remove('wl-holding');
+}
+
+function attachLongPressWl(chip) {
+  chip.addEventListener('pointerdown', function (ev) {
+    if (ev.pointerType !== 'touch' && ev.pointerType !== 'pen') return;
+    cancelWlLongPress(chip);
+    _wlPressStart = {x:ev.clientX, y:ev.clientY, pointerId:ev.pointerId};
+    chip.classList.add('wl-holding');
+    _wlLongPressTimer = setTimeout(function () {
+      _wlLongPressTimer = null;
+      _wlSuppressClickUntil = Date.now() + 900;
+      chip.classList.remove('wl-holding');
+      openWlActionMenu(chip);
+      try { if (navigator.vibrate) navigator.vibrate(18); } catch {}
+    }, 550);
+  }, {passive:true});
+  chip.addEventListener('pointermove', function (ev) {
+    if (!_wlPressStart || ev.pointerId !== _wlPressStart.pointerId) return;
+    if (Math.abs(ev.clientX - _wlPressStart.x) > 10 || Math.abs(ev.clientY - _wlPressStart.y) > 10) cancelWlLongPress(chip);
+  }, {passive:true});
+  chip.addEventListener('pointerup', function () {
+    if (_wlMenuTarget && _wlMenuTarget.sym === chip.dataset.sym && _wlMenuTarget.mkt === chip.dataset.mkt) {
+      _wlSuppressClickUntil = Date.now() + 700;
+    }
+    cancelWlLongPress(chip);
+  }, {passive:true});
+  chip.addEventListener('pointercancel', function () { cancelWlLongPress(chip); }, {passive:true});
+  chip.addEventListener('click', function (ev) {
+    if (Date.now() >= _wlSuppressClickUntil) return;
+    ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation();
+  }, true);
+}
+
 function attachDragWl() {
   const ct = document.getElementById('wlchips');
   if (!ct) return;
   ct.querySelectorAll('.wlchip').forEach(chip => {
+    attachLongPressWl(chip);
     chip.addEventListener('dragstart', e => {
       _dragSrcChip = chip;
       chip.classList.add('dragging');
@@ -1626,12 +1743,80 @@ function relTime(ts) {
 }
 
 // ── TABS ─────────────────────────────────────────────────────────
+const RPANEL_PAGES = [
+  {key:'stats', label:'技術統計'},
+  {key:'research', label:'研究分析'},
+  {key:'position', label:'持倉部位'},
+  {key:'watch', label:'條件觀察'},
+  {key:'plan', label:'交易計畫'},
+  {key:'etf', label:'ETF 變動'}
+];
+let _rpanelSwipeStart = null;
+
+function rpanelPageIndex() {
+  const key = (S.tab === 'batch' || S.tab === 'history') ? 'research' : S.tab;
+  const idx = RPANEL_PAGES.findIndex(page => page.key === key);
+  return idx < 0 ? 0 : idx;
+}
+
+function updateRpanelPager() {
+  const idx = rpanelPageIndex();
+  const page = RPANEL_PAGES[idx];
+  const label = document.getElementById('rpage-label');
+  const dots = document.getElementById('rpage-dots');
+  const prev = document.getElementById('rpage-prev');
+  const next = document.getElementById('rpage-next');
+  if (label) label.textContent = page.label + ' · ' + (idx + 1) + ' / ' + RPANEL_PAGES.length;
+  if (prev) prev.disabled = idx === 0;
+  if (next) next.disabled = idx === RPANEL_PAGES.length - 1;
+  if (dots) dots.innerHTML = RPANEL_PAGES.map(function (candidate, i) {
+    return '<button type="button" class="rpage-dot' + (i === idx ? ' on' : '') + '"' +
+      ' aria-label="前往' + candidate.label + '" aria-current="' + (i === idx ? 'page' : 'false') + '"' +
+      ' onclick="goRpanelPage(' + i + ')"></button>';
+  }).join('');
+}
+
+function goRpanelPage(index) {
+  const next = RPANEL_PAGES[Math.max(0, Math.min(RPANEL_PAGES.length - 1, Number(index) || 0))];
+  if (next) setTab(next.key);
+}
+
+function shiftRtab(delta) {
+  const current = rpanelPageIndex();
+  const next = Math.max(0, Math.min(RPANEL_PAGES.length - 1, current + delta));
+  if (next === current) return;
+  setTab(RPANEL_PAGES[next].key);
+  const panel = document.getElementById('rpanel');
+  if (panel) panel.scrollTop = 0;
+}
+
+function attachRpanelPager() {
+  const panel = document.getElementById('rpanel');
+  if (!panel || panel.dataset.swipePager === '1') return;
+  panel.dataset.swipePager = '1';
+  panel.addEventListener('pointerdown', function (ev) {
+    if (ev.pointerType !== 'touch' && ev.pointerType !== 'pen') return;
+    if (ev.target && ev.target.closest && ev.target.closest('button,a,input,textarea,select,[contenteditable="true"]')) return;
+    _rpanelSwipeStart = {x:ev.clientX, y:ev.clientY, at:Date.now(), pointerId:ev.pointerId};
+  }, {passive:true});
+  panel.addEventListener('pointerup', function (ev) {
+    const start = _rpanelSwipeStart;
+    _rpanelSwipeStart = null;
+    if (!start || ev.pointerId !== start.pointerId || Date.now() - start.at > 1200) return;
+    const dx = ev.clientX - start.x;
+    const dy = ev.clientY - start.y;
+    if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.35) return;
+    shiftRtab(dx < 0 ? 1 : -1);
+  }, {passive:true});
+  panel.addEventListener('pointercancel', function () { _rpanelSwipeStart = null; }, {passive:true});
+}
+
 function setTab(tab) {
   S.tab = tab;
-  document.querySelectorAll('.rtab').forEach((b,i)=>{
-    const tabs=['stats','research','position','watch','plan','etf'];
-    b.classList.toggle('on', tabs[i]===tab);
+  document.querySelectorAll('.rtab').forEach(b=>{
+    b.classList.toggle('on', b.dataset.tab===tab);
   });
+  updateRpanelPager();
   renderRpanel();
 }
 
