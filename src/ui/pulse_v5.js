@@ -58,7 +58,7 @@
         beginnerProbe.style.borderColor = 'rgba(56,189,248,.45)';
         beginnerProbe.style.color = '#7dd3fc';
         beginnerProbe.style.background = 'rgba(56,189,248,.12)';
-        beginnerProbe.title = '預設顯示市場天氣、行動提示與三個白話訊號';
+        beginnerProbe.title = '預設顯示市場狀態、行動提示與三個白話訊號';
       }
       return true;
     }
@@ -1463,7 +1463,7 @@
             '<div class="pl-sub" id="pl-sub">官方資料 · 一行五框 × 上下兩區 · ' + LAYOUT_ANCHOR + '</div>' +
           '</div><div class="pl-actions">' +
             '<span class="pl-mode-toggle" role="group" aria-label="總覽顯示模式">' +
-              '<button type="button" id="pl-view-beginner" title="只看市場天氣、行動提示與三個白話訊號">新手</button>' +
+              '<button type="button" id="pl-view-beginner" title="只看市場狀態、行動提示與三個白話訊號">新手</button>' +
               '<button type="button" id="pl-view-expert" title="顯示完整 5+5 儀表板與原始數據">專業</button>' +
             '</span>' +
             '<button type="button" class="pl-btn" id="pl-refresh">↻ 重新整理</button>' +
@@ -1662,7 +1662,7 @@
   function beginnerWeather(regimeId, score, adv) {
     var map = {
       BROAD_RISK_ON: {
-        icon: '☀', label: '晴朗偏暖', cls: 'calm',
+        icon: '▲', label: '廣泛多頭・結構健康', cls: 'calm',
         slogan: '指數和多數股票一起走強，市場結構相對健康。'
       },
       NARROW_RALLY: {
@@ -1670,23 +1670,23 @@
         slogan: '市場拉高，但只有少數大股票在漲；手上股票未必會跟著漲。'
       },
       RECOVERY_ATTEMPT: {
-        icon: '🌤', label: '雨後觀察', cls: 'watch',
+        icon: '↗', label: '結構修復・等待確認', cls: 'watch',
         slogan: '市場正在回穩，但還需要更多股票一起轉強才能確認。'
       },
       CONFLICT: {
-        icon: '☁', label: '多雲易變', cls: 'watch',
+        icon: '⇄', label: '訊號分歧・方向未定', cls: 'watch',
         slogan: '不同訊號互相打架，方向不明確，今天宜多看少動。'
       },
       DEFENSIVE_RISK_OFF: {
-        icon: '🌧', label: '風雨警戒', cls: 'alert',
+        icon: '▽', label: '風險趨避・防禦優先', cls: 'alert',
         slogan: '賣壓與風險同時升高，先守住資金比急著找買點重要。'
       },
       CAPITULATION: {
-        icon: '⛈', label: '暴雨警戒', cls: 'alert',
+        icon: '▼', label: '極端賣壓・等待止穩', cls: 'alert',
         slogan: '市場出現極端賣壓，超跌不代表立刻安全，先等止穩。'
       },
       INSUFFICIENT_DATA: {
-        icon: '🌫', label: '資料霧區', cls: 'unknown',
+        icon: '…', label: '資料不足・暫緩判斷', cls: 'unknown',
         slogan: '核心資料尚未完整，現在不適合只靠單一數字判斷方向。'
       }
     };
@@ -1699,10 +1699,10 @@
 
   function beginnerScoreBand(score) {
     if (score == null) return '等待資料';
-    if (score < 30) return '寒冬';
-    if (score < 60) return '震盪';
-    if (score < 80) return '溫和';
-    return '過熱';
+    if (score < 30) return '偏空防禦';
+    if (score < 60) return '震盪中性';
+    if (score < 80) return '偏多穩健';
+    return '高檔過熱';
   }
 
   function beginnerModel(ov, p) {

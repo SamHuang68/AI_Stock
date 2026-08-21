@@ -238,7 +238,10 @@ ok(/\.pl-weather\.calm\{color:#bae6fd/.test(pulseBeginner) &&
   /\.pl-weather\.alert\{color:#fed7aa/.test(pulseBeginner) && /weather-watch:after/.test(pulseBeginner),
   'semantic weather uses blue/yellow/orange rather than TW price red/green');
 ok(/NARROW_RALLY:[\s\S]*label: '指數偏強・結構分化'/.test(pulseBeginner) &&
-  !/晴時多雲/.test(pulseBeginner),
+  /BROAD_RISK_ON:[\s\S]*label: '廣泛多頭・結構健康'/.test(pulseBeginner) &&
+  /RECOVERY_ATTEMPT:[\s\S]*label: '結構修復・等待確認'/.test(pulseBeginner) &&
+  /DEFENSIVE_RISK_OFF:[\s\S]*label: '風險趨避・防禦優先'/.test(pulseBeginner) &&
+  !/晴朗偏暖|雨後觀察|多雲易變|風雨警戒|暴雨警戒|資料霧區/.test(pulseBeginner),
   'beginner regime badge uses professional market structure terminology');
 ok(/data-method-card/.test(pulseBeginner) && /怎麼算？/.test(pulseBeginner) &&
   /上漲家數 ÷（上漲＋下跌家數）/.test(pulseBeginner) && /class="pl-method-pop" hidden/.test(pulseBeginner),
