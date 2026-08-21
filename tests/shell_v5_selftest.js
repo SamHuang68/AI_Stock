@@ -66,6 +66,7 @@ const decisionEngine = fs.readFileSync(path.join(root, 'server/decision_context.
 const exposureLabEngine = fs.readFileSync(path.join(root, 'server/exposure_lab.py'), 'utf8');
 const visualSystem = fs.readFileSync(path.join(root, 'src/ui/visual_system_v5.js'), 'utf8');
 const chartVisual = fs.readFileSync(path.join(root, 'src/ui/chart_visual_v5.js'), 'utf8');
+const mobileCss = fs.readFileSync(path.join(root, 'src/ui/mobile_v2.css'), 'utf8');
 ok(/s === '__TXF__'/.test(colors) && /\^__TW_/.test(colors) && /dirRU/.test(colors),
   'color contract recognizes TXF and TW local symbols as red-up instruments');
 ok(/function isJpFmt/.test(marketContract) && /return 'JP'/.test(marketContract) &&
@@ -541,6 +542,11 @@ ok(/data-layout=/.test(pl) && /LAYOUT_CONTRACT/.test(pl) &&
   !/4col-priority/.test(pl) && !/max-width:1280/.test(pl) &&
   !/5col-2zone-flex/.test(pl) && !/enforceFiveCol/.test(pl),
   'pulse dash is known-good 5col-2zone + runtime probe (anchor 3cab212)');
+ok(/MOBILE_LAYOUT_CONTRACT = '2col-scroll'/.test(pl) &&
+  /@media\(max-width:900px\)[\s\S]*pl-zone\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/.test(pl) &&
+  /var expectedCols = mobile \? 2 : 5/.test(pl) &&
+  /layoutResizeTimer = setTimeout\(probeLayoutCols, 120\)/.test(pl),
+  'pulse mobile uses a two-column scrolling layout while desktop remains 5+5');
 ok(/#pl-body\{[^}]*overflow:hidden/.test(pl) && /pl-expanded\{overflow:hidden\}/.test(pl) &&
   /data-go=\"factors\"/.test(pl) && !/pl-toggle-fac/.test(pl) &&
   /因子帳本改獨立頁/.test(pl),
@@ -599,6 +605,16 @@ ok(/#topbar\{position:relative;flex-wrap:nowrap;min-height:42px;max-height:42px;
 ok(/shell-dash-glyph/.test(shell) && /shellDashSheen/.test(shell) &&
   /linear-gradient\(135deg,#ffe36a/.test(shell) && /RING_LOGO/.test(shell),
   'chart dashboard action uses the branded glowing icon treatment');
+ok(/aria-label', '返回儀表板'/.test(shell) &&
+  /#topbar \.shell-dash-btn\{[\s\S]*position:absolute!important;right:4px;top:5px/.test(chartVisual) &&
+  /shell-dash-label\{display:none!important\}/.test(chartVisual),
+  'mobile chart keeps an icon-only dashboard action pinned in the visible topbar');
+ok(/class="wlchip-rm"/.test(sourceHtml) &&
+  /event\.stopPropagation\(\);rmWl/.test(sourceHtml) &&
+  /#wlchips \.wlchip \.wlchip-rm[\s\S]*display: inline-flex !important/.test(mobileCss) &&
+  /#wlchips \.wlchip\{padding-right:32px!important\}/.test(chartVisual) &&
+  !/@media \(hover: none\)[\s\S]*\.wlchip-rm \{ display: none/.test(mobileCss),
+  'mobile watchlist exposes a touch-safe remove control while preserving confirmation');
 ok(/ShellV5\.ringPop/.test(hotkeys),
   'hotkeys Esc fallback calls ShellV5.ringPop while ring open');
 ok(/function plainWdStatus/.test(shell) && /chipLabel/.test(shell) &&

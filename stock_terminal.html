@@ -71,7 +71,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 .wlchip-t{color:var(--thi);font-weight:700;letter-spacing:.5px}
 .wlchip.active .wlchip-t{color:var(--gold)}
 .wlchip-p{font-size:10px}
-/* 觀察股移除改右鍵（rmWl），不再顯示 × 以免誤觸 */
+/* 桌機保留右鍵移除；手機由 responsive CSS 顯示明確的 × 按鈕。 */
 .wlchip-rm{display:none!important}
 .wlchip.dragging{opacity:.35}
 .wlchip.drop-before{box-shadow:inset 3px 0 0 var(--gold)}
@@ -1520,10 +1520,11 @@ function renderWl() {
       if(_flow&&_flow.addCount>0) _etfBadge=`<span style="font-family:monospace;font-size:7px;padding:0 3px;margin-left:2px;background:rgba(74,222,128,.15);color:var(--green);border-radius:2px">+${_flow.addCount}</span>`;
       else if(_flow&&_flow.rmCount>0) _etfBadge=`<span style="font-family:monospace;font-size:7px;padding:0 3px;margin-left:2px;background:rgba(248,113,113,.15);color:var(--red);border-radius:2px">-${_flow.rmCount}</span>`;
     }
-    return `<div class="wlchip${isActive?' active':''}" draggable="true" data-sym="${w.t}" data-mkt="${w.m}" onclick="loadSym('${w.t}','${w.m}')" oncontextmenu="rmWl('${w.t}','${w.m}');return false" title="拖曳排序 / 點擊載入 / 右鍵移除自選">
+    return `<div class="wlchip${isActive?' active':''}" draggable="true" data-sym="${w.t}" data-mkt="${w.m}" onclick="loadSym('${w.t}','${w.m}')" oncontextmenu="rmWl('${w.t}','${w.m}');return false" title="拖曳排序 / 點擊載入 / 右鍵或 × 移除自選">
       <span class="wlchip-grip">⋮⋮</span>
       <span class="wlchip-t">${w.name || w.t}</span>
       <span class="wlchip-p ${getPcls(w.chg)}" id="wlp-${w.t}" style="${window.Colors?('color:'+Colors.dir(w.t,w.chg)+' !important'):''}">${w.chg!=null?(w.chg>=0?'+':'')+w.chg.toFixed(2)+'%':''}</span>${_etfBadge}
+      <button type="button" class="wlchip-rm" draggable="false" aria-label="移除自選 ${w.t}" title="移除自選" onpointerdown="event.stopPropagation()" onclick="event.stopPropagation();rmWl('${w.t}','${w.m}')">×</button>
     </div>`;
   }).join('');
   attachDragWl();

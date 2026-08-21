@@ -27,7 +27,19 @@ ok(!pulse.includes('線型＝加權 ^TWII（非台指期）；櫃買／台指期
   'overview removes the redundant weighted-index annotation');
 ok(pulse.includes('grid-template-columns:repeat(5,minmax(0,1fr))') &&
   !pulse.includes('#pl-root .pl-zone.z-top{') && !pulse.includes('#pl-root .pl-zone.z-bot{'),
-  'overview second and third rows keep five equal-width panels');
+  'overview desktop second and third rows keep five equal-width panels');
+ok(pulse.includes("MOBILE_LAYOUT_CONTRACT = '2col-scroll'") &&
+  pulse.includes('#pl-root .pl-zone{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:300px') &&
+  pulse.includes('#pl-body.pl-mode-expert{display:block;overflow:visible') &&
+  pulse.includes('#shell-views:has(#view-pulse.on){overflow-x:hidden!important;overflow-y:auto!important'),
+  'overview mobile second and third rows use two readable columns with page scrolling');
+ok(pulse.includes('#pl-root .pl-inst4,#pl-root .pl-bd4,#pl-root .pl-ohlc4{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px') &&
+  pulse.includes('#pl-root .pl-score3 .sc.main{grid-column:1/-1}') &&
+  pulse.includes('#pl-root .pl-strip{display:flex;gap:7px;overflow-x:auto') &&
+  pulse.includes('#pl-root .pl-movers .vz-rowbar,#pl-root .pl-movers .vz-chip{display:none!important}') &&
+  pulse.includes('@media(max-width:520px)') && pulse.includes('#pl-root .pl-global{grid-template-columns:1fr}') &&
+  pulse.includes('#pl-root .pl-wl col.c-px{width:29%}'),
+  'overview mobile KPI internals and headline strip avoid numeric/text collisions');
 ok(pulse.includes('overflow-x:hidden;overflow-y:auto') && pulse.includes('scrollbar-gutter:stable'),
   'beginner short viewport scrolls safely instead of clipping its lower edge');
 

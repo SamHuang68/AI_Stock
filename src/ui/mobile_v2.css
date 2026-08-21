@@ -68,9 +68,32 @@
   /* ── Watchlist bar: keep 2 rows but slimmer ── */
   #wlbar { height: 56px !important; }
   #wlchips { grid-template-rows: repeat(2, 1fr) !important; }
-  .wlchip { height: 28px !important; padding: 0 7px !important; font-size: 10px !important; }
+  .wlchip { height: 28px !important; padding: 0 32px 0 7px !important; font-size: 10px !important; }
   .wlchip-grip { display: none !important; }   /* 觸控不需要拖把手提示 */
   .wlchip-p { font-size: 9px !important; }
+  #wlchips .wlchip .wlchip-rm {
+    display: inline-flex !important;
+    position: absolute;
+    right: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 26px;
+    height: 26px;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid rgba(248,113,113,.34);
+    border-radius: 6px;
+    background: rgba(127,29,29,.16);
+    color: #fda4af;
+    font: 800 16px/1 'JetBrains Mono', monospace;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  #wlchips .wlchip .wlchip-rm:active {
+    background: rgba(239,68,68,.26);
+    border-color: rgba(248,113,113,.65);
+  }
   .wladd { height: 56px !important; padding: 0 10px !important; }
 
   /* ── Range bar: smaller buttons ── */
@@ -166,7 +189,6 @@
    👆 Touch device (any size with touch capability)
    ────────────────────────────────────────────────────────── */
 @media (hover: none) and (pointer: coarse) {
-  .wlchip-rm { display: none !important; }          /* 移除 ×：改右鍵/長按由桌面右鍵流程；觸控避免誤觸 */
   .heatcell:hover { transform: none !important; }   /* 觸控時 hover scale 會跳 */
   /* Bigger hitboxes */
   .probtn, .rgbtn, .rtab, .wlchip, .wladd { min-height: 32px; }

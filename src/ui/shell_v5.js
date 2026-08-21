@@ -1368,6 +1368,7 @@
       btn.innerHTML = '<span class="shell-dash-glyph" aria-hidden="true"><img src="' + RING_LOGO +
         '" alt="" width="14" height="14"></span><span class="shell-dash-label">儀表板</span>';
       btn.title = '返回市場總覽儀表板';
+      btn.setAttribute('aria-label', '返回儀表板');
       btn.addEventListener('click', function (e) {
         e.preventDefault();
         goDashboard();

@@ -200,6 +200,16 @@ html.st-vs5 .mkt-cell .px{font-size:12.5px;color:#edf4fb}
 html.st-vs5 .mkt-cell .ch:before{content:"· ";color:#536178}
 
 @media(max-width:900px){
+  html.st-vs5 #topbar{padding-right:46px!important}
+  html.st-vs5 #topbar #keybtn{margin-right:36px!important}
+  html.st-vs5 #topbar .shell-dash-btn{
+    position:absolute!important;right:4px;top:5px;z-index:20;
+    width:34px;height:32px;margin:0!important;padding:4px!important;gap:0;
+    justify-content:center;
+  }
+  html.st-vs5 #topbar .shell-dash-btn .shell-dash-label{display:none!important}
+  html.st-vs5 #topbar .shell-dash-btn .shell-dash-glyph{width:23px;height:23px}
+  html.st-vs5 #wlchips .wlchip{padding-right:32px!important}
   html.st-vs5 #chart-search #syminput{width:88px}
   html.st-vs5 .dual-half{min-height:102px}
   html.st-vs5 #ctag-now,html.st-vs5 #ctag-prev{right:1px!important}
