@@ -44,14 +44,18 @@
     min-height: 0;
     overflow-y: auto !important;
     overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
   }
   #rpanel-pager {
     display: grid !important;
     grid-template-columns: 48px minmax(0,1fr) 48px;
     align-items: center;
-    min-height: 44px;
-    flex: 0 0 44px;
+    min-height: calc(54px + env(safe-area-inset-bottom,0px));
+    height: calc(54px + env(safe-area-inset-bottom,0px));
+    flex: 0 0 calc(54px + env(safe-area-inset-bottom,0px));
+    position: relative;
+    isolation: isolate;
     border-top: 1px solid rgba(148,163,184,.16);
     background: linear-gradient(180deg,rgba(15,23,42,.97),rgba(5,10,18,.99));
     box-shadow: 0 -8px 22px rgba(0,0,0,.22);
@@ -71,10 +75,17 @@
   }
   #rpanel-pager > button:disabled { opacity: .25; color: var(--tlo); }
   #rpage-next { justify-self: center; margin-left: auto !important; }
-  #rpanel-pager .rpage-state { min-width: 0; text-align: center; }
+  #rpanel-pager .rpage-state { min-width: 0; text-align: center; align-self: center; }
+  #rpanel-pager .rpage-title { display: flex; justify-content: center; align-items: baseline; gap: 7px; min-width: 0; }
+  #rpanel-pager .rpage-prefix {
+    color: var(--gold);
+    font: 700 8px/1.2 'Noto Serif TC',serif;
+    letter-spacing: .8px;
+    white-space: nowrap;
+  }
   #rpage-label {
     color: var(--thi);
-    font: 700 10px/1.2 'JetBrains Mono',monospace;
+    font: 800 12px/1.2 'Noto Serif TC','JetBrains Mono',monospace;
     letter-spacing: .5px;
     white-space: nowrap;
   }
@@ -249,6 +260,9 @@
 @media (max-width: 768px) and (orientation: portrait) {
   #body {
     flex-direction: row !important;
+    flex: 1 1 0 !important;
+    height: auto !important;
+    max-height: none !important;
     min-height: 0 !important;
     overflow: hidden !important;
   }
@@ -270,12 +284,15 @@
     border-top: 0 !important;
   }
   #rpanel { flex: 1 1 0 !important; min-height: 0 !important; }
-  #rpanel-pager { flex: 0 0 auto !important; }
+  #rpanel-pager {
+    flex: 0 0 calc(54px + env(safe-area-inset-bottom,0px)) !important;
+    z-index: 140 !important;
+  }
   html[data-st5-route="chart"] #st-ring-fab {
-    bottom: calc(62px + env(safe-area-inset-bottom, 0px)) !important;
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
   }
   #live-panel {
-    bottom: calc(50px + env(safe-area-inset-bottom, 0px)) !important;
+    bottom: calc(62px + env(safe-area-inset-bottom, 0px)) !important;
   }
 }
 

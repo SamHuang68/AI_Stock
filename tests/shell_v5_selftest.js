@@ -622,8 +622,10 @@ ok(!/class="wlchip-rm"/.test(sourceHtml) &&
   /body > \.wl-action-menu\.open/.test(mobileCss),
   'mobile watchlist requires a long press menu and suppresses the following load click');
 ok(/id="rpanel-pager"/.test(sourceHtml) && /id="rpage-dots"/.test(sourceHtml) &&
+  /rpage-prefix">目前頁面/.test(sourceHtml) &&
   /MOBILE_WORKSPACE_PAGES = \[\{key:'chart'/.test(sourceHtml) &&
   /function goMobileWorkspacePage\(index, reason\)/.test(sourceHtml) &&
+  /const pageChanged = body\.getAttribute/.test(sourceHtml) &&
   /data-mobile-workspace-page/.test(sourceHtml) && /function shiftRtab\(delta\)/.test(sourceHtml) &&
   /Math\.abs\(dx\) < 56/.test(sourceHtml) &&
   /#rtabs \{ display: none !important; \}/.test(mobileCss) &&
@@ -640,8 +642,16 @@ ok(/id="rpanel-pager"/.test(sourceHtml) && /id="rpage-dots"/.test(sourceHtml) &&
   /#rpage-dots \.rpage-dot\.on/.test(mobileCss) &&
   /window\.updateRpanelPager/.test(position),
   'portrait mobile pages the whole chart workspace; landscape keeps the workstation split');
+ok(/--st-app-height:100dvh/.test(sourceHtml) &&
+  /function syncAppVisualViewport\(reason\)/.test(sourceHtml) &&
+  /window\.visualViewport\.addEventListener\('resize'/.test(sourceHtml) &&
+  /height:var\(--st-app-height,100dvh\)/.test(sourceHtml) &&
+  /max-height:var\(--st-app-height,100dvh\)/.test(sourceHtml) &&
+  /max-height:100%!important/.test(shell) &&
+  /-webkit-overflow-scrolling:touch/.test(shell),
+  'mobile shell tracks the Chrome visual viewport and keeps one momentum scroll boundary');
 ok(/mobile_shell_panel_layout/.test(shell) &&
-  /scroll-padding-bottom:calc\(80px \+ env\(safe-area-inset-bottom,0px\)\)/.test(shell) &&
+  /scroll-padding-bottom:calc\(88px \+ env\(safe-area-inset-bottom,0px\)\)/.test(shell) &&
   /#shell-main #shell-views\.show>\.sv-panel\.on/.test(shell),
   'portrait shell uses one scroll owner and reserves bottom safe space for all panels');
 ok(/var optionsLabOpen = true/.test(decisionUi) &&

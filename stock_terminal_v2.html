@@ -15,6 +15,7 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
+  --st-app-height:100dvh;
   --bg:#060A12;--bg2:#0B1220;--bg3:#111B2E;--bg4:#162240;
   --border:#1A2740;--bhi:#2A3D5C;
   --gold:#F5C518;--gold-s:rgba(245,197,24,.08);--gold-m:rgba(245,197,24,.18);
@@ -23,14 +24,14 @@
   --blue:#60A5FA;--bbg:rgba(96,165,250,.08);--bbdr:rgba(96,165,250,.3);
   --red:#F87171;--cyan:#67E8F9;--orange:#FB923C;
 }
-html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto Serif TC','PingFang TC',serif;overflow:hidden}
+html,body{height:var(--st-app-height,100dvh);max-height:var(--st-app-height,100dvh);background:var(--bg);color:var(--text);font-family:'Noto Serif TC','PingFang TC',serif;overflow:hidden;overscroll-behavior:none}
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap');
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:var(--bhi);border-radius:2px}
 
 /* ── LAYOUT ── */
-#app{display:flex;flex-direction:column;height:100vh}
+#app{display:flex;flex-direction:column;height:var(--st-app-height,100dvh);max-height:var(--st-app-height,100dvh);min-height:0;overflow:hidden}
 #topbar{height:42px;background:rgba(11,18,32,.95);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 12px;flex-shrink:0;z-index:50}
 #wlbar{height:64px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:stretch;gap:0;padding:0 4px;flex-shrink:0;overflow:hidden}
 #wlchips{display:grid;grid-template-rows:repeat(2,1fr);grid-auto-flow:column dense;grid-auto-columns:max-content;flex:1 1 auto;min-width:0;overflow-x:auto;overflow-y:hidden;align-items:stretch}
@@ -204,12 +205,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 /* ── PRINT ── */
 @media print{
   @page{size:A4;margin:1.6cm 1.8cm}
-  #app{height:auto;overflow:visible}
+  #app{height:auto;max-height:none;overflow:visible}
   #topbar,#wlbar,#indbar,#rtabs,#left,#keybtn{display:none!important}
   #body{display:block}
   #right{width:100%;border:none;background:#fff}
   #rpanel{overflow:visible}
-  body,html{background:#fff;color:#000;overflow:visible}
+  body,html{height:auto;max-height:none;background:#fff;color:#000;overflow:visible}
   .asec-hdr{background:#fffbeb;border-color:#b8960c;color:#b8960c}
   .asec-body{color:#000}
   .asec-body strong{color:#000}
@@ -218,7 +219,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
-<link rel="stylesheet" href="src/ui/mobile_v2.css?v=ebc9387f2c06">
+<link rel="stylesheet" href="src/ui/mobile_v2.css?v=c6bee921e3d2">
 </head>
 <body>
 <div id="app">
@@ -275,7 +276,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
   <div id="rpanel-pager" role="group" aria-label="手機圖表工作區頁面導覽">
     <button type="button" id="rpage-prev" aria-label="上一個工作區頁面" onclick="shiftRtab(-1)">‹</button>
     <div class="rpage-state">
-      <div id="rpage-label" aria-live="polite">線型圖 · 1 / 7</div>
+      <div class="rpage-title"><span class="rpage-prefix">目前頁面</span><span id="rpage-label" aria-live="polite">線型圖 · 1 / 7</span></div>
       <div id="rpage-dots" aria-label="工作區頁面索引"></div>
     </div>
     <button type="button" id="rpage-next" aria-label="下一個工作區頁面" onclick="shiftRtab(1)">›</button>
@@ -335,7 +336,43 @@ let S = {
 };
 
 // ── INIT ────────────────────────────────────────────────────────
+function syncAppVisualViewport(reason) {
+  try {
+    const viewport = window.visualViewport;
+    const measured = viewport && Number.isFinite(viewport.height) ? viewport.height : window.innerHeight;
+    const height = Math.max(320, Math.round(measured || window.innerHeight || 0));
+    if (!height) return;
+    const next = height + 'px';
+    if (document.documentElement.style.getPropertyValue('--st-app-height') !== next) {
+      document.documentElement.style.setProperty('--st-app-height', next);
+    }
+    document.documentElement.dataset.stViewportSource = viewport ? 'visual' : 'inner';
+    if (reason) document.documentElement.dataset.stViewportReason = reason;
+  } catch {}
+}
+
+function attachAppVisualViewport() {
+  if (document.documentElement.dataset.stViewportBound === '1') return;
+  document.documentElement.dataset.stViewportBound = '1';
+  let frame = 0;
+  const queue = function (reason) {
+    if (frame) cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(function () {
+      frame = 0;
+      syncAppVisualViewport(reason);
+    });
+  };
+  syncAppVisualViewport('boot');
+  window.addEventListener('resize', function () { queue('window-resize'); }, {passive:true});
+  window.addEventListener('orientationchange', function () { queue('orientation'); }, {passive:true});
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', function () { queue('visual-resize'); }, {passive:true});
+    window.visualViewport.addEventListener('scroll', function () { queue('visual-scroll'); }, {passive:true});
+  }
+}
+
 window.addEventListener('DOMContentLoaded', () => {
+  attachAppVisualViewport();
   // 安全(v3.9 review):金鑰改存 server。若 localStorage 還有舊 key,搬到 server 後清除,瀏覽器不再保留。
   (async () => {
     const _old = localStorage.getItem(LS_KEY_KEY) || '';
@@ -1752,6 +1789,11 @@ function traceMobileWorkspaceLayout(reason) {
     const b = body.getBoundingClientRect();
     const l = left.getBoundingClientRect();
     const r = right.getBoundingClientRect();
+    const app = document.getElementById('app');
+    const pager = document.getElementById('rpanel-pager');
+    const ar = app ? app.getBoundingClientRect() : null;
+    const pr = pager ? pager.getBoundingClientRect() : null;
+    const vv = window.visualViewport;
     const portrait = window.matchMedia('(orientation: portrait)').matches;
     fetch('/diagnostics/ui-route', {
       method:'POST', headers:{'Content-Type':'application/json'}, keepalive:true,
@@ -1760,9 +1802,12 @@ function traceMobileWorkspaceLayout(reason) {
         correlationId:'mobile-workspace-'+Date.now(), from:'chart-shell', to:'body',
         state:(portrait ? 'portrait' : 'landscape') + '-' + getComputedStyle(body).flexDirection,
         label:[reason, window.innerWidth+'x'+window.innerHeight,
+          'visual='+(vv ? Math.round(vv.width)+'x'+Math.round(vv.height) : 'none'),
+          'app='+(ar ? Math.round(ar.width)+'x'+Math.round(ar.height) : 'none'),
           'body='+Math.round(b.width)+'x'+Math.round(b.height),
           'left='+Math.round(l.width)+'x'+Math.round(l.height),
-          'right='+Math.round(r.width)+'x'+Math.round(r.height)].join('|')
+          'right='+Math.round(r.width)+'x'+Math.round(r.height),
+          'pager='+(pr ? Math.round(pr.top)+'-'+Math.round(pr.bottom) : 'none')].join('|')
       })
     }).catch(()=>{});
   } catch {}
@@ -1844,10 +1889,11 @@ function syncMobileWorkspacePage(reason) {
     return;
   }
   const page = MOBILE_WORKSPACE_PAGES[_mobileWorkspacePage] || MOBILE_WORKSPACE_PAGES[0];
+  const pageChanged = body.getAttribute('data-mobile-workspace-key') !== page.key;
   body.setAttribute('data-mobile-workspace-page', page.key === 'chart' ? 'chart' : 'analysis');
   body.setAttribute('data-mobile-workspace-key', page.key);
   updateRpanelPager();
-  if (page.key === 'chart') {
+  if (page.key === 'chart' && pageChanged) {
     setTimeout(function () { try { window.dispatchEvent(new Event('resize')); } catch {} }, 30);
   }
   if (reason) {
@@ -2439,92 +2485,92 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
 });
 </script>
-<script src="src/core/colors_v3.js?v=ebc9387f2c06"></script>
-<script src="src/core/app_kernel_v5.js?v=ebc9387f2c06"></script>
-<script src="src/core/market_data_v5.js?v=ebc9387f2c06"></script>
-<script src="src/core/decision_data_v5.js?v=ebc9387f2c06"></script>
-<script src="src/core/market_intel_v5.js?v=ebc9387f2c06"></script>
-<script src="src/core/table_sort_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/viz_v5.js?v=ebc9387f2c06"></script>
-<script src="src/core/market_v3.js?v=ebc9387f2c06"></script>
-<script src="src/core/fields_v3.js?v=ebc9387f2c06"></script>
-<script src="src/core/chart_registry_v3.js?v=ebc9387f2c06"></script>
-<script src="src/ui/share_v3.js?v=ebc9387f2c06"></script>
-<script src="src/ui/datasources_v3.js?v=ebc9387f2c06"></script>
-<script src="src/core/etf_flow_tip_v3.js?v=ebc9387f2c06"></script>
-<script src="src/core/position_v2.js?v=ebc9387f2c06"></script>
-<script src="src/core/watch_v2.js?v=ebc9387f2c06"></script>
-<script src="src/core/info_v2.js?v=ebc9387f2c06"></script>
-<script src="src/core/pro_v2.js?v=ebc9387f2c06"></script>
-<script src="src/chart/volume_profile_v3.js?v=ebc9387f2c06"></script>
-<script src="src/chart/pattern_v3.js?v=ebc9387f2c06"></script>
-<script src="src/core/live_v2.js?v=ebc9387f2c06"></script>
-<script src="src/fundamental/chip_v3.js?v=ebc9387f2c06"></script>
-<script src="src/fundamental/fundamental_v3.js?v=ebc9387f2c06"></script>
-<script src="src/screener/screener_v3.js?v=ebc9387f2c06"></script>
-<script src="src/ai/ai_report_v3.js?v=ebc9387f2c06"></script>
-<script src="src/ui/polish_v3.js?v=ebc9387f2c06"></script>
-<script src="src/core/wl_live_v3.js?v=ebc9387f2c06"></script>
-<script src="src/fundamental/plan_history_v3.js?v=ebc9387f2c06"></script>
-<script src="src/fundamental/plan_position_v3.js?v=ebc9387f2c06"></script>
-<script src="src/fundamental/plan_v3.js?v=ebc9387f2c06"></script>
-<script src="src/ui/pdf_import_v3.js?v=ebc9387f2c06"></script>
-<script src="src/ui/pdf_export_v3.js?v=ebc9387f2c06"></script>
-<script src="src/core/peg_v3.js?v=ebc9387f2c06"></script>
-<script src="src/alert/alert_v3.js?v=ebc9387f2c06"></script>
-<script src="src/alert/alert_push_v3.js?v=ebc9387f2c06"></script>
-<script src="src/screener/backtest_v3.js?v=ebc9387f2c06"></script>
-<script src="src/screener/backtest_ui_v3.js?v=ebc9387f2c06"></script>
-<script src="src/ui/enhance_v3.js?v=ebc9387f2c06"></script>
-<script src="src/chart/aftermarket_v3.js?v=ebc9387f2c06"></script>
-<script src="src/chart/overnight_v3.js?v=ebc9387f2c06"></script>
-<script src="src/fundamental/supplychain_v3.js?v=ebc9387f2c06"></script>
-<script src="src/portfolio/portfolio_v3.js?v=ebc9387f2c06"></script>
-<script src="src/fundamental/chainmom_v3.js?v=ebc9387f2c06"></script>
-<script src="src/fundamental/valuation_v3.js?v=ebc9387f2c06"></script>
-<script src="src/fundamental/marketflow_v3.js?v=ebc9387f2c06"></script>
-<script src="src/fundamental/instrank_v3.js?v=ebc9387f2c06"></script>
-<script src="src/alert/calendar_v3.js?v=ebc9387f2c06"></script>
-<script src="src/chart/multichart_v3.js?v=ebc9387f2c06"></script>
-<script src="src/chart/spread_v3.js?v=ebc9387f2c06"></script>
-<script src="src/chart/hotkeys_v3.js?v=ebc9387f2c06"></script>
-<script src="src/screener/strategy_builder_v3.js?v=ebc9387f2c06"></script>
-<script src="src/screener/strategy_script_v3.js?v=ebc9387f2c06"></script>
-<script src="src/chart/drawtools_v3.js?v=ebc9387f2c06"></script>
-<script src="src/screener/screener3_v3.js?v=ebc9387f2c06"></script>
-<script src="src/core/etf_v3.js?v=ebc9387f2c06"></script>
-<script src="src/fundamental/stockfut_v3.js?v=ebc9387f2c06"></script>
-<script src="src/core/indices_v3.js?v=ebc9387f2c06"></script>
-<script src="src/alert/datahealth_v3.js?v=ebc9387f2c06"></script>
-<script src="src/alert/toast_v3.js?v=ebc9387f2c06"></script>
-<script src="src/alert/settle_v3.js?v=ebc9387f2c06"></script>
-<script src="src/ai/cmdpalette_v3.js?v=ebc9387f2c06"></script>
-<script src="src/ui/dragwin_v3.js?v=ebc9387f2c06"></script>
-<script src="src/core/liverefresh_v3.js?v=ebc9387f2c06"></script>
-<script src="src/core/namesearch_v3.js?v=ebc9387f2c06"></script>
-<script src="src/core/intraday_volume_v3.js?v=ebc9387f2c06"></script>
-<script src="src/core/realtime_v3.js?v=ebc9387f2c06"></script>
-<script src="src/ai/focus_v3.js?v=ebc9387f2c06"></script>
-<script src="src/ai/copilot_v3.js?v=ebc9387f2c06"></script>
-<script src="src/screener/wizard_v3.js?v=ebc9387f2c06"></script>
-<script src="src/ui/shell_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/wavedeck_bridge_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/hub_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/pulse_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/decision_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/heat_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/book_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/scan_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/ai_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/breadth_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/afterhours_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/news_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/bridge_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/visual_system_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/chart_visual_v5.js?v=ebc9387f2c06"></script>
-<script src="src/ui/toolbar_v3.js?v=ebc9387f2c06"></script>
-<script src="src/chart/market_score_bar_v3.js?v=ebc9387f2c06"></script>
-<script src="src/chart/market_chart_v3.js?v=ebc9387f2c06"></script>
+<script src="src/core/colors_v3.js?v=c6bee921e3d2"></script>
+<script src="src/core/app_kernel_v5.js?v=c6bee921e3d2"></script>
+<script src="src/core/market_data_v5.js?v=c6bee921e3d2"></script>
+<script src="src/core/decision_data_v5.js?v=c6bee921e3d2"></script>
+<script src="src/core/market_intel_v5.js?v=c6bee921e3d2"></script>
+<script src="src/core/table_sort_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/viz_v5.js?v=c6bee921e3d2"></script>
+<script src="src/core/market_v3.js?v=c6bee921e3d2"></script>
+<script src="src/core/fields_v3.js?v=c6bee921e3d2"></script>
+<script src="src/core/chart_registry_v3.js?v=c6bee921e3d2"></script>
+<script src="src/ui/share_v3.js?v=c6bee921e3d2"></script>
+<script src="src/ui/datasources_v3.js?v=c6bee921e3d2"></script>
+<script src="src/core/etf_flow_tip_v3.js?v=c6bee921e3d2"></script>
+<script src="src/core/position_v2.js?v=c6bee921e3d2"></script>
+<script src="src/core/watch_v2.js?v=c6bee921e3d2"></script>
+<script src="src/core/info_v2.js?v=c6bee921e3d2"></script>
+<script src="src/core/pro_v2.js?v=c6bee921e3d2"></script>
+<script src="src/chart/volume_profile_v3.js?v=c6bee921e3d2"></script>
+<script src="src/chart/pattern_v3.js?v=c6bee921e3d2"></script>
+<script src="src/core/live_v2.js?v=c6bee921e3d2"></script>
+<script src="src/fundamental/chip_v3.js?v=c6bee921e3d2"></script>
+<script src="src/fundamental/fundamental_v3.js?v=c6bee921e3d2"></script>
+<script src="src/screener/screener_v3.js?v=c6bee921e3d2"></script>
+<script src="src/ai/ai_report_v3.js?v=c6bee921e3d2"></script>
+<script src="src/ui/polish_v3.js?v=c6bee921e3d2"></script>
+<script src="src/core/wl_live_v3.js?v=c6bee921e3d2"></script>
+<script src="src/fundamental/plan_history_v3.js?v=c6bee921e3d2"></script>
+<script src="src/fundamental/plan_position_v3.js?v=c6bee921e3d2"></script>
+<script src="src/fundamental/plan_v3.js?v=c6bee921e3d2"></script>
+<script src="src/ui/pdf_import_v3.js?v=c6bee921e3d2"></script>
+<script src="src/ui/pdf_export_v3.js?v=c6bee921e3d2"></script>
+<script src="src/core/peg_v3.js?v=c6bee921e3d2"></script>
+<script src="src/alert/alert_v3.js?v=c6bee921e3d2"></script>
+<script src="src/alert/alert_push_v3.js?v=c6bee921e3d2"></script>
+<script src="src/screener/backtest_v3.js?v=c6bee921e3d2"></script>
+<script src="src/screener/backtest_ui_v3.js?v=c6bee921e3d2"></script>
+<script src="src/ui/enhance_v3.js?v=c6bee921e3d2"></script>
+<script src="src/chart/aftermarket_v3.js?v=c6bee921e3d2"></script>
+<script src="src/chart/overnight_v3.js?v=c6bee921e3d2"></script>
+<script src="src/fundamental/supplychain_v3.js?v=c6bee921e3d2"></script>
+<script src="src/portfolio/portfolio_v3.js?v=c6bee921e3d2"></script>
+<script src="src/fundamental/chainmom_v3.js?v=c6bee921e3d2"></script>
+<script src="src/fundamental/valuation_v3.js?v=c6bee921e3d2"></script>
+<script src="src/fundamental/marketflow_v3.js?v=c6bee921e3d2"></script>
+<script src="src/fundamental/instrank_v3.js?v=c6bee921e3d2"></script>
+<script src="src/alert/calendar_v3.js?v=c6bee921e3d2"></script>
+<script src="src/chart/multichart_v3.js?v=c6bee921e3d2"></script>
+<script src="src/chart/spread_v3.js?v=c6bee921e3d2"></script>
+<script src="src/chart/hotkeys_v3.js?v=c6bee921e3d2"></script>
+<script src="src/screener/strategy_builder_v3.js?v=c6bee921e3d2"></script>
+<script src="src/screener/strategy_script_v3.js?v=c6bee921e3d2"></script>
+<script src="src/chart/drawtools_v3.js?v=c6bee921e3d2"></script>
+<script src="src/screener/screener3_v3.js?v=c6bee921e3d2"></script>
+<script src="src/core/etf_v3.js?v=c6bee921e3d2"></script>
+<script src="src/fundamental/stockfut_v3.js?v=c6bee921e3d2"></script>
+<script src="src/core/indices_v3.js?v=c6bee921e3d2"></script>
+<script src="src/alert/datahealth_v3.js?v=c6bee921e3d2"></script>
+<script src="src/alert/toast_v3.js?v=c6bee921e3d2"></script>
+<script src="src/alert/settle_v3.js?v=c6bee921e3d2"></script>
+<script src="src/ai/cmdpalette_v3.js?v=c6bee921e3d2"></script>
+<script src="src/ui/dragwin_v3.js?v=c6bee921e3d2"></script>
+<script src="src/core/liverefresh_v3.js?v=c6bee921e3d2"></script>
+<script src="src/core/namesearch_v3.js?v=c6bee921e3d2"></script>
+<script src="src/core/intraday_volume_v3.js?v=c6bee921e3d2"></script>
+<script src="src/core/realtime_v3.js?v=c6bee921e3d2"></script>
+<script src="src/ai/focus_v3.js?v=c6bee921e3d2"></script>
+<script src="src/ai/copilot_v3.js?v=c6bee921e3d2"></script>
+<script src="src/screener/wizard_v3.js?v=c6bee921e3d2"></script>
+<script src="src/ui/shell_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/wavedeck_bridge_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/hub_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/pulse_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/decision_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/heat_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/book_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/scan_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/ai_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/breadth_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/afterhours_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/news_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/bridge_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/visual_system_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/chart_visual_v5.js?v=c6bee921e3d2"></script>
+<script src="src/ui/toolbar_v3.js?v=c6bee921e3d2"></script>
+<script src="src/chart/market_score_bar_v3.js?v=c6bee921e3d2"></script>
+<script src="src/chart/market_chart_v3.js?v=c6bee921e3d2"></script>
 </body>
 </html>
 <script>

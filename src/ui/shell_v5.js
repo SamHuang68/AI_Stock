@@ -478,9 +478,10 @@
       /* 手機直式統一由 shell-views 擔任唯一捲動容器；內容底部避開浮動轉盤與 iOS safe area。 */
       '@media(max-width:900px) and (orientation:portrait){' +
         '#shell-main #shell-views.show{display:block!important;overflow-x:hidden!important;overflow-y:auto!important;' +
-          'height:100%!important;min-height:0!important;overscroll-behavior-y:contain;scroll-padding-bottom:calc(80px + env(safe-area-inset-bottom,0px))}' +
+          'height:100%!important;max-height:100%!important;min-height:0!important;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch;' +
+          'scroll-padding-bottom:calc(88px + env(safe-area-inset-bottom,0px))}' +
         '#shell-main #shell-views.show>.sv-panel.on{display:block!important;flex:none!important;height:auto!important;min-height:100%!important;' +
-          'overflow:visible!important;padding-bottom:calc(80px + env(safe-area-inset-bottom,0px))!important}' +
+          'overflow:visible!important;padding-bottom:calc(88px + env(safe-area-inset-bottom,0px))!important}' +
         '#shell-main #shell-views.show>.sv-panel.on>.sv-mount{display:block!important;height:auto!important;min-height:0!important;overflow:visible!important}' +
         '#st-ring-fab{bottom:calc(14px + env(safe-area-inset-bottom,0px))}' +
       '}';
@@ -1652,6 +1653,9 @@
       if (!views || !panel) return;
       var vr = views.getBoundingClientRect();
       var pr = panel.getBoundingClientRect();
+      var app = $('app');
+      var ar = app ? app.getBoundingClientRect() : null;
+      var vv = window.visualViewport;
       fetch('/diagnostics/ui-route', {
         method: 'POST', headers: {'Content-Type':'application/json'}, keepalive: true,
         body: JSON.stringify({
@@ -1659,7 +1663,10 @@
           correlationId: 'mobile-shell-' + Date.now(), from: 'shell-views', to: routeId,
           state: (window.matchMedia('(orientation:portrait)').matches ? 'portrait' : 'landscape') +
             '-scroll-' + getComputedStyle(views).overflowY,
-          label: window.innerWidth + 'x' + window.innerHeight + '|views=' + Math.round(vr.height) +
+          label: window.innerWidth + 'x' + window.innerHeight +
+            '|visual=' + (vv ? Math.round(vv.width) + 'x' + Math.round(vv.height) : 'none') +
+            '|app=' + (ar ? Math.round(ar.width) + 'x' + Math.round(ar.height) : 'none') +
+            '|views=' + Math.round(vr.height) +
             '/' + views.scrollHeight + '|panel=' + Math.round(pr.height) +
             (mount ? '/' + mount.scrollHeight : '')
         })

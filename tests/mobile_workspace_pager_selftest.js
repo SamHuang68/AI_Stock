@@ -26,6 +26,7 @@ const ids = {
   'rpage-prev': element(), 'rpage-next': element()
 };
 let orientation = 'portrait';
+let dispatchCount = 0;
 const sandbox = {
   S: { tab: 'stats' },
   document: {
@@ -37,18 +38,21 @@ const sandbox = {
     matchMedia(query) {
       return { matches: query.includes('orientation: portrait') ? orientation === 'portrait' : true };
     },
-    dispatchEvent() {}
+    dispatchEvent() { dispatchCount += 1; }
   },
   fetch() { return Promise.resolve({ ok: true }); },
   Event: function Event(name) { this.type = name; },
   setTimeout(fn) { fn(); return 1; },
   clearTimeout() {},
+  getDispatchCount() { return dispatchCount; },
   setOrientation(value) { orientation = value; },
   console
 };
 
 const exercise = source.slice(start, end) + `
 syncMobileWorkspacePage();
+syncMobileWorkspacePage();
+globalThis.__initialResizeCount = getDispatchCount();
 shiftRtab(1);
 globalThis.__portrait = {
   page: document.getElementById('body').getAttribute('data-mobile-workspace-page'),
@@ -72,6 +76,7 @@ function ok(value, message) {
 }
 
 ok(sandbox.__portrait.page === 'analysis', 'next changes the entire portrait workspace to analysis');
+ok(sandbox.__initialResizeCount === 1, 'chart visibility emits one resize without a self-triggering loop');
 ok(sandbox.__portrait.key === 'stats', 'first analysis page is technical statistics');
 ok(sandbox.__portrait.label === '技術統計 · 2 / 7', 'bottom index includes line chart as page one');
 ok(sandbox.__portrait.dots === 7, 'bottom index renders seven workspace pages');
