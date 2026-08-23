@@ -49,7 +49,7 @@
 
   function $(id) { return document.getElementById(id); }
 
-  /** 實測 DOM 欄數；桌面維持 5+5，窄螢幕採兩欄捲動避免卡片內容互撞。 */
+  /** 實測 DOM 欄數；桌面與手機橫式維持 5+5，僅手機直式採兩欄捲動。 */
   function probeLayoutCols() {
     if (pulseMode === 'beginner') {
       var beginnerProbe = $('pl-layout-probe');
@@ -65,7 +65,8 @@
     var zones = document.querySelectorAll('#pl-root .pl-zone');
     var parts = [];
     var ok = zones.length === 2;
-    var mobile = !!(window.matchMedia && window.matchMedia('(max-width: 900px)').matches);
+    var mobile = !!(window.matchMedia &&
+      window.matchMedia('(max-width: 900px) and (orientation: portrait)').matches);
     var expectedCols = mobile ? 2 : 5;
     for (var i = 0; i < zones.length; i++) {
       var z = zones[i];
@@ -352,7 +353,7 @@
         '#pl-root .pl-safe-sep{height:36px}' +
         '#pl-root .pl-beginner-actions .pl-btn{font-size:9px;padding:4px 8px}' +
       '}' +
-      '@media(max-width:900px){#pl-root .pl-beginner-hero{grid-template-columns:1fr;text-align:center}' +
+      '@media(max-width:900px) and (orientation:portrait){#pl-root .pl-beginner-hero{grid-template-columns:1fr;text-align:center}' +
         '#pl-root .pl-beginner-gauge{margin:auto}#pl-root .pl-head{flex-wrap:wrap}' +
         '#pl-root .pl-hero-foot{flex-direction:column}#pl-root .pl-stock-check input{width:min(240px,62vw)}' +
         '#pl-root .pl-simple-signals,#pl-root .pl-market-radar-grid{grid-template-columns:1fr}#pl-root .pl-safe-box{grid-template-columns:1fr}' +
@@ -655,8 +656,8 @@
       '#pl-root table.pillars th,#pl-root table.pillars td{padding:3px 4px;border-bottom:1px solid var(--border);text-align:right}' +
       '#pl-root table.pillars th:first-child,#pl-root table.pillars td:first-child{text-align:left}' +
       '#pl-root table.pillars th{color:var(--tlo)}' +
-      /* 手機專業模式：上下兩區各改為兩欄並允許頁面垂直捲動；桌面 5+5 契約不變。 */
-      '@media(max-width:900px){' +
+      /* 手機直式專業模式：上下兩區各改為兩欄並允許頁面垂直捲動；橫式維持原始 5+5。 */
+      '@media(max-width:900px) and (orientation:portrait){' +
         '#shell-views:has(#view-pulse.on){overflow-x:hidden!important;overflow-y:auto!important;display:block!important;' +
           'overscroll-behavior:contain;scrollbar-gutter:stable}' +
         '#view-pulse.sv-panel.on{height:auto;min-height:100%;overflow:visible;display:block!important;padding:6px 8px 18px}' +
@@ -730,7 +731,7 @@
         '#pl-root .pl-wl td.px,#pl-root .pl-wl td.chg,#pl-root .pl-wl td:first-child{font-size:10px}' +
         '#pl-root .pl-wl .nm-only,#pl-root .pl-wl .mkt{font-size:9px}' +
       '}' +
-      '@media(max-width:520px){' +
+      '@media(max-width:520px) and (orientation:portrait){' +
         '#view-pulse.sv-panel.on{padding-left:5px;padding-right:5px}' +
         '#pl-root .pl-zone{gap:5px;grid-auto-rows:310px}' +
         '#pl-root .pl-sec{height:310px;min-height:310px;padding:7px 7px}' +

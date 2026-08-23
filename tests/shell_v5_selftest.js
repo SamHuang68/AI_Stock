@@ -553,10 +553,11 @@ ok(/data-layout=/.test(pl) && /LAYOUT_CONTRACT/.test(pl) &&
   !/5col-2zone-flex/.test(pl) && !/enforceFiveCol/.test(pl),
   'pulse dash is known-good 5col-2zone + runtime probe (anchor 3cab212)');
 ok(/MOBILE_LAYOUT_CONTRACT = '2col-scroll'/.test(pl) &&
-  /@media\(max-width:900px\)[\s\S]*pl-zone\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/.test(pl) &&
+  /@media\(max-width:900px\) and \(orientation:portrait\)[\s\S]*pl-zone\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/.test(pl) &&
+  /matchMedia\('\(max-width: 900px\) and \(orientation: portrait\)'\)/.test(pl) &&
   /var expectedCols = mobile \? 2 : 5/.test(pl) &&
   /layoutResizeTimer = setTimeout\(probeLayoutCols, 120\)/.test(pl),
-  'pulse mobile uses a two-column scrolling layout while desktop remains 5+5');
+  'pulse portrait uses two-column scrolling while landscape and desktop remain 5+5');
 ok(/#pl-body\{[^}]*overflow:hidden/.test(pl) && /pl-expanded\{overflow:hidden\}/.test(pl) &&
   /data-go=\"factors\"/.test(pl) && !/pl-toggle-fac/.test(pl) &&
   /因子帳本改獨立頁/.test(pl),
