@@ -84,6 +84,12 @@ ok(visual.includes('@media(max-width:650px)') &&
   visual.includes('#dc-root .dc-risk-grid,') &&
   visual.includes('grid-template-columns:1fr!important'),
   'decision center reflows dense cards to one column on narrow screens');
+ok(decision.includes('.dc-oi-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))') &&
+  decision.includes('.dc-oi-scroll{max-width:100%;overflow-x:auto') &&
+  decision.includes('#dc-root .dc-oi-kpis{grid-template-columns:repeat(2,minmax(0,1fr))') &&
+  visual.includes('#dc-root .dc-oi-kpi .v{font:800 15px') &&
+  visual.includes('#dc-root .dc-oi-grid{grid-template-columns:1fr!important'),
+  'overnight/intraday lab has readable desktop KPIs, contained detail overflow and narrow-screen reflow');
 
 if (failed) process.exit(1);
 console.log('\nlayout_visual_v5_selftest PASSED');

@@ -38,6 +38,7 @@ from etf_api import (
 )
 from etf_routes import EtfRoutesMixin
 from decision_routes import DecisionRoutesMixin
+from overnight_intraday_routes import OvernightIntradayRoutesMixin
 from options_routes import OptionsRoutesMixin
 from market_contract import attach_quote_contract, cumulative_volume_contract
 from market_routes import market_snapshot
@@ -2639,7 +2640,7 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
     request_queue_size = 64
 
-class Handler(DecisionRoutesMixin, OptionsRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
+class Handler(DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'   # enables keep-alive
 
     def _handle_index(self):
@@ -2733,6 +2734,8 @@ class Handler(DecisionRoutesMixin, OptionsRoutesMixin, AiRoutesMixin, EtfRoutesM
             self._handle_decision_context()
         elif p == '/decision/history' or p.startswith('/decision/history?'):
             self._handle_decision_history()
+        elif p == '/research/overnight-intraday' or p.startswith('/research/overnight-intraday?'):
+            self._handle_overnight_intraday()
         elif p == '/options/txo/structure' or p.startswith('/options/txo/structure?'):
             self._handle_options_structure()
         elif p == '/options/txo/history' or p.startswith('/options/txo/history?'):
@@ -2990,6 +2993,8 @@ class Handler(DecisionRoutesMixin, OptionsRoutesMixin, AiRoutesMixin, EtfRoutesM
             self._handle_portfolio()
         elif p == '/decision/context':
             self._handle_decision_context_post()
+        elif p == '/research/overnight-intraday/refresh':
+            self._handle_overnight_intraday_refresh()
         elif p == '/options/txo/refresh':
             self._handle_options_refresh()
         elif p == '/sync':

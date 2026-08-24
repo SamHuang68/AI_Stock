@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / 'server'))
 
 import decision_context as dc  # noqa: E402
 import options_exposure as ox  # noqa: E402
+import overnight_intraday as oi  # noqa: E402
 
 # Load Stock Terminal's single-file HTTP server under a collision-free name.
 # The optional WaveDeck project deliberately owns the top-level ``server``
@@ -60,6 +61,8 @@ class DecisionHttpTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.old_options_history = ox.HISTORY_PATH
         ox.HISTORY_PATH = str(Path(self.tmp.name) / 'options-history.json')
+        with oi._CACHE_LOCK:
+            oi._CACHE.clear()
         levels = {'levels': {'r1': 23100, 'pivot': 22950, 's1': 22800},
                   'atr': {'pct': 1.5}, 'quality': {'complete': True, 'stale': False}}
         p = _pulse()
@@ -130,6 +133,53 @@ class DecisionHttpTest(unittest.TestCase):
             urllib.request.urlopen(self.base + '/options/txo/history?limit=999', timeout=5)
         self.assertEqual(caught.exception.code, 400)
         caught.exception.close()
+
+    def test_overnight_get_is_cache_only_and_refresh_is_bounded_shadow(self):
+        called = []
+        original = oi.get_snapshot
+        with urllib.request.urlopen(self.base + '/research/overnight-intraday?market=US', timeout=5) as resp:
+            cached = json.loads(resp.read())
+        self.assertFalse(cached['ok'])
+        self.assertEqual(cached['quality']['warnings'], ['NOT_REFRESHED'])
+        fixture = {
+            'ok': True, 'contractVersion': 1, 'model': 'st-overnight-intraday/v1',
+            'shadowOnly': True, 'decisionUse': 'research_only', 'actionAuthority': 'none',
+            'markets': [], 'evidence': [], 'quality': {'status': 'good'},
+        }
+
+        def fake_snapshot(market='all', force=False, fetcher=None):
+            called.append((market, force))
+            return fixture
+
+        oi.get_snapshot = fake_snapshot
+        try:
+            before = dc.latest_context()
+            request = urllib.request.Request(
+                self.base + '/research/overnight-intraday/refresh', data=b'{"market":"all","force":true}',
+                headers={'Content-Type': 'application/json'}, method='POST')
+            with urllib.request.urlopen(request, timeout=5) as resp:
+                refreshed = json.loads(resp.read())
+            self.assertTrue(refreshed['shadowOnly'])
+            self.assertEqual(called, [('all', True)])
+            after = dc.latest_context()
+            for key in ('regime', 'actionEnvelope', 'keyLevels', 'scenario', 'confirmation', 'invalidation'):
+                self.assertEqual(before[key], after[key], key)
+            bad = urllib.request.Request(
+                self.base + '/research/overnight-intraday/refresh', data=b'{"symbols":["ANY"]}',
+                headers={'Content-Type': 'application/json'}, method='POST')
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(bad, timeout=5)
+            self.assertEqual(caught.exception.code, 400)
+            caught.exception.close()
+            wrong_type = urllib.request.Request(
+                self.base + '/research/overnight-intraday/refresh', data=b'{"market":"all","force":"false"}',
+                headers={'Content-Type': 'application/json'}, method='POST')
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(wrong_type, timeout=5)
+            self.assertEqual(caught.exception.code, 400)
+            caught.exception.close()
+        finally:
+            oi.get_snapshot = original
 
     def test_post_profile_recomputes_without_mutating_deterministic_regime(self):
         profile = {

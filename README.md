@@ -15,6 +15,7 @@
 - **新手／專業雙層總覽**：預設用市場結構狀態、情緒表、白話行動、廣度／法人／量能三訊號、台股／美股／期貨三市場雷達與 R1/S1 安全邊界快速理解；可展開進階觀察或切回完整 5+5 專業儀表板。
 - **有條件的風險範圍**：只有完整 Risk Profile 才計算持倉範圍，並公開公式與風險上限；若使用者帶入持倉但投組覆蓋失敗，則停止輸出範圍並明示原因。
 - **Exposure Lab v3（預設展開）**：月度凍結核心、週度健康監控與每日槓桿商品機制是三個不同權限層；先用曝險壓力四燈快速判讀，再按需查看臺灣50同基準波動、台積電 EPS 證據層、正二效率差與商品追蹤品質。週度融資／短波動只能要求複查或增加限制，不能改寫核心研究上限；個別持倉假說不會進入分享版預設模型。
+- **盤別動量研究（Shadow）**：以一致調整後日線拆解「隔夜定價」與「日間承接」，分開觀察臺灣／美國記憶體固定籃子、20／60 日結構、同市場基準歸因與族群同步率；只進研究面板與證據帳本，不改寫 Regime、Action Envelope 或槓桿限制。公式、資料 Gate 與權限圖見 [Overnight × Intraday 研究契約](docs/OVERNIGHT_INTRADAY_RESEARCH.md)。
 - **台指選擇權結構（預設收合）**：精確到期別整合 TAIFEX 一般盤日終 OI、結算價與官方 Delta；分層呈現 OI 事實、IV／Gamma Density 衍生值，以及明確標成 Shadow 的 Signed GEX／Flip 情境，不把公開 OI 冒充造市商真實持倉。
 - **台美顏色語意分離**：台股／台指期紅漲綠跌；美股綠漲紅跌。
 - **本機優先**：介面與伺服器只在本機運作，預設僅監聽 `127.0.0.1:18432`。
@@ -156,6 +157,7 @@ flowchart TB
 | 研究基準資料 | `server/benchmark_research.py` | 非阻塞讀取／背景更新證交所臺灣50價位與報酬指數；只提供單一 canonical contract，不另建 UI 刷新路徑 |
 | 決策路由 | `server/decision_routes.py` | `/decision/context`、歷史與關鍵價位 API；輸入驗證 |
 | 期權結構 | `server/options_exposure.py`、`server/options_routes.py` | 精確到期鏈、IV／Greeks、方向中立 OI Gamma／Vega Density、情境 GEX／VEX／Flip、同到期日歷史、快取與更新命令 |
+| 盤別動量研究 | `server/overnight_intraday.py`、`server/overnight_intraday_routes.py` | 調整後 OHLC、ON／ID 恆等式、20／60 日結構、固定籃子 quorum、cache-only GET 與白名單更新 |
 | 衍生分析 | `server/key_levels.py`、`server/sector_flow.py`、`server/news_impact.py` | 可重現價位、20／60 日波動與尾端分布、同口徑產業參與、新聞影響層級 |
 | 前端建置 | `build_v2.py`、`build_order.py` | 依相依順序組裝 tip UX HTML |
 | 執行台 | `wavedeck/` | 可選的微觀執行、狀態機與風控橋接 |
@@ -330,6 +332,8 @@ flowchart LR
 | `GET /key-levels?symbol=%5ETWII` | Classic Pivot、確認轉折、ATR 與實現波動 |
 | `GET /options/txo/structure` | 讀取最近一次 TXO 結構快取；不暗中觸發外部網路 |
 | `POST /options/txo/refresh` | 下載 TAIFEX 官方鏈、驗證到期別並發布回唯一 `DecisionContext` |
+| `GET /research/overnight-intraday?market=all` | 只讀盤別動量研究快取；不在 GET 隱藏外部下載 |
+| `POST /research/overnight-intraday/refresh` | 更新固定 `memory_v1` 白名單並驗證調整、時段與報酬恆等式 |
 | `GET /options/txo/history?expiry=2026-08-19&limit=20` | 讀取精簡、同到期別的本機日終結構歷史；不觸發網路或寫入 |
 | `GET /bridge/wavedeck/stream` | Stock Terminal 接收 WaveDeck 狀態的 SSE |
 

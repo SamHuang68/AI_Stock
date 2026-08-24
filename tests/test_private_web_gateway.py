@@ -526,6 +526,13 @@ class PrivateWebGatewayTests(unittest.TestCase):
             body={"force": False},
         )
         self.assertEqual(status, 200)
+        status, _ = _request(
+            self.base + "/research/overnight-intraday/refresh",
+            method="POST",
+            token="owner-secret",
+            body={"market": "all", "force": False},
+        )
+        self.assertEqual(status, 200)
         for path in ("/ai-key", "/bridge/wavedeck", "/notify", "/universe/refresh"):
             status, _ = _request(
                 self.base + path,

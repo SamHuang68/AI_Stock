@@ -29,6 +29,8 @@ REQUIRED_RELEASE_FILES = {
     "server/server.py",
     "server/ai_local.py",
     "server/ai_routes.py",
+    "server/overnight_intraday.py",
+    "server/overnight_intraday_routes.py",
     "server/daemon_lock.py",
     "server/private_web_gateway.py",
     "server/private_web_access.py",

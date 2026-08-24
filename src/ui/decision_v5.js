@@ -4,10 +4,12 @@
   var SRV = window.SERVER || '';
   var timer = null;
   var lastContext = null;
+  var lastEvidenceContext = null;
   var lastHoldings = [];
   var riskDraft = {};
   var portfolioMode = 'actual';
   var optionsLabOpen = true;
+  var oiLabOpen = true;
   var optionsRefreshStarted = false;
   var evidenceView = { category: 'all', mode: 'all', scope: 'all', query: '' };
 
@@ -259,6 +261,27 @@
       '#dc-root .dc-options-table{min-width:720px}.dc-options-table td:first-child,.dc-options-table th:first-child{white-space:nowrap}' +
       '#dc-root .dc-options-warn{margin-top:6px;padding:6px 8px;border-left:3px solid #fbbf24;background:rgba(251,191,36,.07);color:#d8c99a;font-size:7.5px;line-height:1.45}' +
       '#dc-root .dc-options-actions{display:flex;align-items:center;gap:7px;margin-top:7px}.dc-options-actions .dc-note{min-width:0}' +
+      '#dc-root .dc-oi-lab>summary:after{content:"收合觀察"}.dc-oi-lab:not([open])>summary:after{content:"展開觀察"}' +
+      '#dc-root .dc-oi-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}' +
+      '#dc-root .dc-oi-market{min-width:0;padding:10px;border:1px solid #29405c;border-radius:8px;background:linear-gradient(145deg,#081522,#0a1828)}' +
+      '#dc-root .dc-oi-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px}' +
+      '#dc-root .dc-oi-head b{font-size:12px;color:#dce9f6}.dc-oi-head .s{text-align:right}' +
+      '#dc-root .dc-oi-state{display:flex;align-items:center;gap:7px;margin:4px 0 8px;padding:7px 8px;border-left:3px solid #22d3ee;background:rgba(34,211,238,.055);border-radius:5px}' +
+      '#dc-root .dc-oi-state b{font-size:12px;color:#d8f7ff}.dc-oi-state span{margin-left:auto;font-size:10px;color:#8cecff;white-space:nowrap}' +
+      '#dc-root .dc-oi-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}' +
+      '#dc-root .dc-oi-kpi{min-width:0;padding:8px;border:1px solid #263a55;border-radius:7px;background:#07111f}' +
+      '#dc-root .dc-oi-kpi .v{font-size:16px;margin:3px 0}.dc-oi-kpi .s{font-size:9px;overflow-wrap:anywhere}' +
+      '#dc-root .dc-oi-kpi .tw-up{color:var(--red)}#dc-root .dc-oi-kpi .tw-down{color:var(--green)}' +
+      '#dc-root .dc-oi-kpi .us-up{color:var(--green)}#dc-root .dc-oi-kpi .us-down{color:var(--red)}' +
+      '#dc-root .dc-oi-table .tw-up{color:var(--red)}#dc-root .dc-oi-table .tw-down{color:var(--green)}' +
+      '#dc-root .dc-oi-table .us-up{color:var(--green)}#dc-root .dc-oi-table .us-down{color:var(--red)}' +
+      '#dc-root .dc-oi-quality{display:inline-flex;padding:2px 7px;border:1px solid #38516d;border-radius:999px;color:#8fdff0;font-size:9px;white-space:nowrap}' +
+      '#dc-root .dc-oi-quality.mixed{border-color:rgba(250,204,21,.55);color:#fde68a}.dc-oi-quality.insufficient,.dc-oi-quality.stale{border-color:rgba(251,146,60,.55);color:#fdba74}' +
+      '#dc-root .dc-oi-detail{margin-top:8px}.dc-oi-detail>summary{margin:0!important;color:#9fcae0!important;font-weight:800}' +
+      '#dc-root .dc-oi-scroll{max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;margin-top:7px}' +
+      '#dc-root .dc-oi-table{min-width:720px}.dc-oi-table td:first-child{white-space:nowrap}' +
+      '#dc-root .dc-oi-authority{margin-top:8px;padding:8px 10px;border-left:3px solid #facc15;background:rgba(250,204,21,.06);color:#d8c99a;font-size:10px;line-height:1.5;border-radius:5px}' +
+      '#dc-root .dc-oi-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}' +
       '#dc-root .dc-ai{white-space:pre-wrap;font-family:"Noto Sans TC",sans-serif;font-size:10px;line-height:1.65;color:#d4deea}' +
       '#dc-root .dc-note{font-size:8px;color:#71839a;line-height:1.5}' +
       '#dc-root .dc-empty{text-align:center;padding:26px 14px}' +
@@ -295,8 +318,8 @@
       '#dc-root .dc-action-cell b{display:block;font-size:12px;color:#dce9f6;margin-bottom:3px}.dc-action-cell span{display:block;font-size:10px;color:#a7b8cc;line-height:1.4;overflow-wrap:anywhere}' +
       '#dc-root .dc-action-cell.limit>i{color:#facc15;background:rgba(250,204,21,.12);box-shadow:0 0 13px rgba(250,204,21,.12)}' +
       '#dc-root .dc-action-cell.stop>i{color:#fb923c;background:rgba(251,146,60,.12);box-shadow:0 0 13px rgba(251,146,60,.12)}' +
-      '@media(max-width:1000px){#dc-root .dc-command,#dc-root .dc-grid{grid-template-columns:1fr}#dc-root .dc-scenario{grid-template-columns:repeat(2,1fr)}#dc-root .dc-risk-grid,#dc-root .dc-lab-grid{grid-template-columns:repeat(2,1fr)}#dc-root .dc-temp{grid-template-columns:1fr}#dc-root .dc-temp-main{border-right:0;border-bottom:1px solid #24344b;padding:0 0 7px}#dc-root .dc-temp-lights{grid-template-columns:repeat(2,1fr)}#dc-root .dc-structure{grid-template-columns:1fr}}' +
-      '@media(max-width:650px){#dc-root .dc-ledger-toolbar,#dc-root .dc-action-summary,#dc-root .dc-lab-authority,#dc-root .dc-validation-note{grid-template-columns:1fr}.dc-ledger-actions{justify-content:flex-start}#dc-root .dc-ledger-table table{min-width:720px}#dc-root .dc-options-kpis,#dc-root .dc-options-kpis.five{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-options-scroll table{min-width:720px}}';
+      '@media(max-width:1000px){#dc-root .dc-command,#dc-root .dc-grid{grid-template-columns:1fr}#dc-root .dc-scenario{grid-template-columns:repeat(2,1fr)}#dc-root .dc-risk-grid,#dc-root .dc-lab-grid{grid-template-columns:repeat(2,1fr)}#dc-root .dc-temp{grid-template-columns:1fr}#dc-root .dc-temp-main{border-right:0;border-bottom:1px solid #24344b;padding:0 0 7px}#dc-root .dc-temp-lights{grid-template-columns:repeat(2,1fr)}#dc-root .dc-structure,#dc-root .dc-oi-grid{grid-template-columns:1fr}}' +
+      '@media(max-width:650px){#dc-root .dc-ledger-toolbar,#dc-root .dc-action-summary,#dc-root .dc-lab-authority,#dc-root .dc-validation-note{grid-template-columns:1fr}.dc-ledger-actions{justify-content:flex-start}#dc-root .dc-ledger-table table{min-width:720px}#dc-root .dc-options-kpis,#dc-root .dc-options-kpis.five{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-options-scroll table{min-width:720px}#dc-root .dc-oi-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-oi-kpi:last-child{grid-column:1/-1}}';
   }
 
   function ensureMount() {
@@ -690,11 +713,12 @@
 
   var EVIDENCE_CATEGORIES = {
     all: '全部', market: '市場廣度', flow: '法人籌碼', derivatives: '期貨價差',
-    options: '期權結構', system: '系統指標', external: '外部／基本面'
+    options: '期權結構', session: '盤別動量', system: '系統指標', external: '外部／基本面'
   };
 
   function evidenceCategory(e) {
     var id = String(e.id || '');
+    if (/^(shadow\.)?overnight_intraday\.|^shadow\.overnight_intraday\./.test(id)) return 'session';
     if (/^options\./.test(id)) return 'options';
     if (/^(txf\.|basis\.)/.test(id)) return 'derivatives';
     if (/^(flow\.|risk\.margin)/.test(id)) return 'flow';
@@ -798,6 +822,8 @@
       callOiChangePct: 'Call OI變化', putOiChangePct: 'Put OI變化',
       atmIvChangePctPoint: 'ATM IV變化', gammaDensityChangePct: 'Gamma密度變化',
       vegaDensityChangePct: 'Vega密度變化'
+      ,overnight20Pct: '隔夜20日', intraday20Pct: '日間20日', synchronizationPct: '同步率',
+      gapRetention: '缺口保留', members: '有效成員', regime: '結構狀態'
     };
     function objectSummary(raw) {
       if (!raw || typeof raw !== 'object') return raw == null ? '—' : String(raw);
@@ -927,7 +953,7 @@
   }
 
   function applyEvidenceFilter() {
-    var root = $('dc-root'), ctx = lastContext;
+    var root = $('dc-root'), ctx = lastEvidenceContext || lastContext;
     if (!root || !ctx) return;
     var visible = 0;
     root.querySelectorAll('.dc-ledger-row').forEach(function (row) {
@@ -959,7 +985,8 @@
     });
     root.querySelectorAll('[data-evidence-copy]').forEach(function (button) {
       button.onclick = function () {
-        var kind = button.getAttribute('data-evidence-copy'), rows = (lastContext && lastContext.evidence) || [], payload;
+        var ledgerContext = lastEvidenceContext || lastContext;
+        var kind = button.getAttribute('data-evidence-copy'), rows = (ledgerContext && ledgerContext.evidence) || [], payload;
         if (kind === 'csv') payload = evidenceCsv(rows);
         else if (kind === 'debug') payload = JSON.stringify({ contractVersion: lastContext.contractVersion, model: lastContext.model,
           asOf: lastContext.asOf, regime: lastContext.regime, actionEnvelope: lastContext.actionEnvelope,
@@ -1249,6 +1276,100 @@
     load(true);
   }
 
+  function oiTone(market, value) {
+    var n = Number(value);
+    if (!isFinite(n) || n === 0) return '';
+    return String(market).toUpperCase() === 'US' ? (n > 0 ? 'us-up' : 'us-down') : (n > 0 ? 'tw-up' : 'tw-down');
+  }
+
+  function oiSignedPct(value) {
+    var n = Number(value);
+    return !isFinite(n) ? '—' : (n > 0 ? '+' : '') + num(n, 2) + '%';
+  }
+
+  function oiQualityLabel(value) {
+    return ({ good: '資料完整', mixed: '部分降級', stale: '快取過期', insufficient: '資料不足' })[value] || '等待資料';
+  }
+
+  function oiRegimeLabel(regime) {
+    regime = regime || {};
+    return regime.label || ({
+      OVERNIGHT_CONFIRMED: '隔夜定價與日間承接同向',
+      GAP_FADE_DISTRIBUTION: '隔夜上修、日間回吐',
+      CASH_SESSION_ACCUMULATION: '日間承接主導',
+      BROAD_CORRECTION: '隔夜與日間同步轉弱',
+      MIXED_LOW_CONFIDENCE: '盤別訊號分歧',
+      INSUFFICIENT_DATA: '資料不足'
+    })[regime.id] || '等待結構判定';
+  }
+
+  function oiMarketHtml(market) {
+    market = market || {};
+    var summary = market.summary || {}, quality = market.quality || {}, regime = summary.regime || {};
+    var relative = summary.benchmarkRelative || {}, breadth = summary.breadth || {};
+    var members = market.members || [], benchmark = market.benchmark || {};
+    var memberRows = members.map(function (member) {
+      var raw = member.raw || {}, rel = member.relative || {}, gap = raw.gapRetention || {}, mq = member.quality || {};
+      return '<tr><td><b>' + esc(member.name || member.symbol) + '</b><br><span class="dc-note">' + esc(member.symbol) + '</span></td>' +
+        '<td class="' + oiTone(market.market, raw.overnight20Pct) + '">' + oiSignedPct(raw.overnight20Pct) + '</td>' +
+        '<td class="' + oiTone(market.market, raw.intraday20Pct) + '">' + oiSignedPct(raw.intraday20Pct) + '</td>' +
+        '<td>' + oiSignedPct(rel.overnight20Pct) + ' / ' + oiSignedPct(rel.intraday20Pct) + '</td>' +
+        '<td>' + (gap.value == null ? '—' : num(gap.value, 2) + '×') + '<br><span class="dc-note">' + num(gap.sample, 0) + ' gaps</span></td>' +
+        '<td>' + num(raw.sampleSize, 0) + '<br><span class="dc-note">' + esc(mq.status || '—') + '</span></td></tr>';
+    }).join('');
+    return '<section class="dc-oi-market"><div class="dc-oi-head"><div><b>' + esc(market.label || market.market || '—') + '</b>' +
+      '<div class="s">' + esc((market.universe || {}).id || 'memory_v1') + ' · ' + esc(summary.asOf || '—') + '</div></div>' +
+      '<span class="dc-oi-quality ' + esc(quality.status || 'insufficient') + '">' + esc(oiQualityLabel(quality.status)) + '</span></div>' +
+      '<div class="dc-oi-state"><b>' + esc(oiRegimeLabel(regime)) + '</b><span>證據強度 ' +
+        (regime.evidenceStrength == null ? '—' : Math.round(Number(regime.evidenceStrength) * 100) + '%') + '</span></div>' +
+      '<div class="dc-oi-kpis"><div class="dc-oi-kpi"><div class="k">隔夜定價 · 20日</div><div class="v ' +
+        oiTone(market.market, summary.overnightRepricing20Pct) + '">' + oiSignedPct(summary.overnightRepricing20Pct) + '</div><div class="s">相對 ' +
+        esc(benchmark.symbol || '基準') + ' ' + oiSignedPct(relative.overnight20Pct) + '</div></div>' +
+      '<div class="dc-oi-kpi"><div class="k">日間承接 · 20日</div><div class="v ' + oiTone(market.market, summary.cashSessionAcceptance20Pct) + '">' +
+        oiSignedPct(summary.cashSessionAcceptance20Pct) + '</div><div class="s">相對基準 ' + oiSignedPct(relative.intraday20Pct) + '</div></div>' +
+      '<div class="dc-oi-kpi"><div class="k">族群同步率</div><div class="v">' + num(summary.synchronizationPct, 1) + '%</div><div class="s">正向 ' +
+        num(breadth.positive, 0) + ' / 有效 ' + num(breadth.eligible, 0) + '；覆蓋 ' + num(summary.memberCount, 0) + '/' +
+        num(summary.expectedMemberCount, 0) + '</div></div></div>' +
+      '<details class="dc-oi-detail"><summary>逐檔、基準與資料品質</summary><div class="dc-oi-scroll"><table class="dc-oi-table"><thead><tr>' +
+        '<th>標的</th><th>隔夜20日</th><th>日間20日</th><th>相對基準 ON / ID</th><th>缺口保留</th><th>樣本</th></tr></thead><tbody>' +
+        memberRows + '</tbody></table></div><div class="dc-note">基準 ' + esc(benchmark.symbol || '—') + ' · ' + esc(benchmark.method || '—') +
+        ' · quorum ' + num((quality.quorum || {}).eligible, 0) + '/' + num((quality.quorum || {}).required, 0) +
+        ' · 調整 ' + esc(quality.adjustmentMode || '—') + '</div></details></section>';
+  }
+
+  function sessionMomentumHtml(ctx) {
+    var research = ((ctx.researchObservations || {}).overnightIntraday) || {};
+    var status = ((research.quality || {}).status) || 'insufficient';
+    var markets = research.markets || [];
+    var openAttr = oiLabOpen ? ' open' : '';
+    var body = markets.length ? '<div class="dc-oi-grid">' + markets.map(oiMarketHtml).join('') + '</div>' :
+      '<div class="dc-note">盤別研究尚未更新。此區不會用 0% 冒充缺失資料；按下更新後才會取得固定觀察籃子日線。</div>';
+    return '<details id="dc-oi-lab" class="dc-lab dc-oi-lab"' + openAttr + '><summary><span>盤別動量結構 · Overnight × Intraday</span>' +
+      '<span class="tag">Shadow · 觀察</span><span class="dc-oi-quality ' + esc(status) + '">' + esc(oiQualityLabel(status)) + '</span></summary>' +
+      body + '<div class="dc-oi-authority">觀察性研究：隔夜代表收盤後至次日開盤的價格重估，不等同法人或 Smart Money 流向；本模組不改寫市場狀態、信心、Key Levels、Action Envelope 或槓桿限制。</div>' +
+      '<div class="dc-oi-actions"><button type="button" class="dc-btn" id="dc-oi-refresh">更新盤別研究</button><span class="dc-note" id="dc-oi-refresh-status">' +
+        esc(research.methodologyVersion || '固定觀察籃子 · Yahoo adjusted daily') + '</span></div></details>';
+  }
+
+  function bindSessionMomentumLab() {
+    var details = $('dc-oi-lab'), button = $('dc-oi-refresh'), status = $('dc-oi-refresh-status');
+    if (details) details.addEventListener('toggle', function () { oiLabOpen = !!details.open; });
+    if (button) button.onclick = function (event) {
+      event.preventDefault(); event.stopPropagation(); button.disabled = true; button.textContent = '更新中…';
+      if (status) status.textContent = '正在取得固定白名單的調整後日線並驗證盤別恆等式…';
+      if (window.DecisionData && DecisionData.refreshOvernightResearch) {
+        DecisionData.refreshOvernightResearch(true).finally(function () {
+          var current = $('dc-oi-refresh'); if (current) { current.disabled = false; current.textContent = '更新盤別研究'; }
+        });
+      }
+    };
+  }
+
+  function contextWithResearchEvidence(ctx) {
+    var research = ((ctx.researchObservations || {}).overnightIntraday) || {};
+    return Object.assign({}, ctx, { evidence: (ctx.evidence || []).concat(research.evidence || []) });
+  }
+
   function exposureLabHtml(ctx) {
     var lab = ctx.exposureLab || {};
     if (!lab.model) return '<div class="dc-note">Exposure Lab 尚未形成。</div>';
@@ -1423,6 +1544,7 @@
     var body = ensureMount();
     if (!body || !ctx) return;
     lastContext = ctx;
+    lastEvidenceContext = contextWithResearchEvidence(ctx);
     var r = ctx.regime || {}, q = ctx.dataQuality || {}, a = ctx.actionEnvelope || {};
     var sub = $('dc-sub');
     if (sub) sub.textContent = (ctx.model || 'DecisionContext') + ' · asOf ' + (ctx.asOf || '—') +
@@ -1446,13 +1568,14 @@
         '<div class="dc-card"><h3><span>廣度趨勢與具名背離</span><span>' + (ctx.divergences || []).length + '</span></h3>' +
           breadthTrendHtml(ctx) + '<div style="margin-top:6px">' + divergencesHtml(ctx) + '</div></div>' +
         '<div class="dc-card"><h3><span>產業資金流／參與</span><span>' + esc((ctx.sectorFlow || {}).mode || '—') + '</span></h3>' + sectorHtml(ctx) + '</div>' +
+        '<div class="dc-card">' + sessionMomentumHtml(ctx) + '</div>' +
       '</div><div>' +
         '<div class="dc-card"><h3><span>Action Envelope</span><span>不是下單訊號</span></h3>' +
           mandatoryControlsHtml(a) + actionSummaryHtml(a) + '<div style="margin-top:7px">' + riskFormHtml(ctx) + '</div></div>' +
         '<div class="dc-card">' + exposureLabHtml(ctx) + '</div>' +
         '<div class="dc-card"><h3 class="dc-portfolio-head"><span>Portfolio Overlay</span>' + portfolioSwitchHtml() +
           '</h3>' + portfolioHtml(ctx) + '</div>' +
-        '<div class="dc-card"><h3><span>Evidence Ledger · 證據帳本</span><span>' + (ctx.evidence || []).length + ' 筆 · 原始值未改寫</span></h3>' + evidenceHtml(ctx) + '</div>' +
+        '<div class="dc-card"><h3><span>Evidence Ledger · 證據帳本</span><span>' + (lastEvidenceContext.evidence || []).length + ' 筆 · 原始值未改寫</span></h3>' + evidenceHtml(lastEvidenceContext) + '</div>' +
         '<div class="dc-card"><h3><span>News Impact</span><span>deterministic tag</span></h3>' + newsHtml(ctx) + '</div>' +
         '<div class="dc-card"><h3><span>Regime History</span><span id="dc-hist-meta">載入中</span></h3><div id="dc-history" class="dc-note">—</div></div>' +
         '<div class="dc-card" id="dc-ai-card" style="display:none"><h3><span>AI Explanation</span><span>唯讀解釋</span></h3><div id="dc-ai-body" class="dc-ai"></div></div>' +
@@ -1461,6 +1584,7 @@
     bindEvidenceLedger();
     bindNewsLinks();
     bindOptionsLab();
+    bindSessionMomentumLab();
     loadHistory();
   }
 

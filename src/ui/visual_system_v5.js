@@ -490,6 +490,17 @@
     html.st-vs5 #dc-root .dc-temp-light .v{font-size:11.5px!important}
     html.st-vs5 #dc-root .dc-temp-light .s{font-size:9px!important}
 
+    html.st-vs5 #dc-root .dc-oi-market{padding:10px!important}
+    html.st-vs5 #dc-root .dc-oi-head b,
+    html.st-vs5 #dc-root .dc-oi-state b{font-size:12px!important;line-height:1.45!important}
+    html.st-vs5 #dc-root .dc-oi-state span,
+    html.st-vs5 #dc-root .dc-oi-quality{font-size:9.5px!important}
+    html.st-vs5 #dc-root .dc-oi-kpi{padding:8px!important}
+    html.st-vs5 #dc-root .dc-oi-kpi .v{font:800 15px/1.3 var(--dc-font-mono)!important}
+    html.st-vs5 #dc-root .dc-oi-kpi .s,
+    html.st-vs5 #dc-root .dc-oi-authority{font-size:10px!important;line-height:1.5!important}
+    html.st-vs5 #dc-root .dc-oi-detail>summary{font-size:10.5px!important}
+
     html.st-vs5 #dc-root .dc-options-meta,
     html.st-vs5 #dc-root .dc-options-status{font-size:9.5px!important}
     html.st-vs5 #dc-root .dc-options-layer{padding:10px!important}
@@ -517,13 +528,16 @@
     html.st-vs5 #dc-root .dc-lab>summary{overflow-wrap:anywhere}
 
     @media(max-width:1000px){
-      html.st-vs5 #dc-root .dc-grid,html.st-vs5 #dc-root .dc-temp{grid-template-columns:1fr!important}
+      html.st-vs5 #dc-root .dc-grid,html.st-vs5 #dc-root .dc-temp,
+      html.st-vs5 #dc-root .dc-oi-grid{grid-template-columns:1fr!important}
     }
     @media(max-width:650px){
       html.st-vs5 #dc-root .dc-title{font-size:21px!important}
       html.st-vs5 #dc-root .dc-scenario,
       html.st-vs5 #dc-root .dc-risk-grid,
       html.st-vs5 #dc-root .dc-lab-grid{grid-template-columns:1fr!important}
+      html.st-vs5 #dc-root .dc-oi-kpis{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+      html.st-vs5 #dc-root .dc-oi-kpi:last-child{grid-column:1/-1}
       html.st-vs5 #dc-root .dc-card{padding:10px!important}
       html.st-vs5 #dc-root .dc-card h3{align-items:flex-start;flex-direction:column;gap:5px}
       html.st-vs5 #dc-root .dc-portfolio-switch{margin-left:0}

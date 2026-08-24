@@ -65,6 +65,7 @@ const sectorHistory = fs.readFileSync(path.join(root, 'server/sector_history.py'
 const sectorFlow = fs.readFileSync(path.join(root, 'server/sector_flow.py'), 'utf8');
 const decisionEngine = fs.readFileSync(path.join(root, 'server/decision_context.py'), 'utf8');
 const exposureLabEngine = fs.readFileSync(path.join(root, 'server/exposure_lab.py'), 'utf8');
+const overnightEngine = fs.readFileSync(path.join(root, 'server/overnight_intraday.py'), 'utf8');
 const visualSystem = fs.readFileSync(path.join(root, 'src/ui/visual_system_v5.js'), 'utf8');
 const chartVisual = fs.readFileSync(path.join(root, 'src/ui/chart_visual_v5.js'), 'utf8');
 const mobileCss = fs.readFileSync(path.join(root, 'src/ui/mobile_v2.css'), 'utf8');
@@ -193,6 +194,17 @@ ok(!/optionsStructure: context\.optionsStructure/.test(decisionData) &&
   /台指選擇權結構/.test(decisionUi) && /不推定造市商持倉/.test(decisionUi) &&
   /Gamma／Vega 密度是方向中立/.test(decisionUi),
   'options research stays out of the Pulse summary and discloses public-OI limitations');
+ok(/\/research\/overnight-intraday/.test(decisionData) && /researchObservations/.test(decisionData) &&
+  /盤別動量結構/.test(decisionUi) && /隔夜定價/.test(decisionUi) && /日間承接/.test(decisionUi) &&
+  /族群同步率/.test(decisionUi) && /Shadow · 觀察/.test(decisionUi) && /actionAuthority/.test(overnightEngine),
+  'overnight/intraday research uses the canonical DecisionData writer and an explicit shadow panel');
+ok(/function refreshOvernightResearch/.test(decisionData) && !/research\/overnight-intraday/.test(decisionUi) &&
+  /summary:\s*\{[\s\S]*?model: context\.model/.test(decisionData) &&
+  !/summary:\s*\{[\s\S]*?overnightIntraday[\s\S]*?model: context\.model/.test(decisionData),
+  'shadow session research does not create a second UI fetch path or enter the compact authoritative summary');
+ok(/adjustedOpen = rawOpen \* adjClose\/rawClose/.test(overnightEngine) && /IDENTITY_TOLERANCE = 1e-10/.test(overnightEngine) &&
+  /"8299\.TWO"/.test(overnightEngine) && !/"3260\.TWO"/.test(overnightEngine) && /same-market daily session residual/.test(overnightEngine),
+  'session research enforces adjusted OHLC identity and reuses the canonical memory watch taxonomy');
 ok(/持有 /.test(fs.readFileSync(path.join(root, 'src/core/pro_v2.js'), 'utf8')) &&
   /今日 /.test(fs.readFileSync(path.join(root, 'src/core/pro_v2.js'), 'utf8')) &&
   /Colors\.dir\(item\.code/.test(fs.readFileSync(path.join(root, 'src/core/pro_v2.js'), 'utf8')),

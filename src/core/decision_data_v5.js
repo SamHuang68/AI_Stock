@@ -3,6 +3,8 @@
   'use strict';
   var state = { context: null, summary: null, updatedAt: null, contractVersion: 1 };
   var inflight = null;
+  var researchInflight = null;
+  var researchUpdatedAt = 0;
   var TRACE_KEY = 'st_decision_ui_trace_v1';
 
   function base() { return window.SERVER || location.origin || 'http://localhost:18432'; }
@@ -37,6 +39,9 @@
 
   function publish(context, reason, id) {
     if (!context || !context.regime) return state;
+    if (!context.researchObservations && state.context && state.context.researchObservations) {
+      context = Object.assign({}, context, { researchObservations: state.context.researchObservations });
+    }
     state = {
       context: context,
       summary: {
@@ -72,6 +77,54 @@
     });
     emit(reason || 'context');
     return state;
+  }
+
+  function withOvernightResearch(context, payload) {
+    var observations = Object.assign({}, (context && context.researchObservations) || {});
+    observations.overnightIntraday = payload || null;
+    return Object.assign({}, context || {}, { researchObservations: observations });
+  }
+
+  function parseResponse(response, id, event) {
+    return response.text().then(function (raw) {
+      trace(event, id, { status: response.status, ok: response.ok, responseChars: raw.length });
+      if (!response.ok || !raw) return null;
+      try { return JSON.parse(raw); }
+      catch (error) {
+        trace(event + '_parse_error', id, { error: String(error && error.message || error) });
+        return null;
+      }
+    });
+  }
+
+  function refreshOvernightResearch(context, id, force) {
+    if (!context || !context.regime) return Promise.resolve(state);
+    if (researchInflight) return researchInflight;
+    if (!force && researchUpdatedAt && Date.now() - researchUpdatedAt < 15 * 60 * 1000) return Promise.resolve(state);
+    var path = base() + '/research/overnight-intraday?market=all';
+    researchInflight = fetch(path, { cache: 'no-store' })
+      .then(function (response) { return parseResponse(response, id, 'overnight_cache_response'); })
+      .then(function (cached) {
+        if (!force && cached && cached.ok) return cached;
+        trace('overnight_refresh_start', id, { scope: 'memory_v1', market: 'all' });
+        return fetch(base() + '/research/overnight-intraday/refresh?market=all', {
+          method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ market: 'all', force: !!force })
+        }).then(function (response) { return parseResponse(response, id, 'overnight_refresh_response'); });
+      })
+      .then(function (payload) {
+        researchUpdatedAt = Date.now();
+        var current = state.context || context;
+        if (payload && current && current.regime) publish(withOvernightResearch(current, payload), 'overnight-research', id);
+        return state;
+      })
+      .catch(function (error) {
+        researchUpdatedAt = Date.now();
+        trace('overnight_refresh_error', id, { error: String(error && error.message || error) });
+        return state;
+      })
+      .finally(function () { researchInflight = null; });
+    return researchInflight;
   }
 
   function fromPulse(pulse, id) {
@@ -134,7 +187,11 @@
         });
       })
       .then(function (ctx) {
-        if (ctx) return publish(ctx, hasBody ? 'profile' : 'refresh', id);
+        if (ctx) {
+          var published = publish(ctx, hasBody ? 'profile' : 'refresh', id);
+          refreshOvernightResearch(state.context, id, false);
+          return published;
+        }
         trace('context_unavailable', id, { elapsedMs: Date.now() - started });
         return state;
       })
@@ -154,6 +211,9 @@
     publish: publish,
     fromPulse: fromPulse,
     refresh: refresh,
+    refreshOvernightResearch: function (force) {
+      return refreshOvernightResearch(state.context, correlationId('overnight'), !!force);
+    },
     trace: trace,
     correlationId: correlationId,
     traceKey: TRACE_KEY

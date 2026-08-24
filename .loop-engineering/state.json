@@ -1,148 +1,263 @@
 {
   "schemaVersion": 1,
   "projectId": "stock-terminal-v5",
-  "objective": "Deliver and deploy a dual-path EVO-T1 AI analysis architecture: a fast explicitly selected local model and a restricted Hermes deep-analysis route, with truthful provider/model/runtime labels, conservative load-aware time guidance, streaming-safe gateway behavior, and mobile-friendly recovery.",
-  "status": "complete",
-  "updatedAt": "2026-08-21",
+  "objective": "Implement and verify a shadow-only Overnight-Intraday Momentum Regime vertical slice for memory and high-beta equities, with session-aligned adjusted OHLC, rolling standardized structure metrics, sector breadth, an auditable API/Evidence contract, and readable ST presentation without changing authoritative market regime, action envelope, leverage, or trading decisions.",
+  "status": "completed",
+  "updatedAt": "2026-08-24",
   "constraints": {
     "inScope": [
-      "reuse the existing /ai/local, Private Web gateway and Pulse AI drawer contracts",
-      "add explicit fast-local and restricted Hermes-deep analysis modes on EVO-T1",
-      "report actual provider, model, data boundary, host and phase-aware conservative duration guidance",
-      "repair gateway streaming, timeout and post-header error behavior",
-      "test, commit, stage, deploy and verify the exact release through authenticated Tailscale access"
+      "derive overnight, intraday and close-to-close log returns from consistent adjusted daily OHLC",
+      "replace unbounded cumulative comparisons with rolling 20/60-session sums, standardized strength, gap retention and sector breadth",
+      "support a bounded memory/high-beta universe with explicit market, session, source, timestamp and benchmark metadata",
+      "expose a deterministic shadow API and Evidence Ledger fields with professional regime labels and evidence strength",
+      "add a progressive ST panel that summarizes overnight repricing, cash-session acceptance and basket synchronization",
+      "add unit, integration, build, data-quality and responsive UI verification"
     ],
     "outOfScope": [
-      "automatic trading, portfolio mutation or allowing model output to become authoritative market data",
-      "exposing LM Studio, Ollama or Hermes directly to the network/browser",
-      "granting Hermes terminal, file-write, messaging, cron or profile-management authority through ST",
+      "automatic trading, portfolio mutation, direct buy/sell signals or leverage recommendations",
+      "allowing the indicator to overwrite DecisionContext regime, confidence, key levels or Action Envelope",
+      "claiming opening gaps are observed institutional or smart-money flow",
+      "adding paid data providers, credentials, new public exposure, commit, push or deployment",
       "discarding, staging or rewriting unrelated runtime data changes"
     ],
     "assumptions": [
-      "the phone is a same-origin remote UI while all AI orchestration runs on EVO-T1",
-      "fast summary remains usable when Hermes or a local model is unavailable",
-      "model load and context prefill can dominate inference time and must be included in estimates",
-      "Hermes' current NVIDIA provider is external and any deep route must label that data boundary",
-      "the existing four modified data files are runtime/user-owned and excluded from implementation commits"
+      "daily official-session Open and Close are available from existing Yahoo-backed chart routes but require consistent adjustment and fail-closed quality checks",
+      "US and Taiwan sessions must be aligned by trading date rather than naïve calendar date",
+      "the first release is observational shadow evidence and requires prospective history before authority can increase",
+      "high-beta raw returns must be separated from market/sector movement before being described as industry-specific",
+      "the existing four modified data files are runtime/user-owned and excluded from implementation work"
     ],
     "permissions": [
-      "modify local project files",
-      "inspect local runtime health, models, Hermes non-secret configuration and existing diagnostics",
-      "modify scoped AI, gateway, Pulse UI, documentation and test files",
-      "run local model, gateway, build, private release and authenticated remote checks",
-      "commit and deploy the completed requested implementation"
+      "modify scoped local project source, tests and loop state",
+      "run deterministic local tests, builds and read-only runtime/browser verification",
+      "use read-only same-provider Codex advisory workers under a Host-owned barrier"
     ],
     "availableResources": [
-      "local repository and git metadata",
-      "EVO-T1 RTX 5080, 96GB RAM, LM Studio, Ollama and Hermes Agent",
-      "existing /ai/local route, Pulse AI drawer and isolated Private Web gateway",
-      "existing Python and JavaScript self-test plus exact-release infrastructure",
-      "persisted gateway/host/backend audit logs"
+      "local repository, Git baseline 78e348ddf0595d4da0056d0debe20f3321f10071 and existing daily chart/provider seams",
+      "existing memory taxonomy, Pulse, DecisionContext, Evidence Ledger and table/UI infrastructure",
+      "existing Python and JavaScript test/build infrastructure",
+      "three read-only Codex advisory branches plus the Host integration writer"
     ],
     "excludedResources": [
-      "repository push and unauthenticated public hosting",
-      "automatic trade execution or trade recommendations",
-      "credentials, private brokerage data or personal lending terms",
-      "direct network exposure of model runtimes or widening access beyond the authenticated Tailscale path"
+      "repository commit, push, release promotion and production deployment without a later explicit approval",
+      "external AI providers or claims of provider-independent review",
+      "credentials, private brokerage data, personal holdings and private access tokens",
+      "new paid market-data adapters or expanded network exposure"
     ]
   },
   "currentLoop": {
-    "id": "LOOP-009",
-    "title": "EVO-T1 dual-path AI analysis and streaming reliability",
-    "entryCondition": "The user approved the diagnosed architecture and requested full implementation with load-aware conservative duration guidance",
-    "exitCondition": "Fast local and Hermes deep analysis are explicit, observable, restricted, streaming-safe and deployed through the authenticated remote UI with passing recovery and mobile gates"
+    "id": "LOOP-010",
+    "title": "Overnight-Intraday Momentum Regime shadow vertical slice",
+    "entryCondition": "The user accepted the evaluation and explicitly requested multi-layer parallel implementation",
+    "exitCondition": "The deterministic shadow engine, API/Evidence contract and readable ST surface pass unit, integration, build, data-quality and responsive UI Gates without gaining trading or DecisionContext authority"
   },
+  "orchestrationPolicy": {
+    "multiProviderRequired": false,
+    "requiredDistinctProviders": 1,
+    "quotaSignalsStayHostLocal": true,
+    "unknownQuotaPolicy": "fallback",
+    "providerGateVerdict": "not-required"
+  },
+  "taskShape": {
+    "kind": "build",
+    "capabilities": ["decide", "extract-transform", "create-synthesize", "validate-govern"],
+    "analysisSource": "chatgpt-codex-host",
+    "inputTypes": ["daily OHLC", "market taxonomy", "DecisionContext contracts", "UI modules"],
+    "outputTypes": ["deterministic Python engine", "HTTP JSON contract", "shadow Evidence", "responsive UI", "tests"],
+    "freshness": "daily-session aware",
+    "sideEffectLevel": "preview",
+    "reversibility": "reversible",
+    "approvalRequired": false,
+    "approvalNodeId": null,
+    "dataBoundary": "local project; existing public market routes only",
+    "feedbackRequired": true
+  },
+  "capabilityGraph": {
+    "enabled": true,
+    "roles": [
+      {"roleId": "host-integrator", "capability": "decide/create/validate", "worker": "root", "writePolicy": "single-writer", "providerGroup": "openai-codex"},
+      {"roleId": "quant-architect", "capability": "logical precision/context expansion", "worker": "quant-architecture", "writePolicy": "advisory-read-only", "providerGroup": "openai-codex"},
+      {"roleId": "ui-contract-explorer", "capability": "context expansion/render-explain", "worker": "ui-evidence", "writePolicy": "advisory-read-only", "providerGroup": "openai-codex"},
+      {"roleId": "adversarial-verifier", "capability": "validate-govern", "worker": "adversarial-tests", "writePolicy": "advisory-read-only", "providerGroup": "openai-codex"}
+    ],
+    "capacityGroups": [
+      {"id": "openai-codex", "provider": "OpenAI", "billingMeter": "current Codex task", "distinctProviderCount": 1}
+    ]
+  },
+  "synchronizationBarriers": [
+    {
+      "id": "B10-ADVISORY-FANIN",
+      "baseStateHash": "78e348ddf0595d4da0056d0debe20f3321f10071",
+      "generation": 1,
+      "requiredTaskIds": ["L10-02", "L10-03", "L10-04"],
+      "providerRequirement": "same-provider parallel advisory accepted; multi-provider not required",
+      "timeoutPolicy": "wait for all required branches; narrow or reroute on failure",
+      "gateCriteria": "Each branch returns result, evidence locations, proposed delta, risks and unresolved questions against the named base hash"
+    }
+  ],
   "routing": [
     {
       "capability": "host",
       "executionTarget": "root",
-      "provider": "local",
-      "model": null,
-      "dataBoundary": "local project plus official public sources",
+      "provider": "OpenAI",
+      "model": "Codex Host",
+      "dataBoundary": "local project",
       "selectionReason": "Retain canonical state, single-writer integration and final acceptance",
       "fallback": null,
       "responsibility": "state, single-writer implementation, integration and acceptance",
       "writePolicy": "single writer"
+    },
+    {
+      "capability": "logical precision and backend architecture",
+      "executionTarget": "quant-architecture",
+      "provider": "OpenAI",
+      "model": "inherited Codex subagent",
+      "dataBoundary": "local project read-only",
+      "selectionReason": "Independently map formulas, session alignment, data quality and backend seams",
+      "fallback": "host inspection",
+      "responsibility": "L10-02 advisory delta",
+      "writePolicy": "read-only advisory"
+    },
+    {
+      "capability": "UI and Evidence contract exploration",
+      "executionTarget": "ui-evidence",
+      "provider": "OpenAI",
+      "model": "inherited Codex subagent",
+      "dataBoundary": "local project read-only",
+      "selectionReason": "Map progressive disclosure and existing Decision/Evidence integration seams",
+      "fallback": "host inspection",
+      "responsibility": "L10-03 advisory delta",
+      "writePolicy": "read-only advisory"
+    },
+    {
+      "capability": "adversarial verification",
+      "executionTarget": "adversarial-tests",
+      "provider": "OpenAI",
+      "model": "inherited Codex subagent",
+      "dataBoundary": "local project read-only",
+      "selectionReason": "Challenge statistical claims, edge cases and regression/test completeness",
+      "fallback": "host review",
+      "responsibility": "L10-04 advisory delta",
+      "writePolicy": "read-only advisory"
     }
   ],
   "tasks": [
     {
-      "id": "L09-01",
-      "title": "Trace the complete mobile-to-model execution path and freeze contracts",
+      "id": "L10-01",
+      "title": "Freeze task, authority and data contracts",
       "owner": "host",
       "status": "completed",
       "dependsOn": [],
-      "successCriteria": "The earliest failure, active runtimes, provider precedence, data boundaries, model inventory and existing tests are evidenced before edits"
+      "capabilities": ["decide"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Baseline hash, shadow-only authority, rolling metrics, session alignment, barrier and Gate matrix are recorded before implementation"
     },
     {
-      "id": "L09-02",
-      "title": "Implement explicit fast-local and restricted Hermes-deep backend modes",
-      "owner": "host",
+      "id": "L10-02",
+      "title": "Quant and backend architecture advisory",
+      "owner": "quant-architecture",
       "status": "completed",
-      "dependsOn": ["L09-01"],
-      "successCriteria": "Each request has a generated request ID, fixed server-side provider/model policy, truthful metadata, conservative load-aware estimate and no caller-controlled endpoint or unrestricted tools"
+      "dependsOn": ["L10-01"],
+      "capabilities": ["extract-transform", "logical precision"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Return formulas, fail-closed quality rules, session/benchmark mapping, backend seams and test cases against the baseline hash"
     },
     {
-      "id": "L09-03",
-      "title": "Repair Private Web gateway streaming and terminal error semantics",
-      "owner": "host",
+      "id": "L10-03",
+      "title": "UI and Evidence integration advisory",
+      "owner": "ui-evidence",
       "status": "completed",
-      "dependsOn": ["L09-01"],
-      "successCriteria": "Small streamed chunks reach the client promptly, AI has a bounded route-specific timeout and no second HTTP response is emitted after headers start"
+      "dependsOn": ["L10-01"],
+      "capabilities": ["render-explain", "context expansion"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Return a progressive panel/evidence contract, exact integration seams and responsive/accessibility risks against the baseline hash"
     },
     {
-      "id": "L09-04",
-      "title": "Add Pulse dual-entry UI with runtime truth and mobile recovery",
-      "owner": "host",
+      "id": "L10-04",
+      "title": "Adversarial formula and test review",
+      "owner": "adversarial-tests",
       "status": "completed",
-      "dependsOn": ["L09-02", "L09-03"],
-      "successCriteria": "Fast and deep actions are distinct, actual host/provider/model/data-boundary metadata is visible, estimates exceed measured load+prefill+inference time and failures fall back without raw HTTP"
+      "dependsOn": ["L10-01"],
+      "capabilities": ["validate-govern"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Return P0/P1 edge cases, falsification fixtures and a release recommendation against the baseline hash"
     },
     {
-      "id": "L09-05",
-      "title": "Run static, unit, integration, fault, browser and local-runtime Gates",
+      "id": "L10-05",
+      "title": "Implement deterministic shadow engine and HTTP contract",
       "owner": "host",
       "status": "completed",
-      "dependsOn": ["L09-02", "L09-03", "L09-04"],
-      "successCriteria": "All scoped tests pass, first-byte streaming and post-header timeout recovery are reproduced, and a real EVO-T1 model request completes with matching provider metadata"
+      "dependsOn": ["L10-01"],
+      "capabilities": ["create-synthesize", "extract-transform"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Pure formulas, bounded provider adapter, source/session metadata, regimes and fail-closed behavior are exposed without changing authoritative DecisionContext"
     },
     {
-      "id": "L09-06",
-      "title": "Commit, stage, promote, deploy and verify the exact release",
+      "id": "L10-06",
+      "title": "Integrate shadow Evidence and progressive ST panel",
       "owner": "host",
       "status": "completed",
-      "dependsOn": ["L09-05"],
-      "successCriteria": "A privacy-clean exact commit is staged, promoted and verified through local production and authenticated Tailscale without including runtime data changes"
+      "dependsOn": ["L10-02", "L10-03", "L10-04", "L10-05"],
+      "capabilities": ["create-synthesize", "render-explain"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "The UI exposes repricing, acceptance, synchronization, methodology and quality while remaining shadow-only and responsive"
+    },
+    {
+      "id": "L10-07",
+      "title": "Run fan-in refinement and verification Gates",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L10-06"],
+      "capabilities": ["validate-govern", "learn-refine"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "All required branch deltas are reconciled and unit, integration, build, runtime, responsive and authority-boundary Gates pass with no P0/P1"
     }
   ],
   "verification": {
     "gate": [
-      "all scoped AI requests execute on EVO-T1 and no model runtime is browser-addressable",
-      "provider, model, host, data boundary and estimate are derived from the actual selected route",
-      "fast mode remains useful when the selected runtime is cold or Hermes is unavailable",
-      "Hermes deep mode is server-selected, read-only from ST and visibly identifies external versus local inference",
-      "gateway streams small chunks promptly and never emits nested HTTP after response start",
-      "timeout, disconnect and unavailable-runtime paths are observable and user-readable",
-      "exact release tests, privacy checks, local production and authenticated remote smoke tests pass"
+      "close-to-close log return equals overnight plus intraday within tolerance for every accepted row",
+      "corporate-action, missing/open-zero, stale, short-window and misaligned-session cases fail closed or downgrade quality",
+      "rolling metrics and regimes are invariant to arbitrary cumulative-series start level and expose bounded evidence strength",
+      "raw high-beta movement is not labeled industry-specific without benchmark and basket evidence",
+      "API includes source, market, session, benchmark, as-of, sample size, methodology version and shadow authority",
+      "DecisionContext regime, confidence, key levels and Action Envelope remain byte-for-byte unaffected by the indicator",
+      "UI uses professional market terms, progressive disclosure and readable portrait/landscape layouts",
+      "unit, integration, static, build, runtime and browser checks pass with no P0/P1"
     ],
-    "commands": [],
+    "commands": [
+      "python -m unittest tests.test_overnight_intraday -v",
+      "python -m unittest tests.test_overnight_intraday tests.test_decision_context tests.test_decision_http tests.test_market_contract tests.test_private_web_gateway tests.test_private_web_access tests.test_private_web_host tests.test_private_web_release tests.test_build_reproducibility tests.test_server_http_security tests.test_health_live -v",
+      "node tests/shell_v5_selftest.js",
+      "node tests/layout_visual_v5_selftest.js",
+      "python build_v2.py",
+      "live Yahoo fixed-universe refresh for TW and US"
+    ],
     "evidence": [
-      "2026-08-21 15:58:42 Private Web audit recorded POST /ai/local TimeoutError after the gateway's 120-second upstream deadline",
-      "The backend sends 200 headers before model generation while the gateway used response.read(64 KiB), which buffered small AI chunks and attempted a second 502 after response start",
-      "EVO-T1 was listening on ST 18435, gateway 18434, Ollama 11434 and LM Studio 1234; the phone performed no inference",
-      "Current ai_local provider precedence selected Ollama nemotron-3.5-lightning while the Pulse UI incorrectly displayed LM Studio",
-      "Hermes Desktop and local serve processes are active, but ST has no Hermes route and Hermes currently resolves nvidia/nemotron-3-super-120b-a12b through an external NVIDIA endpoint"
-      ,"LM Studio live Gate selected google/gemma-4-e4b on EVO-T1, returned the expected local-only response in 17.66 seconds and retained a conservative 300-second user allowance"
-      ,"Hermes live Gate selected NVIDIA NIM nvidia/nemotron-3-super-120b-a12b on EVO-T1, returned the expected restricted response in 24.36 seconds and retained a conservative 720-second user allowance"
-      ,"Gateway integration tests proved one-byte AI chunks reach the client before upstream completion and a post-header timeout closes cleanly without nested HTTP/1.1 or 502 body text"
-      ,"Exact release b6524f0299e7 passed 38 isolated release tests, was promoted with production data/log preservation and restarted on loopback ports 18434/18435"
-      ,"Authenticated Tailscale HTTPS reported execution=server-side-on-EVO-T1, phoneInference=false, the deployed dual-mode asset and the exact fast/deep model contracts"
-      ,"Remote fast and deep Gates returned HTTP 200 in 4.99 and 13.40 seconds respectively, below the deliberately conservative 300/720-second load-aware guidance"
-      ,"Production AI traces contained request IDs, provider/model/boundary, phases, hashes, lengths and elapsed time only; no prompt, context, output or credential content was persisted"
+      "LOOP-010 baseline is Git commit 78e348ddf0595d4da0056d0debe20f3321f10071; four runtime data files are unrelated and protected from integration",
+      "Existing ST seams include memory taxonomy, Yahoo-backed daily chart routes, DecisionContext Evidence Ledger and responsive Decision/Pulse UI",
+      "Three read-only advisory branches completed against the same baseline and were reconciled by the Host single writer",
+      "Twelve feature unit tests pass, including US 3/4 and TW 4/5 quorum, corporate-action adjustment, missing Open fail-closed, unfinished-session exclusion, benchmark inner join, fixed universe, stale-cache preservation and authority boundaries",
+      "Targeted backend, DecisionContext, HTTP, Private Web, reproducibility, security and health tests pass; one Windows socket-abort case passed on immediate isolated rerun",
+      "Shell and layout static suites pass, the generated HTML is byte-reproducible at revision 7343e66d1300, and feature-scoped diff checks are clean",
+      "An isolated localhost browser run confirmed #decision routing, a visible default-open Overnight × Intraday panel, professional labels, responsive DOM containment and the shadow authority warning; provider population was verified separately through the live fixed-universe adapter because the sandboxed UI server cannot open external sockets",
+      "Live fixed-universe Yahoo verification passed on 2026-08-24: TW eligible 5/5 with required 4 and US eligible 4/4 with required 3; maximum return-identity errors were approximately 10^-16"
     ],
     "openP0": [],
     "openP1": [],
-    "verdict": "pass"
+    "verdict": "pass",
+    "providerDiversity": {
+      "required": false,
+      "requiredDistinctProviders": 1,
+      "completedDistinctProviders": 1,
+      "verdict": "not-required"
+    }
   },
   "loopHistory": [
     {
@@ -229,6 +344,17 @@
         "Tailscale HTTPS availability remains dependent on the local machine, Tailscale service and existing Serve/Funnel configuration.",
         "The active application release is 4f89131e5585; the later repository-only verification record does not change served application behavior."
       ]
+    },
+    {
+      "loopId": "LOOP-010",
+      "result": "pass",
+      "summary": "Implemented the Overnight × Intraday memory-theme vertical slice as deterministic shadow research: consistently adjusted Open/Close, exact return identity, 20/60-session structure, same-market residual comparison, TW/US basket quorum, cache-only GET, bounded fixed-universe refresh, canonical DecisionData attachment, readable Decision panel and auditable Evidence Ledger integration.",
+      "residualRisks": [
+        "Yahoo daily chart data remains a public-provider dependency and is not an official institutional-flow feed; opening repricing must not be described as observed smart-money activity.",
+        "The current fixed memory baskets and thresholds are research definitions, not validated portfolio signals; prospective history is required before considering any authority increase.",
+        "Benchmark-relative values are display-only in v1 because high-beta residual interpretation requires further stability testing across market regimes.",
+        "The repository-wide unittest discovery runner retains pre-existing test import-order debt, and the share preflight intentionally rejects the new untracked files until a later explicit Git commit; targeted product Gates pass."
+      ]
     }
   ],
   "blockers": [],
@@ -237,6 +363,7 @@
     "docs/ST_ARCHITECTURE_CODE_REVIEW_2026-08-16.md",
     "docs/ST_ARCHITECTURE_REMEDIATION_2026-08-16.md",
     "docs/ST_DYNAMIC_LEVERAGE_FIVE_POST_RESEARCH_2026-08-16.md",
+    "docs/OVERNIGHT_INTRADAY_RESEARCH.md",
     "Stock_Terminal_v5.0.zip",
     "Stock_Terminal_v5.0.zip.sha256",
     "Stock_Terminal_v5.0.manifest.json"
