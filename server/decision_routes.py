@@ -114,6 +114,19 @@ class DecisionRoutesMixin:
             n = 40
         self._ok(json.dumps(dc.history(n), ensure_ascii=False).encode())
 
+    def _handle_signal_active(self):
+        import early_warning
+        self._ok(json.dumps(early_warning.active(), ensure_ascii=False).encode())
+
+    def _handle_signal_history(self):
+        import early_warning
+        qs = parse_qs(urlparse(self.path).query)
+        try:
+            n = int((qs.get('n') or qs.get('limit') or ['80'])[0])
+        except (TypeError, ValueError):
+            n = 80
+        self._ok(json.dumps(early_warning.history(n), ensure_ascii=False).encode())
+
     def _handle_key_levels(self):
         import datastore
         import key_levels

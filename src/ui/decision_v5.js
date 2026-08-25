@@ -318,8 +318,24 @@
       '#dc-root .dc-action-cell b{display:block;font-size:12px;color:#dce9f6;margin-bottom:3px}.dc-action-cell span{display:block;font-size:10px;color:#a7b8cc;line-height:1.4;overflow-wrap:anywhere}' +
       '#dc-root .dc-action-cell.limit>i{color:#facc15;background:rgba(250,204,21,.12);box-shadow:0 0 13px rgba(250,204,21,.12)}' +
       '#dc-root .dc-action-cell.stop>i{color:#fb923c;background:rgba(251,146,60,.12);box-shadow:0 0 13px rgba(251,146,60,.12)}' +
+      '#dc-root .dc-warning-card{border-color:#304664;background:linear-gradient(145deg,rgba(11,25,43,.96),rgba(7,15,27,.98));overflow:hidden}' +
+      '#dc-root .dc-warning-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.dc-warning-head .tag{margin-left:auto}' +
+      '#dc-root .dc-warning-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}' +
+      '#dc-root .dc-warning-signal{display:grid;grid-template-columns:88px minmax(0,1fr);gap:12px;align-items:center;padding:12px;border:1px solid #2a405d;border-radius:10px;background:#081421;min-width:0}' +
+      '#dc-root .dc-warning-signal.upside{--tone:#38bdf8;box-shadow:inset 3px 0 rgba(56,189,248,.72)}' +
+      '#dc-root .dc-warning-signal.downside{--tone:#fb923c;box-shadow:inset 3px 0 rgba(251,146,60,.78)}' +
+      '#dc-root .dc-warning-ring{position:relative;width:82px;height:82px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--tone) var(--p),#1b2a3e 0);box-shadow:0 0 20px color-mix(in srgb,var(--tone) 22%,transparent)}' +
+      '#dc-root .dc-warning-ring:before{content:"";position:absolute;inset:8px;border-radius:50%;background:#07111e;border:1px solid #2b405b}' +
+      '#dc-root .dc-warning-ring strong,#dc-root .dc-warning-ring small{position:relative;z-index:1}.dc-warning-ring strong{font-size:22px;color:#eef8ff}.dc-warning-ring small{font-size:9px;color:#8ea4bc;margin-left:2px}' +
+      '#dc-root .dc-warning-copy{min-width:0}.dc-warning-title{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:5px}.dc-warning-title b{font-size:14px;color:#e6f0fb}' +
+      '#dc-root .dc-warning-state{padding:2px 7px;border-radius:999px;border:1px solid var(--tone);color:var(--tone);font-size:9px;font-weight:850}' +
+      '#dc-root .dc-warning-reasons{margin:0;padding-left:17px;color:#bdcadd;font:700 10px/1.55 "Noto Sans TC",sans-serif}.dc-warning-reasons li::marker{color:var(--tone)}' +
+      '#dc-root .dc-warning-rule{margin-top:6px;padding-top:6px;border-top:1px dashed #293b53;color:#8195ad;font-size:9px;line-height:1.45}' +
+      '#dc-root .dc-warning-components{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}.dc-warning-component{display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #2a415e;border-radius:999px;background:#091726;color:#aec0d3;font-size:9px}' +
+      '#dc-root .dc-warning-component b{color:#e4eef8}.dc-warning-component.mixed{border-color:#665b32;color:#e5cf78}' +
+      '#dc-root .dc-warning-foot{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:8px;color:#758ba4;font-size:9px}' +
       '@media(max-width:1000px){#dc-root .dc-command,#dc-root .dc-grid{grid-template-columns:1fr}#dc-root .dc-scenario{grid-template-columns:repeat(2,1fr)}#dc-root .dc-risk-grid,#dc-root .dc-lab-grid{grid-template-columns:repeat(2,1fr)}#dc-root .dc-temp{grid-template-columns:1fr}#dc-root .dc-temp-main{border-right:0;border-bottom:1px solid #24344b;padding:0 0 7px}#dc-root .dc-temp-lights{grid-template-columns:repeat(2,1fr)}#dc-root .dc-structure,#dc-root .dc-oi-grid{grid-template-columns:1fr}}' +
-      '@media(max-width:650px){#dc-root .dc-ledger-toolbar,#dc-root .dc-action-summary,#dc-root .dc-lab-authority,#dc-root .dc-validation-note{grid-template-columns:1fr}.dc-ledger-actions{justify-content:flex-start}#dc-root .dc-ledger-table table{min-width:720px}#dc-root .dc-options-kpis,#dc-root .dc-options-kpis.five{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-options-scroll table{min-width:720px}#dc-root .dc-oi-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-oi-kpi:last-child{grid-column:1/-1}}';
+      '@media(max-width:650px){#dc-root .dc-ledger-toolbar,#dc-root .dc-action-summary,#dc-root .dc-lab-authority,#dc-root .dc-validation-note,#dc-root .dc-warning-grid{grid-template-columns:1fr}.dc-ledger-actions{justify-content:flex-start}#dc-root .dc-ledger-table table{min-width:720px}#dc-root .dc-options-kpis,#dc-root .dc-options-kpis.five{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-options-scroll table{min-width:720px}#dc-root .dc-oi-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-oi-kpi:last-child{grid-column:1/-1}#dc-root .dc-warning-signal{grid-template-columns:72px minmax(0,1fr);padding:10px;gap:9px}#dc-root .dc-warning-ring{width:68px;height:68px}.dc-warning-ring strong{font-size:18px!important}}';
   }
 
   function ensureMount() {
@@ -1509,6 +1525,51 @@
       '<div class="dc-action-cell stop"><i>×</i><div><b>禁止</b><span>' + esc(listLabels(envelope.prohibited)) + '</span></div></div></div>';
   }
 
+  function warningStateLabel(value) {
+    return ({
+      OBSERVATION: '觀測', WATCH: '注意', ARMED: '戒備', CONFIRMED: '確認', ACTIVE: '生效',
+      CONFLICT: '衝突', RECOVERY: '回復觀察', INVALIDATED: '失效', EXPIRED: '逾期'
+    })[value] || String(value || '等待資料');
+  }
+
+  function warningSignalHtml(signal, direction) {
+    signal = signal || {};
+    var strength = Math.max(0, Math.min(100, Number(signal.strength) || 0));
+    var reasons = (signal.reasons || []).slice(0, 3);
+    if (!reasons.length) reasons = ['尚未累積足夠的獨立來源'];
+    return '<div class="dc-warning-signal ' + direction + '">' +
+      '<div class="dc-warning-ring" style="--p:' + strength.toFixed(0) + '%"><div><strong>' + strength.toFixed(0) +
+        '</strong><small>/100</small></div></div><div class="dc-warning-copy"><div class="dc-warning-title"><b>' +
+        esc(signal.label || (direction === 'upside' ? '台股強攻蓄勢' : '台股下跌前兆')) + '</b><span class="dc-warning-state">' +
+        esc(warningStateLabel(signal.state)) + '</span></div><ul class="dc-warning-reasons">' + reasons.map(function (row) {
+          return '<li>' + esc(row) + '</li>';
+        }).join('') + '</ul><div class="dc-warning-rule">確認：' + esc(signal.confirmation || '等待現貨與廣度同向') +
+        '<br>失效：' + esc(signal.invalidation || '訊號轉弱或核心方向反轉') + '</div></div></div>';
+  }
+
+  function earlyWarningHtml(ctx) {
+    var warning = ctx.earlyWarnings || {};
+    var signals = warning.signals || [];
+    if (!warning.ok && !signals.length) {
+      return '<div class="dc-card dc-warning-card"><h3><span>跨市場前兆雷達</span><span>SHADOW</span></h3>' +
+        '<div class="dc-note">核心來源尚未齊備；系統不會用新聞或單一股票補成方向訊號。</div></div>';
+    }
+    function find(id) { return signals.find(function (row) { return row.signalId === id; }) || {}; }
+    var down = find('TW_DOWNSIDE_PRECURSOR'), up = find('TW_ATTACK_BUILDUP');
+    var components = [find('AI_WAFER_DOUBLE_ARROW'), find('MEMORY_CYCLE_RESONANCE')];
+    return '<div class="dc-card dc-warning-card"><h3 class="dc-warning-head"><span>跨市場前兆雷達</span>' +
+      '<span>觀測 → 注意 → 戒備 → 確認 → 生效</span><span class="tag">SHADOW · 非下單訊號</span></h3>' +
+      '<div class="dc-warning-grid">' + warningSignalHtml(down, 'downside') + warningSignalHtml(up, 'upside') + '</div>' +
+      '<div class="dc-warning-components">' + components.map(function (row) {
+        var cls = row.direction === 'mixed' ? ' mixed' : '';
+        return '<span class="dc-warning-component' + cls + '"><b>' + esc(row.label || row.signalId || '核心連動') + '</b>' +
+          esc(warningStateLabel(row.state)) + ' · ' + num(row.strength, 0) + '</span>';
+      }).join('') + '</div><div class="dc-warning-foot"><span>獨立來源 ' +
+        esc(String(((warning.dataQuality || {}).availableDomains) || 0)) + '/5 · 證據品質 ' + pct01(warning.evidenceQuality) +
+        '</span><span>訊號強度不是機率 · AI 不參與觸發 · ' + esc(String(warning.asOf || '—').replace('T', ' ').slice(0, 19)) +
+        '</span></div></div>';
+  }
+
   function newsHtml(ctx) {
     var rows = ctx.newsImpact || [];
     if (!rows.length) return '<div class="dc-note">目前沒有帶入已標記的重大訊息。</div>';
@@ -1559,6 +1620,7 @@
         esc(listLabels(a.allowed)) + '<br>限制：' + esc(listLabels(a.restricted)) + '</div></div>' +
       '<div class="box"><div class="k">確認／失效條件</div><div class="v" style="font-size:11px">' + esc((ctx.confirmation || [])[0] || '等待證據') +
         '</div><div class="s">失效：' + esc((ctx.invalidation || [])[0] || '—') + '</div></div></div></details>' +
+      earlyWarningHtml(ctx) +
       '<div class="dc-grid"><div>' +
         '<div class="dc-card"><h3><span>情境訊號矩陣</span><span>負向 -1 · 中性 0 · 正向 +1</span></h3><div class="dc-scenario">' +
           featureHtml('趨勢', sc.trend) + featureHtml('廣度', sc.breadth) + featureHtml('資金', sc.flow) +

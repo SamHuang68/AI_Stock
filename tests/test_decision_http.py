@@ -89,6 +89,19 @@ class DecisionHttpTest(unittest.TestCase):
         self.assertEqual(body['contractVersion'], 2)
         self.assertEqual(body['regime']['id'], 'BROAD_RISK_ON')
         self.assertTrue(body['evidence'])
+        self.assertTrue(body['earlyWarnings']['shadowOnly'])
+
+    def test_signal_routes_expose_shadow_state_and_transition_history(self):
+        with urllib.request.urlopen(self.base + '/signals/active', timeout=5) as resp:
+            active = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertTrue(active['shadowOnly'])
+        self.assertTrue(active['signals'])
+        with urllib.request.urlopen(self.base + '/signals/history?limit=10', timeout=5) as resp:
+            history = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertTrue(history['shadowOnly'])
+        self.assertLessEqual(len(history['events']), 10)
 
     def test_options_refresh_publishes_back_into_canonical_context(self):
         fixture = {

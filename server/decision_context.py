@@ -1366,6 +1366,50 @@ def publish_context(
     """Publish one canonical context; persistence failures never block Pulse."""
     global _latest_context, _latest_inputs
     fingerprint = _fingerprint(pulse)
+    context = dict(context or {})
+    try:
+        import early_warning as _early_warning
+        import overnight_intraday as _overnight_intraday
+        signal_db_path = _early_warning.DB_PATH
+        if os.path.abspath(db_path) != os.path.abspath(DB_PATH):
+            signal_db_path = os.path.join(os.path.dirname(os.path.abspath(db_path)), 'market_signals.db')
+        warning = _early_warning.process_context(
+            context, pulse, memory_snapshot=_overnight_intraday.latest_cached('all'),
+            db_path=signal_db_path)
+        context['earlyWarnings'] = warning
+        source_map = {
+            'globalTech': ('Yahoo Finance', 'latest finalized US session'),
+            'anchor': ('Yahoo Finance + ST benchmark research registry', '2330 and 0050-ex-2330 residual where eligible'),
+            'memoryCycle': ('ST overnight-intraday fixed baskets', '20-session adjusted daily session structure'),
+            'breadthLiquidity': ('TWSE breadth + sector participation', 'same-session stock breadth and sector scope'),
+            'flowDerivatives': ('TWSE/TAIFEX canonical Pulse', 'institutional, same-contract OI and futures context'),
+        }
+        warning_evidence = []
+        for family in warning.get('familyScores') or []:
+            source, reference = source_map.get(family.get('id'), ('ST deterministic signal engine', 'canonical inputs'))
+            warning_evidence.append({
+                'id': 'signal.family.' + str(family.get('id') or 'unknown'),
+                'metric': 'shadowFamilyScore',
+                'value': {
+                    'score': family.get('value'), 'quality': family.get('quality'),
+                    'available': family.get('available'), 'observed': family.get('observed') or {},
+                },
+                'comparison': 'negative -1 / neutral 0 / positive +1',
+                'source': source, 'marketScope': 'TW_CROSS_MARKET', 'session': 'session_aligned_shadow',
+                'asOf': warning.get('asOf'), 'reference': reference,
+                'quality': 'derived' if family.get('available') else 'insufficient',
+                'authority': 'shadow_observation',
+            })
+        context['evidence'] = list(context.get('evidence') or []) + warning_evidence
+    except Exception as exc:
+        try:
+            import early_warning as _early_warning
+            context['earlyWarnings'] = _early_warning.empty(type(exc).__name__)
+        except Exception:
+            context['earlyWarnings'] = {
+                'ok': False, 'shadowOnly': True, 'actionAuthority': 'none',
+                'status': 'INSUFFICIENT_DATA', 'signals': [], 'newEvents': [],
+            }
     with _lock:
         _latest_context = context
         _latest_inputs = {'pulse': pulse, **(build_kwargs or {})}
@@ -1383,6 +1427,12 @@ def publish_context(
     except Exception as exc:
         with _lock:
             _status['lastError'] = 'trace:' + str(exc)[:160]
+    try:
+        if alert_daemon := __import__('alert_daemon'):
+            alert_daemon.deliver_signal_events((context.get('earlyWarnings') or {}).get('newEvents') or [])
+    except Exception as exc:
+        with _lock:
+            _status['lastError'] = 'signal-delivery:' + str(exc)[:160]
     return context
 
 
@@ -1408,11 +1458,21 @@ def rebuild_latest(
 ) -> dict:
     with _lock:
         inputs = dict(_latest_inputs or {})
+        latest_warning = ((_latest_context or {}).get('earlyWarnings') if _latest_context else None)
+        latest_warning_evidence = [
+            row for row in (((_latest_context or {}).get('evidence') if _latest_context else None) or [])
+            if str((row or {}).get('id') or '').startswith('signal.family.')
+        ]
     if not inputs:
         return empty_context('pulse_not_ready')
     if options_structure is not None:
         inputs['options_structure'] = options_structure
-    return build_decision_context(**inputs, risk_profile=risk_profile, portfolio_overlay=portfolio_overlay, portfolio_kind=portfolio_kind)
+    context = build_decision_context(**inputs, risk_profile=risk_profile, portfolio_overlay=portfolio_overlay, portfolio_kind=portfolio_kind)
+    if latest_warning:
+        context['earlyWarnings'] = json.loads(json.dumps(latest_warning, ensure_ascii=False))
+        context['evidence'] = list(context.get('evidence') or []) + json.loads(
+            json.dumps(latest_warning_evidence, ensure_ascii=False))
+    return context
 
 
 def latest_market_reference() -> dict[str, Any] | None:

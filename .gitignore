@@ -88,6 +88,9 @@ data/pulse_history.db
 data/decision_history.db
 data/decision_history.db-wal
 data/decision_history.db-shm
+data/market_signals.db
+data/market_signals.db-wal
+data/market_signals.db-shm
 data/sector_history.db
 data/sector_history.db-wal
 data/sector_history.db-shm

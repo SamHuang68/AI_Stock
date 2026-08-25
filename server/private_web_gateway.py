@@ -338,6 +338,8 @@ READ_GET_EXACT = {
     "/pulse/history",
     "/decision/context",
     "/decision/history",
+    "/signals/active",
+    "/signals/history",
     "/research/overnight-intraday",
     "/options/txo/structure",
     "/options/txo/history",

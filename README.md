@@ -16,6 +16,7 @@
 - **有條件的風險範圍**：只有完整 Risk Profile 才計算持倉範圍，並公開公式與風險上限；若使用者帶入持倉但投組覆蓋失敗，則停止輸出範圍並明示原因。
 - **Exposure Lab v3（預設展開）**：月度凍結核心、週度健康監控與每日槓桿商品機制是三個不同權限層；先用曝險壓力四燈快速判讀，再按需查看臺灣50同基準波動、台積電 EPS 證據層、正二效率差與商品追蹤品質。週度融資／短波動只能要求複查或增加限制，不能改寫核心研究上限；個別持倉假說不會進入分享版預設模型。
 - **盤別動量研究（Shadow）**：以一致調整後日線拆解「隔夜定價」與「日間承接」，分開觀察臺灣／美國記憶體固定籃子、20／60 日結構、同市場基準歸因與族群同步率；只進研究面板與證據帳本，不改寫 Regime、Action Envelope 或槓桿限制。公式、資料 Gate 與權限圖見 [Overnight × Intraday 研究契約](docs/OVERNIGHT_INTRADAY_RESEARCH.md)。
+- **跨市場前兆雷達（Shadow）**：以國際科技、2330／0050 去重錨點、台美記憶體固定籃子、廣度／流動性與資金／衍生品五個獨立證據域，追蹤下跌前兆、強攻蓄勢、AI 雙箭頭與記憶體共振；狀態轉換寫入 SQLite 並可選擇推送，AI 只解釋、不觸發。契約、公式與狀態機見 [跨市場前兆雷達](docs/MARKET_PRECURSOR_SIGNALS.md)。
 - **台指選擇權結構（預設收合）**：精確到期別整合 TAIFEX 一般盤日終 OI、結算價與官方 Delta；分層呈現 OI 事實、IV／Gamma Density 衍生值，以及明確標成 Shadow 的 Signed GEX／Flip 情境，不把公開 OI 冒充造市商真實持倉。
 - **台美顏色語意分離**：台股／台指期紅漲綠跌；美股綠漲紅跌。
 - **本機優先**：介面與伺服器只在本機運作，預設僅監聽 `127.0.0.1:18432`。
@@ -88,6 +89,7 @@ flowchart TB
     Routes["HTTP 路由與靜態檔 allow-list"]
     Contract["market_contract：來源／時間／盤別／基準"]
     DecisionEngine["DecisionContext：情境／分歧／行動邊界"]
+    PrecursorEngine["Precursor Engine：五域／四訊號／狀態事件"]
     ExposureEngine["Exposure Lab v3：月度核心／週度健康／商品機制"]
     BenchmarkResearch["臺灣50官方價位／報酬指數快取"]
     OptionsEngine["TXO Structure：OI／IV／Gamma／Scenario Flip"]
@@ -119,6 +121,8 @@ flowchart TB
   Routes --> Contract
   Routes --> DecisionEngine
   DecisionEngine --> ExposureEngine
+  DecisionEngine --> PrecursorEngine
+  PrecursorEngine --> DecisionStore
   ExposureEngine --> BenchmarkResearch
   Routes --> OptionsEngine
   OptionsEngine --> DecisionEngine
@@ -153,6 +157,7 @@ flowchart TB
 | 市場契約 | `server/market_contract.py` | 標準化價格、漲跌、來源、時間、盤別與比較基準 |
 | 市場路由 | `server/market_routes.py` | 組裝 `/market/snapshot` 的一致行情集合 |
 | 決策引擎 | `server/decision_context.py` | 確定性情境分類、信心度、分歧、行動邊界、歷史與重播 |
+| 市場前兆引擎 | `server/early_warning.py` | 五個去重證據域、四個具名 Shadow 訊號、遲滯狀態機、SQLite 事件帳本與只讀 API |
 | 中長期曝險研究 | `server/exposure_lab.py` | 月度凍結核心、台積電 EPS 證據分層、同基準長短波動、正二效率差、研究上限、商品機制與 ETF 底層穿透 |
 | 研究基準資料 | `server/benchmark_research.py` | 非阻塞讀取／背景更新證交所臺灣50價位與報酬指數；只提供單一 canonical contract，不另建 UI 刷新路徑 |
 | 決策路由 | `server/decision_routes.py` | `/decision/context`、歷史與關鍵價位 API；輸入驗證 |
@@ -327,6 +332,8 @@ flowchart LR
 | `GET /flash` | 台美公司重大訊息 |
 | `GET /pulse/history` | 指數、法人、廣度與 Pulse 歷史 |
 | `GET /decision/context?market=TW` | 最新完整 `DecisionContext v2` 與證據帳本 |
+| `GET /signals/active` | 四個前兆訊號的目前狀態與仍有效事件（唯讀） |
+| `GET /signals/history?limit=80` | 已去重的前兆狀態轉換歷史（唯讀） |
 | `POST /decision/context` | 帶 Risk Profile／實際持倉的本機決策重算 |
 | `GET /decision/history?limit=20` | 本機決策情境歷史與狀態轉換 |
 | `GET /key-levels?symbol=%5ETWII` | Classic Pivot、確認轉折、ATR 與實現波動 |

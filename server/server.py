@@ -2308,6 +2308,7 @@ def _yf_batch_quotes(syms):
         '^VIX': 'VIX 波動', 'TWD=X': '美元／台幣',
         '^SOX': '費半', '^N225': '日經', '^KS11': '韓國', '^HSI': '恆生',
         'NVDA': 'NVIDIA', 'AVGO': 'Broadcom', 'TSM': '台積電ADR',
+        '2330.TW': '台積電', '0050.TW': '元大台灣50',
     }
     # 解讀標籤：國際面板／總覽全球影響用（不影響報價計算）
     roles = {
@@ -2328,6 +2329,9 @@ def _yf_batch_quotes(syms):
                     'price': ov['price'], 'changePct': ov.get('changePct'),
                     'prevClose': ov.get('prevClose'),
                     'source': ov.get('source') or 'override',
+                    'asOf': ov.get('asOf'),
+                    'session': ov.get('session') or 'latest_available',
+                    'referenceType': ov.get('referenceType') or 'previous_close',
                 }
                 if sym in roles:
                     row['role'] = roles[sym]
@@ -2350,6 +2354,10 @@ def _yf_batch_quotes(syms):
                 'changePct': q['changePct'],
                 'prevClose': q['prevClose'],
                 'source': 'yahoo-mktbar',
+                'asOf': (time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(int(m.get('regularMarketTime'))))
+                         if m.get('regularMarketTime') else None),
+                'session': str(m.get('marketState') or 'latest_available').lower(),
+                'referenceType': 'previous_regular_close',
             }
             if sym in roles:
                 row['role'] = roles[sym]
@@ -2734,6 +2742,10 @@ class Handler(DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMi
             self._handle_decision_context()
         elif p == '/decision/history' or p.startswith('/decision/history?'):
             self._handle_decision_history()
+        elif p == '/signals/active' or p.startswith('/signals/active?'):
+            self._handle_signal_active()
+        elif p == '/signals/history' or p.startswith('/signals/history?'):
+            self._handle_signal_history()
         elif p == '/research/overnight-intraday' or p.startswith('/research/overnight-intraday?'):
             self._handle_overnight_intraday()
         elif p == '/options/txo/structure' or p.startswith('/options/txo/structure?'):
@@ -5048,8 +5060,8 @@ class Handler(DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMi
                 return {'ok': False, 'items': []}
 
         def _job_global():
-            # v7：v6 + AI 科技外溢代理（NVDA／AVGO／TSM ADR）— 仍同一 Yahoo 批次，不另開重抓
-            gkey = f'pulse-global:v7:{int(time.time() // 120)}'
+            # v8：同批補 2330／0050 作去重錨點；前端全球面板仍只收到國際列。
+            gkey = f'pulse-global:v8:{int(time.time() // 120)}'
             g = _cache_first([gkey])
             if g is not None:
                 return g
@@ -5059,7 +5071,7 @@ class Handler(DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMi
                 g = _yf_batch_quotes([
                     '^DJI', '^GSPC', '^IXIC', '^SOX', '^N225', '^KS11',
                     '^VIX', 'TWD=X', 'DX-Y.NYB', 'GC=F', 'HG=F', 'CL=F',
-                    'NVDA', 'AVGO', 'TSM',
+                    'NVDA', 'AVGO', 'TSM', '2330.TW', '0050.TW',
                 ])
                 if not any(x.get('symbol') == 'DX-Y.NYB' for x in (g or [])):
                     # 僅在缺美元指數時補一槍，不重抓整批
@@ -5259,6 +5271,9 @@ class Handler(DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMi
             total_yi = ((foreign or 0) + (trust or 0) + (dealer or 0)) / 1e8
 
         out['movers'] = movers
+        _signal_symbols = {'2330.TW', '0050.TW'}
+        out['signalQuotes'] = [row for row in global_q if row.get('symbol') in _signal_symbols]
+        global_q = [row for row in global_q if row.get('symbol') not in _signal_symbols]
         out['global'] = global_q
         # AI／科技外溢：只吃已抓到的 global（費半／那指／VIX／NVDA…），無資料不改分、不畫空殼
         try:

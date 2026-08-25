@@ -86,6 +86,9 @@
     <section>
       <div class="ap-toggle"><input type="checkbox" id="ap-enabled" ${cfg.enabled ? 'checked' : ''}>
       <b>啟用後端警報 daemon</b>（瀏覽器關著也會推播）</div>
+      <div class="ap-toggle" style="margin-top:8px"><input type="checkbox" id="ap-market-signal" ${cfg.market_signal_enabled ? 'checked' : ''}>
+      <b>推送跨市場前兆雷達的狀態轉換</b></div>
+      <div style="color:#64748b;font-size:10px;margin:3px 0 7px">僅推送戒備／確認／生效／衝突等邊緣事件；目前為 Shadow observation，不是買賣或槓桿指令。</div>
       <label>輪詢秒數</label><input id="ap-poll" type="number" value="${cfg.poll_seconds || 60}" min="15">
     </section>
     <section>
@@ -170,6 +173,7 @@
   async function saveCfg() {
     const body = {
       enabled: document.getElementById('ap-enabled').checked,
+      market_signal_enabled: document.getElementById('ap-market-signal').checked,
       poll_seconds: parseInt(document.getElementById('ap-poll').value, 10) || 60,
       telegram: {
         enabled: document.getElementById('ap-tg-en').checked,

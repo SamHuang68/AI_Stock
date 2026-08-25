@@ -1,55 +1,54 @@
 {
   "schemaVersion": 1,
   "projectId": "stock-terminal-v5",
-  "objective": "Implement and verify a shadow-only Overnight-Intraday Momentum Regime vertical slice for memory and high-beta equities, with session-aligned adjusted OHLC, rolling standardized structure metrics, sector breadth, an auditable API/Evidence contract, and readable ST presentation without changing authoritative market regime, action envelope, leverage, or trading decisions.",
+  "objective": "Implement and verify a deterministic, shadow-only cross-market precursor system that turns Stock Terminal's canonical international-tech, de-duplicated 2330/0050 anchor, fixed memory baskets, breadth/liquidity and flow/derivatives evidence into persistent, readable, de-duplicated downside/upside transition alerts without granting trading authority to AI or the signal layer.",
   "status": "completed",
-  "updatedAt": "2026-08-24",
+  "updatedAt": "2026-08-26",
   "constraints": {
     "inScope": [
-      "derive overnight, intraday and close-to-close log returns from consistent adjusted daily OHLC",
-      "replace unbounded cumulative comparisons with rolling 20/60-session sums, standardized strength, gap retention and sector breadth",
-      "support a bounded memory/high-beta universe with explicit market, session, source, timestamp and benchmark metadata",
-      "expose a deterministic shadow API and Evidence Ledger fields with professional regime labels and evidence strength",
-      "add a progressive ST panel that summarizes overnight repricing, cash-session acceptance and basket synchronization",
-      "add unit, integration, build, data-quality and responsive UI verification"
+      "evaluate five independent canonical evidence domains and four named precursor signals",
+      "de-duplicate 2330 and 0050 through an explicit residual when a usable weight exists and fail closed otherwise",
+      "persist observation, watch, armed, confirmed, active, conflict, recovery and invalidation transitions in SQLite",
+      "expose read-only signal state/history APIs through the private Web allow-list",
+      "render a readable Decision panel and optional transition-only Telegram/email/webhook delivery",
+      "add formula, lifecycle, integration, build, private-Web and responsive UI verification"
     ],
     "outOfScope": [
       "automatic trading, portfolio mutation, direct buy/sell signals or leverage recommendations",
       "allowing the indicator to overwrite DecisionContext regime, confidence, key levels or Action Envelope",
-      "claiming opening gaps are observed institutional or smart-money flow",
+      "claiming signal strength is probability or a validated forecast",
       "adding paid data providers, credentials, new public exposure, commit, push or deployment",
       "discarding, staging or rewriting unrelated runtime data changes"
     ],
     "assumptions": [
-      "daily official-session Open and Close are available from existing Yahoo-backed chart routes but require consistent adjustment and fail-closed quality checks",
-      "US and Taiwan sessions must be aligned by trading date rather than naïve calendar date",
+      "canonical Pulse and DecisionContext remain the only authoritative input contracts",
+      "the existing overnight/intraday fixed memory baskets are reusable as a quality-gated evidence domain",
       "the first release is observational shadow evidence and requires prospective history before authority can increase",
-      "high-beta raw returns must be separated from market/sector movement before being described as industry-specific",
-      "the existing four modified data files are runtime/user-owned and excluded from implementation work"
+      "TSM ADR is context only until point-in-time FX/parity data is available",
+      "the existing five modified data files are runtime/user-owned and excluded from implementation work"
     ],
     "permissions": [
       "modify scoped local project source, tests and loop state",
-      "run deterministic local tests, builds and read-only runtime/browser verification",
-      "use read-only same-provider Codex advisory workers under a Host-owned barrier"
+      "run deterministic local tests, builds and read-only runtime/browser verification"
     ],
     "availableResources": [
-      "local repository, Git baseline 78e348ddf0595d4da0056d0debe20f3321f10071 and existing daily chart/provider seams",
-      "existing memory taxonomy, Pulse, DecisionContext, Evidence Ledger and table/UI infrastructure",
-      "existing Python and JavaScript test/build infrastructure",
-      "three read-only Codex advisory branches plus the Host integration writer"
+      "local repository and existing canonical Pulse, DecisionContext and Evidence Ledger seams",
+      "existing memory taxonomy and overnight/intraday fixed baskets",
+      "existing Python, JavaScript, Private Web and build verification infrastructure",
+      "Host-owned single-writer integration"
     ],
     "excludedResources": [
       "repository commit, push, release promotion and production deployment without a later explicit approval",
-      "external AI providers or claims of provider-independent review",
+      "new external AI review; the previously verified multi-provider design is treated as frozen input",
       "credentials, private brokerage data, personal holdings and private access tokens",
       "new paid market-data adapters or expanded network exposure"
     ]
   },
   "currentLoop": {
-    "id": "LOOP-010",
-    "title": "Overnight-Intraday Momentum Regime shadow vertical slice",
-    "entryCondition": "The user accepted the evaluation and explicitly requested multi-layer parallel implementation",
-    "exitCondition": "The deterministic shadow engine, API/Evidence contract and readable ST surface pass unit, integration, build, data-quality and responsive UI Gates without gaining trading or DecisionContext authority"
+    "id": "LOOP-011",
+    "title": "Cross-market precursor signal lifecycle vertical slice",
+    "entryCondition": "The user explicitly requested implementation after the design and verification-only pass",
+    "exitCondition": "The deterministic signal engine, lifecycle store, APIs, notification transport, Decision UI and documentation pass unit, integration, private-Web, build and responsive UI Gates without gaining trading or DecisionContext authority"
   },
   "orchestrationPolicy": {
     "multiProviderRequired": false,
@@ -62,9 +61,9 @@
     "kind": "build",
     "capabilities": ["decide", "extract-transform", "create-synthesize", "validate-govern"],
     "analysisSource": "chatgpt-codex-host",
-    "inputTypes": ["daily OHLC", "market taxonomy", "DecisionContext contracts", "UI modules"],
-    "outputTypes": ["deterministic Python engine", "HTTP JSON contract", "shadow Evidence", "responsive UI", "tests"],
-    "freshness": "daily-session aware",
+    "inputTypes": ["canonical Pulse", "DecisionContext", "memory basket cache", "alert configuration", "UI modules"],
+    "outputTypes": ["deterministic signal engine", "SQLite lifecycle", "HTTP JSON contract", "shadow Evidence", "responsive UI", "tests", "documentation"],
+    "freshness": "session aware with transition dedupe",
     "sideEffectLevel": "preview",
     "reversibility": "reversible",
     "approvalRequired": false,
@@ -73,28 +72,15 @@
     "feedbackRequired": true
   },
   "capabilityGraph": {
-    "enabled": true,
+    "enabled": false,
     "roles": [
-      {"roleId": "host-integrator", "capability": "decide/create/validate", "worker": "root", "writePolicy": "single-writer", "providerGroup": "openai-codex"},
-      {"roleId": "quant-architect", "capability": "logical precision/context expansion", "worker": "quant-architecture", "writePolicy": "advisory-read-only", "providerGroup": "openai-codex"},
-      {"roleId": "ui-contract-explorer", "capability": "context expansion/render-explain", "worker": "ui-evidence", "writePolicy": "advisory-read-only", "providerGroup": "openai-codex"},
-      {"roleId": "adversarial-verifier", "capability": "validate-govern", "worker": "adversarial-tests", "writePolicy": "advisory-read-only", "providerGroup": "openai-codex"}
+      {"roleId": "host-integrator", "capability": "decide/create/validate", "worker": "root", "writePolicy": "single-writer", "providerGroup": "openai-codex"}
     ],
     "capacityGroups": [
       {"id": "openai-codex", "provider": "OpenAI", "billingMeter": "current Codex task", "distinctProviderCount": 1}
     ]
   },
-  "synchronizationBarriers": [
-    {
-      "id": "B10-ADVISORY-FANIN",
-      "baseStateHash": "78e348ddf0595d4da0056d0debe20f3321f10071",
-      "generation": 1,
-      "requiredTaskIds": ["L10-02", "L10-03", "L10-04"],
-      "providerRequirement": "same-provider parallel advisory accepted; multi-provider not required",
-      "timeoutPolicy": "wait for all required branches; narrow or reroute on failure",
-      "gateCriteria": "Each branch returns result, evidence locations, proposed delta, risks and unresolved questions against the named base hash"
-    }
-  ],
+  "synchronizationBarriers": [],
   "routing": [
     {
       "capability": "host",
@@ -106,39 +92,6 @@
       "fallback": null,
       "responsibility": "state, single-writer implementation, integration and acceptance",
       "writePolicy": "single writer"
-    },
-    {
-      "capability": "logical precision and backend architecture",
-      "executionTarget": "quant-architecture",
-      "provider": "OpenAI",
-      "model": "inherited Codex subagent",
-      "dataBoundary": "local project read-only",
-      "selectionReason": "Independently map formulas, session alignment, data quality and backend seams",
-      "fallback": "host inspection",
-      "responsibility": "L10-02 advisory delta",
-      "writePolicy": "read-only advisory"
-    },
-    {
-      "capability": "UI and Evidence contract exploration",
-      "executionTarget": "ui-evidence",
-      "provider": "OpenAI",
-      "model": "inherited Codex subagent",
-      "dataBoundary": "local project read-only",
-      "selectionReason": "Map progressive disclosure and existing Decision/Evidence integration seams",
-      "fallback": "host inspection",
-      "responsibility": "L10-03 advisory delta",
-      "writePolicy": "read-only advisory"
-    },
-    {
-      "capability": "adversarial verification",
-      "executionTarget": "adversarial-tests",
-      "provider": "OpenAI",
-      "model": "inherited Codex subagent",
-      "dataBoundary": "local project read-only",
-      "selectionReason": "Challenge statistical claims, edge cases and regression/test completeness",
-      "fallback": "host review",
-      "responsibility": "L10-04 advisory delta",
-      "writePolicy": "read-only advisory"
     }
   ],
   "tasks": [
@@ -218,36 +171,80 @@
       "sideEffectLevel": "preview",
       "approvalNodeId": null,
       "successCriteria": "All required branch deltas are reconciled and unit, integration, build, runtime, responsive and authority-boundary Gates pass with no P0/P1"
+    },
+    {
+      "id": "L11-01",
+      "title": "Freeze precursor event and authority contract",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": [],
+      "capabilities": ["decide"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Five domains, four named signals, strength semantics, lifecycle, dedupe, session and shadow-only boundaries are explicit"
+    },
+    {
+      "id": "L11-02",
+      "title": "Implement deterministic scoring and persistent lifecycle",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L11-01"],
+      "capabilities": ["create-synthesize", "extract-transform"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Pure scoring, 0050 residual guard, fail-closed memory domain, state hysteresis and stable events are covered by tests"
+    },
+    {
+      "id": "L11-03",
+      "title": "Integrate DecisionContext, APIs, notifications and UI",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L11-02"],
+      "capabilities": ["create-synthesize", "render-explain"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "One backend writer feeds Evidence, read-only remote APIs, transition-only opt-in transports and a readable Decision panel"
+    },
+    {
+      "id": "L11-04",
+      "title": "Run regression, build, security and responsive verification",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L11-03"],
+      "capabilities": ["validate-govern", "learn-refine"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "All targeted and broad suites, build reproducibility, private-Web allow-list and responsive UI Gates pass with no P0/P1"
     }
   ],
   "verification": {
     "gate": [
-      "close-to-close log return equals overnight plus intraday within tolerance for every accepted row",
-      "corporate-action, missing/open-zero, stale, short-window and misaligned-session cases fail closed or downgrade quality",
-      "rolling metrics and regimes are invariant to arbitrary cumulative-series start level and expose bounded evidence strength",
-      "raw high-beta movement is not labeled industry-specific without benchmark and basket evidence",
-      "API includes source, market, session, benchmark, as-of, sample size, methodology version and shadow authority",
-      "DecisionContext regime, confidence, key levels and Action Envelope remain byte-for-byte unaffected by the indicator",
-      "UI uses professional market terms, progressive disclosure and readable portrait/landscape layouts",
-      "unit, integration, static, build, runtime and browser checks pass with no P0/P1"
+      "five canonical evidence domains and four named precursor families are deterministic and fail closed",
+      "2330 and 0050 are de-duplicated only through an explicit 0050-ex-2330 residual with a usable weight",
+      "same signal, direction and as-of input cannot advance lifecycle state or emit duplicate events",
+      "DecisionContext authority, regime, confidence, key levels and Action Envelope remain upstream-owned",
+      "read-only signal APIs are reachable through the private-Web allow-list",
+      "external delivery is explicit opt-in, transition-only and never re-scores market data",
+      "Decision UI is readable without horizontal overflow at desktop and 390-pixel portrait widths",
+      "unit, integration, security, static and reproducible-build checks pass with no P0/P1"
     ],
     "commands": [
-      "python -m unittest tests.test_overnight_intraday -v",
-      "python -m unittest tests.test_overnight_intraday tests.test_decision_context tests.test_decision_http tests.test_market_contract tests.test_private_web_gateway tests.test_private_web_access tests.test_private_web_host tests.test_private_web_release tests.test_build_reproducibility tests.test_server_http_security tests.test_health_live -v",
+      "python -m unittest tests.test_early_warning -v",
+      "python -m unittest tests.test_decision_context tests.test_decision_http -v",
+      "python -m unittest tests.test_private_web_gateway tests.test_private_web_access tests.test_private_web_host tests.test_private_web_release tests.test_build_reproducibility tests.test_server_http_security tests.test_health_live -v",
       "node tests/shell_v5_selftest.js",
       "node tests/layout_visual_v5_selftest.js",
       "python build_v2.py",
-      "live Yahoo fixed-universe refresh for TW and US"
+      "localhost in-app browser verification at desktop and 390x844 portrait viewport"
     ],
     "evidence": [
-      "LOOP-010 baseline is Git commit 78e348ddf0595d4da0056d0debe20f3321f10071; four runtime data files are unrelated and protected from integration",
-      "Existing ST seams include memory taxonomy, Yahoo-backed daily chart routes, DecisionContext Evidence Ledger and responsive Decision/Pulse UI",
-      "Three read-only advisory branches completed against the same baseline and were reconciled by the Host single writer",
-      "Twelve feature unit tests pass, including US 3/4 and TW 4/5 quorum, corporate-action adjustment, missing Open fail-closed, unfinished-session exclusion, benchmark inner join, fixed universe, stale-cache preservation and authority boundaries",
-      "Targeted backend, DecisionContext, HTTP, Private Web, reproducibility, security and health tests pass; one Windows socket-abort case passed on immediate isolated rerun",
-      "Shell and layout static suites pass, the generated HTML is byte-reproducible at revision 7343e66d1300, and feature-scoped diff checks are clean",
-      "An isolated localhost browser run confirmed #decision routing, a visible default-open Overnight × Intraday panel, professional labels, responsive DOM containment and the shadow authority warning; provider population was verified separately through the live fixed-universe adapter because the sandboxed UI server cannot open external sockets",
-      "Live fixed-universe Yahoo verification passed on 2026-08-24: TW eligible 5/5 with required 4 and US eligible 4/4 with required 3; maximum return-identity errors were approximately 10^-16"
+      "Six early-warning unit tests pass for direction, anchor residual de-duplication, missing-memory fail-closed behavior, lifecycle hysteresis/deduplication, ACTIVE-state stability and AI-core conflict",
+      "Twenty-eight DecisionContext and HTTP integration tests pass, including persistent warnings, Evidence rows and active/history routes",
+      "Private-Web access, release, reproducibility, security and health suites pass; one Windows socket-abort case and one import-order collision also pass on isolated rerun",
+      "Shell and layout suites pass; JavaScript syntax checks pass and the generated HTML is reproducible at revision d108c8cfa3f7",
+      "A localhost in-app browser run confirmed #decision routing, a visible default-open shadow radar, explicit insufficient-data fallback and zero horizontal overflow at both 1280-pixel desktop and 390-pixel portrait widths",
+      "Browser logs contain no product JavaScript error; expected WaveDeck-unavailable warnings occur only because the isolated verification server intentionally did not start WaveDeck",
+      "The five pre-existing runtime data changes remain unstaged and outside the implementation diff"
     ],
     "openP0": [],
     "openP1": [],
@@ -260,6 +257,16 @@
     }
   },
   "loopHistory": [
+    {
+      "loopId": "LOOP-011",
+      "result": "pass",
+      "summary": "Implemented a deterministic shadow-only cross-market precursor system with de-duplicated anchors, persistent lifecycle transitions, canonical DecisionContext evidence, read-only APIs, opt-in transition delivery and a responsive Decision radar.",
+      "residualRisks": [
+        "Signal strength is a bounded evidence score, not a probability or prospectively validated forecast.",
+        "The memory-cycle domain remains unavailable when the fixed-basket cache is missing or stale; the engine deliberately degrades instead of imputing direction.",
+        "External alerts remain disabled until explicitly enabled and production evaluation still requires prospective false-positive, lead-time and regime-drift history."
+      ]
+    },
     {
       "loopId": "LOOP-001",
       "result": "pass",

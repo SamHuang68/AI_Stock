@@ -66,6 +66,7 @@ const sectorFlow = fs.readFileSync(path.join(root, 'server/sector_flow.py'), 'ut
 const decisionEngine = fs.readFileSync(path.join(root, 'server/decision_context.py'), 'utf8');
 const exposureLabEngine = fs.readFileSync(path.join(root, 'server/exposure_lab.py'), 'utf8');
 const overnightEngine = fs.readFileSync(path.join(root, 'server/overnight_intraday.py'), 'utf8');
+const earlyWarningEngine = fs.readFileSync(path.join(root, 'server/early_warning.py'), 'utf8');
 const visualSystem = fs.readFileSync(path.join(root, 'src/ui/visual_system_v5.js'), 'utf8');
 const chartVisual = fs.readFileSync(path.join(root, 'src/ui/chart_visual_v5.js'), 'utf8');
 const mobileCss = fs.readFileSync(path.join(root, 'src/ui/mobile_v2.css'), 'utf8');
@@ -113,6 +114,14 @@ ok(/window\.DecisionData/.test(decisionData) && /inflight/.test(decisionData) &&
   /decisionSummary/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')) &&
   /decision_contract_version/.test(fs.readFileSync(path.join(root, 'src/ui/wavedeck_bridge_v5.js'), 'utf8')),
   'decision surfaces use one canonical DecisionContext store');
+ok(/TW_DOWNSIDE_PRECURSOR/.test(earlyWarningEngine) && /TW_ATTACK_BUILDUP/.test(earlyWarningEngine) &&
+  /AI_WAFER_DOUBLE_ARROW/.test(earlyWarningEngine) && /MEMORY_CYCLE_RESONANCE/.test(earlyWarningEngine) &&
+  /shadowOnly/.test(earlyWarningEngine) && /actionAuthority/.test(earlyWarningEngine),
+  'market precursor engine exposes four named shadow-only signals');
+ok(/earlyWarningHtml/.test(decisionUi) && /跨市場前兆雷達/.test(decisionUi) && /訊號強度不是機率/.test(decisionUi),
+  'decision page renders readable precursor strength and authority boundary');
+ok(/\/signals\/active/.test(server) && /\/signals\/history/.test(server),
+  'server exposes read-only signal state and transition history routes');
 ok(/src\/core\/market_intel_v5\.js/.test(build) && /window\.MarketIntelV5/.test(marketIntel) &&
   /linkNewsToWatchlist/.test(marketIntel) && /buildThemeResonance/.test(marketIntel),
   'build includes the shared market-intelligence taxonomy and news/watchlist linker');
@@ -840,9 +849,9 @@ ok(/台指期近月/.test(pl) && /__TXF__/.test(pl) && /TAIFEX MIS/.test(pl) &&
 ok(/AI科技外溢/.test(hub) && /factorScope/.test(hub) && /aiSpill/.test(hub) &&
   /spill\.ok/.test(hub) && !/美股流動池漲跌/.test(hub) && !/尚無美股漲幅資料/.test(hub),
   'risk page shows AI spillover strip only when data exists (no empty US shell)');
-ok(/apply_ai_tech_spillover/.test(srvPy) && /pulse-global:v7/.test(srvPy) &&
+ok(/apply_ai_tech_spillover/.test(srvPy) && /pulse-global:v8/.test(srvPy) &&
   /'NVDA', 'AVGO', 'TSM'/.test(srvPy),
-  'server applies AI spillover from global v7 (SOX + NVDA/AVGO/TSM)');
+  'server applies AI spillover from global v8 (SOX + NVDA/AVGO/TSM + de-duplicated TW anchors)');
 (function () {
   var pi = fs.readFileSync(path.join(root, 'server/pulse_intel.py'), 'utf8');
   ok(/def apply_ai_tech_spillover/.test(pi) && /AI科技外溢偏空/.test(pi) &&

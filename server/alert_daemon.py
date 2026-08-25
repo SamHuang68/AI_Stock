@@ -29,6 +29,10 @@ LOG_DIR = os.path.join(_BASE, 'logs', 'alerts')
 _DEFAULT_CONFIG = {
     'enabled': False,
     'poll_seconds': 60,
+    # Canonical market-signal transitions are recorded in-app regardless of
+    # this switch.  External delivery remains an explicit owner opt-in while
+    # the precursor model is in prospective shadow validation.
+    'market_signal_enabled': False,
     'watch_enabled': False,        # v3.8: WATCH 後端 24h 自動偵測
     'watch_poll_seconds': 300,
     'telegram': {'enabled': False, 'bot_token': '', 'chat_id': ''},
@@ -198,6 +202,37 @@ def notify(cfg, text, subject='Stock Terminal 警報'):
     ok3, m3 = push_webhook(cfg, text, subject); results['webhook'] = m3
     _log(text)
     return (ok1 or ok2 or ok3), results
+
+
+def deliver_signal_events(events):
+    """Transport canonical transition events without recomputing their score."""
+    rows = [row for row in (events or []) if isinstance(row, dict)]
+    if not rows:
+        return {'ok': True, 'delivered': 0, 'reason': 'no_transition'}
+    cfg = load_config()
+    if not cfg.get('enabled') or not cfg.get('market_signal_enabled'):
+        return {'ok': True, 'delivered': 0, 'reason': 'shadow_transport_disabled'}
+    delivered = 0
+    results = []
+    for event in rows:
+        state = str(event.get('toState') or '')
+        if state not in ('ARMED', 'CONFIRMED', 'ACTIVE', 'CONFLICT', 'RECOVERY', 'INVALIDATED'):
+            continue
+        strength = event.get('strength')
+        strength_text = f'{float(strength):.0f}' if strength is not None else '—'
+        reasons = '；'.join((event.get('reasons') or [])[:3]) or '等待更多同向證據'
+        counter = '；'.join((event.get('strongestCounterEvidence') or [])[:1]) or '無明顯反證'
+        text = (
+            f"【ST 前兆雷達 · {event.get('label') or event.get('signalId')}】\n"
+            f"狀態 {state}｜訊號強度 {strength_text}｜獨立來源 {event.get('independentDomains') or 0}\n"
+            f"支持：{reasons}\n反證：{counter}\n"
+            f"失效：{event.get('invalidation') or '—'}\n"
+            "Shadow observation only，不是下單或槓桿指令。"
+        )
+        ok, detail = notify(cfg, text, subject='Stock Terminal 市場前兆雷達')
+        results.append({'eventId': event.get('eventId'), 'ok': ok, 'detail': detail})
+        delivered += int(bool(ok))
+    return {'ok': True, 'delivered': delivered, 'results': results}
 
 
 def _log(text):
