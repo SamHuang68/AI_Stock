@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import copy
 import os
+import sqlite3
 import sys
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -47,7 +49,9 @@ def fixture(direction=1, as_of='2026-08-26T01:10:00+00:00', include_weight=True)
         'evidence': [], 'regime': {'id': 'BROAD_RISK_ON'}, 'actionEnvelope': {},
     }
     change = 2.0 * sign
-    twii = {'changePct': change, 'market': {'displayChangePct': change, 'session': 'regular'}}
+    twii = {'price': 100.0, 'changePct': change,
+            'market': {'displayChangePct': change, 'session': 'regular',
+                       'source': 'test-canonical-pulse', 'asOf': as_of}}
     txf = {'changePct': 1.8 * sign, 'market': {'displayChangePct': 1.8 * sign, 'session': 'night'}}
     pulse = {
         'ok': True, 'updatedAt': as_of,
@@ -153,6 +157,90 @@ class EarlyWarningTest(unittest.TestCase):
             previous.update(state=state, consecutive_hits=hits, miss_count=misses)
             state, hits, misses = ew._target_state(weak, previous, False)
             self.assertEqual(state, expected)
+
+    def test_prospective_ledger_enrolls_once_and_resolves_immutable_horizons(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = str(Path(folder) / 'signals.db')
+            start = datetime(2026, 8, 20, 1, 10, tzinfo=timezone.utc)
+            context, pulse = fixture(1, as_of=start.isoformat())
+            first = ew.process_context(
+                context, pulse, memory_snapshot=memory(), market_history=[],
+                db_path=db, now=start,
+            )
+            self.assertEqual(first['prospectiveValidation']['status'], 'building')
+
+            history = []
+            closes = [101.0, 102.5, 103.0, 104.0, 105.0]
+            for offset, close in enumerate(closes, start=1):
+                observed = start + timedelta(days=offset)
+                history.append({
+                    'date': observed.date().isoformat(), 'close': close,
+                    'source': 'test-finalized-twii', 'asOf': observed.isoformat(),
+                })
+                context, pulse = fixture(1, as_of=observed.isoformat())
+                pulse['marketSnapshot']['quotes']['^TWII']['price'] = close
+                ew.process_context(
+                    context, pulse, memory_snapshot=memory(), market_history=history,
+                    db_path=db, now=observed,
+                )
+
+            result = ew.performance(20, db, signal_id='TW_ATTACK_BUILDUP')
+            self.assertEqual(result['totalTrials'], 1)
+            self.assertEqual([row['sessions'] for row in result['horizons']], [1, 3, 5])
+            self.assertEqual([row['resolvedCount'] for row in result['horizons']], [1, 1, 1])
+            self.assertTrue(all(not row['ratesAvailable'] for row in result['horizons']))
+            self.assertTrue(all(row['directionHitRatePct'] is None for row in result['horizons']))
+            self.assertEqual(
+                [row['horizonSessions'] for row in result['trials'][0]['outcomes']],
+                [1, 3, 5],
+            )
+            first_outcome = result['trials'][0]['outcomes'][0]
+            self.assertEqual(first_outcome['rawReturnPct'], 1.0)
+            self.assertFalse(first_outcome['predictiveProbability'])
+
+            corrected = list(history)
+            corrected[0] = {**corrected[0], 'close': 90.0}
+            context, pulse = fixture(1, as_of=(start + timedelta(days=6)).isoformat())
+            ew.process_context(
+                context, pulse, memory_snapshot=memory(), market_history=corrected,
+                db_path=db, now=start + timedelta(days=6),
+            )
+            unchanged = ew.performance(20, db, signal_id='TW_ATTACK_BUILDUP')
+            self.assertEqual(unchanged['trials'][0]['outcomes'][0]['rawReturnPct'], 1.0)
+
+    def test_prospective_rates_are_withheld_until_twenty_resolved_trials(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = str(Path(folder) / 'signals.db')
+            ew._init_db(db)
+            with closing(sqlite3.connect(db)) as conn:
+                with conn:
+                    for index in range(20):
+                        trial_id = f'trial-{index:02d}'
+                        conn.execute(
+                            'INSERT INTO signal_trials('
+                            'trial_id,signal_id,direction,origin_session,entry_price,trial_json) '
+                            'VALUES(?,?,?,?,?,?)',
+                            (trial_id, 'TW_ATTACK_BUILDUP', 'upside', f'2026-07-{index + 1:02d}',
+                             100.0, '{}'),
+                        )
+                        for horizon in ew.OUTCOME_HORIZONS:
+                            direction_hit = int(index < 15)
+                            material_hit = int(index < 10)
+                            conn.execute(
+                                'INSERT INTO signal_outcomes('
+                                'trial_id,horizon_sessions,directional_return_pct,max_favorable_pct,'
+                                'max_adverse_pct,direction_hit,material_hit,lead_sessions,outcome_json) '
+                                'VALUES(?,?,?,?,?,?,?,?,?)',
+                                (trial_id, horizon, 1.0 if direction_hit else -1.0,
+                                 2.5 if material_hit else 1.0, 0.8, direction_hit,
+                                 material_hit, horizon if material_hit else None, '{}'),
+                            )
+            result = ew.performance(5, db)
+            self.assertEqual(result['scope'], 'headline_precursors')
+            self.assertEqual(result['status'], 'ready')
+            self.assertTrue(all(row['ratesAvailable'] for row in result['horizons']))
+            self.assertTrue(all(row['directionHitRatePct'] == 75.0 for row in result['horizons']))
+            self.assertTrue(all(row['materialMoveHitRatePct'] == 50.0 for row in result['horizons']))
 
 
 if __name__ == '__main__':

@@ -340,6 +340,7 @@ READ_GET_EXACT = {
     "/decision/history",
     "/signals/active",
     "/signals/history",
+    "/signals/performance",
     "/research/overnight-intraday",
     "/options/txo/structure",
     "/options/txo/history",

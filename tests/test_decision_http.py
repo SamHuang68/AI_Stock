@@ -90,6 +90,8 @@ class DecisionHttpTest(unittest.TestCase):
         self.assertEqual(body['regime']['id'], 'BROAD_RISK_ON')
         self.assertTrue(body['evidence'])
         self.assertTrue(body['earlyWarnings']['shadowOnly'])
+        self.assertTrue(any(row.get('id') == 'signal.prospective_validation'
+                            for row in body['evidence']))
 
     def test_signal_routes_expose_shadow_state_and_transition_history(self):
         with urllib.request.urlopen(self.base + '/signals/active', timeout=5) as resp:
@@ -102,6 +104,12 @@ class DecisionHttpTest(unittest.TestCase):
         self.assertEqual(resp.status, 200)
         self.assertTrue(history['shadowOnly'])
         self.assertLessEqual(len(history['events']), 10)
+        with urllib.request.urlopen(self.base + '/signals/performance?limit=10', timeout=5) as resp:
+            performance = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertTrue(performance['shadowOnly'])
+        self.assertEqual(performance['actionAuthority'], 'none')
+        self.assertIn('horizons', performance)
 
     def test_options_refresh_publishes_back_into_canonical_context(self):
         fixture = {

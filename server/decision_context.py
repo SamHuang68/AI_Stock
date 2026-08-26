@@ -1375,6 +1375,7 @@ def publish_context(
             signal_db_path = os.path.join(os.path.dirname(os.path.abspath(db_path)), 'market_signals.db')
         warning = _early_warning.process_context(
             context, pulse, memory_snapshot=_overnight_intraday.latest_cached('all'),
+            market_history=(build_kwargs or {}).get('index_history'),
             db_path=signal_db_path)
         context['earlyWarnings'] = warning
         source_map = {
@@ -1400,6 +1401,27 @@ def publish_context(
                 'quality': 'derived' if family.get('available') else 'insufficient',
                 'authority': 'shadow_observation',
             })
+        validation = warning.get('prospectiveValidation') or {}
+        validation_status = str(validation.get('status') or 'empty')
+        warning_evidence.append({
+            'id': 'signal.prospective_validation',
+            'metric': 'prospectiveSignalLedger',
+            'value': {
+                'status': validation_status,
+                'totalTrials': validation.get('totalTrials', 0),
+                'resolvedOutcomes': validation.get('resolvedOutcomes', 0),
+                'coveragePct': validation.get('coveragePct', 0),
+                'horizons': validation.get('horizons') or [],
+            },
+            'comparison': '1 / 3 / 5 finalized sessions; empirical rates withheld below n=20',
+            'source': 'ST append-only prospective signal ledger',
+            'marketScope': 'TW_CROSS_MARKET', 'session': 'finalized_daily_close',
+            'asOf': warning.get('asOf'),
+            'reference': 'First observed tracked episode; no retrospective backfill',
+            'quality': ('observed' if validation_status == 'ready' else
+                        ('building' if validation_status in ('building', 'empty') else 'insufficient')),
+            'authority': 'shadow_validation',
+        })
         context['evidence'] = list(context.get('evidence') or []) + warning_evidence
     except Exception as exc:
         try:
@@ -1461,7 +1483,7 @@ def rebuild_latest(
         latest_warning = ((_latest_context or {}).get('earlyWarnings') if _latest_context else None)
         latest_warning_evidence = [
             row for row in (((_latest_context or {}).get('evidence') if _latest_context else None) or [])
-            if str((row or {}).get('id') or '').startswith('signal.family.')
+            if str((row or {}).get('id') or '').startswith('signal.')
         ]
     if not inputs:
         return empty_context('pulse_not_ready')

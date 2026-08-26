@@ -1,74 +1,71 @@
 {
   "schemaVersion": 1,
   "projectId": "stock-terminal-v5",
-  "objective": "Implement and verify a deterministic, shadow-only cross-market precursor system that turns Stock Terminal's canonical international-tech, de-duplicated 2330/0050 anchor, fixed memory baskets, breadth/liquidity and flow/derivatives evidence into persistent, readable, de-duplicated downside/upside transition alerts without granting trading authority to AI or the signal layer.",
+  "objective": "Implement LOOP-013 by restoring one truthful canonical release gate and adding a prospective, append-only outcome ledger that measures Stock Terminal precursor value without granting signal or AI trading authority.",
   "status": "completed",
   "updatedAt": "2026-08-26",
   "constraints": {
     "inScope": [
-      "evaluate five independent canonical evidence domains and four named precursor signals",
-      "de-duplicate 2330 and 0050 through an explicit residual when a usable weight exists and fail closed otherwise",
-      "persist observation, watch, armed, confirmed, active, conflict, recovery and invalidation transitions in SQLite",
-      "expose read-only signal state/history APIs through the private Web allow-list",
-      "render a readable Decision panel and optional transition-only Telegram/email/webhook delivery",
-      "add formula, lifecycle, integration, build, private-Web and responsive UI verification"
+      "repair the canonical server package/module identity collision at its source",
+      "prospectively enroll precursor episodes and freeze 1/3/5-session TWII outcomes in the existing signal database",
+      "sample-gated read-only API, Decision UI and Evidence Ledger integration",
+      "deterministic, build, privacy, Chrome responsive and independent advisory verification"
     ],
     "outOfScope": [
-      "automatic trading, portfolio mutation, direct buy/sell signals or leverage recommendations",
-      "allowing the indicator to overwrite DecisionContext regime, confidence, key levels or Action Envelope",
-      "claiming signal strength is probability or a validated forecast",
-      "adding paid data providers, credentials, new public exposure, commit, push or deployment",
-      "discarding, staging or rewriting unrelated runtime data changes"
+      "automatic trading, portfolio mutation or promotion of shadow evidence into trading authority",
+      "retrospective outcome backfill or calling a strength score a probability",
+      "new market-data providers, a second browser fetch path, paid data or expanded public exposure",
+      "commit, push, release promotion or production deployment"
     ],
     "assumptions": [
-      "canonical Pulse and DecisionContext remain the only authoritative input contracts",
-      "the existing overnight/intraday fixed memory baskets are reusable as a quality-gated evidence domain",
-      "the first release is observational shadow evidence and requires prospective history before authority can increase",
-      "TSM ADR is context only until point-in-time FX/parity data is available",
-      "the existing five modified data files are runtime/user-owned and excluded from implementation work"
+      "DecisionContext and Evidence Ledger remain the canonical decision and audit seams",
+      "external workers are advisory-only and the Host remains the sole writer and final authority",
+      "the five pre-existing modified data files are runtime/user-owned and excluded from implementation",
+      "the canonical unittest discovery command is the release-truth gate",
+      "only finalized sessions after enrollment may resolve a prospective outcome"
     ],
     "permissions": [
-      "modify scoped local project source, tests and loop state",
-      "run deterministic local tests, builds and read-only runtime/browser verification"
+      "modify scoped local source, tests, documentation and Loop Engineering state",
+      "run deterministic tests, reproducible builds, privacy scans and local Chrome verification",
+      "send one privacy-sanitized implementation contract to an explicitly authorized NVIDIA advisory worker"
     ],
     "availableResources": [
-      "local repository and existing canonical Pulse, DecisionContext and Evidence Ledger seams",
-      "existing memory taxonomy and overnight/intraday fixed baskets",
-      "existing Python, JavaScript, Private Web and build verification infrastructure",
-      "Host-owned single-writer integration"
+      "canonical Pulse, DecisionContext, Evidence Ledger and finalized TWII history",
+      "existing precursor lifecycle SQLite database and private-Web gateway",
+      "Agent Hive NVIDIA Nemotron read-only review route",
+      "Host-owned single-writer integration and acceptance"
     ],
     "excludedResources": [
-      "repository commit, push, release promotion and production deployment without a later explicit approval",
-      "new external AI review; the previously verified multi-provider design is treated as frozen input",
-      "credentials, private brokerage data, personal holdings and private access tokens",
-      "new paid market-data adapters or expanded network exposure"
+      "credentials, private brokerage data, personal holdings, private hostnames and runtime databases",
+      "new paid or user-specific market data",
+      "release promotion and production deployment"
     ]
   },
   "currentLoop": {
-    "id": "LOOP-011",
-    "title": "Cross-market precursor signal lifecycle vertical slice",
-    "entryCondition": "The user explicitly requested implementation after the design and verification-only pass",
-    "exitCondition": "The deterministic signal engine, lifecycle store, APIs, notification transport, Decision UI and documentation pass unit, integration, private-Web, build and responsive UI Gates without gaining trading or DecisionContext authority"
+    "id": "LOOP-013",
+    "title": "Release Truth + Prospective Signal Ledger",
+    "entryCondition": "The user explicitly authorized implementation of the accepted HIVE roadmap",
+    "exitCondition": "Canonical unittest discovery is fully collectable and green; prospective 1/3/5-session outcomes, API, Decision UI and Evidence integration pass correctness, privacy, build and responsive Gates without changing signal authority"
   },
   "orchestrationPolicy": {
     "multiProviderRequired": false,
     "requiredDistinctProviders": 1,
     "quotaSignalsStayHostLocal": true,
     "unknownQuotaPolicy": "fallback",
-    "providerGateVerdict": "not-required"
+    "providerGateVerdict": "single-independent-review-accepted"
   },
   "taskShape": {
     "kind": "build",
-    "capabilities": ["decide", "extract-transform", "create-synthesize", "validate-govern"],
+    "capabilities": ["decide", "extract-transform", "create-synthesize", "validate-govern", "observe-measure"],
     "analysisSource": "chatgpt-codex-host",
-    "inputTypes": ["canonical Pulse", "DecisionContext", "memory basket cache", "alert configuration", "UI modules"],
-    "outputTypes": ["deterministic signal engine", "SQLite lifecycle", "HTTP JSON contract", "shadow Evidence", "responsive UI", "tests", "documentation"],
-    "freshness": "session aware with transition dedupe",
+    "inputTypes": ["canonical Pulse and DecisionContext", "precursor lifecycle events", "finalized TWII daily history", "HIVE roadmap"],
+    "outputTypes": ["package identity fix", "append-only outcome ledger", "read-only API", "Decision and Evidence surfaces", "tests and documentation"],
+    "freshness": "prospective session outcomes only; no retrospective performance fabrication",
     "sideEffectLevel": "preview",
     "reversibility": "reversible",
     "approvalRequired": false,
     "approvalNodeId": null,
-    "dataBoundary": "local project; existing public market routes only",
+    "dataBoundary": "local project and existing canonical public-market cache only",
     "feedbackRequired": true
   },
   "capabilityGraph": {
@@ -88,10 +85,21 @@
       "provider": "OpenAI",
       "model": "Codex Host",
       "dataBoundary": "local project",
-      "selectionReason": "Retain canonical state, single-writer integration and final acceptance",
+      "selectionReason": "One integration writer is safer for package identity, shared SQLite schema and cross-layer contract changes",
       "fallback": null,
-      "responsibility": "state, single-writer implementation, integration and acceptance",
+      "responsibility": "state, implementation, integration, deterministic tests and final acceptance",
       "writePolicy": "single writer"
+    },
+    {
+      "capability": "independent implementation review",
+      "executionTarget": "nemotron-3-super",
+      "provider": "NVIDIA",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "dataBoundary": "public-sanitized-review",
+      "selectionReason": "Fresh dispatch-verified general-engineering route for an advisory P0/P1 challenge after deterministic verification",
+      "fallback": null,
+      "responsibility": "read-only adversarial review of the immutable sanitized implementation contract",
+      "writePolicy": "advisory"
     }
   ],
   "tasks": [
@@ -215,36 +223,147 @@
       "sideEffectLevel": "preview",
       "approvalNodeId": null,
       "successCriteria": "All targeted and broad suites, build reproducibility, private-Web allow-list and responsive UI Gates pass with no P0/P1"
+    },
+    {
+      "id": "L12-01",
+      "title": "Freeze local baseline and sanitized review artifact",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": [],
+      "capabilities": ["sense", "decide", "validate-govern"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Repository identity, dirty files, canonical test evidence, privacy exclusions and one immutable review-bundle hash are recorded"
+    },
+    {
+      "id": "L12-02",
+      "title": "Independent product, decision and UX review",
+      "owner": "product-reviewer",
+      "status": "completed",
+      "dependsOn": ["L12-01"],
+      "capabilities": ["sense", "context expansion", "adversarial critique"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Google reviews the exact bundle and returns actionable findings with an evidence receipt"
+    },
+    {
+      "id": "L12-03",
+      "title": "Independent quant, architecture and release review",
+      "owner": "quant-architecture-reviewer",
+      "status": "completed",
+      "dependsOn": ["L12-01"],
+      "capabilities": ["sense", "logical precision", "adversarial critique"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "NVIDIA reviews the exact bundle and returns actionable findings with an evidence receipt"
+    },
+    {
+      "id": "L12-04",
+      "title": "Accept, reject and synthesize worker findings",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L12-02", "L12-03"],
+      "capabilities": ["decide", "create-synthesize", "validate-govern"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Unsupported claims are explicitly rejected and accepted findings become a prioritized implementation roadmap"
+    },
+    {
+      "id": "L12-05",
+      "title": "Verify provider diversity, lineage and final documentation",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L12-04"],
+      "capabilities": ["observe-measure", "validate-govern"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Strict multi-provider verification and input lineage pass, final documentation parses cleanly, and product code remains unchanged"
+    },
+    {
+      "id": "L13-01",
+      "title": "Restore canonical release truth",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L12-05"],
+      "capabilities": ["decide", "create-synthesize", "validate-govern"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Full unittest discovery collects without package-identity errors and passes"
+    },
+    {
+      "id": "L13-02",
+      "title": "Implement append-only prospective outcome ledger",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L13-01"],
+      "capabilities": ["extract-transform", "create-synthesize", "observe-measure"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "One episode trial resolves immutable 1/3/5-session outcomes from the existing finalized TWII history without retrospective backfill"
+    },
+    {
+      "id": "L13-03",
+      "title": "Integrate sample-gated API, Decision UI and Evidence",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L13-02"],
+      "capabilities": ["create-synthesize", "render-explain", "register-store"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Read-only performance API and responsive UI expose n/20 until rates are eligible while retaining shadow-only authority"
+    },
+    {
+      "id": "L13-04",
+      "title": "Run deterministic, privacy, build and Chrome Gates",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L13-03"],
+      "capabilities": ["validate-govern", "observe-measure", "learn-refine"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Canonical tests, UI checks, reproducible build, archive privacy scans and desktop/mobile Chrome verification pass"
+    },
+    {
+      "id": "L13-05",
+      "title": "Independent advisory challenge and Host acceptance",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L13-04"],
+      "capabilities": ["validate-govern", "observe-measure"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "A fresh dispatch-verified worker reviews the immutable sanitized contract; the Host independently verifies and records disposition"
     }
   ],
   "verification": {
     "gate": [
-      "five canonical evidence domains and four named precursor families are deterministic and fail closed",
-      "2330 and 0050 are de-duplicated only through an explicit 0050-ex-2330 residual with a usable weight",
-      "same signal, direction and as-of input cannot advance lifecycle state or emit duplicate events",
-      "DecisionContext authority, regime, confidence, key levels and Action Envelope remain upstream-owned",
-      "read-only signal APIs are reachable through the private-Web allow-list",
-      "external delivery is explicit opt-in, transition-only and never re-scores market data",
-      "Decision UI is readable without horizontal overflow at desktop and 390-pixel portrait widths",
-      "unit, integration, security, static and reproducible-build checks pass with no P0/P1"
+      "canonical unittest discovery collects and passes without the server package/module collision",
+      "trial identity is episode-scoped and same-observation refreshes cannot duplicate enrollment",
+      "1/3/5-session outcomes use only future finalized TWII sessions and become immutable after insertion",
+      "headline aggregation excludes correlated component trials; component research remains explicitly filterable",
+      "empirical rates remain null below 20 resolved samples per horizon",
+      "Decision UI, API and Evidence retain shadow-only and non-probability language",
+      "build, privacy and responsive Chrome checks pass while pre-existing user data remains untouched"
     ],
     "commands": [
-      "python -m unittest tests.test_early_warning -v",
-      "python -m unittest tests.test_decision_context tests.test_decision_http -v",
-      "python -m unittest tests.test_private_web_gateway tests.test_private_web_access tests.test_private_web_host tests.test_private_web_release tests.test_build_reproducibility tests.test_server_http_security tests.test_health_live -v",
+      "python -m unittest discover -s tests -v",
+      "node --check src/ui/decision_v5.js",
       "node tests/shell_v5_selftest.js",
-      "node tests/layout_visual_v5_selftest.js",
       "python build_v2.py",
-      "localhost in-app browser verification at desktop and 390x844 portrait viewport"
+      "Chrome desktop and 390x844 portrait verification on a temporary local server",
+      "Agent Hive runtime/list/health/routing, bounded dispatch probe, immutable review dispatch and Host accept_output",
+      "JSON parse, git diff/status and protected runtime-data verification"
     ],
     "evidence": [
-      "Six early-warning unit tests pass for direction, anchor residual de-duplication, missing-memory fail-closed behavior, lifecycle hysteresis/deduplication, ACTIVE-state stability and AI-core conflict",
-      "Twenty-eight DecisionContext and HTTP integration tests pass, including persistent warnings, Evidence rows and active/history routes",
-      "Private-Web access, release, reproducibility, security and health suites pass; one Windows socket-abort case and one import-order collision also pass on isolated rerun",
-      "Shell and layout suites pass; JavaScript syntax checks pass and the generated HTML is reproducible at revision d108c8cfa3f7",
-      "A localhost in-app browser run confirmed #decision routing, a visible default-open shadow radar, explicit insufficient-data fallback and zero horizontal overflow at both 1280-pixel desktop and 390-pixel portrait widths",
-      "Browser logs contain no product JavaScript error; expected WaveDeck-unavailable warnings occur only because the isolated verification server intentionally did not start WaveDeck",
-      "The five pre-existing runtime data changes remain unstaged and outside the implementation diff"
+      "Canonical unittest discovery ran 269 tests in 37.930 seconds: OK with one opt-in live test skipped",
+      "Package identity compatibility removed the prior seven import-order errors without changing the launcher contract",
+      "Prospective tests prove one-time enrollment, immutable 1/3/5 results after source correction and exact n=20 publication gating",
+      "Shell self-test and JavaScript syntax pass; reproducible share build and both staged/archive privacy scanners pass",
+      "Chrome shows the validation card at desktop and 390x844 with no local horizontal overflow or console errors",
+      "Sanitized review bundle SHA-256 is 4a1c8a30dc3c6d259b2d3d709e3c88f8611967becc7e3072a4f020e113a2af91",
+      "NVIDIA Nemotron 3 Super review receipt 9b26d06fd54e12bb64a3af716ac8026172b2f4a022dc9f0cfb1c9a3809df19a6 found no P0/P1",
+      "Host acceptance evidence 94306bb66e0df29e97d8d31b80844305200122a2920ad3bc19c5f0770e3cb00a corroborates the advisory result with local Gates",
+      "The five pre-existing runtime data changes remain unstaged and outside the implementation diff; no commit or deployment was performed"
     ],
     "openP0": [],
     "openP1": [],
@@ -253,10 +372,33 @@
       "required": false,
       "requiredDistinctProviders": 1,
       "completedDistinctProviders": 1,
-      "verdict": "not-required"
+      "verdict": "single-independent-review",
+      "providers": ["NVIDIA"]
     }
   },
   "loopHistory": [
+    {
+      "loopId": "LOOP-013",
+      "result": "pass",
+      "summary": "Restored a truthful canonical release Gate and implemented a shadow-only prospective signal ledger with immutable 1/3/5-session outcomes, sample-gated statistics, read-only API, Decision and Evidence integration, full deterministic/build/privacy/Chrome verification and an accepted independent NVIDIA review.",
+      "residualRisks": [
+        "The ledger starts prospectively at feature activation and deliberately contains too few observations for rates until each horizon reaches 20 resolved trials.",
+        "A fixed 2% material-move threshold is a transparent first contract, not a claim that the same threshold is optimal across volatility regimes.",
+        "Resolved outcomes remain immutable for auditability, so later provider corrections are visible only in pending sessions and must be handled by a future explicit correction policy rather than silent rewrite.",
+        "Signal strength remains an evidence score with no trading authority; promotion would require substantially broader prospective history and regime-stratified validation."
+      ]
+    },
+    {
+      "loopId": "LOOP-012",
+      "result": "pass-review-with-open-remediation",
+      "summary": "Completed a privacy-sanitized, strict HIVE multi-provider review of Stock Terminal with independent Google product/UX and NVIDIA quant/architecture advice, Host claim filtering, canonical test evidence, verified input lineage and an implementation-ready evolution roadmap.",
+      "residualRisks": [
+        "The canonical unittest discovery gate remains red with 7 import errors caused by the server package/module identity collision.",
+        "Cross-market precursor strength is not a probability and lacks prospective lead-time, false-alert, coverage and regime-drift evidence.",
+        "Large compatibility surfaces and browser-global write paths should be reduced incrementally through existing seams, not by a high-risk rewrite.",
+        "The final roadmap is Host synthesis informed by verified external reviews; only the immutable sanitized input bundle itself has direct cross-provider lineage."
+      ]
+    },
     {
       "loopId": "LOOP-011",
       "result": "pass",
@@ -367,6 +509,10 @@
   "blockers": [],
   "artifacts": [
     ".loop-engineering/state.json",
+    "docs/ST_LOOP013_REVIEW_BUNDLE_2026-08-26.md",
+    "docs/ST_HIVE_REVIEW_BUNDLE_2026-08-26.md",
+    "docs/ST_HIVE_EVOLUTION_REVIEW_2026-08-26.md",
+    "docs/MARKET_PRECURSOR_SIGNALS.md",
     "docs/ST_ARCHITECTURE_CODE_REVIEW_2026-08-16.md",
     "docs/ST_ARCHITECTURE_REMEDIATION_2026-08-16.md",
     "docs/ST_DYNAMIC_LEVERAGE_FIVE_POST_RESEARCH_2026-08-16.md",

@@ -16,7 +16,7 @@
 - **有條件的風險範圍**：只有完整 Risk Profile 才計算持倉範圍，並公開公式與風險上限；若使用者帶入持倉但投組覆蓋失敗，則停止輸出範圍並明示原因。
 - **Exposure Lab v3（預設展開）**：月度凍結核心、週度健康監控與每日槓桿商品機制是三個不同權限層；先用曝險壓力四燈快速判讀，再按需查看臺灣50同基準波動、台積電 EPS 證據層、正二效率差與商品追蹤品質。週度融資／短波動只能要求複查或增加限制，不能改寫核心研究上限；個別持倉假說不會進入分享版預設模型。
 - **盤別動量研究（Shadow）**：以一致調整後日線拆解「隔夜定價」與「日間承接」，分開觀察臺灣／美國記憶體固定籃子、20／60 日結構、同市場基準歸因與族群同步率；只進研究面板與證據帳本，不改寫 Regime、Action Envelope 或槓桿限制。公式、資料 Gate 與權限圖見 [Overnight × Intraday 研究契約](docs/OVERNIGHT_INTRADAY_RESEARCH.md)。
-- **跨市場前兆雷達（Shadow）**：以國際科技、2330／0050 去重錨點、台美記憶體固定籃子、廣度／流動性與資金／衍生品五個獨立證據域，追蹤下跌前兆、強攻蓄勢、AI 雙箭頭與記憶體共振；狀態轉換寫入 SQLite 並可選擇推送，AI 只解釋、不觸發。契約、公式與狀態機見 [跨市場前兆雷達](docs/MARKET_PRECURSOR_SIGNALS.md)。
+- **跨市場前兆雷達（Shadow）**：以國際科技、2330／0050 去重錨點、台美記憶體固定籃子、廣度／流動性與資金／衍生品五個獨立證據域，追蹤下跌前兆、強攻蓄勢、AI 雙箭頭與記憶體共振；狀態轉換寫入 SQLite 並可選擇推送，AI 只解釋、不觸發。另以不可回寫的 1／3／5 日前瞻帳本驗證主訊號，單一 horizon 未滿 20 筆時不顯示命中率。契約、公式、狀態機與驗證方法見 [跨市場前兆雷達](docs/MARKET_PRECURSOR_SIGNALS.md)。
 - **台指選擇權結構（預設收合）**：精確到期別整合 TAIFEX 一般盤日終 OI、結算價與官方 Delta；分層呈現 OI 事實、IV／Gamma Density 衍生值，以及明確標成 Shadow 的 Signed GEX／Flip 情境，不把公開 OI 冒充造市商真實持倉。
 - **台美顏色語意分離**：台股／台指期紅漲綠跌；美股綠漲紅跌。
 - **本機優先**：介面與伺服器只在本機運作，預設僅監聽 `127.0.0.1:18432`。
@@ -334,6 +334,7 @@ flowchart LR
 | `GET /decision/context?market=TW` | 最新完整 `DecisionContext v2` 與證據帳本 |
 | `GET /signals/active` | 四個前兆訊號的目前狀態與仍有效事件（唯讀） |
 | `GET /signals/history?limit=80` | 已去重的前兆狀態轉換歷史（唯讀） |
+| `GET /signals/performance?limit=80&signal=...` | 啟用後才累積的 1／3／5 日前瞻結果；小樣本不公開比例（唯讀） |
 | `POST /decision/context` | 帶 Risk Profile／實際持倉的本機決策重算 |
 | `GET /decision/history?limit=20` | 本機決策情境歷史與狀態轉換 |
 | `GET /key-levels?symbol=%5ETWII` | Classic Pivot、確認轉折、ATR 與實現波動 |

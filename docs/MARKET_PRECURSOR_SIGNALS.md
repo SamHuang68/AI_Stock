@@ -18,6 +18,9 @@ flowchart LR
   H --> I["Decision 面板"]
   H --> J["GET /signals/active"]
   H --> K["GET /signals/history"]
+  H --> V["Prospective Outcome Ledger\n1／3／5 個完成交易日"]
+  V --> P["GET /signals/performance"]
+  V --> I
   H -. "owner 明確開啟" .-> L["Telegram／Email／Webhook"]
   M["本機 AI"] -. "只解釋凍結事件" .-> I
 ```
@@ -93,6 +96,20 @@ stateDiagram-v2
 
 回傳有邊緣的狀態轉換，不回傳每次輪詢快照。上限 500 筆。
 
+### `GET /signals/performance?limit=80&signal=TW_ATTACK_BUILDUP`
+
+回傳從功能啟用後才開始累積的前瞻驗證帳本。預設只彙總兩個主方向訊號
+`TW_DOWNSIDE_PRECURSOR` 與 `TW_ATTACK_BUILDUP`，避免把高度相關的 AI 雙箭頭與
+記憶體共振元件混進同一個命中率；需要研究元件時，可用 `signal` 明確指定。
+
+- 每個 `signal + direction + firstSeenAt` 狀態週期只建立一筆 trial，重整不重複計數。
+- 入場基準是該週期第一次進入 WATCH 以上時，Canonical Pulse 中的 TWII 現值。
+- 只用既有 Pulse 歷史的完成日收盤，依序凍結第 1／3／5 個交易日結果，不建立第二條行情來源。
+- 已寫入的 outcome 不因資料供應商後續修訂而改寫；來源修訂只影響尚未結算的 horizon。
+- 記錄方向報酬、方向是否正確、最大有利／不利變動，以及最早達到 2% 有利變動的交易日數。
+- 每個 horizon 未滿 20 筆完成樣本前，命中率、false-alert rate 與平均報酬全部為 `null`。
+- 回傳值一律保留 `shadowOnly: true`、`actionAuthority: none` 與 `predictiveProbability: false`。
+
 主要欄位：
 
 ```json
@@ -125,9 +142,13 @@ stateDiagram-v2
 
 外部推送預設關閉。傳輸層只格式化已凍結的 `SignalEvent`，不重新取行情、不改分數。
 
-## 驗證與升級條件
+## 前瞻驗證與升級條件
 
-v1 必須累積前瞻性歷史後，才可討論從 Shadow 升級。至少追蹤：
+第一階段已開始用 append-only ledger 蒐集 1／3／5 日方向命中、2% 實質波動捕捉、
+最大有利／不利變動與 lead sessions。介面中的比例只代表啟用後的歷史樣本；每個 horizon
+未滿 20 筆時只顯示 `完成樣本／門檻`，不顯示比例，也不做回溯補樣。
+
+仍須累積跨行情樣本後，才可討論從 Shadow 升級。後續至少補充：
 
 - 各 horizon 的 precision／recall、Brier score 與 calibration（若未來產生機率模型）。
 - 每個市場盤別、波動分層與事件日的 false-positive rate。

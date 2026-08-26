@@ -6,6 +6,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import OrderedDict
 from urllib.parse import urlparse, parse_qs, unquote, quote
 import threading
+
+# Compatibility for legacy test and launcher paths that place ``server/`` at
+# the front of ``sys.path`` and then import this file as top-level ``server``.
+# Without a package search path that one import poisons ``sys.modules`` and
+# later, valid imports such as ``server.deadline`` fail during full-suite
+# discovery.  Keep the single-file HTTP entrypoint working while exposing its
+# sibling modules through one stable package identity.
+if __name__ == 'server' and not globals().get('__path__'):
+    __path__ = [os.path.dirname(os.path.abspath(__file__))]
+
 try:
     import alert_daemon
 except Exception as _e:
@@ -2746,6 +2756,8 @@ class Handler(DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMi
             self._handle_signal_active()
         elif p == '/signals/history' or p.startswith('/signals/history?'):
             self._handle_signal_history()
+        elif p == '/signals/performance' or p.startswith('/signals/performance?'):
+            self._handle_signal_performance()
         elif p == '/research/overnight-intraday' or p.startswith('/research/overnight-intraday?'):
             self._handle_overnight_intraday()
         elif p == '/options/txo/structure' or p.startswith('/options/txo/structure?'):

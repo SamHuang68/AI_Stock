@@ -120,8 +120,11 @@ ok(/TW_DOWNSIDE_PRECURSOR/.test(earlyWarningEngine) && /TW_ATTACK_BUILDUP/.test(
   'market precursor engine exposes four named shadow-only signals');
 ok(/earlyWarningHtml/.test(decisionUi) && /跨市場前兆雷達/.test(decisionUi) && /訊號強度不是機率/.test(decisionUi),
   'decision page renders readable precursor strength and authority boundary');
-ok(/\/signals\/active/.test(server) && /\/signals\/history/.test(server),
-  'server exposes read-only signal state and transition history routes');
+ok(/prospectiveValidationHtml/.test(decisionUi) && /前瞻驗證建置中/.test(decisionUi) &&
+  /不是未來機率/.test(decisionUi) && /ratesAvailable/.test(decisionUi),
+  'decision page exposes sample-gated prospective validation without probability language');
+ok(/\/signals\/active/.test(server) && /\/signals\/history/.test(server) && /\/signals\/performance/.test(server),
+  'server exposes read-only signal state, transition history and prospective performance routes');
 ok(/src\/core\/market_intel_v5\.js/.test(build) && /window\.MarketIntelV5/.test(marketIntel) &&
   /linkNewsToWatchlist/.test(marketIntel) && /buildThemeResonance/.test(marketIntel),
   'build includes the shared market-intelligence taxonomy and news/watchlist linker');

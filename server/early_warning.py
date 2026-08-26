@@ -24,9 +24,15 @@ else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 DB_PATH = os.path.join(_BASE, 'data', 'market_signals.db')
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2
 ENGINE_VERSION = 'st-market-precursor/v1'
 POLICY_VERSION = 'shadow-lifecycle/2026-08-v1'
+OUTCOME_MODEL_VERSION = 'st-signal-prospective-ledger/v1'
+OUTCOME_HORIZONS = (1, 3, 5)
+OUTCOME_MIN_SAMPLE = 20
+MATERIAL_MOVE_PCT = 2.0
+_TRACKED_STATES = ('WATCH', 'ARMED', 'CONFIRMED', 'ACTIVE')
+_HEADLINE_SIGNAL_IDS = ('TW_DOWNSIDE_PRECURSOR', 'TW_ATTACK_BUILDUP')
 
 _WEIGHTS = {
     'globalTech': 0.24,
@@ -346,6 +352,266 @@ def evaluate_context(context: dict, pulse: dict, *, memory_snapshot: dict | None
     }
 
 
+def _date_key(value: Any) -> str | None:
+    raw = str(value or '').strip()
+    if not raw:
+        return None
+    if len(raw) >= 10 and raw[4:5] == '-' and raw[7:8] == '-':
+        return raw[:10]
+    digits = ''.join(ch for ch in raw[:10] if ch.isdigit())
+    if len(digits) >= 8:
+        return f'{digits[:4]}-{digits[4:6]}-{digits[6:8]}'
+    return None
+
+
+def _market_reference(pulse: dict, as_of: str) -> dict[str, Any]:
+    quote = _market_quote(pulse, '^TWII')
+    market = quote.get('market') or {}
+    price = _number(quote.get('price', market.get('price')))
+    session_date = _date_key(
+        market.get('sessionDate') or quote.get('tradeDate') or quote.get('date') or
+        pulse.get('date') or market.get('asOf') or quote.get('asOf') or as_of)
+    return {
+        'symbol': '^TWII', 'price': price, 'sessionDate': session_date,
+        'asOf': market.get('asOf') or quote.get('asOf') or as_of,
+        'source': market.get('source') or quote.get('source') or 'canonical-pulse',
+        'session': market.get('session') or quote.get('session') or 'regular',
+    }
+
+
+def _sync_market_sessions(conn: sqlite3.Connection, rows: Any, observed_at: str) -> int:
+    normalized: dict[str, tuple[float, str, str]] = {}
+    for raw in rows or []:
+        if not isinstance(raw, dict):
+            continue
+        day = _date_key(raw.get('date') or raw.get('asOf') or raw.get('ts'))
+        close = _number(raw.get('close', raw.get('indexClose')))
+        if day and close is not None and close > 0:
+            normalized[day] = (
+                close, str(raw.get('source') or 'pulse-history:index'),
+                str(raw.get('asOf') or raw.get('date') or day),
+            )
+    for day, (close, source, as_of) in normalized.items():
+        conn.execute(
+            'INSERT INTO signal_market_sessions(session_date,close,source,as_of,observed_at) '
+            'VALUES(?,?,?,?,?) ON CONFLICT(session_date) DO UPDATE SET '
+            'close=excluded.close,source=excluded.source,as_of=excluded.as_of,observed_at=excluded.observed_at',
+            (day, close, source, as_of, observed_at),
+        )
+    return len(normalized)
+
+
+def _enroll_trials(conn: sqlite3.Connection, signals: list[dict], market_ref: dict,
+                   created_at: str) -> int:
+    enrolled = 0
+    entry_price = _number(market_ref.get('price'))
+    origin_session = _date_key(market_ref.get('sessionDate') or market_ref.get('asOf'))
+    if entry_price is None or entry_price <= 0 or not origin_session:
+        return 0
+    for signal in signals or []:
+        direction = str(signal.get('direction') or '')
+        state = str(signal.get('state') or '')
+        if direction not in ('upside', 'downside') or state not in _TRACKED_STATES:
+            continue
+        first_seen = str(signal.get('firstSeenAt') or created_at)
+        identity = f"{signal.get('signalId')}:{direction}:{first_seen}"
+        trial_id = hashlib.sha256(identity.encode('utf-8')).hexdigest()[:24]
+        payload = {
+            'trialId': trial_id, 'signalId': signal.get('signalId'), 'label': signal.get('label'),
+            'direction': direction, 'triggerState': state, 'originAsOf': market_ref.get('asOf'),
+            'originSession': origin_session, 'entryPrice': round(entry_price, 4),
+            'strength': signal.get('strength'), 'evidenceQuality': signal.get('evidenceQuality'),
+            'independentDomains': signal.get('independentDomains'),
+            'policyVersion': signal.get('policyVersion') or POLICY_VERSION,
+            'engineVersion': signal.get('engineVersion') or ENGINE_VERSION,
+            'shadowOnly': True, 'actionAuthority': 'none',
+            'enrollment': 'first_observed_tracked_episode',
+        }
+        before = conn.total_changes
+        conn.execute(
+            'INSERT OR IGNORE INTO signal_trials('
+            'trial_id,signal_id,label,direction,trigger_state,origin_as_of,origin_session,entry_price,'
+            'strength,evidence_quality,domains,policy_version,engine_version,created_at,trial_json) '
+            'VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            (trial_id, signal.get('signalId'), signal.get('label'), direction, state,
+             market_ref.get('asOf'), origin_session, entry_price, signal.get('strength'),
+             signal.get('evidenceQuality'), signal.get('independentDomains'),
+             signal.get('policyVersion') or POLICY_VERSION,
+             signal.get('engineVersion') or ENGINE_VERSION, created_at,
+             json.dumps(payload, ensure_ascii=False, separators=(',', ':'), default=str)),
+        )
+        enrolled += int(conn.total_changes > before)
+    return enrolled
+
+
+def _median(values: list[float]) -> float | None:
+    clean = sorted(float(value) for value in values if value is not None)
+    if not clean:
+        return None
+    middle = len(clean) // 2
+    return clean[middle] if len(clean) % 2 else (clean[middle - 1] + clean[middle]) / 2.0
+
+
+def _resolve_trials(conn: sqlite3.Connection, resolved_at: str) -> int:
+    rows = conn.execute(
+        'SELECT trial_id,signal_id,direction,origin_session,entry_price FROM signal_trials '
+        'WHERE (SELECT COUNT(*) FROM signal_outcomes o WHERE o.trial_id=signal_trials.trial_id)<?',
+        (len(OUTCOME_HORIZONS),),
+    ).fetchall()
+    inserted = 0
+    for trial_id, signal_id, direction, origin_session, entry_price in rows:
+        if direction not in ('upside', 'downside') or not entry_price:
+            continue
+        future = conn.execute(
+            'SELECT session_date,close,source,as_of FROM signal_market_sessions '
+            'WHERE session_date>? ORDER BY session_date ASC LIMIT ?',
+            (origin_session, max(OUTCOME_HORIZONS)),
+        ).fetchall()
+        if not future:
+            continue
+        signed_returns: list[float] = []
+        raw_returns: list[float] = []
+        sign = 1.0 if direction == 'upside' else -1.0
+        for _day, close, _source, _as_of in future:
+            raw_return = (float(close) / float(entry_price) - 1.0) * 100.0
+            raw_returns.append(raw_return)
+            signed_returns.append(raw_return * sign)
+        for horizon in OUTCOME_HORIZONS:
+            if len(future) < horizon:
+                continue
+            exists = conn.execute(
+                'SELECT 1 FROM signal_outcomes WHERE trial_id=? AND horizon_sessions=?',
+                (trial_id, horizon),
+            ).fetchone()
+            if exists:
+                continue
+            signed_path = signed_returns[:horizon]
+            raw_path = raw_returns[:horizon]
+            directional_return = signed_path[-1]
+            max_favorable = max([0.0] + signed_path)
+            max_adverse = max([0.0] + [-value for value in signed_path])
+            lead = next((index + 1 for index, value in enumerate(signed_path)
+                         if value >= MATERIAL_MOVE_PCT), None)
+            target = future[horizon - 1]
+            payload = {
+                'trialId': trial_id, 'signalId': signal_id, 'direction': direction,
+                'horizonSessions': horizon, 'originSession': origin_session,
+                'targetSession': target[0], 'entryPrice': round(float(entry_price), 4),
+                'exitPrice': round(float(target[1]), 4),
+                'rawReturnPct': round(raw_path[-1], 4),
+                'directionalReturnPct': round(directional_return, 4),
+                'directionCorrect': directional_return > 0,
+                'materialMoveThresholdPct': MATERIAL_MOVE_PCT,
+                'materialMoveHit': max_favorable >= MATERIAL_MOVE_PCT,
+                'maxFavorableExcursionPct': round(max_favorable, 4),
+                'maxAdverseExcursionPct': round(max_adverse, 4),
+                'materialMoveLeadSessions': lead,
+                'source': target[2], 'sourceAsOf': target[3],
+                'historicalEmpirical': True, 'predictiveProbability': False,
+                'shadowOnly': True, 'actionAuthority': 'none',
+            }
+            conn.execute(
+                'INSERT INTO signal_outcomes('
+                'trial_id,horizon_sessions,target_session,exit_price,raw_return_pct,directional_return_pct,'
+                'max_favorable_pct,max_adverse_pct,direction_hit,material_hit,lead_sessions,resolved_at,outcome_json) '
+                'VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                (trial_id, horizon, target[0], target[1], raw_path[-1], directional_return,
+                 max_favorable, max_adverse, int(directional_return > 0),
+                 int(max_favorable >= MATERIAL_MOVE_PCT), lead, resolved_at,
+                 json.dumps(payload, ensure_ascii=False, separators=(',', ':'), default=str)),
+            )
+            inserted += 1
+    return inserted
+
+
+def _prospective_summary_conn(conn: sqlite3.Connection, signal_id: str | None = None) -> dict[str, Any]:
+    if signal_id:
+        where = ' WHERE signal_id=?'
+        params: tuple[Any, ...] = (signal_id,)
+    else:
+        where = ' WHERE signal_id IN (?,?)'
+        params = _HEADLINE_SIGNAL_IDS
+    total = int(conn.execute('SELECT COUNT(*) FROM signal_trials' + where, params).fetchone()[0])
+    started = conn.execute('SELECT MIN(origin_session) FROM signal_trials' + where, params).fetchone()[0]
+    horizons = []
+    resolved_total = 0
+    for horizon in OUTCOME_HORIZONS:
+        query = (
+            'SELECT o.directional_return_pct,o.max_favorable_pct,o.max_adverse_pct,'
+            'o.direction_hit,o.material_hit,o.lead_sessions FROM signal_outcomes o '
+            'JOIN signal_trials t ON t.trial_id=o.trial_id WHERE o.horizon_sessions=?'
+        )
+        args: tuple[Any, ...] = (horizon,)
+        if signal_id:
+            query += ' AND t.signal_id=?'
+            args = (horizon, signal_id)
+        else:
+            query += ' AND t.signal_id IN (?,?)'
+            args = (horizon, *_HEADLINE_SIGNAL_IDS)
+        rows = conn.execute(query, args).fetchall()
+        resolved = len(rows)
+        resolved_total += resolved
+        qualified = resolved >= OUTCOME_MIN_SAMPLE
+        direction_hits = sum(int(row[3] or 0) for row in rows)
+        material_hits = sum(int(row[4] or 0) for row in rows)
+        leads = [float(row[5]) for row in rows if row[5] is not None]
+        horizons.append({
+            'sessions': horizon, 'resolvedCount': resolved,
+            'pendingCount': max(0, total - resolved),
+            'minimumSample': OUTCOME_MIN_SAMPLE, 'ratesAvailable': qualified,
+            'directionHitRatePct': round(direction_hits / resolved * 100.0, 1) if qualified else None,
+            'materialMoveHitRatePct': round(material_hits / resolved * 100.0, 1) if qualified else None,
+            'falseAlertRatePct': round((resolved - material_hits) / resolved * 100.0, 1) if qualified else None,
+            'averageDirectionalReturnPct': round(sum(float(row[0]) for row in rows) / resolved, 3) if qualified else None,
+            'averageMaxFavorablePct': round(sum(float(row[1]) for row in rows) / resolved, 3) if qualified else None,
+            'averageMaxAdversePct': round(sum(float(row[2]) for row in rows) / resolved, 3) if qualified else None,
+            'medianMaterialMoveLeadSessions': round(_median(leads), 1) if qualified and leads else None,
+        })
+    capacity = total * len(OUTCOME_HORIZONS)
+    status = 'empty' if total == 0 else (
+        'ready' if all(row['ratesAvailable'] for row in horizons) else 'building')
+    return {
+        'ok': True, 'contractVersion': 1, 'model': OUTCOME_MODEL_VERSION,
+        'status': status, 'shadowOnly': True, 'actionAuthority': 'none',
+        'totalTrials': total, 'resolvedOutcomes': resolved_total,
+        'coveragePct': round(resolved_total / capacity * 100.0, 1) if capacity else 0.0,
+        'minimumSampleForRates': OUTCOME_MIN_SAMPLE,
+        'materialMoveThresholdPct': MATERIAL_MOVE_PCT,
+        'startedAt': started, 'signalId': signal_id,
+        'scope': signal_id or 'headline_precursors', 'horizons': horizons,
+        'methodology': {
+            'entry': 'first canonical TWII observation in each tracked signal episode',
+            'exit': 'finalized TWII daily closes from existing Pulse index history',
+            'horizons': list(OUTCOME_HORIZONS),
+            'directionHit': 'signed terminal return above zero',
+            'materialMoveHit': f'max favorable excursion reaches {MATERIAL_MOVE_PCT:.1f}%',
+            'ratesWithheldBelowSample': OUTCOME_MIN_SAMPLE,
+            'retrospectiveBackfill': False, 'strengthIsProbability': False,
+        },
+    }
+
+
+def _empty_prospective(status: str = 'empty', error: str | None = None) -> dict[str, Any]:
+    out = {
+        'ok': status != 'unavailable', 'contractVersion': 1,
+        'model': OUTCOME_MODEL_VERSION, 'status': status,
+        'shadowOnly': True, 'actionAuthority': 'none',
+        'totalTrials': 0, 'resolvedOutcomes': 0, 'coveragePct': 0.0,
+        'minimumSampleForRates': OUTCOME_MIN_SAMPLE,
+        'materialMoveThresholdPct': MATERIAL_MOVE_PCT,
+        'horizons': [
+            {
+                'sessions': horizon, 'resolvedCount': 0, 'pendingCount': 0,
+                'minimumSample': OUTCOME_MIN_SAMPLE, 'ratesAvailable': False,
+            }
+            for horizon in OUTCOME_HORIZONS
+        ],
+    }
+    if error:
+        out['error'] = error
+    return out
+
+
 def _init_db(path: str = DB_PATH) -> None:
     folder = os.path.dirname(os.path.abspath(path))
     if folder:
@@ -363,6 +629,22 @@ def _init_db(path: str = DB_PATH) -> None:
             conn.execute('CREATE TABLE IF NOT EXISTS signal_events('
                          'id INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT UNIQUE,signal_id TEXT,direction TEXT,'
                          'from_state TEXT,to_state TEXT,tier TEXT,as_of TEXT,created_at TEXT,dedupe_key TEXT,event_json TEXT)')
+            conn.execute('CREATE TABLE IF NOT EXISTS signal_market_sessions('
+                         'session_date TEXT PRIMARY KEY,close REAL NOT NULL,source TEXT,as_of TEXT,observed_at TEXT)')
+            conn.execute('CREATE TABLE IF NOT EXISTS signal_trials('
+                         'trial_id TEXT PRIMARY KEY,signal_id TEXT,label TEXT,direction TEXT,'
+                         'trigger_state TEXT,origin_as_of TEXT,origin_session TEXT,entry_price REAL,strength REAL,'
+                         'evidence_quality REAL,domains INTEGER,policy_version TEXT,engine_version TEXT,'
+                         'created_at TEXT,trial_json TEXT)')
+            conn.execute('CREATE TABLE IF NOT EXISTS signal_outcomes('
+                         'trial_id TEXT NOT NULL,horizon_sessions INTEGER NOT NULL,target_session TEXT,'
+                         'exit_price REAL,raw_return_pct REAL,directional_return_pct REAL,max_favorable_pct REAL,'
+                         'max_adverse_pct REAL,direction_hit INTEGER,material_hit INTEGER,lead_sessions INTEGER,'
+                         'resolved_at TEXT,outcome_json TEXT,PRIMARY KEY(trial_id,horizon_sessions))')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_signal_trials_signal '
+                         'ON signal_trials(signal_id,direction,origin_session)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_signal_outcomes_horizon '
+                         'ON signal_outcomes(horizon_sessions,resolved_at)')
 
 
 def _target_state(signal: dict, previous: dict | None, same_observation: bool) -> tuple[str, int, int]:
@@ -421,11 +703,13 @@ def _tier(state: str) -> str:
 
 
 def process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None = None,
-                    db_path: str = DB_PATH, now: datetime | None = None) -> dict[str, Any]:
+                    market_history: Any = None, db_path: str = DB_PATH,
+                    now: datetime | None = None) -> dict[str, Any]:
     evaluated = evaluate_context(context, pulse, memory_snapshot=memory_snapshot)
     as_of = str(evaluated.get('asOf') or _iso_now(now))
     created_at = _iso_now(now)
     expires_at = (now or datetime.now(timezone.utc)) + timedelta(hours=24)
+    market_ref = _market_reference(pulse, as_of)
     _init_db(db_path)
     new_events: list[dict] = []
     persisted: list[dict] = []
@@ -443,6 +727,10 @@ def process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None 
                     (signal_id, direction, as_of)).fetchone() is not None
                 state, hits, misses = _target_state(signal, previous, exists)
                 first_seen = (previous or {}).get('first_seen_at') or created_at
+                if (previous and str(previous.get('state') or '') in
+                        ('RECOVERY', 'INVALIDATED', 'EXPIRED', 'OBSERVATION') and
+                        state in _TRACKED_STATES and not exists):
+                    first_seen = created_at
                 changed_at = ((previous or {}).get('changed_at') or created_at)
                 from_state = (previous or {}).get('state') or 'OBSERVATION'
                 changed = state != from_state
@@ -495,6 +783,15 @@ def process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None 
                     if state in ('WATCH', 'ARMED', 'CONFIRMED', 'ACTIVE', 'CONFLICT', 'RECOVERY', 'INVALIDATED'):
                         new_events.append(event)
                 persisted.append(enriched)
+            try:
+                _sync_market_sessions(conn, market_history, created_at)
+                _enroll_trials(conn, persisted, market_ref, created_at)
+                _resolve_trials(conn, created_at)
+                prospective = _prospective_summary_conn(conn)
+            except Exception as exc:
+                # Validation is observational.  A ledger migration or write
+                # failure must never suppress the canonical signal state.
+                prospective = _empty_prospective('unavailable', type(exc).__name__)
             conn.execute('DELETE FROM signal_observations WHERE id NOT IN '
                          '(SELECT id FROM signal_observations ORDER BY id DESC LIMIT 2000)')
             conn.execute('DELETE FROM signal_events WHERE id NOT IN '
@@ -503,6 +800,7 @@ def process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None 
     evaluated['newEvents'] = new_events
     evaluated['activeEvents'] = [row for row in persisted if row.get('state') not in
                                  ('OBSERVATION', 'RECOVERY', 'INVALIDATED', 'EXPIRED')]
+    evaluated['prospectiveValidation'] = prospective
     return evaluated
 
 
@@ -532,10 +830,41 @@ def history(n: int = 80, path: str = DB_PATH) -> dict[str, Any]:
         return {'ok': False, 'error': str(exc), 'events': []}
 
 
+def performance(n: int = 80, path: str = DB_PATH,
+                signal_id: str | None = None) -> dict[str, Any]:
+    """Read-only prospective evidence; empirical rates stay hidden below n=20."""
+    n = max(1, min(int(n or 80), 500))
+    clean_signal = str(signal_id or '').strip() or None
+    try:
+        _init_db(path)
+        with closing(sqlite3.connect(path, timeout=10)) as conn:
+            summary = _prospective_summary_conn(conn, clean_signal)
+            query = (
+                'SELECT trial_id,trial_json FROM signal_trials'
+                + (' WHERE signal_id=?' if clean_signal else ' WHERE signal_id IN (?,?)')
+                + ' ORDER BY origin_session DESC,created_at DESC LIMIT ?'
+            )
+            params: tuple[Any, ...] = ((clean_signal, n) if clean_signal else (*_HEADLINE_SIGNAL_IDS, n))
+            trial_rows = conn.execute(query, params).fetchall()
+            trials = []
+            for trial_id, trial_raw in trial_rows:
+                trial = json.loads(trial_raw) if trial_raw else {'trialId': trial_id}
+                outcomes = conn.execute(
+                    'SELECT outcome_json FROM signal_outcomes WHERE trial_id=? '
+                    'ORDER BY horizon_sessions ASC', (trial_id,),
+                ).fetchall()
+                trial['outcomes'] = [json.loads(row[0]) for row in outcomes if row and row[0]]
+                trials.append(trial)
+        return {**summary, 'trials': trials, 'returnedTrials': len(trials)}
+    except Exception as exc:
+        return {**_empty_prospective('unavailable', type(exc).__name__), 'trials': []}
+
+
 def empty(reason: str = 'NOT_EVALUATED') -> dict[str, Any]:
     return {
         'ok': False, 'contractVersion': CONTRACT_VERSION, 'model': ENGINE_VERSION,
         'policyVersion': POLICY_VERSION, 'shadowOnly': True, 'actionAuthority': 'none',
         'status': 'INSUFFICIENT_DATA', 'signals': [], 'newEvents': [], 'activeEvents': [],
         'familyScores': [], 'dataQuality': {'reason': reason, 'strengthIsProbability': False},
+        'prospectiveValidation': _empty_prospective(),
     }

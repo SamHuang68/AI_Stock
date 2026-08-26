@@ -196,7 +196,8 @@ class PrivateWebGatewayTests(unittest.TestCase):
         self.assertEqual(payload["path"], "/market/snapshot")
 
     def test_signal_ledger_is_read_only_for_shared_viewers(self):
-        for path in ("/signals/active", "/signals/history?limit=20"):
+        for path in ("/signals/active", "/signals/history?limit=20",
+                     "/signals/performance?limit=20"):
             status, payload = _request(self.base + path, token="reader-secret")
             self.assertEqual(status, 200)
             self.assertEqual(payload["path"], path)

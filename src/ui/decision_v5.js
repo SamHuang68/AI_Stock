@@ -333,9 +333,14 @@
       '#dc-root .dc-warning-rule{margin-top:6px;padding-top:6px;border-top:1px dashed #293b53;color:#8195ad;font-size:9px;line-height:1.45}' +
       '#dc-root .dc-warning-components{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}.dc-warning-component{display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #2a415e;border-radius:999px;background:#091726;color:#aec0d3;font-size:9px}' +
       '#dc-root .dc-warning-component b{color:#e4eef8}.dc-warning-component.mixed{border-color:#665b32;color:#e5cf78}' +
+      '#dc-root .dc-warning-validation{margin-top:10px;padding:10px;border:1px solid #29415d;border-radius:10px;background:rgba(5,15,27,.72)}' +
+      '#dc-root .dc-warning-validation-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px}.dc-warning-validation-head b{font-size:11px;color:#d9e8f7}.dc-warning-validation-head span{font-size:9px;color:#7f95ad}' +
+      '#dc-root .dc-warning-validation-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.dc-warning-validation-cell{padding:8px 9px;border:1px solid #263b55;border-radius:8px;background:#081522;min-width:0}' +
+      '#dc-root .dc-warning-validation-cell .k{font-size:9px;color:#8297ae}.dc-warning-validation-cell .v{margin:3px 0 2px;font-size:15px;font-weight:900;color:#dcebf8}.dc-warning-validation-cell .s{font-size:8.5px;line-height:1.35;color:#71879f}' +
+      '#dc-root .dc-warning-validation-note{margin-top:7px;color:#758ba4;font-size:8.5px;line-height:1.45}' +
       '#dc-root .dc-warning-foot{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:8px;color:#758ba4;font-size:9px}' +
       '@media(max-width:1000px){#dc-root .dc-command,#dc-root .dc-grid{grid-template-columns:1fr}#dc-root .dc-scenario{grid-template-columns:repeat(2,1fr)}#dc-root .dc-risk-grid,#dc-root .dc-lab-grid{grid-template-columns:repeat(2,1fr)}#dc-root .dc-temp{grid-template-columns:1fr}#dc-root .dc-temp-main{border-right:0;border-bottom:1px solid #24344b;padding:0 0 7px}#dc-root .dc-temp-lights{grid-template-columns:repeat(2,1fr)}#dc-root .dc-structure,#dc-root .dc-oi-grid{grid-template-columns:1fr}}' +
-      '@media(max-width:650px){#dc-root .dc-ledger-toolbar,#dc-root .dc-action-summary,#dc-root .dc-lab-authority,#dc-root .dc-validation-note,#dc-root .dc-warning-grid{grid-template-columns:1fr}.dc-ledger-actions{justify-content:flex-start}#dc-root .dc-ledger-table table{min-width:720px}#dc-root .dc-options-kpis,#dc-root .dc-options-kpis.five{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-options-scroll table{min-width:720px}#dc-root .dc-oi-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-oi-kpi:last-child{grid-column:1/-1}#dc-root .dc-warning-signal{grid-template-columns:72px minmax(0,1fr);padding:10px;gap:9px}#dc-root .dc-warning-ring{width:68px;height:68px}.dc-warning-ring strong{font-size:18px!important}}';
+      '@media(max-width:650px){#dc-root .dc-ledger-toolbar,#dc-root .dc-action-summary,#dc-root .dc-lab-authority,#dc-root .dc-validation-note,#dc-root .dc-warning-grid{grid-template-columns:1fr}.dc-ledger-actions{justify-content:flex-start}#dc-root .dc-ledger-table table{min-width:720px}#dc-root .dc-options-kpis,#dc-root .dc-options-kpis.five{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-options-scroll table{min-width:720px}#dc-root .dc-oi-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-oi-kpi:last-child{grid-column:1/-1}#dc-root .dc-warning-signal{grid-template-columns:72px minmax(0,1fr);padding:10px;gap:9px}#dc-root .dc-warning-ring{width:68px;height:68px}.dc-warning-ring strong{font-size:18px!important}#dc-root .dc-warning-validation-grid{grid-template-columns:repeat(3,minmax(0,1fr))}#dc-root .dc-warning-validation-cell{padding:7px 6px}.dc-warning-validation-cell .v{font-size:13px}}';
   }
 
   function ensureMount() {
@@ -1547,6 +1552,33 @@
         '<br>失效：' + esc(signal.invalidation || '訊號轉弱或核心方向反轉') + '</div></div></div>';
   }
 
+  function prospectiveValidationHtml(warning) {
+    var validation = (warning && warning.prospectiveValidation) || {};
+    var status = String(validation.status || 'empty');
+    var rows = validation.horizons || [];
+    var minimum = Number(validation.minimumSampleForRates) || 20;
+    if (status === 'unavailable') {
+      return '<div class="dc-warning-validation"><div class="dc-warning-validation-head"><b>前瞻驗證暫時不可用</b>' +
+        '<span>不影響目前訊號觀測</span></div><div class="dc-warning-validation-note">帳本錯誤已隔離；不以缺失結果補成命中率。</div></div>';
+    }
+    var cells = [1, 3, 5].map(function (sessions) {
+      var row = rows.find(function (item) { return Number(item.sessions) === sessions; }) || {};
+      var resolved = Number(row.resolvedCount) || 0;
+      var ready = !!row.ratesAvailable;
+      var value = ready ? num(row.directionHitRatePct, 1) + '%' : resolved + '/' + minimum;
+      var detail = ready
+        ? '歷史方向命中 · 實質波動 ' + num(row.materialMoveHitRatePct, 1) + '%'
+        : '已完成樣本／最低門檻';
+      return '<div class="dc-warning-validation-cell"><div class="k">' + sessions + ' 日驗證</div><div class="v">' +
+        esc(value) + '</div><div class="s">' + esc(detail) + '</div></div>';
+    }).join('');
+    var headline = status === 'ready' ? '前瞻實證（歷史樣本）' : '前瞻驗證建置中';
+    return '<div class="dc-warning-validation"><div class="dc-warning-validation-head"><b>' + headline + '</b><span>試驗 ' +
+      esc(String(validation.totalTrials || 0)) + ' · 結果 ' + esc(String(validation.resolvedOutcomes || 0)) +
+      ' · 覆蓋 ' + num(validation.coveragePct, 1) + '%</span></div><div class="dc-warning-validation-grid">' + cells +
+      '</div><div class="dc-warning-validation-note">只從首次觀測後開始記錄，不回填歷史；這是歷史實證，不是未來機率，也不取得下單權限。</div></div>';
+  }
+
   function earlyWarningHtml(ctx) {
     var warning = ctx.earlyWarnings || {};
     var signals = warning.signals || [];
@@ -1564,7 +1596,7 @@
         var cls = row.direction === 'mixed' ? ' mixed' : '';
         return '<span class="dc-warning-component' + cls + '"><b>' + esc(row.label || row.signalId || '核心連動') + '</b>' +
           esc(warningStateLabel(row.state)) + ' · ' + num(row.strength, 0) + '</span>';
-      }).join('') + '</div><div class="dc-warning-foot"><span>獨立來源 ' +
+      }).join('') + '</div>' + prospectiveValidationHtml(warning) + '<div class="dc-warning-foot"><span>獨立來源 ' +
         esc(String(((warning.dataQuality || {}).availableDomains) || 0)) + '/5 · 證據品質 ' + pct01(warning.evidenceQuality) +
         '</span><span>訊號強度不是機率 · AI 不參與觸發 · ' + esc(String(warning.asOf || '—').replace('T', ' ').slice(0, 19)) +
         '</span></div></div>';
