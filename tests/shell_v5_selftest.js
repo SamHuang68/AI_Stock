@@ -582,6 +582,12 @@ ok(/MOBILE_LAYOUT_CONTRACT = '2col-scroll'/.test(pl) &&
   /var expectedCols = mobile \? 2 : 5/.test(pl) &&
   /layoutResizeTimer = setTimeout\(probeLayoutCols, 120\)/.test(pl),
   'pulse portrait uses two-column scrolling while landscape and desktop remain 5+5');
+ok(/@media\(orientation:landscape\) and \(max-height:540px\) and \(pointer:coarse\)/.test(pl) &&
+  /max-height:540px[\s\S]*pl-strip \.v\{font-size:13px;line-height:1\.15;margin-bottom:0\}/.test(pl) &&
+  /max-height:540px[\s\S]*pl-sec\{padding:6px 8px;height:100%;overflow:hidden\}/.test(pl) &&
+  /max-height:540px[\s\S]*pl-zone\{gap:6px;grid-template-columns:repeat\(5,minmax\(0,1fr\)\)\}/.test(pl) &&
+  /max-height:540px[\s\S]*#pl-flash-sec>h4,#pl-root #pl-watch-sec>h4\{flex-wrap:nowrap\}/.test(pl),
+  'pulse touch landscape restores compact 3cab212 density without changing 5+5');
 ok(/#pl-body\{[^}]*overflow:hidden/.test(pl) && /pl-expanded\{overflow:hidden\}/.test(pl) &&
   /data-go=\"factors\"/.test(pl) && !/pl-toggle-fac/.test(pl) &&
   /因子帳本改獨立頁/.test(pl),

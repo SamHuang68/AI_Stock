@@ -656,6 +656,21 @@
       '#pl-root table.pillars th,#pl-root table.pillars td{padding:3px 4px;border-bottom:1px solid var(--border);text-align:right}' +
       '#pl-root table.pillars th:first-child,#pl-root table.pillars td:first-child{text-align:left}' +
       '#pl-root table.pillars th{color:var(--tlo)}' +
+      /* 手機橫式專業模式：維持 5+5，但恢復 3cab212 的緊湊密度，避免繼承桌機放大值後裁切。 */
+      '@media(orientation:landscape) and (max-height:540px) and (pointer:coarse){' +
+        '#view-pulse.sv-panel.on{padding:4px 6px 6px}' +
+        '#pl-root .pl-strip .cell{padding:4px 7px}' +
+        '#pl-root .pl-strip .v{font-size:13px;line-height:1.15;margin-bottom:0}' +
+        '#pl-root .pl-strip .cell.hero .v{font-size:14px}' +
+        '#pl-root .pl-strip .s{font-size:8px;line-height:1.2}' +
+        '#pl-root .pl-strip .vz-ref{margin-top:2px;margin-bottom:8px;height:5px}' +
+        '#pl-root .pl-dash{gap:6px;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
+        '#pl-root .pl-zone{gap:6px;grid-template-columns:repeat(5,minmax(0,1fr))}' +
+        '#pl-root .pl-sec{padding:6px 8px;height:100%;overflow:hidden}' +
+        '#pl-root .pl-sec h4{margin:0 0 4px;font-size:10px;gap:4px;flex-wrap:wrap}' +
+        '#pl-root #pl-flash-sec>h4,#pl-root #pl-watch-sec>h4{flex-wrap:nowrap}' +
+        '#pl-root .pl-note{font-size:8px;line-height:1.35;margin-top:3px}' +
+      '}' +
       /* 手機直式專業模式：上下兩區各改為兩欄並允許頁面垂直捲動；橫式維持原始 5+5。 */
       '@media(max-width:900px) and (orientation:portrait){' +
         '#shell-views:has(#view-pulse.on){overflow-x:hidden!important;overflow-y:auto!important;display:block!important;' +
