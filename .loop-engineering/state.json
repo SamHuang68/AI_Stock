@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "projectId": "stock-terminal-v5",
   "objective": "Release the accepted landscape typography and beginner-readability corrections from an exact scoped Git commit, preserve runtime market data, and prove that the promoted Private Web runtime matches the reviewed bytes locally and through Tailscale.",
-  "status": "in_progress",
+  "status": "complete",
   "updatedAt": "2026-08-26",
   "constraints": {
     "inScope": [
@@ -127,7 +127,7 @@
       "requiredTasks": ["L21-01", "L21-02", "L21-03", "L21-04"],
       "releaseTask": "L21-05",
       "approvalEvidence": "User instruction: git commit push deploy",
-      "verdict": "pending"
+      "verdict": "passed"
     }
   ],
   "routing": [
@@ -753,7 +753,7 @@
       "id": "L21-03",
       "title": "Commit and push the exact application revision",
       "owner": "host",
-      "status": "in_progress",
+      "status": "completed",
       "dependsOn": ["L21-02"],
       "capabilities": ["register-store", "deliver-actuate"],
       "sideEffectLevel": "approved-write",
@@ -764,7 +764,7 @@
       "id": "L21-04",
       "title": "Stage, promote and restart the exact Private Web release",
       "owner": "host",
-      "status": "pending",
+      "status": "completed",
       "dependsOn": ["L21-03"],
       "capabilities": ["deliver-actuate"],
       "sideEffectLevel": "approved-write",
@@ -775,7 +775,7 @@
       "id": "L21-05",
       "title": "Verify runtime identity, availability and artifact integrity",
       "owner": "host",
-      "status": "pending",
+      "status": "completed",
       "dependsOn": ["L21-04"],
       "capabilities": ["validate-govern", "observe-measure"],
       "sideEffectLevel": "approved-write",
@@ -807,11 +807,18 @@
       "The bundled production build regenerated stock_terminal_v2.html at revision 115aba561f4f",
       "All 39 Private Web regression tests passed before Git mutation",
       "Scoped diff --check passed; the only secret-pattern hits are empty client-side apiKey variable assignments in generated HTML",
-      "Runtime-updated data/tw_names_backup.json and data/twoii_daily.csv remain unstaged and excluded"
+      "Runtime-updated data/tw_names_backup.json and data/twoii_daily.csv remain unstaged and excluded",
+      "Application commit 97e1c7af70da06713aac45f082b7923376400ef2 was pushed and origin/cursor/st-wd-tip-integrate-3497 resolved to the same full hash",
+      "The exact Git archive staged as release 97e1c7af70da, rebuilt at revision 2ae32a188f06 and passed all 39 release tests",
+      "Promotion preserved production data/logs and active manifest commit 97e1c7af70da06713aac45f082b7923376400ef2 with tests=passed",
+      "The restarted isolated host reported private-web, upstream=true and mode=isolated-host on the existing 18434/18435 boundary",
+      "Staged and active stock_terminal_v2.html matched SHA-256 af8d496d88b6b9dcfe85824e6615443a2765f9f5acbec9985c266eedabb1538b",
+      "Authenticated local and Tailscale HTML each matched the exact deterministic gateway-injected bytes, length 146159 and SHA-256 ab69a5d7d76bfd4d12fd71db64a0e6dc32deede8d8f58a4d3ecbf582c2ae4adf",
+      "Tailscale /gateway/health returned ok=true, gateway=private-web, upstream=true and the same restarted runtime instance"
     ],
     "openP0": [],
     "openP1": [],
-    "verdict": "precommit-passed; deployment-pending",
+    "verdict": "passed",
     "providerDiversity": {
       "required": false,
       "requiredDistinctProviders": 0,
@@ -832,6 +839,18 @@
     }
   ],
   "loopHistory": [
+    {
+      "loopId": "LOOP-021",
+      "result": "pass",
+      "summary": "Committed and pushed the accepted landscape-typography and beginner-readability corrections as 97e1c7af70da, staged and tested that exact Git archive, promoted it through the Private Web release gate, restarted the isolated host and passed local plus Tailscale runtime identity, authentication, availability and artifact-integrity Gates.",
+      "residualRisks": [
+        "The isolated host remains a local long-running process; a Windows reboot still requires START_PRIVATE_WEB_HOST.cmd unless a separately approved startup task is configured.",
+        "Tailscale HTTPS availability depends on EVO-T1, the Tailscale service and the existing Serve configuration.",
+        "Short desktops now scroll vertically by design when readable content exceeds viewport height; one-page fit is not used as a readability requirement.",
+        "Runtime-updated data/tw_names_backup.json and data/twoii_daily.csv remain intentionally uncommitted and did not enter release 97e1c7af70da.",
+        "The later repository-only deployment record commit does not change the served application release."
+      ]
+    },
     {
       "loopId": "LOOP-020",
       "result": "pass-successor",
