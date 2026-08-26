@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "projectId": "stock-terminal-v5",
   "objective": "Freeze, commit, push and deploy the verified mobile-landscape 5+5 density restoration through the exact-commit Private Web release gate while excluding unrelated runtime market data.",
-  "status": "active",
+  "status": "complete",
   "updatedAt": "2026-08-26",
   "constraints": {
     "inScope": [
@@ -103,7 +103,7 @@
       "requiredTasks": ["L18-01", "L18-02", "L18-03"],
       "releaseTask": "L18-04",
       "approvalEvidence": "User instruction: git push commit deploy",
-      "verdict": "pending"
+      "verdict": "passed"
     }
   ],
   "routing": [
@@ -586,7 +586,7 @@
       "id": "L18-03",
       "title": "Create and push exact feature commit",
       "owner": "host",
-      "status": "in_progress",
+      "status": "completed",
       "dependsOn": ["L18-01", "L18-02"],
       "capabilities": ["register-store", "deliver-actuate"],
       "sideEffectLevel": "approved-write",
@@ -597,7 +597,7 @@
       "id": "L18-04",
       "title": "Stage, promote and restart exact release",
       "owner": "host",
-      "status": "pending",
+      "status": "completed",
       "dependsOn": ["L18-03"],
       "capabilities": ["register-store", "validate-govern", "deliver-actuate"],
       "sideEffectLevel": "approved-write",
@@ -608,7 +608,7 @@
       "id": "L18-05",
       "title": "Verify local and Tailscale deployment and record evidence",
       "owner": "host",
-      "status": "pending",
+      "status": "completed",
       "dependsOn": ["L18-04"],
       "capabilities": ["validate-govern", "observe-measure", "register-store"],
       "sideEffectLevel": "approved-write",
@@ -638,11 +638,16 @@
       "Canonical unittest discovery ran 274 tests in 37.319 seconds: OK with one opt-in live test skipped",
       "JavaScript syntax and ShellV5 self-test passed, including the landscape compact-density assertion",
       "build_v2.py reproduced revision cd4d49694939",
-      "Scoped diff check passed; unrelated data/twoii_daily.csv remains outside the release scope"
+      "Scoped diff and credential-pattern checks passed; unrelated data/twoii_daily.csv remained outside the release scope",
+      "Feature commit 3c6bf59112265c8af6818711140d403db58a485b was pushed and origin/cursor/st-wd-tip-integrate-3497 resolved to the same hash",
+      "Exact Git archive staging rebuilt revision 7ba21c53fd02 and passed 39 Private Web tests in 22.978 seconds",
+      "Release 3c6bf5911226 was promoted; the active manifest identifies the exact feature commit and production ports 18434/18435 listen on loopback",
+      "Staged/current SHA-256 pairs match: stock_terminal_v2.html 66D77E40AF5EC82833CA51A088BCA2AC4A3DEF1FF31DB14593115FB5D0A12965 and pulse_v5.js E2A3FDED63CA9370E9571C11642FD2400094EF75E314262EFE1E6C87157B584D",
+      "Tailscale remote smoke passed TLS, gateway/upstream health, unauthenticated rejection, browser login redirect, owner/reader access and blocked notify=403"
     ],
     "openP0": [],
     "openP1": [],
-    "verdict": "pending",
+    "verdict": "passed",
     "providerDiversity": {
       "required": false,
       "requiredDistinctProviders": 0,
@@ -652,6 +657,18 @@
     }
   },
   "loopHistory": [
+    {
+      "loopId": "LOOP-018",
+      "result": "pass",
+      "summary": "Committed and pushed the accepted mobile-landscape compact 5+5 restoration as 3c6bf5911226, staged and tested that exact Git archive, promoted it through the Private Web release path, restarted the isolated host and passed local plus Tailscale identity, access and artifact-integrity gates.",
+      "residualRisks": [
+        "The isolated host remains a local long-running process; a Windows reboot still requires START_PRIVATE_WEB_HOST.cmd unless a separately approved startup task is configured.",
+        "Tailscale HTTPS availability depends on EVO-T1, the Tailscale service and the existing Serve configuration.",
+        "OS or Chrome text enlargement above normal settings can still reduce visible rows, while internal list and chart regions remain the intended scroll owners.",
+        "The runtime-updated data/twoii_daily.csv change remains intentionally uncommitted and did not enter release 3c6bf5911226.",
+        "The later repository-only deployment record commit does not change the served application release."
+      ]
+    },
     {
       "loopId": "LOOP-017",
       "result": "pass",
