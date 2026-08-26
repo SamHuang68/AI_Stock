@@ -99,6 +99,7 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/ui/hub_v5.js',                      # v5.0: TW Pulse 對齊模組（指數/法人/國際/訊號/自選/風險/設定）
               'src/ui/pulse_v5.js',                    # v5.0: TW Pulse 市場脈動總覽（組合既有 API，掛 #view-pulse）
               'src/ui/decision_v5.js',                 # v5.x: 策略決策中心（DecisionContext／Evidence／Scenario Matrix）
+              'src/ui/consensus_attention_v5.js',       # v5.x: 共識雷達（DecisionContext 注意力投影；無獨立輪詢）
               'src/ui/heat_v5.js',                     # v5.0: 類股熱力+/focus 輔區（掛 #view-heat）
               'src/ui/book_v5.js',                     # v5.0: 投組風險側欄（POST /portfolio，掛 #view-book）
               'src/ui/scan_v5.js',                     # v5.0: 三合一選股側欄（POST /screen3，掛 #view-scan）
@@ -304,7 +305,8 @@ with open(DST, 'w', encoding='utf-8', newline='\n') as f:
     f.write(html)
 
 # tip UX 契約：建置失敗硬停，避免使用者開到半套舊殼
-if any(x not in html for x in ('app_kernel_v5.js', 'shell_v5.js', 'pulse_v5.js', 'decision_data_v5.js', 'decision_v5.js')):
+if any(x not in html for x in ('app_kernel_v5.js', 'shell_v5.js', 'pulse_v5.js', 'decision_data_v5.js',
+                               'decision_v5.js', 'consensus_attention_v5.js')):
     print('[FAIL] tip UX modules missing from built HTML (shell / pulse / DecisionContext)')
     sys.exit(1)
 if 'id="st5-tip-boot"' not in html:

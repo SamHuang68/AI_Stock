@@ -90,6 +90,8 @@ class DecisionHttpTest(unittest.TestCase):
         self.assertEqual(body['regime']['id'], 'BROAD_RISK_ON')
         self.assertTrue(body['evidence'])
         self.assertTrue(body['earlyWarnings']['shadowOnly'])
+        self.assertEqual(body['consensusAttention']['authority'], 'attention_only')
+        self.assertLessEqual(len(body['consensusAttention']['items']), 5)
         self.assertTrue(any(row.get('id') == 'signal.prospective_validation'
                             for row in body['evidence']))
 

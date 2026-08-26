@@ -12,6 +12,7 @@
   var oiLabOpen = true;
   var optionsRefreshStarted = false;
   var evidenceView = { category: 'all', mode: 'all', scope: 'all', query: '' };
+  var pendingFocus = null;
 
   var ACTIONS = {
     ALLOW_MEASURED_RISK: '允許受控增加風險', LIMIT_NEW_RISK: '限制新增風險',
@@ -90,6 +91,9 @@
       '#dc-root .dc-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:8px;align-items:start;min-width:0;max-width:100%}' +
       '#dc-root .dc-grid>div,#dc-root .dc-ledger,#dc-root .dc-ledger-table{min-width:0;max-width:100%}' +
       '#dc-root .dc-card{background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:8px 9px;margin-bottom:8px;min-width:0}' +
+      '#dc-root .dc-focus{border-color:rgba(125,211,252,.78)!important;box-shadow:0 0 0 2px rgba(56,189,248,.14),0 0 24px rgba(56,189,248,.14)!important;' +
+        'animation:dcFocusPulse 1.15s ease-in-out 2}' +
+      '@keyframes dcFocusPulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.12)}}' +
       '#dc-root .dc-card h3{font-size:11px;color:var(--gold);margin:0 0 7px;border-left:2px solid var(--gold);padding-left:6px;display:flex;justify-content:space-between;gap:8px}' +
       '#dc-root .dc-portfolio-head{align-items:center;flex-wrap:wrap}' +
       '#dc-root .dc-portfolio-switch{display:flex;align-items:center;gap:3px;margin-left:auto}' +
@@ -707,7 +711,7 @@
   function divergencesHtml(ctx) {
     var rows = ctx.divergences || [];
     var html = rows.map(function (d) {
-      return '<div class="dc-div ' + esc(d.severity || '') + '"><div class="dc-div-head"><b>' + esc(d.id) +
+    return '<div class="dc-div ' + esc(d.severity || '') + '" data-dc-highlight="' + esc(d.id) + '"><div class="dc-div-head"><b>' + esc(d.id) +
         '</b>' + confidenceIcon(d.confidence) + '</div>' +
         (d.insight ? '<div class="dc-div-insight">' + esc(d.insight) + '</div>' : '') + divergenceMetrics(d) +
         (d.id === 'INDEX_UP_BREADTH_DOWN' ? indexBreadthVisual(d) : (d.id === 'SPOT_FUTURES_CONFLICT' ? basisVisual(d) : '')) +
@@ -1542,7 +1546,7 @@
     var strength = Math.max(0, Math.min(100, Number(signal.strength) || 0));
     var reasons = (signal.reasons || []).slice(0, 3);
     if (!reasons.length) reasons = ['尚未累積足夠的獨立來源'];
-    return '<div class="dc-warning-signal ' + direction + '">' +
+    return '<div class="dc-warning-signal ' + direction + '" data-dc-highlight="' + esc(signal.signalId || '') + '">' +
       '<div class="dc-warning-ring" style="--p:' + strength.toFixed(0) + '%"><div><strong>' + strength.toFixed(0) +
         '</strong><small>/100</small></div></div><div class="dc-warning-copy"><div class="dc-warning-title"><b>' +
         esc(signal.label || (direction === 'upside' ? '台股強攻蓄勢' : '台股下跌前兆')) + '</b><span class="dc-warning-state">' +
@@ -1583,18 +1587,18 @@
     var warning = ctx.earlyWarnings || {};
     var signals = warning.signals || [];
     if (!warning.ok && !signals.length) {
-      return '<div class="dc-card dc-warning-card"><h3><span>跨市場前兆雷達</span><span>SHADOW</span></h3>' +
+      return '<div class="dc-card dc-warning-card" id="dc-section-precursors" data-dc-section="precursors"><h3><span>跨市場前兆雷達</span><span>SHADOW</span></h3>' +
         '<div class="dc-note">核心來源尚未齊備；系統不會用新聞或單一股票補成方向訊號。</div></div>';
     }
     function find(id) { return signals.find(function (row) { return row.signalId === id; }) || {}; }
     var down = find('TW_DOWNSIDE_PRECURSOR'), up = find('TW_ATTACK_BUILDUP');
     var components = [find('AI_WAFER_DOUBLE_ARROW'), find('MEMORY_CYCLE_RESONANCE')];
-    return '<div class="dc-card dc-warning-card"><h3 class="dc-warning-head"><span>跨市場前兆雷達</span>' +
+    return '<div class="dc-card dc-warning-card" id="dc-section-precursors" data-dc-section="precursors"><h3 class="dc-warning-head"><span>跨市場前兆雷達</span>' +
       '<span>觀測 → 注意 → 戒備 → 確認 → 生效</span><span class="tag">SHADOW · 非下單訊號</span></h3>' +
       '<div class="dc-warning-grid">' + warningSignalHtml(down, 'downside') + warningSignalHtml(up, 'upside') + '</div>' +
       '<div class="dc-warning-components">' + components.map(function (row) {
         var cls = row.direction === 'mixed' ? ' mixed' : '';
-        return '<span class="dc-warning-component' + cls + '"><b>' + esc(row.label || row.signalId || '核心連動') + '</b>' +
+        return '<span class="dc-warning-component' + cls + '" data-dc-highlight="' + esc(row.signalId || '') + '"><b>' + esc(row.label || row.signalId || '核心連動') + '</b>' +
           esc(warningStateLabel(row.state)) + ' · ' + num(row.strength, 0) + '</span>';
       }).join('') + '</div>' + prospectiveValidationHtml(warning) + '<div class="dc-warning-foot"><span>獨立來源 ' +
         esc(String(((warning.dataQuality || {}).availableDomains) || 0)) + '/5 · 證據品質 ' + pct01(warning.evidenceQuality) +
@@ -1633,6 +1637,33 @@
     });
   }
 
+  function applyPendingFocus() {
+    if (!pendingFocus) return;
+    var section = String(pendingFocus.focusSection || 'summary');
+    var highlight = String(pendingFocus.highlightId || '');
+    var target = null;
+    if (highlight) {
+      Array.prototype.some.call(document.querySelectorAll('#dc-root [data-dc-highlight]'), function (node) {
+        if (node.getAttribute('data-dc-highlight') === highlight) { target = node; return true; }
+        return false;
+      });
+    }
+    if (!target) target = $('dc-section-' + section) || $('dc-section-summary');
+    if (!target) return;
+    var details = target.closest && target.closest('details');
+    if (details) details.open = true;
+    document.querySelectorAll('#dc-root .dc-focus').forEach(function (node) { node.classList.remove('dc-focus'); });
+    target.classList.add('dc-focus');
+    if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    var behavior = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    setTimeout(function () {
+      try { target.scrollIntoView({ behavior: behavior, block: 'center', inline: 'nearest' }); } catch (e) {}
+      try { target.focus({ preventScroll: true }); } catch (eFocus) {}
+    }, 80);
+    setTimeout(function () { target.classList.remove('dc-focus'); }, 3600);
+    pendingFocus = null;
+  }
+
   function render(ctx) {
     var body = ensureMount();
     if (!body || !ctx) return;
@@ -1644,7 +1675,7 @@
       ' · contract ' + (ctx.contractVersion || 1);
     var sc = ctx.scenario || {};
     body.innerHTML =
-      '<details class="dc-command-fold" open><summary><span class="name">決策摘要</span><span class="brief">' +
+      '<details class="dc-command-fold" open><summary id="dc-section-summary" data-dc-section="summary"><span class="name">決策摘要</span><span class="brief">' +
         esc(r.label || r.id || '等待市場狀態') + ' · ' + esc(label(a.posture)) +
         '</span></summary><div class="dc-command"><div class="box regime"><div class="k">市場狀態</div><div class="v">' + esc(r.id || '—') +
         '</div><div class="s">' + esc(r.label || '') + ' · 信心 ' + pct01(r.confidence) + ' · 資料 ' + pct01(q.completeness) + '</div></div>' +
@@ -1658,18 +1689,18 @@
           featureHtml('趨勢', sc.trend) + featureHtml('廣度', sc.breadth) + featureHtml('資金', sc.flow) +
           featureHtml('產業', sc.sector) + featureHtml('國際科技', sc.global) + featureHtml('風險負擔', sc.risk) + '</div></div>' +
         '<div class="dc-card"><h3><span>Key Levels & Realized Volatility</span><span>' + esc((ctx.keyLevels || {}).source || '—') + '</span></h3>' + levelsHtml(ctx) + '</div>' +
-        '<div class="dc-card">' + optionsStructureHtml(ctx) + '</div>' +
-        '<div class="dc-card"><h3><span>廣度趨勢與具名背離</span><span>' + (ctx.divergences || []).length + '</span></h3>' +
+        '<div class="dc-card" id="dc-section-options" data-dc-section="options">' + optionsStructureHtml(ctx) + '</div>' +
+        '<div class="dc-card" id="dc-section-divergences" data-dc-section="divergences"><h3><span>廣度趨勢與具名背離</span><span>' + (ctx.divergences || []).length + '</span></h3>' +
           breadthTrendHtml(ctx) + '<div style="margin-top:6px">' + divergencesHtml(ctx) + '</div></div>' +
         '<div class="dc-card"><h3><span>產業資金流／參與</span><span>' + esc((ctx.sectorFlow || {}).mode || '—') + '</span></h3>' + sectorHtml(ctx) + '</div>' +
         '<div class="dc-card">' + sessionMomentumHtml(ctx) + '</div>' +
       '</div><div>' +
-        '<div class="dc-card"><h3><span>Action Envelope</span><span>不是下單訊號</span></h3>' +
+        '<div class="dc-card" id="dc-section-action" data-dc-section="action"><h3><span>Action Envelope</span><span>不是下單訊號</span></h3>' +
           mandatoryControlsHtml(a) + actionSummaryHtml(a) + '<div style="margin-top:7px">' + riskFormHtml(ctx) + '</div></div>' +
-        '<div class="dc-card">' + exposureLabHtml(ctx) + '</div>' +
+        '<div class="dc-card" id="dc-section-exposure" data-dc-section="exposure">' + exposureLabHtml(ctx) + '</div>' +
         '<div class="dc-card"><h3 class="dc-portfolio-head"><span>Portfolio Overlay</span>' + portfolioSwitchHtml() +
           '</h3>' + portfolioHtml(ctx) + '</div>' +
-        '<div class="dc-card"><h3><span>Evidence Ledger · 證據帳本</span><span>' + (lastEvidenceContext.evidence || []).length + ' 筆 · 原始值未改寫</span></h3>' + evidenceHtml(lastEvidenceContext) + '</div>' +
+        '<div class="dc-card" id="dc-section-evidence" data-dc-section="evidence"><h3><span>Evidence Ledger · 證據帳本</span><span>' + (lastEvidenceContext.evidence || []).length + ' 筆 · 原始值未改寫</span></h3>' + evidenceHtml(lastEvidenceContext) + '</div>' +
         '<div class="dc-card"><h3><span>News Impact</span><span>deterministic tag</span></h3>' + newsHtml(ctx) + '</div>' +
         '<div class="dc-card"><h3><span>Regime History</span><span id="dc-hist-meta">載入中</span></h3><div id="dc-history" class="dc-note">—</div></div>' +
         '<div class="dc-card" id="dc-ai-card" style="display:none"><h3><span>AI Explanation</span><span>唯讀解釋</span></h3><div id="dc-ai-body" class="dc-ai"></div></div>' +
@@ -1680,6 +1711,7 @@
     bindOptionsLab();
     bindSessionMomentumLab();
     loadHistory();
+    applyPendingFocus();
   }
 
   function bindRisk() {
@@ -1748,7 +1780,8 @@
       .catch(function () { if (box) box.textContent = '本機模型未連線；deterministic DecisionContext 不受影響。'; });
   }
 
-  function activate() {
+  function activate(opts) {
+    if (opts && (opts.focusSection || opts.highlightId)) pendingFocus = opts;
     ensureMount();
     load(false);
     if (timer) clearInterval(timer);
@@ -1770,6 +1803,6 @@
     if (ctx && window.ShellV5 && ShellV5.route && ShellV5.route() === 'decision') render(ctx);
   });
   window.addEventListener('shell:route', function (ev) {
-    if (ev && ev.detail && ev.detail.route === 'decision') activate();
+    if (ev && ev.detail && ev.detail.route === 'decision') activate(ev.detail.opts || {});
   });
 }());

@@ -64,6 +64,7 @@
         flow: ((((context.scenario || {}).flow || {}).raw) || {}),
         divergences: (context.divergences || []).map(function (x) { return x.id; }),
         divergenceDetails: (context.divergences || []).slice(0, 3),
+        consensusAttention: context.consensusAttention || null,
         dataQuality: context.dataQuality || {},
         model: context.model
       },

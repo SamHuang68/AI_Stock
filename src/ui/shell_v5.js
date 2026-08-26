@@ -923,8 +923,8 @@
     var fab = document.createElement('button');
     fab.type = 'button';
     fab.id = 'st-ring-fab';
-    fab.title = '分析轉盤（點一下）· 雙擊返回儀表板 · 中鍵或 \\';
-    fab.setAttribute('aria-label', '開啟功能轉盤；雙擊返回儀表板');
+    fab.title = '共識雷達（點一下）· 雙擊返回儀表板 · 中鍵或 \\ 開功能轉盤';
+    fab.setAttribute('aria-label', '開啟共識雷達；雙擊返回儀表板');
     fab.textContent = '◎';
     var fabTimer = null;
     fab.addEventListener('click', function (e) {
@@ -932,7 +932,11 @@
       if (fabTimer) clearTimeout(fabTimer);
       fabTimer = setTimeout(function () {
         fabTimer = null;
-        openRing(window.innerWidth - 80, window.innerHeight - 80);
+        if (window.ConsensusAttentionV5 && typeof window.ConsensusAttentionV5.open === 'function') {
+          window.ConsensusAttentionV5.open();
+        } else {
+          openRing(window.innerWidth - 80, window.innerHeight - 80);
+        }
       }, 220);
     });
     fab.addEventListener('dblclick', function (e) {

@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 import exposure_lab as _exposure_lab
+import consensus_attention as _consensus_attention
 
 
 CONTRACT_VERSION = 2
@@ -727,6 +728,7 @@ def empty_context(reason: str = 'pulse_not_ready', now: datetime | None = None) 
         'keyLevels': {}, 'volatility': {}, 'divergences': [], 'breadthTrend': {'rows': []},
         'basisContext': {}, 'sectorFlow': {},
         'portfolioOverlay': None, 'exposureLab': {},
+        'consensusAttention': _consensus_attention.empty(reason),
         'optionsStructure': {'status': 'insufficient', 'shadowMode': True, 'decisionUse': 'research_only'},
         'newsImpact': [], 'scenario': {},
         'confirmation': [], 'invalidation': [], 'evidence': [],
@@ -1227,6 +1229,7 @@ def build_decision_context(
         },
         'model': ENGINE_VERSION,
     }
+    context['consensusAttention'] = _consensus_attention.build_consensus_attention(context)
     return context
 
 
@@ -1288,6 +1291,7 @@ def compact_context(context: dict | None) -> dict[str, Any]:
             {k: d.get(k) for k in ('id', 'severity', 'confidence', 'observed', 'insight', 'confirmation', 'invalidation')}
             for d in (context.get('divergences') or [])[:3]
         ],
+        'consensusAttention': context.get('consensusAttention') or _consensus_attention.empty(),
         'basisContext': {k: (context.get('basisContext') or {}).get(k) for k in (
             'liveGapPts', 'liveGapPct', 'adjustedBasisPts', 'mode', 'sessionComparable',
             'basisZ20', 'basisZ60', 'sample20', 'sample60', 'futuresLagPctPoint',
@@ -1432,6 +1436,9 @@ def publish_context(
                 'ok': False, 'shadowOnly': True, 'actionAuthority': 'none',
                 'status': 'INSUFFICIENT_DATA', 'signals': [], 'newEvents': [],
             }
+    # One canonical projection, recomputed only after the warning lifecycle is
+    # attached.  It never polls providers and never mutates DecisionContext.
+    context['consensusAttention'] = _consensus_attention.build_consensus_attention(context)
     with _lock:
         _latest_context = context
         _latest_inputs = {'pulse': pulse, **(build_kwargs or {})}
@@ -1494,6 +1501,7 @@ def rebuild_latest(
         context['earlyWarnings'] = json.loads(json.dumps(latest_warning, ensure_ascii=False))
         context['evidence'] = list(context.get('evidence') or []) + json.loads(
             json.dumps(latest_warning_evidence, ensure_ascii=False))
+    context['consensusAttention'] = _consensus_attention.build_consensus_attention(context)
     return context
 
 
