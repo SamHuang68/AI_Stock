@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -80,7 +81,10 @@ class PrivateWebReleaseTests(unittest.TestCase):
             release_id="abc123",
             approved=True,
         )
-        self.assertEqual(promoted, current)
+        # Windows runners may expose the same temp directory through a long
+        # path and its 8.3 alias (runneradmin vs RUNNER~1). Compare filesystem
+        # identity instead of path spelling.
+        self.assertTrue(os.path.samefile(promoted, current))
         self.assertFalse((current / "server" / "old_module.py").exists())
         self.assertEqual((current / "server" / "new_module.py").read_text(), "new-code")
         self.assertEqual((current / "data" / "private_web_owner.token").read_text(), "secret")

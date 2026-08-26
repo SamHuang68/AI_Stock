@@ -71,7 +71,11 @@ class ServerHttpSecurityTests(unittest.TestCase):
             self.assertEqual(json.load(response)['body']['days'], 1)
             self.assertEqual(response.headers['X-ST-Trace-ID'], 'security-test-1')
         bad = urllib.request.Request(
-            self.base + '/sync', data=b'{}', method='POST',
+            # This assertion is only about strict Origin matching. An empty
+            # body avoids leaving unread request bytes when the handler rejects
+            # before parsing; Windows may otherwise reset the loopback socket
+            # while urllib is reading the already-sent 403 response.
+            self.base + '/sync', data=b'', method='POST',
             headers={'Content-Type': 'application/json', 'Origin': self.base + '.evil.invalid'})
         with self.assertRaises(urllib.error.HTTPError) as caught:
             urllib.request.urlopen(bad, timeout=3)

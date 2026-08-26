@@ -23,6 +23,7 @@ _locks: dict[str, threading.RLock] = {}
 _status_lock = threading.Lock()
 _status = {'writes': 0, 'recoveries': 0, 'errors': 0, 'lastError': None, 'lastRecovery': None}
 _WINDOWS_REPLACE_ATTEMPTS = 7
+_IS_WINDOWS = os.name == 'nt'
 
 
 def _path_lock(path: Path) -> threading.RLock:
@@ -49,7 +50,7 @@ def status() -> dict[str, Any]:
 
 
 def _sync_parent(path: Path) -> None:
-    if os.name == 'nt':
+    if _IS_WINDOWS:
         return
     try:
         fd = os.open(str(path.parent), os.O_RDONLY)
@@ -68,14 +69,14 @@ def _replace_with_retry(source: Path, target: Path) -> None:
     an otherwise atomic ``os.replace`` fail with WinError 5 or 32.  Retrying only
     those Windows errors preserves fail-fast behavior for real filesystem faults.
     """
-    attempts = _WINDOWS_REPLACE_ATTEMPTS if os.name == 'nt' else 1
+    attempts = _WINDOWS_REPLACE_ATTEMPTS if _IS_WINDOWS else 1
     for attempt in range(attempts):
         try:
             os.replace(source, target)
             return
         except PermissionError as exc:
             winerror = getattr(exc, 'winerror', None)
-            if os.name != 'nt' or winerror not in {5, 32} or attempt + 1 >= attempts:
+            if not _IS_WINDOWS or winerror not in {5, 32} or attempt + 1 >= attempts:
                 raise
             time.sleep(0.005 * (2 ** attempt))
 

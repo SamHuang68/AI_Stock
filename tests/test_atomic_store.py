@@ -76,7 +76,10 @@ class AtomicStoreTests(unittest.TestCase):
                     raise exc
                 return real_replace(src, dst)
 
-            with mock.patch.object(atomic_store.os, 'name', 'nt'):
+            # Patch the module's platform seam rather than ``os.name`` itself.
+            # ``atomic_store.os`` is Python's process-wide os module, so changing
+            # its name makes pathlib attempt to construct WindowsPath on Linux.
+            with mock.patch.object(atomic_store, '_IS_WINDOWS', True):
                 with mock.patch.object(atomic_store.os, 'replace', side_effect=transient_replace):
                     atomic_store.atomic_write_json(path, {'v': 7})
             self.assertEqual(attempts, 1)
