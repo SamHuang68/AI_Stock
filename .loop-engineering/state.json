@@ -1,72 +1,71 @@
 {
   "schemaVersion": 1,
   "projectId": "stock-terminal-v5",
-  "objective": "Implement LOOP-013 by restoring one truthful canonical release gate and adding a prospective, append-only outcome ledger that measures Stock Terminal precursor value without granting signal or AI trading authority.",
+  "objective": "Commit the accepted LOOP-013 increment and all current market-data updates, then deploy the exact immutable revision through the tested Private Web release path with local and Tailscale evidence.",
   "status": "completed",
   "updatedAt": "2026-08-26",
   "constraints": {
     "inScope": [
-      "repair the canonical server package/module identity collision at its source",
-      "prospectively enroll precursor episodes and freeze 1/3/5-session TWII outcomes in the existing signal database",
-      "sample-gated read-only API, Decision UI and Evidence Ledger integration",
-      "deterministic, build, privacy, Chrome responsive and independent advisory verification"
+      "commit all current source, documentation, generated HTML and market-data updates",
+      "stage and test one release exported from the exact application commit",
+      "promote the tested release while preserving production data and logs",
+      "restart the isolated host and verify local plus Tailscale HTTPS identity, authentication, authorization and availability"
     ],
     "outOfScope": [
-      "automatic trading, portfolio mutation or promotion of shadow evidence into trading authority",
-      "retrospective outcome backfill or calling a strength score a probability",
-      "new market-data providers, a second browser fetch path, paid data or expanded public exposure",
-      "commit, push, release promotion or production deployment"
+      "new product features or changes to precursor signal authority",
+      "Git push or branch publication",
+      "credential rotation, Tailscale ACL changes or wider public exposure",
+      "startup-task installation or unrelated runtime changes"
     ],
     "assumptions": [
-      "DecisionContext and Evidence Ledger remain the canonical decision and audit seams",
-      "external workers are advisory-only and the Host remains the sole writer and final authority",
-      "the five pre-existing modified data files are runtime/user-owned and excluded from implementation",
-      "the canonical unittest discovery command is the release-truth gate",
-      "only finalized sessions after enrollment may resolve a prospective outcome"
+      "ba65f45b0d2e1514ef44be6146a8d3b8102df6df is the immutable application release commit",
+      "the canonical unittest discovery and exact-release staging tests are the release-truth gates",
+      "production data and logs must survive promotion",
+      "the existing Tailscale HTTPS endpoint and access credentials remain unchanged"
     ],
     "permissions": [
-      "modify scoped local source, tests, documentation and Loop Engineering state",
-      "run deterministic tests, reproducible builds, privacy scans and local Chrome verification",
-      "send one privacy-sanitized implementation contract to an explicitly authorized NVIDIA advisory worker"
+      "the user's explicit Git commit & deploy instruction authorizes Git commit and Private Web promotion",
+      "stage, promote, stop and restart the isolated Private Web host",
+      "run authenticated local and Tailscale deployment verification without exposing credentials"
     ],
     "availableResources": [
-      "canonical Pulse, DecisionContext, Evidence Ledger and finalized TWII history",
-      "existing precursor lifecycle SQLite database and private-Web gateway",
-      "Agent Hive NVIDIA Nemotron read-only review route",
-      "Host-owned single-writer integration and acceptance"
+      "exact Git archive release builder and atomic Private Web promotion path",
+      "existing rollback release beb38654e270",
+      "local loopback health endpoints and the configured Tailscale HTTPS endpoint",
+      "Host-owned release acceptance"
     ],
     "excludedResources": [
-      "credentials, private brokerage data, personal holdings, private hostnames and runtime databases",
-      "new paid or user-specific market data",
-      "release promotion and production deployment"
+      "credential contents, private brokerage data, personal holdings and runtime database payloads",
+      "new external AI dispatches or providers",
+      "Git push and public Internet deployment"
     ]
   },
   "currentLoop": {
-    "id": "LOOP-013",
-    "title": "Release Truth + Prospective Signal Ledger",
-    "entryCondition": "The user explicitly authorized implementation of the accepted HIVE roadmap",
-    "exitCondition": "Canonical unittest discovery is fully collectable and green; prospective 1/3/5-session outcomes, API, Decision UI and Evidence integration pass correctness, privacy, build and responsive Gates without changing signal authority"
+    "id": "LOOP-014",
+    "title": "Exact Commit + Verified Private Web Deployment",
+    "entryCondition": "The user explicitly requested Git commit and deployment",
+    "exitCondition": "All current changes are committed; the exact commit is staged, tested, promoted and running; local and Tailscale runtime identity, access and security Gates pass"
   },
   "orchestrationPolicy": {
     "multiProviderRequired": false,
-    "requiredDistinctProviders": 1,
+    "requiredDistinctProviders": 0,
     "quotaSignalsStayHostLocal": true,
     "unknownQuotaPolicy": "fallback",
-    "providerGateVerdict": "single-independent-review-accepted"
+    "providerGateVerdict": "codex-only-release-loop; prior accepted implementation review retained"
   },
   "taskShape": {
-    "kind": "build",
-    "capabilities": ["decide", "extract-transform", "create-synthesize", "validate-govern", "observe-measure"],
+    "kind": "operate",
+    "capabilities": ["decide", "register-store", "validate-govern", "deliver-actuate", "observe-measure"],
     "analysisSource": "chatgpt-codex-host",
-    "inputTypes": ["canonical Pulse and DecisionContext", "precursor lifecycle events", "finalized TWII daily history", "HIVE roadmap"],
-    "outputTypes": ["package identity fix", "append-only outcome ledger", "read-only API", "Decision and Evidence surfaces", "tests and documentation"],
-    "freshness": "prospective session outcomes only; no retrospective performance fabrication",
-    "sideEffectLevel": "preview",
+    "inputTypes": ["tested dirty-worktree increment", "Git commit", "Private Web release manifest", "deployment health evidence"],
+    "outputTypes": ["immutable application commit", "tested release", "promoted active runtime", "deployment verification record"],
+    "freshness": "deployment evidence captured against the active 2026-08-26 runtime",
+    "sideEffectLevel": "approved-write",
     "reversibility": "reversible",
-    "approvalRequired": false,
-    "approvalNodeId": null,
-    "dataBoundary": "local project and existing canonical public-market cache only",
-    "feedbackRequired": true
+    "approvalRequired": true,
+    "approvalNodeId": "L14-02",
+    "dataBoundary": "local project, local Private Web install root and existing Tailscale HTTPS endpoint",
+    "feedbackRequired": false
   },
   "capabilityGraph": {
     "enabled": false,
@@ -77,7 +76,15 @@
       {"id": "openai-codex", "provider": "OpenAI", "billingMeter": "current Codex task", "distinctProviderCount": 1}
     ]
   },
-  "synchronizationBarriers": [],
+  "synchronizationBarriers": [
+    {
+      "id": "B14-RELEASE",
+      "requiredTasks": ["L14-01", "L14-02", "L14-03"],
+      "releaseTask": "L14-04",
+      "approvalEvidence": "User instruction: Git commit & deploy",
+      "verdict": "passed"
+    }
+  ],
   "routing": [
     {
       "capability": "host",
@@ -85,21 +92,10 @@
       "provider": "OpenAI",
       "model": "Codex Host",
       "dataBoundary": "local project",
-      "selectionReason": "One integration writer is safer for package identity, shared SQLite schema and cross-layer contract changes",
+      "selectionReason": "Release actuation and acceptance remain Host-owned; no external AI work is needed for the already-reviewed immutable application commit",
       "fallback": null,
-      "responsibility": "state, implementation, integration, deterministic tests and final acceptance",
+      "responsibility": "commit, exact-release staging, approved promotion, runtime verification and final acceptance",
       "writePolicy": "single writer"
-    },
-    {
-      "capability": "independent implementation review",
-      "executionTarget": "nemotron-3-super",
-      "provider": "NVIDIA",
-      "model": "nvidia/nemotron-3-super-120b-a12b",
-      "dataBoundary": "public-sanitized-review",
-      "selectionReason": "Fresh dispatch-verified general-engineering route for an advisory P0/P1 challenge after deterministic verification",
-      "fallback": null,
-      "responsibility": "read-only adversarial review of the immutable sanitized implementation contract",
-      "writePolicy": "advisory"
     }
   ],
   "tasks": [
@@ -333,50 +329,117 @@
       "sideEffectLevel": "none",
       "approvalNodeId": null,
       "successCriteria": "A fresh dispatch-verified worker reviews the immutable sanitized contract; the Host independently verifies and records disposition"
+    },
+    {
+      "id": "L14-01",
+      "title": "Freeze tested application revision",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L13-05"],
+      "capabilities": ["decide", "register-store", "validate-govern"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "All current source, documentation, generated HTML and market-data updates are contained in one immutable commit after canonical gates pass"
+    },
+    {
+      "id": "L14-02",
+      "title": "Authorize exact Private Web deployment",
+      "owner": "user",
+      "status": "completed",
+      "dependsOn": ["L14-01"],
+      "capabilities": ["decide"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "L14-02",
+      "successCriteria": "The user explicitly authorizes Git commit and deployment of the frozen release"
+    },
+    {
+      "id": "L14-03",
+      "title": "Stage and test exact release",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L14-02"],
+      "capabilities": ["register-store", "validate-govern"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "L14-02",
+      "successCriteria": "Release ba65f45b0d2e is exported from the exact commit, rebuilt and passes all Private Web staging tests"
+    },
+    {
+      "id": "L14-04",
+      "title": "Promote and restart isolated host",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L14-03"],
+      "capabilities": ["deliver-actuate"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "L14-02",
+      "successCriteria": "The active manifest identifies ba65f45b0d2e; production data/logs remain preserved and ports 18434/18435 listen on loopback"
+    },
+    {
+      "id": "L14-05",
+      "title": "Verify local and Tailscale deployment",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L14-04"],
+      "capabilities": ["validate-govern", "observe-measure"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Runtime identity, HTML hash, TLS, login, persistent session notice, owner/reader authorization and blocked sensitive route checks pass"
     }
   ],
   "verification": {
     "gate": [
-      "canonical unittest discovery collects and passes without the server package/module collision",
-      "trial identity is episode-scoped and same-observation refreshes cannot duplicate enrollment",
-      "1/3/5-session outcomes use only future finalized TWII sessions and become immutable after insertion",
-      "headline aggregation excludes correlated component trials; component research remains explicitly filterable",
-      "empirical rates remain null below 20 resolved samples per horizon",
-      "Decision UI, API and Evidence retain shadow-only and non-probability language",
-      "build, privacy and responsive Chrome checks pass while pre-existing user data remains untouched"
+      "all current changes are committed without staging secrets or runtime credentials",
+      "canonical Python and frontend release gates pass before commit",
+      "the production release is built and tested from the exact commit rather than the dirty worktree",
+      "promotion preserves production data and logs and leaves the previous release available for rollback",
+      "the active manifest and current HTML hash match the staged ba65f45b0d2e release",
+      "local loopback and Tailscale HTTPS authentication, authorization, availability and blocked-route contracts pass"
     ],
     "commands": [
-      "python -m unittest discover -s tests -v",
+      "C:/Users/Sam/AppData/Local/Python/pythoncore-3.14-64/python.exe -m unittest discover -s tests -v",
       "node --check src/ui/decision_v5.js",
       "node tests/shell_v5_selftest.js",
-      "python build_v2.py",
-      "Chrome desktop and 390x844 portrait verification on a temporary local server",
-      "Agent Hive runtime/list/health/routing, bounded dispatch probe, immutable review dispatch and Host accept_output",
-      "JSON parse, git diff/status and protected runtime-data verification"
+      "git commit and exact SHA verification",
+      "scripts/private_web_release.py stage --ref ba65f45b0d2e1514ef44be6146a8d3b8102df6df",
+      "scripts/private_web_release.py promote --release ba65f45b0d2e --approve",
+      "local gateway/backend health and listener inspection",
+      "scripts/test_private_web_remote.py --url <configured Tailscale HTTPS endpoint>",
+      "active manifest plus staged/current SHA-256 comparison"
     ],
     "evidence": [
-      "Canonical unittest discovery ran 269 tests in 37.930 seconds: OK with one opt-in live test skipped",
-      "Package identity compatibility removed the prior seven import-order errors without changing the launcher contract",
-      "Prospective tests prove one-time enrollment, immutable 1/3/5 results after source correction and exact n=20 publication gating",
-      "Shell self-test and JavaScript syntax pass; reproducible share build and both staged/archive privacy scanners pass",
-      "Chrome shows the validation card at desktop and 390x844 with no local horizontal overflow or console errors",
-      "Sanitized review bundle SHA-256 is 4a1c8a30dc3c6d259b2d3d709e3c88f8611967becc7e3072a4f020e113a2af91",
-      "NVIDIA Nemotron 3 Super review receipt 9b26d06fd54e12bb64a3af716ac8026172b2f4a022dc9f0cfb1c9a3809df19a6 found no P0/P1",
-      "Host acceptance evidence 94306bb66e0df29e97d8d31b80844305200122a2920ad3bc19c5f0770e3cb00a corroborates the advisory result with local Gates",
-      "The five pre-existing runtime data changes remain unstaged and outside the implementation diff; no commit or deployment was performed"
+      "Application commit ba65f45b0d2e1514ef44be6146a8d3b8102df6df contains 22 changed files and all then-current market-data updates",
+      "Canonical discovery ran 269 tests in 40.272 seconds: OK with one opt-in live test skipped",
+      "Reproducible privacy-safe share archive SHA-256 is b5c086491c65ae85c4e2775ae17ce638ac4e36a51f42326ac14737878d7b8060",
+      "JavaScript syntax and shell_v5_selftest passed",
+      "Exact-release staging rebuilt revision 94f5b9bd27be and ran 39 Private Web tests in 22.502 seconds: OK",
+      "Active release manifest identifies release ba65f45b0d2e and full commit ba65f45b0d2e1514ef44be6146a8d3b8102df6df with tests=passed",
+      "Current and staged stock_terminal_v2.html SHA-256 both equal DC7AF088EAB3ED893C37F5EF7002A2EA5747C496ADBB57D2292B6FBA8E3624DF",
+      "Gateway 18434 and backend 18435 listen only on 127.0.0.1 and both local health checks pass",
+      "Tailscale HTTPS smoke test returned ok=true for TLS, login, owner admin, reader liveness, private profile and blocked notify=403"
     ],
     "openP0": [],
     "openP1": [],
     "verdict": "pass",
     "providerDiversity": {
       "required": false,
-      "requiredDistinctProviders": 1,
-      "completedDistinctProviders": 1,
-      "verdict": "single-independent-review",
-      "providers": ["NVIDIA"]
+      "requiredDistinctProviders": 0,
+      "completedDistinctProviders": 0,
+      "verdict": "codex-only-release-loop; no new external AI workers used",
+      "providers": []
     }
   },
   "loopHistory": [
+    {
+      "loopId": "LOOP-014",
+      "result": "pass",
+      "summary": "Committed the accepted precursor-validation increment and current market-data updates, staged an exact Git archive, rebuilt and tested it outside the worktree, promoted release ba65f45b0d2e, restarted the isolated host and passed local plus Tailscale HTTPS identity, authentication, authorization, availability and artifact-integrity Gates.",
+      "residualRisks": [
+        "The isolated host remains a local long-running process; a Windows reboot still requires START_PRIVATE_WEB_HOST.cmd unless a separately approved startup task is configured.",
+        "Tailscale HTTPS availability remains dependent on EVO-T1, the Tailscale service and the existing Serve configuration.",
+        "Market-history files can be refreshed again by the development runtime after the immutable release commit; such later worktree changes do not alter the deployed release.",
+        "The active application release is ba65f45b0d2e; the later repository-only deployment record does not change served application behavior."
+      ]
+    },
     {
       "loopId": "LOOP-013",
       "result": "pass",
