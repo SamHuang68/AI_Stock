@@ -253,10 +253,26 @@ ok(/pl-safe-level ceiling/.test(pulseBeginner) && /pl-safe-level floor/.test(pul
 ok(/展開進階觀察/.test(pulseBeginner) && /查看專業參數/.test(pulseBeginner) &&
   /pl-beginner-advanced/.test(pulseBeginner),
   'beginner progressive disclosure keeps advanced and expert layers opt-in');
-ok(/@media\(min-width:901px\) and \(max-height:740px\)/.test(pulseBeginner) &&
+ok(/@media\(min-width:901px\) and \(max-width:1199px\) and \(max-height:740px\)/.test(pulseBeginner) &&
   /pl-body\.pl-mode-beginner\{overflow-x:hidden;overflow-y:auto;padding:2px 0 8px;scrollbar-gutter:stable\}/.test(pulseBeginner) &&
   /pl-beginner-advanced:not\(\[hidden\]\)\)\{overflow:auto\}/.test(pulseBeginner),
-  'beginner desktop stays compact and safely scrolls when the viewport cannot contain it');
+  'beginner compact-height rule is limited to medium desktops and safely scrolls instead of shrinking wide screens');
+ok(/pl-beginner-copy \.why\{font:500 14px/.test(pulseBeginner) &&
+  /pl-beginner-copy \.quality\{font-size:12px/.test(pulseBeginner) &&
+  /pl-simple-card \.head\{[^}]*font:700 13px/.test(pulseBeginner) &&
+  /pl-simple-card \.plain\{font:500 13px/.test(pulseBeginner) &&
+  /pl-simple-card \.bar-meta\{[^}]*font-size:11px/.test(pulseBeginner) &&
+  /pl-radar-note\{font:500 13px/.test(pulseBeginner) &&
+  /pl-radar-meta\{font-size:11px/.test(pulseBeginner) &&
+  /pl-safe-level \.distance\{font:800 12px/.test(pulseBeginner),
+  'beginner readability floor keeps body and supporting evidence legible on wide desktop');
+(function () {
+  var compactStart = pulseBeginner.indexOf('@media(min-width:901px) and (max-width:1199px) and (max-height:740px)');
+  var compactEnd = pulseBeginner.indexOf('@media(max-width:900px) and (orientation:portrait)', compactStart);
+  var compactCss = pulseBeginner.slice(compactStart, compactEnd);
+  ok(compactStart >= 0 && compactEnd > compactStart && !/font-size:(?:7|8|9|10)px/.test(compactCss),
+    'beginner medium-desktop short-height override compacts spacing without reintroducing tiny typography');
+})();
 ok(/\.pl-weather\.calm\{color:#bae6fd/.test(pulseBeginner) &&
   /\.pl-weather\.watch\{color:#fde68a/.test(pulseBeginner) &&
   /\.pl-weather\.alert\{color:#fed7aa/.test(pulseBeginner) && /weather-watch:after/.test(pulseBeginner),
@@ -588,6 +604,17 @@ ok(/@media\(orientation:landscape\) and \(max-height:540px\) and \(pointer:coars
   /max-height:540px[\s\S]*pl-zone\{gap:6px;grid-template-columns:repeat\(5,minmax\(0,1fr\)\)\}/.test(pl) &&
   /max-height:540px[\s\S]*#pl-flash-sec>h4,#pl-root #pl-watch-sec>h4\{flex-wrap:nowrap\}/.test(pl),
   'pulse touch landscape restores compact 3cab212 density without changing 5+5');
+ok(/max-height:540px[\s\S]*pl-inst4 \.c \.v,#pl-root \.pl-bd4 \.c \.v,#pl-root \.pl-ohlc4 \.c \.v\{[^}]*font-size:9px[^}]*overflow:hidden[^}]*text-overflow:clip/.test(pl) &&
+  /max-height:540px[\s\S]*pl-ohlc4 \.c \.v\{letter-spacing:-0\.5px\}/.test(pl),
+  'pulse touch landscape primary KPI values fit their cells without painting across columns');
+ok(/max-height:540px[\s\S]*#pl-inst-stale\{[^}]*max-width:52px[^}]*font-size:0[^}]*overflow:hidden/.test(pl) &&
+  /#pl-inst-stale:after\{content:attr\(data-compact-label\);font-size:7px/.test(pl) &&
+  /data-compact-label', '前日 '/.test(pl),
+  'pulse touch landscape shortens the secondary institutional stale badge without clipping its title');
+ok(/max-height:540px[\s\S]*pl-ohlc-trend \.chart \.vz-pt\{display:none!important\}/.test(pl) &&
+  /max-height:540px[\s\S]*pl-ohlc-trend \.chart \.vz-spark-ax\{[^}]*grid-template-columns:minmax\(0,1fr\)[^}]*overflow:hidden/.test(pl) &&
+  /max-height:540px[\s\S]*pl-ohlc-trend \.chart \.vz-plot\{[^}]*grid-column:1[^}]*grid-row:1[^}]*overflow:hidden/.test(pl),
+  'pulse touch landscape removes redundant spark annotations and gives the plot the full compact card');
 ok(/#pl-body\{[^}]*overflow:hidden/.test(pl) && /pl-expanded\{overflow:hidden\}/.test(pl) &&
   /data-go=\"factors\"/.test(pl) && !/pl-toggle-fac/.test(pl) &&
   /因子帳本改獨立頁/.test(pl),

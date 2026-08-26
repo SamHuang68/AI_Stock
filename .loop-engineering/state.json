@@ -1,70 +1,73 @@
 {
   "schemaVersion": 1,
   "projectId": "stock-terminal-v5",
-  "objective": "Freeze, commit, push and deploy the verified mobile-landscape 5+5 density restoration through the exact-commit Private Web release gate while excluding unrelated runtime market data.",
-  "status": "complete",
+  "objective": "Release the accepted landscape typography and beginner-readability corrections from an exact scoped Git commit, preserve runtime market data, and prove that the promoted Private Web runtime matches the reviewed bytes locally and through Tailscale.",
+  "status": "in_progress",
   "updatedAt": "2026-08-26",
   "constraints": {
     "inScope": [
-      "freeze the accepted LOOP-017 source, generated HTML, tests and evidence records",
-      "rerun canonical release tests and privacy/diff checks",
-      "commit and push the exact feature revision to the current origin branch",
-      "stage, test and promote that exact Git archive through the Private Web release gate",
-      "restart the isolated host and verify local plus Tailscale runtime identity and layout-rule presence"
+      "measure actual computed font sizes and DOM geometry on the user-reported wide-short desktop shape",
+      "replace the 7–10px beginner typography path with an explicit visual hierarchy",
+      "compact spacing rather than text when a desktop viewport is height-constrained",
+      "verify beginner layouts at desktop, medium desktop, phone portrait and phone landscape",
+      "retain the expert two-zone five-column phone-landscape contract and full primary KPI values",
+      "commit and push only the accepted UI, generated page, tests and immutable review records",
+      "stage, test and promote the exact application commit through the Private Web release gate",
+      "verify local gateway identity, Tailscale HTTPS availability and deployed artifact integrity"
     ],
     "outOfScope": [
-      "additional product or layout changes",
-      "credential, account, Tailscale ACL or exposure changes",
-      "startup-task installation",
-      "the unrelated runtime-updated data/twoii_daily.csv change"
+      "product logic, market-data formulas, credentials, accounts, route behavior or network exposure",
+      "the unrelated runtime-updated market-data files",
+      "changing Tailscale policy, tokens, accounts or existing publication topology"
     ],
     "assumptions": [
-      "LOOP-017 artifacts and responsive evidence are the accepted implementation baseline",
-      "the Private Web release script stages from an exact Git archive rather than the dirty worktree",
-      "production data and logs remain outside the promoted release tree",
-      "the later deployment-record commit does not alter the served feature revision"
+      "the LOOP-019 source and generated page are the implementation baseline",
+      "vertical scrolling is preferable to unreadable text on a short desktop viewport",
+      "supporting evidence may be smaller than body copy but must remain readable without zoom",
+      "the existing local development host may be used for read-only responsive verification"
     ],
     "permissions": [
-      "the user's explicit instruction 'git push commit deploy' authorizes commit, push, staging, promotion, restart and deployment verification",
-      "run deterministic tests, builds and authenticated local/Tailscale deployment checks without exposing credentials"
+      "the accepted LOOP-019 and LOOP-020 artifacts are the release candidates",
+      "the user's explicit instruction 'git commit push deploy' authorizes the scoped Git writes and Private Web promotion",
+      "promotion preserves production data and logs and can be rolled back by promoting a prior staged release"
     ],
     "availableResources": [
-      "accepted LOOP-017 source and evidence artifacts",
-      "canonical project tests and build script",
-      "exact-commit Private Web staging and promotion scripts",
-      "Host-owned release integration, verification and rollback evidence"
+      "current source, generated HTML, self-tests and local development host",
+      "Chrome device emulation and element geometry measurement",
+      "exact-commit Private Web release and isolated-host scripts",
+      "Host-owned single-writer release integration and verification"
     ],
     "excludedResources": [
       "credential contents, private brokerage payloads and personal holdings",
-      "new external AI dispatches or providers",
+      "unauthorized providers and unavailable Google capacity",
       "unrelated runtime market-data mutations"
     ]
   },
   "currentLoop": {
-    "id": "LOOP-018",
-    "title": "Mobile Landscape Release and Private Web Deployment",
-    "entryCondition": "LOOP-017 passed and the user explicitly requested commit, push and deploy",
-    "exitCondition": "The exact feature commit is pushed, staged, promoted, restarted and verified locally plus through Tailscale with no P0/P1"
+    "id": "LOOP-021",
+    "title": "Typography and Readability Release",
+    "entryCondition": "LOOP-019 and LOOP-020 passed and the user explicitly authorized commit, push and deployment",
+    "exitCondition": "The scoped commit is pushed, the exact commit archive passes release tests, promotion succeeds, and local plus Tailscale runtime identity and integrity gates pass"
   },
   "orchestrationPolicy": {
     "multiProviderRequired": false,
     "requiredDistinctProviders": 0,
     "quotaSignalsStayHostLocal": true,
     "unknownQuotaPolicy": "fallback",
-    "providerGateVerdict": "Host-only release loop; the accepted LOOP-017 advisory receipt is historical evidence, not new participation"
+    "providerGateVerdict": "Host-only release loop; the accepted LOOP-019 and LOOP-020 advisory evidence is historical and no new provider participation is claimed"
   },
   "taskShape": {
     "kind": "operate",
     "capabilities": ["decide", "register-store", "validate-govern", "deliver-actuate", "observe-measure"],
     "analysisSource": "chatgpt-codex-host",
-    "inputTypes": ["accepted LOOP-017 worktree delta", "test evidence", "Git branch", "Private Web release scripts"],
-    "outputTypes": ["feature commit", "origin branch update", "staged release", "active deployment", "deployment evidence commit"],
+    "inputTypes": ["accepted LOOP-019 and LOOP-020 worktree delta", "test evidence", "Git branch", "Private Web release scripts"],
+    "outputTypes": ["scoped Git commit", "remote branch receipt", "staged release manifest", "promoted Private Web runtime", "deployment verification record"],
     "freshness": "release evidence captured on 2026-08-26",
     "sideEffectLevel": "approved-write",
     "reversibility": "reversible",
     "approvalRequired": true,
-    "approvalNodeId": "L18-02",
-    "dataBoundary": "GitHub origin and the existing private Tailscale deployment target; no secrets or personal holdings enter commits or reports",
+    "approvalNodeId": "B21-RELEASE",
+    "dataBoundary": "Local repository, GitHub origin and existing EVO-T1 Private Web install; runtime secrets and production data remain local and uncommitted",
     "feedbackRequired": false
   },
   "capabilityGraph": {
@@ -104,6 +107,27 @@
       "releaseTask": "L18-04",
       "approvalEvidence": "User instruction: git push commit deploy",
       "verdict": "passed"
+    },
+    {
+      "id": "B19-TYPOGRAPHY",
+      "requiredTasks": ["L19-01", "L19-02", "L19-03"],
+      "releaseTask": "L19-04",
+      "approvalEvidence": "User requested HIVE-assisted correction; no deployment or external actuation is in scope",
+      "verdict": "passed"
+    },
+    {
+      "id": "B20-READABILITY",
+      "requiredTasks": ["L20-01", "L20-02", "L20-03"],
+      "releaseTask": "L20-04",
+      "approvalEvidence": "User rejected the prior readability quality and explicitly requested correction; commit, push and deployment remain out of scope",
+      "verdict": "passed"
+    },
+    {
+      "id": "B21-RELEASE",
+      "requiredTasks": ["L21-01", "L21-02", "L21-03", "L21-04"],
+      "releaseTask": "L21-05",
+      "approvalEvidence": "User instruction: git commit push deploy",
+      "verdict": "pending"
     }
   ],
   "routing": [
@@ -113,7 +137,7 @@
       "provider": "OpenAI",
       "model": "Codex Host",
       "dataBoundary": "local project",
-      "selectionReason": "Git and deployment actuation plus runtime acceptance remain Host-owned; no new external review is required for the already accepted artifact",
+      "selectionReason": "Git and deployment actuation plus runtime acceptance remain Host-owned; no new external review is required for the already accepted artifacts",
       "fallback": null,
       "responsibility": "freeze, test, commit, push, stage, promote, restart and verify the exact release",
       "writePolicy": "single writer"
@@ -614,49 +638,224 @@
       "sideEffectLevel": "approved-write",
       "approvalNodeId": "L18-02",
       "successCriteria": "Active manifest, HTML hash, runtime health, authentication/authorization and deployed landscape rule match the exact feature commit"
+    },
+    {
+      "id": "L19-01",
+      "title": "Measure mobile landscape typography collisions",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": [],
+      "capabilities": ["sense", "observe-measure"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Record panel widths, KPI client widths, overflowing glyph policy and compact chart intersections at 956x440"
+    },
+    {
+      "id": "L19-02",
+      "title": "Independent HIVE responsive challenge",
+      "owner": "nemotron-3-super",
+      "status": "completed",
+      "dependsOn": ["L19-01"],
+      "capabilities": ["validate-govern", "render-explain"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Review the immutable artifact and return the six requested selector, policy, risk and Gate sections"
+    },
+    {
+      "id": "L19-03",
+      "title": "Implement landscape-only typography containment",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L19-01", "L19-02"],
+      "capabilities": ["create-synthesize", "render-explain"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "KPI values fit without truncation, chart labels stop colliding, and the institutional title remains visible"
+    },
+    {
+      "id": "L19-04",
+      "title": "Run build and responsive acceptance gates",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L19-03"],
+      "capabilities": ["validate-govern", "observe-measure", "learn-refine"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Syntax, self-test, build, scoped diff and Chrome gates pass at 956x440, 956x390, 390x844 and 1440x900"
+    },
+    {
+      "id": "L20-01",
+      "title": "Reproduce the rejected wide-desktop readability state",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": [],
+      "capabilities": ["sense", "observe-measure", "learn-refine"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Record computed font sizes, card occupancy, overflow and the exact short-height media path at 1366x551"
+    },
+    {
+      "id": "L20-02",
+      "title": "Independent HIVE successor-contract review",
+      "owner": "nemotron-3-super",
+      "status": "completed",
+      "dependsOn": ["L20-01"],
+      "capabilities": ["validate-govern", "render-explain"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Review and accept or reject the immutable failure analysis, typography hierarchy and five-viewport Gate matrix"
+    },
+    {
+      "id": "L20-03",
+      "title": "Implement hierarchy-first beginner responsive styling",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L20-01", "L20-02"],
+      "capabilities": ["create-synthesize", "render-explain"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Body and support typography meet the successor floor, wide-short desktop scrolls, and no primary content is hidden"
+    },
+    {
+      "id": "L20-04",
+      "title": "Run build and five-viewport experiential Gates",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L20-03"],
+      "capabilities": ["validate-govern", "observe-measure", "learn-refine"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Syntax, self-test, build, computed typography, overlap, truncation, horizontal containment and expert 5+5 regressions pass"
+    },
+    {
+      "id": "L21-01",
+      "title": "Freeze the scoped release candidate",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L20-04"],
+      "capabilities": ["decide", "register-store"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "The exact source, generated page, tests and four immutable review records are enumerated while runtime market-data mutations remain excluded"
+    },
+    {
+      "id": "L21-02",
+      "title": "Run release regression and integrity gates",
+      "owner": "host",
+      "status": "completed",
+      "dependsOn": ["L21-01"],
+      "capabilities": ["validate-govern"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Syntax, self-test, build, Private Web tests, scoped diff and privacy checks pass before Git mutation"
+    },
+    {
+      "id": "L21-03",
+      "title": "Commit and push the exact application revision",
+      "owner": "host",
+      "status": "in_progress",
+      "dependsOn": ["L21-02"],
+      "capabilities": ["register-store", "deliver-actuate"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "B21-RELEASE",
+      "successCriteria": "Only approved paths are committed and origin resolves the current branch to the exact feature commit"
+    },
+    {
+      "id": "L21-04",
+      "title": "Stage, promote and restart the exact Private Web release",
+      "owner": "host",
+      "status": "pending",
+      "dependsOn": ["L21-03"],
+      "capabilities": ["deliver-actuate"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "B21-RELEASE",
+      "successCriteria": "The exact Git archive passes release tests, promotion preserves data/logs, and isolated host restart succeeds"
+    },
+    {
+      "id": "L21-05",
+      "title": "Verify runtime identity, availability and artifact integrity",
+      "owner": "host",
+      "status": "pending",
+      "dependsOn": ["L21-04"],
+      "capabilities": ["validate-govern", "observe-measure"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "B21-RELEASE",
+      "successCriteria": "Active manifest, runtime HTML hash, local gateway and Tailscale HTTPS all match the exact deployed feature commit"
     }
   ],
   "verification": {
     "gate": [
-      "the release scope excludes unrelated data/twoii_daily.csv",
-      "canonical Python and JavaScript tests, deterministic build, diff and credential-pattern checks pass",
-      "the exact feature commit is pushed to the current origin branch",
-      "Private Web staging rebuilds and tests the exact Git archive",
-      "promotion preserves production data/logs and retains a rollback release",
-      "active local and Tailscale runtime identity and served source match the feature commit"
+      "The scoped commit contains only accepted source, generated HTML, self-tests, Loop state and immutable review records",
+      "Runtime-updated market data, secrets, tokens, credentials and personal holdings remain outside the commit",
+      "JavaScript syntax, complete ShellV5 self-test, production build and Private Web release regressions pass",
+      "The remote branch resolves to the exact application commit before deployment",
+      "The exact Git archive is staged, tested and explicitly promoted while production data and logs are preserved",
+      "The active manifest, runtime HTML, local gateway and Tailscale HTTPS endpoint match the exact deployed commit"
     ],
     "commands": [
-      "canonical unittest discovery and JavaScript self-tests",
-      "build_v2.py and scoped git diff --check",
-      "bounded credential-pattern scan of staged files",
-      "git commit and git push origin cursor/st-wd-tip-integrate-3497",
-      "scripts/private_web_release.py stage/promote",
-      "Private Web restart plus local/Tailscale remote tests"
+      "node --check src/ui/pulse_v5.js",
+      "node tests/shell_v5_selftest.js",
+      "bundled Python build_v2.py",
+      "bundled Python -m unittest tests.test_ai_local tests.test_daemon_lock tests.test_health_live tests.test_private_web_gateway tests.test_private_web_access tests.test_private_web_host tests.test_private_web_release",
+      "scoped git diff --check plus explicit staged-path and secret-pattern inspection",
+      "private_web_release.py stage/status/promote against the exact feature commit",
+      "isolated-host restart plus local/Tailscale health, authentication and artifact-hash inspection"
     ],
     "evidence": [
-      "LOOP-017 implementation and responsive gates passed before release authorization",
-      "Canonical unittest discovery ran 274 tests in 37.319 seconds: OK with one opt-in live test skipped",
-      "JavaScript syntax and ShellV5 self-test passed, including the landscape compact-density assertion",
-      "build_v2.py reproduced revision cd4d49694939",
-      "Scoped diff and credential-pattern checks passed; unrelated data/twoii_daily.csv remained outside the release scope",
-      "Feature commit 3c6bf59112265c8af6818711140d403db58a485b was pushed and origin/cursor/st-wd-tip-integrate-3497 resolved to the same hash",
-      "Exact Git archive staging rebuilt revision 7ba21c53fd02 and passed 39 Private Web tests in 22.978 seconds",
-      "Release 3c6bf5911226 was promoted; the active manifest identifies the exact feature commit and production ports 18434/18435 listen on loopback",
-      "Staged/current SHA-256 pairs match: stock_terminal_v2.html 66D77E40AF5EC82833CA51A088BCA2AC4A3DEF1FF31DB14593115FB5D0A12965 and pulse_v5.js E2A3FDED63CA9370E9571C11642FD2400094EF75E314262EFE1E6C87157B584D",
-      "Tailscale remote smoke passed TLS, gateway/upstream health, unauthenticated rejection, browser login redirect, owner/reader access and blocked notify=403"
+      "The release candidate is limited to state.json, four immutable review/result records, src/ui/pulse_v5.js, stock_terminal_v2.html and tests/shell_v5_selftest.js",
+      "JavaScript syntax and the complete ShellV5 self-test passed before Git mutation",
+      "The bundled production build regenerated stock_terminal_v2.html at revision 115aba561f4f",
+      "All 39 Private Web regression tests passed before Git mutation",
+      "Scoped diff --check passed; the only secret-pattern hits are empty client-side apiKey variable assignments in generated HTML",
+      "Runtime-updated data/tw_names_backup.json and data/twoii_daily.csv remain unstaged and excluded"
     ],
     "openP0": [],
     "openP1": [],
-    "verdict": "passed",
+    "verdict": "precommit-passed; deployment-pending",
     "providerDiversity": {
       "required": false,
       "requiredDistinctProviders": 0,
       "completedDistinctProviders": 0,
-      "verdict": "Host-only release loop; no new external workers are required",
+      "verdict": "Host-only release execution; no new external-provider participation claimed",
       "providers": []
     }
   },
+  "processIncidents": [
+    {
+      "incidentId": "PI-020-01",
+      "failedLoop": "LOOP-019",
+      "classification": "verification-definition",
+      "symptom": "Phone-landscape containment passed while wide-desktop beginner text remained 7–10px despite available space",
+      "missingGate": "Minimum computed font size, information hierarchy and whitespace utilization were absent from the acceptance rubric",
+      "successorLoop": "LOOP-020",
+      "resolution": "Added computed-typography and multi-viewport experiential Gates; short-height rules now compact spacing and permit scrolling instead of shrinking text"
+    }
+  ],
   "loopHistory": [
+    {
+      "loopId": "LOOP-020",
+      "result": "pass-successor",
+      "summary": "Recovered beginner-mode readability after the user rejected the geometry-only review: removed the wide-desktop 7–10px compression path, established a 13–14px body and 11–12px support hierarchy, preserved scroll-safe responsive behavior, and passed five measured browser configurations plus an accepted immutable HIVE challenge.",
+      "residualRisks": [
+        "The short desktop now scrolls vertically by design; one-page fit is no longer treated as a quality requirement.",
+        "Supporting source and risk badges use an 11px floor to preserve dense context; browser or OS accessibility enlargement can increase vertical scrolling.",
+        "The HIVE claim is one accepted NVIDIA advisory, not a multi-provider review.",
+        "Runtime-updated data/tw_names_backup.json and data/twoii_daily.csv remain unrelated and excluded from any later scoped commit.",
+        "This loop did not commit, push or deploy the correction."
+      ]
+    },
+    {
+      "loopId": "LOOP-019",
+      "result": "pass",
+      "summary": "Measured and eliminated the remaining phone-landscape typography collisions while preserving 5+5: primary KPI values now stay inside their cells without truncation, redundant mini-chart annotations are removed only in short touch landscape, the prior-day badge no longer clips 法人資金, and responsive Chrome gates pass at both landscape heights plus portrait and desktop.",
+      "residualRisks": [
+        "Secondary descriptions deliberately use one-line ellipsis in the compact landscape; full context remains available in source panels and tooltips.",
+        "Operating-system accessibility enlargement beyond the tested browser layout can reduce the number of visible list rows, but primary KPI cells now contain their paint boundary.",
+        "Google Gemini was unavailable due rate limiting; the HIVE contribution is one accepted NVIDIA advisory, not verified multi-provider collaboration.",
+        "Runtime-updated data/tw_names_backup.json and data/twoii_daily.csv remain unrelated, unmodified by this loop and excluded from any later scoped commit.",
+        "This loop did not commit, push or deploy the correction."
+      ]
+    },
     {
       "loopId": "LOOP-018",
       "result": "pass",
@@ -848,6 +1047,10 @@
     ".loop-engineering/state.json",
     ".loop-engineering/landscape-layout-review-2026-08-26.md",
     ".loop-engineering/landscape-layout-result-2026-08-26.md",
+    ".loop-engineering/landscape-typography-review-2026-08-26.md",
+    ".loop-engineering/landscape-typography-result-2026-08-26.md",
+    ".loop-engineering/beginner-readability-review-2026-08-26.md",
+    ".loop-engineering/beginner-readability-result-2026-08-26.md",
     "docs/CONSENSUS_ATTENTION_RADAR.md",
     "server/consensus_attention.py",
     "src/ui/consensus_attention_v5.js",
