@@ -13,6 +13,15 @@
   var optionsRefreshStarted = false;
   var evidenceView = { category: 'all', mode: 'all', scope: 'all', query: '' };
   var pendingFocus = null;
+  var AI_TIMEOUT_MS = 12 * 60 * 1000;
+  var aiBusy = false;
+  var aiController = null;
+  var aiAccessPromise = null;
+  var privateProfile = window.ST_PRIVATE_WEB_PROFILE || null;
+  var aiAccessRole = privateProfile
+    ? (privateProfile.role === 'owner' ? 'owner' : (privateProfile.role === 'reader' ? 'reader' : 'unknown'))
+    : 'owner';
+  var aiDisplayState = { visible: false, text: '', error: false };
 
   var ACTIONS = {
     ALLOW_MEASURED_RISK: '允許受控增加風險', LIMIT_NEW_RISK: '限制新增風險',
@@ -73,7 +82,8 @@
       '#dc-root .dc-sub{font-size:9px;color:var(--tlo);margin-top:3px}' +
       '#dc-root .dc-actions{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}' +
       '#dc-root .dc-btn{border:1px solid var(--border);background:var(--bg3);color:var(--text);border-radius:5px;padding:5px 8px;font:700 9px "JetBrains Mono",monospace;cursor:pointer}' +
-      '#dc-root .dc-btn:hover{border-color:var(--gold);color:var(--gold)}#dc-root .dc-btn.primary{background:var(--gold);color:#07101e;border-color:var(--gold)}' +
+      '#dc-root .dc-btn:hover{border-color:var(--gold);color:var(--gold)}#dc-root .dc-btn:disabled{cursor:not-allowed;opacity:.55;border-color:#26364f;color:#75869d}' +
+      '#dc-root .dc-btn.primary{background:var(--gold);color:#07101e;border-color:var(--gold)}' +
       '#dc-root .dc-command-fold{margin:0 0 8px;border:1px solid #26364f;border-radius:8px;background:#091321;overflow:hidden}' +
       '#dc-root .dc-command-fold>summary{list-style:none;display:flex;align-items:center;gap:8px;margin:0!important;padding:7px 10px;' +
         'color:#dbe6f2!important;font-size:9px!important;cursor:pointer;user-select:none}' +
@@ -287,6 +297,7 @@
       '#dc-root .dc-oi-authority{margin-top:8px;padding:8px 10px;border-left:3px solid #facc15;background:rgba(250,204,21,.06);color:#d8c99a;font-size:10px;line-height:1.5;border-radius:5px}' +
       '#dc-root .dc-oi-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}' +
       '#dc-root .dc-ai{white-space:pre-wrap;font-family:"Noto Sans TC",sans-serif;font-size:10px;line-height:1.65;color:#d4deea}' +
+      '#dc-root .dc-ai.is-error{color:#fecaca}' +
       '#dc-root .dc-note{font-size:8px;color:#71839a;line-height:1.5}' +
       '#dc-root .dc-empty{text-align:center;padding:26px 14px}' +
       '#dc-root .dc-empty .v{font-size:14px;margin-bottom:8px}' +
@@ -362,8 +373,105 @@
       $('dc-refresh').onclick = refreshMarketData;
       $('dc-ai-btn').onclick = runAi;
     }
+    syncAiButtonState();
     bindPortfolioSwitch();
     return $('dc-body');
+  }
+
+  function syncAiButtonState() {
+    var button = $('dc-ai-btn');
+    if (!button) return;
+    button.disabled = !!aiBusy || aiAccessRole === 'reader';
+    button.setAttribute('aria-busy', aiBusy ? 'true' : 'false');
+    if (aiBusy) {
+      button.textContent = 'AI 解釋中…';
+      button.title = '分析在 EVO-T1 執行；請勿重複送出。';
+    } else if (aiAccessRole === 'reader') {
+      button.textContent = 'AI 解釋（Owner）';
+      button.title = 'Reader 可閱讀既有決策資料；啟動 EVO-T1 AI 運算僅限 Owner。';
+    } else {
+      button.textContent = aiDisplayState.error ? '重試 AI 解釋' : 'AI 解釋';
+      button.title = aiAccessRole === 'unknown' ? '首次使用會先確認 Private Web 權限。' : '由 EVO-T1 本機模型唯讀解釋 DecisionContext。';
+    }
+  }
+
+  function resolveAiAccess() {
+    if (!window.ST_PRIVATE_WEB_PROFILE) {
+      aiAccessRole = 'owner';
+      syncAiButtonState();
+      return Promise.resolve(aiAccessRole);
+    }
+    if (aiAccessRole === 'owner' || aiAccessRole === 'reader') return Promise.resolve(aiAccessRole);
+    if (aiAccessPromise) return aiAccessPromise;
+    aiAccessPromise = fetch(SRV + '/gateway/whoami', {
+      method: 'GET', cache: 'no-store', credentials: 'same-origin'
+    }).then(function (response) {
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      return response.json();
+    }).then(function (payload) {
+      aiAccessRole = payload && payload.role === 'owner' ? 'owner' : 'reader';
+      return aiAccessRole;
+    }).catch(function () {
+      aiAccessRole = 'unknown';
+      return aiAccessRole;
+    }).then(function (role) {
+      aiAccessPromise = null;
+      syncAiButtonState();
+      return role;
+    });
+    return aiAccessPromise;
+  }
+
+  function setAiDisplay(text, error) {
+    aiDisplayState = { visible: true, text: String(text || ''), error: !!error };
+    restoreAiDisplay();
+  }
+
+  function restoreAiDisplay() {
+    var card = $('dc-ai-card'), box = $('dc-ai-body');
+    if (!card || !box || !aiDisplayState.visible) return;
+    card.style.display = '';
+    box.textContent = aiDisplayState.text;
+    box.classList.toggle('is-error', !!aiDisplayState.error);
+  }
+
+  function safeAiErrorDetail(text) {
+    var raw = String(text || '').trim();
+    if (!raw) return '';
+    try {
+      var payload = JSON.parse(raw);
+      raw = payload && (payload.error || payload.message) ? String(payload.error || payload.message) : raw;
+    } catch (e) {}
+    return raw.replace(/\s+/g, ' ').slice(0, 220);
+  }
+
+  function aiErrorMessage(error, fallbackRequestId) {
+    var requestId = error && error.requestId
+      ? String(error.requestId)
+      : String(fallbackRequestId || '');
+    var suffix = requestId ? '\n\n請求編號：' + requestId : '';
+    if (error && error.name === 'AbortError') {
+      return 'AI 解釋等待超過 12 分鐘，已停止本次請求；DecisionContext 不受影響，可稍後重試。' + suffix;
+    }
+    var status = Number(error && error.status);
+    if (status === 403) return '此登入帳號為 Reader；AI 解釋會使用 EVO-T1 運算資源，目前僅 Owner 可執行。' + suffix;
+    if (status === 401) return '登入狀態已失效，請重新登入 Private Web 後再執行 AI 解釋。' + suffix;
+    if (status === 413) return '本次 DecisionContext 超過 AI 服務可接受大小；請先更新資料後重試。' + suffix;
+    if (status === 429) return 'EVO-T1 AI 請求過於頻繁，請稍後再試。' + suffix;
+    if (status === 502) return 'Private Web 無法連到 EVO-T1 後端；請確認遠端服務已啟動後再試。' + suffix;
+    if (status === 503) return 'EVO-T1 本機模型尚未就緒或正在忙碌，請稍後重試。' + suffix;
+    var detail = safeAiErrorDetail(error && error.detail);
+    return (detail || '無法連線到 EVO-T1 AI 服務；deterministic DecisionContext 不受影響。') + suffix;
+  }
+
+  function aiRuntimeFailureDetail(answer) {
+    var text = String(answer || '').trim();
+    if (text.indexOf('⚠') !== 0) return '';
+    var warning = text.match(/^⚠\s*([^\n]+)/);
+    if (!warning) return '';
+    var detail = String(warning[1] || '').trim();
+    if (/^非投資建議[。.!！]?$/.test(detail)) return '';
+    return detail;
   }
 
   function trace(event, id, details) {
@@ -1705,6 +1813,7 @@
         '<div class="dc-card"><h3><span>Regime History</span><span id="dc-hist-meta">載入中</span></h3><div id="dc-history" class="dc-note">—</div></div>' +
         '<div class="dc-card" id="dc-ai-card" style="display:none"><h3><span>AI Explanation</span><span>唯讀解釋</span></h3><div id="dc-ai-body" class="dc-ai"></div></div>' +
       '</div></div><div class="dc-note">Decision support only · AI 不得覆寫 regime、confidence、key levels 或倉位公式。</div>';
+    restoreAiDisplay();
     bindRisk();
     bindEvidenceLedger();
     bindNewsLinks();
@@ -1762,27 +1871,93 @@
   }
 
   function runAi() {
-    if (!lastContext) return;
-    var card = $('dc-ai-card'), box = $('dc-ai-body');
-    if (card) card.style.display = '';
-    if (box) box.textContent = 'EVO-T1 正在準備本機快速模型。請預留約 5 分鐘；此時間已包含冷啟動、模型載入、上下文預填與推理，通常會提早完成。';
+    if (aiBusy) return;
+    if (aiAccessRole === 'unknown') {
+      resolveAiAccess().then(function (role) {
+        if (role === 'owner') runAi();
+        else if (role === 'reader') syncAiButtonState();
+        else setAiDisplay('目前無法確認 Private Web 權限，請檢查連線後再試。', true);
+      });
+      return;
+    }
+    if (aiAccessRole !== 'owner') {
+      setAiDisplay('此登入帳號為 Reader；AI 解釋會使用 EVO-T1 運算資源，目前僅 Owner 可執行。', true);
+      return;
+    }
+    if (!lastContext) {
+      showEmpty('AI 解釋尚無可用資料', '請先按「更新市場資料」，建立 DecisionContext 後再執行 AI 解釋。');
+      return;
+    }
+    aiBusy = true;
+    syncAiButtonState();
+    setAiDisplay('EVO-T1 正在準備本機快速模型。請預留約 8 分鐘；此時間已包含冷啟動、模型載入、上下文預填與推理，通常會提早完成。最長等待 12 分鐘。', false);
+    aiController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timeoutId = aiController ? setTimeout(function () { aiController.abort(); }, AI_TIMEOUT_MS) : null;
     var slim = {
       regime: lastContext.regime, actionEnvelope: lastContext.actionEnvelope,
       divergences: lastContext.divergences, confirmation: lastContext.confirmation,
       invalidation: lastContext.invalidation, evidence: (lastContext.evidence || []).slice(0, 12)
     };
+    var contextKey = JSON.stringify(slim);
+    var localRequestId = window.DecisionData && DecisionData.correlationId
+      ? DecisionData.correlationId('decision-ai')
+      : 'decision-ai-' + Date.now().toString(36);
     var prompt = '請以 5–8 句繁中解釋既有 DecisionContext，先說支持證據，再提出最強反方觀點、衝突與失效條件；引用 evidence id。' +
       '不得改寫 regime、confidence、價格關卡或倉位數字，不得創造未提供的資料，結尾加「⚠ 非投資建議」。';
-    fetch(SRV + '/ai/local', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: prompt, context: JSON.stringify(slim) }) })
-      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-      .then(function (t) { if (box) box.textContent = t || '本機模型未回傳內容。'; })
-      .catch(function () { if (box) box.textContent = '本機模型未連線；deterministic DecisionContext 不受影響。'; });
+    fetch(SRV + '/ai/local', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-ST-Trace-ID': localRequestId },
+      body: JSON.stringify({ prompt: prompt, context: JSON.stringify(slim) }),
+      credentials: 'same-origin', signal: aiController ? aiController.signal : undefined
+    }).then(function (response) {
+      var requestId = response.headers.get('X-ST-AI-Request-ID') || response.headers.get('X-ST-Trace-ID') || localRequestId;
+      return response.text().then(function (text) {
+        if (!response.ok) {
+          var httpError = new Error('HTTP ' + response.status);
+          httpError.status = response.status;
+          httpError.detail = text;
+          httpError.requestId = requestId;
+          throw httpError;
+        }
+        var answer = String(text || '').trim();
+        if (!answer) {
+          var emptyError = new Error('empty AI response');
+          emptyError.detail = '模型完成推理但沒有輸出可見正文，請重試。';
+          emptyError.requestId = requestId;
+          throw emptyError;
+        }
+        var runtimeFailure = aiRuntimeFailureDetail(answer);
+        if (runtimeFailure) {
+          var streamError = new Error('AI stream failure');
+          streamError.detail = runtimeFailure;
+          streamError.requestId = requestId;
+          throw streamError;
+        }
+        var currentSlim = lastContext ? {
+          regime: lastContext.regime, actionEnvelope: lastContext.actionEnvelope,
+          divergences: lastContext.divergences, confirmation: lastContext.confirmation,
+          invalidation: lastContext.invalidation, evidence: (lastContext.evidence || []).slice(0, 12)
+        } : null;
+        if (!currentSlim || JSON.stringify(currentSlim) !== contextKey) {
+          setAiDisplay('市場資料已在分析期間更新；為避免舊解釋對應新畫面，本次結果已丟棄，請重新執行 AI 解釋。\n\n請求編號：' + requestId, true);
+          return;
+        }
+        var suffix = requestId ? '\n\n請求編號：' + requestId : '';
+        setAiDisplay(answer + suffix, false);
+      });
+    }).catch(function (error) {
+      setAiDisplay(aiErrorMessage(error, localRequestId), true);
+    }).then(function () {
+      if (timeoutId) clearTimeout(timeoutId);
+      aiController = null;
+      aiBusy = false;
+      syncAiButtonState();
+    });
   }
 
   function activate(opts) {
     if (opts && (opts.focusSection || opts.highlightId)) pendingFocus = opts;
     ensureMount();
+    resolveAiAccess();
     load(false);
     if (timer) clearInterval(timer);
     timer = setInterval(function () {

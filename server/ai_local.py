@@ -26,6 +26,15 @@ ROOT = Path(__file__).resolve().parents[1]
 HOST_LABEL = (os.environ.get("ST_AI_HOST_LABEL") or "EVO-T1").strip()[:48]
 TRACE_PATH = Path(os.environ.get("ST_AI_TRACE_PATH") or str(ROOT / "logs" / "ai_runtime_trace.jsonl"))
 
+
+def _bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    """Read one integer setting without allowing import-time configuration failure."""
+    try:
+        value = int(os.environ.get(name) or default)
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
 OLLAMA_BASE = (os.environ.get("ST_OLLAMA_BASE") or "http://127.0.0.1:11434").rstrip("/")
 LMSTUDIO_BASE = (
     os.environ.get("AI_LOCAL_BASE")
@@ -44,6 +53,7 @@ FAST_MODEL = (
     os.environ.get("ST_AI_FAST_MODEL")
     or ("google/gemma-4-e4b" if FAST_PROVIDER == "lmstudio" else "gemma2:latest")
 ).strip()
+FAST_MAX_TOKENS = _bounded_env_int("ST_AI_FAST_MAX_TOKENS", 2048, 1400, 4096)
 
 HERMES_PROVIDER = (os.environ.get("ST_AI_HERMES_PROVIDER") or "nvidia").strip()
 HERMES_MODEL = (
@@ -75,6 +85,10 @@ class AiRuntimeError(RuntimeError):
     """A bounded, user-readable AI runtime failure."""
 
 
+class AiCompletionError(AiRuntimeError):
+    """The model transport completed without one trustworthy visible answer."""
+
+
 def _trace(event: str, *, request_id: str, mode: str, **details: object) -> None:
     """Persist sanitized execution evidence without prompts or output."""
     allowed: dict[str, object] = {}
@@ -82,6 +96,7 @@ def _trace(event: str, *, request_id: str, mode: str, **details: object) -> None
         if key in {
             "provider", "model", "dataBoundary", "phase", "errorType",
             "elapsedMs", "inputChars", "inputHash", "outputChars", "exitCode",
+            "maxTokens", "finishReason", "completionTokens", "reasoningTokens",
         }:
             allowed[key] = value
     record = {
@@ -202,6 +217,7 @@ def route_metadata(mode: str, *, probe: bool = True) -> dict[str, Any]:
         "toolPolicy": "no tools; advisory text only",
         "estimateSeconds": FAST_ESTIMATE_SECONDS,
         "estimateLabel": _estimate_label(FAST_ESTIMATE_SECONDS),
+        "maxOutputTokens": FAST_MAX_TOKENS,
         "phases": ["模型冷啟動", "上下文預填", "快速推理"],
         "reason": reason,
     }
@@ -257,13 +273,20 @@ def _full_prompt(prompt: str, context: str) -> tuple[str, str]:
     return full, hashlib.sha256(full.encode("utf-8")).hexdigest()
 
 
-def _stream_lmstudio(full_prompt: str) -> Generator[str, None, None]:
+def _stream_lmstudio(
+    full_prompt: str,
+    *,
+    diagnostics: Optional[Dict[str, Any]] = None,
+) -> Generator[str, None, None]:
+    diagnostics = diagnostics if diagnostics is not None else {}
+    diagnostics.update({"maxTokens": FAST_MAX_TOKENS, "outputChars": 0})
     payload = {
         "model": FAST_MODEL,
         "messages": [{"role": "user", "content": full_prompt}],
         "temperature": 0.3,
-        "max_tokens": 700,
+        "max_tokens": FAST_MAX_TOKENS,
         "stream": True,
+        "stream_options": {"include_usage": True},
     }
     request = urllib.request.Request(
         LMSTUDIO_CHAT_URL, data=json.dumps(payload).encode("utf-8"),
@@ -279,18 +302,51 @@ def _stream_lmstudio(full_prompt: str) -> Generator[str, None, None]:
                 break
             try:
                 item = json.loads(data)
-                delta = ((item.get("choices") or [{}])[0].get("delta") or {}).get("content")
-                if delta:
-                    yield str(delta)
+                choices = item.get("choices") or []
+                choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+                finish_reason = choice.get("finish_reason")
+                if finish_reason:
+                    normalized = str(finish_reason).strip().lower()
+                    diagnostics["finishReason"] = (
+                        normalized if normalized in {
+                            "stop", "length", "content_filter", "tool_calls", "function_call",
+                        } else "other"
+                    )
+                usage = item.get("usage") or {}
+                if isinstance(usage, dict):
+                    completion_tokens = usage.get("completion_tokens")
+                    if isinstance(completion_tokens, (int, float)) and completion_tokens >= 0:
+                        diagnostics["completionTokens"] = int(completion_tokens)
+                    details = usage.get("completion_tokens_details") or {}
+                    reasoning_tokens = details.get("reasoning_tokens") if isinstance(details, dict) else None
+                    if isinstance(reasoning_tokens, (int, float)) and reasoning_tokens >= 0:
+                        diagnostics["reasoningTokens"] = int(reasoning_tokens)
+                # Deliberately ignore reasoning/reasoning_content/analysis. Only
+                # model-visible answer text may cross the runtime boundary.
+                delta = choice.get("delta") or {}
+                content = delta.get("content") if isinstance(delta, dict) else None
+                if isinstance(content, str) and content:
+                    diagnostics["outputChars"] = int(diagnostics.get("outputChars") or 0) + len(content)
+                    yield content
             except (TypeError, ValueError):
                 continue
+    output_chars = int(diagnostics.get("outputChars") or 0)
+    finish_reason = diagnostics.get("finishReason")
+    if output_chars <= 0 and finish_reason == "length":
+        raise AiCompletionError(
+            f"本機模型已用完 {FAST_MAX_TOKENS} 個輸出 token，但尚未產生可見正文；請重試。"
+        )
+    if output_chars <= 0:
+        raise AiCompletionError("本機模型完成推理，但未回傳可見正文；請重試。")
+    if finish_reason == "length":
+        raise AiCompletionError("本機模型回覆達輸出上限，內容可能不完整；請重試。")
 
 
 def _stream_ollama(full_prompt: str) -> Generator[str, None, None]:
     payload = {
         "model": FAST_MODEL,
         "messages": [{"role": "user", "content": full_prompt}],
-        "options": {"temperature": 0.3},
+        "options": {"temperature": 0.3, "num_predict": FAST_MAX_TOKENS},
         "stream": True,
     }
     request = urllib.request.Request(
@@ -329,29 +385,45 @@ def chat_stream(
         raise AiRuntimeError(defer or "本機模型忙碌")
     started = time.monotonic()
     output_chars = 0
+    diagnostics: Dict[str, Any] = {"maxTokens": FAST_MAX_TOKENS}
     _trace(
         "started", request_id=request_id, mode="fast",
         provider=metadata["provider"], model=metadata["model"],
         dataBoundary=metadata["dataBoundary"], phase="model-load-prefill-inference",
-        inputChars=len(full_prompt), inputHash=digest,
+        inputChars=len(full_prompt), inputHash=digest, maxTokens=FAST_MAX_TOKENS,
     )
     try:
-        iterator = _stream_lmstudio(full_prompt) if FAST_PROVIDER == "lmstudio" else _stream_ollama(full_prompt)
+        iterator = (
+            _stream_lmstudio(full_prompt, diagnostics=diagnostics)
+            if FAST_PROVIDER == "lmstudio" else _stream_ollama(full_prompt)
+        )
         for chunk in iterator:
             output_chars += len(chunk)
             yield chunk
+        if output_chars <= 0:
+            raise AiCompletionError("本機模型完成推理，但未回傳可見正文；請重試。")
         _trace(
             "completed", request_id=request_id, mode="fast",
             provider=metadata["provider"], model=metadata["model"],
             dataBoundary=metadata["dataBoundary"], phase="complete",
             elapsedMs=round((time.monotonic() - started) * 1000), outputChars=output_chars,
+            maxTokens=diagnostics.get("maxTokens"),
+            finishReason=diagnostics.get("finishReason"),
+            completionTokens=diagnostics.get("completionTokens"),
+            reasoningTokens=diagnostics.get("reasoningTokens"),
         )
     except Exception as exc:
         _trace(
             "failed", request_id=request_id, mode="fast",
             provider=metadata["provider"], model=metadata["model"],
-            dataBoundary=metadata["dataBoundary"], phase="runtime",
+            dataBoundary=metadata["dataBoundary"], phase=(
+                "completion-validation" if isinstance(exc, AiCompletionError) else "runtime"
+            ),
             elapsedMs=round((time.monotonic() - started) * 1000), errorType=type(exc).__name__,
+            outputChars=output_chars, maxTokens=diagnostics.get("maxTokens"),
+            finishReason=diagnostics.get("finishReason"),
+            completionTokens=diagnostics.get("completionTokens"),
+            reasoningTokens=diagnostics.get("reasoningTokens"),
         )
         if isinstance(exc, AiRuntimeError):
             raise

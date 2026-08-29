@@ -212,6 +212,7 @@ class PrivateWebGatewayTests(unittest.TestCase):
             html = response.read().decode("utf-8")
             self.assertEqual(int(response.headers["Content-Length"]), len(html.encode("utf-8")))
         self.assertIn("ST_PRIVATE_WEB_PROFILE", html)
+        self.assertIn('role:"owner"', html)
         self.assertIn("wavedeck:false", html)
         self.assertIn("window.SERVER=", html)
         self.assertIn("window.location.origin", html)
@@ -282,6 +283,7 @@ class PrivateWebGatewayTests(unittest.TestCase):
         with urllib.request.urlopen(root, timeout=5) as response:
             html_body = response.read().decode("utf-8")
         self.assertIn("ST_PRIVATE_WEB_PROFILE", html_body)
+        self.assertIn('role:"reader"', html_body)
 
     def test_login_help_is_available_before_authentication(self):
         req = urllib.request.Request(self.base + "/gateway/help", headers={"Accept": "text/html"})

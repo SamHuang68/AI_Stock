@@ -76,7 +76,7 @@ HOP_BY_HOP = {
 }
 
 PRIVATE_PROFILE_BOOT = r'''<script id="st-private-web-profile">
-window.ST_PRIVATE_WEB_PROFILE={profile:"personal-market",wavedeck:false,remoteTrading:false};
+window.ST_PRIVATE_WEB_PROFILE={profile:"personal-market",role:__ST_PRIVATE_ROLE__,wavedeck:false,remoteTrading:false};
 window.SERVER=(window.location&&window.location.origin&&window.location.origin!=="null")?window.location.origin:"http://localhost:18432";
 (function(){
   "use strict";
@@ -161,6 +161,14 @@ window.SERVER=(window.location&&window.location.origin&&window.location.origin!=
   });
 })();
 </script>'''.encode("utf-8")
+
+
+def _private_profile_boot(role: str) -> bytes:
+    """Bind only the already-authenticated gateway role into the HTML profile."""
+    safe_role = "owner" if role == "owner" else "reader"
+    return PRIVATE_PROFILE_BOOT.replace(
+        b"__ST_PRIVATE_ROLE__", json.dumps(safe_role).encode("ascii"), 1
+    )
 
 
 def _b64url_encode(value: bytes) -> str:
@@ -1379,13 +1387,14 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             injected_body = None
             if inject_profile:
                 injected_body = response.read()
+                profile_boot = _private_profile_boot(role)
                 marker = b"<head>"
                 if marker in injected_body:
                     injected_body = injected_body.replace(
-                        marker, marker + PRIVATE_PROFILE_BOOT, 1
+                        marker, marker + profile_boot, 1
                     )
                 else:
-                    injected_body = PRIVATE_PROFILE_BOOT + injected_body
+                    injected_body = profile_boot + injected_body
             self.send_response(response.status, response.reason)
             for key, value in response_headers:
                 lower = key.lower()

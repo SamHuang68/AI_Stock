@@ -172,10 +172,11 @@
       '@keyframes plModeIn{from{opacity:.25;transform:translateY(3px)}to{opacity:1;transform:none}}' +
       '@media(prefers-reduced-motion:reduce){#pl-body.pl-mode-beginner,#pl-body.pl-mode-expert{animation:none}}' +
       '#pl-body.pl-mode-beginner{display:block;overflow:auto;padding:3px 0 14px;overscroll-behavior:contain}' +
-      '#pl-root .pl-beginner{max-width:1420px;margin:0 auto;padding:2px 2px 16px}' +
+      '#pl-root .pl-beginner{width:100%;max-width:1420px;min-width:0;margin:0 auto;padding:2px 2px 16px;box-sizing:border-box}' +
       '#pl-root .pl-beginner-hero{position:relative;isolation:isolate;overflow:hidden;display:grid;grid-template-columns:220px minmax(0,1fr);gap:18px;align-items:center;' +
-        'background:linear-gradient(135deg,#101c30,#0b1423 62%,#0e2430);border:1px solid #2c4762;' +
+        'width:100%;max-width:100%;min-width:0;box-sizing:border-box;background:linear-gradient(135deg,#101c30,#0b1423 62%,#0e2430);border:1px solid #2c4762;' +
         'border-radius:14px;padding:20px 24px;box-shadow:inset 0 1px rgba(255,255,255,.05),0 12px 35px rgba(0,0,0,.2)}' +
+      '#pl-root .pl-beginner-hero>*{min-width:0}' +
       '#pl-root .pl-beginner-hero:after{content:"";position:absolute;z-index:-1;width:360px;height:220px;left:-60px;top:-75px;' +
         'border-radius:50%;filter:blur(18px);opacity:.22;pointer-events:none}' +
       '#pl-root .pl-beginner-hero.weather-calm:after{background:radial-gradient(circle,#38bdf8,transparent 68%)}' +
@@ -197,6 +198,7 @@
       '#pl-root .pl-weather.watch{color:#fde68a;background:rgba(234,179,8,.12);border-color:rgba(250,204,21,.42)}' +
       '#pl-root .pl-weather.alert{color:#fed7aa;background:rgba(249,115,22,.12);border-color:rgba(251,146,60,.48)}' +
       '#pl-root .pl-weather.unknown{color:#cbd5e1;background:rgba(100,116,139,.12);border-color:#475569}' +
+      '#pl-root .pl-beginner-copy{min-width:0;max-width:100%;overflow-wrap:anywhere}' +
       '#pl-root .pl-beginner-copy h2{font:900 26px/1.35 "Noto Sans TC",sans-serif;color:#f4f8fc;margin:0 0 8px}' +
       '#pl-root .pl-divergence-warning{display:flex;align-items:center;gap:8px;width:max-content;max-width:100%;margin:0 0 6px;' +
         'padding:4px 9px;border:1px solid rgba(251,146,60,.52);border-radius:7px;background:rgba(124,45,18,.18);' +
@@ -349,9 +351,10 @@
         '#pl-root .pl-safe-sep{height:36px}' +
         '#pl-root .pl-beginner-actions .pl-btn{padding:5px 8px}' +
       '}' +
-      '@media(max-width:900px) and (orientation:portrait){#pl-root .pl-beginner-hero{grid-template-columns:1fr;text-align:center}' +
+      '@media(max-width:900px) and (orientation:portrait){#pl-root .pl-beginner-hero{grid-template-columns:minmax(0,1fr);text-align:center}' +
         '#pl-root .pl-beginner-gauge{margin:auto}#pl-root .pl-head{flex-wrap:wrap}' +
-        '#pl-root .pl-hero-foot{flex-direction:column}#pl-root .pl-stock-check input{width:min(240px,62vw)}' +
+        '#pl-root .pl-hero-foot{flex-direction:column}#pl-root .pl-stock-check{width:min(100%,340px);max-width:100%}' +
+        '#pl-root .pl-stock-check input{width:auto;min-width:0;flex:1 1 auto}#pl-root .pl-stock-check button{flex:0 0 auto}' +
         '#pl-root .pl-simple-signals,#pl-root .pl-market-radar-grid{grid-template-columns:1fr}#pl-root .pl-safe-box{grid-template-columns:1fr}' +
         '#pl-root .pl-safe-sep{width:100%;height:1px}#pl-root .pl-beginner-actions{justify-content:center}' +
         '#pl-root .pl-advanced-grid{grid-template-columns:1fr 1fr}}' +
@@ -652,31 +655,64 @@
       '#pl-root table.pillars th,#pl-root table.pillars td{padding:3px 4px;border-bottom:1px solid var(--border);text-align:right}' +
       '#pl-root table.pillars th:first-child,#pl-root table.pillars td:first-child{text-align:left}' +
       '#pl-root table.pillars th{color:var(--tlo)}' +
-      /* 手機橫式專業模式：維持 5+5，但恢復 3cab212 的緊湊密度，避免繼承桌機放大值後裁切。 */
+      /* 手機橫式專業模式：維持 5+5；完整縮放每一類內容，不再以裁切冒充無碰撞。 */
       '@media(orientation:landscape) and (max-height:540px) and (pointer:coarse){' +
-        '#view-pulse.sv-panel.on{padding:4px 6px 6px}' +
-        '#pl-root .pl-strip .cell{padding:4px 7px}' +
-        '#pl-root .pl-strip .v{font-size:13px;line-height:1.15;margin-bottom:0}' +
-        '#pl-root .pl-strip .cell.hero .v{font-size:14px}' +
-        '#pl-root .pl-strip .s{font-size:8px;line-height:1.2}' +
-        '#pl-root .pl-strip .vz-ref{margin-top:2px;margin-bottom:8px;height:5px}' +
-        '#pl-root .pl-dash{gap:6px;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
-        '#pl-root .pl-zone{gap:6px;grid-template-columns:repeat(5,minmax(0,1fr))}' +
-        '#pl-root .pl-sec{padding:6px 8px;height:100%;overflow:hidden}' +
-        '#pl-root .pl-sec h4{margin:0 0 4px;font-size:10px;line-height:1.2;gap:4px;flex-wrap:nowrap;' +
-          'min-width:0;max-height:1.2em;overflow:hidden}' +
-        '#pl-root #pl-inst-stale{flex:0 1 52px;max-width:52px;margin-left:2px;padding:0 3px;font-size:0;' +
-          'white-space:nowrap;overflow:hidden;text-overflow:clip}' +
-        '#pl-root #pl-inst-stale:after{content:attr(data-compact-label);font-size:7px;line-height:1.1}' +
+        '#view-pulse.sv-panel.on{padding:3px 5px 5px}' +
+        '#pl-root{-webkit-text-size-adjust:100%;text-size-adjust:100%}' +
+        '#pl-root .pl-head{gap:4px;margin-bottom:2px}' +
+        '#pl-root .pl-head>div:first-child{gap:4px}' +
+        '#pl-root .pl-title{font-size:12px}' +
+        '#pl-root .pl-sub{font-size:7px}' +
+        '#pl-root .pl-actions{gap:2px}' +
+        '#pl-root .pl-btn,#pl-root .pl-mode-toggle button{font-size:7.5px;padding:2px 5px}' +
+        '#pl-root .pl-strip{gap:4px;margin-bottom:4px}' +
+        '#pl-root .pl-strip .cell{padding:3px 5px}' +
+        '#pl-root .pl-strip .k{font-size:6px}' +
+        '#pl-root .pl-strip .v{font-size:11px!important;line-height:1.1;margin-bottom:0}' +
+        '#pl-root .pl-strip .cell.hero .v{font-size:12px!important}' +
+        '#pl-root .pl-strip .v span[style]{font-size:7px!important}' +
+        '#pl-root .pl-strip .s{font-size:5px;line-height:1.15;letter-spacing:-.08px}' +
+        '#pl-root .pl-strip .s .pl-subq{font-size:5px}' +
+        '#pl-root .pl-ttabs span{font-size:5.5px;padding:0 2px}' +
+        '#pl-root .pl-strip .vz-ref{margin-top:2px;margin-bottom:6px;height:4px}' +
+        '#pl-root .pl-dash{gap:4px;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
+        '#pl-root .pl-zone{gap:4px;grid-template-columns:repeat(5,minmax(0,1fr))}' +
+        '#pl-root .pl-sec{padding:4px 6px;height:100%;overflow:hidden}' +
+        'html.st-vs5 #pl-root .pl-sec h4{margin:0 0 3px;padding-left:5px!important;font-size:8.5px!important;' +
+          'line-height:12px;letter-spacing:.05px!important;gap:3px;flex-wrap:nowrap;min-width:0;max-height:none;overflow:visible}' +
+        'html.st-vs5 #pl-root .pl-sec h4:before{width:1px!important}' +
+        '#pl-root .pl-sec-title-text{flex:0 0 auto;min-width:0;white-space:nowrap}' +
+        '#pl-root .pl-sec h4 a,#pl-root .pl-sec-hint{font-size:6.5px}' +
+        '#pl-root #pl-inst-stale{flex:0 1 46px;max-width:46px;margin-left:1px;padding:0 2px;font-size:0;' +
+          'white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+        '#pl-root #pl-inst-stale:after{content:attr(data-compact-label);font-size:6px;line-height:1.1}' +
+        '#pl-root .pl-movers h4 .pl-movers-date,#pl-root .pl-movers h4 .pl-movers-note{font-size:0!important;flex:0 1 auto}' +
+        '#pl-root .pl-movers h4 .pl-movers-date:after,#pl-root .pl-movers h4 .pl-movers-note:after{' +
+          'content:attr(data-compact-label);font-size:5.5px;line-height:1.1}' +
         '#pl-root #pl-flash-sec>h4,#pl-root #pl-watch-sec>h4{flex-wrap:nowrap}' +
-        '#pl-root .pl-note{font-size:8px;line-height:1.35;margin-top:3px}' +
-        /* 四格 KPI 每格只有約 33px：完整保留六位數，但禁止字形畫到隔壁格。 */
+        '#pl-root .pl-note{font-size:7px;line-height:1.2;margin-top:2px}' +
+        '#pl-root .pl-score3{gap:2px}' +
+        '#pl-root .pl-score3 .sc,#pl-root .pl-score3 .sc.main{padding:2px 3px}' +
+        '#pl-root .pl-score3 .sc .k,#pl-root .pl-score3 .sc .k .w,#pl-root .pl-score3 .sc .l{font-size:6.5px}' +
+        '#pl-root .pl-score3 .sc .v{font-size:10px;line-height:1.05}' +
+        '#pl-root .pl-score3 .sc.main .v{font-size:11px}' +
+        '#pl-root .pl-score-formula,#pl-root .pl-drivers,#pl-root .pl-drivers .box .k{' +
+          'font-size:6.5px;line-height:1.15}' +
+        '#pl-root .pl-score-meta{gap:2px;margin-top:2px}' +
+        '#pl-root .pl-score-meta .m{padding:2px 3px}' +
+        '#pl-root .pl-score-meta .m .k{font-size:6.5px}' +
+        '#pl-root .pl-score-meta .m .v{font-size:9px}' +
+        '#pl-root .pl-drivers{gap:2px;margin-top:2px}' +
+        '#pl-root .pl-drivers .box{padding:2px 3px}' +
+        /* 四格 KPI 每格只有約 32px：縮排後讓完整六字符數值真的放得下。 */
+        '#pl-root .pl-inst4,#pl-root .pl-bd4,#pl-root .pl-ohlc4{gap:2px}' +
+        '#pl-root .pl-inst4 .c,#pl-root .pl-bd4 .c,#pl-root .pl-ohlc4 .c{padding:2px 1px}' +
         '#pl-root .pl-inst4 .c .k,#pl-root .pl-bd4 .c .k,#pl-root .pl-ohlc4 .c .k{' +
-          'font-size:7px;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:clip}' +
+          'font-size:6.5px;line-height:1.05;white-space:nowrap}' +
         '#pl-root .pl-inst4 .c .v,#pl-root .pl-bd4 .c .v,#pl-root .pl-ohlc4 .c .v{' +
-          'display:block;width:100%;font-size:9px;line-height:1.1;letter-spacing:-0.5px;text-align:center;' +
-          'white-space:nowrap;overflow:hidden;text-overflow:clip}' +
-        '#pl-root .pl-ohlc4 .c .v{letter-spacing:-0.5px}' +
+          'display:block;width:100%;font-size:8px!important;line-height:1.05;letter-spacing:-0.45px;text-align:center;' +
+          'white-space:nowrap;overflow:visible;text-overflow:initial}' +
+        '#pl-root .pl-ohlc4 .c .v{letter-spacing:-0.45px}' +
         /* 半高卡片只留線型；高低點與座標已由 KPI／標題重複呈現，移除可避免實際交疊。 */
         '#pl-root .pl-inst-trend .chart,#pl-root .pl-bd-trend .chart,#pl-root .pl-ohlc-trend .chart{' +
           'min-height:32px;overflow:hidden}' +
@@ -696,11 +732,37 @@
           '#pl-root .pl-ohlc-trend .chart .vz-plot{' +
           'grid-column:1;grid-row:1;border-left:0;min-width:0;min-height:0;overflow:hidden}' +
         '#pl-root .pl-inst-trend .lab,#pl-root .pl-bd-trend .lab,#pl-root .pl-ohlc-trend .lab{' +
-          'font-size:8px;line-height:1.2;white-space:nowrap;overflow:hidden}' +
+          'font-size:7px;line-height:1.15;white-space:nowrap;overflow:hidden}' +
         '#pl-root .pl-inst-trend .lab>span,#pl-root .pl-bd-trend .lab>span,#pl-root .pl-ohlc-trend .lab>span{' +
           'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
         '#pl-root .pl-inst-cmt,#pl-root .pl-bd-cmt,#pl-root .pl-ohlc-cmt{' +
-          'font-size:8px;line-height:1.2;max-height:1.2em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+          'font-size:7px;line-height:1.15;max-height:1.15em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+        '#pl-root .pl-sbar{gap:2px;font-size:7px;line-height:1.15;padding:0 1px}' +
+        '#pl-root .pl-sbar .nm{width:48px;font-size:6.8px}' +
+        '#pl-root .pl-sbar .pc{width:30px;font-size:7px}' +
+        '#pl-root .pl-sbar .ad{width:22px;font-size:5px}' +
+        '#pl-root .pl-list li{gap:2px;padding:1px 2px;font-size:7px;line-height:1.15}' +
+        '#pl-root .pl-list .nm,#pl-root .pl-movers .pl-list li>span:last-child{font-size:7.5px}' +
+        '#pl-root .pl-list .cd{font-size:6.5px;margin-right:1px}' +
+        '#pl-root .pl-list .ind,#pl-root .pl-movers .vz-chip{font-size:5px}' +
+        '#pl-root .pl-movers .vz-rowbar{max-width:36px;height:2px;margin-left:2px}' +
+        '#pl-root .pl-global{gap:2px;padding-right:1px}' +
+        '#pl-root .pl-global .g{padding:2px 3px}' +
+        '#pl-root .pl-global .g .row{gap:2px}' +
+        '#pl-root .pl-global .g .k{font-size:5.5px}' +
+        '#pl-root .pl-global .g .s{font-size:5px;max-width:68%;letter-spacing:-.3px}' +
+        '#pl-root .pl-global .g .v{font-size:5.5px;letter-spacing:-0.3px}' +
+        '#pl-root .pl-flash{font-size:7px}' +
+        '#pl-root .pl-flash .row{grid-template-columns:30px 36px minmax(0,1fr);gap:2px;padding:1px 2px;line-height:1.2}' +
+        '#pl-root .pl-flash .t,#pl-root .pl-flash .cat{font-size:6px}' +
+        '#pl-root .pl-flash .ttl{font-size:7px}' +
+        '#pl-root .pl-flash-q{width:42px;min-width:34px;max-width:46px;font-size:6px}' +
+        '#pl-root #pl-flash-sec .pl-sec-tog button,#pl-root #pl-watch-sec .pl-sec-tog button{' +
+          'font-size:5.5px;padding:0 2px}' +
+        '#pl-root .pl-wl table{font-size:7px}' +
+        '#pl-root .pl-wl th,#pl-root .pl-wl td{padding:2px 2px;line-height:1.15}' +
+        '#pl-root .pl-wl th,#pl-root .pl-wl .mkt,#pl-root .pl-wl .nm-only{font-size:6px}' +
+        '#pl-root .pl-wl td.px,#pl-root .pl-wl td.chg,#pl-root .pl-wl td:first-child{font-size:7px}' +
       '}' +
       /* 手機直式專業模式：上下兩區各改為兩欄並允許頁面垂直捲動；橫式維持原始 5+5。 */
       '@media(max-width:900px) and (orientation:portrait){' +
@@ -2942,7 +3004,7 @@
     var totalTxt = i.totalYi != null
       ? ((i.totalYi >= 0 ? '+' : '') + Number(i.totalYi).toFixed(1))
       : '—';
-    return '<div class="pl-sec" data-pri="p0"><h4>法人資金' +
+    return '<div class="pl-sec" data-pri="p0"><h4><span class="pl-sec-title-text">法人資金</span>' +
       '<span class="pl-stale" id="pl-inst-stale" data-compact-label="待公布"' + (empty ? '' : ' hidden') + '>' +
         (empty ? '當日尚未公布' : '') +
       '</span>' +
@@ -3362,9 +3424,14 @@
     list.forEach(function (r) {
       if (r.changePct != null && isFinite(r.changePct)) maxAbs = Math.max(maxAbs, Math.abs(r.changePct));
     });
-    var html = '<div class="pl-sec pl-movers" data-pri="p1" data-movers-side="' + side + '"><h4>' + title +
-      (movers && movers.date ? ' <span class="pl-sec-hint" style="margin-right:0">' + movers.date + '</span>' : '') +
-      (note ? ' <span class="pl-sec-hint" style="margin-right:0">' + note + '</span>' : '') +
+    var moverDate = movers && movers.date ? String(movers.date) : '';
+    var moverDateCompact = moverDate.replace(/^(?:\d{4})[-\/]?(\d{2})[-\/]?(\d{2})$/, '$1-$2');
+    var html = '<div class="pl-sec pl-movers" data-pri="p1" data-movers-side="' + side + '"><h4>' +
+      '<span class="pl-sec-title-text pl-movers-title">' + title + '</span>' +
+      (moverDate ? ' <span class="pl-sec-hint pl-movers-date" style="margin-right:0" title="' + esc(moverDate) +
+        '" data-compact-label="' + esc(moverDateCompact) + '">' + esc(moverDate) + '</span>' : '') +
+      (note ? ' <span class="pl-sec-hint pl-movers-note" style="margin-right:0" title="' + esc(note) +
+        '" data-compact-label="上市≥9.9%">' + esc(note) + '</span>' : '') +
       ' <a data-go="breadth">廣度 →</a></h4><ul class="pl-list">';
     if (!list.length) return html + '<li style="cursor:default;color:#94a3b8">' + empty + '</li></ul></div>';
     list.forEach(function (r) {

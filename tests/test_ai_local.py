@@ -16,6 +16,25 @@ sys.path.insert(0, str(ROOT / "server"))
 import ai_local  # noqa: E402
 
 
+class FakeStreamResponse:
+    def __init__(self, *items):
+        self.lines = []
+        for item in items:
+            if item == "[DONE]":
+                self.lines.append(b"data: [DONE]\n")
+            else:
+                self.lines.append(("data: " + json.dumps(item) + "\n").encode("utf-8"))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb):
+        return False
+
+    def __iter__(self):
+        return iter(self.lines)
+
+
 class AiLocalPolicyTests(unittest.TestCase):
     def test_runtime_status_is_server_side_explicit_and_load_aware(self):
         with mock.patch.object(ai_local, "_lmstudio_models", return_value=[ai_local.FAST_MODEL]), \
@@ -29,6 +48,8 @@ class AiLocalPolicyTests(unittest.TestCase):
         self.assertEqual(fast["provider"], "LM Studio")
         self.assertEqual(fast["model"], "google/gemma-4-e4b")
         self.assertEqual(fast["dataBoundary"], "local-only")
+        self.assertEqual(fast["maxOutputTokens"], ai_local.FAST_MAX_TOKENS)
+        self.assertGreaterEqual(fast["maxOutputTokens"], 1400)
         self.assertGreaterEqual(fast["estimateSeconds"], 300)
         self.assertIn("模型載入", fast["estimateLabel"])
         self.assertEqual(deep["providerKey"], "hermes")
@@ -64,6 +85,99 @@ class AiLocalPolicyTests(unittest.TestCase):
         self.assertNotIn(context, trace)
         self.assertNotIn(output, trace)
         self.assertNotIn("browser/attempted-override", trace)
+
+    def test_lmstudio_stream_uses_budget_and_never_emits_reasoning(self):
+        diagnostics = {}
+        response = FakeStreamResponse(
+            {
+                "choices": [{
+                    "delta": {"reasoning_content": "PRIVATE-REASONING-DO-NOT-EMIT"},
+                    "finish_reason": None,
+                }],
+            },
+            {"choices": [{"delta": {"content": "可見正文"}, "finish_reason": None}]},
+            {
+                "choices": [{"delta": {}, "finish_reason": "stop"}],
+                "usage": {
+                    "completion_tokens": 1174,
+                    "completion_tokens_details": {"reasoning_tokens": 780},
+                },
+            },
+            "[DONE]",
+        )
+        with mock.patch.object(ai_local.urllib.request, "urlopen", return_value=response) as opened:
+            result = "".join(ai_local._stream_lmstudio("prompt", diagnostics=diagnostics))
+        request = opened.call_args.args[0]
+        payload = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(result, "可見正文")
+        self.assertNotIn("PRIVATE-REASONING", result)
+        self.assertEqual(payload["max_tokens"], ai_local.FAST_MAX_TOKENS)
+        self.assertEqual(payload["stream_options"], {"include_usage": True})
+        self.assertEqual(diagnostics["finishReason"], "stop")
+        self.assertEqual(diagnostics["completionTokens"], 1174)
+        self.assertEqual(diagnostics["reasoningTokens"], 780)
+
+    def test_reasoning_only_length_fails_and_trace_never_marks_completed(self):
+        response = FakeStreamResponse(
+            {
+                "choices": [{
+                    "delta": {"reasoning_content": "PRIVATE-REASONING-DO-NOT-LOG"},
+                    "finish_reason": None,
+                }],
+            },
+            {
+                "choices": [{"delta": {}, "finish_reason": "length"}],
+                "usage": {
+                    "completion_tokens": ai_local.FAST_MAX_TOKENS,
+                    "completion_tokens_details": {"reasoning_tokens": ai_local.FAST_MAX_TOKENS - 3},
+                },
+            },
+            "[DONE]",
+        )
+        with tempfile.TemporaryDirectory() as temp_name:
+            trace_path = Path(temp_name) / "trace.jsonl"
+            with mock.patch.object(ai_local, "TRACE_PATH", trace_path), \
+                 mock.patch.object(ai_local, "_lmstudio_models", return_value=[ai_local.FAST_MODEL]), \
+                 mock.patch.object(ai_local, "_acquire_st_slot", return_value=(True, None)), \
+                 mock.patch.object(ai_local, "_release_st_slot"), \
+                 mock.patch.object(ai_local.urllib.request, "urlopen", return_value=response):
+                with self.assertRaisesRegex(ai_local.AiRuntimeError, "尚未產生可見正文"):
+                    list(ai_local.chat_stream("分析", "資料", request_id="length-test"))
+            trace = trace_path.read_text(encoding="utf-8")
+        events = [json.loads(line)["event"] for line in trace.splitlines()]
+        self.assertIn("started", events)
+        self.assertIn("failed", events)
+        self.assertNotIn("completed", events)
+        self.assertIn('"finishReason": "length"', trace)
+        self.assertIn('"outputChars": 0', trace)
+        self.assertNotIn("PRIVATE-REASONING", trace)
+
+    def test_empty_stop_and_partial_length_are_explicit_failures(self):
+        empty = FakeStreamResponse(
+            {"choices": [{"delta": {}, "finish_reason": "stop"}]}, "[DONE]",
+        )
+        with mock.patch.object(ai_local.urllib.request, "urlopen", return_value=empty):
+            with self.assertRaisesRegex(ai_local.AiRuntimeError, "未回傳可見正文"):
+                list(ai_local._stream_lmstudio("prompt"))
+
+        partial = FakeStreamResponse(
+            {"choices": [{"delta": {"content": "未完成正文"}, "finish_reason": None}]},
+            {"choices": [{"delta": {}, "finish_reason": "length"}]},
+            "[DONE]",
+        )
+        with mock.patch.object(ai_local.urllib.request, "urlopen", return_value=partial):
+            stream = ai_local._stream_lmstudio("prompt")
+            self.assertEqual(next(stream), "未完成正文")
+            with self.assertRaisesRegex(ai_local.AiRuntimeError, "內容可能不完整"):
+                next(stream)
+
+    def test_fast_output_budget_invalid_env_falls_back_and_clamps(self):
+        with mock.patch.dict(ai_local.os.environ, {"TEST_AI_BUDGET": "invalid"}):
+            self.assertEqual(ai_local._bounded_env_int("TEST_AI_BUDGET", 2048, 1400, 4096), 2048)
+        with mock.patch.dict(ai_local.os.environ, {"TEST_AI_BUDGET": "100"}):
+            self.assertEqual(ai_local._bounded_env_int("TEST_AI_BUDGET", 2048, 1400, 4096), 1400)
+        with mock.patch.dict(ai_local.os.environ, {"TEST_AI_BUDGET": "9000"}):
+            self.assertEqual(ai_local._bounded_env_int("TEST_AI_BUDGET", 2048, 1400, 4096), 4096)
 
     def test_hermes_command_is_bounded_and_has_no_mutating_toolsets(self):
         command = ai_local._hermes_command(Path("C:/Hermes/hermes.exe"))

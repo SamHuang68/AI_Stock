@@ -452,6 +452,11 @@ ok(/結構條不重複/.test(bd) || /結構只用 magBars/.test(bd), 'breadth av
 ok(/官方≠清單/.test(bd) || /官方漲停家數/.test(bd), 'breadth limit popup separates official vs approx list');
 
 const pl = fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8');
+const landscapeStart = pl.indexOf('@media(orientation:landscape) and (max-height:540px) and (pointer:coarse)');
+const landscapeEnd = pl.indexOf('/* 手機直式專業模式', landscapeStart);
+const landscapeCss = landscapeStart >= 0 && landscapeEnd > landscapeStart
+  ? pl.slice(landscapeStart, landscapeEnd)
+  : '';
 ok(/上市漲跌停 · 官方/.test(pl), 'pulse strip labels official limit counts');
 ok(/近漲停/.test(pl) && /≠頂列官方家數/.test(pl), 'pulse movers panel not branded as official limit');
 ok(/movers\.limitUp/.test(pl), 'pulse prefers movers.limitUp for near-limit list');
@@ -598,19 +603,29 @@ ok(/MOBILE_LAYOUT_CONTRACT = '2col-scroll'/.test(pl) &&
   /var expectedCols = mobile \? 2 : 5/.test(pl) &&
   /layoutResizeTimer = setTimeout\(probeLayoutCols, 120\)/.test(pl),
   'pulse portrait uses two-column scrolling while landscape and desktop remain 5+5');
-ok(/@media\(orientation:landscape\) and \(max-height:540px\) and \(pointer:coarse\)/.test(pl) &&
-  /max-height:540px[\s\S]*pl-strip \.v\{font-size:13px;line-height:1\.15;margin-bottom:0\}/.test(pl) &&
-  /max-height:540px[\s\S]*pl-sec\{padding:6px 8px;height:100%;overflow:hidden\}/.test(pl) &&
-  /max-height:540px[\s\S]*pl-zone\{gap:6px;grid-template-columns:repeat\(5,minmax\(0,1fr\)\)\}/.test(pl) &&
-  /max-height:540px[\s\S]*#pl-flash-sec>h4,#pl-root #pl-watch-sec>h4\{flex-wrap:nowrap\}/.test(pl),
-  'pulse touch landscape restores compact 3cab212 density without changing 5+5');
-ok(/max-height:540px[\s\S]*pl-inst4 \.c \.v,#pl-root \.pl-bd4 \.c \.v,#pl-root \.pl-ohlc4 \.c \.v\{[^}]*font-size:9px[^}]*overflow:hidden[^}]*text-overflow:clip/.test(pl) &&
-  /max-height:540px[\s\S]*pl-ohlc4 \.c \.v\{letter-spacing:-0\.5px\}/.test(pl),
-  'pulse touch landscape primary KPI values fit their cells without painting across columns');
-ok(/max-height:540px[\s\S]*#pl-inst-stale\{[^}]*max-width:52px[^}]*font-size:0[^}]*overflow:hidden/.test(pl) &&
-  /#pl-inst-stale:after\{content:attr\(data-compact-label\);font-size:7px/.test(pl) &&
+ok(landscapeStart >= 0 &&
+  /text-size-adjust:100%/.test(landscapeCss) &&
+  /pl-strip \.v\{font-size:11px!important;line-height:1\.1;margin-bottom:0\}/.test(landscapeCss) &&
+  /pl-strip \.s\{font-size:5px/.test(landscapeCss) &&
+  /pl-sec\{padding:4px 6px;height:100%;overflow:hidden\}/.test(landscapeCss) &&
+  /pl-zone\{gap:4px;grid-template-columns:repeat\(5,minmax\(0,1fr\)\)\}/.test(landscapeCss) &&
+  /pl-list li\{[^}]*font-size:7px/.test(landscapeCss) &&
+  /pl-global \.g \.v\{font-size:5\.5px/.test(landscapeCss) &&
+  /pl-global \.g \.s\{font-size:5px/.test(landscapeCss) &&
+  /pl-flash \.ttl\{font-size:7px/.test(landscapeCss) &&
+  /pl-wl table\{font-size:7px/.test(landscapeCss),
+  'pulse touch landscape applies complete compact density without changing 5+5');
+ok(/pl-inst4 \.c \.v,#pl-root \.pl-bd4 \.c \.v,#pl-root \.pl-ohlc4 \.c \.v\{[^}]*font-size:8px!important[^}]*overflow:visible[^}]*text-overflow:initial/.test(landscapeCss) &&
+  /pl-ohlc4 \.c \.v\{letter-spacing:-0\.45px\}/.test(landscapeCss) &&
+  !/\.c \.v[^}]*text-overflow:clip/.test(landscapeCss),
+  'pulse touch landscape primary KPI values are sized to fit instead of clipped');
+ok(/#pl-inst-stale\{[^}]*max-width:46px[^}]*font-size:0[^}]*overflow:hidden/.test(landscapeCss) &&
+  /#pl-inst-stale:after\{content:attr\(data-compact-label\);font-size:6px/.test(landscapeCss) &&
   /data-compact-label', '前日 '/.test(pl),
   'pulse touch landscape shortens the secondary institutional stale badge without clipping its title');
+ok(/pl-sec-title-text/.test(pl) && /pl-movers-date/.test(pl) && /pl-movers-note/.test(pl) &&
+  /data-compact-label=/.test(pl) && !/max-height:1\.2em;overflow:hidden/.test(landscapeCss),
+  'pulse landscape gives primary titles explicit flex ownership and compacts only secondary mover metadata');
 ok(/max-height:540px[\s\S]*pl-ohlc-trend \.chart \.vz-pt\{display:none!important\}/.test(pl) &&
   /max-height:540px[\s\S]*pl-ohlc-trend \.chart \.vz-spark-ax\{[^}]*grid-template-columns:minmax\(0,1fr\)[^}]*overflow:hidden/.test(pl) &&
   /max-height:540px[\s\S]*pl-ohlc-trend \.chart \.vz-plot\{[^}]*grid-column:1[^}]*grid-row:1[^}]*overflow:hidden/.test(pl),
@@ -721,6 +736,14 @@ ok(/mobile_shell_panel_layout/.test(shell) &&
   /scroll-padding-bottom:calc\(88px \+ env\(safe-area-inset-bottom,0px\)\)/.test(shell) &&
   /#shell-main #shell-views\.show>\.sv-panel\.on/.test(shell),
   'portrait shell uses one scroll owner and reserves bottom safe space for all panels');
+ok(/compactLandscape = window\.matchMedia\('\(orientation:landscape\) and \(max-height:540px\) and \(pointer:coarse\)'\)/.test(shell) &&
+  /valueOverflow=/.test(shell) && /titleOverflow=/.test(shell) && /document\.fonts\.status/.test(shell),
+  'mobile layout diagnostics cover short touch landscape and record real text overflow');
+ok(/@media\(orientation:landscape\) and \(max-height:540px\) and \(pointer:coarse\)[\s\S]*#st-ring-fab\{right:4px;bottom:4px;width:30px;height:30px/.test(shell),
+  'landscape consensus radar stays available without covering the watchlist');
+ok(sourceHtml.indexOf('@import url(') > sourceHtml.indexOf('<style>') &&
+  sourceHtml.indexOf('@import url(') < sourceHtml.indexOf('*,*::before,*::after'),
+  'Google font import precedes CSS rules so iOS and Windows use the intended metrics');
 ok(/var optionsLabOpen = true/.test(decisionUi) &&
   /dc-command-fold" open/.test(decisionUi) &&
   /dc-lab-detail" open/.test(decisionUi) &&

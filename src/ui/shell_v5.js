@@ -475,6 +475,11 @@
         'inset 0 1px 0 rgba(255,255,255,.58)}' +
       '@keyframes shellDashSheen{0%,62%{left:-40%}82%,100%{left:125%}}' +
       '@media(prefers-reduced-motion:reduce){#topbar .shell-dash-btn:before{animation:none}}' +
+      /* 短高度觸控橫式：縮小共識雷達，保留入口但不再蓋住右下自選資料。 */
+      '@media(orientation:landscape) and (max-height:540px) and (pointer:coarse){' +
+        '#st-ring-fab{right:4px;bottom:4px;width:30px;height:30px;font-size:11px;opacity:.86}' +
+        '#st-ring-fab:hover{transform:none}' +
+      '}' +
       /* 手機直式統一由 shell-views 擔任唯一捲動容器；內容底部避開浮動轉盤與 iOS safe area。 */
       '@media(max-width:900px) and (orientation:portrait){' +
         '#shell-main #shell-views.show{display:block!important;overflow-x:hidden!important;overflow-y:auto!important;' +
@@ -1650,7 +1655,10 @@
 
   function traceMobilePanelLayout(routeId) {
     try {
-      if (!window.matchMedia || !window.matchMedia('(max-width:900px)').matches) return;
+      if (!window.matchMedia) return;
+      var portraitMobile = window.matchMedia('(max-width:900px) and (orientation:portrait)').matches;
+      var compactLandscape = window.matchMedia('(orientation:landscape) and (max-height:540px) and (pointer:coarse)').matches;
+      if (!portraitMobile && !compactLandscape) return;
       var views = $('shell-views');
       var panel = $('view-' + routeId);
       var mount = $('mount-' + routeId);
@@ -1660,6 +1668,19 @@
       var app = $('app');
       var ar = app ? app.getBoundingClientRect() : null;
       var vv = window.visualViewport;
+      var pulseRoot = routeId === 'pulse' ? document.getElementById('pl-root') : null;
+      var pulseValues = pulseRoot ? pulseRoot.querySelectorAll(
+        '.pl-strip .v,.pl-score3 .v,.pl-inst4 .v,.pl-bd4 .v,.pl-ohlc4 .v,.pl-global .v,.pl-wl td.px,.pl-wl td.chg'
+      ) : [];
+      var pulseTitles = pulseRoot ? pulseRoot.querySelectorAll('.pl-sec h4') : [];
+      var valueOverflow = 0;
+      var titleOverflow = 0;
+      Array.prototype.forEach.call(pulseValues, function (el) {
+        if (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1) valueOverflow += 1;
+      });
+      Array.prototype.forEach.call(pulseTitles, function (el) {
+        if (el.scrollHeight > el.clientHeight + 1) titleOverflow += 1;
+      });
       fetch('/diagnostics/ui-route', {
         method: 'POST', headers: {'Content-Type':'application/json'}, keepalive: true,
         body: JSON.stringify({
@@ -1672,7 +1693,11 @@
             '|app=' + (ar ? Math.round(ar.width) + 'x' + Math.round(ar.height) : 'none') +
             '|views=' + Math.round(vr.height) +
             '/' + views.scrollHeight + '|panel=' + Math.round(pr.height) +
-            (mount ? '/' + mount.scrollHeight : '')
+            (mount ? '/' + mount.scrollHeight : '') +
+            '|dpr=' + Number(window.devicePixelRatio || 1).toFixed(2) +
+            '|fonts=' + (document.fonts ? document.fonts.status : 'na') +
+            '|valueOverflow=' + valueOverflow + '/' + pulseValues.length +
+            '|titleOverflow=' + titleOverflow + '/' + pulseTitles.length
         })
       }).catch(function () {});
     } catch (e) {}

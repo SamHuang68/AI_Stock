@@ -42,6 +42,12 @@ ok(pulse.includes('#pl-root .pl-inst4,#pl-root .pl-bd4,#pl-root .pl-ohlc4{grid-t
   'overview mobile KPI internals and headline strip avoid numeric/text collisions');
 ok(pulse.includes('overflow-x:hidden;overflow-y:auto') && pulse.includes('scrollbar-gutter:stable'),
   'beginner short viewport scrolls safely instead of clipping its lower edge');
+ok(pulse.includes('.pl-beginner-hero>*{min-width:0}') &&
+  pulse.includes('.pl-beginner-copy{min-width:0;max-width:100%;overflow-wrap:anywhere}') &&
+  pulse.includes('grid-template-columns:minmax(0,1fr);text-align:center') &&
+  pulse.includes('.pl-stock-check{width:min(100%,340px);max-width:100%}') &&
+  pulse.includes('.pl-stock-check input{width:auto;min-width:0;flex:1 1 auto}'),
+  'beginner portrait hero and stock check cannot expand beyond the mobile viewport');
 
 ok(breadth.includes('minmax(200px,.72fr)') && breadth.includes('minmax(390px,1.4fr)'),
   'breadth grid shifts width from structure to movers');
