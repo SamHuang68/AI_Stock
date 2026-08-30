@@ -70,19 +70,19 @@ def resolve_history_dir(
         path = Path(override).expanduser()
         if not path.is_absolute():
             raise ValueError(f"{ENV_HISTORY_DIR} must be an absolute path: {override!r}")
+        path = path.resolve(strict=False)
     else:
+        # Canonicalize the existing base before appending directories that may
+        # not exist yet.  Windows services and CI can expose that base through
+        # an 8.3 alias (for example ``RUNNER~1``); resolving the full missing
+        # leaf is not guaranteed to expand the alias on every Python version.
+        base = _default_local_data_root(env, home).resolve(strict=False)
         path = (
-            _default_local_data_root(env, home)
+            base
             / "StockTerminalPrivateWeb"
             / "shared-data"
             / "etf_history"
         )
-    # ``tempfile`` and service environments on Windows may expose the same
-    # directory through an 8.3 short path (for example ``RUNNER~1``) while
-    # callers see its long form.  Resolve the existing prefix so every ST
-    # process publishes one canonical path spelling; ``strict=False`` keeps
-    # the not-yet-created shared-data suffix valid on every platform.
-    path = Path(path).resolve(strict=False)
     if create:
         path.mkdir(parents=True, exist_ok=True)
     return path
