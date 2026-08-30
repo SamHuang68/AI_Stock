@@ -609,6 +609,7 @@ ok(landscapeStart >= 0 &&
   /pl-strip \.s\{font-size:5px/.test(landscapeCss) &&
   /pl-sec\{padding:4px 6px;height:100%;overflow:hidden\}/.test(landscapeCss) &&
   /pl-zone\{gap:4px;grid-template-columns:repeat\(5,minmax\(0,1fr\)\)\}/.test(landscapeCss) &&
+  /pl-zone>\.pl-sec>h4\{[^}]*font-size:7px!important[^}]*line-height:10px[^}]*letter-spacing:0!important[^}]*gap:2px/.test(landscapeCss) &&
   /pl-list li\{[^}]*font-size:7px/.test(landscapeCss) &&
   /pl-global \.g \.v\{font-size:5\.5px/.test(landscapeCss) &&
   /pl-global \.g \.s\{font-size:5px/.test(landscapeCss) &&

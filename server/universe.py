@@ -79,12 +79,6 @@ def fetch_tw():
                     code = str(row[k]).strip()
                     break
             if not _TW_CODE.match(code):
-                for v in row.values():
-                    s = str(v).strip()
-                    if _TW_CODE.match(s):
-                        code = s
-                        break
-            if not _TW_CODE.match(code):
                 continue
             name = ''
             for k in nkeys:

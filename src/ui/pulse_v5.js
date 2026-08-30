@@ -678,8 +678,9 @@
         '#pl-root .pl-dash{gap:4px;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}' +
         '#pl-root .pl-zone{gap:4px;grid-template-columns:repeat(5,minmax(0,1fr))}' +
         '#pl-root .pl-sec{padding:4px 6px;height:100%;overflow:hidden}' +
-        'html.st-vs5 #pl-root .pl-sec h4{margin:0 0 3px;padding-left:5px!important;font-size:8.5px!important;' +
-          'line-height:12px;letter-spacing:.05px!important;gap:3px;flex-wrap:nowrap;min-width:0;max-height:none;overflow:visible}' +
+        /* 5+5 十張專業卡片的標題需比資料內容更節制；只在手機橫式縮小，避免標題／控制項互相遮蔽。 */
+        'html.st-vs5 #pl-root .pl-zone>.pl-sec>h4{margin:0 0 2px;padding-left:5px!important;font-size:7px!important;' +
+          'line-height:10px;letter-spacing:0!important;gap:2px;flex-wrap:nowrap;min-width:0;max-height:none;overflow:visible}' +
         'html.st-vs5 #pl-root .pl-sec h4:before{width:1px!important}' +
         '#pl-root .pl-sec-title-text{flex:0 0 auto;min-width:0;white-space:nowrap}' +
         '#pl-root .pl-sec h4 a,#pl-root .pl-sec-hint{font-size:6.5px}' +

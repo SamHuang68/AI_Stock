@@ -743,6 +743,20 @@ def _db_screener_arrays(code):
 _TW_UNIVERSE = {'date': None, 'codes': []}
 _CODE4 = _re.compile(r'^[1-9]\d{3}$')   # 4 位數普通股；排除 ETF(00xxx)/權證(6 位)
 
+
+def _extract_tw_stock_codes(rows):
+    """只接受交易所具名代號欄位；不從成交價、筆數或日期猜股票代號。"""
+    fields = ('Code', 'SecuritiesCompanyCode', '證券代號', '股票代號')
+    out = set()
+    for row in rows if isinstance(rows, list) else ():
+        if not isinstance(row, dict):
+            continue
+        code = next((str(row[k]).strip() for k in fields if row.get(k)), '')
+        if _CODE4.match(code):
+            out.add(code)
+    return out
+
+
 def _get_tw_universe():
     from datetime import date as _date
     today = _date.today().strftime('%Y%m%d')
@@ -755,19 +769,7 @@ def _get_tw_universe():
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
             with urllib.request.urlopen(req, timeout=20) as r:
                 arr = json.loads(r.read())
-            for row in arr:
-                if not isinstance(row, dict):
-                    continue
-                # 優先抓常見欄位，否則掃所有值找 4 位數代號
-                cand = (row.get('Code') or row.get('SecuritiesCompanyCode')
-                        or row.get('證券代號') or row.get('股票代號') or '')
-                cand = str(cand).strip()
-                if _CODE4.match(cand):
-                    codes.add(cand); continue
-                for v in row.values():
-                    s = str(v).strip()
-                    if _CODE4.match(s):
-                        codes.add(s); break
+            codes.update(_extract_tw_stock_codes(arr))
         except Exception as e:
             print(f'[universe] scan failed {url}: {e}')
 
@@ -784,6 +786,23 @@ def _get_tw_universe():
 
 # ── 台股 code → 中文名 對照(快取一天)。Yahoo shortName 多為英文，改顯示中文簡稱 ──
 _TW_NAMES = {'date': None, 'map': {}}
+
+
+def _extract_tw_name_pairs(rows, code_keys, name_keys):
+    """只從具名代號／名稱欄位擷取台股名稱，禁止把價格等四位數值誤認成股票代號。"""
+    out = {}
+    for row in rows if isinstance(rows, list) else ():
+        if not isinstance(row, dict):
+            continue
+        code = next((str(row[k]).strip() for k in code_keys if row.get(k)), '')
+        if not _CODE4.match(code):
+            continue
+        name = next((str(row[k]).strip() for k in name_keys if row.get(k)), '')
+        if name and any('一' <= ch <= '鿿' for ch in name):
+            out[code] = name
+    return out
+
+
 def _get_tw_names():
     from datetime import date as _date
     today = _date.today().strftime('%Y%m%d')
@@ -807,26 +826,8 @@ def _get_tw_names():
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
             with urllib.request.urlopen(req, timeout=20) as r:
                 arr = json.loads(r.read())
-            for row in arr:
-                if not isinstance(row, dict):
-                    continue
-                code = ''
-                for k in code_keys:
-                    if row.get(k):
-                        code = str(row[k]).strip(); break
-                if not _CODE4.match(code):
-                    for v in row.values():
-                        s = str(v).strip()
-                        if _CODE4.match(s):
-                            code = s; break
-                if not _CODE4.match(code):
-                    continue
-                name = ''
-                for k in name_keys:
-                    if row.get(k):
-                        name = str(row[k]).strip(); break
-                # 只收含中文字的名稱(濾掉英文/代號重複)
-                if name and code not in m and any('一' <= ch <= '鿿' for ch in name):
+            for code, name in _extract_tw_name_pairs(arr, code_keys, name_keys).items():
+                if code not in m:
                     m[code] = name
         except Exception as e:
             print(f'[names] scan failed {url}: {e}')
@@ -848,8 +849,7 @@ def _get_tw_names():
                     old_count = len(json.load(f))
             if len(m) >= old_count:
                 os.makedirs(data_dir, exist_ok=True)
-                with open(backup_path, 'w', encoding='utf-8') as f:
-                    json.dump(m, f, ensure_ascii=False, indent=2)
+                atomic_write_json(backup_path, m, backup=True, indent=2)
         except Exception as e:
             print('[names] backup save failed:', e)
             
