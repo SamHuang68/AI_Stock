@@ -93,9 +93,11 @@ ok(/function themeFor/.test(chartVisual) && /Colors\.isRedUp/.test(chartVisual) 
 ok(/#wlbar\{height:67px!important/.test(chartVisual) && /height:30px!important/.test(chartVisual) &&
   /wlchip-stack\{padding:0!important;max-height:27px;overflow:visible/.test(chartVisual) &&
   /wlchip-primary\{min-height:10px;line-height:1/.test(chartVisual) &&
-  /wladd\{height:62px/.test(chartVisual) && /#rangebar\{height:26px!important/.test(chartVisual) &&
-  /min-height:25px!important/.test(chartVisual),
-  'chart watchlist uses compact two-row chips and a real 26px timeframe row without clipping');
+  /wladd\{height:62px/.test(chartVisual) && /#rangebar,\s*\nhtml\.st-vs5 #rtabs\{/.test(chartVisual) &&
+  /height:26px!important;min-height:26px!important;max-height:26px!important/.test(chartVisual) &&
+  /#rangebar \.rgbtn,\s*\nhtml\.st-vs5 #rtabs \.rtab\{/.test(chartVisual) &&
+  /height:25px!important;min-height:25px!important/.test(chartVisual),
+  'chart watchlist stays compact and timeframe/right-panel tabs share one 26px baseline');
 ok(/\.wlchip-primary/.test(polish) && /if \(mkt === 'TW'\)/.test(polish) &&
   /primary\.appendChild\(t\)/.test(polish) && /primary\.appendChild\(p\)/.test(polish) &&
   /meta\.appendChild\(codeSpan\)/.test(polish) &&
@@ -744,7 +746,9 @@ ok(/id="rpanel-pager"/.test(sourceHtml) && /id="rpage-dots"/.test(sourceHtml) &&
   /orientation: portrait/.test(mobileCss) &&
   /data-mobile-workspace-page="chart"/.test(mobileCss) &&
   /orientation: landscape/.test(mobileCss) &&
-  /#rtabs \{ display: flex !important; \}/.test(mobileCss) &&
+  /@media \(max-width: 900px\) and \(orientation: landscape\)[\s\S]*?#rtabs \{[\s\S]*?display: flex !important;/.test(mobileCss) &&
+  /#rtabs[\s\S]*height: 26px !important;[\s\S]*#rtabs \.rtab[\s\S]*height: 25px !important;/.test(mobileCss) &&
+  !/\.probtn, \.rtab, \.wlchip, \.wladd \{ min-height: 32px; \}/.test(mobileCss) &&
   /main\.appendChild\(pagerEl\)/.test(shell) &&
   /pager\.classList\.toggle\('shell-hidden', !isChart\)/.test(shell) &&
   /data-st5-route/.test(shell) &&

@@ -117,13 +117,19 @@ html.st-vs5 .wlchip.active{
 html.st-vs5 .wlchip-p{padding:0 2px;border-radius:999px;background:rgba(255,255,255,.035)}
 html.st-vs5 .wladd{height:62px;border:1px solid rgba(255,255,255,.06);border-radius:7px;background:rgba(255,255,255,.02)}
 
-/* 時間週期列使用完整寬度分區，26px 仍可點擊並把垂直空間還給圖表。 */
-html.st-vs5 #rangebar{height:26px!important;scrollbar-width:none}
+/* 時間週期列與右側分析分頁共用 26px 基準，避免左右首列錯位。 */
+html.st-vs5 #rangebar,
+html.st-vs5 #rtabs{
+  height:26px!important;min-height:26px!important;max-height:26px!important;
+  align-items:stretch!important;box-sizing:border-box;scrollbar-width:none;
+}
 html.st-vs5 #rangebar::-webkit-scrollbar{display:none}
-html.st-vs5 #rangebar .rgbtn{
+html.st-vs5 #rangebar .rgbtn,
+html.st-vs5 #rtabs .rtab{
   height:25px!important;min-height:25px!important;padding:0 4px!important;
   font-size:9px!important;line-height:25px!important;
 }
+html.st-vs5 #rtabs .rtab{letter-spacing:.7px!important}
 
 /* ── 今／昨軸標籤：沿用既有正確價位，提升焦點而不重複 ───── */
 html.st-vs5 #ctag-now{

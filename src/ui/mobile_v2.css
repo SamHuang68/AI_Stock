@@ -235,8 +235,16 @@
   .stat-row { padding: 5px 10px !important; font-size: 10px !important; }
   .stat-hdr, .stat-sect { padding: 6px 10px 4px !important; font-size: 9px !important; }
 
-  /* ── Tabs: smaller ── */
-  .rtab { font-size: 9px !important; height: 32px !important; letter-spacing: .5px !important; }
+  /* ── Tabs: 與左側時間列共用 26px 基準；直式本列仍由 pager 取代 ── */
+  #rtabs { height: 26px !important; min-height: 26px !important; max-height: 26px !important; }
+  .rtab {
+    height: 25px !important;
+    min-height: 25px !important;
+    line-height: 25px !important;
+    padding: 0 3px !important;
+    font-size: 9px !important;
+    letter-spacing: .5px !important;
+  }
 
   /* ── Replay bar ── */
   #replay-bar { font-size: 9px !important; padding: 3px 8px !important; }
@@ -324,7 +332,18 @@
     border-left: 1px solid var(--border) !important;
     border-top: 0 !important;
   }
-  #rtabs { display: flex !important; }
+  #rtabs {
+    display: flex !important;
+    height: 26px !important;
+    min-height: 26px !important;
+    max-height: 26px !important;
+  }
+  #rtabs .rtab {
+    height: 25px !important;
+    min-height: 25px !important;
+    line-height: 25px !important;
+    padding: 0 3px !important;
+  }
   #rpanel-pager { display: none !important; }
   #live-panel {
     left: auto !important;
@@ -353,7 +372,8 @@
 @media (hover: none) and (pointer: coarse) {
   .heatcell:hover { transform: none !important; }   /* 觸控時 hover scale 會跳 */
   /* Bigger hitboxes */
-  .probtn, .rtab, .wlchip, .wladd { min-height: 32px; }
+  /* 分析分頁刻意與 26px 時間列同步；其餘主要觸控按鈕維持 32px。 */
+  .probtn, .wlchip, .wladd { min-height: 32px; }
   .info-i { width: 16px !important; height: 16px !important; font-size: 10px !important; }
 }
 
