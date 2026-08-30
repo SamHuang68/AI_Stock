@@ -92,12 +92,22 @@ ok(/function themeFor/.test(chartVisual) && /Colors\.isRedUp/.test(chartVisual) 
   'chart workspace shares one market-aware palette across candles, volume, controls and metric cards');
 ok(/#wlbar\{height:67px!important/.test(chartVisual) && /height:30px!important/.test(chartVisual) &&
   /wlchip-stack\{padding:0!important;max-height:27px;overflow:visible/.test(chartVisual) &&
+  /wlchip-primary\{min-height:10px;line-height:1/.test(chartVisual) &&
   /wladd\{height:62px/.test(chartVisual) && /#rangebar\{height:26px!important/.test(chartVisual) &&
   /min-height:25px!important/.test(chartVisual),
   'chart watchlist uses compact two-row chips and a real 26px timeframe row without clipping');
-ok(/\.wlchip-meta/.test(polish) && /meta\.appendChild\(codeSpan\)/.test(polish) &&
+ok(/\.wlchip-primary/.test(polish) && /if \(mkt === 'TW'\)/.test(polish) &&
+  /primary\.appendChild\(t\)/.test(polish) && /primary\.appendChild\(p\)/.test(polish) &&
+  /meta\.appendChild\(codeSpan\)/.test(polish) &&
+  /if \(etfBadge\) meta\.appendChild\(etfBadge\)/.test(polish) &&
   /meta\.appendChild\(p\)/.test(polish) && /stack\.appendChild\(meta\)/.test(polish),
-  'watchlist keeps name primary while symbol and change share one compact meta row');
+  'TW watchlist owns a name/change top row and code/ETF bottom row while US keeps its prior layout');
+ok(/\{t:'2330',m:'TW',name:'台積電'\}/.test(sourceHtml) &&
+  /\{t:'2454',m:'TW',name:'聯發科'\}/.test(sourceHtml) &&
+  /\{t:'3661',m:'TW',name:'世芯-KY'\}/.test(sourceHtml) &&
+  /\{t:'6669',m:'TW',name:'緯穎'\}/.test(sourceHtml) &&
+  /if \(preset\?\.name\) w\.name = preset\.name/.test(sourceHtml),
+  'fresh and older profiles receive known Taiwan names instead of duplicate symbol rows');
 ok(fundamental.includes('?traceId=${encodeURIComponent(traceId)}') &&
   polish.includes('?traceId=${encodeURIComponent(traceId)}') &&
   /_fInflight\[key\]/.test(fundamental) && /_keystatsInflight\[key\]/.test(polish) &&

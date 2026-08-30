@@ -95,7 +95,7 @@ function _isRedUpSym(s) {
 .mkt-cell .down { color: var(--green); }
 .mkt-cell .flat { color: var(--tlo); }
 
-/* (#3) 自選股 chip — 兩層排版：名稱為主列，代號＋漲跌為 compact meta 列。 */
+/* (#3) 自選股 chip — 台股使用 2×2：名稱｜漲跌、代號｜ETF＋−。 */
 .wlchip {
   flex-direction: row !important;
   gap: 4px !important;
@@ -108,6 +108,7 @@ function _isRedUpSym(s) {
   font-size: 10px !important;
   line-height: 1.05 !important;
   letter-spacing: .2px !important;
+  min-width: 0 !important;
   max-width: 48px !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
@@ -137,9 +138,22 @@ function _isRedUpSym(s) {
   justify-content: center; gap: 1px; line-height: 1; min-width: 0; max-width: 52px;
   flex-shrink: 1; padding: 1px 0 !important;
 }
+.wlchip[data-mkt="TW"] .wlchip-stack {
+  width: 76px; max-width: 76px; flex: 0 0 76px;
+}
+.wlchip-primary,
 .wlchip-meta {
-  display: flex; align-items: baseline; gap: 2px; min-width: 0;
+  display: grid; grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: baseline; column-gap: 2px; width: 100%; min-width: 0;
   min-height: 8px; line-height: 1;
+}
+.wlchip-primary { min-height: 10px; }
+.wlchip-primary .wlchip-t { max-width: none !important; }
+.wlchip-primary .wlchip-p,
+.wlchip-meta .etf-flow-badge { justify-self: end; }
+.wlchip-meta .wlchip-c { justify-self: start; }
+.wlchip[data-mkt="US"] .wlchip-meta {
+  display: flex; align-items: baseline; justify-content: flex-start; gap: 2px;
 }
 /* (#2) 線型視窗上限 — 不超過 viewport 62%，下方留空給未來面板/可增大 wlbar */
 #chartarea {
@@ -1424,8 +1438,8 @@ function renderKeystatsSection(ks) {
 }
 
 // ============================================================
-// (#3) Patch renderWl to wrap code + pct in vertical stack
-// 這樣每個 chip 從橫向 ~80px 縮到 ~52px，可放 2 倍數量
+// (#3) Patch renderWl into compact two-row market-aware layouts.
+// TW: name | change, then code | ETF +−. US keeps the existing two-row layout.
 // ============================================================
 (function patchRenderWl() {
   if (typeof renderWl !== 'function') return setTimeout(patchRenderWl, 100);
@@ -1434,8 +1448,8 @@ function renderKeystatsSection(ks) {
   const orig = window.renderWl;
   window.renderWl = function () {
     orig.apply(this, arguments);
-    // After v1 renders chips, restructure into two rows:
-    // name/symbol, then a compact symbol + change meta row.
+    // After v1 renders chips, restructure into two rows without changing
+    // the live-price element or ETF trigger ownership.
     const ct = document.getElementById('wlchips');
     if (!ct) return;
     ct.querySelectorAll('.wlchip').forEach(chip => {
@@ -1448,6 +1462,7 @@ function renderKeystatsSection(ks) {
 
       const t = chip.querySelector('.wlchip-t');
       const p = chip.querySelector('.wlchip-p');
+      const etfBadge = chip.querySelector('[data-etf-flow-trigger]');
       if (!t || !p || t.parentElement !== chip) return;
 
       const stack = document.createElement('div');
@@ -1456,20 +1471,35 @@ function renderKeystatsSection(ks) {
       const meta = document.createElement('div');
       meta.className = 'wlchip-meta';
 
-      if (hasName) {
-        t.textContent = w.name;
-        stack.appendChild(t);
+      if (mkt === 'TW') {
+        const primary = document.createElement('div');
+        primary.className = 'wlchip-primary';
+        t.textContent = hasName ? w.name : sym;
+        primary.appendChild(t);
+        primary.appendChild(p);
+        stack.appendChild(primary);
+
         const codeSpan = document.createElement('span');
         codeSpan.className = 'wlchip-c';
-        codeSpan.textContent = w.t;
+        codeSpan.textContent = sym;
         meta.appendChild(codeSpan);
+        if (etfBadge) meta.appendChild(etfBadge);
+        stack.appendChild(meta);
       } else {
-        t.textContent = sym;
-        stack.appendChild(t);
+        if (hasName) {
+          t.textContent = w.name;
+          stack.appendChild(t);
+          const codeSpan = document.createElement('span');
+          codeSpan.className = 'wlchip-c';
+          codeSpan.textContent = w.t;
+          meta.appendChild(codeSpan);
+        } else {
+          t.textContent = sym;
+          stack.appendChild(t);
+        }
+        meta.appendChild(p);
+        stack.appendChild(meta);
       }
-
-      meta.appendChild(p);
-      stack.appendChild(meta);
       chip.dataset._stacked = '1';
     });
   };

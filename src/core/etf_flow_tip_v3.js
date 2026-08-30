@@ -60,13 +60,13 @@
       '#etf-flow-tip .eft-empty{padding:7px 0;color:#94a3b8}' +
       '#etf-flow-tip .eft-error{margin-top:6px;color:#facc15;font-size:9.5px}' +
       '#etf-flow-tip .eft-foot{margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,.07);color:#65758d;font-size:9px}' +
-      '.etf-flow-badge{position:relative;display:grid;grid-template-columns:auto 8px;grid-template-rows:repeat(2,8px);' +
-      'column-gap:2px;align-items:center;box-sizing:border-box;flex:0 0 28px;width:28px;min-width:28px;height:20px;' +
-      'padding:1px 3px;margin-left:0;border-radius:4px;font-family:"JetBrains Mono",monospace;line-height:1;' +
+      '.etf-flow-badge{position:relative;display:inline-flex;align-items:baseline;justify-content:flex-end;gap:0;' +
+      'box-sizing:border-box;flex:0 0 auto;width:auto;min-width:0;height:9px;' +
+      'padding:0 1px;margin-left:0;border-radius:3px;font-family:"JetBrains Mono",monospace;line-height:1;' +
       'cursor:pointer;border:1px solid transparent}' +
-      '.etf-flow-label{grid-row:1/3;color:#a8b4c7;font:700 6px/1 "JetBrains Mono",monospace;letter-spacing:-.25px}' +
-      '.etf-flow-signs{display:grid;grid-template-rows:repeat(2,8px);width:8px;height:16px}' +
-      '.etf-flow-sign{display:block;width:8px;height:8px;font:900 8px/8px "JetBrains Mono",monospace;' +
+      '.etf-flow-label{color:#a8b4c7;font:700 6.5px/8px "JetBrains Mono",monospace;letter-spacing:-.35px}' +
+      '.etf-flow-signs{display:inline-flex;align-items:baseline;width:auto;height:8px}' +
+      '.etf-flow-sign{display:inline-block;width:6px;height:8px;font:900 7.5px/8px "JetBrains Mono",monospace;' +
       'text-align:center;opacity:.20}' +
       '.etf-flow-sign.up{color:var(--red)}.etf-flow-sign.down{color:var(--green)}' +
       '.etf-flow-sign.on{opacity:1;text-shadow:0 0 6px currentColor}' +

@@ -89,7 +89,7 @@ html.st-vs5 #chart-search #gobtn:hover{
   filter:brightness(1.06);box-shadow:0 7px 19px rgba(226,169,11,.25),inset 0 1px 0 rgba(255,255,255,.42);
 }
 
-/* ── 自選列：兩排固定；名稱＋meta 兩層，ETF 狀態為固定窄欄 ── */
+/* ── 自選列：兩排固定；TW 為名稱｜漲跌、代號｜ETF＋− ── */
 html.st-vs5 #wlbar{height:67px!important;padding:2px 4px;gap:3px;background:rgba(9,17,29,.94)}
 html.st-vs5 #wlchips{grid-template-rows:repeat(2,minmax(0,1fr));column-gap:3px;row-gap:2px;align-items:stretch}
 html.st-vs5 .wlchip{
@@ -101,6 +101,7 @@ html.st-vs5 .wlchip{
 }
 html.st-vs5 .wlchip-grip{font-size:8px;margin-right:0}
 html.st-vs5 .wlchip-stack{padding:0!important;max-height:27px;overflow:visible}
+html.st-vs5 .wlchip-primary{min-height:10px;line-height:1}
 html.st-vs5 .wlchip-meta{min-height:8px;line-height:1}
 html.st-vs5 .wlchip-stack .wlchip-p{line-height:1!important;margin:0!important}
 html.st-vs5 .wlchip:hover{

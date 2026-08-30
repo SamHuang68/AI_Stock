@@ -261,13 +261,15 @@ async function main() {
   ok(/\.wlchip\[data-mkt="TW"\]/.test(tipSource) && !/\^\[\+-\]\\d\+\$/.test(tipSource),
     'tooltip targets the whole TW chip instead of only a tiny +/- badge');
   ok(/class="etf-flow-signs"/.test(html) && /data-etf-up=/.test(html) && /data-etf-down=/.test(html) &&
-      /grid-template-rows:repeat\(2,8px\)/.test(tipSource) &&
+      /\.etf-flow-signs\{display:inline-flex;align-items:baseline/.test(tipSource) &&
+      !/grid-template-rows:repeat\(2,8px\)/.test(tipSource) &&
       /\.etf-flow-sign\.up\{color:var\(--red\)\}/.test(tipSource) &&
       /\.etf-flow-sign\.down\{color:var\(--green\)\}/.test(tipSource),
-    'compact ETF indicator stacks plus over minus and preserves Taiwan direction colors');
+    'compact ETF indicator keeps plus/minus horizontal and preserves Taiwan direction colors');
   ok(!/>ETF ↑/.test(html) && !/>ETF ↓/.test(html) &&
+      /class="etf-flow-sign up[^>]*">\+<\/span><span class="etf-flow-sign down/.test(html) &&
       /aria-label="\$\{w\.t\} ETF 動向：\$\{_text\}/.test(html),
-    'variable ETF counts stay in accessible detail instead of widening the watchlist chip');
+    'ETF +− stays fixed while variable counts remain in accessible detail');
 ok(/wl-menu-etf/.test(html) && /EtfFlowTip\.openForChip/.test(html),
   'mobile long-press menu exposes ETF movement');
 ok(/class="eft-close"/.test(tipSource) && /pointerdown/.test(tipSource),
