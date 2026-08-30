@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -117,6 +118,24 @@ class PrivateWebReleaseTests(unittest.TestCase):
         self.assertFalse((tree / "wavedeck").exists())
         self.assertFalse((tree / "START_WAVEDECK.cmd").exists())
         self.assertTrue((tree / "server" / "server.py").is_file())
+
+    def test_release_tests_cannot_mutate_committed_seed_bytes(self):
+        archive_path = self.install_root / "release.zip"
+        committed_seed = b"date,value\r\n2026-08-28,1.0\r\n"
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr("data/public_seed.csv", committed_seed)
+            archive.writestr("server/server.py", b"server")
+
+        tree = self.install_root / "candidate"
+        _write(tree / "data" / "public_seed.csv", "mutated\n")
+        _write(tree / "data" / "runtime-only.json", "runtime")
+        _write(tree / "logs" / "test.log", "test")
+
+        release._restore_preserved_from_archive(archive_path, tree)
+
+        self.assertEqual((tree / "data" / "public_seed.csv").read_bytes(), committed_seed)
+        self.assertFalse((tree / "data" / "runtime-only.json").exists())
+        self.assertFalse((tree / "logs").exists())
 
 
 if __name__ == "__main__":

@@ -91,6 +91,41 @@ def _safe_extract(archive_path: Path, target: Path) -> None:
         archive.extractall(target)
 
 
+def _restore_preserved_from_archive(archive_path: Path, target: Path) -> None:
+    """Restore preserved seed trees byte-for-byte after release tests.
+
+    Some integration tests import the live server and may refresh files below
+    ``data``.  A staged release must still represent the exact Git archive;
+    runtime/test writes are never allowed to become release inputs.
+    """
+    resolved_target = target.resolve()
+    if not resolved_target.is_dir():
+        raise FileNotFoundError(f"release tree is missing: {resolved_target}")
+
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        preserved_members = []
+        for info in archive.infolist():
+            pure = PurePosixPath(info.filename)
+            if pure.is_absolute() or ".." in pure.parts:
+                raise RuntimeError(f"unsafe archive member: {info.filename}")
+            if pure.parts and pure.parts[0] in PRESERVE_NAMES:
+                preserved_members.append(info)
+
+        for name in sorted(PRESERVE_NAMES):
+            destination = (resolved_target / name).resolve()
+            try:
+                destination.relative_to(resolved_target)
+            except ValueError as exc:
+                raise RuntimeError(f"unsafe preserved path: {destination}") from exc
+            if destination.is_dir() and not destination.is_symlink():
+                shutil.rmtree(destination)
+            elif destination.exists() or destination.is_symlink():
+                destination.unlink()
+
+        for info in preserved_members:
+            archive.extract(info, resolved_target)
+
+
 def _validate_release(path: Path) -> None:
     missing = sorted(rel for rel in REQUIRED_RELEASE_FILES if not (path / rel).is_file())
     if missing:
@@ -146,6 +181,10 @@ def stage_release(
         ]
         if run_tests:
             _run([python, "-m", "unittest", *tests], cwd=extracted)
+
+        # Tests may legitimately exercise refresh paths, but the release
+        # artifact must keep committed public seeds byte-identical to Git.
+        _restore_preserved_from_archive(archive_path, extracted)
 
         managed = sorted(item.name for item in extracted.iterdir() if item.name not in PRESERVE_NAMES)
         manifest = {
