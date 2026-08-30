@@ -82,6 +82,20 @@ def resolve_commit(ref: str) -> tuple[str, str]:
     return commit, commit[:12]
 
 
+def _git_archive_argv(archive_path: Path, commit: str) -> list[str]:
+    """Build an archive from Git blobs without host checkout/EOL filters."""
+    return [
+        "git",
+        "-c",
+        "core.autocrlf=false",
+        "archive",
+        "--format=zip",
+        "--output",
+        str(archive_path),
+        commit,
+    ]
+
+
 def _safe_extract(archive_path: Path, target: Path) -> None:
     with zipfile.ZipFile(archive_path, "r") as archive:
         for info in archive.infolist():
@@ -159,10 +173,7 @@ def stage_release(
     with tempfile.TemporaryDirectory(dir=str(install_root), prefix="stage-") as temp_name:
         temp = Path(temp_name)
         archive_path = temp / "release.zip"
-        _run(
-            ["git", "archive", "--format=zip", "--output", str(archive_path), commit],
-            cwd=ROOT,
-        )
+        _run(_git_archive_argv(archive_path, commit), cwd=ROOT)
         extracted = temp / "tree"
         extracted.mkdir()
         _safe_extract(archive_path, extracted)

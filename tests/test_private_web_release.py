@@ -59,6 +59,13 @@ class PrivateWebReleaseTests(unittest.TestCase):
                 approved=False,
             )
 
+    def test_release_archive_disables_host_eol_conversion(self):
+        archive_path = self.install_root / "release.zip"
+        argv = release._git_archive_argv(archive_path, "a" * 40)
+        self.assertEqual(argv[:4], ["git", "-c", "core.autocrlf=false", "archive"])
+        self.assertEqual(argv[-1], "a" * 40)
+        self.assertIn(str(archive_path), argv)
+
     def test_promote_replaces_code_but_preserves_runtime_data_and_logs(self):
         _fake_release(self.install_root, "abc123")
         current = self.install_root / "current"
