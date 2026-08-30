@@ -185,22 +185,30 @@ function runTipEventRegression() {
   dispatch('keydown', escapeEvent);
   const escapeClosed = tip.style.display === 'none';
   const escapeConsumed = escapeEvent.defaultPrevented && escapeEvent.immediateStopped && globalHotkeyCount === 0;
-  context.EtfFlowTip.openForChip(first.chip, {interaction:'test'});
-  const enterEvent = {
-    key:'Enter', defaultPrevented:false,
+  const keyEvent = key => ({
+    key, defaultPrevented:false, immediateStopped:false,
     target:first.badge,
     preventDefault(){ this.defaultPrevented = true; },
-    stopImmediatePropagation(){}, stopPropagation(){},
-  };
+    stopImmediatePropagation(){ this.immediateStopped = true; },
+    stopPropagation(){},
+  });
+  context.EtfFlowTip.openForChip(first.chip, {interaction:'test'});
+  const hotkeysBeforeKeyboard = globalHotkeyCount;
+  const enterEvent = keyEvent('Enter');
   dispatch('keydown', enterEvent);
-  const keyboardToggleClosed = tip.style.display === 'none' && enterEvent.defaultPrevented;
-  dispatch('keydown', {...enterEvent, defaultPrevented:false});
+  const keyboardToggleClosed = tip.style.display === 'none';
+  const spaceEvent = keyEvent(' ');
+  dispatch('keydown', spaceEvent);
   const keyboardToggleOpened = tip.style.display === 'block';
+  const keyboardConsumed = enterEvent.defaultPrevented && enterEvent.immediateStopped &&
+    spaceEvent.defaultPrevented && spaceEvent.immediateStopped &&
+    globalHotkeyCount === hotkeysBeforeKeyboard;
   return {
     otherChipClosed,
     escapeClosed,
     escapeConsumed,
     keyboardToggle: keyboardToggleClosed && keyboardToggleOpened,
+    keyboardConsumed,
   };
 }
 
@@ -252,6 +260,14 @@ async function main() {
 
   ok(/\.wlchip\[data-mkt="TW"\]/.test(tipSource) && !/\^\[\+-\]\\d\+\$/.test(tipSource),
     'tooltip targets the whole TW chip instead of only a tiny +/- badge');
+  ok(/class="etf-flow-signs"/.test(html) && /data-etf-up=/.test(html) && /data-etf-down=/.test(html) &&
+      /grid-template-rows:repeat\(2,8px\)/.test(tipSource) &&
+      /\.etf-flow-sign\.up\{color:var\(--red\)\}/.test(tipSource) &&
+      /\.etf-flow-sign\.down\{color:var\(--green\)\}/.test(tipSource),
+    'compact ETF indicator stacks plus over minus and preserves Taiwan direction colors');
+  ok(!/>ETF ↑/.test(html) && !/>ETF ↓/.test(html) &&
+      /aria-label="\$\{w\.t\} ETF 動向：\$\{_text\}/.test(html),
+    'variable ETF counts stay in accessible detail instead of widening the watchlist chip');
 ok(/wl-menu-etf/.test(html) && /EtfFlowTip\.openForChip/.test(html),
   'mobile long-press menu exposes ETF movement');
 ok(/class="eft-close"/.test(tipSource) && /pointerdown/.test(tipSource),
@@ -266,7 +282,9 @@ ok(/any-hover: hover/.test(tipSource) && /any-pointer: fine/.test(tipSource),
   ok(interaction.escapeClosed && interaction.escapeConsumed,
     'Escape closes the visible tooltip without leaking into global hotkeys');
   ok(interaction.keyboardToggle,
-    'Enter toggles the ETF tooltip with the same semantics as pointer activation');
+    'Enter closes and Space opens the ETF tooltip with pointer-equivalent semantics');
+  ok(interaction.keyboardConsumed,
+    'ETF Enter/Space activation is consumed before global watchlist hotkeys');
   ok(/<\/html>\s*$/.test(html) && !/<\/html>[\s\S]+<script/i.test(html),
     'source HTML ends at closing html with no legacy owner afterward');
   process.stdout.write('ETF flow v3 selftest passed.\n');

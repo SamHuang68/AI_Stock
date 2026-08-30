@@ -90,10 +90,14 @@ ok(/function themeFor/.test(chartVisual) && /Colors\.isRedUp/.test(chartVisual) 
   /#chart-search/.test(chartVisual) && /\.vp-poc/.test(chartVisual) && /\.mkt-cell/.test(chartVisual) &&
   /chart_visual_v5\.js/.test(build),
   'chart workspace shares one market-aware palette across candles, volume, controls and metric cards');
-ok(/#wlbar\{height:76px!important/.test(chartVisual) && /height:33px!important/.test(chartVisual) &&
-  /wlchip-stack\{padding:1px 0!important;max-height:31px;overflow:visible/.test(chartVisual) &&
-  /wladd\{height:70px/.test(chartVisual),
-  'chart two-row watchlist allocates enough height for name, symbol and change without internal clipping');
+ok(/#wlbar\{height:67px!important/.test(chartVisual) && /height:30px!important/.test(chartVisual) &&
+  /wlchip-stack\{padding:0!important;max-height:27px;overflow:visible/.test(chartVisual) &&
+  /wladd\{height:62px/.test(chartVisual) && /#rangebar\{height:26px!important/.test(chartVisual) &&
+  /min-height:25px!important/.test(chartVisual),
+  'chart watchlist uses compact two-row chips and a real 26px timeframe row without clipping');
+ok(/\.wlchip-meta/.test(polish) && /meta\.appendChild\(codeSpan\)/.test(polish) &&
+  /meta\.appendChild\(p\)/.test(polish) && /stack\.appendChild\(meta\)/.test(polish),
+  'watchlist keeps name primary while symbol and change share one compact meta row');
 ok(fundamental.includes('?traceId=${encodeURIComponent(traceId)}') &&
   polish.includes('?traceId=${encodeURIComponent(traceId)}') &&
   /_fInflight\[key\]/.test(fundamental) && /_keystatsInflight\[key\]/.test(polish) &&
@@ -707,6 +711,10 @@ ok(!/class="wlchip-rm"/.test(sourceHtml) &&
   /EtfFlowTip\.openForChip/.test(sourceHtml) &&
   /class="etf-flow-badge/.test(sourceHtml) &&
   /data-etf-flow-trigger/.test(sourceHtml) &&
+  /data-etf-up=/.test(sourceHtml) &&
+  /class="etf-flow-signs"/.test(sourceHtml) &&
+  /class="etf-flow-sign up/.test(sourceHtml) &&
+  /class="etf-flow-sign down/.test(sourceHtml) &&
   /data-etf-flow-state/.test(sourceHtml) &&
   /wl-menu-remove/.test(sourceHtml) &&
   /if \(!confirm\('從自選移除/.test(sourceHtml) &&

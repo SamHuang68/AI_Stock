@@ -60,12 +60,23 @@
       '#etf-flow-tip .eft-empty{padding:7px 0;color:#94a3b8}' +
       '#etf-flow-tip .eft-error{margin-top:6px;color:#facc15;font-size:9.5px}' +
       '#etf-flow-tip .eft-foot{margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,.07);color:#65758d;font-size:9px}' +
-      '.etf-flow-badge{display:inline-flex;align-items:center;padding:1px 4px;margin-left:2px;border-radius:3px;' +
-      'font:700 7px/1.35 "JetBrains Mono",monospace;cursor:pointer;border:1px solid transparent}' +
-      '.etf-flow-badge.buy{color:var(--red);background:rgba(248,113,113,.13);border-color:rgba(248,113,113,.24)}' +
-      '.etf-flow-badge.sell{color:var(--green);background:rgba(74,222,128,.12);border-color:rgba(74,222,128,.22)}' +
-      '.etf-flow-badge.mixed{color:var(--blue);background:rgba(96,165,250,.12);border-color:rgba(96,165,250,.22)}' +
-      '.etf-flow-badge.stale{color:var(--gold);background:rgba(245,197,24,.10);border-color:rgba(245,197,24,.3)}' +
+      '.etf-flow-badge{position:relative;display:grid;grid-template-columns:auto 8px;grid-template-rows:repeat(2,8px);' +
+      'column-gap:2px;align-items:center;box-sizing:border-box;flex:0 0 28px;width:28px;min-width:28px;height:20px;' +
+      'padding:1px 3px;margin-left:0;border-radius:4px;font-family:"JetBrains Mono",monospace;line-height:1;' +
+      'cursor:pointer;border:1px solid transparent}' +
+      '.etf-flow-label{grid-row:1/3;color:#a8b4c7;font:700 6px/1 "JetBrains Mono",monospace;letter-spacing:-.25px}' +
+      '.etf-flow-signs{display:grid;grid-template-rows:repeat(2,8px);width:8px;height:16px}' +
+      '.etf-flow-sign{display:block;width:8px;height:8px;font:900 8px/8px "JetBrains Mono",monospace;' +
+      'text-align:center;opacity:.20}' +
+      '.etf-flow-sign.up{color:var(--red)}.etf-flow-sign.down{color:var(--green)}' +
+      '.etf-flow-sign.on{opacity:1;text-shadow:0 0 6px currentColor}' +
+      '.etf-flow-badge.buy{background:rgba(248,113,113,.09);border-color:rgba(248,113,113,.24)}' +
+      '.etf-flow-badge.sell{background:rgba(74,222,128,.08);border-color:rgba(74,222,128,.22)}' +
+      '.etf-flow-badge.mixed{background:rgba(96,165,250,.09);border-color:rgba(96,165,250,.22)}' +
+      '.etf-flow-badge.stale{background:rgba(245,197,24,.08);border-color:rgba(245,197,24,.38)}' +
+      '.etf-flow-badge.stale:after{content:"";position:absolute;right:-2px;top:-2px;width:4px;height:4px;border-radius:50%;' +
+      'background:var(--gold);box-shadow:0 0 6px rgba(245,197,24,.55)}' +
+      '.etf-flow-badge:focus-visible{outline:1px solid var(--cyan);outline-offset:2px}' +
       '.wlchip[data-mkt="TW"]{--etf-hover-ring:rgba(96,165,250,.32)}' +
       '.wlchip[data-mkt="TW"][data-etf-flow-state="stale"]{--etf-hover-ring:rgba(245,197,24,.42)}' +
       '.wlchip[data-mkt="TW"]:hover{box-shadow:inset 0 -1px 0 var(--etf-hover-ring)}';
@@ -282,6 +293,8 @@
     var chip = chipFrom(trigger);
     if (!chip) return;
     event.preventDefault();
+    if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+    else if (event.stopPropagation) event.stopPropagation();
     var tip = document.getElementById('etf-flow-tip');
     if (_activeChip === chip && tip && tip.style.display !== 'none') close();
     else openForChip(chip, {interaction:'keyboard'});

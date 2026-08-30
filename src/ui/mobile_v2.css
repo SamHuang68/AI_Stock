@@ -121,10 +121,10 @@
   #statusbar { font-size: 8px !important; }
   .probtn { padding: 2px 5px !important; font-size: 8.5px !important; height: 22px !important; }
 
-  /* ── Watchlist bar: keep 2 rows but slimmer ── */
-  #wlbar { height: 56px !important; }
-  #wlchips { grid-template-rows: repeat(2, 1fr) !important; }
-  .wlchip { height: 28px !important; padding: 0 7px !important; font-size: 10px !important; }
+  /* ── Watchlist bar: two 32px touch rows, no hidden overflow ── */
+  #wlbar { height: 65px !important; padding-block: 0 !important; }
+  #wlchips { grid-template-rows: repeat(2, 1fr) !important; row-gap: 0 !important; }
+  .wlchip { height: 30px !important; padding: 0 5px !important; font-size: 10px !important; }
   .wlchip-grip { display: none !important; }   /* 觸控不需要拖把手提示 */
   .wlchip-p { font-size: 9px !important; }
   .wlchip.wl-holding::after {
@@ -174,11 +174,19 @@
   .wl-action-menu .wl-menu-remove { color: #fda4af; border-color: rgba(248,113,113,.24); }
   .wl-action-menu .wl-menu-etf { color: #67e8f9; border-color: rgba(56,189,248,.28); }
   .wl-action-menu .wl-menu-cancel { color: var(--tlo); }
-  .wladd { height: 56px !important; padding: 0 10px !important; }
+  .wladd { height: 64px !important; padding: 0 9px !important; }
 
-  /* ── Range bar: smaller buttons ── */
-  #rangebar { height: 28px !important; }
-  .rgbtn { font-size: 9px !important; min-width: 40px !important; padding: 0 4px !important; }
+  /* ── Range bar: full-width cells allow a compact 26px touch row ── */
+  #rangebar { height: 26px !important; scrollbar-width: none; }
+  #rangebar::-webkit-scrollbar { display: none; }
+  #rangebar .rgbtn {
+    height: 25px !important;
+    min-height: 25px !important;
+    min-width: 40px !important;
+    padding: 0 4px !important;
+    font-size: 9px !important;
+    line-height: 25px !important;
+  }
 
   /* ── Pro tools row: wrap if needed ── */
   #pro-tools { padding: 0 4px !important; }
@@ -345,7 +353,7 @@
 @media (hover: none) and (pointer: coarse) {
   .heatcell:hover { transform: none !important; }   /* 觸控時 hover scale 會跳 */
   /* Bigger hitboxes */
-  .probtn, .rgbtn, .rtab, .wlchip, .wladd { min-height: 32px; }
+  .probtn, .rtab, .wlchip, .wladd { min-height: 32px; }
   .info-i { width: 16px !important; height: 16px !important; font-size: 10px !important; }
 }
 

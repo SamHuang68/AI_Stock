@@ -95,8 +95,7 @@ function _isRedUpSym(s) {
 .mkt-cell .down { color: var(--green); }
 .mkt-cell .flat { color: var(--tlo); }
 
-/* (#3) 自選股 chip — 直立排版（代號上、漲跌下小字）
-       讓單個 chip 從 ~80px 縮到 ~52px，可塞下 2 倍數量 */
+/* (#3) 自選股 chip — 兩層排版：名稱為主列，代號＋漲跌為 compact meta 列。 */
 .wlchip {
   flex-direction: row !important;
   gap: 4px !important;
@@ -109,20 +108,24 @@ function _isRedUpSym(s) {
   font-size: 10px !important;
   line-height: 1.05 !important;
   letter-spacing: .2px !important;
+  max-width: 48px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
 }
 .wlchip-c {
-  display: block !important;
+  display: inline-block !important;
   font-family: 'JetBrains Mono', monospace !important;
-  font-size: 7.5px !important;
+  font-size: 7px !important;
   color: var(--tlo) !important;
-  line-height: 1 !important;
-  margin-top: 0.5px !important;
+  line-height: .95 !important;
+  margin: 0 !important;
 }
 .wlchip-p {
-  display: block !important;
-  font-size: 8.5px !important;
+  display: inline-block !important;
+  font-size: 8px !important;
   line-height: 1 !important;
-  margin-top: 0.5px !important;
+  margin: 0 !important;
 }
 .wlchip > .wlchip-t,
 .wlchip > .wlchip-p {
@@ -131,8 +134,12 @@ function _isRedUpSym(s) {
 }
 .wlchip-stack {
   display: flex; flex-direction: column; align-items: flex-start;
-  justify-content: center; line-height: 1; min-width: 0; flex-shrink: 1;
-  padding: 2px 0 !important;
+  justify-content: center; gap: 1px; line-height: 1; min-width: 0; max-width: 52px;
+  flex-shrink: 1; padding: 1px 0 !important;
+}
+.wlchip-meta {
+  display: flex; align-items: baseline; gap: 2px; min-width: 0;
+  min-height: 8px; line-height: 1;
 }
 /* (#2) 線型視窗上限 — 不超過 viewport 62%，下方留空給未來面板/可增大 wlbar */
 #chartarea {
@@ -1427,7 +1434,8 @@ function renderKeystatsSection(ks) {
   const orig = window.renderWl;
   window.renderWl = function () {
     orig.apply(this, arguments);
-    // After v1 renders chips, restructure: wrap .wlchip-t + .wlchip-p in a .wlchip-stack
+    // After v1 renders chips, restructure into two rows:
+    // name/symbol, then a compact symbol + change meta row.
     const ct = document.getElementById('wlchips');
     if (!ct) return;
     ct.querySelectorAll('.wlchip').forEach(chip => {
@@ -1445,6 +1453,8 @@ function renderKeystatsSection(ks) {
       const stack = document.createElement('div');
       stack.className = 'wlchip-stack';
       chip.insertBefore(stack, t);
+      const meta = document.createElement('div');
+      meta.className = 'wlchip-meta';
 
       if (hasName) {
         t.textContent = w.name;
@@ -1452,13 +1462,14 @@ function renderKeystatsSection(ks) {
         const codeSpan = document.createElement('span');
         codeSpan.className = 'wlchip-c';
         codeSpan.textContent = w.t;
-        stack.appendChild(codeSpan);
+        meta.appendChild(codeSpan);
       } else {
         t.textContent = sym;
         stack.appendChild(t);
       }
 
-      stack.appendChild(p);
+      meta.appendChild(p);
+      stack.appendChild(meta);
       chip.dataset._stacked = '1';
     });
   };

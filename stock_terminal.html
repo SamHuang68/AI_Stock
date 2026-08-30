@@ -1575,20 +1575,22 @@ function renderWl() {
         _etfState=_stale?'stale':((_buy||_sell)?'changed':'none');
         if (_buy || _sell) {
           const _tone=_buy&&_sell?'mixed':(_buy?'buy':'sell');
-          const _text=`ETF${_buy?' ↑'+_buy:''}${_sell?' ↓'+_sell:''}`;
-          _etfBadge=`<span class="etf-flow-badge ${_tone}${_stale?' stale':''}" data-etf-flow-trigger role="button" tabindex="0" aria-label="${w.t} ETF 動向：${_text}${_stale?'，資料較舊':''}" title="查看 ETF 新增、移除與加減碼">${_text}${_stale?' · 舊':''}</span>`;
+          const _text=`ETF 增持 ${_buy} 檔、減持 ${_sell} 檔`;
+          _etfBadge=`<span class="etf-flow-badge ${_tone}${_stale?' stale':''}" data-etf-flow-trigger data-etf-up="${_buy}" data-etf-down="${_sell}" role="button" tabindex="0" aria-label="${w.t} ETF 動向：${_text}${_stale?'，資料較舊':''}" title="${_text}；查看明細"><span class="etf-flow-label" aria-hidden="true">ETF</span><span class="etf-flow-signs" aria-hidden="true"><span class="etf-flow-sign up${_buy?' on':''}">＋</span><span class="etf-flow-sign down${_sell?' on':''}">−</span></span></span>`;
         } else if (_stale) {
-          _etfBadge='<span class="etf-flow-badge stale" data-etf-flow-trigger role="button" tabindex="0" aria-label="ETF 動向資料較舊" title="查看最近一份 ETF 動向">ETF · 舊</span>';
+          _etfBadge='<span class="etf-flow-badge stale" data-etf-flow-trigger data-etf-up="0" data-etf-down="0" role="button" tabindex="0" aria-label="ETF 動向資料較舊" title="查看最近一份 ETF 動向"><span class="etf-flow-label" aria-hidden="true">ETF</span><span class="etf-flow-signs" aria-hidden="true"><span class="etf-flow-sign up">＋</span><span class="etf-flow-sign down">−</span></span></span>';
         }
       } else {
         _etfState=(_flow&&_flow.freshness==='error')?'error':'missing';
       }
     }
     const _etfAttr=w.m==='TW'?` data-etf-flow-state="${_etfState}"`:'';
-    const _title=w.m==='TW'
+    const _actionTitle=w.m==='TW'
       ? '點擊載入 / 桌機停留查看 ETF 動向 / 手機長按操作 / 右鍵移除'
       : '點擊載入 / 手機長按操作 / 桌機拖曳或右鍵移除';
-    return `<div class="wlchip${isActive?' active':''}" draggable="true" data-sym="${w.t}" data-mkt="${w.m}"${_etfAttr} aria-haspopup="menu" onclick="loadSym('${w.t}','${w.m}')" oncontextmenu="rmWl('${w.t}','${w.m}');return false" title="${_title}">
+    const _identity=(w.name&&w.name!==w.t)?`${w.name} ${w.t}`:w.t;
+    const _title=`${_identity} · ${_actionTitle}`;
+    return `<div class="wlchip${isActive?' active':''}" draggable="true" data-sym="${w.t}" data-mkt="${w.m}"${_etfAttr} aria-haspopup="menu" aria-label="${_title}" onclick="loadSym('${w.t}','${w.m}')" oncontextmenu="rmWl('${w.t}','${w.m}');return false" title="${_title}">
       <span class="wlchip-grip">⋮⋮</span>
       <span class="wlchip-t">${w.name || w.t}</span>
       <span class="wlchip-p ${getPcls(w.chg)}" id="wlp-${w.t}" style="${window.Colors?('color:'+Colors.dir(w.t,w.chg)+' !important'):''}">${w.chg!=null?(w.chg>=0?'+':'')+w.chg.toFixed(2)+'%':''}</span>${_etfBadge}

@@ -89,18 +89,20 @@ html.st-vs5 #chart-search #gobtn:hover{
   filter:brightness(1.06);box-shadow:0 7px 19px rgba(226,169,11,.25),inset 0 1px 0 rgba(255,255,255,.42);
 }
 
-/* ── 自選列：兩排市場仍固定，單檔改為微型膠囊 ─────────── */
-html.st-vs5 #wlbar{height:76px!important;padding:3px 5px;gap:4px;background:rgba(9,17,29,.94)}
-html.st-vs5 #wlchips{grid-template-rows:repeat(2,minmax(0,1fr));column-gap:4px;row-gap:3px;align-items:stretch}
+/* ── 自選列：兩排固定；名稱＋meta 兩層，ETF 狀態為固定窄欄 ── */
+html.st-vs5 #wlbar{height:67px!important;padding:2px 4px;gap:3px;background:rgba(9,17,29,.94)}
+html.st-vs5 #wlchips{grid-template-rows:repeat(2,minmax(0,1fr));column-gap:3px;row-gap:2px;align-items:stretch}
 html.st-vs5 .wlchip{
-  height:33px!important;margin:0!important;padding:0 8px!important;align-self:center;overflow:visible;
+  height:30px!important;margin:0!important;padding:0 6px!important;align-self:center;overflow:visible;
   border:1px solid rgba(255,255,255,.065)!important;border-radius:7px;
   background:linear-gradient(180deg,rgba(255,255,255,.034),rgba(255,255,255,.014));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.025);
   transition:background .16s ease,border-color .16s ease,box-shadow .16s ease,transform .16s ease;
 }
-html.st-vs5 .wlchip-stack{padding:1px 0!important;max-height:31px;overflow:visible}
-html.st-vs5 .wlchip-stack .wlchip-p{line-height:1.05!important;margin-top:1px!important}
+html.st-vs5 .wlchip-grip{font-size:8px;margin-right:0}
+html.st-vs5 .wlchip-stack{padding:0!important;max-height:27px;overflow:visible}
+html.st-vs5 .wlchip-meta{min-height:8px;line-height:1}
+html.st-vs5 .wlchip-stack .wlchip-p{line-height:1!important;margin:0!important}
 html.st-vs5 .wlchip:hover{
   background:rgba(255,255,255,.07);border-color:rgba(122,220,232,.24)!important;
   box-shadow:0 5px 14px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.05);
@@ -111,8 +113,16 @@ html.st-vs5 .wlchip.active{
   border-color:rgba(246,200,76,.30)!important;
   box-shadow:inset 2px 0 0 #f6c84c,0 4px 13px rgba(0,0,0,.15);
 }
-html.st-vs5 .wlchip-p{padding:1px 5px;border-radius:999px;background:rgba(255,255,255,.035)}
-html.st-vs5 .wladd{height:70px;border:1px solid rgba(255,255,255,.06);border-radius:7px;background:rgba(255,255,255,.02)}
+html.st-vs5 .wlchip-p{padding:0 2px;border-radius:999px;background:rgba(255,255,255,.035)}
+html.st-vs5 .wladd{height:62px;border:1px solid rgba(255,255,255,.06);border-radius:7px;background:rgba(255,255,255,.02)}
+
+/* 時間週期列使用完整寬度分區，26px 仍可點擊並把垂直空間還給圖表。 */
+html.st-vs5 #rangebar{height:26px!important;scrollbar-width:none}
+html.st-vs5 #rangebar::-webkit-scrollbar{display:none}
+html.st-vs5 #rangebar .rgbtn{
+  height:25px!important;min-height:25px!important;padding:0 4px!important;
+  font-size:9px!important;line-height:25px!important;
+}
 
 /* ── 今／昨軸標籤：沿用既有正確價位，提升焦點而不重複 ───── */
 html.st-vs5 #ctag-now{
@@ -200,6 +210,10 @@ html.st-vs5 .mkt-cell .px{font-size:12.5px;color:#edf4fb}
 html.st-vs5 .mkt-cell .ch:before{content:"· ";color:#536178}
 
 @media(max-width:900px){
+  html.st-vs5 #wlbar{height:65px!important;padding:0 4px;gap:2px}
+  html.st-vs5 #wlchips{column-gap:2px;row-gap:0}
+  html.st-vs5 .wlchip{height:30px!important;padding:0 5px!important}
+  html.st-vs5 .wladd{height:64px}
   html.st-vs5 #topbar{padding-right:46px!important}
   html.st-vs5 #topbar #keybtn{margin-right:36px!important}
   html.st-vs5 #topbar .shell-dash-btn{
