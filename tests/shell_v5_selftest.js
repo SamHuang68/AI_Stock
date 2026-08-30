@@ -616,6 +616,10 @@ ok(landscapeStart >= 0 &&
   /pl-flash \.ttl\{font-size:7px/.test(landscapeCss) &&
   /pl-wl table\{font-size:7px/.test(landscapeCss),
   'pulse touch landscape applies complete compact density without changing 5+5');
+ok(/@media\(orientation:landscape\) and \(max-height:540px\) and \(max-width:767px\) and \(pointer:coarse\)\{[\s\S]*?pl-zone>\.pl-sec>h4\{font-size:6px!important;line-height:9px;gap:1px\}/.test(pl) &&
+  /max-width:767px[\s\S]*?#pl-watch-sec \.pl-theme-heat\{max-width:56px;padding:0 2px;gap:1px;font-size:5px\}/.test(pl) &&
+  /max-width:767px[\s\S]*?#pl-watch-sec \.pl-sec-tog button\{[^}]*font-size:4\.8px;padding:0 1px/.test(pl),
+  'pulse extra-narrow touch landscape compacts the full watchlist heading without affecting larger phones');
 ok(/pl-inst4 \.c \.v,#pl-root \.pl-bd4 \.c \.v,#pl-root \.pl-ohlc4 \.c \.v\{[^}]*font-size:8px!important[^}]*overflow:visible[^}]*text-overflow:initial/.test(landscapeCss) &&
   /pl-ohlc4 \.c \.v\{letter-spacing:-0\.45px\}/.test(landscapeCss) &&
   !/\.c \.v[^}]*text-overflow:clip/.test(landscapeCss),

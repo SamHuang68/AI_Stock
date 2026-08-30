@@ -765,6 +765,15 @@
         '#pl-root .pl-wl th,#pl-root .pl-wl .mkt,#pl-root .pl-wl .nm-only{font-size:6px}' +
         '#pl-root .pl-wl td.px,#pl-root .pl-wl td.chg,#pl-root .pl-wl td:first-child{font-size:7px}' +
       '}' +
+      /* 768px 以下的舊／小型手機再縮一階；一般橫式與桌面不受影響。 */
+      '@media(orientation:landscape) and (max-height:540px) and (max-width:767px) and (pointer:coarse){' +
+        'html.st-vs5 #pl-root .pl-zone>.pl-sec>h4{font-size:6px!important;line-height:9px;gap:1px}' +
+        '#pl-root .pl-sec h4 a,#pl-root .pl-sec-hint{font-size:5.5px}' +
+        '#pl-root #pl-watch-sec .pl-theme-heat{max-width:56px;padding:0 2px;gap:1px;font-size:5px}' +
+        '#pl-root #pl-flash-sec .pl-sec-tog button,#pl-root #pl-watch-sec .pl-sec-tog button{' +
+          'font-size:4.8px;padding:0 1px}' +
+        '#pl-root #pl-watch-sec>h4>a{font-size:5px}' +
+      '}' +
       /* 手機直式專業模式：上下兩區各改為兩欄並允許頁面垂直捲動；橫式維持原始 5+5。 */
       '@media(max-width:900px) and (orientation:portrait){' +
         '#shell-views:has(#view-pulse.on){overflow-x:hidden!important;overflow-y:auto!important;display:block!important;' +
