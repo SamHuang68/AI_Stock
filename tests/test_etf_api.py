@@ -72,6 +72,30 @@ class TestEtfApi(unittest.TestCase):
         self.assertEqual(etf['removed'][0]['code'], '2317')
         self.assertTrue(any(c['code'] == '2330' for c in etf['changed']))
 
+    def test_changed_only_keeps_share_direction_when_weight_opposes(self):
+        import etf_api
+
+        prev = {'00992A': [{'code': '2330', 'name': '台積電', 'weight': 20.0, 'shares': 1000}]}
+        curr = {'00992A': [{'code': '2330', 'name': '台積電', 'weight': 19.8, 'shares': 1200}]}
+        with tempfile.TemporaryDirectory() as td:
+            f0 = os.path.join(td, 'top10_active_etf_holdings_20260101.json')
+            f1 = os.path.join(td, 'top10_active_etf_holdings_20260102.json')
+            for path, payload in ((f0, prev), (f1, curr)):
+                with open(path, 'w', encoding='utf-8') as handle:
+                    json.dump(payload, handle)
+            old = etf_api.ETF_CATALOG_FILE
+            etf_api.ETF_CATALOG_FILE = os.path.join(td, 'no_catalog.json')
+            try:
+                out = etf_api.compute_etf_delta([f0, f1])
+            finally:
+                etf_api.ETF_CATALOG_FILE = old
+        change = out['etfs'][0]['changed'][0]
+        self.assertEqual(change['code'], '2330')
+        self.assertAlmostEqual(change['delta'], -0.2)
+        self.assertEqual(change['shares_delta'], 200)
+        self.assertEqual(out['etfs'][0]['new'], [])
+        self.assertEqual(out['etfs'][0]['removed'], [])
+
     def test_handler_mixin_methods(self):
         import ai_routes
         import etf_routes

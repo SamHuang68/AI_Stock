@@ -26,16 +26,25 @@
   // ─── State boot ─────────────────────────────────────────────
   function boot() {
     if (typeof S === 'undefined') return setTimeout(boot, 30);
-    if (!S.etfV3) S.etfV3 = {
+    const defaults = {
       catalog:    null,
       deltaRaw:   null,
       delta:      null,
+      lastGoodRaw:null,
       loading:    false,
       err:        null,
+      freshness:  { state: 'missing', reason: 'not_loaded' },
+      inflight:   null,
       catActive:  'active',
       lastFetch:  0,
       expanded:   new Set(),
     };
+    if (!S.etfV3) S.etfV3 = defaults;
+    else {
+      Object.keys(defaults).forEach(key => {
+        if (S.etfV3[key] == null) S.etfV3[key] = defaults[key];
+      });
+    }
   }
   boot();
 
@@ -124,15 +133,173 @@
     S.etfDelta = S.etfV3.delta;   // mirror for v1 (chip indicators, watchlist badges)
   }
 
+  function changeDirection(change) {
+    const shares = Number(change && change.shares_delta);
+    if (Number.isFinite(shares) && shares !== 0) return shares > 0 ? 1 : -1;
+    const weight = Number(change && change.delta);
+    if (Number.isFinite(weight) && weight !== 0) return weight > 0 ? 1 : -1;
+    return 0;
+  }
+
+  function freshnessFor(delta, sourceError) {
+    if (!delta) {
+      return { state: sourceError ? 'error' : 'missing', reason: sourceError || 'not_loaded' };
+    }
+    const history = delta.meta && delta.meta.history;
+    const serverState = history && history.state;
+    if (sourceError) {
+      return { state: 'stale', reason: 'refresh_failed', error: sourceError,
+        latestDate: delta.date || (history && history.latestDate) || null };
+    }
+    if (!history || !serverState) {
+      return {
+        state: 'stale',
+        reason: 'history_contract_missing',
+        latestDate: delta.date || null,
+        legacyPayload: true,
+      };
+    }
+    return {
+      state: serverState === 'ok' ? 'fresh' : 'stale',
+      reason: serverState,
+      latestDate: delta.date || (history && history.latestDate) || null,
+      businessDayAge: history && history.businessDayAge,
+    };
+  }
+
+  function stockFlow(code) {
+    const sym = String(code == null ? '' : code).trim().toUpperCase();
+    const delta = S.etfV3 && S.etfV3.delta;
+    const freshness = (S.etfV3 && S.etfV3.freshness) || freshnessFor(delta, S.etfErr);
+    const out = {
+      sym, date: delta && delta.date || null, prevDate: delta && delta.prev_date || null,
+      freshness: freshness.state || 'missing', freshnessDetail: freshness,
+      added: [], removed: [], increased: [], decreased: [],
+      addCount: 0, rmCount: 0, incCount: 0, decCount: 0,
+      netWeightDelta: 0, chgSum: 0, unchanged: false, available: !!delta,
+      sourceError: (S.etfV3 && S.etfV3.err) || S.etfErr || null,
+    };
+    if (!delta) return out;
+    (delta.etfs || []).forEach(etf => {
+      const meta = { code: etf.code, name: resolveName(etf.code, etf.name) };
+      const added = (etf.new || []).find(item => String(item.code).toUpperCase() === sym);
+      if (added) out.added.push({...meta, weight: added.weight, shares: added.shares});
+      const removed = (etf.removed || []).find(item => String(item.code).toUpperCase() === sym);
+      if (removed) out.removed.push({...meta, weight: removed.prev_weight, shares: removed.prev_shares});
+      const changed = (etf.changed || []).find(item => String(item.code).toUpperCase() === sym);
+      if (changed) {
+        const detail = {...meta, delta: Number(changed.delta) || 0,
+          sharesDelta: Number(changed.shares_delta) || 0};
+        out.netWeightDelta += detail.delta;
+        const direction = changeDirection(changed);
+        if (direction > 0) out.increased.push(detail);
+        else if (direction < 0) out.decreased.push(detail);
+      }
+    });
+    out.addCount = out.added.length;
+    out.rmCount = out.removed.length;
+    out.incCount = out.increased.length;
+    out.decCount = out.decreased.length;
+    out.netWeightDelta = Math.round(out.netWeightDelta * 10000) / 10000;
+    // Compatibility alias for position_v2's ETF confluence calculation.  The
+    // value remains weight percentage-point change, not cash flow.
+    out.chgSum = out.netWeightDelta;
+    out.unchanged = !(out.addCount || out.rmCount || out.incCount || out.decCount);
+    return out;
+  }
+
+  function updateEtfFlowInd() {
+    const el = document.getElementById('ig-etfFlow');
+    if (!el || !S.sym) return;
+    const flow = stockFlow(S.sym);
+    if (!flow.available) {
+      el.textContent = flow.freshness === 'error' ? '資料錯誤' : '尚無資料';
+      el.style.color = 'var(--tf)';
+      return;
+    }
+    const buy = flow.addCount + flow.incCount;
+    const sell = flow.rmCount + flow.decCount;
+    const stale = flow.freshness !== 'fresh';
+    if (buy || sell) {
+      el.textContent = `${buy ? '↑' + buy : ''}${buy && sell ? ' ' : ''}${sell ? '↓' + sell : ''} ETF${stale ? ' · 舊' : ''}`;
+      el.style.color = stale ? 'var(--gold)' : (buy > sell ? 'var(--red)' : sell > buy ? 'var(--green)' : 'var(--blue)');
+    } else {
+      el.textContent = stale ? '無異動 · 資料舊' : '本期無異動';
+      el.style.color = stale ? 'var(--gold)' : 'var(--tf)';
+    }
+  }
+
   function notifyDependents() {
     try { if (typeof renderWl === 'function') renderWl(); } catch {}
-    try { if (typeof updateEtfFlowInd === 'function') updateEtfFlowInd(); } catch {}
+    try { updateEtfFlowInd(); } catch {}
     if (typeof renderRpanel === 'function' && (S.tab === 'etf' || S.tab === 'stats')) {
       try { renderRpanel(); } catch {}
     }
   }
 
   // ─── Fetchers ───────────────────────────────────────────────
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+  function traceEtf(event, correlationId, detail) {
+    try {
+      const row = detail || {};
+      fetch(`${SERVER}/diagnostics/ui-route`, {
+        method: 'POST', cache: 'no-store', keepalive: true,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ts: new Date().toISOString(), event, correlationId,
+          from: 'etf-v3', to: '/etf-delta', state: row.state || '',
+          label: row.label || '', elapsedMs: row.elapsedMs || '',
+        }),
+      }).catch(() => {});
+    } catch {}
+  }
+
+  function retryDelay(response, attempt) {
+    const header = response && response.headers && response.headers.get
+      ? response.headers.get('Retry-After') : null;
+    if (header) {
+      const seconds = Number(header);
+      if (Number.isFinite(seconds)) return Math.max(500, Math.min(5000, seconds * 1000));
+      const when = Date.parse(header);
+      if (Number.isFinite(when)) return Math.max(500, Math.min(5000, when - Date.now()));
+    }
+    return Math.min(5000, 750 * Math.pow(2, attempt - 1) + Math.round(Math.random() * 180));
+  }
+
+  async function requestDelta(url, correlationId) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 12000);
+      try {
+        const response = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
+        if (response.ok) return response;
+        let message = `HTTP ${response.status}`;
+        try { const body = await response.clone().json(); if (body.error) message = body.error; } catch {}
+        const error = new Error(message);
+        error.status = response.status;
+        error.response = response;
+        lastError = error;
+        const retryable = [429, 500, 502, 503, 504].includes(response.status);
+        if (!retryable || attempt >= 3) throw error;
+        const delay = retryDelay(response, attempt);
+        traceEtf('etf_delta_retry', correlationId, { state: `attempt-${attempt}`, label: `${response.status}|${delay}ms` });
+        await wait(delay);
+      } catch (error) {
+        lastError = error;
+        if (error && error.status) throw error;
+        if (attempt >= 3) throw error;
+        const delay = retryDelay(null, attempt);
+        traceEtf('etf_delta_retry', correlationId, { state: `attempt-${attempt}`, label: `${error.name || 'network'}|${delay}ms` });
+        await wait(delay);
+      } finally {
+        clearTimeout(tid);
+      }
+    }
+    throw lastError || new Error('ETF delta request failed');
+  }
+
   async function fetchCatalog() {
     try {
       const r = await fetch(`${SERVER}/etf-catalog`, { cache: 'no-store' });
@@ -166,38 +333,56 @@
     }
   }
 
-  async function fetchDelta(date) {
+  function fetchDelta(date) {
+    if (!S.etfV3) boot();
+    if (S.etfV3.inflight) return S.etfV3.inflight;
     S.etfV3.loading = true;
     S.etfV3.err = null;
     S.etfLoading = true;
     S.etfErr = null;
     if (S.tab === 'etf' && typeof renderRpanel === 'function') renderRpanel();
-    try {
+    const correlationId = `etf-delta-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    const started = Date.now();
+    traceEtf('etf_delta_start', correlationId, { state: date ? 'historical' : 'latest', label: date || '' });
+    const task = (async () => { try {
       const url = date ? `${SERVER}/etf-delta?date=${date}` : `${SERVER}/etf-delta`;
-      const ctrl = new AbortController();
-      const tid = setTimeout(() => ctrl.abort(), 12000);
-      const r = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
-      clearTimeout(tid);
-      if (!r.ok) {
-        let msg = `HTTP ${r.status}`;
-        try { const j = await r.json(); if (j.error) msg = j.error; } catch {}
-        S.etfV3.err = msg;
-        S.etfErr = msg;
-        S.etfV3.deltaRaw = null;
-        return;
-      }
-      S.etfV3.deltaRaw = await r.json();
+      const r = await requestDelta(url, correlationId);
+      const next = await r.json();
+      if (!next || !Array.isArray(next.etfs) || !next.date) throw new Error('ETF delta payload invalid');
+      S.etfV3.deltaRaw = next;
+      S.etfV3.lastGoodRaw = next;
       S.etfV3.lastFetch = Date.now();
+      S.etfV3.err = null;
+      S.etfErr = null;
+      S.etfV3.freshness = freshnessFor(next, null);
       applyFilter();
+      traceEtf('etf_delta_success', correlationId, {
+        state: S.etfV3.freshness.state, label: next.date,
+        elapsedMs: Date.now() - started,
+      });
     } catch (e) {
       S.etfV3.err = e.name === 'AbortError' ? '逾時 (12s)' : (e.message || 'fetch failed');
       S.etfErr = S.etfV3.err;
-      S.etfV3.deltaRaw = null;
+      if (S.etfV3.lastGoodRaw) {
+        S.etfV3.deltaRaw = S.etfV3.lastGoodRaw;
+        S.etfV3.freshness = freshnessFor(S.etfV3.lastGoodRaw, S.etfV3.err);
+      } else {
+        S.etfV3.deltaRaw = null;
+        S.etfV3.freshness = freshnessFor(null, S.etfV3.err);
+      }
+      applyFilter();
+      traceEtf('etf_delta_failed', correlationId, {
+        state: S.etfV3.freshness.state, label: S.etfV3.err,
+        elapsedMs: Date.now() - started,
+      });
     } finally {
       S.etfV3.loading = false;
       S.etfLoading = false;
+      S.etfV3.inflight = null;
       notifyDependents();
-    }
+    } })();
+    S.etfV3.inflight = task;
+    return task;
   }
 
   // ─── CSS ────────────────────────────────────────────────────
@@ -1135,11 +1320,8 @@
     };
   })();
 
-  // ─── Override v1's window-exposed functions ─────────────────
-  // build_v2.py's router uses (window.renderEtfDelta || renderEtfDelta)()
-  // and (window.fetchEtfDelta || fetchEtfDelta)(), so these picks ours.
+  // ─── Public v3 owner + narrow compatibility aliases ─────────
   global.renderEtfDelta            = renderEtfDelta;
-  global.fetchEtfDelta             = fetchDelta;
   global.renderEtfHoldingsForStock = renderEtfHoldingsForStock;
   global.openEtfMgrModal           = openEtfMgrModal;
   // Also expose v3-prefixed names for direct calls
@@ -1147,6 +1329,12 @@
   global.renderEtfHoldingsV3       = renderEtfHoldingsForStock;
   global.etfV3FetchCatalog         = fetchCatalog;
   global.etfV3FetchDelta           = fetchDelta;
+  global.updateEtfFlowIndV3        = updateEtfFlowInd;
+  global.getEtfFlowForStock        = stockFlow;
+  global.EtfFlow = Object.freeze({
+    getStockFlow: stockFlow,
+    changeDirection,
+  });
 
   // Boot: load catalog immediately, delta will lazy-load on first ETF tab open
   fetchCatalog();

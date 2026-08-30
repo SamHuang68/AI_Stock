@@ -62,12 +62,13 @@ class EtfRoutesMixin:
     def _handle_etf_delta(self):
         files = etf_api.list_etf_files()
         d = etf_api.find_etf_dir() or 'not found'
+        health = etf_api.etf_history_status()
         if self.path.startswith('/etf-delta/list'):
             dates = [
                 os.path.basename(f).replace('top10_active_etf_holdings_', '').replace('.json', '')
                 for f in files
             ]
-            self._ok(json.dumps({'dates': dates, 'dir': d}).encode())
+            self._ok(json.dumps({'dates': dates, 'dir': d, 'health': health}).encode())
             return
         if len(files) < 2:
             msg = (
@@ -84,4 +85,5 @@ class EtfRoutesMixin:
             self._err(str(e), 500); return
         if result is None:
             self._err('delta compute failed'); return
+        result['meta'] = {'history': health}
         self._ok(json.dumps(result, ensure_ascii=False).encode())

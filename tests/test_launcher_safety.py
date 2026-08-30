@@ -30,6 +30,26 @@ class LauncherSafetyTests(unittest.TestCase):
         self.assertIn(':18432', start_text)
         self.assertNotIn('taskkill /im python', start_text)
 
+    def test_etf_scheduler_uses_pinned_python_shared_history_and_health_gate(self):
+        wrapper = (ROOT / 'scripts' / 'daily_etf.bat').read_bytes()
+        wrapper_text = wrapper.decode('ascii').lower()
+        script = (ROOT / 'scripts' / 'daily_etf.ps1').read_text(encoding='utf-8')
+        installer = (ROOT / 'scripts' / 'install_scheduler.bat').read_text(encoding='ascii')
+        self.assertNotIn(b'\x00', wrapper)
+        self.assertIn('%~dp0daily_etf.ps1', wrapper_text)
+        self.assertIn('%*', wrapper_text)
+        self.assertIn('Resolve-StockPython', script)
+        self.assertIn('stock_python.path', script)
+        self.assertIn('ST_ETF_HISTORY_DIR', script)
+        self.assertIn(r'shared-data\etf_history', script)
+        self.assertIn('etf_snapshot_health.py', script)
+        self.assertIn('exit $TrackerRc', script)
+        self.assertIn('exit $HealthRc', script)
+        self.assertIn('-WorkingDirectory', installer)
+        self.assertIn('-RequireApi', installer)
+        self.assertIn('http://127.0.0.1:18435/etf-delta', installer)
+        self.assertIn('New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At 7pm', installer)
+
 
 if __name__ == '__main__':
     unittest.main()

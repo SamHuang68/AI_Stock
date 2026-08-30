@@ -73,6 +73,9 @@ class PrivateWebReleaseTests(unittest.TestCase):
         _write(current / "data" / "private_web_owner.token", "secret")
         _write(current / "data" / "personal.db", "personal")
         _write(current / "logs" / "audit.jsonl", "audit")
+        shared_snapshot = self.install_root / "shared-data" / "etf_history" / "sentinel.json"
+        _write(shared_snapshot, "runtime-etf-history")
+        shared_before = shared_snapshot.read_bytes()
         _write(
             current / ".private_web_release.json",
             json.dumps(
@@ -99,6 +102,7 @@ class PrivateWebReleaseTests(unittest.TestCase):
         self.assertEqual((current / "data" / "personal.db").read_text(), "personal")
         self.assertEqual((current / "data" / "public_seed.csv").read_text(), "seed")
         self.assertEqual((current / "logs" / "audit.jsonl").read_text(), "audit")
+        self.assertEqual(shared_snapshot.read_bytes(), shared_before)
         active = json.loads((current / ".private_web_release.json").read_text())
         self.assertEqual(active["releaseId"], "abc123")
         self.assertIn("promotedAt", active)
@@ -125,6 +129,12 @@ class PrivateWebReleaseTests(unittest.TestCase):
         self.assertFalse((tree / "wavedeck").exists())
         self.assertFalse((tree / "START_WAVEDECK.cmd").exists())
         self.assertTrue((tree / "server" / "server.py").is_file())
+
+    def test_release_gate_includes_etf_and_shell_node_regressions(self):
+        source = (ROOT / "scripts" / "private_web_release.py").read_text(encoding="utf-8")
+        self.assertIn("tests/etf_flow_v3_selftest.js", source)
+        self.assertIn("tests/shell_v5_selftest.js", source)
+        self.assertIn('shutil.which("node")', source)
 
     def test_release_tests_cannot_mutate_committed_seed_bytes(self):
         archive_path = self.install_root / "release.zip"

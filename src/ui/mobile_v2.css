@@ -172,6 +172,7 @@
     padding: 0 12px;
   }
   .wl-action-menu .wl-menu-remove { color: #fda4af; border-color: rgba(248,113,113,.24); }
+  .wl-action-menu .wl-menu-etf { color: #67e8f9; border-color: rgba(56,189,248,.28); }
   .wl-action-menu .wl-menu-cancel { color: var(--tlo); }
   .wladd { height: 56px !important; padding: 0 10px !important; }
 

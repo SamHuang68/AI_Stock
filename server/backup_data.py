@@ -11,10 +11,18 @@ import glob
 import zipfile
 import datetime
 
+import etf_paths
+
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC_DIRS = ['chip_history', 'etf_history']     # 要備份的核心資料夾
 BACKUP_DIR = os.path.join(BASE, 'backups')
 KEEP = 14                                       # 保留最近幾份(約兩週交易日)
+
+
+def source_dirs():
+    return [
+        ('chip_history', os.path.join(BASE, 'data', 'chip_history')),
+        ('etf_history', str(etf_paths.resolve_history_dir())),
+    ]
 
 
 def main():
@@ -24,14 +32,14 @@ def main():
 
     n = 0
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
-        for d in SRC_DIRS:
-            full = os.path.join(BASE, 'data', d)
+        for d, full in source_dirs():
             if not os.path.isdir(full):
                 print('[backup] skip (not found): %s' % d)
                 continue
             for f in glob.glob(os.path.join(full, '**', '*'), recursive=True):
                 if os.path.isfile(f):
-                    z.write(f, os.path.relpath(f, BASE))
+                    rel = os.path.relpath(f, full)
+                    z.write(f, os.path.join('data', d, rel))
                     n += 1
 
     size_kb = os.path.getsize(out) / 1024.0

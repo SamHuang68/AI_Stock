@@ -2,7 +2,6 @@
 """ETF delta / catalog / tracker（從 server.py 拆出 · H2 續）"""
 from __future__ import annotations
 
-import glob
 import json
 import os
 import subprocess
@@ -10,6 +9,8 @@ import sys
 import threading
 import time
 from typing import Any, Dict, List, Optional
+
+import etf_paths
 
 try:
     import slog
@@ -21,12 +22,8 @@ _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
 
-ETF_DELTA_PATH = os.path.join(_BASE, 'data', 'etf_history')
+ETF_DELTA_PATH = str(etf_paths.resolve_history_dir())
 ETF_CATALOG_FILE = os.path.join(_BASE, 'data', 'etf_catalog.json')
-_ETF_FALLBACKS = [
-    ETF_DELTA_PATH,
-    os.path.join(_BASE, 'data', 'etf_history'),
-]
 
 # ── Tracker run state (for /etf-tracker/run + /etf-tracker/status) ──
 _tracker_state = {
@@ -97,15 +94,14 @@ ETF_NAME_MAP = {
 
 # ── ETF Delta helpers ──────────────────────────────────────────
 def find_etf_dir():
-    for p in _ETF_FALLBACKS:
-        if p and os.path.isdir(p):
-            return p
-    return None
+    path = str(etf_paths.resolve_history_dir())
+    return path if os.path.isdir(path) else None
 
 def list_etf_files():
-    d = find_etf_dir()
-    if not d: return []
-    return sorted(glob.glob(os.path.join(d, 'top10_active_etf_holdings_*.json')))
+    return [str(path) for path in etf_paths.list_snapshot_files()]
+
+def etf_history_status():
+    return etf_paths.history_status()
 
 def parse_holdings_json(data):
     """Flexible parser — handles multiple JSON schema variants."""

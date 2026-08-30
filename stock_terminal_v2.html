@@ -219,7 +219,7 @@ html,body{height:var(--st-app-height,100dvh);max-height:var(--st-app-height,100d
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
-<link rel="stylesheet" href="src/ui/mobile_v2.css?v=2f8c46f0d9b9">
+<link rel="stylesheet" href="src/ui/mobile_v2.css?v=84f5d136a800">
 </head>
 <body>
 <div id="app">
@@ -393,7 +393,7 @@ window.addEventListener('DOMContentLoaded', () => {
   updateRpanelPager();
   attachMobileWorkspaceTrace();
   if (S.wl.length > 0) loadSym(S.wl[0].t, S.wl[0].m);
-  (window.fetchEtfDelta || fetchEtfDelta)();
+  if (typeof window.etfV3FetchDelta === 'function') window.etfV3FetchDelta();
   updateKeyBtn();
 });
 
@@ -1006,7 +1006,7 @@ async function loadSym(sym, mkt, silent) {
     S.ind = await runWorker(parsed.candles);
     if (_myLoad !== window.__loadSeq) return;   // 切股 race：指標算完前已切別檔→不覆寫
     renderInd(S.ind, last, mkt);
-    if (S.ind) updateEtfFlowInd();
+    if (S.ind && typeof window.updateEtfFlowIndV3 === 'function') window.updateEtfFlowIndV3();
   }
   try { renderRpanel(); } catch (e) { console.error('[v1] renderRpanel threw:', e); }
   try { window.dispatchEvent(new CustomEvent('symLoaded', {detail:{sym: S.sym, mkt: S.mkt}})); } catch(e){}
@@ -1564,12 +1564,31 @@ function renderWl() {
   ct.innerHTML = S.wl.map(w=>{
     const isActive = w.t===S.sym && w.m===S.mkt;
     let _etfBadge='';
-    if(S.etfDelta&&w.m==='TW'){
-      const _flow=getEtfFlowForStock(w.t);
-      if(_flow&&_flow.addCount>0) _etfBadge=`<span style="font-family:monospace;font-size:7px;padding:0 3px;margin-left:2px;background:rgba(74,222,128,.15);color:var(--green);border-radius:2px">+${_flow.addCount}</span>`;
-      else if(_flow&&_flow.rmCount>0) _etfBadge=`<span style="font-family:monospace;font-size:7px;padding:0 3px;margin-left:2px;background:rgba(248,113,113,.15);color:var(--red);border-radius:2px">-${_flow.rmCount}</span>`;
+    let _etfState='na';
+    if(w.m==='TW'){
+      const _flow=(window.EtfFlow&&typeof window.EtfFlow.getStockFlow==='function')
+        ? window.EtfFlow.getStockFlow(w.t) : null;
+      if (_flow && _flow.available) {
+        const _buy=(_flow.addCount||0)+(_flow.incCount||0);
+        const _sell=(_flow.rmCount||0)+(_flow.decCount||0);
+        const _stale=_flow.freshness!=='fresh';
+        _etfState=_stale?'stale':((_buy||_sell)?'changed':'none');
+        if (_buy || _sell) {
+          const _tone=_buy&&_sell?'mixed':(_buy?'buy':'sell');
+          const _text=`ETF${_buy?' ↑'+_buy:''}${_sell?' ↓'+_sell:''}`;
+          _etfBadge=`<span class="etf-flow-badge ${_tone}${_stale?' stale':''}" data-etf-flow-trigger role="button" tabindex="0" aria-label="${w.t} ETF 動向：${_text}${_stale?'，資料較舊':''}" title="查看 ETF 新增、移除與加減碼">${_text}${_stale?' · 舊':''}</span>`;
+        } else if (_stale) {
+          _etfBadge='<span class="etf-flow-badge stale" data-etf-flow-trigger role="button" tabindex="0" aria-label="ETF 動向資料較舊" title="查看最近一份 ETF 動向">ETF · 舊</span>';
+        }
+      } else {
+        _etfState=(_flow&&_flow.freshness==='error')?'error':'missing';
+      }
     }
-    return `<div class="wlchip${isActive?' active':''}" draggable="true" data-sym="${w.t}" data-mkt="${w.m}" aria-haspopup="menu" onclick="loadSym('${w.t}','${w.m}')" oncontextmenu="rmWl('${w.t}','${w.m}');return false" title="點擊載入 / 手機長按操作 / 桌機拖曳或右鍵移除">
+    const _etfAttr=w.m==='TW'?` data-etf-flow-state="${_etfState}"`:'';
+    const _title=w.m==='TW'
+      ? '點擊載入 / 桌機停留查看 ETF 動向 / 手機長按操作 / 右鍵移除'
+      : '點擊載入 / 手機長按操作 / 桌機拖曳或右鍵移除';
+    return `<div class="wlchip${isActive?' active':''}" draggable="true" data-sym="${w.t}" data-mkt="${w.m}"${_etfAttr} aria-haspopup="menu" onclick="loadSym('${w.t}','${w.m}')" oncontextmenu="rmWl('${w.t}','${w.m}');return false" title="${_title}">
       <span class="wlchip-grip">⋮⋮</span>
       <span class="wlchip-t">${w.name || w.t}</span>
       <span class="wlchip-p ${getPcls(w.chg)}" id="wlp-${w.t}" style="${window.Colors?('color:'+Colors.dir(w.t,w.chg)+' !important'):''}">${w.chg!=null?(w.chg>=0?'+':'')+w.chg.toFixed(2)+'%':''}</span>${_etfBadge}
@@ -1594,9 +1613,19 @@ function ensureWlActionMenu() {
   menu.setAttribute('role', 'menu');
   menu.setAttribute('aria-label', '觀察股操作');
   menu.innerHTML = '<div class="wl-menu-head"><span id="wl-menu-name">觀察股</span><small id="wl-menu-code"></small></div>' +
+    '<button type="button" class="wl-menu-etf" role="menuitem">ETF 動向</button>' +
     '<button type="button" class="wl-menu-remove" role="menuitem">移除自選</button>' +
     '<button type="button" class="wl-menu-cancel" role="menuitem">取消</button>';
   document.body.appendChild(menu);
+  menu.querySelector('.wl-menu-etf').addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    const target = _wlMenuTarget;
+    const chip = target && target.chip;
+    closeWlActionMenu();
+    if (chip && window.EtfFlowTip && typeof window.EtfFlowTip.openForChip === 'function') {
+      requestAnimationFrame(function () { window.EtfFlowTip.openForChip(chip, {interaction:'touch'}); });
+    }
+  });
   menu.querySelector('.wl-menu-remove').addEventListener('click', function (ev) {
     ev.stopPropagation();
     const target = _wlMenuTarget;
@@ -1621,9 +1650,14 @@ function openWlActionMenu(chip) {
   const sym = chip.dataset.sym || '';
   const mkt = chip.dataset.mkt || '';
   const item = S.wl.find(w => w.t === sym && w.m === mkt) || {};
-  _wlMenuTarget = {sym, mkt};
+  _wlMenuTarget = {sym, mkt, chip};
   menu.querySelector('#wl-menu-name').textContent = item.name || sym;
   menu.querySelector('#wl-menu-code').textContent = (item.name && item.name !== sym ? sym + ' · ' : '') + mkt;
+  const etfButton = menu.querySelector('.wl-menu-etf');
+  if (etfButton) {
+    etfButton.hidden = mkt !== 'TW';
+    etfButton.disabled = mkt !== 'TW';
+  }
   menu.classList.add('open');
   menu.style.visibility = 'hidden';
   const chipRect = chip.getBoundingClientRect();
@@ -1992,7 +2026,7 @@ function renderRpanel() {
   if (S.tab==='research') { el.innerHTML = renderResearch(); attachResearch(); return; }
   if (S.tab==='batch')    { el.innerHTML = renderBatch(); attachBatch(); return; }
   if (S.tab==='history')  { el.innerHTML = renderHistoryTab(); return; }
-  if (S.tab==='etf')      { el.innerHTML = (window.renderEtfDelta || renderEtfDelta)(); return; }
+  if (S.tab==='etf')      { el.innerHTML = window.renderEtfV3 ? window.renderEtfV3() : ''; return; }
   if (S.tab==='position') { var _ae=document.activeElement; if(!(_ae&&/^pos-(entry|shares|target|stop|notes|unit)$/.test(_ae.id||''))){ el.innerHTML = renderPosition(); attachPosition(); } return; }
   if (S.tab==='watch')    { el.innerHTML = renderWatch(); attachWatch(); return; }
   if (S.tab==='plan')     { el.innerHTML = renderPlan(); attachPlan(); return; }
@@ -2051,7 +2085,7 @@ function renderStats() {
   return `
     <div class="stat-hdr">價格資訊 · ${S.sym}</div>
     ${rows.map(([k,v])=>`<div class="stat-row"><span class="stat-k">${k}</span><span class="stat-v" id="rp-${k.replace(/\s+/g,'')}">${v}</span></div>`).join('')}
-    ${(window.renderEtfHoldingsForStock||renderEtfHoldingsForStock)(S.sym)}${S.ind?`<div class="stat-sect">技術指標</div>${indRows.map(([k,v])=>`<div class="stat-row"><span class="stat-k">${k}</span><span class="stat-v">${v||'--'}</span></div>`).join('')}`:''}
+    ${window.renderEtfHoldingsV3 ? window.renderEtfHoldingsV3(S.sym) : ''}${S.ind?`<div class="stat-sect">技術指標</div>${indRows.map(([k,v])=>`<div class="stat-row"><span class="stat-k">${k}</span><span class="stat-v">${v||'--'}</span></div>`).join('')}`:''}
   `;
 }
 
@@ -2485,157 +2519,92 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
 });
 </script>
-<script src="src/core/colors_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/app_kernel_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/market_data_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/decision_data_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/market_intel_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/table_sort_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/viz_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/market_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/fields_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/chart_registry_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/share_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/datasources_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/etf_flow_tip_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/position_v2.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/watch_v2.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/info_v2.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/pro_v2.js?v=2f8c46f0d9b9"></script>
-<script src="src/chart/volume_profile_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/chart/pattern_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/live_v2.js?v=2f8c46f0d9b9"></script>
-<script src="src/fundamental/chip_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/fundamental/fundamental_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/screener/screener_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/ai/ai_report_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/polish_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/wl_live_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/fundamental/plan_history_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/fundamental/plan_position_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/fundamental/plan_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/pdf_import_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/pdf_export_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/peg_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/alert/alert_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/alert/alert_push_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/screener/backtest_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/screener/backtest_ui_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/enhance_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/chart/aftermarket_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/chart/overnight_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/fundamental/supplychain_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/portfolio/portfolio_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/fundamental/chainmom_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/fundamental/valuation_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/fundamental/marketflow_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/fundamental/instrank_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/alert/calendar_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/chart/multichart_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/chart/spread_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/chart/hotkeys_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/screener/strategy_builder_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/screener/strategy_script_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/chart/drawtools_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/screener/screener3_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/etf_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/fundamental/stockfut_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/indices_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/alert/datahealth_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/alert/toast_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/alert/settle_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/ai/cmdpalette_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/dragwin_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/liverefresh_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/namesearch_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/intraday_volume_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/core/realtime_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/ai/focus_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/ai/copilot_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/screener/wizard_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/shell_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/wavedeck_bridge_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/hub_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/pulse_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/decision_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/consensus_attention_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/heat_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/book_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/scan_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/ai_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/breadth_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/afterhours_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/news_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/bridge_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/visual_system_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/chart_visual_v5.js?v=2f8c46f0d9b9"></script>
-<script src="src/ui/toolbar_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/chart/market_score_bar_v3.js?v=2f8c46f0d9b9"></script>
-<script src="src/chart/market_chart_v3.js?v=2f8c46f0d9b9"></script>
+<script src="src/core/colors_v3.js?v=84f5d136a800"></script>
+<script src="src/core/app_kernel_v5.js?v=84f5d136a800"></script>
+<script src="src/core/market_data_v5.js?v=84f5d136a800"></script>
+<script src="src/core/decision_data_v5.js?v=84f5d136a800"></script>
+<script src="src/core/market_intel_v5.js?v=84f5d136a800"></script>
+<script src="src/core/table_sort_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/viz_v5.js?v=84f5d136a800"></script>
+<script src="src/core/market_v3.js?v=84f5d136a800"></script>
+<script src="src/core/fields_v3.js?v=84f5d136a800"></script>
+<script src="src/core/chart_registry_v3.js?v=84f5d136a800"></script>
+<script src="src/ui/share_v3.js?v=84f5d136a800"></script>
+<script src="src/ui/datasources_v3.js?v=84f5d136a800"></script>
+<script src="src/core/etf_flow_tip_v3.js?v=84f5d136a800"></script>
+<script src="src/core/position_v2.js?v=84f5d136a800"></script>
+<script src="src/core/watch_v2.js?v=84f5d136a800"></script>
+<script src="src/core/info_v2.js?v=84f5d136a800"></script>
+<script src="src/core/pro_v2.js?v=84f5d136a800"></script>
+<script src="src/chart/volume_profile_v3.js?v=84f5d136a800"></script>
+<script src="src/chart/pattern_v3.js?v=84f5d136a800"></script>
+<script src="src/core/live_v2.js?v=84f5d136a800"></script>
+<script src="src/fundamental/chip_v3.js?v=84f5d136a800"></script>
+<script src="src/fundamental/fundamental_v3.js?v=84f5d136a800"></script>
+<script src="src/screener/screener_v3.js?v=84f5d136a800"></script>
+<script src="src/ai/ai_report_v3.js?v=84f5d136a800"></script>
+<script src="src/ui/polish_v3.js?v=84f5d136a800"></script>
+<script src="src/core/wl_live_v3.js?v=84f5d136a800"></script>
+<script src="src/fundamental/plan_history_v3.js?v=84f5d136a800"></script>
+<script src="src/fundamental/plan_position_v3.js?v=84f5d136a800"></script>
+<script src="src/fundamental/plan_v3.js?v=84f5d136a800"></script>
+<script src="src/ui/pdf_import_v3.js?v=84f5d136a800"></script>
+<script src="src/ui/pdf_export_v3.js?v=84f5d136a800"></script>
+<script src="src/core/peg_v3.js?v=84f5d136a800"></script>
+<script src="src/alert/alert_v3.js?v=84f5d136a800"></script>
+<script src="src/alert/alert_push_v3.js?v=84f5d136a800"></script>
+<script src="src/screener/backtest_v3.js?v=84f5d136a800"></script>
+<script src="src/screener/backtest_ui_v3.js?v=84f5d136a800"></script>
+<script src="src/ui/enhance_v3.js?v=84f5d136a800"></script>
+<script src="src/chart/aftermarket_v3.js?v=84f5d136a800"></script>
+<script src="src/chart/overnight_v3.js?v=84f5d136a800"></script>
+<script src="src/fundamental/supplychain_v3.js?v=84f5d136a800"></script>
+<script src="src/portfolio/portfolio_v3.js?v=84f5d136a800"></script>
+<script src="src/fundamental/chainmom_v3.js?v=84f5d136a800"></script>
+<script src="src/fundamental/valuation_v3.js?v=84f5d136a800"></script>
+<script src="src/fundamental/marketflow_v3.js?v=84f5d136a800"></script>
+<script src="src/fundamental/instrank_v3.js?v=84f5d136a800"></script>
+<script src="src/alert/calendar_v3.js?v=84f5d136a800"></script>
+<script src="src/chart/multichart_v3.js?v=84f5d136a800"></script>
+<script src="src/chart/spread_v3.js?v=84f5d136a800"></script>
+<script src="src/chart/hotkeys_v3.js?v=84f5d136a800"></script>
+<script src="src/screener/strategy_builder_v3.js?v=84f5d136a800"></script>
+<script src="src/screener/strategy_script_v3.js?v=84f5d136a800"></script>
+<script src="src/chart/drawtools_v3.js?v=84f5d136a800"></script>
+<script src="src/screener/screener3_v3.js?v=84f5d136a800"></script>
+<script src="src/core/etf_v3.js?v=84f5d136a800"></script>
+<script src="src/fundamental/stockfut_v3.js?v=84f5d136a800"></script>
+<script src="src/core/indices_v3.js?v=84f5d136a800"></script>
+<script src="src/alert/datahealth_v3.js?v=84f5d136a800"></script>
+<script src="src/alert/toast_v3.js?v=84f5d136a800"></script>
+<script src="src/alert/settle_v3.js?v=84f5d136a800"></script>
+<script src="src/ai/cmdpalette_v3.js?v=84f5d136a800"></script>
+<script src="src/ui/dragwin_v3.js?v=84f5d136a800"></script>
+<script src="src/core/liverefresh_v3.js?v=84f5d136a800"></script>
+<script src="src/core/namesearch_v3.js?v=84f5d136a800"></script>
+<script src="src/core/intraday_volume_v3.js?v=84f5d136a800"></script>
+<script src="src/core/realtime_v3.js?v=84f5d136a800"></script>
+<script src="src/ai/focus_v3.js?v=84f5d136a800"></script>
+<script src="src/ai/copilot_v3.js?v=84f5d136a800"></script>
+<script src="src/screener/wizard_v3.js?v=84f5d136a800"></script>
+<script src="src/ui/shell_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/wavedeck_bridge_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/hub_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/pulse_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/decision_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/consensus_attention_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/heat_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/book_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/scan_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/ai_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/breadth_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/afterhours_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/news_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/bridge_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/visual_system_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/chart_visual_v5.js?v=84f5d136a800"></script>
+<script src="src/ui/toolbar_v3.js?v=84f5d136a800"></script>
+<script src="src/chart/market_score_bar_v3.js?v=84f5d136a800"></script>
+<script src="src/chart/market_chart_v3.js?v=84f5d136a800"></script>
 </body>
 </html>
-<script>
-// ══════════════════════════════════════════════════════════════
-// ETF DELTA — 新增功能區塊
-// ══════════════════════════════════════════════════════════════
-
-const ETF_MAP_NAMES = {
-  '00992A':'群益科技創新','00981A':'統一台股增長',
-  '00987A':'台新優勢成長','00994A':'第一金台股優',
-  '00982A':'群益台灣強棒','00995A':'中信台灣卓越',
-  '00980A':'野村臺灣優選','00991A':'復華未來50',
-  '00996A':'兆豐台灣豐收','00984A':'安聯台灣高息',
-};
-
-async function fetchEtfDelta(date) {
-  S.etfLoading = true;
-  S.etfErr = null;
-  try {
-    const url = date ? `${SERVER}/etf-delta?date=${date}` : `${SERVER}/etf-delta`;
-    const r = await fetch(url, {cache:'no-store'});
-    if (!r.ok) {
-      let msg = `HTTP ${r.status}`;
-      try { const j = await r.json(); if (j.error) msg = j.error; } catch {}
-      S.etfDelta = null; S.etfErr = msg; S.etfLoading = false;
-      if (S.tab === 'etf') renderRpanel();
-      return;
-    }
-    S.etfDelta = await r.json();
-    renderWl();
-    updateEtfFlowInd();
-    if (S.tab === 'etf')   renderRpanel();
-    if (S.tab === 'stats') renderRpanel();
-  } catch (e) { S.etfDelta = null; S.etfErr = e.message || 'fetch failed'; }
-  S.etfLoading = false;
-}
-
-function getEtfFlowForStock(code) {
-  if (!S.etfDelta) return null;
-  let addCount=0, rmCount=0, chgSum=0;
-  for (const etf of (S.etfDelta.etfs||[])) {
-    if ((etf.new||[]).find(s=>s.code===code))     addCount++;
-    if ((etf.removed||[]).find(s=>s.code===code)) rmCount++;
-    const chg = (etf.changed||[]).find(s=>s.code===code);
-    if (chg) chgSum += chg.delta;
-  }
-  return {addCount, rmCount, chgSum};
-}
-
-function updateEtfFlowInd() {
-  const el = document.getElementById('ig-etfFlow');
-  if (!el || !S.sym) return;
-  if (!S.etfDelta) { el.textContent='--'; return; }
-  const flow = getEtfFlowForStock(S.sym);
-  if (!flow) { el.textContent='--'; return; }
-  if (flow.addCount > 0)      { el.textContent=`+${flow.addCount} ETF`; el.style.color='var(--green)'; }
-  else if (flow.rmCount > 0)  { el.textContent=`-${flow.rmCount} ETF`; el.style.color='var(--red)'; }
-  else if (Math.abs(flow.chgSum) >= 0.5) {
-    el.textContent=(flow.chgSum>0?'+':'')+flow.chgSum.toFixed(2)+'%';
-    el.style.color=flow.chgSum>0?'var(--green)':'var(--red)';
-  } else { el.textContent='無訊號'; el.style.color='var(--tf)'; }
-}
-
-function renderEtfHoldingsForStock(sym) { return ""; }
-
-// -- v1 ETF section removed by build_v2.py --
-</script>

@@ -183,21 +183,30 @@ if 'renderPlan()' not in html:
 
 # 3c) etf -> window dispatch
 ETF_RP_OLD = "if (S.tab==='etf')      { el.innerHTML = renderEtfDelta(); return; }"
-ETF_RP_NEW = "if (S.tab==='etf')      { el.innerHTML = (window.renderEtfDelta || renderEtfDelta)(); return; }"
-if '(window.renderEtfDelta || renderEtfDelta)' not in html:
+ETF_RP_NEW = "if (S.tab==='etf')      { el.innerHTML = window.renderEtfV3 ? window.renderEtfV3() : ''; return; }"
+if 'window.renderEtfV3 ? window.renderEtfV3()' not in html:
     html = html.replace(ETF_RP_OLD, ETF_RP_NEW, 1)
+html = html.replace(
+    "if (S.tab==='etf')      { el.innerHTML = (window.renderEtfDelta || renderEtfDelta)(); return; }",
+    ETF_RP_NEW,
+)
 
 # 3d) fetchEtfDelta -> window
 FETCH_ETF_OLD = "fetchEtfDelta();"
-FETCH_ETF_NEW = "(window.fetchEtfDelta || fetchEtfDelta)();"
-if '(window.fetchEtfDelta || fetchEtfDelta)' not in html:
+FETCH_ETF_NEW = "if (typeof window.etfV3FetchDelta === 'function') window.etfV3FetchDelta();"
+if 'window.etfV3FetchDelta' not in html:
     html = html.replace(FETCH_ETF_OLD, FETCH_ETF_NEW, 1)
+html = html.replace("(window.fetchEtfDelta || fetchEtfDelta)();", FETCH_ETF_NEW)
 
 # 3e) renderEtfHoldingsForStock -> window
 HOLD_OLD = "${renderEtfHoldingsForStock(S.sym)}"
-HOLD_NEW = "${(window.renderEtfHoldingsForStock||renderEtfHoldingsForStock)(S.sym)}"
-if '(window.renderEtfHoldingsForStock||renderEtfHoldingsForStock)' not in html:
+HOLD_NEW = "${window.renderEtfHoldingsV3 ? window.renderEtfHoldingsV3(S.sym) : ''}"
+if 'window.renderEtfHoldingsV3 ? window.renderEtfHoldingsV3(S.sym)' not in html:
     html = html.replace(HOLD_OLD, HOLD_NEW, 1)
+html = html.replace(
+    "${(window.renderEtfHoldingsForStock||renderEtfHoldingsForStock)(S.sym)}",
+    HOLD_NEW,
+)
 
 # 3f) Remove v1 ETF section
 html = re.sub(
@@ -235,11 +244,12 @@ if RNG_OLD in html:
 
 # 4b) wrap renderRpanel + symLoaded event
 LS_OLD = "  if (S.ind) updateEtfFlowInd();\n  renderRpanel();"
-LS_NEW = ("  if (S.ind) updateEtfFlowInd();\n"
+LS_NEW = ("  if (S.ind && typeof window.updateEtfFlowIndV3 === 'function') window.updateEtfFlowIndV3();\n"
           "  try { renderRpanel(); } catch (e) { console.error('[v1] renderRpanel threw:', e); }\n"
           "  try { window.dispatchEvent(new CustomEvent('symLoaded', {detail:{sym: S.sym, mkt: S.mkt}})); } catch(e){}")
 if 'symLoaded' not in html:
     html = html.replace(LS_OLD, LS_NEW, 1)
+html = html.replace("if (S.ind) updateEtfFlowInd();", "if (S.ind && typeof window.updateEtfFlowIndV3 === 'function') window.updateEtfFlowIndV3();")
 
 # 5) inject scripts + stylesheets
 asset_digest = hashlib.sha256(ST_VERSION.encode('utf-8'))
@@ -308,6 +318,13 @@ with open(DST, 'w', encoding='utf-8', newline='\n') as f:
 if any(x not in html for x in ('app_kernel_v5.js', 'shell_v5.js', 'pulse_v5.js', 'decision_data_v5.js',
                                'decision_v5.js', 'consensus_attention_v5.js')):
     print('[FAIL] tip UX modules missing from built HTML (shell / pulse / DecisionContext)')
+    sys.exit(1)
+_after_html = html.partition('</html>')[2]
+if _after_html.strip():
+    print('[FAIL] content found after closing </html>; legacy owner may override modules')
+    sys.exit(1)
+if 'function fetchEtfDelta' in html or '(window.fetchEtfDelta || fetchEtfDelta)' in html:
+    print('[FAIL] legacy ETF fetch owner remains in built HTML')
     sys.exit(1)
 if 'id="st5-tip-boot"' not in html:
     print('[FAIL] tip UX boot CSS/hash guard missing from built HTML')

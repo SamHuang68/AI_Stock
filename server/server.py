@@ -43,6 +43,7 @@ from ai_api import (
 )
 from ai_routes import AiRoutesMixin
 from etf_api import (
+    etf_history_status,
     find_etf_dir,
     list_etf_files,
 )
@@ -2836,6 +2837,7 @@ class Handler(DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMi
         elif p == '/health':
             d = find_etf_dir()
             files = list_etf_files()
+            etf_health = etf_history_status()
             jobs = {}
             try:
                 import quote_api as qa
@@ -2916,6 +2918,7 @@ class Handler(DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMi
                 'cache_ttl_seconds': getattr(_cache, '_ttl', None),
                 'etf_delta_path': d or 'not found',
                 'etf_history_files': len(files),
+                'etfHistory': etf_health,
                 'sources': _src_snapshot(),
                 'jobs': jobs,  # H4：回補／刷新進度
                 'wavedeck': wd_bus,

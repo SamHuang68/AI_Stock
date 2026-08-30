@@ -24,14 +24,19 @@ import re
 import ssl
 import sys
 import json
+import shutil
 import time
 import html
 import gzip
+import math
 import datetime
 import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import etf_paths
+from atomic_store import atomic_write_json
 
 # ── ETF 下載為 I/O 工作；並行度由環境與遠端限制共同決定 ────────────
 MAX_WORKERS  = 32         # 10 檔 ETF × 多來源 fallback，給寬鬆並發
@@ -46,7 +51,6 @@ _SSL_CTX.verify_mode    = ssl.CERT_NONE
 
 # ── 路徑 ──────────────────────────────────────────────────────────
 SCRIPT_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HISTORY_DIR = os.path.join(SCRIPT_DIR, 'data', 'etf_history')
 CATALOG_FILE = os.path.join(SCRIPT_DIR, 'data', 'etf_catalog.json')
 
 # ── ETFS 觀測池：從 etf_catalog.json 動態載入 enabled=true 的 ETF ─
@@ -65,7 +69,8 @@ def load_catalog():
     out = {}
     for cat in data.get('categories', []):
         for etf in cat.get('etfs', []):
-            if etf.get('enabled') and etf.get('code'):
+            if (etf.get('enabled') and etf.get('code')
+                    and str(etf.get('market') or 'TW').upper() == 'TW'):
                 code = etf['code'].strip().upper()
                 name = etf.get('name', code)
                 out[code] = (code, name)
@@ -288,17 +293,55 @@ def fetch_one(etf_id: str, target_date: datetime.date):
 
 
 # ── 主流程：抓一個指定日期的所有 ETF 並輸出 JSON ─────────────────
+def _previous_snapshot_etf_count(history_dir: str, out_file: str) -> int:
+    for prior in reversed(etf_paths.list_snapshot_files(history_dir)):
+        if os.path.abspath(str(prior)) == os.path.abspath(out_file):
+            continue
+        check = etf_paths.inspect_snapshot(prior)
+        count = int(check.get('etfCount') or 0)
+        if check.get('valid') and count:
+            return count
+    return 0
+
+
 def run(target_date: datetime.date) -> bool:
-    os.makedirs(HISTORY_DIR, exist_ok=True)
+    history_dir = str(etf_paths.resolve_history_dir(create=True))
     date_str = target_date.strftime('%Y-%m-%d')
-    out_file = os.path.join(HISTORY_DIR, f'top10_active_etf_holdings_{date_str}.json')
+    out_file = os.path.join(history_dir, f'top10_active_etf_holdings_{date_str}.json')
+    previous_count = _previous_snapshot_etf_count(history_dir, out_file)
+    minimum_count = max(
+        etf_paths.MIN_HEALTHY_ETF_COUNT,
+        math.ceil(previous_count * 0.60) if previous_count else 0,
+        math.ceil(len(ETFS) * 0.60) if ETFS else 0,
+    )
+    invalid_existing = False
 
+    expected_codes = sorted(ETFS)
     if os.path.exists(out_file):
-        print(f'[{date_str}] 已存在，跳過。')
-        return True
+        # Immutable daily snapshots may be skipped only when the existing file
+        # is complete and belongs to the date encoded in its filename.  A
+        # partial/corrupt file must fail visibly so the scheduler cannot report
+        # a false success forever.
+        check = etf_paths.inspect_snapshot(out_file)
+        acceptance = etf_paths.snapshot_acceptance(
+            check,
+            today=datetime.date.today(),
+            expected_codes=expected_codes,
+            previous_etf_count=previous_count,
+        )
+        if acceptance.get('accepted'):
+            print(f'[{date_str}] 已存在且驗證通過，跳過。')
+            return True
+        invalid_existing = True
+        print(
+            f'[{date_str}] 既有快照不完整，保留原檔並重新抓取：'
+            f'etfs={check.get("etfCount", 0)} '
+            f'problems={list(check.get("problems", [])) + list(acceptance.get("problems", []))}'
+        )
 
-    print(f'[{date_str}] 開始抓取 {len(ETFS)} 檔 ETF 持股...')
-    result: dict = {'date': date_str}
+    print(f'[{date_str}] 開始抓取 {len(ETFS)} 檔台灣 ETF 持股...')
+    collected_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    result: dict = {'date': date_str, 'updated': collected_at}
 
     def worker(item):
         etf_id, (display_code, name) = item
@@ -307,7 +350,11 @@ def run(target_date: datetime.date) -> bool:
             print(f'  ✓ {display_code} {name}: {len(holdings)} 筆  (來源:{source} 資料日:{data_date})')
             return display_code, {
                 'name':     name,
-                'date':     data_date or date_str,
+                # Provider date is evidence and must never be fabricated from
+                # the local collection date when a provider parser changes.
+                'date':     data_date,
+                'collectedDate': date_str,
+                'collectedAt': collected_at,
                 'source':   source,
                 'total':    len(holdings),
                 'holdings': holdings,
@@ -322,19 +369,50 @@ def run(target_date: datetime.date) -> bool:
             if data:
                 result[code] = data
 
-    etf_count = sum(1 for v in result.values() if isinstance(v, dict))
-    if etf_count == 0:
-        print(f'[{date_str}] 全部抓取失敗')
+    succeeded_codes = sorted(
+        key for key, value in result.items()
+        if key != 'date' and isinstance(value, dict)
+        and isinstance(value.get('holdings'), list) and value['holdings']
+    )
+    etf_count = len(succeeded_codes)
+    expected_count = len(expected_codes)
+    success_ratio = etf_count / expected_count if expected_count else 0.0
+    result['meta'] = {
+        'scope': 'catalog-enabled-tw-etf',
+        'expectedCodes': expected_codes,
+        'expectedCount': expected_count,
+        'succeededCodes': succeeded_codes,
+        'failedCodes': sorted(set(expected_codes) - set(succeeded_codes)),
+        'succeededCount': etf_count,
+        'successRatio': round(success_ratio, 4),
+        'catalogFingerprint': etf_paths.catalog_fingerprint(expected_codes),
+    }
+    candidate_check = etf_paths.inspect_snapshot_payload(result, expected_date=target_date)
+    candidate_acceptance = etf_paths.snapshot_acceptance(
+        candidate_check,
+        today=datetime.date.today(),
+        expected_codes=expected_codes,
+        previous_etf_count=previous_count,
+    )
+    if not candidate_acceptance.get('accepted'):
+        print(
+            f'[{date_str}] 快照不完整：成功 {etf_count} 檔，'
+            f'最低需 {minimum_count} 檔（前期 {previous_count or "無"}）；'
+            f'拒絕原因 {candidate_acceptance.get("problems", [])}'
+        )
         return False
 
-    with open(out_file, 'w', encoding='utf-8') as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
+    if invalid_existing:
+        quarantine = out_file + '.invalid-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+        shutil.copy2(out_file, quarantine)
+        print(f'[{date_str}] 舊快照已保留：{quarantine}')
+    atomic_write_json(out_file, result, backup=False)
     print(f'\n[{date_str}] 完成！{etf_count}/{len(ETFS)} 檔 → {out_file}')
     return True
 
 
 # ── 批次補抓 ──────────────────────────────────────────────────────
-def backfill(days: int):
+def backfill(days: int) -> bool:
     """
     補抓最近 N 個交易日。注意：MoneyDJ 只提供最新一日的持股，
     對歷史日只能寫出當日已揭露的同一份快照（用 MoneyDJ 自己的「資料日期」存檔）；
@@ -354,6 +432,7 @@ def backfill(days: int):
         if run(d):
             ok += 1
     print(f'\n=== 回補完成：{ok}/{len(trading_days)} 個交易日成功 ===')
+    return ok == len(trading_days)
 
 
 # ── 入口 ──────────────────────────────────────────────────────────
@@ -366,8 +445,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.backfill:
-        backfill(args.backfill)
+        success = backfill(args.backfill)
     elif args.date:
-        run(datetime.date.fromisoformat(args.date))
+        success = run(datetime.date.fromisoformat(args.date))
     else:
-        run(datetime.date.today())
+        success = run(datetime.date.today())
+    raise SystemExit(0 if success else 2)

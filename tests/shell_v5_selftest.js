@@ -703,6 +703,11 @@ ok(!/class="wlchip-rm"/.test(sourceHtml) &&
   /openWlActionMenu\(chip\)/.test(sourceHtml) &&
   /_wlSuppressClickUntil = Date\.now\(\) \+ 900/.test(sourceHtml) &&
   /}, 550\)/.test(sourceHtml) &&
+  /wl-menu-etf/.test(sourceHtml) &&
+  /EtfFlowTip\.openForChip/.test(sourceHtml) &&
+  /class="etf-flow-badge/.test(sourceHtml) &&
+  /data-etf-flow-trigger/.test(sourceHtml) &&
+  /data-etf-flow-state/.test(sourceHtml) &&
   /wl-menu-remove/.test(sourceHtml) &&
   /if \(!confirm\('從自選移除/.test(sourceHtml) &&
   /\.wlchip\.wl-holding::after/.test(mobileCss) &&
