@@ -77,7 +77,12 @@ def resolve_history_dir(
             / "shared-data"
             / "etf_history"
         )
-    path = Path(os.path.abspath(str(path)))
+    # ``tempfile`` and service environments on Windows may expose the same
+    # directory through an 8.3 short path (for example ``RUNNER~1``) while
+    # callers see its long form.  Resolve the existing prefix so every ST
+    # process publishes one canonical path spelling; ``strict=False`` keeps
+    # the not-yet-created shared-data suffix valid on every platform.
+    path = Path(path).resolve(strict=False)
     if create:
         path.mkdir(parents=True, exist_ok=True)
     return path
