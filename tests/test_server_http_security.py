@@ -112,6 +112,41 @@ class ServerHttpSecurityTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 403)
         caught.exception.close()
 
+    def test_archify_html_has_static_document_security_boundary(self):
+        path = '/assets/docs/archify/st-decision-evidence-lineage.html'
+        with urllib.request.urlopen(self.base + path, timeout=5) as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn('text/html', response.headers['Content-Type'])
+            self.assertEqual(response.headers['X-Content-Type-Options'], 'nosniff')
+            self.assertEqual(response.headers['X-Frame-Options'], 'DENY')
+            self.assertEqual(response.headers['Referrer-Policy'], 'no-referrer')
+            self.assertIn('no-store', response.headers['Cache-Control'])
+            self.assertEqual(
+                response.headers['Content-Security-Policy'],
+                ST.ARCHIFY_DOCUMENT_CSP,
+            )
+        for directive in (
+            "default-src 'none'",
+            "connect-src 'none'",
+            "worker-src 'none'",
+            "frame-src 'none'",
+            "object-src 'none'",
+            "form-action 'none'",
+            "frame-ancestors 'none'",
+        ):
+            self.assertIn(directive, ST.ARCHIFY_DOCUMENT_CSP)
+
+    def test_static_allowlist_rejects_runtime_and_encoded_traversal_paths(self):
+        for path in (
+            '/data/private_web.json',
+            '/assets/docs/archify/%2e%2e/%2e%2e/data/private_web.json',
+        ):
+            with self.subTest(path=path):
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(self.base + path, timeout=3)
+                self.assertEqual(caught.exception.code, 403)
+                caught.exception.close()
+
 
 if __name__ == '__main__':
     unittest.main()

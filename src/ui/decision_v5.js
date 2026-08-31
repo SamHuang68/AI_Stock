@@ -78,8 +78,12 @@
       '#dc-root{font-family:"JetBrains Mono",monospace;color:var(--text);width:100%;min-width:0;max-width:1780px;margin:auto}' +
       '#dc-root *{box-sizing:border-box}' +
       '#dc-root .dc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px}' +
+      '#dc-root .dc-head-copy{min-width:0}#dc-root .dc-title-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}' +
       '#dc-root .dc-title{font-family:"Noto Serif TC",serif;font-size:20px;color:var(--thi);font-weight:800}' +
       '#dc-root .dc-sub{font-size:9px;color:var(--tlo);margin-top:3px}' +
+      '#dc-root .dc-doc-link{display:inline-flex;align-items:center;gap:4px;padding:3px 7px;border:1px solid rgba(103,232,249,.34);' +
+        'border-radius:999px;background:rgba(34,211,238,.07);color:#8cecff;text-decoration:none;font:800 8px "Noto Sans TC",sans-serif;white-space:nowrap}' +
+      '#dc-root .dc-doc-link:hover{border-color:#67e8f9;background:rgba(34,211,238,.14);color:#dffbff}' +
       '#dc-root .dc-actions{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}' +
       '#dc-root .dc-btn{border:1px solid var(--border);background:var(--bg3);color:var(--text);border-radius:5px;padding:5px 8px;font:700 9px "JetBrains Mono",monospace;cursor:pointer}' +
       '#dc-root .dc-btn:hover{border-color:var(--gold);color:var(--gold)}#dc-root .dc-btn:disabled{cursor:not-allowed;opacity:.55;border-color:#26364f;color:#75869d}' +
@@ -355,7 +359,8 @@
       '#dc-root .dc-warning-validation-note{margin-top:7px;color:#758ba4;font-size:8.5px;line-height:1.45}' +
       '#dc-root .dc-warning-foot{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:8px;color:#758ba4;font-size:9px}' +
       '@media(max-width:1000px){#dc-root .dc-command,#dc-root .dc-grid{grid-template-columns:1fr}#dc-root .dc-scenario{grid-template-columns:repeat(2,1fr)}#dc-root .dc-risk-grid,#dc-root .dc-lab-grid{grid-template-columns:repeat(2,1fr)}#dc-root .dc-temp{grid-template-columns:1fr}#dc-root .dc-temp-main{border-right:0;border-bottom:1px solid #24344b;padding:0 0 7px}#dc-root .dc-temp-lights{grid-template-columns:repeat(2,1fr)}#dc-root .dc-structure,#dc-root .dc-oi-grid{grid-template-columns:1fr}}' +
-      '@media(max-width:650px){#dc-root .dc-ledger-toolbar,#dc-root .dc-action-summary,#dc-root .dc-lab-authority,#dc-root .dc-validation-note,#dc-root .dc-warning-grid{grid-template-columns:1fr}.dc-ledger-actions{justify-content:flex-start}#dc-root .dc-ledger-table table{min-width:720px}#dc-root .dc-options-kpis,#dc-root .dc-options-kpis.five{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-options-scroll table{min-width:720px}#dc-root .dc-oi-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-oi-kpi:last-child{grid-column:1/-1}#dc-root .dc-warning-signal{grid-template-columns:72px minmax(0,1fr);padding:10px;gap:9px}#dc-root .dc-warning-ring{width:68px;height:68px}.dc-warning-ring strong{font-size:18px!important}#dc-root .dc-warning-validation-grid{grid-template-columns:repeat(3,minmax(0,1fr))}#dc-root .dc-warning-validation-cell{padding:7px 6px}.dc-warning-validation-cell .v{font-size:13px}}';
+      '@media(max-width:650px){#dc-root .dc-head{flex-direction:column}#dc-root .dc-actions{justify-content:flex-start}#dc-root .dc-doc-link{font-size:9px;padding:4px 8px}' +
+        '#dc-root .dc-ledger-toolbar,#dc-root .dc-action-summary,#dc-root .dc-lab-authority,#dc-root .dc-validation-note,#dc-root .dc-warning-grid{grid-template-columns:1fr}.dc-ledger-actions{justify-content:flex-start}#dc-root .dc-ledger-table table{min-width:720px}#dc-root .dc-options-kpis,#dc-root .dc-options-kpis.five{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-options-scroll table{min-width:720px}#dc-root .dc-oi-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-oi-kpi:last-child{grid-column:1/-1}#dc-root .dc-warning-signal{grid-template-columns:72px minmax(0,1fr);padding:10px;gap:9px}#dc-root .dc-warning-ring{width:68px;height:68px}.dc-warning-ring strong{font-size:18px!important}#dc-root .dc-warning-validation-grid{grid-template-columns:repeat(3,minmax(0,1fr))}#dc-root .dc-warning-validation-cell{padding:7px 6px}.dc-warning-validation-cell .v{font-size:13px}}';
   }
 
   function ensureMount() {
@@ -365,7 +370,8 @@
     var mount = $('mount-decision');
     if (!mount) { mount = document.createElement('div'); mount.id = 'mount-decision'; panel.appendChild(mount); }
     if (!$('dc-root')) {
-      mount.innerHTML = '<div id="dc-root"><div class="dc-head"><div><div class="dc-title">策略決策中心</div>' +
+      mount.innerHTML = '<div id="dc-root"><div class="dc-head"><div class="dc-head-copy"><div class="dc-title-line"><div class="dc-title">策略決策中心</div>' +
+        '<a class="dc-doc-link" href="/assets/docs/archify/st-decision-evidence-lineage.html" target="_blank" rel="noopener noreferrer" aria-label="在新分頁開啟決策證據鏈圖">ⓘ 決策證據鏈 ↗</a></div>' +
         '<div class="dc-sub" id="dc-sub">DecisionContext v1 · deterministic first · evidence before confidence</div></div>' +
         '<div class="dc-actions"><button class="dc-btn" data-shell-back>← 儀表板</button>' +
         '<button class="dc-btn" id="dc-ai-btn">AI 解釋</button><button class="dc-btn primary" id="dc-refresh">↻ 更新市場資料</button></div></div>' +

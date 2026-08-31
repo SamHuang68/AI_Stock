@@ -20,6 +20,15 @@ assert(radar.includes('(orientation:portrait)') && radar.includes('(orientation:
 assert(shell.includes('window.ConsensusAttentionV5.open()'), 'existing FAB is not routed to Consensus Radar');
 assert(decision.includes('applyPendingFocus()') && decision.includes('data-dc-section="divergences"'),
   'Decision deep-link focus contract missing');
+const evidenceArtifact = '/assets/docs/archify/st-decision-evidence-lineage.html';
+assert(radar.includes(evidenceArtifact) && decision.includes(evidenceArtifact),
+  'Decision and Radar must expose the same frozen evidence-lineage artifact');
+assert(radar.includes('target="_blank"') && radar.includes('rel="noopener noreferrer"'),
+  'Radar artifact link must open safely in a new tab');
+assert(decision.includes('target="_blank"') && decision.includes('rel="noopener noreferrer"'),
+  'Decision artifact link must open safely in a new tab');
+assert(!/<iframe\b/i.test(radar) && !/<iframe\b/i.test(decision),
+  'Archify documentation must not be embedded in the runtime');
 assert(build.includes("'src/ui/consensus_attention_v5.js'"), 'build bundle omits Consensus Radar');
 
 console.log('consensus_attention_v5 self-test PASSED');

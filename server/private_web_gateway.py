@@ -328,6 +328,29 @@ STATIC_EXACT = {
     "/favicon.ico",
 }
 STATIC_PREFIXES = ("/assets/", "/src/")
+STATIC_NAV_PREFIXES = ("/assets/docs/archify/",)
+ARCHIFY_DOCUMENT_CSP = (
+    "default-src 'none'; "
+    "script-src 'unsafe-inline'; "
+    "style-src 'unsafe-inline'; "
+    "img-src data: blob:; "
+    "media-src blob:; "
+    "font-src 'self' data:; "
+    "connect-src 'none'; "
+    "worker-src 'none'; "
+    "frame-src 'none'; "
+    "object-src 'none'; "
+    "base-uri 'none'; "
+    "form-action 'none'; "
+    "frame-ancestors 'none'"
+)
+ARCHIFY_OVERRIDDEN_HEADERS = {
+    "cache-control",
+    "content-security-policy",
+    "referrer-policy",
+    "x-content-type-options",
+    "x-frame-options",
+}
 
 # Read-only market/research API.  Prefix matching is segment-aware below.
 READ_GET_EXACT = {
@@ -695,6 +718,11 @@ def _path_matches(path: str, exact: set[str], prefixes: tuple[str, ...]) -> bool
     if path in exact:
         return True
     return any(path.startswith(prefix) for prefix in prefixes)
+
+
+def _is_static_navigation(path: str) -> bool:
+    """Return True only for standalone Archify HTML navigation targets."""
+    return path.lower().endswith(".html") and path.startswith(STATIC_NAV_PREFIXES)
 
 
 def route_permission(method: str, path: str, role: str, settings: Settings) -> bool:
@@ -1324,6 +1352,7 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
     def _proxy(self, role: str) -> None:
         started = time.monotonic()
         path_only = urlsplit(self.path).path
+        archify_document = _is_static_navigation(path_only)
         ai_request = path_only in {"/ai/local", "/ai/deep"}
         response_started = False
         upstream_status = 0
@@ -1383,6 +1412,7 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
                 self.command == "GET"
                 and response.status == 200
                 and "text/html" in content_type
+                and not archify_document
             )
             injected_body = None
             if inject_profile:
@@ -1398,16 +1428,29 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             self.send_response(response.status, response.reason)
             for key, value in response_headers:
                 lower = key.lower()
-                if lower not in HOP_BY_HOP and lower not in {
-                    "server", "date", "access-control-allow-origin",
-                } and not (inject_profile and lower == "content-length"):
+                allowed_header = (
+                    lower not in HOP_BY_HOP
+                    and lower not in {
+                        "server", "date", "access-control-allow-origin",
+                    }
+                    and not (inject_profile and lower == "content-length")
+                    and not (archify_document and lower in ARCHIFY_OVERRIDDEN_HEADERS)
+                )
+                if allowed_header:
                     self.send_header(key, value)
             if injected_body is not None:
                 self.send_header("Content-Length", str(len(injected_body)))
             self.send_header("Cache-Control", "no-store" if self.command == "POST" else "no-cache")
             self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Referrer-Policy", "same-origin")
+            self.send_header(
+                "Referrer-Policy",
+                "no-referrer" if archify_document else "same-origin",
+            )
             self.send_header("X-Frame-Options", "DENY")
+            if archify_document:
+                # Enforce the document boundary at the external gateway too,
+                # even if an older upstream release omitted its CSP header.
+                self.send_header("Content-Security-Policy", ARCHIFY_DOCUMENT_CSP)
             self.send_header("Connection", "close")
             self.end_headers()
             response_started = True
@@ -1520,7 +1563,11 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             if (
                 self.command in {"GET", "HEAD"}
                 and accepts_html
-                and (path in STATIC_EXACT or path == "/gateway/admin")
+                and (
+                    path in STATIC_EXACT
+                    or path == "/gateway/admin"
+                    or _is_static_navigation(path)
+                )
             ):
                 target = path or "/"
                 if urlsplit(self.path).query:
@@ -1528,7 +1575,9 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
                 self._send_html(
                     303,
                     "<!doctype html><title>前往登入</title>",
-                    location="/gateway/login?next=" + quote(target, safe="/?:=&%#"),
+                    # Encode the target's query delimiters as data so the
+                    # login page receives one complete ``next`` parameter.
+                    location="/gateway/login?next=" + quote(target, safe="/"),
                 )
             else:
                 self._json(401, {"error": "authentication required"})

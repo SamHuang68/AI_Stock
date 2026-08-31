@@ -74,6 +74,21 @@ flowchart LR
 
 ## 系統架構
 
+### 可互動架構圖（Archify）
+
+下列圖是從目前程式契約凍結出的獨立 HTML 文件，可搜尋、縮放、切換深淺主題與匯出；它們只負責解釋，不會讀取即時行情、改寫 `MarketData`／`DecisionData`，也不嵌入 ST 執行期。Private Web 使用者會在登入後於新分頁開啟，Decision 與共識雷達共用同一張「決策證據鏈」。版本、雜湊與視覺驗證結果記錄於 [Archify manifest](docs/architecture/archify-manifest.json)。
+
+| 研究問題 | 互動圖 | 可稽核規格 |
+|---|---|---|
+| 市場觀測如何形成唯一決策、Evidence 與 UI 投影？ | [決策證據鏈](assets/docs/archify/st-decision-evidence-lineage.html) | [dataflow JSON](docs/architecture/st-decision-evidence-lineage.dataflow.json) |
+| 遠端 Chrome、Tailscale、Gateway、EVO-T1 與 AI 在哪個信任邊界？ | [Private Web 信任與 AI 執行](assets/docs/archify/st-private-web-trust-ai-execution.html) | [architecture JSON](docs/architecture/st-private-web-trust-ai-execution.architecture.json) |
+| 精確 commit 如何通過 staging、批准、promotion 與人工回復？ | [Private Web 發布閘門](assets/docs/archify/st-private-web-release-gate.html) | [workflow JSON](docs/architecture/st-private-web-release-gate.workflow.json) |
+| Pulse 更新成功、降級或逾時時，誰負責狀態與畫面？ | [Pulse 刷新與降級序列](assets/docs/archify/st-pulse-refresh-degradation.html) | [sequence JSON](docs/architecture/st-pulse-refresh-degradation.sequence.json) |
+| 桌機、手機直式與手機橫式由哪一層擁有版面？ | [Responsive Shell 所有權](assets/docs/archify/st-responsive-shell-ownership.html) | [workflow JSON](docs/architecture/st-responsive-shell-ownership.workflow.json) |
+| Early Warning 訊號如何從觀測走到驗證、失效與修復？ | [Signal Passport 生命週期](assets/docs/archify/st-signal-passport-early-warning.html) | [lifecycle JSON](docs/architecture/st-signal-passport-early-warning.lifecycle.json) |
+
+這些 HTML 是固定文件快照，不代表畫面中的即時市場值；若規格或 HTML 被改動，雜湊測試會要求同步更新 manifest。HTTP 服務另以路徑專屬 CSP 阻擋連線與嵌入，維持「文件可看、資料不外流」的界線。
+
 ```mermaid
 flowchart TB
   subgraph Browser["瀏覽器 UI"]

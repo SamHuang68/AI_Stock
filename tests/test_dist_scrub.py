@@ -75,6 +75,31 @@ class TestDistScrub(unittest.TestCase):
         }
         self.assertTrue(required.issubset(self.names), required - self.names)
 
+    def test_archify_package_is_complete_without_visual_or_receipt_sidecars(self):
+        expected = {
+            "Stock_Terminal/docs/architecture/archify-manifest.json",
+            "Stock_Terminal/docs/architecture/st-decision-evidence-lineage.dataflow.json",
+            "Stock_Terminal/docs/architecture/st-private-web-trust-ai-execution.architecture.json",
+            "Stock_Terminal/docs/architecture/st-private-web-release-gate.workflow.json",
+            "Stock_Terminal/docs/architecture/st-pulse-refresh-degradation.sequence.json",
+            "Stock_Terminal/docs/architecture/st-responsive-shell-ownership.workflow.json",
+            "Stock_Terminal/docs/architecture/st-signal-passport-early-warning.lifecycle.json",
+            "Stock_Terminal/assets/docs/archify/st-decision-evidence-lineage.html",
+            "Stock_Terminal/assets/docs/archify/st-private-web-trust-ai-execution.html",
+            "Stock_Terminal/assets/docs/archify/st-private-web-release-gate.html",
+            "Stock_Terminal/assets/docs/archify/st-pulse-refresh-degradation.html",
+            "Stock_Terminal/assets/docs/archify/st-responsive-shell-ownership.html",
+            "Stock_Terminal/assets/docs/archify/st-signal-passport-early-warning.html",
+        }
+        self.assertTrue(expected.issubset(self.names), expected - self.names)
+        for name in self.names:
+            if "/assets/docs/archify/" not in name:
+                continue
+            lower = name.lower()
+            self.assertNotIn("visual-check", lower, msg=name)
+            self.assertNotIn(".archify-delivery-", lower, msg=name)
+            self.assertNotIn("receipt", lower, msg=name)
+
     def test_excludes_internal_context_and_runtime_state(self):
         forbidden_parts = {
             ".git",
@@ -156,6 +181,8 @@ class TestDistScrub(unittest.TestCase):
                 build_dist.validate_required_share_files()
         self.assertIn("server/decision_context.py", required)
         self.assertIn("server/options_exposure.py", required)
+        self.assertIn("docs/architecture/archify-manifest.json", required)
+        self.assertIn("tests/test_archify_artifacts.py", required)
 
 
 if __name__ == "__main__":

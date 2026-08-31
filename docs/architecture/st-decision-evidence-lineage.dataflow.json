@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Stock Terminal 決策證據鏈",
+    "output": "assets/docs/archify/st-decision-evidence-lineage.html",
+    "viewBox": [1080, 512],
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "market-lineage",
+        "label": "行情資料血緣",
+        "focus": ["market_sources", "market_contract", "pulse", "context_builder", "decision_context"],
+        "note": "從公開來源追蹤到單一 DecisionContext；每一步都保留來源、時間、盤別與比較基準。"
+      },
+      {
+        "id": "authority-boundary",
+        "label": "決策權限邊界",
+        "focus": ["research_inputs", "early_warning", "context_builder", "decision_context", "ai_explanation"],
+        "note": "Shadow 研究與 AI 都不能直接覆寫 regime、Action Envelope 或 Early Warning 狀態。"
+      },
+      {
+        "id": "single-writer",
+        "label": "單一寫入權",
+        "focus": ["decision_context", "decision_data", "ui_consumers"],
+        "note": "DecisionData 是瀏覽器端唯一寫入者；Radar 與 Decision UI 只讀同一份狀態。"
+      },
+      {
+        "id": "audit-replay",
+        "label": "稽核與重播",
+        "focus": ["pulse", "decision_context", "audit_store", "ui_consumers"],
+        "note": "Evidence、SQLite 歷史與 JSONL trace 讓狀態可追溯，而不是只留下 AI 結論。"
+      }
+    ]
+  },
+  "stages": [
+    { "label": "來源" },
+    { "label": "正規化" },
+    { "label": "聚合與研究" },
+    { "label": "決策權威" },
+    { "label": "呈現與說明" }
+  ],
+  "nodes": [
+    { "id": "market_sources", "type": "external", "label": "市場資料來源", "sublabel": "官方／公開 provider", "stage": 0, "row": 0, "yOffset": -24, "tag": "Observed" },
+    { "id": "market_contract", "type": "security", "label": "Market Contract", "sublabel": "來源・時間・盤別・基準", "stage": 1, "row": 0, "yOffset": -24, "tag": "canonical" },
+    { "id": "pulse", "type": "backend", "label": "Pulse 聚合器", "sublabel": "bounded pool + cache", "stage": 2, "row": 0, "yOffset": -24, "tag": "sourceOutcomes" },
+    { "id": "research_inputs", "type": "messagebus", "label": "研究與曝險輸入", "sublabel": "Options・隔夜・持倉", "stage": 2, "row": 2, "yOffset": -68, "tag": "shadow" },
+    { "id": "context_builder", "type": "backend", "label": "Context Builder", "sublabel": "deterministic rules", "stage": 3, "row": 0, "yOffset": -24, "tag": "authority" },
+    { "id": "decision_context", "type": "database", "label": "DecisionContext", "sublabel": "Regime・Evidence・Envelope", "stage": 3, "row": 1, "yOffset": -46, "width": 150, "tag": "single publisher" },
+    { "id": "early_warning", "type": "security", "label": "Early Warning", "sublabel": "生命週期與失效條件", "stage": 3, "row": 2, "yOffset": -68, "tag": "shadow gate" },
+    { "id": "audit_store", "type": "database", "label": "稽核儲存", "sublabel": "SQLite + JSONL trace", "stage": 3, "row": 3, "yOffset": -90, "tag": "bounded ledger" },
+    { "id": "decision_data", "type": "frontend", "label": "DecisionData", "sublabel": "browser one writer", "stage": 4, "row": 1, "yOffset": -46, "tag": "one event" },
+    { "id": "ui_consumers", "type": "frontend", "label": "決策 UI 與共識雷達", "sublabel": "read-only renderers", "stage": 4, "row": 2, "yOffset": -68, "tag": "Evidence drill-down" },
+    { "id": "ai_explanation", "type": "external", "label": "AI 白話解釋", "sublabel": "EVO-T1 本機推理", "stage": 4, "row": 3, "yOffset": -90, "tag": "explanation only" }
+  ],
+  "flows": [
+    { "id": "observations", "from": "market_sources", "to": "market_contract", "label": "raw observations", "classification": "Observed", "variant": "emphasis", "route": "straight" },
+    { "id": "canonical_snapshot", "from": "market_contract", "to": "pulse", "label": "canonical snapshot", "classification": "normalized", "variant": "emphasis", "route": "straight" },
+    { "id": "pulse_context", "from": "pulse", "to": "context_builder", "label": "canonical Pulse", "classification": "freshness-aware", "variant": "emphasis", "route": "straight" },
+    { "id": "research_context", "from": "research_inputs", "to": "decision_context", "label": "研究證據", "classification": "Derived / Modeled", "variant": "dashed", "fromSide": "right", "toSide": "left", "via": [[620, 317], [620, 225]], "labelAt": [580, 220] },
+    { "id": "warning_inputs", "from": "research_inputs", "to": "early_warning", "label": "五域輸入", "classification": "Shadow", "variant": "dashed", "route": "straight", "labelAt": [640, 334] },
+    { "id": "publish_context", "from": "context_builder", "to": "decision_context", "label": "單次發布", "classification": "authoritative", "variant": "emphasis", "route": "straight", "labelAt": [640, 179] },
+    { "id": "warning_attachment", "from": "early_warning", "to": "decision_context", "label": "狀態＋證據", "classification": "shadow_observation", "variant": "security", "route": "straight", "labelAt": [745, 271] },
+    { "id": "persist_trace", "from": "early_warning", "to": "audit_store", "label": "觀測＋結果", "classification": "bounded ledgers", "variant": "dashed", "route": "straight", "labelAt": [600, 410] },
+    { "id": "client_publish", "from": "decision_context", "to": "decision_data", "label": "read-only API", "classification": "GET /decision/context", "variant": "emphasis", "route": "straight", "labelAt": [900, 170] },
+    { "id": "ui_projection", "from": "decision_data", "to": "ui_consumers", "label": "同一事件", "classification": "one state event", "variant": "default", "route": "straight", "labelAt": [1035, 271] },
+    { "id": "explain_request", "from": "ui_consumers", "to": "ai_explanation", "label": "送出上下文", "classification": "request", "variant": "dashed", "route": "straight", "labelAt": [840, 363] },
+    { "id": "explain_response", "from": "ai_explanation", "to": "ui_consumers", "label": "文字回覆", "classification": "no write", "variant": "security", "fromSide": "right", "toSide": "right", "via": [[1070, 409], [1070, 317]], "labelAt": [1035, 363] }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "閱讀結論",
+      "items": [
+        "Market Contract → Pulse → Context Builder 是唯一權威路徑",
+        "研究、Early Warning 與 AI 皆不能覆寫 canonical 決策",
+        "可見判斷都能回到 Evidence、來源、時間與比較基準"
+      ]
+    }
+  ]
+}

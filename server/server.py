@@ -68,6 +68,32 @@ except (TypeError, ValueError):
 MAX_WORKERS = max(32, (os.cpu_count() or 16) * 2)
 LRU_MAX = 20000
 
+ARCHIFY_DOCUMENT_PREFIX = '/assets/docs/archify/'
+ARCHIFY_DOCUMENT_CSP = (
+    "default-src 'none'; "
+    "script-src 'unsafe-inline'; "
+    "style-src 'unsafe-inline'; "
+    "img-src data: blob:; "
+    "media-src blob:; "
+    "font-src 'self' data:; "
+    "connect-src 'none'; "
+    "worker-src 'none'; "
+    "frame-src 'none'; "
+    "object-src 'none'; "
+    "base-uri 'none'; "
+    "form-action 'none'; "
+    "frame-ancestors 'none'"
+)
+
+
+def _is_archify_document_path(value):
+    """Match only the delivered standalone Archify HTML documents."""
+    try:
+        path = unquote(urlparse(str(value or '')).path).replace('\\', '/')
+    except Exception:
+        return False
+    return path.startswith(ARCHIFY_DOCUMENT_PREFIX) and path.lower().endswith('.html')
+
 # ── 專案根目錄 ──
 # 凍結成 .exe(PyInstaller)時用 exe 所在資料夾;一般執行(server/ 下)時用其上一層。
 if getattr(sys, 'frozen', False):
@@ -3138,6 +3164,15 @@ class Handler(DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMi
             self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
             self.send_header('Pragma', 'no-cache')
             self.send_header('Expires', '0')
+        if _is_archify_document_path(path_only):
+            # Archify deliverables are static, standalone explanations.  Keep
+            # their inline viewer/export code, but prohibit runtime APIs,
+            # framing, forms and network connections.  In particular, this
+            # blocks the optional Google-font links while served by ST.
+            self.send_header('Content-Security-Policy', ARCHIFY_DOCUMENT_CSP)
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.send_header('X-Frame-Options', 'DENY')
+            self.send_header('Referrer-Policy', 'no-referrer')
         origin = self._cors_origin()
         if origin:
             self.send_header('Access-Control-Allow-Origin', origin)

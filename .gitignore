@@ -155,3 +155,6 @@ fedfunds.csv
 us10y.csv
 us_cpi_yoy.csv
 xlf.csv
+
+# Local Archify visual-review evidence (absolute paths; regenerate on demand).
+assets/docs/archify/*.visual-check.*

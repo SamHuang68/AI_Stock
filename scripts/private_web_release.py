@@ -38,11 +38,25 @@ REQUIRED_RELEASE_FILES = {
     "scripts/setup_private_web.py",
     "docs/PRIVATE_WEB_ST.md",
     "docs/PRIVATE_WEB_LOGIN_GUIDE.md",
+    "docs/architecture/archify-manifest.json",
+    "docs/architecture/st-decision-evidence-lineage.dataflow.json",
+    "docs/architecture/st-private-web-trust-ai-execution.architecture.json",
+    "docs/architecture/st-private-web-release-gate.workflow.json",
+    "docs/architecture/st-pulse-refresh-degradation.sequence.json",
+    "docs/architecture/st-responsive-shell-ownership.workflow.json",
+    "docs/architecture/st-signal-passport-early-warning.lifecycle.json",
+    "assets/docs/archify/st-decision-evidence-lineage.html",
+    "assets/docs/archify/st-private-web-trust-ai-execution.html",
+    "assets/docs/archify/st-private-web-release-gate.html",
+    "assets/docs/archify/st-pulse-refresh-degradation.html",
+    "assets/docs/archify/st-responsive-shell-ownership.html",
+    "assets/docs/archify/st-signal-passport-early-warning.html",
     "tests/test_health_live.py",
     "tests/test_daemon_lock.py",
     "tests/test_private_web_host.py",
     "tests/test_ai_local.py",
     "tests/test_private_web_access.py",
+    "tests/test_archify_artifacts.py",
     "stock_terminal_v2.html",
 }
 PRIVATE_RELEASE_EXCLUDES = {"wavedeck", "START_WAVEDECK.cmd"}
@@ -189,6 +203,7 @@ def stage_release(
             "tests.test_private_web_access",
             "tests.test_private_web_host",
             "tests.test_private_web_release",
+            "tests.test_archify_artifacts",
         ]
         if run_tests:
             _run([python, "-m", "unittest", *tests], cwd=extracted)

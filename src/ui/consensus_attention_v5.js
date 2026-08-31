@@ -135,9 +135,9 @@
         'background:#091527;box-shadow:inset 0 0 12px rgba(56,189,248,.08),0 0 14px rgba(56,189,248,.12)}' +
       '.ca-head-copy{min-width:0;flex:1}.ca-head-copy h2{margin:0;color:#f8fafc;font:800 17px/1.25 "Noto Sans TC",sans-serif}' +
       '.ca-head-copy p{margin:3px 0 0;color:#8292aa;font:500 10px/1.35 "JetBrains Mono",monospace}' +
-      '.ca-head button,.ca-foot button{border:1px solid rgba(148,163,184,.2);border-radius:8px;background:rgba(15,27,44,.78);' +
+      '.ca-head button,.ca-foot button,.ca-foot a{border:1px solid rgba(148,163,184,.2);border-radius:8px;background:rgba(15,27,44,.78);' +
         'color:#cbd5e1;padding:6px 9px;font:700 10px/1.2 "Noto Sans TC",sans-serif;cursor:pointer}' +
-      '.ca-head button:hover,.ca-foot button:hover{border-color:rgba(125,211,252,.46);color:#7dd3fc}' +
+      '.ca-head button:hover,.ca-foot button:hover,.ca-foot a:hover{border-color:rgba(125,211,252,.46);color:#7dd3fc}' +
       '.ca-body{flex:1;min-height:0;overflow:auto;padding:12px 12px 18px;overscroll-behavior:contain}' +
       '.ca-summary{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 1px 10px;color:#94a3b8;' +
         'font:600 10px/1.4 "JetBrains Mono",monospace}' +
@@ -162,9 +162,10 @@
         'color:#8da0b8;font:700 9px/1.25 "Noto Sans TC",sans-serif;cursor:pointer;padding:6px}' +
       '.ca-ack:hover{color:#f5c518;background:rgba(245,197,24,.07)}.ca-ack:disabled{cursor:default;color:#56657a}' +
       '.ca-empty{padding:28px 18px;text-align:center;border:1px dashed rgba(148,163,184,.22);border-radius:12px;color:#94a3b8;' +
-        'font-size:12px;line-height:1.7}.ca-foot{display:flex;gap:8px;align-items:center;padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));' +
+        'font-size:12px;line-height:1.7}.ca-foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));' +
         'border-top:1px solid rgba(148,163,184,.14);background:rgba(5,13,24,.88)}.ca-foot .primary{margin-left:auto;color:#08111f;' +
         'background:linear-gradient(135deg,#7dd3fc,#38bdf8);border-color:transparent}.ca-foot .ca-expand[hidden]{display:none}' +
+      '.ca-foot .ca-doc-link{display:inline-flex;align-items:center;text-decoration:none;color:#8cecff;white-space:nowrap}' +
       '@media(max-width:900px) and (orientation:portrait){#ca-layer .ca-dialog{left:0;right:0;top:auto;bottom:0;width:100%;' +
         'max-height:min(72dvh,680px);border-radius:18px 18px 0 0;border-bottom:0}.ca-head{padding-top:12px}.ca-body{padding-bottom:14px}}' +
       '@media(max-width:900px) and (orientation:landscape){#ca-layer .ca-dialog{right:0;top:0;bottom:0;width:min(430px,44vw);' +
@@ -185,6 +186,7 @@
           '<button type="button" data-ca-ack-all>全部已讀</button><button type="button" data-ca-close aria-label="關閉">✕</button></header>' +
         '<div class="ca-body" id="ca-body"></div>' +
         '<footer class="ca-foot"><button type="button" class="ca-expand" data-ca-expand>顯示全部</button>' +
+          '<a class="ca-doc-link" href="/assets/docs/archify/st-decision-evidence-lineage.html" target="_blank" rel="noopener noreferrer" aria-label="在新分頁開啟決策證據鏈圖">資料怎麼形成？ ↗</a>' +
           '<button type="button" data-ca-ring>全部功能</button><button type="button" class="primary" data-ca-decision>決策中心</button></footer>' +
       '</section>';
     document.body.appendChild(layer);

@@ -58,6 +58,7 @@ const appKernel = fs.readFileSync(path.join(root, 'src/core/app_kernel_v5.js'), 
 const decisionData = fs.readFileSync(path.join(root, 'src/core/decision_data_v5.js'), 'utf8');
 const marketIntel = fs.readFileSync(path.join(root, 'src/core/market_intel_v5.js'), 'utf8');
 const decisionUi = fs.readFileSync(path.join(root, 'src/ui/decision_v5.js'), 'utf8');
+const consensusAttentionUi = fs.readFileSync(path.join(root, 'src/ui/consensus_attention_v5.js'), 'utf8');
 const scanUi = fs.readFileSync(path.join(root, 'src/ui/scan_v5.js'), 'utf8');
 const tableSortUi = fs.readFileSync(path.join(root, 'src/core/table_sort_v5.js'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'server/server.py'), 'utf8');
@@ -247,6 +248,15 @@ ok(/table_sort_v5\.js/.test(build) && /MutationObserver/.test(tableSortUi) && /f
 ok(/↻ 立即更新市場資料/.test(decisionUi) && /\/pulse\?refresh=1/.test(decisionUi) &&
   /refreshMarketData/.test(decisionUi),
   'decision empty state can refresh pulse and context without route switching');
+const archifyEvidencePath = '/assets/docs/archify/st-decision-evidence-lineage.html';
+ok(decisionUi.includes(archifyEvidencePath) && consensusAttentionUi.includes(archifyEvidencePath),
+  'decision center and consensus radar share one frozen Archify evidence document');
+ok(/target="_blank"/.test(decisionUi) && /rel="noopener noreferrer"/.test(decisionUi) &&
+  /target="_blank"/.test(consensusAttentionUi) && /rel="noopener noreferrer"/.test(consensusAttentionUi),
+  'Archify evidence links use safe on-demand new-tab navigation');
+ok(!/<iframe\b/i.test(decisionUi) && !/<iframe\b/i.test(consensusAttentionUi) &&
+  !/\bfetch\s*\(/.test(consensusAttentionUi),
+  'Archify documents add no iframe or second runtime fetch path');
 ok(/market_refresh_terminal_success/.test(decisionUi) &&
   /market_refresh_terminal_failure/.test(decisionUi) &&
   /st_decision_ui_trace_v1/.test(decisionData),

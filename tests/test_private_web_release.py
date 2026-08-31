@@ -134,7 +134,27 @@ class PrivateWebReleaseTests(unittest.TestCase):
         source = (ROOT / "scripts" / "private_web_release.py").read_text(encoding="utf-8")
         self.assertIn("tests/etf_flow_v3_selftest.js", source)
         self.assertIn("tests/shell_v5_selftest.js", source)
+        self.assertIn('"tests.test_archify_artifacts"', source)
         self.assertIn('shutil.which("node")', source)
+
+    def test_release_requires_archify_manifest_documents_and_validator(self):
+        expected = {
+            "docs/architecture/archify-manifest.json",
+            "docs/architecture/st-decision-evidence-lineage.dataflow.json",
+            "docs/architecture/st-private-web-trust-ai-execution.architecture.json",
+            "docs/architecture/st-private-web-release-gate.workflow.json",
+            "docs/architecture/st-pulse-refresh-degradation.sequence.json",
+            "docs/architecture/st-responsive-shell-ownership.workflow.json",
+            "docs/architecture/st-signal-passport-early-warning.lifecycle.json",
+            "tests/test_archify_artifacts.py",
+            "assets/docs/archify/st-decision-evidence-lineage.html",
+            "assets/docs/archify/st-private-web-trust-ai-execution.html",
+            "assets/docs/archify/st-private-web-release-gate.html",
+            "assets/docs/archify/st-pulse-refresh-degradation.html",
+            "assets/docs/archify/st-responsive-shell-ownership.html",
+            "assets/docs/archify/st-signal-passport-early-warning.html",
+        }
+        self.assertTrue(expected.issubset(release.REQUIRED_RELEASE_FILES))
 
     def test_release_tests_cannot_mutate_committed_seed_bytes(self):
         archive_path = self.install_root / "release.zip"

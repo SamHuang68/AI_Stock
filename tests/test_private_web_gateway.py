@@ -16,7 +16,7 @@ from dataclasses import replace
 from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +55,16 @@ class UpstreamHandler(BaseHTTPRequestHandler):
             raw = b"<html><head></head><body>ST</body></html>"
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
+        if urlsplit(self.path).path.startswith("/assets/docs/archify/"):
+            raw = b"<html><head></head><body>ARCHIFY_STATIC</body></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            # The gateway must replace an upstream policy for this boundary.
+            self.send_header("Content-Security-Policy", "default-src *")
             self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
             self.wfile.write(raw)
@@ -226,6 +236,72 @@ class PrivateWebGatewayTests(unittest.TestCase):
         status, payload = _request(self.base + "/pulse")
         self.assertEqual(status, 401)
         self.assertIn("authentication", payload["error"])
+
+    def test_archify_navigation_redirect_preserves_full_next_target(self):
+        target = (
+            "/assets/docs/archify/st-decision-evidence-lineage.html"
+            "?theme=light&present=1"
+        )
+        request = urllib.request.Request(
+            self.base + target,
+            headers={"Accept": "text/html"},
+        )
+        opener = urllib.request.build_opener(NoRedirect)
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            opener.open(request, timeout=5)
+        response = raised.exception
+        self.assertEqual(response.code, 303)
+        location = response.headers["Location"]
+        response.close()
+        self.assertEqual(urlsplit(location).path, "/gateway/login")
+        self.assertEqual(
+            (parse_qs(urlsplit(location).query).get("next") or [None])[0],
+            target,
+        )
+
+        head = urllib.request.Request(
+            self.base + target,
+            method="HEAD",
+            headers={"Accept": "text/html"},
+        )
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            opener.open(head, timeout=5)
+        head_response = raised.exception
+        self.assertEqual(head_response.code, 303)
+        self.assertEqual(
+            (parse_qs(urlsplit(head_response.headers["Location"]).query).get("next") or [None])[0],
+            target,
+        )
+        self.assertEqual(head_response.read(), b"")
+        head_response.close()
+
+        # API-style requests and writes never receive a browser redirect.
+        status, payload = _request(self.base + target)
+        self.assertEqual(status, 401)
+        self.assertIn("authentication", payload["error"])
+        status, payload = _request(self.base + target, method="POST", body={})
+        self.assertEqual(status, 401)
+        self.assertIn("authentication", payload["error"])
+
+    def test_authenticated_archify_document_is_static_and_strictly_scoped(self):
+        path = "/assets/docs/archify/st-decision-evidence-lineage.html"
+        request = urllib.request.Request(
+            self.base + path,
+            headers={
+                "Authorization": "Bearer reader-secret",
+                "Accept": "text/html",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            body = response.read().decode("utf-8")
+            headers = response.headers
+            self.assertEqual(headers["Content-Security-Policy"], gateway.ARCHIFY_DOCUMENT_CSP)
+            self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+            self.assertEqual(headers["X-Frame-Options"], "DENY")
+            self.assertEqual(headers["Referrer-Policy"], "no-referrer")
+        self.assertIn("ARCHIFY_STATIC", body)
+        self.assertNotIn("ST_PRIVATE_WEB_PROFILE", body)
+        self.assertEqual(UpstreamHandler.seen[-1]["path"], path)
 
     def test_browser_login_page_creates_persistent_cookie_session(self):
         req = urllib.request.Request(
