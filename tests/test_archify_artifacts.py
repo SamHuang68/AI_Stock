@@ -151,6 +151,16 @@ class ArchifyArtifactTests(unittest.TestCase):
                 html_path = _contained_repo_file(row.get("htmlPath"))
                 self.assertEqual(row.get("specSha256"), _sha256(spec_path))
                 self.assertEqual(row.get("htmlSha256"), _sha256(html_path))
+                self.assertNotIn(
+                    b"\r\n",
+                    spec_path.read_bytes(),
+                    "Archify 規格檔必須維持 LF，否則 Windows checkout 會破壞清單雜湊",
+                )
+                self.assertNotIn(
+                    b"\r\n",
+                    html_path.read_bytes(),
+                    "Archify HTML 必須維持 LF，否則跨平台逐位元組驗證不一致",
+                )
 
                 validation = row.get("validation") or {}
                 self.assertEqual(validation.get("passed"), 9)

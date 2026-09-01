@@ -445,6 +445,18 @@
     html.st-vs5 #dc-root .dc-stop b{font-size:10.5px!important}
     html.st-vs5 #dc-root .dc-confidence strong{font-size:14px!important}
     html.st-vs5 #dc-root .dc-confidence small{font-size:9px!important}
+    html.st-vs5 #dc-root .dc-warning-time-chip,
+    html.st-vs5 #dc-root .dc-warning-threshold{
+      font-size:10px!important;line-height:1.4!important;
+    }
+    html.st-vs5 #dc-root .dc-warning-market-cell,
+    html.st-vs5 #dc-root .dc-warning-disclaimer,
+    html.st-vs5 #dc-root .dc-warning-divergence{
+      font-size:10px!important;line-height:1.5!important;
+    }
+    html.st-vs5 #dc-root .dc-warning-market-value{
+      font:800 12px/1.35 var(--dc-font-mono)!important;
+    }
 
     html.st-vs5 #dc-root table{font-size:10.5px!important;line-height:1.45!important}
     html.st-vs5 #dc-root th,html.st-vs5 #dc-root td{padding:7px 8px!important}

@@ -1,9 +1,47 @@
 """Small market-route helpers kept outside the main HTTP handler."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from market_contract import attach_quote_contract
+
+
+TAIPEI_TIMEZONE = timezone(timedelta(hours=8))
+
+
+def twse_mis_observation(row: dict[str, Any] | None) -> dict[str, str]:
+    """保留 TWSE MIS 的市場時間；來源缺值時不可用抓取時間替代。"""
+    row = row or {}
+    observed: datetime | None = None
+    raw_epoch = str(row.get('tlong') or '').strip()
+    if raw_epoch:
+        try:
+            epoch = float(raw_epoch)
+            if epoch > 10_000_000_000:
+                epoch /= 1000.0
+            candidate = datetime.fromtimestamp(epoch, timezone.utc)
+            if 2000 <= candidate.year <= 2100:
+                observed = candidate.astimezone(TAIPEI_TIMEZONE)
+        except (OSError, OverflowError, TypeError, ValueError):
+            observed = None
+    if observed is None:
+        raw_date = ''.join(ch for ch in str(row.get('d') or '') if ch.isdigit())
+        raw_time = str(row.get('t') or '').strip()
+        if len(raw_date) == 8 and raw_time:
+            compact_time = ''.join(ch for ch in raw_time if ch.isdigit())
+            if len(compact_time) >= 6:
+                try:
+                    observed = datetime.strptime(
+                        raw_date + compact_time[:6], '%Y%m%d%H%M%S'
+                    ).replace(tzinfo=TAIPEI_TIMEZONE)
+                except ValueError:
+                    observed = None
+    if observed is None:
+        return {}
+    return {
+        'asOf': observed.isoformat(),
+        'tradeDate': observed.date().isoformat(),
+    }
 
 
 def _aware_datetime(value: Any) -> datetime | None:

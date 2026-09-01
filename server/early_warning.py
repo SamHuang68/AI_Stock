@@ -24,9 +24,9 @@ else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 DB_PATH = os.path.join(_BASE, 'data', 'market_signals.db')
-CONTRACT_VERSION = 2
-ENGINE_VERSION = 'st-market-precursor/v1'
-POLICY_VERSION = 'shadow-lifecycle/2026-08-v1'
+CONTRACT_VERSION = 3
+ENGINE_VERSION = 'st-market-precursor/v2'
+POLICY_VERSION = 'shadow-lifecycle/2026-09-v2'
 OUTCOME_MODEL_VERSION = 'st-signal-prospective-ledger/v1'
 OUTCOME_HORIZONS = (1, 3, 5)
 OUTCOME_MIN_SAMPLE = 20
@@ -71,6 +71,173 @@ def _iso_now(now: datetime | None = None) -> str:
     return (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
 
 
+def _twse_expiry_contract(at: datetime, is_session_date=None) -> dict[str, Any]:
+    """將訊號到期時間對齊 TWSE 現貨盤邊界；未知假日採提前失效。"""
+    if at.tzinfo is None:
+        raise ValueError('expiry time must be timezone-aware')
+    taipei_zone = timezone(timedelta(hours=8))
+    local = at.astimezone(taipei_zone)
+    resolver = is_session_date or (lambda day: day.weekday() < 5)
+    quality = 'injected_calendar' if is_session_date else 'weekday_fallback'
+
+    def next_session_day(day):
+        candidate = day
+        for _ in range(370):
+            if resolver(candidate):
+                return candidate
+            candidate += timedelta(days=1)
+        raise RuntimeError('TWSE session boundary could not be resolved')
+
+    if resolver(local.date()) and local.time() < datetime.min.time().replace(hour=9):
+        session_day = local.date()
+        boundary_name = 'regular_open'
+        boundary_local = datetime.combine(
+            session_day, datetime.min.time().replace(hour=9), taipei_zone)
+    elif resolver(local.date()) and local.time() < datetime.min.time().replace(hour=13, minute=30):
+        session_day = local.date()
+        boundary_name = 'regular_close'
+        boundary_local = datetime.combine(
+            session_day, datetime.min.time().replace(hour=13, minute=30), taipei_zone)
+    else:
+        session_day = next_session_day(local.date() + timedelta(days=1))
+        boundary_name = 'next_regular_open'
+        boundary_local = datetime.combine(
+            session_day, datetime.min.time().replace(hour=9), taipei_zone)
+    return {
+        'expiresAt': boundary_local.astimezone(timezone.utc).isoformat(),
+        'expiry': {
+            'market': 'TWSE', 'session': 'regular', 'boundary': boundary_name,
+            'boundaryAt': boundary_local.isoformat(), 'sessionDate': session_day.isoformat(),
+            'timeZone': 'Asia/Taipei', 'calendarQuality': quality,
+            'calendarSource': quality, 'calendarVersion': None,
+            'policy': 'twse_regular_boundary/v1',
+        },
+    }
+
+
+def _stable_expiry_contract(candidate: dict[str, Any], previous: dict | None,
+                            *, same_observation: bool) -> dict[str, Any]:
+    """同一來源觀測沿用首次到期邊界，不因伺服器重算而滑動延長。"""
+    if not same_observation or not previous:
+        return candidate
+    try:
+        payload = json.loads(str(previous.get('event_json') or '{}'))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        payload = {}
+    expires_at = payload.get('expiresAt')
+    if not expires_at:
+        return candidate
+    expiry = payload.get('expiry')
+    if not isinstance(expiry, dict):
+        observed = _aware_datetime(expires_at)
+        local = observed.astimezone(timezone(timedelta(hours=8))) if observed else None
+        expiry = {
+            'market': 'TWSE', 'session': 'regular', 'boundary': 'legacy_preserved',
+            'boundaryAt': local.isoformat() if local else str(expires_at),
+            'sessionDate': local.date().isoformat() if local else None,
+            'timeZone': 'Asia/Taipei', 'calendarQuality': 'legacy',
+            'calendarSource': 'legacy_event', 'calendarVersion': None,
+            'policy': 'legacy_preserved/v1',
+        }
+    return {'expiresAt': str(expires_at), 'expiry': expiry}
+
+
+def _aware_datetime(value: Any) -> datetime | None:
+    """Parse a source timestamp without treating server time as market time."""
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        raw = str(value or '').strip()
+        if not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+        except ValueError:
+            return None
+    # Legacy Pulse timestamps were emitted in Taiwan local time without an
+    # offset.  Preserve compatibility while making the assumption explicit.
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone(timedelta(hours=8)))
+    return parsed.astimezone(timezone.utc)
+
+
+def _effective_signal_view(signal: dict[str, Any], at: datetime | str | None = None) -> dict[str, Any]:
+    """保留原始生命週期狀態，並依牆上時間派生實際有效狀態。"""
+    checked_at = _aware_datetime(at) or datetime.now(timezone.utc)
+    expires_at = _aware_datetime(signal.get('expiresAt'))
+    expired = bool(expires_at and checked_at >= expires_at)
+    view = dict(signal)
+    view['expired'] = expired
+    view['effectiveState'] = 'EXPIRED' if expired else str(signal.get('state') or 'OBSERVATION')
+    return view
+
+
+def _is_active_signal(signal: dict[str, Any]) -> bool:
+    return str(signal.get('effectiveState') or signal.get('state') or 'OBSERVATION') not in (
+        'OBSERVATION', 'RECOVERY', 'INVALIDATED', 'EXPIRED')
+
+
+def _latest_timestamp(values: list[Any]) -> str | None:
+    parsed = [(stamp, value) for value in values if (stamp := _aware_datetime(value)) is not None]
+    if not parsed:
+        return None
+    return str(max(parsed, key=lambda row: row[0])[1])
+
+
+def _quote_temporal(pulse: dict, symbol: str, *, fallback_market: str,
+                    fallback_session: str) -> dict[str, Any]:
+    quote = _market_quote(pulse, symbol)
+    market = quote.get('market') or {}
+    source_as_of = market.get('asOf') or quote.get('asOf')
+    return {
+        'market': market.get('market') or quote.get('marketCode') or fallback_market,
+        'session': market.get('session') or quote.get('session') or fallback_session,
+        'tradingDate': _date_key(
+            market.get('sessionDate') or quote.get('tradeDate') or quote.get('date') or source_as_of),
+        'sourceAsOf': source_as_of, 'asOf': source_as_of,
+        'source': market.get('source') or quote.get('source') or 'canonical-pulse',
+        'referenceType': market.get('referenceType') or quote.get('referenceType') or 'previous_close',
+        'changePct': _quote_change(quote),
+    }
+
+
+def _temporal_status(metadata: dict[str, Any], computed_at: datetime,
+                     *, evaluation_mode: str, reference: bool = False) -> dict[str, Any]:
+    source_time = _aware_datetime(metadata.get('sourceAsOf'))
+    age = max(0.0, (computed_at - source_time).total_seconds()) if source_time else None
+    session = str(metadata.get('session') or 'unknown').lower()
+    explicit = str(metadata.get('status') or '').lower()
+    if reference:
+        status = 'reference'
+        finalized = True
+    elif explicit in ('live', 'delayed', 'finalized', 'reference', 'stale', 'mixed'):
+        status = explicit
+        finalized = explicit in ('finalized', 'reference')
+    elif session == 'regular' and evaluation_mode in (
+            'cash_close_review', 'overnight_monitor', 'finalized_review'):
+        status = 'finalized'
+        finalized = True
+    elif age is None:
+        status = 'unknown'
+        finalized = False
+    elif age <= 120:
+        status = 'live'
+        finalized = False
+    elif age <= 900:
+        status = 'delayed'
+        finalized = False
+    else:
+        status = 'stale'
+        finalized = False
+    return {
+        **metadata,
+        'status': status,
+        'freshnessStatus': status,
+        'finalized': finalized,
+        'ageSeconds': round(age, 1) if age is not None else None,
+    }
+
+
 def _quote_rows(pulse: dict) -> dict[str, dict]:
     rows = list(pulse.get('global') or []) + list(pulse.get('signalQuotes') or [])
     return {str(row.get('symbol')): row for row in rows if isinstance(row, dict) and row.get('symbol')}
@@ -91,8 +258,17 @@ def _feature_value(context: dict, key: str) -> float | None:
     return _number((((context.get('scenario') or {}).get(key) or {}).get('value')))
 
 
+def _evidence_source_as_of(context: dict, evidence_ids: tuple[str, ...]) -> str | None:
+    wanted = set(evidence_ids)
+    return _latest_timestamp([
+        row.get('asOf') for row in (context.get('evidence') or [])
+        if isinstance(row, dict) and row.get('id') in wanted
+    ])
+
+
 def _family(identifier: str, value: float | None, quality: float, reasons: list[str],
-            evidence_ids: list[str], observed: dict | None = None) -> dict[str, Any]:
+            evidence_ids: list[str], observed: dict | None = None,
+            temporal: dict | None = None) -> dict[str, Any]:
     available = value is not None and quality > 0
     return {
         'id': identifier,
@@ -102,6 +278,7 @@ def _family(identifier: str, value: float | None, quality: float, reasons: list[
         'reasons': reasons,
         'evidenceIds': evidence_ids,
         'observed': observed or {},
+        'temporal': temporal or {},
     }
 
 
@@ -122,8 +299,14 @@ def _global_family(pulse: dict) -> dict[str, Any]:
     total = sum(weight for _, weight, _ in parts)
     value = sum(value * weight for value, weight, _ in parts) / total
     direction = '偏強' if value >= 0.20 else ('偏弱' if value <= -0.20 else '分歧')
+    source_as_of = _latest_timestamp([
+        ((rows.get(symbol) or {}).get('market') or {}).get('asOf') or (rows.get(symbol) or {}).get('asOf')
+        for symbol, *_ in specs
+    ])
     return _family('globalTech', value, min(1.0, total),
-                   [f'國際科技鏈{direction}（{len(parts)}/4）'], ['global.tech'], observed)
+                   [f'國際科技鏈{direction}（{len(parts)}/4）'], ['global.tech'], observed,
+                   {'market': 'US', 'session': 'latest_finalized', 'sourceAsOf': source_as_of,
+                    'referenceType': 'previous_close', 'status': 'finalized'})
 
 
 def _anchor_family(context: dict, pulse: dict) -> dict[str, Any]:
@@ -169,7 +352,15 @@ def _anchor_family(context: dict, pulse: dict) -> dict[str, Any]:
     reason = f'台積電／0050 去重錨點{direction}'
     if residual is None and tsm_tw is not None and tai50 is not None:
         reason += '；缺可用權重，0050 不重複計票'
-    return _family('anchor', value, quality, [reason], ['anchor.2330_0050'], observed)
+    anchor_rows = [rows.get(symbol) or {} for symbol in ('2330.TW', '2330', '0050.TW', '0050', 'TSM')]
+    txf_quote = _market_quote(pulse, '__TXF__')
+    source_as_of = _latest_timestamp([
+        *((row.get('market') or {}).get('asOf') or row.get('asOf') for row in anchor_rows),
+        (txf_quote.get('market') or {}).get('asOf') or txf_quote.get('asOf'),
+    ])
+    return _family('anchor', value, quality, [reason], ['anchor.2330_0050'], observed,
+                   {'market': 'TW_US_CROSS_MARKET', 'session': 'mixed',
+                    'sourceAsOf': source_as_of, 'referenceType': 'mixed', 'status': 'mixed'})
 
 
 def _memory_family(memory_snapshot: dict | None) -> dict[str, Any]:
@@ -198,8 +389,14 @@ def _memory_family(memory_snapshot: dict | None) -> dict[str, Any]:
     total = sum(weight for _, weight, _ in parts)
     value = sum(value * weight for value, weight, _ in parts) / total
     direction = '產業共振轉強' if value >= 0.25 else ('產業共振轉弱' if value <= -0.25 else '跨市場分歧')
+    source_as_of = _latest_timestamp([
+        ((markets.get(market) or {}).get('summary') or {}).get('asOf') for market in ('TW', 'US')
+    ])
     return _family('memoryCycle', value, min(1.0, total), [direction],
-                   [f'shadow.overnight_intraday.{market.lower()}' for _, _, market in parts], observed)
+                   [f'shadow.overnight_intraday.{market.lower()}' for _, _, market in parts], observed,
+                   {'market': 'TW_US_MEMORY_BASKETS', 'session': 'research',
+                    'sourceAsOf': source_as_of, 'referenceType': '20_session_research',
+                    'status': 'reference'})
 
 
 def _breadth_family(context: dict) -> dict[str, Any]:
@@ -215,9 +412,14 @@ def _breadth_family(context: dict) -> dict[str, Any]:
     raw = (((context.get('scenario') or {}).get('breadth') or {}).get('raw') or {})
     adv = _number(raw.get('advRatio'))
     direction = '多數股票參與' if value >= 0.20 else ('廣度收縮' if value <= -0.20 else '廣度中性')
-    return _family('breadthLiquidity', value, min(1.0, total), [direction],
+    result = _family('breadthLiquidity', value, min(1.0, total), [direction],
                    ['breadth.stock_scope', 'breadth.velocity', 'sector.participation'],
-                   {'advRatio': adv, 'velocity3': raw.get('velocity3'), 'velocity5': raw.get('velocity5')})
+                   {'advRatio': adv, 'velocity3': raw.get('velocity3'), 'velocity5': raw.get('velocity5')},
+                   {'market': 'TWSE', 'session': 'regular',
+                    'sourceAsOf': _evidence_source_as_of(
+                        context, ('breadth.stock_scope', 'breadth.velocity', 'sector.participation')),
+                    'referenceType': 'same_session_breadth'})
+    return result
 
 
 def _flow_family(context: dict, pulse: dict) -> dict[str, Any]:
@@ -232,10 +434,16 @@ def _flow_family(context: dict, pulse: dict) -> dict[str, Any]:
     value = sum(value * weight for value, weight in parts) / total
     raw = (((context.get('scenario') or {}).get('flow') or {}).get('raw') or {})
     direction = '資金／期貨支持' if value >= 0.20 else ('資金／期貨轉弱' if value <= -0.20 else '資金訊號分歧')
+    txf_quote = _market_quote(pulse, '__TXF__')
+    source_as_of = _latest_timestamp([
+        _evidence_source_as_of(context, ('flow.institutional', 'flow.tx_oi')),
+        (txf_quote.get('market') or {}).get('asOf') or txf_quote.get('asOf')])
     return _family('flowDerivatives', value, min(1.0, total), [direction],
                    ['flow.institutional', 'flow.tx_oi', 'txf.live'],
                    {'institutionalNetYi': raw.get('institutionalNetYi'),
-                    'txOiChangePct': raw.get('txOiChangePct'), 'txfChangePct': txf})
+                    'txOiChangePct': raw.get('txOiChangePct'), 'txfChangePct': txf},
+                   {'market': 'TW_CASH_DERIVATIVES', 'session': 'mixed',
+                    'sourceAsOf': source_as_of, 'referenceType': 'mixed', 'status': 'mixed'})
 
 
 def _direction_strength(families: list[dict], direction: str) -> tuple[float, int, list[str], list[str]]:
@@ -268,14 +476,142 @@ def _direction_strength(families: list[dict], direction: str) -> tuple[float, in
             [row[1] for row in sorted(counters, reverse=True)[:2]])
 
 
+def _build_temporal_context(context: dict, pulse: dict, computed_at: datetime) -> dict[str, Any]:
+    baseline_raw = _quote_temporal(pulse, '^TWII', fallback_market='TWSE', fallback_session='regular')
+    overlay_raw = _quote_temporal(pulse, '__TXF__', fallback_market='TAIFEX', fallback_session='unknown')
+    overlay_session = str(overlay_raw.get('session') or '').lower()
+    # TWSE and TAIFEX use Taiwan time year-round.  A quote labelled ``night``
+    # can remain in the snapshot during the cash session, so its label alone
+    # must not switch the whole engine into overnight mode.
+    taipei = computed_at.astimezone(timezone(timedelta(hours=8)))
+    minute = taipei.hour * 60 + taipei.minute
+    weekday = taipei.weekday()
+    cash_window = weekday < 5 and 9 * 60 <= minute < 13 * 60 + 30
+    cash_close_window = weekday < 5 and 13 * 60 + 30 <= minute < 15 * 60
+    night_window = (
+        overlay_session == 'night' and (
+            weekday < 5 and minute >= 15 * 60
+            or 1 <= weekday <= 5 and minute <= 5 * 60
+        )
+    )
+    if cash_window:
+        mode = 'cash_session_monitor'
+    elif cash_close_window:
+        mode = 'cash_close_review'
+    elif night_window:
+        mode = 'overnight_monitor'
+    else:
+        mode = 'finalized_review'
+    baseline = _temporal_status(baseline_raw, computed_at, evaluation_mode=mode)
+    overlay = _temporal_status(overlay_raw, computed_at, evaluation_mode=mode)
+    breadth_raw = (((context.get('scenario') or {}).get('breadth') or {}).get('raw') or {})
+    breadth_as_of = _evidence_source_as_of(context, ('breadth.stock_scope', 'breadth.velocity'))
+    breadth_date = _date_key(breadth_as_of)
+    local_date = taipei.date().isoformat()
+    breadth = _temporal_status({
+        'market': 'TWSE', 'session': 'regular', 'tradingDate': breadth_date,
+        'sourceAsOf': breadth_as_of, 'asOf': breadth_as_of,
+        'source': 'canonical-decision-context', 'referenceType': 'same_session_breadth',
+        'status': ('live' if mode == 'cash_session_monitor' and breadth_date == local_date else
+                   'finalized' if mode in ('cash_close_review', 'overnight_monitor', 'finalized_review')
+                   and breadth_date else None),
+        'advRatio': _number(breadth_raw.get('advRatio')),
+    }, computed_at, evaluation_mode=mode)
+    source_times = [
+        stamp for stamp in (
+            _aware_datetime(baseline.get('sourceAsOf')),
+            _aware_datetime(overlay.get('sourceAsOf')),
+            _aware_datetime(breadth.get('sourceAsOf')),
+        ) if stamp is not None
+    ]
+    statuses = {str(row.get('freshnessStatus') or 'unknown') for row in (baseline, overlay, breadth)}
+    freshness_status = next(iter(statuses)) if len(statuses) == 1 else 'mixed'
+    return {
+        'computedAt': computed_at.astimezone(timezone.utc).isoformat(),
+        'evaluationMode': mode,
+        'baseline': baseline,
+        'liveOverlay': overlay,
+        'breadth': breadth,
+        'target': {
+            'market': 'TWSE', 'session': 'regular',
+            'fromTradingSession': 1, 'toTradingSession': 5,
+            'label': '下一個至第五個台股交易日',
+        },
+        'freshness': {
+            'status': freshness_status,
+            'oldestSourceAsOf': min(source_times).isoformat() if source_times else None,
+            'newestSourceAsOf': max(source_times).isoformat() if source_times else None,
+            'allInputsLive': bool(statuses) and statuses == {'live'},
+        },
+    }
+
+
+def _normalize_family_temporal(families: list[dict], computed_at: datetime,
+                               evaluation_mode: str) -> None:
+    for family in families:
+        metadata = dict(family.get('temporal') or {})
+        family['temporal'] = _temporal_status(
+            metadata, computed_at, evaluation_mode=evaluation_mode,
+            reference=str(metadata.get('status') or '').lower() == 'reference')
+
+
+def _observation_key(families: list[dict], temporal_context: dict[str, Any]) -> str:
+    """Key lifecycle progression to source observations, not recomputation time."""
+    compact_families = []
+    for family in families:
+        temporal = family.get('temporal') or {}
+        compact_families.append({
+            'id': family.get('id'), 'value': family.get('value'), 'quality': family.get('quality'),
+            'available': family.get('available'), 'observed': family.get('observed') or {},
+            # Research and finalized external sessions can advance without a
+            # numeric change; server-generated DecisionContext timestamps may not.
+            'sourceAsOf': temporal.get('sourceAsOf') if temporal.get('session') in (
+                'night', 'latest_finalized', 'research') else None,
+        })
+    baseline = temporal_context.get('baseline') or {}
+    overlay = temporal_context.get('liveOverlay') or {}
+    raw = json.dumps({
+        'families': compact_families,
+        'baseline': {key: baseline.get(key) for key in ('tradingDate', 'sourceAsOf', 'changePct')},
+        'liveOverlay': {key: overlay.get(key) for key in ('session', 'tradingDate', 'sourceAsOf', 'changePct')},
+    }, sort_keys=True, ensure_ascii=False, separators=(',', ':'), default=str)
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()[:24]
+
+
 def _signal(signal_id: str, label: str, direction: str, strength: float, domains: int,
             quality: float, reasons: list[str], counters: list[str], evidence_ids: list[str],
-            context: dict, pulse: dict) -> dict[str, Any]:
+            context: dict, pulse: dict, temporal_context: dict) -> dict[str, Any]:
     twii = _quote_change(_market_quote(pulse, '^TWII'))
+    txf = _quote_change(_market_quote(pulse, '__TXF__'))
     breadth = _number(((((context.get('scenario') or {}).get('breadth') or {}).get('raw') or {}).get('advRatio')))
     cash_confirmed = bool(
         direction == 'upside' and twii is not None and twii > 0 and breadth is not None and breadth >= 0.55
         or direction == 'downside' and twii is not None and twii < 0 and breadth is not None and breadth <= 0.45)
+    mode = temporal_context.get('evaluationMode')
+    baseline = temporal_context.get('baseline') or {}
+    breadth_time = temporal_context.get('breadth') or {}
+    computed_stamp = _aware_datetime(temporal_context.get('computedAt'))
+    evaluated_local_date = (
+        computed_stamp.astimezone(timezone(timedelta(hours=8))).date().isoformat()
+        if computed_stamp else None)
+    baseline_date = baseline.get('tradingDate')
+    breadth_date = breadth_time.get('tradingDate')
+    trusted_statuses = {'live', 'delayed', 'finalized'}
+    cash_confirmation_eligible = bool(
+        cash_confirmed and mode in ('cash_session_monitor', 'cash_close_review')
+        and baseline_date and breadth_date
+        and baseline_date == breadth_date == evaluated_local_date
+        and str(baseline.get('session') or '').lower() == 'regular'
+        and str(breadth_time.get('session') or '').lower() == 'regular'
+        and baseline.get('status') in trusted_statuses
+        and breadth_time.get('status') in trusted_statuses)
+    overnight = mode == 'overnight_monitor'
+    if cash_confirmation_eligible:
+        confirmation = '台股現貨方向與上市廣度同向確認'
+    elif cash_confirmed and overnight:
+        confirmation = '當日現貨與廣度同向；夜盤新事件仍須下一現貨盤確認'
+    else:
+        confirmation = '等待台股現貨與廣度同向確認'
     return {
         'signalId': signal_id, 'label': label, 'direction': direction,
         'strength': round(strength, 1), 'independentDomains': int(domains),
@@ -283,19 +619,29 @@ def _signal(signal_id: str, label: str, direction: str, strength: float, domains
         'strongestCounterEvidence': counters,
         'evidenceIds': sorted(set(evidence_ids)),
         'cashConfirmation': cash_confirmed,
-        'observed': {'twiiChangePct': twii, 'advRatio': breadth},
-        'confirmation': ('台股現貨方向與上市廣度同向確認' if cash_confirmed else '等待台股現貨與廣度同向確認'),
+        'cashConfirmationEligible': cash_confirmation_eligible,
+        'confirmationSessionDate': baseline_date if cash_confirmation_eligible else None,
+        'candidateSessionDate': baseline_date,
+        'confirmationSession': baseline.get('session'),
+        'observed': {'twiiChangePct': twii, 'txfChangePct': txf, 'advRatio': breadth},
+        'confirmation': confirmation,
         'invalidation': '訊號強度連續三次低於 45，或核心方向反轉',
         'horizon': 'next_session_to_5_sessions',
+        'target': temporal_context.get('target') or {},
     }
 
 
-def evaluate_context(context: dict, pulse: dict, *, memory_snapshot: dict | None = None) -> dict[str, Any]:
+def evaluate_context(context: dict, pulse: dict, *, memory_snapshot: dict | None = None,
+                     now: datetime | None = None) -> dict[str, Any]:
     """Pure evaluation.  Returned strengths are evidence strength, not probability."""
+    computed_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     families = [
         _global_family(pulse), _anchor_family(context, pulse), _memory_family(memory_snapshot),
         _breadth_family(context), _flow_family(context, pulse),
     ]
+    temporal_context = _build_temporal_context(context, pulse, computed_at)
+    _normalize_family_temporal(families, computed_at, temporal_context['evaluationMode'])
+    observation_key = _observation_key(families, temporal_context)
     completeness = _number((context.get('dataQuality') or {}).get('completeness')) or 0.0
     freshness = _number((context.get('dataQuality') or {}).get('freshness')) or 0.0
     available_weight = sum(_WEIGHTS[row['id']] * float(row.get('quality') or 0)
@@ -305,10 +651,10 @@ def evaluate_context(context: dict, pulse: dict, *, memory_snapshot: dict | None
     down_strength, down_domains, down_reasons, down_counters = _direction_strength(families, 'downside')
     evidence_ids = [eid for row in families for eid in row.get('evidenceIds') or []]
     signals = [
-        _signal('TW_DOWNSIDE_PRECURSOR', '台股下跌前兆', 'downside', down_strength, down_domains,
-                evidence_quality, down_reasons, down_counters, evidence_ids, context, pulse),
-        _signal('TW_ATTACK_BUILDUP', '台股強攻蓄勢', 'upside', up_strength, up_domains,
-                evidence_quality, up_reasons, up_counters, evidence_ids, context, pulse),
+        _signal('TW_DOWNSIDE_PRECURSOR', '下行前兆證據', 'downside', down_strength, down_domains,
+                evidence_quality, down_reasons, down_counters, evidence_ids, context, pulse, temporal_context),
+        _signal('TW_ATTACK_BUILDUP', '上行前兆證據', 'upside', up_strength, up_domains,
+                evidence_quality, up_reasons, up_counters, evidence_ids, context, pulse, temporal_context),
     ]
     family_map = {row['id']: row for row in families}
     for signal_id, label, family_ids in (
@@ -331,13 +677,20 @@ def evaluate_context(context: dict, pulse: dict, *, memory_snapshot: dict | None
         domains = pos_n if direction == 'upside' else neg_n if direction == 'downside' else 0
         selected_ids = [eid for row in selected for eid in row.get('evidenceIds') or []]
         signals.append(_signal(signal_id, label, direction, strength, domains, evidence_quality,
-                               reasons, counters, selected_ids, context, pulse))
+                               reasons, counters, selected_ids, context, pulse, temporal_context))
     conflict = up_strength >= 55 and down_strength >= 55
     return {
         'ok': bool(context.get('ok')),
         'contractVersion': CONTRACT_VERSION, 'model': ENGINE_VERSION,
         'policyVersion': POLICY_VERSION, 'shadowOnly': True,
         'actionAuthority': 'none', 'asOf': context.get('asOf') or pulse.get('updatedAt'),
+        'temporalContext': temporal_context,
+        'observationKey': observation_key,
+        'thresholds': {
+            'watchStrength': 55, 'watchIndependentDomains': 2,
+            'armedStrength': 70, 'armedIndependentDomains': 3,
+            'confirmedStrength': 80, 'confirmedIndependentDomains': 3,
+        },
         'status': 'CONFLICT' if conflict else 'READY',
         'evidenceQuality': round(evidence_quality, 3),
         'familyScores': families, 'signals': signals,
@@ -624,8 +977,16 @@ def _init_db(path: str = DB_PATH) -> None:
                          'consecutive_hits INTEGER,miss_count INTEGER,dedupe_key TEXT,event_json TEXT)')
             conn.execute('CREATE TABLE IF NOT EXISTS signal_observations('
                          'id INTEGER PRIMARY KEY AUTOINCREMENT,signal_id TEXT,direction TEXT,as_of TEXT,'
-                         'strength REAL,domains INTEGER,qualified INTEGER,snapshot_json TEXT,'
+                         'observation_key TEXT,strength REAL,domains INTEGER,qualified INTEGER,snapshot_json TEXT,'
                          'UNIQUE(signal_id,direction,as_of))')
+            observation_columns = {
+                str(row[1]) for row in conn.execute('PRAGMA table_info(signal_observations)').fetchall()
+            }
+            if 'observation_key' not in observation_columns:
+                conn.execute('ALTER TABLE signal_observations ADD COLUMN observation_key TEXT')
+            conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_signal_observation_key '
+                         'ON signal_observations(signal_id,direction,observation_key) '
+                         'WHERE observation_key IS NOT NULL')
             conn.execute('CREATE TABLE IF NOT EXISTS signal_events('
                          'id INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT UNIQUE,signal_id TEXT,direction TEXT,'
                          'from_state TEXT,to_state TEXT,tier TEXT,as_of TEXT,created_at TEXT,dedupe_key TEXT,event_json TEXT)')
@@ -671,7 +1032,10 @@ def _target_state(signal: dict, previous: dict | None, same_observation: bool) -
         return prior_state, hits, misses
     if prior_state == 'ACTIVE':
         return 'ACTIVE', hits, 0
-    if (strength >= 80 and domains >= 3 and signal.get('cashConfirmation')
+    confirmation_eligible = signal.get('cashConfirmationEligible')
+    if confirmation_eligible is None:
+        confirmation_eligible = signal.get('cashConfirmation')
+    if (strength >= 80 and domains >= 3 and confirmation_eligible
             and (prior_state == 'ARMED' or hits >= 3)):
         if prior_state in ('CONFIRMED', 'ACTIVE'):
             return 'ACTIVE', hits, 0
@@ -705,10 +1069,12 @@ def _tier(state: str) -> str:
 def process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None = None,
                     market_history: Any = None, db_path: str = DB_PATH,
                     now: datetime | None = None) -> dict[str, Any]:
-    evaluated = evaluate_context(context, pulse, memory_snapshot=memory_snapshot)
+    evaluated = evaluate_context(context, pulse, memory_snapshot=memory_snapshot, now=now)
     as_of = str(evaluated.get('asOf') or _iso_now(now))
-    created_at = _iso_now(now)
-    expires_at = (now or datetime.now(timezone.utc)) + timedelta(hours=24)
+    observation_key = str(evaluated.get('observationKey') or as_of)
+    run_at = now or datetime.now(timezone.utc)
+    created_at = _iso_now(run_at)
+    candidate_expiry = _twse_expiry_contract(run_at)
     market_ref = _market_reference(pulse, as_of)
     _init_db(db_path)
     new_events: list[dict] = []
@@ -723,8 +1089,9 @@ def process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None 
                     'evidence_quality,consecutive_hits,miss_count,dedupe_key,event_json '
                     'FROM signal_state WHERE signal_id=?', (signal_id,)).fetchone())
                 exists = conn.execute(
-                    'SELECT 1 FROM signal_observations WHERE signal_id=? AND direction=? AND as_of=?',
-                    (signal_id, direction, as_of)).fetchone() is not None
+                    'SELECT 1 FROM signal_observations WHERE signal_id=? AND direction=? '
+                    'AND (observation_key=? OR (observation_key IS NULL AND as_of=?))',
+                    (signal_id, direction, observation_key, as_of)).fetchone() is not None
                 state, hits, misses = _target_state(signal, previous, exists)
                 first_seen = (previous or {}).get('first_seen_at') or created_at
                 if (previous and str(previous.get('state') or '') in
@@ -736,19 +1103,26 @@ def process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None 
                 changed = state != from_state
                 if changed:
                     changed_at = created_at
-                dedupe = f'{signal_id}:{direction}:{state}:{as_of[:10]}'
+                dedupe = f'{signal_id}:{direction}:{state}:{observation_key}'
+                expiry_contract = _stable_expiry_contract(
+                    candidate_expiry, previous, same_observation=exists)
                 enriched = {
                     **signal, 'state': state, 'tier': _tier(state),
                     'firstSeenAt': first_seen, 'changedAt': changed_at, 'lastSeenAt': created_at,
-                    'expiresAt': expires_at.astimezone(timezone.utc).isoformat(),
+                    'expiresAt': expiry_contract['expiresAt'],
+                    'expiry': expiry_contract['expiry'],
                     'consecutiveHits': hits, 'missCount': misses, 'dedupeKey': dedupe,
                     'policyVersion': POLICY_VERSION, 'engineVersion': ENGINE_VERSION,
+                    'temporalContext': evaluated.get('temporalContext') or {},
+                    'observationKey': observation_key,
                     'shadowOnly': True, 'actionAuthority': 'none',
                 }
                 raw = json.dumps(enriched, ensure_ascii=False, separators=(',', ':'), default=str)
                 conn.execute('INSERT OR IGNORE INTO signal_observations('
-                             'signal_id,direction,as_of,strength,domains,qualified,snapshot_json) VALUES(?,?,?,?,?,?,?)',
-                             (signal_id, direction, as_of, signal.get('strength'), signal.get('independentDomains'),
+                             'signal_id,direction,as_of,observation_key,strength,domains,qualified,snapshot_json) '
+                             'VALUES(?,?,?,?,?,?,?,?)',
+                             (signal_id, direction, as_of, observation_key,
+                              signal.get('strength'), signal.get('independentDomains'),
                               int((signal.get('strength') or 0) >= 55 and (signal.get('independentDomains') or 0) >= 2), raw))
                 conn.execute('INSERT INTO signal_state(signal_id,direction,state,first_seen_at,changed_at,last_seen_at,'
                              'strength,evidence_quality,consecutive_hits,miss_count,dedupe_key,event_json) '
@@ -765,12 +1139,19 @@ def process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None 
                         'eventId': event_id, 'signalId': signal_id, 'label': signal.get('label'),
                         'direction': direction, 'fromState': from_state, 'toState': state,
                         'tier': _tier(state), 'asOf': as_of, 'createdAt': created_at,
-                        'expiresAt': enriched['expiresAt'], 'strength': signal.get('strength'),
+                        'observationKey': observation_key,
+                        'expiresAt': enriched['expiresAt'], 'expiry': enriched['expiry'],
+                        'strength': signal.get('strength'),
                         'evidenceQuality': signal.get('evidenceQuality'),
                         'independentDomains': signal.get('independentDomains'),
                         'reasons': signal.get('reasons') or [],
                         'strongestCounterEvidence': signal.get('strongestCounterEvidence') or [],
                         'confirmation': signal.get('confirmation'), 'invalidation': signal.get('invalidation'),
+                        'cashConfirmation': signal.get('cashConfirmation'),
+                        'cashConfirmationEligible': signal.get('cashConfirmationEligible'),
+                        'confirmationSessionDate': signal.get('confirmationSessionDate'),
+                        'horizon': signal.get('horizon'),
+                        'temporalContext': evaluated.get('temporalContext') or {},
                         'evidenceIds': signal.get('evidenceIds') or [], 'dedupeKey': dedupe,
                         'policyVersion': POLICY_VERSION, 'engineVersion': ENGINE_VERSION,
                         'shadowOnly': True, 'actionAuthority': 'none',
@@ -796,24 +1177,26 @@ def process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None 
                          '(SELECT id FROM signal_observations ORDER BY id DESC LIMIT 2000)')
             conn.execute('DELETE FROM signal_events WHERE id NOT IN '
                          '(SELECT id FROM signal_events ORDER BY id DESC LIMIT 500)')
-    evaluated['signals'] = persisted
+    visible_signals = [_effective_signal_view(row, run_at) for row in persisted]
+    evaluated['signals'] = visible_signals
     evaluated['newEvents'] = new_events
-    evaluated['activeEvents'] = [row for row in persisted if row.get('state') not in
-                                 ('OBSERVATION', 'RECOVERY', 'INVALIDATED', 'EXPIRED')]
+    evaluated['activeEvents'] = [row for row in visible_signals if _is_active_signal(row)]
     evaluated['prospectiveValidation'] = prospective
     return evaluated
 
 
-def active(path: str = DB_PATH) -> dict[str, Any]:
+def active(path: str = DB_PATH, *, now: datetime | str | None = None) -> dict[str, Any]:
     try:
         _init_db(path)
         with closing(sqlite3.connect(path, timeout=10)) as conn:
             rows = conn.execute('SELECT event_json FROM signal_state ORDER BY changed_at DESC').fetchall()
-        signals = [json.loads(row[0]) for row in rows if row and row[0]]
+        signals = [
+            _effective_signal_view(json.loads(row[0]), now)
+            for row in rows if row and row[0]
+        ]
         return {'ok': True, 'contractVersion': CONTRACT_VERSION, 'model': ENGINE_VERSION,
                 'shadowOnly': True, 'signals': signals,
-                'activeEvents': [row for row in signals if row.get('state') not in
-                                 ('OBSERVATION', 'RECOVERY', 'INVALIDATED', 'EXPIRED')]}
+                'activeEvents': [row for row in signals if _is_active_signal(row)]}
     except Exception as exc:
         return {'ok': False, 'error': str(exc), 'signals': [], 'activeEvents': []}
 
@@ -865,6 +1248,12 @@ def empty(reason: str = 'NOT_EVALUATED') -> dict[str, Any]:
         'ok': False, 'contractVersion': CONTRACT_VERSION, 'model': ENGINE_VERSION,
         'policyVersion': POLICY_VERSION, 'shadowOnly': True, 'actionAuthority': 'none',
         'status': 'INSUFFICIENT_DATA', 'signals': [], 'newEvents': [], 'activeEvents': [],
+        'temporalContext': {},
+        'thresholds': {
+            'watchStrength': 55, 'watchIndependentDomains': 2,
+            'armedStrength': 70, 'armedIndependentDomains': 3,
+            'confirmedStrength': 80, 'confirmedIndependentDomains': 3,
+        },
         'familyScores': [], 'dataQuality': {'reason': reason, 'strengthIsProbability': False},
         'prospectiveValidation': _empty_prospective(),
     }

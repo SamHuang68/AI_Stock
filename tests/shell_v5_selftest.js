@@ -137,6 +137,20 @@ ok(/TW_DOWNSIDE_PRECURSOR/.test(earlyWarningEngine) && /TW_ATTACK_BUILDUP/.test(
   'market precursor engine exposes four named shadow-only signals');
 ok(/earlyWarningHtml/.test(decisionUi) && /跨市場前兆雷達/.test(decisionUi) && /訊號強度不是機率/.test(decisionUi),
   'decision page renders readable precursor strength and authority boundary');
+ok(/function warningTemporalHtml/.test(decisionUi) && /warning\.temporalContext/.test(decisionUi) &&
+  /目標 T\+/.test(decisionUi) && /即時計算/.test(decisionUi) && /混合時效資料/.test(decisionUi) &&
+  /下一個至第五個台股交易日/.test(decisionUi),
+  '前兆雷達明示計算時間、混合時效與 T+1～T+5 目標期間');
+ok(/function warningMarketStripHtml/.test(decisionUi) && /現貨收盤/.test(decisionUi) &&
+  /台指夜盤/.test(decisionUi) && /上市廣度/.test(decisionUi) && /現況／前兆分歧/.test(decisionUi),
+  '前兆雷達分開呈現目前市場與多日前兆，並提示夜盤方向分歧');
+ok(/下行前兆證據/.test(decisionUi) && /上行前兆證據/.test(decisionUi) &&
+  /觀測・未形成/.test(decisionUi) && /watchStrength/.test(decisionUi) && /尚未達注意門檻/.test(decisionUi),
+  '前兆 headline 使用證據語意並揭露注意門檻');
+ok(/不是目前夜盤方向，也不是上漲／下跌機率/.test(decisionUi) &&
+  /refreshMarketData\(\{ background: true \}\)/.test(decisionUi) &&
+  /marketRefreshInflight/.test(decisionUi) && !/\/market\/snapshot/.test(decisionUi),
+  '決策頁以 canonical Pulse 背景重建，不另建市場資料路徑或把分數當機率');
 ok(/prospectiveValidationHtml/.test(decisionUi) && /前瞻驗證建置中/.test(decisionUi) &&
   /不是未來機率/.test(decisionUi) && /ratesAvailable/.test(decisionUi),
   'decision page exposes sample-gated prospective validation without probability language');

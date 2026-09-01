@@ -3,6 +3,8 @@
   'use strict';
   var SRV = window.SERVER || '';
   var timer = null;
+  var marketRefreshInflight = null;
+  var lastMarketRefreshAt = 0;
   var lastContext = null;
   var lastEvidenceContext = null;
   var lastHoldings = [];
@@ -339,6 +341,16 @@
       '#dc-root .dc-action-cell.stop>i{color:#fb923c;background:rgba(251,146,60,.12);box-shadow:0 0 13px rgba(251,146,60,.12)}' +
       '#dc-root .dc-warning-card{border-color:#304664;background:linear-gradient(145deg,rgba(11,25,43,.96),rgba(7,15,27,.98));overflow:hidden}' +
       '#dc-root .dc-warning-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.dc-warning-head .tag{margin-left:auto}' +
+      '#dc-root .dc-warning-timebar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:-2px 0 9px}' +
+      '#dc-root .dc-warning-time-chip{display:inline-flex;align-items:center;min-width:0;padding:3px 8px;border:1px solid #36516e;border-radius:999px;background:#091827;color:#adc0d4;font-size:10px;line-height:1.4;white-space:nowrap}' +
+      '#dc-root .dc-warning-time-chip.target{border-color:#8a7623;color:#fde68a;background:rgba(250,204,21,.08)}' +
+      '#dc-root .dc-warning-time-chip.session{border-color:#27637b;color:#8be9fb}.dc-warning-time-chip.delayed{border-color:#8b5d25;color:#fdba74}' +
+      '#dc-root .dc-warning-market{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-bottom:8px}' +
+      '#dc-root .dc-warning-market-label,#dc-root .dc-warning-divergence{grid-column:1/-1}.dc-warning-market-label{font-size:11px;font-weight:900;color:#d8e7f5}' +
+      '#dc-root .dc-warning-market-cell{min-width:0;padding:8px 9px;border:1px solid #29415d;border-radius:8px;background:#081522;color:#8da2ba;font-size:10px;line-height:1.45;overflow-wrap:anywhere}' +
+      '#dc-root .dc-warning-market-value{display:block;margin-top:2px;font-size:13px;line-height:1.35;font-weight:900;color:#dcebf8}.dc-warning-market-value.tw-up{color:var(--red)}.dc-warning-market-value.tw-down{color:var(--green)}' +
+      '#dc-root .dc-warning-divergence{padding:8px 10px;border-left:3px solid #facc15;border-radius:5px;background:rgba(250,204,21,.08);color:#fde68a;font-size:10px;line-height:1.5;overflow-wrap:anywhere}' +
+      '#dc-root .dc-warning-disclaimer{margin:7px 0 9px;padding:7px 9px;border:1px dashed #324963;border-radius:7px;color:#a9bbce;background:rgba(8,21,34,.65);font-size:10px;line-height:1.5;overflow-wrap:anywhere}' +
       '#dc-root .dc-warning-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}' +
       '#dc-root .dc-warning-signal{display:grid;grid-template-columns:88px minmax(0,1fr);gap:12px;align-items:center;padding:12px;border:1px solid #2a405d;border-radius:10px;background:#081421;min-width:0}' +
       '#dc-root .dc-warning-signal.upside{--tone:#38bdf8;box-shadow:inset 3px 0 rgba(56,189,248,.72)}' +
@@ -348,6 +360,8 @@
       '#dc-root .dc-warning-ring strong,#dc-root .dc-warning-ring small{position:relative;z-index:1}.dc-warning-ring strong{font-size:22px;color:#eef8ff}.dc-warning-ring small{font-size:9px;color:#8ea4bc;margin-left:2px}' +
       '#dc-root .dc-warning-copy{min-width:0}.dc-warning-title{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:5px}.dc-warning-title b{font-size:14px;color:#e6f0fb}' +
       '#dc-root .dc-warning-state{padding:2px 7px;border-radius:999px;border:1px solid var(--tone);color:var(--tone);font-size:9px;font-weight:850}' +
+      '#dc-root .dc-warning-threshold{display:inline-flex;align-items:center;margin:1px 0 5px;padding:3px 7px;border:1px solid #42526a;border-radius:999px;color:#a9b8c9;background:#0a1726;font-size:10px;line-height:1.35;font-weight:750}' +
+      '#dc-root .dc-warning-threshold.ready{border-color:#277a62;color:#86efac;background:rgba(34,197,94,.08)}.dc-warning-threshold.pending{border-color:#7d6128;color:#fde68a;background:rgba(250,204,21,.06)}' +
       '#dc-root .dc-warning-reasons{margin:0;padding-left:17px;color:#bdcadd;font:700 10px/1.55 "Noto Sans TC",sans-serif}.dc-warning-reasons li::marker{color:var(--tone)}' +
       '#dc-root .dc-warning-rule{margin-top:6px;padding-top:6px;border-top:1px dashed #293b53;color:#8195ad;font-size:9px;line-height:1.45}' +
       '#dc-root .dc-warning-components{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}.dc-warning-component{display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #2a415e;border-radius:999px;background:#091726;color:#aec0d3;font-size:9px}' +
@@ -360,7 +374,8 @@
       '#dc-root .dc-warning-foot{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:8px;color:#758ba4;font-size:9px}' +
       '@media(max-width:1000px){#dc-root .dc-command,#dc-root .dc-grid{grid-template-columns:1fr}#dc-root .dc-scenario{grid-template-columns:repeat(2,1fr)}#dc-root .dc-risk-grid,#dc-root .dc-lab-grid{grid-template-columns:repeat(2,1fr)}#dc-root .dc-temp{grid-template-columns:1fr}#dc-root .dc-temp-main{border-right:0;border-bottom:1px solid #24344b;padding:0 0 7px}#dc-root .dc-temp-lights{grid-template-columns:repeat(2,1fr)}#dc-root .dc-structure,#dc-root .dc-oi-grid{grid-template-columns:1fr}}' +
       '@media(max-width:650px){#dc-root .dc-head{flex-direction:column}#dc-root .dc-actions{justify-content:flex-start}#dc-root .dc-doc-link{font-size:9px;padding:4px 8px}' +
-        '#dc-root .dc-ledger-toolbar,#dc-root .dc-action-summary,#dc-root .dc-lab-authority,#dc-root .dc-validation-note,#dc-root .dc-warning-grid{grid-template-columns:1fr}.dc-ledger-actions{justify-content:flex-start}#dc-root .dc-ledger-table table{min-width:720px}#dc-root .dc-options-kpis,#dc-root .dc-options-kpis.five{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-options-scroll table{min-width:720px}#dc-root .dc-oi-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-oi-kpi:last-child{grid-column:1/-1}#dc-root .dc-warning-signal{grid-template-columns:72px minmax(0,1fr);padding:10px;gap:9px}#dc-root .dc-warning-ring{width:68px;height:68px}.dc-warning-ring strong{font-size:18px!important}#dc-root .dc-warning-validation-grid{grid-template-columns:repeat(3,minmax(0,1fr))}#dc-root .dc-warning-validation-cell{padding:7px 6px}.dc-warning-validation-cell .v{font-size:13px}}';
+        '#dc-root .dc-ledger-toolbar,#dc-root .dc-action-summary,#dc-root .dc-lab-authority,#dc-root .dc-validation-note,#dc-root .dc-warning-grid{grid-template-columns:1fr}.dc-ledger-actions{justify-content:flex-start}#dc-root .dc-ledger-table table{min-width:720px}#dc-root .dc-options-kpis,#dc-root .dc-options-kpis.five{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-options-scroll table{min-width:720px}#dc-root .dc-oi-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-oi-kpi:last-child{grid-column:1/-1}#dc-root .dc-warning-market{grid-template-columns:repeat(2,minmax(0,1fr))}#dc-root .dc-warning-market-label,#dc-root .dc-warning-divergence{grid-column:1/-1}#dc-root .dc-warning-signal{grid-template-columns:72px minmax(0,1fr);padding:10px;gap:9px}#dc-root .dc-warning-ring{width:68px;height:68px}.dc-warning-ring strong{font-size:18px!important}#dc-root .dc-warning-validation-grid{grid-template-columns:repeat(3,minmax(0,1fr))}#dc-root .dc-warning-validation-cell{padding:7px 6px}.dc-warning-validation-cell .v{font-size:13px}}' +
+      '@media(max-width:390px){#dc-root .dc-warning-market{grid-template-columns:1fr}#dc-root .dc-warning-timebar{gap:5px}}';
   }
 
   function ensureMount() {
@@ -521,7 +536,10 @@
     bindEmptyActions();
   }
 
-  function refreshMarketData() {
+  function refreshMarketData(options) {
+    var background = !!(options && options.background === true);
+    if (marketRefreshInflight) return marketRefreshInflight;
+    if (background && Date.now() - lastMarketRefreshAt < 45000) return Promise.resolve(lastContext);
     var body = ensureMount();
     if (!body) return Promise.resolve(null);
     var id = nextCorrelationId();
@@ -529,11 +547,13 @@
     var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var timeoutId = controller ? setTimeout(function () { controller.abort(); }, 20000) : null;
     trace('market_refresh_command_received', id, { route: 'decision' });
-    setRefreshState(true);
-    body.innerHTML = '<div class="dc-card dc-empty"><div class="v">正在更新市場資料…</div>' +
-      '<div class="s">依序取得總覽 Pulse、建立 DecisionContext、再載入完整證據。</div>' +
-      '<div class="dc-status">請稍候，最長等待 20 秒。</div></div>';
-    trace('market_refresh_command_acknowledged', id, { uiState: 'loading' });
+    if (!background) {
+      setRefreshState(true);
+      body.innerHTML = '<div class="dc-card dc-empty"><div class="v">正在更新市場資料…</div>' +
+        '<div class="s">依序取得總覽 Pulse、建立 DecisionContext、再載入完整證據。</div>' +
+        '<div class="dc-status">請稍候，最長等待 20 秒。</div></div>';
+    }
+    trace('market_refresh_command_acknowledged', id, { uiState: background ? 'background' : 'loading' });
     trace('pulse_request_start', id, {
       method: 'GET', path: '/pulse?refresh=1', origin: location.origin || null
     });
@@ -545,7 +565,7 @@
       : fetch(SRV + '/pulse?refresh=1', {
           cache: 'no-store', signal: controller ? controller.signal : undefined
         });
-    return pulseRequest.then(function (response) {
+    marketRefreshInflight = pulseRequest.then(function (response) {
       return response.text().then(function (raw) {
         trace('pulse_response', id, {
           status: response.status,
@@ -577,6 +597,7 @@
       var ctx = state && state.context;
       if (!ctx) throw new Error('更新完成，但後端尚未建立 DecisionContext');
       render(ctx);
+      lastMarketRefreshAt = Date.now();
       trace('market_refresh_terminal_success', id, {
         regime: (ctx.regime || {}).id || null,
         asOf: ctx.asOf || null,
@@ -586,7 +607,7 @@
     }).catch(function (err) {
       var message = err && err.name === 'AbortError' ? '市場資料更新逾時' : '市場資料更新失敗';
       var detail = String(err && err.message || err || '未知錯誤');
-      showEmpty(message, detail + '；可重試或前往總覽檢查服務狀態。');
+      if (!background) showEmpty(message, detail + '；可重試或前往總覽檢查服務狀態。');
       trace('market_refresh_terminal_failure', id, {
         error: detail,
         elapsedMs: Date.now() - started
@@ -594,8 +615,10 @@
       return null;
     }).finally(function () {
       if (timeoutId) clearTimeout(timeoutId);
-      setRefreshState(false);
+      if (!background) setRefreshState(false);
+      marketRefreshInflight = null;
     });
+    return marketRefreshInflight;
   }
 
   function holdingsFromPositions() {
@@ -1655,16 +1678,135 @@
     })[value] || String(value || '等待資料');
   }
 
-  function warningSignalHtml(signal, direction) {
+  function warningClock(value) {
+    if (!value) return '—';
+    var stamp = new Date(value);
+    if (!isFinite(stamp.getTime())) return String(value).replace('T', ' ').slice(11, 16) || '—';
+    try {
+      return stamp.toLocaleTimeString('zh-TW', {
+        timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false
+      });
+    } catch (e) { return String(value).replace('T', ' ').slice(11, 16) || '—'; }
+  }
+
+  function warningEvaluationLabel(mode) {
+    return ({
+      cash_session_monitor: '日盤評估', regular_live: '日盤評估',
+      cash_close_review: '收盤確認', overnight_monitor: '夜盤評估', finalized_review: '收盤後評估',
+      off_session_monitor: '休市評估', historical_replay: '歷史回放'
+    })[mode] || '最新盤別評估';
+  }
+
+  function warningSignalLabel(signal, direction) {
+    var id = String((signal || {}).signalId || '');
+    if (id === 'TW_DOWNSIDE_PRECURSOR') return '下行前兆證據';
+    if (id === 'TW_ATTACK_BUILDUP') return '上行前兆證據';
+    return (signal || {}).label || (direction === 'upside' ? '上行前兆證據' : '下行前兆證據');
+  }
+
+  function warningThresholdHtml(signal, thresholds) {
+    signal = signal || {};
+    thresholds = thresholds || {};
+    var strength = Number(signal.strength) || 0;
+    var domains = Number(signal.independentDomains) || 0;
+    var minimumStrength = Number(thresholds.watchStrength) || 55;
+    var minimumDomains = Number(thresholds.watchIndependentDomains) || 2;
+    var readyStrength = strength >= minimumStrength;
+    var readyDomains = domains >= minimumDomains;
+    var text = '';
+    if (!readyStrength) text = '尚未達注意門檻 ' + minimumStrength;
+    else if (!readyDomains) text = '強度已達 ' + minimumStrength + '，獨立來源尚未達 ' + minimumDomains + ' 域';
+    else text = '已達注意門檻 ' + minimumStrength + ' · ' + domains + ' 域';
+    return '<div class="dc-warning-threshold ' + (readyStrength && readyDomains ? 'ready' : 'pending') + '">' +
+      esc(text) + '</div>';
+  }
+
+  function warningTemporalHtml(warning) {
+    var temporal = (warning && warning.temporalContext) || {};
+    var target = temporal.target || {};
+    var overlay = temporal.liveOverlay || {};
+    var freshness = temporal.freshness || {};
+    var computedAt = temporal.computedAt || warning.asOf || null;
+    var computedMs = computedAt ? new Date(computedAt).getTime() : NaN;
+    var ageMs = isFinite(computedMs) ? Math.max(0, Date.now() - computedMs) : Infinity;
+    var overlayStatus = String(overlay.status || overlay.freshnessStatus || 'unknown');
+    var delayed = overlayStatus === 'delayed' || overlayStatus === 'stale';
+    var computeLabel = '最新評估';
+    if (temporal.evaluationMode === 'finalized_review') computeLabel = '收盤定稿';
+    else if (delayed) computeLabel = '最新評估 · 行情延遲';
+    else if (ageMs <= 90000 && (temporal.evaluationMode !== 'overnight_monitor' || overlayStatus === 'live')) {
+      computeLabel = warningClock(computedAt) + ' 即時計算';
+    } else if (computedAt) computeLabel = warningClock(computedAt) + ' 最新評估';
+    var from = Number(target.fromTradingSession) || 1;
+    var to = Number(target.toTradingSession) || 5;
+    var freshnessLabel = freshness.status === 'mixed' ? '混合時效資料' :
+      (freshness.allInputsLive ? '即時資料' : (freshness.status ? '來源時效已標記' : '來源時效待更新'));
+    return '<div class="dc-warning-timebar" aria-label="市場前兆評估時間與目標期間">' +
+      '<span class="dc-warning-time-chip target">目標 T+' + from + '～T+' + to + '</span>' +
+      '<span class="dc-warning-time-chip session">' + esc(warningEvaluationLabel(temporal.evaluationMode)) + '</span>' +
+      '<span class="dc-warning-time-chip computed' + (delayed ? ' delayed' : '') + '" title="' + esc(computedAt || '') + '">' + esc(computeLabel) + '</span>' +
+      '<span class="dc-warning-time-chip' + (delayed ? ' delayed' : '') + '">' + esc(freshnessLabel) + '</span></div>';
+  }
+
+  function warningPct(value) {
+    var n = Number(value);
+    if (!isFinite(n)) return { text: '—', cls: '' };
+    return {
+      text: (n > 0 ? '▲ +' : n < 0 ? '▼ ' : '— ') + Math.abs(n).toFixed(2) + '%',
+      cls: n > 0 ? ' tw-up' : n < 0 ? ' tw-down' : ''
+    };
+  }
+
+  function warningDivergenceText(warning, downside, upside) {
+    var temporal = (warning && warning.temporalContext) || {};
+    var overlay = temporal.liveOverlay || {};
+    if (String(overlay.session || '').toLowerCase() !== 'night') return '';
+    var change = Number(overlay.changePct);
+    var down = Number((downside || {}).strength) || 0;
+    var up = Number((upside || {}).strength) || 0;
+    if (isFinite(change) && change < 0 && up >= down + 5) {
+      return '現況／前兆分歧：夜盤偏弱，但 T+1～T+5 上行證據仍占優勢。';
+    }
+    if (isFinite(change) && change > 0 && down >= up + 5) {
+      return '現況／前兆分歧：夜盤偏強，但 T+1～T+5 下行風險證據仍占優勢。';
+    }
+    return '';
+  }
+
+  function warningMarketStripHtml(warning, downside, upside) {
+    var temporal = (warning && warning.temporalContext) || {};
+    var baseline = temporal.baseline || {};
+    var overlay = temporal.liveOverlay || {};
+    var breadth = temporal.breadth || {};
+    var basePct = warningPct(baseline.changePct);
+    var overlayPct = warningPct(overlay.changePct);
+    var adv = Number(breadth.advRatio);
+    if (!isFinite(adv)) adv = Number((((upside || {}).observed) || {}).advRatio);
+    if (!isFinite(adv)) adv = Number((((downside || {}).observed) || {}).advRatio);
+    var advText = isFinite(adv) ? (adv <= 1 ? adv * 100 : adv).toFixed(1) + '%' : '—';
+    var tradingDate = String(baseline.tradingDate || '').slice(5).replace('-', '/');
+    var baselineLabel = (tradingDate ? tradingDate + ' ' : '') +
+      ((baseline.status === 'finalized' || baseline.finalized) ? '現貨收盤' : '台股現貨');
+    var overlayLabel = String(overlay.session || '').toLowerCase() === 'night' ? '台指夜盤' : '台指期';
+    var divergence = warningDivergenceText(warning, downside, upside);
+    return '<div class="dc-warning-market" aria-label="目前市場最新可得盤勢"><div class="dc-warning-market-label">目前市場</div>' +
+      '<div class="dc-warning-market-cell"><span>' + esc(baselineLabel) + '</span><b class="dc-warning-market-value' + basePct.cls + '">' + esc(basePct.text) + '</b></div>' +
+      '<div class="dc-warning-market-cell"><span>' + esc(overlayLabel) + '</span><b class="dc-warning-market-value' + overlayPct.cls + '">' + esc(overlayPct.text) + '</b></div>' +
+      '<div class="dc-warning-market-cell"><span>上市廣度</span><b class="dc-warning-market-value">' + esc(advText) + '</b></div>' +
+      (divergence ? '<div class="dc-warning-divergence">' + esc(divergence) + '</div>' : '') + '</div>';
+  }
+
+  function warningSignalHtml(signal, direction, thresholds) {
     signal = signal || {};
     var strength = Math.max(0, Math.min(100, Number(signal.strength) || 0));
     var reasons = (signal.reasons || []).slice(0, 3);
     if (!reasons.length) reasons = ['尚未累積足夠的獨立來源'];
+    var stateText = signal.state === 'OBSERVATION' ? '觀測・未形成' : warningStateLabel(signal.state);
     return '<div class="dc-warning-signal ' + direction + '" data-dc-highlight="' + esc(signal.signalId || '') + '">' +
       '<div class="dc-warning-ring" style="--p:' + strength.toFixed(0) + '%"><div><strong>' + strength.toFixed(0) +
         '</strong><small>/100</small></div></div><div class="dc-warning-copy"><div class="dc-warning-title"><b>' +
-        esc(signal.label || (direction === 'upside' ? '台股強攻蓄勢' : '台股下跌前兆')) + '</b><span class="dc-warning-state">' +
-        esc(warningStateLabel(signal.state)) + '</span></div><ul class="dc-warning-reasons">' + reasons.map(function (row) {
+        esc(warningSignalLabel(signal, direction)) + '</b><span class="dc-warning-state">' +
+        esc(stateText) + '</span></div>' + warningThresholdHtml(signal, thresholds) + '<ul class="dc-warning-reasons">' + reasons.map(function (row) {
           return '<li>' + esc(row) + '</li>';
         }).join('') + '</ul><div class="dc-warning-rule">確認：' + esc(signal.confirmation || '等待現貨與廣度同向') +
         '<br>失效：' + esc(signal.invalidation || '訊號轉弱或核心方向反轉') + '</div></div></div>';
@@ -1707,9 +1849,12 @@
     function find(id) { return signals.find(function (row) { return row.signalId === id; }) || {}; }
     var down = find('TW_DOWNSIDE_PRECURSOR'), up = find('TW_ATTACK_BUILDUP');
     var components = [find('AI_WAFER_DOUBLE_ARROW'), find('MEMORY_CYCLE_RESONANCE')];
+    var thresholds = warning.thresholds || {};
     return '<div class="dc-card dc-warning-card" id="dc-section-precursors" data-dc-section="precursors"><h3 class="dc-warning-head"><span>跨市場前兆雷達</span>' +
       '<span>觀測 → 注意 → 戒備 → 確認 → 生效</span><span class="tag">SHADOW · 非下單訊號</span></h3>' +
-      '<div class="dc-warning-grid">' + warningSignalHtml(down, 'downside') + warningSignalHtml(up, 'upside') + '</div>' +
+      warningTemporalHtml(warning) + warningMarketStripHtml(warning, down, up) +
+      '<div class="dc-warning-disclaimer">前兆分數評估下一個至第五個台股交易日的跨市場證據強度；不是目前夜盤方向，也不是上漲／下跌機率。</div>' +
+      '<div class="dc-warning-grid">' + warningSignalHtml(down, 'downside', thresholds) + warningSignalHtml(up, 'upside', thresholds) + '</div>' +
       '<div class="dc-warning-components">' + components.map(function (row) {
         var cls = row.direction === 'mixed' ? ' mixed' : '';
         return '<span class="dc-warning-component' + cls + '" data-dc-highlight="' + esc(row.signalId || '') + '"><b>' + esc(row.label || row.signalId || '核心連動') + '</b>' +
@@ -1967,7 +2112,9 @@
     load(false);
     if (timer) clearInterval(timer);
     timer = setInterval(function () {
-      if (window.ShellV5 && ShellV5.route && ShellV5.route() === 'decision') load(false);
+      if (window.ShellV5 && ShellV5.route && ShellV5.route() === 'decision') {
+        refreshMarketData({ background: true });
+      }
     }, 60000);
   }
   function deactivate() { if (timer) { clearInterval(timer); timer = null; } }

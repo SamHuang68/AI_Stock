@@ -52,7 +52,7 @@ from decision_routes import DecisionRoutesMixin
 from overnight_intraday_routes import OvernightIntradayRoutesMixin
 from options_routes import OptionsRoutesMixin
 from market_contract import attach_quote_contract, cumulative_volume_contract
-from market_routes import market_snapshot
+from market_routes import market_snapshot, twse_mis_observation
 from http_boundary import BodyReadError, is_same_local_origin, read_json_body
 from atomic_store import StoreCorruptError, atomic_write_json, load_json
 import atomic_store as _atomic_store
@@ -1926,7 +1926,7 @@ _BAD_YF = {'^TWOII': ('otc_o00.tw', 'o00', 'index')}   # 櫃買:Yahoo 三端點�
 
 def _twse_mis_index(ex_ch):
     """ex_ch('tse_t00.tw' 或 'tse_t00.tw|otc_o00.tw') →
-       {code:{price,prevClose,changePct,name,open,high,low}}。
+       {code:{price,prevClose,changePct,name,open,high,low,asOf,tradeDate}}。
        走共用 _src_fetch_json('twse-mis'),享節流/熔斷/健檢。"""
     ms = int(time.time() * 1000)
     url = ('https://mis.twse.com.tw/stock/api/getStockInfo.jsp'
@@ -1954,10 +1954,12 @@ def _twse_mis_index(ex_ch):
         prev = fnum(it.get('y'))
         chg_pct = ((price - prev) / prev * 100) if (price is not None and prev) else None
         chg_pts = (price - prev) if (price is not None and prev is not None) else None
+        observation = twse_mis_observation(it)
         out[code] = {
             'price': price, 'prevClose': prev, 'change': chg_pts, 'changePct': chg_pct,
-            'name': it.get('n'),
+            'name': it.get('n'), 'source': 'twse-mis', 'session': 'regular',
             'open': fnum(it.get('o')), 'high': fnum(it.get('h')), 'low': fnum(it.get('l')),
+            **observation,
         }
     return out
 

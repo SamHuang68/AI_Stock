@@ -729,6 +729,16 @@ def empty_context(reason: str = 'pulse_not_ready', now: datetime | None = None) 
         'basisContext': {}, 'sectorFlow': {},
         'portfolioOverlay': None, 'exposureLab': {},
         'consensusAttention': _consensus_attention.empty(reason),
+        'earlyWarnings': {
+            'ok': False, 'shadowOnly': True, 'actionAuthority': 'none',
+            'status': 'INSUFFICIENT_DATA', 'signals': [], 'newEvents': [], 'activeEvents': [],
+            'temporalContext': {},
+            'thresholds': {
+                'watchStrength': 55, 'watchIndependentDomains': 2,
+                'armedStrength': 70, 'armedIndependentDomains': 3,
+                'confirmedStrength': 80, 'confirmedIndependentDomains': 3,
+            },
+        },
         'optionsStructure': {'status': 'insufficient', 'shadowMode': True, 'decisionUse': 'research_only'},
         'newsImpact': [], 'scenario': {},
         'confirmation': [], 'invalidation': [], 'evidence': [],
@@ -1243,6 +1253,7 @@ def compact_context(context: dict | None) -> dict[str, Any]:
     volatility = context.get('volatility') or {}
     flow = (((context.get('scenario') or {}).get('flow') or {}).get('raw') or {})
     exposure = context.get('exposureLab') or {}
+    warnings = context.get('earlyWarnings') or {}
     return {
         'contractVersion': context.get('contractVersion', CONTRACT_VERSION),
         'asOf': context.get('asOf'),
@@ -1292,6 +1303,20 @@ def compact_context(context: dict | None) -> dict[str, Any]:
             for d in (context.get('divergences') or [])[:3]
         ],
         'consensusAttention': context.get('consensusAttention') or _consensus_attention.empty(),
+        'earlyWarnings': {
+            'asOf': warnings.get('asOf'),
+            'temporalContext': warnings.get('temporalContext') or {},
+            'thresholds': warnings.get('thresholds') or {},
+            'signals': [
+                {k: row.get(k) for k in (
+                    'signalId', 'label', 'direction', 'strength', 'state',
+                    'independentDomains', 'confirmation', 'invalidation', 'target',
+                )}
+                for row in (warnings.get('signals') or [])
+                if row.get('signalId') in ('TW_DOWNSIDE_PRECURSOR', 'TW_ATTACK_BUILDUP')
+            ],
+            'strengthIsProbability': False,
+        },
         'basisContext': {k: (context.get('basisContext') or {}).get(k) for k in (
             'liveGapPts', 'liveGapPct', 'adjustedBasisPts', 'mode', 'sessionComparable',
             'basisZ20', 'basisZ60', 'sample20', 'sample60', 'futuresLagPctPoint',
@@ -1392,16 +1417,19 @@ def publish_context(
         warning_evidence = []
         for family in warning.get('familyScores') or []:
             source, reference = source_map.get(family.get('id'), ('ST deterministic signal engine', 'canonical inputs'))
+            temporal = family.get('temporal') or {}
             warning_evidence.append({
                 'id': 'signal.family.' + str(family.get('id') or 'unknown'),
                 'metric': 'shadowFamilyScore',
                 'value': {
                     'score': family.get('value'), 'quality': family.get('quality'),
                     'available': family.get('available'), 'observed': family.get('observed') or {},
+                    'temporal': temporal,
                 },
                 'comparison': 'negative -1 / neutral 0 / positive +1',
-                'source': source, 'marketScope': 'TW_CROSS_MARKET', 'session': 'session_aligned_shadow',
-                'asOf': warning.get('asOf'), 'reference': reference,
+                'source': source, 'marketScope': temporal.get('market') or 'TW_CROSS_MARKET',
+                'session': temporal.get('session') or 'session_aligned_shadow',
+                'asOf': temporal.get('sourceAsOf') or warning.get('asOf'), 'reference': reference,
                 'quality': 'derived' if family.get('available') else 'insufficient',
                 'authority': 'shadow_observation',
             })
@@ -1435,6 +1463,12 @@ def publish_context(
             context['earlyWarnings'] = {
                 'ok': False, 'shadowOnly': True, 'actionAuthority': 'none',
                 'status': 'INSUFFICIENT_DATA', 'signals': [], 'newEvents': [],
+                'activeEvents': [], 'temporalContext': {},
+                'thresholds': {
+                    'watchStrength': 55, 'watchIndependentDomains': 2,
+                    'armedStrength': 70, 'armedIndependentDomains': 3,
+                    'confirmedStrength': 80, 'confirmedIndependentDomains': 3,
+                },
             }
     # One canonical projection, recomputed only after the warning lifecycle is
     # attached.  It never polls providers and never mutates DecisionContext.

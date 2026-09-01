@@ -1,15 +1,15 @@
-# 跨市場前兆雷達（Shadow v1）
+# 跨市場前兆雷達（Shadow v2）
 
 跨市場前兆雷達把 Stock Terminal 既有的市場快照、DecisionContext、盤別動量研究與證據帳本收斂成可追蹤的「狀態轉換事件」。目的不是預測必然漲跌，而是在台股明顯轉弱或形成強攻結構之前，把多個相互獨立的來源是否開始同向，提早變成容易閱讀、可去重、可失效的提醒。
 
-> 權限邊界：目前只具 `shadow_observation` 權限。訊號強度不是機率，不改寫 DecisionContext Regime、Action Envelope、Key Levels、曝險範圍或交易指令。
+> 權限邊界：目前只具 `shadow_observation` 權限。訊號強度不是機率，不改寫 DecisionContext Regime、Action Envelope、Key Levels、曝險範圍或交易指令。雷達評估的是未來第 1～第 5 個台股交易日，不等同目前夜盤方向。
 
 ## 資料與控制流程
 
 ```mermaid
 flowchart LR
   A["Canonical Pulse\n來源／時間／盤別／基準"] --> B["DecisionContext v2\n情境與證據"]
-  C["Overnight × Intraday\n台美記憶體固定籃子"] --> D["Precursor Engine v1"]
+  C["Overnight × Intraday\n台美記憶體固定籃子"] --> D["Precursor Engine v2"]
   B --> D
   E["2330 + 0050 + TSM ADR\n0050 去除 2330 重複曝險"] --> D
   D --> F["五個獨立證據域"]
@@ -51,8 +51,8 @@ R(0050-ex-2330) = (R0050 - w × R2330) / (1 - w)
 
 | Signal ID | 用途 | 必要語意 |
 |---|---|---|
-| `TW_DOWNSIDE_PRECURSOR` | 台股下跌前兆 | 多來源先行轉弱；仍須現貨與廣度確認 |
-| `TW_ATTACK_BUILDUP` | 台股強攻蓄勢 | 多來源先行轉強；仍須現貨與廣度確認 |
+| `TW_DOWNSIDE_PRECURSOR` | 下行前兆證據 | 多來源先行轉弱；仍須同日現貨與廣度確認 |
+| `TW_ATTACK_BUILDUP` | 上行前兆證據 | 多來源先行轉強；仍須同日現貨與廣度確認 |
 | `AI_WAFER_DOUBLE_ARROW` | AI 雙箭頭晶圓連動 | 國際科技與 2330／0050 去重錨點必須同向；兩者衝突時直接標 `mixed` |
 | `MEMORY_CYCLE_RESONANCE` | 記憶體週期共振 | 記憶體固定籃子須與台股錨點／廣度形成方向共振 |
 
@@ -73,7 +73,7 @@ stateDiagram-v2
   [*] --> OBSERVATION
   OBSERVATION --> WATCH: 強度≥55、至少2域
   WATCH --> ARMED: 強度≥70、至少3域、連續命中
-  ARMED --> CONFIRMED: 強度≥80、現貨與廣度同向
+  ARMED --> CONFIRMED: 強度≥80、同日現貨與廣度同向
   CONFIRMED --> ACTIVE: 下一次仍維持確認
   WATCH --> CONFLICT: 核心來源相反
   ARMED --> INVALIDATED: 核心方向反轉
@@ -81,10 +81,26 @@ stateDiagram-v2
   RECOVERY --> OBSERVATION: 後續重新累積
 ```
 
-- 同一 `signalId + direction + asOf` 只寫入一次，重整頁面不會推進狀態。
+- 同一 `signalId + direction + observationKey` 只寫入一次；伺服器重算時間與重整頁面都不會推進狀態。
 - 只有狀態轉換會產生 `SignalEvent`；輪詢不重複通知。
 - 高階提醒至少需要三個獨立證據域。正負壓力同時偏高時標為 `CONFLICT`，不互相抵銷成「中性」。
-- 每個事件都保留支持理由、最強反證、確認條件、失效條件、證據 ID、政策版本、引擎版本與 24 小時到期時間。
+- 夜盤新事件最多升至 `ARMED`；必須等下一個現貨盤，或在 13:30～15:00 的同日完成盤確認階段，同日現貨與上市廣度都有效，才能升至 `CONFIRMED`。
+- 每個事件都保留支持理由、最強反證、確認條件、失效條件、證據 ID、政策版本、引擎版本與 TWSE 現貨盤邊界到期契約。同一觀測重算不得延長到期時間。
+- 原始 `state` 保留生命週期稽核軌跡；超過 `expiresAt` 時另派生 `expired: true` 與 `effectiveState: EXPIRED`，並立即從 `activeEvents` 排除，不以唯讀查詢竄改歷史狀態。
+
+## 時間、盤別與新鮮度契約
+
+介面把「目前市場」與「多日前兆」分開呈現：
+
+- `computedAt`：引擎本次重新計算的時間；不代表所有來源同時即時。
+- `evaluationMode`：`cash_session_monitor`、`cash_close_review`、`overnight_monitor` 或 `finalized_review`。
+- `baseline`：台股現貨的交易日、來源時間、盤別與完成狀態。
+- `liveOverlay`：台指期目前可得盤別；夜盤漲跌會影響分數，但不會借用已收盤現貨完成新確認。
+- `breadth`：上市股票廣度的交易日與來源時間。
+- `target`：固定標示 `T+1～T+5`，即下一個至第五個台股交易日。
+- `freshness`：上層通常為 `mixed`；「即時計算」不等同「所有輸入皆即時」。
+
+TWSE MIS 的 `tlong` 或 `d + t` 會保留為 timezone-aware `asOf` 與 `tradeDate`。來源沒有時間時維持缺值，禁止使用 HTTP 抓取時間冒充市場時間。到期邊界在盤前對齊同日開盤、盤中對齊同日收盤、收盤後與夜盤對齊下一個平日開盤；目前尚無官方未來休市行事曆，因此契約明示 `weekday_fallback`，遇未知休市採提前失效而不延長。
 
 ## API 契約
 
@@ -126,6 +142,16 @@ stateDiagram-v2
   "strongestCounterEvidence": ["..."],
   "confirmation": "...",
   "invalidation": "...",
+  "observationKey": "source-observation-hash",
+  "expiresAt": "2026-09-02T01:00:00+00:00",
+  "expiry": {
+    "market": "TWSE",
+    "session": "regular",
+    "boundary": "next_regular_open",
+    "sessionDate": "2026-09-02",
+    "timeZone": "Asia/Taipei",
+    "calendarQuality": "weekday_fallback"
+  },
   "shadowOnly": true,
   "actionAuthority": "none"
 }

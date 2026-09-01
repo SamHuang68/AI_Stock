@@ -96,6 +96,18 @@ ok(decision.includes('.dc-oi-grid{display:grid;grid-template-columns:repeat(2,mi
   visual.includes('#dc-root .dc-oi-kpi .v{font:800 15px') &&
   visual.includes('#dc-root .dc-oi-grid{grid-template-columns:1fr!important'),
   'overnight/intraday lab has readable desktop KPIs, contained detail overflow and narrow-screen reflow');
+ok(decision.includes('.dc-warning-timebar{display:flex') && decision.includes('flex-wrap:wrap') &&
+  decision.includes('.dc-warning-market{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))') &&
+  decision.includes('.dc-warning-market-cell{min-width:0') && decision.includes('overflow-wrap:anywhere'),
+  '前兆時間籤與目前市場帶可換行，桌機三欄且內容不撐破容器');
+ok(decision.includes('#dc-root .dc-warning-market{grid-template-columns:repeat(2,minmax(0,1fr))') &&
+  decision.includes('@media(max-width:390px)'),
+  '前兆目前市場帶在手機採二欄，極窄手機降為一欄');
+ok(visual.includes('#dc-root .dc-warning-time-chip') &&
+  visual.includes('#dc-root .dc-warning-market-value') &&
+  visual.includes('font:800 12px/1.35 var(--dc-font-mono)!important') &&
+  visual.includes('#dc-root .dc-warning-disclaimer'),
+  '前兆時間、目前市場與非機率註腳符合決策中心最低可讀字級');
 
 if (failed) process.exit(1);
 console.log('\nlayout_visual_v5_selftest PASSED');

@@ -90,10 +90,20 @@ class DecisionHttpTest(unittest.TestCase):
         self.assertEqual(body['regime']['id'], 'BROAD_RISK_ON')
         self.assertTrue(body['evidence'])
         self.assertTrue(body['earlyWarnings']['shadowOnly'])
+        self.assertIn('temporalContext', body['earlyWarnings'])
+        self.assertEqual(body['earlyWarnings']['thresholds']['watchStrength'], 55)
         self.assertEqual(body['consensusAttention']['authority'], 'attention_only')
         self.assertLessEqual(len(body['consensusAttention']['items']), 5)
         self.assertTrue(any(row.get('id') == 'signal.prospective_validation'
                             for row in body['evidence']))
+        family_evidence = next(
+            row for row in body['evidence']
+            if str(row.get('id') or '').startswith('signal.family.')
+        )
+        self.assertIn('temporal', family_evidence['value'])
+        compact = dc.compact_context(body)
+        self.assertIn('temporalContext', compact['earlyWarnings'])
+        self.assertFalse(compact['earlyWarnings']['strengthIsProbability'])
 
     def test_signal_routes_expose_shadow_state_and_transition_history(self):
         with urllib.request.urlopen(self.base + '/signals/active', timeout=5) as resp:

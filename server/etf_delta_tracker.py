@@ -325,7 +325,10 @@ def run(target_date: datetime.date) -> bool:
         check = etf_paths.inspect_snapshot(out_file)
         acceptance = etf_paths.snapshot_acceptance(
             check,
-            today=datetime.date.today(),
+            # 追蹤器建立的是指定交易日快照；新鮮度必須以該交易日
+            # 為基準，否則歷史快照會隨牆鐘前進而從通過變成失敗。
+            # 即時健康頁仍由 etf_paths.history_status() 以今日評估。
+            today=target_date,
             expected_codes=expected_codes,
             previous_etf_count=previous_count,
         )
@@ -390,7 +393,7 @@ def run(target_date: datetime.date) -> bool:
     candidate_check = etf_paths.inspect_snapshot_payload(result, expected_date=target_date)
     candidate_acceptance = etf_paths.snapshot_acceptance(
         candidate_check,
-        today=datetime.date.today(),
+        today=target_date,
         expected_codes=expected_codes,
         previous_etf_count=previous_count,
     )

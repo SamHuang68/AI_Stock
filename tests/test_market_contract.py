@@ -7,10 +7,25 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 from market_contract import attach_quote_contract, cumulative_volume_contract  # noqa: E402
-from market_routes import market_snapshot  # noqa: E402
+from market_routes import market_snapshot, twse_mis_observation  # noqa: E402
 
 
 class TestMarketContract(unittest.TestCase):
+    def test_twse_mis_observation_preserves_exchange_time(self):
+        observed = twse_mis_observation({
+            'd': '20260826', 't': '13:30:00', 'tlong': '1787722200000',
+        })
+        self.assertEqual(observed['asOf'], '2026-08-26T13:30:00+08:00')
+        self.assertEqual(observed['tradeDate'], '2026-08-26')
+
+        fallback = twse_mis_observation({'d': '20260826', 't': '09:05:07'})
+        self.assertEqual(fallback['asOf'], '2026-08-26T09:05:07+08:00')
+        self.assertEqual(fallback['tradeDate'], '2026-08-26')
+
+    def test_twse_mis_observation_does_not_fabricate_fetch_time(self):
+        self.assertEqual(twse_mis_observation({}), {})
+        self.assertEqual(twse_mis_observation({'d': 'bad', 't': 'bad'}), {})
+
     def test_twse_lots_normalize_to_canonical_shares(self):
         volume = cumulative_volume_contract(
             '151,164', source_unit='lot', source='twse-mis',

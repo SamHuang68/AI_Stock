@@ -74,6 +74,24 @@ class EtfDeltaTrackerTests(unittest.TestCase):
         self.assertEqual(meta["successRatio"], 1.0)
         self.assertEqual(len(meta["catalogFingerprint"]), 16)
 
+    def test_historical_snapshot_freshness_is_anchored_to_target_session(self):
+        day = dt.date(2020, 1, 2)
+        universe = _universe()
+
+        def fetch_ok(code: str, _target: dt.date):
+            return _holding(code), day.isoformat(), "fixture"
+
+        with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+            os.environ, {etf_paths.ENV_HISTORY_DIR: str(Path(temp).resolve())}
+        ), mock.patch.object(etf_delta_tracker, "ETFS", universe), mock.patch.object(
+            etf_delta_tracker, "fetch_one", side_effect=fetch_ok
+        ):
+            self.assertTrue(etf_delta_tracker.run(day))
+            # 指定交易日快照必須可重播；不能因測試牆鐘日期前進而腐化。
+            self.assertTrue(
+                (Path(temp) / f"top10_active_etf_holdings_{day.isoformat()}.json").is_file()
+            )
+
     def test_low_coverage_does_not_create_or_poison_first_snapshot(self):
         day = dt.date(2026, 8, 28)
         universe = _universe()
