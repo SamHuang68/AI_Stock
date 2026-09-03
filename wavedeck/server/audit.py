@@ -5,18 +5,19 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
 from .state import DATA, now_iso
 
-DB_PATH = DATA / "wavedeck_audit.db"
 _lock = threading.Lock()
 
 
 def _conn() -> sqlite3.Connection:
-    DATA.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+    data_path = Path(DATA)
+    data_path.mkdir(parents=True, exist_ok=True)
+    c = sqlite3.connect(str(data_path / "wavedeck_audit.db"))
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS audit (
@@ -31,24 +32,23 @@ def _conn() -> sqlite3.Connection:
     return c
 
 
-_C = _conn()
-
-
 def write(kind: str, payload: dict[str, Any]) -> None:
     with _lock:
-        _C.execute(
-            "INSERT INTO audit(ts, kind, payload) VALUES (?,?,?)",
-            (now_iso(), kind, json.dumps(payload, ensure_ascii=False)),
-        )
-        _C.commit()
+        with closing(_conn()) as connection:
+            connection.execute(
+                "INSERT INTO audit(ts, kind, payload) VALUES (?,?,?)",
+                (now_iso(), kind, json.dumps(payload, ensure_ascii=False)),
+            )
+            connection.commit()
 
 
 def recent(limit: int = 40) -> list[dict[str, Any]]:
     with _lock:
-        rows = _C.execute(
-            "SELECT id, ts, kind, payload FROM audit ORDER BY id DESC LIMIT ?",
-            (int(limit),),
-        ).fetchall()
+        with closing(_conn()) as connection:
+            rows = connection.execute(
+                "SELECT id, ts, kind, payload FROM audit ORDER BY id DESC LIMIT ?",
+                (int(limit),),
+            ).fetchall()
     out = []
     for i, ts, kind, payload in rows:
         try:

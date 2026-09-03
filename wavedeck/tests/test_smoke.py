@@ -3,10 +3,12 @@
 """WaveDeck smoke tests (stdlib unittest)."""
 from __future__ import annotations
 
+import io
 import json
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -131,6 +133,44 @@ class WaveDeckSmoke(unittest.TestCase):
                 self.assertEqual(c["broker"]["kind"], "paper")
                 with self.assertRaises(ValueError):
                     set_provider("nope")
+
+    def test_audit_uses_patched_data_and_closes_database(self):
+        from server import audit
+
+        with tempfile.TemporaryDirectory() as td:
+            data_path = Path(td)
+            db_path = data_path / "wavedeck_audit.db"
+            with mock.patch.object(audit, "DATA", data_path):
+                audit.write("unit", {"marker": "isolated"})
+                items = audit.recent(1)
+            self.assertTrue(db_path.is_file())
+            self.assertEqual(items[0]["payload"]["marker"], "isolated")
+            db_path.unlink()
+            self.assertFalse(db_path.exists())
+
+    def test_exec_md_closes_http_error_response(self):
+        from server import exec_md
+
+        error_body = io.BytesIO(b'{"error":"missing"}')
+        error = urllib.error.HTTPError(
+            "http://127.0.0.1:11434/api/generate",
+            404,
+            "Not Found",
+            {},
+            error_body,
+        )
+        with mock.patch.object(exec_md, "load_config", return_value={"ollama": {}}), mock.patch.object(
+            exec_md.urllib.request,
+            "urlopen",
+            side_effect=error,
+        ):
+            result = exec_md._ollama_narrative(
+                {"price": 45000, "style": 50},
+                {"action": "HOLD", "action_label": "維持續抱"},
+                timeout=0.1,
+            )
+        self.assertIsNone(result)
+        self.assertTrue(error_body.closed)
 
     def test_st_bridge_spillover_forces_delever(self):
         with tempfile.TemporaryDirectory() as td:

@@ -247,6 +247,9 @@ def _ollama_narrative(metrics: dict[str, Any], decision: dict[str, Any], timeout
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as exc:
+        exc.close()
+        return None
     except Exception:
         return None
     text = str(body.get("response") or "").strip()
