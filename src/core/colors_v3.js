@@ -26,18 +26,36 @@
   };
   var HEX = { red: '#F87171', green: '#4ADE80', amber: '#FB923C', neutral: '#F1F5FA', dim: '#5A6A82' };
 
-  function isTW(sym) { sym = String(sym || ''); return /^\d/.test(sym) || /^\^TW/i.test(sym); }
+  function isTW(sym) {
+    // 台股現貨、指數，以及本機台股特例都必須走紅漲綠跌。
+    // __TXF__ 若漏判成美股，圖表／即時列會把跌幅錯畫成紅色。
+    var s = String(sym || '').trim().toUpperCase();
+    if (s === '^N225' || (/^\d{4}\.T$/.test(s) && !/\.TW(O)?$/.test(s))) return false;
+    return /^\d/.test(s) || /^\^TW/.test(s) ||
+      s === '__TXF__' || s === 'TXF' || s === 'TX' || s === 'MXF' ||
+      s === '__MARGIN_RATIO__' || s === '__MARGIN__' ||
+      /^__TW_/.test(s) || /^__HOLDERS_/.test(s);
+  }
+
+  function isJP(sym) {
+    var s = String(sym || '').trim().toUpperCase();
+    return s === '^N225' || (/^\d{4}\.T$/.test(s) && !/\.TW(O)?$/.test(s));
+  }
+
+  function isRedUp(sym) { return isTW(sym) || isJP(sym); }
 
   var Colors = {
     PALETTE: PALETTE,
     HEX: HEX,
     isTW: isTW,
+    isJP: isJP,
+    isRedUp: isRedUp,
 
     // 方向性顏色(漲跌/成長):v>0 漲/正,v<0 跌/負,v==0/缺 平盤中性。
     // 回傳 CSS 字串(供 style.color 用)。
     dir: function (sym, v) {
       if (v == null || !isFinite(v) || v === 0) return PALETTE.dim;
-      var tw = isTW(sym);
+      var tw = isRedUp(sym);
       var up = v > 0;
       return up ? (tw ? PALETTE.red : PALETTE.green) : (tw ? PALETTE.green : PALETTE.red);
     },
@@ -54,7 +72,7 @@
 
     // K 棒/成交量 上下色(canvas 需 hex)。回傳 {up, down}。
     candle: function (sym) {
-      var tw = isTW(sym);
+      var tw = isRedUp(sym);
       return tw ? { up: HEX.red, down: HEX.green } : { up: HEX.green, down: HEX.red };
     },
 

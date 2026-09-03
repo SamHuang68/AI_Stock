@@ -1,5 +1,4 @@
 @echo off
-chcp 65001 > nul
 setlocal enabledelayedexpansion
 cd /d "%~dp0.."
 
@@ -9,15 +8,18 @@ echo  Mon-Fri 19:00 - runs etf_delta_tracker.py
 echo ============================================
 echo.
 
-REM Build absolute path to daily_etf.bat
-set "TARGET=%~dp0daily_etf.bat"
+REM Build absolute paths. The scheduled production task uses the strict API gate.
+set "TARGET=%~dp0daily_etf.ps1"
+set "PSEXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+set "ROOT=%CD%"
 echo Target: %TARGET%
+echo Working directory: %ROOT%
 echo.
 
 REM Register via PowerShell (more reliable than schtasks for path quoting)
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "Register-ScheduledTask -TaskName 'ETF_Daily_Snapshot' -Force " ^
-  "-Action  (New-ScheduledTaskAction -Execute '%TARGET%') " ^
+  "-Action  (New-ScheduledTaskAction -Execute '%PSEXE%' -Argument '-NoProfile -ExecutionPolicy Bypass -File \"%TARGET%\" -ProbeUrl \"http://127.0.0.1:18435/etf-delta\" -RequireApi' -WorkingDirectory '%ROOT%') " ^
   "-Trigger (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At 7pm) " ^
   "-Settings (New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -ExecutionTimeLimit (New-TimeSpan -Minutes 15))"
 

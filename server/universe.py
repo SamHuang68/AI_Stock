@@ -15,6 +15,11 @@ import sys
 import time
 import urllib.request
 
+try:
+    from .atomic_store import StoreCorruptError, atomic_write_json, load_json
+except ImportError:
+    from atomic_store import StoreCorruptError, atomic_write_json, load_json
+
 if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
 else:
@@ -26,13 +31,27 @@ _US_SYM = re.compile(r'^[A-Z][A-Z0-9.\-]{0,7}$')
 
 
 def _fetch_json(url, timeout=25):
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
+    headers = {'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}
+    try:
+        import http_client as _hc
+    except Exception:
+        _hc = None
+    if _hc is not None:
+        return _hc.fetch_json(url, timeout=timeout, retries=1, headers=headers)
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read())
 
 
 def _fetch_text(url, timeout=25):
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    try:
+        import http_client as _hc
+    except Exception:
+        _hc = None
+    if _hc is not None:
+        return _hc.fetch_text(url, timeout=timeout, retries=1, headers=headers)
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read().decode('utf-8', 'replace')
 
@@ -59,12 +78,6 @@ def fetch_tw():
                 if row.get(k):
                     code = str(row[k]).strip()
                     break
-            if not _TW_CODE.match(code):
-                for v in row.values():
-                    s = str(v).strip()
-                    if _TW_CODE.match(s):
-                        code = s
-                        break
             if not _TW_CODE.match(code):
                 continue
             name = ''
@@ -331,9 +344,7 @@ def build():
     data = {'tw': tw, 'us': us, 'twmeta': twmeta, 'updated': int(time.time()),
             'counts': {'tw': len(tw), 'us': len(us), 'twmeta': len(twmeta)}}
     try:
-        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-        with open(CACHE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False)
+        atomic_write_json(CACHE, data, backup=True, indent=None)
     except Exception as e:
         print(f'[universe] save failed: {e}')
     return data
@@ -342,12 +353,11 @@ def build():
 def load():
     """讀快取;沒有就 build()。"""
     try:
-        with open(CACHE, encoding='utf-8') as f:
-            data = json.load(f)
+        data = load_json(CACHE, default={}, expected_type=dict)
         if data.get('tw') or data.get('us'):
             return data
-    except Exception:
-        pass
+    except StoreCorruptError as exc:
+        print('[universe] cache corrupt:', type(exc).__name__)
     return build()
 
 

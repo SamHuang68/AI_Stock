@@ -1,0 +1,112 @@
+{
+  "schemaVersion": "st-archify-manifest/v1",
+  "source": {
+    "repositoryUrl": "https://github.com/SamHuang68/AI_Stock",
+    "commit": "8bc784418182bb6dc2a9f41aa8f8d359190248ca",
+    "worktreePolicy": "The commit identifies the inspected repository baseline; every delivered artifact is bound to its source specification and final HTML by the SHA-256 values below, including source-evidenced working-tree refinements made during LOOP-022."
+  },
+  "generator": {
+    "name": "Archify",
+    "version": "2.16.0",
+    "qualityProfile": "showcase"
+  },
+  "policy": {
+    "navigation": "new-tab-only",
+    "iframe": false,
+    "liveData": false,
+    "httpExternalRequests": "blocked-by-csp",
+    "fileProtocolCaveat": "Direct file:// viewing is portable but is outside the ST HTTP response-header boundary; use the Private Web route when CSP enforcement is required."
+  },
+  "artifacts": [
+    {
+      "id": "st-decision-evidence-lineage",
+      "type": "dataflow",
+      "specPath": "docs/architecture/st-decision-evidence-lineage.dataflow.json",
+      "htmlPath": "assets/docs/archify/st-decision-evidence-lineage.html",
+      "specSha256": "0574329d566927039fc281ec8d55ae418172b7edf915a0c958df269fe1d87854",
+      "htmlSha256": "5adb538ba2c4390992a725e98a8855623a22d26b2758374e0c00c2c9f2f0cab5",
+      "validation": { "passed": 9, "total": 9, "errors": 0, "warnings": 0 },
+      "visual": {
+        "status": "passed",
+        "viewportsPassed": ["1440x900", "1600x1000", "1920x1080", "2048x1320"],
+        "themesPassed": ["light", "dark"]
+      },
+      "network": { "staticScan": "passed", "cspEnforced": true }
+    },
+    {
+      "id": "st-private-web-trust-ai-execution",
+      "type": "architecture",
+      "specPath": "docs/architecture/st-private-web-trust-ai-execution.architecture.json",
+      "htmlPath": "assets/docs/archify/st-private-web-trust-ai-execution.html",
+      "specSha256": "d4b103e3579810f1bd2c00e381c6fa199540dcb39db0c27a6d2999cadb27112b",
+      "htmlSha256": "059b72800f293f484eaaa69978eef0109d9c3da0a852d8bdd8a2db4da6cecfa3",
+      "validation": { "passed": 9, "total": 9, "errors": 0, "warnings": 0 },
+      "visual": {
+        "status": "passed",
+        "viewportsPassed": ["1440x900", "1600x1000", "1920x1080", "2048x1320"],
+        "themesPassed": ["light", "dark"]
+      },
+      "network": { "staticScan": "passed", "cspEnforced": true }
+    },
+    {
+      "id": "st-private-web-release-gate",
+      "type": "workflow",
+      "specPath": "docs/architecture/st-private-web-release-gate.workflow.json",
+      "htmlPath": "assets/docs/archify/st-private-web-release-gate.html",
+      "specSha256": "70c9b6eb023058ffc608542fcc3101a2656803c870b2363eec9923d739d254ab",
+      "htmlSha256": "57802ab52b19902ae4238d1e98e21d353c213f6720e94f775f0ab8300506762f",
+      "validation": { "passed": 9, "total": 9, "errors": 0, "warnings": 0 },
+      "visual": {
+        "status": "passed",
+        "viewportsPassed": ["1440x900", "1600x1000", "1920x1080", "2048x1320"],
+        "themesPassed": ["light", "dark"]
+      },
+      "network": { "staticScan": "passed", "cspEnforced": true }
+    },
+    {
+      "id": "st-pulse-refresh-degradation",
+      "type": "sequence",
+      "specPath": "docs/architecture/st-pulse-refresh-degradation.sequence.json",
+      "htmlPath": "assets/docs/archify/st-pulse-refresh-degradation.html",
+      "specSha256": "5ee48bb70c6f37cb242b729c8b18aa569a39724f5fb80b8d266d6911a8e0f239",
+      "htmlSha256": "fa2ae76c1e92c871fa230832bea1e3f2ba036097f47b8f5c792ce2a3d168fd27",
+      "validation": { "passed": 9, "total": 9, "errors": 0, "warnings": 0 },
+      "visual": {
+        "status": "passed",
+        "viewportsPassed": ["1440x900", "1600x1000", "1920x1080", "2048x1320"],
+        "themesPassed": ["light", "dark"]
+      },
+      "network": { "staticScan": "passed", "cspEnforced": true }
+    },
+    {
+      "id": "st-responsive-shell-ownership",
+      "type": "workflow",
+      "specPath": "docs/architecture/st-responsive-shell-ownership.workflow.json",
+      "htmlPath": "assets/docs/archify/st-responsive-shell-ownership.html",
+      "specSha256": "e480bb4fcf4f6041e8b60445a90cb499cff19a96b09266ce70da4d879df4a484",
+      "htmlSha256": "4a8dbf000e8781d00dbbb68412907f778e19fcc17775e3a8299019d61de06ca9",
+      "validation": { "passed": 9, "total": 9, "errors": 0, "warnings": 0 },
+      "visual": {
+        "status": "passed",
+        "viewportsPassed": ["1440x900", "1600x1000", "1920x1080", "2048x1320"],
+        "themesPassed": ["light", "dark"]
+      },
+      "network": { "staticScan": "passed", "cspEnforced": true }
+    },
+    {
+      "id": "st-signal-passport-early-warning",
+      "type": "lifecycle",
+      "specPath": "docs/architecture/st-signal-passport-early-warning.lifecycle.json",
+      "htmlPath": "assets/docs/archify/st-signal-passport-early-warning.html",
+      "specSha256": "09cb3774f2c50bc6eda4e9858a48026c02aaf8824a4c9c0a60b2df2fc523e3cd",
+      "htmlSha256": "42126cc64d9e9e998dd2a4b5e97baa477a7ceecc0555aa9485b7d4b2303c661c",
+      "validation": { "passed": 9, "total": 9, "errors": 0, "warnings": 0 },
+      "visual": {
+        "status": "passed",
+        "viewportsPassed": ["1440x900", "1600x1000", "1920x1080", "2048x1320"],
+        "themesPassed": ["light", "dark"]
+      },
+      "network": { "staticScan": "passed", "cspEnforced": true }
+    }
+  ]
+}

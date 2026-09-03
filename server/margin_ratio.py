@@ -404,8 +404,36 @@ def compute_ratio_for_date(d: date) -> Optional[float]:
         return None
 
 
-def fetch_today_ratio_live() -> Optional[float]:
-    """盤後／當日：OpenAPI 個股融資 + 收盤價 + MS 融資金額（排除 ETF）。"""
+def _parse_exchange_date(value) -> Optional[date]:
+    """解析 TWSE 西元 YYYYMMDD 或民國 YYYMMDD 日期。"""
+    raw = ''.join(ch for ch in str(value or '') if ch.isdigit())
+    try:
+        if len(raw) == 8:
+            return date(int(raw[:4]), int(raw[4:6]), int(raw[6:8]))
+        if len(raw) == 7:
+            return date(int(raw[:3]) + 1911, int(raw[3:5]), int(raw[5:7]))
+    except ValueError:
+        return None
+    return None
+
+
+def _coherent_live_exchange_date(rows_closes, margin_summary) -> Optional[date]:
+    """現股收盤與融資總額必須屬於同一交易日，否則拒絕混算。"""
+    stock_date = next(
+        (_parse_exchange_date(r.get('Date')) for r in rows_closes
+         if isinstance(r, dict) and _parse_exchange_date(r.get('Date'))),
+        None,
+    ) if isinstance(rows_closes, list) else None
+    margin_date = _parse_exchange_date(
+        margin_summary.get('date') if isinstance(margin_summary, dict) else None
+    )
+    if stock_date is None or margin_date is None or stock_date != margin_date:
+        return None
+    return stock_date
+
+
+def fetch_latest_ratio_live() -> Optional[Tuple[date, float]]:
+    """最新交易日：回傳交易所日期與融資維持率，禁止用本機日期代替資料日期。"""
     try:
         rows_margin = _http_json('https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN')
         per_stock: Dict[str, float] = {}
@@ -434,6 +462,10 @@ def fetch_today_ratio_live() -> Optional[float]:
         ms = _http_json(
             'https://www.twse.com.tw/exchangeReport/MI_MARGN?response=json&selectType=MS'
         )
+        exchange_date = _coherent_live_exchange_date(rows_closes, ms)
+        if exchange_date is None:
+            print('[margin] latest snapshot rejected: STOCK_DAY_ALL / MI_MARGN dates missing or mismatched')
+            return None
         total_loan = _parse_loan_from_tables(ms.get('tables') or [])
         if not per_stock or not closes or not total_loan or total_loan <= 0:
             return None
@@ -445,10 +477,16 @@ def fetch_today_ratio_live() -> Optional[float]:
             collateral += lots * 1000.0 * cl
         if collateral <= 0:
             return None
-        return collateral / total_loan * 100.0
+        return exchange_date, collateral / total_loan * 100.0
     except Exception as e:
         print('[margin] today live compute failed:', e)
         return None
+
+
+def fetch_today_ratio_live() -> Optional[float]:
+    """相容舊呼叫端：只回傳最新交易日的融資維持率數值。"""
+    sample = fetch_latest_ratio_live()
+    return sample[1] if sample else None
 
 
 # ── Seed / FinMind / persistence helpers ─────────────────────
@@ -652,21 +690,24 @@ def refresh_today(force: bool = False) -> Optional[float]:
     with _refresh_lock:
         if not force and (time.time() - _last_today_refresh) < _TODAY_REFRESH_TTL:
             return None
-        ratio = fetch_today_ratio_live()
+        sample = fetch_latest_ratio_live()
         _last_today_refresh = time.time()
-        if ratio and ratio > 0:
+        if sample:
+            exchange_date, ratio = sample
+        else:
+            exchange_date, ratio = None, None
+        if exchange_date is not None and ratio and ratio > 0:
             ds = _import_datastore()
             ds.init_db()
-            today = datetime.now(TZ_TPE).date()
-            _store_points(ds, [(_date_to_ts(today), ratio)])
+            _store_points(ds, [(_date_to_ts(exchange_date), ratio)])
             # 同步 append seed
             try:
                 seed = dict(load_seed_csv(SEED_CSV))
-                seed[_date_to_ts(today)] = ratio
+                seed[_date_to_ts(exchange_date)] = ratio
                 save_seed_csv(sorted(seed.items()), SEED_CSV)
             except Exception:
                 pass
-            print(f'[margin] today {today.isoformat()} = {ratio:.4f}%')
+            print(f'[margin] latest session {exchange_date.isoformat()} = {ratio:.4f}%')
             return ratio
         return None
 

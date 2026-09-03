@@ -4,7 +4,7 @@ setlocal
 cd /d "%~dp0.."
 
 echo ============================================
-echo  Build Stock_Terminal distribution zip (v4.1)
+echo  Build Stock_Terminal distribution zip (v5.0)
 echo ============================================
 echo.
 
@@ -16,8 +16,11 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo Done. Share Stock_Terminal_v4.1.zip with anyone.
-echo Recipient: unzip, then double-click scripts\go.bat
+echo Done. Share these three files together:
+echo   Stock_Terminal_v5.0.zip
+echo   Stock_Terminal_v5.0.zip.sha256
+echo   Stock_Terminal_v5.0.manifest.json
+echo Recipient: unzip, read README.md, then double-click START_TIP.cmd
 echo Optional: scripts\install_scheduler.bat / scripts\install_chip_scheduler.bat
 echo Alerts: open the bell button to set Telegram/Email push (never share those configs).
 echo.

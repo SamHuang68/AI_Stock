@@ -1,0 +1,4 @@
+# Windows does not ship an IANA timezone database for Python's zoneinfo.
+# Keep this CI-only: Stock Terminal's core runtime remains dependency-free on
+# hosts that already provide system timezone data.
+tzdata==2026.3

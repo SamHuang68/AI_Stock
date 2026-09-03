@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "市場脈動刷新、期限與降級序列",
+    "animation": "none",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [1040, 560]
+  },
+  "participants": [
+    {
+      "id": "pulse_ui",
+      "type": "frontend",
+      "label": "Pulse UI",
+      "sublabel": "pulse_v5.js"
+    },
+    {
+      "id": "ui_helper",
+      "type": "frontend",
+      "label": "UI 請求層",
+      "sublabel": "共用 fetch 輔助"
+    },
+    {
+      "id": "pulse_api",
+      "type": "backend",
+      "label": "/pulse",
+      "sublabel": "server.py"
+    },
+    {
+      "id": "pulse_cache",
+      "type": "database",
+      "label": "Pulse 快取",
+      "sublabel": "TTL 45 秒"
+    },
+    {
+      "id": "source_pools",
+      "type": "external",
+      "label": "資料來源池",
+      "sublabel": "core + extras + side"
+    },
+    {
+      "id": "decision_context",
+      "type": "backend",
+      "label": "決策脈絡",
+      "sublabel": "DecisionContext"
+    },
+    {
+      "id": "market_data",
+      "type": "database",
+      "label": "MarketData",
+      "sublabel": "前端市場權威"
+    },
+    {
+      "id": "decision_data",
+      "type": "database",
+      "label": "DecisionData",
+      "sublabel": "前端決策權威"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 275,
+      "label": "請求與快取判定"
+    },
+    {
+      "from": 285,
+      "to": 400,
+      "label": "分組蒐集與容錯"
+    },
+    {
+      "from": 410,
+      "to": 505,
+      "label": "快照回傳與單次發布"
+    }
+  ],
+  "messages": [
+    {
+      "id": "refresh_request",
+      "from": "pulse_ui",
+      "to": "ui_helper",
+      "y": 175,
+      "label": "刷新市場脈動",
+      "variant": "emphasis"
+    },
+    {
+      "id": "pulse_get",
+      "from": "ui_helper",
+      "to": "pulse_api",
+      "y": 205,
+      "label": "GET /pulse",
+      "variant": "default"
+    },
+    {
+      "id": "cache_read",
+      "from": "pulse_api",
+      "to": "pulse_cache",
+      "y": 235,
+      "label": "讀取 45 秒快取",
+      "variant": "default"
+    },
+    {
+      "id": "cache_stale",
+      "from": "pulse_cache",
+      "to": "pulse_api",
+      "y": 265,
+      "label": "未命中或已過期",
+      "variant": "return"
+    },
+    {
+      "id": "collect_sources",
+      "from": "pulse_api",
+      "to": "source_pools",
+      "y": 300,
+      "label": "蒐集核心資料並啟動附加來源池",
+      "variant": "emphasis"
+    },
+    {
+      "id": "bounded_results",
+      "from": "source_pools",
+      "to": "pulse_api",
+      "y": 330,
+      "label": "可用結果；逾時項目標記降級",
+      "variant": "dashed",
+      "note": "deadline 會限制等待時間，但不保證已執行的網路工作立即停止。"
+    },
+    {
+      "id": "build_context",
+      "from": "pulse_api",
+      "to": "decision_context",
+      "y": 360,
+      "label": "組裝帶來源、時間與基準的決策脈絡",
+      "variant": "emphasis"
+    },
+    {
+      "id": "context_ready",
+      "from": "decision_context",
+      "to": "pulse_api",
+      "y": 390,
+      "label": "DecisionContext 快照",
+      "variant": "return"
+    },
+    {
+      "id": "pulse_response",
+      "from": "pulse_api",
+      "to": "pulse_ui",
+      "y": 420,
+      "label": "200 JSON；含 freshness 與降級狀態",
+      "variant": "return"
+    },
+    {
+      "id": "publish_market",
+      "from": "pulse_ui",
+      "to": "market_data",
+      "y": 448,
+      "label": "發布市場快照",
+      "variant": "emphasis"
+    },
+    {
+      "id": "publish_decision",
+      "from": "pulse_ui",
+      "to": "decision_data",
+      "y": 477,
+      "label": "發布決策快照",
+      "variant": "emphasis"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "ui_helper",
+      "from": 170,
+      "to": 430,
+      "type": "frontend"
+    },
+    {
+      "participant": "pulse_api",
+      "from": 200,
+      "to": 425,
+      "type": "backend"
+    },
+    {
+      "participant": "pulse_cache",
+      "from": 230,
+      "to": 270,
+      "type": "database"
+    },
+    {
+      "participant": "source_pools",
+      "from": 295,
+      "to": 337,
+      "type": "external"
+    },
+    {
+      "participant": "decision_context",
+      "from": 355,
+      "to": 397,
+      "type": "backend"
+    },
+    {
+      "participant": "market_data",
+      "from": 443,
+      "to": 463,
+      "type": "database"
+    },
+    {
+      "participant": "decision_data",
+      "from": 472,
+      "to": 497,
+      "type": "database"
+    }
+  ]
+}

@@ -1,15 +1,22 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
+<!-- tip-ux-boot -->
+<meta name="st-ux" content="tip">
+<style id="st5-tip-boot">html:not(.st5-booted) #body,html:not(.st5-booted) #wlbar,html:not(.st5-booted) #mkt-bar{display:none!important}</style>
+<script id="st5-tip-hash">(function(){try{var h=(location.hash||"").replace(/^#/,"").trim();if(!h){location.replace(location.pathname+location.search+"#pulse");}}catch(e){}})();</script>
+
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
-<title>Stock Terminal</title>
+<title>Stock Terminal v5.0 - Market Intelligence / Local DB / AI Copilot</title>
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
+  --st-app-height:100dvh;
   --bg:#060A12;--bg2:#0B1220;--bg3:#111B2E;--bg4:#162240;
   --border:#1A2740;--bhi:#2A3D5C;
   --gold:#F5C518;--gold-s:rgba(245,197,24,.08);--gold-m:rgba(245,197,24,.18);
@@ -18,14 +25,13 @@
   --blue:#60A5FA;--bbg:rgba(96,165,250,.08);--bbdr:rgba(96,165,250,.3);
   --red:#F87171;--cyan:#67E8F9;--orange:#FB923C;
 }
-html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto Serif TC','PingFang TC',serif;overflow:hidden}
-@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap');
+html,body{height:var(--st-app-height,100dvh);max-height:var(--st-app-height,100dvh);background:var(--bg);color:var(--text);font-family:'Noto Serif TC','PingFang TC',serif;overflow:hidden;overscroll-behavior:none}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:var(--bhi);border-radius:2px}
 
 /* ── LAYOUT ── */
-#app{display:flex;flex-direction:column;height:100vh}
+#app{display:flex;flex-direction:column;height:var(--st-app-height,100dvh);max-height:var(--st-app-height,100dvh);min-height:0;overflow:hidden}
 #topbar{height:42px;background:rgba(11,18,32,.95);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 12px;flex-shrink:0;z-index:50}
 #wlbar{height:64px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:stretch;gap:0;padding:0 4px;flex-shrink:0;overflow:hidden}
 #wlchips{display:grid;grid-template-rows:repeat(2,1fr);grid-auto-flow:column dense;grid-auto-columns:max-content;flex:1 1 auto;min-width:0;overflow-x:auto;overflow-y:hidden;align-items:stretch}
@@ -40,8 +46,9 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 #right{flex:0 0 40%;width:40%;min-width:0;display:flex;flex-direction:column;border-left:1px solid var(--border);background:var(--bg2)}
 #left{min-width:0}
 #splitter{display:none}
-#rtabs{display:flex;border-bottom:1px solid var(--border);height:36px;flex-shrink:0}
+#rtabs{display:flex;align-items:stretch;border-bottom:1px solid var(--border);height:26px;min-height:26px;max-height:26px;flex-shrink:0}
 #rpanel{flex:1;overflow-y:auto;min-height:0}
+#rpanel-pager{display:none}
 
 /* ── TOP BAR ── */
 .logo{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--gold);font-weight:700;letter-spacing:2px;white-space:nowrap}
@@ -66,8 +73,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 .wlchip-t{color:var(--thi);font-weight:700;letter-spacing:.5px}
 .wlchip.active .wlchip-t{color:var(--gold)}
 .wlchip-p{font-size:10px}
-/* 觀察股移除改右鍵（rmWl），不再顯示 × 以免誤觸 */
-.wlchip-rm{display:none!important}
+/* 桌機保留右鍵移除；手機以長按選單避免誤觸。 */
+.wl-action-menu{display:none}
 .wlchip.dragging{opacity:.35}
 .wlchip.drop-before{box-shadow:inset 3px 0 0 var(--gold)}
 .wlchip.drop-after{box-shadow:inset -3px 0 0 var(--gold)}
@@ -79,9 +86,9 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 .wladd:hover{color:var(--gold)}
 
 /* ── RANGE BAR (iOS-style chart range selector) ── */
-#rangebar{height:30px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:stretch;padding:0;flex-shrink:0;overflow-x:auto;overflow-y:hidden}
+#rangebar{height:26px;min-height:26px;max-height:26px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:stretch;padding:0;flex-shrink:0;overflow-x:auto;overflow-y:hidden}
 #rangebar::-webkit-scrollbar{height:2px}
-.rgbtn{flex:1 1 0;min-width:54px;background:transparent;border:none;color:var(--tlo);font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.5px;cursor:pointer;border-right:1px solid var(--border);transition:all .12s;padding:0 6px;white-space:nowrap}
+.rgbtn{flex:1 1 0;min-width:54px;height:25px;min-height:25px;background:transparent;border:none;color:var(--tlo);font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;line-height:25px;letter-spacing:.5px;cursor:pointer;border-right:1px solid var(--border);transition:all .12s;padding:0 6px;white-space:nowrap}
 .rgbtn:last-child{border-right:none}
 .rgbtn:hover{color:var(--thi);background:var(--bg3)}
 .rgbtn.on{color:var(--gold);background:var(--gold-s);box-shadow:inset 0 -2px 0 var(--gold)}
@@ -114,7 +121,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 .ig-val{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--thi);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;flex-shrink:0}
 
 /* ── RIGHT PANEL TABS ── */
-.rtab{flex:1;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--tlo);font-family:'JetBrains Mono',monospace;font-size:10px;cursor:pointer;height:36px;letter-spacing:1px;transition:all .12s}
+.rtab{flex:1;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--tlo);font-family:'JetBrains Mono',monospace;font-size:9px;cursor:pointer;height:25px;min-height:25px;line-height:25px;padding:0 4px;letter-spacing:.7px;transition:all .12s}
 .rtab:hover{color:var(--text)}
 .rtab.on{color:var(--gold);border-bottom-color:var(--gold);background:var(--gold-s)}
 
@@ -198,12 +205,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 /* ── PRINT ── */
 @media print{
   @page{size:A4;margin:1.6cm 1.8cm}
-  #app{height:auto;overflow:visible}
+  #app{height:auto;max-height:none;overflow:visible}
   #topbar,#wlbar,#indbar,#rtabs,#left,#keybtn{display:none!important}
   #body{display:block}
   #right{width:100%;border:none;background:#fff}
   #rpanel{overflow:visible}
-  body,html{background:#fff;color:#000;overflow:visible}
+  body,html{height:auto;max-height:none;background:#fff;color:#000;overflow:visible}
   .asec-hdr{background:#fffbeb;border-color:#b8960c;color:#b8960c}
   .asec-body{color:#000}
   .asec-body strong{color:#000}
@@ -212,18 +219,21 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
+<link rel="stylesheet" href="src/ui/mobile_v2.css?v=1786836179">
 </head>
 <body>
 <div id="app">
   <div id="topbar">
-    <span class="logo">STOCK TERMINAL</span>
+    <span class="logo" data-v2-banner>STOCK TERMINAL <span style="color:#FBBF24;font-size:9px;letter-spacing:1px;font-weight:700">v5.0</span></span>
     <div class="sep"></div>
     <div style="display:flex;align-items:center;gap:4px">
       <button class="mktbtn on" id="btn-tw" onclick="setMkt('TW')">🇹🇼 TW</button>
       <button class="mktbtn" id="btn-us" onclick="setMkt('US')">🇺🇸 US</button>
     </div>
-    <input id="syminput" placeholder="代號" maxlength="10" onkeydown="if(event.key==='Enter')go()">
-    <button id="gobtn" onclick="go()">▶ GO</button>
+    <div id="chart-search" role="search" aria-label="股票代號搜尋">
+      <input id="syminput" placeholder="代號" aria-label="股票代號" maxlength="10" onkeydown="if(event.key==='Enter')go()">
+      <button id="gobtn" onclick="go()">▶ GO</button>
+    </div>
     <div class="sep"></div>
     <div id="statusbar"><div class="pulse"></div><span id="stattxt">READY</span></div>
     <button id="keybtn" onclick="showKeyModal()">API KEY</button>
@@ -253,14 +263,23 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
     <div id="splitter" title="拖曳調整線型 / 功能區寬度"></div>
     <div id="right">
       <div id="rtabs">
-        <button class="rtab on" onclick="setTab('stats')">STATS</button>
-        <button class="rtab" onclick="setTab('research')">RESEARCH</button>
-        <button class="rtab" onclick="setTab('batch')">BATCH</button>
-        <button class="rtab" onclick="setTab('history')">HISTORY</button>
-        <button class="rtab" id="tab-etf" onclick="setTab('etf')">ETF△</button>
+        <button class="rtab on" data-tab="stats" onclick="setTab('stats')">STATS</button>
+        <button class="rtab" data-tab="research" onclick="setTab('research')">RESEARCH</button>
+        <button class="rtab" data-tab="position" id="tab-pos" onclick="setTab('position')">POS</button>
+        <button class="rtab" data-tab="watch" id="tab-watch" onclick="setTab('watch')">WATCH</button>
+        <button class="rtab" data-tab="plan" id="tab-plan" onclick="setTab('plan')">PLAN</button>
+        <button class="rtab" data-tab="etf" id="tab-etf" onclick="setTab('etf')">ETF△</button>
       </div>
       <div id="rpanel"></div>
     </div>
+  </div>
+  <div id="rpanel-pager" role="group" aria-label="手機圖表工作區頁面導覽">
+    <button type="button" id="rpage-prev" aria-label="上一個工作區頁面" onclick="shiftRtab(-1)">‹</button>
+    <div class="rpage-state">
+      <div class="rpage-title"><span class="rpage-prefix">目前頁面</span><span id="rpage-label" aria-live="polite">線型圖 · 1 / 7</span></div>
+      <div id="rpage-dots" aria-label="工作區頁面索引"></div>
+    </div>
+    <button type="button" id="rpage-next" aria-label="下一個工作區頁面" onclick="shiftRtab(1)">›</button>
   </div>
 </div>
 <script>
@@ -291,7 +310,8 @@ const MARKET_SECTION_DEFS = [
 ];
 
 const DEFAULT_WL = [
-  {t:'2330',m:'TW'},{t:'2454',m:'TW'},{t:'3661',m:'TW'},{t:'6669',m:'TW'},
+  {t:'2330',m:'TW',name:'台積電'},{t:'2454',m:'TW',name:'聯發科'},
+  {t:'3661',m:'TW',name:'世芯-KY'},{t:'6669',m:'TW',name:'緯穎'},
   {t:'NVDA',m:'US'},{t:'AMD',m:'US'}
 ];
 
@@ -300,12 +320,12 @@ const LS_KEY_KEY  = 'st_apikey';
 const LS_KEY_WL   = 'st_wl';
 const BATCH_CONCURRENCY = 3;
 // 同源相對路徑：避免頁面開在 127.0.0.1、API 卻打 localhost（或反之）導致載入卡住
-const SERVER = (typeof location !== 'undefined' && location.origin) ? location.origin : 'http://localhost:18432';
+const SERVER = window.SERVER = (typeof location !== 'undefined' && location.origin && location.origin !== 'null') ? location.origin : 'http://localhost:18432';
 
 // ── STATE ───────────────────────────────────────────────────────
 let S = {
   mkt: 'TW', sym: '', apiKey: '', aiKeySet: false,
-  range: '5y',                 // iOS-style chart range: 1d/3w/1mo/3mo/6mo/ytd/1y/2y/5y/10y/max
+  range: '6mo',                // iOS-style chart range: 1d/3w/1mo/3mo/6mo/ytd/1y/2y/5y/10y/max
   data: null, ind: null,
   analyzing: false, streamText: '', sources: [], phase: '',
   sections: [],
@@ -317,7 +337,43 @@ let S = {
 };
 
 // ── INIT ────────────────────────────────────────────────────────
+function syncAppVisualViewport(reason) {
+  try {
+    const viewport = window.visualViewport;
+    const measured = viewport && Number.isFinite(viewport.height) ? viewport.height : window.innerHeight;
+    const height = Math.max(320, Math.round(measured || window.innerHeight || 0));
+    if (!height) return;
+    const next = height + 'px';
+    if (document.documentElement.style.getPropertyValue('--st-app-height') !== next) {
+      document.documentElement.style.setProperty('--st-app-height', next);
+    }
+    document.documentElement.dataset.stViewportSource = viewport ? 'visual' : 'inner';
+    if (reason) document.documentElement.dataset.stViewportReason = reason;
+  } catch {}
+}
+
+function attachAppVisualViewport() {
+  if (document.documentElement.dataset.stViewportBound === '1') return;
+  document.documentElement.dataset.stViewportBound = '1';
+  let frame = 0;
+  const queue = function (reason) {
+    if (frame) cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(function () {
+      frame = 0;
+      syncAppVisualViewport(reason);
+    });
+  };
+  syncAppVisualViewport('boot');
+  window.addEventListener('resize', function () { queue('window-resize'); }, {passive:true});
+  window.addEventListener('orientationchange', function () { queue('orientation'); }, {passive:true});
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', function () { queue('visual-resize'); }, {passive:true});
+    window.visualViewport.addEventListener('scroll', function () { queue('visual-scroll'); }, {passive:true});
+  }
+}
+
 window.addEventListener('DOMContentLoaded', () => {
+  attachAppVisualViewport();
   // 安全(v3.9 review):金鑰改存 server。若 localStorage 還有舊 key,搬到 server 後清除,瀏覽器不再保留。
   (async () => {
     const _old = localStorage.getItem(LS_KEY_KEY) || '';
@@ -334,8 +390,11 @@ window.addEventListener('DOMContentLoaded', () => {
   S.wl = loadWl();
   renderWl();
   renderRpanel();
+  attachRpanelPager();
+  updateRpanelPager();
+  attachMobileWorkspaceTrace();
   if (S.wl.length > 0) loadSym(S.wl[0].t, S.wl[0].m);
-  fetchEtfDelta();
+  if (typeof window.etfV3FetchDelta === 'function') window.etfV3FetchDelta();
   updateKeyBtn();
 });
 
@@ -693,11 +752,29 @@ function parseYF(raw) {
   } catch { return null; }
 }
 
+function traceIntradaySessionFilter(sym, result) {
+  if (!result || !(result.dropped > 0)) return;
+  try {
+    fetch('/diagnostics/ui-route', {
+      method:'POST', headers:{'Content-Type':'application/json'}, keepalive:true,
+      body:JSON.stringify({
+        ts:new Date().toISOString(), event:'intraday_session_filtered',
+        correlationId:'session-filter-'+Date.now(), from:'loadSym', to:'renderChart',
+        state:'out_of_session_bars_removed', currentSource:'yahoo-v8-chart',
+        label:JSON.stringify({sym, dropped:result.dropped,
+          firstDroppedTime:result.firstDroppedTime, lastDroppedTime:result.lastDroppedTime}).slice(0,160)
+      })
+    }).catch(()=>{});
+  } catch {}
+}
+
 // ── LOAD SYMBOL ─────────────────────────────────────────────────
 async function loadSym(sym, mkt, silent) {
   if (!sym) return;
   sym = sym.toUpperCase().trim();
-  mkt = mkt || S.mkt;
+  mkt = (mkt || S.mkt || 'TW').toUpperCase();
+  // JP mode accepts the local four-digit code and canonicalizes it to Yahoo .T.
+  if (mkt === 'JP' && /^\d{4}$/.test(sym)) sym += '.T';
   // 市場一律由代號決定(權威表 Market 優先,代號格式兜底):數字/^TW=台股、字母=美股。
   // 不靠 TW/US 市場鈕 → 永不抓錯標的;對未收錄的新上市也正確。
   mkt = window.Market ? Market.of(sym) : ((/^\d/.test(sym) || /^\^TW/i.test(sym)) ? 'TW' : 'US');
@@ -708,6 +785,7 @@ async function loadSym(sym, mkt, silent) {
   }
   const _myLoad = (window.__loadSeq = (window.__loadSeq || 0) + 1);   // 切股 race 守衛
   S.sym = sym; S.mkt = mkt;
+  try { window.dispatchEvent(new CustomEvent('symLoading', {detail:{sym, mkt, loadSeq:_myLoad}})); } catch(e){}
   document.getElementById('syminput').value = sym;
   setMktUI(mkt);
   if (!silent) {   // silent=當日自動刷新(liverefresh_v3),不閃「載入中」遮罩
@@ -745,6 +823,13 @@ async function loadSym(sym, mkt, silent) {
   // 至少看得到今天),而非顯示「載入失敗/無資料」。
   const _intradayDef = (rdef.interval !== '1d' && rdef.interval !== '1wk');
   let _noteMsg = '';
+  // 台股日盤圖表只接受 09:00–13:30 的交易所時間。Yahoo 異常尾棒與舊版
+  // realtime 以抵達時間製造的 13:31–13:40 棒，都在進入渲染層前移除。
+  if (_intradayDef && parsed && window.IntradayVolumeV3) {
+    const _sessionFiltered = window.IntradayVolumeV3.filterTwRegularSession(parsed.candles, mkt);
+    parsed.candles = _sessionFiltered.candles;
+    traceIntradaySessionFilter(sym, _sessionFiltered);
+  }
   // (1) 盤中分K Yahoo 開盤常延遲回空 → 用即時報價(/quote 真當日 open/high/low/現價)
   //     合成「今日K棒」,保留分鐘時間軸,看得到當日漲跌;配合 liverefresh_v3 每分鐘更新。
   if (_intradayDef && (!parsed || !parsed.candles.length)) {
@@ -752,10 +837,17 @@ async function loadSym(sym, mkt, silent) {
       const _q = await fetch(`${SERVER}/quote/${encodeURIComponent(yfsym)}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null);
       if (_myLoad !== window.__loadSeq) return;   // 切股 race 守衛
       if (_q && _q.price > 0) {
+        const _quoteTimestamp = Number(_q.lastBarTime) || Math.floor(Date.now() / 1000);
+        const _syntheticTime = (mkt === 'TW' && window.IntradayVolumeV3)
+          ? window.IntradayVolumeV3.twRegularSessionTimestamp(_quoteTimestamp, {clampAfterClose:true})
+          : Math.floor(_quoteTimestamp / 60) * 60;
+        if (_syntheticTime == null) throw new Error('quote outside regular session');
         const _o = (_q.open > 0 ? _q.open : (_q.prevClose || _q.price));
         const _h = (_q.high > 0 ? _q.high : Math.max(_o, _q.price));
         const _l = (_q.low  > 0 ? _q.low  : Math.min(_o, _q.price));
-        parsed = { candles: [{ time: Math.floor(Date.now() / 1000), open: _o, high: _h, low: _l, close: _q.price, volume: _q.volume || 0 }],
+        // /quote volume is a session cumulative total, not this minute's volume.
+        // Keep the synthetic price bar volume unknown/zero rather than inventing a giant minute.
+        parsed = { candles: [{ time: _syntheticTime, open: _o, high: _h, low: _l, close: _q.price, volume: 0, _volumeUnknown: true }],
                    meta: { symbol: yfsym }, name: (parsed && parsed.name) || sym, yesterdayClose: _q.prevClose };
         _noteMsg = sym + '：盤中分K尚未供,用即時報價合成今日K(自動刷新)';
       }
@@ -860,20 +952,11 @@ async function loadSym(sym, mkt, silent) {
     if (_dp > 0) parsed.yesterdayClose = _dp;
   }
 
-  // ── intraday 尾盤集合競價量補回 (v3.8) ──────────────────────
-  // 台股 13:30 收盤集合競價的量常沒進 Yahoo 5m 最後一根（最後一根 volume=0），
-  // 造成「13:25 後沒抓到交易量」。用當日總量 regularMarketVolume 減去其餘各
-  // bar 的量，把缺口（含尾盤競價）補回最後一根。
-  if (_isIntraday && parsed.meta && parsed.candles.length >= 2) {
-    const _rmv = parsed.meta.regularMarketVolume;
-    if (_rmv != null && isFinite(_rmv) && _rmv > 0) {
-      const _cs = parsed.candles;
-      let _sumEx = 0;
-      for (let i = 0; i < _cs.length - 1; i++) _sumEx += _cs[i].volume || 0;
-      const _rem = _rmv - _sumEx;
-      const _lastV = _cs[_cs.length - 1].volume || 0;
-      if (_rem > 0 && _rem > _lastV) _cs[_cs.length - 1].volume = _rem;
-    }
+  // ── intraday 尾盤集合競價量補回 ─────────────────────────────
+  // 僅收盤後且最後棒確為 13:25–13:30 才允許補量。盤中 Yahoo 分K延遲時，
+  // regularMarketVolume 的剩餘量代表「未回補的一整段」，不能塞進最後一分鐘。
+  if (_isIntraday && window.IntradayVolumeV3) {
+    window.IntradayVolumeV3.backfillClosingAuction(parsed.candles, parsed.meta, mkt);
   }
 
   // ── 區間漲跌基準落定（對齊所選時間區間）──────────────────────
@@ -924,7 +1007,7 @@ async function loadSym(sym, mkt, silent) {
     S.ind = await runWorker(parsed.candles);
     if (_myLoad !== window.__loadSeq) return;   // 切股 race：指標算完前已切別檔→不覆寫
     renderInd(S.ind, last, mkt);
-    if (S.ind) updateEtfFlowInd();
+    if (S.ind && typeof window.updateEtfFlowIndV3 === 'function') window.updateEtfFlowIndV3();
   }
   try { renderRpanel(); } catch (e) { console.error('[v1] renderRpanel threw:', e); }
   try { window.dispatchEvent(new CustomEvent('symLoaded', {detail:{sym: S.sym, mkt: S.mkt}})); } catch(e){}
@@ -1005,7 +1088,8 @@ function renderChart(candles) {
   // intraday (1d range, 5m interval) → show HH:mm; daily/weekly → date only
   const isIntraday = !isMarginRatio && S.range === '1d';
   // 預先判斷是否有量（後面無量分支不再把 top 壓回 0.06）
-  const _hasVolEarly = !isMarginRatio && candles && candles.some(c => c.volume > 0);
+  const _liveTwVolume = isIntraday && S.mkt === 'TW' && /^\d{4,6}[A-Z]?$/.test(S.sym || '');
+  const _hasVolEarly = !isMarginRatio && candles && (candles.some(c => c.volume > 0) || _liveTwVolume);
   const _priceMargins = isMarginRatio
     ? { top: 0.08, bottom: 0.10 }
     : calcPriceScaleMargins(isIntraday, _hasVolEarly, candles);
@@ -1021,29 +1105,46 @@ function renderChart(candles) {
   S.tzOffset = userTzOffset;
   const tz = (t) => (t == null ? t : t + userTzOffset);
 
+  // 圖表視覺只決定色票與線條層級；市場方向語意仍由 Colors 單一契約判定。
+  const _cvTheme = (window.ChartVisualV5 && typeof window.ChartVisualV5.themeFor === 'function')
+    ? window.ChartVisualV5.themeFor(S.sym, S.mkt)
+    : (() => {
+        const _c = (window.Colors && typeof window.Colors.candle === 'function')
+          ? window.Colors.candle(S.sym) : { up:'#4ADE80', down:'#F87171' };
+        return {
+          redUp: window.Colors && typeof window.Colors.isRedUp === 'function' ? window.Colors.isRedUp(S.sym) : S.mkt === 'TW',
+          chartBg:'#08111d', axisText:'#71829a',
+          gridVertical:'rgba(148,163,184,.035)', gridHorizontal:'rgba(148,163,184,.050)',
+          scaleBorder:'rgba(148,163,184,.16)', crosshair:'rgba(246,200,76,.52)', crosshairLabel:'#a97808',
+          candleUp:_c.up, candleDown:_c.down, candleFlat:'#9ca3af',
+          volumeUp:'rgba(74,222,128,.42)', volumeDown:'rgba(248,113,113,.42)', volumeFlat:'rgba(156,163,175,.30)',
+          ma20:'#f6c84c', ma60:'#67d8e8', band:'rgba(96,165,250,.42)'
+        };
+      })();
+
   const chart = LightweightCharts.createChart(wrap, {
     width: wrap.clientWidth, height: wrap.clientHeight,
-    layout:{background:{color:'#060A12'},textColor:'#5A6A82'},
-    grid:{vertLines:{color:'#0F1A2B'},horzLines:{color:'#0F1A2B'}},
+    layout:{background:{color:_cvTheme.chartBg},textColor:_cvTheme.axisText},
+    grid:{vertLines:{color:_cvTheme.gridVertical},horzLines:{color:_cvTheme.gridHorizontal}},
     crosshair:{
       // Magnet 磁吸模式:水平線吸附到最近 K 棒的數值(像 Yahoo 貼著線走,不隨滑鼠 Y 每像素跳動)
       mode:LightweightCharts.CrosshairMode.Magnet,
       // Yahoo 風格:金色虛線 + 軸上時間/價格標籤泡泡
-      vertLine:{color:'rgba(245,197,24,.55)',width:1,style:2,labelVisible:true,labelBackgroundColor:'#B8860B'},
-      horzLine:{color:'rgba(245,197,24,.55)',width:1,style:2,labelVisible:true,labelBackgroundColor:'#B8860B'},
+      vertLine:{color:_cvTheme.crosshair,width:1,style:2,labelVisible:true,labelBackgroundColor:_cvTheme.crosshairLabel},
+      horzLine:{color:_cvTheme.crosshair,width:1,style:2,labelVisible:true,labelBackgroundColor:_cvTheme.crosshairLabel},
     },
     // MacroMicro 雙軸：左=融資維持率%、右=加權指數；一般 K 線僅用右軸
     leftPriceScale: isMarginRatio ? {
       visible: true,
-      borderColor: '#1A2740',
+      borderColor: _cvTheme.scaleBorder,
       scaleMargins: { top: 0.08, bottom: 0.10 },
     } : { visible: false },
-    rightPriceScale:{borderColor:'#1A2740',
+    rightPriceScale:{borderColor:_cvTheme.scaleBorder,
       // 頂部留白加大：創新高時 K 線不上頂，避開量價浮動鈕／OHLC／圖例遮蔽
       // 盤中另加大上下留白以壓平當日小波動；融資維持率雙軸用較小留白
       scaleMargins: _priceMargins},
     timeScale:{
-      borderColor:'#1A2740',
+      borderColor:_cvTheme.scaleBorder,
       timeVisible: isIntraday,
       secondsVisible: false,
       rightOffset: 2,         // tiny right padding so latest candle isn't glued to axis
@@ -1175,10 +1276,10 @@ function renderChart(candles) {
   }
 
   const cs = chart.addCandlestickSeries({
-    upColor:'#4ADE80',downColor:'#F87171',
-    borderUpColor:'#4ADE80',borderDownColor:'#F87171',
-    wickUpColor:'#4ADE80',wickDownColor:'#F87171',
-    lastValueVisible:false, priceLineVisible:false,   // 原生現價框關掉，改用 polish_v3 的「今/昨」小標籤
+    upColor:_cvTheme.candleUp,downColor:_cvTheme.candleDown,
+    borderUpColor:_cvTheme.candleUp,borderDownColor:_cvTheme.candleDown,
+    wickUpColor:_cvTheme.candleUp,wickDownColor:_cvTheme.candleDown,
+    lastValueVisible:false, priceLineVisible:false,   // 保留自訂「今/昨」軸標籤，避免原生框重疊
     // 可視最高 > 實際最高：創新高時影線仍留在浮動 UI 下方
     autoscaleInfoProvider: makeHighHeadroomAutoscale(candles),
   });
@@ -1264,7 +1365,11 @@ function renderChart(candles) {
       priceScaleId:'vol',
     });
     chart.priceScale('vol').applyOptions({scaleMargins:{top:0.8,bottom:0}});
-    vs.setData(candles.map(c=>({time:tz(c.time),value:c.volume,color:c.close>=c.open?'rgba(74,222,128,0.25)':'rgba(248,113,113,0.25)'})));
+    vs.setData(candles.map((c, i) => {
+      const base = _cvTheme.redUp && i > 0 ? candles[i - 1].close : c.open;
+      const color = c.close > base ? _cvTheme.volumeUp : (c.close < base ? _cvTheme.volumeDown : _cvTheme.volumeFlat);
+      return {time:tz(c.time),value:c.volume,color};
+    }));
     S.volSeries = vs;
     // 有量：再套一次價格軸留白（確保不被其他 applyOptions 覆寫）
     chart.priceScale('right').applyOptions({ scaleMargins: _priceMargins });
@@ -1301,10 +1406,10 @@ function renderChart(candles) {
       lineStyle: dashed ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
       crosshairMarkerVisible: false,
     });
-    const sma20S = mkLine('#FBBF24', 1, false);   sma20S.setData(sma20Data);
-    const sma60S = mkLine('#67E8F9', 1, false);   sma60S.setData(sma60Data);
-    const bbUS   = mkLine('rgba(96,165,250,.6)', 1, true); bbUS.setData(bbU);
-    const bbLS   = mkLine('rgba(96,165,250,.6)', 1, true); bbLS.setData(bbL);
+    const sma20S = mkLine(_cvTheme.ma20, 2, false);   sma20S.setData(sma20Data);
+    const sma60S = mkLine(_cvTheme.ma60, 1, false);   sma60S.setData(sma60Data);
+    const bbUS   = mkLine(_cvTheme.band, 1, true); bbUS.setData(bbU);
+    const bbLS   = mkLine(_cvTheme.band, 1, true); bbLS.setData(bbL);
     S.overlaySeries = { sma20: sma20S, sma60: sma60S, bbU: bbUS, bbL: bbLS };
   }
 
@@ -1449,22 +1554,53 @@ function renderInd(ind, last, mkt) {
 
 // ── WATCHLIST ─────────────────────────────────────────────────
 function loadWl() {
-  try { return JSON.parse(localStorage.getItem(LS_KEY_WL)||'null') || DEFAULT_WL.slice(); }
-  catch { return DEFAULT_WL.slice(); }
+  let list;
+  try { list = JSON.parse(localStorage.getItem(LS_KEY_WL)||'null') || DEFAULT_WL.slice(); }
+  catch { list = DEFAULT_WL.slice(); }
+  // Older saved watchlists may predate display names. Backfill known defaults so
+  // the compact grid never falls back to a duplicate symbol/symbol presentation.
+  list.forEach(w => {
+    if (w.name) return;
+    const preset = DEFAULT_WL.find(d => d.t === w.t && d.m === w.m);
+    if (preset?.name) w.name = preset.name;
+  });
+  return list;
 }
 function saveWl() { localStorage.setItem(LS_KEY_WL, JSON.stringify(S.wl)); }
 
 function renderWl() {
+  cancelWlLongPress();
   const ct = document.getElementById('wlchips');
   ct.innerHTML = S.wl.map(w=>{
     const isActive = w.t===S.sym && w.m===S.mkt;
     let _etfBadge='';
-    if(S.etfDelta&&w.m==='TW'){
-      const _flow=getEtfFlowForStock(w.t);
-      if(_flow&&_flow.addCount>0) _etfBadge=`<span style="font-family:monospace;font-size:7px;padding:0 3px;margin-left:2px;background:rgba(74,222,128,.15);color:var(--green);border-radius:2px">+${_flow.addCount}</span>`;
-      else if(_flow&&_flow.rmCount>0) _etfBadge=`<span style="font-family:monospace;font-size:7px;padding:0 3px;margin-left:2px;background:rgba(248,113,113,.15);color:var(--red);border-radius:2px">-${_flow.rmCount}</span>`;
+    let _etfState='na';
+    if(w.m==='TW'){
+      const _flow=(window.EtfFlow&&typeof window.EtfFlow.getStockFlow==='function')
+        ? window.EtfFlow.getStockFlow(w.t) : null;
+      if (_flow && _flow.available) {
+        const _buy=(_flow.addCount||0)+(_flow.incCount||0);
+        const _sell=(_flow.rmCount||0)+(_flow.decCount||0);
+        const _stale=_flow.freshness!=='fresh';
+        _etfState=_stale?'stale':((_buy||_sell)?'changed':'none');
+        if (_buy || _sell) {
+          const _tone=_buy&&_sell?'mixed':(_buy?'buy':'sell');
+          const _text=`ETF 增持 ${_buy} 檔、減持 ${_sell} 檔`;
+          _etfBadge=`<span class="etf-flow-badge ${_tone}${_stale?' stale':''}" data-etf-flow-trigger data-etf-up="${_buy}" data-etf-down="${_sell}" role="button" tabindex="0" aria-label="${w.t} ETF 動向：${_text}${_stale?'，資料較舊':''}" title="${_text}；查看明細"><span class="etf-flow-label" aria-hidden="true">ETF</span><span class="etf-flow-signs" aria-hidden="true"><span class="etf-flow-sign up${_buy?' on':''}">+</span><span class="etf-flow-sign down${_sell?' on':''}">−</span></span></span>`;
+        } else if (_stale) {
+          _etfBadge='<span class="etf-flow-badge stale" data-etf-flow-trigger data-etf-up="0" data-etf-down="0" role="button" tabindex="0" aria-label="ETF 動向資料較舊" title="查看最近一份 ETF 動向"><span class="etf-flow-label" aria-hidden="true">ETF</span><span class="etf-flow-signs" aria-hidden="true"><span class="etf-flow-sign up">+</span><span class="etf-flow-sign down">−</span></span></span>';
+        }
+      } else {
+        _etfState=(_flow&&_flow.freshness==='error')?'error':'missing';
+      }
     }
-    return `<div class="wlchip${isActive?' active':''}" draggable="true" data-sym="${w.t}" data-mkt="${w.m}" onclick="loadSym('${w.t}','${w.m}')" oncontextmenu="rmWl('${w.t}','${w.m}');return false" title="拖曳排序 / 點擊載入 / 右鍵移除自選">
+    const _etfAttr=w.m==='TW'?` data-etf-flow-state="${_etfState}"`:'';
+    const _actionTitle=w.m==='TW'
+      ? '點擊載入 / 桌機停留查看 ETF 動向 / 手機長按操作 / 右鍵移除'
+      : '點擊載入 / 手機長按操作 / 桌機拖曳或右鍵移除';
+    const _identity=(w.name&&w.name!==w.t)?`${w.name} ${w.t}`:w.t;
+    const _title=`${_identity} · ${_actionTitle}`;
+    return `<div class="wlchip${isActive?' active':''}" draggable="true" data-sym="${w.t}" data-mkt="${w.m}"${_etfAttr} aria-haspopup="menu" aria-label="${_title}" onclick="loadSym('${w.t}','${w.m}')" oncontextmenu="rmWl('${w.t}','${w.m}');return false" title="${_title}">
       <span class="wlchip-grip">⋮⋮</span>
       <span class="wlchip-t">${w.name || w.t}</span>
       <span class="wlchip-p ${getPcls(w.chg)}" id="wlp-${w.t}" style="${window.Colors?('color:'+Colors.dir(w.t,w.chg)+' !important'):''}">${w.chg!=null?(w.chg>=0?'+':'')+w.chg.toFixed(2)+'%':''}</span>${_etfBadge}
@@ -1475,10 +1611,131 @@ function renderWl() {
 
 // Drag-and-drop reordering for watchlist chips
 let _dragSrcChip = null;
+let _wlLongPressTimer = null;
+let _wlPressStart = null;
+let _wlSuppressClickUntil = 0;
+let _wlMenuTarget = null;
+
+function ensureWlActionMenu() {
+  let menu = document.getElementById('wl-action-menu');
+  if (menu) return menu;
+  menu = document.createElement('div');
+  menu.id = 'wl-action-menu';
+  menu.className = 'wl-action-menu';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', '觀察股操作');
+  menu.innerHTML = '<div class="wl-menu-head"><span id="wl-menu-name">觀察股</span><small id="wl-menu-code"></small></div>' +
+    '<button type="button" class="wl-menu-etf" role="menuitem">ETF 動向</button>' +
+    '<button type="button" class="wl-menu-remove" role="menuitem">移除自選</button>' +
+    '<button type="button" class="wl-menu-cancel" role="menuitem">取消</button>';
+  document.body.appendChild(menu);
+  menu.querySelector('.wl-menu-etf').addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    const target = _wlMenuTarget;
+    const chip = target && target.chip;
+    closeWlActionMenu();
+    if (chip && window.EtfFlowTip && typeof window.EtfFlowTip.openForChip === 'function') {
+      requestAnimationFrame(function () { window.EtfFlowTip.openForChip(chip, {interaction:'touch'}); });
+    }
+  });
+  menu.querySelector('.wl-menu-remove').addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    const target = _wlMenuTarget;
+    closeWlActionMenu();
+    if (target) rmWl(target.sym, target.mkt);
+  });
+  menu.querySelector('.wl-menu-cancel').addEventListener('click', function (ev) {
+    ev.stopPropagation(); closeWlActionMenu();
+  });
+  document.addEventListener('pointerdown', function (ev) {
+    if (menu.classList.contains('open') && !menu.contains(ev.target)) closeWlActionMenu();
+  });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape') closeWlActionMenu();
+  });
+  window.addEventListener('resize', closeWlActionMenu);
+  return menu;
+}
+
+function openWlActionMenu(chip) {
+  const menu = ensureWlActionMenu();
+  const sym = chip.dataset.sym || '';
+  const mkt = chip.dataset.mkt || '';
+  const item = S.wl.find(w => w.t === sym && w.m === mkt) || {};
+  _wlMenuTarget = {sym, mkt, chip};
+  menu.querySelector('#wl-menu-name').textContent = item.name || sym;
+  menu.querySelector('#wl-menu-code').textContent = (item.name && item.name !== sym ? sym + ' · ' : '') + mkt;
+  const etfButton = menu.querySelector('.wl-menu-etf');
+  if (etfButton) {
+    etfButton.hidden = mkt !== 'TW';
+    etfButton.disabled = mkt !== 'TW';
+  }
+  menu.classList.add('open');
+  menu.style.visibility = 'hidden';
+  const chipRect = chip.getBoundingClientRect();
+  requestAnimationFrame(function () {
+    const menuRect = menu.getBoundingClientRect();
+    const left = Math.max(8, Math.min(window.innerWidth - menuRect.width - 8, chipRect.left));
+    const below = chipRect.bottom + 6;
+    const top = below + menuRect.height <= window.innerHeight - 8
+      ? below : Math.max(8, chipRect.top - menuRect.height - 6);
+    menu.style.left = Math.round(left) + 'px';
+    menu.style.top = Math.round(top) + 'px';
+    menu.style.visibility = 'visible';
+    chip.classList.add('wl-menu-open');
+  });
+}
+
+function closeWlActionMenu() {
+  const menu = document.getElementById('wl-action-menu');
+  if (menu) { menu.classList.remove('open'); menu.style.visibility = ''; }
+  document.querySelectorAll('.wlchip.wl-menu-open').forEach(chip => chip.classList.remove('wl-menu-open'));
+  _wlMenuTarget = null;
+}
+
+function cancelWlLongPress(chip) {
+  if (_wlLongPressTimer) clearTimeout(_wlLongPressTimer);
+  _wlLongPressTimer = null;
+  _wlPressStart = null;
+  if (chip) chip.classList.remove('wl-holding');
+}
+
+function attachLongPressWl(chip) {
+  chip.addEventListener('pointerdown', function (ev) {
+    if (ev.pointerType !== 'touch' && ev.pointerType !== 'pen') return;
+    cancelWlLongPress(chip);
+    _wlPressStart = {x:ev.clientX, y:ev.clientY, pointerId:ev.pointerId};
+    chip.classList.add('wl-holding');
+    _wlLongPressTimer = setTimeout(function () {
+      _wlLongPressTimer = null;
+      _wlSuppressClickUntil = Date.now() + 900;
+      chip.classList.remove('wl-holding');
+      openWlActionMenu(chip);
+      try { if (navigator.vibrate) navigator.vibrate(18); } catch {}
+    }, 550);
+  }, {passive:true});
+  chip.addEventListener('pointermove', function (ev) {
+    if (!_wlPressStart || ev.pointerId !== _wlPressStart.pointerId) return;
+    if (Math.abs(ev.clientX - _wlPressStart.x) > 10 || Math.abs(ev.clientY - _wlPressStart.y) > 10) cancelWlLongPress(chip);
+  }, {passive:true});
+  chip.addEventListener('pointerup', function () {
+    if (_wlMenuTarget && _wlMenuTarget.sym === chip.dataset.sym && _wlMenuTarget.mkt === chip.dataset.mkt) {
+      _wlSuppressClickUntil = Date.now() + 700;
+    }
+    cancelWlLongPress(chip);
+  }, {passive:true});
+  chip.addEventListener('pointercancel', function () { cancelWlLongPress(chip); }, {passive:true});
+  chip.addEventListener('click', function (ev) {
+    if (Date.now() >= _wlSuppressClickUntil) return;
+    ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation();
+  }, true);
+}
+
 function attachDragWl() {
   const ct = document.getElementById('wlchips');
   if (!ct) return;
   ct.querySelectorAll('.wlchip').forEach(chip => {
+    attachLongPressWl(chip);
     chip.addEventListener('dragstart', e => {
       _dragSrcChip = chip;
       chip.classList.add('dragging');
@@ -1569,13 +1826,210 @@ function relTime(ts) {
 }
 
 // ── TABS ─────────────────────────────────────────────────────────
+function traceMobileWorkspaceLayout(reason) {
+  try {
+    const body = document.getElementById('body');
+    const left = document.getElementById('left');
+    const right = document.getElementById('right');
+    if (!body || !left || !right || window.innerWidth > 900) return;
+    const b = body.getBoundingClientRect();
+    const l = left.getBoundingClientRect();
+    const r = right.getBoundingClientRect();
+    const app = document.getElementById('app');
+    const pager = document.getElementById('rpanel-pager');
+    const ar = app ? app.getBoundingClientRect() : null;
+    const pr = pager ? pager.getBoundingClientRect() : null;
+    const vv = window.visualViewport;
+    const portrait = window.matchMedia('(orientation: portrait)').matches;
+    fetch('/diagnostics/ui-route', {
+      method:'POST', headers:{'Content-Type':'application/json'}, keepalive:true,
+      body:JSON.stringify({
+        ts:new Date().toISOString(), event:'mobile_workspace_layout',
+        correlationId:'mobile-workspace-'+Date.now(), from:'chart-shell', to:'body',
+        state:(portrait ? 'portrait' : 'landscape') + '-' + getComputedStyle(body).flexDirection,
+        label:[reason, window.innerWidth+'x'+window.innerHeight,
+          'visual='+(vv ? Math.round(vv.width)+'x'+Math.round(vv.height) : 'none'),
+          'app='+(ar ? Math.round(ar.width)+'x'+Math.round(ar.height) : 'none'),
+          'body='+Math.round(b.width)+'x'+Math.round(b.height),
+          'left='+Math.round(l.width)+'x'+Math.round(l.height),
+          'right='+Math.round(r.width)+'x'+Math.round(r.height),
+          'pager='+(pr ? Math.round(pr.top)+'-'+Math.round(pr.bottom) : 'none')].join('|')
+      })
+    }).catch(()=>{});
+  } catch {}
+}
+
+function attachMobileWorkspaceTrace() {
+  syncMobileWorkspacePage();
+  traceMobileWorkspaceLayout('boot');
+  let timer = 0;
+  const observe = function () {
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      syncMobileWorkspacePage();
+      traceMobileWorkspaceLayout('viewport');
+    }, 180);
+  };
+  window.addEventListener('resize', observe, {passive:true});
+  window.addEventListener('orientationchange', observe, {passive:true});
+}
+
+const RPANEL_PAGES = [
+  {key:'stats', label:'技術統計'},
+  {key:'research', label:'研究分析'},
+  {key:'position', label:'持倉部位'},
+  {key:'watch', label:'條件觀察'},
+  {key:'plan', label:'交易計畫'},
+  {key:'etf', label:'ETF 變動'}
+];
+const MOBILE_WORKSPACE_PAGES = [{key:'chart', label:'線型圖'}].concat(RPANEL_PAGES);
+let _mobileWorkspacePage = 0;
+let _rpanelSwipeStart = null;
+
+function isPortraitMobileWorkspace() {
+  return !!(window.matchMedia &&
+    window.matchMedia('(max-width: 768px) and (orientation: portrait)').matches);
+}
+
+function rpanelPageIndex() {
+  const key = (S.tab === 'batch' || S.tab === 'history') ? 'research' : S.tab;
+  const idx = RPANEL_PAGES.findIndex(page => page.key === key);
+  return idx < 0 ? 0 : idx;
+}
+
+function updateRpanelPager() {
+  const mobileWorkspace = isPortraitMobileWorkspace();
+  const pages = mobileWorkspace ? MOBILE_WORKSPACE_PAGES : RPANEL_PAGES;
+  const idx = mobileWorkspace ? _mobileWorkspacePage : rpanelPageIndex();
+  const page = pages[idx] || pages[0];
+  const label = document.getElementById('rpage-label');
+  const dots = document.getElementById('rpage-dots');
+  const prev = document.getElementById('rpage-prev');
+  const next = document.getElementById('rpage-next');
+  if (label) label.textContent = page.label + ' · ' + (idx + 1) + ' / ' + pages.length;
+  if (prev) prev.disabled = idx === 0;
+  if (next) next.disabled = idx === pages.length - 1;
+  if (dots) dots.innerHTML = pages.map(function (candidate, i) {
+    return '<button type="button" class="rpage-dot' + (i === idx ? ' on' : '') + '"' +
+      ' aria-label="前往' + candidate.label + '" aria-current="' + (i === idx ? 'page' : 'false') + '"' +
+      ' onclick="goRpanelPage(' + i + ')"></button>';
+  }).join('');
+}
+
+function goRpanelPage(index) {
+  if (isPortraitMobileWorkspace()) {
+    goMobileWorkspacePage(index, 'dot');
+    return;
+  }
+  const next = RPANEL_PAGES[Math.max(0, Math.min(RPANEL_PAGES.length - 1, Number(index) || 0))];
+  if (next) setTab(next.key);
+}
+
+function syncMobileWorkspacePage(reason) {
+  const body = document.getElementById('body');
+  if (!body) return;
+  if (!isPortraitMobileWorkspace()) {
+    body.removeAttribute('data-mobile-workspace-page');
+    body.removeAttribute('data-mobile-workspace-key');
+    updateRpanelPager();
+    return;
+  }
+  const page = MOBILE_WORKSPACE_PAGES[_mobileWorkspacePage] || MOBILE_WORKSPACE_PAGES[0];
+  const pageChanged = body.getAttribute('data-mobile-workspace-key') !== page.key;
+  body.setAttribute('data-mobile-workspace-page', page.key === 'chart' ? 'chart' : 'analysis');
+  body.setAttribute('data-mobile-workspace-key', page.key);
+  updateRpanelPager();
+  if (page.key === 'chart' && pageChanged) {
+    setTimeout(function () { try { window.dispatchEvent(new Event('resize')); } catch {} }, 30);
+  }
+  if (reason) {
+    try {
+      fetch('/diagnostics/ui-route', {
+        method:'POST', headers:{'Content-Type':'application/json'}, keepalive:true,
+        body:JSON.stringify({
+          ts:new Date().toISOString(), event:'mobile_workspace_page_changed',
+          correlationId:'mobile-workspace-page-'+Date.now(), from:reason, to:page.key,
+          state:'page-'+(_mobileWorkspacePage + 1)+'-of-'+MOBILE_WORKSPACE_PAGES.length,
+          label:window.innerWidth+'x'+window.innerHeight
+        })
+      }).catch(()=>{});
+    } catch {}
+  }
+}
+
+function goMobileWorkspacePage(index, reason) {
+  const value = Number(index);
+  const nextIndex = Math.max(0, Math.min(MOBILE_WORKSPACE_PAGES.length - 1,
+    Number.isFinite(value) ? value : 0));
+  _mobileWorkspacePage = nextIndex;
+  const page = MOBILE_WORKSPACE_PAGES[nextIndex];
+  if (page && page.key !== 'chart' && S.tab !== page.key) {
+    S.tab = page.key;
+    document.querySelectorAll('.rtab').forEach(function (button) {
+      button.classList.toggle('on', button.dataset.tab === page.key);
+    });
+    renderRpanel();
+  }
+  const panel = document.getElementById('rpanel');
+  if (panel) panel.scrollTop = 0;
+  syncMobileWorkspacePage(reason || 'pager');
+}
+
+function shiftRtab(delta) {
+  if (isPortraitMobileWorkspace()) {
+    goMobileWorkspacePage(_mobileWorkspacePage + delta, delta > 0 ? 'next' : 'prev');
+    return;
+  }
+  const current = rpanelPageIndex();
+  const next = Math.max(0, Math.min(RPANEL_PAGES.length - 1, current + delta));
+  if (next === current) return;
+  setTab(RPANEL_PAGES[next].key);
+  const panel = document.getElementById('rpanel');
+  if (panel) panel.scrollTop = 0;
+}
+
+function attachRpanelPager() {
+  const panel = document.getElementById('rpanel');
+  const left = document.getElementById('left');
+  function bind(surface, chartEdgeOnly) {
+    if (!surface || surface.dataset.swipePager === '1') return;
+    surface.dataset.swipePager = '1';
+    surface.addEventListener('pointerdown', function (ev) {
+      if (!isPortraitMobileWorkspace()) return;
+      if (ev.pointerType !== 'touch' && ev.pointerType !== 'pen') return;
+      if (ev.target && ev.target.closest && ev.target.closest('button,a,input,textarea,select,[contenteditable="true"]')) return;
+      if (chartEdgeOnly && ev.clientX < window.innerWidth - Math.max(28, window.innerWidth * .07)) return;
+      _rpanelSwipeStart = {x:ev.clientX, y:ev.clientY, at:Date.now(), pointerId:ev.pointerId};
+    }, {passive:true, capture:true});
+    surface.addEventListener('pointerup', function (ev) {
+      const start = _rpanelSwipeStart;
+      _rpanelSwipeStart = null;
+      if (!start || ev.pointerId !== start.pointerId || Date.now() - start.at > 1200) return;
+      const dx = ev.clientX - start.x;
+      const dy = ev.clientY - start.y;
+      if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.35) return;
+      shiftRtab(dx < 0 ? 1 : -1);
+    }, {passive:true, capture:true});
+    surface.addEventListener('pointercancel', function () { _rpanelSwipeStart = null; }, {passive:true, capture:true});
+  }
+  bind(panel, false);
+  bind(left, true);
+  syncMobileWorkspacePage();
+}
+
 function setTab(tab) {
   S.tab = tab;
-  document.querySelectorAll('.rtab').forEach((b,i)=>{
-    const tabs=['stats','research','batch','history','etf'];
-    b.classList.toggle('on', tabs[i]===tab);
+  document.querySelectorAll('.rtab').forEach(b=>{
+    b.classList.toggle('on', b.dataset.tab===tab);
   });
   renderRpanel();
+  if (isPortraitMobileWorkspace()) {
+    const idx = RPANEL_PAGES.findIndex(function (page) { return page.key === tab; });
+    if (idx >= 0) _mobileWorkspacePage = idx + 1;
+    syncMobileWorkspacePage('tab');
+  } else {
+    updateRpanelPager();
+  }
 }
 
 function renderRpanel() {
@@ -1584,7 +2038,10 @@ function renderRpanel() {
   if (S.tab==='research') { el.innerHTML = renderResearch(); attachResearch(); return; }
   if (S.tab==='batch')    { el.innerHTML = renderBatch(); attachBatch(); return; }
   if (S.tab==='history')  { el.innerHTML = renderHistoryTab(); return; }
-  if (S.tab==='etf')      { el.innerHTML = renderEtfDelta(); return; }
+  if (S.tab==='etf')      { el.innerHTML = window.renderEtfV3 ? window.renderEtfV3() : ''; return; }
+  if (S.tab==='position') { var _ae=document.activeElement; if(!(_ae&&/^pos-(entry|shares|target|stop|notes|unit)$/.test(_ae.id||''))){ el.innerHTML = renderPosition(); attachPosition(); } return; }
+  if (S.tab==='watch')    { el.innerHTML = renderWatch(); attachWatch(); return; }
+  if (S.tab==='plan')     { el.innerHTML = renderPlan(); attachPlan(); return; }
 }
 
 // ── STATS TAB ────────────────────────────────────────────────────
@@ -1604,7 +2061,7 @@ function renderStats() {
   const _rChg = (_rBase > 0) ? (last.close - _rBase) : null;
   const _rPct = (_rBase > 0) ? (_rChg / _rBase * 100) : null;
   const mktCap = m.marketCap ? (m.marketCap>1e12?(m.marketCap/1e12).toFixed(2)+'T':(m.marketCap>1e9?(m.marketCap/1e9).toFixed(2)+'B':(m.marketCap/1e6).toFixed(0)+'M')) : '--';
-  const cur = S.mkt==='TW'?'TWD':'USD';
+  const cur = S.mkt==='TW' ? 'TWD' : (S.mkt==='JP' ? 'JPY' : 'USD');
   const rows = [
     ['PRICE',`${last.close.toFixed(2)} ${cur}`],
     ['CHANGE',`${chg>=0?'+':''}${chg.toFixed(2)} (${chgPct>=0?'+':''}${chgPct.toFixed(2)}%)`],
@@ -1640,7 +2097,7 @@ function renderStats() {
   return `
     <div class="stat-hdr">價格資訊 · ${S.sym}</div>
     ${rows.map(([k,v])=>`<div class="stat-row"><span class="stat-k">${k}</span><span class="stat-v" id="rp-${k.replace(/\s+/g,'')}">${v}</span></div>`).join('')}
-    ${renderEtfHoldingsForStock(S.sym)}${S.ind?`<div class="stat-sect">技術指標</div>${indRows.map(([k,v])=>`<div class="stat-row"><span class="stat-k">${k}</span><span class="stat-v">${v||'--'}</span></div>`).join('')}`:''}
+    ${window.renderEtfHoldingsV3 ? window.renderEtfHoldingsV3(S.sym) : ''}${S.ind?`<div class="stat-sect">技術指標</div>${indRows.map(([k,v])=>`<div class="stat-row"><span class="stat-k">${k}</span><span class="stat-v">${v||'--'}</span></div>`).join('')}`:''}
   `;
 }
 
@@ -1868,7 +2325,9 @@ async function runBatch() {
 }
 async function runBatchItem(b) {
   b.status='running'; b.statusTxt='分析中...'; renderRpanel();
-  const mktLabel=b.mkt==='TW'?`台股（代號：${b.sym}，幣別：TWD 新台幣）`:`美股（代號：${b.sym}，幣別：USD）`;
+  const mktLabel=b.mkt==='TW' ? `台股（代號：${b.sym}，幣別：TWD 新台幣）`
+    : b.mkt==='JP' ? `日股（代號：${b.sym}，幣別：JPY 日圓）`
+    : `美股（代號：${b.sym}，幣別：USD）`;
   const userMsg=`請對以下個股撰寫完整八章節研究報告：\n市場：${mktLabel}\n股票代號：${b.sym}\n\n直接從 [[[SECTION:公司簡介]]] 開始。`;
   try {
     const res=await fetch(`${SERVER}/ai-proxy`,{   // 經本機 server 代理(金鑰在 server)
@@ -2015,6 +2474,8 @@ function setMkt(m) { S.mkt=m; setMktUI(m); }
 function setMktUI(m) {
   document.getElementById('btn-tw').classList.toggle('on',m==='TW');
   document.getElementById('btn-us').classList.toggle('on',m==='US');
+  const jp = document.getElementById('btn-jp');
+  if (jp) jp.classList.toggle('on',m==='JP');
 }
 function go() {
   const sym=document.getElementById('syminput').value.trim().toUpperCase();
@@ -2070,241 +2531,90 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
 });
 </script>
+<script src="src/core/colors_v3.js?v=1786836179"></script>
+<script src="src/core/market_data_v5.js?v=1786836179"></script>
+<script src="src/core/decision_data_v5.js?v=1786836179"></script>
+<script src="src/core/market_intel_v5.js?v=1786836179"></script>
+<script src="src/core/table_sort_v5.js?v=1786836179"></script>
+<script src="src/ui/viz_v5.js?v=1786836179"></script>
+<script src="src/core/market_v3.js?v=1786836179"></script>
+<script src="src/core/fields_v3.js?v=1786836179"></script>
+<script src="src/core/chart_registry_v3.js?v=1786836179"></script>
+<script src="src/ui/share_v3.js?v=1786836179"></script>
+<script src="src/ui/datasources_v3.js?v=1786836179"></script>
+<script src="src/core/etf_flow_tip_v3.js?v=1786836179"></script>
+<script src="src/core/position_v2.js?v=1786836179"></script>
+<script src="src/core/watch_v2.js?v=1786836179"></script>
+<script src="src/core/info_v2.js?v=1786836179"></script>
+<script src="src/core/pro_v2.js?v=1786836179"></script>
+<script src="src/chart/volume_profile_v3.js?v=1786836179"></script>
+<script src="src/chart/pattern_v3.js?v=1786836179"></script>
+<script src="src/core/live_v2.js?v=1786836179"></script>
+<script src="src/fundamental/chip_v3.js?v=1786836179"></script>
+<script src="src/fundamental/fundamental_v3.js?v=1786836179"></script>
+<script src="src/screener/screener_v3.js?v=1786836179"></script>
+<script src="src/ai/ai_report_v3.js?v=1786836179"></script>
+<script src="src/ui/polish_v3.js?v=1786836179"></script>
+<script src="src/core/wl_live_v3.js?v=1786836179"></script>
+<script src="src/fundamental/plan_history_v3.js?v=1786836179"></script>
+<script src="src/fundamental/plan_position_v3.js?v=1786836179"></script>
+<script src="src/fundamental/plan_v3.js?v=1786836179"></script>
+<script src="src/ui/pdf_import_v3.js?v=1786836179"></script>
+<script src="src/ui/pdf_export_v3.js?v=1786836179"></script>
+<script src="src/core/peg_v3.js?v=1786836179"></script>
+<script src="src/alert/alert_v3.js?v=1786836179"></script>
+<script src="src/alert/alert_push_v3.js?v=1786836179"></script>
+<script src="src/screener/backtest_v3.js?v=1786836179"></script>
+<script src="src/screener/backtest_ui_v3.js?v=1786836179"></script>
+<script src="src/ui/enhance_v3.js?v=1786836179"></script>
+<script src="src/chart/aftermarket_v3.js?v=1786836179"></script>
+<script src="src/chart/overnight_v3.js?v=1786836179"></script>
+<script src="src/fundamental/supplychain_v3.js?v=1786836179"></script>
+<script src="src/portfolio/portfolio_v3.js?v=1786836179"></script>
+<script src="src/fundamental/chainmom_v3.js?v=1786836179"></script>
+<script src="src/fundamental/valuation_v3.js?v=1786836179"></script>
+<script src="src/fundamental/marketflow_v3.js?v=1786836179"></script>
+<script src="src/fundamental/instrank_v3.js?v=1786836179"></script>
+<script src="src/alert/calendar_v3.js?v=1786836179"></script>
+<script src="src/chart/multichart_v3.js?v=1786836179"></script>
+<script src="src/chart/spread_v3.js?v=1786836179"></script>
+<script src="src/chart/hotkeys_v3.js?v=1786836179"></script>
+<script src="src/screener/strategy_builder_v3.js?v=1786836179"></script>
+<script src="src/screener/strategy_script_v3.js?v=1786836179"></script>
+<script src="src/chart/drawtools_v3.js?v=1786836179"></script>
+<script src="src/screener/screener3_v3.js?v=1786836179"></script>
+<script src="src/core/etf_v3.js?v=1786836179"></script>
+<script src="src/fundamental/stockfut_v3.js?v=1786836179"></script>
+<script src="src/core/indices_v3.js?v=1786836179"></script>
+<script src="src/alert/datahealth_v3.js?v=1786836179"></script>
+<script src="src/alert/toast_v3.js?v=1786836179"></script>
+<script src="src/alert/settle_v3.js?v=1786836179"></script>
+<script src="src/ai/cmdpalette_v3.js?v=1786836179"></script>
+<script src="src/ui/dragwin_v3.js?v=1786836179"></script>
+<script src="src/core/liverefresh_v3.js?v=1786836179"></script>
+<script src="src/core/namesearch_v3.js?v=1786836179"></script>
+<script src="src/core/intraday_volume_v3.js?v=1786836179"></script>
+<script src="src/core/realtime_v3.js?v=1786836179"></script>
+<script src="src/ai/focus_v3.js?v=1786836179"></script>
+<script src="src/ai/copilot_v3.js?v=1786836179"></script>
+<script src="src/screener/wizard_v3.js?v=1786836179"></script>
+<script src="src/ui/shell_v5.js?v=1786836179"></script>
+<script src="src/ui/wavedeck_bridge_v5.js?v=1786836179"></script>
+<script src="src/ui/hub_v5.js?v=1786836179"></script>
+<script src="src/ui/pulse_v5.js?v=1786836179"></script>
+<script src="src/ui/decision_v5.js?v=1786836179"></script>
+<script src="src/ui/heat_v5.js?v=1786836179"></script>
+<script src="src/ui/book_v5.js?v=1786836179"></script>
+<script src="src/ui/scan_v5.js?v=1786836179"></script>
+<script src="src/ui/ai_v5.js?v=1786836179"></script>
+<script src="src/ui/breadth_v5.js?v=1786836179"></script>
+<script src="src/ui/afterhours_v5.js?v=1786836179"></script>
+<script src="src/ui/news_v5.js?v=1786836179"></script>
+<script src="src/ui/bridge_v5.js?v=1786836179"></script>
+<script src="src/ui/visual_system_v5.js?v=1786836179"></script>
+<script src="src/ui/chart_visual_v5.js?v=1786836179"></script>
+<script src="src/ui/toolbar_v3.js?v=1786836179"></script>
+<script src="src/chart/market_score_bar_v3.js?v=1786836179"></script>
+<script src="src/chart/market_chart_v3.js?v=1786836179"></script>
 </body>
 </html>
-<script>
-// ══════════════════════════════════════════════════════════════
-// ETF DELTA — 新增功能區塊
-// ══════════════════════════════════════════════════════════════
-
-const ETF_MAP_NAMES = {
-  '00992A':'群益科技創新','00981A':'統一台股增長',
-  '00987A':'台新優勢成長','00994A':'第一金台股優',
-  '00982A':'群益台灣強棒','00995A':'中信台灣卓越',
-  '00980A':'野村臺灣優選','00991A':'復華未來50',
-  '00996A':'兆豐台灣豐收','00984A':'安聯台灣高息',
-};
-
-async function fetchEtfDelta(date) {
-  S.etfLoading = true;
-  S.etfErr = null;
-  try {
-    const url = date ? `${SERVER}/etf-delta?date=${date}` : `${SERVER}/etf-delta`;
-    const r = await fetch(url, {cache:'no-store'});
-    if (!r.ok) {
-      let msg = `HTTP ${r.status}`;
-      try { const j = await r.json(); if (j.error) msg = j.error; } catch {}
-      S.etfDelta = null; S.etfErr = msg; S.etfLoading = false;
-      if (S.tab === 'etf') renderRpanel();
-      return;
-    }
-    S.etfDelta = await r.json();
-    renderWl();
-    updateEtfFlowInd();
-    if (S.tab === 'etf')   renderRpanel();
-    if (S.tab === 'stats') renderRpanel();
-  } catch (e) { S.etfDelta = null; S.etfErr = e.message || 'fetch failed'; }
-  S.etfLoading = false;
-}
-
-function getEtfFlowForStock(code) {
-  if (!S.etfDelta) return null;
-  let addCount=0, rmCount=0, chgSum=0;
-  for (const etf of (S.etfDelta.etfs||[])) {
-    if ((etf.new||[]).find(s=>s.code===code))     addCount++;
-    if ((etf.removed||[]).find(s=>s.code===code)) rmCount++;
-    const chg = (etf.changed||[]).find(s=>s.code===code);
-    if (chg) chgSum += chg.delta;
-  }
-  return {addCount, rmCount, chgSum};
-}
-
-function updateEtfFlowInd() {
-  const el = document.getElementById('ig-etfFlow');
-  if (!el || !S.sym) return;
-  if (!S.etfDelta) { el.textContent='--'; return; }
-  const flow = getEtfFlowForStock(S.sym);
-  if (!flow) { el.textContent='--'; return; }
-  if (flow.addCount > 0)      { el.textContent=`+${flow.addCount} ETF`; el.style.color='var(--green)'; }
-  else if (flow.rmCount > 0)  { el.textContent=`-${flow.rmCount} ETF`; el.style.color='var(--red)'; }
-  else if (Math.abs(flow.chgSum) >= 0.5) {
-    el.textContent=(flow.chgSum>0?'+':'')+flow.chgSum.toFixed(2)+'%';
-    el.style.color=flow.chgSum>0?'var(--green)':'var(--red)';
-  } else { el.textContent='無訊號'; el.style.color='var(--tf)'; }
-}
-
-function renderEtfHoldingsForStock(sym) {
-  if (!S.etfDelta || !sym) return '';
-  const rows = [];
-  for (const etf of (S.etfDelta.etfs||[])) {
-    const n = (etf.new||[]).find(s=>s.code===sym);
-    if (n) { rows.push({code:etf.code,rank:n.rank,weight:n.weight,delta:'新增',dc:'var(--green)'}); continue; }
-    const rm = (etf.removed||[]).find(s=>s.code===sym);
-    if (rm) { rows.push({code:etf.code,rank:'-',weight:rm.prev_weight,delta:'移除',dc:'var(--red)'}); continue; }
-    const chg = (etf.changed||[]).find(s=>s.code===sym);
-    if (chg) { rows.push({code:etf.code,rank:chg.rank,weight:chg.curr_weight,delta:(chg.delta>=0?'+':'')+chg.delta.toFixed(2)+'%',dc:chg.delta>=0?'var(--green)':'var(--red)'}); }
-  }
-  if (!rows.length) return '';
-  return `<div class="stat-sect">ETF 持股動態（今日）</div>` +
-    rows.map(r=>`<div class="stat-row">
-      <span class="stat-k" style="font-size:9px">${r.code} <span style="color:var(--tf)">#${r.rank}</span></span>
-      <span class="stat-v">${r.weight}% <span style="color:${r.dc};margin-left:6px">${r.delta}</span></span>
-    </div>`).join('');
-}
-
-// ── ETF Delta Tab ─────────────────────────────────────────────
-let _etfExp = {};
-
-function renderEtfDelta() {
-  if (S.etfLoading) return '<div style="padding:20px;text-align:center;font-family:monospace;font-size:10px;color:var(--tlo)">載入 ETF Delta...</div>';
-  if (!S.etfDelta || S.etfDelta.error) {
-    const err = S.etfErr || '';
-    const needHist = /history|file|need|≥2|dir=/i.test(err);
-    const hint = needHist
-      ? '尚無足夠歷史檔（需 ≥ 2 個交易日）<br><span style="font-size:9px;color:var(--tf)">執行 <code style="color:var(--gold)">python etf_delta_tracker.py --backfill 5</code><br>每天排程一次即可累積</span>'
-      : (err
-          ? `<span style="font-size:9px;color:var(--red)">${err}</span><br><span style="font-size:9px;color:var(--tf)">請確認 server.py 已啟動於 :18432</span>`
-          : '無法連線 ETF Delta<br><span style="font-size:9px;color:var(--tf)">請確認 server.py 已啟動</span>');
-    return `<div style="padding:24px 14px;font-family:monospace;font-size:10px;color:var(--tlo);text-align:center;line-height:1.9">
-      ${hint}<br>
-      <button onclick="fetchEtfDelta()" style="margin-top:14px;padding:5px 16px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--tlo);font-family:monospace;font-size:9px;cursor:pointer">↻ 重試</button>
-    </div>`;
-  }
-
-  const d = S.etfDelta;
-  const s = d.summary;
-
-  // Cross-ETF consensus
-  const newMap = {};
-  for (const etf of (d.etfs||[])) {
-    for (const n of (etf.new||[])) {
-      if (!newMap[n.code]) newMap[n.code] = {code:n.code,name:n.name,etfs:[]};
-      newMap[n.code].etfs.push({etf:etf.code,w:n.weight});
-    }
-  }
-  const consensus = Object.values(newMap).filter(x=>x.etfs.length>=2);
-
-  let h = '';
-
-  // Date bar
-  h += `<div style="padding:5px 12px;font-family:monospace;font-size:9px;color:var(--tlo);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-    <span>📅 ${d.date} vs ${d.prev_date}</span>
-    <button onclick="fetchEtfDelta()" style="padding:1px 7px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--tlo);font-family:monospace;font-size:8px;cursor:pointer">↻</button>
-  </div>`;
-
-  // Summary counts
-  h += `<div style="display:flex;border-bottom:1px solid var(--border)">
-    <div style="flex:1;padding:8px 4px;text-align:center;border-right:1px solid var(--border)">
-      <div style="font-family:monospace;font-size:20px;font-weight:700;color:var(--green)">${s.new}</div>
-      <div style="font-family:monospace;font-size:8px;color:var(--tlo);letter-spacing:1px">新增</div>
-    </div>
-    <div style="flex:1;padding:8px 4px;text-align:center;border-right:1px solid var(--border)">
-      <div style="font-family:monospace;font-size:20px;font-weight:700;color:var(--red)">${s.removed}</div>
-      <div style="font-family:monospace;font-size:8px;color:var(--tlo);letter-spacing:1px">移除</div>
-    </div>
-    <div style="flex:1;padding:8px 4px;text-align:center">
-      <div style="font-family:monospace;font-size:20px;font-weight:700;color:var(--cyan)">${s.changed}</div>
-      <div style="font-family:monospace;font-size:8px;color:var(--tlo);letter-spacing:1px">加減碼</div>
-    </div>
-  </div>`;
-
-  // Consensus
-  if (consensus.length) {
-    h += `<div style="padding:4px 10px;font-family:monospace;font-size:8px;color:var(--tf);letter-spacing:2px;border-bottom:1px solid var(--border);background:var(--bg);text-transform:uppercase">🔥 跨ETF共識新增</div>`;
-    for (const c of consensus) {
-      const etfTxt = c.etfs.map(e=>`${e.etf}(${e.w}%)`).join(' · ');
-      h += `<div onclick="loadSym('${c.code}','TW')" style="padding:7px 10px;border-bottom:1px solid var(--border);cursor:pointer;background:rgba(245,197,24,.04);border-left:2px solid var(--gold);transition:background .12s" onmouseover="this.style.background='rgba(245,197,24,.09)'" onmouseout="this.style.background='rgba(245,197,24,.04)'">
-        <div style="font-family:monospace;font-size:12px;font-weight:700;color:var(--gold)">${c.code} ${c.name}</div>
-        <div style="font-family:monospace;font-size:8px;color:var(--tlo);margin-top:2px">${etfTxt}</div>
-      </div>`;
-    }
-  }
-
-  // All new additions
-  const allNew = (d.etfs||[]).flatMap(e=>(e.new||[]).map(n=>({...n,etfCode:e.code})));
-  if (allNew.length) {
-    h += `<div style="padding:4px 10px;font-family:monospace;font-size:8px;color:var(--tf);letter-spacing:2px;border-bottom:1px solid var(--border);background:var(--bg);text-transform:uppercase">新增持股</div>`;
-    for (const n of allNew) {
-      const pri = n.weight>=2?'高優先':n.weight>=0.5?'中優先':'低優先';
-      const priColor = n.weight>=2?'var(--green)':n.weight>=0.5?'var(--gold)':'var(--tf)';
-      h += `<div onclick="loadSym('${n.code}','TW')" style="display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
-        <span style="font-family:monospace;font-size:11px;font-weight:700;color:var(--thi);min-width:45px">${n.code}</span>
-        <span style="font-family:monospace;font-size:9px;color:var(--tlo);flex:1">${n.name}</span>
-        <span style="font-family:monospace;font-size:10px;color:var(--green);font-weight:700">+${n.weight}%</span>
-        <span style="font-family:monospace;font-size:8px;color:${priColor}">${pri}</span>
-      </div>
-      <div style="padding:2px 10px 5px;font-family:monospace;font-size:8px;color:var(--tf);border-bottom:1px solid var(--border)">${n.etfCode} · #${n.rank} · ${(n.shares||0).toLocaleString()} 股</div>`;
-    }
-    // Batch all button
-    h += `<div style="padding:8px 10px;border-bottom:1px solid var(--border)">
-      <button onclick="etfBatchAllNew()" style="width:100%;padding:6px;background:var(--gold);color:#060A12;border:none;border-radius:5px;font-family:monospace;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:1px">⚡ 一鍵批次 AI 分析所有新增股</button>
-    </div>`;
-  }
-
-  // Per-ETF signal table
-  h += `<div style="padding:4px 10px;font-family:monospace;font-size:8px;color:var(--tf);letter-spacing:2px;border-bottom:1px solid var(--border);background:var(--bg);text-transform:uppercase">各ETF訊號強度（點擊展開）</div>`;
-
-  // Include ETFs with no events too
-  const allEtfCodes = Object.keys(ETF_MAP_NAMES);
-  const etfMap = {};
-  for (const e of (d.etfs||[])) etfMap[e.code] = e;
-
-  for (const code of allEtfCodes) {
-    const etf = etfMap[code] || {code, name:'主動'+ETF_MAP_NAMES[code], new:[], removed:[], changed:[]};
-    const newLen=(etf.new||[]).length, rmLen=(etf.removed||[]).length;
-    const maxDelta = Math.max(0,...(etf.changed||[]).map(c=>Math.abs(c.delta)));
-    let sig='no', sigTxt='無訊號', sigColor='var(--tf)';
-    if (newLen>0)        { sig='hi'; sigTxt=`高 ↑${newLen}新`;   sigColor='var(--green)'; }
-    else if (maxDelta>=1){ sig='md'; sigTxt='中 △';               sigColor='var(--gold)'; }
-    else if (maxDelta>=0.5||rmLen>0){ sig='lo'; sigTxt='低 ○';   sigColor='var(--tlo)'; }
-    const exp = _etfExp[code];
-    h += `<div onclick="toggleEtfExp('${code}')" style="display:flex;align-items:center;gap:6px;padding:5px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
-      <span style="font-family:monospace;font-size:9px;font-weight:700;color:var(--gold);min-width:55px">${code}</span>
-      <span style="font-family:monospace;font-size:8px;color:var(--tlo);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${ETF_MAP_NAMES[code]||''}</span>
-      <span style="font-family:monospace;font-size:8px;font-weight:700;color:${sigColor}">${sigTxt}</span>
-      <span style="font-size:9px;color:var(--tf)">${exp?'▲':'▼'}</span>
-    </div>`;
-    if (exp) {
-      h += `<div style="padding:6px 10px;background:var(--bg);border-bottom:1px solid var(--border)">`;
-      for (const n of (etf.new||[])) h+=`<div style="display:flex;justify-content:space-between;padding:2px 0;font-family:monospace;font-size:9px"><span style="color:var(--thi);min-width:45px">${n.code}</span><span style="color:var(--tlo);flex:1">${n.name}</span><span style="color:var(--green);font-weight:700">新增 +${n.weight}%</span></div>`;
-      for (const r of (etf.removed||[])) h+=`<div style="display:flex;justify-content:space-between;padding:2px 0;font-family:monospace;font-size:9px"><span style="color:var(--thi);min-width:45px">${r.code}</span><span style="color:var(--tlo);flex:1">${r.name}</span><span style="color:var(--red);font-weight:700">移除 ${r.prev_weight}%</span></div>`;
-      for (const c of (etf.changed||[])) {
-        const clr=c.delta>=0?'var(--green)':'var(--red)';
-        h+=`<div style="display:flex;justify-content:space-between;padding:2px 0;font-family:monospace;font-size:9px"><span style="color:var(--thi);min-width:45px">${c.code}</span><span style="color:var(--tlo);flex:1">${c.name}</span><span style="color:${clr};font-weight:700">${c.delta>=0?'+':''}${c.delta.toFixed(2)}%</span></div>`;
-      }
-      if (!newLen && !rmLen && !(etf.changed||[]).length) h+=`<div style="font-family:monospace;font-size:9px;color:var(--tf)">今日無事件</div>`;
-      h += `<div style="display:flex;gap:5px;margin-top:5px">
-        <button onclick="event.stopPropagation();etfAddWl('${code}')" style="padding:2px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--tlo);font-family:monospace;font-size:8px;cursor:pointer">加自選</button>
-        <button onclick="event.stopPropagation();etfAddBatch('${code}')" style="padding:2px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--tlo);font-family:monospace;font-size:8px;cursor:pointer">批次分析</button>
-      </div>`;
-      h += '</div>';
-    }
-  }
-
-  return h;
-}
-
-function toggleEtfExp(code) {
-  _etfExp[code] = !_etfExp[code];
-  if (S.tab==='etf') renderRpanel();
-}
-function etfAddWl(etfCode) {
-  const etf = (S.etfDelta?.etfs||[]).find(e=>e.code===etfCode);
-  if (!etf) return;
-  for (const n of (etf.new||[])) if (!S.wl.find(w=>w.t===n.code&&w.m==='TW')) S.wl.push({t:n.code,m:'TW'});
-  saveWl(); renderWl();
-}
-function etfAddBatch(etfCode) {
-  const etf = (S.etfDelta?.etfs||[]).find(e=>e.code===etfCode);
-  if (!etf) return;
-  for (const n of (etf.new||[])) if (!S.batch.find(b=>b.sym===n.code&&b.mkt==='TW')) S.batch.push({sym:n.code,mkt:'TW',status:'',statusTxt:''});
-  setTab('batch');
-}
-function etfBatchAllNew() {
-  if (!S.etfDelta) return;
-  for (const etf of (S.etfDelta.etfs||[])) {
-    for (const n of (etf.new||[])) if (!S.batch.find(b=>b.sym===n.code&&b.mkt==='TW')) S.batch.push({sym:n.code,mkt:'TW',status:'',statusTxt:''});
-  }
-  setTab('batch');
-}
-</script>

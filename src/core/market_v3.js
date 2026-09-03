@@ -11,12 +11,21 @@
   var SRV = window.SERVER || 'http://localhost:18432';
   var _tw = null, _us = null, _twmeta = null, _meta = { updated: 0, counts: {} };
 
-  function isTwFmt(c) { c = String(c || ''); return /^\d/.test(c) || /^\^TW/i.test(c); }
+  function isJpFmt(c) {
+    c = String(c || '').toUpperCase();
+    return c === '^N225' || (/^\d{4}\.T$/.test(c) && !/\.TW(O)?$/.test(c));
+  }
+  function isTwFmt(c) {
+    c = String(c || '').toUpperCase();
+    if (isJpFmt(c)) return false;
+    return /^\d/.test(c) || /^\^TW/i.test(c);
+  }
 
   var Market = {
     // 市場判定(永不失敗、對新代號也正確):US 表命中→US;TW 表/格式→TW;字母→US。
     of: function (code) {
       code = String(code || '').toUpperCase();
+      if (isJpFmt(code)) return 'JP';
       // 合成指數／本地序列：台股語意（紅漲綠跌、不附 .TW）
       if (code === '__MARGIN_RATIO__' || code === '__TXF__'
           || code === '__TW_RATES__' || code === '__TW_MARGIN_MIX__'
@@ -30,6 +39,7 @@
       return isTwFmt(code) ? 'TW' : 'US';
     },
     isTW: function (code) { return this.of(code) === 'TW'; },
+    isJP: function (code) { return this.of(code) === 'JP'; },
     name: function (code) {
       code = String(code || '').toUpperCase();
       return (_tw && _tw[code]) || (_us && _us[code]) || '';
@@ -76,8 +86,10 @@
   }
   function _chgCell(code, v) {
     if (v === null || v === undefined || isNaN(v)) return '<td style="text-align:right">–</td>';
-    var col = window.Colors ? Colors.dir(code, v) : (v > 0 ? '#ef4444' : v < 0 ? '#22c55e' : '#9aa');
     var s = (v > 0 ? '+' : '') + v.toFixed(2) + '%';
+    var V = window.Viz;
+    if (V) return '<td style="text-align:right">' + V.heatCell(s, v, code) + '</td>';
+    var col = window.Colors ? Colors.dir(code, v) : (v > 0 ? '#ef4444' : v < 0 ? '#22c55e' : '#9aa');
     return '<td style="text-align:right;color:' + col + ';font-weight:600">' + s + '</td>';
   }
   function _esc(s) { return String(s == null ? '' : s).replace(/[<>&"]/g, function (c) { return ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]; }); }
@@ -151,18 +163,25 @@
       if (!q && rows.length >= 60) break;
     }
     rows.sort(function (a, b) { return a < b ? -1 : 1; });
+    var V = window.Viz;
+    var maxVol = 0;
+    rows.forEach(function (code) {
+      var vv = mm[code] && mm[code].vol;
+      if (vv != null && !isNaN(vv)) maxVol = Math.max(maxVol, Math.abs(vv));
+    });
     var head = '<thead><tr>' +
       ['代號', '中文', '英文', '收盤', '漲跌%', '量(張)', 'PE', 'PB', '殖%', 'EPS', '毛%', '營%', '淨%', '市值', '板'].
         map(function (h) { return '<th>' + h + '</th>'; }).join('') + '</tr></thead>';
     var body = rows.map(function (code) {
       var d = mm[code];
+      var volBar = (V && maxVol && d.vol != null && !isNaN(d.vol)) ? V.rowBar(d.vol, maxVol) : '';
       return '<tr>' +
         '<td class="code" onclick="(window.loadSym||function(){})(\'' + code + '\');document.getElementById(\'uni-modal\').style.display=\'none\'">' + code + '</td>' +
         '<td>' + _esc(d.zh) + '</td>' +
         '<td style="color:#9aa">' + _esc(d.en) + '</td>' +
         '<td style="text-align:right">' + _n(d.close, 2) + '</td>' +
         _chgCell(code, d.chg) +
-        '<td style="text-align:right">' + _vol(d.vol) + '</td>' +
+        '<td style="text-align:right">' + _vol(d.vol) + volBar + '</td>' +
         '<td style="text-align:right">' + _n(d.pe, 2) + '</td>' +
         '<td style="text-align:right">' + _n(d.pb, 2) + '</td>' +
         '<td style="text-align:right">' + _n(d['yield'], 2) + '</td>' +

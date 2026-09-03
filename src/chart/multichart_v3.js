@@ -83,25 +83,26 @@
   // ---- 單格建圖 ----
   function buildPanelChart(p, parsed) {
     if (p.chart) { try { p.chart.remove(); } catch {} p.chart = null; }
-    const candles = (parsed && parsed.candles) ? parsed.candles : [];
-    p.candles = candles;
-    const tz = t => (t == null ? t : t + tzOff());
+    let candles = (parsed && parsed.candles) ? parsed.candles : [];
     const isIntraday = (RANGES.find(x => x.key === p.rg) || {}).interval !== '1d'
       && (RANGES.find(x => x.key === p.rg) || {}).interval !== '1wk';
+    if (isIntraday && window.IntradayVolumeV3) {
+      candles = window.IntradayVolumeV3.filterTwRegularSession(candles, p.mkt).candles;
+    }
+    p.candles = candles;
+    const tz = t => (t == null ? t : t + tzOff());
 
     // ── 最後一根量回補 (對齊主程式 loadSym) ─────────────────────
-    // Yahoo intraday 最後一根(含 13:30 集合競價)volume 常為 0/null。
-    // 用當日總量 regularMarketVolume 減其餘各 bar 量，把缺口補回最後一根；
-    // 日線最後一根量為 0/null 時直接用 regularMarketVolume 回填。
+    // 盤中累計總量不可塞進延遲的最後一分鐘；只有明示完整的收盤快照可補。
+    // 日線本身就是整日桶，最後一根量為 0/null 時仍可用整日總量回填。
     const _meta = (parsed && parsed.meta) || {};
     const _rmv = _meta.regularMarketVolume;
     if (candles.length >= 2 && _rmv != null && isFinite(_rmv) && _rmv > 0) {
       const _li = candles.length - 1;
       if (isIntraday) {
-        let _sumEx = 0;
-        for (let i = 0; i < _li; i++) _sumEx += candles[i].volume || 0;
-        const _rem = _rmv - _sumEx;
-        if (_rem > 0 && _rem > (candles[_li].volume || 0)) candles[_li].volume = _rem;
+        if (window.IntradayVolumeV3) {
+          window.IntradayVolumeV3.backfillClosingAuction(candles, _meta, p.mkt);
+        }
       } else if (!(candles[_li].volume > 0)) {
         candles[_li].volume = _rmv;
       }

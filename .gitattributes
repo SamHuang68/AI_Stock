@@ -1,0 +1,3 @@
+# Archify 完整性清單驗證原始位元組，跨平台 checkout 必須固定使用 LF。
+docs/architecture/*.json text eol=lf
+assets/docs/archify/*.html text eol=lf

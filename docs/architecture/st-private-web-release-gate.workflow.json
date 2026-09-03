@@ -1,0 +1,163 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "ST Private Web 發布閘門與回復流程",
+    "animation": "none",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "exact_commit_stage",
+        "label": "完整 commit 到 staged release",
+        "focus": ["source_commit", "archive_extract", "validate_build", "test_restore", "write_manifest"],
+        "note": "只從完整 commit 匯出、驗證、重建與測試；dirty worktree 不會成為發布輸入。"
+      },
+      {
+        "id": "approval_and_promotion",
+        "label": "批准與 promotion",
+        "focus": ["write_manifest", "explicit_approval", "promote_current", "separate_health_check"],
+        "note": "staging 不改 active website；只有測試通過且帶 --approve 才能更新 current。"
+      },
+      {
+        "id": "manual_recovery",
+        "label": "停止與人工回復",
+        "focus": ["test_restore", "separate_health_check", "hold_or_recover", "explicit_approval"],
+        "note": "閘門失敗時保持既有 current；回復是選擇舊 staged release 後再次明確批准。"
+      }
+    ]
+  },
+  "lanes": [
+    {"id": "pipeline", "label": "精確 Commit Staging"},
+    {"id": "release_owner", "label": "Release Owner"},
+    {"id": "operations", "label": "獨立 Runtime 檢查"},
+    {"id": "exceptions", "label": "停止／回復", "variant": "exception"}
+  ],
+  "phases": [
+    {"id": "source_phase", "label": "鎖定來源", "fromCol": 0, "toCol": 1},
+    {"id": "stage_phase", "label": "建立與驗證", "fromCol": 2, "toCol": 4, "variant": "emphasis"},
+    {"id": "promote_phase", "label": "明確發布", "fromCol": 5, "toCol": 5, "variant": "security"}
+  ],
+  "groups": [
+    {"id": "blocking_gates", "label": "Blocking gates", "lane": "pipeline", "fromCol": 2, "toCol": 4, "variant": "emphasis"},
+    {"id": "recovery_path", "label": "人工回復路徑", "lane": "exceptions", "fromCol": 4, "toCol": 5, "variant": "security"}
+  ],
+  "mainPath": [
+    "source_commit",
+    "archive_extract",
+    "validate_build",
+    "test_restore",
+    "write_manifest",
+    "explicit_approval",
+    "promote_current"
+  ],
+  "nodes": [
+    {
+      "id": "source_commit",
+      "lane": "pipeline",
+      "col": 0,
+      "type": "security",
+      "label": "鎖定完整 SHA",
+      "sublabel": "ref → 40 hex",
+      "tag": "git rev-parse"
+    },
+    {
+      "id": "archive_extract",
+      "lane": "pipeline",
+      "col": 1,
+      "type": "database",
+      "label": "Archive 與安全解壓",
+      "sublabel": "Git blobs · 防 traversal",
+      "width": 132
+    },
+    {
+      "id": "validate_build",
+      "lane": "pipeline",
+      "col": 2,
+      "type": "backend",
+      "label": "驗證並重建",
+      "sublabel": "required files · build_v2.py",
+      "tag": "fail closed",
+      "width": 132
+    },
+    {
+      "id": "test_restore",
+      "lane": "pipeline",
+      "col": 3,
+      "type": "security",
+      "label": "測試與 seed 還原",
+      "sublabel": "Python／Node · Git bytes",
+      "tag": "blocking",
+      "width": 132
+    },
+    {
+      "id": "write_manifest",
+      "lane": "pipeline",
+      "col": 4,
+      "type": "database",
+      "label": "Staged Manifest",
+      "sublabel": "commit · tests · managed",
+      "width": 124
+    },
+    {
+      "id": "explicit_approval",
+      "lane": "release_owner",
+      "col": 4,
+      "type": "security",
+      "label": "明確批准",
+      "sublabel": "--approve 人工閘門",
+      "tag": "human gate",
+      "width": 108
+    },
+    {
+      "id": "promote_current",
+      "lane": "release_owner",
+      "col": 5,
+      "type": "cloud",
+      "label": "Promote",
+      "sublabel": "保留 data／logs",
+      "width": 104
+    },
+    {
+      "id": "separate_health_check",
+      "lane": "operations",
+      "col": 5,
+      "type": "backend",
+      "label": "另行健康檢查",
+      "sublabel": "非 promote 內建",
+      "tag": "health／host",
+      "width": 116
+    },
+    {
+      "id": "hold_or_recover",
+      "lane": "exceptions",
+      "col": 5,
+      "type": "security",
+      "label": "保持 current／回復",
+      "sublabel": "舊 staged release 再批准",
+      "width": 136
+    }
+  ],
+  "edges": [
+    {"id": "commit_to_archive", "from": "source_commit", "to": "archive_extract", "label": "完整 commit", "role": "main", "variant": "security"},
+    {"id": "archive_to_validate", "from": "archive_extract", "to": "validate_build", "label": "ZIP bytes", "role": "main"},
+    {"id": "validate_to_tests", "from": "validate_build", "to": "test_restore", "label": "generated UI", "role": "main", "variant": "emphasis"},
+    {"id": "tests_to_manifest", "from": "test_restore", "to": "write_manifest", "label": "tests passed · seed restored", "role": "main", "variant": "emphasis"},
+    {"id": "manifest_to_approval", "from": "write_manifest", "to": "explicit_approval", "label": "staged only", "role": "main", "variant": "security"},
+    {"id": "approval_to_promote", "from": "explicit_approval", "to": "promote_current", "label": "--approve", "role": "main", "variant": "security"},
+    {"id": "promote_to_health", "from": "promote_current", "to": "separate_health_check", "label": "另行驗證", "role": "branch", "variant": "dashed"},
+    {"id": "test_failure", "from": "test_restore", "to": "hold_or_recover", "label": "任何 gate 失敗", "role": "error", "variant": "security", "route": "bottom-channel"},
+    {"id": "health_failure", "from": "separate_health_check", "to": "hold_or_recover", "label": "不健康", "role": "error", "variant": "security"},
+    {"id": "recover_to_approval", "from": "hold_or_recover", "to": "explicit_approval", "label": "舊 release-id", "role": "return", "variant": "dashed", "route": "return-left", "fromSide": "left", "toSide": "left"}
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "發布不變量",
+      "items": [
+        "只從完整 commit 建立 staged release；dirty worktree 不會進 production。",
+        "tests=passed 與 --approve 缺一不可；promotion 保留 data／logs。",
+        "健康檢查另行執行；回復舊 release 仍需再次明確批准。"
+      ]
+    }
+  ]
+}

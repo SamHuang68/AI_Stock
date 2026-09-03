@@ -1,0 +1,179 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "響應式外殼與工作區所有權流程",
+    "animation": "none",
+    "quality_profile": "showcase",
+    "viewBox": [1080, 560]
+  },
+  "lanes": [
+    {
+      "id": "shell",
+      "label": "外殼、路由、所有權與響應式輸出"
+    }
+  ],
+  "phases": [
+    {
+      "id": "initialize",
+      "label": "建立與解析",
+      "fromCol": 0,
+      "toCol": 2
+    },
+    {
+      "id": "handoff",
+      "label": "切換 owner",
+      "fromCol": 3,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "viewport",
+      "label": "依 viewport 呈現",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "boot",
+    "build_shell",
+    "resolve_route",
+    "deactivate_previous",
+    "owner_gate",
+    "portrait_strategy"
+  ],
+  "semanticChecks": {
+    "allowedRoots": [
+      "boot"
+    ],
+    "allowedTerminals": [
+      "portrait_strategy",
+      "landscape_split"
+    ],
+    "requiredPaths": [
+      {
+        "from": "boot",
+        "to": "portrait_strategy"
+      },
+      {
+        "from": "boot",
+        "to": "landscape_split"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "boot",
+      "lane": "shell",
+      "col": 0,
+      "type": "frontend",
+      "label": "啟動 Shell",
+      "sublabel": "建立頁面生命週期",
+      "yOffset": 85
+    },
+    {
+      "id": "build_shell",
+      "lane": "shell",
+      "col": 1,
+      "type": "frontend",
+      "label": "建立共用外殼",
+      "sublabel": "topbar／wlbar／body／mktbar",
+      "width": 124,
+      "yOffset": 85
+    },
+    {
+      "id": "resolve_route",
+      "lane": "shell",
+      "col": 2,
+      "type": "backend",
+      "label": "解析 hash route",
+      "sublabel": "決定下一個工作區",
+      "width": 112,
+      "yOffset": 85
+    },
+    {
+      "id": "deactivate_previous",
+      "lane": "shell",
+      "col": 3,
+      "type": "messagebus",
+      "label": "解除上一個 owner",
+      "sublabel": "清理可見性與控制權",
+      "width": 120,
+      "yOffset": 85
+    },
+    {
+      "id": "owner_gate",
+      "lane": "shell",
+      "col": 4,
+      "type": "security",
+      "label": "工作區 owner gate",
+      "sublabel": "互斥接管；僅揭露、不自動修復",
+      "tag": "single owner",
+      "width": 132,
+      "yOffset": 85
+    },
+    {
+      "id": "portrait_strategy",
+      "lane": "shell",
+      "col": 5,
+      "type": "frontend",
+      "label": "直式呈現契約",
+      "sublabel": "圖表整頁翻頁；面板外殼捲動",
+      "tag": "portrait",
+      "width": 168,
+      "yOffset": 39
+    },
+    {
+      "id": "landscape_split",
+      "lane": "shell",
+      "col": 5,
+      "type": "frontend",
+      "label": "橫式 5+5 雙區",
+      "sublabel": "僅 Pulse expert 版面契約",
+      "tag": "landscape",
+      "width": 132,
+      "yOffset": 131
+    }
+  ],
+  "edges": [
+    {
+      "from": "boot",
+      "to": "build_shell",
+      "role": "main"
+    },
+    {
+      "from": "build_shell",
+      "to": "resolve_route",
+      "label": "外殼 ready",
+      "role": "main"
+    },
+    {
+      "from": "resolve_route",
+      "to": "deactivate_previous",
+      "label": "route changed",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "deactivate_previous",
+      "to": "owner_gate",
+      "label": "釋放完成",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "owner_gate",
+      "to": "portrait_strategy",
+      "label": "直式",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "owner_gate",
+      "to": "landscape_split",
+      "label": "Pulse expert 橫式",
+      "role": "branch"
+    }
+  ]
+}

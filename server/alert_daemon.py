@@ -13,14 +13,26 @@ import os, json, time, threading, urllib.request, urllib.parse, smtplib, ssl
 from email.mime.text import MIMEText
 from datetime import datetime
 
+try:
+    from .atomic_store import StoreCorruptError, atomic_write_json, load_json
+    from .secret_store import load_secret_json, save_secret_json
+except ImportError:
+    from atomic_store import StoreCorruptError, atomic_write_json, load_json
+    from secret_store import load_secret_json, save_secret_json
+
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_FILE = os.path.join(_BASE, 'data', 'alert_config.json')
 RULES_FILE = os.path.join(_BASE, 'data', 'alert_rules.json')
+SECRETS_FILE = os.path.join(_BASE, 'data', 'alert_secrets.bin')
 LOG_DIR = os.path.join(_BASE, 'logs', 'alerts')
 
 _DEFAULT_CONFIG = {
     'enabled': False,
     'poll_seconds': 60,
+    # Canonical market-signal transitions are recorded in-app regardless of
+    # this switch.  External delivery remains an explicit owner opt-in while
+    # the precursor model is in prospective shadow validation.
+    'market_signal_enabled': False,
     'watch_enabled': False,        # v3.8: WATCH 後端 24h 自動偵測
     'watch_poll_seconds': 300,
     'telegram': {'enabled': False, 'bot_token': '', 'chat_id': ''},
@@ -37,35 +49,67 @@ _lock = threading.Lock()
 
 # ---- config / rules I/O -----------------------------------
 def load_config():
+    default = json.loads(json.dumps(_DEFAULT_CONFIG))
     try:
-        with open(CONFIG_FILE, encoding='utf-8') as f:
-            c = json.load(f)
-        merged = json.loads(json.dumps(_DEFAULT_CONFIG))
+        c = load_json(CONFIG_FILE, default={}, expected_type=dict)
+        merged = default
         merged.update(c)
         for k in ('telegram', 'email', 'webhook'):
             if isinstance(c.get(k), dict):
                 merged[k] = {**_DEFAULT_CONFIG[k], **c[k]}
+        # One-time migration: move legacy plaintext credentials out of JSON.
+        legacy_secret = bool(
+            merged.get('telegram', {}).get('bot_token') or
+            merged.get('email', {}).get('app_password')
+        )
+        if legacy_secret:
+            save_config(merged)
+            merged['telegram']['bot_token'] = ''
+            merged['email']['app_password'] = ''
+        secrets = load_secret_json(SECRETS_FILE)
+        merged['telegram']['bot_token'] = str(secrets.get('telegram_bot_token') or '')
+        merged['email']['app_password'] = str(secrets.get('email_app_password') or '')
         return merged
-    except Exception:
-        return json.loads(json.dumps(_DEFAULT_CONFIG))
+    except (StoreCorruptError, ValueError, OSError) as exc:
+        print('[alert-store] config unavailable:', type(exc).__name__)
+        return default
 
 
 def save_config(c):
-    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(c, f, ensure_ascii=False, indent=2)
+    clean = json.loads(json.dumps(c if isinstance(c, dict) else {}))
+    try:
+        secrets = load_secret_json(SECRETS_FILE)
+    except Exception:
+        secrets = {}
+    for section, field, secret_key in (
+        ('telegram', 'bot_token', 'telegram_bot_token'),
+        ('email', 'app_password', 'email_app_password'),
+    ):
+        part = clean.setdefault(section, {})
+        value = part.get(field)
+        if value == '***set***':
+            pass
+        elif value:
+            secrets[secret_key] = str(value)
+        else:
+            secrets.pop(secret_key, None)
+        part[field] = ''
+    save_secret_json(SECRETS_FILE, secrets)
+    # The config and its recovery copy are deliberately secret-free.
+    atomic_write_json(CONFIG_FILE, clean, backup=False, private=True)
+    atomic_write_json(CONFIG_FILE + '.bak', clean, backup=False, private=True)
 
 
 def load_rules():
     try:
-        with open(RULES_FILE, encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
+        return load_json(RULES_FILE, default=[], expected_type=list)
+    except StoreCorruptError as exc:
+        print('[alert-store] rules unavailable:', type(exc).__name__)
         return []
 
 
 def save_rules(rules):
-    with open(RULES_FILE, 'w', encoding='utf-8') as f:
-        json.dump(rules, f, ensure_ascii=False, indent=2)
+    atomic_write_json(RULES_FILE, rules, backup=True, private=True)
 
 
 # ---- Yahoo 報價 (自足) -------------------------------------
@@ -158,6 +202,37 @@ def notify(cfg, text, subject='Stock Terminal 警報'):
     ok3, m3 = push_webhook(cfg, text, subject); results['webhook'] = m3
     _log(text)
     return (ok1 or ok2 or ok3), results
+
+
+def deliver_signal_events(events):
+    """Transport canonical transition events without recomputing their score."""
+    rows = [row for row in (events or []) if isinstance(row, dict)]
+    if not rows:
+        return {'ok': True, 'delivered': 0, 'reason': 'no_transition'}
+    cfg = load_config()
+    if not cfg.get('enabled') or not cfg.get('market_signal_enabled'):
+        return {'ok': True, 'delivered': 0, 'reason': 'shadow_transport_disabled'}
+    delivered = 0
+    results = []
+    for event in rows:
+        state = str(event.get('toState') or '')
+        if state not in ('ARMED', 'CONFIRMED', 'ACTIVE', 'CONFLICT', 'RECOVERY', 'INVALIDATED'):
+            continue
+        strength = event.get('strength')
+        strength_text = f'{float(strength):.0f}' if strength is not None else '—'
+        reasons = '；'.join((event.get('reasons') or [])[:3]) or '等待更多同向證據'
+        counter = '；'.join((event.get('strongestCounterEvidence') or [])[:1]) or '無明顯反證'
+        text = (
+            f"【ST 前兆雷達 · {event.get('label') or event.get('signalId')}】\n"
+            f"狀態 {state}｜訊號強度 {strength_text}｜獨立來源 {event.get('independentDomains') or 0}\n"
+            f"支持：{reasons}\n反證：{counter}\n"
+            f"失效：{event.get('invalidation') or '—'}\n"
+            "Shadow observation only，不是下單或槓桿指令。"
+        )
+        ok, detail = notify(cfg, text, subject='Stock Terminal 市場前兆雷達')
+        results.append({'eventId': event.get('eventId'), 'ok': ok, 'detail': detail})
+        delivered += int(bool(ok))
+    return {'ok': True, 'delivered': delivered, 'results': results}
 
 
 def _log(text):

@@ -18,6 +18,7 @@ import os
 
 # 相依宣告：key 必須排在 value(們) 之後。
 DEPS = {
+    'table_sort_v5.js':     ['colors_v3.js'],
     'volume_profile_v3.js': ['pro_v2.js'],
     'alert_push_v3.js':     ['alert_v3.js'],
     'backtest_ui_v3.js':    ['backtest_v3.js'],
@@ -29,6 +30,25 @@ DEPS = {
     'polish_v3.js':         ['chart_registry_v3.js', 'colors_v3.js'],
     'market_score_bar_v3.js': ['toast_v3.js', 'fundamental_v3.js'],
     'market_chart_v3.js':   ['toolbar_v3.js', 'polish_v3.js', 'drawtools_v3.js', 'market_score_bar_v3.js'],
+    # Viz 共用視覺：所有消費面板須在 viz_v5 之後
+    'viz_v5.js':            ['colors_v3.js'],
+    'chip_v3.js':           ['viz_v5.js'],
+    'instrank_v3.js':       ['viz_v5.js'],
+    'marketflow_v3.js':     ['viz_v5.js'],
+    'pulse_v5.js':          ['viz_v5.js'],
+    'decision_data_v5.js':  ['market_data_v5.js'],
+    'market_data_v5.js':    ['app_kernel_v5.js'],
+    'decision_v5.js':       ['viz_v5.js', 'decision_data_v5.js', 'shell_v5.js'],
+    'consensus_attention_v5.js': ['decision_data_v5.js', 'decision_v5.js', 'shell_v5.js'],
+    'hub_v5.js':            ['viz_v5.js'],
+    'breadth_v5.js':        ['viz_v5.js'],
+    'afterhours_v5.js':     ['viz_v5.js'],
+    'scan_v5.js':           ['viz_v5.js'],
+    'news_v5.js':           ['viz_v5.js'],
+    'book_v5.js':           ['viz_v5.js'],
+    'heat_v5.js':           ['viz_v5.js'],
+    'chart_visual_v5.js':   ['colors_v3.js', 'visual_system_v5.js'],
+    'realtime_v3.js':       ['intraday_volume_v3.js'],
 }
 # 必須永遠排在最後的（market_chart 蓋過 K 線；score_bar 次末；toolbar 再前）
 LAST = ['toolbar_v3.js', 'market_score_bar_v3.js', 'market_chart_v3.js']
@@ -63,7 +83,7 @@ def order_scripts(scripts):
 
 # ── 與 build_v2.py V2_SCRIPTS（經 order_scripts 後）對齊的基準清單 ──────────
 _CURRENT = [
-    'colors_v3.js', 'market_v3.js', 'fields_v3.js', 'chart_registry_v3.js',
+    'colors_v3.js', 'app_kernel_v5.js', 'market_data_v5.js', 'decision_data_v5.js', 'table_sort_v5.js', 'viz_v5.js', 'market_v3.js', 'fields_v3.js', 'chart_registry_v3.js',
     'share_v3.js', 'datasources_v3.js', 'etf_flow_tip_v3.js',
     'position_v2.js', 'watch_v2.js', 'info_v2.js', 'pro_v2.js', 'volume_profile_v3.js',
     'pattern_v3.js', 'live_v2.js', 'chip_v3.js', 'fundamental_v3.js', 'screener_v3.js',
@@ -76,8 +96,11 @@ _CURRENT = [
     'strategy_builder_v3.js', 'strategy_script_v3.js', 'drawtools_v3.js',
     'screener3_v3.js', 'etf_v3.js', 'stockfut_v3.js', 'indices_v3.js', 'datahealth_v3.js',
     'toast_v3.js', 'settle_v3.js', 'cmdpalette_v3.js', 'dragwin_v3.js', 'liverefresh_v3.js',
-    'namesearch_v3.js', 'realtime_v3.js', 'focus_v3.js', 'copilot_v3.js',
-    'wizard_v3.js', 'toolbar_v3.js', 'market_score_bar_v3.js', 'market_chart_v3.js',
+    'namesearch_v3.js', 'intraday_volume_v3.js', 'realtime_v3.js', 'focus_v3.js', 'copilot_v3.js',
+    'wizard_v3.js', 'shell_v5.js', 'hub_v5.js', 'pulse_v5.js', 'decision_v5.js', 'consensus_attention_v5.js', 'heat_v5.js', 'book_v5.js',
+    'scan_v5.js', 'breadth_v5.js', 'afterhours_v5.js', 'news_v5.js',
+    'visual_system_v5.js', 'chart_visual_v5.js',
+    'toolbar_v3.js', 'market_score_bar_v3.js', 'market_chart_v3.js',
 ]
 
 def _selftest():

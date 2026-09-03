@@ -1,6 +1,71 @@
 你是一個精通台灣股市交易系統的資深架構師。
-本專案為 Stock Terminal v4.1，前端使用 Vanilla JS + TradingView，後端處理高精度技術指標。
+本專案為 Stock Terminal v5.0 tip UX（Vanilla JS + TradingView），後端處理高精度技術指標。
+
 【鐵律】：
 1. 所有的技術指標（RSI, SMA）計算必須精準，不允許任何概略或省略的寫法。
 2. 進行任何修改前，必須確保前後端資料欄位完全對齊。
 3. 拒絕敷衍的程式碼，請完整輸出，減少我的審查與來回修正次數。
+4. 【除錯／防再犯】出錯必須找 root cause，修正錯誤的源頭；禁止用「禁工具／繞開症狀／叫使用者記住避開」當解。
+   例：裸 PATH `python` 叫到工具鏈 venv → 應釘選絕對路徑並禁止裸呼叫，而不是 FATAL 禁 Hermes、
+   taskkill 全機 python、或每次提示「請避開 Hermes」。治本 > 治標；治標會讓同一坑反覆出現。
+5. 【先掃描、再開發 — 永遠遵守】動手改任何功能前，必須先掃描專案內**已建立**的資源
+   （既有 API／payload 欄位／UI 元件／快取／global／movers／sectors／focus／overnight 等），
+   **優先沿用或參考**同一資料源與欄位契約；確認沒有可用來源時，才允許新開抓取或新欄位。
+   禁止平行另建「看起來類似」的資料管線，以免來源不同步、逾時變空殼、前後端口徑分裂。
+   血淚例：風險監控曾另抓「美股流動池」並預畫空 dash 面板，而 `pulse.global`（費半／那指／VIX）
+   早已可用 → 應重用 global 做 AI／科技外溢，而非重造來源。
+
+【Windows 本機啟動／同步 — 已踩過的常見錯，禁止再犯】：
+1. `.cmd` 訊息一律用 ASCII（或確保 Big5/系統碼頁可顯示）。勿在 cmd 腳本寫 UTF-8 中文：
+   繁中 Windows 主控台預設 CP950/Big5，UTF-8 無 BOM 會亂碼，使用者無法讀錯誤訊息。
+2. 禁止假設「解壓／checkout 後路徑只有一層」。zip 解到已存在的 `wavedeck\` 常變成
+   `wavedeck\wavedeck\...`。啟動腳本必須以「找得到 `run.py`」自癒定位 home，
+   並容忍 root 與套件目錄兩種呼叫；根啟動器勿盲目 `call wavedeck\...` 疊加路徑。
+3. 勿用 `python server\server.py` 當套件入口：script 目錄進 `sys.path` 會陰影同名
+   `server` 套件。一律 `python run.py`（或 `-m`），並在入口清掉 script-dir shadowing。
+4. Windows `WinError 10013` ≠ 權限不足這麼簡單：埠常在 excluded port range。
+   預設埠綁定失敗要自動換備援埠，寫入 port 檔，瀏覽器／等待腳本讀實際埠再開 URL。
+5. 等待就緒不要依賴「另一個相對路徑的 .ps1」當唯一路徑：用內嵌 PowerShell 或
+   絕對路徑（`%~dp0` 解析後驗證檔案存在）；先 `/health` 成功再開瀏覽器。
+6. 給使用者的同步指令優先 `git checkout origin/<branch> -- <paths>`；同步包／zip
+   必須附「解壓到 repo 根、檢查無雙層目錄」說明，並提供攤平腳本備援。
+7. 【對使用者下指令：只用 PowerShell】使用者本機 shell 是 PowerShell（`PS C:\Users\Sam\AI_Stock>`）。
+   回覆中的可複製指令必須是 PowerShell 語法，禁止給 CMD-only 寫法（例如 `cd /d`、
+   裸 `scripts\go.bat` 而不說明、或假設 `cmd.exe`）。正確範例：
+   `cd C:\Users\Sam\AI_Stock`、`git pull origin <branch>`、
+   `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\go.ps1`、
+   `.\START_WAVEDECK.cmd`（可從 PS 呼叫）。勿再給 `/workspace` 雲端路徑當本機路徑。
+
+【執行線 — tip UX + WaveDeck 整合】：
+1. 整合分支 `cursor/st-wd-tip-integrate-3497` 同時承載 tip UX 與 WaveDeck ST↔WD 橋接；
+   tip 名稱讀根目錄 TIP_BRANCH（目前 cursor/st-wd-tip-integrate-3497）。
+2. 禁止以 main／舊 ST4.1 線開新功能或叫使用者 checkout main、http-client-pool（main 底）等會掉回舊 UI 的分支。
+3. 基建（如 http_client）必須 cherry-pick／直接做在 tip 上，不可另開「回到 main」的驗證線叫使用者切過去。
+4. 版本號單一真理：根目錄 VERSION；go.bat／build_v2 自動讀取。
+5. 本機同步指令：.\scripts\go.bat pull   （無參數＝tip；會阻擋 main）
+6. 開頁永遠 http://localhost:18432/#pulse；無 hash 不得還原舊圖表殼。合完／重開若見舊 UI＝錯分支或未 rebuild，立刻 go.bat pull tip。
+7. WaveDeck 執行台：`START_WAVEDECK.cmd` 或 `cd wavedeck && python run.py`；ST `:18432` 宏觀 ↔ WD `:18433` 執行。
+
+【血淚教訓 — 總覽版面，禁止再犯】：
+1. 市場總覽（pulse）桌機版鎖定「一行五框 × 上下兩區」一屏高密度：
+   上：脈動｜加權盤勢｜法人｜廣度｜產業
+   下：近漲停｜跌幅｜全球｜快訊｜自選
+2. 桌機（>900px）禁止擅自改成一排 4／3／2 框，亦禁止加「可超過一頁下捲重排」。手機（≤900px）依 2026-08-21 使用者明確要求，`.pl-zone` 必須是兩欄、自然高度並允許垂直捲動；不可把此規則反套到桌機。
+3. 曾犯：改 4 欄 + max-width:1280→2 欄 → 使用者螢幕變成「一行兩框」；之後又在壞版上連續補丁（flex／enforce／badge），比直接 `git checkout` 已知正確版更慢且踩盲點。
+4. **版面一壞：先還原已知正確 commit，禁止在修壞的版面上猜盲點補丁。**
+   已知正確總覽版面錨點：`3cab212`（revert 回一行五框；功能含 Basis／全球簡寫／快訊搜尋／自選點標）。
+   指令：`git checkout 3cab212 -- src/ui/pulse_v5.js`（必要時連 `viz_v5.js`），再 rebuild；勿重寫 CSS 賭運氣。
+5. 桌機密度／文字截斷等問題用欄內排版、簡寫、色點解決，不得用減少每列框數當解法；手機兩欄內的四格 KPI 改為 2×2，避免金額與 OHLC 互撞。
+6. 使用者說「退回／無效／一行兩框」時先確認 viewport：桌機應為 5+5，手機應為兩欄捲動。只有桌機誤成兩欄才還原錨點；勿把手機修正誤判成桌機回歸。
+
+【血淚教訓 — 裸 PATH python／空白窗，禁止再犯】：
+根因是 **agent 腳本紀律**，不是「使用者裝了 Hermes 就要禁她」：
+1. 舊 go.ps1 用裸字串 `Start-Process -FilePath 'python'` → PATH 前方若是工具鏈 venv 就被叫到。
+2. `-Pull` 不檢查 git `$LASTEXITCODE` → checkout 失敗仍用舊 HEAD 繼續 build／start。
+3. `RedirectStandardOutput` + Minimized → 空白窗掩蓋失敗。
+聰明解（必須遵守）：
+- **禁止裸呼叫** `python`／`python3`；必須解析**絕對路徑**並寫入 `data/stock_python.path` 釘選。
+- 優先：`ST_PYTHON` 環境變數 → pin 檔 → `py -3` → python.org 安裝路徑；工具鏈 venv 僅降權，**禁止在 server 對 Hermes FATAL exit**。
+- 禁止 `taskkill /IM python.exe` 屠殺全機；只釋放本專案埠（:18432）。
+- 任何 `git fetch/checkout/reset` 後核對 `$LASTEXITCODE` 與 `HEAD == origin/tip`；失敗立刻 throw。
+- Server 視窗必須有標題與 live log。本機首選：`START_TIP.cmd` → `go.ps1`。

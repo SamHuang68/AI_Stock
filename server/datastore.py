@@ -15,7 +15,7 @@ CLI（在專案根目錄跑）:
   python server\\datastore.py query 2330 5          # 看最近 5 根
   python server\\datastore.py stats                 # DB 概況
 """
-import os, sys, json, time, sqlite3, urllib.request, urllib.error, random, threading
+import os, sys, json, time, sqlite3, urllib.request, urllib.error, random, threading, tempfile
 from contextlib import closing
 
 # 進程內全域寫入鎖
@@ -29,15 +29,17 @@ else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(_BASE, 'data', 'market.db')
 
+SCHEMA_VERSION = 2
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bars(
   symbol TEXT NOT NULL, market TEXT NOT NULL, ts INTEGER NOT NULL,
   open REAL, high REAL, low REAL, close REAL, volume REAL,
-  PRIMARY KEY(symbol, ts)
+  PRIMARY KEY(market, symbol, ts)
 );
-CREATE INDEX IF NOT EXISTS idx_bars_sym_ts ON bars(symbol, ts);
+CREATE INDEX IF NOT EXISTS idx_bars_market_sym_ts ON bars(market, symbol, ts);
 CREATE TABLE IF NOT EXISTS meta(
-  symbol TEXT PRIMARY KEY, market TEXT, name TEXT, last_update INTEGER
+  symbol TEXT NOT NULL, market TEXT NOT NULL, name TEXT, last_update INTEGER,
+  PRIMARY KEY(market, symbol)
 );
 """
 
@@ -48,14 +50,92 @@ def get_conn():
     conn.execute('PRAGMA synchronous=NORMAL')
     return conn
 
+def _table_exists(conn, table):
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    ).fetchone() is not None
+
+
+def _primary_key(conn, table):
+    if not _table_exists(conn, table):
+        return []
+    rows = conn.execute(f'PRAGMA table_info({table})').fetchall()
+    return [row[1] for row in sorted((r for r in rows if r[5]), key=lambda r: r[5])]
+
+
+def _backup_before_market_key_migration(conn):
+    """Create one recoverable SQLite backup before the destructive schema swap."""
+    backup_path = DB_PATH + '.pre-market-key-v2.bak'
+    if os.path.exists(backup_path):
+        return backup_path
+    parent = os.path.dirname(DB_PATH)
+    fd, temp_path = tempfile.mkstemp(prefix='.market-schema-', suffix='.bak', dir=parent)
+    os.close(fd)
+    try:
+        target = sqlite3.connect(temp_path)
+        try:
+            conn.backup(target)
+            target.commit()
+        finally:
+            target.close()
+        with open(temp_path, 'rb+') as stream:
+            os.fsync(stream.fileno())
+        os.replace(temp_path, backup_path)
+        return backup_path
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+def _migrate_market_identity(conn):
+    bars_pk = _primary_key(conn, 'bars')
+    meta_pk = _primary_key(conn, 'meta')
+    if bars_pk in ([], ['market', 'symbol', 'ts']) and meta_pk in ([], ['market', 'symbol']):
+        return False
+    _backup_before_market_key_migration(conn)
+    conn.execute('BEGIN IMMEDIATE')
+    try:
+        if bars_pk and bars_pk != ['market', 'symbol', 'ts']:
+            conn.execute('DROP INDEX IF EXISTS idx_bars_sym_ts')
+            conn.execute('ALTER TABLE bars RENAME TO bars_legacy_v1')
+            conn.execute('''CREATE TABLE bars(
+              symbol TEXT NOT NULL, market TEXT NOT NULL, ts INTEGER NOT NULL,
+              open REAL, high REAL, low REAL, close REAL, volume REAL,
+              PRIMARY KEY(market, symbol, ts))''')
+            conn.execute('''INSERT OR REPLACE INTO bars
+              (symbol,market,ts,open,high,low,close,volume)
+              SELECT symbol,COALESCE(NULLIF(market,''),'TW'),ts,open,high,low,close,volume
+              FROM bars_legacy_v1''')
+            conn.execute('DROP TABLE bars_legacy_v1')
+        if meta_pk and meta_pk != ['market', 'symbol']:
+            conn.execute('ALTER TABLE meta RENAME TO meta_legacy_v1')
+            conn.execute('''CREATE TABLE meta(
+              symbol TEXT NOT NULL, market TEXT NOT NULL, name TEXT, last_update INTEGER,
+              PRIMARY KEY(market, symbol))''')
+            conn.execute('''INSERT OR REPLACE INTO meta(symbol,market,name,last_update)
+              SELECT symbol,COALESCE(NULLIF(market,''),'TW'),name,last_update
+              FROM meta_legacy_v1''')
+            conn.execute('DROP TABLE meta_legacy_v1')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_bars_market_sym_ts ON bars(market, symbol, ts)')
+        conn.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+
+
 def init_db():
     global _db_ready_logged
-    with closing(get_conn()) as conn:
-        with conn:
-            conn.executescript(SCHEMA)
+    with _db_write_lock:
+        with closing(get_conn()) as conn:
+            migrated = _migrate_market_identity(conn)
+            with conn:
+                conn.executescript(SCHEMA)
+                conn.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
     # 多 worker / 重複呼叫時只印一次，避免刷屏
     if not _db_ready_logged:
-        print('[db] ready:', DB_PATH)
+        print('[db] ready:', DB_PATH, '(market-key migration applied)' if migrated else '')
         _db_ready_logged = True
 
 def _yf_symbol(sym, market):
@@ -110,9 +190,11 @@ def upsert_bars(sym, market, rows):
                 conn.executemany(
                     'INSERT OR REPLACE INTO bars(symbol,market,ts,open,high,low,close,volume) VALUES(?,?,?,?,?,?,?,?)',
                     [(sym, market, t, o, h, l, cl, v) for (t, o, h, l, cl, v) in rows])
-                conn.execute('INSERT OR REPLACE INTO meta(symbol,market,name,last_update) '
-                             'VALUES(?,?,COALESCE((SELECT name FROM meta WHERE symbol=?),?),?)',
-                             (sym, market, sym, sym, int(time.time())))
+                conn.execute('''INSERT INTO meta(symbol,market,name,last_update) VALUES(?,?,?,?)
+                             ON CONFLICT(market,symbol) DO UPDATE SET
+                               name=COALESCE(meta.name,excluded.name),
+                               last_update=excluded.last_update''',
+                             (sym, market, sym, int(time.time())))
     return len(rows)
 
 def backfill(sym, market='TW', rng='10y'):
@@ -157,7 +239,8 @@ def backfill_universe(market='TW', rng='5y', workers=4, resume=True):
         print('[db] universe empty — 無法取得代號清單(檢查網路/TWSE OpenAPI)'); return
     if resume:
         with closing(get_conn()) as conn:
-            have = {r[0] for r in conn.execute('SELECT DISTINCT symbol FROM bars').fetchall()}
+            have = {r[0] for r in conn.execute(
+                'SELECT DISTINCT symbol FROM bars WHERE market=?', (market,)).fetchall()}
         todo = [x for x in codes if x not in have]
         print(f'[db] 全宇集 {len(codes)} 檔,已有 {len(have)},本次補剩餘 {len(todo)} 檔 '
               f'(range={rng}, workers={workers})...')
@@ -184,7 +267,7 @@ def backfill_universe(market='TW', rng='5y', workers=4, resume=True):
         print('  提示:仍失敗多半是限流或無 Yahoo 資料的代號;再跑一次同指令會「只補剩餘」(resume),'
               '幾次後就收斂。限流嚴重可降併發:backfill-universe 5y 2')
 
-def get_bars_bulk(codes):
+def get_bars_bulk(codes, market='TW'):
     """一次取多檔 bars,回傳 {code: [(ts,o,h,l,c,v),...]} (依時間排序)。
        單一查詢,避免逐檔開連線 → 選股全宇集讀取秒級。"""
     codes = [str(c) for c in codes]
@@ -197,32 +280,33 @@ def get_bars_bulk(codes):
             ph = ','.join('?' * len(chunk))
             cur = conn.execute(
                 f'SELECT symbol,ts,open,high,low,close,volume FROM bars '
-                f'WHERE symbol IN ({ph}) ORDER BY symbol, ts', chunk)
+                f'WHERE market=? AND symbol IN ({ph}) ORDER BY symbol, ts', [market, *chunk])
             for sym, ts, o, h, l, c, v in cur:
                 lst = out.get(sym)
                 if lst is not None:
                     lst.append((ts, o, h, l, c, v))
     return out
 
-def last_ts(sym):
+def last_ts(sym, market='TW'):
     with closing(get_conn()) as conn:
-        r = conn.execute('SELECT MAX(ts) FROM bars WHERE symbol=?', (sym,)).fetchone()
+        r = conn.execute('SELECT MAX(ts) FROM bars WHERE market=? AND symbol=?', (market, sym)).fetchone()
     return r[0] if r and r[0] else None
 
 def update(sym, market='TW'):
     """增量更新:已有資料 → 只抓近 1 個月補上(便宜);沒資料 → 全回補 10 年。"""
-    if last_ts(sym):
+    if last_ts(sym, market):
         n = upsert_bars(sym, market, fetch_yahoo_daily(sym, market, '1mo'))
         print(f'[db] {sym}.{market}: refreshed {n} recent bars')
         return n
     return backfill(sym, market)
 
-def get_bars(sym, limit=None):
+def get_bars(sym, limit=None, market='TW'):
     """回傳該檔 [(ts,o,h,l,c,v),...] 依時間排序;limit 取最近 N 根。"""
     with closing(get_conn()) as conn:
         rows = conn.execute(
-            'SELECT ts,open,high,low,close,volume FROM bars WHERE symbol=? ORDER BY ts',
-            (sym,)).fetchall()
+            'SELECT ts,open,high,low,close,volume FROM bars '
+            'WHERE market=? AND symbol=? ORDER BY ts',
+            (market, sym)).fetchall()
     return rows[-limit:] if limit else rows
 
 def _fetch_overall_margin_ratio_twse():

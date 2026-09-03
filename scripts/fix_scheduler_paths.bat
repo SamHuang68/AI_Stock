@@ -27,7 +27,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  $t = Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue;" ^
   "  if ($t) {" ^
   "    $tgt = Join-Path $env:SCR $map[$n];" ^
-  "    $a = New-ScheduledTaskAction -Execute $tgt;" ^
+  "    $root = [IO.Path]::GetFullPath((Join-Path $env:SCR '..'));" ^
+  "    if ($n -eq 'ETF_Daily_Snapshot') { $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'; $ps1 = Join-Path $env:SCR 'daily_etf.ps1'; $a = New-ScheduledTaskAction -Execute $ps -Argument ('-NoProfile -ExecutionPolicy Bypass -File \"' + $ps1 + '\" -ProbeUrl \"http://127.0.0.1:18435/etf-delta\" -RequireApi') -WorkingDirectory $root } else { $a = New-ScheduledTaskAction -Execute $tgt -WorkingDirectory $root };" ^
   "    try { Set-ScheduledTask -TaskName $n -Action $a | Out-Null; Write-Host ('  UPDATED  ' + $n + '  ->  ' + $tgt) }" ^
   "    catch { Write-Host ('  FAILED   ' + $n + '  : ' + $_.Exception.Message) }" ^
   "  } else { Write-Host ('  skip     ' + $n + '  (not installed)') }" ^

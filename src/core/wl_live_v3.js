@@ -136,12 +136,18 @@
   }
 
   // 更新某筆持倉的現價（v3.8：POS 不再只在點股時更新）
-  function applyToPos(code, cur) {
+  function applyToPos(code, quote) {
+    const cur = quote && quote.price;
     if (cur == null || !isFinite(cur)) return;
     if (typeof S !== 'undefined' && S.positions && S.positions[code]) {
       const p = S.positions[code];
-      if (p.lastPrice !== cur) {
+      const prev = quote.prevClose != null && isFinite(quote.prevClose) ? Number(quote.prevClose) : null;
+      const dayChange = quote.changePct != null && isFinite(quote.changePct) ? Number(quote.changePct) :
+        (prev && prev > 0 ? (Number(cur) - prev) / prev * 100 : null);
+      if (p.lastPrice !== cur || p.prevClose !== prev || p.dayChangePct !== dayChange) {
         p.lastPrice = cur;
+        p.prevClose = prev;
+        p.dayChangePct = dayChange;
         p.lastUpdate = Date.now();
         _posDirty = true;
       }
@@ -197,8 +203,8 @@
       for (const [yfsym, w] of symMap.entries()) {
         const d = data[yfsym];
         if (!d || d.changePct == null) continue;
-        if (w._pos) applyToPos(w._pos, d.price);
-        else { applyToChip(w, d.changePct, d.price); if (w._posAlso) applyToPos(w._posAlso, d.price); }
+        if (w._pos) applyToPos(w._pos, d);
+        else { applyToChip(w, d.changePct, d.price); if (w._posAlso) applyToPos(w._posAlso, d); }
       }
 
       // After in-place updates: persist S.wl (so refresh shows last seen %)

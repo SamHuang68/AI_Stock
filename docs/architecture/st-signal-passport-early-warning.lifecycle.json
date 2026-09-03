@@ -1,0 +1,204 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Signal Passport 文件投影：提前預警 8 狀態（非 API；不含 EXPIRED）",
+    "animation": "none",
+    "quality_profile": "showcase",
+    "viewBox": [1060, 650],
+    "legend": { "mode": "hidden" }
+  },
+  "lanes": [
+    { "id": "main", "label": "主狀態軌｜strength 非機率" },
+    { "id": "conflict", "label": "衝突失效｜shadowOnly・AI 無交易權" },
+    { "id": "recovery", "label": "有界前瞻帳本｜首次登錄不回填・1／3／5日・n≥20・讀取≤500" }
+  ],
+  "states": [
+    {
+      "id": "observation",
+      "type": "start",
+      "label": "觀察",
+      "sublabel": "未達追蹤門檻",
+      "tag": "OBSERVATION",
+      "step": "01",
+      "lane": "main",
+      "col": 0,
+      "width": 116,
+      "height": 92
+    },
+    {
+      "id": "watch",
+      "type": "waiting",
+      "label": "列入觀察",
+      "sublabel": "強度≥55・2領域",
+      "tag": "WATCH",
+      "step": "02",
+      "lane": "main",
+      "col": 1,
+      "width": 116,
+      "height": 92
+    },
+    {
+      "id": "armed",
+      "type": "decision",
+      "label": "蓄勢待發",
+      "sublabel": "強度≥70・3領域・連2次",
+      "tag": "ARMED",
+      "step": "03",
+      "lane": "main",
+      "col": 2,
+      "width": 116,
+      "height": 92
+    },
+    {
+      "id": "confirmed",
+      "type": "active",
+      "label": "方向確認",
+      "sublabel": "強度≥80・現貨廣度同向",
+      "tag": "CONFIRMED",
+      "step": "04",
+      "lane": "main",
+      "col": 3,
+      "width": 116,
+      "height": 92
+    },
+    {
+      "id": "active",
+      "type": "success",
+      "label": "持續生效",
+      "sublabel": "下一次高門檻仍同向",
+      "tag": "ACTIVE",
+      "step": "05",
+      "lane": "main",
+      "col": 4,
+      "width": 116,
+      "height": 92
+    },
+    {
+      "id": "conflicted",
+      "type": "decision",
+      "label": "證據衝突",
+      "sublabel": "任何狀態遇 direction=mixed",
+      "tag": "CONFLICT",
+      "lane": "conflict",
+      "col": 0,
+      "width": 116,
+      "height": 92
+    },
+    {
+      "id": "invalidated",
+      "type": "failure",
+      "label": "原方向失效",
+      "sublabel": "mixed轉單向／既有方向反轉",
+      "tag": "INVALIDATED",
+      "lane": "conflict",
+      "col": 1,
+      "width": 116,
+      "height": 92
+    },
+    {
+      "id": "recovering",
+      "type": "failure",
+      "label": "恢復觀察",
+      "sublabel": "追蹤態連3次低於45",
+      "tag": "RECOVERY",
+      "lane": "recovery",
+      "col": 2,
+      "width": 116,
+      "height": 92,
+      "yOffset": 100
+    }
+  ],
+  "transitions": [
+    {
+      "id": "observe_watch",
+      "from": "observation",
+      "to": "watch",
+      "variant": "default",
+      "route": "auto"
+    },
+    {
+      "id": "watch_armed",
+      "from": "watch",
+      "to": "armed",
+      "variant": "emphasis",
+      "route": "auto"
+    },
+    {
+      "id": "armed_confirmed",
+      "from": "armed",
+      "to": "confirmed",
+      "variant": "emphasis",
+      "route": "auto"
+    },
+    {
+      "id": "confirmed_active",
+      "from": "confirmed",
+      "to": "active",
+      "variant": "emphasis",
+      "route": "auto"
+    },
+    {
+      "id": "any_conflict",
+      "from": "armed",
+      "to": "conflicted",
+      "label": "任一輪 direction=mixed",
+      "variant": "security",
+      "route": "straight",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [402, 240]
+    },
+    {
+      "id": "conflict_invalidated",
+      "from": "conflicted",
+      "to": "invalidated",
+      "variant": "security",
+      "route": "auto"
+    },
+    {
+      "id": "direction_invalidated",
+      "from": "active",
+      "to": "invalidated",
+      "label": "既有方向反轉",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "top",
+      "via": [[820, 172], [820, 240], [556, 240]],
+      "labelAt": [780, 248]
+    },
+    {
+      "id": "tracked_recovery",
+      "from": "active",
+      "to": "recovering",
+      "label": "追蹤態連3次低於45",
+      "variant": "security",
+      "route": "straight",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [710, 330]
+    },
+    {
+      "id": "invalidated_observation",
+      "from": "invalidated",
+      "to": "observation",
+      "label": "重新建立基準",
+      "variant": "default",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [[556, 390], [20, 390], [20, 234], [94, 234]],
+      "labelAt": [300, 380]
+    },
+    {
+      "id": "recovery_watch",
+      "from": "recovering",
+      "to": "watch",
+      "label": "重新達55／2領域",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [[710, 506], [900, 506], [900, 80], [248, 80]],
+      "labelAt": [806, 496]
+    }
+  ]
+}

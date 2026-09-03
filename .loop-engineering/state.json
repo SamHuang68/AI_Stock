@@ -1,0 +1,1311 @@
+{
+  "stateSchema": "loop-engineering-state/v1",
+  "schemaVersion": 1,
+  "projectId": "stock-terminal-v5",
+  "objective": "Add versioned, evidence-backed Archify explanations to Stock Terminal without creating a second runtime data path, then prove visual quality, security boundaries, regression safety and independent multi-provider review.",
+  "status": "complete",
+  "updatedAt": "2026-08-31",
+  "constraints": {
+    "inScope": [
+      "six standalone Archify diagrams grounded in current Stock Terminal source evidence",
+      "versioned JSON specifications, frozen HTML artifacts, delivery receipts and drift manifest",
+      "on-demand new-tab links from Decision and Consensus Attention only",
+      "Archify showcase validation, multi-viewport visual inspection and Stock Terminal regression tests",
+      "strict Google Antigravity plus xAI/Cursor HIVE review of one immutable sanitized artifact bundle"
+    ],
+    "outOfScope": [
+      "changing market formulas, DecisionContext authority, Early Warning authority or live refresh ownership",
+      "embedding Archify by iframe or making it a startup, build, deploy or mobile-shell dependency",
+      "credentials, private holdings, private payloads or personalized machine paths in public artifacts",
+      "commit, push, deployment or production mutation",
+      "the unrelated runtime-updated market-data files"
+    ],
+    "assumptions": [
+      "current checked-out source is the implementation baseline",
+      "Archify artifacts explain static contracts and do not display current market values",
+      "authored diagram text may be Traditional Chinese while fixed Viewer controls remain English",
+      "frozen HTML is served only after authentication through the existing /assets allowlist"
+    ],
+    "permissions": [
+      "the user's explicit instruction authorizes reversible project source, documentation, test and generated-artifact writes",
+      "external advisory workers are read-only and cannot write canonical project state",
+      "commit, push and deployment require a later explicit user instruction"
+    ],
+    "availableResources": [
+      "current source, tests, build tooling and existing architecture documentation",
+      "Archify safe wrapper, schema validators, delivery and visual-check pipeline",
+      "Chrome or Playwright visual inspection and local static/runtime verification",
+      "Google Antigravity and xAI/Cursor advisory routes through Agent Hive; NVIDIA routes remain optional fallback when healthy",
+      "Host-owned single-writer integration and acceptance"
+    ],
+    "excludedResources": [
+      "credential contents, private brokerage payloads and personal holdings",
+      "direct external-worker writes or access outside the dedicated sanitized review directory",
+      "unrelated runtime market-data mutations"
+    ]
+  },
+  "currentLoop": {
+    "id": "LOOP-022",
+    "title": "Archify Decision Explainability Integration",
+    "entryCondition": "Archify and Loop Engineering contracts are read, current source evidence is available, and the user authorized implementation",
+    "exitCondition": "All six frozen artifacts pass showcase validation and human visual review, ST links remain lazy and secure, regressions pass, and accepted Google Antigravity plus xAI/Cursor reviews bind to the immutable final bundle"
+  },
+  "orchestrationPolicy": {
+    "multiProviderRequired": true,
+    "requiredDistinctProviders": 2,
+    "quotaSignalsStayHostLocal": true,
+    "unknownQuotaPolicy": "fallback",
+    "providerGateVerdict": "VERIFIED_MULTI_PROVIDER"
+  },
+  "taskShape": {
+    "kind": "create-and-integrate",
+    "capabilities": ["decide", "extract-transform", "create-synthesize", "render-explain", "register-store", "validate-govern", "observe-measure"],
+    "analysisSource": "chatgpt-codex-host",
+    "inputTypes": ["current source evidence", "Archify schemas", "existing README and architecture documents", "responsive and Private Web contracts"],
+    "outputTypes": ["versioned diagram specs", "frozen standalone HTML", "receipts", "artifact manifest", "lazy ST links", "regression evidence", "multi-provider review receipts"],
+    "freshness": "source evidence and review bundle frozen during LOOP-022",
+    "sideEffectLevel": "approved-write",
+    "reversibility": "reversible",
+    "approvalRequired": true,
+    "approvalNodeId": "B22-IMPLEMENT",
+    "dataBoundary": "Canonical writes stay in the local repository; external providers receive only an immutable source-free architecture review bundle under the dedicated Documents review directory",
+    "feedbackRequired": false
+  },
+  "capabilityGraph": {
+    "enabled": true,
+    "roles": [
+      {"roleId": "host-integrator", "capability": "decide/create/register/validate", "worker": "root", "writePolicy": "single-writer", "providerGroup": "openai-codex"},
+      {"roleId": "google-adversarial-reviewer", "capability": "review/challenge", "worker": "antigravity", "writePolicy": "read-only advisory", "providerGroup": "google-antigravity"},
+      {"roleId": "xai-adversarial-reviewer", "capability": "review/challenge", "worker": "cursor-agent", "writePolicy": "read-only advisory", "providerGroup": "xai-cursor"}
+    ],
+    "capacityGroups": [
+      {"id": "openai-codex", "provider": "OpenAI", "billingMeter": "current Codex task", "distinctProviderCount": 1},
+      {"id": "google-antigravity", "provider": "Google", "billingMeter": "Google Antigravity CLI quota", "distinctProviderCount": 1},
+      {"id": "xai-cursor", "provider": "xAI", "billingMeter": "Cursor authenticated account quota", "distinctProviderCount": 1}
+    ]
+  },
+  "synchronizationBarriers": [
+    {
+      "id": "B15-ACCEPTANCE",
+      "requiredTasks": ["L15-01", "L15-02", "L15-03", "L15-04"],
+      "releaseTask": "L15-05",
+      "approvalEvidence": "No external actuation in this loop; user authorized reversible implementation",
+      "verdict": "passed"
+    },
+    {
+      "id": "B16-RELEASE",
+      "requiredTasks": ["L16-01", "L16-02", "L16-03"],
+      "releaseTask": "L16-04",
+      "approvalEvidence": "User instruction: git commit push deploy",
+      "verdict": "passed"
+    },
+    {
+      "id": "B17-RESPONSIVE",
+      "requiredTasks": ["L17-01", "L17-02", "L17-03"],
+      "releaseTask": "L17-04",
+      "approvalEvidence": "User authorized the landscape layout correction and requested HIVE review",
+      "verdict": "passed"
+    },
+    {
+      "id": "B18-RELEASE",
+      "requiredTasks": ["L18-01", "L18-02", "L18-03"],
+      "releaseTask": "L18-04",
+      "approvalEvidence": "User instruction: git push commit deploy",
+      "verdict": "passed"
+    },
+    {
+      "id": "B19-TYPOGRAPHY",
+      "requiredTasks": ["L19-01", "L19-02", "L19-03"],
+      "releaseTask": "L19-04",
+      "approvalEvidence": "User requested HIVE-assisted correction; no deployment or external actuation is in scope",
+      "verdict": "passed"
+    },
+    {
+      "id": "B20-READABILITY",
+      "requiredTasks": ["L20-01", "L20-02", "L20-03"],
+      "releaseTask": "L20-04",
+      "approvalEvidence": "User rejected the prior readability quality and explicitly requested correction; commit, push and deployment remain out of scope",
+      "verdict": "passed"
+    },
+    {
+      "id": "B21-RELEASE",
+      "requiredTasks": ["L21-01", "L21-02", "L21-03", "L21-04"],
+      "releaseTask": "L21-05",
+      "approvalEvidence": "User instruction: git commit push deploy",
+      "verdict": "passed"
+    },
+    {
+      "id": "B22-IMPLEMENT",
+      "requiredTasks": ["L22-01", "L22-02", "L22-03", "L22-04", "L22-05"],
+      "releaseTask": "L22-06",
+      "approvalEvidence": "User instruction: HIVE展開loop engineering 照建議執行",
+      "verdict": "passed"
+    }
+  ],
+  "routing": [
+    {
+      "capability": "host",
+      "executionTarget": "root",
+      "provider": "OpenAI",
+      "model": "Codex Host",
+      "dataBoundary": "local project",
+      "selectionReason": "Git and deployment actuation plus runtime acceptance remain Host-owned; no new external review is required for the already accepted artifacts",
+      "fallback": null,
+      "responsibility": "freeze, test, commit, push, stage, promote, restart and verify the exact release",
+      "writePolicy": "single writer"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "L10-01",
+      "title": "Freeze task, authority and data contracts",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": [],
+      "capabilities": ["decide"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Baseline hash, shadow-only authority, rolling metrics, session alignment, barrier and Gate matrix are recorded before implementation"
+    },
+    {
+      "id": "L10-02",
+      "title": "Quant and backend architecture advisory",
+      "owner": "quant-architecture",
+      "status": "done",
+      "dependsOn": ["L10-01"],
+      "capabilities": ["extract-transform", "logical precision"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Return formulas, fail-closed quality rules, session/benchmark mapping, backend seams and test cases against the baseline hash"
+    },
+    {
+      "id": "L10-03",
+      "title": "UI and Evidence integration advisory",
+      "owner": "ui-evidence",
+      "status": "done",
+      "dependsOn": ["L10-01"],
+      "capabilities": ["render-explain", "context expansion"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Return a progressive panel/evidence contract, exact integration seams and responsive/accessibility risks against the baseline hash"
+    },
+    {
+      "id": "L10-04",
+      "title": "Adversarial formula and test review",
+      "owner": "adversarial-tests",
+      "status": "done",
+      "dependsOn": ["L10-01"],
+      "capabilities": ["validate-govern"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Return P0/P1 edge cases, falsification fixtures and a release recommendation against the baseline hash"
+    },
+    {
+      "id": "L10-05",
+      "title": "Implement deterministic shadow engine and HTTP contract",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L10-01"],
+      "capabilities": ["create-synthesize", "extract-transform"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Pure formulas, bounded provider adapter, source/session metadata, regimes and fail-closed behavior are exposed without changing authoritative DecisionContext"
+    },
+    {
+      "id": "L10-06",
+      "title": "Integrate shadow Evidence and progressive ST panel",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L10-02", "L10-03", "L10-04", "L10-05"],
+      "capabilities": ["create-synthesize", "render-explain"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "The UI exposes repricing, acceptance, synchronization, methodology and quality while remaining shadow-only and responsive"
+    },
+    {
+      "id": "L10-07",
+      "title": "Run fan-in refinement and verification Gates",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L10-06"],
+      "capabilities": ["validate-govern", "learn-refine"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "All required branch deltas are reconciled and unit, integration, build, runtime, responsive and authority-boundary Gates pass with no P0/P1"
+    },
+    {
+      "id": "L11-01",
+      "title": "Freeze precursor event and authority contract",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": [],
+      "capabilities": ["decide"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Five domains, four named signals, strength semantics, lifecycle, dedupe, session and shadow-only boundaries are explicit"
+    },
+    {
+      "id": "L11-02",
+      "title": "Implement deterministic scoring and persistent lifecycle",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L11-01"],
+      "capabilities": ["create-synthesize", "extract-transform"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Pure scoring, 0050 residual guard, fail-closed memory domain, state hysteresis and stable events are covered by tests"
+    },
+    {
+      "id": "L11-03",
+      "title": "Integrate DecisionContext, APIs, notifications and UI",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L11-02"],
+      "capabilities": ["create-synthesize", "render-explain"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "One backend writer feeds Evidence, read-only remote APIs, transition-only opt-in transports and a readable Decision panel"
+    },
+    {
+      "id": "L11-04",
+      "title": "Run regression, build, security and responsive verification",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L11-03"],
+      "capabilities": ["validate-govern", "learn-refine"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "All targeted and broad suites, build reproducibility, private-Web allow-list and responsive UI Gates pass with no P0/P1"
+    },
+    {
+      "id": "L12-01",
+      "title": "Freeze local baseline and sanitized review artifact",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": [],
+      "capabilities": ["sense", "decide", "validate-govern"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Repository identity, dirty files, canonical test evidence, privacy exclusions and one immutable review-bundle hash are recorded"
+    },
+    {
+      "id": "L12-02",
+      "title": "Independent product, decision and UX review",
+      "owner": "product-reviewer",
+      "status": "done",
+      "dependsOn": ["L12-01"],
+      "capabilities": ["sense", "context expansion", "adversarial critique"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Google reviews the exact bundle and returns actionable findings with an evidence receipt"
+    },
+    {
+      "id": "L12-03",
+      "title": "Independent quant, architecture and release review",
+      "owner": "quant-architecture-reviewer",
+      "status": "done",
+      "dependsOn": ["L12-01"],
+      "capabilities": ["sense", "logical precision", "adversarial critique"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "NVIDIA reviews the exact bundle and returns actionable findings with an evidence receipt"
+    },
+    {
+      "id": "L12-04",
+      "title": "Accept, reject and synthesize worker findings",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L12-02", "L12-03"],
+      "capabilities": ["decide", "create-synthesize", "validate-govern"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Unsupported claims are explicitly rejected and accepted findings become a prioritized implementation roadmap"
+    },
+    {
+      "id": "L12-05",
+      "title": "Verify provider diversity, lineage and final documentation",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L12-04"],
+      "capabilities": ["observe-measure", "validate-govern"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Strict multi-provider verification and input lineage pass, final documentation parses cleanly, and product code remains unchanged"
+    },
+    {
+      "id": "L13-01",
+      "title": "Restore canonical release truth",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L12-05"],
+      "capabilities": ["decide", "create-synthesize", "validate-govern"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Full unittest discovery collects without package-identity errors and passes"
+    },
+    {
+      "id": "L13-02",
+      "title": "Implement append-only prospective outcome ledger",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L13-01"],
+      "capabilities": ["extract-transform", "create-synthesize", "observe-measure"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "One episode trial resolves immutable 1/3/5-session outcomes from the existing finalized TWII history without retrospective backfill"
+    },
+    {
+      "id": "L13-03",
+      "title": "Integrate sample-gated API, Decision UI and Evidence",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L13-02"],
+      "capabilities": ["create-synthesize", "render-explain", "register-store"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Read-only performance API and responsive UI expose n/20 until rates are eligible while retaining shadow-only authority"
+    },
+    {
+      "id": "L13-04",
+      "title": "Run deterministic, privacy, build and Chrome Gates",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L13-03"],
+      "capabilities": ["validate-govern", "observe-measure", "learn-refine"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Canonical tests, UI checks, reproducible build, archive privacy scans and desktop/mobile Chrome verification pass"
+    },
+    {
+      "id": "L13-05",
+      "title": "Independent advisory challenge and Host acceptance",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L13-04"],
+      "capabilities": ["validate-govern", "observe-measure"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "A fresh dispatch-verified worker reviews the immutable sanitized contract; the Host independently verifies and records disposition"
+    },
+    {
+      "id": "L14-01",
+      "title": "Freeze tested application revision",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L13-05"],
+      "capabilities": ["decide", "register-store", "validate-govern"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "All current source, documentation, generated HTML and market-data updates are contained in one immutable commit after canonical gates pass"
+    },
+    {
+      "id": "L14-02",
+      "title": "Authorize exact Private Web deployment",
+      "owner": "user",
+      "status": "done",
+      "dependsOn": ["L14-01"],
+      "capabilities": ["decide"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "L14-02",
+      "successCriteria": "The user explicitly authorizes Git commit and deployment of the frozen release"
+    },
+    {
+      "id": "L14-03",
+      "title": "Stage and test exact release",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L14-02"],
+      "capabilities": ["register-store", "validate-govern"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "L14-02",
+      "successCriteria": "Release ba65f45b0d2e is exported from the exact commit, rebuilt and passes all Private Web staging tests"
+    },
+    {
+      "id": "L14-04",
+      "title": "Promote and restart isolated host",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L14-03"],
+      "capabilities": ["deliver-actuate"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "L14-02",
+      "successCriteria": "The active manifest identifies ba65f45b0d2e; production data/logs remain preserved and ports 18434/18435 listen on loopback"
+    },
+    {
+      "id": "L14-05",
+      "title": "Verify local and Tailscale deployment",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L14-04"],
+      "capabilities": ["validate-govern", "observe-measure"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Runtime identity, HTML hash, TLS, login, persistent session notice, owner/reader authorization and blocked sensitive route checks pass"
+    },
+    {
+      "id": "L15-01",
+      "title": "Freeze ConsensusAttentionV1 contract and baseline",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": [],
+      "capabilities": ["sense", "decide", "validate-govern"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Existing canonical writers, route options, runtime payload, privacy boundary and pre-change tests are recorded"
+    },
+    {
+      "id": "L15-02",
+      "title": "Implement deterministic consensus projection",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L15-01"],
+      "capabilities": ["extract-transform", "create-synthesize"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "DecisionContext contains a versioned, bounded, privacy-aware attention projection without changing precursor authority or adding polling"
+    },
+    {
+      "id": "L15-03",
+      "title": "Implement floating consensus radar and lifecycle UX",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L15-02"],
+      "capabilities": ["create-synthesize", "render-explain"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Existing FAB opens a three-visible/five-total non-modal radar with WATCH badge, acknowledgement, stale state and responsive portrait/landscape behavior"
+    },
+    {
+      "id": "L15-04",
+      "title": "Implement shared route focus and evidence highlighting",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L15-02"],
+      "capabilities": ["create-synthesize", "render-explain"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Consensus cards route to canonical panels and focus a stable section without breaking existing route options"
+    },
+    {
+      "id": "L15-05",
+      "title": "Run deterministic, responsive, privacy and build Gates",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L15-02", "L15-03", "L15-04"],
+      "capabilities": ["validate-govern", "observe-measure", "learn-refine"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Targeted and broad tests, static checks, reproducible build and local runtime payload/UI smoke pass with no P0/P1"
+    },
+    {
+      "id": "L16-01",
+      "title": "Freeze release scope and rerun canonical Gates",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L15-05"],
+      "capabilities": ["decide", "validate-govern"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "The feature files are isolated from unrelated runtime market data and all canonical release Gates pass"
+    },
+    {
+      "id": "L16-02",
+      "title": "Authorize Git and Private Web actuation",
+      "owner": "user",
+      "status": "done",
+      "dependsOn": ["L16-01"],
+      "capabilities": ["decide"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "L16-02",
+      "successCriteria": "The user explicitly authorizes commit, push and deployment of the frozen release"
+    },
+    {
+      "id": "L16-03",
+      "title": "Commit and push exact release revision",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L16-01", "L16-02"],
+      "capabilities": ["register-store"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "L16-02",
+      "successCriteria": "One immutable feature commit is pushed to the current origin branch without the unrelated runtime CSV change"
+    },
+    {
+      "id": "L16-04",
+      "title": "Stage, promote and restart Private Web",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L16-03"],
+      "capabilities": ["deliver-actuate"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "L16-02",
+      "successCriteria": "The exact pushed commit passes staging tests, is promoted and the isolated host is restarted"
+    },
+    {
+      "id": "L16-05",
+      "title": "Verify active local and Tailscale release",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L16-04"],
+      "capabilities": ["validate-govern", "observe-measure"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Runtime manifest, HTML/module identity, local health and remote authentication/authorization checks match the exact deployed commit"
+    },
+    {
+      "id": "L17-01",
+      "title": "Trace landscape regression to the earliest causal CSS transition",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": [],
+      "capabilities": ["sense", "decide", "observe-measure"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Current screenshot and Git anchor 3cab212 identify the first missing or changed landscape density contract"
+    },
+    {
+      "id": "L17-02",
+      "title": "Obtain bounded HIVE responsive-layout review",
+      "owner": "hive-responsive-reviewer",
+      "status": "done",
+      "dependsOn": ["L17-01"],
+      "capabilities": ["validate-govern", "render-explain"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "One dispatch-verified advisory worker reviews the immutable layout bundle and returns selector-level recommendations with P0/P1 findings"
+    },
+    {
+      "id": "L17-03",
+      "title": "Implement landscape-only compact density profile",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L17-01", "L17-02"],
+      "capabilities": ["create-synthesize", "render-explain"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Only coarse-pointer short landscape receives compact spacing while five columns, two zones, desktop and portrait remain unchanged"
+    },
+    {
+      "id": "L17-04",
+      "title": "Run static, build and responsive regression gates",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L17-03"],
+      "capabilities": ["validate-govern", "observe-measure", "learn-refine"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Shell self-tests, deterministic build and landscape viewport inspection pass with no P0/P1"
+    },
+    {
+      "id": "L18-01",
+      "title": "Freeze release scope and rerun canonical gates",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L17-04"],
+      "capabilities": ["decide", "validate-govern", "register-store"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Only accepted LOOP-017 files are staged; canonical tests, build, diff and privacy checks pass while data/twoii_daily.csv remains excluded"
+    },
+    {
+      "id": "L18-02",
+      "title": "Authorize exact Git and Private Web release",
+      "owner": "user",
+      "status": "done",
+      "dependsOn": ["L18-01"],
+      "capabilities": ["decide"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "L18-02",
+      "successCriteria": "The user explicitly authorizes commit, push and deployment of the frozen change"
+    },
+    {
+      "id": "L18-03",
+      "title": "Create and push exact feature commit",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L18-01", "L18-02"],
+      "capabilities": ["register-store", "deliver-actuate"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "L18-02",
+      "successCriteria": "One feature commit containing only the accepted scope is pushed to origin/cursor/st-wd-tip-integrate-3497"
+    },
+    {
+      "id": "L18-04",
+      "title": "Stage, promote and restart exact release",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L18-03"],
+      "capabilities": ["register-store", "validate-govern", "deliver-actuate"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "L18-02",
+      "successCriteria": "Private Web staging tests the exact Git archive, promotes it and restarts the isolated host while preserving data and logs"
+    },
+    {
+      "id": "L18-05",
+      "title": "Verify local and Tailscale deployment and record evidence",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L18-04"],
+      "capabilities": ["validate-govern", "observe-measure", "register-store"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "L18-02",
+      "successCriteria": "Active manifest, HTML hash, runtime health, authentication/authorization and deployed landscape rule match the exact feature commit"
+    },
+    {
+      "id": "L19-01",
+      "title": "Measure mobile landscape typography collisions",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": [],
+      "capabilities": ["sense", "observe-measure"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Record panel widths, KPI client widths, overflowing glyph policy and compact chart intersections at 956x440"
+    },
+    {
+      "id": "L19-02",
+      "title": "Independent HIVE responsive challenge",
+      "owner": "nemotron-3-super",
+      "status": "done",
+      "dependsOn": ["L19-01"],
+      "capabilities": ["validate-govern", "render-explain"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Review the immutable artifact and return the six requested selector, policy, risk and Gate sections"
+    },
+    {
+      "id": "L19-03",
+      "title": "Implement landscape-only typography containment",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L19-01", "L19-02"],
+      "capabilities": ["create-synthesize", "render-explain"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "KPI values fit without truncation, chart labels stop colliding, and the institutional title remains visible"
+    },
+    {
+      "id": "L19-04",
+      "title": "Run build and responsive acceptance gates",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L19-03"],
+      "capabilities": ["validate-govern", "observe-measure", "learn-refine"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Syntax, self-test, build, scoped diff and Chrome gates pass at 956x440, 956x390, 390x844 and 1440x900"
+    },
+    {
+      "id": "L20-01",
+      "title": "Reproduce the rejected wide-desktop readability state",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": [],
+      "capabilities": ["sense", "observe-measure", "learn-refine"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Record computed font sizes, card occupancy, overflow and the exact short-height media path at 1366x551"
+    },
+    {
+      "id": "L20-02",
+      "title": "Independent HIVE successor-contract review",
+      "owner": "nemotron-3-super",
+      "status": "done",
+      "dependsOn": ["L20-01"],
+      "capabilities": ["validate-govern", "render-explain"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Review and accept or reject the immutable failure analysis, typography hierarchy and five-viewport Gate matrix"
+    },
+    {
+      "id": "L20-03",
+      "title": "Implement hierarchy-first beginner responsive styling",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L20-01", "L20-02"],
+      "capabilities": ["create-synthesize", "render-explain"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Body and support typography meet the successor floor, wide-short desktop scrolls, and no primary content is hidden"
+    },
+    {
+      "id": "L20-04",
+      "title": "Run build and five-viewport experiential Gates",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L20-03"],
+      "capabilities": ["validate-govern", "observe-measure", "learn-refine"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Syntax, self-test, build, computed typography, overlap, truncation, horizontal containment and expert 5+5 regressions pass"
+    },
+    {
+      "id": "L21-01",
+      "title": "Freeze the scoped release candidate",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L20-04"],
+      "capabilities": ["decide", "register-store"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "The exact source, generated page, tests and four immutable review records are enumerated while runtime market-data mutations remain excluded"
+    },
+    {
+      "id": "L21-02",
+      "title": "Run release regression and integrity gates",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L21-01"],
+      "capabilities": ["validate-govern"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Syntax, self-test, build, Private Web tests, scoped diff and privacy checks pass before Git mutation"
+    },
+    {
+      "id": "L21-03",
+      "title": "Commit and push the exact application revision",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L21-02"],
+      "capabilities": ["register-store", "deliver-actuate"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "B21-RELEASE",
+      "successCriteria": "Only approved paths are committed and origin resolves the current branch to the exact feature commit"
+    },
+    {
+      "id": "L21-04",
+      "title": "Stage, promote and restart the exact Private Web release",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L21-03"],
+      "capabilities": ["deliver-actuate"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "B21-RELEASE",
+      "successCriteria": "The exact Git archive passes release tests, promotion preserves data/logs, and isolated host restart succeeds"
+    },
+    {
+      "id": "L21-05",
+      "title": "Verify runtime identity, availability and artifact integrity",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L21-04"],
+      "capabilities": ["validate-govern", "observe-measure"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "B21-RELEASE",
+      "successCriteria": "Active manifest, runtime HTML hash, local gateway and Tailscale HTTPS all match the exact deployed feature commit"
+    },
+    {
+      "id": "L22-01",
+      "title": "Freeze source evidence and architecture contracts",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": [],
+      "capabilities": ["decide", "extract-transform"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Six bounded diagrams, source anchors, authority labels, non-goals, review Gates and immutable bundle inputs are explicit"
+    },
+    {
+      "id": "L22-02",
+      "title": "Generate and visually validate six Archify artifacts",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L22-01"],
+      "capabilities": ["create-synthesize", "render-explain", "validate-govern"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "B22-IMPLEMENT",
+      "successCriteria": "Every spec passes showcase 9/9 with zero composition errors and warnings, deliver succeeds, and all required screenshots pass human inspection"
+    },
+    {
+      "id": "L22-03",
+      "title": "Integrate lazy explainability links and artifact manifest",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L22-02"],
+      "capabilities": ["create-synthesize", "register-store"],
+      "sideEffectLevel": "approved-write",
+      "approvalNodeId": "B22-IMPLEMENT",
+      "successCriteria": "Decision and Radar open authenticated standalone artifacts in new tabs without iframe, preload, fetch, polling or a second DecisionData writer"
+    },
+    {
+      "id": "L22-04",
+      "title": "Run ST build, security and responsive regression Gates",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L22-03"],
+      "capabilities": ["validate-govern", "observe-measure"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": null,
+      "successCriteria": "Targeted tests, production build, Private Web asset/auth boundaries, privacy scan and no-runtime-coupling assertions pass with no P0/P1"
+    },
+    {
+      "id": "L22-05",
+      "title": "Obtain independent Google and xAI architecture challenge",
+      "owner": "host-orchestrated-hive",
+      "status": "done",
+      "dependsOn": ["L22-04"],
+      "capabilities": ["validate-govern", "learn-refine"],
+      "sideEffectLevel": "none",
+      "approvalNodeId": null,
+      "successCriteria": "Two accepted production receipts from distinct upstream vendors and billing meters review the exact immutable sanitized bundle; unavailable NVIDIA fallback is reported truthfully"
+    },
+    {
+      "id": "L22-06",
+      "title": "Fan-in findings, bind final lineage and close the loop",
+      "owner": "host",
+      "status": "done",
+      "dependsOn": ["L22-01", "L22-02", "L22-03", "L22-04", "L22-05"],
+      "capabilities": ["decide", "validate-govern", "learn-refine"],
+      "sideEffectLevel": "preview",
+      "approvalNodeId": "B22-IMPLEMENT",
+      "successCriteria": "All accepted findings are dispositioned, final hashes bind specs/artifacts/reviews, no P0/P1 remains, and commit/push/deploy are still untouched"
+    }
+  ],
+  "providerReceipts": [
+    {
+      "receiptId": "76079d760d8c7cd05cbce45ca62c58b2941d97d181e286c93875d84d564699bd",
+      "scopeId": "ST-ARCHIFY-LOOP022-2026-08-31",
+      "taskId": "L22-05-GOOGLE-ARCH-REVIEW",
+      "workerId": "antigravity",
+      "controlPlane": "official Google Antigravity CLI",
+      "provider": "Google",
+      "upstreamVendor": "Google",
+      "exactModel": "gemini-3.7-flash-high",
+      "modelObservation": "runtime-init-observed",
+      "billingMeter": "Google Antigravity CLI account quota",
+      "billingMeterObservation": "authenticated-account",
+      "dispatchKind": "production",
+      "status": "completed",
+      "anchorState": "anchored",
+      "outputHash": "50dda819495415c6610d5ab1f29e67397157388379567c88fd4fca11d13ffaf9",
+      "acceptanceEvidenceId": "6a4a162d180977df2adefe44335f5d1eb83d8891363f06330d17f007ce3adcd5",
+      "reviewedArtifactHash": "00ec24c2aa39b3cc2bdfae0eac8fa145f8fc6a32a8726b9ab9a04ad131d5e005",
+      "effectReceipt": "zero-side-effects"
+    },
+    {
+      "receiptId": "a62c691e8e1a4f328f7d3e001184207b6fa96bd343c253638ff6466a8f4e8b04",
+      "scopeId": "ST-ARCHIFY-LOOP022-2026-08-31",
+      "taskId": "L22-05-XAI-ARCH-REVIEW",
+      "workerId": "cursor-agent",
+      "controlPlane": "Cursor Agent CLI",
+      "provider": "Cursor",
+      "upstreamVendor": "xAI",
+      "exactModel": "cursor-grok-4.6-high",
+      "modelObservation": "response-observed",
+      "billingMeter": "Cursor authenticated account quota",
+      "billingMeterObservation": "authenticated-account",
+      "authenticationRoute": "cursor-authenticated-account",
+      "dispatchKind": "production",
+      "status": "completed",
+      "anchorState": "anchored",
+      "outputHash": "b071caf970e2778a9fb3743800f307d8934d463f99a60b524b630b46fff52a7e",
+      "acceptanceEvidenceId": "3cd5ad49ef960b0e6f880bd63210f611cab84e13e8423d39eb920bfd632fd609",
+      "reviewedArtifactHash": "00ec24c2aa39b3cc2bdfae0eac8fa145f8fc6a32a8726b9ab9a04ad131d5e005",
+      "effectReceipt": "zero-side-effects"
+    }
+  ],
+  "taskAcceptances": [
+    {
+      "taskId": "L22-05-GOOGLE-ARCH-REVIEW",
+      "producerReceiptId": "76079d760d8c7cd05cbce45ca62c58b2941d97d181e286c93875d84d564699bd",
+      "acceptanceEvidenceId": "6a4a162d180977df2adefe44335f5d1eb83d8891363f06330d17f007ce3adcd5",
+      "outputContract": "strict architecture review JSON bound to the exact immutable review bundle",
+      "verdict": "accepted",
+      "acceptedOutputHash": "50dda819495415c6610d5ab1f29e67397157388379567c88fd4fca11d13ffaf9",
+      "reviewedArtifactHash": "00ec24c2aa39b3cc2bdfae0eac8fa145f8fc6a32a8726b9ab9a04ad131d5e005",
+      "contribution": "Independent Google architecture and security challenge returned NO_P0_P1 with no findings."
+    },
+    {
+      "taskId": "L22-05-XAI-ARCH-REVIEW",
+      "producerReceiptId": "a62c691e8e1a4f328f7d3e001184207b6fa96bd343c253638ff6466a8f4e8b04",
+      "acceptanceEvidenceId": "3cd5ad49ef960b0e6f880bd63210f611cab84e13e8423d39eb920bfd632fd609",
+      "outputContract": "strict architecture review JSON bound to the exact immutable review bundle",
+      "verdict": "accepted",
+      "acceptedOutputHash": "b071caf970e2778a9fb3743800f307d8934d463f99a60b524b630b46fff52a7e",
+      "reviewedArtifactHash": "00ec24c2aa39b3cc2bdfae0eac8fa145f8fc6a32a8726b9ab9a04ad131d5e005",
+      "contribution": "Independent xAI challenge returned NO_P0_P1 and identified the documented direct-file protocol CSP caveat as a non-blocking P2."
+    }
+  ],
+  "collaborationClaims": [
+    {
+      "claimId": "STRICT-ST-ARCHIFY-LOOP022-20260831",
+      "scopeId": "ST-ARCHIFY-LOOP022-2026-08-31",
+      "status": "verified",
+      "taskIds": ["L22-05-GOOGLE-ARCH-REVIEW", "L22-05-XAI-ARCH-REVIEW"],
+      "receiptIds": [
+        "76079d760d8c7cd05cbce45ca62c58b2941d97d181e286c93875d84d564699bd",
+        "a62c691e8e1a4f328f7d3e001184207b6fa96bd343c253638ff6466a8f4e8b04"
+      ],
+      "providerOrganizations": ["Google", "xAI"],
+      "providerMeters": ["Google Antigravity CLI account quota", "Cursor authenticated account quota"],
+      "reviewedArtifactHash": "00ec24c2aa39b3cc2bdfae0eac8fa145f8fc6a32a8726b9ab9a04ad131d5e005",
+      "verdict": "VERIFIED_MULTI_PROVIDER",
+      "verificationEvidenceId": "1a539fc83f9459591b16228f40380afcf534f2438bf397b5b75825585399492a"
+    }
+  ],
+  "claimAudit": {
+    "required": true,
+    "verdict": "passed",
+    "ledgerPath": "Agent Hive hash-chained evidence ledger",
+    "reportPath": "evidence:1a539fc83f9459591b16228f40380afcf534f2438bf397b5b75825585399492a",
+    "unverifiedHistoricalClaimIds": [],
+    "blockingErrors": []
+  },
+  "verification": {
+    "gate": [
+      "Each Archify spec is grounded in named current source evidence and contains at most 12 primary nodes",
+      "Every artifact passes showcase 9/9, deliver, visual-check and Host inspection at four required viewport sizes",
+      "Artifacts contain no credentials, personal holdings, current market values or personalized absolute paths",
+      "ST only opens artifacts on demand in a new tab; no iframe, preload, fetch, poll or duplicate runtime state exists",
+      "Private Web authentication and existing /assets route allowlists remain unchanged",
+      "Targeted JS/Python tests and production build pass while unrelated runtime market-data files remain untouched",
+      "Google and xAI each return a production review bound to the exact sanitized bundle and the Host accepts or rejects every finding"
+    ],
+    "commands": [
+      "Archify showcase validate, deliver and visual-check for all six versioned specifications",
+      "bundled Python -m unittest -v tests.test_archify_artifacts tests.test_server_http_security tests.test_private_web_gateway tests.test_private_web_release",
+      "bundled Python -m unittest -v tests.test_dist_scrub using an isolated temporary Git index",
+      "node --check src/ui/decision_v5.js",
+      "node --check src/ui/consensus_attention_v5.js",
+      "node tests/consensus_attention_v5_selftest.js",
+      "node tests/shell_v5_selftest.js",
+      "bundled Python build_v2.py",
+      "Agent Hive verify_collaboration, bind_artifact and verify_artifact_lineage against the exact review-bundle SHA-256"
+    ],
+    "evidence": [
+      "Six Archify specifications passed showcase validation 9/9 with zero composition errors and zero warnings.",
+      "All six final HTML artifacts passed Host visual inspection in light and dark themes at 1440x900, 1600x1000, 1920x1080 and 2048x1320.",
+      "Manifest 051f87f9c629f82de2b4bc62176aa37227ed102be98b51d314a7dcc337bb5fb2 binds exactly six specifications and six frozen HTML artifacts.",
+      "Decision and Consensus Radar share one lazy new-tab URL with noopener/noreferrer; no iframe, preload, duplicate fetch, poll or second DecisionData writer was added.",
+      "Archify routes receive path-scoped CSP, authentication, traversal protection, no profile injection and no external runtime connection under ST HTTP or Private Web.",
+      "Targeted Python security and release suites passed 44 tests; the isolated-index share-package and privacy rescan passed 11 tests over 355 packaged files.",
+      "The production build regenerated stock_terminal_v2.html at revision 64d8eaf6eac8.",
+      "Google and xAI reviewed identical bundle SHA-256 00ec24c2aa39b3cc2bdfae0eac8fa145f8fc6a32a8726b9ab9a04ad131d5e005 and both returned NO_P0_P1.",
+      "Agent Hive collaboration evidence 1a539fc83f9459591b16228f40380afcf534f2438bf397b5b75825585399492a verified two distinct upstream vendors and billing meters.",
+      "Accepted artifact binding 3b7a01c43175820c3d8fde3fc8ecc12db05ff334a4684c6313f8603d8bc78063 and lineage evidence 37e1a0c786ef7ee5a78a87ab6990b5ee8e13516f8cd0a6e80190be69fd587750 both passed.",
+      "The four unrelated runtime market-data files remained outside implementation authority and were not staged, committed, pushed or deployed."
+    ],
+    "openP0": [],
+    "openP1": [],
+    "verdict": "passed",
+    "providerDiversity": {
+      "required": true,
+      "requiredDistinctProviders": 2,
+      "completedDistinctProviders": 2,
+      "verdict": "VERIFIED_MULTI_PROVIDER",
+      "providers": [
+        {
+          "upstreamVendor": "Google",
+          "billingMeter": "Google Antigravity CLI account quota",
+          "taskId": "L22-05-GOOGLE-ARCH-REVIEW",
+          "receiptId": "76079d760d8c7cd05cbce45ca62c58b2941d97d181e286c93875d84d564699bd"
+        },
+        {
+          "upstreamVendor": "xAI",
+          "billingMeter": "Cursor authenticated account quota",
+          "taskId": "L22-05-XAI-ARCH-REVIEW",
+          "receiptId": "a62c691e8e1a4f328f7d3e001184207b6fa96bd343c253638ff6466a8f4e8b04"
+        }
+      ],
+      "evidenceId": "1a539fc83f9459591b16228f40380afcf534f2438bf397b5b75825585399492a"
+    },
+    "artifactLineage": {
+      "required": true,
+      "artifactId": "st-archify-loop022-review-bundle",
+      "artifactVersion": "2026-08-31.v1",
+      "contentHash": "00ec24c2aa39b3cc2bdfae0eac8fa145f8fc6a32a8726b9ab9a04ad131d5e005",
+      "gateState": "accepted",
+      "bindingReceiptIds": ["3b7a01c43175820c3d8fde3fc8ecc12db05ff334a4684c6313f8603d8bc78063"],
+      "lineageEvidenceId": "37e1a0c786ef7ee5a78a87ab6990b5ee8e13516f8cd0a6e80190be69fd587750",
+      "verdict": "PASS"
+    }
+  },
+  "processIncidents": [
+    {
+      "incidentId": "PI-020-01",
+      "failedLoop": "LOOP-019",
+      "classification": "verification-definition",
+      "symptom": "Phone-landscape containment passed while wide-desktop beginner text remained 7–10px despite available space",
+      "missingGate": "Minimum computed font size, information hierarchy and whitespace utilization were absent from the acceptance rubric",
+      "successorLoop": "LOOP-020",
+      "resolution": "Added computed-typography and multi-viewport experiential Gates; short-height rules now compact spacing and permit scrolling instead of shrinking text"
+    }
+  ],
+  "loopHistory": [
+    {
+      "loopId": "LOOP-022",
+      "result": "pass",
+      "summary": "Created six source-evidenced Archify explanations, integrated lazy authenticated new-tab access from Decision and Consensus Radar, enforced static-document CSP and release/share validation, passed visual plus regression Gates, and closed a strict Google plus xAI HIVE review with accepted artifact lineage.",
+      "residualRisks": [
+        "Direct file:// viewing is outside the ST HTTP response-header boundary and may permit the generator's passive Google Fonts request; use the authenticated Private Web route when network-inert CSP enforcement is required.",
+        "The formal Git-tracked share-package preflight intentionally remains blocked until a later explicitly authorized commit records the fourteen new Archify files; the isolated-index simulation passed privacy and archive rescans.",
+        "The diagrams are frozen explanations of architecture contracts, not live market panels, and must be regenerated when their source contracts change.",
+        "NVIDIA was not counted toward this loop's provider Gate; the verified pair is Google Antigravity and xAI through Cursor.",
+        "This loop did not commit, push or deploy any change."
+      ]
+    },
+    {
+      "loopId": "LOOP-021",
+      "result": "pass",
+      "summary": "Committed and pushed the accepted landscape-typography and beginner-readability corrections as 97e1c7af70da, staged and tested that exact Git archive, promoted it through the Private Web release gate, restarted the isolated host and passed local plus Tailscale runtime identity, authentication, availability and artifact-integrity Gates.",
+      "residualRisks": [
+        "The isolated host remains a local long-running process; a Windows reboot still requires START_PRIVATE_WEB_HOST.cmd unless a separately approved startup task is configured.",
+        "Tailscale HTTPS availability depends on EVO-T1, the Tailscale service and the existing Serve configuration.",
+        "Short desktops now scroll vertically by design when readable content exceeds viewport height; one-page fit is not used as a readability requirement.",
+        "Runtime-updated data/tw_names_backup.json and data/twoii_daily.csv remain intentionally uncommitted and did not enter release 97e1c7af70da.",
+        "The later repository-only deployment record commit does not change the served application release."
+      ]
+    },
+    {
+      "loopId": "LOOP-020",
+      "result": "pass-successor",
+      "summary": "Recovered beginner-mode readability after the user rejected the geometry-only review: removed the wide-desktop 7–10px compression path, established a 13–14px body and 11–12px support hierarchy, preserved scroll-safe responsive behavior, and passed five measured browser configurations plus an accepted immutable HIVE challenge.",
+      "residualRisks": [
+        "The short desktop now scrolls vertically by design; one-page fit is no longer treated as a quality requirement.",
+        "Supporting source and risk badges use an 11px floor to preserve dense context; browser or OS accessibility enlargement can increase vertical scrolling.",
+        "The HIVE claim is one accepted NVIDIA advisory, not a multi-provider review.",
+        "Runtime-updated data/tw_names_backup.json and data/twoii_daily.csv remain unrelated and excluded from any later scoped commit.",
+        "This loop did not commit, push or deploy the correction."
+      ]
+    },
+    {
+      "loopId": "LOOP-019",
+      "result": "pass",
+      "summary": "Measured and eliminated the remaining phone-landscape typography collisions while preserving 5+5: primary KPI values now stay inside their cells without truncation, redundant mini-chart annotations are removed only in short touch landscape, the prior-day badge no longer clips 法人資金, and responsive Chrome gates pass at both landscape heights plus portrait and desktop.",
+      "residualRisks": [
+        "Secondary descriptions deliberately use one-line ellipsis in the compact landscape; full context remains available in source panels and tooltips.",
+        "Operating-system accessibility enlargement beyond the tested browser layout can reduce the number of visible list rows, but primary KPI cells now contain their paint boundary.",
+        "Google Gemini was unavailable due rate limiting; the HIVE contribution is one accepted NVIDIA advisory, not verified multi-provider collaboration.",
+        "Runtime-updated data/tw_names_backup.json and data/twoii_daily.csv remain unrelated, unmodified by this loop and excluded from any later scoped commit.",
+        "This loop did not commit, push or deploy the correction."
+      ]
+    },
+    {
+      "loopId": "LOOP-018",
+      "result": "pass",
+      "summary": "Committed and pushed the accepted mobile-landscape compact 5+5 restoration as 3c6bf5911226, staged and tested that exact Git archive, promoted it through the Private Web release path, restarted the isolated host and passed local plus Tailscale identity, access and artifact-integrity gates.",
+      "residualRisks": [
+        "The isolated host remains a local long-running process; a Windows reboot still requires START_PRIVATE_WEB_HOST.cmd unless a separately approved startup task is configured.",
+        "Tailscale HTTPS availability depends on EVO-T1, the Tailscale service and the existing Serve configuration.",
+        "OS or Chrome text enlargement above normal settings can still reduce visible rows, while internal list and chart regions remain the intended scroll owners.",
+        "The runtime-updated data/twoii_daily.csv change remains intentionally uncommitted and did not enter release 3c6bf5911226.",
+        "The later repository-only deployment record commit does not change the served application release."
+      ]
+    },
+    {
+      "loopId": "LOOP-017",
+      "result": "pass",
+      "summary": "Traced the iPhone landscape clipping regression to the missing compact-density layer introduced at 78e348d, accepted an independent Google HIVE review of the immutable evidence bundle, restored the 3cab212 compact values behind a touch-only short-landscape boundary, rebuilt the page and passed static plus 956x440/956x390 responsive runtime gates.",
+      "residualRisks": [
+        "OS or browser text enlargement above normal settings can still reduce visible data rows; internal list and chart regions remain the intended scroll owners.",
+        "KPI diagnostic strings remain deliberate one-line summaries and use ellipsis when the full detail exceeds one sixth of the viewport.",
+        "The runtime-updated data/twoii_daily.csv change remains unrelated and untouched.",
+        "This loop did not commit, push or deploy the change."
+      ]
+    },
+    {
+      "loopId": "LOOP-016",
+      "result": "pass",
+      "summary": "Committed and pushed the accepted Consensus Attention Radar increment as 49f631d164b6, staged and tested that exact Git archive, promoted it through the Private Web release path, restarted the isolated host and passed local plus Tailscale runtime identity, access, integrity and feature-presence Gates.",
+      "residualRisks": [
+        "The isolated host remains a local long-running process; a Windows reboot still requires START_PRIVATE_WEB_HOST.cmd unless a separately approved startup task is configured.",
+        "Tailscale HTTPS availability depends on EVO-T1, the Tailscale service and the existing Serve configuration.",
+        "The current production context had no active consensus items at verification time; this is a valid empty deterministic projection, not an unavailable contract.",
+        "The runtime-updated data/twoii_daily.csv worktree change remains intentionally uncommitted and did not enter release 49f631d164b6.",
+        "The later repository-only deployment record commit does not change the served application release."
+      ]
+    },
+    {
+      "loopId": "LOOP-015",
+      "result": "pass",
+      "summary": "Implemented ConsensusAttentionV1 as a deterministic, privacy-aware projection of canonical DecisionContext and surfaced it through the existing global FAB as a bounded cross-function attention radar with lifecycle acknowledgement, responsive drawer/sheet behavior and stable Decision deep links.",
+      "residualRisks": [
+        "The already-running local Python service predates this backend change and must be restarted or deployed before its /decision/context response includes consensusAttention.",
+        "The radar ranks deterministic evidence strength and attention relevance; neither value is a predictive probability or trade instruction.",
+        "Owner portfolio exposure remains conditionally visible only when an actual owner overlay is present; reader/public projections intentionally omit it.",
+        "The unrelated runtime-updated data/twoii_daily.csv worktree change was preserved and excluded from this implementation."
+      ]
+    },
+    {
+      "loopId": "LOOP-014",
+      "result": "pass",
+      "summary": "Committed the accepted precursor-validation increment and current market-data updates, staged an exact Git archive, rebuilt and tested it outside the worktree, promoted release ba65f45b0d2e, restarted the isolated host and passed local plus Tailscale HTTPS identity, authentication, authorization, availability and artifact-integrity Gates.",
+      "residualRisks": [
+        "The isolated host remains a local long-running process; a Windows reboot still requires START_PRIVATE_WEB_HOST.cmd unless a separately approved startup task is configured.",
+        "Tailscale HTTPS availability remains dependent on EVO-T1, the Tailscale service and the existing Serve configuration.",
+        "Market-history files can be refreshed again by the development runtime after the immutable release commit; such later worktree changes do not alter the deployed release.",
+        "The active application release is ba65f45b0d2e; the later repository-only deployment record does not change served application behavior."
+      ]
+    },
+    {
+      "loopId": "LOOP-013",
+      "result": "pass",
+      "summary": "Restored a truthful canonical release Gate and implemented a shadow-only prospective signal ledger with immutable 1/3/5-session outcomes, sample-gated statistics, read-only API, Decision and Evidence integration, full deterministic/build/privacy/Chrome verification and an accepted independent NVIDIA review.",
+      "residualRisks": [
+        "The ledger starts prospectively at feature activation and deliberately contains too few observations for rates until each horizon reaches 20 resolved trials.",
+        "A fixed 2% material-move threshold is a transparent first contract, not a claim that the same threshold is optimal across volatility regimes.",
+        "Resolved outcomes remain immutable for auditability, so later provider corrections are visible only in pending sessions and must be handled by a future explicit correction policy rather than silent rewrite.",
+        "Signal strength remains an evidence score with no trading authority; promotion would require substantially broader prospective history and regime-stratified validation."
+      ]
+    },
+    {
+      "loopId": "LOOP-012",
+      "result": "pass-review-with-open-remediation",
+      "summary": "Completed a privacy-sanitized, strict HIVE multi-provider review of Stock Terminal with independent Google product/UX and NVIDIA quant/architecture advice, Host claim filtering, canonical test evidence, verified input lineage and an implementation-ready evolution roadmap.",
+      "residualRisks": [
+        "The canonical unittest discovery gate remains red with 7 import errors caused by the server package/module identity collision.",
+        "Cross-market precursor strength is not a probability and lacks prospective lead-time, false-alert, coverage and regime-drift evidence.",
+        "Large compatibility surfaces and browser-global write paths should be reduced incrementally through existing seams, not by a high-risk rewrite.",
+        "The final roadmap is Host synthesis informed by verified external reviews; only the immutable sanitized input bundle itself has direct cross-provider lineage."
+      ]
+    },
+    {
+      "loopId": "LOOP-011",
+      "result": "pass",
+      "summary": "Implemented a deterministic shadow-only cross-market precursor system with de-duplicated anchors, persistent lifecycle transitions, canonical DecisionContext evidence, read-only APIs, opt-in transition delivery and a responsive Decision radar.",
+      "residualRisks": [
+        "Signal strength is a bounded evidence score, not a probability or prospectively validated forecast.",
+        "The memory-cycle domain remains unavailable when the fixed-basket cache is missing or stale; the engine deliberately degrades instead of imputing direction.",
+        "External alerts remain disabled until explicitly enabled and production evaluation still requires prospective false-positive, lead-time and regime-drift history."
+      ]
+    },
+    {
+      "loopId": "LOOP-001",
+      "result": "pass",
+      "summary": "Delivered the first TXO structure vertical slice with official expiry-scoped observations, auditable direction-neutral Greeks, explicit signed-GEX scenarios, DecisionContext evidence, default-collapsed UI and safe stale fallback.",
+      "residualRisks": [
+        "Public OI does not disclose dealer inventory direction, so Signed GEX and Flip remain scenario research only.",
+        "End-of-day TAIFEX data can lag live trading and is labeled with trade date and session.",
+        "Current scenario flip band is low-stability and must not be promoted to a single deterministic level."
+      ]
+    },
+    {
+      "loopId": "LOOP-002",
+      "result": "pass",
+      "summary": "Added direction-neutral OI Vega density, versioned scenario Signed VEX and bounded same-expiry history, then integrated them into the canonical DecisionContext, Decision UI, evidence ledger and privacy-safe distribution.",
+      "residualRisks": [
+        "Public OI still does not reveal dealer direction, so Signed GEX/VEX remain scenario outputs rather than observed exposure.",
+        "History needs two successful day-end snapshots of the exact same expiry before a change comparison is available.",
+        "Short-dated put-call parity carry can annualize to extreme values and remains visibly warned instead of silently normalized."
+      ]
+    },
+    {
+      "loopId": "LOOP-003",
+      "result": "pass",
+      "summary": "Completed an evidence-backed full architecture and code review without changing product behavior. The review documents current and target architecture, six open P1 and six P2 findings, strengths, verification results, remediation order and measurable acceptance gates.",
+      "residualRisks": [
+        "The product remains conditional because six verified P1 findings require implementation; completing the review does not close those product risks.",
+        "The canonical Python unittest suite currently exits with three order-dependent import errors and does not collect 27 module-level test functions.",
+        "Live-provider market-session validation and long-running browser memory/listener profiling were outside this read-only review."
+      ]
+    },
+    {
+      "loopId": "LOOP-004",
+      "result": "pass",
+      "summary": "Closed ARC-001 through ARC-012 with safe local HTTP boundaries, atomic recoverable persistence, protected secret migration, bounded request deadlines, canonical cross-platform CI, market-time and market-identity contracts, deterministic share builds, incremental AppKernel/service seams and a readable Decision Center.",
+      "residualRisks": [
+        "server/server.py and the generated single-page shell remain large compatibility surfaces; new work must use the introduced route/service/repository and AppKernel seams instead of expanding them directly.",
+        "Public market providers can still be delayed or unavailable; the product now exposes fresh/delayed/stale/unknown outcomes instead of inventing freshness.",
+        "Windows secret storage prefers current-user DPAPI but falls back to machine-scope DPAPI in restricted service contexts; both avoid plaintext, while current-user scope remains preferred.",
+        "Provider values without a timezone-aware market timestamp remain sourceStatus=unknown and must not be presented as live.",
+        "Unrelated refreshed CSV files in the dirty worktree retain existing CRLF/trailing-whitespace noise; scoped source-code diff checks pass and the deterministic archive normalizes packaged files."
+      ]
+    },
+    {
+      "loopId": "LOOP-005",
+      "result": "pass",
+      "summary": "Re-read and independently challenged all five current Taiwan dynamic-leverage articles, traced the Part 2/3 corrections and Part 4 negative out-of-sample result, identified current Exposure Lab authority and benchmark conflicts, and produced an implementation-ready indicator, contract, UI and verification design without promoting research into a trade signal.",
+      "residualRisks": [
+        "Taiwan 50 point-in-time component weights and a canonical total-return history still need a stable source contract.",
+        "The author's 52-week mean-reversion volatility forecast is not fully specified and must not be presented as reproduced by Stock Terminal.",
+        "Forward EPS, fair P/E, other-component growth, incremental product cost and user leverage caps remain assumptions with material model risk.",
+        "The full monthly fundamental core has not yet passed Stock Terminal point-in-time nested walk-forward or a prospective shadow cycle."
+      ]
+    },
+    {
+      "loopId": "LOOP-006",
+      "result": "pass",
+      "summary": "Implemented Exposure Lab v3 with a frozen monthly core, monitor-only weekly health, benchmark-isolated volatility, official Taiwan 50 price/total-return history, TSMC EPS evidence layers, daily-leverage product mechanics, selected-benchmark action constraints, progressive Decision UI and expanded Evidence Ledger; then passed full backend, frontend, live HTTP, build and privacy gates.",
+      "residualRisks": [
+        "Taiwan 50 and TAIEX TSMC weights remain dated external research snapshots rather than a point-in-time official constituent-weight history.",
+        "The author 52-week volatility model is not fully specified; ST labels and uses a transparent max(RV252, rolling three-year median) proxy instead of claiming reproduction.",
+        "The Part 4 out-of-sample result remains external_research with stReproduced=false; the full monthly fundamental core has not passed ST nested walk-forward or a prospective monthly shadow cycle.",
+        "Forward EPS, fair P/E, non-TSMC growth, payout, product incremental cost and policy caps remain explicit assumptions and must be reviewed on their stated cadence."
+      ]
+    },
+    {
+      "loopId": "LOOP-007",
+      "result": "pass",
+      "summary": "Eliminated three independent intraday false-volume paths: normalized MIS lots and Yahoo shares behind one explicit contract, preserved fresh MIS volume during Yahoo price fallback, replaced ad-hoc cumulative subtraction with a deterministic source-aware tracker, and made synthetic and closing-auction minute allocation fail closed; then passed backend, frontend, build, live API and Chrome gates.",
+      "residualRisks": [
+        "Volume accumulated during an unobserved multi-minute gap is intentionally omitted from minute allocation until authoritative minute history becomes available; Stock Terminal no longer invents a distribution.",
+        "Yahoo fallback prices may be delayed and are now labeled as backup rather than drawn at the current minute; provider latency remains external.",
+        "Closing-auction remainder backfill requires an explicit intradayVolumeComplete attestation, so current Yahoo payloads fail closed instead of guessing the final bucket.",
+        "TWSE MIS availability and timestamp quality remain provider dependencies, while source transitions and resets are persisted through the existing bounded UI diagnostic trace."
+      ]
+    },
+    {
+      "loopId": "LOOP-008",
+      "result": "pass",
+      "summary": "Created a privacy-clean exact release commit, rebuilt and tested it outside the worktree, promoted it atomically, started the isolated Private Web host and passed local plus Tailscale HTTPS authentication, authorization, availability and deployed-volume contract gates.",
+      "residualRisks": [
+        "The isolated host is a local long-running process; a Windows reboot still requires START_PRIVATE_WEB_HOST.cmd unless a separately approved startup task is configured.",
+        "Tailscale HTTPS availability remains dependent on the local machine, Tailscale service and existing Serve/Funnel configuration.",
+        "The active application release is 4f89131e5585; the later repository-only verification record does not change served application behavior."
+      ]
+    },
+    {
+      "loopId": "LOOP-010",
+      "result": "pass",
+      "summary": "Implemented the Overnight × Intraday memory-theme vertical slice as deterministic shadow research: consistently adjusted Open/Close, exact return identity, 20/60-session structure, same-market residual comparison, TW/US basket quorum, cache-only GET, bounded fixed-universe refresh, canonical DecisionData attachment, readable Decision panel and auditable Evidence Ledger integration.",
+      "residualRisks": [
+        "Yahoo daily chart data remains a public-provider dependency and is not an official institutional-flow feed; opening repricing must not be described as observed smart-money activity.",
+        "The current fixed memory baskets and thresholds are research definitions, not validated portfolio signals; prospective history is required before considering any authority increase.",
+        "Benchmark-relative values are display-only in v1 because high-beta residual interpretation requires further stability testing across market regimes.",
+        "The repository-wide unittest discovery runner retains pre-existing test import-order debt, and the share preflight intentionally rejects the new untracked files until a later explicit Git commit; targeted product Gates pass."
+      ]
+    }
+  ],
+  "blockers": [],
+  "artifacts": [
+    ".loop-engineering/state.json",
+    ".loop-engineering/landscape-layout-review-2026-08-26.md",
+    ".loop-engineering/landscape-layout-result-2026-08-26.md",
+    ".loop-engineering/landscape-typography-review-2026-08-26.md",
+    ".loop-engineering/landscape-typography-result-2026-08-26.md",
+    ".loop-engineering/beginner-readability-review-2026-08-26.md",
+    ".loop-engineering/beginner-readability-result-2026-08-26.md",
+    "docs/CONSENSUS_ATTENTION_RADAR.md",
+    "server/consensus_attention.py",
+    "src/ui/consensus_attention_v5.js",
+    "tests/test_consensus_attention.py",
+    "tests/consensus_attention_v5_selftest.js",
+    "docs/ST_LOOP013_REVIEW_BUNDLE_2026-08-26.md",
+    "docs/ST_HIVE_REVIEW_BUNDLE_2026-08-26.md",
+    "docs/ST_HIVE_EVOLUTION_REVIEW_2026-08-26.md",
+    "docs/MARKET_PRECURSOR_SIGNALS.md",
+    "docs/ST_ARCHITECTURE_CODE_REVIEW_2026-08-16.md",
+    "docs/ST_ARCHITECTURE_REMEDIATION_2026-08-16.md",
+    "docs/ST_DYNAMIC_LEVERAGE_FIVE_POST_RESEARCH_2026-08-16.md",
+    "docs/OVERNIGHT_INTRADAY_RESEARCH.md",
+    ".loop-engineering/review-bundles/LOOP-022-archify-review.md",
+    "docs/architecture/archify-manifest.json",
+    "docs/architecture/st-decision-evidence-lineage.dataflow.json",
+    "docs/architecture/st-private-web-trust-ai-execution.architecture.json",
+    "docs/architecture/st-private-web-release-gate.workflow.json",
+    "docs/architecture/st-pulse-refresh-degradation.sequence.json",
+    "docs/architecture/st-responsive-shell-ownership.workflow.json",
+    "docs/architecture/st-signal-passport-early-warning.lifecycle.json",
+    "assets/docs/archify/st-decision-evidence-lineage.html",
+    "assets/docs/archify/st-private-web-trust-ai-execution.html",
+    "assets/docs/archify/st-private-web-release-gate.html",
+    "assets/docs/archify/st-pulse-refresh-degradation.html",
+    "assets/docs/archify/st-responsive-shell-ownership.html",
+    "assets/docs/archify/st-signal-passport-early-warning.html",
+    "tests/test_archify_artifacts.py",
+    "Stock_Terminal_v5.0.zip",
+    "Stock_Terminal_v5.0.zip.sha256",
+    "Stock_Terminal_v5.0.manifest.json"
+  ],
+  "nextLoop": null
+}

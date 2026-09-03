@@ -1,5 +1,5 @@
 /* ============================================================
-   Stock Terminal v2.0 — Mobile / Tablet Responsive CSS
+   Stock Terminal v5.0 — Mobile / Tablet Responsive CSS
    ------------------------------------------------------------
    Breakpoints:
      ≤ 768px  → 手機（直式優先）
@@ -7,7 +7,7 @@
      > 1280px → 桌機（保持原樣）
 
    策略：
-     • 手機把右側面板變底部抽屜（drawer），主圖佔滿
+     • 手機直式以整個工作區分頁；橫式維持線型＋分析同屏
      • 觸控按鈕至少 36px 高
      • 隱藏部分裝飾性元素（grip 圖示、長標籤）
      • indbar 改為水平捲動（16 個指標放不下兩列）
@@ -16,6 +16,8 @@
 /* ──────────────────────────────────────────────────────────
    📱 Mobile (≤ 768px)
    ────────────────────────────────────────────────────────── */
+#body.shell-hidden + #rpanel-pager { display: none !important; }
+
 @media (max-width: 768px) {
 
   /* ── Layout: stack vertically ── */
@@ -25,8 +27,8 @@
   /* Right panel becomes bottom sheet */
   #right {
     width: 100% !important;
-    height: 40vh;
-    max-height: 380px;
+    height: 48vh;
+    max-height: 440px;
     border-left: none !important;
     border-top: 1px solid var(--border);
     flex-shrink: 0;
@@ -34,21 +36,75 @@
   }
   #right.collapsed { height: 36px !important; }
   #right.collapsed #rpanel { display: none; }
+  #right.collapsed #rpanel-pager { display: none !important; }
 
-  /* Drag handle to toggle collapsed state */
-  #rtabs::before {
-    content: '═';
-    display: flex;
+  /* Portrait workspace pager: chart + six analysis pages. */
+  #rtabs { display: none !important; }
+  #rpanel {
+    min-height: 0;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+  }
+  #rpanel-pager {
+    display: grid !important;
+    grid-template-columns: 48px minmax(0,1fr) 48px;
     align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 14px;
-    color: var(--tlo);
-    background: var(--bg);
-    cursor: pointer;
-    font-size: 14px;
-    letter-spacing: -2px;
-    margin-bottom: -2px;
+    min-height: calc(54px + env(safe-area-inset-bottom,0px));
+    height: calc(54px + env(safe-area-inset-bottom,0px));
+    flex: 0 0 calc(54px + env(safe-area-inset-bottom,0px));
+    position: relative;
+    isolation: isolate;
+    border-top: 1px solid rgba(148,163,184,.16);
+    background: linear-gradient(180deg,rgba(15,23,42,.97),rgba(5,10,18,.99));
+    box-shadow: 0 -8px 22px rgba(0,0,0,.22);
+    padding-bottom: env(safe-area-inset-bottom,0px);
+    z-index: 8;
+  }
+  #rpanel-pager > button {
+    width: 38px;
+    height: 34px;
+    margin: 0 auto;
+    border: 1px solid rgba(103,232,249,.20);
+    border-radius: 9px;
+    background: rgba(30,41,59,.72);
+    color: var(--cyan);
+    font: 700 25px/1 'JetBrains Mono',monospace;
+    touch-action: manipulation;
+  }
+  #rpanel-pager > button:disabled { opacity: .25; color: var(--tlo); }
+  #rpage-next { justify-self: center; margin-left: auto !important; }
+  #rpanel-pager .rpage-state { min-width: 0; text-align: center; align-self: center; }
+  #rpanel-pager .rpage-title { display: flex; justify-content: center; align-items: baseline; gap: 7px; min-width: 0; }
+  #rpanel-pager .rpage-prefix {
+    color: var(--gold);
+    font: 700 8px/1.2 'Noto Serif TC',serif;
+    letter-spacing: .8px;
+    white-space: nowrap;
+  }
+  #rpage-label {
+    color: var(--thi);
+    font: 800 12px/1.2 'Noto Serif TC','JetBrains Mono',monospace;
+    letter-spacing: .5px;
+    white-space: nowrap;
+  }
+  #rpage-dots { display: flex; justify-content: center; align-items: center; gap: 7px; margin-top: 5px; }
+  #rpage-dots .rpage-dot {
+    width: 7px;
+    height: 7px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: #334155;
+    box-shadow: none;
+    touch-action: manipulation;
+  }
+  #rpage-dots .rpage-dot.on {
+    width: 18px;
+    border-radius: 999px;
+    background: linear-gradient(90deg,var(--gold),#fb923c);
+    box-shadow: 0 0 10px rgba(245,197,24,.35);
   }
 
   /* ── Topbar: tighter ── */
@@ -65,17 +121,72 @@
   #statusbar { font-size: 8px !important; }
   .probtn { padding: 2px 5px !important; font-size: 8.5px !important; height: 22px !important; }
 
-  /* ── Watchlist bar: keep 2 rows but slimmer ── */
-  #wlbar { height: 56px !important; }
-  #wlchips { grid-template-rows: repeat(2, 1fr) !important; }
-  .wlchip { height: 28px !important; padding: 0 7px !important; font-size: 10px !important; }
+  /* ── Watchlist bar: two 32px touch rows, no hidden overflow ── */
+  #wlbar { height: 65px !important; padding-block: 0 !important; }
+  #wlchips { grid-template-rows: repeat(2, 1fr) !important; row-gap: 0 !important; }
+  .wlchip { height: 30px !important; padding: 0 5px !important; font-size: 10px !important; }
   .wlchip-grip { display: none !important; }   /* 觸控不需要拖把手提示 */
   .wlchip-p { font-size: 9px !important; }
-  .wladd { height: 56px !important; padding: 0 10px !important; }
+  .wlchip.wl-holding::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: var(--gold);
+    transform-origin: left;
+    animation: wlHoldProgress .55s linear both;
+  }
+  .wlchip.wl-menu-open {
+    background: rgba(245,197,24,.13) !important;
+    box-shadow: inset 0 0 0 1px rgba(245,197,24,.42),0 0 12px rgba(245,197,24,.12) !important;
+  }
+  @keyframes wlHoldProgress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  body > .wl-action-menu.open {
+    display: block;
+    position: fixed;
+    width: 194px;
+    z-index: 10020;
+    padding: 8px;
+    border: 1px solid rgba(148,163,184,.26);
+    border-radius: 12px;
+    background: rgba(11,18,32,.98);
+    box-shadow: 0 18px 45px rgba(0,0,0,.52),inset 0 1px 0 rgba(255,255,255,.05);
+    backdrop-filter: blur(16px);
+  }
+  .wl-menu-head { padding: 5px 7px 9px; border-bottom: 1px solid rgba(148,163,184,.14); }
+  .wl-menu-head span { display: block; color: var(--thi); font: 700 12px/1.2 'JetBrains Mono',monospace; }
+  .wl-menu-head small { display: block; margin-top: 3px; color: var(--tlo); font: 9px/1.2 'JetBrains Mono',monospace; }
+  .wl-action-menu button {
+    display: block;
+    width: 100%;
+    min-height: 40px;
+    margin-top: 6px;
+    border: 1px solid rgba(148,163,184,.14);
+    border-radius: 8px;
+    background: rgba(30,41,59,.62);
+    color: var(--text);
+    font: 700 11px/1 'JetBrains Mono',monospace;
+    text-align: left;
+    padding: 0 12px;
+  }
+  .wl-action-menu .wl-menu-remove { color: #fda4af; border-color: rgba(248,113,113,.24); }
+  .wl-action-menu .wl-menu-etf { color: #67e8f9; border-color: rgba(56,189,248,.28); }
+  .wl-action-menu .wl-menu-cancel { color: var(--tlo); }
+  .wladd { height: 64px !important; padding: 0 9px !important; }
 
-  /* ── Range bar: smaller buttons ── */
-  #rangebar { height: 28px !important; }
-  .rgbtn { font-size: 9px !important; min-width: 40px !important; padding: 0 4px !important; }
+  /* ── Range bar: full-width cells allow a compact 26px touch row ── */
+  #rangebar { height: 26px !important; scrollbar-width: none; }
+  #rangebar::-webkit-scrollbar { display: none; }
+  #rangebar .rgbtn {
+    height: 25px !important;
+    min-height: 25px !important;
+    min-width: 40px !important;
+    padding: 0 4px !important;
+    font-size: 9px !important;
+    line-height: 25px !important;
+  }
 
   /* ── Pro tools row: wrap if needed ── */
   #pro-tools { padding: 0 4px !important; }
@@ -115,7 +226,7 @@
     top: auto !important;
     right: 8px !important;
     left: 8px !important;
-    bottom: calc(40vh + 8px) !important;
+    bottom: calc(48vh + 8px) !important;
     width: auto !important;
   }
 
@@ -124,8 +235,16 @@
   .stat-row { padding: 5px 10px !important; font-size: 10px !important; }
   .stat-hdr, .stat-sect { padding: 6px 10px 4px !important; font-size: 9px !important; }
 
-  /* ── Tabs: smaller ── */
-  .rtab { font-size: 9px !important; height: 32px !important; letter-spacing: .5px !important; }
+  /* ── Tabs: 與左側時間列共用 26px 基準；直式本列仍由 pager 取代 ── */
+  #rtabs { height: 26px !important; min-height: 26px !important; max-height: 26px !important; }
+  .rtab {
+    height: 25px !important;
+    min-height: 25px !important;
+    line-height: 25px !important;
+    padding: 0 3px !important;
+    font-size: 9px !important;
+    letter-spacing: .5px !important;
+  }
 
   /* ── Replay bar ── */
   #replay-bar { font-size: 9px !important; padding: 3px 8px !important; }
@@ -146,7 +265,92 @@
   #topbar .logo { display: none; }
   .mktbtn span { display: none; }   /* show only flag */
   .rgbtn { font-size: 8.5px !important; min-width: 36px !important; }
-  #right { height: 45vh; }
+  #right { height: 50vh; max-height: none; }
+  #live-panel { bottom: calc(50vh + 8px) !important; }
+}
+
+/* ──────────────────────────────────────────────────────────
+   📱 Phone portrait: page the WHOLE chart workspace.
+   The chart is page 1; analysis tabs are pages 2–7.  This fixes
+   the old 48–50vh bottom sheet that could leave only ~56px for K lines.
+   ────────────────────────────────────────────────────────── */
+@media (max-width: 768px) and (orientation: portrait) {
+  #body {
+    flex-direction: row !important;
+    flex: 1 1 0 !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+  #body > #left,
+  #body > #right {
+    width: 100% !important;
+    height: 100% !important;
+    max-height: none !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    flex: 1 1 100% !important;
+  }
+  #body[data-mobile-workspace-page="chart"] > #left { display: flex !important; }
+  #body[data-mobile-workspace-page="chart"] > #right { display: none !important; }
+  #body[data-mobile-workspace-page="analysis"] > #left { display: none !important; }
+  #body[data-mobile-workspace-page="analysis"] > #right { display: flex !important; }
+  #right {
+    border-left: 0 !important;
+    border-top: 0 !important;
+  }
+  #rpanel { flex: 1 1 0 !important; min-height: 0 !important; }
+  #rpanel-pager {
+    flex: 0 0 calc(54px + env(safe-area-inset-bottom,0px)) !important;
+    z-index: 140 !important;
+  }
+  html[data-st5-route="chart"] #st-ring-fab {
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  #live-panel {
+    bottom: calc(62px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+/* Phone landscape already has enough width.  Do not page it: restore the
+   workstation's line-chart + analysis split and its regular analysis tabs. */
+@media (max-width: 900px) and (orientation: landscape) {
+  #body { flex-direction: row !important; overflow: hidden !important; }
+  #body > #left {
+    display: flex !important;
+    width: auto !important;
+    height: 100% !important;
+    flex: 1 1 60% !important;
+  }
+  #body > #right {
+    display: flex !important;
+    width: 40% !important;
+    height: 100% !important;
+    max-height: none !important;
+    flex: 0 0 40% !important;
+    border-left: 1px solid var(--border) !important;
+    border-top: 0 !important;
+  }
+  #rtabs {
+    display: flex !important;
+    height: 26px !important;
+    min-height: 26px !important;
+    max-height: 26px !important;
+  }
+  #rtabs .rtab {
+    height: 25px !important;
+    min-height: 25px !important;
+    line-height: 25px !important;
+    padding: 0 3px !important;
+  }
+  #rpanel-pager { display: none !important; }
+  #live-panel {
+    left: auto !important;
+    right: calc(40% + 8px) !important;
+    bottom: 52px !important;
+    width: min(220px, 30vw) !important;
+  }
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -166,10 +370,10 @@
    👆 Touch device (any size with touch capability)
    ────────────────────────────────────────────────────────── */
 @media (hover: none) and (pointer: coarse) {
-  .wlchip-rm { display: none !important; }          /* 移除 ×：改右鍵/長按由桌面右鍵流程；觸控避免誤觸 */
   .heatcell:hover { transform: none !important; }   /* 觸控時 hover scale 會跳 */
   /* Bigger hitboxes */
-  .probtn, .rgbtn, .rtab, .wlchip, .wladd { min-height: 32px; }
+  /* 分析分頁刻意與 26px 時間列同步；其餘主要觸控按鈕維持 32px。 */
+  .probtn, .wlchip, .wladd { min-height: 32px; }
   .info-i { width: 16px !important; height: 16px !important; font-size: 10px !important; }
 }
 

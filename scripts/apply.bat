@@ -9,20 +9,29 @@ REM  注意：checkout 會覆寫磁碟上的本腳本；因此 checkout 成功�
 REM  必須用 --continue 重新啟動，避免 cmd 讀到錯位內容而假失敗。
 REM ============================================================
 chcp 65001 >nul
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0.."
 
 set "BR=%~1"
 set "PHASE=%~2"
 
-REM 預設：4e66 主線 (housekeeping) + 區間漲跌 tip
-if "%BR%"=="" set "BR=cursor/range-period-change-b5cf"
+REM 預設：tip UX（TIP_BRANCH）；禁止默默套用舊 main 線
+set "TIP_BRANCH=cursor/st51-docs-ux-on-tip-3497"
+if exist "TIP_BRANCH" (
+  set /p TIP_BRANCH=<"TIP_BRANCH"
+)
+if "%BR%"=="" set "BR=%TIP_BRANCH%"
+
+if /I "%BR%"=="main" goto :FAIL_LEGACY
+if /I "%BR%"=="master" goto :FAIL_LEGACY
+if /I "%BR%"=="cursor/http-client-pool-3497" goto :FAIL_LEGACY
+if /I "%BR%"=="cursor/range-period-change-b5cf" goto :FAIL_LEGACY
 
 REM ---------- phase 2: rebuild / restart（checkout 之後的新檔）----------
 if /I "%PHASE%"=="--continue" goto :CONTINUE
 
 echo.
-echo === APPLY %BR% ===
+echo === APPLY tip UX: %BR% ===
 echo.
 
 echo [1/5] stash local dirty files (含 stock_terminal_v2.html)
@@ -68,15 +77,24 @@ start "Stock Terminal Server" /MIN cmd /c "python server\server.py"
 timeout /t 2 /nobreak >nul
 
 echo [5/5] open browser
-start "" "http://localhost:18432/stock_terminal_v2.html"
+start "" "http://localhost:18432/#pulse"
 
 echo.
 echo Done. Now on:
 git branch --show-current
 git rev-parse --short HEAD
 echo.
-echo 請 Ctrl+F5。完整 tip：大盤／市場 tab、融資週期、TDCC 集中度、分享打包腳本。
+echo Ctrl+F5. Tip UX only - do not apply main or pre-tip branches.
 echo.
 pause
+exit /b 0
+
+:FAIL_LEGACY
+echo [BLOCK] Refusing legacy branch: %BR%
+echo        Tip UX only:
+echo          scripts\apply.bat
+echo          scripts\go.bat pull %TIP_BRANCH%
+pause
+exit /b 2
 endlocal
 exit /b 0

@@ -20,6 +20,8 @@ import subprocess
 import sys
 import time
 
+import etf_paths
+
 if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
     _PYEXE = sys.executable          # frozen:用自己(不會有獨立 python)
@@ -85,7 +87,7 @@ def _st_db():
 
 
 def _st_etf():
-    ts, n = _newest_glob(os.path.join(DATA, 'etf_history', '*.json'))
+    ts, n = _newest_glob(os.path.join(str(etf_paths.resolve_history_dir()), '*.json'))
     return {'updated': ts, 'count': n}
 
 

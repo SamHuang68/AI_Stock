@@ -1,0 +1,200 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ST Private Web 信任與 AI 執行邊界",
+    "animation": "none",
+    "quality_profile": "showcase",
+    "viewBox": [930, 540],
+    "repository": {
+      "url": "https://github.com/SamHuang68/AI_Stock",
+      "revision": "8bc784418182bb6dc2a9f41aa8f8d359190248ca"
+    },
+    "views": [
+      {
+        "id": "private_request_path",
+        "label": "私人連線路徑",
+        "focus": ["remote_browser", "tailscale_serve", "private_gateway", "route_policy", "st_backend"],
+        "note": "遠端瀏覽器只經私人 HTTPS 進入 gateway，再由明確路由政策轉送到 EVO-T1 上的 ST。"
+      },
+      {
+        "id": "ai_execution_boundary",
+        "label": "AI 執行邊界",
+        "focus": ["st_backend", "ai_router", "lm_studio", "restricted_hermes", "nvidia_provider"],
+        "note": "Fast 留在 EVO-T1；Deep 才由受限 Hermes 單回合連到外部 NVIDIA provider。"
+      },
+      {
+        "id": "deny_and_audit",
+        "label": "拒絕與稽核",
+        "focus": ["private_gateway", "route_policy", "blocked_surfaces", "audit_trace"],
+        "note": "本機限定與交易相關面不對外；寫入與拒絕只留下不含 request body 的中繼資料。"
+      }
+    ]
+  },
+  "layout": {
+    "mode": "grid",
+    "origin": [70, 100],
+    "cols": 5,
+    "gapX": 36,
+    "gapY": 80,
+    "cellW": 124,
+    "cellH": 72
+  },
+  "components": [
+    {
+      "id": "remote_browser",
+      "type": "frontend",
+      "label": "遠端 Chrome",
+      "sublabel": "iPhone／Windows · 不執行模型",
+      "row": 0,
+      "col": 0,
+      "sources": [
+        {"path": "docs/PRIVATE_WEB_ST.md", "line": 114, "end_line": 120, "label": "遠端請求邊界"}
+      ]
+    },
+    {
+      "id": "tailscale_serve",
+      "type": "cloud",
+      "label": "Tailscale Serve",
+      "sublabel": "私人 HTTPS · 禁用 Funnel",
+      "row": 0,
+      "col": 1,
+      "sources": [
+        {"path": "docs/PRIVATE_WEB_ST.md", "line": 160, "end_line": 178, "label": "私人發布方式"}
+      ]
+    },
+    {
+      "id": "private_gateway",
+      "type": "security",
+      "label": "Private Web Gateway",
+      "sublabel": "127.0.0.1:18434 · 簽章 session",
+      "tag": "owner／reader",
+      "row": 0,
+      "col": 2,
+      "sources": [
+        {"path": "server/private_web_gateway.py", "line": 3, "end_line": 14, "label": "Gateway 責任"},
+        {"path": "server/private_web_gateway.py", "line": 60, "end_line": 65, "label": "持久 session"}
+      ]
+    },
+    {
+      "id": "route_policy",
+      "type": "security",
+      "label": "角色與路由政策",
+      "sublabel": "讀取／研究 allowlist · 同源寫入",
+      "tag": "fail closed",
+      "row": 0,
+      "col": 3,
+      "sources": [
+        {"path": "server/private_web_gateway.py", "line": 531, "end_line": 630, "label": "路由分類"},
+        {"path": "server/private_web_gateway.py", "line": 694, "end_line": 715, "label": "角色判定"}
+      ]
+    },
+    {
+      "id": "st_backend",
+      "type": "backend",
+      "label": "ST Backend",
+      "sublabel": "EVO-T1 · 市場／決策／AI API",
+      "row": 0,
+      "col": 4,
+      "sources": [
+        {"path": "scripts/private_web_host.py", "line": 195, "end_line": 273, "label": "Host supervisor"}
+      ]
+    },
+    {
+      "id": "audit_trace",
+      "type": "database",
+      "label": "Gateway 稽核",
+      "sublabel": "writes／denials · 無內文",
+      "row": 1,
+      "col": 2,
+      "sources": [
+        {"path": "server/private_web_gateway.py", "line": 3, "end_line": 14, "label": "稽核契約"}
+      ]
+    },
+    {
+      "id": "blocked_surfaces",
+      "type": "security",
+      "label": "封鎖的本機面",
+      "sublabel": "敏感設定／回補／WaveDeck／交易",
+      "tag": "不對外",
+      "row": 1,
+      "col": 3,
+      "sources": [
+        {"path": "docs/PRIVATE_WEB_ST.md", "line": 190, "end_line": 207, "label": "本機限定路由"}
+      ]
+    },
+    {
+      "id": "ai_router",
+      "type": "backend",
+      "label": "固定政策 AI Router",
+      "sublabel": "Owner-only · 回傳執行 metadata",
+      "row": 1,
+      "col": 4,
+      "sources": [
+        {"path": "server/ai_routes.py", "line": 86, "end_line": 172, "label": "AI HTTP route"}
+      ]
+    },
+    {
+      "id": "lm_studio",
+      "type": "backend",
+      "label": "LM Studio",
+      "sublabel": "Fast · google/gemma-4-e4b",
+      "tag": "EVO-T1 local-only",
+      "row": 2,
+      "col": 4,
+      "sources": [
+        {"path": "server/ai_local.py", "line": 38, "end_line": 117, "label": "Fast route"}
+      ]
+    },
+    {
+      "id": "restricted_hermes",
+      "type": "backend",
+      "label": "受限 Hermes Agent",
+      "sublabel": "Deep · 單次無狀態、兩回合上限",
+      "row": 2,
+      "col": 3,
+      "sources": [
+        {"path": "server/ai_local.py", "line": 369, "end_line": 510, "label": "Deep route"}
+      ]
+    },
+    {
+      "id": "nvidia_provider",
+      "type": "external",
+      "label": "NVIDIA Provider",
+      "sublabel": "nemotron-3-super-120b-a12b",
+      "tag": "外部資料邊界",
+      "row": 2,
+      "col": 2,
+      "sources": [
+        {"path": "docs/PRIVATE_WEB_ST.md", "line": 121, "end_line": 151, "label": "Deep 外部路由"}
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "EVO-T1：ST 與 Gateway 維持 loopback",
+      "wraps": ["tailscale_serve", "private_gateway", "route_policy", "st_backend", "audit_trace", "blocked_surfaces", "ai_router", "lm_studio", "restricted_hermes"],
+      "pad": 24
+    },
+    {
+      "kind": "security-group",
+      "label": "Private Web 信任閘門",
+      "wraps": ["private_gateway", "route_policy"],
+      "pad": 16
+    }
+  ],
+  "connections": [
+    {"id": "browser_to_serve", "from": "remote_browser", "to": "tailscale_serve", "label": "私人 HTTPS（tailnet）", "variant": "emphasis", "labelAt": [180, 174]},
+    {"id": "serve_to_gateway", "from": "tailscale_serve", "to": "private_gateway", "label": "僅轉送 :18434", "variant": "security", "labelAt": [370, 174]},
+    {"id": "gateway_to_policy", "from": "private_gateway", "to": "route_policy", "label": "已驗證角色", "variant": "security", "labelAt": [530, 174]},
+    {"id": "policy_to_backend", "from": "route_policy", "to": "st_backend", "label": "允許的讀取／研究路由", "variant": "emphasis", "labelAt": [690, 84]},
+    {"id": "gateway_to_audit", "from": "private_gateway", "to": "audit_trace", "label": "寫入與拒絕中繼資料", "variant": "dashed", "labelAt": [420, 216]},
+    {"id": "policy_to_blocked", "from": "route_policy", "to": "blocked_surfaces", "label": "拒絕", "variant": "security", "labelAt": [580, 216]},
+    {"id": "backend_to_router", "from": "st_backend", "to": "ai_router", "label": "Owner-only AI", "variant": "security", "labelAt": [740, 216]},
+    {"id": "router_to_local", "from": "ai_router", "to": "lm_studio", "label": "Fast：本機", "variant": "emphasis", "labelAt": [760, 368]},
+    {"id": "router_to_hermes", "from": "ai_router", "to": "restricted_hermes", "label": "Deep：受限", "variant": "dashed", "labelAt": [640, 368]},
+    {"id": "hermes_to_nvidia", "from": "restricted_hermes", "to": "nvidia_provider", "label": "外部 provider", "variant": "security", "labelAt": [500, 400]}
+  ],
+  "cards": []
+}

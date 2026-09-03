@@ -1,16 +1,29 @@
 // ============================================================
 // Stock Terminal v3.9 Phase-2 — parseYF 異常清洗 前端單元測試
 // ------------------------------------------------------------
-// 用法:開啟 stock_terminal_v2.html 後,把本檔內容貼到瀏覽器 Console 執行,
-//   或在 DevTools Snippets 存成片段。會對「真正的 window.parseYF」跑斷言。
+// 用法:直接執行 `node tests/parse_selftest.js`,或在瀏覽器 Console 執行。
+// Node 模式會從生成的 stock_terminal.html 載入真正的 parseYF。
 // 測「日線異常驗證(孤立尖刺剔除、持續跳空/漲跌停保留)」不會回歸壞掉。
 // (Python 端核心函式測試見 server.py /selftest 端點)
 // ============================================================
 (function () {
   'use strict';
-  if (typeof window.parseYF !== 'function') {
-    console.error('[parse-selftest] 找不到 window.parseYF — 請在 stock_terminal 頁面執行');
-    return;
+  var host = typeof window !== 'undefined' ? window : globalThis;
+  if (typeof host.parseYF !== 'function' && typeof require === 'function') {
+    var fs = require('fs');
+    var path = require('path');
+    var html = fs.readFileSync(path.join(__dirname, '..', 'stock_terminal.html'), 'utf8');
+    var start = html.indexOf('function parseYF(raw) {');
+    var tail = start >= 0 ? html.slice(start) : '';
+    var boundary = tail.match(/\r?\n\}\r?\n\r?\n\/\/ ── LOAD SYMBOL/);
+    if (start >= 0 && boundary && boundary.index > 0) {
+      var closeAt = boundary.index + boundary[0].indexOf('}') + 1;
+      var source = tail.slice(0, closeAt);
+      host.parseYF = Function(source + '\nreturn parseYF;')();
+    }
+  }
+  if (typeof host.parseYF !== 'function') {
+    throw new Error('[parse-selftest] 找不到生成檔中的 parseYF');
   }
   function mk(closes) {
     var n = closes.length, ts = [], q = { open: [], high: [], low: [], close: [], volume: [] };
@@ -21,7 +34,7 @@
     }
     return { chart: { result: [{ timestamp: ts, indicators: { quote: [q] }, meta: { symbol: 'TEST' } }] } };
   }
-  function closesOf(arr) { var p = window.parseYF(mk(arr)); return p ? p.candles.map(function (c) { return c.close; }) : null; }
+  function closesOf(arr) { var p = host.parseYF(mk(arr)); return p ? p.candles.map(function (c) { return c.close; }) : null; }
 
   var cases = [];
   function ck(name, got, exp) {
@@ -47,12 +60,13 @@
         }]
       }
     };
-    var p = window.parseYF(raw);
+    var p = host.parseYF(raw);
     return p && p.candles[0] && p.candles[0].open === 39.49 && p.candles[0].high === 39.49 && p.candles[0].low === 39.49;
   })(), true);
 
   var passed = cases.filter(function (c) { return c.pass; }).length;
   console.table(cases);
   console.log('[parse-selftest] ' + passed + '/' + cases.length + (passed === cases.length ? ' ✅ 全過' : ' ❌ 有失敗'));
+  if (passed !== cases.length && typeof process !== 'undefined') process.exitCode = 1;
   return { passed: passed, total: cases.length, cases: cases };
 })();

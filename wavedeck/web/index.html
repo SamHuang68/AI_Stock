@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WaveDeck · 浪潮執行台</title>
+  <link rel="stylesheet" href="/css/deck.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <!-- Wave AI 參考：頂列品牌｜中間狀態｜右側健康膠囊 -->
+    <header class="top">
+      <div class="brand">
+        <div class="brand-mark">WD</div>
+        <div>
+          <h1>WaveDeck <span>× 下單大師</span></h1>
+          <p>AI 判斷｜目標倉位｜ST 宏觀覆寫｜風控閘門</p>
+        </div>
+      </div>
+      <div class="top-mid">
+        <div>本機時間 <strong id="clock">—</strong></div>
+        <div>最近 TV <strong id="lastTv">—</strong></div>
+        <div>處理 <strong id="webhookStatus">待命</strong> · FSM <strong id="fsm">—</strong> · <strong id="mode">paper</strong></div>
+      </div>
+      <div class="top-health" id="healthChips"></div>
+    </header>
+
+    <!-- 一頁三欄：左執行｜中 AI｜右燈號／帳戶／傳輸 -->
+    <section class="cols">
+      <aside class="col left">
+        <div class="box">
+          <div class="box-hd">部位與執行狀態</div>
+          <div class="kv pos-grid" id="posKv"></div>
+        </div>
+
+        <div class="box">
+          <div class="box-hd">AI 進場風格</div>
+          <div class="style-presets">
+            <button type="button" class="preset" data-style="35">保守 35</button>
+            <button type="button" class="preset" data-style="50">均衡 50</button>
+            <button type="button" class="preset" data-style="65">積極 65</button>
+          </div>
+          <div class="slider-labels"><span>20</span><span>自訂</span><span>90</span></div>
+          <input id="styleRange" type="range" min="20" max="90" step="1" value="50" />
+          <div class="style-readout">當前 <strong id="styleVal">50</strong></div>
+        </div>
+
+        <div class="box guard" id="noOvernight"></div>
+
+        <div class="box">
+          <div class="box-hd">最新執行 · API 費用</div>
+          <div class="kv pos-grid" id="execKv"></div>
+          <div class="acct tight" id="costKv"></div>
+        </div>
+
+        <div class="box st-box">
+          <div class="box-hd">ST 宏觀（:18432） <span class="pill" id="stSyncTxt">ST …</span></div>
+          <div class="st-grid">
+            <div><span class="k">加權</span><b id="stTwii">—</b><i id="stTwiiPct">—</i></div>
+            <div><span class="k">廣度</span><b id="stAdv">—</b><i id="stBreadth">—</i></div>
+            <div><span class="k">體質</span><b id="stScore">—</b><i id="stScoreLbl">—</i></div>
+          </div>
+          <div class="spill-meter" id="spillMeter">
+            <div class="spill-hd">
+              <span>供應鏈外溢</span>
+              <strong id="stSpillPct">—</strong>
+            </div>
+            <div class="spill-bar"><i id="stSpillBar" style="width:0%"></i></div>
+            <div class="spill-sub">
+              <span id="stSpillRot">輪動 —</span>
+              <span id="stSpillHot">最強段 —</span>
+            </div>
+          </div>
+          <div class="st-note" id="stNote">等待 Stock Terminal…</div>
+          <div class="st-actions">
+            <span>降載 <b id="stDelever">否</b> · 覆寫 <b id="stStyle">—</b></span>
+            <button type="button" class="btn sm cyan" id="btnPullSt">套用 ST</button>
+          </div>
+        </div>
+
+        <!-- 對齊 Wave AI：系統控制在左欄底部 -->
+        <div class="box sys-box">
+          <div class="box-hd">系統控制</div>
+          <div class="sys-btns">
+            <button class="btn primary" data-cmd="start" type="button">啟動</button>
+            <button class="btn" data-cmd="stop" type="button">停止</button>
+            <button class="btn" data-cmd="restart" type="button">重啟</button>
+            <button class="btn" data-cmd="refresh" type="button">重整</button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- 中柱：Wave AI 1:1 語意敘事（C1–C5） -->
+      <section class="col center">
+        <div class="box ai-box waveai-center">
+          <!-- C1 決策標題與摘要 -->
+          <header class="c1-head">
+            <div class="c1-left">
+              <div class="c1-kicker">
+                <span>AI 最新判斷</span>
+                <button type="button" class="btn sm cyan" id="btnExecMd" title="檢視最新執行細節 Markdown">執行 MD</button>
+              </div>
+              <div class="c1-time">最後回應 <strong id="aiUpdated">—</strong></div>
+              <span class="event-badge" id="aiEvent">—</span>
+              <div class="alert-badge" id="fsBadge" hidden>Fail-safe</div>
+            </div>
+            <div class="c1-right">
+              <div class="ai-action">
+                <div class="lbl" id="aiLabel">—</div>
+                <div class="pct" id="aiConf">—</div>
+              </div>
+            </div>
+          </header>
+          <div class="bias-bars" aria-label="方向機會">
+            <div class="bias-row long">
+              <span class="k">偏多機會</span>
+              <div class="bar"><i id="biasLongBar" style="width:0%"></i></div>
+              <em id="biasLong">—</em>
+            </div>
+            <div class="bias-row short">
+              <span class="k">偏空機會</span>
+              <div class="bar"><i id="biasShortBar" style="width:0%"></i></div>
+              <em id="biasShort">—</em>
+            </div>
+          </div>
+
+          <!-- C2 市場狀態 -->
+          <section class="narr-block c2">
+            <h3 class="narr-hd">市場狀態</h3>
+            <div class="narr-body" id="aiMarketStatus">等待決策敘事…</div>
+          </section>
+
+          <!-- C3 判斷理由 -->
+          <section class="narr-block c3">
+            <h3 class="narr-hd">判斷理由</h3>
+            <div class="narr-body" id="aiReasoning">—</div>
+          </section>
+
+          <!-- C4 觀察與失效 -->
+          <section class="narr-block c4">
+            <h3 class="narr-hd">下次觀察與失效條件</h3>
+            <div class="watch-row">
+              <span class="wk">下次觀察</span>
+              <div class="tags" id="aiTags"></div>
+            </div>
+            <div class="inv-box">
+              <span class="inv-lab">失效條件</span>
+              <p class="inv-text" id="aiInvalidation">—</p>
+            </div>
+          </section>
+
+          <!-- C5 三層處理 -->
+          <section class="layer3" aria-label="本事件三層處理結果">
+            <div class="ly">
+              <div class="ly-hd">第一層 · AI 原始</div>
+              <div class="ly-v" id="lyAiAction">—</div>
+              <div class="ly-s">進場準備度 <span id="lyReadiness">—</span></div>
+            </div>
+            <div class="ly">
+              <div class="ly-hd">第二層 · Router</div>
+              <div class="ly-v" id="lyRouter">—</div>
+              <div class="ly-s">Execution Gate <span id="lyGate">—</span></div>
+            </div>
+            <div class="ly">
+              <div class="ly-hd">第三層 · 最終執行</div>
+              <div class="ly-v" id="lyFinal">—</div>
+              <div class="ly-s">錯失機會風險 <span id="lyMiss">—</span></div>
+            </div>
+          </section>
+
+          <div class="muted-line" id="execMdMeta">執行細節 MD：—</div>
+        </div>
+      </section>
+
+      <aside class="col right">
+        <div class="box lights-box">
+          <div class="box-hd">系統運行燈號</div>
+          <div class="lights" id="lights"></div>
+        </div>
+        <div class="box">
+          <div class="box-hd">帳戶與風險
+            <span class="pill warn" title="數值來自參考艦橋 Wave AI，非本機實盤">Wave AI 參考</span>
+          </div>
+          <p class="acct-note" id="acctNote" title="數值來自參考 Wave AI，僅供攻能驗證，非本機實盤持倉／權益。">Wave AI 參考 · 攻能驗證 · 非實盤</p>
+          <div class="acct" id="acct"></div>
+        </div>
+        <div class="box">
+          <div class="box-hd">TradingView / 傳輸</div>
+          <div class="kv pos-grid" id="transportKv"></div>
+          <div class="muted-line">通道 <span id="transport">—</span> · WD <span id="wdSyncTxt">…</span></div>
+        </div>
+      </aside>
+    </section>
+
+    <!-- 底列收斂：決策／工具／急停 -->
+    <footer class="foot">
+      <div class="foot-row">
+        <span class="foot-lab">DECISION</span>
+        <label class="ctrl-select">
+          <span>決策源</span>
+          <select id="providerSelect">
+            <option value="heuristic">Heuristic</option>
+            <option value="ollama">Ollama</option>
+            <option value="openai">OpenAI</option>
+          </select>
+        </label>
+        <button class="btn" id="btnModePaper" type="button">紙上 paper</button>
+        <button class="btn" id="btnModeLive" type="button">實盤 live</button>
+        <button class="btn" id="btnSyncTxt" type="button">同步 TXT</button>
+        <button class="btn cyan" id="btnDemo" type="button">模擬 TV</button>
+        <button class="btn ghost" id="btnAudit" type="button">稽核</button>
+        <button class="btn ghost" id="btnOpenST" type="button">開 ST</button>
+      </div>
+      <div class="foot-row emergency-row">
+        <span class="foot-lab">EMERGENCY</span>
+        <button class="btn danger" id="btnKill" title="僅暫停新單，不平倉" type="button">暫停新單</button>
+        <button class="btn danger panic" id="btnPanic" title="暫停新單並立即寫入市價全平 TXT" type="button">急停並全平</button>
+        <button class="btn" id="btnKillOff" type="button">解除急停</button>
+      </div>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="/js/deck.js"></script>
+</body>
+</html>
