@@ -6,23 +6,24 @@ macro_track.py — MacroMicro 風格多序列總經／籌碼追蹤圖
 圖表：
   __TW_RATES__         台灣指標利率（重貼現／擔保放款／短期融通）
   __TW_MARGIN_MIX__    上櫃／上市融資張數比年增率 vs 加權
-  __US_RATES_CREDIT__  美國基準利率+10Y vs 美林 IG/HY 總報酬
+  __US_RATES_CREDIT__  美國基準利率+10Y vs LQD/HYG 債券 ETF 代理
   __US_CPI_FIN__       美國 CPI YoY + 基準利率 vs 金融類股(XLF)
 
 資料來源：
   - CBC 英文利率走廊頁（種子 CSV + 可即時重抓）
   - TWSE MI_MARGN(MS) + TPEx margin/balance（融資張數）
-  - FRED（優先；雲端常逾時）→ 備援：
-      · Fed Funds：NY Fed EFFR API
-      · 10Y：Fed H.15 / Yahoo ^TNX
-      · BAML IG/HY：Yahoo LQD / HYG 還原收盤（總報酬代理）
-      · CPI YoY：BLS CUUR0000SA0 自算年增
+  - NY Fed EFFR API（基準利率）
+  - BLS CUUR0000SA0 自算 CPI 年增率
   - Yahoo（^TWII / XLF / LQD / HYG / ^TNX）
+
+每一個 seed 固定單一 canonical provider；更新時不得把 FRED 指標與
+Yahoo ETF 代理等不同量尺資料合併進同一 CSV。
 """
 from __future__ import annotations
 
 import csv
 import json
+import math
 import os
 import re
 import sqlite3
@@ -41,6 +42,12 @@ CBC_CHANGES = os.path.join(DATA, 'cbc_policy_rate_changes.csv')
 MARGIN_MIX_CSV = os.path.join(DATA, 'tw_margin_mix_daily.csv')
 DB_PATH = os.path.join(DATA, 'macro_track.db')
 SEED_DIR = os.path.join(DATA, 'macro_seeds')
+TZ_TPE = timezone(timedelta(hours=8))
+
+
+def _taipei_today() -> date:
+    """資料檔日期契約一律以 Asia/Taipei 日曆日判斷。"""
+    return datetime.now(TZ_TPE).date()
 
 UA = {'User-Agent': 'Mozilla/5.0 (compatible; StockTerminal/5.0; +local)'}
 UA_BROWSER = {
@@ -82,21 +89,28 @@ CHARTS: Dict[str, Dict[str, Any]] = {
     },
     '__US_RATES_CREDIT__': {
         'id': '__US_RATES_CREDIT__',
-        'name': '美國利率 vs 公司債總報酬',
+        'name': '美國利率 vs 公司債 ETF 代理',
         'shortName': '美利率債',
         'market': 'US',
         'defaultRange': 'max',
         'years': 25,
-        'description': 'Fed＋10Y vs 美林 IG／HY 總報酬（FRED 優先；備援 LQD/HYG）',
+        'description': 'NY Fed EFFR＋Yahoo ^TNX vs LQD／HYG 還原收盤；各序列固定單一來源',
         'series': [
             {'key': 'fedfunds', 'name': '基準利率', 'scale': 'left', 'color': '#94A3B8', 'style': 'line', 'unit': '%',
-             'source': 'fred', 'fred': 'FEDFUNDS', 'fallback': 'nyfed_effr', 'seed': 'fedfunds.csv'},
+             'source': 'fred', 'fred': 'FEDFUNDS', 'fallback': 'nyfed_effr', 'canonical': 'nyfed_effr',
+             'seedSource': 'NY Fed EFFR', 'cadence': 'daily', 'maxBusinessDays': 3, 'seed': 'fedfunds.csv'},
             {'key': 'us10y', 'name': '10年期公債殖利率', 'scale': 'left', 'color': '#D4A574', 'style': 'line', 'unit': '%',
-             'source': 'fred', 'fred': 'DGS10', 'fallback': 'h15_10y', 'seed': 'us10y.csv'},
-            {'key': 'baml_ig', 'name': '美林投資級總報酬', 'scale': 'right', 'color': '#6B9BB8', 'style': 'line', 'unit': '',
-             'source': 'fred', 'fred': 'BAMLCC0A0CMTRIV', 'fallback': 'yahoo_adj', 'symbol': 'LQD', 'seed': 'baml_ig.csv'},
-            {'key': 'baml_hy', 'name': '美林高收益總報酬', 'scale': 'right', 'color': '#B89595', 'style': 'line', 'unit': '',
-             'source': 'fred', 'fred': 'BAMLHY0A0HYMTRIV', 'fallback': 'yahoo_adj', 'symbol': 'HYG', 'seed': 'baml_hy.csv'},
+             'source': 'fred', 'fred': 'DGS10', 'fallback': 'h15_10y', 'canonical': 'yahoo',
+             'seedSource': 'Yahoo ^TNX', 'cadence': 'daily', 'maxBusinessDays': 2,
+             'symbol': '^TNX', 'seed': 'us10y.csv'},
+            {'key': 'baml_ig', 'name': 'LQD 投資級債 ETF 還原收盤', 'scale': 'right', 'color': '#6B9BB8', 'style': 'line', 'unit': '',
+             'source': 'fred', 'fred': 'BAMLCC0A0CMTRIV', 'fallback': 'yahoo_adj', 'canonical': 'yahoo_adj',
+             'seedSource': 'Yahoo LQD adj', 'cadence': 'daily', 'maxBusinessDays': 2,
+             'symbol': 'LQD', 'seed': 'baml_ig.csv'},
+            {'key': 'baml_hy', 'name': 'HYG 高收益債 ETF 還原收盤', 'scale': 'right', 'color': '#B89595', 'style': 'line', 'unit': '',
+             'source': 'fred', 'fred': 'BAMLHY0A0HYMTRIV', 'fallback': 'yahoo_adj', 'canonical': 'yahoo_adj',
+             'seedSource': 'Yahoo HYG adj', 'cadence': 'daily', 'maxBusinessDays': 2,
+             'symbol': 'HYG', 'seed': 'baml_hy.csv'},
         ],
     },
     '__US_CPI_FIN__': {
@@ -109,11 +123,15 @@ CHARTS: Dict[str, Dict[str, Any]] = {
         'description': 'CPI YoY＋Fed vs 金融類股(XLF 代理總報酬)',
         'series': [
             {'key': 'us_cpi_yoy', 'name': 'CPI年增率', 'scale': 'left', 'color': '#7DD3FC', 'style': 'histogram', 'unit': '%',
-             'source': 'fred', 'fred': 'CPALTT01USM659N', 'fallback': 'bls_cpi_yoy', 'seed': 'us_cpi_yoy.csv'},
+             'source': 'fred', 'fred': 'CPALTT01USM659N', 'fallback': 'bls_cpi_yoy', 'canonical': 'bls_cpi_yoy',
+             'seedSource': 'BLS CPI-U NSA YoY', 'cadence': 'monthly', 'maxCalendarDays': 75,
+             'seed': 'us_cpi_yoy.csv'},
             {'key': 'fedfunds', 'name': '基準利率', 'scale': 'left', 'color': '#4ADE80', 'style': 'histogram', 'unit': '%',
-             'source': 'fred', 'fred': 'FEDFUNDS', 'fallback': 'nyfed_effr', 'seed': 'fedfunds.csv'},
+             'source': 'fred', 'fred': 'FEDFUNDS', 'fallback': 'nyfed_effr', 'canonical': 'nyfed_effr',
+             'seedSource': 'NY Fed EFFR', 'cadence': 'daily', 'maxBusinessDays': 3, 'seed': 'fedfunds.csv'},
             {'key': 'xlf', 'name': '金融類股(XLF)', 'scale': 'right', 'color': '#F59E0B', 'style': 'line', 'unit': '',
-             'source': 'yahoo', 'symbol': 'XLF', 'seed': 'xlf.csv'},
+             'source': 'yahoo', 'canonical': 'yahoo_adj', 'seedSource': 'Yahoo XLF adj',
+             'cadence': 'daily', 'maxBusinessDays': 2, 'symbol': 'XLF', 'seed': 'xlf.csv'},
         ],
     },
     '__TW_MARGIN_CYCLE__': {
@@ -240,7 +258,7 @@ def save_cbc_changes(changes: List[Tuple[date, float, float, float]]) -> None:
     i = 0
     cur = None
     d = changes[0][0]
-    end = date.today()
+    end = _taipei_today()
     while d <= end:
         while i < len(changes) and changes[i][0] <= d:
             cur = changes[i]
@@ -383,7 +401,7 @@ def upsert_margin_mix(d: date, listed: float, otc: float) -> None:
 
 
 def refresh_margin_mix_today() -> Optional[Dict[str, Any]]:
-    d = date.today()
+    d = _taipei_today()
     # try today then walk back up to 10 calendar days (weekends/holidays)
     for i in range(0, 12):
         dd = d - timedelta(days=i)
@@ -528,7 +546,7 @@ def export_margin_mix_csv() -> None:
 
 def backfill_margin_mix(start: date, end: Optional[date] = None, step_days: int = 7) -> int:
     """抽樣回補（預設每週一筆）以建立 YoY。"""
-    end = end or date.today()
+    end = end or _taipei_today()
     d = start
     ok = 0
     while d <= end:
@@ -559,12 +577,30 @@ def _load_seed_csv(name: Optional[str]) -> List[Dict[str, Any]]:
     if not os.path.isfile(path):
         return []
     pts: List[Dict[str, Any]] = []
-    with open(path, encoding='utf-8') as f:
-        for row in csv.DictReader(f):
-            try:
-                pts.append({'date': row['date'][:10], 'value': float(row['value'])})
-            except Exception:
-                pass
+    try:
+        with open(path, encoding='utf-8-sig', newline='') as f:
+            reader = csv.DictReader(f)
+            if list(reader.fieldnames or []) != ['date', 'value']:
+                raise ValueError(f'header must be date,value: {reader.fieldnames}')
+            previous = None
+            for line_no, row in enumerate(reader, start=2):
+                raw_date = str(row.get('date') or '')[:10]
+                try:
+                    parsed = datetime.strptime(raw_date, '%Y-%m-%d').date()
+                    value = float(row.get('value'))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f'invalid row {line_no}') from exc
+                if not math.isfinite(value):
+                    raise ValueError(f'non-finite value at row {line_no}')
+                if parsed > _taipei_today():
+                    raise ValueError(f'future date at row {line_no}: {raw_date}')
+                if previous is not None and parsed <= previous:
+                    raise ValueError(f'dates not strictly increasing at row {line_no}: {raw_date}')
+                previous = parsed
+                pts.append({'date': parsed.isoformat(), 'value': value})
+    except Exception as exc:
+        print('[macro_track] seed rejected', name, exc)
+        return []
     return pts
 
 
@@ -573,11 +609,36 @@ def _save_seed_csv(name: str, pts: List[Dict[str, Any]]) -> None:
         return
     os.makedirs(SEED_DIR, exist_ok=True)
     path = _seed_path(name)
-    with open(path, 'w', newline='', encoding='utf-8') as f:
-        w = csv.writer(f)
-        w.writerow(['date', 'value'])
-        for p in pts:
-            w.writerow([p['date'], p['value']])
+    normalized: Dict[str, float] = {}
+    for i, point in enumerate(pts, start=1):
+        raw_date = str((point or {}).get('date') or '')[:10]
+        try:
+            parsed = datetime.strptime(raw_date, '%Y-%m-%d').date()
+            value = float((point or {}).get('value'))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f'invalid seed point {i}') from exc
+        if parsed > _taipei_today():
+            raise ValueError(f'future seed date: {raw_date}')
+        if not math.isfinite(value):
+            raise ValueError(f'non-finite seed value: {raw_date}')
+        normalized[parsed.isoformat()] = value
+    ordered = sorted(normalized.items())
+    tmp = f'{path}.{os.getpid()}.{threading.get_ident()}.tmp'
+    try:
+        with open(tmp, 'w', newline='', encoding='utf-8') as f:
+            w = csv.writer(f)
+            w.writerow(['date', 'value'])
+            for data_date, value in ordered:
+                w.writerow([data_date, value])
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
 
 
 # ── FRED / Yahoo / NY Fed / H.15 / BLS adapters ───────────────
@@ -607,7 +668,7 @@ def _fred_points(series_id: str, years: int = 25) -> List[Dict[str, Any]]:
     global _FRED_CIRCUIT_OPEN, _FRED_CIRCUIT_REASON
     if fred_circuit_open():
         return []
-    cosd = (date.today() - timedelta(days=years * 366)).strftime('%Y-%m-%d')
+    cosd = (_taipei_today() - timedelta(days=years * 366)).strftime('%Y-%m-%d')
     url = f'https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}&cosd={cosd}'
     # 序列化：並發請求只允許一次實際連線；其餘在熔斷後立刻跳過
     with _FRED_LOCK:
@@ -692,7 +753,7 @@ def _yahoo_closes(symbol: str, years: int = 25, adj: bool = False) -> List[Dict[
 
 def _nyfed_effr(years: int = 25) -> List[Dict[str, Any]]:
     """NY Fed 有效聯邦基金利率（EFFR）日資料，約自 2000 起。"""
-    end = date.today()
+    end = _taipei_today()
     start = end - timedelta(days=years * 366)
     if start.year < 2000:
         start = date(2000, 1, 1)
@@ -769,7 +830,7 @@ def _h15_us10y(years: int = 25) -> List[Dict[str, Any]]:
 
 def _bls_unrate(years: int = 25) -> List[Dict[str, Any]]:
     """BLS 失業率（LNS14000000，季節調整）。公開 API 每次最多約 10 年。"""
-    end_y = date.today().year
+    end_y = _taipei_today().year
     start_y = max(1980, end_y - years - 1)
     pts: List[Dict[str, Any]] = []
     y = start_y
@@ -812,7 +873,7 @@ def _bls_unrate(years: int = 25) -> List[Dict[str, Any]]:
 
 def _bls_cpi_yoy(years: int = 25) -> List[Dict[str, Any]]:
     """BLS CPI-U NSA（CUUR0000SA0）→ 年增率 %。公開 API 每次最多約 10 年，分段抓。"""
-    end_y = date.today().year
+    end_y = _taipei_today().year
     start_y = max(1980, end_y - years - 1)
     by_ym: Dict[Tuple[int, int], float] = {}
     y = start_y
@@ -861,8 +922,48 @@ def _bls_cpi_yoy(years: int = 25) -> List[Dict[str, Any]]:
 def _filter_years(pts: List[Dict[str, Any]], years: int) -> List[Dict[str, Any]]:
     if not pts or years <= 0:
         return pts
-    cut = (date.today() - timedelta(days=years * 366)).isoformat()
+    cut = (_taipei_today() - timedelta(days=years * 366)).isoformat()
     return [p for p in pts if p.get('date', '') >= cut]
+
+
+def _business_day_age(data_date: date, today: Optional[date] = None) -> int:
+    """資料日之後到台北今日的平日數；不把週末本身誤算為過期。"""
+    end = today or datetime.now(timezone(timedelta(hours=8))).date()
+    if data_date >= end:
+        return 0
+    age = 0
+    cur = data_date + timedelta(days=1)
+    while cur <= end:
+        if cur.weekday() < 5:
+            age += 1
+        cur += timedelta(days=1)
+    return age
+
+
+def series_freshness(last_date: Optional[str], spec: Optional[Dict[str, Any]] = None,
+                     today: Optional[date] = None) -> Dict[str, Any]:
+    """把資料日期轉成可發布的明確時效契約。"""
+    spec = spec or {}
+    try:
+        parsed = datetime.strptime(str(last_date or '')[:10], '%Y-%m-%d').date()
+    except ValueError:
+        return {'freshness': 'unknown', 'age': None, 'maxAge': None}
+    end = today or datetime.now(timezone(timedelta(hours=8))).date()
+    if parsed > end:
+        return {'freshness': 'invalid_future', 'age': -1, 'maxAge': 0}
+    if spec.get('cadence') == 'monthly':
+        age = (end - parsed).days
+        max_age = int(spec.get('maxCalendarDays') or 75)
+        return {
+            'freshness': 'fresh' if age <= max_age else 'stale',
+            'age': age, 'ageUnit': 'calendar_day', 'maxAge': max_age,
+        }
+    age = _business_day_age(parsed, end)
+    max_age = int(spec.get('maxBusinessDays') or 2)
+    return {
+        'freshness': 'fresh' if age <= max_age else 'stale',
+        'age': age, 'ageUnit': 'business_day', 'maxAge': max_age,
+    }
 
 
 def _resolve_series_points(
@@ -870,20 +971,42 @@ def _resolve_series_points(
 ) -> Tuple[List[Dict[str, Any]], str]:
     """
     解析單序列：預設優先本地 seed（圖表秒開）；force_live=True（更新鈕）才打網路。
-    線上順序：FRED（可熔斷）→ fallback → 合併回寫 seed。
+    更新只使用該 seed 的 canonical provider，再合併回寫；不同量尺來源不得混檔。
     """
     seed_name = s.get('seed')
     seed_pts = _load_seed_csv(seed_name)
 
     # 一般讀圖：有種子就直接用，避免 FRED Timeout 拖慢每次切換
     if seed_pts and not force_live:
-        return seed_pts, f'seed:{seed_name}'
+        seed_source = s.get('seedSource') or '來源未標記'
+        return seed_pts, f'seed:{seed_name} · {seed_source}'
 
     live: List[Dict[str, Any]] = []
     note = ''
 
+    canonical = s.get('canonical')
     src = s.get('source')
-    if src == 'fred' and s.get('fred'):
+    if canonical == 'nyfed_effr':
+        live = _nyfed_effr(years)
+        if live:
+            note = 'NY Fed EFFR'
+    elif canonical == 'bls_cpi_yoy':
+        live = _bls_cpi_yoy(years)
+        if live:
+            note = 'BLS CPI-U NSA YoY'
+    elif canonical == 'bls_unrate':
+        live = _bls_unrate(years)
+        if live:
+            note = 'BLS UNRATE'
+    elif canonical == 'yahoo_adj' and s.get('symbol'):
+        live = _yahoo_closes(s['symbol'], years=years, adj=True)
+        if live:
+            note = f"Yahoo {s['symbol']} adj"
+    elif canonical == 'yahoo' and s.get('symbol'):
+        live = _yahoo_closes(s['symbol'], years=years, adj=False)
+        if live:
+            note = f"Yahoo {s['symbol']}"
+    elif src == 'fred' and s.get('fred'):
         live = _fred_points(s['fred'], years)
         if live:
             note = f"FRED {s['fred']}"
@@ -892,7 +1015,7 @@ def _resolve_series_points(
         if live:
             note = f"Yahoo {s['symbol']}"
 
-    if not live:
+    if not live and not canonical:
         fb = s.get('fallback')
         if fb == 'nyfed_effr':
             live = _nyfed_effr(years)
@@ -936,7 +1059,10 @@ def _resolve_series_points(
         return merged, note or 'live'
 
     if seed_pts:
-        return seed_pts, f'seed:{seed_name}'
+        seed_source = s.get('seedSource') or '來源未標記'
+        return seed_pts, f'seed:{seed_name} · {seed_source}'
+    if canonical:
+        return [], f'canonical:{canonical} · 指定來源無資料'
     return [], 'empty'
 
 
@@ -991,11 +1117,14 @@ def get_chart(chart_id: str, years: Optional[int] = None,
     elif cid in ('__US_RATES_CREDIT__', '__US_CPI_FIN__'):
         for s in meta['series']:
             pts, note = _resolve_series_points(s, yrs, force_live=force_live)
+            filtered = _filter_years(pts, yrs)
+            last_date = filtered[-1]['date'] if filtered else None
+            freshness = series_freshness(last_date, s)
             out_series.append({
                 'key': s['key'], 'name': s['name'], 'scale': s['scale'],
                 'color': s['color'], 'style': s.get('style', 'line'), 'unit': s.get('unit', ''),
-                'points': _filter_years(pts, yrs),
-                'source': note,
+                'points': filtered, 'source': note, 'lastDate': last_date,
+                **freshness,
             })
 
     elif cid == '__TW_MARGIN_CYCLE__':
@@ -1015,6 +1144,10 @@ def get_chart(chart_id: str, years: Optional[int] = None,
         'years': yrs,
         'series': out_series,
         'ok': any(len(s.get('points') or []) > 0 for s in out_series),
+        'publishable': all(
+            bool(s.get('points')) and s.get('freshness') not in ('stale', 'invalid_future', 'unknown')
+            for s in out_series
+        ) if cid in ('__US_RATES_CREDIT__', '__US_CPI_FIN__') else True,
         'defaultViewMode': 'rebase' if cid in ('__US_RATES_CREDIT__', '__US_CPI_FIN__') else 'raw',
     }
     # 美總經圖：附加市場風險評分（利率／信用／通膨／金融股）
@@ -1058,7 +1191,7 @@ def points_to_yf_like(points: List[Dict[str, Any]], symbol: str, name: str) -> D
 
 
 def primary_points_for_yf(chart_id: str) -> Dict[str, Any]:
-    """給 /yf/__CHART__ 用：依 chart_registry 主序列，绝不退回右軸加權。"""
+    """給 /yf/__CHART__ 用：依 chart_registry 主序列，絕不退回右軸加權。"""
     import chart_registry as cr
     data = get_chart(chart_id)
     primary = cr.pick_primary_series(data.get('series') or [], data.get('id') or chart_id)
@@ -1087,7 +1220,7 @@ def _maybe_autodense_margin_mix() -> None:
     if yoy_n >= 80 and total >= 120:
         return
     _AUTODENSE_STARTED = True
-    start = date.today() - timedelta(days=10 * 365)
+    start = _taipei_today() - timedelta(days=10 * 365)
     step_days = 14
 
     def _run():
@@ -1202,21 +1335,34 @@ def status_summary() -> Dict[str, Any]:
     }
     # US seeds
     for cid in ('__US_RATES_CREDIT__', '__US_CPI_FIN__'):
-        seeds = [s.get('seed') for s in CHARTS[cid]['series'] if s.get('seed')]
-        paths = [_seed_path(n) for n in seeds if n and os.path.isfile(_seed_path(n))]
+        series_status = []
         n = 0
         ts = 0
-        for p in paths:
-            ts = max(ts, int(os.path.getmtime(p)))
-            try:
-                with open(p, encoding='utf-8') as f:
-                    n = max(n, max(0, sum(1 for _ in f) - 1))
-            except Exception:
-                pass
+        for spec in CHARTS[cid]['series']:
+            seed = spec.get('seed')
+            path = _seed_path(seed) if seed else ''
+            pts = _load_seed_csv(seed)
+            updated = int(os.path.getmtime(path)) if path and os.path.isfile(path) else 0
+            ts = max(ts, updated)
+            n = max(n, len(pts))
+            last_date = pts[-1]['date'] if pts else None
+            fresh = series_freshness(last_date, spec)
+            series_status.append({
+                'key': spec['key'], 'source': spec.get('seedSource'),
+                'dataDate': last_date, 'count': len(pts), 'updated': updated,
+                **fresh,
+            })
+        stale_count = sum(
+            1 for item in series_status
+            if item.get('freshness') in ('stale', 'invalid_future', 'unknown')
+        )
         out['charts'][cid] = {
             'updated': ts,
             'count': n,
             'name': CHARTS[cid]['name'],
+            'publishable': stale_count == 0,
+            'staleCount': stale_count,
+            'series': series_status,
         }
     return out
 
@@ -1268,7 +1414,7 @@ def refresh_chart(chart_id: str, dense: bool = False, density: Optional[str] = N
             if dens.get('dense') and dens.get('step', 0) > 0 and dens.get('years', 0) > 0:
                 step_days = int(dens['step'])
                 yrs = int(dens['years'])
-                start = date.today() - timedelta(days=yrs * 365)
+                start = _taipei_today() - timedelta(days=yrs * 365)
                 result['started'] = True
                 result['note'] = f'已背景回補自 {start.isoformat()}（每 {step_days} 日 · {yrs} 年）'
                 result['actions'].append({
@@ -1330,7 +1476,7 @@ def refresh_chart(chart_id: str, dense: bool = False, density: Optional[str] = N
 
     elif cid in ('__US_RATES_CREDIT__', '__US_CPI_FIN__'):
         try:
-            # 強制走線上（FRED→備援）並回寫 seed；FRED 熔斷後仍走備援
+            # 強制由每個序列指定的唯一來源更新並回寫 seed；禁止跨量尺備援混檔
             data = get_chart(
                 cid,
                 years=int(CHARTS[cid].get('years') or 25),

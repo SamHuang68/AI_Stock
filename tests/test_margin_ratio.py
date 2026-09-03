@@ -52,6 +52,22 @@ class TestMarginRatioUnit(unittest.TestCase):
             loaded = mr.load_seed_csv(path)
             self.assertEqual(len(loaded), 2)
             self.assertAlmostEqual(loaded[0][1], 180.123456, places=5)
+            self.assertFalse(any(name.endswith('.tmp') for name in os.listdir(td)))
+
+    def test_seed_csv_rejects_whole_file_on_bad_or_future_row(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, 'm.csv')
+            with open(path, 'w', encoding='utf-8', newline='') as f:
+                f.write('date,margin_ratio_pct\n2026-09-01,186.1\n壞日期,182.4\n')
+            self.assertEqual(mr.load_seed_csv(path), [])
+            with open(path, 'w', encoding='utf-8', newline='') as f:
+                f.write('date,margin_ratio_pct\n2999-01-01,186.1\n')
+            self.assertEqual(mr.load_seed_csv(path), [])
+
+    def test_business_day_freshness_contract(self):
+        self.assertEqual(mr._business_day_age(date(2026, 8, 28), date(2026, 8, 31)), 1)
+        self.assertEqual(mr._business_day_age(date(2026, 8, 29), date(2026, 8, 30)), 0)
 
     def test_live_exchange_date_requires_matching_authoritative_dates(self):
         closes = [{'Date': '1150828', 'Code': '2330'}]

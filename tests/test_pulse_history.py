@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 
@@ -62,6 +63,30 @@ class PulseHistoryTests(unittest.TestCase):
         h = self.ph.history('index', n=5)
         self.assertEqual(len(h['rows']), 1)
         self.assertAlmostEqual(h['rows'][0]['close'], 1.8)
+
+    def test_twoii_uses_official_canonical_rows(self):
+        rows = [
+            {'date': '2026-09-02', 'open': 410.77, 'high': 410.77,
+             'low': 406.96, 'close': 406.96, 'volume': 0},
+            {'date': '2026-09-03', 'open': 406.96, 'high': 406.96,
+             'low': 395.25, 'close': 395.25, 'volume': 0},
+        ]
+        with mock.patch('tw_index_charts.recent_rows', return_value=rows) as recent:
+            points, source = self.ph.fetch_index_series('^TWOII')
+        recent.assert_called_once_with('^TWOII', n=120, allow_network=True)
+        self.assertEqual(source, 'TPEx st41 / TWSE MIS')
+        self.assertEqual(points[-1][0], '2026-09-03')
+        self.assertAlmostEqual(points[-1][4], 395.25)
+
+    def test_institutional_meta_waits_for_official_release(self):
+        status, note = self.ph._institutional_meta('2026-09-02', '2026-09-03', 0)
+        self.assertEqual(status, '等待當日發布')
+        self.assertIn('2026-09-02', note)
+        self.assertIn('2026-09-03', note)
+        self.assertEqual(
+            self.ph._institutional_meta('2026-09-03', '2026-09-03', 1)[0],
+            '同步完成',
+        )
 
 
 if __name__ == '__main__':

@@ -127,7 +127,13 @@ def _st_macro_chart(cid):
     try:
         import macro_track as mt
         st = mt.status_summary().get('charts', {}).get(cid) or {}
-        return {'updated': st.get('updated') or 0, 'count': st.get('count') or 0}
+        return {
+            'updated': st.get('updated') or 0,
+            'count': st.get('count') or 0,
+            'publishable': st.get('publishable'),
+            'staleCount': st.get('staleCount'),
+            'series': st.get('series') or [],
+        }
     except Exception:
         return {'updated': 0, 'count': 0}
 
@@ -138,7 +144,9 @@ def _st_macro_all():
         charts = mt.status_summary().get('charts') or {}
         n = sum(int(v.get('count') or 0) for v in charts.values())
         ts = max((int(v.get('updated') or 0) for v in charts.values()), default=0)
-        return {'updated': ts, 'count': n}
+        stale = sum(int(v.get('staleCount') or 0) for v in charts.values())
+        publishable = all(v.get('publishable', True) is not False for v in charts.values())
+        return {'updated': ts, 'count': n, 'publishable': publishable, 'staleCount': stale}
     except Exception:
         return {'updated': 0, 'count': 0}
 
@@ -169,8 +177,8 @@ def _registry():
          'reliability': 'official', 'kind': 'db', 'updatable': True,
          'desc': 'Σ(融資市值,不含ETF)/融資金額；seed CSV + TWSE 歷史回補 + 今日即時',
          'status': _st_margin_ratio()},
-        {'id': 'macro_tracks', 'name': '指數追蹤圖(全部)', 'provider': 'CBC · TWSE/TPEx · NY Fed · H.15 · BLS · Yahoo',
-         'reliability': 'official', 'kind': 'file', 'updatable': True,
+        {'id': 'macro_tracks', 'name': '指數追蹤圖(全部)', 'provider': 'CBC · TWSE/TPEx · NY Fed · BLS · Yahoo',
+         'reliability': 'vendor', 'kind': 'file', 'updatable': True,
          'desc': '台利率／融資比YoY／美利率債／CPI金融 — 一鍵全更新（融資比會背景加密度）',
          'status': _st_macro_all()},
         {'id': 'macro_tw_rates', 'name': '台灣指標利率', 'provider': 'CBC 利率走廊',
@@ -189,12 +197,12 @@ def _registry():
          'reliability': 'official', 'kind': 'db', 'updatable': True,
          'desc': '股東人數 vs ≥400張大股東持有率（週）— 可回補歷史',
          'status': _st_tdcc_holders()},
-        {'id': 'macro_us_rates_credit', 'name': '美國利率 vs 公司債', 'provider': 'NY Fed / H.15 / Yahoo LQD·HYG',
+        {'id': 'macro_us_rates_credit', 'name': '美國利率 vs 公司債', 'provider': 'NY Fed EFFR / Yahoo ^TNX·LQD·HYG',
          'reliability': 'vendor', 'kind': 'file', 'updatable': True,
-         'desc': 'Fed＋10Y＋IG/HY 種子重抓（FRED 可達時優先）',
+         'desc': 'EFFR＋10Y＋LQD/HYG 種子依固定來源更新，不跨來源混檔',
          'status': _st_macro_chart('__US_RATES_CREDIT__')},
         {'id': 'macro_us_cpi_fin', 'name': '美國CPI＆Fed vs 金融股', 'provider': 'BLS · NY Fed · Yahoo XLF',
-         'reliability': 'official', 'kind': 'file', 'updatable': True,
+         'reliability': 'vendor', 'kind': 'file', 'updatable': True,
          'desc': 'CPI YoY＋基準利率＋XLF 種子重抓',
          'status': _st_macro_chart('__US_CPI_FIN__')},
         {'id': 'etf', 'name': '主動 ETF 每日持股', 'provider': 'MoneyDJ + TWSE',
