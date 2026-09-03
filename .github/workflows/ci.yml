@@ -23,9 +23,11 @@ jobs:
       - name: Install CI dependencies
         run: python -m pip install --disable-pip-version-check -r requirements-ci.txt
       - name: Python syntax
-        run: python -m compileall -q server scripts tests
+        run: python -m compileall -q server scripts tests wavedeck
       - name: Unit tests
         run: python -m unittest discover -s tests -v
+      - name: WaveDeck 測試
+        run: python -W error::ResourceWarning -m unittest wavedeck.tests.test_smoke -v
       - name: build_order self-test
         run: python build_order.py
       - name: JavaScript contract self-tests
@@ -43,5 +45,10 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile(
             (Resolve-Path .\scripts\go.ps1), [ref]$tokens, [ref]$errors) | Out-Null
           if ($errors.Count) { $errors | Format-List; exit 1 }
+          $stopOutput = @(& cmd /d /c .\STOP_PRIVATE_WEB.cmd 2>&1)
+          if ($LASTEXITCODE -ne 0) { $stopOutput; exit $LASTEXITCODE }
+          $expected = '^(正在停止 Private Web ST|Private Web ST 已停止)'
+          $unexpected = @($stopOutput | Where-Object { $_ -and $_ -notmatch $expected })
+          if ($unexpected.Count) { $unexpected; exit 1 }
       - name: Dist scrub (via unittest)
         run: python -m unittest tests.test_dist_scrub -v

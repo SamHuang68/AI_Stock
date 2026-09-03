@@ -33,12 +33,23 @@ from server.config import load_config  # noqa: E402
 from server.state import RUNTIME, now_iso  # noqa: E402
 
 HOST = os.environ.get("WAVEDECK_HOST", "127.0.0.1")
-PORT = int(os.environ.get("WAVEDECK_PORT", "18433"))
+PRIVATE_WEB_PORTS = frozenset({18434, 18435})
+
+
+def _configured_port(value: str) -> int:
+    port = int(value)
+    if not 1 <= port <= 65535:
+        raise ValueError(f"WaveDeck 埠超出有效範圍：{port}")
+    if port in PRIVATE_WEB_PORTS:
+        raise ValueError(f"WaveDeck 不可使用 Private Web 保留埠 {port}")
+    return port
+
+
+PORT = _configured_port(os.environ.get("WAVEDECK_PORT", "18433"))
 SECRET = os.environ.get("WAVEDECK_SECRET", "")
 # Windows 常把某些埠段列為 excluded（WinError 10013），預設失敗時改試這些埠
 PORT_FALLBACKS = [
     PORT,
-    18434,
     18765,
     28765,
     38433,
@@ -325,7 +336,7 @@ def _candidate_ports() -> list[int]:
             n = int(p)
         except Exception:
             continue
-        if n <= 0 or n in seen:
+        if n <= 0 or n in seen or n in PRIVATE_WEB_PORTS:
             continue
         seen.add(n)
         out.append(n)

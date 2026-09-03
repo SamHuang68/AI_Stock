@@ -1308,7 +1308,7 @@
         if (window.WaveDeckBridge && typeof window.WaveDeckBridge.open === 'function') {
           window.WaveDeckBridge.open();
         } else {
-          window.open(window.WAVEDECK_URL || 'http://127.0.0.1:18433/', '_blank', 'noopener');
+          window.open('http://127.0.0.1:18433/', '_blank', 'noopener');
         }
       };
       var stSync = $('shell-sync-btn') || $('shell-sync');
@@ -1716,7 +1716,7 @@
       if (window.WaveDeckBridge && typeof window.WaveDeckBridge.open === 'function') {
         window.WaveDeckBridge.open(url);
       } else {
-        window.open(url, '_blank', 'noopener');
+        window.open('http://127.0.0.1:18433/', '_blank', 'noopener');
       }
       return;
     }

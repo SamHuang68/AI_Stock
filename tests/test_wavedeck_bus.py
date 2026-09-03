@@ -20,6 +20,7 @@ class WaveDeckBusSmoke(unittest.TestCase):
         self.assertTrue(wdb.is_wavedeck_origin("http://127.0.0.1:18433/"))
         self.assertTrue(wdb.is_wavedeck_origin("http://localhost:18765"))
         self.assertFalse(wdb.is_wavedeck_origin("http://127.0.0.1:18432/"))
+        self.assertFalse(wdb.is_wavedeck_origin("http://127.0.0.1:18434/"))
         self.assertFalse(wdb.is_wavedeck_origin("https://evil.example/"))
 
     def test_accept_report_and_costs(self):

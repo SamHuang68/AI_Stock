@@ -25,6 +25,9 @@ CONFIG_FILE = os.path.join(_BASE, 'data', 'alert_config.json')
 RULES_FILE = os.path.join(_BASE, 'data', 'alert_rules.json')
 SECRETS_FILE = os.path.join(_BASE, 'data', 'alert_secrets.bin')
 LOG_DIR = os.path.join(_BASE, 'logs', 'alerts')
+# 本機埠所有權：ST 18432、WaveDeck 18433、Private Web 18434／18435。
+# 通知守護程序只以 18436 作為跨進程單例鎖，不得占用服務埠。
+ALERT_DAEMON_LOCK_PORT = 18436
 
 _DEFAULT_CONFIG = {
     'enabled': False,
@@ -446,15 +449,15 @@ def start():
     global _lock_socket
     if _state['thread'] and _state['thread'].is_alive():
         return
-    # 嘗試佔用 Port 18433 作為進程單例鎖，防止背景殘存重複實例發信
+    # 使用專屬埠作為進程單例鎖，防止背景殘存重複實例發信。
     try:
         import socket
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.bind(('127.0.0.1', 18433))
+        s.bind(('127.0.0.1', ALERT_DAEMON_LOCK_PORT))
         s.listen(1)
         _lock_socket = s
     except OSError:
-        _log("[alert] alert_daemon already running on port 18433, skip start.")
+        _log(f"[alert] 告警背景服務已在連接埠 {ALERT_DAEMON_LOCK_PORT} 執行，略過重複啟動。")
         return
 
     _state['stop'] = False
