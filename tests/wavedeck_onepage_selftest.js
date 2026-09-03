@@ -49,6 +49,10 @@ ok(/lights-box/.test(html) && /pos-grid/.test(html) && /pos-grid/.test(css),
   'dense grids for position / lights / transport');
 ok(/Wave AI 參考 · 攻能驗證 · 非實盤/.test(js) && !/資料性質/.test(js),
   'account note compact; no wide 資料性質 row');
+ok(/async function refreshSt\(\)[\s\S]*?jget\(ST \+ '\/bridge\/wavedeck'\)/.test(js),
+  'ST 狀態燈使用已開放 CORS 的 WaveDeck bridge 探針');
+ok(!/async function refreshSt\(\)[\s\S]*?jget\(ST \+ '\/health'\)/.test(js),
+  'ST 狀態燈不使用遭跨來源阻擋的 health 端點');
 ok(/一頁密度|100dvh|Wave AI/.test(css.split('\n')[0]) || /一頁高密度/.test(css),
   'CSS header documents one-page Wave AI density');
 

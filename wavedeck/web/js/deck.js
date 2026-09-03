@@ -485,8 +485,10 @@
   }
 
   async function refreshSt() {
-    var health = await jget(ST + '/health');
-    if (!health) {
+    // `/health` 刻意不開放跨來源 CORS；改用明確授權的 WaveDeck bridge，
+    // 避免 WaveDeck 使用備援埠時把正常連線誤顯示為 ST OFF。
+    var bridge = await jget(ST + '/bridge/wavedeck');
+    if (!bridge || !bridge.ok) {
       if ($('stSyncTxt')) $('stSyncTxt').textContent = 'ST OFF';
       if ($('stNote') && !(state && state.st_overlay && state.st_overlay.note)) {
         $('stNote').textContent = 'ST :18432 未連線（可先開 Stock Terminal）';

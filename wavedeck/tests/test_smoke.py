@@ -367,6 +367,20 @@ class WaveDeckSmoke(unittest.TestCase):
         self.assertEqual(rep["event_type"], "POSITION_STATE_CHANGE")
         self.assertEqual(rep["chip"]["invalidation_price"], 44800)
 
+    def test_st_heartbeat_republishes_reverse_bus(self):
+        from server import st_link
+
+        with mock.patch.object(st_link, "_ping_st", return_value=True), mock.patch.object(
+            st_link, "_enforce_daily_dd"
+        ), mock.patch.object(st_link, "_overlay_age_sec", return_value=0.0), mock.patch.object(
+            st_link, "fail_safe_active", return_value=False
+        ), mock.patch.object(st_link, "push_async") as push:
+            st_link._tick()
+
+        push.assert_called_once()
+        self.assertEqual(push.call_args.kwargs.get("reason"), "heartbeat")
+        self.assertTrue(push.call_args.kwargs.get("force"))
+
 
 if __name__ == "__main__":
     unittest.main()

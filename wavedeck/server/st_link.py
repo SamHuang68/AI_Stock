@@ -424,6 +424,11 @@ def _tick() -> None:
     except Exception:
         pass
 
+    # 由服務端心跳維持 WD→ST 快照新鮮度，不依賴 WaveDeck 網頁是否位於前景。
+    # force=True 讓相同狀態也能重新發布；否則 st_push 的簽章去重會略過心跳。
+    if ok:
+        push_async(RUNTIME.snapshot(), reason="heartbeat", force=True)
+
     if not ok and _fail_count >= FAIL_AFTER:
         apply_fail_safe("ST 心跳中斷")
         return
