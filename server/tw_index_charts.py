@@ -21,7 +21,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 if getattr(sys, 'frozen', False):
@@ -46,6 +46,59 @@ _HTTP_GAP = 0.35
 # 記憶體快取：symbol -> (mtime_or_build_ts, rows)
 _mem: Dict[str, Tuple[float, List[Tuple]]] = {}
 _REFRESH_TTL = 300.0  # 5 分鐘內不重抓外部
+_TXF_TRACE_PATH = os.path.join(_BASE, 'logs', 'txf_history_trace.jsonl')
+_TXF_DAILY_READY_TIME = datetime_time(16, 0)
+
+
+def _txf_trace(event: str, **fields) -> None:
+    """寫入有界、可稽核的台指期日線更新軌跡。"""
+    try:
+        os.makedirs(os.path.dirname(_TXF_TRACE_PATH), exist_ok=True)
+        row = {
+            'ts': datetime.now(TZ_TPE).isoformat(timespec='seconds'),
+            'component': 'tw_index_charts',
+            'event': event,
+            **fields,
+        }
+        with open(_TXF_TRACE_PATH, 'a', encoding='utf-8') as fh:
+            fh.write(json.dumps(row, ensure_ascii=False, default=str) + '\n')
+        if os.path.getsize(_TXF_TRACE_PATH) > 256 * 1024:
+            with open(_TXF_TRACE_PATH, encoding='utf-8') as fh:
+                tail = fh.readlines()[-500:]
+            with open(_TXF_TRACE_PATH, 'w', encoding='utf-8') as fh:
+                fh.writelines(tail)
+    except Exception:
+        pass
+
+
+def _latest_completed_taiwan_session(now: Optional[datetime] = None) -> date:
+    """最近已成熟的台指日線日期；16:00 前仍以前一個平日為準。"""
+    current = now or datetime.now(TZ_TPE)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=TZ_TPE)
+    else:
+        current = current.astimezone(TZ_TPE)
+    candidate = current.date()
+    if candidate.weekday() < 5 and current.time() < _TXF_DAILY_READY_TIME:
+        candidate -= timedelta(days=1)
+    while candidate.weekday() >= 5:
+        candidate -= timedelta(days=1)
+    return candidate
+
+
+def txf_history_needs_refresh(
+    rows: Optional[List[Tuple]] = None,
+    now: Optional[datetime] = None,
+) -> bool:
+    """以最近已完成日盤判斷 TXF 日線是否缺交易日。"""
+    existing = rows if rows is not None else _read_csv(TXF_CSV)
+    if not existing:
+        return True
+    try:
+        latest = datetime.strptime(str(existing[-1][0])[:10], '%Y-%m-%d').date()
+    except (TypeError, ValueError, IndexError):
+        return True
+    return latest < _latest_completed_taiwan_session(now)
 
 
 def _throttle():
@@ -269,6 +322,11 @@ def _fetch_txf_finmind(start: str, end: str) -> List[Tuple]:
     headers = dict(_UA)
     if token:
         headers['Authorization'] = f'Bearer {token}'
+    started = time.monotonic()
+    _txf_trace(
+        'fetch_started', source='FinMind TaiwanFuturesDaily TX',
+        startDate=start, endDate=end, authenticated=bool(token),
+    )
     try:
         _throttle()
         req = urllib.request.Request(url, headers=headers)
@@ -276,6 +334,11 @@ def _fetch_txf_finmind(start: str, end: str) -> List[Tuple]:
             j = json.loads(resp.read().decode('utf-8', 'replace'))
     except Exception as e:
         print('[tw-index] FinMind TX', e)
+        _txf_trace(
+            'fetch_failed', source='FinMind TaiwanFuturesDaily TX',
+            startDate=start, endDate=end, error=type(e).__name__,
+            elapsedMs=round((time.monotonic() - started) * 1000),
+        )
         return []
     if j.get('status') not in (0, 200, '0', '200', None) and j.get('msg') not in (None, 'success'):
         # FinMind 成功時常 status=200 msg=success
@@ -315,6 +378,13 @@ def _fetch_txf_finmind(start: str, end: str) -> List[Tuple]:
         except Exception:
             continue
         out.append((d, o, h, l, c, v))
+    _txf_trace(
+        'fetch_completed', source='FinMind TaiwanFuturesDaily TX',
+        startDate=start, endDate=end, rowCount=len(out),
+        firstDate=(out[0][0] if out else None),
+        lastDate=(out[-1][0] if out else None),
+        elapsedMs=round((time.monotonic() - started) * 1000),
+    )
     return out
 
 
@@ -331,7 +401,17 @@ def ensure_txf(years: int = 5, force: bool = False) -> List[Tuple]:
             return cached[1]
 
         rows = _read_csv(TXF_CSV)
-        today = date.today()
+        current = datetime.now(TZ_TPE)
+        today = current.date()
+        latest_before = rows[-1][0] if rows else None
+        expected = _latest_completed_taiwan_session(current).isoformat()
+        if rows and not force and not txf_history_needs_refresh(rows, current):
+            _mem['__TXF__'] = (now, rows)
+            _txf_trace(
+                'refresh_skipped_current', source='FinMind TaiwanFuturesDaily TX',
+                latestDate=latest_before, expectedDate=expected, rowCount=len(rows),
+            )
+            return rows
         if rows:
             try:
                 last = datetime.strptime(rows[-1][0], '%Y-%m-%d').date()
@@ -343,6 +423,11 @@ def ensure_txf(years: int = 5, force: bool = False) -> List[Tuple]:
             start = (today - timedelta(days=365 * years)).isoformat()
         end = today.isoformat()
 
+        _txf_trace(
+            'refresh_started', source='FinMind TaiwanFuturesDaily TX',
+            latestDate=latest_before, expectedDate=expected,
+            startDate=start, endDate=end, forced=bool(force),
+        )
         fresh = _fetch_txf_finmind(start, end)
         by_date: Dict[str, Tuple] = {r[0]: r for r in rows}
         for r in fresh:
@@ -351,6 +436,11 @@ def ensure_txf(years: int = 5, force: bool = False) -> List[Tuple]:
         if out:
             _write_csv(TXF_CSV, out)
         _mem['__TXF__'] = (now, out)
+        _txf_trace(
+            'refresh_completed', source='FinMind TaiwanFuturesDaily TX',
+            latestBefore=latest_before, latestAfter=(out[-1][0] if out else None),
+            expectedDate=expected, fetchedRows=len(fresh), totalRows=len(out),
+        )
         return out
 
 
