@@ -191,7 +191,9 @@ class WaveDeckSmoke(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             with mock.patch("server.state.DATA", Path(td)), mock.patch(
                 "server.state.STATE_PATH", Path(td) / "runtime_state.json"
-            ), mock.patch("server.audit.DATA", Path(td)):
+            ), mock.patch("server.audit.DATA", Path(td)), mock.patch(
+                "server.engine.notify_override_alpha"
+            ) as notify, mock.patch("server.engine.push_async") as push:
                 snap = apply_st_bridge(
                     {
                         "style": 55,
@@ -210,6 +212,8 @@ class WaveDeckSmoke(unittest.TestCase):
                 self.assertEqual(ov.get("rotation"), "narrow")
                 self.assertAlmostEqual(float(ov.get("spillover_prob")), 0.22)
                 self.assertEqual(snap.get("style"), 55)
+                notify.assert_called_once()
+                push.assert_called_once()
 
     def test_soft_spillover_gate_halves_lots(self):
         st = {
