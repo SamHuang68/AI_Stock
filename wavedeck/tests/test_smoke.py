@@ -59,6 +59,21 @@ class WaveDeckSmoke(unittest.TestCase):
         self.assertIn("執行閘門", text)
         self.assertIn("v1.5", text)
 
+    def test_private_web_ports_are_never_wavedeck_candidates(self):
+        from server.server import PRIVATE_WEB_PORTS, _candidate_ports, _configured_port
+
+        self.assertEqual(PRIVATE_WEB_PORTS, {18434, 18435})
+        self.assertTrue(PRIVATE_WEB_PORTS.isdisjoint(_candidate_ports()))
+        self.assertEqual(_configured_port("19000"), 19000)
+        for port in PRIVATE_WEB_PORTS:
+            with self.subTest(port=port):
+                with self.assertRaisesRegex(ValueError, "Private Web 保留埠"):
+                    _configured_port(str(port))
+        for port in (0, 65536):
+            with self.subTest(port=port):
+                with self.assertRaisesRegex(ValueError, "有效範圍"):
+                    _configured_port(str(port))
+
     def test_parse_lots(self):
         self.assertEqual(_parse_lots("TXF 2\n", "TXF"), 2)
         self.assertEqual(_parse_lots("2330=3", "2330"), 3)
@@ -176,7 +191,9 @@ class WaveDeckSmoke(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             with mock.patch("server.state.DATA", Path(td)), mock.patch(
                 "server.state.STATE_PATH", Path(td) / "runtime_state.json"
-            ), mock.patch("server.audit.DATA", Path(td)):
+            ), mock.patch("server.audit.DATA", Path(td)), mock.patch(
+                "server.engine.notify_override_alpha"
+            ) as notify, mock.patch("server.engine.push_async") as push:
                 snap = apply_st_bridge(
                     {
                         "style": 55,
@@ -195,6 +212,8 @@ class WaveDeckSmoke(unittest.TestCase):
                 self.assertEqual(ov.get("rotation"), "narrow")
                 self.assertAlmostEqual(float(ov.get("spillover_prob")), 0.22)
                 self.assertEqual(snap.get("style"), 55)
+                notify.assert_called_once()
+                push.assert_called_once()
 
     def test_soft_spillover_gate_halves_lots(self):
         st = {
@@ -285,45 +304,51 @@ class WaveDeckSmoke(unittest.TestCase):
 
     def test_apply_fail_safe_tightens_style(self):
         from server.st_link import apply_fail_safe, enforce_fail_safe, scrub_fail_safe_summary
-        from server.state import RUNTIME
+        from server.state import Runtime
 
         with tempfile.TemporaryDirectory() as td:
             with mock.patch("server.state.DATA", Path(td)), mock.patch(
                 "server.state.STATE_PATH", Path(td) / "runtime_state.json"
             ), mock.patch("server.audit.DATA", Path(td)), mock.patch(
                 "server.st_link.push_async"
-            ):
-                RUNTIME.patch(
-                    style=70,
-                    exec={"price": 45000},
-                    ai={
-                        "invalidation": {"side": "below", "price": 44000},
-                        "summary": "〔Fail-safe：宏觀覆寫過期 90s〕風格→保守、降載、收緊失效。 支撐 44900",
-                    },
-                    st_overlay={},
-                    st_link={},
-                )
-                snap = apply_fail_safe("ST 心跳中斷")
-                self.assertEqual(snap.get("style"), 35)
-                self.assertTrue((snap.get("st_overlay") or {}).get("fail_safe"))
-                self.assertTrue((snap.get("st_link") or {}).get("fail_safe"))
-                self.assertEqual((snap.get("lights") or {}).get("st_bridge"), "bad")
-                inv = ((snap.get("ai") or {}).get("invalidation") or {})
-                self.assertGreater(float(inv.get("price")), 44000)
-                summary = (snap.get("ai") or {}).get("summary") or ""
-                self.assertNotIn("Fail-safe", summary)
-                self.assertNotIn("風格→保守", summary)
-                self.assertIn("支撐", summary)
-                # Sticky: even if style drifts up, enforce clamps back
-                RUNTIME.patch(style=60, st_overlay={"delever": False, "fail_safe": True})
-                snap2 = enforce_fail_safe("宏觀覆寫過期 94s", tighten=False)
-                self.assertEqual(snap2.get("style"), 35)
-                self.assertTrue((snap2.get("st_overlay") or {}).get("delever"))
-                self.assertEqual((snap2.get("lights") or {}).get("st_bridge"), "warn")
-                washed = scrub_fail_safe_summary(
-                    "〔Fail-safe：x〕風格→保守、降載、收緊失效。 〔Fail-safe：y〕風格→保守、降載、收緊失效。 hi"
-                )
-                self.assertEqual(washed, "hi")
+            ), mock.patch("server.st_link._write_inv_txt") as write_inv, mock.patch(
+                "server.exec_md.on_invalidation_trail", return_value={}
+            ) as write_md:
+                runtime = Runtime()
+                with mock.patch("server.st_link.RUNTIME", runtime):
+                    runtime.patch(
+                        style=70,
+                        exec={"price": 45000},
+                        ai={
+                            "invalidation": {"side": "below", "price": 44000},
+                            "summary": "〔Fail-safe：宏觀覆寫過期 90s〕風格→保守、降載、收緊失效。 支撐 44900",
+                        },
+                        st_overlay={},
+                        st_link={},
+                    )
+                    snap = apply_fail_safe("ST 心跳中斷")
+                    self.assertEqual(snap.get("style"), 35)
+                    self.assertTrue((snap.get("st_overlay") or {}).get("fail_safe"))
+                    self.assertTrue((snap.get("st_link") or {}).get("fail_safe"))
+                    self.assertEqual((snap.get("lights") or {}).get("st_bridge"), "bad")
+                    inv = ((snap.get("ai") or {}).get("invalidation") or {})
+                    self.assertGreater(float(inv.get("price")), 44000)
+                    summary = (snap.get("ai") or {}).get("summary") or ""
+                    self.assertNotIn("Fail-safe", summary)
+                    self.assertNotIn("風格→保守", summary)
+                    self.assertIn("支撐", summary)
+                    # Sticky: even if style drifts up, enforce clamps back
+                    runtime.patch(style=60, st_overlay={"delever": False, "fail_safe": True})
+                    snap2 = enforce_fail_safe("宏觀覆寫過期 94s", tighten=False)
+                    self.assertEqual(snap2.get("style"), 35)
+                    self.assertTrue((snap2.get("st_overlay") or {}).get("delever"))
+                    self.assertEqual((snap2.get("lights") or {}).get("st_bridge"), "warn")
+                    washed = scrub_fail_safe_summary(
+                        "〔Fail-safe：x〕風格→保守、降載、收緊失效。 〔Fail-safe：y〕風格→保守、降載、收緊失效。 hi"
+                    )
+                    self.assertEqual(washed, "hi")
+                self.assertEqual(write_inv.call_count, 2)
+                write_md.assert_called_once()
 
     def test_daily_dd_hard_stop(self):
         st = {

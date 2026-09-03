@@ -23,8 +23,9 @@ TZ8 = timezone(timedelta(hours=8))
 DATA = Path(__file__).resolve().parents[1] / 'data'
 STORE = DATA / 'wavedeck_bus.json'
 
-# WaveDeck 預設／fallback 埠（與 bridge JS、run.py 對齊）
-WD_PORTS = (18433, 18434, 18765, 28765, 38433, 8765)
+# WaveDeck 預設／fallback 埠（與 bridge JS、run.py 對齊）。
+# 18434／18435 保留給 Private Web，不可作為 WaveDeck fallback。
+WD_PORTS = (18433, 18765, 28765, 38433, 8765)
 
 _lock = threading.RLock()
 _subscribers: list[queue.Queue] = []

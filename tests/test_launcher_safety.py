@@ -50,6 +50,44 @@ class LauncherSafetyTests(unittest.TestCase):
         self.assertIn('http://127.0.0.1:18435/etf-delta', installer)
         self.assertIn('New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At 7pm', installer)
 
+    def test_wavedeck_reuses_stock_python_and_reserves_private_web_ports(self):
+        launcher = (ROOT / 'wavedeck' / 'START_WAVEDECK.cmd').read_text(encoding='utf-8')
+        self.assertIn(r'data\stock_python.path', launcher)
+        self.assertIn('py -3 -c "import sys; print(sys.executable)"', launcher)
+        self.assertIn('"%PYEXE%" run.py', launcher)
+        self.assertNotIn('PYEXE=python', launcher)
+
+        wd_server = (ROOT / 'wavedeck' / 'server' / 'server.py').read_text(encoding='utf-8')
+        self.assertIn('PRIVATE_WEB_PORTS = frozenset({18434, 18435})', wd_server)
+        self.assertIn('n in PRIVATE_WEB_PORTS', wd_server)
+        bus = (ROOT / 'server' / 'wavedeck_bus.py').read_text(encoding='utf-8')
+        self.assertIn('WD_PORTS = (18433, 18765, 28765, 38433, 8765)', bus)
+
+        ui = (ROOT / 'src' / 'ui' / 'wavedeck_bridge_v5.js').read_text(encoding='utf-8')
+        ui_candidates = ui.split('var CANDIDATES = [', 1)[1].split('];', 1)[0]
+        self.assertNotIn('18434', ui_candidates)
+        self.assertNotIn('18435', ui_candidates)
+        self.assertIn('isReservedPrivateWebUrl(configuredBase)', ui)
+
+        wait_ready = (ROOT / 'wavedeck' / 'wait_ready.ps1').read_text(encoding='utf-8')
+        self.assertIn('$candidates = @(18433, 18765, 28765, 38433, 8765)', wait_ready)
+        self.assertIn('[int]$p -notin @(18434, 18435)', wait_ready)
+        self.assertIn('$ports = @(18433,18765,28765,38433,8765)', launcher)
+        self.assertIn('[int]$p -notin @(18434,18435)', launcher)
+
+        alert = (ROOT / 'server' / 'alert_daemon.py').read_text(encoding='utf-8')
+        self.assertIn('ALERT_DAEMON_LOCK_PORT = 18436', alert)
+        self.assertIn("s.bind(('127.0.0.1', ALERT_DAEMON_LOCK_PORT))", alert)
+
+    def test_private_web_stop_only_terminates_verified_process_identity(self):
+        script = (ROOT / 'STOP_PRIVATE_WEB.cmd').read_text(encoding='utf-8')
+        ci = (ROOT / '.github' / 'workflows' / 'ci.yml').read_text(encoding='utf-8')
+        self.assertIn('Get-CimInstance Win32_Process', script)
+        self.assertIn('private_web_host.py', script)
+        self.assertIn('private_web_gateway.py', script)
+        self.assertNotIn('netstat -ano', script)
+        self.assertIn('cmd /d /c .\\STOP_PRIVATE_WEB.cmd', ci)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -20,16 +20,28 @@
   var ST_URL = (typeof window.SERVER === 'string' && window.SERVER)
     ? String(window.SERVER).replace(/\/?$/, '')
     : '';
+  function isReservedPrivateWebUrl(value) {
+    try {
+      var parsed = new URL(String(value), window.location.href);
+      var loopback = parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost';
+      return loopback && (parsed.port === '18434' || parsed.port === '18435');
+    } catch (e) {
+      return false;
+    }
+  }
   var CANDIDATES = [
     'http://127.0.0.1:18433/',
-    'http://127.0.0.1:18434/',
     'http://127.0.0.1:18765/',
     'http://127.0.0.1:28765/',
     'http://127.0.0.1:38433/',
     'http://127.0.0.1:8765/'
   ];
-  var BASE = (typeof window.WAVEDECK_URL === 'string' && window.WAVEDECK_URL)
-    ? String(window.WAVEDECK_URL).replace(/\/?$/, '/')
+  var configuredBase = (typeof window.WAVEDECK_URL === 'string' && window.WAVEDECK_URL)
+    ? String(window.WAVEDECK_URL)
+    : '';
+  if (isReservedPrivateWebUrl(configuredBase)) configuredBase = '';
+  var BASE = configuredBase
+    ? configuredBase.replace(/\/?$/, '/')
     : DEFAULT_URL;
 
   var AUTO_KEY = 'st5.wd.autoOverlay';
@@ -250,6 +262,10 @@
   function open(url) {
     if (PRIVATE_WEB_NO_WD) return;
     if (url) {
+      if (isReservedPrivateWebUrl(url)) {
+        toast('WaveDeck 網址使用 Private Web 保留埠，已拒絕開啟');
+        return;
+      }
       window.open(url, '_blank', 'noopener');
       toast('已開啟 WaveDeck');
       return;

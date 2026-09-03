@@ -26,7 +26,7 @@
 ```bash
 cd wavedeck
 python3 run.py
-# Windows: 雙擊 START_WAVEDECK.cmd  或  py -3 run.py
+# Windows：雙擊 START_WAVEDECK.cmd，會重用 data\stock_python.path 的釘選 Python
 # （勿用 python server\server.py，Windows 易 import 撞名導致起不來）
 ```
 
@@ -37,8 +37,8 @@ http://127.0.0.1:18433/
 ```
 
 若 Windows 出現 `WinError 10013`（埠被系統保留），伺服器會自動改試
-`18434 / 18765 / 28765 / …`，實際埠寫入 `data/wavedeck.port`。
-亦可手動：`set WAVEDECK_PORT=28765` 再 `py -3 run.py`。
+`18765 / 28765 / 38433 / 8765`，實際埠寫入 `data/wavedeck.port`；
+`18434 / 18435` 專供 Private Web 使用，不會作為 WaveDeck fallback。
 
 Windows 亦可雙擊 `START_WAVEDECK.cmd`。
 

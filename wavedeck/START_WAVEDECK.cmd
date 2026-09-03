@@ -1,6 +1,7 @@
 @echo off
 setlocal EnableExtensions
-REM ASCII-only messages (Windows cmd codepage-safe)
+chcp 65001 >nul
+REM 重用 Stock Terminal 的絕對 Python 釘選，不得退回 PATH 裡的裸 python。
 cd /d "%~dp0"
 
 REM Resolve WaveDeck home (handles AI_Stock\ or nested wavedeck\wavedeck\)
@@ -28,13 +29,16 @@ echo   home: %CD%
 echo  ============================================
 echo.
 
+set "ST_ROOT="
+for %%I in ("%WD_HOME%\..") do if exist "%%~fI\data\stock_python.path" set "ST_ROOT=%%~fI"
+if not defined ST_ROOT for %%I in ("%WD_HOME%\..\..") do if exist "%%~fI\data\stock_python.path" set "ST_ROOT=%%~fI"
+
 set "PYEXE="
-where py >nul 2>nul && set "PYEXE=py -3"
+if defined ST_ROOT set /p PYEXE=<"%ST_ROOT%\data\stock_python.path"
+if defined PYEXE if not exist "%PYEXE%" set "PYEXE="
+if not defined PYEXE for /f "delims=" %%P in ('py -3 -c "import sys; print(sys.executable)" 2^>nul') do set "PYEXE=%%P"
 if not defined PYEXE (
-  where python >nul 2>nul && set "PYEXE=python"
-)
-if not defined PYEXE (
-  echo [ERR] Python not found. Install Python 3.10+ with PATH enabled.
+  echo [ERR] 找不到 Python 3。請先執行 START_TIP.cmd 建立釘選路徑。
   pause
   exit /b 1
 )
@@ -43,16 +47,16 @@ if not exist "data" mkdir "data"
 del /q "data\wavedeck.port" >nul 2>nul
 
 echo [1/3] Starting server window...
-start "WaveDeck Server" cmd /k cd /d "%CD%" ^& %PYEXE% run.py
+start "WaveDeck Server" cmd /k cd /d "%CD%" ^& "%PYEXE%" run.py
 
 echo [2/3] Waiting for /health (auto port fallback if 18433 blocked)...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$homePath = '%CD%';" ^
   "$portFile = Join-Path $homePath 'data\wavedeck.port';" ^
-  "$ports = @(18433,18434,18765,28765,38433,8765);" ^
+  "$ports = @(18433,18765,28765,38433,8765);" ^
   "$deadline = (Get-Date).AddSeconds(30);" ^
   "while ((Get-Date) -lt $deadline) {" ^
-  "  if (Test-Path $portFile) { $p = (Get-Content $portFile -Raw).Trim(); if ($p -match '^\d+$') { try { $r = Invoke-WebRequest -UseBasicParsing -Uri ('http://127.0.0.1:'+$p+'/health') -TimeoutSec 1; if ($r.StatusCode -eq 200) { exit 0 } } catch {} } }" ^
+  "  if (Test-Path $portFile) { $p = (Get-Content $portFile -Raw).Trim(); if ($p -match '^\d+$' -and [int]$p -ge 1 -and [int]$p -le 65535 -and [int]$p -notin @(18434,18435)) { try { $r = Invoke-WebRequest -UseBasicParsing -Uri ('http://127.0.0.1:'+$p+'/health') -TimeoutSec 1; if ($r.StatusCode -eq 200) { exit 0 } } catch {} } }" ^
   "  foreach ($p in $ports) { try { $r = Invoke-WebRequest -UseBasicParsing -Uri ('http://127.0.0.1:'+$p+'/health') -TimeoutSec 1; if ($r.StatusCode -eq 200) { New-Item -ItemType Directory -Force -Path (Split-Path $portFile) | Out-Null; Set-Content -Path $portFile -Value $p -Encoding ascii; exit 0 } } catch {} }" ^
   "  Start-Sleep -Milliseconds 700" ^
   "}; exit 1"
@@ -77,7 +81,7 @@ echo       Check the "WaveDeck Server" window for Traceback.
 echo       Manual:
 echo         cd /d "%CD%"
 echo         set WAVEDECK_PORT=28765
-echo         %PYEXE% run.py
+echo         "%PYEXE%" run.py
 echo.
 pause
 endlocal
