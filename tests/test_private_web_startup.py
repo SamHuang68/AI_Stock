@@ -78,7 +78,9 @@ class PrivateWebStartupTests(unittest.TestCase):
 
     def test_inspect_builds_interactive_logon_contract_from_promoted_current(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            install_root = Path(temp_dir) / "private-web"
+            # CI 的 TEMP 可能使用 RUNNER~1；先解析已存在的父目錄，
+            # 再接尚未建立的子路徑，與安裝器的正規化規則一致。
+            install_root = Path(temp_dir).resolve() / "private-web"
             current, _ = _fake_current(install_root)
             result = self._run("-Mode", "Inspect", "-InstallRoot", str(install_root))
 
