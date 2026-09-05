@@ -157,10 +157,35 @@
       '#ht-root .up{color:var(--red)}#ht-root .dn{color:var(--green)}' +
       '#ht-root .us-up{color:var(--green)}#ht-root .us-down{color:var(--red)}' +
       '#ht-root .ht-note{font-size:10px;color:var(--tlo);line-height:1.4;margin-top:2px;flex:0 0 auto}' +
+      '#ht-root .ht-scroll-hint{display:none}' +
       '#ht-root .ht-loading{font-size:10px;color:var(--tlo);padding:12px 0}' +
       '@media (max-width:980px){' +
         '#ht-body .ht-dash{grid-template-columns:1fr;grid-template-rows:minmax(0,1.1fr) minmax(0,.9fr)}' +
         '#ht-body .ht-kpi{grid-template-columns:repeat(2,minmax(0,1fr))}' +
+      '}' +
+      /* 短橫式不能沿用窄桌機上下分割：保留可讀高度，由外層捲動承接不足的空間。 */
+      '@media(orientation:landscape) and (max-height:540px){' +
+        'html[data-st5-route="heat"] body #app #shell-main #shell-views.show{' +
+          'display:block!important;overflow-x:hidden!important;overflow-y:auto!important;' +
+          'overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch}' +
+        '#view-heat.sv-panel.on{height:auto!important;min-height:100%!important;overflow:visible!important;' +
+          'padding-bottom:calc(38px + env(safe-area-inset-bottom,0px))}' +
+        '#mount-heat,#mount-heat.sv-mount,#ht-root,#ht-body{height:auto!important;overflow:visible!important;flex:none!important}' +
+        '#ht-root .ht-head{flex-wrap:wrap;gap:4px}' +
+        '#ht-root .ht-actions{flex-wrap:wrap}' +
+        '#ht-root .ht-btn{min-height:26px;font-size:10px}' +
+        '#ht-body .ht-kpi{grid-template-columns:repeat(4,minmax(0,1fr))}' +
+        '#ht-body .ht-kpi .k .v{white-space:normal;overflow-wrap:anywhere;line-height:1.3}' +
+        '#ht-body .ht-dash{flex:none;height:380px;min-height:380px;' +
+          'grid-template-columns:minmax(0,1.55fr) minmax(240px,1fr);grid-template-rows:minmax(0,1fr)}' +
+        '#ht-root .ht-cell .nm{font-size:11px;white-space:normal;overflow-wrap:anywhere}' +
+        '#ht-root .ht-cell .pc{font-size:16px}' +
+        '#ht-root .ht-row{min-height:26px;box-sizing:border-box;font-size:11px}' +
+        '#ht-root .ht-row .name{min-width:0;font-size:10px}' +
+        '#ht-root .ht-row .code{font-size:10px}' +
+        '#ht-root .ht-row>span:last-child{flex-shrink:0}' +
+        '#ht-root .ht-grid-wrap,#ht-root .ht-list{scroll-padding:3px;-webkit-overflow-scrolling:touch}' +
+        '#ht-root .ht-scroll-hint{display:inline;font-size:10px;color:var(--tlo);font-weight:400}' +
       '}' +
       /* 手機直式：取消依賴明確父高的 fr/flex 壓縮，讓完整產業格自然撐高頁面。 */
       '@media(max-width:900px) and (orientation:portrait){' +
@@ -494,7 +519,7 @@
       wdStripHtml() +
       kpiHtml(rows, mkt) +
       '<div class="ht-dash">' +
-        '<div class="ht-main"><h4><span>類股熱力圖</span>' + focusTag + '</h4>' +
+        '<div class="ht-main"><h4><span>類股熱力圖</span><span class="ht-scroll-hint">上下滑動看全部</span>' + focusTag + '</h4>' +
           legend + '<div class="ht-grid-wrap">' + grid + '</div>' +
           '<div class="ht-note">/sectors · ' + esc(((d && d.sectorFlow) || {}).label || '漲跌參與') +
           ' · 無同 scope 成交額時不顯示資金流 · 點格載入 K 線 · 非投資建議</div></div>' +

@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { checkHeatViewport } from './heat_viewport_checks.mjs';
 
 const testUrl = process.env.ST_TEST_URL || 'http://127.0.0.1:18432/#chart';
 const chromeCandidates = [
@@ -32,6 +33,7 @@ const viewports = [
 ];
 const evidenceDir = process.env.ST_EVIDENCE_DIR || path.resolve('logs/手機直式驗證');
 const linksOnly = process.env.ST_LINKS_ONLY === '1';
+const heatOnly = process.env.ST_HEAT_ONLY === '1';
 const analysisKeys = ['stats', 'research', 'position', 'watch', 'plan', 'etf'];
 
 async function tap(send, selector) {
@@ -479,7 +481,7 @@ try {
 
   /* 先喚醒所有延遲載入模組與本機資料快取，避免首輪只量到空殼。 */
   console.log('預熱十六個功能路由…');
-  for (const route of linksOnly ? [] : routes) {
+  for (const route of linksOnly || heatOnly ? [] : routes) {
     await evaluate(send, `window.ShellV5.go(${JSON.stringify(route)}); true`);
     await sleep(160);
   }
@@ -488,6 +490,8 @@ try {
   const failures = [];
   const report = [];
   const browserVersion = await send('Browser.getVersion');
+  await checkHeatViewport({send, evaluate, sleep, screenshot, report, failures});
+  if (!heatOnly) {
   for (const viewport of linksOnly ? [] : viewports) {
     await send('Emulation.setDeviceMetricsOverride', {
       width: viewport.width,
@@ -607,6 +611,7 @@ try {
   report.push({route:'same-chart-alias',symbol:aliasSymbol,issues:aliasIssues});
   failures.push(...aliasIssues);
   console.log(`\n已驗證 ${report.length} 個「視窗 × 路由」組合。`);
+  }
   await fs.writeFile(path.join(evidenceDir, '瀏覽器量測.json'), JSON.stringify({time:new Date().toISOString(),browserVersion,testUrl,report,failures},null,2));
   if (failures.length) {
     console.error(`手機直立瀏覽器閘門失敗（${failures.length}）：`);

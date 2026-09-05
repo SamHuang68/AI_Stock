@@ -35,6 +35,10 @@ const modules = {
 };
 const shell = readUi('shell_v5.js');
 const mobileChart = readUi('mobile_v2.css');
+ok(modules.heat.includes('@media(orientation:landscape) and (max-height:540px)') &&
+  modules.heat.includes('height:380px;min-height:380px') &&
+  modules.heat.includes('grid-template-columns:minmax(0,1.55fr) minmax(240px,1fr)'),
+  '類股短橫式保留左右主區及最低可讀高度，不退回零高度堆疊');
 
 ok(
   shell.includes('html[data-st5-route]:not([data-st5-route="chart"]) body #app #shell-main #shell-views.show'),
