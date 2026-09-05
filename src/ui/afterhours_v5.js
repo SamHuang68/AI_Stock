@@ -37,7 +37,6 @@
       document.head.appendChild(s);
     }
     s.textContent =
-      '#shell-views:has(#view-afterhours.on){overflow:hidden!important}' +
       '#view-afterhours.sv-panel.on{' +
         'max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
         'overflow:hidden;display:flex!important;flex-direction:column;flex:1;min-height:0;height:100%}' +
@@ -115,7 +114,37 @@
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#ah-root .ah-loading,#ah-root .ah-err{font-size:10px;color:var(--tlo);padding:10px 0}' +
       '#ah-root .ah-err{color:var(--orange)}' +
-      '#ah-body.ah-loading{display:flex;align-items:center}';
+      '#ah-body.ah-loading{display:flex;align-items:center}' +
+      /* 手機直式：六格摘要改兩欄，五個盤後功能區完整改為上下排列。 */
+      '@media(max-width:900px) and (orientation:portrait){' +
+        'html[data-st5-route="afterhours"] #shell-views:has(#view-afterhours.on){overflow-x:hidden!important;overflow-y:auto!important}' +
+        '#view-afterhours.sv-panel.on,#mount-afterhours,#mount-afterhours.sv-mount,#ah-root,#ah-body{' +
+          'height:auto!important;min-height:0!important;overflow:visible!important;flex:none!important}' +
+        '#ah-root .ah-head{align-items:flex-start;flex-wrap:wrap;margin-bottom:8px}' +
+        '#ah-root .ah-head>div:first-child{width:100%;align-items:flex-start}' +
+        '#ah-root .ah-title{font-size:19px;line-height:1.25}' +
+        '#ah-root .ah-sub{font-size:11px;line-height:1.4}' +
+        '#ah-root .ah-actions{width:100%;justify-content:flex-start;flex-wrap:wrap}' +
+        '#ah-root .ah-btn{min-height:30px;padding:5px 9px;font-size:11px}' +
+        '#ah-root .ah-strip{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-bottom:8px}' +
+        '#ah-root .ah-strip .cell{min-height:66px;padding:7px 8px}' +
+        '#ah-root .ah-strip .k{font-size:10px;line-height:1.35;white-space:normal}' +
+        '#ah-root .ah-strip .v{font-size:17px;line-height:1.25;white-space:normal;overflow:visible}' +
+        '#ah-root .ah-strip .s{font-size:10px;line-height:1.35;white-space:normal;overflow:visible}' +
+        '#ah-root .ah-dash{display:flex!important;flex-direction:column;grid-template-columns:none!important;' +
+          'grid-template-rows:none!important;height:auto!important;overflow:visible!important;gap:8px}' +
+        '#ah-root .ah-zone,#ah-root .ah-zone-up,#ah-root .ah-zone-lo{display:contents}' +
+        '#ah-root .ah-sec{height:auto!important;min-height:0!important;overflow:visible!important;padding:9px 10px}' +
+        '#ah-root .ah-sec h4{font-size:13px;line-height:1.35;margin-bottom:7px;flex-wrap:wrap}' +
+        '#ah-root .ah-sec>.ah-fill{height:auto!important;min-height:0!important;max-height:none!important;' +
+          'overflow-x:auto!important;overflow-y:visible!important;flex:none!important}' +
+        '#ah-root #ah-ovn-host.ovn-embed{height:auto!important;min-height:220px!important;overflow:visible!important}' +
+        '#ah-root .ah-inst-trend{height:auto!important;min-height:140px!important}' +
+        '#ah-root .ah-inst-trend .chart,#ah-root .ah-inst-trend .chart .vz-spark-ax{' +
+          'height:112px!important;min-height:112px!important}' +
+        '#ah-root table.ah-tbl{font-size:10px;min-width:520px}' +
+        '#ah-root .ah-note{font-size:10px;line-height:1.5;white-space:normal;overflow:visible}' +
+      '}';
   }
 
   function twCls(p) {

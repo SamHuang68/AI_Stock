@@ -89,7 +89,6 @@
       document.head.appendChild(s);
     }
     s.textContent =
-      '#shell-views:has(#view-heat.on){overflow:hidden!important}' +
       '#view-heat.sv-panel.on{max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
         'overflow:hidden;display:flex!important;flex-direction:column;flex:1;min-height:0;height:100%}' +
       '#mount-heat,#mount-heat.sv-mount{flex:1;min-height:0;display:flex;flex-direction:column;max-width:none}' +
@@ -162,6 +161,37 @@
       '@media (max-width:980px){' +
         '#ht-body .ht-dash{grid-template-columns:1fr;grid-template-rows:minmax(0,1.1fr) minmax(0,.9fr)}' +
         '#ht-body .ht-kpi{grid-template-columns:repeat(2,minmax(0,1fr))}' +
+      '}' +
+      /* 手機直式：取消依賴明確父高的 fr/flex 壓縮，讓完整產業格自然撐高頁面。 */
+      '@media(max-width:900px) and (orientation:portrait){' +
+        'html[data-st5-route="heat"] #shell-views:has(#view-heat.on){overflow-x:hidden!important;overflow-y:auto!important}' +
+        '#view-heat.sv-panel.on,#mount-heat,#mount-heat.sv-mount,#ht-root,#ht-body{' +
+          'height:auto!important;min-height:0!important;overflow:visible!important;flex:none!important}' +
+        '#ht-root .ht-head{align-items:flex-start;flex-wrap:wrap;margin-bottom:8px}' +
+        '#ht-root .ht-head>div:first-child{width:100%;align-items:flex-start}' +
+        '#ht-root .ht-title{font-size:19px;line-height:1.25}' +
+        '#ht-root .ht-sub{font-size:11px;line-height:1.4}' +
+        '#ht-root .ht-actions{width:100%;justify-content:flex-start;flex-wrap:wrap}' +
+        '#ht-root .ht-btn{min-height:30px;padding:5px 9px;font-size:11px}' +
+        '#ht-body .ht-kpi{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}' +
+        '#ht-body .ht-kpi .k{min-height:68px;padding:7px 8px}' +
+        '#ht-body .ht-kpi .k .l{font-size:10px;line-height:1.35}' +
+        '#ht-body .ht-kpi .k .v{font-size:14px;line-height:1.3;white-space:normal;overflow:visible}' +
+        '#ht-body .ht-dash{display:flex!important;flex-direction:column;grid-template-columns:none!important;' +
+          'grid-template-rows:none!important;height:auto!important;overflow:visible!important;gap:8px}' +
+        '#ht-body .ht-main,#ht-root .ht-focus-zone{height:auto!important;min-height:0!important;overflow:visible!important;padding:9px 10px}' +
+        '#ht-body .ht-main>h4,#ht-root .ht-focus-zone>h4{font-size:13px;line-height:1.35;margin-bottom:7px}' +
+        '#ht-root .ht-grid-wrap{height:auto!important;min-height:0!important;overflow:visible!important;flex:none!important}' +
+        '#ht-root .ht-grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(64px,auto);gap:6px}' +
+        '#ht-root .ht-cell{min-height:64px;padding:7px 5px}' +
+        '#ht-root .ht-cell .nm{font-size:11px;white-space:normal;overflow:visible}' +
+        '#ht-root .ht-cell .pc{font-size:15px}' +
+        '#ht-root .ht-two{display:flex!important;flex-direction:column;grid-template-rows:none!important;' +
+          'height:auto!important;overflow:visible!important;gap:7px}' +
+        '#ht-root .ht-two>div{height:auto!important;min-height:0!important;overflow:visible!important;padding:7px}' +
+        '#ht-root .ht-list{height:auto!important;max-height:none!important;overflow:visible!important;flex:none!important}' +
+        '#ht-root .ht-row{min-height:34px;font-size:11px;line-height:1.35;padding:5px 4px}' +
+        '#ht-root .ht-note{font-size:10px;line-height:1.5}' +
       '}';
   }
 

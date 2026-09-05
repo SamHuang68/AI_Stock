@@ -13,10 +13,26 @@
   var marketColorTraceSeen = {};
 
   function $(id) { return document.getElementById(id); }
-  function jget(url) {
-    return fetch(SRV + url, { cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : null; })
+  function jget(url, timeoutMs) {
+    var limit = Math.max(1000, Number(timeoutMs) || 12000);
+    var controller = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = null;
+    var request = fetch(SRV + url, {
+      cache: 'no-store',
+      signal: controller ? controller.signal : undefined
+    }).then(function (r) { return r.ok ? r.json() : null; })
       .catch(function () { return null; });
+
+    if (controller) {
+      timer = setTimeout(function () { controller.abort(); }, limit);
+      return request.finally(function () { clearTimeout(timer); });
+    }
+
+    /* 舊瀏覽器沒有 AbortController 時仍須解除 UI 載入鎖；慢請求結果會被忽略。 */
+    return Promise.race([
+      request,
+      new Promise(function (resolve) { setTimeout(function () { resolve(null); }, limit); })
+    ]);
   }
   function jpost(url, body) {
     return fetch(SRV + url, {
@@ -83,8 +99,6 @@
       document.head.appendChild(s);
     }
     s.textContent =
-      '#shell-views:has(#view-institutional.on,#view-international.on,#view-signals.on,' +
-        '#view-watchlist.on,#view-risk.on,#view-factors.on,#view-settings.on){overflow:hidden!important}' +
       '#view-institutional.sv-panel.on,#view-international.sv-panel.on,#view-signals.sv-panel.on,' +
         '#view-watchlist.sv-panel.on,#view-risk.sv-panel.on,#view-factors.sv-panel.on,' +
         '#view-settings.sv-panel.on{' +
@@ -277,7 +291,54 @@
       '.hub-root .badge.warn{background:rgba(251,146,60,.12);color:var(--orange);border:1px solid rgba(251,146,60,.35)}' +
       '.hub-root .badge.err{background:rgba(248,113,113,.12);color:var(--red);border:1px solid rgba(248,113,113,.35)}' +
       '.hub-root .badge.mid{background:rgba(245,197,24,.12);color:var(--gold);border:1px solid var(--gold-m)}' +
-      '.hub-root .hub-empty{font-size:10px;color:var(--tlo);padding:16px 8px;text-align:center}';
+      '.hub-root .hub-empty{font-size:10px;color:var(--tlo);padding:16px 8px;text-align:center}' +
+      /* Hub 共用七路由的手機直式契約：主區改上下流動，完整保留每個功能區。 */
+      '@media(max-width:900px) and (orientation:portrait){' +
+        'html[data-st5-route] #shell-views:has(#view-institutional.on,#view-international.on,#view-signals.on,' +
+          '#view-watchlist.on,#view-risk.on,#view-factors.on,#view-settings.on){overflow-x:hidden!important;overflow-y:auto!important}' +
+        '#view-institutional.sv-panel.on,#view-international.sv-panel.on,#view-signals.sv-panel.on,' +
+          '#view-watchlist.sv-panel.on,#view-risk.sv-panel.on,#view-factors.sv-panel.on,#view-settings.sv-panel.on,' +
+          '#mount-institutional,#mount-international,#mount-signals,#mount-watchlist,#mount-risk,#mount-factors,#mount-settings,' +
+          '.hub-root,.hub-root .hub-body{' +
+          'height:auto!important;min-height:0!important;overflow:visible!important;flex:none!important}' +
+        '.hub-root .hub-head{align-items:flex-start;flex-wrap:wrap;margin-bottom:8px}' +
+        '.hub-root .hub-head>div:first-child{width:100%;align-items:flex-start}' +
+        '.hub-root .hub-title,#view-institutional .hub-title{font-size:19px;line-height:1.25}' +
+        '.hub-root .hub-sub,#view-institutional .hub-sub{font-size:11px;line-height:1.4}' +
+        '.hub-root .hub-actions{width:100%;justify-content:flex-start;flex-wrap:wrap}' +
+        '.hub-root .hub-btn,#view-institutional .hub-btn{min-height:30px;padding:5px 9px;font-size:11px}' +
+        '.hub-root .hub-strip{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-bottom:8px}' +
+        '.hub-root .hub-strip .cell{min-height:66px;padding:7px 8px}' +
+        '.hub-root .hub-strip .k{font-size:10px;line-height:1.35;white-space:normal}' +
+        '.hub-root .hub-strip .v{font-size:17px;line-height:1.25;white-space:normal;overflow:visible}' +
+        '.hub-root .hub-dash,.hub-root .hub-dash.hub-dash-1,.hub-root .hub-dash.hub-cols-2,' +
+          '.hub-root .hub-dash.hub-cols-3,.hub-root .hub-dash.hub-cols-4,' +
+          '.hub-root .hub-dash.hub-cols-wide-left,.hub-root .hub-dash.hub-cols-inst{' +
+          'display:flex!important;flex-direction:column;grid-template-columns:none!important;grid-template-rows:none!important;' +
+          'height:auto!important;min-height:0!important;overflow:visible!important;flex:none!important;gap:8px}' +
+        '.hub-root .hub-zone,.hub-root .hub-zone.z-3,.hub-root .hub-zone.z-4,.hub-root .hub-zone.z-stack,' +
+          '.hub-root .hub-zone.z-fill,.hub-root .hub-global-panel .hub-zone.z-fill{' +
+          'grid-template-columns:minmax(0,1fr)!important;grid-template-rows:auto!important;grid-auto-rows:auto!important;' +
+          'height:auto!important;min-height:0!important;overflow:visible!important;gap:7px}' +
+        '.hub-root .hub-sec{height:auto!important;min-height:0!important;overflow:visible!important;padding:9px 10px}' +
+        '.hub-root .hub-sec h4,#view-institutional .hub-sec h4{font-size:13px;line-height:1.35;margin-bottom:7px;flex-wrap:wrap}' +
+        '.hub-root .hub-sec>.hub-fill{height:auto!important;min-height:0!important;max-height:none!important;' +
+          'overflow-x:auto!important;overflow-y:visible!important;flex:none!important}' +
+        '.hub-root .hub-card{height:auto!important;min-height:84px;padding:9px 10px}' +
+        '.hub-root .hub-card .k{font-size:11px;white-space:normal;line-height:1.35}' +
+        '.hub-root .hub-card .v{font-size:18px;line-height:1.25}' +
+        '.hub-root .hub-note{font-size:10px;line-height:1.5;white-space:normal;overflow:visible}' +
+        '.hub-root .hub-inst-hero{grid-template-columns:1fr!important;height:auto!important;gap:7px}' +
+        '.hub-root .hub-inst-hero>div{min-height:92px;padding:10px}' +
+        '.hub-root .hub-inst-rank{height:auto!important;overflow:visible!important}' +
+        '.hub-root .hub-inst-rank .hub-zone{height:auto!important}' +
+        '.hub-root .hub-inst-rankhd{align-items:flex-start;flex-wrap:wrap}' +
+        '.hub-root .hub-inst-rankhd .meta{flex:1 1 100%;min-width:0;max-width:100%;white-space:normal;' +
+          'overflow-wrap:anywhere;line-height:1.4}' +
+        '.hub-root .hub-spark-fill,.hub-root .hub-spark-fill .vz-spark-ax{' +
+          'height:auto!important;min-height:180px!important;overflow:visible!important}' +
+        '.hub-root .hub-mag3{grid-template-rows:repeat(3,auto)!important;height:auto!important;gap:10px}' +
+      '}';
   }
 
   var instWho = 'foreign';
@@ -604,9 +665,9 @@
     }
     var ecoUrl = '/macro/economy?years=5' + (forceEco ? '&refresh=1' : '');
     Promise.all([
-      jget('/pulse?refresh=0'),
-      jget(ecoUrl),
-      jget('/sync/status')
+      jget('/pulse?refresh=0', 8000),
+      jget(ecoUrl, 8000),
+      jget('/sync/status', 8000)
     ]).then(function (arr) {
       var pulse = arr[0] || {};
       var ecoPack = arr[1] || {};

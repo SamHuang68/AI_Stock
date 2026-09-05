@@ -27,7 +27,6 @@
       document.head.appendChild(s);
     }
     s.textContent =
-      '#shell-views:has(#view-news.on){overflow:hidden!important}' +
       '#view-news.sv-panel.on{max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
         'overflow:hidden;display:flex!important;flex-direction:column;flex:1;min-height:0;height:100%}' +
       '#mount-news,#mount-news.sv-mount{flex:1;min-height:0;display:flex;flex-direction:column;max-width:none}' +
@@ -94,7 +93,39 @@
       '#nw-root .nw-empty span{max-width:250px;font-size:9px;line-height:1.5;color:var(--tlo)}' +
       '#nw-root .nw-loading{font-size:10px;color:var(--tlo);padding:12px 0}' +
       '#nw-body.nw-loading{display:flex;align-items:center}' +
-      '@media (max-width:1100px){#nw-root .nw-dash{grid-template-columns:1fr 1fr}#nw-root .nw-left{display:none}}';
+      '@media (max-width:1100px){#nw-root .nw-dash{grid-template-columns:1fr 1fr}}' +
+      '@media (min-width:901px) and (max-width:1100px){#nw-root .nw-left{display:none}}' +
+      /* 手機直式不再隱藏左側結算／事件功能，三區全部上下排列。 */
+      '@media(max-width:900px) and (orientation:portrait){' +
+        'html[data-st5-route="news"] #shell-views:has(#view-news.on){overflow-x:hidden!important;overflow-y:auto!important}' +
+        '#view-news.sv-panel.on,#mount-news,#mount-news.sv-mount,#nw-root,#nw-body{' +
+          'height:auto!important;min-height:0!important;overflow:visible!important;flex:none!important}' +
+        '#nw-root .nw-head{align-items:flex-start;flex-wrap:wrap;margin-bottom:8px}' +
+        '#nw-root .nw-head>div:first-child{width:100%;align-items:flex-start}' +
+        '#nw-root .nw-title{font-size:19px;line-height:1.25}' +
+        '#nw-root .nw-sub{font-size:11px;line-height:1.4}' +
+        '#nw-root .nw-actions{width:100%;justify-content:flex-start;flex-wrap:wrap}' +
+        '#nw-root .nw-btn{min-height:30px;padding:5px 9px;font-size:11px}' +
+        '#nw-root .nw-strip{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-bottom:4px}' +
+        '#nw-root .nw-strip .cell{min-height:66px;padding:7px 8px}' +
+        '#nw-root .nw-strip .k{font-size:10px;line-height:1.35;white-space:normal}' +
+        '#nw-root .nw-strip .v{font-size:17px;line-height:1.25}' +
+        '#nw-root .nw-dash{display:flex!important;flex-direction:column;grid-template-columns:none!important;' +
+          'height:auto!important;overflow:visible!important;gap:8px}' +
+        '#nw-root .nw-left,#nw-root .nw-mid,#nw-root .nw-right{' +
+          'display:flex!important;height:auto!important;min-height:0!important;overflow:visible!important;gap:8px}' +
+        '#nw-root .nw-card{height:auto!important;min-height:0!important;overflow:visible!important;flex:none!important;padding:9px 10px}' +
+        '#nw-root .nw-card h4{font-size:13px;line-height:1.35;margin-bottom:7px;flex-wrap:wrap}' +
+        '#nw-root .nw-grid{height:auto!important;overflow:visible!important;flex:none!important}' +
+        '#nw-root .nw-table-wrap{height:auto!important;max-height:none!important;overflow-x:auto!important;overflow-y:visible!important;flex:none!important}' +
+        '#nw-root .nw-table-wrap table{min-width:540px}' +
+        '#nw-root .nw-flash-list{height:auto!important;max-height:none!important;overflow:visible!important;flex:none!important;font-size:11px}' +
+        '#nw-root .nw-flash-list .row{padding:7px 3px;line-height:1.45}' +
+        '#nw-root .nw-filterbar{width:100%;align-items:stretch}' +
+        '#nw-root .nw-filterbar input{min-width:0;flex:1 1 150px}' +
+        '#nw-root .nw-seg{flex:0 0 auto}' +
+        '#nw-root .nw-seg button{min-height:28px;padding:4px 7px}' +
+      '}';
   }
 
   function thirdWednesday(y, m) {

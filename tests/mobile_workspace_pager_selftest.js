@@ -44,6 +44,7 @@ const sandbox = {
   Event: function Event(name) { this.type = name; },
   setTimeout(fn) { fn(); return 1; },
   clearTimeout() {},
+  renderRpanel() { ids.rpanel.textContent = sandbox.S.tab; },
   getDispatchCount() { return dispatchCount; },
   setOrientation(value) { orientation = value; },
   console
@@ -82,4 +83,23 @@ ok(sandbox.__portrait.label === '技術統計 · 2 / 7', 'bottom index includes 
 ok(sandbox.__portrait.dots === 7, 'bottom index renders seven workspace pages');
 ok(sandbox.__landscape.page == null && sandbox.__landscape.key == null,
   'landscape removes portrait paging state and restores the split workspace');
+vm.runInContext(`
+  setOrientation('portrait');
+  globalThis.__pages = [];
+  for (let index = 1; index <= 6; index++) {
+    document.getElementById('rpanel').scrollTop = 200;
+    goMobileWorkspacePage(index, 'selftest');
+    __pages.push({key:S.tab, scroll:document.getElementById('rpanel').scrollTop,
+      label:document.getElementById('rpage-label').textContent});
+  }
+  shiftRtab(1);
+  globalThis.__lastDisabled = document.getElementById('rpage-next').disabled;
+  goRpanelPage(0);
+  globalThis.__firstDisabled = document.getElementById('rpage-prev').disabled;
+`, sandbox);
+ok(sandbox.__pages.map(page => page.key).join(',') === 'stats,research,position,watch,plan,etf',
+  '六個分析頁依序切換正確內容');
+ok(sandbox.__pages.every((page, index) => page.scroll === 0 && page.label.includes((index + 2) + ' / 7')),
+  '六個分析頁切換均重設捲動並更新索引');
+ok(sandbox.__lastDisabled && sandbox.__firstDisabled, '首末頁停用越界方向按鈕');
 console.log('\nmobile_workspace_pager_selftest PASSED');

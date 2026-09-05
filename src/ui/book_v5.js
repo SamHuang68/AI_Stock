@@ -77,7 +77,6 @@
       document.head.appendChild(s);
     }
     s.textContent =
-      '#shell-views:has(#view-book.on){overflow:hidden!important}' +
       '#view-book.sv-panel.on{max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
         'overflow:hidden;display:flex!important;flex-direction:column;flex:1;min-height:0;height:100%}' +
       '#mount-book,#mount-book.sv-mount{flex:1;min-height:0;display:flex;flex-direction:column;max-width:none}' +
@@ -147,7 +146,37 @@
       '#bk-root .bk-wd{margin:0 0 4px;padding:6px 8px;border-radius:6px;background:var(--bg2);' +
         'border:1px solid rgba(103,232,249,.28);font-size:9px;line-height:1.45}' +
       '#bk-root .bk-wd .t{color:var(--cyan);font-weight:700;letter-spacing:1px;font-size:10px;margin-bottom:2px}' +
-      '#bk-root .bk-wd b{color:var(--thi)}';
+      '#bk-root .bk-wd b{color:var(--thi)}' +
+      /* 手機直式：六格摘要改兩欄，持倉輸入與分析結果完整上下排列。 */
+      '@media(max-width:900px) and (orientation:portrait){' +
+        'html[data-st5-route="book"] #shell-views:has(#view-book.on){overflow-x:hidden!important;overflow-y:auto!important}' +
+        '#view-book.sv-panel.on,#mount-book,#mount-book.sv-mount,#bk-root,#bk-body{' +
+          'height:auto!important;min-height:0!important;overflow:visible!important;flex:none!important}' +
+        '#bk-root .bk-head{align-items:flex-start;flex-wrap:wrap;margin-bottom:8px}' +
+        '#bk-root .bk-head>div:first-child{width:100%;align-items:flex-start}' +
+        '#bk-root .bk-title{font-size:19px;line-height:1.25}' +
+        '#bk-root .bk-sub{font-size:11px;line-height:1.4}' +
+        '#bk-root .bk-actions{width:100%;justify-content:flex-start;flex-wrap:wrap}' +
+        '#bk-root .bk-btn{min-height:30px;padding:5px 8px;font-size:10px}' +
+        '#bk-root .bk-strip{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-bottom:8px}' +
+        '#bk-root .bk-card{min-height:62px;padding:7px 8px}' +
+        '#bk-root .bk-card .lab{font-size:10px;line-height:1.35;white-space:normal}' +
+        '#bk-root .bk-card .val{font-size:16px;line-height:1.25}' +
+        '#bk-root .bk-zone{display:flex!important;flex-direction:column;grid-template-columns:none!important;' +
+          'height:auto!important;min-height:0!important;overflow:visible!important;gap:8px}' +
+        '#bk-root .bk-left,#bk-root .bk-right{' +
+          'height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;flex:none!important}' +
+        '#bk-root .bk-panel{height:auto!important;min-height:0!important;overflow-x:auto!important;' +
+          'overflow-y:visible!important;padding:9px 10px}' +
+        '#bk-root .bk-h{font-size:13px;line-height:1.35;margin-bottom:7px}' +
+        '#bk-root .bk-row{font-size:11px;line-height:1.4;min-height:30px}' +
+        '#bk-root .bk-row .nm{width:94px;flex-basis:94px;font-size:10px}' +
+        '#bk-root table{font-size:10px;min-width:520px}' +
+        '#bk-root .bk-empty{height:auto!important;min-height:0!important;padding:12px 0}' +
+        '#bk-root .bk-empty-card{width:100%;padding:20px 14px}' +
+        '#bk-root .bk-empty-steps{grid-template-columns:1fr;gap:6px}' +
+        '#bk-root .bk-note{font-size:10px;line-height:1.5}' +
+      '}';
   }
 
   function wdStripHtml() {

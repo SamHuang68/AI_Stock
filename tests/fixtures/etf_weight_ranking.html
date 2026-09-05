@@ -1,0 +1,57 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ETF 權重排名排序驗證</title><style>
+:root{--bg:#09111e;--border:#24364a;--gold:#f5c518;--tlo:#a6b8cc;--tf:#b6c6d8;--thi:#edf4fc;--red:#ff6971;--green:#36d988}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--thi);font:14px sans-serif}#panel{width:100%;min-width:0}#result{padding:12px}
+</style></head><body><div id="panel"></div><div id="result">驗證中</div>
+<script>
+window.SERVER='http://127.0.0.1:1';
+const fixtureRows=[
+ {etf_code:'00992A',etf_name:'測試 ETF',code:'2330',name:'台積電',market:'TW',prev_weight:10,weight:10.2001,delta_pp:0.2001,status:'increased',prev_date:'2026-09-03',date:'2026-09-04',source:'moneydj-full'},
+ {etf_code:'00992A',etf_name:'測試 ETF',code:'2454',name:'聯發科',market:'TW',prev_weight:9,weight:8.9,delta_pp:-0.1,status:'decreased',prev_date:'2026-09-03',date:'2026-09-04',source:'moneydj-full'},
+ {etf_code:'00992A',etf_name:'測試 ETF',code:'2317',name:'鴻海',market:'TW',prev_weight:8,weight:7.9,delta_pp:-0.1,status:'decreased',prev_date:'2026-09-03',date:'2026-09-04',source:'moneydj-full'},
+ {etf_code:'OFF',code:'SECRET',name:'不應顯示',market:'TW',delta_pp:99}
+];
+const fixtureDelta={date:'2026-09-04',prev_date:'2026-09-03',etfs:[],weight_rankings:{rows:fixtureRows,excluded:[{etf_code:'00992A',reason:'no_baseline',reason_label:'首次出現，尚無基準'}]}};
+window.S={tab:'etf',etfV3:{catActive:'__WEIGHTS__',catalog:{categories:[{key:'active',name:'主動式',etfs:[{code:'00992A',enabled:true}]}]},deltaRaw:fixtureDelta,delta:fixtureDelta,loading:false,lastFetch:Date.now(),expanded:new Set()}};
+window.renderRpanel=function(){document.getElementById('panel').innerHTML=renderEtfDelta();};
+</script>
+<script src="../../src/core/etf_v3.js"></script><script src="../../src/core/table_sort_v5.js"></script>
+<script>
+document.getElementById('panel').innerHTML=renderEtfDelta();
+setTimeout(function(){
+ const results=[];const check=(value,label)=>{results.push({ok:!!value,label});};
+ const table=()=>document.querySelector('.e3-weight-table');TableSortV5.enhance(table());
+ const values=()=>[...table().tBodies[0].rows].map(r=>Number(r.cells[5].dataset.sortValue));
+ const sort=()=>document.querySelector('[data-e3="weight-sort"][data-key="delta_pp"]').click();
+ check(table().tBodies[0].rows.length===3,'僅顯示已啟用 ETF');
+ check(values().join(',')==='0.2001,-0.1,-0.1','預設依權重增減降冪');
+ check(document.querySelectorAll('th .st-sort-button').length===11,'十一欄均可排序');
+ S.etfV3.weightSortDirection='none';sort();
+ check(values().join(',')==='-0.1,-0.1,0.2001','百分點升冪採原始數值');
+ check(table().tBodies[0].rows[0].cells[1].textContent.includes('2454'),'相同值維持穩定排序');sort();
+ check(values().join(',')==='0.2001,-0.1,-0.1','百分點降冪');sort();
+ check(values().join(',')==='0.2001,-0.1,-0.1','第三次恢復原始排名');
+ check(!document.getElementById('panel').textContent.includes('no_baseline'),'排除原因使用中文');
+ check(document.getElementById('panel').textContent.includes('增權'),'狀態辨識可見');
+ check(document.documentElement.scrollWidth<=innerWidth+1,'整頁不水平溢位');
+ const scroller=document.querySelector('.e3-weight-scroll');scroller.scrollLeft=scroller.scrollWidth;
+ check(scroller.scrollWidth<=scroller.clientWidth||scroller.scrollLeft>0,'寬表格可以捲至右側');
+ scroller.scrollLeft=0;
+ check(table().dataset.stSort==='off','禁用只排序當頁的共用排序器');
+ check(document.querySelector('.e3-weight-context').textContent.includes('不作為持股更新日'),'供應商日期與收集日期分開說明');
+ // 大資料集驗證：最後一頁的最小值必須能排序到第一頁。
+ fixtureDelta.weight_rankings.rows=Array.from({length:201},(_,i)=>({...fixtureRows[0],code:String(3000+i),delta_pp:200-i}));
+ S.etfV3.weightSortKey=null;S.etfV3.weightSortDirection='none';S.etfV3.weightPage=1;renderRpanel();
+ check(values().length===100,'每頁最多一百筆');
+ document.querySelector('[data-e3="weight-page"][data-page="2"]').click();
+ check(S.etfV3.weightPage===2&&values()[0]===100,'第二頁正確延續完整排名');
+ document.querySelector('[data-e3="weight-page"][data-page="3"]').click();
+ check(values().length===1&&values()[0]===0,'最後一頁不漏列');
+ sort();
+ check(S.etfV3.weightPage===1&&values()[0]===0&&values()[99]===99,'先排序全部二百零一筆再分頁');
+ check(table().tHead.rows[0].cells[5].getAttribute('aria-sort')==='ascending','排序狀態提供無障礙標記');
+ check(document.querySelector('.e3-weight-pager').textContent.includes('201'),'顯示全部資料筆數');
+ fixtureDelta.weight_rankings.rows=fixtureRows;S.etfV3.weightSortDirection='none';renderRpanel();
+ const result=document.getElementById('result');result.dataset.status=results.every(r=>r.ok)?'passed':'failed';result.textContent=JSON.stringify(results);
+},200);
+</script></body></html>

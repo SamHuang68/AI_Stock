@@ -63,8 +63,8 @@
     z-index: 8;
   }
   #rpanel-pager > button {
-    width: 38px;
-    height: 34px;
+    width: 44px;
+    height: 44px;
     margin: 0 auto;
     border: 1px solid rgba(103,232,249,.20);
     border-radius: 9px;
@@ -89,22 +89,23 @@
     letter-spacing: .5px;
     white-space: nowrap;
   }
-  #rpage-dots { display: flex; justify-content: center; align-items: center; gap: 7px; margin-top: 5px; }
+  #rpage-dots { display: flex; justify-content: center; align-items: center; gap: 4px; margin-top: 0; }
   #rpage-dots .rpage-dot {
-    width: 7px;
-    height: 7px;
+    /* 保留小圓點外觀，擴大實際觸控區，避免誤觸相鄰頁。 */
+    width: 24px;
+    height: 24px;
     padding: 0;
     border: 0;
     border-radius: 50%;
-    background: #334155;
+    background: radial-gradient(circle, #334155 3.5px, transparent 4px);
     box-shadow: none;
     touch-action: manipulation;
   }
   #rpage-dots .rpage-dot.on {
-    width: 18px;
+    width: 24px;
     border-radius: 999px;
-    background: linear-gradient(90deg,var(--gold),#fb923c);
-    box-shadow: 0 0 10px rgba(245,197,24,.35);
+    background: radial-gradient(circle, var(--gold) 5px, transparent 5.5px);
+    box-shadow: none;
   }
 
   /* ── Topbar: tighter ── */
@@ -215,6 +216,12 @@
 
   /* ── Chart area ── */
   #chart-info { font-size: 9px !important; top: 4px !important; left: 6px !important; }
+  body > #vp-info {
+    box-sizing: border-box !important;
+    max-width: calc(100vw - 12px) !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
   .ci-price { font-size: 15px !important; }
   .ci-chg { font-size: 10px !important; }
   .ci-range-chg { font-size: 9.5px !important; }
@@ -296,6 +303,15 @@
   #body[data-mobile-workspace-page="chart"] > #right { display: none !important; }
   #body[data-mobile-workspace-page="analysis"] > #left { display: none !important; }
   #body[data-mobile-workspace-page="analysis"] > #right { display: flex !important; }
+  /* 直式分頁不承接桌機收合狀態，避免分析頁透明或失去點按能力。 */
+  body.right-collapsed #body > #right {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+  #right-collapse { display: none !important; }
   #right {
     border-left: 0 !important;
     border-top: 0 !important;

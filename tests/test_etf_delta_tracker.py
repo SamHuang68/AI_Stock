@@ -33,6 +33,24 @@ def _holding(code: str) -> list[dict]:
 
 
 class EtfDeltaTrackerTests(unittest.TestCase):
+    def test_tls_certificate_verification_stays_enabled(self):
+        import ssl
+        self.assertTrue(etf_delta_tracker._SSL_CTX.check_hostname)
+        self.assertEqual(etf_delta_tracker._SSL_CTX.verify_mode, ssl.CERT_REQUIRED)
+
+    def test_twse_preserves_active_etf_code_and_requires_provider_date(self):
+        payload = {'stat': 'OK', 'fields': ['代號', '名稱', '權重'], 'data': [['2330', '台積電', '10']]}
+        with mock.patch.object(etf_delta_tracker, 'http_get', return_value=json.dumps(payload)) as request:
+            rows, day = etf_delta_tracker.fetch_twse('00410A', dt.date(2026, 9, 5))
+            self.assertIsNone(rows)
+            self.assertIsNone(day)
+            self.assertIn('stockNo=00410A', request.call_args.args[0])
+        payload['date'] = '20260904'
+        with mock.patch.object(etf_delta_tracker, 'http_get', return_value=json.dumps(payload)):
+            rows, day = etf_delta_tracker.fetch_twse('00410A', dt.date(2026, 9, 5))
+            self.assertEqual(day, '2026-09-04')
+            self.assertEqual(rows[0]['code'], '2330')
+
     def test_catalog_excludes_explicit_us_and_disabled_entries(self):
         catalog = {
             "categories": [

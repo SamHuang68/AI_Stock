@@ -29,7 +29,6 @@
       document.head.appendChild(s);
     }
     s.textContent =
-      '#shell-views:has(#view-ai.on){overflow:hidden!important}' +
       '#view-ai.sv-panel.on{max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
         'overflow:hidden;display:flex!important;flex-direction:column;flex:1;min-height:0;height:100%}' +
       '#mount-ai,#mount-ai.sv-mount{flex:1;min-height:0;display:flex;flex-direction:column;max-width:none;width:100%}' +
@@ -72,7 +71,33 @@
       '#ai5-root .up{color:var(--red)}#ai5-root .dn{color:var(--green)}#ai5-root .flat{color:var(--tlo)}' +
       '#ai5-root .ai5-note{font-size:10px;color:var(--tlo);line-height:1.4;margin-top:2px;flex:0 0 auto}' +
       '#ai5-root .ai5-empty{font-size:10px;color:var(--tlo);padding:16px 8px;text-align:center}' +
-      '#ai5-root .ai5-loading{font-size:10px;color:var(--tlo);padding:12px 0}';
+      '#ai5-root .ai5-loading{font-size:10px;color:var(--tlo);padding:12px 0}' +
+      /* 手機直式：工具、做多與做空資料完整上下排列，不讓桌機雙欄壓縮內容。 */
+      '@media(max-width:900px) and (orientation:portrait){' +
+        'html[data-st5-route="ai"] #shell-views:has(#view-ai.on){overflow-x:hidden!important;overflow-y:auto!important}' +
+        '#view-ai.sv-panel.on,#mount-ai,#mount-ai.sv-mount,#ai5-root,#ai5-body{' +
+          'height:auto!important;min-height:0!important;overflow:visible!important;flex:none!important}' +
+        '#ai5-root .ai5-head{align-items:flex-start;flex-wrap:wrap;margin-bottom:8px}' +
+        '#ai5-root .ai5-head>div:first-child{width:100%;align-items:flex-start}' +
+        '#ai5-root .ai5-title{font-size:19px;line-height:1.25}' +
+        '#ai5-root .ai5-sub{font-size:11px;line-height:1.4}' +
+        '#ai5-root .ai5-actions{width:100%;justify-content:flex-start;flex-wrap:wrap}' +
+        '#ai5-root .ai5-btn{min-height:30px;padding:5px 9px;font-size:11px}' +
+        '#ai5-root .ai5-strip{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-bottom:8px}' +
+        '#ai5-root .ai5-strip .cell{min-height:66px;padding:7px 8px}' +
+        '#ai5-root .ai5-strip .k{font-size:10px;line-height:1.35;white-space:normal}' +
+        '#ai5-root .ai5-strip .v{font-size:17px;line-height:1.25;white-space:normal;overflow:visible}' +
+        '#ai5-root .ai5-strip .s{font-size:10px;line-height:1.35;white-space:normal}' +
+        '#ai5-root .ai5-tools{gap:6px;margin-bottom:8px}' +
+        '#ai5-root .ai5-dash{display:flex!important;flex-direction:column;grid-template-columns:none!important;' +
+          'grid-template-rows:none!important;height:auto!important;min-height:0!important;overflow:visible!important;gap:8px}' +
+        '#ai5-root .ai5-sec{height:auto!important;min-height:0!important;overflow:visible!important;padding:9px 10px}' +
+        '#ai5-root .ai5-sec h4{font-size:13px;line-height:1.35;margin-bottom:7px;flex-wrap:wrap}' +
+        '#ai5-root .ai5-fill{height:auto!important;min-height:0!important;max-height:none!important;' +
+          'overflow-x:auto!important;overflow-y:visible!important;flex:none!important}' +
+        '#ai5-root table{font-size:10px;min-width:560px}' +
+        '#ai5-root .ai5-note{font-size:10px;line-height:1.5;white-space:normal}' +
+      '}';
   }
 
   function openChart(code, mkt) {
@@ -182,6 +207,7 @@
   function render(focus) {
     var body = ensureMount();
     if (!body) return;
+    body.classList.remove('ai5-loading');
     if (focus && typeof focus === 'object') lastFocus = focus;
     var lists = pickLists(lastFocus || {});
     var longs = lists.longs || [];

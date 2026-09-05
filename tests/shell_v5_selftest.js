@@ -857,9 +857,9 @@ ok(/st5-tip-boot/.test(shell) && /st5-booted/.test(shell) && /TIP_UX/.test(shell
   'shell tip-boot hides legacy chart chrome before boot');
 ok(/const SERVER = window\.SERVER =/.test(sourceHtml) && /location\.origin && location\.origin !== 'null'/.test(sourceHtml),
   'browser API base is published on window.SERVER and follows the current origin');
-ok(/開啟預設總覽/.test(shell) && /applyRoute\('pulse'\)/.test(shell) &&
-  /openRing\(window\.innerWidth \/ 2/.test(shell) && /ring=auto/.test(shell),
-  'shell boot defaults to pulse and auto-opens ring');
+ok(/沒有合法深連結時仍開總覽/.test(shell) && /initialId = hasDeepLink \? rawHash : 'pulse'/.test(shell) &&
+  /openRing\(window\.innerWidth \/ 2/.test(shell) && /\? 'auto' : 'manual'/.test(shell),
+  'shell defaults to pulse with auto ring while preserving explicit functional deep links');
 ok(!/saved = localStorage\.getItem\(STORAGE_KEY\) \|\| 'pulse'/.test(shell),
   'shell no longer restores route from localStorage on cold open');
 

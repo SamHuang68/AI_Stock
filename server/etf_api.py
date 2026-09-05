@@ -11,6 +11,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 import etf_paths
+from etf_weight_rankings import build_weight_rankings_from_history
 
 try:
     import slog
@@ -137,7 +138,7 @@ def get_field(h, *keys):
         if k in h: return h[k]
     return None
 
-def _load_enabled_etf_codes():
+def _load_enabled_etf_codes(market=None):
     """讀 etf_catalog.json，回傳目前 enabled=true 的 ETF 代號集合（uppercase）"""
     if not os.path.isfile(ETF_CATALOG_FILE):
         return None   # None = 不做 server 端過濾（fallback 給全部）
@@ -147,10 +148,10 @@ def _load_enabled_etf_codes():
         enabled = set()
         for c in cat.get('categories', []):
             for e in c.get('etfs', []):
-                if e.get('enabled'):
+                if e.get('enabled') and (market is None or str(e.get('market') or 'TW').upper() == market):
                     code = (e.get('code') or '').strip().upper()
                     if code: enabled.add(code)
-        return enabled if enabled else None
+        return enabled  # 空集合表示全部停用，不得退回全部可見。
     except Exception as e:
         print(f'[catalog filter] load failed: {e}')
         return None
@@ -208,8 +209,9 @@ def compute_etf_delta(files, date=None):
         prev_map = to_map(prev_list)
 
         new_stocks, removed, changed = [], [], []
+        has_baseline = bool(curr_map and prev_map)
 
-        for sym, h in curr_map.items():
+        for sym, h in (curr_map.items() if has_baseline else []):
             w = float(get_field(h,'weight','pct','weight_pct') or 0)
             if sym not in prev_map:
                 new_stocks.append({
@@ -241,7 +243,7 @@ def compute_etf_delta(files, date=None):
                         'shares_delta': sdelta,
                     })
 
-        for sym, h in prev_map.items():
+        for sym, h in (prev_map.items() if has_baseline else []):
             if sym not in curr_map:
                 removed.append({
                     'rank':        get_field(h,'rank','holding_rank') or '-',
@@ -281,16 +283,28 @@ def compute_etf_delta(files, date=None):
                 'code':    code,
                 'name':    ETF_NAME_MAP.get(code, code),
                 'total':   len(curr_list),
+                'has_baseline': has_baseline,
                 'new':     new_stocks,
                 'removed': removed,
                 'changed': changed,
                 'top10':   top10,   # v3.1 新增：當前 Top 10 持股
             })
 
+    # 週末或來源未更新時，依每檔 ETF 的真正資料日找基準；不以下載日推論交易。
+    previous_snapshots = []
+    current_index = files.index(curr_file)
+    for history_file in reversed(files[max(0, current_index - 20):current_index]):
+        try:
+            with open(history_file, encoding='utf-8') as handle:
+                previous_snapshots.append(json.load(handle))
+        except (OSError, ValueError):
+            previous_snapshots.append(None)  # 壞檔是明確障礙，不跳過來挑選比較結果。
+    rankings = build_weight_rankings_from_history(curr_raw, previous_snapshots, allowed_codes=_load_enabled_etf_codes('TW'))
     return {
         'date':      curr_date,
         'prev_date': prev_date,
         'summary':   {'new': total_new, 'removed': total_rm, 'changed': total_chg},
         'etfs':      etfs_out,
+        'weight_rankings': rankings,
     }
 

@@ -482,12 +482,20 @@
       '}' +
       /* 手機直式統一由 shell-views 擔任唯一捲動容器；內容底部避開浮動轉盤與 iOS safe area。 */
       '@media(max-width:900px) and (orientation:portrait){' +
-        '#shell-main #shell-views.show{display:block!important;overflow-x:hidden!important;overflow-y:auto!important;' +
+        /*
+         * 模組樣式會在殼層之後注入，且普遍用 :has(...){overflow:hidden!important} 鎖桌機一屏。
+         * 這裡以明確的非圖表路由與較高 specificity 奪回唯一垂直捲動權，避免 iOS Chrome
+         * 出現「拉得動但隨即彈回」或整頁只剩一條內容的假捲動。
+         */
+        'html[data-st5-route]:not([data-st5-route="chart"]) body #app #shell-main #shell-views.show{' +
+          'display:block!important;overflow-x:hidden!important;overflow-y:auto!important;' +
           'height:100%!important;max-height:100%!important;min-height:0!important;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch;' +
           'scroll-padding-bottom:calc(88px + env(safe-area-inset-bottom,0px))}' +
-        '#shell-main #shell-views.show>.sv-panel.on{display:block!important;flex:none!important;height:auto!important;min-height:100%!important;' +
+        'html[data-st5-route]:not([data-st5-route="chart"]) body #app #shell-main #shell-views.show>.sv-panel.on{' +
+          'display:block!important;flex:none!important;height:auto!important;min-height:100%!important;' +
           'overflow:visible!important;padding-bottom:calc(88px + env(safe-area-inset-bottom,0px))!important}' +
-        '#shell-main #shell-views.show>.sv-panel.on>.sv-mount{display:block!important;height:auto!important;min-height:0!important;overflow:visible!important}' +
+        'html[data-st5-route]:not([data-st5-route="chart"]) body #app #shell-main #shell-views.show>.sv-panel.on>.sv-mount{' +
+          'display:block!important;height:auto!important;min-height:0!important;overflow:visible!important}' +
         '#st-ring-fab{bottom:calc(14px + env(safe-area-inset-bottom,0px))}' +
       '}';
   }
@@ -1668,26 +1676,39 @@
       var app = $('app');
       var ar = app ? app.getBoundingClientRect() : null;
       var vv = window.visualViewport;
-      var pulseRoot = routeId === 'pulse' ? document.getElementById('pl-root') : null;
-      var pulseValues = pulseRoot ? pulseRoot.querySelectorAll(
-        '.pl-strip .v,.pl-score3 .v,.pl-inst4 .v,.pl-bd4 .v,.pl-ohlc4 .v,.pl-global .v,.pl-wl td.px,.pl-wl td.chg'
+      var routeRoot = panel.querySelector(
+        '#pl-root,#dc-root,#bd-root,#ht-root,.hub-root,#ah-root,#ai5-root,#nw-root,#sc-root,#bk-root'
+      ) || mount;
+      var routeValues = routeRoot ? routeRoot.querySelectorAll(
+        '.v,.val,.pc,.chg,.px,.rv,.big,.dc-level .v,.dc-feature>.v,td'
       ) : [];
-      var pulseTitles = pulseRoot ? pulseRoot.querySelectorAll('.pl-sec h4') : [];
+      var routeTitles = routeRoot ? routeRoot.querySelectorAll(
+        'h1,h2,h3,h4,.pl-title,.bd-title,.ht-title,.hub-title,.ah-title,.ai5-title,.nw-title,.sc-title,.bk-title'
+      ) : [];
       var valueOverflow = 0;
       var titleOverflow = 0;
-      Array.prototype.forEach.call(pulseValues, function (el) {
+      Array.prototype.forEach.call(routeValues, function (el) {
         if (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1) valueOverflow += 1;
       });
-      Array.prototype.forEach.call(pulseTitles, function (el) {
+      Array.prototype.forEach.call(routeTitles, function (el) {
         if (el.scrollHeight > el.clientHeight + 1) titleOverflow += 1;
       });
+      var horizontalOverflow = Math.max(0, views.scrollWidth - views.clientWidth);
+      var overflowY = getComputedStyle(views).overflowY;
+      var maxScrollTop = Math.max(0, views.scrollHeight - views.clientHeight);
+      var remainingScroll = Math.max(0, maxScrollTop - views.scrollTop);
+      var routeEnd = routeRoot && (routeRoot.lastElementChild || routeRoot);
+      var routeEndRect = routeEnd ? routeEnd.getBoundingClientRect() : null;
+      var scrollEnabled = overflowY === 'auto' || overflowY === 'scroll';
+      var canScrollToEnd = maxScrollTop <= 1 || (scrollEnabled &&
+        (!routeEndRect || routeEndRect.bottom <= vr.bottom + remainingScroll + 2));
       fetch('/diagnostics/ui-route', {
         method: 'POST', headers: {'Content-Type':'application/json'}, keepalive: true,
         body: JSON.stringify({
           ts: new Date().toISOString(), event: 'mobile_shell_panel_layout',
           correlationId: 'mobile-shell-' + Date.now(), from: 'shell-views', to: routeId,
           state: (window.matchMedia('(orientation:portrait)').matches ? 'portrait' : 'landscape') +
-            '-scroll-' + getComputedStyle(views).overflowY,
+            '-scroll-' + overflowY,
           label: window.innerWidth + 'x' + window.innerHeight +
             '|visual=' + (vv ? Math.round(vv.width) + 'x' + Math.round(vv.height) : 'none') +
             '|app=' + (ar ? Math.round(ar.width) + 'x' + Math.round(ar.height) : 'none') +
@@ -1696,8 +1717,10 @@
             (mount ? '/' + mount.scrollHeight : '') +
             '|dpr=' + Number(window.devicePixelRatio || 1).toFixed(2) +
             '|fonts=' + (document.fonts ? document.fonts.status : 'na') +
-            '|valueOverflow=' + valueOverflow + '/' + pulseValues.length +
-            '|titleOverflow=' + titleOverflow + '/' + pulseTitles.length
+            '|valueOverflow=' + valueOverflow + '/' + routeValues.length +
+            '|titleOverflow=' + titleOverflow + '/' + routeTitles.length +
+            '|horizontalOverflow=' + Math.round(horizontalOverflow) +
+            '|scrollEnd=' + (canScrollToEnd ? 'reachable' : 'blocked')
         })
       }).catch(function () {});
     } catch (e) {}
@@ -1760,6 +1783,17 @@
     if (wl) wl.classList.toggle('shell-hidden', !isChart);
     if (pager) pager.classList.toggle('shell-hidden', !isChart);
     if (views) views.classList.toggle('show', !isChart);
+    /* 所有功能頁共用同一個捲動容器；切頁不可承接上一個長頁的 scrollTop。 */
+    if (views && !isChart) {
+      views.scrollTop = 0;
+      try {
+        window.requestAnimationFrame(function () {
+          window.requestAnimationFrame(function () {
+            if (state.route === id) views.scrollTop = 0;
+          });
+        });
+      } catch (eScrollReset) {}
+    }
     try { document.documentElement.setAttribute('data-st5-route', id); } catch (eRouteAttr) {}
     /* 圖表底列大盤／市場條僅圖表頁顯示，勿蓋到其他 shell tab */
     var mktBar = $('mkt-bar');
@@ -1795,6 +1829,8 @@
 
     emitRoute(id, opts);
     setTimeout(function () { traceMobilePanelLayout(id); }, 180);
+    /* 非同步市場資料完成後再量一次，避免只驗到空殼而錯過真實內容溢位。 */
+    setTimeout(function () { traceMobilePanelLayout(id); }, 1200);
   }
 
   function go(id, opts) {
@@ -1810,19 +1846,26 @@
       if (orphan && orphan.parentNode) orphan.parentNode.removeChild(orphan);
     });
     /*
-     * tip UX only：開啟預設總覽 + 彈出轉盤
-     * - 一律 #pulse（絕不吃 localStorage／舊 hash 的 chart）
-     * - boot 後自動 openRing（中心）；之後仍可由 hashchange 切頁
+     * tip UX：沒有合法深連結時仍開總覽；合法功能 hash 則原樣進入分享頁。
+     * 不讀 localStorage，避免冷啟動被過時狀態綁回舊頁。
      */
-    try {
-      if (window.history && window.history.replaceState) {
-        var base = window.location.pathname + (window.location.search || '');
-        window.history.replaceState(null, '', base + '#pulse');
-      } else {
-        window.location.hash = 'pulse';
-      }
-    } catch (eHash) {}
-    applyRoute('pulse');
+    var rawHash = '';
+    try { rawHash = (window.location.hash || '').replace(/^#/, '').trim(); } catch (eReadHash) {}
+    var initialResolved = resolveAlias(rawHash, {});
+    var initialRoute = findRoute(initialResolved.id);
+    var hasDeepLink = !!(rawHash && initialRoute && !initialRoute.action);
+    var initialId = hasDeepLink ? rawHash : 'pulse';
+    if (!hasDeepLink) {
+      try {
+        if (window.history && window.history.replaceState) {
+          var base = window.location.pathname + (window.location.search || '');
+          window.history.replaceState(null, '', base + '#pulse');
+        } else {
+          window.location.hash = 'pulse';
+        }
+      } catch (eHash) {}
+    }
+    applyRoute(initialId, initialResolved.opts || {});
     try {
       document.documentElement.classList.add('st5-booted');
       document.documentElement.setAttribute('data-st5-ux', 'tip');
@@ -1852,7 +1895,10 @@
     } catch (eWd) {}
     window.addEventListener('hashchange', function () {
       var h = (window.location.hash || '').replace(/^#/, '').trim();
-      if (h && findRoute(h) && h !== state.route) go(h);
+      var resolvedHash = resolveAlias(h, {});
+      if (h && findRoute(resolvedHash.id) && (resolvedHash.id !== state.route || resolvedHash.opts.sym)) {
+        go(h, resolvedHash.opts || {});
+      }
     });
     /* 歷史庫過薄時自動背景 merge（不打擾） */
     setTimeout(function () {
@@ -1867,13 +1913,16 @@
     document.addEventListener('keydown', onShellKey, true);
     document.addEventListener('auxclick', onShellAuxClick, true);
     document.addEventListener('mousedown', onShellMiddleDown, true);
-    /* 開啟即彈出分析轉盤（畫面中央） */
-    setTimeout(function () {
-      if (!ringState.open) {
-        openRing(window.innerWidth / 2, window.innerHeight / 2);
-      }
-    }, 180);
-    console.log('[shell-v5] Stock Terminal ' + VERSION + ' · tip UX · route=pulse · ring=auto');
+    /* 總覽維持既有分析轉盤；明確深連結不以浮層遮住目標功能頁。 */
+    if (!hasDeepLink || initialResolved.id === 'pulse') {
+      setTimeout(function () {
+        if (!ringState.open) {
+          openRing(window.innerWidth / 2, window.innerHeight / 2);
+        }
+      }, 180);
+    }
+    console.log('[shell-v5] Stock Terminal ' + VERSION + ' · tip UX · route=' + state.route +
+      ' · ring=' + ((!hasDeepLink || initialResolved.id === 'pulse') ? 'auto' : 'manual'));
   }
 
   function inEditable(el) {

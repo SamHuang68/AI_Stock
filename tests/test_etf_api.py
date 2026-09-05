@@ -29,6 +29,56 @@ class TestAiApi(unittest.TestCase):
 
 
 class TestEtfApi(unittest.TestCase):
+    def test_empty_catalog_is_not_unfiltered(self):
+        import etf_api
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            catalog = os.path.join(td, 'catalog.json')
+            with open(catalog, 'w', encoding='utf-8') as handle:
+                json.dump({'categories': []}, handle)
+            with patch.object(etf_api, 'ETF_CATALOG_FILE', catalog):
+                self.assertEqual(etf_api._load_enabled_etf_codes('TW'), set())
+
+    def test_first_snapshot_is_not_all_new_positions(self):
+        import etf_api
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            files = []
+            for day, payload in [('2026-09-03', {}), ('2026-09-04', {
+                '0050': {'date': '2026-09-04', 'source': 'moneydj-full', 'total': 1,
+                         'holdings': [{'code': '2330', 'market': 'TW', 'weight': 10}]}})]:
+                file = os.path.join(td, f'top10_active_etf_holdings_{day}.json')
+                with open(file, 'w', encoding='utf-8') as handle:
+                    json.dump(payload, handle)
+                files.append(file)
+            with patch.object(etf_api, '_load_enabled_etf_codes', return_value={'0050'}):
+                result = etf_api.compute_etf_delta(files)
+        self.assertFalse(result['etfs'][0]['has_baseline'])
+        self.assertEqual(result['etfs'][0]['new'], [])
+        self.assertEqual(result['weight_rankings']['rows'], [])
+
+    def test_weight_rankings_preserve_dates_small_changes_and_catalog_filter(self):
+        import etf_api
+        from unittest.mock import patch
+        def snapshot(day, weight):
+            return {'date': day, **{code: {'name': code, 'date': day, 'source': 'moneydj-full',
+                'total': 1, 'holdings': [{'code': '2330', 'market': 'TW', 'weight': weight}]}
+                for code in ('0050', '00992A')}}
+        with tempfile.TemporaryDirectory() as td:
+            files = []
+            for day, weight in [('2026-09-03', 10), ('2026-09-04', 10.0001)]:
+                file = os.path.join(td, f'top10_active_etf_holdings_{day}.json')
+                with open(file, 'w', encoding='utf-8') as handle:
+                    json.dump(snapshot(day, weight), handle)
+                files.append(file)
+            with patch.object(etf_api, '_load_enabled_etf_codes', return_value={'0050'}):
+                result = etf_api.compute_etf_delta(files)['weight_rankings']
+        self.assertEqual(len(result['rows']), 1)
+        self.assertEqual(result['rows'][0]['etf_code'], '0050')
+        self.assertEqual(result['rows'][0]['delta_pp'], 0.0001)
+        self.assertEqual(result['rows'][0]['date'], '2026-09-04')
+        self.assertEqual(result['comparable_etf_count'], 1)
+
     def test_parse_and_delta(self):
         import etf_api
 

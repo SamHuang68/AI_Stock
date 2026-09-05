@@ -39,15 +39,13 @@ import etf_paths
 from atomic_store import atomic_write_json
 
 # ── ETF 下載為 I/O 工作；並行度由環境與遠端限制共同決定 ────────────
-MAX_WORKERS  = 32         # 10 檔 ETF × 多來源 fallback，給寬鬆並發
+MAX_WORKERS  = 8          # 擴大觀測池仍限制並行，避免對來源過度請求
 RETRY_TIMES  = 4
 RETRY_DELAY  = 1.5
 TIMEOUT      = 20
 
-# ── SSL：Windows 憑證問題統一關閉 ────────────────────────────────────
+# ── TLS：使用系統信任憑證，驗證失敗不降級 ───────────────────────────
 _SSL_CTX = ssl.create_default_context()
-_SSL_CTX.check_hostname = False
-_SSL_CTX.verify_mode    = ssl.CERT_NONE
 
 # ── 路徑 ──────────────────────────────────────────────────────────
 SCRIPT_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -70,6 +68,7 @@ def load_catalog():
     for cat in data.get('categories', []):
         for etf in cat.get('etfs', []):
             if (etf.get('enabled') and etf.get('code')
+                    and etf.get('listing_status') != 'unverified'
                     and str(etf.get('market') or 'TW').upper() == 'TW'):
                 code = etf['code'].strip().upper()
                 name = etf.get('name', code)
@@ -116,7 +115,9 @@ def http_get(url: str, referer: str = '') -> str | None:
         try:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=TIMEOUT, context=_SSL_CTX) as resp:
-                raw = resp.read()
+                raw = resp.read(8 * 1024 * 1024 + 1)
+                if len(raw) > 8 * 1024 * 1024:
+                    return None
                 if resp.headers.get('Content-Encoding') == 'gzip':
                     raw = gzip.decompress(raw)
             # 嘗試多種編碼
@@ -229,10 +230,9 @@ def fetch_moneydj_top(etf_id: str) -> tuple[list | None, str | None]:
 
 # ── 來源 C：TWSE ETFortfolio（被動 ETF 才有資料；主動 ETF 通常無） ─
 def fetch_twse(stock_no: str, date: datetime.date) -> tuple[list | None, str | None]:
-    short = re.sub(r'[A-Za-z]$', '', stock_no)
     url = ('https://www.twse.com.tw/rwd/zh/fund/ETFortfolio'
            f'?response=json&date={date.year}{date.month:02d}{date.day:02d}'
-           f'&stockNo={short}')
+           f'&stockNo={urllib.parse.quote(stock_no)}')
     txt = http_get(url, 'https://www.twse.com.tw/')
     if not txt:
         return None, None
@@ -241,6 +241,12 @@ def fetch_twse(stock_no: str, date: datetime.date) -> tuple[list | None, str | N
     except Exception:
         return None, None
     if data.get('stat') not in ('OK', 'ok'):
+        return None, None
+    # 不用請求日捏造資料日；舊端點失效或未回傳日期時拒絕採用。
+    raw_date = str(data.get('date') or '')
+    try:
+        provider_day = datetime.datetime.strptime(raw_date, '%Y%m%d').date()
+    except ValueError:
         return None, None
     fields = data.get('fields', [])
     rows   = data.get('data',   [])
@@ -272,7 +278,7 @@ def fetch_twse(stock_no: str, date: datetime.date) -> tuple[list | None, str | N
             'weight': round(wt, 4),
             'shares': int(sr),
         })
-    return (holdings if holdings else None), date.strftime('%Y-%m-%d')
+    return (holdings if holdings else None), provider_day.isoformat()
 
 
 # ── 多來源彙整：依優先序嘗試 ─────────────────────────────────────
@@ -359,6 +365,7 @@ def run(target_date: datetime.date) -> bool:
                 'collectedDate': date_str,
                 'collectedAt': collected_at,
                 'source':   source,
+                'coverage': 'full' if source == 'moneydj-full' else 'partial' if source == 'moneydj-top10' else 'unknown',
                 'total':    len(holdings),
                 'holdings': holdings,
             }

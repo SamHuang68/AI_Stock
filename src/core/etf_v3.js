@@ -38,6 +38,9 @@
       catActive:  'active',
       lastFetch:  0,
       expanded:   new Set(),
+      weightPage: 1,
+      weightSortKey: 'delta_pp',
+      weightSortDirection: 'descending',
     };
     if (!S.etfV3) S.etfV3 = defaults;
     else {
@@ -109,6 +112,7 @@
   // 解析顯示名稱：delta 名稱有效就用，否則回退 catalog 名稱
   function resolveName(code, name) {
     const c = (code || '').toUpperCase();
+    if (catName(code)) return catName(code);
     if (name && name.toUpperCase() !== c) return name;
     return catName(code) || name || '';
   }
@@ -390,6 +394,33 @@
     if (document.getElementById('etf-v3-styles')) return;
     const css = `
 .e3-wrap { font-family: 'JetBrains Mono', monospace; }
+.e3-weight-rank { margin: 10px 8px; min-width: 0; border: 1px solid var(--border); border-radius: 8px; }
+.e3-weight-rank > .e3-section-hdr { font-size: 14px; padding-block: 8px; color: var(--thi); }
+.e3-weight-rank .e3-meta { display: block; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.e3-weight-rank summary { padding: 10px; cursor: pointer; font-size: 12px; }
+.e3-weight-scroll { overflow-x: auto; max-width: 100%; max-height: 440px; overscroll-behavior: contain; }
+.e3-weight-table { width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+.e3-weight-table th { position: sticky; top: 0; background: var(--bg); z-index: 1; }
+.e3-weight-table th,.e3-weight-table td { padding: 9px 10px; text-align: right; border-bottom: 1px solid var(--border); }
+.e3-weight-table td:nth-child(2) { text-align: left; }
+.e3-weight-table .e3-actbtn { font-size: 12px; min-height: 32px; }
+.e3-weight-context { padding: 8px 12px; display: grid; gap: 3px; color: var(--tlo); font-size: 12px; line-height: 1.5; border-bottom: 1px solid var(--border); }
+.e3-weight-context strong { color: var(--thi); }
+.e3-weight-mobile-hint { display: none; padding: 6px 12px; color: var(--blue); font-size: 12px; line-height: 1.45; border-bottom: 1px solid var(--border); }
+.e3-weight-pager { min-height: 38px; padding: 6px 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--tlo); font-size: 12px; border-bottom: 1px solid var(--border); }
+.e3-weight-pager .e3-page-actions { display: flex; gap: 6px; }
+.e3-weight-pager button { min-width: 68px; min-height: 30px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg3); color: var(--thi); font: inherit; cursor: pointer; }
+.e3-weight-pager button:hover:not(:disabled),.e3-weight-pager button:focus-visible { color: var(--gold); border-color: var(--gold-m); outline: none; }
+.e3-weight-pager button:disabled { opacity: .35; cursor: default; }
+@media (max-width: 1000px), (pointer: coarse) {
+  .e3-weight-mobile-hint { display: block; }
+}
+@media (max-width: 620px) {
+  .e3-weight-rank { margin: 6px 4px; }
+  .e3-weight-pager { align-items: flex-start; flex-direction: column; }
+  .e3-weight-pager .e3-page-actions { width: 100%; }
+  .e3-weight-pager button { flex: 1; }
+}
 .e3-tabs { display: flex; flex-wrap: wrap; gap: 3px; padding: 6px 8px; background: var(--bg); border-bottom: 1px solid var(--border); align-items: center; }
 .e3-tab { padding: 4px 9px; background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--tlo); font-family: 'JetBrains Mono', monospace; font-size: 9.5px; font-weight: 600; cursor: pointer; letter-spacing: .3px; white-space: nowrap; transition: all .12s; }
 .e3-tab:hover { color: var(--gold); background: var(--gold-s); }
@@ -552,6 +583,138 @@
     }
   }
 
+  const WEIGHT_PAGE_SIZE = 100;
+  const WEIGHT_COLUMNS = [
+    { key:'etf_code', label:'ETF', type:'text' },
+    { key:'code', label:'個股', type:'text' },
+    { key:'market', label:'市場', type:'text' },
+    { key:'prev_weight', label:'前期權重 %', type:'number' },
+    { key:'weight', label:'本期權重 %', type:'number' },
+    { key:'delta_pp', label:'增減百分點', type:'number' },
+    { key:'status', label:'狀態', type:'text' },
+    { key:'prev_date', label:'前期來源日', type:'date' },
+    { key:'date', label:'本期來源日', type:'date' },
+    { key:'source', label:'資料來源', type:'text' },
+    { key:'snapshot_date', label:'收集檔日期', type:'date' },
+  ];
+
+  function weightDirectionLabel(direction) {
+    return direction === 'ascending' ? '升冪' : direction === 'descending' ? '降冪' : '原始順序';
+  }
+
+  function weightNextDirection(key) {
+    if (S.etfV3.weightSortKey !== key || S.etfV3.weightSortDirection === 'none') return 'ascending';
+    return S.etfV3.weightSortDirection === 'ascending' ? 'descending' : 'none';
+  }
+
+  function weightSortHeader(column) {
+    const active = S.etfV3.weightSortKey === column.key && S.etfV3.weightSortDirection !== 'none';
+    const direction = active ? S.etfV3.weightSortDirection : 'none';
+    const next = weightNextDirection(column.key);
+    const arrow = direction === 'ascending' ? '▲' : direction === 'descending' ? '▼' : '↕';
+    const label = `${column.label}；目前${weightDirectionLabel(direction)}；點擊切換為${weightDirectionLabel(next)}`;
+    return `<th class="st-sortable-head" aria-sort="${direction}"><button type="button" class="st-sort-button" data-e3="weight-sort" data-key="${esc(column.key)}" data-direction="${direction}" aria-label="${esc(label)}" title="${esc(label)}">${esc(column.label)}<span class="st-sort-arrow" aria-hidden="true">${arrow}</span></button></th>`;
+  }
+
+  function weightSortValue(row, column) {
+    const raw = row && row[column.key];
+    if (raw == null || raw === '' || raw === '—' || raw === '-') return { missing:true, value:null };
+    if (column.type === 'number') {
+      const value = Number(raw);
+      return Number.isFinite(value) ? { missing:false, value } : { missing:true, value:null };
+    }
+    if (column.type === 'date') {
+      const value = Date.parse(String(raw));
+      return Number.isFinite(value) ? { missing:false, value } : { missing:true, value:null };
+    }
+    const value = column.key === 'status'
+      ? ({added:'新增持股', removed:'移除持股', increased:'增權', decreased:'減權'}[raw] || String(raw))
+      : String(raw);
+    return { missing:false, value };
+  }
+
+  function weightSourceLabel(source) {
+    const raw = String(source || '');
+    return /^moneydj(?:-|$)/i.test(raw) ? 'MoneyDJ（第三方）' : (raw || '—');
+  }
+
+  // 先對完整資料集穩定排序，再切每頁 100 筆；缺值不論升降冪都固定沉底。
+  function sortWeightRows(rows) {
+    const direction = S.etfV3.weightSortDirection;
+    const column = WEIGHT_COLUMNS.find(item => item.key === S.etfV3.weightSortKey);
+    if (!column || direction === 'none') return rows.slice();
+    const sign = direction === 'ascending' ? 1 : -1;
+    return rows.map((row, index) => ({ row, index })).sort((a, b) => {
+      const av = weightSortValue(a.row, column);
+      const bv = weightSortValue(b.row, column);
+      if (av.missing && bv.missing) return a.index - b.index;
+      if (av.missing) return 1;
+      if (bv.missing) return -1;
+      const compared = column.type === 'text'
+        ? av.value.localeCompare(bv.value, 'zh-Hant', { numeric:true, sensitivity:'base' })
+        : av.value - bv.value;
+      return compared === 0 ? a.index - b.index : compared * sign;
+    }).map(item => item.row);
+  }
+
+  function renderWeightPager(page, totalPages, totalRows) {
+    const start = (page - 1) * WEIGHT_PAGE_SIZE + 1;
+    const end = Math.min(totalRows, page * WEIGHT_PAGE_SIZE);
+    return `<nav class="e3-weight-pager" aria-label="ETF 權重排名翻頁">
+      <span>共 <strong>${totalRows.toLocaleString('zh-TW')}</strong> 筆 · 第 <strong>${page}</strong> / ${totalPages} 頁 · 顯示 ${start}–${end} · 每頁 ${WEIGHT_PAGE_SIZE} 筆</span>
+      <span class="e3-page-actions">
+        <button type="button" data-e3="weight-page" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''} aria-label="上一頁">← 上一頁</button>
+        <button type="button" data-e3="weight-page" data-page="${page + 1}" ${page >= totalPages ? 'disabled' : ''} aria-label="下一頁">下一頁 →</button>
+      </span>
+    </nav>`;
+  }
+
+  // 權重是資產占比，不是成交股數或實際買賣超；保留每檔 ETF 的比較基準。
+  function renderWeightRankings(delta, allowed) {
+    const ranking = delta && delta.weight_rankings;
+    let h = '<section class="e3-weight-rank"><div class="e3-section-hdr">ETF 增減權重・個股排名</div>';
+    h += '<div class="e3-meta">點欄名依完整排名切換升冪／降冪／原始順序。增減為百分點，不等於實際買賣；價格漲跌也會改變權重。</div>';
+    if (!ranking) return h + '<div class="e3-empty">目前後端尚未提供權重排名資料。</div></section>';
+    const rows = (ranking.rows || []).filter(r => !allowed || allowed.has(String(r.etf_code).toUpperCase()));
+    const excluded = (ranking.excluded || []).filter(r => !allowed || allowed.has(String(r.etf_code).toUpperCase()));
+    const number = value => Number.isFinite(Number(value)) && value != null ? Number(value).toLocaleString('zh-TW', {maximumFractionDigits:4}) : '—';
+    const sourceDates = ranking.source_dates || {};
+    const dateList = value => Array.isArray(value) && value.length ? value.map(esc).join('、') : '依各 ETF 列示';
+    h += `<div class="e3-weight-context">
+      <span><strong>供應商資料日</strong>　前期 ${dateList(sourceDates.previous)}　→　本期 ${dateList(sourceDates.current)}</span>
+      <span><strong>收集檔日期</strong>只代表本機取得快照的日期；每列會另列前後收集檔，不作為持股更新日。</span>
+    </div>`;
+    h += '<div class="e3-weight-mobile-hint">手機可左右滑動查看增減、日期與來源。</div>';
+    if (!rows.length) h += '<div class="e3-empty">' + (ranking.status === 'ok' ? '可比較 ETF 的兩期持股權重相同，沒有增減。' : '尚無可比較持股；需同來源、不同供應商資料日的有效快照。') + '</div>';
+    else {
+      const sortedRows = sortWeightRows(rows);
+      const totalPages = Math.max(1, Math.ceil(sortedRows.length / WEIGHT_PAGE_SIZE));
+      const requestedPage = Number.parseInt(S.etfV3.weightPage, 10) || 1;
+      const page = Math.min(totalPages, Math.max(1, requestedPage));
+      S.etfV3.weightPage = page;
+      const pageRows = sortedRows.slice((page - 1) * WEIGHT_PAGE_SIZE, page * WEIGHT_PAGE_SIZE);
+      h += renderWeightPager(page, totalPages, sortedRows.length);
+      h += '<div class="e3-weight-scroll" tabindex="0" aria-label="ETF 權重排名，可左右捲動"><table class="e3-weight-table" data-st-sort="off"><thead><tr>' +
+        WEIGHT_COLUMNS.map(weightSortHeader).join('') + '</tr></thead><tbody>';
+      for (const r of pageRows) {
+        const diff = Number(r.delta_pp);
+        const tw = (r.market || 'TW') === 'TW';
+        const color = diff > 0 ? (tw ? 'var(--red)' : 'var(--green)') : diff < 0 ? (tw ? 'var(--green)' : 'var(--red)') : 'var(--tlo)';
+        h += `<tr><td title="${esc(resolveName(r.etf_code, r.etf_name))}">${esc(r.etf_code)}</td><td><button class="e3-actbtn" data-e3="goto" data-sym="${esc(r.code)}" data-mkt="${esc(r.market || 'TW')}">${esc(r.code)} ${esc(r.name)}</button></td><td>${esc(r.market || 'TW')}</td>`;
+        h += `<td data-sort-value="${esc(r.prev_weight)}">${number(r.prev_weight)}</td><td data-sort-value="${esc(r.weight)}">${number(r.weight)}</td>`;
+        h += `<td data-sort-value="${esc(r.delta_pp)}" style="color:${color}">${diff > 0 ? '+' : ''}${number(r.delta_pp)}</td>`;
+        const status = {added:'新增持股', removed:'移除持股', increased:'增權', decreased:'減權'}[r.status] || '待確認';
+        const previousSnapshot = r.prev_snapshot_date || ranking.prev_snapshot_date || '—';
+        const currentSnapshot = r.snapshot_date || ranking.snapshot_date || '—';
+        h += `<td>${status}</td><td>${esc(r.prev_date || '—')}</td><td>${esc(r.date || '—')}</td><td title="原始來源碼：${esc(r.source || '—')}">${esc(weightSourceLabel(r.source))}</td><td data-sort-value="${esc(currentSnapshot)}">${esc(previousSnapshot)} → ${esc(currentSnapshot)}</td></tr>`;
+      }
+      h += '</tbody></table></div>';
+      h += renderWeightPager(page, totalPages, sortedRows.length);
+    }
+    if (excluded.length) h += '<details><summary>未納入比較 '+excluded.length+' 檔 ETF（缺基準或資料不可比）</summary><div class="e3-meta">' + excluded.map(r => esc(r.etf_code)+'：'+esc(r.reason_label || '資料暫不可比較')).join('<br>') + '</div></details>';
+    return h + '</section>';
+  }
+
   // ─── ETF panel renderer ─────────────────────────────────────
   function renderEtfDelta() {
     // Lazy-fetch catalog if needed
@@ -583,6 +746,7 @@
         ? `已啟用 ${cntEnabled} 檔，僅 ${cntWithData} 檔有 delta 資料；缺資料的 ETF 需在 etf_history 跑 tracker —— 點 ⚙ 管理 → 立即更新` : '';
       h += `<button class="e3-tab${on}" data-e3="cat" data-cat="${esc(cat.key)}" title="${esc(tipMissing)}">${cat.icon || ''} ${esc(cat.name)}<span class="cnt">${cntDisplay}</span></button>`;
     }
+    h += `<button class="e3-tab${S.etfV3.catActive === '__WEIGHTS__' ? ' on' : ''}" data-e3="cat" data-cat="__WEIGHTS__">權重排名</button>`;
     // 🇺🇸 美股獨立分頁（無 MoneyDJ delta，改顯示報價清單）
     const usList = [];
     for (const c of cats) for (const e of (c.etfs || [])) if ((e.market || 'TW') === 'US') usList.push(e);
@@ -634,6 +798,13 @@
     }
 
     const d = S.etfV3.delta;
+
+    // 權重排名是獨立契約，不沿用舊 delta 的摘要與快照日期列。
+    if (S.etfV3.catActive === '__WEIGHTS__') {
+      const rankAllowed = S.etfV3.catalog ? enabledSet(S.etfV3.catalog) : null;
+      return h + renderWeightRankings(d, rankAllowed) + '</div>';
+    }
+
     // Filter to current category
     const cat = cats.find(c => c.key === S.etfV3.catActive);
     let etfs = d.etfs || [];
@@ -700,7 +871,7 @@
           ${nNew ? `<span class="e3-badge new">+${nNew}</span>` : ''}
           ${nRm  ? `<span class="e3-badge rm">-${nRm}</span>`   : ''}
           ${nCh  ? `<span class="e3-badge chg">~${nCh}</span>`  : ''}
-          ${(!nNew && !nRm && !nCh) ? `<span class="e3-badge empty">無變動</span>` : ''}
+          ${(!nNew && !nRm && !nCh) ? `<span class="e3-badge empty">${e.has_baseline === false ? '尚無基準' : '無變動'}</span>` : ''}
         </div>
       </div>`;
       if (opened) {
@@ -1106,6 +1277,30 @@
       if (act === 'cat') {
         ev.preventDefault();
         S.etfV3.catActive = pa.dataset.cat;
+        if (S.etfV3.catActive === '__WEIGHTS__') S.etfV3.weightPage = 1;
+        if (typeof renderRpanel === 'function') renderRpanel();
+      }
+      if (act === 'weight-sort') {
+        ev.preventDefault();
+        const key = pa.dataset.key;
+        if (!WEIGHT_COLUMNS.some(column => column.key === key)) return;
+        if (S.etfV3.weightSortKey !== key || S.etfV3.weightSortDirection === 'none') {
+          S.etfV3.weightSortKey = key;
+          S.etfV3.weightSortDirection = 'ascending';
+        } else if (S.etfV3.weightSortDirection === 'ascending') {
+          S.etfV3.weightSortDirection = 'descending';
+        } else {
+          S.etfV3.weightSortKey = null;
+          S.etfV3.weightSortDirection = 'none';
+        }
+        S.etfV3.weightPage = 1;
+        if (typeof renderRpanel === 'function') renderRpanel();
+      }
+      if (act === 'weight-page') {
+        ev.preventDefault();
+        if (pa.disabled) return;
+        const page = Number.parseInt(pa.dataset.page, 10);
+        if (Number.isFinite(page)) S.etfV3.weightPage = Math.max(1, page);
         if (typeof renderRpanel === 'function') renderRpanel();
       }
       if (act === 'refresh') { ev.preventDefault(); fetchDelta(); }

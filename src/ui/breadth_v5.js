@@ -24,7 +24,6 @@
       document.head.appendChild(s);
     }
     s.textContent =
-      '#shell-views:has(#view-breadth.on){overflow:hidden!important}' +
       '#view-breadth.sv-panel.on{' +
         'max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
         'overflow:hidden;display:flex!important;flex-direction:column;flex:1;min-height:0;height:100%}' +
@@ -111,7 +110,39 @@
       '#bd-root .bd-pop-row .pc{font-weight:700;min-width:58px;text-align:right}' +
       '#bd-root .bd-pop-empty{padding:12px 10px;color:var(--tlo);font-size:10px;text-align:center}' +
       '#bd-root .bd-strip .cell.has-lim{overflow:visible}' +
-      '#bd-root .bd-strip{overflow:visible}';
+      '#bd-root .bd-strip{overflow:visible}' +
+      /* 手機直式：KPI 兩欄、四個資訊區上下排；由 shell-views 單獨負責垂直捲動。 */
+      '@media(max-width:900px) and (orientation:portrait){' +
+        'html[data-st5-route="breadth"] #shell-views:has(#view-breadth.on){overflow-x:hidden!important;overflow-y:auto!important}' +
+        '#view-breadth.sv-panel.on,#mount-breadth,#mount-breadth.sv-mount,#bd-root,#bd-body{' +
+          'height:auto!important;min-height:0!important;overflow:visible!important;flex:none!important}' +
+        '#bd-root .bd-head{align-items:flex-start;flex-wrap:wrap;margin-bottom:8px}' +
+        '#bd-root .bd-head>div:first-child{width:100%;align-items:flex-start}' +
+        '#bd-root .bd-title{font-size:19px;line-height:1.25}' +
+        '#bd-root .bd-sub{font-size:11px;line-height:1.4}' +
+        '#bd-root .bd-actions{width:100%;justify-content:flex-start;flex-wrap:wrap}' +
+        '#bd-root .bd-btn{min-height:30px;padding:5px 9px;font-size:11px}' +
+        '#bd-root .bd-strip{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-bottom:8px}' +
+        '#bd-root .bd-strip .cell{min-height:66px;padding:7px 8px}' +
+        '#bd-root .bd-strip .k{font-size:10px;line-height:1.35;white-space:normal}' +
+        '#bd-root .bd-strip .v{font-size:17px;line-height:1.25;white-space:normal;overflow:visible}' +
+        '#bd-root .bd-strip .s{font-size:10px;line-height:1.35;white-space:normal;overflow:visible}' +
+        '#bd-root .bd-dash{display:flex!important;flex-direction:column;grid-template-columns:none!important;' +
+          'grid-template-rows:none!important;height:auto!important;overflow:visible!important;gap:8px}' +
+        '#bd-root .bd-zone,#bd-root .bd-zone-up,#bd-root .bd-zone-lo{display:contents}' +
+        '#bd-root .bd-sec{height:auto!important;min-height:0!important;overflow:visible!important;padding:9px 10px}' +
+        '#bd-root .bd-sec h4{font-size:13px;line-height:1.35;margin-bottom:7px;flex-wrap:wrap}' +
+        '#bd-root .bd-sec>.bd-fill{height:auto!important;min-height:0!important;overflow:visible!important;flex:none!important}' +
+        '#bd-root .bd-structure .bd-fill{padding-top:2px}' +
+        '#bd-root .bd-structure .bd-score-wrap{margin-top:8px}' +
+        '#bd-root .bd-row{font-size:11px;line-height:1.4;padding:5px 0}' +
+        '#bd-root .bd-spark{min-height:116px;padding:8px}' +
+        '#bd-root .bd-spark svg,#bd-root .bd-spark .vz-spark-ax,#bd-root .bd-spark .vz-spark-wrap{min-height:98px;height:98px}' +
+        '#bd-root table.bd-hist{font-size:10px}' +
+        '#bd-root table.bd-hist th,#bd-root table.bd-hist td{padding:5px 4px}' +
+        '#bd-root .bd-mover-groups{grid-template-columns:minmax(0,1fr)!important}' +
+        '#bd-root .bd-pop{position:fixed;left:12px;right:12px;top:18%;width:auto;max-height:58vh}' +
+      '}';
   }
 
   function fmt(n, dig) {
@@ -258,6 +289,7 @@
     var V = window.Viz;
     var body = ensureMount();
     if (!body) return;
+    body.classList.remove('bd-loading');
     lastData = d;
     var sub = $('bd-sub');
     if (!d || (!d.ok && !d.indices)) {
@@ -448,7 +480,7 @@
     var dnTitle = limDnList.length ? '跌停／弱勢' : '跌幅前列';
     var moversSec =
       '<div class="bd-sec bd-movers"><h4>強弱榜<span style="color:var(--tlo);font-weight:600;font-size:8px">/movers</span></h4>' +
-        '<div class="bd-fill" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;align-content:start">' +
+        '<div class="bd-fill bd-mover-groups" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;align-content:start">' +
           limHalf(upList, upTitle, 'up') + limHalf(dnList, dnTitle, 'dn') +
         '</div>' +
         '<div class="bd-note">點列開圖表 · 紅漲綠跌</div></div>';
