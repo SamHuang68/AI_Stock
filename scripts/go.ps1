@@ -1,4 +1,4 @@
-# Stock Terminal v5.0 — tip UX + WaveDeck integrate (PowerShell)
+﻿# Stock Terminal v5.0 — tip UX + WaveDeck integrate (PowerShell)
 # Usage (from repo root):
 #   DOUBLE-CLICK:  START_TIP.cmd
 #   powershell -ExecutionPolicy Bypass -File .\scripts\go.ps1
@@ -176,9 +176,17 @@ This launcher pins an absolute path under data\stock_python.path instead.
 function Assert-TipBranch {
   $cur = (git branch --show-current 2>$null)
   Write-Host " branch: $cur"
-  $legacy = @('main', 'master', 'cursor/http-client-pool-3497', 'cursor/range-period-change-b5cf')
-  if ($legacy -contains $cur) {
+  # Canonical tip may be main after P0 Conditional Expectation landed on main.
+  # Only treat main/master as legacy when TIP_BRANCH still points at a tip feature branch.
+  $legacyTips = @('cursor/http-client-pool-3497', 'cursor/range-period-change-b5cf')
+  if ($legacyTips -contains $cur) {
     throw "BLOCK: current branch '$cur' is legacy. Run: powershell -File .\scripts\go.ps1 -Pull"
+  }
+  if (($cur -eq 'main' -or $cur -eq 'master') -and ($TipBranch -ne 'main' -and $TipBranch -ne 'master')) {
+    throw "BLOCK: current branch '$cur' is legacy vs tip '$TipBranch'. Run: powershell -File .\scripts\go.ps1 -Pull"
+  }
+  if ($cur -ne $TipBranch) {
+    throw "BLOCK: on '$cur' but tip is '$TipBranch'. Run: powershell -File .\scripts\go.ps1 -Pull"
   }
 }
 
@@ -418,3 +426,4 @@ Write-Host "  PYTHON=$Python  (pinned in data\stock_python.path)"
 Write-Host '  Server window title: Stock Terminal Server v5 tip'
 Write-Host '  Browser: Ctrl+F5 → badge 實測 5+5'
 Write-Host ''
+
