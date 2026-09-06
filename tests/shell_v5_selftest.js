@@ -127,6 +127,16 @@ ok(/function applyMktCellTone/.test(polish) && /overwrite stale inline color/.te
   'market bar resets current-source color for TWSE/TAIFEX overrides');
 ok(/window\.MarketData/.test(marketData) && /marketData/.test(polish) && /\/market\/snapshot/.test(marketData),
   'market headline surfaces use one canonical snapshot/event store');
+ok(/MarketFreshness/.test(fs.readFileSync(path.join(root, 'src/core/market_freshness_v5.js'), 'utf8')) &&
+  /worstAsOfMs/.test(fs.readFileSync(path.join(root, 'src/core/market_freshness_v5.js'), 'utf8')) &&
+  /shellHealthText/.test(shell) && /MarketData\.refresh/.test(shell) &&
+  /行情 asOf/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')),
+  'freshness contract uses per-quote worst asOf for shell and pulse surfaces');
+ok(/FeatureFlags/.test(fs.readFileSync(path.join(root, 'src/core/feature_flags_v5.js'), 'utf8')) &&
+  /shadowOvernightIntraday/.test(fs.readFileSync(path.join(root, 'src/core/feature_flags_v5.js'), 'utf8')) &&
+  /\/features/.test(fs.readFileSync(path.join(root, 'server/server.py'), 'utf8')) &&
+  /FeatureFlags\.isEnabled\('shadowEarlyWarning'\)/.test(decisionUi),
+  'shadow research surfaces are gated behind feature flags defaulting off');
 ok(/window\.DecisionData/.test(decisionData) && /inflight/.test(decisionData) && /decisionData/.test(decisionUi) &&
   /decisionSummary/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')) &&
   /decision_contract_version/.test(fs.readFileSync(path.join(root, 'src/ui/wavedeck_bridge_v5.js'), 'utf8')),

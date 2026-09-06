@@ -2652,6 +2652,13 @@
     var advTabs = renderTrendTabs(tone, BREADTH_TREND_TABS);
     var txfSess = txf.sessionLabel || (txf.session === 'night' ? '夜盤' : (txf.session === 'day' ? '日盤' : ''));
     var idxTip = '趨勢量化：vs前日／vs5日均／動能分／近20日Z／連續漲跌（與成交金額量能同構）';
+    function quoteFreshSuffix(q) {
+      var m = q && q.market;
+      if (!m || !m.asOf) return '';
+      return ' · asOf ' + String(m.asOf).replace('T', ' ').slice(0, 19) +
+        (m.session ? ' · ' + m.session : '') +
+        (m.source ? ' · ' + m.source : '');
+    }
     var t00Fb = chgWithPct(t00, 2, 2);
     var o00Fb = chgWithPct(o00, 2, 2);
     /* Basis＝台指期 − 加權（點）；優先用後端 strip.basisPts／basisPct */
@@ -2681,20 +2688,20 @@
     var txfName = txf.name || '台指期近月';
     var txfTip = '即時報價＝TAIFEX MIS 台指期近月' +
       (txfSess ? ('（' + txfSess + '）') : '') +
-      (txfSrc ? (' · source ' + txfSrc) : '') +
+      (txfSrc ? (' · source ' + txfSrc) : '') + quoteFreshSuffix(txf) +
       '｜趨勢量化＝FinMind 近月連續（代號 __TXF__，日線）覆寫最新點為當前報價｜' +
       'Basis＝期貨−加權現貨（盤後＝夜盤期貨−加權最新／昨收）｜顯示名：' + txfName;
     return '<div class="pl-strip">' +
       renderTrendCell({
         k: '加權指數 TAIEX', hero: true,
         vHtml: fmt(t00.price, 2),
-        trend: t00Tr, fallbackSub: t00Fb, tip: idxTip + ' · 加權',
+        trend: t00Tr, fallbackSub: t00Fb, tip: idxTip + ' · 加權' + quoteFreshSuffix(t00),
         go: 'chart', sym: '^TWII', mkt: 'TW'
       }) +
       renderTrendCell({
         k: '櫃買指數 OTC',
         vHtml: fmt(o00.price, 2),
-        trend: o00Tr, fallbackSub: o00Fb, tip: idxTip + ' · 櫃買',
+        trend: o00Tr, fallbackSub: o00Fb, tip: idxTip + ' · 櫃買' + quoteFreshSuffix(o00),
         go: 'chart', sym: '^TWOII', mkt: 'TW'
       }) +
       renderTrendCell({
@@ -3891,9 +3898,14 @@
 
     var sub = $('pl-sub');
     if (sub) {
-      sub.textContent = '更新 ' + new Date().toLocaleTimeString('zh-TW') +
-        (p.date ? ' · 廣度日 ' + p.date : '') +
-        (p.updatedAt ? ' · ' + String(p.updatedAt).replace('T', ' ') : '');
+      var snap = p.marketSnapshot || {};
+      var fresh = (window.MarketFreshness && MarketFreshness.snapshotSummary)
+        ? MarketFreshness.snapshotSummary(snap.quotes ? snap : { quotes: {}, marketAsOf: p.updatedAt, session: 'unknown' })
+        : null;
+      var worst = fresh && fresh.worstAsOf ? MarketFreshness.formatCompact(fresh.worstAsOf) : null;
+      var sess = fresh && fresh.session && fresh.session !== 'unknown' ? (' · ' + fresh.session) : '';
+      sub.textContent = '行情 asOf ' + (worst || (p.updatedAt ? String(p.updatedAt).replace('T', ' ') : '—')) + sess +
+        (p.date ? ' · 廣度日 ' + p.date : '');
     }
     _lastMacro = buildMacroFromPack(pack);
     maybeAnnounceFlip(_lastMacro);
