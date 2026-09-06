@@ -55,15 +55,23 @@ def _bars(days: int = 70):
     return rows
 
 
-def _fake_anthropic(messages, *, system=None, model=None, max_tokens=1024):
-    text = json.dumps({
-        'conclusion': '收盤走高，量能溫和。',
-        'drivers': ['收盤價高於 sma20'],
-        'hypotheses': ['資金回流權值'],
-        'risks': ['短線乖離擴大'],
-        'watchTomorrow': ['觀察是否續量'],
+def _fake_anthropic(messages, *, system=None, model=None, max_tokens=1024,
+                    temperature=None):
+    """Research canonical 批次回覆：由 user message 解析 symbols 一次回齊。"""
+    import re
+    codes = re.findall(r'"symbol":"([0-9A-Z]+)"', messages[0]['content'])
+    rows = [{
+        'symbol': code,
+        'narrative': {
+            'conclusion': f'{code} 收盤走高，量能溫和。',
+            'drivers': ['收盤價高於 sma20'],
+            'hypotheses': ['資金回流權值'],
+            'risks': ['短線乖離擴大'],
+            'watchTomorrow': ['觀察是否續量'],
+        },
         'citations': [{'type': 'quote', 'ref': 'quote.last'}],
-    }, ensure_ascii=False)
+    } for code in codes]
+    text = json.dumps({'symbols': rows, 'marketBlurb': None}, ensure_ascii=False)
     return text, {'model': model, 'usage': {'input_tokens': 2500, 'output_tokens': 700}}
 
 
@@ -153,7 +161,7 @@ class PostmarketHttpTest(unittest.TestCase):
             narrative = sym['narrative']
             for key in ('conclusion', 'drivers', 'hypotheses', 'risks', 'watchTomorrow'):
                 self.assertIn(key, narrative)
-        self.assertEqual(body['usage']['inputTokens'], 5000)
+        self.assertEqual(body['usage']['inputTokens'], 2500)  # canonical：整批單次呼叫
         self.assertGreater(body['usage']['estUsd'], 0)
         self.assertIn('usageToday', body)
         # 存檔可由 latest 端點讀回

@@ -47,9 +47,13 @@ MAX_EVIDENCE_CHARS = 200_000          # 413 防護：單一請求 context 上限
 STALE_POSTCLOSE_HOURS = 6.0
 STALE_INTRADAY_HOURS = 1.0
 STALE_RISK_PREFIX = '資料可能過期'
-PER_SYMBOL_MAX_TOKENS = 1200
-BLURB_MAX_TOKENS = 200
 BARS_LOOKBACK = 90
+
+# Research canonical call hints：temperature ~0–0.3；輸出約 800–1500 tokens／檔
+DEFAULT_TEMPERATURE = 0.2
+MAX_TOKENS_PER_SYMBOL = 1200
+MAX_TOKENS_FLOOR = 1500
+MAX_TOKENS_CEILING = 16000
 
 # 預設禁止的喊單／目標價語彙（驗收 §9-4；guardrail 直接移除命中片段）
 FORBIDDEN_PATTERNS = (
@@ -59,7 +63,8 @@ FORBIDDEN_PATTERNS = (
 )
 
 NARRATIVE_LIST_KEYS = ('drivers', 'hypotheses', 'risks', 'watchTomorrow')
-CITATION_TYPES = {'quote', 'chip', 'tech', 'news', 'decision'}
+# Research canonical schema：citations type 僅 news|chip|quote|decision
+CITATION_TYPES = {'news', 'chip', 'quote', 'decision'}
 
 # Anthropic 每百萬 token 粗估價（USD）：(model substring, input, output)
 _PRICES = (('opus', 15.0, 75.0), ('sonnet', 3.0, 15.0), ('haiku', 0.8, 4.0))
@@ -142,9 +147,10 @@ def _default_universe():
 def _default_anthropic(api_key: str):
     import ai_api
 
-    def call(messages, *, system=None, model=None, max_tokens=1024):
+    def call(messages, *, system=None, model=None, max_tokens=1024, temperature=None):
         return ai_api.anthropic_messages(
             api_key, messages, max_tokens=max_tokens, system=system, model=model,
+            temperature=temperature,
         )
     return call
 
@@ -470,32 +476,54 @@ def apply_staleness(narrative: Dict[str, Any], stale_reasons: List[str]) -> Dict
     return out
 
 
-# ── Prompt（system 邊界） ───────────────────────────────────────────────────
+# ── Prompt（Research canonical，見任務規格；勿放寬） ───────────────────────
 
-def system_prompt(locale: str = 'zh-Hant-TW') -> str:
+SYSTEM_PROMPT = (
+    '你是台股研究助理。你只能使用使用者訊息裡的 EvidencePack。'
+    '禁止發明股價、漲跌、成交量、籌碼或新聞。數字主張必須能對上 evidence 欄位；'
+    '缺資料就寫「資料不足」，不要猜測。禁止下單指令、目標價喊單、保證獲利。'
+    '不要計算或改寫 regime、支撐壓力、信心分數、曝險區間——'
+    '那些若出現在 decisionSummary，只能當既有證據引用，不可重算或推翻成新分數。'
+    '若任一 evidenceAsOf 明顯過舊，把「資料可能過期」放在 risks 第一條。'
+    '輸出必須是單一 JSON 物件，不要 markdown、不要代碼圍欄，schema：'
+    '{"symbols":[{"symbol":"字串","narrative":{"conclusion":"字串","drivers":["字串"],'
+    '"hypotheses":["字串"],"risks":["字串"],"watchTomorrow":["字串"]},'
+    '"citations":[{"type":"news|chip|quote|decision","ref":"字串"}]}],'
+    '"marketBlurb":null或字串}'
+)
+
+
+def system_prompt() -> str:
+    return SYSTEM_PROMPT
+
+
+def _strip_nulls(value: Any) -> Any:
+    """Call hint：EvidencePack JSON 去除 null 欄位省 token（保留空陣列語意）。"""
+    if isinstance(value, dict):
+        return {k: _strip_nulls(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list):
+        return [_strip_nulls(v) for v in value]
+    return value
+
+
+def user_message(packs: List[Dict[str, Any]], as_of: str, locale: str) -> str:
+    """Research canonical user 骨架（近逐字）。"""
+    evidence_json = json.dumps(_strip_nulls(packs), ensure_ascii=False,
+                               separators=(',', ':'))
     return (
-        '你是台股研究助理，為使用者撰寫「盤後敘事日報」。\n'
-        '規則（必須全部遵守）：\n'
-        '1. 只能使用 user message 內的 EvidencePack 佐證資料；缺資料就明說「資料不足」，'
-        '禁止補造價格、籌碼、新聞或任何數字。\n'
-        '2. 每句涉及數字的主張，都必須對得上 EvidencePack 的欄位值。\n'
-        '3. 禁止下單指令、禁止建議買進、禁止建議賣出、禁止目標價喊單、禁止保證獲利。\n'
-        '4. regime、支撐壓力、信心分數、曝險區間一律以 decisionSummary 既有數值為唯讀證據，'
-        '禁止自行推算、改寫或給出新的等級。\n'
-        '5. 若 EvidencePack 的 stale 為 true，risks 第一條必須以「資料可能過期」開頭。\n'
-        '6. 輸出「嚴格 JSON」（單一 object、無 markdown 圍欄、無多餘文字）：\n'
-        '{"conclusion": "一段結論", "drivers": ["…"], "hypotheses": ["…"], '
-        '"risks": ["…"], "watchTomorrow": ["…"], '
-        '"citations": [{"type": "quote|chip|tech|news|decision", "ref": "對應欄位或標題"}]}\n'
-        f'語言：{locale or "zh-Hant-TW"}（台灣正體中文）。'
+        f'locale: {locale}\n'
+        f'reportAsOf: {as_of}\n'
+        'EvidencePack:\n'
+        f'{evidence_json}\n\n'
+        '請依 system 規則產出 JSON。每檔 conclusion 2–4 句；'
+        'drivers/hypotheses/risks/watchTomorrow 各 1–4 條，精簡可掃讀。'
     )
 
 
-def _user_message(pack: Dict[str, Any], as_of: str, locale: str) -> str:
-    return json.dumps(
-        {'reportAsOf': as_of, 'locale': locale, 'evidencePack': pack},
-        ensure_ascii=False, separators=(',', ':'),
-    )
+def scaled_max_tokens(symbol_count: int) -> int:
+    """Call hint：max_tokens 隨檔數縮放（~800–1500 output／檔）。"""
+    n = max(1, int(symbol_count))
+    return min(MAX_TOKENS_CEILING, max(MAX_TOKENS_FLOOR, 300 + MAX_TOKENS_PER_SYMBOL * n))
 
 
 def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
@@ -677,50 +705,42 @@ def generate_report(body: Dict[str, Any], *, api_key: str,
         import ai_api
         model = ai_api.resolve_model_hint(api_key, model_hint)
         call = anthropic_call or _accessors.get('anthropic_fn') or _default_anthropic(api_key)
-        sys_prompt = system_prompt(locale)
 
-        report_symbols: List[Dict[str, Any]] = []
-        total_in = total_out = 0
-        calls = 0
-        partial = False
-        aborted = False
-        upstream_error: Optional[Tuple[int, str]] = None
-
-        # 批次 concurrency = 1（規格允許 1–2；序列最可預測、避免額度暴衝）
-        for index, pack in enumerate(packs):
+        def _entry(pack: Dict[str, Any], **extra: Any) -> Dict[str, Any]:
             entry: Dict[str, Any] = {
                 'symbol': pack['symbol'],
                 'evidenceAsOf': pack.get('evidenceAsOf') or {},
                 'stale': bool(pack.get('stale')),
             }
-            if client_id and is_aborted(client_id):
-                aborted = True
-                entry['error'] = 'aborted'
-                report_symbols.append(entry)
-                continue
-            if index > 0 and not gate.acquire(GATE_OWNER, ttl_sec=GATE_TTL_SEC,
-                                              purpose=GATE_PURPOSE):
-                # WD 中途 preempt：不搶、不 fallback 本機 deep，剩餘標記後結束。
-                partial = True
-                entry['error'] = 'gate_preempted_by_wavedeck'
-                report_symbols.append(entry)
-                for rest in packs[index + 1:]:
-                    report_symbols.append({
-                        'symbol': rest['symbol'],
-                        'evidenceAsOf': rest.get('evidenceAsOf') or {},
-                        'stale': bool(rest.get('stale')),
-                        'error': 'gate_preempted_by_wavedeck',
-                    })
-                break
+            if pack.get('notes'):
+                entry['notes'] = pack['notes']
+            entry.update(extra)
+            return entry
+
+        report_symbols: List[Dict[str, Any]] = []
+        total_in = total_out = 0
+        calls = 0
+        aborted = False
+        market_blurb = None
+        upstream_error: Optional[Tuple[int, str]] = None
+
+        # Research canonical：整批 EvidencePack 一次呼叫，模型回
+        # {"symbols":[…],"marketBlurb":null或字串}；wrappers 由 server 補。
+        if client_id and is_aborted(client_id):
+            aborted = True
+            report_symbols = [_entry(p, error='aborted') for p in packs]
+        else:
             try:
                 text, raw = call(
-                    [{'role': 'user', 'content': _user_message(pack, as_of, locale)}],
-                    system=sys_prompt, model=model, max_tokens=PER_SYMBOL_MAX_TOKENS,
+                    [{'role': 'user', 'content': user_message(packs, as_of, locale)}],
+                    system=system_prompt(), model=model,
+                    max_tokens=scaled_max_tokens(len(packs)),
+                    temperature=DEFAULT_TEMPERATURE,
                 )
-                calls += 1
+                calls = 1
                 usage = (raw or {}).get('usage') or {}
-                total_in += int(usage.get('input_tokens') or 0)
-                total_out += int(usage.get('output_tokens') or 0)
+                total_in = int(usage.get('input_tokens') or 0)
+                total_out = int(usage.get('output_tokens') or 0)
             except urllib.error.HTTPError as exc:
                 detail = ''
                 try:
@@ -728,57 +748,57 @@ def generate_report(body: Dict[str, Any], *, api_key: str,
                 except Exception:
                     pass
                 upstream_error = (int(exc.code), detail)
-                entry['error'] = f'anthropic HTTP {exc.code}'
-                report_symbols.append(entry)
-                partial = True
-                break  # 上游限流／失敗即停，避免整批硬打
+                report_symbols = [_entry(p, error=f'anthropic HTTP {exc.code}')
+                                  for p in packs]
             except Exception as exc:
                 upstream_error = (0, type(exc).__name__)
-                entry['error'] = 'anthropic call failed: ' + type(exc).__name__
-                report_symbols.append(entry)
-                partial = True
-                break
-
-            parsed = parse_llm_json(text)
-            ok, errors = validate_narrative(parsed)
-            if not ok:
-                entry['error'] = 'narrative JSON 驗證失敗: ' + '; '.join(errors)
-                report_symbols.append(entry)
-                continue
-            narrative = {k: parsed[k] for k in ('conclusion', *NARRATIVE_LIST_KEYS)}
-            narrative, guard_flags = scrub_advice(narrative)
-            narrative = apply_staleness(narrative, pack.get('staleReasons') or [])
-            entry['narrative'] = narrative
-            entry['citations'] = normalize_citations(parsed.get('citations'))
-            if guard_flags:
-                entry['guardrail'] = guard_flags
-            if pack.get('notes'):
-                entry['notes'] = pack['notes']
-            report_symbols.append(entry)
-
-        market_blurb = None
-        if include['macro'] and decision and not partial and not aborted:
-            try:
-                text, raw = call(
-                    [{'role': 'user', 'content': json.dumps(
-                        {'reportAsOf': as_of, 'locale': locale,
-                         'marketDecision': decision,
-                         'task': '僅根據 marketDecision 唯讀證據，用一句話描述大盤現況，'
-                                 '輸出嚴格 JSON {"marketBlurb": "…"}'},
-                        ensure_ascii=False, separators=(',', ':'))}],
-                    system=sys_prompt, model=model, max_tokens=BLURB_MAX_TOKENS,
-                )
-                calls += 1
-                usage = (raw or {}).get('usage') or {}
-                total_in += int(usage.get('input_tokens') or 0)
-                total_out += int(usage.get('output_tokens') or 0)
-                parsed = parse_llm_json(text) or {}
-                blurb = parsed.get('marketBlurb')
-                if isinstance(blurb, str) and blurb.strip() \
-                        and not contains_forbidden_advice(blurb):
-                    market_blurb = blurb.strip()
-            except Exception:
-                market_blurb = None
+                report_symbols = [
+                    _entry(p, error='anthropic call failed: ' + type(exc).__name__)
+                    for p in packs
+                ]
+            else:
+                parsed = parse_llm_json(text)
+                by_symbol: Dict[str, Dict[str, Any]] = {}
+                raw_blurb = None
+                if isinstance(parsed, dict):
+                    for row in (parsed.get('symbols')
+                                if isinstance(parsed.get('symbols'), list) else []):
+                        if isinstance(row, dict):
+                            code = str(row.get('symbol') or '').strip().upper()
+                            if code:
+                                by_symbol[code] = row
+                    raw_blurb = parsed.get('marketBlurb')
+                for pack in packs:
+                    row = by_symbol.get(pack['symbol'])
+                    if parsed is None:
+                        report_symbols.append(_entry(
+                            pack, error='narrative JSON 驗證失敗: 模型未回傳 JSON'))
+                        continue
+                    if row is None:
+                        report_symbols.append(_entry(
+                            pack, error='narrative JSON 驗證失敗: 模型未回覆本檔'))
+                        continue
+                    ok, errors = validate_narrative(row.get('narrative'))
+                    if not ok:
+                        report_symbols.append(_entry(
+                            pack, error='narrative JSON 驗證失敗: ' + '; '.join(errors)))
+                        continue
+                    narrative = {k: row['narrative'][k]
+                                 for k in ('conclusion', *NARRATIVE_LIST_KEYS)}
+                    narrative, guard_flags = scrub_advice(narrative)
+                    narrative = apply_staleness(narrative, pack.get('staleReasons') or [])
+                    extra: Dict[str, Any] = {
+                        'narrative': narrative,
+                        'citations': normalize_citations(row.get('citations')),
+                    }
+                    if guard_flags:
+                        extra['guardrail'] = guard_flags
+                    report_symbols.append(_entry(pack, **extra))
+                # marketBlurb：模型可回 null；僅在 include.macro opt-in 且通過
+                # guardrail 時放進回應。
+                if include['macro'] and isinstance(raw_blurb, str) \
+                        and raw_blurb.strip() and not contains_forbidden_advice(raw_blurb):
+                    market_blurb = raw_blurb.strip()
     finally:
         gate.release(GATE_OWNER)
         if client_id:
@@ -805,7 +825,7 @@ def generate_report(body: Dict[str, Any], *, api_key: str,
     }
     if market_blurb:
         payload['marketBlurb'] = market_blurb
-    if partial:
+    if succeeded and any('error' in s for s in report_symbols):
         payload['partial'] = True
     if aborted:
         payload['aborted'] = True

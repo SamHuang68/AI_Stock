@@ -1,20 +1,24 @@
 # -*- coding: utf-8 -*-
 """盤後敘事日報（postmarket_report）模組測試 — 驗收 §9 對應：
 
-1. narrative JSON schema 嚴格驗證
+1. narrative JSON schema 嚴格驗證（Research canonical batch schema）
 2. 人為改壞 quote asOf → 報告首條 risk 標「資料可能過期」
 3. Decision 數字唯讀快照（不重算、欄位對齊）
-4. 預設不得出現「建議買進／目標價」— system prompt 明文禁止 + guardrail 移除
-5. 與 WaveDeck 同時搶 gate → 行為可預測（503 / partial），且 gate 一定釋放、
+4. 預設不得出現「建議買進／目標價」— canonical system prompt 明文禁止 + guardrail 移除
+5. 與 WaveDeck 同時搶 gate → 行為可預測（503 + Retry-After），且 gate 一定釋放、
    除 reports 目錄外不寫任何狀態
+
+Prompt 契約：Research canonical（單次呼叫、整批 EvidencePack、
+模型回 {"symbols":[…],"marketBlurb":null|字串}、temperature 0–0.3、
+max_tokens 隨檔數縮放、EvidencePack 去 null）。
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
-import time
 import unittest
 import urllib.error
 from datetime import datetime, timedelta
@@ -71,34 +75,54 @@ def _decision_context():
     }
 
 
-def _narrative_json(**overrides):
+def _narrative(**overrides):
     base = {
-        'conclusion': '2330 收在 1000.0，較前一日上漲 0.2%，量能持平。',
+        'conclusion': '2330 收在 1000.0，較前一日上漲 0.2%，量能持平。籌碼與價格方向一致。',
         'drivers': ['外資買超 1,000 張（chips.inst.foreign）'],
         'hypotheses': ['法說會前卡位'],
         'risks': ['量能未放大'],
         'watchTomorrow': ['能否站穩 sma20'],
-        'citations': [{'type': 'quote', 'ref': 'quote.last'},
-                      {'type': 'chip', 'ref': 'chips.inst.foreign'}],
     }
     base.update(overrides)
-    return json.dumps(base, ensure_ascii=False)
+    return base
+
+
+def _batch_json(symbols=('2330',), blurb=None, narratives=None):
+    """Research canonical 模型輸出：{"symbols":[…],"marketBlurb":null|字串}。"""
+    rows = []
+    for code in symbols:
+        narrative = (narratives or {}).get(code) or _narrative()
+        rows.append({
+            'symbol': code,
+            'narrative': narrative,
+            'citations': [{'type': 'quote', 'ref': 'quote.last'},
+                          {'type': 'chip', 'ref': 'chips.inst.foreign'}],
+        })
+    return json.dumps({'symbols': rows, 'marketBlurb': blurb}, ensure_ascii=False)
 
 
 class FakeAnthropic:
-    """可注入回覆序列的 anthropic_call 替身，並記錄每次收到的 prompt。"""
+    """可注入回覆序列的 anthropic_call 替身，並記錄每次收到的參數。
+
+    預設回覆：從 user message 的 EvidencePack 解析 symbols，回 canonical batch。
+    """
 
     def __init__(self, replies=None, error=None):
         self.replies = list(replies or [])
         self.error = error
         self.calls = []
 
-    def __call__(self, messages, *, system=None, model=None, max_tokens=1024):
-        self.calls.append({'messages': messages, 'system': system,
-                           'model': model, 'max_tokens': max_tokens})
+    def __call__(self, messages, *, system=None, model=None, max_tokens=1024,
+                 temperature=None):
+        self.calls.append({'messages': messages, 'system': system, 'model': model,
+                           'max_tokens': max_tokens, 'temperature': temperature})
         if self.error is not None:
             raise self.error
-        text = self.replies.pop(0) if self.replies else _narrative_json()
+        if self.replies:
+            text = self.replies.pop(0)
+        else:
+            codes = re.findall(r'"symbol":"([0-9A-Z]+)"', messages[0]['content'])
+            text = _batch_json(symbols=codes or ('2330',))
         return text, {'model': model, 'usage': {'input_tokens': 3000, 'output_tokens': 800}}
 
 
@@ -197,7 +221,7 @@ class EvidencePackTest(PostmarketBase):
 
 class NarrativeContractTest(unittest.TestCase):
     def test_validate_narrative_strict_schema(self):
-        ok, errors = pr.validate_narrative(json.loads(_narrative_json()))
+        ok, errors = pr.validate_narrative(_narrative())
         self.assertTrue(ok, errors)
         for broken in (
             None, [], 'x',
@@ -211,16 +235,44 @@ class NarrativeContractTest(unittest.TestCase):
             self.assertTrue(errors)
 
     def test_parse_llm_json_tolerates_fences(self):
-        raw = '```json\n' + _narrative_json() + '\n```'
+        raw = '```json\n' + _batch_json() + '\n```'
         self.assertIsNotNone(pr.parse_llm_json(raw))
         self.assertIsNone(pr.parse_llm_json('沒有 JSON'))
 
-    def test_system_prompt_forbids_trade_calls_and_recompute(self):
-        """驗收 §9-4（prompt 面）：明文禁止買賣建議／目標價；Decision 唯讀。"""
+    def test_system_prompt_is_research_canonical(self):
+        """驗收 §9-4（prompt 面）：canonical system 逐字關鍵句都在。"""
         prompt = pr.system_prompt()
-        for phrase in ('禁止建議買進', '禁止建議賣出', '目標價', '保證獲利',
-                       '禁止自行推算', 'decisionSummary', '資料不足', '資料可能過期'):
+        for phrase in (
+            '你是台股研究助理。你只能使用使用者訊息裡的 EvidencePack。',
+            '禁止發明股價、漲跌、成交量、籌碼或新聞。',
+            '缺資料就寫「資料不足」，不要猜測。',
+            '禁止下單指令、目標價喊單、保證獲利。',
+            '不要計算或改寫 regime、支撐壓力、信心分數、曝險區間',
+            '只能當既有證據引用，不可重算或推翻成新分數',
+            '把「資料可能過期」放在 risks 第一條',
+            '輸出必須是單一 JSON 物件，不要 markdown、不要代碼圍欄',
+            '"type":"news|chip|quote|decision"',
+            '"marketBlurb":null或字串',
+        ):
             self.assertIn(phrase, prompt)
+
+    def test_user_message_follows_canonical_skeleton_and_strips_nulls(self):
+        packs = [{'symbol': '2330', 'quote': {'last': 1000.0, 'prevClose': None},
+                  'news': []}]
+        msg = pr.user_message(packs, '2026-09-06T15:05:00+08:00', 'zh-Hant-TW')
+        self.assertTrue(msg.startswith('locale: zh-Hant-TW\n'
+                                       'reportAsOf: 2026-09-06T15:05:00+08:00\n'
+                                       'EvidencePack:\n'))
+        self.assertIn('請依 system 規則產出 JSON。每檔 conclusion 2–4 句；'
+                      'drivers/hypotheses/risks/watchTomorrow 各 1–4 條，精簡可掃讀。', msg)
+        self.assertIn('"last":1000.0', msg)
+        self.assertNotIn('null', msg)          # call hint：去 null 省 token
+        self.assertIn('"news":[]', msg)        # 空陣列語意保留（資料不足可稽核）
+
+    def test_scaled_max_tokens_follows_symbol_count(self):
+        self.assertEqual(pr.scaled_max_tokens(1), 1500)
+        self.assertEqual(pr.scaled_max_tokens(5), 300 + 1200 * 5)
+        self.assertEqual(pr.scaled_max_tokens(20), pr.MAX_TOKENS_CEILING)
 
     def test_scrub_advice_removes_forbidden_output(self):
         """驗收 §9-4（輸出面）：模型違規輸出被 guardrail 移除。"""
@@ -249,6 +301,17 @@ class NarrativeContractTest(unittest.TestCase):
         self.assertTrue(out['risks'][0].startswith('資料可能過期'))
         self.assertEqual(out['risks'][1], '既有風險')
         self.assertEqual(pr.apply_staleness(narrative, []), narrative)
+
+    def test_citations_only_canonical_types(self):
+        rows = pr.normalize_citations([
+            {'type': 'quote', 'ref': 'quote.last'},
+            {'type': 'tech', 'ref': 'techSummary.sma20'},   # canonical 無 tech → 濾除
+            {'type': 'decision', 'ref': 'decisionSummary.regime'},
+            {'type': 'news', 'ref': '重大訊息標題'},
+            {'type': 'chip', 'ref': 'chips.inst.foreign'},
+            {'type': 'quote'},                               # 缺 ref → 濾除
+        ])
+        self.assertEqual([r['type'] for r in rows], ['quote', 'decision', 'news', 'chip'])
 
     def test_estimate_cost_by_model_family(self):
         sonnet = pr.estimate_cost_usd('claude-sonnet-4-6', 1_000_000, 0)
@@ -289,11 +352,24 @@ class GenerateReportTest(PostmarketBase):
         self.assertEqual(again['payload']['usageToday']['runs'], 2)
         self.assertAlmostEqual(again['payload']['usageToday']['estUsd'],
                                2 * payload['usage']['estUsd'], places=6)
-        # user message 只帶 EvidencePack（server 組 context，不下放 key）
-        content = fake.calls[0]['messages'][0]['content']
-        self.assertIn('"evidencePack"', content)
+
+    def test_single_call_uses_canonical_prompt_and_hints(self):
+        """Research canonical：整批一次呼叫；system 逐字；user 骨架；temp/max_tokens hints。"""
+        result, fake = self._generate(body={'symbols': ['2330', '2454']})
+        self.assertEqual(result['status'], 200)
+        self.assertEqual(len(result['payload']['symbols']), 2)
+        self.assertEqual(len(fake.calls), 1)
+        call = fake.calls[0]
+        self.assertEqual(call['system'], pr.SYSTEM_PROMPT)
+        content = call['messages'][0]['content']
+        self.assertTrue(content.startswith('locale: zh-Hant-TW\n'))
+        self.assertIn('EvidencePack:\n', content)
         self.assertIn('"last":1000.0', content)
-        self.assertNotIn('sk-test', content)
+        self.assertIn('請依 system 規則產出 JSON', content)
+        self.assertNotIn('sk-test', content)     # server 組 context，不下放 key
+        self.assertEqual(call['temperature'], pr.DEFAULT_TEMPERATURE)
+        self.assertTrue(0 <= call['temperature'] <= 0.3)
+        self.assertEqual(call['max_tokens'], pr.scaled_max_tokens(2))
 
     def test_stale_quote_flags_first_risk(self):
         """驗收 §9-2：改壞 quote asOf → narrative.risks 首條標資料可能過期。"""
@@ -305,10 +381,10 @@ class GenerateReportTest(PostmarketBase):
         self.assertTrue(sym['narrative']['risks'][0].startswith('資料可能過期'))
 
     def test_forbidden_model_output_scrubbed(self):
-        fake = FakeAnthropic(replies=[_narrative_json(
+        fake = FakeAnthropic(replies=[_batch_json(narratives={'2330': _narrative(
             conclusion='強勢，建議買進，目標價 1200。',
             drivers=['外資買超', '建議加碼'],
-        )])
+        )})])
         result, _ = self._generate(fake=fake)
         sym = result['payload']['symbols'][0]
         joined = json.dumps(sym['narrative'], ensure_ascii=False)
@@ -348,34 +424,18 @@ class GenerateReportTest(PostmarketBase):
         self.assertEqual(llm_gate.status()['purpose'], 'postmarket-daily')
         llm_gate.release('st')
 
-    def test_mid_batch_preempt_yields_predictable_partial(self):
-        class PreemptGate:
-            def __init__(self):
-                self.acquires = 0
-            def wd_busy(self):
-                return False
-            def wait_or_defer(self, owner, wait_sec=2.0, ttl_sec=120, purpose=None):
-                return True
-            def acquire(self, owner, ttl_sec=120, purpose=None):
-                self.acquires += 1
-                return False  # WD 中途 preempt
-            def release(self, owner):
-                self.released = True
-            def status(self):
-                return {'held': True, 'owner': 'wd', 'remaining_sec': 10}
-
-        gate = PreemptGate()
-        result, fake = self._generate(
-            body={'symbols': ['2330', '2454', '2317']}, gate=gate)
+    def test_model_omitting_symbol_yields_partial(self):
+        """模型漏回某檔 → 該檔標錯誤、其餘正常、payload.partial=true。"""
+        fake = FakeAnthropic(replies=[_batch_json(symbols=('2330',))])
+        result, _ = self._generate(body={'symbols': ['2330', '2454']}, fake=fake)
         payload = result['payload']
         self.assertEqual(result['status'], 200)
         self.assertTrue(payload['partial'])
-        self.assertEqual(len(fake.calls), 1)      # 只跑了第一檔
-        errors = [s.get('error') for s in payload['symbols'][1:]]
-        self.assertEqual(errors, ['gate_preempted_by_wavedeck'] * 2)
-        self.assertTrue(gate.released)
+        by_code = {s['symbol']: s for s in payload['symbols']}
+        self.assertIn('narrative', by_code['2330'])
+        self.assertIn('模型未回覆本檔', by_code['2454']['error'])
 
-    def test_abort_signal_skips_remaining_symbols(self):
+    def test_abort_signal_skips_batch(self):
         cid = 'test-abort-1'
         pr.signal_abort(cid)
         result, fake = self._generate(
@@ -414,15 +474,21 @@ class GenerateReportTest(PostmarketBase):
             self.assertTrue(ok, f'不允許的寫入: {path}')
 
     def test_market_blurb_only_with_macro_optin(self):
-        result, fake = self._generate()
+        # 模型回 blurb 但未 opt-in macro → server 不放進回應
+        fake = FakeAnthropic(replies=[_batch_json(blurb='大盤量縮整理。')])
+        result, _ = self._generate(fake=fake)
         self.assertNotIn('marketBlurb', result['payload'])
-        fake2 = FakeAnthropic(replies=[_narrative_json(),
-                                       json.dumps({'marketBlurb': '大盤量縮整理。'},
-                                                  ensure_ascii=False)])
+        # opt-in macro → 放行（仍單次呼叫）
+        fake2 = FakeAnthropic(replies=[_batch_json(blurb='大盤量縮整理。')])
         result, _ = self._generate(
             body={'symbols': ['2330'], 'include': {'macro': True}}, fake=fake2)
         self.assertEqual(result['payload']['marketBlurb'], '大盤量縮整理。')
-        self.assertEqual(len(fake2.calls), 2)
+        self.assertEqual(len(fake2.calls), 1)
+        # 模型回 null → 一律省略
+        fake3 = FakeAnthropic(replies=[_batch_json(blurb=None)])
+        result, _ = self._generate(
+            body={'symbols': ['2330'], 'include': {'macro': True}}, fake=fake3)
+        self.assertNotIn('marketBlurb', result['payload'])
 
     def test_resolve_model_hint_opus_optin_default_sonnet(self):
         today = datetime.now().strftime('%Y%m%d')
