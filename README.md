@@ -21,7 +21,8 @@
 - **台指選擇權結構（預設收合）**：精確到期別整合 TAIFEX 一般盤日終 OI、結算價與官方 Delta；分層呈現 OI 事實、IV／Gamma Density 衍生值，以及明確標成 Shadow 的 Signed GEX／Flip 情境，不把公開 OI 冒充造市商真實持倉。
 - **台美顏色語意分離**：台股／台指期紅漲綠跌；美股綠漲紅跌。
 - **本機優先**：介面與伺服器只在本機運作，預設僅監聽 `127.0.0.1:18432`。
-- **可追溯資料品質**：健康檢查、來源狀態、快取與路由診斷都可由本機端點或紀錄查核。
+- **可追溯資料品質**：健康檢查、來源狀態、快取與路由診斷都可由本機端點或紀錄查核。頂列同步燈以各行情 `asOf` 中最舊者為準（見 `market_freshness_v5.js`）。
+- **Shadow 研究預設關閉**：盤別動量、前兆雷達、共識 Radar 等實驗面預設不載入；於「設定」或 `ST_ENABLE_SHADOW_RESEARCH=1` 啟用（詳 `docs/ARTIFACTS.md`）。
 - **可選 WaveDeck**：以獨立執行台接收 Stock Terminal 的宏觀風險訊號，維持研究與執行職責分離。
 - **安全分享包**：打包器只帶必要程式與公開種子資料，並掃描檔名、內容、個人路徑與常見密鑰格式。
 
@@ -32,14 +33,14 @@
 ### Windows
 
 ```powershell
-cd C:\Stock_Terminal
+cd C:\path\to\AI_Stock   # 或你的本機 clone 目錄（例如 C:\Stock_Terminal）
 .\START_TIP.cmd
 ```
 
 ### Linux / macOS
 
 ```bash
-cd /path/to/Stock_Terminal
+cd /path/to/AI_Stock     # 例如 git clone 後的專案根目錄
 chmod +x scripts/go.sh
 ./scripts/go.sh
 ```
