@@ -386,6 +386,7 @@
     if (!mount) { mount = document.createElement('div'); mount.id = 'mount-decision'; panel.appendChild(mount); }
     if (!$('dc-root')) {
       mount.innerHTML = '<div id="dc-root"><div class="dc-head"><div class="dc-head-copy"><div class="dc-title-line"><div class="dc-title">策略決策中心</div>' +
+        (window.EpistemicBadgesV5 ? window.EpistemicBadgesV5.badge('FACT', { note: 'DecisionContext', compact: true }) : '') +
         '<a class="dc-doc-link" href="/assets/docs/archify/st-decision-evidence-lineage.html" target="_blank" rel="noopener noreferrer" aria-label="在新分頁開啟決策證據鏈圖">ⓘ 決策證據鏈 ↗</a></div>' +
         '<div class="dc-sub" id="dc-sub">DecisionContext v1 · deterministic first · evidence before confidence</div></div>' +
         '<div class="dc-actions"><button class="dc-btn" data-shell-back>← 儀表板</button>' +

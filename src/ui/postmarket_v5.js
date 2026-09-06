@@ -122,6 +122,38 @@
       items.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></details>';
   }
 
+  function hypothesisBadge(note) {
+    if (window.EpistemicBadgesV5 && window.EpistemicBadgesV5.badge) {
+      return window.EpistemicBadgesV5.badge('HYPOTHESIS', { note: note || '敘事整理', compact: true });
+    }
+    return '';
+  }
+
+  function conditionalSection(symbol) {
+    if (window.ConditionalExpectationV5 && ConditionalExpectationV5.isEnabled &&
+      !ConditionalExpectationV5.isEnabled()) {
+      return '';
+    }
+    if (window.FeatureFlags && FeatureFlags.isEnabled &&
+      !FeatureFlags.isEnabled('shadowConditionalExpectation')) {
+      return '';
+    }
+    return '<div class="pmd-ce" id="pmd-ce-' + esc(symbol) + '" data-ce-symbol="' + esc(symbol) + '"></div>';
+  }
+
+  function mountConditionalCards(report) {
+    if (!window.ConditionalExpectationV5 || !ConditionalExpectationV5.isEnabled ||
+      !ConditionalExpectationV5.isEnabled()) {
+      return;
+    }
+    (report.symbols || []).forEach(function (row) {
+      var host = $('pmd-ce-' + row.symbol);
+      if (host && ConditionalExpectationV5.mountInto) {
+        ConditionalExpectationV5.mountInto(host, row.symbol);
+      }
+    });
+  }
+
   function render(report) {
     lastReport = report || null;
     var out = $('pmd-out');
@@ -143,7 +175,7 @@
       if (row.error) {
         html += '<div class="pmd-err">✕ ' + esc(row.error) + '</div>';
       } else if (nar) {
-        html += '<div class="pmd-conc">' + esc(nar.conclusion || '') + '</div>' +
+        html += '<div class="pmd-conc">' + hypothesisBadge('結論敘事') + ' ' + esc(nar.conclusion || '') + '</div>' +
           listBlock('Drivers 驅動', nar.drivers, true) +
           listBlock('Hypotheses 假說', nar.hypotheses) +
           listBlock('Risks 風險', nar.risks) +
@@ -160,9 +192,10 @@
       if (row.notes && row.notes.length) {
         html += '<div class="pmd-note">' + esc(row.notes.join('；')) + '</div>';
       }
-      html += '</div>';
+      html += conditionalSection(row.symbol) + '</div>';
     });
     out.innerHTML = html || '<div class="pmd-note">回應內無 symbols。</div>';
+    mountConditionalCards(report);
     renderUsage(report);
   }
 
@@ -338,7 +371,9 @@
     wrap.id = 'pmd-modal';
     wrap.innerHTML =
       '<div id="pmd-box">' +
-        '<h3>盤後敘事日報 <span style="font-size:9px;color:var(--tlo,#8a94a6)">Claude 整理敘事 · 數字出自 ST EvidencePack · 非投資建議</span>' +
+        '<h3>盤後敘事日報 <span style="font-size:9px;color:var(--tlo,#8a94a6)">' +
+          (window.EpistemicBadgesV5 ? window.EpistemicBadgesV5.badge('HYPOTHESIS', { note: '敘事', compact: true }) + ' ' : '') +
+          'Claude 整理敘事 · 數字出自 ST EvidencePack · 非投資建議</span>' +
           '<button type="button" class="pmd-x" id="pmd-close">✕</button></h3>' +
         '<div id="pmd-ctl">' +
           '<input id="pmd-syms" placeholder="台股代號，逗號或空白分隔（預設帶入自選股）">' +
