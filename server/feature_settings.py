@@ -18,12 +18,14 @@ FEATURE_KEYS = (
     'shadowOvernightIntraday',
     'shadowEarlyWarning',
     'shadowConsensusAttention',
+    'shadowConditionalExpectation',
 )
 
 ENV_KEYS = {
     'shadowOvernightIntraday': 'ST_SHADOW_OVERNIGHT_INTRADAY',
     'shadowEarlyWarning': 'ST_SHADOW_EARLY_WARNING',
     'shadowConsensusAttention': 'ST_SHADOW_CONSENSUS_ATTENTION',
+    'shadowConditionalExpectation': 'ST_SHADOW_CONDITIONAL_EXPECTATION',
 }
 
 # Convenience master switch for local research sessions.
@@ -179,6 +181,7 @@ def public_payload(base_dir: str | Path | None = None) -> dict[str, Any]:
                 'shadowOvernightIntraday': True,
                 'shadowEarlyWarning': True,
                 'shadowConsensusAttention': True,
+                'shadowConditionalExpectation': True,
             },
         },
     }

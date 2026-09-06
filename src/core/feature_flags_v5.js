@@ -6,7 +6,8 @@
   var DEFAULTS = {
     shadowOvernightIntraday: false,
     shadowEarlyWarning: false,
-    shadowConsensusAttention: false
+    shadowConsensusAttention: false,
+    shadowConditionalExpectation: false
   };
   var serverFlags = Object.assign({}, DEFAULTS);
   var ready = false;
@@ -45,7 +46,8 @@
     var env = {
       shadowOvernightIntraday: 'ST_SHADOW_OVERNIGHT_INTRADAY=1',
       shadowEarlyWarning: 'ST_SHADOW_EARLY_WARNING=1',
-      shadowConsensusAttention: 'ST_SHADOW_CONSENSUS_ATTENTION=1'
+      shadowConsensusAttention: 'ST_SHADOW_CONSENSUS_ATTENTION=1',
+      shadowConditionalExpectation: 'ST_SHADOW_CONDITIONAL_EXPECTATION=1'
     };
     return '伺服器旗標關閉。請設定 ' + (env[key] || 'ST_ENABLE_SHADOW_RESEARCH=1') +
       ' 或 data/feature_flags.local.json 後重新啟動伺服器。';
