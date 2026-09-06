@@ -6624,7 +6624,7 @@ if __name__ == '__main__':
             '       Server will still start.\n' % sys.executable
         )
         sys.stderr.flush()
-    _probe0 = _pulse_layout_probe()
+    _probe0 = pulse_layout_probe(_BASE)
     _boot_trace('pulseLayout=%s' % json.dumps(_probe0, ensure_ascii=False))
     if _probe0.get('hasFourColPriority') or not _probe0.get('layoutAnchor'):
         _boot_trace('WARN pulse_v5.js is not tip 5col anchor — wrong tree / not pulled')
