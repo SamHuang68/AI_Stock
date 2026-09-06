@@ -192,6 +192,7 @@
       '<div class="ai5-tools">' +
         '<button type="button" class="ai5-btn primary" id="ai5-focus">焦點掃描</button>' +
         '<button type="button" class="ai5-btn" id="ai5-report">Claude 報告</button>' +
+        '<button type="button" class="ai5-btn" id="ai5-pmd">盤後日報</button>' +
         '<button type="button" class="ai5-btn" id="ai5-copilot">本機副駕</button>' +
       '</div>';
 
@@ -230,6 +231,12 @@
     var br = $('ai5-report');
     if (br) br.onclick = function () {
       if (typeof window.openAIModal === 'function') window.openAIModal();
+    };
+    var bp = $('ai5-pmd');
+    if (bp) bp.onclick = function () {
+      if (window.PostmarketDaily && typeof window.PostmarketDaily.open === 'function') {
+        window.PostmarketDaily.open();
+      }
     };
     var bc = $('ai5-copilot');
     if (bc) bc.onclick = function () {
