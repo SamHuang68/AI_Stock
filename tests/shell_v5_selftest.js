@@ -132,11 +132,17 @@ ok(/MarketFreshness/.test(fs.readFileSync(path.join(root, 'src/core/market_fresh
   /shellHealthText/.test(shell) && /MarketData\.refresh/.test(shell) &&
   /行情 asOf/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')),
   'freshness contract uses per-quote worst asOf for shell and pulse surfaces');
-ok(/FeatureFlags/.test(fs.readFileSync(path.join(root, 'src/core/feature_flags_v5.js'), 'utf8')) &&
-  /shadowOvernightIntraday/.test(fs.readFileSync(path.join(root, 'src/core/feature_flags_v5.js'), 'utf8')) &&
-  /\/features/.test(fs.readFileSync(path.join(root, 'server/server.py'), 'utf8')) &&
+var featureFlags = fs.readFileSync(path.join(root, 'src/core/feature_flags_v5.js'), 'utf8');
+var featuresRoutes = fs.readFileSync(path.join(root, 'server/features_routes.py'), 'utf8');
+var hubUi = fs.readFileSync(path.join(root, 'src/ui/hub_v5.js'), 'utf8');
+ok(/FeatureFlags/.test(featureFlags) &&
+  /shadowOvernightIntraday/.test(featureFlags) &&
+  /public_payload/.test(featuresRoutes) &&
+  !/setLocal/.test(featureFlags) &&
+  /localStorage\.removeItem/.test(featureFlags) &&
+  /GET \/features/.test(hubUi) &&
   /FeatureFlags\.isEnabled\('shadowEarlyWarning'\)/.test(decisionUi),
-  'shadow research surfaces are gated behind feature flags defaulting off');
+  'shadow research surfaces use server /features as source of truth defaulting off');
 ok(/window\.DecisionData/.test(decisionData) && /inflight/.test(decisionData) && /decisionData/.test(decisionUi) &&
   /decisionSummary/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')) &&
   /decision_contract_version/.test(fs.readFileSync(path.join(root, 'src/ui/wavedeck_bridge_v5.js'), 'utf8')),

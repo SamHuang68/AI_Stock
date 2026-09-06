@@ -1265,17 +1265,17 @@
       var body = $('hub-set-body');
       if (!body) return;
       var flagRows = '';
-      var flagMap = (features && features.flags) || (window.FeatureFlags && FeatureFlags.get ? FeatureFlags.get() : {});
+      var flagMap = (features && features.flags) || (window.FeatureFlags && FeatureFlags.getServer ? FeatureFlags.getServer() : {});
       [
         ['shadowOvernightIntraday', '盤別動量研究（Overnight × Intraday）'],
         ['shadowEarlyWarning', '跨市場前兆雷達（Early Warning）'],
         ['shadowConsensusAttention', '共識注意力 Radar']
       ].forEach(function (pair) {
         var on = !!flagMap[pair[0]];
+        var hint = window.FeatureFlags && FeatureFlags.enableHint ? FeatureFlags.enableHint(pair[0]) : '';
         flagRows += '<tr><td>' + pair[1] + '</td><td><span class="badge ' + (on ? 'ok' : 'warn') + '">' +
-          (on ? '已啟用' : '預設關閉') + '</span></td><td style="text-align:left">' +
-          '<button class="hub-btn" data-flag="' + pair[0] + '" data-flag-value="1">啟用</button> ' +
-          '<button class="hub-btn" data-flag="' + pair[0] + '" data-flag-value="0">關閉</button></td></tr>';
+          (on ? '伺服器已啟用' : '伺服器關閉') + '</span></td><td style="text-align:left;font-size:11px;color:#94a3b8">' +
+          (on ? '重新啟動伺服器後生效' : hint) + '</td></tr>';
       });
       body.innerHTML =
         '<div class="hub-strip">' +
@@ -1290,25 +1290,17 @@
             '<div class="s">只更新新交易日</div></div>' +
         '</div>' +
         '<div class="hub-dash hub-cols-2">' +
-          '<div class="hub-sec"><h4>Shadow／實驗功能（預設關閉）</h4><div class="hub-fill"><table>' +
-            '<tr><th>功能</th><th>狀態</th><th>本機覆寫</th></tr>' + flagRows + '</table></div>' +
-            '<div class="hub-note">伺服器環境變數：<code>ST_ENABLE_SHADOW_RESEARCH=1</code> 或個別 ' +
-            '<code>ST_SHADOW_OVERNIGHT_INTRADAY</code>／<code>ST_SHADOW_EARLY_WARNING</code>／' +
-            '<code>ST_SHADOW_CONSENSUS_ATTENTION</code>。亦可建立 <code>data/feature_flags.local.json</code>。</div></div>' +
+          '<div class="hub-sec"><h4>Shadow／實驗功能（伺服器旗標）</h4><div class="hub-fill"><table>' +
+            '<tr><th>功能</th><th>狀態</th><th>啟用方式</th></tr>' + flagRows + '</table></div>' +
+            '<div class="hub-note">以 <code>GET /features</code> 為唯一真相來源；瀏覽器 localStorage 不能單獨開啟 Shadow 面板。' +
+            ' 請設定 <code>ST_ENABLE_SHADOW_RESEARCH=1</code> 或個別 <code>ST_SHADOW_*</code>，' +
+            '或建立 <code>data/feature_flags.local.json</code> 後重新啟動伺服器。</div></div>' +
           '<div class="hub-sec"><h4>資料來源狀態（pulse_history）</h4><div class="hub-fill"><table>' +
             '<tr><th>資料集</th><th>資料日</th><th>狀態</th><th>說明</th><th>列數</th></tr>' +
             dsRows + '</table></div><div class="hub-note">DB：' + (st.db || '') + '</div></div>' +
           srcPanel +
         '</div>';
       bindCommon(el);
-      el.querySelectorAll('[data-flag]').forEach(function (btn) {
-        btn.onclick = function () {
-          var key = btn.getAttribute('data-flag');
-          var enabled = btn.getAttribute('data-flag-value') === '1';
-          if (window.FeatureFlags && FeatureFlags.setLocal) FeatureFlags.setLocal(key, enabled);
-          renderSettings(el);
-        };
-      });
     });
   }
 

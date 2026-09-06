@@ -8,44 +8,19 @@
     shadowEarlyWarning: false,
     shadowConsensusAttention: false
   };
-  var state = Object.assign({}, DEFAULTS);
-  var serverFlags = null;
+  var serverFlags = Object.assign({}, DEFAULTS);
   var ready = false;
-
-  function readLocal() {
-    try {
-      var parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-    } catch (e) { return {}; }
-  }
-
-  function writeLocal(map) {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(map)); } catch (e) {}
-  }
-
-  function mergeFlags(server, local) {
-    var out = Object.assign({}, DEFAULTS);
-    if (server && typeof server === 'object') {
-      Object.keys(DEFAULTS).forEach(function (key) {
-        if (typeof server[key] === 'boolean') out[key] = server[key];
-      });
-    }
-    Object.keys(DEFAULTS).forEach(function (key) {
-      if (typeof local[key] === 'boolean') out[key] = local[key];
-    });
-    return out;
-  }
 
   function publish(reason) {
     window.dispatchEvent(new CustomEvent('featureFlags', {
-      detail: { flags: state, reason: reason || 'update' }
+      detail: { flags: serverFlags, serverFlags: serverFlags, reason: reason || 'update' }
     }));
   }
 
   function apply(next, reason) {
-    state = Object.assign({}, DEFAULTS, next || {});
+    serverFlags = Object.assign({}, DEFAULTS, next || {});
     publish(reason);
-    return state;
+    return serverFlags;
   }
 
   function refresh() {
@@ -53,38 +28,41 @@
     return fetch(base + '/features', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (payload) {
-        serverFlags = payload && payload.flags ? payload.flags : null;
         ready = true;
-        return apply(mergeFlags(serverFlags, readLocal()), 'server');
+        return apply((payload && payload.flags) || null, 'server');
       })
       .catch(function () {
         ready = true;
-        return apply(mergeFlags(null, readLocal()), 'local');
+        return apply(null, 'offline');
       });
   }
 
-  function setLocal(key, enabled) {
-    if (!DEFAULTS.hasOwnProperty(key)) return state;
-    var local = readLocal();
-    local[key] = !!enabled;
-    writeLocal(local);
-    return apply(mergeFlags(serverFlags, local), 'local-set');
+  function isEnabled(key) {
+    return !!serverFlags[key];
   }
 
-  function isEnabled(key) {
-    return !!state[key];
+  function enableHint(key) {
+    var env = {
+      shadowOvernightIntraday: 'ST_SHADOW_OVERNIGHT_INTRADAY=1',
+      shadowEarlyWarning: 'ST_SHADOW_EARLY_WARNING=1',
+      shadowConsensusAttention: 'ST_SHADOW_CONSENSUS_ATTENTION=1'
+    };
+    return '伺服器旗標關閉。請設定 ' + (env[key] || 'ST_ENABLE_SHADOW_RESEARCH=1') +
+      ' 或 data/feature_flags.local.json 後重新啟動伺服器。';
   }
 
   window.FeatureFlags = {
-    get: function () { return state; },
+    get: function () { return serverFlags; },
+    getServer: function () { return serverFlags; },
     defaults: function () { return Object.assign({}, DEFAULTS); },
     isEnabled: isEnabled,
+    enableHint: enableHint,
     refresh: refresh,
-    setLocal: setLocal,
     storageKey: STORAGE_KEY,
     ready: function () { return ready; }
   };
 
-  apply(mergeFlags(null, readLocal()), 'boot');
+  try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+  apply(null, 'boot');
   refresh();
 }());

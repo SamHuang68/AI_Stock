@@ -53,6 +53,15 @@ from features_routes import FeaturesRoutesMixin
 from overnight_intraday_routes import OvernightIntradayRoutesMixin
 from options_routes import OptionsRoutesMixin
 from lru_cache import LRUCache
+from source_health import (
+    HEALTH as _SRC_HEALTH,
+    CB_THRESHOLD as _SRC_CB_THRESHOLD,
+    SourceBreakerOpen,
+    breaker_open as _src_breaker_open,
+    fetch_json as _src_fetch_json,
+    record as _src_record,
+    snapshot as _src_snapshot,
+)
 from market_contract import attach_quote_contract, cumulative_volume_contract
 from market_routes import market_snapshot, twse_mis_observation
 from http_boundary import BodyReadError, is_same_local_origin, read_json_body
@@ -1720,46 +1729,8 @@ def fetch_one(sym, rng=None, interval=None, nocache=False):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# TrustedDataLayer (v3.9 Phase-0) — 對外資料源的 健檢 / 節流 / 熔斷 / 值驗證
-# ----------------------------------------------------------------------------
-# 正確控制流(非 GPT-OSS 流程圖的線性穿透):
-#   呼叫者 → (各 handler 既有 _cache 先查) → _src_fetch_json[節流→熔斷檢查→抓取
-#            →健檢登錄→指數退避重試] → _anom_quote 值合理性驗證 → 回傳。
-#   SourceHealthChecker 是旁路:健康狀態存 _SRC_HEALTH,/health 端點 + 前端燈讀取。
-# 設計原則:單機個人工具,不引入 Redis/CircuitBreaker 套件,純標準庫輕量實作。
+# TrustedDataLayer (v3.9 Phase-0) — see server/source_health.py
 # ════════════════════════════════════════════════════════════════════════════
-_SRC_LOCK = threading.Lock()
-_SRC_HEALTH = {}        # name -> dict(計數/時間/失敗連續數/熔斷到期)
-_SRC_LAST_CALL = {}     # name -> 上次(預約)呼叫時間, 供節流
-# 每源最小請求間隔(秒):TAIFEX MIS 易 520 故拉長;TWSE MIS 次之;yahoo 不節流(0)
-_SRC_MIN_GAP = {'taifex-mis': 1.0, 'twse-mis': 0.3, 'twse-chip': 0.35, 'yahoo-keystats': 0.2}
-_SRC_CB_THRESHOLD = 4   # 連續失敗達此數 → 開熔斷
-_SRC_CB_COOLDOWN = 30.0 # 熔斷冷卻秒數(期間 fail-fast,不打外部源)
-
-
-class SourceBreakerOpen(Exception):
-    """熔斷開啟期間擲出,呼叫端應走備援或回快取/None。"""
-    pass
-
-
-def _src_record(name, ok, ms, err=None):
-    with _SRC_LOCK:
-        v = _SRC_HEALTH.get(name)
-        if v is None:
-            v = {'ok_ct': 0, 'err_ct': 0, 'last_ok': 0, 'last_err': 0,
-                 'last_ms': None, 'fail_streak': 0, 'last_error': None, 'open_until': 0}
-            _SRC_HEALTH[name] = v
-        v['last_ms'] = ms
-        if ok:
-            v['ok_ct'] += 1; v['last_ok'] = time.time()
-            v['fail_streak'] = 0; v['open_until'] = 0
-        else:
-            v['err_ct'] += 1; v['last_err'] = time.time()
-            v['fail_streak'] += 1
-            v['last_error'] = (str(err)[:160] if err else 'error')
-            if v['fail_streak'] >= _SRC_CB_THRESHOLD:
-                v['open_until'] = time.time() + _SRC_CB_COOLDOWN
-
 
 # H2：注入 quote_api 依賴（須在 _cache / _src_record 就緒後）
 try:
@@ -1774,66 +1745,6 @@ try:
 except Exception as _qa_err:
     print('[server] quote_api.configure failed:', _qa_err)
 
-def _src_breaker_open(name):
-    with _SRC_LOCK:
-        v = _SRC_HEALTH.get(name)
-        return bool(v and time.time() < v['open_until'])
-
-
-def _src_throttle(name):
-    """per-source 最小間隔節流(粗略佔位,避免並發過衝外部源)。"""
-    gap = _SRC_MIN_GAP.get(name)
-    if not gap:
-        return
-    with _SRC_LOCK:
-        last = _SRC_LAST_CALL.get(name, 0)
-        wait = gap - (time.time() - last)
-        _SRC_LAST_CALL[name] = max(time.time(), last + gap)
-    if wait > 0:
-        time.sleep(min(wait, 3.0))
-
-
-def _src_fetch_json(name, url, headers=None, timeout=10, retries=1, data=None):
-    """經 健檢/節流/熔斷/退避 的對外 JSON 抓取。
-       熔斷開啟 → 擲 SourceBreakerOpen;最終失敗 → 擲原始例外。data 給定則為 POST。
-       傳輸層走 http_client（連線池／Keep-Alive）；熔斷與節流語意不變。"""
-    if _src_breaker_open(name):
-        raise SourceBreakerOpen(name)
-    last_exc = None
-    try:
-        import http_client as _hc
-    except Exception:
-        _hc = None
-    for attempt in range(retries + 1):
-        _src_throttle(name)
-        t0 = time.time()
-        try:
-            if _hc is not None:
-                # retries=0：退避／重試由本層控制，避免雙重重試拉長 latency
-                resp = _hc.request(
-                    'POST' if data is not None else 'GET',
-                    url,
-                    headers=headers or {},
-                    data=data,
-                    timeout=timeout,
-                    retries=0,
-                )
-                raw = resp.body
-            else:
-                req = urllib.request.Request(url, headers=headers or {}, data=data)
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    raw = resp.read()
-            parsed = json.loads(raw)
-            _src_record(name, True, int((time.time() - t0) * 1000))
-            return parsed
-        except Exception as e:
-            last_exc = e
-            _src_record(name, False, int((time.time() - t0) * 1000), e)
-            if attempt < retries:
-                time.sleep(min(0.5 * (2 ** attempt), 4.0))   # 指數退避
-    raise last_exc if last_exc else RuntimeError(name + ' fetch failed')
-
-
 try:
     import chip_api as _chip_api
     _chip_api.configure(
@@ -1845,27 +1756,6 @@ try:
     )
 except Exception as _ca_err:
     print('[server] chip_api.configure failed:', _ca_err)
-
-
-def _src_snapshot():
-    """供 /health:回各源摘要(成功率/最後成功幾秒前/熔斷狀態)。"""
-    out = {}
-    now = time.time()
-    with _SRC_LOCK:
-        for k, v in _SRC_HEALTH.items():
-            total = v['ok_ct'] + v['err_ct']
-            out[k] = {
-                'healthy': v['fail_streak'] < _SRC_CB_THRESHOLD and not (now < v['open_until']),
-                'okRate': round(v['ok_ct'] / total * 100, 1) if total else None,
-                'calls': total,
-                'lastOkAgo': round(now - v['last_ok'], 1) if v['last_ok'] else None,
-                'lastErrAgo': round(now - v['last_err'], 1) if v['last_err'] else None,
-                'lastMs': v['last_ms'],
-                'failStreak': v['fail_streak'],
-                'lastError': v['last_error'],
-                'breakerOpen': now < v['open_until'],
-            }
-    return out
 
 
 def _yf_prevclose(meta, allow_chart_prev=True):
