@@ -1270,7 +1270,9 @@
         ['shadowOvernightIntraday', '盤別動量研究（Overnight × Intraday）'],
         ['shadowEarlyWarning', '跨市場前兆雷達（Early Warning）'],
         ['shadowConsensusAttention', '共識注意力 Radar'],
-        ['shadowConditionalExpectation', '條件期望研究（Conditional Expectation）']
+        ['shadowConditionalExpectation', '條件期望研究（Conditional Expectation）'],
+        ['shadowMultifactor', '多因子橫截面排名（Shadow Multifactor）'],
+        ['shadowMlExperiment', 'ML 實驗 stub（Shadow ML Experiment）']
       ].forEach(function (pair) {
         var on = !!flagMap[pair[0]];
         var hint = window.FeatureFlags && FeatureFlags.enableHint ? FeatureFlags.enableHint(pair[0]) : '';

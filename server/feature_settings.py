@@ -21,6 +21,8 @@ FEATURE_KEYS = (
     'shadowConditionalExpectation',
     'shadowChipPathState',
     'shadowVolRegimeSwitch',
+    'shadowMultifactor',
+    'shadowMlExperiment',
 )
 
 ENV_KEYS = {
@@ -30,6 +32,8 @@ ENV_KEYS = {
     'shadowConditionalExpectation': 'ST_SHADOW_CONDITIONAL_EXPECTATION',
     'shadowChipPathState': 'ST_SHADOW_CHIP_PATH_STATE',
     'shadowVolRegimeSwitch': 'ST_SHADOW_VOL_REGIME_SWITCH',
+    'shadowMultifactor': 'ST_SHADOW_MULTIFACTOR',
+    'shadowMlExperiment': 'ST_SHADOW_ML_EXPERIMENT',
 }
 
 # Convenience master switch for local research sessions.
@@ -188,6 +192,8 @@ def public_payload(base_dir: str | Path | None = None) -> dict[str, Any]:
                 'shadowConditionalExpectation': True,
                 'shadowChipPathState': True,
                 'shadowVolRegimeSwitch': True,
+                'shadowMultifactor': True,
+                'shadowMlExperiment': True,
             },
         },
     }
