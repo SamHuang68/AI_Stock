@@ -320,3 +320,77 @@ Deferred until a versioned PIT event ledger exists (live `/events` is forward-lo
 ---
 
 *End of FINDINGS — P0 advisory + P1 must-ship (1–3)*
+
+---
+
+## 9. P2 — Shadow-only multifactor / promotion gate (Host Gate ship order)
+
+**Branch:** `cursor/shadow-multifactor-p2-ef4e`  
+**Policy:** shadow-only; flags default **OFF**; never writes Decision / exposure envelopes.
+
+### 9.1 Scope shipped
+
+| Item | Path | Epistemic |
+|------|------|-----------|
+| Multifactor cross-sectional ranking | `server/shadow_multifactor.py` | **CONDITIONAL** |
+| Long-horizon research cards (H=60/120) | `shadow_multifactor._long_horizon_card` | **CONDITIONAL** |
+| ML experiment stub (fixed linear weights) | `shadow_multifactor.ml_experiment_stub` | **HYPOTHESIS** |
+| Promotion gate checklist | `server/promotion_gate.py`, `docs/PROMOTION_GATE.md` | governance |
+| HTTP routes | `GET /research/shadow-multifactor`, `GET /research/promotion-gate` | research_only |
+
+### 9.2 Flags (default OFF)
+
+| Flag | Env |
+|------|-----|
+| `shadowMultifactor` | `ST_SHADOW_MULTIFACTOR` |
+| `shadowMlExperiment` | `ST_SHADOW_ML_EXPERIMENT` |
+
+Master switch `ST_ENABLE_SHADOW_RESEARCH=1` still applies.
+
+### 9.3 Promotion gate (FAIL until criteria met)
+
+Required before any future promotion out of shadow:
+
+1. OOS walk-forward report (`sampleSize≥60`, `windows≥3`)
+2. Cost / turnover notes (`costBps`, `turnoverBps`, summary)
+3. Decay / 失效 monitor (`metric`, `lookbackDays`, `alertThreshold`)
+4. Feature count cap (`≤8`)
+
+`promotion_gate.evaluate()` returns `verdict: FAIL` by default; `autoPromote: false` always.
+
+### 9.4 Isolation guarantees
+
+- No `llm_gate` acquisition on shadow routes
+- No LLM Decision scores
+- No `publish_context` / Decision envelope mutation
+- Stale `asOf` degrades rank scores (50% penalty, `degraded: true`)
+
+### 9.5 NON-GOALS
+
+- No production Decision wiring
+- No guaranteed-alpha marketing copy
+- No auto-promotion from promotion gate PASS alone (Host review still required)
+
+### 9.6 API
+
+- `GET /research/shadow-multifactor?symbols=2330,2317&limit=15` — ranked basket, `epistemic: CONDITIONAL`
+- `GET /research/promotion-gate` — checklist (default FAIL)
+
+### 9.7 Tests
+
+- `tests/test_shadow_multifactor.py`
+- `tests/test_promotion_gate.py`
+
+### 9.8 P2 acceptance checklist
+
+- [x] Flags default OFF (`ST_SHADOW_MULTIFACTOR`, `ST_SHADOW_ML_EXPERIMENT`)
+- [x] Research endpoint returns ranked basket labeled CONDITIONAL
+- [x] Promotion gate doc + module returns FAIL until criteria met
+- [x] Isolated from llm_gate; no Decision writes
+- [x] Long-horizon cards + ML stub (HYPOTHESIS tier)
+- [x] Unit + route tests green
+- [x] NON-GOALS documented
+
+---
+
+*End of FINDINGS — P0 + P1 + P2*

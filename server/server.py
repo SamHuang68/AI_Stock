@@ -49,6 +49,7 @@ from etf_api import (
 )
 from etf_routes import EtfRoutesMixin
 from conditional_expectation_routes import ConditionalExpectationRoutesMixin
+from shadow_multifactor_routes import ShadowMultifactorRoutesMixin
 from decision_routes import DecisionRoutesMixin
 from features_routes import FeaturesRoutesMixin
 from overnight_intraday_routes import OvernightIntradayRoutesMixin
@@ -2293,7 +2294,7 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
     request_queue_size = 64
 
-class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, ConditionalExpectationRoutesMixin, OptionsRoutesMixin, PulseRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
+class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, ConditionalExpectationRoutesMixin, ShadowMultifactorRoutesMixin, OptionsRoutesMixin, PulseRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     _BASE = _BASE
     protocol_version = 'HTTP/1.1'   # enables keep-alive
 
@@ -2400,6 +2401,10 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_conditional_expectation_p1()
         elif p == '/research/conditional-expectation' or p.startswith('/research/conditional-expectation?'):
             self._handle_conditional_expectation()
+        elif p == '/research/shadow-multifactor' or p.startswith('/research/shadow-multifactor?'):
+            self._handle_shadow_multifactor()
+        elif p == '/research/promotion-gate' or p.startswith('/research/promotion-gate?'):
+            self._handle_promotion_gate()
         elif p == '/options/txo/structure' or p.startswith('/options/txo/structure?'):
             self._handle_options_structure()
         elif p == '/options/txo/history' or p.startswith('/options/txo/history?'):
