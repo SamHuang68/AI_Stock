@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import glob
 import json
+import math
 import os
 import sqlite3
 from contextlib import closing
@@ -27,8 +28,8 @@ from postmarket_report import staleness as _quote_staleness
 from postmarket_report import tech_summary_from_bars
 
 CONTRACT_VERSION = 1
-BIN_MODEL_ID = 'rsi14_band×inst3d×regime/v1'
-MODEL_VERSION = 'st-conditional-expectation/pit-v1'
+BIN_MODEL_ID = 'rsi14×devz×rs×inst3d×regime/v2'
+MODEL_VERSION = 'st-conditional-expectation/pit-v2'
 RETURN_CONVENTION = 'close_to_close_same_symbol'
 EPISTEMIC = 'CONDITIONAL'
 HORIZONS = (1, 5, 20)
@@ -165,6 +166,68 @@ def _rsi_band(rsi: float | None) -> tuple[str, str]:
     return f'rsi{low}', f'RSI {low}-{high}'
 
 
+def _deviation_z(closes: list[float], period: int = 20) -> float | None:
+    """Price deviation z-score: (close − SMA) / stdev(closes), PIT on provided series."""
+    if len(closes) < period:
+        return None
+    window = closes[-period:]
+    sma = sum(window) / period
+    if sma <= 0:
+        return None
+    variance = sum((value - sma) ** 2 for value in window) / max(1, period - 1)
+    std = math.sqrt(variance)
+    if std <= 0:
+        return None
+    return (closes[-1] - sma) / std
+
+
+def _devz_band(z: float | None) -> tuple[str, str]:
+    if z is None or not math.isfinite(z):
+        return 'unknown', '偏離Z 未知'
+    if z <= -1.0:
+        return 'devz_low', f'偏離Z ≤-1 ({z:.2f})'
+    if z <= 0.0:
+        return 'devz_midneg', f'偏離Z (-1,0] ({z:.2f})'
+    if z <= 1.0:
+        return 'devz_midpos', f'偏離Z (0,1] ({z:.2f})'
+    return 'devz_high', f'偏離Z >1 ({z:.2f})'
+
+
+def _relative_strength_percentile(
+    closes: list[float],
+    *,
+    ret_period: int = 20,
+    min_history: int = 60,
+) -> float | None:
+    """Percentile rank of current ret_period return vs trailing same-length returns (price only)."""
+    if len(closes) < ret_period + min_history:
+        return None
+    current = closes[-1] / closes[-1 - ret_period] - 1.0
+    history: list[float] = []
+    for idx in range(ret_period, len(closes)):
+        base = closes[idx - ret_period]
+        if base <= 0:
+            continue
+        history.append(closes[idx] / base - 1.0)
+    if len(history) < min_history:
+        return None
+    history = history[:-1]
+    if not history:
+        return None
+    below = sum(1 for value in history if value <= current)
+    return (below / len(history)) * 100.0
+
+
+def _rs_band(percentile: float | None) -> tuple[str, str]:
+    if percentile is None or not math.isfinite(percentile):
+        return 'rs_unknown', '相對強度 未知'
+    if percentile <= 33.0:
+        return 'rs_weak', f'相對強度弱 ({percentile:.0f}%)'
+    if percentile <= 66.0:
+        return 'rs_mid', f'相對強度中 ({percentile:.0f}%)'
+    return 'rs_strong', f'相對強度強 ({percentile:.0f}%)'
+
+
 def _inst3d_sign(chip_inst_by_date: dict[str, float], as_of: date) -> tuple[str, str]:
     eligible = sorted(
         (day, total)
@@ -187,12 +250,24 @@ def _normalize_regime(regime_id: str | None) -> str:
     return raw or 'UNKNOWN'
 
 
-def _make_bin_id(rsi_key: str, inst_key: str, regime_key: str) -> str:
-    return f'{rsi_key}_inst{inst_key}_reg{regime_key}'
+def _make_bin_id(
+    rsi_key: str,
+    devz_key: str,
+    rs_key: str,
+    inst_key: str,
+    regime_key: str,
+) -> str:
+    return f'{rsi_key}_{devz_key}_{rs_key}_inst{inst_key}_reg{regime_key}'
 
 
-def _make_bin_label(rsi_label: str, inst_label: str, regime_key: str) -> str:
-    return f'{rsi_label} · {inst_label} · {regime_key}'
+def _make_bin_label(
+    rsi_label: str,
+    devz_label: str,
+    rs_label: str,
+    inst_label: str,
+    regime_key: str,
+) -> str:
+    return f'{rsi_label} · {devz_label} · {rs_label} · {inst_label} · {regime_key}'
 
 
 def load_chip_inst_history(
@@ -265,19 +340,29 @@ def bin_state(
     code = str(symbol or '').strip().upper()
     pit_bars = _bars_upto_date(bars, as_of_date)
     tech = tech_summary_from_bars(pit_bars)
+    closes = [float(row[4]) for row in pit_bars if row and row[4] is not None]
+    devz = _deviation_z(closes)
+    rs_pct = _relative_strength_percentile(closes)
+    devz_key, devz_label = _devz_band(devz)
+    rs_key, rs_label = _rs_band(rs_pct)
     rsi_key, rsi_label = _rsi_band((tech or {}).get('rsi14'))
     inst_key, inst_label = _inst3d_sign(chip_inst_by_date or {}, as_of_date)
     regime_key = _normalize_regime(regime_id or regime_at_date(as_of_date))
-    bin_id = _make_bin_id(rsi_key, inst_key, regime_key)
+    bin_id = _make_bin_id(rsi_key, devz_key, rs_key, inst_key, regime_key)
     return {
         'symbol': code,
         'asOfDate': as_of_date.isoformat(),
         'binModelId': BIN_MODEL_ID,
         'binId': bin_id,
-        'binLabel': _make_bin_label(rsi_label, inst_label, regime_key),
+        'binLabel': _make_bin_label(rsi_label, devz_label, rs_label, inst_label, regime_key),
         'features': {
             'rsi14': (tech or {}).get('rsi14'),
             'rsiBand': rsi_key,
+            'deviationZ': round(devz, 4) if devz is not None else None,
+            'devzBand': devz_key,
+            'relativeStrengthPct': round(rs_pct, 2) if rs_pct is not None else None,
+            'rsBand': rs_key,
+            'volRatio': (tech or {}).get('volRatio'),
             'inst3d': inst_key,
             'regime': regime_key,
             'bars': (tech or {}).get('bars'),

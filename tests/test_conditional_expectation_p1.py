@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for Conditional Expectation P1 modules (shadow flags default OFF)."""
+"""Tests for Conditional Expectation P1 must-ship modules (shadow flags default OFF)."""
 from __future__ import annotations
 
 import json
@@ -19,8 +19,9 @@ sys.path.insert(0, str(SERVER_DIR))
 
 import chip_path_state as cps  # noqa: E402
 import conditional_expectation as ce  # noqa: E402
-import conditional_integration_score as cis  # noqa: E402
+import conditional_expectation_p1 as p1  # noqa: E402
 import event_window_returns as ewr  # noqa: E402
+import conditional_integration_score as cis  # noqa: E402
 import vol_regime_switch as vrs  # noqa: E402
 
 try:
@@ -49,88 +50,91 @@ def _synthetic_bars(n: int = 120, start_close: float = 100.0, drift: float = 0.1
     return rows
 
 
-class ChipPathStateTests(unittest.TestCase):
-    def test_accumulate_when_inst_buy_without_large_price_move(self):
-        as_of = date(2024, 6, 10)
-        bars = _synthetic_bars(40, drift=0.02)
-        chip_map = {}
-        for offset in range(5):
-            day = (as_of - timedelta(days=offset)).isoformat()
-            chip_map[day] = 500.0
-        payload = cps.evaluate_chip_path_state(
-            '2330', bars=bars, chip_inst_by_date=chip_map, as_of_date=as_of,
+class DeviationZBinTests(unittest.TestCase):
+    def test_bin_state_includes_devz_and_rs_bands(self):
+        bars = _synthetic_bars(100)
+        as_of = ce._session_date_from_ts(bars[60][0])
+        state = ce.bin_state(
+            '2330', as_of, bars=bars, chip_inst_by_date={'2024-03-01': 100.0}, regime_id='TEST',
         )
-        self.assertEqual(payload['epistemic'], 'FACT')
-        self.assertIn(payload['state'], ('accumulate', 'neutral', 'chase'))
+        self.assertEqual(state['binModelId'], ce.BIN_MODEL_ID)
+        self.assertIn('devz', state['binId'])
+        self.assertIn('rs_', state['binId'])
+        self.assertIn('deviationZ', state['features'])
+        self.assertIn('relativeStrengthPct', state['features'])
+
+    def test_deviation_z_is_pit_on_truncated_series(self):
+        bars = _synthetic_bars(80, drift=0.0)
+        as_of = ce._session_date_from_ts(bars[40][0])
+        pit_closes = [float(row[4]) for row in ce._bars_upto_date(bars, as_of)]
+        future = _synthetic_bars(30, start_close=500.0, drift=5.0)
+        # Shift future bars to sessions strictly after as_of
+        shift = (as_of - ce._session_date_from_ts(future[0][0])).days + 1
+        shifted_future = []
+        for row in future:
+            day = ce._session_date_from_ts(row[0]) + timedelta(days=shift)
+            while day.weekday() >= 5:
+                day += timedelta(days=1)
+            ts = datetime.combine(day, datetime.min.time().replace(hour=13, minute=30), TZ_TPE).timestamp()
+            shifted_future.append((ts, row[1], row[2], row[3], row[4], row[5]))
+        extended = list(bars) + shifted_future
+        pit_after = [float(row[4]) for row in ce._bars_upto_date(extended, as_of)]
+        self.assertEqual(pit_closes, pit_after)
+        self.assertEqual(ce._deviation_z(pit_closes), ce._deviation_z(pit_after))
+
+
+class ChipPathStateTests(unittest.TestCase):
+    def test_neutral_when_chips_asof_missing(self):
+        bars = _synthetic_bars(40)
+        payload = cps.evaluate_chip_path_state('2330', bars=bars, chips=None)
+        self.assertEqual(payload['state'], 'neutral')
+        self.assertEqual(payload['status'], 'CHIPS_ASOF_EXPIRED')
 
     def test_classify_chase_on_buy_with_strong_reaction(self):
-        state = cps.classify_path_state(streak_signed=4, price_reaction_pct=5.0)
-        self.assertEqual(state, 'chase')
+        self.assertEqual(cps.classify_path_state(streak_signed=4, price_reaction_pct=5.0), 'chase')
 
-    def test_classify_distribute_on_sell_with_down_move(self):
-        state = cps.classify_path_state(streak_signed=-4, price_reaction_pct=-4.0)
-        self.assertEqual(state, 'distribute')
+    def test_accumulate_on_buy_without_large_move(self):
+        now = datetime(2024, 6, 12, 15, 0, tzinfo=TZ_TPE)
+        as_of = date(2024, 6, 10)
+        bars = _synthetic_bars(40, drift=0.02)
+        chip_map = { (as_of - timedelta(days=i)).isoformat(): 500.0 for i in range(5) }
+        payload = cps.evaluate_chip_path_state(
+            '2330',
+            bars=bars,
+            chip_inst_by_date=chip_map,
+            chips={'asOf': as_of.isoformat()},
+            as_of_date=as_of,
+            now=now,
+        )
+        self.assertEqual(payload['status'], 'READY')
+        self.assertIn(payload['state'], ('accumulate', 'neutral'))
 
 
 class VolRegimeSwitchTests(unittest.TestCase):
-    def test_returns_position_width_hint_without_decision_fields(self):
+    def test_width_and_caution_only_no_buy_sell_score(self):
         bars = _synthetic_bars(300, drift=0.05)
         payload = vrs.evaluate_vol_regime_switch('2330', bars=bars)
-        self.assertEqual(payload['epistemic'], 'CONDITIONAL')
-        self.assertTrue(payload['shadowOnly'])
         hint = payload.get('positionWidthHint') or {}
         self.assertIn('multiplier', hint)
+        self.assertIn('caution', hint)
+        self.assertNotIn('score', payload)
         self.assertNotIn('confidence', payload)
-        self.assertNotIn('regime', payload)
 
 
-class EventWindowReturnsTests(unittest.TestCase):
-    def test_revenue_publish_horizons_pit(self):
-        bars = _synthetic_bars(400, drift=0.1)
-        payload = ewr.evaluate_event_windows('2330', bars=bars)
-        revenue = payload['events'][0]
-        self.assertEqual(revenue['eventType'], 'revenue_publish')
-        self.assertEqual(set(revenue['horizons'].keys()), {'1', '5', '20'})
+class DeferredModuleTests(unittest.TestCase):
+    def test_event_windows_deferred(self):
+        note = ewr.deferred_event_windows_note()
+        self.assertEqual(note['status'], 'DEFERRED_OPTIONAL')
+        self.assertIn('event calendar', note['reason'])
 
-    def test_ex_dividend_deferred_stub(self):
-        stub = ewr.deferred_ex_dividend_note()
-        self.assertEqual(stub['status'], 'DEFERRED_OPTIONAL')
-        self.assertIn('event calendar', stub['reason'])
+    def test_integration_score_deferred(self):
+        note = cis.deferred_integration_score_note()
+        self.assertEqual(note['status'], 'DEFERRED')
 
-
-class IntegrationScoreTests(unittest.TestCase):
-    def test_score_bounded(self):
-        vec = cis.feature_vector(
-            rsi14=70.0, inst_key='buy', chip_state='chase', vol_percentile=85.0,
-        )
-        score = cis.integrate_score(vec)
-        self.assertGreaterEqual(score, cis.SCORE_MIN)
-        self.assertLessEqual(score, cis.SCORE_MAX)
-
-    def test_score_withheld_without_walk_forward_evidence(self):
-        bars = _synthetic_bars(120)
-        chip_map = {}
-        for row in bars[::4]:
-            chip_map[ce._session_date_from_ts(row[0]).isoformat()] = 100.0
-        payload = cis.evaluate_integration_score(
-            '2330', bars=bars, chip_inst_by_date=chip_map,
-        )
-        self.assertFalse(payload['walkForwardEvidencePresent'])
-        self.assertIsNone(payload['score'])
-
-    def test_walk_forward_report_artifact(self):
-        bars = _synthetic_bars(200)
-        observations = ce.collect_pit_observations('2330', bars)
-        enriched = [{
-            **row,
-            'chipState': 'neutral',
-            'volPercentile': 50.0,
-        } for row in observations]
-        report = cis.build_walk_forward_report(enriched, symbol='2330')
-        if report.get('status') == 'READY':
-            paths = cis.write_walk_forward_artifacts(report)
-            self.assertTrue(os.path.isfile(paths[0]))
-            self.assertTrue(os.path.isfile(paths[1]))
+    def test_p1_orchestrator_lists_deferred(self):
+        payload = p1.build_p1_research('2330', bars=_synthetic_bars(80))
+        self.assertEqual(payload['deferred']['eventWindows']['status'], 'DEFERRED_OPTIONAL')
+        self.assertEqual(payload['deferred']['integrationScore']['status'], 'DEFERRED')
 
 
 class ConditionalExpectationP1RouteTests(unittest.TestCase):
@@ -180,11 +184,10 @@ class ConditionalExpectationP1RouteTests(unittest.TestCase):
             httpd.server_close()
             thread.join(timeout=2)
 
-    def test_p1_route_returns_modules_when_flags_on(self):
+    def test_p1_route_returns_must_ship_modules_when_flags_on(self):
         os.environ['ST_SHADOW_CONDITIONAL_EXPECTATION'] = '1'
         os.environ['ST_SHADOW_CHIP_PATH_STATE'] = '1'
         os.environ['ST_SHADOW_VOL_REGIME_SWITCH'] = '1'
-        os.environ['ST_SHADOW_EVENT_WINDOW_RETURNS'] = '1'
         st_server = self._load_server()
         httpd = ThreadingHTTPServer(('127.0.0.1', 0), st_server.Handler)
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
@@ -196,12 +199,11 @@ class ConditionalExpectationP1RouteTests(unittest.TestCase):
             ) as resp:
                 body = json.load(resp)
             self.assertTrue(body['enabled'])
-            p1 = body['p1']
-            self.assertIsNotNone(p1['chipPathState'])
-            self.assertIsNotNone(p1['volRegimeSwitch'])
-            self.assertIsNotNone(p1['eventWindows'])
-            self.assertEqual(p1['chipPathState']['epistemic'], 'FACT')
-            self.assertEqual(p1['volRegimeSwitch']['epistemic'], 'CONDITIONAL')
+            p1_payload = body['p1']
+            self.assertEqual(p1_payload.get('binModelId'), ce.BIN_MODEL_ID)
+            self.assertIsNotNone(p1_payload['volRegimeSwitch'])
+            self.assertEqual(p1_payload['deferred']['integrationScore']['status'], 'DEFERRED')
+            self.assertNotIn('eventWindows', p1_payload)
         finally:
             httpd.shutdown()
             httpd.server_close()

@@ -9,9 +9,7 @@
     shadowConsensusAttention: false,
     shadowConditionalExpectation: false,
     shadowChipPathState: false,
-    shadowVolRegimeSwitch: false,
-    shadowConditionalIntegrationScore: false,
-    shadowEventWindowReturns: false
+    shadowVolRegimeSwitch: false
   };
   var serverFlags = Object.assign({}, DEFAULTS);
   var ready = false;
@@ -53,9 +51,7 @@
       shadowConsensusAttention: 'ST_SHADOW_CONSENSUS_ATTENTION=1',
       shadowConditionalExpectation: 'ST_SHADOW_CONDITIONAL_EXPECTATION=1',
       shadowChipPathState: 'ST_SHADOW_CHIP_PATH_STATE=1',
-      shadowVolRegimeSwitch: 'ST_SHADOW_VOL_REGIME_SWITCH=1',
-      shadowConditionalIntegrationScore: 'ST_SHADOW_CONDITIONAL_INTEGRATION_SCORE=1',
-      shadowEventWindowReturns: 'ST_SHADOW_EVENT_WINDOW_RETURNS=1'
+      shadowVolRegimeSwitch: 'ST_SHADOW_VOL_REGIME_SWITCH=1'
     };
     return '伺服器旗標關閉。請設定 ' + (env[key] || 'ST_ENABLE_SHADOW_RESEARCH=1') +
       ' 或 data/feature_flags.local.json 後重新啟動伺服器。';

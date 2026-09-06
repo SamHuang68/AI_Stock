@@ -777,7 +777,8 @@ def build_evidence_pack(symbol: str, *, include: Dict[str, bool],
             chip_path = chip_path_state.evaluate_chip_path_state(
                 code,
                 bars=bars,
-                as_of_date=None,
+                chips=pack.get('chips'),
+                now=now,
             )
             pack['chipPathState'] = chip_path
             as_of['chipPathState'] = chip_path.get('asOfDate')

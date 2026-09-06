@@ -96,11 +96,6 @@ class ConditionalExpectationRoutesMixin:
             self._err('symbol query parameter is required', 400)
             return
 
-        query = parse_qs(urlparse(self.path).query)
-        write_report = str((query.get('writeWalkForward') or ['0'])[0]).lower() in (
-            '1', 'true', 'yes', 'on',
-        )
-
         ctx = _load_symbol_context(symbol)
         card = ce.build_card(
             symbol,
@@ -116,7 +111,6 @@ class ConditionalExpectationRoutesMixin:
             bars=ctx['bars'],
             chip_inst_by_date=ctx['chip_history'],
             base_dir=base_dir,
-            write_walk_forward=write_report,
         )
         payload = {
             'ok': True,

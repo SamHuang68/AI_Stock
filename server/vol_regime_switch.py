@@ -65,24 +65,32 @@ def _width_hint(
 ) -> dict[str, Any]:
     multiplier = WIDTH_NEUTRAL
     action = 'hold_width'
+    caution = 'normal'
     label = '維持基準部位寬度'
     if bucket == 'high':
         multiplier = WIDTH_HIGH_VOL
         action = 'reduce_width'
+        caution = 'elevated'
         label = '高波動分位 · 建議縮小部位寬度（僅研究提示）'
     elif bucket == 'low':
         multiplier = WIDTH_LOW_VOL
         action = 'allow_full_width'
+        caution = 'relaxed'
         label = '低波動分位 · 可恢復基準部位寬度（僅研究提示）'
+    else:
+        caution = 'normal'
     if crossed == 'up_high':
         action = 'reduce_width'
+        caution = 'elevated'
         label = 'RV 分位上穿高波動門檻 · 建議縮小部位寬度'
     elif crossed == 'down_low':
         action = 'allow_full_width'
+        caution = 'relaxed'
         label = 'RV 分位下穿低波動門檻 · 可恢復基準部位寬度'
     return {
         'multiplier': round(multiplier, 3),
         'action': action,
+        'caution': caution,
         'label': label,
         'prevBucket': prev_bucket,
         'crossed': crossed,

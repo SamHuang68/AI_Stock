@@ -84,6 +84,8 @@ class ConditionalExpectationBinTests(unittest.TestCase):
         )
         self.assertEqual(state['binModelId'], ce.BIN_MODEL_ID)
         self.assertTrue(state['binId'].startswith('rsi'))
+        self.assertIn('devz', state['binId'])
+        self.assertIn('rs_', state['binId'])
         self.assertIn('inst', state['binId'])
         self.assertIn('regBROAD_RISK_ON', state['binId'])
         self.assertLessEqual(

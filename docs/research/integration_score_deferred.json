@@ -1,0 +1,6 @@
+{
+  "status": "DEFERRED",
+  "reason": "awaiting_must_ship_modules_and_walk_forward",
+  "detail": "Bounded composite score (−2…+2) deferred until deviation-z bins, chip path state, and vol width hints are stable with a walk-forward sketch. P2 multifactor/ML requires separate Host Gate.",
+  "p2Note": "shadow-only multifactor/ML; promotion needs OOS, costs, turnover, decay monitor"
+}

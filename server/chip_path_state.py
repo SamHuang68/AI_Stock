@@ -9,16 +9,24 @@ advice and never merged into Decision actionEnvelope.
 from __future__ import annotations
 
 import math
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Any, Callable
 
 from conditional_expectation import (
+    CHIP_MAX_LAG_SESSIONS,
     _bars_upto_date,
     _chip_session_date,
+    _last_tw_close_day,
     _session_date_from_ts,
     load_chip_inst_history,
 )
 
+try:
+    from zoneinfo import ZoneInfo
+    TZ_TPE = ZoneInfo('Asia/Taipei')
+except Exception:  # pragma: no cover
+    from datetime import timezone
+    TZ_TPE = timezone(timedelta(hours=8))
 MODEL_VERSION = 'st-chip-path-state/v1'
 MIN_STREAK_DAYS = 3
 CHASE_RETURN_PCT = 3.0
@@ -98,16 +106,64 @@ def path_state_score(state_id: str) -> float:
     }.get(state_id, 0.0)
 
 
+def _chips_asof_solid(
+    chips: dict[str, Any] | None,
+    *,
+    now: datetime | None = None,
+) -> tuple[bool, list[str]]:
+    """Return whether chips asOf is fresh enough for path-state classification."""
+    now = now or datetime.now(TZ_TPE)
+    reasons: list[str] = []
+    chip_as_of = (chips or {}).get('asOf')
+    chip_day = _chip_session_date(chip_as_of)
+    if not chips or chip_day is None:
+        return False, ['chips asOf 缺失或無法解析']
+    last_close = _last_tw_close_day(now)
+    lag_sessions = 0
+    cursor = last_close
+    while cursor > chip_day and lag_sessions <= CHIP_MAX_LAG_SESSIONS + 3:
+        lag_sessions += 1
+        cursor = cursor.fromordinal(cursor.toordinal() - 1)
+        while cursor.weekday() >= 5:
+            cursor = cursor.fromordinal(cursor.toordinal() - 1)
+    if lag_sessions > CHIP_MAX_LAG_SESSIONS:
+        reasons.append(
+            f'chips asOf {chip_as_of} 落後最近收盤日 {last_close.isoformat()} '
+            f'逾 {CHIP_MAX_LAG_SESSIONS} 個交易日門檻'
+        )
+    return (not reasons, reasons)
+
+
 def evaluate_chip_path_state(
     symbol: str,
     *,
     bars: list,
     chip_inst_by_date: dict[str, float] | None = None,
+    chips: dict[str, Any] | None = None,
     as_of_date: date | None = None,
+    now: datetime | None = None,
     streak_fn: Callable[[dict[str, float], date], tuple[int, float]] | None = None,
 ) -> dict[str, Any]:
     """Build chip path state payload (FACT rule label, shadow-safe)."""
     code = str(symbol or '').strip().upper()
+    now = now or datetime.now(TZ_TPE)
+    solid, chip_reasons = _chips_asof_solid(chips, now=now)
+    if not solid:
+        return {
+            'model': MODEL_VERSION,
+            'epistemic': 'FACT',
+            'shadowOnly': True,
+            'actionAuthority': 'none',
+            'decisionUse': 'research_only',
+            'symbol': code,
+            'state': 'neutral',
+            'stateLabel': STATE_LABELS['neutral'],
+            'streakDays': 0,
+            'priceReactionPct': None,
+            'status': 'CHIPS_ASOF_EXPIRED',
+            'chipsAsOfGate': {'usable': False, 'reasons': chip_reasons},
+            'reason': 'chips_asof_not_solid',
+        }
     rows = [r for r in (bars or []) if r and r[4] is not None]
     if not rows:
         return {
@@ -121,6 +177,7 @@ def evaluate_chip_path_state(
             'stateLabel': STATE_LABELS['neutral'],
             'streakDays': 0,
             'priceReactionPct': None,
+            'status': 'INSUFFICIENT_DATA',
             'reason': 'insufficient_bar_history',
         }
     if as_of_date is None:
@@ -144,6 +201,8 @@ def evaluate_chip_path_state(
         'streakDays': streak_signed,
         'streakNetShares': round(streak_net, 2),
         'priceReactionPct': round(reaction, 4) if reaction is not None else None,
+        'status': 'READY',
+        'chipsAsOfGate': {'usable': True, 'reasons': []},
         'thresholds': {
             'minStreakDays': MIN_STREAK_DAYS,
             'chaseReturnPct': CHASE_RETURN_PCT,
@@ -174,5 +233,6 @@ def evaluate_from_symbol(
         symbol,
         bars=bars,
         chip_inst_by_date=chip_map,
+        chips={'asOf': (current_chip or {}).get('date') or (current_chip or {}).get('asOf')} if current_chip else None,
         as_of_date=as_of_date,
     )

@@ -1,9 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""P1 orchestrator for Conditional Expectation shadow research modules."""
+"""P1 orchestrator for Conditional Expectation shadow research modules.
+
+Host Gate ship order (must-ship):
+  1. Deviation-z / relative-strength bins → conditional_expectation.py (P0 card)
+  2. Chip path state machine (when chips asOf solid)
+  3. Vol-regime switch → position width/caution only
+
+Deferred in this PR:
+  4. Event windows — no versioned event calendar
+  5. Bounded composite score — until 1–3 are promoted with walk-forward
+"""
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from feature_settings import is_enabled
@@ -15,7 +25,21 @@ except Exception:  # pragma: no cover
     from datetime import timezone
     TZ_TPE = timezone(timedelta(hours=8))
 
-P1_CONTRACT_VERSION = 1
+P1_CONTRACT_VERSION = 2
+
+DEFERRED_EVENT_WINDOWS = {
+    'status': 'DEFERRED_OPTIONAL',
+    'reason': 'event calendar',
+    'detail': 'No versioned PIT event ledger in-repo; live /events is forward-looking only.',
+    'artifact': 'docs/research/event_window_deferred.json',
+}
+
+DEFERRED_INTEGRATION_SCORE = {
+    'status': 'DEFERRED',
+    'reason': 'awaiting_must_ship_modules_and_walk_forward',
+    'detail': 'Bounded composite score (−2…+2) deferred until deviation-z bins, chip path, and vol width are stable with walk-forward sketch.',
+    'artifact': 'docs/research/integration_score_deferred.json',
+}
 
 
 def disabled_p1_payload(reason: str = 'P1_SHADOW_DISABLED') -> dict[str, Any]:
@@ -30,8 +54,10 @@ def disabled_p1_payload(reason: str = 'P1_SHADOW_DISABLED') -> dict[str, Any]:
         'reason': reason,
         'chipPathState': None,
         'volRegimeSwitch': None,
-        'integrationScore': None,
-        'eventWindows': None,
+        'deferred': {
+            'eventWindows': DEFERRED_EVENT_WINDOWS,
+            'integrationScore': DEFERRED_INTEGRATION_SCORE,
+        },
     }
 
 
@@ -44,12 +70,9 @@ def build_p1_research(
     chip_inst_by_date: dict[str, float] | None = None,
     now: datetime | None = None,
     base_dir: str | None = None,
-    write_walk_forward: bool = False,
 ) -> dict[str, Any]:
-    """Assemble P1 modules behind per-feature flags (all default OFF)."""
+    """Assemble must-ship P1 modules (2–3) behind per-feature flags (default OFF)."""
     import chip_path_state
-    import conditional_integration_score as cis
-    import event_window_returns as ewr
     import vol_regime_switch
 
     import conditional_expectation as ce
@@ -70,11 +93,18 @@ def build_p1_research(
         'decisionUse': 'research_only',
         'symbol': code,
         'asOfDate': as_of.isoformat(),
+        'binModelId': ce.BIN_MODEL_ID,
         'chipPathState': None,
         'volRegimeSwitch': None,
-        'integrationScore': None,
-        'eventWindows': None,
+        'deferred': {
+            'eventWindows': DEFERRED_EVENT_WINDOWS,
+            'integrationScore': DEFERRED_INTEGRATION_SCORE,
+        },
         'flags': {},
+        'notes': [
+            'Must-ship: deviation-z/rs bins on main card; chip path + vol width here.',
+            'Event windows and composite score intentionally deferred per Host Gate.',
+        ],
     }
 
     if is_enabled('shadowChipPathState', base_dir):
@@ -82,7 +112,9 @@ def build_p1_research(
             code,
             bars=bars or [],
             chip_inst_by_date=chip_map,
+            chips=chips,
             as_of_date=as_of,
+            now=now,
         )
     out['flags']['shadowChipPathState'] = is_enabled('shadowChipPathState', base_dir)
 
@@ -93,25 +125,5 @@ def build_p1_research(
             as_of_date=as_of,
         )
     out['flags']['shadowVolRegimeSwitch'] = is_enabled('shadowVolRegimeSwitch', base_dir)
-
-    if is_enabled('shadowEventWindowReturns', base_dir):
-        out['eventWindows'] = ewr.evaluate_event_windows(
-            code,
-            bars=bars or [],
-            as_of_date=as_of,
-        )
-    out['flags']['shadowEventWindowReturns'] = is_enabled('shadowEventWindowReturns', base_dir)
-
-    if is_enabled('shadowConditionalIntegrationScore', base_dir):
-        out['integrationScore'] = cis.evaluate_integration_score(
-            code,
-            bars=bars or [],
-            chip_inst_by_date=chip_map,
-            as_of_date=as_of,
-            write_report=write_walk_forward,
-        )
-    out['flags']['shadowConditionalIntegrationScore'] = is_enabled(
-        'shadowConditionalIntegrationScore', base_dir,
-    )
 
     return out
