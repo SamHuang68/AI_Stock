@@ -181,6 +181,7 @@ def public_payload(base_dir: str | Path | None = None) -> dict[str, Any]:
                 'shadowOvernightIntraday': True,
                 'shadowEarlyWarning': True,
                 'shadowConsensusAttention': True,
+                'shadowConditionalExpectation': True,
             },
         },
     }
