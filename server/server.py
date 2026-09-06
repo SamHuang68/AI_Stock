@@ -124,6 +124,27 @@ def _breadth_trace(event, **fields):
     _breadth_build.breadth_trace(_BASE, event, **fields)
 
 
+def _marketflow_trace(event, **fields):
+    """保留官方法人／成交量能 canonical payload 的有界診斷軌跡。"""
+    try:
+        path = os.path.join(_BASE, 'logs', 'marketflow_trace.jsonl')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        row = {
+            'ts': datetime.now(timezone(timedelta(hours=8))).isoformat(timespec='seconds'),
+            'event': event,
+            **fields,
+        }
+        with open(path, 'a', encoding='utf-8') as fh:
+            fh.write(json.dumps(row, ensure_ascii=False, default=str) + '\n')
+        if os.path.getsize(path) > 256 * 1024:
+            with open(path, encoding='utf-8') as fh:
+                tail = fh.readlines()[-500:]
+            with open(path, 'w', encoding='utf-8') as fh:
+                fh.writelines(tail)
+    except Exception:
+        pass
+
+
 def _keystats_trace(event, **fields):
     """Persist sanitized market-cap acquisition transitions for one symbol."""
     try:
@@ -1299,7 +1320,7 @@ def _fmtqik_index_closes(turns) -> list:
 
 
 def _tw_index_closes(symbol: str, n: int = 30) -> list:
-    """櫃買／台指期近 n 日收盤；CSV 過期超過 5 日才允許網路補齊。"""
+    """櫃買／台指期近 n 日收盤；TXF 依最近已完成日盤補齊。"""
     try:
         import tw_index_charts as _tic
         from datetime import date as _date, datetime as _dt, timedelta as _td
@@ -1307,7 +1328,9 @@ def _tw_index_closes(symbol: str, n: int = 30) -> list:
         sym_u = (symbol or '').upper()
         path = _tic.TWOII_CSV if 'TWO' in sym_u else _tic.TXF_CSV
         rows = _tic._read_csv(path)
-        if rows:
+        if 'TXF' in sym_u:
+            allow_net = _tic.txf_history_needs_refresh(rows)
+        elif rows:
             try:
                 last = _dt.strptime(rows[-1][0], '%Y-%m-%d').date()
                 allow_net = (_date.today() - last) > _td(days=5)
@@ -1319,6 +1342,22 @@ def _tw_index_closes(symbol: str, n: int = 30) -> list:
     except Exception as e:
         print('[pulse] tw_index_closes', symbol, e)
         return []
+
+
+def _taifex_quote_datetime(row: dict) -> tuple:
+    """只用 TAIFEX CDate／CTime 建立官方來源日期與台北時區時間。"""
+    raw_date = str((row or {}).get('CDate') or '').strip()
+    raw_time = str((row or {}).get('CTime') or '').strip().zfill(6)
+    if len(raw_date) != 8 or not raw_date.isdigit():
+        return None, None
+    if len(raw_time) != 6 or not raw_time.isdigit():
+        return None, None
+    try:
+        observed = datetime.strptime(raw_date + raw_time, '%Y%m%d%H%M%S')
+        observed = observed.replace(tzinfo=timezone(timedelta(hours=8)))
+    except ValueError:
+        return None, None
+    return observed.date().isoformat(), observed.isoformat(timespec='seconds')
 
 
 def _fmtqik_turnover(min_n: int = 12) -> list:
@@ -1390,6 +1429,166 @@ def _fmtqik_turnover(min_n: int = 12) -> list:
     except Exception:
         pass
     return uniq
+
+
+def _marketflow_payload(today=None, force: bool = False) -> dict:
+    """建立唯一 TWSE 市場資金流 payload，供 API、Pulse 與體質評分共用。"""
+    from datetime import timedelta as _td
+
+    current = today or datetime.now(timezone(timedelta(hours=8))).date()
+    key = f'marketflow:{current.strftime("%Y%m%d")}'
+    if not force:
+        cached = _cache.get(key)
+        if cached is not None:
+            try:
+                return json.loads(
+                    cached.decode('utf-8')
+                    if isinstance(cached, (bytes, bytearray)) else cached
+                )
+            except Exception:
+                pass
+
+    started = time.monotonic()
+    out = {
+        'date': current.strftime('%Y-%m-%d'),
+        'turnover': [],
+        'turnoverSource': 'TWSE FMTQIK',
+        'inst': None,
+        'margin': None,
+        'source': 'TWSE FMTQIK + BFI82U + MI_MARGN',
+    }
+    _marketflow_trace(
+        'refresh_started', correlationId=key, requestedDate=out['date'],
+        source=out['source'], forced=bool(force),
+    )
+
+    # 量能趨勢 FMTQIK（當月每日；金額單位元）
+    try:
+        url = (
+            'https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?'
+            f'date={current.strftime("%Y%m01")}&response=json'
+        )
+        req = urllib.request.Request(url, headers=YF_HEADERS)
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            data = json.loads(resp.read())
+        if data.get('stat') in ('OK', 'ok'):
+            fields = data.get('fields') or []
+            rows = data.get('data') or []
+            i_date = next((i for i, f in enumerate(fields) if '日期' in f), 0)
+            i_amt = next((i for i, f in enumerate(fields) if '成交金額' in f), 1)
+            i_idx = next((i for i, f in enumerate(fields) if '指數' in f), None)
+            i_chg = next((i for i, f in enumerate(fields) if '漲跌點數' in f), None)
+            for row in rows:
+                try:
+                    amount = float(str(row[i_amt]).replace(',', ''))
+                except Exception:
+                    continue
+                rec = {'date': str(row[i_date]).strip(), 'amount': amount}
+                if i_idx is not None:
+                    try:
+                        rec['index'] = float(str(row[i_idx]).replace(',', ''))
+                    except Exception:
+                        pass
+                if i_chg is not None:
+                    try:
+                        rec['chg'] = float(str(row[i_chg]).replace(',', ''))
+                    except Exception:
+                        pass
+                out['turnover'].append(rec)
+    except Exception as exc:
+        print(f'[marketflow] FMTQIK failed: {exc}')
+        _marketflow_trace(
+            'source_failed', correlationId=key, source='TWSE FMTQIK',
+            error=type(exc).__name__,
+        )
+
+    # 三大法人買賣金額 BFI82U（往前找最近一個有資料的交易日）
+    try:
+        for back in range(0, 7):
+            requested = (current - _td(days=back)).strftime('%Y%m%d')
+            url = (
+                'https://www.twse.com.tw/rwd/zh/fund/BFI82U?'
+                f'dayDate={requested}&type=day&response=json'
+            )
+            req = urllib.request.Request(url, headers=YF_HEADERS)
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                data = json.loads(resp.read())
+            if data.get('stat') not in ('OK', 'ok'):
+                continue
+            fields = data.get('fields') or []
+            rows = data.get('data') or []
+            i_name = next(
+                (i for i, f in enumerate(fields) if '單位名稱' in f or '買賣別' in f),
+                0,
+            )
+            i_net = next(
+                (i for i, f in enumerate(fields) if '買賣差' in f or '買賣超' in f),
+                len(fields) - 1,
+            )
+            inst = {
+                'foreign': None, 'trust': None, 'dealer': None,
+                'date': requested, 'source': 'TWSE BFI82U',
+            }
+            for row in rows:
+                name = str(row[i_name])
+                try:
+                    net = float(str(row[i_net]).replace(',', ''))
+                except Exception:
+                    continue
+                if '外' in name:
+                    inst['foreign'] = (inst['foreign'] or 0) + net
+                elif '投信' in name:
+                    inst['trust'] = net
+                elif '自營' in name:
+                    inst['dealer'] = (inst['dealer'] or 0) + net
+            if any(inst.get(name) is not None for name in ('foreign', 'trust', 'dealer')):
+                out['inst'] = inst
+                break
+    except Exception as exc:
+        print(f'[marketflow] BFI82U failed: {exc}')
+        _marketflow_trace(
+            'source_failed', correlationId=key, source='TWSE BFI82U',
+            error=type(exc).__name__,
+        )
+
+    # 融資融券大盤摘要 MI_MARGN tables[0]
+    try:
+        url = (
+            'https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?'
+            f'date={current.strftime("%Y%m%d")}&selectType=ALL&response=json'
+        )
+        req = urllib.request.Request(url, headers=YF_HEADERS)
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            data = json.loads(resp.read())
+        if data.get('stat') in ('OK', 'ok'):
+            tables = data.get('tables') or []
+            if tables:
+                rows = tables[0].get('data') or []
+                out['margin'] = {
+                    'raw': rows[:6], 'date': current.strftime('%Y%m%d'),
+                    'source': 'TWSE MI_MARGN',
+                } if rows else None
+    except Exception as exc:
+        print(f'[marketflow] MI_MARGN failed: {exc}')
+        _marketflow_trace(
+            'source_failed', correlationId=key, source='TWSE MI_MARGN',
+            error=type(exc).__name__,
+        )
+
+    try:
+        out['turnoverQuant'] = _turnover_quant(out.get('turnover') or [])
+    except Exception:
+        out['turnoverQuant'] = None
+    body = json.dumps(out, ensure_ascii=False).encode()
+    _cache.set(key, body, ttl=1800)
+    _marketflow_trace(
+        'refresh_completed', correlationId=key, source=out['source'],
+        turnoverDate=(out['turnover'][-1].get('date') if out['turnover'] else None),
+        institutionalDate=((out.get('inst') or {}).get('date')),
+        institutionalSource=((out.get('inst') or {}).get('source')),
+        elapsedMs=round((time.monotonic() - started) * 1000),
+    )
+    return out
 
 
 def _score_tw_market(mf: dict, margin_meta: dict, median_pe) -> tuple:
@@ -1465,68 +1664,8 @@ def _build_tw_market_fundamental(sym: str) -> dict:
         'pillars': None,
         '_source': 'TWSE marketflow + margin + universe PE',
     }
-    # 重用 /marketflow 快取
-    mf = None
-    try:
-        key = f'marketflow:{_date.today().strftime("%Y-%m-%d")}'
-        # marketflow cache key uses Y-m-d in handler... check: key = f'marketflow:{today.strftime("%Y-%m-%d")}'
-        cached = _cache.get(f'marketflow:{_date.today().strftime("%Y-%m-%d")}')
-        if cached:
-            mf = json.loads(cached.decode('utf-8') if isinstance(cached, (bytes, bytearray)) else cached)
-    except Exception:
-        mf = None
-    if mf is None:
-        # 輕量同步抓（與 _handle_marketflow 同資料源）
-        mf = {'turnover': [], 'inst': None, 'margin': None}
-        try:
-            ym1 = _date.today().strftime('%Y%m01')
-            url = f'https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date={ym1}&response=json'
-            with urllib.request.urlopen(urllib.request.Request(url, headers=YF_HEADERS), timeout=12) as resp:
-                d = json.loads(resp.read())
-            if d.get('stat') in ('OK', 'ok'):
-                fields = d.get('fields') or []
-                rows = d.get('data') or []
-                i_amt = next((i for i, f in enumerate(fields) if '成交金額' in f), 1)
-                i_date = next((i for i, f in enumerate(fields) if '日期' in f), 0)
-                for row in rows:
-                    try:
-                        amt = float(str(row[i_amt]).replace(',', ''))
-                        mf['turnover'].append({'date': str(row[i_date]).strip(), 'amount': amt})
-                    except Exception:
-                        pass
-        except Exception as e:
-            print('[market-fund] FMTQIK', e)
-        try:
-            from datetime import timedelta
-            for back in range(0, 7):
-                dd = (_date.today() - timedelta(days=back)).strftime('%Y%m%d')
-                url = f'https://www.twse.com.tw/rwd/zh/fund/BFI82U?dayDate={dd}&type=day&response=json'
-                with urllib.request.urlopen(urllib.request.Request(url, headers=YF_HEADERS), timeout=12) as resp:
-                    d = json.loads(resp.read())
-                if d.get('stat') not in ('OK', 'ok'):
-                    continue
-                fields = d.get('fields') or []
-                rows = d.get('data') or []
-                i_name = next((i for i, f in enumerate(fields) if '單位名稱' in f or '買賣別' in f), 0)
-                i_net = next((i for i, f in enumerate(fields) if '買賣差' in f or '買賣超' in f), len(fields) - 1)
-                inst = {'foreign': None, 'trust': None, 'dealer': None, 'date': dd}
-                for row in rows:
-                    nm = str(row[i_name])
-                    try:
-                        net = float(str(row[i_net]).replace(',', ''))
-                    except Exception:
-                        continue
-                    if '外' in nm:
-                        inst['foreign'] = (inst['foreign'] or 0) + net
-                    elif '投信' in nm:
-                        inst['trust'] = net
-                    elif '自營' in nm:
-                        inst['dealer'] = (inst['dealer'] or 0) + net
-                if any(v is not None for k, v in inst.items() if k != 'date'):
-                    mf['inst'] = inst
-                    break
-        except Exception as e:
-            print('[market-fund] BFI82U', e)
+    # API、Pulse 與體質評分共用同一份 TWSE canonical payload。
+    mf = _marketflow_payload()
 
     margin_meta = {}
     try:
@@ -2341,6 +2480,7 @@ def _configure_pulse_modules():
         fetch_day_movers=_fetch_day_movers,
         fmtqik_turnover=_fmtqik_turnover,
         fmtqik_index_closes=_fmtqik_index_closes,
+        marketflow_payload=_marketflow_payload,
         tw_index_closes=_tw_index_closes,
         turnover_quant=_turnover_quant,
         price_series_quant=_price_series_quant,
@@ -4460,98 +4600,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
            • 三大法人買賣金額 BFI82U（外資/投信/自營 買賣差）
            • 融資融券大盤 MI_MARGN tables[0] 摘要
            僅 TW。整批快取 30 分。"""
-        from datetime import date as _date
-        today = _date.today()
-        key = f'marketflow:{today.strftime("%Y%m%d")}'
-        c = _cache.get(key)
-        if c is not None:
-            self._ok(c); return
-        out = {'date': today.strftime('%Y-%m-%d'), 'turnover': [], 'inst': None, 'margin': None}
-        ym1 = today.strftime('%Y%m01')
-        # 量能趨勢 FMTQIK（當月每日；金額單位元）
-        try:
-            url = f'https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date={ym1}&response=json'
-            req = urllib.request.Request(url, headers=YF_HEADERS)
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                d = json.loads(resp.read())
-            if d.get('stat') in ('OK', 'ok'):
-                fields = d.get('fields') or []
-                rows = d.get('data') or []
-                i_date = next((i for i, f in enumerate(fields) if '日期' in f), 0)
-                i_amt  = next((i for i, f in enumerate(fields) if '成交金額' in f), 1)
-                i_idx  = next((i for i, f in enumerate(fields) if '指數' in f), None)
-                i_chg  = next((i for i, f in enumerate(fields) if '漲跌點數' in f), None)
-                for row in rows:
-                    try:
-                        amt = float(str(row[i_amt]).replace(',', ''))
-                    except Exception:
-                        continue
-                    rec = {'date': str(row[i_date]).strip(), 'amount': amt}
-                    if i_idx is not None:
-                        try: rec['index'] = float(str(row[i_idx]).replace(',', ''))
-                        except Exception: pass
-                    if i_chg is not None:
-                        try: rec['chg'] = float(str(row[i_chg]).replace(',', ''))
-                        except Exception: pass
-                    out['turnover'].append(rec)
-        except Exception as e:
-            print(f'[marketflow] FMTQIK failed: {e}')
-        # 三大法人買賣金額 BFI82U（往前找最近一個有資料的交易日）
-        try:
-            from datetime import timedelta
-            for back in range(0, 7):
-                dd = (today - timedelta(days=back)).strftime('%Y%m%d')
-                url = f'https://www.twse.com.tw/rwd/zh/fund/BFI82U?dayDate={dd}&type=day&response=json'
-                req = urllib.request.Request(url, headers=YF_HEADERS)
-                with urllib.request.urlopen(req, timeout=12) as resp:
-                    d = json.loads(resp.read())
-                if d.get('stat') not in ('OK', 'ok'):
-                    continue
-                fields = d.get('fields') or []
-                rows = d.get('data') or []
-                i_name = next((i for i, f in enumerate(fields) if '單位名稱' in f or '買賣別' in f), 0)
-                i_net  = next((i for i, f in enumerate(fields) if '買賣差' in f or '買賣超' in f), len(fields) - 1)
-                inst = {'foreign': None, 'trust': None, 'dealer': None, 'date': dd}
-                for row in rows:
-                    nm = str(row[i_name])
-                    try: net = float(str(row[i_net]).replace(',', ''))
-                    except Exception: continue
-                    if '外' in nm: inst['foreign'] = (inst['foreign'] or 0) + net
-                    elif '投信' in nm: inst['trust'] = net
-                    elif '自營' in nm: inst['dealer'] = (inst['dealer'] or 0) + net
-                if any(v is not None for k, v in inst.items() if k != 'date'):
-                    out['inst'] = inst
-                    break
-        except Exception as e:
-            print(f'[marketflow] BFI82U failed: {e}')
-        # 融資融券大盤摘要 MI_MARGN tables[0]
-        try:
-            url = f'https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={today.strftime("%Y%m%d")}&selectType=ALL&response=json'
-            req = urllib.request.Request(url, headers=YF_HEADERS)
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                d = json.loads(resp.read())
-            if d.get('stat') in ('OK', 'ok'):
-                tables = d.get('tables') or []
-                if tables:
-                    t0 = tables[0]
-                    fields = t0.get('fields') or []
-                    rows = t0.get('data') or []
-                    summ = {}
-                    for row in rows:
-                        label = str(row[0]) if row else ''
-                        if '融資' in label and '金額' in label:
-                            try: summ['marginAmt'] = float(str(row[-1]).replace(',', ''))
-                            except Exception: pass
-                    out['margin'] = {'raw': rows[:6]} if rows else None
-        except Exception as e:
-            print(f'[marketflow] MI_MARGN failed: {e}')
-        try:
-            out['turnoverQuant'] = _turnover_quant(out.get('turnover') or [])
-        except Exception:
-            out['turnoverQuant'] = None
-        body = json.dumps(out, ensure_ascii=False).encode()
-        _cache.set(key, body, ttl=1800)
-        self._ok(body)
+        out = _marketflow_payload()
+        self._ok(json.dumps(out, ensure_ascii=False).encode())
 
     def _handle_movers(self):
         """輕量漲跌幅排行 GET /movers?n=8 — TWSE+TPEx 日收盤，供 Overview。"""
@@ -5992,12 +6042,14 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         if price is not None and prev is not None:
             change = price - prev
         sess = 'night' if str(market_type) == '1' else 'day'
+        trade_date, source_as_of = _taifex_quote_datetime(best)
         return {
             'price': price, 'prevClose': prev, 'change': change,
             'changePct': (round(chg, 4) if chg is not None else None),
             'open': opn, 'high': high, 'low': low,
             'ampRate': (round(amp, 4) if amp is not None else None),
             'volume': vol, 'time': best.get('CTime') or '',
+            'date': trade_date, 'tradeDate': trade_date, 'asOf': source_as_of,
             'session': sess, 'sessionLabel': '夜盤' if sess == 'night' else '日盤',
             'name': best.get('DispCName') or best.get('CName') or '台指期近一',
             'source': 'taifex-mis-' + sess,
@@ -6157,6 +6209,9 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                 'ampRate': src_night.get('ampRate'),
                 'volume': src_night.get('volume'),
                 'time': src_night.get('time') or '',
+                'date': src_night.get('date'),
+                'tradeDate': src_night.get('tradeDate'),
+                'asOf': src_night.get('asOf'),
                 'session': 'night',
                 'sessionLabel': '夜盤',
                 'source': src_night.get('source') or 'taifex-mis-night',
@@ -6174,6 +6229,9 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             'ampRate': primary.get('ampRate'),
             'volume': primary.get('volume'),
             'time': primary.get('time') or '',
+            'date': primary.get('date'),
+            'tradeDate': primary.get('tradeDate'),
+            'asOf': primary.get('asOf'),
             'session': primary.get('session') or ('night' if self._txf_is_night_hours() else 'day'),
             'sessionLabel': primary.get('sessionLabel') or (
                 '夜盤' if (primary.get('session') or '') == 'night' else '日盤'
