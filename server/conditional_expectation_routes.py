@@ -42,16 +42,27 @@ class ConditionalExpectationRoutesMixin:
 
         quote = None
         chips = None
+        bars = []
+        chip_raw = None
         try:
-            bars = pr._default_bars(symbol)
+            import datastore
+            bars = datastore.get_bars(symbol, market='TW') or []
             quote = pr.quote_from_bars(bars)
-            chips = pr._chip_evidence(pr._default_chip(symbol))
+            chip_raw = pr._default_chip(symbol)
+            chips = pr._chip_evidence(chip_raw)
         except Exception:
             pass
 
+        chip_history = ce.load_chip_inst_history(symbol, current_chip=chip_raw)
         payload = {
             'ok': True,
             'enabled': True,
-            'card': ce.build_card(symbol, quote=quote, chips=chips),
+            'card': ce.build_card(
+                symbol,
+                quote=quote,
+                chips=chips,
+                bars=bars,
+                chip_inst_by_date=chip_history,
+            ),
         }
         self._ok(json.dumps(payload, ensure_ascii=False).encode())
