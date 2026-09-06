@@ -185,11 +185,13 @@ Scaffold lands `evaluate_asof_gate()` in `server/conditional_expectation.py` cal
 - CSS badge: `FACT` (gold), `CONDITIONAL` (cyan), `HYPOTHESIS` (muted purple).
 - When `asOfGate.usable === false` → grey card “資料過期 · 不適合作為預測參考”.
 
-### Slice 3 — postmarket validation points
+### Slice 3 — postmarket validation points ✅
 
-- Add `anomalies[]` + `validationPoints[]` to `build_evidence_pack` (rule-only).
-- Map each point to tomorrow session resolution hook (reuse `early_warning` session calendar helpers).
-- LLM may **rephrase** validation points in `watchTomorrow` but **cannot invent** metrics (extend `validate_narrative` / citations).
+- `server/postmarket_report.py`：`anomalies[]` + `validationPoints[]`（規則 only）、
+  `audit_narrative_numerics` 紅線、`include.validationPoints` 開關（預設 on）。
+- `src/ui/postmarket_v5.js`：FACT 驗證點 checkbox + 異常摘要 + epistemic badges。
+- 測試：`tests/test_postmarket_report.py`（pack shape、數字紅線、API 回傳）。
+- 後續：prospective resolution job（對照 `early_warning` ledger 解析明日驗證點）。
 
 ---
 
