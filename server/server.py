@@ -49,8 +49,10 @@ from etf_api import (
 )
 from etf_routes import EtfRoutesMixin
 from decision_routes import DecisionRoutesMixin
+from features_routes import FeaturesRoutesMixin
 from overnight_intraday_routes import OvernightIntradayRoutesMixin
 from options_routes import OptionsRoutesMixin
+from lru_cache import LRUCache
 from market_contract import attach_quote_contract, cumulative_volume_contract
 from market_routes import market_snapshot, twse_mis_observation
 from http_boundary import BodyReadError, is_same_local_origin, read_json_body
@@ -1571,33 +1573,6 @@ def _chip_streak(clean_code):
 # 下一次抓會重新打 Yahoo，自然吃到最新狀態。
 # 短 TTL（60s）對效能影響可忽略：同一張線型 60s 內被反覆點仍走 cache；
 # 而每分鐘整批數十 symbol 的 Screener 也只多抓一次。
-class LRUCache:
-    def __init__(self, maxsize, ttl_seconds=60):
-        self._d = OrderedDict()        # key → (value, expire_ts)
-        self._max = maxsize
-        self._ttl = ttl_seconds
-        self._lock = threading.Lock()
-    def get(self, k):
-        with self._lock:
-            ent = self._d.get(k)
-            if ent is None: return None
-            val, exp = ent
-            if exp <= time.time():
-                # expired — drop from cache so next set() doesn't trip max
-                self._d.pop(k, None)
-                return None
-            self._d.move_to_end(k)
-            return val
-    def set(self, k, v, ttl=None):
-        with self._lock:
-            exp = time.time() + (ttl if ttl is not None else self._ttl)
-            if k in self._d: self._d.move_to_end(k)
-            self._d[k] = (v, exp)
-            if len(self._d) > self._max:
-                self._d.popitem(last=False)
-    def __len__(self):
-        return len(self._d)
-
 _cache = LRUCache(LRU_MAX, ttl_seconds=60)
 _pool  = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix='yf')
 # 脈動延伸因子專用：勿佔用全域 _pool，避免 Yahoo／掃描與 extras 互卡
@@ -2687,7 +2662,8 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
     request_queue_size = 64
 
-class Handler(DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
+class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
+    _BASE = _BASE
     protocol_version = 'HTTP/1.1'   # enables keep-alive
 
     def _handle_index(self):
@@ -2851,6 +2827,8 @@ class Handler(DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMi
             self._handle_macro('')
         elif p.startswith('/macro/'):
             self._handle_macro(p[len('/macro/'):].split('?')[0])
+        elif p == '/features' or p.startswith('/features?'):
+            self._handle_features()
         elif p == '/health/live':
             # Lightweight process-liveness contract for local supervisors.
             # Keep this free of database, provider, WaveDeck and decision-engine
@@ -5070,7 +5048,8 @@ class Handler(DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMi
         out['txf'] = txf_night
         # Canonical snapshot: headline renderers must not recompute a live
         # change from a daily-series close.
-        out['marketSnapshot'] = market_snapshot(indices, txf_night)
+        market_snap = market_snapshot(indices, txf_night)
+        out['marketSnapshot'] = market_snap
         out['marketflow'] = {
             'turnover': (mf or {}).get('turnover'),
             'inst': inst,
@@ -5083,7 +5062,9 @@ class Handler(DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMi
             'sectorsSource': (extras.get('sectors') or {}).get('source')
             if isinstance(extras.get('sectors'), dict) else None,
         }
-        out['updatedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+        # Headline freshness must follow per-quote market observation time,
+        # not a whole-page server generation stamp.
+        out['updatedAt'] = market_snap.get('marketAsOf') or market_snap.get('generatedAt')
 
         # ── Overview 儀表板擴充（對齊 tw-pulse 參考圖）──────────────
         # movers / global / macro / flash 並行；總預算 ~8s（FRED 在此環境常逾時，必須 fail-fast）
