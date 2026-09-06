@@ -1500,6 +1500,9 @@
   }
 
   function sessionMomentumHtml(ctx) {
+    if (window.FeatureFlags && FeatureFlags.isEnabled && !FeatureFlags.isEnabled('shadowOvernightIntraday')) {
+      return '';
+    }
     var research = ((ctx.researchObservations || {}).overnightIntraday) || {};
     var status = ((research.quality || {}).status) || 'insufficient';
     var markets = research.markets || [];
@@ -1528,6 +1531,9 @@
   }
 
   function contextWithResearchEvidence(ctx) {
+    if (window.FeatureFlags && FeatureFlags.isEnabled && !FeatureFlags.isEnabled('shadowOvernightIntraday')) {
+      return ctx;
+    }
     var research = ((ctx.researchObservations || {}).overnightIntraday) || {};
     return Object.assign({}, ctx, { evidence: (ctx.evidence || []).concat(research.evidence || []) });
   }
@@ -1840,6 +1846,9 @@
   }
 
   function earlyWarningHtml(ctx) {
+    if (window.FeatureFlags && FeatureFlags.isEnabled && !FeatureFlags.isEnabled('shadowEarlyWarning')) {
+      return '';
+    }
     var warning = ctx.earlyWarnings || {};
     var signals = warning.signals || [];
     if (!warning.ok && !signals.length) {

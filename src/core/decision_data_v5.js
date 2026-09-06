@@ -100,6 +100,9 @@
 
   function refreshOvernightResearch(context, id, force) {
     if (!context || !context.regime) return Promise.resolve(state);
+    if (window.FeatureFlags && FeatureFlags.isEnabled && !FeatureFlags.isEnabled('shadowOvernightIntraday')) {
+      return Promise.resolve(state);
+    }
     if (researchInflight) return researchInflight;
     if (!force && researchUpdatedAt && Date.now() - researchUpdatedAt < 15 * 60 * 1000) return Promise.resolve(state);
     var path = base() + '/research/overnight-intraday?market=all';
