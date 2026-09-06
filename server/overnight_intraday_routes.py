@@ -44,6 +44,7 @@ class OvernightIntradayRoutesMixin:
         if not is_enabled('shadowOvernightIntraday', base_dir):
             self._ok(json.dumps(_disabled_payload('refresh'), ensure_ascii=False).encode())
             return
+        import overnight_intraday
         try:
             body = read_json_body(self, max_bytes=2048)
         except BodyReadError as exc:
