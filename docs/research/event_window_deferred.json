@@ -1,0 +1,17 @@
+{
+  "generatedAt": "2026-09-06T00:00:00Z",
+  "deferred": [
+    {
+      "eventType": "ex_dividend",
+      "status": "DEFERRED_OPTIONAL",
+      "reason": "event calendar",
+      "detail": "Live /events exDividend feed has no versioned historical store in-repo. Post-event ex-div distributions require a PIT event ledger — not invented here.",
+      "horizons": {
+        "1": { "n": 0, "ratesAvailable": false },
+        "5": { "n": 0, "ratesAvailable": false },
+        "20": { "n": 0, "ratesAvailable": false }
+      },
+      "artifact": "docs/FINDINGS_CONDITIONAL_EXPECTATION_P0.md#p1-event-window"
+    }
+  ]
+}

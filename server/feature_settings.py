@@ -19,6 +19,10 @@ FEATURE_KEYS = (
     'shadowEarlyWarning',
     'shadowConsensusAttention',
     'shadowConditionalExpectation',
+    'shadowChipPathState',
+    'shadowVolRegimeSwitch',
+    'shadowConditionalIntegrationScore',
+    'shadowEventWindowReturns',
 )
 
 ENV_KEYS = {
@@ -26,6 +30,10 @@ ENV_KEYS = {
     'shadowEarlyWarning': 'ST_SHADOW_EARLY_WARNING',
     'shadowConsensusAttention': 'ST_SHADOW_CONSENSUS_ATTENTION',
     'shadowConditionalExpectation': 'ST_SHADOW_CONDITIONAL_EXPECTATION',
+    'shadowChipPathState': 'ST_SHADOW_CHIP_PATH_STATE',
+    'shadowVolRegimeSwitch': 'ST_SHADOW_VOL_REGIME_SWITCH',
+    'shadowConditionalIntegrationScore': 'ST_SHADOW_CONDITIONAL_INTEGRATION_SCORE',
+    'shadowEventWindowReturns': 'ST_SHADOW_EVENT_WINDOW_RETURNS',
 }
 
 # Convenience master switch for local research sessions.
@@ -182,6 +190,10 @@ def public_payload(base_dir: str | Path | None = None) -> dict[str, Any]:
                 'shadowEarlyWarning': True,
                 'shadowConsensusAttention': True,
                 'shadowConditionalExpectation': True,
+                'shadowChipPathState': True,
+                'shadowVolRegimeSwitch': True,
+                'shadowConditionalIntegrationScore': True,
+                'shadowEventWindowReturns': True,
             },
         },
     }

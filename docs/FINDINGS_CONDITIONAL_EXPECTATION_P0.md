@@ -251,4 +251,68 @@ Scaffold lands `evaluate_asof_gate()` in `server/conditional_expectation.py` cal
 
 ---
 
-*End of FINDINGS — advisory / patch_proposal*
+## 8. P1 — rules / research (shadow-safe defaults) ✅
+
+**Branch:** `cursor/conditional-expectation-p1-eaea`  
+**Policy:** shadow-only; per-module flags default **OFF**; Decision numbers remain rule-only.
+
+### 8.1 籌碼路徑依賴 state machine（規則）
+
+| Item | Path | Epistemic |
+|------|------|-----------|
+| State machine | `server/chip_path_state.py` | **FACT** label (`accumulate` / `chase` / `distribute` / `unwind` / `neutral`) |
+| Flag | `shadowChipPathState` → `ST_SHADOW_CHIP_PATH_STATE` | default OFF |
+| Surfaces | `GET /research/conditional-expectation/p1`, `EvidencePack.chipPathState` (flag on) | not buy/sell advice |
+
+Consecutive institutional streak (≥3 sessions, PIT chip_history) × close-to-close price reaction over streak window.
+
+### 8.2 波動體制切換
+
+| Item | Path | Epistemic |
+|------|------|-----------|
+| RV20 percentile vs 252-session history | `server/vol_regime_switch.py` | **CONDITIONAL** |
+| Output | `positionWidthHint.multiplier` only | does **not** overwrite Decision `actionEnvelope` |
+| Flag | `shadowVolRegimeSwitch` → `ST_SHADOW_VOL_REGIME_SWITCH` | default OFF |
+
+Cross up above 80th → reduce width hint (~0.70×); cross down below 20th → restore toward baseline.
+
+### 8.3 簡單集成分數（Host-gated / shadow）
+
+| Item | Path | Notes |
+|------|------|-------|
+| Orthogonal features → score ∈ [−2, +2] | `server/conditional_integration_score.py` | RSI centered, inst3d, chip path, vol percentile |
+| Walk-forward artifact | `docs/research/conditional_integration_walkforward.{json,md}` | chronological 70/30 split |
+| Flag | `shadowConditionalIntegrationScore` → `ST_SHADOW_CONDITIONAL_INTEGRATION_SCORE` | default OFF |
+| Score visibility | `score` withheld until `walkForwardEvidencePresent` | never Decision production score by default |
+
+### 8.4 事件窗口預測
+
+| Item | Path | Notes |
+|------|------|-------|
+| Revenue publish (rule: monthly 10th) | `server/event_window_returns.py` | H∈{1,5,20} post-event distributions, PIT |
+| Ex-dividend | stub in same module | `DEFERRED_OPTIONAL: event calendar` — no fake events |
+| Flag | `shadowEventWindowReturns` → `ST_SHADOW_EVENT_WINDOW_RETURNS` | default OFF |
+| Artifact | `docs/research/event_window_deferred.json` | documents deferred ex-div backtest |
+
+### 8.5 API & orchestration
+
+- `GET /research/conditional-expectation/p1?symbol=` — requires `shadowConditionalExpectation`; P1 sub-modules gated individually.
+- Orchestrator: `server/conditional_expectation_p1.py`
+- Tests: `tests/test_conditional_expectation_p1.py`
+
+### 8.6 P1 acceptance checklist
+
+- [x] Chip path states exposed as FACT labels on research + postmarket (flag on)
+- [x] Vol regime emits epistemic position width hint only
+- [x] Integration score bounded [−2,+2]; withheld without walk-forward evidence
+- [x] Revenue event windows with PIT discipline; ex-div DEFERRED stub documented
+- [x] All new flags default OFF; Decision envelope unchanged
+- [x] Unit + route tests green
+
+### P1-event-window
+
+Ex-dividend historical backtest deferred until a versioned PIT event ledger exists (live `/events` exDividend is forward-looking only).
+
+---
+
+*End of FINDINGS — P0 advisory + P1 shadow research*
