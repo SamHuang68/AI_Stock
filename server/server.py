@@ -48,6 +48,7 @@ from etf_api import (
     list_etf_files,
 )
 from etf_routes import EtfRoutesMixin
+from conditional_expectation_routes import ConditionalExpectationRoutesMixin
 from decision_routes import DecisionRoutesMixin
 from features_routes import FeaturesRoutesMixin
 from overnight_intraday_routes import OvernightIntradayRoutesMixin
@@ -2292,7 +2293,7 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
     request_queue_size = 64
 
-class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMixin, PulseRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
+class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, ConditionalExpectationRoutesMixin, OptionsRoutesMixin, PulseRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     _BASE = _BASE
     protocol_version = 'HTTP/1.1'   # enables keep-alive
 
@@ -2395,6 +2396,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_signal_performance()
         elif p == '/research/overnight-intraday' or p.startswith('/research/overnight-intraday?'):
             self._handle_overnight_intraday()
+        elif p == '/research/conditional-expectation' or p.startswith('/research/conditional-expectation?'):
+            self._handle_conditional_expectation()
         elif p == '/options/txo/structure' or p.startswith('/options/txo/structure?'):
             self._handle_options_structure()
         elif p == '/options/txo/history' or p.startswith('/options/txo/history?'):
