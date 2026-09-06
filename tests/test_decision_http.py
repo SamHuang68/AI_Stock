@@ -58,6 +58,8 @@ def _pulse() -> dict:
 
 class DecisionHttpTest(unittest.TestCase):
     def setUp(self):
+        self._saved_shadow_env = os.environ.get('ST_ENABLE_SHADOW_RESEARCH')
+        os.environ['ST_ENABLE_SHADOW_RESEARCH'] = '1'
         self.tmp = tempfile.TemporaryDirectory()
         self.old_options_history = ox.HISTORY_PATH
         ox.HISTORY_PATH = str(Path(self.tmp.name) / 'options-history.json')
@@ -81,6 +83,10 @@ class DecisionHttpTest(unittest.TestCase):
         self.thread.join(timeout=2)
         ox.HISTORY_PATH = self.old_options_history
         self.tmp.cleanup()
+        if self._saved_shadow_env is None:
+            os.environ.pop('ST_ENABLE_SHADOW_RESEARCH', None)
+        else:
+            os.environ['ST_ENABLE_SHADOW_RESEARCH'] = self._saved_shadow_env
 
     def test_get_context_returns_canonical_contract(self):
         with urllib.request.urlopen(self.base + '/decision/context', timeout=5) as resp:

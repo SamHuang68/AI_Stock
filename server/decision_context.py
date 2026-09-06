@@ -23,6 +23,11 @@ from typing import Any, Iterable
 
 import exposure_lab as _exposure_lab
 import consensus_attention as _consensus_attention
+from feature_settings import (
+    disabled_consensus_attention,
+    disabled_early_warning,
+    is_enabled,
+)
 
 
 CONTRACT_VERSION = 2
@@ -728,17 +733,22 @@ def empty_context(reason: str = 'pulse_not_ready', now: datetime | None = None) 
         'keyLevels': {}, 'volatility': {}, 'divergences': [], 'breadthTrend': {'rows': []},
         'basisContext': {}, 'sectorFlow': {},
         'portfolioOverlay': None, 'exposureLab': {},
-        'consensusAttention': _consensus_attention.empty(reason),
-        'earlyWarnings': {
-            'ok': False, 'shadowOnly': True, 'actionAuthority': 'none',
-            'status': 'INSUFFICIENT_DATA', 'signals': [], 'newEvents': [], 'activeEvents': [],
-            'temporalContext': {},
-            'thresholds': {
-                'watchStrength': 55, 'watchIndependentDomains': 2,
-                'armedStrength': 70, 'armedIndependentDomains': 3,
-                'confirmedStrength': 80, 'confirmedIndependentDomains': 3,
-            },
-        },
+        'consensusAttention': (
+            _consensus_attention.empty(reason) if is_enabled('shadowConsensusAttention')
+            else disabled_consensus_attention('PULSE_NOT_READY')
+        ),
+        'earlyWarnings': (
+            {
+                'ok': False, 'shadowOnly': True, 'actionAuthority': 'none',
+                'status': 'INSUFFICIENT_DATA', 'signals': [], 'newEvents': [], 'activeEvents': [],
+                'temporalContext': {},
+                'thresholds': {
+                    'watchStrength': 55, 'watchIndependentDomains': 2,
+                    'armedStrength': 70, 'armedIndependentDomains': 3,
+                    'confirmedStrength': 80, 'confirmedIndependentDomains': 3,
+                },
+            } if is_enabled('shadowEarlyWarning') else disabled_early_warning('PULSE_NOT_READY')
+        ),
         'optionsStructure': {'status': 'insufficient', 'shadowMode': True, 'decisionUse': 'research_only'},
         'newsImpact': [], 'scenario': {},
         'confirmation': [], 'invalidation': [], 'evidence': [],
@@ -1239,7 +1249,11 @@ def build_decision_context(
         },
         'model': ENGINE_VERSION,
     }
-    context['consensusAttention'] = _consensus_attention.build_consensus_attention(context)
+    context['consensusAttention'] = (
+        _consensus_attention.build_consensus_attention(context)
+        if is_enabled('shadowConsensusAttention')
+        else disabled_consensus_attention()
+    )
     return context
 
 
@@ -1396,83 +1410,81 @@ def publish_context(
     global _latest_context, _latest_inputs
     fingerprint = _fingerprint(pulse)
     context = dict(context or {})
-    try:
-        import early_warning as _early_warning
-        import overnight_intraday as _overnight_intraday
-        signal_db_path = _early_warning.DB_PATH
-        if os.path.abspath(db_path) != os.path.abspath(DB_PATH):
-            signal_db_path = os.path.join(os.path.dirname(os.path.abspath(db_path)), 'market_signals.db')
-        warning = _early_warning.process_context(
-            context, pulse, memory_snapshot=_overnight_intraday.latest_cached('all'),
-            market_history=(build_kwargs or {}).get('index_history'),
-            db_path=signal_db_path)
-        context['earlyWarnings'] = warning
-        source_map = {
-            'globalTech': ('Yahoo Finance', 'latest finalized US session'),
-            'anchor': ('Yahoo Finance + ST benchmark research registry', '2330 and 0050-ex-2330 residual where eligible'),
-            'memoryCycle': ('ST overnight-intraday fixed baskets', '20-session adjusted daily session structure'),
-            'breadthLiquidity': ('TWSE breadth + sector participation', 'same-session stock breadth and sector scope'),
-            'flowDerivatives': ('TWSE/TAIFEX canonical Pulse', 'institutional, same-contract OI and futures context'),
-        }
-        warning_evidence = []
-        for family in warning.get('familyScores') or []:
-            source, reference = source_map.get(family.get('id'), ('ST deterministic signal engine', 'canonical inputs'))
-            temporal = family.get('temporal') or {}
-            warning_evidence.append({
-                'id': 'signal.family.' + str(family.get('id') or 'unknown'),
-                'metric': 'shadowFamilyScore',
-                'value': {
-                    'score': family.get('value'), 'quality': family.get('quality'),
-                    'available': family.get('available'), 'observed': family.get('observed') or {},
-                    'temporal': temporal,
-                },
-                'comparison': 'negative -1 / neutral 0 / positive +1',
-                'source': source, 'marketScope': temporal.get('market') or 'TW_CROSS_MARKET',
-                'session': temporal.get('session') or 'session_aligned_shadow',
-                'asOf': temporal.get('sourceAsOf') or warning.get('asOf'), 'reference': reference,
-                'quality': 'derived' if family.get('available') else 'insufficient',
-                'authority': 'shadow_observation',
-            })
-        validation = warning.get('prospectiveValidation') or {}
-        validation_status = str(validation.get('status') or 'empty')
-        warning_evidence.append({
-            'id': 'signal.prospective_validation',
-            'metric': 'prospectiveSignalLedger',
-            'value': {
-                'status': validation_status,
-                'totalTrials': validation.get('totalTrials', 0),
-                'resolvedOutcomes': validation.get('resolvedOutcomes', 0),
-                'coveragePct': validation.get('coveragePct', 0),
-                'horizons': validation.get('horizons') or [],
-            },
-            'comparison': '1 / 3 / 5 finalized sessions; empirical rates withheld below n=20',
-            'source': 'ST append-only prospective signal ledger',
-            'marketScope': 'TW_CROSS_MARKET', 'session': 'finalized_daily_close',
-            'asOf': warning.get('asOf'),
-            'reference': 'First observed tracked episode; no retrospective backfill',
-            'quality': ('observed' if validation_status == 'ready' else
-                        ('building' if validation_status in ('building', 'empty') else 'insufficient')),
-            'authority': 'shadow_validation',
-        })
-        context['evidence'] = list(context.get('evidence') or []) + warning_evidence
-    except Exception as exc:
+    if is_enabled('shadowEarlyWarning'):
         try:
             import early_warning as _early_warning
-            context['earlyWarnings'] = _early_warning.empty(type(exc).__name__)
-        except Exception:
-            context['earlyWarnings'] = {
-                'ok': False, 'shadowOnly': True, 'actionAuthority': 'none',
-                'status': 'INSUFFICIENT_DATA', 'signals': [], 'newEvents': [],
-                'activeEvents': [], 'temporalContext': {},
-                'thresholds': {
-                    'watchStrength': 55, 'watchIndependentDomains': 2,
-                    'armedStrength': 70, 'armedIndependentDomains': 3,
-                    'confirmedStrength': 80, 'confirmedIndependentDomains': 3,
-                },
+            import overnight_intraday as _overnight_intraday
+            signal_db_path = _early_warning.DB_PATH
+            if os.path.abspath(db_path) != os.path.abspath(DB_PATH):
+                signal_db_path = os.path.join(os.path.dirname(os.path.abspath(db_path)), 'market_signals.db')
+            warning = _early_warning.process_context(
+                context, pulse, memory_snapshot=_overnight_intraday.latest_cached('all'),
+                market_history=(build_kwargs or {}).get('index_history'),
+                db_path=signal_db_path)
+            context['earlyWarnings'] = warning
+            source_map = {
+                'globalTech': ('Yahoo Finance', 'latest finalized US session'),
+                'anchor': ('Yahoo Finance + ST benchmark research registry', '2330 and 0050-ex-2330 residual where eligible'),
+                'memoryCycle': ('ST overnight-intraday fixed baskets', '20-session adjusted daily session structure'),
+                'breadthLiquidity': ('TWSE breadth + sector participation', 'same-session stock breadth and sector scope'),
+                'flowDerivatives': ('TWSE/TAIFEX canonical Pulse', 'institutional, same-contract OI and futures context'),
             }
+            warning_evidence = []
+            for family in warning.get('familyScores') or []:
+                source, reference = source_map.get(family.get('id'), ('ST deterministic signal engine', 'canonical inputs'))
+                temporal = family.get('temporal') or {}
+                warning_evidence.append({
+                    'id': 'signal.family.' + str(family.get('id') or 'unknown'),
+                    'metric': 'shadowFamilyScore',
+                    'value': {
+                        'score': family.get('value'), 'quality': family.get('quality'),
+                        'available': family.get('available'), 'observed': family.get('observed') or {},
+                        'temporal': temporal,
+                    },
+                    'comparison': 'negative -1 / neutral 0 / positive +1',
+                    'source': source, 'marketScope': temporal.get('market') or 'TW_CROSS_MARKET',
+                    'session': temporal.get('session') or 'session_aligned_shadow',
+                    'asOf': temporal.get('sourceAsOf') or warning.get('asOf'), 'reference': reference,
+                    'quality': 'derived' if family.get('available') else 'insufficient',
+                    'authority': 'shadow_observation',
+                })
+            validation = warning.get('prospectiveValidation') or {}
+            validation_status = str(validation.get('status') or 'empty')
+            warning_evidence.append({
+                'id': 'signal.prospective_validation',
+                'metric': 'prospectiveSignalLedger',
+                'value': {
+                    'status': validation_status,
+                    'totalTrials': validation.get('totalTrials', 0),
+                    'resolvedOutcomes': validation.get('resolvedOutcomes', 0),
+                    'coveragePct': validation.get('coveragePct', 0),
+                    'horizons': validation.get('horizons') or [],
+                },
+                'comparison': '1 / 3 / 5 finalized sessions; empirical rates withheld below n=20',
+                'source': 'ST append-only prospective signal ledger',
+                'marketScope': 'TW_CROSS_MARKET', 'session': 'finalized_daily_close',
+                'asOf': warning.get('asOf'),
+                'reference': 'First observed tracked episode; no retrospective backfill',
+                'quality': ('observed' if validation_status == 'ready' else
+                            ('building' if validation_status in ('building', 'empty') else 'insufficient')),
+                'authority': 'shadow_validation',
+            })
+            context['evidence'] = list(context.get('evidence') or []) + warning_evidence
+        except Exception as exc:
+            try:
+                import early_warning as _early_warning
+                context['earlyWarnings'] = _early_warning.empty(type(exc).__name__)
+            except Exception:
+                context['earlyWarnings'] = disabled_early_warning(type(exc).__name__)
+    else:
+        context['earlyWarnings'] = disabled_early_warning()
     # One canonical projection, recomputed only after the warning lifecycle is
     # attached.  It never polls providers and never mutates DecisionContext.
-    context['consensusAttention'] = _consensus_attention.build_consensus_attention(context)
+    context['consensusAttention'] = (
+        _consensus_attention.build_consensus_attention(context)
+        if is_enabled('shadowConsensusAttention')
+        else disabled_consensus_attention()
+    )
     with _lock:
         _latest_context = context
         _latest_inputs = {'pulse': pulse, **(build_kwargs or {})}
@@ -1531,11 +1543,17 @@ def rebuild_latest(
     if options_structure is not None:
         inputs['options_structure'] = options_structure
     context = build_decision_context(**inputs, risk_profile=risk_profile, portfolio_overlay=portfolio_overlay, portfolio_kind=portfolio_kind)
-    if latest_warning:
+    if is_enabled('shadowEarlyWarning') and latest_warning:
         context['earlyWarnings'] = json.loads(json.dumps(latest_warning, ensure_ascii=False))
         context['evidence'] = list(context.get('evidence') or []) + json.loads(
             json.dumps(latest_warning_evidence, ensure_ascii=False))
-    context['consensusAttention'] = _consensus_attention.build_consensus_attention(context)
+    elif not is_enabled('shadowEarlyWarning'):
+        context['earlyWarnings'] = disabled_early_warning()
+    context['consensusAttention'] = (
+        _consensus_attention.build_consensus_attention(context)
+        if is_enabled('shadowConsensusAttention')
+        else disabled_consensus_attention()
+    )
     return context
 
 

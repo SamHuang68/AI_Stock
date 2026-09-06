@@ -9,6 +9,7 @@ import re
 from urllib.parse import parse_qs, urlparse
 
 from http_boundary import BodyReadError, read_json_body
+from feature_settings import disabled_signal_route, is_enabled
 
 
 _HOLDING_SYMBOL = re.compile(r'^[A-Za-z0-9^._=-]{1,20}$')
@@ -115,10 +116,16 @@ class DecisionRoutesMixin:
         self._ok(json.dumps(dc.history(n), ensure_ascii=False).encode())
 
     def _handle_signal_active(self):
+        if not is_enabled('shadowEarlyWarning', getattr(self, '_BASE', None)):
+            self._ok(json.dumps(disabled_signal_route('active'), ensure_ascii=False).encode())
+            return
         import early_warning
         self._ok(json.dumps(early_warning.active(), ensure_ascii=False).encode())
 
     def _handle_signal_history(self):
+        if not is_enabled('shadowEarlyWarning', getattr(self, '_BASE', None)):
+            self._ok(json.dumps(disabled_signal_route('history'), ensure_ascii=False).encode())
+            return
         import early_warning
         qs = parse_qs(urlparse(self.path).query)
         try:
@@ -128,6 +135,9 @@ class DecisionRoutesMixin:
         self._ok(json.dumps(early_warning.history(n), ensure_ascii=False).encode())
 
     def _handle_signal_performance(self):
+        if not is_enabled('shadowEarlyWarning', getattr(self, '_BASE', None)):
+            self._ok(json.dumps(disabled_signal_route('performance'), ensure_ascii=False).encode())
+            return
         import early_warning
         qs = parse_qs(urlparse(self.path).query)
         try:

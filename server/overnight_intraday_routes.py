@@ -8,22 +8,17 @@ from urllib.parse import parse_qs, urlparse
 
 from feature_settings import is_enabled
 from http_boundary import BodyReadError, read_json_body
+from feature_settings import disabled_overnight_intraday
 
 
 def _disabled_payload(action: str) -> dict:
-    return {
-        'ok': False,
-        'enabled': False,
-        'shadowOnly': True,
-        'decisionUse': 'research_only',
-        'actionAuthority': 'none',
-        'error': (
-            'Overnight × Intraday shadow research is disabled by default. '
-            'Set ST_SHADOW_OVERNIGHT_INTRADAY=1 or ST_ENABLE_SHADOW_RESEARCH=1, '
-            'or create data/feature_flags.local.json to enable.'
-        ),
-        'action': action,
-    }
+    payload = disabled_overnight_intraday(action)
+    payload['error'] = (
+        'Overnight × Intraday shadow research is disabled by default. '
+        'Set ST_SHADOW_OVERNIGHT_INTRADAY=1 or ST_ENABLE_SHADOW_RESEARCH=1, '
+        'or create data/feature_flags.local.json to enable.'
+    )
+    return payload
 
 
 class OvernightIntradayRoutesMixin:
@@ -47,7 +42,7 @@ class OvernightIntradayRoutesMixin:
     def _handle_overnight_intraday_refresh(self):
         base_dir = getattr(self, '_BASE', None)
         if not is_enabled('shadowOvernightIntraday', base_dir):
-            self._err(_disabled_payload('refresh')['error'], 403)
+            self._ok(json.dumps(_disabled_payload('refresh'), ensure_ascii=False).encode())
             return
         try:
             body = read_json_body(self, max_bytes=2048)
