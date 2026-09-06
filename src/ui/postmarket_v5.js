@@ -75,7 +75,13 @@
         'gap:8px;align-items:center;font-size:10px;color:var(--tlo,#8a94a6);flex:0 0 auto}' +
       '#pmd-usage{flex:1;min-width:180px}' +
       '.pmd-blurb{font-size:11px;color:var(--thi,#f2f5fa);border-left:2px solid var(--gold,#F5C451);' +
-        'padding:4px 8px;margin-bottom:8px;background:var(--bg3,#111B2E)}';
+        'padding:4px 8px;margin-bottom:8px;background:var(--bg3,#111B2E)}' +
+      '.pmd-vp{margin:6px 0 4px;padding:6px 8px;border:1px dashed var(--border,#233);border-radius:4px}' +
+      '.pmd-vp-hd{font-size:10px;color:var(--gold,#F5C451);margin-bottom:4px;display:flex;align-items:center;gap:6px}' +
+      '.pmd-vp-item{display:flex;align-items:flex-start;gap:6px;font-size:11px;line-height:1.5;margin:3px 0}' +
+      '.pmd-vp-item input{margin-top:2px;accent-color:var(--gold,#F5C451)}' +
+      '.pmd-vp-meta{font-size:9px;color:var(--tlo,#8a94a6);margin-left:22px}' +
+      '.pmd-anom{font-size:10px;color:var(--tlo,#8a94a6);margin:2px 0}';
     document.head.appendChild(s);
   }
 
@@ -129,6 +135,74 @@
     return '';
   }
 
+  function factBadge(note) {
+    if (window.EpistemicBadgesV5 && window.EpistemicBadgesV5.badge) {
+      return window.EpistemicBadgesV5.badge('FACT', { note: note || '規則證據', compact: true });
+    }
+    return '';
+  }
+
+  function vpStorageKey(reportId, symbol, pointId) {
+    return 'pmd_vp_' + (reportId || 'latest') + '_' + symbol + '_' + pointId;
+  }
+
+  function isVpChecked(reportId, symbol, pointId) {
+    try {
+      return localStorage.getItem(vpStorageKey(reportId, symbol, pointId)) === '1';
+    } catch (e) { return false; }
+  }
+
+  function setVpChecked(reportId, symbol, pointId, checked) {
+    try {
+      localStorage.setItem(vpStorageKey(reportId, symbol, pointId), checked ? '1' : '0');
+    } catch (e) {}
+  }
+
+  function renderValidationPoints(row, reportId) {
+    var points = row.validationPoints;
+    if (!points || !points.length) return '';
+    var html = '<div class="pmd-vp"><div class="pmd-vp-hd">' +
+      factBadge('明日驗證點') + ' 明日驗證點（規則閾值，可勾選）</div>';
+    points.forEach(function (vp) {
+      var pid = vp.id || ('vp_' + Math.random());
+      var checked = isVpChecked(reportId, row.symbol, pid);
+      html += '<label class="pmd-vp-item"><input type="checkbox" data-vp-symbol="' + esc(row.symbol) +
+        '" data-vp-id="' + esc(pid) + '"' + (checked ? ' checked' : '') + '>' +
+        '<span>' + esc(vp.label || '') + '</span></label>';
+      var meta = [];
+      if (vp.resolveSession) meta.push('resolve ' + esc(vp.resolveSession));
+      if (vp.asOf) meta.push('asOf ' + esc(vp.asOf));
+      if (vp.thresholdRef) meta.push('ref ' + esc(vp.thresholdRef));
+      if (meta.length) html += '<div class="pmd-vp-meta">' + meta.join(' ｜ ') + '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function renderAnomalies(row) {
+    var items = row.anomalies;
+    if (!items || !items.length) return '';
+    return '<details><summary>規則異常（' + items.length + '）</summary><ul>' +
+      items.map(function (a) {
+        return '<li class="pmd-anom">' + factBadge('異常') + ' ' + esc(a.label || a.id || '') + '</li>';
+      }).join('') + '</ul></details>';
+  }
+
+  function bindValidationCheckboxes(report) {
+    var reportId = report && report.reportId;
+    document.querySelectorAll('#pmd-out input[data-vp-id]').forEach(function (el) {
+      el.onchange = function () {
+        setVpChecked(reportId, el.getAttribute('data-vp-symbol'), el.getAttribute('data-vp-id'), el.checked);
+      };
+    });
+  }
+
+    if (window.EpistemicBadgesV5 && window.EpistemicBadgesV5.badge) {
+      return window.EpistemicBadgesV5.badge('HYPOTHESIS', { note: note || '敘事整理', compact: true });
+    }
+    return '';
+  }
+
   function conditionalSection(symbol) {
     if (window.ConditionalExpectationV5 && ConditionalExpectationV5.isEnabled &&
       !ConditionalExpectationV5.isEnabled()) {
@@ -174,7 +248,10 @@
       html += '</div><div class="pmd-asof">' + asOfLine(row.evidenceAsOf) + '</div>';
       if (row.error) {
         html += '<div class="pmd-err">✕ ' + esc(row.error) + '</div>';
-      } else if (nar) {
+      } else {
+        html += renderValidationPoints(row, report.reportId);
+        html += renderAnomalies(row);
+        if (nar) {
         html += '<div class="pmd-conc">' + hypothesisBadge('結論敘事') + ' ' + esc(nar.conclusion || '') + '</div>' +
           listBlock('Drivers 驅動', nar.drivers, true) +
           listBlock('Hypotheses 假說', nar.hypotheses) +
@@ -188,6 +265,7 @@
         if (row.guardrail && row.guardrail.length) {
           html += '<div class="pmd-note">guardrail：' + esc(row.guardrail.join('；')) + '</div>';
         }
+        }
       }
       if (row.notes && row.notes.length) {
         html += '<div class="pmd-note">' + esc(row.notes.join('；')) + '</div>';
@@ -195,6 +273,7 @@
       html += conditionalSection(row.symbol) + '</div>';
     });
     out.innerHTML = html || '<div class="pmd-note">回應內無 symbols。</div>';
+    bindValidationCheckboxes(report);
     mountConditionalCards(report);
     renderUsage(report);
   }
@@ -232,6 +311,12 @@
       Object.keys(asOf).forEach(function (k) { if (asOf[k]) asParts.push(k + '=' + asOf[k]); });
       if (asParts.length) lines.push('- evidence asOf: ' + asParts.join(', '));
       if (row.error) { lines.push('- 錯誤: ' + row.error); return; }
+      if (row.validationPoints && row.validationPoints.length) {
+        lines.push('', '### 明日驗證點（FACT）');
+        row.validationPoints.forEach(function (vp) {
+          lines.push('- [ ] ' + (vp.label || vp.id));
+        });
+      }
       var nar = row.narrative || {};
       if (nar.conclusion) lines.push('', nar.conclusion);
       [['drivers', '驅動'], ['hypotheses', '假說'], ['risks', '風險'], ['watchTomorrow', '明日觀察']]

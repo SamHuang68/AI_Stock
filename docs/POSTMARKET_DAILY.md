@@ -19,15 +19,16 @@ Request（欄位齊 `server/postmarket_report.py::generate_report`）：
   "symbols": ["2330", "2454"],
   "locale": "zh-Hant-TW",
   "modelHint": "sonnet",
-  "include": {"quotes": true, "chips": true, "news": true, "decisionSummary": true, "macro": false},
+  "include": {"quotes": true, "chips": true, "news": true, "decisionSummary": true, "macro": false, "validationPoints": true},
   "maxNewsPerSymbol": 5,
   "abortSignalClientId": "optional-request-id"
 }
 ```
 
 Response 200：`{reportId, generatedAt, model, usage{inputTokens,outputTokens,estUsd},
-symbols[{symbol, evidenceAsOf, stale, narrative{conclusion,drivers,hypotheses,risks,watchTomorrow},
-citations[]}], marketBlurb?, usageToday{estUsd,runs}, partial?, aborted?}`。
+symbols[{symbol, evidenceAsOf, stale, anomalies[]?, validationPoints[]?,
+narrative{conclusion,drivers,hypotheses,risks,watchTomorrow},
+citations[], guardrail?}], marketBlurb?, usageToday{estUsd,runs}, partial?, aborted?}`。
 
 錯誤碼：`400`（無 key／參數，與 `/ai-proxy` 同拒絕行為）、`413`（>20 檔或 EvidencePack 過大）、
 `429`（上游限流透傳）、`502`（Anthropic 失敗）、`503 + Retry-After`（WaveDeck 持有 llm_gate）。
@@ -46,7 +47,10 @@ citations[]}], marketBlurb?, usageToday{estUsd,runs}, partial?, aborted?}`。
    （盤後 >6h、盤中 >1h）→ `narrative.risks` 首條由 server 決定性補「資料可能過期」。
 6. **預設禁止喊單**：system prompt 明文禁止買賣建議／目標價／保證獲利；模型違規輸出
    由 `scrub_advice` guardrail 直接移除並回報 `guardrail` 欄位。
-7. Reader／無 key 拒絕行為與既有 AI 端點一致（gateway：reader POST 一律 403；
+7. **明日驗證點紅線**：`anomalies[]`／`validationPoints[]` 僅由 `build_evidence_pack` 規則產出；
+   LLM 可在 `watchTomorrow`／`hypotheses` **改寫語意**，禁止自創閾值或分數；`audit_narrative_numerics`
+   會將 EvidencePack 未出現的數字標入 `guardrail`。
+8. Reader／無 key 拒絕行為與既有 AI 端點一致（gateway：reader POST 一律 403；
    本機：無 key → 400 `AI key not set on server`）。
 
 ## 資料來源（全部沿用既有管線，缺料回空＋notes「資料不足」）
@@ -58,12 +62,18 @@ citations[]}], marketBlurb?, usageToday{estUsd,runs}, partial?, aborted?}`。
 | news | `market_flash.build_flash` 依代號過濾（TWSE/TPEx 重大訊息；**無個股新聞爬蟲**，缺料屬預期） |
 | decisionSummary | `decision_context.latest_context()` 唯讀快照（市場層級） |
 | universeMeta | `universe.load()` ＋ TWSE OpenAPI 產業別（`_get_tw_sectors` 注入） |
+| anomalies[] | `build_evidence_pack` 規則層（量能、RSI、SMA 偏離、法人、融資）— **FACT**，無 LLM |
+| validationPoints[] | 由 anomalies 衍生的明日驗證點（≤3），含 `resolveSession`／`thresholdRef` — **FACT** |
+
+`include.validationPoints`（預設 `true`）關閉時不產出 anomalies／validationPoints（避免不需要的 payload）。
 
 ## UI
 
 AI 中樞（`#ai`）工具列「盤後日報」→ `src/ui/postmarket_v5.js` report drawer：
 每檔結論可展開 drivers／hypotheses／risks／watchTomorrow、各區塊 evidence asOf、
-`usage.estUsd`＋當日累計、複製 Markdown、中止鍵。**不新開 Shadow 訊號面板。**
+**明日驗證點**（FACT 可勾選 checkbox，localStorage 記錄）與規則異常摘要、
+`usage.estUsd`＋當日累計、複製 Markdown、中止鍵。Conditional Expectation 卡仍受
+`shadowConditionalExpectation` 旗標控制。**不新開 Shadow 訊號面板。**
 
 ## v1 範圍外（後續）
 

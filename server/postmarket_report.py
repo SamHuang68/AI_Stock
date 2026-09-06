@@ -311,6 +311,382 @@ def staleness(quote: Optional[Dict[str, Any]], now: datetime) -> List[str]:
     return []
 
 
+# ── Slice 3：規則異常 + 明日驗證點（無 LLM 數字）────────────────────────────
+
+MAX_VALIDATION_POINTS = 3
+VOL_SPIKE_RATIO = 1.5
+VOL_SHRINK_RATIO = 0.65
+MA_DEVIATION_PCT = 2.0
+RSI_OVERSOLD = 30.0
+RSI_OVERBOUGHT = 70.0
+INST_SIGNIFICANT_SHARES = 1_000_000  # ≈1000 張
+MARGIN_CHANGE_SIGNIFICANT = 500.0
+
+
+def _next_tw_session_date(now: datetime) -> str:
+    """盤後 workflow 的「明日」= 下一個台股現貨交易日（ISO date）。"""
+    local = now.astimezone(TZ_TPE)
+    candidate = local.date() + timedelta(days=1)
+    while candidate.weekday() >= 5:
+        candidate += timedelta(days=1)
+    return candidate.isoformat()
+
+
+def _anomaly(
+    anomaly_id: str,
+    *,
+    metric: str,
+    value: Any,
+    threshold: Any,
+    direction: str,
+    label: str,
+    as_of: Optional[str],
+    severity: str = 'watch',
+) -> Dict[str, Any]:
+    return {
+        'id': anomaly_id,
+        'metric': metric,
+        'value': value,
+        'threshold': threshold,
+        'direction': direction,
+        'label': label,
+        'epistemic': 'FACT',
+        'severity': severity,
+        'asOf': as_of,
+    }
+
+
+def detect_anomalies(
+    quote: Optional[Dict[str, Any]],
+    tech: Optional[Dict[str, Any]],
+    chips: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """從 ST 已算好的 quote／tech／chips 產出規則異常清單（無 LLM）。"""
+    anomalies: List[Dict[str, Any]] = []
+    tech = tech or {}
+    quote = quote or {}
+    as_of = tech.get('asOf') or quote.get('asOf')
+
+    vol_ratio = tech.get('volRatio')
+    if vol_ratio is not None:
+        if float(vol_ratio) >= VOL_SPIKE_RATIO:
+            anomalies.append(_anomaly(
+                'volume_spike', metric='techSummary.volRatio', value=_round(vol_ratio),
+                threshold=VOL_SPIKE_RATIO, direction='above',
+                label=f'量能放大（5日/20日均 {float(vol_ratio):.2f}）',
+                as_of=as_of, severity='watch',
+            ))
+        elif float(vol_ratio) <= VOL_SHRINK_RATIO:
+            anomalies.append(_anomaly(
+                'volume_shrink', metric='techSummary.volRatio', value=_round(vol_ratio),
+                threshold=VOL_SHRINK_RATIO, direction='below',
+                label=f'量能萎縮（5日/20日均 {float(vol_ratio):.2f}）',
+                as_of=as_of, severity='watch',
+            ))
+
+    rsi = tech.get('rsi14')
+    if rsi is not None:
+        if float(rsi) <= RSI_OVERSOLD:
+            anomalies.append(_anomaly(
+                'rsi_oversold', metric='techSummary.rsi14', value=_round(rsi),
+                threshold=RSI_OVERSOLD, direction='below',
+                label=f'RSI14 超賣（{float(rsi):.1f}）',
+                as_of=as_of, severity='watch',
+            ))
+        elif float(rsi) >= RSI_OVERBOUGHT:
+            anomalies.append(_anomaly(
+                'rsi_overbought', metric='techSummary.rsi14', value=_round(rsi),
+                threshold=RSI_OVERBOUGHT, direction='above',
+                label=f'RSI14 超買（{float(rsi):.1f}）',
+                as_of=as_of, severity='watch',
+            ))
+
+    close = tech.get('close')
+    sma20 = tech.get('sma20')
+    if close is not None and sma20 not in (None, 0):
+        dev_pct = (float(close) - float(sma20)) / float(sma20) * 100.0
+        if dev_pct >= MA_DEVIATION_PCT:
+            anomalies.append(_anomaly(
+                'price_above_sma20', metric='techSummary.close_vs_sma20_pct',
+                value=_round(dev_pct), threshold=MA_DEVIATION_PCT, direction='above',
+                label=f'收盤偏離 SMA20 上方 {dev_pct:.1f}%（SMA20={float(sma20):.2f}）',
+                as_of=as_of, severity='info',
+            ))
+        elif dev_pct <= -MA_DEVIATION_PCT:
+            anomalies.append(_anomaly(
+                'price_below_sma20', metric='techSummary.close_vs_sma20_pct',
+                value=_round(dev_pct), threshold=-MA_DEVIATION_PCT, direction='below',
+                label=f'收盤偏離 SMA20 下方 {abs(dev_pct):.1f}%（SMA20={float(sma20):.2f}）',
+                as_of=as_of, severity='watch',
+            ))
+
+    inst = (chips or {}).get('inst') or {}
+    foreign = inst.get('foreign')
+    if foreign is not None:
+        foreign_f = float(foreign)
+        if foreign_f >= INST_SIGNIFICANT_SHARES:
+            anomalies.append(_anomaly(
+                'foreign_net_buy', metric='chips.inst.foreign', value=int(foreign_f),
+                threshold=INST_SIGNIFICANT_SHARES, direction='above',
+                label=f'外資大買超 {foreign_f / 1000:.0f} 千股',
+                as_of=(chips or {}).get('asOf') or as_of, severity='info',
+            ))
+        elif foreign_f <= -INST_SIGNIFICANT_SHARES:
+            anomalies.append(_anomaly(
+                'foreign_net_sell', metric='chips.inst.foreign', value=int(foreign_f),
+                threshold=-INST_SIGNIFICANT_SHARES, direction='below',
+                label=f'外資大賣超 {abs(foreign_f) / 1000:.0f} 千股',
+                as_of=(chips or {}).get('asOf') or as_of, severity='watch',
+            ))
+
+    margin = (chips or {}).get('margin') or {}
+    margin_chg = margin.get('marginChange')
+    if margin_chg is not None:
+        margin_chg_f = float(margin_chg)
+        if margin_chg_f >= MARGIN_CHANGE_SIGNIFICANT:
+            anomalies.append(_anomaly(
+                'margin_expanding', metric='chips.margin.marginChange',
+                value=_round(margin_chg_f), threshold=MARGIN_CHANGE_SIGNIFICANT,
+                direction='above', label=f'融資餘額增加 {margin_chg_f:.0f}',
+                as_of=(chips or {}).get('asOf') or as_of, severity='watch',
+            ))
+        elif margin_chg_f <= -MARGIN_CHANGE_SIGNIFICANT:
+            anomalies.append(_anomaly(
+                'margin_contracting', metric='chips.margin.marginChange',
+                value=_round(margin_chg_f), threshold=-MARGIN_CHANGE_SIGNIFICANT,
+                direction='below', label=f'融資餘額減少 {abs(margin_chg_f):.0f}',
+                as_of=(chips or {}).get('asOf') or as_of, severity='info',
+            ))
+
+    return anomalies
+
+
+def _validation_point(
+    point_id: str,
+    *,
+    anomaly_id: Optional[str],
+    kind: str,
+    metric: str,
+    threshold: Any,
+    threshold_ref: str,
+    label: str,
+    as_of: Optional[str],
+    resolve_session: str,
+    priority: int,
+) -> Dict[str, Any]:
+    return {
+        'id': point_id,
+        'anomalyId': anomaly_id,
+        'kind': kind,
+        'metric': metric,
+        'threshold': threshold,
+        'thresholdRef': threshold_ref,
+        'label': label,
+        'epistemic': 'FACT',
+        'resolveSession': resolve_session,
+        'asOf': as_of,
+        'priority': priority,
+    }
+
+
+def build_validation_points(
+    anomalies: List[Dict[str, Any]],
+    quote: Optional[Dict[str, Any]],
+    tech: Optional[Dict[str, Any]],
+    chips: Optional[Dict[str, Any]],
+    *,
+    now: Optional[datetime] = None,
+    max_points: int = MAX_VALIDATION_POINTS,
+) -> List[Dict[str, Any]]:
+    """由 anomalies 衍生最多 max_points 個明日可勾選驗證點（規則閾值，非 LLM）。"""
+    now = now or datetime.now(TZ_TPE)
+    resolve_session = _next_tw_session_date(now)
+    tech = tech or {}
+    quote = quote or {}
+    as_of = tech.get('asOf') or quote.get('asOf')
+    by_id = {str(a.get('id')): a for a in (anomalies or []) if a.get('id')}
+    candidates: List[Dict[str, Any]] = []
+
+    sma20 = tech.get('sma20')
+    if sma20 is not None and 'price_below_sma20' in by_id:
+        candidates.append(_validation_point(
+            'vp_close_above_sma20', anomaly_id='price_below_sma20',
+            kind='close_above', metric='quote.last', threshold=_round(sma20),
+            threshold_ref='techSummary.sma20',
+            label=f'明日收盤價需站穩 SMA20（{_round(sma20)}）',
+            as_of=as_of, resolve_session=resolve_session, priority=10,
+        ))
+    elif sma20 is not None and 'price_above_sma20' in by_id:
+        candidates.append(_validation_point(
+            'vp_close_hold_above_sma20', anomaly_id='price_above_sma20',
+            kind='close_above', metric='quote.last', threshold=_round(sma20),
+            threshold_ref='techSummary.sma20',
+            label=f'明日收盤價需維持在 SMA20 上方（{_round(sma20)}）',
+            as_of=as_of, resolve_session=resolve_session, priority=12,
+        ))
+
+    vol_ratio = tech.get('volRatio')
+    if vol_ratio is not None and 'volume_spike' in by_id:
+        shrink_target = _round(float(vol_ratio) * 0.85)
+        candidates.append(_validation_point(
+            'vp_volume_cool', anomaly_id='volume_spike',
+            kind='vol_ratio_below', metric='techSummary.volRatio',
+            threshold=shrink_target, threshold_ref='techSummary.volRatio',
+            label=f'明日量能需回落至 volRatio < {shrink_target}（今日 {float(vol_ratio):.2f}）',
+            as_of=as_of, resolve_session=resolve_session, priority=20,
+        ))
+    elif vol_ratio is not None and 'volume_shrink' in by_id:
+        candidates.append(_validation_point(
+            'vp_volume_expand', anomaly_id='volume_shrink',
+            kind='vol_ratio_above', metric='techSummary.volRatio',
+            threshold=_round(VOL_SHRINK_RATIO), threshold_ref='techSummary.volRatio',
+            label=f'明日量能需回升至 volRatio ≥ {VOL_SHRINK_RATIO}（今日 {float(vol_ratio):.2f}）',
+            as_of=as_of, resolve_session=resolve_session, priority=22,
+        ))
+
+    foreign = ((chips or {}).get('inst') or {}).get('foreign')
+    if foreign is not None and 'foreign_net_sell' in by_id:
+        candidates.append(_validation_point(
+            'vp_foreign_flip_buy', anomaly_id='foreign_net_sell',
+            kind='inst_foreign_above', metric='chips.inst.foreign',
+            threshold=0, threshold_ref='chips.inst.foreign',
+            label='明日外資需轉為淨買超（>0）',
+            as_of=(chips or {}).get('asOf') or as_of,
+            resolve_session=resolve_session, priority=30,
+        ))
+    elif foreign is not None and 'foreign_net_buy' in by_id:
+        candidates.append(_validation_point(
+            'vp_foreign_hold_buy', anomaly_id='foreign_net_buy',
+            kind='inst_foreign_above', metric='chips.inst.foreign',
+            threshold=0, threshold_ref='chips.inst.foreign',
+            label='明日外資需維持淨買超（>0）',
+            as_of=(chips or {}).get('asOf') or as_of,
+            resolve_session=resolve_session, priority=32,
+        ))
+
+    if 'rsi_oversold' in by_id and tech.get('rsi14') is not None:
+        candidates.append(_validation_point(
+            'vp_rsi_recover', anomaly_id='rsi_oversold',
+            kind='rsi_above', metric='techSummary.rsi14',
+            threshold=RSI_OVERSOLD, threshold_ref='techSummary.rsi14',
+            label=f'明日 RSI14 需回升至 > {RSI_OVERSOLD:.0f}',
+            as_of=as_of, resolve_session=resolve_session, priority=40,
+        ))
+    elif 'rsi_overbought' in by_id and tech.get('rsi14') is not None:
+        candidates.append(_validation_point(
+            'vp_rsi_cool', anomaly_id='rsi_overbought',
+            kind='rsi_below', metric='techSummary.rsi14',
+            threshold=RSI_OVERBOUGHT, threshold_ref='techSummary.rsi14',
+            label=f'明日 RSI14 需回落至 < {RSI_OVERBOUGHT:.0f}',
+            as_of=as_of, resolve_session=resolve_session, priority=42,
+        ))
+
+    if not candidates and sma20 is not None and quote.get('last') is not None:
+        candidates.append(_validation_point(
+            'vp_close_above_sma20_default', anomaly_id=None,
+            kind='close_above', metric='quote.last', threshold=_round(sma20),
+            threshold_ref='techSummary.sma20',
+            label=f'明日收盤價是否站穩 SMA20（{_round(sma20)}）',
+            as_of=as_of, resolve_session=resolve_session, priority=90,
+        ))
+
+    candidates.sort(key=lambda row: int(row.get('priority') or 99))
+    return candidates[:max(0, int(max_points or MAX_VALIDATION_POINTS))]
+
+
+def _pack_numeric_corpus(pack: Dict[str, Any]) -> set:
+    """EvidencePack 內所有可稽核數字（字串集合，供敘事紅線比對）。"""
+    corpus: set = set()
+
+    def add_num(value: Any) -> None:
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            return
+        corpus.add(str(int(num)) if num == int(num) else str(round(num, 4)))
+        corpus.add(str(round(num, 2)))
+        if abs(num) >= 10:
+            corpus.add(str(int(round(num))))
+
+    def walk(obj: Any) -> None:
+        if isinstance(obj, bool) or obj is None:
+            return
+        if isinstance(obj, (int, float)):
+            add_num(obj)
+        elif isinstance(obj, dict):
+            for val in obj.values():
+                walk(val)
+        elif isinstance(obj, list):
+            for val in obj:
+                walk(val)
+        elif isinstance(obj, str):
+            for match in re.finditer(r'\d+\.?\d*', obj):
+                add_num(match.group())
+
+    walk(pack)
+    for vp in pack.get('validationPoints') or []:
+        if vp.get('threshold') is not None:
+            add_num(vp['threshold'])
+    return corpus
+
+
+def audit_narrative_numerics(
+    narrative: Dict[str, Any],
+    pack: Dict[str, Any],
+) -> List[str]:
+    """紅線：敘事中的數字必須能對上 EvidencePack；禁止自創 regime／信心分數。"""
+    flags: List[str] = []
+    corpus = _pack_numeric_corpus(pack)
+    decision = pack.get('decisionSummary') or {}
+    regime = decision.get('regime') or {}
+    if regime.get('score') is not None:
+        try:
+            score = float(regime['score'])
+            corpus.add(str(round(score, 2)))
+            corpus.add(str(int(score)) if score == int(score) else str(round(score, 4)))
+        except (TypeError, ValueError):
+            pass
+    if regime.get('confidence') is not None:
+        try:
+            conf = float(regime['confidence'])
+            corpus.add(str(round(conf, 2)))
+        except (TypeError, ValueError):
+            pass
+
+    texts: List[str] = []
+    for key in ('conclusion', *NARRATIVE_LIST_KEYS):
+        val = narrative.get(key)
+        if isinstance(val, str):
+            texts.append(val)
+        elif isinstance(val, list):
+            texts.extend(str(x) for x in val if isinstance(x, str))
+
+    invented: List[str] = []
+    for text in texts:
+        for match in re.finditer(r'(?<!\d)(\d{1,3}(?:,\d{3})+|\d+\.\d+|\d{2,})(?!\d)', text):
+            raw = match.group().replace(',', '')
+            try:
+                num = float(raw)
+            except ValueError:
+                continue
+            if num < 10 and '.' not in raw:
+                continue
+            variants = {raw, str(round(num, 2)), str(int(num)) if num == int(num) else None}
+            variants = {v for v in variants if v}
+            if not any(v in corpus for v in variants):
+                invented.append(raw)
+
+    if invented:
+        flags.append('敘事含 EvidencePack 未出現的數字：' + '、'.join(sorted(set(invented))[:6]))
+
+    joined = ' '.join(texts).lower()
+    if re.search(r'信心(?:分數|指標|水準)?\s*[:：]?\s*\d', joined) and regime.get('score') is None:
+        flags.append('敘事自創信心分數（decisionSummary 無 score）')
+    if re.search(r'regime\s*score\s*[:=]?\s*\d', joined) and regime.get('score') is None:
+        flags.append('敘事自創 regime score')
+    return flags
+
+
 def build_evidence_pack(symbol: str, *, include: Dict[str, bool],
                         max_news: int = DEFAULT_NEWS_PER_SYMBOL,
                         decision: Optional[Dict[str, Any]] = None,
@@ -382,6 +758,18 @@ def build_evidence_pack(symbol: str, *, include: Dict[str, bool],
         pack['staleReasons'] = stale_reasons
     if notes:
         pack['notes'] = notes
+
+    if include.get('validationPoints', True):
+        pack['anomalies'] = detect_anomalies(
+            pack.get('quote'), pack.get('techSummary'), pack.get('chips'),
+        )
+        pack['validationPoints'] = build_validation_points(
+            pack['anomalies'], pack.get('quote'), pack.get('techSummary'),
+            pack.get('chips'), now=now,
+        )
+        if pack['validationPoints']:
+            as_of['validation'] = pack['validationPoints'][0].get('resolveSession')
+
     return pack
 
 
@@ -483,7 +871,9 @@ def system_prompt(locale: str = 'zh-Hant-TW') -> str:
         '4. regime、支撐壓力、信心分數、曝險區間一律以 decisionSummary 既有數值為唯讀證據，'
         '禁止自行推算、改寫或給出新的等級。\n'
         '5. 若 EvidencePack 的 stale 為 true，risks 第一條必須以「資料可能過期」開頭。\n'
-        '6. 輸出「嚴格 JSON」（單一 object、無 markdown 圍欄、無多餘文字）：\n'
+        '6. EvidencePack 內 validationPoints[] 為規則產生的明日驗證點（FACT）；'
+        'watchTomorrow／hypotheses 只能改寫其語意，禁止自創新閾值、分數或 Decision 數字。\n'
+        '7. 輸出「嚴格 JSON」（單一 object、無 markdown 圍欄、無多餘文字）：\n'
         '{"conclusion": "一段結論", "drivers": ["…"], "hypotheses": ["…"], '
         '"risks": ["…"], "watchTomorrow": ["…"], '
         '"citations": [{"type": "quote|chip|tech|news|decision", "ref": "對應欄位或標題"}]}\n'
@@ -615,6 +1005,7 @@ def generate_report(body: Dict[str, Any], *, api_key: str,
         'news': bool(include_raw.get('news', True)),
         'decisionSummary': bool(include_raw.get('decisionSummary', True)),
         'macro': bool(include_raw.get('macro', False)),
+        'validationPoints': bool(include_raw.get('validationPoints', True)),
     }
     try:
         max_news = int(body.get('maxNewsPerSymbol') or DEFAULT_NEWS_PER_SYMBOL)
@@ -693,6 +1084,10 @@ def generate_report(body: Dict[str, Any], *, api_key: str,
                 'evidenceAsOf': pack.get('evidenceAsOf') or {},
                 'stale': bool(pack.get('stale')),
             }
+            if pack.get('anomalies'):
+                entry['anomalies'] = pack['anomalies']
+            if pack.get('validationPoints'):
+                entry['validationPoints'] = pack['validationPoints']
             if client_id and is_aborted(client_id):
                 aborted = True
                 entry['error'] = 'aborted'
@@ -748,6 +1143,9 @@ def generate_report(body: Dict[str, Any], *, api_key: str,
             narrative = {k: parsed[k] for k in ('conclusion', *NARRATIVE_LIST_KEYS)}
             narrative, guard_flags = scrub_advice(narrative)
             narrative = apply_staleness(narrative, pack.get('staleReasons') or [])
+            numeric_flags = audit_narrative_numerics(narrative, pack)
+            if numeric_flags:
+                guard_flags = list(guard_flags) + numeric_flags
             entry['narrative'] = narrative
             entry['citations'] = normalize_citations(parsed.get('citations'))
             if guard_flags:

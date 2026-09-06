@@ -195,6 +195,103 @@ class EvidencePackTest(PostmarketBase):
         self.assertTrue(any('逾 1h' in r for r in pr.staleness(stale, now)))
 
 
+class AnomaliesValidationPointsTest(PostmarketBase):
+    def test_pack_includes_rule_anomalies_and_validation_points(self):
+        pack = pr.build_evidence_pack(
+            '2330', include={'quotes': True, 'chips': True, 'techSummary': True,
+                             'validationPoints': True},
+            now=_fresh_now())
+        self.assertIn('anomalies', pack)
+        self.assertIn('validationPoints', pack)
+        self.assertLessEqual(len(pack['validationPoints']), pr.MAX_VALIDATION_POINTS)
+        for anomaly in pack['anomalies']:
+            self.assertEqual(anomaly['epistemic'], 'FACT')
+            self.assertIn('id', anomaly)
+            self.assertIn('metric', anomaly)
+            self.assertIn('label', anomaly)
+        for vp in pack['validationPoints']:
+            self.assertEqual(vp['epistemic'], 'FACT')
+            self.assertIn('label', vp)
+            self.assertIn('resolveSession', vp)
+            self.assertIn('thresholdRef', vp)
+
+    def test_volume_spike_anomaly_detected(self):
+        bars = _bars()
+        # inflate last 5 volumes
+        inflated = []
+        for i, row in enumerate(bars):
+            if i >= len(bars) - 5:
+                inflated.append((row[0], row[1], row[2], row[3], row[4], 500_000 + i))
+            else:
+                inflated.append(row)
+        pr.configure(bars_fn=lambda code: inflated)
+        pack = pr.build_evidence_pack('2330', include={'quotes': True, 'techSummary': True,
+                                                       'validationPoints': True},
+                                      now=_fresh_now())
+        ids = {a['id'] for a in pack.get('anomalies', [])}
+        self.assertIn('volume_spike', ids)
+
+    def test_validation_points_capped_at_three(self):
+        quote = {'last': 1000.0, 'asOf': _fresh_now().isoformat(), 'session': 'closed'}
+        tech = {
+            'close': 1000.0, 'sma20': 980.0, 'volRatio': 1.8, 'rsi14': 28.0,
+            'asOf': quote['asOf'],
+        }
+        chips = {
+            'asOf': '2026-09-05',
+            'inst': {'foreign': -2_000_000},
+            'margin': {'marginChange': -600},
+        }
+        anomalies = pr.detect_anomalies(quote, tech, chips)
+        points = pr.build_validation_points(anomalies, quote, tech, chips, now=_fresh_now(),
+                                            max_points=3)
+        self.assertLessEqual(len(points), 3)
+        self.assertTrue(all(p['epistemic'] == 'FACT' for p in points))
+
+    def test_validation_points_disabled_via_include(self):
+        pack = pr.build_evidence_pack(
+            '2330', include={'quotes': True, 'techSummary': True, 'validationPoints': False},
+            now=_fresh_now())
+        self.assertNotIn('anomalies', pack)
+        self.assertNotIn('validationPoints', pack)
+
+
+class NarrativeNumericRedlineTest(PostmarketBase):
+    def test_audit_flags_invented_numbers(self):
+        pack = pr.build_evidence_pack(
+            '2330',
+            include={'quotes': True, 'techSummary': True, 'chips': True, 'validationPoints': True},
+            decision=pr.decision_snapshot(_decision_context()),
+            flash=_flash(),
+            uni={'tw': {'2330': '台積電'}},
+            now=_fresh_now(),
+        )
+        narrative = {
+            'conclusion': '若站穩 1500 元將延續多頭。',
+            'drivers': [], 'hypotheses': [], 'risks': [], 'watchTomorrow': [],
+        }
+        flags = pr.audit_narrative_numerics(narrative, pack)
+        self.assertTrue(any('未出現的數字' in f for f in flags))
+
+    def test_audit_allows_pack_numbers(self):
+        pack = pr.build_evidence_pack(
+            '2330', include={'quotes': True, 'techSummary': True, 'validationPoints': True},
+            now=_fresh_now(),
+        )
+        last = pack['quote']['last']
+        narrative = {
+            'conclusion': f'收在 {last}，量能觀察中。',
+            'drivers': [], 'hypotheses': [], 'risks': [], 'watchTomorrow': [],
+        }
+        flags = pr.audit_narrative_numerics(narrative, pack)
+        self.assertEqual(flags, [])
+
+    def test_system_prompt_mentions_validation_points(self):
+        prompt = pr.system_prompt()
+        self.assertIn('validationPoints', prompt)
+        self.assertIn('禁止自創新閾值', prompt)
+
+
 class NarrativeContractTest(unittest.TestCase):
     def test_validate_narrative_strict_schema(self):
         ok, errors = pr.validate_narrative(json.loads(_narrative_json()))
@@ -279,6 +376,9 @@ class GenerateReportTest(PostmarketBase):
         self.assertEqual(sym['symbol'], '2330')
         self.assertIn('quote', sym['evidenceAsOf'])
         self.assertTrue(sym['narrative']['conclusion'])
+        self.assertIn('validationPoints', sym)
+        self.assertLessEqual(len(sym['validationPoints']), pr.MAX_VALIDATION_POINTS)
+        self.assertEqual(sym['validationPoints'][0]['epistemic'], 'FACT')
         self.assertEqual(sym['citations'][0], {'type': 'quote', 'ref': 'quote.last'})
         # 本機存檔 + 當日累計
         self.assertIn('usageToday', payload)
@@ -315,6 +415,14 @@ class GenerateReportTest(PostmarketBase):
         self.assertNotIn('目標價', joined)
         self.assertNotIn('建議買進', joined)
         self.assertTrue(sym['guardrail'])
+
+    def test_invented_numeric_guardrail(self):
+        fake = FakeAnthropic(replies=[_narrative_json(
+            conclusion='明日若突破 9999 元將延續強勢。',
+        )])
+        result, _ = self._generate(fake=fake)
+        sym = result['payload']['symbols'][0]
+        self.assertTrue(any('未出現的數字' in g for g in (sym.get('guardrail') or [])))
 
     def test_symbols_validation(self):
         result = pr.generate_report({'symbols': []}, api_key='sk-test',
