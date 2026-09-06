@@ -231,6 +231,65 @@ class AiRoutesMixin:
         except Exception as e:
             self._err('AI report failed: ' + str(e), 500)
 
+    # ── 盤後敘事日報（postmarket-daily）────────────────────────────────
+    # 紅線見 docs/POSTMARKET_DAILY.md：雲端 Claude only、不 fallback 本機 deep、
+    # 不 mutate ST 狀態、DecisionContext 只當唯讀證據。
+
+    def _send_ai_json(self, status, payload, headers=None):
+        """帶 X-ST-AI-Request-ID（與 /ai/local 對齊）與額外 header 的 JSON 回覆。"""
+        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        self.send_response(int(status))
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-ST-AI-Request-ID', self._ensure_trace_id())
+        for key, value in (headers or {}).items():
+            self.send_header(key, str(value))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _handle_ai_postmarket_daily(self):
+        key = ai_api.load_ai_key()
+        if not key:
+            # 與 /ai-proxy 相同拒絕行為（reader 遠端則由 private_web_gateway 擋 403）
+            self._err('AI key not set on server', 400); return
+        try:
+            body = read_json_body(self, max_bytes=64 * 1024)
+        except BodyReadError as e:
+            self._err(str(e), e.status); return
+        self._ensure_trace_id()
+        try:
+            import postmarket_report as pr
+            result = pr.generate_report(body, api_key=key)
+        except Exception as e:
+            self._err('postmarket-daily failed: ' + type(e).__name__, 500); return
+        self._send_ai_json(result['status'], result['payload'], result.get('headers'))
+
+    def _handle_ai_postmarket_abort(self):
+        try:
+            body = read_json_body(self, max_bytes=4 * 1024)
+        except BodyReadError as e:
+            self._err(str(e), e.status); return
+        cid = str(body.get('abortSignalClientId') or body.get('clientId') or '').strip()
+        if not cid:
+            self._err('abortSignalClientId required', 400); return
+        try:
+            import postmarket_report as pr
+            pr.signal_abort(cid)
+        except Exception as e:
+            self._err('postmarket abort failed: ' + type(e).__name__, 500); return
+        self._send_ai_json(200, {'ok': True, 'aborted': cid})
+
+    def _handle_ai_postmarket_latest(self):
+        try:
+            import postmarket_report as pr
+            day = pr.load_latest_report()
+        except Exception as e:
+            self._err('postmarket latest failed: ' + type(e).__name__, 500); return
+        if not day:
+            self._ok(json.dumps({'ok': False, 'reason': 'no_report'}).encode()); return
+        self._ok(json.dumps(day, ensure_ascii=False).encode())
+
     def _handle_ai_note(self):
         try:
             body = read_json_body(self, max_bytes=64 * 1024)

@@ -40,6 +40,9 @@ Stock_Terminal_*.manifest.json
 # Local feature-flag overrides (research / shadow surfaces)
 data/feature_flags.local.json
 
+# 盤後敘事日報本機存檔（POST /api/ai/postmarket-daily 產物，可重建）
+data/reports/
+
 *.key
 .env
 .env.local

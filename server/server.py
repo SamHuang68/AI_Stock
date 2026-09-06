@@ -1720,6 +1720,13 @@ try:
 except Exception as _ca_err:
     print('[server] chip_api.configure failed:', _ca_err)
 
+try:
+    import postmarket_report as _postmarket_report
+    # 盤後日報只沿用既有管線；產業別沿用 TWSE OpenAPI 快取（_get_tw_sectors）。
+    _postmarket_report.configure(sectors_fn=_get_tw_sectors)
+except Exception as _pr_err:
+    print('[server] postmarket_report.configure failed:', _pr_err)
+
 
 def _yf_prevclose(meta, allow_chart_prev=True):
     """單一可信昨收口徑 — 全站共用,避免各端點優先序不一造成漲幅亂跳。
@@ -2566,6 +2573,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_override_alpha_get()
         elif p == '/api/llm-gate' or p.startswith('/api/llm-gate?'):
             self._handle_llm_gate_get()
+        elif p == '/api/ai/postmarket-daily/latest' or p.startswith('/api/ai/postmarket-daily/latest?'):
+            self._handle_ai_postmarket_latest()
         else:
             # 安全(v3.9 review):SimpleHTTPRequestHandler 預設會把工作目錄所有檔當靜態檔服務。
             # 阻擋敏感檔被下載:金鑰設定(alert_config 含 telegram token/gmail 密碼)、原始碼(.py)、
@@ -2713,6 +2722,10 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_margin_ratio_refresh()
         elif p == '/ai-report':
             self._handle_ai_report()
+        elif p == '/api/ai/postmarket-daily':
+            self._handle_ai_postmarket_daily()
+        elif p == '/api/ai/postmarket-daily/abort':
+            self._handle_ai_postmarket_abort()
         elif p == '/etf-reason':
             self._handle_etf_reason()
         elif p == '/ai-note':
