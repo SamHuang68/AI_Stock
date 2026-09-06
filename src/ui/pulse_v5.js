@@ -3629,10 +3629,12 @@
       return html + '<div class="pl-note">FRED／主計總處序列尚未就緒</div></div></div>';
     }
     eco.forEach(function (e) {
+      var stale = e.freshness === 'stale' || e.freshness === 'invalid_future';
       html += '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:10px">' +
         '<span style="color:var(--tlo)">' + esc(e.label || e.key) + '</span>' +
         '<span style="font-weight:700;color:var(--thi)">' + fmt(e.value, 2) + esc(e.unit || '') +
-        '<span style="color:var(--tlo);font-weight:500;margin-left:6px;font-size:9px">' + esc(e.date || '') + '</span></span></div>';
+        '<span style="color:' + (stale ? 'var(--warn,#f5c518)' : 'var(--tlo)') + ';font-weight:500;margin-left:6px;font-size:9px">' +
+          esc(e.date || '') + (stale ? ' · 過期' : '') + '</span></span></div>';
     });
     return html + '</div></div>';
   }

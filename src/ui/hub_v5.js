@@ -693,8 +693,13 @@
       var ecoHtml = ecoItems.map(function (it) {
         var src = it.source ? String(it.source).replace(/^seed:/, '種子 ') : '—';
         var dateTip = it.date ? ' title="資料日 ' + String(it.date).replace(/"/g, '&quot;') + '"' : '';
+        var stale = it.freshness === 'stale' || it.freshness === 'invalid_future';
+        var freshnessTag = stale
+          ? '<span class="badge warn" style="margin-left:4px">' +
+              (it.freshness === 'invalid_future' ? '日期異常' : '過期') + '</span>'
+          : '';
         return '<tr' + dateTip + '><td>' + (it.label || it.key) + '</td><td class="' +
-          (it.ok ? '' : 'flat') + '">' + ecoVal(it) + '</td><td>' + ecoChg(it) +
+          (it.ok ? '' : 'flat') + '">' + ecoVal(it) + freshnessTag + '</td><td>' + ecoChg(it) +
           '</td><td>' + ecoShortDate(it.date) + '</td><td style="color:var(--tlo);font-size:9px" title="' +
           src.replace(/"/g, '&quot;') + '">' + src + '</td></tr>';
       }).join('');
