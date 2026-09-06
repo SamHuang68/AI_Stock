@@ -433,6 +433,8 @@ CONTROL_POST_EXACT = {
     "/ai/local",
     "/ai/deep",
     "/ai-report",
+    "/api/ai/postmarket-daily",
+    "/api/ai/postmarket-daily/abort",
     "/etf-reason",
     "/ai-note",
     "/watch/rules",

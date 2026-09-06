@@ -30,6 +30,7 @@ _AI_KEY_LEGACY_FILE = os.path.join(_BASE, 'data', 'ai_key.txt')
 _ai_key_lock = threading.Lock()
 
 _MODEL_CACHE = {'date': '', 'id': 'claude-sonnet-4-6'}
+_OPUS_CACHE = {'date': '', 'id': ''}
 
 
 def load_ai_key() -> str:
@@ -86,14 +87,55 @@ def resolve_model(api_key: Optional[str]) -> str:
     return model
 
 
+def resolve_model_hint(api_key: Optional[str], hint: Optional[str] = None) -> str:
+    """modelHint 解析：預設 sonnet（resolve_model）；'opus' 為 opt-in（更燒額度）。
+
+    找不到 opus 時回退 sonnet，避免打到不存在的模型 id。
+    """
+    from datetime import date as _d
+    if str(hint or '').strip().lower() != 'opus':
+        return resolve_model(api_key)
+    today = _d.today().strftime('%Y%m%d')
+    if _OPUS_CACHE['date'] == today and _OPUS_CACHE['id']:
+        return _OPUS_CACHE['id']
+    if api_key:
+        try:
+            req = urllib.request.Request(
+                'https://api.anthropic.com/v1/models?limit=100',
+                headers={'x-api-key': api_key, 'anthropic-version': '2023-06-01'},
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read())
+            pick = next((m for m in (data.get('data') or [])
+                         if m.get('id') and 'opus' in m['id'].lower()), None)
+            if pick:
+                _OPUS_CACHE['date'] = today
+                _OPUS_CACHE['id'] = pick['id']
+                return pick['id']
+        except Exception as e:
+            if log:
+                log.warning('resolve_model_hint(opus): %s', e)
+    return resolve_model(api_key)
+
+
 def anthropic_messages(api_key: str, messages: List[Dict[str, Any]],
-                       max_tokens: int = 1024) -> Tuple[str, Dict[str, Any]]:
-    """回 (text, raw_json)。失敗 raise urllib.error.HTTPError / Exception。"""
-    req_body = json.dumps({
-        'model': resolve_model(api_key),
+                       max_tokens: int = 1024, *, system: Optional[str] = None,
+                       model: Optional[str] = None,
+                       temperature: Optional[float] = None) -> Tuple[str, Dict[str, Any]]:
+    """回 (text, raw_json)。失敗 raise urllib.error.HTTPError / Exception。
+
+    system / model / temperature 為選用（既有呼叫端不受影響）。
+    """
+    payload: Dict[str, Any] = {
+        'model': model or resolve_model(api_key),
         'max_tokens': max_tokens,
         'messages': messages,
-    }).encode('utf-8')
+    }
+    if system:
+        payload['system'] = system
+    if temperature is not None:
+        payload['temperature'] = temperature
+    req_body = json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(
         'https://api.anthropic.com/v1/messages',
         data=req_body,
