@@ -251,4 +251,72 @@ Scaffold lands `evaluate_asof_gate()` in `server/conditional_expectation.py` cal
 
 ---
 
-*End of FINDINGS — advisory / patch_proposal*
+## 8. P1 — rules / research (Host Gate ship order)
+
+**Branch:** `cursor/conditional-expectation-p1-eaea`  
+**Policy:** shadow-only; per-module flags default **OFF**; Decision numbers remain rule-only.
+
+### 8.1 Must-ship #1 — Relative strength / deviation z → Conditional Expectation bins ✅
+
+| Item | Path | Notes |
+|------|------|-------|
+| Deviation z | `(close − SMA20) / stdev(closes,20)` | price-only, PIT |
+| Relative strength | 20-session return percentile vs trailing history | price-only, PIT |
+| Bin model | `rsi14×devz×rs×inst3d×regime/v2` | `server/conditional_expectation.py` |
+| Volume context | `volRatio` in features (existing tech summary) | not a separate fetch |
+
+### 8.2 Must-ship #2 — Chip path state machine ✅
+
+| Item | Path | Epistemic |
+|------|------|-----------|
+| State machine | `server/chip_path_state.py` | **FACT** (`accumulate` / `chase` / `distribute` / `unwind` / `neutral`) |
+| Gate | `chipsAsOfGate` — neutral when chips asOf not solid | stale chips → no path label |
+| Flag | `shadowChipPathState` → `ST_SHADOW_CHIP_PATH_STATE` | default OFF |
+
+### 8.3 Must-ship #3 — Vol-regime switch ✅
+
+| Item | Path | Epistemic |
+|------|------|-----------|
+| RV20 percentile | `server/vol_regime_switch.py` | **CONDITIONAL** |
+| Output | `positionWidthHint.multiplier` + `caution` only | no buy/sell score |
+| Flag | `shadowVolRegimeSwitch` → `ST_SHADOW_VOL_REGIME_SWITCH` | default OFF |
+
+### 8.4 Deferred #4 — Event windows ⏸
+
+| Status | Notes |
+|--------|-------|
+| `DEFERRED_OPTIONAL: event calendar` | No PIT event ledger; revenue rule-calendar **not** shipped |
+| Artifact | `docs/research/event_window_deferred.json` |
+
+### 8.5 Deferred #5 — Bounded composite score ⏸
+
+| Status | Notes |
+|--------|-------|
+| `DEFERRED` | Until must-ship 1–3 stable + walk-forward sketch under Host Gate |
+| Artifact | `docs/research/integration_score_deferred.json` |
+| P2 | shadow multifactor/ML needs OOS, costs, turnover, decay monitor |
+
+### 8.6 API
+
+- `GET /research/conditional-expectation` — P0 card with v2 bins (devz/rs)
+- `GET /research/conditional-expectation/p1?symbol=` — chip path + vol width; `deferred` block for 4–5
+- Orchestrator: `server/conditional_expectation_p1.py`
+- Tests: `tests/test_conditional_expectation_p1.py`
+
+### 8.7 P1 acceptance checklist
+
+- [x] Deviation-z + relative-strength bands feed Conditional Expectation bins (price/volume only)
+- [x] Chip path states gated on solid chips asOf
+- [x] Vol regime emits width/caution hint only
+- [x] Event windows deferred — no invented dates
+- [x] Composite score deferred
+- [x] All flags default OFF; Decision envelope unchanged
+- [x] Unit + route tests green
+
+### P1-event-window
+
+Deferred until a versioned PIT event ledger exists (live `/events` is forward-looking only).
+
+---
+
+*End of FINDINGS — P0 advisory + P1 must-ship (1–3)*

@@ -2396,6 +2396,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_signal_performance()
         elif p == '/research/overnight-intraday' or p.startswith('/research/overnight-intraday?'):
             self._handle_overnight_intraday()
+        elif p == '/research/conditional-expectation/p1' or p.startswith('/research/conditional-expectation/p1?'):
+            self._handle_conditional_expectation_p1()
         elif p == '/research/conditional-expectation' or p.startswith('/research/conditional-expectation?'):
             self._handle_conditional_expectation()
         elif p == '/options/txo/structure' or p.startswith('/options/txo/structure?'):

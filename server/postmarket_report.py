@@ -770,6 +770,21 @@ def build_evidence_pack(symbol: str, *, include: Dict[str, bool],
         if pack['validationPoints']:
             as_of['validation'] = pack['validationPoints'][0].get('resolveSession')
 
+    try:
+        from feature_settings import is_enabled as _flag_enabled
+        if _flag_enabled('shadowChipPathState') and bars:
+            import chip_path_state
+            chip_path = chip_path_state.evaluate_chip_path_state(
+                code,
+                bars=bars,
+                chips=pack.get('chips'),
+                now=now,
+            )
+            pack['chipPathState'] = chip_path
+            as_of['chipPathState'] = chip_path.get('asOfDate')
+    except Exception:
+        pass
+
     return pack
 
 

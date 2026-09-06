@@ -1,0 +1,7 @@
+{
+  "status": "DEFERRED_OPTIONAL",
+  "reason": "event calendar",
+  "detail": "No versioned PIT event ledger in-repo. Live /events exDividend and revenue reminders are forward-looking only. H-day post-event return distributions are deferred — do not invent historical event dates.",
+  "artifact": "docs/FINDINGS_CONDITIONAL_EXPECTATION_P0.md#p1-event-window",
+  "p2Note": "Requires versioned event ledger with asOf discipline before shadow backtests."
+}
