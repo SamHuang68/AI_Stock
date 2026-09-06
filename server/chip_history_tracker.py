@@ -12,11 +12,31 @@
 # 排程：沿用 install_scheduler.bat 模式，新增每交易日 17:40 觸發。
 # ============================================================
 import os, sys, json, urllib.request
-from datetime import date
+from datetime import datetime, timedelta, timezone
+
+from atomic_store import atomic_write_json
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
 YF_HEADERS = {'User-Agent': 'Mozilla/5.0'}
+TZ_TPE = timezone(timedelta(hours=8))
+
+
+def _taipei_today():
+    return datetime.now(TZ_TPE).date()
+
+
+def _validated_day(value):
+    raw = ''.join(ch for ch in str(value or '') if ch.isdigit())
+    if len(raw) != 8:
+        return None
+    try:
+        parsed = datetime.strptime(raw, '%Y%m%d').date()
+    except ValueError:
+        return None
+    if parsed > _taipei_today():
+        return None
+    return parsed.strftime('%Y%m%d')
 
 
 def fetch_t86(day):
@@ -27,6 +47,9 @@ def fetch_t86(day):
 
 
 def parse_and_save(day):
+    day = _validated_day(day)
+    if not day:
+        raise ValueError('資料日必須是有效且不晚於台北今日的 YYYYMMDD')
     data = fetch_t86(day)
     if data.get('stat') not in ('OK', 'ok'):
         print(f'[chip-tracker] {day} no data (stat={data.get("stat")}) — 非交易日?')
@@ -73,14 +96,13 @@ def parse_and_save(day):
         }
     os.makedirs(CHIP_HISTORY_PATH, exist_ok=True)
     fn = os.path.join(CHIP_HISTORY_PATH, day + '.json')
-    with open(fn, 'w', encoding='utf-8') as f:
-        json.dump(out, f, ensure_ascii=False)
+    atomic_write_json(fn, out, backup=True, indent=None)
     print(f'[chip-tracker] {day}: saved {len(out)} stocks -> {fn}')
     return len(out)
 
 
 if __name__ == '__main__':
-    day = sys.argv[1] if len(sys.argv) > 1 else date.today().strftime('%Y%m%d')
+    day = sys.argv[1] if len(sys.argv) > 1 else _taipei_today().strftime('%Y%m%d')
     try:
         n = parse_and_save(day)
         sys.exit(0 if n else 1)

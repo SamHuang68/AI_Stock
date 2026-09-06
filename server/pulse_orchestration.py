@@ -27,6 +27,7 @@ class PulseDeps:
     fetch_day_movers: Callable[..., dict] | None = None
     fmtqik_turnover: Callable[..., list] | None = None
     fmtqik_index_closes: Callable[..., list] | None = None
+    marketflow_payload: Callable[..., dict] | None = None
     tw_index_closes: Callable[..., list] | None = None
     turnover_quant: Callable[..., dict] | None = None
     price_series_quant: Callable[..., dict] | None = None
@@ -99,6 +100,12 @@ def build_pulse_payload(handler, path: str) -> bytes:
             print('[pulse] breadth hydrate', e)
             bd = bd if isinstance(bd, dict) else None
     mf = _cache_first([f'marketflow:{ymd}', f'marketflow:{y_m_d}'])
+    if mf is None and _deps.marketflow_payload is not None:
+        try:
+            mf = _deps.marketflow_payload()
+        except Exception as e:
+            print('[pulse] marketflow hydrate', e)
+            mf = None
     sec = _cache_first([
         f'sectors:{ymd}',
         f'sectors:TW:yahoo:{ymd}',
@@ -542,6 +549,7 @@ def build_pulse_payload(handler, path: str) -> bytes:
             'foreign': foreign, 'trust': trust, 'dealer': dealer,
             'totalYi': round(total_yi, 1) if total_yi is not None else None,
             'date': (inst or {}).get('date'),
+            'source': (inst or {}).get('source'),
         },
         'sectorsRanked': sec_ranked[:12],
         'lsRatio': ls_ratio,

@@ -45,6 +45,11 @@ SYMBOL = '__MARGIN_RATIO__'
 MARKET = 'TW'
 TZ_TPE = timezone(timedelta(hours=8))
 
+
+def _taipei_today() -> date:
+    return datetime.now(TZ_TPE).date()
+
+
 # 風險區間參考線（前端 price line / meta 共用）
 RISK_ZONES = [
     {'level': 130.0, 'label': '危險區 130%', 'color': '#ef4444', 'hint': '歷史極端低檔／斷頭潮警戒'},
@@ -508,7 +513,16 @@ def load_seed_csv(path: str = SEED_CSV) -> List[Tuple[int, float]]:
     try:
         with open(path, 'r', encoding='utf-8-sig', newline='') as f:
             reader = csv.DictReader(f)
-            for row in reader:
+            fields = set(reader.fieldnames or [])
+            if not ({'date', 'Date'} & fields):
+                raise ValueError('missing date column')
+            value_fields = {
+                'margin_ratio_pct', 'ratio', 'TotalExchangeMarginMaintenance', 'value',
+            }
+            if not (value_fields & fields):
+                raise ValueError('missing margin-ratio value column')
+            previous = None
+            for line_no, row in enumerate(reader, start=2):
                 d = _parse_ymd(row.get('date') or row.get('Date') or '')
                 ratio = _fnum(
                     row.get('margin_ratio_pct')
@@ -517,10 +531,16 @@ def load_seed_csv(path: str = SEED_CSV) -> List[Tuple[int, float]]:
                     or row.get('value')
                 )
                 if d is None or ratio is None or ratio <= 0:
-                    continue
+                    raise ValueError(f'invalid row {line_no}')
+                if d > _taipei_today():
+                    raise ValueError(f'future date at row {line_no}: {d.isoformat()}')
+                if previous is not None and d <= previous:
+                    raise ValueError(f'dates not strictly increasing at row {line_no}: {d.isoformat()}')
+                previous = d
                 out.append((_date_to_ts(d), float(ratio)))
     except Exception as e:
-        print('[margin] seed load failed:', e)
+        print('[margin] seed rejected:', e)
+        return []
     return out
 
 
@@ -532,11 +552,26 @@ def save_seed_csv(rows: Sequence[Tuple[int, float]], path: str = SEED_CSV) -> in
         if ratio and ratio > 0:
             uniq[int(ts)] = float(ratio)
     ordered = sorted(uniq.items())
-    with open(path, 'w', encoding='utf-8', newline='') as f:
-        w = csv.writer(f)
-        w.writerow(['date', 'margin_ratio_pct'])
-        for ts, ratio in ordered:
-            w.writerow([_ts_to_date(ts).isoformat(), f'{ratio:.6f}'])
+    today = _taipei_today()
+    for ts, _ratio in ordered:
+        if _ts_to_date(ts) > today:
+            raise ValueError(f'future margin-ratio date: {_ts_to_date(ts).isoformat()}')
+    tmp = f'{path}.{os.getpid()}.{threading.get_ident()}.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf-8', newline='') as f:
+            w = csv.writer(f)
+            w.writerow(['date', 'margin_ratio_pct'])
+            for ts, ratio in ordered:
+                w.writerow([_ts_to_date(ts).isoformat(), f'{ratio:.6f}'])
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
     return len(ordered)
 
 
@@ -566,7 +601,7 @@ def _fetch_finmind_history(start: date, end: Optional[date] = None) -> List[Tupl
     token = (os.environ.get('FINMIND_TOKEN') or os.environ.get('FINMIND_API_TOKEN') or '').strip()
     if not token:
         return []
-    end = end or date.today()
+    end = end or _taipei_today()
     url = (
         'https://api.finmindtrade.com/api/v4/data'
         f'?dataset=TaiwanTotalExchangeMarginMaintenance'
@@ -927,6 +962,19 @@ def get_bars_filtered(range_key: str = 'max') -> List[Tuple]:
     return [r for r in rows if r[0] >= cutoff]
 
 
+def _business_day_age(data_date: date, today: Optional[date] = None) -> int:
+    end = today or _taipei_today()
+    if data_date >= end:
+        return 0
+    age = 0
+    cur = data_date + timedelta(days=1)
+    while cur <= end:
+        if cur.weekday() < 5:
+            age += 1
+        cur += timedelta(days=1)
+    return age
+
+
 def meta_summary() -> dict:
     rows = get_bars()
     if not rows:
@@ -937,6 +985,8 @@ def meta_summary() -> dict:
             'riskZones': RISK_ZONES,
             'formula': 'Σ(融資張數×1000×收盤價, 不含ETF) / 融資金額 × 100',
             'source': 'TWSE',
+            'dataDate': None,
+            'freshness': 'unknown',
             'backfill': dict(_backfill_state),
         }
     closes = [r[4] for r in rows if r[4] is not None]
@@ -947,13 +997,21 @@ def meta_summary() -> dict:
         if cur <= z['level']:
             zone = z
             break
+    data_date = _ts_to_date(rows[-1][0])
+    age = _business_day_age(data_date)
     return {
         'symbol': SYMBOL,
         'name': '大盤融資維持率',
         'longName': '台灣加權・大盤融資維持率 (Margin Maintenance Ratio)',
         'count': len(rows),
         'firstDate': _ts_to_date(rows[0][0]).isoformat(),
-        'lastDate': _ts_to_date(rows[-1][0]).isoformat(),
+        'lastDate': data_date.isoformat(),
+        'dataDate': data_date.isoformat(),
+        'freshness': 'fresh' if age <= 2 else 'stale',
+        'age': age,
+        'ageUnit': 'business_day',
+        'maxAge': 2,
+        'marketTimeContract': 'STOCK_DAY_ALL 與 MI_MARGN 官方日期必須相同；不得以本機日期代替',
         'current': round(cur, 4),
         'previous': round(prev, 4),
         'delta': round(cur - prev, 4),
@@ -1063,7 +1121,7 @@ def _cli():
                 max_days = int(args[i + 1])
             if a.startswith('--start='):
                 start = _parse_ymd(a.split('=', 1)[1])
-                end = date.today()
+                end = _taipei_today()
                 print(json.dumps(backfill_history(start=start, end=end, max_days=max_days), ensure_ascii=False, indent=2))
                 return
         if full:
@@ -1071,7 +1129,7 @@ def _cli():
         else:
             print('bars:', backfill_margin_ratio(full=False))
     elif cmd == 'compute':
-        d = _parse_ymd(args[1]) if len(args) > 1 else date.today()
+        d = _parse_ymd(args[1]) if len(args) > 1 else _taipei_today()
         print(d, compute_ratio_for_date(d))
     else:
         print('usage: status | seed | today | backfill [--full] [--max N] [--start=YYYY-MM-DD] | compute YYYY-MM-DD')

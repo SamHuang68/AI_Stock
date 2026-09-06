@@ -21,7 +21,7 @@ import threading
 import time
 import urllib.request
 from contextlib import closing
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 if getattr(sys, 'frozen', False):
@@ -76,6 +76,11 @@ CREATE TABLE IF NOT EXISTS sync_meta(
 """
 
 _UA = {'User-Agent': 'Mozilla/5.0 (compatible; StockTerminal/5.0; +local)', 'Accept': 'application/json'}
+TZ_TPE = timezone(timedelta(hours=8))
+
+
+def _taipei_today() -> date:
+    return datetime.now(TZ_TPE).date()
 
 
 def _conn():
@@ -96,7 +101,7 @@ def init_db():
 def _set_meta(conn, dataset: str, data_date: Optional[str], status: str, note: str = '', rows: int = 0):
     conn.execute(
         'INSERT OR REPLACE INTO sync_meta(dataset,data_date,last_success,status,note,rows) VALUES(?,?,?,?,?,?)',
-        (dataset, data_date, int(time.time()) if status in ('同步完成', '部分資料可用') else None,
+        (dataset, data_date, int(time.time()) if status in ('同步完成', '部分資料可用', '等待當日發布') else None,
          status, note, rows),
     )
 
@@ -168,6 +173,28 @@ def fetch_index_yahoo(symbol: str, rng: str = '3mo') -> List[Tuple]:
     if last:
         raise RuntimeError(str(last))
     return []
+
+
+def fetch_index_series(symbol: str, rng: str = '3mo') -> Tuple[List[Tuple], str]:
+    """歷史指數的單一來源路由；櫃買禁止退回已知互斥的 Yahoo ^TWOII。"""
+    if symbol == '^TWOII':
+        import tw_index_charts as twc
+        raw = twc.recent_rows('^TWOII', n=120, allow_network=True)
+        out: List[Tuple] = []
+        prev = None
+        for row in raw:
+            try:
+                d = str(row['date'])[:10]
+                o = float(row['open']); h = float(row['high'])
+                l = float(row['low']); c = float(row['close'])
+                v = float(row.get('volume') or 0)
+            except (KeyError, TypeError, ValueError):
+                continue
+            pct = ((c - prev) / prev * 100.0) if prev else None
+            out.append((d, o, h, l, c, pct, v))
+            prev = c
+        return out, 'TPEx st41 / TWSE MIS'
+    return fetch_index_yahoo(symbol, rng), 'Yahoo Finance v8'
 
 
 def fetch_breadth_day(yyyymmdd: str) -> Optional[dict]:
@@ -266,6 +293,18 @@ def fetch_inst_day(yyyymmdd: str) -> Optional[dict]:
         return None
 
 
+def _institutional_meta(latest_inst: Optional[str], latest_market: Optional[str], merged: int) -> Tuple[str, str]:
+    """依官方資料日與最新市場交易日判定法人資料是否可視為同步。"""
+    status_value = '同步完成' if merged or latest_inst else '部分資料可用'
+    note = f'merged {merged} days'
+    if latest_market and (not latest_inst or latest_inst < latest_market):
+        return (
+            '等待當日發布',
+            f'官方法人資料日 {latest_inst or "無"}；市場交易日 {latest_market}；BFI82U 尚未發布',
+        )
+    return status_value, note
+
+
 # ── merge sync ───────────────────────────────────────────────
 
 def sync(days: int = 40, force_full: bool = False) -> Dict[str, Any]:
@@ -281,24 +320,24 @@ def sync(days: int = 40, force_full: bool = False) -> Dict[str, Any]:
         'datasets': [], 'mode': 'full' if force_full else 'merge',
     }
     try:
-        today = date.today()
+        today = _taipei_today()
         with _lock:
             with closing(_conn()) as conn:
-                # ── indices：Yahoo 一次抓 3mo，upsert 全部（天然 merge）──
+                # ── indices：依 symbol 的 canonical provider upsert（天然 merge）──
                 idx_n = 0
                 for sym in ('^TWII', '^TWOII'):
                     try:
-                        rows = fetch_index_yahoo(sym, '3mo')
+                        rows, source = fetch_index_series(sym, '3mo')
                         now = int(time.time())
                         for d, o, h, l, c, pct, vol in rows:
                             conn.execute(
                                 'INSERT OR REPLACE INTO index_daily(symbol,d,open,high,low,close,change_pct,volume,source,updated_at) '
                                 'VALUES(?,?,?,?,?,?,?,?,?,?)',
-                                (sym, d, o, h, l, c, pct, vol, 'yahoo', now))
+                                (sym, d, o, h, l, c, pct, vol, source, now))
                             idx_n += 1
                         last_d = rows[-1][0] if rows else None
                         _set_meta(conn, f'index:{sym}', last_d, '同步完成' if rows else '同步失敗',
-                                  '' if rows else 'no rows', len(rows))
+                                  source if rows else 'no rows', len(rows))
                     except Exception as e:
                         _set_meta(conn, f'index:{sym}', None, '同步失敗', str(e)[:160], 0)
                 result['index'] = idx_n
@@ -357,9 +396,11 @@ def sync(days: int = 40, force_full: bool = False) -> Dict[str, Any]:
                             i_n += 1
                         time.sleep(0.25)
                     dcur += timedelta(days=1)
-                _set_meta(conn, 'institutional', _max_date(conn, 'inst_daily'),
-                          '同步完成' if i_n or max_i else '部分資料可用',
-                          f'merged {i_n} days', i_n)
+                latest_breadth = _max_date(conn, 'breadth_daily')
+                latest_inst = _max_date(conn, 'inst_daily')
+                inst_status, inst_note = _institutional_meta(latest_inst, latest_breadth, i_n)
+                _set_meta(conn, 'institutional', latest_inst,
+                          inst_status, inst_note, i_n)
 
                 result['breadth'] = b_n
                 result['inst'] = i_n
@@ -388,7 +429,7 @@ def sync(days: int = 40, force_full: bool = False) -> Dict[str, Any]:
 def save_pulse_score(payload: dict) -> None:
     """把當次 /pulse 分數寫入歷史（以資料日或今天為鍵）。"""
     init_db()
-    d = (payload.get('date') or date.today().strftime('%Y%m%d'))
+    d = (payload.get('date') or _taipei_today().strftime('%Y%m%d'))
     if len(d) == 8 and '-' not in d:
         d = f'{d[:4]}-{d[4:6]}-{d[6:8]}'
     with _lock:

@@ -18,7 +18,7 @@ import re
 import threading
 import time
 import urllib.request
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Optional
 
 _CODE_RE = re.compile(r'^\d{4,6}[A-Z]?$')
@@ -37,6 +37,31 @@ _SNAP_LOCK = threading.Lock()
 _SNAP: Dict[str, Dict[str, Any]] = {}   # key -> {ts, by_code|None, err}
 _SNAP_OK_TTL = 1800.0    # 成功快照 30 分
 _SNAP_NEG_TTL = 300.0    # 失敗 neg-cache 5 分
+TZ_TPE = timezone(timedelta(hours=8))
+
+
+def _taipei_today() -> date:
+    """交易所查詢與資料日一律以 Asia/Taipei 為準。"""
+    return datetime.now(TZ_TPE).date()
+
+
+def _exchange_date_yyyymmdd(value: Any) -> Optional[str]:
+    """正規化交易所西元／民國日期；不接受無效或未來資料日。"""
+    raw = ''.join(ch for ch in str(value or '').strip() if ch.isdigit())
+    if len(raw) == 7:  # 民國 YYYMMDD
+        try:
+            raw = f'{int(raw[:3]) + 1911:04d}{raw[3:]}'
+        except Exception:
+            return None
+    if len(raw) != 8:
+        return None
+    try:
+        parsed = datetime.strptime(raw, '%Y%m%d').date()
+    except ValueError:
+        return None
+    if parsed > _taipei_today():
+        return None
+    return parsed.strftime('%Y%m%d')
 
 
 def configure(*, yf_headers=None, src_fetch_json=None, source_breaker_open=None,
@@ -342,12 +367,13 @@ def snap_twtb4u(tdate: str) -> Optional[Dict[str, dict]]:
 
 def resolve_t86_date(max_back: int = 8):
     """往回找最近有 T86 的交易日，回 (date, by_code|None)。"""
+    today = _taipei_today()
     for back in range(0, max_back):
-        d = (date.today() - timedelta(days=back)).strftime('%Y%m%d')
+        d = (today - timedelta(days=back)).strftime('%Y%m%d')
         by = snap_t86(d)
         if by:
             return d, by
-    return date.today().strftime('%Y%m%d'), None
+    return None, None
 
 
 def _tpex_inst(clean: str) -> Optional[dict]:
@@ -388,7 +414,11 @@ def _tpex_inst(clean: str) -> Optional[dict]:
                 rc = str(v).strip(); break
         if rc != clean:
             continue
+        source_date = _exchange_date_yyyymmdd(row.get('Date') or row.get('日期'))
+        if not source_date:
+            continue
         return {
+            'date': source_date,
             'foreign': pick(row, ('外資及陸資買賣超', 'foreigninvestor', 'foreign', '外資'),
                             avoid=('不含', 'exclud', 'dealer', '自營', 'hedge', '避險', 'self', '自行')),
             'trust':   pick(row, ('投信', 'investmenttrust', 'trust'),
@@ -405,7 +435,7 @@ def _tpex_inst(clean: str) -> Optional[dict]:
 def build_chip(sym: str) -> dict:
     """組出 /chip 回應 dict（呼叫端負責 HTTP cache／寫出）。"""
     clean = (sym or '').replace('.TW', '').replace('.TWO', '').strip().upper()
-    today = date.today().strftime('%Y%m%d')
+    today = _taipei_today().strftime('%Y%m%d')
     if not is_equity_code(clean):
         return {
             'symbol': sym, 'date': today, 'inst': None, 'margin': None,
@@ -413,7 +443,11 @@ def build_chip(sym: str) -> dict:
         }
 
     tdate, t86 = resolve_t86_date()
-    out = {'symbol': sym, 'date': tdate, 'inst': None, 'margin': None}
+    lookup_date = tdate or today
+    out = {
+        'symbol': sym, 'date': tdate, 'instDate': tdate,
+        'marginDate': None, 'inst': None, 'margin': None,
+    }
 
     if t86 and clean in t86:
         out['inst'] = dict(t86[clean])
@@ -422,18 +456,22 @@ def build_chip(sym: str) -> dict:
         tp = _tpex_inst(clean)
         if tp:
             src = tp.pop('_chipSource', 'TPEx')
+            inst_date = tp.pop('date', None)
             out['inst'] = tp
             out['_chipSource'] = src
+            out['instDate'] = inst_date
+            out['date'] = inst_date
 
-    marg = snap_margn(tdate)
+    marg = snap_margn(lookup_date)
     if marg and clean in marg:
         out['margin'] = marg[clean]
+        out['marginDate'] = lookup_date
 
-    lend = snap_twt72u(tdate)
+    lend = snap_twt72u(lookup_date)
     if lend and clean in lend:
         out['shortLend'] = lend[clean]
 
-    dayt = snap_twtb4u(tdate)
+    dayt = snap_twtb4u(lookup_date)
     if dayt and clean in dayt:
         out['dayTrade'] = dayt[clean]
 

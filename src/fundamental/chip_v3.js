@@ -119,7 +119,7 @@ function renderChipSection(chip) {
   }
   h += `<div style="padding:6px 12px 0;font-family:monospace;font-size:8.5px;color:var(--tf);line-height:1.5">資料：TWSE 三大法人 + 信用 + 借券 + 當沖` +
     (hold && hold.ok ? ' + TDCC 集保週報' : '') +
-    `（${chip.date.slice(0,4)}/${chip.date.slice(4,6)}/${chip.date.slice(6,8)}）</div>`;
+    `（${chip.date ? chip.date.slice(0,4) + '/' + chip.date.slice(4,6) + '/' + chip.date.slice(6,8) : '官方資料日待確認'}）</div>`;
   return h;
 }
 
