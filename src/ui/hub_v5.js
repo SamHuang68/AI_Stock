@@ -1226,10 +1226,11 @@
       '<button class="hub-btn primary" data-shell-back>← 儀表板</button>') +
       '<div id="hub-set-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
-    Promise.all([jget('/sync/status'), jget('/datasources'), jget('/health')]).then(function (arr) {
+    Promise.all([jget('/sync/status'), jget('/datasources'), jget('/health'), jget('/features')]).then(function (arr) {
       var st = arr[0] || {};
       var ds = arr[1];
       var health = arr[2] || {};
+      var features = arr[3] || {};
       var V = window.Viz;
       var counts = st.counts || {};
       var countChips = V
@@ -1263,6 +1264,19 @@
       }
       var body = $('hub-set-body');
       if (!body) return;
+      var flagRows = '';
+      var flagMap = (features && features.flags) || (window.FeatureFlags && FeatureFlags.getServer ? FeatureFlags.getServer() : {});
+      [
+        ['shadowOvernightIntraday', '盤別動量研究（Overnight × Intraday）'],
+        ['shadowEarlyWarning', '跨市場前兆雷達（Early Warning）'],
+        ['shadowConsensusAttention', '共識注意力 Radar']
+      ].forEach(function (pair) {
+        var on = !!flagMap[pair[0]];
+        var hint = window.FeatureFlags && FeatureFlags.enableHint ? FeatureFlags.enableHint(pair[0]) : '';
+        flagRows += '<tr><td>' + pair[1] + '</td><td><span class="badge ' + (on ? 'ok' : 'warn') + '">' +
+          (on ? '伺服器已啟用' : '伺服器關閉') + '</span></td><td style="text-align:left;font-size:11px;color:#94a3b8">' +
+          (on ? '重新啟動伺服器後生效' : hint) + '</td></tr>';
+      });
       body.innerHTML =
         '<div class="hub-strip">' +
           '<div class="cell"><div class="k">自動同步</div><div class="v">' +
@@ -1276,6 +1290,11 @@
             '<div class="s">只更新新交易日</div></div>' +
         '</div>' +
         '<div class="hub-dash hub-cols-2">' +
+          '<div class="hub-sec"><h4>Shadow／實驗功能（伺服器旗標）</h4><div class="hub-fill"><table>' +
+            '<tr><th>功能</th><th>狀態</th><th>啟用方式</th></tr>' + flagRows + '</table></div>' +
+            '<div class="hub-note">以 <code>GET /features</code> 為唯一真相來源；瀏覽器 localStorage 不能單獨開啟 Shadow 面板。' +
+            ' 請設定 <code>ST_ENABLE_SHADOW_RESEARCH=1</code> 或個別 <code>ST_SHADOW_*</code>，' +
+            '或建立 <code>data/feature_flags.local.json</code> 後重新啟動伺服器。</div></div>' +
           '<div class="hub-sec"><h4>資料來源狀態（pulse_history）</h4><div class="hub-fill"><table>' +
             '<tr><th>資料集</th><th>資料日</th><th>狀態</th><th>說明</th><th>列數</th></tr>' +
             dsRows + '</table></div><div class="hub-note">DB：' + (st.db || '') + '</div></div>' +

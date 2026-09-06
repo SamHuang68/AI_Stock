@@ -1571,12 +1571,19 @@
     var t = setTimeout(function () { if (ctrl) ctrl.abort(); }, 2500);
     Promise.all([
       fetch('/health', { signal: ctrl && ctrl.signal }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
-      fetch('/sync/status', { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return null; })
+      fetch('/sync/status', { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return null; }),
+      (window.MarketData && MarketData.refresh) ? MarketData.refresh() : Promise.resolve(null)
     ]).then(function (arr) {
       var h = arr[0];
       var s = arr[1];
       if (!h) { setSync('warn', 'LOCAL'); return; }
       if (s && s.running) { setSync('warn', 'SYNCING'); return; }
+      var market = window.MarketData && MarketData.get ? MarketData.get() : null;
+      if (market && market.freshness && window.MarketFreshness && MarketFreshness.shellHealthText) {
+        var health = MarketFreshness.shellHealthText(market.freshness);
+        setSync(health.mode, health.text);
+        return;
+      }
       var n = s && s.counts ? (s.counts.index || 0) : 0;
       setSync('ok', n ? ('DB ' + n) : 'SYNC OK');
     }).finally(function () { clearTimeout(t); });

@@ -18,14 +18,14 @@
 Windows：
 
 ```powershell
-cd C:\Stock_Terminal
+cd C:\path\to\AI_Stock
 .\START_TIP.cmd
 ```
 
 Linux／macOS：
 
 ```bash
-cd /path/to/Stock_Terminal
+cd /path/to/AI_Stock
 ./scripts/go.sh
 ```
 

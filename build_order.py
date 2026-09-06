@@ -35,9 +35,12 @@ DEPS = {
     'chip_v3.js':           ['viz_v5.js'],
     'instrank_v3.js':       ['viz_v5.js'],
     'marketflow_v3.js':     ['viz_v5.js'],
-    'pulse_v5.js':          ['viz_v5.js'],
-    'decision_data_v5.js':  ['market_data_v5.js'],
-    'market_data_v5.js':    ['app_kernel_v5.js'],
+    'pulse_v5.js':          ['viz_v5.js', 'market_freshness_v5.js'],
+    'decision_data_v5.js':  ['market_data_v5.js', 'feature_flags_v5.js'],
+    'market_data_v5.js':    ['app_kernel_v5.js', 'market_freshness_v5.js'],
+    'market_freshness_v5.js': ['app_kernel_v5.js'],
+    'feature_flags_v5.js':  ['app_kernel_v5.js'],
+    'shell_v5.js':          ['market_freshness_v5.js', 'feature_flags_v5.js'],
     'decision_v5.js':       ['viz_v5.js', 'decision_data_v5.js', 'shell_v5.js'],
     'consensus_attention_v5.js': ['decision_data_v5.js', 'decision_v5.js', 'shell_v5.js'],
     'hub_v5.js':            ['viz_v5.js'],
@@ -83,7 +86,8 @@ def order_scripts(scripts):
 
 # ── 與 build_v2.py V2_SCRIPTS（經 order_scripts 後）對齊的基準清單 ──────────
 _CURRENT = [
-    'colors_v3.js', 'app_kernel_v5.js', 'market_data_v5.js', 'decision_data_v5.js', 'table_sort_v5.js', 'viz_v5.js', 'market_v3.js', 'fields_v3.js', 'chart_registry_v3.js',
+    'colors_v3.js', 'app_kernel_v5.js', 'feature_flags_v5.js', 'market_freshness_v5.js', 'market_data_v5.js',
+    'decision_data_v5.js', 'table_sort_v5.js', 'viz_v5.js', 'market_v3.js', 'fields_v3.js', 'chart_registry_v3.js',
     'share_v3.js', 'datasources_v3.js', 'etf_flow_tip_v3.js',
     'position_v2.js', 'watch_v2.js', 'info_v2.js', 'pro_v2.js', 'volume_profile_v3.js',
     'pattern_v3.js', 'live_v2.js', 'chip_v3.js', 'fundamental_v3.js', 'screener_v3.js',

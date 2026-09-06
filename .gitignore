@@ -37,7 +37,9 @@ Stock_Terminal_*.zip
 Stock_Terminal_*.zip.sha256
 Stock_Terminal_*.manifest.json
 
-# Local API keys and secrets (just in case)
+# Local feature-flag overrides (research / shadow surfaces)
+data/feature_flags.local.json
+
 *.key
 .env
 .env.local

@@ -117,9 +117,11 @@ V2_STYLES  = ['src/ui/mobile_v2.css']
 
 # v3.9 P5: 依相依關係自動排序模組(取代人工「須在X後」)。失敗則退回原順序,不影響打包。
 V2_SCRIPTS.insert(1, 'src/core/app_kernel_v5.js')  # single API + panel lifecycle boundary
-V2_SCRIPTS.insert(2, 'src/core/market_data_v5.js')  # canonical market quote store
-V2_SCRIPTS.insert(3, 'src/core/decision_data_v5.js')  # canonical DecisionContext store
-V2_SCRIPTS.insert(4, 'src/core/market_intel_v5.js')  # shared theme resonance + news/watch linkage
+V2_SCRIPTS.insert(2, 'src/core/feature_flags_v5.js')  # shadow / experimental gates (default off)
+V2_SCRIPTS.insert(3, 'src/core/market_freshness_v5.js')  # per-quote asOf freshness helpers
+V2_SCRIPTS.insert(4, 'src/core/market_data_v5.js')  # canonical market quote store
+V2_SCRIPTS.insert(5, 'src/core/decision_data_v5.js')  # canonical DecisionContext store
+V2_SCRIPTS.insert(6, 'src/core/market_intel_v5.js')  # shared theme resonance + news/watch linkage
 
 try:
     from build_order import order_scripts

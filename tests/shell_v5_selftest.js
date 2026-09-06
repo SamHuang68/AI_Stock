@@ -62,6 +62,7 @@ const consensusAttentionUi = fs.readFileSync(path.join(root, 'src/ui/consensus_a
 const scanUi = fs.readFileSync(path.join(root, 'src/ui/scan_v5.js'), 'utf8');
 const tableSortUi = fs.readFileSync(path.join(root, 'src/core/table_sort_v5.js'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'server/server.py'), 'utf8');
+const pulseOrch = fs.readFileSync(path.join(root, 'server/pulse_orchestration.py'), 'utf8');
 const sectorHistory = fs.readFileSync(path.join(root, 'server/sector_history.py'), 'utf8');
 const sectorFlow = fs.readFileSync(path.join(root, 'server/sector_flow.py'), 'utf8');
 const decisionEngine = fs.readFileSync(path.join(root, 'server/decision_context.py'), 'utf8');
@@ -127,6 +128,22 @@ ok(/function applyMktCellTone/.test(polish) && /overwrite stale inline color/.te
   'market bar resets current-source color for TWSE/TAIFEX overrides');
 ok(/window\.MarketData/.test(marketData) && /marketData/.test(polish) && /\/market\/snapshot/.test(marketData),
   'market headline surfaces use one canonical snapshot/event store');
+ok(/MarketFreshness/.test(fs.readFileSync(path.join(root, 'src/core/market_freshness_v5.js'), 'utf8')) &&
+  /worstAsOfMs/.test(fs.readFileSync(path.join(root, 'src/core/market_freshness_v5.js'), 'utf8')) &&
+  /shellHealthText/.test(shell) && /MarketData\.refresh/.test(shell) &&
+  /行情 asOf/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')),
+  'freshness contract uses per-quote worst asOf for shell and pulse surfaces');
+var featureFlags = fs.readFileSync(path.join(root, 'src/core/feature_flags_v5.js'), 'utf8');
+var featuresRoutes = fs.readFileSync(path.join(root, 'server/features_routes.py'), 'utf8');
+var hubUi = fs.readFileSync(path.join(root, 'src/ui/hub_v5.js'), 'utf8');
+ok(/FeatureFlags/.test(featureFlags) &&
+  /shadowOvernightIntraday/.test(featureFlags) &&
+  /public_payload/.test(featuresRoutes) &&
+  !/setLocal/.test(featureFlags) &&
+  /localStorage\.removeItem/.test(featureFlags) &&
+  /GET \/features/.test(hubUi) &&
+  /FeatureFlags\.isEnabled\('shadowEarlyWarning'\)/.test(decisionUi),
+  'shadow research surfaces use server /features as source of truth defaulting off');
 ok(/window\.DecisionData/.test(decisionData) && /inflight/.test(decisionData) && /decisionData/.test(decisionUi) &&
   /decisionSummary/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')) &&
   /decision_contract_version/.test(fs.readFileSync(path.join(root, 'src/ui/wavedeck_bridge_v5.js'), 'utf8')),
@@ -163,9 +180,9 @@ ok(/linkNewsToWatchlist/.test(decisionUi) && /dc-news-watch/.test(decisionUi) &&
   /MarketIntelV5/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')),
   'decision and pulse share one direct/theme News Impact watchlist contract');
 ok(/成交口徑：上市普通股產業內占比/.test(decisionUi) && /historyDates/.test(decisionUi) &&
-  /turnoverEligible/.test(decisionUi) && /industryTurnoverYi/.test(server) && /sector_history/.test(server) &&
+  /turnoverEligible/.test(decisionUi) && /industryTurnoverYi/.test(pulseOrch) && /sector_history/.test(pulseOrch) &&
   /TWSE_COMMON_STOCKS_BY_INDUSTRY/.test(sectorFlow) && /normalize_session_date/.test(sectorFlow) &&
-  /turnoverSessionMatched/.test(server) && /enrich_sector_rows/.test(sectorHistory),
+  /turnoverSessionMatched/.test(pulseOrch) && /enrich_sector_rows/.test(sectorHistory),
   'sector flow exposes official-industry turnover scope and persistent RS20 readiness');
 ok(/情境訊號矩陣/.test(decisionUi) && /Evidence Ledger/.test(decisionUi) && /Risk Profile/.test(decisionUi) &&
   /positionRange/.test(decisionUi) && /observation_pool/.test(decisionUi) &&
@@ -964,8 +981,8 @@ ok(/台指期近月/.test(pl) && /__TXF__/.test(pl) && /TAIFEX MIS/.test(pl) &&
 ok(/AI科技外溢/.test(hub) && /factorScope/.test(hub) && /aiSpill/.test(hub) &&
   /spill\.ok/.test(hub) && !/美股流動池漲跌/.test(hub) && !/尚無美股漲幅資料/.test(hub),
   'risk page shows AI spillover strip only when data exists (no empty US shell)');
-ok(/apply_ai_tech_spillover/.test(srvPy) && /pulse-global:v8/.test(srvPy) &&
-  /'NVDA', 'AVGO', 'TSM'/.test(srvPy),
+ok(/apply_ai_tech_spillover/.test(pulseOrch) && /pulse-global:v8/.test(pulseOrch) &&
+  /'NVDA', 'AVGO', 'TSM'/.test(pulseOrch),
   'server applies AI spillover from global v8 (SOX + NVDA/AVGO/TSM + de-duplicated TW anchors)');
 (function () {
   var pi = fs.readFileSync(path.join(root, 'server/pulse_intel.py'), 'utf8');
