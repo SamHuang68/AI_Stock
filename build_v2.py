@@ -108,6 +108,7 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/ui/afterhours_v5.js',               # v5.0: 盤後整理(/txf+/stockfut+/marketflow，掛 #view-afterhours)
               'src/ui/news_v5.js',                     # v5.0: 快訊中樞(/events+結算日，掛 #view-news；非新聞爬蟲)
               'src/ui/postmarket_v5.js',               # v5.x: 盤後敘事日報 drawer(/api/ai/postmarket-daily，由 ai_v5「盤後日報」開啟)
+              'src/ui/conditional_expectation_v5.js',  # v5.x: shadow Conditional Expectation card (/research/conditional-expectation)
               'src/ui/bridge_v5.js',                   # v5.0: 工具列→側欄橋接（須在 *Open 定義後、toolbar 前）
               'src/ui/visual_system_v5.js',            # v5.0: 全站 elevation / border / shadow 視覺契約
               'src/ui/chart_visual_v5.js',             # v5.0: 圖表工作站色票／層級／膠囊與數據卡契約
@@ -119,10 +120,11 @@ V2_STYLES  = ['src/ui/mobile_v2.css']
 # v3.9 P5: 依相依關係自動排序模組(取代人工「須在X後」)。失敗則退回原順序,不影響打包。
 V2_SCRIPTS.insert(1, 'src/core/app_kernel_v5.js')  # single API + panel lifecycle boundary
 V2_SCRIPTS.insert(2, 'src/core/feature_flags_v5.js')  # shadow / experimental gates (default off)
-V2_SCRIPTS.insert(3, 'src/core/market_freshness_v5.js')  # per-quote asOf freshness helpers
-V2_SCRIPTS.insert(4, 'src/core/market_data_v5.js')  # canonical market quote store
-V2_SCRIPTS.insert(5, 'src/core/decision_data_v5.js')  # canonical DecisionContext store
-V2_SCRIPTS.insert(6, 'src/core/market_intel_v5.js')  # shared theme resonance + news/watch linkage
+V2_SCRIPTS.insert(3, 'src/core/epistemic_badges_v5.js')  # FACT | CONDITIONAL | HYPOTHESIS badges
+V2_SCRIPTS.insert(4, 'src/core/market_freshness_v5.js')  # per-quote asOf freshness helpers
+V2_SCRIPTS.insert(5, 'src/core/market_data_v5.js')  # canonical market quote store
+V2_SCRIPTS.insert(6, 'src/core/decision_data_v5.js')  # canonical DecisionContext store
+V2_SCRIPTS.insert(7, 'src/core/market_intel_v5.js')  # shared theme resonance + news/watch linkage
 
 try:
     from build_order import order_scripts

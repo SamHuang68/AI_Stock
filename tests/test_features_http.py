@@ -42,6 +42,7 @@ class FeaturesHttpTests(unittest.TestCase):
         self.assertFalse(payload['flags']['shadowOvernightIntraday'])
         self.assertFalse(payload['flags']['shadowEarlyWarning'])
         self.assertFalse(payload['flags']['shadowConsensusAttention'])
+        self.assertFalse(payload['flags']['shadowConditionalExpectation'])
         self.assertIn('ST_ENABLE_SHADOW_RESEARCH', payload['enable']['masterEnv'])
 
 

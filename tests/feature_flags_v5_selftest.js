@@ -42,7 +42,8 @@ var sandbox = {
               flags: {
                 shadowOvernightIntraday: false,
                 shadowEarlyWarning: false,
-                shadowConsensusAttention: false
+                shadowConsensusAttention: false,
+                shadowConditionalExpectation: false
               }
             });
           }
