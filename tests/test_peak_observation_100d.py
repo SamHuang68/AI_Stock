@@ -18,6 +18,11 @@ sys.path.insert(0, str(SERVER_DIR))
 import peak_observation_100d as po100  # noqa: E402
 from ohlc_ledger import append_bars  # noqa: E402
 
+try:
+    import postmarket_report as _postmarket_report  # noqa: E402
+except ImportError:
+    _postmarket_report = None
+
 FIXTURE_PATH = ROOT / 'tests' / 'fixtures' / 'ohlc_ledger' / 'sample_bars.json'
 
 
@@ -157,6 +162,7 @@ class PeakObservation100dComputeTests(unittest.TestCase):
         self.assertNotIn('actionEnvelope', source.replace('actionEnvelope, or FACT labels', ''))
 
 
+@unittest.skipUnless(_postmarket_report, 'postmarket_report 不在 tip UX，EvidencePack 掛接僅 main 線')
 class PeakObservation100dEvidencePackTests(unittest.TestCase):
     def setUp(self):
         import postmarket_report as pr

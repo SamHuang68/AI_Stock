@@ -18,6 +18,11 @@ sys.path.insert(0, str(SERVER_DIR))
 import touxin_5d as t5  # noqa: E402
 from touxin_ledger import append_rows, query_rows_pit  # noqa: E402
 
+try:
+    import postmarket_report as _postmarket_report  # noqa: E402
+except ImportError:
+    _postmarket_report = None
+
 FIXTURE_PATH = ROOT / 'tests' / 'fixtures' / 'touxin_ledger' / 'sample_rows.json'
 
 
@@ -127,6 +132,7 @@ class Touxin5dComputeTests(unittest.TestCase):
         self.assertNotIn('actionEnvelope', source)
 
 
+@unittest.skipUnless(_postmarket_report, 'postmarket_report 不在 tip UX，EvidencePack 掛接僅 main 線')
 class Touxin5dEvidencePackTests(unittest.TestCase):
     def setUp(self):
         import postmarket_report as pr
