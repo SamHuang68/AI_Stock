@@ -9,6 +9,7 @@
     shadowConsensusAttention: false,
     shadowConditionalExpectation: false,
     shadowChipPathState: false,
+    shadowPeakObservation: true,
     shadowVolRegimeSwitch: false,
     shadowMultifactor: false,
     shadowMlExperiment: false
@@ -53,6 +54,7 @@
       shadowConsensusAttention: 'ST_SHADOW_CONSENSUS_ATTENTION=1',
       shadowConditionalExpectation: 'ST_SHADOW_CONDITIONAL_EXPECTATION=1',
       shadowChipPathState: 'ST_SHADOW_CHIP_PATH_STATE=1',
+      shadowPeakObservation: 'ST_SHADOW_PEAK_OBSERVATION=1（預設開啟；設 0 關閉）',
       shadowVolRegimeSwitch: 'ST_SHADOW_VOL_REGIME_SWITCH=1',
       shadowMultifactor: 'ST_SHADOW_MULTIFACTOR=1',
       shadowMlExperiment: 'ST_SHADOW_ML_EXPERIMENT=1'
