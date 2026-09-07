@@ -114,6 +114,9 @@ installer/dist_installer/
 *.spec
 
 # v4.0 local market datastore (regenerable, can grow large)
+data/ohlc_ledger/
+data/peak_approvals/
+data/touxin_ledger/
 data/market.db
 data/market.db-wal
 data/market.db-shm

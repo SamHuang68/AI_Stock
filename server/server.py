@@ -48,6 +48,10 @@ from etf_api import (
     list_etf_files,
 )
 from etf_routes import EtfRoutesMixin
+from peak_observation_routes import PeakObservationRoutesMixin
+from peak_observation_100d_routes import PeakObservation100dRoutesMixin
+from touxin_5d_routes import Touxin5dRoutesMixin
+from features_routes import FeaturesRoutesMixin
 from decision_routes import DecisionRoutesMixin
 from overnight_intraday_routes import OvernightIntradayRoutesMixin
 from options_routes import OptionsRoutesMixin
@@ -2687,7 +2691,8 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
     request_queue_size = 64
 
-class Handler(DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
+class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, PeakObservationRoutesMixin, PeakObservation100dRoutesMixin, Touxin5dRoutesMixin, OptionsRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
+    _BASE = _BASE
     protocol_version = 'HTTP/1.1'   # enables keep-alive
 
     def _handle_index(self):
@@ -2789,6 +2794,14 @@ class Handler(DecisionRoutesMixin, OvernightIntradayRoutesMixin, OptionsRoutesMi
             self._handle_signal_performance()
         elif p == '/research/overnight-intraday' or p.startswith('/research/overnight-intraday?'):
             self._handle_overnight_intraday()
+        elif p == '/research/peak-observation' or p.startswith('/research/peak-observation?'):
+            self._handle_peak_observation()
+        elif p == '/research/peak-observation-100d' or p.startswith('/research/peak-observation-100d?'):
+            self._handle_peak_observation_100d()
+        elif p == '/research/touxin-5d-netbuy' or p.startswith('/research/touxin-5d-netbuy?'):
+            self._handle_touxin_5d_netbuy()
+        elif p == '/features' or p.startswith('/features?'):
+            self._handle_features()
         elif p == '/options/txo/structure' or p.startswith('/options/txo/structure?'):
             self._handle_options_structure()
         elif p == '/options/txo/history' or p.startswith('/options/txo/history?'):
