@@ -4,3 +4,9 @@
 1. 所有的技術指標（RSI, SMA）計算必須精準，不允許任何概略或省略的寫法。
 2. 進行任何修改前，必須確保前後端資料欄位完全對齊。
 3. 拒絕敷衍的程式碼，請完整輸出，減少我的審查與來回修正次數。
+
+【模型／計費】除非使用者在本則訊息明確點名第三方模型，否則禁用 Other Models。
+- 預設只用 Cursor Models：Composer、Grok（含 inherit 父模型）。
+- 禁止自動／預設改走 Claude、GPT、Gemini、Opus、Sonnet 等第三方（Other Models；會吃 included API 池並可能轉 on-demand）。
+- Task／子 agent／平行探索一律 `model: inherit`。不得指定 claude／gpt／gemini／opus／sonnet 等 slug。
+- 使用者寫「用 Claude／GPT／Gemini／Opus」才可用該模型；「Auto」或未指定 ≠ 授權 Other Models。
