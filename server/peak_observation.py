@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Observation-only peak distance feature (st-peak-v0.1, CONDITIONAL only).
+"""Observation-only peak distance feature (st-peak-v0.1).
 
 Computes ``pctBelowPeak = lastClose / peakClose - 1`` for peakKind ``A``
 (max close from ``historyStart`` through ``asOf`` on a declared ``priceBasis``).
 
-This module does **not** write DecisionContext, actionEnvelope, or FACT labels.
+``label`` is ``FACT`` only when §6 binding is complete (PIT ledger bars,
+explicit ``knowledgeCutoff``, numerics, ``evidenceHash``, Host
+``hostApprovalHash``, no ``pitLimitation``). Otherwise ``CONDITIONAL``.
+
+This module does **not** write DecisionContext or actionEnvelope.
 See ``docs/ST_PEAK_V01.md``.
 """
 from __future__ import annotations
@@ -27,9 +31,11 @@ from ohlc_ledger import OhlcBar, filter_bars_pit, query_bars_pit
 
 CONTRACT_ID = 'st-peak-v0.1'
 PEAK_KIND = 'A'
-LABEL = 'CONDITIONAL'
+LABEL_CONDITIONAL = 'CONDITIONAL'
+LABEL_FACT = 'FACT'
+LABEL = LABEL_CONDITIONAL
 DISCLAIMER_KEY = 'st-peak-v0.1-non-recommendation'
-EPISTEMIC = 'CONDITIONAL'
+EPISTEMIC = LABEL_CONDITIONAL
 DEFAULT_PRICE_BASIS = 'unadj_close'
 DEFAULT_SOURCE_LEDGER = 'ohlc_ledger/pit'
 DEFAULT_SOURCE_LIVE = 'datastore/live-bars-partial-pit'
@@ -89,8 +95,8 @@ def disabled_payload(reason: str = 'SHADOW_DISABLED') -> dict[str, Any]:
         'actionAuthority': 'none',
         'decisionUse': 'research_only',
         'predictiveProbability': False,
-        'epistemic': EPISTEMIC,
-        'label': LABEL,
+        'epistemic': LABEL_CONDITIONAL,
+        'label': LABEL_CONDITIONAL,
         'contractId': CONTRACT_ID,
         'disclaimerKey': DISCLAIMER_KEY,
         'hostApprovalHash': None,
@@ -113,6 +119,10 @@ def _evidence_hash_inputs(
     generation_id: str | None,
     generation_content_hash: str | None,
     source: str,
+    peak_close: float | None = None,
+    peak_date: str | None = None,
+    last_close: float | None = None,
+    pct_below_peak: float | None = None,
 ) -> dict[str, Any]:
     return {
         'contractId': CONTRACT_ID,
@@ -135,12 +145,57 @@ def _evidence_hash_inputs(
             }
             for row in bars
         ],
+        'outputs': {
+            'peakClose': peak_close,
+            'peakDate': peak_date,
+            'lastClose': last_close,
+            'pctBelowPeak': pct_below_peak,
+        },
     }
 
 
 def compute_evidence_hash(payload: Mapping[str, Any]) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+
+def _bars_have_ingested_at(bars: Sequence[OhlcBar]) -> bool:
+    return bool(bars) and all(str(row.ingested_at or '').strip() for row in bars)
+
+
+def _resolve_fact_binding(
+    observation: dict[str, Any],
+    *,
+    pit_from_ledger: bool,
+    knowledge_cutoff_explicit: bool,
+    bars_have_ingested_at: bool,
+    base_dir: str | os.PathLike[str] | None,
+) -> dict[str, Any]:
+    """Apply §6 FACT promotion when Host approval exists and PIT path is complete."""
+    evidence_hash = observation.get('evidenceHash')
+    host_hash: str | None = None
+    if evidence_hash:
+        import peak_approvals as pa
+
+        host_hash = pa.lookup_host_approval_hash(evidence_hash, base_dir=base_dir)
+    observation['hostApprovalHash'] = host_hash
+
+    can_fact = (
+        pit_from_ledger
+        and knowledge_cutoff_explicit
+        and bars_have_ingested_at
+        and not observation.get('pitLimitation')
+        and observation.get('peakKind') == PEAK_KIND
+        and not observation.get('nullReason')
+        and observation.get('peakClose') is not None
+        and observation.get('peakDate') is not None
+        and observation.get('lastClose') is not None
+        and observation.get('pctBelowPeak') is not None
+        and evidence_hash
+        and host_hash is not None
+    )
+    observation['label'] = LABEL_FACT if can_fact else LABEL_CONDITIONAL
+    return observation
 
 
 def _validate_adj_requirements(
@@ -301,9 +356,10 @@ def build_observation(
     base_dir: str | os.PathLike[str] | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Build the st-peak-v0.1 observation object (always label=CONDITIONAL)."""
+    """Build the st-peak-v0.1 observation object (CONDITIONAL unless §6 FACT binding)."""
     now = now or datetime.now(TZ_TPE)
     code = str(symbol).strip().upper()
+    knowledge_cutoff_explicit = knowledge_cutoff is not None
     if peak_kind != PEAK_KIND:
         return _null_observation(
             symbol=code,
@@ -316,6 +372,9 @@ def build_observation(
             generation_id=generation_id,
             generation_content_hash=generation_content_hash,
             source='rejected',
+            pit_from_ledger=False,
+            knowledge_cutoff_explicit=knowledge_cutoff_explicit,
+            base_dir=base_dir,
         )
 
     resolved_as_of = as_of or _last_tw_close_day(now).isoformat()
@@ -339,6 +398,9 @@ def build_observation(
             generation_id=generation_id,
             generation_content_hash=generation_content_hash,
             source='validation',
+            pit_from_ledger=False,
+            knowledge_cutoff_explicit=knowledge_cutoff_explicit,
+            base_dir=base_dir,
         )
 
     pit_bars, source, pit_note = _load_pit_bars(
@@ -350,6 +412,8 @@ def build_observation(
         bars=bars,
         base_dir=base_dir,
     )
+    pit_from_ledger = source == DEFAULT_SOURCE_LEDGER
+    bars_have_ingested_at = _bars_have_ingested_at(pit_bars)
 
     gen_error = _generation_mismatch(pit_bars, generation_id)
     if gen_error:
@@ -365,6 +429,9 @@ def build_observation(
             generation_content_hash=generation_content_hash,
             source=source,
             pit_note=pit_note,
+            pit_from_ledger=pit_from_ledger,
+            knowledge_cutoff_explicit=knowledge_cutoff_explicit,
+            base_dir=base_dir,
         )
 
     try:
@@ -382,6 +449,9 @@ def build_observation(
             generation_content_hash=generation_content_hash,
             source=source,
             pit_note=pit_note,
+            pit_from_ledger=pit_from_ledger,
+            knowledge_cutoff_explicit=knowledge_cutoff_explicit,
+            base_dir=base_dir,
         )
 
     peak_close, peak_date, last_close, null_reason = _compute_peak_kind_a(
@@ -402,6 +472,9 @@ def build_observation(
             generation_content_hash=generation_content_hash,
             source=source,
             pit_note=pit_note,
+            pit_from_ledger=pit_from_ledger,
+            knowledge_cutoff_explicit=knowledge_cutoff_explicit,
+            base_dir=base_dir,
         )
 
     pct = _round_pct(last_close / peak_close - 1.0)
@@ -418,9 +491,14 @@ def build_observation(
             generation_content_hash=generation_content_hash,
             source=source,
             pit_note=pit_note,
+            pit_from_ledger=pit_from_ledger,
+            knowledge_cutoff_explicit=knowledge_cutoff_explicit,
+            base_dir=base_dir,
         )
 
     bar_dicts = [row.as_dict() for row in pit_bars]
+    rounded_peak = _round_price(peak_close)
+    rounded_last = _round_price(last_close)
     hash_inputs = _evidence_hash_inputs(
         symbol=code,
         as_of=resolved_as_of,
@@ -433,6 +511,10 @@ def build_observation(
         generation_id=generation_id,
         generation_content_hash=generation_content_hash,
         source=source,
+        peak_close=rounded_peak,
+        peak_date=peak_date,
+        last_close=rounded_last,
+        pct_below_peak=pct,
     )
     evidence_hash = compute_evidence_hash(hash_inputs)
 
@@ -443,12 +525,12 @@ def build_observation(
         'peakKind': PEAK_KIND,
         'historyStart': resolved_history,
         'priceBasis': price_basis,
-        'peakClose': _round_price(peak_close),
+        'peakClose': rounded_peak,
         'peakDate': peak_date,
-        'lastClose': _round_price(last_close),
+        'lastClose': rounded_last,
         'pctBelowPeak': pct,
         'source': source,
-        'label': LABEL,
+        'label': LABEL_CONDITIONAL,
         'knowledgeCutoff': resolved_cutoff,
         'evidenceHash': evidence_hash,
         'hostApprovalHash': None,
@@ -463,7 +545,13 @@ def build_observation(
     if pit_note:
         observation['pitLimitation'] = pit_note
 
-    return observation
+    return _resolve_fact_binding(
+        observation,
+        pit_from_ledger=pit_from_ledger,
+        knowledge_cutoff_explicit=knowledge_cutoff_explicit,
+        bars_have_ingested_at=bars_have_ingested_at,
+        base_dir=base_dir,
+    )
 
 
 def _null_observation(
@@ -479,6 +567,9 @@ def _null_observation(
     generation_content_hash: str | None,
     source: str,
     pit_note: str | None = None,
+    pit_from_ledger: bool = False,
+    knowledge_cutoff_explicit: bool = False,
+    base_dir: str | os.PathLike[str] | None = None,
 ) -> dict[str, Any]:
     resolved_history = history_start
     if resolved_history:
@@ -511,7 +602,7 @@ def _null_observation(
         'lastClose': None,
         'pctBelowPeak': None,
         'source': source,
-        'label': LABEL,
+        'label': LABEL_CONDITIONAL,
         'knowledgeCutoff': knowledge_cutoff,
         'evidenceHash': compute_evidence_hash(hash_inputs),
         'hostApprovalHash': None,
@@ -526,7 +617,13 @@ def _null_observation(
         observation['generationContentHash'] = generation_content_hash
     if pit_note:
         observation['pitLimitation'] = pit_note
-    return observation
+    return _resolve_fact_binding(
+        observation,
+        pit_from_ledger=pit_from_ledger,
+        knowledge_cutoff_explicit=knowledge_cutoff_explicit,
+        bars_have_ingested_at=False,
+        base_dir=base_dir,
+    )
 
 
 def build_for_evidence_pack(
