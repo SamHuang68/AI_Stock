@@ -82,12 +82,17 @@ function main() {
       session: String(raw.session || m.session || ''),
     };
   }
-  function overlayTxfLiveOnLastBar(last, quote) {
+  function overlayTxfLiveOnLastBar(last, quote, opts) {
     const nq = normalizeTxfLiveQuote(quote);
     if (!last || !nq) return null;
     const px = nq.price;
-    const hi = Math.max(Number(last.high) || px, Number(nq.high) || px, px);
-    const lo = Math.min(Number(last.low) || px, Number(nq.low) || px, px);
+    const sessionHL = !(opts && opts.intraday);
+    const hi = sessionHL
+      ? Math.max(Number(last.high) || px, Number(nq.high) || px, px)
+      : Math.max(Number(last.high) || px, px);
+    const lo = sessionHL
+      ? Math.min(Number(last.low) || px, Number(nq.low) || px, px)
+      : Math.min(Number(last.low) || px, px);
     if (!(lo > 0) || hi < lo) return null;
     return { time: last.time, open: last.open, high: hi, low: lo, close: px, volume: last.volume };
   }
@@ -123,6 +128,12 @@ function main() {
   assert(overlayTxfLiveOnLastBar(dayBar, null) == null, 'skip empty quote');
   assert(overlayTxfLiveOnLastBar(dayBar, { price: 0 }) == null, 'skip invalid price');
 
+  const minuteBar = { time: 1757228580, open: 47390, high: 47400, low: 47340, close: 47350, volume: 20 };
+  const overMin = overlayTxfLiveOnLastBar(minuteBar, nightQuote, { intraday: true });
+  assert(overMin.close === 47333, '1m last close follows live');
+  assert(overMin.high === 47400, '1m overlay does not paint session high onto the last minute');
+  assert(overMin.low === 47333, '1m low expands to live price only');
+
   const fs = require('fs');
   const path = require('path');
   const polish = fs.readFileSync(path.join(__dirname, '..', 'src', 'ui', 'polish_v3.js'), 'utf8');
@@ -133,9 +144,25 @@ function main() {
     'TXF chart keeps polling /txf after load');
   assert(/function isTxfChartSym/.test(polish) && /s === '__TXF__' \|\| s === 'TXF'/.test(polish),
     'overlay recognizes TXF aliases');
+  assert(/opts && opts\.intraday/.test(polish) && /overlayTxfLiveOnLastBar\(last, q, \{ intraday: _intraday \}\)/.test(polish),
+    '1m TXF overlay does not dump session H/L onto the last minute');
   const html = fs.readFileSync(path.join(__dirname, '..', 'stock_terminal.html'), 'utf8');
   assert(/sym === 'TXF' \|\| sym === '__TXF'/.test(html) && /sym = '__TXF__'/.test(html),
     'loadSym canonicalizes TXF to __TXF__');
+  const loadStart = html.indexOf('async function loadSym');
+  assert(loadStart > 0, 'loadSym present');
+  const load = html.slice(loadStart, loadStart + 12000);
+  assert(!/yfsym === '\^TWOII' \|\| yfsym === '__TXF__'/.test(load),
+    'TXF 1天 must not share TWOII 1d→1y daily rewrite');
+  assert(/yfsym === '__TXF__' && S\.range !== '1d'/.test(load),
+    'TXF non-1d still forces FinMind daily interval');
+  assert(/const _isTxf = \(sym === '__TXF__'\)/.test(load)
+    && /IntradayVolumeV3 && !_isTxf/.test(load),
+    'TXF 1天 skips TW 09:00–13:30 cash-session filter');
+  assert(/_intradayDef && !_isTxf && \(!parsed/.test(load),
+    'TXF 1天 does not fall back to 5d daily candles');
+  assert(/_isTxfI/.test(html) && /13\.75 \* 3600/.test(html),
+    'TXF 1天 X-axis uses 13:45 / night 05:00 not cash 13:30');
 
   // applyTxfLiveToChart：標題現價／昨收與最後一根 close 跟大盤列同一份夜盤
   (function () {

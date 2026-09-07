@@ -423,12 +423,18 @@ function isTxfChartSym(sym) {
   return s === '__TXF__' || s === 'TXF' || s === '__TXF';
 }
 
-function overlayTxfLiveOnLastBar(last, quote) {
+function overlayTxfLiveOnLastBar(last, quote, opts) {
   const nq = normalizeTxfLiveQuote(quote) || (quote && Number(quote.price) > 0 ? quote : null);
   if (!last || !nq) return null;
   const px = nq.price;
-  const hi = Math.max(Number(last.high) || px, Number(nq.high) || px, px);
-  const lo = Math.min(Number(last.low) || px, Number(nq.low) || px, px);
+  // 1 分 K：只改當根收盤／高低；日 K 才把整段 session H/L 疊上最後一根。
+  const sessionHL = !(opts && opts.intraday);
+  const hi = sessionHL
+    ? Math.max(Number(last.high) || px, Number(nq.high) || px, px)
+    : Math.max(Number(last.high) || px, px);
+  const lo = sessionHL
+    ? Math.min(Number(last.low) || px, Number(nq.low) || px, px)
+    : Math.min(Number(last.low) || px, px);
   if (!(lo > 0) || hi < lo) return null;
   return {
     time: last.time,
@@ -447,7 +453,10 @@ function applyTxfLiveToChart(raw) {
   const cs = S.data && S.data.candles;
   if (!cs || !cs.length) return false;
   const last = cs[cs.length - 1];
-  const bar = overlayTxfLiveOnLastBar(last, q);
+  const _rdef = (typeof currentRangeDef === 'function') ? currentRangeDef() : null;
+  const _iv = _rdef && _rdef.interval;
+  const _intraday = (_iv && _iv !== '1d' && _iv !== '1wk') || (typeof S !== 'undefined' && S.range === '1d');
+  const bar = overlayTxfLiveOnLastBar(last, q, { intraday: _intraday });
   if (!bar) return false;
   last.open = bar.open;
   last.high = bar.high;

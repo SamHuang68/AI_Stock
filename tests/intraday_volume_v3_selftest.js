@@ -147,6 +147,8 @@ ok(/backfillClosingAuction/.test(shell) && /backfillClosingAuction/.test(multi),
   'all intraday chart surfaces share the same fail-closed auction gate');
 ok(/filterTwRegularSession/.test(shell) && /filterTwRegularSession/.test(multi),
   'main and multi-chart filter TW intraday history through one regular-session contract');
+ok(/IntradayVolumeV3 && !_isTxf/.test(shell) && /IntradayVolumeV3 && !_isTxf/.test(multi),
+  'TXF 1-day keeps night minutes outside the cash 09:00-13:30 filter');
 ok(/twRegularSessionBucket\(sampleTimestampMs, off\)/.test(realtime) &&
    !/Math\.floor\(Date\.now\(\) \/ 1000 \/ 60\) \* 60 \+ off/.test(realtime),
   'realtime bars use the exchange timestamp rather than browser receipt time');
