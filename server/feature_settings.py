@@ -15,6 +15,7 @@ from typing import Any
 
 
 FEATURE_KEYS = (
+    'ohlcLedger',
     'shadowOvernightIntraday',
     'shadowEarlyWarning',
     'shadowConsensusAttention',
@@ -26,6 +27,7 @@ FEATURE_KEYS = (
 )
 
 ENV_KEYS = {
+    'ohlcLedger': 'ST_OHLC_LEDGER',
     'shadowOvernightIntraday': 'ST_SHADOW_OVERNIGHT_INTRADAY',
     'shadowEarlyWarning': 'ST_SHADOW_EARLY_WARNING',
     'shadowConsensusAttention': 'ST_SHADOW_CONSENSUS_ATTENTION',
@@ -77,7 +79,12 @@ def feature_flags(base_dir: str | Path | None = None) -> dict[str, bool]:
             out[key] = bool(local[key])
         elif _truthy(os.environ.get(env_name)):
             out[key] = True
+        elif key == 'ohlcLedger' and os.environ.get(env_name) is not None:
+            out[key] = False
         elif master:
+            out[key] = True
+        elif key == 'ohlcLedger':
+            # Infrastructure ledger defaults ON; disable explicitly via env/local file.
             out[key] = True
         else:
             out[key] = False
@@ -186,6 +193,7 @@ def public_payload(base_dir: str | Path | None = None) -> dict[str, Any]:
             'masterEnv': MASTER_ENV,
             'localFile': 'data/feature_flags.local.json',
             'example': {
+                'ohlcLedger': True,
                 'shadowOvernightIntraday': True,
                 'shadowEarlyWarning': True,
                 'shadowConsensusAttention': True,
