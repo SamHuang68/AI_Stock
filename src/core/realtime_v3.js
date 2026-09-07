@@ -205,7 +205,8 @@
         }
         // 區間最高：即時價創新高時左欄同步刷新（避開右側量價浮動鈕遮蔽）
         if (priceRealtime && typeof updateHeaderHigh === 'function' && S.data && S.data.candles) {
-          updateHeaderHigh(S.data.candles, S.data.rangeChgLbl, q.price);
+          updateHeaderHigh(S.data.candles, S.data.rangeChgLbl, q.price, q.high);
+          if (q.high > 0) S.data.sessionDayHigh = q.high;
         }
         // 右側 STATS 面板即時(在 STATS 分頁才有這些 id;否則 guard 跳過)— 解「右側顯示 Yahoo 延遲值」
         function setRp(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; }
