@@ -418,6 +418,11 @@ function normalizeTxfLiveQuote(raw) {
   };
 }
 
+function isTxfChartSym(sym) {
+  const s = String(sym || '').toUpperCase();
+  return s === '__TXF__' || s === 'TXF' || s === '__TXF';
+}
+
 function overlayTxfLiveOnLastBar(last, quote) {
   const nq = normalizeTxfLiveQuote(quote) || (quote && Number(quote.price) > 0 ? quote : null);
   if (!last || !nq) return null;
@@ -436,7 +441,7 @@ function overlayTxfLiveOnLastBar(last, quote) {
 }
 
 function applyTxfLiveToChart(raw) {
-  if (typeof S === 'undefined' || !S || S.sym !== '__TXF__') return false;
+  if (typeof S === 'undefined' || !S || !isTxfChartSym(S.sym)) return false;
   const q = normalizeTxfLiveQuote(raw);
   if (!q) return false;
   const cs = S.data && S.data.candles;
@@ -487,6 +492,15 @@ function applyTxfLiveToChart(raw) {
   if (typeof updateHeaderHigh === 'function') {
     updateHeaderHigh(cs, S.data.rangeChgLbl, q.price);
   }
+  (function syncStats() {
+    function setRp(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
+    setRp('rp-PRICE', q.price.toFixed(2) + ' TWD');
+    if (q.prevClose > 0) {
+      const dd = q.price - q.prevClose;
+      const ddp = dd / q.prevClose * 100;
+      setRp('rp-CHANGE', (dd >= 0 ? '+' : '') + dd.toFixed(2) + ' (' + (ddp >= 0 ? '+' : '') + ddp.toFixed(2) + '%)');
+    }
+  })();
   if (typeof updateWlPrice === 'function' && q.prevClose > 0) {
     const pct = (q.price - q.prevClose) / q.prevClose * 100;
     try { updateWlPrice('__TXF__', q.price, pct); } catch (e) {}
@@ -528,6 +542,7 @@ function applyTxfLiveToChart(raw) {
 }
 
 window.normalizeTxfLiveQuote = normalizeTxfLiveQuote;
+window.isTxfChartSym = isTxfChartSym;
 window.overlayTxfLiveOnLastBar = overlayTxfLiveOnLastBar;
 window.applyTxfLiveToChart = applyTxfLiveToChart;
 
@@ -536,7 +551,7 @@ window.addEventListener('marketData', function (ev) {
   if (!quotes) return;
   ['^TWII', '^TWOII', '__TXF__'].forEach(sym => renderCanonicalMarketQuote(sym, quotes[sym]));
   const active = window.S && S.sym;
-  if (active === '__TXF__') {
+  if (isTxfChartSym(active)) {
     applyTxfLiveToChart(quotes.__TXF__);
     return;
   }
@@ -942,7 +957,7 @@ function applyMarketColorClass(mkt) {
     const ref = (S.data.yesterdayClose != null && S.data.yesterdayClose > 0)
       ? S.data.yesterdayClose
       : (prev ? prev.close : null);
-    if (S.sym === '__TXF__') {
+    if (isTxfChartSym(S.sym)) {
       const store = window.MarketData && MarketData.get && MarketData.get();
       const live = store && store.quotes && store.quotes.__TXF__;
       if (live && applyTxfLiveToChart(live)) return;
@@ -1011,7 +1026,7 @@ function applyMarketColorClass(mkt) {
 (function patchTxfLiveChart() {
   let inflight = false;
   async function pullTxfLive() {
-    if (typeof S === 'undefined' || !S || S.sym !== '__TXF__') return;
+    if (typeof S === 'undefined' || !S || !isTxfChartSym(S.sym)) return;
     if (document.hidden) return;
     if (inflight) return;
     inflight = true;
@@ -1028,7 +1043,7 @@ function applyMarketColorClass(mkt) {
     finally { inflight = false; }
   }
   window.addEventListener('symLoaded', () => {
-    if (S && S.sym === '__TXF__') pullTxfLive();
+    if (S && isTxfChartSym(S.sym)) pullTxfLive();
   });
   setInterval(pullTxfLive, 5000);
 })();

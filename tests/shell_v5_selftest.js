@@ -962,11 +962,13 @@ ok(/台指期近月/.test(pl) && /__TXF__/.test(pl) && /TAIFEX MIS/.test(pl) &&
   'pulse TXF strip labeled 近月+sources; OHLC spark identifies ^TWII without a redundant header note');
 
 ok(/function applyTxfLiveToChart/.test(polish) && /overlayTxfLiveOnLastBar/.test(polish) &&
+  /function isTxfChartSym/.test(polish) &&
   /applyTxfLiveToChart\(quotes\.__TXF__\)/.test(polish) &&
   /applyTxfLiveToChart\(d\)/.test(polish) &&
   /S\.data\.yesterdayClose = q\.prevClose/.test(polish) &&
   /fetch\(base \+ '\/txf'/.test(polish) && /setInterval\(pullTxfLive, 5000\)/.test(polish) &&
-  /await refreshTxfCell\(\)/.test(polish),
+  /await refreshTxfCell\(\)/.test(polish) &&
+  /sym === 'TXF' \|\| sym === '__TXF'/.test(sourceHtml),
   'TXF chart last bar + header overlay the same /txf quote as the market bar after day close');
 
 ok(/AI科技外溢/.test(hub) && /factorScope/.test(hub) && /aiSpill/.test(hub) &&

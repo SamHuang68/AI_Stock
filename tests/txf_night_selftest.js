@@ -131,8 +131,11 @@ function main() {
   assert(/applyTxfLiveToChart\(quotes\.__TXF__\)/.test(polish), 'marketData overlays TXF chart');
   assert(/fetch\(base \+ '\/txf'/.test(polish) && /setInterval\(pullTxfLive, 5000\)/.test(polish),
     'TXF chart keeps polling /txf after load');
-  assert(!/\/txf-live/.test(polish) && !/\/txf_night_chart/.test(polish),
-    'no parallel TXF quote pipeline');
+  assert(/function isTxfChartSym/.test(polish) && /s === '__TXF__' \|\| s === 'TXF'/.test(polish),
+    'overlay recognizes TXF aliases');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'stock_terminal.html'), 'utf8');
+  assert(/sym === 'TXF' \|\| sym === '__TXF'/.test(html) && /sym = '__TXF__'/.test(html),
+    'loadSym canonicalizes TXF to __TXF__');
 
   // applyTxfLiveToChart：標題現價／昨收與最後一根 close 跟大盤列同一份夜盤
   (function () {
@@ -151,7 +154,8 @@ function main() {
       }
       throw new Error('unterminated fn');
     }
-    const code = sliceFn(normStart) + '\n' + sliceFn(polish.indexOf('function overlayTxfLiveOnLastBar'))
+    const code = sliceFn(normStart) + '\n' + sliceFn(polish.indexOf('function isTxfChartSym'))
+      + '\n' + sliceFn(polish.indexOf('function overlayTxfLiveOnLastBar'))
       + '\n' + sliceFn(start);
     const header = { price: null, chg: null };
     const updates = [];
@@ -181,6 +185,10 @@ function main() {
     assert(header.price === 47333 && header.prev === 47462, 'header matches mkt-bar night quote');
     assert(header.ci === '47333.00', 'ci-price follows night');
     assert(updates.length === 1 && updates[0].close === 47333, 'series.update night close');
+    ctx.S.sym = 'TXF';
+    ctx.S.data.candles[0].close = 47470;
+    require('vm').runInNewContext(code + '\napplyTxfLiveToChart(' + JSON.stringify(nightQuote) + ');', ctx);
+    assert(ctx.S.data.candles[0].close === 47333, 'TXF alias also overlays night close');
   })();
 
   // 行動預估：台指期夜盤優先於美股連動
