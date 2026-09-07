@@ -49,10 +49,11 @@ class PeakObservationRoutesMixin:
 
         bars = _load_symbol_bars(symbol)
         observation = po.build_for_evidence_pack(symbol, bars=bars, base_dir=base_dir)
+        epistemic = (observation or {}).get('label') or po.LABEL_CONDITIONAL
         payload = {
             'ok': True,
             'enabled': True,
-            'epistemic': po.EPISTEMIC,
+            'epistemic': epistemic,
             'observation': observation,
         }
         self._ok(json.dumps(payload, ensure_ascii=False).encode())
