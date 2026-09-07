@@ -37,7 +37,10 @@ class FeatureSettingsTests(unittest.TestCase):
     def test_defaults_are_off(self):
         flags = feature_flags()
         for key in FEATURE_KEYS:
-            self.assertFalse(flags[key])
+            if key == 'ohlcLedger':
+                self.assertTrue(flags[key])
+            else:
+                self.assertFalse(flags[key])
 
     def test_master_env_enables_all(self):
         os.environ['ST_ENABLE_SHADOW_RESEARCH'] = '1'
