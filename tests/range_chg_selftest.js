@@ -40,14 +40,34 @@ function patchTodayDailyBarWithLive(candles, meta, interval) {
   const last = candles[candles.length - 1];
   const rmp = _posPrice(meta.regularMarketPrice);
   const rmt = meta.regularMarketTime;
+  const rdh = _posPrice(meta.regularMarketDayHigh);
+  const rdl = _posPrice(meta.regularMarketDayLow);
   if (!rmp || !rmt || !last || !last.time) return null;
   if (Math.abs(rmt - last.time) > 20 * 3600) return null;
-  if (Math.abs(last.close - rmp) < 1e-9) return rmp;
+  const closeSame = Math.abs(last.close - rmp) < 1e-9;
+  const highOk = !rdh || (last.high != null && last.high >= rdh - 1e-9);
+  const lowOk = !rdl || (last.low != null && last.low <= rdl + 1e-9);
+  if (closeSame && highOk && lowOk) return rmp;
   last.close = rmp;
-  if (rmp > (last.high || rmp)) last.high = rmp;
-  if (rmp < (last.low || rmp)) last.low = rmp;
+  if (rdh != null) last.high = Math.max(rdh, rmp, last.high || rmp);
+  else if (rmp > (last.high || rmp)) last.high = rmp;
+  if (rdl != null) last.low = Math.min(rdl, rmp, last.low ?? rmp);
+  else if (rmp < (last.low || rmp)) last.low = rmp;
   last._livePatched = true;
   return rmp;
+}
+
+/** 與 stock_terminal.html updateHeaderHigh 同口徑（無 DOM） */
+function pickHeaderHigh(candles, livePrice, sessionDayHigh) {
+  if (!candles || !candles.length) return null;
+  let mx = -Infinity;
+  for (let i = 0; i < candles.length; i++) {
+    const h = candles[i] && candles[i].high;
+    if (h != null && isFinite(h) && h > mx) mx = h;
+  }
+  if (livePrice != null && isFinite(livePrice) && livePrice > mx) mx = livePrice;
+  if (sessionDayHigh != null && isFinite(sessionDayHigh) && sessionDayHigh > mx) mx = sessionDayHigh;
+  return (isFinite(mx) && mx > 0) ? mx : null;
 }
 
 function pickRangeBase({ candles, trim, chartPreviousClose }) {
@@ -150,6 +170,37 @@ function assert(cond, msg) {
   const patched = patchTodayDailyBarWithLive(candles, { regularMarketPrice: 2455, regularMarketTime: t }, '1d');
   assert(patched === 2455, 'patch 回傳對齊後 close');
   assert(candles[1].close === 2455 && candles[1]._livePatched, '最後一根 close 已對齊 RMP');
+}
+
+// Case 9: 00631L — quote last=37.84、dayHigh=37.99；hero=收盤，今日最高可高於收盤（正常 OHLC）
+{
+  const t = 1700000000;
+  const hero = resolveCanonicalHeroPrice({
+    barClose: 37.80, quotePrice: 37.84,
+    regularMarketPrice: 37.84, regularMarketTime: t, lastBarTime: t, isDaily: true,
+  });
+  const dayHigh = 37.99;
+  const candles = [{ time: t, open: 36.70, high: 37.50, low: 36.50, close: 37.80 }];
+  patchTodayDailyBarWithLive(candles, {
+    regularMarketPrice: 37.84, regularMarketDayHigh: dayHigh,
+    regularMarketDayLow: 36.50, regularMarketTime: t,
+  }, '1d');
+  const hdrHigh = pickHeaderHigh(candles, hero, dayHigh);
+  assert(hero === 37.84, '00631L hero 收盤 = quote last');
+  assert(hdrHigh === 37.99, '00631L 今日最高 = dayHigh（可 > 收盤）');
+  assert(hdrHigh >= hero, 'dayHigh >= hero（不要求相等）');
+}
+
+// Case 10: stale bar high 低於 quote dayHigh → patch 不得把 high 壓成 close
+{
+  const t = 1700000000;
+  const candles = [{ time: t, open: 36.70, high: 37.50, low: 36.50, close: 37.50 }];
+  patchTodayDailyBarWithLive(candles, {
+    regularMarketPrice: 37.84, regularMarketDayHigh: 37.99,
+    regularMarketTime: t,
+  }, '1d');
+  assert(candles[0].close === 37.84, 'patch close 對齊 quote');
+  assert(candles[0].high === 37.99, 'patch high 取 regularMarketDayHigh，非壓成 close');
 }
 
 if (failed) { console.error('\n' + failed + ' failed'); process.exit(1); }

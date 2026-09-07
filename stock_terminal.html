@@ -628,7 +628,8 @@ function resolveCanonicalHeroPrice(opts) {
 }
 
 /**
- * 日線最後一根若為當日，把 close/high/low 對齊 regularMarketPrice（供圖表軸標籤）。
+ * 日線最後一根若為當日，把 close/high/low 對齊 quote/meta 當日快照（供圖表軸標籤）。
+ * close ← regularMarketPrice；high/low 優先 regularMarketDayHigh/Low（勿把 high 壓成 close）。
  */
 function patchTodayDailyBarWithLive(candles, meta, interval) {
   if (!candles || !candles.length || !meta) return null;
@@ -637,21 +638,30 @@ function patchTodayDailyBarWithLive(candles, meta, interval) {
   const last = candles[candles.length - 1];
   const rmp = _posPrice(meta.regularMarketPrice);
   const rmt = meta.regularMarketTime;
+  const rdh = _posPrice(meta.regularMarketDayHigh);
+  const rdl = _posPrice(meta.regularMarketDayLow);
   if (!rmp || !rmt || !last || !last.time) return null;
   if (Math.abs(rmt - last.time) > 20 * 3600) return null;
-  if (Math.abs(last.close - rmp) < 1e-9) return rmp;
+  const closeSame = Math.abs(last.close - rmp) < 1e-9;
+  const highOk = !rdh || (last.high != null && last.high >= rdh - 1e-9);
+  const lowOk = !rdl || (last.low != null && last.low <= rdl + 1e-9);
+  if (closeSame && highOk && lowOk) return rmp;
   last.close = rmp;
-  if (rmp > (last.high || rmp)) last.high = rmp;
-  if (rmp < (last.low || rmp)) last.low = rmp;
+  if (rdh != null) last.high = Math.max(rdh, rmp, last.high || rmp);
+  else if (rmp > (last.high || rmp)) last.high = rmp;
+  if (rdl != null) last.low = Math.min(rdl, rmp, last.low ?? rmp);
+  else if (rmp < (last.low || rmp)) last.low = rmp;
   last._livePatched = true;
   return rmp;
 }
 
 /**
- * 更新頂部「區間最高」：取目前載入 K 線 high 的最大值。
- * 放在左欄 #ci-high，避開圖上右側量價浮動鈕／圖例遮蔽。
+ * 更新頂部最高價（#ci-high）：
+ * - 1天分K：「今日最高」= 當日盤中 high（可高於收盤／現價，正常 OHLC）
+ * - 其他區間：「區間最高」= 所載 K 線區間內 high 最大值
+ * sessionDayHigh：quote/meta 的 regularMarketDayHigh，與 hero 同一快照。
  */
-function updateHeaderHigh(candles, rangeLbl, livePrice) {
+function updateHeaderHigh(candles, rangeLbl, livePrice, sessionDayHigh) {
   const el = document.getElementById('ci-high');
   if (!el) return null;
   if (!candles || !candles.length) {
@@ -665,6 +675,7 @@ function updateHeaderHigh(candles, rangeLbl, livePrice) {
     if (h != null && isFinite(h) && h > mx) mx = h;
   }
   if (livePrice != null && isFinite(livePrice) && livePrice > mx) mx = livePrice;
+  if (sessionDayHigh != null && isFinite(sessionDayHigh) && sessionDayHigh > mx) mx = sessionDayHigh;
   if (!isFinite(mx) || mx <= 0) {
     el.style.display = 'none';
     el.textContent = '';
@@ -672,8 +683,11 @@ function updateHeaderHigh(candles, rangeLbl, livePrice) {
   }
   const lbl = rangeLbl || ((typeof S !== 'undefined' && S.data && S.data.rangeChgLbl) ? S.data.rangeChgLbl : '')
     || ((typeof S !== 'undefined' && S.range) ? S.range : '區間');
+  const isDayRange = (typeof S !== 'undefined' && S.range === '1d');
   const unit = (typeof S !== 'undefined' && S.sym === '__MARGIN_RATIO__') ? '%' : '';
-  el.innerHTML = `最高 <b>${mx.toFixed(2)}${unit}</b><span class="ci-lbl">· ${lbl}</span>`;
+  const prefix = isDayRange ? '今日最高' : '區間最高';
+  const lblHtml = isDayRange ? '' : `<span class="ci-lbl">· ${lbl}</span>`;
+  el.innerHTML = `${prefix} <b>${mx.toFixed(2)}${unit}</b>${lblHtml}`;
   el.style.display = '';
   if (typeof S !== 'undefined' && S.data) S.data.periodHigh = mx;
   return mx;
@@ -1044,6 +1058,8 @@ async function loadSym(sym, mkt, silent) {
     isDaily: !_isIntraday,
   }) ?? last.close;
   parsed.heroPrice = heroPrice;
+  parsed.sessionDayHigh = _posPrice(_quoteSnap && _quoteSnap.high)
+    ?? _posPrice(parsed.meta && parsed.meta.regularMarketDayHigh);
   // 昨收統一用 parsed.yesterdayClose(intraday=chartPreviousClose；日線=meta/quote 權威昨收)，
   // 缺才退回前一根 K close。修「日線遇 null 缺口抓到更舊一根→漲幅亂跳」。
   const _prevRef = (parsed.yesterdayClose != null && parsed.yesterdayClose > 0)
@@ -1054,7 +1070,7 @@ async function loadSym(sym, mkt, silent) {
   document.getElementById('ci-price').textContent = heroPrice.toFixed(2) + (sym === '__MARGIN_RATIO__' ? '%' : '');
   // 頂部：日漲跌(昨收) + 區間漲跌(所選時間) 同時顯示；區間最高常駐左欄
   updateHeaderChg(heroPrice, _prevRef, parsed.rangeBase, parsed.rangeChgLbl, mkt, sym);
-  updateHeaderHigh(parsed.candles, parsed.rangeChgLbl, heroPrice);
+  updateHeaderHigh(parsed.candles, parsed.rangeChgLbl, heroPrice, parsed.sessionDayHigh);
   document.getElementById('ci-name').textContent = (sym === '__MARGIN_RATIO__')
     ? '大盤融資維持率'
     : (sym === '__TXF__')

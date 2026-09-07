@@ -792,7 +792,7 @@ function applyMarketColorClass(mkt) {
     if (typeof updateHeaderChg === 'function') {
       updateHeaderChg(hero, ref, S.data.rangeBase, S.data.rangeChgLbl, S.mkt, S.sym);
       if (typeof updateHeaderHigh === 'function') {
-        updateHeaderHigh(S.data.candles, S.data.rangeChgLbl, hero);
+        updateHeaderHigh(S.data.candles, S.data.rangeChgLbl, hero, S.data.sessionDayHigh);
       }
       return;
     }
