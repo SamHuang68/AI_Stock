@@ -785,6 +785,21 @@ def build_evidence_pack(symbol: str, *, include: Dict[str, bool],
     except Exception:
         pass
 
+    try:
+        from feature_settings import is_enabled as _flag_enabled
+        if _flag_enabled('shadowPeakObservation'):
+            import peak_observation
+            peak_obs = peak_observation.build_for_evidence_pack(
+                code,
+                bars=bars,
+                now=now,
+            )
+            if peak_obs:
+                pack['peakObservation'] = peak_obs
+                as_of['peakObservation'] = peak_obs.get('asOf')
+    except Exception:
+        pass
+
     return pack
 
 
