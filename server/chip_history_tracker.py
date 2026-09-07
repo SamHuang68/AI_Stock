@@ -76,6 +76,13 @@ def parse_and_save(day):
     with open(fn, 'w', encoding='utf-8') as f:
         json.dump(out, f, ensure_ascii=False)
     print(f'[chip-tracker] {day}: saved {len(out)} stocks -> {fn}')
+    try:
+        from touxin_ledger import ingest_chip_history_file
+        n_ledger = ingest_chip_history_file(fn, source='chip_history/T86')
+        if n_ledger:
+            print(f'[chip-tracker] {day}: appended {n_ledger} touxin ledger rows')
+    except Exception as exc:
+        print(f'[chip-tracker] touxin ledger append skipped: {exc}')
     return len(out)
 
 
