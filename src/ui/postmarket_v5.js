@@ -203,6 +203,31 @@
     return '';
   }
 
+  function peakObservation100dSection(symbol) {
+    if (window.PeakObservation100dV5 && PeakObservation100dV5.isEnabled &&
+      !PeakObservation100dV5.isEnabled()) {
+      return '';
+    }
+    if (window.FeatureFlags && FeatureFlags.isEnabled &&
+      !FeatureFlags.isEnabled('shadowPeak100d')) {
+      return '';
+    }
+    return '<div class="pmd-pk100" id="pmd-pk100-' + esc(symbol) + '" data-pk100-symbol="' + esc(symbol) + '"></div>';
+  }
+
+  function mountPeakObservation100dCards(report) {
+    if (!window.PeakObservation100dV5 || !PeakObservation100dV5.isEnabled ||
+      !PeakObservation100dV5.isEnabled()) {
+      return;
+    }
+    (report.symbols || []).forEach(function (row) {
+      var host = $('pmd-pk100-' + row.symbol);
+      if (host && PeakObservation100dV5.mountInto) {
+        PeakObservation100dV5.mountInto(host, row.symbol);
+      }
+    });
+  }
+
   function peakObservationSection(symbol) {
     if (window.PeakObservationV5 && PeakObservationV5.isEnabled &&
       !PeakObservationV5.isEnabled()) {
@@ -295,12 +320,14 @@
       if (row.notes && row.notes.length) {
         html += '<div class="pmd-note">' + esc(row.notes.join('；')) + '</div>';
       }
-      html += conditionalSection(row.symbol) + peakObservationSection(row.symbol) + '</div>';
+      html += conditionalSection(row.symbol) + peakObservationSection(row.symbol) +
+        peakObservation100dSection(row.symbol) + '</div>';
     });
     out.innerHTML = html || '<div class="pmd-note">回應內無 symbols。</div>';
     bindValidationCheckboxes(report);
     mountConditionalCards(report);
     mountPeakObservationCards(report);
+    mountPeakObservation100dCards(report);
     renderUsage(report);
   }
 

@@ -37,7 +37,7 @@ class FeatureSettingsTests(unittest.TestCase):
     def test_defaults_are_off(self):
         flags = feature_flags()
         for key in FEATURE_KEYS:
-            if key in ('ohlcLedger', 'shadowPeakObservation'):
+            if key in ('ohlcLedger', 'shadowPeakObservation', 'shadowPeak100d'):
                 self.assertTrue(flags[key])
             else:
                 self.assertFalse(flags[key])
