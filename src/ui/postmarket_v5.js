@@ -253,6 +253,31 @@
     });
   }
 
+  function touxin5dSection(symbol) {
+    if (window.Touxin5dV5 && Touxin5dV5.isEnabled &&
+      !Touxin5dV5.isEnabled()) {
+      return '';
+    }
+    if (window.FeatureFlags && FeatureFlags.isEnabled &&
+      !FeatureFlags.isEnabled('shadowTouxin5d')) {
+      return '';
+    }
+    return '<div class="pmd-tx" id="pmd-tx-' + esc(symbol) + '" data-tx-symbol="' + esc(symbol) + '"></div>';
+  }
+
+  function mountTouxin5dCards(report) {
+    if (!window.Touxin5dV5 || !Touxin5dV5.isEnabled ||
+      !Touxin5dV5.isEnabled()) {
+      return;
+    }
+    (report.symbols || []).forEach(function (row) {
+      var host = $('pmd-tx-' + row.symbol);
+      if (host && Touxin5dV5.mountInto) {
+        Touxin5dV5.mountInto(host, row.symbol);
+      }
+    });
+  }
+
   function conditionalSection(symbol) {
     if (window.ConditionalExpectationV5 && ConditionalExpectationV5.isEnabled &&
       !ConditionalExpectationV5.isEnabled()) {
@@ -321,13 +346,14 @@
         html += '<div class="pmd-note">' + esc(row.notes.join('；')) + '</div>';
       }
       html += conditionalSection(row.symbol) + peakObservationSection(row.symbol) +
-        peakObservation100dSection(row.symbol) + '</div>';
+        peakObservation100dSection(row.symbol) + touxin5dSection(row.symbol) + '</div>';
     });
     out.innerHTML = html || '<div class="pmd-note">回應內無 symbols。</div>';
     bindValidationCheckboxes(report);
     mountConditionalCards(report);
     mountPeakObservationCards(report);
     mountPeakObservation100dCards(report);
+    mountTouxin5dCards(report);
     renderUsage(report);
   }
 

@@ -1273,6 +1273,7 @@
         ['shadowConditionalExpectation', '條件期望研究（Conditional Expectation）'],
         ['shadowPeakObservation', '距離區間高點觀察（st-peak-v0.1 · CONDITIONAL）'],
         ['shadowPeak100d', '100 交易日距峰值觀察（st-peak-100d-v0 · CONDITIONAL）'],
+        ['shadowTouxin5d', '投信 5 日買超％／名次（st-touxin-5d-v0 · CONDITIONAL）'],
         ['shadowMultifactor', '多因子橫截面排名（Shadow Multifactor）'],
         ['shadowMlExperiment', 'ML 實驗 stub（Shadow ML Experiment）']
       ].forEach(function (pair) {

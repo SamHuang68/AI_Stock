@@ -51,6 +51,7 @@ from etf_routes import EtfRoutesMixin
 from conditional_expectation_routes import ConditionalExpectationRoutesMixin
 from peak_observation_routes import PeakObservationRoutesMixin
 from peak_observation_100d_routes import PeakObservation100dRoutesMixin
+from touxin_5d_routes import Touxin5dRoutesMixin
 from shadow_multifactor_routes import ShadowMultifactorRoutesMixin
 from decision_routes import DecisionRoutesMixin
 from features_routes import FeaturesRoutesMixin
@@ -2301,7 +2302,7 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
     request_queue_size = 64
 
-class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, ConditionalExpectationRoutesMixin, PeakObservationRoutesMixin, PeakObservation100dRoutesMixin, ShadowMultifactorRoutesMixin, OptionsRoutesMixin, PulseRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
+class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, ConditionalExpectationRoutesMixin, PeakObservationRoutesMixin, PeakObservation100dRoutesMixin, Touxin5dRoutesMixin, ShadowMultifactorRoutesMixin, OptionsRoutesMixin, PulseRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     _BASE = _BASE
     protocol_version = 'HTTP/1.1'   # enables keep-alive
 
@@ -2412,6 +2413,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_peak_observation()
         elif p == '/research/peak-observation-100d' or p.startswith('/research/peak-observation-100d?'):
             self._handle_peak_observation_100d()
+        elif p == '/research/touxin-5d-netbuy' or p.startswith('/research/touxin-5d-netbuy?'):
+            self._handle_touxin_5d_netbuy()
         elif p == '/research/shadow-multifactor' or p.startswith('/research/shadow-multifactor?'):
             self._handle_shadow_multifactor()
         elif p == '/research/promotion-gate' or p.startswith('/research/promotion-gate?'):
