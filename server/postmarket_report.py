@@ -800,6 +800,20 @@ def build_evidence_pack(symbol: str, *, include: Dict[str, bool],
     except Exception:
         pass
 
+    try:
+        from feature_settings import is_enabled as _flag_enabled
+        if _flag_enabled('shadowTouxin5d'):
+            import touxin_5d
+            touxin_obs = touxin_5d.build_for_evidence_pack(
+                code,
+                now=now,
+            )
+            if touxin_obs:
+                pack['touxin5dNetBuy'] = touxin_obs
+                as_of['touxin5dNetBuy'] = touxin_obs.get('asOf')
+    except Exception:
+        pass
+
     return pack
 
 

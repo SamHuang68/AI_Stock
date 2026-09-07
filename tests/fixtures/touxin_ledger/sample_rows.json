@@ -1,0 +1,122 @@
+[
+  {
+    "symbol": "2330",
+    "session_date": "2026-01-02",
+    "trust_net_shares": 12000,
+    "volume_shares": 5000000,
+    "source": "fixture/test",
+    "ingested_at": "2026-01-02T13:30:00+08:00"
+  },
+  {
+    "symbol": "2330",
+    "session_date": "2026-01-03",
+    "trust_net_shares": 8000,
+    "volume_shares": 4800000,
+    "source": "fixture/test",
+    "ingested_at": "2026-01-03T13:30:00+08:00"
+  },
+  {
+    "symbol": "2330",
+    "session_date": "2026-01-06",
+    "trust_net_shares": 15000,
+    "volume_shares": 5200000,
+    "source": "fixture/test",
+    "ingested_at": "2026-01-06T13:30:00+08:00"
+  },
+  {
+    "symbol": "2330",
+    "session_date": "2026-01-07",
+    "trust_net_shares": -3000,
+    "volume_shares": 5100000,
+    "source": "fixture/test",
+    "ingested_at": "2026-01-07T13:30:00+08:00"
+  },
+  {
+    "symbol": "2330",
+    "session_date": "2026-01-08",
+    "trust_net_shares": 20000,
+    "volume_shares": 5300000,
+    "source": "fixture/test",
+    "ingested_at": "2026-01-08T13:30:00+08:00"
+  },
+  {
+    "symbol": "2317",
+    "session_date": "2026-01-02",
+    "trust_net_shares": 5000,
+    "volume_shares": 3000000,
+    "source": "fixture/test",
+    "ingested_at": "2026-01-02T13:30:00+08:00"
+  },
+  {
+    "symbol": "2317",
+    "session_date": "2026-01-03",
+    "trust_net_shares": 4000,
+    "volume_shares": 2900000,
+    "source": "fixture/test",
+    "ingested_at": "2026-01-03T13:30:00+08:00"
+  },
+  {
+    "symbol": "2317",
+    "session_date": "2026-01-06",
+    "trust_net_shares": 6000,
+    "volume_shares": 3100000,
+    "source": "fixture/test",
+    "ingested_at": "2026-01-06T13:30:00+08:00"
+  },
+  {
+    "symbol": "2317",
+    "session_date": "2026-01-07",
+    "trust_net_shares": 7000,
+    "volume_shares": 3050000,
+    "source": "fixture/test",
+    "ingested_at": "2026-01-07T13:30:00+08:00"
+  },
+  {
+    "symbol": "2317",
+    "session_date": "2026-01-08",
+    "trust_net_shares": 8000,
+    "volume_shares": 3200000,
+    "source": "fixture/test",
+    "ingested_at": "2026-01-08T13:30:00+08:00"
+  },
+  {
+    "symbol": "2454",
+    "session_date": "2026-01-02",
+    "trust_net_shares": 1000,
+    "volume_shares": 800000,
+    "source": "fixture/test",
+    "ingested_at": "2026-01-02T13:30:00+08:00"
+  },
+  {
+    "symbol": "2454",
+    "session_date": "2026-01-03",
+    "trust_net_shares": 2000,
+    "volume_shares": 850000,
+    "source": "fixture/test",
+    "ingested_at": "2026-01-03T13:30:00+08:00"
+  },
+  {
+    "symbol": "2454",
+    "session_date": "2026-01-06",
+    "trust_net_shares": 3000,
+    "volume_shares": 900000,
+    "source": "fixture/test",
+    "ingested_at": "2026-01-06T13:30:00+08:00"
+  },
+  {
+    "symbol": "2454",
+    "session_date": "2026-01-07",
+    "trust_net_shares": 4000,
+    "volume_shares": 920000,
+    "source": "fixture/test",
+    "ingested_at": "2026-01-07T13:30:00+08:00"
+  },
+  {
+    "symbol": "2454",
+    "session_date": "2026-01-08",
+    "trust_net_shares": 5000,
+    "volume_shares": 950000,
+    "source": "fixture/test",
+    "ingested_at": "2026-01-08T13:30:00+08:00"
+  }
+]
