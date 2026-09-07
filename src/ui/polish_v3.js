@@ -383,16 +383,168 @@ function renderCanonicalMarketQuote(sym, quote) {
   cell.title = `${m.source || 'unknown'} · ${m.session || 'regular'} · ${m.referenceType || 'previous_close'} · ${m.asOf || ''}`;
 }
 
+/**
+ * 台指期主圖與大盤列必須吃同一份 /txf（TAIFEX MIS）。
+ * FinMind 日線只保留歷史日盤；日盤收盤後把最後一根 K 的 H/L/C 覆寫成當前盤
+ * （夜盤優先），標題漲跌基準改用 /txf.prevClose（日盤結算），避免 K 停在
+ * 日收而下方已在走夜盤。
+ */
+function normalizeTxfLiveQuote(raw) {
+  if (!raw) return null;
+  const m = raw.market || {};
+  const price = Number(raw.price != null ? raw.price : m.price);
+  if (!(price > 0)) return null;
+  const prev = Number(
+    raw.prevClose != null ? raw.prevClose
+      : (raw.referencePrice != null ? raw.referencePrice : m.referencePrice)
+  );
+  const high = Number(raw.high != null ? raw.high : price);
+  const low = Number(raw.low != null ? raw.low : price);
+  const opn = Number(raw.open != null ? raw.open : NaN);
+  const session = String(raw.session || m.session || '');
+  let changePct = raw.changePct != null ? Number(raw.changePct)
+    : (raw.displayChangePct != null ? Number(raw.displayChangePct)
+      : (m.displayChangePct != null ? Number(m.displayChangePct) : NaN));
+  if (!isFinite(changePct) && prev > 0) changePct = (price - prev) / prev * 100;
+  return {
+    price,
+    prevClose: prev > 0 ? prev : null,
+    high: high > 0 ? high : price,
+    low: low > 0 ? low : price,
+    open: opn > 0 ? opn : null,
+    session,
+    sessionLabel: raw.sessionLabel || (session === 'night' ? '夜盤' : session === 'day' ? '日盤' : ''),
+    changePct: isFinite(changePct) ? changePct : null,
+  };
+}
+
+function overlayTxfLiveOnLastBar(last, quote) {
+  const nq = normalizeTxfLiveQuote(quote) || (quote && Number(quote.price) > 0 ? quote : null);
+  if (!last || !nq) return null;
+  const px = nq.price;
+  const hi = Math.max(Number(last.high) || px, Number(nq.high) || px, px);
+  const lo = Math.min(Number(last.low) || px, Number(nq.low) || px, px);
+  if (!(lo > 0) || hi < lo) return null;
+  return {
+    time: last.time,
+    open: last.open,
+    high: hi,
+    low: lo,
+    close: px,
+    volume: last.volume,
+  };
+}
+
+function applyTxfLiveToChart(raw) {
+  if (typeof S === 'undefined' || !S || S.sym !== '__TXF__') return false;
+  const q = normalizeTxfLiveQuote(raw);
+  if (!q) return false;
+  const cs = S.data && S.data.candles;
+  if (!cs || !cs.length) return false;
+  const last = cs[cs.length - 1];
+  const bar = overlayTxfLiveOnLastBar(last, q);
+  if (!bar) return false;
+  last.open = bar.open;
+  last.high = bar.high;
+  last.low = bar.low;
+  last.close = bar.close;
+  if (q.prevClose > 0) S.data.yesterdayClose = q.prevClose;
+  const off = (S.tzOffset && isFinite(S.tzOffset)) ? S.tzOffset : 0;
+  const col = (function () {
+    const delta = (q.prevClose > 0) ? (q.price - q.prevClose) : 0;
+    const pal = (window.Colors && typeof Colors.candle === 'function')
+      ? Colors.candle('__TXF__') : { up: '#F87171', down: '#4ADE80' };
+    if (delta > 0) return pal.up;
+    if (delta < 0) return pal.down;
+    return '#9ca3af';
+  })();
+  if (S.chartSeries && typeof S.chartSeries.update === 'function') {
+    try {
+      S.chartSeries.update({
+        time: bar.time + off,
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+        color: col,
+        borderColor: col,
+        wickColor: col,
+      });
+    } catch (e) { /* LightweightCharts 拒絕未知 time 時保留 FinMind 棒 */ }
+  }
+  const pEl = document.getElementById('ci-price');
+  if (pEl) pEl.textContent = q.price.toFixed(2);
+  if (typeof updateHeaderChg === 'function') {
+    updateHeaderChg(
+      q.price,
+      q.prevClose > 0 ? q.prevClose : (S.data.yesterdayClose || null),
+      S.data.rangeBase,
+      S.data.rangeChgLbl,
+      'TW',
+      '__TXF__'
+    );
+  }
+  if (typeof updateHeaderHigh === 'function') {
+    updateHeaderHigh(cs, S.data.rangeChgLbl, q.price);
+  }
+  if (typeof updateWlPrice === 'function' && q.prevClose > 0) {
+    const pct = (q.price - q.prevClose) / q.prevClose * 100;
+    try { updateWlPrice('__TXF__', q.price, pct); } catch (e) {}
+  }
+  if (S.chartSeries && q.prevClose > 0) {
+    try {
+      if (S._prevLine) S.chartSeries.removePriceLine(S._prevLine);
+      S._prevLine = S.chartSeries.createPriceLine({
+        price: q.prevClose,
+        color: 'rgba(200, 200, 200, .35)',
+        lineWidth: 1,
+        lineStyle: (typeof LightweightCharts !== 'undefined')
+          ? LightweightCharts.LineStyle.Dashed : 2,
+        axisLabelVisible: false,
+        title: '',
+      });
+    } catch (e) {}
+  }
+  if (typeof renderCloseReadout === 'function') {
+    try { renderCloseReadout(q.price, q.prevClose); } catch (e) {}
+  }
+  let hb = document.getElementById('rt-hb');
+  if (!hb) {
+    const cw = document.getElementById('chart-wrap');
+    if (cw) {
+      hb = document.createElement('div');
+      hb.id = 'rt-hb';
+      hb.style.cssText = 'position:absolute;top:4px;right:10px;z-index:8;font-size:9px;' +
+        'font-family:monospace;pointer-events:none;text-shadow:0 0 3px #000';
+      cw.appendChild(hb);
+    }
+  }
+  if (hb) {
+    const night = q.session === 'night';
+    hb.style.color = night ? '#38bdf8' : '#3ecf6b';
+    hb.textContent = '● ' + (q.sessionLabel || (night ? '夜盤' : '日盤')) + ' · MIS';
+  }
+  return true;
+}
+
+window.normalizeTxfLiveQuote = normalizeTxfLiveQuote;
+window.overlayTxfLiveOnLastBar = overlayTxfLiveOnLastBar;
+window.applyTxfLiveToChart = applyTxfLiveToChart;
+
 window.addEventListener('marketData', function (ev) {
   const quotes = ev && ev.detail && ev.detail.snapshot && ev.detail.snapshot.quotes;
   if (!quotes) return;
   ['^TWII', '^TWOII', '__TXF__'].forEach(sym => renderCanonicalMarketQuote(sym, quotes[sym]));
-  // The selected market chart gets the identical headline reference as Pulse/top bar.
   const active = window.S && S.sym;
+  if (active === '__TXF__') {
+    applyTxfLiveToChart(quotes.__TXF__);
+    return;
+  }
   const q = active && quotes[active];
   const m = q && q.market;
   if (m && typeof updateHeaderChg === 'function' && m.price != null && m.referencePrice != null) {
-    updateHeaderChg(m.price, m.referencePrice, null, m.referenceType, 'TW', active);
+    updateHeaderChg(m.price, m.referencePrice,
+      S.data && S.data.rangeBase, S.data && S.data.rangeChgLbl, 'TW', active);
   }
 });
 
@@ -455,7 +607,8 @@ async function refreshMktBar() {
   } catch (e) { console.warn('[polish-v3] mktbar refresh failed:', e); }
   // 加權/櫃買 — TWSE 即時指數覆寫(修 Yahoo ^TWII 早盤落後一日)
   try { if (window.MarketData) await MarketData.refresh(); } catch (e) { console.warn('[polish-v3] market snapshot failed:', e); }
-  // 台指期(含夜盤) — TAIFEX 特例來源
+  // 台指期(含夜盤) — 與主圖共用 /txf，收盤後最後一根 K 繼續跟夜盤
+  try { await refreshTxfCell(); } catch (e) { console.warn('[polish-v3] txf cell failed:', e); }
   // 大盤融資維持率 — 本地特例數據
   try { await refreshMarginRatioCell(); } catch (e) { console.warn('[polish-v3] margin ratio cell failed:', e); }
   // MacroMicro 追蹤圖格（台利率／融資比／美利率債／CPI金融）
@@ -751,6 +904,7 @@ async function refreshTxfCell() {
   const ch = cell.querySelector('.ch');
   const arrow = chg > 0 ? '▲' : chg < 0 ? '▼' : '－';
   ch.textContent = (chg != null) ? arrow + Math.abs(chg).toFixed(2) + '%' : '';
+  applyTxfLiveToChart(d);
 }
 
 // ============================================================
@@ -788,6 +942,11 @@ function applyMarketColorClass(mkt) {
     const ref = (S.data.yesterdayClose != null && S.data.yesterdayClose > 0)
       ? S.data.yesterdayClose
       : (prev ? prev.close : null);
+    if (S.sym === '__TXF__') {
+      const store = window.MarketData && MarketData.get && MarketData.get();
+      const live = store && store.quotes && store.quotes.__TXF__;
+      if (live && applyTxfLiveToChart(live)) return;
+    }
     if (typeof updateHeaderChg === 'function') {
       updateHeaderChg(last.close, ref, S.data.rangeBase, S.data.rangeChgLbl, S.mkt, S.sym);
       if (typeof updateHeaderHigh === 'function') {
@@ -846,6 +1005,32 @@ function applyMarketColorClass(mkt) {
       console.log('[polish-v3] ^TW index header corrected via TWSE (early-session lag):', sym, price, pct.toFixed(2) + '%');
     } catch (e) { /* keep Yahoo on failure */ }
   });
+})();
+
+// 台指期：symLoaded 後拉 /txf 覆寫最後一根；夜盤時段持續輪詢，與下方大盤列同步。
+(function patchTxfLiveChart() {
+  let inflight = false;
+  async function pullTxfLive() {
+    if (typeof S === 'undefined' || !S || S.sym !== '__TXF__') return;
+    if (document.hidden) return;
+    if (inflight) return;
+    inflight = true;
+    try {
+      const store = window.MarketData && MarketData.get && MarketData.get();
+      const cached = store && store.quotes && store.quotes.__TXF__;
+      if (cached) applyTxfLiveToChart(cached);
+      const base = (typeof SERVER_P !== 'undefined' && SERVER_P) ? SERVER_P : '';
+      const r = await fetch(base + '/txf', { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      applyTxfLiveToChart(d);
+    } catch (e) { /* 保留 FinMind 日線 */ }
+    finally { inflight = false; }
+  }
+  window.addEventListener('symLoaded', () => {
+    if (S && S.sym === '__TXF__') pullTxfLive();
+  });
+  setInterval(pullTxfLive, 5000);
 })();
 
 // ============================================================
