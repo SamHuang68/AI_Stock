@@ -800,6 +800,21 @@ def build_evidence_pack(symbol: str, *, include: Dict[str, bool],
     except Exception:
         pass
 
+    try:
+        from feature_settings import is_enabled as _flag_enabled
+        if _flag_enabled('shadowPeak100d'):
+            import peak_observation_100d
+            peak_100d = peak_observation_100d.build_for_evidence_pack(
+                code,
+                bars=bars,
+                now=now,
+            )
+            if peak_100d:
+                pack['peakObservation100d'] = peak_100d
+                as_of['peakObservation100d'] = peak_100d.get('asOf')
+    except Exception:
+        pass
+
     return pack
 
 

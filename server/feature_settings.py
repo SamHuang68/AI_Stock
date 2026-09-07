@@ -22,6 +22,7 @@ FEATURE_KEYS = (
     'shadowConditionalExpectation',
     'shadowChipPathState',
     'shadowPeakObservation',
+    'shadowPeak100d',
     'shadowVolRegimeSwitch',
     'shadowMultifactor',
     'shadowMlExperiment',
@@ -35,6 +36,7 @@ ENV_KEYS = {
     'shadowConditionalExpectation': 'ST_SHADOW_CONDITIONAL_EXPECTATION',
     'shadowChipPathState': 'ST_SHADOW_CHIP_PATH_STATE',
     'shadowPeakObservation': 'ST_SHADOW_PEAK_OBSERVATION',
+    'shadowPeak100d': 'ST_SHADOW_PEAK_100D',
     'shadowVolRegimeSwitch': 'ST_SHADOW_VOL_REGIME_SWITCH',
     'shadowMultifactor': 'ST_SHADOW_MULTIFACTOR',
     'shadowMlExperiment': 'ST_SHADOW_ML_EXPERIMENT',
@@ -81,11 +83,11 @@ def feature_flags(base_dir: str | Path | None = None) -> dict[str, bool]:
             out[key] = bool(local[key])
         elif _truthy(os.environ.get(env_name)):
             out[key] = True
-        elif key in ('ohlcLedger', 'shadowPeakObservation') and os.environ.get(env_name) is not None:
+        elif key in ('ohlcLedger', 'shadowPeakObservation', 'shadowPeak100d') and os.environ.get(env_name) is not None:
             out[key] = False
         elif master:
             out[key] = True
-        elif key in ('ohlcLedger', 'shadowPeakObservation'):
+        elif key in ('ohlcLedger', 'shadowPeakObservation', 'shadowPeak100d'):
             # Infrastructure / observation-only CONDITIONAL defaults ON; disable explicitly.
             out[key] = True
         else:
@@ -202,6 +204,7 @@ def public_payload(base_dir: str | Path | None = None) -> dict[str, Any]:
                 'shadowConditionalExpectation': True,
                 'shadowChipPathState': True,
                 'shadowPeakObservation': True,
+                'shadowPeak100d': True,
                 'shadowVolRegimeSwitch': True,
                 'shadowMultifactor': True,
                 'shadowMlExperiment': True,
