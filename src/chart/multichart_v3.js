@@ -86,7 +86,9 @@
     let candles = (parsed && parsed.candles) ? parsed.candles : [];
     const isIntraday = (RANGES.find(x => x.key === p.rg) || {}).interval !== '1d'
       && (RANGES.find(x => x.key === p.rg) || {}).interval !== '1wk';
-    if (isIntraday && window.IntradayVolumeV3) {
+    const _psym = String(p.sym || '').toUpperCase();
+    const _isTxf = _psym === '__TXF__' || _psym === 'TXF' || _psym === '__TXF';
+    if (isIntraday && window.IntradayVolumeV3 && !_isTxf) {
       candles = window.IntradayVolumeV3.filterTwRegularSession(candles, p.mkt).candles;
     }
     p.candles = candles;

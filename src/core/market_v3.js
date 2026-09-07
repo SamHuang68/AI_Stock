@@ -27,7 +27,7 @@
       code = String(code || '').toUpperCase();
       if (isJpFmt(code)) return 'JP';
       // 合成指數／本地序列：台股語意（紅漲綠跌、不附 .TW）
-      if (code === '__MARGIN_RATIO__' || code === '__TXF__'
+      if (code === '__MARGIN_RATIO__' || code === '__TXF__' || code === 'TXF' || code === '__TXF'
           || code === '__TW_RATES__' || code === '__TW_MARGIN_MIX__'
           || code === '__US_RATES_CREDIT__' || code === '__US_CPI_FIN__') {
         // 合成序列：台股語意（利率／融資）或美股語意由 id 前綴判斷
