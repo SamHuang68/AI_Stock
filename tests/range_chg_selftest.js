@@ -2,6 +2,7 @@
 /**
  * 區間漲跌口徑自測：日漲跌(昨收) vs 區間漲跌(chartPreviousClose / trim 前一根)
  * 對齊 Yahoo/iOS Stocks：現價旁同時顯示兩者。
+ * 另驗證 hero 現價在 quote/rmp 與 bar close 分歧時仍取 canonical last。
  */
 'use strict';
 
@@ -9,6 +10,44 @@ function calcChgFromBase(price, base) {
   if (!(price > 0) || !(base > 0)) return null;
   const delta = price - base;
   return { delta, pct: delta / base * 100 };
+}
+
+function _posPrice(v) {
+  return (v != null && isFinite(v) && v > 0) ? v : null;
+}
+
+function resolveCanonicalHeroPrice(opts) {
+  const barClose = _posPrice(opts && opts.barClose);
+  const quotePrice = _posPrice(opts && opts.quotePrice);
+  const rmp = _posPrice(opts && opts.regularMarketPrice);
+  const rmt = opts && opts.regularMarketTime;
+  const lastBarTime = opts && opts.lastBarTime;
+  const isDaily = !!(opts && opts.isDaily);
+  if (quotePrice) return quotePrice;
+  if (isDaily && rmp && rmt && lastBarTime && Math.abs(rmt - lastBarTime) <= 20 * 3600) {
+    return rmp;
+  }
+  if (rmp && rmt && lastBarTime && (rmt - lastBarTime) > 20 * 3600) {
+    return rmp;
+  }
+  return barClose ?? rmp ?? null;
+}
+
+function patchTodayDailyBarWithLive(candles, meta, interval) {
+  if (!candles || !candles.length || !meta) return null;
+  const isDaily = interval === '1d' || interval === '1wk';
+  if (!isDaily) return null;
+  const last = candles[candles.length - 1];
+  const rmp = _posPrice(meta.regularMarketPrice);
+  const rmt = meta.regularMarketTime;
+  if (!rmp || !rmt || !last || !last.time) return null;
+  if (Math.abs(rmt - last.time) > 20 * 3600) return null;
+  if (Math.abs(last.close - rmp) < 1e-9) return rmp;
+  last.close = rmp;
+  if (rmp > (last.high || rmp)) last.high = rmp;
+  if (rmp < (last.low || rmp)) last.low = rmp;
+  last._livePatched = true;
+  return rmp;
 }
 
 function pickRangeBase({ candles, trim, chartPreviousClose }) {
@@ -78,6 +117,39 @@ function assert(cond, msg) {
   const day = calcChgFromBase(price, prev);
   const rng = calcChgFromBase(price, prev);
   assert(day.delta === rng.delta && day.pct === rng.pct, '1天區間基準≡昨收時數值相同→UI 應隱藏區間列');
+}
+
+// Case 6: 2330 情境 — 3月 range 最後 bar close=2460，quote/rmp=2455 → hero 必為 2455
+{
+  const barClose = 2460, quotePrice = 2455, rmp = 2455;
+  const t = 1700000000;
+  const hero = resolveCanonicalHeroPrice({
+    barClose, quotePrice, regularMarketPrice: rmp,
+    regularMarketTime: t, lastBarTime: t, isDaily: true,
+  });
+  assert(hero === 2455, 'quote 優先於 stale bar close (2460→2455)');
+  const rng = calcChgFromBase(hero, 2360);
+  assert(rng && Math.abs(rng.delta - 95) < 1e-9, '區間漲跌仍用 canonical last 對 rangeBase');
+}
+
+// Case 7: 無 quote 時同日 regularMarketPrice 覆蓋 bar close
+{
+  const t = 1700000000;
+  const hero = resolveCanonicalHeroPrice({
+    barClose: 2460, quotePrice: null, regularMarketPrice: 2455,
+    regularMarketTime: t, lastBarTime: t, isDaily: true,
+  });
+  assert(hero === 2455, '同日 RMP 覆蓋 stale bar close');
+}
+
+// Case 8: patchTodayDailyBarWithLive 同步最後一根供圖表軸
+{
+  const t = 1700000000;
+  const candles = [{ time: t - 86400, open: 2400, high: 2420, low: 2390, close: 2410 },
+    { time: t, open: 2410, high: 2460, low: 2405, close: 2460 }];
+  const patched = patchTodayDailyBarWithLive(candles, { regularMarketPrice: 2455, regularMarketTime: t }, '1d');
+  assert(patched === 2455, 'patch 回傳對齊後 close');
+  assert(candles[1].close === 2455 && candles[1]._livePatched, '最後一根 close 已對齊 RMP');
 }
 
 if (failed) { console.error('\n' + failed + ' failed'); process.exit(1); }

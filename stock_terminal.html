@@ -600,6 +600,53 @@ function calcChgFromBase(price, base) {
   return { delta, pct: delta / base * 100 };
 }
 
+/** 正數且 finite 的價格，否則 null */
+function _posPrice(v) {
+  return (v != null && isFinite(v) && v > 0) ? v : null;
+}
+
+/**
+ * 頂部現價／區間漲跌必用同一 canonical last。
+ * 優先：/quote 權威價 > 同日 regularMarketPrice > 最後一根 bar close。
+ * 長週期 range 的日 K 最後一根 close 可能與即時價不同步（曾出現 2460 vs 2455）。
+ */
+function resolveCanonicalHeroPrice(opts) {
+  const barClose = _posPrice(opts && opts.barClose);
+  const quotePrice = _posPrice(opts && opts.quotePrice);
+  const rmp = _posPrice(opts && opts.regularMarketPrice);
+  const rmt = opts && opts.regularMarketTime;
+  const lastBarTime = opts && opts.lastBarTime;
+  const isDaily = !!(opts && opts.isDaily);
+  if (quotePrice) return quotePrice;
+  if (isDaily && rmp && rmt && lastBarTime && Math.abs(rmt - lastBarTime) <= 20 * 3600) {
+    return rmp;
+  }
+  if (rmp && rmt && lastBarTime && (rmt - lastBarTime) > 20 * 3600) {
+    return rmp;
+  }
+  return barClose ?? rmp ?? null;
+}
+
+/**
+ * 日線最後一根若為當日，把 close/high/low 對齊 regularMarketPrice（供圖表軸標籤）。
+ */
+function patchTodayDailyBarWithLive(candles, meta, interval) {
+  if (!candles || !candles.length || !meta) return null;
+  const isDaily = interval === '1d' || interval === '1wk';
+  if (!isDaily) return null;
+  const last = candles[candles.length - 1];
+  const rmp = _posPrice(meta.regularMarketPrice);
+  const rmt = meta.regularMarketTime;
+  if (!rmp || !rmt || !last || !last.time) return null;
+  if (Math.abs(rmt - last.time) > 20 * 3600) return null;
+  if (Math.abs(last.close - rmp) < 1e-9) return rmp;
+  last.close = rmp;
+  if (rmp > (last.high || rmp)) last.high = rmp;
+  if (rmp < (last.low || rmp)) last.low = rmp;
+  last._livePatched = true;
+  return rmp;
+}
+
 /**
  * 更新頂部「區間最高」：取目前載入 K 線 high 的最大值。
  * 放在左欄 #ci-high，避開圖上右側量價浮動鈕／圖例遮蔽。
@@ -920,6 +967,11 @@ async function loadSym(sym, mkt, silent) {
         && !(_last.volume > 0) && _num(_meta.regularMarketVolume)) {
       // 日線最後一根就是 rmt 當日，但 Yahoo 給的 volume 是 null/0 → 回填
       _last.volume = _meta.regularMarketVolume;
+    } else if (_dailyIvl && _rmt && _num(_rmp) && _last && _last.time
+        && Math.abs(_rmt - _last.time) <= 20 * 3600
+        && Math.abs(_last.close - _rmp) > 1e-9) {
+      // 同日日 K close 與 regularMarketPrice 不同步 → 對齊現價（長 range 切換 hero 錯價）
+      patchTodayDailyBarWithLive(parsed.candles, parsed.meta, rdef.interval);
     }
   }
 
@@ -940,15 +992,17 @@ async function loadSym(sym, mkt, silent) {
   // 算出 +8% 假漲幅。改：優先 meta.regularMarketPreviousClose/previousClose，
   // 缺則打 /quote(range=1d 的 previousClose 權威昨收)。存 yesterdayClose 供 ci-chg
   // 與 polish 昨收線一致。
+  let _quoteSnap = null;
   if (!_isIntraday) {
     let _dp = parsed.meta && (parsed.meta.regularMarketPreviousClose ?? parsed.meta.previousClose);
-    if (!(_dp > 0)) {
-      try {
-        const _q = await fetch(`${SERVER}/quote/${yfsym}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null);
-        if (_q && _q.prevClose > 0) _dp = _q.prevClose;
-      } catch {}
+    try {
+      const _q = await fetch(`${SERVER}/quote/${yfsym}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null);
       if (_myLoad !== window.__loadSeq) return;   // race guard after await
-    }
+      if (_q) {
+        _quoteSnap = _q;
+        if (!(_dp > 0) && _q.prevClose > 0) _dp = _q.prevClose;
+      }
+    } catch {}
     if (_dp > 0) parsed.yesterdayClose = _dp;
   }
 
@@ -980,17 +1034,27 @@ async function loadSym(sym, mkt, silent) {
 
   const last = parsed.candles[parsed.candles.length-1];
   const prev = parsed.candles[parsed.candles.length-2];
+  patchTodayDailyBarWithLive(parsed.candles, parsed.meta, rdef.interval);
+  const heroPrice = resolveCanonicalHeroPrice({
+    barClose: last.close,
+    quotePrice: _quoteSnap && _quoteSnap.price,
+    regularMarketPrice: parsed.meta && parsed.meta.regularMarketPrice,
+    regularMarketTime: parsed.meta && parsed.meta.regularMarketTime,
+    lastBarTime: last.time,
+    isDaily: !_isIntraday,
+  }) ?? last.close;
+  parsed.heroPrice = heroPrice;
   // 昨收統一用 parsed.yesterdayClose(intraday=chartPreviousClose；日線=meta/quote 權威昨收)，
   // 缺才退回前一根 K close。修「日線遇 null 缺口抓到更舊一根→漲幅亂跳」。
   const _prevRef = (parsed.yesterdayClose != null && parsed.yesterdayClose > 0)
     ? parsed.yesterdayClose
     : (prev ? prev.close : null);
   const chgPct = (_prevRef != null && _prevRef > 0)
-    ? ((last.close - _prevRef) / _prevRef * 100) : 0;
-  document.getElementById('ci-price').textContent = last.close.toFixed(2) + (sym === '__MARGIN_RATIO__' ? '%' : '');
+    ? ((heroPrice - _prevRef) / _prevRef * 100) : 0;
+  document.getElementById('ci-price').textContent = heroPrice.toFixed(2) + (sym === '__MARGIN_RATIO__' ? '%' : '');
   // 頂部：日漲跌(昨收) + 區間漲跌(所選時間) 同時顯示；區間最高常駐左欄
-  updateHeaderChg(last.close, _prevRef, parsed.rangeBase, parsed.rangeChgLbl, mkt, sym);
-  updateHeaderHigh(parsed.candles, parsed.rangeChgLbl, last.close);
+  updateHeaderChg(heroPrice, _prevRef, parsed.rangeBase, parsed.rangeChgLbl, mkt, sym);
+  updateHeaderHigh(parsed.candles, parsed.rangeChgLbl, heroPrice);
   document.getElementById('ci-name').textContent = (sym === '__MARGIN_RATIO__')
     ? '大盤融資維持率'
     : (sym === '__TXF__')
@@ -1013,7 +1077,7 @@ async function loadSym(sym, mkt, silent) {
   try { window.dispatchEvent(new CustomEvent('symLoaded', {detail:{sym: S.sym, mkt: S.mkt}})); } catch(e){}
 
   // update wl chip price
-  updateWlPrice(sym, last.close, chgPct);
+  updateWlPrice(sym, heroPrice, chgPct);
   setStat('OK · '+sym);
 }
 
