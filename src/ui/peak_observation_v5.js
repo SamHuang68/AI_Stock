@@ -21,14 +21,16 @@
       FeatureFlags.isEnabled('shadowPeakObservation'));
   }
 
-  function epistemicBadge() {
+  function epistemicBadge(label) {
+    var tier = String(label || 'CONDITIONAL').toUpperCase();
+    if (tier !== 'FACT' && tier !== 'CONDITIONAL') tier = 'CONDITIONAL';
     if (window.EpistemicBadgesV5 && window.EpistemicBadgesV5.badge) {
-      return window.EpistemicBadgesV5.badge('CONDITIONAL', {
+      return window.EpistemicBadgesV5.badge(tier, {
         note: 'st-peak-v0.1',
         compact: true
       });
     }
-    return '<span class="st-epistemic" data-epistemic="CONDITIONAL">CONDITIONAL</span>';
+    return '<span class="st-epistemic" data-epistemic="' + tier + '">' + tier + '</span>';
   }
 
   function injectCSS() {
@@ -76,7 +78,7 @@
     var sym = obs.symbol || opts.symbol || '—';
     var html = '<div class="st-pk-card" data-pk-symbol="' + esc(sym) + '">' +
       '<div class="st-pk-head"><div class="st-pk-title">距離區間高點 · ' + esc(sym) + '</div>' +
-      '<div class="st-pk-tags">' + epistemicBadge() +
+      '<div class="st-pk-tags">' + epistemicBadge(obs.label) +
       '<span class="st-pk-tag">st-peak-v0.1</span><span class="st-pk-tag">peakKind A</span></div></div>' +
       '<div class="st-pk-asof">asOf ' + esc(obs.asOf || '—') +
       ' · basis ' + esc(obs.priceBasis || '—') +

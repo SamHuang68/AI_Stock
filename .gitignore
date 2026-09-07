@@ -120,6 +120,7 @@ installer/dist_installer/
 
 # v4.0 local market datastore (regenerable, can grow large)
 data/ohlc_ledger/
+data/peak_approvals/
 data/market.db
 data/market.db-wal
 data/market.db-shm

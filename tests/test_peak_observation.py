@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for st-peak-v0.1 observation-only peak distance (CONDITIONAL)."""
+"""Tests for st-peak-v0.1 observation-only peak distance (CONDITIONAL / FACT binding)."""
 from __future__ import annotations
 
 import json
@@ -15,10 +15,20 @@ ROOT = Path(__file__).resolve().parents[1]
 SERVER_DIR = ROOT / 'server'
 sys.path.insert(0, str(SERVER_DIR))
 
+import peak_approvals as pa  # noqa: E402
 import peak_observation as po  # noqa: E402
 from ohlc_ledger import append_bars, query_bars_pit  # noqa: E402
 
 FIXTURE_PATH = ROOT / 'tests' / 'fixtures' / 'ohlc_ledger' / 'sample_bars.json'
+
+
+def _build_fixture_obs(**kwargs):
+    defaults = {
+        'as_of': '2026-01-03',
+        'knowledge_cutoff': '2026-01-10T13:30:00+08:00',
+    }
+    defaults.update(kwargs)
+    return po.build_observation('2330', **defaults)
 
 
 class PeakObservationComputeTests(unittest.TestCase):
@@ -117,21 +127,145 @@ class PeakObservationComputeTests(unittest.TestCase):
         self.assertIsNone(obs['pctBelowPeak'])
         self.assertIn('only A supported', obs['nullReason'])
 
-    def test_label_always_conditional(self):
-        obs = po.build_observation(
+    def test_label_conditional_without_approval(self):
+        obs = _build_fixture_obs(base_dir=self.base_dir)
+        self.assertEqual(obs['label'], po.LABEL_CONDITIONAL)
+        self.assertIsNone(obs['hostApprovalHash'])
+
+    def test_fact_binding_requires_host_approval(self):
+        obs = _build_fixture_obs(base_dir=self.base_dir)
+        self.assertEqual(obs['label'], po.LABEL_CONDITIONAL)
+        pa.bind_fixture_approval(
+            obs['evidenceHash'],
+            approved_by='test-host',
+            symbol='2330',
+            as_of=obs['asOf'],
+            base_dir=self.base_dir,
+        )
+        promoted = _build_fixture_obs(base_dir=self.base_dir)
+        self.assertEqual(promoted['label'], po.LABEL_FACT)
+        self.assertIsNotNone(promoted['hostApprovalHash'])
+        self.assertEqual(promoted['evidenceHash'], obs['evidenceHash'])
+
+    def test_implicit_knowledge_cutoff_cannot_fact_even_with_approval(self):
+        obs = _build_fixture_obs(base_dir=self.base_dir)
+        pa.bind_fixture_approval(obs['evidenceHash'], base_dir=self.base_dir)
+        implicit = po.build_observation(
             '2330',
             as_of='2026-01-03',
+            base_dir=self.base_dir,
+            now=datetime.fromisoformat('2026-01-10T15:00:00+08:00'),
+        )
+        self.assertEqual(implicit['label'], po.LABEL_CONDITIONAL)
+
+    def test_pit_limitation_cannot_fact_even_with_approval(self):
+        with tempfile.TemporaryDirectory() as empty_dir:
+            live_bars = [
+                (datetime(2026, 1, 2, 13, 30).timestamp(), 100.0, 105.0, 99.0, 104.0, 1000),
+                (datetime(2026, 1, 3, 13, 30).timestamp(), 104.0, 108.0, 103.0, 107.0, 1000),
+            ]
+            fallback = po.build_observation(
+                '2330',
+                as_of='2026-01-03',
+                knowledge_cutoff='2026-01-10T13:30:00+08:00',
+                bars=live_bars,
+                base_dir=empty_dir,
+            )
+            pa.bind_fixture_approval(fallback['evidenceHash'], base_dir=empty_dir)
+            rebound = po.build_observation(
+                '2330',
+                as_of='2026-01-03',
+                knowledge_cutoff='2026-01-10T13:30:00+08:00',
+                bars=live_bars,
+                base_dir=empty_dir,
+            )
+            self.assertIn('pitLimitation', rebound)
+            self.assertEqual(rebound['label'], po.LABEL_CONDITIONAL)
+
+    def test_fixed_snapshot_replay_is_bit_identical(self):
+        kwargs = {
+            'as_of': '2026-01-03',
+            'knowledge_cutoff': '2026-01-10T13:30:00+08:00',
+            'price_basis': 'unadj_close',
+            'generation_id': None,
+            'base_dir': self.base_dir,
+        }
+        first = po.build_observation('2330', **kwargs)
+        second = po.build_observation('2330', **kwargs)
+        self.assertEqual(first, second)
+        self.assertEqual(first['evidenceHash'], second['evidenceHash'])
+
+    def test_revision_isolation_old_generation_replayable(self):
+        base = dict(json.loads(FIXTURE_PATH.read_text(encoding='utf-8'))[0])
+        base.pop('generation_id', None)
+        append_bars([base], generation_id='gen-old', base_dir=self.base_dir)
+        rewritten = dict(base)
+        rewritten['close'] = 120.0
+        rewritten['high'] = 125.0
+        rewritten['open'] = 118.0
+        rewritten['low'] = 115.0
+        rewritten['ingested_at'] = '2026-01-05T13:30:00+08:00'
+        append_bars([rewritten], generation_id='gen-new', base_dir=self.base_dir)
+
+        old_snapshot = po.build_observation(
+            '2330',
+            as_of='2026-01-02',
+            knowledge_cutoff='2026-01-04T13:30:00+08:00',
+            generation_id='gen-old',
+            base_dir=self.base_dir,
+        )
+        replay_old = po.build_observation(
+            '2330',
+            as_of='2026-01-02',
+            knowledge_cutoff='2026-01-04T13:30:00+08:00',
+            generation_id='gen-old',
+            base_dir=self.base_dir,
+        )
+        self.assertEqual(old_snapshot, replay_old)
+        self.assertEqual(old_snapshot['peakClose'], 104.0)
+
+        new_latest = po.build_observation(
+            '2330',
+            as_of='2026-01-02',
             knowledge_cutoff='2026-01-10T13:30:00+08:00',
             base_dir=self.base_dir,
         )
-        self.assertEqual(obs['label'], 'CONDITIONAL')
-        self.assertEqual(obs['epistemic'] if 'epistemic' in obs else po.LABEL, 'CONDITIONAL')
+        self.assertEqual(new_latest['peakClose'], 120.0)
+        self.assertNotEqual(new_latest['evidenceHash'], old_snapshot['evidenceHash'])
+
+    def test_evidence_hash_includes_outputs(self):
+        obs = _build_fixture_obs(base_dir=self.base_dir)
+        pit_rows = query_bars_pit(
+            '2330',
+            as_of=obs['asOf'],
+            knowledge_cutoff=obs['knowledgeCutoff'],
+            base_dir=self.base_dir,
+        )
+        bar_dicts = [row.as_dict() for row in pit_rows]
+        inputs = po._evidence_hash_inputs(
+            symbol='2330',
+            as_of=obs['asOf'],
+            history_start=obs['historyStart'],
+            price_basis=obs['priceBasis'],
+            knowledge_cutoff=obs['knowledgeCutoff'],
+            peak_kind='A',
+            bars=bar_dicts,
+            basis_as_of=None,
+            generation_id=None,
+            generation_content_hash=None,
+            source=obs['source'],
+            peak_close=obs['peakClose'],
+            peak_date=obs['peakDate'],
+            last_close=obs['lastClose'],
+            pct_below_peak=obs['pctBelowPeak'],
+        )
+        self.assertEqual(po.compute_evidence_hash(inputs), obs['evidenceHash'])
 
     def test_no_decision_context_writes(self):
         source = Path(SERVER_DIR / 'peak_observation.py').read_text(encoding='utf-8')
         self.assertNotIn('import decision_context', source)
         self.assertNotIn('publish_context(', source)
-        self.assertNotIn('actionEnvelope', source.replace('actionEnvelope, or FACT labels', ''))
+        self.assertNotIn('actionEnvelope', source.replace('actionEnvelope.', ''))
 
 
 class PeakObservationEvidencePackTests(unittest.TestCase):
