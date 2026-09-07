@@ -1271,6 +1271,7 @@
         ['shadowEarlyWarning', '跨市場前兆雷達（Early Warning）'],
         ['shadowConsensusAttention', '共識注意力 Radar'],
         ['shadowConditionalExpectation', '條件期望研究（Conditional Expectation）'],
+        ['shadowPeakObservation', '距離區間高點觀察（st-peak-v0.1 · CONDITIONAL）'],
         ['shadowMultifactor', '多因子橫截面排名（Shadow Multifactor）'],
         ['shadowMlExperiment', 'ML 實驗 stub（Shadow ML Experiment）']
       ].forEach(function (pair) {

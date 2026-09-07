@@ -21,6 +21,7 @@ FEATURE_KEYS = (
     'shadowConsensusAttention',
     'shadowConditionalExpectation',
     'shadowChipPathState',
+    'shadowPeakObservation',
     'shadowVolRegimeSwitch',
     'shadowMultifactor',
     'shadowMlExperiment',
@@ -33,6 +34,7 @@ ENV_KEYS = {
     'shadowConsensusAttention': 'ST_SHADOW_CONSENSUS_ATTENTION',
     'shadowConditionalExpectation': 'ST_SHADOW_CONDITIONAL_EXPECTATION',
     'shadowChipPathState': 'ST_SHADOW_CHIP_PATH_STATE',
+    'shadowPeakObservation': 'ST_SHADOW_PEAK_OBSERVATION',
     'shadowVolRegimeSwitch': 'ST_SHADOW_VOL_REGIME_SWITCH',
     'shadowMultifactor': 'ST_SHADOW_MULTIFACTOR',
     'shadowMlExperiment': 'ST_SHADOW_ML_EXPERIMENT',
@@ -79,12 +81,12 @@ def feature_flags(base_dir: str | Path | None = None) -> dict[str, bool]:
             out[key] = bool(local[key])
         elif _truthy(os.environ.get(env_name)):
             out[key] = True
-        elif key == 'ohlcLedger' and os.environ.get(env_name) is not None:
+        elif key in ('ohlcLedger', 'shadowPeakObservation') and os.environ.get(env_name) is not None:
             out[key] = False
         elif master:
             out[key] = True
-        elif key == 'ohlcLedger':
-            # Infrastructure ledger defaults ON; disable explicitly via env/local file.
+        elif key in ('ohlcLedger', 'shadowPeakObservation'):
+            # Infrastructure / observation-only CONDITIONAL defaults ON; disable explicitly.
             out[key] = True
         else:
             out[key] = False
@@ -199,6 +201,7 @@ def public_payload(base_dir: str | Path | None = None) -> dict[str, Any]:
                 'shadowConsensusAttention': True,
                 'shadowConditionalExpectation': True,
                 'shadowChipPathState': True,
+                'shadowPeakObservation': True,
                 'shadowVolRegimeSwitch': True,
                 'shadowMultifactor': True,
                 'shadowMlExperiment': True,

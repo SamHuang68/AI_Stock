@@ -78,9 +78,11 @@ offline tooling.
 
 ## Explicit non-goals (this module)
 
-- No EvidencePack / peak UI
 - No DecisionContext / actionEnvelope writes
 - No dual-axis strategy engine or sim positions
+
+Peak observation UI (T1, CONDITIONAL) lives in `server/peak_observation.py` — see
+`docs/ST_PEAK_V01.md`.
 
 ## Module
 
