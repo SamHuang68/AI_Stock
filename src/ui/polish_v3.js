@@ -785,13 +785,14 @@ function applyMarketColorClass(mkt) {
     if (!S.data?.candles?.length) return;
     const last = S.data.candles[S.data.candles.length - 1];
     const prev = S.data.candles[S.data.candles.length - 2];
+    const hero = (S.data.heroPrice != null && S.data.heroPrice > 0) ? S.data.heroPrice : last.close;
     const ref = (S.data.yesterdayClose != null && S.data.yesterdayClose > 0)
       ? S.data.yesterdayClose
       : (prev ? prev.close : null);
     if (typeof updateHeaderChg === 'function') {
-      updateHeaderChg(last.close, ref, S.data.rangeBase, S.data.rangeChgLbl, S.mkt, S.sym);
+      updateHeaderChg(hero, ref, S.data.rangeBase, S.data.rangeChgLbl, S.mkt, S.sym);
       if (typeof updateHeaderHigh === 'function') {
-        updateHeaderHigh(S.data.candles, S.data.rangeChgLbl, last.close);
+        updateHeaderHigh(S.data.candles, S.data.rangeChgLbl, hero);
       }
       return;
     }
