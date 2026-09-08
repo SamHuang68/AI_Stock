@@ -111,13 +111,16 @@
       '#pl-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);' +
         'width:100%;max-width:none;margin:0;min-width:0;box-sizing:border-box;' +
         'flex:1;min-height:0;display:flex;flex-direction:column}' +
-      /* 單列：標題｜時間戳｜金框填滿「新手」左側空白｜新手／專業｜其他按鈕 */
-      '#pl-root .pl-head{display:flex;align-items:center;justify-content:flex-start;gap:8px;' +
-        'margin-bottom:3px;min-width:0;flex:0 0 auto;flex-wrap:nowrap;overflow:hidden}' +
+      /* 單列三欄：左（標題＋時間）｜金框填滿到「新手」｜右（新手／專業＋按鈕）。grid 不能換列。 */
+      '#pl-root .pl-head{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content;' +
+        'grid-template-rows:auto;align-items:center;column-gap:8px;row-gap:0;' +
+        'margin-bottom:3px;min-width:0;flex:0 0 auto;overflow:hidden}' +
+      '#pl-root .pl-head-start{display:flex;align-items:baseline;gap:8px;min-width:0;flex-wrap:nowrap}' +
+      '#pl-root .pl-head-end{display:flex;align-items:center;gap:4px;min-width:0;flex-wrap:nowrap}' +
       '#pl-root .pl-head-lead{min-width:0;flex:0 0 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:nowrap}' +
       '#pl-root .pl-head-lead .pl-title{flex:0 0 auto;white-space:nowrap}' +
       '#pl-root .pl-sub{flex:0 1 auto;max-width:22em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#pl-root .pl-head-meta{flex:1 1 0%;min-width:0;display:flex;align-items:center;gap:8px;' +
+      '#pl-root .pl-head-meta{min-width:0;max-width:100%;display:flex;align-items:center;gap:8px;' +
         'margin:0;padding:2px 8px;border:1px solid rgba(245,197,24,.38);border-radius:5px;' +
         'background:rgba(8,14,24,.55);overflow:hidden;white-space:nowrap}' +
       '#pl-root .pl-head-meta[hidden]{display:none!important}' +
@@ -368,7 +371,7 @@
         '#pl-root .pl-beginner-actions .pl-btn{padding:5px 8px}' +
       '}' +
       '@media(max-width:900px) and (orientation:portrait){#pl-root .pl-beginner-hero{grid-template-columns:minmax(0,1fr);text-align:center}' +
-        '#pl-root .pl-beginner-gauge{margin:auto}#pl-root .pl-head{flex-wrap:wrap}' +
+        '#pl-root .pl-beginner-gauge{margin:auto}' +
         '#pl-root .pl-hero-foot{flex-direction:column}#pl-root .pl-stock-check{width:min(100%,340px);max-width:100%}' +
         '#pl-root .pl-stock-check input{width:auto;min-width:0;flex:1 1 auto}#pl-root .pl-stock-check button{flex:0 0 auto}' +
         '#pl-root .pl-simple-signals,#pl-root .pl-market-radar-grid{grid-template-columns:1fr}#pl-root .pl-safe-box{grid-template-columns:1fr}' +
@@ -675,10 +678,11 @@
       '@media(orientation:landscape) and (max-height:540px) and (pointer:coarse){' +
         '#view-pulse.sv-panel.on{padding:3px 5px 5px}' +
         '#pl-root{-webkit-text-size-adjust:100%;text-size-adjust:100%}' +
-        '#pl-root .pl-head{gap:4px;margin-bottom:2px;flex-wrap:nowrap}' +
+        '#pl-root .pl-head{column-gap:4px;margin-bottom:2px}' +
+        '#pl-root .pl-head-start,#pl-root .pl-head-end{gap:4px}' +
         '#pl-root .pl-head-lead{gap:4px}' +
         '#pl-root .pl-sub{display:none}' +
-        '#pl-root .pl-head-meta{padding:1px 6px;min-width:0;flex:1 1 0%}' +
+        '#pl-root .pl-head-meta{padding:1px 6px;min-width:0}' +
         '#pl-root .pl-title{font-size:12px}' +
         '#pl-root .pl-sub{font-size:7px}' +
         '#pl-root .pl-actions{gap:2px}' +
@@ -799,10 +803,11 @@
         '#view-pulse.sv-panel.on{height:auto;min-height:100%;overflow:visible;display:block!important;padding:6px 8px 18px}' +
         '#mount-pulse,#mount-pulse.sv-mount,#pl-root{height:auto;min-height:0;display:block;overflow:visible}' +
         '#pl-body.pl-mode-expert{display:block;overflow:visible;padding-bottom:12px}' +
-        '#pl-root .pl-head{align-items:center;gap:6px;flex-wrap:nowrap;overflow:hidden}' +
+        '#pl-root .pl-head{align-items:center;column-gap:6px;overflow:hidden}' +
+        '#pl-root .pl-head-start,#pl-root .pl-head-end{gap:5px}' +
         '#pl-root .pl-head-lead{flex:0 0 auto;gap:5px;flex-wrap:nowrap;min-width:0}' +
         '#pl-root .pl-sub{display:none}' +
-        '#pl-root .pl-head-meta{flex:1 1 0%;min-width:0}' +
+        '#pl-root .pl-head-meta{min-width:0}' +
         '#pl-root .pl-title{font-size:17px}' +
         '#pl-root .pl-actions{justify-content:flex-start;flex-wrap:wrap;gap:5px}' +
         '#pl-root .pl-btn,#pl-root .pl-mode-toggle button{font-size:11px;min-height:30px;padding:5px 9px}' +
@@ -1595,23 +1600,26 @@
     if (!$('pl-root')) {
       mount.innerHTML =
         '<div id="pl-root">' +
-          '<div class="pl-head"><div class="pl-head-lead">' +
-            '<div class="pl-title">市場總覽 <span id="pl-layout-probe" style="font-size:10px;font-weight:700;letter-spacing:.03em;padding:1px 7px;border-radius:999px;border:1px solid rgba(34,211,238,.45);background:rgba(34,211,238,.12);color:#67e8f9;vertical-align:middle">實測…</span></div>' +
-            '<span class="pl-wd" id="pl-wd">WaveDeck 覆寫：—</span>' +
-          '</div>' +
-          '<div class="pl-sub" id="pl-sub">官方資料 · 一行五框 × 上下兩區 · ' + LAYOUT_ANCHOR + '</div>' +
-          '<div class="pl-head-meta" id="pl-head-meta"></div>' +
-          '<span class="pl-mode-toggle" role="group" aria-label="總覽顯示模式">' +
-            '<button type="button" id="pl-view-beginner" title="只看市場狀態、行動提示與三個白話訊號">新手</button>' +
-            '<button type="button" id="pl-view-expert" title="顯示完整 5+5 儀表板與原始數據">專業</button>' +
-          '</span>' +
-          '<div class="pl-actions">' +
-            '<button type="button" class="pl-btn" id="pl-refresh">↻ 重新整理</button>' +
-            '<button type="button" class="pl-btn wd" id="pl-push-wd" title="將廣度／體質推送到 WaveDeck">→ WD</button>' +
-            '<button type="button" class="pl-btn wd" id="pl-ai-sum" title="本機 LLM 盤面摘要（/ai/local）">AI 摘要</button>' +
-            '<button type="button" class="pl-btn" data-go="decision" title="開啟策略決策中心">決策</button>' +
-            '<button type="button" class="pl-btn primary" data-go="chart">圖表</button>' +
-          '</div></div>' +
+          '<div class="pl-head">' +
+            '<div class="pl-head-start"><div class="pl-head-lead">' +
+              '<div class="pl-title">市場總覽 <span id="pl-layout-probe" style="font-size:10px;font-weight:700;letter-spacing:.03em;padding:1px 7px;border-radius:999px;border:1px solid rgba(34,211,238,.45);background:rgba(34,211,238,.12);color:#67e8f9;vertical-align:middle">實測…</span></div>' +
+              '<span class="pl-wd" id="pl-wd">WaveDeck 覆寫：—</span>' +
+            '</div>' +
+            '<div class="pl-sub" id="pl-sub">官方資料 · 一行五框 × 上下兩區 · ' + LAYOUT_ANCHOR + '</div></div>' +
+            '<div class="pl-head-meta" id="pl-head-meta"></div>' +
+            '<div class="pl-head-end">' +
+              '<span class="pl-mode-toggle" role="group" aria-label="總覽顯示模式">' +
+                '<button type="button" id="pl-view-beginner" title="只看市場狀態、行動提示與三個白話訊號">新手</button>' +
+                '<button type="button" id="pl-view-expert" title="顯示完整 5+5 儀表板與原始數據">專業</button>' +
+              '</span>' +
+              '<div class="pl-actions">' +
+                '<button type="button" class="pl-btn" id="pl-refresh">↻ 重新整理</button>' +
+                '<button type="button" class="pl-btn wd" id="pl-push-wd" title="將廣度／體質推送到 WaveDeck">→ WD</button>' +
+                '<button type="button" class="pl-btn wd" id="pl-ai-sum" title="本機 LLM 盤面摘要（/ai/local）">AI 摘要</button>' +
+                '<button type="button" class="pl-btn" data-go="decision" title="開啟策略決策中心">決策</button>' +
+                '<button type="button" class="pl-btn primary" data-go="chart">圖表</button>' +
+              '</div>' +
+            '</div></div>' +
           '<div class="pl-ai" id="pl-ai" style="display:none">' +
             '<h4><span>大盤 AI 即時語意 <span id="pl-ai-st" style="font-weight:600;color:var(--tlo)"></span></span>' +
               '<span class="pl-ai-tools"><button type="button" class="pl-ai-speak" id="pl-ai-speak" aria-pressed="false">🎙 約15秒朗讀</button>' +
@@ -1654,7 +1662,51 @@
       });
       syncModeControls();
     }
+    ensureHeadChrome();
     return $('pl-body');
+  }
+
+  function ensureHeadChrome() {
+    var root = $('pl-root');
+    if (!root) return;
+    var head = root.querySelector('.pl-head');
+    if (!head) return;
+    var start = head.querySelector('.pl-head-start');
+    var end = head.querySelector('.pl-head-end');
+    var lead = head.querySelector('.pl-head-lead') || root.querySelector('.pl-head-lead');
+    var sub = $('pl-sub');
+    var meta = $('pl-head-meta') || root.querySelector('.pl-head-meta');
+    var mode = head.querySelector('.pl-mode-toggle') || root.querySelector('.pl-mode-toggle');
+    var actions = head.querySelector('.pl-actions') || root.querySelector('.pl-actions');
+    if (!start) {
+      start = document.createElement('div');
+      start.className = 'pl-head-start';
+    }
+    if (!end) {
+      end = document.createElement('div');
+      end.className = 'pl-head-end';
+    }
+    if (!meta) {
+      meta = document.createElement('div');
+      meta.className = 'pl-head-meta';
+      meta.id = 'pl-head-meta';
+    } else {
+      meta.classList.add('pl-head-meta');
+      meta.id = 'pl-head-meta';
+    }
+    if (lead && lead.parentNode !== start) start.appendChild(lead);
+    if (sub && sub.parentNode !== start) start.appendChild(sub);
+    if (mode && mode.parentNode !== end) end.appendChild(mode);
+    if (actions && actions.parentNode !== end) end.appendChild(actions);
+    if (start.parentNode !== head) head.insertBefore(start, head.firstChild);
+    else if (head.firstChild !== start) head.insertBefore(start, head.firstChild);
+    if (meta.parentNode !== head || start.nextElementSibling !== meta) {
+      head.insertBefore(meta, start.nextSibling);
+    }
+    if (end.parentNode !== head || meta.nextElementSibling !== end) {
+      if (meta.nextSibling) head.insertBefore(end, meta.nextSibling);
+      else head.appendChild(end);
+    }
   }
 
   function syncModeControls() {
@@ -4021,11 +4073,14 @@
     if (consistent == null && p.decisionSummary && p.decision) {
       consistent = JSON.stringify(p.decisionSummary.regime || {}) === JSON.stringify((p.decision.regime) || {});
     }
+    var summaryNote = consistent === false ? '摘要／全文不一致'
+      : (consistent === true ? '摘要／全文一致' : '僅有摘要，全文未提供');
     var revision = (decision.contractVersion != null ? decision.contractVersion
       : (snap.contractVersion != null ? snap.contractVersion : p.contractVersion));
     var snapId = shortSnapshotId([asOf, snap.generatedAt, p.updatedAt, completeness]);
-    var valid = (fresh && fresh.freshness === 'stale') ? '過期'
-      : ((completeness != null && completeness < 80) ? '降級' : '有效');
+    var valid = !(fresh && fresh.freshness) ? '尚未確認'
+      : (fresh.freshness === 'stale' ? '過期'
+        : ((completeness != null && completeness < 80) ? '降級' : '有效'));
     function bit(label, value) { return label + '<b>' + value + '</b>'; }
     function paint(jobLabel) {
       if (jobLabel) _lastJobLabel = jobLabel;
@@ -4034,19 +4089,19 @@
         bit('盤別：', sessionLabel(pickSession(snap, fresh))),
         bit('來源品質：', pickSourceQuality(snap, fresh)),
         bit('決策資料完整度：', completeness == null ? '—' : completeness + '%'),
-        (consistent === false ? '摘要／全文不一致' : '摘要／全文一致'),
+        summaryNote,
         bit('快照：', snapId),
-        bit('修訂：', revision == null ? '—' : String(revision)),
+        bit('修訂：', revision == null || revision === '' ? '未提供' : String(revision)),
         bit('效期：', valid),
         bit('更新工作：', _lastJobLabel)
       ];
       host.hidden = false;
       host.title = bits.map(function (row) { return String(row).replace(/<[^>]+>/g, ''); }).join(' · ');
       host.innerHTML =
+        '<button type="button" class="pl-head-jobs" id="pl-head-jobs">查看更新工作</button>' +
         '<span class="pl-head-meta-track">' + bits.map(function (row, i) {
           return (i ? '<span aria-hidden="true"> · </span>' : '') + row;
-        }).join('') + '</span>' +
-        '<button type="button" class="pl-head-jobs" id="pl-head-jobs">查看更新工作</button>';
+        }).join('') + '</span>';
       var jobsBtn = $('pl-head-jobs');
       if (jobsBtn) {
         jobsBtn.onclick = function () {
