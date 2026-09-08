@@ -301,15 +301,41 @@ function Assert-ListenerMatchesPin {
   }
 }
 
+function Get-PorcelainPath([string]$Line) {
+  if (-not $Line -or $Line.Length -lt 4) { return '' }
+  $path = $Line.Substring(3).Trim()
+  if ($path.StartsWith('"') -and $path.EndsWith('"') -and $path.Length -ge 2) {
+    $path = $path.Substring(1, $path.Length - 2)
+  }
+  return ($path -replace '\\', '/')
+}
+
+function Test-IgnorableUpdateDirt([string]$Line) {
+  # Server runs dirty tracked market CSVs / sqlite / name backups. Never stash or discard them;
+  # just do not let that runtime dirt block a fast-forward that does not touch those files.
+  $p = Get-PorcelainPath $Line
+  if (-not $p) { return $false }
+  if ($p -match '^data/[^/]+\.(csv|sqlite3)$') { return $true }
+  if ($p -match '^data/[^/]*backup[^/]*\.json$') { return $true }
+  if ($p -match '^\.loop-engineering/') { return $true }
+  return $false
+}
+
 Write-Banner
 
 if ($Pull -or $UpdateOnly) {
   Write-Host "[update] fetch + fast-forward only: $TipBranch"
   $dirty = @(git status --porcelain 2>$null)
   if ($LASTEXITCODE -ne 0) { throw "git status failed" }
-  if ($dirty.Count -gt 0) {
-    git status --short
-    throw "BLOCK: worktree is dirty. Commit or preserve changes explicitly; updater will not stash, force, reset, or discard them."
+  $blocking = @($dirty | Where-Object { -not (Test-IgnorableUpdateDirt $_) })
+  $ignored = @($dirty | Where-Object { Test-IgnorableUpdateDirt $_ })
+  if ($ignored.Count -gt 0) {
+    Write-Host '[update] ignore runtime data dirt (csv/sqlite/backup); not stashed, not discarded'
+    $ignored | ForEach-Object { Write-Host "       $_" }
+  }
+  if ($blocking.Count -gt 0) {
+    $blocking | ForEach-Object { Write-Host $_ }
+    throw "BLOCK: worktree has non-data changes. Commit or preserve them explicitly; updater will not stash, force, reset, or discard them."
   }
   git fetch origin $TipBranch
   if ($LASTEXITCODE -ne 0) { throw "git fetch failed" }
