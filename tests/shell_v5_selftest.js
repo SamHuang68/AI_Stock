@@ -648,6 +648,8 @@ ok(/id="pl-head-meta"/.test(pl) && /pl-head-lead/.test(pl) && /pl-head-meta-trac
   /overflow-x:auto/.test(pl) && /white-space:nowrap/.test(pl) &&
   /flex-wrap:nowrap;overflow:hidden/.test(pl) &&
   /MarketFreshness\.snapshotSummary/.test(pl) &&
+  /function pickSession/.test(pl) && /twse-mis/.test(pl) &&
+  /var _lastMacro = null/.test(pl) && /var _lastJobLabel/.test(pl) &&
   !/#pl-root \.pl-head-meta-track\{font-size:8px\}/.test(pl),
   'pulse 來源長框收入標題列中間空白，橫向捲動不縮小字');
 ok(/MOBILE_LAYOUT_CONTRACT = '2col-scroll'/.test(pl) &&

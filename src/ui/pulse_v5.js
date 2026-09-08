@@ -30,6 +30,7 @@
   var flashQ = '';      /* 快訊關鍵字（代號／標題） */
   var watchMkt = 'ALL'; /* ALL | TW | US */
   var _lastJobLabel = '待命';
+  var _lastMacro = null;
   var _prevBand = null;
   var beginnerAdvanced = false;
   var aiSummaryStarted = false;
@@ -3962,6 +3963,17 @@
     return ((a >>> 0).toString(16) + b.toString(16) + '000000000000').slice(0, 12);
   }
 
+  function pickSession(snap, fresh) {
+    var status = (snap && snap.sourceStatus) || {};
+    var twse = status['twse-mis'] || status.twse;
+    if (twse && twse.sessions && twse.sessions.length) return twse.sessions[0];
+    var q = snap && snap.quotes && snap.quotes['^TWII'];
+    var m = q && q.market;
+    if (m && m.session) return m.session;
+    if (q && q.session) return q.session;
+    return (fresh && fresh.session) || (snap && snap.session);
+  }
+
   function pickSourceQuality(snap, fresh) {
     var status = (snap && snap.sourceStatus) || {};
     var keys = Object.keys(status);
@@ -4018,7 +4030,7 @@
       if (jobLabel) _lastJobLabel = jobLabel;
       var bits = [
         bit('行情最新來源時間：', formatTaipeiClock(asOf)),
-        bit('盤別：', sessionLabel((fresh && fresh.session) || snap.session || p.session)),
+        bit('盤別：', sessionLabel(pickSession(snap, fresh))),
         bit('來源品質：', pickSourceQuality(snap, fresh)),
         bit('決策資料完整度：', completeness == null ? '—' : completeness + '%'),
         (consistent === false ? '摘要／全文不一致' : '摘要／全文一致'),
