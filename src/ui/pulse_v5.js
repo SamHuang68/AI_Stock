@@ -29,7 +29,7 @@
   var flashMkt = 'ALL'; /* ALL | TW | US */
   var flashQ = '';      /* 快訊關鍵字（代號／標題） */
   var watchMkt = 'ALL'; /* ALL | TW | US */
-  var _lastMacro = null;
+  var _lastJobLabel = '待命';
   var _prevBand = null;
   var beginnerAdvanced = false;
   var aiSummaryStarted = false;
@@ -110,10 +110,25 @@
       '#pl-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);' +
         'width:100%;max-width:none;margin:0;min-width:0;box-sizing:border-box;' +
         'flex:1;min-height:0;display:flex;flex-direction:column}' +
-      /* 單列微標題 */
-      '#pl-root .pl-head{display:flex;align-items:center;justify-content:space-between;gap:8px;' +
-        'margin-bottom:3px;min-width:0;flex:0 0 auto}' +
-      '#pl-root .pl-head > div:first-child{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}' +
+      /* 單列微標題：長契約列吃中間空白；文字 nowrap 橫向捲，不縮小、不佔 5+5 高度 */
+      '#pl-root .pl-head{display:flex;align-items:center;justify-content:flex-start;gap:8px;' +
+        'margin-bottom:3px;min-width:0;flex:0 0 auto;flex-wrap:nowrap;overflow:hidden}' +
+      '#pl-root .pl-head-lead{min-width:0;flex:0 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:nowrap}' +
+      '#pl-root .pl-head-lead .pl-title{flex:0 0 auto;white-space:nowrap}' +
+      '#pl-root .pl-head-lead .pl-sub{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#pl-root .pl-head-meta{flex:1 1 0;min-width:12em;max-width:100%;display:flex;align-items:center;gap:8px;' +
+        'margin:0;padding:2px 8px;border:1px solid rgba(245,197,24,.38);border-radius:5px;' +
+        'background:rgba(8,14,24,.55);overflow:hidden;white-space:nowrap}' +
+      '#pl-root .pl-head-meta[hidden]{display:none!important}' +
+      '#pl-root .pl-head-meta-track{display:block;flex:1 1 auto;min-width:0;overflow-x:auto;overflow-y:hidden;' +
+        'white-space:nowrap;scrollbar-width:thin;overscroll-behavior-x:contain;' +
+        'font-size:10px;line-height:1.35;color:#d7e3f2;letter-spacing:0}' +
+      '#pl-root .pl-head-meta-track::-webkit-scrollbar{height:4px}' +
+      '#pl-root .pl-head-meta-track::-webkit-scrollbar-thumb{background:#3a4f68;border-radius:4px}' +
+      '#pl-root .pl-head-meta-track b{color:#fde68a;font-weight:700}' +
+      '#pl-root .pl-head-jobs{flex:0 0 auto;padding:1px 7px;border:1px solid #3a4f68;border-radius:4px;' +
+        'background:#0b1423;color:#dbe7f5;font:700 9px/1.3 "JetBrains Mono",monospace;cursor:pointer;white-space:nowrap}' +
+      '#pl-root .pl-head-jobs:hover{border-color:var(--gold-m);color:var(--gold)}' +
       '#pl-root .pl-kicker{font-size:9px;color:var(--gold);letter-spacing:1.2px;margin:0;font-weight:700}' +
       '#pl-root .pl-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
       '#pl-root .pl-sub{font-size:9px;color:var(--tlo);margin:0}' +
@@ -659,8 +674,9 @@
       '@media(orientation:landscape) and (max-height:540px) and (pointer:coarse){' +
         '#view-pulse.sv-panel.on{padding:3px 5px 5px}' +
         '#pl-root{-webkit-text-size-adjust:100%;text-size-adjust:100%}' +
-        '#pl-root .pl-head{gap:4px;margin-bottom:2px}' +
-        '#pl-root .pl-head>div:first-child{gap:4px}' +
+        '#pl-root .pl-head{gap:4px;margin-bottom:2px;flex-wrap:nowrap}' +
+        '#pl-root .pl-head-lead{gap:4px}' +
+        '#pl-root .pl-head-meta{padding:1px 6px}' +
         '#pl-root .pl-title{font-size:12px}' +
         '#pl-root .pl-sub{font-size:7px}' +
         '#pl-root .pl-actions{gap:2px}' +
@@ -781,8 +797,9 @@
         '#view-pulse.sv-panel.on{height:auto;min-height:100%;overflow:visible;display:block!important;padding:6px 8px 18px}' +
         '#mount-pulse,#mount-pulse.sv-mount,#pl-root{height:auto;min-height:0;display:block;overflow:visible}' +
         '#pl-body.pl-mode-expert{display:block;overflow:visible;padding-bottom:12px}' +
-        '#pl-root .pl-head{align-items:flex-start;gap:6px}' +
-        '#pl-root .pl-head>div:first-child{gap:5px}' +
+        '#pl-root .pl-head{align-items:flex-start;gap:6px;flex-wrap:wrap}' +
+        '#pl-root .pl-head-lead{gap:5px;flex-wrap:wrap}' +
+        '#pl-root .pl-head-meta{flex:1 1 100%;min-width:0}' +
         '#pl-root .pl-title{font-size:17px}' +
         '#pl-root .pl-sub{font-size:10px;line-height:1.4}' +
         '#pl-root .pl-actions{justify-content:flex-start;flex-wrap:wrap;gap:5px}' +
@@ -1576,11 +1593,13 @@
     if (!$('pl-root')) {
       mount.innerHTML =
         '<div id="pl-root">' +
-          '<div class="pl-head"><div>' +
+          '<div class="pl-head"><div class="pl-head-lead">' +
             '<div class="pl-title">市場總覽 <span id="pl-layout-probe" style="font-size:10px;font-weight:700;letter-spacing:.03em;padding:1px 7px;border-radius:999px;border:1px solid rgba(34,211,238,.45);background:rgba(34,211,238,.12);color:#67e8f9;vertical-align:middle">實測…</span></div>' +
             '<span class="pl-wd" id="pl-wd">WaveDeck 覆寫：—</span>' +
             '<div class="pl-sub" id="pl-sub">官方資料 · 一行五框 × 上下兩區 · ' + LAYOUT_ANCHOR + '</div>' +
-          '</div><div class="pl-actions">' +
+          '</div>' +
+          '<div class="pl-head-meta" id="pl-head-meta" hidden></div>' +
+          '<div class="pl-actions">' +
             '<span class="pl-mode-toggle" role="group" aria-label="總覽顯示模式">' +
               '<button type="button" id="pl-view-beginner" title="只看市場狀態、行動提示與三個白話訊號">新手</button>' +
               '<button type="button" id="pl-view-expert" title="顯示完整 5+5 儀表板與原始數據">專業</button>' +
@@ -2652,6 +2671,13 @@
     var advTabs = renderTrendTabs(tone, BREADTH_TREND_TABS);
     var txfSess = txf.sessionLabel || (txf.session === 'night' ? '夜盤' : (txf.session === 'day' ? '日盤' : ''));
     var idxTip = '趨勢量化：vs前日／vs5日均／動能分／近20日Z／連續漲跌（與成交金額量能同構）';
+    function quoteFreshSuffix(q) {
+      var m = q && q.market;
+      if (!m || !m.asOf) return '';
+      return ' · asOf ' + String(m.asOf).replace('T', ' ').slice(0, 19) +
+        (m.session ? ' · ' + m.session : '') +
+        (m.source ? ' · ' + m.source : '');
+    }
     var t00Fb = chgWithPct(t00, 2, 2);
     var o00Fb = chgWithPct(o00, 2, 2);
     /* Basis＝台指期 − 加權（點）；優先用後端 strip.basisPts／basisPct */
@@ -2681,20 +2707,20 @@
     var txfName = txf.name || '台指期近月';
     var txfTip = '即時報價＝TAIFEX MIS 台指期近月' +
       (txfSess ? ('（' + txfSess + '）') : '') +
-      (txfSrc ? (' · source ' + txfSrc) : '') +
+      (txfSrc ? (' · source ' + txfSrc) : '') + quoteFreshSuffix(txf) +
       '｜趨勢量化＝FinMind 近月連續（代號 __TXF__，日線）覆寫最新點為當前報價｜' +
       'Basis＝期貨−加權現貨（盤後＝夜盤期貨−加權最新／昨收）｜顯示名：' + txfName;
     return '<div class="pl-strip">' +
       renderTrendCell({
         k: '加權指數 TAIEX', hero: true,
         vHtml: fmt(t00.price, 2),
-        trend: t00Tr, fallbackSub: t00Fb, tip: idxTip + ' · 加權',
+        trend: t00Tr, fallbackSub: t00Fb, tip: idxTip + ' · 加權' + quoteFreshSuffix(t00),
         go: 'chart', sym: '^TWII', mkt: 'TW'
       }) +
       renderTrendCell({
         k: '櫃買指數 OTC',
         vHtml: fmt(o00.price, 2),
-        trend: o00Tr, fallbackSub: o00Fb, tip: idxTip + ' · 櫃買',
+        trend: o00Tr, fallbackSub: o00Fb, tip: idxTip + ' · 櫃買' + quoteFreshSuffix(o00),
         go: 'chart', sym: '^TWOII', mkt: 'TW'
       }) +
       renderTrendCell({
@@ -3880,6 +3906,149 @@
     });
   }
 
+  function formatTaipeiClock(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return String(iso).replace('T', ' ').slice(0, 19);
+    var parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Taipei',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false
+    }).formatToParts(d);
+    function part(type) {
+      var row = parts.find(function (p) { return p.type === type; });
+      return row ? row.value : '';
+    }
+    var y = part('year'), m = part('month'), day = part('day');
+    var hh = part('hour'), mm = part('minute'), ss = part('second');
+    if (!y) return String(iso).replace('T', ' ').slice(0, 19) + '（臺北）';
+    return y + '/' + m + '/' + day + ' ' + hh + ':' + mm + ':' + ss + '（臺北）';
+  }
+
+  function sessionLabel(session) {
+    var s = String(session || '').toLowerCase();
+    if (s === 'regular' || s === 'day' || s === 'regular_session') return '一般交易時段';
+    if (s === 'night' || s === 'overnight' || s === 'afterhours') return '夜盤';
+    if (s === 'mixed') return '混合盤別';
+    if (s === 'pre' || s === 'premarket') return '盤前';
+    return s && s !== 'unknown' ? session : '未知';
+  }
+
+  function sourceLabel(source) {
+    var key = String(source || '').toLowerCase();
+    if (key === 'twse-mis' || key === 'twse') return '證交所即時';
+    if (key === 'taifex-mis' || key === 'taifex') return '期交所即時';
+    if (key === 'tpex' || key === 'tpex-mis') return '櫃買即時';
+    if (key === 'yahoo') return 'Yahoo';
+    return source || '來源未標';
+  }
+
+  function freshnessLabel(freshness) {
+    if (freshness === 'fresh') return '即時';
+    if (freshness === 'delayed') return '延遲';
+    if (freshness === 'stale') return '過期';
+    return '未知';
+  }
+
+  function shortSnapshotId(parts) {
+    var raw = (parts || []).join('|');
+    var a = 2166136261;
+    for (var i = 0; i < raw.length; i++) {
+      a ^= raw.charCodeAt(i);
+      a = Math.imul(a, 16777619);
+    }
+    var b = Math.imul(a ^ raw.length, 668265263) >>> 0;
+    return ((a >>> 0).toString(16) + b.toString(16) + '000000000000').slice(0, 12);
+  }
+
+  function pickSourceQuality(snap, fresh) {
+    var status = (snap && snap.sourceStatus) || {};
+    var keys = Object.keys(status);
+    if (!keys.length) {
+      var fallback = fresh && fresh.freshness ? freshnessLabel(fresh.freshness) : '未知';
+      return '來源未標：' + fallback;
+    }
+    var prefer = ['twse-mis', 'twse', 'taifex-mis', 'taifex', 'tpex-mis', 'yahoo'];
+    var key = prefer.find(function (k) { return status[k]; }) || keys[0];
+    var row = status[key] || {};
+    return sourceLabel(key) + '：' + freshnessLabel(row.freshness || (fresh && fresh.freshness));
+  }
+
+  function renderHeadMeta(pack) {
+    var host = $('pl-head-meta');
+    if (!host) return;
+    var p = (pack && pack.pulse) || {};
+    var snap = p.marketSnapshot || {};
+    if (window.MarketData && MarketData.fromPulse) MarketData.fromPulse(p);
+    var market = window.MarketData && MarketData.get ? MarketData.get() : null;
+    if (market && market.quotes && Object.keys(market.quotes).length) {
+      snap = {
+        quotes: market.quotes,
+        generatedAt: market.generatedAt || snap.generatedAt,
+        marketAsOf: market.marketAsOf || snap.marketAsOf || p.updatedAt,
+        session: market.session || snap.session,
+        sourceStatus: market.sourceStatus || snap.sourceStatus,
+        contractVersion: market.contractVersion || snap.contractVersion,
+        freshness: market.freshness || snap.freshness
+      };
+    }
+    var fresh = (window.MarketFreshness && MarketFreshness.snapshotSummary)
+      ? MarketFreshness.snapshotSummary(snap.quotes ? snap : {
+          quotes: {}, marketAsOf: p.updatedAt, session: snap.session || 'unknown',
+          generatedAt: snap.generatedAt
+        })
+      : (snap.freshness || null);
+    var asOf = (fresh && fresh.worstAsOf) || snap.marketAsOf || p.updatedAt;
+    var decision = (window.DecisionData && DecisionData.get && DecisionData.get().summary) || p.decisionSummary || {};
+    var quality = decision.dataQuality || {};
+    var completeness = p.dataCompleteness != null ? Math.round(Number(p.dataCompleteness))
+      : (quality.completeness != null ? Math.round(Number(quality.completeness) * 100) : null);
+    var consistent = quality.scopeConsistency;
+    if (consistent == null && p.decisionSummary && p.decision) {
+      consistent = JSON.stringify(p.decisionSummary.regime || {}) === JSON.stringify((p.decision.regime) || {});
+    }
+    var revision = (decision.contractVersion != null ? decision.contractVersion
+      : (snap.contractVersion != null ? snap.contractVersion : p.contractVersion));
+    var snapId = shortSnapshotId([asOf, snap.generatedAt, p.updatedAt, completeness]);
+    var valid = (fresh && fresh.freshness === 'stale') ? '過期'
+      : ((completeness != null && completeness < 80) ? '降級' : '有效');
+    function bit(label, value) { return label + '<b>' + value + '</b>'; }
+    function paint(jobLabel) {
+      if (jobLabel) _lastJobLabel = jobLabel;
+      var bits = [
+        bit('行情最新來源時間：', formatTaipeiClock(asOf)),
+        bit('盤別：', sessionLabel((fresh && fresh.session) || snap.session || p.session)),
+        bit('來源品質：', pickSourceQuality(snap, fresh)),
+        bit('決策資料完整度：', completeness == null ? '—' : completeness + '%'),
+        (consistent === false ? '摘要／全文不一致' : '摘要／全文一致'),
+        bit('快照：', snapId),
+        bit('修訂：', revision == null ? '—' : String(revision)),
+        bit('效期：', valid),
+        bit('更新工作：', _lastJobLabel)
+      ];
+      host.hidden = false;
+      host.title = bits.map(function (row) { return String(row).replace(/<[^>]+>/g, ''); }).join(' · ');
+      host.innerHTML =
+        '<span class="pl-head-meta-track">' + bits.map(function (row, i) {
+          return (i ? '<span aria-hidden="true"> · </span>' : '') + row;
+        }).join('') + '</span>' +
+        '<button type="button" class="pl-head-jobs" id="pl-head-jobs">查看更新工作</button>';
+      var jobsBtn = $('pl-head-jobs');
+      if (jobsBtn) {
+        jobsBtn.onclick = function () {
+          if (window.ShellV5 && typeof window.ShellV5.go === 'function') ShellV5.go('settings');
+          else location.hash = '#settings';
+        };
+      }
+    }
+    paint(_lastJobLabel);
+    jget('/sync/status').then(function (st) {
+      if (!st) return;
+      paint(st.running ? '進行中' : (st.lastOk ? '已完成' : '待命'));
+    }).catch(function () {});
+  }
+
   function render(pack) {
     var body = ensureMount();
     if (!body) return;
@@ -3895,6 +4064,7 @@
         (p.date ? ' · 廣度日 ' + p.date : '') +
         (p.updatedAt ? ' · ' + String(p.updatedAt).replace('T', ' ') : '');
     }
+    renderHeadMeta(pack);
     _lastMacro = buildMacroFromPack(pack);
     maybeAnnounceFlip(_lastMacro);
     pushWd(false);
