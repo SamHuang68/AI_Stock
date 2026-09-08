@@ -906,8 +906,11 @@ ok(/Resolve-StockPython/.test(goPs) && /Test-ToolingPython/.test(goPs) &&
   /PULSE_LAYOUT_ANCHOR_3cab212/.test(goPs),
   'go.ps1 pins an absolute Python, deprioritizes tooling venvs, and launches a titled live server console');
 ok(/git status --porcelain/.test(goPs) && /git merge --ff-only/.test(goPs) &&
+  /Test-IgnorableUpdateDirt/.test(goPs) && /Get-PorcelainPath/.test(goPs) &&
+  /data\/\[\^\/\]\+\\\.\(csv\|sqlite3\)/.test(goPs) && /\.loop-engineering/.test(goPs) &&
+  /ignore runtime data dirt/.test(goPs) && /non-data changes/.test(goPs) &&
   !/git reset --hard/.test(goPs) && !/git stash/.test(goPs),
-  'go.ps1 preserves dirty work and only permits fast-forward updates');
+  'go.ps1 preserves dirty work, ignores runtime data dirt, and only permits fast-forward updates');
 
 const srv = fs.readFileSync(path.join(root, 'server/server.py'), 'utf8');
 ok(/X-Stock-Terminal-UX/.test(srv) && /tipUx/.test(srv) && /\/#pulse/.test(srv),
