@@ -111,13 +111,13 @@
       '#pl-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);' +
         'width:100%;max-width:none;margin:0;min-width:0;box-sizing:border-box;' +
         'flex:1;min-height:0;display:flex;flex-direction:column}' +
-      /* 單列微標題：長契約列吃中間空白；文字 nowrap 橫向捲，不縮小、不佔 5+5 高度 */
+      /* 單列：標題｜時間戳｜金框填滿「新手」左側空白｜新手／專業｜其他按鈕 */
       '#pl-root .pl-head{display:flex;align-items:center;justify-content:flex-start;gap:8px;' +
         'margin-bottom:3px;min-width:0;flex:0 0 auto;flex-wrap:nowrap;overflow:hidden}' +
-      '#pl-root .pl-head-lead{min-width:0;flex:0 1 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:nowrap}' +
+      '#pl-root .pl-head-lead{min-width:0;flex:0 0 auto;display:flex;align-items:baseline;gap:8px;flex-wrap:nowrap}' +
       '#pl-root .pl-head-lead .pl-title{flex:0 0 auto;white-space:nowrap}' +
-      '#pl-root .pl-head-lead .pl-sub{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#pl-root .pl-head-meta{flex:1 1 0;min-width:12em;max-width:100%;display:flex;align-items:center;gap:8px;' +
+      '#pl-root .pl-sub{flex:0 1 auto;max-width:22em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#pl-root .pl-head-meta{flex:1 1 0%;min-width:0;display:flex;align-items:center;gap:8px;' +
         'margin:0;padding:2px 8px;border:1px solid rgba(245,197,24,.38);border-radius:5px;' +
         'background:rgba(8,14,24,.55);overflow:hidden;white-space:nowrap}' +
       '#pl-root .pl-head-meta[hidden]{display:none!important}' +
@@ -677,8 +677,8 @@
         '#pl-root{-webkit-text-size-adjust:100%;text-size-adjust:100%}' +
         '#pl-root .pl-head{gap:4px;margin-bottom:2px;flex-wrap:nowrap}' +
         '#pl-root .pl-head-lead{gap:4px}' +
-        '#pl-root .pl-head-lead .pl-sub{display:none}' +
-        '#pl-root .pl-head-meta{padding:1px 6px;min-width:0}' +
+        '#pl-root .pl-sub{display:none}' +
+        '#pl-root .pl-head-meta{padding:1px 6px;min-width:0;flex:1 1 0%}' +
         '#pl-root .pl-title{font-size:12px}' +
         '#pl-root .pl-sub{font-size:7px}' +
         '#pl-root .pl-actions{gap:2px}' +
@@ -799,12 +799,12 @@
         '#view-pulse.sv-panel.on{height:auto;min-height:100%;overflow:visible;display:block!important;padding:6px 8px 18px}' +
         '#mount-pulse,#mount-pulse.sv-mount,#pl-root{height:auto;min-height:0;display:block;overflow:visible}' +
         '#pl-body.pl-mode-expert{display:block;overflow:visible;padding-bottom:12px}' +
-        '#pl-root .pl-head{align-items:flex-start;gap:6px;flex-wrap:wrap;overflow:visible}' +
-        '#pl-root .pl-head-lead{order:1;flex:1 1 auto;gap:5px;flex-wrap:nowrap;min-width:0}' +
-        '#pl-root .pl-head-meta{order:3;flex:1 1 100%;min-width:0}' +
+        '#pl-root .pl-head{align-items:center;gap:6px;flex-wrap:nowrap;overflow:hidden}' +
+        '#pl-root .pl-head-lead{flex:0 0 auto;gap:5px;flex-wrap:nowrap;min-width:0}' +
+        '#pl-root .pl-sub{display:none}' +
+        '#pl-root .pl-head-meta{flex:1 1 0%;min-width:0}' +
         '#pl-root .pl-title{font-size:17px}' +
-        '#pl-root .pl-sub{font-size:10px;line-height:1.4}' +
-        '#pl-root .pl-actions{order:2;justify-content:flex-start;flex-wrap:wrap;gap:5px}' +
+        '#pl-root .pl-actions{justify-content:flex-start;flex-wrap:wrap;gap:5px}' +
         '#pl-root .pl-btn,#pl-root .pl-mode-toggle button{font-size:11px;min-height:30px;padding:5px 9px}' +
         '#pl-root .pl-strip{display:flex;gap:7px;overflow-x:auto;overflow-y:hidden;padding:1px 1px 7px;' +
           'scroll-snap-type:x proximity;scrollbar-width:thin;overscroll-behavior-x:contain}' +
@@ -1598,14 +1598,14 @@
           '<div class="pl-head"><div class="pl-head-lead">' +
             '<div class="pl-title">市場總覽 <span id="pl-layout-probe" style="font-size:10px;font-weight:700;letter-spacing:.03em;padding:1px 7px;border-radius:999px;border:1px solid rgba(34,211,238,.45);background:rgba(34,211,238,.12);color:#67e8f9;vertical-align:middle">實測…</span></div>' +
             '<span class="pl-wd" id="pl-wd">WaveDeck 覆寫：—</span>' +
-            '<div class="pl-sub" id="pl-sub">官方資料 · 一行五框 × 上下兩區 · ' + LAYOUT_ANCHOR + '</div>' +
           '</div>' +
-          '<div class="pl-head-meta" id="pl-head-meta" hidden></div>' +
+          '<div class="pl-sub" id="pl-sub">官方資料 · 一行五框 × 上下兩區 · ' + LAYOUT_ANCHOR + '</div>' +
+          '<div class="pl-head-meta" id="pl-head-meta"></div>' +
+          '<span class="pl-mode-toggle" role="group" aria-label="總覽顯示模式">' +
+            '<button type="button" id="pl-view-beginner" title="只看市場狀態、行動提示與三個白話訊號">新手</button>' +
+            '<button type="button" id="pl-view-expert" title="顯示完整 5+5 儀表板與原始數據">專業</button>' +
+          '</span>' +
           '<div class="pl-actions">' +
-            '<span class="pl-mode-toggle" role="group" aria-label="總覽顯示模式">' +
-              '<button type="button" id="pl-view-beginner" title="只看市場狀態、行動提示與三個白話訊號">新手</button>' +
-              '<button type="button" id="pl-view-expert" title="顯示完整 5+5 儀表板與原始數據">專業</button>' +
-            '</span>' +
             '<button type="button" class="pl-btn" id="pl-refresh">↻ 重新整理</button>' +
             '<button type="button" class="pl-btn wd" id="pl-push-wd" title="將廣度／體質推送到 WaveDeck">→ WD</button>' +
             '<button type="button" class="pl-btn wd" id="pl-ai-sum" title="本機 LLM 盤面摘要（/ai/local）">AI 摘要</button>' +
