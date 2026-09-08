@@ -652,6 +652,12 @@ ok(/id="pl-head-meta"/.test(pl) && /pl-head-lead/.test(pl) && /pl-head-meta-trac
   /var _lastMacro = null/.test(pl) && /var _lastJobLabel/.test(pl) &&
   !/#pl-root \.pl-head-meta-track\{font-size:8px\}/.test(pl),
   'pulse 來源長框收入標題列中間空白，橫向捲動不縮小字');
+ok(/max-height:540px[\s\S]*pl-head-lead \.pl-sub\{display:none\}/.test(pl) &&
+  /max-height:540px[\s\S]*pl-head-meta\{padding:1px 6px;min-width:0\}/.test(pl) &&
+  /orientation:portrait\)\{[\s\S]*pl-head\{[^}]*overflow:visible/.test(pl) &&
+  /orientation:portrait\)\{[\s\S]*pl-head-meta\{order:3;flex:1 1 100%/.test(pl) &&
+  /orientation:portrait\)\{[\s\S]*pl-actions\{order:2/.test(pl),
+  'pulse 手機橫式把時間戳讓位給金框；直式標題／按鈕在上、金框單列橫捲在下');
 ok(/MOBILE_LAYOUT_CONTRACT = '2col-scroll'/.test(pl) &&
   /@media\(max-width:900px\) and \(orientation:portrait\)[\s\S]*pl-zone\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/.test(pl) &&
   /matchMedia\('\(max-width: 900px\) and \(orientation: portrait\)'\)/.test(pl) &&
