@@ -643,22 +643,25 @@ ok(/data-layout=/.test(pl) && /LAYOUT_CONTRACT/.test(pl) &&
   !/5col-2zone-flex/.test(pl) && !/enforceFiveCol/.test(pl),
   'pulse dash is known-good 5col-2zone + runtime probe (anchor 3cab212)');
 ok(/id="pl-head-meta"/.test(pl) && /pl-head-lead/.test(pl) && /pl-head-meta-track/.test(pl) &&
+  /pl-head-start/.test(pl) && /pl-head-end/.test(pl) && /ensureHeadChrome/.test(pl) &&
   /renderHeadMeta/.test(pl) && /formatTaipeiClock/.test(pl) &&
   /行情最新來源時間/.test(pl) && /查看更新工作/.test(pl) &&
+  /僅有摘要，全文未提供/.test(pl) && /尚未確認/.test(pl) &&
   /overflow-x:auto/.test(pl) && /white-space:nowrap/.test(pl) &&
-  /flex-wrap:nowrap;overflow:hidden/.test(pl) &&
-  /flex:1 1 0%/.test(pl) &&
-  /id="pl-head-meta"><\/div>'[\s\S]{0,80}pl-mode-toggle/.test(pl) &&
+  /grid-template-columns:max-content minmax\(0,1fr\) max-content/.test(pl) &&
+  /id="pl-head-meta"><\/div>'[\s\S]{0,80}pl-head-end/.test(pl) &&
+  /pl-head-end[\s\S]{0,80}pl-mode-toggle/.test(pl) &&
   /MarketFreshness\.snapshotSummary/.test(pl) &&
   /function pickSession/.test(pl) && /twse-mis/.test(pl) &&
   /var _lastMacro = null/.test(pl) && /var _lastJobLabel/.test(pl) &&
   !/#pl-root \.pl-head-meta-track\{font-size:8px\}/.test(pl) &&
+  !/#pl-root \.pl-head\{flex-wrap:wrap\}/.test(pl) &&
   !/order:3;flex:1 1 100%/.test(pl),
-  'pulse 金框緊貼新手左側空白，flex 填滿且不另開一列');
+  'pulse 金框用三欄 grid 填滿新手左側，不能另開一列');
 ok(/max-height:540px[\s\S]*#pl-root \.pl-sub\{display:none\}/.test(pl) &&
-  /max-height:540px[\s\S]*pl-head-meta\{padding:1px 6px;min-width:0;flex:1 1 0%\}/.test(pl) &&
-  /orientation:portrait\)\{[\s\S]*pl-head\{[^}]*flex-wrap:nowrap/.test(pl) &&
-  /orientation:portrait\)\{[\s\S]*pl-head-meta\{flex:1 1 0%/.test(pl) &&
+  /max-height:540px[\s\S]*pl-head-meta\{padding:1px 6px;min-width:0\}/.test(pl) &&
+  /orientation:portrait\)\{[\s\S]*pl-head\{[^}]*overflow:hidden/.test(pl) &&
+  /orientation:portrait\)\{[\s\S]*pl-head-meta\{min-width:0\}/.test(pl) &&
   /orientation:portrait\)\{[\s\S]*#pl-root \.pl-sub\{display:none\}/.test(pl),
   'pulse 手機橫直式金框都留在新手左側橫捲，不整列丟到按鈕下方');
 ok(/MOBILE_LAYOUT_CONTRACT = '2col-scroll'/.test(pl) &&
