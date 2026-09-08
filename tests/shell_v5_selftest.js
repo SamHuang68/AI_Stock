@@ -127,6 +127,11 @@ ok(/function applyMktCellTone/.test(polish) && /overwrite stale inline color/.te
   'market bar resets current-source color for TWSE/TAIFEX overrides');
 ok(/window\.MarketData/.test(marketData) && /marketData/.test(polish) && /\/market\/snapshot/.test(marketData),
   'market headline surfaces use one canonical snapshot/event store');
+ok(/attachFreshness/.test(marketData) && /worstAsOf/.test(marketData) &&
+  /src\/core\/market_freshness_v5\.js/.test(build) &&
+  /window\.MarketFreshness/.test(fs.readFileSync(path.join(root, 'src/core/market_freshness_v5.js'), 'utf8')) &&
+  /shellHealthText/.test(shell) && /MarketFreshness\.shellHealthText/.test(shell),
+  'Codex per-quote asOf freshness is wired into MarketData, build, and shell health');
 ok(/window\.DecisionData/.test(decisionData) && /inflight/.test(decisionData) && /decisionData/.test(decisionUi) &&
   /decisionSummary/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')) &&
   /decision_contract_version/.test(fs.readFileSync(path.join(root, 'src/ui/wavedeck_bridge_v5.js'), 'utf8')),
@@ -637,6 +642,22 @@ ok(/data-layout=/.test(pl) && /LAYOUT_CONTRACT/.test(pl) &&
   !/4col-priority/.test(pl) && !/max-width:1280/.test(pl) &&
   !/5col-2zone-flex/.test(pl) && !/enforceFiveCol/.test(pl),
   'pulse dash is known-good 5col-2zone + runtime probe (anchor 3cab212)');
+ok(/id="pl-head-meta"/.test(pl) && /pl-head-lead/.test(pl) && /pl-head-meta-track/.test(pl) &&
+  /renderHeadMeta/.test(pl) && /formatTaipeiClock/.test(pl) &&
+  /行情最新來源時間/.test(pl) && /查看更新工作/.test(pl) &&
+  /overflow-x:auto/.test(pl) && /white-space:nowrap/.test(pl) &&
+  /flex-wrap:nowrap;overflow:hidden/.test(pl) &&
+  /MarketFreshness\.snapshotSummary/.test(pl) &&
+  /function pickSession/.test(pl) && /twse-mis/.test(pl) &&
+  /var _lastMacro = null/.test(pl) && /var _lastJobLabel/.test(pl) &&
+  !/#pl-root \.pl-head-meta-track\{font-size:8px\}/.test(pl),
+  'pulse 來源長框收入標題列中間空白，橫向捲動不縮小字');
+ok(/max-height:540px[\s\S]*pl-head-lead \.pl-sub\{display:none\}/.test(pl) &&
+  /max-height:540px[\s\S]*pl-head-meta\{padding:1px 6px;min-width:0\}/.test(pl) &&
+  /orientation:portrait\)\{[\s\S]*pl-head\{[^}]*overflow:visible/.test(pl) &&
+  /orientation:portrait\)\{[\s\S]*pl-head-meta\{order:3;flex:1 1 100%/.test(pl) &&
+  /orientation:portrait\)\{[\s\S]*pl-actions\{order:2/.test(pl),
+  'pulse 手機橫式把時間戳讓位給金框；直式標題／按鈕在上、金框單列橫捲在下');
 ok(/MOBILE_LAYOUT_CONTRACT = '2col-scroll'/.test(pl) &&
   /@media\(max-width:900px\) and \(orientation:portrait\)[\s\S]*pl-zone\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/.test(pl) &&
   /matchMedia\('\(max-width: 900px\) and \(orientation: portrait\)'\)/.test(pl) &&
