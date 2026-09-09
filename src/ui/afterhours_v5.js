@@ -122,7 +122,6 @@
       '#ah-root table.ah-mv col.c-i{width:1.6em}#ah-root table.ah-mv col.c-cd{width:3.2em}' +
       '#ah-root table.ah-mv col.c-nm{width:auto}#ah-root table.ah-mv col.c-pct{width:9em}' +
       '#ah-root table.ah-mv td:nth-child(4),#ah-root table.ah-mv th:nth-child(4){white-space:nowrap;overflow:visible;text-overflow:unset}' +
-      '#ah-root table.ah-tbl .vz-rowbar{display:none!important}' +
       '#ah-body.ah-loading{display:flex;align-items:center}' +
       /* 手機直式：一行一個 frame 往下排，允許整頁垂直捲動 */
       '@media(max-width:900px) and (orientation:portrait){' +
@@ -146,6 +145,7 @@
           '#ah-root .ovn-embed th,#ah-root .ovn-embed td{white-space:normal;overflow:visible;text-overflow:unset}' +
         '#ah-root table.ah-tbl th,#ah-root table.ah-tbl td{overflow:visible;text-overflow:unset;white-space:nowrap}' +
         '#ah-root table.ah-mv td:nth-child(3),#ah-root table.ah-fut td:nth-child(2){white-space:normal}' +
+        '#ah-root table.ah-tbl .vz-rowbar{display:none!important}' +
         '#ah-root .ah-note{white-space:normal;overflow:visible;text-overflow:unset}' +
         '#ah-root .ah-inst-trend .lab>span{white-space:normal;overflow:visible;text-overflow:unset}' +
       '}' +
@@ -174,7 +174,7 @@
           '#ah-root .ah-inst-trend .chart .vz-xunit{display:none!important}' +
         '#ah-root .ah-inst-trend .chart .vz-spark-ax{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:0;padding:0;overflow:hidden}' +
         '#ah-root .ah-inst-trend .chart .vz-plot{grid-column:1;grid-row:1;border-left:0}' +
-        '#ah-root table.ah-tbl .vz-chip{display:none!important}' +
+        '#ah-root table.ah-tbl .vz-chip,#ah-root table.ah-tbl .vz-rowbar{display:none!important}' +
         '#ah-root table.ah-tbl th,#ah-root table.ah-tbl td{overflow:visible;text-overflow:unset;font-size:9px;padding:2px 3px}' +
         '#ah-root table.ah-mv col.c-pct{width:4.8em}' +
         '#ah-root table.ah-mv td:nth-child(4){font-size:10px;letter-spacing:-0.2px}' +
