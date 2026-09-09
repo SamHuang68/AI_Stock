@@ -480,6 +480,18 @@ ok(/自營/.test(ah) && /成交金額/.test(ah), 'afterhours strip has 成交／
 ok(/ah-ovn-host/.test(ah) && /overnightRenderInto/.test(ah) && /mountOvernightPanel/.test(ah) &&
   !/ah-ohlc/.test(ah),
   'afterhours left column embeds overnight panel (not crude OHLC)');
+ok(/grid-template-columns:minmax\(0,1fr\) minmax\(0,1\.25fr\)/.test(ah),
+  'afterhours desktop dash keeps five frames');
+ok(/@media\(max-width:900px\) and \(orientation:portrait\)[\s\S]*#ah-root \.ah-dash\{[^}]*grid-template-columns:1fr/.test(ah),
+  'afterhours portrait stacks one frame per row');
+ok(/#ah-root \.ah-inst-trend \.chart\{[^}]*overflow:hidden/.test(ah),
+  'afterhours inst spark is clipped inside the chart box');
+ok(/compact:\s*true/.test(ah),
+  'afterhours inst spark uses compact axes');
+ok(/@media\(max-width:900px\) and \(orientation:landscape\)[\s\S]*vz-pt[\s\S]*display:none/.test(ah),
+  'afterhours landscape hides spark peak labels so they cannot cover comment text');
+ok(/table class="ah-tbl ah-mv"/.test(ah) && /col class="c-pct"/.test(ah),
+  'afterhours rank tables reserve a visible percent column');
 const ovn = fs.readFileSync(path.join(root, 'src/chart/overnight_v3.js'), 'utf8');
 ok(/overnightRenderInto/.test(ovn) && /function renderInto/.test(ovn) && /ovn-embed/.test(ovn),
   'overnight exposes renderInto for afterhours embed');

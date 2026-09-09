@@ -97,25 +97,91 @@
         'text-align:center;display:flex;flex-direction:column;justify-content:center}' +
       '#ah-root .ah-inst4 .c .k{font-size:11px;color:var(--tlo)}' +
       '#ah-root .ah-inst4 .c .v{font-size:13px;font-weight:800;margin-top:1px;color:var(--thi)}' +
-      '#ah-root .ah-inst-trend{flex:1;min-height:48px;margin:0 0 2px;background:var(--bg);border:1px solid var(--border);' +
-        'border-radius:5px;padding:4px 6px;display:flex;flex-direction:column;min-width:0}' +
+      '#ah-root .ah-inst-trend{flex:0 0 auto;min-height:72px;margin:0 0 6px;background:var(--bg);border:1px solid var(--border);' +
+        'border-radius:5px;padding:4px 6px;display:flex;flex-direction:column;min-width:0;overflow:hidden;isolation:isolate}' +
       '#ah-root .ah-inst-trend .lab{font-size:10px;color:var(--tlo);flex:0 0 auto;margin-bottom:2px;' +
-        'display:flex;justify-content:space-between;gap:6px;align-items:baseline}' +
-      '#ah-root .ah-inst-trend .chart{flex:1;min-height:56px;overflow:visible;position:relative}' +
-      '#ah-root .ah-inst-trend .chart .vz-spark-ax{height:100%;min-height:56px;overflow:visible}' +
-      '#ah-root .ah-inst-trend .chart .vz-plot{overflow:visible}' +
-      '#ah-root .ah-inst-trend .chart .vz-pt{font-size:9px;z-index:4}' +
-      '#ah-root .ah-inst-trend .chart .vz-spark,#ah-root .ah-inst-trend .chart svg{width:100%!important;height:100%!important;min-height:36px}' +
-      '#ah-root .ah-inst-cmt{font-size:11px;line-height:1.45;color:var(--text);margin-top:2px;flex:0 0 auto}' +
+        'display:flex;justify-content:space-between;gap:6px;align-items:baseline;min-width:0}' +
+      '#ah-root .ah-inst-trend .lab>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#ah-root .ah-inst-trend .chart{flex:0 0 72px;height:72px;min-height:72px;max-height:88px;overflow:hidden;position:relative}' +
+      '#ah-root .ah-inst-trend .chart .vz-spark-ax{height:100%;min-height:0;max-height:100%;overflow:hidden}' +
+      '#ah-root .ah-inst-trend .chart .vz-plot,#ah-root .ah-inst-trend .chart .vz-spark-wrap{overflow:hidden;max-width:100%;max-height:100%}' +
+      '#ah-root .ah-inst-trend .chart .vz-pt{font-size:8px;z-index:4;max-width:calc(100% - 4px)}' +
+      '#ah-root .ah-inst-trend .chart .vz-spark,#ah-root .ah-inst-trend .chart svg{width:100%!important;height:100%!important;min-height:0;max-height:100%;overflow:hidden}' +
+      '#ah-root .ah-inst-cmt{font-size:11px;line-height:1.45;color:var(--text);margin-top:2px;flex:0 0 auto;' +
+        'position:relative;z-index:2;white-space:normal;overflow:visible;word-break:break-word}' +
       '#ah-root .ah-inst-cmt b{color:var(--gold);font-weight:700}' +
       '#ah-root .ah-inst-cmt .up{color:var(--red)}#ah-root .ah-inst-cmt .dn{color:var(--green)}' +
       '#ah-root .ah-inst-mkt{font-size:10px;color:var(--tlo);line-height:1.4;margin-top:3px;flex:0 0 auto;' +
-        'padding-top:3px;border-top:1px solid var(--border)}' +
+        'padding-top:3px;border-top:1px solid var(--border);white-space:normal;overflow:visible;word-break:break-word}' +
       '#ah-root .ah-note{font-size:10px;color:var(--tlo);line-height:1.4;margin-top:2px;flex:0 0 auto;' +
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#ah-root .ah-loading,#ah-root .ah-err{font-size:10px;color:var(--tlo);padding:10px 0}' +
       '#ah-root .ah-err{color:var(--orange)}' +
-      '#ah-body.ah-loading{display:flex;align-items:center}';
+      '#ah-root table.ah-tbl{table-layout:fixed}' +
+      '#ah-root table.ah-tbl th,#ah-root table.ah-tbl td{min-width:0;overflow:hidden;text-overflow:ellipsis}' +
+      '#ah-root table.ah-mv col.c-i{width:1.6em}#ah-root table.ah-mv col.c-cd{width:3.2em}' +
+      '#ah-root table.ah-mv col.c-nm{width:auto}#ah-root table.ah-mv col.c-pct{width:9em}' +
+      '#ah-root table.ah-mv td:nth-child(4),#ah-root table.ah-mv th:nth-child(4){white-space:nowrap;overflow:visible;text-overflow:unset}' +
+      '#ah-root table.ah-tbl .vz-rowbar{display:none!important}' +
+      '#ah-body.ah-loading{display:flex;align-items:center}' +
+      /* 手機直式：一行一個 frame 往下排，允許整頁垂直捲動 */
+      '@media(max-width:900px) and (orientation:portrait){' +
+        '#shell-views:has(#view-afterhours.on){overflow-x:hidden!important;overflow-y:auto!important;display:block!important;' +
+          'overscroll-behavior:contain;-webkit-overflow-scrolling:touch}' +
+        '#view-afterhours.sv-panel.on{height:auto!important;min-height:100%;overflow:visible!important;' +
+          'display:block!important;flex:none!important;padding:6px 8px 18px}' +
+        '#mount-afterhours,#mount-afterhours.sv-mount,#ah-root,#ah-body{height:auto;min-height:0;overflow:visible;display:block;flex:none}' +
+        '#ah-root .ah-head{flex-wrap:wrap;align-items:flex-start}' +
+        '#ah-root .ah-actions{flex-wrap:wrap;justify-content:flex-start}' +
+        '#ah-root .ah-ovn-head{white-space:normal;flex-wrap:wrap}' +
+        '#ah-root .ah-strip{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:0 0 8px}' +
+        '#ah-root .ah-strip .cell{overflow:visible;padding:7px 9px}' +
+        '#ah-root .ah-strip .k,#ah-root .ah-strip .v{overflow:visible;text-overflow:unset;white-space:nowrap}' +
+        '#ah-root .ah-strip .s{white-space:normal;overflow:visible;text-overflow:unset;line-height:1.35}' +
+        '#ah-root .ah-dash{display:grid;grid-template-columns:1fr;grid-template-rows:none;height:auto;min-height:0;gap:8px;align-items:stretch}' +
+        '#ah-root .ah-sec{height:auto;min-height:0;overflow:visible;padding:9px 10px}' +
+        '#ah-root .ah-sec > .ah-fill{flex:0 0 auto;overflow:visible;min-height:0}' +
+        '#ah-root #ah-ovn-host.ovn-embed{flex:0 0 auto;height:auto}' +
+        '#ah-root .ovn-embed .ovn-signal-name,#ah-root .ovn-embed .ovn-signal-meta,' +
+          '#ah-root .ovn-embed th,#ah-root .ovn-embed td{white-space:normal;overflow:visible;text-overflow:unset}' +
+        '#ah-root table.ah-tbl th,#ah-root table.ah-tbl td{overflow:visible;text-overflow:unset;white-space:nowrap}' +
+        '#ah-root table.ah-mv td:nth-child(3),#ah-root table.ah-fut td:nth-child(2){white-space:normal}' +
+        '#ah-root .ah-note{white-space:normal;overflow:visible;text-overflow:unset}' +
+        '#ah-root .ah-inst-trend .lab>span{white-space:normal;overflow:visible;text-overflow:unset}' +
+      '}' +
+      /* 手機橫式：維持五欄，但框隨內容長高、禁止線圖蓋字／欄位截斷 */
+      '@media(max-width:900px) and (orientation:landscape){' +
+        '#shell-views:has(#view-afterhours.on){overflow-x:hidden!important;overflow-y:auto!important;display:block!important;' +
+          'overscroll-behavior:contain;-webkit-overflow-scrolling:touch}' +
+        '#view-afterhours.sv-panel.on{height:auto!important;min-height:100%;overflow:visible!important;' +
+          'display:flex!important;flex-direction:column;padding:4px 6px 14px}' +
+        '#mount-afterhours,#mount-afterhours.sv-mount,#ah-root{height:auto;min-height:0;overflow:visible}' +
+        '#ah-body{height:auto;min-height:0;overflow:visible;flex:1 0 auto}' +
+        '#ah-root .ah-head{flex-wrap:wrap;gap:4px}' +
+        '#ah-root .ah-actions{flex-wrap:wrap}' +
+        '#ah-root .ah-strip{grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}' +
+        '#ah-root .ah-strip .cell{overflow:visible;padding:4px 6px}' +
+        '#ah-root .ah-strip .k,#ah-root .ah-strip .v{overflow:visible;text-overflow:unset;white-space:nowrap}' +
+        '#ah-root .ah-strip .s{white-space:normal;overflow:visible;text-overflow:unset;line-height:1.3;font-size:9px}' +
+        '#ah-root .ah-dash{height:auto;min-height:0;grid-template-rows:auto;align-items:start;gap:5px}' +
+        '#ah-root .ah-sec{height:auto;max-height:none;overflow:visible;min-height:0}' +
+        '#ah-root .ah-sec > .ah-fill{overflow:visible;flex:0 0 auto}' +
+        '#ah-root #ah-ovn-host.ovn-embed{flex:0 0 auto;height:auto}' +
+        '#ah-root .ovn-embed .ovn-signal-name,#ah-root .ovn-embed .ovn-signal-meta{white-space:normal;overflow:visible;text-overflow:unset}' +
+        '#ah-root .ovn-embed th,#ah-root .ovn-embed td{white-space:normal;overflow:visible;text-overflow:unset}' +
+        '#ah-root .ah-inst-trend .chart .vz-pt,#ah-root .ah-inst-trend .chart .vz-yunit,' +
+          '#ah-root .ah-inst-trend .chart .vz-ylabs,#ah-root .ah-inst-trend .chart .vz-xlabs,' +
+          '#ah-root .ah-inst-trend .chart .vz-xunit{display:none!important}' +
+        '#ah-root .ah-inst-trend .chart .vz-spark-ax{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:0;padding:0;overflow:hidden}' +
+        '#ah-root .ah-inst-trend .chart .vz-plot{grid-column:1;grid-row:1;border-left:0}' +
+        '#ah-root table.ah-tbl .vz-chip{display:none!important}' +
+        '#ah-root table.ah-tbl th,#ah-root table.ah-tbl td{overflow:visible;text-overflow:unset;font-size:9px;padding:2px 3px}' +
+        '#ah-root table.ah-mv col.c-pct{width:4.8em}' +
+        '#ah-root table.ah-mv td:nth-child(4){font-size:10px;letter-spacing:-0.2px}' +
+        '#ah-root .ah-note{white-space:normal;overflow:visible;text-overflow:unset}' +
+        '#ah-root .ah-inst4 .c .v{white-space:nowrap;overflow:visible;font-size:12px}' +
+        '#ah-root .ah-inst-cmt{font-size:10px;line-height:1.4}' +
+      '}';
   }
 
   function twCls(p) {
@@ -253,8 +319,9 @@
           var last = totals[totals.length - 1];
           var col = last >= 0 ? 'var(--red)' : 'var(--green)';
           chart.innerHTML = V.sparkLine(totals, {
-            color: col, h: 56, w: 280,
-            xUnit: '日', yUnit: '億', yDigits: 1
+            color: col, h: 64, w: 280,
+            xUnit: '日', yUnit: '億', yDigits: 1,
+            compact: true
           });
         } else if (totals.length && V && V.sparkBars) {
           chart.innerHTML = V.sparkBars(totals);
@@ -410,7 +477,7 @@
       '<div class="ah-sec"><h4>個股期領先 · ' + sess + '</h4>' +
       '<div class="ah-fill">' +
       (rows
-        ? '<table class="ah-tbl"><tr><th>代號</th><th>名稱</th><th>期價</th><th>期%</th><th>現%</th><th>領先</th></tr>' +
+        ? '<table class="ah-tbl ah-fut"><tr><th>代號</th><th>名稱</th><th>期價</th><th>期%</th><th>現%</th><th>領先</th></tr>' +
           rows + '</table>'
         : '<div class="ah-err">個股期資料暫缺</div>') +
       '</div>' +
@@ -452,7 +519,8 @@
       slice.forEach(function (r) {
         if (r.changePct != null && isFinite(r.changePct)) maxAbs = Math.max(maxAbs, Math.abs(r.changePct));
       });
-      h += '<table class="ah-tbl"><tr><th>#</th><th>代號</th><th>名稱</th><th>漲跌幅</th></tr>';
+      h += '<table class="ah-tbl ah-mv"><colgroup><col class="c-i"><col class="c-cd"><col class="c-nm"><col class="c-pct"></colgroup>' +
+        '<tr><th>#</th><th>代號</th><th>名稱</th><th>漲跌幅</th></tr>';
       slice.forEach(function (r, i) {
         var lim = V ? V.limitChip(r.changePct) : '';
         var bar = V ? V.rowBar(r.changePct, maxAbs) : '';
