@@ -20,7 +20,14 @@ ST 不是兩套產品。本機 `START_TIP.cmd`（http://localhost:18432/#pulse�
 - 任何 UI／版面／資料契約更新：兩邊都要 sync 到同一 tip commit。只修 localhost 就宣告完成＝錯。
 - 必須兩邊都確認版面呈現（pulse 5+5、標題列金框位置等）沒問題，才能 `promote --approve`。
 - 本機：`.\START_TIP.cmd`。Private Web：`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\sync_private_web.ps1`；版面確認後才加 `-Promote -LayoutVerified`。
-- Cloud Agent 人在遠端時：把完整 PowerShell 交給本機 EVO-T1 執行；不可假裝 Tailscale 已更新。
+- Cloud Agent 人在遠端時：git commit／push／合 tip 仍須自己做完再回報，不可把 git 指令丟給使用者代跑。不可假裝 Tailscale 已更新。Private Web promote 只有在碰不到 EVO-T1 的 `%LOCALAPPDATA%\StockTerminalPrivateWeb` 時，才在回報註明「本機尚未 promote」。
+
+【交付 routine — 自己做完再回報】：
+`git commit`／`push`／合 tip／deploy 是重複性 routine，每次直接做完再回報，禁止留給使用者代跑。
+1. 改完碼：自己 staging（禁止 `data/*.csv`）、commit、push 功能分支、更新 PR。
+2. 驗證通過或使用者要 deploy：自己把功能分支合進 `TIP_BRANCH` 並 `git push origin <tip>`。
+3. 回報只寫結果（分支、tip HEAD、CI、還缺什麼），不要貼一串請使用者自己執行的 git 指令。
+4. Private Web promote 若這台機器碰不到 EVO-T1 目錄，git 側仍必須已合 tip；只註明 Tailscale 尚未 promote。
 
 【模型／計費 — 預設禁用 Other Models】除非使用者在本則訊息明確點名第三方模型，否則禁用 Other Models。
 - 預設只用 Cursor Models：Composer、Grok（含 inherit 父模型）。
