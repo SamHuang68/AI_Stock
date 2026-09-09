@@ -38,6 +38,7 @@ function Write-Banner {
   Write-Host '============================================'
   Write-Host " repo: $Root"
   Write-Host " tip:  $TipBranch"
+  Write-Host " faces: http://localhost:${Port}/#pulse  AND  Tailscale Private Web"
 }
 
 function Test-ToolingPython([string]$ExePath) {
