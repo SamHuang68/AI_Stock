@@ -929,6 +929,17 @@ ok(fs.existsSync(path.join(root, 'START_TIP.cmd')), 'START_TIP.cmd exists at rep
 const startTip = fs.readFileSync(path.join(root, 'START_TIP.cmd'), 'utf8');
 ok(/Resolve-StockPython/.test(startTip) && /taskkill/.test(startTip) && /go\.ps1/.test(startTip),
   'START_TIP.cmd kills python, verifies tip files, runs go.ps1');
+ok(/Tailscale Private Web/.test(startTip) && /sync_private_web\.ps1/.test(startTip),
+  'START_TIP.cmd names both ST faces and the Private Web sync script');
+ok(/Tailscale Private Web/.test(goPs),
+  'go.ps1 banner names local and Tailscale faces');
+ok(fs.existsSync(path.join(root, 'scripts/sync_private_web.ps1')),
+  'scripts/sync_private_web.ps1 exists');
+const syncPw = fs.readFileSync(path.join(root, 'scripts/sync_private_web.ps1'), 'utf8');
+ok(/LayoutVerified/.test(syncPw) && /evo-t1-st\.tailbc3519\.ts\.net/.test(syncPw) &&
+  /localhost:18432\/#pulse/.test(syncPw) && /Refuse to promote/.test(syncPw) &&
+  /private_web_release\.py/.test(syncPw) && !/Start-Process -FilePath 'python'/.test(syncPw),
+  'Private Web sync stages exact tip and refuses promote without layout verification');
 ok(fs.existsSync(path.join(root, 'scripts/diagnose_tip.ps1')), 'scripts/diagnose_tip.ps1 exists');
 
 const nw = fs.readFileSync(path.join(root, 'src/ui/news_v5.js'), 'utf8');

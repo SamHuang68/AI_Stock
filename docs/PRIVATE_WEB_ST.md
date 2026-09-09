@@ -17,6 +17,12 @@ long-horizon market/research user.
 - A dirty development worktree is never copied into production. A release is
   staged from an exact Git commit and requires a separate explicit promotion.
 - Production `data/` and `logs/` survive code promotion and rollback.
+- Local `START_TIP.cmd` (`http://localhost:18432/#pulse`) and Tailscale Private
+  Web (`https://evo-t1-st.tailbc3519.ts.net/#pulse`) are two faces of the same ST.
+  Any UI or layout change must be synced to both, and the pulse layout must be
+  verified on both URLs before `promote --approve`. Use
+  `scripts/sync_private_web.ps1` to stage; add `-Promote -LayoutVerified` only
+  after that visual check. Promoting without checking both faces is incomplete.
 
 ## Two operating modes
 

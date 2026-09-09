@@ -13,6 +13,8 @@ echo.
 echo ============================================
 echo  START_TIP - safe local launch on port 18432
 echo  repo: %CD%
+echo  faces: localhost:18432/#pulse AND Tailscale Private Web
+echo  UI done only after both faces match: scripts\sync_private_web.ps1
 echo ============================================
 echo.
 

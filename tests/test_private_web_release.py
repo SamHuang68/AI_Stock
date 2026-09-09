@@ -130,6 +130,23 @@ class PrivateWebReleaseTests(unittest.TestCase):
         self.assertFalse((tree / "START_WAVEDECK.cmd").exists())
         self.assertTrue((tree / "server" / "server.py").is_file())
 
+    def test_two_faces_must_sync_before_promote(self):
+        rules = (ROOT / ".cursorrules").read_text(encoding="utf-8")
+        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        docs = (ROOT / "docs/PRIVATE_WEB_ST.md").read_text(encoding="utf-8")
+        script = (ROOT / "scripts/sync_private_web.ps1").read_text(encoding="utf-8")
+        self.assertIn("一體兩面", rules)
+        self.assertIn("http://localhost:18432/#pulse", rules)
+        self.assertIn("evo-t1-st.tailbc3519.ts.net", rules)
+        self.assertIn("一體兩面", agents)
+        self.assertIn("two faces of the same ST", docs)
+        self.assertIn("sync_private_web.ps1", docs)
+        self.assertIn("-LayoutVerified", script)
+        self.assertIn("http://localhost:18432/#pulse", script)
+        self.assertIn("https://evo-t1-st.tailbc3519.ts.net/#pulse", script)
+        self.assertIn("Refuse to promote", script)
+        self.assertNotIn("Start-Process -FilePath 'python'", script)
+
     def test_release_gate_includes_etf_and_shell_node_regressions(self):
         source = (ROOT / "scripts" / "private_web_release.py").read_text(encoding="utf-8")
         self.assertIn("tests/etf_flow_v3_selftest.js", source)

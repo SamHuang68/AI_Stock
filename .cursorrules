@@ -15,6 +15,13 @@
    血淚例：風險監控曾另抓「美股流動池」並預畫空 dash 面板，而 `pulse.global`（費半／那指／VIX）
    早已可用 → 應重用 global 做 AI／科技外溢，而非重造來源。
 
+【鐵律 — ST 一體兩面：本機 ＋ Private Web】
+ST 不是兩套產品。本機 `START_TIP.cmd`（http://localhost:18432/#pulse）與 Tailscale Private Web（https://evo-t1-st.tailbc3519.ts.net/#pulse）是同一套 UX 的兩面。
+- 任何 UI／版面／資料契約更新：兩邊都要 sync 到同一 tip commit。只修 localhost 就宣告完成＝錯。
+- 必須兩邊都確認版面呈現（pulse 5+5、標題列金框位置等）沒問題，才能 `promote --approve`。
+- 本機：`.\START_TIP.cmd`。Private Web：`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\sync_private_web.ps1`；版面確認後才加 `-Promote -LayoutVerified`。
+- Cloud Agent 人在遠端時：把完整 PowerShell 交給本機 EVO-T1 執行；不可假裝 Tailscale 已更新。
+
 【模型／計費 — 預設禁用 Other Models】除非使用者在本則訊息明確點名第三方模型，否則禁用 Other Models。
 - 預設只用 Cursor Models：Composer、Grok（含 inherit 父模型）。
 - 禁止自動／預設改走 Claude、GPT、Gemini、Opus、Sonnet 等第三方（Other Models；會吃 included API 池並可能轉 on-demand）。
@@ -52,6 +59,7 @@
 5. 本機同步指令：.\scripts\go.bat pull   （無參數＝tip；會阻擋 main）
 6. 開頁永遠 http://localhost:18432/#pulse；無 hash 不得還原舊圖表殼。合完／重開若見舊 UI＝錯分支或未 rebuild，立刻 go.bat pull tip。
 7. WaveDeck 執行台：`START_WAVEDECK.cmd` 或 `cd wavedeck && python run.py`；ST `:18432` 宏觀 ↔ WD `:18433` 執行。
+8. Private Web／Tailscale 是同一 ST 的另一面，不是可選預覽。UI 變更未 stage／未兩邊核對版面，不得當已 release。
 
 【血淚教訓 — 總覽版面，禁止再犯】：
 1. 市場總覽（pulse）桌機版鎖定「一行五框 × 上下兩區」一屏高密度：
