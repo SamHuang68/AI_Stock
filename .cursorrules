@@ -15,6 +15,13 @@
    血淚例：風險監控曾另抓「美股流動池」並預畫空 dash 面板，而 `pulse.global`（費半／那指／VIX）
    早已可用 → 應重用 global 做 AI／科技外溢，而非重造來源。
 
+【模型／計費 — 預設禁用 Other Models】除非使用者在本則訊息明確點名第三方模型，否則禁用 Other Models。
+- 預設只用 Cursor Models：Composer、Grok（含 inherit 父模型）。
+- 禁止自動／預設改走 Claude、GPT、Gemini、Opus、Sonnet 等第三方（Other Models；會吃 included API 池並可能轉 on-demand）。
+- Task／子 agent／平行探索一律 `model: inherit`。不得指定 claude／gpt／gemini／opus／sonnet 等 slug。
+- 使用者寫「用 Claude／GPT／Gemini／Opus」才可用該模型；「Auto」或未指定 ≠ 授權 Other Models。
+- Cloud Agent／背景 agent／審查員同樣適用；不要為了「比較強」自行升級到第三方。
+
 【Windows 本機啟動／同步 — 已踩過的常見錯，禁止再犯】：
 1. `.cmd` 訊息一律用 ASCII（或確保 Big5/系統碼頁可顯示）。勿在 cmd 腳本寫 UTF-8 中文：
    繁中 Windows 主控台預設 CP950/Big5，UTF-8 無 BOM 會亂碼，使用者無法讀錯誤訊息。
