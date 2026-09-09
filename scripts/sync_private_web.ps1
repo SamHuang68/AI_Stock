@@ -106,8 +106,8 @@ if (-not $LayoutVerified) {
 }
 
 Write-Host "[promote] $originTip --approve"
-$promote = Invoke-StockPy @('scripts\private_web_release.py', 'promote', '--release', $originTip, '--approve')
-if ($promote.ExitCode -ne 0) { throw 'private_web_release.py promote failed' }
+$promoteResult = Invoke-StockPy @('scripts\private_web_release.py', 'promote', '--release', $originTip, '--approve')
+if ($promoteResult.ExitCode -ne 0) { throw 'private_web_release.py promote failed' }
 
 Write-Host ''
 Write-Host 'Promoted. Restart isolated host so Tailscale serves the new tree:'
