@@ -153,6 +153,7 @@ class PrivateWebReleaseTests(unittest.TestCase):
         self.assertIn("tests/shell_v5_selftest.js", source)
         self.assertIn('"tests.test_archify_artifacts"', source)
         self.assertIn('shutil.which("node")', source)
+        self.assertIn('"-m", "unittest", "-b"', source)
 
     def test_release_requires_archify_manifest_documents_and_validator(self):
         expected = {

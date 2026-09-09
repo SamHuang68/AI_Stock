@@ -206,7 +206,7 @@ def stage_release(
             "tests.test_archify_artifacts",
         ]
         if run_tests:
-            _run([python, "-m", "unittest", *tests], cwd=extracted)
+            _run([python, "-m", "unittest", "-b", *tests], cwd=extracted)
             node = shutil.which("node")
             if not node:
                 raise RuntimeError("Node.js is required for ETF/UI release regression tests")
