@@ -493,10 +493,9 @@ ok(/@media\(max-width:900px\) and \(orientation:landscape\)[\s\S]*vz-pt[\s\S]*di
 ok(/table class="ah-tbl ah-mv"/.test(ah) && /col class="c-pct"/.test(ah),
   'afterhours rank tables reserve a visible percent column');
 ok(!/#ah-root table\.ah-tbl \.vz-rowbar\{display:none!important\}/.test(ah.split('@media')[0]),
-  'afterhours desktop still shows rank rowBars');
-ok(/orientation:portrait\)[\s\S]*vz-rowbar\{display:none/.test(ah) &&
-  /orientation:landscape\)[\s\S]*vz-rowbar\{display:none/.test(ah),
-  'afterhours phone hides rank rowBars so percent text stays visible');
+  'afterhours desktop still shows futures rowBars');
+ok(/#ah-root table\.ah-mv \.vz-rowbar\{display:none!important\}/.test(ah),
+  'afterhours rank tables drop rowBars so percent text stays visible');
 const ovn = fs.readFileSync(path.join(root, 'src/chart/overnight_v3.js'), 'utf8');
 ok(/overnightRenderInto/.test(ovn) && /function renderInto/.test(ovn) && /ovn-embed/.test(ovn),
   'overnight exposes renderInto for afterhours embed');

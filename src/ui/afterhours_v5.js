@@ -122,6 +122,7 @@
       '#ah-root table.ah-mv col.c-i{width:1.6em}#ah-root table.ah-mv col.c-cd{width:3.2em}' +
       '#ah-root table.ah-mv col.c-nm{width:auto}#ah-root table.ah-mv col.c-pct{width:9em}' +
       '#ah-root table.ah-mv td:nth-child(4),#ah-root table.ah-mv th:nth-child(4){white-space:nowrap;overflow:visible;text-overflow:unset}' +
+      '#ah-root table.ah-mv .vz-rowbar{display:none!important}' +
       '#ah-body.ah-loading{display:flex;align-items:center}' +
       /* 手機直式：一行一個 frame 往下排，允許整頁垂直捲動 */
       '@media(max-width:900px) and (orientation:portrait){' +
