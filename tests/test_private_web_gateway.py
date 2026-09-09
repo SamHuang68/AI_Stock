@@ -212,6 +212,15 @@ class PrivateWebGatewayTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(payload["path"], path)
 
+    def test_valuation_research_read_only_route(self):
+        path = "/valuation-research/2330?peMax=30&excludeIp=1"
+        for token in ("reader-secret", "owner-secret"):
+            status, payload = _request(self.base + path, token=token)
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["path"], path)
+        for role in ("reader", "owner"):
+            self.assertFalse(gateway.route_permission("POST", "/valuation-research/2330", role, self.gateway.settings))
+
     def test_html_receives_private_market_profile_before_ui_boot(self):
         credential = base64.b64encode(b"owner:owner-secret").decode()
         req = urllib.request.Request(

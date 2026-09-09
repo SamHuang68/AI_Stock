@@ -45,6 +45,7 @@ DEPS = {
     'breadth_v5.js':        ['viz_v5.js'],
     'afterhours_v5.js':     ['viz_v5.js'],
     'scan_v5.js':           ['viz_v5.js'],
+    '估值承接研究.js':      ['估值承接核心.js'],
     'news_v5.js':           ['viz_v5.js'],
     'book_v5.js':           ['viz_v5.js'],
     'heat_v5.js':           ['viz_v5.js'],

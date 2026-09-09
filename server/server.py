@@ -2774,6 +2774,9 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         elif p.startswith('/valuation/'):
             sym = unquote(p[11:].split('?')[0])
             self._handle_valuation(sym)
+        elif p.startswith('/valuation-research/'):
+            sym = unquote(p[len('/valuation-research/'):].split('?')[0])
+            self._handle_valuation_research(sym)
         elif p == '/marketflow' or p.startswith('/marketflow?'):
             self._handle_marketflow()
         elif p == '/breadth' or p.startswith('/breadth?'):
@@ -7507,6 +7510,10 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             body = read_json_body(self, max_bytes=512 * 1024)
         except BodyReadError as e:
             self._err(str(e), e.status); return
+        research = body.get('research')
+        if isinstance(research, dict) and research.get('enabled') is True:
+            self._handle_screen3_research(body)
+            return
         tech = body.get('tech') or {}
         fund = body.get('fund') or {}
         chip = body.get('chip') or {}
@@ -7620,6 +7627,69 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         self._ok(json.dumps({'results': results[:80], 'scanned': len(syms),
                              'techPass': len(survivors), 'matched': len(results)},
                             ensure_ascii=False).encode())
+
+    def _handle_screen3_research(self, body):
+        """估值承接觀察沿用既有官方查表及日線來源。"""
+        import 估值趨勢 as research_screen
+        try:
+            settings = research_screen.validate_settings(body['research'])
+            for field in ('tech', 'fund', 'chip'):
+                if body.get(field) is not None and not isinstance(body[field], dict):
+                    raise ValueError('技術、基本面與籌碼條件須為物件。')
+            supplied = body.get('symbols')
+            if supplied is not None and (not isinstance(supplied, list) or len(supplied) > 5000
+                                         or any(not isinstance(item, str) for item in supplied)):
+                raise ValueError('股票清單須為最多五千筆的代號陣列。')
+        except (ValueError, TypeError) as exc:
+            self._err(str(exc), 400)
+            return
+        symbols = supplied or _get_tw_universe()
+        universe_source = '使用者指定清單' if supplied else '官方可取得普通股清單'
+        if not symbols:
+            symbols = self._TW_TOP200
+            universe_source = '官方清單暫缺，使用既有主要股票清單'
+        sector = str(body.get('sector') or '').strip()
+        if sector and sector not in ('全部', 'all'):
+            sectors = _get_tw_sectors()
+            want = _TECH_SECTORS if sector == '__TECH__' else {sector}
+            symbols = [symbol for symbol in symbols if sectors.get(
+                str(symbol).replace('.TWO', '').replace('.TW', '')) in want]
+            universe_source += '（已套用產業條件）'
+        out = research_screen.run_screen(
+            body, settings=settings, symbols=symbols, universe_source=universe_source,
+            lookup=_openapi_lookup, monthly_revenue=_mops_monthly_revenue, names=_get_tw_names(),
+            fetch_quote=fetch_one, calc_ind=self._calc_ind, tech_match=self._screen3_tech,
+            pool=_pool, chip_history_path=CHIP_HISTORY_PATH,
+        )
+        self._ok(json.dumps(out, ensure_ascii=False, allow_nan=False).encode())
+
+    def _handle_valuation_research(self, sym):
+        """單股保留超出範圍的原因，缺價格仍回傳官方估值與營收。"""
+        import 估值趨勢 as research_screen
+        code = sym.replace('.TWO', '').replace('.TW', '').strip().upper()
+        if not _CODE4.fullmatch(code):
+            self._err('估值觀察僅接受四位數普通股代號。', 400)
+            return
+        query = parse_qs(urlparse(self.path).query)
+        try:
+            exclude_raw = (query.get('excludeIp') or ['1'])[0]
+            if exclude_raw not in ('0', '1'):
+                raise ValueError('另案估值排除設定須為 0 或 1。')
+            settings = research_screen.validate_settings({
+                'peMax': (query.get('peMax') or ['30'])[0], 'excludeIp': exclude_raw == '1',
+            })
+        except ValueError as exc:
+            self._err(str(exc), 400)
+            return
+        out = research_screen.run_screen(
+            {}, settings=settings, symbols=[code], universe_source='單股研究詳情',
+            lookup=_openapi_lookup, monthly_revenue=_mops_monthly_revenue, names=_get_tw_names(),
+            fetch_quote=fetch_one, calc_ind=self._calc_ind, tech_match=self._screen3_tech,
+            pool=_pool, chip_history_path=CHIP_HISTORY_PATH, detail=True,
+        )
+        self._ok(json.dumps({'row': out['results'][0] if out['results'] else None,
+                             'researchMeta': out['researchMeta']},
+                            ensure_ascii=False, allow_nan=False).encode())
 
     def _screen3_tech(self, tech, i):
         """技術面條件 (全部需成立)。空條件 → 直接通過。"""

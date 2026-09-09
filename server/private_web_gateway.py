@@ -408,6 +408,7 @@ READ_GET_PREFIXES = (
     "/keystats/",
     "/fundamental/",
     "/valuation/",
+    "/valuation-research/",
     "/macro/",
 )
 

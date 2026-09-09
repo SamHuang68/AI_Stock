@@ -19,6 +19,8 @@
 
   // 找「可拖曳的 box」:標題的祖先 div,其 parent 為 fixed 全螢幕覆蓋層
   function boxFrom(heading) {
+    // 原生對話框自行管理版面；不可把其內容誤認為舊式覆蓋視窗。
+    if (heading.closest('dialog')) return null;
     var box = heading.closest('div');
     while (box) {
       var p = box.parentElement;

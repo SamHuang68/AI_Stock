@@ -98,14 +98,14 @@
       let below = peSeries.filter(x => x <= useP).length;
       const pctile = Math.round(below / peSeries.length * 100);
       const pos = Math.max(2, Math.min(98, pctile));
-      gauge = `<div style="font-size:9px;color:#64748b;margin-top:6px">5 年本益比區間定位（現值 PER ${fmt(useP, 1)} ≈ 第 ${pctile} 百分位）</div>
+      gauge = `<div style="font-size:11px;color:#94a3b8;margin-top:6px">固定 EPS 基準的 5 年股價位置（換算倍數 ${fmt(useP, 1)} ≈ 第 ${pctile} 百分位）</div>
         <div class="val-gauge"><div class="mk" style="left:${pos}%"></div></div>
-        <div class="val-lbl"><span>便宜 ${fmt(lo, 1)}x</span><span>中位 ${fmt(med, 1)}x</span><span>昂貴 ${fmt(hi, 1)}x</span></div>`;
-      verdict = pctile <= 25 ? '<b class="val-dn">相對便宜</b>（接近歷史低本益比區）'
-        : pctile >= 75 ? '<b class="val-up">相對昂貴</b>（接近歷史高本益比區）'
-          : '<b>合理區間</b>（歷史本益比中段）';
+        <div class="val-lbl"><span>偏低 ${fmt(lo, 1)}x</span><span>中位 ${fmt(med, 1)}x</span><span>偏高 ${fmt(hi, 1)}x</span></div>`;
+      verdict = pctile <= 25 ? '<b class="val-dn">接近五年股價低位</b>'
+        : pctile >= 75 ? '<b class="val-up">接近五年股價高位</b>'
+          : '<b>位於五年股價中段</b>';
       // 河流帶：各分位 PER × EPS = 對應股價
-      const bands = [['便宜 5%', lo], ['偏低 25%', q1], ['中位 50%', med], ['偏高 75%', q3], ['昂貴 95%', hi]];
+      const bands = [['低位 5%', lo], ['偏低 25%', q1], ['中位 50%', med], ['偏高 75%', q3], ['高位 95%', hi]];
       let rows = bands.map(([lbl, p]) => {
         const target = p * eps;
         const gap = price ? (target - price) / price * 100 : null;
@@ -120,11 +120,14 @@
     const mktTag = !isTw
       ? '<span style="background:#1e3a5f;color:#7dd3fc;border-radius:4px;padding:1px 6px;font-size:9px">美股</span>'
       : '<span style="background:#3f1e2e;color:#fda4af;border-radius:4px;padding:1px 6px;font-size:9px">台股</span>';
-    body.innerHTML = `<div style="font-size:11px;color:#94a3b8;margin-bottom:2px">${mktTag} ${v.code || sym}　EPS(近12月) ${fmt(eps, 2)}　現價 ${fmt(price, 1)}${v._source ? `　<span style="color:#475569;font-size:9px">源:${v._source}</span>` : ''}</div>
+    body.innerHTML = `<div style="font-size:11px;color:#94a3b8;margin-bottom:2px">${mktTag} ${v.code || sym}　${isTw ? 'EPS 推算基準（股價÷官方本益比）' : '資料源近十二月 EPS'} ${fmt(eps, 2)}　現價 ${fmt(price, 1)}${v._source ? `　<span style="color:#94a3b8;font-size:10px">源:${v._source}</span>` : ''}</div>
       ${kpi}
       ${verdict ? `<div style="font-size:12px;margin:4px 0">估值判讀：${verdict}</div>` : ''}
       ${gauge}${river}
-      <div class="val-note">長線市場派視角：本益比河流回答「現在貴不貴」，但成長股的合理倍數會隨 AI 需求擴張上移——TSMC/台灣 AI 供應鏈在結構性擴張期，落在歷史高位不必然是賣點，需搭配營收動能與產業循環判讀。本表用「當前 EPS×歷史股價」近似，EPS 變動時河流會整體位移。⚠ 僅供參考、非投資建議。</div>`;
+      <div class="val-note" style="font-size:11px;color:#94a3b8">本表將五年股價除以固定 EPS 基準，並非各期實際本益比，也不能用股價歷史位置判定合理價值。台股 EPS 基準由股價與官方本益比推算，不是可持續獲利預測。AI 需求須以獲利品質與循環位置驗證；IP 授權模式需要另案估值。</div>
+      ${isTw && /^\d{4}(?:\.TW|\.TWO)?$/.test(sym) ? '<button type="button" id="val-research" style="margin-top:12px;padding:8px 12px;background:#fbbf24;color:#101827;border:0;border-radius:6px;cursor:pointer">設定估值假設與分批承接</button>' : ''}`;
+    const researchButton = document.getElementById('val-research');
+    if (researchButton) researchButton.onclick = function () { if (window.ValuationResearchUI) { close(); window.ValuationResearchUI.open(sym); } };
   }
 
   function open() {
