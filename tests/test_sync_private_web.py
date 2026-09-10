@@ -3,7 +3,9 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -14,6 +16,46 @@ COMMIT = "a" * 40
 
 @unittest.skipUnless(PS, "需要 Windows PowerShell 5.1")
 class SyncPrivateWebTests(unittest.TestCase):
+    def test_background_host_does_not_keep_callers_output_pipe_open(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "scripts").mkdir()
+            (root / "logs").mkdir()
+            (root / "scripts/private_web_host.py").write_text("""
+import os, time
+from pathlib import Path
+root = Path(__file__).resolve().parents[1]
+(root / 'started').write_text(str(os.getpid()))
+deadline = time.monotonic() + 15
+while not (root / 'release').exists() and time.monotonic() < deadline:
+    time.sleep(0.05)
+(root / 'finished').touch()
+""", encoding="utf-8")
+            helper = str(ROOT / "scripts/private_web_runtime.ps1").replace("'", "''")
+            current = str(root).replace("'", "''")
+            python = sys.executable.replace("'", "''")
+            harness = root / "啟動驗證.ps1"
+            harness.write_text(f". '{helper}'\nStart-PrivateWebRuntime -Current '{current}' -Python '{python}'\n", encoding="utf-8-sig")
+            try:
+                result = subprocess.run([PS, "-NoProfile", "-File", str(harness)], capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+                deadline = time.monotonic() + 5
+                while not (root / "started").exists() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                self.assertTrue((root / "started").exists())
+                self.assertFalse((root / "finished").exists(), "呼叫端必須在背景程序結束前返回")
+            finally:
+                (root / "release").touch()
+                deadline = time.monotonic() + 5
+                while not (root / "finished").exists() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                if (root / "started").exists():
+                    process_id = int((root / "started").read_text())
+                    subprocess.run(
+                        [PS, "-NoProfile", "-Command", f"Wait-Process -Id {process_id} -Timeout 5 -ErrorAction SilentlyContinue"],
+                        capture_output=True, timeout=10,
+                    )
+
     def test_unknown_listener_is_rejected_before_any_stop(self):
         with tempfile.TemporaryDirectory() as directory:
             harness = Path(directory) / "程序驗證.ps1"

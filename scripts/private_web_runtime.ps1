@@ -50,8 +50,9 @@ function Stop-PrivateWebRuntime {
 function Start-PrivateWebRuntime {
   param([string]$Current, [string]$Python)
   $entry = Join-Path $Current 'scripts\private_web_host.py'
-  $logRoot = Join-Path $Current 'logs'
-  $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
-  $process = Start-Process -FilePath $Python -ArgumentList @('-u', ('"' + $entry + '"')) -WorkingDirectory $Current -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logRoot "發布啟動-$stamp.out.log") -RedirectStandardError (Join-Path $logRoot "發布啟動-$stamp.err.log")
+  # 保留 Windows ShellExecute 的獨立程序語意；重新導向會讓子程序
+  # 繼承呼叫端的管線，使發布命令等到服務停止才返回。
+  # 監督程序及子程序仍自行寫入 current/logs 的既有持久紀錄。
+  $process = Start-Process -FilePath $Python -ArgumentList @('-u', ('"' + $entry + '"')) -WorkingDirectory $Current -WindowStyle Hidden -PassThru
   Write-Host "[啟動] current 監督程序 PID=$($process.Id)"
 }
