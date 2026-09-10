@@ -2851,6 +2851,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._alert_get_rules()
         elif p == '/alert/config' or p.startswith('/alert/config?'):
             self._alert_get_config()
+        elif p == '/notify/contacts' or p.startswith('/notify/contacts?'):
+            self._handle_notify_contacts_get()
         elif p == '/watch/status' or p.startswith('/watch/status?'):
             self._watch_status()
         elif p == '/txf' or p.startswith('/txf?'):
@@ -3157,6 +3159,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._etf_report_email()
         elif p == '/report-email':
             self._handle_report_email()
+        elif p == '/notify/contacts':
+            self._handle_notify_contacts_post()
         elif p == '/watch/rules':
             self._watch_post_rules()
         elif p == '/watch/config':
@@ -7006,22 +7010,53 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         except Exception as e:
             self._err('email report failed: ' + str(e), 500)
 
+    def _handle_notify_contacts_get(self):
+        """GET /notify/contacts — Email 通訊錄（不含 SMTP 密鑰）。"""
+        try:
+            import notify_contacts as nc
+            contacts = nc.load_contacts()
+            self._ok(json.dumps({'ok': True, 'contacts': contacts}, ensure_ascii=False).encode())
+        except Exception as e:
+            self._err('contacts unavailable: ' + str(e), 500)
+
+    def _handle_notify_contacts_post(self):
+        """POST /notify/contacts — 整份覆寫通訊錄。body: {contacts:[{id,name,email}]}。"""
+        try:
+            import notify_contacts as nc
+            body = self._read_json_body(max_bytes=64 * 1024) or {}
+            raw = body.get('contacts')
+            cleaned, errors = nc.sanitize(raw)
+            if errors:
+                self._err('; '.join(errors), 400)
+                return
+            saved = nc.save_contacts(cleaned)
+            self._ok(json.dumps({'ok': True, 'contacts': saved}, ensure_ascii=False).encode())
+        except BodyReadError as e:
+            self._err(str(e), e.status)
+        except ValueError as e:
+            self._err(str(e), 400)
+        except Exception as e:
+            self._err('contacts save failed: ' + str(e), 500)
+
     def _handle_report_email(self):
-        """POST /report-email — 把 AI 報告 HTML 寄給『自訂收件者』(重用已設定的 Email SMTP)。
-           body: {to, subject, html}。與 /etf-report/email 不同:收件者可指定,非設定檔固定的 to。"""
+        """POST /report-email — 把 AI 報告寄給『自訂收件者』(重用已設定的 Email SMTP)。
+           body: {to, subject, html?, text?}。to 可為字串或陣列。"""
         if not alert_daemon:
             self._err('email module unavailable', 503); return
         try:
             body = self._read_json_body(max_bytes=2 * 1024 * 1024) or {}
         except BodyReadError as e:
             self._err(str(e), e.status); return
-        to = (body.get('to') or '').strip()
-        subject = (body.get('subject') or 'Stock Terminal AI 報告').strip()
-        html = body.get('html') or ''
-        if '@' not in to:
-            self._err('需有效收件者 email', 400); return
-        if not html:
-            self._err('html required', 400); return
+        try:
+            import notify_contacts as nc
+            payload, errors = nc.normalize_report_payload(body)
+        except Exception as e:
+            self._err('payload invalid: ' + str(e), 400); return
+        if errors:
+            self._err('; '.join(errors), 400); return
+        recips = payload['to']
+        subject = payload['subject']
+        html = payload['html']
         em = (alert_daemon.load_config() or {}).get('email', {})
         if not em.get('user') or not em.get('app_password'):
             self._err('Email 未設定:請先在通知設定填寄件帳號/應用程式密碼', 400); return
@@ -7031,13 +7066,13 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             msg = MIMEText(html, 'html', 'utf-8')
             msg['Subject'] = subject
             msg['From'] = em['user']
-            msg['To'] = to
+            msg['To'] = ', '.join(recips)
             ctx = ssl.create_default_context()
             with smtplib.SMTP(em.get('smtp_host', 'smtp.gmail.com'), int(em.get('smtp_port', 587)), timeout=20) as s:
                 s.starttls(context=ctx)
                 s.login(em['user'], em['app_password'])
-                s.sendmail(em['user'], [to], msg.as_string())
-            self._ok(json.dumps({'ok': True, 'to': to}, ensure_ascii=False).encode())
+                s.sendmail(em['user'], recips, msg.as_string())
+            self._ok(json.dumps({'ok': True, 'to': recips}, ensure_ascii=False).encode())
         except Exception as e:
             self._err('send failed: ' + str(e), 502)
 

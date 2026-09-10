@@ -83,6 +83,8 @@ data/alert_config.json
 data/alert_rules.json
 data/watch_rules.json
 data/watch_state.json
+data/notify_contacts.json
+data/notify_contacts.json.bak
 data/wavedeck_bus.json
 data/pulse_history.db
 data/decision_history.db

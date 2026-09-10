@@ -646,6 +646,40 @@ class PrivateWebGatewayTests(unittest.TestCase):
             )
             self.assertEqual(status, 403, path)
 
+    def test_owner_can_manage_contacts_and_send_report_email(self):
+        settings = self.gateway.settings
+        self.assertTrue(gateway.route_permission('GET', '/notify/contacts', 'owner', settings))
+        self.assertFalse(gateway.route_permission('GET', '/notify/contacts', 'reader', settings))
+        self.assertTrue(gateway.route_permission('POST', '/notify/contacts', 'owner', settings))
+        self.assertFalse(gateway.route_permission('POST', '/notify/contacts', 'reader', settings))
+        self.assertTrue(gateway.route_permission('POST', '/report-email', 'owner', settings))
+        self.assertFalse(gateway.route_permission('POST', '/report-email', 'reader', settings))
+        self.assertFalse(gateway.route_permission('POST', '/notify', 'owner', settings))
+        status, _ = _request(
+            self.base + '/notify/contacts',
+            token='owner-secret',
+        )
+        self.assertEqual(status, 200)
+        status, _ = _request(
+            self.base + '/notify/contacts',
+            method='POST',
+            token='owner-secret',
+            body={'contacts': []},
+        )
+        self.assertEqual(status, 200)
+        status, _ = _request(
+            self.base + '/report-email',
+            method='POST',
+            token='owner-secret',
+            body={'to': 'sam@example.com', 'text': 'hello'},
+        )
+        self.assertEqual(status, 200)
+        status, _ = _request(
+            self.base + '/notify/contacts',
+            token='reader-secret',
+        )
+        self.assertEqual(status, 403)
+
     def test_ai_proxy_forwards_first_small_chunk_without_large_buffer_wait(self):
         UpstreamHandler.ai_stream_mode = "gated"
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)

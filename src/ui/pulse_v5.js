@@ -161,9 +161,9 @@
       '#pl-root.beginner-mode .pl-ai .pl-ai-body{font:600 12px/1.85 "Noto Sans TC",sans-serif;color:#dbeafe}' +
       '@keyframes plAiDrawerIn{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}' +
       '#pl-root .pl-ai-tools{display:flex;align-items:center;gap:6px;margin-left:auto}' +
-      '#pl-root .pl-ai-speak{appearance:none;border:1px solid rgba(125,211,252,.38);border-radius:999px;background:rgba(14,165,233,.1);' +
+      '#pl-root .pl-ai-speak,#pl-root .pl-ai-mail{appearance:none;border:1px solid rgba(125,211,252,.38);border-radius:999px;background:rgba(14,165,233,.1);' +
         'color:#bae6fd;padding:2px 8px;font:700 9px/1.35 "Noto Sans TC",sans-serif;cursor:pointer}' +
-      '#pl-root .pl-ai-speak:hover,#pl-root .pl-ai-speak:focus-visible{border-color:#7dd3fc;color:#fff;outline:none}' +
+      '#pl-root .pl-ai-speak:hover,#pl-root .pl-ai-speak:focus-visible,#pl-root .pl-ai-mail:hover,#pl-root .pl-ai-mail:focus-visible{border-color:#7dd3fc;color:#fff;outline:none}' +
       '#pl-root .pl-ai-close{appearance:none;border:1px solid #43536a;border-radius:999px;background:#0a1423;color:#9fb0c5;' +
         'padding:2px 8px;font:700 9px/1.35 "Noto Sans TC",sans-serif;letter-spacing:0;cursor:pointer}' +
       '#pl-root .pl-ai-close:hover,#pl-root .pl-ai-close:focus-visible{color:#f8fafc;border-color:#7dd3fc;outline:none}' +
@@ -1152,17 +1152,81 @@
     }
     var speakBtn = $('pl-ai-speak');
     if (speakBtn) {
-      speakBtn.textContent = aiSpeechActive ? '■ 停止' : '🎙 約15秒朗讀';
+      speakBtn.textContent = aiSpeechActive ? '■ 停止' : '🎙 朗讀全文';
       speakBtn.setAttribute('aria-pressed', String(aiSpeechActive));
     }
   }
 
+  var aiSpeechToken = 0;
+  var aiSpeechQueue = [];
+  var aiSpeechKeepAlive = null;
+
+  function clearAiSpeechKeepAlive() {
+    if (aiSpeechKeepAlive) {
+      try { clearInterval(aiSpeechKeepAlive); } catch (e) {}
+      aiSpeechKeepAlive = null;
+    }
+  }
+
+  function chunkAiSpeechText(text) {
+    var src = String(text || '').replace(/\s+/g, ' ').trim();
+    var parts = [];
+    var max = 110;
+    while (src.length) {
+      if (src.length <= max) {
+        parts.push(src);
+        break;
+      }
+      var slice = src.slice(0, max);
+      var cut = -1;
+      var marks = ['。', '！', '？', '；', '，', '、', '.', '!', '?', ';', ' '];
+      var i;
+      for (i = 0; i < marks.length; i++) {
+        var idx = slice.lastIndexOf(marks[i]);
+        if (idx > 24) { cut = idx; break; }
+      }
+      if (cut < 0) cut = max - 1;
+      parts.push(src.slice(0, cut + 1).trim());
+      src = src.slice(cut + 1).trim();
+    }
+    return parts.filter(Boolean);
+  }
+
   function stopAiSpeech() {
+    aiSpeechToken += 1;
+    aiSpeechQueue = [];
+    clearAiSpeechKeepAlive();
     try {
       if (window.speechSynthesis) window.speechSynthesis.cancel();
     } catch (e) {}
     aiSpeechActive = false;
     syncAiSummaryControls();
+  }
+
+  function speakAiSpeechNext(token) {
+    if (token !== aiSpeechToken) return;
+    if (!aiSpeechQueue.length) {
+      clearAiSpeechKeepAlive();
+      aiSpeechActive = false;
+      syncAiSummaryControls();
+      return;
+    }
+    var part = aiSpeechQueue.shift();
+    var utterance = new SpeechSynthesisUtterance(part);
+    utterance.lang = 'zh-TW';
+    utterance.rate = 1.15;
+    utterance.onend = function () { speakAiSpeechNext(token); };
+    utterance.onerror = function () {
+      if (token !== aiSpeechToken) return;
+      clearAiSpeechKeepAlive();
+      aiSpeechActive = false;
+      syncAiSummaryControls();
+    };
+    try {
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      utterance.onerror();
+    }
   }
 
   function toggleAiSpeech() {
@@ -1181,17 +1245,49 @@
       if (meta) meta.textContent = '摘要完成後即可朗讀';
       return;
     }
-    var utterance = new SpeechSynthesisUtterance(text.slice(0, 120));
-    utterance.lang = 'zh-TW';
-    utterance.rate = 1.2;
-    utterance.onend = utterance.onerror = function () {
-      aiSpeechActive = false;
-      syncAiSummaryControls();
-    };
+    var chunks = chunkAiSpeechText(text);
+    if (!chunks.length) {
+      if (meta) meta.textContent = '沒有可朗讀的分析內容';
+      return;
+    }
+    stopAiSpeech();
+    aiSpeechQueue = chunks;
+    aiSpeechToken += 1;
+    var token = aiSpeechToken;
     aiSpeechActive = true;
     syncAiSummaryControls();
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
+    try { window.speechSynthesis.cancel(); } catch (e) {}
+    clearAiSpeechKeepAlive();
+    aiSpeechKeepAlive = setInterval(function () {
+      if (token !== aiSpeechToken || !window.speechSynthesis) {
+        clearAiSpeechKeepAlive();
+        return;
+      }
+      if (!window.speechSynthesis.speaking) return;
+      try {
+        window.speechSynthesis.pause();
+        window.speechSynthesis.resume();
+      } catch (err) {}
+    }, 8000);
+    setTimeout(function () { speakAiSpeechNext(token); }, 40);
+  }
+
+  function openAiMailer() {
+    var body = $('pl-ai-body');
+    var meta = $('pl-ai-meta');
+    var text = body ? String(body.textContent || '').trim() : '';
+    if (!text || text.indexOf('思考中') === 0) {
+      if (meta) meta.textContent = '摘要完成後即可寄出 Email';
+      return;
+    }
+    if (!window.ShareResult || typeof ShareResult.openMailer !== 'function') {
+      if (meta) meta.textContent = '寄信模組未載入';
+      return;
+    }
+    ShareResult.openMailer(function () {
+      var live = $('pl-ai-body');
+      return live ? String(live.textContent || '').trim() : text;
+    }, 'Stock Terminal AI 分析');
   }
 
   function setAiSummaryVisible(visible) {
@@ -1296,6 +1392,7 @@
     var st = $('pl-ai-st');
     var meta = $('pl-ai-meta');
     if (!box || !body || aiSummaryInFlight) return;
+    stopAiSpeech();
     mode = mode === 'deep' ? 'deep' : 'fast';
     aiSummaryMode = mode;
     aiSummaryInFlight = true;
@@ -1618,7 +1715,8 @@
             '</div></div>' +
           '<div class="pl-ai" id="pl-ai" style="display:none">' +
             '<h4><span>大盤 AI 即時語意 <span id="pl-ai-st" style="font-weight:600;color:var(--tlo)"></span></span>' +
-              '<span class="pl-ai-tools"><button type="button" class="pl-ai-speak" id="pl-ai-speak" aria-pressed="false">🎙 約15秒朗讀</button>' +
+              '<span class="pl-ai-tools"><button type="button" class="pl-ai-speak" id="pl-ai-speak" aria-pressed="false" title="點選後把目前分析全文朗讀完">🎙 朗讀全文</button>' +
+              '<button type="button" class="pl-ai-mail" id="pl-ai-mail" title="把目前分析寄到聯絡人信箱">✉ Email 通知</button>' +
               '<button type="button" class="pl-ai-close" id="pl-ai-close" aria-label="關閉 AI 白話懶人包">× 關閉</button></span></h4>' +
             '<div class="pl-ai-modebar" role="group" aria-label="AI 分析模式">' +
               '<button type="button" class="pl-ai-mode on" id="pl-ai-fast" aria-pressed="true">⚡ 快速摘要 · 本機</button>' +
@@ -1644,6 +1742,8 @@
       if (aiClose) aiClose.onclick = function () { setAiSummaryVisible(false); };
       var aiSpeak = $('pl-ai-speak');
       if (aiSpeak) aiSpeak.onclick = toggleAiSpeech;
+      var aiMail = $('pl-ai-mail');
+      if (aiMail) aiMail.onclick = openAiMailer;
       var aiFast = $('pl-ai-fast');
       if (aiFast) aiFast.onclick = function () { runAiSummary('fast'); };
       var aiDeep = $('pl-ai-deep');
