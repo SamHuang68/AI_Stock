@@ -11,6 +11,11 @@
 
   var SRV = window.SERVER || '';
   var timer = null;
+  var refreshSequence = 0;
+  var membersRequest = null;
+  var membersSequence = 0;
+  var membersSelection = null;
+  var membersResult = null;
   var state = {
     mkt: 'TW',
     sort: 'chg',
@@ -19,50 +24,6 @@
     sector: null,
     sectorKey: null
   };
-
-  // 台股類股名 → 代表股（點格載入 K 線）
-  var TW_PROXY = [
-    { key: '半導體', code: '2330' },
-    { key: '電子', code: '2317' },
-    { key: '電腦', code: '2382' },
-    { key: '光電', code: '3008' },
-    { key: '通信', code: '2345' },
-    { key: '通訊', code: '2345' },
-    { key: '網通', code: '2345' },
-    { key: '金融', code: '2882' },
-    { key: '保險', code: '2882' },
-    { key: '塑膠', code: '1301' },
-    { key: '化學', code: '1303' },
-    { key: '鋼鐵', code: '2002' },
-    { key: '航運', code: '2603' },
-    { key: '汽車', code: '2207' },
-    { key: '食品', code: '1216' },
-    { key: '電信', code: '2412' },
-    { key: '生技', code: '1707' },
-    { key: '醫療', code: '1707' },
-    { key: '營建', code: '2548' },
-    { key: '建材', code: '2548' },
-    { key: '紡織', code: '1476' },
-    { key: '橡膠', code: '2105' },
-    { key: '電機', code: '2308' },
-    { key: '機械', code: '2308' },
-    { key: '水泥', code: '1101' },
-    { key: '玻璃', code: '1802' },
-    { key: '造紙', code: '1904' },
-    { key: '觀光', code: '2707' },
-    { key: '貿易', code: '2912' },
-    { key: '百貨', code: '2912' },
-    { key: '油電', code: '6505' },
-    { key: '燃氣', code: '6505' },
-    { key: '電器', code: '2377' },
-    { key: '其他電子', code: '2357' },
-    { key: '資訊服務', code: '2474' },
-    { key: '文化創意', code: '8446' },
-    { key: '農業科技', code: '1216' },
-    { key: '數位雲端', code: '2454' },
-    { key: '綠能', code: '6443' },
-    { key: '環保', code: '6443' }
-  ];
 
   var SKIP_TW = /加權|櫃買|寶島|公司治理|中型100|未含金融|未含電子|報酬指數|全市場/;
 
@@ -139,6 +100,7 @@
       '#ht-root .ht-cell.hi{outline:2px solid var(--gold);box-shadow:0 0 0 1px rgba(245,197,24,.45),0 4px 14px rgba(0,0,0,.5);' +
         'z-index:3;transform:scale(1.03)}' +
       '#ht-root .ht-cell.dim{opacity:.38}' +
+      '#ht-root .ht-cell:focus-visible{outline:3px solid var(--gold);outline-offset:2px}' +
       '#ht-root .ht-cell .nm{font-size:10px;font-weight:700;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#ht-root .ht-cell .pc{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}' +
       '#ht-root .ht-cell .px{font-size:8px;opacity:.85;font-variant-numeric:tabular-nums}' +
@@ -162,6 +124,64 @@
       '@media (max-width:980px){' +
         '#ht-body .ht-dash{grid-template-columns:1fr;grid-template-rows:minmax(0,1.1fr) minmax(0,.9fr)}' +
         '#ht-body .ht-kpi{grid-template-columns:repeat(2,minmax(0,1fr))}' +
+      '}' +
+      '@media (max-width:900px) and (orientation:portrait),(max-width:980px) and (orientation:landscape) and (max-height:540px){' +
+        '#ht-root{flex:none;height:auto;min-height:0}' +
+        '#ht-root .ht-head{align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px}' +
+        '#ht-root .ht-head>div:first-child{flex:1 1 100%;gap:5px}' +
+        '#ht-root .ht-title{font-size:20px;line-height:1.35}' +
+        '#ht-root .ht-sub{font-size:12px;line-height:1.5;overflow-wrap:anywhere}' +
+        '#ht-root .ht-actions{flex:1 1 100%;flex-wrap:wrap;gap:6px}' +
+        '#ht-root .ht-btn{min-height:40px;min-width:40px;font-size:12px;padding:7px 10px}' +
+        '#ht-body{flex:none;height:auto;overflow:visible;gap:10px}' +
+        '#ht-body .ht-wd{font-size:11px;overflow-wrap:anywhere}' +
+        '#ht-body .ht-kpi .k{padding:8px;min-height:54px}' +
+        '#ht-body .ht-kpi .k .l,#ht-body .ht-kpi .k .s{font-size:11px;line-height:1.45}' +
+        '#ht-body .ht-kpi .k .v{font-size:14px;white-space:normal;overflow-wrap:anywhere}' +
+        '#ht-body .ht-dash{display:flex;flex-direction:column;flex:none;height:auto;overflow:visible;gap:10px}' +
+        '#ht-body .ht-main,#ht-root .ht-focus-zone{flex:none;height:auto;overflow:visible;padding:10px 8px}' +
+        '#ht-body .ht-main>h4,#ht-root .ht-focus-zone>h4{font-size:13px;line-height:1.5;flex-wrap:wrap}' +
+        '#ht-root .ht-grid-wrap{flex:none;height:auto;max-height:none;overflow:visible}' +
+        '#ht-root .ht-grid{grid-template-columns:repeat(auto-fit,minmax(104px,1fr));grid-auto-rows:minmax(88px,auto);gap:6px}' +
+        '#ht-root .ht-cell{min-width:0;min-height:80px;padding:8px 4px;transform:none}' +
+        '#ht-root .ht-cell.hi{transform:none}#ht-root .ht-cell.dim{opacity:.78}' +
+        '#ht-root .ht-cell .nm{font-size:12px;line-height:1.4;white-space:normal;overflow-wrap:anywhere}' +
+        '#ht-root .ht-cell .pc{font-size:18px}' +
+        '#ht-root .ht-cell .px,#ht-root .ht-cell .pxcode{font-size:10px;line-height:1.4}' +
+        '#ht-root .ht-legend,#ht-root .ht-note{font-size:11px;line-height:1.5;flex-wrap:wrap;overflow-wrap:anywhere}' +
+        '#ht-root .ht-focus-zone>#ht-focus{flex:none;height:auto;overflow:visible}' +
+        '#ht-root .ht-two{flex:none;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:auto;height:auto;overflow:visible}' +
+        '#ht-root .ht-two>div,#ht-root .ht-list{height:auto;overflow:visible}' +
+        '#ht-root .ht-row{min-height:44px;flex-wrap:wrap;font-size:12px;padding:6px 3px}' +
+        '#ht-root .ht-row .code,#ht-root .ht-row .name{font-size:11px;white-space:normal}' +
+      '}' +
+      '#ht-members-dialog{box-sizing:border-box;width:min(720px,calc(100vw - 24px));max-width:calc(100vw - 24px);' +
+        'max-height:calc(var(--st-app-height,100dvh) - 24px);padding:0;margin:auto;border:1px solid var(--bhi);' +
+        'border-radius:10px;background:var(--bg2);color:var(--text);overflow:hidden;font:14px/1.5 Arial,"Noto Sans TC",sans-serif}' +
+      '#ht-members-dialog[open]{display:flex;flex-direction:column}' +
+      '#ht-members-dialog::backdrop{background:rgba(0,0,0,.72)}' +
+      '#ht-members-dialog .hm-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-bottom:1px solid var(--border);flex:none}' +
+      '#ht-members-dialog h2{font-size:18px;line-height:1.4;margin:0;color:var(--thi);overflow-wrap:anywhere}' +
+      '#ht-members-dialog button,#ht-members-dialog input,#ht-members-dialog select{font:inherit;box-sizing:border-box;min-height:44px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);color:var(--thi)}' +
+      '#ht-members-dialog button{padding:8px 12px;cursor:pointer}' +
+      '#ht-members-dialog button:focus-visible,#ht-members-dialog input:focus-visible,#ht-members-dialog select:focus-visible{outline:2px solid var(--gold);outline-offset:2px}' +
+      '#ht-members-dialog .hm-head button{flex:none}' +
+      '#ht-members-dialog .hm-body{padding:12px 14px max(18px,env(safe-area-inset-bottom));overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;min-height:0;flex:1}' +
+      '#ht-members-dialog .hm-meta{font-size:12px;line-height:1.6;color:var(--text);margin:0 0 8px;overflow-wrap:anywhere}' +
+      '#ht-members-dialog .hm-tools{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}' +
+      '#ht-members-dialog input{min-width:100px;flex:1 1 140px;padding:8px}' +
+      '#ht-members-dialog select{max-width:100%;padding:8px}' +
+      '#ht-members-dialog .hm-columns,#ht-members-dialog .hm-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(60px,80px) minmax(72px,88px);gap:8px;align-items:center;text-align:right}' +
+      '#ht-members-dialog .hm-columns{font-size:12px;padding:6px 10px;color:var(--tlo)}' +
+      '#ht-members-dialog .hm-columns>:first-child{text-align:left}' +
+      '#ht-members-dialog .hm-row{width:100%;padding:10px;margin:0 0 6px;background:var(--bg);font-variant-numeric:tabular-nums}' +
+      '#ht-members-dialog .hm-stock{text-align:left;min-width:0;overflow-wrap:anywhere}' +
+      '#ht-members-dialog .hm-stock strong{display:block;color:var(--gold)}' +
+      '#ht-members-dialog .hm-stock small{display:block;color:var(--tlo);font-size:10px}' +
+      '#ht-members-dialog .up,#ht-members-dialog .us-down{color:var(--red)}' +
+      '#ht-members-dialog .dn,#ht-members-dialog .us-up{color:var(--green)}' +
+      '@media (orientation:landscape) and (max-height:540px){' +
+        '#ht-members-dialog .hm-head{padding:6px 12px}#ht-members-dialog .hm-body{padding-top:8px}' +
       '}';
   }
 
@@ -224,13 +244,6 @@
       .replace(/"/g, '&quot;');
   }
 
-  function proxyFor(name) {
-    for (var i = 0; i < TW_PROXY.length; i++) {
-      if (name.indexOf(TW_PROXY[i].key) >= 0) return TW_PROXY[i].code;
-    }
-    return null;
-  }
-
   function filterSectors(list, mkt) {
     var rows = (list || []).filter(function (s) {
       if (!s || s.changePct == null || !s.name) return false;
@@ -270,7 +283,7 @@
         '<div id="ht-root">' +
           '<div class="ht-head"><div>' +
             '<span class="ht-title">類股熱力</span>' +
-            '<span class="ht-sub" id="ht-sub">產業漲跌 · 點格載入代表股</span>' +
+            '<span class="ht-sub" id="ht-sub">產業漲跌 · 點類股查看個股</span>' +
           '</div><div class="ht-actions">' +
             '<button type="button" class="ht-btn on" data-mkt="TW">TW</button>' +
             '<button type="button" class="ht-btn" data-mkt="US">US</button>' +
@@ -283,7 +296,9 @@
         '</div>';
       mount.querySelectorAll('[data-mkt]').forEach(function (b) {
         b.onclick = function () {
+          closeMembers();
           state.mkt = b.getAttribute('data-mkt');
+          state.last = null;
           state.sector = null;
           state.sectorKey = null;
           syncMktButtons();
@@ -310,6 +325,170 @@
     if (!code || typeof loadSym !== 'function') return;
     loadSym(code, mkt || 'TW');
     if (window.ShellV5) window.ShellV5.go('chart');
+  }
+
+  function traceMembers(event, request, detail) {
+    try {
+      fetch(SRV + '/diagnostics/ui-route', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+        body: JSON.stringify({ ts: new Date().toISOString(), event: event,
+          correlationId: request.id, from: 'heat', to: '/sectors/members',
+          state: request.market + '|' + request.sector,
+          label: String(detail || '').slice(0, 500), elapsedMs: Date.now() - request.started })
+      }).catch(function () {});
+    } catch (_) {}
+  }
+
+  function cancelMembersRequest(reason) {
+    if (!membersRequest) return;
+    var request = membersRequest;
+    membersRequest = null;
+    clearTimeout(request.timeout);
+    if (request.controller) request.controller.abort();
+    traceMembers('類股個股讀取取消', request, reason || '關閉明細');
+  }
+
+  function closeMembers() {
+    membersSequence += 1;
+    cancelMembersRequest('離開明細');
+    var dialog = $('ht-members-dialog');
+    if (dialog && dialog.open) dialog.close();
+  }
+
+  function ensureMembersDialog() {
+    var dialog = $('ht-members-dialog');
+    if (dialog) return dialog;
+    dialog = document.createElement('dialog');
+    dialog.id = 'ht-members-dialog';
+    dialog.setAttribute('aria-labelledby', 'hm-title');
+    dialog.innerHTML = '<div class="hm-head"><h2 id="hm-title">類股個股</h2>' +
+      '<button type="button" id="hm-close" aria-label="關閉類股個股清單">關閉</button></div>' +
+      '<div class="hm-body" id="hm-body"></div>';
+    document.body.appendChild(dialog);
+    $('hm-close').onclick = closeMembers;
+    dialog.addEventListener('close', function () {
+      if (!dialog.open) {
+        membersSequence += 1;
+        cancelMembersRequest('關閉明細');
+      }
+    });
+    return dialog;
+  }
+
+  function memberNumber(value) {
+    if (value == null || value === '') return null;
+    var n = Number(value);
+    return isFinite(n) ? n : null;
+  }
+
+  function selectMemberRows(rows, term, order) {
+    term = String(term || '').trim().toLowerCase();
+    var selected = (Array.isArray(rows) ? rows : []).filter(function (row) {
+      return row && row.code && (!term || (String(row.code) + ' ' + String(row.name || '')).toLowerCase().indexOf(term) >= 0);
+    });
+    return selected.slice().sort(function (a, b) {
+      if (order !== 'code') {
+        var av = memberNumber(a.changePct), bv = memberNumber(b.changePct);
+        if (av == null && bv != null) return 1;
+        if (bv == null && av != null) return -1;
+        if (av != null && bv != null && av !== bv) return bv - av;
+      }
+      return String(a.code).localeCompare(String(b.code), 'en', { numeric: true });
+    });
+  }
+
+  function renderMemberRows() {
+    var result = membersResult;
+    var list = $('hm-list');
+    if (!result || !list) return;
+    var rows = selectMemberRows(result.rows, $('hm-search').value, $('hm-sort').value);
+    var total = Array.isArray(result.rows) ? result.rows.length : 0;
+    $('hm-count').textContent = rows.length === total ? '共 ' + total + ' 檔' : '顯示 ' + rows.length + '／' + total + ' 檔';
+    list.innerHTML = rows.length ? rows.map(function (row) {
+      var price = memberNumber(row.price), change = memberNumber(row.changePct);
+      return '<button type="button" class="hm-row" data-code="' + esc(row.code) + '" aria-label="' +
+        esc(row.code + ' ' + (row.name || '') + '，漲跌 ' + pct(change) + '，開啟 K 線') + '">' +
+        '<span class="hm-stock"><strong>' + esc(row.code) + '</strong>' + esc(row.name || '') +
+        '<small>報價 ' + esc(row.asOf || '日期未提供') + '</small></span>' +
+        '<span>' + fmt(price) + '</span><strong class="' + chgCls(change, result.market) + '">' + pct(change) + '</strong></button>';
+    }).join('') : '<p class="hm-meta">沒有符合搜尋條件的個股。</p>';
+    list.querySelectorAll('[data-code]').forEach(function (button) {
+      button.onclick = function () {
+        var code = button.getAttribute('data-code');
+        closeMembers();
+        openSym(code, result.market);
+      };
+    });
+  }
+
+  function renderMembers(result) {
+    membersResult = result;
+    var body = $('hm-body');
+    var rows = Array.isArray(result.rows) ? result.rows : [];
+    var dates = result.holdingsAsOf
+      ? '持股資料日 ' + result.holdingsAsOf + '；個股報價時間見各列。'
+      : '行情資料日 ' + (result.date || '未提供') + '。';
+    body.innerHTML = '<p class="hm-meta">' + esc(result.scopeLabel || '類股個股') + ' · ' + rows.length + ' 檔</p>' +
+      '<p class="hm-meta">' + esc(dates) + ' ' + esc(result.classificationSource || '') +
+      (result.source ? ' · ' + esc(result.source) : '') + '</p>' +
+      (result.unavailableReason ? '<p class="hm-meta" role="status">' + esc(result.unavailableReason) + '</p>' : '') +
+      (result.quotedCount != null && result.quotedCount < rows.length ? '<p class="hm-meta" role="status">已取得 ' + result.quotedCount + '／' + rows.length + ' 檔漲跌，其餘行情尚未取得。</p>' : '') +
+      (rows.length ? '<div class="hm-tools"><input id="hm-search" type="search" placeholder="搜尋代號或名稱" aria-label="搜尋類股個股">' +
+        '<select id="hm-sort" aria-label="個股排序"><option value="change">漲跌高至低</option><option value="code">股票代號</option></select></div>' +
+        '<p class="hm-meta" id="hm-count" role="status"></p><div class="hm-columns"><span>個股／報價日期</span><span>價格</span><span>漲跌幅</span></div>' +
+        '<div id="hm-list"></div><p class="hm-meta">已顯示全部 ' + rows.length + ' 檔；缺少的價格或漲跌以「—」表示。點個股開啟 K 線。</p>' :
+        '<p class="hm-meta">目前沒有可列出的個股資料。</p>');
+    if (rows.length) {
+      $('hm-search').oninput = renderMemberRows;
+      $('hm-sort').onchange = renderMemberRows;
+      renderMemberRows();
+    }
+  }
+
+  function openMembers(selection) {
+    cancelMembersRequest('改選類股');
+    var sequence = ++membersSequence;
+    membersSelection = { market: selection.market, sector: selection.sector, symbol: selection.symbol || '' };
+    var dialog = ensureMembersDialog();
+    $('hm-title').textContent = selection.sector + ' · 個股清單';
+    $('hm-body').innerHTML = '<p class="hm-meta" role="status">正在取得類股個股與漲跌資料…</p>';
+    if (!dialog.open) dialog.showModal();
+    var request = { id: 'heat-members-' + Date.now() + '-' + sequence,
+      market: selection.market, sector: selection.sector, started: Date.now(),
+      controller: typeof AbortController !== 'undefined' ? new AbortController() : null, timedOut: false };
+    membersRequest = request;
+    var path = '/sectors/members?mkt=' + encodeURIComponent(selection.market) + '&sector=' + encodeURIComponent(selection.sector) +
+      (selection.symbol ? '&symbol=' + encodeURIComponent(selection.symbol) : '');
+    traceMembers('類股個股讀取開始', request, path);
+    var deadline = new Promise(function (_, reject) {
+      request.timeout = setTimeout(function () {
+        request.timedOut = true;
+        if (request.controller) request.controller.abort();
+        reject(new Error('讀取逾時，請稍後重試。'));
+      }, 65000);
+    });
+    var response = fetch(SRV + path, { cache: 'no-store', headers: { 'X-ST-Trace-ID': request.id },
+      signal: request.controller ? request.controller.signal : undefined }).then(function (r) {
+      traceMembers('類股個股回應收到', request, 'HTTP ' + r.status);
+      if (!r.ok) throw new Error('讀取失敗（HTTP ' + r.status + '），請稍後重試。');
+      return r.json();
+    });
+    return Promise.race([response, deadline]).then(function (result) {
+      if (sequence !== membersSequence || !dialog.open) return;
+      if (!result || result.ok !== true) throw new Error(result && result.unavailableReason || '目前無法取得類股個股資料。');
+      if (result.market !== selection.market) throw new Error('回應市場不符，請重新選取類股。');
+      renderMembers(result);
+      traceMembers('類股個股呈現完成', request, (result.rows || []).length + ' 檔|' + (result.date || '日期未提供'));
+    }).catch(function (error) {
+      if (sequence !== membersSequence || !dialog.open) return;
+      var message = request.timedOut ? '讀取逾時，請稍後重試。' : String(error && error.message || '讀取失敗，請稍後重試。');
+      $('hm-body').innerHTML = '<p class="hm-meta" role="alert">' + esc(message) + '</p><button type="button" id="hm-retry">重新讀取</button>';
+      $('hm-retry').onclick = function () { openMembers(membersSelection); };
+      traceMembers('類股個股讀取失敗', request, message);
+    }).finally(function () {
+      clearTimeout(request.timeout);
+      if (membersRequest === request) membersRequest = null;
+    });
   }
 
   function renderFocus(j) {
@@ -397,8 +576,12 @@
       return;
     }
     var any = false;
+    var hasExact = Array.prototype.some.call(cells, function (el) {
+      return sectorKey(key) === sectorKey(el.getAttribute('data-name'));
+    });
     cells.forEach(function (el) {
-      var match = sectorKeysMatch(key, el.getAttribute('data-sector-key') || el.getAttribute('data-name'));
+      var match = hasExact ? sectorKey(key) === sectorKey(el.getAttribute('data-name')) :
+        sectorKeysMatch(key, el.getAttribute('data-sector-key') || el.getAttribute('data-name'));
       el.classList.toggle('hi', match);
       if (match) any = true;
     });
@@ -406,11 +589,6 @@
       if (any) el.classList.toggle('dim', !el.classList.contains('hi'));
       else el.classList.remove('dim');
     });
-    var hi = body.querySelector('.ht-cell.hi');
-    if (hi && typeof hi.scrollIntoView === 'function') {
-      try { hi.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
-      catch (e) { try { hi.scrollIntoView(false); } catch (e2) {} }
-    }
   }
 
   function renderHeat(d) {
@@ -438,19 +616,20 @@
       grid += '<div class="ht-loading">無類股資料</div>';
     } else {
       rows.forEach(function (s) {
-        var code = mkt === 'US' ? (s.symbol || '') : proxyFor(s.name);
+        var code = mkt === 'US' ? (s.symbol || '') : '';
         var sk = sectorKey(s.name);
         var flowBits = [];
         if (s.marketSharePct != null) flowBits.push('占比 ' + Number(s.marketSharePct).toFixed(1) + '%');
         if (s.rs20VsBenchmarkPct != null) flowBits.push('RS20 ' + (Number(s.rs20VsBenchmarkPct) >= 0 ? '+' : '') + Number(s.rs20VsBenchmarkPct).toFixed(1));
-        grid += '<div class="ht-cell" style="background:' + pctColor(s.changePct, mkt) + '" data-code="' +
+        grid += '<button type="button" class="ht-cell" style="background:' + pctColor(s.changePct, mkt) + '" data-code="' +
           esc(code || '') + '" data-mkt="' + mkt + '" data-name="' + esc(s.name) +
-          '" data-sector-key="' + esc(sk) + '" title="' + esc(s.name) + (code ? ' → ' + code : '') + '">' +
+          '" data-sector-key="' + esc(sk) + '" title="查看' + esc(s.name) + '個股與漲跌" aria-label="' +
+          esc(s.name + '，' + pct(s.changePct) + '，查看個股') + '">' +
           '<div class="nm">' + esc(s.name) + '</div>' +
           '<div class="pc">' + pct(s.changePct) + '</div>' +
           (flowBits.length ? '<div class="pxcode">' + esc(flowBits.join(' · ')) + '</div>' : '') +
-          (code ? '<div class="pxcode">' + esc(code) + '</div>' : '') +
-          '<div class="px">' + fmt(s.close) + '</div></div>';
+          (code ? '<div class="pxcode">ETF ' + esc(code) + '</div>' : '') +
+          '<div class="px">' + (mkt === 'TW' ? '指數 ' : '') + fmt(s.close) + '</div></button>';
       });
     }
     grid += '</div>';
@@ -467,16 +646,18 @@
         '<div class="ht-main"><h4><span>類股熱力圖</span>' + focusTag + '</h4>' +
           legend + '<div class="ht-grid-wrap">' + grid + '</div>' +
           '<div class="ht-note">/sectors · ' + esc(((d && d.sectorFlow) || {}).label || '漲跌參與') +
-          ' · 無同 scope 成交額時不顯示資金流 · 點格載入 K 線 · 非投資建議</div></div>' +
+          ' · 未提供同口徑成交額時不顯示資金流。點類股查看個股與漲跌；主題指數另標示成分資料範圍。</div></div>' +
         '<div class="ht-focus-zone"><h4 id="ht-focus-title">焦點掃描 · ' + mkt + '</h4>' +
           '<div id="ht-focus" class="ht-loading">掃描中…</div></div>' +
       '</div>';
 
     body.querySelectorAll('.ht-cell').forEach(function (el) {
       el.onclick = function () {
-        var c = el.getAttribute('data-code');
         var m = el.getAttribute('data-mkt') || 'TW';
-        if (c) openSym(c, m);
+        state.sector = el.getAttribute('data-name');
+        state.sectorKey = el.getAttribute('data-sector-key');
+        applySectorHighlight(body);
+        openMembers({ market: m, sector: state.sector, symbol: el.getAttribute('data-code') });
       };
     });
 
@@ -509,24 +690,29 @@
     opts = opts || {};
     var body = ensureMount();
     if (!body) return;
+    var requestMarket = state.mkt;
+    var sequence = ++refreshSequence;
     var soft = !!opts.soft || !!state.last || !!body.querySelector('.ht-grid');
     if (window.ShellV5 && window.ShellV5.softBadge) {
       window.ShellV5.softBadge('mount-heat', soft, '更新中…');
     }
     if (!soft) body.innerHTML = '<div class="ht-loading">載入類股…</div>';
-    fetch(SRV + '/sectors?mkt=' + encodeURIComponent(state.mkt), { cache: 'no-store' })
+    fetch(SRV + '/sectors?mkt=' + encodeURIComponent(requestMarket), { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
+        if (sequence !== refreshSequence || requestMarket !== state.mkt) return;
         renderHeat(d || { sectors: [] });
         var cached = state.focusByMkt[state.mkt];
         if (forceFocus || !cached) loadFocus(!!forceFocus);
         else renderFocus(cached);
       })
       .catch(function () {
+        if (sequence !== refreshSequence || requestMarket !== state.mkt) return;
         var b = ensureMount();
         if (b && !soft) b.innerHTML = '<div class="ht-loading">載入失敗</div>';
       })
       .finally(function () {
+        if (sequence !== refreshSequence) return;
         if (window.ShellV5 && window.ShellV5.softBadge) {
           window.ShellV5.softBadge('mount-heat', false);
         }
@@ -537,6 +723,10 @@
     opts = opts || {};
     var mktChanged = false;
     if (opts.mkt && (opts.mkt === 'TW' || opts.mkt === 'US') && opts.mkt !== state.mkt) {
+      closeMembers();
+      state.last = null;
+      state.sector = null;
+      state.sectorKey = null;
       state.mkt = opts.mkt;
       mktChanged = true;
       syncMktButtons();
@@ -564,6 +754,8 @@
 
   function deactivate() {
     if (timer) { clearInterval(timer); timer = null; }
+    refreshSequence += 1;
+    closeMembers();
   }
 
   window.HeatV5 = {

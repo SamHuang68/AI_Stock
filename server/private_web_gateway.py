@@ -382,6 +382,7 @@ READ_GET_EXACT = {
     "/events",
     "/flash",
     "/sectors",
+    "/sectors/members",
     "/ai/local/status",
     "/screener",
     "/focus",

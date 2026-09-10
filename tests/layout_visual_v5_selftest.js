@@ -29,10 +29,10 @@ ok(pulse.includes('grid-template-columns:repeat(5,minmax(0,1fr))') &&
   !pulse.includes('#pl-root .pl-zone.z-top{') && !pulse.includes('#pl-root .pl-zone.z-bot{'),
   'overview desktop second and third rows keep five equal-width panels');
 ok(pulse.includes("MOBILE_LAYOUT_CONTRACT = '2col-scroll'") &&
-  pulse.includes('#pl-root .pl-zone{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:300px') &&
+  pulse.includes('#pl-root .pl-zone{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(300px,auto)') &&
   pulse.includes('#pl-body.pl-mode-expert{display:block;overflow:visible') &&
   pulse.includes('#shell-views:has(#view-pulse.on){overflow-x:hidden!important;overflow-y:auto!important'),
-  'overview mobile second and third rows use two readable columns with page scrolling');
+  '總覽手機版的第二與第三區採兩欄，卡片可增高並由頁面捲動');
 ok(pulse.includes('#pl-root .pl-inst4,#pl-root .pl-bd4,#pl-root .pl-ohlc4{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px') &&
   pulse.includes('#pl-root .pl-score3 .sc.main{grid-column:1/-1}') &&
   pulse.includes('#pl-root .pl-strip{display:flex;gap:7px;overflow-x:auto') &&

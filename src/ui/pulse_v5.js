@@ -50,7 +50,7 @@
 
   function $(id) { return document.getElementById(id); }
 
-  /** 實測 DOM 欄數；桌面與手機橫式維持 5+5，僅手機直式採兩欄捲動。 */
+  /** 實測 DOM 欄數；手機直式與短橫式採兩欄捲動，桌機維持 5+5。 */
   function probeLayoutCols() {
     if (pulseMode === 'beginner') {
       var beginnerProbe = $('pl-layout-probe');
@@ -67,7 +67,8 @@
     var parts = [];
     var ok = zones.length === 2;
     var mobile = !!(window.matchMedia &&
-      window.matchMedia('(max-width: 900px) and (orientation: portrait)').matches);
+      (window.matchMedia('(max-width: 900px) and (orientation: portrait)').matches ||
+       window.matchMedia('(max-width: 980px) and (orientation: landscape) and (max-height: 540px)').matches));
     var expectedCols = mobile ? 2 : 5;
     for (var i = 0; i < zones.length; i++) {
       var z = zones[i];
@@ -370,7 +371,7 @@
         '#pl-root .pl-safe-sep{height:36px}' +
         '#pl-root .pl-beginner-actions .pl-btn{padding:5px 8px}' +
       '}' +
-      '@media(max-width:900px) and (orientation:portrait){#pl-root .pl-beginner-hero{grid-template-columns:minmax(0,1fr);text-align:center}' +
+      '@media(max-width:900px) and (orientation:portrait),(max-width:980px) and (orientation:landscape) and (max-height:540px){#pl-root .pl-beginner-hero{grid-template-columns:minmax(0,1fr);text-align:center}' +
         '#pl-root .pl-beginner-gauge{margin:auto}' +
         '#pl-root .pl-hero-foot{flex-direction:column}#pl-root .pl-stock-check{width:min(100%,340px);max-width:100%}' +
         '#pl-root .pl-stock-check input{width:auto;min-width:0;flex:1 1 auto}#pl-root .pl-stock-check button{flex:0 0 auto}' +
@@ -674,8 +675,8 @@
       '#pl-root table.pillars th,#pl-root table.pillars td{padding:3px 4px;border-bottom:1px solid var(--border);text-align:right}' +
       '#pl-root table.pillars th:first-child,#pl-root table.pillars td:first-child{text-align:left}' +
       '#pl-root table.pillars th{color:var(--tlo)}' +
-      /* 手機橫式專業模式：維持 5+5；完整縮放每一類內容，不再以裁切冒充無碰撞。 */
-      '@media(orientation:landscape) and (max-height:540px) and (pointer:coarse){' +
+      /* 大尺寸觸控橫式維持 5+5；手機由後方自然高度規則處理。 */
+      '@media(orientation:landscape) and (max-height:540px) and (pointer:coarse) and (min-width:981px){' +
         '#view-pulse.sv-panel.on{padding:3px 5px 5px}' +
         '#pl-root{-webkit-text-size-adjust:100%;text-size-adjust:100%}' +
         '#pl-root .pl-head{column-gap:4px;margin-bottom:2px}' +
@@ -787,17 +788,8 @@
         '#pl-root .pl-wl th,#pl-root .pl-wl .mkt,#pl-root .pl-wl .nm-only{font-size:6px}' +
         '#pl-root .pl-wl td.px,#pl-root .pl-wl td.chg,#pl-root .pl-wl td:first-child{font-size:7px}' +
       '}' +
-      /* 768px 以下的舊／小型手機再縮一階；一般橫式與桌面不受影響。 */
-      '@media(orientation:landscape) and (max-height:540px) and (max-width:767px) and (pointer:coarse){' +
-        'html.st-vs5 #pl-root .pl-zone>.pl-sec>h4{font-size:6px!important;line-height:9px;gap:1px}' +
-        '#pl-root .pl-sec h4 a,#pl-root .pl-sec-hint{font-size:5.5px}' +
-        '#pl-root #pl-watch-sec .pl-theme-heat{max-width:56px;padding:0 2px;gap:1px;font-size:5px}' +
-        '#pl-root #pl-flash-sec .pl-sec-tog button,#pl-root #pl-watch-sec .pl-sec-tog button{' +
-          'font-size:4.8px;padding:0 1px}' +
-        '#pl-root #pl-watch-sec>h4>a{font-size:5px}' +
-      '}' +
-      /* 手機直式專業模式：上下兩區各改為兩欄並允許頁面垂直捲動；橫式維持原始 5+5。 */
-      '@media(max-width:900px) and (orientation:portrait){' +
+      /* 手機直式專業模式與短橫式：上下兩區各採兩欄，趨勢卡隨內容增高並由頁面捲動。 */
+      '@media(max-width:900px) and (orientation:portrait),(max-width:980px) and (orientation:landscape) and (max-height:540px){' +
         '#shell-views:has(#view-pulse.on){overflow-x:hidden!important;overflow-y:auto!important;display:block!important;' +
           'overscroll-behavior:contain;scrollbar-gutter:stable}' +
         '#view-pulse.sv-panel.on{height:auto;min-height:100%;overflow:visible;display:block!important;padding:6px 8px 18px}' +
@@ -821,9 +813,10 @@
         '#pl-root .pl-ttabs span{font-size:8px;padding:2px 4px}' +
         '#pl-root .pl-dash{display:flex;flex:0 0 auto;flex-direction:column;height:auto;min-height:0;gap:8px;' +
           'grid-template-rows:none;overflow:visible}' +
-        '#pl-root .pl-zone{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:300px;' +
+        '#pl-root .pl-zone{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(300px,auto);' +
           'height:auto;min-height:0;gap:8px;align-items:stretch}' +
         '#pl-root .pl-sec{height:300px;min-height:300px;padding:9px 10px;border-radius:8px;overflow:hidden}' +
+        '#pl-root .pl-sec:has(.pl-inst-trend,.pl-bd-trend,.pl-ohlc-trend){height:auto;overflow:visible}' +
         '#pl-root .pl-sec h4{font-size:13px;line-height:1.35;margin-bottom:7px;gap:5px;flex-wrap:wrap}' +
         '#pl-root .pl-sec h4 a,#pl-root .pl-sec-hint{font-size:10px}' +
         '#pl-root .pl-note{font-size:10px;line-height:1.5}' +
@@ -841,7 +834,10 @@
         '#pl-root .pl-inst4 .c .k,#pl-root .pl-bd4 .c .k,#pl-root .pl-ohlc4 .c .k{font-size:10px}' +
         '#pl-root .pl-inst4 .c .v,#pl-root .pl-bd4 .c .v,#pl-root .pl-ohlc4 .c .v{font-size:13px;' +
           'overflow:hidden;text-overflow:ellipsis}' +
-        '#pl-root .pl-inst-trend .lab,#pl-root .pl-bd-trend .lab,#pl-root .pl-ohlc-trend .lab{font-size:10px}' +
+        '#pl-root .pl-inst-trend,#pl-root .pl-bd-trend,#pl-root .pl-ohlc-trend{flex:0 0 auto;height:auto;min-height:150px;overflow:visible}' +
+        '#pl-root .pl-inst-trend .chart,#pl-root .pl-bd-trend .chart,#pl-root .pl-ohlc-trend .chart{flex:0 0 132px;height:132px;min-height:132px}' +
+        '#pl-root .pl-inst-trend .lab,#pl-root .pl-bd-trend .lab,#pl-root .pl-ohlc-trend .lab{font-size:10px;flex-wrap:wrap;overflow:visible}' +
+        '#pl-root .pl-inst-trend .lab>span:last-child,#pl-root .pl-bd-trend .lab>span:last-child,#pl-root .pl-ohlc-trend .lab>span:last-child{white-space:normal;overflow-wrap:anywhere}' +
         '#pl-root .pl-inst-cmt,#pl-root .pl-bd-cmt,#pl-root .pl-ohlc-cmt{font-size:10px;line-height:1.45}' +
         '#pl-root .pl-sec-tog button{font-size:9px;padding:2px 5px}' +
         '#pl-root .pl-sbar{font-size:10px;line-height:1.35;padding:2px}' +
@@ -875,7 +871,7 @@
       '}' +
       '@media(max-width:520px) and (orientation:portrait){' +
         '#view-pulse.sv-panel.on{padding-left:5px;padding-right:5px}' +
-        '#pl-root .pl-zone{gap:5px;grid-auto-rows:310px}' +
+        '#pl-root .pl-zone{gap:5px;grid-auto-rows:minmax(310px,auto)}' +
         '#pl-root .pl-sec{height:310px;min-height:310px;padding:7px 7px}' +
         '#pl-root .pl-sec h4{font-size:12px}' +
         '#pl-root .pl-sec h4 a,#pl-root .pl-sec-hint{font-size:9px}' +

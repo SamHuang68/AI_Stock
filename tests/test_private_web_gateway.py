@@ -212,6 +212,16 @@ class PrivateWebGatewayTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(payload["path"], path)
 
+    def test_類股成員僅開放精確唯讀路由(self):
+        path = '/sectors/members?' + urlencode({'mkt': 'TW', 'sector': '油電燃氣'})
+        status, payload = _request(self.base + path, token='reader-secret')
+        self.assertEqual(status, 200)
+        self.assertEqual(payload['path'], path)
+        for role in ('reader', 'owner'):
+            self.assertFalse(gateway.route_permission('POST', '/sectors/members', role, self.gateway.settings))
+            self.assertFalse(gateway.route_permission('GET', '/sectors/members-extra', role, self.gateway.settings))
+            self.assertFalse(gateway.route_permission('GET', '/sectors/members/private', role, self.gateway.settings))
+
     def test_valuation_research_read_only_route(self):
         path = "/valuation-research/2330?peMax=30&excludeIp=1"
         for token in ("reader-secret", "owner-secret"):

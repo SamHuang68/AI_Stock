@@ -1968,7 +1968,7 @@ def _twse_mis_index(ex_ch):
     return out
 
 
-def _fetch_day_movers(n=8, target_date=None):
+def _fetch_day_movers(n=8, target_date=None, include_rows=False):
     """輕量漲跌幅排行：TWSE STOCK_DAY_ALL + TPEx 上櫃日收盤。
        回 {ok,date,gainers:[{code,name,price,change,changePct,value}], losers:[...], source}。
        供 Overview 儀表板；比 POST /screener 快兩個數量級。"""
@@ -1983,6 +1983,7 @@ def _fetch_day_movers(n=8, target_date=None):
             return None
 
     rows = []
+    member_rows = []
     date_s = None
     tpex_date_s = None
 
@@ -2004,6 +2005,13 @@ def _fetch_day_movers(n=8, target_date=None):
                 continue
             close = fnum(r.get('ClosingPrice'))
             chg = fnum(r.get('Change'))
+            if include_rows and is_stock:
+                previous = close - chg if close is not None and chg is not None else None
+                member_rows.append({
+                    'code': code, 'name': name, 'price': close, 'change': chg,
+                    'changePct': round(chg / previous * 100.0, 2) if previous else None,
+                    'mkt': 'TW', 'ex': 'TWSE', 'asOf': r.get('Date'),
+                })
             if close is None or chg is None:
                 continue
             prev = close - chg
@@ -2124,7 +2132,7 @@ def _fetch_day_movers(n=8, target_date=None):
     elif err_tpex:
         print('[movers] TPEx', err_tpex)
 
-    if not rows:
+    if not rows and not (include_rows and member_rows):
         return {'ok': False, 'date': date_s, 'gainers': [], 'losers': [], 'source': None, 'error': 'no rows'}
 
     rows.sort(key=lambda x: x['changePct'], reverse=True)
@@ -2163,6 +2171,7 @@ def _fetch_day_movers(n=8, target_date=None):
         return lst
 
     _tag_industry(rows)
+    _tag_industry(member_rows)
     _tag_industry(limit_up)
     _tag_industry(limit_down)
     # 同日上市普通股成交額依官方產業分類聚合；這是產業成交占比的分子與同 scope 分母。
@@ -2209,6 +2218,8 @@ def _fetch_day_movers(n=8, target_date=None):
             'TWSE MI_INDEX ALLBUT0999 dated TradeValue + issuer industry classification'
             if target_date else
             'TWSE STOCK_DAY_ALL TradeValue + issuer industry classification'),
+        **({'rows': member_rows, 'twseAvailable': twse_rows is not None,
+            'classificationCount': len(smap)} if include_rows else {}),
     }
 
 
@@ -2825,6 +2836,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_flash()
         elif p == '/sectors' or p.startswith('/sectors?'):
             self._handle_sectors()
+        elif p == '/sectors/members' or p.startswith('/sectors/members?'):
+            self._handle_sector_members()
         elif p == '/ai/local/status' or p.startswith('/ai/local/status?'):
             self._handle_ai_local_status()
         elif p == '/screener' or p.startswith('/screener?'):
@@ -5018,9 +5031,10 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             if isinstance(ex_sec, dict) and ex_sec.get('sectors'):
                 sectors = ex_sec.get('sectors') or []
                 try:
+                    from 類股成員 import sector_cache_payload
                     _cache.set(
                         f'sectors:{ymd}',
-                        json.dumps({'ok': True, 'sectors': sectors, 'source': ex_sec.get('source')},
+                        json.dumps(sector_cache_payload(ex_sec),
                                    ensure_ascii=False).encode(),
                         ttl=300,
                     )
@@ -5776,6 +5790,60 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         _cache.set(key, body, ttl=3600)
         self._ok(body)
 
+    _US_SECTOR_ETFS = (
+        ('XLE', '能源 Energy'),
+        ('XLF', '金融 Financials'),
+        ('XLK', '科技 Technology'),
+        ('XLV', '醫療 Healthcare'),
+        ('XLY', '非必需消費 Cons. Discr.'),
+        ('XLP', '必需消費 Cons. Staples'),
+        ('XLI', '工業 Industrials'),
+        ('XLB', '原物料 Materials'),
+        ('XLU', '公用事業 Utilities'),
+        ('XLRE', '不動產 Real Estate'),
+        ('XLC', '通訊 Communication'),
+    )
+
+    def _handle_sector_members(self):
+        """GET /sectors/members：官方分類上市個股清單及來源日收盤漲跌。"""
+        from datetime import date as _date
+        from 類股成員 import build_tw_members, empty_payload
+        qs = parse_qs(urlparse(self.path).query)
+        market = (qs.get('mkt', ['TW'])[0] or 'TW').strip().upper()
+        sector = (qs.get('sector', qs.get('symbol', ['']))[0] or '').strip()
+        if market not in ('TW', 'US'):
+            self._err('市場僅支援 TW 或 US。', 400); return
+        if not sector or len(sector) > 160:
+            self._err('請提供有效的類股名稱。', 400); return
+        if market == 'US':
+            by_name = {name: symbol for symbol, name in Handler._US_SECTOR_ETFS}
+            by_name.update({name.split(' ')[0]: symbol for symbol, name in Handler._US_SECTOR_ETFS})
+            known_symbols = {symbol for symbol, _ in Handler._US_SECTOR_ETFS}
+            mapped = sector.upper() if sector.upper() in known_symbols else by_name.get(sector)
+            requested = (qs.get('symbol', [''])[0] or '').strip().upper()
+            symbol = requested or mapped
+            if symbol not in known_symbols or (requested and mapped and requested != mapped):
+                self._err('請選擇熱力圖提供的美股產業 ETF。', 400); return
+            try:
+                from 美股類股成員 import get_members
+                out = dict(get_members(symbol, _yf_batch_quotes))
+                out['sector'] = sector
+            except Exception:
+                out = empty_payload('US', sector, '美股產業 ETF 持股與報價暫時無法取得，請稍後重新整理。', ok=False)
+            self._ok(json.dumps(out, ensure_ascii=False).encode()); return
+
+        refresh = qs.get('refresh', qs.get('nocache', ['0']))[0] in ('1', 'true', 'yes')
+        key = f'sector-members-source:v1:{_date.today().strftime("%Y%m%d")}'
+        try:
+            raw = None if refresh else _cache.get(key)
+            snapshot = json.loads(raw) if raw is not None else _fetch_day_movers(include_rows=True)
+            if raw is None and snapshot.get('twseAvailable') and snapshot.get('classificationCount'):
+                _cache.set(key, json.dumps(snapshot, ensure_ascii=False).encode(), ttl=300)
+            out = build_tw_members(snapshot, sector)
+        except Exception:
+            out = empty_payload('TW', sector, '類股個股資料暫時無法取得，請稍後重新整理。', ok=False)
+        self._ok(json.dumps(out, ensure_ascii=False).encode())
+
     def _handle_sectors(self):
         """產業熱力圖：依市場切換資料來源
         v3.2 改版：
@@ -5799,21 +5867,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             cached = _cache.get(key)
             if cached is not None:
                 self._ok(cached); return
-        SPDR = [
-            ('XLE',  '能源 Energy'),
-            ('XLF',  '金融 Financials'),
-            ('XLK',  '科技 Technology'),
-            ('XLV',  '醫療 Healthcare'),
-            ('XLY',  '非必需消費 Cons. Discr.'),
-            ('XLP',  '必需消費 Cons. Staples'),
-            ('XLI',  '工業 Industrials'),
-            ('XLB',  '原物料 Materials'),
-            ('XLU',  '公用事業 Utilities'),
-            ('XLRE', '不動產 Real Estate'),
-            ('XLC',  '通訊 Communication'),
-        ]
         sectors = []
-        for sym, name in SPDR:
+        for sym, name in self._US_SECTOR_ETFS:
             try:
                 # 改 range=5d：用多根 K 線交叉驗證 Yahoo 落後狀況。
                 # 原本 range=1d + chartPreviousClose 在 Yahoo 雙伺服器資料不同步時

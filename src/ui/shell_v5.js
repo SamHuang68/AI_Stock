@@ -480,14 +480,14 @@
         '#st-ring-fab{right:4px;bottom:4px;width:30px;height:30px;font-size:11px;opacity:.86}' +
         '#st-ring-fab:hover{transform:none}' +
       '}' +
-      /* 手機直式統一由 shell-views 擔任唯一捲動容器；內容底部避開浮動轉盤與 iOS safe area。 */
-      '@media(max-width:900px) and (orientation:portrait){' +
-        '#shell-main #shell-views.show{display:block!important;overflow-x:hidden!important;overflow-y:auto!important;' +
+      /* 手機與短橫式由 shell-views 捲動；權重須高於各模組稍後注入的 :has 規則。 */
+      '@media(max-width:900px) and (orientation:portrait),(max-width:980px) and (orientation:landscape) and (max-height:540px){' +
+        '#app #shell-main #shell-views.show{display:block!important;overflow-x:hidden!important;overflow-y:auto!important;' +
           'height:100%!important;max-height:100%!important;min-height:0!important;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch;' +
           'scroll-padding-bottom:calc(88px + env(safe-area-inset-bottom,0px))}' +
-        '#shell-main #shell-views.show>.sv-panel.on{display:block!important;flex:none!important;height:auto!important;min-height:100%!important;' +
+        '#app #shell-main #shell-views.show>.sv-panel.on{display:block!important;flex:none!important;height:auto!important;min-height:100%!important;' +
           'overflow:visible!important;padding-bottom:calc(88px + env(safe-area-inset-bottom,0px))!important}' +
-        '#shell-main #shell-views.show>.sv-panel.on>.sv-mount{display:block!important;height:auto!important;min-height:0!important;overflow:visible!important}' +
+        '#app #shell-main #shell-views.show>.sv-panel.on>.sv-mount{display:block!important;height:auto!important;min-height:0!important;overflow:visible!important}' +
         '#st-ring-fab{bottom:calc(14px + env(safe-area-inset-bottom,0px))}' +
       '}';
   }
@@ -1664,7 +1664,8 @@
     try {
       if (!window.matchMedia) return;
       var portraitMobile = window.matchMedia('(max-width:900px) and (orientation:portrait)').matches;
-      var compactLandscape = window.matchMedia('(orientation:landscape) and (max-height:540px) and (pointer:coarse)').matches;
+      var compactLandscape = window.matchMedia('(orientation:landscape) and (max-height:540px) and (pointer:coarse)').matches ||
+        window.matchMedia('(max-width:980px) and (orientation:landscape) and (max-height:540px)').matches;
       if (!portraitMobile && !compactLandscape) return;
       var views = $('shell-views');
       var panel = $('view-' + routeId);
@@ -1740,6 +1741,7 @@
       id = route.id;
     }
 
+    var routeChanged = state.route !== id;
     if (state.prevRoute && state.prevRoute !== id) {
       deactivateRoute(state.prevRoute);
     }
@@ -1761,6 +1763,12 @@
     var pager = $('rpanel-pager');
     var views = $('shell-views');
     var isChart = id === 'chart';
+
+    /* 換頁從標題開始；相同路由更新資料或選擇類股時保留閱讀位置。 */
+    if (routeChanged && views) {
+      views.scrollTop = 0;
+      views.scrollLeft = 0;
+    }
 
     if (topbar) topbar.classList.toggle('shell-hidden', !isChart);
     if (body) body.classList.toggle('shell-hidden', !isChart);

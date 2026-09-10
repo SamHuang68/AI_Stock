@@ -353,6 +353,101 @@
   }
 }
 
+/* 功能頁的手機內容依自然高度排列；圖表、總覽、盤後與熱力保留各自的內容契約。
+   僅解除已知主版面容器的高度限制，表格保留局部橫向捲動。 */
+@media (max-width: 900px) and (orientation: portrait),
+       (max-width: 980px) and (orientation: landscape) and (max-height: 540px) {
+  #shell-main #shell-views :is(#bd-root, #bk-root, #nw-root, #ai5-root, #sc-root, .hub-root),
+  #shell-main #shell-views :is(#bd-body, #bk-body, #nw-body, #ai5-body, .hub-body) {
+    height: auto;
+    min-height: 0;
+    flex: none;
+    overflow: visible;
+  }
+
+  #shell-main #shell-views :is(.bd-head, .bk-head, .nw-head, .ai5-head, .sc-head, .hub-head) {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  #shell-main #shell-views :is(.bd-head, .bk-head, .nw-head, .ai5-head, .sc-head, .hub-head) > div:first-child {
+    flex-basis: 100%;
+  }
+  #shell-main #shell-views :is(.bd-actions, .bk-actions, .nw-actions, .ai5-actions, .sc-actions, .hub-actions) {
+    flex-wrap: wrap;
+    max-width: 100%;
+    justify-content: flex-start;
+  }
+  #shell-main #shell-views :is(.bd-btn, .bk-btn, .nw-btn, .ai5-btn, .sc-btn, .hub-btn) {
+    min-height: 32px;
+  }
+
+  #shell-main #shell-views :is(.bd-dash, .bk-zone, .nw-dash, .ai5-dash, .sc-layout, .hub-dash, .hub-zone, .hub-inst-hero),
+  #shell-main #shell-views #sc-root .sc-layout {
+    height: auto;
+    min-height: 0;
+    flex: none;
+    overflow: visible;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-auto-rows: auto;
+    align-content: start;
+    gap: 10px;
+  }
+  #shell-main #shell-views :is(.bd-strip, .bk-strip, .nw-strip, .ai5-strip, .hub-strip) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  #shell-main #shell-views .hub-zone.z-fill {
+    grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+    grid-auto-rows: auto;
+  }
+
+  #shell-main #shell-views :is(.bd-sec, .bk-left, .bk-right, .nw-left, .nw-mid, .nw-right, .nw-card, .ai5-sec, .sc-rail, .sc-main, .hub-sec, .hub-card) {
+    height: auto;
+    max-height: none;
+    min-height: 0;
+    min-width: 0;
+    flex: none;
+    overflow: visible;
+  }
+  /* 快訊左欄在窄桌機原本隱藏；手機改為依序呈現，避免遺失統計。 */
+  #shell-main #shell-views #nw-root .nw-left {
+    display: flex;
+  }
+  #shell-main #shell-views #sc-root .sc-rail {
+    max-height: none;
+    padding-right: 0;
+  }
+  #shell-main #shell-views :is(.bd-fill, .bd-rows, .hub-fill, .ai5-fill, .nw-table-wrap, .nw-flash-list, #sc-results) {
+    height: auto;
+    max-height: none;
+    min-height: 0;
+    min-width: 0;
+    max-width: 100%;
+    flex: none;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+  }
+  #shell-main #shell-views :is(.bd-sub, .bk-sub, .nw-sub, .ai5-sub, .sc-sub, .hub-sub, .hub-note) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  #shell-main #shell-views .bk-empty-steps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #app #shell-main #shell-views #pl-root :is(.pl-inst-cmt, .pl-bd-cmt, .pl-ohlc-cmt) {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    -webkit-line-clamp: unset;
+    white-space: normal;
+  }
+}
+
 /* ──────────────────────────────────────────────────────────
    💻 Tablet (≤ 1280px)
    ────────────────────────────────────────────────────────── */
