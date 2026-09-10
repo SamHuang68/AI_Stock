@@ -47,6 +47,11 @@
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
   }
+}
+
+/* 圖表與六個分析頁共用導覽；短橫式也保留完整觸控尺寸。 */
+@media (max-width: 768px),
+       (max-width: 980px) and (orientation: landscape) and (max-height: 540px) {
   #rpanel-pager {
     display: grid !important;
     grid-template-columns: 48px minmax(0,1fr) 48px;
@@ -107,6 +112,9 @@
     box-shadow: 0 0 10px rgba(245,197,24,.35);
   }
 
+}
+
+@media (max-width: 768px) {
   /* ── Topbar: tighter ── */
   #topbar {
     height: 38px;
@@ -274,7 +282,8 @@
    The chart is page 1; analysis tabs are pages 2–7.  This fixes
    the old 48–50vh bottom sheet that could leave only ~56px for K lines.
    ────────────────────────────────────────────────────────── */
-@media (max-width: 768px) and (orientation: portrait) {
+@media (max-width: 768px) and (orientation: portrait),
+       (max-width: 980px) and (orientation: landscape) and (max-height: 540px) {
   #body {
     flex-direction: row !important;
     flex: 1 1 0 !important;
@@ -313,9 +322,8 @@
   }
 }
 
-/* Phone landscape already has enough width.  Do not page it: restore the
-   workstation's line-chart + analysis split and its regular analysis tabs. */
-@media (max-width: 900px) and (orientation: landscape) {
+/* 橫式高度足夠時保留圖表與分析分割；短橫式使用完整工作區分頁。 */
+@media (max-width: 900px) and (orientation: landscape) and (min-height: 541px) {
   #body { flex-direction: row !important; overflow: hidden !important; }
   #body > #left {
     display: flex !important;
@@ -350,6 +358,45 @@
     right: calc(40% + 8px) !important;
     bottom: 52px !important;
     width: min(220px, 30vw) !important;
+  }
+}
+
+/* 短橫式連頂列一起捲動，讓線圖保有實際高度；底部導覽始終可操作。 */
+@media (max-width: 980px) and (orientation: landscape) and (max-height: 540px) {
+  html[data-st5-route="chart"] #app #shell-main {
+    display: block;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+    scroll-padding-bottom: calc(54px + env(safe-area-inset-bottom, 0px));
+  }
+  html[data-st5-route="chart"] #app #body {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  html[data-st5-route="chart"] #app #body > #left {
+    height: auto !important;
+    min-height: 420px !important;
+  }
+  html[data-st5-route="chart"] #app #chartarea {
+    flex: 1 0 260px;
+    min-height: 260px;
+    max-height: none;
+  }
+  html[data-st5-route="chart"] #app #body > #right {
+    height: auto !important;
+    min-height: 260px !important;
+  }
+  html[data-st5-route="chart"] #app #rtabs { display: none !important; }
+  html[data-st5-route="chart"] #app #rpanel {
+    flex: none !important;
+    height: auto;
+    overflow: visible !important;
+  }
+  html[data-st5-route="chart"] #app #rpanel-pager {
+    position: sticky;
+    bottom: 0;
   }
 }
 
@@ -438,6 +485,12 @@
   }
   #shell-main #shell-views .bk-empty-steps {
     grid-template-columns: minmax(0, 1fr);
+  }
+  #shell-main #shell-views .hub-inst-rankhd { flex-wrap: wrap; }
+  #shell-main #shell-views .hub-inst-rankhd > span.meta {
+    white-space: normal;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
   #app #shell-main #shell-views #pl-root :is(.pl-inst-cmt, .pl-bd-cmt, .pl-ohlc-cmt) {
     height: auto;

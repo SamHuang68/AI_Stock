@@ -25,8 +25,12 @@ function element(route) {
 
 const routes = ['heat', 'news', 'chart'].map(id => ({ id }));
 const panels = routes.map(route => element(route.id));
-const ids = Object.fromEntries(['topbar', 'body', 'wlbar', 'rpanel-pager', 'shell-views', 'mkt-bar']
+const ids = Object.fromEntries(['topbar', 'body', 'wlbar', 'rpanel-pager', 'shell-views', 'shell-main', 'mkt-bar']
   .map(id => [id, element()]));
+const pageBody = element();
+const rootElement = element();
+const frames = [];
+const surfaces = [ids['shell-main'], ids['shell-views'], pageBody, rootElement];
 const emitted = [];
 const deactivated = [];
 const loaded = [];
@@ -35,8 +39,11 @@ const context = {
   resolveAlias(id, opts) { return { id, opts }; },
   findRoute(id) { return routes.find(route => route.id === id); },
   $(id) { return ids[id] || null; },
-  document: { documentElement: element(), querySelectorAll() { return panels; } },
-  window: { location: { pathname: '/', search: '' }, history: { replaceState() {} }, dispatchEvent() {} },
+  document: { body: pageBody, documentElement: rootElement, querySelectorAll() { return panels; } },
+  window: {
+    location: { pathname: '/', search: '' }, history: { replaceState() {} }, dispatchEvent() {},
+    requestAnimationFrame(callback) { frames.push(callback); return frames.length; }
+  },
   localStorage: { setItem() {} },
   ringState: { open: false },
   deactivateRoute(id) { deactivated.push(id); },
@@ -48,27 +55,47 @@ const context = {
 vm.createContext(context);
 vm.runInContext(source.slice(start, end), context);
 
-ids['shell-views'].scrollTop = 920;
-ids['shell-views'].scrollLeft = 12;
+function setScroll(top, left) {
+  surfaces.forEach(surface => { surface.scrollTop = top; surface.scrollLeft = left; });
+}
+function assertScroll(top, left, label) {
+  surfaces.forEach(surface => {
+    assert.equal(surface.scrollTop, top, label + '：垂直位置');
+    assert.equal(surface.scrollLeft, left, label + '：橫向位置');
+  });
+}
+function flushFrames() {
+  frames.splice(0).forEach(callback => callback());
+}
+
+setScroll(920, 12);
 context.applyRoute('heat', { sector: '半導體' });
-assert.equal(ids['shell-views'].scrollTop, 920, '相同路由的類股選取保留垂直閱讀位置');
-assert.equal(ids['shell-views'].scrollLeft, 12, '相同路由保留既有位置');
+assertScroll(920, 12, '相同路由的類股選取保留內外容器閱讀位置');
+assert.equal(frames.length, 0, '相同路由不排入下一幀歸零');
 assert.equal(emitted.at(-1).opts.sector, '半導體', '保留同路由選取參數');
 assert.deepEqual(deactivated, [], '相同路由不終止既有模組');
 
 context.applyRoute('news');
-assert.equal(ids['shell-views'].scrollTop, 0, '切換功能頁從頂端開始');
-assert.equal(ids['shell-views'].scrollLeft, 0, '切換功能頁不繼承橫向位移');
+assertScroll(0, 0, '切換功能頁清除主容器及外層頁面位移');
+setScroll(26.333, 8);
+flushFrames();
+assertScroll(0, 0, '路由重排後下一幀清除焦點造成的外層位移');
+assert.equal(frames.length, 0, '路由捲動補正只排一幀');
 assert.equal(ids['shell-views'].classList.contains('show'), true, '功能頁使用共同捲動容器');
 assert.equal(ids['rpanel-pager'].classList.contains('shell-hidden'), true, '功能頁隱藏圖表分頁底列');
 assert.deepEqual(deactivated, ['heat'], '只終止離開的模組');
 
-ids['shell-views'].scrollTop = 450;
+setScroll(450, 13);
 context.applyRoute('chart', { sym: '2330', mkt: 'TW' });
 assert.equal(ids['shell-views'].classList.contains('show'), false, '圖表仍使用原工作台');
 assert.equal(ids['rpanel-pager'].classList.contains('shell-hidden'), false, '圖表保留分析分頁底列');
 assert.deepEqual(loaded, [{ sym: '2330', mkt: 'TW' }], '切換個股仍傳送代號與市場');
-assert.equal(ids['shell-views'].scrollTop, 0, '離開功能頁時清除殘留位置');
+assertScroll(0, 0, '切換到圖表時清除殘留位置');
+flushFrames();
+setScroll(165, 8);
+context.applyRoute('heat');
+assertScroll(0, 0, '圖表捲動後切到熱力不殘留裁頭位移');
+flushFrames();
 
 // 執行總覽的實際欄數診斷，避免短橫式已改兩欄卻仍被診斷成桌機五欄。
 const pulseSource = fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8');

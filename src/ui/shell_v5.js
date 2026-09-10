@@ -156,6 +156,8 @@
       document.head.appendChild(s);
     }
     s.textContent =
+      /* 殼層外框不接受焦點帶動的程式捲動；內容仍由內部容器捲動。 */
+      '@media screen{html.st5-booted,html.st5-booted body{overflow:clip}}' +
       /* 主區全寬；導航改由轉盤（無側欄） */
       '#shell-row{display:flex;flex:1 1 0;min-height:0;min-width:0;height:100%;position:relative}' +
       '#shell-main{display:flex;flex-direction:column;flex:1 1 0;min-width:0;min-height:0;height:100%;position:relative;width:100%}' +
@@ -1762,13 +1764,8 @@
     var wl = $('wlbar');
     var pager = $('rpanel-pager');
     var views = $('shell-views');
+    var main = $('shell-main');
     var isChart = id === 'chart';
-
-    /* 換頁從標題開始；相同路由更新資料或選擇類股時保留閱讀位置。 */
-    if (routeChanged && views) {
-      views.scrollTop = 0;
-      views.scrollLeft = 0;
-    }
 
     if (topbar) topbar.classList.toggle('shell-hidden', !isChart);
     if (body) body.classList.toggle('shell-hidden', !isChart);
@@ -1809,6 +1806,17 @@
     }
 
     emitRoute(id, opts);
+    /* 換頁完成重排後從標題開始；相同路由更新資料時保留閱讀位置。 */
+    if (routeChanged) {
+      var resetRouteScroll = function () {
+        if (state.route !== id) return;
+        [main, views, document.body, document.documentElement].forEach(function (surface) {
+          if (surface) { surface.scrollTop = 0; surface.scrollLeft = 0; }
+        });
+      };
+      resetRouteScroll();
+      if (window.requestAnimationFrame) window.requestAnimationFrame(resetRouteScroll);
+    }
     setTimeout(function () { traceMobilePanelLayout(id); }, 180);
   }
 
