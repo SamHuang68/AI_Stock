@@ -481,6 +481,15 @@ class EarlyWarningTest(unittest.TestCase):
             self.assertTrue(all(row['directionHitRatePct'] == 75.0 for row in result['horizons']))
             self.assertTrue(all(row['materialMoveHitRatePct'] == 50.0 for row in result['horizons']))
 
+    def test_signal_ledger_enables_wal(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = str(Path(folder) / 'signals.db')
+            context, pulse = fixture(1)
+            ew.process_context(context, pulse, memory_snapshot=memory(), db_path=db)
+            with closing(sqlite3.connect(db)) as conn:
+                mode = conn.execute('PRAGMA journal_mode').fetchone()[0]
+            self.assertEqual(str(mode).lower(), 'wal')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -60,6 +60,7 @@ from market_routes import market_snapshot, twse_mis_observation
 from http_boundary import BodyReadError, is_same_local_origin, read_json_body
 from atomic_store import StoreCorruptError, atomic_write_json, load_json
 import atomic_store as _atomic_store
+from jsonl_trace import append_jsonl as _append_jsonl
 from deadline import BoundedExecutor, collect_named
 from runtime_revision import RUNTIME_COMMIT
 from keystats_resolution import should_retry_tw_keystats_as_otc as _should_retry_tw_keystats_as_otc
@@ -111,16 +112,9 @@ def _breadth_trace(event, **fields):
     """Persistent, bounded diagnostic trail for official breadth freshness."""
     try:
         path = os.path.join(_BASE, 'logs', 'breadth_trace.jsonl')
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        row = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'event': event, **fields}
-        with open(path, 'a', encoding='utf-8') as fh:
-            fh.write(json.dumps(row, ensure_ascii=False, default=str) + '\n')
-        # Retain the most recent observations only; trace is diagnostic, not data.
-        if os.path.getsize(path) > 256 * 1024:
-            with open(path, 'r', encoding='utf-8') as fh:
-                tail = fh.readlines()[-500:]
-            with open(path, 'w', encoding='utf-8') as fh:
-                fh.writelines(tail)
+        _append_jsonl(
+            path, {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'event': event, **fields},
+            max_bytes=256 * 1024, tail_lines=500)
     except Exception:
         pass
 
@@ -129,32 +123,21 @@ def _keystats_trace(event, **fields):
     """Persist sanitized market-cap acquisition transitions for one symbol."""
     try:
         path = os.path.join(_BASE, 'logs', 'keystats_trace.jsonl')
-        os.makedirs(os.path.dirname(path), exist_ok=True)
         allowed = (
             'correlationId', 'symbol', 'cache', 'source', 'hasPrice',
             'hasShares', 'hasMarketCap', 'resolved', 'error', 'elapsedMs',
         )
         row = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'event': event}
         row.update({k: fields.get(k) for k in allowed if k in fields})
-        with open(path, 'a', encoding='utf-8') as fh:
-            fh.write(json.dumps(row, ensure_ascii=False, default=str) + '\n')
-        if os.path.getsize(path) > 128 * 1024:
-            with open(path, 'r', encoding='utf-8') as fh:
-                tail = fh.readlines()[-300:]
-            with open(path, 'w', encoding='utf-8') as fh:
-                fh.writelines(tail)
+        _append_jsonl(path, row, max_bytes=128 * 1024, tail_lines=300)
     except Exception:
         pass
-
-
-_FUNDAMENTAL_TRACE_LOCK = threading.Lock()
 
 
 def _fundamental_trace(event, **fields):
     """Persist a bounded trace for market classification and model resolution."""
     try:
         path = os.path.join(_BASE, 'logs', 'fundamental_trace.jsonl')
-        os.makedirs(os.path.dirname(path), exist_ok=True)
         allowed = (
             'correlationId', 'symbol', 'market', 'kind', 'model', 'source',
             'cache', 'score', 'sampleCount', 'hasRevenue', 'hasIncome',
@@ -162,16 +145,7 @@ def _fundamental_trace(event, **fields):
         )
         row = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'event': event}
         row.update({k: fields.get(k) for k in allowed if k in fields})
-        # ThreadingHTTPServer can finish several market requests together;
-        # serialize append + compaction so every JSONL row remains parseable.
-        with _FUNDAMENTAL_TRACE_LOCK:
-            with open(path, 'a', encoding='utf-8') as fh:
-                fh.write(json.dumps(row, ensure_ascii=False, default=str) + '\n')
-            if os.path.getsize(path) > 128 * 1024:
-                with open(path, 'r', encoding='utf-8') as fh:
-                    tail = fh.readlines()[-300:]
-                with open(path, 'w', encoding='utf-8') as fh:
-                    fh.writelines(tail)
+        _append_jsonl(path, row, max_bytes=128 * 1024, tail_lines=300)
     except Exception:
         pass
 
@@ -187,14 +161,7 @@ def _ui_route_trace(row):
         clean = {k: str((row or {}).get(k) or '')[:120] for k in allowed}
         clean['serverTs'] = time.strftime('%Y-%m-%dT%H:%M:%S')
         path = os.path.join(_BASE, 'logs', 'ui_route_trace.jsonl')
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'a', encoding='utf-8') as fh:
-            fh.write(json.dumps(clean, ensure_ascii=False) + '\n')
-        if os.path.getsize(path) > 128 * 1024:
-            with open(path, 'r', encoding='utf-8') as fh:
-                tail = fh.readlines()[-300:]
-            with open(path, 'w', encoding='utf-8') as fh:
-                fh.writelines(tail)
+        _append_jsonl(path, clean, max_bytes=128 * 1024, tail_lines=300)
     except Exception:
         pass
 
@@ -1235,39 +1202,53 @@ except Exception:
         import math
         return max(0.0, min(100.0, 50.0 + 50.0 * math.tanh((float(yi) - 8000.0) / 4000.0)))
 
-    def _turnover_quant(turns, latest_yi=None):
+    def _turnover_quant(turns, latest_yi=None, latest_date=None):
         return {'yi': None, 'chgPct': None, 'ma5Yi': None, 'vsMa5Pct': None,
-                'z20': None, 'volumeScore': None, 'streak': None,
+                'z20': None, 'volumeScore': None, 'volumeRelative': None,
+                'volumeRelativeScore': None, 'streak': None,
                 'trend': None, 'level': None, 'n': 0}
 
 
 try:
     from trend_quant import price_series_quant as _price_series_quant
+    from trend_quant import session_date_key as _session_date_key
 except Exception:
-    def _price_series_quant(closes, latest=None, quote_change_pct=None):
+    def _price_series_quant(closes, latest=None, quote_change_pct=None,
+                            latest_date=None, same_bar=False):
         return {
             'close': None, 'chgPct': None, 'ma5': None, 'vsMa5Pct': None,
             'z20': None, 'momScore': None, 'streak': None,
             'trend': None, 'level': None, 'n': 0, 'spark': [],
         }
 
+    def _session_date_key(value):
+        return None
 
-def _fmtqik_index_closes(turns) -> list:
-    """FMTQIK 列中的加權指數收盤序列（舊→新）。"""
+
+def _quote_session_date(quote):
+    if not isinstance(quote, dict):
+        return None
+    market = quote.get('market') if isinstance(quote.get('market'), dict) else {}
+    return _session_date_key(
+        market.get('sessionDate') or quote.get('tradeDate') or quote.get('asOf'))
+
+
+def _fmtqik_index_bars(turns) -> list:
+    """FMTQIK 列中的加權指數收盤序列（舊→新，含交易日）。"""
     out = []
     for t in turns or []:
         try:
             if t.get('index') is not None:
                 v = float(t['index'])
                 if v > 0:
-                    out.append(v)
+                    out.append({'date': t.get('date'), 'close': v})
         except Exception:
             continue
     return out
 
 
-def _tw_index_closes(symbol: str, n: int = 30) -> list:
-    """櫃買／台指期近 n 日收盤；CSV 過期超過 5 日才允許網路補齊。"""
+def _tw_index_bars(symbol: str, n: int = 30) -> list:
+    """櫃買／台指期近 n 日收盤（含交易日）；CSV 過期超過 5 日才允許網路補齊。"""
     try:
         import tw_index_charts as _tic
         from datetime import date as _date, datetime as _dt, timedelta as _td
@@ -1283,9 +1264,17 @@ def _tw_index_closes(symbol: str, n: int = 30) -> list:
                 allow_net = True
         else:
             allow_net = True
-        return list(_tic.recent_closes(symbol, n=n, allow_network=allow_net) or [])
+        bars = []
+        for row in _tic.recent_rows(symbol, n=n, allow_network=allow_net) or []:
+            try:
+                close = float(row.get('close'))
+            except Exception:
+                continue
+            if close > 0:
+                bars.append({'date': row.get('date'), 'close': close})
+        return bars
     except Exception as e:
-        print('[pulse] tw_index_closes', symbol, e)
+        print('[pulse] tw_index_bars', symbol, e)
         return []
 
 
@@ -5280,7 +5269,10 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                 turnover_yi = float(turns[-1]['amount']) / 1e8
             except Exception:
                 pass
-        tq = _turnover_quant(turns or [], latest_yi=turnover_yi)
+        tq = _turnover_quant(
+            turns or [], latest_yi=turnover_yi,
+            latest_date=(bd or {}).get('date') or out.get('date') or
+            ((turns[-1] or {}).get('date') if turns else None))
         if turnover_yi is None and tq.get('yi') is not None:
             turnover_yi = tq['yi']
         turnover_chg = tq.get('chgPct')
@@ -5288,35 +5280,49 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         t00 = indices.get('t00') or {}
         o00 = indices.get('o00') or {}
         # 加權／櫃買／台指期：與成交金額同構的趨勢量化（vs5／Z／連漲跌／動能分）
+        session_fallback = (bd or {}).get('date') or out.get('date')
         try:
-            t00_closes = _fmtqik_index_closes(turns)
+            t00_bars = _fmtqik_index_bars(turns)
             t00_trend = _price_series_quant(
-                t00_closes, latest=t00.get('price'), quote_change_pct=t00.get('changePct'))
+                t00_bars, latest=t00.get('price'), quote_change_pct=t00.get('changePct'),
+                latest_date=_quote_session_date(t00) or session_fallback)
         except Exception as e:
             print('[pulse] t00 trend', e)
             t00_trend = _price_series_quant(
-                [], latest=t00.get('price'), quote_change_pct=t00.get('changePct'))
+                [], latest=t00.get('price'), quote_change_pct=t00.get('changePct'),
+                latest_date=_quote_session_date(t00) or session_fallback)
         try:
-            o00_closes = _tw_index_closes('^TWOII', n=30)
+            o00_bars = _tw_index_bars('^TWOII', n=30)
             o00_trend = _price_series_quant(
-                o00_closes, latest=o00.get('price'), quote_change_pct=o00.get('changePct'))
+                o00_bars, latest=o00.get('price'), quote_change_pct=o00.get('changePct'),
+                latest_date=_quote_session_date(o00) or session_fallback)
         except Exception as e:
             print('[pulse] o00 trend', e)
             o00_trend = _price_series_quant(
-                [], latest=o00.get('price'), quote_change_pct=o00.get('changePct'))
+                [], latest=o00.get('price'), quote_change_pct=o00.get('changePct'),
+                latest_date=_quote_session_date(o00) or session_fallback)
         txf_live = None
+        night_overlay = False
+        txf_chg = None
+        txf_date = None
         try:
-            # strip 顯示的台指期價（夜盤優先）覆寫連續日線末端
-            if isinstance(txf_night, dict):
+            if isinstance(txf_night, dict) and txf_night.get('price') is not None:
                 txf_live = txf_night.get('price')
-            if txf_live is None and isinstance(txf, dict):
+                txf_chg = txf_night.get('changePct')
+                txf_date = _quote_session_date(txf_night)
+                night_overlay = True
+            elif isinstance(txf, dict) and txf.get('price') is not None:
                 txf_live = txf.get('price')
-            txf_closes = _tw_index_closes('__TXF__', n=30)
+                txf_chg = txf.get('changePct')
+                txf_date = _quote_session_date(txf)
+                night_overlay = str(txf.get('session') or '') == 'night'
+            txf_bars = _tw_index_bars('__TXF__', n=30)
             # 頂列台指期使用與 p.txf 完全相同的 TAIFEX 即時 session。
             # 日線只提供 vs5／Z／趨勢；漲跌幅不可從跨日／換月快取反推。
+            # 夜盤覆寫同一根日 K；日盤依交易日覆蓋或 append。
             txf_trend = _price_series_quant(
-                txf_closes, latest=txf_live,
-                quote_change_pct=(txf_night or {}).get('changePct'))
+                txf_bars, latest=txf_live, quote_change_pct=txf_chg,
+                latest_date=txf_date, same_bar=night_overlay)
         except Exception as e:
             print('[pulse] txf trend', e)
             txf_trend = _price_series_quant([])
@@ -5391,6 +5397,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                 'turnoverVsMa5Pct': tq.get('vsMa5Pct'),
                 'turnoverZ20': tq.get('z20'),
                 'volumeScore': tq.get('volumeScore'),
+                'turnoverRelative': tq.get('volumeRelative'),
+                'turnoverRelativeScore': tq.get('volumeRelativeScore'),
                 'turnoverStreak': tq.get('streak'),
                 'turnoverTrend': tq.get('trend'),
                 'turnoverLevel': tq.get('level'),

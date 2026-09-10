@@ -6,8 +6,90 @@
 """
 from __future__ import annotations
 
+from datetime import date
 import math
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+
+def session_date_key(value: Any) -> Optional[str]:
+    """Normalize ROC / ISO / compact digits to YYYY-MM-DD. Unknown → None."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if 'T' in text:
+        text = text.split('T', 1)[0]
+    parts = text.replace('-', '/').replace('.', '/').split('/')
+    if len(parts) == 3:
+        try:
+            year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+            if year < 1911:
+                year += 1911
+            return date(year, month, day).isoformat()
+        except (TypeError, ValueError):
+            pass
+    compact = ''.join(ch for ch in text if ch.isdigit())
+    if len(compact) >= 8:
+        compact = compact[:8]
+        try:
+            year, month, day = int(compact[0:4]), int(compact[4:6]), int(compact[6:8])
+            return date(year, month, day).isoformat()
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def overlay_latest(
+    series: List[float],
+    dates: List[Optional[str]],
+    latest: float,
+    latest_date: Optional[str] = None,
+    *,
+    same_bar: bool = False,
+) -> None:
+    """Update the last session in-place. Never invent a new day from a % gap.
+
+    - empty series → append
+    - same_bar or missing dates → replace last (live overlay)
+    - same date → replace
+    - later date → append
+    - earlier date → ignore stale print
+    """
+    if not series:
+        series.append(latest)
+        dates.append(latest_date)
+        return
+    last_date = dates[-1] if dates else None
+    if same_bar or not latest_date or not last_date:
+        series[-1] = latest
+        if latest_date:
+            dates[-1] = latest_date
+        return
+    if latest_date == last_date:
+        series[-1] = latest
+        return
+    if latest_date > last_date:
+        series.append(latest)
+        dates.append(latest_date)
+
+
+def _parse_close_row(row: Any) -> Optional[Tuple[float, Optional[str]]]:
+    if isinstance(row, dict):
+        raw = row.get('close')
+        if raw is None:
+            raw = row.get('price')
+        day = session_date_key(row.get('date') or row.get('asOf') or row.get('tradeDate'))
+    else:
+        raw = row
+        day = None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value > 0 and math.isfinite(value):
+        return value, day
+    return None
 
 
 def momentum_score(vs_ma5_pct: Optional[float], z20: Optional[float] = None,
@@ -30,13 +112,17 @@ def momentum_score(vs_ma5_pct: Optional[float], z20: Optional[float] = None,
     return max(0.0, min(100.0, 50.0 + 50.0 * math.tanh(blended)))
 
 
-def price_series_quant(closes: Optional[Sequence[float]],
+def price_series_quant(closes: Optional[Sequence[Any]],
                        latest: Optional[float] = None,
-                       quote_change_pct: Optional[float] = None) -> Dict[str, Any]:
+                       quote_change_pct: Optional[float] = None,
+                       latest_date: Optional[Any] = None,
+                       same_bar: bool = False) -> Dict[str, Any]:
     """由收盤價序列＋可選當日即時價，建趨勢量化指標。
 
-    closes: 由舊到新的日線收盤價。
+    closes: 由舊到新的日線收盤價，或 {'date','close'} 列。
     latest: 同標的的即時報價，用於更新當前水位／均線偏離。
+    latest_date: 即時報價所屬交易日；缺日期時只覆寫最後一根，絕不因跳空 append。
+    same_bar: 台指期夜盤等「仍屬同一根日 K」時強制覆寫末端。
     quote_change_pct: 若即時報價提供官方昨收漲跌幅，必須傳入；它優先於
         日線快取相鄰兩筆的推算，避免換月、夜盤或日線落後時顯示相反方向。
 
@@ -48,25 +134,22 @@ def price_series_quant(closes: Optional[Sequence[float]],
         'trend': None, 'level': None, 'n': 0, 'spark': [],
     }
     series: List[float] = []
-    for c in closes or []:
-        try:
-            v = float(c)
-            if v > 0 and math.isfinite(v):
-                series.append(v)
-        except Exception:
+    dates: List[Optional[str]] = []
+    for row in closes or []:
+        parsed = _parse_close_row(row)
+        if parsed is None:
             continue
+        value, day = parsed
+        series.append(value)
+        dates.append(day)
     if latest is not None:
         try:
             cur0 = float(latest)
-        except Exception:
+        except (TypeError, ValueError):
             cur0 = None
         if cur0 is not None and cur0 > 0 and math.isfinite(cur0):
-            if not series:
-                series = [cur0]
-            elif abs(series[-1] - cur0) / max(abs(cur0), 1.0) <= 0.03:
-                series[-1] = cur0
-            else:
-                series.append(cur0)
+            overlay_latest(
+                series, dates, cur0, session_date_key(latest_date), same_bar=same_bar)
     if not series:
         return empty
     cur = series[-1]
@@ -89,7 +172,7 @@ def price_series_quant(closes: Optional[Sequence[float]],
             candidate = float(quote_change_pct)
             if math.isfinite(candidate):
                 quote_chg = candidate
-        except Exception:
+        except (TypeError, ValueError):
             pass
     display_chg = quote_chg if quote_chg is not None else chg
     mom = momentum_score(vs_ma5, z20, display_chg)

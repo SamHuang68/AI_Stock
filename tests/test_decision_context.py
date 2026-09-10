@@ -238,6 +238,38 @@ class DecisionContextTest(unittest.TestCase):
         self.assertIn('portfolio_var_cap', out['actionEnvelope']['constraints'])
         self.assertIn('lookthrough_tsmc_over_limit', out['actionEnvelope']['constraints'])
         self.assertGreater(out['portfolioOverlay']['lookThrough']['tsmcEconomicExposurePct'], 99)
+        # Beta 1.4/1.1 與 VaR 3/2 共線時取最嚴約束，不連乘。
+        self.assertAlmostEqual(rng['capPct'], round(90 * min(1.1 / 1.4, 2.0 / 3.0), 1), places=1)
+
+    def test_beta_and_var_caps_take_min_not_product(self):
+        profile = {
+            'baseGrossExposure': 70, 'maxGrossExposure': 90, 'maxLeverage': 1,
+            'maxSingleNameWeight': 20, 'maxSectorWeight': 40,
+            'maxPortfolioBeta': 1.1, 'maxDailyVaR': 2.0, 'investmentHorizon': 'swing',
+        }
+        portfolio = {
+            'kind': 'actual', 'available': True,
+            'portfolioBeta': 1.4, 'var95DailyPct': 3.0,
+        }
+        rng, constraints = dc._position_range(
+            'BROAD_RISK_ON', 1.0, KEYS, profile, portfolio, None)
+        self.assertIsNotNone(rng)
+        product = 90 * (1.1 / 1.4) * (2.0 / 3.0)
+        tightest = 90 * min(1.1 / 1.4, 2.0 / 3.0)
+        self.assertAlmostEqual(rng['capPct'], round(tightest, 1), places=1)
+        self.assertGreater(rng['capPct'], product)
+        self.assertIn('portfolio_beta_cap', constraints)
+        self.assertIn('portfolio_var_cap', constraints)
+
+    def test_decision_history_enables_wal(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / 'decision_history.db')
+            conn = dc._connect(path)
+            try:
+                mode = conn.execute('PRAGMA journal_mode').fetchone()[0]
+            finally:
+                conn.close()
+            self.assertEqual(str(mode).lower(), 'wal')
 
     def test_exposure_lab_keeps_00685l_thesis_separate_from_diversification(self):
         overlay = {

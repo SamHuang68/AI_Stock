@@ -1,50 +1,79 @@
 # -*- coding: utf-8 -*-
 """成交金額量化指標（單位：億）。
 
-與大盤體質量能分同源：8000 億 = 50 分、1.2 兆偏熱。
-供 /pulse strip、/marketflow.turnoverQuant 使用。
+與大盤體質量能分同源：8000 億 = 50 分、1.2 兆偏熱（結構題錨，不是常態分位數）。
+另給近 20 日 Z 的相對冷熱標籤。供 /pulse strip、/marketflow.turnoverQuant 使用。
 """
 from __future__ import annotations
 
 import math
 from typing import Any, Dict, List, Optional
 
+from trend_quant import overlay_latest, session_date_key
+
 
 def volume_score_yi(yi: float) -> float:
-    """成交金額（億）→ 0~100 量能分。"""
+    """成交金額（億）→ 0~100 體制量能分（8000 億 = 50）。"""
     return max(0.0, min(100.0, 50.0 + 50.0 * math.tanh((float(yi) - 8000.0) / 4000.0)))
 
 
-def turnover_quant(turns: Optional[List[dict]], latest_yi: Optional[float] = None) -> Dict[str, Any]:
+def volume_relative_label(z20: Optional[float]) -> Optional[str]:
+    """近 20 日 Z 的相對冷熱；與 8000 億體制錨分開。"""
+    if z20 is None:
+        return None
+    if z20 >= 1.0:
+        return '相對偏熱'
+    if z20 <= -1.0:
+        return '相對偏冷'
+    return '相對中性'
+
+
+def volume_relative_score(z20: Optional[float]) -> Optional[float]:
+    if z20 is None:
+        return None
+    return round(max(0.0, min(100.0, 50.0 + 50.0 * math.tanh(float(z20) / 1.5))), 1)
+
+
+def turnover_quant(
+    turns: Optional[List[dict]],
+    latest_yi: Optional[float] = None,
+    latest_date: Optional[Any] = None,
+) -> Dict[str, Any]:
     """由日成交序列＋可選當日官方億元，建量能量化指標。
 
-    turns: [{amount: 元, ...}, ...]
-    回傳：yi, chgPct, ma5Yi, vsMa5Pct, z20, volumeScore, streak, trend, level, n
+    turns: [{date, amount: 元, ...}, ...]
+    latest_date: 當日官方成交所屬交易日。缺日期時只覆寫最後一根，不因盤中累積量 append。
+    回傳：yi, chgPct, ma5Yi, vsMa5Pct, z20, volumeScore, volumeRelative, streak, trend, level, n
     """
     empty = {
         'yi': None, 'chgPct': None, 'ma5Yi': None, 'vsMa5Pct': None,
-        'z20': None, 'volumeScore': None, 'streak': None,
+        'z20': None, 'volumeScore': None, 'volumeRelative': None,
+        'volumeRelativeScore': None, 'streak': None,
         'trend': None, 'level': None, 'n': 0,
     }
     series: List[float] = []
-    for t in turns or []:
-        try:
-            if t.get('amount') is not None:
-                series.append(float(t['amount']) / 1e8)
-        except Exception:
+    dates: List[Optional[str]] = []
+    for row in turns or []:
+        if not isinstance(row, dict):
             continue
+        try:
+            if row.get('amount') is None:
+                continue
+            yi = float(row['amount']) / 1e8
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(yi):
+            continue
+        series.append(yi)
+        dates.append(session_date_key(row.get('date') or row.get('asOf')))
     if latest_yi is not None:
         try:
             cur0 = float(latest_yi)
-        except Exception:
+        except (TypeError, ValueError):
             cur0 = None
-        if cur0 is not None:
-            if not series:
-                series = [cur0]
-            elif abs(series[-1] - cur0) / max(abs(cur0), 1.0) <= 0.03:
-                series[-1] = cur0
-            else:
-                series.append(cur0)
+        if cur0 is not None and math.isfinite(cur0):
+            overlay_latest(
+                series, dates, cur0, session_date_key(latest_date), same_bar=False)
     if not series:
         return empty
     cur = series[-1]
@@ -62,6 +91,8 @@ def turnover_quant(turns: Optional[List[dict]], latest_yi: Optional[float] = Non
         if sd > 1e-9:
             z20 = (cur - mu) / sd
     vol_sc = volume_score_yi(cur)
+    rel = volume_relative_label(z20)
+    rel_sc = volume_relative_score(z20)
     streak = 0
     for i in range(len(series) - 1, 0, -1):
         d = series[i] - series[i - 1]
@@ -105,6 +136,8 @@ def turnover_quant(turns: Optional[List[dict]], latest_yi: Optional[float] = Non
         'vsMa5Pct': round(vs_ma5, 2) if vs_ma5 is not None else None,
         'z20': round(z20, 2) if z20 is not None else None,
         'volumeScore': round(vol_sc, 1),
+        'volumeRelative': rel,
+        'volumeRelativeScore': rel_sc,
         'streak': streak if streak != 0 else 0,
         'trend': trend,
         'level': level,

@@ -21,6 +21,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
+from jsonl_trace import append_jsonl as _append_jsonl
 import exposure_lab as _exposure_lab
 import consensus_attention as _consensus_attention
 
@@ -50,6 +51,8 @@ TRACE_PATH = os.path.join(_BASE, 'logs', 'decision_trace.jsonl')
 TW_TZ = timezone(timedelta(hours=8))
 
 _lock = threading.RLock()
+_db_ready: set[str] = set()
+_db_lock = threading.Lock()
 _latest_context: dict[str, Any] | None = None
 _latest_inputs: dict[str, Any] | None = None
 _recent = deque(maxlen=120)
@@ -592,12 +595,15 @@ def _position_range(
         var95 = _number(portfolio.get('var95DailyPct'))
         max_beta = _number(risk_profile.get('maxPortfolioBeta'))
         max_var = _number(risk_profile.get('maxDailyVaR'))
+        risk_scale = 1.0
         if beta is not None and max_beta not in (None, 0) and beta > max_beta:
-            cap *= max_beta / beta
+            risk_scale = min(risk_scale, max_beta / beta)
             constraints.append('portfolio_beta_cap')
         if var95 is not None and max_var not in (None, 0) and var95 > max_var:
-            cap *= max_var / var95
+            risk_scale = min(risk_scale, max_var / var95)
             constraints.append('portfolio_var_cap')
+        if risk_scale < 1.0:
+            cap *= risk_scale
         max_single = _number(portfolio.get('maxSingleNameWeightPct'))
         max_single_cfg = _number(risk_profile.get('maxSingleNameWeight'))
         if max_single is not None and max_single_cfg is not None and max_single > max_single_cfg:
@@ -1341,17 +1347,31 @@ def _fingerprint(pulse: dict) -> str:
 
 
 def _init_db(path: str = DB_PATH) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with closing(sqlite3.connect(path, timeout=10)) as conn:
-        with conn:
-            conn.execute('CREATE TABLE IF NOT EXISTS decision_history('
-                         'id INTEGER PRIMARY KEY AUTOINCREMENT, as_of TEXT, created_at INTEGER, market TEXT, '
-                         'input_hash TEXT UNIQUE, regime TEXT, confidence REAL, completeness REAL, context_json TEXT)')
+    key = os.path.abspath(path)
+    with _db_lock:
+        if key in _db_ready and os.path.isfile(path):
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with closing(sqlite3.connect(path, timeout=10)) as conn:
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute('PRAGMA synchronous=NORMAL')
+            with conn:
+                conn.execute('CREATE TABLE IF NOT EXISTS decision_history('
+                             'id INTEGER PRIMARY KEY AUTOINCREMENT, as_of TEXT, created_at INTEGER, market TEXT, '
+                             'input_hash TEXT UNIQUE, regime TEXT, confidence REAL, completeness REAL, context_json TEXT)')
+        _db_ready.add(key)
+
+
+def _connect(path: str):
+    _init_db(path)
+    conn = sqlite3.connect(path, timeout=10)
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA synchronous=NORMAL')
+    return conn
 
 
 def _save_history(context: dict, input_hash: str, path: str = DB_PATH) -> None:
-    _init_db(path)
-    with closing(sqlite3.connect(path, timeout=10)) as conn:
+    with closing(_connect(path)) as conn:
         with conn:
             conn.execute('INSERT OR IGNORE INTO decision_history(as_of,created_at,market,input_hash,regime,confidence,completeness,context_json) '
                          'VALUES(?,?,?,?,?,?,?,?)', (
@@ -1364,7 +1384,6 @@ def _save_history(context: dict, input_hash: str, path: str = DB_PATH) -> None:
 
 
 def _write_trace(context: dict, input_hash: str, elapsed_ms: int, path: str = TRACE_PATH) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
     row = {
         'ts': _iso_now(), 'correlationId': input_hash, 'inputVersion': 'pulse/v2',
         'inputHash': input_hash, 'regime': (context.get('regime') or {}).get('id'),
@@ -1374,13 +1393,7 @@ def _write_trace(context: dict, input_hash: str, elapsed_ms: int, path: str = TR
         'staleFields': (context.get('dataQuality') or {}).get('staleFields') or [],
         'elapsedMs': elapsed_ms,
     }
-    with open(path, 'a', encoding='utf-8') as fh:
-        fh.write(json.dumps(row, ensure_ascii=False, separators=(',', ':')) + '\n')
-    if os.path.getsize(path) > 256 * 1024:
-        with open(path, 'r', encoding='utf-8') as fh:
-            tail = fh.readlines()[-500:]
-        with open(path, 'w', encoding='utf-8') as fh:
-            fh.writelines(tail)
+    _append_jsonl(path, row, max_bytes=256 * 1024, tail_lines=500)
 
 
 def publish_context(
@@ -1579,8 +1592,7 @@ def update_options_structure(options_structure: dict[str, Any]) -> dict:
 def history(n: int = 40, path: str = DB_PATH) -> dict[str, Any]:
     n = max(1, min(int(n or 40), 120))
     try:
-        _init_db(path)
-        with closing(sqlite3.connect(path, timeout=10)) as conn:
+        with closing(_connect(path)) as conn:
             rows = conn.execute('SELECT as_of,regime,confidence,completeness,context_json FROM decision_history '
                                 'ORDER BY id DESC LIMIT ?', (n,)).fetchall()
         return {'ok': True, 'model': ENGINE_VERSION, 'rows': [

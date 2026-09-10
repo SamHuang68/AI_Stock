@@ -437,7 +437,10 @@
         var bits = [];
         if (tq.chgPct != null) bits.push((tq.chgPct >= 0 ? '+' : '') + Number(tq.chgPct).toFixed(1) + '%日');
         if (tq.vsMa5Pct != null) bits.push((tq.vsMa5Pct >= 0 ? '+' : '') + Number(tq.vsMa5Pct).toFixed(1) + '%vs5');
-        if (tq.volumeScore != null) bits.push('分' + Number(tq.volumeScore).toFixed(0));
+        if (tq.volumeScore != null) bits.push('體制分' + Number(tq.volumeScore).toFixed(0));
+        if (tq.z20 != null) bits.push('Z' + Number(tq.z20).toFixed(1));
+        if (tq.volumeRelative) bits.push(tq.volumeRelative);
+        if (tq.volumeRelativeScore != null) bits.push('相對分' + Number(tq.volumeRelativeScore).toFixed(0));
         if (tq.trend) bits.push(tq.trend);
         return bits.length ? bits.join(' · ') : (mf.date || '量能');
       })()) +
