@@ -82,6 +82,7 @@ ALGO = {
         '總分 = 有資料支柱平均。'
         '另偵測背離：大股東↑且人數↑幅度大 → 標「散戶化背離」；'
         '大股東↑且人數↓ → 標「集中確認」。'
+        'HHI／熵由 1–16 級佔比推算，只作描述、不進入總分。'
     ),
     'viewNote': '資料為集保每週最後營業日；非即時。來源 TDCC 開放資料，非爬神秘金字塔。',
 }
@@ -140,6 +141,32 @@ def is_holders_sym(sym: str) -> bool:
     return parse_holders_sym(sym) is not None
 
 
+def _hhi_entropy(level_pct: Dict[int, float]) -> Tuple[Optional[float], Optional[float]]:
+    """Herfindahl 0–10000 and Shannon entropy from TDCC level share %.
+
+    Level 17 is the official total row and is excluded. Values are CONDITIONAL
+    reconstructions of the published 1–16 buckets, not a live order-book HHI.
+    """
+    shares: List[float] = []
+    for level, pct in (level_pct or {}).items():
+        try:
+            lv = int(level)
+            if lv < 1 or lv > 16:
+                continue
+            value = float(pct)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            shares.append(value)
+    total = sum(shares)
+    if total <= 0:
+        return None, None
+    weights = [item / total for item in shares]
+    hhi = sum(weight * weight for weight in weights) * 10000.0
+    entropy = -sum(weight * math.log(weight) for weight in weights if weight > 0)
+    return round(hhi, 2), round(entropy, 4)
+
+
 def _db() -> sqlite3.Connection:
     os.makedirs(DATA, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
@@ -154,6 +181,11 @@ def _db() -> sqlite3.Connection:
              PRIMARY KEY (d, code)
            )'''
     )
+    columns = {str(row[1]) for row in conn.execute('PRAGMA table_info(holders_week)').fetchall()}
+    if 'hhi' not in columns:
+        conn.execute('ALTER TABLE holders_week ADD COLUMN hhi REAL')
+    if 'entropy' not in columns:
+        conn.execute('ALTER TABLE holders_week ADD COLUMN entropy REAL')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_holders_code ON holders_week(code, d)')
     conn.commit()
     return conn
@@ -208,9 +240,12 @@ def _parse_csv_bytes(raw: bytes) -> List[Dict[str, Any]]:
                 snap_date = f'{ds[0:4]}-{ds[4:6]}-{ds[6:8]}'
             a = acc.setdefault(code, {
                 'holders': None, 'major_pct': 0.0, 'mega_pct': 0.0, 'major_holders': 0,
+                'level_pct': {},
             })
             if lv == TOTAL_LEVEL:
                 a['holders'] = ppl
+            else:
+                a['level_pct'][lv] = a['level_pct'].get(lv, 0.0) + pct
             if lv in MAJOR_LEVELS:
                 a['major_pct'] += pct
                 a['major_holders'] += ppl
@@ -224,6 +259,7 @@ def _parse_csv_bytes(raw: bytes) -> List[Dict[str, Any]]:
     for code, a in acc.items():
         if a['holders'] is None:
             continue
+        hhi, entropy = _hhi_entropy(a.get('level_pct') or {})
         out.append({
             'date': snap_date,
             'code': code,
@@ -231,6 +267,8 @@ def _parse_csv_bytes(raw: bytes) -> List[Dict[str, Any]]:
             'major_pct': round(float(a['major_pct']), 4),
             'mega_pct': round(float(a['mega_pct']), 4),
             'major_holders': int(a['major_holders']),
+            'hhi': hhi,
+            'entropy': entropy,
         })
     return out
 
@@ -256,9 +294,12 @@ def _parse_positional(rows_raw: List[List[str]]) -> List[Dict[str, Any]]:
                 snap_date = f'{ds[0:4]}-{ds[4:6]}-{ds[6:8]}'
             a = acc.setdefault(code, {
                 'holders': None, 'major_pct': 0.0, 'mega_pct': 0.0, 'major_holders': 0,
+                'level_pct': {},
             })
             if lv == TOTAL_LEVEL:
                 a['holders'] = ppl
+            else:
+                a['level_pct'][lv] = a['level_pct'].get(lv, 0.0) + pct
             if lv in MAJOR_LEVELS:
                 a['major_pct'] += pct
                 a['major_holders'] += ppl
@@ -275,6 +316,8 @@ def _parse_positional(rows_raw: List[List[str]]) -> List[Dict[str, Any]]:
         'major_pct': round(float(a['major_pct']), 4),
         'mega_pct': round(float(a['mega_pct']), 4),
         'major_holders': int(a['major_holders']),
+        'hhi': _hhi_entropy(a.get('level_pct') or {})[0],
+        'entropy': _hhi_entropy(a.get('level_pct') or {})[1],
     } for code, a in acc.items() if a['holders'] is not None]
 
 
@@ -287,9 +330,10 @@ def upsert_rows(rows: List[Dict[str, Any]]) -> int:
         for r in rows:
             conn.execute(
                 '''INSERT OR REPLACE INTO holders_week
-                   (d, code, holders, major_pct, mega_pct, major_holders)
-                   VALUES (?,?,?,?,?,?)''',
-                (r['date'], r['code'], r['holders'], r['major_pct'], r['mega_pct'], r['major_holders']),
+                   (d, code, holders, major_pct, mega_pct, major_holders, hhi, entropy)
+                   VALUES (?,?,?,?,?,?,?,?)''',
+                (r['date'], r['code'], r['holders'], r['major_pct'], r['mega_pct'], r['major_holders'],
+                 r.get('hhi'), r.get('entropy')),
             )
             n += 1
         conn.commit()
@@ -426,7 +470,7 @@ def load_stock_series(code: str) -> List[Dict[str, Any]]:
     conn = _db()
     try:
         rows = conn.execute(
-            '''SELECT d, holders, major_pct, mega_pct, major_holders
+            '''SELECT d, holders, major_pct, mega_pct, major_holders, hhi, entropy
                FROM holders_week WHERE code=? ORDER BY d''',
             (code,),
         ).fetchall()
@@ -439,8 +483,10 @@ def load_stock_series(code: str) -> List[Dict[str, Any]]:
             'major_pct': major_pct,
             'mega_pct': mega_pct,
             'major_holders': major_holders,
+            'hhi': hhi,
+            'entropy': entropy,
         }
-        for d, holders, major_pct, mega_pct, major_holders in rows
+        for d, holders, major_pct, mega_pct, major_holders, hhi, entropy in rows
     ]
 
 
@@ -550,6 +596,14 @@ def score_concentration(series: List[Dict[str, Any]]) -> Dict[str, Any]:
     detail['megaPct'] = last.get('mega_pct')
     detail['date'] = last.get('date')
     detail['divergence'] = divergence
+    hhi = last.get('hhi')
+    entropy = last.get('entropy')
+    if hhi is not None:
+        detail['hhi'] = round(float(hhi), 1)
+    if entropy is not None:
+        detail['entropy'] = round(float(entropy), 3)
+    if prev and prev.get('hhi') is not None and hhi is not None:
+        detail['hhiCh4w'] = round(float(hhi) - float(prev['hhi']), 1)
 
     plain = (
         f'目前籌碼集中度約 {score} 分（{label}）。'
@@ -569,6 +623,13 @@ def score_concentration(series: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     if last.get('mega_pct') is not None:
         rows.append({'k': '千張大戶', 'v': f"{float(last['mega_pct']):.2f}%", 'score': None})
+    if hhi is not None:
+        hhi_txt = f'{float(hhi):.0f}'
+        if detail.get('hhiCh4w') is not None:
+            hhi_txt += f'（4週 {detail["hhiCh4w"]:+.0f}）'
+        rows.append({'k': 'HHI', 'v': hhi_txt + ' · 分級佔比，不進總分', 'score': None})
+    if entropy is not None:
+        rows.append({'k': '籌碼熵', 'v': f'{float(entropy):.2f} · 愈低愈集中', 'score': None})
     if holders is not None:
         rows.insert(0, {
             'k': '總股東人數',

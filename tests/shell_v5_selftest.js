@@ -557,8 +557,10 @@ ok(/function chgWithPct/.test(pl) && /chgWithPct\(t00/.test(pl) && /chgWithPct\(
 ok(/GC=F/.test(pl) && /HG=F/.test(pl) && /CL=F/.test(pl) && /x\.role/.test(pl) &&
   /function globalChgLabel/.test(pl) && /slice\(0, 14\)/.test(pl),
   'pulse global prefer includes gold/copper/oil + price with chg pts/%');
-ok(/turnoverVsMa5Pct/.test(pl) && /volumeScore/.test(pl) && /成交金額 · 量能/.test(pl),
-  'pulse strip shows turnover quant vs5 / score');
+ok(/turnoverVsMa5Pct/.test(pl) && /volumeScore/.test(pl) && /turnoverRelative/.test(pl) &&
+  /成交金額 · 量能/.test(pl) && /體制分/.test(pl) && /8000億=50/.test(pl) &&
+  /結構題錨/.test(pl) && /turnoverRelativeScore/.test(pl),
+  'pulse strip shows turnover quant vs5 / regime score / relative z');
 ok(/t00Trend/.test(pl) && /o00Trend/.test(pl) && /txfTrend/.test(pl) &&
   /trendQuantBits/.test(pl) && /renderTrendCell/.test(pl),
   'pulse strip shows TAIEX/OTC/TXF trend quant like turnover');

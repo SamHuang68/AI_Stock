@@ -2036,6 +2036,8 @@
       instDealer: instDealerYi,
       volumeScore: volumeScore,
       turnoverYi: strip.turnoverYi,
+      turnoverRelative: strip.turnoverRelative || null,
+      turnoverZ20: strip.turnoverZ20 == null ? null : Number(strip.turnoverZ20),
       current: current,
       twChange: strip.t00 && strip.t00.changePct != null ? Number(strip.t00.changePct) : null,
       ceiling: levels.r1,
@@ -2113,19 +2115,20 @@
         main: '等待量能資料', plain: '成交量資料尚未形成。', bar: 0,
         kind: 'volume',
         metric: '量能待資料',
-        method: '計算：成交金額相對近期量能的活躍程度，換算為 0–100 分。'
+        method: '計算：體制分以 8000 億為 50 分（結構題錨），另看近 20 日相對冷熱。'
       };
     }
     var main = value >= 75 ? '買賣非常活躍' : value >= 60 ? '市場動能偏熱' :
       value >= 40 ? '市場動能平穩' : '市場動能偏弱';
     var turnover = model.turnoverYi == null ? '' : '，成交約 ' + Number(model.turnoverYi).toFixed(0) + ' 億';
+    var relative = model.turnoverRelative ? '；近20日' + model.turnoverRelative : '';
     return {
       main: main,
-      plain: '量能分數 ' + value.toFixed(0) + turnover + '。',
+      plain: '體制量能分 ' + value.toFixed(0) + turnover + relative + '。',
       bar: value,
       kind: 'volume',
-      metric: '量能 ' + value.toFixed(0) + '／100',
-      method: '計算：成交金額相對近期量能的活躍程度，換算為 0–100 分。'
+      metric: '體制分 ' + value.toFixed(0) + '／100',
+      method: '計算：體制分以 8000 億為 50 分（結構題錨），另看近 20 日相對冷熱。'
     };
   }
 
@@ -2796,8 +2799,9 @@
     var turnBits = [];
     if (s.turnoverChgPct != null) turnBits.push(pct(s.turnoverChgPct) + '日');
     if (s.turnoverVsMa5Pct != null) turnBits.push(pct(s.turnoverVsMa5Pct) + 'vs5');
-    if (s.volumeScore != null) turnBits.push('分' + Number(s.volumeScore).toFixed(0));
+    if (s.volumeScore != null) turnBits.push('體制分' + Number(s.volumeScore).toFixed(0));
     if (s.turnoverZ20 != null) turnBits.push('Z' + Number(s.turnoverZ20).toFixed(1));
+    if (s.turnoverRelative) turnBits.push(s.turnoverRelative);
     if (s.turnoverStreak) {
       turnBits.push((s.turnoverStreak > 0 ? '連放' : '連縮') + Math.abs(s.turnoverStreak));
     }
@@ -2808,16 +2812,18 @@
     }
     var turnSoft = [];
     if (s.turnoverVsMa5Pct != null) turnSoft.push(pct(s.turnoverVsMa5Pct) + 'vs5');
-    if (s.volumeScore != null) turnSoft.push('分' + Number(s.volumeScore).toFixed(0));
+    if (s.volumeScore != null) turnSoft.push('體制分' + Number(s.volumeScore).toFixed(0));
     if (s.turnoverZ20 != null) turnSoft.push('Z' + Number(s.turnoverZ20).toFixed(1));
+    if (s.turnoverRelative) turnSoft.push(s.turnoverRelative);
     var turnSub = turnMain.join(' · ') || (turnBits.length ? turnBits.join(' · ') : '—');
     if (turnSoft.length) {
       turnSub += (turnMain.length ? ' ' : '') +
         '<span class="pl-subq">' + turnSoft.join(' · ') + '</span>';
     }
-    var turnTip = '量能量化：vs前日／vs5日均／量能分(8000億=50)／近20日Z／連續放縮；水位 8000／12000 億' +
+    var turnTip = '量能：體制分(8000億=50，CSP 結構題錨)／近20日Z與相對冷熱／vs5／連續放縮；水位 8000／12000 億' +
       (turnTone ? (' · 當前 ' + turnTone) : '') +
-      (turnBits.length ? (' · ' + turnBits.join(' · ')) : '');
+      (turnBits.length ? (' · ' + turnBits.join(' · ')) : '') +
+      (s.turnoverRelativeScore != null ? (' · 相對分' + Number(s.turnoverRelativeScore).toFixed(0)) : '');
     var advTabs = renderTrendTabs(tone, BREADTH_TREND_TABS);
     var txfSess = txf.sessionLabel || (txf.session === 'night' ? '夜盤' : (txf.session === 'day' ? '日盤' : ''));
     var idxTip = '趨勢量化：vs前日／vs5日均／動能分／近20日Z／連續漲跌（與成交金額量能同構）';

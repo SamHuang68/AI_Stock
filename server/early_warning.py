@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import threading
 import time
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -33,6 +34,8 @@ OUTCOME_MIN_SAMPLE = 20
 MATERIAL_MOVE_PCT = 2.0
 _TRACKED_STATES = ('WATCH', 'ARMED', 'CONFIRMED', 'ACTIVE')
 _HEADLINE_SIGNAL_IDS = ('TW_DOWNSIDE_PRECURSOR', 'TW_ATTACK_BUILDUP')
+_db_ready: set[str] = set()
+_db_lock = threading.Lock()
 
 _WEIGHTS = {
     'globalTech': 0.24,
@@ -966,46 +969,61 @@ def _empty_prospective(status: str = 'empty', error: str | None = None) -> dict[
 
 
 def _init_db(path: str = DB_PATH) -> None:
-    folder = os.path.dirname(os.path.abspath(path))
-    if folder:
-        os.makedirs(folder, exist_ok=True)
-    with closing(sqlite3.connect(path, timeout=10)) as conn:
-        with conn:
-            conn.execute('CREATE TABLE IF NOT EXISTS signal_state('
-                         'signal_id TEXT PRIMARY KEY,direction TEXT,state TEXT,first_seen_at TEXT,'
-                         'changed_at TEXT,last_seen_at TEXT,strength REAL,evidence_quality REAL,'
-                         'consecutive_hits INTEGER,miss_count INTEGER,dedupe_key TEXT,event_json TEXT)')
-            conn.execute('CREATE TABLE IF NOT EXISTS signal_observations('
-                         'id INTEGER PRIMARY KEY AUTOINCREMENT,signal_id TEXT,direction TEXT,as_of TEXT,'
-                         'observation_key TEXT,strength REAL,domains INTEGER,qualified INTEGER,snapshot_json TEXT,'
-                         'UNIQUE(signal_id,direction,as_of))')
-            observation_columns = {
-                str(row[1]) for row in conn.execute('PRAGMA table_info(signal_observations)').fetchall()
-            }
-            if 'observation_key' not in observation_columns:
-                conn.execute('ALTER TABLE signal_observations ADD COLUMN observation_key TEXT')
-            conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_signal_observation_key '
-                         'ON signal_observations(signal_id,direction,observation_key) '
-                         'WHERE observation_key IS NOT NULL')
-            conn.execute('CREATE TABLE IF NOT EXISTS signal_events('
-                         'id INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT UNIQUE,signal_id TEXT,direction TEXT,'
-                         'from_state TEXT,to_state TEXT,tier TEXT,as_of TEXT,created_at TEXT,dedupe_key TEXT,event_json TEXT)')
-            conn.execute('CREATE TABLE IF NOT EXISTS signal_market_sessions('
-                         'session_date TEXT PRIMARY KEY,close REAL NOT NULL,source TEXT,as_of TEXT,observed_at TEXT)')
-            conn.execute('CREATE TABLE IF NOT EXISTS signal_trials('
-                         'trial_id TEXT PRIMARY KEY,signal_id TEXT,label TEXT,direction TEXT,'
-                         'trigger_state TEXT,origin_as_of TEXT,origin_session TEXT,entry_price REAL,strength REAL,'
-                         'evidence_quality REAL,domains INTEGER,policy_version TEXT,engine_version TEXT,'
-                         'created_at TEXT,trial_json TEXT)')
-            conn.execute('CREATE TABLE IF NOT EXISTS signal_outcomes('
-                         'trial_id TEXT NOT NULL,horizon_sessions INTEGER NOT NULL,target_session TEXT,'
-                         'exit_price REAL,raw_return_pct REAL,directional_return_pct REAL,max_favorable_pct REAL,'
-                         'max_adverse_pct REAL,direction_hit INTEGER,material_hit INTEGER,lead_sessions INTEGER,'
-                         'resolved_at TEXT,outcome_json TEXT,PRIMARY KEY(trial_id,horizon_sessions))')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_signal_trials_signal '
-                         'ON signal_trials(signal_id,direction,origin_session)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_signal_outcomes_horizon '
-                         'ON signal_outcomes(horizon_sessions,resolved_at)')
+    key = os.path.abspath(path)
+    with _db_lock:
+        if key in _db_ready and os.path.isfile(path):
+            return
+        folder = os.path.dirname(os.path.abspath(path))
+        if folder:
+            os.makedirs(folder, exist_ok=True)
+        with closing(sqlite3.connect(path, timeout=10)) as conn:
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute('PRAGMA synchronous=NORMAL')
+            with conn:
+                conn.execute('CREATE TABLE IF NOT EXISTS signal_state('
+                             'signal_id TEXT PRIMARY KEY,direction TEXT,state TEXT,first_seen_at TEXT,'
+                             'changed_at TEXT,last_seen_at TEXT,strength REAL,evidence_quality REAL,'
+                             'consecutive_hits INTEGER,miss_count INTEGER,dedupe_key TEXT,event_json TEXT)')
+                conn.execute('CREATE TABLE IF NOT EXISTS signal_observations('
+                             'id INTEGER PRIMARY KEY AUTOINCREMENT,signal_id TEXT,direction TEXT,as_of TEXT,'
+                             'observation_key TEXT,strength REAL,domains INTEGER,qualified INTEGER,snapshot_json TEXT,'
+                             'UNIQUE(signal_id,direction,as_of))')
+                observation_columns = {
+                    str(row[1]) for row in conn.execute('PRAGMA table_info(signal_observations)').fetchall()
+                }
+                if 'observation_key' not in observation_columns:
+                    conn.execute('ALTER TABLE signal_observations ADD COLUMN observation_key TEXT')
+                conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_signal_observation_key '
+                             'ON signal_observations(signal_id,direction,observation_key) '
+                             'WHERE observation_key IS NOT NULL')
+                conn.execute('CREATE TABLE IF NOT EXISTS signal_events('
+                             'id INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT UNIQUE,signal_id TEXT,direction TEXT,'
+                             'from_state TEXT,to_state TEXT,tier TEXT,as_of TEXT,created_at TEXT,dedupe_key TEXT,event_json TEXT)')
+                conn.execute('CREATE TABLE IF NOT EXISTS signal_market_sessions('
+                             'session_date TEXT PRIMARY KEY,close REAL NOT NULL,source TEXT,as_of TEXT,observed_at TEXT)')
+                conn.execute('CREATE TABLE IF NOT EXISTS signal_trials('
+                             'trial_id TEXT PRIMARY KEY,signal_id TEXT,label TEXT,direction TEXT,'
+                             'trigger_state TEXT,origin_as_of TEXT,origin_session TEXT,entry_price REAL,strength REAL,'
+                             'evidence_quality REAL,domains INTEGER,policy_version TEXT,engine_version TEXT,'
+                             'created_at TEXT,trial_json TEXT)')
+                conn.execute('CREATE TABLE IF NOT EXISTS signal_outcomes('
+                             'trial_id TEXT NOT NULL,horizon_sessions INTEGER NOT NULL,target_session TEXT,'
+                             'exit_price REAL,raw_return_pct REAL,directional_return_pct REAL,max_favorable_pct REAL,'
+                             'max_adverse_pct REAL,direction_hit INTEGER,material_hit INTEGER,lead_sessions INTEGER,'
+                             'resolved_at TEXT,outcome_json TEXT,PRIMARY KEY(trial_id,horizon_sessions))')
+                conn.execute('CREATE INDEX IF NOT EXISTS idx_signal_trials_signal '
+                             'ON signal_trials(signal_id,direction,origin_session)')
+                conn.execute('CREATE INDEX IF NOT EXISTS idx_signal_outcomes_horizon '
+                             'ON signal_outcomes(horizon_sessions,resolved_at)')
+        _db_ready.add(key)
+
+
+def _connect(path: str):
+    _init_db(path)
+    conn = sqlite3.connect(path, timeout=10)
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA synchronous=NORMAL')
+    return conn
 
 
 def _target_state(signal: dict, previous: dict | None, same_observation: bool) -> tuple[str, int, int]:
@@ -1076,10 +1094,9 @@ def process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None 
     created_at = _iso_now(run_at)
     candidate_expiry = _twse_expiry_contract(run_at)
     market_ref = _market_reference(pulse, as_of)
-    _init_db(db_path)
     new_events: list[dict] = []
     persisted: list[dict] = []
-    with closing(sqlite3.connect(db_path, timeout=10)) as conn:
+    with closing(_connect(db_path)) as conn:
         with conn:
             for signal in evaluated.get('signals') or []:
                 signal_id = str(signal['signalId'])
@@ -1187,8 +1204,7 @@ def process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None 
 
 def active(path: str = DB_PATH, *, now: datetime | str | None = None) -> dict[str, Any]:
     try:
-        _init_db(path)
-        with closing(sqlite3.connect(path, timeout=10)) as conn:
+        with closing(_connect(path)) as conn:
             rows = conn.execute('SELECT event_json FROM signal_state ORDER BY changed_at DESC').fetchall()
         signals = [
             _effective_signal_view(json.loads(row[0]), now)
@@ -1204,8 +1220,7 @@ def active(path: str = DB_PATH, *, now: datetime | str | None = None) -> dict[st
 def history(n: int = 80, path: str = DB_PATH) -> dict[str, Any]:
     n = max(1, min(int(n or 80), 500))
     try:
-        _init_db(path)
-        with closing(sqlite3.connect(path, timeout=10)) as conn:
+        with closing(_connect(path)) as conn:
             rows = conn.execute('SELECT event_json FROM signal_events ORDER BY id DESC LIMIT ?', (n,)).fetchall()
         return {'ok': True, 'contractVersion': CONTRACT_VERSION, 'model': ENGINE_VERSION,
                 'shadowOnly': True, 'events': [json.loads(row[0]) for row in rows if row and row[0]]}
@@ -1219,8 +1234,7 @@ def performance(n: int = 80, path: str = DB_PATH,
     n = max(1, min(int(n or 80), 500))
     clean_signal = str(signal_id or '').strip() or None
     try:
-        _init_db(path)
-        with closing(sqlite3.connect(path, timeout=10)) as conn:
+        with closing(_connect(path)) as conn:
             summary = _prospective_summary_conn(conn, clean_signal)
             query = (
                 'SELECT trial_id,trial_json FROM signal_trials'
