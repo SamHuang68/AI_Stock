@@ -7,7 +7,8 @@ tw_index_charts.py — 台股指數／台指期可信日線（覆寫 Yahoo 壞�
   __TXF__         → FinMind TaiwanFuturesDaily（TX 近月，prefer 日盤 position）
 
 Yahoo ^TWOII 日線各端點數值互斥（曾見 419/269/105），不可用。
-台指期無穩定 Yahoo 連續合約代號；改走 FinMind + 本地 CSV 快取。
+台指期無穩定 Yahoo 連續合約代號；日線改走 FinMind + 本地 CSV 快取。
+1天（range=1d + 分 K）改解析 Yahoo TW WTX& 頁內嵌 1 分走勢（含夜盤 15:00–05:00）。
 
 輸出：Yahoo v8 chart 相容 JSON，供 /yf/^TWOII、/yf/__TXF__。
 """
@@ -16,13 +17,14 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import sys
 import threading
 import time
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
@@ -46,6 +48,10 @@ _HTTP_GAP = 0.35
 # 記憶體快取：symbol -> (mtime_or_build_ts, rows)
 _mem: Dict[str, Tuple[float, List[Tuple]]] = {}
 _REFRESH_TTL = 300.0  # 5 分鐘內不重抓外部
+_WTX_HTML_TTL = 20.0
+_wtx_html_cache: Tuple[float, str] = (0.0, '')
+_TXF_INTRADAY_INTERVALS = frozenset({'1m', '2m', '5m', '15m', '30m', '60m', '1h'})
+_WTX_QUOTE_URL = 'https://tw.stock.yahoo.com/quote/WTX%26'
 
 
 def _throttle():
@@ -352,6 +358,223 @@ def ensure_txf(years: int = 5, force: bool = False) -> List[Tuple]:
             _write_csv(TXF_CSV, out)
         _mem['__TXF__'] = (now, out)
         return out
+
+
+def is_txf_intraday_request(range_key: Optional[str], interval: Optional[str]) -> bool:
+    """僅「1天」視圖用分 K（Yahoo TW WTX& 當日／夜盤）；其餘週期仍走 FinMind 日線。"""
+    rk = str(range_key or '').strip().lower()
+    iv = str(interval or '').strip().lower()
+    if rk != '1d':
+        return False
+    if iv in ('1d', '1wk', '1w', '1wkly'):
+        return False
+    return iv in _TXF_INTRADAY_INTERVALS or iv in ('', '1m')
+
+
+def _js_json_array(blob: str, key: str) -> Optional[list]:
+    token = '"' + key + '":['
+    i = blob.find(token)
+    if i < 0:
+        token = '"' + key + '": ['
+        i = blob.find(token)
+    if i < 0:
+        return None
+    start = blob.find('[', i)
+    if start < 0:
+        return None
+    depth = 0
+    for j in range(start, len(blob)):
+        ch = blob[j]
+        if ch == '[':
+            depth += 1
+        elif ch == ']':
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(blob[start:j + 1])
+                except Exception:
+                    return None
+    return None
+
+
+def _js_num(blob: str, key: str) -> Optional[float]:
+    m = re.search(r'"' + re.escape(key) + r'"\s*:\s*(-?[0-9]+(?:\.[0-9]+)?)', blob)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except Exception:
+        return None
+
+
+def parse_wtx_intraday_embed(html: str) -> Optional[Dict[str, Any]]:
+    """從 Yahoo TW WTX& 頁 App.main 抽出當日 1 分 K（含夜盤 15:00–05:00）。"""
+    if not html:
+        return None
+    m = re.search(r'root\.App\.main\s*=\s*(\{.*?\})\s*;\s*\n', html, re.S)
+    blob = m.group(1) if m else html
+    mark = blob.find('"dataGranularity":"1m"')
+    if mark < 0:
+        mark = blob.find('"dataGranularity": "1m"')
+    if mark < 0:
+        blob = html
+        mark = blob.find('"dataGranularity":"1m"')
+        if mark < 0:
+            mark = blob.find('"dataGranularity": "1m"')
+    if mark >= 0:
+        blob = blob[max(0, mark - 8000):]
+    ts = _js_json_array(blob, 'timestamp')
+    closes = _js_json_array(blob, 'close')
+    if not ts or not closes:
+        return None
+    opens = _js_json_array(blob, 'open') or []
+    highs = _js_json_array(blob, 'high') or []
+    lows = _js_json_array(blob, 'low') or []
+    vols = _js_json_array(blob, 'volume') or []
+    n = min(len(ts), len(closes))
+    out_ts, o, h, l, c, v = [], [], [], [], [], []
+    for i in range(n):
+        px = closes[i]
+        if px is None:
+            continue
+        try:
+            t = int(ts[i])
+            close_px = float(px)
+        except Exception:
+            continue
+        if t <= 0 or close_px <= 0:
+            continue
+
+        def _at(arr, default):
+            try:
+                val = arr[i]
+                return float(val) if val is not None else default
+            except Exception:
+                return default
+
+        out_ts.append(t)
+        c.append(close_px)
+        o.append(_at(opens, close_px))
+        h.append(_at(highs, close_px))
+        l.append(_at(lows, close_px))
+        try:
+            vv = vols[i]
+            v.append(int(float(vv)) if vv is not None else 0)
+        except Exception:
+            v.append(0)
+    if not out_ts:
+        return None
+    last_px = c[-1]
+    prev = _js_num(blob, 'chartPreviousClose') or _js_num(blob, 'previousClose')
+    rmp = _js_num(blob, 'regularMarketPrice') or last_px
+    return {
+        'timestamp': out_ts,
+        'open': o, 'high': h, 'low': l, 'close': c, 'volume': v,
+        'regularMarketPrice': rmp,
+        'chartPreviousClose': prev,
+        'previousClose': prev,
+    }
+
+
+def _resample_ohlc(parsed: Dict[str, Any], bucket_sec: int) -> Dict[str, Any]:
+    if bucket_sec <= 60:
+        return parsed
+    ts, o, h, l, c, v = (parsed['timestamp'], parsed['open'], parsed['high'],
+                         parsed['low'], parsed['close'], parsed['volume'])
+    buckets: Dict[int, List[int]] = {}
+    order: List[int] = []
+    for i, t in enumerate(ts):
+        b = t - (t % bucket_sec)
+        if b not in buckets:
+            buckets[b] = []
+            order.append(b)
+        buckets[b].append(i)
+    nts, no, nh, nl, nc, nv = [], [], [], [], [], []
+    for b in order:
+        idx = buckets[b]
+        nts.append(b)
+        no.append(o[idx[0]])
+        nh.append(max(h[i] for i in idx))
+        nl.append(min(l[i] for i in idx))
+        nc.append(c[idx[-1]])
+        nv.append(sum(v[i] for i in idx))
+    out = dict(parsed)
+    out.update({'timestamp': nts, 'open': no, 'high': nh, 'low': nl, 'close': nc, 'volume': nv})
+    return out
+
+
+def _wtx_quote_html(force: bool = False) -> str:
+    """與 /txf Yahoo TW 同源：WTX& 報價頁（含當日 1 分走勢）。"""
+    global _wtx_html_cache
+    now = time.time()
+    cached_at, cached_html = _wtx_html_cache
+    if not force and cached_html and (now - cached_at) < _WTX_HTML_TTL:
+        return cached_html
+    req = urllib.request.Request(_WTX_QUOTE_URL, headers={
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Accept-Language': 'zh-TW,zh;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml',
+    })
+    with urllib.request.urlopen(req, timeout=12) as resp:
+        html = resp.read().decode('utf-8', 'replace')
+    _wtx_html_cache = (now, html)
+    return html
+
+
+def chart_json_txf_intraday(interval: str = '1m') -> bytes:
+    """台指期 1 天：Yahoo TW WTX& 當日 1 分 K（夜盤+日盤時段）。"""
+    html = _wtx_quote_html()
+    parsed = parse_wtx_intraday_embed(html)
+    if not parsed:
+        raise ValueError('WTX embed missing 1m bars')
+    iv = str(interval or '1m').lower()
+    bucket = {'1m': 60, '2m': 120, '5m': 300, '15m': 900, '30m': 1800, '60m': 3600, '1h': 3600}.get(iv, 60)
+    parsed = _resample_ohlc(parsed, bucket)
+    ts, opens, highs, lows, closes, vols = (
+        parsed['timestamp'], parsed['open'], parsed['high'],
+        parsed['low'], parsed['close'], parsed['volume'])
+    last_px = parsed.get('regularMarketPrice') or closes[-1]
+    prev = parsed.get('chartPreviousClose') or parsed.get('previousClose')
+    if not (prev and prev > 0) and len(closes) >= 2:
+        prev = closes[0]
+    gran = '1m' if bucket <= 60 else ('5m' if bucket == 300 else iv)
+    meta = {
+        'currency': 'TWD',
+        'symbol': '__TXF__',
+        'exchangeName': 'TAI',
+        'instrumentType': 'FUTURE',
+        'shortName': '台指期近月',
+        'longName': '台指期近月',
+        'firstTradeDate': ts[0],
+        'regularMarketTime': ts[-1],
+        'gmtoffset': 28800,
+        'timezone': 'TST',
+        'exchangeTimezoneName': 'Asia/Taipei',
+        'regularMarketPrice': last_px,
+        'regularMarketPreviousClose': prev,
+        'chartPreviousClose': prev,
+        'previousClose': prev,
+        'dataGranularity': gran,
+        'range': '1d',
+        'validRanges': ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max'],
+        '_source': 'yahoo-tw-WTX 1m',
+    }
+    body = {
+        'chart': {
+            'result': [{
+                'meta': meta,
+                'timestamp': ts,
+                'indicators': {
+                    'quote': [{
+                        'open': opens, 'high': highs, 'low': lows,
+                        'close': closes, 'volume': vols,
+                    }],
+                },
+            }],
+            'error': None,
+        }
+    }
+    return json.dumps(body, ensure_ascii=False).encode()
 
 
 def _yf_payload(symbol: str, name: str, rows: List[Tuple], range_key: Optional[str]) -> bytes:

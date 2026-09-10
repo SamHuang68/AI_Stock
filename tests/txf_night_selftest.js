@@ -69,6 +69,24 @@ function main() {
   assert(actionPct(-2.46, 0.8) === -2.46, 'TXF night drives action');
   assert(actionPct(null, 0.8) === 0.8, 'fallback to US estimate');
 
+  const fs = require('fs');
+  const path = require('path');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'stock_terminal.html'), 'utf8');
+  const loadStart = html.indexOf('async function loadSym');
+  assert(loadStart > 0, 'loadSym present');
+  const load = html.slice(loadStart, loadStart + 12000);
+  assert(!/yfsym === '\^TWOII' \|\| yfsym === '__TXF__'/.test(load),
+    'TXF 1天 must not share TWOII 1d→1y daily rewrite');
+  assert(/yfsym === '__TXF__' && S\.range !== '1d'/.test(load),
+    'TXF non-1d still forces FinMind daily interval');
+  assert(/const _isTxf = \(sym === '__TXF__'\)/.test(load)
+    && /IntradayVolumeV3 && !_isTxf/.test(load),
+    'TXF 1天 skips TW 09:00–13:30 cash-session filter');
+  assert(/_intradayDef && !_isTxf && \(!parsed/.test(load),
+    'TXF 1天 does not fall back to 5d daily candles');
+  assert(/_isTxfI/.test(html) && /13\.75 \* 3600/.test(html),
+    'TXF 1天 X-axis uses 13:45 / night 05:00 not cash 13:30');
+
   console.log('txf_night_selftest: PASS');
 }
 

@@ -114,12 +114,17 @@ def fetch_one(sym, rng=None, interval=None, nocache=False) -> Tuple[str, Any, bo
         _raw = unquote(str(sym or ''))
         if tic.is_tw_index_chart_sym(_raw) or tic.is_tw_index_chart_sym(str(sym or '')):
             canon = '__TXF__' if 'TXF' in str(sym).upper() else '^TWOII'
-            cache_key = f'{canon}|1d|{rng or "max"}'
+            rng_k = rng or 'max'
+            iv = str(interval or '1d').strip().lower() or '1d'
+            cache_key = f'{canon}|{iv}|{rng_k}'
             if cache is not None and not nocache:
                 cached = cache.get(cache_key)
                 if cached is not None:
                     return canon, cached, True
-            data = tic.chart_json(canon, range_key=(rng or 'max'))
+            if canon == '__TXF__' and tic.is_txf_intraday_request(rng_k, iv):
+                data = tic.chart_json_txf_intraday(iv)
+            else:
+                data = tic.chart_json(canon, range_key=rng_k)
             if cache is not None and not nocache and data:
                 cache.set(cache_key, data)
             return canon, data, False
