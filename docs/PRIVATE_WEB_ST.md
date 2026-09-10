@@ -24,6 +24,15 @@ long-horizon market/research user.
   `scripts/sync_private_web.ps1` to stage; add `-Promote -LayoutVerified` only
   after that visual check. Promoting without checking both faces is incomplete.
 
+發布流程會固定遠端 tip 的完整 SHA。未指定 `-Promote` 時只暫存版本；
+重複暫存僅重用 SHA 相符且 `tests=passed` 的版本，未測試版本仍會拒絕。
+指定 `-Promote -LayoutVerified` 時，本機 `18432` 必須已啟動正確 tip，
+腳本才會確認 Private Web 程序身分、停止舊程序、切換 current 並啟動新服務。
+最後以 `/health/live` 的 `releaseCommit` 驗證 localhost 與 Tailscale。
+這個欄位固定於程序啟動時讀取，更新磁碟上的 manifest 不會使舊程序誤報新版。
+程序或版本檢查失敗會回傳失敗，不能以 staged 清單或 current 檔案代替成功發布。
+發布後仍須實際確認兩個入口的版面與手機橫向操作；HTTP 檢查不代表視覺驗收。
+
 ## Two operating modes
 
 ### 1. Development-linked preview

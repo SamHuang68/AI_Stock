@@ -58,6 +58,8 @@ class HealthLiveTests(unittest.TestCase):
             self.module.find_etf_dir = original
         self.assertTrue(payload["ok"])
         self.assertTrue(payload["liveness"])
+        self.assertIn("releaseCommit", payload)
+        self.assertEqual(payload["releaseCommit"], self.module.RUNTIME_COMMIT)
         self.assertLess(elapsed, 1.0)
 
 

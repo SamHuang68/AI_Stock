@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -144,8 +145,31 @@ class PrivateWebReleaseTests(unittest.TestCase):
         self.assertIn("-LayoutVerified", script)
         self.assertIn("http://localhost:18432/#pulse", script)
         self.assertIn("https://evo-t1-st.tailbc3519.ts.net/#pulse", script)
-        self.assertIn("Refuse to promote", script)
+        self.assertIn("拒絕發布", script)
         self.assertNotIn("Start-Process -FilePath 'python'", script)
+
+    def test_verified_stage_is_reusable_without_rebuilding(self):
+        commit = "a" * 40
+        target = _fake_release(self.install_root, commit[:12])
+        manifest = target / ".private_web_release.json"
+        value = json.loads(manifest.read_text())
+        value["commit"] = commit
+        manifest.write_text(json.dumps(value), encoding="utf-8")
+        with patch.object(release, "resolve_commit", return_value=(commit, commit[:12])), patch.object(release, "_run") as run:
+            reused = release.stage_release(self.install_root, ref=commit)
+        self.assertTrue(os.path.samefile(reused, target))
+        run.assert_not_called()
+
+    def test_existing_stage_rejects_skipped_tests_or_wrong_commit(self):
+        commit = "b" * 40
+        target = _fake_release(self.install_root, commit[:12])
+        manifest = target / ".private_web_release.json"
+        for stored_commit, tests in [(commit, "skipped"), ("c" * 40, "passed")]:
+            with self.subTest(commit=stored_commit, tests=tests):
+                manifest.write_text(json.dumps({"commit": stored_commit, "releaseId": commit[:12], "tests": tests}), encoding="utf-8")
+                with patch.object(release, "resolve_commit", return_value=(commit, commit[:12])):
+                    with self.assertRaises(RuntimeError):
+                        release.stage_release(self.install_root, ref=commit)
 
     def test_release_gate_includes_etf_and_shell_node_regressions(self):
         source = (ROOT / "scripts" / "private_web_release.py").read_text(encoding="utf-8")

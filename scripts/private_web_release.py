@@ -182,7 +182,13 @@ def stage_release(
     releases.mkdir(parents=True, exist_ok=True)
     target = releases / release_id
     if target.exists():
-        raise FileExistsError(f"release already staged: {target}")
+        _validate_release(target)
+        manifest = _read_manifest(target / ".private_web_release.json")
+        if manifest.get("commit") != commit or manifest.get("releaseId") != release_id:
+            raise RuntimeError(f"已暫存版本的識別資料不符：{target}")
+        if manifest.get("tests") != "passed":
+            raise RuntimeError(f"已暫存版本未通過測試，禁止重用：{target}")
+        return target
 
     with tempfile.TemporaryDirectory(dir=str(install_root), prefix="stage-") as temp_name:
         temp = Path(temp_name)
@@ -203,6 +209,8 @@ def stage_release(
             "tests.test_private_web_access",
             "tests.test_private_web_host",
             "tests.test_private_web_release",
+            "tests.test_sync_private_web",
+            "tests.test_runtime_revision",
             "tests.test_archify_artifacts",
         ]
         if run_tests:

@@ -955,7 +955,7 @@ ok(fs.existsSync(path.join(root, 'scripts/sync_private_web.ps1')),
   'scripts/sync_private_web.ps1 exists');
 const syncPw = fs.readFileSync(path.join(root, 'scripts/sync_private_web.ps1'), 'utf8');
 ok(/LayoutVerified/.test(syncPw) && /evo-t1-st\.tailbc3519\.ts\.net/.test(syncPw) &&
-  /localhost:18432\/#pulse/.test(syncPw) && /Refuse to promote/.test(syncPw) &&
+  /localhost:18432\/#pulse/.test(syncPw) && /拒絕發布/.test(syncPw) &&
   /private_web_release\.py/.test(syncPw) && /RedirectStandardError/.test(syncPw) &&
   /NativeCommandError/.test(syncPw) && !/Start-Process -FilePath 'python'/.test(syncPw),
   'Private Web sync stages exact tip and refuses promote without layout verification');

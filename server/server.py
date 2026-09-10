@@ -61,6 +61,7 @@ from http_boundary import BodyReadError, is_same_local_origin, read_json_body
 from atomic_store import StoreCorruptError, atomic_write_json, load_json
 import atomic_store as _atomic_store
 from deadline import BoundedExecutor, collect_named
+from runtime_revision import RUNTIME_COMMIT
 from keystats_resolution import should_retry_tw_keystats_as_otc as _should_retry_tw_keystats_as_otc
 
 HOST = os.environ.get('ST_HOST', '127.0.0.1').strip() or '127.0.0.1'
@@ -2888,6 +2889,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                 'ok': True,
                 'status': 'ok',
                 'liveness': True,
+                'releaseCommit': RUNTIME_COMMIT,
                 'bind': HOST,
                 'port': PORT,
             }, ensure_ascii=False).encode())
