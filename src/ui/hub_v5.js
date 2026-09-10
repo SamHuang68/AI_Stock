@@ -1221,16 +1221,33 @@
 
   // ── Settings ─────────────────────────────────────────────
   function renderSettings(el) {
-    el.innerHTML = head('設定', '同步狀態 · 資料來源 · 本機歷史庫',
+    el.innerHTML = head('設定', '同步狀態 · 資料來源 · Email 聯絡人',
+      '<button class="hub-btn" id="hub-contacts-btn">✉ 管理聯絡人</button>' +
       '<button class="hub-btn" data-sync>同步資料</button>' +
       '<button class="hub-btn primary" data-shell-back>← 儀表板</button>') +
       '<div id="hub-set-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
-    Promise.all([jget('/sync/status'), jget('/datasources'), jget('/health'), jget('/features')]).then(function (arr) {
+    var contactsBtn = $('hub-contacts-btn');
+    if (contactsBtn) {
+      contactsBtn.onclick = function () {
+        if (window.ShareResult && typeof ShareResult.openContacts === 'function') {
+          ShareResult.openContacts();
+        }
+      };
+    }
+    Promise.all([jget('/sync/status'), jget('/datasources'), jget('/health'), jget('/features'), jget('/notify/contacts')]).then(function (arr) {
       var st = arr[0] || {};
       var ds = arr[1];
       var health = arr[2] || {};
       var features = arr[3] || {};
+      var contactPack = arr[4] || {};
+      var contactRows = '';
+      ((contactPack.contacts) || []).forEach(function (c) {
+        contactRows += '<tr><td>' + (c.name || '') + '</td><td style="text-align:left">' + (c.email || '') + '</td></tr>';
+      });
+      if (!contactRows) {
+        contactRows = '<tr><td colspan="2">尚無聯絡人 — 按「管理聯絡人」新增</td></tr>';
+      }
       var V = window.Viz;
       var counts = st.counts || {};
       var countChips = V
@@ -1305,8 +1322,20 @@
             '<tr><th>資料集</th><th>資料日</th><th>狀態</th><th>說明</th><th>列數</th></tr>' +
             dsRows + '</table></div><div class="hub-note">DB：' + (st.db || '') + '</div></div>' +
           srcPanel +
+          '<div class="hub-sec"><h4>Email 聯絡人</h4><div class="hub-fill"><table>' +
+            '<tr><th>姓名</th><th>Email</th></tr>' + contactRows + '</table></div>' +
+            '<div class="hub-note">AI 分析抽屜的「Email 通知」會把全文寄到勾選的聯絡人。SMTP 沿用通知設定的寄件帳號，通訊錄不含密鑰。' +
+            ' <button type="button" class="hub-btn" id="hub-contacts-open">管理聯絡人</button></div></div>' +
         '</div>';
       bindCommon(el);
+      var openContacts = $('hub-contacts-open');
+      if (openContacts) {
+        openContacts.onclick = function () {
+          if (window.ShareResult && typeof ShareResult.openContacts === 'function') {
+            ShareResult.openContacts();
+          }
+        };
+      }
     });
   }
 

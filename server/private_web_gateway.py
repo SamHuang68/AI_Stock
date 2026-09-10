@@ -419,6 +419,7 @@ OWNER_GET_EXACT = {
     "/alert/config",  # ST masks stored transport credentials in its response.
     "/api/override-alpha",
     "/api/llm-gate",
+    "/notify/contacts",
 }
 OWNER_GET_PREFIXES = ("/draw/",)
 
@@ -440,6 +441,8 @@ CONTROL_POST_EXACT = {
     "/watch/rules",
     "/watch/config",
     "/alert/rules",
+    "/notify/contacts",
+    "/report-email",
 }
 CONTROL_POST_PREFIXES = ("/draw/",)
 
@@ -464,7 +467,6 @@ BLOCKED_REMOTE_PATHS = {
     "POST /alert/config",
     "POST /alert/test",
     "POST /etf-report/email",
-    "POST /report-email",
     "GET/POST /sync",
 }
 

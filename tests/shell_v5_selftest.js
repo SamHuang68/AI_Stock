@@ -341,8 +341,13 @@ ok(/id="pl-ai-close" aria-label="關閉 AI 白話懶人包"/.test(pulseBeginner)
   'AI plain-language summary is dismissible, toggleable and reopens without another request');
 ok(/plAiDrawerIn/.test(pulseBeginner) && /backdrop-filter:blur\(18px\)/.test(pulseBeginner) &&
   /id="pl-ai-speak"/.test(pulseBeginner) && /SpeechSynthesisUtterance/.test(pulseBeginner) &&
+  /function chunkAiSpeechText/.test(pulseBeginner) && /speakAiSpeechNext/.test(pulseBeginner) &&
+  /🎙 朗讀全文/.test(pulseBeginner) && !/約15秒朗讀/.test(pulseBeginner) &&
+  !/text\.slice\(0, 120\)/.test(pulseBeginner) &&
+  /id="pl-ai-mail"/.test(pulseBeginner) && /function openAiMailer/.test(pulseBeginner) &&
+  /ShareResult\.openMailer/.test(pulseBeginner) &&
   /3 大要點速覽/.test(pulseBeginner),
-  'beginner AI uses a glass drawer with bounded speech playback and three-point fallback');
+  'beginner AI uses a glass drawer with full-text speech, email notify and three-point fallback');
 ok(/id="pl-ai-fast"/.test(pulseBeginner) && /id="pl-ai-deep"/.test(pulseBeginner) &&
   /\/ai\/deep/.test(pulseBeginner) && /X-ST-AI-Provider/.test(pulseBeginner) &&
   /X-ST-AI-Model/.test(pulseBeginner) && /X-ST-AI-Data-Boundary/.test(pulseBeginner) &&
@@ -443,6 +448,16 @@ ok(/#view-institutional \.hub-title\{font-size:20px/.test(hub) &&
   'institutional large-screen type fit (title/axes/structure bars)');
 ok(/法人金額尚未更新/.test(hub) && /hub-mag3/.test(hub),
   'institutional structure fallback when Viz absent');
+ok(/id="hub-contacts-btn"/.test(hub) && /管理聯絡人/.test(hub) &&
+  /ShareResult\.openContacts/.test(hub) && /Email 聯絡人/.test(hub),
+  'settings page exposes Email contact manager');
+(function () {
+  var share = fs.readFileSync(path.join(root, 'src/ui/share_v3.js'), 'utf8');
+  ok(/ShareResult\.openMailer/.test(share) && /\/notify\/contacts/.test(share) &&
+    /\/report-email/.test(share) && /ShareResult\.openContacts/.test(share) &&
+    /寄出通知/.test(share),
+    'ShareResult mailer reuses contacts API and /report-email');
+})();
 (function () {
   var wd = fs.readFileSync(path.join(root, 'src/ui/wavedeck_bridge_v5.js'), 'utf8');
   ok(/HEARTBEAT_MS/.test(wd) && /startOverlayHeartbeat/.test(wd),
