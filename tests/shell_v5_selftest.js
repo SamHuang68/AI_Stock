@@ -940,6 +940,9 @@ ok(fs.existsSync(path.join(root, 'scripts/go.ps1')), 'scripts/go.ps1 exists for 
 const goPs = fs.readFileSync(path.join(root, 'scripts/go.ps1'), 'utf8');
 ok(/tipUx/.test(goPs) && /st5-tip-boot/.test(goPs) && /#pulse/.test(goPs),
   'go.ps1 verifies tip health/HTML and opens #pulse');
+ok(/Assert-LiveRevision/.test(goPs) && /health\/live/.test(goPs) &&
+  /releaseCommit/.test(goPs),
+  'go.ps1 proves the :18432 process SHA via /health/live before opening the browser');
 ok(/Resolve-StockPython/.test(goPs) && /Test-ToolingPython/.test(goPs) &&
   /deprioritize tooling venvs/.test(goPs) && /Stock Terminal Server v5 tip/.test(goPs) &&
   /PULSE_LAYOUT_ANCHOR_3cab212/.test(goPs),

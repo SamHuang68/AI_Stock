@@ -255,6 +255,17 @@ function Wait-TipServer {
   throw "Server on :$Port is not tip UX. Check the 'Stock Terminal Server' console window for traceback."
 }
 
+function Assert-LiveRevision {
+  $expect = (git rev-parse HEAD).Trim()
+  if ($expect -notmatch '^[0-9a-f]{40}$') { throw "unable to parse HEAD SHA" }
+  $live = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health/live" -TimeoutSec 3
+  $got = [string]$live.releaseCommit
+  if (-not $live.ok -or $got -ne $expect) {
+    throw "localhost:$Port/health/live SHA=$got expected HEAD=$expect — stale process; free :$Port and relaunch"
+  }
+  Write-Host "[ok] /health/live releaseCommit=$got"
+}
+
 function Assert-IndexIsTip {
   $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/" -UseBasicParsing -TimeoutSec 5
   $hdr = $resp.Headers['X-Stock-Terminal-UX']
@@ -432,6 +443,7 @@ Write-Host "       window title MUST be: Stock Terminal Server v5 tip"
 Write-Host "       launcher script: $launcher"
 
 Wait-TipServer
+Assert-LiveRevision
 Assert-IndexIsTip
 Assert-ListenerMatchesPin
 

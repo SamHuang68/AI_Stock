@@ -1,17 +1,24 @@
 ﻿# Private Web 發布時的程序身分、重啟及版本驗證。
 function Assert-PrivateWebRevision {
   param([string]$Url, [string]$Commit, [hashtable]$Headers = @{}, [int]$Attempts = 1)
+  $observed = $null
+  $lastError = $null
   for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
     try {
       $health = Invoke-RestMethod -Uri $Url -Headers $Headers -TimeoutSec 3
-      if ($health.ok -and $health.releaseCommit -eq $Commit) {
+      $observed = [string]$health.releaseCommit
+      if ($health.ok -and $observed -eq $Commit) {
         Write-Host "[版本驗證] $Url SHA=$Commit"
         return
       }
-    } catch { }
+    } catch {
+      $lastError = $_.Exception.Message
+    }
     if ($attempt -lt $Attempts) { Start-Sleep -Milliseconds 500 }
   }
-  throw "服務版本驗證失敗：$Url，預期 SHA=$Commit；磁碟 current 不能代替程序版本證據"
+  $got = if ($observed) { $observed } else { 'unreachable' }
+  $hint = if ($lastError) { "；連線=$lastError" } else { '' }
+  throw "服務版本驗證失敗：$Url，預期 SHA=$Commit，程序 SHA=$got$hint；磁碟 current 不能代替程序版本證據"
 }
 
 function Stop-PrivateWebRuntime {
