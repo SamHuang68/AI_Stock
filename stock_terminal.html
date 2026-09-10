@@ -772,6 +772,8 @@ function traceIntradaySessionFilter(sym, result) {
 async function loadSym(sym, mkt, silent) {
   if (!sym) return;
   sym = sym.toUpperCase().trim();
+  // 搜尋列打 TXF／__TXF 與大盤列 __TXF__ 同一近月連續合約
+  if (sym === 'TXF' || sym === '__TXF') sym = '__TXF__';
   mkt = (mkt || S.mkt || 'TW').toUpperCase();
   // JP mode accepts the local four-digit code and canonicalizes it to Yahoo .T.
   if (mkt === 'JP' && /^\d{4}$/.test(sym)) sym += '.T';
