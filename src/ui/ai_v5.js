@@ -13,11 +13,16 @@
   var timer = null;
   var lastFocus = null;
   var fetching = false;
+  var activeRequest = null;
+  var requestId = 0;
+  var receivedAt = null;
+  var focusError = '';
+  var FOCUS_TIMEOUT_MS = 120000;
 
   function $(id) { return document.getElementById(id); }
   function esc(s) {
-    return String(s == null ? '' : s).replace(/[&<>]/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
 
@@ -72,7 +77,23 @@
       '#ai5-root .up{color:var(--red)}#ai5-root .dn{color:var(--green)}#ai5-root .flat{color:var(--tlo)}' +
       '#ai5-root .ai5-note{font-size:10px;color:var(--tlo);line-height:1.4;margin-top:2px;flex:0 0 auto}' +
       '#ai5-root .ai5-empty{font-size:10px;color:var(--tlo);padding:16px 8px;text-align:center}' +
-      '#ai5-root .ai5-loading{font-size:10px;color:var(--tlo);padding:12px 0}';
+      '#ai5-root .ai5-loading{font-size:10px;color:var(--tlo);padding:12px 0}' +
+      '#ai5-root .ai5-status{font-size:11px;line-height:1.5;padding:5px 7px;margin-bottom:4px;color:var(--tlo);flex:0 0 auto}' +
+      '#ai5-root .ai5-status.error{color:var(--gold);border:1px solid var(--gold);border-radius:4px}' +
+      '#ai5-root .ai5-symbol{font:inherit;color:inherit;background:none;border:0;padding:4px;cursor:pointer;text-decoration:underline;white-space:nowrap}' +
+      '#ai5-root button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}' +
+      '#ai5-root .ai5-btn:disabled{opacity:.6;cursor:wait}' +
+      '@media(max-width:700px){' +
+        '#ai5-root .ai5-head{align-items:flex-start;flex-wrap:wrap}' +
+        '#ai5-root .ai5-actions{flex-wrap:wrap}' +
+        '#ai5-root .ai5-btn{font-size:12px;min-height:36px;padding:6px 9px}' +
+        '#ai5-root .ai5-strip{grid-template-columns:repeat(2,minmax(0,1fr))}' +
+        '#ai5-root .ai5-dash{display:flex;flex-direction:column;overflow:auto}' +
+        '#ai5-root .ai5-sec{height:auto;min-height:150px;flex:0 0 auto}' +
+        '#ai5-root table{font-size:12px}#ai5-root .ai5-symbol{min-height:36px}' +
+        '#ai5-root th,#ai5-root td{padding:5px 3px;overflow-wrap:anywhere}' +
+        '#ai5-root th:first-child,#ai5-root td:first-child{min-width:48px;white-space:nowrap}' +
+      '}';
   }
 
   function openChart(code, mkt) {
@@ -158,7 +179,7 @@
     return $('ai5-body');
   }
 
-  function rowOf(x, cls) {
+  function rowOf(x, cls, market) {
     var V = window.Viz;
     var code = x.code || x.sym || x.ticker || '';
     var name = x.name || x.zh || '';
@@ -172,8 +193,9 @@
       scoreCell = (score >= 0 ? '+' : '') + Number(score).toFixed(1);
       if (V) scoreCell += V.scoreMeter(meterScore);
     }
-    return '<tr class="ai5-row" data-code="' + esc(code) + '">' +
-      '<td class="' + cls + '" style="font-weight:700">' + esc(code) + '</td>' +
+    return '<tr class="ai5-row" data-code="' + esc(code) + '" data-market="' + esc(x.mkt || market || 'TW') + '">' +
+      '<td class="' + cls + '" style="font-weight:700"><button type="button" class="ai5-symbol" aria-label="開啟 ' +
+        esc(code + ' ' + name) + ' 圖表">' + esc(code) + '</button></td>' +
       '<td>' + esc(name) + '</td>' +
       '<td>' + scoreCell + '</td>' +
       '<td style="color:var(--tlo)">' + esc(String(sig)) + '</td></tr>';
@@ -200,13 +222,13 @@
         '<div class="cell"><div class="k">Claude Key</div><div class="v" style="font-size:11px">' + esc(keyStatus()) + '</div>' +
           '<div class="s">報告：' + esc(lastReportStamp()) + '</div></div>' +
         '<div class="cell"><div class="k">掃描檔數</div><div class="v">' + esc(String(scanned)) + '</div>' +
-          '<div class="s">GET /focus</div></div>' +
+          '<div class="s">完成分析的股票</div></div>' +
         '<div class="cell"><div class="k">做多焦點</div><div class="v up">' + longs.length + '</div>' +
-          '<div class="s">buy</div></div>' +
+          '<div class="s">偏多訊號組合</div></div>' +
         '<div class="cell"><div class="k">做空焦點</div><div class="v dn">' + shorts.length + '</div>' +
-          '<div class="s">short</div></div>' +
+          '<div class="s">偏空訊號組合</div></div>' +
         '<div class="cell"><div class="k">合計</div><div class="v">' + (longs.length + shorts.length) + '</div>' +
-          '<div class="s">點列開圖表</div></div>' +
+          '<div class="s">選取代號開啟圖表</div></div>' +
       '</div>';
 
     function tbl(list, title, cls) {
@@ -216,12 +238,12 @@
         return h + '<div class="ai5-empty">暫無 — 按「焦點掃描」或側欄「訊號」</div></div>' +
           '<div class="ai5-note">多訊號組合 · 非投資建議</div></div>';
       }
-      h += '<table><tr><th>代號</th><th>名稱</th><th>分數</th><th>訊號</th></tr>' +
-        list.slice(0, 40).map(function (x) { return rowOf(x, cls); }).join('') + '</table>';
+      h += '<table><thead><tr><th scope="col">代號</th><th scope="col">名稱</th><th scope="col">分數</th><th scope="col">訊號</th></tr></thead><tbody>' +
+        list.slice(0, 40).map(function (x) { return rowOf(x, cls, (lastFocus || {}).mkt); }).join('') + '</tbody></table>';
       return h + '</div><div class="ai5-note">點列載入線型</div></div>';
     }
 
-    body.innerHTML = tools + strip +
+    body.innerHTML = '<div id="ai5-status" class="ai5-status" role="status" aria-live="polite"></div>' + tools + strip +
       '<div class="ai5-dash">' +
         tbl(longs, '做多焦點', 'up') +
         tbl(shorts, '做空焦點', 'dn') +
@@ -240,7 +262,36 @@
       if (typeof window.focusScanOpen === 'function') window.focusScanOpen();
     };
     body.querySelectorAll('tr.ai5-row').forEach(function (el) {
-      el.onclick = function () { openChart(el.getAttribute('data-code')); };
+      el.onclick = function () { openChart(el.getAttribute('data-code'), el.getAttribute('data-market')); };
+    });
+    updateStatus();
+  }
+
+  function updateStatus() {
+    var body = $('ai5-body');
+    if (body) body.setAttribute('aria-busy', String(fetching));
+    var button = $('ai5-refresh');
+    if (button) {
+      button.disabled = fetching;
+      button.textContent = fetching ? '更新中…' : (focusError ? '↻ 重試更新' : '↻ 重新整理');
+    }
+    var status = $('ai5-status');
+    if (!status) return;
+    status.className = 'ai5-status' + (focusError ? ' error' : '');
+    var stamp = receivedAt ? '上次取得：' + receivedAt.toLocaleTimeString('zh-TW', { hour12: false }) + '（接收時間，非行情時間）。' : '';
+    status.textContent = fetching ? '正在取得焦點掃描，首次掃描可能需要較長時間…' :
+      focusError ? focusError + (lastFocus ? ' 保留上次成功清單。' : ' 尚無可用清單。') + stamp + ' 請按「重試更新」。' : stamp;
+  }
+
+  function validFocus(data) {
+    if (!data || typeof data !== 'object' || Array.isArray(data) || data.ok === false) return false;
+    var source = data.focus || data;
+    var keys = ['buy', 'long', 'bull', 'longs', 'short', 'bear', 'shorts', 'list'];
+    var present = keys.filter(function (key) { return source[key] != null; });
+    return present.length > 0 && present.every(function (key) {
+      return Array.isArray(source[key]) && source[key].every(function (row) {
+        return row && typeof row === 'object' && !Array.isArray(row);
+      });
     });
   }
 
@@ -248,25 +299,60 @@
     opts = opts || {};
     var body = ensureMount();
     if (!body) return;
-    var soft = !!opts.soft || !!body.querySelector('.ai5-strip, .ai5-dash');
-    if (fetching && soft) return;
+    if (fetching) return activeRequest && activeRequest.promise;
+    var soft = !!lastFocus;
+    var current = { id: ++requestId, controller: new AbortController(), timeout: null, promise: null };
+    activeRequest = current;
     fetching = true;
+    focusError = '';
     if (window.ShellV5 && window.ShellV5.softBadge) {
       window.ShellV5.softBadge('mount-ai', soft, '更新中…');
     }
-    if (!soft) body.innerHTML = '<div class="ai5-loading">載入 AI 中樞…</div>';
+    if (!soft) body.innerHTML = '<div id="ai5-status" class="ai5-status" role="status" aria-live="polite"></div>';
+    updateStatus();
+    current.timeout = setTimeout(function () { current.controller.abort(); }, FOCUS_TIMEOUT_MS);
 
     var url = SRV + '/focus' + (opts.force ? '?refresh=1' : '');
-    fetch(url, { cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : {}; })
-      .catch(function () { return {}; })
-      .then(function (d) { render(d); })
+    current.promise = fetch(url, { cache: 'no-store', signal: current.controller.signal })
+      .then(function (r) {
+        if (!r.ok) {
+          var error = new Error('HTTP');
+          error.status = r.status;
+          throw error;
+        }
+        return r.json();
+      })
+      .then(function (d) {
+        if (current.id !== requestId) return;
+        if (current.controller.signal.aborted) {
+          var timeoutError = new Error('TIMEOUT');
+          timeoutError.name = 'AbortError';
+          throw timeoutError;
+        }
+        if (!validFocus(d)) throw new Error('INVALID_FOCUS');
+        receivedAt = new Date();
+        render(d);
+      })
+      .catch(function (error) {
+        if (current.id !== requestId) return;
+        focusError = error.name === 'AbortError' ? '掃描等待超過兩分鐘。' :
+          error.status === 401 ? '登入已失效，請重新登入。' :
+          error.status === 403 ? '目前帳號無權讀取焦點掃描。' :
+          error.status === 429 ? '請求過於頻繁，請稍後重試。' :
+          error.status ? '焦點掃描服務暫時無法使用（HTTP ' + error.status + '）。' :
+          error.message === 'INVALID_FOCUS' || error instanceof SyntaxError ? '掃描回應格式不完整。' : '無法連線至焦點掃描服務。';
+      })
       .finally(function () {
+        clearTimeout(current.timeout);
+        if (current.id !== requestId) return;
         fetching = false;
+        activeRequest = null;
+        updateStatus();
         if (window.ShellV5 && window.ShellV5.softBadge) {
           window.ShellV5.softBadge('mount-ai', false);
         }
       });
+    return current.promise;
   }
 
   function activate() {
@@ -274,7 +360,7 @@
     refresh({ soft: !!lastFocus });
     if (timer) clearInterval(timer);
     timer = setInterval(function () {
-      if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'ai') {
+      if (!document.hidden && window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'ai') {
         refresh({ soft: true });
       }
     }, 120000);
@@ -282,6 +368,15 @@
 
   function deactivate() {
     if (timer) { clearInterval(timer); timer = null; }
+    ++requestId;
+    if (activeRequest) {
+      clearTimeout(activeRequest.timeout);
+      activeRequest.controller.abort();
+      activeRequest = null;
+    }
+    fetching = false;
+    if (window.ShellV5 && window.ShellV5.softBadge) window.ShellV5.softBadge('mount-ai', false);
+    updateStatus();
   }
 
   window.AiV5 = { activate: activate, deactivate: deactivate, refresh: refresh };
