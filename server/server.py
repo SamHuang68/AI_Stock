@@ -62,6 +62,7 @@ from atomic_store import StoreCorruptError, atomic_write_json, load_json
 import atomic_store as _atomic_store
 from jsonl_trace import append_jsonl as _append_jsonl
 from deadline import BoundedExecutor, collect_named
+from focus_cache import FocusScanCache
 from runtime_revision import RUNTIME_COMMIT
 from keystats_resolution import should_retry_tw_keystats_as_otc as _should_retry_tw_keystats_as_otc
 
@@ -6264,8 +6265,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         'SPY', 'QQQ', 'IWM', 'DIA', 'ARKK',
     ]
 
-    _FOCUS_CACHE = {}
     _FOCUS_TTL_SEC = 180
+    _FOCUS_CACHE = FocusScanCache(ttl_sec=_FOCUS_TTL_SEC)
 
     def _us_focus_name_map(self):
         try:
@@ -6348,14 +6349,22 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             mkt = 'TW'
         sector = (qs.get('sector', [''])[0] or '').strip()
         refresh = (qs.get('refresh', [''])[0] or '').strip() in ('1', 'true', 'yes')
-        cache_key = mkt + '|' + (sector or '')
-        now = time.time()
-        if not refresh:
-            hit = Handler._FOCUS_CACHE.get(cache_key)
-            if hit and now - hit.get('ts', 0) < Handler._FOCUS_TTL_SEC:
-                self._ok(json.dumps(hit['payload'], ensure_ascii=False).encode())
-                return
+        if mkt == 'US' or sector in ('全部', 'all'):
+            sector = ''
+        try:
+            payload = Handler._FOCUS_CACHE.get_or_scan(
+                (mkt, sector), lambda: self._build_focus(mkt, sector), force=refresh,
+            )
+        except TimeoutError:
+            self._err('同範圍的焦點掃描仍在進行，請稍後重試。', 503)
+            return
+        except Exception:
+            self._err('焦點掃描暫時無法完成，請稍後重試。', 503)
+            return
+        self._ok(json.dumps(payload, ensure_ascii=False).encode())
 
+    def _build_focus(self, mkt, sector):
+        """沿用既有資料來源與評分，一次建立指定市場及產業的完整結果。"""
         if mkt == 'US':
             codes = list(dict.fromkeys(self._US_FOCUS_UNIVERSE))
             yf_by_code = {c: c for c in codes}
@@ -6395,8 +6404,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             'buy': buy[:20],
             'short': short[:20],
         }
-        Handler._FOCUS_CACHE[cache_key] = {'ts': now, 'payload': payload}
-        self._ok(json.dumps(payload, ensure_ascii=False).encode())
+        return payload
 
     def _handle_bars(self):
         """v4.0: GET /bars?sym=2330&market=TW → 本機 DB 日線 {candles:[{time,open,high,low,close,volume}]}。

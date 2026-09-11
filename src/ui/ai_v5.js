@@ -279,6 +279,20 @@
     if (!status) return;
     status.className = 'ai5-status' + (focusError ? ' error' : '');
     var stamp = receivedAt ? '上次取得：' + receivedAt.toLocaleTimeString('zh-TW', { hour12: false }) + '（接收時間，非行情時間）。' : '';
+    var scan = lastFocus && lastFocus.scan;
+    if (scan && scan.completedAt) {
+      var completed = new Date(scan.completedAt);
+      if (isFinite(completed.getTime())) {
+        stamp = '掃描完成：' + completed.toLocaleString('zh-TW', {
+          month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+          hour12: false, timeZone: 'Asia/Taipei',
+        }) + '（臺北；非行情時間）';
+        if (typeof scan.durationMs === 'number' && isFinite(scan.durationMs) && scan.durationMs >= 0) {
+          stamp += ' · 耗時 ' + (scan.durationMs / 1000).toFixed(1) + ' 秒';
+        }
+        stamp += scan.cacheHit ? ' · 快取結果。' : scan.shared ? ' · 共用掃描結果。' : ' · 本次掃描。';
+      }
+    }
     status.textContent = fetching ? '正在取得焦點掃描，首次掃描可能需要較長時間…' :
       focusError ? focusError + (lastFocus ? ' 保留上次成功清單。' : ' 尚無可用清單。') + stamp + ' 請按「重試更新」。' : stamp;
   }

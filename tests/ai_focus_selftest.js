@@ -76,6 +76,16 @@ const data = (sym = '2330') => ({ ok: true, mkt: 'TW', scanned: 100, buy: [{ sym
   assert.match(initial, /2330/);
   assert.match(h.nodes.get('ai5-status').textContent, /接收時間，非行情時間/);
 
+  work = h.api.refresh();
+  reply(h.pending.at(-1), Object.assign(data(), { scan: {
+    completedAt: '2026-09-11T03:00:00+00:00', durationMs: 12345, cacheHit: true, shared: false,
+  } }));
+  await work;
+  assert.match(h.nodes.get('ai5-status').textContent, /掃描完成：.*11:00:00.*臺北；非行情時間.*耗時 12.3 秒.*快取結果/);
+  work = h.api.refresh();
+  reply(h.pending.at(-1), data());
+  await work;
+
   for (const status of [401, 403, 429, 503]) {
     work = h.api.refresh({ force: true });
     reply(h.pending.at(-1), {}, status);
