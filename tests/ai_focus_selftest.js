@@ -148,6 +148,13 @@ const data = (sym = '2330') => ({ ok: true, mkt: 'TW', scanned: 100, buy: [{ sym
   const count = empty.pending.length;
   [...empty.intervals.values()][0]();
   assert.equal(empty.pending.length, count, '隱藏分頁不自動掃描');
+  empty.document.hidden = false;
+  work = empty.api.refresh();
+  reply(empty.pending.at(-1), {}, 503);
+  await work;
+  const failedCount = empty.pending.length;
+  [...empty.intervals.values()][0]();
+  assert.equal(empty.pending.length, failedCount, '失敗後保留重試提示，不由計時器重複掃描');
   empty.api.deactivate();
   assert.equal(empty.intervals.size, 0);
   assert.equal(empty.scheduled.size, 0);

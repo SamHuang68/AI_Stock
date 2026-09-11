@@ -360,7 +360,7 @@
     refresh({ soft: !!lastFocus });
     if (timer) clearInterval(timer);
     timer = setInterval(function () {
-      if (!document.hidden && window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'ai') {
+      if (!document.hidden && !focusError && window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'ai') {
         refresh({ soft: true });
       }
     }, 120000);
