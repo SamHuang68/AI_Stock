@@ -30,6 +30,20 @@
     { key: 'trustStreak', label: '投信', type: 'number' },
     { key: 'foreignStreak', label: '外資', type: 'number' }
   ];
+  var RESEARCH_SORT_COLUMNS = [
+    { key: 'sym', label: '代號', type: 'text' },
+    { key: 'name', label: '名稱', type: 'text' },
+    { key: 'close', label: '價格', type: 'number' },
+    { key: 'per', label: '官方本益比', type: 'number' },
+    { key: 'revYoy', label: '營收年增率', type: 'number' },
+    { key: 'revenueMom', label: '營收月增率', type: 'number', research: true },
+    { key: 'revenueCumYoy', label: '累計營收年增率', type: 'number', research: true },
+    { key: 'drawdown100', label: '100 日回撤', type: 'number', research: true },
+    { key: 'distanceToTopPct', label: '距前 20 日上緣', type: 'number', research: true },
+    { key: 'breakoutVolumeRatio', label: '當日量／前 20 日均量', type: 'number', research: true },
+    { key: 'trustLatestShares', label: '投信最近買賣超', type: 'number', research: true },
+    { key: 'trustNet5d', label: '投信近 5 日淨買超', type: 'number', research: true }
+  ];
 
   function $(id) { return document.getElementById(id); }
   function esc(s) {
@@ -87,10 +101,14 @@
       '#sc-root .sc-sort{appearance:none;border:0;background:transparent;color:inherit;font:inherit;font-weight:inherit;' +
         'padding:2px 1px;cursor:pointer;display:inline-flex;align-items:center;justify-content:flex-end;gap:3px;white-space:nowrap}' +
       '#sc-root .sc-sort:hover,#sc-root .sc-sort:focus-visible{color:var(--thi);outline:none}' +
-      '#sc-root .sc-sort[aria-sort=ascending],#sc-root .sc-sort[aria-sort=descending]{color:var(--gold)}' +
+      '#sc-root .sc-sort[data-direction=ascending],#sc-root .sc-sort[data-direction=descending]{color:var(--gold)}' +
       '#sc-root .sc-sort .arrow{display:inline-block;min-width:9px;color:var(--tlo);font-size:8px}' +
-      '#sc-root .sc-sort[aria-sort=ascending] .arrow,#sc-root .sc-sort[aria-sort=descending] .arrow{color:var(--gold)}' +
+      '#sc-root .sc-sort[data-direction=ascending] .arrow,#sc-root .sc-sort[data-direction=descending] .arrow{color:var(--gold)}' +
       '#sc-root .sc-sort-state{margin-left:auto;color:var(--gold);font-size:9px;white-space:nowrap}' +
+      '#sc-root .sc-sort-controls{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:5px 7px;font-size:11px}' +
+      '#sc-root .sc-sort-controls label{display:flex;align-items:center;gap:4px}' +
+      '#sc-root .sc-sort-controls select{max-width:185px;background:var(--bg);color:var(--thi);border:1px solid var(--border);border-radius:4px;padding:3px;font:inherit}' +
+      '#sc-root .sc-sort-hint{color:var(--tlo);font-size:10px}' +
       '#sc-root td.up{color:var(--red)}#sc-root td.dn{color:var(--green)}' +
       '#sc-root .sc-code{color:var(--gold);font-weight:700;cursor:pointer;text-align:left}' +
       '#sc-root .sc-nm{color:var(--tlo);text-align:left;max-width:90px;overflow:hidden;text-overflow:ellipsis}' +
@@ -171,6 +189,12 @@
     if (hint && (lastResults.length || scanPending)) hint.textContent = '條件已更新，請按「掃描」套用；下方為前次條件的結果。';
   }
 
+  function onFormInput(event) {
+    var target = event.target;
+    if (!target || target.id === 'sc-research-symbol' || target.closest('.sc-sort-controls')) return;
+    markFormChange();
+  }
+
   function readForm() {
     if (ck('sc-research-enabled')) {
       var settings = researchSettings();
@@ -233,17 +257,32 @@
   }
 
   function hasSortValue(value, type) {
-    if (value == null || value === '') return false;
+    if (value == null || typeof value === 'boolean' || String(value).trim() === '') return false;
     return type === 'number' ? isFinite(Number(value)) : String(value).trim() !== '';
   }
 
+  function sortColumns() { return lastResearchSettings ? RESEARCH_SORT_COLUMNS : SORT_COLUMNS; }
+
+  function trustComplete(q) {
+    var observed = numOrNull(q.trustObservedDays);
+    var required = numOrNull(q.trustRequiredDays);
+    if (required == null || required <= 0) required = 5;
+    return observed != null && observed >= required && numOrNull(q.trustNet5d) != null;
+  }
+
+  function sortValue(row, column) {
+    var q = row.research || {};
+    if (column.key === 'trustNet5d' && !trustComplete(q)) return null;
+    return column.research ? q[column.key] : row[column.key];
+  }
+
   function sortedResults(rows) {
-    var column = SORT_COLUMNS.find(function (c) { return c.key === sortState.key; });
+    var column = sortColumns().find(function (c) { return c.key === sortState.key; });
     if (!column || sortState.direction === 'original') return rows.slice();
     var direction = sortState.direction === 'ascending' ? 1 : -1;
     return rows.map(function (row, index) { return { row: row, index: index }; }).sort(function (a, b) {
-      var av = a.row[column.key];
-      var bv = b.row[column.key];
+      var av = sortValue(a.row, column);
+      var bv = sortValue(b.row, column);
       var aHas = hasSortValue(av, column.type);
       var bHas = hasSortValue(bv, column.type);
       // 缺值永遠沉底，不因升／降冪翻到最上方。
@@ -257,25 +296,44 @@
     }).map(function (item) { return item.row; });
   }
 
-  function sortHeader(column) {
+  function sortHeader(column, label) {
     var active = sortState.key === column.key && sortState.direction !== 'original';
     var aria = active ? sortState.direction : 'none';
     var arrow = aria === 'ascending' ? '▲' : (aria === 'descending' ? '▼' : '↕');
     var next = aria === 'none' ? '升冪' : (aria === 'ascending' ? '降冪' : '原始順序');
-    return '<th><button type="button" class="sc-sort" data-sort="' + esc(column.key) +
-      '" aria-sort="' + aria + '" title="' + esc(column.label) + '：點擊切換為' + next + '">' +
-      esc(column.label) + '<span class="arrow" aria-hidden="true">' + arrow + '</span></button></th>';
+    var hint = column.label + '；目前' + (active ? (aria === 'ascending' ? '升冪' : '降冪') : '原始順序') + '；點擊切換為' + next;
+    return '<th aria-sort="' + aria + '"><button type="button" class="sc-sort" data-sort="' + esc(column.key) +
+      '" data-direction="' + aria + '" aria-label="' + esc(hint) + '" title="' + esc(hint) + '">' +
+      esc(label || column.label) + '<span class="arrow" aria-hidden="true">' + arrow + '</span></button></th>';
+  }
+
+  function sortControls(count) {
+    return '<div class="sc-sort-controls"><label>排序欄位 <select id="sc-sort-key" aria-label="排序欄位">' +
+      '<option value="">原始順序</option>' + sortColumns().map(function (c) {
+        return '<option value="' + esc(c.key) + '"' + (sortState.key === c.key ? ' selected' : '') + '>' + esc(c.label) + '</option>';
+      }).join('') + '</select></label><label>順序 <select id="sc-sort-direction" aria-label="排序順序"' + (sortState.key ? '' : ' disabled') + '>' +
+      '<option value="ascending"' + (sortState.direction === 'ascending' ? ' selected' : '') + '>由小到大／升冪</option>' +
+      '<option value="descending"' + (sortState.direction === 'descending' ? ' selected' : '') + '>由大到小／降冪</option></select></label>' +
+      '<button type="button" class="sc-btn" id="sc-sort-reset">還原排序</button>' +
+      '<span class="sc-sort-hint">排序本次回傳的 ' + count + ' 檔 · 也可點欄名切換 · 缺值置底</span></div>';
+  }
+
+  function applySort(key, direction, focusId, headerKey) {
+    if (!sortColumns().some(function (c) { return c.key === key; })) key = null;
+    sortState = { key: key || null, direction: key ? direction : 'original' };
+    var box = $('sc-results');
+    var top = box ? box.scrollTop : 0;
+    var left = box ? box.scrollLeft : 0;
+    renderResults(lastResults);
+    if (box) { box.scrollTop = top; box.scrollLeft = left; }
+    var control = focusId ? $(focusId) : box && box.querySelector('.sc-sort[data-sort="' + (headerKey || key) + '"]');
+    if (control) control.focus({ preventScroll: true });
   }
 
   function cycleSort(key) {
-    if (sortState.key !== key || sortState.direction === 'original') {
-      sortState = { key: key, direction: 'ascending' };
-    } else if (sortState.direction === 'ascending') {
-      sortState.direction = 'descending';
-    } else {
-      sortState = { key: null, direction: 'original' };
-    }
-    renderResults(lastResults);
+    var direction = sortState.key !== key || sortState.direction === 'original' ? 'ascending' :
+      sortState.direction === 'ascending' ? 'descending' : 'original';
+    applySort(direction === 'original' ? null : key, direction, null, key);
   }
 
   function addWl(sym, batch) {
@@ -343,6 +401,14 @@
   }
 
   function resultActions(el, rows) {
+    var sortKey = $('sc-sort-key');
+    if (sortKey) sortKey.onchange = function () {
+      applySort(sortKey.value, sortState.direction === 'descending' ? 'descending' : 'ascending', 'sc-sort-key');
+    };
+    var sortDirection = $('sc-sort-direction');
+    if (sortDirection) sortDirection.onchange = function () { applySort(sortState.key, sortDirection.value, 'sc-sort-direction'); };
+    var sortReset = $('sc-sort-reset');
+    if (sortReset) sortReset.onclick = function () { applySort(null, 'original', 'sc-sort-reset'); };
     el.querySelectorAll('.sc-code').forEach(function (td) {
       td.onclick = function () { openChart(td.getAttribute('data-sym')); };
     });
@@ -375,17 +441,21 @@
       el.innerHTML = '<div class="sc-empty">本次完成範圍內沒有符合估值上限的候選。<br>請一併查看上方資料不足與截斷摘要。</div>';
       return;
     }
+    rows = sortedResults(rows);
     var h = '<div class="sc-rtop"><button type="button" class="sc-btn" id="sc-addall">＋ 本次結果加入自選</button>' +
-      '<span class="sc-r-detail">顯示 ' + rows.length + ' 檔 · 點代號看線型，點研究查看估值假設</span></div>' +
+      '<span class="sc-r-detail">顯示 ' + rows.length + ' 檔 · 點代號看線型，點研究查看估值假設</span></div>' + sortControls(rows.length) +
       '<table class="sc-research-table" data-st-sort="off"><thead><tr>' +
-      '<th>個股／價格</th><th>官方本益比</th><th>月營收</th><th>100 日回撤</th><th>前 20 日區間</th><th>投信資料</th><th>操作</th>' +
+      [['sym', '個股／價格'], ['per', '官方本益比'], ['revYoy', '月營收'], ['drawdown100', '100 日回撤'],
+        ['distanceToTopPct', '前 20 日區間'], ['trustLatestShares', '投信資料']].map(function (item) {
+        return sortHeader(RESEARCH_SORT_COLUMNS.find(function (c) { return c.key === item[0]; }), item[1]);
+      }).join('') + '<th>操作</th>' +
       '</tr></thead><tbody>';
     rows.forEach(function (r) {
       var q = r.research || {};
       var observed = numOrNull(q.trustObservedDays);
       var required = numOrNull(q.trustRequiredDays);
       if (required == null || required <= 0) required = 5;
-      var complete = observed != null && observed >= required && numOrNull(q.trustNet5d) != null;
+      var complete = trustComplete(q);
       h += '<tr><td><div class="sc-r-main"><span class="sc-code" data-sym="' + esc(r.sym) + '">' + esc(r.sym) + '</span> ' + esc(r.name) + '</div>' +
         '<div>' + esc(metric(r.close, 2)) + ' 元</div>' + detail('價格日期', q.priceAsOf) + '</td>' +
         '<td><div class="sc-r-main">' + esc(metric(r.per, 2, ' 倍')) + '</div>' + detail('日期', q.valuationDate) +
@@ -411,6 +481,7 @@
   function renderResults(rows) {
     var el = $('sc-results');
     if (!el) return;
+    if (!sortColumns().some(function (c) { return c.key === sortState.key; })) sortState = { key: null, direction: 'original' };
     if (lastResearchSettings) { renderResearchResults(rows); return; }
     if (!rows.length) {
       el.innerHTML = '<div style="color:var(--tlo);padding:18px;text-align:center">無符合條件的個股</div>';
@@ -425,8 +496,8 @@
     var h = '<div class="sc-rtop"><button type="button" class="sc-btn" id="sc-addall">＋ 全部加入自選</button>' +
       '<span style="color:var(--tlo);font-size:10px">點代號載入線型 · 顯示前 ' + rows.length + ' 檔</span>' +
       (sortState.key ? '<span class="sc-sort-state">排序：' + esc((SORT_COLUMNS.find(function (c) { return c.key === sortState.key; }) || {}).label || '') +
-        (sortState.direction === 'ascending' ? ' ▲' : ' ▼') + '</span>' : '') + '</div>';
-    h += '<table class="sc-native-sort" data-st-sort="off"><thead><tr>' + SORT_COLUMNS.map(sortHeader).join('') + '<th>操作</th></tr></thead><tbody>';
+        (sortState.direction === 'ascending' ? ' ▲' : ' ▼') + '</span>' : '') + '</div>' + sortControls(rows.length);
+    h += '<table class="sc-native-sort" data-st-sort="off"><thead><tr>' + SORT_COLUMNS.map(function (c) { return sortHeader(c); }).join('') + '<th>操作</th></tr></thead><tbody>';
     rows.forEach(function (r) {
       var chgCls = r.changePct >= 0 ? 'up' : 'dn';
       var notes = r.fieldStatus || {};
@@ -608,7 +679,7 @@
       if (run) run.onclick = scan;
       var researchToggle = $('sc-research-enabled');
       if (researchToggle) researchToggle.onchange = function () { syncResearchControls(); markFormChange(); };
-      mount.addEventListener('input', function (event) { if (event.target.id !== 'sc-research-symbol') markFormChange(); });
+      mount.addEventListener('input', onFormInput);
       var open = $('sc-research-open');
       if (open) open.onclick = function () { openResearch(val('sc-research-symbol'), null); };
       var symbolInput = $('sc-research-symbol');
