@@ -41,8 +41,17 @@ def _corr(a, b):
 
 
 def _rets_on(series, dates):
-    closes = [series[t] for t in dates]
-    return [closes[i] / closes[i - 1] - 1 for i in range(1, len(closes)) if closes[i - 1]]
+    return list(_dated_rets(series, dates).values())
+
+
+def _dated_rets(series, dates):
+    """保留原始相鄰日期；缺值兩側皆不產生單日報酬。"""
+    out = {}
+    for previous, current in zip(dates, dates[1:]):
+        a, b = series.get(previous), series.get(current)
+        if all(isinstance(v, (int, float)) and math.isfinite(v) and v > 0 for v in (a, b)):
+            out[current] = b / a - 1
+    return out
 
 
 def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
@@ -58,26 +67,27 @@ def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
 
     data = datastore.get_bars_bulk(codes + [benchmark])
     series = {c: {r[0]: r[4] for r in (data.get(c) or [])} for c in codes + [benchmark]}
-    vcodes = [c for c in codes if len(series[c]) > 60]
+    dates = sorted({t for values in series.values() for t in values})
+    dated_returns = {c: _dated_rets(values, dates) for c, values in series.items()}
+    vcodes = [c for c in codes if len(dated_returns[c]) > 60]
     if not vcodes:
         return {'error': 'no price data — 請先回補這些代號到 DB'}
 
     totw = sum(wmap[c] for c in vcodes) or 1
     weights = {c: wmap[c] / totw for c in vcodes}
-    bench_dates = sorted(series[benchmark].keys())
+    bench_returns = dated_returns[benchmark]
 
     per = {}
     stock_ret = {}   # c -> {ts: ret}
     for c in vcodes:
-        dts = sorted(series[c].keys())
-        rets = _rets_on(series[c], dts)
-        stock_ret[c] = {dts[i + 1]: rets[i] for i in range(len(rets))}
+        stock_ret[c] = dated_returns[c]
+        rets = list(stock_ret[c].values())
         _, sd = _stats(rets)
         beta = None
-        common = sorted(set(dts) & set(bench_dates))
+        common = sorted(set(stock_ret[c]) & set(bench_returns))
         if len(common) > 30:
-            sr = _rets_on(series[c], common)
-            br = _rets_on(series[benchmark], common)
+            sr = [stock_ret[c][t] for t in common]
+            br = [bench_returns[t] for t in common]
             n = min(len(sr), len(br)); sr, br = sr[-n:], br[-n:]
             mb = sum(br) / n; vb = sum((x - mb) ** 2 for x in br)
             if vb > 0:

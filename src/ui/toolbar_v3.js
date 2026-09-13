@@ -40,7 +40,7 @@
       items: ['btn-valuation', 'btn-marketflow', 'btn-instrank',
               'btn-supplychain', 'btn-stockfut', 'btn-portfolio', 'btn-chainmom'] },
     { key: 'screen', label: '🔍 選股策略',
-      items: ['btn-screener3', 'btn-screener', 'btn-patterns',
+      items: ['btn-screener3', 'btn-screener', 'btn-patterns', 'btn-kline-events',
               'btn-stratbuilder', 'btn-bt3', 'btn-wizard', 'btn-stratscript'] },
     { key: 'sys', label: '⚙️ 系統',
       items: ['btn-universe', 'btn-datasources', 'btn-calendar',

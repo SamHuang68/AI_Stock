@@ -7,6 +7,7 @@ import json
 import sys
 import threading
 import unittest
+from unittest.mock import patch
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
@@ -112,6 +113,20 @@ class ServerHttpSecurityTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 403)
         caught.exception.close()
 
+    def test_kline_events_route_validates_input_and_serializes_report(self):
+        import K線事件
+        payload = {'sym': '2330', 'events': [], 'freshness': {'fresh': False}}
+        with patch.object(K線事件, 'report', return_value=payload) as calculate:
+            with urllib.request.urlopen(self.base + '/kline-events?sym=2330&asOf=2026-09-01', timeout=5) as response:
+                self.assertEqual(json.load(response), payload)
+            self.assertEqual(calculate.call_args.args[1:], ('2330', '2026-09-01'))
+            calculate.side_effect = ValueError('截至日期無效')
+            for query in ('sym=bad!', 'sym=2330&asOf=invalid'):
+                with self.subTest(query=query), self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(self.base + '/kline-events?' + query, timeout=5)
+                self.assertEqual(caught.exception.code, 400)
+                caught.exception.close()
+
     def test_archify_html_has_static_document_security_boundary(self):
         path = '/assets/docs/archify/st-decision-evidence-lineage.html'
         with urllib.request.urlopen(self.base + path, timeout=5) as response:
@@ -146,6 +161,19 @@ class ServerHttpSecurityTests(unittest.TestCase):
                     urllib.request.urlopen(self.base + path, timeout=3)
                 self.assertEqual(caught.exception.code, 403)
                 caught.exception.close()
+
+    def test_missing_closes_do_not_abort_screener_or_chain_momentum(self):
+        import datastore
+        rows = [(i, 100, 101, 99, 100, 1000) for i in range(80)]
+        rows[-1] = (79, None, None, None, None, 0)
+        with patch.object(datastore, 'get_bars_bulk', return_value={'1472': rows}), patch.object(ST, '_get_tw_universe', return_value=['1472']), patch.object(ST, '_get_tw_names', return_value={}):
+            for path, payload in (('/screener', {'symbols': ['1472'], 'preset': 'volume'}), ('/chain-momentum', {'stages': [{'stage': '測試', 'codes': ['1472']}]})):
+                with self.subTest(path=path):
+                    req = urllib.request.Request(self.base + path, data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json'})
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        result = json.load(response)
+                    if path == '/chain-momentum':
+                        self.assertEqual(result['stages'][0]['n'], 0)
 
 
 if __name__ == '__main__':

@@ -15,7 +15,7 @@ CLI（在專案根目錄跑）:
   python server\\datastore.py query 2330 5          # 看最近 5 根
   python server\\datastore.py stats                 # DB 概況
 """
-import os, sys, json, time, sqlite3, urllib.request, urllib.error, random, threading, tempfile
+import os, sys, json, time, sqlite3, urllib.request, urllib.error, random, threading, tempfile, math
 from contextlib import closing
 
 # 進程內全域寫入鎖
@@ -29,7 +29,7 @@ else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(_BASE, 'data', 'market.db')
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bars(
   symbol TEXT NOT NULL, market TEXT NOT NULL, ts INTEGER NOT NULL,
@@ -40,6 +40,37 @@ CREATE INDEX IF NOT EXISTS idx_bars_market_sym_ts ON bars(market, symbol, ts);
 CREATE TABLE IF NOT EXISTS meta(
   symbol TEXT NOT NULL, market TEXT NOT NULL, name TEXT, last_update INTEGER,
   PRIMARY KEY(market, symbol)
+);
+CREATE TABLE IF NOT EXISTS bar_quality(
+  market TEXT NOT NULL, symbol TEXT NOT NULL, ts INTEGER NOT NULL,
+  session_date TEXT NOT NULL, source TEXT NOT NULL, volume_unit TEXT NOT NULL,
+  price_basis TEXT NOT NULL, issues TEXT NOT NULL, retrieved_at TEXT NOT NULL,
+  source_hash TEXT NOT NULL, PRIMARY KEY(market,symbol,ts)
+);
+CREATE TABLE IF NOT EXISTS daily_imports(
+  exchange TEXT NOT NULL, session_date TEXT NOT NULL, row_count INTEGER NOT NULL,
+  source_hash TEXT NOT NULL, imported_at TEXT NOT NULL,
+  PRIMARY KEY(exchange,session_date)
+);
+CREATE TABLE IF NOT EXISTS daily_update_state(
+  id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS corporate_actions(
+  market TEXT NOT NULL, symbol TEXT NOT NULL, session_date TEXT NOT NULL,
+  kind TEXT NOT NULL, source TEXT NOT NULL, PRIMARY KEY(market,symbol,session_date,kind)
+);
+CREATE TABLE IF NOT EXISTS action_coverage(
+  market TEXT NOT NULL, symbol TEXT NOT NULL, start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL, source TEXT NOT NULL, PRIMARY KEY(market,symbol)
+);
+CREATE TABLE IF NOT EXISTS market_sessions(
+  session_date TEXT PRIMARY KEY, source TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS calendar_years(
+  year INTEGER PRIMARY KEY, closed TEXT NOT NULL, opened TEXT NOT NULL, refreshed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS session_months(
+  month TEXT PRIMARY KEY, observed_through TEXT NOT NULL, dates TEXT NOT NULL, source_hash TEXT NOT NULL
 );
 """
 
@@ -160,16 +191,15 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3):
                 rows = []
                 for i, t in enumerate(ts):
                     cl = q['close'][i]
-                    if cl is None or cl <= 0:
+                    if not isinstance(cl, (int, float)) or not math.isfinite(cl) or cl <= 0:
                         continue
                     op = q['open'][i]
                     hi = q['high'][i]
                     lo = q['low'][i]
-                    vol = q['volume'][i] if q['volume'][i] is not None else 0
-                    
-                    if op is None or op <= 0: op = cl
-                    if hi is None or hi <= 0: hi = cl
-                    if lo is None or lo <= 0: lo = cl
+                    vol = q['volume'][i]
+                    # 缺值保留，不製造開高低等於收盤的假十字線。
+                    op, hi, lo = [v if isinstance(v, (int, float)) and math.isfinite(v) and v > 0 else None for v in (op, hi, lo)]
+                    vol = vol if isinstance(vol, (int, float)) and math.isfinite(vol) and vol >= 0 else None
                     
                     rows.append((t, op, hi, lo, cl, vol))
                 return rows
@@ -183,13 +213,44 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3):
             time.sleep(min(8, 0.8 * (2 ** attempt)) + random.random())   # 指數退避 + 抖動
     raise RuntimeError(f'fetch failed for {ysym}: {last}')
 
-def upsert_bars(sym, market, rows):
+def upsert_bars(sym, market, rows, *, source='yahoo', source_hash=''):
+    from datetime import datetime, timezone, timedelta
+    retrieved = datetime.now(timezone.utc).isoformat()
+    zone = timezone(timedelta(hours=8)) if market == 'TW' else timezone.utc
+    rows = [(t, *[x if isinstance(x, (int, float)) and math.isfinite(x) and x > 0 else None for x in (o, h, l, cl)],
+             v if isinstance(v, (int, float)) and math.isfinite(v) and v >= 0 else None) for t, o, h, l, cl, v in rows]
+    quality = []
+    for t, o, h, l, cl, v in rows:
+        issues = []
+        prices = (o, h, l, cl)
+        if any(not isinstance(x, (int, float)) or not math.isfinite(x) or x <= 0 for x in prices):
+            issues.append('價格缺值或無效')
+        elif not (l <= min(o, cl) <= max(o, cl) <= h):
+            issues.append('開高低收邊界無效')
+        if not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0:
+            issues.append('成交量缺值或無成交')
+        day = datetime.fromtimestamp(t, zone).date().isoformat()
+        quality.append((market, sym, t, day, source, '股', '原始價格', json.dumps(issues, ensure_ascii=False), retrieved, source_hash))
     with _db_write_lock:
         with closing(get_conn()) as conn:
             with conn:
+                # 舊有 Yahoo 回補呼叫不能覆寫已經官方核對的日線及品質。
+                if source not in ('TWSE', 'TPEX'):
+                    official_days = {r[0] for r in conn.execute("SELECT session_date FROM bar_quality WHERE market=? AND symbol=? AND source IN ('TWSE','TPEX')", (market, sym))}
+                    quality = [r for r in quality if r[3] not in official_days]
+                    accepted_ts = {r[2] for r in quality}
+                    rows = [r for r in rows if r[0] in accepted_ts]
+                elif market == 'TW':
+                    # 官方歷史回補與每日匯入均只保留該交易日的一根日線。
+                    for q in quality:
+                        start = int(datetime.fromisoformat(q[3]).replace(tzinfo=zone).timestamp())
+                        for table in ('bars', 'bar_quality'):
+                            conn.execute(f'DELETE FROM {table} WHERE market=? AND symbol=? AND ts>=? AND ts<? AND ts<>?',
+                                         (market, sym, start, start + 86400, q[2]))
                 conn.executemany(
                     'INSERT OR REPLACE INTO bars(symbol,market,ts,open,high,low,close,volume) VALUES(?,?,?,?,?,?,?,?)',
                     [(sym, market, t, o, h, l, cl, v) for (t, o, h, l, cl, v) in rows])
+                conn.executemany('INSERT OR REPLACE INTO bar_quality VALUES(?,?,?,?,?,?,?,?,?,?)', quality)
                 conn.execute('''INSERT INTO meta(symbol,market,name,last_update) VALUES(?,?,?,?)
                              ON CONFLICT(market,symbol) DO UPDATE SET
                                name=COALESCE(meta.name,excluded.name),
