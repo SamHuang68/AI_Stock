@@ -62,7 +62,10 @@
     } catch (e) { msg.textContent = '掃描錯誤：' + e.message; }
   }
 
-  function cell(v, cls) { return `<td class="${cls || ''}">${v == null ? '—' : v}</td>`; }
+  function cell(v, cls, note) {
+    const title = String(note || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<td class="${cls || ''}" title="${title}">${v == null ? '—' : v}</td>`;
+  }
   // 把選股結果格式化成純文字(寄送用)
   function screen3Text(rows) {
     if (!rows || !rows.length) return '';
@@ -84,17 +87,18 @@
     h += `<table class="s3-tbl"><thead><tr><th>代號</th><th>名稱</th><th>價</th><th>漲跌</th><th>RSI</th><th>量比</th><th>營收YoY</th><th>PER</th><th>殖利</th><th>投信</th><th>外資</th><th></th></tr></thead><tbody>`;
     for (const r of rows) {
       const chgCls = (r.changePct >= 0) ? 'up' : 'dn';
-      const streak = v => v == null ? '—' : (v > 0 ? '+' + v : v);
+      const notes = r.fieldStatus || {};
+      const streak = (v, complete) => v == null ? '—' : (complete === false && v !== 0 ? (v > 0 ? '≥' : '≤') : '') + (v > 0 ? '+' + v : v);
       h += `<tr>
         <td class="s3-code" data-sym="${r.sym}">${r.sym}</td>
         <td class="s3-nm">${r.name || ''}</td>
         ${cell(r.close)}
         ${cell((r.changePct >= 0 ? '+' : '') + (r.changePct == null ? '—' : r.changePct + '%'), chgCls)}
         ${cell(r.rsi14)}${cell(r.volRatio)}
-        ${cell(r.revYoy == null ? null : r.revYoy + '%', r.revYoy >= 0 ? 'up' : 'dn')}
-        ${cell(r.per)}${cell(r['yield'] == null ? null : r['yield'] + '%')}
-        ${cell(streak(r.trustStreak), r.trustStreak > 0 ? 'up' : (r.trustStreak < 0 ? 'dn' : ''))}
-        ${cell(streak(r.foreignStreak), r.foreignStreak > 0 ? 'up' : (r.foreignStreak < 0 ? 'dn' : ''))}
+        ${cell(r.revYoy == null ? null : r.revYoy + '%', r.revYoy >= 0 ? 'up' : 'dn', notes.revYoy)}
+        ${cell(r.per, '', notes.per)}${cell(r['yield'] == null ? null : r['yield'] + '%', '', notes['yield'])}
+        ${cell(streak(r.trustStreak, r.trustStreakComplete), r.trustStreak > 0 ? 'up' : (r.trustStreak < 0 ? 'dn' : ''), notes.trustStreak)}
+        ${cell(streak(r.foreignStreak, r.foreignStreakComplete), r.foreignStreak > 0 ? 'up' : (r.foreignStreak < 0 ? 'dn' : ''), notes.foreignStreak)}
         <td><button class="s3-add" data-sym="${r.sym}" title="加入自選">＋</button></td>
       </tr>`;
     }
@@ -169,7 +173,7 @@
           <div class="s3-grp"><h4>籌碼面</h4>
             <label>投信連買 ≥ <input type="number" id="s3-trust" placeholder="3"> 天</label>
             <label>外資連買 ≥ <input type="number" id="s3-foreign" placeholder="3"> 天</label>
-            <div style="font-size:9px;color:#475569;margin-top:6px">連續天數來自 chip_history（需每日累積；無紀錄則顯示 0）。</div>
+            <div style="font-size:9px;color:#475569;margin-top:6px">依來源交易日計算連買／連賣。缺資料顯示 —；≥／≤ 表示已核對天數下限。</div>
           </div>
         </div>
         <div class="s3-bar">

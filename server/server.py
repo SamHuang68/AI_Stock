@@ -686,23 +686,13 @@ def _fetch_tw_light():
     return []
 
 def _chip_history_record(clean_code, chip_out):
-    """把今日某股的 inst.total 記到 chip_history/<date>.json (彙總多股)"""
-    from datetime import date as _date
+    """保存官方明載的來源交易日，不把讀取日期當成新交易日。"""
+    from chip_history_tracker import record_rows
     inst = (chip_out or {}).get('inst') or {}
-    if inst.get('total') is None:
-        return
-    os.makedirs(CHIP_HISTORY_PATH, exist_ok=True)
-    fn = os.path.join(CHIP_HISTORY_PATH, _date.today().strftime('%Y%m%d') + '.json')
-    try:
-        day = load_json(fn, default={}, expected_type=dict)
-    except StoreCorruptError as exc:
-        print('[chip-history] unavailable:', type(exc).__name__)
-        return
-    day[clean_code] = {
-        'foreign': inst.get('foreign'), 'trust': inst.get('trust'),
-        'dealer': inst.get('dealer'), 'total': inst.get('total'),
-    }
-    atomic_write_json(fn, day, backup=True, indent=None)
+    day = inst.get('sourceDate')
+    if day:
+        record_rows(day, {clean_code: inst}, directory=CHIP_HISTORY_PATH)
+
 
 _openapi_ds = {}   # dataset name → (date, {code: row})
 
@@ -7672,10 +7662,6 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             except Exception as e:
                 print('[screen3] sector filter failed:', e)
 
-        def fnum(x):
-            try: return float(x)
-            except Exception: return None
-
         # ── 1) 技術面：平行抓 K 線 + _calc_ind，先篩出 survivors ──
         survivors = []
         futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith('.TW') else s): s for s in syms}
@@ -7704,8 +7690,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                 if len(closes) < 70:
                     continue
                 ind = self._calc_ind(closes, highs, lows, vols)
-                # 漲跌% 同樣改以官方昨收為基準(避免資料缺口/除權息造成離譜值)
-                _pc = _yf_prevclose(meta)
+                # 長區間的 chartPreviousClose 是區間起點，不能當成昨日收盤。
+                _pc = _yf_prevclose(meta, allow_chart_prev=False)
                 if _pc and _pc > 0:
                     ind['changePct'] = round((closes[-1] - _pc) / _pc * 100, 2)
                 if not self._screen3_tech(tech, ind):
@@ -7718,10 +7704,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             except Exception:
                 continue
 
-        # ── 2) 基本面 + 籌碼（O(1) 查表，資料集已快取一天）──
+        # ── 2) 所有結果皆補齊觀察欄位，只有已設定門檻才篩除 ──
         results = []
-        want_fund = any(v not in (None, '', False) for v in fund.values())
-        want_chip = any(v not in (None, '', False) for v in chip.values())
         for row in survivors:
             code = row['sym']
             ind = row['ind']
@@ -7732,42 +7716,21 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                 'rsi14': round(ind['rsi14'], 1) if ind['rsi14'] else None,
                 'volRatio': round(ind['volRatio'], 2) if ind['volRatio'] else None,
             }
-            ok = True
-            # 基本面
-            if want_fund:
-                revrow = _openapi_lookup(['t187ap05_L', 't187ap05_O'], code)
-                yoy = _pick_num(revrow, ['去年同月增減']) if revrow else None
-                valrow = _openapi_lookup(['exchangeReport/BWIBBU_ALL', 'BWIBBU_ALL'], code) or \
-                    _openapi_lookup(['tpex:tpex_mainboard_peratio_analysis'], code)
-                per = ydiv = None
-                if valrow:
-                    per = _pick_num(valrow, ['本益比']) or fnum(valrow.get('PEratio'))
-                    ydiv = _pick_num(valrow, ['殖利率']) or fnum(valrow.get('DividendYield'))
-                rec['revYoy'] = round(yoy, 1) if yoy is not None else None
-                rec['per'] = per
-                rec['yield'] = ydiv
-                if fund.get('revYoyMin') is not None and not (yoy is not None and yoy >= fnum(fund['revYoyMin'])):
-                    ok = False
-                if ok and fund.get('perMax') is not None and not (per is not None and per <= fnum(fund['perMax'])):
-                    ok = False
-                if ok and fund.get('yieldMin') is not None and not (ydiv is not None and ydiv >= fnum(fund['yieldMin'])):
-                    ok = False
-            # 籌碼
-            if ok and want_chip:
-                st = _chip_streak(code) or {'foreign': 0, 'trust': 0}
-                rec['foreignStreak'] = st.get('foreign')
-                rec['trustStreak'] = st.get('trust')
-                if chip.get('trustBuyDays') is not None and not (st.get('trust', 0) >= int(chip['trustBuyDays'])):
-                    ok = False
-                if ok and chip.get('foreignBuyDays') is not None and not (st.get('foreign', 0) >= int(chip['foreignBuyDays'])):
-                    ok = False
-            if ok:
-                results.append(rec)
+            results.append(rec)
+        if results:
+            import datastore
+            import 三合一選股 as screen_fields
+            results = screen_fields.enrich_results(
+                results, fund, chip, lookup=_openapi_lookup, monthly_revenue=_mops_monthly_revenue,
+                database=datastore.DB_PATH, chip_history_path=CHIP_HISTORY_PATH,
+                trace_path=os.path.join(_BASE, 'logs', '三合一選股追蹤.jsonl'),
+                trace_id=self._ensure_trace_id(),
+            )
 
         results.sort(key=lambda x: x.get('changePct') or 0, reverse=True)
         self._ok(json.dumps({'results': results[:80], 'scanned': len(syms),
                              'techPass': len(survivors), 'matched': len(results)},
-                            ensure_ascii=False).encode())
+                            ensure_ascii=False, allow_nan=False).encode())
 
     def _handle_screen3_research(self, body):
         """估值承接觀察沿用既有官方查表及日線來源。"""

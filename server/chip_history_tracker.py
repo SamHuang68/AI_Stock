@@ -11,12 +11,64 @@
 #   python chip_history_tracker.py 20260601   # 抓指定日期 (yyyymmdd)
 # 排程：沿用 install_scheduler.bat 模式，新增每交易日 17:40 觸發。
 # ============================================================
-import os, sys, json, urllib.request
+import os, sys, json, urllib.request, threading
 from datetime import date
+from pathlib import Path
+from atomic_store import atomic_write_json, load_json
+from daemon_lock import acquire_daemon_lock, release_daemon_lock
+from 估值趨勢 import number, source_date
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
 YF_HEADERS = {'User-Agent': 'Mozilla/5.0'}
+_WRITE_LOCK = threading.RLock()
+
+
+def record_rows(day, rows, *, directory=None):
+    """合併已核對來源日的觀測；保留其他股票與寫入前備份。"""
+    actual_day = source_date(day)
+    if not actual_day:
+        return 0
+    verified = {}
+    for code, row in rows.items():
+        if not isinstance(row, dict) or source_date(row.get('sourceDate')) != actual_day:
+            continue
+        values = {key: number(row.get(key)) for key in ('foreign', 'trust', 'dealer', 'total')}
+        if all(value is None for value in values.values()):
+            continue
+        verified[code] = {**values, 'sourceDate': actual_day, 'source': row.get('source'), 'unit': 'shares'}
+    if not verified:
+        return 0
+    target = directory or CHIP_HISTORY_PATH
+    fn = os.path.join(target, actual_day.replace('-', '') + '.json')
+    with _WRITE_LOCK:
+        handle = acquire_daemon_lock('chip-' + actual_day,
+                                     lock_dir=Path(target).resolve().parent / 'runtime_locks')
+        if handle is None:
+            raise RuntimeError('另一個程序正在更新籌碼，本次保留原檔未寫入')
+        try:
+            stored = load_json(fn, default={}, expected_type=dict)
+            changed = sum(stored.get(code) != row for code, row in verified.items())
+            if changed:
+                stored.update(verified)
+                atomic_write_json(fn, stored, backup=True, indent=None)
+        finally:
+            release_daemon_lock(handle)
+    return changed
+
+
+def refresh_latest(day, *, directory=None):
+    """沿用籌碼 API 整批快取，僅保存符合目標交易日的上市與上櫃資料。"""
+    from chip_api import snap_t86, snap_tpex_inst
+    actual_day = source_date(day)
+    if not actual_day:
+        return 0
+    rows = {}
+    for batch in (snap_t86(actual_day.replace('-', '')), snap_tpex_inst()):
+        for code, row in (batch or {}).items():
+            if source_date(row.get('sourceDate')) == actual_day:
+                rows[code] = row
+    return record_rows(actual_day, rows, directory=directory)
 
 
 def fetch_t86(day):
@@ -30,6 +82,10 @@ def parse_and_save(day):
     data = fetch_t86(day)
     if data.get('stat') not in ('OK', 'ok'):
         print(f'[chip-tracker] {day} no data (stat={data.get("stat")}) — 非交易日?')
+        return 0
+    actual_day = source_date(data.get('date'))
+    if not actual_day or actual_day != source_date(day):
+        print('[chip-tracker] 來源交易日不符，保留既有資料')
         return 0
     fields = data.get('fields') or []
     rows = data.get('data') or []
@@ -68,13 +124,12 @@ def parse_and_save(day):
         if not code:
             continue
         out[code] = {
+            'sourceDate': actual_day, 'source': 'TWSE T86', 'unit': 'shares',
             'foreign': num(row, i_for), 'trust': num(row, i_trust),
             'dealer': num(row, i_deal), 'total': num(row, i_tot),
         }
-    os.makedirs(CHIP_HISTORY_PATH, exist_ok=True)
     fn = os.path.join(CHIP_HISTORY_PATH, day + '.json')
-    with open(fn, 'w', encoding='utf-8') as f:
-        json.dump(out, f, ensure_ascii=False)
+    record_rows(day, out)
     print(f'[chip-tracker] {day}: saved {len(out)} stocks -> {fn}')
     try:
         from touxin_ledger import ingest_chip_history_file

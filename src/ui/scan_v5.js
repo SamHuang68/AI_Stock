@@ -228,8 +228,8 @@
     markFormChange();
   }
 
-  function cell(v, cls) {
-    return '<td class="' + (cls || '') + '">' + (v == null || v === '' ? '—' : esc(v)) + '</td>';
+  function cell(v, cls, note) {
+    return '<td class="' + (cls || '') + '" title="' + esc(note || '') + '">' + (v == null || v === '' ? '—' : esc(v)) + '</td>';
   }
 
   function hasSortValue(value, type) {
@@ -429,7 +429,10 @@
     h += '<table class="sc-native-sort" data-st-sort="off"><thead><tr>' + SORT_COLUMNS.map(sortHeader).join('') + '<th>操作</th></tr></thead><tbody>';
     rows.forEach(function (r) {
       var chgCls = r.changePct >= 0 ? 'up' : 'dn';
-      var streak = function (v) { return v == null ? '—' : (v > 0 ? '+' + v : v); };
+      var notes = r.fieldStatus || {};
+      var streak = function (v, complete) {
+        return v == null ? '—' : (complete === false && v !== 0 ? (v > 0 ? '≥' : '≤') : '') + (v > 0 ? '+' + v : v);
+      };
       var chgAbs = r.changePct != null && Math.abs(r.changePct) < 30;
       var rsiCell = (V && r.rsi14 != null && isFinite(r.rsi14))
         ? '<td>' + V.heatCell(String(r.rsi14), r.rsi14 - 50, 'TW') + '</td>'
@@ -442,14 +445,14 @@
         ? Colors.growth(r.sym || 'TW', r.revYoy)
         : (r.revYoy >= 0 ? 'var(--red)' : 'var(--green)'));
       var yoyCell = r.revYoy == null
-        ? cell(null)
-        : '<td style="color:' + yoyCol + '">' + esc(yoyTxt) + '</td>';
-      var trustCell = (V && r.trustStreak)
-        ? '<td>' + V.streakChip(r.trustStreak, '') + '</td>'
-        : cell(streak(r.trustStreak), r.trustStreak > 0 ? 'up' : (r.trustStreak < 0 ? 'dn' : ''));
-      var foreignCell = (V && r.foreignStreak)
-        ? '<td>' + V.streakChip(r.foreignStreak, '') + '</td>'
-        : cell(streak(r.foreignStreak), r.foreignStreak > 0 ? 'up' : (r.foreignStreak < 0 ? 'dn' : ''));
+        ? cell(null, '', notes.revYoy)
+        : '<td title="' + esc(notes.revYoy || '') + '" style="color:' + yoyCol + '">' + esc(yoyTxt) + '</td>';
+      var trustCell = (V && r.trustStreak && r.trustStreakComplete !== false)
+        ? '<td title="' + esc(notes.trustStreak || '') + '">' + V.streakChip(r.trustStreak, '') + '</td>'
+        : cell(streak(r.trustStreak, r.trustStreakComplete), r.trustStreak > 0 ? 'up' : (r.trustStreak < 0 ? 'dn' : ''), notes.trustStreak);
+      var foreignCell = (V && r.foreignStreak && r.foreignStreakComplete !== false)
+        ? '<td title="' + esc(notes.foreignStreak || '') + '">' + V.streakChip(r.foreignStreak, '') + '</td>'
+        : cell(streak(r.foreignStreak, r.foreignStreakComplete), r.foreignStreak > 0 ? 'up' : (r.foreignStreak < 0 ? 'dn' : ''), notes.foreignStreak);
       h += '<tr>' +
         '<td class="sc-code" data-sym="' + esc(r.sym) + '">' + esc(r.sym) + '</td>' +
         '<td class="sc-nm">' + esc(r.name || '') + '</td>' +
@@ -457,8 +460,8 @@
         cell(chgAbs ? ((r.changePct >= 0 ? '+' : '') + r.changePct + '%') : '—', chgAbs ? chgCls : '') +
         rsiCell + volCell +
         yoyCell +
-        cell(r.per) +
-        cell(r['yield'] == null ? null : r['yield'] + '%') +
+        cell(r.per, '', notes.per) +
+        cell(r['yield'] == null ? null : r['yield'] + '%', '', notes['yield']) +
         trustCell + foreignCell +
         '<td><button type="button" class="sc-btn sc-research-row" data-sym="' + esc(r.sym) + '">研究</button> ' +
         '<button type="button" class="sc-add" data-sym="' + esc(r.sym) + '">＋</button></td></tr>';
@@ -512,7 +515,8 @@
           msg.innerHTML = settings ? researchCoverage(lastResearchMeta) :
             '掃描 ' + esc(r.scanned) + ' 檔 → 技術通過 ' + esc(r.techPass) +
             ' → 交集 <b style="color:var(--gold)">' + esc(r.matched) + '</b> 檔' +
-            (r.matched > 80 ? '（顯示前 80）' : '');
+            (r.matched > 80 ? '（顯示前 80）' : '') +
+            '<br>空白條件仍顯示基本面與籌碼。— 表示資料缺少或不適用；≥／≤ 為已核對連買／連賣天數下限。';
         }
         renderResults(lastResults);
         return r;
@@ -586,7 +590,7 @@
               '<div class="sc-grp" data-sc-standard><h4>籌碼面</h4>' +
                 '<label>投信 ≥ <input type="number" id="sc-trust" placeholder="3">天</label>' +
                 '<label>外資 ≥ <input type="number" id="sc-foreign" placeholder="3">天</label>' +
-                '<div class="hint">chip_history 連續天數</div>' +
+                '<div class="hint">依來源交易日計算；缺日不跨接</div>' +
               '</div>' +
               '<div class="sc-bar">' +
                 '<select id="sc-sector"><option value="">全部產業</option><option value="__TECH__">科技電子整合</option></select>' +
