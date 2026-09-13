@@ -20,6 +20,7 @@ import time
 import urllib.request
 from datetime import date, timedelta
 from typing import Any, Callable, Dict, Optional
+from 估值趨勢 import source_date
 
 _CODE_RE = re.compile(r'^\d{4,6}[A-Z]?$')
 
@@ -196,6 +197,10 @@ def snap_t86(tdate: str) -> Optional[Dict[str, dict]]:
     data = _fetch_json(url)
     by = None
     if data and data.get('stat') in ('OK', 'ok') and data.get('data'):
+        actual_day = source_date(data.get('date'))
+        if actual_day is not None and actual_day != source_date(tdate):
+            _snap_set(key, None, err=True)
+            return None
         fields = data.get('fields') or []
         ic = _idx(fields, '證券代號', '代號')
         by = {}
@@ -206,6 +211,7 @@ def snap_t86(tdate: str) -> Optional[Dict[str, dict]]:
             if not code:
                 continue
             by[code] = {
+                'sourceDate': actual_day, 'source': 'TWSE T86', 'unit': 'shares',
                 # 外陸資：用『外陸資*』關鍵字，不會命中『外資自營商*』
                 # （勿 avoid『外資自營商』——欄名常含『不含外資自營商』會被誤殺）
                 'foreign': _col(fields, row, '外陸資買賣超股數(不含外資自營商)',
@@ -350,7 +356,11 @@ def resolve_t86_date(max_back: int = 8):
     return date.today().strftime('%Y%m%d'), None
 
 
-def _tpex_inst(clean: str) -> Optional[dict]:
+def snap_tpex_inst() -> Optional[Dict[str, dict]]:
+    key = 'TPEx:institutional'
+    hit, cached = _snap_get(key)
+    if hit:
+        return cached
     url = 'https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading'
     try:
         if _src_fetch_json is not None:
@@ -358,8 +368,10 @@ def _tpex_inst(clean: str) -> Optional[dict]:
         else:
             ta = _fetch_json(url)
     except Exception:
+        _snap_set(key, None, err=True)
         return None
     if not isinstance(ta, list):
+        _snap_set(key, None, err=True)
         return None
     NET = ('買賣超', 'netbuysell', 'net', 'diff', 'buysell')
 
@@ -379,6 +391,7 @@ def _tpex_inst(clean: str) -> Optional[dict]:
                 cand = _num(v)
         return cand
 
+    by = {}
     for row in ta:
         if not isinstance(row, dict):
             continue
@@ -386,9 +399,11 @@ def _tpex_inst(clean: str) -> Optional[dict]:
         for k, v in row.items():
             if ('代號' in k) or ('code' in k.lower()):
                 rc = str(v).strip(); break
-        if rc != clean:
+        if not rc:
             continue
-        return {
+        by[rc] = {
+            'sourceDate': source_date(row.get('Date') or row.get('日期')),
+            'source': 'TPEx 三大法人', 'unit': 'shares',
             'foreign': pick(row, ('外資及陸資買賣超', 'foreigninvestor', 'foreign', '外資'),
                             avoid=('不含', 'exclud', 'dealer', '自營', 'hedge', '避險', 'self', '自行')),
             'trust':   pick(row, ('投信', 'investmenttrust', 'trust'),
@@ -399,7 +414,13 @@ def _tpex_inst(clean: str) -> Optional[dict]:
                             avoid=('foreign', '外資', 'dealer', '自營', 'trust', '投信')),
             '_chipSource': 'TPEx',
         }
-    return None
+    _snap_set(key, by, err=not bool(by))
+    return by or None
+
+
+def _tpex_inst(clean: str) -> Optional[dict]:
+    row = (snap_tpex_inst() or {}).get(clean)
+    return dict(row) if row else None
 
 
 def build_chip(sym: str) -> dict:

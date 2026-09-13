@@ -77,7 +77,7 @@ def parse_valuation(row: Mapping[str, Any] | None, dataset: str | None) -> dict[
                   if (parsed := source_date(row.get(key)))), None)
     return {
         'per': value_from(row, '本益比', 'PEratio', 'PriceEarningRatio'),
-        'yield': value_from(row, '殖利率', 'DividendYield', 'Yield'),
+        'yield': value_from(row, '殖利率', 'DividendYield', 'YieldRatio', 'Yield'),
         'valuationDate': as_of,
         'valuationSource': ('TWSE BWIBBU_ALL' if dataset == PE_DATASETS[0]
                             else 'TPEx peratio' if dataset == PE_DATASETS[1] else None),
