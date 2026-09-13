@@ -695,6 +695,7 @@ def _chip_history_record(clean_code, chip_out):
 
 
 _openapi_ds = {}   # dataset name → (date, {code: row})
+_openapi_retry = {}  # 暫時失敗只等待五分鐘，不鎖住整天。
 
 # ── 全台股普通股代號宇集（上市 TWSE + 上櫃 TPEx），當日快取 ──
 import re as _re
@@ -949,32 +950,33 @@ def _openapi_lookup(dataset_names, clean_code):
        代號欄位同時認 中文(公司代號/證券代號) 與 英文(Code/SecuritiesCompanyCode)。"""
     from datetime import date as _date
     today = _date.today().strftime('%Y%m%d')
+    from 台股基本面 import dataset_url
     for ds in dataset_names:
+        if time.monotonic() < _openapi_retry.get(ds, 0):
+            continue
         cached = _openapi_ds.get(ds)
         if not cached or cached[0] != today:
             try:
-                if ds.startswith('tpex:'):
-                    url = f'https://www.tpex.org.tw/openapi/v1/{ds[5:]}'
-                elif '/' in ds:
-                    url = f'https://openapi.twse.com.tw/v1/{ds}'
-                else:
-                    url = f'https://openapi.twse.com.tw/v1/opendata/{ds}'
+                url = dataset_url(ds)
                 req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
                 with urllib.request.urlopen(req, timeout=15) as resp:
                     arr = json.loads(resp.read())
+                if not isinstance(arr, list) or any(not isinstance(row, dict) for row in arr):
+                    raise ValueError('官方資料格式不是資料列陣列')
                 idx = {}
                 for row in arr:
                     code = (row.get('公司代號') or row.get('證券代號') or
                             row.get('Code') or row.get('SecuritiesCompanyCode') or
                             row.get('股票代號') or '').strip()
                     if code:
-                        idx[code] = row
+                        idx[code] = {**row, 'source': ds}
                 _openapi_ds[ds] = (today, idx)
+                _openapi_retry.pop(ds, None)
                 cached = _openapi_ds[ds]
             except Exception as e:
-                print(f'[fundamental] openapi {ds} failed: {e}')
-                _openapi_ds[ds] = (today, {})
-                cached = _openapi_ds[ds]
+                _openapi_retry[ds] = time.monotonic() + 300
+                _fundamental_trace('來源暫缺', source=ds, error=type(e).__name__)
+                continue
         row = cached[1].get(clean_code)
         if row:
             return row
@@ -1003,8 +1005,9 @@ def _openapi_lookup_list(dataset_name):
         return []
 
 
-# ── MOPS 公開資訊觀測站 月營收(補上櫃:官方 OpenAPI 無 per-company 上櫃端點) ──
-_mops_rev_cache = {}   # market('otc'/'sii') -> (yyyymmdd, period('11505'), {code: {...}})
+# ── MOPS 月營收：補回總表尚未列出的個股最近期 ──
+_mops_rev_cache = {}   # (市場, 年, 月, 國內外類別) → (到期時間, 個股資料列)
+_mops_rev_lock = threading.RLock()
 _MOPS_TR = _re.compile(r'<tr[^>]*>(.*?)</tr>', _re.I | _re.S)
 _MOPS_TD = _re.compile(r'<td[^>]*>(.*?)</td>', _re.I | _re.S)
 _MOPS_TAG = _re.compile(r'<[^>]+>')
@@ -1045,40 +1048,45 @@ def _parse_mops_t21sc03(html):
 
 
 def _mops_monthly_revenue(market, clean_code):
-    """MOPS 月營收(market:'otc'上櫃 / 'sii'上市)。整批快取一天;往回找最近一個
-    已公布月份(約次月 10 日)。回傳該股 dict 或 None。"""
+    """按公司尋找最近四個完整月份；其他公司已有新期不代表本股也有。"""
     from datetime import date as _date
-    today = _date.today().strftime('%Y%m%d')
-    cached = _mops_rev_cache.get(market)
-    if not cached or cached[0] != today:
-        idx, period = {}, None
-        y, mo = _date.today().year, _date.today().month
-        done = False
-        for _back in range(0, 4):
-            yy, mm = y, mo - _back
-            while mm <= 0:
-                mm += 12; yy -= 1
-            rocy = yy - 1911
-            for host in ('https://mopsov.twse.com.tw', 'https://mops.twse.com.tw'):
-                url = f'{host}/nas/t21/{market}/t21sc03_{rocy}_{mm}_0.html'
-                try:
-                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(req, timeout=20) as resp:
-                        raw = resp.read()
-                    rows = _parse_mops_t21sc03(raw.decode('big5', 'replace'))
-                    if rows:
-                        idx, period = rows, f'{rocy}{mm:02d}'; done = True
-                        break
-                except Exception:
+    if market not in ('sii', 'otc') or not _re.fullmatch(r'[1-9]\d{3}', clean_code):
+        return None
+    today = _date.today()
+    for back in range(1, 5):
+        month_index = today.year * 12 + today.month - 1 - back
+        yy, month_zero = divmod(month_index, 12)
+        mm = month_zero + 1
+        # 國內公司與外國公司分表；不可漏掉 KY 股票。
+        for category in (0, 1):
+            key = (market, yy, mm, category)
+            with _mops_rev_lock:
+                cached = _mops_rev_cache.get(key)
+                if cached and cached[0] > time.monotonic():
+                    row = cached[1].get(clean_code)
+                    if row:
+                        return dict(row)
                     continue
-            if done:
-                break
-        _mops_rev_cache[market] = (today, period, idx)
-        cached = _mops_rev_cache[market]
-    row = cached[2].get(clean_code)
-    if row:
-        row = dict(row); row['period'] = cached[1]
-    return row
+                idx = {}
+                rocy = yy - 1911
+                for host in ('https://mopsov.twse.com.tw', 'https://mops.twse.com.tw'):
+                    url = f'{host}/nas/t21/{market}/t21sc03_{rocy}_{mm}_{category}.html'
+                    try:
+                        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(req, timeout=20) as resp:
+                            raw = resp.read()
+                        rows = _parse_mops_t21sc03(raw.decode('big5', 'replace'))
+                        if rows:
+                            idx = {code: {**row, 'period': f'{rocy}{mm:02d}', 'source': 'MOPS:' + market}
+                                   for code, row in rows.items()}
+                            break
+                    except Exception:
+                        continue
+                # 成功一天、失敗五分鐘；逐月共用，避免逐股反覆抓整張表。
+                _mops_rev_cache[key] = (time.monotonic() + (86400 if idx else 300), idx)
+                if clean_code in idx:
+                    return dict(idx[clean_code])
+    return None
 
 def _fundamental_score(out):
     """0~100 基本面分數：成長性 50% + 獲利性 50%。
@@ -4653,53 +4661,26 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             return
 
         # ── 台股 ──────────────────────────────────────────────
-        # 月營收（欄位用「含子字串」模糊比對：TWSE 欄位有前綴如「營業收入-當月營收」）
-        rev = _openapi_lookup(['t187ap05_L', 'tpex:mopsfin_t187ap05_O'], clean)
-        if rev:
-            out['revenue'] = {
-                'period':    rev.get('資料年月'),
-                'monthRev':  _pick_num(rev, ['當月營收'], ['累計']),
-                'yoyPct':    _pick_num(rev, ['去年同月增減']),
-                'momPct':    _pick_num(rev, ['上月比較增減']),
-                'cumRev':    _pick_num(rev, ['當月累計營收']),
-                'cumYoyPct': _pick_num(rev, ['累計', '前期比較增減']),
-            }
-        # 官方 OpenAPI 無 per-company 上櫃月營收 → 退 MOPS 公開資訊觀測站(otc;上市 sii 備援)
-        if not (out['revenue'] and out['revenue'].get('monthRev') is not None):
-            for mk in ('otc', 'sii'):
-                mr = _mops_monthly_revenue(mk, clean)
-                if mr and mr.get('monthRev') is not None:
-                    out['revenue'] = {
-                        'period':    mr.get('period'),
-                        'monthRev':  mr.get('monthRev'),
-                        'yoyPct':    mr.get('yoyPct'),
-                        'momPct':    mr.get('momPct'),
-                        'cumRev':    mr.get('cumRev'),
-                        'cumYoyPct': mr.get('cumYoyPct'),
-                    }
-                    out['_revSource'] = 'MOPS:' + mk
-                    break
-        # 綜合損益表 → 三率（同樣模糊比對，避免全形/半形括號差異 例 營業毛利（毛損））
-        inc = _openapi_lookup(['t187ap06_L_ci', 'tpex:mopsfin_t187ap06_O_ci', 't187ap06_L'], clean)
-        if inc:
-            sales = _pick_num(inc, ['營業收入'], ['成本', '毛利', '費用', '外', '淨額'])
-            gross = _pick_num(inc, ['營業毛利'])
-            op = _pick_num(inc, ['營業利益'])
-            net = _pick_num(inc, ['本期淨利']) or _pick_num(inc, ['本期綜合損益總額']) \
-                or _pick_num(inc, ['淨利', '母公司'])
-            eps = _pick_num(inc, ['基本每股盈餘'])
-            pct = lambda a, b: round(a / b * 100, 2) if (a is not None and b) else None
-            out['income'] = {
-                'period':       inc.get('資料年度') or inc.get('資料季別') or inc.get('年度'),
-                'sales':        sales, 'eps': eps,
-                'grossMargin':  pct(gross, sales),
-                'opMargin':     pct(op, sales),
-                'netMargin':    pct(net, sales),
-            }
-        # 基本面評分 0~100（成長性/獲利性二維簡版）
-        out['score'] = _fundamental_score(out)
+        from 台股基本面 import load_income, load_revenue
+        out['revenue'] = load_revenue(clean, _openapi_lookup, _mops_monthly_revenue)
+        out['income'] = load_income(clean, _openapi_lookup)
+        out['_revSource'] = (out['revenue'] or {}).get('source')
+        out['_incomeSource'] = (out['income'] or {}).get('source')
+        out['revenueStatus'] = ('prior_period' if (out['revenue'] or {}).get('priorPeriod') else
+                                'available' if out['revenue'] else 'unavailable')
+        out['incomeStatus'] = 'available' if out['income'] else 'unavailable'
+        special = (out['income'] or {}).get('marginStatus') == 'not_applicable'
+        out['score'] = None if special or not out['income'] else _fundamental_score(out)
+        out['scoreNote'] = (out['income'] or {}).get('marginNote') if out['income'] else '財報暫缺，暫不評分。'
         body = json.dumps(out, ensure_ascii=False).encode()
         _cache.set(key, body)
+        _fundamental_trace(
+            'terminal', correlationId=trace_id, symbol=sym, market=market, kind='stock',
+            source='、'.join(filter(None, (out['_revSource'], out['_incomeSource']))),
+            score=out['score'], hasRevenue=out['revenue'] is not None,
+            hasIncome=out['income'] is not None,
+            stateAfter='renderable' if out['revenue'] or out['income'] else 'empty',
+            elapsedMs=round((time.perf_counter() - trace_started) * 1000))
         self._ok(body)
 
     def _handle_valuation(self, sym):
@@ -6905,19 +6886,12 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         # 補基本面
         fund_txt = ''
         try:
-            rev = _openapi_lookup(['t187ap05_L', 't187ap05_O'], code)
-            yoy = _pick_num(rev, ['去年同月增減']) if rev else None
-            inc = _openapi_lookup(['t187ap06_L_ci', 't187ap06_O_ci', 't187ap06_L', 't187ap06_O'], code)
-            gm = nm = None
-            if inc:
-                sales = _pick_num(inc, ['營業收入'], ['成本', '毛利', '費用', '外', '淨額'])
-                gross = _pick_num(inc, ['營業毛利'])
-                net = _pick_num(inc, ['本期淨利']) or _pick_num(inc, ['本期綜合損益總額'])
-                if sales:
-                    gm = round(gross / sales * 100, 1) if gross else None
-                    nm = round(net / sales * 100, 1) if net else None
+            from 台股基本面 import load_income, load_revenue
+            rev = load_revenue(code, _openapi_lookup, _mops_monthly_revenue) or {}
+            inc = load_income(code, _openapi_lookup) or {}
+            yoy, gm, nm = rev.get('yoyPct'), inc.get('grossMargin'), inc.get('netMargin')
             parts = []
-            if yoy is not None: parts.append(f'月營收YoY {yoy}%')
+            if yoy is not None: parts.append(f"{rev.get('periodLabel') or '期別未明'}月營收YoY {yoy}%")
             if gm is not None: parts.append(f'毛利率 {gm}%')
             if nm is not None: parts.append(f'淨利率 {nm}%')
             fund_txt = '、'.join(parts) if parts else '(基本面資料暫缺)'

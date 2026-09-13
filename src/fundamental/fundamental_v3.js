@@ -28,7 +28,7 @@
         return live;
       }
     }
-    if (_fCache[key]) return _fCache[key];
+    if (_fCache[key] && _fCache[key].expiresAt > Date.now()) return _fCache[key].data;
     if (_fInflight[key]) return _fInflight[key];
     _fInflight[key] = (async function () {
       try {
@@ -41,7 +41,9 @@
         });
         if (!r.ok) return null;
         const d = await r.json();
-        _fCache[key] = d;
+        // 缺漏與前一期資料需能重試，不讓長時間開啟的頁面永久停在空值。
+        const partial = !d.revenue || !d.income || d.revenueStatus === 'prior_period';
+        _fCache[key] = { data: d, expiresAt: Date.now() + (partial ? 60000 : 300000) };
         return d;
       } catch (e) {
         console.warn('[fundamental]', e);
@@ -56,6 +58,9 @@
   const fmtMoney = v => v == null ? '—' :
     (Math.abs(v) >= 1e8 ? (v / 1e8).toFixed(1) + ' 億' :
       Math.abs(v) >= 1e4 ? (v / 1e4).toFixed(0) + ' 萬' : Math.round(v).toLocaleString());
+  const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const twMoney = (value, row) => fmtMoney(value == null ? null : value * (row.unitMultiplier || 1));
   // 方向性成長(YoY/MoM/累計)→ 顏色管理表(台股 正=紅/負=綠);水準型(三率)→ warn(偏低琥珀)
   const pctCol = v => window.Colors ? Colors.growth(S.sym, v)
     : (v == null ? 'var(--tlo)' : v > 0 ? 'var(--red)' : v < 0 ? 'var(--green)' : 'var(--tlo)');
@@ -143,7 +148,7 @@
     else if (isIntl)
       hint = 'Yahoo 成長／三率暫無資料（可檢查本機是否可連 Yahoo / 已裝 yfinance）';
     else
-      hint = 'TWSE OpenAPI 僅上市櫃普通股；金融/ETF 部分欄位缺';
+      hint = '官方營收或財報暫未取得，稍後可重新查詢；ETF 不適用公司財報。';
     return `<div style="padding:14px 12px;text-align:center;color:var(--tlo);font-family:monospace;font-size:10px;line-height:1.7">無基本面資料<br><span style="font-size:9px;color:var(--tf)">${hint}</span></div>`;
   }
 
@@ -159,30 +164,45 @@
     }
     const r = f.revenue;
     if (r) {
-      if (isIntl || r.monthRev == null) {
+      if (isIntl) {
         // 美股：無「月營收」金額，改顯示成長標題
         h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span class="stat-k">成長 ${r.period || ''}</span><span class="stat-v">${r.label || 'Yahoo'}</span></div>`;
         h += `<div class="stat-row"><span class="stat-k">營收成長 YoY</span><span class="stat-v" style="color:${pctCol(r.yoyPct)}">${pctStr(r.yoyPct)}</span></div>`;
         h += `<div class="stat-row"><span class="stat-k">盈餘成長</span><span class="stat-v" style="color:${pctCol(r.cumYoyPct)}">${pctStr(r.cumYoyPct)}</span></div>`;
       } else {
-        h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span class="stat-k">月營收 ${r.period || ''}</span><span class="stat-v">${fmtMoney(r.monthRev)}</span></div>`;
+        h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span class="stat-k">月營收 ${esc(r.periodLabel || r.period || '')}</span><span class="stat-v">${twMoney(r.monthRev, r)}</span></div>`;
         h += `<div class="stat-row"><span class="stat-k">YoY 年增</span><span class="stat-v" style="color:${pctCol(r.yoyPct)}">${pctStr(r.yoyPct)}</span></div>`;
         h += `<div class="stat-row"><span class="stat-k">MoM 月增</span><span class="stat-v" style="color:${pctCol(r.momPct)}">${pctStr(r.momPct)}</span></div>`;
         h += `<div class="stat-row"><span class="stat-k">累計營收 YoY</span><span class="stat-v" style="color:${pctCol(r.cumYoyPct)}">${pctStr(r.cumYoyPct)}</span></div>`;
+        if (r.priorPeriod)
+          h += `<div style="padding:6px 12px;color:var(--orange);font-size:10px;line-height:1.6">${esc(r.expectedPeriod)} 尚無此股資料；以上為最近可得的 ${esc(r.periodLabel)}。</div>`;
       }
+    } else if (!isIntl) {
+      h += '<div class="stat-row"><span class="stat-k">月營收</span><span class="stat-v">官方資料暫缺</span></div>';
     }
     const inc = f.income;
     if (inc) {
-      h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span class="stat-k">財報 ${inc.period || ''}</span><span class="stat-v">EPS ${inc.eps != null ? Number(inc.eps).toFixed(2) : '—'}</span></div>`;
+      h += `<div class="stat-row" style="border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span class="stat-k">財報 ${esc(inc.period || '')}</span><span class="stat-v">EPS ${inc.eps != null ? Number(inc.eps).toFixed(2) : '—'}</span></div>`;
+      if (!isIntl && inc.marginStatus === 'not_applicable') {
+        h += `<div class="stat-row"><span class="stat-k">財報業別</span><span class="stat-v">${esc(inc.industry)}</span></div>`;
+        h += `<div class="stat-row"><span class="stat-k">本期稅後損益</span><span class="stat-v">${twMoney(inc.netIncome, inc)}</span></div>`;
+        if (inc.parentNetIncome != null)
+          h += `<div class="stat-row"><span class="stat-k">歸屬母公司損益</span><span class="stat-v">${twMoney(inc.parentNetIncome, inc)}</span></div>`;
+        h += `<div style="padding:6px 12px;color:var(--tlo);font-size:10px;line-height:1.6">${esc(inc.marginNote)}</div>`;
+      } else {
       h += `<div class="stat-row"><span class="stat-k">毛利率</span><span class="stat-v" style="color:${marginCol(inc.grossMargin)}">${inc.grossMargin != null ? Number(inc.grossMargin).toFixed(1) + '%' : '—'}</span></div>`;
       h += `<div class="stat-row"><span class="stat-k">營益率</span><span class="stat-v" style="color:${marginCol(inc.opMargin)}">${inc.opMargin != null ? Number(inc.opMargin).toFixed(1) + '%' : '—'}</span></div>`;
       h += `<div class="stat-row"><span class="stat-k">淨利率</span><span class="stat-v" style="color:${marginCol(inc.netMargin)}">${inc.netMargin != null ? Number(inc.netMargin).toFixed(1) + '%' : '—'}</span></div>`;
       if (inc.roe != null)
         h += `<div class="stat-row"><span class="stat-k">ROE</span><span class="stat-v" style="color:${marginCol(inc.roe)}">${Number(inc.roe).toFixed(1)}%</span></div>`;
+      }
+    } else if (!isIntl) {
+      h += '<div class="stat-row"><span class="stat-k">財報</span><span class="stat-v">官方資料暫缺</span></div>';
     }
     const src = isIntl
       ? `資料：Yahoo Finance（${f._source || 'keystats'}）成長 + 三率`
-      : '資料：TWSE OpenAPI 月營收 + 綜合損益表';
+      : `營收來源：${esc((r && (r.sourceName || r.source)) || '暫缺')}<br>財報來源：${esc((inc && (inc.sourceName || inc.source)) || '暫缺')}` +
+        (inc && inc.sourceDate ? `<br>財報出表日：${esc(inc.sourceDate)}` : '') + '<br>金額已換算新臺幣元；EPS 單位為元。';
     h += `<div style="padding:6px 12px 0;font-family:monospace;font-size:8.5px;color:var(--tf);line-height:1.5">${src}</div>`;
     return h;
   }
@@ -196,7 +216,9 @@
       let h = orig.apply(this, arguments);
       if (!S.sym) return h;
       // 台／美／大盤皆顯示基本面區塊；籌碼等仍僅台股（資料源限制）
-      fetchFund(S.sym, S.mkt).then(f => {
+      const requestedSym = S.sym, requestedMarket = S.mkt;
+      fetchFund(requestedSym, requestedMarket).then(f => {
+        if (S.sym !== requestedSym || S.mkt !== requestedMarket) return;
         const stats = document.getElementById('rpanel');
         if (!stats || S.tab !== 'stats') return;
         const ex = document.getElementById('fund-sect');

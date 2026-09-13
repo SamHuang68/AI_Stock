@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from jsonl_trace import append_jsonl
+from 台股基本面 import load_revenue
 from 估值趨勢 import (PE_DATASETS, REVENUE_DATASETS, TZ_TPE, load_chip_snapshots,
                      number, parse_revenue, parse_valuation, source_date)
 
@@ -108,20 +109,18 @@ def enrich(record, *, lookup, monthly_revenue, sessions, snapshots):
         out.update(parse_valuation(raw, dataset if raw else None))
         if out['per'] is not None and out['per'] <= 0:
             out['per'] = None
-        revenue = lookup(list(REVENUE_DATASETS), code)
-        if parse_revenue(revenue)['revYoy'] is None:
-            markets = ('otc', 'sii') if out.get('valuationSource') == 'TPEx peratio' else ('sii', 'otc')
-            for market in markets:
-                fallback = monthly_revenue(market, code)
-                if parse_revenue(fallback)['revYoy'] is not None:
-                    revenue = fallback
-                    break
+        markets = ('otc', 'sii') if out.get('valuationSource') == 'TPEx peratio' else ('sii', 'otc')
+        revenue = load_revenue(code, lookup, monthly_revenue, markets=markets)
         out.update(parse_revenue(revenue))
+        out['revenueSource'] = (revenue or {}).get('source')
+        out['revenuePriorPeriod'] = (revenue or {}).get('priorPeriod', False)
     for field in ('revYoy', 'per', 'yield'):
         out['fieldStatus'][field] = (
             'ETF 等非普通股不適用公司營收與一般股票估值' if not ordinary else
             '官方資料尚缺或不適用' if out[field] is None else
             '資料期間：' + str((out.get('revenuePeriod') if field == 'revYoy' else out.get('valuationDate')) or '來源未附日期'))
+    if out.get('revenuePriorPeriod') and out['revYoy'] is not None:
+        out['fieldStatus']['revYoy'] = '最新月份尚無此股；最近可得期別：' + str(out['revenuePeriod'])
     chip = chip_fields(code, sessions, snapshots)
     out['fieldStatus'].update(chip.pop('fieldStatus'))
     out.update(chip)
