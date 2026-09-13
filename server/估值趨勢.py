@@ -12,7 +12,7 @@ from typing import Any, Callable, Mapping, Sequence
 TZ_TPE = timezone(timedelta(hours=8))
 IP_REVIEW = {'3529': '力旺', '6643': 'M31'}
 PE_DATASETS = ('exchangeReport/BWIBBU_ALL', 'tpex:tpex_mainboard_peratio_analysis')
-REVENUE_DATASETS = ('t187ap05_L', 'tpex:mopsfin_t187ap05_O')
+from 台股基本面 import REVENUE_DATASETS, load_revenue
 
 
 def number(value: Any) -> float | None:
@@ -322,25 +322,23 @@ def run_screen(body: Mapping[str, Any], *, settings: Mapping[str, Any], symbols:
             continue
         if price_ok:
             tech_pass += 1
-        rev = lookup(list(REVENUE_DATASETS), code)
-        if not rev or contains_number(rev, ('當月營收',)) is None:
-            for market in ('otc', 'sii'):
-                fallback = monthly_revenue(market, code)
-                if fallback and number(fallback.get('monthRev')) is not None:
-                    rev = fallback
-                    break
+        rev = load_revenue(code, lookup, monthly_revenue, now.date())
         revenue = parse_revenue(rev)
         observations = chip_observation(code, [bar['date'] for bar in bars], snapshots)
         vol_ratio = number(ind.get('volRatio')) if all(bar['volume'] is not None for bar in bars[-20:]) else None
         research = {**candidates[code], **revenue, **price_observation(bars), **observations,
                     'epsBasis': 'official_pe_only',
                     'valuationModel': '另案估值' if code in IP_REVIEW else '一般估值',
+                    'revenueSource': (rev or {}).get('source'),
+                    'revenuePriorPeriod': (rev or {}).get('priorPeriod', False),
                     'missing': []}
         if research['valuationDate'] is None:
             research['missing'].append('官方本益比未附資料日')
         if revenue['revYoy'] is None:
             meta['missingRevenue'] += 1
             research['missing'].append('最新月營收年增資料不足')
+        if (rev or {}).get('priorPeriod'):
+            research['missing'].append('月營收最近可得期別：' + str(rev['periodLabel']))
         if observations['trustObservedDays'] < 5:
             meta['missingChip'] += 1
             research['missing'].append('同組五個交易日籌碼資料不完整')

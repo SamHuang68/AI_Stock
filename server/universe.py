@@ -16,6 +16,11 @@ import time
 import urllib.request
 
 try:
+    from .台股基本面 import INCOME_DATASETS, dataset_url, income_record
+except ImportError:
+    from 台股基本面 import INCOME_DATASETS, dataset_url, income_record
+
+try:
     from .atomic_store import StoreCorruptError, atomic_write_json, load_json
 except ImportError:
     from atomic_store import StoreCorruptError, atomic_write_json, load_json
@@ -266,34 +271,20 @@ def fetch_tw_meta(shares_map):
         m['pb'] = m['pb'] if m['pb'] is not None else _row_num(row, ['PB', '淨值比', '股價淨值'])
         m['yield'] = m['yield'] if m['yield'] is not None else _row_num(row, ['Yield', '殖利率'], avoid=['Year', '年度'])
 
-    # 3) 三率 + EPS ── 綜合損益表(僅上市 _L_ci;中文 key)
-    # 註:上櫃(_O)綜合損益表 TWSE/TPEx OpenAPI 均未提供 per-company 端點(實機核
-    # 對 TPEx swagger:t187ap46_O_* 為「公司治理」非財報;TWSE 僅 _L)。故上櫃三率/
-    # EPS 暫留 null(量價與估值仍由 TPEx mainboard 端點正常填入)。
-    for url, board in (
-        ('https://openapi.twse.com.tw/v1/opendata/t187ap06_L_ci', '上市'),
-    ):
-        for row in _scan_rows(url):
+    # 3) 共用上市／上櫃六業別財報；金融與異業不套用一般業三率。
+    for dataset, kind, board in INCOME_DATASETS:
+        for row in _scan_rows(dataset_url(dataset)):
             if not isinstance(row, dict):
                 continue
             code = _row_code(row)
-            if not code:
+            income = income_record(row, kind, dataset)
+            if not code or not income:
                 continue
             m = _slot(meta, code, board)
-            rev = _row_num(row, ['營業收入', 'Revenue'], avoid=['成本', '毛利', '率', 'Cost'])
-            gp = _row_num(row, ['營業毛利', 'GrossProfit'], avoid=['率', '%'])
-            oi = _row_num(row, ['營業利益', 'OperatingIncome'], avoid=['率', '%', '外'])
-            ni = _row_num(row, ['本期淨利', '稅後淨利', 'NetIncome', '本期綜合損益'], avoid=['每股', '率', '%', '其他', '非控制'])
-            eps = _row_num(row, ['基本每股盈餘', '每股盈餘', 'EPS'], avoid=['稀釋'])
-            if eps is not None:
-                m['eps'] = eps
-            if rev and rev != 0:
-                if gp is not None and m['gross'] is None:
-                    m['gross'] = round(gp / rev * 100, 1)
-                if oi is not None and m['op'] is None:
-                    m['op'] = round(oi / rev * 100, 1)
-                if ni is not None and m['net'] is None:
-                    m['net'] = round(ni / rev * 100, 1)
+            m.update(eps=income['eps'], gross=income['grossMargin'],
+                     op=income['opMargin'], net=income['netMargin'],
+                     incomePeriod=income['period'], incomeSource=dataset,
+                     incomeIndustry=income['industry'], marginStatus=income['marginStatus'])
 
     # 4) 英文名 + 發行股數 ── 公司基本資料(上市 t187ap03_L;值為英文/數字,key 中文)
     # 註:上櫃公司基本資料 OpenAPI 同樣無 per-company 端點 → 上櫃英文名暫留 null。
