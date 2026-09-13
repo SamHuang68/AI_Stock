@@ -116,6 +116,7 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/ui/bridge_v5.js',                   # v5.0: 工具列→側欄橋接（須在 *Open 定義後、toolbar 前）
               'src/ui/visual_system_v5.js',            # v5.0: 全站 elevation / border / shadow 視覺契約
               'src/ui/chart_visual_v5.js',             # v5.0: 圖表工作站色票／層級／膠囊與數據卡契約
+              'src/ui/K線事件研究.js',                # 官方日線品質與事件研究入口
               'src/ui/toolbar_v3.js',                  # v3.9: 工具列模組化(一階分類+二階下拉,設定驅動;須排最後,整理所有功能鈕)
               'src/chart/market_score_bar_v3.js',      # v4.1: 主圖大盤體質／市場風險資訊列（須在 market_chart 前）
               'src/chart/market_chart_v3.js']          # v4.1: 總經/大盤折線模組（融資維持率等，必須最後掛鉤蓋過 K 線 patch）

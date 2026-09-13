@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import OrderedDict
 from urllib.parse import urlparse, parse_qs, unquote, quote
 import threading
+import math
 
 # Compatibility for legacy test and launcher paths that place ``server/`` at
 # the front of ``sys.path`` and then import this file as top-level ``server``.
@@ -2757,6 +2758,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_quote(sym)
         elif p == '/bars' or p.startswith('/bars?'):
             self._handle_bars()
+        elif p == '/kline-events' or p.startswith('/kline-events?'):
+            self._handle_kline_events()
         elif p == '/universe' or p.startswith('/universe?'):
             self._handle_universe()
         elif p == '/datasources' or p.startswith('/datasources?'):
@@ -6407,31 +6410,54 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         return payload
 
     def _handle_bars(self):
-        """v4.0: GET /bars?sym=2330&market=TW → 本機 DB 日線 {candles:[{time,open,high,low,close,volume}]}。
-           DB 沒有/太少則即時抓 Yahoo 5y 並寫回(供回測深度歷史用)。"""
+        """讀取指定市場日線；台股由官方排程更新，筆數不代表新鮮度。"""
         try:
             qs = parse_qs(urlparse(self.path).query)
             sym = (qs.get('sym', [''])[0]).strip()
             market = (qs.get('market', ['TW'])[0]).strip() or 'TW'
-            if not sym:
-                self._err('missing sym', 400); return
+            if not sym or market not in ('TW', 'US') or len(sym) > 24:
+                self._err('股票代號或市場無效', 400); return
             code = sym.replace('.TW', '').replace('.TWO', '')
             rows = []
             try:
                 import datastore
-                rows = datastore.get_bars(code)
-                if not rows or len(rows) < 80:
+                rows = datastore.get_bars(code, market=market)
+                if market == 'US' and (not rows or len(rows) < 80):
                     fetched = datastore.fetch_yahoo_daily(code, market, '5y')
                     if fetched:
+                        datastore.init_db()
                         datastore.upsert_bars(code, market, fetched)
-                        rows = datastore.get_bars(code)
+                        rows = datastore.get_bars(code, market=market)
             except Exception as e:
                 print('[bars] datastore failed:', e)
             candles = [{'time': r[0], 'open': r[1], 'high': r[2], 'low': r[3],
                         'close': r[4], 'volume': r[5]} for r in (rows or [])]
-            self._ok(json.dumps({'sym': code, 'candles': candles}).encode())
+            status = {'status': '未核對最新交易日', 'fresh': False}
+            if market == 'TW':
+                from K線事件 import freshness
+                import sqlite3
+                from contextlib import closing
+                with closing(sqlite3.connect(datastore.DB_PATH)) as conn:
+                    status = freshness(conn, code)
+            self._ok(json.dumps({'sym': code, 'market': market, 'candles': candles, 'freshness': status}, ensure_ascii=False, allow_nan=False).encode())
         except Exception as e:
             self._err('bars failed: ' + str(e), 500)
+
+    def _handle_kline_events(self):
+        try:
+            qs = parse_qs(urlparse(self.path).query)
+            code = qs.get('sym', ['2330'])[0].strip().removesuffix('.TW').removesuffix('.TWO')
+            if not _re.fullmatch(r'[0-9A-Z]{4,7}', code):
+                self._err('台股代號無效', 400); return
+            import datastore
+            from K線事件 import report
+            result = report(datastore.DB_PATH, code, qs.get('asOf', [None])[0])
+            self._ok(json.dumps(result, ensure_ascii=False, allow_nan=False).encode())
+        except ValueError as e:
+            self._err(str(e), 400)
+        except Exception as e:
+            print('[kline-events] 研究讀取失敗：', type(e).__name__)
+            self._err('事件資料尚未完整建立，請檢查官方日線更新狀態', 503)
 
     def _handle_universe(self):
         """GET /universe → 全台股+美股 code↔name lookup(權威判市場 / 補名 / 驗存在)。讀快取,缺則建。"""
@@ -6528,7 +6554,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             if not rows or len(rows) <= n:
                 return None
             c0 = rows[-1 - n][4]; c1 = rows[-1][4]
-            return (c1 / c0 - 1) * 100 if c0 else None
+            return (c1 / c0 - 1) * 100 if all(isinstance(c, (int, float)) and math.isfinite(c) and c > 0 for c in (c0, c1)) else None
 
         out = []
         for st in stages:
@@ -6564,7 +6590,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                     if not rows or len(rows) < (w + 1) * 5 + 1:
                         continue
                     seg = rows[start:end] if end is not None else rows[start:]
-                    if len(seg) < 2 or not seg[0][4]:
+                    if len(seg) < 2 or not all(isinstance(r[4], (int, float)) and math.isfinite(r[4]) and r[4] > 0 for r in (seg[0], seg[-1])):
                         continue
                     rs.append((seg[-1][4] / seg[0][4] - 1) * 100)
                 if rs:
@@ -6643,6 +6669,13 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             _rows = _db_all.get(_code)
             if not _rows or len(_rows) < 70:
                 need_yahoo.append(_s); continue
+            # 官方缺值不得回填或跨缺口拼接；策略只使用最近連續完整區間。
+            for _i in range(len(_rows) - 1, -1, -1):
+                if not all(isinstance(v, (int, float)) and math.isfinite(v) and v > 0 for v in _rows[_i][1:5]):
+                    _rows = _rows[_i + 1:]
+                    break
+            if len(_rows) < 70:
+                continue
             _cl = [r[4] for r in _rows]
             
             # 異常檢測：若資料庫最新兩日價格出現巨大斷層 (如除權息/分割/異常值) 導致變動 > 11% ➔ 丟給 Yahoo 重抓權威昨收
@@ -7914,6 +7947,9 @@ if __name__ == '__main__':
         _log = None
     d = find_etf_dir()
     files = list_etf_files()
+    # 日線讀取端只讀取官方更新狀態；啟動時建立附加品質表。
+    import datastore as _daily_store
+    _daily_store.init_db()
     # v5.0：脈動歷史庫 init + 背景增量同步（只 merge 新日）
     try:
         import pulse_history as _ph

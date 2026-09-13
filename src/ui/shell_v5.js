@@ -102,6 +102,7 @@
     'btn-screener3': { label: '三合一', icon: '🔬' },
     'btn-screener': { label: '篩選', icon: '🔍' },
     'btn-patterns': { label: '型態', icon: '〰' },
+    'btn-kline-events': { label: 'K 線事件', icon: '●' },
     'btn-stratbuilder': { label: '策略', icon: '🧱' },
     'btn-bt3': { label: '回測', icon: '📈' },
     'btn-wizard': { label: '精靈', icon: '🧙' },
@@ -580,7 +581,7 @@
       ringFolder('screen', '選股', '▷', '篩選、策略、回測', [
         ringRoute('scan', '選股室', '▷', '三合一選股頁'),
         ringFolder('screen-tools', '策略庫', '🔬', '選股／型態／回測', [
-          ringClick('btn-screener3'), ringClick('btn-screener'), ringClick('btn-patterns'),
+          ringClick('btn-screener3'), ringClick('btn-screener'), ringClick('btn-patterns'), ringClick('btn-kline-events'),
           ringClick('btn-stratbuilder'), ringClick('btn-bt3'), ringClick('btn-wizard'),
           ringClick('btn-stratscript')
         ]),

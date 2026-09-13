@@ -361,6 +361,7 @@ READ_GET_EXACT = {
     "/etf-tracker/status",
     "/quote-batch",
     "/bars",
+    "/kline-events",
     "/universe",
     "/datasources",
     "/marketflow",

@@ -87,6 +87,13 @@
     // 後援:深度歷史抓不到 → 用畫面載入的線型資料
     if (candles.length < 80) candles = ((typeof S !== 'undefined') && S.data && S.data.candles) || [];
     if (candles.length < 80) { body.innerHTML = '<span class="bt3-neg">資料太少（需 ≥ 80 根 K）。</span>'; return; }
+    if (candles.some(c => !['open', 'high', 'low', 'close'].every(k => Number.isFinite(c[k]) && c[k] > 0))) {
+      lastRows = [];
+      body.innerHTML = '<span class="bt3-neg">歷史區間含缺值或無成交日，無法判定回測；請改用已完整核對的區間。</span>';
+      const cv = document.getElementById('bt3-curve');
+      const ctx = cv && cv.getContext('2d'); if (ctx) ctx.clearRect(0, 0, cv.width, cv.height);
+      return;
+    }
     const opts = {
       tp: (+document.getElementById('bt3-tp').value || 15) / 100,
       sl: (+document.getElementById('bt3-sl').value || 8) / 100,
