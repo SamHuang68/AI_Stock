@@ -120,6 +120,10 @@ class ServerHttpSecurityTests(unittest.TestCase):
             with urllib.request.urlopen(self.base + '/kline-events?sym=2330&asOf=2026-09-01', timeout=5) as response:
                 self.assertEqual(json.load(response), payload)
             self.assertEqual(calculate.call_args.args[1:], ('2330', '2026-09-01'))
+            self.assertEqual(calculate.call_args.kwargs, {'period': '3y', 'start_date': None})
+            with urllib.request.urlopen(self.base + '/kline-events?sym=2330&range=custom&start=2020-01-01&asOf=2025-12-31', timeout=5) as response:
+                self.assertEqual(json.load(response), payload)
+            self.assertEqual(calculate.call_args.kwargs, {'period': 'custom', 'start_date': '2020-01-01'})
             calculate.side_effect = ValueError('截至日期無效')
             for query in ('sym=bad!', 'sym=2330&asOf=invalid'):
                 with self.subTest(query=query), self.assertRaises(urllib.error.HTTPError) as caught:
