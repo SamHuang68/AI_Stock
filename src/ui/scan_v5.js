@@ -189,6 +189,12 @@
     if (hint && (lastResults.length || scanPending)) hint.textContent = '條件已更新，請按「掃描」套用；下方為前次條件的結果。';
   }
 
+  function onFormInput(event) {
+    var target = event.target;
+    if (!target || target.id === 'sc-research-symbol' || target.closest('.sc-sort-controls')) return;
+    markFormChange();
+  }
+
   function readForm() {
     if (ck('sc-research-enabled')) {
       var settings = researchSettings();
@@ -673,7 +679,7 @@
       if (run) run.onclick = scan;
       var researchToggle = $('sc-research-enabled');
       if (researchToggle) researchToggle.onchange = function () { syncResearchControls(); markFormChange(); };
-      mount.addEventListener('input', function (event) { if (event.target.id !== 'sc-research-symbol') markFormChange(); });
+      mount.addEventListener('input', onFormInput);
       var open = $('sc-research-open');
       if (open) open.onclick = function () { openResearch(val('sc-research-symbol'), null); };
       var symbolInput = $('sc-research-symbol');

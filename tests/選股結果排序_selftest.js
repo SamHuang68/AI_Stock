@@ -24,7 +24,7 @@ const sandbox = {
 };
 vm.runInNewContext(source.replace(marker, `window.sortTest = {
   load: function(rows, settings) { lastResults = rows; lastResearchSettings = settings; renderResults(rows); },
-  apply: applySort, cycle: cycleSort
+  apply: applySort, cycle: cycleSort, formInput: onFormInput
 }; ${marker}`), sandbox);
 const api = window.ScanV5;
 const test = window.sortTest;
@@ -37,6 +37,11 @@ const base = [
 ];
 const saved = JSON.stringify(base);
 test.load(base, null);
+node('sc-conditions-msg').textContent = '';
+test.formInput({target:{id:'sc-sort-key',closest(){return {};}}});
+assert.equal(node('sc-conditions-msg').textContent, '', '排序輸入不得標記查詢條件已變更');
+test.formInput({target:{id:'sc-permax',closest(){return null;}}});
+assert.match(node('sc-conditions-msg').textContent, /條件已更新/, '真正篩選條件仍須提示重新查詢');
 test.cycle('per');
 assert.deepEqual(ids(base), ['5347','2454','2330','00631L'], '數值升冪、同值穩定、缺值置底');
 test.cycle('per');
