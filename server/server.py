@@ -6422,7 +6422,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                 self._err('台股代號無效', 400); return
             import datastore
             from K線事件 import report
-            result = report(datastore.DB_PATH, code, qs.get('asOf', [None])[0])
+            result = report(datastore.DB_PATH, code, qs.get('asOf', [None])[0],
+                            period=qs.get('range', ['3y'])[0], start_date=qs.get('start', [None])[0])
             self._ok(json.dumps(result, ensure_ascii=False, allow_nan=False).encode())
         except ValueError as e:
             self._err(str(e), 400)

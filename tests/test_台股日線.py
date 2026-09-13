@@ -259,6 +259,72 @@ class DatabaseCase(unittest.TestCase):
         with closing(sqlite3.connect(self.db)) as conn, conn:
             self.assertEqual(conn.execute('SELECT end_date FROM action_coverage').fetchone()[0], '2026-12-31')
 
+    def test_all_history_includes_older_bars_without_certifying_them(self):
+        self.history()
+        old = (daily.stamp(date(2016, 6, 22)), 100, 101, 99, 100, 1000)
+        datastore.upsert_bars('2330', 'TW', [old])
+        now = datetime(2026, 9, 13, 8, tzinfo=daily.TZ)
+        result = events.report(self.db, as_of='2026-09-11', now=now, period='all')
+        self.assertEqual(result['historyStart'], '2016-06-22')
+        self.assertEqual(result['availableStart'], '2016-06-22')
+        self.assertGreater(len(result['candles']), 30)
+        self.assertFalse(result['candles'][0]['eligible'])
+        self.assertIn('交易日曆尚未核對', result['candles'][0]['issues'])
+        self.assertEqual(result['unverifiedRows'], 1)
+        self.assertNotEqual(self.report()['historyStart'], '2016-06-22')
+        self.assertEqual(result['events'], [r for r in reversed(result['candles']) if r['signals']])
+
+    def test_custom_range_has_warmup_without_inflating_statistics(self):
+        rows = self.history()
+        start = datetime.fromtimestamp(rows[30][0], daily.TZ).date().isoformat()
+        end = datetime.fromtimestamp(rows[50][0], daily.TZ).date().isoformat()
+        result = events.report(self.db, as_of=end, period='custom', start_date=start)
+        self.assertEqual(result['historyStart'], start)
+        self.assertEqual(result['historyEnd'], end)
+        self.assertEqual(result['warmupDays'], 20)
+        self.assertEqual(result['timelineDays'], 21)
+        self.assertEqual(result['eligibleDays'], 21)
+        self.assertEqual(result['candles'][0]['signals'], ['doji'])
+        doji = next(s for s in result['stats'] if s['key'] == 'doji')
+        self.assertEqual(doji['cases'], 21)
+        self.assertEqual(doji['horizons']['10']['raw']['n'], 11)
+        self.assertIsNone(result['candles'][-1]['returns']['1']['value'])
+        self.assertEqual(result['candles'], [r for r in self.report(end)['candles'] if r['date'] >= start])
+
+    def test_thirty_sessions_and_empty_ranges_are_not_silent_fallbacks(self):
+        self.history()
+        result = events.report(self.db, as_of='2026-09-11', period='30d')
+        self.assertEqual(len(result['candles']), 30)
+        self.assertEqual(result['warmupDays'], 20)
+        empty = events.report(self.db, as_of='2015-01-01', period='all')
+        self.assertEqual(empty['candles'], [])
+        self.assertIsNone(empty['historyStart'])
+        self.assertEqual(empty['availableStart'], '2026-06-01')
+        absent = events.report(self.db, '9999', period='all')
+        self.assertEqual(absent['candles'], [])
+        self.assertIsNone(absent['availableStart'])
+
+    def test_calendar_ranges_handle_leap_days_and_invalid_parameters(self):
+        self.assertEqual(events.range_start('1y', date(2024, 2, 29), None), date(2023, 2, 28))
+        self.assertEqual(events.range_start('3m', date(2026, 5, 31), None), date(2026, 2, 28))
+        self.assertEqual(events.range_start('10y', date(2026, 9, 11), None), date(2016, 9, 11))
+        for period, start in [('custom', None), ('custom', 'bad'), ('custom', '2026-09-12'), ('all', '2020-01-01'), ('invalid', None)]:
+            with self.subTest(period=period, start=start), self.assertRaises(ValueError):
+                events.report(self.db, as_of='2026-09-11', period=period, start_date=start)
+
+    def test_missing_calendar_year_cannot_compress_history(self):
+        self.history()
+        daily.save_calendar(self.db, 2024, set(), set())
+        old = [(daily.stamp(date(2024, 12, d)), 100, 101, 99, 100, 1000) for d in range(2, 32) if date(2024, 12, d).weekday() < 5]
+        datastore.upsert_bars('2330', 'TW', old, source='TWSE')
+        datastore.upsert_bars('2330', 'TW', [(daily.stamp(date(2026, 1, 1)), 100, 101, 99, 100, 1000)], source='TWSE')
+        with closing(sqlite3.connect(self.db)) as conn, conn:
+            conn.execute("UPDATE action_coverage SET start_date='2024-01-01'")
+        result = events.report(self.db, as_of='2026-06-02', period='all')
+        last_old = next(r for r in result['candles'] if r['date'] == '2024-12-31')
+        self.assertTrue(last_old['eligible'])
+        self.assertIn('交易日曆', last_old['returns']['1']['reason'])
+
 
 if __name__ == '__main__':
     unittest.main()
