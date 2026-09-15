@@ -15,6 +15,7 @@ import os
 import shutil
 import subprocess
 import threading
+import tempfile
 import time
 import urllib.request
 import uuid
@@ -79,6 +80,8 @@ SYSTEM = (
 )
 
 _TRACE_LOCK = threading.Lock()
+# 本機與 Private Web 共用使用者暫存目錄，避免同時擠入同一個模型。
+FAST_LOCK_DIR = Path(tempfile.gettempdir()) / 'StockTerminal' / 'ai-runtime'
 
 
 class AiRuntimeError(RuntimeError):
@@ -292,8 +295,11 @@ def _stream_lmstudio(
         LMSTUDIO_CHAT_URL, data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json", "Accept": "text/event-stream"},
     )
+    deadline = time.monotonic() + FAST_SOCKET_TIMEOUT
     with urllib.request.urlopen(request, timeout=FAST_SOCKET_TIMEOUT) as response:
         for raw in response:
+            if time.monotonic() > deadline:
+                raise AiRuntimeError('本機模型推理超過等待上限，已停止本次分析；請稍後重試。')
             line = raw.decode("utf-8", "replace").strip()
             if not line.startswith("data:"):
                 continue
@@ -340,9 +346,12 @@ def _stream_lmstudio(
         raise AiCompletionError("本機模型完成推理，但未回傳可見正文；請重試。")
     if finish_reason == "length":
         raise AiCompletionError("本機模型回覆達輸出上限，內容可能不完整；請重試。")
+    if finish_reason != 'stop':
+        raise AiCompletionError('本機模型未正常完成回覆，內容可能不完整；請重試。')
 
 
 def _stream_ollama(full_prompt: str) -> Generator[str, None, None]:
+    completed = False
     payload = {
         "model": FAST_MODEL,
         "messages": [{"role": "user", "content": full_prompt}],
@@ -363,7 +372,12 @@ def _stream_ollama(full_prompt: str) -> Generator[str, None, None]:
             if chunk:
                 yield str(chunk)
             if item.get("done"):
+                if item.get('done_reason') == 'length':
+                    raise AiCompletionError('本機模型回覆達輸出上限，內容可能不完整；請重試。')
+                completed = True
                 break
+    if not completed:
+        raise AiCompletionError('本機模型未正常完成回覆，內容可能不完整；請重試。')
 
 
 def chat_stream(
@@ -380,12 +394,22 @@ def chat_stream(
     if not metadata.get("available"):
         raise AiRuntimeError(str(metadata.get("reason") or "快速本機模型未就緒"))
     full_prompt, digest = _full_prompt(prompt, context)
+    from daemon_lock import acquire_daemon_lock, release_daemon_lock
+    try:
+        runtime_lock = acquire_daemon_lock('fast-ai', lock_dir=FAST_LOCK_DIR)
+    except OSError as exc:
+        raise AiRuntimeError('無法取得本機 AI 執行鎖，請稍後重試') from exc
+    if runtime_lock is None:
+        _trace('busy', request_id=request_id, mode='fast', phase='admission')
+        raise AiRuntimeError('本機 AI 正在處理另一份分析；請等待完成後再試。')
     ok, defer = _acquire_st_slot()
     if not ok:
+        release_daemon_lock(runtime_lock)
         raise AiRuntimeError(defer or "本機模型忙碌")
     started = time.monotonic()
     output_chars = 0
     diagnostics: Dict[str, Any] = {"maxTokens": FAST_MAX_TOKENS}
+    iterator = None
     _trace(
         "started", request_id=request_id, mode="fast",
         provider=metadata["provider"], model=metadata["model"],
@@ -429,7 +453,12 @@ def chat_stream(
             raise
         raise AiRuntimeError(f"{metadata['provider']} 快速摘要失敗：{type(exc).__name__}") from exc
     finally:
-        _release_st_slot()
+        try:
+            if iterator is not None and hasattr(iterator, 'close'):
+                iterator.close()
+        finally:
+            _release_st_slot()
+            release_daemon_lock(runtime_lock)
 
 
 def _hermes_command(executable: Path) -> list[str]:

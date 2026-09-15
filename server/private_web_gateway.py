@@ -1358,7 +1358,7 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
         started = time.monotonic()
         path_only = urlsplit(self.path).path
         archify_document = _is_static_navigation(path_only)
-        ai_request = path_only in {"/ai/local", "/ai/deep"}
+        ai_request = path_only in {"/ai/local", "/ai/deep", "/ai-report", "/ai-note"}
         response_started = False
         upstream_status = 0
         bytes_forwarded = 0

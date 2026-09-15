@@ -36,6 +36,45 @@ class FakeStreamResponse:
 
 
 class AiLocalPolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        patcher = mock.patch.object(ai_local, 'FAST_LOCK_DIR', Path(self.temp.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_two_requests_cannot_enter_same_local_model_and_close_releases_lock(self):
+        with mock.patch.object(ai_local, '_lmstudio_models', return_value=[ai_local.FAST_MODEL]), \
+             mock.patch.object(ai_local, '_acquire_st_slot', return_value=(True, None)), \
+             mock.patch.object(ai_local, '_release_st_slot'), \
+             mock.patch.object(ai_local, '_stream_lmstudio', side_effect=lambda *args, **kwargs: iter(['正文'])), \
+             mock.patch.object(ai_local, 'TRACE_PATH', Path(self.temp.name) / 'trace.jsonl'):
+            first = ai_local.chat_stream('分析')
+            self.assertEqual(next(first), '正文')
+            with self.assertRaisesRegex(ai_local.AiRuntimeError, '另一份分析'):
+                list(ai_local.chat_stream('重複分析'))
+            first.close()
+            self.assertEqual(list(ai_local.chat_stream('重新分析')), ['正文'])
+
+    def test_upstream_eof_without_finish_reason_cannot_be_success(self):
+        response = FakeStreamResponse({'choices': [{'delta': {'content': '半截正文'}}]})
+        with mock.patch.object(ai_local.urllib.request, 'urlopen', return_value=response):
+            with self.assertRaisesRegex(ai_local.AiCompletionError, '未正常完成'):
+                list(ai_local._stream_lmstudio('分析'))
+
+    def test_ollama_requires_done_and_rejects_output_limit(self):
+        for ending, expected in [(None, False), ('length', False), ('stop', True)]:
+            response = FakeStreamResponse()
+            response.lines = [json.dumps({'message': {'content': '正文'}}).encode()]
+            if ending:
+                response.lines.append(json.dumps({'done': True, 'done_reason': ending}).encode())
+            with mock.patch.object(ai_local.urllib.request, 'urlopen', return_value=response):
+                if expected:
+                    self.assertEqual(''.join(ai_local._stream_ollama('分析')), '正文')
+                else:
+                    with self.assertRaises(ai_local.AiCompletionError):
+                        list(ai_local._stream_ollama('分析'))
+
     def test_runtime_status_is_server_side_explicit_and_load_aware(self):
         with mock.patch.object(ai_local, "_lmstudio_models", return_value=[ai_local.FAST_MODEL]), \
              mock.patch.object(ai_local, "_resolve_hermes_exe", return_value=Path("hermes.exe")):

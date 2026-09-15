@@ -48,7 +48,7 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/fundamental/chip_v3.js',
               'src/fundamental/fundamental_v3.js',              # v3.8 B: 基本面 (月營收/三率/評分)
               # 'src/chart/heatmap_v3.js',                # v3.9: 📊類股(產業熱力圖)停用 — 改成點下面大盤列 cell 直接帶K線;檔案保留待恢復
-              'src/screener/screener_v3.js', 'src/ai/ai_report_v3.js', 'src/ui/polish_v3.js',
+              'src/screener/screener_v3.js', 'src/ai/ai_runtime_client.js', 'src/ai/ai_report_v3.js', 'src/ui/polish_v3.js',
               'src/core/wl_live_v3.js',
               'src/fundamental/plan_history_v3.js',
               'src/fundamental/plan_position_v3.js',

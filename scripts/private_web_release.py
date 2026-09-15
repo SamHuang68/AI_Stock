@@ -29,6 +29,7 @@ REQUIRED_RELEASE_FILES = {
     "server/server.py",
     "server/ai_local.py",
     "server/ai_routes.py",
+    "src/ai/ai_runtime_client.js",
     "server/overnight_intraday.py",
     "server/overnight_intraday_routes.py",
     "server/daemon_lock.py",
@@ -55,6 +56,8 @@ REQUIRED_RELEASE_FILES = {
     "tests/test_daemon_lock.py",
     "tests/test_private_web_host.py",
     "tests/test_ai_local.py",
+    "tests/test_ai_routes_stream.py",
+    "tests/ai_panels_selftest.js",
     "tests/test_private_web_access.py",
     "tests/test_archify_artifacts.py",
     "stock_terminal_v2.html",
@@ -203,6 +206,7 @@ def stage_release(
         _run([python, "build_v2.py"], cwd=extracted)
         tests = [
             "tests.test_ai_local",
+            "tests.test_ai_routes_stream",
             "tests.test_daemon_lock",
             "tests.test_health_live",
             "tests.test_private_web_gateway",
@@ -220,6 +224,7 @@ def stage_release(
                 raise RuntimeError("Node.js is required for ETF/UI release regression tests")
             _run([node, "tests/etf_flow_v3_selftest.js"], cwd=extracted)
             _run([node, "tests/shell_v5_selftest.js"], cwd=extracted)
+            _run([node, "tests/ai_panels_selftest.js"], cwd=extracted)
 
         # Tests may legitimately exercise refresh paths, but the release
         # artifact must keep committed public seeds byte-identical to Git.

@@ -1,11 +1,5 @@
-// ============================================================
-// Stock Terminal v3.0 — Claude AI 每日盤前報告
-// ------------------------------------------------------------
-// 收集你的持倉 + 觀察清單，呼叫 Claude API 產出 Markdown 報告。
-// 需要在右上角 API KEY 設過 sk-ant-* 才能用。
-// ============================================================
-
-const SERVER_A = window.SERVER || `http://localhost:18432`;
+// AI 研究報告：預設使用既有本機模型；雲端模式須主動選取。
+let aiReportTask = null;
 
 (function injectAICSS() {
   const css = `
@@ -33,6 +27,7 @@ const SERVER_A = window.SERVER || `http://localhost:18432`;
 #btn-ai-report:hover{color:var(--gold);background:var(--gold-s);border-color:var(--gold-m)}
 .ai-loading{text-align:center;padding:80px 30px;color:var(--gold);font-family:monospace;font-size:12px;line-height:2}
 .ai-loading .spin{display:inline-block;animation:airot 1.4s linear infinite;font-size:24px;margin-right:10px}
+.ai-foot{flex-wrap:wrap;gap:8px}.ai-foot>div{flex-wrap:wrap}.ai-foot select{max-width:100%;background:var(--bg);color:var(--text)}.ai-foot button:disabled{opacity:.45;cursor:wait}
 @keyframes airot{from{transform:rotate(0)}to{transform:rotate(360deg)}}
 `;
   const s = document.createElement('style'); s.id='ai-v3-styles'; s.textContent=css;
@@ -41,11 +36,7 @@ const SERVER_A = window.SERVER || `http://localhost:18432`;
 
 // Minimal Markdown → HTML (no external lib)
 function mdToHtml(md) {
-  // 安全(v3.9 review):中和潛在注入(AI 回應理論上可含 HTML)。移除 script/iframe/事件處理器/js: 協定。
-  let h = String(md || '')
-    .replace(/<\s*\/?\s*(script|iframe|object|embed|link|meta)\b/gi, '&lt;$1')
-    .replace(/\son\w+\s*=/gi, ' data-x=')
-    .replace(/javascript:/gi, 'js:');
+  let h = escA(md);
   // Headers
   h = h.replace(/^### (.*?)$/gm, '<h3>$1</h3>');
   h = h.replace(/^## (.*?)$/gm, '<h2>$1</h2>');
@@ -75,71 +66,71 @@ function mdToHtml(md) {
   return h;
 }
 
+function syncAIReportControls(busy) {
+  ['ai-generate', 'ai-last', 'ai-provider'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.disabled = busy;
+  });
+  const cancel = document.getElementById('ai-cancel'); if (cancel) cancel.hidden = !busy;
+}
 async function generateAIReport() {
-  if (!S.aiKeySet) { alert('請先在右上角設定 Claude API Key (sk-ant-...)'); return; }
-  openAIModal();
+  if (aiReportTask) return;
+  // 不再呼叫會被導覽橋接包裝的全域入口，以免延遲重建面板。
+  if (!document.getElementById('ai-body')) createAIReportModal();
   const body = document.getElementById('ai-body');
-  body.innerHTML = '<div class="ai-loading"><span class="spin">⚙</span>Claude 撰寫中...<br><span style="font-size:10px;color:var(--tlo);margin-top:10px;display:inline-block">分析您的持倉與觀察清單</span></div>';
-  // Collect data
-  const positions = {};
-  for (const code in (S.positions || {})) {
-    const p = S.positions[code];
-    positions[code] = {
-      entry: p.entry, shares: p.shares,
-      target: p.target, stop: p.stop,
-      lastPrice: p.lastPrice,
-      notes: p.notes,
-    };
-  }
-  const watches = {};
-  for (const code in (S.watches || {})) {
-    watches[code] = S.watches[code];
-  }
+  const status = document.getElementById('ai-status');
+  const cloud = document.getElementById('ai-provider').value === 'cloud';
+  if (cloud && !S.aiKeySet) { status.textContent = '雲端模式尚未設定金鑰，可改用本機報告。'; return; }
+  const context = window.STAI.context();
+  syncAIReportControls(true);
+  body.textContent = '正在準備報告，請保留此面板；本機模型載入與推理可能需要數分鐘。';
+  const task = window.STAI.request({
+    endpoint: cloud ? '/ai-report' : '/ai/local',
+    body: cloud ? { positions: S.positions || {}, watches: S.watches || {},
+      marketSym: S.mkt === 'US' ? '^GSPC' : '^TWII', context } : undefined,
+    prompt: '請依提供的畫面快照，寫一份約 300 字繁體中文研究報告，依序列出資料日期、已知觀察、持倉風險、反方證據與待補資料。缺少大盤行情或新聞時直接說未提供，不可推測昨日表現、即時行情或買賣價位。',
+    context,
+    onText: text => { if (aiReportTask === task) body.innerHTML = mdToHtml(text); },
+    onStatus: info => { status.textContent = (cloud ? '既有雲端報告' : '本機報告') +
+      ' · 已等候 ' + info.elapsedSeconds + ' 秒 · ' + (info.hasText ? '接收正文中' : '模型準備／推理中') +
+      ' · ' + info.requestId; }
+  });
+  aiReportTask = task;
   try {
-    const r = await fetch(`${SERVER_A}/ai-report`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        apiKey: S.apiKey,
-        positions,
-        watches,
-        marketSym: S.mkt === 'US' ? '^GSPC' : '^TWII',
-      }),
-    });
-    if (!r.ok) {
-      const j = await r.json().catch(()=>({error:'HTTP '+r.status}));
-      body.innerHTML = `<div style="padding:30px;color:var(--red);font-family:monospace;font-size:11px;line-height:2">⚠ 報告生成失敗<br><br>${escA(j.error || ('HTTP '+r.status))}</div>`;
-      return;
-    }
-    const data = await r.json();
-    body.innerHTML = mdToHtml(data.report || '無內容回傳');
-    // Save to localStorage for re-open
-    const stamp = new Date().toISOString().slice(0,16).replace('T', ' ');
-    try { localStorage.setItem('ai_report_last', JSON.stringify({stamp, md: data.report})); } catch {}
+    const result = await task.promise;
+    if (aiReportTask !== task) return;
+    const stamp = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
+    status.textContent = '完成 · ' + result.elapsedSeconds + ' 秒 · ' +
+      [result.meta.host, result.meta.provider, result.meta.model].filter(Boolean).join(' · ');
+    try { localStorage.setItem('ai_report_last', JSON.stringify({ stamp, md: result.text, meta: result.meta })); } catch (_) {}
   } catch (e) {
-    body.innerHTML = `<div style="padding:30px;color:var(--red);font-family:monospace;font-size:11px;line-height:2">⚠ 網路錯誤：${escA(e.message)}</div>`;
+    if (aiReportTask === task) { status.textContent = '未完成：' + e.message; body.textContent = '本次報告未完成，未覆寫上次成功報告。'; }
+  } finally {
+    if (aiReportTask === task) { aiReportTask = null; syncAIReportControls(false); }
   }
+}
+function cancelAIReport() {
+  if (aiReportTask) aiReportTask.cancel();
 }
 
 function escA(s) { return String(s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
-function openAIModal() {
-  closeAIModal();
+function createAIReportModal() {
+  if (document.getElementById('ai-modal')) return;
   const m = document.createElement('div');
   m.className = 'ai-modal';
   m.id = 'ai-modal';
   m.innerHTML = `
     <div class="panel">
       <div class="head">
-        <h3>🤖 Claude AI 每日盤前報告</h3>
+        <h3>🤖 AI 研究報告</h3>
         <span style="cursor:pointer;color:var(--tlo);font-size:20px" onclick="closeAIModal()">×</span>
       </div>
-      <div class="ai-body" id="ai-body"><div style="color:var(--tlo);font-family:monospace;font-size:11px;line-height:1.8;padding:14px;text-align:center">點下方 <b style="color:var(--gold)">🔄 重新生成</b> 開始分析(會用 Claude 跑你的持倉+觀察+大盤)<br>或 <b>📂 上次報告</b> 看上次結果。</div></div>
-      <div class="ai-foot">
-        <span style="font-family:monospace;font-size:9.5px;color:var(--tf)">資料：你的持倉 + 觀察 + 大盤 · 模型：Claude</span>
+      <div class="ai-body" id="ai-body"><div style="color:var(--tlo);font-family:monospace;font-size:11px;line-height:1.8;padding:14px;text-align:center">點下方 <b style="color:var(--gold)">🔄 重新生成</b> 開始分析（預設本機模型，僅整理已提供的個股、持倉與觀察資料）<br>或 <b>📂 上次報告</b> 看上次結果。</div></div>
+      <div id="ai-status" role="status" style="padding:8px 18px;overflow-wrap:anywhere;font-size:11px">本機模型不需要雲端金鑰。</div><div class="ai-foot">
+        <span style="font-family:monospace;font-size:9.5px;color:var(--tf)">資料：目前畫面快照 · 未提供資料不推測</span>
         <div style="display:flex;gap:6px">
-          <button onclick="loadLastAIReport()">📂 上次報告</button>
-          <button onclick="generateAIReport()" class="primary">🔄 重新生成</button>
+          <select id="ai-provider" aria-label="報告模型路徑"><option value="local">本機報告</option><option value="cloud">既有 Claude 雲端（傳送快照）</option></select><button id="ai-cancel" hidden onclick="cancelAIReport()">取消</button><button id="ai-last" onclick="loadLastAIReport()">📂 上次報告</button>
+          <button id="ai-generate" onclick="generateAIReport()" class="primary">🔄 重新生成</button>
         </div>
       </div>
     </div>
@@ -147,21 +138,23 @@ function openAIModal() {
   document.body.appendChild(m);
   m.addEventListener('click', e => { if (e.target === m) closeAIModal(); });
 }
-function closeAIModal() { document.getElementById('ai-modal')?.remove(); }
+function openAIModal() { createAIReportModal(); }
+function closeAIModal() { cancelAIReport(); aiReportTask = null; document.getElementById('ai-modal')?.remove(); }
 
 function loadLastAIReport() {
+  if (aiReportTask) return;
   try {
     const saved = JSON.parse(localStorage.getItem('ai_report_last') || 'null');
     if (!saved) { alert('還沒有上次報告'); return; }
     const body = document.getElementById('ai-body');
-    if (body) body.innerHTML = `<div style="color:var(--tlo);font-family:monospace;font-size:9.5px;margin-bottom:10px">上次生成：${saved.stamp}</div>` + mdToHtml(saved.md);
+    if (body) body.innerHTML = `<div style="color:var(--tlo);font-family:monospace;font-size:9.5px;margin-bottom:10px">上次生成：${escA(saved.stamp)}</div>` + mdToHtml(saved.md);
   } catch (e) { alert('讀取失敗：' + e.message); }
 }
 
 /* v3.9: 改用 Toolbar 註冊表(模組化) — 取代手寫 #pro-tools 注入樣板 */
 (function () {
   var spec = { id: 'btn-ai-report', label: '🤖 AI報告', cat: 'ai',
-               title: 'Claude AI 每日報告（需先設 API Key）',
+               title: 'AI 研究報告（預設本機模型，可選既有雲端）',
                onclick: openAIModal };   // 先開面板,由使用者點「重新生成」才分析
   (window.Toolbar ? window.Toolbar.register
     : function (s) { (window.__tbQueue = window.__tbQueue || []).push(s); })(spec);
@@ -171,3 +164,5 @@ window.generateAIReport = generateAIReport;
 window.openAIModal = openAIModal;
 window.closeAIModal = closeAIModal;
 window.loadLastAIReport = loadLastAIReport;
+
+window.cancelAIReport = cancelAIReport;

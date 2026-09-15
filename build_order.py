@@ -18,6 +18,9 @@ import os
 
 # 相依宣告：key 必須排在 value(們) 之後。
 DEPS = {
+    'ai_runtime_client.js': ['market_v3.js'],
+    'ai_report_v3.js':      ['ai_runtime_client.js'],
+    'copilot_v3.js':        ['ai_runtime_client.js'],
     'table_sort_v5.js':     ['colors_v3.js'],
     'volume_profile_v3.js': ['pro_v2.js'],
     'alert_push_v3.js':     ['alert_v3.js'],
@@ -35,7 +38,7 @@ DEPS = {
     'chip_v3.js':           ['viz_v5.js'],
     'instrank_v3.js':       ['viz_v5.js'],
     'marketflow_v3.js':     ['viz_v5.js'],
-    'pulse_v5.js':          ['viz_v5.js'],
+    'pulse_v5.js':          ['viz_v5.js', 'ai_runtime_client.js'],
     'decision_data_v5.js':  ['market_data_v5.js'],
     'market_freshness_v5.js': ['app_kernel_v5.js'],
     'market_data_v5.js':    ['app_kernel_v5.js', 'market_freshness_v5.js'],

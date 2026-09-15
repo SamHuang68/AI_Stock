@@ -82,6 +82,12 @@ class AiRoutesMixin:
         if not al:
             self._err('ai_local 模組未載入', 500); return
         request_id = self._ensure_trace_id()
+        structured = 'text/event-stream' in (self.headers.get('Accept') or '')
+
+        def emit(event, **fields):
+            raw = json.dumps({'type': event, **fields}, ensure_ascii=False)
+            self.wfile.write(('data: ' + raw + '\n\n').encode('utf-8'))
+            self.wfile.flush()
         try:
             metadata = al.route_metadata(mode, probe=(mode == 'fast'))
         except Exception as exc:
@@ -98,7 +104,7 @@ class AiRoutesMixin:
         except Exception:
             pass
         self.send_response(200)
-        self.send_header('Content-Type', 'text/plain; charset=utf-8')
+        self.send_header('Content-Type', ('text/event-stream' if structured else 'text/plain') + '; charset=utf-8')
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Accel-Buffering', 'no')
         self.send_header('X-ST-AI-Request-ID', request_id)
@@ -130,8 +136,13 @@ class AiRoutesMixin:
                 )
             for chunk in iterator:
                 output_chars += len(chunk)
-                self.wfile.write(chunk.encode('utf-8'))
-                self.wfile.flush()
+                if structured:
+                    emit('delta', text=chunk)
+                else:
+                    self.wfile.write(chunk.encode('utf-8'))
+                    self.wfile.flush()
+            if structured:
+                emit('done')
             al.trace_event(
                 'http_stream_completed', request_id=request_id, mode=mode,
                 provider=metadata.get('provider'), model=metadata.get('model'),
@@ -148,8 +159,11 @@ class AiRoutesMixin:
         except Exception as exc:
             message = str(exc) if isinstance(exc, getattr(al, 'AiRuntimeError', RuntimeError)) else type(exc).__name__
             try:
-                self.wfile.write(('\n⚠ ' + message).encode('utf-8'))
-                self.wfile.flush()
+                if structured:
+                    emit('error', message=message)
+                else:
+                    self.wfile.write(('\n⚠ ' + message).encode('utf-8'))
+                    self.wfile.flush()
             except (OSError, ValueError):
                 pass
             al.trace_event(
@@ -202,11 +216,12 @@ class AiRoutesMixin:
             triggered = [s for s in sigs if s.get('lastEval', {}).get('status') == 'trigger']
             watch_lines.append(f"  - {code}: {len(sigs)} 訊號、{len(triggered)} 觸發")
         prompt = (
-            f'你是專業台股研究分析師。請為這個人撰寫今日盤前簡報。\n\n'
+            f'你是專業台股研究分析師。只能依提供的資料撰寫研究報告。未提供的行情、日期與新聞不可推測。\n\n'
+            f'# 畫面快照\n{str(body.get("context") or "未提供")[:180000]}\n\n'
             f'# 持倉清單\n' + ('\n'.join(pos_lines) if pos_lines else '  (無)') + '\n\n'
             f'# 觀察清單\n' + ('\n'.join(watch_lines) if watch_lines else '  (無)') + '\n\n'
             f'請輸出 Markdown 格式報告，含：\n'
-            f'1. 📊 大盤總結（基於昨日 {market} 表現）\n'
+            f'1. 📊 {market} 已知觀察與資料日期（未提供大盤行情時明確說明資料不足）\n'
             f'2. 💼 持倉檢視（每檔含表現、注意事項、行動建議）\n'
             f'3. 👁 觀察清單重點（觸發訊號分析）\n'
             f'4. 🎯 今日 3 大重點\n\n'
@@ -219,6 +234,8 @@ class AiRoutesMixin:
             text, data = ai_api.anthropic_messages(
                 api_key, [{'role': 'user', 'content': prompt}], max_tokens=2048,
             )
+            if not text.strip() or data.get('stop_reason') == 'max_tokens':
+                self._err('雲端報告未完整回傳，請稍後重試', 502); return
             try:
                 import wavedeck_bus as wdb
                 wdb.record_st_cloud(usd=0.04, calls=1)
