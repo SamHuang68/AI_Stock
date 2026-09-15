@@ -8,7 +8,7 @@
 (function () {
   'use strict';
 
-  var _lastReply = '', _lastQ = '';
+  var _lastReply = '', _lastQ = '', activeTask = null;
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
 
@@ -18,37 +18,6 @@
     h = h.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
     h = h.replace(/\n{2,}/g, '<br><br>').replace(/\n/g, '<br>');
     return h;
-  }
-
-  // 把畫面上有的真實資料整理成 context(只送有的,不編造)
-  function buildContext() {
-    var parts = [];
-    if (typeof S === 'undefined') return '';
-    if (S.sym && S.data) {
-      var cs = S.data.candles || [];
-      var last = cs.length ? cs[cs.length - 1] : null;
-      var nm = S.data.name || S.sym;
-      if (last && last.close != null) {
-        var line = '當前個股:' + S.sym + ' ' + nm + ',最新收盤 ' + last.close;
-        if (S.data.yesterdayClose) {
-          var chg = ((last.close - S.data.yesterdayClose) / S.data.yesterdayClose * 100);
-          line += ',昨收 ' + S.data.yesterdayClose + ',漲跌 ' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
-        }
-        parts.push(line);
-      }
-    }
-    if (S.positions && Object.keys(S.positions).length) {
-      var ph = Object.keys(S.positions).map(function (code) {
-        var p = S.positions[code] || {};
-        var pnl = (p.lastPrice && p.entry) ? ((p.lastPrice - p.entry) / p.entry * 100).toFixed(1) + '%' : '';
-        return code + '(' + (p.shares || 0) + '股,進場 ' + p.entry + (pnl ? ',損益 ' + pnl : '') + ')';
-      });
-      parts.push('我的持倉:' + ph.join('; '));
-    }
-    if (S.watches && Object.keys(S.watches).length) {
-      parts.push('自選股:' + Object.keys(S.watches).join('、'));
-    }
-    return parts.join('\n');
   }
 
   function injectStyle() {
@@ -70,7 +39,7 @@
       '.cp-meta{font-size:10px;color:#64748b;margin-top:10px}' +
       '.cp-keep{background:#16213a;border:1px solid #28324d;color:#cbd5e1;border-radius:12px;padding:2px 10px;font-size:10px;cursor:pointer;margin-left:6px}' +
       '.cp-keep:hover{border-color:#F5C518;color:#F5C518}.cp-keep-st{font-size:10px;color:#94a3b8;margin-left:4px}' +
-      '#cp-box .cp-hint{font-size:10px;color:#64748b;padding:0 16px 8px}';
+      '#cp-box button:disabled{opacity:.45;cursor:wait}#cp-status{overflow-wrap:anywhere}#cp-box .cp-hint{font-size:10px;color:#64748b;padding:0 16px 8px}';
     document.head.appendChild(s);
   }
 
@@ -99,50 +68,45 @@
     }
   }
 
+  function busy(value) {
+    document.querySelectorAll('#cp-send, .cp-q button').forEach(function (el) { el.disabled = value; });
+    var cancel = document.getElementById('cp-cancel'); if (cancel) cancel.hidden = !value;
+  }
   async function send(preset) {
-    var text = preset || (document.getElementById('cp-text') || {}).value || '';
-    text = text.trim();
+    if (activeTask) return;
+    var text = String(preset || (document.getElementById('cp-text') || {}).value || '').trim();
     if (!text) return;
-    var out = document.getElementById('cp-out');
-    out.innerHTML = '<span style="color:#94a3b8">EVO-T1 正在準備本機快速模型。請預留約 5 分鐘；已包含冷啟動、模型載入、上下文預填與推理，通常會提早完成。</span>';
-    var ctx = buildContext();
+    var out = document.getElementById('cp-out'), status = document.getElementById('cp-status');
+    _lastReply = ''; _lastQ = '';
+    busy(true);
+    out.textContent = '正在準備本機模型；載入與推理可能需要數分鐘，收到正文後會逐步顯示。';
+    var task = window.STAI.request({ prompt: text, context: window.STAI.context(),
+      onText: function (reply) { if (activeTask === task) out.innerHTML = mdLite(reply); },
+      onStatus: function (info) { status.textContent = '已等候 ' + info.elapsedSeconds + ' 秒 · ' +
+        (info.hasText ? '接收正文中' : '模型準備／推理中') + ' · ' + info.requestId; }
+    });
+    activeTask = task;
     try {
-      var r = await fetch('/ai/local', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: text, context: ctx })
-      });
-      if (!r.ok) {
-        var errText = await r.text();
-        try { errText = (JSON.parse(errText) || {}).error || errText; } catch (_e) {}
-        throw new Error(String(errText || ('HTTP ' + r.status)).slice(0, 220));
+      var result = await task.promise;
+      if (activeTask !== task) return;
+      _lastReply = result.text; _lastQ = text;
+      status.textContent = '完成 · ' + result.elapsedSeconds + ' 秒 · ' +
+        [result.meta.host, result.meta.provider, result.meta.model].filter(Boolean).join(' · ');
+      out.innerHTML = mdLite(result.text) + '<div class="cp-meta">本機資料邊界 <button class="cp-keep" id="cp-keep">📨 寄到 Telegram/Email</button><span id="cp-keep-st" class="cp-keep-st"></span></div>';
+      var keep = document.getElementById('cp-keep'); if (keep) keep.onclick = notifyReply;
+    } catch (err) {
+      if (activeTask === task) {
+        status.textContent = '未完成：' + err.message;
+        out.textContent = '本次分析未完成，可稍後重試。';
       }
-      var actualHost = r.headers.get('X-ST-AI-Host') || 'EVO-T1';
-      var actualProvider = r.headers.get('X-ST-AI-Provider') || 'LM Studio';
-      var actualModel = r.headers.get('X-ST-AI-Model') || '固定模型';
-      if (!r.body || !r.body.getReader) { out.innerHTML = mdLite(await r.text()); return; }   // 後援
-      var reader = r.body.getReader();
-      var dec = new TextDecoder();
-      var acc = '';
-      out.innerHTML = '';
-      while (true) {
-        var res = await reader.read();
-        if (res.done) break;
-        acc += dec.decode(res.value, { stream: true });
-        out.innerHTML = mdLite(acc);
-        out.scrollTop = out.scrollHeight;
-      }
-      _lastReply = acc; _lastQ = text;
-      out.innerHTML = mdLite(acc) + '<div class="cp-meta">執行:' + esc(actualHost + ' · ' + actualProvider + ' · ' + actualModel) +
-        ' · 本機資料邊界' + (ctx ? ' · 已附帶持倉/個股' : '') +
-        ' <button class="cp-keep" id="cp-keep">📨 寄到 Telegram/Email</button><span id="cp-keep-st" class="cp-keep-st"></span></div>';
-      var _kb = document.getElementById('cp-keep'); if (_kb) _kb.onclick = notifyReply;
-    } catch (e) {
-      out.innerHTML = '<span style="color:#f87171">⚠ ' + esc(e.message) + '</span>';
+    } finally {
+      if (activeTask === task) { activeTask = null; busy(false); }
     }
   }
 
   function open() {
     injectStyle();
+    if (activeTask) { var shown = document.getElementById('cp-modal'); if (shown) shown.style.display = 'flex'; return; }
     var modal = document.getElementById('cp-modal');
     if (!modal) { modal = document.createElement('div'); modal.id = 'cp-modal'; document.body.appendChild(modal); }
     modal.innerHTML =
@@ -150,12 +114,13 @@
       '<h3>🤖 AI 副駕 <span style="display:flex;gap:8px;align-items:center"><select id="cp-model"><option>載入中…</option></select><span class="x" onclick="window.copilotClose&&copilotClose()">×</span></span></h3>' +
       '<div class="cp-hint">EVO-T1 主機端 LM Studio · 固定本機模型 · 手機不執行推理 · 會附上當前個股與持倉資料</div>' +
       '<div id="cp-out">問我關於你的持倉、當前個股、或台股盤面結構的問題。</div>' +
-      '<div class="cp-q">' + QUICK.map(function (q, i) { return '<button data-q="' + i + '">' + esc(q) + '</button>'; }).join('') + '</div>' +
+      '<div id="cp-status" role="status" class="cp-hint"></div><button id="cp-cancel" hidden>取消接收</button><div class="cp-q">' + QUICK.map(function (q, i) { return '<button data-q="' + i + '">' + esc(q) + '</button>'; }).join('') + '</div>' +
       '<div class="cp-in"><textarea id="cp-text" placeholder="用自然語言問…(Enter 送出,Shift+Enter 換行)"></textarea><button id="cp-send">送出</button></div>' +
       '</div>';
     modal.style.display = 'flex';
     modal.onclick = function (e) { if (e.target === modal) close(); };
     loadModels();
+    document.getElementById('cp-cancel').onclick = function () { if (activeTask) activeTask.cancel(); };
     document.getElementById('cp-send').onclick = function () { send(); };
     document.getElementById('cp-text').onkeydown = function (e) {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -166,7 +131,7 @@
     setTimeout(function () { var t = document.getElementById('cp-text'); if (t) t.focus(); }, 50);
   }
 
-  function close() { var m = document.getElementById('cp-modal'); if (m) m.style.display = 'none'; }
+  function close() { if (activeTask) activeTask.cancel(); activeTask = null; var m = document.getElementById('cp-modal'); if (m) m.style.display = 'none'; }
 
   async function notifyReply() {
     if (!_lastReply) return;

@@ -1444,38 +1444,15 @@
       if (mode === 'deep') body.textContent += '\n注意：深度分析會由 EVO-T1 經 Hermes 將本面板市場摘要送至外部 NVIDIA 模型。';
       if (st) st.textContent = aiRouteLabel(activeRoute);
       startAiWaitTicker(startedAt, activeRoute, meta);
-      return fetch(SRV + endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-ST-Trace-ID': traceId },
-        body: JSON.stringify({ prompt: mode === 'deep' ? deepPrompt : fastPrompt, context: ctx })
+      return window.STAI.request({
+        endpoint: endpoint, prompt: mode === 'deep' ? deepPrompt : fastPrompt, context: ctx,
+        timeoutMs: mode === 'deep' ? 990000 : 660000,
+        onText: function (text) { body.textContent = text; }
+      }).promise.then(function (result) {
+        activeRoute = Object.assign({}, activeRoute, result.meta);
+        if (st) st.textContent = aiRouteLabel(activeRoute);
+        body.textContent = result.text;
       });
-    }).then(function (r) {
-      activeRoute = headerRoute(r, activeRoute);
-      if (st) st.textContent = aiRouteLabel(activeRoute);
-      startAiWaitTicker(startedAt, activeRoute, meta);
-      if (!r.ok) return r.text().then(function (t) { throw new Error(friendlyAiError(r.status, t)); });
-      if (!r.body || !r.body.getReader) return r.text().then(function (t) {
-        if (!t.trim()) throw new Error('AI 未回傳內容');
-        body.textContent = t;
-        return t;
-      });
-      var reader = r.body.getReader();
-      var dec = new TextDecoder();
-      var acc = '';
-      function pump() {
-        return reader.read().then(function (res) {
-          if (res.done) {
-            acc += dec.decode();
-            if (!acc.trim()) throw new Error('AI 未回傳內容');
-            body.textContent = acc;
-            return acc;
-          }
-          acc += dec.decode(res.value || new Uint8Array(), { stream: true });
-          body.textContent = acc;
-          return pump();
-        });
-      }
-      return pump();
     }).then(function () {
       if (meta) meta.textContent = '完成於 ' + new Date().toLocaleTimeString('zh-TW') + ' · 實際耗時 ' +
         formatAiDuration(Date.now() - startedAt) + ' · ' + aiRouteLabel(activeRoute) +
