@@ -59,6 +59,18 @@
     }
     const stats = document.getElementById('rp-PRICE');
     if (stats) stats.textContent = Number(q.price).toFixed(2) + ' TWD';
+    function updateStatsChange(id, base, label) {
+      const el = document.getElementById(id);
+      if (!el || !(base > 0)) return;
+      const delta = q.price - base, pct = delta / base * 100;
+      el.textContent = (delta >= 0 ? '+' : '') + delta.toFixed(2) + ' (' +
+        (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%)' + (label ? ' · ' + label : '');
+      el.style.color = window.Colors ? Colors.dir(code, delta) :
+        delta > 0 ? 'var(--red)' : delta < 0 ? 'var(--green)' : 'var(--thi)';
+      el.title = quoteLabel(q);
+    }
+    updateStatsChange('rp-CHANGE', q.prevClose, '');
+    if (S.range !== '1d' && S.data) updateStatsChange('rp-RANGE', S.data.rangeBase, S.data.rangeChgLbl);
   }
 
   function extractChg(res) {
