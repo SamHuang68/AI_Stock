@@ -659,8 +659,8 @@ ok(/industryLabel/.test(pl) && /bindSectorMoverLink/.test(pl) && /data-sector-ke
   'pulse movers industry tags + sector hover link');
 ok(/globalAbbr/.test(pl) && /'DJI'/.test(pl) && /'SPX'/.test(pl) && /'NDX'/.test(pl) && /'SOX'/.test(pl),
   'pulse global uses short ticker labels');
-ok(/basisPts/.test(pl) && /正價差/.test(pl) && /逆價差/.test(pl) && /Basis＝期貨−加權現貨/.test(pl),
-  'pulse strip shows TXF–TAIEX basis');
+ok(/basisPts/.test(pl) && /正價差/.test(pl) && /逆價差/.test(pl) && /同日日盤且成交時間相差不超過五分鐘/.test(pl),
+  '總覽期現價差標明同場次與時間差限制');
 ok(/pl-flash-q/.test(pl) && /flashQ/.test(pl) && /搜代號\/關鍵字/.test(pl),
   'pulse flash has keyword search beside TW/US tabs');
 ok(/pl-flash-title/.test(pl) &&
@@ -1036,10 +1036,10 @@ ok(/id: 'factors'/.test(shell) && /FactorsV5/.test(shell) && /ringRoute\('factor
   /function renderFactors/.test(hub) && /window\.FactorsV5/.test(hub) &&
   /ACTIVATORS\.factors/.test(hub),
   'factors ledger is independent shell route + hub page');
-ok(/台指期近月/.test(pl) && /__TXF__/.test(pl) && /TAIFEX MIS/.test(pl) &&
+ok(/台指期近月/.test(pl) && /夜盤獨立顯示/.test(pl) && /TAIFEX MIS/.test(pl) &&
   /加權 \^TWII · 近 20 日/.test(pl) && !/線型＝加權 \^TWII（非台指期）/.test(pl) &&
   !/台指期 TXF'/.test(pl),
-  'pulse TXF strip labeled 近月+sources; OHLC spark identifies ^TWII without a redundant header note');
+  '總覽台指期標明近月、來源與夜盤分離；日線圖保留加權識別');
 
 ok(/function applyTxfLiveToChart/.test(polish) && /overlayTxfLiveOnLastBar/.test(polish) &&
   /function isTxfChartSym/.test(polish) &&
