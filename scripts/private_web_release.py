@@ -207,6 +207,7 @@ def stage_release(
         tests = [
             "tests.test_ai_local",
             "tests.test_ai_routes_stream",
+            "tests.test_台股即時報價",
             "tests.test_daemon_lock",
             "tests.test_health_live",
             "tests.test_private_web_gateway",
@@ -225,6 +226,7 @@ def stage_release(
             _run([node, "tests/etf_flow_v3_selftest.js"], cwd=extracted)
             _run([node, "tests/shell_v5_selftest.js"], cwd=extracted)
             _run([node, "tests/ai_panels_selftest.js"], cwd=extracted)
+            _run([node, "tests/台股即時報價_selftest.js"], cwd=extracted)
 
         # Tests may legitimately exercise refresh paths, but the release
         # artifact must keep committed public seeds byte-identical to Git.

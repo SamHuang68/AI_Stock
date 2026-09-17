@@ -44,6 +44,23 @@
     el.classList.add(pcls(chgPct));
   }
 
+  function quoteLabel(q) {
+    if (!q || q.ok === false || q.stale) return '報價待更新';
+    const stamp = q.asOf ? new Date(q.asOf).toLocaleString('zh-TW', { hour12: false }) : '時間未知';
+    return (q.source === 'twse-mis' ? '最近成交' : '延遲報價') + ' · ' + stamp;
+  }
+
+  function applyToActiveQuote(code, q) {
+    if (S.mkt !== 'TW' || S.sym !== code || q.source !== 'twse-mis' || !q.priceRealtime) return;
+    const price = document.getElementById('ci-price');
+    if (price) { price.textContent = Number(q.price).toFixed(2); price.title = quoteLabel(q); }
+    if (typeof updateHeaderChg === 'function' && q.prevClose > 0) {
+      updateHeaderChg(q.price, q.prevClose, S.data && S.data.rangeBase, S.data && S.data.rangeChgLbl, S.mkt, S.sym);
+    }
+    const stats = document.getElementById('rp-PRICE');
+    if (stats) stats.textContent = Number(q.price).toFixed(2) + ' TWD';
+  }
+
   function extractChg(res) {
     // ── Bug history ─────────────────────────────────────────
     // v1 用 range=2d：對 00631L 等槓桿 ETF 今日 close=null 時，
@@ -141,6 +158,11 @@
     if (cur == null || !isFinite(cur)) return;
     if (typeof S !== 'undefined' && S.positions && S.positions[code]) {
       const p = S.positions[code];
+      if (p.quoteTimestampMs !== quote.timestampMs || p.quoteStale) _posDirty = true;
+      p.quoteTimestampMs = quote.timestampMs || null;
+      p.quoteAsOf = quote.asOf || null;
+      p.quoteStale = !!quote.stale || quote.ok === false;
+      p.quoteLabel = quoteLabel(quote);
       const prev = quote.prevClose != null && isFinite(quote.prevClose) ? Number(quote.prevClose) : null;
       const dayChange = quote.changePct != null && isFinite(quote.changePct) ? Number(quote.changePct) :
         (prev && prev > 0 ? (Number(cur) - prev) / prev * 100 : null);
@@ -177,6 +199,10 @@
         if (!symMap.has(yf)) symMap.set(yf, { _pos: code });
         else if (symMap.get(yf) && symMap.get(yf).t) symMap.get(yf)._posAlso = code;
       }
+      if (S.mkt === 'TW' && /^\d{4,6}[A-Z]?$/.test(S.sym || '')) {
+        const active = S.sym + '.TW';
+        if (!symMap.has(active)) symMap.set(active, { _active: S.sym });
+      }
       const syms = [...symMap.keys()];
       // v3.9 即時化:台股(.TW/.TWO)→ MIS 即時;指數/美股 → Yahoo。MIS 漏接的台股再用 Yahoo 補。
       const twYf = syms.filter(s => s.endsWith('.TW') || s.endsWith('.TWO'));
@@ -189,12 +215,7 @@
           if (mis[code] && mis[code].changePct != null) data[yf] = mis[code];
         }
       }
-      // 台股優先用 MIS(真即時);但 MIS 常整批回 {}(伺服器端無 session 易被擋)。
-      // 舊版「MIS 漏接就保留 chip 上次值、不回退 Yahoo」→ MIS 一掛,chip 就凍在上次
-      // 成功輪詢(可能是上週五)的值,分頁開著過週末更明顯。這是反覆出現「舊股價」的真因。
-      // 改:MIS 沒回的台股一律回退 Yahoo /quote-batch(回的是「今天」的價,保證新鮮,
-      // 絕不殘留上一交易日)。Yahoo 1d meta 昨收已修過跳動問題,盤中兩源差異極小,
-      // 遠勝顯示前一個交易日的收盤。美股/指數(無 MIS)本就走 Yahoo。
+      // MIS 漏接仍可查備援，但備援可能停留昨日，不能以請求成功當成新鮮報價。
       const twMissing = twYf.filter(yf => !data[yf]);
       const missing = otherYf.concat(twMissing);
       if (missing.length) Object.assign(data, await fetchBatch(missing));
@@ -202,7 +223,26 @@
       // 回傳 {sym:{price,prevClose,changePct}}（台股=MIS 即時,其餘=Yahoo）
       for (const [yfsym, w] of symMap.entries()) {
         const d = data[yfsym];
-        if (!d || d.changePct == null) continue;
+        if (!d || d.ok === false || d.changePct == null) {
+          if (!w._pos && !w._active) {
+            applyToChip(w, null, null);
+            const chip = document.getElementById('wlp-' + w.t);
+            if (chip) { chip.textContent = '待更新'; chip.title = '尚未取得有效成交報價'; }
+          }
+          const p = S.positions && S.positions[w._pos || w._posAlso];
+          if (p && !p.quoteStale) { p.quoteStale = true; p.quoteLabel = '報價待更新'; p.dayChangePct = null; _posDirty = true; }
+          continue;
+        }
+        const code = yfsym.replace(/\.TWO?$/, '');
+        if (/\.TWO?$/.test(yfsym) && window.MarketData && !MarketData.acceptStockQuote(code, d)) continue;
+        applyToActiveQuote(code, d);
+        if (w._active) continue;
+        if (!w._pos) {
+          w.quoteAsOf = d.asOf || null;
+          w.quoteSource = d.source || null;
+          const chip = document.getElementById('wlp-' + w.t);
+          if (chip) chip.title = quoteLabel(d);
+        }
         if (w._pos) applyToPos(w._pos, d);
         else { applyToChip(w, d.changePct, d.price); if (w._posAlso) applyToPos(w._posAlso, d); }
       }

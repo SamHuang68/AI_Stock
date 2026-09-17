@@ -552,7 +552,7 @@ function computePortfolioMetrics() {
   const items = [];
   for (const code of codes) {
     const p = positions[code];
-    const ref = code === S.sym?.toUpperCase()
+    const ref = p.quoteTimestampMs ? p.lastPrice : code === S.sym?.toUpperCase()
       ? (S.data?.candles?.[S.data.candles.length-1]?.close ?? p.lastPrice)
       : p.lastPrice;
     const cost = p.entry * p.shares;
@@ -562,7 +562,7 @@ function computePortfolioMetrics() {
     const activeCandles = code === S.sym?.toUpperCase() ? (S.data?.candles || []) : [];
     const activePrev = activeCandles.length >= 2 ? activeCandles[activeCandles.length - 2]?.close : null;
     const prevClose = p.prevClose ?? activePrev;
-    const dayChangePct = p.dayChangePct != null ? Number(p.dayChangePct) :
+    const dayChangePct = p.quoteStale ? null : p.dayChangePct != null ? Number(p.dayChangePct) :
       (ref != null && prevClose != null && prevClose > 0 ? (ref - prevClose) / prevClose * 100 : null);
     totalCost += cost; totalValue += val; totalPnl += pnl;
     items.push({code, cost, val, pnl, pnlPct, dayChangePct, ref, shares: p.shares});

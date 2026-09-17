@@ -17,6 +17,17 @@
   var lastTraceKey = null;
   var lastSessionTraceKey = null;
 
+  function heartbeat() {
+    var hb = document.getElementById('rt-hb');
+    var wrap = document.getElementById('chart-wrap');
+    if (!hb && wrap) {
+      hb = document.createElement('div'); hb.id = 'rt-hb';
+      hb.style.cssText = 'position:absolute;top:4px;right:10px;z-index:8;font-size:9px;font-family:monospace;pointer-events:none;text-shadow:0 0 3px #000';
+      wrap.appendChild(hb);
+    }
+    return hb;
+  }
+
   function traceVolume(reason, q, extra) {
     var key = [reason, S && S.sym, q && q.volumeSource, curBucket].join('|');
     if (key === lastTraceKey) return;
@@ -102,7 +113,12 @@
     var requestGeneration = generation;
     fetch('/twquote?code=' + encodeURIComponent(sym)).then(function (r) { return r.json(); })
       .then(function (q) {
-        if (!q || !q.ok || !(q.price > 0)) return;
+        if (!q || !q.ok || !(q.price > 0)) {
+          var pending = heartbeat();
+          if (pending) { pending.style.color = '#f59e0b'; pending.textContent = '● 報價待更新 · 保留最後成交'; }
+          traceSession('quote_unavailable_or_stale', q, { quoteStatus: q && q.quoteStatus });
+          return;
+        }
         if (requestGeneration !== generation || S.sym !== sym || !activeIntradayTW()) return;
         if (seq <= lastAppliedSeq) {
           traceVolume('out_of_order_response', q, { requestSeq: seq, lastAppliedSeq: lastAppliedSeq });
@@ -126,12 +142,17 @@
           });
           return;
         }
+        if (window.MarketData && !MarketData.acceptStockQuote(sym, q)) {
+          traceSession('older_than_accepted_quote', q, { sampleTimestampMs: sampleTimestampMs });
+          return;
+        }
         var cumVol = window.IntradayVolumeV3
           ? window.IntradayVolumeV3.canonicalShares(q) : null;
-        var volumeResult = volumeTracker && cumVol != null ? volumeTracker.observe({
+        var volumeBucket = window.IntradayVolumeV3.twRegularSessionBucket(q.volumeTimestampMs, off);
+        var volumeResult = volumeTracker && cumVol != null && volumeBucket != null ? volumeTracker.observe({
           context: sym,
           source: q.volumeSource || q.source || 'unknown',
-          bucket: bucket,
+          bucket: volumeBucket,
           cumulative: cumVol,
           sampleTimestampMs: q.volumeTimestampMs || q.timestampMs,
           receivedAtMs: Date.now(),
@@ -164,28 +185,18 @@
         if (S.volSeries && curBar && volumeResult) {
           var bv = volumeResult.volume;
           var up = curBar.close >= curBar.open;
-          try { S.volSeries.update({ time: bucket, value: bv, color: up ? 'rgba(74,222,128,0.25)' : 'rgba(248,113,113,0.25)' }); } catch (e) {
+          try { S.volSeries.update({ time: volumeBucket, value: bv, color: up ? 'rgba(74,222,128,0.25)' : 'rgba(248,113,113,0.25)' }); } catch (e) {
             traceVolume('volume_series_update_failed', q, { message: String(e).slice(0, 80), bucket: bucket });
           }
         }
         // 即時心跳標(右上角):讓使用者一眼確認 realtime 在跳 + 最後更新時間(等同 Yahoo「HH:MM 更新」)
-        var hb = document.getElementById('rt-hb');
-        if (!hb) {
-          var cw = document.getElementById('chart-wrap');
-          if (cw) {
-            hb = document.createElement('div');
-            hb.id = 'rt-hb';
-            hb.style.cssText = 'position:absolute;top:4px;right:10px;z-index:8;font-size:9px;' +
-              'font-family:monospace;color:#3ecf6b;pointer-events:none;text-shadow:0 0 3px #000';
-            cw.appendChild(hb);
-          }
-        }
+        var hb = heartbeat();
         if (hb) {
           var isMisPrice = q.source === 'twse-mis';
           var volLabel = q.volumeSource === 'twse-mis' && !isMisPrice ? '/MIS量' : '';
           hb.style.color = isMisPrice ? '#3ecf6b' : '#f59e0b';
-          hb.textContent = '● ' + (isMisPrice ? '即時 ' : '備援 ') +
-            (isMisPrice ? new Date().toLocaleTimeString('zh-TW', { hour12: false }) : (q.time || '時間未知')) +
+          hb.textContent = '● ' + (isMisPrice ? '最近成交 ' : '延遲報價 ') +
+            (q.time || '時間未知') +
             ' · ' + (isMisPrice ? 'MIS' : 'Yahoo價' + volLabel);
         }
         // 右側現價/漲跌即時(台股紅漲綠跌) — 日漲跌 + 區間漲跌同步

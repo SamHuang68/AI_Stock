@@ -2,11 +2,76 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import math
 from typing import Any
-from market_contract import attach_quote_contract
+from market_contract import attach_quote_contract, cumulative_volume_contract
 
 
 TAIPEI_TIMEZONE = timezone(timedelta(hours=8))
+
+
+def quote_observation(epoch_ms: Any, now: datetime | None = None) -> dict[str, Any]:
+    """成交時間與取得時間分開；缺值或跨交易日不可宣稱即時。"""
+    observed = twse_mis_observation({'tlong': epoch_ms})
+    current = (now or datetime.now(TAIPEI_TIMEZONE)).astimezone(TAIPEI_TIMEZONE)
+    as_of = datetime.fromisoformat(observed['asOf']) if observed else None
+    age = (current - as_of).total_seconds() if as_of else None
+    return {**observed, 'timestampMs': int(as_of.timestamp() * 1000) if as_of else None,
+            'ageSeconds': round(age, 1) if age is not None else None,
+            'stale': as_of is None or as_of.date() != current.date() or age < -5}
+
+
+def twse_mis_stock_quote(row: dict[str, Any], now: datetime | None = None) -> dict[str, Any] | None:
+    """讀取 MIS 真實成交；z 缺值時採 trade.z，絕不以委買賣推估。"""
+    def number(value: Any) -> float | None:
+        try:
+            value = float(str(value).replace(',', ''))
+            return value if math.isfinite(value) and value > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    observation = twse_mis_observation(row)
+    if not observation:
+        return None
+    snapshot = datetime.fromisoformat(observation['asOf'])
+    field, price, traded = 'z', number(row.get('z')), snapshot
+    if price is None:
+        trade = row.get('trade') if isinstance(row.get('trade'), dict) else {}
+        field, price = 'trade.z', number(trade.get('z'))
+        # trade.t 是成交時間，tlong 則可能只是較晚的委託簿更新時間。
+        try:
+            traded = datetime.strptime(snapshot.strftime('%Y%m%d') + str(trade.get('t')), '%Y%m%d%H:%M:%S').replace(tzinfo=TAIPEI_TIMEZONE)
+        except ValueError:
+            return None
+        if traded > snapshot:
+            return None
+    if price is None:
+        return None
+    previous = number(row.get('y'))
+    out = {'ok': True, 'code': str(row.get('c') or ''), 'name': row.get('n'),
+           'price': price, 'prevClose': previous,
+           'changePct': (price - previous) / previous * 100 if previous else None,
+           'open': number(row.get('o')), 'high': number(row.get('h')), 'low': number(row.get('l')),
+           'source': 'twse-mis', 'priceField': field, 'time': traded.strftime('%H:%M:%S')}
+    out.update(quote_observation(traded.timestamp() * 1000, now))
+    out['priceRealtime'] = not out['stale']
+    out.update(cumulative_volume_contract(row.get('v'), source_unit='lot', source='twse-mis', timestamp_ms=snapshot.timestamp() * 1000))
+    return out
+
+
+def guard_tw_quote(raw: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
+    """盤中拒絕昨日或時間不明的價格，所有 HTTP 消費者共用此防線。"""
+    out = dict(raw)
+    current = (now or datetime.now(TAIPEI_TIMEZONE)).astimezone(TAIPEI_TIMEZONE)
+    out.update(quote_observation(out.get('timestampMs'), current))
+    regular = current.weekday() < 5 and 540 <= current.hour * 60 + current.minute <= 810
+    if out['stale'] and regular:
+        out.update(ok=False, lastKnownPrice=out.get('price') or out.get('lastKnownPrice'), price=None, change=None,
+                   changePct=None, priceRealtime=False, quoteStatus='stale',
+                   message='成交資料尚未更新，暫不提供今日價格與漲跌')
+    else:
+        out['quoteStatus'] = 'last_trade' if out.get('source') == 'twse-mis' else 'delayed'
+    return out
 
 
 def twse_mis_observation(row: dict[str, Any] | None) -> dict[str, str]:
