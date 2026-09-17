@@ -261,7 +261,7 @@ def ensure_twoii(years: int = 6, force: bool = False) -> List[Tuple]:
 # ── 台指期 __TXF__（FinMind 近月連續）────────────────────────
 
 def _fetch_txf_finmind(start: str, end: str) -> List[Tuple]:
-    """FinMind TaiwanFuturesDaily TX → 每日近月（position 日盤優先）。"""
+    """FinMind TaiwanFuturesDaily TX → 日盤主力合約，夜盤不得補成日線。"""
     url = (
         'https://api.finmindtrade.com/api/v4/data?'
         + urllib.parse.urlencode({
@@ -308,9 +308,9 @@ def _fetch_txf_finmind(start: str, end: str) -> List[Tuple]:
     out = []
     for d in sorted(by_day):
         rows = by_day[d]
-        # prefer 日盤 position（有結算／OI），其次 after_market
-        day = [r for r in rows if r.get('trading_session') == 'position']
-        pool = day or [r for r in rows if r.get('trading_session') == 'after_market'] or rows
+        pool = [r for r in rows if r.get('trading_session') == 'position']
+        if not pool:
+            continue
         best = max(pool, key=lambda r: float(r.get('volume') or 0))
         try:
             o = float(best.get('open') or best['close'])

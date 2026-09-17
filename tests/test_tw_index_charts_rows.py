@@ -3,7 +3,7 @@ import json
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 
@@ -27,6 +27,22 @@ _WTX_HTML = (
 
 
 class TwIndexChartRowsTest(unittest.TestCase):
+    def test_daily_import_rejects_night_only_and_unknown_sessions(self):
+        base = {'contract_date': '202610', 'open': 100, 'max': 105, 'min': 99, 'close': 101, 'volume': 10}
+        payload = {'status': 200, 'data': [
+            {**base, 'date': '2026-09-16', 'trading_session': 'position'},
+            {**base, 'date': '2026-09-16', 'trading_session': 'after_market', 'close': 102, 'volume': 500},
+            {**base, 'date': '2026-09-17', 'trading_session': 'after_market'},
+            {**base, 'date': '2026-09-18', 'trading_session': 'unknown'},
+        ]}
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(payload).encode()
+        with patch.object(tw_index_charts, '_throttle'), patch.object(tw_index_charts.urllib.request, 'urlopen', return_value=response):
+            out = tw_index_charts._fetch_txf_finmind('2026-09-01', '2026-09-18')
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0][0], '2026-09-16')
+        self.assertEqual(out[0][4], 101)
+
     def test_recent_txf_rows_preserve_dates_for_same_session_basis(self):
         rows = [
             ('2026-08-12', 100, 102, 99, 101, 10),
