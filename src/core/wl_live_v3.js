@@ -59,6 +59,31 @@
     }
     const stats = document.getElementById('rp-PRICE');
     if (stats) stats.textContent = Number(q.price).toFixed(2) + ' TWD';
+    function updateStatsChange(id, base, label) {
+      const el = document.getElementById(id);
+      if (!el || !(base > 0)) return;
+      const delta = q.price - base, pct = delta / base * 100;
+      el.textContent = (delta >= 0 ? '+' : '') + delta.toFixed(2) + ' (' +
+        (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%)' + (label ? ' · ' + label : '');
+      el.style.color = window.Colors ? Colors.dir(code, delta) :
+        delta > 0 ? 'var(--red)' : delta < 0 ? 'var(--green)' : 'var(--thi)';
+      el.title = quoteLabel(q);
+    }
+    updateStatsChange('rp-CHANGE', q.prevClose, '');
+    if (S.range !== '1d' && S.data) updateStatsChange('rp-RANGE', S.data.rangeBase, S.data.rangeChgLbl);
+  }
+
+  function markActiveQuotePending(code) {
+    if (S.mkt !== 'TW' || S.sym !== code) return;
+    const price = document.getElementById('ci-price');
+    if (price) {
+      price.textContent = price.textContent.replace(/ · 待更新$/, '') + ' · 待更新';
+      price.title = '尚未取得有效成交報價；所示價格僅為最後已知值';
+    }
+    for (const id of ['ci-chg', 'ci-range-chg', 'rp-CHANGE', 'rp-RANGE']) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = id === 'ci-chg' ? '報價待更新' : '—';
+    }
   }
 
   function extractChg(res) {
@@ -225,6 +250,7 @@
       for (const [yfsym, w] of symMap.entries()) {
         const d = data[yfsym];
         if (!d || d.ok === false || d.changePct == null) {
+          markActiveQuotePending(yfsym.replace(/\.TWO?$/, ''));
           if (!w._pos && !w._active) {
             applyToChip(w, null, null);
             const chip = document.getElementById('wlp-' + w.t);
