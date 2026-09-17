@@ -73,6 +73,19 @@
     if (S.range !== '1d' && S.data) updateStatsChange('rp-RANGE', S.data.rangeBase, S.data.rangeChgLbl);
   }
 
+  function markActiveQuotePending(code) {
+    if (S.mkt !== 'TW' || S.sym !== code) return;
+    const price = document.getElementById('ci-price');
+    if (price) {
+      price.textContent = price.textContent.replace(/ · 待更新$/, '') + ' · 待更新';
+      price.title = '尚未取得有效成交報價；所示價格僅為最後已知值';
+    }
+    for (const id of ['ci-chg', 'ci-range-chg', 'rp-CHANGE', 'rp-RANGE']) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = id === 'ci-chg' ? '報價待更新' : '—';
+    }
+  }
+
   function extractChg(res) {
     // ── Bug history ─────────────────────────────────────────
     // v1 用 range=2d：對 00631L 等槓桿 ETF 今日 close=null 時，
@@ -237,6 +250,7 @@
       for (const [yfsym, w] of symMap.entries()) {
         const d = data[yfsym];
         if (!d || d.ok === false || d.changePct == null) {
+          markActiveQuotePending(yfsym.replace(/\.TWO?$/, ''));
           if (!w._pos && !w._active) {
             applyToChip(w, null, null);
             const chip = document.getElementById('wlp-' + w.t);
