@@ -182,7 +182,8 @@
     if (_inflight) return;
     const hasWl = (typeof S !== 'undefined' && S.wl && S.wl.length);
     const hasPos = (typeof S !== 'undefined' && S.positions && Object.keys(S.positions).length);
-    if (!hasWl && !hasPos) return;
+    const hasActive = typeof S !== 'undefined' && S.mkt === 'TW' && /^\d{4,6}[A-Z]?$/.test(S.sym || '');
+    if (!hasWl && !hasPos && !hasActive) return;
     _inflight = true;
     _posDirty = false;
     try {

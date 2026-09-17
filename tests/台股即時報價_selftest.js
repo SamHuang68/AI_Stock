@@ -5,11 +5,11 @@ const vm = require('vm');
 const path = require('path');
 const root = path.resolve(__dirname, '..');
 const chip = { textContent: '', title: '', classList: { remove() {}, add() {} } };
-let response = {}, rendered = 0;
+let response = {}, rendered = 0, fetched = 0;
 const S = { sym: '2330', wl: [{ t: '2330', m: 'TW' }], positions: { '2330': { entry: 2000, shares: 1000, lastPrice: 2380 } }, data: { candles: [{ close: 2380 }] } };
 const context = { S, console, Map, Date, setTimeout() {}, clearTimeout() {}, setInterval() {}, clearInterval() {},
   document: { body: {}, getElementById: () => chip, addEventListener() {} },
-  fetch: async () => ({ ok: true, json: async () => response }),
+  fetch: async () => { fetched++; return { ok: true, json: async () => response }; },
   renderPositionPanel: () => { rendered++; }, saveWl() {}, savePositions() {} };
 context.window = context;
 vm.createContext(context);
@@ -52,5 +52,12 @@ vm.runInContext(fs.readFileSync(path.join(root, 'src/core/wl_live_v3.js'), 'utf8
   assert.equal(context.computePortfolioMetrics().items[0].dayChangePct, null);
   assert.equal(context.computePortfolioMetrics().items[0].ref, 2430);
   assert(rendered >= 2);
+  S.wl = []; S.positions = {}; S.mkt = 'TW';
+  response = { '2330': { ok: true, price: 2435, priceRealtime: true, prevClose: 2380, changePct: 55 / 2380 * 100,
+    timestampMs: 1789607990000, asOf: '2026-09-17T09:19:50+08:00', source: 'twse-mis' } };
+  const beforeActivePoll = fetched;
+  await context.pollWlPrices();
+  assert(fetched > beforeActivePoll, '沒有自選與持倉時仍須更新當前台股');
+  assert(chip.textContent.includes('2435.00'), '當前台股現價應收到官方成交');
   console.log('台股即時報價：自選、持倉、過期備援與現價優先順序通過');
 })().catch(error => { console.error(error); process.exitCode = 1; });
