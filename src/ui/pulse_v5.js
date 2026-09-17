@@ -395,6 +395,7 @@
       '#pl-root .pl-strip .s{font-size:10px;margin-top:0;font-weight:800;line-height:1.25;' +
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}' +
       '#pl-root .pl-strip .s .pl-subq{font-size:8px;font-weight:600;color:#94a3b8;margin-left:3px}' +
+      '#pl-root .pl-strip .pl-observation{font-size:9px;line-height:1.3;font-weight:600;color:#a8b6c8;margin-top:2px;overflow-wrap:anywhere}' +
       '#pl-root .pl-strip .badge{display:inline-flex;align-items:center;gap:3px;font-size:8px;color:var(--cyan)}' +
       '#pl-root .pl-strip .dot{width:4px;height:4px;border-radius:50%;background:var(--cyan);box-shadow:0 0 4px var(--cyan);flex-shrink:0}' +
       '#pl-root .pl-strip .viz-hide,#pl-root .pl-strip .viz-meter,#pl-root .pl-strip .viz-seg,' +
@@ -2756,7 +2757,7 @@
       '<div class="k">' + opts.k + '</div>' +
       '<div class="v">' + opts.vHtml + levelHtml + '</div>' +
       '<div class="s ' + toneCls + '">' + subHtml + '</div>' +
-      (opts.observationText ? '<div class="pl-subq">' + esc(opts.observationText) + '</div>' : '') +
+      (opts.observationText ? '<div class="pl-observation">' + esc(opts.observationText) + '</div>' : '') +
       tabs + meter + '</div>';
   }
 
