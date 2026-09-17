@@ -32,6 +32,13 @@ vm.runInContext(fs.readFileSync(path.join(root, 'src/core/wl_live_v3.js'), 'utf8
   vm.runInContext(source.slice(start, next), context);
   assert.equal(context.computePortfolioMetrics().items[0].ref, 2430);
 
+  const positionsSource = fs.readFileSync(path.join(root, 'src/core/position_v2.js'), 'utf8');
+  const listStart = positionsSource.indexOf('function renderPositionList()');
+  const listEnd = positionsSource.indexOf('\nfunction ', listStart + 1);
+  vm.runInContext(positionsSource.slice(listStart, listEnd), context);
+  assert(context.renderPositionList().includes('2,430,000'), '持倉合計市值須使用最新成交');
+  assert(!context.renderPositionList().includes('2,380,000'), '持倉合計不得使用舊 K 線收盤');
+
   response = { '2330': { ...response['2330'], price: 2420, timestampMs: 1789607900000 } };
   await context.pollWlPrices();
   assert.equal(S.positions['2330'].lastPrice, 2430, '較晚抵達的舊成交不得覆寫新價格');

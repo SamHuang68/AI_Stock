@@ -292,7 +292,7 @@ function renderPositionList() {
   let totalCost = 0, totalValue = 0, totalPnl = 0, knownCount = 0;
   for (const code of codes) {
     const p = S.positions[code];
-    const ref = code === S.sym
+    const ref = p.quoteTimestampMs ? p.lastPrice : code === S.sym
       ? (S.data?.candles?.[S.data.candles.length - 1]?.close ?? p.lastPrice)
       : p.lastPrice;
     totalCost += p.entry * p.shares;
