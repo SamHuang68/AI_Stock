@@ -53,7 +53,8 @@ DEPS = {
     'book_v5.js':           ['viz_v5.js'],
     'heat_v5.js':           ['viz_v5.js'],
     'chart_visual_v5.js':   ['colors_v3.js', 'visual_system_v5.js'],
-    'realtime_v3.js':       ['intraday_volume_v3.js'],
+    'realtime_v3.js':       ['intraday_volume_v3.js', 'market_data_v5.js'],
+    'wl_live_v3.js':        ['market_data_v5.js'],
 }
 # 必須永遠排在最後的（market_chart 蓋過 K 線；score_bar 次末；toolbar 再前）
 LAST = ['toolbar_v3.js', 'market_score_bar_v3.js', 'market_chart_v3.js']

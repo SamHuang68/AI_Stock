@@ -292,7 +292,7 @@ function renderPositionList() {
   let totalCost = 0, totalValue = 0, totalPnl = 0, knownCount = 0;
   for (const code of codes) {
     const p = S.positions[code];
-    const ref = code === S.sym
+    const ref = p.quoteTimestampMs ? p.lastPrice : code === S.sym
       ? (S.data?.candles?.[S.data.candles.length - 1]?.close ?? p.lastPrice)
       : p.lastPrice;
     totalCost += p.entry * p.shares;
@@ -321,7 +321,7 @@ function renderPositionList() {
   for (const code of codes) {
     const p = S.positions[code];
     const isActive = code === S.sym;
-    const ref = isActive
+    const ref = p.quoteTimestampMs ? p.lastPrice : isActive
       ? (S.data?.candles?.[S.data.candles.length - 1]?.close ?? p.lastPrice)
       : p.lastPrice;
     const pnlPct = ref != null ? ((ref - p.entry) / p.entry * 100) : null;
@@ -329,7 +329,7 @@ function renderPositionList() {
     const candles = isActive ? (S.data?.candles || []) : [];
     const activePrev = candles.length >= 2 ? candles[candles.length - 2]?.close : null;
     const prevClose = p.prevClose ?? activePrev;
-    const dayChangePct = p.dayChangePct != null ? Number(p.dayChangePct) :
+    const dayChangePct = p.quoteStale ? null : p.dayChangePct != null ? Number(p.dayChangePct) :
       (ref != null && prevClose != null && prevClose > 0 ? (ref - prevClose) / prevClose * 100 : null);
     const dayCol = window.Colors ? Colors.dir(code, dayChangePct) : (dayChangePct == null ? 'var(--tlo)' : (dayChangePct >= 0 ? 'var(--red)' : 'var(--green)'));
     const lotsTxt = (p.shares % 1000 === 0) ? `${p.shares / 1000}張` : `${p.shares}股`;
@@ -345,7 +345,7 @@ function renderPositionList() {
       <div style="text-align:right">
         <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:700;color:${pnlCol}">${pnlPct == null ? '—' : '持有 ' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(1) + '%'}</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:8px;color:${dayCol};margin-top:1px">${dayChangePct == null ? '今日 —' : '今日 ' + (dayChangePct >= 0 ? '+' : '') + dayChangePct.toFixed(1) + '%'}</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:8px;color:var(--tlo);margin-top:1px">${ref != null ? ref.toFixed(2) : '未載入'}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:8px;color:var(--tlo);margin-top:1px">${ref != null ? ref.toFixed(2) : '未載入'}${p.quoteStale ? ' · 待更新' : ''}</div>
       </div>
     </div>`;
   }
@@ -364,7 +364,7 @@ function renderPosition() {
   }
   const pos = getPosition();
   const last = S.data && S.data.candles ? S.data.candles[S.data.candles.length - 1] : null;
-  const c = last ? last.close : null;
+  const c = pos && pos.quoteTimestampMs ? pos.lastPrice : (last ? last.close : null);
 
   let h = renderPositionList();
   h += `<div class="stat-hdr">倉位管理 · ${S.sym}</div>`;
@@ -511,7 +511,7 @@ window.addEventListener('symLoaded', function (e) {
     const sym = e.detail && e.detail.sym;
     const code = (sym || S.sym || '').toUpperCase().trim();
     if (S.positions && S.positions[code] && S.data?.candles?.length) {
-      S.positions[code].lastPrice  = S.data.candles[S.data.candles.length - 1].close;
+      if (!S.positions[code].quoteTimestampMs) S.positions[code].lastPrice = S.data.candles[S.data.candles.length - 1].close;
       S.positions[code].lastUpdate = Date.now();
       savePositions();
     }

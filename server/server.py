@@ -57,7 +57,7 @@ from decision_routes import DecisionRoutesMixin
 from overnight_intraday_routes import OvernightIntradayRoutesMixin
 from options_routes import OptionsRoutesMixin
 from market_contract import attach_quote_contract, cumulative_volume_contract
-from market_routes import market_snapshot, twse_mis_observation
+from market_routes import market_snapshot, twse_mis_observation, twse_mis_stock_quote, quote_observation, guard_tw_quote
 from http_boundary import BodyReadError, is_same_local_origin, read_json_body
 from atomic_store import StoreCorruptError, atomic_write_json, load_json
 import atomic_store as _atomic_store
@@ -1918,6 +1918,40 @@ def _anom_quote(price, prev, chg, kind='stock'):
 _BAD_YF = {'^TWOII': ('otc_o00.tw', 'o00', 'index')}   # 櫃買:Yahoo 三端點三值,只信 MIS
 
 
+def _twse_mis_stock_quotes(codes):
+    """所有台股報價入口共用官方成交解析，涵蓋上市、上櫃及 ETF。"""
+    codes = list(dict.fromkeys(str(c).upper() for c in codes if _re.fullmatch(r'\d{4,6}[A-Z]?', str(c).upper())))[:100]
+    exs = [f'{exchange}_{code}.tw' for code in codes for exchange in ('tse', 'otc')]
+    out = {}
+    for offset in range(0, len(exs), 50):
+        chunk = '|'.join(exs[offset:offset + 50])
+        url = ('https://mis.twse.com.tw/stock/api/getStockInfo.jsp'
+               '?ex_ch=%s&json=1&delay=0&_=%d' % (chunk, int(time.time() * 1000)))
+        try:
+            payload = _src_fetch_json('twse-mis', url, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                'Accept': 'application/json', 'Accept-Language': 'zh-TW,zh;q=0.9',
+                'Referer': 'https://mis.twse.com.tw/stock/index.jsp',
+            }, timeout=8)
+            for row in payload.get('msgArray') or []:
+                code = str(row.get('c') or '')
+                parsed = twse_mis_stock_quote(row)
+                if not parsed and code in codes:
+                    parsed = {'ok': False, 'code': code, 'price': None, 'source': 'twse-mis',
+                              **quote_observation(row.get('tlong')),
+                              **cumulative_volume_contract(row.get('v'), source_unit='lot',
+                                                           source='twse-mis', timestamp_ms=row.get('tlong'))}
+                if code in codes and parsed:
+                    previous = out.get(code)
+                    if not previous or (parsed.get('timestampMs') or 0) > (previous.get('timestampMs') or 0):
+                        out[code] = guard_tw_quote(parsed)
+        except SourceBreakerOpen:
+            break
+        except Exception as error:
+            print('[台股報價] MIS 請求失敗：', type(error).__name__)
+    return out
+
+
 def _twse_mis_index(ex_ch):
     """ex_ch('tse_t00.tw' 或 'tse_t00.tw|otc_o00.tw') →
        {code:{price,prevClose,changePct,name,open,high,low,asOf,tradeDate}}。
@@ -3410,12 +3444,13 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                     pass
         self._ok(json.dumps(results).encode())
 
-    def _handle_twquote(self):
+    def _handle_twquote(self, code=None):
         """台股個股『即時』報價 (v3.9) — TWSE MIS getStockInfo,真即時。
            解 Yahoo 免費台股分K 延遲~20min 的問題:盤中即時看盤用此源更新最新K棒。
            ?code=2330。volume 保持累計張數；volumeShares 為跨來源權威累計股數。"""
         qs = parse_qs(urlparse(self.path).query)
-        code = (qs.get('code', [''])[0] or '').strip().upper().replace('.TWO', '').replace('.TW', '')
+        quote_alias = code is not None
+        code = (code or qs.get('code', [''])[0] or '').strip().upper().replace('.TWO', '').replace('.TW', '')
         if not code:
             self._ok(b'{"ok":false}'); return
 
@@ -3426,46 +3461,9 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                 return float(str(v).replace(',', ''))
             except Exception:
                 return None
-        out = {'ok': False, 'code': code}
-        mis_volume = None
-        for ex in ('tse_%s.tw' % code, 'otc_%s.tw' % code):
-            try:
-                ms = int(time.time() * 1000)
-                url = ('https://mis.twse.com.tw/stock/api/getStockInfo.jsp'
-                       '?ex_ch=%s&json=1&delay=0&_=%d' % (ex, ms))
-                data = _src_fetch_json('twse-mis', url, headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                    'Accept': 'application/json', 'Accept-Language': 'zh-TW,zh;q=0.9',
-                    'Referer': 'https://mis.twse.com.tw/stock/index.jsp',
-                }, timeout=8)
-                arr = data.get('msgArray') or []
-                if not arr:
-                    continue
-                it = arr[0]
-                candidate_volume = cumulative_volume_contract(
-                    it.get('v'), source_unit='lot', source='twse-mis',
-                    timestamp_ms=it.get('tlong'))
-                if candidate_volume.get('volumeShares') is not None:
-                    mis_volume = candidate_volume
-                # Data Integrity:只用最新『成交』價 z。z='-'(無撮合/收盤後)→ 不推估(試下一個 ex,
-                #   都沒有就回 ok:false 讓前端保留上次真實值)。絕不用開盤價/委買賣價假裝成交價(會灌錯值)。
-                price = fnum(it.get('z'))
-                if price is None:
-                    continue
-                out = {'ok': True, 'code': code, 'price': price,
-                       'open': fnum(it.get('o')), 'high': fnum(it.get('h')), 'low': fnum(it.get('l')),
-                       'prevClose': fnum(it.get('y')),
-                       'name': it.get('n'), 'time': it.get('t'),
-                       'timestampMs': candidate_volume.get('volumeTimestampMs'),
-                       'source': 'twse-mis'}
-                out.update(candidate_volume)
-                break
-            except SourceBreakerOpen:
-                out['error'] = 'twse-mis breaker open'; break
-            except Exception as e:
-                out['error'] = str(e)
-        # 盤後 MIS 常將最新成交 z 回為「-」。這代表官方即時成交欄位已收盤，
-        # 不代表股票沒有報價；以 Yahoo v8 日資料的真實最新價／昨收作備援。
+        out = _twse_mis_stock_quotes([code]).get(code) or {'ok': False, 'code': code}
+        mis_volume = {k: v for k, v in out.items() if k.startswith('volume')} if out.get('volumeShares') is not None else None
+        # 官方無可用成交才使用 Yahoo；保留原成交時間及過期狀態。
         if not out.get('ok'):
             for candidate in (code + '.TW', code + '.TWO'):
                 try:
@@ -3500,15 +3498,19 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                         'time': (time.strftime('%H:%M:%S', time.localtime(meta.get('regularMarketTime')))
                                  if meta.get('regularMarketTime') else None),
                         'timestampMs': yahoo_ts_ms,
-                        'source': 'yahoo-v8-chart · MIS盤後備援',
+                        'source': 'yahoo-v8-chart · MIS備援',
+                        'priceRealtime': False,
+                        **quote_observation(yahoo_ts_ms),
                     }
-                    # MIS may stop publishing the last price while its official
-                    # cumulative volume is still current. Keep price and volume
-                    # provenance independent instead of replacing both with Yahoo.
                     out.update(mis_volume or yahoo_volume)
                     break
                 except Exception as e:
                     out['fallbackError'] = str(e)
+        out = guard_tw_quote(out)
+        if quote_alias:
+            out['symbol'] = code
+            out['volume'] = out.get('volumeShares')
+            out['change'] = out['price'] - out['prevClose'] if out.get('price') and out.get('prevClose') else None
         self._ok(json.dumps(out, ensure_ascii=False).encode())
 
     def _handle_twquote_batch(self):
@@ -3521,40 +3523,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         if not codes:
             self._ok(b'{}'); return
 
-        def fnum(v):
-            if v in (None, '', '-'):
-                return None
-            try:
-                return float(str(v).replace(',', ''))
-            except Exception:
-                return None
-        exs = []
-        for c in codes:
-            exs.append('tse_%s.tw' % c)
-            exs.append('otc_%s.tw' % c)
-        out = {}
-        for i in range(0, len(exs), 50):                 # MIS 一次最多約 50~100 檔,保守分塊
-            chunk = '|'.join(exs[i:i + 50])
-            try:
-                ms = int(time.time() * 1000)
-                url = ('https://mis.twse.com.tw/stock/api/getStockInfo.jsp'
-                       '?ex_ch=%s&json=1&delay=0&_=%d' % (chunk, ms))
-                data = _src_fetch_json('twse-mis', url, headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                    'Accept': 'application/json', 'Accept-Language': 'zh-TW,zh;q=0.9',
-                    'Referer': 'https://mis.twse.com.tw/stock/index.jsp',
-                }, timeout=8)
-                for it in (data.get('msgArray') or []):
-                    code = (it.get('c') or '').strip()
-                    price = fnum(it.get('z'))        # Data Integrity:只用最新成交價;z='-' 不推估,略過(前端保留上次值)
-                    prev = fnum(it.get('y'))
-                    if code and price is not None:
-                        chg = ((price - prev) / prev * 100) if prev else None
-                        out[code] = {'price': price, 'prevClose': prev, 'changePct': chg}
-            except SourceBreakerOpen:
-                break
-            except Exception:
-                continue
+        out = _twse_mis_stock_quotes(codes)
         self._ok(json.dumps(out, ensure_ascii=False).encode())
 
 
@@ -3642,7 +3611,13 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         syms = [s.strip() for s in qs.get('syms', [''])[0].split(',') if s.strip()]
         if not syms:
             self._ok(b'{}'); return
+        tw_codes = [s.rsplit('.', 1)[0] for s in syms if s.endswith(('.TW', '.TWO'))]
+        official = _twse_mis_stock_quotes(tw_codes) if tw_codes else {}
         def one(sym):
+            if sym.endswith(('.TW', '.TWO')):
+                found = official.get(sym.rsplit('.', 1)[0])
+                if found and found.get('ok'):
+                    return sym, found
             ov = _trusted_quote_override(sym)   # ^TWOII 等 → 改走 TWSE MIS
             if ov:
                 return sym, ov
@@ -3665,7 +3640,11 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                     prev = _yf_prevclose(m)
                     if cur is None or not prev:
                         continue
-                    return sym, {'price': cur, 'prevClose': prev, 'changePct': (cur - prev) / prev * 100}
+                    result = {'ok': True, 'price': cur, 'prevClose': prev, 'changePct': (cur - prev) / prev * 100,
+                              'source': 'yahoo-v8-chart', 'priceRealtime': False,
+                              **quote_observation(float(m.get('regularMarketTime') or 0) * 1000)}
+                    # 台股盤中日期防線不能套用到不同交易時區的美股。
+                    return sym, guard_tw_quote(result) if sym.endswith(('.TW', '.TWO')) else {**result, 'stale': False}
                 except Exception:
                     continue
             return sym, None
@@ -3688,6 +3667,9 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         """
         from urllib.parse import unquote as _unq
         sym = _unq(sym)                     # 路徑未自動解碼:%5ETWOII → ^TWOII,否則 _BAD_YF 比對不到
+        if _re.fullmatch(r'\d{4,6}[A-Z]?(?:\.TW|\.TWO)?', sym.upper()):
+            self._handle_twquote(sym)
+            return
         ov = _trusted_quote_override(sym)   # ^TWOII 等 Yahoo 壞標的 → TWSE MIS
         if ov:
             self._ok(json.dumps({

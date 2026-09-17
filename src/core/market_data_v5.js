@@ -7,6 +7,15 @@
     freshness: null, worstAsOf: null
   };
   var inflight = null;
+  var stockQuotes = Object.create(null);
+  function acceptStockQuote(symbol, quote) {
+    var stamp = Number(quote && quote.timestampMs);
+    if (!quote || quote.ok === false || !(quote.price > 0) || !isFinite(stamp) || stamp <= 0) return false;
+    var previous = stockQuotes[symbol];
+    if (previous && stamp < Number(previous.timestampMs)) return false;
+    stockQuotes[symbol] = quote;
+    return true;
+  }
   function base() { return window.SERVER || location.origin || 'http://localhost:18432'; }
   function attachFreshness(snapshot) {
     if (!window.MarketFreshness || !MarketFreshness.snapshotSummary) return snapshot;
@@ -66,5 +75,6 @@
       .finally(function () { inflight = null; });
     return inflight;
   }
-  window.MarketData = { get: function () { return state; }, publish: publish, fromPulse: fromPulse, refresh: refresh };
+  window.MarketData = { get: function () { return state; }, publish: publish, fromPulse: fromPulse, refresh: refresh,
+    acceptStockQuote: acceptStockQuote };
 }());

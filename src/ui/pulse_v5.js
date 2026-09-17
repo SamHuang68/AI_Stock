@@ -2506,13 +2506,14 @@
       if (!r.ok) throw new Error('fallback_http_' + r.status);
       return r.json();
     }).then(function (q) {
-      if (!q || q.price == null || q.prevClose == null) throw new Error('fallback_quote_unavailable');
+      if (!q || q.ok === false || q.stale || q.price == null || q.prevClose == null) throw new Error('fallback_quote_unavailable');
       return {
         ok: true, code: code, name: q.name || '',
         price: q.price, prevClose: q.prevClose,
         open: q.open, high: q.high, low: q.low, volume: q.volume,
         time: q.lastBarTime ? new Date(Number(q.lastBarTime) * 1000).toLocaleTimeString('zh-TW', { hour12: false }) : '',
-        source: (q.source || 'Yahoo') + ' · MIS盤後備援'
+        source: q.source || 'Yahoo 備援',
+        stale: q.stale, timestampMs: q.timestampMs, asOf: q.asOf
       };
     });
   }
@@ -2565,7 +2566,7 @@
       }).then(function (q) {
         var pack = (lastPack || {}).pulse || {};
         var assessment = stockHealthAssessment(q, beginnerModel(pack.overview || {}, pack));
-        if (!q || q.ok === false || !assessment) throw new Error('quote_unavailable');
+        if (!q || q.ok === false || q.stale || !assessment) throw new Error('quote_unavailable');
         result.className = 'pl-stock-result on ' + assessment.cls;
         title.textContent = assessment.title;
         body.textContent = assessment.body;

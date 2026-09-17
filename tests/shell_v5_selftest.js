@@ -391,9 +391,9 @@ ok(/id="pl-stock-check"/.test(pulseBeginner) && /function stockHealthAssessment/
   /setTimeout\(function \(\) \{ if \(controller\) controller\.abort\(\); \}, 8000\)/.test(pulseBeginner),
   'beginner stock health check is source-backed, traced and bounded by timeout');
 ok(/function stockHealthFallbackQuote/.test(pulseBeginner) && /stock_health_fallback_start/.test(pulseBeginner) &&
-  /\/quote\/.*code \+ '\.TW'/.test(pulseBeginner) && /MIS盤後備援/.test(pulseBeginner) &&
-  /yahoo-v8-chart · MIS盤後備援/.test(server),
-  'stock health falls back to a labeled Yahoo quote when MIS has no post-close trade field');
+  /\/quote\/.*code \+ '\.TW'/.test(pulseBeginner) && /q\.stale/.test(pulseBeginner) &&
+  /yahoo-v8-chart · MIS備援/.test(server),
+  '個股健診保留備援來源，並拒絕過期成交資料');
 ok(/key_levels_stale/.test(server + decisionEngine) && /keyLevelMeta/.test(decisionEngine) &&
   /divergenceDetails/.test(decisionEngine),
   'decision contract suppresses stale key-level triggers and publishes provenance-rich compact metadata');
