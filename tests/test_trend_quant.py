@@ -30,11 +30,11 @@ class TestPriceSeriesQuant(unittest.TestCase):
             (q['level'] in ('偏弱', '弱勢'))
         )
 
-    def test_latest_without_date_replaces_last_bar(self):
-        # 缺交易日時不得用跳空百分比發明新的一天。
+    def test_latest_without_date_preserves_history(self):
+        # 缺交易日不能改寫已完成的歷史。
         closes = [100, 101, 102]
         q = tq.price_series_quant(closes, latest=110)
-        self.assertEqual(q['close'], 110.0)
+        self.assertEqual(q['close'], 102.0)
         self.assertEqual(q['n'], 3)
 
     def test_gap_same_date_replaces_not_appends(self):
@@ -69,14 +69,23 @@ class TestPriceSeriesQuant(unittest.TestCase):
         q = tq.price_series_quant(
             bars, latest=26800, latest_date='2026-09-11', same_bar=True)
         self.assertEqual(q['n'], 1)
-        self.assertEqual(q['close'], 26800.0)
+        self.assertEqual(q['close'], 27000.0)
+
+    def test_same_bar_rejects_older_print(self):
+        q = tq.price_series_quant([{'date': '2026-09-11', 'close': 27000}],
+                                  latest=26800, latest_date='2026-09-10', same_bar=True)
+        self.assertEqual(q['close'], 27000)
+
+    def test_z20_requires_twenty_samples(self):
+        self.assertIsNone(tq.price_series_quant(list(range(100, 112)))['z20'])
+        self.assertIsNotNone(tq.price_series_quant(list(range(100, 120)))['z20'])
 
     def test_quote_change_overrides_stale_daily_series(self):
         # 期貨夜盤／換月時，日線最後一筆可能與官方昨收基準不同；
         # 頂列漲跌必須與同卡即時報價一致，而不是拿日線快取反推方向。
         q = tq.price_series_quant(
             [43000, 43800, 44280], latest=44719, quote_change_pct=-0.6024)
-        self.assertEqual(q['close'], 44719.0)
+        self.assertEqual(q['close'], 44280.0)  # 缺日期時歷史保留；報價漲跌仍獨立採官方值
         self.assertAlmostEqual(q['chgPct'], -0.60, places=2)
         self.assertGreater(q['vsMa5Pct'], 0)  # 日線水位仍可獨立呈現
 

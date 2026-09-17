@@ -1260,6 +1260,7 @@
       ['Call OI', optionsChangeText(changes.callOpenInterestPct, 1, '%')],
       ['Put OI', optionsChangeText(changes.putOpenInterestPct, 1, '%')],
       ['ATM IV', optionsChangeText(changes.atmIvPctPoint, 2, 'pp')],
+      ['25Δ Skew', optionsChangeText(changes.ivSkewPctPoint, 2, 'pp')],
       ['Gamma 密度', optionsChangeText(changes.totalOiGammaPct, 1, '%')],
       ['Vega 密度', optionsChangeText(changes.totalOiVegaPct, 1, '%')]
     ].filter(function (item) { return item[1] != null; });

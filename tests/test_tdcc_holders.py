@@ -3,6 +3,8 @@
 import os
 import sys
 import unittest
+import tempfile
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 import tdcc_holders as th  # noqa: E402
@@ -16,6 +18,8 @@ _CSV = (
     '20260905,2330,台積電,15,2,4000,40\n'
     '20260905,2330,台積電,17,162,10000,100\n'
 )
+_CSV += ''.join(f'20260905,2330,台積電,{level},0,0,0\n' for level in range(1, 16)
+                if level not in (1, 2, 12, 15))
 
 
 class TestTdccHhi(unittest.TestCase):
@@ -35,9 +39,9 @@ class TestTdccHhi(unittest.TestCase):
         self.assertIsNotNone(scored['score'])
         self.assertEqual(scored['detail']['hhi'], 3000.0)
         labels = [r['k'] for r in scored['marketRows']]
-        self.assertIn('HHI', labels)
-        self.assertIn('籌碼熵', labels)
-        hhi_row = next(r for r in scored['marketRows'] if r['k'] == 'HHI')
+        self.assertIn('級距 HHI', labels)
+        self.assertIn('級距分布熵', labels)
+        hhi_row = next(r for r in scored['marketRows'] if r['k'] == '級距 HHI')
         self.assertIsNone(hhi_row['score'])
         mutated = dict(row)
         mutated['hhi'] = 9000
@@ -45,7 +49,7 @@ class TestTdccHhi(unittest.TestCase):
                          th.score_concentration([mutated])['score'])
 
     def test_uniform_buckets_have_lower_hhi_than_concentrated(self):
-        concentrated = {1: 90.0, 2: 10.0}
+        concentrated = {**dict.fromkeys(range(1, 16), 0), 1: 90.0, 2: 10.0}
         spread = {i: 100.0 / 15.0 for i in range(1, 16)}
         hhi_c, ent_c = th._hhi_entropy(concentrated)
         hhi_s, ent_s = th._hhi_entropy(spread)
@@ -53,7 +57,27 @@ class TestTdccHhi(unittest.TestCase):
         self.assertLess(ent_c, ent_s)
         self.assertIsNone(th._hhi_entropy({17: 100.0})[0])
         only_valid = th._hhi_entropy({1: 50.0, 18: 50.0})
-        self.assertAlmostEqual(only_valid[0], 10000.0, places=1)
+        self.assertIsNone(only_valid[0])
+
+    def test_invalid_or_duplicate_buckets_do_not_publish_extreme_concentration(self):
+        self.assertIsNone(th._hhi_entropy({1: 50})[0])
+        valid = dict.fromkeys(range(1, 16), 100 / 15)
+        for invalid in (float('nan'), float('inf'), -1):
+            self.assertIsNone(th._hhi_entropy({**valid, 1: invalid})[0])
+        row = th._parse_csv_bytes((_CSV + '20260905,2330,台積電,1,100,1000,10\n').encode())[0]
+        self.assertIsNone(row['hhi'])
+
+    def test_legacy_unvalidated_values_are_hidden_without_deleting_history(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(th, 'DATA', folder), \
+                patch.object(th, 'DB_PATH', os.path.join(folder, 'holders.db')):
+            row = th._parse_csv_bytes(_CSV.encode())[0]
+            old = {**row, 'date': '2026-08-29', 'distribution_version': None}
+            th.upsert_rows([old, row])
+            loaded = th.load_stock_series('2330')
+            self.assertEqual(len(loaded), 2)
+            self.assertIsNone(loaded[0]['hhi'])
+            self.assertEqual(loaded[1]['hhi'], 3000)
+            self.assertEqual(loaded[0]['major_pct'], 70)
 
 
 if __name__ == '__main__':

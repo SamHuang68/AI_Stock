@@ -2756,6 +2756,7 @@
       '<div class="k">' + opts.k + '</div>' +
       '<div class="v">' + opts.vHtml + levelHtml + '</div>' +
       '<div class="s ' + toneCls + '">' + subHtml + '</div>' +
+      (opts.observationText ? '<div class="pl-subq">' + esc(opts.observationText) + '</div>' : '') +
       tabs + meter + '</div>';
   }
 
@@ -2789,6 +2790,8 @@
       turnMain.push((s.turnoverStreak > 0 ? '連放' : '連縮') + Math.abs(s.turnoverStreak));
     }
     var turnSoft = [];
+    if (s.turnoverDate) turnSoft.push(String(s.turnoverDate) + ' 全日');
+    if (s.turnoverZ20 == null && s.turnoverN != null && s.turnoverN < 20) turnSoft.push('Z20 待足 20 日（現有 ' + s.turnoverN + '）');
     if (s.turnoverVsMa5Pct != null) turnSoft.push(pct(s.turnoverVsMa5Pct) + 'vs5');
     if (s.volumeScore != null) turnSoft.push('體制分' + Number(s.volumeScore).toFixed(0));
     if (s.turnoverZ20 != null) turnSoft.push('Z' + Number(s.turnoverZ20).toFixed(1));
@@ -2817,12 +2820,6 @@
     /* Basis＝台指期 − 加權（點）；優先用後端 strip.basisPts／basisPct */
     var basisPts = s.basisPts;
     var basisPct = s.basisPct;
-    if (basisPts == null && txf.price != null && t00.price != null && isFinite(txf.price) && isFinite(t00.price)) {
-      basisPts = Math.round((Number(txf.price) - Number(t00.price)) * 100) / 100;
-      if (Number(t00.price) > 0) {
-        basisPct = Math.round((basisPts / Number(t00.price)) * 100000) / 1000;
-      }
-    }
     var basisBits = [];
     if (basisPts != null && isFinite(basisPts)) {
       basisBits.push((basisPts >= 0 ? '正價差 +' : '逆價差 ') + Number(basisPts).toFixed(1) + '點');
@@ -2839,11 +2836,14 @@
     bdSub.push(tone);
     var txfSrc = txf.source || '';
     var txfName = txf.name || '台指期近月';
-    var txfTip = '即時報價＝TAIFEX MIS 台指期近月' +
+    var txfObservation = (txf.stale ? '最近成交，非即時' : '成交時間') +
+      (txf.asOf ? ' ' + String(txf.asOf).replace('T', ' ').slice(5, 19) : '待確認') +
+      (txfTr.historyAsOf ? ' · 日線 ' + txfTr.historyAsOf : '');
+    var txfTip = '成交報價＝TAIFEX MIS 台指期近月' +
       (txfSess ? ('（' + txfSess + '）') : '') +
       (txfSrc ? (' · source ' + txfSrc) : '') + quoteFreshSuffix(txf) +
-      '｜趨勢量化＝FinMind 近月連續（代號 __TXF__，日線）覆寫最新點為當前報價｜' +
-      'Basis＝期貨−加權現貨（盤後＝夜盤期貨−加權最新／昨收）｜顯示名：' + txfName;
+      '｜趨勢量化＝FinMind 近月連續日線；僅當日日盤可更新，夜盤獨立顯示｜' +
+      'Basis＝同日日盤且成交時間相差不超過五分鐘的期現價差｜顯示名：' + txfName;
     return '<div class="pl-strip">' +
       renderTrendCell({
         k: '加權指數 TAIEX', hero: true,
@@ -2864,7 +2864,7 @@
             : ''),
         hero: true,
         vHtml: fmt(txf.price, 0),
-        trend: txfTr, fallbackSub: txfFb, tip: txfTip,
+        trend: txfTr, fallbackSub: txfFb, tip: txfTip, observationText: txfObservation,
         go: 'afterhours', mkt: 'TW'
       }) +
       '<div class="cell hero" data-go="afterhours" role="link" tabindex="0" style="cursor:pointer" title="' + turnTip + '"><div class="k">成交金額 · 量能</div><div class="v">' +

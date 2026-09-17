@@ -48,28 +48,18 @@ def overlay_latest(
     *,
     same_bar: bool = False,
 ) -> None:
-    """Update the last session in-place. Never invent a new day from a % gap.
-
-    - empty series → append
-    - same_bar or missing dates → replace last (live overlay)
-    - same date → replace
-    - later date → append
-    - earlier date → ignore stale print
-    """
+    """只依明確日期更新；same_bar 僅允許同日，不能跳過日期檢查。"""
     if not series:
         series.append(latest)
         dates.append(latest_date)
         return
     last_date = dates[-1] if dates else None
-    if same_bar or not latest_date or not last_date:
-        series[-1] = latest
-        if latest_date:
-            dates[-1] = latest_date
+    if not latest_date or not last_date or latest_date < last_date:
         return
     if latest_date == last_date:
         series[-1] = latest
         return
-    if latest_date > last_date:
+    if latest_date > last_date and not same_bar:
         series.append(latest)
         dates.append(latest_date)
 
@@ -121,8 +111,8 @@ def price_series_quant(closes: Optional[Sequence[Any]],
 
     closes: 由舊到新的日線收盤價，或 {'date','close'} 列。
     latest: 同標的的即時報價，用於更新當前水位／均線偏離。
-    latest_date: 即時報價所屬交易日；缺日期時只覆寫最後一根，絕不因跳空 append。
-    same_bar: 台指期夜盤等「仍屬同一根日 K」時強制覆寫末端。
+    latest_date: 即時報價所屬交易日；日期缺失時保留歷史。
+    same_bar: 僅允許更新已存在的同日資料，不跨日覆寫。
     quote_change_pct: 若即時報價提供官方昨收漲跌幅，必須傳入；它優先於
         日線快取相鄰兩筆的推算，避免換月、夜盤或日線落後時顯示相反方向。
 
@@ -159,8 +149,8 @@ def price_series_quant(closes: Optional[Sequence[Any]],
     ma5 = sum(win5) / len(win5) if win5 else None
     vs_ma5 = ((cur - ma5) / ma5 * 100.0) if ma5 not in (None, 0) else None
     z20 = None
-    if len(series) >= 6:
-        w = series[-20:] if len(series) >= 20 else series
+    if len(series) >= 20:
+        w = series[-20:]
         mu = sum(w) / len(w)
         var = sum((x - mu) ** 2 for x in w) / len(w)
         sd = math.sqrt(var) if var > 0 else 0.0
@@ -227,5 +217,6 @@ def price_series_quant(closes: Optional[Sequence[Any]],
         'trend': trend,
         'level': level,
         'n': len(series),
+        'z20N': min(20, len(series)),
         'spark': spark,
     }

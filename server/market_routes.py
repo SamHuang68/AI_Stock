@@ -10,6 +10,74 @@ from market_contract import attach_quote_contract, cumulative_volume_contract
 TAIPEI_TIMEZONE = timezone(timedelta(hours=8))
 
 
+def taifex_mis_observation(row: dict[str, Any], session: str) -> dict[str, Any]:
+    """保留期交所場次起始日；午夜後夜盤時刻屬下一曆日，不猜交易歸屬日。"""
+    out = {'sourceDate': row.get('CDate'), 'sourceTime': row.get('CTime'),
+           'contract': str(row.get('SymbolID') or ''), 'tradeDate': None,
+           'sessionDate': None, 'asOf': None}
+    try:
+        raw_date, raw_time = str(row.get('CDate')), str(row.get('CTime'))
+        if (session not in ('day', 'night') or len(raw_date) != 8 or len(raw_time) != 6
+                or not raw_date.isdigit() or not raw_time.isdigit()):
+            return out
+        base = datetime.strptime(str(row.get('CDate')), '%Y%m%d').replace(tzinfo=TAIPEI_TIMEZONE)
+        observed = datetime.strptime(str(row.get('CDate')) + str(row.get('CTime')), '%Y%m%d%H%M%S').replace(tzinfo=TAIPEI_TIMEZONE)
+        minute = observed.hour * 60 + observed.minute
+        if session == 'night':
+            if minute <= 300:
+                observed += timedelta(days=1)
+            elif minute < 900:
+                return out
+        elif not 525 <= minute <= 825:
+            return out
+        # TXF 2026/09/17 官方日報與 9/16 夜盤 MIS 的完整 OHLC 已交叉核對。
+        out.update(asOf=observed.isoformat(), sessionDate=base.date().isoformat(),
+                   timestampQuality='mis_session_start_date',
+                   tradeDate=base.date().isoformat() if session == 'day' else None)
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
+def select_txf_quote(day: dict | None, night: dict | None,
+                     now: datetime | None = None) -> dict | None:
+    """由真實成交時間選主報價，保留非即時狀態，不混補跨場次欄位。"""
+    current = (now or datetime.now(TAIPEI_TIMEZONE)).astimezone(TAIPEI_TIMEZONE)
+    candidates = []
+    for row in (day, night):
+        if not row or row.get('price') is None:
+            continue
+        try:
+            observed = datetime.fromisoformat(row['asOf'])
+            if observed.tzinfo is None or observed > current + timedelta(seconds=5):
+                continue
+        except (KeyError, TypeError, ValueError):
+            continue
+        candidates.append((observed, row))
+    if not candidates:
+        return None
+    observed, row = max(candidates, key=lambda pair: pair[0])
+    age = max(0, (current - observed).total_seconds())
+    return {**row, 'ageSeconds': round(age, 1), 'stale': age > 300,
+            'quoteStatus': 'stale' if age > 300 else 'last_trade'}
+
+
+def synchronous_basis(spot: dict | None, future: dict | None) -> tuple[float | None, float | None]:
+    """期現價差只接受同日盤且時間相差不超過五分鐘的行情。"""
+    spot, future = spot or {}, future or {}
+    try:
+        a, b = datetime.fromisoformat(spot['asOf']), datetime.fromisoformat(future['asOf'])
+        if (a.tzinfo is None or b.tzinfo is None or future.get('session') not in ('day', 'regular')
+                or future.get('stale') or a.date() != b.date() or abs((a - b).total_seconds()) > 300):
+            return None, None
+        cash, fut = float(spot['price']), float(future['price'])
+        if not math.isfinite(cash) or not math.isfinite(fut) or cash <= 0 or fut <= 0:
+            return None, None
+        return round(fut - cash, 2), round((fut - cash) / cash * 100, 3)
+    except (KeyError, TypeError, ValueError):
+        return None, None
+
+
 def quote_observation(epoch_ms: Any, now: datetime | None = None) -> dict[str, Any]:
     """成交時間與取得時間分開；缺值或跨交易日不可宣稱即時。"""
     observed = twse_mis_observation({'tlong': epoch_ms})

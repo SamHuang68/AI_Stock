@@ -49,13 +49,22 @@ class TestTurnoverQuant(unittest.TestCase):
     def test_latest_without_date_does_not_invent_a_day(self):
         turns = [{'amount': x * 1e8} for x in (8000, 8100, 8200)]
         q = tq.turnover_quant(turns, latest_yi=9000)
-        self.assertEqual(q['yi'], 9000.0)
+        self.assertEqual(q['yi'], 8200.0)
         self.assertEqual(q['n'], 3)
 
     def test_empty(self):
         q = tq.turnover_quant([])
         self.assertIsNone(q['yi'])
         self.assertEqual(q['n'], 0)
+
+    def test_z20_requires_twenty_samples_and_keeps_value_date(self):
+        turns = [{'date': f'2026-08-{i:02d}', 'amount': (6000 + i * 10) * 1e8}
+                 for i in range(1, 21)]
+        self.assertIsNone(tq.turnover_quant(turns[:12])['z20'])
+        self.assertIsNotNone(tq.turnover_quant(turns)['z20'])
+        q = tq.turnover_quant(turns, latest_yi=1, latest_date='2026-08-19')
+        self.assertEqual(q['date'], '2026-08-20')
+        self.assertEqual(q['yi'], 6200)
 
 
 class TestVolumeScoreYi(unittest.TestCase):

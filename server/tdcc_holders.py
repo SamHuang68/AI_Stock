@@ -82,7 +82,7 @@ ALGO = {
         '總分 = 有資料支柱平均。'
         '另偵測背離：大股東↑且人數↑幅度大 → 標「散戶化背離」；'
         '大股東↑且人數↓ → 標「集中確認」。'
-        'HHI／熵由 1–16 級佔比推算，只作描述、不進入總分。'
+        'HHI／熵描述持股級距分布，不能單獨判斷大戶吸籌，不進入總分。'
     ),
     'viewNote': '資料為集保每週最後營業日；非即時。來源 TDCC 開放資料，非爬神秘金字塔。',
 }
@@ -142,24 +142,25 @@ def is_holders_sym(sym: str) -> bool:
 
 
 def _hhi_entropy(level_pct: Dict[int, float]) -> Tuple[Optional[float], Optional[float]]:
-    """Herfindahl 0–10000 and Shannon entropy from TDCC level share %.
-
-    Level 17 is the official total row and is excluded. Values are CONDITIONAL
-    reconstructions of the published 1–16 buckets, not a live order-book HHI.
-    """
+    """完整 1–15 持股級距的分布統計；排除調整與合計，不推論個別股東。"""
+    if not all(level in level_pct for level in range(1, 16)):
+        return None, None
     shares: List[float] = []
     for level, pct in (level_pct or {}).items():
         try:
             lv = int(level)
-            if lv < 1 or lv > 16:
+            if lv < 1 or lv > 15:
                 continue
             value = float(pct)
         except (TypeError, ValueError):
-            continue
+            return None, None
+        if not math.isfinite(value) or value < 0 or value > 100:
+            return None, None
         if value > 0:
             shares.append(value)
     total = sum(shares)
-    if total <= 0:
+    # 官方比例的四捨五入容差；缺列或大幅缺額不能正規化成完整樣本。
+    if abs(total - 100.0) > 0.2:
         return None, None
     weights = [item / total for item in shares]
     hhi = sum(weight * weight for weight in weights) * 10000.0
@@ -186,6 +187,8 @@ def _db() -> sqlite3.Connection:
         conn.execute('ALTER TABLE holders_week ADD COLUMN hhi REAL')
     if 'entropy' not in columns:
         conn.execute('ALTER TABLE holders_week ADD COLUMN entropy REAL')
+    if 'distribution_version' not in columns:
+        conn.execute('ALTER TABLE holders_week ADD COLUMN distribution_version INTEGER')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_holders_code ON holders_week(code, d)')
     conn.commit()
     return conn
@@ -245,7 +248,7 @@ def _parse_csv_bytes(raw: bytes) -> List[Dict[str, Any]]:
             if lv == TOTAL_LEVEL:
                 a['holders'] = ppl
             else:
-                a['level_pct'][lv] = a['level_pct'].get(lv, 0.0) + pct
+                a['level_pct'][lv] = float('nan') if lv in a['level_pct'] else pct
             if lv in MAJOR_LEVELS:
                 a['major_pct'] += pct
                 a['major_holders'] += ppl
@@ -269,6 +272,7 @@ def _parse_csv_bytes(raw: bytes) -> List[Dict[str, Any]]:
             'major_holders': int(a['major_holders']),
             'hhi': hhi,
             'entropy': entropy,
+            'distribution_version': 2,
         })
     return out
 
@@ -299,7 +303,7 @@ def _parse_positional(rows_raw: List[List[str]]) -> List[Dict[str, Any]]:
             if lv == TOTAL_LEVEL:
                 a['holders'] = ppl
             else:
-                a['level_pct'][lv] = a['level_pct'].get(lv, 0.0) + pct
+                a['level_pct'][lv] = float('nan') if lv in a['level_pct'] else pct
             if lv in MAJOR_LEVELS:
                 a['major_pct'] += pct
                 a['major_holders'] += ppl
@@ -318,6 +322,7 @@ def _parse_positional(rows_raw: List[List[str]]) -> List[Dict[str, Any]]:
         'major_holders': int(a['major_holders']),
         'hhi': _hhi_entropy(a.get('level_pct') or {})[0],
         'entropy': _hhi_entropy(a.get('level_pct') or {})[1],
+        'distribution_version': 2,
     } for code, a in acc.items() if a['holders'] is not None]
 
 
@@ -330,10 +335,10 @@ def upsert_rows(rows: List[Dict[str, Any]]) -> int:
         for r in rows:
             conn.execute(
                 '''INSERT OR REPLACE INTO holders_week
-                   (d, code, holders, major_pct, mega_pct, major_holders, hhi, entropy)
-                   VALUES (?,?,?,?,?,?,?,?)''',
+                   (d, code, holders, major_pct, mega_pct, major_holders, hhi, entropy, distribution_version)
+                   VALUES (?,?,?,?,?,?,?,?,?)''',
                 (r['date'], r['code'], r['holders'], r['major_pct'], r['mega_pct'], r['major_holders'],
-                 r.get('hhi'), r.get('entropy')),
+                 r.get('hhi'), r.get('entropy'), r.get('distribution_version')),
             )
             n += 1
         conn.commit()
@@ -470,7 +475,7 @@ def load_stock_series(code: str) -> List[Dict[str, Any]]:
     conn = _db()
     try:
         rows = conn.execute(
-            '''SELECT d, holders, major_pct, mega_pct, major_holders, hhi, entropy
+            '''SELECT d, holders, major_pct, mega_pct, major_holders, hhi, entropy, distribution_version
                FROM holders_week WHERE code=? ORDER BY d''',
             (code,),
         ).fetchall()
@@ -483,10 +488,11 @@ def load_stock_series(code: str) -> List[Dict[str, Any]]:
             'major_pct': major_pct,
             'mega_pct': mega_pct,
             'major_holders': major_holders,
-            'hhi': hhi,
-            'entropy': entropy,
+            'hhi': hhi if version == 2 else None,
+            'entropy': entropy if version == 2 else None,
+            'distribution_version': version,
         }
-        for d, holders, major_pct, mega_pct, major_holders, hhi, entropy in rows
+        for d, holders, major_pct, mega_pct, major_holders, hhi, entropy, version in rows
     ]
 
 
@@ -627,9 +633,11 @@ def score_concentration(series: List[Dict[str, Any]]) -> Dict[str, Any]:
         hhi_txt = f'{float(hhi):.0f}'
         if detail.get('hhiCh4w') is not None:
             hhi_txt += f'（4週 {detail["hhiCh4w"]:+.0f}）'
-        rows.append({'k': 'HHI', 'v': hhi_txt + ' · 分級佔比，不進總分', 'score': None})
+        rows.append({'k': '級距 HHI', 'v': hhi_txt + ' · 級距分布，不代表吸籌方向', 'score': None})
     if entropy is not None:
-        rows.append({'k': '籌碼熵', 'v': f'{float(entropy):.2f} · 愈低愈集中', 'score': None})
+        rows.append({'k': '級距分布熵', 'v': f'{float(entropy):.2f} · 愈低表示分布集中於較少級距', 'score': None})
+    if hhi is None or entropy is None:
+        rows.append({'k': '級距分布', 'v': '待完整分級資料重新核對', 'score': None})
     if holders is not None:
         rows.insert(0, {
             'k': '總股東人數',

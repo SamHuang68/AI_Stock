@@ -57,7 +57,9 @@ from decision_routes import DecisionRoutesMixin
 from overnight_intraday_routes import OvernightIntradayRoutesMixin
 from options_routes import OptionsRoutesMixin
 from market_contract import attach_quote_contract, cumulative_volume_contract
-from market_routes import market_snapshot, twse_mis_observation, twse_mis_stock_quote, quote_observation, guard_tw_quote
+from market_routes import (market_snapshot, twse_mis_observation, twse_mis_stock_quote,
+                           quote_observation, guard_tw_quote, taifex_mis_observation,
+                           select_txf_quote, synchronous_basis)
 from http_boundary import BodyReadError, is_same_local_origin, read_json_body
 from atomic_store import StoreCorruptError, atomic_write_json, load_json
 import atomic_store as _atomic_store
@@ -1278,12 +1280,12 @@ def _tw_index_bars(symbol: str, n: int = 30) -> list:
         return []
 
 
-def _fmtqik_turnover(min_n: int = 12) -> list:
+def _fmtqik_turnover(min_n: int = 20) -> list:
     """TWSE FMTQIK 近月（必要時補上月）日成交金額列：[{date, amount, index?, chg?}]。
        供 /pulse 量能量化；快取 30 分。失敗回 []。"""
     from datetime import date as _date, timedelta
     today = _date.today()
-    key = f'fmtqik:v1:{today.strftime("%Y%m%d")}'
+    key = f'fmtqik:v2:{today.strftime("%Y%m%d")}'
     c = _cache.get(key)
     if c is not None:
         try:
@@ -4939,23 +4941,13 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         if inst is None and bd:
             inst = bd.get('inst')
 
-        # 夜盤：快取未命中則輕量直取（與 _handle_txf 同源 helper）
-        txf_night = None
-        if txf and txf.get('ok'):
-            n = txf.get('night')
-            if n and n.get('price') is not None:
-                txf_night = n
-            elif txf.get('price') is not None and (
-                txf.get('session') == 'night' or txf.get('ampRate') is not None
-            ):
-                txf_night = txf
-        if txf_night is None:
-            try:
-                n = self._txf_mis_session(1)
-                if n and n.get('price') is not None:
-                    txf_night = n
-            except Exception as e:
-                print('[pulse] txf night', e)
+        # 主報價、快照與趨勢共用 /txf 的同一來源；夜盤保留供夜盤觀察。
+        try:
+            txf = self._txf_payload()
+        except Exception as e:
+            print('[pulse] txf', e)
+            txf = None
+        txf_night = (txf or {}).get('night')
 
         sectors = []
         if isinstance(sec, dict):
@@ -5049,10 +5041,11 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         out['indices'] = indices
         out['stocks'] = stocks
         out['inst'] = inst
-        out['txf'] = txf_night
+        out['txf'] = txf
+        out['txfNight'] = txf_night
         # Canonical snapshot: headline renderers must not recompute a live
         # change from a daily-series close.
-        out['marketSnapshot'] = market_snapshot(indices, txf_night)
+        out['marketSnapshot'] = market_snapshot(indices, txf)
         out['marketflow'] = {
             'turnover': (mf or {}).get('turnover'),
             'inst': inst,
@@ -5204,34 +5197,21 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                 'cat': '系統',
             })
 
-        # 成交金額（億）— breadth.turnover 優先；序列用 marketflow／FMTQIK 量化趨勢
-        turnover_yi = None
-        to_bd = (bd or {}).get('turnover') or {}
-        for k in ('stockAmt', 'totalAmt'):
-            if to_bd.get(k) is not None:
-                try:
-                    turnover_yi = float(to_bd[k]) / 1e8
-                    break
-                except Exception:
-                    pass
-        turns = (mf or {}).get('turnover') if mf else None
-        if not turns:
+        # 全日量能沿用 FMTQIK；金額與日期一起取，不能以廣度日期重貼舊數值。
+        turns = (mf or {}).get('turnover') or []
+        if len(turns) < 20:
             try:
-                turns = _fmtqik_turnover()
+                turns = _fmtqik_turnover() or turns
             except Exception as e:
                 print('[pulse] fmtqik', e)
-                turns = []
-        if turnover_yi is None and turns:
-            try:
-                turnover_yi = float(turns[-1]['amount']) / 1e8
-            except Exception:
-                pass
-        tq = _turnover_quant(
-            turns or [], latest_yi=turnover_yi,
-            latest_date=(bd or {}).get('date') or out.get('date') or
-            ((turns[-1] or {}).get('date') if turns else None))
-        if turnover_yi is None and tq.get('yi') is not None:
-            turnover_yi = tq['yi']
+        turnover_source = 'TWSE FMTQIK'
+        if not turns:
+            amount = ((bd or {}).get('turnover') or {}).get('stockAmt')
+            if amount is not None and (bd or {}).get('date'):
+                turns = [{'date': bd['date'], 'amount': amount}]
+                turnover_source = (bd or {}).get('source') or 'TWSE MI_INDEX'
+        tq = _turnover_quant(turns)
+        turnover_yi = tq.get('yi')
         turnover_chg = tq.get('chgPct')
 
         t00 = indices.get('t00') or {}
@@ -5258,46 +5238,22 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             o00_trend = _price_series_quant(
                 [], latest=o00.get('price'), quote_change_pct=o00.get('changePct'),
                 latest_date=_quote_session_date(o00) or session_fallback)
-        txf_live = None
-        night_overlay = False
-        txf_chg = None
-        txf_date = None
+        txf_live = (txf or {}).get('price')
         try:
-            if isinstance(txf_night, dict) and txf_night.get('price') is not None:
-                txf_live = txf_night.get('price')
-                txf_chg = txf_night.get('changePct')
-                txf_date = _quote_session_date(txf_night)
-                night_overlay = True
-            elif isinstance(txf, dict) and txf.get('price') is not None:
-                txf_live = txf.get('price')
-                txf_chg = txf.get('changePct')
-                txf_date = _quote_session_date(txf)
-                night_overlay = str(txf.get('session') or '') == 'night'
             txf_bars = _tw_index_bars('__TXF__', n=30)
-            # 頂列台指期使用與 p.txf 完全相同的 TAIFEX 即時 session。
-            # 日線只提供 vs5／Z／趨勢；漲跌幅不可從跨日／換月快取反推。
-            # 夜盤覆寫同一根日 K；日盤依交易日覆蓋或 append。
+            # 這份歷史以日盤為主；夜盤報價獨立顯示，不改寫已完成日 K。
+            day_overlay = ((txf or {}).get('session') == 'day' and not (txf or {}).get('stale'))
             txf_trend = _price_series_quant(
-                txf_bars, latest=txf_live, quote_change_pct=txf_chg,
-                latest_date=txf_date, same_bar=night_overlay)
+                txf_bars, latest=txf_live if day_overlay else None,
+                latest_date=(txf or {}).get('tradeDate') if day_overlay else None,
+                quote_change_pct=(txf or {}).get('changePct'))
+            txf_trend['quoteSession'] = (txf or {}).get('session')
+            txf_trend['historyAsOf'] = (txf_bars[-1] or {}).get('date') if txf_bars else None
         except Exception as e:
             print('[pulse] txf trend', e)
             txf_trend = _price_series_quant([])
-        # 台指期 − 加權現貨＝Basis（正價差／逆價差）；與前端 strip.basisPts／basisPct 對齊
-        basis_pts = None
-        basis_pct = None
-        try:
-            t00_px = t00.get('price')
-            if txf_live is not None and t00_px is not None:
-                t00_f = float(t00_px)
-                txf_f = float(txf_live)
-                basis_pts = round(txf_f - t00_f, 2)
-                if t00_f > 0:
-                    basis_pct = round(basis_pts / t00_f * 100.0, 3)
-        except Exception as e:
-            print('[pulse] basis', e)
-            basis_pts = None
-            basis_pct = None
+        # 異時段或時間不明時不發布同時點期現價差。
+        basis_pts, basis_pct = synchronous_basis(t00, txf)
         st = stocks or {}
         up, dn, flat = st.get('up'), st.get('down'), st.get('unchanged')
         ls_ratio = None
@@ -5360,6 +5316,10 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                 'turnoverTrend': tq.get('trend'),
                 'turnoverLevel': tq.get('level'),
                 'turnoverN': tq.get('n'),
+                'turnoverDate': tq.get('date'),
+                'turnoverSource': turnover_source,
+                'turnoverSession': 'day_eod',
+                'turnoverZ20N': tq.get('z20N'),
                 'up': up, 'down': dn, 'flat': flat,
                 'limitUp': st.get('limitUp'),
                 'limitDown': st.get('limitDown'),
@@ -7101,6 +7061,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             return None
         best, best_vol = None, -1.0
         for row in rows:
+            if not str(row.get('SymbolID') or '').endswith(('-F', '-M')):
+                continue
             last = self._txf_fnum(row, 'CLastPrice', 'CLast', 'LastPrice')
             if last is None:
                 continue
@@ -7108,7 +7070,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             if vol > best_vol:
                 best, best_vol = row, vol
         if best is None:
-            best = rows[0]
+            return None
         price = self._txf_fnum(best, 'CLastPrice', 'CLast', 'LastPrice')
         prev = self._txf_fnum(best, 'CRefPrice', 'CYDClose', 'RefPrice')
         high = self._txf_fnum(best, 'CHighPrice')
@@ -7131,6 +7093,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             'open': opn, 'high': high, 'low': low,
             'ampRate': (round(amp, 4) if amp is not None else None),
             'volume': vol, 'time': best.get('CTime') or '',
+            **taifex_mis_observation(best, sess),
             'session': sess, 'sessionLabel': '夜盤' if sess == 'night' else '日盤',
             'name': best.get('DispCName') or best.get('CName') or '台指期近一',
             'source': 'taifex-mis-' + sess,
@@ -7209,118 +7172,31 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         except Exception:
             return False
 
-    def _handle_txf(self):
-        """台指期近一(含夜盤波動) — Yahoo TW + TAIFEX MIS 日/夜盤。
-           回 {ok, price, prevClose, change, changePct, open, high, low, ampRate,
-               volume, session, sessionLabel, time, name, source, night:{...}}。
-           night 永遠附夜盤近月 OHLC/振幅，供夜盤面板「台指期夜盤波動」。"""
-        key = f'txf:{int(time.time() // 20)}'   # 20s 快取
-        c = _cache.get(key)
-        if c is not None:
-            self._ok(c); return
-
-        debug = {}
-        yahoo = None
-        try:
-            yahoo, ydbg = self._txf_yahoo_quote()
-            if ydbg:
-                debug['yahoo'] = ydbg
-        except Exception as e:
-            debug['yahoo_error'] = str(e)
-
-        night = None
-        day = None
-        try:
-            night = self._txf_mis_session(1)
-        except Exception as e:
-            debug['taifex_night_error'] = str(e)
-        try:
-            day = self._txf_mis_session(0)
-        except Exception as e:
-            debug['taifex_day_error'] = str(e)
-
-        # 主報價：夜盤時段或 Yahoo≈夜盤價 → 夜盤；否則日盤；再退 Yahoo
-        primary = None
-        if night and night.get('price') is not None and (
-            self._txf_is_night_hours()
-            or (yahoo and yahoo.get('price') is not None
-                and abs(yahoo['price'] - night['price']) <= max(2.0, night['price'] * 0.0005))
-            or (not day or day.get('price') is None)
-        ):
-            primary = dict(night)
-            # Yahoo 同期 OHLC 可補 MIS 缺欄
-            if yahoo:
-                for k in ('open', 'high', 'low', 'ampRate', 'prevClose', 'changePct', 'change'):
-                    if primary.get(k) is None and yahoo.get(k) is not None:
-                        primary[k] = yahoo[k]
-                if primary.get('source') and yahoo.get('source'):
-                    primary['source'] = yahoo['source'] + '+' + primary['source']
-        elif day and day.get('price') is not None:
-            primary = dict(day)
-            if yahoo:
-                for k in ('open', 'high', 'low', 'ampRate', 'prevClose', 'changePct', 'change'):
-                    if primary.get(k) is None and yahoo.get(k) is not None:
-                        primary[k] = yahoo[k]
-        elif yahoo and yahoo.get('price') is not None:
-            primary = dict(yahoo)
-            primary['session'] = 'night' if self._txf_is_night_hours() else 'day'
-            primary['sessionLabel'] = '夜盤' if primary['session'] == 'night' else '日盤'
-
+    def _txf_payload(self):
+        """/txf 與 /pulse 共用完整成交時間選擇，不以價格相似度猜日夜盤。"""
+        key = f'txf:v2:{int(time.time() // 20)}'
+        cached = _cache.get(key)
+        if cached is not None:
+            return json.loads(cached)
+        sessions = {}
+        for market_type, name in ((0, 'day'), (1, 'night')):
+            try:
+                sessions[name] = self._txf_mis_session(market_type)
+            except Exception:
+                sessions[name] = None
+        primary = select_txf_quote(sessions.get('day'), sessions.get('night'))
         if primary is None:
-            self._ok(json.dumps(
-                {'ok': False, 'error': '兩來源皆無法解析', 'debug': debug},
-                ensure_ascii=False,
-            ).encode())
-            return
-
-        # 夜盤波動區塊：優先 MIS 夜盤；若無則主報價已是夜盤時複用
-        night_block = None
-        src_night = night if (night and night.get('price') is not None) else None
-        if src_night is None and primary.get('session') == 'night':
-            src_night = primary
-        if src_night is not None:
-            night_block = {
-                'price': src_night.get('price'),
-                'prevClose': src_night.get('prevClose'),
-                'change': src_night.get('change'),
-                'changePct': src_night.get('changePct'),
-                'open': src_night.get('open'),
-                'high': src_night.get('high'),
-                'low': src_night.get('low'),
-                'ampRate': src_night.get('ampRate'),
-                'volume': src_night.get('volume'),
-                'time': src_night.get('time') or '',
-                'session': 'night',
-                'sessionLabel': '夜盤',
-                'source': src_night.get('source') or 'taifex-mis-night',
-            }
-
-        out = {
-            'ok': True,
-            'price': primary.get('price'),
-            'prevClose': primary.get('prevClose'),
-            'change': primary.get('change'),
-            'changePct': primary.get('changePct'),
-            'open': primary.get('open'),
-            'high': primary.get('high'),
-            'low': primary.get('low'),
-            'ampRate': primary.get('ampRate'),
-            'volume': primary.get('volume'),
-            'time': primary.get('time') or '',
-            'session': primary.get('session') or ('night' if self._txf_is_night_hours() else 'day'),
-            'sessionLabel': primary.get('sessionLabel') or (
-                '夜盤' if (primary.get('session') or '') == 'night' else '日盤'
-            ),
-            'name': primary.get('name') or '台指期近一',
-            'source': primary.get('source') or 'unknown',
-            'night': night_block,
-        }
+            return {'ok': False, 'price': None, 'night': sessions.get('night'),
+                    'error': '缺少可核對成交時間的期貨行情'}
         out = attach_quote_contract(
-            out, symbol='__TXF__', market='TW', session=out.get('session'),
-            source=out.get('source'))
-        body = json.dumps(out, ensure_ascii=False).encode()
-        _cache.set(key, body)
-        self._ok(body)
+            {**primary, 'ok': True, 'night': sessions.get('night')},
+            symbol='__TXF__', market='TW', session=primary.get('session'),
+            source=primary.get('source'))
+        _cache.set(key, json.dumps(out, ensure_ascii=False).encode(), ttl=20)
+        return out
+
+    def _handle_txf(self):
+        self._ok(json.dumps(self._txf_payload(), ensure_ascii=False).encode())
 
     def _stockfut_one(self, cid, m):
         """從整批快取 m 算單一個股期 {ok,price,changePct,現%,領先,session...}。"""

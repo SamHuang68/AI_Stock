@@ -42,7 +42,7 @@ def turnover_quant(
     """由日成交序列＋可選當日官方億元，建量能量化指標。
 
     turns: [{date, amount: 元, ...}, ...]
-    latest_date: 當日官方成交所屬交易日。缺日期時只覆寫最後一根，不因盤中累積量 append。
+    latest_date: 官方成交所屬交易日；缺日期時保留既有歷史。
     回傳：yi, chgPct, ma5Yi, vsMa5Pct, z20, volumeScore, volumeRelative, streak, trend, level, n
     """
     empty = {
@@ -83,8 +83,8 @@ def turnover_quant(
     ma5 = sum(win5) / len(win5) if win5 else None
     vs_ma5 = ((cur - ma5) / ma5 * 100.0) if ma5 not in (None, 0) else None
     z20 = None
-    if len(series) >= 6:
-        w = series[-20:] if len(series) >= 20 else series
+    if len(series) >= 20:
+        w = series[-20:]
         mu = sum(w) / len(w)
         var = sum((x - mu) ** 2 for x in w) / len(w)
         sd = math.sqrt(var) if var > 0 else 0.0
@@ -142,4 +142,6 @@ def turnover_quant(
         'trend': trend,
         'level': level,
         'n': len(series),
+        'z20N': min(20, len(series)),
+        'date': dates[-1],
     }

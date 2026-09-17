@@ -14,6 +14,14 @@ import margin_ratio as mr  # noqa: E402
 
 
 class TestMarginRatioUnit(unittest.TestCase):
+    def test_official_balance_columns_and_units(self):
+        tables = [{'fields': ['代號', '名稱', '今日餘額', '今日餘額'],
+                   'data': [['2330', '台積電', '1,234', '999'], ['0050', 'ETF', '100', '200']]}]
+        self.assertEqual(mr._parse_lots_from_tables(tables), {'2330': 1234})
+        self.assertEqual(mr._parse_lots_from_tables([{'fields': ['代號'], 'data': [['2330']]}]), {})
+        loan = [{'fields': ['項目', '今日餘額'], 'data': [['融資金額(仟元)', '2,345']]}]
+        self.assertEqual(mr._parse_loan_from_tables(loan), 2345000)
+
     def test_etf_filter(self):
         self.assertTrue(mr._is_etf_code('0050'))
         self.assertTrue(mr._is_etf_code('006208'))

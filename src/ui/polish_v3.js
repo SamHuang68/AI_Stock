@@ -385,9 +385,7 @@ function renderCanonicalMarketQuote(sym, quote) {
 
 /**
  * 台指期主圖與大盤列必須吃同一份 /txf（TAIFEX MIS）。
- * FinMind 日線只保留歷史日盤；日盤收盤後把最後一根 K 的 H/L/C 覆寫成當前盤
- * （夜盤優先），標題漲跌基準改用 /txf.prevClose（日盤結算），避免 K 停在
- * 日收而下方已在走夜盤。
+ * 即時報價與歷史圖分開；日線只接受明確同日的日盤資料，夜盤保留獨立報價。
  */
 function normalizeTxfLiveQuote(raw) {
   if (!raw) return null;
@@ -413,6 +411,9 @@ function normalizeTxfLiveQuote(raw) {
     low: low > 0 ? low : price,
     open: opn > 0 ? opn : null,
     session,
+    asOf: raw.asOf || m.asOf || null,
+    tradeDate: raw.tradeDate || m.tradeDate || null,
+    stale: raw.stale === true || m.stale === true,
     sessionLabel: raw.sessionLabel || (session === 'night' ? '夜盤' : session === 'day' ? '日盤' : ''),
     changePct: isFinite(changePct) ? changePct : null,
   };
@@ -424,8 +425,20 @@ function isTxfChartSym(sym) {
 }
 
 function overlayTxfLiveOnLastBar(last, quote, opts) {
-  const nq = normalizeTxfLiveQuote(quote) || (quote && Number(quote.price) > 0 ? quote : null);
-  if (!last || !nq) return null;
+  const nq = normalizeTxfLiveQuote(quote);
+  if (!last || !nq || nq.stale || !nq.asOf) return null;
+  const observed = Date.parse(nq.asOf);
+  if (!Number.isFinite(observed)) return null;
+  const intraday = !!(opts && opts.intraday);
+  if (intraday) {
+    // 即時 tick 只能更新同一分鐘，不把新時段的價格貼到舊分 K。
+    if (!Number.isFinite(Number(last.time)) || Math.floor(observed / 60000) !== Math.floor(Number(last.time) / 60)) return null;
+  } else {
+    const day = typeof last.time === 'string' ? last.time.slice(0, 10)
+      : typeof last.time === 'number' ? new Date((last.time + 8 * 3600) * 1000).toISOString().slice(0, 10)
+        : last.time && [last.time.year, String(last.time.month).padStart(2, '0'), String(last.time.day).padStart(2, '0')].join('-');
+    if (nq.session !== 'day' || !nq.tradeDate || day !== nq.tradeDate) return null;
+  }
   const px = nq.price;
   // 1 分 K：只跟當根收盤擴高低；日 K 才把整段 session H/L 畫上最後一根。
   const sessionHL = !(opts && opts.intraday);
@@ -457,11 +470,12 @@ function applyTxfLiveToChart(raw) {
   const _iv = _rdef && _rdef.interval;
   const _intraday = (_iv && _iv !== '1d' && _iv !== '1wk') || (typeof S !== 'undefined' && S.range === '1d');
   const bar = overlayTxfLiveOnLastBar(last, q, { intraday: _intraday });
-  if (!bar) return false;
-  last.open = bar.open;
-  last.high = bar.high;
-  last.low = bar.low;
-  last.close = bar.close;
+  if (bar) {
+    last.open = bar.open;
+    last.high = bar.high;
+    last.low = bar.low;
+    last.close = bar.close;
+  }
   if (q.prevClose > 0) S.data.yesterdayClose = q.prevClose;
   const off = (S.tzOffset && isFinite(S.tzOffset)) ? S.tzOffset : 0;
   const col = (function () {
@@ -472,7 +486,7 @@ function applyTxfLiveToChart(raw) {
     if (delta < 0) return pal.down;
     return '#9ca3af';
   })();
-  if (S.chartSeries && typeof S.chartSeries.update === 'function') {
+  if (bar && S.chartSeries && typeof S.chartSeries.update === 'function') {
     try {
       S.chartSeries.update({
         time: bar.time + off,
@@ -544,8 +558,10 @@ function applyTxfLiveToChart(raw) {
   }
   if (hb) {
     const night = q.session === 'night';
-    hb.style.color = night ? '#38bdf8' : '#3ecf6b';
-    hb.textContent = '● ' + (q.sessionLabel || (night ? '夜盤' : '日盤')) + ' · MIS';
+    hb.style.color = q.stale ? '#94a3b8' : night ? '#38bdf8' : '#3ecf6b';
+    hb.textContent = '● ' + (q.sessionLabel || (night ? '夜盤' : '日盤')) +
+      (q.stale ? ' · 最近成交，非即時' : '') + ' · MIS' +
+      (q.asOf ? ' · ' + String(q.asOf).replace('T', ' ').slice(5, 19) : ' · 時間待核對');
   }
   return true;
 }
