@@ -21,6 +21,9 @@
 
   var SRV = window.SERVER || '';
   var timer = null;
+  var refreshSequence = 0;
+  var headMetaSequence = 0;
+  var warmRetryTimer = null;
   var layoutResizeTimer = null;
   var lastPack = null;
   var showFactors = false;
@@ -3482,7 +3485,7 @@
   }
 
   function sectorsFromPack(ov) {
-    if (sectorMkt === 'US' && sectorCache.US) return sectorCache.US;
+    if (sectorMkt === 'US') return sectorCache.US || [];
     if (sectorMkt === 'TW' && sectorCache.TW) return sectorCache.TW;
     return (ov && ov.sectorsRanked) || [];
   }
@@ -3547,18 +3550,19 @@
   }
 
   function loadSectorsMkt(mkt) {
-    sectorMkt = mkt || 'TW';
-    if (sectorCache[sectorMkt] && lastPack) {
+    var requestMarket = mkt === 'US' ? 'US' : 'TW';
+    sectorMkt = requestMarket;
+    if (sectorCache[requestMarket] && lastPack) {
       var body = $('pl-body');
       if (body && lastPack) render(lastPack);
       return;
     }
-    jget('/sectors?mkt=' + encodeURIComponent(sectorMkt)).then(function (d) {
+    jget('/sectors?mkt=' + encodeURIComponent(requestMarket)).then(function (d) {
       var rows = (d && d.sectors) || [];
-      sectorCache[sectorMkt] = rows.map(function (s) {
+      sectorCache[requestMarket] = rows.map(function (s) {
         return { name: s.name, changePct: s.changePct, close: s.close, symbol: s.symbol };
       });
-      if (lastPack) render(lastPack);
+      if (lastPack && sectorMkt === requestMarket) render(lastPack);
     });
   }
 
@@ -4122,6 +4126,7 @@
   }
 
   function renderHeadMeta(pack) {
+    var sequence = ++headMetaSequence;
     var host = $('pl-head-meta');
     if (!host) return;
     var p = (pack && pack.pulse) || {};
@@ -4159,9 +4164,13 @@
     var revision = (decision.contractVersion != null ? decision.contractVersion
       : (snap.contractVersion != null ? snap.contractVersion : p.contractVersion));
     var snapId = shortSnapshotId([asOf, snap.generatedAt, p.updatedAt, completeness]);
-    var valid = !(fresh && fresh.freshness) ? '尚未確認'
+    var decisionFreshness = quality.freshness == null ? null : Number(quality.freshness);
+    var decisionExpired = decisionFreshness != null && isFinite(decisionFreshness) && decisionFreshness < 0.25;
+    var decisionDegraded = (decisionFreshness != null && isFinite(decisionFreshness) && decisionFreshness < 1) ||
+      (Array.isArray(quality.staleFields) && quality.staleFields.length > 0);
+    var valid = decisionExpired ? '過期（決策來源）' : (!(fresh && fresh.freshness) ? '尚未確認'
       : (fresh.freshness === 'stale' ? '過期'
-        : ((completeness != null && completeness < 80) ? '降級' : '有效'));
+        : (decisionDegraded || (completeness != null && completeness < 80) ? '降級' : '有效')));
     function bit(label, value) { return label + '<b>' + value + '</b>'; }
     function paint(jobLabel) {
       if (jobLabel) _lastJobLabel = jobLabel;
@@ -4193,7 +4202,7 @@
     }
     paint(_lastJobLabel);
     jget('/sync/status').then(function (st) {
-      if (!st) return;
+      if (!st || sequence !== headMetaSequence) return;
       paint(st.running ? '進行中' : (st.lastOk ? '已完成' : '待命'));
     }).catch(function () {});
   }
@@ -4348,6 +4357,8 @@
   function refresh(force) {
     var body = ensureMount();
     if (!body) return;
+    var sequence = ++refreshSequence;
+    if (warmRetryTimer) { clearTimeout(warmRetryTimer); warmRetryTimer = null; }
     var btn = $('pl-refresh');
     if (btn) {
       btn.disabled = true;
@@ -4366,6 +4377,7 @@
     var q = force ? '/pulse?refresh=1' : '/pulse';
     var t0 = Date.now();
     Promise.all([jget(q), fetchWlQuotes()]).then(function (arr) {
+      if (sequence !== refreshSequence) return;
       var pulse = arr[0];
       if (!pulse || !pulse.ok) {
         if (!lastPack) {
@@ -4387,15 +4399,17 @@
       // 資料不完整：只暖快取 + soft 再取；禁止再打 refresh=1（舊邏輯會再卡 20s+）
       if ((pulse.dataCompleteness != null && pulse.dataCompleteness < 90) || !pulse.breadthOk) {
         warmCaches();
-        setTimeout(function () {
-          if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'pulse') {
+        warmRetryTimer = setTimeout(function () {
+          warmRetryTimer = null;
+          if (sequence === refreshSequence && window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'pulse') {
             jget('/pulse').then(function (p2) {
-              if (p2 && p2.ok) render({ pulse: p2, wlQuotes: arr[1] || {} });
+              if (sequence === refreshSequence && p2 && p2.ok) render({ pulse: p2, wlQuotes: arr[1] || {} });
             });
           }
         }, 1600);
       }
     }).finally(function () {
+      if (sequence !== refreshSequence) return;
       var b = $('pl-refresh');
       if (b) {
         b.disabled = false;
@@ -4414,7 +4428,9 @@
   }
 
   function deactivate() {
+    ++refreshSequence;
     if (timer) { clearInterval(timer); timer = null; }
+    if (warmRetryTimer) { clearTimeout(warmRetryTimer); warmRetryTimer = null; }
     showFactors = false;
     var body = $('pl-body');
     if (body) {
@@ -4439,17 +4455,10 @@
     last: function () { return lastPack; }
   };
 
-  window.addEventListener('shell:route', function (ev) {
-    if (ev && ev.detail && ev.detail.route === 'pulse') activate();
-  });
+  // 面板生命週期由 Shell／AppKernel 統一呼叫，路由事件保留作追蹤用途。
   window.addEventListener('resize', function () {
     if (layoutResizeTimer) clearTimeout(layoutResizeTimer);
     layoutResizeTimer = setTimeout(probeLayoutCols, 120);
   });
 
-  function boot() {
-    if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'pulse') activate();
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(boot, 200); });
-  else setTimeout(boot, 200);
 })();

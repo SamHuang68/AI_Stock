@@ -34,6 +34,7 @@ def _fake_release(root: Path, release_id: str) -> Path:
         "commit": release_id.ljust(40, "0"),
         "tests": "passed",
         "managedTopLevel": ["server", "scripts", "stock_terminal_v2.html"],
+        "contentSha256": release._content_hashes(target),
     }
     _write(
         target / ".private_web_release.json",
@@ -173,11 +174,35 @@ class PrivateWebReleaseTests(unittest.TestCase):
 
     def test_release_gate_includes_etf_and_shell_node_regressions(self):
         source = (ROOT / "scripts" / "private_web_release.py").read_text(encoding="utf-8")
-        self.assertIn("tests/etf_flow_v3_selftest.js", source)
-        self.assertIn("tests/shell_v5_selftest.js", source)
         self.assertIn('"tests.test_archify_artifacts"', source)
         self.assertIn('shutil.which("node")', source)
         self.assertIn('"-m", "unittest", "-b"', source)
+
+    def test_發布階段執行暫存版本全部排序後的前端自測及決策回歸(self):
+        commit = 'a' * 40
+        selftests = [
+            'tests/shell_v5_selftest.js', 'tests/etf_flow_v3_selftest.js',
+            'tests/ai_panels_selftest.js', 'tests/台股即時報價_selftest.js',
+            'tests/LIVE報價一致性_selftest.js', 'tests/新增_selftest.js',
+        ]
+        calls = []
+
+        def run(argv, *, cwd, capture=False):
+            calls.append(argv)
+            if argv[0] == 'git':
+                with zipfile.ZipFile(argv[argv.index('--output') + 1], 'w') as archive:
+                    for relative in sorted(release.REQUIRED_RELEASE_FILES | set(selftests)):
+                        archive.writestr(relative, '受測內容')
+
+        with patch.object(release, 'resolve_commit', return_value=(commit, commit[:12])), \
+                patch.object(release, '_run', run), patch.object(release.shutil, 'which', return_value='node'):
+            staged = release.stage_release(self.install_root, ref=commit)
+        self.assertEqual([argv[1] for argv in calls if argv[0] == 'node'], sorted(selftests))
+        python_tests = next(argv for argv in calls if '-m' in argv)
+        for test in ['tests.test_決策資料品質', 'tests.test_發布完整性',
+                     'tests.test_decision_context', 'tests.test_decision_http']:
+            self.assertIn(test, python_tests)
+        release._validate_integrity(staged, release._read_manifest(staged / release.MANIFEST_NAME))
 
     def test_release_requires_archify_manifest_documents_and_validator(self):
         expected = {

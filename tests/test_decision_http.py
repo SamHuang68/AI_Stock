@@ -10,9 +10,10 @@ import threading
 import unittest
 import urllib.request
 import urllib.error
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'server'))
@@ -37,14 +38,22 @@ _SERVER_SPEC.loader.exec_module(st_server)
 
 def _pulse() -> dict:
     as_of = datetime.now(timezone.utc).isoformat()
+    observed = datetime.now(dc.TW_TZ)
+    if observed.weekday() >= 5 or not 540 <= observed.hour * 60 + observed.minute < 815:
+        if observed.hour * 60 + observed.minute < 815:
+            observed -= timedelta(days=1)
+        while observed.weekday() >= 5:
+            observed -= timedelta(days=1)
+        observed = observed.replace(hour=13, minute=33, second=0, microsecond=0)
+    source_as_of = observed.isoformat()
     twii = {'price': 23000, 'changePct': 1.0,
             'market': {'displayChangePct': 1.0, 'source': 'twse-mis', 'session': 'regular',
-                       'referenceType': 'previous_close', 'asOf': as_of}}
+                       'referenceType': 'previous_close', 'asOf': source_as_of}}
     txf = {'price': 23020, 'changePct': 0.8,
            'market': {'displayChangePct': 0.8, 'source': 'taifex-mis', 'session': 'night',
-                      'referenceType': 'previous_close', 'asOf': as_of}}
+                      'referenceType': 'previous_close', 'asOf': source_as_of}}
     return {
-        'ok': True, 'updatedAt': as_of, 'date': as_of[:10],
+        'ok': True, 'updatedAt': as_of, 'date': observed.date().isoformat(),
         'marketSnapshot': {'quotes': {'^TWII': twii, '__TXF__': txf}},
         'stocks': {'up': 700, 'down': 300, 'advRatio': 0.7, 'limitDown': 1},
         'snapshot': {'stocks': {'up': 700, 'down': 300, 'advRatio': 0.7, 'limitDown': 1},
@@ -59,6 +68,17 @@ def _pulse() -> dict:
 class DecisionHttpTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
+        for replacement in (patch.object(dc, '_latest_context', None), patch.object(dc, '_latest_inputs', None)):
+            replacement.start()
+            self.addCleanup(replacement.stop)
+        publish = dc.publish_context
+        def isolated_publish(context, **kwargs):
+            kwargs.update(db_path=str(Path(self.tmp.name) / 'decision.db'),
+                          trace_path=str(Path(self.tmp.name) / 'decision.jsonl'))
+            return publish(context, **kwargs)
+        publication = patch.object(dc, 'publish_context', side_effect=isolated_publish)
+        publication.start()
+        self.addCleanup(publication.stop)
         self.old_options_history = ox.HISTORY_PATH
         ox.HISTORY_PATH = str(Path(self.tmp.name) / 'options-history.json')
         with oi._CACHE_LOCK:

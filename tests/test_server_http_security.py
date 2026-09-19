@@ -84,15 +84,17 @@ class ServerHttpSecurityTests(unittest.TestCase):
         caught.exception.close()
 
     def test_wrong_content_type_and_oversized_body_are_rejected(self):
+        # 這兩案驗證標頭拒絕；不附未讀取的位元組，避免 Windows 在送出
+        # 415／413 後重設連線，使 urllib 偶發看不到已送出的 HTTP 狀態。
         wrong = urllib.request.Request(
-            self.base + '/sync', data=b'{}', method='POST',
+            self.base + '/sync', data=b'', method='POST',
             headers={'Content-Type': 'text/plain'})
         with self.assertRaises(urllib.error.HTTPError) as caught:
             urllib.request.urlopen(wrong, timeout=3)
         self.assertEqual(caught.exception.code, 415)
         caught.exception.close()
         oversized = urllib.request.Request(
-            self.base + '/sync', data=b'{}', method='POST',
+            self.base + '/sync', data=b'', method='POST',
             headers={'Content-Type': 'application/json', 'Content-Length': '999'})
         with self.assertRaises(urllib.error.HTTPError) as caught:
             urllib.request.urlopen(oversized, timeout=3)

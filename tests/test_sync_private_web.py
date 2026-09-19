@@ -84,14 +84,16 @@ catch { if ($_.Exception.Message -notmatch '服務版本驗證失敗') { throw }
             result = subprocess.run([PS, "-NoProfile", "-File", str(harness)], capture_output=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
 
-    def run_sync(self, switches, fail_stage=False):
+    def run_sync(self, switches, fail_stage=False, fail_promote=False, fail_health=False,
+                 fail_after_switch=False, first_install=False, lock_sync=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "scripts").mkdir()
             (root / "current").mkdir()
             (root / "current/data").mkdir()
             (root / "current/data/private_web_owner.token").write_text("測試用憑證", encoding="utf-8")
-            (root / "current/.private_web_release.json").write_text(json.dumps({"commit": COMMIT, "tests": "passed"}), encoding="utf-8")
+            if not first_install:
+                (root / "current/.private_web_release.json").write_text(json.dumps({"commit": 'b' * 40, "tests": "passed"}), encoding="utf-8")
             (root / "build_v2.py").touch()
             source = (ROOT / "scripts/sync_private_web.ps1").read_text(encoding="utf-8-sig")
             # 只替換外部邊界；參數繫結、版本選取、分支與發布順序均執行原碼。
@@ -103,12 +105,27 @@ function Invoke-StockPy {
   Add-Content -Encoding UTF8 -LiteralPath $env:SYNC_TRACE -Value ($PyArgs -join '|')
   $code = 0
   if ($PyArgs[1] -eq 'stage' -and $env:SYNC_FAIL -eq '1') { $code = 1 }
+  if ($PyArgs[1] -eq 'promote' -and $env:SYNC_FAIL_PROMOTE -eq '1') { $code = 1 }
+  if ($PyArgs[1] -eq 'promote' -and $code -eq 0) {
+    @{commit=('a' * 40);tests='passed';promotionId='new-promotion'} | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Root 'current/.private_web_release.json')
+    if ($env:SYNC_FAIL_AFTER_SWITCH -eq '1') { $code = 1 }
+  }
+  if ($PyArgs[1] -eq 'rollback') {
+    @{commit=('b' * 40);tests='passed'} | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Root 'current/.private_web_release.json')
+  }
   return [pscustomobject]@{ ExitCode=$code; Text=''; Stdout=(@{installRoot=$Root} | ConvertTo-Json) }
 }
 """
             (root / "scripts/sync_private_web.ps1").write_text(source[:begin] + stub + source[end:], encoding="utf-8-sig")
             (root / "scripts/private_web_runtime.ps1").write_text("""
-function Assert-PrivateWebRevision { param($Url, $Commit, $Headers, $Attempts); Add-Content -Encoding UTF8 $env:SYNC_TRACE ('驗證|' + $Url + '|' + $Commit) }
+function Assert-PrivateWebRevision {
+  param($Url, $Commit, $Headers, $Attempts)
+  Add-Content -Encoding UTF8 $env:SYNC_TRACE ('驗證|' + $Url + '|' + $Commit)
+  if ($Url -match ':18435/' -and $env:SYNC_FAIL_HEALTH -eq '1' -and -not $script:healthFailed) {
+    $script:healthFailed=$true
+    throw '模擬新版本啟動驗證失敗'
+  }
+}
 function Stop-PrivateWebRuntime { param($Current); Add-Content -Encoding UTF8 $env:SYNC_TRACE '停止' }
 function Start-PrivateWebRuntime { param($Current, $Python); Add-Content -Encoding UTF8 $env:SYNC_TRACE '啟動' }
 """, encoding="utf-8-sig")
@@ -119,9 +136,14 @@ function git {
   $global:LASTEXITCODE = 0
   if ($args[0] -eq 'rev-parse') { return ('a' * 40) }
 }
+if ($env:SYNC_LOCK -eq '1') {
+  $heldLock = [IO.File]::Open((Join-Path $PSScriptRoot '.private-web-sync.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+}
 & (Join-Path $PSScriptRoot 'scripts/sync_private_web.ps1') """ + switches, encoding="utf-8-sig")
             trace = root / "流程.txt"
-            env = dict(os.environ, ST_PYTHON=str(Path(PS)), SYNC_TRACE=str(trace), SYNC_FAIL="1" if fail_stage else "0")
+            env = dict(os.environ, ST_PYTHON=str(Path(PS)), SYNC_TRACE=str(trace), SYNC_FAIL="1" if fail_stage else "0",
+                       SYNC_FAIL_PROMOTE="1" if fail_promote else "0", SYNC_FAIL_HEALTH="1" if fail_health else "0",
+                       SYNC_FAIL_AFTER_SWITCH="1" if fail_after_switch else "0", SYNC_LOCK="1" if lock_sync else "0")
             result = subprocess.run([PS, "-NoProfile", "-File", str(harness)], env=env, capture_output=True, timeout=30)
             events = trace.read_text(encoding="utf-8-sig").splitlines() if trace.exists() else []
             return result, events
@@ -150,3 +172,43 @@ function git {
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("停止", events)
         self.assertFalse(any("promote|" in event for event in events))
+
+    def test_切換失敗仍啟動原版且回報失敗(self):
+        result, events = self.run_sync('-Promote -LayoutVerified', fail_promote=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(events.count('停止'), 1)
+        self.assertEqual(events.count('啟動'), 1)
+        self.assertFalse(any('|rollback|' in event for event in events))
+        self.assertTrue(any(':18435/health/live' in event for event in events))
+
+    def test_啟動失敗會停止新版回復並啟動前版(self):
+        result, events = self.run_sync('-Promote -LayoutVerified', fail_health=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(events.count('停止'), 2)
+        self.assertEqual(events.count('啟動'), 2)
+        rollback = 'scripts\\private_web_release.py|rollback|--approve'
+        self.assertIn(rollback, events)
+        self.assertLess(events.index(rollback), len(events) - 2)
+        self.assertIn('驗證|http://127.0.0.1:18435/health/live|' + 'b' * 40, events)
+
+    def test_切換後程序異常退出仍辨識新版並回復(self):
+        result, events = self.run_sync('-Promote -LayoutVerified', fail_after_switch=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(events.count('停止'), 2)
+        self.assertEqual(events.count('啟動'), 1)
+        self.assertIn('scripts\\private_web_release.py|recover|--approve', events)
+        self.assertIn('scripts\\private_web_release.py|rollback|--approve', events)
+        self.assertIn('驗證|http://127.0.0.1:18435/health/live|' + 'b' * 40, events)
+
+    def test_首次安裝啟動失敗會停止新版且不嘗試不存在的前版(self):
+        result, events = self.run_sync('-Promote -LayoutVerified', fail_health=True, first_install=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(events.count('停止'), 2)
+        self.assertEqual(events.count('啟動'), 1)
+        self.assertFalse(any('|rollback|' in event for event in events))
+
+    def test_另一個同步流程持有鎖時不停止服務(self):
+        result, events = self.run_sync('-Promote -LayoutVerified', lock_sync=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('停止', events)
+        self.assertFalse(any('|promote|' in event for event in events))

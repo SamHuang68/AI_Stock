@@ -10,6 +10,7 @@ or exposure range.  Pure ``build_decision_context`` calls are replayable;
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import math
 import os
@@ -18,7 +19,7 @@ import threading
 import time
 from collections import deque
 from contextlib import closing
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from jsonl_trace import append_jsonl as _append_jsonl
@@ -28,6 +29,7 @@ import consensus_attention as _consensus_attention
 
 CONTRACT_VERSION = 2
 ENGINE_VERSION = 'st-decision-context/v2'
+RULES_VERSION = 'st-decision-rules/2026-09-19'
 REGIME_LABELS = {
     'BROAD_RISK_ON': '廣泛風險偏好',
     'NARROW_RALLY': '指數偏強、結構狹窄',
@@ -51,6 +53,7 @@ TRACE_PATH = os.path.join(_BASE, 'logs', 'decision_trace.jsonl')
 TW_TZ = timezone(timedelta(hours=8))
 
 _lock = threading.RLock()
+_publish_lock = threading.RLock()
 _db_ready: set[str] = set()
 _db_lock = threading.Lock()
 _latest_context: dict[str, Any] | None = None
@@ -81,6 +84,73 @@ def _aware_datetime(value: Any) -> datetime | None:
         return parsed.replace(tzinfo=TW_TZ) if parsed.tzinfo is None else parsed
     except (TypeError, ValueError):
         return None
+
+
+def _source_quality(pulse: dict, twii: dict, txf: dict, now: datetime,
+                    session_calendar: dict | None = None) -> dict[str, dict]:
+    """依來源觀測時間與既有交易日曆判斷；建置時間不提供時效證明。"""
+    local = now.astimezone(TW_TZ)
+    calendar = session_calendar or {}
+    closed = set(calendar.get('closed') or [])
+    opened = set(calendar.get('opened') or [])
+    sessions = set(calendar.get('sessions') or [])
+    covered_years = set(calendar.get('coveredYears') or [])
+
+    def trading_day(day: date) -> bool:
+        key = day.isoformat()
+        if day.year in covered_years:
+            return key in sessions
+        return key not in closed and (day.weekday() < 5 or key in opened)
+
+    def completed_day(cutoff: int) -> date:
+        day = local.date()
+        if local.hour * 60 + local.minute < cutoff:
+            day -= timedelta(days=1)
+        for _ in range(370):
+            if trading_day(day):
+                return day
+            day -= timedelta(days=1)
+        return day
+
+    spot_day = completed_day(815)
+    daily_day = completed_day(1080)
+    live_spot = trading_day(local.date()) and 540 <= local.hour * 60 + local.minute < 815
+    sources = {}
+    for name, quote in (('twii', twii), ('txf', txf)):
+        market = quote.get('market') or {}
+        observed = _aware_datetime(market.get('asOf') or quote.get('asOf'))
+        status, freshness = 'unknown', 0.0
+        age = (local - observed).total_seconds() if observed else None
+        if observed is not None:
+            source_local = observed.astimezone(TW_TZ)
+            stale = market.get('stale') is True or quote.get('stale') is True
+            source_session_open = trading_day(local.date()) or (
+                name == 'txf' and local.hour * 60 + local.minute <= 300
+                and trading_day(local.date() - timedelta(days=1)))
+            if age < -5:
+                status = 'future'
+            elif source_local.date() == local.date() and source_session_open and age <= 1800 and not stale:
+                status, freshness = 'observed', 1.0 if age <= 300 else 0.8
+            elif (name == 'twii' and not live_spot and source_local.date() == spot_day
+                  and source_local.hour * 60 + source_local.minute >= 810):
+                # 收盤後與週末仍可使用最新完整交易日，不將固定秒數視為跨場次失效。
+                status, freshness = 'completed_session', 1.0
+            else:
+                status, freshness = 'stale', 0.2
+        sources[name] = {'asOf': observed.isoformat() if observed else None,
+                         'status': status, 'freshness': freshness,
+                         'ageSeconds': round(age, 1) if age is not None else None}
+    raw_day = _date_key(pulse.get('date'))
+    try:
+        breadth_day = datetime.strptime(raw_day, '%Y%m%d').date() if raw_day else None
+    except ValueError:
+        breadth_day = None
+    eligible_breadth = breadth_day == daily_day or (breadth_day == local.date() and trading_day(breadth_day))
+    sources['breadth'] = {'asOf': breadth_day.isoformat() if breadth_day else None,
+                          'status': 'completed_session' if eligible_breadth else ('stale' if breadth_day else 'unknown'),
+                          'freshness': 1.0 if eligible_breadth else (0.2 if breadth_day else 0.0),
+                          'expectedSession': daily_day.isoformat()}
+    return sources
 
 
 def _quote(pulse: dict, symbol: str, legacy: dict | None = None) -> dict:
@@ -515,10 +585,16 @@ def _portfolio_summary(raw: dict | None, kind: str = 'actual') -> dict | None:
     sectors = raw.get('sector') or {}
     top_sector = max(sectors.items(), key=lambda x: x[1]) if sectors else (None, None)
     port = raw.get('portfolio') or {}
+    quality = dict(raw.get('quality') or {})
+    sample_days = _number(port.get('days'))
+    available = (bool(stocks) and not raw.get('skipped') and sample_days is not None and sample_days > 30
+                 and beta_weight > 0 and abs(beta_weight - sum(_number((row or {}).get('weight')) or 0 for row in stocks.values())) < 0.01
+                 and _number(port.get('var95')) is not None and quality.get('available') is not False)
     look_through = _exposure_lab.portfolio_lookthrough(stocks)
     return {
         'kind': kind,
-        'available': True,
+        'available': available,
+        'quality': quality,
         'portfolioBeta': round(beta_sum / beta_weight, 3) if beta_weight else None,
         'volAnnualPct': _number(port.get('vol')),
         'var95DailyPct': _number(port.get('var95')),
@@ -768,6 +844,7 @@ def build_decision_context(
     margin_state: dict[str, Any] | None = None,
     benchmark_data: dict[str, Any] | None = None,
     options_structure: dict[str, Any] | None = None,
+    session_calendar: dict[str, Any] | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     pulse = dict(pulse or {})
@@ -779,8 +856,9 @@ def build_decision_context(
     indices = pulse.get('indices') or {}
     twii = _quote(pulse, '^TWII', (indices.get('t00') or snapshot.get('t00') or {}))
     txf = _quote(pulse, '__TXF__', (pulse.get('txf') or snapshot.get('txf') or {}))
+    source_quality = _source_quality(pulse, twii, txf, now, session_calendar)
     twii_change = _quote_change(twii)
-    txf_change = _quote_change(txf)
+    txf_change = _quote_change(txf) if source_quality['txf']['freshness'] >= 0.25 else None
     stocks = pulse.get('stocks') or snapshot.get('stocks') or {}
     adv_ratio = _number(stocks.get('advRatio'))
     advancers = _number(stocks.get('up'))
@@ -858,15 +936,7 @@ def build_decision_context(
     }
     completeness = _number(pulse.get('dataCompleteness'))
     completeness = _clamp((completeness or 0.0) / 100.0, 0.0, 1.0)
-    freshness = 1.0
-    try:
-        dt = _aware_datetime(as_of)
-        if dt is None:
-            raise ValueError('invalid asOf')
-        age = max(0.0, (now.astimezone(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds())
-        freshness = 1.0 if age <= 300 else (0.8 if age <= 1800 else (0.5 if age <= 21600 else 0.2))
-    except (TypeError, ValueError):
-        freshness = 0.8
+    freshness = min(source_quality[name]['freshness'] for name in ('twii', 'breadth'))
 
     scope_consistent = str(pulse.get('breadthScope') or 'TWSE_STOCKS') == 'TWSE_STOCKS'
     missing_core = []
@@ -1203,7 +1273,7 @@ def build_decision_context(
             reference=margin_state.get('reference') or 'trailing 52-week observations',
             market_scope='TWSE', session='regular', quality='official',
             comparison=margin_state.get('direction')))
-    stale_fields = []
+    stale_fields = [name for name, quality in source_quality.items() if quality['freshness'] < 0.25]
     if ((key_levels.get('quality') or {}).get('stale')):
         stale_fields.append('keyLevels')
     if options_structure.get('status') == 'stale' or option_quality.get('isHybridTimestamp'):
@@ -1240,6 +1310,8 @@ def build_decision_context(
         'evidence': evidence,
         'dataQuality': {
             'completeness': round(completeness, 3), 'freshness': round(freshness, 3),
+            'sourceQuality': source_quality,
+            'calendarSource': 'stored_exchange_calendar' if session_calendar else 'weekday_fallback',
             'scopeConsistency': scope_consistent, 'conflicts': conflicts,
             'staleFields': stale_fields, 'missingCore': missing_core,
         },
@@ -1333,15 +1405,16 @@ def compact_context(context: dict | None) -> dict[str, Any]:
     }
 
 
-def _fingerprint(pulse: dict) -> str:
-    snap = pulse.get('snapshot') or {}
-    selected = {
-        'date': pulse.get('date'), 'updatedAt': pulse.get('updatedAt'),
-        'snapshot': snap, 'riskScore': pulse.get('riskScore'), 'healthScore': pulse.get('healthScore'),
-        'dataCompleteness': pulse.get('dataCompleteness'),
-        'basis': (((pulse.get('overview') or {}).get('strip') or {}).get('basisPct')),
-        'indexTrend': (((pulse.get('overview') or {}).get('strip') or {}).get('t00Trend')),
-    }
+def _rules_digest() -> str:
+    versions = (CONTRACT_VERSION, ENGINE_VERSION, RULES_VERSION,
+                _exposure_lab.MODEL_VERSION, _consensus_attention.RANKING_VERSION)
+    return hashlib.sha256(json.dumps(versions).encode('utf-8')).hexdigest()
+
+
+def _fingerprint(pulse: dict, build_kwargs: dict | None = None, context: dict | None = None) -> str:
+    # 所有實際輸入與規則版本皆參與識別；直接發布的呼叫也保留完整計算結果。
+    selected = {'pulse': pulse, 'buildInputs': build_kwargs or {},
+                'context': context or {}, 'rulesDigest': _rules_digest()}
     raw = json.dumps(selected, sort_keys=True, ensure_ascii=False, default=str).encode('utf-8')
     return hashlib.sha256(raw).hexdigest()[:24]
 
@@ -1405,10 +1478,33 @@ def publish_context(
     trace_path: str = TRACE_PATH,
     elapsed_ms: int = 0,
 ) -> dict:
-    """Publish one canonical context; persistence failures never block Pulse."""
+    """先接納版本，再序列化預警、狀態與歷史副作用；拒絕逆序結果。"""
+    with _publish_lock:
+        with _lock:
+            previous_pulse = (_latest_inputs or {}).get('pulse') or {}
+            previous = _aware_datetime(previous_pulse.get('updateStartedAt') or previous_pulse.get('updatedAt'))
+            candidate = _aware_datetime(pulse.get('updateStartedAt') or pulse.get('updatedAt'))
+            if _latest_context and previous and (candidate is None or candidate < previous):
+                rejected = copy.deepcopy(_latest_context)
+                rejected['publicationStatus'] = 'superseded'
+                return rejected
+        return _publish_accepted_context(context, pulse=pulse, build_kwargs=build_kwargs,
+                                         db_path=db_path, trace_path=trace_path, elapsed_ms=elapsed_ms)
+
+
+def _publish_accepted_context(
+    context: dict, *, pulse: dict, build_kwargs: dict | None, db_path: str, trace_path: str,
+    elapsed_ms: int,
+) -> dict:
+    """呼叫端持有發布鎖，避免預警與歷史順序不同於目前狀態。"""
     global _latest_context, _latest_inputs
-    fingerprint = _fingerprint(pulse)
-    context = dict(context or {})
+    context = copy.deepcopy(context or {})
+    pulse = copy.deepcopy(pulse)
+    build_kwargs = copy.deepcopy(build_kwargs or {})
+    fingerprint = _fingerprint(pulse, build_kwargs, context)
+    context['inputHash'] = fingerprint
+    context['rulesDigest'] = _rules_digest()
+    context['publicationStatus'] = 'accepted'
     try:
         import early_warning as _early_warning
         import overnight_intraday as _overnight_intraday
@@ -1520,9 +1616,48 @@ def build_and_publish(pulse: dict, **kwargs: Any) -> dict:
     return publish_context(context, pulse=pulse, build_kwargs=base_kwargs, elapsed_ms=elapsed)
 
 
-def latest_context() -> dict | None:
+def _current_context_view(context: dict | None, inputs: dict, now: datetime | None = None) -> dict | None:
+    """讀取時只檢查效期，保留原觀測與內容；不發布、不寫入或推進預警。"""
+    if not context:
+        return None
+    pulse = inputs.get('pulse') or {}
+    snapshot = pulse.get('snapshot') or {}
+    twii = _quote(pulse, '^TWII', (pulse.get('indices') or {}).get('t00') or snapshot.get('t00') or {})
+    txf = _quote(pulse, '__TXF__', pulse.get('txf') or snapshot.get('txf') or {})
+    quality = _source_quality(pulse, twii, txf, now or datetime.now(timezone.utc), inputs.get('session_calendar'))
+    freshness = min(quality[name]['freshness'] for name in ('twii', 'breadth'))
+    data_quality = context.setdefault('dataQuality', {})
+    data_quality.update(freshness=freshness, sourceQuality=quality)
+    data_quality['staleFields'] = sorted(set(data_quality.get('staleFields') or []) |
+                                         {name for name, row in quality.items() if row['freshness'] < 0.25})
+    if freshness < 0.25:
+        context['lastObservedRegime'] = copy.deepcopy(context.get('regime'))
+        context['regime'] = empty_context()['regime']
+        context['actionEnvelope'] = _action_envelope('INSUFFICIENT_DATA', context.get('divergences') or [],
+            context.get('keyLevels') or {}, 0.0, None, context.get('portfolioOverlay'), context.get('exposureLab'))
+        context['actionEnvelope']['constraints'].append('source_data_expired')
+        if isinstance(context.get('exposureLab'), dict):
+            context['exposureLab']['finalEligibleRange'] = None
+        context['consensusAttention'] = _consensus_attention.build_consensus_attention(context)
+    return context
+
+
+def latest_context(now: datetime | None = None) -> dict | None:
     with _lock:
-        return json.loads(json.dumps(_latest_context, ensure_ascii=False)) if _latest_context else None
+        context = copy.deepcopy(_latest_context)
+        inputs = copy.deepcopy(_latest_inputs or {})
+    return _current_context_view(context, inputs, now)
+
+
+def latest_pulse() -> dict | None:
+    """供被取代的更新回傳已接納快照，避免把舊行情配上新摘要。"""
+    with _lock:
+        pulse = copy.deepcopy((_latest_inputs or {}).get('pulse'))
+        context = copy.deepcopy(_latest_context)
+        inputs = copy.deepcopy(_latest_inputs or {})
+    if pulse and context:
+        pulse['decisionSummary'] = compact_context(_current_context_view(context, inputs))
+    return pulse
 
 
 def rebuild_latest(
@@ -1541,6 +1676,8 @@ def rebuild_latest(
         ]
     if not inputs:
         return empty_context('pulse_not_ready')
+    # 即時 POST 不沿用回放或測試注入的固定時鐘。
+    inputs.pop('now', None)
     if options_structure is not None:
         inputs['options_structure'] = options_structure
     context = build_decision_context(**inputs, risk_profile=risk_profile, portfolio_overlay=portfolio_overlay, portfolio_kind=portfolio_kind)
@@ -1582,6 +1719,7 @@ def update_options_structure(options_structure: dict[str, Any]) -> dict:
     pulse = inputs.pop('pulse', None)
     if not pulse:
         return empty_context('pulse_not_ready')
+    inputs.pop('now', None)
     inputs['options_structure'] = dict(options_structure or {})
     started = time.perf_counter()
     context = build_decision_context(pulse, **inputs)
@@ -1625,7 +1763,7 @@ def replay(pulses: Iterable[dict], **kwargs: Any) -> dict[str, Any]:
 def engine_status() -> dict[str, Any]:
     with _lock:
         last = dict(_status)
-        ctx = _latest_context
+    ctx = latest_context()
     age = None
     if last.get('lastSuccess'):
         try:

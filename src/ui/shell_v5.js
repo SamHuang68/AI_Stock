@@ -64,6 +64,7 @@
   }
 
   var state = { route: 'pulse', built: false, syncing: false, prevRoute: null };
+  var routeSequence = 0;
 
   /* Alt+Shift+1…0 → 常用路由（避開 Alt+數字 時框） */
   var HOTKEY_ROUTES = [
@@ -1606,6 +1607,11 @@
 
   function deactivateRoute(id) {
     if (!id || id === 'chart') return;
+    if (window.AppKernel) {
+      // 由同一個生命週期擁有者清理，避免直接 deactivate 後又被 Kernel 清理一次。
+      window.AppKernel.panels.activate(null);
+      return;
+    }
     var api = panelApi(id);
     if (api && typeof api.deactivate === 'function') {
       try { api.deactivate(); }
@@ -1613,7 +1619,7 @@
     }
   }
 
-  function emitRoute(id, opts, retries) {
+  function emitRoute(id, opts, retries, sequence) {
     /* 相容舊呼叫 emitRoute(id, retriesNumber) */
     if (typeof opts === 'number') {
       retries = opts;
@@ -1621,7 +1627,10 @@
     }
     opts = opts || {};
     retries = retries || 0;
-    try {
+    if (sequence == null) sequence = ++routeSequence;
+    if (id !== state.route || sequence !== routeSequence) return;
+    // 事件僅通知觀察者；面板啟動由下方 Shell／Kernel 唯一負責。
+    if (!retries) try {
       window.dispatchEvent(new CustomEvent('shell:route', {
         detail: { route: id, opts: opts }
       }));
@@ -1639,7 +1648,7 @@
     }
     /* 模組尚未載入：短重試，避免開成空白舊介面 */
     if (retries < 20) {
-      setTimeout(function () { emitRoute(id, opts, retries + 1); }, 50);
+      setTimeout(function () { emitRoute(id, opts, retries + 1, sequence); }, 50);
     } else {
       console.warn('[shell-v5] module not ready: ' + key + ' (route=' + id + ')');
     }

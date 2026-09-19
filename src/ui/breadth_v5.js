@@ -13,6 +13,7 @@
   var lastData = null;
   var lastMovers = null;
   var timer = null;
+  var refreshGeneration = 0;
 
   function $(id) { return document.getElementById(id); }
 
@@ -499,6 +500,7 @@
     opts = opts || {};
     var body = ensureMount();
     if (!body) return;
+    var generation = ++refreshGeneration;
     var soft = !!opts.soft || !!lastData || !!body.querySelector('.bd-strip, .bd-dash, .bd-sec');
     if (window.ShellV5 && window.ShellV5.softBadge) {
       window.ShellV5.softBadge('mount-breadth', soft, '更新中…');
@@ -516,14 +518,17 @@
         .then(function (r) { return r.ok ? r.json() : null; })
         .catch(function () { return null; })
     ]).then(function (arr) {
+      if (generation !== refreshGeneration) return;
       var d = arr[0] || {};
       d._hist = (arr[1] && arr[1].rows) || [];
       lastMovers = arr[2] || null;
       d._movers = lastMovers;
       render(d);
     }).catch(function (e) {
+      if (generation !== refreshGeneration) return;
       if (!soft) render({ ok: false, error: '載入失敗：' + (e && e.message ? e.message : e) });
     }).finally(function () {
+      if (generation !== refreshGeneration) return;
       if (window.ShellV5 && window.ShellV5.softBadge) {
         window.ShellV5.softBadge('mount-breadth', false);
       }
@@ -542,12 +547,12 @@
   }
 
   function deactivate() {
+    // 離頁即撤銷舊請求的畫面、快取及更新標示寫入權限。
+    ++refreshGeneration;
     if (timer) { clearInterval(timer); timer = null; }
-  }
-
-  function onRoute(ev) {
-    var id = ev && ev.detail && ev.detail.route;
-    if (id === 'breadth') activate();
+    if (window.ShellV5 && window.ShellV5.softBadge) {
+      window.ShellV5.softBadge('mount-breadth', false);
+    }
   }
 
   window.BreadthV5 = {
@@ -557,13 +562,5 @@
     last: function () { return lastData; }
   };
 
-  window.addEventListener('shell:route', onRoute);
-
-  function boot() {
-    if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'breadth') {
-      activate();
-    }
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(boot, 200); });
-  else setTimeout(boot, 200);
+  // 面板生命週期由 Shell／AppKernel 統一呼叫。
 })();

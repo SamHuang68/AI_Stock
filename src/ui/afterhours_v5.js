@@ -14,6 +14,7 @@
 
   var SRV = window.SERVER || '';
   var timer = null;
+  var refreshSequence = 0;
   var LIST = [
     { code: '2330', name: '台積電', cid: 'CDF' },
     { code: '2317', name: '鴻海', cid: 'DHF' },
@@ -579,6 +580,7 @@
     opts = opts || {};
     var body = ensureMount();
     if (!body) return;
+    var sequence = ++refreshSequence;
     var soft = !!opts.soft || !!body.querySelector('.ah-strip, .ah-dash, .ah-sec');
     if (window.ShellV5 && window.ShellV5.softBadge) {
       window.ShellV5.softBadge('mount-afterhours', soft, '更新中…');
@@ -592,6 +594,7 @@
       jget('/breadth'),
       jget('/movers?n=22')
     ]).then(function (arr) {
+      if (sequence !== refreshSequence) return;
       var txfRaw = arr[0], sf = arr[1], mf = arr[2], bd = arr[3], mv = arr[4];
       var byCid = {};
       ((sf && sf.results) || []).forEach(function (r) { byCid[r.cid] = r; });
@@ -602,6 +605,7 @@
       });
       render({ txf: normalizeNight(txfRaw), fut: fut, mf: mf || {}, bd: bd || {}, movers: mv || {} });
     }).finally(function () {
+      if (sequence !== refreshSequence) return;
       if (window.ShellV5 && window.ShellV5.softBadge) {
         window.ShellV5.softBadge('mount-afterhours', false);
       }
@@ -620,18 +624,12 @@
   }
 
   function deactivate() {
+    ++refreshSequence;
     if (timer) { clearInterval(timer); timer = null; }
+    if (window.ShellV5 && window.ShellV5.softBadge) window.ShellV5.softBadge('mount-afterhours', false);
   }
 
   window.AfterhoursV5 = { activate: activate, deactivate: deactivate, refresh: refresh };
 
-  window.addEventListener('shell:route', function (ev) {
-    if (ev && ev.detail && ev.detail.route === 'afterhours') activate();
-  });
-
-  function boot() {
-    if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'afterhours') activate();
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(boot, 220); });
-  else setTimeout(boot, 220);
+  // 面板生命週期由 Shell／AppKernel 統一呼叫。
 })();

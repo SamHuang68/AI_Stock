@@ -3,6 +3,9 @@
   'use strict';
   var SRV = window.SERVER || '';
   var timer = null;
+  var loadSequence = 0;
+  var historySequence = 0;
+  var lifecycleSequence = 0;
   var marketRefreshInflight = null;
   var lastMarketRefreshAt = 0;
   var lastContext = null;
@@ -51,6 +54,7 @@
     current_effective_gross_over_limit: '每日槓桿穿透後總曝險超過上限',
     lookthrough_tsmc_over_limit: '台積電經濟曝險超過單一持倉上限',
     insufficient_data_no_position_range: '核心資料不足，不發布曝險百分比',
+    source_data_expired: '來源資料已過期，不建立新方向或發布倉位範圍',
     portfolio_not_provided: '未提供實際投組；範圍未套用投組風險上限',
     observation_pool_not_risk_overlay: '等權自選僅供觀察，不作投組風險上限'
     ,breadth_divergence_risk_lock: '指數與廣度背離信心高於 70%，啟動追價／槓桿鎖定'
@@ -537,6 +541,7 @@
   }
 
   function refreshMarketData(options) {
+    var sequence = lifecycleSequence;
     var background = !!(options && options.background === true);
     if (marketRefreshInflight) return marketRefreshInflight;
     if (background && Date.now() - lastMarketRefreshAt < 45000) return Promise.resolve(lastContext);
@@ -565,7 +570,7 @@
       : fetch(SRV + '/pulse?refresh=1', {
           cache: 'no-store', signal: controller ? controller.signal : undefined
         });
-    marketRefreshInflight = pulseRequest.then(function (response) {
+    var request = pulseRequest.then(function (response) {
       return response.text().then(function (raw) {
         trace('pulse_response', id, {
           status: response.status,
@@ -578,6 +583,7 @@
         catch (e) { throw new Error('Pulse JSON 解析失敗'); }
       });
     }).then(function (pulse) {
+      if (sequence !== lifecycleSequence) return null;
       if (!pulse || !pulse.ok) throw new Error((pulse && pulse.error) || 'Pulse 未回傳有效資料');
       if (window.MarketData && MarketData.fromPulse) MarketData.fromPulse(pulse);
       if (window.DecisionData && DecisionData.fromPulse) DecisionData.fromPulse(pulse, id);
@@ -594,6 +600,7 @@
         correlationId: id
       });
     }).then(function (state) {
+      if (sequence !== lifecycleSequence) return null;
       var ctx = state && state.context;
       if (!ctx) throw new Error('更新完成，但後端尚未建立 DecisionContext');
       render(ctx);
@@ -605,6 +612,7 @@
       });
       return ctx;
     }).catch(function (err) {
+      if (sequence !== lifecycleSequence) return null;
       var message = err && err.name === 'AbortError' ? '市場資料更新逾時' : '市場資料更新失敗';
       var detail = String(err && err.message || err || '未知錯誤');
       if (!background) showEmpty(message, detail + '；可重試或前往總覽檢查服務狀態。');
@@ -615,9 +623,10 @@
       return null;
     }).finally(function () {
       if (timeoutId) clearTimeout(timeoutId);
-      if (!background) setRefreshState(false);
-      marketRefreshInflight = null;
+      if (sequence === lifecycleSequence && !background) setRefreshState(false);
+      if (marketRefreshInflight === request) marketRefreshInflight = null;
     });
+    marketRefreshInflight = request;
     return marketRefreshInflight;
   }
 
@@ -1188,8 +1197,16 @@
   function portfolioHtml(ctx) {
     var p = ctx.portfolioOverlay;
     if (!p) return '<div class="dc-note">未偵測到實際持倉；不以自選池冒充投資組合。</div>';
-    if (p.available === false) return '<div class="dc-note">投組資料不可用：' + esc(p.error || '價格序列不足') +
-      '。在完成 Beta／VaR 檢查前不產生倉位範圍。</div>';
+    if (p.available === false) {
+      var quality = p.quality || {}, coverage = [];
+      if (quality.holdingCoveragePct != null) coverage.push('持倉涵蓋率 ' + num(quality.holdingCoveragePct, 1) + '%');
+      if (quality.betaCoveragePct != null) coverage.push('Beta 涵蓋率 ' + num(quality.betaCoveragePct, 1) + '%');
+      if (quality.commonSampleDays != null) coverage.push('共同有效報酬 ' + num(quality.commonSampleDays, 0) + ' 筆');
+      var reasons = Array.isArray(quality.reasons) ? quality.reasons.join('、') : '';
+      return '<div class="dc-note">投組資料不可用：' + esc(p.error || reasons || '價格序列不足') +
+        '。在完成 Beta／VaR 檢查前不產生倉位範圍。' +
+        (coverage.length ? '<br>' + esc(coverage.join(' · ')) : '') + '</div>';
+    }
     var look = p.lookThrough || {};
     var rows = look.rows || [];
     return '<div class="dc-scenario">' +
@@ -1722,7 +1739,8 @@
       esc(text) + '</div>';
   }
 
-  function warningTemporalHtml(warning) {
+  function warningTemporalHtml(warning, quality) {
+    quality = quality || {};
     var temporal = (warning && warning.temporalContext) || {};
     var target = temporal.target || {};
     var overlay = temporal.liveOverlay || {};
@@ -1730,18 +1748,22 @@
     var computedAt = temporal.computedAt || warning.asOf || null;
     var computedMs = computedAt ? new Date(computedAt).getTime() : NaN;
     var ageMs = isFinite(computedMs) ? Math.max(0, Date.now() - computedMs) : Infinity;
+    var sourceExpired = quality.freshness != null && isFinite(Number(quality.freshness)) && Number(quality.freshness) < 0.25;
     var overlayStatus = String(overlay.status || overlay.freshnessStatus || 'unknown');
     var delayed = overlayStatus === 'delayed' || overlayStatus === 'stale';
     var computeLabel = '最新評估';
-    if (temporal.evaluationMode === 'finalized_review') computeLabel = '收盤定稿';
+    if (sourceExpired) computeLabel = warningClock(computedAt) + ' 已保存評估';
+    else if (temporal.evaluationMode === 'finalized_review') computeLabel = '收盤定稿';
     else if (delayed) computeLabel = '最新評估 · 行情延遲';
     else if (ageMs <= 90000 && (temporal.evaluationMode !== 'overnight_monitor' || overlayStatus === 'live')) {
       computeLabel = warningClock(computedAt) + ' 即時計算';
     } else if (computedAt) computeLabel = warningClock(computedAt) + ' 最新評估';
     var from = Number(target.fromTradingSession) || 1;
     var to = Number(target.toTradingSession) || 5;
-    var freshnessLabel = freshness.status === 'mixed' ? '混合時效資料' :
-      (freshness.allInputsLive ? '即時資料' : (freshness.status ? '來源時效已標記' : '來源時效待更新'));
+    var freshnessLabel = sourceExpired ? '目前不可用：決策來源已過期' :
+      (freshness.status === 'mixed' ? '混合時效資料' :
+        (freshness.allInputsLive ? (ageMs <= 90000 && !delayed ? '即時資料' : '即時效期待更新') :
+          (freshness.status ? '來源時效已標記' : '來源時效待更新')));
     return '<div class="dc-warning-timebar" aria-label="市場前兆評估時間與目標期間">' +
       '<span class="dc-warning-time-chip target">目標 T+' + from + '～T+' + to + '</span>' +
       '<span class="dc-warning-time-chip session">' + esc(warningEvaluationLabel(temporal.evaluationMode)) + '</span>' +
@@ -1853,7 +1875,7 @@
     var thresholds = warning.thresholds || {};
     return '<div class="dc-card dc-warning-card" id="dc-section-precursors" data-dc-section="precursors"><h3 class="dc-warning-head"><span>跨市場前兆雷達</span>' +
       '<span>觀測 → 注意 → 戒備 → 確認 → 生效</span><span class="tag">SHADOW · 非下單訊號</span></h3>' +
-      warningTemporalHtml(warning) + warningMarketStripHtml(warning, down, up) +
+      warningTemporalHtml(warning, ctx.dataQuality) + warningMarketStripHtml(warning, down, up) +
       '<div class="dc-warning-disclaimer">前兆分數評估下一個至第五個台股交易日的跨市場證據強度；不是目前夜盤方向，也不是上漲／下跌機率。</div>' +
       '<div class="dc-warning-grid">' + warningSignalHtml(down, 'downside', thresholds) + warningSignalHtml(up, 'upside', thresholds) + '</div>' +
       '<div class="dc-warning-components">' + components.map(function (row) {
@@ -1991,8 +2013,10 @@
   }
 
   function loadHistory() {
+    var sequence = ++historySequence;
     fetch(SRV + '/decision/history?n=12', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
+        if (sequence !== historySequence) return;
         var box = $('dc-history'), meta = $('dc-hist-meta');
         if (!box) return;
         var rows = (d && d.rows) || [];
@@ -2006,12 +2030,14 @@
   function load(force, riskProfile) {
     var body = ensureMount();
     if (!body) return;
+    var sequence = ++loadSequence;
     lastHoldings = portfolioMode === 'observation_pool' ? holdingsFromWatch() : holdingsFromPositions();
     if (!lastContext) body.innerHTML = '<div class="dc-card">決策資料載入中…</div>';
     var opts = { force: !!force, holdings: lastHoldings, portfolioKind: portfolioMode };
     if (riskProfile) opts.riskProfile = riskProfile;
     if (window.DecisionData && DecisionData.refresh) {
       DecisionData.refresh(opts).then(function (st) {
+        if (sequence !== loadSequence) return;
         var ctx = st && st.context;
         if (ctx) render(ctx);
         else if (!lastContext) showEmpty(
@@ -2118,7 +2144,14 @@
       }
     }, 60000);
   }
-  function deactivate() { if (timer) { clearInterval(timer); timer = null; } }
+  function deactivate() {
+    ++loadSequence;
+    ++historySequence;
+    ++lifecycleSequence;
+    marketRefreshInflight = null;
+    setRefreshState(false);
+    if (timer) { clearInterval(timer); timer = null; }
+  }
 
   window.DecisionV5 = {
     activate: activate,
@@ -2131,7 +2164,5 @@
     var ctx = ev && ev.detail && ev.detail.state && ev.detail.state.context;
     if (ctx && window.ShellV5 && ShellV5.route && ShellV5.route() === 'decision') render(ctx);
   });
-  window.addEventListener('shell:route', function (ev) {
-    if (ev && ev.detail && ev.detail.route === 'decision') activate(ev.detail.opts || {});
-  });
+  // 面板生命週期由 Shell／AppKernel 統一呼叫。
 }());

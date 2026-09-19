@@ -15,6 +15,7 @@
   var lastResearchMeta = null;
   var lastResearchSettings = null;
   var scanPending = null;
+  var activationTimer = null;
   var metaPending = null;
   var sortState = { key: null, direction: 'original' };
   var SORT_COLUMNS = [
@@ -700,12 +701,14 @@
   }
 
   function activate() {
+    if (activationTimer) { clearTimeout(activationTimer); activationTimer = null; }
     ensureMount();
     loadMeta();
     if (lastResults.length) renderResults(lastResults);
     else {
       /* 進頁自動掃一次，避免結果區空白 */
-      setTimeout(function () {
+      activationTimer = setTimeout(function () {
+        activationTimer = null;
         if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'scan' && !lastResults.length) {
           scan();
         }
@@ -715,7 +718,9 @@
 
   window.ScanV5 = {
     activate: activate,
-    deactivate: function () {},
+    deactivate: function () {
+      if (activationTimer) { clearTimeout(activationTimer); activationTimer = null; }
+    },
     scan: scan,
     last: function () { return lastResults; },
     sortState: function () { return { key: sortState.key, direction: sortState.direction }; },
@@ -734,13 +739,5 @@
     };
   })();
 
-  window.addEventListener('shell:route', function (ev) {
-    if (ev && ev.detail && ev.detail.route === 'scan') activate();
-  });
-
-  function boot() {
-    if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'scan') activate();
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(boot, 250); });
-  else setTimeout(boot, 250);
+  // 面板生命週期由 Shell／AppKernel 統一呼叫。
 })();

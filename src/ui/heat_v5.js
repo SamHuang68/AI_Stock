@@ -12,6 +12,7 @@
   var SRV = window.SERVER || '';
   var timer = null;
   var refreshSequence = 0;
+  var focusSequence = 0;
   var membersRequest = null;
   var membersSequence = 0;
   var membersSelection = null;
@@ -669,10 +670,12 @@
 
   function loadFocus(force) {
     var mkt = state.mkt || 'TW';
+    var sequence = ++focusSequence;
     var url = SRV + '/focus?mkt=' + encodeURIComponent(mkt) + (force ? '&refresh=1' : '');
     fetch(url, { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) {
+        if (sequence !== focusSequence || state.mkt !== mkt) return;
         if (j && !j.mkt) j.mkt = mkt;
         state.focusByMkt[mkt] = j;
         if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'heat' &&
@@ -681,6 +684,7 @@
         }
       })
       .catch(function () {
+        if (sequence !== focusSequence || state.mkt !== mkt) return;
         state.focusByMkt[mkt] = null;
         if (state.mkt === mkt) renderFocus(null);
       });
@@ -692,6 +696,7 @@
     if (!body) return;
     var requestMarket = state.mkt;
     var sequence = ++refreshSequence;
+    ++focusSequence;
     var soft = !!opts.soft || !!state.last || !!body.querySelector('.ht-grid');
     if (window.ShellV5 && window.ShellV5.softBadge) {
       window.ShellV5.softBadge('mount-heat', soft, '更新中…');
@@ -755,6 +760,7 @@
   function deactivate() {
     if (timer) { clearInterval(timer); timer = null; }
     refreshSequence += 1;
+    focusSequence += 1;
     closeMembers();
   }
 
@@ -766,15 +772,5 @@
     sectorKeysMatch: sectorKeysMatch
   };
 
-  window.addEventListener('shell:route', function (ev) {
-    if (ev && ev.detail && ev.detail.route === 'heat') {
-      activate((ev.detail && ev.detail.opts) || {});
-    }
-  });
-
-  function boot() {
-    if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'heat') activate();
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(boot, 220); });
-  else setTimeout(boot, 220);
+  // 面板生命週期及 opts 由 Shell／AppKernel 統一傳入。
 })();

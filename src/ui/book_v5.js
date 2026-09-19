@@ -10,6 +10,7 @@
 
   var SRV = window.SERVER || '';
   var lastData = null;
+  var analysisSequence = 0;
   var source = 'auto'; // auto | pos | watch | custom
 
   function $(id) { return document.getElementById(id); }
@@ -17,6 +18,31 @@
     return String(s == null ? '' : s).replace(/[&<>]/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
     });
+  }
+
+  function finiteMetric(v) { return typeof v === 'number' && isFinite(v); }
+  function riskValue(v, digits, suffix) { return finiteMetric(v) ? v.toFixed(digits) + (suffix || '') : '資料不足'; }
+  function riskSummary(d) {
+    var stocks = d.stocks || {}, codes = Object.keys(stocks), p = d.portfolio || {}, q = d.quality || {};
+    var cv = Object.keys(d.corr || {}).map(function (k) { return d.corr[k]; }).filter(finiteMetric);
+    var beta = 0, weight = 0;
+    var betaComplete = codes.length > 0 && !(d.skipped || []).length &&
+      (!finiteMetric(q.betaCoveragePct) || q.betaCoveragePct >= 99.9999);
+    codes.forEach(function (c) {
+      var s = stocks[c];
+      if (!finiteMetric(s.beta)) { betaComplete = false; return; }
+      beta += (s.weight || 0) * s.beta; weight += s.weight || 0;
+    });
+    var notes = [];
+    if (q.available === false || !finiteMetric(p.vol) || !finiteMetric(p.var95)) notes.push('資料不足，未完成全部投組風險檢查');
+    if (finiteMetric(q.holdingCoveragePct)) notes.push('持倉涵蓋率 ' + riskValue(q.holdingCoveragePct, 1, '%'));
+    if (finiteMetric(q.betaCoveragePct)) notes.push('Beta 涵蓋率 ' + riskValue(q.betaCoveragePct, 1, '%'));
+    if (finiteMetric(q.commonSampleDays)) notes.push('共同有效報酬 ' + q.commonSampleDays + ' 筆');
+    if (Array.isArray(q.reasons) && q.reasons.length) notes.push('原因：' + q.reasons.join('、'));
+    if (!betaComplete && !(q.reasons || []).length) notes.push('投組 Beta 未涵蓋全部持倉');
+    return { vol: p.vol, var95: p.var95, days: p.days,
+      correlation: cv.length ? cv.reduce(function (a, b) { return a + b; }, 0) / cv.length : null,
+      beta: betaComplete && weight > 0 ? beta / weight : null, note: notes.join(' · ') };
   }
 
   function holdingsFromPositions() {
@@ -331,15 +357,7 @@
       chainExp[st] = (chainExp[st] || 0) + (stocks[c].weight || 0);
     });
 
-    var cv = Object.keys(d.corr || {}).map(function (k) { return d.corr[k]; });
-    var avgCorr = cv.length ? cv.reduce(function (a, b) { return a + b; }, 0) / cv.length : 0;
-    var pBeta = 0, bw = 0;
-    codes.forEach(function (c) {
-      var s = stocks[c];
-      if (s.beta != null) { pBeta += (s.weight || 0) * s.beta; bw += (s.weight || 0); }
-    });
-    pBeta = bw > 0 ? pBeta / bw : 0;
-    var p = d.portfolio || {};
+    var risk = riskSummary(d), avgCorr = risk.correlation, pBeta = risk.beta;
 
     var sub = $('bk-sub');
     if (sub) {
@@ -348,30 +366,30 @@
     }
 
     var V = window.Viz;
-    var var95 = p.var95 || 0;
-    var vol = p.vol || 0;
+    var var95 = risk.var95;
+    var vol = risk.vol;
     // VaR：日風險 >2% 警示、>4% 危險；相關性以 0–100% 刻度，>50/70 警示
-    var varMeter = V ? V.ratioMeter(Math.abs(var95), 2, 4) : '';
-    var corrMeter = V ? V.ratioMeter(Math.abs(avgCorr) * 100, 50, 70) : '';
+    var varMeter = V && finiteMetric(var95) ? V.ratioMeter(Math.abs(var95), 2, 4) : '';
+    var corrMeter = V && finiteMetric(avgCorr) ? V.ratioMeter(Math.abs(avgCorr) * 100, 50, 70) : '';
     var betaViz = '';
-    if (V && isFinite(pBeta)) {
+    if (V && finiteMetric(pBeta)) {
       betaViz = V.magBar(pBeta - 1, 1, {
         label: 'β−1',
         fmt: function () { return pBeta.toFixed(2); }
       });
     }
     var h = wdStripHtml() + '<div class="bk-strip">' +
-      '<div class="bk-card"><div class="lab">年化波動</div><div class="val">' + vol.toFixed(1) + '%</div>' +
-        (V ? V.scoreMeter(Math.min(100, vol * 2), { hi: 40, mid: 25 }) : '') + '</div>' +
-      '<div class="bk-card"><div class="lab">1日 95% VaR</div><div class="val">' + var95.toFixed(2) + '%</div>' +
+      '<div class="bk-card"><div class="lab">年化波動</div><div class="val">' + riskValue(vol, 1, '%') + '</div>' +
+        (V && finiteMetric(vol) ? V.scoreMeter(Math.min(100, vol * 2), { hi: 40, mid: 25 }) : '') + '</div>' +
+      '<div class="bk-card"><div class="lab">1日 95% VaR</div><div class="val">' + riskValue(var95, 2, '%') + '</div>' +
         varMeter + '</div>' +
-      '<div class="bk-card"><div class="lab">平均相關性</div><div class="val">' + avgCorr.toFixed(2) + '</div>' +
+      '<div class="bk-card"><div class="lab">平均相關性</div><div class="val">' + riskValue(avgCorr, 2) + '</div>' +
         corrMeter + '</div>' +
-      '<div class="bk-card"><div class="lab">投組 Beta</div><div class="val">' + pBeta.toFixed(2) + '</div>' +
+      '<div class="bk-card"><div class="lab">投組 Beta</div><div class="val">' + riskValue(pBeta, 2) + '</div>' +
         betaViz + '</div>' +
       '<div class="bk-card"><div class="lab">持倉檔數</div><div class="val">' + codes.length + '</div></div>' +
-      '<div class="bk-card"><div class="lab">樣本天數</div><div class="val">' + (p.days || 0) + '</div></div>' +
-      '</div>';
+      '<div class="bk-card"><div class="lab">樣本天數</div><div class="val">' + riskValue(risk.days, 0) + '</div></div>' +
+      '</div>' + (risk.note ? '<div class="bk-note">' + esc(risk.note) + '</div>' : '');
 
     h += '<div class="bk-zone">';
     h += '<div class="bk-left">' +
@@ -421,6 +439,7 @@
   function analyze(h) {
     var body = ensureMount();
     if (!body) return;
+    var sequence = ++analysisSequence;
     if (!h || !h.length) {
       body.innerHTML = '<div class="bk-empty"><div class="bk-empty-card">' +
         '<div class="bk-empty-icon" aria-hidden="true">▦</div><b>尚未建立投組樣本</b>' +
@@ -437,11 +456,12 @@
     })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (x) {
+        if (sequence !== analysisSequence) return;
         if (!x.ok || !x.d || x.d.error) {
           body.innerHTML = '<div class="bk-err">分析失敗：' + esc((x.d && x.d.error) || '無資料') + '</div>';
           return;
         }
-        var paint = function () { render(x.d); };
+        var paint = function () { if (sequence === analysisSequence) render(x.d); };
         _bindWdChipLive();
         var stream = window.WaveDeckBridge && typeof WaveDeckBridge.streamStatus === 'function'
           ? WaveDeckBridge.streamStatus() : null;
@@ -462,6 +482,7 @@
         }
       })
       .catch(function (e) {
+        if (sequence !== analysisSequence) return;
         body.innerHTML = '<div class="bk-err">分析失敗：' + esc(e.message || e) + '</div>';
       });
   }
@@ -479,18 +500,10 @@
 
   window.BookV5 = {
     activate: activate,
-    deactivate: function () {},
+    deactivate: function () { ++analysisSequence; },
     refresh: activate,
     last: function () { return lastData; }
   };
 
-  window.addEventListener('shell:route', function (ev) {
-    if (ev && ev.detail && ev.detail.route === 'book') activate();
-  });
-
-  function boot() {
-    if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'book') activate();
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(boot, 240); });
-  else setTimeout(boot, 240);
+  // 面板生命週期由 Shell／AppKernel 統一呼叫。
 })();

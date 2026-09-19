@@ -996,7 +996,7 @@ ok(/#ht-body\{[^}]*flex-direction:column/.test(heat) &&
   'heat body stacks WD/KPI above 2-col dash (focus not clipped)');
 ok(/function applyRouteOpts/.test(heat) && /function applySectorHighlight/.test(heat) &&
   /ht-cell\.hi/.test(heat) && /opts\.sector/.test(heat) &&
-  /activate\(opts\)/.test(heat) && /detail\.opts/.test(heat),
+  /activate\(opts\)/.test(heat) && /applyRouteOpts\(opts\)/.test(heat),
   'heat activate accepts mkt/sector deep-link and highlights cell');
 ok(/data-go="heat"[^>]*data-mkt=/.test(pl) && /data-sector=""/.test(pl) &&
   /class="pl-sbar" data-go="heat"/.test(pl),
