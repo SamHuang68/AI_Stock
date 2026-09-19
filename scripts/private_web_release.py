@@ -69,6 +69,10 @@ REQUIRED_RELEASE_FILES = {
     "tests/test_private_web_access.py",
     "tests/test_archify_artifacts.py",
     "stock_terminal_v2.html",
+    "assets/vendor/pdfjs/6.3.289/pdf.min.mjs",
+    "assets/vendor/pdfjs/6.3.289/pdf.worker.min.mjs",
+    "assets/vendor/pdfjs/6.3.289/來源資訊.json",
+    "tests/test_pdf_assets.py",
 }
 PRIVATE_RELEASE_EXCLUDES = {"wavedeck", "START_WAVEDECK.cmd"}
 MANIFEST_NAME = ".private_web_release.json"
@@ -397,6 +401,7 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
             "tests.test_decision_http",
             "tests.test_runtime_revision",
             "tests.test_archify_artifacts",
+            "tests.test_pdf_assets",
         ]
         if run_tests:
             _run([python, "-m", "unittest", "-b", *tests], cwd=extracted)

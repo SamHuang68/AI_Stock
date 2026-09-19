@@ -16,14 +16,15 @@
 //        - "破 X 走弱/出場/反彈失敗/轉弱" → weakBreak
 //   4. 從「倉位⾓⾊」或「定位」欄推 role
 //
-// pdf.js 從 CDN 延遲載入（首次用時抓）
+// 固定版本的 PDF.js 與 worker 由同源延遲載入；PDF 內容只在瀏覽器解析。
 // ============================================================
 
 (function (global) {
   'use strict';
 
-  const PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-  const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const PDFJS_VERSION = '6.3.289';
+  const PDFJS_BASE = new URL('../../assets/vendor/pdfjs/' + PDFJS_VERSION + '/', document.currentScript.src).href;
+  const PDF_TIMEOUT_MS = 120000;
 
   // ── Common TW name → code map (helps when PDF text reorders the chars) ──
   // 這份內建表只是為了 cross-check；主要 anchor 還是用 4 位數字代號定位。
@@ -42,22 +43,15 @@
   // ─── PDF.js loader (lazy) ────────────────────────────────────
   let _pdfjsLoadPromise = null;
   function loadPdfJs() {
-    if (global.pdfjsLib) {
-      return Promise.resolve(global.pdfjsLib);
-    }
     if (_pdfjsLoadPromise) return _pdfjsLoadPromise;
-    _pdfjsLoadPromise = new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = PDFJS_URL;
-      s.onload = () => {
-        if (!global.pdfjsLib) return reject(new Error('pdf.js loaded but pdfjsLib missing'));
-        try {
-          global.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
-        } catch (e) { console.warn('[v3-pdf] worker setup:', e); }
-        resolve(global.pdfjsLib);
-      };
-      s.onerror = () => reject(new Error('pdf.js CDN 載入失敗（網路問題？）'));
-      document.head.appendChild(s);
+    const moduleUrl = new URL('pdf.min.mjs', PDFJS_BASE).href;
+    _pdfjsLoadPromise = import(moduleUrl).then(lib => {
+      if (lib.version !== PDFJS_VERSION) throw new Error('PDF 解析元件版本不符，請重新整理頁面');
+      lib.GlobalWorkerOptions.workerSrc = new URL('pdf.worker.min.mjs', PDFJS_BASE).href;
+      return lib;
+    }).catch(error => {
+      _pdfjsLoadPromise = null;
+      throw new Error('PDF 解析元件載入失敗，請重新整理後再試', { cause: error });
     });
     return _pdfjsLoadPromise;
   }
@@ -66,28 +60,72 @@
   async function extractText(file) {
     const pdfjsLib = await loadPdfJs();
     const arrayBuffer = await file.arrayBuffer();
-    // 文字匯入不需要動態程式碼；停用舊版 PDF.js 的 eval 路徑。
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, isEvalSupported: false }).promise;
-    let allText = '';
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const tc = await page.getTextContent();
-      const lineMap = new Map();   // y → array of {x, str}
-      for (const it of tc.items) {
-        const y = Math.round(it.transform[5]);
-        const x = it.transform[4];
-        if (!lineMap.has(y)) lineMap.set(y, []);
-        lineMap.get(y).push({ x, str: it.str });
+    // 自行持有 worker，確保 loading task 清理卡住時仍能終止執行緒。
+    const worker = new pdfjsLib.PDFWorker();
+    let loadingTask;
+    let timer;
+    try {
+      // 僅擷取文字，不建立 viewer、不啟用文件指令碼，也不將檔案上傳。
+      loadingTask = pdfjsLib.getDocument({
+        data: arrayBuffer,
+        worker,
+        cMapUrl: new URL('cmaps/', PDFJS_BASE).href,
+        cMapPacked: true,
+        standardFontDataUrl: new URL('standard_fonts/', PDFJS_BASE).href,
+        wasmUrl: new URL('wasm/', PDFJS_BASE).href,
+        stopAtErrors: true,
+      });
+      const extraction = (async () => {
+        const pdf = await loadingTask.promise;
+        let allText = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          try {
+            const tc = await page.getTextContent();
+            const lineMap = new Map();
+            for (const it of tc.items) {
+              if (typeof it.str !== 'string' || !Array.isArray(it.transform)) continue;
+              const y = Math.round(it.transform[5]);
+              const x = it.transform[4];
+              if (!lineMap.has(y)) lineMap.set(y, []);
+              lineMap.get(y).push({ x, str: it.str });
+            }
+            // PDF 的 y 向上增加；維持由上到下、由左到右的既有排序。
+            const sortedY = [...lineMap.keys()].sort((a, b) => b - a);
+            for (const y of sortedY) {
+              const items = lineMap.get(y).sort((a, b) => a.x - b.x);
+              allText += items.map(it => it.str).join(' ') + '\n';
+            }
+            allText += '\n--- PAGE ' + i + ' END ---\n';
+          } finally {
+            page.cleanup();
+          }
+        }
+        return allText;
+      })();
+      return await Promise.race([extraction, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('PDF 解析超過 120 秒，請重新嘗試或拆分檔案')), PDF_TIMEOUT_MS);
+      })]);
+    } catch (error) {
+      if (error.name === 'PasswordException') throw new Error('此 PDF 需要密碼，請先解除密碼保護後再匯入');
+      if (error.name === 'InvalidPDFException') throw new Error('PDF 檔案損毀或格式不完整，請重新取得檔案');
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      // 清理不得無期限延後原本結果，也不得蓋掉可供使用者處理的解析錯誤。
+      let cleanupTimer;
+      try {
+        if (loadingTask) await Promise.race([
+          Promise.resolve().then(() => loadingTask.destroy()).catch(error => {
+            console.warn('[PDF匯入] 文件清理失敗，將終止 worker', error);
+          }),
+          new Promise(resolve => { cleanupTimer = setTimeout(resolve, 5000); }),
+        ]);
+      } finally {
+        if (cleanupTimer !== undefined) clearTimeout(cleanupTimer);
+        worker.destroy();
       }
-      // sort lines top→bottom (PDF y increases upward; we want descending)
-      const sortedY = [...lineMap.keys()].sort((a, b) => b - a);
-      for (const y of sortedY) {
-        const items = lineMap.get(y).sort((a, b) => a.x - b.x);
-        allText += items.map(it => it.str).join(' ') + '\n';
-      }
-      allText += '\n--- PAGE ' + i + ' END ---\n';
     }
-    return allText;
   }
 
   // ─── Helpers ──────────────────────────────────────────────────
@@ -191,6 +229,9 @@
     // Filter out false positives: 4-digit non-stock numbers e.g. years 2026
     const filtered = matches.filter(m => {
       const code = m[2];
+      // 四位數價位也符合形式；價位欄名與條件動詞不可成為新的股票區塊。
+      const label = m[1].replace(/[：:，,；;。]+$/g, '').replace(/[（(]元[）)]$/g, '');
+      if (/(?:買區|可買區|站穩|站上|守住|突破|放量過|放量站上|壓力|支撐|停損|目標|現價)(?:位|價|價位)?$/.test(label)) return false;
       // TW codes are 1000-9999 but exclude obvious years (2020-2099)
       const n = parseInt(code, 10);
       if (n >= 2020 && n <= 2099) {
@@ -332,6 +373,6 @@
     _names: TW_NAMES,
   };
 
-  console.log('[v3-pdf] PlanPdfImport module loaded (pdf.js lazy-loaded on first use)');
+  console.log('[PDF匯入] 文字解析模組已載入，PDF.js 將於首次匯入時啟動');
 
 })(typeof window !== 'undefined' ? window : globalThis);

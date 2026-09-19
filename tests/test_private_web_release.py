@@ -105,7 +105,7 @@ class PrivateWebReleaseTests(unittest.TestCase):
         self.assertEqual((current / "data" / "public_seed.csv").read_text(), "seed")
         self.assertEqual((current / "logs" / "audit.jsonl").read_text(), "audit")
         self.assertEqual(shared_snapshot.read_bytes(), shared_before)
-        active = json.loads((current / ".private_web_release.json").read_text())
+        active = json.loads((current / ".private_web_release.json").read_text(encoding="utf-8"))
         self.assertEqual(active["releaseId"], "abc123")
         self.assertIn("promotedAt", active)
 

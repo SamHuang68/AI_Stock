@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-Hant">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF 匯入瀏覽器驗證</title>
+<style>
+body { font: 17px/1.6 system-ui; max-width: 880px; margin: 40px auto; padding: 0 24px; color: #172d41; background: #f4f7fb; }
+button { font: inherit; padding: 12px 22px; border: 0; border-radius: 8px; color: white; background: #175b98; cursor: pointer; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; background: white; padding: 24px; border-radius: 12px; }
+</style>
+<h1>PDF 匯入瀏覽器驗證</h1>
+<p>使用專案自行產生的五份 PDF，驗證實際模組、worker、中文 CMap 與失敗後恢復。計畫僅存於此頁記憶體。</p>
+<button id="run">執行完整驗證</button>
+<pre id="result" role="status">尚未執行</pre>
+<script>
+'use strict';
+const workers = [];
+const NativeWorker = window.Worker;
+window.Worker = class extends NativeWorker {
+  constructor(url, options) {
+    super(url, options);
+    this.record = { url: String(url), type: options?.type, terminated: false };
+    workers.push(this.record);
+  }
+  terminate() { this.record.terminated = true; return super.terminate(); }
+};
+const plans = new Map();
+window.setPlan = (code, market, plan) => plans.set(code, { market, ...plan });
+</script>
+<script src="../src/ui/pdf_import_v3.js"></script>
+<script>
+'use strict';
+document.querySelector('#run').addEventListener('click', async event => {
+  event.target.disabled = true;
+  const results = [];
+  const output = document.querySelector('#result');
+  const check = (condition, message) => { if (!condition) throw new Error(message); results.push(message); };
+  const file = async name => {
+    const response = await fetch('fixtures/pdf_import/' + name);
+    if (!response.ok) throw new Error('測試文件讀取失敗：' + name);
+    return new File([await response.arrayBuffer()], name, { type: 'application/pdf' });
+  };
+  output.textContent = '驗證中';
+  try {
+    plans.clear();
+    workers.length = 0;
+    const lib = await PlanPdfImport.loadPdfJs();
+    check(lib.version === '6.3.289', '解析元件版本為 6.3.289');
+    const chinese = await PlanPdfImport.parseFile(await file('中文多頁計畫.pdf'));
+    check(chinese.imported === 2 && plans.size === 2, '中文兩頁正確匯入兩檔股票');
+    check(plans.get('2330').buyZoneLow === 900 && plans.get('2330').role === '主倉', '中文 CMap、買區與倉位正確');
+    check(plans.get('2454').resistance === 1200 && plans.get('2454').stopLoss === 1080, '四位數價格未被誤認為股票代碼');
+    const before = JSON.stringify([...plans]);
+    const english = await PlanPdfImport.extractText(await file('一般多頁文字.pdf'));
+    check(english.includes('First page:') && english.includes('Second page:') && english.includes('PAGE 2 END'), '一般多頁文字與頁序正確');
+    check((await PlanPdfImport.parseFile(await file('空白文件.pdf'))).imported === 0, '空白 PDF 未寫入計畫');
+    for (const [name, expected] of [['密碼保護.pdf', '需要密碼'], ['損毀文件.pdf', '損毀']]) {
+      let rejected = false;
+      try { await PlanPdfImport.parseFile(await file(name)); } catch (error) { rejected = error.message.includes(expected); }
+      check(rejected, name + ' 顯示預期錯誤');
+    }
+    check((await PlanPdfImport.parseFile(await file('一般多頁文字.pdf'))).imported === 0, '失敗後仍可正常解析下一份 PDF');
+    check(JSON.stringify([...plans]) === before, '空白、非計畫與錯誤文件均保留原計畫');
+    check(workers.length === 6 && workers.every(worker => worker.type === 'module' && worker.terminated && worker.url.startsWith(location.origin + '/assets/vendor/pdfjs/6.3.289/')), '六個同源 module worker 全數建立並結束');
+    output.textContent = JSON.stringify({ 狀態: '全部通過', 瀏覽器: navigator.userAgent, 結果: results, workers }, null, 2);
+  } catch (error) {
+    output.textContent = JSON.stringify({ 狀態: '失敗', 錯誤: error.message, 結果: results, workers }, null, 2);
+  } finally { event.target.disabled = false; }
+});
+</script>
+</html>

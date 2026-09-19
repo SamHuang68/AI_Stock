@@ -2751,6 +2751,9 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
 
 class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, PeakObservationRoutesMixin, PeakObservation100dRoutesMixin, Touxin5dRoutesMixin, OptionsRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     _BASE = _BASE
+    # 固定模組與 Wasm MIME，避免 Windows 登錄設定影響 worker 載入。
+    extensions_map = {**SimpleHTTPRequestHandler.extensions_map,
+                      '.mjs': 'text/javascript', '.wasm': 'application/wasm'}
     protocol_version = 'HTTP/1.1'   # enables keep-alive
 
     def _handle_index(self):
@@ -3245,7 +3248,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         # HTML／JS 開發期禁止快取，避免 shell/pulse 修好後仍載到舊殼層
         p = getattr(self, 'path', '') or ''
         path_only = p.split('?', 1)[0]
-        if path_only.endswith(('.html', '.js', '.css')):
+        if path_only.endswith(('.html', '.js', '.mjs', '.css')):
             self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
             self.send_header('Pragma', 'no-cache')
             self.send_header('Expires', '0')
