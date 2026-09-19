@@ -75,7 +75,10 @@ async function decision() {
     'render = function (ctx) { window.testRendered.push(ctx.id); };\n' +
     'window.testLoadHistory = loadHistory;');
   const work = [];
-  h.context.DecisionData = { refresh() { const p = pending(); work.push(p); return p.promise; } };
+  h.context.DecisionData = {
+    refresh() { const p = pending(); work.push(p); return p.promise; },
+    refreshPulse() { return h.context.fetch('/pulse').then(response => response.json()).then(pulse => ({ pulse })); }
+  };
   h.api.refresh(false); h.api.deactivate();
   work[0].resolve({ context: { id: '離頁資料' } }); await tick();
   assert.equal(h.rendered.length, 0);

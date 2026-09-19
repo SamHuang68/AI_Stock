@@ -68,13 +68,13 @@ class TestTxfSessionContract(unittest.TestCase):
         day = self.quote('day', '20260917', '090000')
         night = self.quote('night', '20260916', '045958')
         obj._txf_mis_session = lambda market: day if market == 0 else night
-        obj._txf_payload = types.MethodType(namespace['_txf_payload'], obj)
+        obj._txf_payload = types.MethodType(namespace['_txf_payload'].__func__, obj)
         namespace['_handle_txf'](obj)
         value = json.loads(obj._ok.call_args.args[0])
         self.assertEqual(value['session'], 'day')
         self.assertEqual(value['market']['tradeDate'], '2026-09-17')
         self.assertEqual(value['night']['asOf'], night['asOf'])
-        pulse = next(n for n in handler.body if isinstance(n, ast.FunctionDef) and n.name == '_handle_pulse')
+        pulse = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_build_pulse_update')
         calls = [n for n in ast.walk(pulse) if isinstance(n, ast.Call)]
         self.assertTrue(any(isinstance(n.func, ast.Attribute) and n.func.attr == '_txf_payload' for n in calls))
 

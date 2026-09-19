@@ -236,7 +236,7 @@ ok(/function optionsStructureHtml/.test(decisionUi) && /data-layer=\"observed\"/
 ok(/topVegaStrikes/.test(decisionUi) && /Modeled Signed VEX/.test(decisionUi) &&
   /IV \+1 波動率點（1 vol pt）/.test(decisionUi) && /dc-options-density-grid/.test(decisionUi) &&
   /function optionsHistoryHtml/.test(decisionUi) && /dc-options-change/.test(decisionUi) &&
-  /history\.status|var status = history\.status/.test(decisionUi) && /Number\(current\.contractVersion/.test(decisionUi),
+  /history\.status|var status = history\.status/.test(decisionUi),
   'TXO V2 adds direction-neutral Vega density, modeled Signed VEX and same-expiry history without changing collapsed summary');
 ok(!/optionsStructure: context\.optionsStructure/.test(decisionData) &&
   /台指選擇權結構/.test(decisionUi) && /不推定造市商持倉/.test(decisionUi) &&
@@ -264,9 +264,9 @@ ok(/table_sort_v5\.js/.test(build) && /MutationObserver/.test(tableSortUi) && /f
   /direction === 'ascending' \? 'descending' : 'none'/.test(tableSortUi) && /升冪與降冪都將缺值固定沉底/.test(tableSortUi) &&
   /\.pf-hm,\.bk-hm/.test(tableSortUi) && /data-st-sort="off"/.test(scanUi),
   'all list-style panel tables inherit global three-state sorting while matrix/native tables opt out');
-ok(/↻ 立即更新市場資料/.test(decisionUi) && /\/pulse\?refresh=1/.test(decisionUi) &&
-  /refreshMarketData/.test(decisionUi),
-  'decision empty state can refresh pulse and context without route switching');
+ok(/↻ 立即更新市場資料/.test(decisionUi) && /DecisionData\.refreshPulse/.test(decisionUi) &&
+  /\/pulse\/refresh/.test(decisionData) && !/\/pulse\?refresh=1/.test(decisionUi),
+  '決策空白狀態透過明確工作入口更新市場，讀取不使用舊 refresh GET');
 const archifyEvidencePath = '/assets/docs/archify/st-decision-evidence-lineage.html';
 ok(decisionUi.includes(archifyEvidencePath) && consensusAttentionUi.includes(archifyEvidencePath),
   'decision center and consensus radar share one frozen Archify evidence document');

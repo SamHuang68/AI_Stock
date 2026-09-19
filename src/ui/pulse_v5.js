@@ -22,8 +22,10 @@
   var SRV = window.SERVER || '';
   var timer = null;
   var refreshSequence = 0;
+  var refreshController = null;
+  var refreshPromise = null;
+  var refreshIsUpdate = false;
   var headMetaSequence = 0;
-  var warmRetryTimer = null;
   var layoutResizeTimer = null;
   var lastPack = null;
   var showFactors = false;
@@ -138,6 +140,7 @@
       '#pl-root .pl-head-jobs{flex:0 0 auto;padding:1px 7px;border:1px solid #3a4f68;border-radius:4px;' +
         'background:#0b1423;color:#dbe7f5;font:700 9px/1.3 "JetBrains Mono",monospace;cursor:pointer;white-space:nowrap}' +
       '#pl-root .pl-head-jobs:hover{border-color:var(--gold-m);color:var(--gold)}' +
+      '#pl-root .pl-update-status{font-size:11px;line-height:1.5;color:#cbd5e1;overflow-wrap:anywhere;margin:3px 0 6px}' +
       '#pl-root .pl-kicker{font-size:9px;color:var(--gold);letter-spacing:1.2px;margin:0;font-weight:700}' +
       '#pl-root .pl-title{font-family:\'Noto Serif TC\',serif;font-size:15px;font-weight:700;color:var(--thi);line-height:1.1}' +
       '#pl-root .pl-sub{font-size:9px;color:var(--tlo);margin:0}' +
@@ -1699,6 +1702,7 @@
                 '<button type="button" class="pl-btn primary" data-go="chart">圖表</button>' +
               '</div>' +
             '</div></div>' +
+          '<div id="pl-update-status" class="pl-update-status" role="status"></div>' +
           '<div class="pl-ai" id="pl-ai" style="display:none">' +
             '<h4><span>大盤 AI 即時語意 <span id="pl-ai-st" style="font-weight:600;color:var(--tlo)"></span></span>' +
               '<span class="pl-ai-tools"><button type="button" class="pl-ai-speak" id="pl-ai-speak" aria-pressed="false" title="點選後把目前分析全文朗讀完">🎙 朗讀全文</button>' +
@@ -4295,7 +4299,7 @@
 
     var sub = $('pl-sub');
     if (sub) {
-      sub.textContent = '更新 ' + new Date().toLocaleTimeString('zh-TW') +
+      sub.textContent = '讀取 ' + new Date().toLocaleTimeString('zh-TW') +
         (p.date ? ' · 廣度日 ' + p.date : '') +
         (p.updatedAt ? ' · ' + String(p.updatedAt).replace('T', ' ') : '');
     }
@@ -4405,11 +4409,19 @@
     });
   }
 
-  function warmCaches() {
-    jget('/breadth');
-    jget('/sectors?mkt=TW');
-    jget('/marketflow');
-    jget('/events');
+  function showPulseUpdateStatus(pulse, job, error) {
+    var status = $('pl-update-status');
+    if (!status) return;
+    var state = job && job.status;
+    if (error || state === 'failed' || state === 'interrupted') {
+      status.textContent = '市場更新未完成：' + String(error || job.error || '工作已中斷') +
+        (lastPack ? '；保留上次已提交資料。' : '；等待下一次伺服器更新。');
+    } else if (state === 'queued' || state === 'running') {
+      status.textContent = state === 'queued' ? '市場更新已排入佇列；保留目前快照。' : '伺服器正在建立市場快照；保留目前資料。';
+    } else if (!pulse || !pulse.ok) status.textContent = '尚未有已提交快照；伺服器會自動更新，可稍後重新讀取。';
+    else if ((pulse.dataCompleteness != null && pulse.dataCompleteness < 90) || !pulse.breadthOk) {
+      status.textContent = '資料待更新；目前顯示已提交快照，不會因讀取而另行建構。';
+    } else status.textContent = '目前顯示已提交快照；來源效期與更新工作分開判定。';
   }
 
   function fetchWlQuotes() {
@@ -4432,14 +4444,18 @@
   }
 
   function refresh(force) {
+    if (refreshPromise && (!force || refreshIsUpdate)) return refreshPromise;
     var body = ensureMount();
     if (!body) return;
     var sequence = ++refreshSequence;
-    if (warmRetryTimer) { clearTimeout(warmRetryTimer); warmRetryTimer = null; }
+    if (refreshController) refreshController.abort();
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    refreshController = controller;
+    refreshIsUpdate = !!force && !!(window.DecisionData && DecisionData.canUpdateMarket && DecisionData.canUpdateMarket());
     var btn = $('pl-refresh');
     if (btn) {
       btn.disabled = true;
-      btn.textContent = '↻ 更新中…';
+      btn.textContent = refreshIsUpdate ? '↻ 等待市場更新…' : '↻ 讀取快照…';
     }
     // stale-while-revalidate：已有畫面時不整頁清空（體感延遲主因）
     if (!lastPack) {
@@ -4450,21 +4466,23 @@
         tone.textContent = (tone.textContent || '—') + ' · 更新中…';
       }
     }
-    // 手動刷新打穿聚合快取；子源（movers/global/macro）仍走各自 TTL，伺服器側預算 ≤8s
-    var q = force ? '/pulse?refresh=1' : '/pulse';
+    // 頁面與輪詢只讀已提交快照；明確更新才經由共同工作協議送出 POST。
     var t0 = Date.now();
-    Promise.all([jget(q), fetchWlQuotes()]).then(function (arr) {
+    var request = window.DecisionData && DecisionData.refreshPulse
+      ? DecisionData.refreshPulse({ update: !!force, signal: controller && controller.signal,
+          onStatus: function (job) { if (sequence === refreshSequence) showPulseUpdateStatus(lastPack && lastPack.pulse, job); } })
+      : Promise.reject(new Error('市場快照服務尚未載入'));
+    var promise = Promise.all([request, fetchWlQuotes()]).then(function (arr) {
       if (sequence !== refreshSequence) return;
-      var pulse = arr[0];
+      var result = arr[0] || {}, pulse = result.pulse;
       if (!pulse || !pulse.ok) {
         if (!lastPack) {
-          body.innerHTML = '<div class="pl-note">脈動載入失敗' +
-            (pulse && pulse.error ? '：' + pulse.error : '（請重啟 server）') +
-            ' <button type="button" class="pl-btn" id="pl-retry">重試</button></div>';
+          body.innerHTML = '<div class="pl-note">' + esc(pulse && pulse.error || '尚未有已提交快照') +
+            ' <button type="button" class="pl-btn" id="pl-retry">重新讀取</button></div>';
           var retry = $('pl-retry');
-          if (retry) retry.onclick = function () { refresh(true); };
+          if (retry) retry.onclick = function () { refresh(false); };
         }
-        warmCaches();
+        showPulseUpdateStatus(pulse, result.job, result.error);
         return;
       }
       if (window.MarketData && window.MarketData.fromPulse) window.MarketData.fromPulse(pulse);
@@ -4473,26 +4491,24 @@
       var ms = Date.now() - t0;
       var sub = $('pl-sub');
       if (sub) sub.textContent = (sub.textContent || '') + ' · ' + ms + 'ms';
-      // 資料不完整：只暖快取 + soft 再取；禁止再打 refresh=1（舊邏輯會再卡 20s+）
-      if ((pulse.dataCompleteness != null && pulse.dataCompleteness < 90) || !pulse.breadthOk) {
-        warmCaches();
-        warmRetryTimer = setTimeout(function () {
-          warmRetryTimer = null;
-          if (sequence === refreshSequence && window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'pulse') {
-            jget('/pulse').then(function (p2) {
-              if (sequence === refreshSequence && p2 && p2.ok) render({ pulse: p2, wlQuotes: arr[1] || {} });
-            });
-          }
-        }, 1600);
-      }
+      showPulseUpdateStatus(pulse, result.job, result.error);
+      return pulse;
+    }).catch(function (error) {
+      if (sequence !== refreshSequence) return;
+      showPulseUpdateStatus(lastPack && lastPack.pulse, null, String(error && error.message || error));
     }).finally(function () {
       if (sequence !== refreshSequence) return;
+      if (refreshController === controller) refreshController = null;
+      if (refreshPromise === promise) { refreshPromise = null; refreshIsUpdate = false; }
       var b = $('pl-refresh');
       if (b) {
         b.disabled = false;
-        b.textContent = '↻ 重新整理';
+        b.textContent = window.DecisionData && DecisionData.canUpdateMarket && !DecisionData.canUpdateMarket()
+          ? '↻ 重新讀取快照' : '↻ 更新市場資料';
       }
     });
+    refreshPromise = promise;
+    return promise;
   }
 
   function activate() {
@@ -4506,8 +4522,10 @@
 
   function deactivate() {
     ++refreshSequence;
+    if (refreshController) { refreshController.abort(); refreshController = null; }
+    refreshPromise = null;
+    refreshIsUpdate = false;
     if (timer) { clearInterval(timer); timer = null; }
-    if (warmRetryTimer) { clearTimeout(warmRetryTimer); warmRetryTimer = null; }
     showFactors = false;
     var body = $('pl-body');
     if (body) {
@@ -4521,7 +4539,7 @@
   window.PulseV5 = {
     activate: activate,
     deactivate: deactivate,
-    refresh: function () { refresh(true); },
+    refresh: function () { return refresh(true); },
     formatYiCompact: formatYiCompact,
     buildWatchThemeResonance: buildWatchThemeResonance,
     /** 相容舊呼叫：改導向獨立因子頁 */
