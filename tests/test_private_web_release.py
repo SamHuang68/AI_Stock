@@ -184,15 +184,21 @@ class PrivateWebReleaseTests(unittest.TestCase):
             'tests/shell_v5_selftest.js', 'tests/etf_flow_v3_selftest.js',
             'tests/ai_panels_selftest.js', 'tests/台股即時報價_selftest.js',
             'tests/LIVE報價一致性_selftest.js', 'tests/新增_selftest.js',
+            'tests/wavedeck_onepage_selftest.js',
         ]
+        extras = {'wavedeck/web/css/deck.css', 'START_WAVEDECK.cmd'}
         calls = []
 
         def run(argv, *, cwd, capture=False):
             calls.append(argv)
             if argv[0] == 'git':
                 with zipfile.ZipFile(argv[argv.index('--output') + 1], 'w') as archive:
-                    for relative in sorted(release.REQUIRED_RELEASE_FILES | set(selftests)):
+                    for relative in sorted(release.REQUIRED_RELEASE_FILES | set(selftests) | extras):
                         archive.writestr(relative, '受測內容')
+            else:
+                for relative in extras:
+                    self.assertEqual((cwd / relative).read_text(encoding='utf-8'), '受測內容',
+                                     '完整封存內容必須保留至組建與全部自測結束')
 
         with patch.object(release, 'resolve_commit', return_value=(commit, commit[:12])), \
                 patch.object(release, '_run', run), patch.object(release.shutil, 'which', return_value='node'):
@@ -202,7 +208,13 @@ class PrivateWebReleaseTests(unittest.TestCase):
         for test in ['tests.test_決策資料品質', 'tests.test_發布完整性',
                      'tests.test_decision_context', 'tests.test_decision_http']:
             self.assertIn(test, python_tests)
-        release._validate_integrity(staged, release._read_manifest(staged / release.MANIFEST_NAME))
+        manifest = release._read_manifest(staged / release.MANIFEST_NAME)
+        release._validate_integrity(staged, manifest)
+        for name in release.PRIVATE_RELEASE_EXCLUDES:
+            self.assertFalse((staged / name).exists(), '私人網站發布產物不得包含 WaveDeck 執行內容')
+            self.assertNotIn(name, manifest['managedTopLevel'])
+        self.assertFalse(any(key.split('/')[0] in release.PRIVATE_RELEASE_EXCLUDES
+                             for key in manifest['contentSha256']))
 
     def test_release_requires_archify_manifest_documents_and_validator(self):
         expected = {

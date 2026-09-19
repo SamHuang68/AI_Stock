@@ -377,7 +377,6 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
         extracted = temp / "tree"
         extracted.mkdir()
         _safe_extract(archive_path, extracted)
-        _strip_private_release_extras(extracted)
         _validate_release(extracted)
 
         _run([python, "build_v2.py"], cwd=extracted)
@@ -407,6 +406,8 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
             for selftest in sorted((extracted / "tests").glob("*selftest.js"), key=lambda path: path.name):
                 _run([node, selftest.relative_to(extracted).as_posix()], cwd=extracted)
 
+        # 完整封存內容供所有自測使用；通過後才排除私人網站不出貨的執行內容。
+        _strip_private_release_extras(extracted)
         # Tests may legitimately exercise refresh paths, but the release
         # artifact must keep committed public seeds byte-identical to Git.
         _restore_preserved_from_archive(archive_path, extracted)
