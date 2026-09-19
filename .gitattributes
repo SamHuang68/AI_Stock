@@ -1,3 +1,6 @@
 # Archify 完整性清單驗證原始位元組，跨平台 checkout 必須固定使用 LF。
 docs/architecture/*.json text eol=lf
 assets/docs/archify/*.html text eol=lf
+# 第三方資產保留官方原始位元組，以來源雜湊驗證。
+assets/vendor/pdfjs/** -text -whitespace
+tests/fixtures/pdf_import/*.pdf binary

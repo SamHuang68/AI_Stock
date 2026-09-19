@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -15,6 +16,67 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import build_dist  # noqa: E402
+
+
+class TestModulePrivacyScan(unittest.TestCase):
+    WORKER_PATH = "assets/vendor/pdfjs/6.3.289/pdf.worker.min.mjs"
+
+    def scan_fixture(self, relative_name, data, extra_files=None):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stage = root / build_dist.STAGE_NAME
+            target = stage / relative_name
+            target.parent.mkdir(parents=True)
+            target.write_bytes(data)
+            for relative, content in (extra_files or {}).items():
+                extra = stage / relative
+                extra.parent.mkdir(parents=True, exist_ok=True)
+                extra.write_bytes(content)
+            staged = build_dist.scan_stage_content(stage)
+            archive = root / "模組檢查.zip"
+            build_dist.make_zip(stage, archive)
+            return staged, build_dist.verify_archive(archive)
+
+    def test_module_formats_are_scanned_before_and_after_compression(self):
+        credential = ("sk-" + "x" * 24).encode("ascii")
+        for suffix in (".mjs", ".cjs"):
+            with self.subTest(format=suffix):
+                for issues in self.scan_fixture("src/module" + suffix, credential):
+                    self.assertEqual({issue["rule"] for issue in issues}, {"openai-anthropic-key"})
+
+    def test_original_worker_email_false_positive_requires_exact_path(self):
+        original = (ROOT / self.WORKER_PATH).read_bytes()
+        for issues in self.scan_fixture(self.WORKER_PATH, original):
+            self.assertEqual(issues, [])
+        for issues in self.scan_fixture("assets/copied.worker.mjs", original):
+            self.assertIn("email-address", {issue["rule"] for issue in issues})
+
+    def test_changed_worker_cannot_reauthorize_itself_through_manifest(self):
+        original = (ROOT / self.WORKER_PATH).read_bytes()
+        changed = original + ("\n// " + "sk-" + "x" * 24).encode("ascii")
+        forged = json.dumps({"檔案SHA256": {
+            "pdf.worker.min.mjs": hashlib.sha256(changed).hexdigest(),
+        }}, ensure_ascii=False).encode("utf-8")
+        manifest_path = str(Path(self.WORKER_PATH).parent / "來源資訊.json")
+        for issues in self.scan_fixture(self.WORKER_PATH, changed, {manifest_path: forged}):
+            rules = {issue["rule"] for issue in issues}
+            self.assertIn("email-address", rules)
+            self.assertIn("openai-anthropic-key", rules)
+
+    def test_newline_change_does_not_preserve_original_byte_exception(self):
+        original = (ROOT / self.WORKER_PATH).read_bytes()
+        self.assertIn(b"\n", original)
+        changed = original.replace(b"\n", b"\r\n", 1)
+        for issues in self.scan_fixture(self.WORKER_PATH, changed):
+            self.assertIn("email-address", {issue["rule"] for issue in issues})
+
+    def test_verified_worker_still_runs_other_scan_rules(self):
+        original = (ROOT / self.WORKER_PATH).read_bytes()
+        # 用確定出現在原檔的內容驗證其他規則仍會執行，不修改受信任雜湊。
+        rules = build_dist.SENSITIVE_CONTENT_RULES + (("測試其他規則", re.compile("PDF")),)
+        with mock.patch.object(build_dist, "SENSITIVE_CONTENT_RULES", rules):
+            for issues in self.scan_fixture(self.WORKER_PATH, original):
+                self.assertEqual({issue["rule"] for issue in issues}, {"測試其他規則"})
 
 
 class TestDistScrub(unittest.TestCase):
@@ -38,6 +100,9 @@ class TestDistScrub(unittest.TestCase):
         required = {
             "Stock_Terminal/README.md",
             "Stock_Terminal/LICENSE",
+            "Stock_Terminal/assets/vendor/pdfjs/6.3.289/pdf.min.mjs",
+            "Stock_Terminal/assets/vendor/pdfjs/6.3.289/pdf.worker.min.mjs",
+            "Stock_Terminal/assets/vendor/pdfjs/6.3.289/來源資訊.json",
             "Stock_Terminal/START_TIP.cmd",
             "Stock_Terminal/server/server.py",
             "Stock_Terminal/server/daemon_lock.py",

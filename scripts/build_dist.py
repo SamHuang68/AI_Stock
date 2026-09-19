@@ -246,6 +246,9 @@ REQUIRED_SHARE_FILES = (
     "docs/architecture/st-responsive-shell-ownership.workflow.json",
     "docs/architecture/st-signal-passport-early-warning.lifecycle.json",
     "assets/docs/archify/st-decision-evidence-lineage.html",
+    "assets/vendor/pdfjs/6.3.289/pdf.min.mjs",
+    "assets/vendor/pdfjs/6.3.289/pdf.worker.min.mjs",
+    "assets/vendor/pdfjs/6.3.289/來源資訊.json",
     "assets/docs/archify/st-private-web-trust-ai-execution.html",
     "assets/docs/archify/st-private-web-release-gate.html",
     "assets/docs/archify/st-pulse-refresh-degradation.html",
@@ -273,6 +276,8 @@ REQUIRED_SHARE_FILES = (
 TEXT_SUFFIXES = {
     ".py",
     ".js",
+    ".mjs",
+    ".cjs",
     ".css",
     ".html",
     ".md",
@@ -292,6 +297,13 @@ TEXT_SUFFIXES = {
     ".iss",
 }
 TEXT_BASENAMES = {".gitignore", "VERSION"}
+
+# 官方 worker 的內嵌編碼資料會誤中郵件位址規則；僅對已核對 npm
+# 套件完整性的精確原檔豁免該規則，不信任可隨內容一起修改的來源清單。
+VERIFIED_VENDOR_EMAIL_EXCEPTIONS = {
+    "assets/vendor/pdfjs/6.3.289/pdf.worker.min.mjs":
+        "a33cfe728c584fdba4fcc1fd54bcdc2f9f2f13889ddbb5b2bd1d0f8cbe49b84e",
+}
 
 # These patterns intentionally target concrete credential formats. Placeholder
 # examples such as "your-api-key" do not match.
@@ -527,10 +539,17 @@ def is_text_path(path: Path) -> bool:
 
 def scan_text(relative_name: str, text: str) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
+    canonical_name = relative_name.replace("\\", "/").removeprefix(STAGE_NAME + "/")
+    trusted_digest = VERIFIED_VENDOR_EMAIL_EXCEPTIONS.get(canonical_name)
+    verified_vendor_email = bool(
+        trusted_digest and hashlib.sha256(text.encode("utf-8")).hexdigest() == trusted_digest
+    )
     for rule, pattern in SENSITIVE_CONTENT_RULES:
         for match in pattern.finditer(text):
             value = match.group(0)
-            if rule == "email-address" and value.lower().endswith("@example.com"):
+            if rule == "email-address" and (
+                value.lower().endswith("@example.com") or verified_vendor_email
+            ):
                 continue
             issues.append({"path": relative_name, "rule": rule})
             break
@@ -543,7 +562,8 @@ def scan_stage_content(stage: Path) -> list[dict[str, str]]:
         if not path.is_file() or not is_text_path(path):
             continue
         try:
-            text = path.read_text(encoding="utf-8")
+            # 保留原始換行，確保雜湊驗證不把不同位元組視為同一份資產。
+            text = path.read_bytes().decode("utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         issues.extend(scan_text(path.relative_to(stage).as_posix(), text))
