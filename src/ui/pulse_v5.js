@@ -116,7 +116,7 @@
       '#pl-root{font-family:\'JetBrains Mono\',monospace;color:var(--text);' +
         'width:100%;max-width:none;margin:0;min-width:0;box-sizing:border-box;' +
         'flex:1;min-height:0;display:flex;flex-direction:column}' +
-      /* 單列三欄：左（標題＋時間）｜金框填滿到「新手」｜右（新手／專業＋按鈕）。grid 不能換列。 */
+      /* 桌機維持單列三欄；手機由下方斷點分列，保留完整標題、工具與快照資訊。 */
       '#pl-root .pl-head{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content;' +
         'grid-template-rows:auto;align-items:center;column-gap:8px;row-gap:0;' +
         'margin-bottom:3px;min-width:0;flex:0 0 auto;overflow:hidden}' +
@@ -800,13 +800,17 @@
         '#view-pulse.sv-panel.on{height:auto;min-height:100%;overflow:visible;display:block!important;padding:6px 8px 18px}' +
         '#mount-pulse,#mount-pulse.sv-mount,#pl-root{height:auto;min-height:0;display:block;overflow:visible}' +
         '#pl-body.pl-mode-expert{display:block;overflow:visible;padding-bottom:12px}' +
-        '#pl-root .pl-head{align-items:center;column-gap:6px;overflow:hidden}' +
-        '#pl-root .pl-head-start,#pl-root .pl-head-end{gap:5px}' +
-        '#pl-root .pl-head-lead{flex:0 0 auto;gap:5px;flex-wrap:nowrap;min-width:0}' +
+        '#pl-root .pl-head{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto auto;' +
+          'align-items:center;gap:6px;overflow:visible}' +
+        '#pl-root .pl-head-start{grid-column:1;grid-row:1;gap:5px;flex-wrap:wrap}' +
+        '#pl-root .pl-head-end{grid-column:1;grid-row:2;gap:5px;flex-wrap:wrap}' +
+        '#pl-root .pl-head-lead{flex:0 1 auto;gap:5px;flex-wrap:wrap;min-width:0}' +
         '#pl-root .pl-sub{display:none}' +
-        '#pl-root .pl-head-meta{min-width:0}' +
-        '#pl-root .pl-title{font-size:17px}' +
-        '#pl-root .pl-actions{justify-content:flex-start;flex-wrap:wrap;gap:5px}' +
+        '#pl-root .pl-head-meta{grid-column:1;grid-row:3;min-width:0;width:100%;box-sizing:border-box}' +
+        '#pl-root .pl-head-meta-track{font-size:11px;line-height:1.5}' +
+        '#pl-root .pl-head-jobs{font-size:11px;min-height:30px}' +
+        '#pl-root .pl-title{font-size:17px;white-space:normal}' +
+        '#pl-root .pl-actions{flex:1 1 260px;justify-content:flex-start;flex-wrap:wrap;gap:5px}' +
         '#pl-root .pl-btn,#pl-root .pl-mode-toggle button{font-size:11px;min-height:30px;padding:5px 9px}' +
         '#pl-root .pl-strip{display:flex;gap:7px;overflow-x:auto;overflow-y:hidden;padding:1px 1px 7px;' +
           'scroll-snap-type:x proximity;scrollbar-width:thin;overscroll-behavior-x:contain}' +

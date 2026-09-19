@@ -688,15 +688,9 @@ ok(/id="pl-head-meta"/.test(pl) && /pl-head-lead/.test(pl) && /pl-head-meta-trac
   /function pickSession/.test(pl) && /twse-mis/.test(pl) &&
   /var _lastMacro = null/.test(pl) && /var _lastJobLabel/.test(pl) &&
   !/#pl-root \.pl-head-meta-track\{font-size:8px\}/.test(pl) &&
-  !/#pl-root \.pl-head\{flex-wrap:wrap\}/.test(pl) &&
-  !/order:3;flex:1 1 100%/.test(pl),
-  'pulse 金框用三欄 grid 填滿新手左側，不能另開一列');
-ok(/max-height:540px[\s\S]*#pl-root \.pl-sub\{display:none\}/.test(pl) &&
-  /max-height:540px[\s\S]*pl-head-meta\{padding:1px 6px;min-width:0\}/.test(pl) &&
-  /orientation:portrait\)[^{]*\{[\s\S]*pl-head\{[^}]*overflow:hidden/.test(pl) &&
-  /orientation:portrait\)[^{]*\{[\s\S]*pl-head-meta\{min-width:0\}/.test(pl) &&
-  /orientation:portrait\)[^{]*\{[\s\S]*#pl-root \.pl-sub\{display:none\}/.test(pl),
-  'pulse 手機橫直式金框都留在新手左側橫捲，不整列丟到按鈕下方');
+  !/#pl-root \.pl-head\{flex-wrap:wrap\}/.test(pl),
+  'pulse 桌機保留三欄金框、完整識別文字及原有工具接線');
+// 手機金框可獨立成列；可見寬度與工具是否遭裁切須以完整正式 header 的瀏覽器幾何驗證。
 ok(/MOBILE_LAYOUT_CONTRACT = '2col-scroll'/.test(pl) &&
   /@media\(max-width:900px\) and \(orientation:portrait\)[\s\S]*pl-zone\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/.test(pl) &&
   /matchMedia\('\(max-width: 900px\) and \(orientation: portrait\)'\)/.test(pl) &&
