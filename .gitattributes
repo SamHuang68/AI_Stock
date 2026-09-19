@@ -3,4 +3,6 @@ docs/architecture/*.json text eol=lf
 assets/docs/archify/*.html text eol=lf
 # 第三方資產保留官方原始位元組，以來源雜湊驗證。
 assets/vendor/pdfjs/** -text -whitespace
+assets/vendor/jspdf/** -text -whitespace
+assets/vendor/html2canvas/** -text -whitespace
 tests/fixtures/pdf_import/*.pdf binary

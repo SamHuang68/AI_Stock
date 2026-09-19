@@ -1,0 +1,12 @@
+{
+  "package": "jspdf",
+  "version": "4.2.1",
+  "metadataUrl": "https://registry.npmjs.org/jspdf/4.2.1",
+  "tarballUrl": "https://registry.npmjs.org/jspdf/-/jspdf-4.2.1.tgz",
+  "integrity": "sha512-YyAXyvnmjTbR4bHQRLzex3CuINCDlQnBqoSYyjJwTP2x9jDLuKDzy7aKUl0hgx3uhcl7xzg32agn5vlie6HIlQ==",
+  "取得時間": "2026-09-19T21:53:51.805853+00:00",
+  "files": {
+    "jspdf.umd.min.js": "e6551fcdc32f09d6853b2c5126d18d01d9447e0da618a41a11ebeee0f6c20d54",
+    "LICENSE": "dc388ec35ff463288cdde3588a36fd4ed12a45deff053243b37309acc9ef583b"
+  }
+}
