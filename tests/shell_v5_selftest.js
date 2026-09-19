@@ -678,7 +678,7 @@ ok(/data-layout=/.test(pl) && /LAYOUT_CONTRACT/.test(pl) &&
 ok(/id="pl-head-meta"/.test(pl) && /pl-head-lead/.test(pl) && /pl-head-meta-track/.test(pl) &&
   /pl-head-start/.test(pl) && /pl-head-end/.test(pl) && /ensureHeadChrome/.test(pl) &&
   /renderHeadMeta/.test(pl) && /formatTaipeiClock/.test(pl) &&
-  /行情最新來源時間/.test(pl) && /查看更新工作/.test(pl) &&
+  /行情最新來源時間/.test(pl) && /查看歷史資料同步/.test(pl) &&
   /僅有摘要，全文未提供/.test(pl) && /尚未確認/.test(pl) &&
   /overflow-x:auto/.test(pl) && /white-space:nowrap/.test(pl) &&
   /grid-template-columns:max-content minmax\(0,1fr\) max-content/.test(pl) &&
