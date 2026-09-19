@@ -14,6 +14,11 @@
 const LIVE_POLL_MS = 30_000;   // 30 秒
 let _liveTimer = null;
 let _lastQuote = null;
+let _liveGeneration = 0;
+let _liveRequestSeq = 0;
+let _liveLastApplied = null;
+let _liveChartReady = false;
+let _liveReadyLoadSeq = null;
 
 (function bootLive() {
   if (typeof S === 'undefined') return;
@@ -287,7 +292,7 @@ function stMap(s) {
 }
 
 async function livePollOnce() {
-  if (!S.liveEnabled || !S.sym) return;
+  if (!S.liveEnabled || !S.sym || !_liveChartReady || _liveReadyLoadSeq !== window.__loadSeq) return;
   // (1) 視窗隱藏 (Visibility API) 防護：當分頁被背景化時，暫停輪詢防止被 Yahoo 鎖 IP
   if (document.hidden) {
     console.log('[live] Tab hidden, skip polling to prevent rate limiting.');
@@ -303,12 +308,33 @@ async function livePollOnce() {
       return;
     }
   }
-  const q = await fetchQuote(S.sym, S.mkt || 'TW');
-  if (q) renderQuote(q);
+  // 綁定本次請求的圖表與啟用週期，避免晚到報價寫入另一檔或重載後的圖表。
+  const request = {
+    sym: S.sym, mkt: S.mkt || 'TW', loadSeq: window.__loadSeq,
+    generation: _liveGeneration, seq: ++_liveRequestSeq,
+  };
+  const q = await fetchQuote(request.sym, request.mkt);
+  if (!q || !S.liveEnabled || !_liveChartReady || _liveReadyLoadSeq !== window.__loadSeq ||
+      request.generation !== _liveGeneration || request.loadSeq !== window.__loadSeq ||
+      request.sym !== S.sym || request.mkt !== (S.mkt || 'TW')) return;
+  if (_liveLastApplied && request.seq <= _liveLastApplied.seq) return;
+
+  // 請求順序與來源報價時間都不可倒退；缺少來源時間時仍使用請求序號防護。
+  const timestamp = Number(q.timestampMs) || Number(q.lastBarTime) * 1000;
+  const timestampMs = Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+  const sameContext = _liveLastApplied &&
+    request.generation === _liveLastApplied.generation && request.loadSeq === _liveLastApplied.loadSeq &&
+    request.sym === _liveLastApplied.sym && request.mkt === _liveLastApplied.mkt;
+  if (sameContext && timestampMs != null && _liveLastApplied.timestampMs != null &&
+      timestampMs < _liveLastApplied.timestampMs) return;
+  _liveLastApplied = { ...request,
+    timestampMs: timestampMs != null ? timestampMs : (sameContext ? _liveLastApplied.timestampMs : null) };
+  renderQuote(q);
 }
 
 function liveEnable() {
   if (!S.sym) { alert('先載入個股'); return; }
+  _liveGeneration += 1;
   S.liveEnabled = true;
   document.getElementById('live-panel')?.classList.add('on');
   updateLiveBtn();
@@ -317,6 +343,7 @@ function liveEnable() {
   _liveTimer = setInterval(livePollOnce, LIVE_POLL_MS);
 }
 function liveDisable() {
+  _liveGeneration += 1;
   S.liveEnabled = false;
   document.getElementById('live-panel')?.classList.remove('on');
   updateLiveBtn();
@@ -331,8 +358,14 @@ function updateLiveBtn() {
   b.title = S.liveEnabled ? '即時報價已啟用（30 秒輪詢）— 點關閉' : '點擊啟用即時報價輪詢';
 }
 
-// Refresh on sym change
+// loadSym 先更新標的才替換圖表；MarketChart 僅更新載入序號，兩者都須等完成通知。
+window.addEventListener('symLoading', () => {
+  _liveChartReady = false;
+  _liveGeneration += 1;
+});
 window.addEventListener('symLoaded', () => {
+  _liveChartReady = true;
+  _liveReadyLoadSeq = window.__loadSeq;
   if (S.liveEnabled) setTimeout(livePollOnce, 500);
 });
 

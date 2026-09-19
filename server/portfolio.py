@@ -73,7 +73,8 @@ def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
     if not vcodes:
         return {'error': 'no price data — 請先回補這些代號到 DB'}
 
-    totw = sum(wmap[c] for c in vcodes) or 1
+    # 保留使用者完整持倉的分母，缺歷史的部位不能被重新分配給其餘持股。
+    totw = sum(wmap.values()) or 1
     weights = {c: wmap[c] / totw for c in vcodes}
     bench_returns = dated_returns[benchmark]
 
@@ -115,8 +116,18 @@ def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
         ks = set(stock_ret[c])
         inter = ks if inter is None else (inter & ks)
     inter = sorted(inter or [])
-    pvol = var95 = 0.0
-    if len(inter) > 30:
+    skipped = [c for c in codes if c not in vcodes]
+    coverage = sum(weights.values()) * 100.0
+    beta_coverage = sum(weights[c] for c in vcodes if per[c]['beta'] is not None) * 100.0
+    reasons = []
+    if skipped:
+        reasons.append('部分持倉缺少足夠歷史')
+    if len(inter) <= 30:
+        reasons.append('共同有效報酬不足 31 筆')
+    if beta_coverage < 100.0 - 1e-8:
+        reasons.append('部分持倉缺少可驗證的基準 Beta')
+    pvol = var95 = None
+    if not skipped and len(inter) > 30:
         port = [sum(weights[c] * stock_ret[c][t] for c in vcodes) for t in inter]
         _, psd = _stats(port)
         pvol = psd * ANN * 100
@@ -130,9 +141,13 @@ def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
 
     return {
         'stocks': per,
-        'portfolio': {'vol': round(pvol, 1), 'var95': round(var95, 2), 'days': len(inter)},
+        'portfolio': {'vol': round(pvol, 1) if pvol is not None else None,
+                      'var95': round(var95, 2) if var95 is not None else None, 'days': len(inter)},
         'corr': corr,
         'sector': sect,
         'benchmark': benchmark,
-        'skipped': [c for c in codes if c not in vcodes],
+        'skipped': skipped,
+        'quality': {'available': not reasons, 'holdingCoveragePct': round(coverage, 4),
+                    'betaCoveragePct': round(beta_coverage, 4), 'commonSampleDays': len(inter),
+                    'reasons': reasons},
     }

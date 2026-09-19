@@ -66,7 +66,8 @@
   async function extractText(file) {
     const pdfjsLib = await loadPdfJs();
     const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    // 文字匯入不需要動態程式碼；停用舊版 PDF.js 的 eval 路徑。
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, isEvalSupported: false }).promise;
     let allText = '';
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);

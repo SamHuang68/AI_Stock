@@ -395,13 +395,5 @@
 
   window.AiV5 = { activate: activate, deactivate: deactivate, refresh: refresh };
 
-  window.addEventListener('shell:route', function (ev) {
-    if (ev && ev.detail && ev.detail.route === 'ai') activate();
-  });
-
-  function boot() {
-    if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'ai') activate();
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(boot, 220); });
-  else setTimeout(boot, 220);
+  // 面板生命週期由 Shell／AppKernel 統一呼叫。
 })();

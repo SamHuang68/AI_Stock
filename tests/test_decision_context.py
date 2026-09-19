@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 
@@ -354,7 +355,7 @@ class DecisionContextTest(unittest.TestCase):
         self.assertIn('insufficient_data_no_position_range', out['actionEnvelope']['constraints'])
 
     def test_publish_history_trace_and_replay(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as td, patch.object(dc, '_latest_context', None), patch.object(dc, '_latest_inputs', None):
             db = str(Path(td) / 'decision.db')
             trace = str(Path(td) / 'decision.jsonl')
             p1 = pulse(updated='2026-08-11T08:45:00')

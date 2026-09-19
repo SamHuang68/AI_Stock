@@ -10,14 +10,17 @@ import threading
 import unittest
 import urllib.request
 import urllib.error
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'server'))
 
 import decision_context as dc  # noqa: E402
+import early_warning as ew  # noqa: E402
 import options_exposure as ox  # noqa: E402
 import overnight_intraday as oi  # noqa: E402
 
@@ -37,14 +40,22 @@ _SERVER_SPEC.loader.exec_module(st_server)
 
 def _pulse() -> dict:
     as_of = datetime.now(timezone.utc).isoformat()
+    observed = datetime.now(dc.TW_TZ)
+    if observed.weekday() >= 5 or not 540 <= observed.hour * 60 + observed.minute < 815:
+        if observed.hour * 60 + observed.minute < 815:
+            observed -= timedelta(days=1)
+        while observed.weekday() >= 5:
+            observed -= timedelta(days=1)
+        observed = observed.replace(hour=13, minute=33, second=0, microsecond=0)
+    source_as_of = observed.isoformat()
     twii = {'price': 23000, 'changePct': 1.0,
             'market': {'displayChangePct': 1.0, 'source': 'twse-mis', 'session': 'regular',
-                       'referenceType': 'previous_close', 'asOf': as_of}}
+                       'referenceType': 'previous_close', 'asOf': source_as_of}}
     txf = {'price': 23020, 'changePct': 0.8,
            'market': {'displayChangePct': 0.8, 'source': 'taifex-mis', 'session': 'night',
-                      'referenceType': 'previous_close', 'asOf': as_of}}
+                      'referenceType': 'previous_close', 'asOf': source_as_of}}
     return {
-        'ok': True, 'updatedAt': as_of, 'date': as_of[:10],
+        'ok': True, 'updatedAt': as_of, 'date': observed.date().isoformat(),
         'marketSnapshot': {'quotes': {'^TWII': twii, '__TXF__': txf}},
         'stocks': {'up': 700, 'down': 300, 'advRatio': 0.7, 'limitDown': 1},
         'snapshot': {'stocks': {'up': 700, 'down': 300, 'advRatio': 0.7, 'limitDown': 1},
@@ -59,6 +70,24 @@ def _pulse() -> dict:
 class DecisionHttpTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
+        self.signal_db_path = str(Path(self.tmp.name) / 'market_signals.db')
+        # 訊號讀取函式的預設路徑在定義時已綁定；只改 DB_PATH 不會隔離 HTTP 查詢。
+        # 保留真實查詢與序列化流程，讓讀取端與下方發布端共用本次測試資料庫。
+        for name in ('active', 'history', 'performance'):
+            replacement = patch.object(ew, name, partial(getattr(ew, name), path=self.signal_db_path))
+            replacement.start()
+            self.addCleanup(replacement.stop)
+        for replacement in (patch.object(dc, '_latest_context', None), patch.object(dc, '_latest_inputs', None)):
+            replacement.start()
+            self.addCleanup(replacement.stop)
+        publish = dc.publish_context
+        def isolated_publish(context, **kwargs):
+            kwargs.update(db_path=str(Path(self.tmp.name) / 'decision.db'),
+                          trace_path=str(Path(self.tmp.name) / 'decision.jsonl'))
+            return publish(context, **kwargs)
+        publication = patch.object(dc, 'publish_context', side_effect=isolated_publish)
+        publication.start()
+        self.addCleanup(publication.stop)
         self.old_options_history = ox.HISTORY_PATH
         ox.HISTORY_PATH = str(Path(self.tmp.name) / 'options-history.json')
         with oi._CACHE_LOCK:
@@ -111,6 +140,12 @@ class DecisionHttpTest(unittest.TestCase):
         self.assertEqual(resp.status, 200)
         self.assertTrue(active['shadowOnly'])
         self.assertTrue(active['signals'])
+        expected = (dc.latest_context() or {}).get('earlyWarnings', {}).get('signals', [])
+        self.assertTrue(expected)
+        self.assertEqual(
+            {(row['signalId'], row['observationKey'], row['lastSeenAt']) for row in active['signals']},
+            {(row['signalId'], row['observationKey'], row['lastSeenAt']) for row in expected},
+        )
         with urllib.request.urlopen(self.base + '/signals/history?limit=10', timeout=5) as resp:
             history = json.loads(resp.read())
         self.assertEqual(resp.status, 200)

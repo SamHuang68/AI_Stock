@@ -129,23 +129,45 @@
 
   function card(lab, val) { return '<div class="pf-card"><div class="lab">' + lab + '</div><div class="val">' + val + '</div></div>'; }
 
+  function finiteMetric(v) { return typeof v === 'number' && isFinite(v); }
+  function riskValue(v, digits, suffix) { return finiteMetric(v) ? v.toFixed(digits) + (suffix || '') : '資料不足'; }
+  function riskSummary(d) {
+    var stocks = d.stocks || {}, codes = Object.keys(stocks), p = d.portfolio || {}, q = d.quality || {};
+    var cv = Object.keys(d.corr || {}).map(function (k) { return d.corr[k]; }).filter(finiteMetric);
+    var beta = 0, weight = 0;
+    var betaComplete = codes.length > 0 && !(d.skipped || []).length &&
+      (!finiteMetric(q.betaCoveragePct) || q.betaCoveragePct >= 99.9999);
+    codes.forEach(function (c) {
+      var s = stocks[c];
+      if (!finiteMetric(s.beta)) { betaComplete = false; return; }
+      beta += (s.weight || 0) * s.beta; weight += s.weight || 0;
+    });
+    var notes = [];
+    if (q.available === false || !finiteMetric(p.vol) || !finiteMetric(p.var95)) notes.push('資料不足，未完成全部投組風險檢查');
+    if (finiteMetric(q.holdingCoveragePct)) notes.push('持倉涵蓋率 ' + riskValue(q.holdingCoveragePct, 1, '%'));
+    if (finiteMetric(q.betaCoveragePct)) notes.push('Beta 涵蓋率 ' + riskValue(q.betaCoveragePct, 1, '%'));
+    if (finiteMetric(q.commonSampleDays)) notes.push('共同有效報酬 ' + q.commonSampleDays + ' 筆');
+    if (Array.isArray(q.reasons) && q.reasons.length) notes.push('原因：' + q.reasons.join('、'));
+    if (!betaComplete && !(q.reasons || []).length) notes.push('投組 Beta 未涵蓋全部持倉');
+    return { vol: p.vol, var95: p.var95, days: p.days,
+      correlation: cv.length ? cv.reduce(function (a, b) { return a + b; }, 0) / cv.length : null,
+      beta: betaComplete && weight > 0 ? beta / weight : null, note: notes.join(' · ') };
+  }
+
   var _lastPD = null;
   // 把投組風險結果格式化成純文字(寄送用)
   function portfolioText(d) {
     if (!d || !d.stocks) return '';
     var stocks = d.stocks, codes = Object.keys(stocks);
-    var cv = Object.keys(d.corr || {}).map(function (k) { return d.corr[k]; });
-    var avgCorr = cv.length ? cv.reduce(function (a, b) { return a + b; }, 0) / cv.length : 0;
-    var pBeta = 0, bw = 0;
-    codes.forEach(function (c) { var s = stocks[c]; if (s.beta != null) { pBeta += (s.weight || 0) * s.beta; bw += (s.weight || 0); } });
-    pBeta = bw > 0 ? pBeta / bw : 0;
-    var p = d.portfolio || {};
+    var risk = riskSummary(d);
     var lines = ['📦 投組風險分析', new Date().toLocaleString('zh-TW'), '',
-      '年化波動 ' + (p.vol || 0).toFixed(1) + '%  |  1日95%VaR ' + (p.var95 || 0).toFixed(2) + '%',
-      '平均相關性 ' + avgCorr.toFixed(2) + '  |  投組Beta ' + pBeta.toFixed(2) + '  |  檔數 ' + codes.length + '  |  樣本 ' + (p.days || 0) + '日',
+      '年化波動 ' + riskValue(risk.vol, 1, '%') + '  |  1日95%VaR ' + riskValue(risk.var95, 2, '%'),
+      '平均相關性 ' + riskValue(risk.correlation, 2) + '  |  投組Beta ' + riskValue(risk.beta, 2) + '  |  檔數 ' + codes.length + '  |  樣本 ' + riskValue(risk.days, 0, '日'),
+      risk.note,
       '', '個股(依權重):'];
     codes.map(function (c) { return [c, stocks[c]]; }).sort(function (a, b) { return (b[1].weight || 0) - (a[1].weight || 0); })
       .forEach(function (e) { var s = e[1]; lines.push('  ' + (s.name || e[0]) + '  權重' + (s.weight || 0).toFixed(1) + '%  波動' + (s.vol != null ? s.vol.toFixed(1) + '%' : '—') + '  Beta' + (s.beta != null ? s.beta.toFixed(2) : '—')); });
+    if (d.skipped && d.skipped.length) lines.push('無資料略過：' + d.skipped.join('、'));
     lines.push(''); lines.push('基準:' + (d.benchmark || '^TWII'));
     return lines.join('\n');
   }
@@ -157,20 +179,15 @@
     var chainExp = {};
     codes.forEach(function (c) { var st = stageMap[c] || '其他'; chainExp[st] = (chainExp[st] || 0) + (stocks[c].weight || 0); });
 
-    var cv = Object.keys(d.corr || {}).map(function (k) { return d.corr[k]; });
-    var avgCorr = cv.length ? cv.reduce(function (a, b) { return a + b; }, 0) / cv.length : 0;
-    var pBeta = 0, bw = 0;
-    codes.forEach(function (c) { var s = stocks[c]; if (s.beta != null) { pBeta += (s.weight || 0) * s.beta; bw += (s.weight || 0); } });
-    pBeta = bw > 0 ? pBeta / bw : 0;
-
-    var p = d.portfolio || {};
+    var risk = riskSummary(d);
     var h = '<div class="pf-cards">' +
-      card('年化波動', (p.vol || 0).toFixed(1) + '%') +
-      card('1日 95% VaR', (p.var95 || 0).toFixed(2) + '%') +
-      card('平均相關性', avgCorr.toFixed(2)) +
-      card('投組 Beta', pBeta.toFixed(2)) +
+      card('年化波動', riskValue(risk.vol, 1, '%')) +
+      card('1日 95% VaR', riskValue(risk.var95, 2, '%')) +
+      card('平均相關性', riskValue(risk.correlation, 2)) +
+      card('投組 Beta', riskValue(risk.beta, 2)) +
       card('持倉檔數', codes.length) +
-      card('樣本天數', p.days || 0) + '</div>';
+      card('樣本天數', riskValue(risk.days, 0)) + '</div>' +
+      (risk.note ? '<div class="note">' + esc(risk.note) + '</div>' : '');
 
     h += '<div class="pf-h">供應鏈曝險（鏈條圖 · 你壓在哪一段）</div>' + chainDiagram(chainExp);
     h += '<div class="pf-h">產業曝險</div>' + (d.sector && Object.keys(d.sector).length ? bars(d.sector, '#60a5fa') : '<div class="note">無產業資料</div>');

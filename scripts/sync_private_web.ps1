@@ -106,19 +106,57 @@ if (-not $Promote) {
 $releaseState = $status.Stdout | ConvertFrom-Json
 $installRoot = $releaseState.installRoot
 $current = Join-Path $installRoot 'current'
+$syncLock = [IO.File]::Open((Join-Path $installRoot '.private-web-sync.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+try {
+$previousManifest = $null
+$activeManifestPath = Join-Path $current '.private_web_release.json'
+if (Test-Path -LiteralPath $activeManifestPath) {
+  $previousManifest = Get-Content -LiteralPath $activeManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+}
 Assert-PrivateWebRevision -Url 'http://localhost:18432/health/live' -Commit $originCommit
 Stop-PrivateWebRuntime -Current $current
 
 Write-Host "[promote] $originTip --approve"
-$promoteResult = Invoke-StockPy @('scripts\private_web_release.py', 'promote', '--release', $originTip, '--approve')
-if ($promoteResult.ExitCode -ne 0) { throw 'private_web_release.py promote failed' }
-
-$manifest = Get-Content -LiteralPath (Join-Path $current '.private_web_release.json') -Raw | ConvertFrom-Json
-if ($manifest.commit -ne $originCommit -or $manifest.tests -ne 'passed') { throw 'current 的 SHA 或測試狀態不符' }
-Start-PrivateWebRuntime -Current $current -Python $script:Py
-Assert-PrivateWebRevision -Url 'http://127.0.0.1:18435/health/live' -Commit $originCommit -Attempts 60
-$ownerToken = (Get-Content -LiteralPath (Join-Path $current 'data\private_web_owner.token') -Raw).Trim()
-$headers = @{ Authorization = 'Bearer ' + $ownerToken }
-Assert-PrivateWebRevision -Url ($TailscaleUrl.Split('#')[0].TrimEnd('/') + '/health/live') -Commit $originCommit -Headers $headers -Attempts 30
-Assert-PrivateWebRevision -Url 'http://localhost:18432/health/live' -Commit $originCommit
+$promoted = $false
+try {
+  $promoteResult = Invoke-StockPy @('scripts\private_web_release.py', 'promote', '--release', $originTip, '--approve')
+  if ($promoteResult.ExitCode -ne 0) { throw '版本切換失敗；發布器已嘗試還原原目錄' }
+  $promoted = $true
+  $manifest = Get-Content -LiteralPath (Join-Path $current '.private_web_release.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ($manifest.commit -ne $originCommit -or $manifest.tests -ne 'passed') { throw 'current 的 SHA 或測試狀態不符' }
+  Start-PrivateWebRuntime -Current $current -Python $script:Py
+  Assert-PrivateWebRevision -Url 'http://127.0.0.1:18435/health/live' -Commit $originCommit -Attempts 60
+  $ownerToken = (Get-Content -LiteralPath (Join-Path $current 'data\private_web_owner.token') -Raw).Trim()
+  $headers = @{ Authorization = 'Bearer ' + $ownerToken }
+  Assert-PrivateWebRevision -Url ($TailscaleUrl.Split('#')[0].TrimEnd('/') + '/health/live') -Commit $originCommit -Headers $headers -Attempts 30
+  Assert-PrivateWebRevision -Url 'http://localhost:18432/health/live' -Commit $originCommit
+} catch {
+  $publishFailure = $_.Exception.Message
+  try {
+    if (-not $promoted) {
+      $recovery = Invoke-StockPy @('scripts\private_web_release.py', 'recover', '--approve')
+      if ($recovery.ExitCode -ne 0) { throw '發布交易回復失敗，已保留目錄及紀錄' }
+      if (Test-Path -LiteralPath $activeManifestPath) {
+        $active = Get-Content -LiteralPath $activeManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $promoted = $active.promotionId -and ($active.promotionId -ne $previousManifest.promotionId)
+      }
+    }
+    if ($promoted) {
+      Stop-PrivateWebRuntime -Current $current
+      if (-not $previousManifest) { throw '首次安裝啟動失敗，沒有可回復的前版；已停止新版並保留資料' }
+      $rollback = Invoke-StockPy @('scripts\private_web_release.py', 'rollback', '--approve')
+      if ($rollback.ExitCode -ne 0) { throw '前版目錄回復失敗' }
+    }
+    $restored = Get-Content -LiteralPath (Join-Path $current '.private_web_release.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $restored.commit) { throw '無法確認回復版本' }
+    Start-PrivateWebRuntime -Current $current -Python $script:Py
+    Assert-PrivateWebRevision -Url 'http://127.0.0.1:18435/health/live' -Commit $restored.commit -Attempts 60
+  } catch {
+    throw "發布失敗：$publishFailure；自動回復尚未完成：$($_.Exception.Message)"
+  }
+  throw "發布未完成，已啟動回復版本 $($restored.commit)：$publishFailure"
+}
 Write-Host "[發布完成] current、localhost 與 Tailscale 程序 SHA 均為 $originCommit；請保留發布後版面驗證紀錄。"
+} finally {
+  $syncLock.Dispose()
+}

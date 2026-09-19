@@ -11,6 +11,7 @@
   var SRV = window.SERVER || '';
   var timers = {};
   var marketColorTraceSeen = {};
+  var factorsGeneration = 0;
 
   function $(id) { return document.getElementById(id); }
   function jget(url) {
@@ -953,6 +954,7 @@
 
   // ── Factors（獨立頁；不再於總覽內嵌展開，避免頂列遮蔽／切頁殘留）──
   function renderFactors(el) {
+    var generation = ++factorsGeneration;
     el.innerHTML = head('因子帳本', '脈動正面／風險／未納入因子（與總覽／風險同源 /pulse）',
       '<button class="hub-btn" data-sync>同步資料</button>' +
       '<button class="hub-btn" data-go="risk">風險監控</button>' +
@@ -961,6 +963,7 @@
       '<div id="hub-fac-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
     Promise.all([jget('/pulse'), jget('/pulse/history?kind=pulse&n=12')]).then(function (arr) {
+      if (generation !== factorsGeneration) return;
       var p = arr[0] || {};
       var hist = (arr[1] && arr[1].rows) || [];
       var V = window.Viz;
@@ -1388,8 +1391,8 @@
     settings: function () { var el = mount('settings'); if (el) renderSettings(el); }
   };
 
-  function hubApi(fn) {
-    return { activate: fn, deactivate: function () {}, mount: fn };
+  function hubApi(fn, deactivate) {
+    return { activate: fn, deactivate: deactivate || function () {}, mount: fn };
   }
 
   window.HubV5 = ACTIVATORS;
@@ -1398,7 +1401,7 @@
   window.SignalsV5 = hubApi(ACTIVATORS.signals);
   window.WatchlistV5 = hubApi(ACTIVATORS.watchlist);
   window.RiskV5 = hubApi(ACTIVATORS.risk);
-  window.FactorsV5 = hubApi(ACTIVATORS.factors);
+  window.FactorsV5 = hubApi(ACTIVATORS.factors, function () { ++factorsGeneration; });
   window.SettingsV5 = hubApi(ACTIVATORS.settings);
   window.TrendsV5 = {
     activate: function () {
@@ -1408,8 +1411,5 @@
     mount: function () { this.activate(); }
   };
 
-  window.addEventListener('shell:route', function (ev) {
-    var id = ev && ev.detail && ev.detail.route;
-    if (id && ACTIVATORS[id]) ACTIVATORS[id]();
-  });
+  // 各 Hub 面板保留上述 API，由 Shell／AppKernel 統一啟動。
 })();

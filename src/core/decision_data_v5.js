@@ -3,6 +3,8 @@
   'use strict';
   var state = { context: null, summary: null, updatedAt: null, contractVersion: 1 };
   var inflight = null;
+  var inflightKey = null;
+  var requestSequence = 0;
   var researchInflight = null;
   var researchUpdatedAt = 0;
   var TRACE_KEY = 'st_decision_ui_trace_v1';
@@ -150,7 +152,15 @@
 
   function refresh(opts) {
     opts = opts || {};
-    if (inflight && !opts.force) return inflight;
+    var input = {
+      riskProfile: opts.riskProfile || null,
+      holdings: opts.holdings || [],
+      portfolioKind: opts.portfolioKind || 'actual'
+    };
+    var requestKey = JSON.stringify(input);
+    if (inflight && !opts.force && inflightKey === requestKey) return inflight;
+    // 相同輸入共用請求；輸入改變或強制更新時，只有最新一代能發布。
+    var sequence = ++requestSequence;
     var id = opts.correlationId || correlationId('context');
     var started = Date.now();
     var hasBody = !!(opts.riskProfile || (opts.holdings && opts.holdings.length));
@@ -158,11 +168,7 @@
     if (hasBody) {
       req.method = 'POST';
       req.headers = { 'Content-Type': 'application/json' };
-      req.body = JSON.stringify({
-        riskProfile: opts.riskProfile || null,
-        holdings: opts.holdings || [],
-        portfolioKind: opts.portfolioKind || 'actual'
-      });
+      req.body = requestKey;
     }
     trace('context_request_start', id, {
       method: req.method || 'GET',
@@ -170,7 +176,7 @@
       portfolioKind: opts.portfolioKind || null,
       holdingsCount: (opts.holdings || []).length
     });
-    inflight = fetch(base() + '/decision/context', req)
+    var request = fetch(base() + '/decision/context', req)
       .then(function (r) {
         return r.text().then(function (raw) {
           trace('context_response', id, {
@@ -188,6 +194,10 @@
         });
       })
       .then(function (ctx) {
+        if (sequence !== requestSequence) {
+          trace('context_response_discarded', id, { reason: 'superseded_input', sequence: sequence });
+          return inflight || state;
+        }
         if (ctx) {
           var published = publish(ctx, hasBody ? 'profile' : 'refresh', id);
           refreshOvernightResearch(state.context, id, false);
@@ -201,10 +211,14 @@
           error: String(err && err.message || err),
           elapsedMs: Date.now() - started
         });
-        return state;
+        return sequence !== requestSequence ? (inflight || state) : state;
       })
-      .finally(function () { inflight = null; });
-    return inflight;
+      .finally(function () {
+        if (inflight === request) { inflight = null; inflightKey = null; }
+      });
+    inflight = request;
+    inflightKey = requestKey;
+    return request;
   }
 
   window.DecisionData = {

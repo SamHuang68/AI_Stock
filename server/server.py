@@ -1227,6 +1227,27 @@ except Exception:
         return None
 
 
+def _decision_session_calendar():
+    """只讀既有官方交易日曆；沿用 market_sessions 中已核對的臨時休市修正。"""
+    import sqlite3
+    from contextlib import closing
+    from datetime import datetime, timedelta, timezone
+    from pathlib import Path
+    import datastore
+    year = datetime.now(timezone(timedelta(hours=8))).year
+    try:
+        uri = Path(datastore.DB_PATH).resolve().as_uri() + '?mode=ro'
+        with closing(sqlite3.connect(uri, uri=True, timeout=2)) as conn:
+            years = [row[0] for row in conn.execute(
+                'SELECT year FROM calendar_years WHERE year IN (?,?)', (year - 1, year))]
+            sessions = [row[0] for row in conn.execute(
+                'SELECT session_date FROM market_sessions WHERE session_date>=? AND session_date<?',
+                (f'{year - 1}-01-01', f'{year + 1}-01-01'))]
+        return {'coveredYears': years, 'sessions': sessions} if years else None
+    except (OSError, sqlite3.Error):
+        return None
+
+
 def _quote_session_date(quote):
     if not isinstance(quote, dict):
         return None
@@ -4865,6 +4886,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
            重用 breadth / marketflow / txf / sectors 快取與 _build_tw_market_fundamental；
            缺資料進 pendingFactors，不捏造分數。快取 45s。"""
         from datetime import date as _date
+        from datetime import datetime as _datetime, timezone as _timezone
+        update_started_at = _datetime.now(_timezone.utc).isoformat()
         qs = parse_qs(urlparse(self.path).query)
         force = (qs.get('refresh', ['0'])[0] or '0') in ('1', 'true', 'yes')
         key = f'pulse:v2:{_date.today().strftime("%Y%m%d")}:{int(time.time() // 45)}'
@@ -5059,6 +5082,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             if isinstance(extras.get('sectors'), dict) else None,
         }
         out['updatedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+        out['updateStartedAt'] = update_started_at
 
         # ── Overview 儀表板擴充（對齊 tw-pulse 參考圖）──────────────
         # movers / global / macro / flash 並行；總預算 ~8s（FRED 在此環境常逾時，必須 fail-fast）
@@ -5473,7 +5497,11 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                 index_history=_index_hist, futures_history=_futures_hist,
                 sector_flow=_sec_flow, margin_state=_margin_state,
                 benchmark_data=_benchmark_data,
-                options_structure=_options_structure)
+                options_structure=_options_structure,
+                session_calendar=_decision_session_calendar())
+            if _ctx.get('publicationStatus') == 'superseded':
+                self._ok(json.dumps(_decision.latest_pulse() or out, ensure_ascii=False).encode())
+                return
             out['decisionSummary'] = _decision.compact_context(_ctx)
         except Exception as e:
             print('[pulse] decision context', e)

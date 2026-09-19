@@ -13,6 +13,7 @@
 
   var SRV = window.SERVER || '';
   var timer = null;
+  var refreshSequence = 0;
   var flashMkt = 'all'; /* all | TW | US */
   var flashImpact = 'all'; /* all | high | medium_up */
   var lastPack = null;
@@ -370,6 +371,7 @@
     opts = opts || {};
     var body = ensureMount();
     if (!body) return;
+    var sequence = ++refreshSequence;
     var soft = !!opts.soft || !!body.querySelector('.nw-grid, .nw-card, .nw-flash');
     if (window.ShellV5 && window.ShellV5.softBadge) {
       window.ShellV5.softBadge('mount-news', soft, '更新中…');
@@ -379,8 +381,9 @@
       fetch(SRV + '/events', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; }),
       fetch(SRV + '/alert/status', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
       fetch(SRV + '/flash?n=36', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; })
-    ]).then(function (arr) { render(arr[0], arr[1], arr[2]); })
+    ]).then(function (arr) { if (sequence === refreshSequence) render(arr[0], arr[1], arr[2]); })
       .finally(function () {
+        if (sequence !== refreshSequence) return;
         if (window.ShellV5 && window.ShellV5.softBadge) {
           window.ShellV5.softBadge('mount-news', false);
         }
@@ -399,18 +402,12 @@
   }
 
   function deactivate() {
+    ++refreshSequence;
     if (timer) { clearInterval(timer); timer = null; }
+    if (window.ShellV5 && window.ShellV5.softBadge) window.ShellV5.softBadge('mount-news', false);
   }
 
   window.NewsV5 = { activate: activate, deactivate: deactivate, refresh: refresh };
 
-  window.addEventListener('shell:route', function (ev) {
-    if (ev && ev.detail && ev.detail.route === 'news') activate();
-  });
-
-  function boot() {
-    if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'news') activate();
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(boot, 240); });
-  else setTimeout(boot, 240);
+  // 面板生命週期由 Shell／AppKernel 統一呼叫。
 })();
