@@ -367,6 +367,7 @@ READ_GET_EXACT = {
     "/marketflow",
     "/breadth",
     "/pulse",
+    "/pulse/update-status",
     "/pulse/history",
     "/decision/context",
     "/decision/history",
@@ -426,6 +427,7 @@ OWNER_GET_PREFIXES = ("/draw/",)
 
 # Deliberately narrow write surface for a long-horizon market/research user.
 CONTROL_POST_EXACT = {
+    "/pulse/refresh",
     "/diagnostics/ui-route",
     "/screener",
     "/screen3",

@@ -11,6 +11,89 @@
 
   function base() { return window.SERVER || location.origin || 'http://localhost:18432'; }
 
+  function canUpdateMarket() {
+    var profile = window.ST_PRIVATE_WEB_PROFILE;
+    return !profile || profile.role === 'owner';
+  }
+
+  function pulseJob(payload) {
+    var update = payload && payload.updateState;
+    return update && (update.job || (update.status ? update : null));
+  }
+
+  // 純讀與明確更新共用工作協議；取消只停止此瀏覽器等待，不取消伺服器工作。
+  async function refreshPulse(options) {
+    options = options || {};
+    var update = options.update === true && canUpdateMarket();
+    var controller = new AbortController();
+    var timedOut = false;
+    var external = options.signal;
+    function abort() { controller.abort(); }
+    if (external) {
+      if (external.aborted) abort();
+      else external.addEventListener('abort', abort, { once: true });
+    }
+    var timeout = setTimeout(function () { timedOut = true; abort(); }, update ? 90000 : 12000);
+    async function json(path, request) {
+      if (controller.signal.aborted) { var cancelled = new Error('已停止等待市場快照'); cancelled.name = 'AbortError'; throw cancelled; }
+      var response = await fetch(base() + path, Object.assign({ cache: 'no-store', signal: controller.signal }, request || {}));
+      var payload = await response.json();
+      if (!response.ok) {
+        var failure = new Error(payload && payload.error || ('HTTP ' + response.status));
+        failure.status = response.status;
+        throw failure;
+      }
+      return payload;
+    }
+    function pause() {
+      return new Promise(function (resolve, reject) {
+        function cancelled() {
+          clearTimeout(timer);
+          controller.signal.removeEventListener('abort', cancelled);
+          var error = new Error('已停止等待市場更新'); error.name = 'AbortError'; reject(error);
+        }
+        var timer = setTimeout(function () {
+          controller.signal.removeEventListener('abort', cancelled); resolve();
+        }, 1000);
+        if (controller.signal.aborted) cancelled();
+        else controller.signal.addEventListener('abort', cancelled, { once: true });
+      });
+    }
+    try {
+      if (!update) {
+        var current = await json('/pulse');
+        return { pulse: current, job: pulseJob(current), requestedUpdate: false, error: null };
+      }
+      var accepted = await json('/pulse/refresh', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+      });
+      var job = accepted && accepted.job;
+      if (!job || !job.jobId) throw new Error('伺服器未提供市場更新工作識別');
+      if (options.onStatus) options.onStatus(job);
+      while (job.status === 'queued' || job.status === 'running') {
+        await pause();
+        var progress = await json('/pulse/update-status?jobId=' + encodeURIComponent(job.jobId));
+        if (!progress || !progress.job || progress.job.jobId !== job.jobId) throw new Error('市場更新工作狀態不一致');
+        job = progress.job;
+        if (options.onStatus) options.onStatus(job);
+      }
+      if (['succeeded', 'failed', 'interrupted'].indexOf(job.status) < 0) throw new Error('無法辨識市場更新工作狀態');
+      var pulse = await json('/pulse');
+      var error = job.status === 'succeeded' ? null : String(job.error || (job.status === 'interrupted' ? '市場更新工作已中斷' : '市場更新失敗'));
+      if (!error && (!pulse || !pulse.ok)) error = '工作已結束，但尚未讀到已提交快照';
+      return { pulse: pulse, job: job, requestedUpdate: true, coalesced: !!accepted.coalesced, error: error };
+    } catch (error) {
+      if (timedOut) {
+        var timeoutError = new Error(update ? '等待市場更新逾時；伺服器工作仍可能繼續，可重新讀取狀態。' : '讀取市場快照逾時');
+        timeoutError.name = 'TimeoutError'; throw timeoutError;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      if (external) external.removeEventListener('abort', abort);
+    }
+  }
+
   function correlationId(prefix) {
     return String(prefix || 'decision') + '-' + Date.now().toString(36) + '-' +
       Math.random().toString(36).slice(2, 8);
@@ -117,7 +200,7 @@
     researchInflight = fetch(path, { cache: 'no-store' })
       .then(function (response) { return parseResponse(response, id, 'overnight_cache_response'); })
       .then(function (cached) {
-        if (!force && cached && cached.ok) return cached;
+        if (!force || !canUpdateMarket()) return cached;
         trace('overnight_refresh_start', id, { scope: 'memory_v1', market: 'all' });
         return fetch(base() + '/research/overnight-intraday/refresh?market=all', {
           method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
@@ -127,7 +210,7 @@
       .then(function (payload) {
         researchUpdatedAt = Date.now();
         var current = state.context || context;
-        if (payload && current && current.regime) publish(withOvernightResearch(current, payload), 'overnight-research', id);
+        if (payload && payload.ok && current && current.regime) publish(withOvernightResearch(current, payload), 'overnight-research', id);
         return state;
       })
       .catch(function (error) {
@@ -161,9 +244,10 @@
 
   function refresh(opts) {
     opts = opts || {};
+    var personalized = canUpdateMarket();
     var input = {
-      riskProfile: opts.riskProfile || null,
-      holdings: opts.holdings || [],
+      riskProfile: personalized ? (opts.riskProfile || null) : null,
+      holdings: personalized ? (opts.holdings || []) : [],
       portfolioKind: opts.portfolioKind || 'actual'
     };
     var requestKey = JSON.stringify(input);
@@ -172,8 +256,9 @@
     var sequence = ++requestSequence;
     var id = opts.correlationId || correlationId('context');
     var started = Date.now();
-    var hasBody = !!(opts.riskProfile || (opts.holdings && opts.holdings.length));
+    var hasBody = !!(input.riskProfile || input.holdings.length);
     var req = { cache: 'no-store' };
+    if (opts.signal) req.signal = opts.signal;
     if (hasBody) {
       req.method = 'POST';
       req.headers = { 'Content-Type': 'application/json' };
@@ -203,6 +288,7 @@
         });
       })
       .then(function (ctx) {
+        if (opts.signal && opts.signal.aborted) return state;
         if (sequence !== requestSequence) {
           trace('context_response_discarded', id, { reason: 'superseded_input', sequence: sequence });
           return inflight || state;
@@ -231,6 +317,8 @@
   }
 
   window.DecisionData = {
+    canUpdateMarket: canUpdateMarket,
+    refreshPulse: refreshPulse,
     get: function () { return state; },
     publish: publish,
     fromPulse: fromPulse,

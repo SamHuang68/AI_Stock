@@ -1580,10 +1580,13 @@ def _finish_publication(payload: dict, path: str, trace_path: str, elapsed_ms: i
 def publish_context(
     context: dict, *, pulse: dict, build_kwargs: dict[str, Any] | None = None,
     db_path: str = DB_PATH, trace_path: str = TRACE_PATH, elapsed_ms: int = 0,
+    publication_guard: Any = None,
 ) -> dict:
     """先記錄意圖，再完成可重播預警與決策提交，最後公開及處理通知。"""
     with _publish_lock:
         try:
+            if publication_guard is not None:
+                publication_guard()
             _ensure_latest(db_path)
             with _lock:
                 previous_snapshot_id = (_latest_context or {}).get('snapshotId')
@@ -1617,6 +1620,8 @@ def publish_context(
                     return current
                 return _current_context_view(copy.deepcopy(existing['context']), existing['inputs'])
             frozen_context.update(inputHash=fingerprint, rulesDigest=_rules_digest(), snapshotId=snapshot_id)
+            if publication_guard is not None:
+                publication_guard()
             payload = {'snapshotId': snapshot_id, 'context': frozen_context, 'inputs': inputs,
                        'memory': memory, 'evaluationAt': _iso_now()}
             _store.prepare(db_path, payload)
@@ -1678,12 +1683,13 @@ def _attach_warning_evidence(context: dict, warning: dict) -> None:
     context['evidence'] = list(context.get('evidence') or []) + warning_evidence
 
 
-def build_and_publish(pulse: dict, **kwargs: Any) -> dict:
+def build_and_publish(pulse: dict, *, publication_guard: Any = None, **kwargs: Any) -> dict:
     started = time.perf_counter()
     context = build_decision_context(pulse, **kwargs)
     elapsed = int((time.perf_counter() - started) * 1000)
     base_kwargs = {k: v for k, v in kwargs.items() if k not in ('portfolio_overlay', 'risk_profile', 'portfolio_kind')}
-    return publish_context(context, pulse=pulse, build_kwargs=base_kwargs, elapsed_ms=elapsed)
+    return publish_context(context, pulse=pulse, build_kwargs=base_kwargs, elapsed_ms=elapsed,
+                           publication_guard=publication_guard)
 
 
 def _current_context_view(context: dict | None, inputs: dict, now: datetime | None = None) -> dict | None:
@@ -1730,6 +1736,20 @@ def latest_pulse() -> dict | None:
         inputs = copy.deepcopy(_latest_inputs or {})
     if pulse and context:
         pulse['decisionSummary'] = compact_context(_current_context_view(context, inputs))
+    return pulse
+
+
+def committed_pulse_for_job(job_id: str) -> dict | None:
+    """依工作編號核對已提交歷史，供發布意圖恢復後更正工作結果。"""
+    path = _active_db_path or DB_PATH
+    rows = _store.read_rows(path, 'SELECT snapshot_id FROM decision_commits '
+        "WHERE json_extract(inputs_json, '$.pulse.updateJobId')=? ORDER BY revision DESC LIMIT 1",
+        (job_id,))
+    saved = _store.load(path, rows[0][0]) if rows else None
+    if not saved:
+        return None
+    pulse = copy.deepcopy(saved['inputs']['pulse'])
+    pulse['decisionSummary'] = compact_context(saved['context'])
     return pulse
 
 

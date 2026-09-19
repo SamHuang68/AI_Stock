@@ -202,11 +202,11 @@ async function checkPulseLeave() {
   const source = read('src/ui/pulse_v5.js'), requests = [], paints = [], timers = new Map();
   const body = element(); let timerId = 0;
   const context = {
-    refreshSequence: 0, warmRetryTimer: null, timer: null, showFactors: false, lastPack: null,
+    refreshSequence: 0, refreshController: null, refreshPromise: null, refreshIsUpdate: false, timer: null, showFactors: false, lastPack: null,
     ensureMount: () => body, $: id => id === 'pl-body' ? body : null,
     document: { querySelector: () => null }, Date,
-    jget() { const request = pending(); requests.push(request); return request.promise; },
-    fetchWlQuotes: async () => ({}), render: value => paints.push(value), warmCaches() {},
+    DecisionData: { refreshPulse() { const request = pending(); requests.push(request); return request.promise.then(pulse => ({ pulse })); } },
+    fetchWlQuotes: async () => ({}), render: value => paints.push(value), showPulseUpdateStatus() {},
     setTimeout(callback) { timers.set(++timerId, callback); return timerId; }, clearTimeout: id => timers.delete(id),
     setInterval: () => 1, clearInterval() {},
     ShellV5: { route: () => 'pulse' }
@@ -224,13 +224,13 @@ async function checkPulseLeave() {
   requests[1].resolve({ ok: true, breadthOk: true, id: '新頁面' }); await tick();
   requests[0].resolve({ ok: true, breadthOk: false, id: '舊頁面' }); await tick();
   assert.deepEqual(paints.map(value => value.pulse.id), ['新頁面']);
-  assert.equal(timers.size, 0, '離頁前的晚到資料不得啟動暖快取重試');
+  assert.equal(timers.size, 0, '離頁前的晚到資料不得啟動補建重試');
   context.refresh();
   requests[2].resolve({ ok: true, breadthOk: false }); await tick();
-  assert.equal(timers.size, 1, '目前頁面資料不完整仍可安排原有重試');
+  assert.equal(timers.size, 0, '目前頁面資料不完整也只能讀取，不得安排補建重試');
   context.deactivate();
-  assert.equal(timers.size, 0, '離頁會取消目前暖快取重試');
-  console.log('通過：Pulse 離頁／返回後拒收舊資料，並取消暖快取計時器');
+  assert.equal(timers.size, 0, '離頁後不可留下補建計時器');
+  console.log('通過：Pulse 離頁／返回後拒收舊資料，不因缺值自動補建');
 }
 
 (async () => {

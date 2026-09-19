@@ -2744,6 +2744,746 @@ def _build_breadth_payload(force=False):
     return out
 
 
+def _build_marketflow_payload() -> dict:
+    """大盤資金流市場面板 (v3.8 #3)：
+       • 量能趨勢 FMTQIK（近月每日成交金額，呼應 8000億→1.2兆）
+       • 三大法人買賣金額 BFI82U（外資/投信/自營 買賣差）
+       • 融資融券大盤 MI_MARGN tables[0] 摘要
+       僅 TW。整批快取 30 分。"""
+    from datetime import date as _date
+    today = _date.today()
+    key = f'marketflow:{today.strftime("%Y%m%d")}'
+    c = _cache.get(key)
+    if c is not None:
+        return json.loads(c)
+    out = {'date': today.strftime('%Y-%m-%d'), 'turnover': [], 'inst': None, 'margin': None}
+    ym1 = today.strftime('%Y%m01')
+    # 量能趨勢 FMTQIK（當月每日；金額單位元）
+    try:
+        url = f'https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date={ym1}&response=json'
+        req = urllib.request.Request(url, headers=YF_HEADERS)
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            d = json.loads(resp.read())
+        if d.get('stat') in ('OK', 'ok'):
+            fields = d.get('fields') or []
+            rows = d.get('data') or []
+            i_date = next((i for i, f in enumerate(fields) if '日期' in f), 0)
+            i_amt  = next((i for i, f in enumerate(fields) if '成交金額' in f), 1)
+            i_idx  = next((i for i, f in enumerate(fields) if '指數' in f), None)
+            i_chg  = next((i for i, f in enumerate(fields) if '漲跌點數' in f), None)
+            for row in rows:
+                try:
+                    amt = float(str(row[i_amt]).replace(',', ''))
+                except Exception:
+                    continue
+                rec = {'date': str(row[i_date]).strip(), 'amount': amt}
+                if i_idx is not None:
+                    try: rec['index'] = float(str(row[i_idx]).replace(',', ''))
+                    except Exception: pass
+                if i_chg is not None:
+                    try: rec['chg'] = float(str(row[i_chg]).replace(',', ''))
+                    except Exception: pass
+                out['turnover'].append(rec)
+    except Exception as e:
+        print(f'[marketflow] FMTQIK failed: {e}')
+    # 三大法人買賣金額 BFI82U（往前找最近一個有資料的交易日）
+    try:
+        from datetime import timedelta
+        for back in range(0, 7):
+            dd = (today - timedelta(days=back)).strftime('%Y%m%d')
+            url = f'https://www.twse.com.tw/rwd/zh/fund/BFI82U?dayDate={dd}&type=day&response=json'
+            req = urllib.request.Request(url, headers=YF_HEADERS)
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                d = json.loads(resp.read())
+            if d.get('stat') not in ('OK', 'ok'):
+                continue
+            fields = d.get('fields') or []
+            rows = d.get('data') or []
+            i_name = next((i for i, f in enumerate(fields) if '單位名稱' in f or '買賣別' in f), 0)
+            i_net  = next((i for i, f in enumerate(fields) if '買賣差' in f or '買賣超' in f), len(fields) - 1)
+            inst = {'foreign': None, 'trust': None, 'dealer': None, 'date': dd}
+            for row in rows:
+                nm = str(row[i_name])
+                try: net = float(str(row[i_net]).replace(',', ''))
+                except Exception: continue
+                if '外' in nm: inst['foreign'] = (inst['foreign'] or 0) + net
+                elif '投信' in nm: inst['trust'] = net
+                elif '自營' in nm: inst['dealer'] = (inst['dealer'] or 0) + net
+            if any(v is not None for k, v in inst.items() if k != 'date'):
+                out['inst'] = inst
+                break
+    except Exception as e:
+        print(f'[marketflow] BFI82U failed: {e}')
+    # 融資融券大盤摘要 MI_MARGN tables[0]
+    try:
+        url = f'https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={today.strftime("%Y%m%d")}&selectType=ALL&response=json'
+        req = urllib.request.Request(url, headers=YF_HEADERS)
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            d = json.loads(resp.read())
+        if d.get('stat') in ('OK', 'ok'):
+            tables = d.get('tables') or []
+            if tables:
+                t0 = tables[0]
+                fields = t0.get('fields') or []
+                rows = t0.get('data') or []
+                summ = {}
+                for row in rows:
+                    label = str(row[0]) if row else ''
+                    if '融資' in label and '金額' in label:
+                        try: summ['marginAmt'] = float(str(row[-1]).replace(',', ''))
+                        except Exception: pass
+                out['margin'] = {'raw': rows[:6]} if rows else None
+    except Exception as e:
+        print(f'[marketflow] MI_MARGN failed: {e}')
+    try:
+        out['turnoverQuant'] = _turnover_quant(out.get('turnover') or [])
+    except Exception:
+        out['turnoverQuant'] = None
+    body = json.dumps(out, ensure_ascii=False).encode()
+    _cache.set(key, body, ttl=1800)
+    return out
+
+
+def _build_pulse_update(job_id: str, guard) -> dict:
+    """背景工作沿用市場來源與決策流程，提交前核對工作效期。"""
+    from datetime import date as _date
+    from datetime import datetime as _datetime, timezone as _timezone
+    guard()
+    update_started_at = _datetime.now(_timezone.utc).isoformat()
+    force = True
+    def _loads(raw):
+        if raw is None:
+            return None
+        try:
+            return json.loads(raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw)
+        except Exception:
+            return None
+
+    def _cache_first(keys):
+        for k in keys:
+            d = _loads(_cache.get(k))
+            if d is not None:
+                return d
+        return None
+
+    today = _date.today()
+    ymd = today.strftime('%Y%m%d')
+    y_m_d = today.strftime('%Y-%m-%d')
+
+    # 延伸因子與體質並行：OI／借券／NHNL／類股（專用 pool，不佔用全域 _pool）
+    extras_fut = None
+    try:
+        import pulse_extras as _pulse_extras
+        extras_budget = 7.5 if force else 5.5
+        extras_fut = _pulse_extras_pool.submit(
+            lambda b=extras_budget: _pulse_extras.fetch_all(budget=b)
+        )
+    except Exception as e:
+        print('[pulse] extras submit', e)
+
+    # 1) 體質（權威來源）
+    fund = {}
+    try:
+        fund = _build_tw_market_fundamental('^TWII') or {}
+    except Exception as e:
+        print('[pulse] fundamental', e)
+        fund = {}
+
+    # 2) 廣度／指數／法人 — 優先快取；miss 時內聯建置（不經 _handle_*，避免弄亂 HTTP）
+    bd = _cache_first([f'breadth:v1:{ymd}'])
+    if not (isinstance(bd, dict) and bd.get('ok')):
+        try:
+            bd = _build_breadth_payload(force=False)
+        except Exception as e:
+            print('[pulse] breadth hydrate', e)
+            bd = bd if isinstance(bd, dict) else None
+    mf = _cache_first([f'marketflow:{ymd}', f'marketflow:{y_m_d}'])
+    if mf is None:
+        # 更新工作承接既有前端暖快取來源，不依賴瀏覽器先讀其他端點。
+        mf = _build_marketflow_payload()
+    sec = _cache_first([
+        f'sectors:{ymd}',
+        f'sectors:TW:yahoo:{ymd}',
+        f'sectors:TW:{ymd}',
+    ])
+    txf = _cache_first([f'txf:{int(time.time() // 20)}', f'txf:{int(time.time() // 20) - 1}'])
+
+    # 指數可直取 MIS；臺指期可直取既有解析（不經 _handle_txf）。
+    indices = (bd or {}).get('indices') or {}
+    if not (indices.get('t00') or {}).get('price'):
+        try:
+            indices = _twse_mis_index('tse_t00.tw|otc_o00.tw') or {}
+        except Exception as e:
+            print('[pulse] twindex', e)
+            indices = indices or {}
+
+    stocks = (bd or {}).get('stocks') if bd else None
+    inst = (mf or {}).get('inst') if mf else None
+    if inst is None and bd:
+        inst = bd.get('inst')
+
+    # 主報價、快照與趨勢共用 /txf 的同一來源；夜盤保留供夜盤觀察。
+    try:
+        txf = Handler._txf_payload()
+    except Exception as e:
+        print('[pulse] txf', e)
+        txf = None
+    txf_night = (txf or {}).get('night')
+
+    sectors = []
+    if isinstance(sec, dict):
+        sectors = sec.get('sectors') or sec.get('list') or []
+    elif isinstance(sec, list):
+        sectors = sec
+
+    # 延伸因子（類股／OI／借券賣出／250日 NHNL）— 與體質並行，失敗進 pending
+    extras = {'sectors': None, 'txOi': None, 'sbl': None, 'nhnl': None}
+    extras_outcomes = {}
+    if extras_fut is not None:
+        values, parent_outcomes = collect_named(
+            {'extras': extras_fut}, timeout=8.0, executor=_pulse_extras_pool)
+        candidate = values.get('extras')
+        if isinstance(candidate, dict):
+            extras.update(candidate)
+            extras_outcomes = candidate.get('_outcomes') or {}
+        if parent_outcomes.get('extras') != 'ok':
+            extras_outcomes['aggregate'] = parent_outcomes.get('extras')
+    else:
+        extras_outcomes['aggregate'] = 'saturated'
+
+    if not sectors:
+        ex_sec = extras.get('sectors') if isinstance(extras, dict) else None
+        if isinstance(ex_sec, dict) and ex_sec.get('sectors'):
+            sectors = ex_sec.get('sectors') or []
+            try:
+                from 類股成員 import sector_cache_payload
+                _cache.set(
+                    f'sectors:{ymd}',
+                    json.dumps(sector_cache_payload(ex_sec),
+                               ensure_ascii=False).encode(),
+                    ttl=300,
+                )
+            except Exception:
+                pass
+
+    tx_oi = extras.get('txOi') if isinstance(extras, dict) else None
+    sbl = extras.get('sbl') if isinstance(extras, dict) else None
+    nhnl = extras.get('nhnl') if isinstance(extras, dict) else None
+
+    import pulse_intel as pi
+    # sources.sectors 必須用過濾後類股，與因子帳本／完整度對齊
+    sectors_scored = pi.filter_sectors(sectors)
+    nhnl_ok = bool(
+        isinstance(nhnl, dict)
+        and nhnl.get('newHighs') is not None
+        and nhnl.get('newLows') is not None
+        and (nhnl.get('sampleN') or 0) >= pi.NHNL_MIN_SAMPLE
+    )
+    sources = {
+        'twindex': bool((indices.get('t00') or {}).get('price') is not None),
+        'breadth': bool(stocks and stocks.get('advRatio') is not None),
+        'marketflow': bool(mf and (mf.get('turnover') or mf.get('inst'))),
+        'health': fund.get('score') is not None,
+        'margin': (fund.get('pillars') or {}).get('marginRatio') is not None,
+        'valuation': (fund.get('pillars') or {}).get('medianPE') is not None,
+        'txf': bool(txf_night and txf_night.get('price') is not None),
+        'sectors': bool(sectors_scored),
+        'txOi': bool(isinstance(tx_oi, dict) and tx_oi.get('oi') is not None
+                     and tx_oi.get('oiChgPct') is not None),
+        'sbl': bool(isinstance(sbl, dict) and sbl.get('sblSellYi') is not None),
+        'nhnl': nhnl_ok,
+    }
+
+    try:
+        out = pi.build_pulse_intel(
+            health_score=fund.get('score'),
+            pillars=fund.get('pillars'),
+            market_rows=fund.get('marketRows'),
+            summary=fund.get('summary'),
+            stocks=stocks,
+            indices=indices,
+            inst=inst or {},
+            txf_night=txf_night,
+            sectors=sectors,
+            sources_present=sources,
+            tx_oi=tx_oi if isinstance(tx_oi, dict) else None,
+            sbl=sbl if isinstance(sbl, dict) else None,
+            nhnl=nhnl if isinstance(nhnl, dict) else None,
+        )
+    except Exception as e:
+        print('[pulse] build', e)
+        raise RuntimeError('Pulse 建置失敗') from e
+
+    # 附帶列表資料供前端一次渲染（減少 round-trip）
+    out['date'] = (bd or {}).get('date')
+    out['breadthOk'] = bool(bd and bd.get('ok'))
+    out['breadthSource'] = (bd or {}).get('source') or 'TWSE MI_INDEX MS'
+    out['breadthScope'] = 'TWSE_STOCKS'
+    out['indices'] = indices
+    out['stocks'] = stocks
+    out['inst'] = inst
+    out['txf'] = txf
+    out['txfNight'] = txf_night
+    # Canonical snapshot: headline renderers must not recompute a live
+    # change from a daily-series close.
+    out['marketSnapshot'] = market_snapshot(indices, txf)
+    out['marketflow'] = {
+        'turnover': (mf or {}).get('turnover'),
+        'inst': inst,
+    } if mf else None
+    out['sectors'] = sectors
+    out['extras'] = {
+        'txOi': tx_oi if isinstance(tx_oi, dict) else None,
+        'sbl': sbl if isinstance(sbl, dict) else None,
+        'nhnl': nhnl if isinstance(nhnl, dict) else None,
+        'sectorsSource': (extras.get('sectors') or {}).get('source')
+        if isinstance(extras.get('sectors'), dict) else None,
+    }
+    out['updatedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+    out['updateStartedAt'] = update_started_at
+    out['updateJobId'] = job_id
+
+    # ── Overview 市場面板擴充（對齊 tw-pulse 參考圖）──────────────
+    # movers / global / macro / flash 並行；總預算 ~8s（FRED 在此環境常逾時，必須 fail-fast）
+    PULSE_SIDE_BUDGET = 8.0
+
+    def _job_movers():
+        _sector_day = ((sec or {}).get('date') if isinstance(sec, dict) else None) or out.get('date')
+        m = _cache_first([f'movers:v5:{_sector_day or ymd}'])
+        if m is not None:
+            return m
+        try:
+            m = _fetch_day_movers(8, target_date=_sector_day)
+            if m and m.get('ok'):
+                _cache.set(f'movers:v5:{_sector_day or ymd}', json.dumps(m, ensure_ascii=False).encode(), ttl=300)
+            return m
+        except Exception as e:
+            print('[pulse] movers', e)
+            return {'ok': False, 'gainers': [], 'losers': []}
+
+    def _job_flash():
+        try:
+            import market_flash as _mf
+            return _mf.build_flash(n=20, force=False)
+        except Exception as e:
+            print('[pulse] flash', e)
+            return {'ok': False, 'items': []}
+
+    def _job_global():
+        # v8：同批補 2330／0050 作去重錨點；前端全球面板仍只收到國際列。
+        gkey = f'pulse-global:v8:{int(time.time() // 120)}'
+        g = _cache_first([gkey])
+        if g is not None:
+            return g
+        try:
+            # 指數列優先使用市場 tab 同源標的（SOX/美股/日韓）；
+            # 另補 VIX／匯率／美元／黃金／銅／原油；AI 鏈代理個股
+            g = _yf_batch_quotes([
+                '^DJI', '^GSPC', '^IXIC', '^SOX', '^N225', '^KS11',
+                '^VIX', 'TWD=X', 'DX-Y.NYB', 'GC=F', 'HG=F', 'CL=F',
+                'NVDA', 'AVGO', 'TSM', '2330.TW', '0050.TW',
+            ])
+            if not any(x.get('symbol') == 'DX-Y.NYB' for x in (g or [])):
+                # 僅在缺美元指數時補一槍，不重抓整批
+                extra = _yf_batch_quotes(['DX=F'])
+                if extra:
+                    g = list(g or []) + list(extra)
+            _cache.set(gkey, json.dumps(g, ensure_ascii=False).encode(), ttl=120)
+            return g
+        except Exception as e:
+            print('[pulse] global', e)
+            return []
+
+    def _job_macro():
+        """快取優先；未命中才短逾時抓 FRED（timeout=3, retries=1）。"""
+        u10 = None
+        eco_rows = []
+        try:
+            u10 = _macro_latest('us10y', years=5, timeout=3, retries=1)
+        except Exception as e:
+            print('[pulse] us10y', e)
+        for mk in ('unrate', 'us_cpi_yoy', 'tw_cpi'):
+            try:
+                # 先只讀快取；沒有再短抓（tw_cpi 走政府源，允許稍長）
+                row = _macro_latest(mk, years=10, timeout=3, retries=1,
+                                    allow_fetch=(mk == 'tw_cpi'))
+                if row is None and mk != 'tw_cpi':
+                    row = _macro_latest(mk, years=10, timeout=3, retries=1, allow_fetch=True)
+                if row:
+                    eco_rows.append(row)
+            except Exception as e:
+                print('[pulse] macro', mk, e)
+        return u10, eco_rows
+
+    movers = {'ok': False, 'gainers': [], 'losers': []}
+    global_q = []
+    us10y = None
+    eco = []
+    flash_pack = {'ok': False, 'items': []}
+    side_jobs = {
+        'movers': _pulse_side_pool.submit(_job_movers),
+        'global': _pulse_side_pool.submit(_job_global),
+        'macro': _pulse_side_pool.submit(_job_macro),
+        'flash': _pulse_side_pool.submit(_job_flash),
+    }
+    side_values, side_outcomes = collect_named(
+        side_jobs, timeout=PULSE_SIDE_BUDGET, executor=_pulse_side_pool)
+    if isinstance(side_values.get('movers'), dict):
+        movers = side_values['movers'] or movers
+    if isinstance(side_values.get('global'), list):
+        global_q = side_values['global'] or []
+    if side_outcomes.get('macro') == 'ok':
+        try:
+            us10y, eco = side_values['macro']
+            eco = eco or []
+        except Exception as exc:
+            side_outcomes['macro'] = f'error:{type(exc).__name__}'
+    else:
+        # Timeout/saturation: cache-only fallback, never another network call.
+        try:
+            us10y = _macro_latest('us10y', years=5, allow_fetch=False)
+            for mk in ('unrate', 'us_cpi_yoy', 'tw_cpi'):
+                row = _macro_latest(mk, years=10, allow_fetch=False)
+                if row:
+                    eco.append(row)
+        except Exception:
+            pass
+    if isinstance(side_values.get('flash'), dict):
+        flash_pack = side_values['flash'] or flash_pack
+    out['sourceOutcomes'] = {
+        'extras': extras_outcomes,
+        'overview': side_outcomes,
+    }
+
+    # 市場快訊：臺／美公司重大訊息（market_flash）；行事曆事件僅作少量補充
+    flash = list((flash_pack or {}).get('items') or [])
+    try:
+        ev = _cache_first([f'events:{ymd}:', f'events:{ymd}'])
+        if isinstance(ev, dict):
+            rev = ev.get('revenue') or {}
+            if rev.get('nextPublishBy') and len(flash) < 18:
+                flash.append({
+                    'time': str(rev.get('nextPublishBy')),
+                    'title': f"月營收時程 {rev.get('forMonth') or ''}（尚餘 {rev.get('daysAway')} 天）"
+                             if rev.get('daysAway') is not None
+                             else f"月營收時程 {rev.get('nextPublishBy')}",
+                    'cat': '總經',
+                    'mkt': 'TW',
+                    'source': 'events',
+                })
+    except Exception:
+        pass
+    if not flash:
+        flash.append({
+            'time': out.get('updatedAt') or '',
+            'title': '重大訊息載入中（上市／櫃買重訊＋美股）— 可稍後重試',
+            'cat': '系統',
+        })
+
+    # 全日量能沿用 FMTQIK；金額與日期一起取，不能以廣度日期重貼舊數值。
+    turns = (mf or {}).get('turnover') or []
+    if len(turns) < 20:
+        try:
+            turns = _fmtqik_turnover() or turns
+        except Exception as e:
+            print('[pulse] fmtqik', e)
+    turnover_source = 'TWSE FMTQIK'
+    if not turns:
+        amount = ((bd or {}).get('turnover') or {}).get('stockAmt')
+        if amount is not None and (bd or {}).get('date'):
+            turns = [{'date': bd['date'], 'amount': amount}]
+            turnover_source = (bd or {}).get('source') or 'TWSE MI_INDEX'
+    tq = _turnover_quant(turns)
+    turnover_yi = tq.get('yi')
+    turnover_chg = tq.get('chgPct')
+
+    t00 = indices.get('t00') or {}
+    o00 = indices.get('o00') or {}
+    # 加權／櫃買／臺指期：與成交金額同構的趨勢量化（vs5／Z／連漲跌／動能分）
+    session_fallback = (bd or {}).get('date') or out.get('date')
+    try:
+        t00_bars = _fmtqik_index_bars(turns)
+        t00_trend = _price_series_quant(
+            t00_bars, latest=t00.get('price'), quote_change_pct=t00.get('changePct'),
+            latest_date=_quote_session_date(t00) or session_fallback)
+    except Exception as e:
+        print('[pulse] t00 trend', e)
+        t00_trend = _price_series_quant(
+            [], latest=t00.get('price'), quote_change_pct=t00.get('changePct'),
+            latest_date=_quote_session_date(t00) or session_fallback)
+    try:
+        o00_bars = _tw_index_bars('^TWOII', n=30)
+        o00_trend = _price_series_quant(
+            o00_bars, latest=o00.get('price'), quote_change_pct=o00.get('changePct'),
+            latest_date=_quote_session_date(o00) or session_fallback)
+    except Exception as e:
+        print('[pulse] o00 trend', e)
+        o00_trend = _price_series_quant(
+            [], latest=o00.get('price'), quote_change_pct=o00.get('changePct'),
+            latest_date=_quote_session_date(o00) or session_fallback)
+    txf_live = (txf or {}).get('price')
+    try:
+        txf_bars = _tw_index_bars('__TXF__', n=30)
+        # 這份歷史以日盤為主；夜盤報價獨立顯示，不改寫已完成日 K。
+        day_overlay = ((txf or {}).get('session') == 'day' and not (txf or {}).get('stale'))
+        txf_trend = _price_series_quant(
+            txf_bars, latest=txf_live if day_overlay else None,
+            latest_date=(txf or {}).get('tradeDate') if day_overlay else None,
+            quote_change_pct=(txf or {}).get('changePct'))
+        txf_trend['quoteSession'] = (txf or {}).get('session')
+        txf_trend['historyAsOf'] = (txf_bars[-1] or {}).get('date') if txf_bars else None
+    except Exception as e:
+        print('[pulse] txf trend', e)
+        txf_trend = _price_series_quant([])
+    # 異時段或時間不明時不發布同時點期現價差。
+    basis_pts, basis_pct = synchronous_basis(t00, txf)
+    st = stocks or {}
+    up, dn, flat = st.get('up'), st.get('down'), st.get('unchanged')
+    ls_ratio = None
+    if up is not None and dn not in (None, 0):
+        try:
+            ls_ratio = round(float(up) / float(dn), 2)
+        except Exception:
+            ls_ratio = None
+
+    try:
+        import pulse_intel as _pi_ov
+        sec_ranked = list(_pi_ov.filter_sectors(sectors))
+    except Exception:
+        sec_ranked = list(sectors_scored) if sectors_scored else []
+    sec_ranked.sort(key=lambda x: x['changePct'], reverse=True)
+
+    foreign = (inst or {}).get('foreign')
+    trust = (inst or {}).get('trust')
+    dealer = (inst or {}).get('dealer')
+    total_yi = None
+    if any(v is not None for v in (foreign, trust, dealer)):
+        total_yi = ((foreign or 0) + (trust or 0) + (dealer or 0)) / 1e8
+
+    out['movers'] = movers
+    _signal_symbols = {'2330.TW', '0050.TW'}
+    out['signalQuotes'] = [row for row in global_q if row.get('symbol') in _signal_symbols]
+    global_q = [row for row in global_q if row.get('symbol') not in _signal_symbols]
+    out['global'] = global_q
+    # AI／科技外溢：只使用已抓到的 global（費半／那指／VIX／NVDA…），無資料不改分、不畫空殼
+    try:
+        import pulse_intel as _pi_spill
+        out = _pi_spill.apply_ai_tech_spillover(out, global_q, sectors)
+    except Exception as e:
+        print('[pulse] ai spillover', e)
+        try:
+            out['aiSpill'] = {'ok': False, 'reason': 'apply_failed'}
+        except Exception:
+            pass
+    out['us10y'] = us10y
+    out['economy'] = eco
+    out['flash'] = flash
+    out['overview'] = {
+        'strip': {
+            't00': t00,
+            'o00': o00,
+            't00Trend': t00_trend,
+            'o00Trend': o00_trend,
+            'txfTrend': txf_trend,
+            'basisPts': basis_pts,
+            'basisPct': basis_pct,
+            'turnoverYi': round(turnover_yi, 1) if turnover_yi is not None else None,
+            'turnoverChgPct': round(turnover_chg, 2) if turnover_chg is not None else None,
+            'turnoverMa5Yi': tq.get('ma5Yi'),
+            'turnoverVsMa5Pct': tq.get('vsMa5Pct'),
+            'turnoverZ20': tq.get('z20'),
+            'volumeScore': tq.get('volumeScore'),
+            'turnoverRelative': tq.get('volumeRelative'),
+            'turnoverRelativeScore': tq.get('volumeRelativeScore'),
+            'turnoverStreak': tq.get('streak'),
+            'turnoverTrend': tq.get('trend'),
+            'turnoverLevel': tq.get('level'),
+            'turnoverN': tq.get('n'),
+            'turnoverDate': tq.get('date'),
+            'turnoverSource': turnover_source,
+            'turnoverSession': 'day_eod',
+            'turnoverZ20N': tq.get('z20N'),
+            'up': up, 'down': dn, 'flat': flat,
+            'limitUp': st.get('limitUp'),
+            'limitDown': st.get('limitDown'),
+            'advRatio': st.get('advRatio'),
+            'lsRatio': ls_ratio,
+            'dataLabel': '官方盤後／即時混成' if out.get('breadthOk') else '部分資料可用',
+        },
+        'ohlc': {
+            'open': t00.get('open'), 'high': t00.get('high'), 'low': t00.get('low'),
+            'prevClose': t00.get('prevClose'), 'price': t00.get('price'),
+            'changePct': t00.get('changePct'), 'name': t00.get('name') or '加權指數',
+            'otcChangePct': o00.get('changePct'),
+            'otcPrice': o00.get('price'),
+        },
+        'institutional': {
+            'foreign': foreign, 'trust': trust, 'dealer': dealer,
+            'totalYi': round(total_yi, 1) if total_yi is not None else None,
+            'date': (inst or {}).get('date'),
+        },
+        'sectorsRanked': sec_ranked[:12],
+        'lsRatio': ls_ratio,
+    }
+
+    # Yahoo 補齊加權 OHLC（MIS 若缺 h/l）— 最多等 3s，不拖垮整包
+    ohlc = out['overview']['ohlc']
+    if ohlc.get('high') is None or ohlc.get('low') is None or ohlc.get('open') is None:
+        _ohlc_box = {'data': None, 'err': None}
+
+        def _ohlc_job():
+            try:
+                _, data, _ = fetch_one('^TWII', '5d', '1d', False)
+                _ohlc_box['data'] = data
+            except Exception as e:
+                _ohlc_box['err'] = e
+
+        th = threading.Thread(target=_ohlc_job, daemon=True)
+        th.start()
+        th.join(3.0)
+        if _ohlc_box['data']:
+            try:
+                res = (json.loads(_ohlc_box['data']).get('chart') or {}).get('result') or []
+                if res:
+                    q = ((res[0].get('indicators') or {}).get('quote') or [{}])[0]
+
+                    def _last(arr):
+                        for x in reversed(arr or []):
+                            if x is not None:
+                                return x
+                        return None
+
+                    if ohlc.get('open') is None:
+                        ohlc['open'] = _last(q.get('open'))
+                    if ohlc.get('high') is None:
+                        ohlc['high'] = _last(q.get('high'))
+                    if ohlc.get('low') is None:
+                        ohlc['low'] = _last(q.get('low'))
+                    ohlc['source'] = (ohlc.get('source') or '') + '+yahoo'
+            except Exception as e:
+                print('[pulse] twii ohlc', e)
+        elif _ohlc_box['err']:
+            print('[pulse] twii ohlc', _ohlc_box['err'])
+
+    # Deterministic DecisionContext：重用本包 canonical quote／廣度／因子；
+    # AI 不參與 regime、confidence、levels 或 position range。
+    try:
+        import datastore as _decision_store
+        import benchmark_research as _benchmark_research
+        import decision_context as _decision
+        import key_levels as _key_levels
+        import margin_cycle as _margin_cycle
+        import sector_flow as _sector_flow
+        import sector_history as _sector_history
+
+        _bars = _decision_store.get_bars('^TWII', limit=80)
+        if not _bars:
+            try:
+                import pulse_history as _ph_levels
+                _bars = ((_ph_levels.history(kind='index', n=80) or {}).get('rows') or [])
+            except Exception:
+                _bars = []
+        _levels = _key_levels.calculate_key_levels(
+            _bars, symbol='^TWII', session='regular', source='market.db/pulse-history',
+            as_of=out.get('updatedAt'))
+        try:
+            import pulse_history as _ph_decision
+            _breadth_hist = ((_ph_decision.history(kind='breadth', n=20) or {}).get('rows') or [])
+            _index_hist = ((_ph_decision.history(kind='index', n=80) or {}).get('rows') or [])
+        except Exception:
+            _breadth_hist = []
+            _index_hist = []
+        try:
+            import tw_index_charts as _tw_charts_decision
+            _futures_hist = _tw_charts_decision.recent_rows('__TXF__', n=80, allow_network=False)
+        except Exception:
+            _futures_hist = []
+        try:
+            _margin_state = _margin_cycle.margin_balance_state()
+        except Exception as _margin_exc:
+            _margin_state = {
+                'available': False, 'reason': str(_margin_exc)[:120],
+                'source': 'TWSE MI_MARGN MS', 'role': 'risk_brake_only',
+            }
+        # Official Taiwan 50 history is owned by one canonical research
+        # provider.  The request reads cache only; a missing/stale cache is
+        # refreshed in a bounded daemon and remains fail-closed meanwhile.
+        _benchmark_data = _benchmark_research.snapshot(allow_network=True)
+        _sec_source = None
+        if isinstance(extras.get('sectors'), dict):
+            _sec_source = extras.get('sectors', {}).get('source')
+        if not _sec_source and isinstance(sec, dict):
+            _sec_source = sec.get('source') or sec.get('_source')
+        _sec_source = _sec_source or 'TWSE MI_INDEX IND'
+        _sector_session = _sector_flow.normalize_session_date(
+            (sec or {}).get('date') if isinstance(sec, dict) else out.get('date'))
+        _turnover_session = _sector_flow.normalize_session_date(
+            movers.get('industryTurnoverDate') if isinstance(movers, dict) else None)
+        _same_turnover_session = bool(_sector_session and _turnover_session == _sector_session)
+        _industry_turnover = (movers.get('industryTurnoverYi') if
+                              isinstance(movers, dict) and _same_turnover_session else None)
+        _industry_turnover_total = (movers.get('industryTurnoverTotalYi') if
+                                    isinstance(movers, dict) and _same_turnover_session else None)
+        _sector_rows, _sec_hist_status = _sector_history.enrich_sector_rows(
+            sectors,
+            as_of=(sec or {}).get('date') if isinstance(sec, dict) else out.get('date'),
+            benchmark_bars=_bars,
+            industry_turnover_yi=_industry_turnover,
+            bootstrap=('proxy' not in str(_sec_source).lower()),
+            budget_seconds=4.0,
+        )
+        _turnover_source = (movers.get('industryTurnoverSource') if
+                            isinstance(movers, dict) and _same_turnover_session else None)
+        _sec_flow = _sector_flow.build_sector_flow(
+            _sector_rows, market_scope='TWSE',
+            source=_sec_source + ((' + ' + _turnover_source) if _turnover_source else ''),
+            as_of=(sec or {}).get('date') if isinstance(sec, dict) else out.get('date'),
+            total_turnover_yi=_industry_turnover_total,
+            benchmark_return20_pct=_sec_hist_status.get('benchmarkReturn20Pct'),
+            proxy_basket=('proxy' in str(_sec_source).lower()),
+        )
+        _sec_flow['historyStatus'] = _sec_hist_status
+        _sec_flow['turnoverSource'] = _turnover_source
+        _sec_flow['turnoverDate'] = _turnover_session
+        _sec_flow['turnoverSessionMatched'] = _same_turnover_session
+        try:
+            import options_exposure as _options_exposure
+            _options_structure = _options_exposure.latest_cached()
+        except Exception:
+            _options_structure = None
+        try:
+            _ctx = _decision.build_and_publish(
+                out, publication_guard=guard, key_levels=_levels, breadth_history=_breadth_hist,
+                index_history=_index_hist, futures_history=_futures_hist,
+                sector_flow=_sec_flow, margin_state=_margin_state,
+                benchmark_data=_benchmark_data,
+                options_structure=_options_structure,
+                session_calendar=_decision_session_calendar())
+        except _decision.SnapshotPublicationError:
+            raise
+        if _ctx.get('publicationStatus') == 'superseded':
+            raise RuntimeError('更新已被較新的決策取代，保留目前快照')
+        out['decisionSummary'] = _decision.compact_context(_ctx)
+    except Exception:
+        # 未提交的候選不可成為成功結果，交由工作紀錄保存錯誤。
+        raise
+
+    if out.get('ok'):
+        # 寫入脈動歷史庫（增量 merge；失敗不擋回應）
+        try:
+            import pulse_history as ph
+            ph.save_pulse_score(out)
+        except Exception as e:
+            print('[pulse] history save', e)
+    return out
+
+from pulse_updates import PulseUpdates
+
+_pulse_updates = PulseUpdates(
+    db_path=os.environ.get('ST_UPDATE_JOBS_DB') or os.path.join(_BASE, 'data', 'update_jobs.sqlite3'),
+    trace_path=os.path.join(_BASE, 'logs', 'pulse_updates.jsonl'),
+)
+
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -2846,6 +3586,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_breadth()
         elif p == '/pulse' or p.startswith('/pulse?'):
             self._handle_pulse()
+        elif p == '/pulse/update-status' or p.startswith('/pulse/update-status?'):
+            self._handle_pulse_update_status()
         elif p == '/pulse/history' or p.startswith('/pulse/history?'):
             self._handle_pulse_history()
         elif p == '/decision/context' or p.startswith('/decision/context?'):
@@ -3130,6 +3872,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_screen3()
         elif p == '/portfolio':
             self._handle_portfolio()
+        elif p == '/pulse/refresh':
+            self._handle_pulse_refresh()
         elif p == '/decision/context':
             self._handle_decision_context_post()
         elif p == '/research/overnight-intraday/refresh':
@@ -3248,7 +3992,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         # HTML／JS 開發期禁止快取，避免 shell/pulse 修好後仍載到舊殼層
         p = getattr(self, 'path', '') or ''
         path_only = p.split('?', 1)[0]
-        if path_only.endswith(('.html', '.js', '.mjs', '.css')):
+        if (path_only.endswith(('.html', '.js', '.mjs', '.css')) or
+                path_only in ('/pulse', '/pulse/update-status', '/pulse/refresh', '/decision/context')):
             self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
             self.send_header('Pragma', 'no-cache')
             self.send_header('Expires', '0')
@@ -3268,10 +4013,10 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         self.send_header('X-ST-Trace-ID', self._ensure_trace_id())
         super().end_headers()
 
-    def _ok(self, body, ct='application/json'):
+    def _ok(self, body, ct='application/json', *, status=200):
         if isinstance(body, str):
             body = body.encode('utf-8')
-        self.send_response(200)
+        self.send_response(status)
         if ct.startswith('application/json'):
             ct = ct + '; charset=utf-8'
         self.send_header('Content-Type', ct)
@@ -4785,750 +5530,48 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         self._ok(body)
 
     def _handle_marketflow(self):
-        """大盤資金流儀表板 (v3.8 #3)：
-           • 量能趨勢 FMTQIK（近月每日成交金額，呼應 8000億→1.2兆）
-           • 三大法人買賣金額 BFI82U（外資/投信/自營 買賣差）
-           • 融資融券大盤 MI_MARGN tables[0] 摘要
-           僅 TW。整批快取 30 分。"""
-        from datetime import date as _date
-        today = _date.today()
-        key = f'marketflow:{today.strftime("%Y%m%d")}'
-        c = _cache.get(key)
-        if c is not None:
-            self._ok(c); return
-        out = {'date': today.strftime('%Y-%m-%d'), 'turnover': [], 'inst': None, 'margin': None}
-        ym1 = today.strftime('%Y%m01')
-        # 量能趨勢 FMTQIK（當月每日；金額單位元）
-        try:
-            url = f'https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date={ym1}&response=json'
-            req = urllib.request.Request(url, headers=YF_HEADERS)
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                d = json.loads(resp.read())
-            if d.get('stat') in ('OK', 'ok'):
-                fields = d.get('fields') or []
-                rows = d.get('data') or []
-                i_date = next((i for i, f in enumerate(fields) if '日期' in f), 0)
-                i_amt  = next((i for i, f in enumerate(fields) if '成交金額' in f), 1)
-                i_idx  = next((i for i, f in enumerate(fields) if '指數' in f), None)
-                i_chg  = next((i for i, f in enumerate(fields) if '漲跌點數' in f), None)
-                for row in rows:
-                    try:
-                        amt = float(str(row[i_amt]).replace(',', ''))
-                    except Exception:
-                        continue
-                    rec = {'date': str(row[i_date]).strip(), 'amount': amt}
-                    if i_idx is not None:
-                        try: rec['index'] = float(str(row[i_idx]).replace(',', ''))
-                        except Exception: pass
-                    if i_chg is not None:
-                        try: rec['chg'] = float(str(row[i_chg]).replace(',', ''))
-                        except Exception: pass
-                    out['turnover'].append(rec)
-        except Exception as e:
-            print(f'[marketflow] FMTQIK failed: {e}')
-        # 三大法人買賣金額 BFI82U（往前找最近一個有資料的交易日）
-        try:
-            from datetime import timedelta
-            for back in range(0, 7):
-                dd = (today - timedelta(days=back)).strftime('%Y%m%d')
-                url = f'https://www.twse.com.tw/rwd/zh/fund/BFI82U?dayDate={dd}&type=day&response=json'
-                req = urllib.request.Request(url, headers=YF_HEADERS)
-                with urllib.request.urlopen(req, timeout=12) as resp:
-                    d = json.loads(resp.read())
-                if d.get('stat') not in ('OK', 'ok'):
-                    continue
-                fields = d.get('fields') or []
-                rows = d.get('data') or []
-                i_name = next((i for i, f in enumerate(fields) if '單位名稱' in f or '買賣別' in f), 0)
-                i_net  = next((i for i, f in enumerate(fields) if '買賣差' in f or '買賣超' in f), len(fields) - 1)
-                inst = {'foreign': None, 'trust': None, 'dealer': None, 'date': dd}
-                for row in rows:
-                    nm = str(row[i_name])
-                    try: net = float(str(row[i_net]).replace(',', ''))
-                    except Exception: continue
-                    if '外' in nm: inst['foreign'] = (inst['foreign'] or 0) + net
-                    elif '投信' in nm: inst['trust'] = net
-                    elif '自營' in nm: inst['dealer'] = (inst['dealer'] or 0) + net
-                if any(v is not None for k, v in inst.items() if k != 'date'):
-                    out['inst'] = inst
-                    break
-        except Exception as e:
-            print(f'[marketflow] BFI82U failed: {e}')
-        # 融資融券大盤摘要 MI_MARGN tables[0]
-        try:
-            url = f'https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={today.strftime("%Y%m%d")}&selectType=ALL&response=json'
-            req = urllib.request.Request(url, headers=YF_HEADERS)
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                d = json.loads(resp.read())
-            if d.get('stat') in ('OK', 'ok'):
-                tables = d.get('tables') or []
-                if tables:
-                    t0 = tables[0]
-                    fields = t0.get('fields') or []
-                    rows = t0.get('data') or []
-                    summ = {}
-                    for row in rows:
-                        label = str(row[0]) if row else ''
-                        if '融資' in label and '金額' in label:
-                            try: summ['marginAmt'] = float(str(row[-1]).replace(',', ''))
-                            except Exception: pass
-                    out['margin'] = {'raw': rows[:6]} if rows else None
-        except Exception as e:
-            print(f'[marketflow] MI_MARGN failed: {e}')
-        try:
-            out['turnoverQuant'] = _turnover_quant(out.get('turnover') or [])
-        except Exception:
-            out['turnoverQuant'] = None
-        body = json.dumps(out, ensure_ascii=False).encode()
-        _cache.set(key, body, ttl=1800)
-        self._ok(body)
+        self._ok(json.dumps(_build_marketflow_payload(), ensure_ascii=False).encode())
 
     def _handle_pulse(self):
-        """市場脈動情報 (merge tw-pulse-terminal UX)：因子帳本 + 雙軌健康／風險。
-           GET /pulse → pulse_intel.build_pulse_intel(...) + 即時快照欄位。
-           重用 breadth / marketflow / txf / sectors 快取與 _build_tw_market_fundamental；
-           缺資料進 pendingFactors，不捏造分數。快取 45s。"""
-        from datetime import date as _date
-        from datetime import datetime as _datetime, timezone as _timezone
-        update_started_at = _datetime.now(_timezone.utc).isoformat()
-        qs = parse_qs(urlparse(self.path).query)
-        force = (qs.get('refresh', ['0'])[0] or '0') in ('1', 'true', 'yes')
-        key = f'pulse:v2:{_date.today().strftime("%Y%m%d")}:{int(time.time() // 45)}'
-        if not force:
-            c = _cache.get(key)
-            if c is not None:
-                self._ok(c); return
-
-        def _loads(raw):
-            if raw is None:
-                return None
-            try:
-                return json.loads(raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw)
-            except Exception:
-                return None
-
-        def _cache_first(keys):
-            for k in keys:
-                d = _loads(_cache.get(k))
-                if d is not None:
-                    return d
-            return None
-
-        today = _date.today()
-        ymd = today.strftime('%Y%m%d')
-        y_m_d = today.strftime('%Y-%m-%d')
-
-        # 延伸因子與體質並行：OI／借券／NHNL／類股（專用 pool，不佔用全域 _pool）
-        extras_fut = None
+        """所有 GET（含舊 refresh 參數）只讀取已提交快照。"""
+        import decision_context as dc
         try:
-            import pulse_extras as _pulse_extras
-            extras_budget = 7.5 if force else 5.5
-            extras_fut = _pulse_extras_pool.submit(
-                lambda b=extras_budget: _pulse_extras.fetch_all(budget=b)
-            )
-        except Exception as e:
-            print('[pulse] extras submit', e)
-
-        # 1) 體質（權威來源）
-        fund = {}
-        try:
-            fund = _build_tw_market_fundamental('^TWII') or {}
-        except Exception as e:
-            print('[pulse] fundamental', e)
-            fund = {}
-
-        # 2) 廣度／指數／法人 — 優先快取；miss 時內聯建置（不經 _handle_*，避免弄亂 HTTP）
-        bd = _cache_first([f'breadth:v1:{ymd}'])
-        if not (isinstance(bd, dict) and bd.get('ok')):
-            try:
-                bd = _build_breadth_payload(force=False)
-            except Exception as e:
-                print('[pulse] breadth hydrate', e)
-                bd = bd if isinstance(bd, dict) else None
-        mf = _cache_first([f'marketflow:{ymd}', f'marketflow:{y_m_d}'])
-        sec = _cache_first([
-            f'sectors:{ymd}',
-            f'sectors:TW:yahoo:{ymd}',
-            f'sectors:TW:{ymd}',
-        ])
-        txf = _cache_first([f'txf:{int(time.time() // 20)}', f'txf:{int(time.time() // 20) - 1}'])
-
-        # 指數可直取 MIS；台指期可直取既有解析（不經 _handle_txf）。
-        indices = (bd or {}).get('indices') or {}
-        if not (indices.get('t00') or {}).get('price'):
-            try:
-                indices = _twse_mis_index('tse_t00.tw|otc_o00.tw') or {}
-            except Exception as e:
-                print('[pulse] twindex', e)
-                indices = indices or {}
-
-        stocks = (bd or {}).get('stocks') if bd else None
-        inst = (mf or {}).get('inst') if mf else None
-        if inst is None and bd:
-            inst = bd.get('inst')
-
-        # 主報價、快照與趨勢共用 /txf 的同一來源；夜盤保留供夜盤觀察。
-        try:
-            txf = self._txf_payload()
-        except Exception as e:
-            print('[pulse] txf', e)
-            txf = None
-        txf_night = (txf or {}).get('night')
-
-        sectors = []
-        if isinstance(sec, dict):
-            sectors = sec.get('sectors') or sec.get('list') or []
-        elif isinstance(sec, list):
-            sectors = sec
-
-        # 延伸因子（類股／OI／借券賣出／250日 NHNL）— 與體質並行，失敗進 pending
-        extras = {'sectors': None, 'txOi': None, 'sbl': None, 'nhnl': None}
-        extras_outcomes = {}
-        if extras_fut is not None:
-            values, parent_outcomes = collect_named(
-                {'extras': extras_fut}, timeout=8.0, executor=_pulse_extras_pool)
-            candidate = values.get('extras')
-            if isinstance(candidate, dict):
-                extras.update(candidate)
-                extras_outcomes = candidate.get('_outcomes') or {}
-            if parent_outcomes.get('extras') != 'ok':
-                extras_outcomes['aggregate'] = parent_outcomes.get('extras')
-        else:
-            extras_outcomes['aggregate'] = 'saturated'
-
-        if not sectors:
-            ex_sec = extras.get('sectors') if isinstance(extras, dict) else None
-            if isinstance(ex_sec, dict) and ex_sec.get('sectors'):
-                sectors = ex_sec.get('sectors') or []
-                try:
-                    from 類股成員 import sector_cache_payload
-                    _cache.set(
-                        f'sectors:{ymd}',
-                        json.dumps(sector_cache_payload(ex_sec),
-                                   ensure_ascii=False).encode(),
-                        ttl=300,
-                    )
-                except Exception:
-                    pass
-
-        tx_oi = extras.get('txOi') if isinstance(extras, dict) else None
-        sbl = extras.get('sbl') if isinstance(extras, dict) else None
-        nhnl = extras.get('nhnl') if isinstance(extras, dict) else None
-
-        import pulse_intel as pi
-        # sources.sectors 必須用過濾後類股，與因子帳本／完整度對齊
-        sectors_scored = pi.filter_sectors(sectors)
-        nhnl_ok = bool(
-            isinstance(nhnl, dict)
-            and nhnl.get('newHighs') is not None
-            and nhnl.get('newLows') is not None
-            and (nhnl.get('sampleN') or 0) >= pi.NHNL_MIN_SAMPLE
-        )
-        sources = {
-            'twindex': bool((indices.get('t00') or {}).get('price') is not None),
-            'breadth': bool(stocks and stocks.get('advRatio') is not None),
-            'marketflow': bool(mf and (mf.get('turnover') or mf.get('inst'))),
-            'health': fund.get('score') is not None,
-            'margin': (fund.get('pillars') or {}).get('marginRatio') is not None,
-            'valuation': (fund.get('pillars') or {}).get('medianPE') is not None,
-            'txf': bool(txf_night and txf_night.get('price') is not None),
-            'sectors': bool(sectors_scored),
-            'txOi': bool(isinstance(tx_oi, dict) and tx_oi.get('oi') is not None
-                         and tx_oi.get('oiChgPct') is not None),
-            'sbl': bool(isinstance(sbl, dict) and sbl.get('sblSellYi') is not None),
-            'nhnl': nhnl_ok,
-        }
-
-        try:
-            out = pi.build_pulse_intel(
-                health_score=fund.get('score'),
-                pillars=fund.get('pillars'),
-                market_rows=fund.get('marketRows'),
-                summary=fund.get('summary'),
-                stocks=stocks,
-                indices=indices,
-                inst=inst or {},
-                txf_night=txf_night,
-                sectors=sectors,
-                sources_present=sources,
-                tx_oi=tx_oi if isinstance(tx_oi, dict) else None,
-                sbl=sbl if isinstance(sbl, dict) else None,
-                nhnl=nhnl if isinstance(nhnl, dict) else None,
-            )
-        except Exception as e:
-            print('[pulse] build', e)
-            out = {'ok': False, 'error': f'pulse build failed: {e}'}
-
-        # 附帶列表資料供前端一次渲染（減少 round-trip）
-        out['date'] = (bd or {}).get('date')
-        out['breadthOk'] = bool(bd and bd.get('ok'))
-        out['breadthSource'] = (bd or {}).get('source') or 'TWSE MI_INDEX MS'
-        out['breadthScope'] = 'TWSE_STOCKS'
-        out['indices'] = indices
-        out['stocks'] = stocks
-        out['inst'] = inst
-        out['txf'] = txf
-        out['txfNight'] = txf_night
-        # Canonical snapshot: headline renderers must not recompute a live
-        # change from a daily-series close.
-        out['marketSnapshot'] = market_snapshot(indices, txf)
-        out['marketflow'] = {
-            'turnover': (mf or {}).get('turnover'),
-            'inst': inst,
-        } if mf else None
-        out['sectors'] = sectors
-        out['extras'] = {
-            'txOi': tx_oi if isinstance(tx_oi, dict) else None,
-            'sbl': sbl if isinstance(sbl, dict) else None,
-            'nhnl': nhnl if isinstance(nhnl, dict) else None,
-            'sectorsSource': (extras.get('sectors') or {}).get('source')
-            if isinstance(extras.get('sectors'), dict) else None,
-        }
-        out['updatedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
-        out['updateStartedAt'] = update_started_at
-
-        # ── Overview 儀表板擴充（對齊 tw-pulse 參考圖）──────────────
-        # movers / global / macro / flash 並行；總預算 ~8s（FRED 在此環境常逾時，必須 fail-fast）
-        PULSE_SIDE_BUDGET = 8.0
-
-        def _job_movers():
-            _sector_day = ((sec or {}).get('date') if isinstance(sec, dict) else None) or out.get('date')
-            m = _cache_first([f'movers:v5:{_sector_day or ymd}'])
-            if m is not None:
-                return m
-            try:
-                m = _fetch_day_movers(8, target_date=_sector_day)
-                if m and m.get('ok'):
-                    _cache.set(f'movers:v5:{_sector_day or ymd}', json.dumps(m, ensure_ascii=False).encode(), ttl=300)
-                return m
-            except Exception as e:
-                print('[pulse] movers', e)
-                return {'ok': False, 'gainers': [], 'losers': []}
-
-        def _job_flash():
-            try:
-                import market_flash as _mf
-                return _mf.build_flash(n=20, force=False)
-            except Exception as e:
-                print('[pulse] flash', e)
-                return {'ok': False, 'items': []}
-
-        def _job_global():
-            # v8：同批補 2330／0050 作去重錨點；前端全球面板仍只收到國際列。
-            gkey = f'pulse-global:v8:{int(time.time() // 120)}'
-            g = _cache_first([gkey])
-            if g is not None:
-                return g
-            try:
-                # 指數列優先吃市場 tab 同源標的（SOX/美股/日韓）；
-                # 另補 VIX／匯率／美元／黃金／銅／原油；AI 鏈代理個股
-                g = _yf_batch_quotes([
-                    '^DJI', '^GSPC', '^IXIC', '^SOX', '^N225', '^KS11',
-                    '^VIX', 'TWD=X', 'DX-Y.NYB', 'GC=F', 'HG=F', 'CL=F',
-                    'NVDA', 'AVGO', 'TSM', '2330.TW', '0050.TW',
-                ])
-                if not any(x.get('symbol') == 'DX-Y.NYB' for x in (g or [])):
-                    # 僅在缺美元指數時補一槍，不重抓整批
-                    extra = _yf_batch_quotes(['DX=F'])
-                    if extra:
-                        g = list(g or []) + list(extra)
-                _cache.set(gkey, json.dumps(g, ensure_ascii=False).encode(), ttl=120)
-                return g
-            except Exception as e:
-                print('[pulse] global', e)
-                return []
-
-        def _job_macro():
-            """快取優先；未命中才短逾時抓 FRED（timeout=3, retries=1）。"""
-            u10 = None
-            eco_rows = []
-            try:
-                u10 = _macro_latest('us10y', years=5, timeout=3, retries=1)
-            except Exception as e:
-                print('[pulse] us10y', e)
-            for mk in ('unrate', 'us_cpi_yoy', 'tw_cpi'):
-                try:
-                    # 先只讀快取；沒有再短抓（tw_cpi 走政府源，允許稍長）
-                    row = _macro_latest(mk, years=10, timeout=3, retries=1,
-                                        allow_fetch=(mk == 'tw_cpi'))
-                    if row is None and mk != 'tw_cpi':
-                        row = _macro_latest(mk, years=10, timeout=3, retries=1, allow_fetch=True)
-                    if row:
-                        eco_rows.append(row)
-                except Exception as e:
-                    print('[pulse] macro', mk, e)
-            return u10, eco_rows
-
-        movers = {'ok': False, 'gainers': [], 'losers': []}
-        global_q = []
-        us10y = None
-        eco = []
-        flash_pack = {'ok': False, 'items': []}
-        side_jobs = {
-            'movers': _pulse_side_pool.submit(_job_movers),
-            'global': _pulse_side_pool.submit(_job_global),
-            'macro': _pulse_side_pool.submit(_job_macro),
-            'flash': _pulse_side_pool.submit(_job_flash),
-        }
-        side_values, side_outcomes = collect_named(
-            side_jobs, timeout=PULSE_SIDE_BUDGET, executor=_pulse_side_pool)
-        if isinstance(side_values.get('movers'), dict):
-            movers = side_values['movers'] or movers
-        if isinstance(side_values.get('global'), list):
-            global_q = side_values['global'] or []
-        if side_outcomes.get('macro') == 'ok':
-            try:
-                us10y, eco = side_values['macro']
-                eco = eco or []
-            except Exception as exc:
-                side_outcomes['macro'] = f'error:{type(exc).__name__}'
-        else:
-            # Timeout/saturation: cache-only fallback, never another network call.
-            try:
-                us10y = _macro_latest('us10y', years=5, allow_fetch=False)
-                for mk in ('unrate', 'us_cpi_yoy', 'tw_cpi'):
-                    row = _macro_latest(mk, years=10, allow_fetch=False)
-                    if row:
-                        eco.append(row)
-            except Exception:
-                pass
-        if isinstance(side_values.get('flash'), dict):
-            flash_pack = side_values['flash'] or flash_pack
-        out['sourceOutcomes'] = {
-            'extras': extras_outcomes,
-            'overview': side_outcomes,
-        }
-
-        # 市場快訊：台／美公司重大訊息（market_flash）；行事曆事件僅作少量補充
-        flash = list((flash_pack or {}).get('items') or [])
-        try:
-            ev = _cache_first([f'events:{ymd}:', f'events:{ymd}'])
-            if isinstance(ev, dict):
-                rev = ev.get('revenue') or {}
-                if rev.get('nextPublishBy') and len(flash) < 18:
-                    flash.append({
-                        'time': str(rev.get('nextPublishBy')),
-                        'title': f"月營收時程 {rev.get('forMonth') or ''}（尚餘 {rev.get('daysAway')} 天）"
-                                 if rev.get('daysAway') is not None
-                                 else f"月營收時程 {rev.get('nextPublishBy')}",
-                        'cat': '總經',
-                        'mkt': 'TW',
-                        'source': 'events',
-                    })
+            out = dc.latest_pulse() or {
+                'ok': False, 'error': '尚未有已提交快照',
+                'decisionSummary': dc.compact_context(dc.empty_context('pulse_not_ready')),
+            }
+            out['updateState'] = _pulse_updates.status()
+            self._ok(json.dumps(out, ensure_ascii=False).encode())
         except Exception:
-            pass
-        if not flash:
-            flash.append({
-                'time': out.get('updatedAt') or '',
-                'title': '重大訊息載入中（上市／櫃買重訊＋美股）— 可稍後重試',
-                'cat': '系統',
-            })
+            self._err('已提交快照或更新狀態無法讀取，請查看服務紀錄', 503)
 
-        # 全日量能沿用 FMTQIK；金額與日期一起取，不能以廣度日期重貼舊數值。
-        turns = (mf or {}).get('turnover') or []
-        if len(turns) < 20:
-            try:
-                turns = _fmtqik_turnover() or turns
-            except Exception as e:
-                print('[pulse] fmtqik', e)
-        turnover_source = 'TWSE FMTQIK'
-        if not turns:
-            amount = ((bd or {}).get('turnover') or {}).get('stockAmt')
-            if amount is not None and (bd or {}).get('date'):
-                turns = [{'date': bd['date'], 'amount': amount}]
-                turnover_source = (bd or {}).get('source') or 'TWSE MI_INDEX'
-        tq = _turnover_quant(turns)
-        turnover_yi = tq.get('yi')
-        turnover_chg = tq.get('chgPct')
-
-        t00 = indices.get('t00') or {}
-        o00 = indices.get('o00') or {}
-        # 加權／櫃買／台指期：與成交金額同構的趨勢量化（vs5／Z／連漲跌／動能分）
-        session_fallback = (bd or {}).get('date') or out.get('date')
+    def _handle_pulse_update_status(self):
+        query = parse_qs(urlparse(self.path).query)
+        job_id = (query.get('jobId') or [None])[0]
+        if job_id and (len(job_id) > 80 or not all(c.isalnum() or c in '-_' for c in job_id)):
+            self._err('更新工作編號格式不正確', 400)
+            return
         try:
-            t00_bars = _fmtqik_index_bars(turns)
-            t00_trend = _price_series_quant(
-                t00_bars, latest=t00.get('price'), quote_change_pct=t00.get('changePct'),
-                latest_date=_quote_session_date(t00) or session_fallback)
-        except Exception as e:
-            print('[pulse] t00 trend', e)
-            t00_trend = _price_series_quant(
-                [], latest=t00.get('price'), quote_change_pct=t00.get('changePct'),
-                latest_date=_quote_session_date(t00) or session_fallback)
-        try:
-            o00_bars = _tw_index_bars('^TWOII', n=30)
-            o00_trend = _price_series_quant(
-                o00_bars, latest=o00.get('price'), quote_change_pct=o00.get('changePct'),
-                latest_date=_quote_session_date(o00) or session_fallback)
-        except Exception as e:
-            print('[pulse] o00 trend', e)
-            o00_trend = _price_series_quant(
-                [], latest=o00.get('price'), quote_change_pct=o00.get('changePct'),
-                latest_date=_quote_session_date(o00) or session_fallback)
-        txf_live = (txf or {}).get('price')
-        try:
-            txf_bars = _tw_index_bars('__TXF__', n=30)
-            # 這份歷史以日盤為主；夜盤報價獨立顯示，不改寫已完成日 K。
-            day_overlay = ((txf or {}).get('session') == 'day' and not (txf or {}).get('stale'))
-            txf_trend = _price_series_quant(
-                txf_bars, latest=txf_live if day_overlay else None,
-                latest_date=(txf or {}).get('tradeDate') if day_overlay else None,
-                quote_change_pct=(txf or {}).get('changePct'))
-            txf_trend['quoteSession'] = (txf or {}).get('session')
-            txf_trend['historyAsOf'] = (txf_bars[-1] or {}).get('date') if txf_bars else None
-        except Exception as e:
-            print('[pulse] txf trend', e)
-            txf_trend = _price_series_quant([])
-        # 異時段或時間不明時不發布同時點期現價差。
-        basis_pts, basis_pct = synchronous_basis(t00, txf)
-        st = stocks or {}
-        up, dn, flat = st.get('up'), st.get('down'), st.get('unchanged')
-        ls_ratio = None
-        if up is not None and dn not in (None, 0):
-            try:
-                ls_ratio = round(float(up) / float(dn), 2)
-            except Exception:
-                ls_ratio = None
-
-        try:
-            import pulse_intel as _pi_ov
-            sec_ranked = list(_pi_ov.filter_sectors(sectors))
+            out = _pulse_updates.status(job_id)
+            if job_id and not out.get('job'):
+                self._err('找不到更新工作，可能已超過保存範圍', 404)
+                return
+            self._ok(json.dumps({'ok': True, **out}, ensure_ascii=False).encode())
         except Exception:
-            sec_ranked = list(sectors_scored) if sectors_scored else []
-        sec_ranked.sort(key=lambda x: x['changePct'], reverse=True)
+            self._err('更新工作狀態無法讀取', 503)
 
-        foreign = (inst or {}).get('foreign')
-        trust = (inst or {}).get('trust')
-        dealer = (inst or {}).get('dealer')
-        total_yi = None
-        if any(v is not None for v in (foreign, trust, dealer)):
-            total_yi = ((foreign or 0) + (trust or 0) + (dealer or 0)) / 1e8
-
-        out['movers'] = movers
-        _signal_symbols = {'2330.TW', '0050.TW'}
-        out['signalQuotes'] = [row for row in global_q if row.get('symbol') in _signal_symbols]
-        global_q = [row for row in global_q if row.get('symbol') not in _signal_symbols]
-        out['global'] = global_q
-        # AI／科技外溢：只吃已抓到的 global（費半／那指／VIX／NVDA…），無資料不改分、不畫空殼
+    def _handle_pulse_refresh(self):
         try:
-            import pulse_intel as _pi_spill
-            out = _pi_spill.apply_ai_tech_spillover(out, global_q, sectors)
-        except Exception as e:
-            print('[pulse] ai spillover', e)
-            try:
-                out['aiSpill'] = {'ok': False, 'reason': 'apply_failed'}
-            except Exception:
-                pass
-        out['us10y'] = us10y
-        out['economy'] = eco
-        out['flash'] = flash
-        out['overview'] = {
-            'strip': {
-                't00': t00,
-                'o00': o00,
-                't00Trend': t00_trend,
-                'o00Trend': o00_trend,
-                'txfTrend': txf_trend,
-                'basisPts': basis_pts,
-                'basisPct': basis_pct,
-                'turnoverYi': round(turnover_yi, 1) if turnover_yi is not None else None,
-                'turnoverChgPct': round(turnover_chg, 2) if turnover_chg is not None else None,
-                'turnoverMa5Yi': tq.get('ma5Yi'),
-                'turnoverVsMa5Pct': tq.get('vsMa5Pct'),
-                'turnoverZ20': tq.get('z20'),
-                'volumeScore': tq.get('volumeScore'),
-                'turnoverRelative': tq.get('volumeRelative'),
-                'turnoverRelativeScore': tq.get('volumeRelativeScore'),
-                'turnoverStreak': tq.get('streak'),
-                'turnoverTrend': tq.get('trend'),
-                'turnoverLevel': tq.get('level'),
-                'turnoverN': tq.get('n'),
-                'turnoverDate': tq.get('date'),
-                'turnoverSource': turnover_source,
-                'turnoverSession': 'day_eod',
-                'turnoverZ20N': tq.get('z20N'),
-                'up': up, 'down': dn, 'flat': flat,
-                'limitUp': st.get('limitUp'),
-                'limitDown': st.get('limitDown'),
-                'advRatio': st.get('advRatio'),
-                'lsRatio': ls_ratio,
-                'dataLabel': '官方盤後／即時混成' if out.get('breadthOk') else '部分資料可用',
-            },
-            'ohlc': {
-                'open': t00.get('open'), 'high': t00.get('high'), 'low': t00.get('low'),
-                'prevClose': t00.get('prevClose'), 'price': t00.get('price'),
-                'changePct': t00.get('changePct'), 'name': t00.get('name') or '加權指數',
-                'otcChangePct': o00.get('changePct'),
-                'otcPrice': o00.get('price'),
-            },
-            'institutional': {
-                'foreign': foreign, 'trust': trust, 'dealer': dealer,
-                'totalYi': round(total_yi, 1) if total_yi is not None else None,
-                'date': (inst or {}).get('date'),
-            },
-            'sectorsRanked': sec_ranked[:12],
-            'lsRatio': ls_ratio,
-        }
-
-        # Yahoo 補齊加權 OHLC（MIS 若缺 h/l）— 最多等 3s，不拖垮整包
-        ohlc = out['overview']['ohlc']
-        if ohlc.get('high') is None or ohlc.get('low') is None or ohlc.get('open') is None:
-            _ohlc_box = {'data': None, 'err': None}
-
-            def _ohlc_job():
-                try:
-                    _, data, _ = fetch_one('^TWII', '5d', '1d', False)
-                    _ohlc_box['data'] = data
-                except Exception as e:
-                    _ohlc_box['err'] = e
-
-            th = threading.Thread(target=_ohlc_job, daemon=True)
-            th.start()
-            th.join(3.0)
-            if _ohlc_box['data']:
-                try:
-                    res = (json.loads(_ohlc_box['data']).get('chart') or {}).get('result') or []
-                    if res:
-                        q = ((res[0].get('indicators') or {}).get('quote') or [{}])[0]
-
-                        def _last(arr):
-                            for x in reversed(arr or []):
-                                if x is not None:
-                                    return x
-                            return None
-
-                        if ohlc.get('open') is None:
-                            ohlc['open'] = _last(q.get('open'))
-                        if ohlc.get('high') is None:
-                            ohlc['high'] = _last(q.get('high'))
-                        if ohlc.get('low') is None:
-                            ohlc['low'] = _last(q.get('low'))
-                        ohlc['source'] = (ohlc.get('source') or '') + '+yahoo'
-                except Exception as e:
-                    print('[pulse] twii ohlc', e)
-            elif _ohlc_box['err']:
-                print('[pulse] twii ohlc', _ohlc_box['err'])
-
-        # Deterministic DecisionContext：重用本包 canonical quote／廣度／因子；
-        # AI 不參與 regime、confidence、levels 或 position range。
-        try:
-            import datastore as _decision_store
-            import benchmark_research as _benchmark_research
-            import decision_context as _decision
-            import key_levels as _key_levels
-            import margin_cycle as _margin_cycle
-            import sector_flow as _sector_flow
-            import sector_history as _sector_history
-
-            _bars = _decision_store.get_bars('^TWII', limit=80)
-            if not _bars:
-                try:
-                    import pulse_history as _ph_levels
-                    _bars = ((_ph_levels.history(kind='index', n=80) or {}).get('rows') or [])
-                except Exception:
-                    _bars = []
-            _levels = _key_levels.calculate_key_levels(
-                _bars, symbol='^TWII', session='regular', source='market.db/pulse-history',
-                as_of=out.get('updatedAt'))
-            try:
-                import pulse_history as _ph_decision
-                _breadth_hist = ((_ph_decision.history(kind='breadth', n=20) or {}).get('rows') or [])
-                _index_hist = ((_ph_decision.history(kind='index', n=80) or {}).get('rows') or [])
-            except Exception:
-                _breadth_hist = []
-                _index_hist = []
-            try:
-                import tw_index_charts as _tw_charts_decision
-                _futures_hist = _tw_charts_decision.recent_rows('__TXF__', n=80, allow_network=False)
-            except Exception:
-                _futures_hist = []
-            try:
-                _margin_state = _margin_cycle.margin_balance_state()
-            except Exception as _margin_exc:
-                _margin_state = {
-                    'available': False, 'reason': str(_margin_exc)[:120],
-                    'source': 'TWSE MI_MARGN MS', 'role': 'risk_brake_only',
-                }
-            # Official Taiwan 50 history is owned by one canonical research
-            # provider.  The request reads cache only; a missing/stale cache is
-            # refreshed in a bounded daemon and remains fail-closed meanwhile.
-            _benchmark_data = _benchmark_research.snapshot(allow_network=True)
-            _sec_source = None
-            if isinstance(extras.get('sectors'), dict):
-                _sec_source = extras.get('sectors', {}).get('source')
-            if not _sec_source and isinstance(sec, dict):
-                _sec_source = sec.get('source') or sec.get('_source')
-            _sec_source = _sec_source or 'TWSE MI_INDEX IND'
-            _sector_session = _sector_flow.normalize_session_date(
-                (sec or {}).get('date') if isinstance(sec, dict) else out.get('date'))
-            _turnover_session = _sector_flow.normalize_session_date(
-                movers.get('industryTurnoverDate') if isinstance(movers, dict) else None)
-            _same_turnover_session = bool(_sector_session and _turnover_session == _sector_session)
-            _industry_turnover = (movers.get('industryTurnoverYi') if
-                                  isinstance(movers, dict) and _same_turnover_session else None)
-            _industry_turnover_total = (movers.get('industryTurnoverTotalYi') if
-                                        isinstance(movers, dict) and _same_turnover_session else None)
-            _sector_rows, _sec_hist_status = _sector_history.enrich_sector_rows(
-                sectors,
-                as_of=(sec or {}).get('date') if isinstance(sec, dict) else out.get('date'),
-                benchmark_bars=_bars,
-                industry_turnover_yi=_industry_turnover,
-                bootstrap=('proxy' not in str(_sec_source).lower()),
-                budget_seconds=4.0,
-            )
-            _turnover_source = (movers.get('industryTurnoverSource') if
-                                isinstance(movers, dict) and _same_turnover_session else None)
-            _sec_flow = _sector_flow.build_sector_flow(
-                _sector_rows, market_scope='TWSE',
-                source=_sec_source + ((' + ' + _turnover_source) if _turnover_source else ''),
-                as_of=(sec or {}).get('date') if isinstance(sec, dict) else out.get('date'),
-                total_turnover_yi=_industry_turnover_total,
-                benchmark_return20_pct=_sec_hist_status.get('benchmarkReturn20Pct'),
-                proxy_basket=('proxy' in str(_sec_source).lower()),
-            )
-            _sec_flow['historyStatus'] = _sec_hist_status
-            _sec_flow['turnoverSource'] = _turnover_source
-            _sec_flow['turnoverDate'] = _turnover_session
-            _sec_flow['turnoverSessionMatched'] = _same_turnover_session
-            try:
-                import options_exposure as _options_exposure
-                _options_structure = _options_exposure.latest_cached()
-            except Exception:
-                _options_structure = None
-            try:
-                _ctx = _decision.build_and_publish(
-                    out, key_levels=_levels, breadth_history=_breadth_hist,
-                    index_history=_index_hist, futures_history=_futures_hist,
-                    sector_flow=_sec_flow, margin_state=_margin_state,
-                    benchmark_data=_benchmark_data,
-                    options_structure=_options_structure,
-                    session_calendar=_decision_session_calendar())
-            except _decision.SnapshotPublicationError:
-                self._err('決策快照尚未提交，保留前次已提交版本', 503)
+            body = read_json_body(self, max_bytes=1024)
+            if not isinstance(body, dict) or body:
+                self._err('Pulse 更新只接受空物件', 400)
                 return
-            if _ctx.get('publicationStatus') == 'superseded':
-                self._ok(json.dumps(_decision.latest_pulse() or out, ensure_ascii=False).encode())
-                return
-            out['decisionSummary'] = _decision.compact_context(_ctx)
-        except Exception as e:
-            print('[pulse] decision context', e)
-            try:
-                import decision_context as _decision_fallback
-                out['decisionSummary'] = _decision_fallback.compact_context(
-                    _decision_fallback.empty_context('decision_build_failed'))
-            except Exception:
-                out['decisionSummary'] = None
-
-        body = json.dumps(out, ensure_ascii=False).encode()
-        if out.get('ok'):
-            _cache.set(key, body, ttl=45)
-            # 寫入脈動歷史庫（增量 merge；失敗不擋回應）
-            try:
-                import pulse_history as ph
-                ph.save_pulse_score(out)
-            except Exception as e:
-                print('[pulse] history save', e)
-        self._ok(body)
+            out = _pulse_updates.submit(reason='manual')
+            self._ok(json.dumps({'ok': True, **out}, ensure_ascii=False).encode(), status=202)
+        except BodyReadError as exc:
+            self._err(str(exc), exc.status)
+        except Exception:
+            self._err('更新工作尚未接受，請稍後重試', 503)
 
     def _handle_pulse_history(self):
         """GET /pulse/history?kind=breadth|institutional|index|pulse&n=40"""
@@ -7067,7 +7110,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         except Exception as e:
             self._err('send failed: ' + str(e), 502)
 
-    def _txf_fnum(self, d, *keys):
+    @classmethod
+    def _txf_fnum(cls, d, *keys):
         for k in keys:
             v = (d or {}).get(k)
             if v not in (None, '', '-'):
@@ -7077,7 +7121,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                     pass
         return None
 
-    def _txf_mis_session(self, market_type):
+    @classmethod
+    def _txf_mis_session(cls, market_type):
         """TAIFEX MIS 台指期近月：MarketType 0=日盤、1=夜盤。
            近月以成交量最大列為準（夜盤 QuoteList 常缺 CMonth）。"""
         url = 'https://mis.taifex.com.tw/futures/api/getQuoteList'
@@ -7098,22 +7143,22 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         for row in rows:
             if not str(row.get('SymbolID') or '').endswith(('-F', '-M')):
                 continue
-            last = self._txf_fnum(row, 'CLastPrice', 'CLast', 'LastPrice')
+            last = cls._txf_fnum(row, 'CLastPrice', 'CLast', 'LastPrice')
             if last is None:
                 continue
-            vol = self._txf_fnum(row, 'CTotalVolume') or 0.0
+            vol = cls._txf_fnum(row, 'CTotalVolume') or 0.0
             if vol > best_vol:
                 best, best_vol = row, vol
         if best is None:
             return None
-        price = self._txf_fnum(best, 'CLastPrice', 'CLast', 'LastPrice')
-        prev = self._txf_fnum(best, 'CRefPrice', 'CYDClose', 'RefPrice')
-        high = self._txf_fnum(best, 'CHighPrice')
-        low = self._txf_fnum(best, 'CLowPrice')
-        opn = self._txf_fnum(best, 'COpenPrice')
-        amp = self._txf_fnum(best, 'CAmpRate')
-        vol = self._txf_fnum(best, 'CTotalVolume')
-        chg = self._txf_fnum(best, 'CDiffRate', 'DiffRate')
+        price = cls._txf_fnum(best, 'CLastPrice', 'CLast', 'LastPrice')
+        prev = cls._txf_fnum(best, 'CRefPrice', 'CYDClose', 'RefPrice')
+        high = cls._txf_fnum(best, 'CHighPrice')
+        low = cls._txf_fnum(best, 'CLowPrice')
+        opn = cls._txf_fnum(best, 'COpenPrice')
+        amp = cls._txf_fnum(best, 'CAmpRate')
+        vol = cls._txf_fnum(best, 'CTotalVolume')
+        chg = cls._txf_fnum(best, 'CDiffRate', 'DiffRate')
         if chg is None and price is not None and prev:
             chg = (price - prev) / prev * 100.0
         if amp is None and high is not None and low is not None and prev:
@@ -7207,7 +7252,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         except Exception:
             return False
 
-    def _txf_payload(self):
+    @classmethod
+    def _txf_payload(cls):
         """/txf 與 /pulse 共用完整成交時間選擇，不以價格相似度猜日夜盤。"""
         key = f'txf:v2:{int(time.time() // 20)}'
         cached = _cache.get(key)
@@ -7216,7 +7262,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         sessions = {}
         for market_type, name in ((0, 'day'), (1, 'night')):
             try:
-                sessions[name] = self._txf_mis_session(market_type)
+                sessions[name] = cls._txf_mis_session(market_type)
             except Exception:
                 sessions[name] = None
         primary = select_txf_quote(sessions.get('day'), sessions.get('night'))
@@ -7827,5 +7873,14 @@ if __name__ == '__main__':
     # H0：只聽 loopback，避免 18432 暴露到區網／公網
     if HOST not in ('127.0.0.1', 'localhost', '::1'):
         raise RuntimeError('ST_HOST must remain loopback; expose ST through the private web gateway')
-    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    import decision_context as _pulse_decision
+    _http_server = ThreadingHTTPServer((HOST, PORT), Handler)
+    try:
+        if not _pulse_updates.start(_build_pulse_update, _pulse_decision.latest_pulse,
+                                    _pulse_decision.committed_pulse_for_job):
+            raise RuntimeError('無法取得唯一 Pulse 更新工作者，停止啟動以避免快照分歧')
+        _http_server.serve_forever()
+    finally:
+        _pulse_updates.stop(timeout=2.0)
+        _http_server.server_close()
 

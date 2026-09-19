@@ -7,6 +7,8 @@
   var historySequence = 0;
   var lifecycleSequence = 0;
   var marketRefreshInflight = null;
+  var marketRefreshController = null;
+  var marketRefreshBackground = false;
   var lastMarketRefreshAt = 0;
   var lastContext = null;
   var lastEvidenceContext = null;
@@ -394,11 +396,13 @@
         '<div class="dc-sub" id="dc-sub">DecisionContext v1 · deterministic first · evidence before confidence</div></div>' +
         '<div class="dc-actions"><button class="dc-btn" data-shell-back>← 儀表板</button>' +
         '<button class="dc-btn" id="dc-ai-btn">AI 解釋</button><button class="dc-btn primary" id="dc-refresh">↻ 更新市場資料</button></div></div>' +
+        '<div class="dc-note" id="dc-update-status" role="status"></div>' +
         '<div id="dc-body"><div class="dc-card">決策資料載入中…</div></div></div>';
       $('dc-refresh').onclick = refreshMarketData;
       $('dc-ai-btn').onclick = runAi;
     }
     syncAiButtonState();
+    setRefreshState(!!marketRefreshInflight);
     bindPortfolioSwitch();
     return $('dc-body');
   }
@@ -435,6 +439,7 @@
       return response.json();
     }).then(function (payload) {
       aiAccessRole = payload && payload.role === 'owner' ? 'owner' : 'reader';
+      window.ST_PRIVATE_WEB_PROFILE = Object.assign({}, window.ST_PRIVATE_WEB_PROFILE, { role: aiAccessRole });
       return aiAccessRole;
     }).catch(function () {
       aiAccessRole = 'unknown';
@@ -512,13 +517,24 @@
     var btn = $('dc-refresh');
     if (!btn) return;
     btn.disabled = !!active;
-    btn.textContent = active ? '↻ 市場資料更新中…' : '↻ 更新市場資料';
+    btn.textContent = active ? '↻ 等待市場快照…' : (canUpdateMarket() ? '↻ 更新市場資料' : '↻ 重新讀取快照');
+  }
+
+  function canUpdateMarket() {
+    return window.DecisionData && DecisionData.canUpdateMarket ? DecisionData.canUpdateMarket()
+      : (!window.ST_PRIVATE_WEB_PROFILE || window.ST_PRIVATE_WEB_PROFILE.role === 'owner');
+  }
+
+  function marketUpdateStatus(message) {
+    var status = $('dc-update-status');
+    if (status) status.textContent = message;
   }
 
   function emptyHtml(message, detail) {
     return '<div class="dc-card dc-empty"><div class="v">' + esc(message) + '</div>' +
-      '<div class="s">' + esc(detail || '更新會重新取得總覽資料，並建立可稽核的 DecisionContext。') + '</div>' +
-      '<div class="dc-actions"><button type="button" class="dc-btn primary" id="dc-empty-refresh">↻ 立即更新市場資料</button>' +
+      '<div class="s">' + esc(detail || '伺服器會自動更新快照；頁面只讀已提交資料。') + '</div>' +
+      '<div class="dc-actions"><button type="button" class="dc-btn primary" id="dc-empty-refresh">' +
+      (canUpdateMarket() ? '↻ 立即更新市場資料' : '↻ 重新讀取快照') + '</button>' +
       '<button type="button" class="dc-btn" id="dc-empty-pulse">前往總覽</button></div>' +
       '<div class="dc-status" id="dc-empty-status"></div></div>';
   }
@@ -543,48 +559,48 @@
   function refreshMarketData(options) {
     var sequence = lifecycleSequence;
     var background = !!(options && options.background === true);
-    if (marketRefreshInflight) return marketRefreshInflight;
+    if (marketRefreshInflight) {
+      if (!background && marketRefreshBackground) return marketRefreshInflight.then(function () {
+        return sequence === lifecycleSequence ? refreshMarketData(options) : null;
+      });
+      return marketRefreshInflight;
+    }
     if (background && Date.now() - lastMarketRefreshAt < 45000) return Promise.resolve(lastContext);
     var body = ensureMount();
     if (!body) return Promise.resolve(null);
     var id = nextCorrelationId();
     var started = Date.now();
     var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    var timeoutId = controller ? setTimeout(function () { controller.abort(); }, 20000) : null;
-    trace('market_refresh_command_received', id, { route: 'decision' });
+    marketRefreshController = controller;
+    marketRefreshBackground = background;
+    var requestedUpdate = !background && canUpdateMarket();
+    var refreshResult = null;
+    trace('market_refresh_command_received', id, { route: 'decision', update: requestedUpdate });
     if (!background) {
       setRefreshState(true);
-      body.innerHTML = '<div class="dc-card dc-empty"><div class="v">正在更新市場資料…</div>' +
-        '<div class="s">依序取得總覽 Pulse、建立 DecisionContext、再載入完整證據。</div>' +
-        '<div class="dc-status">請稍候，最長等待 20 秒。</div></div>';
+      if (!lastContext) body.innerHTML = '<div class="dc-card dc-empty"><div class="v">等待已提交市場快照…</div>' +
+        '<div class="s">' + (requestedUpdate ? '已要求伺服器更新；等待最長 90 秒，離頁不會取消伺服器工作。' : '正在讀取伺服器已提交資料。') + '</div></div>';
     }
     trace('market_refresh_command_acknowledged', id, { uiState: background ? 'background' : 'loading' });
     trace('pulse_request_start', id, {
-      method: 'GET', path: '/pulse?refresh=1', origin: location.origin || null
+      method: requestedUpdate ? 'POST' : 'GET', path: requestedUpdate ? '/pulse/refresh' : '/pulse', origin: location.origin || null
     });
-    var pulseRequest = window.AppKernel && window.AppKernel.api
-      ? window.AppKernel.api.request('/pulse?refresh=1', {
-          cache: 'no-store', signal: controller ? controller.signal : undefined, timeoutMs: 20000,
-          headers: { 'X-ST-Trace-ID': id }
-        })
-      : fetch(SRV + '/pulse?refresh=1', {
-          cache: 'no-store', signal: controller ? controller.signal : undefined
-        });
-    var request = pulseRequest.then(function (response) {
-      return response.text().then(function (raw) {
-        trace('pulse_response', id, {
-          status: response.status,
-          ok: response.ok,
-          responseChars: raw.length,
-          elapsedMs: Date.now() - started
-        });
-        if (!response.ok) throw new Error('Pulse HTTP ' + response.status);
-        try { return JSON.parse(raw); }
-        catch (e) { throw new Error('Pulse JSON 解析失敗'); }
-      });
-    }).then(function (pulse) {
+    var pulseRequest = window.DecisionData && DecisionData.refreshPulse
+      ? DecisionData.refreshPulse({ update: requestedUpdate, signal: controller && controller.signal,
+          onStatus: function (job) {
+            if (sequence !== lifecycleSequence) return;
+            marketUpdateStatus(job.status === 'queued' ? '市場更新已排入佇列；保留目前決策。' : '正在建立市場快照；保留目前決策。');
+          } })
+      : Promise.reject(new Error('市場快照服務尚未載入'));
+    var request = pulseRequest.then(function (result) {
       if (sequence !== lifecycleSequence) return null;
-      if (!pulse || !pulse.ok) throw new Error((pulse && pulse.error) || 'Pulse 未回傳有效資料');
+      refreshResult = result || {};
+      var pulse = refreshResult.pulse;
+      if (!pulse || !pulse.ok) {
+        if (!lastContext) showEmpty('尚未有已提交快照', '伺服器會自動更新；可稍後重新讀取。');
+        marketUpdateStatus(refreshResult.error || (pulse && pulse.error) || '尚未有已提交快照');
+        return null;
+      }
       if (window.MarketData && MarketData.fromPulse) MarketData.fromPulse(pulse);
       if (window.DecisionData && DecisionData.fromPulse) DecisionData.fromPulse(pulse, id);
       trace('pulse_applied', id, {
@@ -595,17 +611,26 @@
       if (!window.DecisionData || !DecisionData.refresh) throw new Error('DecisionData 尚未載入');
       return DecisionData.refresh({
         force: true,
+        signal: controller && controller.signal,
         holdings: lastHoldings,
         portfolioKind: portfolioMode,
         correlationId: id
       });
     }).then(function (state) {
       if (sequence !== lifecycleSequence) return null;
+      if (!state) return lastContext;
       var ctx = state && state.context;
       if (!ctx) throw new Error('更新完成，但後端尚未建立 DecisionContext');
       render(ctx);
+      var job = refreshResult && refreshResult.job;
+      var failed = refreshResult && refreshResult.error || (job && ['failed', 'interrupted'].indexOf(job.status) >= 0 && job.error);
+      marketUpdateStatus(failed ? '市場更新未完成：' + String(failed) + '；保留已提交決策。'
+        : (job && ['queued', 'running'].indexOf(job.status) >= 0 ? '伺服器正在更新；目前顯示已提交決策。'
+          : (canUpdateMarket() ? '已讀取最新提交的市場快照，並套用目前的個人化設定。'
+            : 'Reader 僅顯示已提交市場決策，未套用本機持倉。')));
       lastMarketRefreshAt = Date.now();
-      trace('market_refresh_terminal_success', id, {
+      trace(failed ? 'market_refresh_terminal_failure' : 'market_refresh_terminal_success', id, {
+        error: failed || null,
         regime: (ctx.regime || {}).id || null,
         asOf: ctx.asOf || null,
         elapsedMs: Date.now() - started
@@ -613,17 +638,18 @@
       return ctx;
     }).catch(function (err) {
       if (sequence !== lifecycleSequence) return null;
-      var message = err && err.name === 'AbortError' ? '市場資料更新逾時' : '市場資料更新失敗';
+      var message = requestedUpdate ? '市場資料更新未完成' : '市場快照讀取失敗';
       var detail = String(err && err.message || err || '未知錯誤');
-      if (!background) showEmpty(message, detail + '；可重試或前往總覽檢查服務狀態。');
+      if (!lastContext) showEmpty(message, detail + '；可稍後重新讀取。');
+      marketUpdateStatus(message + '：' + detail + (lastContext ? '；保留上次已提交決策。' : ''));
       trace('market_refresh_terminal_failure', id, {
         error: detail,
         elapsedMs: Date.now() - started
       });
       return null;
     }).finally(function () {
-      if (timeoutId) clearTimeout(timeoutId);
       if (sequence === lifecycleSequence && !background) setRefreshState(false);
+      if (marketRefreshController === controller) marketRefreshController = null;
       if (marketRefreshInflight === request) marketRefreshInflight = null;
     });
     marketRefreshInflight = request;
@@ -1392,6 +1418,7 @@
   }
 
   function refreshOptionsStructure(force) {
+    if (!force || !canUpdateMarket()) return;
     if (optionsRefreshStarted && !force) return;
     optionsRefreshStarted = true;
     var button = $('dc-options-refresh'), status = $('dc-options-refresh-status');
@@ -1419,11 +1446,8 @@
     if (!details) return;
     details.addEventListener('toggle', function () {
       optionsLabOpen = !!details.open;
-      var current = (lastContext && lastContext.optionsStructure) || {};
-      var derived = current.derived || {};
-      var needsV2 = Number(current.contractVersion || 0) < 2 || derived.totalOiVega1VolPointNtd == null;
-      if (optionsLabOpen && ((current.status || 'insufficient') === 'insufficient' || needsV2)) refreshOptionsStructure(false);
     });
+    if (button && !canUpdateMarket()) { button.disabled = true; button.textContent = '更新期權結構（Owner）'; }
     if (button) button.onclick = function (event) {
       event.preventDefault();
       event.stopPropagation();
@@ -1534,7 +1558,9 @@
   function bindSessionMomentumLab() {
     var details = $('dc-oi-lab'), button = $('dc-oi-refresh'), status = $('dc-oi-refresh-status');
     if (details) details.addEventListener('toggle', function () { oiLabOpen = !!details.open; });
+    if (button && !canUpdateMarket()) { button.disabled = true; button.textContent = '更新盤別研究（Owner）'; }
     if (button) button.onclick = function (event) {
+      if (!canUpdateMarket()) return;
       event.preventDefault(); event.stopPropagation(); button.disabled = true; button.textContent = '更新中…';
       if (status) status.textContent = '正在取得固定白名單的調整後日線並驗證盤別恆等式…';
       if (window.DecisionData && DecisionData.refreshOvernightResearch) {
@@ -2136,7 +2162,7 @@
     if (opts && (opts.focusSection || opts.highlightId)) pendingFocus = opts;
     ensureMount();
     resolveAiAccess();
-    load(false);
+    refreshMarketData({ background: true });
     if (timer) clearInterval(timer);
     timer = setInterval(function () {
       if (window.ShellV5 && ShellV5.route && ShellV5.route() === 'decision') {
@@ -2148,6 +2174,7 @@
     ++loadSequence;
     ++historySequence;
     ++lifecycleSequence;
+    if (marketRefreshController) { marketRefreshController.abort(); marketRefreshController = null; }
     marketRefreshInflight = null;
     setRefreshState(false);
     if (timer) { clearInterval(timer); timer = null; }
