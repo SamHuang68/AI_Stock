@@ -11,6 +11,7 @@ import unittest
 import urllib.request
 import urllib.error
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -19,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'server'))
 
 import decision_context as dc  # noqa: E402
+import early_warning as ew  # noqa: E402
 import options_exposure as ox  # noqa: E402
 import overnight_intraday as oi  # noqa: E402
 
@@ -68,6 +70,13 @@ def _pulse() -> dict:
 class DecisionHttpTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
+        self.signal_db_path = str(Path(self.tmp.name) / 'market_signals.db')
+        # 訊號讀取函式的預設路徑在定義時已綁定；只改 DB_PATH 不會隔離 HTTP 查詢。
+        # 保留真實查詢與序列化流程，讓讀取端與下方發布端共用本次測試資料庫。
+        for name in ('active', 'history', 'performance'):
+            replacement = patch.object(ew, name, partial(getattr(ew, name), path=self.signal_db_path))
+            replacement.start()
+            self.addCleanup(replacement.stop)
         for replacement in (patch.object(dc, '_latest_context', None), patch.object(dc, '_latest_inputs', None)):
             replacement.start()
             self.addCleanup(replacement.stop)
@@ -131,6 +140,12 @@ class DecisionHttpTest(unittest.TestCase):
         self.assertEqual(resp.status, 200)
         self.assertTrue(active['shadowOnly'])
         self.assertTrue(active['signals'])
+        expected = (dc.latest_context() or {}).get('earlyWarnings', {}).get('signals', [])
+        self.assertTrue(expected)
+        self.assertEqual(
+            {(row['signalId'], row['observationKey'], row['lastSeenAt']) for row in active['signals']},
+            {(row['signalId'], row['observationKey'], row['lastSeenAt']) for row in expected},
+        )
         with urllib.request.urlopen(self.base + '/signals/history?limit=10', timeout=5) as resp:
             history = json.loads(resp.read())
         self.assertEqual(resp.status, 200)

@@ -20,6 +20,8 @@ class 發布完整性測試(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / '安裝目錄'
         self.root.mkdir()
+        # Windows CI 的 TEMP 可能是 8.3 別名；與發布器使用同一解析路徑，確保故障注入命中。
+        self.root = self.root.resolve()
         self.staged = _fake_release(self.root, 'abc123')
         self.current = self.root / 'current'
         _write(self.current / 'server/old.py', '原程式')
