@@ -249,6 +249,13 @@ REQUIRED_SHARE_FILES = (
     "assets/vendor/pdfjs/6.3.289/pdf.min.mjs",
     "assets/vendor/pdfjs/6.3.289/pdf.worker.min.mjs",
     "assets/vendor/pdfjs/6.3.289/來源資訊.json",
+    "assets/vendor/html2canvas/1.4.1/html2canvas.min.js",
+    "assets/vendor/html2canvas/1.4.1/LICENSE",
+    "assets/vendor/html2canvas/1.4.1/來源資訊.json",
+    "assets/vendor/jspdf/4.2.1/jspdf.umd.min.js",
+    "assets/vendor/jspdf/4.2.1/LICENSE",
+    "assets/vendor/jspdf/4.2.1/來源資訊.json",
+    "tests/test_PDF匯出資產.py",
     "assets/docs/archify/st-private-web-trust-ai-execution.html",
     "assets/docs/archify/st-private-web-release-gate.html",
     "assets/docs/archify/st-pulse-refresh-degradation.html",
@@ -303,6 +310,9 @@ TEXT_BASENAMES = {".gitignore", "VERSION"}
 VERIFIED_VENDOR_EMAIL_EXCEPTIONS = {
     "assets/vendor/pdfjs/6.3.289/pdf.worker.min.mjs":
         "a33cfe728c584fdba4fcc1fd54bcdc2f9f2f13889ddbb5b2bd1d0f8cbe49b84e",
+    # jsPDF 官方原檔包含公開作者與授權署名；只豁免此原檔的郵件規則。
+    "assets/vendor/jspdf/4.2.1/jspdf.umd.min.js":
+        "e6551fcdc32f09d6853b2c5126d18d01d9447e0da618a41a11ebeee0f6c20d54",
 }
 
 # These patterns intentionally target concrete credential formats. Placeholder
@@ -556,6 +566,21 @@ def scan_text(relative_name: str, text: str) -> list[dict[str, str]]:
     return issues
 
 
+def scan_bytes(relative_name: str, data: bytes) -> list[dict[str, str]]:
+    """官方例外原檔先核對位元組，解碼失敗也不能繞過完整性檢查。"""
+    issues: list[dict[str, str]] = []
+    canonical_name = relative_name.replace("\\", "/").removeprefix(STAGE_NAME + "/")
+    trusted_digest = VERIFIED_VENDOR_EMAIL_EXCEPTIONS.get(canonical_name)
+    if trusted_digest and hashlib.sha256(data).hexdigest() != trusted_digest:
+        issues.append({"path": relative_name, "rule": "vendor-integrity"})
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        # 其他既有文字編碼策略保持不變，但保留已發現的官方原檔異動。
+        return issues
+    return issues + scan_text(relative_name, text)
+
+
 def scan_stage_content(stage: Path) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
     for path in sorted(stage.rglob("*")):
@@ -563,10 +588,10 @@ def scan_stage_content(stage: Path) -> list[dict[str, str]]:
             continue
         try:
             # 保留原始換行，確保雜湊驗證不把不同位元組視為同一份資產。
-            text = path.read_bytes().decode("utf-8")
-        except (OSError, UnicodeDecodeError):
+            data = path.read_bytes()
+        except OSError:
             continue
-        issues.extend(scan_text(path.relative_to(stage).as_posix(), text))
+        issues.extend(scan_bytes(path.relative_to(stage).as_posix(), data))
     return issues
 
 
@@ -613,11 +638,7 @@ def verify_archive(zip_path: Path) -> list[dict[str, str]]:
                 if filename.lower() != "readme.txt":
                     issues.append({"path": info.filename, "rule": "wavedeck-runtime"})
             if archive_path.suffix.lower() in TEXT_SUFFIXES or filename in TEXT_BASENAMES:
-                try:
-                    text = archive.read(info).decode("utf-8")
-                except UnicodeDecodeError:
-                    continue
-                issues.extend(scan_text(info.filename, text))
+                issues.extend(scan_bytes(info.filename, archive.read(info)))
     return issues
 
 

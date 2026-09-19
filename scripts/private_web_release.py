@@ -75,6 +75,13 @@ REQUIRED_RELEASE_FILES = {
     "assets/vendor/pdfjs/6.3.289/pdf.worker.min.mjs",
     "assets/vendor/pdfjs/6.3.289/來源資訊.json",
     "tests/test_pdf_assets.py",
+    "assets/vendor/html2canvas/1.4.1/html2canvas.min.js",
+    "assets/vendor/html2canvas/1.4.1/LICENSE",
+    "assets/vendor/html2canvas/1.4.1/來源資訊.json",
+    "assets/vendor/jspdf/4.2.1/jspdf.umd.min.js",
+    "assets/vendor/jspdf/4.2.1/LICENSE",
+    "assets/vendor/jspdf/4.2.1/來源資訊.json",
+    "tests/test_PDF匯出資產.py",
 }
 PRIVATE_RELEASE_EXCLUDES = {"wavedeck", "START_WAVEDECK.cmd"}
 MANIFEST_NAME = ".private_web_release.json"
@@ -408,6 +415,7 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
             "tests.test_runtime_revision",
             "tests.test_archify_artifacts",
             "tests.test_pdf_assets",
+            "tests.test_PDF匯出資產",
         ]
         if run_tests:
             _run([python, "-m", "unittest", "-b", *tests], cwd=extracted)
