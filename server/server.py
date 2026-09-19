@@ -5495,13 +5495,17 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                 _options_structure = _options_exposure.latest_cached()
             except Exception:
                 _options_structure = None
-            _ctx = _decision.build_and_publish(
-                out, key_levels=_levels, breadth_history=_breadth_hist,
-                index_history=_index_hist, futures_history=_futures_hist,
-                sector_flow=_sec_flow, margin_state=_margin_state,
-                benchmark_data=_benchmark_data,
-                options_structure=_options_structure,
-                session_calendar=_decision_session_calendar())
+            try:
+                _ctx = _decision.build_and_publish(
+                    out, key_levels=_levels, breadth_history=_breadth_hist,
+                    index_history=_index_hist, futures_history=_futures_hist,
+                    sector_flow=_sec_flow, margin_state=_margin_state,
+                    benchmark_data=_benchmark_data,
+                    options_structure=_options_structure,
+                    session_calendar=_decision_session_calendar())
+            except _decision.SnapshotPublicationError:
+                self._err('決策快照尚未提交，保留前次已提交版本', 503)
+                return
             if _ctx.get('publicationStatus') == 'superseded':
                 self._ok(json.dumps(_decision.latest_pulse() or out, ensure_ascii=False).encode())
                 return

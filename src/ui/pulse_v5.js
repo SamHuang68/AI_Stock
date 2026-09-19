@@ -32,7 +32,8 @@
   var flashMkt = 'ALL'; /* ALL | TW | US */
   var flashQ = '';      /* 快訊關鍵字（代號／標題） */
   var watchMkt = 'ALL'; /* ALL | TW | US */
-  var _lastJobLabel = '待命';
+  var _lastJobLabel = '尚未查詢';
+  var _lastSyncStatus = null;
   var _lastMacro = null;
   var _prevBand = null;
   var beginnerAdvanced = false;
@@ -4125,6 +4126,61 @@
     return sourceLabel(key) + '：' + freshnessLabel(row.freshness || (fresh && fresh.freshness));
   }
 
+  function decisionSnapshotComparison(summary, context) {
+    if (!context) return '僅有摘要，全文未提供';
+    if (summary.viewScope === 'personal' || context.viewScope === 'personal' ||
+        summary.persistence === 'ephemeral' || context.persistence === 'ephemeral') {
+      return '摘要／全文尚未核對（個人化衍生視圖）';
+    }
+    if (!summary.snapshotId || !context.snapshotId) return '摘要／全文尚未核對（快照識別未提供）';
+    if (summary.snapshotId !== context.snapshotId) return '摘要／全文尚未核對（不同快照）';
+    if (summary.viewState !== context.viewState) return '摘要／全文效期視圖不同，尚未核對';
+    if (!summary.viewState) return '摘要／全文尚未核對（效期視圖未提供）';
+    if (summary.revision == null || context.revision == null) return '摘要／全文尚未核對（修訂未提供）';
+    if (!summary.inputHash || !context.inputHash || !summary.rulesDigest || !context.rulesDigest) {
+      return '摘要／全文尚未核對（輸入或規則識別未提供）';
+    }
+    if (summary.revision !== context.revision || summary.inputHash !== context.inputHash ||
+        summary.rulesDigest !== context.rulesDigest) return '摘要／全文快照識別不一致';
+    if (summary.persistence !== 'committed' || context.persistence !== 'committed') {
+      return '摘要／全文尚未核對（持久儲存未確認）';
+    }
+    function comparedView(value, full) {
+      var regime = value.regime || {}, quality = value.dataQuality || {};
+      var envelope = full ? (value.actionEnvelope || {}) : value;
+      var levels = full ? ((value.keyLevels || {}).levels || {}) : (value.levels || {});
+      return {
+        asOf: value.asOf || null,
+        regime: ['id', 'label', 'score', 'confidence', 'ruleId'].map(function (key) {
+          return regime[key] == null ? null : regime[key];
+        }),
+        posture: envelope.posture || null,
+        allowed: (envelope.allowed || []).slice(0, 3),
+        restricted: (envelope.restricted || []).slice(0, 3),
+        confirmation: (value.confirmation || []).slice(0, 2),
+        invalidation: (value.invalidation || []).slice(0, 2),
+        levels: ['r1', 'pivot', 's1'].map(function (key) { return levels[key] == null ? null : levels[key]; }),
+        quality: ['completeness', 'freshness', 'scopeConsistency'].map(function (key) {
+          return quality[key] == null ? null : quality[key];
+        }),
+        staleFields: (quality.staleFields || []).slice().sort()
+      };
+    }
+    return JSON.stringify(comparedView(summary, false)) === JSON.stringify(comparedView(context, true))
+      ? '摘要／全文快照與核對內容一致' : '摘要／全文核對內容不同';
+  }
+
+  function historySyncLabel(status, previous) {
+    var lastOk = (status && status.lastOk) || (previous && previous.lastOk);
+    var label;
+    if (!status || status.ok === false) label = '查詢失敗';
+    else if (status.running) label = '進行中';
+    else if (status.lastError || (status.lastResult && status.lastResult.ok === false)) {
+      label = '失敗：' + (status.lastError || status.lastResult.error || '同步未完成');
+    } else label = status.lastOk ? '已完成' : '待命';
+    return label + (lastOk ? '；最後成功 ' + lastOk : '；尚無成功紀錄');
+  }
+
   function renderHeadMeta(pack) {
     var sequence = ++headMetaSequence;
     var host = $('pl-head-meta');
@@ -4151,19 +4207,27 @@
         })
       : (snap.freshness || null);
     var asOf = (fresh && fresh.worstAsOf) || snap.marketAsOf || p.updatedAt;
-    var decision = (window.DecisionData && DecisionData.get && DecisionData.get().summary) || p.decisionSummary || {};
+    // 此列說明目前 Pulse；其他頁面的個人化摘要不可覆蓋它。
+    var decision = p.decisionSummary || {};
+    var decisionState = (window.DecisionData && DecisionData.get && DecisionData.get()) || {};
+    var fullDecision = p.decision || decisionState.context || null;
     var quality = decision.dataQuality || {};
     var completeness = p.dataCompleteness != null ? Math.round(Number(p.dataCompleteness))
       : (quality.completeness != null ? Math.round(Number(quality.completeness) * 100) : null);
-    var consistent = quality.scopeConsistency;
-    if (consistent == null && p.decisionSummary && p.decision) {
-      consistent = JSON.stringify(p.decisionSummary.regime || {}) === JSON.stringify((p.decision.regime) || {});
-    }
-    var summaryNote = consistent === false ? '摘要／全文不一致'
-      : (consistent === true ? '摘要／全文一致' : '僅有摘要，全文未提供');
-    var revision = (decision.contractVersion != null ? decision.contractVersion
-      : (snap.contractVersion != null ? snap.contractVersion : p.contractVersion));
-    var snapId = shortSnapshotId([asOf, snap.generatedAt, p.updatedAt, completeness]);
+    var summaryNote = decisionSnapshotComparison(decision, fullDecision);
+    var revision = decision.revision;
+    var snapId = decision.snapshotId || '未提供';
+    var displayId = shortSnapshotId([asOf, snap.generatedAt, p.updatedAt, completeness]);
+    var derived = decision.viewScope === 'personal' || decision.persistence === 'ephemeral';
+    var persistence = derived ? '未持久儲存（個人化衍生）'
+      : (decision.persistence === 'committed' ? '已持久儲存' : '未提供');
+    var publication = decision.publicationStatus === 'accepted' ? '已接納'
+      : (decision.publicationStatus === 'superseded' ? '已被取代'
+        : (decision.publicationStatus === 'derived' ? '個人化衍生' : '未提供'));
+    var scopeNote = quality.scopeConsistency === true ? '一致'
+      : (quality.scopeConsistency === false ? '不一致' : '未提供');
+    var contract = '決策 ' + (decision.contractVersion == null ? '未提供' : decision.contractVersion) +
+      '／行情 ' + (snap.contractVersion == null ? '未提供' : snap.contractVersion);
     var decisionFreshness = quality.freshness == null ? null : Number(quality.freshness);
     var decisionExpired = decisionFreshness != null && isFinite(decisionFreshness) && decisionFreshness < 0.25;
     var decisionDegraded = (decisionFreshness != null && isFinite(decisionFreshness) && decisionFreshness < 1) ||
@@ -4171,7 +4235,7 @@
     var valid = decisionExpired ? '過期（決策來源）' : (!(fresh && fresh.freshness) ? '尚未確認'
       : (fresh.freshness === 'stale' ? '過期'
         : (decisionDegraded || (completeness != null && completeness < 80) ? '降級' : '有效')));
-    function bit(label, value) { return label + '<b>' + value + '</b>'; }
+    function bit(label, value) { return label + '<b>' + esc(String(value)) + '</b>'; }
     function paint(jobLabel) {
       if (jobLabel) _lastJobLabel = jobLabel;
       var bits = [
@@ -4179,16 +4243,22 @@
         bit('盤別：', sessionLabel(pickSession(snap, fresh))),
         bit('來源品質：', pickSourceQuality(snap, fresh)),
         bit('決策資料完整度：', completeness == null ? '—' : completeness + '%'),
+        bit('市場範圍：', scopeNote),
         summaryNote,
         bit('快照：', snapId),
         bit('修訂：', revision == null || revision === '' ? '未提供' : String(revision)),
+        bit('契約版本：', contract),
+        bit('發布狀態：', publication),
+        bit('儲存狀態：', persistence),
+        bit('畫面識別：', displayId),
         bit('效期：', valid),
-        bit('更新工作：', _lastJobLabel)
+        bit('歷史資料同步：', _lastJobLabel)
       ];
+      if (decision.parentSnapshotId) bits.push(bit('衍生來源快照：', decision.parentSnapshotId));
       host.hidden = false;
       host.title = bits.map(function (row) { return String(row).replace(/<[^>]+>/g, ''); }).join(' · ');
       host.innerHTML =
-        '<button type="button" class="pl-head-jobs" id="pl-head-jobs">查看更新工作</button>' +
+        '<button type="button" class="pl-head-jobs" id="pl-head-jobs">查看歷史資料同步</button>' +
         '<span class="pl-head-meta-track">' + bits.map(function (row, i) {
           return (i ? '<span aria-hidden="true"> · </span>' : '') + row;
         }).join('') + '</span>';
@@ -4202,9 +4272,12 @@
     }
     paint(_lastJobLabel);
     jget('/sync/status').then(function (st) {
-      if (!st || sequence !== headMetaSequence) return;
-      paint(st.running ? '進行中' : (st.lastOk ? '已完成' : '待命'));
-    }).catch(function () {});
+      if (sequence !== headMetaSequence) return;
+      paint(historySyncLabel(st, _lastSyncStatus));
+      if (st && st.ok !== false) _lastSyncStatus = st;
+    }).catch(function () {
+      if (sequence === headMetaSequence) paint(historySyncLabel(null, _lastSyncStatus));
+    });
   }
 
   function render(pack) {
