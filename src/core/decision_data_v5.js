@@ -279,10 +279,18 @@
             responseChars: raw.length,
             elapsedMs: Date.now() - started
           });
-          if (!r.ok || !raw) return null;
+          if (!r.ok || !raw) {
+            if (opts.throwOnError) {
+              var error = new Error(!r.ok ? '讀取決策快照失敗（HTTP ' + r.status + '）' : '決策快照回應為空');
+              error.status = r.status;
+              throw error;
+            }
+            return null;
+          }
           try { return JSON.parse(raw); }
           catch (e) {
             trace('context_parse_error', id, { error: String(e && e.message || e) });
+            if (opts.throwOnError) throw new Error('決策快照回應格式無效');
             return null;
           }
         });
@@ -293,6 +301,7 @@
           trace('context_response_discarded', id, { reason: 'superseded_input', sequence: sequence });
           return inflight || state;
         }
+        if (opts.throwOnError && (!ctx || !ctx.regime)) throw new Error('決策快照缺少必要內容');
         if (ctx) {
           var published = publish(ctx, hasBody ? 'profile' : 'refresh', id);
           refreshOvernightResearch(state.context, id, false);
@@ -306,7 +315,9 @@
           error: String(err && err.message || err),
           elapsedMs: Date.now() - started
         });
-        return sequence !== requestSequence ? (inflight || state) : state;
+        if (sequence !== requestSequence) return inflight || state;
+        if (opts.throwOnError) throw err;
+        return state;
       })
       .finally(function () {
         if (inflight === request) { inflight = null; inflightKey = null; }

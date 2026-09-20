@@ -87,6 +87,7 @@ REQUIRED_RELEASE_FILES = {
     "tests/test_投組市場代號.py",
     "tests/test_市場尾碼一致性.py",
     "tests/分類範圍標示_selftest.js",
+    "tests/決策更新狀態_selftest.js",
 }
 PRIVATE_RELEASE_EXCLUDES = {"wavedeck", "START_WAVEDECK.cmd"}
 MANIFEST_NAME = ".private_web_release.json"

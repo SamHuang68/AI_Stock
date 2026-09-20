@@ -402,7 +402,7 @@
       $('dc-ai-btn').onclick = runAi;
     }
     syncAiButtonState();
-    setRefreshState(!!marketRefreshInflight);
+    setRefreshState(!!marketRefreshInflight && !marketRefreshBackground);
     bindPortfolioSwitch();
     return $('dc-body');
   }
@@ -588,12 +588,23 @@
     var pulseRequest = window.DecisionData && DecisionData.refreshPulse
       ? DecisionData.refreshPulse({ update: requestedUpdate, signal: controller && controller.signal,
           onStatus: function (job) {
-            if (sequence !== lifecycleSequence) return;
+            if (sequence !== lifecycleSequence || (controller && controller.signal.aborted)) return;
             marketUpdateStatus(job.status === 'queued' ? '市場更新已排入佇列；保留目前決策。' : '正在建立市場快照；保留目前決策。');
           } })
       : Promise.reject(new Error('市場快照服務尚未載入'));
-    var request = pulseRequest.then(function (result) {
-      if (sequence !== lifecycleSequence) return null;
+    // 限制整段更新等待，包含快照完成後的個人化決策讀取。
+    var deadlineTimer;
+    var deadline = new Promise(function (_resolve, reject) {
+      deadlineTimer = setTimeout(function () {
+        var error = new Error(requestedUpdate ? '市場更新等待逾時；伺服器工作仍可能繼續，可重新讀取狀態。'
+          : '市場快照讀取逾時；保留上次已提交決策，可稍後重試。');
+        error.name = 'TimeoutError';
+        reject(error);
+        if (controller) controller.abort();
+      }, requestedUpdate ? 90000 : 12000);
+    });
+    var contextRequest = pulseRequest.then(function (result) {
+      if (sequence !== lifecycleSequence || (controller && controller.signal.aborted)) return null;
       refreshResult = result || {};
       var pulse = refreshResult.pulse;
       if (!pulse || !pulse.ok) {
@@ -611,13 +622,15 @@
       if (!window.DecisionData || !DecisionData.refresh) throw new Error('DecisionData 尚未載入');
       return DecisionData.refresh({
         force: true,
+        throwOnError: true,
         signal: controller && controller.signal,
         holdings: lastHoldings,
         portfolioKind: portfolioMode,
         correlationId: id
       });
-    }).then(function (state) {
-      if (sequence !== lifecycleSequence) return null;
+    });
+    var request = Promise.race([contextRequest, deadline]).then(function (state) {
+      if (sequence !== lifecycleSequence || (controller && controller.signal.aborted)) return null;
       if (!state) return lastContext;
       var ctx = state && state.context;
       if (!ctx) throw new Error('更新完成，但後端尚未建立 DecisionContext');
@@ -648,9 +661,16 @@
       });
       return null;
     }).finally(function () {
-      if (sequence === lifecycleSequence && !background) setRefreshState(false);
-      if (marketRefreshController === controller) marketRefreshController = null;
-      if (marketRefreshInflight === request) marketRefreshInflight = null;
+      clearTimeout(deadlineTimer);
+      if (marketRefreshInflight === request) {
+        marketRefreshInflight = null;
+        marketRefreshBackground = false;
+        if (marketRefreshController === controller) marketRefreshController = null;
+        if (sequence === lifecycleSequence) {
+          setRefreshState(false);
+          trace('market_refresh_ui_released', id, { background: background, elapsedMs: Date.now() - started });
+        }
+      }
     });
     marketRefreshInflight = request;
     return marketRefreshInflight;
