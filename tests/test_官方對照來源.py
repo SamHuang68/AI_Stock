@@ -141,13 +141,17 @@ class 官方對照來源測試(unittest.TestCase):
 
 
 class 上市分類涵蓋測試(unittest.TestCase):
-    def snapshot(self, industries, *, missing_change=False, include_rows=True):
+    def snapshot(self, industries, *, missing_change=False, include_rows=True, include_tdr=False):
         listed = [
             {'Code': '2330', 'Name': '上市甲', 'ClosingPrice': '100', 'Change': '1', 'Date': '1150918', 'TradeValue': '600000000'},
             {'Code': '2885', 'Name': '上市乙', 'ClosingPrice': '100', 'Change': '1', 'Date': '1150918', 'TradeValue': '400000000'},
         ]
         if missing_change:
             listed[1]['Change'] = None
+        if include_tdr:
+            listed.extend({'Code': code, 'Name': name, 'ClosingPrice': '100', 'Change': '1',
+                           'Date': '1150918', 'TradeValue': '100000000'}
+                          for code, name in (('9103', '美德醫療-DR'), ('9110', '越南控-DR'), ('9136', '巨騰-DR')))
         def fetch(req, timeout=None):
             return response(listed if 'STOCK_DAY_ALL' in req.full_url else [])
         with mock.patch.object(ST.urllib.request, 'urlopen', side_effect=fetch), mock.patch.object(
@@ -195,6 +199,30 @@ class 上市分類涵蓋測試(unittest.TestCase):
         self.assertTrue(flow['flowEligible'])
         self.assertEqual(flow['turnoverCoveragePct'], 100)
         self.assertEqual(flow['hhi'], 5200)
+
+    def test_未分類存託憑證保留母體與成交分母且不偽稱完整(self):
+        out = self.snapshot({'2330': '半導體業', '2885': '金融保險業'}, include_tdr=True)
+        self.assertEqual({row['code'] for row in out['rows']}, {'2330', '2885', '9103', '9110', '9136'})
+        self.assertEqual((out['classificationCount'], out['classificationTotal']), (2, 5))
+        self.assertEqual(out['classificationCoveragePct'], 40)
+        self.assertFalse(out['classificationComplete'])
+        self.assertEqual(out['industryTurnoverTotalYi'], 13)
+        self.assertEqual(sum(out['industryTurnoverYi'].values()), 10)
+        self.assertIn('四碼證券（含存託憑證）', out['limitNote'])
+        rows = sector_flow.attach_sector_metrics([{'name': '半導體'}, {'name': '金融保險'}, {'name': '電子'}],
+                                                 industry_turnover_yi=out['industryTurnoverYi'])
+        flow = sector_flow.build_sector_flow(rows, total_turnover_yi=out['industryTurnoverTotalYi'],
+                   classification_coverage_pct=out['classificationCoveragePct'], classification_complete=out['classificationComplete'])
+        self.assertEqual(flow['turnoverScope'], 'TWSE_FOUR_DIGIT_SECURITIES_BY_INDUSTRY')
+        self.assertEqual(flow['turnoverCoveragePct'], 40)
+        self.assertEqual(flow['rows'][0]['marketSharePct'], round(6 / 13 * 100, 3))
+        self.assertFalse(flow['flowEligible'])
+        self.assertIsNone(flow['hhi'])
+        self.assertIsNone(flow['top3SharePct'])
+        view = members.build_tw_members(out, '半導體')
+        self.assertEqual([row['code'] for row in view['rows']], ['2330'])
+        self.assertIn('分類母體為上市四碼證券，含存託憑證', view['scopeLabel'])
+        self.assertIn('分類未完整', view['scopeLabel'])
 
 
 class 選股交易所尾碼測試(unittest.TestCase):

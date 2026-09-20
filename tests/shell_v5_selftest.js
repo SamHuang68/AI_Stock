@@ -167,11 +167,12 @@ ok(/src\/core\/market_intel_v5\.js/.test(build) && /window\.MarketIntelV5/.test(
 ok(/linkNewsToWatchlist/.test(decisionUi) && /dc-news-watch/.test(decisionUi) && /bindNewsLinks/.test(decisionUi) &&
   /MarketIntelV5/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')),
   'decision and pulse share one direct/theme News Impact watchlist contract');
-ok(/成交口徑：上市普通股產業內占比/.test(decisionUi) && /historyDates/.test(decisionUi) &&
+ok(/上市四碼證券（含存託憑證；未分類仍計入成交分母）/.test(decisionUi) && /historyDates/.test(decisionUi) &&
+  /TWSE_FOUR_DIGIT_SECURITIES_BY_INDUSTRY/.test(decisionUi) && /TWSE_COMMON_STOCKS_BY_INDUSTRY/.test(decisionUi) &&
   /turnoverEligible/.test(decisionUi) && /industryTurnoverYi/.test(server) && /sector_history/.test(server) &&
-  /TWSE_COMMON_STOCKS_BY_INDUSTRY/.test(sectorFlow) && /normalize_session_date/.test(sectorFlow) &&
+  /TWSE_FOUR_DIGIT_SECURITIES_BY_INDUSTRY/.test(sectorFlow) && /normalize_session_date/.test(sectorFlow) &&
   /turnoverSessionMatched/.test(server) && /enrich_sector_rows/.test(sectorHistory),
-  'sector flow exposes official-industry turnover scope and persistent RS20 readiness');
+  '產業資金流明示含存託憑證的分類母體、相容舊範圍代碼並保留 RS20 建置狀態');
 ok(/情境訊號矩陣/.test(decisionUi) && /Evidence Ledger/.test(decisionUi) && /Risk Profile/.test(decisionUi) &&
   /positionRange/.test(decisionUi) && /observation_pool/.test(decisionUi) &&
   /observation_pool_not_risk_overlay/.test(decisionUi) && /breadthTrendHtml/.test(decisionUi),

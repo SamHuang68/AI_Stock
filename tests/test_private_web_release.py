@@ -185,6 +185,7 @@ class PrivateWebReleaseTests(unittest.TestCase):
             'tests/ai_panels_selftest.js', 'tests/台股即時報價_selftest.js',
             'tests/LIVE報價一致性_selftest.js', 'tests/新增_selftest.js',
             'tests/wavedeck_onepage_selftest.js',
+            'tests/分類範圍標示_selftest.js',
         ]
         extras = {'wavedeck/web/css/deck.css', 'START_WAVEDECK.cmd'}
         calls = []
