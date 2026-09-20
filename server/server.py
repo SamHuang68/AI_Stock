@@ -146,6 +146,7 @@ def _fundamental_trace(event, **fields):
             'correlationId', 'symbol', 'market', 'kind', 'model', 'source',
             'cache', 'score', 'sampleCount', 'hasRevenue', 'hasIncome',
             'stateBefore', 'stateAfter', 'error', 'elapsedMs',
+            'method', 'httpStatus', 'contentType', 'responseBytes',
         )
         row = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'event': event}
         row.update({k: fields.get(k) for k in allowed if k in fields})
@@ -782,6 +783,36 @@ def _get_tw_universe():
 _TW_NAMES = {'date': None, 'map': {}}
 
 
+def _fetch_tw_reference_rows(url, purpose, timeout=20):
+    """核對官方名稱／分類總表，將 HTTP 與資料格式結果保存在既有診斷紀錄。"""
+    started = time.monotonic()
+    fields = {'correlationId': uuid.uuid4().hex, 'kind': purpose,
+              'source': url, 'method': 'GET', 'stateBefore': 'fetching'}
+    _fundamental_trace('對照來源開始', **fields)
+    try:
+        request = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            fields.update(httpStatus=response.status, contentType=response.headers.get_content_type())
+            raw = response.read(8 * 1024 * 1024 + 1)
+        fields['responseBytes'] = len(raw)
+        if len(raw) > 8 * 1024 * 1024:
+            raise ValueError('官方對照表超過大小上限')
+        if fields['contentType'] not in ('application/json', 'text/json'):
+            raise ValueError('官方對照表未回傳 JSON')
+        rows = json.loads(raw)
+        if not isinstance(rows, list) or not rows or any(not isinstance(row, dict) for row in rows):
+            raise ValueError('官方對照表格式無效或沒有資料')
+        _fundamental_trace('對照來源完成', **fields, sampleCount=len(rows), stateAfter='ready',
+                           elapsedMs=round((time.monotonic() - started) * 1000))
+        return rows
+    except Exception as error:
+        if isinstance(error, urllib.error.HTTPError):
+            fields['httpStatus'] = error.code
+        _fundamental_trace('對照來源失敗', **fields, stateAfter='unavailable', error=type(error).__name__,
+                           elapsedMs=round((time.monotonic() - started) * 1000))
+        raise
+
+
 def _extract_tw_name_pairs(rows, code_keys, name_keys):
     """只從具名代號／名稱欄位擷取台股名稱，禁止把價格等四位數值誤認成股票代號。"""
     out = {}
@@ -802,8 +833,10 @@ def _get_tw_names():
     today = _date.today().strftime('%Y%m%d')
     if _TW_NAMES['date'] == today and _TW_NAMES['map']:
         return _TW_NAMES['map']
+    if time.monotonic() < _TW_NAMES.get('retryAt', 0):
+        return _TW_NAMES['map']
     
-    m = {}
+    m = dict(_TW_NAMES['map']) if isinstance(_TW_NAMES.get('map'), dict) else {}
     # ── 本地備份讀取防線 ────────────────────────────────────
     # 優先載入上次成功儲存的名稱對照表，確保即使 OpenAPI 斷連或限流，依然有完整的股票代號可用
     data_dir = os.path.join(_BASE, 'data')
@@ -811,27 +844,40 @@ def _get_tw_names():
     if os.path.exists(backup_path):
         try:
             with open(backup_path, 'r', encoding='utf-8') as f:
-                m = json.load(f)
+                backup = json.load(f)
+            if not isinstance(backup, dict):
+                raise ValueError('名稱備份必須是代號對照表')
+            for code, name in backup.items():
+                if isinstance(code, str) and isinstance(name, str) and code and name.strip():
+                    m.setdefault(code, name)
         except Exception:
             pass
 
+    refreshed = set()
+    completed = []
+
     def scan(url, code_keys, name_keys):
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
-            with urllib.request.urlopen(req, timeout=20) as r:
-                arr = json.loads(r.read())
-            for code, name in _extract_tw_name_pairs(arr, code_keys, name_keys).items():
-                if code not in m:
+            arr = _fetch_tw_reference_rows(url, '名稱')
+            pairs = _extract_tw_name_pairs(arr, code_keys, name_keys)
+            if not pairs:
+                raise ValueError('官方名稱對照沒有有效代號與名稱')
+            for code, name in pairs.items():
+                if code not in refreshed:
                     m[code] = name
+                    refreshed.add(code)
+            completed.append(True)
         except Exception as e:
+            completed.append(False)
             print(f'[names] scan failed {url}: {e}')
 
     scan('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL', ('Code',), ('Name', '名稱', '證券名稱'))
     scan('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes',
          ('SecuritiesCompanyCode', 'Code', 'CompanyCode', '公司代號'),
          ('CompanyName', 'SecuritiesCompanyName', '公司名稱', '公司簡稱', 'Name', '名稱'))
-    for ds in ('t187ap05_L', 't187ap05_O'):
-        scan(f'https://openapi.twse.com.tw/v1/opendata/{ds}', ('公司代號', 'Code'), ('公司名稱', '公司簡稱', 'Name'))
+    from 台股基本面 import REVENUE_DATASETS, dataset_url
+    for ds in REVENUE_DATASETS:
+        scan(dataset_url(ds), ('公司代號', 'Code'), ('公司名稱', '公司簡稱', 'Name'))
     
     if m:
         # ── 「只增不減」安全覆寫 ──────────────────────────────
@@ -847,7 +893,9 @@ def _get_tw_names():
         except Exception as e:
             print('[names] backup save failed:', e)
             
-        _TW_NAMES['date'] = today; _TW_NAMES['map'] = m
+        _TW_NAMES['map'] = m
+    _TW_NAMES['date'] = today if all(completed) else None
+    _TW_NAMES['retryAt'] = 0 if all(completed) else time.monotonic() + 60
     return m
 
 
@@ -910,26 +958,34 @@ _TECH_SECTORS = {'半導體業', '電腦及週邊設備業', '光電業', '通�
 
 def _get_tw_sectors():
     from datetime import date as _date
+    from 台股基本面 import REVENUE_DATASETS, dataset_url
     today = _date.today().strftime('%Y%m%d')
     if _TW_SECTORS['date'] == today and _TW_SECTORS['map']:
         return _TW_SECTORS['map']
-    m = {}
-    for ds in ('t187ap05_L', 't187ap05_O'):
+    if time.monotonic() < _TW_SECTORS.get('retryAt', 0):
+        return _TW_SECTORS['map']
+    m = dict(_TW_SECTORS['map'])
+    completed = []
+    for ds in REVENUE_DATASETS:
         try:
-            url = f'https://openapi.twse.com.tw/v1/opendata/{ds}'
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
-            with urllib.request.urlopen(req, timeout=15) as r:
-                arr = json.loads(r.read())
+            arr = _fetch_tw_reference_rows(dataset_url(ds), '產業', timeout=15)
+            pairs = {}
             for row in arr:
-                code = (row.get('公司代號') or '').strip()
-                ind = (row.get('產業別') or '').strip()
-                if code and ind:
-                    m[code] = ind
+                code = str(row.get('公司代號') or '').strip()
+                ind = str(row.get('產業別') or '').strip()
+                if _CODE4.fullmatch(code) and ind:
+                    pairs[code] = ind
+            if not pairs:
+                raise ValueError('官方產業對照沒有有效代號與分類')
+            m.update(pairs)
+            completed.append(True)
         except Exception as e:
+            completed.append(False)
             print(f'[sectors] {ds} failed: {e}')
     if m:
-        _TW_SECTORS['date'] = today
         _TW_SECTORS['map'] = m
+    _TW_SECTORS['date'] = today if all(completed) else None
+    _TW_SECTORS['retryAt'] = 0 if all(completed) else time.monotonic() + 60
     return m
 
 def _pick_num(row, includes, excludes=()):
@@ -1146,7 +1202,7 @@ def _is_index_sym(sym: str) -> bool:
 
 def _is_tw_index_sym(sym: str) -> bool:
     """台股大盤指數（可走大盤體質評分）。美股 ^GSPC 等不可誤套。"""
-    s = (sym or '').strip().upper().replace('.TW', '').replace('.TWO', '')
+    s = (sym or '').strip().upper().removesuffix('.TWO').removesuffix('.TW')
     return s in ('^TWII', '^TWOII', 'TWII', 'TWOII', 'TAIEX', '^TAIEX')
 
 
@@ -1158,7 +1214,7 @@ def _is_macro_sym(sym: str) -> bool:
 def _is_tw_market_fund_sym(sym: str) -> bool:
     """可計算「大盤體質」的代號：台指／融資維持／台股合成序列。
        融資週期（__TW_MARGIN_CYCLE__）為獨立指標，不含在內。"""
-    s = (sym or '').strip().upper().replace('.TW', '').replace('.TWO', '')
+    s = (sym or '').strip().upper().removesuffix('.TWO').removesuffix('.TW')
     if s in ('__TW_MARGIN_CYCLE__', '__MARGIN_CYCLE__'):
         return False
     if _is_tw_index_sym(s):
@@ -1431,7 +1487,7 @@ def _build_tw_market_fundamental(sym: str) -> dict:
     """^TWII / ^TWOII / __MARGIN_RATIO__ 大盤體質評分 payload。"""
     from datetime import date as _date
     today = _date.today().strftime('%Y%m%d')
-    clean = (sym or '').replace('.TW', '').replace('.TWO', '').strip().upper()
+    clean = (sym or '').removesuffix('.TWO').removesuffix('.TW').strip().upper()
     out = {
         'symbol': sym,
         'code': clean,
@@ -2052,12 +2108,12 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
                 continue
             close = fnum(r.get('ClosingPrice'))
             chg = fnum(r.get('Change'))
-            if include_rows and is_stock:
+            if is_stock:
                 previous = close - chg if close is not None and chg is not None else None
                 member_rows.append({
                     'code': code, 'name': name, 'price': close, 'change': chg,
                     'changePct': round(chg / previous * 100.0, 2) if previous else None,
-                    'mkt': 'TW', 'ex': 'TWSE', 'asOf': r.get('Date'),
+                    'mkt': 'TW', 'ex': 'TWSE', 'asOf': r.get('Date'), 'value': fnum(r.get('TradeValue')),
                 })
             if close is None or chg is None:
                 continue
@@ -2221,17 +2277,34 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
     _tag_industry(member_rows)
     _tag_industry(limit_up)
     _tag_industry(limit_down)
+    classification_rows = member_rows
+    classification_codes = {str(r.get('code') or '') for r in classification_rows
+                            if r.get('ex') == 'TWSE' and _CODE4.fullmatch(str(r.get('code') or ''))}
+    classified_codes = {str(r.get('code') or '') for r in classification_rows
+                        if str(r.get('code') or '') in classification_codes and r.get('industry')
+                        and r.get('ex') == 'TWSE'}
+    classification_coverage = (100.0 * len(classified_codes) / len(classification_codes)
+                               if classification_codes else 0.0)
     # 同日上市普通股成交額依官方產業分類聚合；這是產業成交占比的分子與同 scope 分母。
     # ETF／權證／上櫃不混入，避免把不同市場範圍相除。
     industry_turnover_ntd = {}
     industry_stock_count = {}
+    total_turnover_ntd = 0.0
+    has_turnover = False
     try:
         import sector_flow as _sector_turnover_flow
-        for r in rows:
+        for r in member_rows:
             code = str(r.get('code') or '')
             value = r.get('value')
             industry = r.get('industry')
-            if r.get('ex') != 'TWSE' or not _CODE4.match(code) or value is None or not industry:
+            if r.get('ex') != 'TWSE' or not _CODE4.fullmatch(code) or value is None:
+                continue
+            value = float(value)
+            if not math.isfinite(value) or value < 0:
+                continue
+            total_turnover_ntd += value
+            has_turnover = True
+            if not industry:
                 continue
             key_ind = _sector_turnover_flow.normalize_sector_name(industry)
             industry_turnover_ntd[key_ind] = industry_turnover_ntd.get(key_ind, 0.0) + float(value)
@@ -2240,8 +2313,9 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
         print('[movers] industry turnover aggregate', e)
         industry_turnover_ntd = {}
         industry_stock_count = {}
+        has_turnover = False
     industry_turnover_yi = {k: round(v / 1e8, 3) for k, v in industry_turnover_ntd.items()}
-    industry_turnover_total_yi = round(sum(industry_turnover_ntd.values()) / 1e8, 3) if industry_turnover_ntd else None
+    industry_turnover_total_yi = round(total_turnover_ntd / 1e8, 3) if has_turnover else None
     gainers = _tag_industry(rows[:n])
     losers = _tag_industry(list(reversed(rows[-n:])))
 
@@ -2259,14 +2333,17 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
         'industryTurnoverYi': industry_turnover_yi,
         'industryTurnoverTotalYi': industry_turnover_total_yi,
         'industryTurnoverStockCount': industry_stock_count,
+        'classificationCount': len(classified_codes),
+        'classificationTotal': len(classification_codes),
+        'classificationCoveragePct': round(classification_coverage, 2),
+        'classificationComplete': bool(classification_codes) and classified_codes == classification_codes,
         'industryTurnoverDate': date_s,
         'tpexDate': tpex_date_s,
         'industryTurnoverSource': (
             'TWSE MI_INDEX ALLBUT0999 dated TradeValue + issuer industry classification'
             if target_date else
             'TWSE STOCK_DAY_ALL TradeValue + issuer industry classification'),
-        **({'rows': member_rows, 'twseAvailable': twse_rows is not None,
-            'classificationCount': len(smap)} if include_rows else {}),
+        **({'rows': member_rows, 'twseAvailable': twse_rows is not None} if include_rows else {}),
     }
 
 
@@ -3439,6 +3516,10 @@ def _build_pulse_update(job_id: str, guard) -> dict:
             source=_sec_source + ((' + ' + _turnover_source) if _turnover_source else ''),
             as_of=(sec or {}).get('date') if isinstance(sec, dict) else out.get('date'),
             total_turnover_yi=_industry_turnover_total,
+            classification_coverage_pct=(movers.get('classificationCoveragePct')
+                if isinstance(movers, dict) and _same_turnover_session else None),
+            classification_complete=(movers.get('classificationComplete')
+                if isinstance(movers, dict) and _same_turnover_session else None),
             benchmark_return20_pct=_sec_hist_status.get('benchmarkReturn20Pct'),
             proxy_basket=('proxy' in str(_sec_source).lower()),
         )
@@ -5108,7 +5189,9 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
     def _handle_chip(self, sym):
         """法人籌碼面板 — 委派 chip_api（全市場快照 + 熔斷 + 非個股短路）。"""
         import chip_api as ca
-        clean = sym.replace('.TW', '').replace('.TWO', '').strip().upper()
+        clean = sym.strip().upper()
+        if clean.endswith(('.TW', '.TWO')):
+            clean = clean.rsplit('.', 1)[0]
         from datetime import date as _date
         today = _date.today().strftime('%Y%m%d')
         # 個股短快取（全市場表另有 30 分快照）
@@ -5186,7 +5269,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         _fundamental_trace('request_received', correlationId=trace_id, symbol=sym,
                            stateBefore='unclassified')
         today = _date.today().strftime('%Y%m%d')
-        clean = sym.replace('.TW', '').replace('.TWO', '').strip().upper()
+        clean = sym.removesuffix('.TWO').removesuffix('.TW').strip().upper()
         # 籌碼集中度圖（__HOLDERS_2330__）
         try:
             import tdcc_holders as th
@@ -5444,7 +5527,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         from datetime import date as _date
         import international_fundamental as intl
         today = _date.today().strftime('%Y%m%d')
-        clean = sym.replace('.TW', '').replace('.TWO', '').strip().upper()
+        clean = sym.removesuffix('.TWO').removesuffix('.TW').strip().upper()
         market = intl.market_of_symbol(sym)
         is_tw = market == 'TW'
         key = f'val:{clean}:{today}'
@@ -5751,7 +5834,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
            ?code=2330 可只看單檔除權息。"""
         from datetime import date as _date, timedelta
         qs = parse_qs(urlparse(self.path).query)
-        code = (qs.get('code', [''])[0]).replace('.TW', '').replace('.TWO', '').strip().upper()
+        code = (qs.get('code', [''])[0]).removesuffix('.TWO').removesuffix('.TW').strip().upper()
         today = _date.today()
         key = f'events:{today.strftime("%Y%m%d")}:{code}'
         c = _cache.get(key)
@@ -6309,7 +6392,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                 scanned += 1
                 ind = self._calc_ind(closes, highs, lows, vols)
                 bscore, bsig, sscore, ssig = self._focus_score(ind)
-                clean = str(code).replace('.TW', '').replace('.TWO', '')
+                clean = str(code).removesuffix('.TWO').removesuffix('.TW')
                 name = (name_map.get(clean)
                         or meta.get('shortName')
                         or meta.get('symbol')
@@ -6375,12 +6458,12 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                     smap = _get_tw_sectors()
                     want = _TECH_SECTORS if sector == '__TECH__' else {sector}
                     codes = [s for s in codes
-                             if smap.get(str(s).replace('.TW', '').replace('.TWO', '')) in want]
+                             if smap.get(str(s).removesuffix('.TWO').removesuffix('.TW')) in want]
                 except Exception:
                     pass
             yf_by_code = {}
             for s in codes:
-                c = str(s).replace('.TW', '').replace('.TWO', '')
+                c = str(s).removesuffix('.TWO').removesuffix('.TW')
                 yf_by_code[c] = c + '.TW' if not str(s).endswith(('.TW', '.TWO')) else str(s)
             try:
                 name_map = _get_tw_names()
@@ -6408,7 +6491,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             market = (qs.get('market', ['TW'])[0]).strip() or 'TW'
             if not sym or market not in ('TW', 'US') or len(sym) > 24:
                 self._err('股票代號或市場無效', 400); return
-            code = sym.replace('.TW', '').replace('.TWO', '')
+            code = sym.removesuffix('.TWO').removesuffix('.TW')
             rows = []
             try:
                 import datastore
@@ -6605,7 +6688,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._err('no holdings', 400); return
         try:
             import portfolio, datastore
-            codes = [str(h.get('sym', '')).replace('.TW', '').replace('.TWO', '') for h in holdings]
+            codes = [str(h.get('sym', '')).removesuffix('.TWO').removesuffix('.TW') for h in holdings]
             for c in [x for x in codes if x] + ['^TWII']:   # 確保持倉+大盤基準在 DB
                 try:
                     r = datastore.get_bars(c)
@@ -6644,7 +6727,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             try:
                 smap = _get_tw_sectors()
                 want = _TECH_SECTORS if sector == '__TECH__' else {sector}
-                syms = [s for s in syms if smap.get(str(s).replace('.TW', '').replace('.TWO', '')) in want]
+                syms = [s for s in syms if smap.get(str(s).removesuffix('.TWO').removesuffix('.TW')) in want]
             except Exception as e:
                 print('[screener] sector filter failed:', e)
         # v4.0:一次把全宇集在 DB 的 bars 撈出(單一查詢,秒級);DB 沒有的才退回 Yahoo(DB 空時零差異)
@@ -6653,11 +6736,11 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         need_yahoo = []
         try:
             import datastore
-            _db_all = datastore.get_bars_bulk([str(s).replace('.TW', '').replace('.TWO', '') for s in syms])
+            _db_all = datastore.get_bars_bulk([str(s).removesuffix('.TWO').removesuffix('.TW') for s in syms])
         except Exception:
             _db_all = {}
         for _s in syms:
-            _code = str(_s).replace('.TW', '').replace('.TWO', '')
+            _code = str(_s).removesuffix('.TWO').removesuffix('.TW')
             _rows = _db_all.get(_code)
             if not _rows or len(_rows) < 70:
                 need_yahoo.append(_s); continue
@@ -6699,7 +6782,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         _yahoo_truncated = max(0, len(need_yahoo) - _yahoo_cap)
         need_yahoo = need_yahoo[:_yahoo_cap]
         # Fetch DB-misses in parallel using existing fetch_one with nocache=True
-        futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith('.TW') else s, nocache=True): s for s in need_yahoo}
+        futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith(('.TW', '.TWO')) else s, nocache=True): s for s in need_yahoo}
         for fut in as_completed(futures):
             sym, data, _ = fut.result()
             if not data: continue
@@ -6752,8 +6835,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                 _chg = ((closes[-1] - _pc) / _pc * 100) if (_pc and _pc > 0) else ind['changePct']
                 if self._screener_match(preset or custom, ind, closes, highs, vols):
                     results.append({
-                        'sym': sym.replace('.TW','').replace('.TWO',''),
-                        'name': _get_tw_names().get(sym.replace('.TW','').replace('.TWO','')) or meta.get('shortName') or meta.get('symbol') or sym,
+                        'sym': sym.removesuffix('.TWO').removesuffix('.TW'),
+                        'name': _get_tw_names().get(sym.removesuffix('.TWO').removesuffix('.TW')) or meta.get('shortName') or meta.get('symbol') or sym,
                         'close': ind['close'], 'changePct': round(_chg, 2),
                         'rsi14': round(ind['rsi14'],1) if ind['rsi14'] else None,
                         'volRatio': round(ind['volRatio'],2) if ind['volRatio'] else None,
@@ -7572,13 +7655,13 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             try:
                 smap = _get_tw_sectors()
                 want = _TECH_SECTORS if sector == '__TECH__' else {sector}
-                syms = [s for s in syms if smap.get(str(s).replace('.TW', '').replace('.TWO', '')) in want]
+                syms = [s for s in syms if smap.get(str(s).removesuffix('.TWO').removesuffix('.TW')) in want]
             except Exception as e:
                 print('[screen3] sector filter failed:', e)
 
         # ── 1) 技術面：平行抓 K 線 + _calc_ind，先篩出 survivors ──
         survivors = []
-        futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith('.TW') else s): s for s in syms}
+        futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith(('.TW', '.TWO')) else s): s for s in syms}
         for fut in as_completed(futures):
             sym, data, _ = fut.result()
             if not data:
@@ -7611,8 +7694,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                 if not self._screen3_tech(tech, ind):
                     continue
                 survivors.append({
-                    'sym': sym.replace('.TW', '').replace('.TWO', ''),
-                    'name': _get_tw_names().get(sym.replace('.TW', '').replace('.TWO', '')) or meta.get('shortName') or meta.get('symbol') or sym,
+                    'sym': sym.removesuffix('.TWO').removesuffix('.TW'),
+                    'name': _get_tw_names().get(sym.removesuffix('.TWO').removesuffix('.TW')) or meta.get('shortName') or meta.get('symbol') or sym,
                     'ind': ind,
                 })
             except Exception:
@@ -7883,4 +7966,3 @@ if __name__ == '__main__':
     finally:
         _pulse_updates.stop(timeout=2.0)
         _http_server.server_close()
-

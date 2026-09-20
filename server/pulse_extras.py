@@ -12,11 +12,14 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import time
 import urllib.request
-from datetime import date, timedelta
+import urllib.error
+from contextlib import closing
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
@@ -299,9 +302,112 @@ _NHNL_UNIVERSE = [
 ]
 
 
+def _nhnl_close(value) -> Optional[float]:
+    """沿用日線骨幹的有效收盤限制，不把 NaN／無限值／非正價算成有效歷史。"""
+    if isinstance(value, bool):
+        return None
+    number = _fnum(value)
+    return number if number is not None and math.isfinite(number) and number > 0 else None
+
+
+def _nhnl_session(timestamp) -> Optional[str]:
+    try:
+        return datetime.fromtimestamp(float(timestamp), timezone(timedelta(hours=8))).date().isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _nhnl_daily_closes(values, timestamps, latest_session=None):
+    """同一臺灣交易日僅保留一根；無日期資料不能證明有 250 個日線樣本。"""
+    by_day = {}
+    for timestamp, value in zip(timestamps, values):
+        session, close = _nhnl_session(timestamp), _nhnl_close(value)
+        if session and close is not None and (not latest_session or session <= latest_session):
+            by_day[session] = close
+    days = sorted(by_day)
+    return [by_day[day] for day in days], days[-1] if days else None
+
+
+def _nhnl_yahoo_closes(code: str, deadline: Deadline):
+    """既有 Yahoo chart 補足路徑；與 quote_api 相同，404 直接換 TW／TWO 後綴。"""
+    symbol = str(code).strip().upper()
+    if symbol.endswith('.TWO'):
+        candidates = [symbol, symbol[:-4] + '.TW']
+    elif symbol.endswith('.TW'):
+        candidates = [symbol, symbol[:-3] + '.TWO']
+    else:
+        candidates = [symbol + '.TW', symbol + '.TWO']
+    # 只記住曾取得足夠有效歷史的代號；重複刷新不必再碰已證實錯誤的後綴。
+    resolved = _cache_get('nhnl-symbol:' + symbol, 86400)
+    if resolved in candidates:
+        candidates.remove(resolved)
+        candidates.insert(0, resolved)
+    detail = {'status': 'source_error', 'attempts': []}
+    for candidate in candidates:
+        for host in ('query1', 'query2'):
+            remaining = deadline.remaining()
+            if remaining <= 0:
+                detail['status'] = 'timeout'
+                return code, None, detail
+            url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{candidate}?range=2y&interval=1d'
+            attempt = {'symbol': candidate, 'host': host, 'url': url}
+            started = time.monotonic()
+            next_symbol = False
+            try:
+                payload = _http_json(url, timeout=min(6.0, remaining))
+                attempt['httpStatus'] = 200
+                if deadline.expired():
+                    attempt['outcome'] = 'late_response'
+                    detail['status'] = 'timeout'
+                    return code, None, detail
+                chart = payload.get('chart') or {}
+                result = chart.get('result') or []
+                if not result:
+                    error = chart.get('error') or {}
+                    attempt['outcome'] = 'chart_error' if error else 'empty_result'
+                    attempt['error'] = error
+                    next_symbol = error.get('code') == 'Not Found'
+                else:
+                    item = result[0]
+                    returned = (item.get('meta') or {}).get('symbol')
+                    if returned and str(returned).upper() != candidate:
+                        attempt.update(outcome='symbol_mismatch', returnedSymbol=returned)
+                    else:
+                        values = (((item.get('indicators') or {}).get('quote') or [{}])[0].get('close') or [])
+                        timestamps = item.get('timestamp') or []
+                        regular = (((item.get('meta') or {}).get('currentTradingPeriod') or {}).get('regular') or {})
+                        declared_session = _nhnl_session(regular.get('start'))
+                        # Yahoo 偶爾附上晚於其宣告交易日的 regularMarketTime 點，不能充當另一根日線。
+                        ignored = sum(bool(day and declared_session and day > declared_session)
+                                      for day in map(_nhnl_session, timestamps))
+                        closes, session = _nhnl_daily_closes(values, timestamps, declared_session)
+                        status = 'ok' if len(closes) >= NHNL_MIN_BARS else 'insufficient_history'
+                        attempt.update(outcome=status, validBars=len(closes))
+                        detail.update(status=status, symbol=candidate, source='Yahoo chart', sessionDate=session, validBars=len(closes),
+                                      declaredSessionDate=declared_session, ignoredAfterSessionN=ignored)
+                        if status == 'ok':
+                            _cache_set('nhnl-symbol:' + symbol, candidate)
+                        return code, closes if status == 'ok' else None, detail
+            except urllib.error.HTTPError as error:
+                attempt.update(httpStatus=error.code, outcome='http_error', errorType=type(error).__name__)
+                next_symbol = error.code == 404
+            except Exception as error:
+                attempt.update(outcome='request_error', errorType=type(error).__name__)
+            finally:
+                attempt['elapsedMs'] = round((time.monotonic() - started) * 1000, 1)
+                detail['attempts'].append(attempt)
+                if attempt.get('outcome') != 'ok':
+                    print('[pulse-extras] nhnl yahoo', json.dumps(attempt, ensure_ascii=False))
+            if next_symbol:
+                break
+    return code, None, detail
+
+
 def count_nhnl(closes_map: Dict[str, List[float]], min_bars: int = NHNL_MIN_BARS) -> Optional[Dict[str, Any]]:
     """流動性樣本 NHNL。不足 min_bars 的序列排除；樣本 < NHNL_MIN_SAMPLE → None。"""
-    usable = {c: closes for c, closes in closes_map.items() if closes and len(closes) >= min_bars}
+    clean = {c: [number for value in (closes or []) if (number := _nhnl_close(value)) is not None]
+             for c, closes in closes_map.items()}
+    usable = {c: closes for c, closes in clean.items() if len(closes) >= min_bars}
     if len(usable) < NHNL_MIN_SAMPLE:
         return None
     nh = nl = 0
@@ -319,7 +425,7 @@ def count_nhnl(closes_map: Dict[str, List[float]], min_bars: int = NHNL_MIN_BARS
             nl += 1
     return {
         'ok': True,
-        'date': date.today().isoformat(),
+        'date': None,  # 計算日不等於資料日期，由來源呼叫者填入實際交易日。
         'newHighs': nh,
         'newLows': nl,
         'sampleN': len(usable),
@@ -338,61 +444,59 @@ def fetch_nhnl_sample(ttl: float = 3600) -> Optional[Dict[str, Any]]:
         return hit
 
     rows_map: Dict[str, List[float]] = {}
+    source_dates: Dict[str, str] = {}
     db_path = os.path.join(_BASE, 'data', 'market.db')
     if os.path.isfile(db_path):
         try:
             import sqlite3
-            with sqlite3.connect(db_path, timeout=5) as con:
+            with closing(sqlite3.connect(db_path, timeout=5)) as con:
                 for code in _NHNL_UNIVERSE:
                     bars = con.execute(
-                        'SELECT close FROM bars WHERE symbol=? AND market=? ORDER BY ts ASC',
+                        'SELECT ts,close FROM bars WHERE symbol=? AND market=? ORDER BY ts ASC',
                         (code, 'TW')).fetchall()
-                    closes = [float(r[0]) for r in bars if r and r[0] is not None]
+                    closes, session = _nhnl_daily_closes([r[1] for r in bars], [r[0] for r in bars])
                     if len(closes) >= NHNL_MIN_BARS:
                         rows_map[code] = closes
+                        if session:
+                            source_dates[code] = session
         except Exception as e:
             print('[pulse-extras] nhnl db', type(e).__name__, e)
 
-    source = 'market.db'
+    db_n = len(rows_map)
     need = [c for c in _NHNL_UNIVERSE if c not in rows_map]
+    details, outcomes = {}, {}
+    yahoo_n = 0
     if need:
-        source = 'market.db+yahoo' if rows_map else 'yahoo'
         deadline = Deadline(NHNL_YAHOO_BUDGET)
-
-        def _one(code: str):
-            """直連 Yahoo chart，避免 import server 造成循環依賴。"""
-            for host in ('query1', 'query2'):
-                if deadline.expired():
-                    return code, None
-                # 2y 確保交易日 ≥250；不足仍排除，不冒充 250 日
-                url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{code}.TW?range=2y&interval=1d'
-                try:
-                    j = _http_json(url, timeout=min(6.0, max(0.25, deadline.remaining())))
-                    res = (j.get('chart') or {}).get('result') or []
-                    if not res:
-                        continue
-                    cls = ((res[0].get('indicators') or {}).get('quote') or [{}])[0].get('close') or []
-                    closes = [float(x) for x in cls if x is not None]
-                    # 鐵律：不足 250 根不得冒充 250 日新高／新低
-                    return code, closes if len(closes) >= NHNL_MIN_BARS else None
-                except Exception as e:
-                    print('[pulse-extras] nhnl yahoo', code, host, type(e).__name__)
-            return code, None
-
-        jobs = {code: _NHNL_EXECUTOR.submit(_one, code) for code in need[:36]}
+        jobs = {code: _NHNL_EXECUTOR.submit(_nhnl_yahoo_closes, code, deadline) for code in need[:36]}
         results, outcomes = collect_named(
             jobs, timeout=deadline.remaining(), executor=_NHNL_EXECUTOR)
         for code, item in results.items():
-            result_code, closes = item
+            result_code, closes, detail = item
+            details[code] = detail
             if closes:
                 rows_map[result_code or code] = closes
+                yahoo_n += 1
+                if detail.get('sessionDate'):
+                    source_dates[code] = detail['sessionDate']
         if any(value != 'ok' for value in outcomes.values()):
             print('[pulse-extras] nhnl bounded outcomes', outcomes)
 
     out = count_nhnl(rows_map)
     if out:
-        out['source'] = source
+        out['source'] = 'market.db+yahoo' if db_n and yahoo_n else ('market.db' if db_n else 'yahoo')
+        out['date'] = max(source_dates.values()) if source_dates else None
+        out['dateBasis'] = 'latest_observed_session'
+        out['calculatedAt'] = datetime.now(timezone.utc).isoformat()
+        out['freshnessVerified'] = False
+        out['note'] += '；來源效期未驗證'
+        out['sourceDetails'] = {'marketDbN': db_n, 'yahooN': yahoo_n, 'sourceDates': source_dates,
+                                'missingSymbols': [c for c in _NHNL_UNIVERSE if c not in rows_map],
+                                'notAttempted': need[36:], 'yahoo': details, 'outcomes': outcomes}
         _cache_set(ck, out)
+    else:
+        print('[pulse-extras] nhnl unavailable', json.dumps({'sampleN': len(rows_map), 'minimumSampleN': NHNL_MIN_SAMPLE,
+              'missingSymbols': [c for c in _NHNL_UNIVERSE if c not in rows_map], 'outcomes': outcomes}, ensure_ascii=False))
     return out
 
 

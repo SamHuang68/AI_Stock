@@ -134,7 +134,8 @@ def holders_chart_id(code: str) -> str:
 
 
 def _norm_code(code: str) -> str:
-    return str(code or '').strip().upper().replace('.TW', '').replace('.TWO', '')
+    s = str(code or '').strip().upper()
+    return s.rsplit('.', 1)[0] if s.endswith(('.TW', '.TWO')) else s
 
 
 def is_holders_sym(sym: str) -> bool:

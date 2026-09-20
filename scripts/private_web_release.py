@@ -82,6 +82,10 @@ REQUIRED_RELEASE_FILES = {
     "assets/vendor/jspdf/4.2.1/LICENSE",
     "assets/vendor/jspdf/4.2.1/來源資訊.json",
     "tests/test_PDF匯出資產.py",
+    "tests/test_官方對照來源.py",
+    "tests/test_NHNL來源.py",
+    "tests/test_投組市場代號.py",
+    "tests/test_市場尾碼一致性.py",
 }
 PRIVATE_RELEASE_EXCLUDES = {"wavedeck", "START_WAVEDECK.cmd"}
 MANIFEST_NAME = ".private_web_release.json"
@@ -416,6 +420,15 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
             "tests.test_archify_artifacts",
             "tests.test_pdf_assets",
             "tests.test_PDF匯出資產",
+            "tests.test_官方對照來源",
+            "tests.test_NHNL來源",
+            "tests.test_投組市場代號",
+            "tests.test_市場尾碼一致性",
+            "tests.test_tw_name_integrity",
+            "tests.test_pulse_extras",
+            "tests.test_pulse_intel",
+            "tests.test_sector_flow",
+            "tests.test_類股成員",
         ]
         if run_tests:
             _run([python, "-m", "unittest", "-b", *tests], cwd=extracted)

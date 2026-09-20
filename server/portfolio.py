@@ -58,7 +58,9 @@ def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
     """holdings: [{'sym':code,'weight':w}](weight 可不正規化,內部正規化)。"""
     wmap = {}
     for h in holdings:
-        c = str(h.get('sym', '')).replace('.TW', '').replace('.TWO', '')
+        c = str(h.get('sym', ''))
+        if c.endswith(('.TW', '.TWO')):
+            c = c.rsplit('.', 1)[0]
         if c:
             wmap[c] = wmap.get(c, 0) + float(h.get('weight') or 1)
     codes = list(wmap.keys())
