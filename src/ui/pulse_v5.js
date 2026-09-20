@@ -2544,6 +2544,12 @@
     var closes = (((result.indicators || {}).quote || [])[0] || {}).close || [];
     return { meta: result.meta || {}, rows: (result.timestamp || []).map(function (time, i) {
       return { time: Number(time) * 1000, close: closes[i] };
+    }).filter(function (row) {
+      // Yahoo 偶爾附上週末報價時間；不可把它當成台股日線交易日。
+      var day = stockHealthDate(row.time);
+      if (!day) return false;
+      var weekday = new Date(day + 'T00:00:00Z').getUTCDay();
+      return weekday !== 0 && weekday !== 6;
     }) };
   }
 

@@ -412,6 +412,24 @@ test('舊健診顯示時保留尚未送出的代號，重繪後查詢實際輸�
   assert.match(h.text(), /6488 新輸入股票/); assert.equal(h.nodes.get('pl-stock-code').value, '6488');
 });
 
+test('Yahoo 週末尾列不當作台股交易日，櫃買代號與指數對齊最近兩個交易日', async () => {
+  const h = harness(); await h.submit('6488'); await complete(h.requests[0], { ok: false });
+  assert.equal(h.requests[1].path, '/bars?sym=6488&market=TW');
+  assert.equal(h.requests[2].path, '/yf/batch?syms=6488.TW%2C%5ETWII&range=1mo&interval=1d&nocache=1');
+  await complete(h.requests[1], { candles: [] });
+  const chart = (symbol, timestamp, close) => ({ chart: { result: [{ meta: { symbol, shortName: '歷史測試' },
+    timestamp, indicators: { quote: [{ close }] } }] } });
+  await complete(h.requests[2], {
+    '6488.TW': chart('6488.TWO', [1789606800, 1789693200, 1789876804], [912, 944, 944]),
+    '^TWII': chart('^TWII', [1789606800, 1789693200, 1789876875], [46288, 47180.75, 47368.0390625])
+  });
+  assert.match(h.text(), /6488.*\+3\.51%/);
+  assert.match(h.text(), /2026-09-17 → 2026-09-18/);
+  assert.match(h.text(), /同期加權指數 \+1\.93%.*相差 \+1\.58 個百分點/);
+  assert.match(h.text(), /資料日 2026-09-18/);
+  assert.doesNotMatch(h.text(), /\+0\.00%|→ 2026-09-20|資料日 2026-09-20/);
+});
+
 (async () => {
   let failures = 0;
   for (const item of cases) {
