@@ -92,12 +92,15 @@ def build_tw_members(snapshot: dict[str, Any], sector: str) -> dict[str, Any]:
     dates = {row['asOf'] for row in rows}
     day = next(iter(dates)) if len(dates) == 1 and None not in dates else None
     group = key in _GROUPS
+    incomplete = snapshot.get('classificationComplete') is False
     return {
         'ok': True, 'market': 'TW', 'sector': sector, 'sectorKey': key,
         'scope': 'TWSE_INDUSTRY_GROUP' if group else 'TWSE_INDUSTRY',
-        'scopeLabel': '上市電子相關產業個股' if group else '同產業上市個股',
+        'scopeLabel': ('上市電子相關產業個股' if group else '同產業上市個股') + ('（分類未完整）' if incomplete else ''),
         'date': day, 'source': QUOTE_SOURCE, 'classificationSource': CLASSIFICATION_SOURCE,
         'count': len(rows), 'rows': rows, 'unavailableReason': None,
+        'classificationCoveragePct': snapshot.get('classificationCoveragePct'),
+        'classificationComplete': snapshot.get('classificationComplete'),
     }
 
 

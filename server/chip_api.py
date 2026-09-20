@@ -425,7 +425,9 @@ def _tpex_inst(clean: str) -> Optional[dict]:
 
 def build_chip(sym: str) -> dict:
     """組出 /chip 回應 dict（呼叫端負責 HTTP cache／寫出）。"""
-    clean = (sym or '').replace('.TW', '').replace('.TWO', '').strip().upper()
+    clean = (sym or '').strip().upper()
+    if clean.endswith(('.TW', '.TWO')):
+        clean = clean.rsplit('.', 1)[0]
     today = date.today().strftime('%Y%m%d')
     if not is_equity_code(clean):
         return {
