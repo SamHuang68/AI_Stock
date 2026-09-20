@@ -9,6 +9,10 @@ from datetime import date
 from typing import Any, Iterable
 
 
+TWSE_TURNOVER_SCOPE = 'TWSE_FOUR_DIGIT_SECURITIES_BY_INDUSTRY'
+TWSE_TURNOVER_SCOPE_LABEL = '上市四碼證券（含存託憑證；未分類仍計入成交分母）'
+
+
 def _number(value: Any) -> float | None:
     try:
         value = float(str(value).replace(',', '').replace('+', '').strip())
@@ -105,7 +109,8 @@ def attach_sector_metrics(
             row['turnoverEligible'] = key in turnover and turnover.get(key) is not None
             if row['turnoverEligible']:
                 row['turnoverYi'] = turnover[key]
-                row['turnoverScope'] = 'TWSE_COMMON_STOCKS_BY_INDUSTRY'
+                row['turnoverScope'] = TWSE_TURNOVER_SCOPE
+                row['turnoverScopeLabel'] = TWSE_TURNOVER_SCOPE_LABEL
         if key in returns and returns[key] is not None:
             row['return20Pct'] = returns[key]
             row['return20Source'] = 'TWSE MI_INDEX IND daily close'
@@ -165,6 +170,7 @@ def build_sector_flow(
             'proxyBasket': bool(row.get('proxyBasket', proxy_basket)),
             'turnoverEligible': row.get('turnoverEligible'),
             'turnoverScope': row.get('turnoverScope'),
+            'turnoverScopeLabel': row.get('turnoverScopeLabel'),
             'return20Source': row.get('return20Source'),
         })
         rows.append(enriched)
@@ -192,6 +198,7 @@ def build_sector_flow(
         'classificationCoveragePct': classification_coverage_pct,
         'classificationComplete': classification_complete,
         'turnoverScope': next((x.get('turnoverScope') for x in rows if x.get('turnoverScope')), None),
+        'turnoverScopeLabel': next((x.get('turnoverScopeLabel') for x in rows if x.get('turnoverScopeLabel')), None),
         'top3SharePct': round(top3, 3) if top3 is not None else None,
         'hhi': round(hhi, 2) if hhi is not None else None,
         'rows': rows,

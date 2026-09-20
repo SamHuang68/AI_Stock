@@ -700,7 +700,7 @@ def _chip_history_record(clean_code, chip_out):
 _openapi_ds = {}   # dataset name → (date, {code: row})
 _openapi_retry = {}  # 暫時失敗只等待五分鐘，不鎖住整天。
 
-# ── 全台股普通股代號宇集（上市 TWSE + 上櫃 TPEx），當日快取 ──
+# ── 台股四碼證券代號宇集（上市 TWSE + 上櫃 TPEx，含存託憑證），當日快取 ──
 import re as _re
 def _round_px(p):
     """台股價格進位:< NT$50 保留 2 位小數(tick 0.01/0.05),>= 50 進到 1 位
@@ -736,7 +736,7 @@ def _db_screener_arrays(code):
 
 
 _TW_UNIVERSE = {'date': None, 'codes': []}
-_CODE4 = _re.compile(r'^[1-9]\d{3}$')   # 4 位數普通股；排除 ETF(00xxx)/權證(6 位)
+_CODE4 = _re.compile(r'^[1-9]\d{3}$')   # 四碼證券，含存託憑證；排除 ETF(00xxx)/權證(6 位)
 
 
 def _extract_tw_stock_codes(rows):
@@ -2099,7 +2099,7 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
             name = str(r.get('Name') or '').strip()
             if not code or not name:
                 continue
-            # 排除權證／牛熊（名稱含購售，或非 4 碼個股／00 開頭 ETF）
+            # 排除權證／牛熊（名稱含購售，或非四碼證券／00 開頭 ETF）
             if any(k in name for k in ('購', '售', '牛證', '熊證', '認購', '認售')):
                 continue
             is_stock = bool(_CODE4.match(code))
@@ -2240,7 +2240,7 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
 
     rows.sort(key=lambda x: x['changePct'], reverse=True)
     n = max(1, min(int(n or 8), 30))
-    # 近漲跌停近似清單：僅上市（TWSE）普通股、|漲跌|≥9.9%。
+    # 近漲跌停近似清單：上市（TWSE）四碼證券含存託憑證、|漲跌|≥9.9%。
     # 家數仍可能 ≠ 證交所 MI_INDEX「股票」欄括號（官方含特殊漲跌幅／撮合判定）。
     NEAR_LIMIT = 9.9
 
@@ -2285,8 +2285,8 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
                         and r.get('ex') == 'TWSE'}
     classification_coverage = (100.0 * len(classified_codes) / len(classification_codes)
                                if classification_codes else 0.0)
-    # 同日上市普通股成交額依官方產業分類聚合；這是產業成交占比的分子與同 scope 分母。
-    # ETF／權證／上櫃不混入，避免把不同市場範圍相除。
+    # 同日上市四碼證券含存託憑證；已分類成交額為分子，所有有效成交額（含未分類）為分母。
+    # ETF／權證／上櫃不混入；分類不完整時保留資料並禁止宣稱完整資金流。
     industry_turnover_ntd = {}
     industry_stock_count = {}
     total_turnover_ntd = 0.0
@@ -2327,7 +2327,7 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
         'limitUp': limit_up,
         'limitDown': limit_down,
         'limitThreshold': NEAR_LIMIT,
-        'limitNote': '近漲跌停近似：上市普通股 |漲跌|≥9.9%，不含 ETF／櫃買；家數≠證交所官方括號',
+        'limitNote': '近漲跌停近似：上市四碼證券（含存託憑證）|漲跌|≥9.9%，不含 ETF／櫃買；家數≠證交所官方括號',
         'source': 'TWSE STOCK_DAY_ALL + TPEx daily',
         'count': len(rows),
         'industryTurnoverYi': industry_turnover_yi,

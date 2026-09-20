@@ -1198,13 +1198,20 @@
     applyEvidenceFilter();
   }
 
+  function turnoverScopeLabel(scope) {
+    if (scope === 'TWSE_FOUR_DIGIT_SECURITIES_BY_INDUSTRY' || scope === 'TWSE_COMMON_STOCKS_BY_INDUSTRY') {
+      return '上市四碼證券（含存託憑證；未分類仍計入成交分母）';
+    }
+    return scope || '—';
+  }
+
   function sectorHtml(ctx) {
     var sf = ctx.sectorFlow || {}, rows = sf.rows || [];
     var hist = sf.historyStatus || {};
     var meta = '<div class="s">' + esc(sf.label || '—') + ' · scope ' + esc(sf.marketScope || '—') +
       ' · 上漲參與 ' + num(sf.participationPct, 1) + '% · 成交覆蓋 ' + num(sf.turnoverCoveragePct, 1) +
       '% · Top3 ' + num(sf.top3SharePct, 1) + '% · HHI ' + num(sf.hhi, 0) +
-      (sf.turnoverScope ? ' · 成交口徑：上市普通股產業內占比' : '') +
+      (sf.turnoverScope ? ' · 成交口徑：' + esc(turnoverScopeLabel(sf.turnoverScope)) : '') +
       ' · RS20 ' + (hist.rs20Available ? '完整' : ('建置 ' + num(hist.historyDates, 0) + '/21 交易日')) + '</div>';
     if (!rows.length) return meta;
     return meta + '<div class="dc-scroll" style="max-height:150px"><table><tr><th>產業</th><th>漲跌</th><th>成交占比</th><th>RS20</th><th>口徑</th></tr>' +
@@ -1216,7 +1223,7 @@
         return '<tr><td>' + esc(r.sector || r.name) + '</td><td>' + num(r.changePct, 2) + '%</td><td>' +
           (r.marketSharePct == null ? '—' : num(r.marketSharePct, 2) + '%') + '</td><td>' +
           (r.rs20VsBenchmarkPct == null ? '—' : signedUnit(r.rs20VsBenchmarkPct, 2, '%')) + '</td><td>' +
-          (r.proxyBasket ? 'proxyBasket' : (r.turnoverEligible === false ? '複合指數' : esc(r.turnoverScope || r.marketScope || '—'))) + '</td></tr>';
+          (r.proxyBasket ? 'proxyBasket' : (r.turnoverEligible === false ? '複合指數' : esc(turnoverScopeLabel(r.turnoverScope || r.marketScope)))) + '</td></tr>';
       }).join('') + '</table></div>';
   }
 

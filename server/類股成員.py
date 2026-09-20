@@ -54,7 +54,7 @@ def empty_payload(market: str, sector: str, reason: str, *, ok: bool = True) -> 
 
 
 def build_tw_members(snapshot: dict[str, Any], sector: str) -> dict[str, Any]:
-    """篩選同產業上市普通股；不限制排行筆數、不排除無成交或漲跌缺值。"""
+    """從上市四碼證券母體篩選已分類同產業成員；母體含存託憑證，不排除漲跌缺值。"""
     key = normalize_sector_name(sector)
     key = _ALIASES.get(key, key)
     if not snapshot.get('twseAvailable'):
@@ -96,7 +96,9 @@ def build_tw_members(snapshot: dict[str, Any], sector: str) -> dict[str, Any]:
     return {
         'ok': True, 'market': 'TW', 'sector': sector, 'sectorKey': key,
         'scope': 'TWSE_INDUSTRY_GROUP' if group else 'TWSE_INDUSTRY',
-        'scopeLabel': ('上市電子相關產業個股' if group else '同產業上市個股') + ('（分類未完整）' if incomplete else ''),
+        'scopeLabel': ('上市電子相關產業個股' if group else '同產業上市個股')
+                      + '（分類母體為上市四碼證券，含存託憑證'
+                      + ('；分類未完整）' if incomplete else '）'),
         'date': day, 'source': QUOTE_SOURCE, 'classificationSource': CLASSIFICATION_SOURCE,
         'count': len(rows), 'rows': rows, 'unavailableReason': None,
         'classificationCoveragePct': snapshot.get('classificationCoveragePct'),

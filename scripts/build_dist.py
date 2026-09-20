@@ -260,6 +260,7 @@ REQUIRED_SHARE_FILES = (
     "tests/test_NHNL來源.py",
     "tests/test_投組市場代號.py",
     "tests/test_市場尾碼一致性.py",
+    "tests/分類範圍標示_selftest.js",
     "assets/docs/archify/st-private-web-trust-ai-execution.html",
     "assets/docs/archify/st-private-web-release-gate.html",
     "assets/docs/archify/st-pulse-refresh-degradation.html",
