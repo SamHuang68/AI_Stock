@@ -389,12 +389,13 @@ ok(/levelsStale/.test(pulseBeginner) && /歷史壓力參考/.test(pulseBeginner)
   'stale key levels are downgraded from today boundaries and traced with their source values');
 ok(/id="pl-stock-check"/.test(pulseBeginner) && /function stockHealthAssessment/.test(pulseBeginner) &&
   /stock_health_request_start/.test(pulseBeginner) && /\/twquote\?code=/.test(pulseBeginner) &&
-  /setTimeout\(function \(\) \{ if \(controller\) controller\.abort\(\); \}, 8000\)/.test(pulseBeginner),
+  /function stockHealthRequest/.test(pulseBeginner) && /Promise\.race\(\[request, deadline\]\)/.test(pulseBeginner),
   'beginner stock health check is source-backed, traced and bounded by timeout');
 ok(/function stockHealthFallbackQuote/.test(pulseBeginner) && /stock_health_fallback_start/.test(pulseBeginner) &&
-  /\/quote\/.*code \+ '\.TW'/.test(pulseBeginner) && /q\.stale/.test(pulseBeginner) &&
+  /\/bars\?sym=/.test(pulseBeginner) && /\/yf\/batch\?syms=/.test(pulseBeginner) &&
+  /歷史回顧/.test(pulseBeginner) && /相同日期與期間/.test(pulseBeginner) &&
   /yahoo-v8-chart · MIS備援/.test(server),
-  '個股健診保留備援來源，並拒絕過期成交資料');
+  '個股健診以帶日期的歷史資料備援，並明示分析前提與比較限制');
 ok(/key_levels_stale/.test(server + decisionEngine) && /keyLevelMeta/.test(decisionEngine) &&
   /divergenceDetails/.test(decisionEngine),
   'decision contract suppresses stale key-level triggers and publishes provenance-rich compact metadata');

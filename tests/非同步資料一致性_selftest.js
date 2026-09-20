@@ -203,6 +203,7 @@ async function checkPulseLeave() {
   const body = element(); let timerId = 0;
   const context = {
     refreshSequence: 0, refreshController: null, refreshPromise: null, refreshIsUpdate: false, timer: null, showFactors: false, lastPack: null,
+    stockHealthSequence: 0, stockHealthController: null, stockHealthView: null, routeTrace() {},
     ensureMount: () => body, $: id => id === 'pl-body' ? body : null,
     document: { querySelector: () => null }, Date,
     DecisionData: { refreshPulse() { const request = pending(); requests.push(request); return request.promise.then(pulse => ({ pulse })); } },
@@ -213,7 +214,7 @@ async function checkPulseLeave() {
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(['refresh', 'activate', 'deactivate'].map(name => {
+  vm.runInContext(['cancelStockHealth', 'refresh', 'activate', 'deactivate'].map(name => {
     if (name === 'deactivate') {
       const start = source.indexOf('  function deactivate(');
       return source.slice(start, source.indexOf('\n  window.PulseV5', start));
