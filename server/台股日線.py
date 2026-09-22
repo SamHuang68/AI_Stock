@@ -365,6 +365,16 @@ def run_update(db: Path, *, start: date | None = None, now: datetime | None = No
         state['finishedAt'] = datetime.now(timezone.utc).isoformat()
         try:
             save()
+            if state['ok']:
+                try:
+                    try:
+                        from .突破影子紀錄 import record_daily
+                    except ImportError:
+                        from 突破影子紀錄 import record_daily
+                    state['researchShadow'] = record_daily(db, now=now)
+                except Exception as exc:
+                    state['researchShadow'] = {'status': '紀錄失敗', 'reason': type(exc).__name__}
+                save()
             trace('工作結束', ok=state['ok'], status=state['status'], failureCount=len(state['failures']))
         finally:
             release_daemon_lock(lock)

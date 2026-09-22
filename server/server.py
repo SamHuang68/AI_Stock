@@ -6527,6 +6527,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             from K線事件 import report
             result = report(datastore.DB_PATH, code, qs.get('asOf', [None])[0],
                             period=qs.get('range', ['3y'])[0], start_date=qs.get('start', [None])[0])
+            from 突破影子紀錄 import summary
+            result['research']['shadow'] = summary(datastore.DB_PATH, code, result['research'], result['asOf'])
             self._ok(json.dumps(result, ensure_ascii=False, allow_nan=False).encode())
         except ValueError as e:
             self._err(str(e), 400)

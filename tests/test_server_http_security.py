@@ -117,11 +117,15 @@ class ServerHttpSecurityTests(unittest.TestCase):
 
     def test_kline_events_route_validates_input_and_serializes_report(self):
         import K線事件
-        payload = {'sym': '2330', 'events': [], 'freshness': {'fresh': False}}
-        with patch.object(K線事件, 'report', return_value=payload) as calculate:
+        import 突破影子紀錄
+        payload = {'sym': '2330', 'asOf': '2026-09-01', 'events': [], 'freshness': {'fresh': False},
+                   'research': {'version': '研究測試版', 'latest': None}}
+        with patch.object(K線事件, 'report', return_value=payload) as calculate, \
+                patch.object(突破影子紀錄, 'summary', return_value={'status': '尚未建立影子紀錄', 'count': 0}) as shadow:
             with urllib.request.urlopen(self.base + '/kline-events?sym=2330&asOf=2026-09-01', timeout=5) as response:
                 self.assertEqual(json.load(response), payload)
             self.assertEqual(calculate.call_args.args[1:], ('2330', '2026-09-01'))
+            self.assertEqual(shadow.call_args.args[1:], ('2330', payload['research'], '2026-09-01'))
             self.assertEqual(calculate.call_args.kwargs, {'period': '3y', 'start_date': None})
             with urllib.request.urlopen(self.base + '/kline-events?sym=2330&range=custom&start=2020-01-01&asOf=2025-12-31', timeout=5) as response:
                 self.assertEqual(json.load(response), payload)

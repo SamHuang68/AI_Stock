@@ -15,8 +15,10 @@ function harness(payload) {
     // 只替換 DOM 容器；圖表、事件及 HTML 組裝仍執行正式匯出函式。
     el.cloneNode = () => {
       const nodes = new Map(['ke-events', 'ke-chart', 'ke-visible'].map(key => [key, element()]));
+      const appended = [];
       return { querySelector: selector => nodes.get(selector.slice(1)), querySelectorAll: () => [],
-        get innerHTML() { return [...nodes.values()].map(node => node.innerHTML + (node.textContent || '')).join(''); } };
+        appendChild(node) { appended.push(node); },
+        get innerHTML() { return [...nodes.values(), ...appended].map(node => node.innerHTML + (node.textContent || '')).join(''); } };
     };
     Object.defineProperty(el, 'innerHTML', { get() { return this.html || ''; }, set(html) {
       this.html = html;
@@ -104,5 +106,36 @@ const payload = { sym: '2330', name: '台積電', asOf: candles.at(-1).date,
   $('ke-start').value = '2016-01-01'; await $('ke-load').onclick();
   assert.match(view.calls.at(-1), /range=custom&asOf=2020-01-01&start=2016-01-01/);
   view.context.KlineEventsUI.close();
+  const researchPayload = structuredClone(payload);
+  const key = 'breakout_252';
+  const observation = { eligible: { [key]: true }, conditions: { [key]: true },
+    reason: { [key]: '條件首次成立，僅供研究觀察' }, signals: [key],
+    metrics: { priorHigh252: 100, distance252HighPct: 2 },
+    date: candles.at(-1).date, source: 'TWSE', inputDigest: '首次證據' };
+  researchPayload.candles.at(-1).signals = [];
+  researchPayload.candles.at(-1).research = observation;
+  researchPayload.research = { version: '研究測試版', latest: observation,
+    rules: [{ key, label: '一年高點突破觀察', formula: '收盤 > 前 252 日最高價' }], notes: ['<img src=x onerror=alert(1)>'],
+    stats: [{ ...structuredClone(payload.stats[0]), key, label: '一年高點突破觀察', eligibleDays: 30, cases: 1 }],
+    shadow: { status: '資料已修訂，保留原觀察', count: 3, asOf: observation.date, observedAt: '2026-09-22T18:30:00+08:00', revised: true,
+      evidence: { ...observation, signals: [], conditions: { [key]: null }, reason: { [key]: '前一交易日不可判定' } } } };
+  const researchView = harness(researchPayload), rget = researchView.get;
+  researchView.context.KlineEventsUI.open('2330'); await ready();
+  assert.match(rget('ke-result').innerHTML, /不是訊號數或績效樣本/);
+  assert.match(rget('ke-result').innerHTML, /資料已修訂，保留原觀察/);
+  assert.match(rget('ke-result').innerHTML, /前一交易日不可判定/);
+  assert.match(rget('ke-result').innerHTML, /&lt;img src=x/);
+  assert.doesNotMatch(rget('ke-result').innerHTML, /<img src=x/);
+  assert.match(rget('ke-events').innerHTML, /一年高點突破觀察/);
+  assert.match(rget('ke-detail').innerHTML, /本日新增觀察事件/);
+  assert.match(rget('ke-research-stats').innerHTML, /可判定日數 30/);
+  rget('ke-horizon').value = '10'; rget('ke-horizon').onchange();
+  assert.match(rget('ke-research-stats').innerHTML, /一年高點突破觀察/);
+  rget('ke-export').onclick();
+  const researchExport = await researchView.downloads[0].text();
+  assert.match(researchExport, /一年高點突破觀察/);
+  assert.match(researchExport, /條件首次成立，僅供研究觀察/);
+  assert.match(researchExport, /首次事件/);
+  researchView.context.KlineEventsUI.close();
   console.log('K 線歷史時間軸：期間查詢、日期驗證、分段與滑桿、日期定位、事件分頁及統計範圍驗證通過');
 })().catch(error => { console.error(error); process.exitCode = 1; });

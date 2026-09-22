@@ -13,8 +13,10 @@ from statistics import mean, median
 
 try:
     from .台股日線 import TZ, latest_session
+    from .突破觀察 import WARMUP_DAYS, build_research
 except ImportError:
     from 台股日線 import TZ, latest_session
+    from 突破觀察 import WARMUP_DAYS, build_research
 
 HORIZONS = (1, 3, 5, 10)
 RANGES = {'30d': '近 30 個交易日', '3m': '近 3 個月', '6m': '近 6 個月',
@@ -165,7 +167,7 @@ def report(db: str | Path, symbol: str = '2330', as_of: str | None = None, now: 
         first = next((i for i, day in enumerate(timeline) if day >= requested_start.isoformat()), len(timeline))
     else:
         first = max(0, len(timeline) - 30) if period == '30d' else 0
-    warmup = min(20, first)
+    warmup = min(WARMUP_DAYS, first)
     timeline = timeline[first - warmup:]
     rows = [by_day.get(day, {'date': day, 'issues': ['交易日資料缺漏'], 'signals': [], **{k: None for k in ('time', 'open', 'high', 'low', 'close', 'volume')}}) for day in timeline]
     def covered(first: str, last: str) -> bool:
@@ -207,6 +209,10 @@ def report(db: str | Path, symbol: str = '2330', as_of: str | None = None, now: 
         return {'value': (segment[-1]['close'] / segment[0]['close'] - 1) * 100, 'reason': None}
     for i, row in enumerate(rows):
         row['returns'] = {str(h): outcome(i, h) for h in HORIZONS} if row['eligible'] else {str(h): {'value': None, 'reason': row['reason']} for h in HORIZONS}
+    research = build_research(rows, calendar_years=calendar_years, action_days=action_days,
+                              action_coverage=coverage, sample_start=warmup)
+    for row, observation in zip(rows, research.pop('rows')):
+        row['research'] = observation
     rows = rows[warmup:]
     stats = []
     for key, (label, _) in RULES.items():
@@ -228,13 +234,13 @@ def report(db: str | Path, symbol: str = '2330', as_of: str | None = None, now: 
             'availableStart': available_start, 'availableEnd': available_end,
             'historyStart': rows[0]['date'] if rows else None, 'historyEnd': rows[-1]['date'] if rows else None,
             'historyRows': sum(r['time'] is not None for r in rows), 'timelineDays': len(rows),
-            'warmupDays': warmup, 'eligibleDays': sum(r['eligible'] for r in rows),
+            'warmupDays': min(20, warmup), 'eligibleDays': sum(r['eligible'] for r in rows),
             'unverifiedRows': sum(r['time'] is not None and r.get('source') not in ('TWSE', 'TPEX') for r in rows),
             'companyActionCoverage': {'start': coverage[0], 'end': coverage[1], 'source': coverage[2]} if coverage else None,
-            'candles': rows, 'events': [r for r in reversed(rows) if r['signals']], 'stats': stats,
+            'candles': rows, 'events': [r for r in reversed(rows) if r['signals']], 'stats': stats, 'research': research,
             'rules': [{'key': k, 'label': v[0], 'formula': v[1]} for k, v in RULES.items()],
             'notes': ['黃色點只代表事件日；同日可有多個標籤，不代表買賣建議。',
-                      '圖表、事件清單及統計共用所選期間；開始日前最多 20 個交易日只供暖機，不計入樣本。圖表分段瀏覽不會改變統計期間。',
+                      '圖表、事件清單及統計共用所選期間；既有事件使用前 20 個交易日，突破研究最多使用前 253 個交易日暖機，不計入樣本。圖表分段瀏覽不會改變統計期間。',
                       '完整歷史指資料庫現存日線，並非保證涵蓋上市以來每一日；未核對日線或交易日曆可瀏覽但不產生事件。',
                       '報酬以事件日收盤至後續第 1、3、5、10 個市場交易日收盤計算，採原始價格，未含股息、稅費。',
                       '事件與基準共用資料品質、20 日暖機及公司行動排除條件。基準為同一期間所有可判定日期。',
