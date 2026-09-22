@@ -28,6 +28,13 @@ TZ = timezone(timedelta(hours=8))
 ROOT = Path(__file__).resolve().parents[1]
 CODE = re.compile(r'^(?:[1-9]\d{3}[A-Z]?|00\d{2,4}[A-Z]?|9\d{5})$')
 _last_request = 0.0
+ACTION_PARSER_VERSION = 'twse-reference-ratio-v1'
+ACTION_ROUTES = (
+    ('exRight/TWT49U', '資料日期', '股票代號', '除權息', '除權息前收盤價', '除權息參考價'),
+    ('reducation/TWTAUU', '恢復買賣日期', '股票代號', '減資', '停止買賣前收盤價格', '恢復買賣參考價'),
+    ('change/TWTB8U', '恢復買賣日期', '股票代號', '面額變更', '停止買賣前收盤價格', '恢復買賣參考價'),
+    ('split/TWTCAU', '恢復買賣日期', 'ETF代號', 'ETF分割', '停止買賣前收盤價格', '恢復買賣參考價'),
+)
 
 
 def numeric(value: object, *, positive: bool = False) -> float | None:
@@ -65,6 +72,13 @@ def get_json(url: str, trace=None) -> tuple[object, str]:
     raise RuntimeError('來源未回傳資料')
 
 
+def _calendar_trading(text: str) -> bool:
+    # 官方可能沿用「最後交易日」名稱，說明卻明確註明僅辦理交割。
+    if any(term in text for term in ('無交易', '不交易', '停止交易', '休市')):
+        return False
+    return any(term in text for term in ('開始交易', '最後交易', '補行交易'))
+
+
 def calendar(year: int, fetch=get_json) -> tuple[set[date], set[date]]:
     try:
         data, _ = fetch('https://www.twse.com.tw/rwd/zh/holidaySchedule/holidaySchedule?response=json&date=' + str(year) + '0101')
@@ -83,14 +97,14 @@ def calendar(year: int, fetch=get_json) -> tuple[set[date], set[date]]:
                 if day.year != year:
                     raise ValueError('官方休市資料年度不符')
                 text = ' '.join(map(str, row))
-                (opened if '開始交易' in text or '最後交易' in text or '補行交易' in text else closed).add(day)
+                (opened if _calendar_trading(text) else closed).add(day)
                 continue
             match = re.search(r'(\d{1,2})月(\d{1,2})日', raw_day)
             if not match:
                 raise ValueError('官方開休市日期格式無法辨識')
             day = date(year, int(match[1]), int(match[2]))
             text = ' '.join(map(str, row))
-            (opened if '開始交易' in text or '最後交易' in text or '補行交易' in text else closed).add(day)
+            (opened if _calendar_trading(text) else closed).add(day)
         return closed, opened
     # OpenAPI 明確包含年度；只接受要求年度，禁止用今年假日推估別年。
     data, _ = fetch('https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule')
@@ -103,7 +117,7 @@ def calendar(year: int, fetch=get_json) -> tuple[set[date], set[date]]:
             continue
         day = date(year, int(raw[3:5]), int(raw[5:7]))
         text = str(row.get('Name', '')) + str(row.get('Description', ''))
-        (opened if '開始交易' in text or '最後交易' in text or '補行交易' in text else closed).add(day)
+        (opened if _calendar_trading(text) else closed).add(day)
     if not closed:
         raise ValueError('官方休市資料年度不足')
     return closed, opened
@@ -115,9 +129,32 @@ def stored_calendar(db: Path, year: int, fetch=get_json) -> tuple[set[date], set
     with closing(sqlite3.connect(db)) as conn:
         row = conn.execute('SELECT closed,opened,refreshed_at FROM calendar_years WHERE year=?', (year,)).fetchone()
     if row and (year < now.year or now - datetime.fromisoformat(row[2]) <= timedelta(days=7)):
-        return {date.fromisoformat(d) for d in json.loads(row[0])}, {date.fromisoformat(d) for d in json.loads(row[1])}
+        closed = {date.fromisoformat(d) for d in json.loads(row[0])}
+        opened = {date.fromisoformat(d) for d in json.loads(row[1])}
+        return _observed_calendar(db, year, closed, opened)
     closed, opened = calendar(year, fetch)
     save_calendar(db, year, closed, opened)
+    return _observed_calendar(db, year, closed, opened)
+
+
+def _observed_calendar(db: Path, year: int, closed: set[date], opened: set[date]) -> tuple[set[date], set[date]]:
+    """已證實成交日期優先於年度預定日曆，且不刷新原始年度擷取時間。"""
+    with closing(sqlite3.connect(db)) as conn:
+        months = conn.execute('SELECT month,observed_through,dates FROM session_months WHERE month LIKE ?', (str(year) + '%',)).fetchall()
+    for month, through, payload in months:
+        day, last = date.fromisoformat(month + '-01'), date.fromisoformat(through)
+        if (day.year, day.month) != (last.year, last.month):
+            raise ValueError('已核對交易月份的涵蓋邊界不符')
+        actual = set(json.loads(payload))
+        while day <= last:
+            if day.isoformat() in actual:
+                closed.discard(day)
+                if day.weekday() >= 5:
+                    opened.add(day)
+            else:
+                closed.add(day)
+                opened.discard(day)
+            day += timedelta(days=1)
     return closed, opened
 
 
@@ -181,28 +218,61 @@ def reconcile_sessions(db: Path, begin: date, end: date, fetch=get_json) -> set[
             conn.execute('INSERT OR REPLACE INTO session_months VALUES(?,?,?,?)', (month.strftime('%Y-%m'), max(dates).isoformat(), json.dumps([d.isoformat() for d in dates]), digest))
         actual.update(dates)
         month = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
+    # 月末休市日不會出現在當月最後一筆成交日期之內；必須以後月實際
+    # 成交證據關閉前月尾端。當前尚無後續成交證據的缺日仍保持待核對。
+    if actual:
+        confirmed = max(actual)
+        with closing(sqlite3.connect(db)) as conn, conn:
+            completed = conn.execute('SELECT month,dates FROM session_months WHERE month BETWEEN ? AND ?',
+                                     (begin.strftime('%Y-%m'), end.strftime('%Y-%m'))).fetchall()
+            for month_text, payload in completed:
+                first = date.fromisoformat(month_text + '-01')
+                following = date(first.year + (first.month == 12), first.month % 12 + 1, 1)
+                if following > confirmed:
+                    continue
+                through = (following - timedelta(days=1)).isoformat()
+                dates = json.loads(payload)
+                conn.execute('DELETE FROM market_sessions WHERE session_date BETWEEN ? AND ?', (first.isoformat(), through))
+                conn.executemany('INSERT OR REPLACE INTO market_sessions VALUES(?,?)', [(day, 'TWSE實際成交日') for day in dates])
+                conn.execute('UPDATE session_months SET observed_through=? WHERE month=?', (through, month_text))
     return actual
 
 
 def refresh_actions(db: Path, symbol: str, begin: date, end: date, fetch=get_json) -> int:
-    """三種官方事件全數核對成功才延長涵蓋區間。"""
-    actions = []
-    endpoints = [('exRight/TWT49U', '資料日期', '除權息'),
-                 ('reducation/TWTAUU', '恢復買賣日期', '減資'),
-                 ('change/TWTB8U', '恢復買賣日期', '面額變更')]
+    """四類官方事件與原始參考價證據全數取得後，原子提交涵蓋區間。"""
+    if begin > end:
+        raise ValueError('公司行動查詢開始日期不得晚於結束日期')
+    actions, evidence, sources, seen = [], [], [], set()
     for year in range(begin.year, end.year + 1):
         first, last = max(begin, date(year, 1, 1)), min(end, date(year, 12, 31))
-        for route, date_field, kind in endpoints:
+        for route, date_field, code_field, kind, before_field, after_field in ACTION_ROUTES:
             # 證交所公告頁亦由官方 wwwc 站提供；此站歷史範圍查詢已核對可用。
             url = 'https://wwwc.twse.com.tw/rwd/zh/' + route + '?startDate=' + first.strftime('%Y%m%d') + '&endDate=' + last.strftime('%Y%m%d') + '&response=json'
-            data, _ = fetch(url)
+            data, digest = fetch(url)
+            retrieved = datetime.now(timezone.utc).isoformat()
+            if not isinstance(data, dict):
+                raise ValueError(kind + '資料格式無效')
+            if not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest):
+                raise ValueError(kind + '來源雜湊缺漏或格式無效')
+            sources.append({'year': year, 'route': route, 'start': first.isoformat(), 'end': last.isoformat(),
+                            'stat': data.get('stat'), 'sourceHash': digest, 'url': url, 'retrievedAt': retrieved})
             if data.get('stat') == '很抱歉，沒有符合條件的資料!':
+                if data.get('data'):
+                    raise ValueError(kind + '空集合狀態與回傳資料矛盾')
                 continue
-            if data.get('stat') != 'OK' or not all(k in data.get('fields', []) for k in (date_field, '股票代號')):
+            fields = data.get('fields', [])
+            required = [date_field, code_field, before_field, after_field]
+            if kind == '除權息':
+                required.append('權/息')
+            if kind == 'ETF分割':
+                required.append('分割(反分割)')
+            if data.get('stat') != 'OK' or not isinstance(fields, list) or not all(k in fields for k in required) or len(set(fields)) != len(fields) or not isinstance(data.get('data'), list):
                 raise ValueError(kind + '資料尚未完整核對')
             for values in data.get('data', []):
-                row = dict(zip(data['fields'], values))
-                if str(row['股票代號']).strip() != symbol:
+                if not isinstance(values, list) or len(values) != len(fields):
+                    raise ValueError(kind + '資料列與欄位數量不符')
+                row = dict(zip(fields, values))
+                if str(row[code_field]).strip() != symbol:
                     continue
                 parts = list(map(int, re.findall(r'\d+', str(row[date_field]))))
                 if len(parts) != 3:
@@ -210,16 +280,46 @@ def refresh_actions(db: Path, symbol: str, begin: date, end: date, fetch=get_jso
                 day = date(parts[0] + (1911 if parts[0] < 1911 else 0), parts[1], parts[2])
                 if not first <= day <= last:
                     raise ValueError('公司行動回傳超出查詢日期')
+                identity = (day.isoformat(), kind)
+                if identity in seen:
+                    raise ValueError('同日同類公司行動資料重複')
+                seen.add(identity)
                 actions.append(('TW', symbol, day.isoformat(), kind, 'TWSE'))
+                before, after = numeric(row[before_field], positive=True), numeric(row[after_field], positive=True)
+                supported = (kind == '除權息' and str(row['權/息']).strip() == '息') or (kind == 'ETF分割' and str(row['分割(反分割)']).strip() in ('分割', '反分割'))
+                reason = None if supported else '除權、減資、面額變更或未知類型尚未支援價格比較調整'
+                if before is None or after is None:
+                    supported, reason = False, '官方前收盤或參考價缺漏／無效，不能建立調整因子'
+                factor = after / before if supported else None
+                if factor is not None and not math.isfinite(factor):
+                    supported, factor, reason = False, None, '官方參考價比值無效，不能建立調整因子'
+                payload = {'fields': fields, 'row': values, 'request': {'start': first.isoformat(), 'end': last.isoformat()}}
+                evidence.append(('TW', symbol, day.isoformat(), kind, before, after, factor,
+                                 'supported' if supported else 'unsupported', reason, url, digest, retrieved,
+                                 ACTION_PARSER_VERSION, json.dumps(payload, ensure_ascii=False)))
     with closing(sqlite3.connect(db)) as conn, conn:
         prior = conn.execute('SELECT start_date,end_date FROM action_coverage WHERE market=? AND symbol=?', ('TW', symbol)).fetchone()
-        coverage_begin = begin.isoformat()
-        if prior and date.fromisoformat(prior[1]) + timedelta(days=1) >= begin and prior[0] <= coverage_begin:
-            coverage_begin = prior[0]
+        coverage_begin, coverage_end = _merged_coverage(prior, begin, end)
+        price_prior = conn.execute('SELECT start_date,end_date,parser_version,sources_json FROM action_price_coverage WHERE market=? AND symbol=?', ('TW', symbol)).fetchone()
+        price_begin, price_end = begin.isoformat(), end.isoformat()
+        if price_prior and price_prior[2] == ACTION_PARSER_VERSION:
+            price_begin, price_end = _merged_coverage(price_prior[:2], begin, end)
+            if (price_begin, price_end) != (begin.isoformat(), end.isoformat()) or price_prior[:2] == (price_begin, price_end):
+                sources = json.loads(price_prior[3]) + sources
+        sources = list({(item['url'], item['sourceHash']): item for item in sources}.values())
         conn.execute('DELETE FROM corporate_actions WHERE market=? AND symbol=? AND session_date BETWEEN ? AND ?', ('TW', symbol, begin.isoformat(), end.isoformat()))
         conn.executemany('INSERT OR REPLACE INTO corporate_actions VALUES(?,?,?,?,?)', actions)
-        conn.execute('INSERT OR REPLACE INTO action_coverage VALUES(?,?,?,?,?)', ('TW', symbol, coverage_begin, end.isoformat(), 'TWSE除權息、減資、面額變更'))
+        conn.execute('INSERT OR REPLACE INTO action_coverage VALUES(?,?,?,?,?)', ('TW', symbol, coverage_begin, coverage_end, 'TWSE除權息、減資、面額變更、ETF分割'))
+        conn.execute('DELETE FROM action_price_evidence WHERE market=? AND symbol=? AND session_date BETWEEN ? AND ?', ('TW', symbol, begin.isoformat(), end.isoformat()))
+        conn.executemany('INSERT OR REPLACE INTO action_price_evidence VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', evidence)
+        conn.execute('INSERT OR REPLACE INTO action_price_coverage VALUES(?,?,?,?,?,?)', ('TW', symbol, price_begin, price_end, ACTION_PARSER_VERSION, json.dumps(sources, ensure_ascii=False)))
     return len(actions)
+
+
+def _merged_coverage(prior: tuple | None, begin: date, end: date) -> tuple[str, str]:
+    if prior and date.fromisoformat(prior[1]) + timedelta(days=1) >= begin and date.fromisoformat(prior[0]) <= end + timedelta(days=1):
+        return min(prior[0], begin.isoformat()), max(prior[1], end.isoformat())
+    return begin.isoformat(), end.isoformat()
 
 
 def parse_daily(data: dict, exchange: str, day: date) -> list[dict]:
@@ -381,6 +481,59 @@ def run_update(db: Path, *, start: date | None = None, now: datetime | None = No
     return state
 
 
+def _research_valid_days(conn: sqlite3.Connection, symbol: str, first: str, last: str) -> set[str]:
+    records = conn.execute('''SELECT q.session_date,b.open,b.high,b.low,b.close,b.volume,q.issues,q.source_hash
+        FROM bar_quality q JOIN bars b ON b.market=q.market AND b.symbol=q.symbol AND b.ts=q.ts
+        WHERE q.market='TW' AND q.symbol=? AND q.source='TWSE' AND q.volume_unit='股'
+        AND q.price_basis='原始價格' AND q.session_date BETWEEN ? AND ?''', (symbol, first, last)).fetchall()
+    counts, valid = {}, set()
+    for day, opening, high, low, close, volume, issues, source_hash in records:
+        counts[day] = counts.get(day, 0) + 1
+        try:
+            quality_issues = json.loads(issues)
+        except (TypeError, ValueError):
+            continue
+        if (isinstance(source_hash, str) and re.fullmatch(r'[0-9a-f]{64}', source_hash) and quality_issues == []
+                and all(isinstance(v, (int, float)) and math.isfinite(v) and v > 0 for v in (opening, high, low, close, volume))
+                and low <= min(opening, close) <= max(opening, close) <= high):
+            valid.add(day)
+    return {day for day in valid if counts[day] == 1}
+
+
+def _research_month(data: dict, symbol: str, month: date, target: date, expected: set[str]) -> tuple[list[tuple], list[str]]:
+    """先驗證整份月份，才交由既有 canonical upsert 原子寫入該月所有列。"""
+    fields = ['日期', '成交股數', '成交金額', '開盤價', '最高價', '最低價', '收盤價']
+    if not isinstance(data, dict) or data.get('stat') != 'OK' or data.get('fields', [])[:7] != fields or not isinstance(data.get('data'), list):
+        raise ValueError('官方個股月份資料缺失或欄位不符')
+    if data.get('date') is not None and str(data['date']) != month.strftime('%Y%m%d'):
+        raise ValueError('官方個股月份回應日期不符')
+    if data.get('title') is not None and symbol not in str(data['title']):
+        raise ValueError('官方個股月份回應標的不符')
+    rows, returned = [], set()
+    for row in data['data']:
+        if not isinstance(row, list) or len(row) != len(data['fields']):
+            raise ValueError('官方個股月份資料列與欄位數量不符')
+        try:
+            y, m, d = map(int, str(row[0]).split('/'))
+            day = date(y + 1911, m, d)
+        except (TypeError, ValueError):
+            raise ValueError('官方個股月份日期格式無效') from None
+        day_text = day.isoformat()
+        if (day.year, day.month) != (month.year, month.month) or day > target:
+            raise ValueError('官方個股月份回傳超出查詢日期')
+        if day_text in returned:
+            raise ValueError('官方個股月份交易日重複')
+        if day_text not in expected:
+            raise ValueError('官方個股月份含未核對市場交易日')
+        returned.add(day_text)
+        opening, high, low, close = [numeric(row[i], positive=True) for i in (3, 4, 5, 6)]
+        volume = numeric(row[1], positive=True)
+        if any(v is None for v in (opening, high, low, close, volume)) or not low <= min(opening, close) <= max(opening, close) <= high:
+            raise ValueError('官方個股月份含價格、成交量或開高低收邊界無效資料，整月未寫入')
+        rows.append((stamp(day), opening, high, low, close, volume))
+    return rows, sorted(returned)
+
+
 def seed_research(db: Path, symbol: str = '2330', years: int = 3, *, fetch=get_json) -> dict:
     """以官方月份資料補齊研究股票，另核對公司行動與完整交易日曆。"""
     if not re.fullmatch(r'\d{4}', symbol) or years not in range(1, 6):
@@ -398,35 +551,58 @@ def seed_research(db: Path, symbol: str = '2330', years: int = 3, *, fetch=get_j
         for year in range(start.year, target.year + 1):
             stored_calendar(db, year, fetch)
         reconcile_sessions(db, start, target, fetch)
-        count = 0
+        count, receipts = 0, []
         month = start
         while month <= target:
             next_month = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
             with closing(sqlite3.connect(db)) as conn:
                 expected = {r[0] for r in conn.execute('SELECT session_date FROM market_sessions WHERE session_date>=? AND session_date<? AND session_date<=?', (month.isoformat(), next_month.isoformat(), target.isoformat()))}
-                verified = {r[0] for r in conn.execute("SELECT session_date FROM bar_quality WHERE market='TW' AND symbol=? AND source='TWSE' AND session_date>=? AND session_date<?", (symbol, month.isoformat(), next_month.isoformat()))}
-            if expected and expected <= verified:
-                count += len(expected)
+                month_end = min(target, next_month - timedelta(days=1)).isoformat()
+                verified = _research_valid_days(conn, symbol, month.isoformat(), month_end)
+                receipt = conn.execute("SELECT observed_through,source_hash,payload_json FROM research_month_receipts WHERE market='TW' AND symbol=? AND month=?", (symbol, month.strftime('%Y-%m'))).fetchone()
+            cached = json.loads(receipt[2]) if receipt else None
+            returned = set(cached.get('returnedDates', [])) if cached else set()
+            url = 'https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=' + month.strftime('%Y%m%d') + '&stockNo=' + symbol
+            valid_receipt = bool(receipt and receipt[0] >= month_end and receipt[1] and cached.get('symbol') == symbol
+                                 and cached.get('month') == month.strftime('%Y-%m') and returned <= verified
+                                 and cached.get('url') == url and cached.get('request') == {'start': month.isoformat(), 'end': receipt[0]}
+                                 and expected == returned and cached.get('missingDates') == [])
+            if valid_receipt or (expected and expected <= verified):
+                count += len(expected & verified)
+                receipts.append({'month': month.strftime('%Y-%m'), 'cached': True, 'returnedDays': len(expected & verified),
+                                 'missingDates': sorted(expected - verified), 'sourceHash': receipt[1] if valid_receipt else None})
                 month = next_month
                 continue
-            url = 'https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=' + month.strftime('%Y%m%d') + '&stockNo=' + symbol
             data, digest = fetch(url)
-            if data.get('stat') != 'OK' or data.get('fields', [])[:7] != ['日期', '成交股數', '成交金額', '開盤價', '最高價', '最低價', '收盤價']:
-                raise ValueError('官方個股月份資料缺失或欄位不符')
-            for row in data['data']:
-                y, m, d = map(int, row[0].split('/'))
-                day = date(y + 1911, m, d)
-                if not start <= day <= target or (day.year, day.month) != (month.year, month.month):
-                    continue
-                prices = [numeric(row[i], positive=True) for i in (3, 4, 5, 6)]
-                datastore.upsert_bars(symbol, 'TW', [(stamp(day), *prices, numeric(row[1]))], source='TWSE', source_hash=digest)
-                count += 1
+            if not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest):
+                raise ValueError('官方個股月份來源雜湊缺漏或格式無效')
+            parsed, returned_dates = _research_month(data, symbol, month, target, expected)
+            datastore.upsert_bars(symbol, 'TW', parsed, source='TWSE', source_hash=digest)
+            missing = sorted(expected - set(returned_dates))
+            month_payload = {'symbol': symbol, 'month': month.strftime('%Y-%m'), 'url': url,
+                             'request': {'start': month.isoformat(), 'end': month_end}, 'fields': data['fields'],
+                             'rows': data['data'], 'returnedDates': returned_dates, 'missingDates': missing}
+            with closing(sqlite3.connect(db)) as conn, conn:
+                conn.execute('INSERT OR REPLACE INTO research_month_receipts VALUES(?,?,?,?,?,?,?)',
+                             ('TW', symbol, month.strftime('%Y-%m'), month_end, digest,
+                              datetime.now(timezone.utc).isoformat(), json.dumps(month_payload, ensure_ascii=False)))
+            count += len(parsed)
+            receipts.append({'month': month.strftime('%Y-%m'), 'cached': False, 'returnedDays': len(parsed),
+                             'missingDates': missing, 'sourceHash': digest})
             print('研究日線已回補：' + month.isoformat(), flush=True)
             month = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
             if fetch is get_json:
                 time.sleep(0.4)
         actions = refresh_actions(db, symbol, start, target, fetch)
-        return {'ok': True, 'symbol': symbol, 'rows': count, 'start': start.isoformat(), 'end': target.isoformat(), 'actions': actions}
+        with closing(sqlite3.connect(db)) as conn:
+            expected = {r[0] for r in conn.execute('SELECT session_date FROM market_sessions WHERE session_date BETWEEN ? AND ?', (start.isoformat(), target.isoformat()))}
+            verified = _research_valid_days(conn, symbol, start.isoformat(), target.isoformat())
+        missing = sorted(expected - verified)
+        return {'ok': True, 'symbol': symbol, 'rows': count, 'start': start.isoformat(), 'end': target.isoformat(), 'actions': actions,
+                'retrievalComplete': True, 'dataComplete': not missing, 'expectedDays': len(expected), 'validDays': len(expected & verified),
+                'missingDates': missing, 'months': receipts,
+                'status': '官方回應已取得；仍有市場交易日缺值，研究保留缺口' if missing else '官方回應與市場交易日日線已核對',
+                'note': '回應取得成功不代表全部日期可判定；停止交易與未知缺日均不壓縮、不補值。'}
     finally:
         datastore.DB_PATH = old_path
         release_daemon_lock(lock)
@@ -438,6 +614,8 @@ def main() -> int:
     parser.add_argument('--start', type=date.fromisoformat)
     parser.add_argument('--include-private', action='store_true')
     parser.add_argument('--seed-research', action='store_true')
+    parser.add_argument('--symbols', nargs='+', default=['2330'], help='官方研究回補標的，預設 2330')
+    parser.add_argument('--years', type=int, default=3, choices=range(1, 6), help='官方研究回補年數，一至五年')
     parser.add_argument('--refresh-existing', action='store_true', help='重新核對指定區間已匯入日期')
     args = parser.parse_args()
     paths = [args.database]
@@ -447,7 +625,8 @@ def main() -> int:
         if not private.is_file():
             raise SystemExit('Private Web 資料庫不存在，未執行更新')
         paths.append(private)
-    results = [seed_research(path) if args.seed_research else run_update(path, start=args.start, refresh_existing=args.refresh_existing) for path in paths]
+    results = ([seed_research(path, symbol, args.years) for path in paths for symbol in dict.fromkeys(args.symbols)] if args.seed_research
+               else [run_update(path, start=args.start, refresh_existing=args.refresh_existing) for path in paths])
     print(json.dumps(results, ensure_ascii=False, indent=2))
     return 0 if all(result['ok'] for result in results) else 1
 

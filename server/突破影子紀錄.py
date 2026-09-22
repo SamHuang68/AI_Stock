@@ -57,6 +57,10 @@ def record_daily(db: str | Path, *, now: datetime | None = None, observed_at: da
             result = report(db, symbol, now=now, period='30d', include_execution=False)
             recorded_at = observed_at or datetime.now(TZ)
             added += int(append_observation(db, result, recorded_at))
+            adjusted = result.get('research', {}).get('adjusted') or {}
+            if adjusted.get('adjustmentEvidence', {}).get('coverage'):
+                # 規則版本分開留存，原始模式的首次證據不因新增基準而覆寫。
+                added += int(append_observation(db, {**result, 'research': adjusted}, recorded_at))
         except Exception as exc:
             failures.append({'symbol': symbol, 'reason': type(exc).__name__})
     return {'status': '紀錄不完整' if failures else '已檢查', 'checked': len(symbols),

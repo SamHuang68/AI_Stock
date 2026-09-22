@@ -8,7 +8,13 @@ from bisect import bisect_right
 from decimal import Decimal
 from statistics import mean, median
 
+try:
+    from .公司行動比較 import Comparison, PRICE_BASIS, json_safe
+except ImportError:
+    from 公司行動比較 import Comparison, PRICE_BASIS, json_safe
+
 VERSION = 'breakout-observation-v1'
+ADJUSTED_VERSION = 'breakout-observation-adjusted-v1'
 WARMUP_DAYS = 253
 HORIZONS = (1, 3, 5, 10)
 RULES = (
@@ -52,7 +58,8 @@ def _distribution(values: list[float]) -> dict:
 
 
 def build_research(rows: list[dict], *, calendar_years: set[int], action_days: set[str],
-                   action_coverage: tuple | list | dict | None, sample_start: int = 0) -> dict:
+                   action_coverage: tuple | list | dict | None, sample_start: int = 0,
+                   adjustments: dict | None = None) -> dict:
     """計算已正規化的交易日時間軸，輸入及輸出均不產生副作用。
 
     rows 由既有日線讀取端提供，須按日期遞增且保留缺交易日的空列，
@@ -75,12 +82,18 @@ def build_research(rows: list[dict], *, calendar_years: set[int], action_days: s
     for previous, current in zip(rows, rows[1:]):
         if _number(previous.get('close')) and _number(current.get('close')) and abs(current['close'] / previous['close'] - 1) > .15:
             actions.add(current['date'])
+    comparison = Comparison(rows, adjustments, actions) if adjustments is not None else None
+    if comparison:
+        actions.update(comparison.action_days)
+    version = ADJUSTED_VERSION if comparison else VERSION
     ordered_actions = sorted(actions)
     row_reasons = []
     for row in rows:
         issues = list(row.get('issues', ['資料品質尚未核對']))
         if row.get('source') not in ('TWSE', 'TPEX'):
             issues.append('歷史來源尚未經官方核對')
+        if comparison and row.get('priceBasis', row.get('price_basis')) != 'unadjusted':
+            issues.append('原始價格基準尚未核對')
         if not all(_number(row.get(k)) for k in ('open', 'high', 'low', 'close', 'volume')):
             issues.append('價格或成交量缺值／無成交')
         elif not row['low'] <= min(row['open'], row['close']) <= max(row['open'], row['close']) <= row['high']:
@@ -90,7 +103,7 @@ def build_research(rows: list[dict], *, calendar_years: set[int], action_days: s
     for reason in row_reasons:
         issue_prefix.append(issue_prefix[-1] + bool(reason))
 
-    def segment_reason(first: int, last: int) -> str | None:
+    def segment_reason(first: int, last: int, *, compare: bool = False) -> str | None:
         if issue_prefix[last + 1] != issue_prefix[first]:
             return '比較區間含缺值、無成交或未核對資料'
         start, end = dates[first], dates[last]
@@ -98,6 +111,8 @@ def build_research(rows: list[dict], *, calendar_years: set[int], action_days: s
             return '比較區間的交易日曆尚未完整核對'
         if not coverage or not coverage[0] or not coverage[1] or not coverage[0] <= start <= end <= coverage[1]:
             return '公司行動涵蓋區間尚未核對'
+        if comparison and compare:
+            return comparison.reason(first, last)
         if bisect_right(ordered_actions, end) > bisect_right(ordered_actions, start):
             return '比較區間跨公司行動或重大價格斷點'
         return None
@@ -113,18 +128,21 @@ def build_research(rows: list[dict], *, calendar_years: set[int], action_days: s
         for rule in RULES:
             key, lookback = rule['key'], rule['lookbackDays']
             if lookback not in quality_by_window:
-                quality_by_window[lookback] = (row_reasons[i] or f'前 {lookback} 個交易日暖機資料不足') if i < lookback else (row_reasons[i] or segment_reason(i - lookback, i))
+                quality_by_window[lookback] = (row_reasons[i] or f'前 {lookback} 個交易日暖機資料不足') if i < lookback else (row_reasons[i] or segment_reason(i - lookback, i, compare=True))
             reason = quality_by_window[lookback]
             current_reasons[key] = reason
             conditions[key] = None
         if any(reason is None for reason in current_reasons.values()):
+            prior_prices = comparison.prices(i - 252, i) if comparison else rows[i - 252:i]
             for window in (20, 120, 252):
-                metrics[f'priorHigh{window}'] = max(r['high'] for r in rows[i - window:i])
+                metrics[f'priorHigh{window}'] = max(r['high'] for r in prior_prices[-window:])
+                if comparison:
+                    metrics[f'rawPriorHigh{window}'] = max(r['high'] for r in rows[i - window:i])
             close = Decimal(str(row['close']))
             high252 = Decimal(str(metrics['priorHigh252']))
             distance = (close / high252 - 1) * 100
             peak, drawdown = None, Decimal(0)
-            for prior in rows[i - 100:i]:
+            for prior in prior_prices[-100:]:
                 # 使用較早日期的高點；不假設同日 high 與 close 的先後路徑。
                 if peak is not None:
                     drawdown = max(drawdown, (1 - Decimal(str(prior['close'])) / peak) * 100)
@@ -157,6 +175,12 @@ def build_research(rows: list[dict], *, calendar_years: set[int], action_days: s
             else:
                 reasons[key] = '條件未成立'
         observations.append({'eligible': eligible, 'reason': reasons, 'conditions': conditions, 'signals': hits, 'metrics': metrics})
+        if comparison:
+            for name, value in metrics.items():
+                if isinstance(value, Decimal):
+                    metrics[name] = float(value)
+            observations[-1].update(priceBasis=PRICE_BASIS, anchorDate=row['date'],
+                                    comparisonEvidence=comparison.evidence(max(0, i - 252), i))
         condition_reasons.append(current_reasons)
 
     def outcome(i: int, horizon: int) -> float | None:
@@ -199,11 +223,24 @@ def build_research(rows: list[dict], *, calendar_years: set[int], action_days: s
             if first <= last:
                 relevant_coverage = (first, last, coverage[2] if len(coverage) > 2 else None)
         relevant_years = [year for year in range(int(evidence_start[:4]), int(evidence_end[:4]) + 1) if year in calendar_years]
-        evidence = {'version': VERSION, 'rows': [{key: digest_value(row.get(key)) for key in ('date', 'open', 'high', 'low', 'close', 'volume', 'source', 'issues')}
+        evidence = {'version': version, 'rows': [{key: digest_value(row.get(key)) for key in ('date', 'open', 'high', 'low', 'close', 'volume', 'source', 'issues')}
                     for row in rows[-WARMUP_DAYS - 1:]],
                     'calendarYears': relevant_years, 'actionDays': sorted(d for d in actions if evidence_start < d <= evidence_end),
                     'actionCoverage': relevant_coverage}
+        if comparison:
+            evidence['comparison'] = comparison.digest_evidence(max(0, len(rows) - WARMUP_DAYS - 1), len(rows) - 1)
+            evidence['priceBases'] = [row.get('priceBasis', row.get('price_basis')) for row in rows[-WARMUP_DAYS - 1:]]
         digest = hashlib.sha256(json.dumps(evidence, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()
         latest = {**observations[-1], 'date': rows[-1]['date'], 'close': rows[-1].get('close'), 'source': rows[-1].get('source'), 'inputDigest': digest}
-    return {'version': VERSION, 'rules': [dict(rule) for rule in RULES], 'latest': latest, 'stats': stats,
-            'notes': list(NOTES), 'warmupDays': sample_start, 'rows': observations}
+    result = {'version': version, 'rules': [dict(rule) for rule in RULES], 'latest': latest, 'stats': stats,
+              'notes': list(NOTES), 'warmupDays': sample_start, 'rows': observations}
+    if comparison:
+        extra_notes = ['比較價格採官方完整參考價與前收盤價比值，不是官方還原日線、股數比率或總報酬。',
+                       '每個觀察日使用自己的價格基準；僅調整比較 OHLC，不調整成交量或原始成交價。',
+                       '歷史條件依目前核對資料回算，擷取時間不代表當年的發布時間；原始價格報酬跨公司行動仍排除。']
+        result['notes'].extend(extra_notes)
+        # 頂層稽核供整段研究及匯出使用；最新觀察摘要仍只使用自身比較窗口。
+        evidence = comparison.evidence(0, len(rows) - 1) if rows else {'events': []}
+        result.update(priceBasis=PRICE_BASIS, coverage=json_safe(comparison.coverage),
+                      adjustmentEvidence={'coverage': json_safe(comparison.coverage), 'events': evidence['events'], 'notes': extra_notes})
+    return result

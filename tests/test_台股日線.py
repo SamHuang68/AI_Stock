@@ -156,6 +156,52 @@ class DatabaseCase(unittest.TestCase):
         self.assertEqual(closed, {date(2025, 1, 1)})
         self.assertEqual(opened, {date(2025, 1, 2)})
 
+    def test_交割日的無交易說明優先於最後交易日名稱(self):
+        data = {'fields': ['日期', '名稱', '說明'], 'data': [
+            ['2022-01-26', '農曆春節前最後交易日', '農曆春節前最後交易。'],
+            ['2022-01-27', '農曆春節前最後交易日', '1月27日市場無交易，僅辦理結算交割作業。'],
+            ['2022-01-28', '農曆春節前最後交易日', '1月28日市場無交易，僅辦理結算交割作業。']]}
+        closed, opened = daily.calendar(2022, lambda url: (data, '日曆'))
+        self.assertEqual(opened, {date(2022, 1, 26)})
+        self.assertEqual(closed, {date(2022, 1, 27), date(2022, 1, 28)})
+
+    def test_OpenAPI交割說明同樣優先於名稱(self):
+        data = [{'Date': '1110127', 'Name': '農曆春節前最後交易日', 'Description': '市場無交易，僅辦理交割'}]
+        closed, opened = daily.calendar(2022, lambda url: (data if 'openapi.' in url else {}, '日曆'))
+        self.assertEqual(closed, {date(2022, 1, 27)})
+        self.assertEqual(opened, set())
+
+    def test_月末缺日須有後月成交證據才關閉並持續保留(self):
+        daily.save_calendar(self.db, 2024, set(), set())
+        def fetch(url):
+            month = parse_qs(urlparse(url).query)['date'][0]
+            rows = [['113/10/30']] if month == '20241001' else [['113/11/01']]
+            return {'stat': 'OK', 'date': month, 'fields': ['日期'], 'data': rows}, '成交日'
+        daily.reconcile_sessions(self.db, date(2024, 10, 1), date(2024, 10, 31), fetch)
+        with closing(sqlite3.connect(self.db)) as conn:
+            self.assertIsNotNone(conn.execute("SELECT 1 FROM market_sessions WHERE session_date='2024-10-31'").fetchone())
+            self.assertEqual(conn.execute("SELECT observed_through FROM session_months WHERE month='2024-10'").fetchone()[0], '2024-10-30')
+        daily.reconcile_sessions(self.db, date(2024, 10, 1), date(2024, 11, 1), fetch)
+        # 即使舊年度日曆仍把該日視為平日，已核對月份尾界仍必須保留。
+        daily.save_calendar(self.db, 2024, set(), set())
+        with closing(sqlite3.connect(self.db)) as conn:
+            self.assertIsNone(conn.execute("SELECT 1 FROM market_sessions WHERE session_date='2024-10-31'").fetchone())
+            self.assertEqual(conn.execute("SELECT observed_through FROM session_months WHERE month='2024-10'").fetchone()[0], '2024-10-31')
+        daily.reconcile_sessions(self.db, date(2024, 10, 1), date(2024, 11, 1), lambda url: self.fail('完成月份不應再次抓取'))
+
+    def test_舊日曆快取採實際月份覆蓋且不刷新時間(self):
+        false_open = date(2022, 1, 27)
+        daily.save_calendar(self.db, 2022, set(), {false_open})
+        with closing(sqlite3.connect(self.db)) as conn, conn:
+            original = conn.execute('SELECT refreshed_at FROM calendar_years WHERE year=2022').fetchone()[0]
+            conn.execute('INSERT INTO session_months VALUES(?,?,?,?)', ('2022-01', '2022-01-31', '["2022-01-26"]', '成交日'))
+        closed, opened = daily.stored_calendar(self.db, 2022, lambda url: self.fail('已有年度與成交證據不應連網'))
+        self.assertIn(false_open, closed)
+        self.assertNotIn(false_open, opened)
+        self.assertNotIn(date(2022, 1, 26), closed)
+        with closing(sqlite3.connect(self.db)) as conn:
+            self.assertEqual(conn.execute('SELECT refreshed_at FROM calendar_years WHERE year=2022').fetchone()[0], original)
+
     def test_weekend_holiday_and_evening_cutoff(self):
         closed = {date(2026, 9, 11)}
         self.assertEqual(daily.latest_session(datetime(2026, 9, 14, 7, 30, tzinfo=daily.TZ), closed, set()), date(2026, 9, 10))
@@ -253,7 +299,7 @@ class DatabaseCase(unittest.TestCase):
         def fail(url):
             if 'change/' in url:
                 raise TimeoutError('測試失敗')
-            return {'stat': '很抱歉，沒有符合條件的資料!'}, ''
+            return {'stat': '很抱歉，沒有符合條件的資料!'}, '0' * 64
         with self.assertRaises(TimeoutError):
             daily.refresh_actions(self.db, '2330', date(2026, 9, 1), date(2026, 9, 11), fail)
         with closing(sqlite3.connect(self.db)) as conn, conn:

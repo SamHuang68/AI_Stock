@@ -186,6 +186,7 @@ class 突破成交資料庫測試(unittest.TestCase):
         complete = self.report()
         expected = copy.deepcopy(complete)
         expected['research'].pop('execution')
+        expected['research']['adjusted'].pop('execution')
         with patch.object(events, 'build_execution', side_effect=AssertionError('此路徑不應計算成交研究')):
             compact = self.report(include_execution=False)
         self.assertEqual(compact, expected)

@@ -63,6 +63,22 @@ CREATE TABLE IF NOT EXISTS action_coverage(
   market TEXT NOT NULL, symbol TEXT NOT NULL, start_date TEXT NOT NULL,
   end_date TEXT NOT NULL, source TEXT NOT NULL, PRIMARY KEY(market,symbol)
 );
+CREATE TABLE IF NOT EXISTS action_price_evidence(
+  market TEXT NOT NULL, symbol TEXT NOT NULL, session_date TEXT NOT NULL, kind TEXT NOT NULL,
+  previous_close REAL, reference_price REAL, factor REAL, status TEXT NOT NULL, reason TEXT,
+  source_url TEXT NOT NULL, source_hash TEXT NOT NULL, retrieved_at TEXT NOT NULL,
+  parser_version TEXT NOT NULL, payload_json TEXT NOT NULL,
+  PRIMARY KEY(market,symbol,session_date,kind)
+);
+CREATE TABLE IF NOT EXISTS action_price_coverage(
+  market TEXT NOT NULL, symbol TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+  parser_version TEXT NOT NULL, sources_json TEXT NOT NULL, PRIMARY KEY(market,symbol)
+);
+CREATE TABLE IF NOT EXISTS research_month_receipts(
+  market TEXT NOT NULL, symbol TEXT NOT NULL, month TEXT NOT NULL, observed_through TEXT NOT NULL,
+  source_hash TEXT NOT NULL, retrieved_at TEXT NOT NULL, payload_json TEXT NOT NULL,
+  PRIMARY KEY(market,symbol,month)
+);
 CREATE TABLE IF NOT EXISTS market_sessions(
   session_date TEXT PRIMARY KEY, source TEXT NOT NULL
 );

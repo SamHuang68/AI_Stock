@@ -1,16 +1,21 @@
 /* 官方日線事件研究：圖表、品質及統計使用同一份資料。 */
 (function () {
   'use strict';
-  let dialog, controller, priorFocus, data, generation = 0, viewStart = 0, viewSize = 30, eventPage = 0, executionPage = 0;
+  let dialog, controller, priorFocus, data, generation = 0, viewStart = 0, viewSize = 30, eventPage = 0, executionPage = 0, priceBasis = 'adjusted', selectedDay = null;
   const EVENT_PAGE_SIZE = 50;
   const $ = id => document.getElementById(id);
   const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const number = v => typeof v === 'number' && Number.isFinite(v);
   const fmt = (v, n = 2) => number(v) ? v.toLocaleString('zh-TW', { maximumFractionDigits: n }) : '未提供';
   const pct = (v, n = 2) => number(v) ? (v > 0 ? '+' : '') + fmt(v, n) + '%' : '資料不足';
-  const researchRules = () => data.research && Array.isArray(data.research.rules) ? data.research.rules : [];
+  const hasAdjusted = () => Boolean(data.research && data.research.adjusted);
+  const activeBasis = () => priceBasis === 'adjusted' && hasAdjusted() ? 'adjusted' : 'raw';
+  const basisLabel = basis => basis === 'adjusted' ? '官方參考價調整比較' : '原始價格（保守排除）';
+  const selectedResearch = () => activeBasis() === 'adjusted' ? data.research.adjusted : data.research;
+  const rowResearch = row => activeBasis() === 'adjusted' ? row.adjustedResearch : row.research;
+  const researchRules = () => selectedResearch() && Array.isArray(selectedResearch().rules) ? selectedResearch().rules : [];
   const label = key => ([...(data.rules || []), ...researchRules()].find(r => r.key === key) || {}).label || key;
-  const researchSignals = row => row.research && Array.isArray(row.research.signals) ? row.research.signals : [];
+  const researchSignals = row => rowResearch(row) && Array.isArray(rowResearch(row).signals) ? rowResearch(row).signals : [];
   const eventSignals = row => [...(row.signals || []), ...researchSignals(row)];
   const eventRows = () => data.candles.filter(row => eventSignals(row).length).slice().reverse();
   const METRICS = [
@@ -19,10 +24,16 @@
     ['distance252HighPct', '距前 252 日高點', true]
   ];
   const researchCondition = (row, key) => row.conditions && row.conditions[key] === true ? '符合' : row.conditions && row.conditions[key] === false ? '未符合' : '不可判定';
-  const researchEvidence = row => METRICS.map(([key, name, percentage]) => {
-    const value = (row.metrics || {})[key];
-    return name + ' ' + (key === 'maxDrawdown100Pct' ? number(value) ? fmt(value) + '%' : '資料不足' : percentage ? pct(value) : fmt(value));
-  }).join('；');
+  const evidenceText = value => value == null ? '未提供' : typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  const researchEvidence = row => {
+    const metrics = row.metrics || {}, anchor = row.anchorDate || (row.comparisonEvidence || {}).anchorDate;
+    const rawHighs = row.rawPriorHighs || metrics.rawPriorHighs || Object.fromEntries([20, 120, 252].filter(h => metrics['rawPriorHigh' + h] !== undefined).map(h => ['前 ' + h + ' 日原始高點', metrics['rawPriorHigh' + h]]));
+    return METRICS.map(([key, name, percentage]) => {
+      const value = metrics[key];
+      return name + ' ' + (key === 'maxDrawdown100Pct' ? number(value) ? fmt(value) + '%' : '資料不足' : percentage ? pct(value) : fmt(value));
+    }).join('；') + (anchor ? '；價格比較基準日 ' + anchor : '') + (row.priceBasis ? '；價格口徑 ' + row.priceBasis : '') +
+      (Object.keys(rawHighs).length ? '；對照原始高點 ' + evidenceText(rawHighs) : '');
+  };
   const CSS = `
     #ke-dialog{width:min(1180px,96vw);max-height:94vh;max-height:94dvh;margin:auto;inset:0;padding:0;border:1px solid #526179;border-radius:10px;background:#101827;color:#e2e8f0;font:15px/1.65 system-ui,"Microsoft JhengHei UI",sans-serif;overflow:auto;scroll-padding-top:110px;scroll-padding-bottom:16px}
     #ke-dialog::backdrop{background:rgba(2,6,23,.78)}#ke-dialog *{box-sizing:border-box}#ke-dialog h2{font-size:23px;line-height:1.35;margin:0;font-weight:600}#ke-dialog h3{font-size:18px;margin:0 0 10px;font-weight:600}
@@ -36,6 +47,7 @@
     #ke-dialog [hidden]{display:none!important}#ke-dialog .ke-nav{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}#ke-dialog .ke-nav label{margin-right:6px}#ke-dialog .ke-timeline{width:100%;margin:10px 0}#ke-dialog .ke-timeline input{width:100%;padding:0;accent-color:#fbd45a}#ke-dialog .ke-scope{overflow-wrap:anywhere}#ke-dialog .ke-selected .ke-hit{stroke:#fbd45a;stroke-width:1.5}
     #ke-dialog .ke-research-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}#ke-dialog .ke-research-card{min-width:0;padding:12px;border:1px solid #475569;border-radius:6px;background:#19283b;overflow-wrap:anywhere}#ke-dialog .ke-research-card h4{font-size:14px;line-height:1.5;margin:0 0 8px}#ke-dialog .ke-research-card p{margin:5px 0;font-size:13px}#ke-dialog .ke-evidence{font-size:13px;overflow-wrap:anywhere}#ke-dialog .ke-detail{overflow-wrap:anywhere}#ke-dialog .ke-head>div{min-width:0}#ke-dialog .ke-head>button{flex-shrink:0}#ke-dialog .ke-fields select{max-width:100%}#ke-dialog .ke-research-table td.ke-wrap{min-width:210px;max-width:420px;overflow-wrap:anywhere}#ke-dialog a{color:#93c5fd;text-underline-offset:3px}
     #ke-dialog .ke-execution{min-width:0;overflow-wrap:anywhere}#ke-dialog .ke-execution h4{font-size:15px;margin:16px 0 8px}#ke-dialog .ke-execution .ke-nav{align-items:end}#ke-dialog .ke-execution .ke-nav>label{flex:0 1 240px;max-width:100%}#ke-dialog .ke-execution select{max-width:100%;font-size:13px}#ke-dialog .ke-execution table{font-size:13px}#ke-dialog .ke-execution th,#ke-dialog .ke-execution td{padding:9px 10px}#ke-dialog .ke-execution td.ke-wrap{min-width:170px;max-width:320px;overflow-wrap:anywhere}#ke-dialog .ke-execution summary{line-height:1.6}#ke-dialog .ke-execution .ke-state p{margin:4px 0}#ke-dialog .ke-execution .ke-scroll{margin:8px 0 12px}
+    #ke-dialog .ke-basis{min-width:0;overflow-wrap:anywhere}#ke-dialog .ke-basis select{width:100%;max-width:100%;font-size:13px}#ke-dialog .ke-basis label{width:min(100%,330px)}#ke-dialog .ke-payload{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.7 ui-monospace,monospace;margin:8px 0;padding:10px;background:#0b1220;border-radius:5px}#ke-dialog .ke-adjustment{min-width:0;overflow-wrap:anywhere}#ke-dialog .ke-adjustment details{padding:8px 10px;border:1px solid #334155;border-radius:5px}#ke-dialog .ke-adjustment p{margin:6px 0}
     @media(max-width:800px){#ke-dialog .ke-research-grid{grid-template-columns:minmax(0,1fr)}#ke-dialog .ke-research-card{padding:10px}}
     @media(max-width:600px){#ke-dialog .ke-head,#ke-dialog .ke-content{padding:12px}#ke-dialog h2{font-size:20px}#ke-dialog .ke-kpis{gap:10px 22px}#ke-dialog .ke-fields>label{flex:1 1 130px}#ke-dialog input{width:100%}#ke-dialog section{padding:14px 0}}
   `;
@@ -71,11 +83,13 @@
   }
   function selectDay(day) {
     const index = data.candles.findIndex(item => item.date === day), r = data.candles[index]; if (!r) return;
+    const research = rowResearch(r);
     if (index < viewStart || index >= viewStart + viewSize) { viewStart = index - Math.floor(viewSize / 2); renderChart(); }
+    selectedDay = day;
     $('ke-chart').querySelectorAll('[data-ke-day]').forEach(el => el.classList.toggle('ke-selected', el.dataset.keDay === day));
     $('ke-detail').innerHTML = '<strong>' + esc(r.date) + '｜' + esc(eventSignals(r).map(label).join('、') || r.reason) + '</strong><div>' + esc(r.reason) + '</div><div class="ke-muted">開 ' + fmt(r.open) + '・高 ' + fmt(r.high) + '・低 ' + fmt(r.low) + '・收 ' + fmt(r.close) + '・成交 ' + fmt(r.volume, 0) + ' 股</div>' +
       (r.metrics ? '<div>實體 ' + pct(r.metrics.bodyPct, 4) + '・量比 ' + fmt(r.metrics.volumeRatio, 3) + ' 倍・前 20 日高／低 ' + fmt(r.metrics.priorHigh) + '／' + fmt(r.metrics.priorLow) + '</div>' : '') +
-      (r.research ? '<div class="ke-evidence"><strong>突破位置研究</strong><ul>' + researchRules().map(rule => '<li>' + esc(rule.label + '：當日條件' + researchCondition(r.research, rule.key) + '；' + (researchSignals(r).includes(rule.key) ? '本日新增觀察事件' : '本日未新增觀察事件') + '。' + ((r.research.reason || {})[rule.key] || '')) + '</li>').join('') + '</ul><p>' + esc(researchEvidence(r.research)) + '</p></div>' : '') +
+      (research ? '<div class="ke-evidence"><strong>突破位置研究・' + esc(basisLabel(activeBasis())) + '</strong><ul>' + researchRules().map(rule => '<li>' + esc(rule.label + '：當日條件' + researchCondition(research, rule.key) + '；' + (researchSignals(r).includes(rule.key) ? '本日新增觀察事件' : '本日未新增觀察事件') + '。' + ((research.reason || {})[rule.key] || '')) + '</li>').join('') + '</ul><p>' + esc(researchEvidence(research)) + '</p>' + rowAdjustmentEvidence(research) + '</div>' : '') +
       '<div class="ke-muted">' + [1, 3, 5, 10].map(h => h + ' 日後：' + (number(r.returns[h].value) ? pct(r.returns[h].value) : esc(r.returns[h].reason))).join('；') + '</div>';
   }
   function renderChart() {
@@ -89,6 +103,7 @@
     ['ke-first', 'ke-prev'].forEach(id => { $(id).disabled = viewStart === 0; });
     ['ke-next', 'ke-last'].forEach(id => { $(id).disabled = viewStart === maxStart; });
     $('ke-detail').innerHTML = '';
+    selectedDay = null;
   }
   function eventTable(rows) {
     return '<table><thead><tr><th>日期</th><th>事件</th><th>收盤</th><th>1 日後</th><th>3 日後</th><th>5 日後</th><th>10 日後</th></tr></thead><tbody>' + (rows.length ? rows.map(r => '<tr><td><button data-ke-day="' + esc(r.date) + '">' + esc(r.date) + '</button></td><td class="ke-wrap">' + esc(eventSignals(r).map(label).join('、')) + (researchSignals(r).length ? '<small>含研究觀察事件，不是買進建議</small>' : '') + '</td><td>' + fmt(r.close) + '</td>' + [1, 3, 5, 10].map(h => cell(r.returns[h].value, r.returns[h].reason)).join('') + '</tr>').join('') : '<tr><td colspan="7">此區間沒有可判定的特殊事件。請查看資料品質。</td></tr>') + '</tbody></table>';
@@ -109,10 +124,44 @@
   function renderStats() {
     const h = $('ke-horizon').value;
     $('ke-stats').innerHTML = statsTable(data.stats, h);
-    if ($('ke-research-stats')) $('ke-research-stats').innerHTML = statsTable(data.research.stats || [], h);
+    if ($('ke-research-stats')) $('ke-research-stats').innerHTML = statsTable(selectedResearch().stats || [], h);
+  }
+  function evidenceLink(value) {
+    try {
+      const url = new URL(String(value));
+      if (url.protocol === 'https:' || url.protocol === 'http:') return '<a href="' + esc(url.href) + '" target="_blank" rel="noopener noreferrer">' + esc(value) + '</a>';
+    } catch (_) { /* 未核對網址只顯示文字。 */ }
+    return esc(evidenceText(value));
+  }
+  function rowAdjustmentEvidence(row) {
+    const evidence = row.comparisonEvidence || row.adjustmentEvidence;
+    return evidence ? '<details><summary>本日比較窗口的完整調整證據</summary><pre class="ke-payload">' + esc(evidenceText(evidence)) + '</pre></details>' : '';
+  }
+  function adjustmentEvidence() {
+    if (activeBasis() !== 'adjusted') return '<p class="ke-muted">本模式直接使用原始價格比較，跨公司行動的觀察窗口保守排除。原始價格研究及影子紀錄維持原版本。</p>';
+    const research = selectedResearch(), evidence = research.adjustmentEvidence || {}, coverage = evidence.coverage || {};
+    return '<div class="ke-adjustment"><p class="ke-state ke-warn">調整僅用於突破位置與高點比較；K 線、成交開盤與收盤價格仍為原始日線。這不是含息總報酬，也不是官方發布的還原日線；跨公司行動的持有期仍排除。歷史結果採目前已核對版本，不能視為事件當時已取得的證據。</p><details><summary>官方參考價基準、涵蓋與全部來源事件</summary><p class="ke-evidence">比較口徑：' + esc(research.priceBasis || 'twse-reference-comparison') + '；規則版本：' + esc(research.version || '未提供') + '。各觀察日只使用當日以前已生效的因子。</p><p class="ke-evidence">來源涵蓋：' + esc(coverage.start || '尚未建立') + '～' + esc(coverage.end || '尚未建立') + '；涵蓋版本：' + esc(coverage.version || '未提供') + '</p><pre class="ke-payload">' + esc(evidenceText(coverage.sources)) + '</pre><ul>' + (evidence.notes || []).map(note => '<li>' + esc(note) + '</li>').join('') + '</ul>' + (Array.isArray(evidence.events) && evidence.events.length ? evidence.events.map(event => '<details><summary>' + esc((event.date || '日期未提供') + '｜' + (event.kind || '事件類型未提供') + '｜' + (event.status || '狀態未提供')) + '</summary><p>本機價格核對：' + (event.verified === true ? '已核對通過' : event.verified === false ? '核對未通過' : '尚未核對') + '。' + esc(event.verificationReason || (event.verified === true ? '官方事件與本機價格一致。' : '尚無核對通過的依據。')) + '</p><p>來源解析狀態：' + esc(event.status || '未提供') + '；' + esc(event.reason || '沒有額外狀態說明') + '</p><p>事件前價格 ' + fmt(event.before, 6) + '；參考價 ' + fmt(event.after, 6) + '；比較因子 ' + fmt(event.factor, 12) + '</p><p class="ke-evidence">來源網址：' + evidenceLink(event.sourceUrl) + '</p><p class="ke-evidence">回應雜湊：' + esc(event.sourceHash || '未提供') + '；擷取時間：' + esc(event.retrievedAt || '未提供') + '；解析版本：' + esc(event.version || '未提供') + '</p><pre class="ke-payload">' + esc(evidenceText(event.payload)) + '</pre></details>').join('') : '<p>尚無來源事件明細；請併看涵蓋狀態與不可判定原因，不能據此認定期間沒有公司行動。</p>') + '</details></div>';
+  }
+  function basisSection() {
+    return '<div class="ke-basis"><div class="ke-nav" data-ke-interactive><label>價格比較基準<select id="ke-basis"><option value="raw">原始價格（保守排除）</option><option value="adjusted"' + (hasAdjusted() ? '' : ' disabled') + '>官方參考價調整比較</option></select></label></div><p id="ke-basis-status" class="ke-state' + (hasAdjusted() ? '' : ' ke-warn') + '" role="status">' + (hasAdjusted() ? '目前使用：' + esc(basisLabel(activeBasis())) + '。切換只改變研究比較，沿用本次已載入資料。' : '目前回應未提供官方參考價調整研究，已回退原始價格（保守排除）。') + ' 原六種事件與圖表 OHLC 維持原始價格。</p></div>';
+  }
+  function dailyResearchEvidence() {
+    return '<h3>' + esc(basisLabel(activeBasis())) + '：研究期間完整每日證據</h3><p class="ke-muted">每日條件與首次事件分開列出；不可判定不等於條件未符合。圖表及成交價保持原始日線，所有高點區間排除當日；調整模式以每個觀察日為自己的比較基準日。</p><div class="ke-scroll"><table class="ke-research-table"><thead><tr><th>日期</th><th>規則判定</th><th>首次事件</th><th>數值依據與基準</th></tr></thead><tbody>' + data.candles.map(row => {
+      const research = rowResearch(row) || {};
+      return '<tr><td>' + esc(row.date) + '</td><td class="ke-wrap">' + researchRules().map(rule => esc(rule.label + '：' + researchCondition(research, rule.key) + '；' + ((research.reason || {})[rule.key] || ''))).join('<br>') + '</td><td class="ke-wrap">' + esc(researchSignals(row).map(label).join('、') || '無新增觀察事件') + '</td><td class="ke-wrap">' + esc(researchEvidence(research)) + rowAdjustmentEvidence(research) + '</td></tr>';
+    }).join('') + '</tbody></table></div>';
+  }
+  function allResearchExport() {
+    const selected = priceBasis;
+    try {
+      return ['raw', ...(hasAdjusted() ? ['adjusted'] : [])].map(basis => {
+        priceBasis = basis;
+        return '<section class="ke-basis"><h2>價格比較基準：' + esc(basisLabel(basis)) + '</h2>' + adjustmentEvidence() + researchSection(true).replace(' id="ke-research"', '') + dailyResearchEvidence() + (executionData() ? '<section class="ke-execution">' + executionExport() + '</section>' : '<p>此價格基準尚未提供固定持有研究。</p>') + '</section>';
+      }).join('');
+    } finally { priceBasis = selected; }
   }
   const EXECUTION_COSTS = [['baseNet', '基準淨報酬'], ['stressNet', '壓力淨報酬'], ['gross', '未扣成本報酬']];
-  const executionData = () => data.research && data.research.execution;
+  const executionData = () => selectedResearch() && selectedResearch().execution;
   const executionRules = () => executionData() && Array.isArray(executionData().rules) ? executionData().rules : [];
   const executionAt = (rule, h) => (rule.horizons || {})[h] || {};
   const executionCostLabel = cost => (EXECUTION_COSTS.find(item => item[0] === cost) || [])[1] || cost;
@@ -121,7 +170,7 @@
   const executionRows = h => executionRules().flatMap(rule => (executionAt(rule, h).trades || []).map(trade => ({ ...trade, ruleLabel: rule.label }))).sort((a, b) => String(b.signalDate).localeCompare(String(a.signalDate)));
   function executionAssumptions() {
     const ex = executionData(), a = ex.assumptions || {};
-    return '<div class="ke-state ke-warn"><p><strong>隔日開盤、固定持有的歷史研究；非實際成交紀錄，也不是文章策略完整重現。</strong></p><p>進場：' + esc(a.entry || '未提供') + '。出場：' + esc(a.exit || '未提供') + '。</p><p>基準成本每邊 ' + ratio(a.baseCostPerSidePct) + '；壓力成本每邊 ' + ratio(a.stressCostPerSidePct) + '。' + esc(a.costNote || '成本假設未提供') + '</p></div><p class="ke-evidence">研究版本：' + esc(ex.version || '未提供') + '；固定持有 1／3／5／10 個市場交易日。1 日代表下一交易日開盤進場、同日收盤出場。未建立 VIDYA、停損或複利投資組合；不據此判定策略優勢。</p><ul class="ke-evidence">' + (a.notes || []).map(note => '<li>' + esc(note) + '</li>').join('') + '</ul>';
+    return '<div class="ke-state ke-warn"><p><strong>隔日開盤、固定持有的歷史研究；非實際成交紀錄，也不是文章策略完整重現。</strong></p><p>訊號比較基準：' + esc(basisLabel(activeBasis())) + '。進出價格一律採原始開盤與收盤，跨公司行動的持有期仍排除，未含股息。</p><p>進場：' + esc(a.entry || '未提供') + '。出場：' + esc(a.exit || '未提供') + '。</p><p>基準成本每邊 ' + ratio(a.baseCostPerSidePct) + '；壓力成本每邊 ' + ratio(a.stressCostPerSidePct) + '。' + esc(a.costNote || '成本假設未提供') + '</p></div><p class="ke-evidence">研究版本：' + esc(ex.version || '未提供') + '；固定持有 1／3／5／10 個市場交易日。1 日代表下一交易日開盤進場、同日收盤出場。未建立 VIDYA、停損或複利投資組合；不據此判定策略優勢。</p><ul class="ke-evidence">' + (a.notes || []).map(note => '<li>' + esc(note) + '</li>').join('') + '</ul>';
   }
   function executionCounts(h) {
     return '<h4>訊號與可用樣本</h4><p class="ke-muted">成熟、未成熟及排除分開列示。可判定日數為 0 時，零訊號代表資料不足，不能解讀為沒有觸發機會。</p><div class="ke-scroll" tabindex="0" aria-label="訊號與可用樣本，可水平捲動"><table><thead><tr><th>研究規則</th><th>可判定日數</th><th>首次訊號</th><th>成熟</th><th>未成熟</th><th>排除</th><th>非重疊</th><th>重疊排除</th></tr></thead><tbody>' + executionRules().map(rule => {
@@ -181,9 +230,9 @@
   function executionExport() {
     return '<h3>隔日開盤固定持有研究：完整期數與成本口徑</h3>' + executionAssumptions() + [1, 3, 5, 10].map(h => '<section><h3>固定持有 ' + h + ' 個交易日</h3>' + executionCounts(h) + EXECUTION_COSTS.map(([cost]) => executionDistributions(h, cost) + executionRandom(h, cost) + executionBenchmark(h, cost)).join('') + executionReasons(h) + '<h4>本期全部逐筆明細</h4><div class="ke-scroll">' + executionTradeTable(executionRows(h)) + '</div></section>').join('');
   }
-  function researchSection() {
+  function researchSection(exportAll = false) {
     if (!researchRules().length) return '';
-    const research = data.research, latest = research.latest || {}, signals = latest.signals || [];
+    const research = selectedResearch(), latest = research.latest || {}, signals = latest.signals || [];
     const shadow = research.shadow, writer = shadow && shadow.writer;
     return '<section id="ke-research"><h3>突破位置與修復風險觀察</h3><p class="ke-muted">研究標籤與影子紀錄，不加入買進分數、不自動下單。正報酬不等於進場優勢；本頁工程觀察不代表已重現文章策略。</p>' +
       '<div class="ke-state' + (!latest.date || researchRules().some(rule => !(latest.eligible || {})[rule.key]) ? ' ke-warn' : '') + '">資料基準：' + esc(latest.date || '無可用交易日') + '；最近已完成交易日：' + esc(data.freshness.expectedSession || '待核對') + '。以本次截至日期以前的已完成日線分析；休市沿用最近已完成交易日，歷史查詢保留當時日期前提。</div>' +
@@ -194,21 +243,25 @@
       '<p class="ke-evidence">影子紀錄：' + (shadow ? esc(shadow.status || '已提供') + '；最近已記錄交易日 ' + esc(shadow.asOf || '尚無紀錄') + '；首次觀測 ' + esc(shadow.observedAt || '尚無紀錄') + '；目前版本觀察日數 ' + fmt(shadow.count, 0) + '（不是訊號數或績效樣本）。' + esc(shadow.note || '') : '尚未提供帳本狀態；歷史事件不視為當時已觀測的前瞻紀錄。') + '</p>' +
       (writer ? '<p class="ke-evidence">最近帳本寫入工作：' + esc(writer.status || '狀態未提供') + '；檢查標的 ' + fmt(writer.checked, 0) + '；新增觀察 ' + fmt(writer.added, 0) + '；失敗 ' + fmt(Array.isArray(writer.failures) ? writer.failures.length : writer.failures, 0) + '；執行時間 ' + esc(writer.observedAt || '未提供') + '。' + esc(writer.reason || '') + '</p>' : '') +
       (shadow && shadow.revised ? '<div class="ke-state ke-warn">目前資料與該日首次觀測不同；影子帳本保留首次證據，未覆寫或回填歷史。</div>' : '') +
-      (shadow && shadow.evidence ? '<details><summary>首次觀測證據</summary><p class="ke-evidence">' + esc((shadow.evidence.date || shadow.asOf || '未提供日期') + '；' + researchEvidence(shadow.evidence)) + '</p><ul>' + researchRules().map(rule => '<li>' + esc(rule.label + '：當日條件' + researchCondition(shadow.evidence, rule.key) + '；' + ((shadow.evidence.signals || []).includes(rule.key) ? '新增觀察事件' : '未新增觀察事件') + '。' + ((shadow.evidence.reason || {})[rule.key] || '')) + '</li>').join('') + '</ul><p class="ke-evidence">首次輸入摘要：' + esc(shadow.evidence.inputDigest || '未提供') + '</p></details>' : '') +
-      '<h3>研究事件後續表現</h3><p class="ke-muted">期數跟隨下方「後續交易日」選單。事件日收盤至後續收盤的描述統計，非隔日開盤交易回測；基準為同期合格日期，非配對隨機進場或 0050。</p><div id="ke-research-stats" class="ke-scroll" tabindex="0" aria-label="研究事件後續表現，可水平捲動"></div>' +
-      '<details><summary>研究不可判定日期與原因</summary><ul>' + data.candles.filter(row => row.research && researchRules().some(rule => !(row.research.eligible || {})[rule.key])).map(row => '<li>' + esc(row.date + '：' + researchRules().filter(rule => !(row.research.eligible || {})[rule.key]).map(rule => rule.label + '／' + ((row.research.reason || {})[rule.key] || '不可判定')).join('；')) + '</li>').join('') + '</ul></details></section>';
+      (shadow && shadow.evidence ? '<details><summary>首次觀測證據</summary><p class="ke-evidence">' + esc((shadow.evidence.date || shadow.asOf || '未提供日期') + '；' + researchEvidence(shadow.evidence)) + '</p><ul>' + researchRules().map(rule => '<li>' + esc(rule.label + '：當日條件' + researchCondition(shadow.evidence, rule.key) + '；' + ((shadow.evidence.signals || []).includes(rule.key) ? '新增觀察事件' : '未新增觀察事件') + '。' + ((shadow.evidence.reason || {})[rule.key] || '')) + '</li>').join('') + '</ul><p class="ke-evidence">首次輸入摘要：' + esc(shadow.evidence.inputDigest || '未提供') + '</p>' + rowAdjustmentEvidence(shadow.evidence) + '</details>' : '') +
+      '<h3>研究事件後續表現</h3><p class="ke-muted">' + (exportAll ? '以下列出全部四種後續期數。' : '期數跟隨下方「後續交易日」選單。') + '事件日原始收盤至後續原始收盤的描述統計，非隔日開盤交易回測；基準為同期合格日期，非配對隨機進場或 0050。</p>' + (exportAll ? [1, 3, 5, 10].map(h => '<h4>後續 ' + h + ' 個交易日</h4><div class="ke-scroll">' + statsTable(research.stats || [], h) + '</div>').join('') : '<div id="ke-research-stats" class="ke-scroll" tabindex="0" aria-label="研究事件後續表現，可水平捲動"></div>') +
+      '<details><summary>研究不可判定日期與原因</summary><ul>' + data.candles.filter(row => rowResearch(row) && researchRules().some(rule => !(rowResearch(row).eligible || {})[rule.key])).map(row => '<li>' + esc(row.date + '：' + researchRules().filter(rule => !(rowResearch(row).eligible || {})[rule.key]).map(rule => rule.label + '／' + ((rowResearch(row).reason || {})[rule.key] || '不可判定')).join('；')) + '</li>').join('') + '</ul></details></section>';
   }
-  function render() {
+  function render(preserveControls = false) {
+    const previous = preserveControls ? { horizon: $('ke-horizon').value, executionHorizon: $('ke-execution-horizon') && $('ke-execution-horizon').value, cost: $('ke-execution-cost') && $('ke-execution-cost').value, day: selectedDay } : null;
     const f = data.freshness;
     $('ke-status').className = 'ke-state' + (f.fresh ? '' : ' ke-warn');
     $('ke-status').textContent = f.status + '｜應有 ' + (f.expectedSession || '待核對') + '；資料最新 ' + (f.latestSession || '無資料') + '。本次研究截至 ' + data.asOf + '。';
-    $('ke-result').innerHTML = '<p class="ke-scope"><strong>' + esc(data.range.label) + '：' + esc(data.historyStart || '無資料') + '～' + esc(data.historyEnd || '無資料') + '</strong><br><span class="ke-muted">資料庫現存日線 ' + esc(data.availableStart || '無資料') + '～' + esc(data.availableEnd || '無資料') + '；完整歷史依現有資料範圍提供，尚未核對的日期不納入事件統計。</span></p><div class="ke-kpis"><div><span class="ke-muted">研究標的</span><strong>' + esc(data.sym + ' ' + data.name) + '</strong></div><div><span class="ke-muted">期間事件天數（含研究）</span><strong>' + eventRows().length + '</strong></div><div><span class="ke-muted">原六種規則可判定日數</span><strong>' + data.eligibleDays + '</strong></div><div><span class="ke-muted">時間軸日數</span><strong>' + data.timelineDays + '</strong></div></div>' + researchSection() + executionSection() +
-      '<section><h3>歷史 K 線與成交量</h3><p class="ke-muted">點選 K 線或黃色點可查看當日依據。紅漲綠跌；缺值以 × 標示。圖表分段瀏覽，統計維持整個所選期間。</p><div class="ke-nav" data-ke-interactive><label>每段日數<select id="ke-size"><option value="30">30 日</option><option value="60">60 日</option><option value="120">120 日</option></select></label><button id="ke-first">最早</button><button id="ke-prev">上一段</button><button id="ke-next">下一段</button><button id="ke-last">最新</button><label>跳至日期<input id="ke-jump" type="date"></label><button id="ke-jump-go">前往日期</button></div><label class="ke-timeline" data-ke-interactive>歷史時間軸<input id="ke-position" type="range" min="0" step="1" value="0"></label><p id="ke-visible" class="ke-muted" aria-live="polite"></p><div id="ke-chart" class="ke-scroll"></div><div id="ke-detail" class="ke-detail" aria-live="polite"></div></section>' +
+    $('ke-result').innerHTML = '<p class="ke-scope"><strong>' + esc(data.range.label) + '：' + esc(data.historyStart || '無資料') + '～' + esc(data.historyEnd || '無資料') + '</strong><br><span class="ke-muted">資料庫現存日線 ' + esc(data.availableStart || '無資料') + '～' + esc(data.availableEnd || '無資料') + '；完整歷史依現有資料範圍提供，尚未核對的日期不納入事件統計。</span></p>' + basisSection() + '<div class="ke-kpis"><div><span class="ke-muted">研究標的</span><strong>' + esc(data.sym + ' ' + data.name) + '</strong></div><div><span class="ke-muted">期間事件天數（含研究）</span><strong>' + eventRows().length + '</strong></div><div><span class="ke-muted">原六種規則可判定日數</span><strong>' + data.eligibleDays + '</strong></div><div><span class="ke-muted">時間軸日數</span><strong>' + data.timelineDays + '</strong></div></div>' + adjustmentEvidence() + researchSection() + executionSection() +
+      '<section><h3>歷史 K 線與成交量（原始價格）</h3><p class="ke-muted">點選 K 線或黃色點可查看當日依據。紅漲綠跌；缺值以 × 標示。圖表價格永遠使用原始 OHLC，黃色點依所選研究比較基準更新；原六種事件維持原判定。圖表分段瀏覽，統計維持整個所選期間。</p><div class="ke-nav" data-ke-interactive><label>每段日數<select id="ke-size"><option value="30">30 日</option><option value="60">60 日</option><option value="120">120 日</option></select></label><button id="ke-first">最早</button><button id="ke-prev">上一段</button><button id="ke-next">下一段</button><button id="ke-last">最新</button><label>跳至日期<input id="ke-jump" type="date"></label><button id="ke-jump-go">前往日期</button></div><label class="ke-timeline" data-ke-interactive>歷史時間軸<input id="ke-position" type="range" min="0" step="1" value="0"></label><p id="ke-visible" class="ke-muted" aria-live="polite"></p><div id="ke-chart" class="ke-scroll"></div><div id="ke-detail" class="ke-detail" aria-live="polite"></div></section>' +
       '<section><h3>特殊事件與後續表現</h3><div class="ke-nav" data-ke-interactive><button id="ke-event-prev">上一頁事件</button><span id="ke-event-page" aria-live="polite"></span><button id="ke-event-next">下一頁事件</button></div><div id="ke-events" class="ke-scroll"></div><p class="ke-muted">包含原六種規則與研究首次觀察事件。資料不足的原因可點選該日查看；缺值與未成熟報酬皆不補零。下載報告包含所選期間全部事件與研究證據。</p></section>' +
       '<section><div class="ke-inline"><h3>歷史同型態統計</h3><label>後續交易日<select id="ke-horizon"><option value="1">1 日</option><option value="3">3 日</option><option value="5" selected>5 日</option><option value="10">10 日</option></select></label></div><p class="ke-muted">研究區間 ' + esc(data.historyStart || '尚未建立') + '～' + esc(data.historyEnd || '尚未建立') + '。各期只使用成熟樣本；平均差單位為百分點。</p><div id="ke-stats" class="ke-scroll"></div></section>' +
       '<details><summary>資料品質與不可判定日期</summary><p>官方來源：TWSE／TPEx；成交量統一為股。歷史中尚未官方核對 ' + data.unverifiedRows + ' 筆。</p><p>' + (data.companyActionCoverage ? '公司行動已核對：' + esc(data.companyActionCoverage.start + '～' + data.companyActionCoverage.end + '；' + data.companyActionCoverage.source) : '公司行動尚未完成核對。目前已提供台積電三年研究回補；其他標的需建立完整核對區間後才會產生統計。') + '</p><ul>' + data.candles.filter(r => !r.eligible).map(r => '<li>' + esc(r.date + '：' + r.reason) + '</li>').join('') + '</ul></details>' +
       '<details><summary>六種規則與統計口徑</summary><ul>' + data.rules.map(r => '<li>' + esc(r.label + '：' + r.formula) + '</li>').join('') + '</ul><ul>' + data.notes.map(n => '<li>' + esc(n) + '</li>').join('') + '</ul></details>';
-    viewStart = Math.max(0, data.candles.length - viewSize); eventPage = 0;
+    if (!preserveControls) viewStart = Math.max(0, data.candles.length - viewSize);
+    eventPage = 0;
+    $('ke-basis').value = activeBasis();
+    $('ke-basis').onchange = () => { priceBasis = $('ke-basis').value; render(true); $('ke-basis').focus(); };
     $('ke-size').value = String(viewSize);
     $('ke-size').onchange = () => { const end = viewStart + viewSize; viewSize = Number($('ke-size').value); viewStart = end - viewSize; renderChart(); };
     $('ke-position').oninput = () => { viewStart = Number($('ke-position').value); renderChart(); };
@@ -225,6 +278,7 @@
     };
     $('ke-event-prev').onclick = () => { eventPage--; renderEvents(); };
     $('ke-event-next').onclick = () => { eventPage++; renderEvents(); };
+    if (previous) $('ke-horizon').value = previous.horizon;
     $('ke-horizon').onchange = renderStats; renderStats(); renderChart(); renderEvents();
     if (executionData()) {
       executionPage = 0;
@@ -232,11 +286,13 @@
       $('ke-execution-cost').onchange = renderExecution;
       $('ke-execution-prev').onclick = () => { executionPage--; renderExecutionTrades(); };
       $('ke-execution-next').onclick = () => { executionPage++; renderExecutionTrades(); };
+      if (previous && previous.executionHorizon) $('ke-execution-horizon').value = previous.executionHorizon;
+      if (previous && previous.cost) $('ke-execution-cost').value = previous.cost;
       renderExecution();
     }
     $('ke-result').onclick = event => { const el = event.target.closest('[data-ke-day]'); if (el) selectDay(el.dataset.keDay); };
     $('ke-result').onkeydown = event => { const el = event.target.closest('g[data-ke-day]'); if (el && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); selectDay(el.dataset.keDay); } };
-    if (data.candles.length) selectDay(data.candles[data.candles.length - 1].date);
+    if (previous ? previous.day : data.candles.length) selectDay(previous ? previous.day : data.candles[data.candles.length - 1].date);
     $('ke-export').disabled = false;
   }
   async function load() {
@@ -267,11 +323,9 @@
     if (!data) return;
     const copy = $('ke-result').cloneNode(true);
     copy.querySelector('#ke-events').innerHTML = eventTable(eventRows());
-    if (executionData()) copy.querySelector('#ke-execution').innerHTML = executionExport();
     if (researchRules().length) {
-      const evidence = document.createElement('section');
-      evidence.innerHTML = '<h3>研究期間完整每日證據</h3><p class="ke-muted">每日條件與首次事件分開列出；不可判定不等於條件未符合。價格為原始日線口徑，所有高點區間排除當日。</p><div class="ke-scroll"><table class="ke-research-table"><thead><tr><th>日期</th><th>規則判定</th><th>首次事件</th><th>數值依據</th></tr></thead><tbody>' + data.candles.map(row => '<tr><td>' + esc(row.date) + '</td><td class="ke-wrap">' + researchRules().map(rule => esc(rule.label + '：' + researchCondition(row.research || {}, rule.key) + '；' + (((row.research || {}).reason || {})[rule.key] || ''))).join('<br>') + '</td><td class="ke-wrap">' + esc(researchSignals(row).map(label).join('、') || '無新增觀察事件') + '</td><td class="ke-wrap">' + esc(researchEvidence(row.research || {})) + '</td></tr>').join('') + '</tbody></table></div>';
-      copy.appendChild(evidence);
+      copy.querySelector('#ke-research').innerHTML = allResearchExport();
+      if (copy.querySelector('#ke-execution')) copy.querySelector('#ke-execution').innerHTML = '';
     }
     const charts = [];
     for (let i = 0; i < data.candles.length; i += 120) {
@@ -279,7 +333,7 @@
       charts.push('<p>' + esc(rows[0].date + '～' + rows[rows.length - 1].date) + '</p>' + chart(rows));
     }
     copy.querySelector('#ke-chart').innerHTML = charts.join('') || chart([]);
-    copy.querySelector('#ke-visible').textContent = '以下分段列出所選期間全部 ' + data.candles.length + ' 日。';
+    copy.querySelector('#ke-visible').textContent = '以下分段列出所選期間全部 ' + data.candles.length + ' 日，價格保持原始日線；圖上研究標記採 ' + basisLabel(activeBasis()) + '。' + (hasAdjusted() ? '兩種基準的完整研究依據分章列出。' : '目前回應僅提供原始價格研究，未提供調整比較模式。');
     copy.querySelectorAll('[data-ke-interactive]').forEach(el => el.remove());
     copy.querySelectorAll('details').forEach(el => { el.open = true; });
     copy.querySelectorAll('select').forEach(el => { el.value = $(el.id).value; el.replaceWith(document.createTextNode(el.options[el.selectedIndex].text)); });

@@ -117,7 +117,7 @@ def range_start(period: str, cutoff: date, start_date: str | None) -> date | Non
 
 
 def _read_bars(conn: sqlite3.Connection, symbol: str, cutoff: date) -> list:
-    return conn.execute('''SELECT b.ts,b.open,b.high,b.low,b.close,b.volume,q.session_date,q.source,q.issues,q.volume_unit
+    return conn.execute('''SELECT b.ts,b.open,b.high,b.low,b.close,b.volume,q.session_date,q.source,q.issues,q.volume_unit,q.price_basis
         FROM bars b LEFT JOIN bar_quality q ON b.market=q.market AND b.symbol=q.symbol AND b.ts=q.ts
         WHERE b.market='TW' AND b.symbol=? AND b.ts<? ORDER BY b.ts''',
         (symbol, int(datetime.combine(cutoff + timedelta(days=1), datetime.min.time(), TZ).timestamp()))).fetchall()
@@ -135,6 +135,8 @@ def _normalize_bars(raw: list, sessions: set[str]) -> dict[str, dict]:
             issues = [*issues, '交易日曆尚未核對']
         if row[9] != '股':
             issues = [*issues, '成交量單位未核對']
+        if row[10] != '原始價格':
+            issues = [*issues, '原始價格基準尚未核對']
         record = dict(zip(('time', 'open', 'high', 'low', 'close', 'volume'), row[:6]))
         prices = row[1:5]
         if not all(valid_number(v) for v in row[1:6]):
@@ -143,8 +145,32 @@ def _normalize_bars(raw: list, sessions: set[str]) -> dict[str, dict]:
             issues = [*issues, '開高低收邊界無效']
         if day in by_day:
             issues = [*issues, '同一交易日資料重複']
-        by_day[day] = {**record, 'date': day, 'issues': sorted(set(issues)), 'source': row[7], 'signals': []}
+        by_day[day] = {**record, 'date': day, 'issues': sorted(set(issues)), 'source': row[7],
+                       'priceBasis': 'unadjusted' if row[10] == '原始價格' else None, 'signals': []}
     return by_day
+
+
+def _read_adjustments(conn: sqlite3.Connection, symbol: str, cutoff: date) -> dict:
+    """與日線共用唯讀快照；舊資料庫未建表時只回報尚無證據。"""
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if not {'action_price_evidence', 'action_price_coverage'} <= tables:
+        return {'symbol': symbol, 'coverage': None, 'events': []}
+    coverage = conn.execute('''SELECT start_date,end_date,parser_version,sources_json
+        FROM action_price_coverage WHERE market='TW' AND symbol=?''', (symbol,)).fetchone()
+    events = conn.execute('''SELECT session_date,kind,previous_close,reference_price,factor,status,reason,
+        source_hash,source_url,retrieved_at,parser_version,payload_json FROM action_price_evidence
+        WHERE market='TW' AND symbol=? AND session_date<=? ORDER BY session_date,kind''',
+        (symbol, cutoff.isoformat())).fetchall()
+    def parsed(value, default):
+        try:
+            return json.loads(value)
+        except (ValueError, TypeError):
+            return default
+    return {'symbol': symbol, 'coverage': {'start': coverage[0], 'end': coverage[1], 'version': coverage[2],
+                         'sources': parsed(coverage[3], [])} if coverage else None,
+            'events': [dict(zip(('date', 'kind', 'before', 'after', 'factor', 'status', 'reason',
+                                'sourceHash', 'sourceUrl', 'retrievedAt', 'version', 'payload'),
+                               (*row[:-1], parsed(row[-1], {})))) for row in events]}
 
 
 def report(db: str | Path, symbol: str = '2330', as_of: str | None = None, now: datetime | None = None,
@@ -173,12 +199,16 @@ def report(db: str | Path, symbol: str = '2330', as_of: str | None = None, now: 
         calendar_years = {r[0] for r in conn.execute('SELECT year FROM calendar_years')}
         action_days = {r[0] for r in conn.execute("SELECT session_date FROM corporate_actions WHERE market='TW' AND symbol=? AND session_date<=?", (symbol, cutoff.isoformat()))}
         coverage = conn.execute("SELECT start_date,end_date,source FROM action_coverage WHERE market='TW' AND symbol=?", (symbol,)).fetchone()
+        adjustments = _read_adjustments(conn, symbol, cutoff)
+        official_action_days = set(action_days)
         name = conn.execute("SELECT name FROM meta WHERE market='TW' AND symbol=?", (symbol,)).fetchone()
         benchmark_raw, benchmark_actions, benchmark_coverage = [], set(), None
+        benchmark_adjustments = {'coverage': None, 'events': []}
         if include_execution:
             benchmark_raw = raw if symbol == '0050' else _read_bars(conn, '0050', cutoff)
             benchmark_actions = {r[0] for r in conn.execute("SELECT session_date FROM corporate_actions WHERE market='TW' AND symbol='0050' AND session_date<=?", (cutoff.isoformat(),))}
             benchmark_coverage = conn.execute("SELECT start_date,end_date,source FROM action_coverage WHERE market='TW' AND symbol='0050'").fetchone()
+            benchmark_adjustments = adjustments if symbol == '0050' else _read_adjustments(conn, '0050', cutoff)
     by_day = _normalize_bars(raw, sessions)
     # 保留已知交易日的缺口；日曆涵蓋以前的舊日線仍可瀏覽，但不參與事件判定。
     timeline = sorted(sessions | set(by_day)) if raw else []
@@ -232,12 +262,26 @@ def report(db: str | Path, symbol: str = '2330', as_of: str | None = None, now: 
                               action_coverage=coverage, sample_start=warmup)
     for row, observation in zip(rows, research.pop('rows')):
         row['research'] = observation
+    adjusted = build_research(rows, calendar_years=calendar_years, action_days=official_action_days,
+                              action_coverage=coverage, sample_start=warmup, adjustments=adjustments)
+    for row, observation in zip(rows, adjusted.pop('rows')):
+        row['adjustedResearch'] = observation
     if include_execution:
         benchmark_rows = list(_normalize_bars(benchmark_raw, sessions).values())
         research['execution'] = build_execution(rows, symbol=symbol, calendar_years=calendar_years,
                                                 action_days=action_days, action_coverage=coverage, sample_start=warmup,
                                                 benchmark_rows=benchmark_rows, benchmark_action_days=benchmark_actions,
                                                 benchmark_action_coverage=benchmark_coverage)
+        # 新模式只替換訊號資格；成交價、成交排除與同日配對仍沿用原始日線。
+        adjusted_rows = [{**row, 'research': row['adjustedResearch']} for row in rows]
+        adjusted['execution'] = build_execution(adjusted_rows, symbol=symbol, calendar_years=calendar_years,
+                                                action_days=action_days, action_coverage=adjustments['coverage'],
+                                                sample_start=warmup, benchmark_rows=benchmark_rows,
+                                                benchmark_action_days=benchmark_actions,
+                                                benchmark_action_coverage=benchmark_adjustments['coverage'])
+        adjusted['execution']['signalVersion'] = adjusted['version']
+        adjusted['execution']['signalPriceBasis'] = adjusted.get('priceBasis')
+    research['adjusted'] = adjusted
     rows = rows[warmup:]
     stats = []
     for key, (label, _) in RULES.items():

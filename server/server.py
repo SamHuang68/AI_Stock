@@ -6529,6 +6529,9 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                             period=qs.get('range', ['3y'])[0], start_date=qs.get('start', [None])[0])
             from 突破影子紀錄 import summary
             result['research']['shadow'] = summary(datastore.DB_PATH, code, result['research'], result['asOf'])
+            adjusted = result['research'].get('adjusted')
+            if adjusted:
+                adjusted['shadow'] = summary(datastore.DB_PATH, code, adjusted, result['asOf'])
             self._ok(json.dumps(result, ensure_ascii=False, allow_nan=False).encode())
         except ValueError as e:
             self._err(str(e), 400)

@@ -14,7 +14,7 @@ function harness(payload) {
       querySelectorAll: () => [], showModal() { this.open = true; }, close() { this.open = false; } };
     // 只替換 DOM 容器；圖表、事件及 HTML 組裝仍執行正式匯出函式。
     el.cloneNode = () => {
-      const nodes = new Map(['ke-events', 'ke-chart', 'ke-visible', 'ke-execution'].map(key => [key, element()]));
+      const nodes = new Map(['ke-events', 'ke-chart', 'ke-visible', 'ke-research', 'ke-execution'].map(key => [key, element()]));
       const appended = [];
       return { querySelector: selector => nodes.get(selector.slice(1)), querySelectorAll: () => [],
         appendChild(node) { appended.push(node); },
@@ -38,7 +38,7 @@ function harness(payload) {
   element('pro-tools');
   const context = { console, URLSearchParams, AbortController, Blob, clearTimeout,
     setTimeout: (fn, delay) => setTimeout(fn, delay === 30000 ? 0 : delay),
-    URL: { createObjectURL(blob) { downloads.push(blob); return 'blob:驗收'; }, revokeObjectURL() {} },
+    URL: class extends URL { static createObjectURL(blob) { downloads.push(blob); return 'blob:驗收'; } static revokeObjectURL() {} },
     document: { getElementById: id => elements.get(id), createElement: () => element(),
       head: element(), body: element(), activeElement: null },
     fetch: async url => { calls.push(url); return { ok: true, json: async () => payload }; },
@@ -121,6 +121,8 @@ const payload = { sym: '2330', name: '台積電', asOf: candles.at(-1).date,
       evidence: { ...observation, signals: [], conditions: { [key]: null }, reason: { [key]: '前一交易日不可判定' } } } };
   const researchView = harness(researchPayload), rget = researchView.get;
   researchView.context.KlineEventsUI.open('2330'); await ready();
+  assert.equal(rget('ke-basis').value, 'raw');
+  assert.match(rget('ke-result').innerHTML, /已回退原始價格（保守排除）/);
   assert.match(rget('ke-result').innerHTML, /不是訊號數或績效樣本/);
   assert.match(rget('ke-result').innerHTML, /資料已修訂，保留原觀察/);
   assert.match(rget('ke-result').innerHTML, /前一交易日不可判定/);
@@ -215,29 +217,107 @@ const payload = { sym: '2330', name: '台積電', asOf: candles.at(-1).date,
   assert.equal((executionExport.match(/0050 缺少官方進場日線&lt;&amp;&gt;/g) || []).length, 53 * 4 + 3);
   assert.doesNotMatch(executionExport, /<script>|<img src=x/);
   executionView.context.KlineEventsUI.close();
+  const adjustedPayload = structuredClone(executionPayload);
+  const factor = { date: '2016-08-01', kind: '除息', before: 100, after: 95, factor: .95, status: 'supported', reason: '已核對官方參考價',
+    verified: true, verificationReason: null,
+    sourceUrl: 'https://www.twse.com.tw/example?symbol=2330&year=2016', sourceHash: '原始回應<&>', retrievedAt: '2026-09-22T12:00:00+08:00', version: '參考價解析第一版', payload: { originalRow: ['<script>來源不可執行</script>', 100, 95] } };
+  const adjustedRow = { ...structuredClone(observation), anchorDate: candles.at(-1).date, priceBasis: 'twse-reference-comparison',
+    metrics: { priorHigh252: 95, distance252HighPct: 5, rawPriorHigh252: 100 }, comparisonEvidence: { anchorDate: candles.at(-1).date, events: [factor], windowStart: '2016-01-01' } };
+  adjustedPayload.candles.at(-1).research.signals = [];
+  adjustedPayload.candles.at(-1).research.conditions[key] = false;
+  adjustedPayload.candles.at(-1).adjustedResearch = adjustedRow;
+  adjustedPayload.research.adjusted = { ...structuredClone(adjustedPayload.research), version: 'breakout-observation-adjusted-v1', priceBasis: 'twse-reference-comparison',
+    latest: adjustedRow, rules: [{ key, label: '調整高點突破觀察', formula: '比較收盤大於調整後 252 日高點' }],
+    adjustmentEvidence: { coverage: { start: '2016-01-01', end: '2016-12-31', version: '涵蓋第一版', sources: ['TWSE', '<img src=x>'] },
+      events: [factor, { ...factor, date: '2016-08-02', status: 'unsupported', reason: '同日複合事件未放行', verified: false, verificationReason: '本機前收盤不一致', sourceUrl: 'javascript:alert("不可執行")' }], notes: ['只調整比較，不計含息報酬'] } };
+  adjustedPayload.research.adjusted.stats[0].label = '調整高點突破觀察';
+  adjustedPayload.research.adjusted.execution.rules[0].label = '調整高點突破觀察';
+  const adjustedView = harness(adjustedPayload), bget = adjustedView.get;
+  adjustedView.context.KlineEventsUI.open('2330'); await ready();
+  assert.equal(bget('ke-basis').value, 'adjusted');
+  assert.match(bget('ke-result').innerHTML, /價格永遠使用原始 OHLC/);
+  assert.match(bget('ke-result').innerHTML, /跨公司行動的持有期仍排除/);
+  assert.match(bget('ke-result').innerHTML, /歷史結果採目前已核對版本/);
+  assert.match(bget('ke-result').innerHTML, /href="https:\/\/www.twse.com.tw\/example\?symbol=2330&amp;year=2016"/);
+  assert.doesNotMatch(bget('ke-result').innerHTML, /href="javascript:|<script>|<img src=x/);
+  assert.match(bget('ke-result').innerHTML, /同日複合事件未放行/);
+  assert.match(bget('ke-result').innerHTML, /本機價格核對：已核對通過/);
+  assert.match(bget('ke-result').innerHTML, /本機價格核對：核對未通過/);
+  assert.match(bget('ke-result').innerHTML, /本機前收盤不一致/);
+  assert.match(bget('ke-detail').innerHTML, /價格比較基準日/);
+  assert.match(bget('ke-detail').innerHTML, /對照原始高點/);
+  assert.match(bget('ke-detail').innerHTML, /前 252 日原始高點/);
+  assert.match(bget('ke-detail').innerHTML, /本日比較窗口的完整調整證據/);
+  assert.match(bget('ke-events').innerHTML, /調整高點突破觀察/);
+  assert.match(bget('ke-chart').innerHTML, /調整高點突破觀察/);
+  assert.match(bget('ke-research-stats').innerHTML, /調整高點突破觀察/);
+  assert.match(bget('ke-execution-results').innerHTML, /調整高點突破觀察/);
+  const originalStats = bget('ke-stats').innerHTML;
+  const rawPriceShapes = bget('ke-chart').innerHTML.match(/<(?:rect|line)\s[^>]+>/g);
+  bget('ke-execution-horizon').value = '3'; bget('ke-execution-horizon').onchange();
+  bget('ke-execution-cost').value = 'stressNet'; bget('ke-execution-cost').onchange();
+  const fetchCount = adjustedView.calls.length;
+  bget('ke-basis').value = 'raw'; bget('ke-basis').onchange();
+  assert.equal(adjustedView.calls.length, fetchCount, '切換比較基準不得重抓資料');
+  assert.equal(bget('ke-execution-horizon').value, '3');
+  assert.equal(bget('ke-execution-cost').value, 'stressNet');
+  assert.equal(bget('ke-stats').innerHTML, originalStats, '原六種事件統計保持不變');
+  assert.deepEqual(bget('ke-chart').innerHTML.match(/<(?:rect|line)\s[^>]+>/g), rawPriceShapes, '比較基準切換不得改變原始 OHLC 圖形');
+  assert.doesNotMatch(bget('ke-chart').innerHTML, /調整高點突破觀察/);
+  assert.doesNotMatch(bget('ke-events').innerHTML, /調整高點突破觀察/);
+  assert.match(bget('ke-research-stats').innerHTML, /一年高點突破觀察/);
+  assert.match(bget('ke-execution-results').innerHTML, /一年高點突破觀察/);
+  assert.match(bget('ke-detail').innerHTML, /原始價格（保守排除）/);
+  bget('ke-export').onclick();
+  const bothExport = await adjustedView.downloads[0].text();
+  assert.match(bothExport, /價格比較基準：原始價格（保守排除）/);
+  assert.match(bothExport, /價格比較基準：官方參考價調整比較/);
+  assert.match(bothExport, /breakout-observation-adjusted-v1/);
+  assert.match(bothExport, /原始回應&lt;&amp;&gt;/);
+  assert.match(bothExport, /&lt;script&gt;來源不可執行/);
+  assert.match(bothExport, /參考價解析第一版/);
+  assert.match(bothExport, /涵蓋第一版/);
+  assert.doesNotMatch(bothExport, /href="javascript:|<script>|<img src=x/);
+  for (const h of [1, 3, 5, 10]) {
+    assert.equal(bothExport.split('一年高點突破觀察・' + h + ' 日').length - 1, 53);
+    assert.equal(bothExport.split('調整高點突破觀察・' + h + ' 日').length - 1, 53);
+    assert.equal(bothExport.split('<h4>後續 ' + h + ' 個交易日</h4>').length - 1, 2);
+  }
+  assert.equal(bget('ke-basis').value, 'raw', '匯出兩模式後須保留目前選擇');
+  bget('ke-basis').value = 'adjusted'; bget('ke-basis').onchange();
+  assert.equal(bget('ke-execution-horizon').value, '3');
+  assert.equal(bget('ke-execution-cost').value, 'stressNet');
+  assert.match(bget('ke-events').innerHTML, /調整高點突破觀察/);
+  adjustedView.context.KlineEventsUI.close();
   // 可傳入後端完整 report，讓實際輸出契約沿用相同 DOM／下載驗收流程。
   if (process.argv[2]) {
     const actual = JSON.parse(fs.readFileSync(path.resolve(process.argv[2]), 'utf8'));
     const actualView = harness(actual), aget = actualView.get;
     actualView.context.KlineEventsUI.open(actual.sym); await ready();
     assert.ok(aget('ke-execution-results'), '完整 report 應含第二階段研究');
-    for (const h of [1, 3, 5, 10]) {
-      aget('ke-execution-horizon').value = String(h); aget('ke-execution-horizon').onchange();
-      for (const cost of ['gross', 'baseNet', 'stressNet']) {
-        aget('ke-execution-cost').value = cost; aget('ke-execution-cost').onchange();
-        assert.doesNotMatch(aget('ke-execution-results').innerHTML + aget('ke-execution-trades').innerHTML, /NaN|undefined/);
+    const bases = ['raw', ...(actual.research.adjusted ? ['adjusted'] : [])], expectedRows = new Map();
+    for (const basis of bases) {
+      aget('ke-basis').value = basis; aget('ke-basis').onchange();
+      const research = basis === 'raw' ? actual.research : actual.research.adjusted;
+      for (const h of [1, 3, 5, 10]) {
+        aget('ke-execution-horizon').value = String(h); aget('ke-execution-horizon').onchange();
+        for (const cost of ['gross', 'baseNet', 'stressNet']) {
+          aget('ke-execution-cost').value = cost; aget('ke-execution-cost').onchange();
+          assert.doesNotMatch(aget('ke-execution-results').innerHTML + aget('ke-execution-trades').innerHTML, /NaN|undefined/);
+        }
+        const total = research.execution.rules.reduce((n, rule) => n + rule.horizons[h].trades.length, 0);
+        assert.match(aget('ke-execution-page').textContent, new RegExp('共 ' + total + ' 筆'));
+        for (const rule of research.execution.rules) {
+          const marker = rule.label + '・' + h + ' 日';
+          expectedRows.set(marker, (expectedRows.get(marker) || 0) + rule.horizons[h].trades.length);
+        }
       }
-      const total = actual.research.execution.rules.reduce((n, rule) => n + rule.horizons[h].trades.length, 0);
-      assert.match(aget('ke-execution-page').textContent, new RegExp('共 ' + total + ' 筆'));
     }
     aget('ke-export').onclick();
     const actualExport = await actualView.downloads[0].text();
-    for (const rule of actual.research.execution.rules) for (const h of [1, 3, 5, 10]) {
-      const marker = rule.label + '・' + h + ' 日';
-      assert.equal(actualExport.split(marker).length - 1, rule.horizons[h].trades.length, '匯出必須保留每個期數的所有逐筆研究');
-    }
+    for (const [marker, count] of expectedRows) assert.equal(actualExport.split(marker).length - 1, count, '匯出必須保留兩種模式每個期數的所有逐筆研究');
     assert.match(actualExport, /完整期數與成本口徑/);
     actualView.context.KlineEventsUI.close();
   }
-  console.log('K 線歷史時間軸：原事件與第二階段研究的期數、成本、分頁、缺漏原因、完整匯出及字元跳脫驗證通過');
+  console.log('K 線歷史時間軸：原事件、價格比較基準、期數、成本、分頁、來源證據、缺漏原因、兩模式完整匯出及字元跳脫驗證通過');
 })().catch(error => { console.error(error); process.exitCode = 1; });
