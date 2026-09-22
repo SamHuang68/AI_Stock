@@ -32,7 +32,11 @@ ok(pulse.includes("MOBILE_LAYOUT_CONTRACT = '2col-scroll'") &&
   pulse.includes('#pl-root .pl-zone{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(300px,auto)') &&
   pulse.includes('#pl-body.pl-mode-expert{display:block;overflow:visible') &&
   pulse.includes('#shell-views:has(#view-pulse.on){overflow-x:hidden!important;overflow-y:auto!important'),
-  '總覽手機版的第二與第三區採兩欄，卡片可增高並由頁面捲動');
+  '總覽手機直式的第二與第三區採兩欄，卡片可增高並由頁面捲動');
+ok(!pulse.includes("(pointer:coarse) and (min-width:981px)") &&
+  pulse.includes('#pl-root .pl-sec{box-sizing:border-box;overflow:auto;overscroll-behavior:contain}') &&
+  pulse.includes('html.st-vs5 #pl-root .pl-zone>.pl-sec>h4{flex-wrap:wrap;white-space:normal;overflow-wrap:anywhere}'),
+  '短橫式包含手機寬度，卡片可捲動且標題可換行');
 ok(pulse.includes('#pl-root .pl-inst4,#pl-root .pl-bd4,#pl-root .pl-ohlc4{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px') &&
   pulse.includes('#pl-root .pl-score3 .sc.main{grid-column:1/-1}') &&
   pulse.includes('#pl-root .pl-strip{display:flex;gap:7px;overflow-x:auto') &&

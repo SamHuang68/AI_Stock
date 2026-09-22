@@ -97,12 +97,12 @@ context.applyRoute('heat');
 assertScroll(0, 0, '圖表捲動後切到熱力不殘留裁頭位移');
 flushFrames();
 
-// 執行總覽的實際欄數診斷，避免短橫式已改兩欄卻仍被診斷成桌機五欄。
+// 執行總覽的實際欄數診斷，確認直式兩欄、橫式上下各五欄。
 const pulseSource = fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8');
 const probeStart = pulseSource.indexOf('  function probeLayoutCols() {');
 const probeEnd = pulseSource.indexOf('  function injectCSS() {', probeStart);
 assert.ok(probeStart >= 0 && probeEnd > probeStart, '找到實際總覽欄數診斷函式');
-for (const [width, height, columns] of [[393, 852, 2], [852, 330, 2], [767, 400, 2], [981, 330, 5], [1440, 900, 5]]) {
+for (const [width, height, columns] of [[393, 852, 2], [852, 330, 5], [767, 400, 5], [981, 330, 5], [1440, 900, 5]]) {
   const probe = { style: {} };
   const zones = [{ children: Array(5) }, { children: Array(5) }];
   const probeContext = {
