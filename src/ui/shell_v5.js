@@ -39,6 +39,8 @@
   };
 
   var ROUTES = [
+    { id: 'research', label: '研究', hint: '每日變化、個股、研究紀錄與回顧', icon: '▧' },
+    { id: 'updates', label: '更新', hint: '更新工作、進度、錯誤與重試', icon: '↻', action: 'updates' },
     { id: 'pulse',         label: '總覽', hint: '市場總覽儀表板（一屏高密度）', icon: '◎' },
     { id: 'decision',      label: '決策', hint: '情境矩陣／行動範圍／證據鏈',                 icon: '◆' },
     { id: 'chart',         label: '圖表', hint: 'K 線工作區（含加權／櫃買指數與總體列）',   icon: '◈' },
@@ -130,6 +132,7 @@
   };
 
   var PANEL_MAP = {
+    research: 'ResearchDesk',
     pulse: 'PulseV5',
     decision: 'DecisionV5',
     breadth: 'BreadthV5',
@@ -604,6 +607,8 @@
         ])
       ]),
       ringFolder('desk', '工作台', '★', '自選、投組、系統（含原側欄「工具」指令盤）', [
+        ringRoute('research', '研究', '▧', '每日變化、個股與研究回顧'),
+        ringRoute('updates', '更新', '↻', '更新工作中心'),
         ringRoute('watchlist', '自選', '★', '自選股中心'),
         ringRoute('book', '投組', '▣', '投組風險'),
         PRIVATE_WEB ? null : ringRoute('wavedeck', 'WaveDeck', '⚡', '開啟浪潮執行台'),
@@ -1730,6 +1735,10 @@
     opts = resolved.opts;
 
     var route = findRoute(id) || findRoute('chart') || ROUTES[0];
+    if (route.action === 'updates') {
+      if (window.UpdateCenter) window.UpdateCenter.open(document.activeElement);
+      return;
+    }
 
     if (route.action === 'wavedeck') {
       var url = (window.WAVEDECK_URL || 'http://127.0.0.1:18433/');

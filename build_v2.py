@@ -128,6 +128,10 @@ V2_SCRIPTS.insert(2, 'src/core/market_freshness_v5.js')  # per-quote asOf freshn
 V2_SCRIPTS.insert(3, 'src/core/market_data_v5.js')  # canonical market quote store
 V2_SCRIPTS.insert(4, 'src/core/decision_data_v5.js')  # canonical DecisionContext store
 V2_SCRIPTS.insert(5, 'src/core/market_intel_v5.js')  # shared theme resonance + news/watch linkage
+V2_SCRIPTS[4:4] = ['src/core/投組資料契約_v5.js', 'src/core/更新工作_v5.js',
+                   'src/core/研究工作流.js', 'src/core/研究任務.js']
+V2_SCRIPTS[V2_SCRIPTS.index('src/ui/decision_v5.js'):V2_SCRIPTS.index('src/ui/decision_v5.js')] = [
+    'src/ui/更新工作中心.js', 'src/ui/研究任務面板.js', 'src/ui/研究工作台.js']
 
 try:
     from build_order import order_scripts

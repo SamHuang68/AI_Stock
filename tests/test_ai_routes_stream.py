@@ -55,6 +55,65 @@ class AiRoutesStreamTests(unittest.TestCase):
         self.assertNotIn('http_stream_completed', trace)
         self.assertNotIn('部分正文', trace)
 
+    def test_confirmed_route_change_rejected_before_inference(self):
+        expected = dict(mode='fast', host='本機', provider='local', model='模型甲', dataBoundary='local-only', destinationId='route-a')
+        handler = Handler({'prompt': '測試', 'expectedRoute': expected})
+        with mock.patch.object(ai_local, 'route_metadata', return_value=dict(expected, model='模型乙', available=True, destinationVerified=True)), \
+             mock.patch.object(ai_local, 'chat_stream') as inference:
+            handler._handle_ai_local()
+        self.assertEqual(409, handler.code)
+        inference.assert_not_called()
+
+    def test_confirmed_route_matching_allows_inference(self):
+        expected = dict(mode='fast', host='本機', provider='local', model='模型甲', dataBoundary='local-only', destinationId='route-a')
+        handler = Handler({'prompt': '測試', 'expectedRoute': expected})
+        with mock.patch.object(ai_local, 'route_metadata', return_value=dict(expected, available=True, destinationVerified=True)), \
+             mock.patch.object(ai_local, 'chat_stream', return_value=iter(['完成'])) as inference:
+            handler._handle_ai_local()
+        self.assertEqual(200, handler.code)
+        inference.assert_called_once()
+        self.assertEqual(expected, inference.call_args.kwargs['expected_route'])
+        self.assertEqual('route-a', handler.sent['X-ST-AI-Destination-ID'])
+
+    def test_missing_or_null_destination_consent_rejected_without_probe(self):
+        metadata = dict(mode='fast', host='本機', provider='local', model='模型甲',
+                        dataBoundary='external', destinationId='route-a', available=True,
+                        destinationVerified=True)
+        for expected in [None, {}, {key: metadata[key] for key in ai_local.ROUTE_FIELDS if key != 'destinationId'}]:
+            with self.subTest(expected=expected), \
+                 mock.patch.object(ai_local, 'route_metadata', return_value=metadata) as route, \
+                 mock.patch.object(ai_local, 'chat_stream') as inference:
+                handler = Handler({'prompt': '測試', 'expectedRoute': expected})
+                handler._handle_ai_local()
+                self.assertEqual(409, handler.code)
+                self.assertEqual([mock.call('fast', probe=False)], route.call_args_list)
+                inference.assert_not_called()
+
+    def test_destination_changed_during_probe_rejected_before_stream(self):
+        metadata = dict(mode='fast', host='本機', provider='local', model='模型甲',
+                        dataBoundary='external', destinationId='route-a', available=True,
+                        destinationVerified=True)
+        expected = {key: metadata[key] for key in ai_local.ROUTE_FIELDS}
+        with mock.patch.object(ai_local, 'route_metadata', side_effect=[metadata, metadata, dict(metadata, destinationId='route-b')]), \
+             mock.patch.object(ai_local, 'chat_stream') as inference:
+            handler = Handler({'prompt': '測試', 'expectedRoute': expected})
+            handler._handle_ai_local()
+        self.assertEqual(409, handler.code)
+        inference.assert_not_called()
+
+    def test_unverified_hermes_destination_rejected_before_process(self):
+        metadata = dict(mode='deep', host='本機', provider='Hermes', model='模型甲',
+                        dataBoundary='unknown', destinationId='route-a', available=True,
+                        destinationVerified=False)
+        expected = {key: metadata[key] for key in ai_local.ROUTE_FIELDS}
+        with mock.patch.object(ai_local, 'route_metadata', return_value=metadata) as route, \
+             mock.patch.object(ai_local, 'deep_stream') as inference:
+            handler = Handler({'prompt': '測試', 'expectedRoute': expected})
+            handler._handle_ai_deep()
+        self.assertEqual(409, handler.code)
+        self.assertEqual([mock.call('deep', probe=False)], route.call_args_list)
+        inference.assert_not_called()
+
     def test_success_done_and_legacy_plain_text(self):
         for accept in ['text/event-stream', 'text/plain']:
             with self.subTest(accept=accept), mock.patch.object(ai_local, 'chat_stream', return_value=iter(['正文'])):

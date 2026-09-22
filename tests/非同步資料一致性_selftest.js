@@ -120,6 +120,7 @@ async function checkPanelLifecycle() {
     PANEL_MAP: { book: 'BookV5', heat: 'HeatV5', institutional: 'InstitutionalV5' },
     ROUTES: ['book', 'chart', 'heat', 'institutional'].map(id => ({ id })), ROUTE_ALIASES: {},
     STORAGE_KEY: '測試路由', ringState: { open: false },
+    S: { positions: { '2330': { shares: 100, lastPrice: 1000, mkt: 'TW' } }, wl: [] },
     document: { readyState: 'loading', body: element(), documentElement: element(), head: element(),
       getElementById: id => ids.get(id), createElement: () => element(), querySelectorAll: () => [],
       addEventListener(type, callback) { const key = 'document:' + type; listeners.set(key, [...(listeners.get(key) || []), callback]); } },
@@ -137,6 +138,7 @@ async function checkPanelLifecycle() {
   context.window = context;
   vm.createContext(context);
   vm.runInContext(read('src/core/app_kernel_v5.js'), context);
+  vm.runInContext(read('src/core/投組資料契約_v5.js'), context);
   vm.runInContext(read('src/ui/book_v5.js'), context);
   const shell = read('src/ui/shell_v5.js');
   vm.runInContext(['panelApi', 'deactivateRoute', 'emitRoute', 'findRoute', 'resolveAlias', 'applyRoute']
@@ -149,6 +151,7 @@ async function checkPanelLifecycle() {
   assert.equal(requests.length, 1, '實際 Shell、AppKernel、Book 接線只能送一次投組請求');
   assert.equal(requests[0].url, '/portfolio');
   assert.equal(JSON.parse(requests[0].options.body).holdings[0].sym, '2330');
+  assert.equal(JSON.parse(requests[0].options.body).holdings[0].weight, 100000, '正式持倉請求須來自股數乘上最新價格');
   for (const callback of listeners.get('document:DOMContentLoaded') || []) callback();
   for (const [id, timer] of [...timers]) if (timer.ms === 240) { timers.delete(id); timer.callback(); }
   assert.equal(requests.length, 1, '頁面就緒不得再由面板自行延遲啟動');

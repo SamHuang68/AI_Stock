@@ -735,12 +735,20 @@ def _read_disk_cache() -> dict[str, Any] | None:
         return None
 
 
-def _write_disk_cache(value: dict[str, Any]) -> None:
+def _write_disk_cache(value: dict[str, Any], commit_guard=None) -> None:
+    if commit_guard:
+        commit_guard()
     os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
     temp_path = CACHE_PATH + '.tmp'
     with open(temp_path, 'w', encoding='utf-8') as fh:
         json.dump(value, fh, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
-    os.replace(temp_path, CACHE_PATH)
+    try:
+        if commit_guard:
+            commit_guard()
+        os.replace(temp_path, CACHE_PATH)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 class OptionsHistoryCorruptError(RuntimeError):
@@ -761,7 +769,9 @@ def _read_history_rows(*, strict: bool = False) -> list[dict[str, Any]]:
         return []
 
 
-def _write_history_rows(rows: list[dict[str, Any]]) -> None:
+def _write_history_rows(rows: list[dict[str, Any]], commit_guard=None) -> None:
+    if commit_guard:
+        commit_guard()
     os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
     temp_path = HISTORY_PATH + f'.{os.getpid()}.{threading.get_ident()}.tmp'
     payload = {
@@ -773,6 +783,8 @@ def _write_history_rows(rows: list[dict[str, Any]]) -> None:
             json.dump(payload, fh, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
             fh.flush()
             os.fsync(fh.fileno())
+        if commit_guard:
+            commit_guard()
         os.replace(temp_path, HISTORY_PATH)
     finally:
         try:
@@ -891,7 +903,7 @@ def _history_context(snapshot: dict[str, Any], rows: list[dict[str, Any]]) -> di
     }
 
 
-def _record_history(value: dict[str, Any]) -> dict[str, Any]:
+def _record_history(value: dict[str, Any], commit_guard=None) -> dict[str, Any]:
     snapshot = _compact_history_snapshot(value)
     if not snapshot:
         return {'status': 'unavailable', 'sameExpiry': False, 'sampleCount': 0,
@@ -912,7 +924,11 @@ def _record_history(value: dict[str, Any]) -> dict[str, Any]:
             rows = [snapshot if (row.get('tradeDate'), row.get('expiry')) == key else row for row in rows]
         rows.sort(key=lambda row: (str(row.get('tradeDate') or ''), str(row.get('expiry') or '')))
         try:
-            _write_history_rows(rows)
+            if commit_guard:
+                commit_guard()
+                _write_history_rows(rows, commit_guard=commit_guard)
+            else:
+                _write_history_rows(rows)
         except OSError:
             context['persistence'] = 'write_failed'
             context['historyPersisted'] = False
@@ -955,9 +971,12 @@ def refresh(
     force: bool = False,
     now: datetime | None = None,
     fetcher: Callable[..., Any] = fetch_json,
+    commit_guard=None,
 ) -> dict[str, Any]:
     """Fetch official sources, build one exact expiry and cache atomically."""
     now = now or datetime.now(timezone.utc)
+    if commit_guard:
+        commit_guard()
     with _lock:
         cached = latest_cached()
         same_expiry = not expiry or _date_key(expiry) == ((cached or {}).get('observed') or {}).get('expiry')
@@ -967,21 +986,35 @@ def refresh(
     fetched_at = now.isoformat()
     try:
         report = fetcher(REPORT_URL, timeout=25, retries=2)
+        if commit_guard:
+            commit_guard()
         delta = fetcher(DELTA_URL, timeout=25, retries=2)
+        if commit_guard:
+            commit_guard()
         if not isinstance(report, list) or not isinstance(delta, list):
             raise ValueError('TAIFEX options endpoints must return arrays')
         value = build_options_structure(
             report, delta, spot=spot, spot_as_of=spot_as_of, expiry=expiry,
             fetched_at=fetched_at, now=now)
-        value['history'] = _record_history(value)
+        value['history'] = (_record_history(value, commit_guard=commit_guard) if commit_guard
+                            else _record_history(value))
         with _lock:
-            _memory_cache.update({'loaded': True, 'value': value, 'savedAt': time.time()})
+            if commit_guard:
+                commit_guard()
             try:
-                _write_disk_cache(value)
+                if commit_guard:
+                    _write_disk_cache(value, commit_guard=commit_guard)
+                else:
+                    _write_disk_cache(value)
             except OSError:
                 pass
+            if commit_guard:
+                commit_guard()
+            _memory_cache.update({'loaded': True, 'value': value, 'savedAt': time.time()})
         return deepcopy(value)
     except Exception as exc:
+        if commit_guard:
+            commit_guard()
         cached = latest_cached()
         if cached:
             cached['status'] = 'stale'

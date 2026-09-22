@@ -34,6 +34,12 @@ jobs:
           for test in tests/*selftest.js; do node "$test"; done
       - name: Build v2 HTML
         run: python build_v2.py --out stock_terminal_v2.ci.html
+      - name: 安裝固定版本瀏覽器驗收工具
+        run: npm ci --ignore-scripts
+      - name: 準備 Chromium
+        run: npx playwright install --with-deps chromium
+      - name: 研究流程與手機橫向瀏覽器驗收
+        run: npm run test:browser
       - name: PowerShell launcher syntax
         if: runner.os == 'Windows'
         shell: pwsh

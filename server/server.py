@@ -56,6 +56,8 @@ from features_routes import FeaturesRoutesMixin
 from decision_routes import DecisionRoutesMixin
 from overnight_intraday_routes import OvernightIntradayRoutesMixin
 from options_routes import OptionsRoutesMixin
+from 研究工作流路由 import ResearchWorkflowRoutesMixin
+from 更新路由 import UpdateRoutesMixin, configure_updates, coordinator as _update_coordinator
 from market_contract import attach_quote_contract, cumulative_volume_contract
 from market_routes import (market_snapshot, twse_mis_observation, twse_mis_stock_quote,
                            quote_observation, guard_tw_quote, taifex_mis_observation,
@@ -3570,7 +3572,7 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
     request_queue_size = 64
 
-class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, PeakObservationRoutesMixin, PeakObservation100dRoutesMixin, Touxin5dRoutesMixin, OptionsRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
+class Handler(ResearchWorkflowRoutesMixin, UpdateRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, PeakObservationRoutesMixin, PeakObservation100dRoutesMixin, Touxin5dRoutesMixin, OptionsRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     _BASE = _BASE
     # 固定模組與 Wasm MIME，避免 Windows 登錄設定影響 worker 載入。
     extensions_map = {**SimpleHTTPRequestHandler.extensions_map,
@@ -3665,6 +3667,16 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_marketflow()
         elif p == '/breadth' or p.startswith('/breadth?'):
             self._handle_breadth()
+        elif p in ('/updates', '/updates/archive') or p.startswith('/updates?'):
+            self._handle_updates_get()
+        elif p == '/research/workflow' or p.startswith('/research/workflow?'):
+            self._handle_research_workflow()
+        elif p == '/research/subject' or p.startswith('/research/subject?'):
+            self._handle_research_subject()
+        elif p == '/research/validation' or p.startswith('/research/validation?'):
+            self._handle_research_validation()
+        elif p == '/research/portfolio':
+            self._handle_research_portfolio()
         elif p == '/pulse' or p.startswith('/pulse?'):
             self._handle_pulse()
         elif p == '/pulse/update-status' or p.startswith('/pulse/update-status?'):
@@ -3953,6 +3965,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_screen3()
         elif p == '/portfolio':
             self._handle_portfolio()
+        elif p in ('/updates', '/updates/retry'):
+            self._handle_updates_post()
         elif p == '/pulse/refresh':
             self._handle_pulse_refresh()
         elif p == '/decision/context':
@@ -4100,6 +4114,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         self.send_response(status)
         if ct.startswith('application/json'):
             ct = ct + '; charset=utf-8'
+            self.send_header('Cache-Control', 'no-store')
         self.send_header('Content-Type', ct)
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
@@ -7967,7 +7982,12 @@ if __name__ == '__main__':
         if not _pulse_updates.start(_build_pulse_update, _pulse_decision.latest_pulse,
                                     _pulse_decision.committed_pulse_for_job):
             raise RuntimeError('無法取得唯一 Pulse 更新工作者，停止啟動以避免快照分歧')
+        configure_updates(_pulse_updates)
         _http_server.serve_forever()
     finally:
+        try:
+            _update_coordinator().queue.stop(timeout=2.0)
+        except RuntimeError:
+            pass
         _pulse_updates.stop(timeout=2.0)
         _http_server.server_close()

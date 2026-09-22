@@ -26,11 +26,13 @@ function harness(file, api, setup = '') {
     addEventListener() {}, setInterval() { return 1; }, clearInterval() {}, setTimeout() { return 1; }, clearTimeout() {},
     ShellV5: { route: () => api === 'HeatV5' ? 'heat' : '', softBadge: (...args) => badges.push(args) },
     localStorage: { getItem() { return null; } },
+    S: { positions: { '2330': { shares: 100, lastPrice: 1000, mkt: 'TW' } }, wl: [] },
     fetch(url) {
       const p = pending(); requests.push({ ...p, url }); return p.promise;
     }
   };
   context.window = context; vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/core/投組資料契約_v5.js'), 'utf8'), context);
   let source = fs.readFileSync(path.join(root, file), 'utf8');
   const marker = '  window.' + api + ' = ';
   if (setup) source = source.replace(marker, setup + '\n' + marker);
@@ -76,15 +78,19 @@ async function decision() {
     'window.testLoadHistory = loadHistory;');
   const work = [];
   h.context.DecisionData = {
-    refresh() { const p = pending(); work.push(p); return p.promise; },
+    refresh(options) {
+      assert.equal(options.holdings[0].weight, 100000, '以共用契約計算完整持倉市值');
+      assert.equal(options.portfolioInputStatus, 'complete');
+      const p = pending(); work.push({ ...p, key: options.portfolioInputKey }); return p.promise;
+    },
     refreshPulse() { return h.context.fetch('/pulse').then(response => response.json()).then(pulse => ({ pulse })); }
   };
   h.api.refresh(false); h.api.deactivate();
-  work[0].resolve({ context: { id: '離頁資料' } }); await tick();
+  work[0].resolve({ context: { id: '離頁資料' }, portfolioInputKey: work[0].key }); await tick();
   assert.equal(h.rendered.length, 0);
   h.api.refresh(false); h.api.refresh(true);
-  work[2].resolve({ context: { id: '新資料' } }); await tick();
-  work[1].resolve({ context: { id: '舊資料' } }); await tick();
+  work[2].resolve({ context: { id: '新資料' }, portfolioInputKey: work[2].key }); await tick();
+  work[1].resolve({ context: { id: '舊資料' }, portfolioInputKey: work[1].key }); await tick();
   assert.deepEqual(h.rendered, ['新資料']);
   h.context.testLoadHistory(); h.api.deactivate();
   complete(h.requests[0], { rows: [{ asOf: '2026-09-18T08:00:00Z', regime: '離頁歷史' }] }); await tick();
@@ -101,7 +107,7 @@ async function decision() {
   assert.equal(work.length, 3, '離頁的市場更新不可再啟動決策刷新');
   assert.equal(h.api.refreshMarketData(), newMarket, '舊 finally 不可清除新市場請求');
   complete(h.requests[4], { ok: true }); await tick();
-  work[3].resolve({ context: { id: '重入市場資料' } }); await newMarket;
+  work[3].resolve({ context: { id: '重入市場資料' }, portfolioInputKey: work[3].key }); await newMarket;
   assert.deepEqual(h.rendered, ['新資料', '重入市場資料']);
   console.log('通過：決策正式 load 與歷史回應的離頁、逆序');
 }

@@ -1,7 +1,7 @@
 /* ============================================================================
  * book_v5.js  —  Stock Terminal 5.0 Stage 6：投組風險側欄
  * ----------------------------------------------------------------------------
- * 成分：持倉市值權重 → 否則自選等權；可手改 textarea。
+ * 成分：共用實際持倉／等權觀察池；手動權重明列為情境模擬。
  * 資料：POST /portfolio → 波動／VaR／Beta／產業／相關性（與 portfolio_v3 同後端）
  * 掛載：#mount-book；側欄「投組」
  * ========================================================================== */
@@ -10,8 +10,10 @@
 
   var SRV = window.SERVER || '';
   var lastData = null;
-  var analysisSequence = 0;
-  var source = 'auto'; // auto | pos | watch | custom
+  var source = 'shared';
+  var generation = 0;
+  var controller = null;
+  var active = false;
 
   function $(id) { return document.getElementById(id); }
   function esc(s) {
@@ -45,54 +47,86 @@
       beta: betaComplete && weight > 0 ? beta / weight : null, note: notes.join(' · ') };
   }
 
-  function holdingsFromPositions() {
-    if (typeof S !== 'undefined' && S.positions && Object.keys(S.positions).length) {
-      return Object.keys(S.positions).map(function (code) {
-        var p = S.positions[code] || {};
-        var px = p.lastPrice || p.entry || 0;
-        var val = px * (p.shares || 0);
-        return { sym: code, weight: val > 0 ? val : 1 };
-      });
-    }
-    return [];
-  }
-  function holdingsFromWatch() {
-    if (typeof S !== 'undefined' && S.watches && Object.keys(S.watches).length) {
-      return Object.keys(S.watches).map(function (code) {
-        return { sym: code, weight: 1 };
-      });
-    }
-    // fallback: watchlist chips in DOM / localStorage common keys
-    try {
-      var wl = JSON.parse(localStorage.getItem('wl_v2') || localStorage.getItem('watchlist') || '[]');
-      if (Array.isArray(wl) && wl.length) {
-        return wl.map(function (x) {
-          var sym = typeof x === 'string' ? x : (x.sym || x.t || x.code);
-          return sym ? { sym: String(sym).replace(/\.TW|\.TWO/g, ''), weight: 1 } : null;
-        }).filter(Boolean);
-      }
-    } catch (e) {}
-    return [];
-  }
-  function holdingsAuto() {
-    var p = holdingsFromPositions();
-    return p.length ? p : holdingsFromWatch();
+  function sharedContext() {
+    if (window.PortfolioContext) return window.PortfolioContext.resolve();
+    return { kind: 'actual', label: '實際持倉', ready: false, holdings: [],
+      coverage: { total: 0, included: 0, excluded: 0, complete: false },
+      issues: [{ message: '共用投組資料契約尚未載入。', action: '請重新載入完整版本；不會以舊邏輯代算。' }] };
   }
   function holdingsToText(h) {
     return (h || []).map(function (x) {
-      return x.sym + ' ' + (Math.round((x.weight || 1) * 100) / 100);
+      return x.sym + ' ' + String(x.weight);
     }).join('\n');
   }
   function parseHoldings(txt) {
-    return (txt || '').split('\n').map(function (line) {
+    var context = { kind: 'simulation', label: '情境模擬（手動權重，非實際持倉）', ready: false,
+      holdings: [], coverage: { total: 0, included: 0, excluded: 0, complete: false }, issues: [] };
+    var seen = {};
+    (txt || '').split('\n').forEach(function (line) {
       var p = line.trim().split(/\s+/);
-      if (!p[0]) return null;
-      var w = parseFloat(p[1]);
-      return {
-        sym: p[0].replace('.TW', '').replace('.TWO', ''),
-        weight: (isFinite(w) && w > 0) ? w : 1
-      };
-    }).filter(Boolean);
+      if (!p[0]) return;
+      context.coverage.total++;
+      var sym = p[0].toUpperCase().replace(/\.(TW|TWO)$/, '');
+      var w = Number(p[1]);
+      if (p.length !== 2 || !/^[A-Z0-9^][A-Z0-9.^=_-]*$/.test(sym) || !isFinite(w) || w <= 0 || seen[sym]) {
+        context.issues.push({ sym: sym, message: '模擬代號重複、格式錯誤或權重不是有效正數。', action: '每行輸入不重複代號與大於零的權重，例如 2330 40；權重不得省略。' });
+        return;
+      }
+      seen[sym] = true;
+      context.holdings.push({ sym: sym, weight: w, market: /^\d{4,8}[A-Z]?$/.test(sym) ? 'TW' : 'US' });
+    });
+    context.coverage.included = context.holdings.length;
+    context.coverage.excluded = context.coverage.total - context.holdings.length;
+    if (!isFinite(context.holdings.reduce(function (sum, row) { return sum + row.weight; }, 0))) {
+      context.issues.push({ message: '模擬總權重超出可計算範圍。', action: '請縮小權重單位後再分析。' });
+    }
+    context.ready = context.holdings.length > 0 && !context.issues.length;
+    context.coverage.complete = context.ready;
+    if (!context.ready) context.holdings = [];
+    return context;
+  }
+
+  function currentContext() {
+    var shared = sharedContext();
+    if ((shared.issues || []).some(function (item) { return item.code === 'private_access_blocked'; })) return shared;
+    return source === 'simulation' ? parseHoldings(($('bk-edit') || {}).value) : shared;
+  }
+
+  function invalidate() {
+    generation++;
+    lastData = null;
+    if (controller) controller.abort();
+    controller = null;
+  }
+
+  function contextKey(context) {
+    return JSON.stringify({ kind: context.kind, ready: context.ready, holdings: context.holdings, coverage: context.coverage });
+  }
+
+  function syncMode(context) {
+    var details = $('bk-mode-details');
+    if (details) details.textContent = context.label + ' · 有效 ' + context.coverage.included + '／' + context.coverage.total + ' 檔' +
+      (context.ready ? '' : ' · 尚未計算；請先處理資料缺漏。');
+    var mount = $('mount-book');
+    if (mount) mount.querySelectorAll('[data-src]').forEach(function (button) {
+      var selected = button.getAttribute('data-src') === context.kind;
+      button.classList.toggle('on', selected);
+      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    });
+    var sub = $('bk-sub');
+    if (sub) sub.textContent = context.label;
+  }
+
+  function showUnavailable(context) {
+    var body = $('bk-body');
+    if (!body) return;
+    lastData = null;
+    syncMode(context);
+    body.innerHTML = '<div class="bk-empty"><div class="bk-empty-card">' +
+      '<div class="bk-empty-icon" aria-hidden="true">▦</div><b>尚未計算投組風險</b>' +
+      '<p style="font-size:11px;line-height:1.5">' + (context.issues.length ? context.issues.map(function (item) {
+        return (item.sym ? esc(item.sym) + '：' : '') + esc(item.message) + '<br>' + esc(item.action);
+      }).join('<br><br>') : '請輸入模擬成分與有效正權重，再執行分析。') + '</p></div></div>';
   }
 
   function injectCSS() {
@@ -159,7 +193,7 @@
       '#bk-root .bk-note{font-size:10px;color:var(--tlo);line-height:1.4;margin-top:2px;flex:0 0 auto}' +
       '#bk-root .bk-loading{font-size:10px;color:var(--tlo);padding:12px 0}' +
       '#bk-root .bk-err{color:var(--orange);font-size:10px;padding:8px 0}' +
-      '#bk-root .bk-empty{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:24px}' +
+      '#bk-root .bk-empty{flex:1;min-height:0;overflow:auto;display:flex;align-items:center;justify-content:center;padding:24px}' +
       '#bk-root .bk-empty-card{width:min(520px,100%);padding:28px 30px;text-align:center;border-radius:11px;' +
         'border:1px solid rgba(125,211,252,.2);background:radial-gradient(circle at 50% 0%,rgba(56,189,248,.11),transparent 58%),' +
         'linear-gradient(145deg,rgba(17,31,50,.9),rgba(7,15,27,.96));box-shadow:0 18px 42px -28px rgba(0,0,0,.95)}' +
@@ -299,22 +333,25 @@
       panel.appendChild(mount);
     }
     if (!$('bk-root')) {
-      var init = holdingsAuto();
+      var init = sharedContext();
       mount.innerHTML =
         '<div id="bk-root">' +
           '<div class="bk-head"><div>' +
             '<span class="bk-title">投組風險</span>' +
             '<span class="bk-sub" id="bk-sub">波動 · VaR · Beta · 產業曝險</span>' +
           '</div><div class="bk-actions">' +
-            '<button type="button" class="bk-btn" data-src="pos">持倉</button>' +
-            '<button type="button" class="bk-btn" data-src="watch">自選</button>' +
             '<button type="button" class="bk-btn" id="bk-edit-toggle">成分 ▾</button>' +
             '<button type="button" class="bk-btn primary" id="bk-run">分析</button>' +
             '<button type="button" class="bk-btn" data-shell-back>← 儀表板</button>' +
           '</div></div>' +
           '<div class="bk-edit-wrap">' +
-            '<textarea id="bk-edit" placeholder="每行：代號 權重（可省略=1）  例：2330 40">' +
-              esc(holdingsToText(init)) + '</textarea>' +
+            '<div role="group" aria-label="投組資料模式" style="display:flex;gap:6px;flex-wrap:wrap">' +
+              '<button type="button" class="bk-btn" data-src="actual">實際持倉</button>' +
+              '<button type="button" class="bk-btn" data-src="observation_pool">觀察池（等權）</button>' +
+              '<button type="button" class="bk-btn" data-src="simulation">情境模擬</button>' +
+            '</div><div class="bk-note" id="bk-mode-details" aria-live="polite" style="font-size:11px;line-height:1.45"></div>' +
+            '<textarea id="bk-edit" aria-label="情境模擬成分" placeholder="模擬專用；每行：代號 正權重（必填），例如 2330 40">' +
+              esc(holdingsToText(init.holdings)) + '</textarea>' +
           '</div>' +
           '<div id="bk-body" class="bk-loading">待命</div>' +
         '</div>';
@@ -325,26 +362,39 @@
           var open = editTa.classList.toggle('open');
           editToggle.textContent = open ? '成分 ▴' : '成分 ▾';
         };
+        editTa.oninput = function () {
+          source = 'simulation';
+          invalidate();
+          syncMode(currentContext());
+          var body = $('bk-body');
+          if (body) body.innerHTML = '<div class="bk-loading">模擬內容已變更；請按分析。先前結果已失效。</div>';
+        };
       }
       mount.querySelectorAll('[data-src]').forEach(function (b) {
         b.onclick = function () {
-          source = b.getAttribute('data-src');
-          var h = source === 'pos' ? holdingsFromPositions() : holdingsFromWatch();
-          var ta = $('bk-edit');
-          if (ta) ta.value = holdingsToText(h);
-          analyze(h);
+          var next = b.getAttribute('data-src');
+          if (next === 'simulation') {
+            source = 'simulation';
+            if ($('bk-edit')) $('bk-edit').classList.add('open');
+            analyze(currentContext());
+          } else {
+            source = 'shared';
+            var before = window.PortfolioContext && window.PortfolioContext.getMode();
+            if (window.PortfolioContext) window.PortfolioContext.setMode(next);
+            if (before === next || !window.PortfolioContext) activate();
+          }
         };
       });
       var run = $('bk-run');
       if (run) run.onclick = function () {
-        source = 'custom';
-        analyze(parseHoldings(($('bk-edit') || {}).value));
+        analyze(currentContext());
       };
     }
     return $('bk-body');
   }
 
-  function render(d) {
+  function render(d, context) {
+    context = context || currentContext();
     var body = $('bk-body');
     if (!body) return;
     lastData = d;
@@ -361,7 +411,7 @@
 
     var sub = $('bk-sub');
     if (sub) {
-      sub.textContent = codes.length + ' 檔 · 基準 ' + (d.benchmark || '^TWII') +
+      sub.textContent = context.label + ' · ' + codes.length + ' 檔 · 基準 ' + (d.benchmark || '^TWII') +
         ' · 更新 ' + new Date().toLocaleTimeString('zh-TW');
     }
 
@@ -436,36 +486,57 @@
     });
   }
 
-  function analyze(h) {
+  function analyze(context) {
     var body = ensureMount();
+    invalidate();
     if (!body) return;
-    var sequence = ++analysisSequence;
-    if (!h || !h.length) {
-      body.innerHTML = '<div class="bk-empty"><div class="bk-empty-card">' +
-        '<div class="bk-empty-icon" aria-hidden="true">▦</div><b>尚未建立投組樣本</b>' +
-        '<p>從上方載入持倉或自選；也可展開編輯區輸入「代號 權重」，再按重新分析。</p>' +
-        '<div class="bk-empty-steps"><span>1 · 選擇來源</span><span>2 · 確認權重</span><span>3 · 重新分析</span></div>' +
-        '</div></div>';
+    syncMode(context);
+    if (!context.ready) {
+      showUnavailable(context);
       return;
     }
+    if (context.holdings.some(function (item) { return item.market !== 'TW'; })) {
+      showUnavailable({ kind: context.kind, label: context.label, ready: false, holdings: [], coverage: context.coverage,
+        issues: [{ message: '目前投組風險後端僅支援臺股；非臺股成分不可混入臺股基準。',
+          action: '請分市場檢視標的；完成多市場資料與比較基準契約前，不執行此投組計算。' }] });
+      return;
+    }
+    var requestGeneration = generation;
+    var requestKey = contextKey(context);
+    function current() {
+      if (requestGeneration !== generation) return false;
+      var latest = currentContext();
+      if (contextKey(latest) !== requestKey) {
+        invalidate();
+        if (!latest.ready) showUnavailable(latest);
+        else {
+          syncMode(latest);
+          body.innerHTML = '<div class="bk-loading">投組資料已變更；本次結果已失效，請重新分析。</div>';
+        }
+        return false;
+      }
+      return true;
+    }
+    controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     body.innerHTML = '<div class="bk-loading">分析中…（首次可能需回補日線）</div>';
     fetch(SRV + '/portfolio', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ holdings: h })
+      body: JSON.stringify({ holdings: context.holdings, portfolioKind: context.kind }),
+      signal: controller ? controller.signal : undefined
     })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (x) {
-        if (sequence !== analysisSequence) return;
+        if (!current()) return;
         if (!x.ok || !x.d || x.d.error) {
           body.innerHTML = '<div class="bk-err">分析失敗：' + esc((x.d && x.d.error) || '無資料') + '</div>';
           return;
         }
-        var paint = function () { if (sequence === analysisSequence) render(x.d); };
+        var paint = function () { if (current()) render(x.d, context); };
         _bindWdChipLive();
         var stream = window.WaveDeckBridge && typeof WaveDeckBridge.streamStatus === 'function'
           ? WaveDeckBridge.streamStatus() : null;
-        // SSE store warm → paint immediately; else one REST hydrate
+        // 串流已有狀態時直接呈現，否則取得一次橋接狀態；兩條路徑都檢查請求代次。
         if (stream && stream.ok && stream.chips > 0) {
           paint();
         } else {
@@ -482,28 +553,37 @@
         }
       })
       .catch(function (e) {
-        if (sequence !== analysisSequence) return;
+        if (!current()) return;
+        lastData = null;
         body.innerHTML = '<div class="bk-err">分析失敗：' + esc(e.message || e) + '</div>';
       });
   }
 
   function activate() {
+    active = true;
     ensureMount();
     var ta = $('bk-edit');
-    var h = parseHoldings(ta && ta.value);
-    if (!h.length) {
-      h = holdingsAuto();
-      if (ta) ta.value = holdingsToText(h);
-    }
-    analyze(h);
+    var context = currentContext();
+    if (source !== 'simulation' && ta) ta.value = holdingsToText(context.holdings);
+    analyze(context);
   }
 
   window.BookV5 = {
     activate: activate,
-    deactivate: function () { ++analysisSequence; },
+    deactivate: function () { active = false; invalidate(); },
     refresh: activate,
     last: function () { return lastData; }
   };
+
+  window.addEventListener('portfolioContext', function () {
+    source = 'shared';
+    invalidate();
+    if (active) activate();
+    else if ($('bk-body')) {
+      syncMode(sharedContext());
+      $('bk-body').innerHTML = '<div class="bk-loading">投組模式已變更；重新開啟本頁後分析。</div>';
+    }
+  });
 
   // 面板生命週期由 Shell／AppKernel 統一呼叫。
 })();

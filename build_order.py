@@ -18,6 +18,9 @@ import os
 
 # 相依宣告：key 必須排在 value(們) 之後。
 DEPS = {
+    '研究任務面板.js': ['研究任務.js', 'ai_runtime_client.js'],
+    '研究工作台.js': ['研究工作流.js', '研究任務面板.js', '投組資料契約_v5.js', 'shell_v5.js'],
+    '更新工作中心.js': ['更新工作_v5.js', 'shell_v5.js'],
     'ai_runtime_client.js': ['market_v3.js'],
     'ai_report_v3.js':      ['ai_runtime_client.js'],
     'copilot_v3.js':        ['ai_runtime_client.js'],
@@ -39,7 +42,7 @@ DEPS = {
     'instrank_v3.js':       ['viz_v5.js'],
     'marketflow_v3.js':     ['viz_v5.js'],
     'pulse_v5.js':          ['viz_v5.js', 'ai_runtime_client.js'],
-    'decision_data_v5.js':  ['market_data_v5.js'],
+    'decision_data_v5.js':  ['market_data_v5.js', '投組資料契約_v5.js', '更新工作_v5.js'],
     'market_freshness_v5.js': ['app_kernel_v5.js'],
     'market_data_v5.js':    ['app_kernel_v5.js', 'market_freshness_v5.js'],
     'decision_v5.js':       ['viz_v5.js', 'decision_data_v5.js', 'shell_v5.js'],
@@ -50,7 +53,7 @@ DEPS = {
     'scan_v5.js':           ['viz_v5.js'],
     '估值承接研究.js':      ['估值承接核心.js'],
     'news_v5.js':           ['viz_v5.js'],
-    'book_v5.js':           ['viz_v5.js'],
+    'book_v5.js':           ['viz_v5.js', '投組資料契約_v5.js'],
     'heat_v5.js':           ['viz_v5.js'],
     'chart_visual_v5.js':   ['colors_v3.js', 'visual_system_v5.js'],
     'realtime_v3.js':       ['intraday_volume_v3.js', 'market_data_v5.js'],

@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import json
+import copy
 import importlib.util
 import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.request
 import urllib.error
@@ -23,6 +25,9 @@ import decision_context as dc  # noqa: E402
 import early_warning as ew  # noqa: E402
 import options_exposure as ox  # noqa: E402
 import overnight_intraday as oi  # noqa: E402
+import job_queue as jq  # noqa: E402
+import 更新路由 as updates  # noqa: E402
+from pulse_updates import PulseUpdates  # noqa: E402
 
 # Load Stock Terminal's single-file HTTP server under a collision-free name.
 # The optional WaveDeck project deliberately owns the top-level ``server``
@@ -69,7 +74,8 @@ def _pulse() -> dict:
 
 class DecisionHttpTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        (ROOT / 'scratch').mkdir(exist_ok=True)
+        self.tmp = tempfile.TemporaryDirectory(prefix='決策HTTP-', dir=ROOT / 'scratch')
         self.signal_db_path = str(Path(self.tmp.name) / 'market_signals.db')
         # 訊號讀取函式的預設路徑在定義時已綁定；只改 DB_PATH 不會隔離 HTTP 查詢。
         # 保留真實查詢與序列化流程，讓讀取端與下方發布端共用本次測試資料庫。
@@ -94,11 +100,20 @@ class DecisionHttpTest(unittest.TestCase):
             oi._CACHE.clear()
         levels = {'levels': {'r1': 23100, 'pivot': 22950, 's1': 22800},
                   'atr': {'pct': 1.5}, 'quality': {'complete': True, 'stale': False}}
+        self.levels = levels
         p = _pulse()
         ctx = dc.build_decision_context(p, key_levels=levels)
         dc.publish_context(ctx, pulse=p, build_kwargs={'key_levels': levels},
                            db_path=str(Path(self.tmp.name) / 'decision.db'),
                            trace_path=str(Path(self.tmp.name) / 'decision.jsonl'))
+        self.pulse_updates = PulseUpdates(Path(self.tmp.name) / 'updates.db',
+                                          Path(self.tmp.name) / 'updates.jsonl', interval_seconds=3600)
+        self.queue = jq.DurableJobQueue(self.pulse_updates.db_path, retain=10, capacity=2)
+        self.coordinator = updates.UpdateCoordinator(self.pulse_updates, self.queue)
+        for replacement in (patch.object(updates, '_service', self.coordinator),
+                            patch.object(st_server, '_pulse_updates', self.pulse_updates)):
+            replacement.start()
+            self.addCleanup(replacement.stop)
         self.httpd = ThreadingHTTPServer(('127.0.0.1', 0), st_server.Handler)
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.thread.start()
@@ -108,8 +123,43 @@ class DecisionHttpTest(unittest.TestCase):
         self.httpd.shutdown()
         self.httpd.server_close()
         self.thread.join(timeout=2)
+        self.assertTrue(self.queue.stop())
+        self.assertTrue(self.pulse_updates.stop())
         ox.HISTORY_PATH = self.old_options_history
         self.tmp.cleanup()
+
+    def wait_for(self, predicate):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            result = predicate()
+            if result:
+                return result
+            time.sleep(0.01)
+        self.fail('隔離更新工作未於時限內完成')
+
+    @staticmethod
+    def committed_context():
+        # latest_context 會依讀取當下重算 freshness 秒數；原提交內容才是不可變檢查標的。
+        return copy.deepcopy(dc._latest_context)
+
+    def publish_queued_market(self, market_job_id, **build_kwargs):
+        calls = []
+        def builder(job_id, guard):
+            calls.append((job_id, threading.current_thread().name))
+            pulse = _pulse()
+            pulse['updateJobId'] = job_id
+            dc.build_and_publish(pulse, key_levels=self.levels, publication_guard=guard, **build_kwargs)
+            return dc.latest_pulse()
+        self.assertTrue(self.pulse_updates.start(builder, dc.latest_pulse))
+        job_id = market_job_id.removeprefix('p-')
+        self.wait_for(lambda: self.pulse_updates.status(job_id)['job']['status'] not in ('queued', 'running'))
+        job = self.pulse_updates.status(job_id)['job']
+        self.assertEqual(job['status'], 'succeeded', job)
+        self.assertEqual(calls, [(job_id, 'st-pulse-updates')])
+        self.assertEqual(dc.latest_pulse()['updateJobId'], job_id)
+        self.assertEqual(job['result']['snapshotId'], dc.latest_context()['snapshotId'])
+        self.assertEqual(dc.latest_context()['persistence'], 'committed')
+        return dc.latest_context()
 
     def test_get_context_returns_canonical_contract(self):
         with urllib.request.urlopen(self.base + '/decision/context', timeout=5) as resp:
@@ -158,7 +208,7 @@ class DecisionHttpTest(unittest.TestCase):
         self.assertEqual(performance['actionAuthority'], 'none')
         self.assertIn('horizons', performance)
 
-    def test_options_refresh_publishes_back_into_canonical_context(self):
+    def test_options_refresh_queues_then_publishes_through_shared_pulse_writer(self):
         fixture = {
             'ok': True, 'contractVersion': 1, 'model': 'st-options-structure/v1',
             'status': 'ready', 'shadowMode': True, 'decisionUse': 'research_only',
@@ -169,21 +219,31 @@ class DecisionHttpTest(unittest.TestCase):
             'modeled': {'eligible': False, 'scenarios': []},
             'quality': {'warnings': []},
         }
-        original = ox.refresh
-        ox.refresh = lambda **_kwargs: fixture
-        try:
+        with patch.object(ox, 'refresh', return_value=fixture) as source:
+            before = self.committed_context()
             req = urllib.request.Request(
                 self.base + '/options/txo/refresh', data=b'{"force":true}',
                 headers={'Content-Type': 'application/json'}, method='POST')
             with urllib.request.urlopen(req, timeout=5) as resp:
                 body = json.loads(resp.read())
-            self.assertEqual(resp.status, 200)
-            self.assertEqual(body['optionsStructure']['observed']['expiry'], '2026-08-19')
-            with urllib.request.urlopen(self.base + '/decision/context', timeout=5) as resp:
-                after = json.loads(resp.read())
+            self.assertEqual(resp.status, 202)
+            self.assertEqual(body['job']['status'], 'queued')
+            self.assertEqual(body['job']['type'], 'options')
+            source.assert_not_called()
+            self.assertEqual(self.committed_context(), before, 'HTTP 排隊不可同步改寫正式決策')
+            self.queue.start()
+            job_id = body['job']['jobId'].removeprefix('r-')
+            self.wait_for(lambda: self.queue.get(job_id)['status'] not in ('queued', 'running'))
+            job = self.queue.get(job_id)
+            self.assertEqual(job['status'], 'succeeded', job)
+            source.assert_called_once()
+            self.assertTrue(callable(source.call_args.kwargs['commit_guard']))
+            self.assertTrue(source.call_args.kwargs['force'])
+            self.assertEqual(self.committed_context(), before, '來源工作只能提交 Pulse 工作，不可自己發布')
+            after = self.publish_queued_market(job['result']['marketJobId'], options_structure=fixture)
             self.assertEqual(after['optionsStructure']['status'], 'ready')
-        finally:
-            ox.refresh = original
+            self.assertEqual(after['optionsStructure']['observed']['expiry'], '2026-08-19')
+            self.assertGreater(after['revision'], before['revision'])
 
     def test_options_history_is_bounded_read_only_and_validated(self):
         ox._write_history_rows([
@@ -215,21 +275,36 @@ class DecisionHttpTest(unittest.TestCase):
             'markets': [], 'evidence': [], 'quality': {'status': 'good'},
         }
 
-        def fake_snapshot(market='all', force=False, fetcher=None):
+        def fake_snapshot(market='all', force=False, fetcher=None, commit_guard=None):
+            self.assertTrue(callable(commit_guard))
+            commit_guard()
             called.append((market, force))
             return fixture
 
         oi.get_snapshot = fake_snapshot
         try:
-            before = dc.latest_context()
+            before = self.committed_context()
             request = urllib.request.Request(
                 self.base + '/research/overnight-intraday/refresh', data=b'{"market":"all","force":true}',
                 headers={'Content-Type': 'application/json'}, method='POST')
             with urllib.request.urlopen(request, timeout=5) as resp:
                 refreshed = json.loads(resp.read())
-            self.assertTrue(refreshed['shadowOnly'])
+            self.assertEqual(resp.status, 202)
+            self.assertEqual(refreshed['job']['status'], 'queued')
+            self.assertEqual(refreshed['job']['type'], 'research')
+            self.assertEqual(called, [], 'HTTP 排隊時不可同步執行研究來源')
+            self.assertEqual(self.committed_context(), before)
+            self.queue.start()
+            job_id = refreshed['job']['jobId'].removeprefix('r-')
+            self.wait_for(lambda: self.queue.get(job_id)['status'] not in ('queued', 'running'))
+            job = self.queue.get(job_id)
+            self.assertEqual(job['status'], 'succeeded', job)
             self.assertEqual(called, [('all', True)])
-            after = dc.latest_context()
+            self.assertEqual(self.committed_context(), before, '來源完成後仍須等待原 Pulse writer 發布')
+            with patch.object(oi, 'latest_cached', return_value=fixture) as cached_source:
+                after = self.publish_queued_market(job['result']['marketJobId'])
+                cached_source.assert_called_with('all')
+            self.assertGreater(after['revision'], before['revision'])
             for key in ('regime', 'actionEnvelope', 'keyLevels', 'scenario', 'confirmation', 'invalidation'):
                 self.assertEqual(before[key], after[key], key)
             bad = urllib.request.Request(
@@ -249,19 +324,55 @@ class DecisionHttpTest(unittest.TestCase):
         finally:
             oi.get_snapshot = original
 
-    def test_post_profile_recomputes_without_mutating_deterministic_regime(self):
+    def test_post_profile_without_holdings_has_no_position_range_or_canonical_write(self):
         profile = {
             'baseGrossExposure': 70, 'maxGrossExposure': 90, 'maxLeverage': 1,
             'maxSingleNameWeight': 20, 'maxSectorWeight': 40,
             'maxPortfolioBeta': 1.1, 'maxDailyVaR': 2, 'investmentHorizon': 'swing',
         }
-        data = json.dumps({'riskProfile': profile}).encode()
+        before = self.committed_context()
+        before_pulse = copy.deepcopy(dc._latest_inputs['pulse'])
+        data = json.dumps({'riskProfile': profile, 'holdings': [], 'portfolioKind': 'actual',
+                           'portfolioInputStatus': 'empty'}).encode()
         req = urllib.request.Request(self.base + '/decision/context', data=data,
                                      headers={'Content-Type': 'application/json'}, method='POST')
         with urllib.request.urlopen(req, timeout=5) as resp:
             body = json.loads(resp.read())
         self.assertEqual(body['regime']['id'], 'BROAD_RISK_ON')
-        self.assertIsNotNone(body['actionEnvelope']['positionRange'])
+        self.assertIsNone(body['actionEnvelope']['positionRange'])
+        self.assertIn('portfolio_input_empty', body['actionEnvelope']['constraints'])
+        self.assertEqual(self.committed_context(), before)
+        self.assertEqual(dc._latest_inputs['pulse'], before_pulse)
+
+    def test_updates_keep_old_active_jobs_and_export_all_history_beyond_retention(self):
+        # 高優先工作連續完成，較早等待的工作仍須可見；歷史不可隨即時清單裁切。
+        fixed_time = time.time()
+        self.queue.clock = lambda: fixed_time
+        self.queue.register('驗收低優先', lambda *_: {}, priority=80)
+        self.queue.register('驗收高優先', lambda *_: {}, priority=10)
+        old = self.queue.submit_registered('驗收低優先')['job']
+        completed = []
+        for index in range(self.queue.retain + self.queue.capacity + 8):
+            job = self.queue.submit_registered('驗收高優先', {'index': index})['job']
+            claimed = self.queue._claim()
+            self.assertEqual(claimed['jobId'], job['jobId'])
+            self.queue._finish(claimed, 'succeeded', {'index': index}, None)
+            completed.append(job['jobId'])
+        with urllib.request.urlopen(self.base + '/updates', timeout=5) as resp:
+            status = json.loads(resp.read())
+        visible = {job['jobId']: job for job in status['jobs']}
+        self.assertEqual(visible['r-' + old['jobId']]['status'], 'queued')
+        self.assertEqual(len(status['jobs']), self.queue.retain + 1)
+        self.assertEqual(status['researchTotalJobs'], len(completed) + 1)
+        with patch.object(jq, '_durable_default', self.queue):
+            self.assertTrue(jq.is_busy())
+        with urllib.request.urlopen(self.base + '/updates/archive', timeout=5) as resp:
+            archive = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertEqual({job['jobId'] for job in archive['research']},
+                         {'r-' + value for value in [old['jobId'], *completed]})
+        self.assertEqual(len(archive['research']), len(completed) + 1)
+        self.assertEqual(self.queue.get(old['jobId'])['status'], 'queued')
 
     def test_post_rejects_invalid_json_and_unbounded_holdings(self):
         bad_json = urllib.request.Request(self.base + '/decision/context', data=b'{', method='POST')

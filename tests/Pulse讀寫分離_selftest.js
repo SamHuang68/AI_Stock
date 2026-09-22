@@ -29,7 +29,7 @@ function harness(role = 'owner', panel = '') {
     Store: { positions: { '2330': { shares: 100, entry: 1000 } } },
     localStorage: { getItem: k => saved.get(k) || null, setItem: (k, v) => saved.set(k, v) },
     document: { getElementById: id => nodes.get(id) || null, querySelector: () => null,
-      createElement: element, head: { appendChild() {} } },
+      createElement: element, head: { appendChild() {} }, addEventListener() {}, hidden: false },
     ShellV5: { route: () => panel },
     CustomEvent: function (type, init) { this.type = type; this.detail = init.detail; },
     dispatchEvent(event) { events.push(event); }, addEventListener() {},
@@ -53,6 +53,7 @@ function harness(role = 'owner', panel = '') {
     }
   };
   c.window = c; vm.createContext(c);
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/core/更新工作_v5.js'), 'utf8'), c);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/core/decision_data_v5.js'), 'utf8'), c);
   if (panel) {
     const api = panel === 'pulse' ? 'PulseV5' : 'DecisionV5';
@@ -85,6 +86,20 @@ function complete(request, payload, status = 200) {
 const calls = h => h.requests.map(r => r.method + ' ' + r.path);
 const last = h => h.requests.at(-1);
 const job = (status, extra = {}) => ({ jobId: 'pulse-工作一', status, ...extra });
+const updateState = (jobs = []) => ({ ok: true, jobs, workers: {}, capabilities: { canSubmit: true, canRetry: true } });
+async function finishSourceUpdate(h, kind) {
+  assert.equal(last(h).path, '/updates'); assert.equal(last(h).method, 'GET');
+  complete(last(h), updateState()); await tick();
+  assert.equal(last(h).path, '/updates'); assert.equal(last(h).method, 'POST');
+  assert.equal(JSON.parse(last(h).options.body).type, kind);
+  const source = { jobId: 'r-' + 'a'.repeat(32), type: kind, status: 'queued' };
+  complete(last(h), { ok: true, job: source }, 202); await tick();
+  assert.equal(last(h).method, 'GET');
+  const marketId = 'p-' + 'b'.repeat(32);
+  complete(last(h), updateState([{ ...source, status: 'succeeded', result: { marketJobId: marketId } },
+    { jobId: marketId, type: 'pulse', status: 'succeeded', result: { snapshotId: '新市場', revision: 23 } }]));
+  await tick();
+}
 
 async function coreReadBoundary() {
   for (const role of ['local', 'owner', 'reader', 'unknown']) {
@@ -155,8 +170,9 @@ async function personalAndResearchBoundary() {
     const explicit = h.c.DecisionData.refreshOvernightResearch(true);
     complete(last(h), { ok: false }); await tick();
     if (role === 'owner') {
-      assert.equal(last(h).method, 'POST');
-      assert.match(last(h).path, /^\/research\/overnight-intraday\/refresh/);
+      await finishSourceUpdate(h, 'research');
+      assert.equal(last(h).method, 'GET');
+      assert.equal(last(h).path, '/research/overnight-intraday?market=all', '工作完成後重讀研究快取，不把202當研究內容');
       complete(last(h), { ok: true, status: 'ready' });
     } else assert.equal(last(h).method, 'GET');
     await explicit;
@@ -212,7 +228,8 @@ async function decisionPanel() {
       assert(!calls(h).some(call => call.startsWith('POST ')));
     } else {
       h.nodes.get('dc-options-refresh').onclick({ preventDefault() {}, stopPropagation() {} });
-      assert.equal(last(h).path, '/options/txo/refresh'); assert.equal(last(h).method, 'POST');
+      await finishSourceUpdate(h, 'options');
+      assert.equal(last(h).path, '/decision/context', '期權完成關聯市場工作後才重讀決策，不發布202工作物件');
       complete(last(h), contextPayload('明確期權更新')); await tick();
       const refresh = h.c.DecisionV5.refreshMarketData();
       complete(last(h), { ok: true, job: job('succeeded') }, 202); await tick();

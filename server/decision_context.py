@@ -1553,6 +1553,8 @@ def _acknowledge_committed(snapshot_id: str, path: str) -> None:
 
 def _finish_publication(payload: dict, path: str, trace_path: str, elapsed_ms: int) -> dict:
     import early_warning
+    import datastore
+    from 預警研究驗證 import load_calendar
     context = copy.deepcopy(payload['context'])
     inputs = payload['inputs']
     signal_path = early_warning.DB_PATH
@@ -1561,7 +1563,8 @@ def _finish_publication(payload: dict, path: str, trace_path: str, elapsed_ms: i
     warning = early_warning.process_context(
         context, inputs['pulse'], memory_snapshot=payload['memory'],
         market_history=inputs.get('index_history'), db_path=signal_path,
-        now=_aware_datetime(payload['evaluationAt']), publication_id=payload['snapshotId'])
+        now=_aware_datetime(payload['evaluationAt']), publication_id=payload['snapshotId'],
+        research_calendar=load_calendar(datastore.DB_PATH))
     context['earlyWarnings'] = warning
     _attach_warning_evidence(context, warning)
     context['consensusAttention'] = _consensus_attention.build_consensus_attention(context)
@@ -1758,6 +1761,7 @@ def rebuild_latest(
     risk_profile: dict | None = None,
     portfolio_overlay: dict | None = None,
     portfolio_kind: str = 'actual',
+    portfolio_input_status: str | None = None,
     options_structure: dict[str, Any] | None = None,
 ) -> dict:
     _ensure_latest()
@@ -1776,6 +1780,17 @@ def rebuild_latest(
     if options_structure is not None:
         inputs['options_structure'] = options_structure
     context = build_decision_context(**inputs, risk_profile=risk_profile, portfolio_overlay=portfolio_overlay, portfolio_kind=portfolio_kind)
+    if portfolio_input_status in ('empty', 'incomplete'):
+        # 缺持倉不是零風險，也不能用 Risk Profile 單獨推算實際部位範圍。
+        envelope = context.get('actionEnvelope') or {}
+        envelope['positionRange'] = None
+        envelope.setdefault('constraints', []).append('portfolio_input_' + portfolio_input_status)
+        context['actionEnvelope'] = envelope
+        if isinstance(context.get('exposureLab'), dict):
+            context['exposureLab']['finalEligibleRange'] = None
+        context['portfolioInputStatus'] = portfolio_input_status
+    elif portfolio_input_status:
+        context['portfolioInputStatus'] = portfolio_input_status
     if latest_warning:
         context['earlyWarnings'] = json.loads(json.dumps(latest_warning, ensure_ascii=False))
         context['evidence'] = list(context.get('evidence') or []) + json.loads(

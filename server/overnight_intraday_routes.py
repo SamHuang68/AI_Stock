@@ -24,7 +24,11 @@ class OvernightIntradayRoutesMixin:
         self._ok(json.dumps(payload, ensure_ascii=False).encode())
 
     def _handle_overnight_intraday_refresh(self):
-        import overnight_intraday
+        import job_queue
+        from 更新路由 import coordinator
+        if str(self.headers.get('X-ST-Gateway-Role', '')).lower() not in ('', 'owner'):
+            self._err('唯讀模式不能更新研究資料', 403)
+            return
         try:
             body = read_json_body(self, max_bytes=2048)
         except BodyReadError as exc:
@@ -43,11 +47,14 @@ class OvernightIntradayRoutesMixin:
             return
         market = str((body or {}).get("market") or self._overnight_intraday_market())
         try:
-            payload = overnight_intraday.get_snapshot(market=market, force=bool((body or {}).get("force", False)))
+            payload = coordinator().submit('research', {'market': market, 'force': (body or {}).get('force', False)})
         except ValueError as exc:
             self._err(str(exc), 400)
             return
-        except Exception as exc:
-            self._err(f"overnight/intraday refresh unavailable: {str(exc)[:160]}", 502)
+        except job_queue.QueueFull as exc:
+            self._err(str(exc), 429)
             return
-        self._ok(json.dumps(payload, ensure_ascii=False).encode())
+        except Exception:
+            self._err('日夜盤研究工作尚未接受，請稍後重試', 503)
+            return
+        self._ok(json.dumps(payload, ensure_ascii=False).encode(), status=202)

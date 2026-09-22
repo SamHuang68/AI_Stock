@@ -88,8 +88,22 @@ class AiRoutesMixin:
             raw = json.dumps({'type': event, **fields}, ensure_ascii=False)
             self.wfile.write(('data: ' + raw + '\n\n').encode('utf-8'))
             self.wfile.flush()
+        expected = body.get('expectedRoute')
+        confirmed = 'expectedRoute' in body
         try:
-            metadata = al.route_metadata(mode, probe=(mode == 'fast'))
+            # 授權比對之前只能讀取設定，不能先探測模型端點。
+            metadata = al.route_metadata(mode, probe=False)
+            if confirmed:
+                al.validate_expected_route(expected, metadata)
+            metadata = al.route_metadata(
+                mode, probe=(mode == 'fast'),
+                **({'expected_route': expected} if confirmed else {}),
+            )
+            if confirmed:
+                al.validate_expected_route(expected, metadata)
+                al.validate_expected_route(expected, al.route_metadata(mode, probe=False))
+        except al.AiRouteChangedError as exc:
+            self._err(str(exc), 409); return
         except Exception as exc:
             self._err('AI runtime 狀態讀取失敗: ' + type(exc).__name__, 503); return
         if not metadata.get('available'):
@@ -113,6 +127,7 @@ class AiRoutesMixin:
         self.send_header('X-ST-AI-Provider', str(metadata.get('provider') or 'unknown'))
         self.send_header('X-ST-AI-Model', str(metadata.get('model') or 'unknown'))
         self.send_header('X-ST-AI-Data-Boundary', str(metadata.get('dataBoundary') or 'unknown'))
+        self.send_header('X-ST-AI-Destination-ID', str(metadata.get('destinationId') or 'unknown'))
         self.send_header('X-ST-AI-Estimate-Seconds', str(int(metadata.get('estimateSeconds') or 0)))
         self.send_header('Connection', 'close')
         self.end_headers()
@@ -129,10 +144,12 @@ class AiRoutesMixin:
             if mode == 'deep':
                 iterator = al.deep_stream(
                     body.get('prompt', ''), body.get('context', ''), request_id=request_id,
+                    **({'expected_route': expected} if confirmed else {}),
                 )
             else:
                 iterator = al.chat_stream(
                     body.get('prompt', ''), body.get('context', ''), request_id=request_id,
+                    **({'expected_route': expected} if confirmed else {}),
                 )
             for chunk in iterator:
                 output_chars += len(chunk)

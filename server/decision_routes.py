@@ -67,10 +67,16 @@ class DecisionRoutesMixin:
         portfolio_kind = str(body.get('portfolioKind') or 'actual')
         if portfolio_kind not in ('actual', 'observation_pool'):
             return None, 'portfolioKind must be actual or observation_pool'
+        input_status = body.get('portfolioInputStatus') or ('complete' if clean_holdings else 'empty')
+        if input_status not in ('complete', 'empty', 'incomplete'):
+            return None, '投組輸入狀態不正確'
+        if (input_status == 'complete') != bool(clean_holdings):
+            return None, '投組輸入狀態與完整持倉不一致'
         return {
             'riskProfile': risk_profile,
             'holdings': clean_holdings,
             'portfolioKind': portfolio_kind,
+            'portfolioInputStatus': input_status,
         }, None
 
     def _handle_decision_context(self):
@@ -102,7 +108,8 @@ class DecisionRoutesMixin:
                 overlay = portfolio.compute(holdings, sectors_map=sector_map)
             except Exception as exc:
                 overlay = {'error': str(exc)}
-        out = dc.rebuild_latest(risk_profile=risk_profile, portfolio_overlay=overlay, portfolio_kind=portfolio_kind)
+        out = dc.rebuild_latest(risk_profile=risk_profile, portfolio_overlay=overlay, portfolio_kind=portfolio_kind,
+                                portfolio_input_status=payload['portfolioInputStatus'])
         self._ok(json.dumps(out, ensure_ascii=False).encode())
 
     def _handle_decision_history(self):

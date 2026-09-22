@@ -312,12 +312,12 @@
     const cell = (lbl, val, cls) => `<div class="sb-stat"><div class="sb-sl">${lbl}</div><div class="sb-sv ${cls || ''}">${val}</div></div>`;
     const pos = v => v >= 0 ? 'up' : 'dn';
     let h = `<div class="sb-stats">` +
-      cell('總報酬', (r.totalReturn >= 0 ? '+' : '') + r.totalReturn.toFixed(1) + '%', pos(r.totalReturn)) +
+      cell('總報酬', r.totalReturn == null ? '資料不足' : (r.totalReturn >= 0 ? '+' : '') + r.totalReturn.toFixed(1) + '%', pos(r.totalReturn)) +
       cell('交易筆數', r.count) +
       cell('勝率', r.winRate.toFixed(1) + '%', r.winRate >= 50 ? 'up' : 'dn') +
       cell('獲利因子', fmtPF(r.profitFactor), r.profitFactor >= 1 ? 'up' : 'dn') +
-      cell('最大回撤', '-' + r.maxDD.toFixed(1) + '%', 'dn') +
-      cell('夏普(年化)', r.sharpeAnn.toFixed(2), r.sharpeAnn >= 1 ? 'up' : '') +
+      cell('最大回撤', r.maxDD == null ? '資料不足' : '-' + r.maxDD.toFixed(1) + '%', 'dn') +
+      cell('夏普（年棒數假設）', r.sharpeAnn == null ? '資料不足' : r.sharpeAnn.toFixed(2), r.sharpeAnn >= 1 ? 'up' : '') +
       cell('期望值/筆', (r.expectancy >= 0 ? '+' : '') + r.expectancy.toFixed(2) + '%', pos(r.expectancy)) +
       cell('平均持有', r.avgHoldBars.toFixed(1) + ' 根') +
       cell('最大連勝', r.maxWinStreak, 'up') +
@@ -335,6 +335,13 @@
       });
       h += `</tbody></table></details>`;
     }
+    const premise = JSON.stringify({ 成交與成本口徑: r.methodology, 未平倉: r.openPosition,
+      待進場: r.pendingEntry, 無法成交: r.rejected, 估值缺漏: r.valuationIssues }, null, 2)
+      .replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    h += '<p>收盤訊號於下一根開盤成交；總報酬包含期末未實現損益，勝率只計已平倉。' +
+      (r.count ? '' : '目前沒有已平倉交易，勝率與逐筆統計無樣本。') +
+      (r.status === 'unknown' || r.status === 'insufficient' ? '資料或估值不足，總績效不可判定。' : '') +
+      '</p><details><summary>成本、年棒數、資料限制及完整未成交狀態</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%">' + premise + '</pre></details>';
     document.getElementById('sb-result').innerHTML = h;
     document.getElementById('sb-msg').textContent = sym ? `回測標的：${sym}（目前圖表區間）` : '';
     if (window.Backtest.drawCurve) window.Backtest.drawCurve(document.getElementById('sb-curve'), r.curve, '#fbbf24');

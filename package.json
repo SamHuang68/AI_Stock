@@ -1,0 +1,11 @@
+{
+  "name": "stock-terminal-browser-checks",
+  "private": true,
+  "description": "Stock Terminal 離線瀏覽器驗收工具",
+  "scripts": {
+    "test:browser": "node tests/研究工作台_browser.cjs && node tests/手機橫向五欄_browser.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}
