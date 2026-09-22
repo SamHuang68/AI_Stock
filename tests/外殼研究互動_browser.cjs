@@ -33,6 +33,20 @@ function html() {
     modules.map(file => '<script src="/src/' + file + '"></script>').join('') + '</body></html>';
 }
 async function frame(page) { await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))); }
+async function openUpdates(page) {
+  // 觸控完成與相容 click 派送可能分屬不同工作；等待真正可見的原生模態狀態。
+  await page.locator('#rw-updates').tap();
+  const opened = page.locator('#st-update-center[open]');
+  await opened.waitFor({ state: 'visible' });
+  assert.equal(await opened.evaluate(node => node.matches(':modal')), true, '更新中心必須實際開啟為模態對話框');
+  assert.equal(await page.evaluate(() => ShellV5.route()), 'research', '開啟更新中心不可切離研究頁');
+}
+async function closeUpdates(page) {
+  await page.keyboard.press('Escape');
+  await page.locator('#st-update-center').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('#st-update-center').count(), 1, '關閉應保留既有對話框供再次開啟');
+  assert.equal(await page.evaluate(() => ShellV5.route()), 'research', '關閉更新中心不可切離研究頁');
+}
 async function geometry(page, selector) {
   return page.locator(selector).evaluate(root => {
     const clipped = [...root.querySelectorAll('button,summary,p,h2,h3,h4,pre,label')].filter(node => node.getClientRects().length && node.clientWidth).filter(node => {
@@ -153,11 +167,11 @@ async function touchDrag(context, page, selector) {
     const zoom = await geometry(page, '#rw-root');
     assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).zoom), '2');
     assert.equal(zoom.pageOverflow, false); assert.deepEqual(zoom.clipped, []);
-    await page.locator('#rw-updates').tap(); await page.waitForFunction(() => document.getElementById('st-update-center').open);
+    await openUpdates(page);
     const zoomUpdates = await geometry(page, '#st-update-center'); assert.deepEqual(zoomUpdates.clipped, []);
     assert.equal(zoomUpdates.withinViewport, true, '放大後更新中心標題、關閉及全部可捲動內容必須在視窗內');
     await page.screenshot({ path: path.join(output, '200%原生CSS放大-更新中心.png') });
-    await page.keyboard.press('Escape');
+    await closeUpdates(page);
     await page.screenshot({ path: path.join(output, '200%原生CSS放大-研究.png') });
     await page.evaluate(() => { document.documentElement.style.zoom = ''; });
     report.zoom = { method: 'Chromium 原生 CSS zoom:2（整體內容兩倍）；另有 640×360 的重排驗證，不冒稱 OS 字型設定', research: zoom, updates: zoomUpdates };
@@ -170,21 +184,21 @@ async function touchDrag(context, page, selector) {
     assert.deepEqual(await page.evaluate(() => ({ width: innerWidth, ratio: devicePixelRatio })), { width: 640, ratio: 2 });
     const equivalentResearch = await geometry(page, '#rw-root');
     assert.equal(equivalentResearch.pageOverflow, false); assert.deepEqual(equivalentResearch.clipped, []);
-    await page.locator('#rw-updates').tap();
-    await page.waitForFunction(() => document.getElementById('st-update-center').open);
+    await openUpdates(page);
     const equivalentUpdates = await geometry(page, '#st-update-center');
     assert.equal(equivalentUpdates.withinViewport, true); assert.deepEqual(equivalentUpdates.clipped, []);
     const magnifiedPng = Buffer.from((await magnification.send('Page.captureScreenshot', { format: 'png', fromSurface: true })).data, 'base64');
     fs.writeFileSync(path.join(output, '200%瀏覽器縮放等效-更新中心.png'), magnifiedPng);
     assert.equal(magnifiedPng.readUInt32BE(16), 1280); assert.equal(magnifiedPng.readUInt32BE(20), 720);
-    await page.keyboard.press('Escape');
+    await closeUpdates(page);
     fs.writeFileSync(path.join(output, '200%瀏覽器縮放等效-研究.png'), Buffer.from((await magnification.send('Page.captureScreenshot', { format: 'png', fromSurface: true })).data, 'base64'));
     report.magnificationEquivalent = { method: '640×360 CSS 視窗及 DPR2，輸出1280×720，文字與控制項實體像素兩倍；未操作瀏覽器GUI或OS字型設定', research: equivalentResearch, updates: equivalentUpdates };
     await magnification.send('Emulation.clearDeviceMetricsOverride'); await magnification.detach();
     await page.setViewportSize({ width: 390, height: 844 });
     report.checks.push('200%瀏覽器縮放等效下完整內容重排、觸控與關閉焦點可用，輸出為1280×720');
 
-    await page.locator('#rw-updates').tap(); await page.waitForFunction(() => document.querySelector('#st-update-center .uc-jobs').textContent.includes('固定已完成工作'));
+    await openUpdates(page);
+    await page.waitForFunction(() => document.querySelector('#st-update-center[open] .uc-jobs')?.textContent.includes('固定已完成工作'));
     offline = true; await page.evaluate(() => UpdateJobs.refresh());
     await page.waitForFunction(() => !!UpdateJobs.snapshot().error);
     assert((await page.locator('#st-update-center .uc-jobs').first().innerText()).includes('固定已完成工作'), '斷網保留最後已知工作');
@@ -199,7 +213,7 @@ async function touchDrag(context, page, selector) {
     await page.evaluate(() => { window.sleeping = false; document.dispatchEvent(new Event('visibilitychange')); });
     await page.waitForFunction(() => !UpdateJobs.snapshot().error && UpdateJobs.snapshot().jobs.length === 1);
     assert.equal(report.requests.filter(row => row.method === 'POST' && row.path === '/updates').length, 0, '恢復不可重送來源更新');
-    await page.keyboard.press('Escape'); await page.evaluate(() => { window.Date = originalDate; delete document.hidden; });
+    await closeUpdates(page); await page.evaluate(() => { window.Date = originalDate; delete document.hidden; });
     assert.deepEqual(await page.evaluate(() => UpdateJobs.diagnostics()), { subscribers: 0, timers: 0, requests: 0 });
     report.checks.push('真實fetch斷網錯誤保留前次工作，模擬八小時時鐘間隔及重新可見可恢復純讀；未休眠主機');
 
