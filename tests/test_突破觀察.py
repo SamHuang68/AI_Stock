@@ -311,6 +311,24 @@ class 突破觀察資料庫測試(unittest.TestCase):
         self.assertNotEqual(before['inputDigest'], revised['inputDigest'])
         self.assertRegex(revised['inputDigest'], r'^[0-9a-f]{64}$')
 
+    def test_歷史輸入摘要不受窗口外例行涵蓋更新影響(self):
+        self.history()
+        cutoff = self.days[280]
+        before = self.report(end=cutoff)['research']['latest']['inputDigest']
+        with closing(sqlite3.connect(self.db)) as conn, conn:
+            conn.execute("UPDATE action_coverage SET end_date='2027-12-31'")
+        daily.save_calendar(self.db, 2027, set(), set())
+        refreshed = self.report(end=cutoff)['research']['latest']['inputDigest']
+        self.assertEqual(before, refreshed)
+        with closing(sqlite3.connect(self.db)) as conn, conn:
+            conn.execute('INSERT INTO corporate_actions VALUES(?,?,?,?,?)', (
+                'TW', '2330', self.days[270].isoformat(), '除權息', 'TWSE'))
+        action_revised = self.report(end=cutoff)['research']['latest']['inputDigest']
+        self.assertNotEqual(refreshed, action_revised)
+        self.price(279, 100, high=101)
+        price_revised = self.report(end=cutoff)['research']['latest']['inputDigest']
+        self.assertNotEqual(action_revised, price_revised)
+
     def test_讀取研究報告不改寫日線或其他資料表(self):
         self.history()
         with closing(sqlite3.connect(self.db)) as conn:
