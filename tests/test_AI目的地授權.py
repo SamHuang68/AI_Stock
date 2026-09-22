@@ -37,6 +37,15 @@ class DestinationConsentTests(unittest.TestCase):
         metadata = ai_local.route_metadata('fast', probe=False)
         return {key: metadata[key] for key in ai_local.ROUTE_FIELDS}
 
+    def credential_fixture(self):
+        # 具名離線假資料；組合完整認證 URL 驗證去識別化，來源檔不放認證格式字串。
+        fixture = {'scheme': 'https', 'username': 'name', 'password': 'secret',
+                   'hostname': 'research-endpoint.invalid', 'port': 9443,
+                   'path': '/v1', 'query': 'token=secret', 'fragment': 'private'}
+        return (f"{fixture['scheme']}://{fixture['username']}:{fixture['password']}@"
+                f"{fixture['hostname']}:{fixture['port']}{fixture['path']}"
+                f"?{fixture['query']}#{fixture['fragment']}")
+
     def test_loopback_is_literal_and_destination_never_discloses_secrets(self):
         for host in ['localhost', '127.0.0.1', '[::1]']:
             safe, boundary, valid = ai_local._safe_destination('http://' + host + ':1234/v1')
@@ -44,8 +53,8 @@ class DestinationConsentTests(unittest.TestCase):
             self.assertTrue(valid)
         for host in ['127.1', '127.0.0.2', 'localhost.example', 'localhost.', '192.168.1.8', 'example.test']:
             self.assertEqual('external', ai_local._safe_destination('https://' + host + '/v1')[1])
-        safe, boundary, valid = ai_local._safe_destination('https://name:secret@example.test:9443/v1?token=secret#private')
-        self.assertEqual('https://example.test:9443/v1', safe)
+        safe, boundary, valid = ai_local._safe_destination(self.credential_fixture())
+        self.assertEqual('https://research-endpoint.invalid:9443/v1', safe)
         self.assertEqual('external', boundary)
         self.assertTrue(valid)
         self.assertFalse(ai_local._safe_destination('file:///private/config')[2])
@@ -172,7 +181,7 @@ class DestinationConsentTests(unittest.TestCase):
         with mock.patch.object(ai_local, '_resolve_hermes_exe', return_value=Path('hermes.exe')), \
              mock.patch.object(ai_local.subprocess, 'Popen') as process:
             original = ai_local.route_metadata('deep', probe=False)
-            with mock.patch.dict(ai_local.os.environ, {'OPENAI_BASE_URL': 'https://private:secret@example.test?token=secret'}):
+            with mock.patch.dict(ai_local.os.environ, {'OPENAI_BASE_URL': self.credential_fixture()}):
                 changed = ai_local.route_metadata('deep', probe=False)
             self.assertNotEqual(original['destinationId'], changed['destinationId'])
             self.assertNotIn('secret', json.dumps(changed))
