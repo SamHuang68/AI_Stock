@@ -54,7 +54,7 @@ def record_daily(db: str | Path, *, now: datetime | None = None, observed_at: da
     recorded_at = observed_at or datetime.now(TZ)
     for symbol in symbols:
         try:
-            result = report(db, symbol, now=now, period='30d')
+            result = report(db, symbol, now=now, period='30d', include_execution=False)
             recorded_at = observed_at or datetime.now(TZ)
             added += int(append_observation(db, result, recorded_at))
         except Exception as exc:

@@ -14,9 +14,11 @@ from statistics import mean, median
 try:
     from .台股日線 import TZ, latest_session
     from .突破觀察 import WARMUP_DAYS, build_research
+    from .突破成交研究 import build_execution
 except ImportError:
     from 台股日線 import TZ, latest_session
     from 突破觀察 import WARMUP_DAYS, build_research
+    from 突破成交研究 import build_execution
 
 HORIZONS = (1, 3, 5, 10)
 RANGES = {'30d': '近 30 個交易日', '3m': '近 3 個月', '6m': '近 6 個月',
@@ -114,34 +116,15 @@ def range_start(period: str, cutoff: date, start_date: str | None) -> date | Non
     return None
 
 
-def report(db: str | Path, symbol: str = '2330', as_of: str | None = None, now: datetime | None = None,
-           *, period: str = '3y', start_date: str | None = None) -> dict:
-    now = (now or datetime.now(TZ)).astimezone(TZ)
-    try:
-        cutoff = date.fromisoformat(as_of) if as_of else now.date()
-    except ValueError:
-        raise ValueError('截至日期無效') from None
-    if cutoff > now.date():
-        raise ValueError('截至日期不得晚於今天')
-    if cutoff == date.max:
-        raise ValueError('截至日期超出可用範圍')
-    with closing(sqlite3.connect(db, timeout=15)) as conn, conn:
-        status = freshness(conn, symbol, now)
-        expected = status['expectedSession']
-        cutoff = min(cutoff, date.fromisoformat(expected)) if expected else cutoff
-        requested_start = range_start(period, cutoff, start_date)
-        available = conn.execute("SELECT MIN(ts),MAX(ts) FROM bars WHERE market='TW' AND symbol=?", (symbol,)).fetchone()
-        available_start, available_end = [datetime.fromtimestamp(t, TZ).date().isoformat() if t is not None else None for t in available]
-        # 先讀取截至日以前的原始資料，讓任一期間都能使用開始日前的暖機資料。
-        raw = conn.execute('''SELECT b.ts,b.open,b.high,b.low,b.close,b.volume,q.session_date,q.source,q.issues,q.volume_unit
-            FROM bars b LEFT JOIN bar_quality q ON b.market=q.market AND b.symbol=q.symbol AND b.ts=q.ts
-            WHERE b.market='TW' AND b.symbol=? AND b.ts<? ORDER BY b.ts''',
-            (symbol, int(datetime.combine(cutoff + timedelta(days=1), datetime.min.time(), TZ).timestamp()))).fetchall()
-        sessions = {r[0] for r in conn.execute('SELECT session_date FROM market_sessions WHERE session_date BETWEEN ? AND ?', (available_start or cutoff.isoformat(), cutoff.isoformat()))}
-        calendar_years = {r[0] for r in conn.execute('SELECT year FROM calendar_years')}
-        action_days = {r[0] for r in conn.execute("SELECT session_date FROM corporate_actions WHERE market='TW' AND symbol=? AND session_date<=?", (symbol, cutoff.isoformat()))}
-        coverage = conn.execute("SELECT start_date,end_date,source FROM action_coverage WHERE market='TW' AND symbol=?", (symbol,)).fetchone()
-        name = conn.execute("SELECT name FROM meta WHERE market='TW' AND symbol=?", (symbol,)).fetchone()
+def _read_bars(conn: sqlite3.Connection, symbol: str, cutoff: date) -> list:
+    return conn.execute('''SELECT b.ts,b.open,b.high,b.low,b.close,b.volume,q.session_date,q.source,q.issues,q.volume_unit
+        FROM bars b LEFT JOIN bar_quality q ON b.market=q.market AND b.symbol=q.symbol AND b.ts=q.ts
+        WHERE b.market='TW' AND b.symbol=? AND b.ts<? ORDER BY b.ts''',
+        (symbol, int(datetime.combine(cutoff + timedelta(days=1), datetime.min.time(), TZ).timestamp()))).fetchall()
+
+
+def _normalize_bars(raw: list, sessions: set[str]) -> dict[str, dict]:
+    """個股與 0050 共用官方日線品質正規化，不另開一條補值資料流程。"""
     by_day = {}
     for row in raw:
         day = row[6] or datetime.fromtimestamp(row[0], TZ).date().isoformat()
@@ -161,6 +144,42 @@ def report(db: str | Path, symbol: str = '2330', as_of: str | None = None, now: 
         if day in by_day:
             issues = [*issues, '同一交易日資料重複']
         by_day[day] = {**record, 'date': day, 'issues': sorted(set(issues)), 'source': row[7], 'signals': []}
+    return by_day
+
+
+def report(db: str | Path, symbol: str = '2330', as_of: str | None = None, now: datetime | None = None,
+           *, period: str = '3y', start_date: str | None = None, include_execution: bool = True) -> dict:
+    now = (now or datetime.now(TZ)).astimezone(TZ)
+    try:
+        cutoff = date.fromisoformat(as_of) if as_of else now.date()
+    except ValueError:
+        raise ValueError('截至日期無效') from None
+    if cutoff > now.date():
+        raise ValueError('截至日期不得晚於今天')
+    if cutoff == date.max:
+        raise ValueError('截至日期超出可用範圍')
+    with closing(sqlite3.connect(Path(db).resolve().as_uri() + '?mode=ro', uri=True, timeout=15)) as conn:
+        # 同一讀取交易保留個股、0050 與品質欄位的一致快照。
+        conn.execute('BEGIN')
+        status = freshness(conn, symbol, now)
+        expected = status['expectedSession']
+        cutoff = min(cutoff, date.fromisoformat(expected)) if expected else cutoff
+        requested_start = range_start(period, cutoff, start_date)
+        available = conn.execute("SELECT MIN(ts),MAX(ts) FROM bars WHERE market='TW' AND symbol=?", (symbol,)).fetchone()
+        available_start, available_end = [datetime.fromtimestamp(t, TZ).date().isoformat() if t is not None else None for t in available]
+        # 先讀取截至日以前的原始資料，讓任一期間都能使用開始日前的暖機資料。
+        raw = _read_bars(conn, symbol, cutoff)
+        sessions = {r[0] for r in conn.execute('SELECT session_date FROM market_sessions WHERE session_date BETWEEN ? AND ?', (available_start or cutoff.isoformat(), cutoff.isoformat()))}
+        calendar_years = {r[0] for r in conn.execute('SELECT year FROM calendar_years')}
+        action_days = {r[0] for r in conn.execute("SELECT session_date FROM corporate_actions WHERE market='TW' AND symbol=? AND session_date<=?", (symbol, cutoff.isoformat()))}
+        coverage = conn.execute("SELECT start_date,end_date,source FROM action_coverage WHERE market='TW' AND symbol=?", (symbol,)).fetchone()
+        name = conn.execute("SELECT name FROM meta WHERE market='TW' AND symbol=?", (symbol,)).fetchone()
+        benchmark_raw, benchmark_actions, benchmark_coverage = [], set(), None
+        if include_execution:
+            benchmark_raw = raw if symbol == '0050' else _read_bars(conn, '0050', cutoff)
+            benchmark_actions = {r[0] for r in conn.execute("SELECT session_date FROM corporate_actions WHERE market='TW' AND symbol='0050' AND session_date<=?", (cutoff.isoformat(),))}
+            benchmark_coverage = conn.execute("SELECT start_date,end_date,source FROM action_coverage WHERE market='TW' AND symbol='0050'").fetchone()
+    by_day = _normalize_bars(raw, sessions)
     # 保留已知交易日的缺口；日曆涵蓋以前的舊日線仍可瀏覽，但不參與事件判定。
     timeline = sorted(sessions | set(by_day)) if raw else []
     if requested_start is not None:
@@ -213,6 +232,12 @@ def report(db: str | Path, symbol: str = '2330', as_of: str | None = None, now: 
                               action_coverage=coverage, sample_start=warmup)
     for row, observation in zip(rows, research.pop('rows')):
         row['research'] = observation
+    if include_execution:
+        benchmark_rows = list(_normalize_bars(benchmark_raw, sessions).values())
+        research['execution'] = build_execution(rows, symbol=symbol, calendar_years=calendar_years,
+                                                action_days=action_days, action_coverage=coverage, sample_start=warmup,
+                                                benchmark_rows=benchmark_rows, benchmark_action_days=benchmark_actions,
+                                                benchmark_action_coverage=benchmark_coverage)
     rows = rows[warmup:]
     stats = []
     for key, (label, _) in RULES.items():

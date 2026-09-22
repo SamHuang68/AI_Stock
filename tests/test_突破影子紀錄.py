@@ -68,7 +68,7 @@ class ShadowTests(unittest.TestCase):
         with patch('K線事件.report', return_value=self.result) as report:
             outcome = ledger.record_daily(self.db, now=self.now)
         self.assertEqual((outcome['checked'], outcome['added'], outcome['failures']), (1, 1, []))
-        report.assert_called_once_with(self.db, '2330', now=self.now, period='30d')
+        report.assert_called_once_with(self.db, '2330', now=self.now, period='30d', include_execution=False)
 
     def test_observation_time_is_separate_from_session_evaluation_time(self):
         with closing(sqlite3.connect(self.db)) as conn, conn:
