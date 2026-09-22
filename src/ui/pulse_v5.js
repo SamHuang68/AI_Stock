@@ -929,7 +929,7 @@
       '#pl-root .pl-flash .t,#pl-root .pl-flash .cat,#pl-root .pl-flash .ttl{overflow-x:auto;text-overflow:clip}' +
       '#pl-root .pl-strip .s,#pl-root .pl-theme-heat{overflow-x:auto;text-overflow:clip}' +
       '#pl-root .pl-theme-heat{flex-shrink:0}' +
-      '#pl-root .vz-spark-ax{overflow-x:auto}' +
+      '#pl-root .vz-spark-ax{overflow-x:auto!important}' +
       '@media(max-width:520px) and (orientation:portrait){' +
         '#view-pulse.sv-panel.on{padding-left:5px;padding-right:5px}' +
         '#pl-root .pl-zone{gap:5px;grid-auto-rows:minmax(310px,auto)}' +
