@@ -530,7 +530,7 @@ ok(/結構條不重複/.test(bd) || /結構只用 magBars/.test(bd), 'breadth av
 ok(/官方≠清單/.test(bd) || /官方漲停家數/.test(bd), 'breadth limit popup separates official vs approx list');
 
 const pl = fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8');
-const landscapeStart = pl.indexOf('@media(orientation:landscape) and (max-height:540px) and (pointer:coarse)');
+const landscapeStart = pl.indexOf('@media(orientation:landscape) and (max-height:540px){');
 const landscapeEnd = pl.indexOf('/* 手機直式專業模式', landscapeStart);
 const landscapeCss = landscapeStart >= 0 && landscapeEnd > landscapeStart
   ? pl.slice(landscapeStart, landscapeEnd)
@@ -696,10 +696,10 @@ ok(/id="pl-head-meta"/.test(pl) && /pl-head-lead/.test(pl) && /pl-head-meta-trac
 ok(/MOBILE_LAYOUT_CONTRACT = '2col-scroll'/.test(pl) &&
   /@media\(max-width:900px\) and \(orientation:portrait\)[\s\S]*pl-zone\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/.test(pl) &&
   /matchMedia\('\(max-width: 900px\) and \(orientation: portrait\)'\)/.test(pl) &&
-  /matchMedia\('\(max-width: 980px\) and \(orientation: landscape\) and \(max-height: 540px\)'\)/.test(pl) &&
+  !/matchMedia\('\(max-width: 980px\) and \(orientation: landscape\) and \(max-height: 540px\)'\)/.test(pl) &&
   /var expectedCols = mobile \? 2 : 5/.test(pl) &&
   /layoutResizeTimer = setTimeout\(probeLayoutCols, 120\)/.test(pl),
-  '總覽直式與短橫式採兩欄捲動，桌機維持五欄');
+  '總覽直式採兩欄捲動，橫式與桌機維持五欄');
 ok(landscapeStart >= 0 &&
   /text-size-adjust:100%/.test(landscapeCss) &&
   /pl-strip \.v\{font-size:11px!important;line-height:1\.1;margin-bottom:0\}/.test(landscapeCss) &&
@@ -712,12 +712,12 @@ ok(landscapeStart >= 0 &&
   /pl-global \.g \.s\{font-size:5px/.test(landscapeCss) &&
   /pl-flash \.ttl\{font-size:7px/.test(landscapeCss) &&
   /pl-wl table\{font-size:7px/.test(landscapeCss),
-  '大型觸控橫式保留五欄密度');
-ok(/pointer:coarse\) and \(min-width:981px\)/.test(pl) &&
+  '手機短橫式保留五欄密度');
+ok(!/pointer:coarse\) and \(min-width:981px\)/.test(pl) &&
   !/max-width:767px/.test(pl) && /grid-auto-rows:minmax\(300px,auto\)/.test(pl) &&
   /pl-sec:has\(\.pl-inst-trend,\.pl-bd-trend,\.pl-ohlc-trend\)\{height:auto;overflow:visible\}/.test(pl) &&
   /pl-ohlc-trend \.chart\{flex:0 0 132px;height:132px;min-height:132px\}/.test(pl),
-  '手機短橫式不使用微縮小字，趨勢卡可增高且曲線保留可讀高度');
+  '手機直式趨勢卡可增高，橫式不再受大型螢幕寬度限制');
 ok(/pl-inst4 \.c \.v,#pl-root \.pl-bd4 \.c \.v,#pl-root \.pl-ohlc4 \.c \.v\{[^}]*font-size:8px!important[^}]*overflow:visible[^}]*text-overflow:initial/.test(landscapeCss) &&
   /pl-ohlc4 \.c \.v\{letter-spacing:-0\.45px\}/.test(landscapeCss) &&
   !/\.c \.v[^}]*text-overflow:clip/.test(landscapeCss),

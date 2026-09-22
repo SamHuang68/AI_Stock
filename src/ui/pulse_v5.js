@@ -900,6 +900,7 @@
         'html.st-vs5 #pl-root .pl-zone>.pl-sec>h4{flex-wrap:wrap;white-space:normal;overflow-wrap:anywhere}' +
         '#pl-root .pl-sec-title-text{flex:0 1 auto;white-space:normal;overflow-wrap:anywhere}' +
         '#pl-root #pl-flash-sec>h4,#pl-root #pl-watch-sec>h4{flex-wrap:wrap}' +
+        '#pl-root #pl-watch-sec>h4.pl-wl-head{flex-wrap:wrap;white-space:normal;overflow:visible}' +
         '#pl-root .pl-flash-tools{flex-wrap:wrap;min-width:0;max-width:100%}' +
         '#pl-root .pl-inst4,#pl-root .pl-bd4,#pl-root .pl-ohlc4{grid-template-columns:repeat(2,minmax(0,1fr))}' +
         '#pl-root .pl-inst4 .c .v,#pl-root .pl-bd4 .c .v,#pl-root .pl-ohlc4 .c .v{' +
