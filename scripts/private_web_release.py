@@ -46,6 +46,8 @@ REQUIRED_RELEASE_FILES = {
     "src/ui/更新工作中心.js",
     "tests/研究工作台_browser.cjs",
     "tests/手機橫向五欄_browser.cjs",
+    "tests/外殼研究互動_browser.cjs",
+    "tests/選股候選_browser.cjs",
     "START_PRIVATE_WEB_HOST.cmd",
     "STOP_PRIVATE_WEB.cmd",
     "server/server.py",
@@ -101,6 +103,7 @@ REQUIRED_RELEASE_FILES = {
     "tests/test_官方對照來源.py",
     "tests/test_NHNL來源.py",
     "tests/test_投組市場代號.py",
+    "tests/test_情境投組HTTP.py",
     "tests/test_市場尾碼一致性.py",
     "tests/分類範圍標示_selftest.js",
     "tests/決策更新狀態_selftest.js",
@@ -458,6 +461,7 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
             "tests.test_官方對照來源",
             "tests.test_NHNL來源",
             "tests.test_投組市場代號",
+            "tests.test_情境投組HTTP",
             "tests.test_市場尾碼一致性",
             "tests.test_tw_name_integrity",
             "tests.test_pulse_extras",
@@ -476,7 +480,8 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
             browser_output = install_root / "validation" / f"{commit[:12]}-{uuid.uuid4().hex}"
             browser_output.mkdir(parents=True)
             browser_env = dict(os.environ, ST_BROWSER_OUTPUT=str(browser_output))
-            for browser_test in ("tests/研究工作台_browser.cjs", "tests/手機橫向五欄_browser.cjs"):
+            for browser_test in ("tests/研究工作台_browser.cjs", "tests/手機橫向五欄_browser.cjs",
+                                 "tests/外殼研究互動_browser.cjs", "tests/選股候選_browser.cjs"):
                 _run([node, browser_test], cwd=extracted, env=browser_env)
 
         # 完整封存內容供所有自測使用；通過後才排除私人網站不出貨的執行內容。

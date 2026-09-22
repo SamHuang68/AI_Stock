@@ -216,14 +216,16 @@ class PrivateWebReleaseTests(unittest.TestCase):
                 patch.object(release, '_run', run), patch.object(release.shutil, 'which', return_value='node'):
             staged = release.stage_release(self.install_root, ref=commit)
         self.assertEqual([argv[1] for argv in calls if argv[0] == 'node'], sorted(selftests) +
-                         ['tests/研究工作台_browser.cjs', 'tests/手機橫向五欄_browser.cjs'])
+                         ['tests/研究工作台_browser.cjs', 'tests/手機橫向五欄_browser.cjs',
+                          'tests/外殼研究互動_browser.cjs', 'tests/選股候選_browser.cjs'])
         python_tests = next(argv for argv in calls if '-m' in argv)
         for test in ['tests.test_決策資料品質', 'tests.test_發布完整性',
-                     'tests.test_decision_context', 'tests.test_decision_http']:
+                     'tests.test_decision_context', 'tests.test_decision_http',
+                     'tests.test_情境投組HTTP']:
             self.assertIn(test, python_tests)
         manifest = release._read_manifest(staged / release.MANIFEST_NAME)
         release._validate_integrity(staged, manifest)
-        self.assertEqual(len(receipts), 2)
+        self.assertEqual(len(receipts), 4)
         self.assertTrue(all(receipt.is_file() for receipt in receipts))
         self.assertFalse((staged / 'scratch').exists())
         self.assertNotIn('scratch', manifest['managedTopLevel'])

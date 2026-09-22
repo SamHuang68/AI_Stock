@@ -105,6 +105,48 @@ check(oldStorage.api.resolve().ready, '狀態尚未初始化時可讀取既有�
 check(!harness({ positions: {} }, secretStorage).api.resolve().ready, '已初始化的空持倉不被舊儲存復活');
 check(!harness({ wl: [] }, secretStorage).api.resolve('observation_pool').ready, '已清空自選不被舊儲存復活');
 
+const simulationState = { positions: valid(), wl: [{ t: '0050', m: 'TW' }] };
+const originalState = JSON.stringify(simulationState);
+const sharedSimulation = harness(simulationState);
+sharedSimulation.api.setMode('simulation');
+check(!sharedSimulation.api.resolve().ready && sharedSimulation.api.resolve().coverage.total === 0, '空情境不借用持倉或自選');
+const rawSimulation = 'TW:2330 40\n0050 60\n保留無效原文';
+sharedSimulation.api.setSimulation(rawSimulation);
+const brokenSimulation = sharedSimulation.api.resolve();
+check(!brokenSimulation.ready && brokenSimulation.coverage.total === 3 && brokenSimulation.coverage.included === 2 && brokenSimulation.holdings.length === 0, '情境缺漏保留分母與原文且不送片段權重');
+check(sharedSimulation.api.getSimulation() === rawSimulation && brokenSimulation.simulationInput.text === rawSimulation, '共享與本機研究保存完整情境原文');
+for (const raw of ['2330', '2330 0', '2330 -1', '2330 NaN', '2330 1e309', 'TW: 40', '2330 4 extra', '2330 5\n2330 6', '2330 1e308\n0050 1e308']) {
+  sharedSimulation.api.setSimulation(raw);
+  check(!sharedSimulation.api.resolve().ready && sharedSimulation.api.getSimulation() === raw, '無效情境停止計算且原文不變：' + raw.replace(/\n/g, '／'));
+}
+sharedSimulation.api.setSimulation('TW:2330 40\n0050 60');
+const simComplete = sharedSimulation.api.resolve();
+check(simComplete.ready && simComplete.holdings[0].weight === 40 && simComplete.source === 'st_portfolio_simulation_v1' && !!simComplete.inputVersion, '第三模式採明列假設權重及獨立來源版本');
+for (const unsupported of ['HK:2330 40', 'US:AAPL 40', 'AAPL 40', 'TW:AAPL 40', '^TWII 40']) {
+  sharedSimulation.api.setSimulation('0050 60\n' + unsupported);
+  const result = sharedSimulation.api.resolve();
+  check(!result.ready && result.holdings.length === 0 && result.coverage.total === 2 && result.coverage.included === 1 &&
+    result.issues.some(x => x.code === 'unsupported_simulation_market') && sharedSimulation.api.getSimulation().includes(unsupported),
+    '非台股情境不誤套TW引擎、不送部分投組且完整保留：' + unsupported);
+}
+sharedSimulation.api.setSimulation('TW:2330 40\n0050 60');
+sharedSimulation.api.setMode('actual');
+check(sharedSimulation.api.resolve().holdings[0].weight === 100000 && JSON.stringify(simulationState) === originalState, '切回實際模式恢復真市值且不污染原部位');
+check(sharedSimulation.writes.every(row => row[0] !== 'stock_terminal_positions_v2' && row[0] !== 'st_wl'), '三模式操作不寫實際持倉與自選來源');
+const reopened = harness(simulationState, sharedSimulation.storage);
+reopened.api.setMode('simulation');
+check(reopened.api.getSimulation() === 'TW:2330 40\n0050 60' && reopened.api.resolve().ready, '重新開啟保留共用模擬輸入');
+const crossVersion = JSON.stringify({ contractVersion: 1, text: '0050 10', inputVersion: '另一分頁版本' });
+reopened.context.dispatchEvent({ type: 'storage', key: 'st_portfolio_simulation_v1', newValue: crossVersion });
+check(reopened.api.resolve().holdings[0].sym === '0050' && reopened.api.resolve().inputVersion === '另一分頁版本', '跨分頁同步完整情境與版本');
+const scenarioReader = harness(undefined, sharedSimulation.storage, 'reader');
+check(scenarioReader.api.getSimulation() === '' && !scenarioReader.api.resolve('simulation').ready && !scenarioReader.reads.includes('st_portfolio_simulation_v1'), 'Reader 不讀情境原文或模擬權重');
+assert.throws(() => scenarioReader.api.setSimulation('2330 10'), /角色/);
+const quota = harness(simulationState);
+quota.context.localStorage.setItem = () => { throw new Error('儲存已滿'); };
+quota.api.setMode('simulation'); quota.api.setSimulation('2330 10');
+check(quota.api.getSimulation() === '2330 10' && !quota.api.resolve().ready && quota.api.resolve().issues.some(x => x.code === 'simulation_storage_unavailable'), '儲存失敗保留本頁原文並明示跨頁不可用，不清除其他資料');
+
 // 有界 DOM 替身只驗證狀態／請求順序，不取代真實瀏覽器排版驗收。
 function bookHarness(state, role) {
   const env = harness(state, {}, role);
@@ -188,6 +230,7 @@ async function settle(request, data) {
   check(page.requests.length === 2 && page.requests[0].options.signal.aborted, '切換共用模式中止前次瀏覽器請求並建立新代次');
   check(JSON.parse(page.requests[1].options.body).holdings[0].weight === 1, '等權觀察池請求保留明確模式');
   await settle(page.requests[1], portfolioResponse('0050'));
+  check(page.elements['bk-body'].innerHTML.includes('觀察檔數') && !page.elements['bk-body'].innerHTML.includes('持倉檔數'), '觀察模式核心指標不混稱真實持倉檔數');
   const newHtml = page.elements['bk-body'].innerHTML;
   await settle(page.requests[0], portfolioResponse('2330'));
   check(page.elements['bk-body'].innerHTML === newHtml && !!page.book.last().stocks['0050'], '晚到舊模式回應不能覆蓋新結果');
@@ -210,18 +253,25 @@ async function settle(request, data) {
 
   const simulation = bookHarness({ positions: valid(), wl: [{ t: '0050', m: 'TW' }] });
   simulation.book.activate();
+  simulation.api.setMode('simulation');
+  check(simulation.elements['bk-edit'].value === '', '切換模擬不自動複製實際持倉');
   simulation.elements['bk-edit'].value = '2330 0';
   simulation.elements['bk-edit'].oninput();
   simulation.elements['bk-run'].onclick();
-  check(simulation.requests.length === 1 && simulation.book.last() === null && simulation.elements['bk-body'].innerHTML.includes('權重不是有效正數'), '手動模擬零權重不以一取代');
+  check(simulation.requests.length === 1 && simulation.book.last() === null && simulation.elements['bk-body'].innerHTML.includes('缺少有效正權重'), '手動模擬零權重不以一取代');
   simulation.elements['bk-edit'].value = '2330 40';
+  const editor = simulation.elements['bk-edit']; let editorText = editor.value, assignments = 0;
+  Object.defineProperty(editor, 'value', { get() { return editorText; }, set(value) { assignments++; editorText = value; editor.selectionStart = value.length; } });
+  editor.selectionStart = 3;
   simulation.elements['bk-edit'].oninput();
+  check(assignments === 0 && editor.selectionStart === 3, '中段輸入通知不重新設定textarea值或把游標移到尾端');
   simulation.elements['bk-run'].onclick();
-  check(JSON.parse(simulation.requests[1].options.body).portfolioKind === 'simulation' && simulation.api.getMode() === 'actual', '手動模擬有獨立標籤且不冒充共用實際持倉');
+  check(JSON.parse(simulation.requests[1].options.body).portfolioKind === 'simulation' && simulation.api.getMode() === 'simulation', '手動模擬共享第三模式且不冒充實際持倉');
   await settle(simulation.requests[1], portfolioResponse('2330'));
+  check(simulation.elements['bk-body'].innerHTML.includes('模擬檔數') && !simulation.elements['bk-body'].innerHTML.includes('持倉檔數'), '模擬模式核心指標持續標示假設來源');
   check(simulation.elements['bk-sub'].textContent.includes('情境模擬'), '模擬結果持續保留模式標籤');
   simulation.api.setMode('observation_pool');
-  check(JSON.parse(simulation.requests[2].options.body).portfolioKind === 'observation_pool', '共用模式事件使投組頁退出本頁模擬');
+  check(JSON.parse(simulation.requests[2].options.body).portfolioKind === 'observation_pool', '共用模式事件使投組頁切換觀察池且保留情境原文');
 
   const skipped = bookHarness({ positions: valid() });
   skipped.book.activate();

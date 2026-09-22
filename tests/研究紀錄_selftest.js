@@ -60,5 +60,17 @@ const core = window.ResearchWorkflow;
   const unknown = await core.freezeSubject('00981a.tw', null, etf, []);
   assert.equal(unknown.symbol, '00981A'); assert.equal(unknown.asOf, null); assert.equal(unknown.technicalAvailability, 'unknown');
   assert.equal(unknown.savedResearch.report.domains.etfResearch.asOf, null); passed++;
+  const simulation = { contractVersion: 1, kind: 'simulation', label: '情境模擬（手動權重，非實際持倉）', source: 'st_portfolio_simulation_v1',
+    sourceLabel: '手動情境', inputVersion: '情境版本一', revision: 1, ready: true, holdings: [{ sym: '2330', market: 'TW', currency: 'TWD', weight: 0.6 }],
+    simulationInput: { text: '私人情境原文含無效行也須保留', inputVersion: '情境版本一' }, coverage: { complete: true }, issues: [] };
+  const relation = core.relevance('2330', simulation);
+  assert.equal(relation.kind, 'simulation'); assert.equal(relation.source, simulation.source); assert.equal(relation.inputVersion, '情境版本一');
+  assert(relation.note.includes('不代表已成交')); passed++;
+  const simulationRecord = await store.save({ ...input, portfolio: simulation });
+  simulation.inputVersion = '情境版本二'; simulation.holdings[0].weight = 0.2; simulation.simulationInput.text = '修改後情境';
+  assert.equal(simulationRecord.portfolio.inputVersion, '情境版本一'); assert.equal(simulationRecord.portfolio.holdings[0].weight, 0.6);
+  assert.equal(simulationRecord.portfolio.simulationInput.text, '私人情境原文含無效行也須保留'); assert(await store.verify(simulationRecord)); passed++;
+  const invalidSimulation = core.relevance('2330', { ...simulation, ready: false, issues: [{ code: 'bad_line', message: '無效行' }] });
+  assert.equal(invalidSimulation.present, null); assert.equal(invalidSimulation.kind, 'simulation'); assert.equal(invalidSimulation.issues[0].code, 'bad_line'); passed++;
   console.log('研究紀錄 ' + passed + ' 組驗證通過：不可覆寫、快照凍結、匯入回復與私人來源界線');
 })().catch(error => { console.error(error); process.exitCode = 1; });

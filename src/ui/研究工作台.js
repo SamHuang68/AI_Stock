@@ -18,9 +18,29 @@
       hour: '2-digit', minute: '2-digit', hour12: false });
   }
   function message(text) { if ($('rw-status')) $('rw-status').textContent = text; }
+  function portfolioAllowed() { return !window.ST_PRIVATE_WEB_PROFILE || window.ST_PRIVATE_WEB_PROFILE.role === 'owner'; }
   function portfolio() {
-    if (window.ST_PRIVATE_WEB_PROFILE && window.ST_PRIVATE_WEB_PROFILE.role === 'reader') return null;
+    if (!portfolioAllowed()) return null;
     return window.PortfolioContext ? window.PortfolioContext.resolve() : null;
+  }
+  function renderPortfolioSource() {
+    if (!$('rw-portfolio-mode')) return;
+    var allowed = portfolioAllowed(), api = window.PortfolioContext;
+    $('rw-portfolio-mode').disabled = !allowed || !api;
+    $('rw-simulation-edit').disabled = !allowed || !api || !window.ShellV5;
+    if (!allowed) {
+      $('rw-portfolio-mode').value = '';
+      $('rw-portfolio-source').textContent = 'Reader：不讀取實際持倉、觀察池或模擬情境；公開標的研究仍可使用。'; return;
+    }
+    if (!api) { $('rw-portfolio-source').textContent = '共用投組模式尚未載入，關聯來源未知。'; return; }
+    try {
+      $('rw-portfolio-mode').value = api.getMode();
+      var context = portfolio();
+      $('rw-portfolio-source').textContent = '目前研究關聯：' + context.label + ' · 來源 ' + (context.sourceLabel || context.source || '未知') +
+        (context.inputVersion ? ' · 輸入版本 ' + context.inputVersion : '') +
+        ' · ' + (context.ready ? '輸入已完整核對' : '輸入不足，直接關聯未知') +
+        '。切換只改本次研究前提，已保存紀錄維持原來源；模擬情境不代表實際持倉。';
+    } catch (error) { $('rw-portfolio-source').textContent = '關聯來源無法讀取：' + error.message + '；不改用其他模式。'; }
   }
   function details(title, value) { return '<details><summary>' + esc(title) + '</summary><pre>' + esc(pretty(value)) + '</pre></details>'; }
   function css() {
@@ -70,7 +90,9 @@
       '<section aria-labelledby="rw-today"><h3 id="rw-today">今日變化與證據</h3><div class="rw-row">' +
       '<label>目前快照<select id="rw-current"></select></label><label>比較快照<select id="rw-previous"></select></label>' +
       '<button id="rw-compare">比較</button><button id="rw-more">載入更早快照</button></div><div id="rw-changes"></div><div id="rw-evidence"></div></section>' +
-      '<section aria-labelledby="rw-subject-title"><h3 id="rw-subject-title">標的研究與持倉關聯</h3><div class="rw-row">' +
+      '<section aria-labelledby="rw-subject-title"><h3 id="rw-subject-title">標的研究與持倉關聯</h3>' +
+      '<div class="rw-row"><label>研究關聯模式<select id="rw-portfolio-mode"><option value="">來源尚未核對</option><option value="actual">實際持倉</option><option value="observation_pool">觀察池（等權）</option><option value="simulation">模擬情境</option></select></label>' +
+      '<button id="rw-simulation-edit">前往投組頁編輯模擬情境</button></div><p id="rw-portfolio-source" class="rw-small" role="status">關聯來源尚未核對</p><div class="rw-row">' +
       '<label>台股／ETF 代號<input id="rw-symbol" value="2330" maxlength="10" autocomplete="off"></label>' +
       '<button id="rw-subject-load">讀取已保存標的研究</button><button id="rw-chart">開啟圖表</button></div><div id="rw-subject">尚未選取標的研究</div></section>' +
       '<section aria-labelledby="rw-journal-title"><h3 id="rw-journal-title">保存研究與回顧</h3>' +
@@ -100,6 +122,16 @@
     $('rw-portfolio-load').onclick = loadPortfolioStudy;
     $('rw-replay').onclick = replayObservation;
     $('rw-subject-load').onclick = loadSubject;
+    $('rw-portfolio-mode').onchange = function () {
+      if (!portfolioAllowed() || !window.PortfolioContext) return;
+      try { window.PortfolioContext.setMode(this.value); renderPortfolioSource(); renderSubject(); }
+      catch (error) { message(error.message); renderPortfolioSource(); }
+    };
+    $('rw-simulation-edit').onclick = function () {
+      if (!portfolioAllowed() || !window.PortfolioContext || !window.ShellV5) return;
+      try { window.PortfolioContext.setMode('simulation'); window.ShellV5.go('book'); }
+      catch (error) { message(error.message); }
+    };
     $('rw-chart').onclick = function () {
       try { var sym = window.ResearchWorkflow.normalizeSymbol($('rw-symbol').value); window.ShellV5.go('chart', { sym: sym, mkt: 'TW' }); }
       catch (error) { message(error.message); }
@@ -123,9 +155,7 @@
     listRecords();
     if (!store) ['rw-save', 'rw-save-review', 'rw-export', 'rw-import'].forEach(function (key) { $(key).disabled = true; });
     if (storageError) message(storageError);
-    if (window.ResearchTasks) window.ResearchTasks.mount($('rw-ai'), function () {
-      return { data: data, subject: subject, record: verifiedRecord };
-    });
+    renderPortfolioSource();
   }
   function options() {
     [data && data.current, data && data.previous].filter(Boolean).forEach(function (r) {
@@ -294,6 +324,7 @@
     };
   }
   function renderSubject() {
+    renderPortfolioSource();
     if (!$('rw-subject') || !subject) return;
     var relation = window.ResearchWorkflow.relevance(subject.symbol, portfolio());
     var saved = subject.savedResearch || {}, report = saved.report || {}, tools = subjectTools();
@@ -364,7 +395,14 @@
     var url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json;charset=utf-8' }));
     var a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
-  function activate() { active = true; mount(); if (data) render(); else load(); }
+  function activate() {
+    active = true; mount();
+    // 面板也供決策中心使用；每次回到工作台必須重新綁定容器與已核對紀錄。
+    if (window.ResearchTasks) window.ResearchTasks.mount($('rw-ai'), function () {
+      return { data: data, subject: subject, record: verifiedRecord };
+    });
+    renderPortfolioSource(); if (data) render(); else load();
+  }
   function deactivate() {
     Object.keys(studyControllers).forEach(function (key) { studyControllers[key].abort(); }); studyControllers = {};
     if (moreController) { moreController.abort(); moreController = null; }

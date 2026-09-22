@@ -1,7 +1,7 @@
 /* ============================================================================
  * book_v5.js  —  Stock Terminal 5.0 Stage 6：投組風險側欄
  * ----------------------------------------------------------------------------
- * 成分：共用實際持倉／等權觀察池；手動權重明列為情境模擬。
+ * 成分：共用實際持倉／等權觀察池／手動情境模擬，來源與缺漏明列。
  * 資料：POST /portfolio → 波動／VaR／Beta／產業／相關性（與 portfolio_v3 同後端）
  * 掛載：#mount-book；側欄「投組」
  * ========================================================================== */
@@ -10,7 +10,6 @@
 
   var SRV = window.SERVER || '';
   var lastData = null;
-  var source = 'shared';
   var generation = 0;
   var controller = null;
   var active = false;
@@ -58,39 +57,7 @@
       return x.sym + ' ' + String(x.weight);
     }).join('\n');
   }
-  function parseHoldings(txt) {
-    var context = { kind: 'simulation', label: '情境模擬（手動權重，非實際持倉）', ready: false,
-      holdings: [], coverage: { total: 0, included: 0, excluded: 0, complete: false }, issues: [] };
-    var seen = {};
-    (txt || '').split('\n').forEach(function (line) {
-      var p = line.trim().split(/\s+/);
-      if (!p[0]) return;
-      context.coverage.total++;
-      var sym = p[0].toUpperCase().replace(/\.(TW|TWO)$/, '');
-      var w = Number(p[1]);
-      if (p.length !== 2 || !/^[A-Z0-9^][A-Z0-9.^=_-]*$/.test(sym) || !isFinite(w) || w <= 0 || seen[sym]) {
-        context.issues.push({ sym: sym, message: '模擬代號重複、格式錯誤或權重不是有效正數。', action: '每行輸入不重複代號與大於零的權重，例如 2330 40；權重不得省略。' });
-        return;
-      }
-      seen[sym] = true;
-      context.holdings.push({ sym: sym, weight: w, market: /^\d{4,8}[A-Z]?$/.test(sym) ? 'TW' : 'US' });
-    });
-    context.coverage.included = context.holdings.length;
-    context.coverage.excluded = context.coverage.total - context.holdings.length;
-    if (!isFinite(context.holdings.reduce(function (sum, row) { return sum + row.weight; }, 0))) {
-      context.issues.push({ message: '模擬總權重超出可計算範圍。', action: '請縮小權重單位後再分析。' });
-    }
-    context.ready = context.holdings.length > 0 && !context.issues.length;
-    context.coverage.complete = context.ready;
-    if (!context.ready) context.holdings = [];
-    return context;
-  }
-
-  function currentContext() {
-    var shared = sharedContext();
-    if ((shared.issues || []).some(function (item) { return item.code === 'private_access_blocked'; })) return shared;
-    return source === 'simulation' ? parseHoldings(($('bk-edit') || {}).value) : shared;
-  }
+  function currentContext() { return sharedContext(); }
 
   function invalidate() {
     generation++;
@@ -100,13 +67,13 @@
   }
 
   function contextKey(context) {
-    return JSON.stringify({ kind: context.kind, ready: context.ready, holdings: context.holdings, coverage: context.coverage });
+    return JSON.stringify({ kind: context.kind, ready: context.ready, holdings: context.holdings, coverage: context.coverage, inputVersion: context.inputVersion, revision: context.revision });
   }
 
   function syncMode(context) {
     var details = $('bk-mode-details');
     if (details) details.textContent = context.label + ' · 有效 ' + context.coverage.included + '／' + context.coverage.total + ' 檔' +
-      (context.ready ? '' : ' · 尚未計算；請先處理資料缺漏。');
+      (context.ready ? '' : ' · 尚未計算；請先處理資料缺漏。') + ' · ' + (context.sourceLabel || context.source || '來源未知');
     var mount = $('mount-book');
     if (mount) mount.querySelectorAll('[data-src]').forEach(function (button) {
       var selected = button.getAttribute('data-src') === context.kind;
@@ -350,8 +317,8 @@
               '<button type="button" class="bk-btn" data-src="observation_pool">觀察池（等權）</button>' +
               '<button type="button" class="bk-btn" data-src="simulation">情境模擬</button>' +
             '</div><div class="bk-note" id="bk-mode-details" aria-live="polite" style="font-size:11px;line-height:1.45"></div>' +
-            '<textarea id="bk-edit" aria-label="情境模擬成分" placeholder="模擬專用；每行：代號 正權重（必填），例如 2330 40">' +
-              esc(holdingsToText(init.holdings)) + '</textarea>' +
+            '<textarea id="bk-edit" aria-label="情境模擬成分" placeholder="共用情境專用；每行：代號 正權重，例如 TW:2330 40；不會改寫實際持倉">' +
+              esc(init.kind === 'simulation' && window.PortfolioContext ? PortfolioContext.getSimulation() : '') + '</textarea>' +
           '</div>' +
           '<div id="bk-body" class="bk-loading">待命</div>' +
         '</div>';
@@ -363,26 +330,17 @@
           editToggle.textContent = open ? '成分 ▴' : '成分 ▾';
         };
         editTa.oninput = function () {
-          source = 'simulation';
-          invalidate();
-          syncMode(currentContext());
-          var body = $('bk-body');
-          if (body) body.innerHTML = '<div class="bk-loading">模擬內容已變更；請按分析。先前結果已失效。</div>';
+          if (!window.PortfolioContext) return;
+          try { PortfolioContext.setSimulation(editTa.value); }
+          catch (error) { var body = $('bk-body'); if (body) body.textContent = error.message; }
         };
       }
       mount.querySelectorAll('[data-src]').forEach(function (b) {
         b.onclick = function () {
           var next = b.getAttribute('data-src');
-          if (next === 'simulation') {
-            source = 'simulation';
-            if ($('bk-edit')) $('bk-edit').classList.add('open');
-            analyze(currentContext());
-          } else {
-            source = 'shared';
-            var before = window.PortfolioContext && window.PortfolioContext.getMode();
-            if (window.PortfolioContext) window.PortfolioContext.setMode(next);
-            if (before === next || !window.PortfolioContext) activate();
-          }
+          var before = window.PortfolioContext && window.PortfolioContext.getMode();
+          if (window.PortfolioContext) window.PortfolioContext.setMode(next);
+          if (before === next || !window.PortfolioContext) activate();
         };
       });
       var run = $('bk-run');
@@ -437,7 +395,7 @@
         corrMeter + '</div>' +
       '<div class="bk-card"><div class="lab">投組 Beta</div><div class="val">' + riskValue(pBeta, 2) + '</div>' +
         betaViz + '</div>' +
-      '<div class="bk-card"><div class="lab">持倉檔數</div><div class="val">' + codes.length + '</div></div>' +
+      '<div class="bk-card"><div class="lab">' + (context.kind === 'actual' ? '持倉檔數' : context.kind === 'simulation' ? '模擬檔數' : '觀察檔數') + '</div><div class="val">' + codes.length + '</div></div>' +
       '<div class="bk-card"><div class="lab">樣本天數</div><div class="val">' + riskValue(risk.days, 0) + '</div></div>' +
       '</div>' + (risk.note ? '<div class="bk-note">' + esc(risk.note) + '</div>' : '');
 
@@ -564,7 +522,11 @@
     ensureMount();
     var ta = $('bk-edit');
     var context = currentContext();
-    if (source !== 'simulation' && ta) ta.value = holdingsToText(context.holdings);
+    if (ta) {
+      ta.value = context.kind === 'simulation' && window.PortfolioContext ? PortfolioContext.getSimulation() : '';
+      ta.disabled = context.kind !== 'simulation' || (context.issues || []).some(function (item) { return item.code === 'private_access_blocked'; });
+      if (context.kind === 'simulation') ta.classList.add('open');
+    }
     analyze(context);
   }
 
@@ -575,10 +537,17 @@
     last: function () { return lastData; }
   };
 
-  window.addEventListener('portfolioContext', function () {
-    source = 'shared';
+  window.addEventListener('portfolioContext', function (event) {
     invalidate();
-    if (active) activate();
+    var context = sharedContext();
+    var edited = event && event.detail && /^simulation-/.test(event.detail.reason);
+    if (active && edited && context.kind === 'simulation') {
+      var editor = $('bk-edit'), text = PortfolioContext.getSimulation();
+      // 同頁每次輸入已有最新原文；重設 value 會把中段游標移到尾端。
+      if (editor && editor.value !== text) editor.value = text;
+      syncMode(context);
+      if ($('bk-body')) $('bk-body').innerHTML = '<div class="bk-loading">共用情境內容已變更；請按分析。先前結果已失效。</div>';
+    } else if (active) activate();
     else if ($('bk-body')) {
       syncMode(sharedContext());
       $('bk-body').innerHTML = '<div class="bk-loading">投組模式已變更；重新開啟本頁後分析。</div>';

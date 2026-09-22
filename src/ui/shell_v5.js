@@ -67,6 +67,24 @@
 
   var state = { route: 'pulse', built: false, syncing: false, prevRoute: null };
   var routeSequence = 0;
+  var routeScroll = Object.create(null), scrollSequence = 0, scrollFrame = null;
+
+  function scrollSurfaces() { return [$('shell-main'), $('shell-views'), document.body, document.documentElement]; }
+  function rememberRouteScroll(id) {
+    routeScroll[id] = scrollSurfaces().map(function (surface) {
+      return surface ? { top: surface.scrollTop, left: surface.scrollLeft } : null;
+    });
+  }
+  function restoreRouteScroll(id, sequence, fresh) {
+    if (state.route !== id || sequence !== scrollSequence) return;
+    var positions = fresh ? [] : routeScroll[id] || [];
+    scrollSurfaces().forEach(function (surface, index) {
+      if (!surface) return;
+      var position = positions[index];
+      surface.scrollTop = position ? position.top : 0;
+      surface.scrollLeft = position ? position.left : 0;
+    });
+  }
 
   /* Alt+Shift+1…0 → 常用路由（避開 Alt+數字 時框） */
   var HOTKEY_ROUTES = [
@@ -1763,6 +1781,10 @@
     }
 
     var routeChanged = state.route !== id;
+    var scrollGeneration = ++scrollSequence;
+    if (scrollFrame !== null && window.cancelAnimationFrame) window.cancelAnimationFrame(scrollFrame);
+    scrollFrame = null;
+    if (routeChanged) rememberRouteScroll(state.route);
     if (state.prevRoute && state.prevRoute !== id) {
       deactivateRoute(state.prevRoute);
     }
@@ -1824,17 +1846,19 @@
       }, isChart ? 40 : 0);
     }
 
+    // 指定標的或證據位置的深連結由原面板定位；一般返回才回復該頁閱讀位置。
+    var deepLink = !!(opts.sym || opts.focusSection || opts.highlightId);
+    if (routeChanged && deepLink) restoreRouteScroll(id, scrollGeneration, true);
     emitRoute(id, opts);
-    /* 換頁完成重排後從標題開始；相同路由更新資料時保留閱讀位置。 */
+    /* 首次開頁從頂端開始；返回保存的外層位置，不接管各元件內部捲動。 */
     if (routeChanged) {
-      var resetRouteScroll = function () {
-        if (state.route !== id) return;
-        [main, views, document.body, document.documentElement].forEach(function (surface) {
-          if (surface) { surface.scrollTop = 0; surface.scrollLeft = 0; }
+      if (!deepLink) {
+        restoreRouteScroll(id, scrollGeneration, false);
+        if (window.requestAnimationFrame) scrollFrame = window.requestAnimationFrame(function () {
+          scrollFrame = null;
+          restoreRouteScroll(id, scrollGeneration, false);
         });
-      };
-      resetRouteScroll();
-      if (window.requestAnimationFrame) window.requestAnimationFrame(resetRouteScroll);
+      }
     }
     setTimeout(function () { traceMobilePanelLayout(id); }, 180);
   }

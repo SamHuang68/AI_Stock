@@ -2,18 +2,21 @@
 (function () {
   'use strict';
   var MODE_KEY = 'st_portfolio_mode_v1';
+  var SIMULATION_KEY = 'st_portfolio_simulation_v1';
   var mode = 'actual';
   var revision = 0;
+  var simulation = null;
   var currencies = { TW: 'TWD', US: 'USD', JP: 'JPY', HK: 'HKD' };
 
-  function validMode(value) { return value === 'actual' || value === 'observation_pool'; }
+  function validMode(value) { return value === 'actual' || value === 'observation_pool' || value === 'simulation'; }
+  function blocked() { return window.ST_PRIVATE_WEB_PROFILE && window.ST_PRIVATE_WEB_PROFILE.role !== 'owner'; }
   try {
     var saved = localStorage.getItem(MODE_KEY);
     if (validMode(saved)) mode = saved;
   } catch (error) { /* 儲存不可用時仍保留本頁模式。 */ }
 
   function changeMode(value, reason, persist) {
-    if (!validMode(value)) throw new Error('投組模式僅接受實際持倉或觀察池。');
+    if (!validMode(value)) throw new Error('投組模式僅接受實際持倉、觀察池或情境模擬。');
     if (value === mode) return mode;
     var previous = mode;
     mode = value;
@@ -22,7 +25,7 @@
       try { localStorage.setItem(MODE_KEY, mode); } catch (error) { /* 不把私人資料當成模式備援。 */ }
     }
     window.dispatchEvent(new CustomEvent('portfolioContext', {
-      detail: { contractVersion: 1, mode: mode, previousMode: previous, reason: reason, revision: revision }
+      detail: { contractVersion: 2, mode: mode, previousMode: previous, reason: reason, revision: revision }
     }));
     return mode;
   }
@@ -36,6 +39,36 @@
 
   function issue(code, sym, message, action) {
     return { code: code, sym: sym || null, message: message, action: action };
+  }
+
+  function decodeSimulation(raw) {
+    if (raw === null) return { text: '', inputVersion: 'empty' };
+    try {
+      var value = JSON.parse(raw);
+      if (value && value.contractVersion === 1 && typeof value.text === 'string' && typeof value.inputVersion === 'string') return value;
+    } catch (_) { /* 原始內容仍保留，不能以空白掩蓋損毀。 */ }
+    return { text: String(raw), inputVersion: 'invalid', error: '情境儲存格式無法確認；原文保留，請檢查後重新輸入。' };
+  }
+  function simulationInput() {
+    if (simulation === null) {
+      try { simulation = decodeSimulation(localStorage.getItem(SIMULATION_KEY)); }
+      catch (_) { simulation = { text: '', inputVersion: 'unavailable', error: '情境儲存無法讀取；請確認瀏覽器儲存權限。' }; }
+    }
+    return simulation;
+  }
+  function setSimulation(text) {
+    if (blocked()) throw new Error('目前角色無法存取私人情境輸入。');
+    if (typeof text !== 'string') throw new Error('情境輸入必須為文字；原有資料未變更。');
+    var previous = simulationInput();
+    if (previous.text === text && !previous.error) return text;
+    simulation = { contractVersion: 1, text: text, inputVersion: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) };
+    try { localStorage.setItem(SIMULATION_KEY, JSON.stringify(simulation)); }
+    catch (_) { simulation.error = '情境原文目前只保留在本頁；儲存失敗，請先複製原文並確認儲存權限後重試。'; }
+    revision++;
+    window.dispatchEvent(new CustomEvent('portfolioContext', {
+      detail: { contractVersion: 2, mode: mode, previousMode: mode, reason: 'simulation-input', revision: revision }
+    }));
+    return text;
   }
 
   function readStored(keys, issues) {
@@ -52,6 +85,11 @@
   }
 
   function inputFor(kind, issues) {
+    if (kind === 'simulation') {
+      var current = simulationInput();
+      if (current.error) issues.push(issue('simulation_storage_unavailable', null, current.error, '不會清除原文或改用實際持倉；修正後再分析。'));
+      return { value: current.text, source: SIMULATION_KEY, inputVersion: current.inputVersion };
+    }
     var state = typeof S !== 'undefined' && S ? S : null;
     if (kind === 'actual') {
       if (state && Object.prototype.hasOwnProperty.call(state, 'positions')) return { value: state.positions, source: 'S.positions' };
@@ -78,11 +116,11 @@
 
   function resolve(requestedMode) {
     var kind = requestedMode == null ? mode : requestedMode;
-    if (!validMode(kind)) throw new Error('投組模式僅接受實際持倉或觀察池。');
+    if (!validMode(kind)) throw new Error('投組模式僅接受實際持倉、觀察池或情境模擬。');
     var result = {
-      contractVersion: 1, kind: kind, label: kind === 'actual' ? '實際持倉' : '觀察池（等權，非實際持倉）',
+      contractVersion: 2, kind: kind, label: kind === 'actual' ? '實際持倉' : kind === 'simulation' ? '情境模擬（手動權重，非實際持倉）' : '觀察池（等權，非實際持倉）',
       ready: false, holdings: [], coverage: { total: 0, included: 0, excluded: 0, ratio: 0, complete: false, comparable: true },
-      issues: [], source: 'none', currency: null
+      issues: [], source: 'none', sourceLabel: '', inputVersion: null, revision: revision, currency: null
     };
     var profile = window.ST_PRIVATE_WEB_PROFILE;
     if (profile && profile.role !== 'owner') {
@@ -91,9 +129,18 @@
     }
     var input = inputFor(kind, result.issues);
     result.source = input.source;
+    result.sourceLabel = kind === 'simulation' ? '使用者手動情境輸入（獨立於實際持倉）' : kind === 'actual' ? '原始持倉數量與有效現價' : '使用者明確選擇的自選等權清單';
+    result.inputVersion = input.inputVersion || null;
     var value = input.value;
     var rows = [];
-    if (kind === 'actual') {
+    if (kind === 'simulation') {
+      result.simulationInput = { text: value, inputVersion: input.inputVersion };
+      rows = value.split('\n').map(function (line, index) {
+        var parts = line.trim().split(/\s+/), code = parts[0].split(':'), explicit = code.length === 2;
+        return { key: explicit ? code[1] : parts[0], emptyLine: !line.trim(), row: { market: explicit ? code[0] : '', weight: parts[1],
+          line: index + 1, invalidFormat: parts.length !== 2 || code.length > 2 } };
+      }).filter(function (item) { return !item.emptyLine; });
+    } else if (kind === 'actual') {
       if (value && typeof value === 'object' && !Array.isArray(value)) {
         rows = Object.keys(value).map(function (key) { return { key: key, row: value[key] }; });
       } else if (value != null) {
@@ -116,12 +163,23 @@
       // 觀察池只列一次同一市場標的；實際持倉重複識別碼則停止計算。
       if (kind === 'observation_pool' && seen[key]) return;
       result.coverage.total++;
+      if (kind === 'simulation' && (row.invalidFormat || positive(row.weight) === null)) {
+        result.issues.push(issue('invalid_simulation_weight', id.sym, '第 ' + row.line + ' 行格式不正確或缺少有效正權重。',
+          '每行輸入「代號 正權重」或「市場:代號 正權重」，例如 TW:2330 40；原文保留，不會補等權。'));
+        return;
+      }
       if (!id.valid || seen[key]) {
         result.issues.push(issue('invalid_identity', id.sym, '標的、市場或幣別無法確認，或持倉代號重複。', '請在原持倉／自選頁確認標的市場與幣別，排除重複資料。'));
         return;
       }
       seen[key] = true;
+      if (kind === 'simulation' && (id.market !== 'TW' || id.currency !== 'TWD' || !/^\d{4,6}[A-Z]?$/.test(id.sym))) {
+        result.issues.push(issue('unsupported_simulation_market', id.sym, '情境引擎目前僅支援可確認的台股代號與新臺幣（TW／TWD）。',
+          '海外或無法確認的成分原文仍保留；不會套用台股資料或計算部分情境。'));
+        return;
+      }
       var weight = 1;
+      if (kind === 'simulation') weight = positive(row.weight);
       if (kind === 'actual') {
         var shares = positive(row.shares);
         var price = positive(row.lastPrice);
@@ -146,12 +204,12 @@
       result.coverage.comparable = false;
       result.issues.push(issue('mixed_currency', null, '多市場持倉的原幣市值不可直接相加，尚無可用匯率契約。', '請先分市場檢視部位；完成明確匯率與基準幣別契約前，停止整體風險計算。'));
     }
-    if (kind === 'actual' && candidates.length && !isFinite(candidates.reduce(function (sum, item) { return sum + item.weight; }, 0))) {
-      result.issues.push(issue('invalid_total_value', null, '持倉總市值超出可計算範圍。', '請確認股數與價格的單位及輸入值，修正後再分析。'));
+    if (kind !== 'observation_pool' && candidates.length && !isFinite(candidates.reduce(function (sum, item) { return sum + item.weight; }, 0))) {
+      result.issues.push(issue('invalid_total_value', null, '持倉總市值或情境總權重超出可計算範圍。', '請確認單位及輸入值，修正後再分析。'));
     }
     if (!result.coverage.total && !result.issues.length) {
-      result.issues.push(issue('empty', null, kind === 'actual' ? '尚未建立實際持倉。' : '觀察池尚無標的。',
-        kind === 'actual' ? '請在持倉頁建立部位，或明確切換至等權觀察池；不會自動混用。' : '請先加入自選標的，再執行等權觀察分析。'));
+      result.issues.push(issue('empty', null, kind === 'actual' ? '尚未建立實際持倉。' : kind === 'simulation' ? '情境模擬尚未輸入成分。' : '觀察池尚無標的。',
+        kind === 'actual' ? '請在持倉頁建立部位，或明確切換其他模式；不會自動混用。' : kind === 'simulation' ? '請到投組頁輸入模擬代號及正權重；不會帶入實際持倉或觀察池。' : '請先加入自選標的，再執行等權觀察分析。'));
     }
     result.ready = candidates.length > 0 && !result.issues.length && result.coverage.comparable;
     result.coverage.complete = result.ready;
@@ -163,9 +221,18 @@
   window.PortfolioContext = {
     getMode: function () { return mode; },
     setMode: function (value) { return changeMode(value, 'mode-change', true); },
+    getSimulation: function () { return blocked() ? '' : simulationInput().text; },
+    setSimulation: setSimulation,
     resolve: resolve
   };
   window.addEventListener('storage', function (event) {
     if (event && event.key === MODE_KEY) changeMode(validMode(event.newValue) ? event.newValue : 'actual', 'storage', false);
+    if (event && event.key === SIMULATION_KEY && !blocked()) {
+      simulation = decodeSimulation(event.newValue);
+      revision++;
+      window.dispatchEvent(new CustomEvent('portfolioContext', {
+        detail: { contractVersion: 2, mode: mode, previousMode: mode, reason: 'simulation-storage', revision: revision }
+      }));
+    }
   });
 }());

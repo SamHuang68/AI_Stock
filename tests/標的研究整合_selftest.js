@@ -12,16 +12,18 @@ function report(symbol) {
   return { ok: true, version: 'research-subject-v1', symbol, market: 'TW', currency: 'TWD', asOf: null, readOnly: true, domains, evidence: [], digest: 'b'.repeat(64), notes: ['完整公開研究'] };
 }
 function daily(symbol) { return { ok: true, symbol, asOf: '2026-09-22', research: { version: 'breakout-v1', stats: [], latest: { signals: [] } } }; }
-function harness() {
-  const nodes = new Map(), data = new Map(), requests = [], navigation = [], listeners = new Map();
+function harness(role = 'owner', withPortfolio = false, withTasks = false) {
+  const nodes = new Map(), data = new Map(), requests = [], navigation = [], listeners = new Map(), storageReads = [], copied = [];
   let taskInput;
   function element(id = '') {
-    const node = { id, value: '', textContent: '', disabled: false, style: {}, attrs: {}, tools: [],
+    const node = { id, value: '', textContent: '', disabled: false, style: {}, attrs: {}, tools: [], children: new Map(),
+      querySelector(selector) { return this.children.get(selector.slice(1)) || null; },
       appendChild() {}, getAttribute(key) { return this.attrs[key] || null; }, querySelectorAll(selector) { return selector === '[data-rw-tool]' ? this.tools : []; } };
     Object.defineProperty(node, 'innerHTML', { get() { return this.html || ''; }, set(value) {
-      this.html = String(value); this.tools = [];
+      this.html = String(value); this.tools = []; this.children.clear();
       for (const match of this.html.matchAll(/<\w+\b[^>]*\bid="([^"]+)"[^>]*>/g)) {
         const child = element(match[1]); const val = /\bvalue="([^"]*)"/.exec(match[0]); child.value = val ? val[1] : ''; child.disabled = /\bdisabled/.test(match[0]);
+        this.children.set(child.id, child);
       }
       for (const match of this.html.matchAll(/<button\b[^>]*data-rw-tool="([^"]+)"[^>]*>/g)) {
         const button = element(); button.attrs['data-rw-tool'] = match[1]; button.disabled = /\bdisabled/.test(match[0]); this.tools.push(button);
@@ -30,14 +32,19 @@ function harness() {
     if (id) nodes.set(id, node); return node;
   }
   element('mount-research');
-  const storage = { get length() { return data.size; }, key: i => [...data.keys()][i], getItem: k => data.has(k) ? data.get(k) : null, setItem: (k, v) => data.set(k, v), removeItem: k => data.delete(k) };
+  const storage = { get length() { return data.size; }, key: i => [...data.keys()][i], getItem(k) { storageReads.push(k); return data.has(k) ? data.get(k) : null; }, setItem: (k, v) => data.set(k, v), removeItem: k => data.delete(k) };
   const current = { snapshotId: 'dc-current', revision: 2, persistence: 'committed', asOf: new Date().toISOString(), digest: 'd'.repeat(64),
     evidence: [{ evidenceId: 'current:metric', digest: 'a'.repeat(64), id: 'metric', asOf: new Date().toISOString(), source: '正式快照', value: 1 }] };
   const context = { console, Date, Math, Promise, Set, Map, Uint8Array, TextEncoder, AbortController, crypto: webcrypto, setTimeout, clearTimeout,
+    ST_PRIVATE_WEB_PROFILE: { role }, S: { positions: { '2330': { shares: 1, lastPrice: 100, mkt: 'TW' } }, watches: { '0050': { mkt: 'TW' } } },
     localStorage: storage, sessionStorage: storage, SC_CHAINS: { TW: [{ stage: '晶圓分類', stocks: [['2330', '台積電'], ['2303', '聯電']] }] },
     document: { getElementById: id => nodes.get(id) || null, createElement: () => element(), head: { appendChild() {} } },
-    addEventListener(type, fn) { listeners.set(type, fn); },
+    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
+    addEventListener(type, fn) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(fn); },
+    dispatchEvent(event) { for (const fn of listeners.get(event.type) || []) fn(event); },
     ResearchTasks: { mount(_node, input) { taskInput = input; }, stop() {} },
+    STAI: { request() { throw new Error('此驗收不得呼叫模型'); } },
+    navigator: { clipboard: { writeText: async value => copied.push(value) } },
     ShellV5: { go(route, options) { navigation.push({ route, options }); } },
     ValuationResearchUI: { open(symbol) { navigation.push({ tool: 'valuation', symbol }); } },
     openEtfMgrModal() { navigation.push({ tool: 'etf' }); }, supplyChainOpen() { navigation.push({ tool: 'supply' }); },
@@ -49,8 +56,8 @@ function harness() {
       return new Promise((resolve, reject) => { call.resolve = payload => resolve({ ok: true, json: async () => payload }); call.reject = reject; });
     } };
   context.window = context; vm.createContext(context);
-  for (const file of ['src/core/研究工作流.js', 'src/core/研究任務.js', 'src/ui/研究工作台.js']) vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context, { filename: file });
-  return { context, nodes, storage, requests, navigation, current, get: id => nodes.get(id), input: () => taskInput(),
+  for (const file of (withPortfolio ? ['src/core/投組資料契約_v5.js'] : []).concat(['src/core/研究工作流.js', 'src/core/研究任務.js'], withTasks ? ['src/ui/研究任務面板.js'] : [], ['src/ui/研究工作台.js'])) vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context, { filename: file });
+  return { context, nodes, storage, storageReads, requests, navigation, current, copied, element, get: id => nodes.get(id), input: () => taskInput(),
     async start() { context.ResearchDesk.activate(); for (let i = 0; i < 10; i++) await tick(); },
     read(symbol) { nodes.get('rw-symbol').value = symbol; return nodes.get('rw-subject-load').onclick(); },
     complete(symbol, from = 0, profile = report(symbol)) { for (const call of requests.slice(from)) {
@@ -114,4 +121,71 @@ function harness() {
   assert.equal(h.requests.slice(start).length, 1, '尚未支援字尾的日線入口不能錯送代號');
   assert(h.get('rw-subject').innerHTML.includes('技術研究未知'));
   console.log('通過：ETF 英文字尾正規化與未支援日線明示未知');
+
+  const modes = harness('owner', true); await modes.start();
+  const modeRead = modes.read('2330'); modes.complete('2330'); await modeRead;
+  assert(modes.get('rw-portfolio-source').textContent.includes('實際持倉'));
+  modes.get('rw-portfolio-mode').value = 'observation_pool'; modes.get('rw-portfolio-mode').onchange();
+  assert.equal(modes.context.PortfolioContext.getMode(), 'observation_pool');
+  assert(modes.get('rw-subject').innerHTML.includes('觀察池（等權，非實際持倉）中沒有此標的'));
+  modes.context.PortfolioContext.setSimulation('TW:2330 40\n0050 60');
+  modes.get('rw-portfolio-mode').value = 'simulation'; modes.get('rw-portfolio-mode').onchange();
+  assert(modes.get('rw-subject').innerHTML.includes('情境模擬（手動權重，非實際持倉）中包含此標的'));
+  assert(modes.get('rw-portfolio-source').textContent.includes('輸入版本'));
+  modes.get('rw-title').value = '當時模擬研究'; modes.get('rw-save').onclick();
+  const modeStore = new modes.context.ResearchWorkflow.Store(modes.storage);
+  let deadline = Date.now() + 3000; while (!modeStore.list().records.length && Date.now() < deadline) await tick();
+  const savedMode = modeStore.list().records[0]; assert(savedMode);
+  assert.equal(savedMode.portfolio.kind, 'simulation'); assert.equal(savedMode.portfolio.simulationInput.text, 'TW:2330 40\n0050 60');
+  const savedVersion = savedMode.portfolio.inputVersion;
+  modes.context.PortfolioContext.setSimulation('TW:2330 99\n私人情境不可外送 無效');
+  assert(modes.get('rw-subject').innerHTML.includes('輸入不足，無法確認曝險'));
+  assert.notEqual(modes.context.PortfolioContext.resolve().inputVersion, savedVersion);
+  assert.equal(modeStore.list().records[0].portfolio.simulationInput.text, 'TW:2330 40\n0050 60');
+  assert(await modeStore.verify(savedMode));
+  const modelInput = await modes.context.ResearchTaskCore.freeze({ ...modes.input(), portfolio: modes.context.PortfolioContext.resolve() }, 'subject');
+  assert(!JSON.stringify(modelInput).includes('私人情境不可外送')); assert.equal(modelInput.portfolio, undefined);
+  const beforeLeave = modes.get('rw-portfolio-source').textContent;
+  modes.context.ResearchDesk.deactivate(); modes.context.PortfolioContext.setMode('actual');
+  assert.equal(modes.get('rw-portfolio-source').textContent, beforeLeave, '離頁時不重畫隱藏內容');
+  modes.context.ResearchDesk.activate(); assert(modes.get('rw-portfolio-source').textContent.includes('實際持倉'));
+  modes.get('rw-simulation-edit').onclick(); assert.equal(modes.context.PortfolioContext.getMode(), 'simulation'); assert.equal(modes.navigation.at(-1).route, 'book');
+  assert.equal(modes.context.S.positions['2330'].shares, 1, '研究切換不改寫實際持倉');
+  console.log('通過：真共用核心三模式、輸入變更事件、紀錄版本原文凍結、離頁恢復與模型私有資料隔離');
+
+  const reader = harness('reader', true); await reader.start();
+  const readerRead = reader.read('2330'); reader.complete('2330'); await readerRead;
+  assert.equal(reader.get('rw-portfolio-mode').disabled, true); assert.equal(reader.get('rw-simulation-edit').disabled, true);
+  const requestCount = reader.requests.length;
+  reader.get('rw-portfolio-mode').value = 'simulation'; reader.get('rw-portfolio-mode').onchange(); reader.get('rw-simulation-edit').onclick();
+  assert.equal(reader.context.PortfolioContext.getMode(), 'actual'); assert.equal(reader.navigation.length, 0); assert.equal(reader.requests.length, requestCount);
+  assert(!reader.storageReads.includes('st_portfolio_simulation_v1')); assert(!reader.storageReads.includes('stock_terminal_positions_v2'));
+  assert(reader.get('rw-portfolio-source').textContent.includes('Reader'));
+  console.log('通過：Reader 研究消費端不讀私人情境或持倉，直接觸發停用控制項也無作用');
+
+  const returnTrip = harness('owner', true, true); await returnTrip.start();
+  const tripRead = returnTrip.read('2330'); returnTrip.complete('2330'); await tripRead;
+  const researchPanel = returnTrip.get('rw-ai');
+  researchPanel.querySelector('#rt-type').value = 'subject';
+  await researchPanel.querySelector('#rt-freeze').onclick();
+  await researchPanel.querySelector('#rt-copy').onclick();
+  assert.equal(JSON.parse(returnTrip.copied.at(-1)).subjects.current.symbol, '2330');
+  returnTrip.context.ResearchDesk.deactivate();
+  const decisionPanel = returnTrip.element('decision-ai');
+  const otherSnapshot = JSON.parse(JSON.stringify(returnTrip.current)); otherSnapshot.snapshotId = 'dc-decision-public';
+  returnTrip.context.ResearchTasks.mount(decisionPanel, () => ({ data: { current: otherSnapshot } }));
+  decisionPanel.querySelector('#rt-type').value = 'challenge';
+  await decisionPanel.querySelector('#rt-freeze').onclick();
+  const decisionHtml = decisionPanel.querySelector('#rt-package').innerHTML;
+  returnTrip.context.ResearchDesk.activate();
+  researchPanel.querySelector('#rt-type').value = 'subject';
+  await researchPanel.querySelector('#rt-freeze').onclick();
+  assert(researchPanel.querySelector('#rt-status').textContent.includes('已凍結完整公開資料'));
+  await researchPanel.querySelector('#rt-copy').onclick();
+  const restoredPacket = JSON.parse(returnTrip.copied.at(-1));
+  assert.equal(restoredPacket.subjects.current.symbol, '2330');
+  assert.equal(restoredPacket.snapshots.current.snapshotId, 'dc-current');
+  assert.equal(decisionPanel.querySelector('#rt-package').innerHTML, decisionHtml, '回研究頁不得重畫隱藏的決策面板');
+  assert(returnTrip.requests.every(call => !call.url.startsWith('/ai/')), '往返及凍結不呼叫路由或模型');
+  console.log('通過：正式研究任務面板在研究→決策→研究後重綁目前容器、標的與公開快照');
 })().catch(error => { console.error(error); process.exitCode = 1; });

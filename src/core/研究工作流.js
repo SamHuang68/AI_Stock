@@ -99,11 +99,13 @@
   };
   function relevance(symbol, portfolio) {
     if (!portfolio) return { label: '未載入持倉模式', present: null };
-    if (!portfolio.ready) return { label: portfolio.label + '：輸入不足，無法確認曝險', present: null };
+    var premise = { kind: portfolio.kind, source: portfolio.source || '未知', sourceLabel: portfolio.sourceLabel, contractVersion: portfolio.contractVersion,
+      inputVersion: portfolio.inputVersion, revision: portfolio.revision, coverage: copy(portfolio.coverage || null), issues: copy(portfolio.issues || []) };
+    if (!portfolio.ready) return Object.assign(premise, { label: portfolio.label + '：輸入不足，無法確認曝險', present: null });
     var found = (portfolio.holdings || []).find(function (x) { return x.sym === symbol; });
-    return { label: portfolio.label + (found ? '中包含此標的' : '中沒有此標的'), present: !!found,
+    return Object.assign(premise, { label: portfolio.label + (found ? '中包含此標的' : '中沒有此標的'), present: !!found,
       kind: portfolio.kind, directWeight: found ? found.weight : null,
-      note: '此處只核對直接標的；ETF 間接曝險請查看投組穿透研究。' };
+      note: (portfolio.kind === 'simulation' ? '模擬情境為自訂假設，不代表已成交或實際曝險。' : '') + '此處只核對直接標的；ETF 間接曝險請查看投組穿透研究。' });
   }
   var SUBJECT_DOMAINS = ['fundamentals', 'flows', 'supplyChainNews', 'peersThemes', 'etfResearch'];
   function publicFields(value, keys) {

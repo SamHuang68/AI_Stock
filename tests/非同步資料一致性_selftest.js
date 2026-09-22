@@ -117,6 +117,7 @@ async function checkPanelLifecycle() {
   ids.get('bk-edit').value = '2330 100';
   const context = {
     state: { route: 'chart', prevRoute: 'chart' }, routeSequence: 0,
+    routeScroll: Object.create(null), scrollSequence: 0, scrollFrame: null,
     PANEL_MAP: { book: 'BookV5', heat: 'HeatV5', institutional: 'InstitutionalV5' },
     ROUTES: ['book', 'chart', 'heat', 'institutional'].map(id => ({ id })), ROUTE_ALIASES: {},
     STORAGE_KEY: '測試路由', ringState: { open: false },
@@ -141,7 +142,7 @@ async function checkPanelLifecycle() {
   vm.runInContext(read('src/core/投組資料契約_v5.js'), context);
   vm.runInContext(read('src/ui/book_v5.js'), context);
   const shell = read('src/ui/shell_v5.js');
-  vm.runInContext(['panelApi', 'deactivateRoute', 'emitRoute', 'findRoute', 'resolveAlias', 'applyRoute']
+  vm.runInContext(['scrollSurfaces', 'rememberRouteScroll', 'restoreRouteScroll', 'panelApi', 'deactivateRoute', 'emitRoute', 'findRoute', 'resolveAlias', 'applyRoute']
     .map(name => scoped(shell, name)).join('\n'), context);
   context.ShellV5 = { go: context.applyRoute, route: () => context.state.route };
   let leaveCount = 0;

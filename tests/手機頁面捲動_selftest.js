@@ -10,6 +10,9 @@ const source = fs.readFileSync(path.join(root, 'src/ui/shell_v5.js'), 'utf8');
 const start = source.indexOf('  function applyRoute(id, opts) {');
 const end = source.indexOf('  function go(id, opts) {', start);
 assert.ok(start >= 0 && end > start, '找到實際路由切換函式');
+const scrollStart = source.indexOf('  var routeScroll =');
+const scrollEnd = source.indexOf('  /* Alt+Shift+', scrollStart);
+assert.ok(scrollStart >= 0 && scrollEnd > scrollStart, '讀取正式路由位置保存與恢復函式');
 
 function element(route) {
   const classes = new Set();
@@ -29,7 +32,8 @@ const ids = Object.fromEntries(['topbar', 'body', 'wlbar', 'rpanel-pager', 'shel
   .map(id => [id, element()]));
 const pageBody = element();
 const rootElement = element();
-const frames = [];
+const frames = new Map();
+let nextFrame = 0;
 const surfaces = [ids['shell-main'], ids['shell-views'], pageBody, rootElement];
 const emitted = [];
 const deactivated = [];
@@ -42,7 +46,8 @@ const context = {
   document: { body: pageBody, documentElement: rootElement, querySelectorAll() { return panels; } },
   window: {
     location: { pathname: '/', search: '' }, history: { replaceState() {} }, dispatchEvent() {},
-    requestAnimationFrame(callback) { frames.push(callback); return frames.length; }
+    requestAnimationFrame(callback) { const id = ++nextFrame; frames.set(id, callback); return id; },
+    cancelAnimationFrame(id) { frames.delete(id); }
   },
   localStorage: { setItem() {} },
   ringState: { open: false },
@@ -53,7 +58,7 @@ const context = {
   setTimeout(fn) { fn(); }, Event: function (name) { this.type = name; }, console
 };
 vm.createContext(context);
-vm.runInContext(source.slice(start, end), context);
+vm.runInContext(source.slice(scrollStart, scrollEnd) + source.slice(start, end), context);
 
 function setScroll(top, left) {
   surfaces.forEach(surface => { surface.scrollTop = top; surface.scrollLeft = left; });
@@ -65,22 +70,22 @@ function assertScroll(top, left, label) {
   });
 }
 function flushFrames() {
-  frames.splice(0).forEach(callback => callback());
+  const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback());
 }
 
 setScroll(920, 12);
 context.applyRoute('heat', { sector: '半導體' });
 assertScroll(920, 12, '相同路由的類股選取保留內外容器閱讀位置');
-assert.equal(frames.length, 0, '相同路由不排入下一幀歸零');
+assert.equal(frames.size, 0, '相同路由不排入下一幀歸零');
 assert.equal(emitted.at(-1).opts.sector, '半導體', '保留同路由選取參數');
 assert.deepEqual(deactivated, [], '相同路由不終止既有模組');
 
 context.applyRoute('news');
-assertScroll(0, 0, '切換功能頁清除主容器及外層頁面位移');
+assertScroll(0, 0, '首次開啟功能頁從頂端開始');
 setScroll(26.333, 8);
 flushFrames();
 assertScroll(0, 0, '路由重排後下一幀清除焦點造成的外層位移');
-assert.equal(frames.length, 0, '路由捲動補正只排一幀');
+assert.equal(frames.size, 0, '路由捲動補正只排一幀');
 assert.equal(ids['shell-views'].classList.contains('show'), true, '功能頁使用共同捲動容器');
 assert.equal(ids['rpanel-pager'].classList.contains('shell-hidden'), true, '功能頁隱藏圖表分頁底列');
 assert.deepEqual(deactivated, ['heat'], '只終止離開的模組');
@@ -94,8 +99,19 @@ assertScroll(0, 0, '切換到圖表時清除殘留位置');
 flushFrames();
 setScroll(165, 8);
 context.applyRoute('heat');
-assertScroll(0, 0, '圖表捲動後切到熱力不殘留裁頭位移');
+assertScroll(920, 12, '圖表返回熱力回復該頁原閱讀位置，不混入圖表位移');
 flushFrames();
+context.applyRoute('news');
+assertScroll(450, 13, '新聞頁保留自己的閱讀位置');
+context.applyRoute('chart');
+assertScroll(165, 8, '圖表頁保留自己的閱讀位置');
+context.applyRoute('heat');
+flushFrames();
+assertScroll(920, 12, '快速連續換頁不得由較舊的下一幀覆寫最後頁面位置');
+context.applyRoute('news');
+context.applyRoute('heat', { focusSection: 'summary' });
+flushFrames();
+assertScroll(0, 0, '指定證據位置的深連結不套用舊閱讀位置');
 
 // 執行總覽的實際欄數診斷，確認直式兩欄、橫式上下各五欄。
 const pulseSource = fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8');

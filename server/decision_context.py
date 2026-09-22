@@ -568,10 +568,14 @@ def _detect_divergences(
 
 
 def _portfolio_summary(raw: dict | None, kind: str = 'actual') -> dict | None:
+    identity = {'kind': kind}
+    if kind == 'simulation':
+        identity.update(label='情境模擬（手動權重，非實際持倉）',
+                        premise='依使用者手動假設與既有歷史資料計算；僅供私人情境研究')
     if not isinstance(raw, dict):
-        return None
+        return {**identity, 'available': False} if kind == 'simulation' else None
     if raw.get('error'):
-        return {'kind': kind, 'available': False, 'error': str(raw.get('error'))[:180]}
+        return {**identity, 'available': False, 'error': str(raw.get('error'))[:180]}
     stocks = raw.get('stocks') or {}
     beta_sum = beta_weight = 0.0
     max_single = 0.0
@@ -594,7 +598,7 @@ def _portfolio_summary(raw: dict | None, kind: str = 'actual') -> dict | None:
                  and _number(port.get('var95')) is not None and quality.get('available') is not False)
     look_through = _exposure_lab.portfolio_lookthrough(stocks)
     return {
-        'kind': kind,
+        **identity,
         'available': available,
         'quality': quality,
         'portfolioBeta': round(beta_sum / beta_weight, 3) if beta_weight else None,

@@ -117,7 +117,9 @@ function harness(role = 'owner') {
   };
 }
 
-(async () => {
+module.exports = { harness, tick, contextPayload };
+
+if (require.main === module) (async () => {
   const h = harness();
   h.c.DecisionV5.refresh(true);
   const actual = h.pending('/decision/context', 'POST');
@@ -169,6 +171,56 @@ function harness(role = 'owner') {
   assert.match(changed.body(), /投組資料已變更/);
   console.log('通過：請求期間來源變更不發布過期個人化決策');
 
+  const scenario = harness();
+  const originalPositions = JSON.stringify(scenario.c.S.positions);
+  scenario.c.PortfolioContext.setSimulation('TW:2330 40\n0050 60');
+  scenario.c.DecisionV5.setPortfolioMode('simulation');
+  const simulated = scenario.requests.filter(r => r.path === '/decision/context').at(-1);
+  assert.equal(JSON.parse(simulated.options.body).portfolioKind, 'simulation');
+  assert.equal(JSON.parse(simulated.options.body).holdings[0].weight, 40);
+  assert(!simulated.options.body.includes('simulationInput'));
+  scenario.c.PortfolioContext.setSimulation('2330 10\n原文必須保留');
+  const invalidSimulation = scenario.requests.filter(r => r.path === '/decision/context').at(-1);
+  assert.equal(JSON.parse(invalidSimulation.options.body).portfolioInputStatus, 'incomplete');
+  assert.equal(JSON.parse(invalidSimulation.options.body).holdings.length, 0);
+  await scenario.complete(invalidSimulation, contextPayload('缺漏情境市場資料'));
+  await scenario.complete(simulated, contextPayload('舊情境不可套用'));
+  assert.match(scenario.body(), /情境模擬/); assert.match(scenario.body(), /1／2/);
+  assert.doesNotMatch(scenario.body(), /舊情境不可套用/);
+  scenario.c.DecisionV5.setPortfolioMode('actual');
+  const actualAgain = scenario.requests.filter(r => r.path === '/decision/context').at(-1);
+  assert.equal(JSON.parse(actualAgain.options.body).holdings[0].weight, 100000);
+  assert.equal(JSON.stringify(scenario.c.S.positions), originalPositions);
+  console.log('通過：決策第三模式共享、編輯失效、原文不外送及切回真實市值');
+
+  const returning = harness();
+  returning.leave();
+  returning.c.PortfolioContext.setSimulation('2330 40\n0050 60');
+  returning.c.PortfolioContext.setMode('simulation');
+  returning.enter(); returning.c.DecisionV5.activate();
+  await returning.complete(returning.pending('/pulse', 'GET'), snapshot('模擬公開基準'));
+  await returning.complete(returning.pending('/decision/context', 'POST'), contextPayload('已套用模擬'));
+  assert.match(returning.body(), /id="dc-use-simulation"[^>]*aria-pressed="true"/);
+  returning.leave(); returning.enter();
+  const cachedRequests = returning.requests.length;
+  returning.c.DecisionV5.activate(); await tick();
+  assert.equal(returning.requests.length, cachedRequests, '相同投組快速返回仍保留 45 秒節流');
+  returning.leave();
+  returning.c.PortfolioContext.setMode('observation_pool');
+  returning.enter(); returning.c.DecisionV5.activate();
+  assert.doesNotMatch(returning.body(), /已套用模擬|id="dc-use-simulation"[^>]*aria-pressed="true"/,
+    '等待目前模式資料時不得繼續呈現舊模擬結果');
+  assert.match(returning.body(), /觀察池/);
+  await returning.complete(returning.pending('/pulse', 'GET'), snapshot('觀察池公開基準'));
+  const returnContext = returning.pending('/decision/context', 'POST');
+  assert.equal(JSON.parse(returnContext.options.body).portfolioKind, 'observation_pool');
+  assert.equal(JSON.parse(returnContext.options.body).holdings[0].weight, 1);
+  await returning.complete(returnContext, contextPayload('已套用觀察池'));
+  assert.match(returning.body(), /id="dc-use-watch"[^>]*aria-pressed="true"/);
+  assert.match(returning.body(), /id="dc-use-simulation"[^>]*aria-pressed="false"/);
+  assert(!returning.requests.some(r => r.path === '/pulse/refresh'), '跨頁模式同步只讀公開市場，不要求外部行情更新');
+  console.log('通過：45 秒內跨頁切換即失效舊模式，相同模式仍節流且不要求市場更新');
+
   const reader = harness('reader');
   reader.c.DecisionV5.refresh(true, { baseGrossExposure: 99 });
   const read = reader.pending('/decision/context', 'GET');
@@ -177,6 +229,7 @@ function harness(role = 'owner') {
   assert.match(reader.body(), /目前角色無法存取私人投組/);
   assert.doesNotMatch(reader.body(), /私人筆記|100000/);
   reader.c.PortfolioContext.setMode('observation_pool');
+  reader.c.PortfolioContext.setMode('simulation');
   assert(reader.requests.every(r => r.method === 'GET'));
   console.log('通過：Reader 只讀市場且不傳送持倉、觀察池或風險設定');
 })().catch(error => { console.error(error); process.exitCode = 1; });
