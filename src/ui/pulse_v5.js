@@ -914,6 +914,22 @@
         '#pl-root .pl-sec>.pl-fill{flex:1 0 48px}' +
         '#pl-root .pl-note{overflow-wrap:anywhere}' +
       '}' +
+      /* 完整欄位留在各卡片內捲動，避免固定五欄時截字或侵入相鄰欄。 */
+      '#pl-root .pl-score3 .sc .k>span:first-child,#pl-root .pl-score3 .sc .l,' +
+        '#pl-root .pl-drivers .box li,#pl-root .pl-sbar .nm,' +
+        '#pl-root .pl-inst-trend .lab>span,#pl-root .pl-bd-trend .lab>span,#pl-root .pl-ohlc-trend .lab>span{' +
+        'overflow-x:auto;text-overflow:clip;white-space:nowrap}' +
+      '#pl-root .pl-list li{overflow-x:auto;max-width:100%;box-sizing:border-box}' +
+      '#pl-root #pl-ohlc-trend-meta,#pl-root #pl-inst-trend-meta,#pl-root #pl-bd-trend-meta{' +
+        'overflow-x:auto;text-overflow:clip;white-space:nowrap}' +
+      '#pl-root .pl-global .g .row{overflow-x:auto}' +
+      '#pl-root .pl-global .g .v{flex:0 0 auto;overflow:visible}' +
+      '#pl-root .pl-global .g .s{max-width:none;flex:0 0 auto}' +
+      '#pl-root .pl-flash .row{overflow-x:auto;grid-template-columns:max-content max-content minmax(0,1fr)}' +
+      '#pl-root .pl-flash .t,#pl-root .pl-flash .cat,#pl-root .pl-flash .ttl{overflow-x:auto;text-overflow:clip}' +
+      '#pl-root .pl-strip .s,#pl-root .pl-theme-heat{overflow-x:auto;text-overflow:clip}' +
+      '#pl-root .pl-theme-heat{flex-shrink:0}' +
+      '#pl-root .vz-spark-ax{overflow-x:auto}' +
       '@media(max-width:520px) and (orientation:portrait){' +
         '#view-pulse.sv-panel.on{padding-left:5px;padding-right:5px}' +
         '#pl-root .pl-zone{gap:5px;grid-auto-rows:minmax(310px,auto)}' +
