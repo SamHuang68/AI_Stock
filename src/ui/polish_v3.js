@@ -173,7 +173,7 @@ body.market-us .price-down { color: var(--red) !important; }
        視窗縮小約一半(字級/間距減)、半透明，避免遮到 K 線。 */
 #ci-row { display: flex; align-items: flex-start; gap: 8px; }
 #ci-row .ci-left { min-width: 0; max-width: 220px; }
-#ci-row .ci-left #ci-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ci-row .ci-left #ci-name { font-size:7px!important;white-space:nowrap;overflow-x:auto;max-width:100%;pointer-events:auto; }
 #ci-row .ci-left .ci-high { font-size: 12px; font-weight: 700; margin-top: 3px; color: var(--gold); line-height: 1.3; }
 #ci-row .ci-left .ci-high b { color: var(--thi); font-size: 13px; }
 #ci-row .ci-left .ci-range-chg { font-size: 10px; line-height: 1.35; }

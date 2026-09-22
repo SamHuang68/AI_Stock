@@ -254,10 +254,10 @@
     style.textContent =
       'th.st-sortable-head{padding:0!important}' +
       '.st-sort-button{appearance:none;width:100%;min-height:24px;border:0;background:transparent;color:inherit;' +
-        'font:inherit;font-weight:inherit;padding:3px 5px;display:flex;align-items:center;gap:3px;white-space:nowrap;cursor:pointer}' +
+        'font:inherit;font-weight:inherit;box-sizing:border-box;min-width:0;padding:3px 1px;display:flex;align-items:center;gap:1px;white-space:nowrap;cursor:pointer}' +
       '.st-sort-button:hover,.st-sort-button:focus-visible{color:var(--thi,#f1f5fa);background:rgba(148,163,184,.08);outline:none}' +
       'th.st-sortable-head[aria-sort=ascending] .st-sort-button,th.st-sortable-head[aria-sort=descending] .st-sort-button{color:var(--gold,#f5c518)}' +
-      '.st-sort-arrow{flex:0 0 auto;min-width:9px;font-size:8px;color:var(--tlo,#64748b);text-align:center}' +
+      '.st-sort-arrow{flex:0 0 auto;min-width:4px;font-size:6px;color:var(--tlo,#64748b);text-align:center}' +
       'th.st-sortable-head[aria-sort=ascending] .st-sort-arrow,th.st-sortable-head[aria-sort=descending] .st-sort-arrow{color:var(--gold,#f5c518)}';
     document.head.appendChild(style);
   }

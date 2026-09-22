@@ -153,8 +153,11 @@
         '#ht-root .ht-focus-zone>#ht-focus{flex:none;height:auto;overflow:visible}' +
         '#ht-root .ht-two{flex:none;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:auto;height:auto;overflow:visible}' +
         '#ht-root .ht-two>div,#ht-root .ht-list{height:auto;overflow:visible}' +
-        '#ht-root .ht-row{min-height:44px;flex-wrap:wrap;font-size:12px;padding:6px 3px}' +
-        '#ht-root .ht-row .code,#ht-root .ht-row .name{font-size:11px;white-space:normal}' +
+        '#ht-root .ht-row{min-height:32px;flex-wrap:nowrap;font-size:9px;padding:4px 3px;gap:3px}' +
+        '#ht-root .ht-row .code,#ht-root .ht-row .name{font-size:9px;white-space:nowrap}' +
+        '#ht-root .ht-list{overflow-x:auto}' +
+        '#ht-root .ht-row{min-width:300px}' +
+        '#ht-root .ht-row .name{min-width:112px;flex:1 0 auto}' +
       '}' +
       '#ht-members-dialog{box-sizing:border-box;width:min(720px,calc(100vw - 24px));max-width:calc(100vw - 24px);' +
         'max-height:calc(var(--st-app-height,100dvh) - 24px);padding:0;margin:auto;border:1px solid var(--bhi);' +

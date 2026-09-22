@@ -155,7 +155,7 @@
       '.hub-root .hub-economy-panel h4{justify-content:flex-start}' +
       '.hub-root .hub-economy-panel .hub-year{margin-left:auto;color:var(--cyan);font-size:10px;' +
         'font-weight:800;letter-spacing:.3px;white-space:nowrap}' +
-      '.hub-root .hub-economy-table{table-layout:fixed}' +
+      '.hub-root .hub-economy-table{table-layout:auto;min-width:560px}' +
       '.hub-root .hub-economy-table th:nth-child(1),.hub-root .hub-economy-table td:nth-child(1){width:34%;text-align:left}' +
       '.hub-root .hub-economy-table th:nth-child(2),.hub-root .hub-economy-table td:nth-child(2){width:15%}' +
       '.hub-root .hub-economy-table th:nth-child(3),.hub-root .hub-economy-table td:nth-child(3){width:15%}' +
@@ -259,7 +259,7 @@
       '.hub-root .hub-inst-rankhd{display:flex;align-items:center;justify-content:space-between;gap:8px;flex:0 0 auto}' +
       '.hub-root .hub-inst-rankhd .meta{font-size:8px;color:var(--tlo);white-space:nowrap}' +
       '.hub-root .hub-inst-rank .hub-zone{flex:1;min-height:0}' +
-      '.hub-root .hub-inst-rank table{font-size:10px;table-layout:fixed;width:100%}' +
+      '.hub-root .hub-inst-rank table{font-size:10px;table-layout:auto;width:100%;min-width:440px}' +
       '.hub-root .hub-inst-rank th:nth-child(1),.hub-root .hub-inst-rank td:nth-child(1){width:28px}' +
       '.hub-root .hub-inst-rank th:nth-child(2),.hub-root .hub-inst-rank td:nth-child(2){width:52px}' +
       '.hub-root .hub-inst-rank th:nth-child(3),.hub-root .hub-inst-rank td:nth-child(3){text-align:left;' +

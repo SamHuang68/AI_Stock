@@ -233,7 +233,9 @@
       '#pl-root .pl-divergence-warning{display:flex;align-items:center;gap:8px;width:max-content;max-width:100%;margin:0 0 6px;' +
         'padding:4px 9px;border:1px solid rgba(251,146,60,.52);border-radius:7px;background:rgba(124,45,18,.18);' +
         'font:700 11px/1.35 "Noto Sans TC",sans-serif;color:#fed7aa;box-shadow:0 0 13px rgba(251,146,60,.08)}' +
-      '#pl-root .pl-divergence-warning b{color:#fdba74;white-space:nowrap}#pl-root .pl-divergence-warning span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#pl-root .pl-divergence-warning{box-sizing:border-box;overflow-x:auto}' +
+      '#pl-root .pl-divergence-warning b{color:#fdba74;white-space:nowrap;flex-shrink:0}' +
+      '#pl-root .pl-divergence-warning span{font-size:8px;flex-shrink:0;white-space:nowrap}' +
       '#pl-root .pl-beginner-copy .advice{font:800 17px/1.5 "Noto Sans TC",sans-serif;color:#fcd34d;margin:0 0 7px}' +
       '#pl-root .pl-beginner-copy .why{font:500 14px/1.6 "Noto Sans TC",sans-serif;color:#b8c7d9;margin:0}' +
       '#pl-root .pl-hero-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:7px}' +

@@ -256,7 +256,8 @@
       '#dc-root .dc-validation-note{display:grid;grid-template-columns:145px minmax(0,1fr);gap:9px;align-items:start;margin-top:8px;padding:9px 10px;border-left:3px solid #facc15;background:rgba(250,204,21,.06);border-radius:5px}' +
       '#dc-root .dc-validation-note b{color:#fde68a;font-size:8.5px}.dc-validation-note span{color:#b8c5d5;font-size:8px;line-height:1.5}' +
       '#dc-root .dc-options-lab>summary{min-width:0}.dc-options-lab>summary .dc-options-name{white-space:nowrap}' +
-      '#dc-root .dc-options-lab>summary .dc-options-meta{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#91a5bd;font-size:7.5px;font-weight:700}' +
+      '#dc-root .dc-options-lab>summary .dc-options-meta{min-width:0;overflow-x:auto;white-space:nowrap;color:#91a5bd;font-size:7.5px;font-weight:700}' +
+      '#dc-root .dc-ledger-table th:first-child{min-width:56px;width:56px}' +
       '#dc-root .dc-options-lab>summary:after{content:"展開結構"}#dc-root .dc-options-lab[open]>summary:after{content:"收合結構"}' +
       '#dc-root .dc-options-status{border-radius:999px;padding:1px 6px;border:1px solid #35506f;color:#8fdff0;font-size:7px;white-space:nowrap}' +
       '#dc-root .dc-options-status.stale{border-color:rgba(251,146,60,.55);color:#fdba74}.dc-options-status.insufficient{color:#94a3b8}' +

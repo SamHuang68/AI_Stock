@@ -183,6 +183,20 @@
         '#ah-root .ah-note{white-space:normal;overflow:visible;text-overflow:unset}' +
         '#ah-root .ah-inst4 .c .v{white-space:nowrap;overflow:visible;font-size:12px}' +
         '#ah-root .ah-inst-cmt{font-size:10px;line-height:1.4}' +
+      '}' +
+      /* 表格採內容寬度並在卡片內捲動，避免數值與排序按鈕跨欄。 */
+      '#ah-root table.ah-tbl{table-layout:auto;min-width:340px}' +
+      '#ah-root table.ah-tbl th,#ah-root table.ah-tbl td{white-space:nowrap}' +
+      '#ah-root .ah-sec>.ah-fill{max-width:100%;overflow:auto;min-width:0}' +
+      '#ah-root .ovn-embed table{table-layout:auto;min-width:420px;max-width:none}' +
+      '#ah-root .ovn-embed th,#ah-root .ovn-embed td{white-space:nowrap}' +
+      '#ah-root .ah-inst-trend .lab{flex-wrap:wrap;gap:2px;font-size:9px}' +
+      '#ah-root .ah-inst-trend .lab>span{flex:0 0 auto;max-width:100%;white-space:normal;overflow-wrap:anywhere}' +
+      '#ah-root .ah-strip .s{white-space:normal;overflow-wrap:anywhere;font-size:9px}' +
+      '@media(orientation:landscape) and (max-height:540px) and (max-width:1100px){' +
+        '#ah-root .ah-dash{grid-template-columns:repeat(2,minmax(0,1fr))}' +
+        '#ah-root .ah-sec.ah-ovn{grid-column:1/-1}' +
+        '#ah-root .ah-sec h4{font-size:10px;flex-wrap:wrap}' +
       '}';
   }
 
