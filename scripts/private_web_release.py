@@ -293,13 +293,20 @@ def safe_install_root(path: Path) -> Path:
 
 def _run(argv: list[str], *, cwd: Path, capture: bool = False,
          env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    command: list[str] | str = argv
+    shell = False
+    # Windows 的 npm 是 npm.cmd。CreateProcess 不能直接執行，必須交給 cmd。
+    if os.name == "nt" and argv and argv[0].lower().endswith((".cmd", ".bat")):
+        command = subprocess.list2cmdline(argv)
+        shell = True
     return subprocess.run(
-        argv,
+        command,
         cwd=cwd,
         check=True,
         text=True,
         capture_output=capture,
         env=env,
+        shell=shell,
     )
 
 
@@ -476,6 +483,14 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
                 raise RuntimeError("Node.js is required for ETF/UI release regression tests")
             for selftest in sorted((extracted / "tests").glob("*selftest.js"), key=lambda path: path.name):
                 _run([node, selftest.relative_to(extracted).as_posix()], cwd=extracted)
+            # git archive 不含 node_modules。playwright 是 devDependency，只在暫存樹安裝。
+            if (extracted / "package-lock.json").is_file():
+                npm = shutil.which("npm")
+                if not npm:
+                    raise RuntimeError(
+                        "npm is required to install devDependencies before browser release tests"
+                    )
+                _run([npm, "ci", "--include=dev"], cwd=extracted)
             # 驗收收據保留在安裝根目錄，不能混入由 Git 封存的正式程式。
             browser_output = install_root / "validation" / f"{commit[:12]}-{uuid.uuid4().hex}"
             browser_output.mkdir(parents=True)
@@ -483,6 +498,9 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
             for browser_test in ("tests/研究工作台_browser.cjs", "tests/手機橫向五欄_browser.cjs",
                                  "tests/外殼研究互動_browser.cjs", "tests/選股候選_browser.cjs"):
                 _run([node, browser_test], cwd=extracted, env=browser_env)
+            modules = extracted / "node_modules"
+            if modules.exists():
+                _remove_managed(modules, extracted)
 
         # 完整封存內容供所有自測使用；通過後才排除私人網站不出貨的執行內容。
         _strip_private_release_extras(extracted)

@@ -176,7 +176,9 @@ class PrivateWebReleaseTests(unittest.TestCase):
         source = (ROOT / "scripts" / "private_web_release.py").read_text(encoding="utf-8")
         self.assertIn('"tests.test_archify_artifacts"', source)
         self.assertIn('shutil.which("node")', source)
+        self.assertIn('shutil.which("npm")', source)
         self.assertIn('"-m", "unittest", "-b"', source)
+        self.assertIn('"ci", "--include=dev"', source)
 
     def test_發布階段執行暫存版本全部排序後的前端自測及決策回歸(self):
         commit = 'a' * 40
@@ -191,6 +193,7 @@ class PrivateWebReleaseTests(unittest.TestCase):
         ]
         extras = {'wavedeck/web/css/deck.css', 'START_WAVEDECK.cmd'}
         calls = []
+        npm_cwd = []
 
         receipts = []
 
@@ -200,24 +203,44 @@ class PrivateWebReleaseTests(unittest.TestCase):
                 with zipfile.ZipFile(argv[argv.index('--output') + 1], 'w') as archive:
                     for relative in sorted(release.REQUIRED_RELEASE_FILES | set(selftests) | extras):
                         archive.writestr(relative, '受測內容')
+                    archive.writestr('package.json', '{"devDependencies":{"playwright":"1.62.1"}}\n')
+                    archive.writestr('package-lock.json', '{"lockfileVersion":3}\n')
             else:
                 for relative in extras:
                     self.assertEqual((cwd / relative).read_text(encoding='utf-8'), '受測內容',
                                      '完整封存內容必須保留至組建與全部自測結束')
+                if argv[:2] == ['npm', 'ci']:
+                    self.assertEqual(argv, ['npm', 'ci', '--include=dev'])
+                    self.assertTrue((cwd / 'package-lock.json').is_file())
+                    self.assertNotEqual(cwd.resolve(), ROOT.resolve())
+                    self.assertEqual(cwd.name, 'tree')
+                    npm_cwd.append(cwd)
+                    playwright = cwd / 'node_modules' / 'playwright'
+                    playwright.mkdir(parents=True)
+                    (playwright / 'index.js').write_text('module.exports = {};', encoding='utf-8')
                 if argv[0] == 'node' and argv[1].endswith('_browser.cjs'):
                     output = Path(env['ST_BROWSER_OUTPUT']).resolve()
                     self.assertFalse(output.is_relative_to(cwd.resolve()))
                     self.assertTrue(output.is_relative_to(self.install_root.resolve()))
+                    self.assertTrue((cwd / 'node_modules' / 'playwright' / 'index.js').is_file())
                     receipt = output / '版面驗收.json'
                     receipt.write_text('{"通過":true}', encoding='utf-8')
                     receipts.append(receipt)
 
+        def which(name):
+            return {'node': 'node', 'npm': 'npm'}.get(name)
+
         with patch.object(release, 'resolve_commit', return_value=(commit, commit[:12])), \
-                patch.object(release, '_run', run), patch.object(release.shutil, 'which', return_value='node'):
+                patch.object(release, '_run', run), patch.object(release.shutil, 'which', side_effect=which):
             staged = release.stage_release(self.install_root, ref=commit)
-        self.assertEqual([argv[1] for argv in calls if argv[0] == 'node'], sorted(selftests) +
+        node_scripts = [argv[1] for argv in calls if argv[0] == 'node']
+        self.assertEqual(node_scripts, sorted(selftests) +
                          ['tests/研究工作台_browser.cjs', 'tests/手機橫向五欄_browser.cjs',
                           'tests/外殼研究互動_browser.cjs', 'tests/選股候選_browser.cjs'])
+        npm_at = next(i for i, argv in enumerate(calls) if argv[:2] == ['npm', 'ci'])
+        browser_at = next(i for i, argv in enumerate(calls) if argv[0] == 'node' and argv[1].endswith('_browser.cjs'))
+        self.assertLess(npm_at, browser_at)
+        self.assertEqual(len(npm_cwd), 1)
         python_tests = next(argv for argv in calls if '-m' in argv)
         for test in ['tests.test_決策資料品質', 'tests.test_發布完整性',
                      'tests.test_decision_context', 'tests.test_decision_http',
@@ -228,12 +251,50 @@ class PrivateWebReleaseTests(unittest.TestCase):
         self.assertEqual(len(receipts), 4)
         self.assertTrue(all(receipt.is_file() for receipt in receipts))
         self.assertFalse((staged / 'scratch').exists())
+        self.assertFalse((staged / 'node_modules').exists())
         self.assertNotIn('scratch', manifest['managedTopLevel'])
+        self.assertNotIn('node_modules', manifest['managedTopLevel'])
+        self.assertNotIn('node_modules/playwright/index.js', manifest['contentSha256'])
         for name in release.PRIVATE_RELEASE_EXCLUDES:
             self.assertFalse((staged / name).exists(), '私人網站發布產物不得包含 WaveDeck 執行內容')
             self.assertNotIn(name, manifest['managedTopLevel'])
         self.assertFalse(any(key.split('/')[0] in release.PRIVATE_RELEASE_EXCLUDES
                              for key in manifest['contentSha256']))
+
+    def test_browser_stage_requires_npm_when_lockfile_present(self):
+        commit = 'd' * 40
+        calls = []
+
+        def run(argv, *, cwd, capture=False, env=None):
+            calls.append(argv)
+            if argv[0] == 'git':
+                with zipfile.ZipFile(argv[argv.index('--output') + 1], 'w') as archive:
+                    for relative in release.REQUIRED_RELEASE_FILES:
+                        archive.writestr(relative, '受測內容')
+                    archive.writestr('package-lock.json', '{"lockfileVersion":3}\n')
+
+        def which(name):
+            return 'node' if name == 'node' else None
+
+        with patch.object(release, 'resolve_commit', return_value=(commit, commit[:12])), \
+                patch.object(release, '_run', run), patch.object(release.shutil, 'which', side_effect=which):
+            with self.assertRaisesRegex(RuntimeError, 'npm is required'):
+                release.stage_release(self.install_root, ref=commit)
+        self.assertFalse(any(argv[0] == 'node' and argv[1].endswith('_browser.cjs') for argv in calls))
+        self.assertFalse(any(argv[:2] == ['npm', 'ci'] for argv in calls))
+
+    def test_windows_npm_cmd_runs_through_cmd(self):
+        npm = r'C:\Program Files\nodejs\npm.cmd'
+        with patch.object(release.subprocess, 'run') as run, patch.object(release.os, 'name', 'nt'):
+            release._run([npm, 'ci', '--include=dev'], cwd=self.install_root)
+        args, kwargs = run.call_args
+        self.assertTrue(kwargs['shell'])
+        self.assertIsInstance(args[0], str)
+        self.assertIn('npm.cmd', args[0])
+        self.assertIn('ci', args[0])
+        self.assertIn('--include=dev', args[0])
+        self.assertEqual(kwargs['cwd'], self.install_root)
+        self.assertNotEqual(kwargs['cwd'], ROOT)
 
     def test_release_requires_archify_manifest_documents_and_validator(self):
         expected = {
