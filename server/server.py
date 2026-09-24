@@ -1012,7 +1012,12 @@ def _openapi_lookup_list(dataset_name):
     if cached and cached[0] == today:
         return cached[1]
     try:
-        url = f'https://openapi.twse.com.tw/v1/opendata/{dataset_name}'
+        if str(dataset_name).startswith('tpex:'):
+            url = f'https://www.tpex.org.tw/openapi/v1/{dataset_name[5:]}'
+        elif '/' in str(dataset_name):
+            url = f'https://openapi.twse.com.tw/v1/{dataset_name}'
+        else:
+            url = f'https://openapi.twse.com.tw/v1/opendata/{dataset_name}'
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
         with urllib.request.urlopen(req, timeout=15) as resp:
             arr = json.loads(resp.read())
@@ -2296,6 +2301,12 @@ def _configure_pulse_modules():
 
 
 _configure_pulse_modules()
+
+try:
+    import industry_revenue as _industry_revenue_module
+    _industry_revenue_module.configure(_openapi_lookup_list)
+except Exception as _ir_cfg_exc:
+    print('[industry_revenue] configure failed:', _ir_cfg_exc)
 
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
@@ -4904,8 +4915,25 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                     sectors = flow.get('rows') or sectors
                 except Exception:
                     flow = None
+                industry_rev_pack = None
+                try:
+                    import industry_revenue as _ir_sectors
+                    _ir_agg = _ir_sectors.get_aggregate()
+                    sectors = _ir_sectors.attach_sector_revenue(sectors, _ir_agg)
+                    if _ir_agg.get('ok'):
+                        industry_rev_pack = {
+                            'periodLabel': _ir_agg.get('periodLabel'),
+                            'market': _ir_agg.get('market'),
+                            'yoyLeaders': _ir_agg.get('yoyLeaders'),
+                            'yoyLaggards': _ir_agg.get('yoyLaggards'),
+                            'note': _ir_agg.get('note'),
+                            'source': _ir_agg.get('source'),
+                        }
+                except Exception as _ir_sec_exc:
+                    print('[sectors] industry revenue', _ir_sec_exc)
                 out = {'date': date_str, 'source': 'TWSE MI_INDEX IND',
-                       'sectorFlow': flow, 'sectors': sectors}
+                       'sectorFlow': flow, 'sectors': sectors,
+                       'industryRevenue': industry_rev_pack}
                 body = json.dumps(out, ensure_ascii=False).encode()
                 _cache.set(key, body)
                 self._ok(body)
