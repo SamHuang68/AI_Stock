@@ -33,13 +33,35 @@ function html() {
     modules.map(file => '<script src="/src/' + file + '"></script>').join('') + '</body></html>';
 }
 async function frame(page) { await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))); }
+async function updateTriggerState(page) {
+  return page.evaluate(() => {
+    const button = document.getElementById('rw-updates');
+    const rect = button && button.getBoundingClientRect();
+    const at = rect && document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    const dialog = document.getElementById('st-update-center');
+    return {
+      route: window.ShellV5 && ShellV5.route(),
+      zoom: getComputedStyle(document.documentElement).zoom,
+      viewport: { width: innerWidth, height: innerHeight, ratio: devicePixelRatio, visualScale: visualViewport && visualViewport.scale },
+      button: rect && { x: rect.x, y: rect.y, width: rect.width, height: rect.height, disabled: button.disabled, hasClick: typeof button.onclick === 'function' },
+      elementAtCenter: at && { tag: at.tagName, id: at.id, text: (at.textContent || '').slice(0, 60) },
+      dialog: dialog && { open: dialog.open, modal: dialog.matches(':modal') },
+      events: window.auditTouchEvents || []
+    };
+  });
+}
 async function openUpdates(page) {
-  // 觸控完成與相容 click 派送可能分屬不同工作；等待真正可見的原生模態狀態。
-  await page.locator('#rw-updates').tap();
-  const opened = page.locator('#st-update-center[open]');
-  await opened.waitFor({ state: 'visible' });
-  assert.equal(await opened.evaluate(node => node.matches(':modal')), true, '更新中心必須實際開啟為模態對話框');
-  assert.equal(await page.evaluate(() => ShellV5.route()), 'research', '開啟更新中心不可切離研究頁');
+  // 仍用 locator.tap，不補合成 click。前後證據只供失敗時對照，不改產品按鈕。
+  await page.evaluate(() => { window.auditTouchEvents = []; });
+  const evidence = { before: await updateTriggerState(page), playwrightBox: await page.locator('#rw-updates').boundingBox() };
+  (report.openings || (report.openings = [])).push(evidence);
+  try {
+    await page.locator('#rw-updates').tap();
+    const opened = page.locator('#st-update-center[open]');
+    await opened.waitFor({ state: 'visible' });
+    assert.equal(await opened.evaluate(node => node.matches(':modal')), true, '更新中心必須實際開啟為模態對話框');
+    assert.equal(await page.evaluate(() => ShellV5.route()), 'research', '開啟更新中心不可切離研究頁');
+  } finally { evidence.after = await updateTriggerState(page); }
 }
 async function closeUpdates(page) {
   await page.keyboard.press('Escape');
@@ -63,20 +85,106 @@ async function geometry(page, selector) {
 async function touchDrag(context, page, selector) {
   const box = await page.locator(selector).boundingBox();
   assert(box && box.width > 100 && box.height > 200, '觸控捲動區域必須可見');
-  const x = Math.min(box.x + box.width / 2, (await page.viewportSize()).width / 2);
-  const y = Math.min(box.y + box.height - 150, (await page.viewportSize()).height - 150);
+  // 落在按鈕或輸入框上的合成手勢只會觸發 touch，不會捲動外層。改點在非控制項的內容上。
+  const point = await page.locator(selector).evaluate(node => {
+    const rect = node.getBoundingClientRect();
+    const blocksScroll = (el) => el && el.closest('button,a,input,textarea,select,summary,label,[role="button"]');
+    for (let y = rect.top + 48; y < Math.min(rect.bottom, innerHeight) - 24; y += 20) {
+      const x = Math.min(Math.max(rect.left + 24, rect.left + rect.width / 2), innerWidth - 8);
+      const el = document.elementFromPoint(x, y);
+      if (!el || !node.contains(el) || blocksScroll(el)) continue;
+      return { x, y, tag: el.tagName, id: el.id || '' };
+    }
+    return null;
+  });
+  assert(point, '必須在捲動區內找到不會攔截捲動的觸控點');
+  const { x, y } = point;
   const before = await page.locator(selector).evaluate(node => node.scrollTop);
+  // 合成捲動手勢常常不送出 trusted touch。稽核可以記下，但完成條件只看目標區真的捲動並且停住。
+  await page.evaluate(selector => {
+    const node = document.querySelector(selector);
+    const audit = {
+      trustedStart: false, trustedEnd: false, scrollEnd: false, samples: [],
+      releasedAt: null, gestureCompletedAt: null, settledTop: null, settledBy: null, before: node.scrollTop
+    };
+    window.auditDragCompletion = audit;
+    const remember = (entry) => {
+      audit.samples.push(entry);
+      if (audit.samples.length > 80) audit.samples.shift();
+    };
+    const onTouch = (event) => {
+      if (event.type === 'touchstart' && event.isTrusted) audit.trustedStart = true;
+      if (event.type === 'touchend' && event.isTrusted) {
+        audit.trustedEnd = true;
+        audit.releasedAt = performance.now();
+      }
+      remember({ type: event.type, trusted: event.isTrusted, top: node.scrollTop, time: performance.now() });
+    };
+    const onScroll = () => remember({ type: 'scroll', top: node.scrollTop, time: performance.now() });
+    const onScrollEnd = () => {
+      const top = node.scrollTop;
+      // 手勢開始前可能先出現 scrollTop 仍為 0 的 scrollend，那不是捲動完成。
+      if (top > audit.before + 40) {
+        audit.scrollEnd = true;
+        audit.scrollEndTop = top;
+      }
+      remember({ type: 'scrollend', top, time: performance.now() });
+    };
+    node.addEventListener('touchstart', onTouch, true);
+    node.addEventListener('touchend', onTouch, true);
+    node.addEventListener('scroll', onScroll, { passive: true });
+    node.addEventListener('scrollend', onScrollEnd);
+    window.__auditDragCleanup = () => {
+      node.removeEventListener('touchstart', onTouch, true);
+      node.removeEventListener('touchend', onTouch, true);
+      node.removeEventListener('scroll', onScroll);
+      node.removeEventListener('scrollend', onScrollEnd);
+    };
+  }, selector);
   const cdp = await context.newCDPSession(page);
   try {
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
-    for (let step = 1; step <= 12; step++) {
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y - step * 20 }] });
-      await page.waitForTimeout(20);
-    }
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await page.waitForFunction(({ selector, before }) => document.querySelector(selector).scrollTop > before + 40, { selector, before });
-  } finally { await cdp.detach(); }
-  return { before, after: await page.locator(selector).evaluate(node => node.scrollTop) };
+    // 協議裡 yDistance 正值是向上捲。負值才會增加 scrollTop。
+    // 觸控來源在這版 Chromium 只送出 touchstart／touchend，scrollTop 不會變；滑鼠來源才會真正捲動。
+    // trusted touch 只留在稽核，缺少時不視為失敗。
+    await cdp.send('Input.synthesizeScrollGesture', {
+      x, y, yDistance: -240, gestureSourceType: 'mouse', preventFling: true, speed: 800
+    });
+    await page.evaluate(selector => {
+      const audit = window.auditDragCompletion;
+      const node = document.querySelector(selector);
+      audit.gestureCompletedAt = performance.now();
+      audit.settledTop = node ? node.scrollTop : null;
+    }, selector);
+    await page.waitForFunction(({ selector, before }) => {
+      const node = document.querySelector(selector);
+      const audit = window.auditDragCompletion;
+      if (!node || !audit) return false;
+      const top = node.scrollTop;
+      if (!(top > before + 40)) return false;
+      if (audit.scrollEnd && top === audit.scrollEndTop) {
+        audit.settledTop = top;
+        audit.settledBy = 'scrollend';
+        return true;
+      }
+      const now = performance.now();
+      if (audit.stableTop !== top) {
+        audit.stableTop = top;
+        audit.stableSince = now;
+        return false;
+      }
+      if (now - audit.stableSince < 150) return false;
+      audit.settledTop = top;
+      audit.settledBy = 'scrollTop-stable';
+      return true;
+    }, { selector, before });
+  } finally {
+    await page.evaluate(() => { if (window.__auditDragCleanup) window.__auditDragCleanup(); }).catch(() => {});
+    await cdp.detach();
+  }
+  const after = await page.locator(selector).evaluate(node => node.scrollTop);
+  const audit = await page.evaluate(() => window.auditDragCompletion);
+  assert(after > before + 40, '觸控手勢必須真正捲動目標區域');
+  return { before, after, audit };
 }
 (async () => {
   fs.mkdirSync(output, { recursive: true });
@@ -115,12 +223,29 @@ async function touchDrag(context, page, selector) {
     else { report.unexpected = (report.unexpected || []).concat(url.pathname); return route.abort('blockedbyclient'); }
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify(value) });
   });
+  await context.addInitScript(() => {
+    window.auditTouchEvents = [];
+    const record = (event) => {
+      const target = event.target;
+      const id = target && target.id;
+      const onUpdates = id === 'rw-updates' || !!(target && target.closest && target.closest('#rw-updates'));
+      if (!onUpdates) return;
+      if ((event.type === 'pointermove' || event.type === 'touchmove') && id !== 'rw-updates') return;
+      const list = window.auditTouchEvents;
+      if (list.length >= 100) return;
+      list.push({ type: event.type, trusted: event.isTrusted, id: id || '', time: performance.now() });
+    };
+    for (const type of ['pointerdown', 'pointerup', 'pointermove', 'pointercancel', 'touchstart', 'touchend', 'touchmove', 'touchcancel', 'click']) {
+      document.addEventListener(type, record, true);
+    }
+  });
   const page = await context.newPage();
   page.setDefaultTimeout(15000);
   page.on('pageerror', error => report.pageErrors.push(error.message));
   try {
     await page.goto(origin); await page.waitForFunction(() => window.ShellV5 && document.documentElement.classList.contains('st5-booted'));
-    await page.waitForTimeout(220); await page.evaluate(() => { ShellV5.closeRing(); ShellV5.go('research'); });
+    await page.waitForFunction(() => ShellV5.isRingOpen());
+    await page.evaluate(() => { ShellV5.closeRing(); ShellV5.go('research'); });
     await page.waitForFunction(() => document.getElementById('rw-changes').textContent.includes('dc-2'));
     for (const [session, label] of Object.entries(sessions)) {
       scenario = session;
@@ -143,7 +268,6 @@ async function touchDrag(context, page, selector) {
     await page.locator('#rw-root details').evaluateAll(nodes => nodes.forEach(node => { node.open = true; }));
     await page.locator('#shell-views').evaluate(node => { node.scrollTop = 0; }); await frame(page);
     report.touch = await touchDrag(context, page, '#shell-views');
-    await page.waitForTimeout(250);
     const savedPosition = await page.locator('#shell-views').evaluate(node => node.scrollTop);
     delayWorkflowMs = 700;
     await page.evaluate(() => document.getElementById('rw-refresh').click());
@@ -249,7 +373,8 @@ async function touchDrag(context, page, selector) {
     await page.locator('[data-src="simulation"]').tap();
     assert.equal(await page.locator('#bk-edit').inputValue(), simulationText);
     await page.reload(); await page.waitForFunction(() => window.ShellV5 && document.documentElement.classList.contains('st5-booted'));
-    await page.waitForTimeout(220); await page.evaluate(() => { ShellV5.closeRing(); ShellV5.go('book'); }); await frame(page);
+    await page.waitForFunction(() => ShellV5.isRingOpen());
+    await page.evaluate(() => { ShellV5.closeRing(); ShellV5.go('book'); }); await frame(page);
     assert.equal(await page.evaluate(() => PortfolioContext.getMode()), 'simulation');
     assert.equal(await page.locator('#bk-edit').inputValue(), simulationText);
     assert.equal(await page.evaluate(() => JSON.stringify(S.positions)), privateBefore);
@@ -264,9 +389,11 @@ async function touchDrag(context, page, selector) {
     report.failureState = await page.evaluate(() => ({ mode: window.PortfolioContext && PortfolioContext.getMode(),
       buttons: [...document.querySelectorAll('.dc-source-btn')].map(node => ({ id: node.id, pressed: node.getAttribute('aria-pressed') })),
       status: document.getElementById('dc-portfolio-status')?.textContent, researchMode: document.getElementById('rw-portfolio-mode')?.value,
-      decisionData: window.DecisionData && DecisionData.snapshot && DecisionData.snapshot() }));
+      decisionData: window.DecisionData && DecisionData.snapshot && DecisionData.snapshot(),
+      drag: window.auditDragCompletion }));
     report.failureSurfaces = await page.evaluate(() => [...document.querySelectorAll('html,body,#app,#shell-main,#shell-views,.sv-panel.on,#rw-root')].map(node => ({ id: node.id || node.tagName,
       width: node.clientWidth, height: node.clientHeight, top: node.scrollTop, scrollHeight: node.scrollHeight, overflow: getComputedStyle(node).overflowY })));
+    console.error(JSON.stringify({ openings: report.openings || [], failureState: report.failureState, failureSurfaces: report.failureSurfaces, pageErrors: report.pageErrors }, null, 2));
     await page.screenshot({ path: path.join(output, '失敗.png') });
     throw error;
   }
