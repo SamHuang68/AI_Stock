@@ -2923,6 +2923,54 @@ def _build_marketflow_payload() -> dict:
     return out
 
 
+def _focus_row_brief(row):
+    """焦點列只保留新手面板要用的既有欄位，不重算 RSI。"""
+    if not isinstance(row, dict):
+        return None
+    sym = row.get('sym')
+    if not sym:
+        return None
+    signals = []
+    for item in (row.get('signals') or [])[:2]:
+        if isinstance(item, str) and item.strip():
+            signals.append(item.strip())
+    rsi = row.get('rsi14')
+    if isinstance(rsi, bool) or not isinstance(rsi, (int, float)):
+        rsi = None
+    change = row.get('changePct')
+    if isinstance(change, bool) or not isinstance(change, (int, float)):
+        change = None
+    return {
+        'sym': str(sym),
+        'name': row.get('name') or '',
+        'changePct': change,
+        'rsi14': rsi,
+        'score': row.get('score'),
+        'signals': signals,
+    }
+
+
+def _focus_hint_from_cache():
+    """只讀既有 /focus 快取（TW、未指定產業）。沒有快取就不掃描。"""
+    empty = {'ok': False, 'reason': 'cache_miss', 'mkt': 'TW', 'buy': None, 'short': None}
+    try:
+        cached = Handler._FOCUS_CACHE.peek(('TW', ''))
+    except Exception:
+        empty['reason'] = 'cache_unavailable'
+        return empty
+    if not isinstance(cached, dict) or cached.get('ok') is not True:
+        return empty
+    return {
+        'ok': True,
+        'reason': None,
+        'mkt': 'TW',
+        'scanned': cached.get('scanned'),
+        'cacheHit': True,
+        'buy': _focus_row_brief((cached.get('buy') or [None])[0]),
+        'short': _focus_row_brief((cached.get('short') or [None])[0]),
+    }
+
+
 def _build_pulse_update(job_id: str, guard) -> dict:
     """背景工作沿用市場來源與決策流程，提交前核對工作效期。"""
     from datetime import date as _date
@@ -3550,6 +3598,8 @@ def _build_pulse_update(job_id: str, guard) -> dict:
     except Exception:
         # 未提交的候選不可成為成功結果，交由工作紀錄保存錯誤。
         raise
+
+    out['focusHint'] = _focus_hint_from_cache()
 
     if out.get('ok'):
         # 寫入脈動歷史庫（增量 merge；失敗不擋回應）

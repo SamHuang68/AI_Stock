@@ -391,6 +391,16 @@ ok(/id="pl-stock-check"/.test(pulseBeginner) && /function stockHealthAssessment/
   /stock_health_request_start/.test(pulseBeginner) && /\/twquote\?code=/.test(pulseBeginner) &&
   /function stockHealthRequest/.test(pulseBeginner) && /Promise\.race\(\[request, deadline\]\)/.test(pulseBeginner),
   'beginner stock health check is source-backed, traced and bounded by timeout');
+ok(/pl-beginner-signals/.test(pulseBeginner) && /今日短訊號/.test(pulseBeginner) &&
+  /function beginnerMaChip/.test(pulseBeginner) && /五日均/.test(pulseBeginner) &&
+  /t00Trend/.test(pulseBeginner) && /ma5/.test(pulseBeginner) && /不估算/.test(pulseBeginner) &&
+  /function beginnerSpillChip/.test(pulseBeginner) && /aiSpill/.test(pulseBeginner) &&
+  /科技外溢/.test(pulseBeginner) && /function beginnerFocusChip/.test(pulseBeginner) &&
+  /focusHint/.test(pulseBeginner) && /rsi14/.test(pulseBeginner) && /不啟動新掃描/.test(pulseBeginner) &&
+  !/\/focus\?/.test(pulseBeginner) &&
+  /grid-template-columns:repeat\(5,minmax\(0,1fr\)\)/.test(pulseBeginner) &&
+  /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/.test(pulseBeginner),
+  'beginner panel shows existing pulse signals with short labels and keeps the 5+2 grid');
 ok(/function stockHealthFallbackQuote/.test(pulseBeginner) && /stock_health_fallback_start/.test(pulseBeginner) &&
   /\/bars\?sym=/.test(pulseBeginner) && /\/yf\/batch\?syms=/.test(pulseBeginner) &&
   /歷史回顧/.test(pulseBeginner) && /相同日期與期間/.test(pulseBeginner) &&
