@@ -380,6 +380,14 @@ def build_pulse_payload(handler, path: str) -> bytes:
                 })
     except Exception:
         pass
+    try:
+        import industry_revenue as _ir_flash
+        _rev_agg = _ir_flash.get_aggregate()
+        _rev_item = _ir_flash.market_flash_item(_rev_agg)
+        if _rev_item and len(flash) < 18:
+            flash.insert(0, _rev_item)
+    except Exception as e:
+        print('[pulse] industry revenue flash', e)
     if not flash:
         flash.append({
             'time': out.get('updatedAt') or '',
@@ -479,6 +487,13 @@ def build_pulse_payload(handler, path: str) -> bytes:
     except Exception:
         sec_ranked = list(sectors_scored) if sectors_scored else []
     sec_ranked.sort(key=lambda x: x['changePct'], reverse=True)
+    try:
+        import industry_revenue as _ir_pulse
+        _rev_agg_rank = _ir_pulse.get_aggregate()
+        if _rev_agg_rank.get('ok'):
+            sec_ranked = _ir_pulse.attach_sector_revenue(sec_ranked, _rev_agg_rank)
+    except Exception as e:
+        print('[pulse] industry revenue sectors', e)
 
     foreign = (inst or {}).get('foreign')
     trust = (inst or {}).get('trust')

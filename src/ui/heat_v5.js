@@ -112,7 +112,7 @@
       '#ht-body .ht-wd{flex:0 0 auto;margin:0;padding:5px 8px;border-radius:6px;background:var(--bg2);' +
         'border:1px solid rgba(103,232,249,.28);font-size:9px;line-height:1.45;color:var(--tlo)}' +
       '#ht-body .ht-wd b{color:var(--cyan)}' +
-      '#ht-body .ht-kpi{flex:0 0 auto;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}' +
+      '#ht-body .ht-kpi{flex:0 0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:4px}' +
       '#ht-body .ht-kpi .k{background:var(--bg2);border:1px solid var(--border);border-radius:5px;padding:4px 7px;min-width:0}' +
       '#ht-body .ht-kpi .k .l{font-size:10px;color:var(--tlo);letter-spacing:.3px}' +
       '#ht-body .ht-kpi .k .v{font-size:12px;font-weight:700;color:var(--thi);margin-top:1px;' +
@@ -367,6 +367,18 @@
       if (!worst || s.changePct < worst.changePct) worst = s;
     });
     var flow = (state.last && state.last.sectorFlow) || {};
+    var ir = (state.last && state.last.industryRevenue) || {};
+    var irMkt = ir.market || {};
+    var revKpi = '';
+    if (mkt === 'TW' && irMkt.yoyPct != null) {
+      var lead = (ir.yoyLeaders && ir.yoyLeaders[0]) || null;
+      revKpi = '<div class="k"><div class="l">月營YoY · ' + esc(ir.periodLabel || '—') + '</div>' +
+        '<div class="v">' + (Number(irMkt.yoyPct) >= 0 ? '+' : '') + Number(irMkt.yoyPct).toFixed(1) + '%</div>' +
+        '<div class="s">合計 ' + (irMkt.monthRevYi != null ? Number(irMkt.monthRevYi).toFixed(0) + ' 億' : '—') +
+        (lead ? (' · 最強 ' + esc(lead.industry || '') + ' ' + (Number(lead.yoyPct) >= 0 ? '+' : '') +
+          Number(lead.yoyPct).toFixed(1) + '%') : '') +
+        '</div></div>';
+    }
     var focusBit = state.sector
       ? ('<div class="k"><div class="l">深鏈聚焦</div><div class="v" style="color:var(--cyan)">' +
         esc(state.sector) + '</div><div class="s">總覽產業輪動帶入</div></div>')
@@ -375,6 +387,7 @@
         (flow.participationPct == null ? '—' : Number(flow.participationPct).toFixed(0) + '%') + '</div></div>');
     return '<div class="ht-kpi">' +
       focusBit +
+      revKpi +
       '<div class="k"><div class="l">上漲／下跌</div><div class="v"><span class="' + chgCls(1, mkt) + '">' + up +
         '</span>　<span class="' + chgCls(-1, mkt) + '">' + dn + '</span></div><div class="s">依目前排序篩選</div></div>' +
       '<div class="k"><div class="l">最強</div><div class="v">' + esc(best ? best.name : '—') +
@@ -443,6 +456,15 @@
         var flowBits = [];
         if (s.marketSharePct != null) flowBits.push('占比 ' + Number(s.marketSharePct).toFixed(1) + '%');
         if (s.rs20VsBenchmarkPct != null) flowBits.push('RS20 ' + (Number(s.rs20VsBenchmarkPct) >= 0 ? '+' : '') + Number(s.rs20VsBenchmarkPct).toFixed(1));
+        if (mkt === 'TW' && s.revenueYoyPct != null) {
+          flowBits.push('營YoY ' + (Number(s.revenueYoyPct) >= 0 ? '+' : '') + Number(s.revenueYoyPct).toFixed(1) + '%');
+        }
+        if (mkt === 'TW' && s.revenueSharePct != null) {
+          flowBits.push('營占比 ' + Number(s.revenueSharePct).toFixed(1) + '%');
+        }
+        if (mkt === 'TW' && s.revenueGrowCount != null && s.revenueDeclineCount != null) {
+          flowBits.push('營↑' + s.revenueGrowCount + '/↓' + s.revenueDeclineCount);
+        }
         grid += '<div class="ht-cell" style="background:' + pctColor(s.changePct, mkt) + '" data-code="' +
           esc(code || '') + '" data-mkt="' + mkt + '" data-name="' + esc(s.name) +
           '" data-sector-key="' + esc(sk) + '" title="' + esc(s.name) + (code ? ' → ' + code : '') + '">' +
