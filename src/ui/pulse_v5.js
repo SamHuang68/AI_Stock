@@ -297,6 +297,19 @@
         'border-radius:8px;background:rgba(7,16,29,.98);box-shadow:0 10px 24px rgba(0,0,0,.4);font:600 12px/1.5 "Noto Sans TC",sans-serif;color:#c7d6e8}' +
       '#pl-root .pl-method-pop[hidden]{display:none!important}' +
       '#pl-root .pl-method-pop a{display:inline-block;margin-left:6px;color:#7dd3fc;text-decoration:none;white-space:nowrap}' +
+      '#pl-root .pl-beginner-signals{margin-top:10px}' +
+      '#pl-root .pl-beginner-signals-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:0 0 6px}' +
+      '#pl-root .pl-beginner-signals-head h3{margin:0;font:800 14px/1.4 "Noto Sans TC",sans-serif;color:#e7eef8}' +
+      '#pl-root .pl-beginner-signals-head span{font:500 12px/1.4 "Noto Sans TC",sans-serif;color:#879bb2}' +
+      '#pl-root .pl-signal-chips{display:flex;flex-wrap:wrap;gap:6px}' +
+      '#pl-root .pl-today-chip{position:relative;display:inline-flex;align-items:baseline;gap:6px;max-width:100%;min-width:0;' +
+        'padding:6px 10px;border-radius:999px;border:1px solid #314862;background:#0d1727;color:inherit;cursor:pointer}' +
+      '#pl-root .pl-today-chip em{font-style:normal;font:700 12px "Noto Sans TC",sans-serif;color:#93a8c0;white-space:nowrap}' +
+      '#pl-root .pl-today-chip b{font:800 13px "Noto Sans TC",sans-serif;color:#f2f7ff;white-space:nowrap;' +
+        'max-width:8em;overflow:hidden;text-overflow:ellipsis}' +
+      '#pl-root .pl-today-chip .detail{font:500 12px "Noto Sans TC",sans-serif;color:#b7c6d8;min-width:0;' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}' +
+      '#pl-root .pl-today-chip .pl-method-pop{top:calc(100% + 4px);left:0;right:auto;width:min(280px,72vw);white-space:normal}' +
       '#pl-root .pl-market-radar{margin-top:10px;background:#0a1423;border:1px solid #2a3e58;border-radius:10px;padding:12px 13px}' +
       '#pl-root .pl-market-radar-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:9px}' +
       '#pl-root .pl-market-radar-head h3{font:900 16px "Noto Sans TC",sans-serif;color:#edf5ff;margin:0}' +
@@ -376,6 +389,7 @@
         '#pl-root .pl-simple-signals{gap:7px;margin-top:7px}' +
         '#pl-root .pl-beginner-signals{margin-top:7px;padding:8px 10px}' +
         '#pl-root .pl-beginner-signals .head{margin-bottom:6px}' +
+        '#pl-root .pl-today-signals{margin-top:6px}' +
         '#pl-root .pl-signal-chips{gap:5px}' +
         '#pl-root .pl-simple-card{padding:8px 10px}' +
         '#pl-root .pl-simple-card .main{margin:5px 0 3px}' +
@@ -404,6 +418,7 @@
         '#pl-root .pl-stock-check input{width:auto;min-width:0;flex:1 1 auto}#pl-root .pl-stock-check button{flex:0 0 auto}' +
         '#pl-root .pl-simple-signals,#pl-root .pl-market-radar-grid{grid-template-columns:1fr}#pl-root .pl-safe-box{grid-template-columns:1fr}' +
         '#pl-root .pl-signal-chip b{max-width:min(220px,68vw)}' +
+        '#pl-root .pl-today-chip .detail{max-width:46vw}' +
         '#pl-root .pl-safe-sep{width:100%;height:1px}#pl-root .pl-beginner-actions{justify-content:center}' +
         '#pl-root .pl-advanced-grid{grid-template-columns:1fr 1fr}}' +
       /* 舊 pl-expanded 已廢止：因子帳本改獨立頁，禁止再開 overflow:auto 撐破頂列 */
@@ -2475,6 +2490,290 @@
       '</div></div>';
   }
 
+  function todaySignalChip(spec) {
+    return '<div class="pl-today-chip" data-method-card role="button" tabindex="0" aria-expanded="false" title="點擊查看資料來源">' +
+      '<em>' + esc(spec.label) + '</em><b>' + esc(spec.main) + '</b>' +
+      '<span class="detail">' + esc(spec.detail) + '</span>' +
+      '<div class="pl-method-pop" hidden>' + esc(spec.method) +
+      (spec.go ? '<a data-go="' + esc(spec.go) + '"' +
+        (spec.sym ? ' data-sym="' + esc(spec.sym) + '" data-mkt="' + esc(spec.mkt || 'TW') + '"' : '') +
+        '>查看詳細 →</a>' : '') +
+      '</div></div>';
+  }
+
+  function beginnerFactorName(list) {
+    var row = (list || []).filter(function (item) { return item && item.name; })[0];
+    return row ? String(row.name) : '';
+  }
+
+  function beginnerMaChip(ov) {
+    var tr = ((ov && ov.strip) || {}).t00Trend || {};
+    var ma5 = radarNumber(tr.ma5);
+    var vs = radarNumber(tr.vsMa5Pct);
+    var mom = radarNumber(tr.momScore);
+    var n = tr.n == null || !isFinite(Number(tr.n)) ? null : Number(tr.n);
+    var method = '五日均沿用後端 trend_quant 的 ma5：最近至多 5 筆收盤的算術平均（SMA）。' +
+      '偏離 vsMa5Pct＝(收盤−ma5)÷ma5。樣本未滿 5 日或欄位是空值時只顯示等待，缺值時留空。';
+    if (ma5 == null) {
+      return todaySignalChip({
+        label: '五日均', main: '等待均線', detail: '後端尚未給出 ma5',
+        method: method, go: 'chart', sym: '^TWII'
+      });
+    }
+    var sample = n != null && n < 5 ? '僅 ' + n + ' 日樣本' : 'SMA5';
+    var bits = [sample];
+    if (vs != null) bits.push('vs5 ' + pct(vs));
+    if (mom != null) bits.push('動能 ' + mom.toFixed(0));
+    return todaySignalChip({
+      label: '五日均',
+      main: tr.level || tr.trend || '均線已更新',
+      detail: bits.join(' · ') + ' · ' + fmt(ma5, 2),
+      method: method + (tr.trend ? ' 趨勢標籤：' + tr.trend + '。' : ''),
+      go: 'chart', sym: '^TWII'
+    });
+  }
+
+  function beginnerRiskChip(p) {
+    var score = radarNumber(p && p.riskScore);
+    var label = (p && p.riskLabel) || (score == null ? '等待風險分' : '風險');
+    var pressure = beginnerFactorName(p && p.riskFactors);
+    var support = beginnerFactorName(p && p.positiveFactors);
+    var bits = [];
+    if (score != null) bits.push(score.toFixed(1));
+    if (pressure) bits.push('壓力 ' + pressure);
+    if (support) bits.push('支撐 ' + support);
+    return todaySignalChip({
+      label: '風險',
+      main: label,
+      detail: bits.join(' · ') || '風險分尚未形成',
+      method: '風險分沿用 pulse.riskScore：風險因子絕對分加總後軟封頂，越高越警戒。' +
+        '標籤沿用 riskLabel，因子名稱沿用 riskFactors／positiveFactors，前端不重算。',
+      go: 'factors'
+    });
+  }
+
+  function beginnerSpillChip(p) {
+    var spill = (p && p.aiSpill) || {};
+    var method = '科技外溢沿用 pulse.aiSpill，來源是同一包 global 的費半、那指與 VIX。缺費半與那指時 ok 為 false，前端不另抓、不補方向。';
+    if (spill.ok !== true) {
+      return todaySignalChip({
+        label: '科技外溢', main: '等待外溢', detail: '費半與那指尚未齊',
+        method: method, go: 'international'
+      });
+    }
+    var dir = spill.direction === 'pos' ? '外溢偏多' :
+      spill.direction === 'risk' ? '外溢偏空' : '外溢中性';
+    var bits = [];
+    if (radarNumber(spill.soxChangePct) != null) bits.push('費半 ' + pct(spill.soxChangePct));
+    if (radarNumber(spill.ixicChangePct) != null) bits.push('那指 ' + pct(spill.ixicChangePct));
+    if (radarNumber(spill.vixLevel) != null) bits.push('VIX ' + Number(spill.vixLevel).toFixed(1));
+    return todaySignalChip({
+      label: '科技外溢',
+      main: spill.factorName || dir,
+      detail: bits.join(' · ') || dir,
+      method: method,
+      go: 'international'
+    });
+  }
+
+  function beginnerLimitChip(ov) {
+    var strip = (ov && ov.strip) || {};
+    var up = strip.limitUp;
+    var down = strip.limitDown;
+    var ready = up != null && down != null && isFinite(Number(up)) && isFinite(Number(down));
+    return todaySignalChip({
+      label: '漲跌停',
+      main: ready ? ('漲 ' + fmt(up, 0) + ' · 跌 ' + fmt(down, 0)) : '等待家數',
+      detail: '官方家數',
+      method: '上市漲停／跌停家數沿用 overview.strip.limitUp／limitDown，來源是證交所 MI_INDEX 股票欄括號。' +
+        '與下方漲跌榜的近漲停清單不同，前端不把兩套數字加總。',
+      go: 'breadth'
+    });
+  }
+
+  function beginnerSectorChip(p) {
+    var snap = (p && p.snapshot) || {};
+    var hot = snap.topSector || null;
+    var cold = snap.bottomSector || null;
+    var hotPct = hot && radarNumber(hot.changePct);
+    var coldPct = cold && radarNumber(cold.changePct);
+    var hasHot = !!(hot && hot.name && hotPct != null);
+    var hasCold = !!(cold && cold.name && coldPct != null && (!hot || cold.name !== hot.name));
+    var detail = '尚無類股漲跌';
+    if (hasHot && hasCold) detail = pct(hotPct) + ' · 落後 ' + cold.name + ' ' + pct(coldPct);
+    else if (hasHot) detail = pct(hotPct);
+    else if (hasCold) detail = '落後 ' + cold.name + ' ' + pct(coldPct);
+    return todaySignalChip({
+      label: '產業',
+      main: hasHot ? hot.name : (hasCold ? cold.name : '等待產業'),
+      detail: detail,
+      method: '領先／落後沿用 pulse.snapshot.topSector／bottomSector，是同一包類股漲跌幅的最大與最小。' +
+        '不用 sectorsRanked 前 12 名的最後一檔充當落後。',
+      go: 'heat'
+    });
+  }
+
+  function beginnerNhnlChip(p) {
+    var nhnl = ((p && p.extras) || {}).nhnl || {};
+    var highs = radarNumber(nhnl.newHighs);
+    var lows = radarNumber(nhnl.newLows);
+    var sample = radarNumber(nhnl.sampleN);
+    var ready = highs != null && lows != null;
+    return todaySignalChip({
+      label: '新高低',
+      main: ready ? ('高 ' + fmt(highs, 0) + ' · 低 ' + fmt(lows, 0)) : '等待新高低',
+      detail: sample == null ? '250 日' : ('樣本 ' + fmt(sample, 0) + ' 檔'),
+      method: '250 日新高／新低家數沿用 pulse.extras.nhnl。樣本不足時後端不計入因子，這裡也不補家數。',
+      go: 'breadth'
+    });
+  }
+
+  function beginnerWarningChip(p) {
+    var summary = (p && p.decisionSummary) || {};
+    var rows = (((summary.earlyWarnings || {}).signals) || []).filter(function (row) {
+      return row && row.label;
+    });
+    var hot = {
+      WATCH: '留意', ARMED: '預備', CONFIRMED: '已確認',
+      ACTIVE: '生效中', CONFLICT: '訊號衝突'
+    };
+    var elevated = rows.filter(function (row) { return hot[row.state]; });
+    elevated.sort(function (a, b) { return Number(b.strength || 0) - Number(a.strength || 0); });
+    var lead = elevated[0] || null;
+    var invalidation = (summary.invalidation || []).map(function (item) {
+      return typeof item === 'string' ? item : (item && (item.text || item.label)) || '';
+    }).filter(Boolean)[0] || '';
+    var method = '預警沿用 decisionSummary.earlyWarnings，只顯示後端已發布的標籤與狀態。' +
+      '強度是證據強度，不是上漲機率。' +
+      (invalidation ? ' 失效條件：' + invalidation : '');
+    if (!lead) {
+      return todaySignalChip({
+        label: '預警', main: rows.length ? '預警平穩' : '等待預警',
+        detail: rows[0] ? String(rows[0].label) : '決策摘要尚未附預警',
+        method: method, go: 'decision'
+      });
+    }
+    var strength = radarNumber(lead.strength);
+    return todaySignalChip({
+      label: '預警',
+      main: hot[lead.state] || '留意',
+      detail: String(lead.label) + (strength == null ? '' : ' · 強度 ' + strength.toFixed(0)),
+      method: method, go: 'decision'
+    });
+  }
+
+  function beginnerMoverChip(p) {
+    var movers = (p && p.movers) || {};
+    var upAll = moverRows(movers, 'gainers');
+    var downAll = moverRows(movers, 'losers');
+    var up = upAll.slice(0, 2);
+    var down = downAll.slice(0, 2);
+    function names(list) {
+      return list.map(function (row) {
+        return (row.code || row.sym || '') + (row.name ? ' ' + row.name : '');
+      }).filter(Boolean).join('、');
+    }
+    var upText = names(up);
+    var downText = names(down);
+    var detail = [];
+    if (upText) detail.push('近漲停 ' + upText);
+    if (downText) detail.push('跌幅 ' + downText);
+    return todaySignalChip({
+      label: '漲跌榜',
+      main: (upAll.length || downAll.length) ? ('漲 ' + upAll.length + ' · 跌 ' + downAll.length) : '尚無極端漲跌',
+      detail: detail.join(' · ') || '沿用 movers 清單',
+      method: '漲跌榜沿用 pulse.movers，篩選與專業區相同：近漲停優先 limitUp，否則上市代號且漲幅 ≥9.9%；' +
+        '跌幅優先 limitDown，否則跌幅 ≤−7%。這裡只顯示前兩檔，不另抓報價。',
+      go: 'breadth'
+    });
+  }
+
+  function beginnerBondChip(p) {
+    var bond = (p && p.us10y) || {};
+    var value = radarNumber(bond.value);
+    return todaySignalChip({
+      label: '美債',
+      main: value == null ? '等待美債' : (value.toFixed(2) + '%'),
+      detail: bond.date ? String(bond.date) : '美國十年期',
+      method: '殖利率沿用 pulse.us10y.value，與總經序列同一來源。沒有漲跌幅欄位時不自行推算。',
+      go: 'international'
+    });
+  }
+
+  function beginnerMarginChip(p) {
+    var pillars = (p && p.pillars) || {};
+    var ratio = radarNumber(pillars.marginRatio);
+    var zone = typeof pillars.riskZone === 'string' ? pillars.riskZone : '';
+    return todaySignalChip({
+      label: '融資',
+      main: ratio == null ? '等待融資' : (ratio.toFixed(2) + '%'),
+      detail: zone || '維持率',
+      method: '融資維持率沿用 pulse.pillars.marginRatio 與 riskZone 文字，前端不重算分數。',
+      go: 'factors'
+    });
+  }
+
+  function beginnerPeChip(p) {
+    var pe = radarNumber(((p && p.pillars) || {}).medianPE);
+    return todaySignalChip({
+      label: '本益比',
+      main: pe == null ? '等待本益比' : (pe.toFixed(1) + ' 倍'),
+      detail: '全市場中位',
+      method: '本益比中位數沿用 pulse.pillars.medianPE，來自既有 universe 本益比中位，前端不重算。',
+      go: 'factors'
+    });
+  }
+
+  function beginnerFocusChip(p) {
+    var hint = (p && p.focusHint) || {};
+    var buy = hint.buy || null;
+    var sell = hint.short || null;
+    var method = '焦點只讀 pulse.focusHint，也就是既有 /focus 的 TW 快取。' +
+      'RSI(14) 使用掃描當下的後端 Wilder 值，SMA 訊號只顯示後端已寫入的名稱。' +
+      '快取沒有結果時不啟動新掃描，也不在此重算。';
+    if (hint.ok !== true || (!buy && !sell)) {
+      return todaySignalChip({
+        label: '焦點', main: '尚未掃描', detail: '開啟熱力頁後才會有快取',
+        method: method, go: 'heat'
+      });
+    }
+    var lead = buy || sell;
+    var side = buy ? '做多' : '做空';
+    var bits = [];
+    if (buy && buy.signals && buy.signals.length) bits.push(buy.signals.join('、'));
+    if (radarNumber(lead.rsi14) != null) bits.push('RSI ' + Number(lead.rsi14).toFixed(1));
+    if (radarNumber(lead.changePct) != null) bits.push(pct(lead.changePct));
+    if (sell && sell.sym) bits.push('做空 ' + sell.sym);
+    return todaySignalChip({
+      label: '焦點',
+      main: side + ' ' + (lead.sym || ''),
+      detail: bits.join(' · ') || (lead.name || '焦點快取'),
+      method: method,
+      go: 'chart',
+      sym: lead.sym,
+      mkt: 'TW'
+    });
+  }
+
+  function renderBeginnerSignalStrip(ov, p) {
+    return '<section class="pl-today-signals" aria-label="今日短訊號">' +
+      '<div class="pl-beginner-signals-head"><h3>今日短訊號</h3>' +
+      '<span>沿用本頁已有資料</span></div><div class="pl-signal-chips">' +
+      beginnerMaChip(ov) +
+      beginnerRiskChip(p) +
+      beginnerSpillChip(p) +
+      beginnerLimitChip(ov) +
+      beginnerSectorChip(p) +
+      beginnerNhnlChip(p) +
+      beginnerWarningChip(p) +
+      beginnerMoverChip(p) +
+      beginnerBondChip(p) +
+      beginnerMarginChip(p) +
+      beginnerPeChip(p) +
+      beginnerFocusChip(p) +
+      '</div></section>';
+  }
+
   function beginnerChip(opts) {
     opts = opts || {};
     var go = opts.go ? ' data-go="' + esc(opts.go) + '"' +
@@ -2876,6 +3175,7 @@
         beginnerSignal('🔋', '動能氣氛', volume, '動能：市場成交量是否活躍', 'afterhours') +
       '</div>' +
       beginnerSignalBoard(ov, p, quotes) +
+      renderBeginnerSignalStrip(ov, p) +
       renderMarketRadar(ov, p) +
       '<div class="pl-safe-box" title="' + esc(model.levelsStale ? staleDistance : '依前一交易日高低收計算；不是保證價位') + '">' +
         '<div class="pl-safe-level ceiling' + (model.levelsStale ? ' stale' : '') + '"><div class="k pl-tip" title="壓力：上方容易遇到賣壓">☁ ' +

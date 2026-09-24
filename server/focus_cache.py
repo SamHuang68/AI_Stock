@@ -52,6 +52,15 @@ class FocusScanCache:
         }
         return response
 
+    def peek(self, key: Hashable) -> dict[str, Any] | None:
+        """回傳未過期快取副本。不啟動掃描，也不等待進行中的工作。"""
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None or self._clock() - entry.completed >= self._ttl:
+                return None
+            self._entries.move_to_end(key)
+            return self._response(entry, cache_hit=True, shared=False)
+
     def get_or_scan(
         self, key: Hashable, scan: Callable[[], dict[str, Any]], *, force: bool = False,
     ) -> dict[str, Any]:

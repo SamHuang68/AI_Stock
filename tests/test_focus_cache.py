@@ -22,6 +22,33 @@ def payload(symbol='2330'):
 
 
 class FocusCacheTests(unittest.TestCase):
+    def test_peek_reads_fresh_cache_without_scanning(self):
+        clock = [10.0]
+        cache = FocusScanCache(ttl_sec=180, clock=lambda: clock[0], wall_clock=lambda: 1000.0)
+        self.assertIsNone(cache.peek('TW'))
+        scan = Mock(return_value=payload())
+        cache.get_or_scan('TW', scan)
+        seen = cache.peek('TW')
+        self.assertEqual(seen['buy'][0]['sym'], '2330')
+        self.assertTrue(seen['scan']['cacheHit'])
+        seen['buy'][0]['sym'] = '呼叫端修改'
+        self.assertEqual(cache.peek('TW')['buy'][0]['sym'], '2330')
+        self.assertEqual(scan.call_count, 1)
+        clock[0] += 180
+        self.assertIsNone(cache.peek('TW'))
+        self.assertEqual(scan.call_count, 1)
+
+    def test_pulse_focus_hint_does_not_start_a_scan(self):
+        source = (ROOT / 'server' / 'server.py').read_text(encoding='utf-8')
+        module = ast.parse(source)
+        hint = next(node for node in module.body
+                    if isinstance(node, ast.FunctionDef) and node.name == '_focus_hint_from_cache')
+        calls = [
+            node.func.attr for node in ast.walk(hint)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        ]
+        self.assertIn('peek', calls)
+        self.assertNotIn('get_or_scan', calls)
     def test_concurrent_refreshes_share_one_scan(self):
         cache = FocusScanCache()
         release, joined = threading.Event(), threading.Event()
