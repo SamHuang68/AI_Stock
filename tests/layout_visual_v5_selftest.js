@@ -52,6 +52,16 @@ ok(pulse.includes('.pl-beginner-hero>*{min-width:0}') &&
   pulse.includes('.pl-stock-check{width:min(100%,340px);max-width:100%}') &&
   pulse.includes('.pl-stock-check input{width:auto;min-width:0;flex:1 1 auto}'),
   'beginner portrait hero and stock check cannot expand beyond the mobile viewport');
+ok((function () {
+  const start = pulse.indexOf('function beginnerPrecursorChip');
+  const end = pulse.indexOf('function paintBeginnerFocus');
+  const board = start >= 0 && end > start ? pulse.slice(start, end) : '';
+  const labels = ['五日均', '動能', '近20日Z', '連漲跌', '費半', '恐慌', '外溢', '領漲', '領跌', '近漲停', '重跌', '官方漲停', '官方跌停', '支撐', '壓力', '前兆', '失效', '做多', '做空'];
+  return !!board && labels.every(function (label) { return board.indexOf("'" + label + "'") >= 0; }) &&
+    board.indexOf('trend.n') >= 0 && board.indexOf('z20N') < 0 && board.indexOf('不估算') < 0 &&
+    pulse.includes('grid-template-columns:repeat(5,minmax(0,1fr))') &&
+    !pulse.includes('#pl-root .pl-zone.z-top{');
+})(), 'beginner short labels stay in the panel while desktop pulse keeps one row of five frames');
 
 ok(breadth.includes('minmax(200px,.72fr)') && breadth.includes('minmax(390px,1.4fr)'),
   'breadth grid shifts width from structure to movers');

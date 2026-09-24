@@ -2584,6 +2584,40 @@
     return String(row.sym || '—') + ' ' + signal + rsi;
   }
 
+  function beginnerZChip(trend) {
+    trend = trend || {};
+    var z20 = radarNumber(trend.z20);
+    var n = radarNumber(trend.n);
+    var nText = n == null ? '未提供' : String(Math.round(n));
+    var fullWindow = n != null && n >= 20;
+    var title = '後端 z20=' + (trend.z20 == null ? '空' : trend.z20) +
+      '，日線樣本 n=' + (trend.n == null ? '未提供' : trend.n) + '。沿用後端公布值，不另算。';
+    if (z20 != null && fullWindow) {
+      return beginnerChip({
+        label: '近20日Z',
+        value: Number(z20).toFixed(2) + ' · 樣本 ' + nText,
+        cls: tw(z20),
+        go: 'chart', sym: '^TWII', mkt: 'TW',
+        title: title + 'n 已滿 20，這是後端 20 日窗。'
+      });
+    }
+    if (z20 != null) {
+      return beginnerChip({
+        label: 'Z',
+        value: Number(z20).toFixed(2) + ' · 樣本 ' + nText,
+        cls: tw(z20),
+        go: 'chart', sym: '^TWII', mkt: 'TW',
+        title: title + 'n 未滿 20，不是完整 20 日 Z。'
+      });
+    }
+    return beginnerChip({
+      label: 'Z',
+      value: n == null ? '尚無' : ('樣本 ' + nText),
+      go: 'chart', sym: '^TWII', mkt: 'TW',
+      title: title + '後端沒有 Z 值。'
+    });
+  }
+
   function beginnerSignalBoard(ov, p, quotes) {
     var strip = (ov && ov.strip) || {};
     var trend = strip.t00Trend || {};
@@ -2591,7 +2625,6 @@
     var ma5 = radarNumber(trend.ma5);
     var vsMa5 = radarNumber(trend.vsMa5Pct);
     var mom = radarNumber(trend.momScore);
-    var z20 = radarNumber(trend.z20);
     var streak = radarNumber(trend.streak);
     var sox = radarGlobalQuote(p, ['^SOX']);
     var vix = radarGlobalQuote(p, ['^VIX']);
@@ -2619,13 +2652,7 @@
         title: '後端 momScore=' + (trend.momScore == null ? '—' : trend.momScore) +
           (trend.level ? ' · 水位 ' + trend.level : '') + '。動能分由 vs5、Z20 與漲跌合成。'
       }),
-      beginnerChip({
-        label: '近20日Z',
-        value: z20 == null ? ('樣本 ' + (trend.z20N == null ? '—' : trend.z20N) + '/20') : Number(z20).toFixed(2),
-        cls: z20 == null ? '' : tw(z20),
-        go: 'chart', sym: '^TWII', mkt: 'TW',
-        title: '後端 z20=' + (trend.z20 == null ? '—' : trend.z20) + '。樣本不足 20 日不估算。'
-      }),
+      beginnerZChip(trend),
       beginnerChip({
         label: '連漲跌',
         value: streak == null ? '—' : streak > 0 ? ('連漲 ' + Math.round(streak) + ' 日') :

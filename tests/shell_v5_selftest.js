@@ -363,10 +363,12 @@ ok(/三市場趨勢雷達/.test(pulseBeginner) && /台股市場/.test(pulseBegin
 ok(/\^GSPC/.test(pulseBeginner) && /\^IXIC/.test(pulseBeginner) && /\^SOX/.test(pulseBeginner) &&
   /\^VIX/.test(pulseBeginner) && /basisPct/.test(pulseBeginner) && /ampRate/.test(pulseBeginner),
   'beginner radar uses existing US index, VIX and TXF basis/volatility sources');
-ok(/function beginnerSignalBoard/.test(pulseBeginner) && /class="pl-beginner-signals"/.test(pulseBeginner) &&
+ok(/function beginnerSignalBoard/.test(pulseBeginner) && /function beginnerZChip/.test(pulseBeginner) &&
+  /class="pl-beginner-signals"/.test(pulseBeginner) &&
   /短訊號/.test(pulseBeginner) && /沿用總覽同一包，不另估指標/.test(pulseBeginner) &&
   /t00Trend/.test(pulseBeginner) && /trend\.ma5/.test(pulseBeginner) && /vsMa5Pct/.test(pulseBeginner) &&
-  /trend\.momScore/.test(pulseBeginner) && /trend\.z20/.test(pulseBeginner) &&
+  /trend\.momScore/.test(pulseBeginner) && /trend\.z20/.test(pulseBeginner) && /trend\.n/.test(pulseBeginner) &&
+  !/z20N/.test(pulseBeginner) && !/不估算/.test(pulseBeginner) &&
   /sectorsRanked/.test(pulseBeginner) && /moverRows\(p\.movers/.test(pulseBeginner) &&
   /strip\.limitUp/.test(pulseBeginner) && /p\.positiveFactors/.test(pulseBeginner) &&
   /p\.riskFactors/.test(pulseBeginner) && /earlyWarnings/.test(pulseBeginner) &&
@@ -412,7 +414,7 @@ ok(!/function beginnerRsi|rsi_wilders|closes\[i\] - closes/.test(pulseBeginner),
   const html = sandbox.PulseV5.beginnerSignalBoard({
     strip: {
       limitUp: 12, limitDown: 3,
-      t00Trend: { ma5: 23123.4567, vsMa5Pct: 1.25, momScore: 63.4, z20: 0.82, z20N: 20, streak: 3, trend: '連漲趨升', level: '偏強' }
+      t00Trend: { ma5: 23123.4567, vsMa5Pct: 1.25, momScore: 63.4, z20: 0.82, n: 20, streak: 3, trend: '連漲趨升', level: '偏強' }
     },
     sectorsRanked: [
       { name: '半導體', changePct: 2.4 },
@@ -446,8 +448,29 @@ ok(!/function beginnerRsi|rsi_wilders|closes\[i\] - closes/.test(pulseBeginner),
   });
   ok(html.indexOf('23,123.46') >= 0 && html.indexOf('+1.25%') >= 0 && html.indexOf('ma5=23123.4567') >= 0,
     'beginner five-day average prints the backend ma5 value');
-  ok(html.indexOf('63.4') >= 0 && html.indexOf('連漲趨升') >= 0 && html.indexOf('0.82') >= 0 && html.indexOf('連漲 3 日') >= 0,
-    'beginner momentum, z-score and streak use backend trend fields');
+  const shortLabels = ['五日均', '動能', '近20日Z', '連漲跌', '費半', '恐慌', '外溢', '領漲', '領跌', '近漲停', '重跌', '官方漲停', '官方跌停', '支撐', '壓力', '前兆', '失效', '做多', '做空'];
+  ok(shortLabels.every(function (label) { return html.indexOf('<em>' + label + '</em>') >= 0; }),
+    'beginner board locks the short signal labels');
+  ok(html.indexOf('63.4') >= 0 && html.indexOf('連漲趨升') >= 0 && html.indexOf('0.82') >= 0 &&
+    html.indexOf('樣本 20') >= 0 && html.indexOf('n=20') >= 0 && html.indexOf('連漲 3 日') >= 0 &&
+    html.indexOf('不估算') < 0 && html.indexOf('z20N') < 0,
+    'beginner momentum, full-window z-score and streak use backend trend fields');
+  const shortSample = sandbox.PulseV5.beginnerSignalBoard({
+    strip: { t00Trend: { z20: 1.25, n: 8, z20N: 8 } }
+  }, {}, {});
+  ok(shortSample.indexOf('<em>Z</em>') >= 0 && shortSample.indexOf('1.25') >= 0 &&
+    shortSample.indexOf('樣本 8') >= 0 && shortSample.indexOf('n=8') >= 0 &&
+    shortSample.indexOf('<em>近20日Z</em>') < 0 && shortSample.indexOf('不估算') < 0 &&
+    shortSample.indexOf('/20') < 0 && shortSample.indexOf('z20N') < 0,
+    'a published z20 with n under 20 shows the backend value and actual n');
+  const emptySample = sandbox.PulseV5.beginnerSignalBoard({
+    strip: { t00Trend: { z20: null, n: 8, z20N: 12 } }
+  }, {}, {});
+  ok(emptySample.indexOf('<em>Z</em>') >= 0 && emptySample.indexOf('樣本 8') >= 0 &&
+    emptySample.indexOf('n=8') >= 0 && emptySample.indexOf('12') < 0 &&
+    emptySample.indexOf('<em>近20日Z</em>') < 0 && emptySample.indexOf('不估算') < 0 &&
+    emptySample.indexOf('—/20') < 0 && emptySample.indexOf('z20N') < 0,
+    'an empty z20 reads sample count n and ignores z20N');
   ok(html.indexOf('+1.10%') >= 0 && html.indexOf('18.4') >= 0 && html.indexOf('>偏多<') >= 0,
     'beginner global chips use SOX change, VIX level and aiSpill direction');
   ok(html.indexOf('半導體') >= 0 && html.indexOf('航運') >= 0 && html.indexOf('2330') >= 0 && html.indexOf('2603') >= 0,
