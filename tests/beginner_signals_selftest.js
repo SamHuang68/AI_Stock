@@ -25,7 +25,7 @@ const code = [
   sliceFn('pct', 'fmt'),
   sliceFn('fmt', 'chgPts'),
   sliceFn('radarNumber', 'radarClamp'),
-  sliceFn('beginnerChip', 'renderBeginner'),
+  sliceFn('todaySignalChip', 'beginnerChip'),
   sliceFn('moverRows', 'renderMovers'),
   'module.exports = { renderBeginnerSignalStrip: renderBeginnerSignalStrip, moverRows: moverRows };'
 ].join('\n');
@@ -83,7 +83,7 @@ const pack = {
 };
 
 const html = api.renderBeginnerSignalStrip(pack.overview, pack.pulse);
-ok(html.includes('今日短訊號') && html.includes('class="pl-signal-chip"'), '短訊號列在新手面板內');
+ok(html.includes('今日短訊號') && html.includes('class="pl-today-chip"'), '今日短訊號列在新手面板內');
 ok(html.includes('五日均') && html.includes('偏強') && html.includes('23,456.78') && html.includes('+1.25%'),
   '五日均顯示後端 ma5 與 vsMa5Pct');
 ok(html.includes('風險偏低') && html.includes('41.2') && html.includes('借券賣出壓力'),

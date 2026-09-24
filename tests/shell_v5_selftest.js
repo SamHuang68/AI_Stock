@@ -363,6 +363,144 @@ ok(/三市場趨勢雷達/.test(pulseBeginner) && /台股市場/.test(pulseBegin
 ok(/\^GSPC/.test(pulseBeginner) && /\^IXIC/.test(pulseBeginner) && /\^SOX/.test(pulseBeginner) &&
   /\^VIX/.test(pulseBeginner) && /basisPct/.test(pulseBeginner) && /ampRate/.test(pulseBeginner),
   'beginner radar uses existing US index, VIX and TXF basis/volatility sources');
+ok(/function beginnerSignalBoard/.test(pulseBeginner) && /function beginnerZChip/.test(pulseBeginner) &&
+  /class="pl-beginner-signals"/.test(pulseBeginner) &&
+  /短訊號/.test(pulseBeginner) && /沿用總覽同一包，不另估指標/.test(pulseBeginner) &&
+  /t00Trend/.test(pulseBeginner) && /trend\.ma5/.test(pulseBeginner) && /vsMa5Pct/.test(pulseBeginner) &&
+  /trend\.momScore/.test(pulseBeginner) && /trend\.z20/.test(pulseBeginner) && /trend\.n/.test(pulseBeginner) &&
+  !/z20N/.test(pulseBeginner) && !/不估算/.test(pulseBeginner) &&
+  /sectorsRanked/.test(pulseBeginner) && /moverRows\(p\.movers/.test(pulseBeginner) &&
+  /strip\.limitUp/.test(pulseBeginner) && /p\.positiveFactors/.test(pulseBeginner) &&
+  /p\.riskFactors/.test(pulseBeginner) && /earlyWarnings/.test(pulseBeginner) &&
+  /p\.aiSpill/.test(pulseBeginner) && /wlQuotes/.test(pulseBeginner) &&
+  /\/focus\?mkt=TW/.test(pulseBeginner) && /row\.rsi14/.test(pulseBeginner) &&
+  /beginnerSignalBoard: beginnerSignalBoard/.test(pulseBeginner) &&
+  /grid-template-columns:repeat\(5,minmax\(0,1fr\)\)/.test(pulseBeginner),
+  'beginner short signals reuse pulse, decision, global, sectors, focus and movers without new frames');
+ok(!/function beginnerRsi|rsi_wilders|closes\[i\] - closes/.test(pulseBeginner),
+  'beginner panel displays backend RSI and does not recompute it');
+(function () {
+  const vm = require('vm');
+  const nodes = new Map();
+  const saved = new Map();
+  saved.set('st_wl', JSON.stringify([
+    { t: '2330', name: '台積電', m: 'TW', chg: 1.2 },
+    { t: '2317', name: '鴻海', m: 'TW', chg: -2.5 }
+  ]));
+  const sandbox = {
+    console, Math, Promise, Date, Intl,
+    location: { origin: 'http://test.invalid' },
+    SERVER: '',
+    localStorage: { getItem: function (key) { return saved.get(key) || null; }, setItem: function (key, value) { saved.set(key, value); } },
+    document: {
+      getElementById: function (id) { return nodes.get(id) || null; },
+      querySelector: function () { return null; },
+      querySelectorAll: function () { return []; },
+      createElement: function () { return { style: {}, appendChild: function () {} }; },
+      head: { appendChild: function () {} },
+      body: { appendChild: function () {} },
+      documentElement: { classList: { add: function () {}, remove: function () {} } }
+    },
+    addEventListener: function () {},
+    setTimeout: function () { return 0; },
+    clearTimeout: function () {},
+    setInterval: function () { return 0; },
+    clearInterval: function () {},
+    fetch: function () { return Promise.resolve({ ok: false, json: async function () { return null; } }); }
+  };
+  sandbox.window = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(pulseBeginner, sandbox, { filename: 'src/ui/pulse_v5.js' });
+  const html = sandbox.PulseV5.beginnerSignalBoard({
+    strip: {
+      limitUp: 12, limitDown: 3,
+      t00Trend: { ma5: 23123.4567, vsMa5Pct: 1.25, momScore: 63.4, z20: 0.82, n: 20, streak: 3, trend: '連漲趨升', level: '偏強' }
+    },
+    sectorsRanked: [
+      { name: '半導體', changePct: 2.4 },
+      { name: '航運', changePct: -1.8 }
+    ]
+  }, {
+    global: [
+      { symbol: '^SOX', price: 5400, changePct: 1.1 },
+      { symbol: '^VIX', price: 18.432, changePct: -0.4 }
+    ],
+    aiSpill: { ok: true, direction: 'pos', factorName: 'AI科技外溢偏多', soxChangePct: 1.1, ixicChangePct: 0.6, vixLevel: 18.4 },
+    positiveFactors: [{ name: '法人買超', score: 6 }],
+    riskFactors: [{ name: '融資偏高', score: -4 }],
+    decisionSummary: {
+      invalidation: ['加權指數收破 S1 22800'],
+      earlyWarnings: {
+        thresholds: { watchStrength: 55, watchIndependentDomains: 2 },
+        signals: [
+          { signalId: 'TW_DOWNSIDE_PRECURSOR', label: '下行前兆證據', strength: 40, independentDomains: 1 },
+          { signalId: 'TW_ATTACK_BUILDUP', label: '上行前兆證據', strength: 72.5, independentDomains: 3 }
+        ]
+      }
+    },
+    movers: {
+      limitUp: [{ code: '2330', name: '台積電', changePct: 9.9 }],
+      limitDown: [{ code: '2603', name: '長榮', changePct: -9.5 }]
+    }
+  }, {
+    '2330': { changePct: 1.5 },
+    '2317': { changePct: -2.1 }
+  });
+  ok(html.indexOf('23,123.46') >= 0 && html.indexOf('+1.25%') >= 0 && html.indexOf('ma5=23123.4567') >= 0,
+    'beginner five-day average prints the backend ma5 value');
+  const shortLabels = ['五日均', '動能', '近20日Z', '連漲跌', '費半', '恐慌', '外溢', '領漲', '領跌', '近漲停', '重跌', '官方漲停', '官方跌停', '支撐', '壓力', '前兆', '失效', '做多', '做空'];
+  ok(shortLabels.every(function (label) { return html.indexOf('<em>' + label + '</em>') >= 0; }),
+    'beginner board locks the short signal labels');
+  ok(html.indexOf('63.4') >= 0 && html.indexOf('連漲趨升') >= 0 && html.indexOf('0.82') >= 0 &&
+    html.indexOf('樣本 20') >= 0 && html.indexOf('n=20') >= 0 && html.indexOf('連漲 3 日') >= 0 &&
+    html.indexOf('不估算') < 0 && html.indexOf('z20N') < 0,
+    'beginner momentum, full-window z-score and streak use backend trend fields');
+  const shortSample = sandbox.PulseV5.beginnerSignalBoard({
+    strip: { t00Trend: { z20: 1.25, n: 8, z20N: 8 } }
+  }, {}, {});
+  ok(shortSample.indexOf('<em>Z</em>') >= 0 && shortSample.indexOf('1.25') >= 0 &&
+    shortSample.indexOf('樣本 8') >= 0 && shortSample.indexOf('n=8') >= 0 &&
+    shortSample.indexOf('<em>近20日Z</em>') < 0 && shortSample.indexOf('不估算') < 0 &&
+    shortSample.indexOf('/20') < 0 && shortSample.indexOf('z20N') < 0,
+    'a published z20 with n under 20 shows the backend value and actual n');
+  const emptySample = sandbox.PulseV5.beginnerSignalBoard({
+    strip: { t00Trend: { z20: null, n: 8, z20N: 12 } }
+  }, {}, {});
+  ok(emptySample.indexOf('<em>Z</em>') >= 0 && emptySample.indexOf('樣本 8') >= 0 &&
+    emptySample.indexOf('n=8') >= 0 && emptySample.indexOf('12') < 0 &&
+    emptySample.indexOf('<em>近20日Z</em>') < 0 && emptySample.indexOf('不估算') < 0 &&
+    emptySample.indexOf('—/20') < 0 && emptySample.indexOf('z20N') < 0,
+    'an empty z20 reads sample count n and ignores z20N');
+  ok(html.indexOf('+1.10%') >= 0 && html.indexOf('18.4') >= 0 && html.indexOf('>偏多<') >= 0,
+    'beginner global chips use SOX change, VIX level and aiSpill direction');
+  ok(html.indexOf('半導體') >= 0 && html.indexOf('航運') >= 0 && html.indexOf('2330') >= 0 && html.indexOf('2603') >= 0,
+    'beginner sector and mover chips use ranked sectors and mover rows');
+  ok(html.indexOf('法人買超') >= 0 && html.indexOf('融資偏高') >= 0 && html.indexOf('上行 72.5') >= 0 &&
+    html.indexOf('加權指數收破 S1 22800') >= 0,
+    'beginner decision chips use factors, precursor strength and invalidation');
+  ok(html.indexOf('自選強') >= 0 && html.indexOf('+1.50%') >= 0 && html.indexOf('自選弱') >= 0 && html.indexOf('-2.10%') >= 0,
+    'beginner watch chips use quotes already loaded with the pulse pack');
+  function chip(id) {
+    const value = { textContent: '', className: '' };
+    return {
+      title: '', attrs: {},
+      querySelector: function () { return value; },
+      setAttribute: function (key, val) { this.attrs[key] = val; },
+      removeAttribute: function (key) { delete this.attrs[key]; },
+      value: value
+    };
+  }
+  nodes.set('pl-focus-long', chip('pl-focus-long'));
+  nodes.set('pl-focus-short', chip('pl-focus-short'));
+  sandbox.PulseV5.paintBeginnerFocus({
+    ok: true, mkt: 'TW',
+    buy: [{ sym: '2454', mkt: 'TW', changePct: 2.2, rsi14: 61.8, score: 4.5, signals: ['多頭排列'] }],
+    short: [{ sym: '2609', mkt: 'TW', changePct: -3.1, rsi14: 28.4, score: 3.5, signals: ['空頭排列'] }]
+  });
+  ok(nodes.get('pl-focus-long').value.textContent === '2454 多頭排列 RSI 61.8' &&
+    nodes.get('pl-focus-short').value.textContent === '2609 空頭排列 RSI 28.4',
+    'focus chips print backend rsi14 and signal labels without recomputing');
+})();
 ok(pulseBeginner.includes('.pl-radar-card.tw .change.radar-pos,#pl-root .pl-radar-card.fut .change.radar-pos{color:var(--red)}') &&
   pulseBeginner.includes('.pl-radar-card.us .change.radar-pos{color:var(--green)}') &&
   /value > 0 \? 'radar-pos' : 'radar-neg'/.test(pulseBeginner) &&
@@ -391,16 +529,17 @@ ok(/id="pl-stock-check"/.test(pulseBeginner) && /function stockHealthAssessment/
   /stock_health_request_start/.test(pulseBeginner) && /\/twquote\?code=/.test(pulseBeginner) &&
   /function stockHealthRequest/.test(pulseBeginner) && /Promise\.race\(\[request, deadline\]\)/.test(pulseBeginner),
   'beginner stock health check is source-backed, traced and bounded by timeout');
-ok(/pl-beginner-signals/.test(pulseBeginner) && /今日短訊號/.test(pulseBeginner) &&
+ok(/今日短訊號/.test(pulseBeginner) && /pl-today-signals/.test(pulseBeginner) &&
+  /function todaySignalChip/.test(pulseBeginner) && /function renderBeginnerSignalStrip/.test(pulseBeginner) &&
   /function beginnerMaChip/.test(pulseBeginner) && /五日均/.test(pulseBeginner) &&
-  /t00Trend/.test(pulseBeginner) && /ma5/.test(pulseBeginner) && /不估算/.test(pulseBeginner) &&
+  /t00Trend/.test(pulseBeginner) && /ma5/.test(pulseBeginner) && /缺值時留空/.test(pulseBeginner) &&
   /function beginnerSpillChip/.test(pulseBeginner) && /aiSpill/.test(pulseBeginner) &&
   /科技外溢/.test(pulseBeginner) && /function beginnerFocusChip/.test(pulseBeginner) &&
   /focusHint/.test(pulseBeginner) && /rsi14/.test(pulseBeginner) && /不啟動新掃描/.test(pulseBeginner) &&
-  !/\/focus\?/.test(pulseBeginner) &&
+  /renderBeginnerSignalStrip\(ov, p\)/.test(pulseBeginner) &&
   /grid-template-columns:repeat\(5,minmax\(0,1fr\)\)/.test(pulseBeginner) &&
   /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/.test(pulseBeginner),
-  'beginner panel shows existing pulse signals with short labels and keeps the 5+2 grid');
+  'today signal row reuses the pulse payload beside the short-signal board and keeps the 5+2 grid');
 ok(/function stockHealthFallbackQuote/.test(pulseBeginner) && /stock_health_fallback_start/.test(pulseBeginner) &&
   /\/bars\?sym=/.test(pulseBeginner) && /\/yf\/batch\?syms=/.test(pulseBeginner) &&
   /歷史回顧/.test(pulseBeginner) && /相同日期與期間/.test(pulseBeginner) &&

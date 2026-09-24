@@ -43,6 +43,7 @@
   var _lastMacro = null;
   var _prevBand = null;
   var beginnerAdvanced = false;
+  var beginnerFocusState = { seq: 0, at: 0, data: null };
   var aiSummaryStarted = false;
   var aiSummaryVisible = false;
   var aiSpeechActive = false;
@@ -259,6 +260,16 @@
         'font:700 11px "Noto Sans TC",sans-serif;cursor:pointer}' +
       '@media(max-width:600px){#pl-root .pl-stock-result{grid-template-columns:1fr auto}#pl-root .pl-stock-result>div{grid-column:1/-1}}' +
       '#pl-root .pl-simple-signals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}' +
+      '#pl-root .pl-beginner-signals{margin-top:10px;background:#0a1423;border:1px solid #2a3e58;border-radius:10px;padding:10px 12px}' +
+      '#pl-root .pl-beginner-signals .head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px}' +
+      '#pl-root .pl-beginner-signals h3{font:900 14px/1.3 "Noto Sans TC",sans-serif;color:#edf5ff;margin:0}' +
+      '#pl-root .pl-beginner-signals .note{font:500 12px/1.4 "Noto Sans TC",sans-serif;color:#879bb2}' +
+      '#pl-root .pl-signal-chips{display:flex;flex-wrap:wrap;gap:6px}' +
+      '#pl-root .pl-signal-chip{display:inline-flex;align-items:baseline;gap:5px;max-width:100%;padding:5px 8px;' +
+        'border:1px solid #2b405c;border-radius:999px;background:#0d1727;font:700 12px/1.35 "Noto Sans TC",sans-serif;color:#d5e2f0}' +
+      '#pl-root .pl-signal-chip[data-go]{cursor:pointer}#pl-root .pl-signal-chip[data-go]:hover{border-color:#4c6684}' +
+      '#pl-root .pl-signal-chip em{font-style:normal;color:#8ea3ba;font-weight:700;white-space:nowrap}' +
+      '#pl-root .pl-signal-chip b{font-weight:800;color:#f4f8fc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}' +
       '#pl-root .pl-simple-card{position:relative;background:#0d1727;border:1px solid #293b54;border-radius:10px;padding:13px 14px;min-width:0;cursor:pointer}' +
       '#pl-root .pl-simple-card:hover{border-color:#49627f}' +
       '#pl-root .pl-simple-card .head{display:flex;align-items:center;gap:7px;color:#b6c6d8;font:700 13px "Noto Sans TC",sans-serif}' +
@@ -291,14 +302,14 @@
       '#pl-root .pl-beginner-signals-head h3{margin:0;font:800 14px/1.4 "Noto Sans TC",sans-serif;color:#e7eef8}' +
       '#pl-root .pl-beginner-signals-head span{font:500 12px/1.4 "Noto Sans TC",sans-serif;color:#879bb2}' +
       '#pl-root .pl-signal-chips{display:flex;flex-wrap:wrap;gap:6px}' +
-      '#pl-root .pl-signal-chip{position:relative;display:inline-flex;align-items:baseline;gap:6px;max-width:100%;min-width:0;' +
+      '#pl-root .pl-today-chip{position:relative;display:inline-flex;align-items:baseline;gap:6px;max-width:100%;min-width:0;' +
         'padding:6px 10px;border-radius:999px;border:1px solid #314862;background:#0d1727;color:inherit;cursor:pointer}' +
-      '#pl-root .pl-signal-chip em{font-style:normal;font:700 12px "Noto Sans TC",sans-serif;color:#93a8c0;white-space:nowrap}' +
-      '#pl-root .pl-signal-chip b{font:800 13px "Noto Sans TC",sans-serif;color:#f2f7ff;white-space:nowrap;' +
+      '#pl-root .pl-today-chip em{font-style:normal;font:700 12px "Noto Sans TC",sans-serif;color:#93a8c0;white-space:nowrap}' +
+      '#pl-root .pl-today-chip b{font:800 13px "Noto Sans TC",sans-serif;color:#f2f7ff;white-space:nowrap;' +
         'max-width:8em;overflow:hidden;text-overflow:ellipsis}' +
-      '#pl-root .pl-signal-chip .detail{font:500 12px "Noto Sans TC",sans-serif;color:#b7c6d8;min-width:0;' +
+      '#pl-root .pl-today-chip .detail{font:500 12px "Noto Sans TC",sans-serif;color:#b7c6d8;min-width:0;' +
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}' +
-      '#pl-root .pl-signal-chip .pl-method-pop{top:calc(100% + 4px);left:0;right:auto;width:min(280px,72vw);white-space:normal}' +
+      '#pl-root .pl-today-chip .pl-method-pop{top:calc(100% + 4px);left:0;right:auto;width:min(280px,72vw);white-space:normal}' +
       '#pl-root .pl-market-radar{margin-top:10px;background:#0a1423;border:1px solid #2a3e58;border-radius:10px;padding:12px 13px}' +
       '#pl-root .pl-market-radar-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:9px}' +
       '#pl-root .pl-market-radar-head h3{font:900 16px "Noto Sans TC",sans-serif;color:#edf5ff;margin:0}' +
@@ -376,7 +387,9 @@
         '#pl-root .pl-stock-check input{width:145px;padding:3px 6px}' +
         '#pl-root .pl-stock-check button{padding:3px 7px}' +
         '#pl-root .pl-simple-signals{gap:7px;margin-top:7px}' +
-        '#pl-root .pl-beginner-signals{margin-top:6px}' +
+        '#pl-root .pl-beginner-signals{margin-top:7px;padding:8px 10px}' +
+        '#pl-root .pl-beginner-signals .head{margin-bottom:6px}' +
+        '#pl-root .pl-today-signals{margin-top:6px}' +
         '#pl-root .pl-signal-chips{gap:5px}' +
         '#pl-root .pl-simple-card{padding:8px 10px}' +
         '#pl-root .pl-simple-card .main{margin:5px 0 3px}' +
@@ -404,7 +417,8 @@
         '#pl-root .pl-hero-foot{flex-direction:column}#pl-root .pl-stock-check{width:min(100%,340px);max-width:100%}' +
         '#pl-root .pl-stock-check input{width:auto;min-width:0;flex:1 1 auto}#pl-root .pl-stock-check button{flex:0 0 auto}' +
         '#pl-root .pl-simple-signals,#pl-root .pl-market-radar-grid{grid-template-columns:1fr}#pl-root .pl-safe-box{grid-template-columns:1fr}' +
-        '#pl-root .pl-signal-chip .detail{max-width:46vw}' +
+        '#pl-root .pl-signal-chip b{max-width:min(220px,68vw)}' +
+        '#pl-root .pl-today-chip .detail{max-width:46vw}' +
         '#pl-root .pl-safe-sep{width:100%;height:1px}#pl-root .pl-beginner-actions{justify-content:center}' +
         '#pl-root .pl-advanced-grid{grid-template-columns:1fr 1fr}}' +
       /* 舊 pl-expanded 已廢止：因子帳本改獨立頁，禁止再開 overflow:auto 撐破頂列 */
@@ -2476,8 +2490,8 @@
       '</div></div>';
   }
 
-  function beginnerChip(spec) {
-    return '<div class="pl-signal-chip" data-method-card role="button" tabindex="0" aria-expanded="false" title="點擊查看資料來源">' +
+  function todaySignalChip(spec) {
+    return '<div class="pl-today-chip" data-method-card role="button" tabindex="0" aria-expanded="false" title="點擊查看資料來源">' +
       '<em>' + esc(spec.label) + '</em><b>' + esc(spec.main) + '</b>' +
       '<span class="detail">' + esc(spec.detail) + '</span>' +
       '<div class="pl-method-pop" hidden>' + esc(spec.method) +
@@ -2499,9 +2513,9 @@
     var mom = radarNumber(tr.momScore);
     var n = tr.n == null || !isFinite(Number(tr.n)) ? null : Number(tr.n);
     var method = '五日均沿用後端 trend_quant 的 ma5：最近至多 5 筆收盤的算術平均（SMA）。' +
-      '偏離 vsMa5Pct＝(收盤−ma5)÷ma5。樣本未滿 5 日或欄位是空值時只顯示等待，前端不估算。';
+      '偏離 vsMa5Pct＝(收盤−ma5)÷ma5。樣本未滿 5 日或欄位是空值時只顯示等待，缺值時留空。';
     if (ma5 == null) {
-      return beginnerChip({
+      return todaySignalChip({
         label: '五日均', main: '等待均線', detail: '後端尚未給出 ma5',
         method: method, go: 'chart', sym: '^TWII'
       });
@@ -2510,7 +2524,7 @@
     var bits = [sample];
     if (vs != null) bits.push('vs5 ' + pct(vs));
     if (mom != null) bits.push('動能 ' + mom.toFixed(0));
-    return beginnerChip({
+    return todaySignalChip({
       label: '五日均',
       main: tr.level || tr.trend || '均線已更新',
       detail: bits.join(' · ') + ' · ' + fmt(ma5, 2),
@@ -2528,7 +2542,7 @@
     if (score != null) bits.push(score.toFixed(1));
     if (pressure) bits.push('壓力 ' + pressure);
     if (support) bits.push('支撐 ' + support);
-    return beginnerChip({
+    return todaySignalChip({
       label: '風險',
       main: label,
       detail: bits.join(' · ') || '風險分尚未形成',
@@ -2542,7 +2556,7 @@
     var spill = (p && p.aiSpill) || {};
     var method = '科技外溢沿用 pulse.aiSpill，來源是同一包 global 的費半、那指與 VIX。缺費半與那指時 ok 為 false，前端不另抓、不補方向。';
     if (spill.ok !== true) {
-      return beginnerChip({
+      return todaySignalChip({
         label: '科技外溢', main: '等待外溢', detail: '費半與那指尚未齊',
         method: method, go: 'international'
       });
@@ -2553,7 +2567,7 @@
     if (radarNumber(spill.soxChangePct) != null) bits.push('費半 ' + pct(spill.soxChangePct));
     if (radarNumber(spill.ixicChangePct) != null) bits.push('那指 ' + pct(spill.ixicChangePct));
     if (radarNumber(spill.vixLevel) != null) bits.push('VIX ' + Number(spill.vixLevel).toFixed(1));
-    return beginnerChip({
+    return todaySignalChip({
       label: '科技外溢',
       main: spill.factorName || dir,
       detail: bits.join(' · ') || dir,
@@ -2567,7 +2581,7 @@
     var up = strip.limitUp;
     var down = strip.limitDown;
     var ready = up != null && down != null && isFinite(Number(up)) && isFinite(Number(down));
-    return beginnerChip({
+    return todaySignalChip({
       label: '漲跌停',
       main: ready ? ('漲 ' + fmt(up, 0) + ' · 跌 ' + fmt(down, 0)) : '等待家數',
       detail: '官方家數',
@@ -2589,7 +2603,7 @@
     if (hasHot && hasCold) detail = pct(hotPct) + ' · 落後 ' + cold.name + ' ' + pct(coldPct);
     else if (hasHot) detail = pct(hotPct);
     else if (hasCold) detail = '落後 ' + cold.name + ' ' + pct(coldPct);
-    return beginnerChip({
+    return todaySignalChip({
       label: '產業',
       main: hasHot ? hot.name : (hasCold ? cold.name : '等待產業'),
       detail: detail,
@@ -2605,11 +2619,11 @@
     var lows = radarNumber(nhnl.newLows);
     var sample = radarNumber(nhnl.sampleN);
     var ready = highs != null && lows != null;
-    return beginnerChip({
+    return todaySignalChip({
       label: '新高低',
       main: ready ? ('高 ' + fmt(highs, 0) + ' · 低 ' + fmt(lows, 0)) : '等待新高低',
       detail: sample == null ? '250 日' : ('樣本 ' + fmt(sample, 0) + ' 檔'),
-      method: '250 日新高／新低家數沿用 pulse.extras.nhnl。樣本不足時後端不計入因子，這裡也不估算家數。',
+      method: '250 日新高／新低家數沿用 pulse.extras.nhnl。樣本不足時後端不計入因子，這裡也不補家數。',
       go: 'breadth'
     });
   }
@@ -2633,14 +2647,14 @@
       '強度是證據強度，不是上漲機率。' +
       (invalidation ? ' 失效條件：' + invalidation : '');
     if (!lead) {
-      return beginnerChip({
+      return todaySignalChip({
         label: '預警', main: rows.length ? '預警平穩' : '等待預警',
         detail: rows[0] ? String(rows[0].label) : '決策摘要尚未附預警',
         method: method, go: 'decision'
       });
     }
     var strength = radarNumber(lead.strength);
-    return beginnerChip({
+    return todaySignalChip({
       label: '預警',
       main: hot[lead.state] || '留意',
       detail: String(lead.label) + (strength == null ? '' : ' · 強度 ' + strength.toFixed(0)),
@@ -2664,7 +2678,7 @@
     var detail = [];
     if (upText) detail.push('近漲停 ' + upText);
     if (downText) detail.push('跌幅 ' + downText);
-    return beginnerChip({
+    return todaySignalChip({
       label: '漲跌榜',
       main: (upAll.length || downAll.length) ? ('漲 ' + upAll.length + ' · 跌 ' + downAll.length) : '尚無極端漲跌',
       detail: detail.join(' · ') || '沿用 movers 清單',
@@ -2677,7 +2691,7 @@
   function beginnerBondChip(p) {
     var bond = (p && p.us10y) || {};
     var value = radarNumber(bond.value);
-    return beginnerChip({
+    return todaySignalChip({
       label: '美債',
       main: value == null ? '等待美債' : (value.toFixed(2) + '%'),
       detail: bond.date ? String(bond.date) : '美國十年期',
@@ -2690,7 +2704,7 @@
     var pillars = (p && p.pillars) || {};
     var ratio = radarNumber(pillars.marginRatio);
     var zone = typeof pillars.riskZone === 'string' ? pillars.riskZone : '';
-    return beginnerChip({
+    return todaySignalChip({
       label: '融資',
       main: ratio == null ? '等待融資' : (ratio.toFixed(2) + '%'),
       detail: zone || '維持率',
@@ -2701,7 +2715,7 @@
 
   function beginnerPeChip(p) {
     var pe = radarNumber(((p && p.pillars) || {}).medianPE);
-    return beginnerChip({
+    return todaySignalChip({
       label: '本益比',
       main: pe == null ? '等待本益比' : (pe.toFixed(1) + ' 倍'),
       detail: '全市場中位',
@@ -2718,7 +2732,7 @@
       'RSI(14) 使用掃描當下的後端 Wilder 值，SMA 訊號只顯示後端已寫入的名稱。' +
       '快取沒有結果時不啟動新掃描，也不在此重算。';
     if (hint.ok !== true || (!buy && !sell)) {
-      return beginnerChip({
+      return todaySignalChip({
         label: '焦點', main: '尚未掃描', detail: '開啟熱力頁後才會有快取',
         method: method, go: 'heat'
       });
@@ -2730,7 +2744,7 @@
     if (radarNumber(lead.rsi14) != null) bits.push('RSI ' + Number(lead.rsi14).toFixed(1));
     if (radarNumber(lead.changePct) != null) bits.push(pct(lead.changePct));
     if (sell && sell.sym) bits.push('做空 ' + sell.sym);
-    return beginnerChip({
+    return todaySignalChip({
       label: '焦點',
       main: side + ' ' + (lead.sym || ''),
       detail: bits.join(' · ') || (lead.name || '焦點快取'),
@@ -2742,7 +2756,7 @@
   }
 
   function renderBeginnerSignalStrip(ov, p) {
-    return '<section class="pl-beginner-signals" aria-label="今日短訊號">' +
+    return '<section class="pl-today-signals" aria-label="今日短訊號">' +
       '<div class="pl-beginner-signals-head"><h3>今日短訊號</h3>' +
       '<span>沿用本頁已有資料</span></div><div class="pl-signal-chips">' +
       beginnerMaChip(ov) +
@@ -2760,7 +2774,368 @@
       '</div></section>';
   }
 
-  function renderBeginner(ov, p) {
+  function beginnerChip(opts) {
+    opts = opts || {};
+    var go = opts.go ? ' data-go="' + esc(opts.go) + '"' +
+      (opts.sym ? ' data-sym="' + esc(opts.sym) + '"' : '') +
+      (opts.mkt ? ' data-mkt="' + esc(opts.mkt) + '"' : '') +
+      (opts.sector ? ' data-sector="' + esc(opts.sector) + '"' : '') +
+      ' role="link" tabindex="0"' : '';
+    return '<span class="pl-signal-chip"' + (opts.id ? ' id="' + esc(opts.id) + '"' : '') + go +
+      ' title="' + esc(opts.title || opts.label || '') + '"><em>' + esc(opts.label || '') +
+      '</em><b class="' + esc(opts.cls || '') + '">' + esc(opts.value == null ? '—' : opts.value) + '</b></span>';
+  }
+
+  function beginnerSectorExtremes(ov) {
+    var rows = ((ov && ov.sectorsRanked) || []).filter(function (row) {
+      return row && row.name && row.changePct != null && isFinite(Number(row.changePct));
+    });
+    if (!rows.length) return null;
+    var lead = rows[0], lag = rows[0];
+    rows.forEach(function (row) {
+      if (Number(row.changePct) > Number(lead.changePct)) lead = row;
+      if (Number(row.changePct) < Number(lag.changePct)) lag = row;
+    });
+    return { lead: lead, lag: lag };
+  }
+
+  function beginnerWatchExtremes(quotes) {
+    var rows = [];
+    readWatchlist().forEach(function (item) {
+      var quote = watchQuote(item, quotes);
+      var change = quote.changePct != null ? Number(quote.changePct) : Number(item.chg);
+      if (!isFinite(change)) return;
+      rows.push({
+        sym: String(item.t || ''),
+        name: item.name || '',
+        changePct: change,
+        mkt: watchIsUs(item) ? 'US' : (item.m || 'TW')
+      });
+    });
+    if (!rows.length) return null;
+    rows.sort(function (a, b) { return b.changePct - a.changePct; });
+    return { strong: rows[0], weak: rows[rows.length - 1], count: rows.length };
+  }
+
+  function beginnerPrecursorChip(summary) {
+    var warning = (summary && summary.earlyWarnings) || {};
+    var signals = warning.signals || [];
+    var thresholds = warning.thresholds || {};
+    var watch = radarNumber(thresholds.watchStrength);
+    if (watch == null) watch = 55;
+    var need = radarNumber(thresholds.watchIndependentDomains);
+    if (need == null) need = 2;
+    function find(id) {
+      for (var i = 0; i < signals.length; i++) {
+        if (signals[i] && signals[i].signalId === id) return signals[i];
+      }
+      return null;
+    }
+    var down = find('TW_DOWNSIDE_PRECURSOR');
+    var up = find('TW_ATTACK_BUILDUP');
+    if (!down && !up) {
+      return beginnerChip({
+        label: '前兆', value: '等待資料', go: 'decision',
+        title: 'decisionSummary.earlyWarnings 尚無下行或上行前兆'
+      });
+    }
+    function strengthOf(row) { return row ? radarNumber(row.strength) : null; }
+    var downStrength = strengthOf(down), upStrength = strengthOf(up);
+    var pick = downStrength == null ? up : upStrength == null ? down : (downStrength >= upStrength ? down : up);
+    var other = pick === down ? up : down;
+    var strength = strengthOf(pick);
+    var domains = pick ? radarNumber(pick.independentDomains) : null;
+    var ready = strength != null && strength >= watch && domains != null && domains >= need;
+    var side = pick && pick.signalId === 'TW_ATTACK_BUILDUP' ? '上行' : '下行';
+    var title = '證據強度不是上漲或下跌機率。注意門檻 ' + watch + '、獨立來源 ' + need + '。' +
+      (ready ? '目前已達注意門檻。' : '目前尚未同時達到強度與獨立來源門檻。') +
+      (pick && pick.label ? ' 標籤：' + pick.label + '。' : '');
+    if (other && strengthOf(other) != null) title += ' 另一側 ' + (other.label || '') + ' ' + strengthOf(other) + '。';
+    return beginnerChip({
+      label: '前兆',
+      value: side + ' ' + (strength == null ? '—' : String(strength)),
+      title: title,
+      go: 'decision'
+    });
+  }
+
+  function beginnerFactorChip(label, list) {
+    var row = (list || []).filter(function (item) { return item && item.name; })[0];
+    if (!row) {
+      return beginnerChip({
+        label: label, value: '等待資料', go: 'factors',
+        title: label + '因子尚無。來源：pulse.positiveFactors／riskFactors'
+      });
+    }
+    var score = radarNumber(row.score);
+    return beginnerChip({
+      label: label,
+      value: row.name,
+      go: 'factors',
+      title: row.name + (score == null ? '' : ' · 分數 ' + score) + '。沿用脈動因子帳本，不另計分。'
+    });
+  }
+
+  function beginnerFocusValue(row) {
+    if (!row) return '無符合';
+    var signal = (row.signals && row.signals[0]) || '焦點';
+    var rsi = row.rsi14 != null && isFinite(Number(row.rsi14)) ? (' RSI ' + Number(row.rsi14).toFixed(1)) : '';
+    return String(row.sym || '—') + ' ' + signal + rsi;
+  }
+
+  function beginnerZChip(trend) {
+    trend = trend || {};
+    var z20 = radarNumber(trend.z20);
+    var n = radarNumber(trend.n);
+    var nText = n == null ? '未提供' : String(Math.round(n));
+    var fullWindow = n != null && n >= 20;
+    var title = '後端 z20=' + (trend.z20 == null ? '空' : trend.z20) +
+      '，日線樣本 n=' + (trend.n == null ? '未提供' : trend.n) + '。沿用後端公布值，不另算。';
+    if (z20 != null && fullWindow) {
+      return beginnerChip({
+        label: '近20日Z',
+        value: Number(z20).toFixed(2) + ' · 樣本 ' + nText,
+        cls: tw(z20),
+        go: 'chart', sym: '^TWII', mkt: 'TW',
+        title: title + 'n 已滿 20，這是後端 20 日窗。'
+      });
+    }
+    if (z20 != null) {
+      return beginnerChip({
+        label: 'Z',
+        value: Number(z20).toFixed(2) + ' · 樣本 ' + nText,
+        cls: tw(z20),
+        go: 'chart', sym: '^TWII', mkt: 'TW',
+        title: title + 'n 未滿 20，不是完整 20 日 Z。'
+      });
+    }
+    return beginnerChip({
+      label: 'Z',
+      value: n == null ? '尚無' : ('樣本 ' + nText),
+      go: 'chart', sym: '^TWII', mkt: 'TW',
+      title: title + '後端沒有 Z 值。'
+    });
+  }
+
+  function beginnerSignalBoard(ov, p, quotes) {
+    var strip = (ov && ov.strip) || {};
+    var trend = strip.t00Trend || {};
+    var summary = p.decisionSummary || {};
+    var ma5 = radarNumber(trend.ma5);
+    var vsMa5 = radarNumber(trend.vsMa5Pct);
+    var mom = radarNumber(trend.momScore);
+    var streak = radarNumber(trend.streak);
+    var sox = radarGlobalQuote(p, ['^SOX']);
+    var vix = radarGlobalQuote(p, ['^VIX']);
+    var spill = p.aiSpill || {};
+    var spillLabel = { pos: '偏多', risk: '偏空', flat: '中性' };
+    var sectors = beginnerSectorExtremes(ov);
+    var ups = moverRows(p.movers, 'gainers');
+    var downs = moverRows(p.movers, 'losers');
+    var watch = beginnerWatchExtremes(quotes || {});
+    var invalidation = (summary.invalidation || []).filter(Boolean)[0] || '';
+    var chips = [
+      beginnerChip({
+        label: '五日均',
+        value: ma5 == null ? '等待日線' : (fmt(ma5, 2) + (vsMa5 == null ? '' : ' · ' + pct(vsMa5))),
+        cls: vsMa5 == null ? '' : tw(vsMa5),
+        go: 'chart', sym: '^TWII', mkt: 'TW',
+        title: '加權五日簡單移動平均。後端 trend_quant ma5=' + (trend.ma5 == null ? '—' : trend.ma5) +
+          '，vsMa5Pct=' + (trend.vsMa5Pct == null ? '—' : trend.vsMa5Pct) +
+          '。畫面兩位小數對齊指數報價，不在瀏覽器重算均線。'
+      }),
+      beginnerChip({
+        label: '動能',
+        value: mom == null ? '等待日線' : (Number(mom).toFixed(1) + (trend.trend ? ' · ' + trend.trend : '')),
+        go: 'chart', sym: '^TWII', mkt: 'TW',
+        title: '後端 momScore=' + (trend.momScore == null ? '—' : trend.momScore) +
+          (trend.level ? ' · 水位 ' + trend.level : '') + '。動能分由 vs5、Z20 與漲跌合成。'
+      }),
+      beginnerZChip(trend),
+      beginnerChip({
+        label: '連漲跌',
+        value: streak == null ? '—' : streak > 0 ? ('連漲 ' + Math.round(streak) + ' 日') :
+          streak < 0 ? ('連跌 ' + Math.round(Math.abs(streak)) + ' 日') : '無連續',
+        cls: streak == null || streak === 0 ? 'flat' : tw(streak),
+        go: 'chart', sym: '^TWII', mkt: 'TW',
+        title: '後端 t00Trend.streak=' + (trend.streak == null ? '—' : trend.streak) + '。日線連續漲跌，不是盤中分K。'
+      }),
+      beginnerChip({
+        label: '費半',
+        value: sox.changePct == null ? '等待報價' : pct(sox.changePct),
+        cls: marketCls(sox.changePct, 'US'),
+        go: 'international',
+        title: 'pulse.global ^SOX' + (sox.price == null ? '' : ' · ' + sox.price) + '。美股上漲為綠色。'
+      }),
+      beginnerChip({
+        label: '恐慌',
+        value: radarNumber(vix.price) == null ? '等待報價' : Number(vix.price).toFixed(1),
+        go: 'international',
+        title: 'pulse.global ^VIX 點位' + (vix.price == null ? '' : '=' + vix.price) +
+          (vix.changePct == null ? '' : '，漲跌 ' + pct(vix.changePct)) + '。點位本身不上漲跌色。'
+      }),
+      beginnerChip({
+        label: '外溢',
+        value: spill.ok ? (spillLabel[spill.direction] || '中性') : '尚無',
+        go: 'international',
+        title: spill.ok
+          ? ('pulse.aiSpill direction=' + (spill.direction || '—') +
+            (spill.factorName ? ' · ' + spill.factorName : '') +
+            ' · 費半 ' + (spill.soxChangePct == null ? '—' : spill.soxChangePct) +
+            ' · 那指 ' + (spill.ixicChangePct == null ? '—' : spill.ixicChangePct) +
+            ' · VIX ' + (spill.vixLevel == null ? '—' : spill.vixLevel))
+          : 'AI／科技外溢需要費半或那指；缺資料不另估。'
+      }),
+      beginnerChip({
+        label: '領漲',
+        value: sectors ? (sectors.lead.name + ' ' + pct(sectors.lead.changePct)) : '等待類股',
+        cls: sectors ? tw(sectors.lead.changePct) : '',
+        go: 'heat', sector: sectors ? sectors.lead.name : '',
+        title: 'pulse.overview.sectorsRanked 漲跌幅最高的類股。'
+      }),
+      beginnerChip({
+        label: '領跌',
+        value: !sectors || sectors.lag === sectors.lead ? '—' : (sectors.lag.name + ' ' + pct(sectors.lag.changePct)),
+        cls: sectors && sectors.lag !== sectors.lead ? tw(sectors.lag.changePct) : '',
+        go: sectors && sectors.lag !== sectors.lead ? 'heat' : '',
+        sector: sectors && sectors.lag !== sectors.lead ? sectors.lag.name : '',
+        title: 'pulse.overview.sectorsRanked 漲跌幅最低的類股。'
+      }),
+      beginnerChip({
+        label: '近漲停',
+        value: ups.length ? (ups.length + ' 檔 · ' + (ups[0].code || '') + (ups[0].name ? ' ' + ups[0].name : '')) : '尚無',
+        cls: ups.length ? 'up' : 'flat',
+        go: ups.length ? 'chart' : 'breadth',
+        sym: ups.length ? ups[0].code : '',
+        mkt: 'TW',
+        title: 'movers.limitUp；不足時沿用上市 ≥9.9% 的 gainers。與官方漲停家數不同。'
+      }),
+      beginnerChip({
+        label: '重跌',
+        value: downs.length ? ((downs[0].code || '') + (downs[0].name ? ' ' + downs[0].name : '') + ' ' + pct(downs[0].changePct)) : '尚無',
+        cls: downs.length ? 'dn' : 'flat',
+        go: downs.length ? 'chart' : 'breadth',
+        sym: downs.length ? downs[0].code : '',
+        mkt: 'TW',
+        title: 'movers.limitDown；不足時沿用跌幅 ≤ -7% 的 losers。'
+      }),
+      beginnerChip({
+        label: '官方漲停',
+        value: strip.limitUp == null || !isFinite(Number(strip.limitUp)) ? '—' : String(Math.round(Number(strip.limitUp))),
+        go: 'breadth',
+        title: '證交所 MI_INDEX 股票欄括號內漲停家數。不是近漲停清單。'
+      }),
+      beginnerChip({
+        label: '官方跌停',
+        value: strip.limitDown == null || !isFinite(Number(strip.limitDown)) ? '—' : String(Math.round(Number(strip.limitDown))),
+        go: 'breadth',
+        title: '證交所 MI_INDEX 股票欄括號內跌停家數。'
+      }),
+      beginnerFactorChip('支撐', p.positiveFactors),
+      beginnerFactorChip('壓力', p.riskFactors),
+      beginnerPrecursorChip(summary),
+      beginnerChip({
+        label: '失效',
+        value: invalidation || '尚無',
+        go: 'decision',
+        title: invalidation || 'decisionSummary.invalidation 尚無'
+      })
+    ];
+    if (!watch) {
+      chips.push(beginnerChip({
+        label: '自選', value: '尚未加入', go: 'watchlist',
+        title: '自選報價沿用總覽已讀取的 wlQuotes。'
+      }));
+    } else if (watch.count === 1 || watch.strong.sym === watch.weak.sym) {
+      chips.push(beginnerChip({
+        label: '自選',
+        value: watch.strong.sym + ' ' + pct(watch.strong.changePct),
+        cls: marketCls(watch.strong.changePct, watch.strong.mkt),
+        go: 'chart', sym: watch.strong.sym, mkt: watch.strong.mkt,
+        title: '自選漲跌來自總覽 wlQuotes，缺報價時用清單既有 chg。'
+      }));
+    } else {
+      chips.push(beginnerChip({
+        label: '自選強',
+        value: watch.strong.sym + ' ' + pct(watch.strong.changePct),
+        cls: marketCls(watch.strong.changePct, watch.strong.mkt),
+        go: 'chart', sym: watch.strong.sym, mkt: watch.strong.mkt,
+        title: '自選池漲幅最大。報價來自總覽 wlQuotes。'
+      }));
+      chips.push(beginnerChip({
+        label: '自選弱',
+        value: watch.weak.sym + ' ' + pct(watch.weak.changePct),
+        cls: marketCls(watch.weak.changePct, watch.weak.mkt),
+        go: 'chart', sym: watch.weak.sym, mkt: watch.weak.mkt,
+        title: '自選池跌幅最大。報價來自總覽 wlQuotes。'
+      }));
+    }
+    chips.push(beginnerChip({
+      id: 'pl-focus-long', label: '做多', value: '讀取焦點', go: 'heat',
+      title: '沿用既有 /focus 快取。RSI 只顯示後端 rsi14，不在瀏覽器重算。'
+    }));
+    chips.push(beginnerChip({
+      id: 'pl-focus-short', label: '做空', value: '讀取焦點', go: 'heat',
+      title: '沿用既有 /focus 快取。RSI 只顯示後端 rsi14，不在瀏覽器重算。'
+    }));
+    return '<section class="pl-beginner-signals" aria-label="短訊號"><div class="head"><h3>短訊號</h3>' +
+      '<span class="note">沿用總覽同一包，不另估指標</span></div><div class="pl-signal-chips">' +
+      chips.join('') + '</div></section>';
+  }
+
+  function paintBeginnerFocus(payload) {
+    var longChip = $('pl-focus-long');
+    var shortChip = $('pl-focus-short');
+    if (!longChip || !shortChip || pulseMode !== 'beginner') return;
+    function paint(el, row, emptyTitle) {
+      var value = el.querySelector('b');
+      if (!payload || payload.ok === false || payload == null) {
+        if (value) { value.textContent = '尚未就緒'; value.className = 'flat'; }
+        el.title = '既有 /focus 尚未回傳，不另開掃描管線。';
+        return;
+      }
+      if (!row) {
+        if (value) { value.textContent = '無符合'; value.className = 'flat'; }
+        el.title = emptyTitle;
+        el.setAttribute('data-go', 'heat');
+        el.removeAttribute('data-sym');
+        return;
+      }
+      if (value) {
+        value.textContent = beginnerFocusValue(row);
+        value.className = marketCls(row.changePct, row.mkt || payload.mkt || 'TW');
+      }
+      el.title = (row.sym || '') + ' ' + ((row.signals || []).join('、') || '焦點') +
+        (row.rsi14 == null ? ' · 後端未提供 rsi14' : ' · 後端 rsi14=' + row.rsi14) +
+        (row.score == null ? '' : ' · 分數 ' + row.score);
+      el.setAttribute('data-go', 'chart');
+      el.setAttribute('data-sym', row.sym || '');
+      el.setAttribute('data-mkt', row.mkt || payload.mkt || 'TW');
+    }
+    var buy = payload && payload.buy && payload.buy[0];
+    var shortRow = payload && payload.short && payload.short[0];
+    paint(longChip, buy, '既有 /focus.buy 目前無符合');
+    paint(shortChip, shortRow, '既有 /focus.short 目前無符合');
+  }
+
+  function loadBeginnerFocus() {
+    var now = Date.now();
+    if (beginnerFocusState.data && beginnerFocusState.data.ok && now - beginnerFocusState.at < 180000) {
+      paintBeginnerFocus(beginnerFocusState.data);
+      return;
+    }
+    var seq = ++beginnerFocusState.seq;
+    jget('/focus?mkt=TW').then(function (payload) {
+      if (seq !== beginnerFocusState.seq) return;
+      if (payload && payload.ok) {
+        beginnerFocusState.data = payload;
+        beginnerFocusState.at = Date.now();
+      }
+      if (pulseMode === 'beginner') paintBeginnerFocus(payload);
+    });
+  }
+
+  function renderBeginner(ov, p, quotes) {
     var model = beginnerModel(ov, p);
     traceBeginnerBoundaries(model);
     var breadth = beginnerBreadth(model);
@@ -2799,6 +3174,7 @@
         beginnerSignal('💰', '大戶動向', money, '大戶：三大法人買賣合計', 'institutional', 'pl-beginner-money') +
         beginnerSignal('🔋', '動能氣氛', volume, '動能：市場成交量是否活躍', 'afterhours') +
       '</div>' +
+      beginnerSignalBoard(ov, p, quotes) +
       renderBeginnerSignalStrip(ov, p) +
       renderMarketRadar(ov, p) +
       '<div class="pl-safe-box" title="' + esc(model.levelsStale ? staleDistance : '依前一交易日高低收計算；不是保證價位') + '">' +
@@ -4053,38 +4429,33 @@
   }
 
   function moverRows(movers, side) {
-    /* 與新手漲跌榜同一套篩選：近漲停優先後端 limitUp；跌幅優先 limitDown。 */
     if (side === 'gainers') {
-      var list = ((movers && movers.limitUp) || []).slice();
-      if (!list.length) {
-        list = ((movers && movers.gainers) || []).filter(function (r) {
-          return r && r.ex !== 'TPEx' && r.changePct != null && r.changePct >= 9.9 &&
-            /^[1-9]\d{3}$/.test(String(r.code || ''));
-        });
-      }
-      return list;
+      var ups = ((movers && movers.limitUp) || []).slice(0, 10);
+      if (ups.length) return ups;
+      return ((movers && movers.gainers) || []).filter(function (r) {
+        return r && r.ex !== 'TPEx' && r.changePct != null && r.changePct >= 9.9 &&
+          /^[1-9]\d{3}$/.test(String(r.code || ''));
+      }).slice(0, 10);
     }
-    var bad = ((movers && movers.limitDown) || []).slice();
-    if (!bad.length) {
-      bad = ((movers && movers.losers) || []).filter(function (r) {
+    var downs = ((movers && movers.limitDown) || []).slice();
+    if (!downs.length) {
+      downs = ((movers && movers.losers) || []).filter(function (r) {
         return r && r.changePct != null && r.changePct <= -7;
       });
     }
-    return bad;
+    return downs.slice(0, 10);
   }
 
   function renderMovers(movers, side) {
     var V = window.Viz;
-    var list = [];
+    var list = moverRows(movers, side);
     var title, empty, note;
     if (side === 'gainers') {
       /* 優先用後端 limitUp（上市普通股 ≥9.9%）；勿與頂列官方括號家數混為一談 */
-      list = moverRows(movers, 'gainers').slice(0, 10);
       title = '近漲停';
       empty = '尚無上市個股接近漲停（≥9.9%）';
       note = '上市≥9.9%・≠頂列官方家數';
     } else {
-      list = moverRows(movers, 'losers').slice(0, 10);
       title = '跌幅異常';
       empty = '尚無大幅下跌標的';
       note = '';
@@ -4803,10 +5174,11 @@
 
     if (pulseMode === 'beginner') {
       body.className = 'pl-mode-beginner';
-      body.innerHTML = renderBeginner(ov, p);
+      body.innerHTML = renderBeginner(ov, p, pack.wlQuotes || {});
       bind(body);
       bindBeginner();
       fillBeginnerInstitutional(ov, p);
+      loadBeginnerFocus();
       probeLayoutCols();
       return;
     }
@@ -5028,6 +5400,8 @@
     refresh: function () { return refresh(true); },
     formatYiCompact: formatYiCompact,
     buildWatchThemeResonance: buildWatchThemeResonance,
+    beginnerSignalBoard: beginnerSignalBoard,
+    paintBeginnerFocus: paintBeginnerFocus,
     /** 相容舊呼叫：改導向獨立因子頁 */
     focusFactors: function () {
       if (window.ShellV5 && ShellV5.go) ShellV5.go('factors');
