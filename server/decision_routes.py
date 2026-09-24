@@ -12,6 +12,7 @@ from http_boundary import BodyReadError, read_json_body
 
 
 _HOLDING_SYMBOL = re.compile(r'^[A-Za-z0-9^._=-]{1,20}$')
+_TW_SIMULATION_SYMBOL = re.compile(r'^\d{4,6}[A-Z]?(?:\.TW|\.TWO)?$')
 _NUMERIC_RISK_FIELDS = (
     'baseGrossExposure', 'maxGrossExposure', 'maxLeverage', 'maxSingleNameWeight',
     'maxSectorWeight', 'maxPortfolioBeta', 'maxDailyVaR',
@@ -26,6 +27,9 @@ class DecisionRoutesMixin:
             return None, exc
 
     def _decision_payload(self, body: dict) -> tuple[dict | None, str | None]:
+        portfolio_kind = str(body.get('portfolioKind') or 'actual')
+        if portfolio_kind not in ('actual', 'observation_pool', 'simulation'):
+            return None, '投組模式僅接受 actual、observation_pool 或 simulation'
         risk_profile = body.get('riskProfile')
         if risk_profile is not None and not isinstance(risk_profile, dict):
             return None, 'riskProfile must be an object or null'
@@ -50,12 +54,26 @@ class DecisionRoutesMixin:
         if isinstance(holdings, list) and len(holdings) > 80:
             return None, 'holdings supports at most 80 rows'
         clean_holdings = []
+        simulation_symbols = set()
         for idx, row in enumerate(holdings or []):
             if not isinstance(row, dict):
                 return None, f'holdings[{idx}] must be an object'
             symbol = str(row.get('sym') or '').strip()
             if not _HOLDING_SYMBOL.fullmatch(symbol):
                 return None, f'holdings[{idx}].sym is invalid'
+            if portfolio_kind == 'simulation':
+                market = str(row.get('market') if row.get('market') is not None else 'TW').upper()
+                currency = str(row.get('currency') if row.get('currency') is not None else 'TWD').upper()
+                if (market != 'TW' or currency != 'TWD' or
+                        not _TW_SIMULATION_SYMBOL.fullmatch(symbol.upper())):
+                    return None, '情境風險引擎目前僅支援可確認的台股 TW／TWD，其他市場與幣別尚未支援'
+                if row.get('weight') is None or isinstance(row.get('weight'), bool):
+                    return None, f'情境第 {idx + 1} 列必須明確提供正權重'
+                normalized = symbol.upper().removesuffix('.TWO').removesuffix('.TW')
+                if normalized in simulation_symbols:
+                    return None, f'情境標的重複：{normalized}'
+                simulation_symbols.add(normalized)
+                symbol = normalized
             try:
                 weight = float(row.get('weight', 1))
             except (TypeError, ValueError):
@@ -64,13 +82,16 @@ class DecisionRoutesMixin:
                 return None, f'holdings[{idx}].weight must be positive'
             clean_holdings.append({'sym': symbol, 'weight': weight})
 
-        portfolio_kind = str(body.get('portfolioKind') or 'actual')
-        if portfolio_kind not in ('actual', 'observation_pool'):
-            return None, 'portfolioKind must be actual or observation_pool'
+        input_status = body.get('portfolioInputStatus') or ('complete' if clean_holdings else 'empty')
+        if input_status not in ('complete', 'empty', 'incomplete'):
+            return None, '投組輸入狀態不正確'
+        if (input_status == 'complete') != bool(clean_holdings):
+            return None, '投組輸入狀態與完整持倉不一致'
         return {
             'riskProfile': risk_profile,
             'holdings': clean_holdings,
             'portfolioKind': portfolio_kind,
+            'portfolioInputStatus': input_status,
         }, None
 
     def _handle_decision_context(self):
@@ -96,13 +117,15 @@ class DecisionRoutesMixin:
             try:
                 import portfolio
                 sector_map = None
-                hook = getattr(self, '_decision_sector_map', None)
+                hook = getattr(self, '_decision_saved_sector_map' if portfolio_kind == 'simulation'
+                               else '_decision_sector_map', None)
                 if callable(hook):
                     sector_map = hook()
                 overlay = portfolio.compute(holdings, sectors_map=sector_map)
             except Exception as exc:
                 overlay = {'error': str(exc)}
-        out = dc.rebuild_latest(risk_profile=risk_profile, portfolio_overlay=overlay, portfolio_kind=portfolio_kind)
+        out = dc.rebuild_latest(risk_profile=risk_profile, portfolio_overlay=overlay, portfolio_kind=portfolio_kind,
+                                portfolio_input_status=payload['portfolioInputStatus'])
         self._ok(json.dumps(out, ensure_ascii=False).encode())
 
     def _handle_decision_history(self):

@@ -192,7 +192,9 @@ class PrivateWebReleaseTests(unittest.TestCase):
         extras = {'wavedeck/web/css/deck.css', 'START_WAVEDECK.cmd'}
         calls = []
 
-        def run(argv, *, cwd, capture=False):
+        receipts = []
+
+        def run(argv, *, cwd, capture=False, env=None):
             calls.append(argv)
             if argv[0] == 'git':
                 with zipfile.ZipFile(argv[argv.index('--output') + 1], 'w') as archive:
@@ -202,17 +204,31 @@ class PrivateWebReleaseTests(unittest.TestCase):
                 for relative in extras:
                     self.assertEqual((cwd / relative).read_text(encoding='utf-8'), '受測內容',
                                      '完整封存內容必須保留至組建與全部自測結束')
+                if argv[0] == 'node' and argv[1].endswith('_browser.cjs'):
+                    output = Path(env['ST_BROWSER_OUTPUT']).resolve()
+                    self.assertFalse(output.is_relative_to(cwd.resolve()))
+                    self.assertTrue(output.is_relative_to(self.install_root.resolve()))
+                    receipt = output / '版面驗收.json'
+                    receipt.write_text('{"通過":true}', encoding='utf-8')
+                    receipts.append(receipt)
 
         with patch.object(release, 'resolve_commit', return_value=(commit, commit[:12])), \
                 patch.object(release, '_run', run), patch.object(release.shutil, 'which', return_value='node'):
             staged = release.stage_release(self.install_root, ref=commit)
-        self.assertEqual([argv[1] for argv in calls if argv[0] == 'node'], sorted(selftests))
+        self.assertEqual([argv[1] for argv in calls if argv[0] == 'node'], sorted(selftests) +
+                         ['tests/研究工作台_browser.cjs', 'tests/手機橫向五欄_browser.cjs',
+                          'tests/外殼研究互動_browser.cjs', 'tests/選股候選_browser.cjs'])
         python_tests = next(argv for argv in calls if '-m' in argv)
         for test in ['tests.test_決策資料品質', 'tests.test_發布完整性',
-                     'tests.test_decision_context', 'tests.test_decision_http']:
+                     'tests.test_decision_context', 'tests.test_decision_http',
+                     'tests.test_情境投組HTTP']:
             self.assertIn(test, python_tests)
         manifest = release._read_manifest(staged / release.MANIFEST_NAME)
         release._validate_integrity(staged, manifest)
+        self.assertEqual(len(receipts), 4)
+        self.assertTrue(all(receipt.is_file() for receipt in receipts))
+        self.assertFalse((staged / 'scratch').exists())
+        self.assertNotIn('scratch', manifest['managedTopLevel'])
         for name in release.PRIVATE_RELEASE_EXCLUDES:
             self.assertFalse((staged / name).exists(), '私人網站發布產物不得包含 WaveDeck 執行內容')
             self.assertNotIn(name, manifest['managedTopLevel'])

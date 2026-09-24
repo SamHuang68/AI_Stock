@@ -81,32 +81,120 @@
   // candles: [{time,open,high,low,close,volume}]
   // opts: {tp:0.15, sl:0.08, maxBars:20, short:false}
   function run(candles, signalArr, opts) {
-    opts = Object.assign({ tp: 0.15, sl: 0.08, maxBars: 20, short: false }, opts || {});
-    const c = colsOf(candles);
-    const trades = [];
-    let equity = 1, peak = 1, maxDD = 0;
-    const curve = [];
-    let i = 0;
-    while (i < candles.length) {
-      if (signalArr[i]) {
-        const entry = c.close[i];
-        let exit = entry, exitBar = i, reason = 'time';
-        for (let j = i + 1; j < candles.length && j <= i + opts.maxBars; j++) {
-          const ret = opts.short ? (entry - c.close[j]) / entry : (c.close[j] - entry) / entry;
-          if (ret >= opts.tp) { exit = c.close[j]; exitBar = j; reason = 'tp'; break; }
-          if (ret <= -opts.sl) { exit = c.close[j]; exitBar = j; reason = 'sl'; break; }
-          exit = c.close[j]; exitBar = j;
+    return simulate(candles, signalArr, null, Object.assign({ tp: .15, sl: .08, maxBars: 20 }, opts || {}));
+  }
+
+  const ENGINE_VERSION = 'backtest-next-open/2026-09-v1';
+  const positive = value => Number.isFinite(value) && value > 0;
+  function executable(bar) {
+    if (!bar || !['open', 'high', 'low', 'close'].every(key => positive(bar[key]))) return '價格缺值';
+    if (!(bar.low <= Math.min(bar.open, bar.close) && Math.max(bar.open, bar.close) <= bar.high)) return '開高低收邊界無效';
+    if (!positive(bar.volume)) return '成交量未知或無成交';
+    if (bar.issues && bar.issues.length) return '來源品質尚未通過';
+    if (bar.corporateAction) return '公司行動未建立持有權利計算';
+    if (bar.open === bar.high && bar.high === bar.low && bar.low === bar.close) return '一價日無法證實成交';
+    return null;
+  }
+  function simulate(candles, buyArr, sellArr, options) {
+    const opts = Object.assign({ tp: 0, sl: 0, maxBars: 0, short: false,
+      feeRate: 0, taxRate: 0, slippage: 0, barsPerYear: 252 }, options || {});
+    for (const key of ['tp', 'sl', 'feeRate', 'taxRate', 'slippage']) {
+      if (!Number.isFinite(opts[key]) || opts[key] < 0 || (['feeRate', 'taxRate', 'slippage'].includes(key) && opts[key] >= 1)) throw new Error('回測參數無效：' + key);
+    }
+    if (!Number.isInteger(opts.maxBars) || opts.maxBars < 0) throw new Error('最長持有棒數必須為非負整數');
+    if (!positive(opts.barsPerYear)) throw new Error('年化棒數假設必須大於零');
+    const trades = [], curve = [], rejected = [], valuationIssues = [];
+    let cash = 1, position = null, pendingEntry = null, pendingExit = null;
+    let peak = 1, maxDD = 0, lastEquity = 1, bankrupt = false;
+    const sign = opts.short ? -1 : 1;
+    const fill = (price, entering) => price * (1 + (entering ? sign : -sign) * opts.slippage);
+    const rate = entering => opts.feeRate + ((entering ? opts.short : !opts.short) ? opts.taxRate : 0);
+    for (let i = 0; i < candles.length; i++) {
+      const bar = candles[i];
+      let reason = executable(bar);
+      const previous = i ? candles[i - 1] : null;
+      const openingGap = !opts.corporateActionsVerified && previous && positive(previous.close) &&
+        positive(bar.open) && Math.abs(bar.open / previous.close - 1) > .15;
+      const closingGap = !opts.corporateActionsVerified && previous && positive(previous.close) &&
+        positive(bar.close) && Math.abs(bar.close / previous.close - 1) > .15;
+      if (openingGap) reason = '重大開盤價格斷點缺少公司行動核對';
+      if (position && (bar.corporateAction || openingGap)) position.accountingUnknown = true;
+      if (position && pendingExit) {
+        if (reason || position.accountingUnknown) rejected.push({ kind: 'exit', bar: i, time: bar.time,
+          reason: reason || '公司行動後持有權利未知', signalBar: pendingExit.bar });
+        else {
+          const exit = fill(bar.open, false), exitCosts = position.quantity * exit * rate(false);
+          cash = position.capital - position.entryCosts + sign * position.quantity * (exit - position.entry) - exitCosts;
+          trades.push({ signalBar: position.signalBar, entryBar: position.entryBar, exitBar: i,
+            entry: position.entry, exit, rawEntryOpen: position.rawEntryOpen, rawExitOpen: bar.open,
+            ret: cash / position.capital - 1, reason: pendingExit.reason,
+            time: candles[position.entryBar].time, signalTime: candles[position.signalBar].time,
+            exitTime: bar.time, holdBars: i - position.entryBar,
+            entryCosts: position.entryCosts, exitCosts, quantity: position.quantity,
+            exitSignalBar: pendingExit.bar });
+          position = null; pendingExit = null;
         }
-        let ret = opts.short ? (entry - exit) / entry : (exit - entry) / entry;
-        trades.push({ entryBar: i, exitBar, entry, exit, ret, reason, time: candles[i].time, exitTime: candles[exitBar].time, holdBars: exitBar - i });
-        equity *= (1 + ret);
+      }
+      if (pendingEntry && !position && !bankrupt) {
+        if (reason) rejected.push({ kind: 'entry', bar: i, time: bar.time, reason, signalBar: pendingEntry.bar });
+        else {
+          const entry = fill(bar.open, true), quantity = cash / (entry * (1 + rate(true)));
+          position = { signalBar: pendingEntry.bar, entryBar: i, entry, rawEntryOpen: bar.open,
+            capital: cash, quantity, entryCosts: quantity * entry * rate(true) };
+        }
+        // 進場只嘗試訊號後下一棒；失敗不跳至之後有價格的日期。
+        pendingEntry = null;
+      }
+      let equity = cash;
+      if (position) {
+        if (closingGap) position.accountingUnknown = true;
+        if (positive(bar.close) && (!reason || reason === '一價日無法證實成交') && !position.accountingUnknown) {
+          equity = position.capital - position.entryCosts + sign * position.quantity * (bar.close - position.entry);
+          const gross = sign * (bar.close / position.entry - 1);
+          if (!pendingExit) {
+            const exitReason = opts.tp > 0 && gross >= opts.tp ? 'tp' : opts.sl > 0 && gross <= -opts.sl ? 'sl' :
+              opts.maxBars > 0 && i - position.entryBar + 1 >= opts.maxBars ? 'time' : sellArr && sellArr[i] ? 'signal' : null;
+            if (exitReason) pendingExit = { bar: i, reason: exitReason };
+          }
+        } else {
+          equity = null;
+          valuationIssues.push({ bar: i, time: bar.time, reason: position.accountingUnknown ? '持有期間公司行動或價格斷點未知' : '持有期間無有效估值' });
+        }
+      }
+      if (Number.isFinite(equity)) {
         peak = Math.max(peak, equity);
         maxDD = Math.max(maxDD, (peak - equity) / peak);
-        curve.push({ time: candles[exitBar].time, equity });
-        i = exitBar + 1;
-      } else i++;
+        bankrupt = bankrupt || equity <= 0;
+      }
+      lastEquity = equity;
+      curve.push({ time: bar.time, equity, known: Number.isFinite(equity), position: !!position,
+        drawdown: Number.isFinite(equity) ? (peak - equity) / peak * 100 : null });
+      if (!position && !pendingEntry && buyArr && buyArr[i] && !bankrupt) {
+        if (closingGap) reason = '重大收盤價格斷點缺少公司行動核對';
+        if (reason) rejected.push({ kind: 'signal', bar: i, time: bar.time, reason });
+        else pendingEntry = { bar: i };
+      }
     }
-    return summarize(trades, equity, maxDD, curve);
+    const result = summarize(trades, candles.length ? lastEquity : null, valuationIssues.length || !candles.length ? null : maxDD, curve);
+    const barReturns = [];
+    for (let i = 1; i < curve.length; i++) if (positive(curve[i - 1].equity) && Number.isFinite(curve[i].equity)) barReturns.push(curve[i].equity / curve[i - 1].equity - 1);
+    const avg = barReturns.length ? barReturns.reduce((sum, value) => sum + value, 0) / barReturns.length : 0;
+    const sd = barReturns.length > 1 ? Math.sqrt(barReturns.reduce((sum, value) => sum + (value - avg) ** 2, 0) / (barReturns.length - 1)) : 0;
+    result.sharpe = valuationIssues.length ? null : sd ? avg / sd : null;
+    result.sharpeAnn = result.sharpe == null ? null : result.sharpe * Math.sqrt(opts.barsPerYear);
+    return Object.assign(result, { engineVersion: ENGINE_VERSION, status: !candles.length ? 'insufficient' : valuationIssues.length ? 'unknown' : 'complete',
+      openPosition: position ? { ...position, markTime: candles.length ? candles[candles.length - 1].time : null,
+        markEquity: lastEquity, pendingExit, unrealizedReturnPct: lastEquity == null ? null : (lastEquity / position.capital - 1) * 100 } : null,
+      pendingEntry, rejected, valuationIssues, bankrupt, realizedEquity: cash,
+      maxDDLowerBound: maxDD * 100,
+      methodology: { version: ENGINE_VERSION, entry: '收盤訊號後下一根提供的開盤價；不可成交便取消進場',
+        exit: '收盤確認停利、停損、期限或出場訊號後下一棒開盤；無法成交保留待出場部位',
+        valuation: '每棒收盤按市價估值；期末未平倉不強制成交；未知估值令回撤為無值',
+        costs: { feeRate: opts.feeRate, sellTaxRate: opts.taxRate, adverseSlippage: opts.slippage },
+        annualization: '每年 ' + opts.barsPerYear + ' 棒的假設，須與輸入頻率相符',
+        calendar: '依輸入棒序列；未另外證實完整市場交易日曆',
+        dataQuality: '交易日曆、完整公司行動與流動性未全部核對，僅供探索，不能升格為有效策略證據',
+        scope: '同樣本策略探索，不是樣本外證據；空方未含借券可得性與借券費' } });
   }
 
   function summarize(trades, equity, maxDD, curve) {
@@ -118,9 +206,6 @@
     const winRate = n ? wins.length / n * 100 : 0;
     const expectancy = n ? trades.reduce((s, t) => s + t.ret, 0) / n : 0;
     const rets = trades.map(t => t.ret);
-    const mean = expectancy;
-    const sd = n > 1 ? Math.sqrt(rets.reduce((s, r) => s + (r - mean) ** 2, 0) / (n - 1)) : 0;
-    const sharpe = sd ? mean / sd * Math.sqrt(n) : 0;
     const payoff = avgLoss ? Math.abs(avgWin / avgLoss) : (avgWin ? Infinity : 0);
     // v3.9 深化：獲利因子、平均持有、最大連勝/連敗、最佳/最差、年化夏普估計
     const grossWin = wins.reduce((s, t) => s + t.ret, 0);
@@ -134,14 +219,11 @@
     }
     const best = n ? Math.max(...rets) : 0;
     const worst = n ? Math.min(...rets) : 0;
-    // 年化夏普估計：以平均持有 bar 數換算每年交易筆數(252 交易日)
-    const tradesPerYear = avgHoldBars > 0 ? 252 / avgHoldBars : n;
-    const sharpeAnn = sd ? (mean / sd) * Math.sqrt(tradesPerYear) : 0;
     return {
       count: n, winRate, wins: wins.length, losses: losses.length,
       avgWin: avgWin * 100, avgLoss: avgLoss * 100, payoff,
-      expectancy: expectancy * 100, totalReturn: (equity - 1) * 100,
-      maxDD: maxDD * 100, sharpe, sharpeAnn,
+      expectancy: expectancy * 100, totalReturn: equity == null ? null : (equity - 1) * 100,
+      maxDD: maxDD == null ? null : maxDD * 100,
       profitFactor, avgHoldBars,
       maxWinStreak: winStreak, maxLossStreak: lossStreak,
       best: best * 100, worst: worst * 100,
@@ -153,34 +235,7 @@
   // buyArr[i] 進場、sellArr[j] 出場；tp/sl/maxBars 任一先到也出場。
   // 同一時間只持有一個部位(進場後直到出場才找下一筆)。
   function runLS(candles, buyArr, sellArr, opts) {
-    opts = Object.assign({ tp: 0, sl: 0, maxBars: 0, short: false }, opts || {});
-    const c = colsOf(candles);
-    const trades = [];
-    let equity = 1, peak = 1, maxDD = 0;
-    const curve = [];
-    let i = 0;
-    while (i < candles.length) {
-      if (buyArr[i]) {
-        const entry = c.close[i];
-        let exit = entry, exitBar = i, reason = 'end';
-        for (let j = i + 1; j < candles.length; j++) {
-          const ret = opts.short ? (entry - c.close[j]) / entry : (c.close[j] - entry) / entry;
-          exit = c.close[j]; exitBar = j;
-          if (opts.tp > 0 && ret >= opts.tp) { reason = 'tp'; break; }
-          if (opts.sl > 0 && ret <= -opts.sl) { reason = 'sl'; break; }
-          if (opts.maxBars > 0 && (j - i) >= opts.maxBars) { reason = 'time'; break; }
-          if (sellArr && sellArr[j]) { reason = 'signal'; break; }
-        }
-        const ret = opts.short ? (entry - exit) / entry : (exit - entry) / entry;
-        trades.push({ entryBar: i, exitBar, entry, exit, ret, reason, time: candles[i].time, exitTime: candles[exitBar].time, holdBars: exitBar - i });
-        equity *= (1 + ret);
-        peak = Math.max(peak, equity);
-        maxDD = Math.max(maxDD, (peak - equity) / peak);
-        curve.push({ time: candles[exitBar].time, equity });
-        i = exitBar + 1;
-      } else i++;
-    }
-    return summarize(trades, equity, maxDD, curve);
+    return simulate(candles, buyArr, sellArr, opts);
   }
 
   function colsOf(candles) {
@@ -237,17 +292,20 @@
     const syms = Object.keys(perSymCurves);
     if (!syms.length) return null;
     const w = weights || Object.fromEntries(syms.map(s => [s, 1 / syms.length]));
-    const allTimes = [...new Set(syms.flatMap(s => perSymCurves[s].map(p => p.time)))].sort((a, b) => a - b);
+    if (syms.some(s => !Number.isFinite(w[s]) || w[s] < 0) || Math.abs(syms.reduce((sum, s) => sum + w[s], 0) - 1) > 1e-9) throw new Error('投組權重須為非負且合計為 1');
+    const allTimes = [...new Set(syms.flatMap(s => perSymCurves[s].map(p => p.time)))].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
     const last = {}; syms.forEach(s => last[s] = 1);
     const curve = allTimes.map(t => {
       syms.forEach(s => {
         const pt = perSymCurves[s].filter(p => p.time <= t).pop();
         if (pt) last[s] = pt.equity;
       });
-      const eq = syms.reduce((sum, s) => sum + w[s] * last[s], 0);
+      const eq = syms.some(s => w[s] > 0 && !Number.isFinite(last[s])) ? null : syms.reduce((sum, s) => sum + w[s] * (last[s] || 0), 0);
       return { time: t, equity: eq };
     });
-    return { curve, finalReturn: (curve[curve.length - 1].equity - 1) * 100 };
+    const lastEquity = curve.length ? curve[curve.length - 1].equity : null;
+    return { curve, finalReturn: Number.isFinite(lastEquity) ? (lastEquity - 1) * 100 : null,
+      methodology: '既定權重的獨立資金分配合成，缺價保留未知；未共用資金池或模擬再平衡' };
   }
 
   // ---- 權益曲線繪製 (canvas) ------------------------------
@@ -256,20 +314,22 @@
     const ctx = canvas.getContext('2d');
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
-    const eqs = curve.map(p => p.equity);
+    const eqs = curve.map(p => p.equity).filter(Number.isFinite);
     const lo = Math.min(1, ...eqs), hi = Math.max(1, ...eqs);
-    const x = i => i / (curve.length - 1) * (W - 8) + 4;
+    const x = i => i / Math.max(1, curve.length - 1) * (W - 8) + 4;
     const y = v => H - 4 - (v - lo) / (hi - lo || 1) * (H - 8);
     // baseline equity=1
     ctx.strokeStyle = 'rgba(148,163,184,.3)'; ctx.beginPath();
     ctx.moveTo(4, y(1)); ctx.lineTo(W - 4, y(1)); ctx.stroke();
     ctx.strokeStyle = color || '#34d399'; ctx.lineWidth = 1.5; ctx.beginPath();
-    curve.forEach((p, i) => { const px = x(i), py = y(p.equity); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+    let connected = false;
+    curve.forEach((p, i) => { if (!Number.isFinite(p.equity)) { connected = false; return; }
+      const px = x(i), py = y(p.equity); connected ? ctx.lineTo(px, py) : ctx.moveTo(px, py); connected = true; });
     ctx.stroke();
   }
 
   window.Backtest = {
     run, runLS, scanStrategies, patternHitRate, portfolio, drawCurve,
-    STRATEGIES, sma, rsi, bbLower, colsOf, crossUp, breakout,
+    STRATEGIES, sma, rsi, bbLower, colsOf, crossUp, breakout, ENGINE_VERSION,
   };
 })();

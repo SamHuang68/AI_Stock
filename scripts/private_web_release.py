@@ -32,6 +32,22 @@ from daemon_lock import acquire_daemon_lock, release_daemon_lock
 
 PRESERVE_NAMES = {"data", "logs"}
 REQUIRED_RELEASE_FILES = {
+    "server/研究工作流.py",
+    "server/研究工作流路由.py",
+    "server/預警研究驗證.py",
+    "server/突破組合研究.py",
+    "server/更新路由.py",
+    "src/core/投組資料契約_v5.js",
+    "src/core/研究任務.js",
+    "src/core/研究工作流.js",
+    "src/core/更新工作_v5.js",
+    "src/ui/研究工作台.js",
+    "src/ui/研究任務面板.js",
+    "src/ui/更新工作中心.js",
+    "tests/研究工作台_browser.cjs",
+    "tests/手機橫向五欄_browser.cjs",
+    "tests/外殼研究互動_browser.cjs",
+    "tests/選股候選_browser.cjs",
     "START_PRIVATE_WEB_HOST.cmd",
     "STOP_PRIVATE_WEB.cmd",
     "server/server.py",
@@ -67,6 +83,8 @@ REQUIRED_RELEASE_FILES = {
     "tests/test_private_web_host.py",
     "tests/test_ai_local.py",
     "tests/test_ai_routes_stream.py",
+    "tests/test_AI目的地授權.py",
+    "tests/test_標的研究.py",
     "tests/ai_panels_selftest.js",
     "tests/test_private_web_access.py",
     "tests/test_archify_artifacts.py",
@@ -85,6 +103,7 @@ REQUIRED_RELEASE_FILES = {
     "tests/test_官方對照來源.py",
     "tests/test_NHNL來源.py",
     "tests/test_投組市場代號.py",
+    "tests/test_情境投組HTTP.py",
     "tests/test_市場尾碼一致性.py",
     "tests/分類範圍標示_selftest.js",
     "tests/決策更新狀態_selftest.js",
@@ -272,13 +291,15 @@ def safe_install_root(path: Path) -> Path:
     return resolved
 
 
-def _run(argv: list[str], *, cwd: Path, capture: bool = False) -> subprocess.CompletedProcess:
+def _run(argv: list[str], *, cwd: Path, capture: bool = False,
+         env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         argv,
         cwd=cwd,
         check=True,
         text=True,
         capture_output=capture,
+        env=env,
     )
 
 
@@ -401,8 +422,14 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
 
         _run([python, "build_v2.py"], cwd=extracted)
         tests = [
+            "tests.test_研究工作流",
+            "tests.test_標的研究",
+            "tests.test_統一更新中心",
+            "tests.test_預警研究分母",
+            "tests.test_突破組合研究",
             "tests.test_ai_local",
             "tests.test_ai_routes_stream",
+            "tests.test_AI目的地授權",
             "tests.test_台股即時報價",
             "tests.test_台股日線",
             "tests.test_突破觀察",
@@ -434,6 +461,7 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
             "tests.test_官方對照來源",
             "tests.test_NHNL來源",
             "tests.test_投組市場代號",
+            "tests.test_情境投組HTTP",
             "tests.test_市場尾碼一致性",
             "tests.test_tw_name_integrity",
             "tests.test_pulse_extras",
@@ -448,6 +476,13 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
                 raise RuntimeError("Node.js is required for ETF/UI release regression tests")
             for selftest in sorted((extracted / "tests").glob("*selftest.js"), key=lambda path: path.name):
                 _run([node, selftest.relative_to(extracted).as_posix()], cwd=extracted)
+            # 驗收收據保留在安裝根目錄，不能混入由 Git 封存的正式程式。
+            browser_output = install_root / "validation" / f"{commit[:12]}-{uuid.uuid4().hex}"
+            browser_output.mkdir(parents=True)
+            browser_env = dict(os.environ, ST_BROWSER_OUTPUT=str(browser_output))
+            for browser_test in ("tests/研究工作台_browser.cjs", "tests/手機橫向五欄_browser.cjs",
+                                 "tests/外殼研究互動_browser.cjs", "tests/選股候選_browser.cjs"):
+                _run([node, browser_test], cwd=extracted, env=browser_env)
 
         # 完整封存內容供所有自測使用；通過後才排除私人網站不出貨的執行內容。
         _strip_private_release_extras(extracted)

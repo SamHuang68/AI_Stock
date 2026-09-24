@@ -56,6 +56,8 @@ from features_routes import FeaturesRoutesMixin
 from decision_routes import DecisionRoutesMixin
 from overnight_intraday_routes import OvernightIntradayRoutesMixin
 from options_routes import OptionsRoutesMixin
+from 研究工作流路由 import ResearchWorkflowRoutesMixin
+from 更新路由 import UpdateRoutesMixin, configure_updates, coordinator as _update_coordinator
 from market_contract import attach_quote_contract, cumulative_volume_contract
 from market_routes import (market_snapshot, twse_mis_observation, twse_mis_stock_quote,
                            quote_observation, guard_tw_quote, taifex_mis_observation,
@@ -3570,7 +3572,7 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
     request_queue_size = 64
 
-class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, PeakObservationRoutesMixin, PeakObservation100dRoutesMixin, Touxin5dRoutesMixin, OptionsRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
+class Handler(ResearchWorkflowRoutesMixin, UpdateRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, PeakObservationRoutesMixin, PeakObservation100dRoutesMixin, Touxin5dRoutesMixin, OptionsRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     _BASE = _BASE
     # 固定模組與 Wasm MIME，避免 Windows 登錄設定影響 worker 載入。
     extensions_map = {**SimpleHTTPRequestHandler.extensions_map,
@@ -3665,6 +3667,16 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_marketflow()
         elif p == '/breadth' or p.startswith('/breadth?'):
             self._handle_breadth()
+        elif p in ('/updates', '/updates/archive') or p.startswith('/updates?'):
+            self._handle_updates_get()
+        elif p == '/research/workflow' or p.startswith('/research/workflow?'):
+            self._handle_research_workflow()
+        elif p == '/research/subject' or p.startswith('/research/subject?'):
+            self._handle_research_subject()
+        elif p == '/research/validation' or p.startswith('/research/validation?'):
+            self._handle_research_validation()
+        elif p == '/research/portfolio':
+            self._handle_research_portfolio()
         elif p == '/pulse' or p.startswith('/pulse?'):
             self._handle_pulse()
         elif p == '/pulse/update-status' or p.startswith('/pulse/update-status?'):
@@ -3953,6 +3965,8 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_screen3()
         elif p == '/portfolio':
             self._handle_portfolio()
+        elif p in ('/updates', '/updates/retry'):
+            self._handle_updates_post()
         elif p == '/pulse/refresh':
             self._handle_pulse_refresh()
         elif p == '/decision/context':
@@ -4100,6 +4114,7 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         self.send_response(status)
         if ct.startswith('application/json'):
             ct = ct + '; charset=utf-8'
+            self.send_header('Cache-Control', 'no-store')
         self.send_header('Content-Type', ct)
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
@@ -6682,19 +6697,33 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
         self._ok(json.dumps({'stages': out, 'rotation': rotation}, ensure_ascii=False).encode())
 
     def _handle_portfolio(self):
-        """v4.0: POST /portfolio  body:{holdings:[{sym,weight}]} 或 {symbols:[...]}
-           → 投組風險(相關性/波動/VaR/Beta/產業曝險)。讀本機 DB,缺的代號先即時回補。"""
+        """計算三種來源的投組風險；手動情境只使用既有保存行情。"""
         try:
             body = read_json_body(self, max_bytes=128 * 1024)
         except BodyReadError as e:
             self._err(str(e), e.status); return
-        holdings = body.get('holdings') or [{'sym': s, 'weight': 1} for s in (body.get('symbols') or [])]
+        holdings = body.get('holdings')
+        if holdings is None:
+            if body.get('portfolioKind') == 'simulation':
+                self._err('手動情境必須提供完整標的與權重，不能由代號清單推定等權', 400); return
+            symbols = body.get('symbols') or []
+            if not isinstance(symbols, list):
+                self._err('標的清單必須為陣列', 400); return
+            holdings = [{'sym': s, 'weight': 1} for s in symbols]
+        payload, error = self._decision_payload({
+            'holdings': holdings, 'portfolioKind': body.get('portfolioKind'),
+        })
+        if error:
+            self._err(error, 400); return
+        holdings = payload['holdings']
+        portfolio_kind = payload['portfolioKind']
         if not holdings:
-            self._err('no holdings', 400); return
+            self._err('投組輸入沒有完整標的與權重', 400); return
         try:
             import portfolio, datastore
             codes = [str(h.get('sym', '')).removesuffix('.TWO').removesuffix('.TW') for h in holdings]
-            for c in [x for x in codes if x] + ['^TWII']:   # 確保持倉+大盤基準在 DB
+            refresh_codes = [] if portfolio_kind == 'simulation' else [x for x in codes if x] + ['^TWII']
+            for c in refresh_codes:   # 保留既有實際持倉／觀察池回補行為；情境不新增來源請求。
                 try:
                     r = datastore.get_bars(c)
                     if not r or len(r) < 80:
@@ -6703,7 +6732,14 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
                             datastore.upsert_bars(c, 'TW', f)
                 except Exception:
                     pass
-            out = portfolio.compute(holdings, sectors_map=_get_tw_sectors(), names_map=_get_tw_names())
+            sectors = self._decision_saved_sector_map() if portfolio_kind == 'simulation' else _get_tw_sectors()
+            names = dict(_TW_NAMES.get('map') or {}) if portfolio_kind == 'simulation' else _get_tw_names()
+            out = portfolio.compute(holdings, sectors_map=sectors, names_map=names)
+            out.update(kind=portfolio_kind, viewScope='personal', persistence='ephemeral',
+                       label={'actual': '實際持倉', 'observation_pool': '觀察池',
+                              'simulation': '情境模擬（手動權重，非實際持倉）'}[portfolio_kind])
+            if portfolio_kind == 'simulation':
+                out['premise'] = '依使用者手動假設與既有歷史資料計算；缺少行情不自動回補'
             self._ok(json.dumps(out, ensure_ascii=False).encode())
         except Exception as e:
             self._err('portfolio failed: ' + str(e), 500)
@@ -6711,6 +6747,10 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
     def _decision_sector_map(self):
         """DecisionRoutesMixin hook：沿用既有 code→產業單一來源。"""
         return _get_tw_sectors()
+
+    def _decision_saved_sector_map(self):
+        """手動情境沿用已載入的分類；沒有分類時不觸發來源更新。"""
+        return dict(_TW_SECTORS.get('map') or {})
 
     def _handle_screener_post(self):
         """POST /screener — body: {preset:'...', symbols:[...] (optional)} or {custom:'...'}"""
@@ -7967,7 +8007,12 @@ if __name__ == '__main__':
         if not _pulse_updates.start(_build_pulse_update, _pulse_decision.latest_pulse,
                                     _pulse_decision.committed_pulse_for_job):
             raise RuntimeError('無法取得唯一 Pulse 更新工作者，停止啟動以避免快照分歧')
+        configure_updates(_pulse_updates)
         _http_server.serve_forever()
     finally:
+        try:
+            _update_coordinator().queue.stop(timeout=2.0)
+        except RuntimeError:
+            pass
         _pulse_updates.stop(timeout=2.0)
         _http_server.server_close()

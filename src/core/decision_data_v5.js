@@ -7,6 +7,7 @@
   var requestSequence = 0;
   var researchInflight = null;
   var researchUpdatedAt = 0;
+  var researchController = null;
   var TRACE_KEY = 'st_decision_ui_trace_v1';
 
   function base() { return window.SERVER || location.origin || 'http://localhost:18432'; }
@@ -122,13 +123,14 @@
     } catch (e) {}
   }
 
-  function publish(context, reason, id) {
+  function publish(context, reason, id, portfolioInputKey) {
     if (!context || !context.regime) return state;
     if (!context.researchObservations && state.context && state.context.researchObservations) {
       context = Object.assign({}, context, { researchObservations: state.context.researchObservations });
     }
     state = {
       context: context,
+      portfolioInputKey: portfolioInputKey || null,
       summary: {
         contractVersion: context.contractVersion || 1,
         snapshotId: context.snapshotId || null,
@@ -197,28 +199,35 @@
     if (researchInflight) return researchInflight;
     if (!force && researchUpdatedAt && Date.now() - researchUpdatedAt < 15 * 60 * 1000) return Promise.resolve(state);
     var path = base() + '/research/overnight-intraday?market=all';
-    researchInflight = fetch(path, { cache: 'no-store' })
+    var own = new AbortController(); researchController = own;
+    var timeout = setTimeout(function () { own.abort(); }, force ? 660000 : 15000);
+    researchInflight = fetch(path, { cache: 'no-store', signal: own.signal })
       .then(function (response) { return parseResponse(response, id, 'overnight_cache_response'); })
-      .then(function (cached) {
+      .then(async function (cached) {
         if (!force || !canUpdateMarket()) return cached;
         trace('overnight_refresh_start', id, { scope: 'memory_v1', market: 'all' });
-        return fetch(base() + '/research/overnight-intraday/refresh?market=all', {
-          method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ market: 'all', force: !!force })
-        }).then(function (response) { return parseResponse(response, id, 'overnight_refresh_response'); });
+        if (!window.UpdateJobs) throw new Error('更新工作中心尚未載入');
+        await UpdateJobs.refresh();
+        if (own.signal.aborted) throw new Error('已停止等待研究更新');
+        var accepted = await UpdateJobs.submit('research', { market: 'all', force: true });
+        await UpdateJobs.wait(accepted.job.jobId, { signal: own.signal, timeoutMs: 650000 });
+        return fetch(path, { cache: 'no-store', signal: own.signal })
+          .then(function (response) { return parseResponse(response, id, 'overnight_refresh_response'); });
       })
       .then(function (payload) {
+        if (own.signal.aborted) return state;
         researchUpdatedAt = Date.now();
         var current = state.context || context;
-        if (payload && payload.ok && current && current.regime) publish(withOvernightResearch(current, payload), 'overnight-research', id);
+        if (payload && payload.ok && current && current.regime) publish(withOvernightResearch(current, payload), 'overnight-research', id, state.portfolioInputKey);
         return state;
       })
       .catch(function (error) {
         researchUpdatedAt = Date.now();
         trace('overnight_refresh_error', id, { error: String(error && error.message || error) });
+        if (force && !own.signal.aborted) throw error;
         return state;
       })
-      .finally(function () { researchInflight = null; });
+      .finally(function () { clearTimeout(timeout); if (researchController === own) { researchController = null; researchInflight = null; } });
     return researchInflight;
   }
 
@@ -230,6 +239,7 @@
     }
     state = {
       context: state.context,
+      portfolioInputKey: state.portfolioInputKey || null,
       summary: summary,
       updatedAt: summary.asOf || pulse.updatedAt || state.updatedAt,
       contractVersion: summary.contractVersion || 1
@@ -248,15 +258,17 @@
     var input = {
       riskProfile: personalized ? (opts.riskProfile || null) : null,
       holdings: personalized ? (opts.holdings || []) : [],
-      portfolioKind: opts.portfolioKind || 'actual'
+      portfolioKind: opts.portfolioKind || 'actual',
+      portfolioInputStatus: personalized ? (opts.portfolioInputStatus || null) : null
     };
     var requestKey = JSON.stringify(input);
-    if (inflight && !opts.force && inflightKey === requestKey) return inflight;
+    var flightKey = JSON.stringify([input, opts.portfolioInputKey || null]);
+    if (inflight && !opts.force && inflightKey === flightKey) return inflight;
     // 相同輸入共用請求；輸入改變或強制更新時，只有最新一代能發布。
     var sequence = ++requestSequence;
     var id = opts.correlationId || correlationId('context');
     var started = Date.now();
-    var hasBody = !!(input.riskProfile || input.holdings.length);
+    var hasBody = personalized && !!(input.riskProfile || input.holdings.length || input.portfolioInputStatus);
     var req = { cache: 'no-store' };
     if (opts.signal) req.signal = opts.signal;
     if (hasBody) {
@@ -268,7 +280,7 @@
       method: req.method || 'GET',
       path: '/decision/context',
       portfolioKind: opts.portfolioKind || null,
-      holdingsCount: (opts.holdings || []).length
+      holdingsCount: input.holdings.length
     });
     var request = fetch(base() + '/decision/context', req)
       .then(function (r) {
@@ -297,13 +309,17 @@
       })
       .then(function (ctx) {
         if (opts.signal && opts.signal.aborted) return state;
+        if (typeof opts.isCurrent === 'function' && !opts.isCurrent()) {
+          trace('context_response_discarded', id, { reason: 'portfolio_input_changed' });
+          return state;
+        }
         if (sequence !== requestSequence) {
           trace('context_response_discarded', id, { reason: 'superseded_input', sequence: sequence });
           return inflight || state;
         }
         if (opts.throwOnError && (!ctx || !ctx.regime)) throw new Error('決策快照缺少必要內容');
         if (ctx) {
-          var published = publish(ctx, hasBody ? 'profile' : 'refresh', id);
+          var published = publish(ctx, hasBody ? 'profile' : 'refresh', id, opts.portfolioInputKey);
           refreshOvernightResearch(state.context, id, false);
           return published;
         }
@@ -323,7 +339,7 @@
         if (inflight === request) { inflight = null; inflightKey = null; }
       });
     inflight = request;
-    inflightKey = requestKey;
+    inflightKey = flightKey;
     return request;
   }
 
@@ -337,6 +353,7 @@
     refreshOvernightResearch: function (force) {
       return refreshOvernightResearch(state.context, correlationId('overnight'), !!force);
     },
+    stopResearchWait: function () { if (researchController) researchController.abort(); },
     trace: trace,
     correlationId: correlationId,
     traceKey: TRACE_KEY

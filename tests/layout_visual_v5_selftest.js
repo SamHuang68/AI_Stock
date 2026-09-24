@@ -64,8 +64,9 @@ ok(breadth.includes('.bd-structure .bd-score-wrap{flex:0 0 auto'),
 
 ok(news.includes('class="nw-empty"') && news.includes('目前沒有除權息事件'),
   'news empty data uses a deliberate empty state');
-ok(book.includes('class="bk-empty"') && book.includes('尚未建立投組樣本'),
-  'portfolio analysis empty state provides a three-step path');
+ok(book.includes('class="bk-empty"') && book.includes('尚未計算投組風險') &&
+  book.includes('context.issues.map') && book.includes('esc(item.message)') && book.includes('esc(item.action)'),
+  '投組空態保留版面容器並呈現目前模式的缺值原因與補救方式');
 ok(visual.includes('#bd-root .bd-movers') && visual.includes('.pl-sec h4:before'),
   'shared visual layer strengthens priority and section hierarchy');
 ok(visual.includes('#pl-root .pl-strip .cell') && visual.includes('#nw-root .nw-strip .cell'),

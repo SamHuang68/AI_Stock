@@ -568,10 +568,14 @@ def _detect_divergences(
 
 
 def _portfolio_summary(raw: dict | None, kind: str = 'actual') -> dict | None:
+    identity = {'kind': kind}
+    if kind == 'simulation':
+        identity.update(label='情境模擬（手動權重，非實際持倉）',
+                        premise='依使用者手動假設與既有歷史資料計算；僅供私人情境研究')
     if not isinstance(raw, dict):
-        return None
+        return {**identity, 'available': False} if kind == 'simulation' else None
     if raw.get('error'):
-        return {'kind': kind, 'available': False, 'error': str(raw.get('error'))[:180]}
+        return {**identity, 'available': False, 'error': str(raw.get('error'))[:180]}
     stocks = raw.get('stocks') or {}
     beta_sum = beta_weight = 0.0
     max_single = 0.0
@@ -594,7 +598,7 @@ def _portfolio_summary(raw: dict | None, kind: str = 'actual') -> dict | None:
                  and _number(port.get('var95')) is not None and quality.get('available') is not False)
     look_through = _exposure_lab.portfolio_lookthrough(stocks)
     return {
-        'kind': kind,
+        **identity,
         'available': available,
         'quality': quality,
         'portfolioBeta': round(beta_sum / beta_weight, 3) if beta_weight else None,
@@ -1553,6 +1557,8 @@ def _acknowledge_committed(snapshot_id: str, path: str) -> None:
 
 def _finish_publication(payload: dict, path: str, trace_path: str, elapsed_ms: int) -> dict:
     import early_warning
+    import datastore
+    from 預警研究驗證 import load_calendar
     context = copy.deepcopy(payload['context'])
     inputs = payload['inputs']
     signal_path = early_warning.DB_PATH
@@ -1561,7 +1567,8 @@ def _finish_publication(payload: dict, path: str, trace_path: str, elapsed_ms: i
     warning = early_warning.process_context(
         context, inputs['pulse'], memory_snapshot=payload['memory'],
         market_history=inputs.get('index_history'), db_path=signal_path,
-        now=_aware_datetime(payload['evaluationAt']), publication_id=payload['snapshotId'])
+        now=_aware_datetime(payload['evaluationAt']), publication_id=payload['snapshotId'],
+        research_calendar=load_calendar(datastore.DB_PATH))
     context['earlyWarnings'] = warning
     _attach_warning_evidence(context, warning)
     context['consensusAttention'] = _consensus_attention.build_consensus_attention(context)
@@ -1758,6 +1765,7 @@ def rebuild_latest(
     risk_profile: dict | None = None,
     portfolio_overlay: dict | None = None,
     portfolio_kind: str = 'actual',
+    portfolio_input_status: str | None = None,
     options_structure: dict[str, Any] | None = None,
 ) -> dict:
     _ensure_latest()
@@ -1776,6 +1784,17 @@ def rebuild_latest(
     if options_structure is not None:
         inputs['options_structure'] = options_structure
     context = build_decision_context(**inputs, risk_profile=risk_profile, portfolio_overlay=portfolio_overlay, portfolio_kind=portfolio_kind)
+    if portfolio_input_status in ('empty', 'incomplete'):
+        # 缺持倉不是零風險，也不能用 Risk Profile 單獨推算實際部位範圍。
+        envelope = context.get('actionEnvelope') or {}
+        envelope['positionRange'] = None
+        envelope.setdefault('constraints', []).append('portfolio_input_' + portfolio_input_status)
+        context['actionEnvelope'] = envelope
+        if isinstance(context.get('exposureLab'), dict):
+            context['exposureLab']['finalEligibleRange'] = None
+        context['portfolioInputStatus'] = portfolio_input_status
+    elif portfolio_input_status:
+        context['portfolioInputStatus'] = portfolio_input_status
     if latest_warning:
         context['earlyWarnings'] = json.loads(json.dumps(latest_warning, ensure_ascii=False))
         context['evidence'] = list(context.get('evidence') or []) + json.loads(

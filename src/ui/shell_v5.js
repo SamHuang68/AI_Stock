@@ -39,6 +39,8 @@
   };
 
   var ROUTES = [
+    { id: 'research', label: '研究', hint: '每日變化、個股、研究紀錄與回顧', icon: '▧' },
+    { id: 'updates', label: '更新', hint: '更新工作、進度、錯誤與重試', icon: '↻', action: 'updates' },
     { id: 'pulse',         label: '總覽', hint: '市場總覽儀表板（一屏高密度）', icon: '◎' },
     { id: 'decision',      label: '決策', hint: '情境矩陣／行動範圍／證據鏈',                 icon: '◆' },
     { id: 'chart',         label: '圖表', hint: 'K 線工作區（含加權／櫃買指數與總體列）',   icon: '◈' },
@@ -65,6 +67,24 @@
 
   var state = { route: 'pulse', built: false, syncing: false, prevRoute: null };
   var routeSequence = 0;
+  var routeScroll = Object.create(null), scrollSequence = 0, scrollFrame = null;
+
+  function scrollSurfaces() { return [$('shell-main'), $('shell-views'), document.body, document.documentElement]; }
+  function rememberRouteScroll(id) {
+    routeScroll[id] = scrollSurfaces().map(function (surface) {
+      return surface ? { top: surface.scrollTop, left: surface.scrollLeft } : null;
+    });
+  }
+  function restoreRouteScroll(id, sequence, fresh) {
+    if (state.route !== id || sequence !== scrollSequence) return;
+    var positions = fresh ? [] : routeScroll[id] || [];
+    scrollSurfaces().forEach(function (surface, index) {
+      if (!surface) return;
+      var position = positions[index];
+      surface.scrollTop = position ? position.top : 0;
+      surface.scrollLeft = position ? position.left : 0;
+    });
+  }
 
   /* Alt+Shift+1…0 → 常用路由（避開 Alt+數字 時框） */
   var HOTKEY_ROUTES = [
@@ -130,6 +150,7 @@
   };
 
   var PANEL_MAP = {
+    research: 'ResearchDesk',
     pulse: 'PulseV5',
     decision: 'DecisionV5',
     breadth: 'BreadthV5',
@@ -604,6 +625,8 @@
         ])
       ]),
       ringFolder('desk', '工作台', '★', '自選、投組、系統（含原側欄「工具」指令盤）', [
+        ringRoute('research', '研究', '▧', '每日變化、個股與研究回顧'),
+        ringRoute('updates', '更新', '↻', '更新工作中心'),
         ringRoute('watchlist', '自選', '★', '自選股中心'),
         ringRoute('book', '投組', '▣', '投組風險'),
         PRIVATE_WEB ? null : ringRoute('wavedeck', 'WaveDeck', '⚡', '開啟浪潮執行台'),
@@ -1730,6 +1753,10 @@
     opts = resolved.opts;
 
     var route = findRoute(id) || findRoute('chart') || ROUTES[0];
+    if (route.action === 'updates') {
+      if (window.UpdateCenter) window.UpdateCenter.open(document.activeElement);
+      return;
+    }
 
     if (route.action === 'wavedeck') {
       var url = (window.WAVEDECK_URL || 'http://127.0.0.1:18433/');
@@ -1754,6 +1781,10 @@
     }
 
     var routeChanged = state.route !== id;
+    var scrollGeneration = ++scrollSequence;
+    if (scrollFrame !== null && window.cancelAnimationFrame) window.cancelAnimationFrame(scrollFrame);
+    scrollFrame = null;
+    if (routeChanged) rememberRouteScroll(state.route);
     if (state.prevRoute && state.prevRoute !== id) {
       deactivateRoute(state.prevRoute);
     }
@@ -1815,17 +1846,19 @@
       }, isChart ? 40 : 0);
     }
 
+    // 指定標的或證據位置的深連結由原面板定位；一般返回才回復該頁閱讀位置。
+    var deepLink = !!(opts.sym || opts.focusSection || opts.highlightId);
+    if (routeChanged && deepLink) restoreRouteScroll(id, scrollGeneration, true);
     emitRoute(id, opts);
-    /* 換頁完成重排後從標題開始；相同路由更新資料時保留閱讀位置。 */
+    /* 首次開頁從頂端開始；返回保存的外層位置，不接管各元件內部捲動。 */
     if (routeChanged) {
-      var resetRouteScroll = function () {
-        if (state.route !== id) return;
-        [main, views, document.body, document.documentElement].forEach(function (surface) {
-          if (surface) { surface.scrollTop = 0; surface.scrollLeft = 0; }
+      if (!deepLink) {
+        restoreRouteScroll(id, scrollGeneration, false);
+        if (window.requestAnimationFrame) scrollFrame = window.requestAnimationFrame(function () {
+          scrollFrame = null;
+          restoreRouteScroll(id, scrollGeneration, false);
         });
-      };
-      resetRouteScroll();
-      if (window.requestAnimationFrame) window.requestAnimationFrame(resetRouteScroll);
+      }
     }
     setTimeout(function () { traceMobilePanelLayout(id); }, 180);
   }

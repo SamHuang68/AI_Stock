@@ -17,6 +17,12 @@ import time
 from contextlib import closing, nullcontext
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from pathlib import Path
+
+try:
+    from . import 預警研究驗證 as warning_research
+except ImportError:
+    import 預警研究驗證 as warning_research
 
 
 if getattr(__import__('sys'), 'frozen', False):
@@ -737,23 +743,28 @@ def _market_reference(pulse: dict, as_of: str) -> dict[str, Any]:
 
 
 def _sync_market_sessions(conn: sqlite3.Connection, rows: Any, observed_at: str) -> int:
-    normalized: dict[str, tuple[float, str, str]] = {}
+    normalized: dict[str, tuple[float, str, str, str]] = {}
     for raw in rows or []:
         if not isinstance(raw, dict):
             continue
         day = _date_key(raw.get('date') or raw.get('asOf') or raw.get('ts'))
         close = _number(raw.get('close', raw.get('indexClose')))
-        if day and close is not None and close > 0:
+        if day:
+            supplied_issues = raw.get('issues', [])
+            issues = list(supplied_issues) if isinstance(supplied_issues, list) else ['來源品質欄位格式無效']
+            if close is None or close <= 0:
+                issues.append('最新來源收盤缺值或無效，不能沿用較舊有效值')
             normalized[day] = (
-                close, str(raw.get('source') or 'pulse-history:index'),
+                close if close is not None and close > 0 else 0., str(raw.get('source') or 'pulse-history:index'),
                 str(raw.get('asOf') or raw.get('date') or day),
+                json.dumps(issues, ensure_ascii=False, separators=(',', ':')),
             )
-    for day, (close, source, as_of) in normalized.items():
+    for day, (close, source, as_of, issues) in normalized.items():
         conn.execute(
-            'INSERT INTO signal_market_sessions(session_date,close,source,as_of,observed_at) '
-            'VALUES(?,?,?,?,?) ON CONFLICT(session_date) DO UPDATE SET '
-            'close=excluded.close,source=excluded.source,as_of=excluded.as_of,observed_at=excluded.observed_at',
-            (day, close, source, as_of, observed_at),
+            'INSERT INTO signal_market_sessions(session_date,close,source,as_of,observed_at,issues_json) '
+            'VALUES(?,?,?,?,?,?) ON CONFLICT(session_date) DO UPDATE SET '
+            'close=excluded.close,source=excluded.source,as_of=excluded.as_of,observed_at=excluded.observed_at,issues_json=excluded.issues_json',
+            (day, close, source, as_of, observed_at, issues),
         )
     return len(normalized)
 
@@ -771,7 +782,7 @@ def _enroll_trials(conn: sqlite3.Connection, signals: list[dict], market_ref: di
         if direction not in ('upside', 'downside') or state not in _TRACKED_STATES:
             continue
         first_seen = str(signal.get('firstSeenAt') or created_at)
-        identity = f"{signal.get('signalId')}:{direction}:{first_seen}"
+        identity = f"{signal.get('signalId')}:{direction}:{first_seen}:{signal.get('engineVersion') or ENGINE_VERSION}:{signal.get('policyVersion') or POLICY_VERSION}"
         trial_id = hashlib.sha256(identity.encode('utf-8')).hexdigest()[:24]
         payload = {
             'trialId': trial_id, 'signalId': signal.get('signalId'), 'label': signal.get('label'),
@@ -820,7 +831,7 @@ def _resolve_trials(conn: sqlite3.Connection, resolved_at: str) -> int:
         if direction not in ('upside', 'downside') or not entry_price:
             continue
         future = conn.execute(
-            'SELECT session_date,close,source,as_of FROM signal_market_sessions '
+            'SELECT session_date,close,source,as_of,issues_json FROM signal_market_sessions '
             'WHERE session_date>? ORDER BY session_date ASC LIMIT ?',
             (origin_session, max(OUTCOME_HORIZONS)),
         ).fetchall()
@@ -829,12 +840,14 @@ def _resolve_trials(conn: sqlite3.Connection, resolved_at: str) -> int:
         signed_returns: list[float] = []
         raw_returns: list[float] = []
         sign = 1.0 if direction == 'upside' else -1.0
-        for _day, close, _source, _as_of in future:
+        for _day, close, _source, _as_of, _issues in future:
             raw_return = (float(close) / float(entry_price) - 1.0) * 100.0
             raw_returns.append(raw_return)
             signed_returns.append(raw_return * sign)
         for horizon in OUTCOME_HORIZONS:
             if len(future) < horizon:
+                continue
+            if any(row[1] <= 0 or json.loads(row[4] or '[]') for row in future[:horizon]):
                 continue
             exists = conn.execute(
                 'SELECT 1 FROM signal_outcomes WHERE trial_id=? AND horizon_sessions=?',
@@ -863,6 +876,10 @@ def _resolve_trials(conn: sqlite3.Connection, resolved_at: str) -> int:
                 'maxFavorableExcursionPct': round(max_favorable, 4),
                 'maxAdverseExcursionPct': round(max_adverse, 4),
                 'materialMoveLeadSessions': lead,
+                'eventArrivalSessions': lead,
+                'relativeLeadSessions': None,
+                'leadReason': '此欄是收盤路徑到達門檻時間，不能解讀為相對基準領先時間',
+                'pricePathBasis': '收盤路徑；不是日內最大有利或不利變動',
                 'source': target[2], 'sourceAsOf': target[3],
                 'historicalEmpirical': True, 'predictiveProbability': False,
                 'shadowOnly': True, 'actionAuthority': 'none',
@@ -881,13 +898,17 @@ def _resolve_trials(conn: sqlite3.Connection, resolved_at: str) -> int:
     return inserted
 
 
-def _prospective_summary_conn(conn: sqlite3.Connection, signal_id: str | None = None) -> dict[str, Any]:
+def _prospective_summary_version_conn(conn: sqlite3.Connection, signal_id: str | None = None,
+                                      versions: tuple | None = None) -> dict[str, Any]:
     if signal_id:
         where = ' WHERE signal_id=?'
         params: tuple[Any, ...] = (signal_id,)
     else:
         where = ' WHERE signal_id IN (?,?)'
         params = _HEADLINE_SIGNAL_IDS
+    if versions is not None:
+        where += ' AND engine_version IS ? AND policy_version IS ?'
+        params = (*params, *versions)
     total = int(conn.execute('SELECT COUNT(*) FROM signal_trials' + where, params).fetchone()[0])
     started = conn.execute('SELECT MIN(origin_session) FROM signal_trials' + where, params).fetchone()[0]
     horizons = []
@@ -905,6 +926,9 @@ def _prospective_summary_conn(conn: sqlite3.Connection, signal_id: str | None = 
         else:
             query += ' AND t.signal_id IN (?,?)'
             args = (horizon, *_HEADLINE_SIGNAL_IDS)
+        if versions is not None:
+            query += ' AND t.engine_version IS ? AND t.policy_version IS ?'
+            args = (*args, *versions)
         rows = conn.execute(query, args).fetchall()
         resolved = len(rows)
         resolved_total += resolved
@@ -937,15 +961,39 @@ def _prospective_summary_conn(conn: sqlite3.Connection, signal_id: str | None = 
         'startedAt': started, 'signalId': signal_id,
         'scope': signal_id or 'headline_precursors', 'horizons': horizons,
         'methodology': {
-            'entry': 'first canonical TWII observation in each tracked signal episode',
-            'exit': 'finalized TWII daily closes from existing Pulse index history',
+            'entry': '每個預警事件首次加權指數觀測價；不是可成交價格',
+            'exit': '既有市場歷史中後續收盤；舊帳本未凍結完整官方交易日分母',
             'horizons': list(OUTCOME_HORIZONS),
-            'directionHit': 'signed terminal return above zero',
-            'materialMoveHit': f'max favorable excursion reaches {MATERIAL_MOVE_PCT:.1f}%',
+            'directionHit': '方向調整後期末變動大於零',
+            'materialMoveHit': f'收盤路徑同向最大變動達 {MATERIAL_MOVE_PCT:.1f}%',
+            'lead': '門檻到達時間，不是相對基準領先時間',
+            'denominator': '只有曾觸發事件，缺少未觸發分母；不可估計完整漏報率',
             'ratesWithheldBelowSample': OUTCOME_MIN_SAMPLE,
             'retrospectiveBackfill': False, 'strengthIsProbability': False,
         },
     }
+
+
+def _prospective_summary_conn(conn: sqlite3.Connection, signal_id: str | None = None) -> dict[str, Any]:
+    where = ' WHERE signal_id=?' if signal_id else ' WHERE signal_id IN (?,?)'
+    args = (signal_id,) if signal_id else _HEADLINE_SIGNAL_IDS
+    versions = conn.execute('SELECT DISTINCT engine_version,policy_version FROM signal_trials' + where,
+                            args).fetchall()
+    strata = []
+    for engine, policy in versions:
+        summary = _prospective_summary_version_conn(conn, signal_id, (engine, policy))
+        strata.append({**summary, 'engineVersion': engine, 'policyVersion': policy,
+                       'versionKnown': engine is not None and policy is not None})
+    summary = _prospective_summary_version_conn(conn, signal_id) if len(strata) != 1 else dict(strata[0])
+    if len(strata) > 1:
+        summary['status'] = 'versioned'
+        for horizon in summary['horizons']:
+            horizon['ratesAvailable'] = False
+            for key in tuple(horizon):
+                if key.endswith('Pct') or key == 'medianMaterialMoveLeadSessions':
+                    horizon[key] = None
+    return {**summary, 'versionStrata': strata, 'mixedVersions': len(strata) > 1,
+            'denominatorComplete': False, 'populationMissRatePct': None}
 
 
 def _empty_prospective(status: str = 'empty', error: str | None = None) -> dict[str, Any]:
@@ -1010,6 +1058,9 @@ def _init_db(path: str = DB_PATH) -> None:
                     conn.execute('ALTER TABLE signal_publication_receipts ADD COLUMN committed_at TEXT')
                 conn.execute('CREATE TABLE IF NOT EXISTS signal_market_sessions('
                              'session_date TEXT PRIMARY KEY,close REAL NOT NULL,source TEXT,as_of TEXT,observed_at TEXT)')
+                market_columns = {str(row[1]) for row in conn.execute('PRAGMA table_info(signal_market_sessions)')}
+                if 'issues_json' not in market_columns:
+                    conn.execute('ALTER TABLE signal_market_sessions ADD COLUMN issues_json TEXT')
                 conn.execute('CREATE TABLE IF NOT EXISTS signal_trials('
                              'trial_id TEXT PRIMARY KEY,signal_id TEXT,label TEXT,direction TEXT,'
                              'trigger_state TEXT,origin_as_of TEXT,origin_session TEXT,entry_price REAL,strength REAL,'
@@ -1020,6 +1071,15 @@ def _init_db(path: str = DB_PATH) -> None:
                              'exit_price REAL,raw_return_pct REAL,directional_return_pct REAL,max_favorable_pct REAL,'
                              'max_adverse_pct REAL,direction_hit INTEGER,material_hit INTEGER,lead_sessions INTEGER,'
                              'resolved_at TEXT,outcome_json TEXT,PRIMARY KEY(trial_id,horizon_sessions))')
+                conn.execute('CREATE TABLE IF NOT EXISTS signal_research_protocols('
+                             'protocol_id TEXT PRIMARY KEY,config_json TEXT NOT NULL,created_at TEXT NOT NULL)')
+                conn.execute('CREATE TABLE IF NOT EXISTS signal_research_observations('
+                             'observation_id TEXT PRIMARY KEY,protocol_id TEXT NOT NULL,signal_id TEXT NOT NULL,'
+                             'origin_session TEXT NOT NULL,created_at TEXT NOT NULL,record_json TEXT NOT NULL,payload_json TEXT NOT NULL,'
+                             'UNIQUE(protocol_id,signal_id,origin_session))')
+                conn.execute('CREATE TABLE IF NOT EXISTS signal_research_outcomes('
+                             'observation_id TEXT NOT NULL,horizon_sessions INTEGER NOT NULL,resolved_at TEXT NOT NULL,'
+                             'payload_json TEXT NOT NULL,PRIMARY KEY(observation_id,horizon_sessions))')
                 conn.execute('CREATE INDEX IF NOT EXISTS idx_signal_trials_signal '
                              'ON signal_trials(signal_id,direction,origin_session)')
                 conn.execute('CREATE INDEX IF NOT EXISTS idx_signal_outcomes_horizon '
@@ -1095,10 +1155,11 @@ def _tier(state: str) -> str:
 
 def process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None = None,
                     market_history: Any = None, db_path: str = DB_PATH,
-                    now: datetime | None = None, publication_id: str | None = None) -> dict[str, Any]:
+                    now: datetime | None = None, publication_id: str | None = None,
+                    research_calendar: dict | None = None) -> dict[str, Any]:
     """發布識別若已提交便回傳原收據；新收據與預警異動共用交易。"""
     inputs = {'memory_snapshot': memory_snapshot, 'market_history': market_history,
-              'db_path': db_path, 'now': now}
+              'db_path': db_path, 'now': now, 'research_calendar': research_calendar}
     if publication_id is None:
         return _process_context(context, pulse, **inputs)
     if not isinstance(publication_id, str) or not publication_id.strip():
@@ -1140,7 +1201,8 @@ def acknowledge_publication(publication_id: str, *, db_path: str = DB_PATH) -> b
 
 def _process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None,
                      market_history: Any, db_path: str, now: datetime | None,
-                     connection: sqlite3.Connection | None = None) -> dict[str, Any]:
+                     connection: sqlite3.Connection | None = None,
+                     research_calendar: dict | None = None) -> dict[str, Any]:
     evaluated = evaluate_context(context, pulse, memory_snapshot=memory_snapshot, now=now)
     as_of = str(evaluated.get('asOf') or _iso_now(now))
     observation_key = str(evaluated.get('observationKey') or as_of)
@@ -1245,6 +1307,16 @@ def _process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None
                 # Validation is observational.  A ledger migration or write
                 # failure must never suppress the canonical signal state.
                 prospective = _empty_prospective('unavailable', type(exc).__name__)
+            conn.execute('SAVEPOINT warning_research')
+            try:
+                research = _write_research(conn, context, pulse, memory_snapshot, evaluated, persisted,
+                                           market_ref, research_calendar, created_at)
+                conn.execute('RELEASE SAVEPOINT warning_research')
+            except Exception as exc:
+                conn.execute('ROLLBACK TO SAVEPOINT warning_research')
+                conn.execute('RELEASE SAVEPOINT warning_research')
+                research = {**warning_research.summarize([], {}, created_at), 'status': 'unavailable',
+                            'error': type(exc).__name__, 'reason': '研究帳本寫入失敗，本次未新增完整分母'}
             conn.execute('DELETE FROM signal_observations WHERE id NOT IN '
                          '(SELECT id FROM signal_observations ORDER BY id DESC LIMIT 2000)')
             conn.execute('DELETE FROM signal_events WHERE id NOT IN '
@@ -1254,6 +1326,7 @@ def _process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None
     evaluated['newEvents'] = new_events
     evaluated['activeEvents'] = [row for row in visible_signals if _is_active_signal(row)]
     evaluated['prospectiveValidation'] = prospective
+    evaluated['researchValidation'] = research
     return evaluated
 
 
@@ -1283,14 +1356,89 @@ def history(n: int = 80, path: str = DB_PATH) -> dict[str, Any]:
         return {'ok': False, 'error': str(exc), 'events': []}
 
 
+def _research_summary_conn(conn: sqlite3.Connection, now: str, signal_id: str | None = None) -> dict:
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name='signal_research_observations'").fetchone() is None:
+        return warning_research.summarize([], {}, now)
+    query = 'SELECT record_json FROM signal_research_observations'
+    args = (signal_id,) if signal_id else ()
+    records = [json.loads(row[0]) for row in conn.execute(query + (' WHERE signal_id=?' if signal_id else ''), args)]
+    outcomes: dict[str, list] = {}
+    for identity, payload in conn.execute('SELECT observation_id,payload_json FROM signal_research_outcomes'):
+        outcomes.setdefault(identity, []).append(json.loads(payload))
+    return warning_research.summarize(records, outcomes, now)
+
+
+def _write_research(conn: sqlite3.Connection, context: dict, pulse: dict, memory: dict | None,
+                    evaluated: dict, signals: list[dict], market_ref: dict,
+                    calendar: dict | None, now: str) -> dict:
+    records = warning_research.freeze(context, pulse, memory, evaluated, signals, market_ref, calendar, now)
+    encode = lambda value: json.dumps(value, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
+    for record in records:
+        conn.execute('INSERT OR IGNORE INTO signal_research_protocols VALUES(?,?,?)',
+                     (record['protocolId'], encode(record['protocol']), now))
+        conn.execute('INSERT OR IGNORE INTO signal_research_observations VALUES(?,?,?,?,?,?,?)',
+                     (record['observationId'], record['protocolId'], record['signalId'], record['originSession'],
+                      now, encode({key: value for key, value in record.items() if key != 'replay'}), encode(record)))
+    pending = conn.execute('SELECT observation_id,record_json FROM signal_research_observations').fetchall()
+    sessions = [{'date': day, 'close': close, 'source': source, 'asOf': as_of, 'observedAt': seen,
+                 'issues': json.loads(issues) if issues is not None else ['舊來源未保存品質證據']}
+                for day, close, source, as_of, seen, issues in conn.execute(
+                    'SELECT session_date,close,source,as_of,observed_at,issues_json FROM signal_market_sessions ORDER BY session_date')]
+    for identity, raw in pending:
+        record = json.loads(raw)
+        completed = {row[0] for row in conn.execute('SELECT horizon_sessions FROM signal_research_outcomes WHERE observation_id=?', (identity,))}
+        if set(record['protocol']['horizons']) <= completed:
+            continue
+        for outcome in warning_research.resolve(record, sessions, now):
+            if outcome['status'] != 'immature':
+                conn.execute('INSERT OR IGNORE INTO signal_research_outcomes VALUES(?,?,?,?)',
+                             (identity, outcome['horizonSessions'], now, encode(outcome)))
+    return _research_summary_conn(conn, now)
+
+
+def replay_observation(observation_id: str, path: str = DB_PATH) -> dict:
+    """以首次凍結輸入重播純規則評估；不回推未保存的狀態機歷史，不寫入資料庫。"""
+    try:
+        with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as conn:
+            row = conn.execute('SELECT payload_json FROM signal_research_observations WHERE observation_id=?',
+                               (observation_id,)).fetchone()
+        if row is None:
+            return {'ok': False, 'status': 'not_found', 'reason': '找不到前向凍結觀測'}
+        record = json.loads(row[0])
+        replay = record['replay']
+        if warning_research.digest(replay) != record['inputDigest']:
+            return {'ok': False, 'status': 'digest_mismatch', 'reason': '凍結輸入摘要不符，拒絕重播'}
+        protocol = record['protocol']
+        if warning_research.digest(protocol) != record['protocolId']:
+            return {'ok': False, 'status': 'protocol_mismatch', 'reason': '凍結協定與版本摘要不符，拒絕重播'}
+        if protocol['engineVersion'] != ENGINE_VERSION or protocol['policyVersion'] != POLICY_VERSION:
+            return {'ok': False, 'status': 'version_unavailable', 'record': record,
+                    'reason': '保留原始證據，但目前程式不具該歷史規則版本'}
+        evaluated = evaluate_context(replay['context'], replay['pulse'], memory_snapshot=replay['memory'],
+                                     now=warning_research.aware(record['observedAt']))
+        matched = warning_research.digest(evaluated) == warning_research.digest(replay['evaluated'])
+        return {'ok': matched, 'status': 'matched' if matched else 'mismatch', 'record': record,
+                'evaluated': evaluated, 'scope': '重播純規則輸出；狀態機轉移保存為原始觀測，不重新推演'}
+    except (sqlite3.Error, ValueError, KeyError, TypeError, OSError) as exc:
+        return {'ok': False, 'status': 'unavailable', 'error': type(exc).__name__}
+
+
 def performance(n: int = 80, path: str = DB_PATH,
                 signal_id: str | None = None) -> dict[str, Any]:
     """Read-only prospective evidence; empirical rates stay hidden below n=20."""
     n = max(1, min(int(n or 80), 500))
     clean_signal = str(signal_id or '').strip() or None
     try:
-        with closing(_connect(path)) as conn:
+        with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as conn:
+            conn.execute('BEGIN')
             summary = _prospective_summary_conn(conn, clean_signal)
+            research = _research_summary_conn(conn, _iso_now(), clean_signal)
+            research_rows = []
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='signal_research_observations'").fetchone():
+                research_query = 'SELECT record_json FROM signal_research_observations'
+                research_params = (clean_signal, n) if clean_signal else (n,)
+                research_query += (' WHERE signal_id=?' if clean_signal else '') + ' ORDER BY origin_session DESC,created_at DESC LIMIT ?'
+                research_rows = [json.loads(row[0]) for row in conn.execute(research_query, research_params)]
             query = (
                 'SELECT trial_id,trial_json FROM signal_trials'
                 + (' WHERE signal_id=?' if clean_signal else ' WHERE signal_id IN (?,?)')
@@ -1307,7 +1455,8 @@ def performance(n: int = 80, path: str = DB_PATH,
                 ).fetchall()
                 trial['outcomes'] = [json.loads(row[0]) for row in outcomes if row and row[0]]
                 trials.append(trial)
-        return {**summary, 'trials': trials, 'returnedTrials': len(trials)}
+        return {**summary, 'trials': trials, 'returnedTrials': len(trials), 'researchValidation': research,
+                'researchObservations': research_rows, 'returnedResearchObservations': len(research_rows)}
     except Exception as exc:
         return {**_empty_prospective('unavailable', type(exc).__name__), 'trials': []}
 

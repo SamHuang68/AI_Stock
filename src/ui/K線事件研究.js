@@ -343,13 +343,30 @@
     const a = document.createElement('a'); a.href = url; a.download = data.sym + '_K線事件研究_' + (data.historyStart || '無資料') + '_' + data.asOf + '.html'; a.hidden = true;
     dialog.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
   }
+  function visibleFocusTarget(node) {
+    if (!node || !node.isConnected || node.disabled || node.hidden || typeof node.focus !== 'function') return false;
+    return typeof node.getClientRects !== 'function' || node.getClientRects().length > 0;
+  }
+  function returnTarget(trigger) {
+    // 工具列選單會在開窗後收合；記住仍可見的分類按鈕，不能返回已隱藏的選單項目。
+    const menu = trigger && trigger.closest ? trigger.closest('.tbg-menu') : null;
+    if (menu && menu.id) {
+      const group = $(menu.id.replace('tbg-menu-', 'tbg-'));
+      const button = group && group.querySelector('.tbg-btn');
+      if (visibleFocusTarget(button)) return button;
+    }
+    return visibleFocusTarget(trigger) ? trigger : null;
+  }
   function close() {
     generation++; if (controller) controller.abort();
     if (dialog && dialog.open) dialog.close();
-    if (priorFocus && priorFocus.isConnected) priorFocus.focus();
+    const target = returnTarget(priorFocus) || returnTarget($('btn-kline-events'));
+    priorFocus = null;
+    if (target) target.focus({ preventScroll: true });
   }
-  function open(symbol) {
-    if (dialog && dialog.open) close(); priorFocus = document.activeElement;
+  function open(symbol, trigger) {
+    if (dialog && dialog.open) close();
+    priorFocus = returnTarget(trigger || document.activeElement) || returnTarget($('btn-kline-events'));
     if (!$('ke-style')) { const style = document.createElement('style'); style.id = 'ke-style'; style.textContent = CSS; document.head.appendChild(style); }
     if (!dialog) { dialog = document.createElement('dialog'); dialog.id = 'ke-dialog'; dialog.setAttribute('aria-labelledby', 'ke-title'); document.body.appendChild(dialog); }
     const current = String(symbol || ((typeof S !== 'undefined' && S.mkt === 'TW') ? S.sym : '') || '2330').replace(/\.(TW|TWO)$/i, '');
@@ -361,7 +378,7 @@
   }
   function mount() {
     const parent = $('pro-tools'); if (!parent) return false;
-    if (!$('btn-kline-events')) { const b = document.createElement('button'); b.id = 'btn-kline-events'; b.className = 'btn'; b.textContent = 'K 線事件'; b.onclick = () => open(); parent.appendChild(b); }
+    if (!$('btn-kline-events')) { const b = document.createElement('button'); b.id = 'btn-kline-events'; b.className = 'btn'; b.textContent = 'K 線事件'; b.onclick = event => open(undefined, event.currentTarget); parent.appendChild(b); }
     return true;
   }
   if (!mount()) { let attempts = 0; const timer = setInterval(() => { if (mount() || ++attempts > 30) clearInterval(timer); }, 300); }

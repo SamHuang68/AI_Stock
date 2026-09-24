@@ -23,7 +23,7 @@ const card = (_, i) => `<section class="pl-sec"><h4><span class="pl-sec-title-te
   <div class="pl-inst-cmt">分析前提：採用最近交易日的歷史資料，完整說明不應被裁切或遮蔽。</div>
   <div class="pl-fill">${'<p>長內容可捲動閱讀，保留每一筆資訊。</p>'.repeat(12)}</div></section>`;
 (async () => {
-  const browser = await chromium.launch({ headless: true, channel: 'msedge' });
+  const browser = await chromium.launch({ headless: true, ...(process.env.ST_BROWSER_CHANNEL ? { channel: process.env.ST_BROWSER_CHANNEL } : {}) });
   try {
     const context = await browser.newContext({ isMobile: true, hasTouch: true });
     await context.route('**/*', route => route.abort());

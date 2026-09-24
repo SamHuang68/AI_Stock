@@ -231,9 +231,9 @@ ok(/function mandatoryControlsHtml/.test(decisionUi) && /dc-mandatory/.test(deci
 ok(/function optionsStructureHtml/.test(decisionUi) && /data-layer=\"observed\"/.test(decisionUi) &&
   /data-layer=\"derived\"/.test(decisionUi) && /data-layer=\"modeled\"/.test(decisionUi) &&
   /optionsLabOpen = true/.test(decisionUi) && /function bindOptionsLab/.test(decisionUi) &&
-  /data-st-sort=\"off\"/.test(decisionUi) && /\/options\/txo\/refresh/.test(decisionUi) &&
-  /DecisionData\.publish\(ctx, 'options-refresh'\)/.test(decisionUi),
-  'TXO options structure keeps observed, derived and modeled layers distinct in one canonical DecisionContext');
+  /data-st-sort=\"off\"/.test(decisionUi) && /UpdateJobs\.submit\('options', \{ force: true \}\)/.test(decisionUi) &&
+  /UpdateJobs\.wait\(accepted\.job\.jobId/.test(decisionUi) && !/DecisionData\.publish\(ctx, 'options-refresh'\)/.test(decisionUi),
+  'TXO 結構保留觀測、衍生及模型分層，經共用更新工作完成後讀取正式決策');
 ok(/topVegaStrikes/.test(decisionUi) && /Modeled Signed VEX/.test(decisionUi) &&
   /IV \+1 波動率點（1 vol pt）/.test(decisionUi) && /dc-options-density-grid/.test(decisionUi) &&
   /function optionsHistoryHtml/.test(decisionUi) && /dc-options-change/.test(decisionUi) &&

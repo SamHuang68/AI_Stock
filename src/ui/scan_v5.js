@@ -14,6 +14,10 @@
   var lastResults = [];
   var lastResearchMeta = null;
   var lastResearchSettings = null;
+  // 本頁開啟期間的完整成功回應；失敗或換條件不刪除舊收據。
+  var scanReceipts = [];
+  var currentReceipt = null;
+  var previousReceipt = null;
   var scanPending = null;
   var activationTimer = null;
   var metaPending = null;
@@ -131,6 +135,10 @@
       '#sc-root .sc-r-missing{color:var(--gold);font-size:10px}' +
       '#sc-root .sc-coverage{padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);font-size:10px;line-height:1.6}' +
       '#sc-root .sc-coverage strong{color:var(--gold)}' +
+      '#sc-root .sc-comparison{padding:7px;border-bottom:1px solid var(--border);font-size:11px;line-height:1.6;overflow-wrap:anywhere}' +
+      '#sc-root .sc-comparison summary{cursor:pointer;color:var(--gold)}' +
+      '#sc-root .sc-comparison li{margin:5px 0;white-space:normal}' +
+      '#sc-root .sc-comparison pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}' +
       '@media(max-width:760px){#sc-root .sc-head{flex-wrap:wrap}#sc-root .sc-head > div:first-child{flex-basis:100%}' +
         '#sc-root .sc-actions{flex-wrap:wrap}#sc-root .sc-layout{grid-template-columns:minmax(150px,29%) minmax(0,1fr)}' +
         '#sc-root:has(#sc-research-enabled:checked) .sc-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}' +
@@ -263,6 +271,106 @@
   }
 
   function sortColumns() { return lastResearchSettings ? RESEARCH_SORT_COLUMNS : SORT_COLUMNS; }
+
+  function copy(value) { return JSON.parse(JSON.stringify(value)); }
+
+  function acceptReceipt(body, response) {
+    var receipt = { version: 'screen-comparison-v1', id: scanReceipts.length + 1,
+      receivedAt: new Date().toISOString(), conditions: copy(body), response: copy(response) };
+    var key = JSON.stringify(receipt.conditions);
+    previousReceipt = null;
+    for (var i = scanReceipts.length - 1; i >= 0; i--) {
+      if (JSON.stringify(scanReceipts[i].conditions) === key) { previousReceipt = scanReceipts[i]; break; }
+    }
+    scanReceipts.push(receipt);
+    currentReceipt = receipt;
+  }
+
+  function comparison() {
+    if (!currentReceipt) return null;
+    var column = sortColumns().find(function (c) { return c.key === sortState.key; });
+    if (sortState.direction === 'original') column = null;
+    var before = previousReceipt ? sortedResults(previousReceipt.response.results) : [];
+    var after = sortedResults(currentReceipt.response.results);
+    var counts = function (rows) {
+      var result = Object.create(null);
+      rows.forEach(function (row) { var sym = String(row.sym); result[sym] = (result[sym] || 0) + 1; });
+      return result;
+    };
+    var oldCounts = counts(before), newCounts = counts(after);
+    var symbols = Array.from(new Set(after.concat(before).map(function (row) { return String(row.sym); })));
+    function rank(rows, row, duplicate) {
+      if (!row || duplicate || (column && !hasSortValue(sortValue(row, column), column.type))) return null;
+      return rows.indexOf(row) + 1;
+    }
+    return { current: copy(currentReceipt), previous: previousReceipt ? copy(previousReceipt) : null,
+      ordering: column ? column.label + (sortState.direction === 'ascending' ? '升冪' : '降冪') : '原始回傳位置（不代表推薦順序）',
+      rows: symbols.map(function (sym) {
+        var old = before.find(function (row) { return String(row.sym) === sym; });
+        var now = after.find(function (row) { return String(row.sym) === sym; });
+        var duplicate = oldCounts[sym] > 1 || newCounts[sym] > 1;
+        var oldRank = rank(before, old, duplicate), newRank = rank(after, now, duplicate);
+        var changes = [];
+        if (old && now) sortColumns().forEach(function (c) {
+          var a = sortValue(old, c), b = sortValue(now, c);
+          a = hasSortValue(a, c.type) ? a : null;
+          b = hasSortValue(b, c.type) ? b : null;
+          if (a !== b) changes.push({ field: c.label, before: a, after: b });
+        });
+        var reason = !previousReceipt ? '尚無相同條件的前次成功結果' :
+          duplicate ? '代號重複，無法對應排名' :
+          !old ? '本次回傳新增；前次未見不代表當時不符合條件' :
+          !now ? '本次回傳未見；可能受涵蓋範圍或截斷影響，不能推定不再符合條件' :
+          (oldRank == null || newRank == null) ? '排序欄位資料不足，不以零分或尾端位置冒充可比較排名' :
+          oldRank === newRank ? '位置未變；仍應核對欄位與來源日期' :
+          column && sortValue(old, column) !== sortValue(now, column) ? '排序欄位值改變；相對位置亦受其他候選影響' :
+          column ? '本檔排序值未變；候選集合、其他候選值或同值回傳順序改變' : '後端回傳順序或候選集合改變，未提供推薦排名原因';
+        return { symbol: sym, beforeRank: oldRank, afterRank: newRank, reason: reason, changes: changes,
+          previousSource: old ? copy(old.research || old.fieldStatus || {}) : null,
+          currentSource: now ? copy(now.research || now.fieldStatus || {}) : null };
+      }) };
+  }
+
+  function comparisonHtml() {
+    var result = comparison();
+    if (!result) return '';
+    var old = result.previous;
+    var current = result.current;
+    var h = '<details class="sc-comparison"><summary>候選位置與欄位變化 · ' + esc(result.ordering) + '</summary>' +
+      '<div>比較相同篩選條件的前次成功掃描。取得時間：' + esc(old ? old.receivedAt : '尚無前次') + ' → ' + esc(current.receivedAt) +
+      '；取得時間不等於行情、財報或法人資料日。</div>' +
+      '<div>只比較兩次已回傳的候選，涵蓋缺漏與截斷不視為淘汰；名次不是買進評分。來源提供的日期與原始回應保存在收據中；未提供的日期保持未知。</div>' +
+      '<div>本頁開啟期間保留 ' + scanReceipts.length + ' 份完整成功回應；重新載入頁面後須重新建立比較。' +
+      '<button type="button" class="sc-btn" id="sc-comparison-export">匯出全部掃描收據</button></div>' +
+      '<details><summary>篩選條件與涵蓋前提</summary><pre>' + esc(JSON.stringify({
+        conditions: current.conditions,
+        previous: old ? { scanned: old.response.scanned, matched: old.response.matched, returned: old.response.results.length, researchMeta: old.response.researchMeta || null } : null,
+        current: { scanned: current.response.scanned, matched: current.response.matched, returned: current.response.results.length, researchMeta: current.response.researchMeta || null }
+      }, null, 2)) + '</pre></details><ul>';
+    result.rows.forEach(function (row) {
+      h += '<li><b>' + esc(row.symbol) + '</b> · ' + esc(row.beforeRank == null ? '不可比較' : '第 ' + row.beforeRank + ' 位') +
+        ' → ' + esc(row.afterRank == null ? '不可比較' : '第 ' + row.afterRank + ' 位') + '：' + esc(row.reason);
+      row.changes.forEach(function (change) {
+        h += '<div>' + esc(change.field) + '：' + esc(change.before == null ? '未知' : change.before) + ' → ' + esc(change.after == null ? '未知' : change.after) + '</div>';
+      });
+      h += '<details><summary>兩次來源與缺漏欄位</summary><pre>' + esc(JSON.stringify({ previous: row.previousSource, current: row.currentSource }, null, 2)) + '</pre></details></li>';
+    });
+    return h + '</ul></details>';
+  }
+
+  function bindComparison() {
+    var button = $('sc-comparison-export');
+    if (!button) return;
+    button.onclick = function () {
+      try {
+        var text = JSON.stringify({ version: 'screen-comparison-v1', receipts: scanReceipts, comparison: comparison() }, null, 2);
+        var url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+        var link = document.createElement('a');
+        link.href = url; link.download = '選股掃描完整收據.json'; link.click();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      } catch (_) { if ($('sc-msg')) $('sc-msg').textContent = '收據匯出失敗，原始結果仍保留在本頁，請重試。'; }
+    };
+  }
 
   function trustComplete(q) {
     var observed = numOrNull(q.trustObservedDays);
@@ -402,6 +510,7 @@
   }
 
   function resultActions(el, rows) {
+    bindComparison();
     var sortKey = $('sc-sort-key');
     if (sortKey) sortKey.onchange = function () {
       applySort(sortKey.value, sortState.direction === 'descending' ? 'descending' : 'ascending', 'sc-sort-key');
@@ -439,7 +548,8 @@
     var el = $('sc-results');
     if (!el) return;
     if (!rows.length) {
-      el.innerHTML = '<div class="sc-empty">本次完成範圍內沒有符合估值上限的候選。<br>請一併查看上方資料不足與截斷摘要。</div>';
+      el.innerHTML = comparisonHtml() + '<div class="sc-empty">本次完成範圍內沒有符合估值上限的候選。<br>請一併查看上方資料不足與截斷摘要。</div>';
+      bindComparison();
       return;
     }
     rows = sortedResults(rows);
@@ -475,7 +585,7 @@
         '<td><button type="button" class="sc-btn sc-research-row" data-sym="' + esc(r.sym) + '">研究</button> ' +
         '<button type="button" class="sc-add" data-sym="' + esc(r.sym) + '" aria-label="加入自選">＋</button></td></tr>';
     });
-    el.innerHTML = h + '</tbody></table>';
+    el.innerHTML = comparisonHtml() + h + '</tbody></table>';
     resultActions(el, rows);
   }
 
@@ -485,7 +595,8 @@
     if (!sortColumns().some(function (c) { return c.key === sortState.key; })) sortState = { key: null, direction: 'original' };
     if (lastResearchSettings) { renderResearchResults(rows); return; }
     if (!rows.length) {
-      el.innerHTML = '<div style="color:var(--tlo);padding:18px;text-align:center">無符合條件的個股</div>';
+      el.innerHTML = comparisonHtml() + '<div style="color:var(--tlo);padding:18px;text-align:center">無符合條件的個股</div>';
+      bindComparison();
       return;
     }
     rows = sortedResults(rows);
@@ -539,7 +650,7 @@
         '<button type="button" class="sc-add" data-sym="' + esc(r.sym) + '">＋</button></td></tr>';
     });
     h += '</tbody></table>';
-    el.innerHTML = h;
+    el.innerHTML = comparisonHtml() + h;
     resultActions(el, rows);
   }
 
@@ -555,14 +666,11 @@
     var settings = body.research && body.research.enabled
       ? { peMax: body.research.peMax, excludeIp: body.research.excludeIp } : null;
     if ($('sc-conditions-msg')) $('sc-conditions-msg').textContent = '';
-    lastResults = [];
-    lastResearchMeta = null;
-    lastResearchSettings = settings;
     if (msg) msg.textContent = settings
       ? '估值篩選中…完成後會列出來源、涵蓋範圍與缺少資料。'
       : '掃描中…（依目前可取得的台股資料篩選）';
     var box = $('sc-results');
-    if (box) box.innerHTML = '';
+    if (box && !currentReceipt) box.innerHTML = '';
     var run = $('sc-run');
     if (run) { run.disabled = true; run.textContent = '掃描中…'; }
     scanPending = fetch(SRV + '/screen3', {
@@ -576,10 +684,15 @@
       })
       .then(function (r) {
         if (!r || !Array.isArray(r.results)) throw new Error('後端未傳回有效結果，請稍後重試。');
+        if (r.results.some(function (row) { return !row || typeof row !== 'object' || Array.isArray(row) ||
+          !['string', 'number'].includes(typeof row.sym) || !String(row.sym).trim(); })) {
+          throw new Error('候選內容或代號格式不完整；前次成功結果仍保留。');
+        }
         if (settings && (!r.researchMeta || !r.researchMeta.enabled)) {
           throw new Error('後端未啟用估值研究，請確認前後端版本一致後重試。');
         }
-        lastResults = r.results;
+        acceptReceipt(body, r);
+        lastResults = copy(currentReceipt.response.results);
         lastResearchMeta = settings ? r.researchMeta : null;
         lastResearchSettings = settings;
         try { if (JSON.stringify(readForm()) !== JSON.stringify(body)) markFormChange(); } catch (_) { markFormChange(); }
@@ -595,7 +708,8 @@
       })
       .catch(function (e) {
         if (msg) msg.textContent = '掃描未完成：' + (e && e.message ? e.message : '連線中斷，請稍後再試。');
-        if (box) box.innerHTML = '<div class="sc-empty">本次沒有可用結果。<br>請按「掃描」重試。</div>';
+        if (box && !currentReceipt) box.innerHTML = '<div class="sc-empty">本次沒有可用結果。<br>請按「掃描」重試。</div>';
+        else if (msg) msg.textContent += ' 已保留前次成功結果與全部比較收據。';
         return null;
       })
       .finally(function () {
@@ -704,7 +818,7 @@
     if (activationTimer) { clearTimeout(activationTimer); activationTimer = null; }
     ensureMount();
     loadMeta();
-    if (lastResults.length) renderResults(lastResults);
+    if (currentReceipt || lastResults.length) renderResults(lastResults);
     else {
       /* 進頁自動掃一次，避免結果區空白 */
       activationTimer = setTimeout(function () {
@@ -724,7 +838,9 @@
     scan: scan,
     last: function () { return lastResults; },
     sortState: function () { return { key: sortState.key, direction: sortState.direction }; },
-    sortRows: sortedResults
+    sortRows: sortedResults,
+    comparison: comparison,
+    receipts: function () { return copy(scanReceipts); }
   };
 
   // 工具列選股鈕：若殼層可用則導向側欄選股室

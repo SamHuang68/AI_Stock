@@ -1,0 +1,76 @@
+'use strict';
+const fs = require('fs'), vm = require('vm'), assert = require('assert'), crypto = require('crypto');
+function memory() {
+  const values = new Map();
+  return { get length() { return values.size; }, key: n => Array.from(values.keys())[n],
+    getItem: k => values.has(k) ? values.get(k) : null, setItem: (k, v) => values.set(k, v), removeItem: k => values.delete(k) };
+}
+const window = { crypto: crypto.webcrypto };
+vm.runInNewContext(fs.readFileSync('src/core/研究工作流.js', 'utf8'), { window, TextEncoder, Uint8Array, Set, Date });
+const core = window.ResearchWorkflow;
+(async function () {
+  let passed = 0;
+  const storage = memory(), store = new core.Store(storage);
+  const input = { title: '當時研究', note: '<script>不可執行</script>', snapshot: { persistence: 'committed', snapshotId: 'dc-1', revision: 1, evidence: [{ id: 'a', value: 1 }] } };
+  const first = await store.save(input); input.snapshot.evidence[0].value = 999;
+  assert.equal(first.snapshot.evidence[0].value, 1); assert(await store.verify(first)); passed++;
+  const second = await store.save({ ...input, parentId: first.id });
+  assert.notEqual(first.id, second.id); assert.equal(store.list().records.length, 2); assert(await store.verify(first)); passed++;
+  const backup = store.exportAll(), target = new core.Store(memory());
+  assert.equal(await target.importAll(backup), 2); assert.equal(await target.importAll(backup), 0); passed++;
+  const tampered = JSON.parse(JSON.stringify(backup)); tampered.records[0].note = '事後美化';
+  await assert.rejects(target.importAll(tampered), /摘要不符/); assert.equal(target.list().records.length, 2); passed++;
+  const bad = JSON.parse(JSON.stringify(backup)); bad.records.push(bad.records[0]);
+  await assert.rejects(new core.Store(memory()).importAll(bad), /重複識別/); passed++;
+  await assert.rejects(store.save({ title: '不合法', snapshot: { persistence: 'ephemeral' } }), /已提交/); passed++;
+  storage.setItem('st.research.record.v1.damaged', '破損原文');
+  assert.equal(store.list().damagedKeys.length, 1); assert.equal(store.exportAll().damaged[0].raw, '破損原文'); passed++;
+  const quota = memory(), set = quota.setItem; let calls = 0;
+  quota.setItem = (k, v) => { if (++calls === 2) throw Error('容量不足'); set(k, v); };
+  await assert.rejects(new core.Store(quota).importAll(backup), /回復本次新增/); assert.equal(quota.length, 0); passed++;
+  assert.equal(core.relevance('2330', { ready: false, label: '實際持倉' }).present, null);
+  assert.equal(core.relevance('2330', { ready: true, label: '觀察池', kind: 'observation_pool', holdings: [{ sym: '2330', weight: 1 }] }).kind, 'observation_pool'); passed++;
+  assert.equal(await core.hash({ b: 2, a: 1 }), await core.hash({ a: 1, b: 2 })); passed++;
+  const domains = Object.fromEntries(core.subjectDomains.map(name => [name, { availability: 'unknown', asOf: null, source: [], evidence: [], reason: '來源日期未知' }]));
+  domains.fundamentals = { availability: 'partial', asOf: null, source: ['已保存財報'], reason: '抓取日不等於公告日',
+    evidence: [{ evidenceId: 'fundamental:2330', digest: 'a'.repeat(64), domain: 'fundamentals', kind: 'income', symbol: '2330', asOf: null, source: '已保存財報', value: { period: '2026Q2', sales: 100, retrievedAt: '2026-09-23' } }] };
+  const savedSubject = { ok: true, version: 'research-subject-v1', symbol: '2330', readOnly: true, market: 'TW', currency: 'TWD', domains, digest: 'b'.repeat(64), notes: ['資料期別分開'] };
+  const daily = { symbol: '2330', asOf: '2026-09-22', research: { version: 'daily-v1', latest: { conditions: ['breakout_252'] } } };
+  const chains = [{ stage: '晶圓分類', stocks: [['2330', '台積電'], ['2303', '聯電']] }];
+  const frozenPromise = core.freezeSubject('2330.TW', daily, savedSubject, chains);
+  savedSubject.domains.fundamentals.evidence[0].value.sales = 999; chains[0].stocks[0][1] = '事後改名';
+  const frozen = await frozenPromise;
+  assert.equal(frozen.savedResearch.report.domains.fundamentals.evidence[0].value.sales, 100);
+  assert.equal(frozen.savedResearch.report.domains.fundamentals.asOf, null);
+  assert.equal(frozen.savedResearch.supplyChainClassification.evidence[0].value.members[0].name, '台積電');
+  assert.equal(frozen.savedResearch.supplyChainClassification.asOf, null); passed++;
+  const merged = await store.save({ ...input, subject: frozen, symbol: '2330' });
+  frozen.savedResearch.report.domains.fundamentals.evidence[0].value.sales = 888;
+  assert.equal(merged.subject.savedResearch.report.domains.fundamentals.evidence[0].value.sales, 100);
+  assert(await store.verify(merged));
+  const altered = JSON.parse(JSON.stringify(merged)); altered.subject.savedResearch.report.domains.fundamentals.evidence[0].value.sales = 777;
+  assert.equal(await store.verify(altered), false); passed++;
+  const restored = new core.Store(memory()); await restored.importAll({ schema: 'research-backup-v1', records: [merged] });
+  assert.deepEqual(restored.list().records[0].subject, merged.subject); passed++;
+  await assert.rejects(core.freezeSubject('2330', daily, { ...savedSubject, symbol: '0050' }, []), /歸屬/);
+  await assert.rejects(core.freezeSubject('2330', { ...daily, symbol: '0050' }, savedSubject, []), /歸屬/); passed++;
+  const wrongEvidence = JSON.parse(JSON.stringify(savedSubject)); wrongEvidence.domains.fundamentals.evidence[0].symbol = '0050';
+  await assert.rejects(core.freezeSubject('2330', daily, wrongEvidence, []), /歸屬/); passed++;
+  const etf = { ...savedSubject, symbol: '00981A', domains: Object.fromEntries(core.subjectDomains.map(name => [name, { availability: 'unknown', asOf: null, source: [], evidence: [], reason: '尚未保存' }])) };
+  const unknown = await core.freezeSubject('00981a.tw', null, etf, []);
+  assert.equal(unknown.symbol, '00981A'); assert.equal(unknown.asOf, null); assert.equal(unknown.technicalAvailability, 'unknown');
+  assert.equal(unknown.savedResearch.report.domains.etfResearch.asOf, null); passed++;
+  const simulation = { contractVersion: 1, kind: 'simulation', label: '情境模擬（手動權重，非實際持倉）', source: 'st_portfolio_simulation_v1',
+    sourceLabel: '手動情境', inputVersion: '情境版本一', revision: 1, ready: true, holdings: [{ sym: '2330', market: 'TW', currency: 'TWD', weight: 0.6 }],
+    simulationInput: { text: '私人情境原文含無效行也須保留', inputVersion: '情境版本一' }, coverage: { complete: true }, issues: [] };
+  const relation = core.relevance('2330', simulation);
+  assert.equal(relation.kind, 'simulation'); assert.equal(relation.source, simulation.source); assert.equal(relation.inputVersion, '情境版本一');
+  assert(relation.note.includes('不代表已成交')); passed++;
+  const simulationRecord = await store.save({ ...input, portfolio: simulation });
+  simulation.inputVersion = '情境版本二'; simulation.holdings[0].weight = 0.2; simulation.simulationInput.text = '修改後情境';
+  assert.equal(simulationRecord.portfolio.inputVersion, '情境版本一'); assert.equal(simulationRecord.portfolio.holdings[0].weight, 0.6);
+  assert.equal(simulationRecord.portfolio.simulationInput.text, '私人情境原文含無效行也須保留'); assert(await store.verify(simulationRecord)); passed++;
+  const invalidSimulation = core.relevance('2330', { ...simulation, ready: false, issues: [{ code: 'bad_line', message: '無效行' }] });
+  assert.equal(invalidSimulation.present, null); assert.equal(invalidSimulation.kind, 'simulation'); assert.equal(invalidSimulation.issues[0].code, 'bad_line'); passed++;
+  console.log('研究紀錄 ' + passed + ' 組驗證通過：不可覆寫、快照凍結、匯入回復與私人來源界線');
+})().catch(error => { console.error(error); process.exitCode = 1; });

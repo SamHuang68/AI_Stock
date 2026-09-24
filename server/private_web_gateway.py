@@ -354,6 +354,12 @@ ARCHIFY_OVERRIDDEN_HEADERS = {
 
 # Read-only market/research API.  Prefix matching is segment-aware below.
 READ_GET_EXACT = {
+    "/updates",
+    "/updates/archive",
+    "/research/workflow",
+    "/research/subject",
+    "/research/validation",
+    "/research/portfolio",
     "/health",
     "/health/live",
     "/etf-delta",
@@ -427,6 +433,8 @@ OWNER_GET_PREFIXES = ("/draw/",)
 
 # Deliberately narrow write surface for a long-horizon market/research user.
 CONTROL_POST_EXACT = {
+    "/updates",
+    "/updates/retry",
     "/pulse/refresh",
     "/diagnostics/ui-route",
     "/screener",

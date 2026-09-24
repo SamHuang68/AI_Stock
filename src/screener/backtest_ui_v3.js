@@ -30,8 +30,8 @@
     document.head.appendChild(s);
   }
 
-  function cur(v, p) { return (v >= 0 ? '+' : '') + v.toFixed(p == null ? 1 : p) + '%'; }
-  function cls(v) { return v >= 0 ? 'bt3-pos' : 'bt3-neg'; }
+  function cur(v, p) { return Number.isFinite(v) ? (v >= 0 ? '+' : '') + v.toFixed(p == null ? 1 : p) + '%' : '—'; }
+  function cls(v) { return Number.isFinite(v) ? v >= 0 ? 'bt3-pos' : 'bt3-neg' : ''; }
 
   function open() {
     style();
@@ -39,14 +39,18 @@
     if (!m) {
       m = document.createElement('div'); m.id = 'bt3-modal';
       m.innerHTML = `<div id="bt3-box">
-        <h3>📈 回測引擎 v3.8</h3>
+        <h3>📈 下一棒開盤回測研究</h3>
         <div class="ctrl">
           停利% <input id="bt3-tp" value="15">
           停損% <input id="bt3-sl" value="8">
-          最長持有(日) <input id="bt3-mb" value="20">
+          最長持有(棒) <input id="bt3-mb" value="20">
+          單邊費用情境% <input id="bt3-fee" value="0.25">
+          賣出稅費情境% <input id="bt3-tax" value="0">
+          不利滑價% <input id="bt3-slip" value="0">
           <button id="bt3-run">執行掃描</button>
           <button class="sec" id="bt3-close">關閉</button>
         </div>
+        <div style="line-height:1.6">收盤訊號及出場條件均於下一棒開盤執行；每棒收盤估值，期末部位保留未平倉。成本為自訂情境，非實際券商費率。資料與交易日曆未完整核對，僅供同樣本探索，不能升格策略。</div>
         <canvas id="bt3-curve" width="680" height="120" style="background:#0b1220;border:1px solid #1e293b;border-radius:6px;width:100%"></canvas>
         <div id="bt3-body" style="margin-top:8px;color:#64748b">按「執行掃描」開始（使用目前線型資料）。</div>
       </div>`;
@@ -58,6 +62,7 @@
     m.style.display = 'flex';
   }
   function close() {
+    scanSequence++;
     const m = document.getElementById('bt3-modal');
     if (m) m.style.display = 'none';
     // 清除上一支股票的回測結果，避免下次開啟殘留
@@ -69,21 +74,26 @@
   }
 
   let lastRows = [];
+  let scanSequence = 0;
 
   async function runScan() {
+    const sequence = ++scanSequence;
+    const symbol = (typeof S !== 'undefined' && S.sym) ? S.sym : '';
+    const market = (typeof S !== 'undefined' && S.mkt) ? S.mkt : 'TW';
     const body = document.getElementById('bt3-body');
     if (body) body.innerHTML = '載入本機深度歷史中…';
     // v4.0:優先用本機 DB 的深度歷史(5年)跑回測,不再只靠畫面載入的區間
     let candles = [];
     try {
-      const sym = (typeof S !== 'undefined' && S.sym) ? S.sym : '';
-      const mkt = (typeof S !== 'undefined' && S.mkt) ? S.mkt : 'TW';
+      const sym = symbol;
+      const mkt = market;
       if (sym) {
         const r = await fetch('/bars?sym=' + encodeURIComponent(sym) + '&market=' + encodeURIComponent(mkt));
         const j = await r.json();
         if (j && j.candles && j.candles.length >= 80) candles = j.candles;
       }
     } catch (e) {}
+    if (sequence !== scanSequence || (typeof S !== 'undefined' && (S.sym !== symbol || (S.mkt || 'TW') !== market))) return;
     // 後援:深度歷史抓不到 → 用畫面載入的線型資料
     if (candles.length < 80) candles = ((typeof S !== 'undefined') && S.data && S.data.candles) || [];
     if (candles.length < 80) { body.innerHTML = '<span class="bt3-neg">資料太少（需 ≥ 80 根 K）。</span>'; return; }
@@ -95,23 +105,33 @@
       return;
     }
     const opts = {
-      tp: (+document.getElementById('bt3-tp').value || 15) / 100,
-      sl: (+document.getElementById('bt3-sl').value || 8) / 100,
-      maxBars: +document.getElementById('bt3-mb').value || 20,
+      tp: Number(document.getElementById('bt3-tp').value) / 100,
+      sl: Number(document.getElementById('bt3-sl').value) / 100,
+      maxBars: Number(document.getElementById('bt3-mb').value),
+      feeRate: Number(document.getElementById('bt3-fee').value) / 100,
+      taxRate: Number(document.getElementById('bt3-tax').value) / 100,
+      slippage: Number(document.getElementById('bt3-slip').value) / 100,
     };
+    if (![opts.feeRate, opts.taxRate, opts.slippage].every(value => Number.isFinite(value) && value >= 0 && value < 1)) {
+      body.textContent = '成本情境須為 0 至小於 100% 的有限數值。'; return;
+    }
+    if (![opts.tp, opts.sl].every(value => Number.isFinite(value) && value >= 0) || !Number.isInteger(opts.maxBars) || opts.maxBars < 0) {
+      body.textContent = '停利停損須為非負數，持有棒數須為非負整數；0 代表停用該條件。'; return;
+    }
     const rows = window.Backtest.scanStrategies(candles, opts);
     lastRows = rows;
-    let h = `<table><thead><tr><th>策略</th><th>次數</th><th>勝率</th><th>賠率</th><th>期望值</th><th>總報酬</th><th>最大回撤</th><th>夏普</th></tr></thead><tbody>`;
+    let h = `<div>版本：${window.Backtest.ENGINE_VERSION || '未提供'}。排序使用同一開發樣本；總報酬含期末按市價部位，勝率僅計已平倉交易。</div><div style="max-width:100%;overflow:auto"><table><thead><tr><th>策略</th><th>已平倉</th><th>勝率</th><th>賠率</th><th>期望值</th><th>總報酬</th><th>收盤回撤</th><th>每棒夏普</th><th>待確認</th></tr></thead><tbody>`;
     rows.forEach((r, i) => {
       h += `<tr data-i="${i}"><td>${r.name}</td><td>${r.count}</td>
-        <td>${r.winRate.toFixed(0)}%</td>
+        <td>${r.count ? r.winRate.toFixed(0) + '%' : '—'}</td>
         <td>${isFinite(r.payoff) ? r.payoff.toFixed(2) : '∞'}</td>
         <td class="${cls(r.expectancy)}">${cur(r.expectancy)}</td>
         <td class="${cls(r.totalReturn)}">${cur(r.totalReturn)}</td>
-        <td class="bt3-neg">-${r.maxDD.toFixed(0)}%</td>
-        <td>${r.sharpe.toFixed(2)}</td></tr>`;
+        <td class="bt3-neg">${Number.isFinite(r.maxDD) ? '-' + r.maxDD.toFixed(1) + '%' : '未知'}</td>
+        <td>${Number.isFinite(r.sharpe) ? r.sharpe.toFixed(2) : '—'}</td>
+        <td>${r.openPosition ? '未平倉' : r.pendingEntry ? '待進場' : '—'}${r.rejected && r.rejected.length ? '／未成交 ' + r.rejected.length : ''}${r.status === 'unknown' ? '／估值未知' : ''}</td></tr>`;
     });
-    h += `</tbody></table>`;
+    h += `</tbody></table></div>`;
 
     // 型態命中率（若 PatternV3 可用）
     if (window.PatternV3 && typeof PatternV3.detectPatterns === 'function') {

@@ -45,8 +45,10 @@
         });
         if (cancelled || timedOut) throw new Error('請求已停止');
         meta = { requestId: response.headers.get('X-ST-AI-Request-ID') || traceId,
+          serverRequestId: response.headers.get('X-ST-AI-Request-ID') || '',
           host: response.headers.get('X-ST-AI-Host') || '', provider: response.headers.get('X-ST-AI-Provider') || '',
-          model: response.headers.get('X-ST-AI-Model') || '', dataBoundary: response.headers.get('X-ST-AI-Data-Boundary') || '' };
+          model: response.headers.get('X-ST-AI-Model') || '', dataBoundary: response.headers.get('X-ST-AI-Data-Boundary') || '',
+          destinationId: response.headers.get('X-ST-AI-Destination-ID') || '' };
         status();
         if (!response.ok) {
           var detail = await response.text();
