@@ -2687,6 +2687,8 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             self._handle_stock_signals_push_config_post()
         elif p == '/stock-signals/pooled/refresh':
             self._handle_stock_signals_pooled_refresh()
+        elif p == '/stock-signals/explain':
+            self._handle_stock_signals_explain()
         elif p == '/research/overnight-intraday/refresh':
             self._handle_overnight_intraday_refresh()
         elif p == '/options/txo/refresh':

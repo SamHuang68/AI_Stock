@@ -34,6 +34,8 @@ _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_FILE = os.path.join(_BASE, 'data', 'stock_signal_push_state.json')
 CONFIG_KEY = 'stock_signal_push'
 POLL_KEY = 'stock_signal_poll_seconds'
+AI_DIGEST_KEY = 'stock_signal_ai_digest'
+AI_BATCH_WAIT_SEC = 90 * 60   # 批次最多等 90 分鐘，逾時先送規則版摘要
 # 收盤後多久送摘要（當地時間），給資料源時間定稿
 DIGEST_AFTER = {'TW': (14, 30), 'US': (16, 45)}
 
@@ -62,11 +64,13 @@ def get_mode(cfg: Optional[Dict[str, Any]] = None) -> str:
     return mode if mode in routes.PUSH_MODES else 'off'
 
 
-def set_mode(mode: str) -> None:
+def set_mode(mode: str, ai_digest: Optional[bool] = None) -> None:
     if not alert_daemon:
         raise RuntimeError('alert daemon unavailable')
     cur = alert_daemon.load_config()
     cur[CONFIG_KEY] = mode
+    if ai_digest is not None:
+        cur[AI_DIGEST_KEY] = bool(ai_digest)
     alert_daemon.save_config(cur)
     if mode != 'off':
         start()
@@ -118,7 +122,8 @@ def _event_line(e: Dict[str, Any]) -> str:
             f"{e['detail']}；失效：{inval}{stats}")
 
 
-def format_symbol_block(result: Dict[str, Any], today_only: bool = True) -> Optional[str]:
+def format_symbol_block(result: Dict[str, Any], today_only: bool = True,
+                        narrative: Optional[Dict[str, Any]] = None) -> Optional[str]:
     if not result.get('ok'):
         return None
     chg = result['indicators'].get('chgPct')
@@ -128,11 +133,15 @@ def format_symbol_block(result: Dict[str, Any], today_only: bool = True) -> Opti
     events = [e for e in result.get('events') or []
               if e['status'] != 'invalidated' and (not today_only or e['barsAgo'] == 0)]
     lines += [_event_line(e) for e in events]
+    if narrative and narrative.get('source') == 'claude':
+        import signal_narrative
+        lines.append('  AI 白話（逐句對照證據）：' + signal_narrative.as_text(narrative))
     return '\n'.join(lines)
 
 
 def build_digest(market: str, *, allow_network: bool = True,
-                 items: Optional[List[Dict[str, str]]] = None) -> str:
+                 items: Optional[List[Dict[str, str]]] = None,
+                 narratives: Optional[Dict[str, Dict[str, Any]]] = None) -> str:
     items = [i for i in (items if items is not None else symbols()) if i['market'] == market]
     title = f"📋 自選股收盤體檢（{'台股' if market == 'TW' else '美股'}）"
     if not items:
@@ -145,7 +154,7 @@ def build_digest(market: str, *, allow_network: bool = True,
             continue
         if r.get('ok'):
             as_of = max(as_of or '', r['asOf'])
-        block = format_symbol_block(r)
+        block = format_symbol_block(r, narrative=(narratives or {}).get(it['sym']))
         if block:
             blocks.append(block)
     body = '\n\n'.join(blocks) if blocks else '（本機尚無可用日線）'
@@ -200,13 +209,19 @@ def check_once(now: Optional[datetime] = None, notify=None) -> Dict[str, int]:
                                  ['  ' + r['health']['summary']['sentence']])
                 send(text, f"個股訊號 {r['symbol']}")
                 counts['events'] += len(fresh)
+    api_key = _ai_key() if cfg.get(AI_DIGEST_KEY) else ''
     for market in ('TW', 'US'):
         if mode not in ('digest', 'realtime'):
             break
         day = _digest_due(market, st, now)
         if not day or not any(i['market'] == market for i in items):
             continue
-        text = build_digest(market, items=items)
+        narratives = None
+        if api_key:
+            ready, narratives = _ai_batch_step(st, market, day, items, api_key)
+            if not ready:
+                continue   # 批次仍在跑：下一輪再檢查，逾時則送規則版
+        text = build_digest(market, items=items, narratives=narratives)
         send(text, f"自選股收盤體檢 {day}")
         st['digestSent'][market] = day
         counts['digests'] += 1
@@ -217,6 +232,58 @@ def check_once(now: Optional[datetime] = None, notify=None) -> Dict[str, int]:
         _state['sent'].append({'t': time.time(), **counts})
         _state['sent'] = _state['sent'][-50:]
     return counts
+
+
+def _ai_key() -> str:
+    try:
+        import ai_api
+        return ai_api.load_ai_key()
+    except Exception:
+        return ''
+
+
+def _ai_batch_step(st: Dict[str, Any], market: str, day: str, items: List[Dict[str, str]],
+                   api_key: str) -> tuple:
+    """收盤摘要的 AI 白話版：送出 Message Batches → 之後幾輪輪詢 → 結束後逐檔驗證。
+
+    回 (ready, narratives)。ready=False 表示還在等；逾時或失敗時 ready=True、narratives=None
+    （照常送規則版摘要，不讓 AI 卡住推播）。
+    """
+    import ai_api
+    import signal_narrative
+    batches = st.setdefault('aiBatch', {})
+    job = batches.get(market)
+    syms = [i['sym'] for i in items if i['market'] == market]
+    try:
+        if not job or job.get('day') != day:
+            model = ai_api.resolve_model(api_key)
+            reqs = []
+            for sym in syms:
+                r = routes.analyze_symbol(sym, market)
+                if r.get('ok'):
+                    reqs.append(signal_narrative.batch_request(r, model, f'{market}-{sym}'))
+            if not reqs:
+                return True, None
+            batch = ai_api.batch_create(api_key, reqs)
+            batches[market] = {'id': batch.get('id'), 'day': day, 'model': model,
+                               'submittedAt': time.time()}
+            return False, None
+        if time.time() - float(job.get('submittedAt') or 0) > AI_BATCH_WAIT_SEC:
+            return True, None
+        batch = ai_api.batch_get(api_key, job['id'])
+        if batch.get('processing_status') != 'ended':
+            return False, None
+        rows = ai_api.batch_results(api_key, batch)
+        out = {}
+        for sym in syms:
+            r = routes.analyze_symbol(sym, market)
+            row = rows.get(f'{market}-{sym}')
+            if r.get('ok') and row is not None:
+                out[sym] = signal_narrative.from_batch_result(r, row, job.get('model') or '')
+        return True, out
+    except Exception as exc:
+        print('[stock-signal] AI batch step failed:', type(exc).__name__)
+        return True, None
 
 
 POOLED_MAX_AGE_DAYS = 7
@@ -281,6 +348,7 @@ def status() -> Dict[str, Any]:
     channels = [k for k in ('telegram', 'email', 'webhook') if (cfg.get(k) or {}).get('enabled')]
     return {
         'mode': get_mode(cfg), 'modes': list(routes.PUSH_MODES),
+        'aiDigest': bool(cfg.get(AI_DIGEST_KEY)), 'aiKeySet': bool(_ai_key()),
         'pollSeconds': int(cfg.get(POLL_KEY, 600) or 600),
         'channels': channels,
         'symbols': len(symbols()),

@@ -948,7 +948,9 @@ def build_evidence(result: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
                                 'asOf': as_of}
     for e in result.get('events') or []:
         ev[e['evidenceId']] = {'label': e['label'], 'value': {
-            'date': e['date'], 'status': e['status'], 'level': e['invalidation']['level']},
+            'date': e['date'], 'status': e['status'], 'statusLabel': e['statusLabel'],
+            'direction': e['directionLabel'], 'level': e['invalidation']['level'],
+            'invalidation': e['invalidation']['text'], 'meaning': e['plain']},
             'text': e['detail'], 'asOf': e['date']}
         st = e.get('stats') or {}
         for row in st.get('horizons') or []:

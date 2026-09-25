@@ -449,6 +449,7 @@ CONTROL_POST_EXACT = {
     "/stock-signals/watchlist",
     "/stock-signals/push-config",
     "/stock-signals/pooled/refresh",
+    "/stock-signals/explain",
 }
 CONTROL_POST_PREFIXES = ("/draw/",)
 

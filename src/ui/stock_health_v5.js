@@ -216,9 +216,15 @@
     var opts = [['off', '關閉推播'], ['digest', '收盤摘要（每日一次）'], ['realtime', '即時事件＋收盤摘要']];
     var hint = cfg && cfg.channels && !cfg.channels.length && mode !== 'off'
       ? '<span class="sh5-warn">尚未啟用 Telegram／Email／Webhook，請到警報設定開啟。</span>' : '';
+    var ai = '';
+    if (cfg && mode !== 'off') {
+      ai = '<label title="收盤摘要附 Claude 白話版：用 Message Batches 非即時處理，費用約同步呼叫一半；每句仍需通過證據驗證">' +
+        '<input type="checkbox" id="sh5-aidigest"' + (cfg.aiDigest ? ' checked' : '') + (cfg.aiKeySet ? '' : ' disabled') + '> ' +
+        '摘要附 AI 白話（批次）' + (cfg.aiKeySet ? '' : '（需先設定 AI Key）') + '</label>';
+    }
     return '<div class="sh5-row">自選股訊號推播：<select id="sh5-push">' + opts.map(function (o) {
       return '<option value="' + o[0] + '"' + (o[0] === mode ? ' selected' : '') + '>' + o[1] + '</option>';
-    }).join('') + '</select>' + (cfg ? '<span>追蹤 ' + (cfg.symbols || 0) + ' 檔</span>' : '') + hint + '</div>';
+    }).join('') + '</select>' + (cfg ? '<span>追蹤 ' + (cfg.symbols || 0) + ' 檔</span>' : '') + ai + hint + '</div>';
   }
 
   function aiHtml(n) {
@@ -228,9 +234,10 @@
       return esc(s.text) + '<span class="cite">[' + esc((s.evidenceIds || []).join(', ')) + ']</span>';
     });
     var head = n.source === 'claude'
-      ? 'AI 白話解讀（每句都附證據編號，未通過驗證的句子已刪除）'
-      : '白話解讀（規則模板；未設定 AI Key 或 AI 未通過驗證）';
+      ? 'AI 白話解讀（' + esc(n.model || 'Claude') + '；每句都附證據編號，未通過驗證的句子已刪除）'
+      : '白話解讀（規則模板）';
     var dropped = n.dropped && n.dropped.length ? '<div class="sh5-warn">已刪除 ' + n.dropped.length + ' 句無法對應證據的內容。</div>' : '';
+    if (n.note) dropped += '<div class="sh5-warn">' + esc(n.note) + '</div>';
     return '<div class="sh5-ai"><div style="font-weight:800;color:#c7d2fe;margin-bottom:4px">' + esc(head) + '</div>' +
       parts.join('<br>') + dropped + '</div>';
   }
@@ -334,12 +341,17 @@
       b.onclick = function () { setMode(b.getAttribute('data-sh5-mode')); paint(el, d); };
     });
     var sel = el.querySelector('#sh5-push');
-    if (sel) sel.onchange = function () {
+    var aiBox = el.querySelector('#sh5-aidigest');
+    function savePush() {
       syncWatchlist(true);
-      postJson('/stock-signals/push-config', { mode: sel.value }).then(function (c) {
+      var body = { mode: sel.value };
+      if (aiBox) body.aiDigest = !!aiBox.checked;
+      postJson('/stock-signals/push-config', body).then(function (c) {
         pushCfg = c; paint(el, d);
       }).catch(function () {});
-    };
+    }
+    if (sel) sel.onchange = savePush;
+    if (aiBox) aiBox.onchange = savePush;
     var pool = el.querySelector('#sh5-pool');
     if (pool) {
       var bindPool = function () {

@@ -323,12 +323,45 @@ class StockSignalsRoutesMixin:
         if mode not in PUSH_MODES:
             self._err('mode must be one of off / digest / realtime', 400)
             return
+        ai_digest = (body or {}).get('aiDigest')
         try:
-            signal_digest.set_mode(mode)
+            signal_digest.set_mode(mode, ai_digest=None if ai_digest is None else bool(ai_digest))
         except Exception as exc:
             self._err(f'save push config failed: {type(exc).__name__}', 500)
             return
         self._ok(json.dumps(signal_digest.status(), ensure_ascii=False).encode('utf-8'))
+
+    def _handle_stock_signals_explain(self):
+        """POST {sym, market}：AI 白話解讀（只引用體檢證據，逐句驗證；無 Key 或失敗回規則模板）。"""
+        import ai_api
+        import signal_narrative
+        try:
+            body = read_json_body(self, max_bytes=4096)
+        except BodyReadError as exc:
+            self._err(str(exc), exc.status)
+            return
+        code = clean_symbol(str((body or {}).get('sym') or ''))
+        if not code:
+            self._err('sym is required', 400)
+            return
+        market = infer_market(code, (body or {}).get('market'))
+        try:
+            result = analyze_symbol(code, market, allow_network=False)
+            narrative = signal_narrative.explain(result, ai_api.load_ai_key())
+        except Exception as exc:
+            self._err(f'explain failed: {type(exc).__name__}', 500)
+            return
+        if narrative.get('source') == 'claude':
+            try:
+                import postmarket_report
+                import wavedeck_bus as wdb
+                usage = narrative.get('usage') or {}
+                wdb.record_st_cloud(usd=postmarket_report.estimate_cost_usd(
+                    narrative.get('model') or '', usage.get('input_tokens') or 0,
+                    usage.get('output_tokens') or 0), calls=1)
+            except Exception:
+                pass
+        self._ok(json.dumps(narrative, ensure_ascii=False).encode('utf-8'))
 
     def _handle_stock_signals_pooled(self):
         import job_queue

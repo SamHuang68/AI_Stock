@@ -10,6 +10,7 @@
 | [TIP_UX.md](TIP_UX.md) | 分析轉盤、快捷鍵與總覽操作 |
 | [FIELDS.md](FIELDS.md) | 欄位型別與前後端一致性契約 |
 | [STRATEGIC_COMMAND_CENTER_PLAN.md](STRATEGIC_COMMAND_CENTER_PLAN.md) | 戰略指揮中心、DecisionContext 與實作計畫 |
+| [STOCK_SIGNALS.md](STOCK_SIGNALS.md) | 個股訊號引擎、五燈體檢、歷史統計、推播、AI 白話解讀與 MCP |
 | [HOUSEKEEPING.md](HOUSEKEEPING.md) | 專案維護與清理原則 |
 | [WaveDeck ARCHITECTURE](../wavedeck/docs/ARCHITECTURE.md) | 可選執行台架構 |
 
