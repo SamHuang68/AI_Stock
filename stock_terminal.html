@@ -264,6 +264,7 @@ html,body{height:var(--st-app-height,100dvh);max-height:var(--st-app-height,100d
     <div id="right">
       <div id="rtabs">
         <button class="rtab on" data-tab="stats" onclick="setTab('stats')">STATS</button>
+        <button class="rtab" data-tab="health" id="tab-health" onclick="setTab('health')" title="個股體檢：燈號、訊號與失效條件">體檢</button>
         <button class="rtab" data-tab="research" onclick="setTab('research')">RESEARCH</button>
         <button class="rtab" data-tab="position" id="tab-pos" onclick="setTab('position')">POS</button>
         <button class="rtab" data-tab="watch" id="tab-watch" onclick="setTab('watch')">WATCH</button>
@@ -1956,6 +1957,7 @@ function attachMobileWorkspaceTrace() {
 
 const RPANEL_PAGES = [
   {key:'stats', label:'技術統計'},
+  {key:'health', label:'個股體檢'},
   {key:'research', label:'研究分析'},
   {key:'position', label:'持倉部位'},
   {key:'watch', label:'條件觀察'},
@@ -2115,6 +2117,7 @@ function setTab(tab) {
 function renderRpanel() {
   const el = document.getElementById('rpanel');
   if (S.tab==='stats')    { el.innerHTML = renderStats(); return; }
+  if (S.tab==='health')   { if (window.StockHealthV5) window.StockHealthV5.renderInto(el); else el.innerHTML = ''; return; }
   if (S.tab==='research') { el.innerHTML = renderResearch(); attachResearch(); return; }
   if (S.tab==='batch')    { el.innerHTML = renderBatch(); attachBatch(); return; }
   if (S.tab==='history')  { el.innerHTML = renderHistoryTab(); return; }

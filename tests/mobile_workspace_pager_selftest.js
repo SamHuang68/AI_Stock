@@ -78,8 +78,8 @@ function ok(value, message) {
 ok(sandbox.__portrait.page === 'analysis', 'next changes the entire portrait workspace to analysis');
 ok(sandbox.__initialResizeCount === 1, 'chart visibility emits one resize without a self-triggering loop');
 ok(sandbox.__portrait.key === 'stats', 'first analysis page is technical statistics');
-ok(sandbox.__portrait.label === '技術統計 · 2 / 7', 'bottom index includes line chart as page one');
-ok(sandbox.__portrait.dots === 7, 'bottom index renders seven workspace pages');
+ok(sandbox.__portrait.label === '技術統計 · 2 / 8', 'bottom index includes line chart as page one');
+ok(sandbox.__portrait.dots === 8, 'bottom index renders eight workspace pages');
 ok(sandbox.__landscape.page == null && sandbox.__landscape.key == null,
   'landscape removes portrait paging state and restores the split workspace');
 console.log('\nmobile_workspace_pager_selftest PASSED');

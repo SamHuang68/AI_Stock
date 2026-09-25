@@ -17,8 +17,10 @@ from datetime import datetime
 from daemon_lock import acquire_daemon_lock
 try:
     from .atomic_store import StoreCorruptError, atomic_write_json, load_json
+    from .indicators import candle_snapshot
 except ImportError:
     from atomic_store import StoreCorruptError, atomic_write_json, load_json
+    from indicators import candle_snapshot
 
 try:
     import alert_daemon
@@ -106,43 +108,38 @@ def _fetch_daily(code, mkt):
 
 # ---- 指標 --------------------------------------------------
 def _ind(candles):
-    closes = [c['close'] for c in candles]
-    highs = [c['high'] for c in candles]
-    vols = [c['volume'] for c in candles]
-    n = len(closes)
-
-    def sma(p):
-        return sum(closes[-p:]) / p if n >= p else None
-
-    sma20 = sma(20); sma60 = sma(60)
-    # RSI 14
-    g = l = 0.0
-    for i in range(n - 14, n):
-        if i < 1:
-            continue
-        dd = closes[i] - closes[i - 1]
-        if dd > 0: g += dd
-        else: l -= dd
-    rsi = 100.0 if l == 0 else 100 - 100 / (1 + (g / 14) / (l / 14))
-    # BB lower = sma20 - 2*std20
-    bbL = None
-    if sma20 is not None and n >= 20:
-        m = sma20
-        var = sum((x - m) ** 2 for x in closes[-20:]) / 20
-        bbL = m - 2 * (var ** 0.5)
-    v5 = sum(vols[-5:]) / 5 if n >= 5 else 0
-    v20 = sum(vols[-20:]) / 20 if n >= 20 else 0
-    volRatio = v5 / v20 if v20 > 0 else 0
-    return {'close': closes[-1], 'sma20': sma20, 'sma60': sma60, 'rsi14': rsi,
-            'bbL': bbL, 'volRatio': volRatio, 'highs': highs}
+    """WATCH 背景偵測指標：與前端 watch_v2／pro_v2 同一口徑（indicators.candle_snapshot）。"""
+    return candle_snapshot(candles)
 
 
 # ---- 策略評估（對齊 watch_v2 STRATEGIES.check）-------------
+def _rsi_bounce_state(rsi, prev_min):
+    """RSI 超賣反彈（事件，非水位）：近 5 根曾 < 30，今日回升站上 30 且仍在 38 以內才觸發。
+
+    與前端 watch_v2 rsi_oversold_bounce 共用同一規則；單看「RSI 在 30~38」會把
+    從 60 一路跌到 35 的走勢誤判成反彈。
+    """
+    if rsi is None:
+        return ('none', '')
+    recent_oversold = prev_min is not None and prev_min < 30
+    if rsi < 30:
+        return ('wait', f'RSI {rsi:.1f} 仍在超賣區，等回升站上 30')
+    if rsi <= 38:
+        if recent_oversold:
+            return ('trigger', f'RSI 由 {prev_min:.1f} 回升至 {rsi:.1f}（近 5 日曾跌破 30）')
+        return ('wait', f'RSI {rsi:.1f} 在 30~38，但近 5 日未曾跌破 30，非超賣反彈')
+    if rsi < 50 and recent_oversold:
+        return ('expired', f'RSI {rsi:.1f} 已離開反彈區')
+    return ('wait', '')
+
+
 def _eval(strategy, ind, params):
     p = params or {}
-    c = ind['close']
+    c = ind.get('close')
+    if c is None:
+        return ('none', '')
     if strategy == 'sma60_pullback':
-        s = ind['sma60']
+        s = ind.get('sma60')
         if s is None: return ('none', '')
         tol = (p.get('tolerance', 1.5)) / 100
         lo, hi = s * (1 - tol), s * (1 + tol)
@@ -150,7 +147,7 @@ def _eval(strategy, ind, params):
         if c < lo: return ('broken', f'跌破容差下緣 {lo:.2f}')
         return ('wait', '')
     if strategy == 'sma20_pullback':
-        s = ind['sma20']
+        s = ind.get('sma20')
         if s is None: return ('none', '')
         tol = (p.get('tolerance', 1.0)) / 100
         lo, hi = s * (1 - tol), s * (1 + tol)
@@ -159,24 +156,27 @@ def _eval(strategy, ind, params):
         return ('wait', '')
     if strategy == 'breakout_n_high':
         days = int(p.get('days', 20)); vm = p.get('volMult', 1.5)
-        highs = ind['highs']
+        highs = ind.get('highs') or []
         if len(highs) < days + 1: return ('none', '')
         mx = max(highs[-(days + 1):-1])
-        if c > mx and ind['volRatio'] >= vm:
-            return ('trigger', f'突破 {days} 日新高 {mx:.2f} + 量 {ind["volRatio"]:.1f}x')
+        vr = ind.get('volRatio')
+        if c > mx:
+            if vr is not None and vr >= vm:
+                return ('trigger', f'突破 {days} 日新高 {mx:.2f} + 量 {vr:.1f}x')
+            return ('partial', f'價突破 {mx:.2f} 但量不足')
         return ('wait', '')
     if strategy == 'rsi_oversold_bounce':
-        r = ind['rsi14']
-        if 30 <= r <= 38: return ('trigger', f'RSI {r:.1f} 反彈區')
-        return ('wait', '')
+        return _rsi_bounce_state(ind.get('rsi14'), ind.get('rsiPrevMin5'))
     if strategy == 'bb_lower_touch':
-        b = ind['bbL']
+        b = ind.get('bbL')
         if b is None: return ('none', '')
         if c <= b: return ('trigger', f'觸布林下軌 {b:.2f}')
         return ('wait', '')
     if strategy == 'rsi_overheat':
         thr = p.get('threshold', 75)
-        if ind['rsi14'] >= thr: return ('trigger', f'RSI {ind["rsi14"]:.1f} ≥ {thr} 過熱')
+        r = ind.get('rsi14')
+        if r is None: return ('none', '')
+        if r >= thr: return ('trigger', f'RSI {r:.1f} ≥ {thr} 過熱')
         return ('wait', '')
     if strategy == 'custom_buy':
         t = p.get('target')

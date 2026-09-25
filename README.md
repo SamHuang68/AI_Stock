@@ -19,6 +19,7 @@
 - **跨市場前兆雷達（Shadow）**：以國際科技、2330／0050 去重錨點、台美記憶體固定籃子、廣度／流動性與資金／衍生品五個獨立證據域，追蹤下行與上行前兆、AI 雙箭頭及記憶體共振；畫面分開顯示目前現貨／夜盤與 T+1～T+5 證據強度，明示混合時效且不把分數當機率。夜盤新事件不得借用舊現貨確認，同一來源觀測不重複推進或滑動延長到期時間；狀態轉換寫入 SQLite 並可選擇推送，AI 只解釋、不觸發。另以不可回寫的 1／3／5 日前瞻帳本驗證主訊號，單一 horizon 未滿 20 筆時不顯示命中率。契約、公式、狀態機與驗證方法見 [跨市場前兆雷達](docs/MARKET_PRECURSOR_SIGNALS.md)。
 - **共識注意力 Radar**：既有右下浮動按鈕先呈現最多三項跨功能重點，再深連結並高亮 Decision 的原始證據區；它只投影既有 DecisionContext、不另行抓資料，Observation 不計徽章，過期資料凍結提醒。排序、已讀 generation、手機直／橫版與權威邊界見 [Consensus Attention Radar](docs/CONSENSUS_ATTENTION_RADAR.md)。
 - **台指選擇權結構（預設收合）**：精確到期別整合 TAIFEX 一般盤日終 OI、結算價與官方 Delta；分層呈現 OI 事實、IV／Gamma Density 衍生值，以及明確標成 Shadow 的 Signed GEX／Flip 情境，不把公開 OI 冒充造市商真實持倉。
+- **個股體檢與訊號**：圖表頁「體檢」分頁用五燈（趨勢／動能／量能／籌碼／風險）、一句話與失效價位給新手看；15 個事件型訊號都附失效條件、本檔與同市場歷史統計（樣本不足不公開比例、附 ±95% 誤差），策略訊號頁列出自選股總表，可選收盤摘要或即時推播。AI 白話解讀只能引用證據並逐句驗證；另提供唯讀 MCP 伺服器給 Claude Desktop／Code 使用。詳見 [個股訊號與體檢](docs/STOCK_SIGNALS.md)。
 - **台美顏色語意分離**：台股／台指期紅漲綠跌；美股綠漲紅跌。
 - **本機優先**：介面與伺服器只在本機運作，預設僅監聽 `127.0.0.1:18432`。
 - **可追溯資料品質**：健康檢查、來源狀態、快取與路由診斷都可由本機端點或紀錄查核。頂列同步燈以各行情 `asOf` 中最舊者為準（見 `market_freshness_v5.js`）。
@@ -361,6 +362,10 @@ flowchart LR
 | `POST /research/overnight-intraday/refresh` | 更新固定 `memory_v1` 白名單並驗證調整、時段與報酬恆等式 |
 | `GET /options/txo/history?expiry=2026-08-19&limit=20` | 讀取精簡、同到期別的本機日終結構歷史；不觸發網路或寫入 |
 | `GET /bridge/wavedeck/stream` | Stock Terminal 接收 WaveDeck 狀態的 SSE |
+| `GET /stock-signals?sym=2330` | 個股體檢：五燈、事件、失效條件、本檔與同市場統計、可引用證據 |
+| `GET /stock-signals/batch?syms=2330,AAPL:US` | 自選股精簡體檢（最多 40 檔） |
+| `GET /stock-signals/pooled?market=TW` | 訊號成績單（同市場合併統計快取）；`POST /stock-signals/pooled/refresh` 背景重算 |
+| `POST /stock-signals/explain` | AI 白話解讀（逐句驗證證據；無 Key 回規則模板） |
 
 靜態檔案採 allow-list；伺服器不是通用檔案伺服器，也不應改成對外網卡監聽。
 

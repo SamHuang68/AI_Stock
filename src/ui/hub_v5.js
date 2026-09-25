@@ -742,12 +742,14 @@
 
   // ── Signals ──────────────────────────────────────────────
   function renderSignals(el) {
-    el.innerHTML = head('策略訊號', '可解釋監控訊號（焦點掃描／選股結果）',
+    el.innerHTML = head('策略訊號', '自選股體檢＋可解釋監控訊號（焦點掃描／選股結果）',
       '<button class="hub-btn" data-go="scan">選股</button>' +
       '<button class="hub-btn primary" id="hub-run-focus">執行焦點掃描</button>' +
       '<button class="hub-btn" data-shell-back>← 儀表板</button>') +
+      '<div id="hub-health-board" class="hub-body" style="flex:0 0 auto;height:auto;max-height:46%;overflow:auto"></div>' +
       '<div id="hub-sig-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
     bindCommon(el);
+    if (window.StockHealthV5) window.StockHealthV5.renderBoard($('hub-health-board'));
     var run = $('hub-run-focus');
     if (run) run.onclick = function () { loadFocus(el, true); };
     loadFocus(el, false);

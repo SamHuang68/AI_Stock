@@ -88,6 +88,9 @@ data/alert_config.json
 data/alert_rules.json
 data/watch_rules.json
 data/watch_state.json
+data/stock_signal_watchlist.json
+data/stock_signal_push_state.json
+data/stock_signal_pooled_stats.json
 data/wavedeck_bus.json
 data/pulse_history.db
 data/decision_history.db
