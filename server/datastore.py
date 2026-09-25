@@ -287,6 +287,14 @@ def get_bars_bulk(codes, market='TW'):
                     lst.append((ts, o, h, l, c, v))
     return out
 
+def list_symbols(market='TW', min_bars=1):
+    """本機 DB 內此市場、至少 min_bars 根日 K 的代號(依代號排序);供全市場統計等批次讀取。"""
+    with closing(get_conn()) as conn:
+        rows = conn.execute(
+            'SELECT symbol FROM bars WHERE market=? GROUP BY symbol HAVING COUNT(*) >= ? ORDER BY symbol',
+            (market, int(min_bars))).fetchall()
+    return [r[0] for r in rows]
+
 def last_ts(sym, market='TW'):
     with closing(get_conn()) as conn:
         r = conn.execute('SELECT MAX(ts) FROM bars WHERE market=? AND symbol=?', (market, sym)).fetchone()

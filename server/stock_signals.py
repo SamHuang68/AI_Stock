@@ -580,6 +580,21 @@ def recent_events(frame: Mapping[str, List[Any]], lookback: int = EVENT_LOOKBACK
 
 
 # ── 歷史統計（P2）─────────────────────────────────────────────
+def ci95_pts(p: float, n: int) -> Optional[float]:
+    """上漲比例的 95% 常態近似誤差半寬（百分點）；讓 UI 能說「差距小於誤差，視為無明顯差異」。"""
+    if n <= 0:
+        return None
+    return round(1.96 * math.sqrt(max(0.0, p * (1.0 - p)) / n) * 100.0, 1)
+
+
+def edge_verdict(edge_pts: Optional[float], ci_pts: Optional[float]) -> Optional[str]:
+    if edge_pts is None or ci_pts is None:
+        return None
+    if abs(edge_pts) <= ci_pts:
+        return 'noise'
+    return 'above' if edge_pts > 0 else 'below'
+
+
 def _median(vals: Sequence[float]) -> Optional[float]:
     s = sorted(vals)
     n = len(s)
@@ -619,7 +634,7 @@ def forward_outcomes(frame: Mapping[str, List[Any]], starts: Sequence[int], hori
             adverse = max(h[e + 1: x + 1]) / c[e] - 1.0
         else:
             adverse = min(lo[e + 1: x + 1]) / c[e] - 1.0
-        out.append({'ret': ret, 'adverse': adverse})
+        out.append({'t': t, 'ret': ret, 'adverse': adverse})
     return out
 
 
@@ -650,11 +665,13 @@ def signal_stats(frame: Mapping[str, List[Any]], spec: Mapping[str, Any],
                 'baseUpRatio': round(base_up, 4),
                 'baseMedianRet': round(_median(base), 5),
                 'edgePts': round((up - base_up) * 100.0, 1),
+                'ci95Pts': ci95_pts(up, n),
             })
+            row['edgeVerdict'] = edge_verdict(row['edgePts'], row['ci95Pts'])
         else:
             row.update({'gate': 'insufficient', 'upRatio': None, 'medianRet': None,
                         'medianAdverse': None, 'baseUpRatio': None, 'baseMedianRet': None,
-                        'edgePts': None})
+                        'edgePts': None, 'ci95Pts': None, 'edgeVerdict': None})
         rows.append(row)
     return {
         'signalId': spec['id'], 'epistemic': EPISTEMIC_STATS,

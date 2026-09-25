@@ -125,6 +125,16 @@
   }
 
   // ── 統計文字 ────────────────────────────────────────────────
+  var VERDICT = {
+    above: '高於基準', below: '低於基準',
+    noise: '差距在誤差範圍內，無明顯差異'
+  };
+  function verdictText(r) {
+    if (!r || !r.edgeVerdict) return '';
+    return ' → ' + VERDICT[r.edgeVerdict];
+  }
+  function ciText(r) { return r && r.ci95Pts != null ? '±' + r.ci95Pts : ''; }
+
   function statsLine(ev, mode) {
     var st = ev.stats;
     if (!st || !st.horizons) return '';
@@ -134,8 +144,8 @@
         if (!r.n) return '之後 ' + r.horizon + ' 日：本檔歷史尚無此訊號的完整樣本，無法統計';
         return '之後 ' + r.horizon + ' 日：本檔歷史樣本 ' + r.n + ' 次（< ' + st.minSample + '），不顯示比例';
       }
-      var s = '過去 ' + r.n + ' 次觸發後 ' + r.horizon + ' 日：上漲 ' + pct(r.upRatio) +
-        '（本檔全期間 ' + pct(r.baseUpRatio) + '）';
+      var s = '本檔過去 ' + r.n + ' 次觸發後 ' + r.horizon + ' 日：上漲 ' + pct(r.upRatio) + ciText(r) +
+        '（本檔全期間 ' + pct(r.baseUpRatio) + '）' + verdictText(r);
       if (mode !== 'beginner') {
         s += '、報酬中位數 ' + pct(r.medianRet, 1) + '、期間最大逆向中位數 ' + pct(r.medianAdverse, 1) +
           '、差距 ' + (r.edgePts > 0 ? '+' : '') + r.edgePts + ' 個百分點';
@@ -150,8 +160,9 @@
     var rows = p.horizons.filter(function (r) { return r.gate === 'ok' && (mode !== 'beginner' || r.horizon === 5); });
     if (!rows.length) return '';
     return rows.map(function (r) {
-      return '同市場 ' + p.symbols + ' 檔合計 ' + r.n + ' 次後 ' + r.horizon + ' 日：上漲 ' + pct(r.upRatio) +
-        '（基準 ' + pct(r.baseUpRatio) + '）' + (mode !== 'beginner' ? '、中位數 ' + pct(r.medianRet, 1) : '');
+      return '同市場 ' + p.symbols + ' 檔合計 ' + r.n + ' 次後 ' + r.horizon + ' 日：上漲 ' + pct(r.upRatio) + ciText(r) +
+        '（基準 ' + pct(r.baseUpRatio) + '）' + verdictText(r) +
+        (mode !== 'beginner' ? '、中位數 ' + pct(r.medianRet, 1) : '');
     }).join('<br>');
   }
 
@@ -224,6 +235,35 @@
       parts.join('<br>') + dropped + '</div>';
   }
 
+  function scoreboardHtml(p) {
+    if (!p) return '<div class="sh5-empty">載入中…</div>';
+    var btn = '<button class="sh5-btn" id="sh5-pool-refresh"' + (p.running ? ' disabled' : '') + '>' +
+      (p.running ? '計算中…（全市場約需數分鐘）' : (p.available ? '重新計算' : '開始計算')) + '</button>';
+    if (!p.available) {
+      return '<div class="sh5-empty">尚未計算同市場合併統計。會用本機日線庫所有標的，逐一套用同一套規則，' +
+        '算出每個訊號之後 5／20 日的表現與「隨便挑一天」的基準差距。</div><div class="sh5-row">' + btn + '</div>';
+    }
+    var rows = (p.scoreboard || []).map(function (r) {
+      var h = r.horizons.filter(function (x) { return x.horizon === 5; })[0] || {};
+      var h20 = r.horizons.filter(function (x) { return x.horizon === 20; })[0] || {};
+      var st = h.stability || {};
+      var cell = function (x) {
+        return x.gate === 'ok' ? pct(x.upRatio) + ciText(x) + '<br><span style="color:var(--tlo)">基準 ' + pct(x.baseUpRatio) + '</span>'
+          : '<span style="color:var(--tlo)">樣本不足（' + (x.n || 0) + '）</span>';
+      };
+      return '<tr><td>' + esc(r.label) + '<br><span style="color:var(--tlo)">' + esc(r.familyLabel + '・' + r.directionLabel) + '</span></td>' +
+        '<td>' + (h.n || 0) + '<br><span style="color:var(--tlo)">' + (h.symbols || 0) + ' 檔</span></td>' +
+        '<td>' + cell(h) + '</td><td>' + cell(h20) + '</td>' +
+        '<td>' + (h.edgeVerdict ? esc(VERDICT[h.edgeVerdict]) + '<br><span style="color:var(--tlo)">' + (h.edgePts > 0 ? '+' : '') + h.edgePts + ' pts</span>' : '—') + '</td>' +
+        '<td>' + (st.olderUpRatio != null && st.recentUpRatio != null ? pct(st.olderUpRatio) + ' → ' + pct(st.recentUpRatio) : '—') + '</td></tr>';
+    }).join('');
+    return '<div class="sh5-foot" style="margin-top:0">同市場 ' + esc(p.symbols) + ' 檔 · ' + esc((p.window || {}).from || '') + '～' +
+      esc((p.window || {}).to || '') + ' · 計算於 ' + esc(p.generatedAt || '') + ' · 樣本門檻 ' + esc(p.minSample) + ' 次／' + esc(p.minSymbols) + ' 檔</div>' +
+      '<table class="sh5-tbl"><tr><td>訊號</td><td>次數(5日)</td><td>5 日上漲</td><td>20 日上漲</td><td>判讀(5日)</td><td>前段→近段</td></tr>' + rows + '</table>' +
+      '<div class="sh5-foot">' + esc(p.method || '') + '<br>' + (p.caveats || []).map(esc).join('<br>') + '</div>' +
+      '<div class="sh5-row">' + btn + '</div>';
+  }
+
   function cardHtml(d, mode, pushCfg) {
     var head = '<div class="sh5-head"><div class="sh5-title">' + esc(d.symbol) + ' 個股體檢' +
       '<small>' + esc(d.asOf || '') + (d.session && d.session.provisional ? ' · 盤中暫定' : '') + '</small></div>' +
@@ -249,6 +289,10 @@
     html += '<div class="sh5-row"><button class="sh5-btn primary" id="sh5-explain">白話解讀（可用 AI）</button>' +
       '<span>AI 只能引用上方證據，不能改寫燈號或給買賣指令</span></div><div id="sh5-ai-out">' +
       aiHtml(explainCache[d.symbol + ':' + d.asOf]) + '</div>';
+    if (mode !== 'beginner') {
+      html += '<div class="sh5-sec"><details id="sh5-pool"><summary style="cursor:pointer;font:800 11px \'Noto Sans TC\',sans-serif;color:var(--gold,#fbbf24)">' +
+        '訊號成績單（同市場合併統計：哪些訊號真的有資訊？）</summary><div id="sh5-pool-body">' + scoreboardHtml(poolCache) + '</div></details></div>';
+    }
     if (mode === 'pro') {
       html += '<div class="sh5-sec"><h4>指標值（' + esc(d.engine) + '）</h4>' + indicatorTable(d) + '</div>' +
         '<div class="sh5-foot">資料來源：' + esc(d.dataSource || '—') + ' · 日 K ' + esc(d.bars) + ' 根' +
@@ -276,6 +320,10 @@
   }
 
   var pushCfg = null;
+  var poolCache = null;
+  function loadPool(market) {
+    return getJson('/stock-signals/pooled?market=' + (market || 'TW')).then(function (p) { poolCache = p; return p; });
+  }
   function loadPushCfg() {
     return getJson('/stock-signals/push-config').then(function (c) { pushCfg = c; return c; })
       .catch(function () { return null; });
@@ -292,6 +340,29 @@
         pushCfg = c; paint(el, d);
       }).catch(function () {});
     };
+    var pool = el.querySelector('#sh5-pool');
+    if (pool) {
+      var bindPool = function () {
+        var rb = el.querySelector('#sh5-pool-refresh');
+        if (rb) rb.onclick = function () {
+          rb.disabled = true;
+          postJson('/stock-signals/pooled/refresh', { market: d.market }).then(function () {
+            return loadPool(d.market);
+          }).then(function () {
+            var body = el.querySelector('#sh5-pool-body');
+            if (body) { body.innerHTML = scoreboardHtml(poolCache); bindPool(); }
+          }).catch(function () { rb.disabled = false; });
+        };
+      };
+      pool.addEventListener('toggle', function () {
+        if (!pool.open) return;
+        loadPool(d.market).then(function () {
+          var body = el.querySelector('#sh5-pool-body');
+          if (body) { body.innerHTML = scoreboardHtml(poolCache); bindPool(); }
+        }).catch(function () {});
+      });
+      bindPool();
+    }
     var btn = el.querySelector('#sh5-explain');
     if (btn) btn.onclick = function () {
       var out = el.querySelector('#sh5-ai-out');
@@ -420,6 +491,7 @@
     cardHtml: cardHtml,
     boardHtml: boardHtml,
     statsLine: statsLine,
+    scoreboardHtml: scoreboardHtml,
     getMode: getMode,
     setMode: setMode
   });

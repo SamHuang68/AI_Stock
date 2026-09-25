@@ -178,6 +178,12 @@ def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
     chips = ss.load_chip_series(code, chip_dir or CHIP_HISTORY_PATH, 60) if market == 'TW' else []
     result = ss.analyze(loaded['bars'], symbol=code, market=market, chips=chips,
                         provisional_last=loaded.get('provisional', False), with_stats=with_stats)
+    if with_stats and result.get('ok'):
+        try:
+            import signal_stats_pool as pool
+            pool.attach(result, pool.load_cached(market))
+        except Exception:
+            pass   # 合併統計是加值資訊；快取壞掉不影響個股體檢
     result['dataSource'] = loaded.get('source')
     result['staleDays'] = loaded.get('staleDays')
     if loaded.get('error'):
@@ -323,6 +329,40 @@ class StockSignalsRoutesMixin:
             self._err(f'save push config failed: {type(exc).__name__}', 500)
             return
         self._ok(json.dumps(signal_digest.status(), ensure_ascii=False).encode('utf-8'))
+
+    def _handle_stock_signals_pooled(self):
+        import job_queue
+        import signal_stats_pool as pool
+        qs = self._stock_signals_query()
+        market = infer_market('', (qs.get('market') or ['TW'])[0])
+        cached = pool.load_cached(market)
+        payload = {
+            'market': market, 'available': bool(cached),
+            'running': job_queue.is_busy(pool.JOB_PREFIX + market),
+            'minSample': pool.POOLED_MIN_SAMPLE, 'minSymbols': pool.MIN_SYMBOLS,
+        }
+        if cached:
+            payload.update({k: cached.get(k) for k in
+                            ('generatedAt', 'symbols', 'window', 'method', 'caveats', 'elapsedSec')})
+            payload['scoreboard'] = pool.scoreboard(cached)
+        self._ok(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+
+    def _handle_stock_signals_pooled_refresh(self):
+        import job_queue
+        import signal_stats_pool as pool
+        try:
+            body = read_json_body(self, max_bytes=4096)
+        except BodyReadError as exc:
+            self._err(str(exc), exc.status)
+            return
+        market = infer_market('', (body or {}).get('market') or 'TW')
+
+        def job():
+            pool.refresh(market)
+            clear_cache()   # 讓下一次個股體檢帶上新的合併統計
+
+        res = job_queue.submit(pool.JOB_PREFIX + market, job, meta={'market': market})
+        self._ok(json.dumps({'market': market, **res}, ensure_ascii=False).encode('utf-8'))
 
     def _handle_stock_signals_digest_preview(self):
         import signal_digest

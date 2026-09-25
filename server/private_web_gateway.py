@@ -379,6 +379,7 @@ READ_GET_EXACT = {
     "/stock-signals",
     "/stock-signals/batch",
     "/stock-signals/catalog",
+    "/stock-signals/pooled",
     "/sync/status",
     "/movers",
     "/inst-rank",
@@ -447,6 +448,7 @@ CONTROL_POST_EXACT = {
     "/alert/rules",
     "/stock-signals/watchlist",
     "/stock-signals/push-config",
+    "/stock-signals/pooled/refresh",
 }
 CONTROL_POST_PREFIXES = ("/draw/",)
 

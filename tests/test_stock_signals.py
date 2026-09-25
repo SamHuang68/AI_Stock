@@ -279,6 +279,7 @@ class DigestTests(unittest.TestCase):
                 mock.patch.object(signal_digest, 'STATE_FILE', os.path.join(tmp, 'st.json')), \
                 mock.patch.object(signal_digest, 'symbols', lambda: [{'sym': '2330', 'market': 'TW'}]), \
                 mock.patch.object(signal_digest.routes, 'analyze_symbol', lambda *a, **k: result), \
+                mock.patch.object(signal_digest, '_maybe_refresh_pooled', lambda items: None), \
                 mock.patch.object(signal_digest, 'alert_daemon') as ad:
             ad.load_config.return_value = {'stock_signal_push': 'realtime'}
             notify = lambda text, subject: sent.append((subject, text))
@@ -297,6 +298,7 @@ class DigestTests(unittest.TestCase):
                 mock.patch.object(signal_digest, 'STATE_FILE', os.path.join(tmp, 'st.json')), \
                 mock.patch.object(signal_digest, 'symbols', lambda: [{'sym': '2330', 'market': 'TW'}]), \
                 mock.patch.object(signal_digest.routes, 'analyze_symbol', lambda *a, **k: result), \
+                mock.patch.object(signal_digest, '_maybe_refresh_pooled', lambda items: None), \
                 mock.patch.object(signal_digest, 'alert_daemon') as ad:
             ad.load_config.return_value = {'stock_signal_push': 'digest'}
             notify = lambda text, subject: sent.append(subject)

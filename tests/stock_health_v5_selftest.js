@@ -79,6 +79,19 @@ const board = H.boardHtml({ items: [
 ok(board.includes('data-code="2330"') && board.includes('RSI 過熱回落（暫定）'), 'board lists today events with provisional flag');
 ok(board.includes('尚無資料'), 'board keeps failed rows visible');
 
+const noiseEv = { stats: { minSample: 20, horizons: [{ horizon: 5, n: 60, gate: 'ok', upRatio: 0.55, baseUpRatio: 0.52,
+  ci95Pts: 12.6, edgePts: 3, edgeVerdict: 'noise' }] } };
+ok(/誤差範圍內/.test(H.statsLine(noiseEv, 'beginner')) && /±12.6/.test(H.statsLine(noiseEv, 'beginner')),
+  'stats line tells beginners when the edge is within noise');
+ok(/尚未計算/.test(H.scoreboardHtml({ available: false })), 'scoreboard explains missing pooled stats');
+const sb = H.scoreboardHtml({ available: true, symbols: 1800, minSample: 100, minSymbols: 5, window: { from: '2021-01-04', to: '2026-09-25' },
+  generatedAt: '2026-09-25T15:00:00+08:00', method: '逐檔同規則', caveats: ['存活者偏差'],
+  scoreboard: [{ label: '帶量突破 20 日高', familyLabel: '量價', directionLabel: '偏多', horizons: [
+    { horizon: 5, n: 4200, symbols: 900, gate: 'ok', upRatio: 0.58, baseUpRatio: 0.51, ci95Pts: 1.5, edgePts: 7, edgeVerdict: 'above',
+      stability: { olderUpRatio: 0.6, recentUpRatio: 0.56 } },
+    { horizon: 20, n: 4100, gate: 'insufficient' }] }] });
+ok(sb.includes('高於基準') && sb.includes('60% → 56%') && sb.includes('存活者偏差'), 'scoreboard shows verdict, stability and caveats');
+
 H.setMode('pro');
 ok(H.getMode() === 'pro', 'mode persists');
 

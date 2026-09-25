@@ -2400,6 +2400,8 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             self._handle_stock_signals_push_config_get()
         elif p == '/stock-signals/digest/preview' or p.startswith('/stock-signals/digest/preview?'):
             self._handle_stock_signals_digest_preview()
+        elif p == '/stock-signals/pooled' or p.startswith('/stock-signals/pooled?'):
+            self._handle_stock_signals_pooled()
         elif p == '/research/overnight-intraday' or p.startswith('/research/overnight-intraday?'):
             self._handle_overnight_intraday()
         elif p == '/research/conditional-expectation/p1' or p.startswith('/research/conditional-expectation/p1?'):
@@ -2683,6 +2685,8 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             self._handle_stock_signals_watchlist_post()
         elif p == '/stock-signals/push-config':
             self._handle_stock_signals_push_config_post()
+        elif p == '/stock-signals/pooled/refresh':
+            self._handle_stock_signals_pooled_refresh()
         elif p == '/research/overnight-intraday/refresh':
             self._handle_overnight_intraday_refresh()
         elif p == '/options/txo/refresh':

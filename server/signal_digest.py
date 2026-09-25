@@ -106,8 +106,14 @@ def _event_line(e: Dict[str, Any]) -> str:
     stats = ''
     for row in ((e.get('stats') or {}).get('horizons') or []):
         if row['horizon'] == 5 and row.get('gate') == 'ok':
-            stats = (f"；過去 {row['n']} 次後 5 日上漲 {row['upRatio'] * 100:.0f}%"
+            stats = (f"；本檔過去 {row['n']} 次後 5 日上漲 {row['upRatio'] * 100:.0f}%"
                      f"（全期間 {row['baseUpRatio'] * 100:.0f}%）")
+    if not stats:
+        pooled = e.get('pooledStats') or {}
+        for row in pooled.get('horizons') or []:
+            if row['horizon'] == 5 and row.get('gate') == 'ok':
+                stats = (f"；同市場 {pooled.get('symbols')} 檔合計 {row['n']} 次後 5 日上漲 "
+                         f"{row['upRatio'] * 100:.0f}%（基準 {row['baseUpRatio'] * 100:.0f}%）")
     return (f"  {ICON.get(e['direction'], '•')} {e['label']}（{e['directionLabel']}）{tag}："
             f"{e['detail']}；失效：{inval}{stats}")
 
@@ -205,11 +211,36 @@ def check_once(now: Optional[datetime] = None, notify=None) -> Dict[str, int]:
         st['digestSent'][market] = day
         counts['digests'] += 1
     _save_state(st)
+    _maybe_refresh_pooled(items)
     _state['last_run'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     if counts['events'] or counts['digests']:
         _state['sent'].append({'t': time.time(), **counts})
         _state['sent'] = _state['sent'][-50:]
     return counts
+
+
+POOLED_MAX_AGE_DAYS = 7
+
+
+def _maybe_refresh_pooled(items: List[Dict[str, str]]) -> None:
+    """推播開啟時，每週在背景重算一次同市場合併統計（使用者已明確啟用，不在 GET 偷跑）。"""
+    try:
+        import job_queue
+        import signal_stats_pool as pool
+    except Exception:
+        return
+    for market in sorted({i['market'] for i in items}):
+        cached = pool.load_cached(market)
+        stamp = (cached or {}).get('generatedAt')
+        try:
+            age = (datetime.now(ss._TZ['TW']) - datetime.fromisoformat(stamp)).days if stamp else None
+        except ValueError:
+            age = None
+        if age is not None and age < POOLED_MAX_AGE_DAYS:
+            continue
+        job_queue.submit(pool.JOB_PREFIX + market,
+                         (lambda m=market: (pool.refresh(m), routes.clear_cache())),
+                         meta={'market': market, 'reason': 'weekly'})
 
 
 def _loop():
