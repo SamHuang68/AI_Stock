@@ -448,6 +448,13 @@
           '0 0 0 3px rgba(245,197,24,.16),' +
           '0 10px 26px rgba(0,0,0,.55)}' +
       '#st-ring-fab[hidden]{display:none!important}' +
+      /* 桌機滑鼠：浮動轉盤縮小、半透明，懸停才全亮；右欄捲動區底部留白，最後一列可捲到按鈕上方，
+         不再遮住自選表／STATS 數值。 */
+      '@media(min-width:901px) and (pointer:fine){' +
+        '#st-ring-fab{right:6px;bottom:6px;width:28px;height:28px;font-size:11px;opacity:.5}' +
+        '#st-ring-fab:hover,#st-ring-fab:focus-visible{opacity:1;transform:none}' +
+        '#rpanel::after{content:"";display:block;height:34px}' +
+      '}' +
       /* 圖表頂欄 Logo／快捷鈕 → 儀表板 */
       '#topbar .logo{cursor:pointer}' +
       '#topbar .logo:hover{filter:brightness(1.08)}' +
