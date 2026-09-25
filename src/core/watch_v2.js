@@ -92,6 +92,28 @@ function syncWatchesToServer() {
   }, 800);
 }
 
+// Wilder RSI 逐根序列（與 worker rsiWilder／server indicators.rsi_wilders_series 同一演算法；
+// avgLoss 為 0 時回 100）。WATCH 的「跨越」類訊號需要前幾根 RSI，不能只看最後一點。
+function rsiWildersSeries(closes, period) {
+  period = period || 14;
+  const out = new Array(closes.length).fill(null);
+  if (closes.length <= period) return out;
+  let avgG = 0, avgL = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = closes[i] - closes[i - 1];
+    if (d > 0) avgG += d; else avgL -= d;
+  }
+  avgG /= period; avgL /= period;
+  out[period] = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
+  for (let i = period + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    avgG = (avgG * (period - 1) + (d > 0 ? d : 0)) / period;
+    avgL = (avgL * (period - 1) + (d < 0 ? -d : 0)) / period;
+    out[i] = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
+  }
+  return out;
+}
+
 // ── Strategy Playbook ──────────────────────────────────────
 const STRATEGIES = [
   {
@@ -187,11 +209,21 @@ const STRATEGIES = [
     action: '進場 1/3 試單，停損近期低 -3%。短線目標 5~10%。',
     paramFields: [],
     check(ind, candles, params) {
-      const rsi = num(ind.rsi14);
+      // 事件而非水位：近 5 根曾 < 30，今日回升站上 30 才算「反彈」。
+      // 與後端 watch_daemon._rsi_bounce_state 同一規則（Wilder RSI 同口徑）。
+      const series = rsiWildersSeries((candles || []).map(x => x.close), 14);
+      const n = series.length;
+      const rsi = n ? (series[n - 1] != null ? series[n - 1] : num(ind.rsi14)) : num(ind.rsi14);
       if (rsi == null) return {status:'no-data', detail:'RSI 尚無資料'};
-      if (rsi >= 30 && rsi <= 38) return {status:'trigger', detail:`RSI ${rsi.toFixed(1)} 在反彈區 (30~38)`};
-      if (rsi < 30) return {status:'wait', detail:`RSI ${rsi.toFixed(1)} 仍超賣，等回升突破 30`};
-      if (rsi > 38 && rsi < 50) return {status:'expired', detail:`RSI ${rsi.toFixed(1)} 已過反彈區，訊號失效`};
+      const prev = series.slice(Math.max(0, n - 6), Math.max(0, n - 1)).filter(v => v != null);
+      const prevMin = prev.length ? Math.min(...prev) : null;
+      const recentOversold = prevMin != null && prevMin < 30;
+      if (rsi < 30) return {status:'wait', detail:`RSI ${rsi.toFixed(1)} 仍在超賣區，等回升站上 30`};
+      if (rsi <= 38) {
+        if (recentOversold) return {status:'trigger', detail:`RSI 由 ${prevMin.toFixed(1)} 回升至 ${rsi.toFixed(1)}（近 5 日曾跌破 30）`};
+        return {status:'wait', detail:`RSI ${rsi.toFixed(1)} 在 30~38，但近 5 日未曾跌破 30，非超賣反彈`};
+      }
+      if (rsi < 50 && recentOversold) return {status:'expired', detail:`RSI ${rsi.toFixed(1)} 已離開反彈區，訊號失效`};
       return {status:'wait', detail:`RSI ${rsi.toFixed(1)}（非觀察區）`};
     },
   },
@@ -203,7 +235,7 @@ const STRATEGIES = [
     direction: 'buy',
     difficulty: '★☆☆ 簡單',
     desc: '價格觸碰或跌破布林通道下軌，短線超賣反彈機會。',
-    why: 'BB 下軌 = SMA20 -2σ。統計上只有 2.5% 機率落在下軌外，反彈到中軌機率高。',
+    why: 'BB 下軌 = SMA20 -2σ，代表價格相對近 20 日偏離較大。股價分布有肥尾，觸下軌不代表會反彈；下跌趨勢中常沿下軌走（walk the band）。',
     when: '✓ 適合：盤整、上漲趨勢中的回檔\n✗ 不適合：強勢下跌 (walk the band)',
     action: '進場 1/3，停損下軌 -3%。目標：回到 SMA20。',
     paramFields: [],
@@ -288,7 +320,7 @@ const PRESETS = [
     key: 'classic_pullback',
     lbl: '經典回檔買進',
     icon: '📉',
-    desc: '多頭趨勢中等價格回測重要均線 + 動能未過熱，最穩健的進場組合。',
+    desc: '多頭趨勢中等價格回測重要均線 + 動能未過熱，偏保守的等待型組合。',
     when: '個股長期向上、近期短線回檔，想等更好價位時',
     customPriceLbl: null,
     signals: [
@@ -314,7 +346,7 @@ const PRESETS = [
     key: 'oversold_bounce',
     lbl: '超賣反彈短線',
     icon: '🔄',
-    desc: 'RSI + 布林下軌雙重超賣訊號，短線反彈勝率高。',
+    desc: 'RSI + 布林下軌雙重超賣訊號；歷史表現請看個股體檢的訊號統計，未經驗證不代表勝率。',
     when: '短線急殺後想抓反彈、配合基本面尚可的個股',
     customPriceLbl: null,
     signals: [

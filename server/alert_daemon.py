@@ -16,9 +16,11 @@ from datetime import datetime
 try:
     from .atomic_store import StoreCorruptError, atomic_write_json, load_json
     from .secret_store import load_secret_json, save_secret_json
+    from .indicators import candle_snapshot
 except ImportError:
     from atomic_store import StoreCorruptError, atomic_write_json, load_json
     from secret_store import load_secret_json, save_secret_json
+    from indicators import candle_snapshot
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_FILE = os.path.join(_BASE, 'data', 'alert_config.json')
@@ -280,31 +282,11 @@ def _fetch_daily_candles(sym, market):
 
 
 def _calc_ind(candles):
-    closes = [c['close'] for c in candles]
-    highs = [c['high'] for c in candles]
-    vols = [c['volume'] for c in candles]
-    n = len(closes)
-    def sma(p):
-        return sum(closes[-p:]) / p if n >= p else None
-    sma20, sma60 = sma(20), sma(60)
-    g = l = 0.0
-    for i in range(max(1, n - 14), n):
-        dd = closes[i] - closes[i - 1]
-        if dd > 0: g += dd
-        else: l -= dd
-    rsi = 100.0 if l == 0 else 100 - 100 / (1 + (g / 14) / (l / 14))
-    bbL = bbU = None
-    if sma20 is not None and n >= 20:
-        var = sum((x - sma20) ** 2 for x in closes[-20:]) / 20
-        sd = var ** 0.5
-        bbL, bbU = sma20 - 2 * sd, sma20 + 2 * sd
-    v5 = sum(vols[-5:]) / 5 if n >= 5 else 0
-    v20 = sum(vols[-20:]) / 20 if n >= 20 else 0
-    return {
-        'close': closes[-1], 'sma20': sma20, 'sma60': sma60, 'rsi14': rsi,
-        'bbL': bbL, 'bbU': bbU, 'volRatio': (v5 / v20 if v20 > 0 else 0),
-        'high20': max(highs[-21:-1]) if n >= 21 else None,
-    }
+    """複合警示指標：一律走 indicators.candle_snapshot（Wilder RSI、母體σ布林），
+    與畫面 pro_v2 同口徑；不得在 daemon 內自寫近似版 RSI。"""
+    snap = candle_snapshot(candles)
+    return {k: snap.get(k) for k in
+            ('close', 'sma20', 'sma60', 'rsi14', 'bbL', 'bbU', 'volRatio', 'high20')}
 
 
 def _eval_composite(rule, ind):

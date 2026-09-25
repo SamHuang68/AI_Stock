@@ -31,12 +31,12 @@
       if (d >= 0) g += d; else l -= d;
     }
     g /= p; l /= p;
-    out[p] = 100 - 100 / (1 + (l === 0 ? 100 : g / l));
+    out[p] = (l === 0 ? 100 : 100 - 100 / (1 + g / l));
     for (let i = p + 1; i < closes.length; i++) {
       const d = closes[i] - closes[i - 1];
       g = (g * (p - 1) + (d > 0 ? d : 0)) / p;
       l = (l * (p - 1) + (d < 0 ? -d : 0)) / p;
-      out[i] = 100 - 100 / (1 + (l === 0 ? 100 : g / l));
+      out[i] = (l === 0 ? 100 : 100 - 100 / (1 + g / l));
     }
     return out;
   }

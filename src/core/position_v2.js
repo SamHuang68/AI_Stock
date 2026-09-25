@@ -204,7 +204,7 @@ function generateSignals() {
     } else if (c < ind.bbL && ind.rsi14 != null && ind.rsi14 < 30) {
       push('buy', '觸 BB 下軌 + RSI 超賣',
         `價 ${c.toFixed(2)} 跌破布林下軌 ${ind.bbL.toFixed(2)}，RSI ${ind.rsi14.toFixed(0)}`,
-        '雙重超賣訊號，反彈機率高');
+        '雙重超賣訊號；超賣可以更超賣，確認止跌再動作');
     }
   }
 
