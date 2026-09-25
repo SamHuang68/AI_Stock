@@ -197,12 +197,6 @@
     });
   }
 
-    if (window.EpistemicBadgesV5 && window.EpistemicBadgesV5.badge) {
-      return window.EpistemicBadgesV5.badge('HYPOTHESIS', { note: note || '敘事整理', compact: true });
-    }
-    return '';
-  }
-
   function peakObservation100dSection(symbol) {
     if (window.PeakObservation100dV5 && PeakObservation100dV5.isEnabled &&
       !PeakObservation100dV5.isEnabled()) {

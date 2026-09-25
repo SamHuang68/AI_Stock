@@ -52,6 +52,7 @@ from conditional_expectation_routes import ConditionalExpectationRoutesMixin
 from peak_observation_routes import PeakObservationRoutesMixin
 from peak_observation_100d_routes import PeakObservation100dRoutesMixin
 from touxin_5d_routes import Touxin5dRoutesMixin
+from stock_signals_routes import StockSignalsRoutesMixin
 from shadow_multifactor_routes import ShadowMultifactorRoutesMixin
 from decision_routes import DecisionRoutesMixin
 from features_routes import FeaturesRoutesMixin
@@ -1520,40 +1521,15 @@ def _build_tw_market_fundamental(sym: str) -> dict:
 
 
 def _chip_streak(clean_code):
-    """從 chip_history 反向算外資/投信/自營商連續買(>0)賣(<0)超天數"""
+    """從 chip_history 反向算外資/投信/自營商連續買(>0)賣(<0)超天數。
+
+    與個股訊號引擎共用同一個讀檔／計算實作（stock_signals.load_chip_series／chip_streaks），
+    避免兩套口徑。
+    """
     if not os.path.isdir(CHIP_HISTORY_PATH):
         return None
-    files = sorted(glob.glob(os.path.join(CHIP_HISTORY_PATH, '*.json')), reverse=True)
-    series = {'foreign': [], 'trust': [], 'dealer': []}
-    for fn in files[:60]:
-        try:
-            with open(fn, encoding='utf-8') as f: day = json.load(f)
-        except Exception:
-            continue
-        rec = day.get(clean_code)
-        if not rec:
-            continue
-        for k in series:
-            if rec.get(k) is not None:
-                series[k].append(rec[k])
-    def streak(vals):
-        if not vals:
-            return 0
-        sign = 1 if vals[0] > 0 else (-1 if vals[0] < 0 else 0)
-        if sign == 0:
-            return 0
-        n = 0
-        for v in vals:
-            if (v > 0 and sign > 0) or (v < 0 and sign < 0):
-                n += 1
-            else:
-                break
-        return n * sign  # 正=連買天數, 負=連賣天數
-    return {
-        'foreign': streak(series['foreign']),
-        'trust': streak(series['trust']),
-        'dealer': streak(series['dealer']),
-    }
+    import stock_signals as _ss
+    return _ss.chip_streaks(_ss.load_chip_series(clean_code, CHIP_HISTORY_PATH, 60))
 
 # ── LRU cache with TTL ──────────────────────────────────────────
 # v3.6 加 TTL（預設 60 秒）：原本沒 TTL 造成的「stale price 隨機重現」根因 ——
@@ -2313,7 +2289,7 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
     request_queue_size = 64
 
-class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, ConditionalExpectationRoutesMixin, PeakObservationRoutesMixin, PeakObservation100dRoutesMixin, Touxin5dRoutesMixin, ShadowMultifactorRoutesMixin, OptionsRoutesMixin, PulseRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
+class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, ConditionalExpectationRoutesMixin, PeakObservationRoutesMixin, PeakObservation100dRoutesMixin, Touxin5dRoutesMixin, ShadowMultifactorRoutesMixin, OptionsRoutesMixin, PulseRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     _BASE = _BASE
     protocol_version = 'HTTP/1.1'   # enables keep-alive
 
@@ -2414,6 +2390,16 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_signal_history()
         elif p == '/signals/performance' or p.startswith('/signals/performance?'):
             self._handle_signal_performance()
+        elif p == '/stock-signals' or p.startswith('/stock-signals?'):
+            self._handle_stock_signals()
+        elif p == '/stock-signals/batch' or p.startswith('/stock-signals/batch?'):
+            self._handle_stock_signals_batch()
+        elif p == '/stock-signals/catalog' or p.startswith('/stock-signals/catalog?'):
+            self._handle_stock_signals_catalog()
+        elif p == '/stock-signals/push-config' or p.startswith('/stock-signals/push-config?'):
+            self._handle_stock_signals_push_config_get()
+        elif p == '/stock-signals/digest/preview' or p.startswith('/stock-signals/digest/preview?'):
+            self._handle_stock_signals_digest_preview()
         elif p == '/research/overnight-intraday' or p.startswith('/research/overnight-intraday?'):
             self._handle_overnight_intraday()
         elif p == '/research/conditional-expectation/p1' or p.startswith('/research/conditional-expectation/p1?'):
@@ -2693,6 +2679,10 @@ class Handler(FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesM
             self._handle_portfolio()
         elif p == '/decision/context':
             self._handle_decision_context_post()
+        elif p == '/stock-signals/watchlist':
+            self._handle_stock_signals_watchlist_post()
+        elif p == '/stock-signals/push-config':
+            self._handle_stock_signals_push_config_post()
         elif p == '/research/overnight-intraday/refresh':
             self._handle_overnight_intraday_refresh()
         elif p == '/options/txo/refresh':
@@ -6717,6 +6707,10 @@ if __name__ == '__main__':
             if watch_daemon and _ac.get('watch_enabled'):
                 watch_daemon.start()
                 print('[watch] daemon started (poll %ss)' % _ac.get('watch_poll_seconds', 300))
+            if _ac.get('stock_signal_push') in ('digest', 'realtime'):
+                import signal_digest as _sd
+                _sd.start()
+                print('[stock-signal] push daemon started (%s)' % _ac.get('stock_signal_push'))
         except Exception as _e:
             print('[alert] start failed:', _e)
     if getattr(sys, 'frozen', False):

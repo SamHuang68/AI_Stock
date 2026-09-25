@@ -376,6 +376,9 @@ READ_GET_EXACT = {
     "/options/txo/structure",
     "/options/txo/history",
     "/key-levels",
+    "/stock-signals",
+    "/stock-signals/batch",
+    "/stock-signals/catalog",
     "/sync/status",
     "/movers",
     "/inst-rank",
@@ -417,6 +420,8 @@ OWNER_GET_EXACT = {
     "/alert/config",  # ST masks stored transport credentials in its response.
     "/api/override-alpha",
     "/api/llm-gate",
+    "/stock-signals/push-config",
+    "/stock-signals/digest/preview",
 }
 OWNER_GET_PREFIXES = ("/draw/",)
 
@@ -440,6 +445,8 @@ CONTROL_POST_EXACT = {
     "/watch/rules",
     "/watch/config",
     "/alert/rules",
+    "/stock-signals/watchlist",
+    "/stock-signals/push-config",
 }
 CONTROL_POST_PREFIXES = ("/draw/",)
 
