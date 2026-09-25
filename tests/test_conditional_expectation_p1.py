@@ -20,8 +20,6 @@ sys.path.insert(0, str(SERVER_DIR))
 import chip_path_state as cps  # noqa: E402
 import conditional_expectation as ce  # noqa: E402
 import conditional_expectation_p1 as p1  # noqa: E402
-import event_window_returns as ewr  # noqa: E402
-import conditional_integration_score as cis  # noqa: E402
 import vol_regime_switch as vrs  # noqa: E402
 
 try:
@@ -122,15 +120,6 @@ class VolRegimeSwitchTests(unittest.TestCase):
 
 
 class DeferredModuleTests(unittest.TestCase):
-    def test_event_windows_deferred(self):
-        note = ewr.deferred_event_windows_note()
-        self.assertEqual(note['status'], 'DEFERRED_OPTIONAL')
-        self.assertIn('event calendar', note['reason'])
-
-    def test_integration_score_deferred(self):
-        note = cis.deferred_integration_score_note()
-        self.assertEqual(note['status'], 'DEFERRED')
-
     def test_p1_orchestrator_lists_deferred(self):
         payload = p1.build_p1_research('2330', bars=_synthetic_bars(80))
         self.assertEqual(payload['deferred']['eventWindows']['status'], 'DEFERRED_OPTIONAL')

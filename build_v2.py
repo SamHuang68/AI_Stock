@@ -46,8 +46,7 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/chart/pattern_v3.js', 'src/core/live_v2.js',
               'src/fundamental/chip_v3.js',
               'src/fundamental/fundamental_v3.js',              # v3.8 B: 基本面 (月營收/三率/評分)
-              # 'src/chart/heatmap_v3.js',                # v3.9: 📊類股(產業熱力圖)停用 — 改成點下面大盤列 cell 直接帶K線;檔案保留待恢復
-              'src/screener/screener_v3.js', 'src/ai/ai_report_v3.js', 'src/ui/polish_v3.js',
+              'src/ai/ai_report_v3.js', 'src/ui/polish_v3.js',
               'src/core/wl_live_v3.js',
               'src/fundamental/plan_history_v3.js',
               'src/fundamental/plan_position_v3.js',
@@ -63,11 +62,8 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/chart/aftermarket_v3.js',              # v3.8: 美股盤後/盤前延伸交易顯示
               'src/chart/overnight_v3.js',                # v3.8: 夜盤連動預警(美股期貨→台股隔日)
               'src/fundamental/supplychain_v3.js',              # v3.8: 台灣AI供應鏈族群連動
-              'src/portfolio/portfolio_v3.js',                  # v4.0: 投組風險面板(相關性/VaR/產業·供應鏈曝險,依賴 SC_STAGE 須在 supplychain 後)
               'src/fundamental/chainmom_v3.js',                 # v4.0: 供應鏈輪動(多時框動能,依賴 SC_CHAINS 須在 supplychain 後)
               'src/fundamental/valuation_v3.js',                # v3.8: 長線估值錨(本益比河流)
-              'src/fundamental/marketflow_v3.js',               # v3.8: 大盤資金流儀表板
-              'src/fundamental/instrank_v3.js',                 # 外資/投信/自營商買賣超排行榜
               'src/alert/calendar_v3.js',                 # v3.8: 事件行事曆+提醒
               'src/chart/multichart_v3.js',               # v3.9 P1: 多圖連動布局 (grid overlay)
               'src/chart/spread_v3.js',                   # v3.9 P1: 價差/比值圖
@@ -75,13 +71,10 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/screener/strategy_builder_v3.js',         # v3.9 P2: 樂高式策略條件組合器 (提供 window.StratLib，須在 backtest_v3 後)
               'src/screener/strategy_script_v3.js',          # v3.9 P2: 迷你策略腳本 DSL (依賴 StratLib，須在 strategy_builder 後)
               'src/chart/drawtools_v3.js',                # v3.9 P3: 進階畫線(canvas overlay)+雲端記憶
-              'src/screener/screener3_v3.js',                # v3.9 P4: 三合一進階選股(技術+基本面+籌碼)
-              # 'src/screener/macro_v3.js',                  # v3.9 P4: 總經疊圖 — 已停用(資料源不穩,2026-06-14 移除;檔案與 server /macro 保留待日後)
               'src/core/etf_v3.js',
               'src/fundamental/stockfut_v3.js',                 # v3.9: 個股期夜盤領先(市值前十大,TAIFEX MIS)
               'src/core/indices_v3.js',                  # v3.9: 大盤指數加入自選(台股加權/櫃買+美股四大)
               'src/alert/datahealth_v3.js',               # v3.9 Phase-0: 資料源健檢燈(讀 /health sources)
-              # 'src/core/wlgroup_v3.js',                # v3.9: 自選股分組停用 — 使用者覺得篩選列佔版面且未使用;檔案保留待恢復
 
               'src/alert/toast_v3.js',                    # v3.9 Phase-1: 桌面/頁內 toast 通知(window.notifyToast)
               'src/alert/settle_v3.js',                   # v3.9: 台股結算日(每月第三個週三)前3天浮動toast提醒

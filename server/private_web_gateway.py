@@ -429,7 +429,6 @@ OWNER_GET_PREFIXES = ("/draw/",)
 # Deliberately narrow write surface for a long-horizon market/research user.
 CONTROL_POST_EXACT = {
     "/diagnostics/ui-route",
-    "/screener",
     "/screen3",
     "/portfolio",
     "/decision/context",

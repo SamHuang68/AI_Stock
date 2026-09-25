@@ -15,15 +15,8 @@
 
   // ---------- 共用指標庫 StratLib ----------
   // 全部接受/回傳「與 K 線等長、不足期數為 null」的陣列。
-  function sma(arr, p) {
-    const out = new Array(arr.length).fill(null); let s = 0;
-    for (let i = 0; i < arr.length; i++) {
-      const v = arr[i] == null ? 0 : arr[i]; s += v;
-      if (i >= p) s -= (arr[i - p] == null ? 0 : arr[i - p]);
-      if (i >= p - 1) out[i] = s / p;
-    }
-    return out;
-  }
+  // SMA／Wilder RSI 與回測核心同一份（backtest_v3 先載入）
+  const sma = window.Backtest.sma;
   function ema(arr, p) {
     const out = new Array(arr.length).fill(null);
     const k = 2 / (p + 1); let prev = null;
@@ -35,22 +28,7 @@
     }
     return out;
   }
-  function rsi(close, p) {
-    p = p || 14;
-    const out = new Array(close.length).fill(null);
-    if (close.length <= p) return out;
-    let g = 0, l = 0;
-    for (let i = 1; i <= p; i++) { const d = close[i] - close[i - 1]; if (d >= 0) g += d; else l -= d; }
-    g /= p; l /= p;
-    out[p] = (l === 0 ? 100 : 100 - 100 / (1 + g / l));
-    for (let i = p + 1; i < close.length; i++) {
-      const d = close[i] - close[i - 1];
-      g = (g * (p - 1) + (d > 0 ? d : 0)) / p;
-      l = (l * (p - 1) + (d < 0 ? -d : 0)) / p;
-      out[i] = (l === 0 ? 100 : 100 - 100 / (1 + g / l));
-    }
-    return out;
-  }
+  const rsi = window.Backtest.rsi;
   // 隨機指標 KD (n=9, 平滑3)
   function kd(high, low, close, n, sm) {
     n = n || 9; sm = sm || 3;

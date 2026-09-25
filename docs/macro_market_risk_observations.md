@@ -119,7 +119,7 @@ flowchart TD
 
 ## 🛠️ 程式碼與系統整合說明
 
-我們已同步將上述 4 組觀察圖表所涵蓋的總經數據資料集，寫入後端 `server/server.py` 與前端 `src/screener/macro_v3.js` 的 `MACRO_SERIES` 配置中，支援在看盤介面中進行任意總經指標與個股 K 線的疊圖與 Pearson 相關係數分析！
+我們已同步將上述 4 組觀察圖表所涵蓋的總經數據資料集，寫入後端 `server/server.py` 的 `MACRO_SERIES` 配置；前端由 `src/chart/market_chart_v3.js`（`/macro/chart/<id>`）與總覽的總經區塊讀取。
 
 ```python
 # MACRO_SERIES 新增項目 (server/server.py)

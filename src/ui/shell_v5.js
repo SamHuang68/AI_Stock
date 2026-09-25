@@ -94,13 +94,11 @@
   var RING_BTN_META = {
     'btn-valuation': { label: '估值', icon: '⚓' },
     'btn-marketflow': { label: '資金', icon: '💰' },
-    'btn-instrank': { label: '法人榜', icon: '🏆' },
     'btn-supplychain': { label: '供應鏈', icon: '🔗' },
     'btn-stockfut': { label: '個股期', icon: '🔭' },
     'btn-portfolio': { label: '投組', icon: '▣' },
     'btn-chainmom': { label: '鏈動能', icon: '⛓' },
     'btn-screener3': { label: '三合一', icon: '🔬' },
-    'btn-screener': { label: '篩選', icon: '🔍' },
     'btn-patterns': { label: '型態', icon: '〰' },
     'btn-stratbuilder': { label: '策略', icon: '🧱' },
     'btn-bt3': { label: '回測', icon: '📈' },
@@ -573,19 +571,17 @@
       ]),
       ringFolder('flow', '籌碼', '₴', '法人、資金流、基本面', [
         ringRoute('institutional', '法人頁', '₴', '三大法人動向'),
-        ringFolder('flow-tools', '資金流', '💰', '資金與排行工具', [
-          ringClick('btn-marketflow'), ringClick('btn-instrank'),
+        ringFolder('flow-tools', '期貨／輪動', '💰', '個股期夜盤與供應鏈輪動', [
           ringClick('btn-stockfut'), ringClick('btn-chainmom')
         ]),
-        ringFolder('fundamentals', '基本面', '⚓', '估值／供應鏈／投組', [
-          ringClick('btn-valuation'), ringClick('btn-supplychain'),
-          ringClick('btn-portfolio')
+        ringFolder('fundamentals', '基本面', '⚓', '估值／供應鏈', [
+          ringClick('btn-valuation'), ringClick('btn-supplychain')
         ])
       ]),
       ringFolder('screen', '選股', '▷', '篩選、策略、回測', [
         ringRoute('scan', '選股室', '▷', '三合一選股頁'),
         ringFolder('screen-tools', '策略庫', '🔬', '選股／型態／回測', [
-          ringClick('btn-screener3'), ringClick('btn-screener'), ringClick('btn-patterns'),
+          ringClick('btn-patterns'),
           ringClick('btn-stratbuilder'), ringClick('btn-bt3'), ringClick('btn-wizard'),
           ringClick('btn-stratscript')
         ]),
@@ -593,8 +589,7 @@
       ]),
       ringFolder('breadth', '廣度', '▤', '市場廣度與類股', [
         ringRoute('breadth', '漲跌家數', '▤', '大盤廣度'),
-        ringRoute('heat', '熱力', '▦', '類股熱力圖'),
-        ringRoute('afterhours', '排行', '◐', '漲跌排行（盤後）')
+        ringRoute('heat', '熱力', '▦', '類股熱力圖')
       ]),
       ringFolder('global', '國際', '◎', '海外與總經', [
         ringRoute('international', '國際頁', '◎', '美股／美元／黃金／銅'),
