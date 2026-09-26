@@ -12,12 +12,13 @@
   'use strict';
 
   // ---- 指標 ------------------------------------------------
+  // sma／rsi 也是 StratLib 的實作（strategy_builder 直接引用，勿另寫一份）
   function sma(arr, p) {
     const out = new Array(arr.length).fill(null);
     let s = 0;
     for (let i = 0; i < arr.length; i++) {
-      s += arr[i];
-      if (i >= p) s -= arr[i - p];
+      s += arr[i] == null ? 0 : arr[i];
+      if (i >= p) s -= (arr[i - p] == null ? 0 : arr[i - p]);
       if (i >= p - 1) out[i] = s / p;
     }
     return out;
@@ -25,6 +26,7 @@
   function rsi(closes, p) {
     p = p || 14;
     const out = new Array(closes.length).fill(null);
+    if (closes.length <= p) return out;
     let g = 0, l = 0;
     for (let i = 1; i <= p; i++) {
       const d = closes[i] - closes[i - 1];

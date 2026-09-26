@@ -853,31 +853,8 @@ function mockInd(candles) {
     return s / p;
   };
   const last = n - 1;
-  // 標準 Wilder's Smoothing RSI 14 計算
-  const calcRsiWilders = (prices, period = 14) => {
-    if (prices.length <= period) return null;
-    let gains = [], losses = [];
-    for (let i = 1; i < prices.length; i++) {
-      const diff = prices[i] - prices[i-1];
-      if (diff > 0) { gains.push(diff); losses.push(0); }
-      else { gains.push(0); losses.push(-diff); }
-    }
-    let avgGain = 0, avgLoss = 0;
-    for (let i = 0; i < period; i++) {
-      avgGain += gains[i];
-      avgLoss += losses[i];
-    }
-    avgGain /= period;
-    avgLoss /= period;
-    for (let i = period; i < gains.length; i++) {
-      avgGain = (avgGain * 13 + gains[i]) / 14;
-      avgLoss = (avgLoss * 13 + losses[i]) / 14;
-    }
-    if (avgLoss === 0) return 100;
-    const rs = avgGain / avgLoss;
-    return 100 - 100 / (1 + rs);
-  };
-  const rsi = calcRsiWilders(closes, 14);
+  // Wilder RSI14：共用 watch_v2 的 rsiWildersSeries（與 server indicators 同一演算法）
+  const rsi = rsiWildersSeries(closes, 14)[last];
   // BB 20
   const m20 = sma(20, last);
   let v = 0;
@@ -985,8 +962,8 @@ document.addEventListener('click', ev => {
       `<button class="probtn" id="btn-overnight" onclick="window.overnightOpen&&overnightOpen()" title="夜盤連動預警：美股期貨→台股隔日預估→持倉停損/觀察買區 (v3.8)">🌙 夜盤</button>` +
       `<button class="probtn" id="btn-supplychain" onclick="window.supplyChainOpen&&supplyChainOpen()" title="台灣AI供應鏈族群連動：晶圓→封裝→CPO→伺服器→散熱 RS輪動 (v3.8)">🔗 供應鏈</button>` +
       `<button class="probtn" id="btn-valuation" onclick="window.valuationOpen&&valuationOpen()" title="長線估值錨：本益比河流，判斷現在貴不貴 (v3.8)">⚓ 估值</button>` +
-      `<button class="probtn" id="btn-marketflow" onclick="window.marketFlowOpen&&marketFlowOpen()" title="大盤資金流：量能趨勢8000億→1.2兆 + 三大法人 (v3.8)">💰 資金流</button>` +
-      `<button class="probtn" id="btn-instrank" onclick="window.instRankOpen&&instRankOpen()" title="外資/投信/自營商買賣超排行榜 + 連續天數">🏆 法人榜</button>` +
+      `<button class="probtn" id="btn-marketflow" onclick="window.marketFlowOpen&&marketFlowOpen()" title="法人資金頁：三大法人動向與買賣超排行">💰 法人資金</button>` +
+      `<button class="probtn" id="btn-portfolio" onclick="window.portfolioOpen&&portfolioOpen()" title="投組風險頁：相關性／波動／VaR／產業曝險">📦 投組</button>` +
       `<button class="probtn" id="btn-stockfut" onclick="window.stockFutOpen&&stockFutOpen()" title="個股期夜盤領先：市值前十大個股期 期%/現%/領先差，現股領先指標 (v3.9)">🔭 個股期</button>` +
       `<button class="probtn" id="btn-calendar" onclick="window.calendarOpen&&calendarOpen()" title="事件行事曆：月營收/除權息提醒 (v3.8)">📅 行事曆</button>` +
       `<button class="probtn" id="btn-multichart" onclick="window.multiChartOpen&&multiChartOpen()" title="多圖連動布局：2×2/1×3 同股多時框或相關商品，同步游標/時間軸 (v3.9)　Alt+M">▦ 多圖</button>` +
@@ -1066,13 +1043,7 @@ document.addEventListener('click', ev => {
   const orig = window.renderStrategyPlaybook;
   window.renderStrategyPlaybook = function () {
     let h = orig.apply(this, arguments);
-    // Inject backtest buttons after each strategy block
-    h = h.replace(/(<div style="font-family:monospace;font-size:9px;color:var\(--green\);line-height:1\.7"><b>觸發行動<\/b>　[^<]*<\/div>)\s*<\/div>/g,
-      (m, actionDiv) => {
-        // Find the strat key from the previous icon... simpler: just add a generic button hint
-        return actionDiv + '</div>';
-      });
-    // Easier approach: append a hint at top of playbook telling user how to backtest
+    // 回測按鈕由 WATCH 表單（data-pro="bt"）提供；這裡只在劇本標題提示
     h = h.replace('▼ 策略劇本說明（點開看詳細）',
       '▼ 策略劇本說明（點開看詳細，含回測）');
     return h;

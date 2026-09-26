@@ -1,10 +1,10 @@
 /* ============================================================================
  * scan_v5.js  —  Stock Terminal 5.0 Stage 7：三合一選股側欄
  * ----------------------------------------------------------------------------
- * 資料：POST /screen3（技術 × 基本面 × 籌碼，與 screener3_v3 同後端）
+ * 資料：POST /screen3（技術 × 基本面 × 籌碼）
  * Meta：GET /screener（產業清單）
  * 掛載：#mount-scan；側欄「選股」
- * 不取代工具列模態窗；兩者可並存（表單 id 用 sc-* 避免衝突）
+ * 工具列「🔬 選股」經 bridge_v5 導向此頁（舊模態窗已移除）
  * ========================================================================== */
 (function () {
   'use strict';
@@ -431,18 +431,6 @@
     sortState: function () { return { key: sortState.key, direction: sortState.direction }; },
     sortRows: sortedResults
   };
-
-  // 工具列選股鈕：若殼層可用則導向側欄選股室
-  (function hookToolbar() {
-    var orig = window.screener3Open;
-    window.screener3Open = function () {
-      if (window.ShellV5 && typeof window.ShellV5.go === 'function') {
-        window.ShellV5.go('scan');
-        return;
-      }
-      if (typeof orig === 'function') orig();
-    };
-  })();
 
   window.addEventListener('shell:route', function (ev) {
     if (ev && ev.detail && ev.detail.route === 'scan') activate();

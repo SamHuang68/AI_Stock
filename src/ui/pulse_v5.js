@@ -857,7 +857,94 @@
         '#pl-root .pl-sec h4 a,#pl-root .pl-sec-hint{font-size:9px}' +
         '#pl-root .pl-inst4 .c .v,#pl-root .pl-bd4 .c .v,#pl-root .pl-ohlc4 .c .v{font-size:12px}' +
         '#pl-root .pl-global{grid-template-columns:1fr}' +
-      '}';
+      '}' + EXPERT_DESKTOP_DENSE_CSS;
+  }
+
+  /* 專業 5+5 桌機密度：字級再縮一級、所有說明文字單行（刪節號＋懸停看全文），
+     省下的高度全部讓給三張走勢圖；右下浮動轉盤不得蓋住自選表最後一列。
+     只作用於寬螢幕專業模式，不改變一行五框 × 上下兩區的格線契約。 */
+  var EXPERT_DESKTOP_DENSE_CSS =
+    '@media(min-width:901px){' +
+      '#pl-body.pl-mode-expert .pl-strip{gap:4px;margin:0 0 4px}' +
+      '#pl-body.pl-mode-expert .pl-strip .cell{padding:3px 5px}' +
+      '#pl-body.pl-mode-expert .pl-strip .k{font-size:7px;margin-bottom:0}' +
+      '#pl-body.pl-mode-expert .pl-strip .v{font-size:12px;margin-bottom:1px}' +
+      '#pl-body.pl-mode-expert .pl-strip .cell.hero .v{font-size:13px}' +
+      '#pl-body.pl-mode-expert .pl-strip .v span{font-size:8px!important}' +
+      '#pl-body.pl-mode-expert .pl-strip .s{font-size:8.5px;line-height:1.2}' +
+      '#pl-body.pl-mode-expert .pl-strip .s .pl-subq{font-size:7px}' +
+      '#pl-body.pl-mode-expert .pl-ttabs{flex-wrap:nowrap;overflow:hidden;margin-top:1px}' +
+      '#pl-body.pl-mode-expert .pl-ttabs span{font-size:5.5px;padding:0 2px}' +
+      '#pl-body.pl-mode-expert .pl-strip .vz-ref{margin-top:2px;margin-bottom:8px;height:4px}' +
+      '#pl-body.pl-mode-expert .pl-dash{gap:4px}' +
+      '#pl-body.pl-mode-expert .pl-zone{gap:4px}' +
+      '#pl-body.pl-mode-expert .pl-sec{padding:5px 7px}' +
+      '#pl-body.pl-mode-expert .pl-sec h4{font-size:9px;margin:0 0 3px;white-space:nowrap}' +
+      '#pl-body.pl-mode-expert .pl-sec h4 a,#pl-body.pl-mode-expert .pl-sec-hint{font-size:7px}' +
+      '#pl-body.pl-mode-expert .pl-note,#pl-body.pl-mode-expert .pl-score-formula{font-size:7px;' +
+        'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}' +
+      '#pl-body.pl-mode-expert .pl-inst4,#pl-body.pl-mode-expert .pl-bd4,#pl-body.pl-mode-expert .pl-ohlc4{gap:3px}' +
+      '#pl-body.pl-mode-expert .pl-inst4 .c,#pl-body.pl-mode-expert .pl-bd4 .c,#pl-body.pl-mode-expert .pl-ohlc4 .c{padding:2px 1px}' +
+      '#pl-body.pl-mode-expert .pl-inst4 .c .k,#pl-body.pl-mode-expert .pl-bd4 .c .k,#pl-body.pl-mode-expert .pl-ohlc4 .c .k{font-size:7px}' +
+      '#pl-body.pl-mode-expert .pl-inst4 .c .v,#pl-body.pl-mode-expert .pl-bd4 .c .v,#pl-body.pl-mode-expert .pl-ohlc4 .c .v{font-size:9px;margin-top:1px}' +
+      '#pl-body.pl-mode-expert .pl-inst-trend,#pl-body.pl-mode-expert .pl-bd-trend,#pl-body.pl-mode-expert .pl-ohlc-trend{' +
+        'margin:3px 0 2px;padding:3px 5px}' +
+      '#pl-body.pl-mode-expert .pl-inst-trend .lab,#pl-body.pl-mode-expert .pl-bd-trend .lab,' +
+        '#pl-body.pl-mode-expert .pl-ohlc-trend .lab{font-size:7.5px;margin-bottom:1px;white-space:nowrap}' +
+      '#pl-body.pl-mode-expert .pl-inst-trend .lab>span,#pl-body.pl-mode-expert .pl-bd-trend .lab>span,' +
+        '#pl-body.pl-mode-expert .pl-ohlc-trend .lab>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '#pl-body.pl-mode-expert .pl-inst-trend .lab>span:first-child,#pl-body.pl-mode-expert .pl-bd-trend .lab>span:first-child,' +
+        '#pl-body.pl-mode-expert .pl-ohlc-trend .lab>span:first-child{flex:0 0 auto}' +
+      '#pl-body.pl-mode-expert .pl-inst-cmt,#pl-body.pl-mode-expert .pl-bd-cmt,#pl-body.pl-mode-expert .pl-ohlc-cmt{' +
+        'font-size:7.5px;line-height:1.3;max-height:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '#pl-body.pl-mode-expert .pl-wl table{font-size:7.5px}' +
+      '#pl-body.pl-mode-expert .pl-wl th,#pl-body.pl-mode-expert .pl-wl td{padding:2px 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '#pl-body.pl-mode-expert .pl-wl td:first-child,#pl-body.pl-mode-expert .pl-wl td.px,' +
+        '#pl-body.pl-mode-expert .pl-wl td.chg{font-size:7.5px}' +
+      '#pl-body.pl-mode-expert .pl-wl .nm-only{display:inline;margin-left:3px;font-size:6.5px}' +
+      '#pl-body.pl-mode-expert .pl-wl-scroll::after{content:"";display:block;height:30px}' +
+      '#pl-body.pl-mode-expert .pl-flash .row{grid-template-columns:28px 34px minmax(0,1fr);padding:1px 3px}' +
+      '#pl-body.pl-mode-expert .pl-flash .ttl{font-size:7.5px;white-space:nowrap}' +
+      '#pl-body.pl-mode-expert .pl-score3 .sc .v{font-size:12px}' +
+      '#pl-body.pl-mode-expert .pl-score3 .sc.main .v{font-size:13px}' +
+      '#pl-body.pl-mode-expert .pl-score3 .sc .k,#pl-body.pl-mode-expert .pl-score3 .sc .l{font-size:6.5px}' +
+      '#pl-body.pl-mode-expert .pl-score-meta .m .k{font-size:7px}' +
+      '#pl-body.pl-mode-expert .pl-score-meta .m .v{font-size:10px}' +
+      '#pl-body.pl-mode-expert .pl-drivers,#pl-body.pl-mode-expert .pl-drivers .box .k{font-size:7.5px}' +
+      '#pl-body.pl-mode-expert .pl-global .g{padding:2px 4px}' +
+      '#pl-body.pl-mode-expert .pl-global .g .v{font-size:7.5px}' +
+    '}';
+
+  /* 單行刪節的文字補上 title，懸停可看全文（不必為了看完整句子而換行）。 */
+  var ELLIPSIS_SEL = '.pl-note,.pl-score-formula,.pl-inst-cmt,.pl-bd-cmt,.pl-ohlc-cmt,' +
+    '.pl-strip .s,.pl-strip .k,.lab>span,.pl-sec-hint,.pl-wl td,.pl-flash .ttl';
+  var ellipsisTimer = null;
+  function titleTruncated(root) {
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll(ELLIPSIS_SEL).forEach(function (el) {
+      if (el.scrollWidth > el.clientWidth + 1) {
+        var full = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (full && !el.getAttribute('title')) el.setAttribute('title', full);
+      }
+    });
+  }
+  function watchTruncation(body) {
+    if (!body || body._plEllipsisObs || typeof MutationObserver === 'undefined') return;
+    body._plEllipsisObs = new MutationObserver(function () {
+      clearTimeout(ellipsisTimer);
+      ellipsisTimer = setTimeout(function () { titleTruncated(body); }, 250);
+    });
+    body._plEllipsisObs.observe(body, { childList: true, subtree: true, characterData: true });
+  }
+
+  /* 快訊時間：今日只留 HH:MM，其他日子 MM/DD，完整時間放 title。 */
+  function flashTimeShort(t) {
+    var s = String(t || '');
+    var m = s.match(/(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);
+    if (!m) return s;
+    var now = new Date();
+    var today = String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+    return (m[1] + '-' + m[2]) === today ? m[3] : (m[1] + '/' + m[2]);
   }
 
   function tw(p) {
@@ -3689,7 +3776,7 @@
         (f.mkt ? ' data-mkt="' + esc(f.mkt) + '"' : '') +
         (f.url ? ' data-url="' + esc(f.url) + '"' : '') +
         ' title="' + esc(title) + '">' +
-        '<span class="t">' + esc(f.time || '') + '</span>' +
+        '<span class="t" title="' + esc(f.time || '') + '">' + esc(flashTimeShort(f.time)) + '</span>' +
         '<span class="' + catCls + '">[' + esc((f.cat || (isUs ? '美股' : '重訊')) + tierBit) + ']</span>' +
         '<span class="ttl">' + esc(title) + '</span></div>';
     });
@@ -3948,6 +4035,8 @@
     probeLayoutCols();
     setTimeout(probeLayoutCols, 0);
     setTimeout(probeLayoutCols, 500);
+    watchTruncation(body);
+    setTimeout(function () { titleTruncated(body); }, 300);
 
     bind(body);
     body.querySelectorAll('[data-sec-mkt]').forEach(function (b) {

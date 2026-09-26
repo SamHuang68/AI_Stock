@@ -1,11 +1,10 @@
 /* ============================================================================
  * bridge_v5.js  —  Stock Terminal 5.0：工具列 → 側欄橋接
  * ----------------------------------------------------------------------------
- * 將 v3/v4 模態入口導向 ST5 側欄對應室（殼層可用時）。
- *   screener3Open      → scan（scan_v5 已掛；此處作備援）
+ * 將 v3/v4 入口導向 ST5 側欄對應室。
+ *   screener3Open      → scan
  *   portfolioOpen      → book
- *   marketFlowOpen     → institutional
- *   instRankOpen       → institutional
+ *   marketFlowOpen     → institutional（法人資金；原「法人榜」併入同頁）
  *   openAIModal        → ai（再開報告模態）
  *   copilotOpen        → ai（再開副駕）
  *   focusScanOpen      → ai（再開焦點；亦可 signals）
@@ -46,15 +45,16 @@
     }
   }
 
-  /* 選股：優先 scan_v5 既有 hook；bridge 備援 */
-  wrap('screener3Open', 'scan', { openModal: false });
-
-  /* 投組 */
-  wrap('portfolioOpen', 'book', { openModal: false });
-
-  /* 資金流／法人榜 → 法人室（hub 已有完整資料） */
-  wrap('marketFlowOpen', 'institutional', { openModal: false });
-  wrap('instRankOpen', 'institutional', { openModal: false });
+  /* 舊 v3 模態窗（三合一選股／投組／資金流／法人榜）已由側欄頁取代並移除；
+     保留同名入口給工具列、指令盤與舊快捷鍵，一律導向對應頁。 */
+  function routeOpener(name, route) {
+    window[name] = function () {
+      if (window.ShellV5 && typeof window.ShellV5.go === 'function') window.ShellV5.go(route);
+    };
+  }
+  routeOpener('screener3Open', 'scan');
+  routeOpener('portfolioOpen', 'book');
+  routeOpener('marketFlowOpen', 'institutional');
 
   /* AI 三鈕 → AI 中樞 + 開對應模態 */
   wrap('openAIModal', 'ai', { openModal: true, delay: 100 });

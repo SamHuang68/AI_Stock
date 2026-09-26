@@ -1793,7 +1793,7 @@ def _twse_mis_index(ex_ch):
 def _fetch_day_movers(n=8, target_date=None):
     """輕量漲跌幅排行：TWSE STOCK_DAY_ALL + TPEx 上櫃日收盤。
        回 {ok,date,gainers:[{code,name,price,change,changePct,value}], losers:[...], source}。
-       供 Overview 儀表板；比 POST /screener 快兩個數量級。"""
+       供 Overview 儀表板；不需逐檔抓 K 線。"""
     from datetime import date as _date
 
     def fnum(v):
@@ -2673,8 +2673,6 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             self._handle_etf_catalog_post()
         elif p == '/etf-tracker/run':
             self._handle_tracker_run()
-        elif p == '/screener':
-            self._handle_screener_post()
         elif p == '/screen3':
             self._handle_screen3()
         elif p == '/portfolio':
@@ -5055,27 +5053,7 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
     ]
 
     def _handle_screener_get(self):
-        """GET /screener — return preset filter list + symbol pool"""
-        presets = [
-            # ── 多方 / 進場 ──
-            {'key':'breakout_20',    'name':'突破 20 日新高 + 量增',  'desc':'抓動能爆發初期','side':'long'},
-            {'key':'rsi_oversold',   'name':'RSI 超賣 + 站上 SMA60',  'desc':'多頭趨勢中的超賣反彈點','side':'long'},
-            {'key':'bullish_align',  'name':'均線多頭排列',            'desc':'SMA5 > SMA20 > SMA60，強勢結構','side':'long'},
-            {'key':'pullback_sma60', 'name':'回測 SMA60 不破',         'desc':'多頭趨勢回檔買進點','side':'long'},
-            {'key':'pullback_sma20', 'name':'回測 SMA20 不破',         'desc':'強勢股短線回檔買點','side':'long'},
-            {'key':'vol_spike',      'name':'量增 2x 且收紅',          'desc':'籌碼異動 + 短線買盤','side':'long'},
-            {'key':'cross_golden',   'name':'近 5 日黃金交叉',          'desc':'SMA20 上穿 SMA60','side':'long'},
-            {'key':'near_52w_low',   'name':'逼近 60 日低檔',          'desc':'落底區間，搏反彈（風險高）','side':'long'},
-            {'key':'top_gainers',    'name':'漲幅榜 Top',              'desc':'今日漲幅最大（追勢/強勢觀察）','side':'long'},
-            # ── 空方 / 跌幅 / 出場警示 ──
-            {'key':'top_losers',     'name':'跌幅榜 Top',              'desc':'今日跌幅最大（賣壓/弱勢）','side':'short'},
-            {'key':'breakdown_20',   'name':'跌破 20 日新低 + 量增',  'desc':'空頭動能啟動、停損警示','side':'short'},
-            {'key':'bearish_align',  'name':'均線空頭排列',            'desc':'SMA5 < SMA20 < SMA60，弱勢結構','side':'short'},
-            {'key':'death_cross',    'name':'近 5 日死亡交叉',          'desc':'SMA20 下穿 SMA60，趨勢轉空','side':'short'},
-            {'key':'break_sma60_dn', 'name':'跌破 SMA60',              'desc':'跌破季線，中期轉弱','side':'short'},
-            {'key':'rsi_overbought', 'name':'RSI 過熱 (>75)',          'desc':'短線過熱，留意回檔/停利','side':'short'},
-            {'key':'high_vol_drop',  'name':'帶量下跌 (出貨)',         'desc':'量增 2x 且收黑，疑似出貨','side':'short'},
-        ]
+        """GET /screener — 產業清單 + 宇集檔數（掃描頁／焦點掃描的產業下拉）。"""
         try:
             _uni = _get_tw_universe()
         except Exception:
@@ -5084,8 +5062,7 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             _sec = sorted(set(_get_tw_sectors().values()))
         except Exception:
             _sec = []
-        out = {'presets': presets, 'symbolCount': len(_uni) or len(set(self._TW_TOP200)),
-               'sectors': _sec}
+        out = {'symbolCount': len(_uni) or len(set(self._TW_TOP200)), 'sectors': _sec}
         self._ok(json.dumps(out, ensure_ascii=False).encode())
 
     def _focus_score(self, i):
@@ -5469,206 +5446,13 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
         """DecisionRoutesMixin hook：沿用既有 code→產業單一來源。"""
         return _get_tw_sectors()
 
-    def _handle_screener_post(self):
-        """POST /screener — body: {preset:'...', symbols:[...] (optional)} or {custom:'...'}"""
-        try:
-            body = read_json_body(self, max_bytes=512 * 1024)
-        except BodyReadError as e:
-            self._err(str(e), e.status); return
-        preset = body.get('preset')
-        custom = body.get('custom')
-        # 預設掃全台股宇集（上市+上櫃普通股）；抓不到才退回精選清單
-        try:
-            _uni = _get_tw_universe()
-        except Exception:
-            _uni = []
-        syms = list(set(body.get('symbols') or _uni or self._TW_TOP200))
-        # 產業別篩選：sector='__TECH__' 科技電子整合，或單一產業別名稱
-        sector = (body.get('sector') or '').strip()
-        if sector and sector not in ('全部', 'all', ''):
-            try:
-                smap = _get_tw_sectors()
-                want = _TECH_SECTORS if sector == '__TECH__' else {sector}
-                syms = [s for s in syms if smap.get(str(s).replace('.TW', '').replace('.TWO', '')) in want]
-            except Exception as e:
-                print('[screener] sector filter failed:', e)
-        # v4.0:一次把全宇集在 DB 的 bars 撈出(單一查詢,秒級);DB 沒有的才退回 Yahoo(DB 空時零差異)
-        results = []
-        ind_cache = {}
-        need_yahoo = []
-        try:
-            import datastore
-            _db_all = datastore.get_bars_bulk([str(s).replace('.TW', '').replace('.TWO', '') for s in syms])
-        except Exception:
-            _db_all = {}
-        for _s in syms:
-            _code = str(_s).replace('.TW', '').replace('.TWO', '')
-            _rows = _db_all.get(_code)
-            if not _rows or len(_rows) < 70:
-                need_yahoo.append(_s); continue
-            _cl = [r[4] for r in _rows]
-            
-            # 異常檢測：若資料庫最新兩日價格出現巨大斷層 (如除權息/分割/異常值) 導致變動 > 11% ➔ 丟給 Yahoo 重抓權威昨收
-            if len(_cl) >= 2:
-                _db_chg = (_cl[-1] - _cl[-2]) / _cl[-2] * 100
-                if abs(_db_chg) > 11.0:
-                    need_yahoo.append(_s); continue
-
-            _hi = [r[2] if r[2] is not None else r[4] for r in _rows]
-            _lo = [r[3] if r[3] is not None else r[4] for r in _rows]
-            _vo = [r[5] if r[5] is not None else 0 for r in _rows]
-            try:
-                _ind = self._screener_ind_cached(_code, _rows, _cl, _hi, _lo, _vo)
-                if self._screener_match(preset or custom, _ind, _cl, _hi, _vo):
-                    results.append({
-                        'sym': _code,
-                        'name': _get_tw_names().get(_code) or _code,
-                        'close': _ind['close'], 'changePct': _ind['changePct'],
-                        'rsi14': round(_ind['rsi14'], 1) if _ind['rsi14'] else None,
-                        'volRatio': round(_ind['volRatio'], 2) if _ind['volRatio'] else None,
-                        'sma5': round(_ind['sma5'], 2) if _ind['sma5'] else None,
-                        'sma20': round(_ind['sma20'], 2) if _ind['sma20'] else None,
-                        'sma60': round(_ind['sma60'], 2) if _ind['sma60'] else None,
-                    })
-            except Exception:
-                pass
-        # H5：Yahoo 補洞限流，避免 DB 空時一次打爆對外 API
-        _yahoo_cap = 120
-        _yahoo_truncated = max(0, len(need_yahoo) - _yahoo_cap)
-        need_yahoo = need_yahoo[:_yahoo_cap]
-        # Fetch DB-misses in parallel using existing fetch_one with nocache=True
-        futures = {_pool.submit(fetch_one, s + '.TW' if not s.endswith('.TW') else s, nocache=True): s for s in need_yahoo}
-        for fut in as_completed(futures):
-            sym, data, _ = fut.result()
-            if not data: continue
-            try:
-                parsed = json.loads(data)
-                res = parsed.get('chart', {}).get('result', [{}])[0]
-                ts = res.get('timestamp') or []
-                q = (res.get('indicators',{}).get('quote') or [{}])[0]
-                meta = res.get('meta', {})
-                if len(ts) < 70: continue
-                # Build per-bar arrays — pair (timestamp, close) and filter null closes
-                raw_closes = q.get('close') or []
-                raw_highs  = q.get('high')  or []
-                raw_lows   = q.get('low')   or []
-                raw_vols   = q.get('volume') or []
-                closes, highs, lows, vols, ts_valid = [], [], [], [], []
-                for i in range(min(len(ts), len(raw_closes))):
-                    c = raw_closes[i]
-                    if c is None: continue
-                    closes.append(c)
-                    highs.append(raw_highs[i] if i < len(raw_highs) and raw_highs[i] is not None else c)
-                    lows.append(raw_lows[i]  if i < len(raw_lows)  and raw_lows[i]  is not None else c)
-                    vols.append(raw_vols[i]  if i < len(raw_vols)  and raw_vols[i]  is not None else 0)
-                    ts_valid.append(ts[i])
-                if len(closes) < 70: continue
-                # ── Yahoo data freshness fix ──────────────────────────
-                # Yahoo 部分台股 ETF/個股 daily K 線會落後 regularMarketPrice
-                # 一天。如 2454 5/28 收 4410，但 candles[-1] 仍是 5/27 4640。
-                # 偵測：regularMarketTime 比 last candle ts 晚 > 20h → 合成
-                # 今日 K 線（OHLC = rmp, vol 用近 5 日均量）。
-                rmt = meta.get('regularMarketTime')
-                rmp = meta.get('regularMarketPrice')
-                if (rmt and rmp is not None and isinstance(rmp, (int, float)) and rmp > 0
-                        and ts_valid and rmt - ts_valid[-1] > 20 * 3600):
-                    syn_vol = sum(vols[-5:]) / 5 if len(vols) >= 5 else 0
-                    closes.append(float(rmp))
-                    highs.append(float(rmp))
-                    lows.append(float(rmp))
-                    vols.append(syn_vol)
-                    ts_valid.append(rmt)
-                ind = self._calc_ind(closes, highs, lows, vols)
-                # 昨收優先級：優先使用無斷層的 closes[-2]，否則退回官方昨收，防止 long range 下 chartPreviousClose 誤用
-                _pc = None
-                if len(closes) >= 2:
-                    _tmp_chg = (closes[-1] - closes[-2]) / closes[-2] * 100
-                    if abs(_tmp_chg) <= 11.0:
-                        _pc = closes[-2]
-                if _pc is None:
-                    _pc = _yf_prevclose(meta, allow_chart_prev=False)
-                _chg = ((closes[-1] - _pc) / _pc * 100) if (_pc and _pc > 0) else ind['changePct']
-                if self._screener_match(preset or custom, ind, closes, highs, vols):
-                    results.append({
-                        'sym': sym.replace('.TW','').replace('.TWO',''),
-                        'name': _get_tw_names().get(sym.replace('.TW','').replace('.TWO','')) or meta.get('shortName') or meta.get('symbol') or sym,
-                        'close': ind['close'], 'changePct': round(_chg, 2),
-                        'rsi14': round(ind['rsi14'],1) if ind['rsi14'] else None,
-                        'volRatio': round(ind['volRatio'],2) if ind['volRatio'] else None,
-                        'sma5': round(ind['sma5'],2) if ind['sma5'] else None,
-                        'sma20': round(ind['sma20'],2) if ind['sma20'] else None,
-                        'sma60': round(ind['sma60'],2) if ind['sma60'] else None,
-                    })
-            except Exception as e:
-                continue
-        # 空方/跌幅類 → 由跌最多排序（升冪）；其餘 → 漲幅降冪
-        _bear = {'top_losers', 'breakdown_20', 'bearish_align', 'death_cross',
-                 'break_sma60_dn', 'high_vol_drop', 'near_52w_low'}
-        asc = (preset in _bear)
-        results.sort(key=lambda x: x.get('changePct') or 0, reverse=not asc)
-        # 漲/跌幅榜只取前 40 檔避免整包
-        if preset in ('top_gainers', 'top_losers'):
-            results = results[:40]
-        self._ok(json.dumps({
-            'results': results,
-            'scanned': len(syms),
-            'matched': len(results),
-            'yahooFetched': len(need_yahoo),
-            'yahooTruncated': _yahoo_truncated,
-        }, ensure_ascii=False).encode())
-
-    # H5：選股指標短 TTL 快取（同收盤簽名 60s 內不重算 RSI/SMA）
-    _SCREENER_IND_CACHE = {}
-    _SCREENER_IND_TTL = 60.0
-
-    def _screener_ind_cached(self, code, rows, closes, highs, lows, vols):
-        try:
-            last = rows[-1]
-            sig = (len(rows), last[0], last[4])
-        except Exception:
-            return self._calc_ind(closes, highs, lows, vols)
-        now = time.time()
-        ent = Handler._SCREENER_IND_CACHE.get(code)
-        if ent and ent[0] == sig and ent[2] > now:
-            return ent[1]
-        ind = self._calc_ind(closes, highs, lows, vols)
-        Handler._SCREENER_IND_CACHE[code] = (sig, ind, now + Handler._SCREENER_IND_TTL)
-        if len(Handler._SCREENER_IND_CACHE) > 4000:
-            # 丟棄過期
-            Handler._SCREENER_IND_CACHE = {
-                k: v for k, v in Handler._SCREENER_IND_CACHE.items() if v[2] > now
-            }
-        return ind
-
     def _calc_ind(self, closes, highs, lows, vols):
         n = len(closes)
-        try:
-            import indicators as _ind
-            def sma(p, idx):
-                return _ind.sma(closes, p, idx)
-            rsi = _ind.rsi_wilders(closes, 14)
-        except Exception:
-            def sma(p, idx):
-                if idx + 1 < p: return None
-                return sum(closes[idx-p+1:idx+1]) / p
-            def calc_rsi_wilders(prices, period=14):
-                if len(prices) <= period:
-                    return None
-                gains, losses = [], []
-                for i in range(1, len(prices)):
-                    diff = prices[i] - prices[i-1]
-                    gains.append(diff if diff > 0 else 0.0)
-                    losses.append(-diff if diff < 0 else 0.0)
-                avg_gain = sum(gains[:period]) / period
-                avg_loss = sum(losses[:period]) / period
-                for i in range(period, len(gains)):
-                    avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-                    avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-                if avg_loss == 0:
-                    return 100.0
-                rs = avg_gain / avg_loss
-                return 100.0 - (100.0 / (1.0 + rs))
-            rsi = calc_rsi_wilders(closes, 14)
+        import indicators as _ind
+
+        def sma(p, idx):
+            return _ind.sma(closes, p, idx)
+        rsi = _ind.rsi_wilders(closes, 14)
         # Vol ratio
         v5 = sum(vols[-5:]) / 5 if len(vols) >= 5 else 0
         v20 = sum(vols[-20:]) / 20 if len(vols) >= 20 else 0
@@ -5684,49 +5468,6 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             'low20': min(lows[-21:-1]) if len(lows) >= 21 else None,
             'low60': min(lows[-61:-1]) if len(lows) >= 61 else None,
         }
-
-    def _screener_match(self, preset, i, closes, highs, vols):
-        if not i.get('close'): return False
-        c = i['close']
-        if preset == 'breakout_20':
-            return i['high20'] and c > i['high20'] and i['volRatio'] and i['volRatio'] > 1.5
-        if preset == 'rsi_oversold':
-            return i['rsi14'] and i['rsi14'] < 35 and i['sma60'] and c > i['sma60']
-        if preset == 'bullish_align':
-            return all([i['sma5'], i['sma20'], i['sma60']]) and i['sma5'] > i['sma20'] > i['sma60']
-        if preset == 'pullback_sma60':
-            return i['sma60'] and abs(c - i['sma60']) / i['sma60'] < 0.02 and i['sma60_prev'] and i['sma60'] > i['sma60_prev']
-        if preset == 'vol_spike':
-            return i['volRatio'] and i['volRatio'] > 2 and i['prev'] and c > i['prev']
-        if preset == 'cross_golden':
-            return all([i['sma20'], i['sma60'], i['sma20_prev'], i['sma60_prev']]) \
-                   and i['sma20_prev'] <= i['sma60_prev'] and i['sma20'] > i['sma60']
-        if preset == 'pullback_sma20':
-            return i['sma20'] and abs(c - i['sma20']) / i['sma20'] < 0.015 \
-                   and i['sma20_prev'] and i['sma20'] > i['sma20_prev']
-        if preset == 'near_52w_low':
-            return i['low60'] and c <= i['low60'] * 1.03
-        if preset == 'top_gainers':
-            return i['changePct'] is not None    # 全收，靠排序取前段
-        # ── 空方 / 跌幅 ──
-        if preset == 'top_losers':
-            return i['changePct'] is not None
-        if preset == 'breakdown_20':
-            return i['low20'] and c < i['low20'] and i['volRatio'] and i['volRatio'] > 1.5
-        if preset == 'bearish_align':
-            return all([i['sma5'], i['sma20'], i['sma60']]) and i['sma5'] < i['sma20'] < i['sma60']
-        if preset == 'death_cross':
-            return all([i['sma20'], i['sma60'], i['sma20_prev'], i['sma60_prev']]) \
-                   and i['sma20_prev'] >= i['sma60_prev'] and i['sma20'] < i['sma60']
-        if preset == 'break_sma60_dn':
-            return i['sma60'] and i['prev'] and i['sma60_prev'] \
-                   and i['prev'] >= i['sma60_prev'] and c < i['sma60']
-        if preset == 'rsi_overbought':
-            return i['rsi14'] and i['rsi14'] > 75
-        if preset == 'high_vol_drop':
-            return i['volRatio'] and i['volRatio'] > 2 and i['prev'] and c < i['prev']
-        return False
-
 
     def _handle_etf_reason(self):
         """POST /etf-reason — ETF 異動 AI 一句話原因推導 (v3.9 P5)。
