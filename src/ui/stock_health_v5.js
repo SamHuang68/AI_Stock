@@ -119,6 +119,13 @@
       '.sh5-board td,.sh5-board th{padding:5px 6px;border-bottom:1px solid rgba(34,50,74,.6);font-size:11px;text-align:left;vertical-align:top}' +
       '.sh5-board tr[data-code]{cursor:pointer}' +
       '.sh5-board tr[data-code]:hover{background:rgba(251,191,36,.06)}' +
+      '.sh5-table-scroll{overflow-x:auto;max-width:100%}.sh5-table-scroll .sh5-tbl{min-width:780px}' +
+      '.sh5-table-scroll:focus-visible{outline:2px solid var(--gold,#fbbf24);outline-offset:2px}' +
+      '.sh5-professional details{margin:8px 0;padding:8px;border:1px solid var(--border,#22324a);border-radius:7px;font-size:11px}' +
+      '.sh5-professional summary{cursor:pointer;color:var(--thi,#f2f5fa);line-height:1.6}' +
+      '.sh5-professional table{width:100%;border-collapse:collapse;font-size:11px}.sh5-professional th,.sh5-professional td{padding:5px;text-align:left;border-bottom:1px solid var(--border,#22324a)}' +
+      '.sh5-scroll{overflow:auto;max-width:100%}.sh5-professional pre{font-size:10px;line-height:1.5}' +
+      '.sh5 :focus-visible{outline:2px solid var(--gold,#fbbf24);outline-offset:2px}' +
       '.sh5-dot{display:inline-block;min-width:34px;font:800 10px "Noto Sans TC",sans-serif;margin-right:3px;white-space:nowrap}' +
       '@media(max-width:520px){.sh5-lights{grid-template-columns:repeat(3,minmax(0,1fr))}}';
     document.head.appendChild(style);
@@ -127,7 +134,8 @@
   // ── 統計文字 ────────────────────────────────────────────────
   var VERDICT = {
     above: '高於基準', below: '低於基準',
-    noise: '差距在誤差範圍內，無明顯差異'
+    noise: '差距在誤差範圍內，無明顯差異',
+    descriptive: '歷史差距，尚未驗證優勢'
   };
   function verdictText(r) {
     if (!r || !r.edgeVerdict) return '';
@@ -254,6 +262,16 @@
       var h = r.horizons.filter(function (x) { return x.horizon === 5; })[0] || {};
       var h20 = r.horizons.filter(function (x) { return x.horizon === 20; })[0] || {};
       var st = h.stability || {};
+      var rh = ((r.research || {}).horizons || []).filter(function (x) { return x.horizon === 5; })[0];
+      var matched = rh && rh.all;
+      var matchedText = '待重新計算';
+      if (matched) {
+        var ci = matched.deltaRetCI95;
+        matchedText = matched.blockMeanDeltaRet == null ? '資料不足' : '季度等權差距 ' + pct(matched.blockMeanDeltaRet, 2);
+        matchedText += '<br><span style="color:var(--tlo)">' + matched.n + ' 次／' + matched.quarters + ' 季';
+        matchedText += ci ? '<br>季度差距區間 ' + pct(ci[0], 2) + '～' + pct(ci[1], 2) : '<br>區間資料不足';
+        matchedText += '</span>';
+      }
       var cell = function (x) {
         return x.gate === 'ok' ? pct(x.upRatio) + ciText(x) + '<br><span style="color:var(--tlo)">基準 ' + pct(x.baseUpRatio) + '</span>'
           : '<span style="color:var(--tlo)">樣本不足（' + (x.n || 0) + '）</span>';
@@ -262,11 +280,16 @@
         '<td>' + (h.n || 0) + '<br><span style="color:var(--tlo)">' + (h.symbols || 0) + ' 檔</span></td>' +
         '<td>' + cell(h) + '</td><td>' + cell(h20) + '</td>' +
         '<td>' + (h.edgeVerdict ? esc(VERDICT[h.edgeVerdict]) + '<br><span style="color:var(--tlo)">' + (h.edgePts > 0 ? '+' : '') + h.edgePts + ' pts</span>' : '—') + '</td>' +
-        '<td>' + (st.olderUpRatio != null && st.recentUpRatio != null ? pct(st.olderUpRatio) + ' → ' + pct(st.recentUpRatio) : '—') + '</td></tr>';
+        '<td>' + (st.olderUpRatio != null && st.recentUpRatio != null ? pct(st.olderUpRatio) + ' → ' + pct(st.recentUpRatio) : '—') + '</td>' +
+        '<td>' + matchedText + '</td></tr>';
     }).join('');
     return '<div class="sh5-foot" style="margin-top:0">同市場 ' + esc(p.symbols) + ' 檔 · ' + esc((p.window || {}).from || '') + '～' +
       esc((p.window || {}).to || '') + ' · 計算於 ' + esc(p.generatedAt || '') + ' · 樣本門檻 ' + esc(p.minSample) + ' 次／' + esc(p.minSymbols) + ' 檔</div>' +
-      '<table class="sh5-tbl"><tr><td>訊號</td><td>次數(5日)</td><td>5 日上漲</td><td>20 日上漲</td><td>判讀(5日)</td><td>前段→近段</td></tr>' + rows + '</table>' +
+      '<div class="sh5-table-scroll" tabindex="0" role="region" aria-label="訊號成績單，可左右捲動"><table class="sh5-tbl"><tr><th scope="col">訊號</th><th scope="col">次數(5日)</th><th scope="col">5 日上漲</th><th scope="col">20 日上漲</th><th scope="col">判讀(5日)</th><th scope="col">前段→近段</th><th scope="col">情境對照(5日)</th></tr>' + rows + '</table></div>' +
+      '<div class="sh5-foot">比例誤差僅為描述，不能當作優勢證明。情境對照從次日收盤起算，對照同股票、同大盤情境已成熟的歷史；季度區間屬探索結果，未校正多重比較。</div>' +
+      (p.research && p.research.selection ? '<div class="sh5-foot">候選判讀：' + esc(p.research.selection.reason) + '</div>' : '') +
+      (p.research && p.research.benchmarkCoverage ? '<div class="sh5-foot">大盤情境資料：' + esc(p.research.benchmarkCoverage.from || '缺少') + '～' + esc(p.research.benchmarkCoverage.to || '缺少') + '；缺少同日情境的事件不納入對照研究。</div>' : '') +
+      rsiResearchHtml(p.research && p.research.rsiRebound) +
       '<div class="sh5-foot">' + esc(p.method || '') + '<br>' + (p.caveats || []).map(esc).join('<br>') + '</div>' +
       '<div class="sh5-row">' + btn + '</div>';
   }
@@ -274,8 +297,8 @@
   function cardHtml(d, mode, pushCfg) {
     var head = '<div class="sh5-head"><div class="sh5-title">' + esc(d.symbol) + ' 個股體檢' +
       '<small>' + esc(d.asOf || '') + (d.session && d.session.provisional ? ' · 盤中暫定' : '') + '</small></div>' +
-      '<div class="sh5-modes" role="tablist">' + MODES.map(function (m) {
-        return '<button data-sh5-mode="' + m.key + '" class="' + (m.key === mode ? 'on' : '') + '">' + m.label + '</button>';
+      '<div class="sh5-modes" role="group" aria-label="體檢閱讀深度">' + MODES.map(function (m) {
+        return '<button data-sh5-mode="' + m.key + '" aria-pressed="' + (m.key === mode) + '" class="' + (m.key === mode ? 'on' : '') + '">' + m.label + '</button>';
       }).join('') + '</div></div>';
     if (!d.ok) {
       return '<div class="sh5">' + head + '<div class="sh5-empty">' + esc(d.message || '尚無資料') +
@@ -290,6 +313,7 @@
     var html = '<div class="sh5">' + head + warn + lightsHtml(d, mode) +
       '<div class="sh5-sum">' + esc(d.health.summary.sentence) + '</div>' +
       (inv ? '<div class="sh5-inval">什麼情況代表判斷錯了：' + esc(inv.text) + '</div>' : '') +
+      (mode === 'pro' ? professionalHtml(d) : '') +
       '<div class="sh5-sec"><h4>近 10 個交易日的訊號（' + shown.length + '）</h4>' +
       (shown.length ? shown.map(function (e) { return eventHtml(d, e, mode); }).join('')
         : '<div class="sh5-empty">近 10 個交易日沒有新的狀態轉換。沒有訊號也是資訊：趨勢照燈號判讀即可。</div>') + '</div>';
@@ -309,6 +333,61 @@
     html += pushRowHtml(pushCfg);
     html += '<div class="sh5-foot">' + esc(d.disclaimer || '') + '</div></div>';
     return html;
+  }
+
+  function rsiResearchHtml(r) {
+    if (!r) return '';
+    var html = '<details class="sh5-sec"><summary>RSI 獨立研究：大盤非下降、個股仍下降</summary><div class="sh5-foot">' +
+      esc((r.selection || {}).reason) + '<br>此假說在看過第一輪結果後提出，歷史分段不是獨立盲測。</div>';
+    (((r.signals || [])[0] || {}).horizons || []).forEach(function (h) {
+      ['training', 'temporalCheck'].forEach(function (key) {
+        var part = h[key] || {}, c = part.context || {}, ci = c.deltaRetCI95, inc = (part.increment || {}).ci95;
+        html += '<div class="sh5-foot">' + h.horizon + ' 日／' + (key === 'training' ? '2024 年以前' : '2024 年起') +
+          '：' + esc(c.n) + ' 次／' + esc(c.symbols) + ' 檔／' + esc(c.quarters) + ' 季；季度差距區間 ' +
+          (ci ? pct(ci[0], 2) + '～' + pct(ci[1], 2) : '資料不足') + '；情境增量區間 ' +
+          (inc ? pct(inc[0], 2) + '～' + pct(inc[1], 2) : '資料不足') + '</div>';
+      });
+    });
+    return html + '<div class="sh5-foot">次日收盤起算；未還原、未計費用，區間未校正多重比較。</div></details>';
+  }
+
+  function professionalHtml(d) {
+    var names = { close: '收盤', sma20: '20 日均線', sma60: '季線', rsi: 'Wilder RSI14',
+      macd_hist: 'MACD 柱狀體', volx: '量／均量', atr: 'ATR14', trust: '投信股數', foreign: '外資股數' };
+    var html = '<section class="sh5-sec sh5-professional" aria-label="專業證據檢視"><h4>專業檢視：事件、分布與證據</h4>' +
+      '<div class="sh5-foot">歷史快照重建可供核對規則；實際前瞻觀察另存帳本。比例與分位數均為描述統計，不能當成獲利保證。</div>';
+    var events = d.events || [];
+    if (!events.length) html += '<div class="sh5-empty">近期沒有新事件；仍可核對下方燈號、失效條件與原始證據。</div>';
+    events.forEach(function (e) {
+      var a = e.audit || {};
+      html += '<details><summary>' + esc(e.label) + '：' + esc(e.date) + ' → ' + esc(e.statusLabel) + '</summary>' +
+        '<div class="sh5-foot">觸發規則：' + esc(e.rule || e.detail) + '<br>狀態更新日：' + esc(e.statusDate || e.date) +
+        '；檢查至 ' + esc(a.evaluatedThrough || d.asOf) + (a.statusProvisional ? '（含盤中暫定資料）' : '') +
+        '<br>確認需要 ' + esc(a.confirmationBars == null ? '—' : a.confirmationBars) + ' 根未失效日 K；歷史統計同訊號間隔至少 ' +
+        esc(a.statCooldownBars == null ? '—' : a.statCooldownBars) + ' 根。<br>' + esc(a.note || '此版本未附事件快照') + '</div>';
+      var vals = a.triggerValues || {};
+      html += '<div class="sh5-scroll" role="region" tabindex="0" aria-label="觸發前後數值"><table class="sh5-it"><thead><tr><th>證據</th><th>觸發前一日</th><th>觸發日</th></tr></thead><tbody>';
+      Object.keys(vals).forEach(function (key) {
+        html += '<tr><th>' + esc(names[key] || key) + '</th><td>' + num(vals[key].before) + '</td><td>' + num(vals[key].at) + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+      ((e.stats || {}).horizons || []).forEach(function (h) {
+        html += '<div class="sh5-foot">本檔觸發後 ' + esc(h.horizon) + ' 日，n=' + esc(h.n) + '：';
+        if (h.gate !== 'ok' || !h.distribution) html += '樣本不足或此版本未提供分布，不顯示分位數。';
+        else html += '第 10／50／90 百分位 ' + pct(h.distribution.p10, 2) + '／' + pct(h.distribution.p50, 2) + '／' + pct(h.distribution.p90, 2) +
+          '；最差 ' + pct(h.distribution.worst, 2) + '<br>成熟觸發期間：' + esc((h.window || {}).from) + '～' + esc((h.window || {}).to);
+        html += '</div>';
+      });
+      html += '</details>';
+    });
+    html += '<details><summary>原始證據表（' + Object.keys(d.evidence || {}).length + ' 項）</summary>' +
+      '<div class="sh5-foot">證據編號可對應白話解讀的引用；日期代表該證據的資料時間。</div>';
+    Object.keys(d.evidence || {}).forEach(function (key) {
+      var v = d.evidence[key];
+      html += '<details><summary>' + esc(key) + ' · ' + esc(v.label || '') + ' · ' + esc(v.asOf || '未提供日期') +
+        '</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' + esc(JSON.stringify(v, null, 2)) + '</pre></details>';
+    });
+    return html + '</details></section>';
   }
 
   function currentSym() {
@@ -338,7 +417,12 @@
 
   function bindCard(el, d) {
     el.querySelectorAll('[data-sh5-mode]').forEach(function (b) {
-      b.onclick = function () { setMode(b.getAttribute('data-sh5-mode')); paint(el, d); };
+      b.onclick = function () {
+        var chosen = b.getAttribute('data-sh5-mode');
+        setMode(chosen); paint(el, d);
+        var active = el.querySelector('[data-sh5-mode="' + chosen + '"]');
+        if (active) active.focus();
+      };
     });
     var sel = el.querySelector('#sh5-push');
     var aiBox = el.querySelector('#sh5-aidigest');

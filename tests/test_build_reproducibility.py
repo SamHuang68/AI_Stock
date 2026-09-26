@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.build_dist import make_zip
-
 ROOT = Path(__file__).resolve().parents[1]
+_spec = importlib.util.spec_from_file_location('st_build_dist_repro', ROOT / 'scripts' / 'build_dist.py')
+_build_dist = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_build_dist)
+make_zip = _build_dist.make_zip
 
 
 class BuildReproducibilityTests(unittest.TestCase):

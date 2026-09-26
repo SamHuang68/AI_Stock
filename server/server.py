@@ -700,23 +700,10 @@ def _fetch_tw_light():
     return []
 
 def _chip_history_record(clean_code, chip_out):
-    """把今日某股的 inst.total 記到 chip_history/<date>.json (彙總多股)"""
-    from datetime import date as _date
-    inst = (chip_out or {}).get('inst') or {}
-    if inst.get('total') is None:
-        return
-    os.makedirs(CHIP_HISTORY_PATH, exist_ok=True)
-    fn = os.path.join(CHIP_HISTORY_PATH, _date.today().strftime('%Y%m%d') + '.json')
-    try:
-        day = load_json(fn, default={}, expected_type=dict)
-    except StoreCorruptError as exc:
-        print('[chip-history] unavailable:', type(exc).__name__)
-        return
-    day[clean_code] = {
-        'foreign': inst.get('foreign'), 'trust': inst.get('trust'),
-        'dealer': inst.get('dealer'), 'total': inst.get('total'),
-    }
-    atomic_write_json(fn, day, backup=True, indent=None)
+    """逐檔查詢與全市場快照共用來源日契約。"""
+    from chip_history_tracker import record_snapshot
+    record_snapshot(clean_code, chip_out, CHIP_HISTORY_PATH)
+
 
 _openapi_ds = {}   # dataset name → (date, {code: row})
 

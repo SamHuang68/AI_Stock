@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import threading
 import time
@@ -64,7 +65,8 @@ def is_equity_code(clean: str) -> bool:
 
 def _num(v):
     try:
-        return float(str(v).replace(',', '').replace(' ', '').replace('%', ''))
+        number = float(str(v).replace(',', '').replace(' ', '').replace('%', ''))
+        return number if math.isfinite(number) else None
     except Exception:
         return None
 
@@ -169,9 +171,9 @@ def _t86_dealer(fields, row):
             self_net = _num(row[i]) if i < len(row) else None
         elif fs == '自營商買賣超股數(避險)':
             hedge_net = _num(row[i]) if i < len(row) else None
-    if self_net is None and hedge_net is None:
+    if self_net is None or hedge_net is None:
         return None
-    return (self_net or 0.0) + (hedge_net or 0.0)
+    return self_net + hedge_net
 
 
 def _margn_pair(fields, row, name):
@@ -186,14 +188,8 @@ def _margn_pair(fields, row, name):
     return a, b
 
 
-def snap_t86(tdate: str) -> Optional[Dict[str, dict]]:
-    key = f'T86:{tdate}'
-    hit, cached = _snap_get(key)
-    if hit:
-        return cached
-    url = (f'https://www.twse.com.tw/rwd/zh/fund/T86?date={tdate}'
-           f'&selectType=ALLBUT0999&response=json')
-    data = _fetch_json(url)
+def parse_t86(data):
+    """T86 單一欄位解析器，HTTP 與每日快照共用。"""
     by = None
     if data and data.get('stat') in ('OK', 'ok') and data.get('data'):
         fields = data.get('fields') or []
@@ -214,6 +210,18 @@ def snap_t86(tdate: str) -> Optional[Dict[str, dict]]:
                 'dealer':  _t86_dealer(fields, row),
                 'total':   _col(fields, row, '三大法人買賣超股數'),
             }
+    return by
+
+
+def snap_t86(tdate: str) -> Optional[Dict[str, dict]]:
+    key = f'T86:{tdate}'
+    hit, cached = _snap_get(key)
+    if hit:
+        return cached
+    url = (f'https://www.twse.com.tw/rwd/zh/fund/T86?date={tdate}'
+           f'&selectType=ALLBUT0999&response=json')
+    data = _fetch_json(url)
+    by = parse_t86(data)
     _snap_set(key, by, err=(by is None))
     return by
 

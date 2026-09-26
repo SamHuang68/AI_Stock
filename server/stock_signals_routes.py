@@ -378,6 +378,8 @@ class StockSignalsRoutesMixin:
             payload.update({k: cached.get(k) for k in
                             ('generatedAt', 'symbols', 'window', 'method', 'caveats', 'elapsedSec')})
             payload['scoreboard'] = pool.scoreboard(cached)
+            research = cached.get('research') or {}
+            payload['research'] = {k: research.get(k) for k in ('version', 'policy', 'selection', 'limitations', 'benchmarkCoverage', 'rsiRebound')}
         self._ok(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
 
     def _handle_stock_signals_pooled_refresh(self):

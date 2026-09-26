@@ -29,7 +29,8 @@ class ProtocolTests(unittest.TestCase):
         r = rpc('initialize', {'protocolVersion': '2025-06-18', 'capabilities': {}})['result']
         self.assertEqual(r['protocolVersion'], '2025-06-18')
         self.assertIn('tools', r['capabilities'])
-        self.assertIn('not investment advice', r['instructions'])
+        self.assertIn('並非投資建議', r['instructions'])
+        self.assertIn('不能宣稱已有優勢', r['instructions'])
         r = rpc('initialize', {'protocolVersion': '1999-01-01'})['result']
         self.assertEqual(r['protocolVersion'], MCP.SUPPORTED_PROTOCOLS[0])
 

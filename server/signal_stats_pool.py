@@ -10,7 +10,7 @@
 * 基準 = 同一批標的「所有交易日」的 5／20 日報酬，讓使用者看到訊號相對基準的差距，
   而不是只看一個看起來很高的上漲比例。
 * 合併樣本 < POOLED_MIN_SAMPLE（100）或貢獻標的 < MIN_SYMBOLS 不公開比例；
-  另附 95% 誤差範圍，差距落在誤差內即標示「無明顯差異」。
+  比例誤差僅為描述，不用它判定相對基準優勢。
 * 另把事件依日期切成前後兩半，列出兩段的上漲比例，作為穩定度參考（非顯著性檢定）。
 * 限制：標的清單是「目前在本機 DB 的代號」，已下市股票不在其中（存活者偏差）；
   價格未還原除權息。這兩點寫進輸出的 ``caveats``。
@@ -80,7 +80,7 @@ class _BinnedBase:
 
 def _load_all_chips(chip_dir: str) -> Dict[str, List[Dict[str, Any]]]:
     """一次讀完所有 chip_history 檔 → {code: [由舊到新]}（合併統計需要完整期間）。"""
-    out: Dict[str, List[Dict[str, Any]]] = {}
+    out: Dict[str, Dict[str, Dict[str, Any]]] = {}
     if not chip_dir or not os.path.isdir(chip_dir):
         return out
     for fn in sorted(glob.glob(os.path.join(chip_dir, '*.json'))):
@@ -97,17 +97,18 @@ def _load_all_chips(chip_dir: str) -> Dict[str, List[Dict[str, Any]]]:
         d = f'{stem[:4]}-{stem[4:6]}-{stem[6:]}'
         for code, rec in day.items():
             if isinstance(rec, dict):
-                out.setdefault(code, []).append({
-                    'date': d, 'foreign': ss._finite(rec.get('foreign')),
-                    'trust': ss._finite(rec.get('trust'))})
-    return out
+                row = ss.normalize_chip_record(rec, d)
+                if row:
+                    out.setdefault(code, {})[row['date']] = row
+    return {code: [rows[d] for d in sorted(rows)] for code, rows in out.items()}
 
 
 def compute_pooled(series: Iterable[tuple], *, market: str = 'TW',
                    horizons: Sequence[int] = ss.STAT_HORIZONS,
                    min_sample: int = POOLED_MIN_SAMPLE,
                    chips: Optional[Mapping[str, List[Dict[str, Any]]]] = None,
-                   progress: Optional[Callable[[int], None]] = None) -> Dict[str, Any]:
+                   progress: Optional[Callable[[int], None]] = None,
+                   frame_observer: Optional[Callable] = None) -> Dict[str, Any]:
     """series: 可疊代的 (code, bars)；bars 為 ``ss.normalize_bars`` 輸出。"""
     t0 = time.time()
     acc: Dict[str, Dict[int, List[Dict[str, Any]]]] = {s['id']: {h: [] for h in horizons} for s in ss.SIGNALS}
@@ -119,6 +120,8 @@ def compute_pooled(series: Iterable[tuple], *, market: str = 'TW',
             continue
         n_symbols += 1
         frame = ss.build_frame(bars, (chips or {}).get(code))
+        if frame_observer is not None:
+            frame_observer(code, frame)
         dates, closes = frame['date'], frame['close']
         last_date = max(last_date or dates[-1], dates[-1])
         first_date = min(first_date or dates[0], dates[0])
@@ -134,7 +137,7 @@ def compute_pooled(series: Iterable[tuple], *, market: str = 'TW',
             for hz in horizons:
                 outs = ss.forward_outcomes(frame, starts, hz, spec['direction'], lag)
                 for o in outs:
-                    acc[spec['id']][hz].append({'date': dates[o['t']], 'ret': o['ret'],
+                    acc[spec['id']][hz].append({'symbol': code, 'date': dates[o['t']], 'ret': o['ret'],
                                                 'adverse': o['adverse']})
                 if outs:
                     contrib[spec['id']].add(code)
@@ -146,9 +149,10 @@ def compute_pooled(series: Iterable[tuple], *, market: str = 'TW',
         for hz in horizons:
             outs = sorted(acc[spec['id']][hz], key=lambda o: o['date'])
             n, b = len(outs), base[hz]
+            horizon_symbols = len({o['symbol'] for o in outs})
             row: Dict[str, Any] = {'horizon': hz, 'n': n, 'baseN': b.n,
-                                   'symbols': len(contrib[spec['id']])}
-            if n >= min_sample and len(contrib[spec['id']]) >= MIN_SYMBOLS and b.n:
+                                   'symbols': horizon_symbols}
+            if n >= min_sample and horizon_symbols >= MIN_SYMBOLS and b.n:
                 rets = [o['ret'] for o in outs]
                 up = sum(1 for r in rets if r > 0) / n
                 base_up = b.up / b.n
@@ -163,6 +167,7 @@ def compute_pooled(series: Iterable[tuple], *, market: str = 'TW',
                     'baseMedianRet': round(b.median(), 5) if b.median() is not None else None,
                     'edgePts': round((up - base_up) * 100.0, 1),
                     'ci95Pts': ss.ci95_pts(up, n),
+                    'inference': 'descriptive',
                     'edgeVerdict': ss.edge_verdict(round((up - base_up) * 100.0, 1), ss.ci95_pts(up, n)),
                     'stability': {
                         'olderUpRatio': round(sum(1 for r in older if r > 0) / len(older), 4)
@@ -191,30 +196,65 @@ def compute_pooled(series: Iterable[tuple], *, market: str = 'TW',
         'caveats': ['標的為目前在本機日線庫的代號，已下市股票不在其中（存活者偏差）。',
                     '價格未還原除權息，除息日的跳空會被算進報酬。',
                     '穩定度只比較前後兩段的上漲比例，不是統計顯著性檢定。',
+                    '比例誤差假設獨立樣本，尚未處理事件重疊與同日股票群聚；不代表相對基準優勢。',
                     '同時比較 15 個訊號 × 2 種天數，即使全是雜訊，也常有 1～2 個因巧合落在誤差範圍外；'
                     '請同時看「前段→近段」是否一致。'],
     }
 
 
 def iter_datastore(market: str, symbols: Optional[Sequence[str]] = None,
-                   chunk: int = 200) -> Iterable[tuple]:
+                   chunk: int = 200, *, connection=None) -> Iterable[tuple]:
     """從本機 DB 分批讀日 K（沿用 datastore.get_bars_bulk，與選股同一讀取路徑）。"""
     import datastore
-    datastore.init_db()
-    codes = list(symbols) if symbols else datastore.list_symbols(market, MIN_BARS_POOL)
+    if connection is None:
+        datastore.init_db()
+    codes = list(symbols) if symbols else datastore.list_symbols(market, MIN_BARS_POOL, connection=connection)
     pattern = _TICKER_RE.get(market)
     if pattern:
         codes = [c for c in codes if pattern.match(str(c))]
     for i in range(0, len(codes), chunk):
-        bulk = datastore.get_bars_bulk(codes[i:i + chunk], market=market)
+        bulk = datastore.get_bars_bulk(codes[i:i + chunk], market=market, connection=connection)
         for code in codes[i:i + chunk]:
             yield code, ss.normalize_bars(bulk.get(code) or [], market)
+
+
+def compute_snapshot(connection, *, market='TW', symbols=None, chips=None, progress=None, now=None):
+    """既有樣本池與情境研究共用同一份指標；資料來自呼叫端的唯讀快照。"""
+    import datastore
+    current = now or datetime.now(ss._TZ.get(market, ss._TZ['TW']))
+    if current.tzinfo is None:
+        raise ValueError('研究時間必須包含時區')
+    current = current.astimezone(ss._TZ.get(market, ss._TZ['TW']))
+    today = current.date().isoformat()
+    final_time = (14, 0) if market == 'TW' else (16, 30)
+    finalized_today = (current.hour, current.minute) >= final_time
+    def finalized(bars):
+        return [b for b in bars if b['date'] < today or (b['date'] == today and finalized_today)]
+    study = None
+    if market == 'TW':
+        try:
+            from . import 個股訊號研究 as research
+        except ImportError:
+            import 個股訊號研究 as research
+        benchmark = datastore.get_bars_bulk(['^TWII'], market=market, connection=connection)
+        study = research.Study(finalized(ss.normalize_bars(benchmark.get('^TWII') or [], market)))
+    series = ((code, finalized(bars)) for code, bars in iter_datastore(market, symbols, connection=connection))
+    result = compute_pooled(series,
+                            market=market, chips=chips, progress=progress,
+                            frame_observer=study.add if study else None)
+    result['statisticsVersion'] = 2
+    result['researchAsOf'] = current.isoformat()
+    if study:
+        result['research'] = study.finish()
+    return result
 
 
 def refresh(market: str = 'TW', *, symbols: Optional[Sequence[str]] = None,
             chip_dir: Optional[str] = None, cache_file: Optional[str] = None) -> Dict[str, Any]:
     chips = _load_all_chips(chip_dir or CHIP_HISTORY_PATH) if market == 'TW' else {}
-    result = compute_pooled(iter_datastore(market, symbols), market=market, chips=chips)
+    import datastore
+    with datastore.read_snapshot() as connection:
+        result = compute_snapshot(connection, market=market, symbols=symbols, chips=chips)
     path = cache_file or CACHE_FILE
     try:
         allc = load_json(path, default={}, expected_type=dict)
@@ -239,7 +279,16 @@ def load_cached(market: str, cache_file: Optional[str] = None) -> Optional[Dict[
         except StoreCorruptError:
             return None
         _mem_mtime[path] = mtime
-    return (_mem.get(path) or {}).get(market)
+    result = (_mem.get(path) or {}).get(market)
+    if result and result.get('statisticsVersion', 1) < 2:
+        # 舊快取保留原始資料與比例，但不能繼續把比例誤差當成差距檢定。
+        for sig in (result.get('signals') or {}).values():
+            for row in sig.get('horizons') or []:
+                if row.get('gate') == 'ok':
+                    row['edgeVerdict'] = 'descriptive'
+        result.setdefault('caveats', []).append('舊版比例誤差不代表相對基準優勢；重新計算可取得情境研究。')
+        result['statisticsVersion'] = 2
+    return result
 
 
 def attach(result: Dict[str, Any], pooled: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
@@ -267,6 +316,7 @@ def scoreboard(pooled: Optional[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     if not pooled:
         return []
     rows = []
+    studies = {r['signalId']: r for r in (pooled.get('research') or {}).get('signals', [])}
     for spec in ss.SIGNALS:
         sig = (pooled.get('signals') or {}).get(spec['id'])
         if not sig:
@@ -275,6 +325,7 @@ def scoreboard(pooled: Optional[Mapping[str, Any]]) -> List[Dict[str, Any]]:
         rows.append({'signalId': spec['id'], 'label': spec['label'], 'family': spec['family'],
                      'familyLabel': ss.FAMILY_LABEL[spec['family']], 'direction': spec['direction'],
                      'directionLabel': ss.DIRECTION_LABEL[spec['direction']],
-                     'horizons': sig['horizons'], 'sortEdge': h5.get('edgePts') if h5 else None})
+                     'horizons': sig['horizons'], 'sortEdge': h5.get('edgePts') if h5 else None,
+                     'research': studies.get(spec['id'])})
     rows.sort(key=lambda r: (r['sortEdge'] is None, -(abs(r['sortEdge']) if r['sortEdge'] is not None else 0)))
     return rows

@@ -36,13 +36,11 @@ TIMEOUT = float(os.environ.get('ST_MCP_TIMEOUT', '60'))
 _SYM_RE = re.compile(r'^[A-Za-z0-9^][A-Za-z0-9.\-^]{0,14}$')
 
 INSTRUCTIONS = (
-    'Stock Terminal (ST) read-only research data for Taiwan and US equities. Outputs are '
-    'rule-based facts (signals, health lights, invalidation levels) and point-in-time historical '
-    'statistics — not investment advice. When you summarise them: cite the evidence ids or field '
-    'names you rely on, copy numbers exactly, say "sample insufficient" when gate is insufficient '
-    'and "within noise" when edgeVerdict is noise, always state the invalidation condition, and '
-    'never turn them into buy/sell instructions or price targets. Taiwan colour convention: red = '
-    'up, green = down.'
+    'Stock Terminal 提供臺股與美股的規則化事實及歷史研究，並非投資建議。'
+    '請引用證據編號或欄位名稱，精確保留數字與失效條件。gate 為 insufficient 時說明樣本不足；'
+    'edgeVerdict 為 descriptive 時只能說明歷史差距，不能宣稱已有優勢。'
+    '情境研究的季度區間屬探索結果，未校正多重比較；候選仍待前瞻驗證。'
+    '一般歷史快照重建不能稱為當年實際留存的點時證據。不得產生買賣指令或目標價。臺灣以紅色表示上漲、綠色表示下跌。'
 )
 
 
@@ -160,8 +158,10 @@ def tool_signal_scoreboard(args):
         return {'market': market, 'available': False,
                 'hint': 'Pooled statistics not computed yet; open ST 體檢 tab → 訊號成績單 → 開始計算.'}
     rows = [{'signalId': r['signalId'], 'label': r['label'], 'direction': r['direction'],
-             'horizons': _stats_brief({'horizons': r['horizons']})} for r in d.get('scoreboard') or []]
-    out = {k: d.get(k) for k in ('market', 'symbols', 'window', 'generatedAt', 'minSample', 'caveats')}
+             'horizons': _stats_brief({'horizons': r['horizons']}),
+             'research5d': next((h.get('all') for h in (r.get('research') or {}).get('horizons', [])
+                                if h.get('horizon') == 5), None)} for r in d.get('scoreboard') or []]
+    out = {k: d.get(k) for k in ('market', 'symbols', 'window', 'generatedAt', 'minSample', 'caveats', 'research')}
     out['scoreboard'] = rows
     return out
 

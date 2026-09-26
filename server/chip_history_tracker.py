@@ -26,64 +26,74 @@ def fetch_t86(day):
         return json.loads(resp.read())
 
 
+def record_snapshot(code, payload, directory=CHIP_HISTORY_PATH):
+    """逐檔查詢也按可證明的來源日保存，不能把休市日讀取當成新交易日。"""
+    from datetime import datetime
+    from atomic_store import atomic_write_json, load_json
+    inst = (payload or {}).get('inst') or {}
+    if inst.get('total') is None:
+        return False
+    # TPEx 的原回應尚未帶其自身交易日，不能借用 T86 日期寫入。
+    if payload.get('_chipSource') == 'TPEx':
+        return False
+    raw_day = str(payload.get('date') or '')
+    try:
+        source_day = datetime.strptime(raw_day, '%Y%m%d').date()
+    except ValueError:
+        return False
+    if source_day > date.today() or source_day.weekday() >= 5:
+        return False
+    fn = os.path.join(directory, raw_day + '.json')
+    old = load_json(fn, default={}, expected_type=dict)
+    values = {key: inst.get(key) for key in ('foreign', 'trust', 'dealer', 'total')}
+    # 查詢缺值不得抹掉先前的完整全市場快照。
+    old[code] = {**(old.get(code) or {}), **{k: v for k, v in values.items() if v is not None},
+                 'sourceDate': source_day.isoformat(), 'source': 'TWSE/T86', 'unit': 'shares'}
+    atomic_write_json(fn, old, backup=True, indent=None)
+    return True
+
+
 def parse_and_save(day):
     data = fetch_t86(day)
     if data.get('stat') not in ('OK', 'ok'):
         print(f'[chip-tracker] {day} no data (stat={data.get("stat")}) — 非交易日?')
         return 0
-    fields = data.get('fields') or []
-    rows = data.get('data') or []
-    idx_code = next((i for i, f in enumerate(fields) if '證券代號' in f), 0)
-
-    def col_idx(keyword, *, exact=False, avoid=()):
-        for i, f in enumerate(fields):
-            fs = str(f).strip()
-            if avoid and any(a in fs for a in avoid):
-                continue
-            if exact:
-                if fs == keyword:
-                    return i
-            elif keyword in fs:
-                return i
-        return None
-
-    i_for = col_idx('外陸資買賣超股數(不含外資自營商)', exact=True) \
-        or col_idx('外陸資買賣超股數') or col_idx('外資', avoid=('外資自營商',))
-    i_trust = col_idx('投信買賣超股數') or col_idx('投信')
-    # 必須完全相符，否則會誤中『外資自營商買賣超股數』
-    i_deal = col_idx('自營商買賣超股數', exact=True)
-    i_tot = col_idx('三大法人買賣超股數', exact=True) or col_idx('三大法人買賣超股數')
-
-    def num(row, i):
-        if i is None:
-            return None
-        try:
-            return float(str(row[i]).replace(',', '').replace(' ', ''))
-        except Exception:
-            return None
-
-    out = {}
-    for row in rows:
-        code = str(row[idx_code]).strip()
-        if not code:
-            continue
-        out[code] = {
-            'foreign': num(row, i_for), 'trust': num(row, i_trust),
-            'dealer': num(row, i_deal), 'total': num(row, i_tot),
-        }
+    from chip_api import parse_t86
+    from atomic_store import atomic_write_json, load_json
+    from datetime import datetime, timezone
+    parsed = parse_t86(data)
+    source_day = str(data.get('date') or '').replace('-', '')
+    if source_day != day:
+        raise ValueError('來源交易日與請求不符，拒絕寫入籌碼快照')
+    datetime.strptime(source_day, '%Y%m%d')
+    if not parsed:
+        return 0
+    if any(any(values.get(k) is None for k in ('foreign', 'trust', 'dealer', 'total'))
+           for values in parsed.values()):
+        raise ValueError('來源必要欄位不完整，保留既有籌碼快照')
     os.makedirs(CHIP_HISTORY_PATH, exist_ok=True)
     fn = os.path.join(CHIP_HISTORY_PATH, day + '.json')
-    with open(fn, 'w', encoding='utf-8') as f:
-        json.dump(out, f, ensure_ascii=False)
-    print(f'[chip-tracker] {day}: saved {len(out)} stocks -> {fn}')
+    out = load_json(fn, default={}, expected_type=dict)
+    stamp = datetime.now(timezone.utc).isoformat()
+    for code, values in parsed.items():
+        out[code] = {**(out.get(code) or {}), **values,
+                     'sourceDate': f'{day[:4]}-{day[4:6]}-{day[6:]}',
+                     'source': 'TWSE/T86', 'unit': 'shares', 'fetchedAt': stamp}
+    atomic_write_json(fn, out, backup=True)
+    print(f'[籌碼快照] {day}：已更新 {len(parsed)} 檔上市資料')
     try:
-        from touxin_ledger import ingest_chip_history_file
-        n_ledger = ingest_chip_history_file(fn, source='chip_history/T86')
+        from touxin_ledger import append_rows
+        n_ledger = append_rows([
+            {'symbol': code, 'session_date': out[code]['sourceDate'],
+             'trust_net_shares': values['trust'], 'volume_shares': None,
+             'source': 'chip_history/T86', 'ingested_at': stamp}
+            for code, values in parsed.items()
+        ], base_dir=os.path.dirname(os.path.dirname(CHIP_HISTORY_PATH)))
         if n_ledger:
             print(f'[chip-tracker] {day}: appended {n_ledger} touxin ledger rows')
     except Exception as exc:
-        print(f'[chip-tracker] touxin ledger append skipped: {exc}')
-    return len(out)
+        raise RuntimeError('籌碼快照已寫入，但投信帳本追加失敗，需重試') from exc
+    return len(parsed)
 
 
 if __name__ == '__main__':

@@ -116,13 +116,27 @@ def normalize_bars(rows: Iterable[Any], market: str = 'TW') -> List[Dict[str, An
 
 
 # ── 籌碼歷史（沿用 data/chip_history/<yyyymmdd>.json，與 server._chip_streak 同源）──
+def normalize_chip_record(record: Mapping[str, Any], snapshot_date: str) -> Optional[Dict[str, Any]]:
+    """籌碼依明示來源日對齊；休市日的重複快照不成為新的交易日。"""
+    source_date = record.get('sourceDate') or snapshot_date
+    try:
+        source_date = date.fromisoformat(str(source_date)).isoformat()
+    except (TypeError, ValueError):
+        return None
+    if source_date > snapshot_date:
+        return None
+    return {'date': source_date, 'snapshotDate': snapshot_date,
+            'sourceDate': source_date, 'source': record.get('source'), 'unit': record.get('unit'),
+            **{key: _finite(record.get(key)) for key in ('foreign', 'trust', 'dealer', 'total')}}
+
+
 def load_chip_series(code: str, chip_dir: str, days: int = 60) -> List[Dict[str, Any]]:
     """由新到舊讀最近 ``days`` 個 chip_history 檔，回傳由舊到新的
     [{date, foreign, trust, dealer, total}]；該日沒有此代號就略過（不補 0）。"""
     if not code or not chip_dir or not os.path.isdir(chip_dir):
         return []
     files = sorted(glob.glob(os.path.join(chip_dir, '*.json')), reverse=True)[:days]
-    out: List[Dict[str, Any]] = []
+    by_date: Dict[str, Dict[str, Any]] = {}
     for fn in files:
         stem = os.path.splitext(os.path.basename(fn))[0]
         if len(stem) != 8 or not stem.isdigit():
@@ -135,15 +149,11 @@ def load_chip_series(code: str, chip_dir: str, days: int = 60) -> List[Dict[str,
         rec = day.get(code) if isinstance(day, dict) else None
         if not isinstance(rec, dict):
             continue
-        out.append({
-            'date': f'{stem[:4]}-{stem[4:6]}-{stem[6:]}',
-            'foreign': _finite(rec.get('foreign')),
-            'trust': _finite(rec.get('trust')),
-            'dealer': _finite(rec.get('dealer')),
-            'total': _finite(rec.get('total')),
-        })
-    out.reverse()
-    return out
+        row = normalize_chip_record(rec, f'{stem[:4]}-{stem[4:6]}-{stem[6:]}')
+        if row:
+            # 由新到舊讀取，同一來源日保留最新快照，不覆寫為較舊版本。
+            by_date.setdefault(row['date'], row)
+    return [by_date[d] for d in sorted(by_date)]
 
 
 def chip_streaks(series: Sequence[Mapping[str, Any]]) -> Dict[str, int]:
@@ -568,6 +578,18 @@ def recent_events(frame: Mapping[str, List[Any]], lookback: int = EVENT_LOOKBACK
             'status': status, 'statusLabel': status_label, 'statusDate': life['statusDate'],
             'provisional': bool(provisional_last and ev['index'] == last),
             'detail': ev['detail'], 'plain': spec['plain'],
+            'rule': spec['rule'],
+            'audit': {
+                'evaluatedThrough': frame['date'][last],
+                'statusProvisional': bool(provisional_last),
+                'confirmationBars': CONFIRM_BARS,
+                'statCooldownBars': STAT_COOLDOWN_BARS,
+                'triggerValues': {key: {'before': frame[key][ev['index'] - 1],
+                                        'at': frame[key][ev['index']]}
+                                  for key in ('close', 'sma20', 'sma60', 'rsi', 'macd_hist',
+                                              'volx', 'atr', 'trust', 'foreign')},
+                'note': '依目前歷史快照重建；不是當時推播或首次觀測的稽核紀錄。',
+            },
             'invalidation': {
                 'text': spec['invalidText'],
                 'level': round(lvl, 4) if lvl is not None else None,
@@ -581,18 +603,20 @@ def recent_events(frame: Mapping[str, List[Any]], lookback: int = EVENT_LOOKBACK
 
 # ── 歷史統計（P2）─────────────────────────────────────────────
 def ci95_pts(p: float, n: int) -> Optional[float]:
-    """上漲比例的 95% 常態近似誤差半寬（百分點）；讓 UI 能說「差距小於誤差，視為無明顯差異」。"""
+    """比例的 Wilson 區間最大半寬；僅作獨立樣本假設下的描述，不判定優勢。"""
     if n <= 0:
         return None
-    return round(1.96 * math.sqrt(max(0.0, p * (1.0 - p)) / n) * 100.0, 1)
+    z2 = 1.96 ** 2
+    center = (p + z2 / (2 * n)) / (1 + z2 / n)
+    half = 1.96 * math.sqrt(p * (1 - p) / n + z2 / (4 * n * n)) / (1 + z2 / n)
+    return round((abs(center - p) + half) * 100, 1)
 
 
 def edge_verdict(edge_pts: Optional[float], ci_pts: Optional[float]) -> Optional[str]:
     if edge_pts is None or ci_pts is None:
         return None
-    if abs(edge_pts) <= ci_pts:
-        return 'noise'
-    return 'above' if edge_pts > 0 else 'below'
+    # 比例區間不等於兩組差距區間；重疊行情與同日股票亦非獨立樣本。
+    return 'descriptive'
 
 
 def _median(vals: Sequence[float]) -> Optional[float]:
@@ -666,12 +690,22 @@ def signal_stats(frame: Mapping[str, List[Any]], spec: Mapping[str, Any],
                 'baseMedianRet': round(_median(base), 5),
                 'edgePts': round((up - base_up) * 100.0, 1),
                 'ci95Pts': ci95_pts(up, n),
+                'inference': 'descriptive',
+                'distribution': {
+                    'p10': round(sorted(rets)[int((n - 1) * .1)], 5),
+                    'p50': round(_median(rets), 5),
+                    'p90': round(sorted(rets)[int((n - 1) * .9)], 5),
+                    'worst': round(min(rets), 5),
+                },
+                'window': {'from': frame['date'][outs[0]['t']],
+                           'to': frame['date'][outs[-1]['t']]},
             })
             row['edgeVerdict'] = edge_verdict(row['edgePts'], row['ci95Pts'])
         else:
             row.update({'gate': 'insufficient', 'upRatio': None, 'medianRet': None,
                         'medianAdverse': None, 'baseUpRatio': None, 'baseMedianRet': None,
                         'edgePts': None, 'ci95Pts': None, 'edgeVerdict': None})
+            row['distribution'] = None
         rows.append(row)
     return {
         'signalId': spec['id'], 'epistemic': EPISTEMIC_STATS,
@@ -680,7 +714,8 @@ def signal_stats(frame: Mapping[str, List[Any]], spec: Mapping[str, Any],
                    'to': frame['date'][-1] if n_bars else None, 'bars': n_bars},
         'method': ('本檔歷史逐根判斷（只用當根以前資料）；進場價 = 觸發日'
                    + ('次一交易日' if lag else '') + '收盤；只統計已走完天數的樣本；'
-                   f'同訊號觸發間隔至少 {STAT_COOLDOWN_BARS} 根；樣本 < {min_sample} 不公開比例。'),
+                   f'同訊號觸發間隔至少 {STAT_COOLDOWN_BARS} 根；樣本 < {min_sample} 不公開比例。'
+                   '比例誤差僅為獨立樣本假設下的描述，未處理事件相依，不代表相對基準優勢。'),
     }
 
 
@@ -868,7 +903,9 @@ def analyze(bars: Sequence[Mapping[str, Any]], *, symbol: str, market: str = 'TW
             provisional_last: bool = False, with_stats: bool = True,
             as_of_note: Optional[str] = None) -> Dict[str, Any]:
     """bars 為 ``normalize_bars`` 輸出（由舊到新）。回傳完整個股體檢契約。"""
-    chips = list(chips or [])
+    # 舊快照可能以休市日保存日期命名；未對齊個股實際日 K 的列不能增加連買賣天數。
+    sessions = {b['date'] for b in bars}
+    chips = [row for row in (chips or []) if row.get('date') in sessions]
     base = {
         'contractVersion': CONTRACT_VERSION, 'engine': ENGINE_ID, 'symbol': symbol,
         'market': market, 'epistemic': {'events': EPISTEMIC_EVENTS, 'stats': EPISTEMIC_STATS},
@@ -886,10 +923,11 @@ def analyze(bars: Sequence[Mapping[str, Any]], *, symbol: str, market: str = 'TW
     events = recent_events(frame, provisional_last=provisional_last)
     stats: Dict[str, Any] = {}
     if with_stats:
+        stats_frame = {key: values[:-1] for key, values in frame.items()} if provisional_last else frame
         wanted = {e['signalId'] for e in events}
         for spec in SIGNALS:
             if spec['id'] in wanted:
-                stats[spec['id']] = signal_stats(frame, spec)
+                stats[spec['id']] = signal_stats(stats_frame, spec)
         for e in events:
             e['stats'] = stats.get(e['signalId'])
     c, cp = frame['close'][i], frame['close'][i - 1]
@@ -956,7 +994,7 @@ def build_evidence(result: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
         for row in st.get('horizons') or []:
             ev[f"stats.{e['signalId']}.h{row['horizon']}"] = {
                 'label': f"{e['label']}：之後 {row['horizon']} 日統計", 'value': row,
-                'asOf': as_of, 'epistemic': EPISTEMIC_STATS}
+                'asOf': (st.get('window') or {}).get('to', as_of), 'epistemic': EPISTEMIC_STATS}
     return ev
 
 

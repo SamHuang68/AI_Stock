@@ -34,11 +34,13 @@ def make_bars(seed, n=400):
 
 class ConfidenceTests(unittest.TestCase):
     def test_ci95_and_verdict(self):
-        self.assertAlmostEqual(ss.ci95_pts(0.5, 100), 9.8)
+        self.assertAlmostEqual(ss.ci95_pts(0.5, 100), 9.6)
         self.assertIsNone(ss.ci95_pts(0.5, 0))
-        self.assertEqual(ss.edge_verdict(3.0, 9.8), 'noise')
-        self.assertEqual(ss.edge_verdict(12.0, 9.8), 'above')
-        self.assertEqual(ss.edge_verdict(-12.0, 9.8), 'below')
+        self.assertEqual(ss.edge_verdict(3.0, 9.8), 'descriptive')
+        self.assertEqual(ss.edge_verdict(12.0, 9.8), 'descriptive')
+        self.assertEqual(ss.edge_verdict(-12.0, 9.8), 'descriptive')
+        self.assertGreater(ss.ci95_pts(0, 20), 0)
+        self.assertGreater(ss.ci95_pts(1, 20), 0)
         self.assertIsNone(ss.edge_verdict(None, 9.8))
 
 
@@ -67,7 +69,7 @@ class PooledTests(unittest.TestCase):
                 if row['gate'] == 'ok':
                     self.assertGreaterEqual(row['n'], pool.POOLED_MIN_SAMPLE)
                     self.assertGreaterEqual(row['symbols'], pool.MIN_SYMBOLS)
-                    self.assertIn(row['edgeVerdict'], ('above', 'below', 'noise'))
+                    self.assertEqual(row['edgeVerdict'], 'descriptive')
                     self.assertAlmostEqual(row['edgePts'], round((row['upRatio'] - row['baseUpRatio']) * 100, 1),
                                            places=1)
                 else:

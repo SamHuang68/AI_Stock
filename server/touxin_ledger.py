@@ -153,7 +153,7 @@ def normalize_row(
         row.get('session_date') or row.get('sessionDate') or ''
     )
     trust = _finite_number(
-        row.get('trust_net_shares') or row.get('trustNetShares'),
+        row.get('trust_net_shares') if 'trust_net_shares' in row else row.get('trustNetShares'),
         'trust_net_shares',
         allow_negative=True,
     )

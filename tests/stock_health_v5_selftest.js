@@ -64,6 +64,13 @@ ok(advanced.includes('報酬中位數'), 'advanced shows median and adverse move
 
 const pro = H.cardHtml(fixture, 'pro', null);
 ok(pro.includes('SMA5 / 20 / 60') && pro.includes('方法：'), 'pro shows indicators and stats method');
+ok(pro.includes('專業檢視：事件、分布與證據') && pro.includes('原始證據表') && !advanced.includes('原始證據表'), '專業模式具有進階模式沒有的證據檢視');
+ok(pro.includes('aria-pressed="true"') && pro.includes('觸發前後數值'), '閱讀深度按鈕具有選取語意且表格可捲動');
+fixture.events[0].stats.horizons[0].distribution = { p10: -.03, p50: -.004, p90: .06, worst: -.08 };
+ok(H.cardHtml(fixture, 'pro').includes('第 10／50／90 百分位'), '專業模式呈現後端分布');
+fixture.events[0].stats.horizons[0].gate = 'insufficient';
+ok(!H.cardHtml(fixture, 'pro').includes('第 10／50／90 百分位'), '不足樣本即使有數值也不得顯示分布');
+fixture.events[0].stats.horizons[0].gate = 'ok';
 
 for (const html of [beginner, advanced, pro]) {
   ok(!/買進|賣出|保證獲利/.test(html), 'no buy/sell directives in rendered card');
@@ -91,6 +98,18 @@ const sb = H.scoreboardHtml({ available: true, symbols: 1800, minSample: 100, mi
       stability: { olderUpRatio: 0.6, recentUpRatio: 0.56 } },
     { horizon: 20, n: 4100, gate: 'insufficient' }] }] });
 ok(sb.includes('高於基準') && sb.includes('60% → 56%') && sb.includes('存活者偏差'), 'scoreboard shows verdict, stability and caveats');
+
+const described = { stats: { minSample: 20, horizons: [{ horizon: 5, n: 60, gate: 'ok', upRatio: 0.9,
+  baseUpRatio: 0.5, ci95Pts: 8.2, edgePts: 40, edgeVerdict: 'descriptive' }] } };
+ok(H.statsLine(described, 'beginner').includes('尚未驗證優勢'), '描述差距不冒稱統計優勢');
+const researched = H.scoreboardHtml({ available: true, symbols: 20, scoreboard: [{
+  label: '測試訊號', familyLabel: '量價', directionLabel: '偏多', horizons: [{ horizon: 5, n: 100, gate: 'ok',
+    upRatio: .6, baseUpRatio: .5, edgePts: 10, edgeVerdict: 'descriptive' }],
+  research: { horizons: [{ horizon: 5, all: { n: 100, quarters: 10, meanDeltaRet: .9, blockMeanDeltaRet: .01, deltaRetCI95: [-.01, .02] } }] }
+}], research: { selection: { reason: '沒有候選 <script>' } } });
+ok(researched.includes('100 次／10 季') && researched.includes('季度差距區間'), '研究顯示有效時間區塊及差距區間');
+ok(researched.includes('季度等權差距 1.00%') && !researched.includes('90.00%'), '區間與平均使用相同季度權重');
+ok(researched.includes('沒有候選 &lt;script&gt;') && researched.includes('未校正多重比較'), '空候選與探索限制保持可見並跳脫文字');
 
 H.setMode('pro');
 ok(H.getMode() === 'pro', 'mode persists');

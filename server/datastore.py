@@ -16,7 +16,8 @@ CLI（在專案根目錄跑）:
   python server\\datastore.py stats                 # DB 概況
 """
 import os, sys, json, time, sqlite3, urllib.request, urllib.error, random, threading, tempfile
-from contextlib import closing
+from contextlib import closing, nullcontext, contextmanager
+from pathlib import Path
 
 # 進程內全域寫入鎖
 _db_write_lock = threading.Lock()
@@ -49,6 +50,18 @@ def get_conn():
     conn.execute('PRAGMA journal_mode=WAL')     # 並發讀寫
     conn.execute('PRAGMA synchronous=NORMAL')
     return conn
+
+
+@contextmanager
+def read_snapshot(path=None):
+    """唯讀一致性交易；研究不建表、不遷移、不更動正式資料庫設定。"""
+    conn = sqlite3.connect(Path(path or DB_PATH).resolve().as_uri() + '?mode=ro', uri=True, timeout=30)
+    try:
+        conn.execute('PRAGMA query_only=ON')
+        conn.execute('BEGIN')
+        yield conn
+    finally:
+        conn.close()
 
 def _table_exists(conn, table):
     return conn.execute(
@@ -267,14 +280,14 @@ def backfill_universe(market='TW', rng='5y', workers=4, resume=True):
         print('  提示:仍失敗多半是限流或無 Yahoo 資料的代號;再跑一次同指令會「只補剩餘」(resume),'
               '幾次後就收斂。限流嚴重可降併發:backfill-universe 5y 2')
 
-def get_bars_bulk(codes, market='TW'):
+def get_bars_bulk(codes, market='TW', *, connection=None):
     """一次取多檔 bars,回傳 {code: [(ts,o,h,l,c,v),...]} (依時間排序)。
        單一查詢,避免逐檔開連線 → 選股全宇集讀取秒級。"""
     codes = [str(c) for c in codes]
     if not codes:
         return {}
     out = {c: [] for c in codes}
-    with closing(get_conn()) as conn:
+    with (nullcontext(connection) if connection is not None else closing(get_conn())) as conn:
         for i in range(0, len(codes), 800):          # 分批避開 SQLite 變數上限
             chunk = codes[i:i + 800]
             ph = ','.join('?' * len(chunk))
@@ -287,9 +300,9 @@ def get_bars_bulk(codes, market='TW'):
                     lst.append((ts, o, h, l, c, v))
     return out
 
-def list_symbols(market='TW', min_bars=1):
+def list_symbols(market='TW', min_bars=1, *, connection=None):
     """本機 DB 內此市場、至少 min_bars 根日 K 的代號(依代號排序);供全市場統計等批次讀取。"""
-    with closing(get_conn()) as conn:
+    with (nullcontext(connection) if connection is not None else closing(get_conn())) as conn:
         rows = conn.execute(
             'SELECT symbol FROM bars WHERE market=? GROUP BY symbol HAVING COUNT(*) >= ? ORDER BY symbol',
             (market, int(min_bars))).fetchall()
@@ -301,9 +314,22 @@ def last_ts(sym, market='TW'):
     return r[0] if r and r[0] else None
 
 def update(sym, market='TW'):
-    """增量更新:已有資料 → 只抓近 1 個月補上(便宜);沒資料 → 全回補 10 年。"""
-    if last_ts(sym, market):
-        n = upsert_bars(sym, market, fetch_yahoo_daily(sym, market, '1mo'))
+    """依停更天數選取補抓期間，避免固定一個月留下歷史缺口。"""
+    latest = last_ts(sym, market)
+    if latest:
+        days = max(0, (time.time() - latest) / 86400)
+        rng = next((r for limit, r in ((20, '1mo'), (75, '3mo'), (150, '6mo'),
+                                      (330, '1y'), (690, '2y'), (1700, '5y')) if days <= limit), '10y')
+        rows = fetch_yahoo_daily(sym, market, rng)
+        # 盤中資料仍由 API 回傳記憶體暫定值，不寫入歷史日線庫。
+        from stock_signals import _TZ, bar_date
+        from datetime import datetime
+        local = datetime.now(_TZ.get(market, _TZ['TW']))
+        final_time = (14, 0) if market == 'TW' else (16, 30)
+        rows = [row for row in rows if bar_date(row[0], market) < local.date().isoformat()
+                or (bar_date(row[0], market) == local.date().isoformat()
+                    and (local.hour, local.minute) >= final_time)]
+        n = upsert_bars(sym, market, rows)
         print(f'[db] {sym}.{market}: refreshed {n} recent bars')
         return n
     return backfill(sym, market)
