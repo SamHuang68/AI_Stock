@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -29,6 +30,32 @@ class LauncherSafetyTests(unittest.TestCase):
         self.assertNotRegex(go_text, r'(?m)^\s*git\s+')
         self.assertIn(':18432', start_text)
         self.assertNotIn('taskkill /im python', start_text)
+
+    def test_stop_private_web_stops_isolated_host_from_any_folder(self):
+        text = (ROOT / 'STOP_PRIVATE_WEB.cmd').read_bytes().decode('ascii')
+        low = text.lower()
+        # The promoted copy's supervisor restarts gateway/backend unless it is stopped
+        # first; run from the dev folder the script must still find its pid file.
+        self.assertIn(r'%localappdata%\stockterminalprivateweb\current', low)
+        self.assertIn('*private_web_host.py*', low)
+        host = low.index('private_web_host.pid')
+        self.assertLess(host, low.index('*private_web_host.py*'))
+        self.assertLess(low.index('*private_web_host.py*'), low.index('private_web_gateway.pid'))
+        self.assertLess(low.index('private_web_gateway.pid'), low.index('for %%p in'))
+        # Only the private ports are swept; development ST :18432 is never killed.
+        self.assertEqual(set(re.findall(r'for %%p in \(([^)]*)\)', low)), {'18434 18435'})
+        code = '\n'.join(l for l in low.splitlines() if not l.strip().startswith('rem '))
+        self.assertNotIn('taskkill /im', code)
+        self.assertNotIn('server.py', code)
+        # A stale pid file (e.g. after a reboot) must not kill an unrelated process.
+        self.assertEqual(low.count('tasklist /fi "pid eq !st_web_pid!"'), 2)
+        self.assertEqual(low.count('if /i "%%i"=="python.exe" taskkill /pid !st_web_pid!'), 2)
+        # The promoted copy is exported with LF endings, where cmd label lookup is
+        # unreliable, and !vars! are not expanded inside pipes: no labels, no piped pids.
+        self.assertNotRegex(code, r'(?m)^\s*:|\bcall :|\bgoto ')
+        self.assertNotRegex(code, r'!st_web_pid![^\n]*\|')
+        self.assertIn('still listening', low)
+        self.assertIn('exit /b 1', low)
 
     def test_etf_scheduler_uses_pinned_python_shared_history_and_health_gate(self):
         wrapper = (ROOT / 'scripts' / 'daily_etf.bat').read_bytes()

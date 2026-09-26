@@ -281,3 +281,10 @@ Stop the private Gateway/host without touching development ST on `18432`:
 ```powershell
 .\STOP_PRIVATE_WEB.cmd
 ```
+
+It works from either the development folder or the promoted `current` copy.
+The isolated-host supervisor restarts its gateway/backend when they exit, so
+the script stops it first: via its pid file in either copy (only while that pid
+is still a Python process), then by matching `private_web_host.py` on the
+command line for other install roots. It then sweeps ports `18434`/`18435` and
+exits with code 1, naming the process, if either port is still listening.
