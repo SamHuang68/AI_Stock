@@ -373,6 +373,11 @@ READ_GET_EXACT = {
     "/signals/history",
     "/signals/performance",
     "/research/overnight-intraday",
+    "/research/conditional-expectation",
+    "/research/peak-observation",
+    "/research/peak-observation-100d",
+    "/research/touxin-5d-netbuy",
+    "/features",  # public flag booleans + env names; UI falls back to defaults without it
     "/options/txo/structure",
     "/options/txo/history",
     "/key-levels",
@@ -423,6 +428,7 @@ OWNER_GET_EXACT = {
     "/api/llm-gate",
     "/stock-signals/push-config",
     "/stock-signals/digest/preview",
+    "/api/ai/postmarket-daily/latest",  # owner's saved watchlist narrative
 }
 OWNER_GET_PREFIXES = ("/draw/",)
 
@@ -437,7 +443,6 @@ CONTROL_POST_EXACT = {
     "/chain-momentum",
     "/ai/local",
     "/ai/deep",
-    "/ai-report",
     "/api/ai/postmarket-daily",
     "/api/ai/postmarket-daily/abort",
     "/etf-reason",
@@ -650,11 +655,11 @@ class Settings:
                 minimum=1024, maximum=8_388_608,
             ),
             read_rate_per_minute=_env_int(
-                "ST_WEB_READ_RATE", int(cfg.get("read_rate_per_minute") or 240),
+                "ST_WEB_READ_RATE", int(cfg.get("read_rate_per_minute") or 600),
                 minimum=10, maximum=5000,
             ),
             write_rate_per_minute=_env_int(
-                "ST_WEB_WRITE_RATE", int(cfg.get("write_rate_per_minute") or 30),
+                "ST_WEB_WRITE_RATE", int(cfg.get("write_rate_per_minute") or 60),
                 minimum=1, maximum=600,
             ),
             upstream_timeout_seconds=_env_int(
@@ -676,6 +681,14 @@ class Settings:
             instance_id=instance_id,
             mode=mode,
         )
+
+
+# Budgets that must not compete with market data or real writes.  One dashboard
+# load fans out ~170 requests (≈35 of them static UI files), so a phone reload over
+# Tailscale used to exhaust the shared read budget and 429 the data panels.
+STATIC_RATE_PER_MINUTE = 1200
+TELEMETRY_RATE_PER_MINUTE = 120
+TELEMETRY_POST_PATHS = {"/gateway/client-log", "/diagnostics/ui-route"}
 
 
 class WindowRateLimiter:
@@ -1151,6 +1164,16 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             self._rid = value
         return value
 
+    def _rate_bucket(self, path: str) -> tuple[str, int]:
+        """Static UI files and browser telemetry get their own budgets."""
+        if self.command in {"GET", "HEAD"} and (path in STATIC_EXACT or path.startswith(STATIC_PREFIXES)):
+            return "static", STATIC_RATE_PER_MINUTE
+        if self.command == "POST":
+            if path in TELEMETRY_POST_PATHS:
+                return "telemetry", TELEMETRY_RATE_PER_MINUTE
+            return "write", self.settings.write_rate_per_minute
+        return "read", self.settings.read_rate_per_minute
+
     def _client_identity(self) -> str:
         peer = self.client_address[0]
         if peer in {"127.0.0.1", "::1"}:
@@ -1593,8 +1616,7 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             else:
                 self._json(401, {"error": "authentication required"})
             return
-        bucket = "write" if self.command == "POST" else "read"
-        limit = self.settings.write_rate_per_minute if bucket == "write" else self.settings.read_rate_per_minute
+        bucket, limit = self._rate_bucket(path)
         if not self.server.rate_limiter.allow(self._client_identity(), bucket, limit):  # type: ignore[attr-defined]
             self._audit("rate_limited", 429, role)
             self._json(429, {"error": "rate limit exceeded"})

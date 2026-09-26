@@ -179,58 +179,6 @@ class AiRoutesMixin:
             payload = {'ok': False, 'error': 'AI runtime status: ' + type(exc).__name__, 'modes': {}}
         self._ok(json.dumps(payload, ensure_ascii=False).encode())
 
-    def _handle_ai_report(self):
-        try:
-            body = read_json_body(self, max_bytes=512 * 1024)
-        except BodyReadError as e:
-            self._err(str(e), e.status); return
-        api_key = body.get('apiKey', '').strip() or ai_api.load_ai_key()
-        if not api_key:
-            self._err('apiKey required (use sk-ant-...)', 400); return
-        positions = body.get('positions') or {}
-        watches = body.get('watches') or {}
-        market = body.get('marketSym') or '^TWII'
-        pos_lines = []
-        for code, p in positions.items():
-            pos_lines.append(
-                f"  - {code}: 進場 {p.get('entry')}、{p.get('shares')} 股、"
-                f"停利 {p.get('target') or '無'}、停損 {p.get('stop') or '無'}、現價 {p.get('lastPrice') or '?'}"
-            )
-        watch_lines = []
-        for code, w in watches.items():
-            sigs = w.get('signals', []) if isinstance(w, dict) else []
-            triggered = [s for s in sigs if s.get('lastEval', {}).get('status') == 'trigger']
-            watch_lines.append(f"  - {code}: {len(sigs)} 訊號、{len(triggered)} 觸發")
-        prompt = (
-            f'你是專業台股研究分析師。請為這個人撰寫今日盤前簡報。\n\n'
-            f'# 持倉清單\n' + ('\n'.join(pos_lines) if pos_lines else '  (無)') + '\n\n'
-            f'# 觀察清單\n' + ('\n'.join(watch_lines) if watch_lines else '  (無)') + '\n\n'
-            f'請輸出 Markdown 格式報告，含：\n'
-            f'1. 📊 大盤總結（基於昨日 {market} 表現）\n'
-            f'2. 💼 持倉檢視（每檔含表現、注意事項、行動建議）\n'
-            f'3. 👁 觀察清單重點（觸發訊號分析）\n'
-            f'4. 🎯 今日 3 大重點\n\n'
-            f'語言：繁體中文、口語化、有觀點。長度約 500~800 字。\n\n'
-            f'【重要】股票一律以「代號」為準（上面清單給的就是正確代號）。'
-            f'提到公司名稱時務必與代號正確對應；若你不百分之百確定某代號對應的公司名稱，'
-            f'就只用代號稱呼，嚴禁臆測或填入可能錯誤的名稱（例如不可把 2408 寫成旺宏）。'
-        )
-        try:
-            text, data = ai_api.anthropic_messages(
-                api_key, [{'role': 'user', 'content': prompt}], max_tokens=2048,
-            )
-            try:
-                import wavedeck_bus as wdb
-                wdb.record_st_cloud(usd=0.04, calls=1)
-            except Exception:
-                pass
-            self._ok(json.dumps({'ok': True, 'report': text, 'model': data.get('model')}).encode())
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode('utf-8', 'replace')
-            self._err(f'Anthropic API HTTP {e.code}: {err_body[:500]}', 502)
-        except Exception as e:
-            self._err('AI report failed: ' + str(e), 500)
-
     # ── 盤後敘事日報（postmarket-daily）────────────────────────────────
     # 紅線見 docs/POSTMARKET_DAILY.md：雲端 Claude only、不 fallback 本機 deep、
     # 不 mutate ST 狀態、DecisionContext 只當唯讀證據。

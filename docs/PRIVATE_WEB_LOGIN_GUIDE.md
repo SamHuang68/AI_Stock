@@ -199,6 +199,7 @@ py -3 scripts\setup_private_web.py --rotate
 | 顯示 ST 密碼錯誤 | 身分應選 Reader；確認 Owner 是否剛輪替密碼 |
 | 登入後又回登入頁 | 退出無痕模式；確認 Cookie 未被清除；檢查內容阻擋器 |
 | 登入後黑畫面 | 關閉分頁後從完整網址重開；記錄發生時間、裝置與 Chrome 版本 |
+| 重新整理後報價／面板空白 | 舊版閘道會把靜態檔與診斷紀錄算進 API 限額，連續重新整理會被 429 擋下；更新 ST 後已分開計算。仍發生時查 `logs/private_web_audit.jsonl` 的 `rate_limited` |
 | 換 Wi-Fi／行動網路後停止更新 | 重新連接 Tailscale，再重新整理 ST |
 
 健康檢查網址：

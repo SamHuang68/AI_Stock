@@ -269,8 +269,9 @@
     updateFab();
     if (open) render();
   }
+  /** 回傳是否真的開啟；功能旗標關閉時回 false，呼叫端（轉盤鈕）據此改開轉盤 */
   function openRadar() {
-    if (window.FeatureFlags && FeatureFlags.isEnabled && !FeatureFlags.isEnabled('shadowConsensusAttention')) return;
+    if (window.FeatureFlags && FeatureFlags.isEnabled && !FeatureFlags.isEnabled('shadowConsensusAttention')) return false;
     open = true;
     expanded = false;
     syncProjection();
@@ -279,6 +280,7 @@
     render();
     var close = layer.querySelector('[data-ca-close]');
     if (close) close.focus();
+    return true;
   }
   function closeRadar() {
     open = false;

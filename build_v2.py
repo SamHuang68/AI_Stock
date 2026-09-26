@@ -46,7 +46,7 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/chart/pattern_v3.js', 'src/core/live_v2.js',
               'src/fundamental/chip_v3.js',
               'src/fundamental/fundamental_v3.js',              # v3.8 B: 基本面 (月營收/三率/評分)
-              'src/ai/ai_report_v3.js', 'src/ui/polish_v3.js',
+              'src/ui/polish_v3.js',
               'src/core/wl_live_v3.js',
               'src/fundamental/plan_history_v3.js',
               'src/fundamental/plan_position_v3.js',
@@ -84,7 +84,6 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/core/namesearch_v3.js',               # v3.9: 代號框打公司名自動完成(/search 反查台股名)
               'src/core/intraday_volume_v3.js',          # 累積量單位／來源切換／缺分鐘保護（須在 realtime 前）
               'src/core/realtime_v3.js',                 # v3.9: 台股盤中真即時(TWSE MIS 每10s 更新當前分鐘K,解 Yahoo 延遲)
-              'src/ai/focus_v3.js',                    # v3.9: 焦點掃描精靈(多訊號組合自動找做多/做空焦點,/focus)
               'src/ai/copilot_v3.js',                  # v4.0: AI 副駕面板(本機 LM Studio,/ai/local)
               'src/screener/wizard_v3.js',                   # v3.9: 加股設定精靈(依賴 StratLib/Backtest/drawtools/setPosition/saveWatches，排最後)
               'src/ui/shell_v5.js',                    # v5.0: 轉盤殼層+視圖路由(show/hide，預設 #pulse；須在 toolbar 前掛好 DOM)

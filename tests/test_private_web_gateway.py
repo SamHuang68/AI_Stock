@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import http.client
 import json
+import re
 import sys
 import tempfile
 import threading
@@ -16,6 +17,7 @@ from dataclasses import replace
 from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 
@@ -204,6 +206,28 @@ class PrivateWebGatewayTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(payload["path"], "/market/snapshot")
+
+    def test_page_reload_static_fanout_does_not_starve_market_data(self):
+        # setUp read budget is 100/min; a dashboard load alone fetches dozens of UI files.
+        for i in range(110):
+            status, _ = _request(self.base + f"/src/ui/module_{i}.js", token="owner-secret")
+            self.assertEqual(status, 200, i)
+        status, payload = _request(self.base + "/market/snapshot", token="owner-secret")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["path"], "/market/snapshot")
+
+    def test_rate_buckets_keep_static_and_telemetry_apart(self):
+        limits = SimpleNamespace(read_rate_per_minute=7, write_rate_per_minute=3)
+
+        def bucket(method: str, path: str):
+            return gateway.Handler._rate_bucket(SimpleNamespace(command=method, settings=limits), path)
+
+        self.assertEqual(bucket("GET", "/")[0], "static")
+        self.assertEqual(bucket("GET", "/src/ui/shell_v5.js")[0], "static")
+        self.assertEqual(bucket("GET", "/quote-batch"), ("read", 7))
+        self.assertEqual(bucket("POST", "/gateway/client-log")[0], "telemetry")
+        self.assertEqual(bucket("POST", "/diagnostics/ui-route")[0], "telemetry")
+        self.assertEqual(bucket("POST", "/chain-momentum"), ("write", 3))
 
     def test_signal_ledger_is_read_only_for_shared_viewers(self):
         for path in ("/signals/active", "/signals/history?limit=20",
@@ -704,6 +728,59 @@ class PrivateWebGatewayTests(unittest.TestCase):
         self.assertIn("write_forwarded", audit)
         self.assertNotIn("do-not-log", audit)
         self.assertNotIn("owner-secret", audit)
+
+
+class FrontendRouteCoverageTests(unittest.TestCase):
+    """Every ST API the shipped UI calls must pass the Private Web (Tailscale) gateway for the
+    owner, unless it is on BLOCKED_REMOTE_PATHS by design or is not an ST API call."""
+
+    # WaveDeck's bridge is excluded from Private Web; "/quote" only appears as a trace label.
+    NOT_PROXIED = {"/api/state", "/bridge/st", "/quote"}
+    SETTINGS = SimpleNamespace(extra_control_paths=set(), extra_read_paths=set())
+
+    @staticmethod
+    def _shipped_paths() -> dict[str, set[str]]:
+        build = (ROOT / "build_v2.py").read_text(encoding="utf-8")
+        files = [ROOT / p for p in re.findall(r"'(src/[^']+\.js)'", build)]
+        files.append(ROOT / "stock_terminal.html")
+        literal = re.compile(r"['\"`](/[a-z][A-Za-z0-9_\-]*(?:/[A-Za-z0-9_\-.]*)*)(?=[?'\"`$])")
+        found: dict[str, set[str]] = {}
+        for f in files:
+            if not f.exists():
+                continue
+            for m in literal.finditer(f.read_text(encoding="utf-8", errors="replace")):
+                path = m.group(1)
+                if path.startswith(("/src/", "/assets/", "/gateway/")):
+                    continue
+                if re.search(r"\.(js|css|html|png|svg|json|ico|md)$", path):
+                    continue
+                found.setdefault(path, set()).add(f.name)
+        return found
+
+    def test_ui_api_paths_are_routable_for_owner(self):
+        blocked = {entry.split(" ", 1)[1] for entry in gateway.BLOCKED_REMOTE_PATHS}
+        paths = self._shipped_paths()
+        self.assertGreater(len(paths), 40)
+        missing = []
+        for path, files in sorted(paths.items()):
+            if path in self.NOT_PROXIED or path in blocked:
+                continue
+            probe = path + "x" if path.endswith("/") else path
+            if (gateway.route_permission("GET", probe, "owner", self.SETTINGS)
+                    or gateway.route_permission("POST", probe, "owner", self.SETTINGS)):
+                continue
+            missing.append(f"{path} ({', '.join(sorted(files))})")
+        self.assertEqual(missing, [], "UI calls these ST APIs but Private Web would deny them")
+
+    def test_research_cards_flags_and_ai_hub_reads(self):
+        for path in ("/features", "/research/conditional-expectation", "/research/peak-observation",
+                     "/research/peak-observation-100d", "/research/touxin-5d-netbuy",
+                     "/ai-key/status", "/ai/local/status", "/stock-signals"):
+            self.assertTrue(gateway.route_permission("GET", path, "reader", self.SETTINGS), path)
+        latest = "/api/ai/postmarket-daily/latest"
+        self.assertTrue(gateway.route_permission("GET", latest, "owner", self.SETTINGS))
+        self.assertFalse(gateway.route_permission("GET", latest, "reader", self.SETTINGS))
+        self.assertFalse(gateway.route_permission("POST", "/ai-report", "owner", self.SETTINGS))
 
 
 if __name__ == "__main__":

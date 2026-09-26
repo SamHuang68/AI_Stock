@@ -134,8 +134,10 @@ class PostmarketHttpTest(unittest.TestCase):
         self.assertTrue(gateway.route_permission(
             'POST', '/api/ai/postmarket-daily', 'owner', settings))
         # 與既有 AI 端點一致：owner 可、reader 不可
-        self.assertFalse(gateway.route_permission('POST', '/ai-report', 'reader', settings))
-        self.assertTrue(gateway.route_permission('POST', '/ai-report', 'owner', settings))
+        self.assertFalse(gateway.route_permission('POST', '/ai-note', 'reader', settings))
+        self.assertTrue(gateway.route_permission('POST', '/ai-note', 'owner', settings))
+        # 盤前 /ai-report 已由盤後日報取代並移除
+        self.assertNotIn('/ai-report', gateway.CONTROL_POST_EXACT)
 
     def test_success_returns_contract_and_request_id_header(self):
         ai_api.load_ai_key = lambda: 'sk-test'

@@ -196,6 +196,22 @@ runtime evidence is written to `logs/ai_runtime_trace.jsonl`; it records only
 request IDs, route metadata, phase, hashes, lengths, elapsed time and error
 type, never prompts, context, model output or credentials.
 
+## Rate budgets
+
+One dashboard load fans out to roughly 170 requests, about 35 of them static UI
+files. The gateway therefore keeps separate per-client budgets so a reload over
+Tailscale cannot starve market data:
+
+| Bucket | Covers | Per minute |
+| --- | --- | --- |
+| `static` | `/`, `stock_terminal*.html`, `/src/`, `/assets/` | 1,200 (fixed) |
+| `telemetry` | `/gateway/client-log`, `/diagnostics/ui-route` | 120 (fixed) |
+| `read` | other GET/HEAD API calls | `read_rate_per_minute` (default 600) |
+| `write` | other POST calls | `write_rate_per_minute` (default 60) |
+
+Existing `data/private_web.json` files keep their explicit values; 240/30 is
+still enough for normal reloads now that static and telemetry are separate.
+
 ## Private HTTPS publication
 
 After host-mode testing succeeds, Tailscale Serve can publish only the gateway

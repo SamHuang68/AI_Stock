@@ -69,7 +69,9 @@ citations[], guardrail?}], marketBlurb?, usageToday{estUsd,runs}, partial?, abor
 
 ## UI
 
-AI 中樞（`#ai`）工具列「盤後日報」→ `src/ui/postmarket_v5.js` report drawer：
+AI 中樞（`#ai`）工具列「盤後日報」→ `src/ui/postmarket_v5.js` report drawer（預設帶入持倉＋自選，最多 20 檔）。
+舊的盤前 `/ai-report`（未帶行情、要求「行動建議」）已由本日報取代並移除。
+
 每檔結論可展開 drivers／hypotheses／risks／watchTomorrow、各區塊 evidence asOf、
 **明日驗證點**（FACT 可勾選 checkbox，localStorage 記錄）與規則異常摘要、
 `usage.estUsd`＋當日累計、複製 Markdown、中止鍵。Conditional Expectation 卡仍受

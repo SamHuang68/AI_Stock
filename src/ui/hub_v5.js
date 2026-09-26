@@ -13,6 +13,11 @@
   var marketColorTraceSeen = {};
 
   function $(id) { return document.getElementById(id); }
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
   function jget(url) {
     return fetch(SRV + url, { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -111,6 +116,8 @@
         'color:var(--text);font-size:10px;cursor:pointer;font-family:inherit;white-space:nowrap;flex:0 0 auto}' +
       '.hub-root .hub-btn.primary{background:var(--gold);color:#060A12;border:none;font-weight:700}' +
       '.hub-root .hub-btn:hover{border-color:var(--bhi);color:var(--thi)}' +
+      '.hub-root .hub-sel{padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg3);' +
+        'color:var(--text);font-size:10px;font-family:inherit;max-width:130px;flex:0 1 auto}' +
       '.hub-root .hub-body{flex:1 1 0;min-height:0;height:100%;display:flex;flex-direction:column;overflow:hidden}' +
       '.hub-root .hub-loading{font-size:10px;color:var(--tlo);padding:8px 0;flex:0 0 auto}' +
       '.hub-root .hub-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin:0 0 4px;min-width:0;flex:0 0 auto}' +
@@ -741,10 +748,50 @@
   }
 
   // ── Signals ──────────────────────────────────────────────
+  /* 焦點掃描唯一入口（原 🎯 焦點模態併入此頁）：產業篩選＋寄送 */
+  var focusSectors = null;
+  var lastFocusScan = null;
+  function focusSectorValue() {
+    var sel = $('hub-focus-sector');
+    return sel ? sel.value : '';
+  }
+  function fillFocusSectors() {
+    var sel = $('hub-focus-sector');
+    if (!sel || !focusSectors) return;
+    var cur = sel.value;
+    sel.innerHTML = '<option value="">全部產業</option><option value="__TECH__">科技電子（整合）</option>' +
+      focusSectors.map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('');
+    sel.value = cur;
+  }
+  function focusShareText() {
+    var L = lastFocusScan;
+    if (!L) return '';
+    var lines = ['🎯 焦點掃描 · 訊號組合自動選股',
+      '掃描 ' + L.scanned + ' 檔' + (L.sec ? ' · 產業:' + (L.sec === '__TECH__' ? '科技電子' : L.sec) : '') +
+        ' · ' + new Date().toLocaleString('zh-TW')];
+    function blk(title, rows) {
+      lines.push('');
+      lines.push(title + ' (' + rows.length + ')');
+      if (!rows.length) { lines.push('  無符合'); return; }
+      rows.forEach(function (r) {
+        var chg = r.changePct != null ? ((r.changePct >= 0 ? '+' : '') + r.changePct + '%  ') : '';
+        lines.push('  ' + (r.sym || r.code || '') + ' ' + (r.name || '') + '  ' + chg +
+          (r.score != null ? r.score + '★  ' : '') + ((r.signals || []).join('/')) +
+          (r.rsi14 != null ? '  RSI' + r.rsi14 : ''));
+      });
+    }
+    blk('🟢 做多焦點 Buy', L.buy);
+    blk('🔴 做空焦點 Short', L.short);
+    return lines.join('\n');
+  }
   function renderSignals(el) {
-    el.innerHTML = head('策略訊號', '自選股體檢＋可解釋監控訊號（焦點掃描／選股結果）',
-      '<button class="hub-btn" data-go="scan">選股</button>' +
+    el.innerHTML = head('策略訊號', '自選股體檢＋焦點掃描（多訊號組合）',
+      '<select class="hub-sel" id="hub-focus-sector" title="焦點掃描的產業範圍">' +
+        '<option value="">全部產業</option><option value="__TECH__">科技電子（整合）</option></select>' +
       '<button class="hub-btn primary" id="hub-run-focus">執行焦點掃描</button>' +
+      '<button class="hub-btn" id="hub-focus-send" title="把焦點掃描結果寄到 Telegram/Email（🔔 通知設定）">📨 寄送</button>' +
+      '<span id="hub-focus-send-st" style="font-size:9px;color:var(--tlo);align-self:center"></span>' +
+      '<button class="hub-btn" data-go="scan">選股</button>' +
       '<button class="hub-btn" data-shell-back>← 儀表板</button>') +
       '<div id="hub-health-board" class="hub-body" style="flex:0 0 auto;height:auto;max-height:46%;overflow:auto"></div>' +
       '<div id="hub-sig-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
@@ -752,6 +799,16 @@
     if (window.StockHealthV5) window.StockHealthV5.renderBoard($('hub-health-board'));
     var run = $('hub-run-focus');
     if (run) run.onclick = function () { loadFocus(el, true); };
+    var sel = $('hub-focus-sector');
+    if (sel) sel.onchange = function () { loadFocus(el, false); };
+    if (window.ShareResult) window.ShareResult.wire('hub-focus-send', focusShareText, '焦點掃描結果');
+    if (focusSectors) fillFocusSectors();
+    else {
+      jget('/screener').then(function (d) {
+        focusSectors = (d && Array.isArray(d.sectors)) ? d.sectors : [];
+        fillFocusSectors();
+      });
+    }
     loadFocus(el, false);
   }
   function loadFocus(el, force) {
@@ -761,7 +818,11 @@
     if (soft && window.ShellV5 && window.ShellV5.softBadge) {
       window.ShellV5.softBadge('mount-signals', true, '掃描中…');
     }
-    jget('/focus' + (force ? '?refresh=1' : '')).then(function (d) {
+    var sec = focusSectorValue();
+    var qs = [];
+    if (sec) qs.push('sector=' + encodeURIComponent(sec));
+    if (force) qs.push('refresh=1');
+    jget('/focus' + (qs.length ? '?' + qs.join('&') : '')).then(function (d) {
       var body = $('hub-sig-body');
       if (!body) return;
       d = d || {};
@@ -776,6 +837,7 @@
         });
       }
       var scanned = d.scanned != null ? d.scanned : (bulls.length + bears.length);
+      lastFocusScan = { sec: sec, scanned: scanned, buy: bulls, short: bears };
       if (!bulls.length && !bears.length) {
         body.innerHTML =
           '<div class="hub-strip">' +

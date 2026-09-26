@@ -104,7 +104,7 @@
     'btn-bt3': { label: '回測', icon: '📈' },
     'btn-wizard': { label: '精靈', icon: '🧙' },
     'btn-stratscript': { label: '腳本', icon: '📝' },
-    'btn-ai-report': { label: '報告', icon: '🤖' },
+    'btn-ai-hub': { label: 'AI中樞', icon: '✧' },
     'btn-copilot': { label: '副駕', icon: '✦' },
     'btn-focus': { label: '焦點', icon: '◎' },
     'btn-vp': { label: '量價', icon: '📊' },
@@ -595,11 +595,9 @@
         ringRoute('international', '國際頁', '◎', '美股／美元／黃金／銅'),
         ringClick('btn-calendar')
       ]),
-      ringFolder('ai', 'AI', '✧', '報告、副駕、焦點', [
-        ringRoute('ai', 'AI中樞', '✧', 'AI 報告／副駕頁'),
-        ringFolder('ai-tools', 'AI工具', '🤖', '報告／副駕／焦點掃描', [
-          ringClick('btn-ai-report'), ringClick('btn-copilot'), ringClick('btn-focus')
-        ])
+      ringFolder('ai', 'AI', '✧', '所有 AI 功能集中在 AI 中樞', [
+        ringRoute('ai', 'AI中樞', '✧', 'AI 功能總覽、模型與連線狀態'),
+        ringClick('btn-copilot')
       ]),
       ringFolder('desk', '工作台', '★', '自選、投組、系統（含原側欄「工具」指令盤）', [
         ringRoute('watchlist', '自選', '★', '自選股中心'),
@@ -930,8 +928,8 @@
     var fab = document.createElement('button');
     fab.type = 'button';
     fab.id = 'st-ring-fab';
-    fab.title = '共識雷達（點一下）· 雙擊返回儀表板 · 中鍵或 \\ 開功能轉盤';
-    fab.setAttribute('aria-label', '開啟共識雷達；雙擊返回儀表板');
+    fab.title = '功能轉盤（點一下）· 雙擊返回儀表板 · 快捷鍵 \\ 或滑鼠中鍵';
+    fab.setAttribute('aria-label', '開啟功能轉盤；雙擊返回儀表板');
     fab.textContent = '◎';
     var fabTimer = null;
     fab.addEventListener('click', function (e) {
@@ -939,11 +937,10 @@
       if (fabTimer) clearTimeout(fabTimer);
       fabTimer = setTimeout(function () {
         fabTimer = null;
-        if (window.ConsensusAttentionV5 && typeof window.ConsensusAttentionV5.open === 'function') {
-          window.ConsensusAttentionV5.open();
-        } else {
-          openRing(window.innerWidth - 80, window.innerHeight - 80);
-        }
+        /* 共識雷達是預設關閉的實驗功能；沒開啟時 open() 回 false，一律改開轉盤 */
+        var ca = window.ConsensusAttentionV5;
+        var shown = ca && typeof ca.open === 'function' ? ca.open() : false;
+        if (shown !== true) openRing(window.innerWidth - 80, window.innerHeight - 80);
       }, 220);
     });
     fab.addEventListener('dblclick', function (e) {
@@ -1892,6 +1889,11 @@
     return !!el.isContentEditable;
   }
 
+  /* 注音等輸入法啟用時 keydown 的 key 是 'Process'（keyCode 229），改看實體鍵位 code */
+  function keyIs(e, ch, code) {
+    return e.key === ch || ((e.key === 'Process' || e.keyCode === 229) && e.code === code);
+  }
+
   function onShellKey(e) {
     if (inEditable(e.target)) return;
     var meta = e.metaKey || e.ctrlKey;
@@ -1911,7 +1913,7 @@
       }
     }
     /* \\：功能轉盤（MX Master 風格） */
-    if (e.key === '\\' && !e.altKey && !meta) {
+    if (keyIs(e, '\\', 'Backslash') && !e.altKey && !meta) {
       e.preventDefault();
       toggleRing(window.innerWidth / 2, window.innerHeight / 2);
       return;
@@ -1946,7 +1948,7 @@
       }
     }
     /* [ 或 Ctrl/⌘B：開／關分析轉盤（側欄已移除） */
-    if (e.key === '[' || (meta && (e.key === 'b' || e.key === 'B'))) {
+    if (keyIs(e, '[', 'BracketLeft') || (meta && (e.key === 'b' || e.key === 'B'))) {
       e.preventDefault();
       toggleRing(window.innerWidth / 2, window.innerHeight / 2);
       return;

@@ -44,8 +44,8 @@ ok(/ai: 'AiV5'/.test(shell), 'AiV5 in PANEL_MAP');
 });
 
 const bridge = fs.readFileSync(path.join(root, 'src/ui/bridge_v5.js'), 'utf8');
-ok(/portfolioOpen/.test(bridge) && /marketFlowOpen/.test(bridge) && /openAIModal/.test(bridge),
-  'bridge_v5 wraps portfolio/marketflow/AI');
+ok(/portfolioOpen/.test(bridge) && /marketFlowOpen/.test(bridge) && /copilotOpen/.test(bridge),
+  'bridge_v5 wraps portfolio/marketflow/AI copilot');
 const build = fs.readFileSync(path.join(root, 'build_v2.py'), 'utf8');
 ok(build.indexOf('src/ui/ai_v5.js') >= 0 && build.indexOf('src/ui/bridge_v5.js') >= 0,
   'ai_v5 + bridge_v5 in build_v2');
@@ -484,7 +484,12 @@ ok(/黃金（避險）/.test(hub) && /銅（景氣循環）/.test(hub) && /g\.ro
 
 const ai = fs.readFileSync(path.join(root, 'src/ui/ai_v5.js'), 'utf8');
 ok(/ai5-strip/.test(ai) && /ai5-dash/.test(ai), 'ai professional strip+dash');
-ok(/focus\.buy/.test(ai) || /buy \|\| focus\.long/.test(ai), 'ai maps focus.buy');
+ok(!/'\/focus/.test(ai) && /PostmarketDaily/.test(ai) && /copilotOpen/.test(ai) && /\/ai\/local\/status/.test(ai),
+  'ai hub is the AI catalog (report/copilot/runtime status); focus scan lives on the signals page');
+ok(/routeOpener\('focusScanOpen', 'signals'\)/.test(bridge) && !/openAIModal/.test(bridge),
+  'focus opener routes to signals; retired pre-market report has no bridge');
+ok(/hub-focus-sector/.test(hub) && /sector=/.test(hub) && /hub-focus-send/.test(hub),
+  'signals page carries the focus sector filter + share (former focus modal)');
 ok(!/ai5-card/.test(ai) || /ai5-tools/.test(ai), 'ai launcher not card-grid only');
 
 const ah = fs.readFileSync(path.join(root, 'src/ui/afterhours_v5.js'), 'utf8');
