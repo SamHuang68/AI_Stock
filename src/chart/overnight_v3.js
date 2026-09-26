@@ -132,34 +132,32 @@
   function style() {
     if (document.getElementById('ovn-style')) return;
     const s = document.createElement('style'); s.id = 'ovn-style';
-    /* #ovn-box＝浮層；.ovn-embed＝盤後欄內嵌同一套夜盤面板 */
+    /* .ovn-embed＝盤後頁左欄的夜盤面板 */
     s.textContent = `
-    #ovn-modal{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:none;align-items:center;justify-content:center}
-    #ovn-box{background:#0f172a;border:1px solid #334155;border-radius:10px;width:min(720px,94vw);max-height:90vh;overflow:auto;padding:16px;color:#e2e8f0;font-size:12px}
-    #ovn-box h3,.ovn-embed h3{margin:0 0 8px;font-size:15px}
-    #ovn-box table,.ovn-embed table{width:100%;border-collapse:collapse;font-size:11px;margin:4px 0 12px}
-    #ovn-box th,#ovn-box td,.ovn-embed th,.ovn-embed td{border-bottom:1px solid #1e293b;padding:5px 7px;text-align:right}
-    #ovn-box th:first-child,#ovn-box td:first-child,.ovn-embed th:first-child,.ovn-embed td:first-child{text-align:left}
-    #ovn-box tr,.ovn-embed tr{cursor:pointer}
-    #ovn-box .gauge,.ovn-embed .gauge{font-size:30px;font-weight:800;text-align:center;line-height:1.15}
-    #ovn-box .gauge-sm,.ovn-embed .gauge-sm{font-size:20px;font-weight:800;text-align:center;line-height:1.15}
-    #ovn-box .dual,.ovn-embed .dual{display:grid;grid-template-columns:1.2fr 1fr;gap:10px;margin-bottom:8px}
-    #ovn-box .dual > div,.ovn-embed .dual > div{border:1px solid #1e293b;border-radius:8px;padding:8px 6px;background:#111827}
-    #ovn-box .ovn-signal-card,.ovn-embed .ovn-signal-card{min-width:0;display:grid;grid-template-rows:auto 1fr auto;align-items:center;gap:5px;position:relative;overflow:hidden}
-    #ovn-box .ovn-signal-card::before,.ovn-embed .ovn-signal-card::before{content:"";position:absolute;inset:0 auto 0 0;width:2px;background:#38bdf8;opacity:.7}
-    #ovn-box .ovn-signal-card.secondary::before,.ovn-embed .ovn-signal-card.secondary::before{background:#64748b;opacity:.55}
-    #ovn-box .ovn-signal-head,.ovn-embed .ovn-signal-head{display:flex;align-items:center;justify-content:center;gap:6px;min-width:0}
-    #ovn-box .ovn-signal-kicker,.ovn-embed .ovn-signal-kicker{flex:0 0 auto;border:1px solid rgba(56,189,248,.28);border-radius:999px;padding:1px 5px;color:#7dd3fc;background:rgba(56,189,248,.08);font-size:9px;font-weight:700;letter-spacing:.3px}
-    #ovn-box .ovn-signal-card.secondary .ovn-signal-kicker,.ovn-embed .ovn-signal-card.secondary .ovn-signal-kicker{border-color:rgba(148,163,184,.22);background:rgba(148,163,184,.07);color:#94a3b8}
-    #ovn-box .ovn-signal-name,.ovn-embed .ovn-signal-name{min-width:0;color:#cbd5e1;font-size:10px;font-weight:700;white-space:nowrap}
-    #ovn-box .ovn-signal-value,.ovn-embed .ovn-signal-value{font-variant-numeric:tabular-nums;letter-spacing:-.4px}
-    #ovn-box .ovn-signal-meta,.ovn-embed .ovn-signal-meta{display:flex;align-items:center;justify-content:center;gap:8px;min-width:0;color:#64748b;font-size:10px;line-height:1.25;white-space:nowrap}
-    #ovn-box .ovn-signal-meta strong,.ovn-embed .ovn-signal-meta strong{color:#cbd5e1;font-weight:750;font-variant-numeric:tabular-nums}
-    #ovn-box .txf-grid,.ovn-embed .txf-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
-    #ovn-box .txf-cell,.ovn-embed .txf-cell{background:#0b1220;border:1px solid #1e293b;border-radius:6px;padding:6px 7px;text-align:center}
-    #ovn-box .txf-cell .k,.ovn-embed .txf-cell .k{font-size:9px;color:#64748b}
-    #ovn-box .txf-cell .v,.ovn-embed .txf-cell .v{font-size:12px;font-weight:700;margin-top:2px}
-    #ovn-box button,.ovn-embed button{background:#334155;border:0;color:#fff;border-radius:6px;padding:5px 11px;cursor:pointer}
+    .ovn-embed h3{margin:0 0 8px;font-size:15px}
+    .ovn-embed table{width:100%;border-collapse:collapse;font-size:11px;margin:4px 0 12px}
+    .ovn-embed th,.ovn-embed td{border-bottom:1px solid #1e293b;padding:5px 7px;text-align:right}
+    .ovn-embed th:first-child,.ovn-embed td:first-child{text-align:left}
+    .ovn-embed tr{cursor:pointer}
+    .ovn-embed .gauge{font-size:30px;font-weight:800;text-align:center;line-height:1.15}
+    .ovn-embed .gauge-sm{font-size:20px;font-weight:800;text-align:center;line-height:1.15}
+    .ovn-embed .dual{display:grid;grid-template-columns:1.2fr 1fr;gap:10px;margin-bottom:8px}
+    .ovn-embed .dual > div{border:1px solid #1e293b;border-radius:8px;padding:8px 6px;background:#111827}
+    .ovn-embed .ovn-signal-card{min-width:0;display:grid;grid-template-rows:auto 1fr auto;align-items:center;gap:5px;position:relative;overflow:hidden}
+    .ovn-embed .ovn-signal-card::before{content:"";position:absolute;inset:0 auto 0 0;width:2px;background:#38bdf8;opacity:.7}
+    .ovn-embed .ovn-signal-card.secondary::before{background:#64748b;opacity:.55}
+    .ovn-embed .ovn-signal-head{display:flex;align-items:center;justify-content:center;gap:6px;min-width:0}
+    .ovn-embed .ovn-signal-kicker{flex:0 0 auto;border:1px solid rgba(56,189,248,.28);border-radius:999px;padding:1px 5px;color:#7dd3fc;background:rgba(56,189,248,.08);font-size:9px;font-weight:700;letter-spacing:.3px}
+    .ovn-embed .ovn-signal-card.secondary .ovn-signal-kicker{border-color:rgba(148,163,184,.22);background:rgba(148,163,184,.07);color:#94a3b8}
+    .ovn-embed .ovn-signal-name{min-width:0;color:#cbd5e1;font-size:10px;font-weight:700;white-space:nowrap}
+    .ovn-embed .ovn-signal-value{font-variant-numeric:tabular-nums;letter-spacing:-.4px}
+    .ovn-embed .ovn-signal-meta{display:flex;align-items:center;justify-content:center;gap:8px;min-width:0;color:#64748b;font-size:10px;line-height:1.25;white-space:nowrap}
+    .ovn-embed .ovn-signal-meta strong{color:#cbd5e1;font-weight:750;font-variant-numeric:tabular-nums}
+    .ovn-embed .txf-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
+    .ovn-embed .txf-cell{background:#0b1220;border:1px solid #1e293b;border-radius:6px;padding:6px 7px;text-align:center}
+    .ovn-embed .txf-cell .k{font-size:9px;color:#64748b}
+    .ovn-embed .txf-cell .v{font-size:12px;font-weight:700;margin-top:2px}
+    .ovn-embed button{background:#334155;border:0;color:#fff;border-radius:6px;padding:5px 11px;cursor:pointer}
     .ovn-embed{color:#e2e8f0;font-size:11px;min-height:0}
     .ovn-embed .gauge{font-size:22px}
     .ovn-embed .gauge-sm{font-size:16px}
@@ -173,11 +171,7 @@
     .ovn-embed table{font-size:10px;margin:2px 0 8px;max-width:100%;table-layout:fixed}
     .ovn-embed th,.ovn-embed td{min-width:0;padding:3px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .ovn-embed .ovn-foot{font-size:8px!important;line-height:1.55!important}
-    .ovn-embed .ovn-tsmc-note{font-size:8px!important;max-height:4.8em;overflow:auto}
-    @media (max-width:560px){
-      #ovn-box .dual{grid-template-columns:1fr}
-      #ovn-box .txf-grid{grid-template-columns:repeat(2,1fr)}
-    }`;
+    .ovn-embed .ovn-tsmc-note{font-size:8px!important;max-height:4.8em;overflow:auto}`;
     document.head.appendChild(s);
   }
 
@@ -218,27 +212,17 @@
 
   let _embedHost = null; /* 盤後內嵌宿主；refresh 時同步重繪 */
 
-  async function open() {
-    style();
-    let m = document.getElementById('ovn-modal');
-    if (!m) {
-      m = document.createElement('div'); m.id = 'ovn-modal';
-      m.innerHTML = `<div id="ovn-box"><h3>🌙 夜盤連動預警</h3><div id="ovn-body">載入夜盤中…</div></div>`;
-      document.body.appendChild(m);
-      m.addEventListener('click', e => { if (e.target === m) close(); });
-    }
-    m.style.display = 'flex';
-    renderInto(document.getElementById('ovn-body'), { embedded: false });
+  /* 夜盤面板只在盤後頁左欄（原浮層與盤後內嵌是同一套內容，已合併）；舊入口一律導向盤後頁 */
+  function open() {
+    if (window.ShellV5 && typeof window.ShellV5.go === 'function') window.ShellV5.go('afterhours');
   }
-  function close() { const m = document.getElementById('ovn-modal'); if (m) m.style.display = 'none'; }
 
   function goSym(code, mkt) {
     if (typeof loadSym === 'function') loadSym(code, mkt);
     if (window.ShellV5 && typeof window.ShellV5.go === 'function') window.ShellV5.go('chart');
-    close();
   }
 
-  /** 將現有夜盤面板畫入任意宿主（浮層 #ovn-body 或盤後 #ah-ovn-host） */
+  /** 將夜盤面板畫入盤後 #ah-ovn-host */
   async function renderInto(host, opts) {
     opts = opts || {};
     if (!host) return;
@@ -325,12 +309,8 @@
       }
     }
 
-    const actions = embedded
-      ? `<div style="text-align:right;margin-top:6px">
-          <button type="button" data-ovn-refresh>↻ 重新整理</button></div>`
-      : `<div style="text-align:right;margin-top:8px">
-          <button type="button" data-ovn-refresh>↻ 重新整理</button>
-          <button type="button" data-ovn-close>關閉</button></div>`;
+    const actions = `<div style="text-align:right;margin-top:6px">
+          <button type="button" data-ovn-refresh>↻ 重新整理</button></div>`;
 
     host.innerHTML = `
       <div class="dual ovn-signal-grid">
@@ -387,29 +367,14 @@
     });
     const btnR = host.querySelector('[data-ovn-refresh]');
     if (btnR) btnR.onclick = () => refresh();
-    const btnC = host.querySelector('[data-ovn-close]');
-    if (btnC) btnC.onclick = () => close();
   }
 
-  /** 浮層與（若有）盤後內嵌同步刷新 */
+  /** 盤後內嵌面板刷新 */
   async function refresh() {
-    const modalBody = document.getElementById('ovn-body');
-    const modalOn = document.getElementById('ovn-modal');
-    const jobs = [];
-    if (modalBody && modalOn && modalOn.style.display === 'flex') {
-      jobs.push(renderInto(modalBody, { embedded: false }));
-    }
-    if (_embedHost && _embedHost.isConnected) {
-      jobs.push(renderInto(_embedHost, { embedded: true }));
-    }
-    if (!jobs.length && modalBody) {
-      jobs.push(renderInto(modalBody, { embedded: false }));
-    }
-    await Promise.all(jobs);
+    if (_embedHost && _embedHost.isConnected) await renderInto(_embedHost, { embedded: true });
   }
 
   window.overnightOpen = open;
-  window.overnightClose = close;
   window.overnightRefresh = refresh;
   window.overnightRenderInto = function (host, opts) {
     return renderInto(host, Object.assign({ embedded: true }, opts || {}));

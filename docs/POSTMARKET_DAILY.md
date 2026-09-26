@@ -30,7 +30,7 @@ symbols[{symbol, evidenceAsOf, stale, anomalies[]?, validationPoints[]?,
 narrative{conclusion,drivers,hypotheses,risks,watchTomorrow},
 citations[], guardrail?}], marketBlurb?, usageToday{estUsd,runs}, partial?, aborted?}`。
 
-錯誤碼：`400`（無 key／參數，與 `/ai-proxy` 同拒絕行為）、`413`（>20 檔或 EvidencePack 過大）、
+錯誤碼：`400`（無 key／參數，與其他 AI 端點同拒絕行為）、`413`（>20 檔或 EvidencePack 過大）、
 `429`（上游限流透傳）、`502`（Anthropic 失敗）、`503 + Retry-After`（WaveDeck 持有 llm_gate）。
 
 ## 紅線（v1，違反即退件）

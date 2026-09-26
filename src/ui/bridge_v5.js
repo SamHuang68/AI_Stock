@@ -6,6 +6,7 @@
  *   portfolioOpen      → book
  *   marketFlowOpen     → institutional（法人資金；原「法人榜」併入同頁）
  *   focusScanOpen      → signals（焦點掃描唯一入口：策略訊號頁，可選產業）
+ *   stockFutOpen       → afterhours（個股期領先表在盤後頁，原浮層已併入）
  *   copilotOpen        → ai（AI 中樞 + 再開副駕）
  * 須在各模組定義 window.*Open 之後、toolbar 整理前載入。
  * ========================================================================== */
@@ -55,6 +56,7 @@
   routeOpener('portfolioOpen', 'book');
   routeOpener('marketFlowOpen', 'institutional');
   routeOpener('focusScanOpen', 'signals');
+  routeOpener('stockFutOpen', 'afterhours');
 
   /* 副駕 → AI 中樞 + 開副駕視窗（AI 功能集中在 AI 中樞） */
   wrap('copilotOpen', 'ai', { openModal: true, delay: 100 });

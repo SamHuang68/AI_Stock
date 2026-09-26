@@ -95,7 +95,6 @@
     'btn-valuation': { label: '估值', icon: '⚓' },
     'btn-marketflow': { label: '資金', icon: '💰' },
     'btn-supplychain': { label: '供應鏈', icon: '🔗' },
-    'btn-stockfut': { label: '個股期', icon: '🔭' },
     'btn-portfolio': { label: '投組', icon: '▣' },
     'btn-chainmom': { label: '鏈動能', icon: '⛓' },
     'btn-screener3': { label: '三合一', icon: '🔬' },
@@ -564,18 +563,14 @@
         ringRoute('chart', 'K線', '◈', '圖表工作區'),
         ringFolder('tech', '技術', '▦', '量價／多圖／畫線', [
           ringClick('btn-vp'), ringClick('btn-multichart'), ringClick('btn-compare'),
-          ringClick('btn-spread'), ringClick('btn-drawtools'), ringClick('btn-replay'),
-          ringClick('btn-overnight')
+          ringClick('btn-spread'), ringClick('btn-drawtools'), ringClick('btn-replay')
         ]),
-        ringRoute('afterhours', '盤後', '◐', '排行／夜盤／籌碼摘要')
+        ringRoute('afterhours', '盤後', '◐', '排行／夜盤／個股期／籌碼摘要')
       ]),
       ringFolder('flow', '籌碼', '₴', '法人、資金流、基本面', [
         ringRoute('institutional', '法人頁', '₴', '三大法人動向'),
-        ringFolder('flow-tools', '期貨／輪動', '💰', '個股期夜盤與供應鏈輪動', [
-          ringClick('btn-stockfut'), ringClick('btn-chainmom')
-        ]),
-        ringFolder('fundamentals', '基本面', '⚓', '估值／供應鏈', [
-          ringClick('btn-valuation'), ringClick('btn-supplychain')
+        ringFolder('fundamentals', '基本面', '⚓', '估值／供應鏈／輪動', [
+          ringClick('btn-valuation'), ringClick('btn-supplychain'), ringClick('btn-chainmom')
         ])
       ]),
       ringFolder('screen', '選股', '▷', '篩選、策略、回測', [

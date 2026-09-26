@@ -359,7 +359,7 @@
       </div>
 
       ${wz.use === 'hold'
-        ? `<div class="wz-card"><h4>${chk('wz-ap-pos', true)} 持倉計畫（PLAN）</h4>
+        ? `<div class="wz-card"><h4>${chk('wz-ap-pos', true)} 持倉設定（POS）</h4>
             <label>進場 ${wz.entry || d.price.toFixed(2)}・股數 ${wz.shares || '—'}・停損 ${s.stopPrice}（-${s.slPct}%）・停利 ${s.target}</label></div>`
         : `<div class="wz-card"><h4>${chk('wz-ap-pos', true)} 買進計畫</h4>
             <label>買區 ${s.buyLo}~${s.buyHi}・停損 ${s.stopPrice}（-${s.slPct}%）・停利 ${s.target}</label>

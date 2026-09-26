@@ -461,7 +461,6 @@ CONTROL_POST_PREFIXES = ("/draw/",)
 # the owner token.  They are listed here for status/documentation responses.
 BLOCKED_REMOTE_PATHS = {
     "POST /ai-key",
-    "POST /ai-proxy",
     "POST /etf-catalog",
     "POST /etf-tracker/run",
     "GET/POST /bridge/wavedeck",
@@ -478,7 +477,6 @@ BLOCKED_REMOTE_PATHS = {
     "POST /alert/config",
     "POST /alert/test",
     "POST /etf-report/email",
-    "POST /report-email",
     "GET/POST /sync",
 }
 

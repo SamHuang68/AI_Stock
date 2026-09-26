@@ -133,63 +133,6 @@ html,body{height:var(--st-app-height,100dvh);max-height:var(--st-app-height,100d
 .stat-v{color:var(--thi);font-weight:700}
 .stat-sect{padding:6px 12px;background:var(--bg);font-family:'JetBrains Mono',monospace;font-size:8px;color:var(--tf);letter-spacing:2px;border-bottom:1px solid var(--border);text-transform:uppercase}
 
-/* ── RESEARCH TAB ── */
-#anabtn{display:block;width:calc(100% - 24px);margin:10px 12px;padding:9px;background:var(--gold);color:#060A12;border:none;border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px}
-#anabtn:hover:not(:disabled){background:#FBBF24}
-#anabtn:disabled{opacity:.4;cursor:not-allowed}
-#anapanel{padding:0 12px 12px;font-size:12px;line-height:1.8;color:var(--text)}
-.toc-pills{display:flex;flex-wrap:wrap;gap:4px;padding:8px 12px;border-bottom:1px solid var(--border)}
-.tpill{padding:3px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--tlo);cursor:pointer;transition:all .12s}
-.tpill:hover{color:var(--text);border-color:var(--bhi)}
-.tpill.on{background:var(--gold-s);border-color:var(--gold-m);color:var(--gold)}
-.asec{padding:12px 0;border-bottom:1px dashed var(--border)}
-.asec:last-child{border-bottom:none}
-.asec-hdr{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--gold);letter-spacing:2px;margin-bottom:8px;padding:2px 7px;background:var(--gold-s);border-left:2px solid var(--gold)}
-.asec-body p{margin:4px 0;font-size:12px}
-.asec-body strong{color:var(--thi)}
-.asec-body table{width:100%;border-collapse:collapse;font-size:10px;font-family:'JetBrains Mono',monospace;margin:6px 0}
-.asec-body th{background:var(--bg);color:var(--gold);padding:5px 7px;text-align:left;border-bottom:1px solid var(--border);font-size:9px}
-.asec-body td{padding:5px 7px;border-bottom:1px solid var(--border);color:var(--text);vertical-align:top}
-.asec-body ul{padding-left:14px;margin:4px 0}
-.asec-body li{margin:2px 0}
-.asec-body li::marker{color:var(--gold)}
-.asec-body code{background:var(--bg);padding:1px 4px;border-radius:2px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--cyan)}
-.stream-box{padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--tlo);white-space:pre-wrap;word-break:break-word;animation:blink-cur 1s step-end infinite}
-@keyframes blink-cur{50%{opacity:.5}}
-.src-box{padding:8px 12px;border-top:1px solid var(--border)}
-.src-ttl{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--cyan);letter-spacing:2px;margin-bottom:5px}
-.src-lnk{display:block;font-size:9px;color:var(--cyan);font-family:'JetBrains Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:2px 0;opacity:.7}
-.src-lnk:hover{opacity:1}
-.phase-badge{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--tlo);margin:0 12px 6px}
-
-/* ── BATCH TAB ── */
-.batch-input-row{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid var(--border)}
-#batchsym{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:5px 8px;color:var(--thi);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:1px;outline:none;text-transform:uppercase}
-#batchsym:focus{border-color:var(--gold)}
-.badd{padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:5px;color:var(--tlo);font-family:'JetBrains Mono',monospace;font-size:10px;cursor:pointer}
-.badd:hover{color:var(--text);border-color:var(--bhi)}
-.brun{padding:5px 10px;background:var(--gold);color:#060A12;border:none;border-radius:5px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;cursor:pointer}
-.brun:disabled{opacity:.4;cursor:not-allowed}
-.batch-list{padding:6px 12px;display:flex;flex-direction:column;gap:4px}
-.batch-item{display:flex;align-items:center;gap:7px;padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:5px;font-family:'JetBrains Mono',monospace;font-size:10px}
-.bi-sym{color:var(--thi);font-weight:700;min-width:60px;letter-spacing:1px}
-.bi-st{color:var(--tlo);flex:1;font-size:9px}
-.bi-st.done{color:var(--green)}.bi-st.err{color:var(--red)}.bi-st.running{color:var(--gold)}
-.bi-x{background:none;border:none;color:var(--tf);cursor:pointer;font-size:12px;padding:0 2px}
-.bi-x:hover{color:var(--red)}
-.bmkt{font-size:8px;padding:1px 5px;border-radius:2px;font-weight:700}
-.bmkt.tw{background:var(--gbg);color:var(--green)}.bmkt.us{background:var(--bbg);color:var(--blue)}
-
-/* ── HISTORY TAB ── */
-.hist-item{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s}
-.hist-item:hover{background:var(--bg3)}
-.hi-t{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--gold);min-width:55px;letter-spacing:1px}
-.hi-mkt{font-family:'JetBrains Mono',monospace;font-size:8px;padding:1px 5px;border-radius:2px;font-weight:700}
-.hi-mkt.tw{background:var(--gbg);color:var(--green)}.hi-mkt.us{background:var(--bbg);color:var(--blue)}
-.hi-time{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--tlo);margin-left:auto}
-.hi-x{background:none;border:none;color:var(--tf);cursor:pointer;font-size:13px;padding:0 3px}
-.hi-x:hover{color:var(--red)}
-
 /* ── MODALS ── */
 .modal{position:fixed;inset:0;background:rgba(6,10,18,.85);z-index:100;display:flex;align-items:center;justify-content:center}
 .mbox{background:var(--bg2);border:1px solid var(--bhi);border-radius:10px;padding:22px;width:380px;max-width:90vw}
@@ -219,7 +162,7 @@ html,body{height:var(--st-app-height,100dvh);max-height:var(--st-app-height,100d
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
-<link rel="stylesheet" href="src/ui/mobile_v2.css?v=8352336a8527">
+<link rel="stylesheet" href="src/ui/mobile_v2.css?v=4ec4d3de9355">
 </head>
 <body>
 <div id="app">
@@ -265,10 +208,8 @@ html,body{height:var(--st-app-height,100dvh);max-height:var(--st-app-height,100d
       <div id="rtabs">
         <button class="rtab on" data-tab="stats" onclick="setTab('stats')">STATS</button>
         <button class="rtab" data-tab="health" id="tab-health" onclick="setTab('health')" title="個股體檢：燈號、訊號與失效條件">體檢</button>
-        <button class="rtab" data-tab="research" onclick="setTab('research')">RESEARCH</button>
         <button class="rtab" data-tab="position" id="tab-pos" onclick="setTab('position')">POS</button>
         <button class="rtab" data-tab="watch" id="tab-watch" onclick="setTab('watch')">WATCH</button>
-        <button class="rtab" data-tab="plan" id="tab-plan" onclick="setTab('plan')">PLAN</button>
         <button class="rtab" data-tab="etf" id="tab-etf" onclick="setTab('etf')">ETF△</button>
       </div>
       <div id="rpanel"></div>
@@ -284,42 +225,14 @@ html,body{height:var(--st-app-height,100dvh);max-height:var(--st-app-height,100d
   </div>
 </div>
 <script>
-const SYS_PROMPT = '你是一位頂尖台灣個股研究分析師，專精半導體、AI 科技與美股。\n撰寫風格：直白犀利、有觀點、數據精確，口語化但不失專業。參考「蕉割俠個股研究報告」風格。\n語言：全繁體中文，技術指標保留英文縮寫（EPS, TOPS, NPU, CXL, HBM, BULL, BEAR, BUY, SELL 等）。\n\n═══════════════════════════════════\n輸出規則（嚴格遵守）：\n1. 每個章節以 [[[SECTION:章節名]]] 開頭，必須是以下八個之一\n2. 所有表格使用 Markdown 格式\n3. 台股幣別 TWD，美股幣別 USD，全篇不可混用\n4. 章節順序固定：公司簡介→產品與技術→基本面數據→技術面→籌碼面→產業技術生態→機會與風險→分析師總結\n5. 直接以 [[[SECTION:公司簡介]]] 開頭，不要寫任何標題行\n\n[[[SECTION:公司簡介]]]\n基本資料 Markdown 表格（公司全名、市場別、產業分類、成立/上市、市值、資本額、核心產品），幣別清楚標示。\n接著約 150 字的公司定位描述。\n\n[[[SECTION:產品與技術]]]\n3～4 個產品線，每段含：**產品群名稱**（粗體）、技術護城河、營收佔比、最新成長催化劑。\n\n[[[SECTION:基本面數據]]]\n財務數據 Markdown 表格（前年全年｜去年全年｜今年 E｜明年 E）：\n- EPS（台股=元 TWD；美股=USD）\n- 全年營收（含幣別）\n- 毛利率 %、營業利益率 %\n- 【台股專屬行】現金股利（元 TWD）、殖利率 %、最近除息日、最近配股資訊\n接著：毛利率結構分析、最新季/月營收動能（標明期間）、法人預估 EPS 路徑。\n\n[[[SECTION:技術面]]]\n1. 趨勢判斷：🟢 多頭 / 🟡 盤整 / 🔴 空頭\n2. 關鍵 SUPPORT / RESISTANCE（含幣別）\n3. Wyckoff / SMC 籌碼結構訊號\n4. 系統狀態：BULL / BEAR / NEUTRAL\n5. 注意事項\n\n[[[SECTION:籌碼面]]]\n1. 外資 / 機構近期方向（BUY / SELL / HOLD）\n2. 主力大戶累積情況\n3. 異常買賣超訊號解讀\n4. 退場警示條件（2 條）\n\n[[[SECTION:產業技術生態]]]\n■ 半導體/AI 硬體：製程封裝（CoWoS/Foveros/SoIC）、AI PC 異構計算鏈位置（NPU/GPU/CXL/HBM）、推論效率鏈、護城河評估\n■ EDA/IP/軟體：AI 工具鏈角色、量化技術（INT4/INT8/FP16）、CXL/PCIe IP 生態\n■ 其他科技：AI PC 週期受惠度、替代風險\n技術週期評分：🔥🔥🔥🔥🔥（五分制，附理由一句）\n\n[[[SECTION:機會與風險]]]\n| 機會 / 催化劑 | 風險 / 注意訊號 |\n3 機會 vs 3 風險，各約 30 字，具體不廢話。\n\n[[[SECTION:分析師總結]]]\n| 問題 | 答覆 |\n- 適不適合追？→ 位階 + 短/中線建議\n- 要看什麼訊號？→ 1/2/3 三個觀察指標\n- 最重要的一件事 → 核心邏輯 + STOP LOSS 位（含幣別）';
-
-
-const SECTION_DEFS = [
-  {key:'公司簡介',   zh:'公司簡介',   en:'OVERVIEW'},
-  {key:'產品與技術', zh:'產品與技術', en:'PRODUCTS'},
-  {key:'基本面數據', zh:'基本面數據', en:'FUNDAMENTALS'},
-  {key:'技術面',     zh:'技術面',     en:'TECHNICALS'},
-  {key:'籌碼面',     zh:'籌碼面',     en:'POSITIONING'},
-  {key:'產業技術生態',zh:'產業技術生態',en:'TECH ECOSYSTEM'},
-  {key:'機會與風險', zh:'機會與風險', en:'RISK/REWARD'},
-  {key:'分析師總結', zh:'分析師總結', en:'CONCLUSION'},
-];
-
-// ── 大盤分析（市場層級）system prompt + 章節 ──
-const MARKET_SYS_PROMPT = '你是一位頂尖台股大盤策略分析師，專精指數、資金流、產業輪動與國際連動。\n撰寫風格：直白犀利、有觀點、數據精確、給可執行結論。語言：全繁體中文，技術指標保留英文縮寫。\n\n輸出規則（嚴格遵守）：\n1. 每章節以 [[[SECTION:章節名]]] 開頭，必須是以下六個之一，順序固定。\n2. 表格用 Markdown。直接從 [[[SECTION:大盤總覽]]] 開始，不要寫標題行。\n3. 【數據紀律｜最重要】提供的即時快照「只有點數與漲跌%」。凡是快照沒有的數字（成交額/量能、漲跌家數、三大法人買賣超金額、外資期貨口數等）一律先用 web_search 查最新真實值，嚴禁自行估算或編造（曾發生把上市大盤成交額 12,316億 誤填成 2,316億）。查不到就寫「待查」，不要瞎掰。\n4. 【使用者長線結構觀點｜納入研判】(a) TSMC(2330/TSM) 是 AI 宇宙核心、先進製程獨佔，營收正比 AI 類股；TSM ADR／費半漲，2330 隔日多反映（除非美股收盤後重磅利空）。(b) INTEL 18A／Samsung SF2 即便接單，產能良率僅滿足部分需求；AI 與 AMD/INTEL 皆靠 3D 封裝（如 Panther Lake 僅 compute die，其餘晶片與封裝仍在台積），非單一廠全拿。(c) 四大 CSP 的 AI 投資高度集中台灣供應鏈：TSMC 晶圓→3D 封裝→CPO 光通訊→AI 伺服器整機組裝，這是台股日成交量自 2026/04 前約 8000 億／日 升至 1.2 兆＋的結構原因 → 對台股(尤其 AI 半導體)維持結構性偏多視角，但仍須以當下數據與技術面修正短線判斷、提醒風險。\n\n[[[SECTION:大盤總覽]]]\n加權/櫃買現況表（點數、漲跌%、成交額）。成交額必須來自 web_search 的真實數據，沒查到就標「待查」，不可臆造。最後一句定調今日盤勢（強多/偏多/中性/偏空/強空）。\n\n[[[SECTION:技術面]]]\n加權指數趨勢判斷（🟢多/🟡盤整/🔴空）、關鍵支撐/壓力點位、均線（月線/季線/年線）位置、量價背離與否。\n\n[[[SECTION:資金與籌碼]]]\n三大法人買賣超方向與金額、外資期貨多空淨額、融資融券變化、資金流向（電子/金融/傳產）。\n\n[[[SECTION:類股輪動]]]\n今日強勢/弱勢類股、輪動趨勢（如 AI 半導體→傳產），點名 2~3 個值得關注的族群與代表股。\n\n[[[SECTION:國際與夜盤連動]]]\n美股（道瓊/那斯達克/費半）、美股期貨夜盤、台指期夜盤、重要總經事件，評估對台股隔日開盤的影響（估計開高/開低方向與幅度）。\n\n[[[SECTION:隔日策略]]]\n| 情境 | 操作建議 |\n給「開高/開平/開低」三情境的應對；多單/空單/觀望的條件；最重要的一個觀察點與風險。';
-
-const MARKET_SECTION_DEFS = [
-  {key:'大盤總覽',   zh:'大盤總覽',   en:'MARKET OVERVIEW'},
-  {key:'技術面',     zh:'技術面',     en:'TECHNICALS'},
-  {key:'資金與籌碼', zh:'資金與籌碼', en:'FLOWS'},
-  {key:'類股輪動',   zh:'類股輪動',   en:'ROTATION'},
-  {key:'國際與夜盤連動',zh:'國際與夜盤連動',en:'GLOBAL/OVERNIGHT'},
-  {key:'隔日策略',   zh:'隔日策略',   en:'NEXT-DAY PLAN'},
-];
-
 const DEFAULT_WL = [
   {t:'2330',m:'TW',name:'台積電'},{t:'2454',m:'TW',name:'聯發科'},
   {t:'3661',m:'TW',name:'世芯-KY'},{t:'6669',m:'TW',name:'緯穎'},
   {t:'NVDA',m:'US'},{t:'AMD',m:'US'}
 ];
 
-const LS_KEY_HIST = 'st_hist_v2';
 const LS_KEY_KEY  = 'st_apikey';
 const LS_KEY_WL   = 'st_wl';
-const BATCH_CONCURRENCY = 3;
 // 同源相對路徑：避免頁面開在 127.0.0.1、API 卻打 localhost（或反之）導致載入卡住
 const SERVER = window.SERVER = (typeof location !== 'undefined' && location.origin && location.origin !== 'null') ? location.origin : 'http://localhost:18432';
 
@@ -328,11 +241,8 @@ let S = {
   mkt: 'TW', sym: '', apiKey: '', aiKeySet: false,
   range: '6mo',                // iOS-style chart range: 1d/3w/1mo/3mo/6mo/ytd/1y/2y/5y/10y/max
   data: null, ind: null,
-  analyzing: false, streamText: '', sources: [], phase: '',
-  sections: [],
-  history: [], wl: [],
+  wl: [],
   tab: 'stats',
-  batch: [], batchRunning: false,
   etfDelta: null, etfLoading: false,
   chart: null, chartSeries: null, volSeries: null,
 };
@@ -387,7 +297,6 @@ window.addEventListener('DOMContentLoaded', () => {
     if (typeof updateKeyBtn === 'function') updateKeyBtn();
     renderRpanel();
   })();
-  S.history = loadHist();
   S.wl = loadWl();
   renderWl();
   renderRpanel();
@@ -1885,27 +1794,6 @@ function rmWl(t,m) {
   S.wl = S.wl.filter(w=>!(w.t===t&&w.m===m)); saveWl(); renderWl();
 }
 
-// ── HISTORY ──────────────────────────────────────────────────────
-function loadHist() {
-  try { return JSON.parse(localStorage.getItem(LS_KEY_HIST)||'[]'); } catch { return []; }
-}
-function saveHist(h) { localStorage.setItem(LS_KEY_HIST, JSON.stringify(h.slice(0,20))); }
-function addHist(report) {
-  const list = S.history.filter(r=>!(r.ticker===report.ticker&&r.market===report.market));
-  S.history = [report,...list].slice(0,20);
-  saveHist(S.history);
-}
-function delHist(ticker, market) {
-  S.history = S.history.filter(r=>!(r.ticker===ticker&&r.market===market));
-  saveHist(S.history);
-  renderRpanel();
-}
-function relTime(ts) {
-  const d=Date.now()-ts;
-  if(d<60000)return'剛剛';if(d<3600000)return Math.floor(d/60000)+'分前';
-  if(d<86400000)return Math.floor(d/3600000)+'時前';return Math.floor(d/86400000)+'天前';
-}
-
 // ── TABS ─────────────────────────────────────────────────────────
 function traceMobileWorkspaceLayout(reason) {
   try {
@@ -1958,10 +1846,8 @@ function attachMobileWorkspaceTrace() {
 const RPANEL_PAGES = [
   {key:'stats', label:'技術統計'},
   {key:'health', label:'個股體檢'},
-  {key:'research', label:'研究分析'},
   {key:'position', label:'持倉部位'},
   {key:'watch', label:'條件觀察'},
-  {key:'plan', label:'交易計畫'},
   {key:'etf', label:'ETF 變動'}
 ];
 const MOBILE_WORKSPACE_PAGES = [{key:'chart', label:'線型圖'}].concat(RPANEL_PAGES);
@@ -1974,7 +1860,7 @@ function isPortraitMobileWorkspace() {
 }
 
 function rpanelPageIndex() {
-  const key = (S.tab === 'batch' || S.tab === 'history') ? 'research' : S.tab;
+  const key = S.tab;
   const idx = RPANEL_PAGES.findIndex(page => page.key === key);
   return idx < 0 ? 0 : idx;
 }
@@ -2118,9 +2004,6 @@ function renderRpanel() {
   const el = document.getElementById('rpanel');
   if (S.tab==='stats')    { el.innerHTML = renderStats(); return; }
   if (S.tab==='health')   { if (window.StockHealthV5) window.StockHealthV5.renderInto(el); else el.innerHTML = ''; return; }
-  if (S.tab==='research') { el.innerHTML = renderResearch(); attachResearch(); return; }
-  if (S.tab==='batch')    { el.innerHTML = renderBatch(); attachBatch(); return; }
-  if (S.tab==='history')  { el.innerHTML = renderHistoryTab(); return; }
   if (S.tab==='etf')      { el.innerHTML = window.renderEtfV3 ? window.renderEtfV3() : ''; return; }
   if (S.tab==='position') { var _ae=document.activeElement; if(!(_ae&&/^pos-(entry|shares|target|stop|notes|unit)$/.test(_ae.id||''))){ el.innerHTML = renderPosition(); attachPosition(); } return; }
   if (S.tab==='watch')    { el.innerHTML = renderWatch(); attachWatch(); return; }
@@ -2184,374 +2067,6 @@ function renderStats() {
   `;
 }
 
-// ── RESEARCH TAB ─────────────────────────────────────────────────
-function renderResearch() {
-  const canAna = !!S.aiKeySet && !!S.sym && !S.analyzing;
-  const canMkt = !!S.aiKeySet && !S.analyzing;
-  let html = `<div style="display:flex;gap:6px">
-    <button id="anabtn" style="flex:1" onclick="startAnalysis('stock')" ${canAna?'':'disabled'}>${S.analyzing&&S.anaMode!=='market'?'分析中...':'▶ AI 個股 '+(S.sym||'')}</button>
-    <button id="anabtn-mkt" style="flex:1" onclick="startAnalysis('market')" ${canMkt?'':'disabled'}>${S.analyzing&&S.anaMode==='market'?'分析中...':'📊 大盤分析'}</button>
-  </div>`;
-  if (S.analyzing) {
-    if (S.phase) html += `<div class="phase-badge"><div class="pulse"></div>${S.phase}</div>`;
-    if (S.sources.length) {
-      html += `<div class="src-box"><div class="src-ttl">SOURCES (${S.sources.length})</div>`;
-      html += S.sources.slice(-5).map(s=>`<a class="src-lnk" href="${s.url}" target="_blank">${s.title||s.url}</a>`).join('');
-      html += '</div>';
-    }
-    html += `<div class="stream-box">${escHtml(S.streamText.slice(-500).replace(/\[\[\[SECTION:.+?\]\]\]/g,'\n━ '))}</div>`;
-    return html;
-  }
-  if (S.sections.length > 0) {
-    const _defs = S.secDefs || SECTION_DEFS;
-    html += `<div class="toc-pills">${_defs.map((d,i)=>`<div class="tpill" onclick="scrollSec(${i})">${d.zh}</div>`).join('')}</div>`;
-    html += '<div id="anapanel">';
-    for (const sec of S.sections) {
-      const def = _defs.find(d=>d.key===sec.key)||{zh:sec.key,en:''};
-      html += `<div class="asec" id="asec-${sec.key}">
-        <div class="asec-hdr">${def.zh}${def.en?' · '+def.en:''}</div>
-        <div class="asec-body">${mdToHtml(sec.content)}</div>
-      </div>`;
-    }
-    if (S.sources.length) {
-      html += `<div class="src-box"><div class="src-ttl">資料來源 (${S.sources.length})</div>`;
-      html += S.sources.map((s,i)=>`<a class="src-lnk" href="${s.url}" target="_blank">${i+1}. ${s.title||s.url}</a>`).join('');
-      html += '</div>';
-    }
-    html += '<div style="text-align:center;padding:12px 0;display:flex;gap:8px;justify-content:center">'
-      + '<button onclick="exportReportPDF()" style="padding:6px 14px;background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--tlo);font-family:JetBrains Mono,monospace;font-size:10px;cursor:pointer">📄 匯出 PDF</button>'
-      + '<button onclick="emailReport()" style="padding:6px 14px;background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--tlo);font-family:JetBrains Mono,monospace;font-size:10px;cursor:pointer">✉ Email 寄送</button></div>';
-    html += '</div>';
-  }
-  return html;
-}
-function attachResearch() {}
-function scrollSec(i) {
-  const d = (S.secDefs || SECTION_DEFS)[i];
-  if (!d) return;
-  const el = document.getElementById('asec-'+d.key);
-  if (el) el.scrollIntoView({behavior:'smooth',block:'start'});
-}
-
-// 從大盤列 DOM 蒐集即時數據字串，餵給大盤分析
-function gatherMarketSnapshot() {
-  const lines = [];
-  document.querySelectorAll('#mkt-bar-inner .mkt-cell').forEach(c => {
-    const nm = (c.querySelector('.nm')||{}).textContent || '';
-    const px = (c.querySelector('.px')||{}).textContent || '';
-    const ch = (c.querySelector('.ch')||{}).textContent || '';
-    if (nm && px) lines.push(`${nm.trim()}: ${px.trim()} ${ch.trim()}`);
-  });
-  return lines.length ? lines.join('\n') : '（即時數據未載入，請用 web_search 查最新）';
-}
-
-// ── STREAMING ANALYSIS ─────────────────────────────────────────
-// ── 自適應 AI 模型 (v3.9) ────────────────────────────────────────
-// 不寫死模型字串:查 Anthropic /v1/models 自動挑「最新的 Sonnet」(API 回傳新→舊排序),
-// 解析一次後本工作階段快取。Anthropic 出新模型自動跟上,不必每次手改。失敗退現行固定值。
-let _aiModel = 'claude-sonnet-4-6';     // fallback(現行有效)
-let _aiModelResolved = false;
-async function refreshAIModel() {
-  // 改由 server 解析(server 端持有金鑰查 /v1/models)→ 金鑰不進瀏覽器。
-  try {
-    const r = await fetch(`${SERVER}/ai-model`, { cache: 'no-store' });
-    if (!r.ok) return;
-    const j = await r.json();
-    if (j && j.model) { _aiModel = j.model; console.log('[ai] 自適應模型 →', j.model); }
-  } catch (e) { /* 保留 fallback */ }
-}
-async function ensureAIModel() {
-  if (!_aiModelResolved) { await refreshAIModel(); _aiModelResolved = true; }
-  return _aiModel;
-}
-
-async function startAnalysis(mode) {
-  mode = mode || 'stock';
-  if (!S.aiKeySet) { showKeyModal(); return; }
-  if (S.analyzing) return;
-  if (mode === 'stock' && !S.sym) return;
-  S.anaMode = mode;
-  S.secDefs = (mode === 'market') ? MARKET_SECTION_DEFS : SECTION_DEFS;
-  S.analyzing=true; S.streamText=''; S.sources=[]; S.phase=mode==='market'?'分析大盤中...':'分析中...'; S.sections=[];
-  renderRpanel();
-
-  let userMsg, systemPrompt;
-  if (mode === 'market') {
-    systemPrompt = MARKET_SYS_PROMPT;
-    const snap = gatherMarketSnapshot();
-    userMsg = `請撰寫台股大盤分析與隔日策略報告。\n\n# 目前即時數據（大盤列）\n${snap}\n\n` +
-      `請結合上述數據，並用 web_search 補最新（加權指數量能、三大法人買賣超、外資期貨、台指期夜盤、美股與費半、重大事件）。\n` +
-      `嚴格按章節標記輸出，從 [[[SECTION:大盤總覽]]] 開始，共六章節，不要寫標題行。`;
-  } else {
-    systemPrompt = SYS_PROMPT;
-    const mktLabel = S.mkt==='TW'
-      ? `台股（代號：${S.sym}，幣別：TWD 新台幣）`
-      : `美股（Nasdaq/NYSE 代號：${S.sym}，幣別：USD 美元）`;
-    userMsg = `請對以下個股撰寫完整八章節研究報告：\n市場：${mktLabel}\n股票代號：${S.sym}\n\n請嚴格按章節標記輸出，每章節以 [[[SECTION:章節名]]] 開頭，直接從 [[[SECTION:公司簡介]]] 開始，不要寫任何標題行。`;
-  }
-
-  try {
-    const res = await fetch(`${SERVER}/ai-proxy`, {   // 經本機 server 代理(金鑰在 server,不進瀏覽器)
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body:JSON.stringify({
-        model:(await ensureAIModel()),
-        max_tokens:6000, stream:true,
-        system:systemPrompt,
-        messages:[{role:'user',content:userMsg}],
-        tools:[{type:'web_search_20250305',name:'web_search'}]
-      })
-    });
-    if (!res.ok) { const e=await res.json().catch(()=>{}); throw new Error(e?.error?.message||'API '+res.status); }
-
-    const reader=res.body.getReader(), dec=new TextDecoder();
-    let buf='', fullText='';
-    const seenUrls=new Set();
-    let toolPhase=false;
-
-    while(true) {
-      const {done,value}=await reader.read();
-      if(done) break;
-      buf+=dec.decode(value,{stream:true});
-      const lines=buf.split('\n'); buf=lines.pop()||'';
-      for(const line of lines) {
-        if(!line.startsWith('data: ')) continue;
-        try {
-          const ev=JSON.parse(line.slice(6));
-          if(ev.type==='content_block_start') {
-            const cb=ev.content_block;
-            if(cb?.type==='server_tool_use'&&cb.name==='web_search') { toolPhase=true; S.phase='搜尋公開市場資訊'; }
-            if(cb?.type==='web_search_tool_result'&&Array.isArray(cb.content)) {
-              for(const item of cb.content) {
-                if(item.url&&!seenUrls.has(item.url)) { seenUrls.add(item.url); S.sources.push({url:item.url,title:item.title||item.url}); }
-              }
-            }
-            if(cb?.type==='text'&&toolPhase) { toolPhase=false; S.phase='撰寫研究報告'; }
-          }
-          if(ev.type==='content_block_delta'&&ev.delta?.type==='text_delta') {
-            fullText+=ev.delta.text; S.streamText=fullText;
-          }
-          if(ev.type==='message_stop') {
-            S.sections=parseSections(fullText);
-            S.analyzing=false; S.phase='';
-            const _tk = S.anaMode==='market' ? '大盤' : S.sym;
-            const report={ticker:_tk,market:S.mkt,text:fullText,sources:S.sources,sections:S.sections,timestamp:Date.now()};
-            addHist(report);
-            renderRpanel();
-            return;
-          }
-        } catch {}
-      }
-      // live update every chunk
-      renderRpanel();
-      await new Promise(r=>setTimeout(r,0));
-    }
-  } catch(e) {
-    S.analyzing=false; S.phase='';
-    const el=document.getElementById('rpanel');
-    if(el) el.innerHTML+=`<div style="padding:10px 12px;color:var(--red);font-family:JetBrains Mono,monospace;font-size:10px">⚠ ${escHtml(e.message)}</div>`;
-  }
-}
-
-// ── BATCH TAB ────────────────────────────────────────────────────
-function renderBatch() {
-  const isRunning = S.batchRunning;
-  return `
-    <div class="batch-input-row">
-      <input id="batchsym" placeholder="代號 如 2330" maxlength="12" onkeydown="if(event.key==='Enter')batchAdd()">
-      <div style="display:flex;gap:4px">
-        <button class="mktbtn on" id="bb-tw" onclick="batchSetMkt('TW')">TW</button>
-        <button class="mktbtn" id="bb-us" onclick="batchSetMkt('US')">US</button>
-      </div>
-      <button class="badd" onclick="batchAdd()">＋</button>
-      <button class="brun" onclick="runBatch()" ${isRunning||!S.aiKeySet?'disabled':''}>${isRunning?'執行中...':'▶ 批次'}</button>
-    </div>
-    <div class="batch-list">
-      ${S.batch.map((b,i)=>`
-        <div class="batch-item">
-          <span class="bi-sym">${b.sym}</span>
-          <span class="bmkt ${b.mkt.toLowerCase()}">${b.mkt}</span>
-          <span class="bi-st ${b.status||''}">${b.statusTxt||'待執行'}</span>
-          <button class="bi-x" onclick="batchRm(${i})">×</button>
-        </div>
-      `).join('')}
-      ${S.batch.length===0?'<div style="padding:8px 0;font-family:JetBrains Mono,monospace;font-size:10px;color:var(--tlo)">加入股票代號開始批次分析</div>':''}
-    </div>
-  `;
-}
-let _batchMkt='TW';
-function attachBatch() {
-  const bb=document.getElementById('bb-tw');
-  const bu=document.getElementById('bb-us');
-  if(bb)bb.classList.toggle('on',_batchMkt==='TW');
-  if(bu)bu.classList.toggle('on',_batchMkt==='US');
-}
-function batchSetMkt(m) { _batchMkt=m; renderRpanel(); }
-function batchAdd() {
-  const v=document.getElementById('batchsym')?.value?.trim()?.toUpperCase();
-  if(!v)return;
-  if(!S.batch.find(b=>b.sym===v&&b.mkt===_batchMkt)) S.batch.push({sym:v,mkt:_batchMkt,status:'',statusTxt:''});
-  renderRpanel();
-}
-function batchRm(i) { S.batch.splice(i,1); renderRpanel(); }
-
-async function runBatch() {
-  if (!S.apiKey||S.batchRunning||!S.batch.length) return;
-  S.batchRunning=true;
-  const items=[...S.batch];
-  for(let i=0;i<items.length;i+=BATCH_CONCURRENCY) {
-    const chunk=items.slice(i,i+BATCH_CONCURRENCY);
-    await Promise.all(chunk.map(b=>runBatchItem(b)));
-  }
-  S.batchRunning=false;
-  renderRpanel();
-}
-async function runBatchItem(b) {
-  b.status='running'; b.statusTxt='分析中...'; renderRpanel();
-  const mktLabel=b.mkt==='TW' ? `台股（代號：${b.sym}，幣別：TWD 新台幣）`
-    : b.mkt==='JP' ? `日股（代號：${b.sym}，幣別：JPY 日圓）`
-    : `美股（代號：${b.sym}，幣別：USD）`;
-  const userMsg=`請對以下個股撰寫完整八章節研究報告：\n市場：${mktLabel}\n股票代號：${b.sym}\n\n直接從 [[[SECTION:公司簡介]]] 開始。`;
-  try {
-    const res=await fetch(`${SERVER}/ai-proxy`,{   // 經本機 server 代理(金鑰在 server)
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:(await ensureAIModel()),max_tokens:6000,stream:true,system:SYS_PROMPT,messages:[{role:'user',content:userMsg}],tools:[{type:'web_search_20250305',name:'web_search'}]})
-    });
-    if(!res.ok) throw new Error('API '+res.status);
-    const reader=res.body.getReader(),dec=new TextDecoder();
-    let buf='',fullText='';
-    const sources=[],seenUrls=new Set();
-    while(true){
-      const {done,value}=await reader.read(); if(done)break;
-      buf+=dec.decode(value,{stream:true});
-      const lines=buf.split('\n'); buf=lines.pop()||'';
-      for(const line of lines){
-        if(!line.startsWith('data: '))continue;
-        try{
-          const ev=JSON.parse(line.slice(6));
-          if(ev.type==='content_block_start'&&ev.content_block?.type==='web_search_tool_result'&&Array.isArray(ev.content_block.content)){
-            for(const item of ev.content_block.content) if(item.url&&!seenUrls.has(item.url)){seenUrls.add(item.url);sources.push({url:item.url,title:item.title||item.url});}
-          }
-          if(ev.type==='content_block_delta'&&ev.delta?.type==='text_delta') fullText+=ev.delta.text;
-          if(ev.type==='message_stop'){
-            b.status='done'; b.statusTxt='完成';
-            addHist({ticker:b.sym,market:b.mkt,text:fullText,sources,sections:parseSections(fullText),timestamp:Date.now()});
-            renderRpanel(); return;
-          }
-        }catch{}
-      }
-    }
-  } catch(e) { b.status='err'; b.statusTxt='失敗: '+e.message; renderRpanel(); }
-}
-
-// ── HISTORY TAB ──────────────────────────────────────────────────
-function renderHistoryTab() {
-  if(!S.history.length) return '<div style="padding:16px;font-family:JetBrains Mono,monospace;font-size:10px;color:var(--tlo)">無歷史報告</div>';
-  return S.history.map(r=>`
-    <div class="hist-item" onclick="loadReport('${r.ticker}','${r.market}')">
-      <span class="hi-t">${r.ticker}</span>
-      <span class="hi-mkt ${r.market==='TW'?'tw':'us'}">${r.market}</span>
-      <span class="hi-time">${relTime(r.timestamp)}</span>
-      <button class="hi-x" onclick="event.stopPropagation();delHist('${r.ticker}','${r.market}')">×</button>
-    </div>
-  `).join('');
-}
-function loadReport(ticker, market) {
-  const r = S.history.find(h=>h.ticker===ticker&&h.market===market);
-  if (!r) return;
-  S.sym=ticker; S.mkt=market; S.sections=r.sections||parseSections(r.text); S.sources=r.sources||[];
-  S.streamText=''; S.analyzing=false;
-  setTab('research');
-  loadSym(ticker, market);
-}
-
-// ── MARKDOWN → HTML ───────────────────────────────────────────────
-// ── AI 報告匯出 PDF / Email (v3.9) ──────────────────────────────
-function reportDocHTML() {
-  const _defs = S.secDefs || SECTION_DEFS;
-  const title = (S.anaMode === 'market') ? '台股大盤分析與隔日策略' : `${S.sym} 個股研究報告`;
-  const date = new Date().toLocaleString('zh-TW', { hour12: false });
-  let secs = '';
-  for (const sec of (S.sections || [])) {
-    const def = _defs.find(d => d.key === sec.key) || { zh: sec.key };
-    secs += `<h2>${def.zh}</h2>${mdToHtml(sec.content)}`;
-  }
-  let src = '';
-  if (S.sources && S.sources.length) {
-    src = '<h2>資料來源</h2><ol>' + S.sources.map(s => `<li><a href="${s.url}">${(s.title || s.url)}</a></li>`).join('') + '</ol>';
-  }
-  return `<!doctype html><html lang="zh-TW"><head><meta charset="utf-8"><title>${title}</title>
-    <style>body{font-family:'Microsoft JhengHei','PingFang TC',Arial,sans-serif;max-width:760px;margin:24px auto;padding:0 20px;color:#1a1a1a;line-height:1.7}
-    h1{font-size:20px;border-bottom:2px solid #333;padding-bottom:8px}
-    h2{font-size:15px;color:#1f4e79;margin-top:22px;border-left:4px solid #1f4e79;padding-left:8px}
-    table{border-collapse:collapse;width:100%;margin:8px 0;font-size:13px}th,td{border:1px solid #ccc;padding:5px 8px;text-align:left}th{background:#f0f4f8}
-    a{color:#1f4e79;word-break:break-all}.meta{color:#666;font-size:12px;margin-bottom:16px}
-    .foot{margin-top:24px;color:#999;font-size:11px;border-top:1px solid #ddd;padding-top:8px}
-    @media print{a{color:#1f4e79}}</style></head>
-    <body><h1>${title}</h1>
-    <div class="meta">產生時間:${date} · Stock Terminal AI 分析</div>
-    ${secs}${src}
-    <div class="foot">本報告由 Stock Terminal AI 生成,資料來源見上。投資有風險,僅供參考、非投資建議。</div>` + '</' + 'body></' + 'html>';
-    // ↑ 結尾標籤用字串串接,避免原始碼出現字面 </body>(build_v2 以 </body> 為 script 注入點,會誤注入進此字串)
-}
-function exportReportPDF() {
-  if (!S.sections || !S.sections.length) { alert('尚無報告可匯出,請先執行 AI 分析'); return; }
-  const w = window.open('', '_blank');
-  if (!w) { alert('請允許此站彈出視窗後再試'); return; }
-  w.document.write(reportDocHTML());
-  w.document.close();
-  setTimeout(() => { try { w.focus(); w.print(); } catch (e) {} }, 500);   // 列印對話框選「另存為 PDF」
-}
-async function emailReport() {
-  if (!S.sections || !S.sections.length) { alert('尚無報告可寄送,請先執行 AI 分析'); return; }
-  const to = prompt('寄送 AI 報告到 Email(收件者):', '');
-  if (!to || !to.trim()) return;
-  const title = (S.anaMode === 'market') ? '台股大盤分析' : `${S.sym} 個股研究報告`;
-  setStat('寄送中…');
-  try {
-    const r = await fetch(`${SERVER}/report-email`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: to.trim(), subject: '【Stock Terminal】' + title, html: reportDocHTML() }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (r.ok && j.ok) setStat('✓ 已寄出報告到 ' + to.trim());
-    else { setStat('寄送失敗'); alert('寄送失敗:' + (j.error || r.status) + '\n\n需先在 🔔 通知 設定 Email SMTP(寄件帳號/應用程式密碼)。'); }
-  } catch (e) { setStat('寄送失敗'); alert('寄送失敗:' + e.message); }
-}
-
-function mdToHtml(raw) {
-  if(!raw) return '';
-  let t=raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  t=t.replace(/(\|.+\|\r?\n\|[-|: ]+\|\r?\n)((?:\|.+\|\r?\n?)+)/g,(_,head,body)=>{
-    const hCells=head.split('\n')[0].split('|').filter(c=>c.trim()).map(c=>`<th>${c.trim()}</th>`).join('');
-    const rows=body.trim().split('\n').map(r=>{
-      const cells=r.split('|').filter(c=>c.trim()).map(c=>`<td>${c.trim()}</td>`).join('');
-      return `<tr>${cells}</tr>`;
-    }).join('');
-    return `<div style="overflow-x:auto;margin:6px 0;border:1px solid var(--border);border-radius:4px"><table><thead><tr>${hCells}</tr></thead><tbody>${rows}</tbody></table></div>`;
-  });
-  t=t
-    .replace(/\*\*\*(.+?)\*\*\*/g,'<strong><em>$1</em></strong>')
-    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g,'<em>$1</em>')
-    .replace(/`([^`]+)`/g,'<code>$1</code>')
-    .replace(/^#{1,3} (.+)$/gm,'<strong>$1</strong>')
-    .replace(/^[-*] (.+)$/gm,'<li>$1</li>')
-    .replace(/^\d+\. (.+)$/gm,'<li>$1</li>')
-    .replace(/\n{2,}/g,'|||').replace(/\n/g,'<br>').replace(/\|\|\|/g,'</p><p>');
-  t=t.replace(/(<li[^>]*>.*?<\/li>)+/gs,m=>`<ul>${m}</ul>`);
-  return `<p>${t}</p>`;
-}
-function parseSections(text) {
-  if(!text) return [];
-  const regex=/\[\[\[SECTION:(.+?)\]\]\]/g;
-  const parts=text.split(/\[\[\[SECTION:.+?\]\]\]/);
-  const matches=[...text.matchAll(regex)];
-  return matches.map((m,i)=>({key:m[1].trim(),content:(parts[i+1]||'').trim()}));
-}
-function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
 // ── UI HELPERS ───────────────────────────────────────────────────
 function setMkt(m) { S.mkt=m; setMktUI(m); }
 function setMktUI(m) {
@@ -2614,94 +2129,86 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
 });
 </script>
-<script src="src/core/colors_v3.js?v=8352336a8527"></script>
-<script src="src/core/app_kernel_v5.js?v=8352336a8527"></script>
-<script src="src/core/feature_flags_v5.js?v=8352336a8527"></script>
-<script src="src/core/epistemic_badges_v5.js?v=8352336a8527"></script>
-<script src="src/core/market_freshness_v5.js?v=8352336a8527"></script>
-<script src="src/core/market_data_v5.js?v=8352336a8527"></script>
-<script src="src/core/decision_data_v5.js?v=8352336a8527"></script>
-<script src="src/core/market_intel_v5.js?v=8352336a8527"></script>
-<script src="src/core/table_sort_v5.js?v=8352336a8527"></script>
-<script src="src/ui/viz_v5.js?v=8352336a8527"></script>
-<script src="src/core/market_v3.js?v=8352336a8527"></script>
-<script src="src/core/fields_v3.js?v=8352336a8527"></script>
-<script src="src/core/chart_registry_v3.js?v=8352336a8527"></script>
-<script src="src/ui/share_v3.js?v=8352336a8527"></script>
-<script src="src/ui/datasources_v3.js?v=8352336a8527"></script>
-<script src="src/core/etf_flow_tip_v3.js?v=8352336a8527"></script>
-<script src="src/core/position_v2.js?v=8352336a8527"></script>
-<script src="src/core/watch_v2.js?v=8352336a8527"></script>
-<script src="src/core/info_v2.js?v=8352336a8527"></script>
-<script src="src/core/pro_v2.js?v=8352336a8527"></script>
-<script src="src/chart/volume_profile_v3.js?v=8352336a8527"></script>
-<script src="src/chart/pattern_v3.js?v=8352336a8527"></script>
-<script src="src/core/live_v2.js?v=8352336a8527"></script>
-<script src="src/fundamental/chip_v3.js?v=8352336a8527"></script>
-<script src="src/fundamental/fundamental_v3.js?v=8352336a8527"></script>
-<script src="src/ui/polish_v3.js?v=8352336a8527"></script>
-<script src="src/core/wl_live_v3.js?v=8352336a8527"></script>
-<script src="src/fundamental/plan_history_v3.js?v=8352336a8527"></script>
-<script src="src/fundamental/plan_position_v3.js?v=8352336a8527"></script>
-<script src="src/fundamental/plan_v3.js?v=8352336a8527"></script>
-<script src="src/ui/pdf_import_v3.js?v=8352336a8527"></script>
-<script src="src/ui/pdf_export_v3.js?v=8352336a8527"></script>
-<script src="src/core/peg_v3.js?v=8352336a8527"></script>
-<script src="src/alert/alert_v3.js?v=8352336a8527"></script>
-<script src="src/alert/alert_push_v3.js?v=8352336a8527"></script>
-<script src="src/screener/backtest_v3.js?v=8352336a8527"></script>
-<script src="src/screener/backtest_ui_v3.js?v=8352336a8527"></script>
-<script src="src/ui/enhance_v3.js?v=8352336a8527"></script>
-<script src="src/chart/aftermarket_v3.js?v=8352336a8527"></script>
-<script src="src/chart/overnight_v3.js?v=8352336a8527"></script>
-<script src="src/fundamental/supplychain_v3.js?v=8352336a8527"></script>
-<script src="src/fundamental/chainmom_v3.js?v=8352336a8527"></script>
-<script src="src/fundamental/valuation_v3.js?v=8352336a8527"></script>
-<script src="src/alert/calendar_v3.js?v=8352336a8527"></script>
-<script src="src/chart/multichart_v3.js?v=8352336a8527"></script>
-<script src="src/chart/spread_v3.js?v=8352336a8527"></script>
-<script src="src/chart/hotkeys_v3.js?v=8352336a8527"></script>
-<script src="src/screener/strategy_builder_v3.js?v=8352336a8527"></script>
-<script src="src/screener/strategy_script_v3.js?v=8352336a8527"></script>
-<script src="src/chart/drawtools_v3.js?v=8352336a8527"></script>
-<script src="src/core/etf_v3.js?v=8352336a8527"></script>
-<script src="src/fundamental/stockfut_v3.js?v=8352336a8527"></script>
-<script src="src/core/indices_v3.js?v=8352336a8527"></script>
-<script src="src/alert/datahealth_v3.js?v=8352336a8527"></script>
-<script src="src/alert/toast_v3.js?v=8352336a8527"></script>
-<script src="src/alert/settle_v3.js?v=8352336a8527"></script>
-<script src="src/ai/cmdpalette_v3.js?v=8352336a8527"></script>
-<script src="src/ui/dragwin_v3.js?v=8352336a8527"></script>
-<script src="src/core/liverefresh_v3.js?v=8352336a8527"></script>
-<script src="src/core/namesearch_v3.js?v=8352336a8527"></script>
-<script src="src/core/intraday_volume_v3.js?v=8352336a8527"></script>
-<script src="src/core/realtime_v3.js?v=8352336a8527"></script>
-<script src="src/ai/copilot_v3.js?v=8352336a8527"></script>
-<script src="src/screener/wizard_v3.js?v=8352336a8527"></script>
-<script src="src/ui/shell_v5.js?v=8352336a8527"></script>
-<script src="src/ui/wavedeck_bridge_v5.js?v=8352336a8527"></script>
-<script src="src/ui/hub_v5.js?v=8352336a8527"></script>
-<script src="src/ui/pulse_v5.js?v=8352336a8527"></script>
-<script src="src/ui/decision_v5.js?v=8352336a8527"></script>
-<script src="src/ui/consensus_attention_v5.js?v=8352336a8527"></script>
-<script src="src/ui/heat_v5.js?v=8352336a8527"></script>
-<script src="src/ui/book_v5.js?v=8352336a8527"></script>
-<script src="src/ui/scan_v5.js?v=8352336a8527"></script>
-<script src="src/ui/ai_v5.js?v=8352336a8527"></script>
-<script src="src/ui/breadth_v5.js?v=8352336a8527"></script>
-<script src="src/ui/afterhours_v5.js?v=8352336a8527"></script>
-<script src="src/ui/news_v5.js?v=8352336a8527"></script>
-<script src="src/ui/postmarket_v5.js?v=8352336a8527"></script>
-<script src="src/ui/conditional_expectation_v5.js?v=8352336a8527"></script>
-<script src="src/ui/peak_observation_v5.js?v=8352336a8527"></script>
-<script src="src/ui/peak_observation_100d_v5.js?v=8352336a8527"></script>
-<script src="src/ui/touxin_5d_v5.js?v=8352336a8527"></script>
-<script src="src/ui/stock_health_v5.js?v=8352336a8527"></script>
-<script src="src/ui/bridge_v5.js?v=8352336a8527"></script>
-<script src="src/ui/visual_system_v5.js?v=8352336a8527"></script>
-<script src="src/ui/chart_visual_v5.js?v=8352336a8527"></script>
-<script src="src/ui/toolbar_v3.js?v=8352336a8527"></script>
-<script src="src/chart/market_score_bar_v3.js?v=8352336a8527"></script>
-<script src="src/chart/market_chart_v3.js?v=8352336a8527"></script>
+<script src="src/core/colors_v3.js?v=4ec4d3de9355"></script>
+<script src="src/core/app_kernel_v5.js?v=4ec4d3de9355"></script>
+<script src="src/core/feature_flags_v5.js?v=4ec4d3de9355"></script>
+<script src="src/core/epistemic_badges_v5.js?v=4ec4d3de9355"></script>
+<script src="src/core/market_freshness_v5.js?v=4ec4d3de9355"></script>
+<script src="src/core/market_data_v5.js?v=4ec4d3de9355"></script>
+<script src="src/core/decision_data_v5.js?v=4ec4d3de9355"></script>
+<script src="src/core/market_intel_v5.js?v=4ec4d3de9355"></script>
+<script src="src/core/table_sort_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/viz_v5.js?v=4ec4d3de9355"></script>
+<script src="src/core/market_v3.js?v=4ec4d3de9355"></script>
+<script src="src/core/fields_v3.js?v=4ec4d3de9355"></script>
+<script src="src/core/chart_registry_v3.js?v=4ec4d3de9355"></script>
+<script src="src/ui/share_v3.js?v=4ec4d3de9355"></script>
+<script src="src/ui/datasources_v3.js?v=4ec4d3de9355"></script>
+<script src="src/core/etf_flow_tip_v3.js?v=4ec4d3de9355"></script>
+<script src="src/core/position_v2.js?v=4ec4d3de9355"></script>
+<script src="src/core/watch_v2.js?v=4ec4d3de9355"></script>
+<script src="src/core/info_v2.js?v=4ec4d3de9355"></script>
+<script src="src/core/pro_v2.js?v=4ec4d3de9355"></script>
+<script src="src/chart/volume_profile_v3.js?v=4ec4d3de9355"></script>
+<script src="src/chart/pattern_v3.js?v=4ec4d3de9355"></script>
+<script src="src/core/live_v2.js?v=4ec4d3de9355"></script>
+<script src="src/fundamental/chip_v3.js?v=4ec4d3de9355"></script>
+<script src="src/fundamental/fundamental_v3.js?v=4ec4d3de9355"></script>
+<script src="src/ui/polish_v3.js?v=4ec4d3de9355"></script>
+<script src="src/core/wl_live_v3.js?v=4ec4d3de9355"></script>
+<script src="src/alert/alert_push_v3.js?v=4ec4d3de9355"></script>
+<script src="src/screener/backtest_v3.js?v=4ec4d3de9355"></script>
+<script src="src/screener/backtest_ui_v3.js?v=4ec4d3de9355"></script>
+<script src="src/ui/enhance_v3.js?v=4ec4d3de9355"></script>
+<script src="src/chart/aftermarket_v3.js?v=4ec4d3de9355"></script>
+<script src="src/chart/overnight_v3.js?v=4ec4d3de9355"></script>
+<script src="src/fundamental/supplychain_v3.js?v=4ec4d3de9355"></script>
+<script src="src/fundamental/chainmom_v3.js?v=4ec4d3de9355"></script>
+<script src="src/fundamental/valuation_v3.js?v=4ec4d3de9355"></script>
+<script src="src/alert/calendar_v3.js?v=4ec4d3de9355"></script>
+<script src="src/chart/multichart_v3.js?v=4ec4d3de9355"></script>
+<script src="src/chart/spread_v3.js?v=4ec4d3de9355"></script>
+<script src="src/chart/hotkeys_v3.js?v=4ec4d3de9355"></script>
+<script src="src/screener/strategy_builder_v3.js?v=4ec4d3de9355"></script>
+<script src="src/screener/strategy_script_v3.js?v=4ec4d3de9355"></script>
+<script src="src/chart/drawtools_v3.js?v=4ec4d3de9355"></script>
+<script src="src/core/etf_v3.js?v=4ec4d3de9355"></script>
+<script src="src/core/indices_v3.js?v=4ec4d3de9355"></script>
+<script src="src/alert/datahealth_v3.js?v=4ec4d3de9355"></script>
+<script src="src/alert/toast_v3.js?v=4ec4d3de9355"></script>
+<script src="src/alert/settle_v3.js?v=4ec4d3de9355"></script>
+<script src="src/ai/cmdpalette_v3.js?v=4ec4d3de9355"></script>
+<script src="src/ui/dragwin_v3.js?v=4ec4d3de9355"></script>
+<script src="src/core/liverefresh_v3.js?v=4ec4d3de9355"></script>
+<script src="src/core/namesearch_v3.js?v=4ec4d3de9355"></script>
+<script src="src/core/intraday_volume_v3.js?v=4ec4d3de9355"></script>
+<script src="src/core/realtime_v3.js?v=4ec4d3de9355"></script>
+<script src="src/ai/copilot_v3.js?v=4ec4d3de9355"></script>
+<script src="src/screener/wizard_v3.js?v=4ec4d3de9355"></script>
+<script src="src/ui/shell_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/wavedeck_bridge_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/hub_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/pulse_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/decision_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/consensus_attention_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/heat_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/book_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/scan_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/ai_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/breadth_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/afterhours_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/news_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/postmarket_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/conditional_expectation_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/peak_observation_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/peak_observation_100d_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/touxin_5d_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/stock_health_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/bridge_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/visual_system_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/chart_visual_v5.js?v=4ec4d3de9355"></script>
+<script src="src/ui/toolbar_v3.js?v=4ec4d3de9355"></script>
+<script src="src/chart/market_score_bar_v3.js?v=4ec4d3de9355"></script>
+<script src="src/chart/market_chart_v3.js?v=4ec4d3de9355"></script>
 </body>
 </html>
