@@ -22,7 +22,7 @@ assert(shell.includes('var ca = window.ConsensusAttentionV5;') && shell.includes
 assert(shell.includes('if (shown !== true) openRing('),
   'FAB must fall back to the ring when the radar is disabled (default flag off)');
 assert(/function openRadar\(\) \{\s*if \([^\n]*shadowConsensusAttention'\)\) return false;/.test(radar) &&
-  radar.includes('return true;\n  }\n  function closeRadar'),
+  /return true;\r?\n\s*\}\r?\n\s*function closeRadar/.test(radar),
   'openRadar must report whether it opened');
 assert(decision.includes('applyPendingFocus()') && decision.includes('data-dc-section="divergences"'),
   'Decision deep-link focus contract missing');
