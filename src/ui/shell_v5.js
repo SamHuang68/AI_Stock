@@ -96,11 +96,9 @@
     'btn-marketflow': { label: '資金', icon: '💰' },
     'btn-supplychain': { label: '供應鏈', icon: '🔗' },
     'btn-portfolio': { label: '投組', icon: '▣' },
-    'btn-chainmom': { label: '鏈動能', icon: '⛓' },
     'btn-screener3': { label: '三合一', icon: '🔬' },
     'btn-patterns': { label: '型態', icon: '〰' },
     'btn-stratbuilder': { label: '策略', icon: '🧱' },
-    'btn-bt3': { label: '回測', icon: '📈' },
     'btn-wizard': { label: '精靈', icon: '🧙' },
     'btn-stratscript': { label: '腳本', icon: '📝' },
     'btn-ai-hub': { label: 'AI中樞', icon: '✧' },
@@ -569,15 +567,15 @@
       ]),
       ringFolder('flow', '籌碼', '₴', '法人、資金流、基本面', [
         ringRoute('institutional', '法人頁', '₴', '三大法人動向'),
-        ringFolder('fundamentals', '基本面', '⚓', '估值／供應鏈／輪動', [
-          ringClick('btn-valuation'), ringClick('btn-supplychain'), ringClick('btn-chainmom')
+        ringFolder('fundamentals', '基本面', '⚓', '估值／供應鏈（今日＋多時框輪動）', [
+          ringClick('btn-valuation'), ringClick('btn-supplychain')
         ])
       ]),
       ringFolder('screen', '選股', '▷', '篩選、策略、回測', [
         ringRoute('scan', '選股室', '▷', '三合一選股頁'),
-        ringFolder('screen-tools', '策略庫', '🔬', '選股／型態／回測', [
+        ringFolder('screen-tools', '策略庫', '🔬', '型態（含歷史命中率）／策略建構／精靈', [
           ringClick('btn-patterns'),
-          ringClick('btn-stratbuilder'), ringClick('btn-bt3'), ringClick('btn-wizard'),
+          ringClick('btn-stratbuilder'), ringClick('btn-wizard'),
           ringClick('btn-stratscript')
         ]),
         ringRoute('signals', '訊號', '✦', '策略訊號／焦點結果')

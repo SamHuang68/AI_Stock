@@ -18,6 +18,7 @@
   // v3.8.2：分 台股/美股 兩個 tab，美股鏈 設備/EDA→代工→晶片→記憶體→
   //   網通光通訊→伺服器→電力散熱→CSP平台。
   let scMkt = 'TW';   // 目前 tab
+  let scView = 'day'; // day＝今日族群連動；mom＝5/20/60 日動能（chainmom_v3，原「鏈動能」視窗併入）
   const CHAIN_TW = [
     { stage: '晶圓 / 先進製程', icon: '🔬', stocks: [['2330', '台積電'], ['2303', '聯電'], ['6770', '力積電'], ['5347', '世界先進']] },
     { stage: 'IC 設計 / 矽智財 IP', icon: '🧠', stocks: [['2454', '聯發科'], ['3443', '創意'], ['3661', '世芯-KY'], ['5274', '信驊'], ['3529', '力旺'], ['6533', '晶心科']] },
@@ -118,17 +119,28 @@
   async function render() {
     const body = document.getElementById('sc-body');
     if (!body) return;
+    document.querySelectorAll('.sc-view').forEach(b => b.classList.toggle('on', b.dataset.view === scView));
+    const mktTabs = document.getElementById('sc-mkt-tabs');
+    if (mktTabs) mktTabs.style.display = scView === 'mom' ? 'none' : '';
+    if (scView === 'mom') {
+      /* 多時框動能只有台股（本機 DB 日線） */
+      const box = document.getElementById('sc-box');
+      if (box) box.classList.remove('sc-usmkt');
+      if (window.ChainMom) window.ChainMom.renderInto(body, () => scView === 'mom');
+      else body.innerHTML = '動能模組未載入';
+      return;
+    }
     body.innerHTML = '載入中…';
     const isUS = scMkt === 'US';
     const chain = CHAINS[scMkt] || CHAIN_TW;
     // tab 高亮 + 美股綠漲紅跌 class
     const box = document.getElementById('sc-box');
     if (box) box.classList.toggle('sc-usmkt', isUS);
-    document.querySelectorAll('.sc-tab').forEach(b =>
+    document.querySelectorAll('.sc-tab[data-mkt]').forEach(b =>
       b.classList.toggle('on', b.dataset.mkt === scMkt));
     const allCodes = [...new Set(chain.flatMap(g => g.stocks.map(s => s[0])))];
     const pmap = await fetchPctMap(allCodes.map(c => isUS ? c : c + '.TW'));
-    if (scMkt !== (isUS ? 'US' : 'TW')) return;   // 載入期間被切走 → 丟棄
+    if (scView !== 'day' || scMkt !== (isUS ? 'US' : 'TW')) return;   // 載入期間被切走 → 丟棄
     const getp = code => pmap[isUS ? code : code + '.TW'];
 
     let h = '';
@@ -178,13 +190,17 @@
     });
   }
 
-  function open() {
+  function open(opts) {
     style();
     let m = document.getElementById('sc-modal');
     if (!m) {
       m = document.createElement('div'); m.id = 'sc-modal';
-      m.innerHTML = `<div id="sc-box"><h3>🔗 AI 供應鏈族群連動</h3>
+      m.innerHTML = `<div id="sc-box"><h3>🔗 AI 供應鏈</h3>
         <div class="sc-tabs">
+          <button class="sc-tab sc-view on" data-view="day">今日漲跌</button>
+          <button class="sc-tab sc-view" data-view="mom">5／20／60 日動能</button>
+        </div>
+        <div class="sc-tabs" id="sc-mkt-tabs">
           <button class="sc-tab on" data-mkt="TW">台股</button>
           <button class="sc-tab" data-mkt="US">美股</button>
         </div>
@@ -193,14 +209,20 @@
         <button onclick="window.supplyChainClose&&supplyChainClose()" style="background:#334155;border:0;color:#fff;border-radius:6px;padding:5px 11px;cursor:pointer;margin-left:6px">關閉</button></div></div>`;
       document.body.appendChild(m);
       m.addEventListener('click', e => { if (e.target === m) close(); });
-      m.querySelectorAll('.sc-tab').forEach(b => b.onclick = () => {
+      m.querySelectorAll('.sc-tab[data-mkt]').forEach(b => b.onclick = () => {
         if (scMkt === b.dataset.mkt) return;
         scMkt = b.dataset.mkt;
+        render();
+      });
+      m.querySelectorAll('.sc-view').forEach(b => b.onclick = () => {
+        if (scView === b.dataset.view) return;
+        scView = b.dataset.view;
         render();
       });
     }
     // 開啟時跟隨目前終端機市場
     if (typeof S !== 'undefined' && S.mkt) scMkt = (S.mkt === 'US') ? 'US' : 'TW';
+    scView = (opts && opts.view === 'mom') ? 'mom' : 'day';
     m.style.display = 'flex';
     render();
   }

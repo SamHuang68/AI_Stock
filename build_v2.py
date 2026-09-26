@@ -50,12 +50,11 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/core/wl_live_v3.js',
               'src/alert/alert_push_v3.js',               # v3.8 D: 後端警報推播設定 UI
               'src/screener/backtest_v3.js',                 # v3.8 C: 回測核心
-              'src/screener/backtest_ui_v3.js',              # v3.8 C: 回測 UI (須在 backtest_v3 後)
               'src/ui/enhance_v3.js',                  # v3.8: 雙軸卡/量價面板/右側收合/分頁記憶
               'src/chart/aftermarket_v3.js',              # v3.8: 美股盤後/盤前延伸交易顯示
               'src/chart/overnight_v3.js',                # v3.8: 夜盤連動預警(美股期貨→台股隔日)
               'src/fundamental/supplychain_v3.js',              # v3.8: 台灣AI供應鏈族群連動
-              'src/fundamental/chainmom_v3.js',                 # v4.0: 供應鏈輪動(多時框動能,依賴 SC_CHAINS 須在 supplychain 後)
+              'src/fundamental/chainmom_v3.js',                 # 供應鏈視窗的 5/20/60 日動能檢視(依賴 SC_CHAINS 須在 supplychain 後)
               'src/fundamental/valuation_v3.js',                # v3.8: 長線估值錨(本益比河流)
               'src/alert/calendar_v3.js',                 # v3.8: 事件行事曆+提醒
               'src/chart/multichart_v3.js',               # v3.9 P1: 多圖連動布局 (grid overlay)

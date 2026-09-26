@@ -428,7 +428,7 @@ self.onmessage = function(e) {
   const v20avg=n>=20?v.slice(n-20).reduce((a,b)=>a+b,0)/20:0;
   const volRatio=v20avg>0?(v5avg/v20avg):null;
   const d2=(cur!=null&&m20!=null)?(((cur-m20)/m20)*100):null;
-  // 一律回傳 number（顯示端 toFixed）。禁止字串，否則 techScore 的 > 會變字典序比較。
+  // 一律回傳 number（顯示端 toFixed）。禁止字串，否則下游 > 比較會變字典序比較。
   self.postMessage({
     sma5:s5[n-1], sma20:m20, sma60:s60[n-1],
     rsi14: rsi14==null?null:+rsi14,
@@ -2153,7 +2153,6 @@ document.addEventListener('keydown',e=>{
 <script src="src/core/wl_live_v3.js?v=1786836179"></script>
 <script src="src/alert/alert_push_v3.js?v=1786836179"></script>
 <script src="src/screener/backtest_v3.js?v=1786836179"></script>
-<script src="src/screener/backtest_ui_v3.js?v=1786836179"></script>
 <script src="src/ui/enhance_v3.js?v=1786836179"></script>
 <script src="src/chart/aftermarket_v3.js?v=1786836179"></script>
 <script src="src/chart/overnight_v3.js?v=1786836179"></script>

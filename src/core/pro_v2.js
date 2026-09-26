@@ -55,9 +55,6 @@ function savePro() {
 #replay-bar{display:none;align-items:center;gap:8px;padding:4px 12px;background:var(--bg2);border-bottom:1px solid var(--gold-m);font-family:monospace;font-size:10px;color:var(--gold)}
 #replay-bar.on{display:flex}
 #replay-slider{flex:1;height:4px;cursor:pointer}
-.bt-result-row{display:flex;justify-content:space-between;padding:5px 12px;border-bottom:1px solid var(--bg3);font-family:monospace;font-size:10px}
-.bt-result-row .lbl{color:var(--tlo)}
-.bt-result-row .val{color:var(--thi);font-weight:700}
 `;
   const s = document.createElement('style');
   s.id = 'pro-v2-styles';
@@ -807,103 +804,6 @@ function replayStep(delta) {
   replayApply();
 }
 
-// ============================================================
-// 8. BACKTESTING — per-strategy historical performance
-// ============================================================
-function backtest(stratKey, params, candles, holdDays) {
-  const strat = STRATEGIES.find(s => s.key === stratKey);
-  if (!strat || !candles || candles.length < 70) return null;
-  holdDays = holdDays || 20;
-  const trades = [];
-  // Walk through candles, evaluate strategy at each bar, simulate trade
-  let i = 60;   // skip warmup for indicators
-  while (i < candles.length - holdDays - 1) {
-    const sub = candles.slice(0, i + 1);
-    const ind = mockInd(sub);
-    let r;
-    try { r = strat.check(ind, sub, params || {}); } catch { r = null; }
-    if (r?.status === 'trigger') {
-      const entry = candles[i + 1].open;     // enter next bar open
-      const exit  = candles[i + holdDays].close;
-      const ret = (exit - entry) / entry * 100;
-      trades.push({date: candles[i].time, entry, exit, ret});
-      i += holdDays;   // wait for trade to finish before next
-    } else {
-      i++;
-    }
-  }
-  if (trades.length === 0) return {trades:[], summary:'無交易訊號'};
-  const wins = trades.filter(t => t.ret > 0).length;
-  const totalRet = trades.reduce((s, t) => s + t.ret, 0);
-  const avgRet = totalRet / trades.length;
-  const winRate = wins / trades.length * 100;
-  const maxDD = Math.min(...trades.map(t => t.ret));
-  const maxGain = Math.max(...trades.map(t => t.ret));
-  return {trades, summary: {count:trades.length, wins, winRate, avgRet, totalRet, maxDD, maxGain}};
-}
-
-// Minimal indicator computation for backtest (subset of full worker)
-function mockInd(candles) {
-  const closes = candles.map(c => c.close);
-  const n = closes.length;
-  const sma = (p, idx) => {
-    if (idx + 1 < p) return null;
-    let s = 0;
-    for (let k = idx - p + 1; k <= idx; k++) s += closes[k];
-    return s / p;
-  };
-  const last = n - 1;
-  // Wilder RSI14：共用 watch_v2 的 rsiWildersSeries（與 server indicators 同一演算法）
-  const rsi = rsiWildersSeries(closes, 14)[last];
-  // BB 20
-  const m20 = sma(20, last);
-  let v = 0;
-  for (let i = last - 19; i <= last; i++) v += Math.pow(closes[i] - m20, 2);
-  const sd = Math.sqrt(v / 20);
-  // Vol ratio
-  let v5 = 0, v20 = 0;
-  for (let i = last - 4; i <= last; i++) v5 += candles[i].volume || 0;
-  for (let i = last - 19; i <= last; i++) v20 += candles[i].volume || 0;
-  const volRatio = (v20 / 20) > 0 ? (v5 / 5) / (v20 / 20) : 1;
-  return {
-    sma5: sma(5, last), sma20: m20, sma60: sma(60, last),
-    rsi14: rsi, bbU: m20 + 2 * sd, bbL: m20 - 2 * sd,
-    volRatio,
-  };
-}
-
-function runBacktestForStrat(stratKey) {
-  if (!S.data?.candles?.length) { alert('先載入資料'); return; }
-  const strat = STRATEGIES.find(s => s.key === stratKey);
-  if (!strat) return;
-  // Use default params
-  const params = {};
-  for (const f of (strat.paramFields || [])) {
-    if (f.default !== undefined && f.default !== '') params[f.key] = f.default;
-  }
-  // Fill required custom prices with nominal
-  if (stratKey === 'custom_buy' || stratKey === 'custom_sell') {
-    alert('自訂價位策略無法回測（需要固定價格基準，但歷史資料價格動態變化）');
-    return;
-  }
-  const r = backtest(stratKey, params, S.data.candles, 20);
-  if (!r || r.summary === '無交易訊號') { alert(`${strat.lbl}：歷史資料中無觸發訊號`); return; }
-  const s = r.summary;
-  const winCol = window.Colors ? Colors.quality(s.winRate, 55, 45) : (s.winRate >= 55 ? 'var(--red)' : s.winRate >= 45 ? 'var(--orange)' : 'var(--green)');
-  const avgCol = window.Colors ? Colors.gain(s.avgRet) : (s.avgRet >= 0 ? 'var(--green)' : 'var(--red)');
-  const html =
-    `<h3 style="margin:0 0 8px;color:var(--gold);font-family:monospace">${strat.icon} ${strat.lbl} — 回測結果</h3>` +
-    `<div style="font-family:monospace;font-size:9.5px;color:var(--tlo);margin-bottom:8px">${S.sym} · ${S.data.candles.length} 個交易日 · 持有 20 日後出場</div>` +
-    `<div class="bt-result-row"><span class="lbl">交易次數</span><span class="val">${s.count}</span></div>` +
-    `<div class="bt-result-row"><span class="lbl">勝率</span><span class="val" style="color:${winCol}">${s.winRate.toFixed(1)}% (${s.wins}/${s.count})</span></div>` +
-    `<div class="bt-result-row"><span class="lbl">平均報酬</span><span class="val" style="color:${avgCol}">${s.avgRet >= 0 ? '+' : ''}${s.avgRet.toFixed(2)}%</span></div>` +
-    `<div class="bt-result-row"><span class="lbl">總報酬</span><span class="val" style="color:${avgCol}">${s.totalRet >= 0 ? '+' : ''}${s.totalRet.toFixed(2)}%</span></div>` +
-    `<div class="bt-result-row"><span class="lbl">最大單筆盈利</span><span class="val" style="color:var(--green)">+${s.maxGain.toFixed(2)}%</span></div>` +
-    `<div class="bt-result-row"><span class="lbl">最大單筆虧損</span><span class="val" style="color:var(--red)">${s.maxDD.toFixed(2)}%</span></div>` +
-    `<div style="margin-top:10px;font-family:monospace;font-size:9px;color:var(--tf);line-height:1.6">⚠ 回測假設：訊號觸發隔日開盤進場、固定持有 20 日後出場、無滑價手續費。實際操作會有差距。</div>`;
-  showProModal(html);
-}
-
 function showProModal(html) {
   hideProModal();
   const m = document.createElement('div');
@@ -957,10 +857,9 @@ document.addEventListener('click', ev => {
       `<button class="probtn" id="btn-compare" onclick="compareToggle()" title="疊上大盤指數比較相對表現">vs 大盤</button>` +
       `<button class="probtn on" id="btn-vp"      onclick="vpToggle()"      title="量價分布常駐預設開啟；點一下可暫時關閉。模式請用圖上方「均衡/只看價/只看量」列切換">📊 量價</button>` +
       `<button class="probtn" id="btn-vp-mode" style="display:none" onclick="window.vpCycleMode&&vpCycleMode()" title="已改由圖上方量價列切換">量價均衡</button>` +
-      `<button class="probtn" id="btn-bt3"     onclick="window.backtestOpen&&backtestOpen()" title="回測引擎：8 策略勝率 + 型態命中率 (v3.8)">📈 回測</button>` +
       `<button class="probtn" id="btn-alertpush" onclick="window.alertPushOpen&&alertPushOpen()" title="後端警報推播設定 Telegram/Email (v3.8)">🔔 推播</button>` +
       `<button class="probtn" id="btn-overnight" onclick="window.overnightOpen&&overnightOpen()" title="盤後頁：台指期夜盤＋美股期貨→台股隔日預估、市值前十大個股期領先、持倉停損/觀察買區">🌙 夜盤</button>` +
-      `<button class="probtn" id="btn-supplychain" onclick="window.supplyChainOpen&&supplyChainOpen()" title="台灣AI供應鏈族群連動：晶圓→封裝→CPO→伺服器→散熱 RS輪動 (v3.8)">🔗 供應鏈</button>` +
+      `<button class="probtn" id="btn-supplychain" onclick="window.supplyChainOpen&&supplyChainOpen()" title="AI 供應鏈：今日族群連動（台／美）＋ 5/20/60 日動能與資金輪動（台股）">🔗 供應鏈</button>` +
       `<button class="probtn" id="btn-valuation" onclick="window.valuationOpen&&valuationOpen()" title="長線估值錨：本益比河流，判斷現在貴不貴 (v3.8)">⚓ 估值</button>` +
       `<button class="probtn" id="btn-marketflow" onclick="window.marketFlowOpen&&marketFlowOpen()" title="法人資金頁：三大法人動向與買賣超排行">💰 法人資金</button>` +
       `<button class="probtn" id="btn-portfolio" onclick="window.portfolioOpen&&portfolioOpen()" title="投組風險頁：相關性／波動／VaR／產業曝險">📦 投組</button>` +
@@ -1031,39 +930,6 @@ document.addEventListener('click', ev => {
   };
 })();
 
-// Hook into renderStrategyPlaybook to add 回測 button per strategy
-(function patchPlaybook() {
-  if (typeof renderStrategyPlaybook !== 'function') return setTimeout(patchPlaybook, 100);
-  // Add backtest button via click delegation in playbook section
-  document.addEventListener('click', ev => {
-    const el = ev.target.closest('[data-pro="bt"]');
-    if (!el) return;
-    runBacktestForStrat(el.dataset.strat);
-  });
-  // Override renderStrategyPlaybook to inject 回測 button per strategy
-  const orig = window.renderStrategyPlaybook;
-  window.renderStrategyPlaybook = function () {
-    let h = orig.apply(this, arguments);
-    // 回測按鈕由 WATCH 表單（data-pro="bt"）提供；這裡只在劇本標題提示
-    h = h.replace('▼ 策略劇本說明（點開看詳細）',
-      '▼ 策略劇本說明（點開看詳細，含回測）');
-    return h;
-  };
-})();
-
-// Better backtest entry: add a button in WATCH form
-(function addBacktestButton() {
-  // Patch renderSingleForm to add "回測 X 年" button
-  if (typeof renderSingleForm !== 'function') return setTimeout(addBacktestButton, 100);
-  const orig = window.renderSingleForm;
-  window.renderSingleForm = function () {
-    let h = orig.apply(this, arguments);
-    // Append a backtest button after the params section
-    h += `<button data-pro="bt" data-strat="${S.watchFormStrategy || 'sma60_pullback'}" style="padding:7px;background:transparent;border:1px solid var(--gold-m);border-radius:4px;color:var(--gold);font-family:monospace;font-size:10px;cursor:pointer;letter-spacing:.5px">📊 回測這個策略（用 ${S.sym || '當前個股'} 5 年資料）</button>`;
-    return h;
-  };
-})();
-
 // ── Mobile: tap on rtabs ::before pseudo-handle to collapse/expand ──
 (function mobileDrawerToggle() {
   if (!document.getElementById('rtabs')) return setTimeout(mobileDrawerToggle, 100);
@@ -1092,7 +958,6 @@ window.vpToggle          = vpToggle;
 window.replayToggle      = replayToggle;
 window.replayStep        = replayStep;
 window.replayExit        = replayExit;
-window.runBacktestForStrat = runBacktestForStrat;
 window.addLine           = addLine;
 window.removeLine        = removeLine;
 window.clearLines        = clearLines;

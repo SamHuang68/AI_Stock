@@ -1471,6 +1471,64 @@ function plainTalkV3(p) {
     '目前方向不明、在區間整理。新手做法 → 別猜方向，等明確突破某一邊再考慮，現階段按兵不動最安全。';
 }
 
+// ── 型態歷史命中率（原 📈 回測視窗的一段，併入型態視窗）──────────────
+// 每根 K 只偵測一次、所有關鍵字共用；分批計算避免卡住畫面。
+// 樣本 < 20 不公開比例（與體檢統計同一門檻）。同一型態連續多日被偵測會重複計入。
+const HIT_KEYWORDS_V3 = ['雙底', '雙頂', '頭肩底', '頭肩頂', '黃金交叉', '杯柄', '上升三角', '突破'];
+const HIT_MIN_N_V3 = 20;
+function patternHitRatesV3(candles, fwd, onDone) {
+  const acc = {};
+  HIT_KEYWORDS_V3.forEach(k => { acc[k] = []; });
+  const end = candles.length - fwd;
+  let i = 40;
+  (function step() {
+    const stop = Math.min(end, i + 25);
+    for (; i < stop; i++) {
+      let names;
+      try { names = detectPatternsV3(candles.slice(0, i + 1)).map(p => p.name || p.type || ''); } catch (e) { continue; }
+      if (!names.length) continue;
+      const r = (candles[i + fwd].close - candles[i].close) / candles[i].close;
+      HIT_KEYWORDS_V3.forEach(k => { if (names.some(n => n.includes(k))) acc[k].push(r); });
+    }
+    if (i < end) { setTimeout(step, 0); return; }
+    onDone(HIT_KEYWORDS_V3.map(k => {
+      const h = acc[k];
+      const wins = h.filter(r => r > 0).length;
+      return { kw: k, count: h.length, hitRate: h.length ? wins / h.length * 100 : null,
+               avgRet: h.length ? h.reduce((a, r) => a + r, 0) / h.length * 100 : null };
+    }));
+  })();
+}
+function renderHitRatesV3(host, candles) {
+  const fwd = 10;
+  host.innerHTML = '<div style="padding:8px 12px;font-family:monospace;font-size:10px;color:var(--tlo)">⟳ 計算型態歷史命中率…</div>';
+  patternHitRatesV3(candles, fwd, rows => {
+    if (!host.isConnected) return;
+    const col = v => window.Colors ? Colors.gain(v) : (v >= 0 ? 'var(--red)' : 'var(--green)');
+    const shown = rows.filter(r => r.count > 0);
+    let h = `<div style="padding:6px 12px;font-family:monospace;font-size:10px;color:var(--gold);background:rgba(251,191,36,.05);border-bottom:1px solid var(--border)">▸ 型態歷史命中率（出現後 ${fwd} 日）</div>`;
+    if (!shown.length) {
+      host.innerHTML = h + '<div style="padding:8px 12px;font-family:monospace;font-size:10px;color:var(--tlo)">這段期間沒有可統計的型態</div>';
+      return;
+    }
+    h += '<table style="width:100%;border-collapse:collapse;font-family:monospace;font-size:10px">' +
+      '<tr style="color:var(--tlo)"><th style="text-align:left;padding:4px 12px">型態</th><th style="text-align:right;padding:4px 6px">樣本</th>' +
+      '<th style="text-align:right;padding:4px 6px">上漲比例</th><th style="text-align:right;padding:4px 12px">平均報酬</th></tr>';
+    for (const r of shown) {
+      const enough = r.count >= HIT_MIN_N_V3;
+      h += `<tr style="border-top:1px solid var(--border)"><td style="padding:4px 12px">${escP(r.kw)}</td>` +
+        `<td style="text-align:right;padding:4px 6px">${r.count}</td>` +
+        (enough
+          ? `<td style="text-align:right;padding:4px 6px">${r.hitRate.toFixed(0)}%</td>` +
+            `<td style="text-align:right;padding:4px 12px;color:${col(r.avgRet)}">${r.avgRet >= 0 ? '+' : ''}${r.avgRet.toFixed(2)}%</td>`
+          : `<td colspan="2" style="text-align:right;padding:4px 12px;color:var(--tf)">樣本不足（&lt;${HIT_MIN_N_V3}）</td>`) +
+        '</tr>';
+    }
+    h += `</table><div style="padding:4px 12px 8px;font-family:monospace;font-size:8.5px;color:var(--tf);line-height:1.6">同一型態連續多日被偵測會重複計入；未還原除權息；過去比例不代表未來。</div>`;
+    host.innerHTML = h;
+  });
+}
+
 function patternsToggleV3() {
   S.patternsEnabled = !S.patternsEnabled;
   const b = document.getElementById('btn-patterns');
@@ -1504,11 +1562,14 @@ async function showPatternsModalV3() {
     <h3 style="margin:0 0 10px;color:var(--gold);font-family:monospace;font-size:14px">🤖 AI 形態辨識 v3 — ${sym}</h3>
     <div style="font-family:monospace;font-size:9.5px;color:var(--tlo);margin-bottom:10px">v3 進階：8 經典 + 11 TradingView 級。${candles ? `<br>分析基礎：最近 <b style="color:var(--gold)">${candles.length}</b> 個日 K 線 (2y 獨立抓取)` : ''}</div>
     <div style="border-top:1px solid var(--border);margin:-2px -24px 6px">${panelHtml}</div>
+    ${candles ? '<div id="pat-hit-rates" style="border-top:1px solid var(--border);margin:0 -24px 6px"></div>' : ''}
     <div style="margin-top:10px;font-family:monospace;font-size:8.5px;color:var(--tf);line-height:1.7">
       ⚠ 形態辨識僅為技術面參考。<br>
       v3 諧波/艾略特/週期建議搭配基本面、量能、大盤判斷。長按 🤖 按鈕可在 chart 上 toggle overlay。
     </div>`;
   if (typeof showProModal === 'function') showProModal(html);
+  const hitHost = document.getElementById('pat-hit-rates');
+  if (hitHost && candles) renderHitRatesV3(hitHost, candles);
 }
 
 // ============================================================
@@ -1526,7 +1587,7 @@ async function showPatternsModalV3() {
     const b = document.createElement('button');
     b.id = 'btn-patterns';
     b.className = 'probtn';
-    b.title = 'AI 形態辨識 v3 — 19 種型態 (含諧波/艾略特/循環)';
+    b.title = 'AI 形態辨識 v3 — 19 種型態 (含諧波/艾略特/循環)＋ 型態歷史命中率（2 年日 K）';
     b.innerHTML = '🤖 形態³';
     b.onclick = showPatternsModalV3;
     let lp = null;
@@ -1572,6 +1633,7 @@ window.PatternV3 = {
   drawPatternsOnChart: drawPatternsOnChartV3,
   renderPatternsPanel: renderPatternsPanelV3,
   showPatternsModal: showPatternsModalV3,
+  hitRates: patternHitRatesV3,
   patternsToggle: patternsToggleV3,
   // 常數
   FIB, COL, TOL, HARMONICS,

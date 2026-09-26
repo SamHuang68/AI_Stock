@@ -20,7 +20,6 @@ import os
 DEPS = {
     'table_sort_v5.js':     ['colors_v3.js'],
     'volume_profile_v3.js': ['pro_v2.js'],
-    'backtest_ui_v3.js':    ['backtest_v3.js'],
     'strategy_builder_v3.js': ['backtest_v3.js'],
     'strategy_script_v3.js':  ['strategy_builder_v3.js'],
     'wizard_v3.js':         ['strategy_builder_v3.js', 'backtest_v3.js', 'drawtools_v3.js'],
@@ -88,7 +87,7 @@ _CURRENT = [
     'position_v2.js', 'watch_v2.js', 'info_v2.js', 'pro_v2.js', 'volume_profile_v3.js',
     'pattern_v3.js', 'live_v2.js', 'chip_v3.js', 'fundamental_v3.js',
     'polish_v3.js', 'wl_live_v3.js',
-    'alert_push_v3.js', 'backtest_v3.js', 'backtest_ui_v3.js', 'enhance_v3.js',
+    'alert_push_v3.js', 'backtest_v3.js', 'enhance_v3.js',
     'aftermarket_v3.js', 'overnight_v3.js', 'supplychain_v3.js',
     'chainmom_v3.js', 'valuation_v3.js',
     'calendar_v3.js', 'multichart_v3.js', 'spread_v3.js', 'hotkeys_v3.js',
