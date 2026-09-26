@@ -15,7 +15,7 @@
 | 建置 | `build_v2.py` 以 `stock_terminal.html` 為唯讀輸入，把 `src/**` 注入 `stock_terminal_v2.html`；內容雜湊版號可重現 |
 | 啟動 | `START_TIP.cmd` → `scripts/go.ps1`（Windows canonical）；`go.bat` 只保留相容轉接 |
 | 規模 | `server/` ≈ **12.9k** LOC；`src/` ≈ **21.7k** LOC；單檔最大：`server.py` **~5.6k**、`market_chart_v3.js` **~1.8k** |
-| 核心功能 | 台／美股看盤、技術指標、觀察／持倉、選股回測、ETFΔ、籌碼／基本面、大盤 Macro 追蹤圖、市場風險評分、融資週期、TDCC 集中度、本機 AI／Claude 報告、推播警示 |
+| 核心功能 | 台／美股看盤、技術指標、觀察／持倉、選股回測、ETFΔ、籌碼／基本面、大盤 Macro 追蹤圖、市場風險評分、融資週期、TDCC 集中度、AI 中樞（盤後日報／體檢白話／本機副駕等）、推播警示 |
 | 鐵律（`.cursorrules`） | RSI／SMA 計算必須精準；前後端欄位必須對齊；拒絕半成品 |
 
 ---

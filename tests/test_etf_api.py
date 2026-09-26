@@ -100,7 +100,7 @@ class TestEtfApi(unittest.TestCase):
         import ai_routes
         import etf_routes
         for name in (
-            '_handle_ai_key_status', '_handle_ai_proxy', '_handle_ai_report',
+            '_handle_ai_key_status', '_handle_ai_proxy',
             '_handle_ai_note', '_handle_ai_local',
         ):
             self.assertTrue(hasattr(ai_routes.AiRoutesMixin, name), name)

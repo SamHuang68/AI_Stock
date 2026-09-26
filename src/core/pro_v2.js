@@ -973,6 +973,8 @@ document.addEventListener('click', ev => {
       `<button class="probtn" id="btn-stratscript" onclick="window.stratScriptOpen&&stratScriptOpen()" title="策略腳本 DSL：類 Pine 語法寫策略→圖上渲染買賣訊號 (v3.9)">📝 腳本</button>` +
       `<button class="probtn" id="btn-drawtools" onclick="window.drawToolsOpen&&drawToolsOpen()" title="進階畫線：趨勢線/斐波那契/通道/矩形/文字，雲端記憶換裝置不消失 (v3.9)　Alt+T">✏ 畫線</button>` +
       `<button class="probtn" id="btn-screener3" onclick="window.screener3Open&&screener3Open()" title="三合一選股：技術+基本面+籌碼交集，一鍵存自選 (v3.9)">🔬 選股</button>` +
+      `<button class="probtn" id="btn-focus" onclick="window.focusScanOpen&&focusScanOpen()" title="焦點掃描：多訊號組合找做多／做空焦點（策略訊號頁，可選產業）">🎯 焦點</button>` +
+      `<button class="probtn" id="btn-ai-hub" onclick="window.ShellV5&&ShellV5.go('ai')" title="AI 中樞：所有 AI 功能、模型與連線狀態集中一頁">🤖 AI 中樞</button>` +
       `<button class="probtn" id="btn-wizard" onclick="window.wizardOpen&&wizardOpen()" title="加股設定精靈：4題問答→自動體檢並建議 訊號/警報/計畫/畫線 (v3.9)">🧙 精靈</button>` +
       `<button class="probtn" id="btn-replay"  onclick="replayToggle()"  title="K 線重播模式">▶ Replay</button>`;
     rangebar.parentElement.insertBefore(tools, rangebar.nextSibling);

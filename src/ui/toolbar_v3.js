@@ -32,7 +32,7 @@
   // 一階分類 → 二階項目（按鈕 id，順序即顯示順序）
   var GROUPS = [
     { key: 'ai', label: '🤖 AI',
-      items: ['btn-ai-report', 'btn-copilot', 'btn-focus'] },
+      items: ['btn-ai-hub', 'btn-copilot'] },
     { key: 'chart', label: '📈 圖表',
       items: ['btn-vp', 'btn-multichart', 'btn-spread', 'btn-compare',
               'btn-overnight', 'btn-drawtools', 'btn-replay'] },
@@ -40,7 +40,7 @@
       items: ['btn-valuation', 'btn-marketflow',
               'btn-supplychain', 'btn-stockfut', 'btn-portfolio', 'btn-chainmom'] },
     { key: 'screen', label: '🔍 選股策略',
-      items: ['btn-screener3', 'btn-patterns',
+      items: ['btn-screener3', 'btn-focus', 'btn-patterns',
               'btn-stratbuilder', 'btn-bt3', 'btn-wizard', 'btn-stratscript'] },
     { key: 'sys', label: '⚙️ 系統',
       items: ['btn-universe', 'btn-datasources', 'btn-calendar',
@@ -322,7 +322,8 @@
       // 相容舊 cat:'pin'：除指令外，導向對應分類（避免再度撐爆常駐列）
       var cat = opt.cat;
       if (cat === 'pin' && opt.id !== 'btn-cmdp') {
-        if (opt.id === 'btn-ai-report' || opt.id === 'btn-copilot' || opt.id === 'btn-focus') cat = 'ai';
+        if (opt.id === 'btn-ai-hub' || opt.id === 'btn-copilot') cat = 'ai';
+        else if (opt.id === 'btn-focus') cat = 'screen';
         else if (opt.id === 'btn-universe' || opt.id === 'btn-datasources') cat = 'sys';
         else cat = 'sys';
       }

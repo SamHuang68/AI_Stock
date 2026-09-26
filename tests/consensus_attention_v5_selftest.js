@@ -17,7 +17,13 @@ assert(radar.includes("ACTIONABLE[item.lifecycleState]") && radar.includes("fres
   'badge must require WATCH+ and fresh evidence');
 assert(radar.includes('(orientation:portrait)') && radar.includes('(orientation:landscape)'),
   'portrait bottom sheet / landscape side overlay rules missing');
-assert(shell.includes('window.ConsensusAttentionV5.open()'), 'existing FAB is not routed to Consensus Radar');
+assert(shell.includes('var ca = window.ConsensusAttentionV5;') && shell.includes('ca.open()'),
+  'existing FAB is not routed to Consensus Radar');
+assert(shell.includes('if (shown !== true) openRing('),
+  'FAB must fall back to the ring when the radar is disabled (default flag off)');
+assert(/function openRadar\(\) \{\s*if \([^\n]*shadowConsensusAttention'\)\) return false;/.test(radar) &&
+  /return true;\r?\n\s*\}\r?\n\s*function closeRadar/.test(radar),
+  'openRadar must report whether it opened');
 assert(decision.includes('applyPendingFocus()') && decision.includes('data-dc-section="divergences"'),
   'Decision deep-link focus contract missing');
 const evidenceArtifact = '/assets/docs/archify/st-decision-evidence-lineage.html';

@@ -1,9 +1,10 @@
 /* ============================================================================
  * ai_v5.js  —  Stock Terminal 5.0：AI 中樞側欄
  * ----------------------------------------------------------------------------
- * 專業終端版面：KPI strip + 做多／做空雙欄 + 緊湊工具列（開既有模態）
- *   openAIModal / copilotOpen / focusScanOpen
- *   GET /focus（欄位：buy / short / scanned）
+ * 全站 AI 功能集中一頁：KPI strip（Claude Key／模型、本機 EVO-T1、盤後日報、權限）
+ * + AI 功能目錄（用途、模型、資料去向、所在位置、就緒狀態、開啟）。
+ *   GET /ai-key/status · /ai-model · /ai/local/status · /api/ai/postmarket-daily/latest
+ * 焦點掃描不是 AI（規則訊號），唯一入口在「策略訊號」頁。
  * 掛載：#mount-ai；側欄「AI」
  * ========================================================================== */
 (function () {
@@ -11,14 +12,19 @@
 
   var SRV = window.SERVER || '';
   var timer = null;
-  var lastFocus = null;
   var fetching = false;
+  var status = { key: null, model: null, local: null, pmd: null };
 
   function $(id) { return document.getElementById(id); }
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>]/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
     });
+  }
+  function jget(url) {
+    return fetch(SRV + url, { cache: 'no-store', credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; });
   }
 
   function injectCSS() {
@@ -52,11 +58,11 @@
       '#ai5-root .ai5-strip .cell{background:linear-gradient(180deg,rgba(17,27,46,.95),rgba(11,18,32,.98));' +
         'border:1px solid var(--border);border-radius:5px;padding:3px 6px;min-width:0;overflow:hidden}' +
       '#ai5-root .ai5-strip .k{font-size:10px;color:var(--tlo);letter-spacing:.4px}' +
-      '#ai5-root .ai5-strip .v{font-size:15px;font-weight:800;color:var(--thi);line-height:1.15;' +
+      '#ai5-root .ai5-strip .v{font-size:13px;font-weight:800;color:var(--thi);line-height:1.2;' +
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '#ai5-root .ai5-strip .s{font-size:10px;color:var(--tlo);margin-top:0;line-height:1.2}' +
+      '#ai5-root .ai5-strip .s{font-size:10px;color:var(--tlo);line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#ai5-root .ai5-tools{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 4px;flex:0 0 auto}' +
-      '#ai5-root .ai5-dash{flex:1;min-height:0;display:grid;gap:4px;grid-template-columns:minmax(0,1fr) minmax(0,1fr);' +
+      '#ai5-root .ai5-dash{flex:1;min-height:0;display:grid;gap:4px;grid-template-columns:minmax(0,1fr);' +
         'grid-template-rows:minmax(0,1fr);align-items:stretch}' +
       '#ai5-root .ai5-sec{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;' +
         'min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;height:100%}' +
@@ -64,61 +70,100 @@
         'display:flex;justify-content:space-between;align-items:center;gap:6px}' +
       '#ai5-root .ai5-fill{flex:1;min-height:0;overflow:auto}' +
       '#ai5-root table{width:100%;border-collapse:collapse;font-size:10px}' +
-      '#ai5-root th,#ai5-root td{padding:3px 4px;border-bottom:1px solid var(--border);text-align:right}' +
-      '#ai5-root th:first-child,#ai5-root td:first-child,#ai5-root th:nth-child(2),#ai5-root td:nth-child(2),' +
-      '#ai5-root th:nth-child(4),#ai5-root td:nth-child(4){text-align:left}' +
+      '#ai5-root th,#ai5-root td{padding:4px 5px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}' +
+      '#ai5-root td:last-child,#ai5-root th:last-child{text-align:right;white-space:nowrap}' +
       '#ai5-root th{color:var(--tlo);font-weight:600;position:sticky;top:0;background:var(--bg2);z-index:1}' +
-      '#ai5-root tr.ai5-row{cursor:pointer}#ai5-root tr.ai5-row:hover{background:var(--bg3)}' +
-      '#ai5-root .up{color:var(--red)}#ai5-root .dn{color:var(--green)}#ai5-root .flat{color:var(--tlo)}' +
-      '#ai5-root .ai5-note{font-size:10px;color:var(--tlo);line-height:1.4;margin-top:2px;flex:0 0 auto}' +
-      '#ai5-root .ai5-empty{font-size:10px;color:var(--tlo);padding:16px 8px;text-align:center}' +
+      '#ai5-root td.nm{color:var(--thi);font-weight:700;white-space:nowrap}' +
+      '#ai5-root td.what{color:var(--text);min-width:180px}' +
+      '#ai5-root td.where,#ai5-root td.mdl{color:var(--tlo);white-space:nowrap}' +
+      '#ai5-root .tag{display:inline-block;padding:0 5px;border-radius:3px;font-size:9px;border:1px solid var(--border)}' +
+      '#ai5-root .tag.cloud{color:#fde68a;border-color:rgba(250,204,21,.45)}' +
+      '#ai5-root .tag.local{color:#a7f3d0;border-color:rgba(52,211,153,.45)}' +
+      '#ai5-root .tag.ext{color:#fca5a5;border-color:rgba(248,113,113,.45)}' +
+      '#ai5-root .ok{color:#34d399}#ai5-root .warn{color:#fbbf24}#ai5-root .off{color:var(--tlo)}' +
+      '#ai5-root .ai5-note{font-size:10px;color:var(--tlo);line-height:1.4;margin-top:4px;flex:0 0 auto}' +
       '#ai5-root .ai5-loading{font-size:10px;color:var(--tlo);padding:12px 0}';
   }
 
-  function openChart(code, mkt) {
-    if (code && typeof loadSym === 'function') {
-      if (window.ShellV5 && ShellV5.openChart) ShellV5.openChart(code, mkt || 'TW');
-      else {
-        loadSym(code, mkt || 'TW');
-        if (window.ShellV5) window.ShellV5.go('chart');
-      }
-    }
+  function role() {
+    var p = window.ST_PRIVATE_WEB_PROFILE;
+    return p && p.role ? String(p.role) : 'local';
   }
 
-  function keyStatus() {
-    try {
-      if (localStorage.getItem('claude_api_key') || localStorage.getItem('ai_key') ||
-          localStorage.getItem('ANTHROPIC_API_KEY')) {
-        return '本機 Key 已存';
-      }
-    } catch (e) {}
-    return '未偵測 Key';
+  function openChartTab(tab) {
+    if (window.ShellV5 && typeof window.ShellV5.go === 'function') window.ShellV5.go('chart');
+    setTimeout(function () {
+      if (typeof window.setTab === 'function') window.setTab(tab);
+    }, 200);
   }
 
-  function lastReportStamp() {
-    try {
-      var saved = JSON.parse(localStorage.getItem('ai_report_last') || 'null');
-      return saved && saved.stamp ? saved.stamp : '尚無報告';
-    } catch (e) { return '尚無報告'; }
+  function openPulseAi() {
+    if (window.ShellV5 && typeof window.ShellV5.go === 'function') window.ShellV5.go('pulse');
+    /* 只帶到按鈕並標示；本機推論需數分鐘，由使用者自己按下開始 */
+    setTimeout(function () {
+      var b = $('pl-ai-sum');
+      if (!b) return;
+      b.scrollIntoView({ block: 'nearest' });
+      b.focus();
+      b.style.outline = '2px solid var(--gold)';
+      setTimeout(function () { b.style.outline = ''; }, 2400);
+    }, 450);
   }
 
-  /** 對齊 /focus：buy / short（heat_v5 同契約）；相容舊別名 */
-  function pickLists(focus) {
-    focus = focus || {};
-    var longs = (focus.buy || focus.long || focus.bull || focus.longs || []).slice();
-    var shorts = (focus.short || focus.bear || focus.shorts || []).slice();
-    if (focus.focus) {
-      longs = (focus.focus.buy || focus.focus.long || longs).slice();
-      shorts = (focus.focus.short || shorts).slice();
+  /* engine：cloud＝Claude（送 Anthropic）；local＝EVO-T1 本機；pulse＝本機快速＋外部深度 */
+  var FEATURES = [
+    { id: 'pmd', name: '盤後日報', engine: 'cloud', where: 'AI 中樞',
+      what: '持倉＋自選逐檔敘事；數字只引用伺服器證據包，會刪除喊單字句',
+      open: function () { if (window.PostmarketDaily) window.PostmarketDaily.open(); } },
+    { id: 'health', name: '個股體檢白話', engine: 'cloud', where: '圖表「體檢」分頁',
+      what: '燈號、訊號與歷史統計逐句引用證據翻成白話；沒 Key 時用規則模板',
+      open: function () { openChartTab('health'); } },
+    { id: 'copilot', name: '本機副駕', engine: 'local', where: '副駕視窗',
+      what: '自然語言問盤，自動附上當前個股、持倉與自選',
+      open: function () { if (typeof window.copilotOpen === 'function') window.copilotOpen(); } },
+    { id: 'pulse', name: '大盤 AI 摘要', engine: 'pulse', where: '儀表板「AI 摘要」',
+      what: '大盤快速摘要（本機）或支持／反方證據的深度分析（外部）',
+      open: openPulseAi },
+    { id: 'decision', name: '決策 AI 解釋', engine: 'local', where: '決策中心',
+      what: '解釋決策情境，列出反方觀點、衝突與失效條件',
+      open: function () { if (window.ShellV5) window.ShellV5.go('decision', { focusSection: 'summary', from: 'ai-hub' }); } },
+    { id: 'etf', name: 'ETF 異動原因', engine: 'cloud', where: '圖表「ETF△」分頁',
+      what: 'ETF 加減碼個股的一句話原因（自動補月營收與三率）',
+      open: function () { openChartTab('etf'); } },
+    { id: 'wizard', name: '加股精靈筆記', engine: 'cloud', where: '🧙 精靈',
+      what: '加股設定精靈最後一步產生的操作筆記',
+      open: function () { if (typeof window.wizardOpen === 'function') window.wizardOpen(); } }
+  ];
+
+  function engineTag(engine) {
+    if (engine === 'cloud') return '<span class="tag cloud">Claude · 雲端</span>';
+    if (engine === 'local') return '<span class="tag local">EVO-T1 · 本機</span>';
+    return '<span class="tag local">本機</span> <span class="tag ext">深度 · 外部</span>';
+  }
+
+  function localModes() {
+    var st = status.local;
+    return (st && st.modes) || {};
+  }
+
+  /** 每列就緒狀態：reader 身分不能送 AI 請求（gateway POST 一律 403） */
+  function readiness(f) {
+    if (role() === 'reader') return '<span class="off">僅 Owner</span>';
+    if (f.engine === 'cloud') {
+      if (status.key == null) return '<span class="off">檢查中</span>';
+      if (f.id === 'health' && !status.key.set) return '<span class="warn">規則模板</span>';
+      return status.key.set ? '<span class="ok">就緒</span>' : '<span class="warn">未設 Key</span>';
     }
-    if (!longs.length && !shorts.length && Array.isArray(focus.list)) {
-      focus.list.forEach(function (r) {
-        var side = String(r.side || r.dir || r.bias || '');
-        if (/空|short|bear|sell/i.test(side) || (r.score != null && r.score < 0)) shorts.push(r);
-        else longs.push(r);
-      });
+    if (status.local == null) return '<span class="off">檢查中</span>';
+    var m = localModes();
+    var fast = m.fast && m.fast.available;
+    if (f.engine === 'pulse') {
+      var deep = m.deep && m.deep.available;
+      if (fast && deep) return '<span class="ok">就緒</span>';
+      if (fast) return '<span class="ok">快速就緒</span>';
+      return deep ? '<span class="warn">僅深度</span>' : '<span class="warn">離線</span>';
     }
-    return { longs: longs, shorts: shorts, scanned: focus.scanned };
+    return fast ? '<span class="ok">就緒</span>' : '<span class="warn">離線</span>';
   }
 
   function ensureMount() {
@@ -137,18 +182,17 @@
       mount.innerHTML =
         '<div id="ai5-root">' +
           '<div class="ai5-head"><div>' +
-            '<span class="ai5-title">AI</span>' +
-            '<span class="ai5-sub">焦點掃描摘要 · 報告／副駕入口</span>' +
+            '<span class="ai5-title">AI 中樞</span>' +
+            '<span class="ai5-sub">全站 AI 功能集中 · 模型與連線狀態</span>' +
           '</div><div class="ai5-actions">' +
             '<button type="button" class="ai5-btn" id="ai5-refresh">↻ 重新整理</button>' +
-            '<button type="button" class="ai5-btn" data-go="signals">訊號</button>' +
-            '<button type="button" class="ai5-btn" data-go="scan">選股</button>' +
+            '<button type="button" class="ai5-btn" data-go="signals" title="焦點掃描（規則訊號，非 AI）">訊號</button>' +
             '<button type="button" class="ai5-btn primary" data-shell-back>← 儀表板</button>' +
           '</div></div>' +
           '<div id="ai5-body" class="ai5-loading">載入 AI 中樞…</div>' +
         '</div>';
       var r = $('ai5-refresh');
-      if (r) r.onclick = function () { refresh({ force: true }); };
+      if (r) r.onclick = function () { refresh(); };
       mount.querySelectorAll('[data-go]').forEach(function (b) {
         b.onclick = function () {
           if (window.ShellV5) window.ShellV5.go(b.getAttribute('data-go'));
@@ -158,96 +202,78 @@
     return $('ai5-body');
   }
 
-  function rowOf(x, cls) {
-    var V = window.Viz;
-    var code = x.code || x.sym || x.ticker || '';
-    var name = x.name || x.zh || '';
-    var score = x.score != null ? x.score : (x.confidence != null ? x.confidence : null);
-    var sig = '';
-    if (Array.isArray(x.signals) && x.signals.length) sig = x.signals.slice(0, 3).join(' · ');
-    else sig = x.signal || x.reason || x.tag || '—';
-    var scoreCell = '—';
-    if (score != null && isFinite(score)) {
-      var meterScore = Math.abs(score) <= 1 ? score * 100 : Math.max(0, Math.min(100, Math.abs(score)));
-      scoreCell = (score >= 0 ? '+' : '') + Number(score).toFixed(1);
-      if (V) scoreCell += V.scoreMeter(meterScore);
-    }
-    return '<tr class="ai5-row" data-code="' + esc(code) + '">' +
-      '<td class="' + cls + '" style="font-weight:700">' + esc(code) + '</td>' +
-      '<td>' + esc(name) + '</td>' +
-      '<td>' + scoreCell + '</td>' +
-      '<td style="color:var(--tlo)">' + esc(String(sig)) + '</td></tr>';
+  function stripHtml() {
+    var key = status.key;
+    var keyV = key == null ? '…' : (key.set ? '已設定' : '未設定');
+    var keyCls = key == null ? '' : (key.set ? 'ok' : 'warn');
+    var model = status.model && status.model.model ? status.model.model : (key && key.set ? '…' : '—');
+    var m = localModes();
+    var fast = m.fast || {};
+    var deep = m.deep || {};
+    var localV = status.local == null ? '…' : (fast.available ? '快速就緒' : '離線');
+    var localCls = status.local == null ? '' : (fast.available ? 'ok' : 'warn');
+    var localS = (fast.model ? fast.model : 'LM Studio') + (deep.available ? ' · 深度可用' : '');
+    var day = status.pmd;
+    var pmdV = day && day.date ? day.date : '尚無';
+    var pmdS = day && day.date ? ('當日 ' + (day.runs || 0) + ' 次 · $' + Number(day.usdToday || 0).toFixed(3)) : '收盤後手動產生';
+    var r = role();
+    var roleV = r === 'owner' ? 'Owner' : (r === 'reader' ? 'Reader' : '本機');
+    var roleS = r === 'reader' ? 'AI 功能僅 Owner 可執行' : (r === 'owner' ? 'Private Web 遠端' : '完整權限');
+    return '<div class="ai5-strip">' +
+      '<div class="cell"><div class="k">Claude Key</div><div class="v ' + keyCls + '">' + esc(keyV) + '</div>' +
+        '<div class="s">右上 API KEY 設定</div></div>' +
+      '<div class="cell"><div class="k">Claude 模型</div><div class="v" style="font-size:11px">' + esc(model) + '</div>' +
+        '<div class="s">每日自動取最新 Sonnet</div></div>' +
+      '<div class="cell"><div class="k">本機 EVO-T1</div><div class="v ' + localCls + '">' + esc(localV) + '</div>' +
+        '<div class="s" title="' + esc(localS) + '">' + esc(localS) + '</div></div>' +
+      '<div class="cell"><div class="k">盤後日報</div><div class="v">' + esc(pmdV) + '</div>' +
+        '<div class="s">' + esc(pmdS) + '</div></div>' +
+      '<div class="cell"><div class="k">權限</div><div class="v">' + esc(roleV) + '</div>' +
+        '<div class="s">' + esc(roleS) + '</div></div>' +
+    '</div>';
   }
 
-  function render(focus) {
+  function render() {
     var body = ensureMount();
     if (!body) return;
-    if (focus && typeof focus === 'object') lastFocus = focus;
-    var lists = pickLists(lastFocus || {});
-    var longs = lists.longs || [];
-    var shorts = lists.shorts || [];
-    var scanned = lists.scanned != null ? lists.scanned : '—';
+    body.className = '';
 
     var tools =
       '<div class="ai5-tools">' +
-        '<button type="button" class="ai5-btn primary" id="ai5-focus">焦點掃描</button>' +
-        '<button type="button" class="ai5-btn" id="ai5-report">Claude 報告</button>' +
-        '<button type="button" class="ai5-btn" id="ai5-pmd">盤後日報</button>' +
-        '<button type="button" class="ai5-btn" id="ai5-copilot">本機副駕</button>' +
+        '<button type="button" class="ai5-btn primary" data-ai-open="pmd">盤後日報</button>' +
+        '<button type="button" class="ai5-btn" data-ai-open="copilot">本機副駕</button>' +
+        '<button type="button" class="ai5-btn" data-ai-open="health">個股體檢白話</button>' +
+        '<button type="button" class="ai5-btn" data-ai-open="decision">決策 AI 解釋</button>' +
       '</div>';
 
-    var strip =
-      '<div class="ai5-strip">' +
-        '<div class="cell"><div class="k">Claude Key</div><div class="v" style="font-size:11px">' + esc(keyStatus()) + '</div>' +
-          '<div class="s">報告：' + esc(lastReportStamp()) + '</div></div>' +
-        '<div class="cell"><div class="k">掃描檔數</div><div class="v">' + esc(String(scanned)) + '</div>' +
-          '<div class="s">GET /focus</div></div>' +
-        '<div class="cell"><div class="k">做多焦點</div><div class="v up">' + longs.length + '</div>' +
-          '<div class="s">buy</div></div>' +
-        '<div class="cell"><div class="k">做空焦點</div><div class="v dn">' + shorts.length + '</div>' +
-          '<div class="s">short</div></div>' +
-        '<div class="cell"><div class="k">合計</div><div class="v">' + (longs.length + shorts.length) + '</div>' +
-          '<div class="s">點列開圖表</div></div>' +
-      '</div>';
+    var rows = FEATURES.map(function (f) {
+      return '<tr>' +
+        '<td class="nm">' + esc(f.name) + '</td>' +
+        '<td class="what">' + esc(f.what) + '</td>' +
+        '<td class="mdl">' + engineTag(f.engine) + '</td>' +
+        '<td class="where">' + esc(f.where) + '</td>' +
+        '<td>' + readiness(f) + '</td>' +
+        '<td><button type="button" class="ai5-btn" data-ai-open="' + f.id + '">開啟</button></td>' +
+      '</tr>';
+    }).join('');
 
-    function tbl(list, title, cls) {
-      var h = '<div class="ai5-sec"><h4>' + title + '<span style="color:var(--tlo);font-weight:600;font-size:8px">' +
-        list.length + ' 檔</span></h4><div class="ai5-fill">';
-      if (!list.length) {
-        return h + '<div class="ai5-empty">暫無 — 按「焦點掃描」或側欄「訊號」</div></div>' +
-          '<div class="ai5-note">多訊號組合 · 非投資建議</div></div>';
-      }
-      h += '<table><tr><th>代號</th><th>名稱</th><th>分數</th><th>訊號</th></tr>' +
-        list.slice(0, 40).map(function (x) { return rowOf(x, cls); }).join('') + '</table>';
-      return h + '</div><div class="ai5-note">點列載入線型</div></div>';
-    }
+    body.innerHTML = tools + stripHtml() +
+      '<div class="ai5-dash"><div class="ai5-sec">' +
+        '<h4>AI 功能目錄<span style="color:var(--tlo);font-weight:600;font-size:8px">' + FEATURES.length + ' 項</span></h4>' +
+        '<div class="ai5-fill"><table>' +
+          '<tr><th>功能</th><th>做什麼</th><th>模型</th><th>位置</th><th>狀態</th><th></th></tr>' +
+          rows + '</table></div>' +
+        '<div class="ai5-note">雲端功能會把所列資料送到 Anthropic；本機功能只在 EVO-T1 執行；「深度」會經 Hermes 送外部模型。' +
+          'AI 只整理與解釋既有資料，不構成投資建議。</div>' +
+      '</div></div>';
 
-    body.innerHTML = tools + strip +
-      '<div class="ai5-dash">' +
-        tbl(longs, '做多焦點', 'up') +
-        tbl(shorts, '做空焦點', 'dn') +
-      '</div>';
-
-    var br = $('ai5-report');
-    if (br) br.onclick = function () {
-      if (typeof window.openAIModal === 'function') window.openAIModal();
-    };
-    var bp = $('ai5-pmd');
-    if (bp) bp.onclick = function () {
-      if (window.PostmarketDaily && typeof window.PostmarketDaily.open === 'function') {
-        window.PostmarketDaily.open();
-      }
-    };
-    var bc = $('ai5-copilot');
-    if (bc) bc.onclick = function () {
-      if (typeof window.copilotOpen === 'function') window.copilotOpen();
-    };
-    var bf = $('ai5-focus');
-    if (bf) bf.onclick = function () {
-      if (typeof window.focusScanOpen === 'function') window.focusScanOpen();
-    };
-    body.querySelectorAll('tr.ai5-row').forEach(function (el) {
-      el.onclick = function () { openChart(el.getAttribute('data-code')); };
+    body.querySelectorAll('[data-ai-open]').forEach(function (b) {
+      b.onclick = function () {
+        var id = b.getAttribute('data-ai-open');
+        for (var i = 0; i < FEATURES.length; i++) {
+          if (FEATURES[i].id === id) { FEATURES[i].open(); return; }
+        }
+      };
     });
   }
 
@@ -255,43 +281,49 @@
     opts = opts || {};
     var body = ensureMount();
     if (!body) return;
-    var soft = !!opts.soft || !!body.querySelector('.ai5-strip, .ai5-dash');
-    if (fetching && soft) return;
+    if (fetching) return;
     fetching = true;
     if (window.ShellV5 && window.ShellV5.softBadge) {
-      window.ShellV5.softBadge('mount-ai', soft, '更新中…');
+      window.ShellV5.softBadge('mount-ai', !!opts.soft, '更新中…');
     }
-    if (!soft) body.innerHTML = '<div class="ai5-loading">載入 AI 中樞…</div>';
-
-    var url = SRV + '/focus' + (opts.force ? '?refresh=1' : '');
-    fetch(url, { cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : {}; })
-      .catch(function () { return {}; })
-      .then(function (d) { render(d); })
-      .finally(function () {
-        fetching = false;
-        if (window.ShellV5 && window.ShellV5.softBadge) {
-          window.ShellV5.softBadge('mount-ai', false);
-        }
-      });
+    render();
+    var jobs = [
+      jget('/ai-key/status').then(function (d) { status.key = d || { set: false }; render(); }),
+      jget('/ai/local/status').then(function (d) { status.local = d || { ok: false, modes: {} }; render(); }),
+      jget('/api/ai/postmarket-daily/latest').then(function (d) {
+        status.pmd = d && d.date ? d : null;
+        render();
+      })
+    ];
+    Promise.all(jobs).then(function () {
+      /* /ai-model 可能要連 Anthropic 查最新模型：有 Key 才查，且不擋其他狀態 */
+      if (status.key && status.key.set) {
+        return jget('/ai-model').then(function (d) { status.model = d; render(); });
+      }
+    }).finally(function () {
+      fetching = false;
+      if (window.ShellV5 && window.ShellV5.softBadge) {
+        window.ShellV5.softBadge('mount-ai', false);
+      }
+    });
   }
 
   function activate() {
     ensureMount();
-    refresh({ soft: !!lastFocus });
+    refresh({ soft: status.key != null });
     if (timer) clearInterval(timer);
     timer = setInterval(function () {
       if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'ai') {
         refresh({ soft: true });
       }
-    }, 120000);
+    }, 300000);
   }
 
   function deactivate() {
     if (timer) { clearInterval(timer); timer = null; }
   }
 
-  window.AiV5 = { activate: activate, deactivate: deactivate, refresh: refresh };
+  window.AiV5 = { activate: activate, deactivate: deactivate, refresh: refresh, features: FEATURES };
 
   window.addEventListener('shell:route', function (ev) {
     if (ev && ev.detail && ev.detail.route === 'ai') activate();

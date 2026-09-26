@@ -85,9 +85,15 @@
     document.head.appendChild(s);
   }
 
-  /** 自選股來源：st_wl（同 pulse_v5.readWatchlist 契約），僅台股、上限 20 檔 */
+  /** 預設標的：持倉（台股代號）優先，再補自選股 st_wl（同 pulse_v5.readWatchlist 契約）；僅台股、上限 20 檔 */
   function readWatchlist() {
     var out = [];
+    try {
+      var pos = (typeof S !== 'undefined' && S && S.positions) ? S.positions : {};
+      Object.keys(pos).forEach(function (code) {
+        if (/^\d{4,6}[A-Z]?$/.test(code) && out.indexOf(code) < 0) out.push(code);
+      });
+    } catch (e) {}
     try {
       var arr = JSON.parse(localStorage.getItem('st_wl') || '[]');
       if (Array.isArray(arr)) {
@@ -534,7 +540,7 @@
           'Claude 整理敘事 · 數字出自 ST EvidencePack · 非投資建議</span>' +
           '<button type="button" class="pmd-x" id="pmd-close">✕</button></h3>' +
         '<div id="pmd-ctl">' +
-          '<input id="pmd-syms" placeholder="台股代號，逗號或空白分隔（預設帶入自選股）">' +
+          '<input id="pmd-syms" placeholder="台股代號，逗號或空白分隔（預設帶入持倉＋自選股）">' +
           '<label><input type="checkbox" id="pmd-inc-chips" checked>籌碼</label>' +
           '<label><input type="checkbox" id="pmd-inc-news" checked>新聞</label>' +
           '<label><input type="checkbox" id="pmd-inc-dc" checked>Decision</label>' +

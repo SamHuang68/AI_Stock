@@ -5,9 +5,8 @@
  *   screener3Open      → scan
  *   portfolioOpen      → book
  *   marketFlowOpen     → institutional（法人資金；原「法人榜」併入同頁）
- *   openAIModal        → ai（再開報告模態）
- *   copilotOpen        → ai（再開副駕）
- *   focusScanOpen      → ai（再開焦點；亦可 signals）
+ *   focusScanOpen      → signals（焦點掃描唯一入口：策略訊號頁，可選產業）
+ *   copilotOpen        → ai（AI 中樞 + 再開副駕）
  * 須在各模組定義 window.*Open 之後、toolbar 整理前載入。
  * ========================================================================== */
 (function () {
@@ -45,7 +44,7 @@
     }
   }
 
-  /* 舊 v3 模態窗（三合一選股／投組／資金流／法人榜）已由側欄頁取代並移除；
+  /* 舊 v3 模態窗（三合一選股／投組／資金流／法人榜／焦點掃描）已由側欄頁取代並移除；
      保留同名入口給工具列、指令盤與舊快捷鍵，一律導向對應頁。 */
   function routeOpener(name, route) {
     window[name] = function () {
@@ -55,11 +54,10 @@
   routeOpener('screener3Open', 'scan');
   routeOpener('portfolioOpen', 'book');
   routeOpener('marketFlowOpen', 'institutional');
+  routeOpener('focusScanOpen', 'signals');
 
-  /* AI 三鈕 → AI 中樞 + 開對應模態 */
-  wrap('openAIModal', 'ai', { openModal: true, delay: 100 });
+  /* 副駕 → AI 中樞 + 開副駕視窗（AI 功能集中在 AI 中樞） */
   wrap('copilotOpen', 'ai', { openModal: true, delay: 100 });
-  wrap('focusScanOpen', 'ai', { openModal: true, delay: 100 });
 
   console.log('[bridge-v5] toolbar → shell bridges armed');
 })();

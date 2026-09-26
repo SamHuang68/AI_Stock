@@ -2749,8 +2749,6 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             self._handle_margin_ratio_backfill()
         elif p == '/margin_ratio/refresh':
             self._handle_margin_ratio_refresh()
-        elif p == '/ai-report':
-            self._handle_ai_report()
         elif p == '/api/ai/postmarket-daily':
             self._handle_ai_postmarket_daily()
         elif p == '/api/ai/postmarket-daily/abort':
