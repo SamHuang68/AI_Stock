@@ -1,8 +1,9 @@
 /* ============================================================================
- * chainmom_v3.js — v4.0 供應鏈輪動(多時框動能)
+ * chainmom_v3.js — 供應鏈「5/20/60 日動能」檢視（畫在 🔗 供應鏈 視窗內）
  * ----------------------------------------------------------------------------
  * 用本機 DB 算台灣 AI 供應鏈每一段的 5/20/60 日動能,並抓出「資金正流入哪一段」
  * (5 日日均動能 > 20 日日均動能 = 加速/流入)。沿用 supplychain_v3 的 SC_CHAINS。
+ * 原獨立「鏈動能」視窗已併入供應鏈視窗（同一組鏈段，今日漲跌／多時框動能切換）。
  * 顏色:台股紅漲綠跌(動能即漲跌,>0 紅、<0 綠、平無色)。
  * ========================================================================== */
 (function () {
@@ -16,15 +17,12 @@
     if (document.getElementById('cm-style')) return;
     var s = document.createElement('style'); s.id = 'cm-style';
     s.textContent =
-      '#cm-modal{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:none;align-items:center;justify-content:center}' +
-      '#cm-box{background:#0f172a;border:1px solid #334155;border-radius:10px;width:min(760px,95vw);max-height:90vh;overflow:auto;padding:16px;color:#e2e8f0;font-size:12px}' +
-      '#cm-box h3{margin:0 0 4px;font-size:15px;display:flex;justify-content:space-between;align-items:center}' +
-      '#cm-box .x{cursor:pointer;color:#64748b;font-size:18px}#cm-box .x:hover{color:#e2e8f0}' +
-      '#cm-box .sub{font-size:10px;color:#64748b;margin-bottom:10px}' +
+      '.cm-view .sub{font-size:10px;color:#64748b;margin-bottom:10px}' +
+      '.cm-share{display:flex;justify-content:flex-end;align-items:center;gap:6px;margin:0 0 6px}' +
       '.cm-sum{background:#16213a;border:1px solid #28324d;border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.7}' +
-      '#cm-box table{width:100%;border-collapse:collapse}' +
-      '#cm-box th,#cm-box td{padding:5px 6px;border-bottom:1px solid #1e293b;text-align:right;font-family:monospace}' +
-      '#cm-box th:first-child,#cm-box td:first-child{text-align:left;font-family:inherit}' +
+      '.cm-view table{width:100%;border-collapse:collapse}' +
+      '.cm-view th,.cm-view td{padding:5px 6px;border-bottom:1px solid #1e293b;text-align:right;font-family:monospace}' +
+      '.cm-view th:first-child,.cm-view td:first-child{text-align:left;font-family:inherit}' +
       '.cm-flow{font-size:10px;padding:1px 6px;border-radius:10px}' +
       '.cm-in{background:rgba(239,68,68,.15);color:#fca5a5}.cm-out{background:rgba(34,197,94,.12);color:#86efac}' +
       '.cm-ld{font-size:10px;color:#94a3b8;margin-top:2px}' +
@@ -114,39 +112,35 @@
     return h;
   }
 
-  async function open() {
+  /** 畫進供應鏈視窗的內容區（host），由 supplychain_v3 的「5/20/60 日動能」切換呼叫；
+   *  isCurrent() 回 false 表示載入期間已切回「今日漲跌」→ 丟棄結果 */
+  async function renderInto(host, isCurrent) {
+    var stale = function () { return !host.isConnected || (typeof isCurrent === 'function' && !isCurrent()); };
+    if (!host) return;
     injectStyle();
-    var modal = document.getElementById('cm-modal');
-    if (!modal) { modal = document.createElement('div'); modal.id = 'cm-modal'; document.body.appendChild(modal); }
-    modal.innerHTML = '<div id="cm-box"><h3>🔄 供應鏈輪動 <span style="display:flex;gap:6px;align-items:center">' + (window.ShareResult ? ShareResult.buttonHTML('cm-send', '寄結果') : '') + '<span class="x" onclick="window.chainMomClose&&chainMomClose()">×</span></span></h3><div class="sub">台灣 AI 供應鏈 · 多時框動能 + 資金輪動(本機 DB)</div><div id="cm-body">計算中…</div></div>';
-    modal.style.display = 'flex';
-    modal.onclick = function (e) { if (e.target === modal) close(); };
-    var body = document.getElementById('cm-body');
+    host.innerHTML = '<div class="cm-view">計算中…</div>';
     var stages = stagesFromChain();
-    if (!stages) { body.innerHTML = '供應鏈對照尚未載入(supplychain_v3)。'; return; }
+    if (!stages) { host.innerHTML = '<div class="cm-view">供應鏈對照尚未載入(supplychain_v3)。</div>'; return; }
     try {
       var r = await fetch('/chain-momentum', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stages: stages })
       });
       var d = await r.json();
-      if (!d || !d.stages) { body.innerHTML = '計算失敗:' + ((d && d.error) || '無資料'); return; }
-      body.innerHTML = render(d);
+      if (stale()) return;
+      if (!d || !d.stages) { host.innerHTML = '<div class="cm-view">計算失敗:' + esc((d && d.error) || '無資料') + '</div>'; return; }
+      var share = window.ShareResult ? '<div class="cm-share">' + ShareResult.buttonHTML('cm-send', '寄結果') + '</div>' : '';
+      host.innerHTML = '<div class="cm-view">' + share + render(d) + '</div>';
       if (window.ShareResult) ShareResult.wire('cm-send', function () { return chainText(_lastD); }, '供應鏈輪動');
     } catch (e) {
-      body.innerHTML = '計算失敗:' + e.message;
+      if (stale()) return;
+      host.innerHTML = '<div class="cm-view">計算失敗:' + esc(e.message) + '</div>';
     }
   }
 
-  function close() { var m = document.getElementById('cm-modal'); if (m) m.style.display = 'none'; }
-
-  window.chainMomOpen = open;
-  window.chainMomClose = close;
-
-  (function () {
-    var spec = { id: 'btn-chainmom', label: '🔄 輪動', cat: 'fund',
-                 title: '供應鏈輪動:各段 5/20/60 日動能 + 資金流入偵測 (v4.0)', onclick: open };
-    (window.Toolbar ? window.Toolbar.register
-      : function (s) { (window.__tbQueue = window.__tbQueue || []).push(s); })(spec);
-  })();
+  window.ChainMom = { renderInto: renderInto };
+  /* 舊入口（指令盤／快捷）：開供應鏈視窗並切到動能檢視 */
+  window.chainMomOpen = function () {
+    if (typeof window.supplyChainOpen === 'function') window.supplyChainOpen({ view: 'mom' });
+  };
 })();
