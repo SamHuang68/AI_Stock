@@ -345,7 +345,7 @@
     html.st-vs5 .pl-weather,html.st-vs5 .pl-risk-pill,
     html.st-vs5 .hub-root .badge,html.st-vs5 .hub-root .hub-seg,
     html.st-vs5 #dc-root .tag,html.st-vs5 #dc-root .dc-signal,
-    html.st-vs5 .vz-chip,html.st-vs5 .phase-badge{
+    html.st-vs5 .vz-chip{
       box-shadow:inset 0 1px 0 rgba(255,255,255,.045),0 5px 14px -12px rgba(0,0,0,.9);
       backdrop-filter:blur(8px) saturate(120%);
     }

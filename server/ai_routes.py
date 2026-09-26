@@ -5,10 +5,9 @@ from __future__ import annotations
 import json
 import time
 import urllib.error
-import urllib.request
 
 import ai_api
-from http_boundary import BodyReadError, read_body, read_json_body
+from http_boundary import BodyReadError, read_json_body
 
 
 class AiRoutesMixin:
@@ -31,41 +30,6 @@ class AiRoutesMixin:
 
     def _handle_ai_model(self):
         self._ok(json.dumps({'model': ai_api.resolve_model(ai_api.load_ai_key())}).encode())
-
-    def _handle_ai_proxy(self):
-        key = ai_api.load_ai_key()
-        if not key:
-            self._err('AI key not set on server', 400); return
-        try:
-            raw = read_body(self, max_bytes=2 * 1024 * 1024) or b'{}'
-        except BodyReadError as e:
-            self._err(str(e), e.status); return
-        try:
-            up = urllib.request.Request(
-                'https://api.anthropic.com/v1/messages', data=raw,
-                headers={
-                    'Content-Type': 'application/json', 'x-api-key': key,
-                    'anthropic-version': '2023-06-01',
-                }, method='POST',
-            )
-            resp = urllib.request.urlopen(up, timeout=180)
-        except urllib.error.HTTPError as e:
-            self._err('Anthropic %d: %s' % (e.code, e.read().decode('utf-8', 'replace')[:300]), 502); return
-        except Exception as e:
-            self._err('ai-proxy failed: ' + str(e), 502); return
-        try:
-            self.send_response(200)
-            self.send_header('Content-Type', resp.headers.get('Content-Type', 'text/event-stream'))
-            self.send_header('Cache-Control', 'no-cache')
-            self.end_headers()
-            while True:
-                chunk = resp.read(2048)
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
-                self.wfile.flush()
-        except Exception:
-            pass
 
     def _stream_ai_runtime(self, mode: str):
         try:
@@ -199,7 +163,7 @@ class AiRoutesMixin:
     def _handle_ai_postmarket_daily(self):
         key = ai_api.load_ai_key()
         if not key:
-            # 與 /ai-proxy 相同拒絕行為（reader 遠端則由 private_web_gateway 擋 403）
+            # 與其他 AI 端點相同拒絕行為（reader 遠端則由 private_web_gateway 擋 403）
             self._err('AI key not set on server', 400); return
         try:
             body = read_json_body(self, max_bytes=64 * 1024)

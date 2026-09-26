@@ -2667,8 +2667,6 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             self._ok(json.dumps({'ok': True}).encode())
         elif p == '/ai-key':
             self._handle_ai_key_set()
-        elif p == '/ai-proxy':
-            self._handle_ai_proxy()
         elif p == '/etf-catalog':
             self._handle_etf_catalog_post()
         elif p == '/etf-tracker/run':
@@ -2765,8 +2763,6 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             self._alert_test()
         elif p == '/etf-report/email':
             self._etf_report_email()
-        elif p == '/report-email':
-            self._handle_report_email()
         elif p == '/watch/rules':
             self._watch_post_rules()
         elif p == '/watch/config':
@@ -5627,41 +5623,6 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             self._err(str(e), e.status)
         except Exception as e:
             self._err('email report failed: ' + str(e), 500)
-
-    def _handle_report_email(self):
-        """POST /report-email — 把 AI 報告 HTML 寄給『自訂收件者』(重用已設定的 Email SMTP)。
-           body: {to, subject, html}。與 /etf-report/email 不同:收件者可指定,非設定檔固定的 to。"""
-        if not alert_daemon:
-            self._err('email module unavailable', 503); return
-        try:
-            body = self._read_json_body(max_bytes=2 * 1024 * 1024) or {}
-        except BodyReadError as e:
-            self._err(str(e), e.status); return
-        to = (body.get('to') or '').strip()
-        subject = (body.get('subject') or 'Stock Terminal AI 報告').strip()
-        html = body.get('html') or ''
-        if '@' not in to:
-            self._err('需有效收件者 email', 400); return
-        if not html:
-            self._err('html required', 400); return
-        em = (alert_daemon.load_config() or {}).get('email', {})
-        if not em.get('user') or not em.get('app_password'):
-            self._err('Email 未設定:請先在通知設定填寄件帳號/應用程式密碼', 400); return
-        try:
-            import smtplib, ssl
-            from email.mime.text import MIMEText
-            msg = MIMEText(html, 'html', 'utf-8')
-            msg['Subject'] = subject
-            msg['From'] = em['user']
-            msg['To'] = to
-            ctx = ssl.create_default_context()
-            with smtplib.SMTP(em.get('smtp_host', 'smtp.gmail.com'), int(em.get('smtp_port', 587)), timeout=20) as s:
-                s.starttls(context=ctx)
-                s.login(em['user'], em['app_password'])
-                s.sendmail(em['user'], [to], msg.as_string())
-            self._ok(json.dumps({'ok': True, 'to': to}, ensure_ascii=False).encode())
-        except Exception as e:
-            self._err('send failed: ' + str(e), 502)
 
     def _txf_fnum(self, d, *keys):
         for k in keys:

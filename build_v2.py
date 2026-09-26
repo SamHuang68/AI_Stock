@@ -48,14 +48,7 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/fundamental/fundamental_v3.js',              # v3.8 B: 基本面 (月營收/三率/評分)
               'src/ui/polish_v3.js',
               'src/core/wl_live_v3.js',
-              'src/fundamental/plan_history_v3.js',
-              'src/fundamental/plan_position_v3.js',
-              'src/fundamental/plan_v3.js',
-              'src/ui/pdf_import_v3.js',
-              'src/ui/pdf_export_v3.js',
-              'src/core/peg_v3.js',
-              'src/alert/alert_v3.js',
-              'src/alert/alert_push_v3.js',               # v3.8 D: 後端警報推播設定 UI (須在 alert_v3 後)
+              'src/alert/alert_push_v3.js',               # v3.8 D: 後端警報推播設定 UI
               'src/screener/backtest_v3.js',                 # v3.8 C: 回測核心
               'src/screener/backtest_ui_v3.js',              # v3.8 C: 回測 UI (須在 backtest_v3 後)
               'src/ui/enhance_v3.js',                  # v3.8: 雙軸卡/量價面板/右側收合/分頁記憶
@@ -72,7 +65,6 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/screener/strategy_script_v3.js',          # v3.9 P2: 迷你策略腳本 DSL (依賴 StratLib，須在 strategy_builder 後)
               'src/chart/drawtools_v3.js',                # v3.9 P3: 進階畫線(canvas overlay)+雲端記憶
               'src/core/etf_v3.js',
-              'src/fundamental/stockfut_v3.js',                 # v3.9: 個股期夜盤領先(市值前十大,TAIFEX MIS)
               'src/core/indices_v3.js',                  # v3.9: 大盤指數加入自選(台股加權/櫃買+美股四大)
               'src/alert/datahealth_v3.js',               # v3.9 Phase-0: 資料源健檢燈(讀 /health sources)
 

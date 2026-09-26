@@ -315,7 +315,6 @@
             '</div>' +
             '<div class="ah-actions">' +
               '<button type="button" class="ah-btn" id="ah-refresh">↻ 重新整理</button>' +
-              '<button type="button" class="ah-btn" id="ah-open-ovn">夜盤詳情</button>' +
               '<button type="button" class="ah-btn primary" data-shell-back>← 儀表板</button>' +
             '</div>' +
           '</div>' +
@@ -323,10 +322,6 @@
         '</div>';
       var r = $('ah-refresh');
       if (r) r.onclick = function () { refresh(); };
-      var o = $('ah-open-ovn');
-      if (o) o.onclick = function () {
-        if (window.overnightOpen) window.overnightOpen();
-      };
     }
     return $('ah-body');
   }

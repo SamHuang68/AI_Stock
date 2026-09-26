@@ -370,7 +370,9 @@
       return orig.apply(this, arguments);
     };
     const saved = localStorage.getItem('stockTerminal.lastTab');
-    if (saved && saved !== 'stats') setTimeout(() => { try { setTab(saved); } catch {} }, 900);
+    // 只還原仍存在的分頁（RESEARCH/PLAN 已移除，舊記憶會落到空白面板）
+    const exists = saved && document.querySelector('.rtab[data-tab="' + saved.replace(/[^a-z]/g, '') + '"]');
+    if (saved && saved !== 'stats' && exists) setTimeout(() => { try { setTab(saved); } catch {} }, 900);
   })();
 
   style();

@@ -38,7 +38,7 @@
               'btn-overnight', 'btn-drawtools', 'btn-replay'] },
     { key: 'fund', label: '🏦 籌碼基本面',
       items: ['btn-valuation', 'btn-marketflow',
-              'btn-supplychain', 'btn-stockfut', 'btn-portfolio', 'btn-chainmom'] },
+              'btn-supplychain', 'btn-portfolio', 'btn-chainmom'] },
     { key: 'screen', label: '🔍 選股策略',
       items: ['btn-screener3', 'btn-focus', 'btn-patterns',
               'btn-stratbuilder', 'btn-bt3', 'btn-wizard', 'btn-stratscript'] },

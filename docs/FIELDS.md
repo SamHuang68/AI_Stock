@@ -30,9 +30,9 @@
 | 自選 WATCH（右panel） | `watch-sym`(帶入)、`watch-notes`(文字)、`watch-preset-price/price2`(數值)、`watch-param-*` | 同款架構同款修：守門入口 `renderWatchPanel` + wrapper 的 origRender 路徑加 `Field.editing` 守門；數值欄改純文字 |
 | `setTab`（切分頁） | — | 切頁屬明確操作：先讓 rpanel 內聚焦欄位失焦，確保切頁必定重繪 |
 
-**無此風險者（symLoaded 只重畫圖表/數據或模態開啟時才渲染）：** `polish_v3`(總體列)、`volume_profile_v3`/`drawtools_v3`(圖層)、`chip_v3`(stats 數據)、`live_v2`/`aftermarket_v3`(報價)、`pro_v2`(通知)、`plan_v3`(只畫價位線)。
+**無此風險者（symLoaded 只重畫圖表/數據或模態開啟時才渲染）：** `polish_v3`(總體列)、`volume_profile_v3`/`drawtools_v3`(圖層)、`chip_v3`(stats 數據)、`live_v2`/`aftermarket_v3`(報價)、`pro_v2`(通知)。
 
-**`type=number` 欄位（模態，開啟時渲染一次，無焦點被奪風險）— 由全域滾輪防護兜底，建議逐步遷移到 `Field.numAttrs()`：** `alert_push`(ap-poll/em-port/r-price)、`screener3`(s3-*)、`wizard`(wz-*)、`plan_v3`(buyZone 等)、`plan_position`(ppc-*)、`strategy_builder`(sb-*)。
+**`type=number` 欄位（模態，開啟時渲染一次，無焦點被奪風險）— 由全域滾輪防護兜底，建議逐步遷移到 `Field.numAttrs()`：** `alert_push`(ap-poll/em-port/r-price)、`wizard`(wz-*)、`strategy_builder`(sb-*)。
 
 ## 新增欄位檢查清單
 
