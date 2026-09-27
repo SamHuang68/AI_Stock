@@ -68,7 +68,8 @@ class AdjustmentTests(unittest.TestCase):
                 conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', ('2330', 'TW', stamp, 10, 10, 10, 10, 1))
             pack = {'timestamps': [stamp + 3600, stamp + 86400], 'quoteClose': [11, 12], 'adjclose': [10, 12],
                     'events': {}, 'source': '本機測試', 'fetchedAt': 1,
-                    'rows': [(stamp + 3600, 11, 11, 11, 11, 1), (stamp + 86400, 12, 12, 12, 12, 1)]}
+                    'rows': [(stamp - 86400, 9, 9, 9, 9, 1), (stamp + 3600, 11, 11, 11, 11, 1),
+                             (stamp + 86400, 12, 12, 12, 12, 1)]}
             with patch.object(datastore, 'update', return_value=0), patch.object(datastore, 'fetch_yahoo_daily', return_value=pack) as fetch, \
                     patch.object(updater.tracker, 'CHIP_HISTORY_PATH', str(Path(tmp) / 'chip_history')), redirect_stdout(io.StringIO()):
                 code = updater.main(['--start', '2026-09-27', '--end', '2026-09-27', '--data-dir', tmp, '--adjustments'])

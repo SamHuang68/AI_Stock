@@ -132,7 +132,9 @@ def main(argv=None):
                     current = datetime.now(_TZ['TW'])
                     # 依交易日期去重，避免來源時間戳不同造成同一天兩根日線。
                     existing = {bar_date(r[0]) for r in datastore.get_bars(code)}
-                    fresh = list({bar_date(r[0]): r for r in pack['rows'] if bar_date(r[0]) not in existing and
+                    first_day = min(existing)
+                    # 查詢緩衝只用來確保首日完整，不能讓每次重跑都向前增加一天。
+                    fresh = list({bar_date(r[0]): r for r in pack['rows'] if first_day <= bar_date(r[0]) and bar_date(r[0]) not in existing and
                                   (bar_date(r[0]) < current.date().isoformat() or
                                    (bar_date(r[0]) == current.date().isoformat() and current.hour >= 14))}.values())
                     if fresh:
