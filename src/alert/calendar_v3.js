@@ -7,6 +7,7 @@
 (function () {
   'use strict';
   const SRV = window.SERVER || 'http://localhost:18432';
+  const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   let onlyCurrent = false;
 
   function style() {
@@ -47,19 +48,23 @@
     // 除權除息
     let exCard = '';
     const ex = (d.exDividend || []);
+    const exSource = d.exDividendSource || {};
     if (ex.length) {
-      const rows = ex.slice(0, 60).map(e =>
-        `<tr class="cal-row" data-code="${e.code || ''}"><td>${e.date || ''}</td><td>${e.code || ''} ${e.name || ''}</td><td>${e.type || ''}</td></tr>`).join('');
+      const rows = ex.map(e =>
+        `<tr class="cal-row" data-code="${esc(e.code)}"><td>${esc(e.date)}</td><td>${esc(e.code)} ${esc(e.name)}</td><td>${esc(e.type)}</td></tr>`).join('');
       exCard = `<div class="cal-card"><h4>💵 除權除息${code ? '（' + code + '）' : '預告'}</h4>
         <table class="cal-tbl"><tr><th>日期</th><th>標的</th><th>類型</th></tr>${rows}</table>
-        <div class="cal-note">除權息日前後注意填權息行情與股利稅務；長線持有者通常參與。</div></div>`;
+        <div class="cal-note">上市除權息預告，共 ${ex.length} 筆；日期為官方預告日。取得時間：${esc(exSource.fetchedAt || '未提供')}。</div></div>`;
     } else {
-      exCard = `<div class="cal-card"><h4>💵 除權除息預告</h4><div class="cal-note">目前無預告資料（TWSE 資料集可能未開放或當期無資料）。</div></div>`;
+      const note = exSource.status === 'ok'
+        ? (code ? '官方上市預告中，目前沒有這檔股票的資料；上櫃不在此來源範圍。' : '官方上市除權息預告目前為空。')
+        : '官方除權息來源暫時無法取得，尚不能判定是否有預告；請稍後重新整理。';
+      exCard = `<div class="cal-card"><h4>💵 除權除息預告</h4><div class="cal-note" role="status">${note}</div></div>`;
     }
 
     body.innerHTML = `<div style="margin-bottom:4px"><span class="cal-toggle" id="cal-tg">${onlyCurrent ? '☑' : '☐'} 只看目前個股 ${(typeof S !== 'undefined' && S.sym) ? '(' + S.sym + ')' : ''}</span></div>
       ${revCard}${exCard}
-      <div class="cal-note">⚠ 僅供參考、非投資建議。資料源 TWSE OpenData。</div>`;
+      <div class="cal-note">除權息來源：TWSE 上市股票除權除息預告表；不含上櫃。僅供參考。</div>`;
     const tg = document.getElementById('cal-tg');
     if (tg) tg.onclick = () => { onlyCurrent = !onlyCurrent; render(); };
     body.querySelectorAll('.cal-row').forEach(el => el.onclick = () => {

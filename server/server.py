@@ -163,6 +163,7 @@ def _fundamental_trace(event, **fields):
             'correlationId', 'symbol', 'market', 'kind', 'model', 'source',
             'cache', 'score', 'sampleCount', 'hasRevenue', 'hasIncome',
             'stateBefore', 'stateAfter', 'error', 'elapsedMs',
+            'dataset', 'url', 'finalUrl', 'method', 'httpStatus', 'contentType', 'bytes',
         )
         row = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'event': event}
         row.update({k: fields.get(k) for k in allowed if k in fields})
@@ -705,7 +706,11 @@ def _chip_history_record(clean_code, chip_out):
     record_snapshot(clean_code, chip_out, CHIP_HISTORY_PATH)
 
 
-_openapi_ds = {}   # dataset name → (date, {code: row})
+_openapi_ds = {}   # 資料集清單共用快取；成功資料才更新日期
+_openapi_meta = {}
+_openapi_locks = {}
+_openapi_state_lock = threading.Lock()
+_REVENUE_DATASETS = ('t187ap05_L', 'tpex:mopsfin_t187ap05_O')
 
 # ── 全台股普通股代號宇集（上市 TWSE + 上櫃 TPEx），當日快取 ──
 import re as _re
@@ -823,24 +828,22 @@ def _get_tw_names():
         except Exception:
             pass
 
-    def scan(url, code_keys, name_keys):
-        try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
-            with urllib.request.urlopen(req, timeout=20) as r:
-                arr = json.loads(r.read())
-            for code, name in _extract_tw_name_pairs(arr, code_keys, name_keys).items():
-                if code not in m:
-                    m[code] = name
-        except Exception as e:
-            print(f'[names] scan failed {url}: {e}')
+    complete = True
+    def scan(ds, code_keys, name_keys):
+        nonlocal complete
+        arr = _openapi_lookup_list(ds)
+        complete = complete and _openapi_meta.get(_openapi_dataset(ds), {}).get('status') == 'ok'
+        for code, name in _extract_tw_name_pairs(arr, code_keys, name_keys).items():
+            if code not in m:
+                m[code] = name
 
-    scan('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL', ('Code',), ('Name', '名稱', '證券名稱'))
-    scan('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes',
+    scan('exchangeReport/STOCK_DAY_ALL', ('Code',), ('Name', '名稱', '證券名稱'))
+    scan('tpex:tpex_mainboard_daily_close_quotes',
          ('SecuritiesCompanyCode', 'Code', 'CompanyCode', '公司代號'),
          ('CompanyName', 'SecuritiesCompanyName', '公司名稱', '公司簡稱', 'Name', '名稱'))
-    for ds in ('t187ap05_L', 't187ap05_O'):
-        scan(f'https://openapi.twse.com.tw/v1/opendata/{ds}', ('公司代號', 'Code'), ('公司名稱', '公司簡稱', 'Name'))
-    
+    for ds in _REVENUE_DATASETS:
+        scan(ds, ('公司代號', 'Code'), ('公司名稱', '公司簡稱', 'Name'))
+
     if m:
         # ── 「只增不減」安全覆寫 ──────────────────────────────
         # 只有在新掃描後的資料總數大於等於舊備份時才寫入，防範部分 API 失敗導致備份檔萎縮
@@ -855,7 +858,7 @@ def _get_tw_names():
         except Exception as e:
             print('[names] backup save failed:', e)
             
-        _TW_NAMES['date'] = today; _TW_NAMES['map'] = m
+        _TW_NAMES['date'] = today if complete else None; _TW_NAMES['map'] = m
     return m
 
 
@@ -921,24 +924,21 @@ def _get_tw_sectors():
     today = _date.today().strftime('%Y%m%d')
     if _TW_SECTORS['date'] == today and _TW_SECTORS['map']:
         return _TW_SECTORS['map']
-    m = {}
-    for ds in ('t187ap05_L', 't187ap05_O'):
-        try:
-            url = f'https://openapi.twse.com.tw/v1/opendata/{ds}'
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
-            with urllib.request.urlopen(req, timeout=15) as r:
-                arr = json.loads(r.read())
-            for row in arr:
-                code = (row.get('公司代號') or '').strip()
-                ind = (row.get('產業別') or '').strip()
-                if code and ind:
-                    m[code] = ind
-        except Exception as e:
-            print(f'[sectors] {ds} failed: {e}')
+    m = dict(_TW_SECTORS['map'])
+    complete = True
+    for ds in _REVENUE_DATASETS:
+        arr = _openapi_lookup_list(ds)
+        complete = complete and _openapi_meta.get(ds, {}).get('status') == 'ok'
+        for row in arr:
+            code = str(row.get('公司代號') or '').strip()
+            ind = str(row.get('產業別') or '').strip()
+            if code and ind:
+                m[code] = ind
     if m:
-        _TW_SECTORS['date'] = today
+        _TW_SECTORS['date'] = today if complete else None
         _TW_SECTORS['map'] = m
     return m
+
 
 def _pick_num(row, includes, excludes=()):
     """從 row 找第一個 key 同時包含 includes 全部子字串、且不含任何 excludes 的值 → float。
@@ -951,72 +951,105 @@ def _pick_num(row, includes, excludes=()):
                 return None
     return None
 
+def _openapi_dataset(dataset_name):
+    """舊上櫃名稱只作相容別名，實際一律使用 TPEx 官方資料集。"""
+    ds = str(dataset_name)
+    return 'tpex:mopsfin_t187ap05_O' if ds == 't187ap05_O' else ds
+
+
+def _openapi_url(dataset_name):
+    ds = _openapi_dataset(dataset_name)
+    if ds.startswith('tpex:'):
+        return f'https://www.tpex.org.tw/openapi/v1/{ds[5:]}'
+    return 'https://openapi.twse.com.tw/v1/' + (ds if '/' in ds else 'opendata/' + ds)
+
+
 def _openapi_lookup(dataset_names, clean_code):
-    """從 TWSE/TPEx OpenAPI 全市場資料集找某股。資料集整批快取一天。
-       dataset 名稱規則 (v3.8.1)：
-         'XXX'            → https://openapi.twse.com.tw/v1/opendata/XXX  (舊行為)
-         'exchangeReport/XXX' 等含 '/' → https://openapi.twse.com.tw/v1/<原樣>
-         'tpex:XXX'       → https://www.tpex.org.tw/openapi/v1/XXX (上櫃)
-       代號欄位同時認 中文(公司代號/證券代號) 與 英文(Code/SecuritiesCompanyCode)。"""
-    from datetime import date as _date
-    today = _date.today().strftime('%Y%m%d')
+    """單股與整表查詢共用同一份已驗證資料，不另建請求與失敗快取。"""
     for ds in dataset_names:
-        cached = _openapi_ds.get(ds)
-        if not cached or cached[0] != today:
-            try:
-                if ds.startswith('tpex:'):
-                    url = f'https://www.tpex.org.tw/openapi/v1/{ds[5:]}'
-                elif '/' in ds:
-                    url = f'https://openapi.twse.com.tw/v1/{ds}'
-                else:
-                    url = f'https://openapi.twse.com.tw/v1/opendata/{ds}'
-                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    arr = json.loads(resp.read())
-                idx = {}
-                for row in arr:
-                    code = (row.get('公司代號') or row.get('證券代號') or
-                            row.get('Code') or row.get('SecuritiesCompanyCode') or
-                            row.get('股票代號') or '').strip()
-                    if code:
-                        idx[code] = row
-                _openapi_ds[ds] = (today, idx)
-                cached = _openapi_ds[ds]
-            except Exception as e:
-                print(f'[fundamental] openapi {ds} failed: {e}')
-                _openapi_ds[ds] = (today, {})
-                cached = _openapi_ds[ds]
-        row = cached[1].get(clean_code)
-        if row:
-            return row
+        for row in _openapi_lookup_list(ds):
+            code = str(row.get('公司代號') or row.get('證券代號') or row.get('Code') or
+                       row.get('SecuritiesCompanyCode') or row.get('股票代號') or '').strip()
+            if code == clean_code:
+                return row
     return None
 
+
 def _openapi_lookup_list(dataset_name):
-    """回傳 TWSE OpenAPI 整個資料集 array（快取一天）。給事件行事曆等需整表掃描者用。"""
+    """成功整表快取一天；失敗保留舊快取、短暫退避，不能偽裝成當日空資料。"""
     from datetime import date as _date
-    today = _date.today().strftime('%Y%m%d')
-    cache_key = f'__list__{dataset_name}'
-    cached = _openapi_ds.get(cache_key)
-    if cached and cached[0] == today:
-        return cached[1]
-    try:
-        if str(dataset_name).startswith('tpex:'):
-            url = f'https://www.tpex.org.tw/openapi/v1/{dataset_name[5:]}'
-        elif '/' in str(dataset_name):
-            url = f'https://openapi.twse.com.tw/v1/{dataset_name}'
-        else:
-            url = f'https://openapi.twse.com.tw/v1/opendata/{dataset_name}'
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            arr = json.loads(resp.read())
-        if not isinstance(arr, list):
-            arr = []
-        _openapi_ds[cache_key] = (today, arr)
-        return arr
-    except Exception as e:
-        print(f'[openapi-list] {dataset_name} failed: {e}')
-        _openapi_ds[cache_key] = (today, [])
-        return []
+    ds = _openapi_dataset(dataset_name)
+    with _openapi_state_lock:
+        lock = _openapi_locks.setdefault(ds, threading.Lock())
+    with lock:
+        today = _date.today().strftime('%Y%m%d')
+        key = '__list__' + ds
+        cached = _openapi_ds.get(key)
+        if cached and cached[0] == today:
+            return cached[1]
+        if time.monotonic() < _openapi_meta.get(ds, {}).get('retryAt', 0):
+            return []
+        started = time.monotonic()
+        url = _openapi_url(ds)
+        trace = {'correlationId': uuid.uuid4().hex, 'dataset': ds, 'url': url, 'method': 'GET'}
+        _fundamental_trace('openapi_fetch_start', **trace)
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = resp.read()
+                trace.update(httpStatus=resp.status, finalUrl=resp.url,
+                             contentType=resp.headers.get('Content-Type', ''), bytes=len(body))
+            if 'text/html' in trace['contentType'].lower() or body.lstrip().startswith(b'<'):
+                raise ValueError('官方端點回傳 HTML，未取得 JSON 資料')
+            arr = json.loads(body)
+            if not isinstance(arr, list) or any(not isinstance(row, dict) for row in arr):
+                raise ValueError('官方資料格式應為物件清單')
+            _openapi_ds[key] = (today, arr)
+            _openapi_meta[ds] = {'status': 'ok', 'url': url, 'rows': len(arr),
+                                 'fetchedAt': time.strftime('%Y-%m-%dT%H:%M:%S%z')}
+            _fundamental_trace('openapi_fetch_complete', **trace, sampleCount=len(arr),
+                               elapsedMs=round((time.monotonic() - started) * 1000))
+            return arr
+        except Exception as e:
+            if isinstance(e, urllib.error.HTTPError):
+                trace.update(httpStatus=e.code, finalUrl=e.url,
+                             contentType=e.headers.get('Content-Type', ''))
+            _openapi_meta[ds] = {'status': 'unavailable', 'url': url, 'error': str(e),
+                                 'retryAt': time.monotonic() + 60}
+            _fundamental_trace('openapi_fetch_failed', **trace, error=str(e),
+                               elapsedMs=round((time.monotonic() - started) * 1000))
+            print(f'[官方資料] {ds} 取得失敗：{e}；60 秒後可重試')
+            return []
+
+
+def _revenue_deadline(today):
+    from datetime import timedelta
+    due = today.replace(day=10) if today.day <= 10 else (today.replace(day=28) + timedelta(days=10)).replace(day=10)
+    return {'nextPublishBy': due.isoformat(),
+            'forMonth': (due.replace(day=1) - timedelta(days=1)).strftime('%Y-%m'),
+            'daysAway': (due - today).days}
+
+
+def _ex_dividend_rows(rows, code=''):
+    """只採官方除權息欄位；停止過戶與暫停交易日期不能當成除權息日。"""
+    from datetime import date as _date
+    result = []
+    for row in rows:
+        rc = str(row.get('Code') or '').strip()
+        raw_date = str(row.get('Date') or '').strip()
+        if not rc or (code and rc != code):
+            continue
+        digits = _re.sub(r'[^0-9]', '', raw_date)
+        try:
+            if len(digits) not in (7, 8):
+                continue
+            year = int(digits[:-4]) + (1911 if len(digits) == 7 else 0)
+            day = _date(year, int(digits[-4:-2]), int(digits[-2:])).isoformat()
+        except ValueError:
+            continue
+        result.append({'code': rc, 'name': str(row.get('Name') or '').strip(),
+                       'date': day, 'type': str(row.get('Exdividend') or '').strip()})
+    return sorted(result, key=lambda row: (row['date'], row['code']))
 
 
 # ── MOPS 公開資訊觀測站 月營收(補上櫃:官方 OpenAPI 無 per-company 上櫃端點) ──
@@ -4625,7 +4658,7 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
     def _handle_events(self):
         """事件行事曆 (v3.8 #1)：
            • 月營收：規則制——每月 10 日前公布上月營收（永遠可算）
-           • 除權除息預告：TWSE OpenAPI 多個資料集嘗試
+           • 除權除息預告：TWSE 官方 TWT48U_ALL（上市）
            • 法說會：TWSE OpenAPI 法說會一覽（best-effort）
            ?code=2330 可只看單檔除權息。"""
         from datetime import date as _date, timedelta
@@ -4637,45 +4670,16 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
         if c is not None:
             self._ok(c); return
         out = {'date': today.strftime('%Y-%m-%d'), 'revenue': None, 'exDividend': [], 'conference': []}
-        # 月營收規則：本月 10 日前公布上月；若已過 10 日則下次是下月 10 日
-        try:
-            if today.day <= 10:
-                rev_date = today.replace(day=10)
-            else:
-                nm = (today.replace(day=28) + timedelta(days=10)).replace(day=10)
-                rev_date = nm
-            last_month = (today.replace(day=1) - timedelta(days=1)).strftime('%Y-%m')
-            out['revenue'] = {'nextPublishBy': rev_date.strftime('%Y-%m-%d'),
-                              'forMonth': last_month,
-                              'daysAway': (rev_date - today).days}
-        except Exception as e:
-            print(f'[events] revenue rule failed: {e}')
-        # 除權除息預告（嘗試多個資料集名稱，欄位用模糊比對）
-        for ds in ('TWT48U', 'TWTAWU', 'TWT49U'):
-            try:
-                arr = _openapi_lookup_list(ds)
-                if not arr:
-                    continue
-                cnt = 0
-                for row in arr:
-                    rc = (row.get('股票代號') or row.get('證券代號') or row.get('公司代號') or '').strip()
-                    if code and rc != code:
-                        continue
-                    date_v = (row.get('除權息日期') or row.get('除權除息日期') or row.get('資料日期')
-                              or row.get('停止過戶日期') or '')
-                    name_v = row.get('股票名稱') or row.get('證券名稱') or row.get('名稱') or ''
-                    typ = row.get('除權息') or row.get('權息') or ''
-                    if date_v:
-                        out['exDividend'].append({'code': rc, 'name': name_v, 'date': date_v, 'type': typ})
-                        cnt += 1
-                    if cnt >= (200 if not code else 20):
-                        break
-                if out['exDividend']:
-                    break
-            except Exception as e:
-                print(f'[events] exDividend {ds} failed: {e}')
+        out['revenue'] = _revenue_deadline(today)
+        ds = 'exchangeReport/TWT48U_ALL'
+        arr = _openapi_lookup_list(ds)
+        out['exDividend'] = _ex_dividend_rows(arr, code)
+        meta = _openapi_meta.get(ds, {})
+        out['exDividendSource'] = {'dataset': ds, 'url': _openapi_url(ds), 'scope': '上市',
+                                  'status': meta.get('status', 'unavailable'),
+                                  'fetchedAt': meta.get('fetchedAt'), 'sourceRows': len(arr)}
         body = json.dumps(out, ensure_ascii=False).encode()
-        _cache.set(key, body, ttl=3600)
+        _cache.set(key, body, ttl=3600 if meta.get('status') == 'ok' else 60)
         self._ok(body)
 
     def _handle_sectors(self):
@@ -5467,7 +5471,7 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
         # 補基本面
         fund_txt = ''
         try:
-            rev = _openapi_lookup(['t187ap05_L', 't187ap05_O'], code)
+            rev = _openapi_lookup(_REVENUE_DATASETS, code)
             yoy = _pick_num(rev, ['去年同月增減']) if rev else None
             inc = _openapi_lookup(['t187ap06_L_ci', 't187ap06_O_ci', 't187ap06_L', 't187ap06_O'], code)
             gm = nm = None
@@ -6217,7 +6221,7 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             ok = True
             # 基本面
             if want_fund:
-                revrow = _openapi_lookup(['t187ap05_L', 't187ap05_O'], code)
+                revrow = _openapi_lookup(_REVENUE_DATASETS, code)
                 yoy = _pick_num(revrow, ['去年同月增減']) if revrow else None
                 valrow = _openapi_lookup(['exchangeReport/BWIBBU_ALL', 'BWIBBU_ALL'], code) or \
                     _openapi_lookup(['tpex:tpex_mainboard_peratio_analysis'], code)

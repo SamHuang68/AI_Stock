@@ -242,7 +242,7 @@ def aggregate_stocks(stocks: list[dict[str, Any]]) -> dict[str, Any]:
         'periodRaw': period_raw,
         'periodLabel': period_label,
         'unit': 'thousand_ntd',
-        'source': 'TWSE/TPEx OpenAPI t187ap05_L + t187ap05_O',
+        'source': 'TWSE t187ap05_L + TPEx mopsfin_t187ap05_O',
         'stockCount': len([s for s in stocks if s.get('monthRev') is not None]),
         'market': {
             'monthRevThousand': round(market_month, 2),
@@ -268,7 +268,7 @@ def build_from_openapi_rows(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     return aggregate_stocks(merge_openapi_rows(rows))
 
 
-DEFAULT_DATASETS = ('t187ap05_L', 't187ap05_O', 'tpex:mopsfin_t187ap05_O')
+DEFAULT_DATASETS = ('t187ap05_L', 'tpex:mopsfin_t187ap05_O')
 
 
 def get_aggregate(*, force: bool = False, loader: RowLoader | None = None) -> dict[str, Any]:
@@ -279,15 +279,22 @@ def get_aggregate(*, force: bool = False, loader: RowLoader | None = None) -> di
     if load is None:
         return {'ok': False, 'reason': 'no_loader'}
     merged: list[dict[str, Any]] = []
+    coverage = {}
     for ds in DEFAULT_DATASETS:
         try:
             chunk = load(ds) or []
+            coverage[ds] = len(chunk)
             if chunk:
                 merged.extend(chunk)
         except Exception:
+            coverage[ds] = 0
             continue
     agg = build_from_openapi_rows(merged)
-    if agg.get('ok'):
+    complete = all(coverage.values())
+    agg['sourceCoverage'] = {'complete': complete, 'datasets': coverage}
+    if not complete:
+        agg['note'] = (agg.get('note') or '') + ' 部分來源未提供資料，目前合計僅含已取得的來源。'
+    if agg.get('ok') and complete:
         _cache['day'] = today
         _cache['agg'] = agg
     return agg
