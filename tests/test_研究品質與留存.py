@@ -81,14 +81,16 @@ class AdjustmentTests(unittest.TestCase):
         payload = {'chart': {'result': [{'meta': {'dataGranularity': '1d'}, 'timestamp': [1704153600],
             'indicators': {'quote': [{'close': [100], 'open': [99], 'high': [101], 'low': [98], 'volume': [5]}],
                            'adjclose': [{'adjclose': [90]}]}, 'events': {}}]}}
+        error_stream = io.BytesIO(b'not found')
         with patch.object(datastore.urllib.request, 'urlopen', side_effect=[
-                urllib.error.HTTPError('來源', 404, '無資料', {}, None),
+                urllib.error.HTTPError('來源', 404, '無資料', {}, error_stream),
                 io.BytesIO(json.dumps(payload).encode())]) as call:
             out = datastore.fetch_yahoo_daily('5347', 'TW', retries=1, with_research=True, start_ts=1000)
         urls = [item.args[0].full_url for item in call.call_args_list]
         self.assertTrue(all('period1=1000&' in url and 'range=' not in url for url in urls))
         self.assertIn('5347.TWO?', out['source'])
         self.assertEqual(out['adjclose'], [90])
+        self.assertTrue(error_stream.closed)
 
     def test_source_monthly_granularity_is_rejected(self):
         payload = {'chart': {'result': [{'meta': {'dataGranularity': '1mo'}}]}}

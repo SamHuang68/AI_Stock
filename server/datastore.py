@@ -200,6 +200,11 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False,
                 return rows
             except urllib.error.HTTPError as e:
                 last = e
+                # HTTPError 仍持有回應串流；回退或重試前釋放，避免批次結束才由 GC 清理。
+                try:
+                    e.close()
+                except (OSError, ValueError):
+                    pass
                 if with_research and market == 'TW' and e.code == 404 and ysym.endswith('.TW'):
                     return fetch_yahoo_daily(sym.removesuffix('.TW') + '.TWO', market, rng, retries,
                                              with_research=True, start_ts=start_ts)
