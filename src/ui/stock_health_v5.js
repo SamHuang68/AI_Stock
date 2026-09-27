@@ -426,7 +426,10 @@
     if (!p) return '<div class="sh5-foot">還原與成本研究尚未計算；原有研究結果保留。</div>';
     var html = '<details class="sh5-sec"><summary>除權息與成本敏感度（覆蓋 ' + esc(p.coveredSymbols) + '／' + esc(p.totalSymbols) + ' 檔）</summary>' +
       '<div class="sh5-foot">' + esc(p.method || '') + '<br>' + (p.limitations || []).map(esc).join('<br>') + '</div>';
-    if (p.status !== 'available') return html + '<div class="sh5-warn">尚無完整還原快照。缺值不當成無除權息；需先補齊資料。</div></details>';
+    var detail = '<details><summary>完整覆蓋與未接納原因</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
+      esc(JSON.stringify({ covered: p.covered, missingSymbols: p.missingSymbols, missingDetails: p.missingDetails }, null, 2)) + '</pre></details>';
+    if (p.snapshotSymbols != null) html += '<div class="sh5-foot">已取得來源快照 ' + esc(p.snapshotSymbols) + ' 檔；僅完整且與本機原價相容的資料納入比較。</div>';
+    if (p.status !== 'available') return html + '<div class="sh5-warn">尚無完整且相容的還原快照。缺值不當成無除權息；缺日與價差詳見下方。</div>' + detail + '</details>';
     html += '<div class="sh5-table-scroll" role="region" tabindex="0" aria-label="除權息與成本比較，可左右捲動"><table class="sh5-tbl"><thead><tr>' +
       '<th>訊號／天數</th><th>原價／還原事件</th><th>共同事件</th><th>共同原價中位數</th><th>共同還原中位數</th><th>還原後成本情境中位數</th></tr></thead><tbody>';
     (p.signals || []).forEach(function (s) { (s.horizons || []).forEach(function (h) {
@@ -435,8 +438,7 @@
         esc(h.commonEvents) + '</td><td>' + med(h.commonRaw) + '</td><td>' + med(h.commonAdjusted) + '</td><td>' +
         (h.costScenarios || []).map(function (c) { return esc(c.roundTripBps) + ' 基點：' + med(c); }).join('<br>') + '</td></tr>';
     }); });
-    return html + '</tbody></table></div><details><summary>完整覆蓋與缺少代號</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
-      esc(JSON.stringify({ covered: p.covered, missingSymbols: p.missingSymbols }, null, 2)) + '</pre></details></details>';
+    return html + '</tbody></table></div>' + detail + '</details>';
   }
 
   function maintenanceHtml(p) {

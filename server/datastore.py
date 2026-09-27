@@ -156,13 +156,15 @@ def _yf_symbol(sym, market):
         return sym
     return sym + '.TW' if market == 'TW' else sym
 
-def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False):
+def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False, start_ts=None):
     """自 Yahoo v8 chart API 抓日線(query1/query2 雙端點 + 限流退避重試)。"""
     ysym = _yf_symbol(sym, market)
     last = None
     for attempt in range(retries):
         for host in ('query1', 'query2'):
-            url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{ysym}?range={rng}&interval=1d'
+            period = (f'period1={int(start_ts)}&period2={int(time.time())}'
+                      if start_ts is not None else f'range={rng}')
+            url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{ysym}?{period}&interval=1d'
             if with_research:
                 url += '&events=div%2Csplits'
             try:
@@ -170,6 +172,9 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False)
                 with urllib.request.urlopen(req, timeout=20) as r:
                     j = json.load(r)
                 res = j['chart']['result'][0]
+                granularity = (res.get('meta') or {}).get('dataGranularity')
+                if granularity and granularity != '1d':
+                    raise ValueError('來源回傳非日線資料，拒絕寫入日線庫')
                 ts = res['timestamp']
                 q = res['indicators']['quote'][0]
                 rows = []
@@ -197,7 +202,7 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False)
                 last = e
                 if with_research and market == 'TW' and e.code == 404 and ysym.endswith('.TW'):
                     return fetch_yahoo_daily(sym.removesuffix('.TW') + '.TWO', market, rng, retries,
-                                             with_research=True)
+                                             with_research=True, start_ts=start_ts)
                 if e.code == 429:        # 被限流 → 兩端點都跳過,退避後整體重試
                     break
             except Exception as e:

@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -26,6 +27,7 @@ def main(argv=None):
     parser.add_argument('--data-dir', type=Path, default=ROOT / 'data')
     parser.add_argument('--adjustments', action='store_true', help='明確授權後才使用：補取本機股票的還原快照')
     parser.add_argument('--symbols', help='限制還原快照代號，以逗號分隔；省略為本機全部股票')
+    parser.add_argument('--workers', type=int, choices=range(1, 5), default=4, help='來源下載併發數，最多四個；資料寫入仍循序執行')
     args = parser.parse_args(argv)
     if not args.start <= args.end <= date.today() or (args.end - args.start).days > 370:
         parser.error('日期必須由舊到新、不得包含未來，單次最多 370 日')
@@ -91,33 +93,54 @@ def main(argv=None):
     if args.adjustments:
         import signal_stats_pool as pool
         import 個股還原研究 as adjusted
-        codes = args.symbols.split(',') if args.symbols else datastore.list_symbols('TW', pool.MIN_BARS_POOL)
+        from stock_signals import bar_date, normalize_bars, _TZ
+        benchmark_ts = datastore.last_ts('^TWII')
+        benchmark_day = bar_date(benchmark_ts) if benchmark_ts else None
+        codes = args.symbols.split(',') if args.symbols else datastore.list_symbols('TW', 1)
+        tasks = {}
         for code in codes:
             if not pool._TICKER_RE['TW'].fullmatch(code):
                 continue
             with datastore.read_snapshot() as conn:
                 previous = adjusted.load_snapshot(conn, code)
-            if previous and datetime.fromtimestamp(previous['fetchedAt']).date() == date.today():
+                existing_rows = datastore.get_bars_bulk([code], connection=conn).get(code) or []
+            bars = normalize_bars(existing_rows)
+            if not bars:
+                continue
+            fetched = datetime.fromtimestamp(previous['fetchedAt'], _TZ['TW']) if previous else None
+            current = datetime.now(_TZ['TW'])
+            if (previous and fetched.date() == current.date()
+                    and (current.hour < 14 or fetched.hour >= 14)
+                    and benchmark_day is not None
+                    and max((r['date'] for r in previous.get('rows', [])), default='') >= benchmark_day
+                    and adjusted.adjusted_bars(bars, previous) is not None):
                 trace('還原來源沿用當日快照', symbol=code)
                 continue
-            trace('還原來源開始', symbol=code, host='finance.yahoo.com')
-            try:
-                pack = datastore.fetch_yahoo_daily(code, 'TW', '10y', with_research=True)
-                count = adjusted.save_snapshot(code, 'TW', pack)
-                from stock_signals import bar_date, _TZ
-                current = datetime.now(_TZ['TW'])
-                # 僅追加尚不存在的交易日；既有原價歷史不因還原研究被覆寫。
-                existing = {r[0] for r in datastore.get_bars(code)}
-                fresh = [r for r in pack['rows'] if r[0] not in existing and
-                         (bar_date(r[0]) < current.date().isoformat() or
-                          (bar_date(r[0]) == current.date().isoformat() and current.hour >= 14))]
-                if fresh:
-                    datastore.upsert_bars(code, 'TW', fresh)
-                trace('還原來源完成', symbol=code, rows=count, appendedBars=len(fresh))
-            except Exception as exc:
-                failures.append('adjustment:' + code)
-                trace('還原來源失敗', symbol=code, errorType=type(exc).__name__)
-            time.sleep(.25)
+            # 明確期間保留日線粒度；range=max 可能被來源自動改成月線。
+            tasks[code] = min(r[0] for r in existing_rows) - 86400
+        with ThreadPoolExecutor(max_workers=args.workers) as executor:
+            futures = {}
+            for code, start_ts in tasks.items():
+                trace('還原來源排程', symbol=code, host='finance.yahoo.com', startTimestamp=start_ts)
+                futures[executor.submit(datastore.fetch_yahoo_daily, code, 'TW', '10y',
+                                        with_research=True, start_ts=start_ts)] = code
+            for future in as_completed(futures):
+                code = futures[future]
+                try:
+                    pack = future.result()
+                    count = adjusted.save_snapshot(code, 'TW', pack)
+                    current = datetime.now(_TZ['TW'])
+                    # 依交易日期去重，避免來源時間戳不同造成同一天兩根日線。
+                    existing = {bar_date(r[0]) for r in datastore.get_bars(code)}
+                    fresh = list({bar_date(r[0]): r for r in pack['rows'] if bar_date(r[0]) not in existing and
+                                  (bar_date(r[0]) < current.date().isoformat() or
+                                   (bar_date(r[0]) == current.date().isoformat() and current.hour >= 14))}.values())
+                    if fresh:
+                        datastore.upsert_bars(code, 'TW', fresh)
+                    trace('還原來源完成', symbol=code, rows=count, appendedBars=len(fresh))
+                except Exception as exc:
+                    failures.append('adjustment:' + code)
+                    trace('還原來源失敗', symbol=code, errorType=type(exc).__name__, reason=str(exc)[:400])
     trace('工作結束', ok=not failures, failures=failures, coveredDays=len(state), chipScope='僅上市 T86')
     return int(bool(failures))
 

@@ -59,6 +59,24 @@ def adjusted_bars(bars, snapshot):
     return out
 
 
+def alignment_issues(bars, snapshot):
+    """保留未接納原因；來源取得成功不等於與既有原價相容。"""
+    if not snapshot:
+        return {'status': 'missing_snapshot', 'label': '尚無來源快照', 'missingDates': [], 'priceMismatches': []}
+    values = {r['date']: r for r in snapshot.get('rows', [])}
+    missing, mismatches = [], []
+    for bar in bars:
+        row = values.get(bar['date'])
+        if not row:
+            missing.append(bar['date'])
+        elif not math.isclose(row['rawClose'], bar['close'], rel_tol=0.0001, abs_tol=0.005):
+            mismatches.append({'date': bar['date'], 'localClose': bar['close'], 'sourceClose': row['rawClose']})
+    return {'status': 'incompatible' if missing or mismatches else 'aligned',
+            'label': '來源缺日或與本機原價不一致' if missing or mismatches else '完整相容',
+            'missingDates': missing, 'priceMismatches': mismatches,
+            'fetchedAt': snapshot.get('fetchedAt'), 'source': snapshot.get('source')}
+
+
 def net_return(gross, round_trip_bps):
     if not math.isfinite(round_trip_bps) or not 0 <= round_trip_bps <= 1000:
         raise ValueError('往返成本須介於 0 與 1000 基點')
@@ -77,6 +95,7 @@ class Sensitivity:
         self.connection, self.market = connection, market
         self.positions = {d: i for i, d in enumerate(sessions)}
         self.covered, self.missing = [], []
+        self.missing_details = []
         self.rows = {s['id']: {h: {'raw': [], 'adjusted': [], 'commonRaw': [], 'commonAdjusted': [],
                                   'rawEvents': 0, 'adjustedEvents': 0, 'commonEvents': 0}
                              for h in ss.STAT_HORIZONS} for s in ss.SIGNALS}
@@ -86,6 +105,7 @@ class Sensitivity:
         adjusted = adjusted_bars(bars, snapshot)
         if not adjusted:
             self.missing.append(symbol)
+            self.missing_details.append({'symbol': symbol, **alignment_issues(bars, snapshot)})
             return
         self.covered.append({'symbol': symbol, 'from': bars[0]['date'], 'to': bars[-1]['date'],
                              'fetchedAt': snapshot['fetchedAt'],
@@ -122,6 +142,8 @@ class Sensitivity:
                                       for cost in COSTS]})
             signals.append({'signalId': spec['id'], 'label': spec['label'], 'horizons': horizons})
         return {'version': 'st-price-sensitivity/v1', 'covered': self.covered, 'missingSymbols': self.missing,
+                'missingDetails': self.missing_details,
+                'snapshotSymbols': len(self.covered) + sum(d['status'] != 'missing_snapshot' for d in self.missing_details),
                 'coveredSymbols': len(self.covered), 'totalSymbols': len(self.covered) + len(self.missing),
                 'status': 'available' if self.covered else 'missing', 'signals': signals,
                 'method': '原價與供應商還原快照各用同一引擎，次日收盤起算；成本於進出各計往返假設的一半。',

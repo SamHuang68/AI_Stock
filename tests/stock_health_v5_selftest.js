@@ -27,6 +27,9 @@ const maintenanceMarkup = H.maintenanceHtml({ running: false, job: {status:'fail
 if (!maintenanceMarkup.includes('失敗') || !maintenanceMarkup.includes('80／100') || !maintenanceMarkup.includes('0 個事件')) throw new Error('維護失敗或真實空狀態錯誤');
 const adjustmentMarkup = H.sensitivityHtml({status:'missing',coveredSymbols:0,totalSymbols:100,limitations:[]});
 if (!adjustmentMarkup.includes('缺值不當成無除權息') || !adjustmentMarkup.includes('0／100')) throw new Error('缺還原資料必須明示');
+const mismatchMarkup = H.sensitivityHtml({status:'missing',coveredSymbols:0,totalSymbols:1,snapshotSymbols:1,
+  limitations:[],missingSymbols:['2330'],missingDetails:[{symbol:'2330',label:'原價不一致<script>',priceMismatches:[{date:'2024-03-29'}]}]});
+if (!mismatchMarkup.includes('已取得來源快照 1 檔') || !mismatchMarkup.includes('2024-03-29') || mismatchMarkup.includes('<script>')) throw new Error('來源已取得但未接納的原因不可隱藏');
 
 function ok(value, message) {
   if (!value) throw new Error('FAIL: ' + message);

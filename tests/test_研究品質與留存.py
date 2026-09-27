@@ -1,10 +1,12 @@
 """資料品質、還原成本與實際留存的邊界驗證；不使用外部來源。"""
 import json
+import io
+import importlib.util
 import sqlite3
 import sys
 import tempfile
 import unittest
-from contextlib import closing
+from contextlib import closing, redirect_stdout
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -55,6 +57,45 @@ class QualityTests(unittest.TestCase):
 
 
 class AdjustmentTests(unittest.TestCase):
+    def test_source_update_includes_short_history_and_does_not_duplicate_session(self):
+        spec = importlib.util.spec_from_file_location('research_source_test', ROOT / 'scripts/個股研究資料更新.py')
+        updater = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(updater)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(datastore, 'DB_PATH', str(Path(tmp) / 'market.db')):
+            stamp = int(datetime(2026, 9, 24, 9, tzinfo=ss._TZ['TW']).timestamp())
+            with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+                conn.executescript(datastore.SCHEMA)
+                conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', ('2330', 'TW', stamp, 10, 10, 10, 10, 1))
+            pack = {'timestamps': [stamp + 3600, stamp + 86400], 'quoteClose': [11, 12], 'adjclose': [10, 12],
+                    'events': {}, 'source': '本機測試', 'fetchedAt': 1,
+                    'rows': [(stamp + 3600, 11, 11, 11, 11, 1), (stamp + 86400, 12, 12, 12, 12, 1)]}
+            with patch.object(datastore, 'update', return_value=0), patch.object(datastore, 'fetch_yahoo_daily', return_value=pack) as fetch, \
+                    patch.object(updater.tracker, 'CHIP_HISTORY_PATH', str(Path(tmp) / 'chip_history')), redirect_stdout(io.StringIO()):
+                code = updater.main(['--start', '2026-09-27', '--end', '2026-09-27', '--data-dir', tmp, '--adjustments'])
+            self.assertEqual(code, 0)
+            self.assertEqual(fetch.call_args.kwargs['start_ts'], stamp - 86400)
+            self.assertEqual([row[4] for row in datastore.get_bars('2330')], [10, 12])
+
+    def test_explicit_period_preserves_daily_history_and_otc_fallback(self):
+        import urllib.error
+        payload = {'chart': {'result': [{'meta': {'dataGranularity': '1d'}, 'timestamp': [1704153600],
+            'indicators': {'quote': [{'close': [100], 'open': [99], 'high': [101], 'low': [98], 'volume': [5]}],
+                           'adjclose': [{'adjclose': [90]}]}, 'events': {}}]}}
+        with patch.object(datastore.urllib.request, 'urlopen', side_effect=[
+                urllib.error.HTTPError('來源', 404, '無資料', {}, None),
+                io.BytesIO(json.dumps(payload).encode())]) as call:
+            out = datastore.fetch_yahoo_daily('5347', 'TW', retries=1, with_research=True, start_ts=1000)
+        urls = [item.args[0].full_url for item in call.call_args_list]
+        self.assertTrue(all('period1=1000&' in url and 'range=' not in url for url in urls))
+        self.assertIn('5347.TWO?', out['source'])
+        self.assertEqual(out['adjclose'], [90])
+
+    def test_source_monthly_granularity_is_rejected(self):
+        payload = {'chart': {'result': [{'meta': {'dataGranularity': '1mo'}}]}}
+        with patch.object(datastore.urllib.request, 'urlopen', side_effect=lambda *a, **k: io.BytesIO(json.dumps(payload).encode())):
+            with self.assertRaisesRegex(RuntimeError, '非日線'):
+                datastore.fetch_yahoo_daily('2330', 'TW', 'max', retries=1, with_research=True)
+
     def test_dividend_adjustment_and_missing_day_rejection(self):
         b = [{'date': '2026-01-02', 'open': 100, 'high': 101, 'low': 99, 'close': 100, 'volume': 5},
              {'date': '2026-01-05', 'open': 95, 'high': 96, 'low': 94, 'close': 95, 'volume': 5}]
@@ -65,8 +106,10 @@ class AdjustmentTests(unittest.TestCase):
         self.assertEqual(b[0]['close'], 100)
         self.assertEqual(a[0]['volume'], b[0]['volume'])
         self.assertIsNone(adjusted.adjusted_bars(b, {'rows': snap['rows'][:1]}))
+        self.assertEqual(adjusted.alignment_issues(b, {'rows': snap['rows'][:1]})['missingDates'], ['2026-01-05'])
         snap['rows'][0]['rawClose'] = 99
         self.assertIsNone(adjusted.adjusted_bars(b, snap))
+        self.assertEqual(adjusted.alignment_issues(b, snap)['priceMismatches'][0]['sourceClose'], 99)
 
     def test_cost_formula_threshold_and_nonfinite(self):
         self.assertAlmostEqual(adjusted.net_return(.1, 100), 1.1 * .995 / 1.005 - 1)
