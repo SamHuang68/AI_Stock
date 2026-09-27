@@ -374,7 +374,7 @@
       var lead = (ir.yoyLeaders && ir.yoyLeaders[0]) || null;
       revKpi = '<div class="k"><div class="l">月營YoY · ' + esc(ir.periodLabel || '—') + '</div>' +
         '<div class="v">' + (Number(irMkt.yoyPct) >= 0 ? '+' : '') + Number(irMkt.yoyPct).toFixed(1) + '%</div>' +
-        '<div class="s">合計 ' + (irMkt.monthRevYi != null ? Number(irMkt.monthRevYi).toFixed(0) + ' 億' : '—') +
+        '<div class="s">' + esc(ir.coverageLabel || '來源完整度未知') + ' · 合計 ' + (irMkt.monthRevYi != null ? Number(irMkt.monthRevYi).toFixed(0) + ' 億' : '—') +
         (lead ? (' · 最強 ' + esc(lead.industry || '') + ' ' + (Number(lead.yoyPct) >= 0 ? '+' : '') +
           Number(lead.yoyPct).toFixed(1) + '%') : '') +
         '</div></div>';
@@ -461,6 +461,7 @@
         }
         if (mkt === 'TW' && s.revenueSharePct != null) {
           flowBits.push('營占比 ' + Number(s.revenueSharePct).toFixed(1) + '%');
+          if (!s.revenueSourceCoverage || !s.revenueSourceCoverage.complete) flowBits.push(s.revenueCoverageLabel || '營收來源完整度未知');
         }
         if (mkt === 'TW' && s.revenueGrowCount != null && s.revenueDeclineCount != null) {
           flowBits.push('營↑' + s.revenueGrowCount + '/↓' + s.revenueDeclineCount);

@@ -2420,6 +2420,8 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             self._handle_stock_signals_push_config_get()
         elif p == '/stock-signals/digest/preview' or p.startswith('/stock-signals/digest/preview?'):
             self._handle_stock_signals_digest_preview()
+        elif p == '/stock-signals/research/status' or p.startswith('/stock-signals/research/status?'):
+            self._handle_stock_research_status()
         elif p == '/stock-signals/pooled' or p.startswith('/stock-signals/pooled?'):
             self._handle_stock_signals_pooled()
         elif p == '/research/overnight-intraday' or p.startswith('/research/overnight-intraday?'):
@@ -2701,6 +2703,8 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             self._handle_stock_signals_watchlist_post()
         elif p == '/stock-signals/push-config':
             self._handle_stock_signals_push_config_post()
+        elif p == '/stock-signals/research/refresh':
+            self._handle_stock_research_refresh()
         elif p == '/stock-signals/pooled/refresh':
             self._handle_stock_signals_pooled_refresh()
         elif p == '/stock-signals/explain':
@@ -4906,6 +4910,8 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
                             'yoyLeaders': _ir_agg.get('yoyLeaders'),
                             'yoyLaggards': _ir_agg.get('yoyLaggards'),
                             'note': _ir_agg.get('note'),
+                            'sourceCoverage': _ir_agg.get('sourceCoverage'),
+                            'coverageLabel': _ir_agg.get('coverageLabel'),
                             'source': _ir_agg.get('source'),
                         }
                 except Exception as _ir_sec_exc:
@@ -6410,6 +6416,11 @@ if __name__ == '__main__':
                 print('[stock-signal] push daemon started (%s)' % _ac.get('stock_signal_push'))
         except Exception as _e:
             print('[alert] start failed:', _e)
+    try:
+        import 個股研究維護 as _research_maintenance
+        _research_maintenance.start_daemon()
+    except Exception as _e:
+        print('每日個股留存啟動失敗：', type(_e).__name__)
     if getattr(sys, 'frozen', False):
         # 打包成 app 時:啟動後自動開 tip 總覽（#pulse）；絕不開無 hash 舊圖表殼
         try:

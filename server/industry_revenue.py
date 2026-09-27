@@ -292,6 +292,9 @@ def get_aggregate(*, force: bool = False, loader: RowLoader | None = None) -> di
     agg = build_from_openapi_rows(merged)
     complete = all(coverage.values())
     agg['sourceCoverage'] = {'complete': complete, 'datasets': coverage}
+    agg['coverageLabel'] = ('上市櫃來源齊全' if complete else
+                            '僅含' + '、'.join('上市' if ds == 't187ap05_L' else '上櫃'
+                                            for ds, count in coverage.items() if count) + '，來源未齊')
     if not complete:
         agg['note'] = (agg.get('note') or '') + ' 部分來源未提供資料，目前合計僅含已取得的來源。'
     if agg.get('ok') and complete:
@@ -335,6 +338,8 @@ def attach_sector_revenue(
             row['revenueLeaderCode'] = (hit.get('leader') or {}).get('code')
             row['revenueLaggardCode'] = (hit.get('laggard') or {}).get('code')
             row['revenuePeriodLabel'] = (agg or {}).get('periodLabel')
+            row['revenueSourceCoverage'] = (agg or {}).get('sourceCoverage')
+            row['revenueCoverageLabel'] = (agg or {}).get('coverageLabel', '來源完整度未知')
         out.append(row)
     return out
 
@@ -347,7 +352,11 @@ def market_flash_title(agg: dict[str, Any] | None) -> str | None:
     yi = mkt.get('monthRevYi')
     yoy = mkt.get('yoyPct')
     mom = mkt.get('momPct')
-    parts = [f'月營收 {label} 上市櫃合計']
+    coverage = agg.get('sourceCoverage') or {}
+    scope = '上市櫃合計' if coverage.get('complete') else '已取得來源合計（完整度未確認）'
+    if coverage and not coverage.get('complete'):
+        scope = '部分來源合計（' + agg.get('coverageLabel', '來源未齊') + '）'
+    parts = [f'月營收 {label} {scope}']
     if yi is not None:
         parts.append(f'{yi:.1f} 億')
     if yoy is not None:
@@ -371,4 +380,5 @@ def market_flash_item(agg: dict[str, Any] | None) -> dict[str, Any] | None:
         'cat': '總經',
         'mkt': 'TW',
         'source': 'industry_revenue_openapi',
+        'sourceCoverage': (agg or {}).get('sourceCoverage'),
     }

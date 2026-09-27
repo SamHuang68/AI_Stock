@@ -152,17 +152,19 @@ def init_db():
         _db_ready_logged = True
 
 def _yf_symbol(sym, market):
-    if sym.startswith('^'):
+    if sym.startswith('^') or sym.endswith(('.TW', '.TWO')):
         return sym
     return sym + '.TW' if market == 'TW' else sym
 
-def fetch_yahoo_daily(sym, market, rng='10y', retries=3):
+def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False):
     """自 Yahoo v8 chart API 抓日線(query1/query2 雙端點 + 限流退避重試)。"""
     ysym = _yf_symbol(sym, market)
     last = None
     for attempt in range(retries):
         for host in ('query1', 'query2'):
             url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{ysym}?range={rng}&interval=1d'
+            if with_research:
+                url += '&events=div%2Csplits'
             try:
                 req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
                 with urllib.request.urlopen(req, timeout=20) as r:
@@ -185,9 +187,17 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3):
                     if lo is None or lo <= 0: lo = cl
                     
                     rows.append((t, op, hi, lo, cl, vol))
+                if with_research:
+                    return {'rows': rows, 'timestamps': ts, 'quoteClose': q['close'],
+                            'adjclose': ((res['indicators'].get('adjclose') or [{}])[0]).get('adjclose', []),
+                            'events': res.get('events') or {}, 'source': url,
+                            'fetchedAt': int(time.time())}
                 return rows
             except urllib.error.HTTPError as e:
                 last = e
+                if with_research and market == 'TW' and e.code == 404 and ysym.endswith('.TW'):
+                    return fetch_yahoo_daily(sym.removesuffix('.TW') + '.TWO', market, rng, retries,
+                                             with_research=True)
                 if e.code == 429:        # 被限流 → 兩端點都跳過,退避後整體重試
                     break
             except Exception as e:

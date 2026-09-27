@@ -239,9 +239,18 @@ def compute_snapshot(connection, *, market='TW', symbols=None, chips=None, progr
         benchmark = datastore.get_bars_bulk(['^TWII'], market=market, connection=connection)
         study = research.Study(finalized(ss.normalize_bars(benchmark.get('^TWII') or [], market)))
     series = ((code, finalized(bars)) for code, bars in iter_datastore(market, symbols, connection=connection))
+    from 個股還原研究 import Sensitivity
+    sensitivity = Sensitivity(connection, sorted(study.market) if study else [], market)
+    def observed(code, frame):
+        if study:
+            study.add(code, frame)
+        bars = [{key: frame[key][i] for key in ('date', 'open', 'high', 'low', 'close', 'volume')}
+                for i in range(len(frame['date']))]
+        sensitivity.add(code, bars, (chips or {}).get(code, []))
     result = compute_pooled(series,
                             market=market, chips=chips, progress=progress,
-                            frame_observer=study.add if study else None)
+                            frame_observer=observed)
+    result['priceSensitivity'] = sensitivity.finish()
     result['statisticsVersion'] = 2
     result['researchAsOf'] = current.isoformat()
     if study:

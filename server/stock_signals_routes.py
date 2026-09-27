@@ -189,6 +189,17 @@ def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
     if loaded.get('error'):
         result['dataWarning'] = loaded['error']
     result['generatedAt'] = datetime.now(ss._TZ['TW']).isoformat(timespec='seconds')
+    try:
+        from 個股資料品質 import assess
+        import signal_stats_pool as pool
+        import datastore as ds
+        with ds.read_snapshot() as connection:
+            benchmark_code = '^TWII' if market == 'TW' else '^GSPC'
+            raw = ds.get_bars_bulk([benchmark_code], market=market, connection=connection).get(benchmark_code) or []
+        result['dataQuality'] = assess(result, ss.normalize_bars(raw, market), pool.load_cached(market), now)
+    except Exception:
+        result['dataQuality'] = {'status': 'unknown', 'label': '資料品質待確認', 'items': [],
+                                 'notes': ['本機品質資料無法讀取；不代表資料已齊全。']}
     ttl = 300 if loaded.get('provisional') else 1800
     if use_cache:
         with _cache_lock:
@@ -376,11 +387,30 @@ class StockSignalsRoutesMixin:
         }
         if cached:
             payload.update({k: cached.get(k) for k in
-                            ('generatedAt', 'symbols', 'window', 'method', 'caveats', 'elapsedSec')})
+                            ('generatedAt', 'symbols', 'window', 'method', 'caveats', 'elapsedSec', 'priceSensitivity')})
             payload['scoreboard'] = pool.scoreboard(cached)
             research = cached.get('research') or {}
             payload['research'] = {k: research.get(k) for k in ('version', 'policy', 'selection', 'limitations', 'benchmarkCoverage', 'rsiRebound')}
         self._ok(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+
+    def _handle_stock_research_status(self):
+        import 個股研究維護 as maintenance
+        try:
+            self._ok(json.dumps(maintenance.status(), ensure_ascii=False).encode('utf-8'))
+        except Exception as exc:
+            self._err('研究狀態讀取失敗：' + type(exc).__name__, 500)
+
+    def _handle_stock_research_refresh(self):
+        import 個股研究維護 as maintenance
+        try:
+            body = read_json_body(self, max_bytes=4096)
+        except BodyReadError as exc:
+            self._err(str(exc), exc.status)
+            return
+        if not isinstance(body, dict) or any(not isinstance(body.get(k, False), bool) for k in ('enableDaily', 'downloadSources')):
+            self._err('每日留存設定必須是布林值', 400)
+            return
+        self._ok(json.dumps(maintenance.submit(body.get('enableDaily', False), body.get('downloadSources', False)), ensure_ascii=False).encode('utf-8'))
 
     def _handle_stock_signals_pooled_refresh(self):
         import job_queue

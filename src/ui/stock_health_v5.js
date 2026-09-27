@@ -46,7 +46,7 @@
     var base = window.SERVER || location.origin || 'http://localhost:18432';
     return fetch(base + path, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {})
-    }).then(function (r) { return r.json(); });
+    }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
   }
 
   function getMode() {
@@ -167,7 +167,7 @@
     if (!p || !p.horizons) return '';
     var rows = p.horizons.filter(function (r) { return r.gate === 'ok' && (mode !== 'beginner' || r.horizon === 5); });
     if (!rows.length) return '';
-    return rows.map(function (r) {
+    return '<span>統計資料至 ' + esc((p.window || {}).to || '未知') + '；計算於 ' + esc(p.generatedAt || '未知') + '</span><br>' + rows.map(function (r) {
       return '同市場 ' + p.symbols + ' 檔合計 ' + r.n + ' 次後 ' + r.horizon + ' 日：上漲 ' + pct(r.upRatio) + ciText(r) +
         '（基準 ' + pct(r.baseUpRatio) + '）' + verdictText(r) +
         (mode !== 'beginner' ? '、中位數 ' + pct(r.medianRet, 1) : '');
@@ -290,6 +290,8 @@
       (p.research && p.research.selection ? '<div class="sh5-foot">候選判讀：' + esc(p.research.selection.reason) + '</div>' : '') +
       (p.research && p.research.benchmarkCoverage ? '<div class="sh5-foot">大盤情境資料：' + esc(p.research.benchmarkCoverage.from || '缺少') + '～' + esc(p.research.benchmarkCoverage.to || '缺少') + '；缺少同日情境的事件不納入對照研究。</div>' : '') +
       rsiResearchHtml(p.research && p.research.rsiRebound) +
+      sensitivityHtml(p.priceSensitivity) +
+      rawCostHtml(p.scoreboard || []) +
       '<div class="sh5-foot">' + esc(p.method || '') + '<br>' + (p.caveats || []).map(esc).join('<br>') + '</div>' +
       '<div class="sh5-row">' + btn + '</div>';
   }
@@ -310,7 +312,7 @@
     var inv = d.health.invalidation;
     var events = d.events || [];
     var shown = mode === 'beginner' ? events.filter(function (e) { return e.status !== 'invalidated'; }) : events;
-    var html = '<div class="sh5">' + head + warn + lightsHtml(d, mode) +
+    var html = '<div class="sh5">' + head + warn + qualityHtml(d.dataQuality, mode) + lightsHtml(d, mode) +
       '<div class="sh5-sum">' + esc(d.health.summary.sentence) + '</div>' +
       (inv ? '<div class="sh5-inval">什麼情況代表判斷錯了：' + esc(inv.text) + '</div>' : '') +
       (mode === 'pro' ? professionalHtml(d) : '') +
@@ -321,6 +323,7 @@
       '<span>AI 只能引用上方證據，不能改寫燈號或給買賣指令</span></div><div id="sh5-ai-out">' +
       aiHtml(explainCache[d.symbol + ':' + d.asOf]) + '</div>';
     if (mode !== 'beginner') {
+      if (d.market === 'TW') html += '<details class="sh5-sec" id="sh5-research"><summary>研究維護與每日事件留存</summary><div id="sh5-research-body">展開後讀取本機狀態。</div></details>';
       html += '<div class="sh5-sec"><details id="sh5-pool"><summary style="cursor:pointer;font:800 11px \'Noto Sans TC\',sans-serif;color:var(--gold,#fbbf24)">' +
         '訊號成績單（同市場合併統計：哪些訊號真的有資訊？）</summary><div id="sh5-pool-body">' + scoreboardHtml(poolCache) + '</div></details></div>';
     }
@@ -407,6 +410,65 @@
 
   var pushCfg = null;
   var poolCache = null;
+  function qualityHtml(q, mode) {
+    if (!q) return '<div class="sh5-foot">資料品質尚未提供，請以各來源日期核對。</div>';
+    var names = { aligned: '已對齊', stale: '待更新', missing: '缺資料', unknown: '待確認' };
+    var parts = (q.items || []).map(function (r) {
+      return esc(r.label) + '：' + esc(names[r.status] || '待確認') + '（' + esc(r.asOf || '無日期') + '）' +
+        (r.lagSessions ? '，落後 ' + esc(r.lagSessions) + ' 個已知交易日' : '') +
+        (mode !== 'beginner' ? '<br>' + esc(r.impact || '') + (r.generatedAt ? '；計算於 ' + esc(r.generatedAt) : '') : '');
+    });
+    return '<details class="sh5-sec"><summary>' + esc(q.label || '資料品質待確認') + ' · 基準日 ' + esc(q.referenceSession || '未知') +
+      '</summary><div class="sh5-foot">' + parts.join('<br>') + '<br>' + (q.notes || []).map(esc).join('<br>') + '</div></details>';
+  }
+
+  function sensitivityHtml(p) {
+    if (!p) return '<div class="sh5-foot">還原與成本研究尚未計算；原有研究結果保留。</div>';
+    var html = '<details class="sh5-sec"><summary>除權息與成本敏感度（覆蓋 ' + esc(p.coveredSymbols) + '／' + esc(p.totalSymbols) + ' 檔）</summary>' +
+      '<div class="sh5-foot">' + esc(p.method || '') + '<br>' + (p.limitations || []).map(esc).join('<br>') + '</div>';
+    if (p.status !== 'available') return html + '<div class="sh5-warn">尚無完整還原快照。缺值不當成無除權息；需先補齊資料。</div></details>';
+    html += '<div class="sh5-table-scroll" role="region" tabindex="0" aria-label="除權息與成本比較，可左右捲動"><table class="sh5-tbl"><thead><tr>' +
+      '<th>訊號／天數</th><th>原價／還原事件</th><th>共同事件</th><th>共同原價中位數</th><th>共同還原中位數</th><th>還原後成本情境中位數</th></tr></thead><tbody>';
+    (p.signals || []).forEach(function (s) { (s.horizons || []).forEach(function (h) {
+      var med = function (v) { return v && v.gate === 'ok' ? pct(v.medianRet, 2) : '樣本不足'; };
+      html += '<tr><td>' + esc(s.label) + '／' + esc(h.horizon) + ' 日</td><td>' + esc(h.rawEvents) + '／' + esc(h.adjustedEvents) + '</td><td>' +
+        esc(h.commonEvents) + '</td><td>' + med(h.commonRaw) + '</td><td>' + med(h.commonAdjusted) + '</td><td>' +
+        (h.costScenarios || []).map(function (c) { return esc(c.roundTripBps) + ' 基點：' + med(c); }).join('<br>') + '</td></tr>';
+    }); });
+    return html + '</tbody></table></div><details><summary>完整覆蓋與缺少代號</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
+      esc(JSON.stringify({ covered: p.covered, missingSymbols: p.missingSymbols }, null, 2)) + '</pre></details></details>';
+  }
+
+  function maintenanceHtml(p) {
+    var j = p.job || {}, o = p.observations || {}, i = p.inventory || {};
+    var names = { running: '執行中', queued: '排隊中', completed: '已完成', partial: '部分完成', failed: '失敗', interrupted: '已中斷', waiting: '等待資料', disabled: '未啟用' };
+    var html = '<div role="status" aria-live="polite" class="sh5-foot">' + esc(p.running ? '研究工作執行中' : (names[j.status] || '尚未執行')) +
+      ' · ' + esc(j.message || '') + '<br>大盤至 ' + esc(i.benchmarkAsOf || '未知') + '；個股對齊 ' + esc(i.alignedSymbols || 0) + '／' + esc(i.symbols || 0) + ' 檔。' +
+      '<br>' + esc(i.note || '') + '<br>預設只重算本機資料；不呼叫模型或傳送通知。</div>';
+    html += '<ol class="sh5-foot">' + (j.steps || []).map(function (s) { return '<li>' + esc(s.label) + '：' + esc(names[s.status] || s.status) +
+      (s.detail && s.detail.reason ? '；' + esc(s.detail.reason) : '') + (s.error ? '（' + esc(s.error) + '）' : '') + '</li>'; }).join('') + '</ol>';
+    html += '<div class="sh5-foot">每日事件留存：' + (o.enabled ? '已啟用，主機運行時收盤後檢查' : '尚未啟用') +
+      '；已留存 ' + esc(o.events || 0) + ' 個事件、' + esc(o.outcomes || 0) + ' 筆成熟結果。' +
+      (o.activatedAt ? '<br>啟用於 ' + esc(o.activatedAt) : '') + (o.lastRun ? '<br>最近檢查 ' + esc(o.lastRun.asOf) + '：' + esc(o.lastRun.reason) : '') +
+      '<br>只記錄啟用後的當日收盤事件，缺日不回填；這些是觀察紀錄，並非通過研究的候選。</div>';
+    if ((o.recent || []).length) html += '<details><summary>最新 20 筆事件摘要（完整資料保留於本機帳本）</summary><div class="sh5-foot">' +
+      o.recent.map(function (r) { return esc(r.date + ' · ' + r.symbol + ' · ' + r.signalId); }).join('<br>') + '</div></details>';
+    if (!o.enabled) html += '<label class="sh5-foot"><input type="checkbox" id="sh5-daily-enable"> 同時啟用本機每日事件留存</label>';
+    html += '<div class="sh5-foot"><label><input type="checkbox" id="sh5-source-consent"> 同意本次向既有 Yahoo Finance／TWSE 下載行情、還原價格與上市籌碼</label><br>僅傳送代號與日期範圍，不上傳帳本；無已知 API 費用，可能限流。未勾選則只用本機資料。</div>';
+    return html + '<div class="sh5-row"><button class="sh5-btn" id="sh5-research-refresh"' + (p.running ? ' disabled' : '') + '>檢查並重算本機研究</button>' +
+      '<button class="sh5-btn" id="sh5-research-status">更新狀態</button></div><div id="sh5-research-error" role="alert" class="sh5-warn"></div>';
+  }
+
+  function rawCostHtml(rows) {
+    var html = '<details class="sh5-sec"><summary>原價事件研究：往返成本敏感度</summary><div class="sh5-foot">沿用原本情境研究樣本，次日收盤起算。各成本是研究假設，不代表實際券商收費；未還原價格的限制仍存在，不改變候選結果。</div>';
+    rows.forEach(function (r) { ((r.research || {}).horizons || []).forEach(function (h) {
+      var cases = (h.all || {}).costScenarios || [];
+      html += '<div class="sh5-foot">' + esc(r.label) + '／' + esc(h.horizon) + ' 日：' +
+        (cases.length ? cases.map(function (c) { return esc(c.roundTripBps) + ' 基點 → ' +
+          (c.gate === 'ok' ? '中位數 ' + pct(c.medianRet, 2) + '、正報酬 ' + pct(c.upRatio) + '（n=' + esc(c.n) + '）' : '樣本不足'); }).join('；') : '尚待重算') + '</div>';
+    }); });
+    return html + '</details>';
+  }
   function loadPool(market) {
     return getJson('/stock-signals/pooled?market=' + (market || 'TW')).then(function (p) { poolCache = p; return p; });
   }
@@ -416,6 +478,36 @@
   }
 
   function bindCard(el, d) {
+    var researchBox = el.querySelector('#sh5-research');
+    if (researchBox) {
+      var timer;
+      var loadResearch = function () {
+        clearTimeout(timer);
+        return getJson('/stock-signals/research/status').then(function (p) {
+          if (!researchBox.isConnected || !researchBox.open) return;
+          var body = el.querySelector('#sh5-research-body');
+          body.innerHTML = maintenanceHtml(p);
+          body.querySelector('#sh5-research-status').onclick = loadResearch;
+          body.querySelector('#sh5-research-refresh').onclick = function () {
+            this.disabled = true;
+            var c = body.querySelector('#sh5-daily-enable');
+            var sourceConsent = body.querySelector('#sh5-source-consent');
+            postJson('/stock-signals/research/refresh', { enableDaily: !!(c && c.checked), downloadSources: !!(sourceConsent && sourceConsent.checked) }).then(function () {
+              cache = {}; poolCache = null; return loadResearch();
+            }).catch(function (e) {
+              body.querySelector('#sh5-research-error').textContent = '無法開始：' + e.message;
+              body.querySelector('#sh5-research-refresh').disabled = false;
+            });
+          };
+          if (p.running) timer = setTimeout(loadResearch, 3000);
+        }).catch(function (e) {
+          var body = el.querySelector('#sh5-research-body');
+          if (body) { body.innerHTML = '<div role="alert" class="sh5-warn">研究維護狀態無法讀取（需擁有者權限）：' + esc(e.message) + '</div><button class="sh5-btn" id="sh5-research-retry">重試</button>';
+            body.querySelector('#sh5-research-retry').onclick = loadResearch; }
+        });
+      };
+      researchBox.addEventListener('toggle', function () { if (researchBox.open) loadResearch(); else clearTimeout(timer); });
+    }
     el.querySelectorAll('[data-sh5-mode]').forEach(function (b) {
       b.onclick = function () {
         var chosen = b.getAttribute('data-sh5-mode');
@@ -588,6 +680,9 @@
     boardHtml: boardHtml,
     statsLine: statsLine,
     scoreboardHtml: scoreboardHtml,
+    qualityHtml: qualityHtml,
+    sensitivityHtml: sensitivityHtml,
+    maintenanceHtml: maintenanceHtml,
     getMode: getMode,
     setMode: setMode
   });

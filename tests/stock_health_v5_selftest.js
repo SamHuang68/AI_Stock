@@ -18,6 +18,16 @@ vm.createContext(sandbox);
 vm.runInContext(source, sandbox);
 const H = sandbox.StockHealthV5;
 
+const qualityMarkup = H.qualityHtml({ label: '資料需留意', referenceSession: '2026-09-24',
+  items: [{ label: '籌碼', status: 'missing', impact: '只影響籌碼<script>' },
+    { label: '統計', status: 'stale', asOf: '2026-09-10', lagSessions: 8, generatedAt: '2026-09-27' }], notes: [] }, 'pro');
+if (!qualityMarkup.includes('缺資料') || !qualityMarkup.includes('待更新') || qualityMarkup.includes('<script>')) throw new Error('品質提示或跳脫錯誤');
+const maintenanceMarkup = H.maintenanceHtml({ running: false, job: {status:'failed', steps:[{label:'重算',status:'failed'}]},
+  observations: {enabled:true,events:0,outcomes:0}, inventory: {symbols:100,alignedSymbols:80} });
+if (!maintenanceMarkup.includes('失敗') || !maintenanceMarkup.includes('80／100') || !maintenanceMarkup.includes('0 個事件')) throw new Error('維護失敗或真實空狀態錯誤');
+const adjustmentMarkup = H.sensitivityHtml({status:'missing',coveredSymbols:0,totalSymbols:100,limitations:[]});
+if (!adjustmentMarkup.includes('缺值不當成無除權息') || !adjustmentMarkup.includes('0／100')) throw new Error('缺還原資料必須明示');
+
 function ok(value, message) {
   if (!value) throw new Error('FAIL: ' + message);
   console.log('OK  ', message);

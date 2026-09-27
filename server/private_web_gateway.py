@@ -428,6 +428,7 @@ OWNER_GET_EXACT = {
     "/api/llm-gate",
     "/stock-signals/push-config",
     "/stock-signals/digest/preview",
+    "/stock-signals/research/status",
     "/api/ai/postmarket-daily/latest",  # owner's saved watchlist narrative
 }
 OWNER_GET_PREFIXES = ("/draw/",)
@@ -453,6 +454,7 @@ CONTROL_POST_EXACT = {
     "/stock-signals/watchlist",
     "/stock-signals/push-config",
     "/stock-signals/pooled/refresh",
+    "/stock-signals/research/refresh",
     "/stock-signals/explain",
 }
 CONTROL_POST_PREFIXES = ("/draw/",)

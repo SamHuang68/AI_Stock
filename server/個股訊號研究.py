@@ -89,7 +89,10 @@ def summarize(rows, policy=POLICY):
     symbols = len({r['symbol'] for r in rows})
     blocks = block_values(rows)
     eligible = n >= policy['minEvents'] and symbols >= policy['minSymbols'] and len(blocks) >= policy['minBlocks']
+    from 個股還原研究 import COSTS, net_return, summary as cost_summary
     result = {'n': n, 'symbols': symbols, 'quarters': len(blocks),
+              'costScenarios': [{'roundTripBps': cost, **cost_summary([net_return(r['ret'], cost) for r in rows])}
+                                for cost in COSTS],
               'gate': 'exploratory' if eligible else 'insufficient',
               'window': [min((r['date'] for r in rows), default=None),
                          max((r['date'] for r in rows), default=None)]}

@@ -21,7 +21,7 @@ import 個股訊號帳本 as ledger
 from atomic_store import atomic_write_json, atomic_write_text
 
 SOURCE_FILES = ['server/' + p for p in ['indicators.py', 'stock_signals.py', '個股訊號研究.py',
-                '個股訊號帳本.py', 'signal_stats_pool.py', 'datastore.py', 'atomic_store.py']]
+                '個股訊號帳本.py', '個股還原研究.py', 'signal_stats_pool.py', 'datastore.py', 'atomic_store.py']]
 SOURCE_FILES.append('scripts/個股訊號成績單.py')
 
 
@@ -79,7 +79,19 @@ def render_report(result, receipt):
                 c = part['context']
                 rows.append(f"| {h['horizon']} | {label} | {c['n']}／{c['symbols']}／{c['quarters']} | "
                             f"{interval(c['deltaRetCI95'])} | {interval(part['increment']['ci95'])} |")
-    rows += ['', '## 覆蓋、限制與追蹤', '']
+    rows += ['', '## 原價事件研究的往返成本敏感度', '',
+             '成本 0／20／50／100 基點均為假設，進出各半；未模擬真實撮合或券商收費，不改變候選門檻。', '',
+             '| 訊號 | 天數 | 0 基點中位數 | 20 基點中位數 | 50 基點中位數 | 100 基點中位數 |',
+             '|---|---:|---:|---:|---:|---:|']
+    for signal in study['signals']:
+        for h in signal['horizons']:
+            cases = h['all'].get('costScenarios') or []
+            rows.append('| ' + signal['label'] + ' | ' + str(h['horizon']) + ' | ' +
+                        ' | '.join(pct(c['medianRet']) for c in cases) + ' |')
+    sensitivity = result.get('priceSensitivity') or {}
+    rows += ['', '## 還原快照比較', '',
+             f"完整覆蓋 {sensitivity.get('coveredSymbols', 0)}／{sensitivity.get('totalSymbols', 0)} 檔。完整事件集合與共同樣本比較見成績單 JSON 的 priceSensitivity。",
+             *['- ' + s for s in sensitivity.get('limitations', [])], '', '## 覆蓋、限制與追蹤', '']
     rows += [f'- {note}' for note in study['limitations']]
     bc = study['benchmarkCoverage']
     rows += [f"- 指數情境覆蓋：{bc['from']}～{bc['to']}，共 {bc['bars']} 根；情境已成形 {bc['knownRegimeDays']} 日。",
@@ -89,7 +101,7 @@ def render_report(result, receipt):
              f"- 缺少同日大盤或已成熟對照：{study['skipped'].get('missing_market_or_controls', 0)} 筆事件／天數組合。",
              '- 完整各股票覆蓋、年份差距與集中程度保留於「成績單.json」，來源為同資料夾的唯讀快照。',
              '- 前瞻追蹤使用相同輸出資料夾執行批次；只追加註冊後的當日已收盤事件，不回填歷史。',
-             '- 「圖表 → 體檢 → 專業」內容延後到下一輪，本輪未新增閱讀深度。', '']
+             '- 「圖表 → 體檢 → 專業」已提供事件前後值、狀態、分布與原始證據；本報告保留研究當時的資料版本。', '']
     return '\n'.join(rows)
 
 
