@@ -102,9 +102,9 @@ def adjusted_bars(bars, snapshot):
     return out
 
 
-def adjusted_segments(bars, snapshot, sessions):
+def adjusted_segments(bars, snapshot, sessions, market='TW'):
     """回收可驗證區段；共同日期、獨立暖機，不修改完整覆蓋的既有契約。"""
-    from 台股交易參考 import continuous_segments
+    from 台股交易參考 import continuous_segments, session
     if not snapshot:
         return []
     values = {r['date']: r for r in snapshot.get('rows', [])}
@@ -113,6 +113,8 @@ def adjusted_segments(bars, snapshot, sessions):
     # 先按原始索引切開不相容列，避免個股與大盤同日缺漏時掩蓋中斷。
     compatible, groups = [], []
     for bar in bars:
+        if market == 'TW' and session(bar['date'])['status'] == 'closed':
+            continue
         row = values.get(bar['date'])
         if row and _basis_match(bar, row, events)[0] is not None:
             compatible.append(bar)
@@ -123,7 +125,8 @@ def adjusted_segments(bars, snapshot, sessions):
     if compatible:
         groups.append(compatible)
     for group in groups:
-        for raw in continuous_segments(snapshot.get('symbol'), group, sessions):
+        parts = continuous_segments(snapshot.get('symbol'), group, sessions) if market == 'TW' else [group]
+        for raw in parts:
             if len(raw) < ss.MIN_BARS:
                 continue
             adjusted = adjusted_bars(raw, snapshot)
@@ -198,7 +201,7 @@ class Sensitivity:
             self.missing.append(symbol)
             self.missing_details.append({'symbol': symbol, **alignment_issues(bars, snapshot)})
             if self.partial is not None:
-                for part in adjusted_segments(bars, snapshot, self.positions):
+                for part in adjusted_segments(bars, snapshot, self.positions, market=self.market):
                     self.partial.add(symbol, part['raw'], chips)
             return
         self.covered.append({'symbol': symbol, 'from': bars[0]['date'], 'to': bars[-1]['date'],

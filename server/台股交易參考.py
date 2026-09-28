@@ -15,7 +15,8 @@ def session(day):
     calendar = references()['calendar']
     holiday = calendar['closed'].get(day.isoformat())
     if holiday:
-        return {'status': 'closed', 'reason': '官方公告休市：' + holiday, 'source': calendar['source']}
+        source = calendar.get('closedSources', {}).get(day.isoformat(), calendar['source'])
+        return {'status': 'closed', 'reason': '官方公告休市：' + holiday, 'source': source}
     if day.weekday() >= 5:
         return {'status': 'closed', 'reason': '週末休市', 'source': calendar['source']}
     if str(day.year) == calendar['year']:
@@ -55,6 +56,9 @@ def continuous_segments(symbol, bars, sessions):
     part, result = [], []
     for bar in bars:
         day = bar['date']
+        # 來源可能在全市場休市日留存平價零量列；略過該列，不中斷真實交易日。
+        if session(day)['status'] == 'closed':
+            continue
         valid = day in positions and eligible_bar(symbol, day)
         adjacent = not part or positions.get(day) == positions[part[-1]['date']] + 1
         if part and adjacent:

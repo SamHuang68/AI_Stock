@@ -32,6 +32,20 @@ def series(n=750):
 
 
 class ResearchBoundaryTests(unittest.TestCase):
+    def test_verified_emergency_closure_keeps_trading_sessions_continuous(self):
+        closure = reference.session('2026-07-10')
+        self.assertEqual(closure['status'], 'closed')
+        self.assertIn('8a8216d69ef76943019f46cb86ae0110.pdf', closure['source'])
+        self.assertNotEqual(closure['source'], reference.references()['calendar']['source'])
+        bars = series(500)
+        self.assertNotIn('2026-07-10', [b['date'] for b in bars])
+        parts = reference.continuous_segments('2330', bars, [b['date'] for b in bars])
+        self.assertEqual(parts, [bars])
+        self.assertFalse(reference.eligible_bar('2330', '2026-07-10'))
+        july9 = next(b for b in bars if b['date'] == '2026-07-09')
+        with_filler = sorted(bars + [{**july9, 'date': '2026-07-10', 'volume': 0}], key=lambda b: b['date'])
+        self.assertEqual(reference.continuous_segments('2330', with_filler, [b['date'] for b in bars]), [bars])
+
     def test_terminated_rows_cannot_enter_main_study_or_pooled_outcomes(self):
         bars = series()
         benchmark = [{**b, 'close': 100 + i} for i, b in enumerate(bars)]
@@ -44,6 +58,23 @@ class ResearchBoundaryTests(unittest.TestCase):
         expected = pool.compute_pooled([('2867', [b for b in bars if b['date'] < '2026-09-01'])])
         self.assertEqual(actual['signals'], expected['signals'])
         self.assertLess(actual['window']['to'], '2026-09-01')
+
+    def test_adjusted_groups_skip_tw_closure_before_source_alignment_only_for_tw(self):
+        bars = series(500)
+        cut = next(i for i, b in enumerate(bars) if b['date'] == '2026-07-13')
+        filler = {**bars[cut - 1], 'date': '2026-07-10', 'volume': 0}
+        raw = bars[:cut] + [filler] + bars[cut:]
+        snap = {'symbol': '2330', 'events': {},
+                'rows': [dict(date=b['date'], rawClose=b['close'], adjClose=b['close']) for b in bars]}
+        sessions = [b['date'] for b in bars]
+        parts = adjusted.adjusted_segments(raw, snap, sessions, market='TW')
+        self.assertEqual([p['raw'] for p in parts], [bars])
+        # 相同日期若屬美股正常交易日，缺少來源列仍須切段，不套台股休市。
+        us = adjusted.adjusted_segments(raw, {**snap, 'symbol': 'AAPL'}, [b['date'] for b in raw], market='US')
+        self.assertEqual([p['raw'] for p in us], [bars[:cut]])
+        missing = {**snap, 'rows': [r for r in snap['rows'] if r['date'] != '2026-07-09']}
+        tw_missing = adjusted.adjusted_segments(raw, missing, sessions, market='TW')
+        self.assertEqual([p['raw'] for p in tw_missing], [bars[:cut - 1]])
 
     def test_gap_resets_indicators_before_events_and_matches_separate_studies(self):
         bars = series(500)
