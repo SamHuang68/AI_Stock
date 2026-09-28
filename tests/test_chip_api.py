@@ -2,14 +2,6 @@
 """chip_api 欄位對齊：自營商不可誤中外資自營商；融資/融券讀重複『今日餘額』。"""
 import os
 import sys
-import unittest
-
-
-def load_tests(loader, suite, pattern):
-    """讓標準 unittest 探索也執行既有函式型案例。"""
-    suite.addTests(unittest.FunctionTestCase(fn) for name, fn in globals().items()
-                   if name.startswith('test_') and callable(fn))
-    return suite
 import inspect
 import unittest
 

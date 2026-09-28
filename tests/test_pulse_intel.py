@@ -2,14 +2,6 @@
 """pulse_intel 單元測試 — 分數可覆核、缺資料進 pending、延伸因子專業口徑。"""
 import os
 import sys
-import unittest
-
-
-def load_tests(loader, suite, pattern):
-    """讓標準 unittest 探索也執行既有函式型案例。"""
-    suite.addTests(unittest.FunctionTestCase(fn) for name, fn in globals().items()
-                   if name.startswith('test_') and callable(fn))
-    return suite
 import inspect
 import unittest
 
