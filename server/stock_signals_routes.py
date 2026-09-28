@@ -406,7 +406,11 @@ class StockSignalsRoutesMixin:
     def _handle_stock_research_status(self):
         import 個股研究維護 as maintenance
         try:
-            self._ok(json.dumps(maintenance.status(), ensure_ascii=False).encode('utf-8'))
+            before = (self._stock_signals_query().get('reportBefore') or [None])[0]
+            if before is not None and (len(before) > 19 or not before.isdecimal() or not 0 < int(before) < 9223372036854775807):
+                self._err('報告分頁位置無效', 400)
+                return
+            self._ok(json.dumps(maintenance.status(int(before) if before else None), ensure_ascii=False).encode('utf-8'))
         except Exception as exc:
             self._err('研究狀態讀取失敗：' + type(exc).__name__, 500)
 
@@ -416,6 +420,12 @@ class StockSignalsRoutesMixin:
             body = read_json_body(self, max_bytes=4096)
         except BodyReadError as exc:
             self._err(str(exc), exc.status)
+            return
+        if isinstance(body, dict) and 'checkEvidence' in body:
+            if body['checkEvidence'] is not True or len(body) != 1:
+                self._err('證據檢查須單獨指定且為真', 400)
+                return
+            self._ok(json.dumps(maintenance.submit_evidence(), ensure_ascii=False).encode('utf-8'))
             return
         if isinstance(body, dict) and 'setSchedule' in body:
             if not isinstance(body['setSchedule'], bool):

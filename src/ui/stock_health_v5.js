@@ -112,7 +112,7 @@
       '.sh5-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:10.5px;color:var(--tlo)}' +
       '.sh5-row select,.sh5-btn{background:rgba(15,23,42,.8);color:var(--thi);border:1px solid var(--border,#22324a);border-radius:6px;font:700 10.5px "Noto Sans TC",sans-serif;padding:3px 8px;cursor:pointer}' +
       '.sh5-btn.primary{border-color:rgba(251,191,36,.5);color:var(--gold,#fbbf24)}' +
-      '#sh5-schedule-save{min-height:44px;font-size:13px}.sh5-schedule-control{display:flex;align-items:center;gap:8px;min-height:44px;font-size:13px}.sh5-schedule-control input{flex-shrink:0}' +
+      '#sh5-schedule-save,#sh5-evidence-check,#sh5-report-more{min-height:44px;font-size:13px}.sh5-schedule-control{display:flex;align-items:center;gap:8px;min-height:44px;font-size:13px}.sh5-schedule-control input{flex-shrink:0}' +
       '.sh5-ai{margin-top:8px;font-size:12px;line-height:1.7;color:#e2e8f0;padding:8px 10px;border-radius:8px;border:1px solid rgba(165,180,252,.3);background:rgba(99,102,241,.08)}' +
       '.sh5-ai .cite{font:700 8.5px "JetBrains Mono",monospace;color:#a5b4fc;margin-left:3px}' +
       '.sh5-warn{color:#fbbf24;font-size:10.5px;margin-top:4px}' +
@@ -444,10 +444,57 @@
     return html + '</tbody></table></div>' + detail + '</details>' + (p.partial ? sensitivityHtml(p.partial) : '');
   }
 
+  function reportHistoryHtml(rows) {
+    return (rows || []).map(function (r) {
+      return '<details class="sh5-foot"><summary>' + esc(r.sessionDate + ' · ' + r.checkedAt + ' · ' +
+        (r.execution === 'failed' ? '檢查失敗' : '檢查完成')) + '</summary>' +
+        ((r.changes || []).length ? '<ul>' + r.changes.map(function (c) {
+          return '<li>' + esc(c.label) + '：' + esc(c.before == null ? '尚無基準' : c.before) + ' → ' + esc(c.after == null ? '未知' : c.after) + '</li>';
+        }).join('') + '</ul>' : '相較上次沒有量化指標變化；仍保留此次檢查紀錄。') +
+        '<details><summary>當時完整報告與失敗原因</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
+        esc(JSON.stringify(r, null, 2)) + '</pre></details></details>';
+    }).join('');
+  }
+
+  function evidenceReportHtml(p) {
+    p = p || {};
+    var r = p.latest, labels = { passed: '通過', failed: '失敗', waiting: '等待證據', limited: '涵蓋有限',
+      unproven: '尚未驗證優勢', observing: '持續觀察', attention: '需處理' };
+    var html = '<section class="sh5-sec" aria-label="三項證據限制測試回報"><h4>三項證據限制：每日測試回報</h4>' +
+      '<div class="sh5-foot">' + esc(p.note || '來源更新後檢查；每日20:40本機結報，需主機運行。') +
+      '<br>檢查完成代表程序已執行，並不代表投資證據達標；不自動提升候選。</div>';
+    if (!r) html += '<p class="sh5-foot">尚無驗證報告。可執行下方本機檢查，或等待每日排程。</p>';
+    else {
+      html += '<p role="status" class="' + (r.execution === 'failed' ? 'sh5-warn' : 'sh5-foot') + '">' +
+        (r.execution === 'failed' ? '最近檢查失敗，請查看原因。' : '最近檢查已完成；證據狀態如下。') +
+        '<br>最近檢查 ' + esc(p.lastCheckedAt || r.checkedAt) + '；報告日期 ' + esc(r.sessionDate) +
+        '；研究至 ' + esc((r.metrics || {}).researchThrough || '未知') + '</p><ol>';
+      (r.constraints || []).forEach(function (c) {
+        html += '<li class="sh5-foot"><strong>' + esc(c.label + '：' + (labels[c.state] || c.state)) + '</strong><br>' +
+          esc(c.summary) + '<br>下一步：' + esc(c.next) + '</li>';
+      });
+      html += '</ol>';
+      ((r.observations || {}).horizons || []).forEach(function (h) {
+        html += '<div class="sh5-foot">' + esc(h.horizon) + '日：成熟 ' + esc(h.mature) + '、待時間累積 ' +
+          esc(h.waiting) + '、觀察期已到仍待結算 ' + esc(h.due) + ' 筆。</div>';
+      });
+      html += '<details><summary>檢查項目與判定依據（' + esc((r.checks || []).length) + '項）</summary><ul>' +
+        (r.checks || []).map(function (c) { return '<li class="sh5-foot">' + esc(c.label + '：' + (labels[c.state] || c.state) + '；' + c.detail) + '</li>'; }).join('') +
+        '</ul></details><details><summary>完整資料缺口與報告來源</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
+        esc(JSON.stringify({ coverage: r.coverage, missingAdjustedSymbols: r.missingAdjustedSymbols, pendingSources: r.pendingSources,
+          observations: r.observations, provenance: r.provenance }, null, 2)) + '</pre></details>';
+    }
+    html += '<details><summary>每日報告與變化紀錄（共' + esc(p.total || 0) + '份）</summary><div id="sh5-report-history">' +
+      reportHistoryHtml(p.history) + '</div><button class="sh5-btn" id="sh5-report-more" data-before="' + esc(p.nextBefore || '') + '"' +
+      (p.nextBefore ? '' : ' hidden') + '>載入更早報告</button><div class="sh5-foot">量化指標變化不等於投資績效改善；完整紀錄保留於本機，不截斷歷史。</div></details>';
+    return html + '<button class="sh5-btn" id="sh5-evidence-check"' + (p.running ? ' disabled' : '') + '>' +
+      (p.running ? '本機證據檢查執行中' : '重算並檢查三項證據（僅本機）') + '</button></section>';
+  }
+
   function maintenanceHtml(p) {
     var j = p.job || {}, o = p.observations || {}, i = p.inventory || {};
     var names = { running: '執行中', queued: '排隊中', completed: '已完成', partial: '部分完成', failed: '失敗', interrupted: '已中斷', waiting: '等待資料', closed: '休市', disabled: '未啟用' };
-    var html = '<div role="status" aria-live="polite" class="sh5-foot">' + esc(p.running ? '研究工作執行中' : (names[j.status] || '尚未執行')) +
+    var html = evidenceReportHtml(p.evidenceReports) + '<div role="status" aria-live="polite" class="sh5-foot">' + esc(p.running ? '研究工作執行中' : (names[j.status] || '尚未執行')) +
       ' · ' + esc(j.message || '') + '<br>大盤至 ' + esc(i.benchmarkAsOf || '未知') + '；個股對齊 ' + esc(i.alignedSymbols || 0) + '／' + esc(i.symbols || 0) + ' 檔。' +
       '<br>' + esc(i.note || '') + '<br>預設只重算本機資料；不呼叫模型或傳送通知。</div>';
     if (i.calendar) html += '<div class="sh5-foot">交易日判定：' + esc(i.calendar.reason) + '</div>';
@@ -512,6 +559,28 @@
           var body = el.querySelector('#sh5-research-body');
           body.innerHTML = maintenanceHtml(p);
           body.querySelector('#sh5-research-status').onclick = loadResearch;
+          body.querySelector('#sh5-evidence-check').onclick = function () {
+            this.disabled = true;
+            postJson('/stock-signals/research/refresh', { checkEvidence: true }).then(loadResearch).catch(function (e) {
+              body.querySelector('#sh5-research-error').textContent = '證據檢查未啟動：' + e.message;
+              body.querySelector('#sh5-evidence-check').disabled = false;
+            });
+          };
+          body.querySelector('#sh5-report-more').onclick = function () {
+            var button = this;
+            button.disabled = true;
+            getJson('/stock-signals/research/status?reportBefore=' + encodeURIComponent(button.getAttribute('data-before'))).then(function (next) {
+              var reports = next.evidenceReports || {};
+              body.querySelector('#sh5-report-history').insertAdjacentHTML('beforeend', reportHistoryHtml(reports.history));
+              button.setAttribute('data-before', reports.nextBefore || '');
+              button.hidden = !reports.nextBefore;
+              button.disabled = false;
+              if (button.hidden) body.querySelector('#sh5-evidence-check').focus();
+            }).catch(function (e) {
+              body.querySelector('#sh5-research-error').textContent = '較早報告未載入：' + e.message;
+              button.disabled = false;
+            });
+          };
           body.querySelector('#sh5-schedule-save').onclick = function () {
             this.disabled = true;
             postJson('/stock-signals/research/refresh', { setSchedule: body.querySelector('#sh5-schedule-enable').checked }).then(loadResearch).catch(function (e) {
@@ -530,7 +599,7 @@
               body.querySelector('#sh5-research-refresh').disabled = false;
             });
           };
-          if (p.running) timer = setTimeout(loadResearch, 3000);
+          if (p.running || (p.evidenceReports || {}).running) timer = setTimeout(loadResearch, 3000);
         }).catch(function (e) {
           var body = el.querySelector('#sh5-research-body');
           if (body) { body.innerHTML = '<div role="alert" class="sh5-warn">研究維護狀態無法讀取（需擁有者權限）：' + esc(e.message) + '</div><button class="sh5-btn" id="sh5-research-retry">重試</button>';
@@ -714,6 +783,7 @@
     qualityHtml: qualityHtml,
     sensitivityHtml: sensitivityHtml,
     maintenanceHtml: maintenanceHtml,
+    evidenceReportHtml: evidenceReportHtml,
     getMode: getMode,
     setMode: setMode
   });

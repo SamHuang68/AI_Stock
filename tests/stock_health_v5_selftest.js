@@ -142,4 +142,17 @@ const partialView = H.sensitivityHtml({ status: 'available', coveredSymbols: 105
   partial: { status: 'available', coveredSymbols: 26, totalSymbols: 26, windowCount: 38, coveredBars: 27000, signals: [] } });
 ok(partialView.includes('完整覆蓋 1054／1083') && partialView.includes('部分歷史區段：38 段、27000 根日線（26／26'), '部分歷史與完整股票覆蓋分開呈現');
 
+const reportView = H.evidenceReportHtml({ total: 21, nextBefore: 2, lastCheckedAt: '2026-09-29T20:40:00+08:00', latest: {
+  execution: 'completed', sessionDate: '2026-09-29', metrics: { researchThrough: '2026-09-29' },
+  constraints: [{ label: '研究優勢', state: 'unproven', summary: 'no_candidate <script>', next: '繼續觀察' }],
+  checks: [{ label: '來源', state: 'waiting', detail: '<img src=x>' }],
+  observations: { horizons: [{ horizon: 5, mature: 1, waiting: 4, due: 2 }] }
+}, history: [{ sessionDate: '2026-09-29', checkedAt: '20:40', execution: 'completed', changes: [{ label: '事件數', before: 1, after: 3 }] }] });
+ok(reportView.includes('尚未驗證優勢') && reportView.includes('no_candidate &lt;script&gt;'), '檢查完成不等於投資證據達標，來源文字跳脫');
+ok(reportView.includes('待時間累積 4') && reportView.includes('仍待結算 2'), '未到期與到期未結算分開呈現');
+ok(reportView.includes('data-before="2"') && reportView.includes('1 → 3') && reportView.includes('&lt;img src=x&gt;'), '完整歷史分頁、變化與跳脫文字可見');
+ok(H.evidenceReportHtml({}).includes('尚無驗證報告'), '沒有報告不冒稱完成');
+ok(H.evidenceReportHtml({ latest: { execution: 'failed' } }).includes('最近檢查失敗'), '程序失敗明確保留');
+ok(H.evidenceReportHtml({ history: [{ execution: 'failed', checks: [{ detail: '舊報告特定失敗原因 <script>' }] }] })
+  .includes('舊報告特定失敗原因 &lt;script&gt;'), '新報告完成後仍可回查舊失敗的完整原因');
 console.log('\nstock_health_v5_selftest PASSED');
