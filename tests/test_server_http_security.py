@@ -83,15 +83,16 @@ class ServerHttpSecurityTests(unittest.TestCase):
         caught.exception.close()
 
     def test_wrong_content_type_and_oversized_body_are_rejected(self):
+        # 此處驗證標頭拒絕；不留未讀本文，避免 Windows 在回應讀取前重設連線。
         wrong = urllib.request.Request(
-            self.base + '/sync', data=b'{}', method='POST',
+            self.base + '/sync', data=b'', method='POST',
             headers={'Content-Type': 'text/plain'})
         with self.assertRaises(urllib.error.HTTPError) as caught:
             urllib.request.urlopen(wrong, timeout=3)
         self.assertEqual(caught.exception.code, 415)
         caught.exception.close()
         oversized = urllib.request.Request(
-            self.base + '/sync', data=b'{}', method='POST',
+            self.base + '/sync', data=b'', method='POST',
             headers={'Content-Type': 'application/json', 'Content-Length': '999'})
         with self.assertRaises(urllib.error.HTTPError) as caught:
             urllib.request.urlopen(oversized, timeout=3)

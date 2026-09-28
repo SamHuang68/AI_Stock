@@ -73,21 +73,31 @@ def _now_local(market: str, now: Optional[datetime] = None) -> datetime:
 
 def session_state(market: str, last_bar_date: Optional[str],
                   now: Optional[datetime] = None) -> Dict[str, Any]:
-    """最後一根 K 是否仍在盤中；以及目前應該看到的最新交易日（週末退回週五；假日無法得知，僅多抓一次）。"""
+    """共用台股官方休市參考，避免連假或盤前誤判落後並觸發來源補取。"""
+    try:
+        from .台股交易參考 import session
+    except ImportError:
+        from 台股交易參考 import session
     local = _now_local(market, now)
     (oh, om), (ch, cm), settle = _SESSION.get(market, _SESSION['TW'])
     open_t = local.replace(hour=oh, minute=om, second=0, microsecond=0)
     final_t = local.replace(hour=ch, minute=cm, second=0, microsecond=0) + settle
-    weekday = local.weekday() < 5
+    def closed(day):
+        return session(day)['status'] == 'closed' if market == 'TW' else day.weekday() >= 5
+    calendar = session(local.date()) if market == 'TW' else None
+    weekday = not closed(local.date())
     today = local.date().isoformat()
     provisional = bool(weekday and last_bar_date == today and open_t <= local < final_t)
     expected = local.date()
     if not weekday or local < open_t:
         expected -= timedelta(days=1)
-        while expected.weekday() >= 5:
+        while closed(expected):
             expected -= timedelta(days=1)
-    return {'provisional': provisional, 'expectedLastDate': expected.isoformat(),
-            'sessionOpen': bool(weekday and open_t <= local < final_t), 'localTime': local.isoformat()}
+    expected_known = market != 'TW' or session(expected)['status'] != 'unknown'
+    return {'provisional': provisional, 'expectedLastDate': expected.isoformat() if expected_known else None,
+            'sessionOpen': bool(weekday and open_t <= local < final_t and
+                                (calendar is None or calendar['status'] == 'scheduled')),
+            'calendar': calendar, 'localTime': local.isoformat()}
 
 
 # ── 日 K 載入 ────────────────────────────────────────────────
@@ -102,13 +112,7 @@ def _datastore():
 
 def _fetch_remote(code: str, market: str, rng: str) -> List[tuple]:
     ds = _datastore()
-    if market != 'TW' or code.startswith('^'):
-        return ds.fetch_yahoo_daily(code, market, rng, retries=2)
-    try:
-        return ds.fetch_yahoo_daily(code, 'TW', rng, retries=2)
-    except Exception:
-        # 上櫃股 Yahoo 代號為 .TWO；datastore._yf_symbol 只補 .TW，這裡直接帶完整代號
-        return ds.fetch_yahoo_daily(code + '.TWO', 'US', rng, retries=2)
+    return ds.fetch_yahoo_daily(code, market, rng, retries=2)
 
 
 def load_bars(code: str, market: str, *, allow_network: bool = True,
@@ -121,14 +125,17 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
     error = None
     last = bars[-1]['date'] if bars else None
     sess = session_state(market, last, now)
+    expected = sess['expectedLastDate']
+    if expected is None:
+        error = '尚無該年度官方交易日曆；資料新鮮度待確認，不以平日推定落後'
     need_full = len(bars) < 130
-    behind = (last or '') < sess['expectedLastDate']
+    behind = expected is not None and (last or '') < expected
     live_extra: List[Dict[str, Any]] = []
     if allow_network and _remote_fail.get((code, market), 0) > time.time():
         allow_network = False
         error = '近 10 分鐘內無法連線更新日線，先使用本機資料'
     if allow_network and (need_full or behind or sess['sessionOpen']):
-        gap_days = (date.fromisoformat(sess['expectedLastDate']) - date.fromisoformat(last)).days if last else 9999
+        gap_days = (date.fromisoformat(expected) - date.fromisoformat(last)).days if last and expected else 9999
         rng = '5y' if need_full or gap_days > 80 else ('3mo' if gap_days > 4 else '5d')
         try:
             fetched = _fetch_remote(code, market, rng)
@@ -155,7 +162,7 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
     last = bars[-1]['date'] if bars else None
     sess = session_state(market, last, now)
     stale_days = ((date.fromisoformat(sess['expectedLastDate']) - date.fromisoformat(last)).days
-                  if last else None)
+                  if last and sess['expectedLastDate'] else None)
     return {'bars': bars, 'source': source, 'provisional': sess['provisional'],
             'staleDays': max(0, stale_days) if stale_days is not None else None,
             'error': error}

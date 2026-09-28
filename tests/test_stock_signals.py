@@ -223,14 +223,14 @@ class RoutesTests(unittest.TestCase):
         routes.clear_cache()
 
     def test_session_state_marks_intraday_bar_provisional(self):
-        during = datetime(2026, 9, 25, 11, 0, tzinfo=TPE)
-        after = datetime(2026, 9, 25, 14, 30, tzinfo=TPE)
-        self.assertTrue(routes.session_state('TW', '2026-09-25', during)['provisional'])
-        self.assertFalse(routes.session_state('TW', '2026-09-25', after)['provisional'])
+        during = datetime(2026, 9, 24, 11, 0, tzinfo=TPE)
+        after = datetime(2026, 9, 24, 14, 30, tzinfo=TPE)
+        self.assertTrue(routes.session_state('TW', '2026-09-24', during)['provisional'])
+        self.assertFalse(routes.session_state('TW', '2026-09-24', after)['provisional'])
         weekend = datetime(2026, 9, 27, 11, 0, tzinfo=TPE)
-        self.assertEqual(routes.session_state('TW', '2026-09-25', weekend)['expectedLastDate'], '2026-09-25')
+        self.assertEqual(routes.session_state('TW', '2026-09-24', weekend)['expectedLastDate'], '2026-09-24')
         early = datetime(2026, 9, 28, 8, 0, tzinfo=TPE)
-        self.assertEqual(routes.session_state('TW', None, early)['expectedLastDate'], '2026-09-25')
+        self.assertEqual(routes.session_state('TW', None, early)['expectedLastDate'], '2026-09-24')
 
     def test_symbol_cleaning_and_market_inference(self):
         self.assertEqual(routes.clean_symbol('2330.tw'), '2330')

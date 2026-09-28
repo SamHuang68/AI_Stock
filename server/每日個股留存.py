@@ -70,8 +70,14 @@ def capture(path, series, benchmark, chips=None, now=None):
         return {'status': 'disabled', 'reason': '每日留存尚未啟用'}
     today, stamp = now.date().isoformat(), now.isoformat()
     calendar = session(today)
+    tradable_dates = {}
+    def tradable(day):
+        if day not in tradable_dates:
+            tradable_dates[day] = session(day)['status'] != 'closed'
+        return tradable_dates[day]
     finalized = (now.hour, now.minute) >= (14, 0)
-    benchmark = [b for b in benchmark if b['date'] < today or (finalized and b['date'] == today)]
+    benchmark = [b for b in benchmark if tradable(b['date']) and
+                 (b['date'] < today or (finalized and b['date'] == today))]
     sessions = sorted({b['date'] for b in benchmark})
     counts = {'scanned': 0, 'currentSymbols': 0, 'eventsAdded': 0, 'outcomesAdded': 0,
               'asOf': stamp, 'sessionDate': today, 'historicalBackfill': False,
@@ -88,7 +94,8 @@ def capture(path, series, benchmark, chips=None, now=None):
     activated = datetime.fromisoformat(cfg['activatedAt']).astimezone(ss._TZ['TW']).date().isoformat()
     with closing(sqlite3.connect(path, timeout=30)) as conn, conn:
         for symbol, raw in series:
-            bars = [b for b in raw if b['date'] < today or (finalized and b['date'] == today)]
+            bars = [b for b in raw if tradable(b['date']) and
+                    (b['date'] < today or (finalized and b['date'] == today))]
             lifecycle = instrument(symbol, today)
             if lifecycle:
                 counts['excludedInstruments'].append(lifecycle)
@@ -124,9 +131,12 @@ def capture(path, series, benchmark, chips=None, now=None):
                     conn.execute('INSERT OR IGNORE INTO daily_prices VALUES(?,?,?,?)',
                                  (symbol, b['date'], stamp, encoded(b)))
             for event_id, origin, _ in pending:
+                if not tradable(origin):
+                    continue
                 expected_all = [d for d in sessions if d > origin]
                 prices = {r[0]: json.loads(r[1]) for r in conn.execute(
-                    'SELECT session_date,payload FROM daily_prices WHERE symbol=? AND session_date>?', (symbol, origin))}
+                    'SELECT session_date,payload FROM daily_prices WHERE symbol=? AND session_date>?', (symbol, origin))
+                    if tradable(r[0]) and (not lifecycle or r[0] < lifecycle['stopDate'])}
                 for hz in (5, 20):
                     expected = expected_all[:hz + 1]
                     if len(expected) != hz + 1 or any(d not in prices for d in expected):
