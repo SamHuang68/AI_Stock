@@ -551,12 +551,19 @@
   function bindCard(el, d) {
     var researchBox = el.querySelector('#sh5-research');
     if (researchBox) {
-      var timer;
-      var loadResearch = function () {
+      var timer, lastResearchView;
+      var loadResearch = function (force) {
         clearTimeout(timer);
         return getJson('/stock-signals/research/status').then(function (p) {
           if (!researchBox.isConnected || !researchBox.open) return;
           var body = el.querySelector('#sh5-research-body');
+          var view = JSON.stringify(p);
+          // 未變的輪詢保留已展開報告、較早分頁與鍵盤焦點。
+          if (!force && view === lastResearchView && body.querySelector('#sh5-evidence-check')) {
+            if (p.running || (p.evidenceReports || {}).running) timer = setTimeout(loadResearch, 3000);
+            return;
+          }
+          lastResearchView = view;
           body.innerHTML = maintenanceHtml(p);
           body.querySelector('#sh5-research-status').onclick = loadResearch;
           body.querySelector('#sh5-evidence-check').onclick = function () {

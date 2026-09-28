@@ -155,4 +155,32 @@ ok(H.evidenceReportHtml({}).includes('尚無驗證報告'), '沒有報告不冒�
 ok(H.evidenceReportHtml({ latest: { execution: 'failed' } }).includes('最近檢查失敗'), '程序失敗明確保留');
 ok(H.evidenceReportHtml({ history: [{ execution: 'failed', checks: [{ detail: '舊報告特定失敗原因 <script>' }] }] })
   .includes('舊報告特定失敗原因 &lt;script&gt;'), '新報告完成後仍可回查舊失敗的完整原因');
-console.log('\nstock_health_v5_selftest PASSED');
+// 以公開渲染所用的真實事件綁定驗證：穩定輪詢不可重建閱讀中的 DOM。
+(async function pollingKeepsReadingState() {
+  let poll, toggle, writes = 0;
+  let status = { evidenceReports: { running: true } };
+  const buttons = {};
+  const body = { querySelector(key) { return buttons[key] || (buttons[key] = {}); },
+    set innerHTML(value) { writes++; this.markup = value; this.readingState = null; } };
+  const box = { isConnected: true, open: true, addEventListener(type, fn) { toggle = fn; } };
+  const el = { querySelector(key) { return key === '#sh5-research' ? box : key === '#sh5-research-body' ? body : null; },
+    querySelectorAll() { return []; } };
+  const scope = { ...sandbox, AppKernel: { api: { getJson: async () => status } },
+    setTimeout(fn) { poll = fn; }, clearTimeout() {} };
+  scope.window = scope;
+  vm.createContext(scope);
+  vm.runInContext(source.replace('renderInto: renderInto,', 'bindCardForTest: bindCard, renderInto: renderInto,'), scope);
+  scope.StockHealthV5.bindCardForTest(el, {});
+  toggle();
+  await new Promise(resolve => setImmediate(resolve));
+  ok(writes === 1, '首次研究狀態正常渲染');
+  body.readingState = '展開歷史第二頁並保留鍵盤焦點';
+  await poll();
+  ok(writes === 1 && body.readingState, '相同輪詢不重建閱讀中的報告與分頁');
+  status = { evidenceReports: { running: false, total: 2 } };
+  await poll();
+  ok(writes === 2 && body.markup.includes('共2份'), '完成後的新報告仍會即時呈現');
+  await buttons['#sh5-research-status'].onclick({ type: 'click' });
+  ok(writes === 3, '使用者明確更新狀態仍會重新渲染');
+  console.log('\nstock_health_v5_selftest PASSED');
+})().catch(error => { console.error(error); process.exitCode = 1; });
