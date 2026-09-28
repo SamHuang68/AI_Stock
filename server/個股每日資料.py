@@ -12,6 +12,7 @@ import chip_history_tracker as chips
 from atomic_store import atomic_write_json, load_json
 from sector_flow import normalize_session_date
 from 台股交易參考 import session, eligible_bar
+from signal_stats_pool import _TICKER_RE
 
 SOURCES = {
     'TWSE': 'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL',
@@ -62,8 +63,11 @@ def run(day=None):
     run_id = uuid.uuid4().hex
     previous = load_json(str(state_path), default={}, expected_type=dict)
     completed = {r['name']: r for r in previous.get('sources', []) if r.get('status') == 'completed'} if previous.get('sessionDate') == day else {}
+    names = ['TWSE 日線', 'TPEx 日線', '大盤日線', '上市法人', '上櫃法人']
     state = {'runId': run_id, 'sessionDate': day, 'startedAt': now.isoformat(), 'status': 'running',
-             'sources': [], 'externalCalls': '官方批次日線及法人、既有 Yahoo 大盤日線'}
+             'sources': [{**completed[name], 'reusedFromRun': previous.get('runId')} if name in completed
+                         else {'name': name, 'status': 'pending'} for name in names],
+             'externalCalls': '官方批次日線及法人、既有 Yahoo 大盤日線'}
     def trace(event, **details):
         state['updatedAt'] = datetime.now(ss._TZ['TW']).isoformat()
         atomic_write_json(str(state_path), state, backup=True)
@@ -71,11 +75,10 @@ def run(day=None):
             handle.write(json.dumps({'at': state['updatedAt'], 'runId': run_id, 'event': event, **details}, ensure_ascii=False) + '\n')
     def step(name, url, action):
         if name in completed:
-            state['sources'].append({**completed[name], 'reusedFromRun': previous.get('runId')})
             trace('沿用當日已完成來源', source=url)
             return
-        row = {'name': name, 'source': url, 'status': 'running'}
-        state['sources'].append(row)
+        row = next(r for r in state['sources'] if r['name'] == name)
+        row.update(source=url, status='running')
         trace('來源開始', source=url)
         started = time.monotonic()
         try:
@@ -87,7 +90,7 @@ def run(day=None):
         row['elapsedSec'] = round(time.monotonic() - started, 3)
         trace('來源完成', **row)
     trace('工作開始')
-    symbols = set(datastore.list_symbols('TW', 1))
+    symbols = {code for code in datastore.list_symbols('TW', 1) if _TICKER_RE['TW'].fullmatch(code)}
     for exchange, url in SOURCES.items():
         def fetch_quotes(exchange=exchange, url=url):
             with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'}), timeout=20) as response:
@@ -101,8 +104,20 @@ def run(day=None):
                 for k in totals:
                     totals[k] += result[k]
             return {**totals, 'sourceDate': day, 'symbols': len(rows), 'unavailableSymbols': absent,
-                    'volumeUnit': '股'}
+                    'receivedSymbols': sorted(rows), 'volumeUnit': '股'}
         step(exchange + ' 日線', url, fetch_quotes)
+    # 本機只有 TW 市場，不能猜測交易所；以兩來源聯集查覆蓋，缺漏時兩邊均待確認。
+    quote_sources = state['sources'][:2]
+    received = {code for row in quote_sources for code in (row.get('result') or {}).get('receivedSymbols', [])}
+    unavailable = {code for row in quote_sources for code in (row.get('result') or {}).get('unavailableSymbols', [])}
+    missing = sorted(code for code in symbols - received - unavailable if eligible_bar(code, day))
+    state['unconfirmedSymbols'] = missing
+    if missing:
+        for row in quote_sources:
+            if row['status'] == 'completed':
+                row['status'] = 'partial'
+            row.setdefault('result', {})['unconfirmedSymbols'] = missing
+        trace('日線覆蓋未齊', symbols=missing)
     def benchmark():
         count = datastore.update('^TWII')
         latest = datastore.last_ts('^TWII')

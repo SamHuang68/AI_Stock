@@ -221,7 +221,9 @@ def snap_t86(tdate: str) -> Optional[Dict[str, dict]]:
     url = (f'https://www.twse.com.tw/rwd/zh/fund/T86?date={tdate}'
            f'&selectType=ALLBUT0999&response=json')
     data = _fetch_json(url)
-    by = parse_t86(data)
+    from sector_flow import normalize_session_date
+    source_day = normalize_session_date((data or {}).get('date'))
+    by = parse_t86(data) if source_day == tdate else None
     _snap_set(key, by, err=(by is None))
     return by
 
@@ -413,6 +415,8 @@ def build_chip(sym: str) -> dict:
 
     if t86 and clean in t86:
         out['inst'] = dict(t86[clean])
+        out['_chipSource'] = 'TWSE'
+        out['_verifiedChipDate'] = tdate
 
     if out['inst'] is None:
         tp = _tpex_inst(clean)

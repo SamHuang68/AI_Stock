@@ -2,6 +2,14 @@
 """chip_api 欄位對齊：自營商不可誤中外資自營商；融資/融券讀重複『今日餘額』。"""
 import os
 import sys
+import unittest
+
+
+def load_tests(loader, suite, pattern):
+    """讓標準 unittest 探索也執行既有函式型案例。"""
+    suite.addTests(unittest.FunctionTestCase(fn) for name, fn in globals().items()
+                   if name.startswith('test_') and callable(fn))
+    return suite
 import inspect
 import unittest
 
@@ -137,7 +145,7 @@ def test_snap_t86_dealer_not_zero_when_foreign_dealer_zero():
     row[10] = '61,000'
     row[11] = '1,242,950'
     row[18] = '1,945,610'
-    payload = {'stat': 'OK', 'fields': T86_FIELDS, 'data': [row]}
+    payload = {'stat': 'OK', 'date': '20260807', 'fields': T86_FIELDS, 'data': [row]}
 
     def fake_fetch(url, timeout=8):
         return payload

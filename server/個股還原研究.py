@@ -206,6 +206,15 @@ class Sensitivity:
                              'basisConversions': alignment_issues(bars, snapshot)['basisConversions'],
                              'dividends': len(snapshot['events'].get('dividends') or {}),
                              'splits': len(snapshot['events'].get('splits') or {})})
+        # 完整覆蓋亦可能有交易日缺口；原價與還原價必須用相同區段重新暖機。
+        from 台股交易參考 import continuous_segments
+        adjusted_by_date = {b['date']: b for b in adjusted}
+        parts = continuous_segments(symbol, bars, self.positions) if self.market == 'TW' else [bars]
+        for part in parts:
+            if len(part) >= ss.MIN_BARS:
+                self._add_continuous(part, [adjusted_by_date[b['date']] for b in part], chips)
+
+    def _add_continuous(self, bars, adjusted, chips):
         raw, adj = ss.build_frame(bars, chips), ss.build_frame(adjusted, chips)
         dates = raw['date']
         for spec in ss.SIGNALS:

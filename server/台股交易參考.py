@@ -1,6 +1,6 @@
 """已核對的公開交易參考；純本機讀取，不推論未收錄股票仍在交易。"""
 import json
-from datetime import date
+from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
 
@@ -57,6 +57,14 @@ def continuous_segments(symbol, bars, sessions):
         day = bar['date']
         valid = day in positions and eligible_bar(symbol, day)
         adjacent = not part or positions.get(day) == positions[part[-1]['date']] + 1
+        if part and adjacent:
+            between = date.fromisoformat(part[-1]['date']) + timedelta(days=1)
+            end = date.fromisoformat(day)
+            while between < end:
+                if session(between)['status'] == 'scheduled':
+                    adjacent = False
+                    break
+                between += timedelta(days=1)
         if not valid or not adjacent:
             if part:
                 result.append(part)
@@ -66,3 +74,16 @@ def continuous_segments(symbol, bars, sessions):
     if part:
         result.append(part)
     return result
+
+
+def continuous_frames(symbol, frame, sessions):
+    """研究共用的有效連續指標；切段後重新暖機，不沿用缺口前的指標。"""
+    import stock_signals as ss
+    bars = [{k: frame[k][i] for k in ('date', 'open', 'high', 'low', 'close', 'volume')}
+            for i in range(len(frame['date']))]
+    parts = continuous_segments(symbol, bars, sessions)
+    if len(parts) == 1 and len(parts[0]) == len(bars):
+        return [frame]
+    chips = [{k: frame[k][i] for k in ('date', 'trust', 'foreign')}
+             for i in range(len(frame['date']))]
+    return [ss.build_frame(part, chips) for part in parts if len(part) >= ss.MIN_BARS]

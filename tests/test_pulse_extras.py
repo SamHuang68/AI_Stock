@@ -2,6 +2,14 @@
 """pulse_extras 單元測試 — 解析／同契約 OI／NHNL 誠實門檻（無網路）。"""
 import os
 import sys
+import unittest
+
+
+def load_tests(loader, suite, pattern):
+    """讓標準 unittest 探索也執行既有函式型案例。"""
+    suite.addTests(unittest.FunctionTestCase(fn) for name, fn in globals().items()
+                   if name.startswith('test_') and callable(fn))
+    return suite
 import inspect
 import unittest
 

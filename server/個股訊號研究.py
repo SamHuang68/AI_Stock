@@ -57,8 +57,13 @@ def regime(frame, t):
 
 
 def market_regimes(bars):
-    frame = ss.build_frame(bars)
-    return {d: regime(frame, t) for t, d in enumerate(frame['date'])}
+    from 台股交易參考 import continuous_frames, eligible_bar
+    dates = [b['date'] for b in bars if eligible_bar('^TWII', b['date'])]
+    frames = continuous_frames('^TWII', ss.build_frame(bars), dates)
+    result = dict.fromkeys(dates, 'unknown')
+    for frame in frames:
+        result.update({d: regime(frame, t) for t, d in enumerate(frame['date'])})
+    return result
 
 
 def quarter(day):
@@ -171,6 +176,13 @@ class Study:
         self.skipped = defaultdict(int)
 
     def add(self, symbol, frame):
+        from 台股交易參考 import continuous_frames
+        frames = continuous_frames(symbol, frame, self.market)
+        self.skipped['excluded_or_short_segment_bars'] += len(frame['date']) - sum(len(f['date']) for f in frames)
+        for part in frames:
+            self._add_continuous(symbol, part)
+
+    def _add_continuous(self, symbol, frame):
         dates = frame['date']
         self.coverage.append({'symbol': symbol, 'bars': len(dates), 'from': dates[0], 'to': dates[-1],
                               'digest': digest(frame),
@@ -251,6 +263,7 @@ class Study:
                 'skipped': dict(self.skipped), 'signals': signals, 'selection': selection,
                 'rsiRebound': self.rsi_rebound(),
                 'limitations': [
+                    '依已知交易參考排除停止交易價格與缺日；每段重新計算指標，證券主檔仍非完整歷史名冊。',
                     '使用目前本機歷史快照重建，並非當年實際留存的點時紀錄。',
                     '價格未還原除權息，未納入費用、成交限制與下市股票的完整歷史。',
                     '95% 區間採季度等權重抽；季度邊界仍可能相依，並未校正多重比較。',

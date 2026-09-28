@@ -108,7 +108,8 @@ def compute_pooled(series: Iterable[tuple], *, market: str = 'TW',
                    min_sample: int = POOLED_MIN_SAMPLE,
                    chips: Optional[Mapping[str, List[Dict[str, Any]]]] = None,
                    progress: Optional[Callable[[int], None]] = None,
-                   frame_observer: Optional[Callable] = None) -> Dict[str, Any]:
+                   frame_observer: Optional[Callable] = None,
+                   sessions: Optional[Sequence[str]] = None) -> Dict[str, Any]:
     """series: 可疊代的 (code, bars)；bars 為 ``ss.normalize_bars`` 輸出。"""
     t0 = time.time()
     acc: Dict[str, Dict[int, List[Dict[str, Any]]]] = {s['id']: {h: [] for h in horizons} for s in ss.SIGNALS}
@@ -122,25 +123,28 @@ def compute_pooled(series: Iterable[tuple], *, market: str = 'TW',
         frame = ss.build_frame(bars, (chips or {}).get(code))
         if frame_observer is not None:
             frame_observer(code, frame)
-        dates, closes = frame['date'], frame['close']
-        last_date = max(last_date or dates[-1], dates[-1])
-        first_date = min(first_date or dates[0], dates[0])
-        for hz in horizons:
-            b = base[hz]
-            for e in range(60, len(closes) - hz):
-                b.add(closes[e + hz] / closes[e] - 1.0)
-        for spec in ss.SIGNALS:
-            starts = ss.event_indices(frame, spec)
-            if not starts:
-                continue
-            lag = int(spec.get('entryLag', 0))
+        from 台股交易參考 import continuous_frames
+        frames = continuous_frames(code, frame, sessions) if market == 'TW' and sessions is not None else [frame]
+        for frame in frames:
+            dates, closes = frame['date'], frame['close']
+            last_date = max(last_date or dates[-1], dates[-1])
+            first_date = min(first_date or dates[0], dates[0])
             for hz in horizons:
-                outs = ss.forward_outcomes(frame, starts, hz, spec['direction'], lag)
-                for o in outs:
-                    acc[spec['id']][hz].append({'symbol': code, 'date': dates[o['t']], 'ret': o['ret'],
-                                                'adverse': o['adverse']})
-                if outs:
-                    contrib[spec['id']].add(code)
+                b = base[hz]
+                for e in range(60, len(closes) - hz):
+                    b.add(closes[e + hz] / closes[e] - 1.0)
+            for spec in ss.SIGNALS:
+                starts = ss.event_indices(frame, spec)
+                if not starts:
+                    continue
+                lag = int(spec.get('entryLag', 0))
+                for hz in horizons:
+                    outs = ss.forward_outcomes(frame, starts, hz, spec['direction'], lag)
+                    for o in outs:
+                        acc[spec['id']][hz].append({'symbol': code, 'date': dates[o['t']], 'ret': o['ret'],
+                                                    'adverse': o['adverse']})
+                    if outs:
+                        contrib[spec['id']].add(code)
         if progress and idx % 50 == 0:
             progress(idx)
     signals: Dict[str, Any] = {}
@@ -193,7 +197,8 @@ def compute_pooled(series: Iterable[tuple], *, market: str = 'TW',
         'signals': signals,
         'method': ('逐檔以同一套規則偵測（只用當根以前資料），合併同市場所有標的；進場＝觸發日收盤'
                    '（籌碼訊號為次一交易日收盤）；只統計已走完天數的樣本；基準＝同批標的所有交易日。'),
-        'caveats': ['標的為目前在本機日線庫的代號，已下市股票不在其中（存活者偏差）。',
+        'caveats': ['標的為目前本機日線庫的代號，並非完整歷史上市名冊，仍有存活者偏差。',
+                    '台股依基準交易日與已知停止交易參考切段，缺口後指標重新暖機；未知證券生命週期仍可能缺漏。',
                     '價格未還原除權息，除息日的跳空會被算進報酬。',
                     '穩定度只比較前後兩段的上漲比例，不是統計顯著性檢定。',
                     '比例誤差假設獨立樣本，尚未處理事件重疊與同日股票群聚；不代表相對基準優勢。',
@@ -249,9 +254,9 @@ def compute_snapshot(connection, *, market='TW', symbols=None, chips=None, progr
         sensitivity.add(code, bars, (chips or {}).get(code, []))
     result = compute_pooled(series,
                             market=market, chips=chips, progress=progress,
-                            frame_observer=observed)
+                            frame_observer=observed, sessions=list(study.market) if study else None)
     result['priceSensitivity'] = sensitivity.finish()
-    result['statisticsVersion'] = 2
+    result['statisticsVersion'] = 3
     result['researchAsOf'] = current.isoformat()
     if study:
         result['research'] = study.finish()

@@ -57,8 +57,8 @@ def record_snapshot(code, payload, directory=CHIP_HISTORY_PATH):
     inst = (payload or {}).get('inst') or {}
     if inst.get('total') is None:
         return False
-    # TPEx 必須帶經解析器核對的自身交易日，不能借用 T86 日期。
-    if payload.get('_chipSource') == 'TPEx' and payload.get('_verifiedChipDate') != payload.get('date'):
+    # 兩個交易所都必須帶經解析器核對的自身交易日。
+    if payload.get('_chipSource') not in ('TWSE', 'TPEx') or payload.get('_verifiedChipDate') != payload.get('date'):
         return False
     raw_day = str(payload.get('date') or '')
     try:

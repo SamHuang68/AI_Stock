@@ -20,13 +20,14 @@ class UpdateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             p = Path(root) / '20260924.json'
             p.write_text('{"2330":{"trust":1000,"custom":7}}', encoding='utf-8')
-            payload = {'date': '20260924', 'inst': {'foreign': 20, 'trust': None, 'dealer': 0, 'total': 20}}
+            payload = {'date': '20260924', '_chipSource': 'TWSE', '_verifiedChipDate': '20260924',
+                       'inst': {'foreign': 20, 'trust': None, 'dealer': 0, 'total': 20}}
             self.assertTrue(ct.record_snapshot('2330', payload, root))
             saved = json.loads(p.read_text(encoding='utf-8'))['2330']
             self.assertEqual(saved['sourceDate'], '2026-09-24')
             self.assertEqual(saved['trust'], 1000)
             self.assertEqual(saved['custom'], 7)
-            self.assertFalse(ct.record_snapshot('6488', {**payload, '_chipSource': 'TPEx'}, root))
+            self.assertFalse(ct.record_snapshot('6488', {**payload, '_chipSource': 'TPEx', '_verifiedChipDate': None}, root))
             self.assertFalse(ct.record_snapshot('2330', {**payload, 'date': '20260926'}, root))
             self.assertEqual(len(list(Path(root).glob('*.json'))), 1)
 
