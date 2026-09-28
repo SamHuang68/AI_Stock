@@ -32,3 +32,37 @@ def instrument(symbol, as_of=None):
 
 def split_references(symbol):
     return references()['splits'].get(symbol, [])
+
+
+def trading_status(symbol, day):
+    """已知個股停止交易區間；未知主檔不冒稱官方確認可交易。"""
+    ended = instrument(symbol, day)
+    if ended:
+        return ended
+    for item in references().get('suspensions', {}).get(symbol, []):
+        if item['from'] <= day < item['resumeDate']:
+            return {'symbol': symbol, 'status': 'suspended', **item}
+    return None
+
+
+def eligible_bar(symbol, day):
+    return session(day)['status'] != 'closed' and trading_status(symbol, day) is None
+
+
+def continuous_segments(symbol, bars, sessions):
+    """以基準交易日切段；缺日、停牌、終止後價格都不能壓縮成相鄰 K 棒。"""
+    positions = {day: i for i, day in enumerate(sessions)}
+    part, result = [], []
+    for bar in bars:
+        day = bar['date']
+        valid = day in positions and eligible_bar(symbol, day)
+        adjacent = not part or positions.get(day) == positions[part[-1]['date']] + 1
+        if not valid or not adjacent:
+            if part:
+                result.append(part)
+            part = []
+        if valid:
+            part.append(bar)
+    if part:
+        result.append(part)
+    return result

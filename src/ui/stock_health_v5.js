@@ -424,13 +424,14 @@
 
   function sensitivityHtml(p) {
     if (!p) return '<div class="sh5-foot">還原與成本研究尚未計算；原有研究結果保留。</div>';
-    var html = '<details class="sh5-sec"><summary>除權息與成本敏感度（覆蓋 ' + esc(p.coveredSymbols) + '／' + esc(p.totalSymbols) + ' 檔）</summary>' +
+    var partial = p.windowCount != null;
+    var html = '<details class="sh5-sec"><summary>' + (partial ? '部分歷史區段：' + esc(p.windowCount) + ' 段、' + esc(p.coveredBars) + ' 根日線（' : '除權息與成本敏感度（完整覆蓋 ') + esc(p.coveredSymbols) + '／' + esc(p.totalSymbols) + ' 檔）</summary>' +
       '<div class="sh5-foot">' + esc(p.method || '') + '<br>' + (p.limitations || []).map(esc).join('<br>') + '</div>';
-    var detail = '<details><summary>完整覆蓋與未接納原因</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
+    var detail = '<details><summary>覆蓋日期與未接納原因</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
       esc(JSON.stringify({ covered: p.covered, missingSymbols: p.missingSymbols, missingDetails: p.missingDetails }, null, 2)) + '</pre></details>';
-    if (p.snapshotSymbols != null) html += '<div class="sh5-foot">已取得來源快照 ' + esc(p.snapshotSymbols) + ' 檔；僅完整且與本機原價相容的資料納入比較。' +
+    if (p.snapshotSymbols != null) html += '<div class="sh5-foot">已取得來源快照 ' + esc(p.snapshotSymbols) + ' 檔；' + (partial ? '各區段與本機原價相容，分段暖機，不跨缺口計算。' : '僅完整且與本機原價相容的資料納入比較。') +
       '其中 ' + esc(p.reconciledSymbols || 0) + ' 檔經明示分割／配股事件逐日核對價格基準；原始行情與差異證據保留，轉換期間及來源可展開查閱。</div>';
-    if (p.status !== 'available') return html + '<div class="sh5-warn">尚無完整且相容的還原快照。缺值不當成無除權息；缺日與價差詳見下方。</div>' + detail + '</details>';
+    if (p.status !== 'available') return html + '<div class="sh5-warn">尚無完整且相容的還原快照。缺值不當成無除權息；缺日與價差詳見下方。</div>' + detail + '</details>' + (p.partial ? sensitivityHtml(p.partial) : '');
     html += '<div class="sh5-table-scroll" role="region" tabindex="0" aria-label="除權息與成本比較，可左右捲動"><table class="sh5-tbl"><thead><tr>' +
       '<th>訊號／天數</th><th>原價／還原事件</th><th>共同事件</th><th>共同原價中位數</th><th>共同還原中位數</th><th>還原後成本情境中位數</th></tr></thead><tbody>';
     (p.signals || []).forEach(function (s) { (s.horizons || []).forEach(function (h) {
@@ -439,7 +440,7 @@
         esc(h.commonEvents) + '</td><td>' + med(h.commonRaw) + '</td><td>' + med(h.commonAdjusted) + '</td><td>' +
         (h.costScenarios || []).map(function (c) { return esc(c.roundTripBps) + ' 基點：' + med(c); }).join('<br>') + '</td></tr>';
     }); });
-    return html + '</tbody></table></div>' + detail + '</details>';
+    return html + '</tbody></table></div>' + detail + '</details>' + (p.partial ? sensitivityHtml(p.partial) : '');
   }
 
   function maintenanceHtml(p) {
@@ -459,6 +460,20 @@
       '；已留存 ' + esc(o.events || 0) + ' 個事件、' + esc(o.outcomes || 0) + ' 筆成熟結果。' +
       (o.activatedAt ? '<br>啟用於 ' + esc(o.activatedAt) : '') + (o.lastRun ? '<br>最近檢查 ' + esc(o.lastRun.asOf) + '：' + esc(o.lastRun.reason) : '') +
       '<br>只記錄啟用後的當日收盤事件，缺日不回填；這些是觀察紀錄，並非通過研究的候選。</div>';
+    if (o.lastRun && o.lastRun.chipChannelsExpected != null) html += '<div class="sh5-foot">首次價量輸入 ' + esc(o.lastRun.priceInputs || 0) +
+      ' 檔；籌碼訊號資料到齊 ' + esc(o.lastRun.chipChannelsComplete || 0) + '／' + esc(o.lastRun.chipChannelsExpected) +
+      ' 組。籌碼稍後到齊會另留證據，不改寫首次價量。</div><details><summary>尚缺資料與排除原因</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
+      esc(JSON.stringify({ missingPriceSymbols: o.lastRun.missingPriceSymbols, missingChipInputs: o.lastRun.missingChipInputs,
+        excludedInstruments: o.lastRun.excludedInstruments }, null, 2)) + '</pre></details>';
+    if (p.sourceRevisions && p.sourceRevisions.count) html += '<div class="sh5-warn">來源修訂 ' + esc(p.sourceRevisions.count) + ' 筆、涉及 ' +
+      esc(p.sourceRevisions.symbols) + ' 檔；首次日線保留，衝突另存，尚未自動採用。</div>';
+    var schedule = p.schedule || {};
+    html += '<div class="sh5-foot"><label><input type="checkbox" id="sh5-schedule-enable"' + (schedule.enabled ? ' checked' : '') +
+      '> 持續授權盤後自動更新：TWSE／TPEx 日線及法人、Yahoo 大盤</label><br>交易日 18:30 更新，19:30／20:30 只重試未完成來源；需主機運行。僅傳日期與代號，不上傳帳本、不呼叫模型，無已知 API 費用；取消並儲存可停用。</div>' +
+      '<button class="sh5-btn" id="sh5-schedule-save">儲存每日更新設定</button>';
+    if (schedule.lastSources && schedule.lastSources.sources) html += '<details><summary>每日來源實際執行紀錄</summary><div class="sh5-foot">' +
+      schedule.lastSources.sources.map(function (s) { return esc(s.name + '：' + (names[s.status] || s.status) + (s.reason ? '；' + s.reason : '')); }).join('<br>') +
+      '</div><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' + esc(JSON.stringify(schedule.lastSources, null, 2)) + '</pre></details>';
     if ((o.recent || []).length) html += '<details><summary>最新 20 筆事件摘要（完整資料保留於本機帳本）</summary><div class="sh5-foot">' +
       o.recent.map(function (r) { return esc(r.date + ' · ' + r.symbol + ' · ' + r.signalId); }).join('<br>') + '</div></details>';
     if (!o.enabled) html += '<label class="sh5-foot"><input type="checkbox" id="sh5-daily-enable"> 同時啟用本機每日事件留存</label>';
@@ -496,6 +511,13 @@
           var body = el.querySelector('#sh5-research-body');
           body.innerHTML = maintenanceHtml(p);
           body.querySelector('#sh5-research-status').onclick = loadResearch;
+          body.querySelector('#sh5-schedule-save').onclick = function () {
+            this.disabled = true;
+            postJson('/stock-signals/research/refresh', { setSchedule: body.querySelector('#sh5-schedule-enable').checked }).then(loadResearch).catch(function (e) {
+              body.querySelector('#sh5-research-error').textContent = '設定未儲存：' + e.message;
+              body.querySelector('#sh5-schedule-save').disabled = false;
+            });
+          };
           body.querySelector('#sh5-research-refresh').onclick = function () {
             this.disabled = true;
             var c = body.querySelector('#sh5-daily-enable');

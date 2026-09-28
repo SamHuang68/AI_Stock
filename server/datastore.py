@@ -16,6 +16,9 @@ CLI（在專案根目錄跑）:
   python server\\datastore.py stats                 # DB 概況
 """
 import os, sys, json, time, sqlite3, urllib.request, urllib.error, random, threading, tempfile
+import hashlib
+import math
+import uuid
 from contextlib import closing, nullcontext, contextmanager
 from pathlib import Path
 
@@ -222,7 +225,63 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False,
             time.sleep(delay)   # 指數退避 + 抖動，仍受呼叫端總預算約束
     raise RuntimeError(f'fetch failed for {ysym}: {last}')
 
-def upsert_bars(sym, market, rows):
+def merge_source_bars(sym, market, rows, source):
+    """來源更新保留首次日線，修訂另存；不把短區段覆寫成不同價格基準。"""
+    from stock_signals import bar_date
+    from 台股交易參考 import eligible_bar
+    counts = {'runId': uuid.uuid4().hex, 'symbol': sym, 'market': market, 'source': source,
+              'inserted': 0, 'unchanged': 0, 'conflicts': 0, 'excluded': 0, 'observedAt': time.time()}
+    with _db_write_lock, closing(get_conn()) as conn, conn:
+        conn.execute('CREATE TABLE IF NOT EXISTS bar_source_revisions('
+                     'id TEXT PRIMARY KEY,symbol TEXT,market TEXT,session_date TEXT,observed_at REAL,payload TEXT)')
+        conn.execute('CREATE TABLE IF NOT EXISTS bar_ingest_runs(id TEXT PRIMARY KEY,payload TEXT)')
+        existing = {bar_date(r[0], market): r for r in conn.execute(
+            'SELECT ts,open,high,low,close,volume FROM bars WHERE symbol=? AND market=? ORDER BY ts', (sym, market))}
+        for row in rows:
+            if len(row) != 6 or any(not isinstance(v, (int, float)) or not math.isfinite(v) for v in row):
+                raise ValueError('來源日線必須提供有限的時間、OHLC 與成交量')
+            day = bar_date(row[0], market)
+            if not day or (market == 'TW' and not eligible_bar(sym, day)):
+                counts['excluded'] += 1
+                continue
+            if min(row[1:5]) <= 0 or row[5] < 0 or row[2] < max(row[1], row[3], row[4]) or row[3] > min(row[1], row[2], row[4]):
+                raise ValueError('來源 OHLCV 欄位不一致')
+            old = existing.get(day)
+            if old:
+                if all(a is not None and math.isclose(a, b, rel_tol=1e-6, abs_tol=1e-5) for a, b in zip(old[1:], row[1:])):
+                    counts['unchanged'] += 1
+                    continue
+                record = {'source': source, 'original': old, 'revision': row, 'policy': '保留原始值，待核對來源修訂'}
+                payload = json.dumps(record, ensure_ascii=False, allow_nan=False)
+                key = hashlib.sha256((sym + market + day + payload).encode('utf-8')).hexdigest()
+                conn.execute('INSERT OR IGNORE INTO bar_source_revisions VALUES(?,?,?,?,?,?)',
+                             (key, sym, market, day, counts['observedAt'], payload))
+                counts['conflicts'] += 1
+                continue
+            conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', (sym, market, *row))
+            existing[day] = row
+            counts['inserted'] += 1
+        conn.execute('INSERT INTO meta(symbol,market,name,last_update) VALUES(?,?,?,?) '
+                     'ON CONFLICT(market,symbol) DO UPDATE SET last_update=excluded.last_update',
+                     (sym, market, sym, int(counts['observedAt'])))
+        conn.execute('INSERT INTO bar_ingest_runs VALUES(?,?)',
+                     (counts['runId'], json.dumps(counts, ensure_ascii=False)))
+    return counts
+
+
+def source_revision_status(symbol=None, market='TW', *, connection=None):
+    with (read_snapshot() if connection is None else nullcontext(connection)) as conn:
+        if not _table_exists(conn, 'bar_source_revisions'):
+            return {'count': 0, 'symbols': 0}
+        where, args = ('market=? AND symbol=?', (market, symbol)) if symbol else ('market=?', (market,))
+        count, symbols = conn.execute('SELECT count(*),count(DISTINCT symbol) FROM bar_source_revisions WHERE ' + where, args).fetchone()
+        return {'count': count, 'symbols': symbols, 'policy': '來源修訂另存；首次日線保留，未自動覆寫'}
+
+
+def upsert_bars(sym, market, rows, *, source=None):
+    if source:
+        result = merge_source_bars(sym, market, rows, source)
+        return result['inserted'] + result['unchanged']
     with _db_write_lock:
         with closing(get_conn()) as conn:
             with conn:
@@ -238,7 +297,7 @@ def upsert_bars(sym, market, rows):
 
 def backfill(sym, market='TW', rng='10y'):
     rows = fetch_yahoo_daily(sym, market, rng)
-    n = upsert_bars(sym, market, rows)
+    n = upsert_bars(sym, market, rows, source='Yahoo Finance')
     print(f'[db] {sym}.{market}: stored {n} bars ({rng})')
     return n
 
@@ -295,7 +354,7 @@ def backfill_universe(market='TW', rng='5y', workers=4, resume=True):
         for i, fut in enumerate(as_completed(futs), 1):
             c = futs[fut]
             try:
-                upsert_bars(c, market, fut.result())   # 主執行緒序列寫入
+                upsert_bars(c, market, fut.result(), source='Yahoo Finance')   # 主執行緒序列寫入
                 ok += 1
             except Exception:
                 fail += 1
@@ -355,7 +414,7 @@ def update(sym, market='TW'):
         rows = [row for row in rows if bar_date(row[0], market) < local.date().isoformat()
                 or (bar_date(row[0], market) == local.date().isoformat()
                     and (local.hour, local.minute) >= final_time)]
-        n = upsert_bars(sym, market, rows)
+        n = upsert_bars(sym, market, rows, source='Yahoo Finance')
         print(f'[db] {sym}.{market}: refreshed {n} recent bars')
         return n
     return backfill(sym, market)

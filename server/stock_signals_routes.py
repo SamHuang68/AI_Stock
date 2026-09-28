@@ -151,12 +151,15 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
             final_rows = [row for row in fetched
                           if not (today_live and ss.bar_date(row[0], market) == today)]
             if final_rows:
-                ds.upsert_bars(code, market, final_rows)
+                ds.upsert_bars(code, market, final_rows, source='Yahoo Finance')
                 rows = ds.get_bars(code, market=market)
                 bars = ss.normalize_bars(rows, market)
             if today_live and fresh and fresh[-1]['date'] == today:
                 live_extra = [fresh[-1]]
             source = 'local-db+yahoo'
+            revision = ds.source_revision_status(code, market)
+            if revision['count']:
+                error = '來源有歷史修訂，首次日線已保留；價格基準仍須核對，不以新來源靜默覆寫'
     if live_extra and (not bars or bars[-1]['date'] < live_extra[0]['date']):
         bars = bars + live_extra
     last = bars[-1]['date'] if bars else None
@@ -413,6 +416,12 @@ class StockSignalsRoutesMixin:
             body = read_json_body(self, max_bytes=4096)
         except BodyReadError as exc:
             self._err(str(exc), exc.status)
+            return
+        if isinstance(body, dict) and 'setSchedule' in body:
+            if not isinstance(body['setSchedule'], bool):
+                self._err('每日更新設定必須是布林值', 400)
+                return
+            self._ok(json.dumps(maintenance.configure_schedule(body['setSchedule']), ensure_ascii=False).encode('utf-8'))
             return
         if not isinstance(body, dict) or any(not isinstance(body.get(k, False), bool) for k in ('enableDaily', 'downloadSources')):
             self._err('每日留存設定必須是布林值', 400)

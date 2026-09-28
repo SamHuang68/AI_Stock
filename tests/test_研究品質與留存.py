@@ -62,7 +62,8 @@ class AdjustmentTests(unittest.TestCase):
         updater = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(updater)
         with tempfile.TemporaryDirectory() as tmp, patch.object(datastore, 'DB_PATH', str(Path(tmp) / 'market.db')):
-            stamp = int(datetime(2026, 9, 24, 9, tzinfo=ss._TZ['TW']).timestamp())
+            # 9/25 為官方休市日；此案例用 9/23、9/24 驗證有效交易日追加。
+            stamp = int(datetime(2026, 9, 23, 9, tzinfo=ss._TZ['TW']).timestamp())
             with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
                 conn.executescript(datastore.SCHEMA)
                 conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', ('2330', 'TW', stamp, 10, 10, 10, 10, 1))

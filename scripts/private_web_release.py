@@ -29,6 +29,7 @@ REQUIRED_RELEASE_FILES = {
     "server/server.py",
     "server/台股交易參考.py",
     "server/台股交易參考.json",
+    "server/個股每日資料.py",
     "server/ai_local.py",
     "server/ai_routes.py",
     "server/overnight_intraday.py",

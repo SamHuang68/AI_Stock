@@ -22,6 +22,68 @@ JOB = 'stock-research-maintenance'
 _thread = None
 
 
+def schedule_status():
+    data = Path(datastore.DB_PATH).parent
+    config = load_json(str(data / 'stock_daily_schedule.json'), default={}, expected_type=dict)
+    return {'enabled': config.get('enabled') is True, 'consentAt': config.get('consentAt'),
+            'times': ['18:30', '19:30', '20:30'], 'scope': 'TWSE／TPEx 官方批次日線及法人、Yahoo 大盤日線',
+            'lastSources': load_json(str(data / 'stock_daily_sources.json'), default={}, expected_type=dict)}
+
+
+def configure_schedule(enabled):
+    if not isinstance(enabled, bool):
+        raise ValueError('每日來源更新設定必須是布林值')
+    data = Path(datastore.DB_PATH).parent
+    config = {'enabled': enabled, 'consentAt': datetime.now(ss._TZ['TW']).isoformat(),
+              'scope': schedule_status()['scope'], 'source': '擁有者明確設定',
+              'paidModelCalls': False, 'uploadLedger': False}
+    atomic_write_json(str(data / 'stock_daily_schedule.json'), config, backup=True)
+    if enabled:
+        daily.enable(paths()[1])
+        start_daemon()
+    return schedule_status()
+
+
+def scheduled_update(day):
+    # 已排隊但使用者隨後停用的工作不再外送。
+    if not schedule_status()['enabled']:
+        return {'status': 'disabled'}
+    import 個股每日資料 as sources
+    result = sources.run(day)
+    observed = capture()
+    return {'sources': result, 'observations': observed}
+
+
+def schedule_tick(current):
+    """持久的每日三次時段；重新啟動也不重複無界外送。"""
+    config = schedule_status()
+    if not config['enabled'] or session(current.date())['status'] != 'scheduled':
+        return False
+    if current.hour >= 21:
+        return False
+    minutes = current.hour * 60 + current.minute
+    slots = [value for value in (18 * 60 + 30, 19 * 60 + 30, 20 * 60 + 30) if value <= minutes]
+    if not slots:
+        return False
+    if config['lastSources'].get('sessionDate') == current.date().isoformat() and config['lastSources'].get('status') == 'completed':
+        return False
+    key = current.date().isoformat() + '/' + str(slots[-1])
+    filename = Path(datastore.DB_PATH).parent / 'stock_daily_attempts.json'
+    attempts = load_json(str(filename), default={}, expected_type=dict)
+    if key in attempts:
+        return False
+    # 先留下時段收據再交佇列，避免工作已外送、程序重啟卻還沒有收據。
+    attempts[key] = {'queuedAt': current.isoformat(), 'run': 'stock-daily-sources', 'status': 'reserved'}
+    atomic_write_json(str(filename), attempts, backup=True)
+    submitted = job_queue.submit('stock-daily-sources', lambda: scheduled_update(current.date().isoformat()),
+                                 meta={'sessionDate': current.date().isoformat(), 'consentAt': config['consentAt']})
+    if submitted.get('queued'):
+        attempts[key]['status'] = 'queued'
+        atomic_write_json(str(filename), attempts, backup=True)
+        return True
+    return False
+
+
 def paths():
     data = Path(datastore.DB_PATH).parent
     return data / 'stock_research_maintenance.json', data / 'stock_daily_observations.sqlite3'
@@ -52,6 +114,7 @@ def status():
     if state.get('status') in ('queued', 'running') and not busy:
         state = {**state, 'status': 'interrupted', 'message': '上次工作未正常完成，可重新執行；原始資料保留。'}
     return {'running': busy, 'job': state, 'observations': daily.status(ledger),
+            'schedule': schedule_status(), 'sourceRevisions': datastore.source_revision_status(),
             'inventory': inventory(), 'externalCallsOnRefresh': 0}
 
 
@@ -156,11 +219,16 @@ def start_daemon():
     def loop():
         while True:
             current = datetime.now(ss._TZ['TW'])
-            if current.weekday() < 5 and (current.hour, current.minute) >= (14, 0):
+            if current.weekday() < 5 and 14 <= current.hour < 21:
                 try:
-                    job_queue.submit('stock-daily-observation', capture, meta={'externalCalls': 0})
+                    schedule_tick(current)
+                    last = daily.status(paths()[1]).get('lastRun') or {}
+                    if last.get('sessionDate') != current.date().isoformat() or last.get('status') not in ('completed', 'closed'):
+                        job_queue.submit('stock-daily-observation', capture, meta={'externalCalls': 0})
                 except Exception:
-                    pass  # 工作錯誤由 job_queue 留下記錄；下輪可重試，不更新完成狀態。
+                    # 保留排程階段失敗；不能因背景 thread 無輸出就誤判仍正常。
+                    import logging
+                    logging.getLogger(__name__).exception('每日個股排程檢查失敗')
             time.sleep(600)
     _thread = threading.Thread(target=loop, name='stock-daily-observation', daemon=True)
     _thread.start()

@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 import stock_signals as ss
-from 台股交易參考 import session, instrument
+from 台股交易參考 import session, instrument, trading_status, eligible_bar, continuous_segments
 from 個股訊號研究 import digest
 
 
@@ -21,6 +21,46 @@ def engine_digest():
 
 def encoded(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
+
+
+def _chip_schema(conn):
+    conn.execute('CREATE TABLE IF NOT EXISTS daily_chip_inputs('
+                 'id TEXT PRIMARY KEY,input_id TEXT,signal_id TEXT,observed_at TEXT,payload BLOB)')
+
+
+def _capture_chips(conn, input_row, symbol, today, stamp, chips, version):
+    """較晚到達的籌碼有獨立證據；不改寫先前價量輸入、不隔日補造事件。"""
+    input_id, original_version, compressed = input_row
+    price = json.loads(zlib.decompress(compressed))
+    bars = price['bars']
+    expected = [b['date'] for b in bars[-4:]]
+    values = {r['date']: r for r in chips if r['date'] <= today}
+    missing, added, complete = [], 0, 0
+    for sid, field in (('chip_trust_buy3', 'trust'), ('chip_foreign_sell3', 'foreign')):
+        event_id = digest([input_id, sid])
+        if conn.execute('SELECT 1 FROM daily_chip_inputs WHERE id=?', (event_id,)).fetchone():
+            complete += 1
+            continue
+        absent = [day for day in expected if ss._finite(values.get(day, {}).get(field)) is None]
+        if original_version != version or len(expected) != 4 or absent:
+            missing.append({'symbol': symbol, 'signalId': sid, 'missingDates': absent,
+                            'reason': '引擎版本已變更，原觀察保留' if original_version != version else '等待完整四日籌碼'})
+            continue
+        stock_chips = [values[day] for day in sorted(values)]
+        result = ss.analyze(bars, symbol=symbol, chips=stock_chips, with_stats=False)
+        payload = {'priceInputId': input_id, 'barsDigest': digest(bars), 'chips': stock_chips,
+                   'engineDigest': version, 'observedAt': stamp, 'requiredDates': expected,
+                   'source': '同日稍後到齊的本機籌碼；使用首次價量輸入'}
+        conn.execute('INSERT INTO daily_chip_inputs VALUES(?,?,?,?,?)',
+                     (event_id, input_id, sid, stamp, zlib.compress(encoded(payload).encode('utf-8'))))
+        for ev in result.get('events', []):
+            if ev['signalId'] == sid and ev['date'] == today and not ev.get('provisional'):
+                saved = {**ev, 'chipInputId': event_id}
+                cur = conn.execute('INSERT OR IGNORE INTO daily_events VALUES(?,?,?,?,?,?,?)',
+                    (event_id, input_id, symbol, today, sid, stamp, encoded(saved)))
+                added += cur.rowcount
+        complete += 1
+    return added, complete, missing
 
 
 def enable(path, now=None):
@@ -38,6 +78,7 @@ def enable(path, now=None):
           CREATE TABLE IF NOT EXISTS daily_outcomes(event_id TEXT,horizon INTEGER,resolved_at TEXT,payload TEXT,PRIMARY KEY(event_id,horizon));
           CREATE TABLE IF NOT EXISTS daily_runs(at TEXT PRIMARY KEY,payload TEXT);
         ''')
+        _chip_schema(conn)
         conn.execute('INSERT OR IGNORE INTO daily_config VALUES(?,?)', ('activation', encoded({
             'activatedAt': now.isoformat(), 'scope': '本機台股日線庫', 'candidatePromotion': False,
             'note': '僅留存啟用後的當日收盤事件；缺日不回填，不代表通過研究門檻。'})))
@@ -85,6 +126,8 @@ def capture(path, series, benchmark, chips=None, now=None):
               'reason': '以當日已收盤資料留存' if finalized and today in sessions else '等待當日收盤與大盤資料'}
     counts['calendar'] = calendar
     counts['excludedInstruments'] = []
+    counts.update(chipChannelsComplete=0, chipChannelsExpected=0, missingChipInputs=[], priceInputs=0,
+                  missingPriceSymbols=[])
     can_capture = finalized and today in sessions and calendar['status'] != 'closed'
     if calendar['status'] == 'closed':
         counts.update(status='closed', reason=calendar['reason'] + '；不要求當日日線')
@@ -93,25 +136,32 @@ def capture(path, series, benchmark, chips=None, now=None):
     version = engine_digest()
     activated = datetime.fromisoformat(cfg['activatedAt']).astimezone(ss._TZ['TW']).date().isoformat()
     with closing(sqlite3.connect(path, timeout=30)) as conn, conn:
+        _chip_schema(conn)
         for symbol, raw in series:
-            bars = [b for b in raw if tradable(b['date']) and
+            bars = [b for b in raw if eligible_bar(symbol, b['date']) and
                     (b['date'] < today or (finalized and b['date'] == today))]
             lifecycle = instrument(symbol, today)
-            if lifecycle:
-                counts['excludedInstruments'].append(lifecycle)
-                bars = [b for b in bars if b['date'] < lifecycle['stopDate']]
+            inactive = trading_status(symbol, today)
+            if inactive:
+                counts['excludedInstruments'].append(inactive)
             counts['scanned'] += 1
             if len(bars) < ss.MIN_BARS:
+                if can_capture and not inactive:
+                    counts['missingPriceSymbols'].append(symbol)
                 continue
             input_id = digest([version, symbol, today])
-            if (can_capture and bars[-1]['date'] == today and today > activated):
+            parts = continuous_segments(symbol, bars, sessions)
+            current_bars = parts[-1] if parts else []
+            if (can_capture and current_bars and current_bars[-1]['date'] == today
+                    and len(current_bars) >= ss.MIN_BARS and today > activated):
                 counts['currentSymbols'] += 1
                 if not conn.execute('SELECT 1 FROM daily_inputs WHERE symbol=? AND session_date=?', (symbol, today)).fetchone():
-                    stock_chips = [c for c in (chips or {}).get(symbol, []) if c['date'] <= today]
-                    result = ss.analyze(bars, symbol=symbol, chips=stock_chips, with_stats=False)
-                    fresh = [e for e in result.get('events', []) if e['date'] == today and not e.get('provisional')]
+                    stock_chips = []
+                    result = ss.analyze(current_bars, symbol=symbol, chips=stock_chips, with_stats=False)
+                    fresh = [e for e in result.get('events', []) if e['date'] == today and not e.get('provisional')
+                             and ss.SIGNAL_BY_ID.get(e['signalId'], {}).get('family') != 'chip']
                     # 沒有事件亦保存當日掃描證據，避免重跑後行情修訂製造新事件。
-                    payload = {'bars': bars, 'chips': stock_chips, 'benchmark': benchmark,
+                    payload = {'bars': current_bars, 'chips': stock_chips, 'benchmark': benchmark,
                                'engineDigest': version, 'evidence': result.get('evidence'),
                                'observedAt': stamp, 'source': 'datastore 唯讀快照'}
                     inserted = conn.execute('INSERT OR IGNORE INTO daily_inputs VALUES(?,?,?,?,?)',
@@ -121,6 +171,17 @@ def capture(path, series, benchmark, chips=None, now=None):
                         cur = conn.execute('INSERT OR IGNORE INTO daily_events VALUES(?,?,?,?,?,?,?)',
                                            (event_id, input_id, symbol, today, ev['signalId'], stamp, encoded(ev)))
                         counts['eventsAdded'] += cur.rowcount
+                frozen = conn.execute('SELECT id,engine,payload FROM daily_inputs WHERE symbol=? AND session_date=?',
+                                      (symbol, today)).fetchone()
+                counts['priceInputs'] += 1
+                added, complete, missing = _capture_chips(conn, frozen, symbol, today, stamp,
+                                                          (chips or {}).get(symbol, []), version)
+                counts['eventsAdded'] += added
+                counts['chipChannelsExpected'] += 2
+                counts['chipChannelsComplete'] += complete
+                counts['missingChipInputs'].extend(missing)
+            elif can_capture and not inactive:
+                counts['missingPriceSymbols'].append(symbol)
             pending = conn.execute('SELECT e.id,e.session_date,e.input_id FROM daily_events e WHERE symbol=? '
                 'AND (SELECT count(*) FROM daily_outcomes o WHERE o.event_id=e.id)<2', (symbol,)).fetchall()
             if not pending:
@@ -131,12 +192,12 @@ def capture(path, series, benchmark, chips=None, now=None):
                     conn.execute('INSERT OR IGNORE INTO daily_prices VALUES(?,?,?,?)',
                                  (symbol, b['date'], stamp, encoded(b)))
             for event_id, origin, _ in pending:
-                if not tradable(origin):
+                if not eligible_bar(symbol, origin):
                     continue
                 expected_all = [d for d in sessions if d > origin]
                 prices = {r[0]: json.loads(r[1]) for r in conn.execute(
                     'SELECT session_date,payload FROM daily_prices WHERE symbol=? AND session_date>?', (symbol, origin))
-                    if tradable(r[0]) and (not lifecycle or r[0] < lifecycle['stopDate'])}
+                    if eligible_bar(symbol, r[0])}
                 for hz in (5, 20):
                     expected = expected_all[:hz + 1]
                     if len(expected) != hz + 1 or any(d not in prices for d in expected):
@@ -157,5 +218,7 @@ def capture(path, series, benchmark, chips=None, now=None):
             counts.update(status='waiting', reason='啟用當日不回填；由下一個交易日開始留存')
         elif can_capture and counts['currentSymbols'] == 0:
             counts.update(status='waiting', reason='大盤已更新，個股當日日線尚未到齊')
+        elif can_capture and (counts['missingPriceSymbols'] or counts['missingChipInputs']):
+            counts.update(status='partial', reason='價量與籌碼分開留存；仍有來源未到齊，當日可重試')
         conn.execute('INSERT OR IGNORE INTO daily_runs VALUES(?,?)', (stamp, encoded(counts)))
     return counts

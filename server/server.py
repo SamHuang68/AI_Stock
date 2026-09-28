@@ -5254,7 +5254,7 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
                 if not rows or len(rows) < 80:
                     fetched = datastore.fetch_yahoo_daily(code, market, '5y')
                     if fetched:
-                        datastore.upsert_bars(code, market, fetched)
+                        datastore.upsert_bars(code, market, fetched, source='Yahoo Finance')
                         rows = datastore.get_bars(code)
             except Exception as e:
                 print('[bars] datastore failed:', e)
@@ -5425,7 +5425,7 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
                     if not r or len(r) < 80:
                         f = datastore.fetch_yahoo_daily(c, 'TW', '5y')
                         if f:
-                            datastore.upsert_bars(c, 'TW', f)
+                            datastore.upsert_bars(c, 'TW', f, source='Yahoo Finance')
                 except Exception:
                     pass
             out = portfolio.compute(holdings, sectors_map=_get_tw_sectors(), names_map=_get_tw_names())

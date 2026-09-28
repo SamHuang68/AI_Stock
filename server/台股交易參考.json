@@ -20,6 +20,10 @@
     "00793B": {"status": "terminated", "label": "已終止上櫃", "stopDate": "2026-09-18", "endDate": "2026-09-18", "source": "https://www.capitalfund.com.tw/ECStorge/fund/news/20260818D.pdf"},
     "5371": {"status": "terminated", "label": "股份轉換後已終止上櫃，3718 為不同代號，不拼接行情", "stopDate": "2026-08-24", "endDate": "2026-09-03", "source": "https://www.tpex.org.tw/storage/eb_data/11508/11500050581.html"}
   },
+  "suspensions": {
+    "1441": [{"from": "2026-09-17", "through": "2026-09-28", "resumeDate": "2026-09-29", "label": "減資換股停止交易", "source": "https://wwwc.twse.com.tw/en/announcement/announcement/list.html", "reference": "1150017640"}],
+    "6550": [{"from": "2026-09-17", "through": "2026-09-28", "resumeDate": "2026-09-29", "label": "減資換股停止交易", "source": "https://wwwc.twse.com.tw/en/announcement/announcement/list.html", "reference": "1150017502"}]
+  },
   "sourceFindings": {
     "2330": [
       {"date": "2022-08-22", "officialClose": 510, "vendorClose": 512, "verdict": "官方支持本機價格，保留本機；供應商價差不強行修平", "source": "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?response=json&date=20220801&stockNo=2330"},

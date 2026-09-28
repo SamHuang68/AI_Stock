@@ -59,7 +59,7 @@ def main(argv=None):
                     or (bar_date(r[0], 'TW') == current.date().isoformat() and current.hour >= 14)]
             if not rows:
                 raise ValueError('來源沒有已收盤日線')
-            count = datastore.upsert_bars('^TWII', 'TW', rows)
+            count = datastore.upsert_bars('^TWII', 'TW', rows, source='Yahoo Finance')
         else:
             count = datastore.update('^TWII')
         trace('大盤資料已提交', rows=count, after=datastore.last_ts('^TWII'))
@@ -138,7 +138,7 @@ def main(argv=None):
                                   (bar_date(r[0]) < current.date().isoformat() or
                                    (bar_date(r[0]) == current.date().isoformat() and current.hour >= 14))}.values())
                     if fresh:
-                        datastore.upsert_bars(code, 'TW', fresh)
+                        datastore.upsert_bars(code, 'TW', fresh, source='Yahoo Finance')
                     trace('還原來源完成', symbol=code, rows=count, appendedBars=len(fresh))
                 except Exception as exc:
                     failures.append('adjustment:' + code)

@@ -133,4 +133,13 @@ ok(researched.includes('沒有候選 &lt;script&gt;') && researched.includes('�
 H.setMode('pro');
 ok(H.getMode() === 'pro', 'mode persists');
 
+const maint = H.maintenanceHtml({ schedule: { enabled: false }, observations: { enabled: true,
+  lastRun: { priceInputs: 3, chipChannelsComplete: 4, chipChannelsExpected: 6, missingPriceSymbols: ['2317'], missingChipInputs: [] } } });
+ok(maint.includes('持續授權盤後自動更新') && !maint.includes('id="sh5-schedule-enable" checked'), '每日外部更新預設未勾選');
+ok(maint.includes('首次價量輸入 3') && maint.includes('4／6') && maint.includes('2317'), '價量與籌碼缺漏分開呈現');
+ok(H.maintenanceHtml({ schedule: { enabled: true } }).includes('id="sh5-schedule-enable" checked'), '已授權的排程狀態可核對並停用');
+const partialView = H.sensitivityHtml({ status: 'available', coveredSymbols: 1054, totalSymbols: 1083, signals: [],
+  partial: { status: 'available', coveredSymbols: 26, totalSymbols: 26, windowCount: 38, coveredBars: 27000, signals: [] } });
+ok(partialView.includes('完整覆蓋 1054／1083') && partialView.includes('部分歷史區段：38 段、27000 根日線（26／26'), '部分歷史與完整股票覆蓋分開呈現');
+
 console.log('\nstock_health_v5_selftest PASSED');

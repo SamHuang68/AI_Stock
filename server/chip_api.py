@@ -358,6 +358,26 @@ def resolve_t86_date(max_back: int = 8):
     return date.today().strftime('%Y%m%d'), None
 
 
+def parse_tpex_inst(rows, expected_day=None):
+    """上櫃法人以自身交易日與明確淨額欄位解析，不以買入量代替買賣超。"""
+    from sector_flow import normalize_session_date
+    fields = {
+        'foreign': 'ForeignInvestorsInclude MainlandAreaInvestors-Difference',
+        'trust': 'SecuritiesInvestmentTrustCompanies-Difference',
+        'dealer': 'Dealers-Difference', 'total': 'TotalDifference'}
+    out = {}
+    for row in rows if isinstance(rows, list) else []:
+        day = normalize_session_date(row.get('Date'))
+        code = str(row.get('SecuritiesCompanyCode') or '').strip()
+        if not day or not code or (expected_day and day != expected_day):
+            raise ValueError('上櫃籌碼缺少自身交易日或日期不符')
+        values = {k: _num(row.get(v)) for k, v in fields.items()}
+        if any(v is None for v in values.values()):
+            raise ValueError('上櫃籌碼淨額欄位缺漏，不以買入或賣出量推定')
+        out[code] = {**values, 'sourceDate': day}
+    return out
+
+
 def _tpex_inst(clean: str) -> Optional[dict]:
     url = 'https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading'
     try:
@@ -369,44 +389,12 @@ def _tpex_inst(clean: str) -> Optional[dict]:
         return None
     if not isinstance(ta, list):
         return None
-    NET = ('買賣超', 'netbuysell', 'net', 'diff', 'buysell')
-
-    def pick(row, must, avoid=()):
-        cand = None
-        for k, v in row.items():
-            kl = k.lower()
-            if not any((m in k) or (m.lower() in kl) for m in must):
-                continue
-            if any((a in k) or (a.lower() in kl) for a in avoid):
-                continue
-            if any((n in k) or (n in kl) for n in NET):
-                val = _num(v)
-                if val is not None:
-                    return val
-            elif cand is None:
-                cand = _num(v)
-        return cand
-
-    for row in ta:
-        if not isinstance(row, dict):
-            continue
-        rc = ''
-        for k, v in row.items():
-            if ('代號' in k) or ('code' in k.lower()):
-                rc = str(v).strip(); break
-        if rc != clean:
-            continue
-        return {
-            'foreign': pick(row, ('外資及陸資買賣超', 'foreigninvestor', 'foreign', '外資'),
-                            avoid=('不含', 'exclud', 'dealer', '自營', 'hedge', '避險', 'self', '自行')),
-            'trust':   pick(row, ('投信', 'investmenttrust', 'trust'),
-                            avoid=('foreign', '外資', 'dealer', '自營')),
-            'dealer':  pick(row, ('自營商買賣超', 'dealer', '自營'),
-                            avoid=('foreign', '外資', 'hedge', '避險', 'self', '自行', 'propriet', '不含', 'exclud')),
-            'total':   pick(row, ('三大法人', 'totalinstitution', 'institutionalinvestorstotal', 'total'),
-                            avoid=('foreign', '外資', 'dealer', '自營', 'trust', '投信')),
-            '_chipSource': 'TPEx',
-        }
+    try:
+        parsed = parse_tpex_inst(ta)
+    except ValueError:
+        return None
+    if clean in parsed:
+        return {**parsed[clean], '_chipSource': 'TPEx'}
     return None
 
 
@@ -430,8 +418,12 @@ def build_chip(sym: str) -> dict:
         tp = _tpex_inst(clean)
         if tp:
             src = tp.pop('_chipSource', 'TPEx')
+            source_day = tp.pop('sourceDate', None)
             out['inst'] = tp
             out['_chipSource'] = src
+            if source_day:
+                out['date'] = source_day
+                out['_verifiedChipDate'] = source_day
 
     marg = snap_margn(tdate)
     if marg and clean in marg:
