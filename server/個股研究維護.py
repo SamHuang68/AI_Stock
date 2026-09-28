@@ -15,6 +15,7 @@ import signal_stats_pool as pool
 import stock_signals as ss
 from atomic_store import atomic_write_json, load_json
 import 每日個股留存 as daily
+from 台股交易參考 import session, instrument
 
 ROOT = Path(__file__).resolve().parents[1]
 JOB = 'stock-research-maintenance'
@@ -33,10 +34,15 @@ def inventory():
         rows = conn.execute("SELECT symbol,max(ts) FROM bars WHERE market='TW' GROUP BY symbol").fetchall()
     latest = benchmark[-1]['date'] if benchmark else None
     eligible = [(s, ss.bar_date(ts)) for s, ts in rows if pool._TICKER_RE['TW'].match(s)]
+    today = datetime.now(ss._TZ['TW']).date().isoformat()
+    known = [{**instrument(s, today), 'localAsOf': day,
+              'sourceDateConflict': day >= instrument(s, today)['stopDate']}
+             for s, day in eligible if instrument(s, today)]
     return {'benchmarkAsOf': latest, 'symbols': len(eligible),
             'alignedSymbols': sum(day == latest for _, day in eligible) if latest else 0,
             'olderSymbols': sum(day < latest for _, day in eligible) if latest else None,
-            'note': '依本機指數已知交易日比較；不代表已核對官方休市表。'}
+            'calendar': session(today), 'knownInactive': known,
+            'note': '對齊數保留全部本機股票；已知終止交易另列，不當成一般資料延遲。日曆不涵蓋臨時休市。'}
 
 
 def status():

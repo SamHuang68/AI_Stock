@@ -2,6 +2,7 @@
 from datetime import datetime
 
 import stock_signals as ss
+from 台股交易參考 import session, instrument
 
 
 def assess(result, benchmark, pooled=None, now=None):
@@ -38,10 +39,15 @@ def assess(result, benchmark, pooled=None, now=None):
     if result.get('session', {}).get('provisional'):
         notes.append('今日事件含盤中暫定值，收盤後才能確認。')
     if latest != today:
-        notes.append('以本機已知交易日核對；今日是否休市或來源尚未更新，尚無完整證據。')
+        calendar = session(today) if result.get('market') == 'TW' else None
+        notes.append(calendar['reason'] if calendar and calendar['status'] == 'closed' else
+                     '以本機已知交易日核對；當日日線尚未確認，不能只憑平日推定缺資料。')
+    lifecycle = instrument(result.get('symbol'), today) if result.get('market') == 'TW' else None
+    if lifecycle:
+        notes.append(lifecycle['label'] + '；自 ' + lifecycle['stopDate'] + ' 起不作可交易訊號，原始歷史保留。')
     if result.get('dataWarning'):
         notes.append(result['dataWarning'])
-    status = 'attention' if any(r['status'] in ('missing', 'stale', 'unknown') for r in rows) else 'aligned'
+    status = 'attention' if lifecycle or any(r['status'] in ('missing', 'stale', 'unknown') for r in rows) else 'aligned'
     return {'status': status, 'referenceSession': latest, 'checkedAt': now.isoformat(),
             'label': '資料需留意' if status == 'attention' else '與已知交易日對齊',
-            'items': rows, 'notes': notes, 'changesSignal': False}
+            'items': rows, 'notes': notes, 'instrument': lifecycle, 'changesSignal': False}

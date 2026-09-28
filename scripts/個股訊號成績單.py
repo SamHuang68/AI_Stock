@@ -23,6 +23,7 @@ from atomic_store import atomic_write_json, atomic_write_text
 SOURCE_FILES = ['server/' + p for p in ['indicators.py', 'stock_signals.py', '個股訊號研究.py',
                 '個股訊號帳本.py', '個股還原研究.py', 'signal_stats_pool.py', 'datastore.py', 'atomic_store.py']]
 SOURCE_FILES.append('scripts/個股訊號成績單.py')
+SOURCE_FILES.extend(['server/台股交易參考.py', 'server/台股交易參考.json'])
 
 
 def engine_digest():

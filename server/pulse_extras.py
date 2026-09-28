@@ -16,7 +16,7 @@ import os
 import sys
 import time
 import urllib.request
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
@@ -337,19 +337,24 @@ def fetch_nhnl_sample(ttl: float = 3600) -> Optional[Dict[str, Any]]:
     if hit is not None:
         return hit
 
+    import datastore
+    from stock_signals import normalize_bars, _TZ
     rows_map: Dict[str, List[float]] = {}
-    db_path = os.path.join(_BASE, 'data', 'market.db')
+    dates_map = {}
+    now = datetime.now(_TZ['TW'])
+    def finalized(raw):
+        return [b for b in normalize_bars(raw) if b['date'] < now.date().isoformat() or
+                (b['date'] == now.date().isoformat() and now.hour >= 14)]
+    db_path = datastore.DB_PATH
     if os.path.isfile(db_path):
         try:
-            import sqlite3
-            with sqlite3.connect(db_path, timeout=5) as con:
-                for code in _NHNL_UNIVERSE:
-                    bars = con.execute(
-                        'SELECT close FROM bars WHERE symbol=? AND market=? ORDER BY ts ASC',
-                        (code, 'TW')).fetchall()
-                    closes = [float(r[0]) for r in bars if r and r[0] is not None]
+            with datastore.read_snapshot() as con:
+                for code, bars in datastore.get_bars_bulk(_NHNL_UNIVERSE, connection=con).items():
+                    normalized = finalized(bars)
+                    closes = [b['close'] for b in normalized]
                     if len(closes) >= NHNL_MIN_BARS:
                         rows_map[code] = closes
+                        dates_map[code] = normalized[-1]['date']
         except Exception as e:
             print('[pulse-extras] nhnl db', type(e).__name__, e)
 
@@ -360,38 +365,36 @@ def fetch_nhnl_sample(ttl: float = 3600) -> Optional[Dict[str, Any]]:
         deadline = Deadline(NHNL_YAHOO_BUDGET)
 
         def _one(code: str):
-            """直連 Yahoo chart，避免 import server 造成循環依賴。"""
-            for host in ('query1', 'query2'):
-                if deadline.expired():
-                    return code, None
-                # 2y 確保交易日 ≥250；不足仍排除，不冒充 250 日
-                url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{code}.TW?range=2y&interval=1d'
-                try:
-                    j = _http_json(url, timeout=min(6.0, max(0.25, deadline.remaining())))
-                    res = (j.get('chart') or {}).get('result') or []
-                    if not res:
-                        continue
-                    cls = ((res[0].get('indicators') or {}).get('quote') or [{}])[0].get('close') or []
-                    closes = [float(x) for x in cls if x is not None]
-                    # 鐵律：不足 250 根不得冒充 250 日新高／新低
-                    return code, closes if len(closes) >= NHNL_MIN_BARS else None
-                except Exception as e:
-                    print('[pulse-extras] nhnl yahoo', code, host, type(e).__name__)
-            return code, None
+            """共用行情解析、市場別回退及總預算，不再維護第二套 Yahoo 路徑。"""
+            try:
+                bars = datastore.fetch_yahoo_daily(code, 'TW', '2y', retries=1, deadline=deadline)
+                normalized = finalized(bars)
+                closes = [b['close'] for b in normalized]
+                return code, closes if len(closes) >= NHNL_MIN_BARS else None, normalized[-1]['date'] if normalized else None
+            except Exception as e:
+                print('[pulse-extras] nhnl yahoo', code, type(e).__name__)
+            return code, None, None
 
         jobs = {code: _NHNL_EXECUTOR.submit(_one, code) for code in need[:36]}
         results, outcomes = collect_named(
             jobs, timeout=deadline.remaining(), executor=_NHNL_EXECUTOR)
         for code, item in results.items():
-            result_code, closes = item
+            result_code, closes, as_of = item
             if closes:
                 rows_map[result_code or code] = closes
+                dates_map[result_code or code] = as_of
         if any(value != 'ok' for value in outcomes.values()):
             print('[pulse-extras] nhnl bounded outcomes', outcomes)
 
+    as_of = max(dates_map.values(), default=None)
+    # 不把不同截止日混成同一日廣度，也不以請求日期冒充行情日。
+    rows_map = {code: closes for code, closes in rows_map.items() if dates_map[code] == as_of}
     out = count_nhnl(rows_map)
     if out:
+        out['date'] = as_of
         out['source'] = source
+        out['requestedSymbols'] = len(_NHNL_UNIVERSE)
+        out['excludedSymbols'] = [c for c in _NHNL_UNIVERSE if c not in rows_map]
         _cache_set(ck, out)
     return out
 

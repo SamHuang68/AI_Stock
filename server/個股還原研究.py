@@ -41,18 +41,62 @@ def load_snapshot(connection, symbol, market='TW'):
         return None
     row = connection.execute(f'SELECT payload FROM {TABLE} WHERE market=? AND symbol=? '
                              'ORDER BY fetched_at DESC LIMIT 1', (market, symbol)).fetchone()
-    return json.loads(row[0]) if row else None
+    if not row:
+        return None
+    payload = json.loads(row[0])
+    payload['symbol'] = symbol
+    return payload
+
+
+def _split_events(snapshot):
+    """只使用明示的公司行動；不從價差反推分割比率。"""
+    events = {}
+    for event in ((snapshot or {}).get('events', {}).get('splits') or {}).values():
+        try:
+            ratio = float(event['numerator']) / float(event['denominator'])
+            day = ss.bar_date(event['date'])
+            if day and math.isfinite(ratio) and ratio > 0:
+                events[day] = {'date': day, 'ratio': ratio, 'source': snapshot.get('source')}
+        except (ValueError, TypeError, KeyError, ZeroDivisionError):
+            continue
+    from 台股交易參考 import split_references
+    for event in split_references((snapshot or {}).get('symbol')):
+        # 不覆蓋供應商同日事件；若兩者不一致，保留待核對。
+        if event['date'] not in events:
+            events[event['date']] = event
+    through = max((r['date'] for r in (snapshot or {}).get('rows', [])), default='')
+    return sorted((e for e in events.values() if e['date'] <= through), key=lambda e: e['date'], reverse=True)
+
+
+def _basis_match(bar, row, events):
+    if math.isclose(row['rawClose'], bar['close'], rel_tol=.0001, abs_tol=.005):
+        return 1.0, []
+    ratio, used = 1.0, []
+    for event in events:
+        if event['date'] <= bar['date']:
+            break
+        ratio *= event['ratio']
+        used.append(event)
+        if math.isclose(bar['close'] / ratio, row['rawClose'], rel_tol=.0001, abs_tol=.005):
+            return ratio, list(used)
+    return None, []
 
 
 def adjusted_bars(bars, snapshot):
     """完整且相容才接納，不能因缺日壓縮事件天數。"""
     values = {r['date']: r for r in (snapshot or {}).get('rows', [])}
+    events = _split_events(snapshot)
+    from 台股交易參考 import instrument
+    lifecycle = instrument((snapshot or {}).get('symbol'))
+    if lifecycle and any(b['date'] >= lifecycle['stopDate'] for b in bars):
+        return None
     out = []
     for b in bars:
         r = values.get(b['date'])
-        if not r or not math.isclose(r['rawClose'], b['close'], rel_tol=0.0001, abs_tol=0.005):
+        if not r or _basis_match(b, r, events)[0] is None:
             return None
-        factor = r['adjClose'] / r['rawClose']
+        # 本機舊日線可能尚未納入較新的分割；先驗證事件與原價，再直接轉到同一還原基準。
+        factor = r['adjClose'] / b['close']
         if not math.isfinite(factor) or factor <= 0:
             return None
         out.append({**b, **{key: b[key] * factor for key in ('open', 'high', 'low', 'close')}})
@@ -63,17 +107,33 @@ def alignment_issues(bars, snapshot):
     """保留未接納原因；來源取得成功不等於與既有原價相容。"""
     if not snapshot:
         return {'status': 'missing_snapshot', 'label': '尚無來源快照', 'missingDates': [], 'priceMismatches': []}
+    from 台股交易參考 import instrument, references
+    lifecycle = instrument(snapshot.get('symbol'))
+    invalid_dates = [b['date'] for b in bars if lifecycle and b['date'] >= lifecycle['stopDate']]
     values = {r['date']: r for r in snapshot.get('rows', [])}
-    missing, mismatches = [], []
+    events = _split_events(snapshot)
+    missing, mismatches, conversions = [], [], {}
     for bar in bars:
         row = values.get(bar['date'])
         if not row:
             missing.append(bar['date'])
-        elif not math.isclose(row['rawClose'], bar['close'], rel_tol=0.0001, abs_tol=0.005):
-            mismatches.append({'date': bar['date'], 'localClose': bar['close'], 'sourceClose': row['rawClose']})
-    return {'status': 'incompatible' if missing or mismatches else 'aligned',
-            'label': '來源缺日或與本機原價不一致' if missing or mismatches else '完整相容',
+        else:
+            ratio, used = _basis_match(bar, row, events)
+            if ratio is None:
+                mismatches.append({'date': bar['date'], 'localClose': bar['close'], 'sourceClose': row['rawClose']})
+            elif ratio != 1:
+                key = tuple(e['date'] for e in used)
+                group = conversions.setdefault(key, {'from': bar['date'], 'to': bar['date'], 'bars': 0,
+                    'ratio': ratio, 'events': used})
+                group['to'] = bar['date']
+                group['bars'] += 1
+    return {'status': 'incompatible' if missing or mismatches or invalid_dates else 'aligned',
+            'label': '終止交易後仍有價格列，保留原始資料並排除研究' if invalid_dates else
+                     ('來源缺日或與本機原價不一致' if missing or mismatches else '完整相容'),
+            'invalidTradeDates': invalid_dates, 'instrument': lifecycle,
+            'verifiedFindings': references().get('sourceFindings', {}).get(snapshot.get('symbol'), []),
             'missingDates': missing, 'priceMismatches': mismatches,
+            'basisConversions': list(conversions.values()),
             'fetchedAt': snapshot.get('fetchedAt'), 'source': snapshot.get('source')}
 
 
@@ -109,6 +169,7 @@ class Sensitivity:
             return
         self.covered.append({'symbol': symbol, 'from': bars[0]['date'], 'to': bars[-1]['date'],
                              'fetchedAt': snapshot['fetchedAt'],
+                             'basisConversions': alignment_issues(bars, snapshot)['basisConversions'],
                              'dividends': len(snapshot['events'].get('dividends') or {}),
                              'splits': len(snapshot['events'].get('splits') or {})})
         raw, adj = ss.build_frame(bars, chips), ss.build_frame(adjusted, chips)
@@ -141,13 +202,15 @@ class Sensitivity:
                     'costScenarios': [{'roundTripBps': cost, **summary([net_return(v, cost) for v in row['adjusted']])}
                                       for cost in COSTS]})
             signals.append({'signalId': spec['id'], 'label': spec['label'], 'horizons': horizons})
-        return {'version': 'st-price-sensitivity/v1', 'covered': self.covered, 'missingSymbols': self.missing,
+        return {'version': 'st-price-sensitivity/v2', 'covered': self.covered, 'missingSymbols': self.missing,
                 'missingDetails': self.missing_details,
                 'snapshotSymbols': len(self.covered) + sum(d['status'] != 'missing_snapshot' for d in self.missing_details),
                 'coveredSymbols': len(self.covered), 'totalSymbols': len(self.covered) + len(self.missing),
+                'reconciledSymbols': sum(bool(r['basisConversions']) for r in self.covered),
                 'status': 'available' if self.covered else 'missing', 'signals': signals,
                 'method': '原價與供應商還原快照各用同一引擎，次日收盤起算；成本於進出各計往返假設的一半。',
                 'limitations': ['目前重編的還原價格不是歷史點時資料；不改寫原始價格與既有候選。',
+                                '公司行動只用於驗證本機與供應商的價格基準；逐日對得上才轉換，原始差異與來源快照仍保留。',
                                 '只分析完整覆蓋的股票；覆蓋不足不可外推全市場。',
                                 '供應商原價可能已處理股票分割；此處比較供應商 quote 與 adjclose，不重複套用分割。',
                                 '成本是 0／20／50／100 基點的假設；未模擬撮合、稅制、最低手續費與漲跌停成交。']}

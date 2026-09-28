@@ -428,7 +428,8 @@
       '<div class="sh5-foot">' + esc(p.method || '') + '<br>' + (p.limitations || []).map(esc).join('<br>') + '</div>';
     var detail = '<details><summary>完整覆蓋與未接納原因</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
       esc(JSON.stringify({ covered: p.covered, missingSymbols: p.missingSymbols, missingDetails: p.missingDetails }, null, 2)) + '</pre></details>';
-    if (p.snapshotSymbols != null) html += '<div class="sh5-foot">已取得來源快照 ' + esc(p.snapshotSymbols) + ' 檔；僅完整且與本機原價相容的資料納入比較。</div>';
+    if (p.snapshotSymbols != null) html += '<div class="sh5-foot">已取得來源快照 ' + esc(p.snapshotSymbols) + ' 檔；僅完整且與本機原價相容的資料納入比較。' +
+      '其中 ' + esc(p.reconciledSymbols || 0) + ' 檔經明示分割／配股事件逐日核對價格基準；原始行情與差異證據保留，轉換期間及來源可展開查閱。</div>';
     if (p.status !== 'available') return html + '<div class="sh5-warn">尚無完整且相容的還原快照。缺值不當成無除權息；缺日與價差詳見下方。</div>' + detail + '</details>';
     html += '<div class="sh5-table-scroll" role="region" tabindex="0" aria-label="除權息與成本比較，可左右捲動"><table class="sh5-tbl"><thead><tr>' +
       '<th>訊號／天數</th><th>原價／還原事件</th><th>共同事件</th><th>共同原價中位數</th><th>共同還原中位數</th><th>還原後成本情境中位數</th></tr></thead><tbody>';
@@ -443,10 +444,15 @@
 
   function maintenanceHtml(p) {
     var j = p.job || {}, o = p.observations || {}, i = p.inventory || {};
-    var names = { running: '執行中', queued: '排隊中', completed: '已完成', partial: '部分完成', failed: '失敗', interrupted: '已中斷', waiting: '等待資料', disabled: '未啟用' };
+    var names = { running: '執行中', queued: '排隊中', completed: '已完成', partial: '部分完成', failed: '失敗', interrupted: '已中斷', waiting: '等待資料', closed: '休市', disabled: '未啟用' };
     var html = '<div role="status" aria-live="polite" class="sh5-foot">' + esc(p.running ? '研究工作執行中' : (names[j.status] || '尚未執行')) +
       ' · ' + esc(j.message || '') + '<br>大盤至 ' + esc(i.benchmarkAsOf || '未知') + '；個股對齊 ' + esc(i.alignedSymbols || 0) + '／' + esc(i.symbols || 0) + ' 檔。' +
       '<br>' + esc(i.note || '') + '<br>預設只重算本機資料；不呼叫模型或傳送通知。</div>';
+    if (i.calendar) html += '<div class="sh5-foot">交易日判定：' + esc(i.calendar.reason) + '</div>';
+    if ((i.knownInactive || []).length) html += '<details><summary>已核對的終止交易與來源日期異常（原始資料保留）</summary><div class="sh5-foot">' +
+      i.knownInactive.map(function (r) { return esc(r.symbol + '：' + r.label + '；停止交易起日 ' + r.stopDate + '；本機資料至 ' + r.localAsOf +
+        (r.sourceDateConflict ? '。存在停止交易後的來源列，需留意，未納入還原比較。' : '。')) +
+        ' <a href="' + esc(r.source) + '" target="_blank" rel="noopener noreferrer">公告依據</a>'; }).join('<br>') + '</div></details>';
     html += '<ol class="sh5-foot">' + (j.steps || []).map(function (s) { return '<li>' + esc(s.label) + '：' + esc(names[s.status] || s.status) +
       (s.detail && s.detail.reason ? '；' + esc(s.detail.reason) : '') + (s.error ? '（' + esc(s.error) + '）' : '') + '</li>'; }).join('') + '</ol>';
     html += '<div class="sh5-foot">每日事件留存：' + (o.enabled ? '已啟用，主機運行時收盤後檢查' : '尚未啟用') +

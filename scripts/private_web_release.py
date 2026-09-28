@@ -27,6 +27,8 @@ REQUIRED_RELEASE_FILES = {
     "START_PRIVATE_WEB_HOST.cmd",
     "STOP_PRIVATE_WEB.cmd",
     "server/server.py",
+    "server/台股交易參考.py",
+    "server/台股交易參考.json",
     "server/ai_local.py",
     "server/ai_routes.py",
     "server/overnight_intraday.py",

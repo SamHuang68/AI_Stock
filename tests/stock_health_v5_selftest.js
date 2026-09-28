@@ -26,6 +26,12 @@ const maintenanceMarkup = H.maintenanceHtml({ running: false, job: {status:'fail
   observations: {enabled:true,events:0,outcomes:0}, inventory: {symbols:100,alignedSymbols:80} });
 if (!maintenanceMarkup.includes('失敗') || !maintenanceMarkup.includes('80／100') || !maintenanceMarkup.includes('0 個事件')) throw new Error('維護失敗或真實空狀態錯誤');
 const adjustmentMarkup = H.sensitivityHtml({status:'missing',coveredSymbols:0,totalSymbols:100,limitations:[]});
+const closedMarkup = H.maintenanceHtml({job:{},observations:{enabled:true,lastRun:{asOf:'2026-09-28',reason:'官方公告休市：教師節'}},
+  inventory:{calendar:{reason:'官方公告休市：教師節'},knownInactive:[{symbol:'5371',label:'股份轉換<script>',stopDate:'2026-08-24',
+    localAsOf:'2026-09-03',sourceDateConflict:true,source:'https://www.tpex.org.tw/'}]}});
+if (!closedMarkup.includes('教師節') || !closedMarkup.includes('未納入還原比較') || closedMarkup.includes('<script>')) throw new Error('休市與終止交易必須可見且安全跳脫');
+const reconciledMarkup = H.sensitivityHtml({status:'missing',snapshotSymbols:100,reconciledSymbols:72,limitations:[]});
+if (!reconciledMarkup.includes('72 檔經明示分割') || !reconciledMarkup.includes('原始行情與差異證據保留')) throw new Error('價格基準轉換必須揭露');
 if (!adjustmentMarkup.includes('缺值不當成無除權息') || !adjustmentMarkup.includes('0／100')) throw new Error('缺還原資料必須明示');
 const mismatchMarkup = H.sensitivityHtml({status:'missing',coveredSymbols:0,totalSymbols:1,snapshotSymbols:1,
   limitations:[],missingSymbols:['2330'],missingDetails:[{symbol:'2330',label:'原價不一致<script>',priceMismatches:[{date:'2024-03-29'}]}]});

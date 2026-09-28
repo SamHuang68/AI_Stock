@@ -8,13 +8,15 @@ from datetime import datetime
 from pathlib import Path
 
 import stock_signals as ss
+from 台股交易參考 import session, instrument
 from 個股訊號研究 import digest
 
 
 def engine_digest():
     root = Path(__file__).parent
     return digest({name: hashlib.sha256((root / name).read_bytes()).hexdigest()
-                   for name in ('stock_signals.py', 'indicators.py')})
+                   for name in ('stock_signals.py', 'indicators.py', '每日個股留存.py',
+                                '台股交易參考.py', '台股交易參考.json')})
 
 
 def encoded(value):
@@ -67,6 +69,7 @@ def capture(path, series, benchmark, chips=None, now=None):
     if not cfg['enabled']:
         return {'status': 'disabled', 'reason': '每日留存尚未啟用'}
     today, stamp = now.date().isoformat(), now.isoformat()
+    calendar = session(today)
     finalized = (now.hour, now.minute) >= (14, 0)
     benchmark = [b for b in benchmark if b['date'] < today or (finalized and b['date'] == today)]
     sessions = sorted({b['date'] for b in benchmark})
@@ -74,16 +77,27 @@ def capture(path, series, benchmark, chips=None, now=None):
               'asOf': stamp, 'sessionDate': today, 'historicalBackfill': False,
               'status': 'completed' if finalized and today in sessions else 'waiting',
               'reason': '以當日已收盤資料留存' if finalized and today in sessions else '等待當日收盤與大盤資料'}
+    counts['calendar'] = calendar
+    counts['excludedInstruments'] = []
+    can_capture = finalized and today in sessions and calendar['status'] != 'closed'
+    if calendar['status'] == 'closed':
+        counts.update(status='closed', reason=calendar['reason'] + '；不要求當日日線')
+    elif not finalized:
+        counts.update(status='waiting', reason='尚未到收盤留存時間；14:00 後檢查當日日線')
     version = engine_digest()
     activated = datetime.fromisoformat(cfg['activatedAt']).astimezone(ss._TZ['TW']).date().isoformat()
     with closing(sqlite3.connect(path, timeout=30)) as conn, conn:
         for symbol, raw in series:
             bars = [b for b in raw if b['date'] < today or (finalized and b['date'] == today)]
+            lifecycle = instrument(symbol, today)
+            if lifecycle:
+                counts['excludedInstruments'].append(lifecycle)
+                bars = [b for b in bars if b['date'] < lifecycle['stopDate']]
             counts['scanned'] += 1
             if len(bars) < ss.MIN_BARS:
                 continue
             input_id = digest([version, symbol, today])
-            if (bars[-1]['date'] == today and today in sessions and today > activated):
+            if (can_capture and bars[-1]['date'] == today and today > activated):
                 counts['currentSymbols'] += 1
                 if not conn.execute('SELECT 1 FROM daily_inputs WHERE symbol=? AND session_date=?', (symbol, today)).fetchone():
                     stock_chips = [c for c in (chips or {}).get(symbol, []) if c['date'] <= today]
@@ -129,9 +143,9 @@ def capture(path, series, benchmark, chips=None, now=None):
                     cur = conn.execute('INSERT OR IGNORE INTO daily_outcomes VALUES(?,?,?,?)',
                                        (event_id, hz, stamp, encoded(out)))
                     counts['outcomesAdded'] += cur.rowcount
-        if finalized and today in sessions and today <= activated:
+        if can_capture and today <= activated:
             counts.update(status='waiting', reason='啟用當日不回填；由下一個交易日開始留存')
-        elif finalized and today in sessions and counts['currentSymbols'] == 0:
+        elif can_capture and counts['currentSymbols'] == 0:
             counts.update(status='waiting', reason='大盤已更新，個股當日日線尚未到齊')
         conn.execute('INSERT OR IGNORE INTO daily_runs VALUES(?,?)', (stamp, encoded(counts)))
     return counts

@@ -156,12 +156,14 @@ def _yf_symbol(sym, market):
         return sym
     return sym + '.TW' if market == 'TW' else sym
 
-def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False, start_ts=None):
+def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False, start_ts=None, deadline=None):
     """自 Yahoo v8 chart API 抓日線(query1/query2 雙端點 + 限流退避重試)。"""
     ysym = _yf_symbol(sym, market)
     last = None
     for attempt in range(retries):
         for host in ('query1', 'query2'):
+            if deadline is not None and deadline.expired():
+                raise TimeoutError('行情取得已超過本次時間預算')
             period = (f'period1={int(start_ts)}&period2={int(time.time())}'
                       if start_ts is not None else f'range={rng}')
             url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{ysym}?{period}&interval=1d'
@@ -169,7 +171,8 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False,
                 url += '&events=div%2Csplits'
             try:
                 req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=20) as r:
+                timeout = min(20, deadline.remaining()) if deadline is not None else 20
+                with urllib.request.urlopen(req, timeout=max(.05, timeout)) as r:
                     j = json.load(r)
                 res = j['chart']['result'][0]
                 granularity = (res.get('meta') or {}).get('dataGranularity')
@@ -205,15 +208,18 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False,
                     e.close()
                 except (OSError, ValueError):
                     pass
-                if with_research and market == 'TW' and e.code == 404 and ysym.endswith('.TW'):
+                if market == 'TW' and e.code == 404 and ysym.endswith('.TW'):
                     return fetch_yahoo_daily(sym.removesuffix('.TW') + '.TWO', market, rng, retries,
-                                             with_research=True, start_ts=start_ts)
+                                             with_research=with_research, start_ts=start_ts, deadline=deadline)
                 if e.code == 429:        # 被限流 → 兩端點都跳過,退避後整體重試
                     break
             except Exception as e:
                 last = e
         if attempt < retries - 1:
-            time.sleep(min(8, 0.8 * (2 ** attempt)) + random.random())   # 指數退避 + 抖動
+            delay = min(8, 0.8 * (2 ** attempt)) + random.random()
+            if deadline is not None:
+                delay = min(delay, deadline.remaining())
+            time.sleep(delay)   # 指數退避 + 抖動，仍受呼叫端總預算約束
     raise RuntimeError(f'fetch failed for {ysym}: {last}')
 
 def upsert_bars(sym, market, rows):
