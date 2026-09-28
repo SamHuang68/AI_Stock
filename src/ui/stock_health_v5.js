@@ -112,6 +112,7 @@
       '.sh5-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:10.5px;color:var(--tlo)}' +
       '.sh5-row select,.sh5-btn{background:rgba(15,23,42,.8);color:var(--thi);border:1px solid var(--border,#22324a);border-radius:6px;font:700 10.5px "Noto Sans TC",sans-serif;padding:3px 8px;cursor:pointer}' +
       '.sh5-btn.primary{border-color:rgba(251,191,36,.5);color:var(--gold,#fbbf24)}' +
+      '#sh5-schedule-save{min-height:44px;font-size:13px}.sh5-schedule-control{display:flex;align-items:center;gap:8px;min-height:44px;font-size:13px}.sh5-schedule-control input{flex-shrink:0}' +
       '.sh5-ai{margin-top:8px;font-size:12px;line-height:1.7;color:#e2e8f0;padding:8px 10px;border-radius:8px;border:1px solid rgba(165,180,252,.3);background:rgba(99,102,241,.08)}' +
       '.sh5-ai .cite{font:700 8.5px "JetBrains Mono",monospace;color:#a5b4fc;margin-left:3px}' +
       '.sh5-warn{color:#fbbf24;font-size:10.5px;margin-top:4px}' +
@@ -468,7 +469,7 @@
     if (p.sourceRevisions && p.sourceRevisions.count) html += '<div class="sh5-warn">來源修訂 ' + esc(p.sourceRevisions.count) + ' 筆、涉及 ' +
       esc(p.sourceRevisions.symbols) + ' 檔；首次日線保留，衝突另存，尚未自動採用。</div>';
     var schedule = p.schedule || {};
-    html += '<div class="sh5-foot"><label><input type="checkbox" id="sh5-schedule-enable"' + (schedule.enabled ? ' checked' : '') +
+    html += '<div class="sh5-foot"><label class="sh5-schedule-control"><input type="checkbox" id="sh5-schedule-enable"' + (schedule.enabled ? ' checked' : '') +
       '> 持續授權盤後自動更新：TWSE／TPEx 日線及法人、Yahoo 大盤</label><br>交易日 18:30 更新，19:30／20:30 只重試未完成來源；需主機運行。僅傳日期與代號，不上傳帳本、不呼叫模型，無已知 API 費用；取消並儲存可停用。</div>' +
       '<button class="sh5-btn" id="sh5-schedule-save">儲存每日更新設定</button>';
     if (schedule.lastSources && schedule.lastSources.sources) html += '<details><summary>每日來源實際執行紀錄</summary><div class="sh5-foot">' +
