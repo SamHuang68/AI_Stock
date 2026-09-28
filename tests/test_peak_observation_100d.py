@@ -177,7 +177,7 @@ class PeakObservation100dEvidencePackTests(unittest.TestCase):
     def test_evidence_pack_attaches_peak_100d_when_flag_on(self):
         pack = self._pr.build_evidence_pack(
             '2330',
-            include={'quotes': True},
+            include={'quotes': True, 'chips': False},
             now=datetime.now(self._pr.TZ_TPE).replace(hour=15, minute=5, second=0, microsecond=0),
         )
         self.assertIn('peakObservation100d', pack)
