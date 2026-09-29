@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import threading
+import uuid
 from urllib.parse import parse_qs, urlparse
 
 import etf_api
@@ -49,14 +50,22 @@ class EtfRoutesMixin:
             etf_api._tracker_state.update({
                 'running': True, 'startedAt': __import__('time').time(),
                 'finishedAt': None, 'lastReturnCode': None, 'lastOutput': '',
+                'runId': uuid.uuid4().hex, 'report': None,
             })
         t = threading.Thread(target=etf_api._run_tracker_async, daemon=True)
         t.start()
-        self._ok(json.dumps({'ok': True, 'started': True}).encode())
+        self._ok(json.dumps({'ok': True, 'started': True, 'runId': etf_api._tracker_state['runId']}).encode())
 
     def _handle_tracker_status(self):
         with etf_api._tracker_lock:
             state = dict(etf_api._tracker_state)
+        if not state.get('runId'):
+            report = etf_api.tracker_diagnostics.latest_report()
+            if report:
+                state.update(runId=report['runId'], report=report,
+                             startedAt=report['startedAt'], finishedAt=report['finishedAt'],
+                             lastDuration=report['durationSeconds'],
+                             lastReturnCode=0 if report['accepted'] else report.get('errorCode', 2))
         self._ok(json.dumps(state, ensure_ascii=False).encode())
 
     def _handle_etf_delta(self):

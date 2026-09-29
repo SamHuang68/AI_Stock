@@ -26,6 +26,7 @@ function response(status, body, headers = {}) {
 }
 
 const deltaQueue = [];
+const moduleClicks = [];
 const emptyElement = () => ({
   id: '', style: {}, dataset: {}, classList: {add(){}, remove(){}, toggle(){}},
   setAttribute(){}, addEventListener(){}, appendChild(){}, querySelector(){return null;},
@@ -34,7 +35,7 @@ const emptyElement = () => ({
 const document = {
   head: { appendChild(){} }, body: { appendChild(){} },
   getElementById(){ return null; }, createElement: emptyElement,
-  addEventListener(){}, querySelectorAll(){ return []; },
+  addEventListener(type, handler){ if(type === 'click') moduleClicks.push(handler); }, querySelectorAll(){ return []; },
 };
 const sandbox = {
   console, document, SERVER: 'http://st.test',
@@ -248,6 +249,56 @@ async function main() {
   flow = sandbox.EtfFlow.getStockFlow('2330');
   ok(flow.available && flow.unchanged && flow.freshness === 'stale',
     'fresh response distinguishes no-change from missing and keeps server freshness');
+
+  const uncomparable = {...first, etfs:[{code:'00992A',new:[],removed:[],changed:[],
+    comparison:{state:'current_missing',message:'本期來源缺漏'},
+    previousTop10:[{code:'2330',name:'台積電',weight:20}]}]};
+  deltaQueue.push(response(200, uncomparable));
+  await sandbox.etfV3FetchDelta();
+  flow = sandbox.EtfFlow.getStockFlow('2330');
+  ok(!flow.available && !flow.unchanged && flow.rmCount === 0,
+    '來源缺漏不能顯示無異動或出清');
+  const indicator = emptyElement();
+  const originalLookup = document.getElementById;
+  document.getElementById = id => id === 'ig-etfFlow' ? indicator : null;
+  sandbox.S.etfV3.delta = {...uncomparable, etfs:[...uncomparable.etfs,
+    {code:'0050',new:[],removed:[],changed:[],comparison:{state:'comparable'}}]};
+  sandbox.updateEtfFlowIndV3();
+  ok(indicator.textContent === '部分資料待比較', '部分缺漏的指標不能顯示本期無異動');
+  document.getElementById = originalLookup;
+  sandbox.S.etfV3.delta = uncomparable;
+  sandbox.S.etfV3.expanded.add('00992A');
+  const missingMarkup = sandbox.renderEtfV3();
+  ok(missingMarkup.includes('待比較') && missingMarkup.includes('前期留存（本期缺漏）'),
+    '來源缺漏保留前期明細並標示日期界線');
+  const assets = {...first, etfs:[{code:'00992A',new:[],removed:[],changed:[],
+    top10:[{code:'asset:202611 黃豆期貨',name:'202611 黃豆期貨',market:'ASSET',
+      instrumentType:'named_asset',weight:100.03,shares:732}]}]};
+  deltaQueue.push(response(200, assets));
+  await sandbox.etfV3FetchDelta();
+  const assetMarkup = sandbox.renderEtfV3();
+  ok(assetMarkup.includes('202611 黃豆期貨') && assetMarkup.includes('非股票部位') &&
+      !assetMarkup.includes('data-sym="asset:'), '期貨部位可見且不冒充股票 K 線');
+  const changedAsset = {...assets.etfs[0], comparison:{state:'comparable'},
+    changed:[{code:'asset:202611 黃豆期貨',name:'202611 黃豆期貨',market:'ASSET',
+      instrumentType:'named_asset',shares_delta:10,delta:1}]};
+  sandbox.S.etfV3.deltaRaw = {...assets, etfs:[changedAsset]};
+  let modalHtml = '';
+  document.body.appendChild = element => { modalHtml = element.innerHTML || ''; };
+  for (const handler of moduleClicks) handler({preventDefault(){},target:{
+    closest(selector){ return selector === '[data-e3]' ? {dataset:{e3:'report'}} : null; }}});
+  ok(modalHtml.includes('202611 黃豆期貨') && modalHtml.includes('不納入個股共識分數') &&
+      !modalHtml.includes('data-sym="asset:') && !modalHtml.includes('class="e3-volpct"'),
+      '下一期非股票異動保留明細但不能觸發股票共識、日均量及載圖');
+  let chartLoads = 0;
+  sandbox.loadSym = () => { chartLoads++; };
+  for (const handler of moduleClicks) handler({preventDefault(){},target:{closest(selector){
+    return selector === '[data-e3m]' ? {dataset:{e3m:'load',sym:'asset:202611 黃豆期貨',mkt:'ASSET'}} : null; }}});
+  ok(chartLoads === 0, '報表載圖入口再次阻擋非股票代號');
+  const summary = sandbox.EtfFlow.trackerSummary({lastReturnCode:0,report:{accepted:true,
+    succeededCount:85,expectedCount:130,failedCodes:['測試缺漏'],acceptance:{providerFreshCount:84}}});
+  ok(summary.includes('部分來源缺漏') && summary.includes('85/130') && summary.includes('84 檔'),
+    '更新成功與全觀測池完整性分開揭露');
 
   const legacy = {...first, date:'2026-08-10', meta:undefined};
   deltaQueue.push(response(200, legacy));

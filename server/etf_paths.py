@@ -27,6 +27,8 @@ import uuid
 from pathlib import Path
 from typing import Iterable, Mapping
 
+import 台股交易參考 as trading_calendar
+
 
 ENV_HISTORY_DIR = "ST_ETF_HISTORY_DIR"
 MIN_HEALTHY_ETF_COUNT = 10
@@ -110,22 +112,34 @@ def list_snapshot_files(directory: str | os.PathLike[str] | None = None) -> list
 
 
 def business_day_age(latest: _dt.date, today: _dt.date | None = None) -> int:
-    """Count weekdays after ``latest`` through ``today``.
-
-    Friday remains fresh over a weekend; Monday is one business day old.  This
-    deliberately does not pretend to know TWSE holidays, so the two-day gate is
-    conservative without producing weekend false alarms.
-    """
+    """以共用臺股日曆計算經過日數；未知年度保守計平日，不冒稱已核對。"""
     current = today or _dt.date.today()
     if latest >= current:
         return 0
     age = 0
     cursor = latest + _dt.timedelta(days=1)
     while cursor <= current:
-        if cursor.weekday() < 5:
+        if trading_calendar.session(cursor)['status'] != 'closed':
             age += 1
         cursor += _dt.timedelta(days=1)
     return age
+
+
+def freshness_calendar(dates: Iterable[_dt.date], today: _dt.date) -> dict:
+    """揭露新鮮度所用日曆，未知年度的保守退回必須可見。"""
+    ref = trading_calendar.references()
+    year = int(ref['calendar']['year'])
+    oldest = min([today, *dates])
+    unknown = sorted(set(range(oldest.year, today.year + 1)) - {year})
+    return {
+        'basis': 'twse_calendar' if not unknown else 'twse_calendar_with_weekday_fallback',
+        'verifiedYear': year,
+        'verifiedAt': ref.get('verifiedAt'),
+        'source': ref['calendar']['source'],
+        'unknownYears': unknown,
+        'note': '已核對休市日不計入；其餘依表定交易日計算。' if not unknown
+                else '部分年度尚無官方日曆，該年度保守以平日計算，可能高估延遲。',
+    }
 
 
 def catalog_fingerprint(codes: Iterable[str]) -> str:
@@ -201,6 +215,7 @@ def snapshot_acceptance(
         "providerCoverageRatio": round(provider_coverage_ratio, 4),
         "providerFreshCount": provider_fresh_count,
         "providerFreshRatio": round(provider_fresh_ratio, 4),
+        "calendar": freshness_calendar(provider_dates, current),
     }
 
 
@@ -304,6 +319,7 @@ def history_status(
         "latestReadable": latest_valid,
         "previousReadable": previous_valid,
         "acceptance": acceptance,
+        "calendar": acceptance["calendar"],
         "problems": problems,
         "maxBusinessDays": int(max_business_days),
     }

@@ -8,10 +8,8 @@
   2) MoneyDJ Basic0007 (前十大持股)               ← fallback
   3) 台灣證券交易所 TWSE ETFortfolio              ← 最終 fallback（被動 ETF 才有）
 
-說明：MoneyDJ 只提供「最新一日」的持股快照，故 --backfill N
-      僅做為「重試 N 次」與相容介面用；歷史日累積請靠每日排程
-      （週一∼五 each weekday）。檔案以 MoneyDJ 揭露的「資料日期」存檔，
-      若同檔已存在則跳過。
+說明：MoneyDJ 只提供最新持股。檔名是收集日，每檔另存來源揭露日；
+      不支援以最新資料製造歷史回補。每日排程與手動更新共用驗收及診斷。
 
 執行方式：
   python etf_delta_tracker.py
@@ -29,6 +27,7 @@ import time
 import html
 import gzip
 import math
+import threading
 import datetime
 import urllib.error
 import urllib.parse
@@ -36,6 +35,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import etf_paths
+from ETF更新診斷 import UpdateTrace
 from atomic_store import atomic_write_json
 
 # ── ETF 下載為 I/O 工作；並行度由環境與遠端限制共同決定 ────────────
@@ -93,6 +93,13 @@ _FALLBACK_ETFS = {
 }
 
 ETFS = load_catalog()
+_request_context = threading.local()
+
+
+def _source_event(event, **fields):
+    trace = getattr(_request_context, 'trace', None)
+    if trace:
+        trace.record(event, code=getattr(_request_context, 'code', None), **fields)
 
 # ── HTTP 標頭：模擬瀏覽器，加 Accept-Encoding 自動處理 gzip ──────
 HEADERS = {
@@ -113,12 +120,16 @@ def http_get(url: str, referer: str = '') -> str | None:
     if referer:
         headers['Referer'] = referer
     for attempt in range(RETRY_TIMES):
+        started = time.monotonic()
         try:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=TIMEOUT, context=_SSL_CTX) as resp:
                 raw = resp.read()
                 if resp.headers.get('Content-Encoding') == 'gzip':
                     raw = gzip.decompress(raw)
+                _source_event('source_response', url=url, attempt=attempt + 1,
+                              status=resp.status, bytes=len(raw),
+                              elapsedMs=round((time.monotonic() - started) * 1000))
             # 嘗試多種編碼
             for enc in ('utf-8', 'big5', 'cp950', 'gbk'):
                 try:
@@ -127,10 +138,14 @@ def http_get(url: str, referer: str = '') -> str | None:
                     continue
             return raw.decode('utf-8', errors='replace')
         except urllib.error.HTTPError as e:
+            _source_event('source_error', url=url, attempt=attempt + 1, status=e.code,
+                          error=type(e).__name__)
             if e.code in (404, 410):
                 return None
             time.sleep(RETRY_DELAY)
-        except Exception:
+        except Exception as exc:
+            _source_event('source_error', url=url, attempt=attempt + 1,
+                          error=type(exc).__name__)
             time.sleep(RETRY_DELAY)
     return None
 
@@ -153,10 +168,36 @@ _MDJ_ROW_RE  = re.compile(
     r'etfid=([0-9A-Za-z]{1,7})\.([A-Z]{2})(?:&|&amp;)back=[0-9A-Za-z]+\.TW[^>]*>'
     r'\s*([^<]+?)\(\1\.\2\)\s*</a>'
     r'\s*</td>\s*'
-    r'<td[^>]*>\s*([\d.]+)\s*</td>\s*'
-    r'<td[^>]*>\s*([\d,]+)\s*</td>',
+    r'<td[^>]*>\s*([+-]?[\d.]+)\s*</td>\s*'
+    r'<td[^>]*>\s*([+-]?[\d,]+|N/A|--)\s*</td>',
     re.DOTALL
 )
+
+_MDJ_ASSET_RE = re.compile(
+    r'<td[^>]*class=["\']col05["\'][^>]*>\s*((?:(?!</td>).)+?)\s*</td>\s*'
+    r'<td[^>]*class=["\']col06["\'][^>]*>\s*([+-]?[\d.]+)\s*</td>\s*'
+    r'<td[^>]*class=["\']col07["\'][^>]*>\s*([+-]?[\d,]+|N/A|--)\s*</td>', re.DOTALL)
+
+
+def _quantity(raw):
+    return None if str(raw).strip() in ('N/A', '--', '') else int(clean_num(raw))
+
+
+def _append_named_assets(holdings, text):
+    """保留來源無股票代號的部位；名稱識別碼不能冒充可載入 K 線的股票。"""
+    seen = {item['code'] for item in holdings}
+    for match in _MDJ_ASSET_RE.finditer(text):
+        if _MDJ_ROW_RE.search(match.group(0)):
+            continue
+        name = html.unescape(re.sub(r'<[^>]*>', '', match.group(1))).strip()
+        code = 'asset:' + name
+        if code in seen or name in ('合計', '總計', '小計'):
+            continue
+        seen.add(code)
+        holdings.append({'rank': len(holdings) + 1, 'code': code, 'name': name,
+                         'market': 'ASSET', 'instrumentType': 'named_asset',
+                         'weight': round(clean_num(match.group(2)), 4),
+                         'shares': _quantity(match.group(3))})
 
 def fetch_moneydj_full(etf_id: str) -> tuple[list | None, str | None]:
     """MoneyDJ 全部持股頁；回傳 (holdings, data_date 'YYYY-MM-DD')"""
@@ -176,7 +217,7 @@ def fetch_moneydj_full(etf_id: str) -> tuple[list | None, str | None]:
         market = m.group(2).strip()
         name   = html.unescape(m.group(3)).strip()
         weight = clean_num(m.group(4))
-        shares = int(clean_num(m.group(5)))
+        shares = _quantity(m.group(5))
         key = f'{code}.{market}'
         if key in seen:
             continue
@@ -189,6 +230,7 @@ def fetch_moneydj_full(etf_id: str) -> tuple[list | None, str | None]:
             'weight': round(weight, 4),
             'shares': shares,
         })
+    _append_named_assets(holdings, html_txt)
     return (holdings if holdings else None), data_date
 
 
@@ -222,17 +264,17 @@ def fetch_moneydj_top(etf_id: str) -> tuple[list | None, str | None]:
             'market': market,
             'name':   html.unescape(m.group(3)).strip(),
             'weight': round(clean_num(m.group(4)), 4),
-            'shares': int(clean_num(m.group(5))),
+            'shares': _quantity(m.group(5)),
         })
+    _append_named_assets(holdings, seg)
     return (holdings if holdings else None), data_date
 
 
 # ── 來源 C：TWSE ETFortfolio（被動 ETF 才有資料；主動 ETF 通常無） ─
 def fetch_twse(stock_no: str, date: datetime.date) -> tuple[list | None, str | None]:
-    short = re.sub(r'[A-Za-z]$', '', stock_no)
     url = ('https://www.twse.com.tw/rwd/zh/fund/ETFortfolio'
            f'?response=json&date={date.year}{date.month:02d}{date.day:02d}'
-           f'&stockNo={short}')
+           f'&stockNo={urllib.parse.quote(stock_no)}')
     txt = http_get(url, 'https://www.twse.com.tw/')
     if not txt:
         return None, None
@@ -272,30 +314,44 @@ def fetch_twse(stock_no: str, date: datetime.date) -> tuple[list | None, str | N
             'weight': round(wt, 4),
             'shares': int(sr),
         })
-    return (holdings if holdings else None), date.strftime('%Y-%m-%d')
+    raw_date = str(data.get('date') or '')
+    try:
+        provider_date = datetime.datetime.strptime(raw_date, '%Y%m%d').date().isoformat()
+    except ValueError:
+        try:
+            provider_date = datetime.date.fromisoformat(raw_date).isoformat()
+        except ValueError:
+            provider_date = None
+    return (holdings if holdings else None), provider_date
 
 
 # ── 多來源彙整：依優先序嘗試 ─────────────────────────────────────
 def fetch_one(etf_id: str, target_date: datetime.date):
-    # A. MoneyDJ 全部持股
-    h, d = fetch_moneydj_full(etf_id)
-    if h:
-        return h, d, 'moneydj-full'
-    # B. MoneyDJ 前十大
-    h, d = fetch_moneydj_top(etf_id)
-    if h:
-        return h, d, 'moneydj-top10'
-    # C. TWSE (機會極低)
-    h, d = fetch_twse(etf_id, target_date)
-    if h:
-        return h, d, 'twse'
-    return None, None, None
+    first_available = (None, None, None)
+    sources = [('moneydj-full', lambda: fetch_moneydj_full(etf_id)),
+               ('moneydj-top10', lambda: fetch_moneydj_top(etf_id)),
+               ('twse', lambda: fetch_twse(etf_id, target_date))]
+    for source, fetch in sources:
+        h, d = fetch()
+        try:
+            parsed = datetime.date.fromisoformat(d or '')
+            fresh = parsed <= target_date and etf_paths.business_day_age(parsed, target_date) <= 2
+        except ValueError:
+            fresh = False
+        _source_event('source_parsed', source=source, providerDate=d,
+                      rows=len(h or []), fresh=fresh)
+        if h and fresh:
+            return h, d, source
+        if h and not first_available[0]:
+            first_available = (h, d, source)
+    # 未找到新來源時保留原始日期，由統一驗收決定，不以收集日補造。
+    return first_available
 
 
 # ── 主流程：抓一個指定日期的所有 ETF 並輸出 JSON ─────────────────
 def _previous_snapshot_etf_count(history_dir: str, out_file: str) -> int:
     for prior in reversed(etf_paths.list_snapshot_files(history_dir)):
-        if os.path.abspath(str(prior)) == os.path.abspath(out_file):
+        if etf_paths.snapshot_date(prior) >= etf_paths.snapshot_date(out_file):
             continue
         check = etf_paths.inspect_snapshot(prior)
         count = int(check.get('etfCount') or 0)
@@ -304,7 +360,18 @@ def _previous_snapshot_etf_count(history_dir: str, out_file: str) -> int:
     return 0
 
 
-def run(target_date: datetime.date) -> bool:
+def run(target_date: datetime.date, *, run_id=None) -> bool:
+    trace = UpdateTrace(run_id or os.environ.get('ST_ETF_RUN_ID'))
+    trace.record('command_received', targetDate=target_date.isoformat(), expectedCount=len(ETFS))
+    try:
+        return _run(target_date, trace)
+    except Exception as exc:
+        trace.finish(accepted=False, state='error', targetDate=target_date.isoformat(),
+                     message='更新發生例外，原快照保留。', error=type(exc).__name__)
+        raise
+
+
+def _run(target_date: datetime.date, trace) -> bool:
     history_dir = str(etf_paths.resolve_history_dir(create=True))
     date_str = target_date.strftime('%Y-%m-%d')
     out_file = os.path.join(history_dir, f'top10_active_etf_holdings_{date_str}.json')
@@ -315,6 +382,8 @@ def run(target_date: datetime.date) -> bool:
         math.ceil(len(ETFS) * 0.60) if ETFS else 0,
     )
     invalid_existing = False
+    retained = {}
+    pending_codes = set(ETFS)
 
     expected_codes = sorted(ETFS)
     if os.path.exists(out_file):
@@ -332,12 +401,23 @@ def run(target_date: datetime.date) -> bool:
             expected_codes=expected_codes,
             previous_etf_count=previous_count,
         )
-        if acceptance.get('accepted'):
+        if acceptance.get('accepted') and not check.get('failedCodes'):
+            trace.finish(accepted=True, state='already_current', targetDate=date_str,
+                         succeededCount=check['etfCount'], expectedCount=len(ETFS),
+                         failedCodes=check.get('failedCodes', []), acceptance=acceptance,
+                         message='當日快照已通過驗收。')
             print(f'[{date_str}] 已存在且驗證通過，跳過。')
             return True
+        if acceptance.get('accepted'):
+            # 同日已通過的部分快照只重試缺漏，避免整池重抓及永久跳過失敗項。
+            with open(out_file, encoding='utf-8') as handle:
+                existing = json.load(handle)
+            retained = {code: existing[code] for code in check['succeededCodes']}
+            pending_codes -= set(retained)
+            trace.record('retry_missing', retainedCount=len(retained), pendingCodes=sorted(pending_codes))
         invalid_existing = True
         print(
-            f'[{date_str}] 既有快照不完整，保留原檔並重新抓取：'
+            f'[{date_str}] 既有快照有待補資料，保留原檔並重試：'
             f'etfs={check.get("etfCount", 0)} '
             f'problems={list(check.get("problems", [])) + list(acceptance.get("problems", []))}'
         )
@@ -345,10 +425,14 @@ def run(target_date: datetime.date) -> bool:
     print(f'[{date_str}] 開始抓取 {len(ETFS)} 檔台灣 ETF 持股...')
     collected_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
     result: dict = {'date': date_str, 'updated': collected_at}
+    result.update(retained)
 
     def worker(item):
         etf_id, (display_code, name) = item
+        _request_context.trace, _request_context.code = trace, display_code
         holdings, data_date, source = fetch_one(etf_id, target_date)
+        trace.record('etf_result', code=display_code, providerDate=data_date, source=source,
+                     rows=len(holdings or []), state='received' if holdings else 'no_parsed_holdings')
         if holdings:
             print(f'  ✓ {display_code} {name}: {len(holdings)} 筆  (來源:{source} 資料日:{data_date})')
             return display_code, {
@@ -359,14 +443,15 @@ def run(target_date: datetime.date) -> bool:
                 'collectedDate': date_str,
                 'collectedAt': collected_at,
                 'source':   source,
+                'holdingsSchema': 2,
                 'total':    len(holdings),
                 'holdings': holdings,
             }
-        print(f'  ✗ {display_code} {name}: 全部來源皆無資料')
+        print(f'  ✗ {display_code} {name}: 既有來源未取得可解析部位，請查看逐筆診斷')
         return display_code, None
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = {pool.submit(worker, item): item for item in ETFS.items()}
+        futures = {pool.submit(worker, item): item for item in ETFS.items() if item[0] in pending_codes}
         for fut in as_completed(futures):
             code, data = fut.result()
             if data:
@@ -397,45 +482,43 @@ def run(target_date: datetime.date) -> bool:
         expected_codes=expected_codes,
         previous_etf_count=previous_count,
     )
+    from collections import Counter
+    diagnostics = {
+        'targetDate': date_str, 'succeededCount': etf_count, 'expectedCount': expected_count,
+        'failedCodes': result['meta']['failedCodes'], 'acceptance': candidate_acceptance,
+        'providerDateCounts': dict(Counter(str(d) for d in candidate_check['providerDates'])),
+        'etfs': {code: {'providerDate': result[code]['date'], 'source': result[code]['source'],
+                        'rows': len(result[code]['holdings'])} for code in succeeded_codes},
+    }
+    trace.record('candidate_checked', **diagnostics)
     if not candidate_acceptance.get('accepted'):
+        trace.finish(accepted=False, state=candidate_acceptance['state'],
+                     message='快照未通過驗收，沿用原資料；請查看拒絕原因與來源日期。', **diagnostics)
         print(
-            f'[{date_str}] 快照不完整：成功 {etf_count} 檔，'
+            f'[{date_str}] 快照驗收未通過（{candidate_acceptance["state"]}）：成功 {etf_count} 檔，'
             f'最低需 {minimum_count} 檔（前期 {previous_count or "無"}）；'
             f'拒絕原因 {candidate_acceptance.get("problems", [])}'
         )
         return False
 
     if invalid_existing:
-        quarantine = out_file + '.invalid-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+        quarantine = out_file + ('.previous-' if retained else '.invalid-') + datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f')
         shutil.copy2(out_file, quarantine)
         print(f'[{date_str}] 舊快照已保留：{quarantine}')
     atomic_write_json(out_file, result, backup=False)
+    trace.finish(accepted=True, state='updated', message='快照已更新；來源缺漏另列，不代表全部成功。',
+                 **diagnostics)
     print(f'\n[{date_str}] 完成！{etf_count}/{len(ETFS)} 檔 → {out_file}')
     return True
 
 
 # ── 批次補抓 ──────────────────────────────────────────────────────
 def backfill(days: int) -> bool:
-    """
-    補抓最近 N 個交易日。注意：MoneyDJ 只提供最新一日的持股，
-    對歷史日只能寫出當日已揭露的同一份快照（用 MoneyDJ 自己的「資料日期」存檔）；
-    若該資料日已存在則自動跳過，等同把當日資料保存下來。
-    """
-    today = datetime.date.today()
-    trading_days = []
-    d = today
-    while len(trading_days) < days:
-        if d.weekday() < 5:
-            trading_days.append(d)
-        d -= datetime.timedelta(days=1)
-
-    print(f'執行回補：{[x.strftime("%Y-%m-%d") for x in trading_days]}')
-    ok = 0
-    for d in trading_days:
-        if run(d):
-            ok += 1
-    print(f'\n=== 回補完成：{ok}/{len(trading_days)} 個交易日成功 ===')
-    return ok == len(trading_days)
+    """最新持股來源不能回補歷史，避免把同一份資料寫成多日觀測。"""
+    if days != 1:
+        print('無法回補歷史：目前來源只提供最新持股；原歷史檔保留，請靠每日更新累積。')
+        return False
+    return run(datetime.date.today())
 
 
 # ── 入口 ──────────────────────────────────────────────────────────
@@ -444,13 +527,18 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='台股主動ETF持股爬蟲 (MoneyDJ)')
     parser.add_argument('--date', help='指定日期 YYYY-MM-DD (預設今天)')
     parser.add_argument('--backfill', type=int, metavar='N',
-                        help='補抓最近 N 個交易日 (例 --backfill 5)')
+                        help='相容參數：僅 N=1 可更新當日；不支援歷史回補')
     args = parser.parse_args()
 
     if args.backfill:
         success = backfill(args.backfill)
     elif args.date:
-        success = run(datetime.date.fromisoformat(args.date))
+        day = datetime.date.fromisoformat(args.date)
+        if day != datetime.date.today():
+            print('無法指定歷史或未來收集日：目前來源只提供最新持股，原歷史檔保留。')
+            success = False
+        else:
+            success = run(day)
     else:
         success = run(datetime.date.today())
     raise SystemExit(0 if success else 2)

@@ -178,9 +178,14 @@
       addCount: 0, rmCount: 0, incCount: 0, decCount: 0,
       netWeightDelta: 0, chgSum: 0, unchanged: false, available: !!delta,
       sourceError: (S.etfV3 && S.etfV3.err) || S.etfErr || null,
+      uncomparableCount: 0,
     };
     if (!delta) return out;
     (delta.etfs || []).forEach(etf => {
+      if (etf.comparison && etf.comparison.state !== 'comparable') {
+        out.uncomparableCount++;
+        return;
+      }
       const meta = { code: etf.code, name: resolveName(etf.code, etf.name) };
       const added = (etf.new || []).find(item => String(item.code).toUpperCase() === sym);
       if (added) out.added.push({...meta, weight: added.weight, shares: added.shares});
@@ -204,7 +209,11 @@
     // Compatibility alias for position_v2's ETF confluence calculation.  The
     // value remains weight percentage-point change, not cash flow.
     out.chgSum = out.netWeightDelta;
-    out.unchanged = !(out.addCount || out.rmCount || out.incCount || out.decCount);
+    out.unchanged = !out.uncomparableCount && !(out.addCount || out.rmCount || out.incCount || out.decCount);
+    if (out.uncomparableCount && out.uncomparableCount === (delta.etfs || []).length) {
+      out.available = false;
+      out.sourceError = '來源尚未更新或兩期資料不可比較；不能判定今日異動。';
+    }
     return out;
   }
 
@@ -213,7 +222,7 @@
     if (!el || !S.sym) return;
     const flow = stockFlow(S.sym);
     if (!flow.available) {
-      el.textContent = flow.freshness === 'error' ? '資料錯誤' : '尚無資料';
+      el.textContent = flow.uncomparableCount ? '資料待比較' : flow.freshness === 'error' ? '資料錯誤' : '尚無資料';
       el.style.color = 'var(--tf)';
       return;
     }
@@ -221,10 +230,10 @@
     const sell = flow.rmCount + flow.decCount;
     const stale = flow.freshness !== 'fresh';
     if (buy || sell) {
-      el.textContent = `${buy ? '↑' + buy : ''}${buy && sell ? ' ' : ''}${sell ? '↓' + sell : ''} ETF${stale ? ' · 舊' : ''}`;
+      el.textContent = `${buy ? '↑' + buy : ''}${buy && sell ? ' ' : ''}${sell ? '↓' + sell : ''} ETF${stale ? ' · 舊' : ''}${flow.uncomparableCount ? ' · 部分待比較' : ''}`;
       el.style.color = stale ? 'var(--gold)' : (buy > sell ? 'var(--red)' : sell > buy ? 'var(--green)' : 'var(--blue)');
     } else {
-      el.textContent = stale ? '無異動 · 資料舊' : '本期無異動';
+      el.textContent = !flow.unchanged ? '部分資料待比較' : stale ? '無異動 · 資料舊' : '本期無異動';
       el.style.color = stale ? 'var(--gold)' : 'var(--tf)';
     }
   }
@@ -447,6 +456,7 @@
 .e3-modal .head h3 { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--gold); font-weight: 700; letter-spacing: 1px; margin: 0; }
 .e3-modal .body { flex: 1; overflow-y: auto; padding: 8px 0; }
 .e3-modal .foot { padding: 10px 18px; border-top: 1px solid var(--border); background: var(--bg); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+@media (max-width: 640px) { #e3-modal .foot { flex-direction: column; align-items: stretch; } }
 .e3-modal .x { cursor: pointer; color: var(--tlo); font-size: 20px; line-height: 1; padding: 0 4px; }
 .e3-modal .x:hover { color: var(--red); }
 .e3-mgrcat { margin: 8px 0; }
@@ -700,24 +710,26 @@
           ${nNew ? `<span class="e3-badge new">+${nNew}</span>` : ''}
           ${nRm  ? `<span class="e3-badge rm">-${nRm}</span>`   : ''}
           ${nCh  ? `<span class="e3-badge chg">~${nCh}</span>`  : ''}
-          ${(!nNew && !nRm && !nCh) ? `<span class="e3-badge empty">無變動</span>` : ''}
+          ${e.comparison && e.comparison.state !== 'comparable' ? '<span class="e3-badge empty">待比較</span>' : (!nNew && !nRm && !nCh) ? '<span class="e3-badge empty">無變動</span>' : ''}
         </div>
       </div>`;
       if (opened) {
         h += '<div class="e3-card-body">';
+        if (e.comparison) h += `<div class="e3-top10-foot">${esc(e.comparison.message)}<br>來源日期：${esc(e.providerDate || '缺漏')}；前期：${esc(e.previousProviderDate || '缺漏')}</div>`;
         // ── v3.1 Top 10 當前持股（最先顯示，給使用者快速確認投資標的） ──
-        const top10 = e.top10 || [];
+        const top10 = (e.top10 || []).length ? e.top10 : (e.previousTop10 || []);
         if (top10.length) {
           const totalW = top10.reduce((s, x) => s + (x.weight || 0), 0);
           const maxW = top10[0]?.weight || 1;
-          h += '<div class="e3-section-hdr">📊 Top 10 持股（按比例）</div>';
+          h += `<div class="e3-section-hdr">📊 ${(e.top10 || []).length ? '本期' : '前期留存（本期缺漏）'} Top 10 部位（按比例）</div>`;
           h += '<div class="e3-top10">';
           for (const t of top10) {
             const w = t.weight || 0;
             const barPct = Math.min(100, (w / maxW) * 100);
-            h += `<div class="e3-stock" data-e3="goto" data-sym="${esc(t.code)}" data-mkt="${esc(t.market || 'TW')}" title="${esc(t.name || '')}${t.market && t.market !== 'TW' ? ' · ' + t.market : ''}">
+            const namedAsset = t.instrumentType === 'named_asset' || String(t.code).startsWith('asset:');
+            h += `<div class="e3-stock" ${namedAsset ? '' : `data-e3="goto" data-sym="${esc(t.code)}" data-mkt="${esc(t.market || 'TW')}"`} title="${esc(t.name || '')}">
               <span class="rank">${t.rank || ''}</span>
-              <span class="scode">${esc(t.code)}${t.market && t.market !== 'TW' ? `<span style="color:var(--tlo);font-size:8px;margin-left:3px">.${esc(t.market)}</span>` : ''}</span>
+              <span class="scode">${namedAsset ? '非股票部位' : esc(t.code)}${!namedAsset && t.market && t.market !== 'TW' ? `<span style="color:var(--tlo);font-size:8px;margin-left:3px">.${esc(t.market)}</span>` : ''}</span>
               <span class="sname">${esc(t.name || '')}</span>
               <span class="bar"><i style="width:${barPct.toFixed(1)}%"></i></span>
               <span class="swt gold">${w.toFixed(2)}%</span>
@@ -758,7 +770,7 @@
             </div>`;
           }
         }
-        if (!nNew && !nRm && !nCh && !top10.length) {
+        if (!nNew && !nRm && !nCh && !top10.length && (!e.comparison || e.comparison.state === 'comparable')) {
           h += '<div class="e3-empty" style="padding:14px 12px;font-size:9.5px">此 ETF 在當日無持股變動</div>';
         }
         h += '</div>';
@@ -800,21 +812,24 @@
     const etfs = (S.etfV3.deltaRaw && S.etfV3.deltaRaw.etfs)
       || (S.etfV3.delta && S.etfV3.delta.etfs) || [];
     const agg = {};   // code -> {code,name, add:[], inc:[], rm:[], dec:[], wIn, wOut}
-    const get = (code, name) => {
-      const k = (code || '').toUpperCase();
-      if (!agg[k]) agg[k] = { code, name: name || '', add: [], inc: [], rm: [], dec: [], wIn: 0, wOut: 0, addShares: 0 };
+    const get = (item) => {
+      const {code, name, instrumentType} = item;
+      const market = item.market || 'TW';
+      const k = (code || '').toUpperCase() + '.' + market;
+      if (!agg[k]) agg[k] = { code, name: name || '', market, instrumentType, add: [], inc: [], rm: [], dec: [], wIn: 0, wOut: 0, addShares: 0 };
       if (name && !agg[k].name) agg[k].name = name;
       return agg[k];
     };
     for (const e of etfs) {
       const etf = e.code;
-      for (const n of (e.new || [])) { const s = get(n.code, n.name); s.add.push(etf); s.wIn += (n.weight || 0); s.addShares += (n.shares || 0); }
+      if (e.comparison && e.comparison.state !== 'comparable') continue;
+      for (const n of (e.new || [])) { const s = get(n); s.add.push(etf); s.wIn += (n.weight || 0); s.addShares += (n.shares || 0); }
       for (const c of (e.changed || [])) {
-        const s = get(c.code, c.name);
+        const s = get(c);
         if ((c.delta || 0) >= 0) { s.inc.push(etf); s.wIn += (c.delta || 0); s.addShares += Math.max(0, c.shares_delta || 0); }
         else { s.dec.push(etf); s.wOut += Math.abs(c.delta || 0); }
       }
-      for (const r of (e.removed || [])) { const s = get(r.code, r.name); s.rm.push(etf); s.wOut += (r.prev_weight || 0); }
+      for (const r of (e.removed || [])) { const s = get(r); s.rm.push(etf); s.wOut += (r.prev_weight || 0); }
     }
     // 權重：新增/移除 與 加碼/減碼 同權，皆 ×2
     const arr = Object.values(agg).map(s => ({
@@ -822,16 +837,19 @@
       bull: (s.add.length + s.inc.length) * 2,
       bear: (s.rm.length + s.dec.length) * 2,
     })).map(s => ({ ...s, net: s.bull - s.bear }));
-    const up = arr.filter(s => s.bull > 0).sort((a, b) => b.bull - a.bull || b.wIn - a.wIn);
-    const down = arr.filter(s => s.bear > 0).sort((a, b) => b.bear - a.bear || b.wOut - a.wOut);
-    const net = arr.filter(s => s.net !== 0).sort((a, b) => b.net - a.net);
-    return { up, down, net, etfCount: etfs.length };
+    const isAsset = s => s.instrumentType === 'named_asset' || String(s.code).startsWith('asset:');
+    const stocks = arr.filter(s => !isAsset(s));
+    const up = stocks.filter(s => s.bull > 0).sort((a, b) => b.bull - a.bull || b.wIn - a.wIn);
+    const down = stocks.filter(s => s.bear > 0).sort((a, b) => b.bear - a.bear || b.wOut - a.wOut);
+    const net = stocks.filter(s => s.net !== 0).sort((a, b) => b.net - a.net);
+    return { up, down, net, assets: arr.filter(isAsset), etfCount: etfs.length };
   }
 
   function reportRows(list, side) {
     if (!list.length) return '<div class="e3-empty" style="padding:18px">無資料</div>';
     let h = '';
     for (const s of list.slice(0, 40)) {
+      const namedAsset = s.instrumentType === 'named_asset' || String(s.code).startsWith('asset:');
       const badges = side === 'up'
         ? `${s.add.length ? `<span class="e3-badge new">▲新增 ${s.add.length}</span>` : ''}${s.inc.length ? `<span class="e3-badge chg">＋加碼 ${s.inc.length}</span>` : ''}`
         : `${s.rm.length ? `<span class="e3-badge rm">▼移除 ${s.rm.length}</span>` : ''}${s.dec.length ? `<span class="e3-badge chg">－減碼 ${s.dec.length}</span>` : ''}`;
@@ -840,12 +858,12 @@
       const wt = side === 'up' ? s.wIn : s.wOut;
       const wtCol = side === 'up' ? 'var(--red)' : 'var(--green)';
       // v3.9 P5：買盤側顯示「投信潛在買盤佔個股日均量%」+ AI 原因鈕
-      const extra = (side === 'up' && s.addShares > 0)
+      const extra = (!namedAsset && (s.market || 'TW') === 'TW' && side === 'up' && s.addShares > 0)
         ? `<div class="e3-volpct" data-sym="${esc(s.code)}" data-shares="${s.addShares}" style="color:var(--gold);font-size:8.5px;margin-top:2px">佔量 計算中…</div>`
           + `<button class="e3-reason" data-sym="${esc(s.code)}" data-name="${esc(s.name || '')}" data-etfs="${esc(etfUp.slice(0, 6).join(','))}" data-shares="${s.addShares}" data-weight="${wt.toFixed(2)}" data-action="${s.add.length ? '新增' : '加碼'}" style="margin-top:3px;background:#1e293b;border:1px solid #334155;color:#a5b4fc;border-radius:4px;font-size:8.5px;padding:1px 6px;cursor:pointer">🤖 原因</button>`
         : '';
-      h += `<div class="e3-stock" data-e3m="load" data-sym="${esc(s.code)}" data-mkt="TW" style="cursor:pointer;align-items:flex-start;padding:7px 12px">
-        <span style="font-weight:700;color:var(--thi);min-width:54px">${esc(s.code)}</span>
+      h += `<div class="e3-stock" ${namedAsset ? '' : `data-e3m="load" data-sym="${esc(s.code)}" data-mkt="${esc(s.market || 'TW')}"`} style="align-items:flex-start;padding:7px 12px">
+        <span style="font-weight:700;color:var(--thi);min-width:54px">${namedAsset ? '非股票部位' : esc(s.code)}</span>
         <span class="sname" style="flex:1">${esc(s.name || '')}<div style="color:var(--tf);font-size:8.5px;margin-top:2px">${esc(etfList)}</div><div class="e3-reason-out" data-for="${esc(s.code)}" style="color:#c7d2fe;font-size:9px;margin-top:3px"></div></span>
         <span style="text-align:right;white-space:nowrap">${badges}<div style="color:${wtCol};font-size:9px;margin-top:2px">權重 ${wt.toFixed(2)}%</div>${extra}</span>
       </div>`;
@@ -857,12 +875,13 @@
     if (!list.length) return '<div class="e3-empty" style="padding:18px">無資料</div>';
     let h = '';
     for (const s of list.slice(0, 60)) {
+      const namedAsset = s.instrumentType === 'named_asset' || String(s.code).startsWith('asset:');
       const pos = s.net > 0;
       const col = window.Colors ? Colors.gain(s.net) : (pos ? 'var(--red)' : 'var(--green)');
       const etfList = [...new Set([...s.add, ...s.inc, ...s.rm, ...s.dec])].slice(0, 8).join(' · ');
-      h += `<div class="e3-stock" data-e3m="load" data-sym="${esc(s.code)}" data-mkt="TW" style="cursor:pointer;align-items:center;padding:6px 12px">
+      h += `<div class="e3-stock" ${namedAsset ? '' : `data-e3m="load" data-sym="${esc(s.code)}" data-mkt="${esc(s.market || 'TW')}"`} style="align-items:center;padding:6px 12px">
         <span style="font-weight:800;color:${col};min-width:42px;font-size:13px;text-align:center">${pos ? '+' : ''}${s.net}</span>
-        <span style="font-weight:700;color:var(--thi);min-width:54px">${esc(s.code)}</span>
+        <span style="font-weight:700;color:var(--thi);min-width:54px">${namedAsset ? '非股票部位' : esc(s.code)}</span>
         <span class="sname" style="flex:1">${esc(s.name || '')}<div style="color:var(--tf);font-size:8.5px;margin-top:2px">${esc(etfList)}</div></span>
         <span style="text-align:right;white-space:nowrap;font-size:8.5px;color:var(--tlo)">▲${s.add.length}/＋${s.inc.length} ▼${s.rm.length}/－${s.dec.length}</span>
       </div>`;
@@ -871,8 +890,10 @@
   }
 
   function renderReportBody(rep, mode) {
+    const assets = (rep.assets || []).length ? '<div class="e3-section-hdr">非股票部位異動（不納入個股共識分數）</div>' +
+      rep.assets.map(s => `<div class="e3-top10-foot">${esc(s.name)}<br>新增 ${s.add.length}／移除 ${s.rm.length}；權重增加 ${s.wIn.toFixed(2)}／減少 ${s.wOut.toFixed(2)} 個百分點</div>`).join('') : '';
     if (mode === 'net') {
-      return `<div class="e3-section-hdr">📊 淨分數排序（買盤共識 − 賣盤共識，正=偏多 負=偏空）</div>${netRows(rep.net)}`;
+      return `<div class="e3-section-hdr">📊 淨分數排序（買盤共識 − 賣盤共識，正=偏多 負=偏空）</div>${netRows(rep.net)}${assets}`;
     }
     return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:0">
         <div style="border-right:1px solid var(--border)">
@@ -883,7 +904,7 @@
           <div class="e3-section-hdr" style="color:var(--red)">🔴 潛在下跌（賣盤共識）</div>
           ${reportRows(rep.down, 'down')}
         </div>
-      </div>`;
+      </div>${assets}`;
   }
 
   // 把報表轉純文字（供 Email）
@@ -1013,8 +1034,8 @@
         </div>
         <div class="body" id="e3-mgr-body">${renderMgrBody()}</div>
         <div class="foot">
-          <span style="font-family:monospace;font-size:9.5px;color:var(--tlo)" id="e3-foot-msg">勾選 = 加入每日追蹤池 · 點 × 移除自訂 ETF</span>
-          <div style="display:flex;gap:6px">
+          <div style="min-width:0;flex:1"><span style="font-size:12px;color:var(--tlo);white-space:pre-wrap;overflow-wrap:anywhere" id="e3-foot-msg" role="status">勾選 = 加入每日追蹤池 · 點 × 移除自訂 ETF</span><details id="e3-update-details" hidden><summary>檢視更新證據與完整紀錄</summary><pre style="max-height:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px" id="e3-update-evidence"></pre></details></div>
+          <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap">
             <button class="e3-mbtn" data-e3m="close">關閉</button>
             <button class="e3-mbtn" data-e3m="save">💾 只儲存</button>
             <button class="e3-mbtn primary" data-e3m="save-run">💾 儲存並立即更新</button>
@@ -1024,6 +1045,10 @@
     `;
     document.body.appendChild(m);
     m.addEventListener('click', ev => { if (ev.target === m) closeMgrModal(); });
+    try {
+      const status = await fetch(`${SERVER}/etf-tracker/status`, {cache:'no-store'}).then(r => r.json());
+      if (document.getElementById('e3-modal') === m && status.report && !status.running) showTrackerResult(status);
+    } catch (_) { /* 觀測池仍可操作，更新時會再次查核狀態。 */ }
   }
 
   function closeMgrModal() {
@@ -1097,6 +1122,31 @@
     if (m) { m.textContent = msg; m.style.color = color || 'var(--tlo)'; }
   }
 
+  function trackerSummary(st) {
+    const report = st.report;
+    if (!report) return `更新${st.lastReturnCode === 0 ? '完成' : '未完成'}（代碼 ${st.lastReturnCode}）；請展開完整紀錄。`;
+    if (!report.acceptance) return report.message || '更新未完成，請查看完整紀錄。';
+    const acceptance = report.acceptance || {};
+    const failed = report.failedCodes || [];
+    const outcome = report.accepted ? (failed.length ? '已更新，部分來源缺漏' : '已更新') : '更新未通過驗收，原資料保留';
+    return `${outcome}：${report.succeededCount ?? 0}/${report.expectedCount ?? 0} 檔；來源缺漏 ${failed.length} 檔。\n` +
+      `新鮮度：${acceptance.providerFreshCount ?? 0} 檔在 2 個臺股表定交易日內，已排除已知休市日。` +
+      (acceptance.calendar?.unknownYears?.length ? '\n部分年度日曆未核對，採保守平日計算。' : '');
+  }
+
+  function showTrackerResult(st) {
+    const failed = st.report?.failedCodes || [];
+    setFootMsg(trackerSummary(st), st.lastReturnCode !== 0 ? 'var(--red)' : failed.length ? 'var(--gold)' : 'var(--green)');
+    const details = document.getElementById('e3-update-details');
+    const evidence = document.getElementById('e3-update-evidence');
+    if (details && evidence) {
+      details.hidden = false;
+      evidence.textContent = `作業編號：${st.runId || '未記錄'}\n` +
+        `來源缺漏：${failed.join('、') || '無'}\n` +
+        (st.report ? JSON.stringify(st.report, null, 2) + '\n' : '') + (st.lastOutput || '');
+    }
+  }
+
   // ─── Click delegation (panel + modal) ───────────────────────
   document.addEventListener('click', ev => {
     // Panel actions
@@ -1122,7 +1172,7 @@
         ev.preventDefault();
         const sym = pa.dataset.sym;
         const mkt = pa.dataset.mkt || 'TW';
-        if (sym && typeof loadSym === 'function') {
+        if (sym && !sym.startsWith('asset:') && typeof loadSym === 'function') {
           const [yfSym, uiMkt] = mapToYahoo(sym, mkt);
           loadSym(yfSym, uiMkt);
         }
@@ -1154,8 +1204,9 @@
     if (act === 'load') {
       ev.preventDefault();
       const sym = ma.dataset.sym, mk = ma.dataset.mkt || 'TW';
+      if (!sym || sym.startsWith('asset:') || mk === 'ASSET') return;
       closeMgrModal();
-      if (typeof loadSym === 'function') loadSym(sym, mk);
+      if (typeof loadSym === 'function') { const [yfSym, uiMkt] = mapToYahoo(sym, mk); loadSym(yfSym, uiMkt); }
       return;
     }
     if (act === 'toggle') {
@@ -1247,6 +1298,7 @@
         if (!r?.ok) { ma.disabled = false; ma.textContent = '💾 儲存並立即更新'; return; }
         ma.textContent = '▶ 啟動 tracker...';
         setFootMsg(`✓ Catalog 已存 (${r.enabledCount} 檔)，正在抓 MoneyDJ 持股...`, 'var(--gold)');
+        let runId = null;
         try {
           const rr = await fetch(`${SERVER}/etf-tracker/run`, { method: 'POST' });
           if (!rr.ok) {
@@ -1255,6 +1307,7 @@
             ma.disabled = false; ma.textContent = '💾 儲存並立即更新';
             return;
           }
+          runId = (await rr.json()).runId;
         } catch (e) {
           alert('啟動失敗：' + e.message);
           ma.disabled = false; ma.textContent = '💾 儲存並立即更新';
@@ -1269,6 +1322,7 @@
           try {
             const sr = await fetch(`${SERVER}/etf-tracker/status`, { cache: 'no-store' });
             const st = await sr.json();
+            if (runId && st.runId !== runId) throw new Error('更新作業編號不符，等待本次作業結果');
             const elapsed = Math.round((Date.now() - startTs) / 1000);
             if (st.running) {
               ma.textContent = `▶ 抓取中 ${elapsed}s...`;
@@ -1280,16 +1334,13 @@
             }
             if (st.lastReturnCode === 0) {
               ma.textContent = `✓ 完成 (${st.lastDuration}s)`;
-              setFootMsg(`✓ 抓取完成，耗時 ${st.lastDuration} 秒`, 'var(--green)');
+              showTrackerResult(st);
+              ma.disabled = false;
               await fetchDelta();
-              setTimeout(() => {
-                closeMgrModal();
-                if (typeof renderRpanel === 'function') renderRpanel();
-              }, 1200);
+              if (typeof renderRpanel === 'function') renderRpanel();
             } else {
               ma.textContent = '⚠ 失敗';
-              const tail = (st.lastOutput || '').split('\n').slice(-3).join('\n');
-              setFootMsg(`⚠ tracker 失敗 (code ${st.lastReturnCode})：${tail}`, 'var(--red)');
+              showTrackerResult(st);
               ma.disabled = false;
               setTimeout(() => { ma.textContent = '💾 儲存並立即更新'; }, 4000);
             }
@@ -1334,6 +1385,7 @@
   global.EtfFlow = Object.freeze({
     getStockFlow: stockFlow,
     changeDirection,
+    trackerSummary,
   });
 
   // Boot: load catalog immediately, delta will lazy-load on first ETF tab open
