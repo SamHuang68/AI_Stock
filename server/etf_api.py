@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import copy
+import datetime as dt
+from functools import lru_cache
 import os
 import subprocess
 import sys
@@ -191,16 +194,54 @@ def compute_etf_delta(files, date=None):
         curr_file = files[-1]
         prev_file = files[-2]
 
-    def extract_date(f):
-        return os.path.basename(f).replace('top10_active_etf_holdings_','').replace('.json','')
+    selected = files[:files.index(curr_file) + 1]
+    signatures = tuple((path, os.stat(path).st_mtime_ns, os.stat(path).st_size) for path in selected)
+    enabled = _load_enabled_etf_codes()
+    # 同日覆寫、觀測池變更或新增快照都會使快取失效；回傳副本避免呼叫端污染。
+    return copy.deepcopy(_delta_with_history(signatures, tuple(sorted(enabled)) if enabled is not None else None))
 
-    curr_date = extract_date(curr_file)
-    prev_date = extract_date(prev_file)
 
-    with open(curr_file, encoding='utf-8') as f:
-        curr_raw = json.load(f)
-    with open(prev_file, encoding='utf-8') as f:
-        prev_raw = json.load(f)
+@lru_cache(maxsize=4)
+def _delta_with_history(signatures, enabled):
+    def read(index):
+        with open(signatures[index][0], encoding='utf-8') as stream:
+            return json.load(stream)
+
+    def day(index):
+        # 保留舊快照 YYYYMMDD 的既有回傳契約；日期驗證仍交給 ISO parser。
+        return os.path.basename(signatures[index][0]).replace('top10_active_etf_holdings_', '').replace('.json', '')
+
+    current, previous = read(-1), read(-2)
+    result = _compare_etf_snapshots(current, previous, day(-1), day(-2), enabled)
+    pending = {row['code']: row for row in result['etfs'] if row['comparison']['state'] != 'comparable'}
+    # 查找最近一組已驗證的歷史比較，不把舊異動回灌本期訊號。
+    # 同一比較函式負責本期與歷史；只讀所選日期以前的快照。
+    skipped = []
+    for index in range(len(signatures) - 2, 0, -1):
+        if not pending:
+            break
+        older = None
+        try:
+            older = read(index - 1)
+            historical = _compare_etf_snapshots(previous, older, day(index), day(index - 1), pending)
+            for row in historical['etfs']:
+                if row['comparison']['state'] != 'comparable' or not row['providerDate'] or not row['previousProviderDate']:
+                    continue
+                pending.pop(row['code'])['lastComparable'] = {
+                    key: row[key] for key in ('new', 'removed', 'changed', 'providerDate', 'previousProviderDate')
+                } | {'date': day(index), 'prev_date': day(index - 1),
+                     'observedSecurities': [
+                         {'code': h['code'], 'market': h.get('market', 'TW'),
+                          'instrumentType': h.get('instrumentType')}
+                         for h in row['holdings'] + row['removed']]}
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            skipped.append(day(index - 1))
+        previous = older or {}
+    result['historyLookup'] = {'skippedDates': skipped, 'unavailableCount': len(pending)}
+    return result
+
+
+def _compare_etf_snapshots(curr_raw, prev_raw, curr_date, prev_date, enabled_codes=None):
 
     curr_all = parse_holdings_json(curr_raw)
     prev_all = parse_holdings_json(prev_raw)
@@ -209,7 +250,6 @@ def compute_etf_delta(files, date=None):
     all_codes = sorted(set(curr_all) | set(prev_all))
 
     # ── 過濾：只保留 catalog 內 enabled=true 的 ETF（隱藏舊 009 殘留）──
-    enabled_codes = _load_enabled_etf_codes()
     if enabled_codes is not None:
         all_codes = [c for c in all_codes if c.upper() in enabled_codes]
 
@@ -237,11 +277,10 @@ def compute_etf_delta(files, date=None):
               and any(h.get('instrumentType') == 'named_asset' for h in curr_list + prev_list)):
             comparison = {'state': 'schema_changed', 'message': '新增非股票部位辨識，需下一期同格式資料才能比較。'}
         elif current_meta or previous_meta:
-            import datetime as dt
             try:
                 current_day = dt.date.fromisoformat(current_meta.get('date') or '')
                 previous_day = dt.date.fromisoformat(previous_meta.get('date') or '')
-                target_day = etf_paths.snapshot_date(curr_file)
+                target_day = dt.date.fromisoformat(curr_date)
                 if current_day == previous_day:
                     comparison = {'state': 'same_source_date', 'message': '來源尚未發布新一期資料，不能視為今日無異動。'}
                 elif current_day < previous_day or current_day > target_day:
@@ -327,7 +366,7 @@ def compute_etf_delta(files, date=None):
                 curr_list,
                 key=lambda h: float(get_field(h, 'weight', 'pct', 'weight_pct') or 0),
                 reverse=True,
-            )[:10]
+            )
             for h in sorted_curr:
                 top10.append({
                     'rank':   get_field(h, 'rank', 'holding_rank') or '-',
@@ -345,12 +384,14 @@ def compute_etf_delta(files, date=None):
         if new_stocks or removed or changed or top10 or prev_list:
             etfs_out.append({
                 'code':    code,
-                'name':    ETF_NAME_MAP.get(code, code),
+                'name':    current_meta.get('name') or previous_meta.get('name') or ETF_NAME_MAP.get(code, code),
                 'total':   len(curr_list),
                 'new':     new_stocks,
                 'removed': removed,
                 'changed': changed,
-                'top10':   top10,   # v3.1 新增：當前 Top 10 持股
+                'top10':   top10[:10],
+                'holdings': top10,  # 個股查詢涵蓋完整來源，不受前十大限制。
+                'previousHoldings': prev_list if not curr_list else [],
                 'comparison': comparison,
                 'providerDate': current_meta.get('date'),
                 'previousProviderDate': previous_meta.get('date'),

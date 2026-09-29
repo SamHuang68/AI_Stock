@@ -1583,6 +1583,13 @@ function renderWl() {
       } else {
         _etfState=(_flow&&_flow.freshness==='error')?'error':'missing';
       }
+      // 明細入口不以訊號成立為條件：待比較、無異動或載入失敗仍可查看。
+      if (!_etfBadge) {
+        const _pending=_flow&&_flow.uncomparableCount;
+        if (_pending) _etfState='pending';
+        const _label=_pending?'本期待比較，查看持股與最近可比較紀錄':'查看 ETF 持股與加減碼明細';
+        _etfBadge=`<span class="etf-flow-badge${_pending?' pending':''}" data-etf-flow-trigger data-etf-up="0" data-etf-down="0" role="button" tabindex="0" aria-label="${w.t} ETF 動向：${_label}" title="${_label}"><span class="etf-flow-label" aria-hidden="true">ETF</span><span class="etf-flow-signs" aria-hidden="true"><span class="etf-flow-sign up">+</span><span class="etf-flow-sign down">−</span></span></span>`;
+      }
     }
     const _etfAttr=w.m==='TW'?` data-etf-flow-state="${_etfState}"`:'';
     const _actionTitle=w.m==='TW'

@@ -174,6 +174,58 @@ class ComparisonRegression(unittest.TestCase):
         self.assertEqual(fund['new'][0]['market'], 'US')
         self.assertEqual(fund['removed'][0]['market'], 'TW')
 
+    def test_pending_preserves_full_holdings_and_latest_verified_history(self):
+        with tempfile.TemporaryDirectory() as temp, \
+             mock.patch.object(etf_api, 'ETF_CATALOG_FILE', str(Path(temp) / 'missing')):
+            paths = [Path(temp) / f'top10_active_etf_holdings_{day}.json'
+                     for day in ('2026-09-22', '2026-09-24', '2026-09-29')]
+            rows = [dict(ROW, code=str(1100 + i), rank=i + 1, weight=20-i) for i in range(12)]
+            previous = self.entry(date='2026-09-22', holdings=rows + [dict(ROW, shares=100, rank=13, weight=1)])
+            current = self.entry(holdings=rows + [dict(ROW, shares=200, rank=13, weight=1)])
+            for path, entry in zip(paths, (previous, current, current)):
+                path.write_text(json.dumps({'0050': entry}), encoding='utf-8')
+            out = etf_api.compute_etf_delta([str(p) for p in paths])
+            fund = out['etfs'][0]
+            self.assertEqual(fund['comparison']['state'], 'same_source_date')
+            self.assertEqual(out['summary'], {'new': 0, 'removed': 0, 'changed': 0})
+            self.assertEqual(len(fund['holdings']), 13)
+            self.assertEqual(len(fund['top10']), 10)
+            self.assertEqual(fund['lastComparable']['changed'][0]['shares_delta'], 100)
+            self.assertEqual(fund['lastComparable']['providerDate'], '2026-09-24')
+            historical = etf_api.compute_etf_delta([str(p) for p in paths], '2026-09-24')
+            self.assertEqual(historical['etfs'][0]['comparison']['state'], 'comparable')
+            self.assertNotIn('lastComparable', historical['etfs'][0])
+            # 消費端改動及同日覆寫都不能污染或固定住快取。
+            fund['holdings'].clear()
+            self.assertEqual(len(etf_api.compute_etf_delta([str(p) for p in paths])['etfs'][0]['holdings']), 13)
+            paths[-1].write_text(json.dumps({'0050': self.entry(date='2026-09-29', holdings=[dict(ROW, shares=300)])}), encoding='utf-8')
+            newer = etf_api.compute_etf_delta([str(p) for p in paths])
+            self.assertEqual(newer['etfs'][0]['comparison']['state'], 'comparable')
+
+    def test_history_never_uses_incompatible_or_same_date_pair(self):
+        with tempfile.TemporaryDirectory() as temp, \
+             mock.patch.object(etf_api, 'ETF_CATALOG_FILE', str(Path(temp) / 'missing')):
+            paths = [Path(temp) / f'top10_active_etf_holdings_{day}.json'
+                     for day in ('2026-09-22', '2026-09-24', '2026-09-29')]
+            for source in ('twse', 'moneydj-top10'):
+                for path, entry in zip(paths, (self.entry(date='2026-09-22', source=source), self.entry(), self.entry())):
+                    path.write_text(json.dumps({'0050': entry}), encoding='utf-8')
+                out = etf_api.compute_etf_delta([str(p) for p in paths])
+                self.assertNotIn('lastComparable', out['etfs'][0])
+                self.assertEqual(out['historyLookup']['unavailableCount'], 1)
+
+    def test_malformed_older_snapshot_does_not_remove_current_detail(self):
+        with tempfile.TemporaryDirectory() as temp, \
+             mock.patch.object(etf_api, 'ETF_CATALOG_FILE', str(Path(temp) / 'missing')):
+            paths = [Path(temp) / f'top10_active_etf_holdings_{day}.json'
+                     for day in ('2026-09-21', '2026-09-22', '2026-09-23', '2026-09-24')]
+            for path, raw in zip(paths, ({'0050': self.entry(date='2026-09-21')}, {'etfs':[None]},
+                    {'0050':self.entry(date='2026-09-23')}, {'0050':self.entry(date='2026-09-23')})):
+                path.write_text(json.dumps(raw), encoding='utf-8')
+            out = etf_api.compute_etf_delta([str(p) for p in paths])
+            self.assertEqual(out['etfs'][0]['holdings'][0]['code'], ROW['code'])
+            self.assertTrue(out['historyLookup']['skippedDates'])
+
 
 class ReceiptRegression(unittest.TestCase):
     def test_timeout_and_start_failure_survive_service_restart(self):

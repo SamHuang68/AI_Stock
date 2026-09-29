@@ -179,22 +179,51 @@
       netWeightDelta: 0, chgSum: 0, unchanged: false, available: !!delta,
       sourceError: (S.etfV3 && S.etfV3.err) || S.etfErr || null,
       uncomparableCount: 0,
+      holdings: [], historical: {added: [], removed: [], increased: [], decreased: []}, historicalUnchanged: [],
+      historyLookup: delta && delta.historyLookup,
     };
     if (!delta) return out;
+    const matches = item => String(item.code).toUpperCase() === sym &&
+      (!item.market || item.market === 'TW') && item.instrumentType !== 'named_asset';
     (delta.etfs || []).forEach(etf => {
+      const meta = { code: etf.code, name: resolveName(etf.code, etf.name),
+        providerDate: etf.providerDate, previousProviderDate: etf.previousProviderDate };
+      const current = (etf.holdings || etf.top10 || []).find(matches);
+      const previous = (etf.previousHoldings || etf.previousTop10 || []).find(matches);
+      const holding = current || previous;
+      if (holding) out.holdings.push({...meta, weight: holding.weight, shares: holding.shares,
+        previousOnly: !current, comparison: etf.comparison,
+        lastComparable: etf.lastComparable && {providerDate: etf.lastComparable.providerDate,
+          previousProviderDate: etf.lastComparable.previousProviderDate},
+        providerDate: current ? etf.providerDate : etf.previousProviderDate});
       if (etf.comparison && etf.comparison.state !== 'comparable') {
         out.uncomparableCount++;
+        const history = etf.lastComparable;
+        if (history) {
+          const oldMeta = {...meta, providerDate: history.providerDate,
+            previousProviderDate: history.previousProviderDate};
+          if ((history.observedSecurities || []).some(matches) &&
+              !['new','removed','changed'].some(key => (history[key] || []).some(matches))) {
+            out.historicalUnchanged.push(oldMeta);
+          }
+          for (const [key, target] of [['new','added'], ['removed','removed'], ['changed',null]]) {
+            const item = (history[key] || []).find(matches);
+            if (!item) continue;
+            const bucket = target || (changeDirection(item) > 0 ? 'increased' : 'decreased');
+            out.historical[bucket].push({...oldMeta, weight: item.weight ?? item.prev_weight,
+              shares: item.shares ?? item.prev_shares, delta: item.delta, sharesDelta: item.shares_delta});
+          }
+        }
         return;
       }
-      const meta = { code: etf.code, name: resolveName(etf.code, etf.name) };
-      const added = (etf.new || []).find(item => String(item.code).toUpperCase() === sym);
+      const added = (etf.new || []).find(matches);
       if (added) out.added.push({...meta, weight: added.weight, shares: added.shares});
-      const removed = (etf.removed || []).find(item => String(item.code).toUpperCase() === sym);
+      const removed = (etf.removed || []).find(matches);
       if (removed) out.removed.push({...meta, weight: removed.prev_weight, shares: removed.prev_shares});
-      const changed = (etf.changed || []).find(item => String(item.code).toUpperCase() === sym);
+      const changed = (etf.changed || []).find(matches);
       if (changed) {
         const detail = {...meta, delta: Number(changed.delta) || 0,
-          sharesDelta: Number(changed.shares_delta) || 0};
+          sharesDelta: changed.shares_delta == null ? null : Number(changed.shares_delta)};
         out.netWeightDelta += detail.delta;
         const direction = changeDirection(changed);
         if (direction > 0) out.increased.push(detail);
@@ -210,11 +239,62 @@
     // value remains weight percentage-point change, not cash flow.
     out.chgSum = out.netWeightDelta;
     out.unchanged = !out.uncomparableCount && !(out.addCount || out.rmCount || out.incCount || out.decCount);
-    if (out.uncomparableCount && out.uncomparableCount === (delta.etfs || []).length) {
-      out.available = false;
-      out.sourceError = '來源尚未更新或兩期資料不可比較；不能判定今日異動。';
-    }
+    out.signalAvailable = out.uncomparableCount < (delta.etfs || []).length;
     return out;
+  }
+
+  function stockFlowDetail(flow) {
+    if (!flow.available) return '<div class="eft-empty">' +
+      (flow.freshness === 'error' ? 'ETF 資料取得失敗' : 'ETF 資料載入中或尚未取得') +
+      '</div>' + (flow.sourceError ? '<div class="eft-error">' + esc(flow.sourceError) + '</div>' : '');
+    const format = value => value == null ? '未提供' : Number(value).toLocaleString('zh-TW');
+    const signed = value => (Number(value) > 0 ? '+' : '') + format(value);
+    const dates = item => '來源 ' + (item.providerDate || '未知') + '／比較 ' + (item.previousProviderDate || '未知');
+    const fund = item => '<button type="button" class="eft-item" data-etf="' + esc(item.code) +
+      '">' + esc(item.code + ' ' + item.name) + '</button>';
+    function sections(data, historical) {
+      return [['added','新增持股','#f87171'], ['increased','加碼','#fca5a5'],
+        ['removed','移除持股','#34d399'], ['decreased','減碼','#86efac']].map(([key,label,color]) => {
+        const rows = data[key] || [];
+        if (!rows.length) return '';
+        return '<div class="eft-sec"><strong style="color:' + color + '">' +
+          (historical ? '歷史' : '本期') + label + '（' + rows.length + '）</strong>' + rows.map(item => {
+          const amount = key === 'added' || key === 'removed'
+            ? '股數 ' + format(item.shares) + ' · 權重 ' + format(item.weight) + '%'
+            : '股數變化 ' + signed(item.sharesDelta) + ' · 權重 ' + signed(item.delta) + ' 個百分點';
+          return '<div>' + fund(item) + '<div class="eft-meta">' + esc(amount) +
+            '<br>' + esc(dates(item)) + '</div></div>';
+        }).join('') + '</div>';
+      }).join('');
+    }
+    let h = '<div class="eft-meta">快照 ' + esc(flow.date || '未知') +
+      ' · ' + (flow.freshness === 'fresh' ? '資料已載入' : '保留資料，更新狀態需留意') + '</div>';
+    if (flow.freshnessDetail && flow.freshnessDetail.reason === 'history_contract_missing') h +=
+      '<div class="eft-error">伺服器尚未提供 ETF 歷史健康資訊；此日期不能視為最新資料。</div>';
+    if (flow.uncomparableCount) h += '<div class="eft-error">觀測池 ' + flow.uncomparableCount +
+      ' 檔本期待比較；持股與歷史明細保留，不能判定今日無異動。</div>';
+    h += sections(flow, false);
+    if (flow.unchanged) h += '<div class="eft-empty">本比較期未達持股異動門檻。</div>';
+    const historical = sections(flow.historical || {}, true);
+    if (historical) h += '<div class="eft-sec"><strong>最近可比較紀錄</strong>' +
+      '<div class="eft-meta">各 ETF 期間可能不同；歷史紀錄不列入本期訊號。</div>' + historical + '</div>';
+    if ((flow.historicalUnchanged || []).length) h += '<div class="eft-sec"><strong>歷史比較未達異動門檻（' +
+      flow.historicalUnchanged.length + '）</strong>' + flow.historicalUnchanged.map(item =>
+        '<div>' + fund(item) + '<div class="eft-meta">' + esc(dates(item)) + '</div></div>').join('') + '</div>';
+    else if (!historical && flow.uncomparableCount) h += '<div class="eft-empty">此股尚無可核對的歷史比較。</div>';
+    h += '<div class="eft-sec"><strong>持股明細（' + (flow.holdings || []).length + '）</strong>';
+    h += (flow.holdings || []).map(item => '<div>' + fund(item) + '<div class="eft-meta">' +
+      esc((item.previousOnly ? '前期留存 · ' : '') + '來源 ' + (item.providerDate || '未知') +
+        ' · 股數 ' + format(item.shares) + ' · 權重 ' + format(item.weight) + '%') +
+      (item.comparison && item.comparison.state !== 'comparable' ? '<br>' + esc(item.comparison.message) : '') +
+      (item.lastComparable ? '<br>最近可比較：' + esc(dates(item.lastComparable)) : '') +
+      '</div></div>').join('') || '<div class="eft-empty">目前來源未列出此股持股；不代表所有 ETF 均未持有。</div>';
+    h += '</div>';
+    if (flow.historyLookup && flow.historyLookup.skippedDates.length) h +=
+      '<div class="eft-error">部分歷史快照無法讀取：' + esc(flow.historyLookup.skippedDates.join('、')) + '</div>';
+    if (flow.sourceError) h += '<div class="eft-error">最近更新失敗，保留既有明細：' + esc(flow.sourceError) + '</div>';
+    h += '<div class="eft-foot">方向優先依股數，權重僅作輔助；股數未變且權重差小於 0.5 個百分點不列入異動。點 ETF 可載入線型。</div>';
+    return h;
   }
 
   function updateEtfFlowInd() {
@@ -785,26 +865,8 @@
   // ─── STATS holdings sub-section ─────────────────────────────
   function renderEtfHoldingsForStock(sym) {
     if (!sym) return '';
-    if (!S.etfV3.delta) return '';
-    const rows = [];
-    for (const etf of (S.etfV3.delta.etfs || [])) {
-      const n = (etf.new || []).find(s => s.code === sym);
-      if (n) { rows.push({ code: etf.code, type: 'new', val: n.weight }); continue; }
-      const rm = (etf.removed || []).find(s => s.code === sym);
-      if (rm) { rows.push({ code: etf.code, type: 'rm', val: rm.prev_weight }); continue; }
-      const ch = (etf.changed || []).find(s => s.code === sym);
-      if (ch) { rows.push({ code: etf.code, type: 'chg', val: ch.delta }); }
-    }
-    if (!rows.length) return '';
-    let h = '<div class="stat-sect">主動 ETF 對此股動向</div>';
-    for (const r of rows) {
-      const lbl = r.type === 'new' ? '新進' : r.type === 'rm' ? '移除' : '加減碼';
-      const col = r.type === 'rm' ? 'var(--green)' : (window.Colors ? Colors.gain(r.val) : (r.val >= 0 ? 'var(--red)' : 'var(--green)'));
-      const sign = (r.type !== 'rm' && r.val >= 0) ? '+' : (r.type === 'rm' ? '-' : '');
-      const num = Math.abs(r.val ?? 0).toFixed(2);
-      h += `<div class="e3-hold-row"><span class="k">${esc(r.code)} ${lbl}</span><span class="v" style="color:${col}">${sign}${num}%</span></div>`;
-    }
-    return h;
+    return '<div class="stat-sect">ETF 對此股動向</div><div class="etf-stock-detail">' +
+      stockFlowDetail(stockFlow(sym)) + '</div>';
   }
 
   // ─── 跨 ETF 買賣超彙總報表 ──────────────────────────────────
@@ -1385,6 +1447,7 @@
   global.EtfFlow = Object.freeze({
     getStockFlow: stockFlow,
     changeDirection,
+    renderStockDetail: stockFlowDetail,
     trackerSummary,
   });
 

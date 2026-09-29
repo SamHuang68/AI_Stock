@@ -152,7 +152,7 @@ function runTipEventRegression() {
   const context = {
     console, document: documentMock,
     S: {wl:[]}, SERVER:'http://st.test', location:{origin:'http://st.test'},
-    EtfFlow:{getStockFlow:sym => ({sym, available:false, freshness:'missing', freshnessDetail:{}})},
+    EtfFlow:sandbox.EtfFlow,
     innerWidth:1200, innerHeight:800,
     visualViewport:{offsetLeft:0, offsetTop:0, width:1200, height:800, addEventListener(){}},
     matchMedia: query => ({matches: query.includes('any-hover') || query.includes('any-pointer')}),
@@ -171,6 +171,8 @@ function runTipEventRegression() {
   const second = makeChip('2303');
   context.EtfFlowTip.openForChip(first.chip, {interaction:'test'});
   const tip = documentMock.getElementById('etf-flow-tip');
+  const actualDetail = tip.innerHTML.includes('持股明細') && tip.innerHTML.includes('歷史加碼') &&
+    tip.innerHTML.includes('2026-09-24') && !tip.innerHTML.includes('資料尚未取得');
   dispatch('pointerdown', {target:second.chip});
   const otherChipClosed = tip.style.display === 'none';
 
@@ -205,6 +207,7 @@ function runTipEventRegression() {
     spaceEvent.defaultPrevented && spaceEvent.immediateStopped &&
     globalHotkeyCount === hotkeysBeforeKeyboard;
   return {
+    actualDetail,
     otherChipClosed,
     escapeClosed,
     escapeConsumed,
@@ -256,8 +259,45 @@ async function main() {
   deltaQueue.push(response(200, uncomparable));
   await sandbox.etfV3FetchDelta();
   flow = sandbox.EtfFlow.getStockFlow('2330');
-  ok(!flow.available && !flow.unchanged && flow.rmCount === 0,
-    '來源缺漏不能顯示無異動或出清');
+  ok(flow.available && !flow.unchanged && flow.rmCount === 0 && !flow.signalAvailable && flow.holdings.length === 1,
+    '來源缺漏仍保留明細，不能顯示無異動或出清');
+  const restored = {...first, date:'2026-09-29', etfs:[{code:'00992A',new:[],removed:[],changed:[],
+    comparison:{state:'same_source_date',message:'來源尚未發布新一期資料'}, providerDate:'2026-09-24',
+    holdings:[{code:'2330',market:'TW',rank:17,shares:1200,weight:2.1},
+      {code:'2330',market:'US',shares:999999,weight:99}],
+    lastComparable:{providerDate:'2026-09-24',previousProviderDate:'2026-09-22',
+      new:[],removed:[],changed:[{code:'2330',market:'TW',shares_delta:200,delta:-0.1}]}}]};
+  sandbox.S.etfV3.delta = restored;
+  flow = sandbox.EtfFlow.getStockFlow('2330');
+  ok(flow.holdings[0].shares === 1200 && flow.historical.increased.length === 1 &&
+    flow.chgSum === 0 && flow.incCount === 0 && flow.addCount === 0,
+    '前十大之外的持股與歷史加碼可見，跨市場及歷史資料不污染本期訊號');
+  const details = sandbox.renderEtfHoldingsV3('2330');
+  ok(details.includes('歷史加碼') && details.includes('2026-09-22') && details.includes('1,200'),
+    'STATS 保留具來源日期的加減碼及持股明細');
+  const historicalCopy = restored.etfs[0].lastComparable;
+  restored.etfs[0].lastComparable = {...historicalCopy, changed:[], observedSecurities:[{code:'2330',market:'TW'}]};
+  const noHistoricalChange = sandbox.renderEtfHoldingsV3('2330');
+  ok(noHistoricalChange.includes('歷史比較未達異動門檻（1）') && noHistoricalChange.includes('2026-09-22') &&
+    !noHistoricalChange.includes('尚無可核對的歷史比較'), '已核對的歷史無異動保留日期，與缺少歷史分開');
+  restored.etfs[0].lastComparable = historicalCopy;
+  const chipElement = {innerHTML:''};
+  const chipLookup = document.getElementById;
+  document.getElementById = id => id === 'wlchips' ? chipElement : null;
+  Object.assign(sandbox, {cancelWlLongPress(){},attachDragWl(){},getPcls(){return '';}});
+  sandbox.S.wl = [{t:'2330',m:'TW',name:'台積電',chg:0},{t:'TSM',m:'US',chg:0}];
+  vm.runInContext(html.slice(html.indexOf('function renderWl()'), html.indexOf('// Drag-and-drop reordering')), sandbox);
+  for (const state of [restored, {...restored,etfs:[]}, null]) {
+    sandbox.S.etfV3.delta = state;
+    sandbox.renderWl();
+    ok((chipElement.innerHTML.match(/data-etf-flow-trigger/g)||[]).length === 1,
+      '真實觀察卡渲染在待比較、無異動、未載入狀態都保留台股 ETF 入口');
+  }
+  sandbox.S.etfV3.delta = restored;
+  const restoredEvents = runTipEventRegression();
+  ok(restoredEvents.actualDetail, '觀察卡開啟提示時實際渲染最近可比較加碼與完整持股');
+  document.getElementById = chipLookup;
+  sandbox.renderWl = function(){};
   const indicator = emptyElement();
   const originalLookup = document.getElementById;
   document.getElementById = id => id === 'ig-etfFlow' ? indicator : null;
@@ -327,7 +367,7 @@ ok(/class="eft-close"/.test(tipSource) && /pointerdown/.test(tipSource),
   'ETF tooltip has explicit and outside-tap close paths');
 ok(/any-hover: hover/.test(tipSource) && /any-pointer: fine/.test(tipSource),
   'hybrid touch-and-mouse Windows devices retain whole-chip hover');
-  ok(/history_contract_missing/.test(tipSource) && /不能視為最新資料/.test(tipSource),
+  ok(/history_contract_missing/.test(source) && /不能視為最新資料/.test(source),
     'legacy backend contract is explained instead of being presented as valid data');
   const interaction = runTipEventRegression();
   ok(interaction.otherChipClosed,

@@ -10,6 +10,7 @@
   var _showTimer = null;
   var _hideTimer = null;
   var _activeChip = null;
+  var _interaction = null;
 
   function esc(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, function (char) {
@@ -42,24 +43,25 @@
       'max-height:calc(100dvh - 16px);overflow:auto;background:rgba(11,18,32,.98);border:1px solid #2f4a6e;' +
       'border-radius:10px;box-shadow:0 14px 38px rgba(0,0,0,.62);padding:10px 12px;' +
       'font-family:"JetBrains Mono",monospace;font-size:11px;color:#cbd5e1;line-height:1.55}' +
-      '#etf-flow-tip .eft-head{display:flex;align-items:center;justify-content:space-between;gap:10px}' +
-      '#etf-flow-tip .eft-h{font-weight:800;color:#f8fafc;margin-bottom:2px;font-size:12px}' +
-      '#etf-flow-tip .eft-close{appearance:none;display:inline-grid;place-items:center;flex:0 0 28px;width:28px;height:28px;' +
+      '.etf-stock-detail .eft-head{display:flex;align-items:center;justify-content:space-between;gap:10px}' +
+      '.etf-stock-detail .eft-h{font-weight:800;color:#f8fafc;margin-bottom:2px;font-size:12px}' +
+      '.etf-stock-detail .eft-close{appearance:none;display:inline-grid;place-items:center;flex:0 0 28px;width:28px;height:28px;' +
       'margin:-5px -6px 0 0;border:1px solid rgba(148,163,184,.22);border-radius:7px;background:rgba(148,163,184,.08);' +
       'color:#cbd5e1;font:800 16px/1 sans-serif;cursor:pointer;touch-action:manipulation}' +
-      '#etf-flow-tip .eft-close:hover,#etf-flow-tip .eft-close:focus-visible{color:#fff;border-color:rgba(96,165,250,.55);outline:none}' +
-      '#etf-flow-tip .eft-meta{color:#8fa0b8;font-size:9.5px;margin-bottom:6px}' +
-      '#etf-flow-tip .eft-fresh{display:inline-flex;align-items:center;gap:4px;padding:1px 6px;border-radius:999px;' +
+      '.etf-stock-detail .eft-close:hover,.etf-stock-detail .eft-close:focus-visible{color:#fff;border-color:rgba(96,165,250,.55);outline:none}' +
+      '.etf-stock-detail .eft-meta{color:#8fa0b8;font-size:9.5px;margin-bottom:6px}' +
+      '.etf-stock-detail .eft-fresh{display:inline-flex;align-items:center;gap:4px;padding:1px 6px;border-radius:999px;' +
       'border:1px solid rgba(56,189,248,.35);color:#67e8f9;background:rgba(56,189,248,.08)}' +
-      '#etf-flow-tip .eft-fresh.stale{border-color:rgba(245,197,24,.45);color:#facc15;background:rgba(245,197,24,.10)}' +
-      '#etf-flow-tip .eft-fresh.missing{border-color:rgba(148,163,184,.3);color:#a8b4c7;background:rgba(148,163,184,.08)}' +
-      '#etf-flow-tip .eft-sec{margin-top:6px}' +
-      '#etf-flow-tip .eft-item{display:inline-block;margin:3px 4px 0 0;padding:2px 7px;background:rgba(255,255,255,.06);' +
-      'border:1px solid rgba(255,255,255,.07);border-radius:4px;cursor:pointer}' +
-      '#etf-flow-tip .eft-item:hover{background:rgba(96,165,250,.22);border-color:rgba(96,165,250,.38)}' +
-      '#etf-flow-tip .eft-empty{padding:7px 0;color:#94a3b8}' +
-      '#etf-flow-tip .eft-error{margin-top:6px;color:#facc15;font-size:9.5px}' +
-      '#etf-flow-tip .eft-foot{margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,.07);color:#65758d;font-size:9px}' +
+      '.etf-stock-detail .eft-fresh.stale{border-color:rgba(245,197,24,.45);color:#facc15;background:rgba(245,197,24,.10)}' +
+      '.etf-stock-detail .eft-fresh.missing{border-color:rgba(148,163,184,.3);color:#a8b4c7;background:rgba(148,163,184,.08)}' +
+      '.etf-stock-detail .eft-sec{margin-top:6px}' +
+      '.etf-stock-detail .eft-item{display:inline-block;margin:3px 4px 0 0;padding:2px 7px;background:rgba(255,255,255,.06);' +
+      'border:1px solid rgba(255,255,255,.07);border-radius:4px;cursor:pointer;color:inherit;font:inherit;text-align:left;max-width:100%;overflow-wrap:anywhere}' +
+      '.etf-stock-detail{font-size:11px;line-height:1.55;overflow-wrap:anywhere}' +
+      '.etf-stock-detail .eft-item:hover{background:rgba(96,165,250,.22);border-color:rgba(96,165,250,.38)}' +
+      '.etf-stock-detail .eft-empty{padding:7px 0;color:#94a3b8}' +
+      '.etf-stock-detail .eft-error{margin-top:6px;color:#facc15;font-size:9.5px}' +
+      '.etf-stock-detail .eft-foot{margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,.07);color:#65758d;font-size:9px}' +
       '.etf-flow-badge{position:relative;display:inline-flex;align-items:baseline;justify-content:flex-end;gap:0;' +
       'box-sizing:border-box;flex:0 0 auto;width:auto;min-width:0;height:9px;' +
       'padding:0 1px;margin-left:0;border-radius:3px;font-family:"JetBrains Mono",monospace;line-height:1;' +
@@ -74,6 +76,7 @@
       '.etf-flow-badge.sell{background:rgba(74,222,128,.08);border-color:rgba(74,222,128,.22)}' +
       '.etf-flow-badge.mixed{background:rgba(96,165,250,.09);border-color:rgba(96,165,250,.22)}' +
       '.etf-flow-badge.stale{background:rgba(245,197,24,.08);border-color:rgba(245,197,24,.38)}' +
+      '.etf-flow-badge.pending{background:rgba(245,197,24,.08);border-color:rgba(245,197,24,.38)}' +
       '.etf-flow-badge.stale:after{content:"";position:absolute;right:-2px;top:-2px;width:4px;height:4px;border-radius:50%;' +
       'background:var(--gold);box-shadow:0 0 6px rgba(245,197,24,.55)}' +
       '.etf-flow-badge:focus-visible{outline:1px solid var(--cyan);outline-offset:2px}' +
@@ -89,6 +92,7 @@
     if (tip) return tip;
     tip = document.createElement('div');
     tip.id = 'etf-flow-tip';
+    tip.className = 'etf-stock-detail';
     tip.setAttribute('role', 'dialog');
     tip.setAttribute('aria-label', 'ETF 動向');
     tip.setAttribute('aria-live', 'polite');
@@ -112,73 +116,32 @@
     return tip;
   }
 
-  function fmtShares(value) {
-    var number = Number(value);
-    if (!Number.isFinite(number) || number === 0) return '';
-    return ' · 股數' + (number > 0 ? '+' : '') + Math.round(number).toLocaleString('zh-TW');
-  }
-
-  function etfLabel(item) {
-    var name = item.name && item.name !== item.code ? ' ' + item.name : '';
-    var weight = Number(item.delta);
-    var delta = Number.isFinite(weight) && weight !== 0
-      ? ' · 權重' + (weight > 0 ? '+' : '') + weight.toFixed(2) + 'pp' : '';
-    return esc(item.code) + esc(name) + '<span style="opacity:.72">' + esc(fmtShares(item.sharesDelta)) + esc(delta) + '</span>';
-  }
-
-  function section(items, color, label) {
-    if (!items || !items.length) return '';
-    return '<div class="eft-sec"><span style="color:' + color + ';font-weight:800">' +
-      esc(label) + ' (' + items.length + ')</span><div>' + items.map(function (item) {
-        return '<span class="eft-item" data-etf="' + esc(item.code) + '" title="載入 ' + esc(item.code) +
-          ' 線型">' + etfLabel(item) + '</span>';
-      }).join('') + '</div></div>';
-  }
-
   function buildHtml(sym, flow) {
     var name = stockName(sym);
     var html = '<div class="eft-head"><div class="eft-h">ETF 動向 · ' + esc(sym) +
       (name ? ' ' + esc(name) : '') + '</div><button type="button" class="eft-close" ' +
       'aria-label="關閉 ETF 動向" title="關閉">×</button></div>';
-    if (!flow.available) {
-      var missingText = flow.freshness === 'error' ? 'ETF 資料取得失敗' : 'ETF 資料尚未取得';
-      html += '<div class="eft-meta"><span class="eft-fresh missing">● ' + esc(missingText) + '</span></div>';
-      if (flow.sourceError) html += '<div class="eft-error">' + esc(flow.sourceError) + '</div>';
-      html += '<div class="eft-foot">資料可用後，桌機停留整張台股觀察卡即可查看；手機請長按並選擇「ETF 動向」。</div>';
-      return html;
-    }
-
-    var stale = flow.freshness !== 'fresh';
-    var dateText = flow.date ? '截至 ' + flow.date : '日期未知';
-    var compareText = flow.prevDate ? ' · 比較 ' + flow.prevDate : '';
-    html += '<div class="eft-meta"><span class="eft-fresh ' + (stale ? 'stale' : '') + '">' +
-      (stale ? '◷ 資料過期' : '● 資料有效') + '</span>　' + esc(dateText + compareText) + '</div>';
-    html += section(flow.added, '#f87171', '新增持股');
-    html += section(flow.increased, '#fca5a5', '加碼');
-    html += section(flow.removed, '#34d399', '移除持股');
-    html += section(flow.decreased, '#86efac', '減碼');
-    if (flow.unchanged) html += '<div class="eft-empty">本比較期無 ETF 持股異動。</div>';
-    if (flow.freshnessDetail && flow.freshnessDetail.reason === 'history_contract_missing') {
-      html += '<div class="eft-error">伺服器尚未提供 ETF 歷史健康資訊；此日期不能視為最新資料。</div>';
-    }
-    if (flow.sourceError) html += '<div class="eft-error">最近更新失敗；目前保留上一份有效資料。' + esc(flow.sourceError) + '</div>';
-    html += '<div class="eft-foot">方向優先依持股股數變化判定；權重變化僅作輔助。點 ETF 代號可載入線型。</div>';
-    return html;
+    return html + (global.EtfFlow && global.EtfFlow.renderStockDetail
+      ? global.EtfFlow.renderStockDetail(flow)
+      : '<div class="eft-empty">ETF 資料載入中，請稍後重新開啟。</div>');
   }
-
   function position(tip, anchor) {
     var viewport = global.visualViewport;
     var vx = viewport ? viewport.offsetLeft : 0;
     var vy = viewport ? viewport.offsetTop : 0;
     var vw = viewport ? viewport.width : global.innerWidth;
     var vh = viewport ? viewport.height : global.innerHeight;
-    tip.style.maxHeight = Math.max(180, vh - 16) + 'px';
     var rect = anchor.getBoundingClientRect();
+    var below = rect.bottom + 6;
+    var belowSpace = vy + vh - 8 - below;
+    var aboveSpace = rect.top - vy - 14;
+    var useBelow = belowSpace >= aboveSpace;
+    // 長明細在觀察卡下方捲動，不覆蓋入口而使點擊被自己的浮窗攔住。
+    tip.style.maxHeight = Math.max(40, useBelow ? belowSpace : aboveSpace) + 'px';
     var width = tip.offsetWidth;
     var height = tip.offsetHeight;
     var left = Math.max(vx + 8, Math.min(rect.left, vx + vw - width - 8));
-    var below = rect.bottom + 6;
-    var top = below + height <= vy + vh - 8 ? below : Math.max(vy + 8, rect.top - height - 6);
+    var top = useBelow ? below : Math.max(vy + 8, rect.top - height - 6);
     tip.style.left = Math.round(left) + 'px';
     tip.style.top = Math.round(top) + 'px';
   }
@@ -190,7 +153,9 @@
         body: JSON.stringify({
           ts: new Date().toISOString(), event: 'etf_flow_tip_opened',
           correlationId: 'etf-tip-' + Date.now(), from: interaction || 'hover', to: sym,
-          state: flow.freshness, label: flow.date || flow.sourceError || 'no-data',
+          state: flow.available ? (flow.uncomparableCount ? 'pending-detail' : flow.freshness) : 'missing',
+          label: (flow.date || 'no-data') + ' · 持股 ' + (flow.holdings || []).length + ' · 歷史異動 ' +
+            Object.values(flow.historical || {}).reduce(function(n, rows){ return n + rows.length; }, 0),
         }),
       }).catch(function () {});
     } catch {}
@@ -203,6 +168,7 @@
     clearTimeout(_showTimer);
     clearTimeout(_hideTimer);
     _activeChip = chip;
+    _interaction = options && options.interaction || 'hover';
     var flow = flowFor(sym);
     var tip = tipEl();
     tip.innerHTML = buildHtml(sym, flow);
@@ -218,9 +184,11 @@
     var tip = document.getElementById('etf-flow-tip');
     if (tip) tip.style.display = 'none';
     _activeChip = null;
+    _interaction = null;
   }
 
   function scheduleClose() {
+    if (_interaction && _interaction !== 'hover') return;
     clearTimeout(_hideTimer);
     _hideTimer = setTimeout(close, HIDE_DELAY);
   }
@@ -257,6 +225,12 @@
   });
 
   document.addEventListener('click', function (event) {
+    var detail = event.target && event.target.closest && event.target.closest('.etf-stock-detail');
+    var fund = detail && detail.id !== 'etf-flow-tip' && event.target.closest('.eft-item');
+    if (fund && typeof global.loadSym === 'function') {
+      global.loadSym(fund.getAttribute('data-etf'), 'TW');
+      return;
+    }
     var trigger = event.target && event.target.closest && event.target.closest('[data-etf-flow-trigger]');
     if (!trigger) return;
     var chip = chipFrom(trigger);
@@ -264,7 +238,7 @@
     event.preventDefault();
     event.stopPropagation();
     var tip = document.getElementById('etf-flow-tip');
-    if (_activeChip === chip && tip && tip.style.display !== 'none') close();
+    if (_activeChip === chip && _interaction !== 'hover' && tip && tip.style.display !== 'none') close();
     else openForChip(chip, {interaction:'badge'});
   }, true);
 
