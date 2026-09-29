@@ -115,7 +115,43 @@
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#ah-root .ah-loading,#ah-root .ah-err{font-size:10px;color:var(--tlo);padding:10px 0}' +
       '#ah-root .ah-err{color:var(--orange)}' +
-      '#ah-body.ah-loading{display:flex;align-items:center}';
+      '#ah-body.ah-loading{display:flex;align-items:center}' +
+      /* 直向手機沿用殼層捲動：兩欄自然高度，表格各自橫捲，保留全部欄位。 */
+      '@media(max-width:900px) and (orientation:portrait){' +
+        '#shell-views:has(#view-afterhours.on){overflow-x:hidden!important;overflow-y:auto!important}' +
+        '#ah-root,#ah-body{flex:none;height:auto;overflow:visible}' +
+        '#ah-root .ah-head{flex-wrap:wrap;gap:8px;margin-bottom:8px}' +
+        '#ah-root .ah-head > div:first-child{flex-basis:100%}' +
+        '#ah-root .ah-title{font-size:20px}' +
+        '#ah-root .ah-sub{font-size:12px;line-height:1.5}' +
+        '#ah-root .ah-btn{font-size:12px;min-height:36px;padding:6px 10px}' +
+        '#ah-root .ah-strip{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-bottom:8px}' +
+        '#ah-root .ah-strip .cell{padding:8px}' +
+        '#ah-root .ah-strip .k,#ah-root .ah-strip .s{font-size:12px;line-height:1.5}' +
+        '#ah-root .ah-strip .v{font-size:19px;line-height:1.4}' +
+        '#ah-root .ah-strip .k,#ah-root .ah-strip .v,#ah-root .ah-strip .s{white-space:normal;overflow-wrap:anywhere}' +
+        '#ah-root .ah-dash{flex:none;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:auto;gap:8px;align-items:start}' +
+        '#ah-root .ah-sec{height:auto;padding:8px;box-sizing:border-box;overflow:visible}' +
+        '#ah-root .ah-sec h4{font-size:13px;line-height:1.5;flex-wrap:wrap;white-space:normal}' +
+        '#ah-root .ah-sec:has(table) > h4:after{content:"表格可左右滑動";flex-basis:100%;font-size:11px;font-weight:400;color:var(--tlo)}' +
+        '#ah-root .ah-sec > .ah-fill{flex:none;display:block;overflow:visible}' +
+        '#ah-root table.ah-tbl,#ah-root .ovn-embed table{display:block;width:100%;overflow-x:auto;table-layout:auto;font-size:12px;-webkit-overflow-scrolling:touch}' +
+        '#ah-root table.ah-tbl th,#ah-root table.ah-tbl td,#ah-root .ovn-embed th,#ah-root .ovn-embed td{white-space:nowrap;padding:8px 6px;overflow:visible}' +
+        '#ah-root .ah-note{font-size:12px;white-space:normal;overflow-wrap:anywhere;margin-top:6px}' +
+        '#ah-root .ah-ovn-head{display:block}' +
+        '#ah-root .ah-ovn-head > span,#ah-root .ah-ovn-head:after{display:block}' +
+        '#ah-root .ah-ovn-sub{font-size:11px}' +
+        '#ah-root .ovn-embed .ovn-signal-card{display:flex;flex-direction:column;align-items:stretch;gap:6px}' +
+        '#ah-root .ovn-embed .ovn-signal-head,#ah-root .ovn-embed .ovn-signal-meta{flex-wrap:wrap;white-space:normal;overflow:visible}' +
+        '#ah-root .ovn-embed .ovn-signal-value{font-size:22px;text-align:center;align-self:auto}' +
+        '#ah-root .ovn-embed .ovn-signal-meta{font-size:11px}' +
+        '#ah-root .ovn-embed .ovn-tsmc-note{max-height:none;overflow:visible;font-size:11px!important}' +
+        '#ah-root .ovn-embed .ovn-foot{font-size:11px!important;overflow-wrap:anywhere}' +
+        '#ah-root .ah-inst{grid-column:1 / -1}' +
+        '#ah-root .ah-inst-trend .chart{flex:none;height:160px}' +
+        '#ah-root .ah-inst-trend .lab{flex-wrap:wrap}' +
+        '#ah-root .ah-inst-cmt,#ah-root .ah-inst-mkt{font-size:12px;line-height:1.6}' +
+      '}';
   }
 
   function twCls(p) {
@@ -411,7 +447,7 @@
       '</div>' +
       '<div class="ah-note">領先 = 期% − 現% · 點列載入線型</div></div>';
 
-    var instBlock = '<div class="ah-sec"><h4>盤後籌碼</h4>';
+    var instBlock = '<div class="ah-sec ah-inst"><h4>盤後籌碼</h4>';
     if (!inst && latestAmt == null) {
       instBlock += '<div class="ah-err">資金流尚未更新</div></div>';
     } else {
