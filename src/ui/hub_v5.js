@@ -112,6 +112,11 @@
       '.hub-root .hub-sep{font-size:11px;color:var(--tlo);margin:0 2px}' +
       '.hub-root .hub-sub{font-size:11px;color:var(--tlo);margin:0;line-height:1.2}' +
       '.hub-root .hub-actions{display:flex;gap:4px;flex-wrap:nowrap;justify-content:flex-end;flex:0 0 auto}' +
+      '@media(max-width:680px){' +
+        '#view-signals .hub-head{flex-wrap:wrap}' +
+        '#view-signals .hub-head>div:first-child{flex-basis:100%}' +
+        '#view-signals .hub-title{white-space:nowrap}' +
+        '#view-signals .hub-actions{flex:1 1 100%;flex-wrap:wrap;justify-content:flex-start}}' +
       '.hub-root .hub-btn{padding:3px 7px;border:1px solid var(--border);border-radius:4px;background:var(--bg3);' +
         'color:var(--text);font-size:10px;cursor:pointer;font-family:inherit;white-space:nowrap;flex:0 0 auto}' +
       '.hub-root .hub-btn.primary{background:var(--gold);color:#060A12;border:none;font-weight:700}' +
