@@ -1068,6 +1068,28 @@ function makeHighHeadroomAutoscale(candles) {
   };
 }
 
+function bindChartSizeLifecycle(chart, wrap) {
+  let active = true;
+  const alive = () => active && S.chart === chart && wrap.isConnected;
+  const frame = requestAnimationFrame(() => {
+    if (alive()) chart.timeScale().fitContent();
+  });
+  const observer = new ResizeObserver(() => {
+    if (!alive()) return;
+    chart.applyOptions({ width: wrap.clientWidth, height: wrap.clientHeight });
+    chart.timeScale().fitContent();
+  });
+  const remove = chart.remove;
+  chart.remove = function () {
+    if (!active) return;
+    active = false;
+    observer.disconnect();
+    cancelAnimationFrame(frame);
+    return remove.apply(chart, arguments);
+  };
+  observer.observe(wrap);
+}
+
 function renderChart(candles) {
   const wrap = document.getElementById('chart-wrap');
   if (S.chart) { S.chart.remove(); S.chart=null; }
@@ -1256,12 +1278,7 @@ function renderChart(candles) {
       }
     })();
 
-    requestAnimationFrame(() => chart.timeScale().fitContent());
-    const ro = new ResizeObserver(() => {
-      chart.applyOptions({ width: wrap.clientWidth, height: wrap.clientHeight });
-      chart.timeScale().fitContent();
-    });
-    ro.observe(wrap);
+    bindChartSizeLifecycle(chart, wrap);
     return;
   }
 
@@ -1465,14 +1482,8 @@ function renderChart(candles) {
       maRow;
   });
 
-  // 🔑 Fit all candles to one page width
-  requestAnimationFrame(()=>chart.timeScale().fitContent());
-
-  const ro = new ResizeObserver(()=>{
-    chart.applyOptions({width:wrap.clientWidth,height:wrap.clientHeight});
-    chart.timeScale().fitContent();
-  });
-  ro.observe(wrap);
+  // 圖表移除時一併取消尺寸觀察與尚未執行的動畫回呼。
+  bindChartSizeLifecycle(chart, wrap);
 }
 
 function formatVol(v) {
