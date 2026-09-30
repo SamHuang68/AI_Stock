@@ -182,7 +182,9 @@ ok(!compare.includes('99.88%') && !compare.includes('-99.11%'), '未滿 20 筆�
 
 (async function pollingKeepsReadingState() {
   let poll, toggle, writes = 0;
-  let status = { evidenceReports: { running: true } };
+  let status = { evidenceReports: { running: true }, sourceRevisions: {count:1790, symbols:13},
+    sourceReviews: { verifiedAt:'2026-10-01', scope:'只核對本輪差異，完整歷史仍保留',
+      findings:[{label:'緯穎舊基準<script>', detail:'仍排除不相容列', source:'https://www.twse.com.tw/'}] } };
   const buttons = {};
   const body = { querySelector(key) { return buttons[key] || (buttons[key] = {}); },
     set innerHTML(value) { writes++; this.markup = value; this.readingState = null; } };
@@ -198,6 +200,8 @@ ok(!compare.includes('99.88%') && !compare.includes('-99.11%'), '未滿 20 筆�
   toggle();
   await new Promise(resolve => setImmediate(resolve));
   ok(writes === 1, '首次研究狀態正常渲染');
+  ok(body.markup.includes('來源修訂 1790 筆') && body.markup.includes('仍排除不相容列') &&
+    body.markup.includes('只核對本輪差異') && body.markup.includes('&lt;script&gt;'), '來源核對另列範圍與限制，保留全部修訂警示及文字跳脫');
   body.readingState = '展開歷史第二頁並保留鍵盤焦點';
   await poll();
   ok(writes === 1 && body.readingState, '相同輪詢不重建閱讀中的報告與分頁');

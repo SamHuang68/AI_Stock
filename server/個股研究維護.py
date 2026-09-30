@@ -123,6 +123,7 @@ def report_path():
 
 
 def status(report_before=None):
+    from 台股交易參考 import references
     state_path, ledger = paths()
     state = load_json(str(state_path), default={}, expected_type=dict)
     busy = job_queue.is_busy(JOB)
@@ -134,6 +135,7 @@ def status(report_before=None):
                   note='來源更新後檢查；每日20:40起於下一次背景檢查結報（約10分鐘內，工作繁忙時依序排隊），需主機運行。歷史報告完整保留。')
     return {'running': busy, 'job': state, 'observations': daily.status(ledger), 'evidenceReports': report,
             'schedule': schedule_status(), 'sourceRevisions': datastore.source_revision_status(),
+            'sourceReviews': references().get('sourceReviews'),
             'inventory': inventory(), 'externalCallsOnRefresh': 0}
 
 

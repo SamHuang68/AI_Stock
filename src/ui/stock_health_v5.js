@@ -518,6 +518,10 @@
         excludedInstruments: o.lastRun.excludedInstruments }, null, 2)) + '</pre></details>';
     if (p.sourceRevisions && p.sourceRevisions.count) html += '<div class="sh5-warn">來源修訂 ' + esc(p.sourceRevisions.count) + ' 筆、涉及 ' +
       esc(p.sourceRevisions.symbols) + ' 檔；首次日線保留，衝突另存，尚未自動採用。</div>';
+    if (p.sourceReviews && p.sourceReviews.findings) html += '<details><summary>已完成的來源核對（' + esc(p.sourceReviews.verifiedAt) +
+      '）</summary><div class="sh5-foot">' + esc(p.sourceReviews.scope) + '</div><ul class="sh5-foot">' +
+      p.sourceReviews.findings.map(function (r) { return '<li>' + esc(r.label) + '：' + esc(r.detail) +
+        ' <a href="' + esc(r.source) + '" target="_blank" rel="noopener noreferrer">核對來源</a></li>'; }).join('') + '</ul></details>';
     var schedule = p.schedule || {};
     html += '<div class="sh5-foot"><label class="sh5-schedule-control"><input type="checkbox" id="sh5-schedule-enable"' + (schedule.enabled ? ' checked' : '') +
       '> 持續授權盤後自動更新：TWSE／TPEx 日線及法人、Yahoo 大盤</label><br>交易日 18:30 更新，19:30／20:30 只重試未完成來源；需主機運行。僅傳日期與代號，不上傳帳本、不呼叫模型，無已知 API 費用；取消並儲存可停用。</div>' +

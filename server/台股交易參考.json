@@ -1,5 +1,5 @@
 {
-  "verifiedAt": "2026-09-29",
+  "verifiedAt": "2026-10-01",
   "scope": "本輪異常股票、官方年度日曆及已核對臨時休市；並非完整證券主檔或歷史日曆，未收錄不代表仍可交易。",
   "calendar": {
     "year": "2026",
@@ -34,7 +34,21 @@
       {"date": "2025-08-01", "officialClose": 1140, "vendorClose": null, "verdict": "官方確認有交易，供應商缺日；不插值還原係數", "source": "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?response=json&date=20250801&stockNo=2330"}
     ]
   },
+  "sourceReviews": {
+    "verifiedAt": "2026-10-01",
+    "scope": "本輪自選股補齊產生的 1,790 筆差異；不代表所有歷史來源修訂均已核對。原始行情與各版修訂全部保留。",
+    "findings": [
+      {"label": "元大金 1,253 筆價格差異", "detail": "官方股票股利 4%、2026 年 8 月 18 日除權，可解釋原價與供應商調整基準的差異。", "source": "https://www.yuanta.com/TW/IR/Investor-Info/Dividend-Info"},
+      {"label": "緯穎 51 筆價格差異", "detail": "官方最終每仟股配發 1,982.79460 股，含原股比率為 2.9827946，可解釋這批原價與供應商的基準差異。", "source": "https://mopsov.twse.com.tw/mops/web/ajax_t05st01?step=2&firstin=true&TYPEK=sii&co_id=6669&spoke_date=20260814&spoke_time=144120&seq_no=1"},
+      {"label": "緯穎 58 筆舊基準差異", "detail": "2021 年 6 至 9 月的首存值符合官方當時收盤價除以早期三倍比率；新來源符合最終 2.9827946 比率。已查明基準不同，仍保留首存值，這些不相容列仍排除於還原研究。", "source": "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date=20210601&stockNo=6669&response=json"},
+      {"label": "台股 422 筆成交量差異", "detail": "逐月官方資料支持本機首存成交股數；供應商回應重核後未變。保留官方口徑，不以供應商成交量覆寫。", "source": "https://www.twse.com.tw/zh/trading/historical/stock-day.html"},
+      {"label": "聯發科 9 月 29 日成交量", "detail": "本機 13,191,812 股、供應商 11,051,455 股、官方 13,758,267 股，三者不同。保留差異與官方證據，不自動選值覆寫；收盤價均為 4,910 元。", "source": "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date=20260901&stockNo=2454&response=json"},
+      {"label": "美股 5 筆成交量修訂", "detail": "INTC、META、GOOGL、MSFT、AMZN 的 9 月 25 日供應商成交量修訂，重核一致，價格未變；保留首存值與新版本，未宣稱經交易所獨立核實。", "source": "https://query1.finance.yahoo.com/v8/finance/chart/INTC?period1=1790294400&period2=1790726400&interval=1d"}
+    ]
+  },
   "splits": {
+    "2885": [{"date": "2026-08-18", "ratio": 1.04, "source": "https://www.yuanta.com/TW/IR/Investor-Info/Dividend-Info"}],
+    "6669": [{"date": "2026-09-02", "ratio": 2.9827946, "source": "https://mopsov.twse.com.tw/mops/web/ajax_t05st01?step=2&firstin=true&TYPEK=sii&co_id=6669&spoke_date=20260814&spoke_time=144120&seq_no=1"}],
     "0050": [{"date": "2025-06-18", "ratio": 4, "source": "https://api.yuantafunds.com/ECImage/ECBackstage/file/2025-06-17/ca6610a73d444bc09bc2035df79bfd25.pdf"}],
     "00685L": [{"date": "2026-07-07", "ratio": 24, "source": "https://www.capitalfund.com.tw/ECStorge/fund/news/20260706A.pdf"}]
   }

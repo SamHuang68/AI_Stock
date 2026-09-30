@@ -15,9 +15,30 @@ from 台股交易參考 import session, eligible_bar
 from signal_stats_pool import _TICKER_RE
 
 SOURCES = {
-    'TWSE': 'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL',
+    'TWSE': 'https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date={day}&type=ALL&response=json',
     'TPEx': 'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes',
 }
+
+
+def parse_twse_market(payload, expected_day, symbols):
+    """全部收盤行情包含 ETF；以欄名定位，仍共用日期與 OHLC 驗證。"""
+    day = expected_day.replace('-', '')
+    if not isinstance(payload, dict) or payload.get('stat') != 'OK' or payload.get('date') != day:
+        raise ValueError('證交所全部收盤行情日期未到齊，拒絕寫入')
+    mapping = {'證券代號': 'Code', '開盤價': 'OpeningPrice', '最高價': 'HighestPrice',
+               '最低價': 'LowestPrice', '收盤價': 'ClosingPrice', '成交股數': 'TradeVolume'}
+    tables = [table for table in payload.get('tables', []) if isinstance(table, dict)
+              and set(mapping).issubset(table.get('fields') or [])]
+    if len(tables) != 1:
+        raise ValueError('證交所全部收盤行情欄位缺漏或資料表重複')
+    table = tables[0]
+    indexes = {name: table['fields'].index(name) for name in mapping}
+    rows = []
+    for values in table.get('data', []):
+        if not isinstance(values, list) or len(values) <= max(indexes.values()):
+            raise ValueError('證交所全部收盤行情資料列不完整')
+        rows.append({'Date': day, **{key: values[indexes[name]] for name, key in mapping.items()}})
+    return parse_quotes(rows, 'TWSE', expected_day, symbols)
 
 
 def parse_quotes(payload, exchange, expected_day, symbols):
@@ -92,10 +113,12 @@ def run(day=None):
     trace('工作開始')
     symbols = {code for code in datastore.list_symbols('TW', 1) if _TICKER_RE['TW'].fullmatch(code)}
     for exchange, url in SOURCES.items():
+        url = url.format(day=day.replace('-', ''))
         def fetch_quotes(exchange=exchange, url=url):
             with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'}), timeout=20) as response:
                 payload = json.load(response)
-            rows, absent = parse_quotes(payload, exchange, day, symbols)
+            rows, absent = (parse_twse_market(payload, day, symbols) if exchange == 'TWSE'
+                            else parse_quotes(payload, exchange, day, symbols))
             if not rows:
                 raise ValueError('來源沒有目前觀察集合的有效成交資料')
             totals = {'inserted': 0, 'unchanged': 0, 'conflicts': 0, 'excluded': 0}

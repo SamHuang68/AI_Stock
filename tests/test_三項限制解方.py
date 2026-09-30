@@ -59,6 +59,31 @@ class SolutionTests(unittest.TestCase):
             sources.parse_quotes([row], 'TWSE', '2026-09-29', {'2330'})
         self.assertEqual(sources.parse_quotes([{**row, 'TradeVolume': '0'}], 'TWSE', '2026-09-24', {'2330'})[1], ['2330'])
 
+    def test_twse_all_market_includes_etf_and_rejects_wrong_or_ambiguous_payload(self):
+        table = {'fields': ['證券代號', '成交股數', '開盤價', '最高價', '最低價', '收盤價'],
+                 'data': [['00631L', '137,367,770', '39.10', '39.51', '38.94', '38.99']]}
+        payload = {'stat': 'OK', 'date': '20260930', 'tables': [{'fields': ['指數'], 'data': []}, table]}
+        values, absent = sources.parse_twse_market(payload, '2026-09-30', {'00631L'})
+        self.assertEqual(values['00631L'][1:], (39.10, 39.51, 38.94, 38.99, 137367770))
+        self.assertEqual(absent, [])
+        for bad in ({**payload, 'date': '20260929'}, {**payload, 'stat': '尚無資料'},
+                    {**payload, 'tables': [table, table]}, {**payload, 'tables': []}):
+            with self.assertRaises(ValueError):
+                sources.parse_twse_market(bad, '2026-09-30', {'00631L'})
+        for data in ([table['data'][0], table['data'][0]], [['00631L']],
+                     [['00631L', '100', '39', '38', '37', '39']]):
+            with self.assertRaises(ValueError):
+                sources.parse_twse_market({**payload, 'tables': [{**table, 'data': data}]}, '2026-09-30', {'00631L'})
+
+    def test_confirmed_wiwynn_ratio_does_not_accept_obsolete_threefold_basis(self):
+        import 個股還原研究 as adjusted
+        from 台股交易參考 import split_references
+        events = split_references('6669')
+        official = 956
+        row = {'rawClose': official / 2.9827946}
+        self.assertIsNotNone(adjusted._basis_match({'date': '2021-06-22', 'close': official}, row, events)[0])
+        self.assertIsNone(adjusted._basis_match({'date': '2021-06-22', 'close': official / 3}, row, events)[0])
+
     def test_tpex_chip_net_and_source_date_do_not_use_buy_quantity(self):
         row = {'Date': '1150924', 'SecuritiesCompanyCode': '6488',
                'ForeignInvestorsInclude MainlandAreaInvestors-Difference': '-4',
@@ -124,6 +149,10 @@ class SolutionTests(unittest.TestCase):
         def respond(request, **kwargs):
             seen.append(request.full_url)
             rows = [twse, {**twse, 'Code': '2317', 'ClosingPrice': '--' if len(seen) < 3 else '100'}] if 'twse' in request.full_url else [tpex]
+            if 'twse' in request.full_url:
+                rows = {'stat': 'OK', 'date': '20260929', 'tables': [{
+                    'fields': ['證券代號', '開盤價', '最高價', '最低價', '收盤價', '成交股數'],
+                    'data': [[r[k] for k in ('Code', 'OpeningPrice', 'HighestPrice', 'LowestPrice', 'ClosingPrice', 'TradeVolume')] for r in rows]}]}
             return io.StringIO(json.dumps(rows))
         with tempfile.TemporaryDirectory() as tmp, patch.object(ds, 'DB_PATH', str(Path(tmp) / 'market.db')), \
                 patch.object(sources, 'datetime') as clock, \

@@ -132,6 +132,10 @@ class SourceBoundaryTests(unittest.TestCase):
             rows = [twse] if 'twse' in request.full_url else [tpex]
             if 'twse' in request.full_url and len(seen) > 2:
                 rows.append({**twse, 'Code': '2317'})
+            if 'twse' in request.full_url:
+                rows = {'stat': 'OK', 'date': '20260929', 'tables': [{
+                    'fields': ['證券代號', '開盤價', '最高價', '最低價', '收盤價', '成交股數'],
+                    'data': [[r[k] for k in ('Code', 'OpeningPrice', 'HighestPrice', 'LowestPrice', 'ClosingPrice', 'TradeVolume')] for r in rows]}]}
             return io.StringIO(json.dumps(rows))
         with tempfile.TemporaryDirectory() as tmp, patch.object(ds, 'DB_PATH', str(Path(tmp) / 'market.db')), \
                 patch.object(sources, 'datetime') as clock, \
