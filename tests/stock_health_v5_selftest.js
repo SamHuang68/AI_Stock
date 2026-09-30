@@ -156,6 +156,21 @@ ok(H.evidenceReportHtml({ latest: { execution: 'failed' } }).includes('最近檢
 ok(H.evidenceReportHtml({ history: [{ execution: 'failed', checks: [{ detail: '舊報告特定失敗原因 <script>' }] }] })
   .includes('舊報告特定失敗原因 &lt;script&gt;'), '新報告完成後仍可回查舊失敗的完整原因');
 // 以公開渲染所用的真實事件綁定驗證：穩定輪詢不可重建閱讀中的 DOM。
+const review = H.eventReviewHtml([{ ...fixture, lights: fixture.health.lights, eventReview: fixture.events,
+  dataQuality: { status: 'attention', label: '籌碼日期待確認', items: [{ label: '籌碼', status: 'stale', asOf: '2026-09-24' }] } }]);
+ok(review.includes('已失效') && review.includes('收盤跌回突破點之下') && review.includes('2026-09-24'), '事件清單保留失效條件、資料不足及證據日期');
+ok(review.includes('data-review-etf="2330"') && review.includes('data-review-open="2330"'), '事件可開啟既有體檢與 ETF 明細');
+const movingLevel = H.eventReviewHtml([{ ...fixture, lights: fixture.health.lights, close: 105,
+  eventReview: [{ label: '季線事件', status: 'invalidated', date: '2026-09-01', statusDate: '2026-09-30',
+    invalidation: { text: '跌回當日季線', level: 100 } }] }]);
+ok(movingLevel.includes('成立日參考值 100.00（2026-09-01）') && !movingLevel.includes('收盤相對門檻'), '成立日均線參考值不誤當目前失效距離');
+const forwardRow = { n: 19, gate: 'insufficient', medianRet: .9988, medianAdverse: -.9911, costScenarios: [] };
+const compare = H.comparisonHtml({ minSample: 20, historicalVerified: false, groups: [{ currentRules: true, rulesDigest: 'test', signals: [
+  { label: '測試事件<script>', horizons: [{ horizon: 5, observed: 22, mature: 19, waiting: 2, unverified: 1,
+    forward: forwardRow, historical: { n: 30, gate: 'unverified_version' }, reference: { ...forwardRow, missing: 5 } }] }] }], limitations: ['測試限制'] });
+ok(compare.includes('等待 2') && compare.includes('未核實 1') && compare.includes('版本未核實') && compare.includes('&lt;script&gt;'), '前瞻區分等待、未核實及版本限制，來源文字跳脫');
+ok(!compare.includes('99.88%') && !compare.includes('-99.11%'), '未滿 20 筆的前瞻比例與幅度不顯示');
+
 (async function pollingKeepsReadingState() {
   let poll, toggle, writes = 0;
   let status = { evidenceReports: { running: true } };

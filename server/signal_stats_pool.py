@@ -226,6 +226,9 @@ def iter_datastore(market: str, symbols: Optional[Sequence[str]] = None,
 def compute_snapshot(connection, *, market='TW', symbols=None, chips=None, progress=None, now=None):
     """既有樣本池與情境研究共用同一份指標；資料來自呼叫端的唯讀快照。"""
     import datastore
+    from 每日個股留存 import engine_digest
+    from 個股前瞻對照 import method_digest
+    rules_version, method_version = engine_digest(), method_digest()
     current = now or datetime.now(ss._TZ.get(market, ss._TZ['TW']))
     if current.tzinfo is None:
         raise ValueError('研究時間必須包含時區')
@@ -260,6 +263,9 @@ def compute_snapshot(connection, *, market='TW', symbols=None, chips=None, progr
     result['researchAsOf'] = current.isoformat()
     if study:
         result['research'] = study.finish()
+        if rules_version != engine_digest() or method_version != method_digest():
+            raise RuntimeError('研究執行期間規則或方法已變更，保留原有研究結果')
+        result['research'].update(rulesDigest=rules_version, methodDigest=method_version)
     return result
 
 

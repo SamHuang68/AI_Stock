@@ -264,6 +264,20 @@
 
   window.TableSortV5 = {
     enhance: enhanceTable,
+    capture: function (table) {
+      var state = states.get(table);
+      return state ? { column: state.column, direction: state.direction, labels: state.labels.slice() } : null;
+    },
+    restore: function (table, saved) {
+      enhanceTable(table);
+      var state = states.get(table);
+      if (!state || !saved || saved.column == null ||
+          state.labels[saved.column] !== saved.labels[saved.column] ||
+          ['ascending', 'descending'].indexOf(saved.direction) < 0) return;
+      state.column = saved.column;
+      state.direction = saved.direction;
+      applyOrder(state);
+    },
     refresh: function (root) { (root || document).querySelectorAll('table').forEach(queueTable); },
     numericValue: numericValue,
     dateValue: dateValue

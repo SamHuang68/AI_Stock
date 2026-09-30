@@ -14,6 +14,116 @@
 
   var SRV = window.SERVER || '';
   var timer = null;
+  var refreshTrace = '';
+  var inflight = null;
+  var sources = Object.create(null);
+  var expanded = null;
+  function esc(value) { return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
+  function readingOwner(root, el) {
+    var section = el.closest('[data-ah-section]');
+    return section && root.contains(section) ? section : root;
+  }
+  function readingKey(root, el, selector) {
+    var owner = readingOwner(root, el);
+    return (owner.getAttribute('data-ah-section') || 'root') + ':' + Array.from(owner.querySelectorAll(selector)).indexOf(el);
+  }
+  function captureReading(root) {
+    var tables = Array.from(root.querySelectorAll('table'));
+    var active = document.activeElement, focus = null;
+    if (root.contains(active)) {
+      var th = active.closest('th'), table = active.closest('table');
+      if (th && table) focus = { table: readingKey(root, table, 'table'), column: th.cellIndex };
+      else if (active.id) focus = { id: active.id };
+      else if (active.matches('[data-ah-expand],[data-ovn-refresh]')) focus = { selector: active.hasAttribute('data-ah-expand') ? '[data-ah-expand="' + active.getAttribute('data-ah-expand') + '"]' : '[data-ovn-refresh]' };
+      else {
+        var path = [], child = active, owner = readingOwner(root, active);
+        while (child && child !== owner) { path.unshift(Array.from(child.parentElement.children).indexOf(child)); child = child.parentElement; }
+        focus = { path: path, owner: owner === root ? null : owner.getAttribute('data-ah-section') };
+      }
+    }
+    var ancestors = [], node = root;
+    while (node) { ancestors.push({ node: node, x: node.scrollLeft, y: node.scrollTop }); node = node.parentElement; }
+    return { focus: focus, ancestors: ancestors, x: window.scrollX, y: window.scrollY,
+      details: Object.fromEntries(Array.from(root.querySelectorAll('details')).map(function (el) { return [readingKey(root, el, 'details'), el.open]; })),
+      scroll: Object.fromEntries(Array.from(root.querySelectorAll('.ah-fill,table,.ovn-tsmc-note')).map(function (el) { return [readingKey(root, el, '.ah-fill,table,.ovn-tsmc-note'), { x: el.scrollLeft, y: el.scrollTop }]; })),
+      tables: Object.fromEntries(tables.map(function (t) { return [readingKey(root, t, 'table'), window.TableSortV5 ? TableSortV5.capture(t) : null]; })) };
+  }
+  function restoreReading(root, saved) {
+    if (!saved || !root.isConnected) return;
+    var tables = Array.from(root.querySelectorAll('table'));
+    root.querySelectorAll('details').forEach(function (el) { var key = readingKey(root, el, 'details'); if (saved.details[key] != null) el.open = saved.details[key]; });
+    tables.forEach(function (t) { if (window.TableSortV5) TableSortV5.restore(t, saved.tables[readingKey(root, t, 'table')]); });
+    var f = saved.focus, target = null;
+    if (f) {
+      if (f.id) target = document.getElementById(f.id);
+      else if (f.selector) target = root.querySelector(f.selector);
+      else if (f.path) { target = f.owner ? root.querySelector('[data-ah-section="' + f.owner + '"]') : root; f.path.forEach(function (index) { target = target && target.children[index]; }); }
+      else { var table = tables.find(function (t) { return readingKey(root, t, 'table') === f.table; }); if (table) target = table.querySelectorAll('th')[f.column]; }
+      if (target && target.tagName === 'TH') target = target.querySelector('button');
+      if (target) target.focus({ preventScroll: true });
+    }
+    root.querySelectorAll('.ah-fill,table,.ovn-tsmc-note').forEach(function (el) {
+      var p = saved.scroll[readingKey(root, el, '.ah-fill,table,.ovn-tsmc-note')]; if (p) { el.scrollLeft = p.x; el.scrollTop = p.y; }
+    });
+    saved.ancestors.forEach(function (p) { if (p.node.isConnected) { p.node.scrollLeft = p.x; p.node.scrollTop = p.y; } });
+    window.scrollTo(saved.x, saved.y);
+  }
+  function closeExpanded() {
+    if (!expanded) return;
+    var e = expanded; expanded = null;
+    e.placeholder.replaceWith(e.section);
+    e.dialog.remove();
+    restoreReading(e.section, e.reading);
+    var button = e.section.querySelector('[data-ah-expand]');
+    if (button) button.focus({ preventScroll: true });
+  }
+  function expandSection(section) {
+    if (expanded) return;
+    var reading = captureReading(section), button = section.querySelector('[data-ah-expand]');
+    var placeholder = document.createElement('div');
+    placeholder.className = 'ah-expanded-placeholder';
+    placeholder.textContent = section.querySelector('h4').textContent.replace('放大', '') + ' · 全寬檢視中';
+    var dialog = document.createElement('dialog');
+    dialog.className = 'ah-dialog';
+    dialog.setAttribute('aria-label', placeholder.textContent);
+    dialog.innerHTML = '<div class="ah-dialog-actions"><button type="button" class="ah-btn" data-ah-close>返回兩欄總覽</button></div>';
+    section.replaceWith(placeholder); dialog.appendChild(section); $('ah-root').appendChild(dialog);
+    expanded = { section: section, placeholder: placeholder, dialog: dialog, button: button, reading: reading };
+    dialog.querySelector('[data-ah-close]').onclick = closeExpanded;
+    dialog.addEventListener('cancel', function (ev) { ev.preventDefault(); closeExpanded(); });
+    dialog.showModal();
+  }
+  function decorateSection(section, key) {
+    section.setAttribute('data-ah-section', key);
+    var h = section.querySelector('h4');
+    if (h && !h.querySelector('[data-ah-expand]')) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'ah-btn';
+      b.setAttribute('data-ah-expand', key); b.setAttribute('aria-label', '放大' + h.textContent); b.textContent = '放大';
+      b.onclick = function () { expandSection(section); }; h.appendChild(b);
+    }
+  }
+  function sourceNote(keys) {
+    return keys.map(function (key) {
+      var s = sources[key]; if (!s) return '';
+      return s.label + '：' + (s.failed ? (s.value ? '更新失敗，保留最後成功資料' : '更新失敗，尚無成功資料') : '已讀取') +
+        ' · 嘗試 ' + s.attempt + ' · 最後成功 ' + (s.success || '—') + ' · 來源 ' + (s.asOf || '未提供時間');
+    }).join('；');
+  }
+  function trace(event, state, label) {
+    try {
+      fetch(SRV + '/diagnostics/ui-route', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+        body: JSON.stringify({ ts: new Date().toISOString(), event: event,
+          correlationId: refreshTrace, from: 'afterhours', to: 'afterhours', state: state, label: label })
+      }).catch(function () {});
+    } catch (_) {}
+  }
+  function readingTrace() {
+    return Array.from(document.querySelectorAll('#ah-root table')).map(function (t) {
+      var th = t.querySelector('th[aria-sort="ascending"],th[aria-sort="descending"]');
+      return Math.round(t.scrollLeft) + ':' + (th ? th.getAttribute('aria-sort') : 'none');
+    }).join('|');
+  }
   var LIST = [
     { code: '2330', name: '台積電', cid: 'CDF' },
     { code: '2317', name: '鴻海', cid: 'DHF' },
@@ -37,6 +147,13 @@
       document.head.appendChild(s);
     }
     s.textContent =
+      '#ah-root .ah-source-state{font-size:11px;line-height:1.5;color:var(--tlo);white-space:normal;overflow-wrap:anywhere}' +
+      '#ah-root .ah-dialog{box-sizing:border-box;width:min(1100px,calc(100vw - 16px));max-width:none;height:calc(100dvh - 24px);max-height:none;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text)}' +
+      '#ah-root .ah-dialog[open]{display:flex;flex-direction:column;gap:10px}#ah-root .ah-dialog::backdrop{background:#000b}' +
+      '#ah-root .ah-dialog>.ah-sec{height:auto!important;min-height:0;flex:1;overflow:auto!important}' +
+      '#ah-root .ah-dialog .ah-fill{min-height:0;overflow:auto!important}#ah-root .ah-dialog [data-ah-expand]{display:none}' +
+      '#ah-root .ah-dialog-actions{display:flex;justify-content:flex-end}#ah-root .ah-dialog-actions button{min-height:40px}' +
+      '#ah-root .ah-expanded-placeholder{border:1px dashed var(--border);padding:12px;font-size:12px}' +
       '#shell-views:has(#view-afterhours.on){overflow:hidden!important}' +
       '#view-afterhours.sv-panel.on{' +
         'max-width:none!important;width:100%;min-width:0;padding:4px 6px 6px;box-sizing:border-box;' +
@@ -174,6 +291,7 @@
   }
   function fmtTime(t) {
     if (!t || String(t).length < 4) return '';
+    if (!/^\d{4,6}$/.test(String(t))) return String(t);
     var s = String(t).padStart(6, '0');
     return s.slice(0, 2) + ':' + s.slice(2, 4) + ':' + s.slice(4, 6);
   }
@@ -274,8 +392,7 @@
     return bits.length ? bits.join(' · ') : '市場廣度／夜盤訊號載入中';
   }
 
-  function fillAhInstTrend(inst) {
-    jget('/pulse/history?kind=institutional&n=20').then(function (h) {
+  function fillAhInstTrend(inst, h) {
       var V = window.Viz;
       var chart = $('ah-inst-chart');
       var meta = $('ah-inst-trend-meta');
@@ -305,7 +422,6 @@
           (inst && inst.date ? ' · ' + inst.date : '');
       }
       if (cmt) cmt.innerHTML = buildInstComment(inst || {}, rows);
-    });
   }
 
   function normalizeNight(d) {
@@ -369,6 +485,7 @@
   }
 
   function render(pack) {
+    trace('盤後重繪開始', '開始', readingTrace());
     var V = window.Viz;
     var body = ensureMount();
     if (!body) return;
@@ -376,7 +493,7 @@
     var sub = $('ah-sub');
     var st = (bd.stocks || {});
     if (sub) {
-      sub.textContent = '更新 ' + new Date().toLocaleTimeString('zh-TW') +
+      sub.textContent = '嘗試更新 ' + new Date().toLocaleTimeString('zh-TW') +
         (txf && txf.time ? ' · 夜盤 ' + fmtTime(txf.time) : '') +
         (bd.date ? ' · 廣度日 ' + bd.date : '');
     }
@@ -429,7 +546,7 @@
       }
       return '<tr class="ah-row" data-code="' + r.code + '">' +
         '<td style="color:var(--gold);font-weight:700">' + r.code + '</td>' +
-        '<td>' + r.name + '</td>' +
+        '<td>' + r.name + (r.retained ? '<small>（保留）</small>' : '') + '</td>' +
         '<td>' + (r.price != null ? r.price : '—') + '</td>' +
         '<td class="' + twCls(r.changePct) + '">' + pct(r.changePct) + '</td>' +
         '<td class="' + twCls(r.spotChangePct) + '">' + pct(r.spotChangePct) + '</td>' +
@@ -496,15 +613,40 @@
     }
 
     body.classList.remove('ah-loading');
-    body.innerHTML =
+    var draft = document.createElement('div');
+    draft.innerHTML =
       '<div class="ah-strip">' + strip + '</div>' +
       '<div class="ah-dash">' +
         '<div class="ah-zone ah-zone-up">' + txfBlock + futBlock + '</div>' +
         '<div class="ah-zone ah-zone-lo">' + instBlock + mvTbl(gain, '漲幅排行', 'up') + mvTbl(lose, '跌幅排行', 'dn') + '</div>' +
       '</div>' +
       '<div class="ah-note">僅供參考 · TAIFEX MIS / TWSE OpenData</div>';
-
-    body.querySelectorAll('tr.ah-row').forEach(function (el) {
+    var keys = ['night', 'futures', 'institutional', 'gainers', 'losers'];
+    var keySources = [['txf'], ['stockfut'], ['marketflow', 'breadth', 'history'], ['movers'], ['movers']];
+    var reading = captureReading($('ah-root'));
+    if (!body.querySelector('.ah-dash')) body.replaceChildren.apply(body, Array.from(draft.childNodes));
+    else {
+      body.querySelector('.ah-strip').innerHTML = draft.querySelector('.ah-strip').innerHTML;
+      draft.querySelectorAll('.ah-sec').forEach(function (fresh, i) {
+        var old = $('ah-root').querySelector('[data-ah-section="' + keys[i] + '"]');
+        if (old && keys[i] !== 'night') old.innerHTML = fresh.innerHTML;
+      });
+    }
+    keys.forEach(function (key, i) {
+      var section = $('ah-root').querySelector('[data-ah-section="' + key + '"]') || body.querySelectorAll('.ah-sec')[i];
+      if (!section) return;
+      decorateSection(section, key);
+      var note = section.querySelector('.ah-source-state');
+      if (!note) { note = document.createElement('details'); note.className = 'ah-source-state'; section.appendChild(note); }
+      var failing = keySources[i].some(function (k) { return sources[k] && sources[k].failed; });
+      note.innerHTML = '<summary>' + (failing ? '更新失敗 · 保留已有資料' : '資料來源與更新時間') + '</summary>' + esc(sourceNote(keySources[i]));
+    });
+    var stripNote = body.querySelector('[data-ah-sources]');
+    if (!stripNote) { stripNote = document.createElement('details'); stripNote.setAttribute('data-ah-sources', ''); body.appendChild(stripNote); }
+    var wasOpen = stripNote.open;
+    stripNote.innerHTML = '<summary>各來源更新狀態</summary><div class="ah-source-state">' + esc(sourceNote(['txf', 'stockfut', 'marketflow', 'breadth', 'movers', 'history'])) + '</div>';
+    stripNote.open = wasOpen;
+    $('ah-root').querySelectorAll('tr.ah-row').forEach(function (el) {
       el.onclick = function () {
         var c = el.getAttribute('data-code');
         if (c && typeof loadSym === 'function') {
@@ -513,8 +655,10 @@
         }
       };
     });
-    if (inst || latestAmt != null) fillAhInstTrend(inst || {});
+    if (inst || latestAmt != null) fillAhInstTrend(inst || {}, pack.history);
+    restoreReading($('ah-root'), reading);
     mountOvernightPanel();
+    trace('盤後重繪完成', '完成', readingTrace());
   }
 
   function mountOvernightPanel() {
@@ -529,12 +673,50 @@
   }
 
   function jget(url) {
-    return fetch(SRV + url, { cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .catch(function () { return null; });
+    if (window.AppKernel) return AppKernel.api.getJson(url, { timeoutMs: 15000 });
+    var controller = new AbortController(), deadline = setTimeout(function () { controller.abort(); }, 15000);
+    return fetch(SRV + url, { cache: 'no-store', signal: controller.signal })
+      .then(function (r) { if (!r.ok) throw new Error('來源讀取失敗'); return r.json(); })
+      .finally(function () { clearTimeout(deadline); });
+  }
+  function loadSource(key, label, url, valid, timeOf) {
+    var s = sources[key] || (sources[key] = { label: label });
+    s.attempt = new Date().toLocaleString('zh-TW', { hour12: false });
+    return jget(url).then(function (value) {
+      if (!value || value.ok === false || !valid(value)) throw new Error('來源資料不足');
+      // 個股期各合約獨立保留，單一合約缺漏不能洗掉其他已取得的報價。
+      var partial = false;
+      if (key === 'marketflow') {
+        var previousFlow = s.value || {};
+        if (!value.inst) { value.inst = previousFlow.inst; partial = true; }
+        if (!(value.turnover || []).some(function (row) { return row.amount != null; })) { value.turnover = previousFlow.turnover; partial = true; }
+      }
+      if (key === 'movers') {
+        var previousMovers = s.value || {};
+        ['gainers', 'losers'].forEach(function (side, i) {
+          value[side] = value[side] || value[i ? 'down' : 'up'];
+          if (!Array.isArray(value[side]) || !value[side].length) { value[side] = previousMovers[side] || []; partial = true; }
+        });
+      }
+      if (key === 'stockfut') {
+        var old = (s.value && s.value.results) || [];
+        value.results = LIST.map(function (contract) {
+          var row = value.results.find(function (x) { return x.cid === contract.cid && x.ok !== false && x.price != null; });
+          if (row) return row;
+          partial = true;
+          return Object.assign({}, old.find(function (x) { return x.cid === contract.cid; }) || { cid: contract.cid }, { retained: true });
+        });
+      }
+      s.value = value; s.failed = partial;
+      if (!partial) { s.success = s.attempt; s.asOf = timeOf(value); }
+      return value;
+    }).catch(function () { s.failed = true; trace('盤後來源失敗', key, s.value ? '保留最後成功資料' : '尚無資料'); return s.value || null; });
   }
 
   function refresh(opts) {
+    if (inflight) return inflight;
+    refreshTrace = 'afterhours-' + Date.now();
+    trace('盤後更新開始', '開始', readingTrace());
     opts = opts || {};
     var body = ensureMount();
     if (!body) return;
@@ -544,13 +726,15 @@
     }
     if (!soft) body.innerHTML = '<div class="ah-loading">載入盤後資料…</div>';
     var cids = LIST.map(function (x) { return x.cid; }).join(',');
-    Promise.all([
-      jget('/txf'),
-      jget('/stockfut?cids=' + encodeURIComponent(cids)),
-      jget('/marketflow'),
-      jget('/breadth'),
-      jget('/movers?n=22')
+    inflight = Promise.all([
+      loadSource('txf', '台指期', '/txf', function (d) { var n = normalizeNight(d); return n && isFinite(n.price); }, function (d) { return normalizeNight(d).time; }),
+      loadSource('stockfut', '個股期', '/stockfut?cids=' + encodeURIComponent(cids), function (d) { return Array.isArray(d.results) && d.results.some(function (r) { return r.ok !== false && r.price != null; }); }, function (d) { return d.date || d.time || d.results.map(function (r) { return r.time || r.asOf || ''; }).filter(Boolean).join('／'); }),
+      loadSource('marketflow', '資金流', '/marketflow', function (d) { return !!d.inst || (d.turnover || []).length > 0; }, function (d) { return (d.inst && d.inst.date) || d.date; }),
+      loadSource('breadth', '市場廣度', '/breadth', function (d) { return d.stocks && d.stocks.up != null && d.stocks.down != null; }, function (d) { return d.date || d.asOf; }),
+      loadSource('movers', '漲跌排行', '/movers?n=22', function (d) { return Array.isArray(d.gainers || d.up) && Array.isArray(d.losers || d.down); }, function (d) { return d.date || d.asOf; }),
+      loadSource('history', '法人歷史', '/pulse/history?kind=institutional&n=20', function (d) { return Array.isArray(d.rows) && d.rows.length > 0; }, function (d) { return d.rows[0].date; })
     ]).then(function (arr) {
+      if (window.ShellV5 && ShellV5.route && ShellV5.route() !== 'afterhours') return;
       var txfRaw = arr[0], sf = arr[1], mf = arr[2], bd = arr[3], mv = arr[4];
       var byCid = {};
       ((sf && sf.results) || []).forEach(function (r) { byCid[r.cid] = r; });
@@ -559,12 +743,14 @@
       }).sort(function (a, b) {
         return (b.changePct == null ? -999 : b.changePct) - (a.changePct == null ? -999 : a.changePct);
       });
-      render({ txf: normalizeNight(txfRaw), fut: fut, mf: mf || {}, bd: bd || {}, movers: mv || {} });
+      render({ txf: normalizeNight(txfRaw), fut: fut, mf: mf || {}, bd: bd || {}, movers: mv || {}, history: arr[5] });
     }).finally(function () {
+      inflight = null;
       if (window.ShellV5 && window.ShellV5.softBadge) {
         window.ShellV5.softBadge('mount-afterhours', false);
       }
     });
+    return inflight;
   }
 
   function activate() {
@@ -580,12 +766,14 @@
 
   function deactivate() {
     if (timer) { clearInterval(timer); timer = null; }
+    closeExpanded();
   }
 
-  window.AfterhoursV5 = { activate: activate, deactivate: deactivate, refresh: refresh };
+  window.AfterhoursV5 = { activate: activate, deactivate: deactivate, refresh: refresh, captureReading: captureReading, restoreReading: restoreReading };
 
   window.addEventListener('shell:route', function (ev) {
     if (ev && ev.detail && ev.detail.route === 'afterhours') activate();
+    else deactivate();
   });
 
   function boot() {

@@ -22,13 +22,34 @@
     { sym: 'YM=F', name: '道瓊期', w: 0.10 },
     { sym: '^SOX', name: '費半', w: 0.35 },
   ];
+  const lastQuotes = new Map();
+  const rendering = new WeakSet();
+  async function readJson(path) {
+    if (window.AppKernel) return AppKernel.api.getJson(path, { timeoutMs: 15000 });
+    const controller = new AbortController(), deadline = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(srv() + path, { cache: 'no-store', signal: controller.signal });
+      if (!response.ok) throw new Error('來源讀取失敗');
+      return await response.json();
+    } finally { clearTimeout(deadline); }
+  }
+  async function retainedQuote(key, request, states) {
+    const attempt = new Date().toLocaleString('zh-TW', { hour12: false });
+    const value = await request();
+    if (value) lastQuotes.set(key, { value, success: attempt });
+    const last = lastQuotes.get(key);
+    states.push({ key, failed: !value, attempt, success: last && last.success,
+      asOf: last && (last.value.asOf || last.value.time) });
+    return last ? last.value : null;
+  }
+  function escapeText(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+  }
 
   // 與大盤列 refreshMktBar 完全相同的算法（rmt 落後判斷 + 前一交易日收盤）
   async function q(sym) {
     try {
-      const r = await fetch(`${srv()}/yf/${encodeURIComponent(sym)}?range=5d&interval=1d`, { cache: 'no-store' });
-      if (!r.ok) return null;
-      const j = await r.json();
+      const j = await readJson(`/yf/${encodeURIComponent(sym)}?range=5d&interval=1d`);
       const res = j && j.chart && j.chart.result && j.chart.result[0];
       if (!res) return null;
       const meta = res.meta || {};
@@ -49,7 +70,8 @@
         cur = last.c; prev = (prevC != null) ? prevC : (meta.chartPreviousClose || meta.previousClose);
       }
       const changePct = (cur != null && prev != null && prev > 0) ? (cur - prev) / prev * 100 : null;
-      return { price: cur, changePct };
+      const sourceTime = rmt && rmp === cur && rmt - last.t > 20 * 3600 ? rmt : last.t;
+      return { price: cur, changePct, asOf: new Date(sourceTime * 1000).toLocaleString('zh-TW', { hour12: false }) };
     } catch { return null; }
   }
 
@@ -86,9 +108,7 @@
   /** /txf → 台指期夜盤（優先 night；夜盤時段/仍為 night session 的主報價亦可） */
   async function qTxfNight() {
     try {
-      const r = await fetch(`${srv()}/txf`, { cache: 'no-store' });
-      if (!r.ok) return null;
-      const d = await r.json();
+      const d = await readJson('/txf');
       if (!d || !d.ok) return null;
       let n = normalizeTxf(d.night, d.source);
       if (!n && d.session === 'night') n = normalizeTxf(d, d.source);
@@ -109,6 +129,7 @@
   const fmtVol = v => v == null || !isFinite(v) ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
   const fmtTime = t => {
     if (!t || String(t).length < 4) return '';
+    if (!/^\d{4,6}$/.test(String(t))) return String(t);
     const s = String(t).padStart(6, '0');
     return s.slice(0, 2) + ':' + s.slice(2, 4) + ':' + s.slice(4, 6);
   };
@@ -225,22 +246,24 @@
   /** 將夜盤面板畫入盤後 #ah-ovn-host */
   async function renderInto(host, opts) {
     opts = opts || {};
-    if (!host) return;
+    if (!host || rendering.has(host)) return;
+    rendering.add(host);
+    try {
     style();
     const embedded = !!opts.embedded;
     if (embedded) {
       _embedHost = host;
       host.classList.add('ovn-embed');
     }
-    host.innerHTML = '<div style="padding:12px;color:#94a3b8">載入台指期夜盤與美股期貨…</div>';
-    const quotes = {};
+    if (!host.querySelector('table')) host.innerHTML = '<div style="padding:12px;color:#94a3b8">載入台指期夜盤與美股期貨…</div>';
+    const quotes = {}, states = [];
     const [, , txf] = await Promise.all([
-      Promise.all(DRIVERS.map(async d => { quotes[d.sym] = await q(d.sym); })),
-      q('TSM').then(v => { quotes.__TSM__ = v; }),
-      qTxfNight(),
+      Promise.all(DRIVERS.map(async d => { quotes[d.sym] = await retainedQuote(d.sym, () => q(d.sym), states); })),
+      retainedQuote('TSM', () => q('TSM'), states).then(v => { quotes.__TSM__ = v; }),
+      retainedQuote('台指期', qTxfNight, states),
     ]);
     /* 宿主若已被盤後重新掛載，略過這次過期結果 */
-    if (!host.isConnected) return;
+    if (!host.isConnected || (host.closest('#ah-root') && window.ShellV5 && ShellV5.route && ShellV5.route() !== 'afterhours')) return;
     const tsm = quotes.__TSM__;
     const tsmPct = (tsm && tsm.changePct != null) ? tsm.changePct : null;
     const soxQ = quotes['^SOX'];
@@ -312,7 +335,12 @@
     const actions = `<div style="text-align:right;margin-top:6px">
           <button type="button" data-ovn-refresh>↻ 重新整理</button></div>`;
 
+    const reading = window.AfterhoursV5 ? AfterhoursV5.captureReading(host) : null;
+    const failures = states.filter(s => s.failed).length;
+    const status = `<details class="ovn-source-state"><summary>${failures ? failures + ' 個來源更新失敗，保留已有資料' : '夜盤來源更新狀態'}</summary>${states.map(s =>
+      '<div>' + escapeText(s.key + '：' + (s.failed ? '更新失敗' : '已讀取') + ' · 嘗試 ' + s.attempt + ' · 最後成功 ' + (s.success || '—') + ' · 來源 ' + (s.asOf || '未提供時間')) + '</div>').join('')}<div>各來源時間可能不同；保留資料未代表即時報價。</div></details>`;
     host.innerHTML = `
+      ${status}
       <div class="dual ovn-signal-grid">
         <div class="ovn-signal-card primary">
           <div class="ovn-signal-head"><span class="ovn-signal-kicker">主訊號</span><span class="ovn-signal-name">台指期夜盤</span></div>
@@ -366,7 +394,9 @@
       goSym(c, 'US');
     });
     const btnR = host.querySelector('[data-ovn-refresh]');
-    if (btnR) btnR.onclick = () => refresh();
+    if (btnR) btnR.onclick = () => renderInto(host, opts);
+    if (reading) AfterhoursV5.restoreReading(host, reading);
+    } finally { rendering.delete(host); }
   }
 
   /** 盤後內嵌面板刷新 */

@@ -12,11 +12,14 @@
     }
     return 'st' + Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
   }
+  function copyResponse(response) {
+    return typeof response.clone === 'function' ? response.clone() : response;
+  }
   function request(path, options) {
     options = options || {};
     var method = String(options.method || 'GET').toUpperCase();
     var key = method === 'GET' ? method + ':' + path : null;
-    if (key && inflight[key]) return inflight[key];
+    if (key && inflight[key]) return inflight[key].then(copyResponse);
     var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var timeoutMs = Math.max(250, Number(options.timeoutMs || 15000));
     var headers = Object.assign({ 'X-ST-Trace-ID': traceId() }, options.headers || {});
@@ -39,7 +42,7 @@
       if (key) delete inflight[key];
     });
     if (key) inflight[key] = promise;
-    return promise;
+    return promise.then(copyResponse);
   }
   function getJson(path, options) {
     return request(path, options).then(function (response) { return response.json(); });

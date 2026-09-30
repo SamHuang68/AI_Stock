@@ -291,6 +291,7 @@ class StockSignalsRoutesMixin:
 
     def _handle_stock_signals_batch(self):
         qs = self._stock_signals_query()
+        cache_only = (qs.get('cacheOnly') or ['0'])[0] == '1'
         items = _parse_batch((qs.get('syms') or [''])[0])
         if not items:
             self._err('syms query parameter is required (e.g. 2330,2454,AAPL:US)', 400)
@@ -299,7 +300,16 @@ class StockSignalsRoutesMixin:
         def one(it):
             code, market = it
             try:
-                return ss.compact(analyze_symbol(code, market, with_stats=False))
+                result = analyze_symbol(code, market, with_stats=False, allow_network=not cache_only,
+                                        use_cache=not cache_only)
+                row = ss.compact(result)
+                row['eventReview'] = [{key: event.get(key) for key in (
+                    'signalId', 'label', 'direction', 'date', 'barsAgo', 'status', 'statusLabel',
+                    'statusDate', 'provisional', 'detail', 'plain', 'rule', 'audit', 'invalidation', 'evidenceId')}
+                    for event in result.get('events', [])]
+                for key in ('dataQuality', 'dataSource', 'dataWarning'):
+                    row[key] = result.get(key)
+                return row
             except Exception as exc:
                 return {'symbol': code, 'market': market, 'ok': False,
                         'reason': 'ERROR', 'message': type(exc).__name__}
@@ -406,6 +416,12 @@ class StockSignalsRoutesMixin:
     def _handle_stock_research_status(self):
         import 個股研究維護 as maintenance
         try:
+            if (self._stock_signals_query().get('comparison') or ['0'])[0] == '1':
+                import 個股前瞻對照 as comparison
+                import signal_stats_pool as pool
+                payload = comparison.read_report(maintenance.paths()[1], pool.load_cached('TW'))
+                self._ok(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+                return
             before = (self._stock_signals_query().get('reportBefore') or [None])[0]
             if before is not None and (len(before) > 19 or not before.isdecimal() or not 0 < int(before) < 9223372036854775807):
                 self._err('報告分頁位置無效', 400)
