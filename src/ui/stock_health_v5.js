@@ -813,13 +813,16 @@
   }
 
   var boards = new WeakMap();
+  function notApplicableLights(it) {
+    return (it && it.lights || []).filter(function (light) { return light.state === 'unknown' && light.tag === '不適用'; });
+  }
   function needsBoardRetry(it) {
     var quality = it && it.dataQuality || {};
     return !it || !it.ok || !!it.boardReadError || !!it.dataWarning || quality.status === 'attention' || quality.status === 'unknown' ||
-      (it.lights || []).some(function (light) { return light.state === 'unknown'; });
+      (it.lights || []).some(function (light) { return light.state === 'unknown' && light.tag !== '不適用'; });
   }
   function eventReviewHtml(items) {
-    var groups = { fresh: [], active: [], invalidated: [], insufficient: [] };
+    var groups = { fresh: [], active: [], invalidated: [], insufficient: [], notApplicable: [] };
     function actions(it) {
       return '<div class="sh5-row"><button type="button" class="sh5-btn" data-review-open="' + esc(it.symbol) + '" data-mkt="' + esc(it.market) + '">圖表與體檢證據</button>' +
         (it.market === 'TW' ? '<button type="button" class="sh5-btn" data-review-etf="' + esc(it.symbol) + '" data-sym="' + esc(it.symbol) + '" data-mkt="TW">ETF 明細</button>' : '') + '</div>';
@@ -827,9 +830,19 @@
     items.forEach(function (it) {
       if (it.pending) return;
       var quality = it.dataQuality || {}, problems = (quality.items || []).filter(function (q) { return ['missing', 'stale', 'unknown'].indexOf(q.status) >= 0; });
+      var unavailable = notApplicableLights(it);
+      if (unavailable.length) {
+        groups.notApplicable.push('<article class="sh5-ev"><b>' + esc(it.symbol) + ' · 資料日 ' + esc(it.asOf || '未知') + '</b><div>' +
+          unavailable.map(function (light) { return esc(light.label + '：' + light.tag); }).join('、') + '</div><div>' +
+          esc(it.market === 'US' && unavailable.some(function (light) { return light.key === 'chip'; }) ?
+            '美股不適用臺灣三大法人買賣超；此項保留標示，其餘體檢結果照常顯示。' : '此項依原始規則標示為不適用，保留供查閱。') + '</div>' + actions(it) + '</article>');
+      }
       if (needsBoardRetry(it)) {
+        var missingLights = (it.lights || []).filter(function (light) { return light.state === 'unknown' && light.tag !== '不適用'; });
         groups.insufficient.push('<article class="sh5-ev"><b>' + esc(it.symbol) + ' · 資料日 ' + esc(it.asOf || '未知') + '</b><div>' +
-          esc(it.boardReadError || it.message || it.dataWarning || quality.label || '部分條件資料不足') + '</div>' + problems.map(function (q) { return '<div>' + esc(q.label + ' · ' + (q.asOf || '未提供日期')) + '</div>'; }).join('') + actions(it) + '</article>');
+          esc(it.boardReadError || it.message || it.dataWarning || (missingLights.length ? '部分條件資料不足' : quality.label) || '部分條件資料不足') + '</div>' +
+          missingLights.map(function (light) { return '<div>' + esc(light.label + '：' + light.tag) + '</div>'; }).join('') +
+          problems.map(function (q) { return '<div>' + esc(q.label + ' · ' + (q.asOf || '未提供日期')) + '</div>'; }).join('') + actions(it) + '</article>');
       }
       (it.eventReview || []).forEach(function (event) {
         var key = event.status === 'invalidated' ? 'invalidated' : event.status === 'new' && event.barsAgo === 0 ? 'fresh' : 'active';
@@ -844,7 +857,7 @@
           '</div>' + actions(it) + '</article>');
       });
     });
-    var titles = { fresh: '新成立', active: '持續追蹤', invalidated: '已失效', insufficient: '資料不足' };
+    var titles = { fresh: '新成立', active: '持續追蹤', invalidated: '已失效', insufficient: '資料不足', notApplicable: '不適用項目' };
     return '<div class="sh5-foot">依每檔最新資料日分組；舊資料日不代表今天發生。事件狀態由目前歷史快照重建，首次觀測以每日帳本為準。ETF 明細沿用自身的比較日期。</div>' +
       Object.keys(groups).map(function (key) { return '<details class="sh5-review-group" data-review-group="' + key + '"' + (key === 'fresh' ? ' open' : '') + '><summary>' + titles[key] + ' · ' + groups[key].length + ' 筆</summary>' +
         (groups[key].join('') || '<div class="sh5-foot">目前已載入資料沒有此類項目。</div>') + '</details>'; }).join('');
@@ -885,7 +898,9 @@
       var oldTable = body.querySelector('table'), sorting = oldTable && window.TableSortV5 ? TableSortV5.capture(oldTable) : null;
       var items = syms.map(function (s) { return state.rows[s] || { symbol: s.split(':')[0], market: s.split(':')[1], ok: false, pending: true, message: '待載入' }; });
       var pending = syms.length - state.attempted.size;
-      el.querySelector('[data-board-progress]').textContent = '自選共 ' + syms.length + ' 檔 · 已完成 ' + (state.attempted.size - state.failures.size) + ' 檔 · 失敗／資料不足 ' + state.failures.size + ' 檔 · 待載入 ' + pending + ' 檔' + (state.busy ? ' · 載入中' : '') + ' · 每批最多 40 檔，僅讀本機資料';
+      var notApplicable = items.filter(function (it) { return notApplicableLights(it).length > 0; }).length;
+      el.querySelector('[data-board-progress]').textContent = '自選共 ' + syms.length + ' 檔 · 已完成 ' + (state.attempted.size - state.failures.size) + ' 檔 · 失敗／資料不足 ' + state.failures.size + ' 檔 · 待載入 ' + pending + ' 檔' +
+        (notApplicable ? ' · 含不適用項目 ' + notApplicable + ' 檔（另列說明）' : '') + (state.busy ? ' · 載入中' : '') + ' · 每批最多 40 檔，僅讀本機資料';
       el.querySelector('[data-board-more]').disabled = state.busy || !pending;
       el.querySelector('[data-board-retry]').disabled = state.busy || !state.failures.size;
       body.innerHTML = eventReviewHtml(items) + '<details data-board-legacy open><summary>完整體檢總表 · ' + syms.length + ' 檔</summary><div style="overflow:auto">' + boardHtml({ items: items }) + '</div></details>';

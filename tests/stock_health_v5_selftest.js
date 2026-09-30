@@ -160,6 +160,15 @@ const review = H.eventReviewHtml([{ ...fixture, lights: fixture.health.lights, e
   dataQuality: { status: 'attention', label: '籌碼日期待確認', items: [{ label: '籌碼', status: 'stale', asOf: '2026-09-24' }] } }]);
 ok(review.includes('已失效') && review.includes('收盤跌回突破點之下') && review.includes('2026-09-24'), '事件清單保留失效條件、資料不足及證據日期');
 ok(review.includes('data-review-etf="2330"') && review.includes('data-review-open="2330"'), '事件可開啟既有體檢與 ETF 明細');
+const usNotApplicable = { ...fixture, symbol: 'NVDA', market: 'US', lights: [light('chip', '籌碼', 'unknown', '不適用')],
+  eventReview: [], dataQuality: {status:'aligned',label:'與已知交易日對齊',items:[]} };
+const notApplicableReview = H.eventReviewHtml([usNotApplicable]);
+ok(notApplicableReview.includes('資料不足 · 0 筆') && notApplicableReview.includes('不適用項目 · 1 筆') &&
+  notApplicableReview.includes('美股不適用臺灣三大法人') && notApplicableReview.includes('data-review-open="NVDA"'), '不適用項目完整保留，與可重試缺漏分開');
+const usStaleReview = H.eventReviewHtml([{ ...usNotApplicable, dataQuality: {status:'attention',label:'日線待更新',items:[]} }]);
+ok(usStaleReview.includes('資料不足 · 1 筆') && usStaleReview.includes('不適用項目 · 1 筆'), '美股若同時有日線缺漏，仍保留重試項目');
+const twMissingReview = H.eventReviewHtml([{ ...usNotApplicable, symbol:'2330',market:'TW',lights:[light('chip','籌碼','unknown','無資料')] }]);
+ok(twMissingReview.includes('資料不足 · 1 筆') && twMissingReview.includes('籌碼：無資料') && twMissingReview.includes('不適用項目 · 0 筆'), '台股籌碼缺漏仍須提示並可重試');
 const movingLevel = H.eventReviewHtml([{ ...fixture, lights: fixture.health.lights, close: 105,
   eventReview: [{ label: '季線事件', status: 'invalidated', date: '2026-09-01', statusDate: '2026-09-30',
     invalidation: { text: '跌回當日季線', level: 100 } }] }]);
