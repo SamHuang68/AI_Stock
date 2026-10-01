@@ -57,7 +57,9 @@ def _number(value):
         return None
 
 def marketflow_payload(fetch, today):
-    out = {'date': today.isoformat(), 'turnover': [], 'inst': None, 'margin': None}
+    # date 一律是「實際觀察到的最新官方資料日」；全部抓不到就是 None，絕不退回請求／抓取日
+    # （否則法人缺資料時畫面會把今天當成法人資料日）。
+    out = {'date': None, 'turnover': [], 'inst': None, 'margin': None}
     try:
         data = fetch('https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date=' + today.strftime('%Y%m01') + '&response=json')
         if data.get('stat') in ('OK', 'ok'):
@@ -80,8 +82,9 @@ def marketflow_payload(fetch, today):
                     out['turnover'].append(rec)
                 except (IndexError, TypeError):
                     continue
-    except Exception:
-        pass
+    except Exception as e:
+        print('[marketflow] FMTQIK failed:', type(e).__name__, e)
+    inst_error = None
     for back in range(7):
         requested = today - timedelta(days=back)
         try:
@@ -106,8 +109,11 @@ def marketflow_payload(fetch, today):
             if any(inst[k] is not None for k in ('foreign','trust','dealer')):
                 out['inst'] = inst
                 break
-        except Exception:
+        except Exception as e:
+            inst_error = e
             continue
+    if out['inst'] is None and inst_error is not None:
+        print('[marketflow] BFI82U failed:', type(inst_error).__name__, inst_error)
     try:
         data = fetch('https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date=' + today.strftime('%Y%m%d') + '&selectType=ALL&response=json')
         observed = response_date(data, today, today)
@@ -117,6 +123,11 @@ def marketflow_payload(fetch, today):
             if rows:
                 out['margin'] = {'raw': rows[:6], 'date': observed.strftime('%Y%m%d'),
                                  'sourceDate': observed.isoformat(), 'source': 'TWSE MI_MARGN'}
-    except Exception:
-        pass
+    except Exception as e:
+        print('[marketflow] MI_MARGN failed:', type(e).__name__, e)
+    observed_days = [r['sourceDate'] for r in out['turnover']]
+    for section in (out['inst'], out['margin']):
+        if section:
+            observed_days.append(section['sourceDate'])
+    out['date'] = max(observed_days) if observed_days else None
     return out

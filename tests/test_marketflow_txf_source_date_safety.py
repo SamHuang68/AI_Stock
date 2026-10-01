@@ -126,6 +126,58 @@ def test_partial_institution_payload_keeps_missing_values_explicit():
     assert inst['dealer'] is None
 
 
+def test_marketflow_date_is_latest_observed_official_date_never_request_day():
+    # 過去 date 一律填請求日：法人抓不到時，盤後頁會把「今天」當成法人資料日。
+    nothing = marketflow_payload(lambda url: {'stat': 'no data'}, date(2026, 10, 1))
+    assert nothing['date'] is None
+
+    def only_inst(url):
+        if 'BFI82U' in url and 'dayDate=20260930' in url:
+            return {'stat': 'OK', 'date': '20260930', 'fields': ['單位名稱', '買賣超'], 'data': [['外資', '10']]}
+        return {'stat': 'no data'}
+    out = marketflow_payload(only_inst, date(2026, 10, 1))
+    assert out['inst']['date'] == '20260930'
+    assert out['date'] == '2026-09-30'
+
+
+def _marketflow_cache_ttl(fetch_json):
+    """用與 test_canonical_marketflow 相同的方式載入 _canonical_marketflow，回傳寫入快取時的 ttl。"""
+    import json
+    from types import SimpleNamespace
+    ttls = []
+    class Cache:
+        data = {}
+        def get(self, key): return self.data.get(key)
+        def set(self, key, value, ttl):
+            self.data[key] = value
+            ttls.append(ttl)
+    class Response:
+        def __init__(self, body): self.body = body
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self): return self.body
+    ns = {'taipei_today': lambda: date(2026, 10, 1), '_cache': Cache(), 'json': json,
+          'marketflow_payload': marketflow_payload, 'marketflow_cache_key': marketflow_cache_key,
+          'urllib': SimpleNamespace(request=SimpleNamespace(
+              Request=lambda url, headers: url,
+              urlopen=lambda url, timeout: Response(json.dumps(fetch_json(url)).encode()))),
+          'YF_HEADERS': {}, '_turnover_quant': lambda rows: None}
+    exec(compile(_function_node('_canonical_marketflow'), '<canonical>', 'exec'), ns)
+    ns['_canonical_marketflow']()
+    return ttls
+
+
+def test_canonical_marketflow_short_caches_total_failure_but_long_caches_real_data():
+    # 四個畫面共用這一份；整批失敗若快取 30 分鐘，TWSE 恢復後仍整整半小時沒資料。
+    assert _marketflow_cache_ttl(lambda url: {'stat': 'no data'}) == [60]
+
+    def with_turnover(url):
+        if 'FMTQIK' in url:
+            return {'stat': 'OK', 'fields': ['日期', '成交金額'], 'data': [['115/10/01', '100']]}
+        return {'stat': 'no data'}
+    assert _marketflow_cache_ttl(with_turnover) == [1800]
+
+
 def load_tests(loader, tests, pattern):
     import unittest
     suite = unittest.TestSuite()

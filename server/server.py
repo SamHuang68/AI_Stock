@@ -1503,14 +1503,16 @@ def _canonical_marketflow():
         out['turnoverQuant'] = _turnover_quant(out['turnover'])
     except Exception:
         out['turnoverQuant'] = None
-    _cache.set(key, json.dumps(out, ensure_ascii=False).encode(), ttl=1800)
+    # 四個畫面（/marketflow、基本面、Pulse、廣度）共用這一份：上游整批失敗（被限流／回 HTML）時，
+    # 若照樣快取 30 分鐘，等於 TWSE 恢復後仍整整半小時四處都沒資料。全空只留 60 秒（仍擋住連續請求的重複抓取）。
+    ttl = 1800 if (out['turnover'] or out['inst']) else 60
+    _cache.set(key, json.dumps(out, ensure_ascii=False).encode(), ttl=ttl)
     return out
 
 
 def _build_tw_market_fundamental(sym: str) -> dict:
     """^TWII / ^TWOII / __MARGIN_RATIO__ 大盤體質評分 payload。"""
-    from datetime import date as _date
-    today = _date.today().strftime('%Y%m%d')
+    today = taipei_today().strftime('%Y%m%d')   # 台北日，不用主機本地日（主機非 UTC+8 時日界會錯）
     clean = (sym or '').replace('.TW', '').replace('.TWO', '').strip().upper()
     out = {
         'symbol': sym,
