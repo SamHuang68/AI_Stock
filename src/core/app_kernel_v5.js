@@ -18,7 +18,8 @@
   function request(path, options) {
     options = options || {};
     var method = String(options.method || 'GET').toUpperCase();
-    var key = method === 'GET' ? method + ':' + path : null;
+    // A caller-owned deadline must not inherit another request's signal.
+    var key = method === 'GET' && !options.signal ? method + ':' + path : null;
     if (key && inflight[key]) return inflight[key].then(copyResponse);
     var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var timeoutMs = Math.max(250, Number(options.timeoutMs || 15000));

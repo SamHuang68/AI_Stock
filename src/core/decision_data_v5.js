@@ -153,7 +153,7 @@
 
   function refresh(opts) {
     opts = opts || {};
-    if (inflight && !opts.force) return inflight;
+    if (inflight && !opts.force && !opts.strict) return inflight;
     var id = opts.correlationId || correlationId('context');
     var started = Date.now();
     var hasBody = !!(opts.riskProfile || (opts.holdings && opts.holdings.length));
@@ -174,7 +174,7 @@
       portfolioKind: opts.portfolioKind || null,
       holdingsCount: (opts.holdings || []).length
     });
-    inflight = fetch(base() + '/decision/context', req)
+    var requestPromise = fetch(base() + '/decision/context', req)
       .then(function (r) {
         return r.text().then(function (raw) {
           trace('context_response', id, {
@@ -219,8 +219,9 @@
         if (opts.strict) throw err;
         return state;
       })
-      .finally(function () { inflight = null; });
-    return inflight;
+      .finally(function () { if (inflight === requestPromise) inflight = null; });
+    inflight = requestPromise;
+    return requestPromise;
   }
 
   window.DecisionData = {
