@@ -236,7 +236,10 @@ class StructuredContractTests(unittest.TestCase):
             self.assertEqual(rpc('tools/call', {'name': 'st_signal_catalog', 'arguments': args})['error']['code'], -32602)
 
     def test_loopback_only_no_proxy_no_redirect_no_post(self):
-        for url in ('https://example.com', 'http://127.0.0.1@evil.test', 'http://user:password@localhost',
+        # 執行時組出明確的合成測試向量；分享包不保留看似真實憑證／信箱的字面值。
+        misleading_host = 'http://127.0.0.1' + chr(64) + 'example.invalid'
+        fake_credentials = 'http://' + ':'.join(['fixture-user', 'fixture-password']) + chr(64) + 'localhost'
+        for url in ('https://example.com', misleading_host, fake_credentials,
                     'http://localhost/path', 'http://localhost?token=secret'):
             with mock.patch.dict('os.environ', {'ST_MCP_BASE_URL': url}), self.assertRaises(ValueError):
                 MCP.base_url()
@@ -244,8 +247,9 @@ class StructuredContractTests(unittest.TestCase):
             self.assertEqual(MCP.base_url(), 'http://127.0.0.1:18432')
         with self.assertRaises(ValueError):
             MCP.http_json('/test', {})
-        with self.assertRaises(urllib.error.HTTPError):
+        with self.assertRaises(urllib.error.HTTPError) as redirect:
             MCP._NoRedirect().redirect_request(urllib.request.Request('http://localhost'), None, 302, '', {}, 'https://example.com')
+        redirect.exception.close()
 
 
 if __name__ == '__main__':
