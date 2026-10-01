@@ -196,17 +196,27 @@
   function run() {
     const ta = document.getElementById('ss-code');
     const msg = document.getElementById('ss-msg');
+    document.getElementById('ss-result').textContent = '';
+    window._ssLast = null;
     const candles = getCandles();
     if (!candles || candles.length < 60) { msg.innerHTML = '<span style="color:#f87171">資料不足，請先載入個股(1 年以上日線)</span>'; return; }
     if (!window.StratLib || !window.Backtest || !window.Backtest.runLS) { msg.innerHTML = '<span style="color:#f87171">核心未載入</span>'; return; }
     const cols = window.Backtest.colsOf(candles);
     let res;
     try { res = interp(ta.value, cols); }
-    catch (e) { msg.innerHTML = '<span style="color:#f87171">腳本錯誤：' + e.message + '</span>'; return; }
+    catch (e) { msg.textContent = '腳本錯誤：' + e.message; return; }
     const buy = res.env.buy, sell = res.env.sell;
     if (!Array.isArray(buy)) { msg.innerHTML = '<span style="color:#f87171">需定義 buy = ... (布林序列)</span>'; return; }
     const sellArr = Array.isArray(sell) ? sell : null;
-    const r = window.Backtest.runLS(candles, buy, sellArr, { sl: 0, tp: 0, maxBars: 0 });
+    let r;
+    try {
+      if (typeof currentRangeDef === 'function' && currentRangeDef()?.interval !== '1d') throw new Error('請切換到日線再回測');
+      r = window.Backtest.runLS(candles, buy, sellArr, { sl: 0, tp: 0, maxBars: 0,
+        market: typeof S !== 'undefined' ? S.mkt : 'TW',
+        entryFeeBps: parseFloat(document.getElementById('ss-entryFeeBps').value),
+        exitFeeBps: parseFloat(document.getElementById('ss-exitFeeBps').value),
+        slippageBps: parseFloat(document.getElementById('ss-slippageBps').value) });
+    } catch (e) { msg.textContent = '回測未完成：' + e.message; return; }
     window._ssLast = { r, candles, plots: res.plots };
     msg.textContent = `OK · 進場訊號 ${buy.filter(Boolean).length} 次 · ${res.plots.length} 條 plot`;
     renderResult(r);
@@ -247,14 +257,16 @@
     const cell = (lbl, val, cls) => `<div class="ss-stat"><div class="ss-sl">${lbl}</div><div class="ss-sv ${cls || ''}">${val}</div></div>`;
     const pos = v => v >= 0 ? 'up' : 'dn';
     let h = `<div class="ss-stats">` +
-      cell('總報酬', (r.totalReturn >= 0 ? '+' : '') + r.totalReturn.toFixed(1) + '%', pos(r.totalReturn)) +
+      cell('總報酬（含未平倉）', (r.totalReturn >= 0 ? '+' : '') + r.totalReturn.toFixed(1) + '%', pos(r.totalReturn)) +
       cell('筆數', r.count) +
-      cell('勝率', r.winRate.toFixed(1) + '%', r.winRate >= 50 ? 'up' : 'dn') +
+      cell('已平倉勝率', r.winRate == null ? '—' : r.winRate.toFixed(1) + '%', r.winRate >= 50 ? 'up' : 'dn') +
       cell('獲利因子', fmtPF(r.profitFactor), r.profitFactor >= 1 ? 'up' : 'dn') +
       cell('最大回撤', '-' + r.maxDD.toFixed(1) + '%', 'dn') +
-      cell('夏普(年化)', r.sharpeAnn.toFixed(2), r.sharpeAnn >= 1 ? 'up' : '') +
+      cell('每日夏普（年化）', r.sharpeAnn == null ? '—' : r.sharpeAnn.toFixed(2), r.sharpeAnn >= 1 ? 'up' : '') +
       `</div><canvas id="ss-curve" width="540" height="80"></canvas>`;
-    document.getElementById('ss-result').innerHTML = h;
+    document.getElementById('ss-result').innerHTML = '<p id="ss-contract"></p><details><summary>模型限制與資料提醒</summary><p id="ss-limits"></p></details>' + h;
+    document.getElementById('ss-contract').textContent = window.Backtest.describe(r);
+    document.getElementById('ss-limits').textContent = r.limitations.join(' ') + ' ' + r.issues.map(x => `${x.date || ''} ${x.code}`).slice(0, 20).join('；');
     if (window.Backtest.drawCurve) window.Backtest.drawCurve(document.getElementById('ss-curve'), r.curve, '#fbbf24');
   }
 
@@ -262,7 +274,7 @@
     if (document.getElementById('ss-style')) return;
     const s = document.createElement('style'); s.id = 'ss-style';
     s.textContent = `
-    #ss-modal{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:none;align-items:center;justify-content:center}
+    #ss-modal{position:fixed;inset:0;width:100%;height:100%;max-width:none;max-height:none;margin:0;padding:0;border:0;box-sizing:border-box;background:rgba(0,0,0,.6);z-index:9999;display:none;align-items:center;justify-content:center}
     #ss-box{background:#0f172a;border:1px solid #334155;border-radius:10px;width:min(760px,96vw);max-height:92vh;overflow:auto;padding:16px;color:#e2e8f0;font-size:12px}
     #ss-box h3{margin:0 0 8px;font-size:15px;display:flex;align-items:center;gap:8px}
     #ss-box h3 .x{margin-left:auto;cursor:pointer;color:#94a3b8;font-size:18px}
@@ -278,7 +290,11 @@
     .ss-stat{background:#0b1220;border:1px solid #1e293b;border-radius:6px;padding:6px}
     .ss-sl{font-size:9px;color:#64748b}.ss-sv{font-size:13px;font-weight:800;margin-top:2px}
     .ss-sv.up{color:#22c55e}.ss-sv.dn{color:#ef4444}
-    #ss-curve{border:1px solid #1e293b;border-radius:6px;background:#060A12;margin-top:6px}`;
+    #ss-curve{border:1px solid #1e293b;border-radius:6px;background:#060A12;margin-top:6px;max-width:100%}
+    #ss-contract,#ss-limits{font-size:11px;line-height:1.7;color:#cbd5e1;overflow-wrap:anywhere}
+    .ss-costs{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0}.ss-costs input{width:65px}
+    #ss-box button:focus-visible,#ss-box input:focus-visible{outline:2px solid #fbbf24;outline-offset:2px}
+    @media(max-width:600px){.ss-stats{grid-template-columns:repeat(2,1fr)}}`;
     document.head.appendChild(s);
   }
 
@@ -286,30 +302,35 @@
     style();
     let m = document.getElementById('ss-modal');
     if (!m) {
-      m = document.createElement('div'); m.id = 'ss-modal';
+      m = document.createElement('dialog'); m.id = 'ss-modal';
+      m.setAttribute('aria-labelledby', 'ss-title');
       m.innerHTML = `<div id="ss-box">
-        <h3>📝 策略腳本 (DSL) <span class="x" onclick="window.stratScriptClose&&stratScriptClose()">×</span></h3>
+        <h3 id="ss-title">📝 策略腳本 (DSL) <button type="button" class="x" aria-label="關閉策略腳本" onclick="window.stratScriptClose&&stratScriptClose()">×</button></h3>
         <div class="ss-bar">
           <select id="ss-ex"><option value="">— 載入範例 —</option><option value="golden">均線黃金交叉+RSI</option><option value="rsi">RSI 超賣超買</option><option value="bb">布林通道</option></select>
           <button id="ss-run">▶ 執行回測</button>
           <button id="ss-clear">清除主圖標記</button>
           <span style="color:#475569;font-size:10px">標的=目前個股與圖表區間</span>
         </div>
-        <textarea id="ss-code" spellcheck="false"></textarea>
+        <textarea id="ss-code" spellcheck="false" aria-label="策略腳本內容"></textarea>
+        <div class="ss-costs"><label>進場費 bp <input id="ss-entryFeeBps" type="number" min="0" step="0.1" value="10" /></label><label>出場費 bp <input id="ss-exitFeeBps" type="number" min="0" step="0.1" value="10" /></label><label>每邊滑價 bp <input id="ss-slippageBps" type="number" min="0" step="0.1" value="5" /></label></div>
+        <p>1 bp = 0.01%；預設為可調成本情境，非券商牌告。收盤訊號於下一可成交開盤執行；期末只估值、不強制平倉。</p>
         <div class="ss-help">函式：<code>sma/ema/rsi/highest/lowest(來源,期數)</code>、<code>crossover/crossunder(a,b)</code>、<code>k() d() macd() macdsig() macdhist()</code>、<code>bbupper/bbmid/bblower(期數,標準差)</code>、<code>abs()</code>。<br>變數：<code>close open high low volume</code>。運算：<code>+ - * / &gt; &lt; &gt;= &lt;= == != and or not</code>。必須定義 <code>buy = ...</code>(可選 <code>sell = ...</code>)；<code>plot a, b</code> 疊到主圖。不用 sell 時，部位持有到資料末端(可純看 plot)。</div>
-        <div id="ss-msg"></div>
+        <div id="ss-msg" role="status" aria-live="polite"></div>
         <div id="ss-result"></div>
       </div>`;
       document.body.appendChild(m);
       m.addEventListener('click', e => { if (e.target === m) close(); });
+      m.addEventListener('cancel', e => { e.preventDefault(); close(); });
       m.querySelector('#ss-run').onclick = run;
       m.querySelector('#ss-clear').onclick = () => { clearPlots(); if (typeof S !== 'undefined' && S.chartSeries) try { S.chartSeries.setMarkers([]); } catch {} };
       m.querySelector('#ss-ex').onchange = e => { if (e.target.value && EXAMPLES[e.target.value]) document.getElementById('ss-code').value = EXAMPLES[e.target.value]; };
     }
     if (!document.getElementById('ss-code').value.trim()) document.getElementById('ss-code').value = EXAMPLES.golden;
     m.style.display = 'flex';
+    if (!m.open) m.showModal();
   }
-  function close() { const m = document.getElementById('ss-modal'); if (m) m.style.display = 'none'; }
+  function close() { const m = document.getElementById('ss-modal'); if (m) { m.close(); m.style.display = 'none'; } }
 
   window.stratScriptOpen = open;
   window.stratScriptClose = close;

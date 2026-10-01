@@ -179,7 +179,7 @@
       entryCombine: 'AND',
       exit: [{ left: { ind: 'sma', n: 20 }, cmp: 'xdn', rightMode: 'ind', right: { ind: 'sma', n: 60 }, rightNum: 0 }],
       exitCombine: 'OR',
-      tp: 0, sl: 8, maxBars: 0,
+      tp: 0, sl: 8, maxBars: 0, entryFeeBps: 10, exitFeeBps: 10, slippageBps: 5,
     };
   }
 
@@ -232,9 +232,10 @@
       const cb = document.querySelector(`.sb-combine[data-group="${group}"]`);
       if (cb) model[group + 'Combine'] = cb.value;
     });
-    model.tp = parseFloat(document.getElementById('sb-tp').value) || 0;
-    model.sl = parseFloat(document.getElementById('sb-sl').value) || 0;
-    model.maxBars = parseFloat(document.getElementById('sb-maxbars').value) || 0;
+    model.tp = parseFloat(document.getElementById('sb-tp').value);
+    model.sl = parseFloat(document.getElementById('sb-sl').value);
+    model.maxBars = parseFloat(document.getElementById('sb-maxbars').value);
+    for (const key of ['entryFeeBps', 'exitFeeBps', 'slippageBps']) model[key] = parseFloat(document.getElementById('sb-' + key).value);
   }
 
   function renderGroups() {
@@ -269,19 +270,38 @@
     if (typeof S !== 'undefined' && S.data && Array.isArray(S.data.candles)) return S.data.candles;
     return null;
   }
-  function run() {
-    readUI();
+  function executionOptions() {
+    if (typeof currentRangeDef === 'function' && currentRangeDef()?.interval !== '1d') throw new Error('請切換到日線再回測');
+    return { tp: model.tp / 100, sl: model.sl / 100, maxBars: model.maxBars,
+      entryFeeBps: model.entryFeeBps, exitFeeBps: model.exitFeeBps, slippageBps: model.slippageBps,
+      market: typeof S !== 'undefined' ? S.mkt : 'TW' };
+  }
+  function run(holdout = false) {
     const candles = getCandles();
     const msg = document.getElementById('sb-msg');
+    document.getElementById('sb-result').textContent = '';
+    window._sbLast = null;
     if (!candles || candles.length < 60) { msg.innerHTML = '<span style="color:#f87171">資料不足，請先載入個股(建議 1 年以上日線)</span>'; return; }
     if (!window.Backtest || !window.Backtest.runLS) { msg.innerHTML = '<span style="color:#f87171">回測核心未載入</span>'; return; }
-    const cols = window.Backtest.colsOf(candles);
-    const buy = evalConditions(model.entry, model.entryCombine, cols);
-    const sell = evalConditions(model.exit, model.exitCombine, cols);
-    const opts = { tp: model.tp > 0 ? model.tp / 100 : 0, sl: model.sl > 0 ? model.sl / 100 : 0, maxBars: model.maxBars || 0 };
-    const r = window.Backtest.runLS(candles, buy, sell, opts);
-    window._sbLast = { r, candles, buy, sell };
-    renderResult(r);
+    try {
+      readUI();
+      const opts = executionOptions();
+      if (holdout === true) {
+        const split = window.Backtest.evaluateStrategies(candles, { ...opts,
+          trainEnd: document.getElementById('sb-train-end').value, testEnd: document.getElementById('sb-test-end').value });
+        if (!split.test) { msg.textContent = split.reason; return; }
+        window._sbLast = { r: split.test, candles, split };
+        renderResult(split.test);
+        msg.textContent = `固定切分：訓練截止 ${split.trainEnd}／測試截止 ${split.testEnd}；依訓練期淨期望值從八種既有策略選出「${window.Backtest.STRATEGIES[split.selected].name}」。測試期不再調參，以下只顯示樣本外結果。`;
+      } else {
+        const cols = window.Backtest.colsOf(candles);
+        const buy = evalConditions(model.entry, model.entryCombine, cols);
+        const sell = evalConditions(model.exit, model.exitCombine, cols);
+        const r = window.Backtest.runLS(candles, buy, sell, opts);
+        window._sbLast = { r, candles, buy, sell };
+        renderResult(r);
+      }
+    } catch (error) { msg.textContent = '回測未完成：' + error.message; }
   }
 
   function fmtPF(v) { return v === Infinity ? '∞' : v.toFixed(2); }
@@ -290,12 +310,12 @@
     const cell = (lbl, val, cls) => `<div class="sb-stat"><div class="sb-sl">${lbl}</div><div class="sb-sv ${cls || ''}">${val}</div></div>`;
     const pos = v => v >= 0 ? 'up' : 'dn';
     let h = `<div class="sb-stats">` +
-      cell('總報酬', (r.totalReturn >= 0 ? '+' : '') + r.totalReturn.toFixed(1) + '%', pos(r.totalReturn)) +
+      cell('總報酬（含未平倉）', (r.totalReturn >= 0 ? '+' : '') + r.totalReturn.toFixed(1) + '%', pos(r.totalReturn)) +
       cell('交易筆數', r.count) +
-      cell('勝率', r.winRate.toFixed(1) + '%', r.winRate >= 50 ? 'up' : 'dn') +
+      cell('已平倉勝率', r.winRate == null ? '—' : r.winRate.toFixed(1) + '%', r.winRate >= 50 ? 'up' : 'dn') +
       cell('獲利因子', fmtPF(r.profitFactor), r.profitFactor >= 1 ? 'up' : 'dn') +
       cell('最大回撤', '-' + r.maxDD.toFixed(1) + '%', 'dn') +
-      cell('夏普(年化)', r.sharpeAnn.toFixed(2), r.sharpeAnn >= 1 ? 'up' : '') +
+      cell('每日夏普（年化）', r.sharpeAnn == null ? '—' : r.sharpeAnn.toFixed(2), r.sharpeAnn >= 1 ? 'up' : '') +
       cell('期望值/筆', (r.expectancy >= 0 ? '+' : '') + r.expectancy.toFixed(2) + '%', pos(r.expectancy)) +
       cell('平均持有', r.avgHoldBars.toFixed(1) + ' 根') +
       cell('最大連勝', r.maxWinStreak, 'up') +
@@ -306,14 +326,16 @@
     // 交易明細
     if (r.trades.length) {
       h += `<details class="sb-trades"><summary>逐筆交易明細 (${r.trades.length})</summary><table><thead><tr><th>#</th><th>進場日</th><th>進</th><th>出場日</th><th>出</th><th>報酬</th><th>持有</th><th>出場因</th></tr></thead><tbody>`;
-      const fmtD = t => { const d = new Date(t * 1000); return (d.getMonth() + 1) + '/' + d.getDate() + '/' + String(d.getFullYear()).slice(2); };
-      const rsn = { tp: '停利', sl: '停損', time: '時間', signal: '訊號', end: '到底' };
+      const fmtD = t => window.Backtest.dateKey(t, r.settings.market);
+      const rsn = { tp: '收盤停利', sl: '收盤停損', time: '持有期滿', signal: '收盤訊號', insolvent: '權益耗盡' };
       r.trades.forEach((t, i) => {
         h += `<tr><td>${i + 1}</td><td>${fmtD(t.time)}</td><td>${t.entry.toFixed(2)}</td><td>${fmtD(t.exitTime)}</td><td>${t.exit.toFixed(2)}</td><td class="${t.ret >= 0 ? 'up' : 'dn'}">${(t.ret * 100).toFixed(2)}%</td><td>${t.holdBars}</td><td>${rsn[t.reason] || t.reason}</td></tr>`;
       });
       h += `</tbody></table></details>`;
     }
-    document.getElementById('sb-result').innerHTML = h;
+    document.getElementById('sb-result').innerHTML = '<p id="sb-contract"></p><details><summary>模型限制與資料提醒</summary><p id="sb-limits"></p></details>' + h;
+    document.getElementById('sb-contract').textContent = window.Backtest.describe(r);
+    document.getElementById('sb-limits').textContent = r.limitations.join(' ') + ' ' + r.issues.map(x => `${x.date || ''} ${x.code}`).slice(0, 20).join('；');
     document.getElementById('sb-msg').textContent = sym ? `回測標的：${sym}（目前圖表區間）` : '';
     if (window.Backtest.drawCurve) window.Backtest.drawCurve(document.getElementById('sb-curve'), r.curve, '#fbbf24');
     const mk = document.getElementById('sb-mark'); if (mk) mk.onclick = markChart;
@@ -351,6 +373,7 @@
     document.getElementById('sb-tp').value = model.tp || 0;
     document.getElementById('sb-sl').value = model.sl || 0;
     document.getElementById('sb-maxbars').value = model.maxBars || 0;
+    for (const key of ['entryFeeBps', 'exitFeeBps', 'slippageBps']) document.getElementById('sb-' + key).value = model[key] ?? window.Backtest.DEFAULTS[key];
     renderGroups();
   }
 
@@ -359,7 +382,7 @@
     if (document.getElementById('sb-style')) return;
     const s = document.createElement('style'); s.id = 'sb-style';
     s.textContent = `
-    #sb-modal{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:none;align-items:center;justify-content:center}
+    #sb-modal{position:fixed;inset:0;width:100%;height:100%;max-width:none;max-height:none;margin:0;padding:0;border:0;box-sizing:border-box;background:rgba(0,0,0,.6);z-index:9999;display:none;align-items:center;justify-content:center}
     #sb-box{background:#0f172a;border:1px solid #334155;border-radius:10px;width:min(820px,96vw);max-height:92vh;overflow:auto;padding:16px;color:#e2e8f0;font-size:12px}
     #sb-box h3{margin:0 0 8px;font-size:15px;display:flex;align-items:center;gap:8px}
     #sb-box h3 .x{margin-left:auto;cursor:pointer;color:#94a3b8;font-size:18px}
@@ -380,7 +403,11 @@
     .sb-sl{font-size:9px;color:#64748b}.sb-sv{font-size:14px;font-weight:800;margin-top:2px}
     .sb-sv.up{color:#22c55e}.sb-sv.dn{color:#ef4444}
     .sb-actions{display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap}
-    #sb-curve{border:1px solid #1e293b;border-radius:6px;background:#060A12}
+    #sb-curve{border:1px solid #1e293b;border-radius:6px;background:#060A12;max-width:100%}
+    #sb-contract,#sb-limits{font-size:11px;line-height:1.7;color:#cbd5e1;overflow-wrap:anywhere}
+    .sb-split{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+    .sb-split input{max-width:140px}.sb-split button{padding:6px}
+    #sb-box button:focus-visible,#sb-box input:focus-visible{outline:2px solid #fbbf24;outline-offset:2px}
     .sb-trades{margin-top:8px}.sb-trades summary{cursor:pointer;color:#94a3b8;font-size:11px;margin-bottom:6px}
     .sb-trades table{width:100%;border-collapse:collapse;font-size:10px}
     .sb-trades th,.sb-trades td{border-bottom:1px solid #1a2740;padding:3px 5px;text-align:right}
@@ -396,9 +423,10 @@
     if (!model) model = defModel();
     let m = document.getElementById('sb-modal');
     if (!m) {
-      m = document.createElement('div'); m.id = 'sb-modal';
+      m = document.createElement('dialog'); m.id = 'sb-modal';
+      m.setAttribute('aria-labelledby', 'sb-title');
       m.innerHTML = `<div id="sb-box">
-        <h3>🧱 策略條件組合器 <span class="x" onclick="window.stratBuilderClose&&stratBuilderClose()">×</span></h3>
+        <h3 id="sb-title">🧱 策略條件組合器 <button type="button" class="x" aria-label="關閉策略條件組合器" onclick="window.stratBuilderClose&&stratBuilderClose()">×</button></h3>
         <div class="sb-toolbar">
           <select id="sb-saved"><option value="">— 載入條件組 —</option></select>
           <button id="sb-save">💾 另存</button>
@@ -410,22 +438,32 @@
           <label>停利% <input id="sb-tp" type="number" value="${model.tp}" /></label>
           <label>停損% <input id="sb-sl" type="number" value="${model.sl}" /></label>
           <label>最長持有(根) <input id="sb-maxbars" type="number" value="${model.maxBars}" /></label>
+          <label>進場費 bp <input id="sb-entryFeeBps" type="number" min="0" step="0.1" value="${model.entryFeeBps}" /></label>
+          <label>出場費 bp <input id="sb-exitFeeBps" type="number" min="0" step="0.1" value="${model.exitFeeBps}" /></label>
+          <label>每邊滑價 bp <input id="sb-slippageBps" type="number" min="0" step="0.1" value="${model.slippageBps}" /></label>
           <button id="sb-run">▶ 回測</button>
         </div>
-        <div id="sb-msg"></div>
+        <p>1 bp = 0.01%；預設為成本情境，請依市場／股票或 ETF 調整。停利停損採收盤判斷、下次可成交開盤執行。</p>
+        <details><summary>八種既有策略的固定樣本外比較</summary><p>先固定日期，僅用訓練期挑選策略；沿用上方成本與停利停損。反覆查看測試結果後改設定，仍可能造成樣本外污染。</p>
+          <div class="sb-split"><label>訓練截止 <input id="sb-train-end" type="date" /></label><label>測試截止 <input id="sb-test-end" type="date" /></label><button id="sb-holdout">執行固定切分</button></div>
+        </details>
+        <div id="sb-msg" role="status" aria-live="polite"></div>
         <div id="sb-result"></div>
       </div>`;
       document.body.appendChild(m);
       m.addEventListener('click', e => { if (e.target === m) close(); });
-      m.querySelector('#sb-run').onclick = run;
+      m.addEventListener('cancel', e => { e.preventDefault(); close(); });
+      m.querySelector('#sb-run').onclick = () => run(false);
+      m.querySelector('#sb-holdout').onclick = () => run(true);
       m.querySelector('#sb-save').onclick = saveModel;
       m.querySelector('#sb-saved').onchange = e => { if (e.target.value) loadModel(e.target.value); };
     }
     m.style.display = 'flex';
+    if (!m.open) m.showModal();
     renderGroups();
     refreshSavedList();
   }
-  function close() { const m = document.getElementById('sb-modal'); if (m) m.style.display = 'none'; }
+  function close() { const m = document.getElementById('sb-modal'); if (m) { m.close(); m.style.display = 'none'; } }
 
   window.stratBuilderOpen = open;
   window.stratBuilderClose = close;

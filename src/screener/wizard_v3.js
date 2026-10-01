@@ -72,9 +72,9 @@
   // ---- 體檢引擎 ----
   function compute() {
     const c = (typeof S !== 'undefined' && S.data && S.data.candles) ? S.data.candles : null;
-    return computeFrom(c);
+    return computeFrom(c, typeof S !== 'undefined' ? S.mkt : 'TW');
   }
-  function computeFrom(c) {
+  function computeFrom(c, market = 'TW') {
     if (!c || c.length < 60 || !window.StratLib) return null;
     const L = window.StratLib;
     const closes = c.map(x => x.close), highs = c.map(x => x.high), lows = c.map(x => x.low), vols = c.map(x => x.volume || 0);
@@ -91,10 +91,12 @@
     const { support, resistance } = levels(c, price);
     const sw = swing(c);
     // 歷史策略勝率 (best-effort)
-    let scan = [];
-    try { if (window.Backtest && window.Backtest.scanStrategies) scan = window.Backtest.scanStrategies(c) || []; } catch {}
+    let scan = [], backtestError = null;
+    try {
+      if (window.Backtest && window.Backtest.scanStrategies) scan = window.Backtest.scanStrategies(c, { market });
+    } catch (error) { backtestError = error.message; }
     const scanMap = {}; scan.forEach(r => { scanMap[r.key] = r; });
-    return { price, sma20, sma60, sma200, rsi, atr, atrPct, volRatio, techBias: tb, support, resistance, sw, scanMap };
+    return { price, sma20, sma60, sma200, rsi, atr, atrPct, volRatio, techBias: tb, support, resistance, sw, scanMap, backtestError };
   }
 
   async function fetchContext(sym) {
@@ -339,7 +341,7 @@
     const chk = (id, on) => `<input type="checkbox" id="${id}" ${on ? 'checked' : ''}>`;
     const sigList = s.sigs.map((sig, i) => {
       const sc = d.scanMap[sig.strategy];
-      const wr = sc && sc.winRate != null ? ` <span style="color:#64748b">(歷史勝率 ${sc.winRate.toFixed(0)}%)</span>` : '';
+      const wr = sc && sc.winRate != null ? ` <span style="color:#64748b">(樣本內已平倉 ${sc.count} 筆，勝率 ${sc.winRate.toFixed(0)}%)</span>` : '';
       return `<label>${chk('wz-sig-' + i, true)} ${SIG_LBL[sig.strategy] || sig.strategy}${sig.params.target ? ' @' + sig.params.target : ''}${wr}</label>`;
     }).join('');
     box.innerHTML = `
@@ -351,7 +353,7 @@
       </div>
       <div class="wz-concl">🧠 ${wz.conclusion || ''}</div>
 
-      <div class="wz-card"><h4>${chk('wz-ap-watch', true)} 觀察訊號（WATCH 後端 24h 偵測）</h4>${sigList}</div>
+      <div class="wz-card"><h4>${chk('wz-ap-watch', true)} 觀察訊號（WATCH 後端 24h 偵測）</h4>${sigList}<p id="wz-backtest-contract"></p></div>
 
       <div class="wz-card"><h4>${chk('wz-ap-alert', true)} 警報（🔔 後端推播）</h4>
         <label>跌破支撐 ${s.buyLo}　|　突破壓力 ${s.target}</label>
@@ -370,6 +372,11 @@
 
       <div id="wz-msg"></div>
       <div class="wz-foot"><button id="wz-back">← 改答案</button><button class="pri" id="wz-apply">✅ 套用勾選項目</button></div>`;
+    const firstBacktest = Object.values(d.scanMap)[0];
+    box.querySelector('#wz-backtest-contract').textContent = d.backtestError
+      ? '歷史回測未完成：' + d.backtestError
+      : firstBacktest ? window.Backtest.describe(firstBacktest) + ' ' + firstBacktest.limitations.join(' ')
+        : '尚無可用的歷史回測結果。';
     box.querySelector('#wz-back').onclick = renderQuestions;
     box.querySelector('#wz-apply').onclick = apply;
   }
@@ -464,7 +471,7 @@
         const yf = (mkt === 'TW') ? sym + '.TW' : sym;
         const raw = await fetch(`${SRV}/yf/${encodeURIComponent(yf)}?range=1y&interval=1d`, { cache: 'no-store' }).then(x => x.ok ? x.json() : null);
         const parsed = (raw && typeof parseYF === 'function') ? parseYF(raw) : null;
-        const diag = parsed ? computeFrom(parsed.candles) : null;
+        const diag = parsed ? computeFrom(parsed.candles, mkt) : null;
         if (!diag) { row.textContent = `${sym} ✗ 資料不足`; continue; }
         const sug = buildSuggestions(diag);
         sug.conclusion = ruleConclusion(diag, {}, sym);
