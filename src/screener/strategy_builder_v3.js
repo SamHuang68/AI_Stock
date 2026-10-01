@@ -304,23 +304,23 @@
     } catch (error) { msg.textContent = '回測未完成：' + error.message; }
   }
 
-  function fmtPF(v) { return v === Infinity ? '∞' : v.toFixed(2); }
+  function fmtPF(v) { return v == null ? '—' : v === Infinity ? '∞' : v.toFixed(2); }
   function renderResult(r) {
     const sym = (typeof S !== 'undefined' && S.sym) ? S.sym : '';
     const cell = (lbl, val, cls) => `<div class="sb-stat"><div class="sb-sl">${lbl}</div><div class="sb-sv ${cls || ''}">${val}</div></div>`;
-    const pos = v => v >= 0 ? 'up' : 'dn';
+    const pos = v => v == null ? '' : v >= 0 ? 'up' : 'dn';
     let h = `<div class="sb-stats">` +
       cell('總報酬（含未平倉）', (r.totalReturn >= 0 ? '+' : '') + r.totalReturn.toFixed(1) + '%', pos(r.totalReturn)) +
       cell('交易筆數', r.count) +
-      cell('已平倉勝率', r.winRate == null ? '—' : r.winRate.toFixed(1) + '%', r.winRate >= 50 ? 'up' : 'dn') +
-      cell('獲利因子', fmtPF(r.profitFactor), r.profitFactor >= 1 ? 'up' : 'dn') +
+      cell('已平倉勝率', r.winRate == null ? '—' : r.winRate.toFixed(1) + '%', r.winRate == null ? '' : r.winRate >= 50 ? 'up' : 'dn') +
+      cell('獲利因子', fmtPF(r.profitFactor), r.profitFactor == null ? '' : r.profitFactor >= 1 ? 'up' : 'dn') +
       cell('最大回撤', '-' + r.maxDD.toFixed(1) + '%', 'dn') +
       cell('每日夏普（年化）', r.sharpeAnn == null ? '—' : r.sharpeAnn.toFixed(2), r.sharpeAnn >= 1 ? 'up' : '') +
-      cell('期望值/筆', (r.expectancy >= 0 ? '+' : '') + r.expectancy.toFixed(2) + '%', pos(r.expectancy)) +
-      cell('平均持有', r.avgHoldBars.toFixed(1) + ' 根') +
+      cell('期望值/筆', r.expectancy == null ? '—' : (r.expectancy >= 0 ? '+' : '') + r.expectancy.toFixed(2) + '%', pos(r.expectancy)) +
+      cell('平均持有', r.avgHoldBars == null ? '—' : r.avgHoldBars.toFixed(1) + ' 根') +
       cell('最大連勝', r.maxWinStreak, 'up') +
       cell('最大連敗', r.maxLossStreak, 'dn') +
-      cell('最佳/最差', '+' + r.best.toFixed(1) + '% / ' + r.worst.toFixed(1) + '%') +
+      cell('最佳/最差', r.best == null ? '—' : (r.best >= 0 ? '+' : '') + r.best.toFixed(1) + '% / ' + r.worst.toFixed(1) + '%') +
       `</div>`;
     h += `<div class="sb-actions"><button id="sb-mark">📍 在主圖標示買賣點</button><canvas id="sb-curve" width="540" height="90"></canvas></div>`;
     // 交易明細

@@ -79,7 +79,7 @@
   // ---- 核心回測 --------------------------------------------
   // candles: [{time,open,high,low,close,volume}]
   // opts: {tp:0.15, sl:0.08, maxBars:20, short:false}
-  const ENGINE_VERSION = 'st-backtest/4.0';
+  const ENGINE_VERSION = 'st-backtest/4.0.1';
   const DEFAULTS = Object.freeze({ tp: 0, sl: 0, maxBars: 0, short: false,
     entryFeeBps: 10, exitFeeBps: 10, slippageBps: 5, periodsPerYear: 252,
     annualRiskFreeRate: 0, market: 'TW' });
@@ -241,9 +241,9 @@
     const mean = excess.length ? excess.reduce((s, r) => s + r, 0) / excess.length : 0;
     const sd = excess.length > 1 ? Math.sqrt(excess.reduce((s, r) => s + (r - mean) ** 2, 0) / (excess.length - 1)) : 0;
     const sharpe = sd > 0 && excess.length === dailyReturns.length ? mean / sd * Math.sqrt(opts.periodsPerYear) : null;
-    const payoff = avgLoss ? Math.abs(avgWin / avgLoss) : (avgWin ? Infinity : 0);
+    const payoff = avgLoss ? Math.abs(avgWin / avgLoss) : (avgWin ? Infinity : null);
     const grossWin = wins.reduce((s, t) => s + t.pnl, 0), grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
-    const profitFactor = grossLoss ? grossWin / grossLoss : (grossWin ? Infinity : 0);
+    const profitFactor = grossLoss ? grossWin / grossLoss : (grossWin ? Infinity : null);
     let winStreak = 0, lossStreak = 0, curW = 0, curL = 0;
     for (const t of trades) {
       if (t.ret > 0) { curW++; curL = 0; winStreak = Math.max(winStreak, curW); }
@@ -251,12 +251,13 @@
     }
     const rets = trades.map(t => t.ret);
     return { count: n, winRate: n ? wins.length / n * 100 : null, wins: wins.length, losses: losses.length,
-      avgWin: avgWin * 100, avgLoss: avgLoss * 100, payoff,
-      expectancy: expectancy * 100, totalReturn: (equity - 1) * 100, maxDD: maxDD * 100,
+      avgWin: wins.length ? avgWin * 100 : null, avgLoss: losses.length ? avgLoss * 100 : null,
+      payoff: n ? payoff : null,
+      expectancy: n ? expectancy * 100 : null, totalReturn: (equity - 1) * 100, maxDD: maxDD * 100,
       sharpe, sharpeAnn: sharpe, profitFactor,
-      avgHoldBars: n ? trades.reduce((s, t) => s + t.holdBars, 0) / n : 0,
+      avgHoldBars: n ? trades.reduce((s, t) => s + t.holdBars, 0) / n : null,
       maxWinStreak: winStreak, maxLossStreak: lossStreak,
-      best: n ? Math.max(...rets) * 100 : 0, worst: n ? Math.min(...rets) * 100 : 0,
+      best: n ? Math.max(...rets) * 100 : null, worst: n ? Math.min(...rets) * 100 : null,
       trades, curve, dailyReturns };
   }
 
@@ -279,7 +280,8 @@
       const r = run(candles, sig, o);
       rows.push({ key, name: st.name, ...r });
     }
-    return rows.sort((a, b) => b.expectancy - a.expectancy);
+    return rows.sort((a, b) => a.expectancy == null ? (b.expectancy == null ? 0 : 1)
+      : b.expectancy == null ? -1 : b.expectancy - a.expectancy);
   }
   function wrap(candles) { return colsOf(candles); }
 
