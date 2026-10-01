@@ -18,7 +18,8 @@ import macro_track as mt
 def api_namespace():
     tree = ast.parse((ROOT / 'server/server.py').read_text(encoding='utf-8'))
     names = {'MACRO_SERIES', 'MACRO_ECONOMY_KEYS', '_macro_resolve_points',
-             '_macro_payload', '_macro_economy_snapshot', '_macro_latest', '_macro_today'}
+             '_macro_payload', '_macro_economy_snapshot', '_macro_latest', '_macro_today',
+             '_macro_cache', '_macro_cache_invalidate'}
     nodes = [node for node in tree.body if
              isinstance(node, ast.FunctionDef) and node.name in names or
              isinstance(node, ast.Assign) and any(

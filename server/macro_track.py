@@ -573,17 +573,45 @@ def _seed_path(name: str) -> str:
     return os.path.join(SEED_DIR, name)
 
 
+# 解析結果快取：鍵＝(檔名, 內容 sha256, 台北日)。status_summary 每次都對每個美股種子完整解析
+# （約 4 萬列），資料源清單一次請求會呼叫它 6 次 → /datasources 每次多花約 2 秒。
+# 內容雜湊讓檔案一變就自然失效（不靠 mtime，避免同大小同時間的連續改寫）；
+# 加上台北日是因為「未來日期」檢查會隨日期變動。回傳複本，呼叫端改動不會污染快取。
+_SEED_PARSE_CACHE: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}
+_SEED_PARSE_CACHE_MAX = 64
+_SEED_PARSE_CACHE_LOCK = threading.Lock()
+
+
 def _load_seed_csv(name: Optional[str], content: Optional[bytes] = None) -> List[Dict[str, Any]]:
     if not name:
         return []
     path = _seed_path(name)
     if not os.path.isfile(path):
         return []
-    pts: List[Dict[str, Any]] = []
     try:
         if content is None:
             with open(path, 'rb') as f:
                 content = f.read()
+    except OSError:
+        return []
+    key = (name, hashlib.sha256(content).hexdigest(), _taipei_today().isoformat())
+    with _SEED_PARSE_CACHE_LOCK:
+        hit = _SEED_PARSE_CACHE.get(key)
+    if hit is not None:
+        return [dict(p) for p in hit]
+    pts = _parse_seed_csv(name, content)
+    if pts:                                  # 被拒收的檔不快取：修好之後要立刻生效，也讓拒收訊息每次都看得到
+        with _SEED_PARSE_CACHE_LOCK:
+            if len(_SEED_PARSE_CACHE) >= _SEED_PARSE_CACHE_MAX:
+                _SEED_PARSE_CACHE.clear()
+            _SEED_PARSE_CACHE[key] = pts
+        return [dict(p) for p in pts]
+    return pts
+
+
+def _parse_seed_csv(name: str, content: bytes) -> List[Dict[str, Any]]:
+    pts: List[Dict[str, Any]] = []
+    try:
         with io.StringIO(content.decode('utf-8-sig'), newline='') as f:
             reader = csv.DictReader(f)
             if list(reader.fieldnames or []) != ['date', 'value']:
@@ -594,7 +622,7 @@ def _load_seed_csv(name: Optional[str], content: Optional[bytes] = None) -> List
                 try:
                     if None in row or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', raw_date):
                         raise ValueError('invalid date or extra columns')
-                    parsed = datetime.strptime(raw_date, '%Y-%m-%d').date()
+                    parsed = date.fromisoformat(raw_date)    # 已由上面的 regex 限定為 YYYY-MM-DD；比 strptime 快一個數量級
                     value = float(row.get('value'))
                 except (TypeError, ValueError) as exc:
                     raise ValueError(f'invalid row {line_no}') from exc
@@ -619,7 +647,7 @@ def _validated_seed_points(pts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         try:
             if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', raw_date):
                 raise ValueError('invalid date')
-            parsed = datetime.strptime(raw_date, '%Y-%m-%d').date()
+            parsed = date.fromisoformat(raw_date)
             value = float((point or {}).get('value'))
         except (TypeError, ValueError) as exc:
             raise ValueError(f'invalid seed point {i}') from exc

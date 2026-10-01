@@ -349,7 +349,7 @@ def build_us_rates_credit_risk(series_list: List[Dict[str, Any]]) -> Dict[str, A
         'marketRows': [{'k': p['k'], 'v': p['v'], 'score': p['score']} for p in pillars],
         'pillarDetails': pillars,
         'algo': ALGO_US_RATES_CREDIT,
-        '_source': 'FRED Fed/10Y + BAML IG/HY（或缺時 Yahoo LQD/HYG）',
+        '_source': 'NY Fed EFFR + Yahoo ^TNX + Yahoo LQD/HYG 還原收盤（ETF 代理，非 BAML 指數）',
     }
 
 
@@ -411,7 +411,7 @@ def build_us_cpi_fin_risk(series_list: List[Dict[str, Any]]) -> Dict[str, Any]:
         'marketRows': [{'k': p['k'], 'v': p['v'], 'score': p['score']} for p in pillars],
         'pillarDetails': pillars,
         'algo': ALGO_US_CPI_FIN,
-        '_source': 'FRED CPI/Fed + Yahoo XLF',
+        '_source': 'BLS CPI-U + NY Fed EFFR + Yahoo XLF 還原收盤',
     }
 
 

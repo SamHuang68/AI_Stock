@@ -344,7 +344,7 @@
   });
   register({
     id: '__US_RATES_CREDIT__',
-    name: '美國利率 vs 公司債總報酬',
+    name: '美國利率 vs 公司債 ETF 代理',
     shortName: '美利率債',
     market: 'US',
     unit: '%',

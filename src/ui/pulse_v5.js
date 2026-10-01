@@ -3666,7 +3666,8 @@
     var items = g.slice();
     if (p.us10y && p.us10y.value != null) {
       items.push({
-        symbol: 'US10Y', name: '美10年債',
+        symbol: 'US10Y',
+        name: '美10年債' + ((window.MarketFreshness && MarketFreshness.macroTag) ? MarketFreshness.macroTag(p.us10y) : ''),
         price: p.us10y.value, changePct: null, unit: '%'
       });
     }

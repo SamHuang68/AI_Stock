@@ -267,6 +267,16 @@ def _save_draw_store(d):
 
 # v3.9 P4: 總經數據 — FRED 優先；台灣家用／雲端常連不上 → Yahoo／BLS／NY Fed／本地 seed 備援。
 _macro_cache = {}   # {series_key: payload_bytes}
+
+
+def _macro_cache_invalidate(series_key=None):
+    """清掉 _macro_cache：指定序列（鍵為 '<series>:<years>:<yyyymmdd>'）或全部。"""
+    if series_key is None:
+        _macro_cache.clear()
+        return
+    prefix = f'{series_key}:'
+    for key in [k for k in list(_macro_cache) if k.startswith(prefix)]:
+        _macro_cache.pop(key, None)
 _macro_fail_until = {}  # series_key -> unix ts；失敗後短暫跳過，避免 /pulse 反覆卡死
 # seed/fallback/symbol 對齊 macro_track._resolve_series_points
 MACRO_SERIES = {
@@ -318,11 +328,17 @@ MACRO_SERIES = {
                          'canonical': 'yahoo_adj', 'seedSource': 'Yahoo HYG adj', 'maxBusinessDays': 2},
     'tw_discount_rate': {'p': 'fred', 'id': 'INTDSRTWM193N', 'label': '台灣央行重貼現率', 'unit': '%'},
     # CBC 利率走廊（種子／官網；FRED INTDSRTWM193N 已 404）
-    'tw_discount':      {'p': 'cbc',  'id': 'discount', 'label': '台灣重貼現率', 'unit': '%'},
-    'tw_secured_rate':  {'p': 'cbc',  'id': 'secured', 'label': '台灣擔保放款融通利率', 'unit': '%'},
-    'tw_short_rate':    {'p': 'cbc',  'id': 'short', 'label': '台灣短期融通利率', 'unit': '%'},
+    # 央行政策利率是階梯函數（理監事會一季一次），資料列是「最後一次抓取日」向前填補。
+    # 以每日序列的 2 個營業日判斷，利率沒變也會在抓取後第 3 個營業日被標成過期；改以約一季為準。
+    'tw_discount':      {'p': 'cbc',  'id': 'discount', 'label': '台灣重貼現率', 'unit': '%',
+                         'cadence': 'monthly', 'maxCalendarDays': 100},
+    'tw_secured_rate':  {'p': 'cbc',  'id': 'secured', 'label': '台灣擔保放款融通利率', 'unit': '%',
+                         'cadence': 'monthly', 'maxCalendarDays': 100},
+    'tw_short_rate':    {'p': 'cbc',  'id': 'short', 'label': '台灣短期融通利率', 'unit': '%',
+                         'cadence': 'monthly', 'maxCalendarDays': 100},
     'tw_cpi':           {'p': 'twcpi', 'label': '台灣CPI指數', 'unit': '', 'cadence': 'monthly', 'maxCalendarDays': 75},
-    'tw_light':         {'p': 'ndc', 'label': '台灣景氣對策信號(分數)', 'unit': '分', 'cadence': 'monthly', 'maxCalendarDays': 75},
+    # 資料列標在當月 1 日、約於次月 27 日公布：下一期公布前一天，最新一列已距今約 88 天（31＋27＋30），75 天會每月誤報約 12 天
+    'tw_light':         {'p': 'ndc', 'label': '台灣景氣對策信號(分數)', 'unit': '分', 'cadence': 'monthly', 'maxCalendarDays': 100},
 }
 
 # 國際頁「經濟指標」預設清單（順序即顯示順序）
@@ -384,8 +400,13 @@ def _fetch_fred_csv(series_id, cosd, timeout=8, retries=1):
 
 
 def _macro_today():
-    from macro_track import _taipei_today
-    return _taipei_today()
+    # /macro/<series>、_macro_latest 都先呼叫這個；macro_track 匯入失敗時，tw_cpi／tw_light 這些
+    # 根本不需要 macro_track 的序列也會跟著 500。匯入失敗就用共用的台北日。
+    try:
+        from macro_track import _taipei_today
+        return _taipei_today()
+    except Exception:
+        return taipei_today()
 
 
 def _macro_resolve_points(series_key, years=10, force_live=False):
@@ -479,6 +500,10 @@ def _macro_resolve_points(series_key, years=10, force_live=False):
 def _macro_payload(series_key, years=10, force_live=False):
     spec = MACRO_SERIES.get(series_key) or {}
     pts, note = _macro_resolve_points(series_key, years=years, force_live=force_live)
+    if force_live:
+        # 更新可能已改寫／驗證種子：先前以「未驗證／過期」快取的 payload 不能再被讀到
+        # （否則同步成功後，要等台北日換日才會看到新狀態）。
+        _macro_cache_invalidate(series_key)
     last_date = pts[-1].get('date') if pts else None
     freshness = {'freshness': 'unknown', 'age': None, 'maxAge': None}
     if pts:
@@ -2131,6 +2156,12 @@ def _macro_latest(series_key, years=10, timeout=8, retries=1, allow_fetch=True):
         'date': last.get('date'),
         'value': last.get('value'),
         'source': d.get('source'),
+        # 過去只回最後一點：Pulse／總覽拿到的過期、未驗證或日期異常的值，看起來和正常值一樣。
+        # 新增欄位（只加不改），讓畫面能標示；判定與 /macro/<key> 同源。
+        'freshness': d.get('freshness'),
+        'age': d.get('age'),
+        'ageUnit': d.get('ageUnit'),
+        'maxAge': d.get('maxAge'),
     }
 
 
@@ -3249,8 +3280,8 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             '__TW_MARGIN_CYCLE__': ('融資週期（槓桿臨界）', 'TW'),
             '融資週期': ('融資週期（槓桿臨界）', 'TW'),
             '槓桿臨界': ('融資週期（槓桿臨界）', 'TW'),
-            '__US_RATES_CREDIT__': ('美國利率 vs 公司債總報酬', 'US'),
-            '美利率債': ('美國利率 vs 公司債總報酬', 'US'),
+            '__US_RATES_CREDIT__': ('美國利率 vs 公司債 ETF 代理', 'US'),
+            '美利率債': ('美國利率 vs 公司債 ETF 代理', 'US'),
             '__US_CPI_FIN__': ('美國CPI＆基準利率 vs 金融股', 'US'),
             'CPI金融': ('美國CPI＆基準利率 vs 金融股', 'US'),
         }
@@ -6019,6 +6050,7 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             try:
                 import macro_track as mt
                 data = mt.refresh_chart(cid, dense=dense, density=density, step=step, years=years)
+                _macro_cache_invalidate()      # 圖表更新會改寫多個共用種子（fedfunds 等）
                 self._ok(json.dumps(data, ensure_ascii=False).encode()); return
             except Exception as e:
                 self._err('macro refresh failed: ' + str(e), 500); return
@@ -6072,8 +6104,8 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             out = {'series': series, 'label': spec['label'], 'unit': spec.get('unit', ''),
                    'points': [], 'source': None, 'note': '抓取失敗：' + str(e)}
         body = json.dumps(out, ensure_ascii=False).encode()
-        if out.get('points'):
-            _macro_cache[ckey] = body
+        if out.get('points') and not out.get('refreshError'):
+            _macro_cache[ckey] = body       # 失敗的強制更新不可被後續一般請求當成「目前狀態」讀到
         self._ok(body)
 
     # ── 三合一選股 技術+基本面+籌碼 (v3.9 P4) ───────────────
