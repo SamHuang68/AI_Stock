@@ -3665,8 +3665,11 @@
     var g = p.global || [];
     var items = g.slice();
     if (p.us10y && p.us10y.value != null) {
+      var us10yTag = (window.MarketFreshness && MarketFreshness.macroTag) ? MarketFreshness.macroTag(p.us10y) : '';
       items.push({
-        symbol: 'US10Y', name: '美10年債',
+        symbol: 'US10Y', name: '美10年債' + us10yTag,
+        /* 磚塊很緊湊：漲跌格（美10年債本來就是「—」）改放短標記，不增加高度、不動 5×2 版面 */
+        staleTag: us10yTag.replace(/[（）]/g, ''),
         price: p.us10y.value, changePct: null, unit: '%'
       });
     }
@@ -3692,7 +3695,7 @@
       var abbr = globalAbbr(x);
       var full = (x.name || x.symbol || abbr) + (x.role ? ' · ' + x.role : '') +
         (x.price != null ? (' · ' + px) : '');
-      var chgLbl = globalChgLabel(x, dig);
+      var chgLbl = x.staleTag ? esc(x.staleTag) : globalChgLabel(x, dig);
       var globalClass = marketCls(x.changePct, 'US');
       traceMarketColor('pulse.global', x.symbol || abbr, 'US', x.changePct, globalClass);
       html += '<div class="g" title="' + esc(full) + '">' +

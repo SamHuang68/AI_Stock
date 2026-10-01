@@ -14,6 +14,7 @@ CLI：
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -21,8 +22,9 @@ import threading
 import time
 import urllib.request
 from contextlib import closing
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from exchange_source_dates import official_date
 
 if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
@@ -76,6 +78,64 @@ CREATE TABLE IF NOT EXISTS sync_meta(
 """
 
 _UA = {'User-Agent': 'Mozilla/5.0 (compatible; StockTerminal/5.0; +local)', 'Accept': 'application/json'}
+
+
+TZ_TPE = timezone(timedelta(hours=8))
+TWOII_SOURCE = 'TPEx st41 / TWSE MIS'
+
+
+def _taipei_today():
+    return datetime.now(TZ_TPE).date()
+
+
+def fetch_index_series(symbol, rng='3mo'):
+    if symbol != '^TWOII':
+        return fetch_index_yahoo(symbol, rng), 'yahoo'
+    import tw_index_charts
+    raw = tw_index_charts.recent_rows(symbol, n=120, allow_network=True)
+    rows = []
+    previous = None
+    for row in raw:
+        d = date.fromisoformat(str(row['date']))
+        values = [float(row[k]) for k in ('open', 'high', 'low', 'close')]
+        vol = float(row.get('volume') or 0)
+        if d > _taipei_today() or any(not math.isfinite(v) or v <= 0 for v in values) or not math.isfinite(vol) or vol < 0:
+            raise ValueError('invalid official index row')
+        if rows and d.isoformat() <= rows[-1][0]:
+            raise ValueError('official index dates must strictly increase')
+        pct = (values[3] / previous - 1) * 100 if previous else None
+        rows.append((d.isoformat(), *values, pct, vol))
+        previous = values[3]
+    return rows, TWOII_SOURCE
+
+
+def _upsert_index_rows(conn, sym, rows, source, now):
+    """寫入指數日線。視窗最舊的一列沒有「前一日收盤」可算漲跌幅（pct=None）；
+    若用 INSERT OR REPLACE，該列先前同步時已算好的 change_pct 會被洗成 NULL，
+    久了每一列滑出視窗後都變 NULL。故 pct 為空時保留既有值。"""
+    n = 0
+    for d, o, h, l, c, pct, vol in rows:
+        conn.execute(
+            'INSERT INTO index_daily(symbol,d,open,high,low,close,change_pct,volume,source,updated_at) '
+            'VALUES(?,?,?,?,?,?,?,?,?,?) '
+            'ON CONFLICT(symbol,d) DO UPDATE SET open=excluded.open, high=excluded.high, low=excluded.low, '
+            'close=excluded.close, change_pct=COALESCE(excluded.change_pct, index_daily.change_pct), '
+            'volume=excluded.volume, source=excluded.source, updated_at=excluded.updated_at',
+            (sym, d, o, h, l, c, pct, vol, source, now))
+        n += 1
+    return n
+
+
+def _archive_legacy_twoii(conn):
+    conn.execute('CREATE TABLE IF NOT EXISTS index_daily_legacy AS SELECT * FROM index_daily WHERE 0')
+    conn.execute("INSERT INTO index_daily_legacy SELECT * FROM index_daily WHERE symbol='^TWOII' AND (source IS NULL OR source != ?)", (TWOII_SOURCE,))
+    conn.execute("DELETE FROM index_daily WHERE symbol='^TWOII' AND (source IS NULL OR source != ?)", (TWOII_SOURCE,))
+
+
+def _institutional_meta(latest_inst, latest_market, merged):
+    if latest_market and (not latest_inst or latest_inst < latest_market):
+        return '等待當日發布', f'official institutional date {latest_inst}; market date {latest_market}'
+    return ('同步完成' if latest_inst else '部分資料可用'), f'merged {merged} days'
 
 
 def _conn():
@@ -181,6 +241,10 @@ def fetch_breadth_day(yyyymmdd: str) -> Optional[dict]:
             d = _http_json(url, timeout=14)
             if d.get('stat') not in ('OK', 'ok'):
                 continue
+            # 回應自己說是另一天（或未來日）→ 不能存成請求日的廣度。沒帶 date 欄不擋（同 chip 區塊的寬鬆政策）。
+            observed = official_date(d.get('date'))
+            if observed is not None and (observed.strftime('%Y%m%d') != yyyymmdd or observed > _taipei_today()):
+                continue
             tables = d.get('tables') or []
             rows = None
             for t in tables:
@@ -237,6 +301,9 @@ def fetch_inst_day(yyyymmdd: str) -> Optional[dict]:
         d = _http_json(url, timeout=14)
         if d.get('stat') not in ('OK', 'ok'):
             return None
+        observed = official_date(d.get('date'))
+        if observed is None or observed.strftime('%Y%m%d') != yyyymmdd or observed > _taipei_today():
+            return None
         fields = d.get('fields') or []
         rows = d.get('data') or []
         i_name = next((i for i, f in enumerate(fields) if '單位名稱' in f or '買賣別' in f), 0)
@@ -281,25 +348,25 @@ def sync(days: int = 40, force_full: bool = False) -> Dict[str, Any]:
         'datasets': [], 'mode': 'full' if force_full else 'merge',
     }
     try:
-        today = date.today()
+        today = _taipei_today()
         with _lock:
             with closing(_conn()) as conn:
                 # ── indices：Yahoo 一次抓 3mo，upsert 全部（天然 merge）──
                 idx_n = 0
                 for sym in ('^TWII', '^TWOII'):
+                    conn.execute('SAVEPOINT index_sync')
                     try:
-                        rows = fetch_index_yahoo(sym, '3mo')
-                        now = int(time.time())
-                        for d, o, h, l, c, pct, vol in rows:
-                            conn.execute(
-                                'INSERT OR REPLACE INTO index_daily(symbol,d,open,high,low,close,change_pct,volume,source,updated_at) '
-                                'VALUES(?,?,?,?,?,?,?,?,?,?)',
-                                (sym, d, o, h, l, c, pct, vol, 'yahoo', now))
-                            idx_n += 1
+                        rows, source = fetch_index_series(sym, '3mo')
+                        if sym == '^TWOII' and rows:
+                            _archive_legacy_twoii(conn)
+                        idx_n += _upsert_index_rows(conn, sym, rows, source, int(time.time()))
                         last_d = rows[-1][0] if rows else None
                         _set_meta(conn, f'index:{sym}', last_d, '同步完成' if rows else '同步失敗',
-                                  '' if rows else 'no rows', len(rows))
+                                  source if rows else 'official source unavailable', len(rows))
+                        conn.execute('RELEASE index_sync')
                     except Exception as e:
+                        conn.execute('ROLLBACK TO index_sync')
+                        conn.execute('RELEASE index_sync')
                         _set_meta(conn, f'index:{sym}', None, '同步失敗', str(e)[:160], 0)
                 result['index'] = idx_n
                 conn.commit()
@@ -357,9 +424,10 @@ def sync(days: int = 40, force_full: bool = False) -> Dict[str, Any]:
                             i_n += 1
                         time.sleep(0.25)
                     dcur += timedelta(days=1)
+                inst_status, inst_note = _institutional_meta(
+                    _max_date(conn, 'inst_daily'), _max_date(conn, 'breadth_daily'), i_n)
                 _set_meta(conn, 'institutional', _max_date(conn, 'inst_daily'),
-                          '同步完成' if i_n or max_i else '部分資料可用',
-                          f'merged {i_n} days', i_n)
+                          inst_status, inst_note, i_n)
 
                 result['breadth'] = b_n
                 result['inst'] = i_n
@@ -388,7 +456,7 @@ def sync(days: int = 40, force_full: bool = False) -> Dict[str, Any]:
 def save_pulse_score(payload: dict) -> None:
     """把當次 /pulse 分數寫入歷史（以資料日或今天為鍵）。"""
     init_db()
-    d = (payload.get('date') or date.today().strftime('%Y%m%d'))
+    d = (payload.get('date') or _taipei_today().strftime('%Y%m%d'))
     if len(d) == 8 and '-' not in d:
         d = f'{d[:4]}-{d[4:6]}-{d[6:8]}'
     with _lock:
@@ -436,12 +504,20 @@ def history(kind: str = 'breadth', n: int = 40) -> Dict[str, Any]:
             if kind == 'index':
                 sym = '^TWII'
             rows = conn.execute(
-                'SELECT d,open,high,low,close,change_pct,volume FROM index_daily WHERE symbol=? ORDER BY d DESC LIMIT ?',
-                (sym, n)).fetchall()
-            return {'ok': True, 'kind': kind, 'symbol': sym, 'rows': [
+                "SELECT d,open,high,low,close,change_pct,volume FROM index_daily WHERE symbol=? AND (? != '^TWOII' OR source=?) ORDER BY d DESC LIMIT ?",
+                (sym, sym, TWOII_SOURCE, n)).fetchall()
+            out = {'ok': bool(rows), 'status': 'available' if rows else 'unavailable',
+                   'source': TWOII_SOURCE if sym == '^TWOII' else 'yahoo',
+                   'kind': kind, 'symbol': sym, 'rows': [
                 {'date': r[0], 'open': r[1], 'high': r[2], 'low': r[3], 'close': r[4],
                  'changePct': r[5], 'volume': r[6]} for r in rows
             ]}
+            if sym == '^TWOII':
+                # 官方 st41 只有收盤與漲跌；tw_index_charts 以前收盤／收盤合成 open/high/low、volume 填 0。
+                # 欄位保留（既有消費端直接用數字），但明說哪些是衍生值，避免被當成真實 K 棒或成交量。
+                out['ohlcDerived'] = True
+                out['ohlcNote'] = '只有 close／changePct 是官方值；open/high/low 由前收與收盤衍生，volume 無官方資料'
+            return out
         if kind in ('pulse', 'score'):
             rows = conn.execute(
                 'SELECT d,health,risk,total,completeness,status_text,tone FROM pulse_score_daily ORDER BY d DESC LIMIT ?',

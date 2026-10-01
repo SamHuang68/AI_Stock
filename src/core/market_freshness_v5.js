@@ -95,7 +95,18 @@
     };
   }
 
+  /* 總經序列（/macro/*、macro_latest）的新鮮度標示：fresh 回空字串，其餘回括號後綴。
+     資料列自帶 freshness（fresh / stale / invalid_future / unknown）；沒有這個欄位（舊伺服器）不標示。 */
+  function macroTag(row) {
+    var f = row && row.freshness;
+    if (f === 'stale') return '（過期）';
+    if (f === 'invalid_future') return '（日期異常）';
+    if (f === 'unknown') return '（未驗證）';
+    return '';
+  }
+
   window.MarketFreshness = {
+    macroTag: macroTag,
     parseAsOf: parseAsOf,
     quoteAsOf: quoteAsOf,
     quoteSession: quoteSession,

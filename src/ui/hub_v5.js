@@ -625,8 +625,9 @@
       var st = arr[2] || {};
       var global = pulse.global || [];
       if (pulse.us10y && pulse.us10y.value != null) {
+        var us10yTag = (window.MarketFreshness && MarketFreshness.macroTag) ? MarketFreshness.macroTag(pulse.us10y) : '';
         global = global.concat([{
-          name: '美10年債', price: pulse.us10y.value, changePct: null, unit: '%'
+          name: '美10年債' + us10yTag, price: pulse.us10y.value, changePct: null, unit: '%'
         }]);
       }
       var ecoItems = ecoPack.items || [];
@@ -662,7 +663,7 @@
           '<div class="s">資料來源狀態</div></div>' +
         '<div class="cell"><div class="k">美10Y</div><div class="v">' +
           (pulse.us10y && pulse.us10y.value != null ? fmt(pulse.us10y.value, 2) + '%' : '—') +
-          '</div><div class="s">殖利率</div></div>';
+          '</div><div class="s">殖利率' + ((window.MarketFreshness && MarketFreshness.macroTag && pulse.us10y) ? MarketFreshness.macroTag(pulse.us10y) : '') + '</div></div>';
       var cards = global.map(function (g) {
         var sym = g.symbol || g.sym || '';
         var bar = (V && g.changePct != null) ? '<div class="bar">' + V.rowBar(g.changePct, maxChg, sym) + '</div>' : '';

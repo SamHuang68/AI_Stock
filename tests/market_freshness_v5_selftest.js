@@ -57,4 +57,13 @@ ok(summary.freshness === 'stale', 'mixed-age quotes classify as stale when old e
 var health = MF.shellHealthText(summary);
 ok(health.mode === 'err' && /2026-08-15/.test(health.text), 'shell health uses worst asOf');
 
+/* 總經列標示：Pulse／總覽的美10年債過去不論新舊、是否驗證過都顯示成一般數值 */
+ok(typeof MF.macroTag === 'function', 'MarketFreshness.macroTag exists');
+ok(MF.macroTag({ freshness: 'fresh' }) === '', 'fresh macro row has no tag');
+ok(MF.macroTag({ freshness: 'stale' }) === '（過期）', 'stale macro row is tagged');
+ok(MF.macroTag({ freshness: 'invalid_future' }) === '（日期異常）', 'future-dated macro row is tagged');
+ok(MF.macroTag({ freshness: 'unknown' }) === '（未驗證）', 'unverified macro row is tagged');
+ok(MF.macroTag({}) === '' && MF.macroTag(null) === '' && MF.macroTag(undefined) === '',
+  'rows without freshness (older server) stay untagged');
+
 console.log('market_freshness_v5_selftest: ok');

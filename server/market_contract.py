@@ -90,7 +90,7 @@ def quote_contract(raw: dict[str, Any] | None, *, symbol: str, market: str,
             "source": source or raw.get("source") or "unknown",
             # A fetch timestamp is not a market timestamp.  Leave the field
             # unknown unless the upstream source actually supplied one.
-            "asOf": as_of or raw.get("asOf") or raw.get("time") or None}
+            "asOf": as_of or (raw.get("asOf") if "asOf" in raw else raw.get("time")) or None}
 
 
 def attach_quote_contract(raw: dict[str, Any] | None, **kwargs: Any) -> dict[str, Any]:

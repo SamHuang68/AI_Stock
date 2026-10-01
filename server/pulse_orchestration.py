@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 from deadline import collect_named
 from market_routes import market_snapshot
+from exchange_source_dates import breadth_cache_key, marketflow_cache_key, taipei_today
 
 
 @dataclass
@@ -43,10 +44,9 @@ def configure(**kwargs: Any) -> None:
 
 def build_pulse_payload(handler, path: str) -> bytes:
     """Build GET /pulse response body (bytes JSON). Caller handles HTTP."""
-    from datetime import date as _date
     qs = parse_qs(urlparse(path).query)
     force = (qs.get('refresh', ['0'])[0] or '0') in ('1', 'true', 'yes')
-    key = f'pulse:v2:{_date.today().strftime("%Y%m%d")}:{int(time.time() // 45)}'
+    key = f'pulse:v2:{taipei_today().strftime("%Y%m%d")}:{int(time.time() // 45)}'
     if not force:
         c = _deps.cache.get(key)
         if c is not None:
@@ -67,9 +67,8 @@ def build_pulse_payload(handler, path: str) -> bytes:
                 return d
         return None
 
-    today = _date.today()
+    today = taipei_today()
     ymd = today.strftime('%Y%m%d')
-    y_m_d = today.strftime('%Y-%m-%d')
 
     # 延伸因子與體質並行：OI／借券／NHNL／類股（專用 pool，不佔用全域 _pool）
     extras_fut = None
@@ -91,14 +90,14 @@ def build_pulse_payload(handler, path: str) -> bytes:
         fund = {}
 
     # 2) 廣度／指數／法人 — 優先快取；miss 時內聯建置（不經 _handle_*，避免弄亂 HTTP）
-    bd = _cache_first([f'breadth:v1:{ymd}'])
+    bd = _cache_first([breadth_cache_key(today)])
     if not (isinstance(bd, dict) and bd.get('ok')):
         try:
             bd = _deps.build_breadth_payload(force=False)
         except Exception as e:
             print('[pulse] breadth hydrate', e)
             bd = bd if isinstance(bd, dict) else None
-    mf = _cache_first([f'marketflow:{ymd}', f'marketflow:{y_m_d}'])
+    mf = _cache_first([marketflow_cache_key(today)])
     sec = _cache_first([
         f'sectors:{ymd}',
         f'sectors:TW:yahoo:{ymd}',
@@ -557,6 +556,8 @@ def build_pulse_payload(handler, path: str) -> bytes:
             'foreign': foreign, 'trust': trust, 'dealer': dealer,
             'totalYi': round(total_yi, 1) if total_yi is not None else None,
             'date': (inst or {}).get('date'),
+            'sourceDate': (inst or {}).get('sourceDate'),
+            'source': (inst or {}).get('source'),
         },
         'sectorsRanked': sec_ranked[:12],
         'lsRatio': ls_ratio,

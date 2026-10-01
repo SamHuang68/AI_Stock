@@ -169,3 +169,8 @@ xlf.csv
 
 # Local Archify visual-review evidence (absolute paths; regenerate on demand).
 assets/docs/archify/*.visual-check.*
+
+# Runtime provenance of locally refreshed macro seeds.
+data/macro_seeds/*.source.json
+data/macro_seeds/*.tmp
+data/macro_seeds/*.unverified.*.bak
