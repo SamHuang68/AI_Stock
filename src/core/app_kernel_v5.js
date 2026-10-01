@@ -37,7 +37,10 @@
         else callerSignal.addEventListener('abort', abortFromCaller, { once: true });
       }
     }
-    var timer = controller ? setTimeout(function () { controller.abort(); }, timeoutMs) : null;
+    var timer = controller ? setTimeout(function () {
+      controller.abort();
+      if (abortFromCaller) callerSignal.removeEventListener('abort', abortFromCaller);
+    }, timeoutMs) : null;
     var fetchOptions = Object.assign({}, options, {
       method: method, headers: headers, cache: options.cache || 'no-store'
     });
