@@ -23,6 +23,12 @@
     var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var timeoutMs = Math.max(250, Number(options.timeoutMs || 15000));
     var headers = Object.assign({ 'X-ST-Trace-ID': traceId() }, options.headers || {});
+    var callerSignal = options.signal;
+    var abortFromCaller = controller ? function () { controller.abort(); } : null;
+    if (callerSignal && abortFromCaller) {
+      if (callerSignal.aborted) abortFromCaller();
+      else callerSignal.addEventListener('abort', abortFromCaller, { once: true });
+    }
     var timer = controller ? setTimeout(function () { controller.abort(); }, timeoutMs) : null;
     var fetchOptions = Object.assign({}, options, {
       method: method, headers: headers, cache: options.cache || 'no-store'
@@ -39,6 +45,7 @@
       return response;
     }).finally(function () {
       if (timer) clearTimeout(timer);
+      if (callerSignal && abortFromCaller) callerSignal.removeEventListener('abort', abortFromCaller);
       if (key) delete inflight[key];
     });
     if (key) inflight[key] = promise;

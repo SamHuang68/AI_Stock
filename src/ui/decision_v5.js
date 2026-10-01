@@ -590,6 +590,8 @@
       if (!window.DecisionData || !DecisionData.refresh) throw new Error('DecisionData 尚未載入');
       return DecisionData.refresh({
         force: true,
+        strict: true,
+        signal: controller ? controller.signal : undefined,
         holdings: lastHoldings,
         portfolioKind: portfolioMode,
         correlationId: id
