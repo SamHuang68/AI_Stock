@@ -507,11 +507,12 @@ def _import_datastore():
         return ds
 
 
-def load_seed_csv(path: str = SEED_CSV) -> List[Tuple[int, float]]:
-    """回傳 [(ts, ratio), ...]；支援 date,margin_ratio_pct 或 date,ratio。"""
+def _read_seed(path: str = SEED_CSV) -> Tuple[List[Tuple[int, float]], str]:
+    """回傳 (points, status)。status：missing（無檔）／empty（只有表頭）／ok／rejected（有壞列，整檔拒收）。
+    壞檔與空檔必須分開：空檔可安全重建，壞檔不可被悄悄覆寫（需人工修復）。"""
     out: List[Tuple[int, float]] = []
     if not os.path.isfile(path):
-        return out
+        return out, 'missing'
     try:
         with open(path, 'r', encoding='utf-8-sig', newline='') as f:
             reader = csv.DictReader(f)
@@ -535,13 +536,18 @@ def load_seed_csv(path: str = SEED_CSV) -> List[Tuple[int, float]]:
                 out.append((_date_to_ts(d), ratio))
     except Exception as e:
         print('[margin] seed rejected:', e)
-        return []
-    return out
+        return [], 'rejected'
+    return out, ('ok' if out else 'empty')
+
+
+def load_seed_csv(path: str = SEED_CSV) -> List[Tuple[int, float]]:
+    """回傳 [(ts, ratio), ...]；支援 date,margin_ratio_pct 或 date,ratio。壞檔回 []（見 _read_seed）。"""
+    return _read_seed(path)[0]
 
 
 def save_seed_csv(rows: Sequence[Tuple[int, float]], path: str = SEED_CSV) -> int:
     """rows: [(ts, ratio), ...] → 寫入正規化 CSV。"""
-    if os.path.isfile(path) and not load_seed_csv(path):
+    if _read_seed(path)[1] == 'rejected':
         raise ValueError('refuse replacement of rejected seed; repair or quarantine explicitly')
     if not rows:
         raise ValueError('refuse empty seed replacement')
@@ -670,6 +676,22 @@ def _store_points(ds, points: Iterable[Tuple[int, float]]) -> int:
     return ds.upsert_bars(SYMBOL, MARKET, rows)
 
 
+_rejected_seed_sig = None
+
+
+def _warn_rejected_seed_once() -> None:
+    """壞 seed 只在檔案內容變動（mtime／大小）時記一次 log，避免每個圖表請求都刷屏。"""
+    global _rejected_seed_sig
+    try:
+        st = os.stat(SEED_CSV)
+        sig = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        sig = None
+    if sig != _rejected_seed_sig:
+        _rejected_seed_sig = sig
+        print(f'[margin] seed {SEED_CSV} 被拒收：不重爬、不覆寫；請修復或移除該檔後重試（DB 既有資料不受影響）')
+
+
 def ensure_seed_loaded(ds=None) -> int:
     """把本地 seed CSV 灌進 DB。若 seed 不存在／過短，不採用第三方短序列當權威，
     改以近期 TWSE 官方重算（分子不含 ETF）建立可用起點。"""
@@ -679,7 +701,12 @@ def ensure_seed_loaded(ds=None) -> int:
         return _seed_ensured_n
     ds = ds or _import_datastore()
     ds.init_db()
-    points = load_seed_csv(SEED_CSV)
+    points, status = _read_seed(SEED_CSV)
+    if status == 'rejected':
+        # 壞檔：不重爬（save 一定會被拒，每次呼叫都白打約 100 次 TWSE）、不覆寫；
+        # DB 內先前灌入的歷史照舊可用。人工修復後下次呼叫自動恢復。
+        _warn_rejected_seed_once()
+        return 0
     if len(points) < 60:
         print(f'[margin] seed shallow ({len(points)}) — computing recent TWSE history…')
         # 近 ~4 個月交易日快速建立可用圖（同時寫入 seed）

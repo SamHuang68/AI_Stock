@@ -53,6 +53,62 @@ class TestMarginRatioUnit(unittest.TestCase):
             self.assertEqual(len(loaded), 2)
             self.assertAlmostEqual(loaded[0][1], 180.123456, places=5)
 
+    def _seed_env(self, td, content):
+        path = os.path.join(td, 'seed.csv')
+        with open(path, 'w', encoding='utf-8', newline='') as f:
+            f.write(content)
+        fake_ds = mock.Mock()
+        return path, fake_ds
+
+    def test_rejected_seed_is_not_recrawled_or_overwritten(self):
+        # 一列未來日期 → 整檔拒收。過去：ensure_seed_loaded 視為「0 筆」→ 每次呼叫都重爬 TWSE
+        # 約 100 次，最後 save 因拒絕覆寫而拋錯，_seed_ensured 永遠不會設定。
+        import tempfile
+        bad = 'date,margin_ratio_pct\n2024-01-02,180.0\n2999-01-01,181.0\n'
+        with tempfile.TemporaryDirectory() as td:
+            path, fake_ds = self._seed_env(td, bad)
+            with mock.patch.object(mr, 'SEED_CSV', path), \
+                    mock.patch.object(mr, '_seed_ensured', False), \
+                    mock.patch.object(mr, '_seed_ensured_n', 0), \
+                    mock.patch.object(mr, '_rejected_seed_sig', None), \
+                    mock.patch.object(mr, '_trading_days_from_yahoo') as cal, \
+                    mock.patch.object(mr, 'compute_ratio_for_date') as crawl, \
+                    mock.patch.object(mr, '_store_points') as store, \
+                    mock.patch('builtins.print') as log:
+                self.assertEqual(mr.ensure_seed_loaded(fake_ds), 0)
+                self.assertEqual(mr.ensure_seed_loaded(fake_ds), 0)
+            cal.assert_not_called()
+            crawl.assert_not_called()
+            store.assert_not_called()
+            with open(path, encoding='utf-8') as f:
+                self.assertEqual(f.read(), bad, 'rejected seed must stay untouched')
+            warned = [c for c in log.call_args_list if '被拒收' in ' '.join(map(str, c.args))]
+            self.assertEqual(len(warned), 1, 'warn once per file version, not per call')
+
+    def test_header_only_seed_is_rebuilt_not_treated_as_rejected(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            path, fake_ds = self._seed_env(td, 'date,margin_ratio_pct\n')
+            days = [date(2024, 1, 2), date(2024, 1, 3)]
+            with mock.patch.object(mr, 'SEED_CSV', path), \
+                    mock.patch.object(mr, '_seed_ensured', False), \
+                    mock.patch.object(mr, '_seed_ensured_n', 0), \
+                    mock.patch.object(mr, '_trading_days_from_yahoo', return_value=days), \
+                    mock.patch.object(mr, 'compute_ratio_for_date', return_value=180.0), \
+                    mock.patch.object(mr, '_store_points', side_effect=lambda ds, pts: len(list(pts))):
+                self.assertEqual(mr.ensure_seed_loaded(fake_ds), 2)
+            self.assertEqual(len(mr.load_seed_csv(path)), 2)
+
+    def test_save_still_refuses_to_replace_a_rejected_seed(self):
+        import tempfile
+        bad = 'date,margin_ratio_pct\n2024-01-03,181.0\n2024-01-02,180.0\n'   # 日期非遞增
+        with tempfile.TemporaryDirectory() as td:
+            path, _ = self._seed_env(td, bad)
+            with self.assertRaises(ValueError):
+                mr.save_seed_csv([(mr._date_to_ts(date(2024, 1, 4)), 182.0)], path)
+            with open(path, encoding='utf-8') as f:
+                self.assertEqual(f.read(), bad)
+
     def test_live_exchange_date_requires_matching_authoritative_dates(self):
         closes = [{'Date': '1150828', 'Code': '2330'}]
         self.assertEqual(
