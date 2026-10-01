@@ -270,49 +270,58 @@ _macro_fail_until = {}  # series_key -> unix ts；失敗後短暫跳過，避免
 # seed/fallback/symbol 對齊 macro_track._resolve_series_points
 MACRO_SERIES = {
     'us10y':            {'p': 'fred', 'id': 'DGS10', 'label': '美國10年期公債殖利率', 'unit': '%',
-                         'seed': 'us10y.csv', 'fallback': 'h15_10y', 'symbol': '^TNX'},
+                         'seed': 'us10y.csv', 'fallback': 'h15_10y', 'symbol': '^TNX',
+                         'canonical': 'yahoo', 'seedSource': 'Yahoo ^TNX', 'maxBusinessDays': 2},
     'us2y':             {'p': 'fred', 'id': 'DGS2', 'label': '美國2年期公債殖利率', 'unit': '%',
-                         'seed': 'us2y.csv', 'fallback': 'yahoo', 'symbol': '^IRX'},  # 近似：3M 短率代理
+                         'seed': 'us2y.csv', 'canonical': 'fred', 'seedSource': 'FRED DGS2'},
     'us5y':             {'p': 'yahoo', 'id': '^FVX', 'label': '美國5年期公債殖利率', 'unit': '%',
-                         'seed': 'us5y.csv', 'symbol': '^FVX'},
+                         'seed': 'us5y.csv', 'symbol': '^FVX', 'canonical': 'yahoo_adj', 'seedSource': 'Yahoo ^FVX adj'},
     'us30y':            {'p': 'yahoo', 'id': '^TYX', 'label': '美國30年期公債殖利率', 'unit': '%',
-                         'seed': 'us30y.csv', 'symbol': '^TYX'},
+                         'seed': 'us30y.csv', 'symbol': '^TYX', 'canonical': 'yahoo_adj', 'seedSource': 'Yahoo ^TYX adj'},
     'us_tbill_3m':      {'p': 'yahoo', 'id': '^IRX', 'label': '美國3個月國庫券殖利率', 'unit': '%',
-                         'seed': 'us_tbill_3m.csv', 'symbol': '^IRX'},
+                         'seed': 'us_tbill_3m.csv', 'symbol': '^IRX', 'canonical': 'yahoo_adj', 'seedSource': 'Yahoo ^IRX adj'},
     'spread10y2y':      {'p': 'fred', 'id': 'T10Y2Y', 'label': '美10Y-2Y利差(倒掛<0)', 'unit': '%',
-                         'seed': 'spread10y2y.csv'},
-    'us_cpi':           {'p': 'fred', 'id': 'CPIAUCSL', 'label': '美國CPI指數', 'unit': ''},
+                         'seed': 'spread10y2y.csv', 'canonical': 'fred', 'seedSource': 'FRED T10Y2Y'},
+    'us_cpi':           {'p': 'fred', 'id': 'CPIAUCSL', 'label': '美國CPI指數', 'unit': '',
+                         'cadence': 'monthly', 'maxCalendarDays': 75},
     'us_cpi_yoy':       {'p': 'fred', 'id': 'CPALTT01USM659N', 'label': '美國CPI年增率(YoY)', 'unit': '%',
-                         'seed': 'us_cpi_yoy.csv', 'fallback': 'bls_cpi_yoy'},
+                         'seed': 'us_cpi_yoy.csv', 'fallback': 'bls_cpi_yoy',
+                         'canonical': 'bls_cpi_yoy', 'seedSource': 'BLS CPI-U NSA YoY',
+                         'cadence': 'monthly', 'maxCalendarDays': 75},
     'fedfunds':         {'p': 'fred', 'id': 'FEDFUNDS', 'label': '美國聯邦基金利率', 'unit': '%',
-                         'seed': 'fedfunds.csv', 'fallback': 'nyfed_effr'},
+                         'seed': 'fedfunds.csv', 'fallback': 'nyfed_effr',
+                         'canonical': 'nyfed_effr', 'seedSource': 'NY Fed EFFR', 'maxBusinessDays': 3},
     'unrate':           {'p': 'fred', 'id': 'UNRATE', 'label': '美國失業率', 'unit': '%',
-                         'seed': 'unrate.csv', 'fallback': 'bls_unrate'},
+                         'seed': 'unrate.csv', 'fallback': 'bls_unrate',
+                         'canonical': 'bls_unrate', 'seedSource': 'BLS UNRATE',
+                         'cadence': 'monthly', 'maxCalendarDays': 75},
     'move':             {'p': 'yahoo', 'id': '^MOVE', 'label': 'MOVE 美債波動指數', 'unit': '',
-                         'seed': 'move.csv', 'symbol': '^MOVE'},
+                         'seed': 'move.csv', 'symbol': '^MOVE', 'canonical': 'yahoo_adj', 'seedSource': 'Yahoo ^MOVE adj'},
     'vix':              {'p': 'yahoo', 'id': '^VIX', 'label': 'VIX 恐慌指數', 'unit': '',
-                         'seed': 'vix.csv', 'symbol': '^VIX'},
+                         'seed': 'vix.csv', 'symbol': '^VIX', 'canonical': 'yahoo_adj', 'seedSource': 'Yahoo ^VIX adj'},
     'dxy':              {'p': 'yahoo', 'id': 'DX-Y.NYB', 'label': '美元指數 DXY', 'unit': '',
-                         'seed': 'dxy.csv', 'symbol': 'DX-Y.NYB'},
+                         'seed': 'dxy.csv', 'symbol': 'DX-Y.NYB', 'canonical': 'yahoo_adj', 'seedSource': 'Yahoo DXY adj'},
     'wti':              {'p': 'yahoo', 'id': 'CL=F', 'label': 'WTI 原油', 'unit': 'USD',
-                         'seed': 'wti.csv', 'symbol': 'CL=F'},
+                         'seed': 'wti.csv', 'symbol': 'CL=F', 'canonical': 'yahoo_adj', 'seedSource': 'Yahoo CL=F adj'},
     'gold':             {'p': 'yahoo', 'id': 'GC=F', 'label': '黃金期貨', 'unit': 'USD',
-                         'seed': 'gold.csv', 'symbol': 'GC=F'},
+                         'seed': 'gold.csv', 'symbol': 'GC=F', 'canonical': 'yahoo_adj', 'seedSource': 'Yahoo GC=F adj'},
     'copper':           {'p': 'yahoo', 'id': 'HG=F', 'label': '銅期貨', 'unit': 'USD',
-                         'seed': 'copper.csv', 'symbol': 'HG=F'},
+                         'seed': 'copper.csv', 'symbol': 'HG=F', 'canonical': 'yahoo_adj', 'seedSource': 'Yahoo HG=F adj'},
     'btc':              {'p': 'yahoo', 'id': 'BTC-USD', 'label': '比特幣', 'unit': 'USD',
-                         'seed': 'btc.csv', 'symbol': 'BTC-USD'},
-    'baml_ig':          {'p': 'fred', 'id': 'BAMLCC0A0CMTRIV', 'label': '美林投資級公司債總報酬', 'unit': 'Index',
-                         'seed': 'baml_ig.csv', 'fallback': 'yahoo_adj', 'symbol': 'LQD'},
-    'baml_hy':          {'p': 'fred', 'id': 'BAMLHY0A0HYMTRIV', 'label': '美林高收益公司債總報酬', 'unit': 'Index',
-                         'seed': 'baml_hy.csv', 'fallback': 'yahoo_adj', 'symbol': 'HYG'},
+                         'seed': 'btc.csv', 'symbol': 'BTC-USD', 'canonical': 'yahoo_adj', 'seedSource': 'Yahoo BTC-USD adj'},
+    'baml_ig':          {'p': 'fred', 'id': 'BAMLCC0A0CMTRIV', 'label': 'LQD 投資級債 ETF 還原收盤', 'unit': 'USD',
+                         'seed': 'baml_ig.csv', 'fallback': 'yahoo_adj', 'symbol': 'LQD',
+                         'canonical': 'yahoo_adj', 'seedSource': 'Yahoo LQD adj', 'maxBusinessDays': 2},
+    'baml_hy':          {'p': 'fred', 'id': 'BAMLHY0A0HYMTRIV', 'label': 'HYG 高收益債 ETF 還原收盤', 'unit': 'USD',
+                         'seed': 'baml_hy.csv', 'fallback': 'yahoo_adj', 'symbol': 'HYG',
+                         'canonical': 'yahoo_adj', 'seedSource': 'Yahoo HYG adj', 'maxBusinessDays': 2},
     'tw_discount_rate': {'p': 'fred', 'id': 'INTDSRTWM193N', 'label': '台灣央行重貼現率', 'unit': '%'},
     # CBC 利率走廊（種子／官網；FRED INTDSRTWM193N 已 404）
     'tw_discount':      {'p': 'cbc',  'id': 'discount', 'label': '台灣重貼現率', 'unit': '%'},
     'tw_secured_rate':  {'p': 'cbc',  'id': 'secured', 'label': '台灣擔保放款融通利率', 'unit': '%'},
     'tw_short_rate':    {'p': 'cbc',  'id': 'short', 'label': '台灣短期融通利率', 'unit': '%'},
-    'tw_cpi':           {'p': 'twcpi', 'label': '台灣CPI指數', 'unit': ''},
-    'tw_light':         {'p': 'ndc', 'label': '台灣景氣對策信號(分數)', 'unit': '分'},
+    'tw_cpi':           {'p': 'twcpi', 'label': '台灣CPI指數', 'unit': '', 'cadence': 'monthly', 'maxCalendarDays': 75},
+    'tw_light':         {'p': 'ndc', 'label': '台灣景氣對策信號(分數)', 'unit': '分', 'cadence': 'monthly', 'maxCalendarDays': 75},
 }
 
 # 國際頁「經濟指標」預設清單（順序即顯示順序）
@@ -373,6 +382,11 @@ def _fetch_fred_csv(series_id, cosd, timeout=8, retries=1):
     return pts
 
 
+def _macro_today():
+    from macro_track import _taipei_today
+    return _taipei_today()
+
+
 def _macro_resolve_points(series_key, years=10, force_live=False):
     """統一解析 MACRO_SERIES：FRED／Yahoo／CBC／種子／BLS／NY Fed 備援。
        回 (points, source_note)。"""
@@ -387,13 +401,22 @@ def _macro_resolve_points(series_key, years=10, force_live=False):
         mt = None
         print('[macro] import macro_track', e)
 
+    if spec.get('canonical') and mt is None:
+        return [], f'canonical:{spec["canonical"]} · 指定來源解析器不可用'
+
     # Yahoo 直連（含 seed 合併）
     if prov == 'yahoo' and mt is not None:
+        symbol = spec.get('symbol') or spec.get('id')
         s = {
             'source': 'yahoo',
-            'symbol': spec.get('symbol') or spec.get('id'),
+            'symbol': symbol,
             'seed': spec.get('seed'),
             'fallback': spec.get('fallback') or 'yahoo',
+            'canonical': spec.get('canonical'),
+            'seedSource': spec.get('seedSource') or f'Yahoo {symbol}',
+            'cadence': spec.get('cadence', 'daily'),
+            'maxBusinessDays': spec.get('maxBusinessDays', 2),
+            'maxCalendarDays': spec.get('maxCalendarDays'),
         }
         pts, note = mt._resolve_series_points(s, years, force_live=force_live)
         return mt._filter_years(pts, years), note or f"Yahoo {s.get('symbol')}"
@@ -406,12 +429,18 @@ def _macro_resolve_points(series_key, years=10, force_live=False):
             'seed': spec.get('seed'),
             'fallback': spec.get('fallback'),
             'symbol': spec.get('symbol'),
+            'canonical': spec.get('canonical'),
+            'seedSource': spec.get('seedSource'),
+            'cadence': spec.get('cadence', 'daily'),
+            'maxBusinessDays': spec.get('maxBusinessDays', 2),
+            'maxCalendarDays': spec.get('maxCalendarDays'),
         }
         pts, note = mt._resolve_series_points(s, years, force_live=force_live)
         if pts:
             return mt._filter_years(pts, years), note
-        # 最後嘗試 Yahoo 代號
-        if spec.get('symbol'):
+        # 只有未指定 canonical 的舊序列可走同量尺 Yahoo 後備；
+        # 固定來源序列若不可用，必須保留 unavailable，不得改抓未還原收盤。
+        if spec.get('symbol') and not spec.get('canonical'):
             ypts = mt._yahoo_closes(spec['symbol'], years=years)
             if ypts:
                 return mt._filter_years(ypts, years), f"Yahoo {spec['symbol']}"
@@ -449,6 +478,16 @@ def _macro_resolve_points(series_key, years=10, force_live=False):
 def _macro_payload(series_key, years=10, force_live=False):
     spec = MACRO_SERIES.get(series_key) or {}
     pts, note = _macro_resolve_points(series_key, years=years, force_live=force_live)
+    last_date = pts[-1].get('date') if pts else None
+    freshness = {'freshness': 'unknown', 'age': None, 'maxAge': None}
+    if pts:
+        try:
+            import macro_track as mt
+            freshness = mt.series_freshness(last_date, spec)
+            if 'unverified' in str(note):
+                freshness['freshness'] = 'unknown'
+        except Exception:
+            pass
     out = {
         'series': series_key,
         'label': spec.get('label') or series_key,
@@ -456,10 +495,25 @@ def _macro_payload(series_key, years=10, force_live=False):
         'points': pts,
         'source': note if pts and not str(note).startswith('seed:') else (note if pts else None),
         'note': None if pts else (note or '無資料'),
+        'lastDate': last_date,
+        'refreshError': note if force_live and (
+            str(note).startswith(('refresh-', 'seed:', 'canonical:')) or note == 'invalid-live'
+        ) else None,
+        **freshness,
     }
     if pts and str(note).startswith('seed:'):
         out['source'] = note
         out['note'] = '目前使用本機種子／快取；按同步可嘗試線上更新'
+        if 'unverified' in str(note):
+            out['note'] = '種子來源未驗證；按同步以指定來源重建，未驗證前不視為可發布快照'
+    if out.get('freshness') == 'stale':
+        age_unit = '個平日' if out.get('ageUnit') == 'business_day' else '個日曆日'
+        out['note'] = (
+            f'資料已過期：資料日 {last_date}，'
+            f'已相隔 {out.get("age")} {age_unit}'
+        )
+    elif out.get('freshness') == 'invalid_future':
+        out['note'] = f'資料日異常：{last_date} 晚於台北今日'
     return out
 
 
@@ -488,12 +542,23 @@ def _macro_economy_snapshot(years=5, force_live=False):
             'prevValue': None if not prev else prev.get('value'),
             'change': None if chg is None else round(chg, 4),
             'source': payload.get('source'),
-            'ok': bool(last and last.get('value') is not None),
+            'ok': bool(
+                last and last.get('value') is not None
+                and payload.get('freshness') == 'fresh'
+                and not (force_live and payload.get('refreshError'))
+            ),
             'note': payload.get('note'),
+            'refreshError': payload.get('refreshError'),
+            'freshness': payload.get('freshness'),
+            'age': payload.get('age'),
+            'ageUnit': payload.get('ageUnit'),
+            'maxAge': payload.get('maxAge'),
         })
     ok_n = sum(1 for x in items if x.get('ok'))
+    refresh_errors = [x['key'] + ': ' + x['refreshError'] for x in items if x.get('refreshError')]
     return {
-        'ok': ok_n > 0,
+        'ok': ok_n > 0 and not (force_live and refresh_errors),
+        'refreshErrors': refresh_errors,
         'years': years,
         'updatedAt': time.strftime('%Y-%m-%dT%H:%M:%S'),
         'counts': {'total': len(items), 'ok': ok_n},
@@ -2061,7 +2126,7 @@ def _macro_latest(series_key, years=10, timeout=8, retries=1, allow_fetch=True):
     spec = MACRO_SERIES.get(series_key)
     if not spec:
         return None
-    today = _date.today()
+    today = _macro_today()
     ckey = f'{series_key}:{years}:{today.strftime("%Y%m%d")}'
     cached = _macro_cache.get(ckey)
     d = None
@@ -6121,7 +6186,7 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
         except Exception:
             yrs = 10
         force = (qs.get('refresh') or ['0'])[0] in ('1', 'true', 'yes')
-        today = _date.today()
+        today = _macro_today()
         ckey = f'{series}:{yrs}:{today.strftime("%Y%m%d")}'
         if not force:
             cached = _macro_cache.get(ckey)
