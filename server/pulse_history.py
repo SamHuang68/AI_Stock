@@ -109,6 +109,23 @@ def fetch_index_series(symbol, rng='3mo'):
     return rows, TWOII_SOURCE
 
 
+def _upsert_index_rows(conn, sym, rows, source, now):
+    """寫入指數日線。視窗最舊的一列沒有「前一日收盤」可算漲跌幅（pct=None）；
+    若用 INSERT OR REPLACE，該列先前同步時已算好的 change_pct 會被洗成 NULL，
+    久了每一列滑出視窗後都變 NULL。故 pct 為空時保留既有值。"""
+    n = 0
+    for d, o, h, l, c, pct, vol in rows:
+        conn.execute(
+            'INSERT INTO index_daily(symbol,d,open,high,low,close,change_pct,volume,source,updated_at) '
+            'VALUES(?,?,?,?,?,?,?,?,?,?) '
+            'ON CONFLICT(symbol,d) DO UPDATE SET open=excluded.open, high=excluded.high, low=excluded.low, '
+            'close=excluded.close, change_pct=COALESCE(excluded.change_pct, index_daily.change_pct), '
+            'volume=excluded.volume, source=excluded.source, updated_at=excluded.updated_at',
+            (sym, d, o, h, l, c, pct, vol, source, now))
+        n += 1
+    return n
+
+
 def _archive_legacy_twoii(conn):
     conn.execute('CREATE TABLE IF NOT EXISTS index_daily_legacy AS SELECT * FROM index_daily WHERE 0')
     conn.execute("INSERT INTO index_daily_legacy SELECT * FROM index_daily WHERE symbol='^TWOII' AND (source IS NULL OR source != ?)", (TWOII_SOURCE,))
@@ -338,13 +355,7 @@ def sync(days: int = 40, force_full: bool = False) -> Dict[str, Any]:
                         rows, source = fetch_index_series(sym, '3mo')
                         if sym == '^TWOII' and rows:
                             _archive_legacy_twoii(conn)
-                        now = int(time.time())
-                        for d, o, h, l, c, pct, vol in rows:
-                            conn.execute(
-                                'INSERT OR REPLACE INTO index_daily(symbol,d,open,high,low,close,change_pct,volume,source,updated_at) '
-                                'VALUES(?,?,?,?,?,?,?,?,?,?)',
-                                (sym, d, o, h, l, c, pct, vol, source, now))
-                            idx_n += 1
+                        idx_n += _upsert_index_rows(conn, sym, rows, source, int(time.time()))
                         last_d = rows[-1][0] if rows else None
                         _set_meta(conn, f'index:{sym}', last_d, '同步完成' if rows else '同步失敗',
                                   source if rows else 'official source unavailable', len(rows))
