@@ -229,6 +229,15 @@ def snap_t86(tdate: str) -> Optional[Dict[str, dict]]:
     return by
 
 
+def _date_conflict(data, tdate: str) -> bool:
+    """回應自帶的資料日與請求日不同 → 視為無資料，不把別天的資料標成請求日。
+    回應沒帶（或帶不可解析的）date 欄不算衝突：只擋「明確說是另一天」的資料，
+    避免上游少了欄位就讓整塊籌碼消失。"""
+    seen = official_date((data or {}).get('date'))
+    asked = official_date(tdate)
+    return seen is not None and asked is not None and seen != asked
+
+
 def snap_margn(tdate: str) -> Optional[Dict[str, dict]]:
     key = f'MARGN:{tdate}'
     hit, cached = _snap_get(key)
@@ -238,7 +247,7 @@ def snap_margn(tdate: str) -> Optional[Dict[str, dict]]:
            f'?date={tdate}&selectType=ALL&response=json')
     data = _fetch_json(url)
     by = None
-    if data and data.get('stat') in ('OK', 'ok'):
+    if data and data.get('stat') in ('OK', 'ok') and not _date_conflict(data, tdate):
         by = {}
         for t in (data.get('tables') or []):
             rows = t.get('data') or []
@@ -292,7 +301,7 @@ def snap_twt72u(tdate: str) -> Optional[Dict[str, dict]]:
            f'?response=json&date={tdate}&selectType=ALL')
     data = _fetch_json(url, timeout=12)
     by = None
-    if data and data.get('stat') in ('OK', 'ok') and data.get('data'):
+    if data and data.get('stat') in ('OK', 'ok') and data.get('data') and not _date_conflict(data, tdate):
         fields = data.get('fields') or []
         ic = _idx(fields, '證券代號', '代號')
         by = {}
@@ -319,7 +328,7 @@ def snap_twtb4u(tdate: str) -> Optional[Dict[str, dict]]:
     url = f'https://www.twse.com.tw/exchangeReport/TWTB4U?response=json&date={tdate}'
     data = _fetch_json(url, timeout=12)
     by = None
-    if data and data.get('stat') in ('OK', 'ok'):
+    if data and data.get('stat') in ('OK', 'ok') and not _date_conflict(data, tdate):
         by = {}
         tables = data.get('tables') or []
         # 若無 tables，退 fields/data
@@ -412,7 +421,6 @@ def build_chip(sym: str) -> dict:
         }
 
     tdate, t86 = resolve_t86_date()
-    lookup_date = tdate or today
     out = {'symbol': sym, 'date': tdate, 'inst': None, 'margin': None}
 
     if t86 and clean in t86:
@@ -431,17 +439,21 @@ def build_chip(sym: str) -> dict:
                 out['date'] = source_day
                 out['_verifiedChipDate'] = source_day
 
-    marg = snap_margn(lookup_date)
-    if marg and clean in marg:
-        out['margin'] = marg[clean]
+    # 融資券／借券／當沖只在「已有官方查詢日」時才抓並附上；找不到官方日（T86 與 TPEx 都失敗）時
+    # 不退回「今天」去查，否則這些區塊會掛在一份 date=None 的回應上，看起來像今天的資料。
+    lookup_date = tdate or out.get('_verifiedChipDate')
+    if lookup_date:
+        marg = snap_margn(lookup_date)
+        if marg and clean in marg:
+            out['margin'] = marg[clean]
 
-    lend = snap_twt72u(lookup_date)
-    if lend and clean in lend:
-        out['shortLend'] = lend[clean]
+        lend = snap_twt72u(lookup_date)
+        if lend and clean in lend:
+            out['shortLend'] = lend[clean]
 
-    dayt = snap_twtb4u(lookup_date)
-    if dayt and clean in dayt:
-        out['dayTrade'] = dayt[clean]
+        dayt = snap_twtb4u(lookup_date)
+        if dayt and clean in dayt:
+            out['dayTrade'] = dayt[clean]
 
     if _chip_streak:
         try:

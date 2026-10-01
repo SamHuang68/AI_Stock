@@ -58,3 +58,55 @@ class TestChipOfficialDateSafety(unittest.TestCase):
             with mock.patch.object(twc, '_http_json', return_value={
                 'msgArray': [{'z': '100', 'y': '99', 'd': '20260930'}]}):
                 self.assertEqual(twc._live_twoii_close()[0], '2026-09-30')
+
+
+class TestChipSideBlocksDateSafety(unittest.TestCase):
+    def setUp(self):
+        chip._SNAP.clear()
+
+    def tearDown(self):
+        chip._SNAP.clear()
+
+    def _margn(self, date_field):
+        body = {'stat': 'OK', 'tables': [{'fields': ['代號', '今日餘額', '今日餘額'], 'data': [['2330', '10', '2']]}]}
+        if date_field is not None:
+            body['date'] = date_field
+        return body
+
+    def test_margin_block_rejects_response_that_states_another_day(self):
+        with mock.patch.object(chip, '_fetch_json', return_value=self._margn('20260930')):
+            self.assertIsNone(chip.snap_margn('20261001'))
+
+    def test_margin_block_accepts_matching_or_undated_response(self):
+        # 只擋「明確說是另一天」的回應；上游少了 date 欄不能讓整塊籌碼消失。
+        for body in (self._margn('20261001'), self._margn(None)):
+            chip._SNAP.clear()
+            with self.subTest(date=body.get('date')), mock.patch.object(chip, '_fetch_json', return_value=body):
+                self.assertIn('2330', chip.snap_margn('20261001'))
+
+    def test_short_lending_and_daytrade_reject_other_day(self):
+        lend = {'stat': 'OK', 'date': '20260930', 'fields': ['證券代號', '本日借券餘額股'], 'data': [['2330', '5']]}
+        with mock.patch.object(chip, '_fetch_json', return_value=lend):
+            self.assertIsNone(chip.snap_twt72u('20261001'))
+        rows = [[str(1000 + i), '1', '1'] for i in range(12)]
+        dayt = {'stat': 'OK', 'date': '20260930',
+                'fields': ['證券代號', '當日沖銷交易成交股數', '當日沖銷交易比率'], 'data': rows}
+        with mock.patch.object(chip, '_fetch_json', return_value=dayt):
+            self.assertIsNone(chip.snap_twtb4u('20261001'))
+
+    def test_build_chip_without_official_date_does_not_query_side_blocks_for_today(self):
+        # 過去：T86 與 TPEx 都找不到官方日時，仍以「今天」去查融資券／借券／當沖，
+        # 掛在一份 date=None 的回應上，看起來像今天的資料。
+        with mock.patch.object(chip, 'taipei_today', return_value=date(2026, 10, 1)), \
+                mock.patch.object(chip, 'resolve_t86_date', return_value=(None, None)), \
+                mock.patch.object(chip, '_tpex_inst', return_value=None), \
+                mock.patch.object(chip, 'snap_margn') as margn, \
+                mock.patch.object(chip, 'snap_twt72u') as lend, \
+                mock.patch.object(chip, 'snap_twtb4u') as dayt:
+            out = chip.build_chip('2330')
+        self.assertIsNone(out['date'])
+        for fetch in (margn, lend, dayt):
+            fetch.assert_not_called()
+        self.assertIsNone(out['margin'])
+        self.assertNotIn('shortLend', out)
+        self.assertNotIn('dayTrade', out)
