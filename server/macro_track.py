@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import json
 import math
 import os
@@ -572,7 +573,7 @@ def _seed_path(name: str) -> str:
     return os.path.join(SEED_DIR, name)
 
 
-def _load_seed_csv(name: Optional[str]) -> List[Dict[str, Any]]:
+def _load_seed_csv(name: Optional[str], content: Optional[bytes] = None) -> List[Dict[str, Any]]:
     if not name:
         return []
     path = _seed_path(name)
@@ -580,7 +581,10 @@ def _load_seed_csv(name: Optional[str]) -> List[Dict[str, Any]]:
         return []
     pts: List[Dict[str, Any]] = []
     try:
-        with open(path, encoding='utf-8-sig', newline='') as f:
+        if content is None:
+            with open(path, 'rb') as f:
+                content = f.read()
+        with io.StringIO(content.decode('utf-8-sig'), newline='') as f:
             reader = csv.DictReader(f)
             if list(reader.fieldnames or []) != ['date', 'value']:
                 raise ValueError(f'header must be date,value: {reader.fieldnames}')
@@ -750,8 +754,9 @@ def _yahoo_closes(symbol: str, years: int = 25, adj: bool = False) -> List[Dict[
     closes = q.get('close') or []
     if adj:
         adj_arr = ((r0.get('indicators') or {}).get('adjclose') or [{}])[0].get('adjclose') or []
-        if adj_arr:
-            closes = adj_arr
+        if not adj_arr:
+            return []
+        closes = adj_arr
     pts = []
     for t, c in zip(ts, closes):
         if c is None:
@@ -986,17 +991,29 @@ def _seed_identity(spec: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _seed_verified(spec: Dict[str, Any]) -> bool:
+    return _seed_snapshot(spec)[1]
+
+
+def _seed_snapshot(spec: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
+    name = spec.get('seed')
+    if not name:
+        return [], False
+    try:
+        with open(_seed_path(name), 'rb') as f:
+            content = f.read()
+    except OSError:
+        return [], False
+    points = _load_seed_csv(name, content)
     if not spec.get('seed') or not spec.get('canonical'):
-        return False
+        return points, False
     path = _seed_path(spec['seed'])
     try:
         with open(path + '.source.json', encoding='utf-8') as f:
             provenance = json.load(f)
-        with open(path, 'rb') as f:
-            digest = hashlib.sha256(f.read()).hexdigest()
-        return provenance == {**_seed_identity(spec), 'sha256': digest}
+        digest = hashlib.sha256(content).hexdigest()
+        return points, bool(points) and provenance == {**_seed_identity(spec), 'sha256': digest}
     except (OSError, ValueError):
-        return False
+        return points, False
 
 
 def _save_seed_source(spec: Dict[str, Any], digest: Optional[str] = None) -> None:
@@ -1017,15 +1034,46 @@ def _save_seed_source(spec: Dict[str, Any], digest: Optional[str] = None) -> Non
             os.remove(tmp)
 
 
-_SEED_RESOLVE_LOCK = threading.RLock()
+_SEED_LOCKS_GUARD = threading.Lock()
+_SEED_LOCKS: Dict[str, Any] = {}
+
+
+def _seed_lock(name: Optional[str]):
+    with _SEED_LOCKS_GUARD:
+        return _SEED_LOCKS.setdefault(name, threading.RLock())
+
+
+def _backup_seed(name: str) -> None:
+    path = _seed_path(name)
+    if not os.path.isfile(path):
+        return
+    with open(path, 'rb') as f:
+        content = f.read()
+    digest = hashlib.sha256(content).hexdigest()
+    backup = path + '.unverified.' + digest + '.bak'
+    if os.path.isfile(backup):
+        with open(backup, 'rb') as f:
+            if hashlib.sha256(f.read()).hexdigest() == digest:
+                return
+    tmp = f'{backup}.{os.getpid()}.{threading.get_ident()}.tmp'
+    try:
+        with open(tmp, 'wb') as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, backup)
+        with open(backup, 'rb') as f:
+            if hashlib.sha256(f.read()).hexdigest() != digest:
+                raise OSError('seed backup verification failed')
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
 def _resolve_series_points(
     s: Dict[str, Any], years: int, force_live: bool = False
 ) -> Tuple[List[Dict[str, Any]], str]:
-    # Shared seeds appear in multiple charts; serialize CSV/provenance updates.
-    with _SEED_RESOLVE_LOCK:
-        return _resolve_series_points_locked(s, years, force_live)
+    return _resolve_series_points_locked(s, years, force_live)
 
 
 def _resolve_series_points_locked(
@@ -1036,8 +1084,8 @@ def _resolve_series_points_locked(
     更新只使用該 seed 的 canonical provider，再合併回寫；不同量尺來源不得混檔。
     """
     seed_name = s.get('seed')
-    seed_pts = _load_seed_csv(seed_name)
-    verified = _seed_verified(s)
+    with _seed_lock(seed_name):
+        seed_pts, verified = _seed_snapshot(s)
     seed_source = s.get('seedSource') if verified else 'unverified（來源未驗證）'
     seed_note = f'seed:{seed_name} · {seed_source}'
 
@@ -1063,7 +1111,11 @@ def _resolve_series_points_locked(
         if live:
             note = 'BLS UNRATE'
     elif canonical == 'yahoo_adj' and s.get('symbol'):
-        live = _yahoo_closes(s['symbol'], years=years, adj=True)
+        fetch_years = years
+        if verified and seed_pts:
+            first = date.fromisoformat(seed_pts[0]['date'])
+            fetch_years = max(years, (_taipei_today() - first).days // 366 + 1)
+        live = _yahoo_closes(s['symbol'], years=fetch_years, adj=True)
         if live:
             note = f"Yahoo {s['symbol']} adj"
     elif canonical == 'yahoo' and s.get('symbol'):
@@ -1120,26 +1172,25 @@ def _resolve_series_points_locked(
         except (TypeError, ValueError) as exc:
             print('[macro_track] live rejected', seed_name, exc)
             return (seed_pts, seed_note) if seed_pts else ([], 'invalid-live')
-        # merge: prefer live, keep older seed points not in live
-        by_d = {p['date']: p for p in seed_pts} if not canonical or verified else {}
-        for p in live:
-            by_d[p['date']] = p
-        merged = [by_d[k] for k in sorted(by_d.keys())]
-        try:
-            if canonical and not verified and seed_name and os.path.isfile(_seed_path(seed_name)):
-                with open(_seed_path(seed_name), 'rb') as f:
-                    legacy = f.read()
-                backup = _seed_path(seed_name) + '.unverified.' + hashlib.sha256(legacy).hexdigest() + '.bak'
-                if not os.path.exists(backup):
-                    with open(backup, 'xb') as f:
-                        f.write(legacy)
-                        f.flush()
-                        os.fsync(f.fileno())
-            digest = _save_seed_csv(seed_name, merged)
-            if seed_name and canonical:
-                _save_seed_source(s, digest)
-        except Exception as e:
-            print('[macro_track] save seed', seed_name, e)
+        # Network I/O runs outside the per-seed commit lock. Re-read before merge.
+        with _seed_lock(seed_name):
+            current, verified = _seed_snapshot(s)
+            if canonical == 'yahoo_adj' and verified:
+                if not {p['date'] for p in current}.issubset({p['date'] for p in live}):
+                    return current, 'refresh-incomplete:yahoo_adj · full adjusted history required'
+            by_d = {p['date']: p for p in current} if not canonical or verified else {}
+            for p in live:
+                by_d[p['date']] = p
+            merged = [by_d[k] for k in sorted(by_d.keys())]
+            try:
+                if canonical and not verified and seed_name:
+                    _backup_seed(seed_name)
+                digest = _save_seed_csv(seed_name, merged)
+                if seed_name and canonical:
+                    _save_seed_source(s, digest)
+            except Exception as e:
+                print('[macro_track] save seed', seed_name, e)
+                return merged, f'refresh-save-failed:{type(e).__name__} · {note}'
         return merged, note or 'live'
 
     if seed_pts:
@@ -1209,6 +1260,9 @@ def get_chart(chart_id: str, years: Optional[int] = None,
                 'key': s['key'], 'name': s['name'], 'scale': s['scale'],
                 'color': s['color'], 'style': s.get('style', 'line'), 'unit': s.get('unit', ''),
                 'points': filtered, 'source': note, 'lastDate': last_date,
+                'refreshError': note if force_live and (
+                    note.startswith(('refresh-', 'seed:', 'canonical:')) or note == 'invalid-live'
+                ) else None,
                 **freshness,
             })
 
@@ -1426,13 +1480,13 @@ def status_summary() -> Dict[str, Any]:
         for spec in CHARTS[cid]['series']:
             seed = spec.get('seed')
             path = _seed_path(seed) if seed else ''
-            pts = _load_seed_csv(seed)
+            with _seed_lock(seed):
+                pts, verified = _seed_snapshot(spec)
             updated = int(os.path.getmtime(path)) if path and os.path.isfile(path) else 0
             ts = max(ts, updated)
             n = max(n, len(pts))
             last_date = pts[-1]['date'] if pts else None
             fresh = series_freshness(last_date, spec)
-            verified = _seed_verified(spec)
             if not verified:
                 fresh['freshness'] = 'unknown'
             series_status.append({
@@ -1575,8 +1629,10 @@ def refresh_chart(chart_id: str, dense: bool = False, density: Optional[str] = N
                 s['key']: s.get('source') for s in data.get('series') or []
             }, 'fredCircuit': fred_circuit_open()})
             result['count'] = sum(counts.values())
-            result['ok'] = bool(data.get('ok'))
+            failures = [s['refreshError'] for s in data.get('series', []) if s.get('refreshError')]
+            result['ok'] = bool(data.get('ok')) and not failures
             if not result['ok']:
+                result['refreshErrors'] = failures
                 result['error'] = '美國序列抓取失敗'
         except Exception as e:
             result['ok'] = False

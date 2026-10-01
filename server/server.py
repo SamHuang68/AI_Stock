@@ -382,6 +382,11 @@ def _fetch_fred_csv(series_id, cosd, timeout=8, retries=1):
     return pts
 
 
+def _macro_today():
+    from macro_track import _taipei_today
+    return _taipei_today()
+
+
 def _macro_resolve_points(series_key, years=10, force_live=False):
     """統一解析 MACRO_SERIES：FRED／Yahoo／CBC／種子／BLS／NY Fed 備援。
        回 (points, source_note)。"""
@@ -491,6 +496,9 @@ def _macro_payload(series_key, years=10, force_live=False):
         'source': note if pts and not str(note).startswith('seed:') else (note if pts else None),
         'note': None if pts else (note or '無資料'),
         'lastDate': last_date,
+        'refreshError': note if force_live and (
+            str(note).startswith(('refresh-', 'seed:', 'canonical:')) or note == 'invalid-live'
+        ) else None,
         **freshness,
     }
     if pts and str(note).startswith('seed:'):
@@ -537,16 +545,20 @@ def _macro_economy_snapshot(years=5, force_live=False):
             'ok': bool(
                 last and last.get('value') is not None
                 and payload.get('freshness') == 'fresh'
+                and not (force_live and payload.get('refreshError'))
             ),
             'note': payload.get('note'),
+            'refreshError': payload.get('refreshError'),
             'freshness': payload.get('freshness'),
             'age': payload.get('age'),
             'ageUnit': payload.get('ageUnit'),
             'maxAge': payload.get('maxAge'),
         })
     ok_n = sum(1 for x in items if x.get('ok'))
+    refresh_errors = [x['key'] + ': ' + x['refreshError'] for x in items if x.get('refreshError')]
     return {
-        'ok': ok_n > 0,
+        'ok': ok_n > 0 and not (force_live and refresh_errors),
+        'refreshErrors': refresh_errors,
         'years': years,
         'updatedAt': time.strftime('%Y-%m-%dT%H:%M:%S'),
         'counts': {'total': len(items), 'ok': ok_n},
@@ -2114,7 +2126,7 @@ def _macro_latest(series_key, years=10, timeout=8, retries=1, allow_fetch=True):
     spec = MACRO_SERIES.get(series_key)
     if not spec:
         return None
-    today = _date.today()
+    today = _macro_today()
     ckey = f'{series_key}:{years}:{today.strftime("%Y%m%d")}'
     cached = _macro_cache.get(ckey)
     d = None
@@ -6174,7 +6186,7 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
         except Exception:
             yrs = 10
         force = (qs.get('refresh') or ['0'])[0] in ('1', 'true', 'yes')
-        today = _date.today()
+        today = _macro_today()
         ckey = f'{series}:{yrs}:{today.strftime("%Y%m%d")}'
         if not force:
             cached = _macro_cache.get(ckey)

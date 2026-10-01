@@ -1,11 +1,14 @@
 """Exercise the real macro API functions without starting the HTTP server."""
 import ast
+import json
 import sys
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
 from unittest import mock
+from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'server'))
@@ -15,7 +18,7 @@ import macro_track as mt
 def api_namespace():
     tree = ast.parse((ROOT / 'server/server.py').read_text(encoding='utf-8'))
     names = {'MACRO_SERIES', 'MACRO_ECONOMY_KEYS', '_macro_resolve_points',
-             '_macro_payload', '_macro_economy_snapshot'}
+             '_macro_payload', '_macro_economy_snapshot', '_macro_latest', '_macro_today'}
     nodes = [node for node in tree.body if
              isinstance(node, ast.FunctionDef) and node.name in names or
              isinstance(node, ast.Assign) and any(
@@ -88,6 +91,48 @@ class TestMacroApiContract(unittest.TestCase):
         mt._save_seed_source(spec)
         self.assertFalse(mt._seed_verified({**spec, 'symbol': 'LQD'}))
         self.assertFalse(mt._seed_verified({**spec, 'canonical': 'yahoo'}))
+
+    def test_handler_cache_recalculates_freshness_at_taipei_midnight(self):
+        tree = ast.parse((ROOT / 'server/server.py').read_text(encoding='utf-8'))
+        handler = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == '_handle_macro')
+        ns = {**self.api, 'json': json, 'parse_qs': parse_qs, 'urlparse': urlparse, '_macro_cache': {}}
+        ns['_macro_resolve_points'] = lambda *a, **k: ([{'date': '2026-08-28', 'value': 80}], 'Yahoo HYG adj')
+        # Functions must share the same globals as the real handler.
+        ns['_macro_payload'] = type(self.api['_macro_payload'])(self.api['_macro_payload'].__code__, ns)
+        exec(compile(ast.Module(body=[handler], type_ignores=[]), 'server/server.py', 'exec'), ns)
+        responses = []
+        request = SimpleNamespace(path='/macro/baml_hy?years=10', _ok=lambda body: responses.append(json.loads(body)))
+        with mock.patch.object(mt, '_taipei_today', return_value=date(2026, 9, 1)):
+            ns['_handle_macro'](request, 'baml_hy')
+        with mock.patch.object(mt, '_taipei_today', return_value=date(2026, 9, 2)):
+            ns['_handle_macro'](request, 'baml_hy')
+        self.assertEqual([r['freshness'] for r in responses], ['fresh', 'stale'])
+        self.assertEqual(set(ns['_macro_cache']), {'baml_hy:10:20260901', 'baml_hy:10:20260902'})
+
+    def test_snapshot_reports_failed_refresh_even_with_recent_points(self):
+        import time
+        ns = {**self.api, 'time': time, 'MACRO_ECONOMY_KEYS': ['baml_hy']}
+        ns['_macro_resolve_points'] = lambda *a, **k: (
+            [{'date': '2026-09-30', 'value': 80}], 'refresh-save-failed:OSError')
+        for name in ('_macro_payload', '_macro_economy_snapshot'):
+            fn = self.api[name]
+            ns[name] = type(fn)(fn.__code__, ns, argdefs=fn.__defaults__)
+        with mock.patch.object(mt, '_taipei_today', return_value=date(2026, 10, 1)):
+            result = ns['_macro_economy_snapshot'](force_live=True)
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['counts']['ok'], 0)
+        self.assertFalse(result['items'][0]['ok'])
+        self.assertIn('OSError', result['items'][0]['refreshError'])
+        self.assertEqual(len(result['refreshErrors']), 1)
+
+    def test_latest_reader_uses_the_same_taipei_date_key(self):
+        points = [{'date': '2026-08-28', 'value': 80}]
+        ns = {**self.api, 'json': json, '_macro_cache': {
+            'baml_hy:10:20260902': json.dumps({'points': points}).encode()}}
+        latest = type(self.api['_macro_latest'])(self.api['_macro_latest'].__code__, ns,
+                                                argdefs=self.api['_macro_latest'].__defaults__)
+        with mock.patch.object(mt, '_taipei_today', return_value=date(2026, 9, 2)):
+            self.assertEqual(latest('baml_hy', allow_fetch=False)['value'], 80)
 
 
 if __name__ == '__main__':

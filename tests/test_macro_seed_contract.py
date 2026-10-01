@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 """總經種子 CSV 的格式、來源與市場時間契約。"""
 import os
+import json
+import hashlib
+import threading
 import sys
 import tempfile
 import unittest
@@ -111,7 +114,7 @@ class TestMacroSeedContract(unittest.TestCase):
         self.assertEqual(len(backups), 1)
         with open(os.path.join(self._tmpdir.name, backups[0]), encoding='utf-8') as f:
             self.assertIn('2020-01-01,3000', f.read())
-        with mock.patch.object(mt, '_yahoo_closes', return_value=next_points):
+        with mock.patch.object(mt, '_yahoo_closes', return_value=first + next_points):
             self.assertEqual(mt._resolve_series_points(spec, 5, True)[0], first + next_points)
         mt._save_seed_csv('hyg.csv', old)
         self.assertFalse(mt._seed_verified(spec))
@@ -146,6 +149,105 @@ class TestMacroSeedContract(unittest.TestCase):
                 mt._save_seed_csv('hyg.csv', [{'date': '2026-08-31', 'value': 81}])
         self.assertEqual(mt._load_seed_csv('hyg.csv'), points)
         self.assertFalse(any(name.endswith('.tmp') for name in os.listdir(self._tmpdir.name)))
+
+    def test_failed_backup_is_not_published_and_retry_repairs_partial_backup(self):
+        spec = {'seed': 'hyg.csv', 'canonical': 'yahoo_adj', 'symbol': 'HYG'}
+        old = [{'date': '2020-01-01', 'value': 3000}]
+        live = [{'date': '2026-08-28', 'value': 80}]
+        mt._save_seed_csv(spec['seed'], old)
+        with mock.patch.object(mt, '_yahoo_closes', return_value=live), \
+                mock.patch.object(mt.os, 'fsync', side_effect=OSError('disk failure')):
+            mt._resolve_series_points(spec, 5, True)
+        self.assertEqual(mt._load_seed_csv(spec['seed']), old)
+        self.assertFalse(any(name.endswith('.bak') or name.endswith('.tmp')
+                             for name in os.listdir(self._tmpdir.name)))
+        with open(mt._seed_path(spec['seed']), 'rb') as f:
+            original = f.read()
+        backup = mt._seed_path(spec['seed']) + '.unverified.' + hashlib.sha256(original).hexdigest() + '.bak'
+        with open(backup, 'wb') as f:
+            f.write(b'partial')
+        with mock.patch.object(mt, '_yahoo_closes', return_value=live):
+            mt._resolve_series_points(spec, 5, True)
+        with open(backup, 'rb') as f:
+            self.assertEqual(f.read(), original)
+
+    def test_provenance_is_checked_against_the_same_csv_snapshot(self):
+        spec = {'seed': 'hyg.csv', 'canonical': 'yahoo_adj', 'symbol': 'HYG'}
+        old = [{'date': '2026-08-28', 'value': 3000}]
+        new = [{'date': '2026-08-31', 'value': 80}]
+        mt._save_seed_csv(spec['seed'], old)
+        load = mt._load_seed_csv
+        def concurrent_update(name, content=None):
+            points = load(name, content)
+            mt._save_seed_csv(name, new)
+            mt._save_seed_source(spec)
+            return points
+        with mock.patch.object(mt, '_load_seed_csv', side_effect=concurrent_update):
+            points, verified = mt._seed_snapshot(spec)
+        self.assertEqual(points, old)
+        self.assertFalse(verified)
+
+    def test_slow_refresh_does_not_block_other_cached_seed(self):
+        spec = {'seed': 'slow.csv', 'canonical': 'yahoo_adj', 'symbol': 'HYG'}
+        fast = {'seed': 'fast.csv', 'canonical': 'nyfed_effr'}
+        points = [{'date': '2026-08-28', 'value': 80}]
+        mt._save_seed_csv(fast['seed'], points)
+        started = threading.Event()
+        release = threading.Event()
+        done = threading.Event()
+        def slow(*args, **kwargs):
+            started.set()
+            release.wait(3)
+            return points
+        with mock.patch.object(mt, '_yahoo_closes', side_effect=slow):
+            thread = threading.Thread(target=mt._resolve_series_points, args=(spec, 5, True))
+            thread.start()
+            self.assertTrue(started.wait(2))
+            reader = threading.Thread(target=lambda: (mt._resolve_series_points(fast, 5), done.set()))
+            reader.start()
+            try:
+                self.assertTrue(done.wait(1))
+            finally:
+                release.set()
+                thread.join(3)
+                reader.join(3)
+
+    def test_yahoo_adjusted_provider_requires_adjusted_close(self):
+        payload = {'chart': {'result': [{'timestamp': [1787875200],
+            'indicators': {'quote': [{'close': [3000]}]}}]}}
+        with mock.patch.object(mt, '_http_json', return_value=payload):
+            self.assertEqual(mt._yahoo_closes('HYG', 5, adj=True), [])
+            self.assertEqual(mt._yahoo_closes('HYG', 5, adj=False)[0]['value'], 3000)
+
+    def test_partial_adjusted_refresh_preserves_one_adjustment_basis(self):
+        spec = {'seed': 'hyg.csv', 'canonical': 'yahoo_adj', 'symbol': 'HYG'}
+        old = [{'date': '2007-01-03', 'value': 40}, {'date': '2026-08-28', 'value': 80}]
+        mt._save_seed_csv(spec['seed'], old)
+        mt._save_seed_source(spec)
+        with mock.patch.object(mt, '_yahoo_closes', return_value=[{'date': '2026-08-28', 'value': 78}]) as fetch:
+            points, note = mt._resolve_series_points(spec, 5, True)
+        self.assertEqual(points, old)
+        self.assertTrue(note.startswith('refresh-incomplete'))
+        self.assertGreater(fetch.call_args.kwargs['years'], 5)
+        self.assertEqual(mt._load_seed_csv(spec['seed']), old)
+        full = [{'date': '2007-01-03', 'value': 39}, {'date': '2026-08-28', 'value': 78}]
+        with mock.patch.object(mt, '_yahoo_closes', return_value=full):
+            self.assertEqual(mt._resolve_series_points(spec, 5, True)[0], full)
+
+    def test_commit_failures_are_explicit_refresh_errors(self):
+        live = [{'date': '2026-08-28', 'value': 80}]
+        spec = {'seed': 'hyg.csv', 'canonical': 'yahoo_adj', 'symbol': 'HYG'}
+        for stage in ('_backup_seed', '_save_seed_csv', '_save_seed_source'):
+            with self.subTest(stage=stage), mock.patch.object(mt, '_yahoo_closes', return_value=live), \
+                    mock.patch.object(mt, stage, side_effect=OSError('disk failure')):
+                _, note = mt._resolve_series_points(spec, 5, True)
+                self.assertTrue(note.startswith('refresh-save-failed'))
+        with mock.patch.object(mt, '_nyfed_effr', return_value=live), \
+                mock.patch.object(mt, '_yahoo_closes', return_value=live), \
+                mock.patch.object(mt, '_save_seed_csv', side_effect=OSError('disk failure')):
+            result = mt.refresh_chart('__US_RATES_CREDIT__')
+        self.assertFalse(result['ok'])
+        self.assertTrue(result['refreshErrors'])
 
 
 if __name__ == '__main__':
