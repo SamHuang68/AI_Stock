@@ -451,6 +451,8 @@ py -3 build_v2.py
 
 `build_v2.py` 會把唯讀輸入 `stock_terminal.html` 與 `src/` 模組組裝成 `stock_terminal_v2.html`。資產版號取自內容雜湊，因此相同輸入會得到相同輸出；建置不再回寫模板或修改 JavaScript 原始碼。不要只修改生成檔而忽略 `src/` 模組。
 
+改了 `stock_terminal.html`、`V2_SCRIPTS` 或其他會進入打包檔的內容後，請重跑 `python build_v2.py` 並把 `stock_terminal_v2.html` 一起提交；`tests/test_bundle_fresh.py` 會在追蹤檔與重建結果不一致時擋下（比對時會忽略 `?v=` 快取雜湊，因為它在 Windows 與 Linux 的換行不同時本來就會不同）。
+
 若只想驗證建置、不要覆寫正式產物：
 
 ```powershell
