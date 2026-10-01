@@ -219,8 +219,8 @@
         if (opts.strict) throw err;
         return state;
       })
-      .finally(function () { if (inflight === requestPromise) inflight = null; });
-    inflight = requestPromise;
+      .finally(function () { if (!opts.strict && inflight === requestPromise) inflight = null; });
+    if (!opts.strict) inflight = requestPromise;
     return requestPromise;
   }
 
