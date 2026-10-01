@@ -4,6 +4,7 @@ import math
 import re
 
 TAIPEI = timezone(timedelta(hours=8))
+CLOCK_SKEW_TOLERANCE = timedelta(seconds=120)
 
 def taipei_today():
     return datetime.now(TAIPEI).date()
@@ -50,7 +51,9 @@ def txf_timestamp(day, clock, now=None):
         stamp = datetime.combine(observed, datetime.strptime(text, '%H:%M:%S').time(), TAIPEI)
     except ValueError:
         return None
-    if stamp > (now or datetime.now(TAIPEI)):
+    # 容許本機時鐘比交易所慢一點：TAIFEX 的 CTime 可能就是「這一秒」，零容忍會讓有效報價時有時無。
+    # 真正超前（日期錯、格式錯）仍然拒收。
+    if stamp > (now or datetime.now(TAIPEI)) + CLOCK_SKEW_TOLERANCE:
         return None
     return stamp.isoformat()
 

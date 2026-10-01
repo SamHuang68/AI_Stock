@@ -24,6 +24,14 @@ def test_txf_preserves_official_calendar_day_and_timezone():
     assert quote_contract({'time':'02:30:00','asOf':None},symbol='__TXF__',market='TW')['asOf'] is None
 
 
+def test_txf_timestamp_tolerates_small_local_clock_lag_but_not_real_future():
+    now = datetime(2026,10,1,12,0,0,tzinfo=TAIPEI)
+    # 交易所時間比本機快 60 秒：本機時鐘慢，不是壞資料
+    assert txf_timestamp('20261001','12:01:00',now) == '2026-10-01T12:01:00+08:00'
+    # 快 10 分鐘：超過容忍度，仍視為不可信
+    assert txf_timestamp('20261001','12:10:00',now) is None
+
+
 def test_marketflow_requires_response_date_and_valid_row_dates():
     def fetch(url):
         if 'FMTQIK' in url:
