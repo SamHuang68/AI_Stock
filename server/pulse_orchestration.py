@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 from deadline import collect_named
 from market_routes import market_snapshot
-from exchange_source_dates import marketflow_cache_key, taipei_today
+from exchange_source_dates import breadth_cache_key, marketflow_cache_key, taipei_today
 
 
 @dataclass
@@ -44,7 +44,6 @@ def configure(**kwargs: Any) -> None:
 
 def build_pulse_payload(handler, path: str) -> bytes:
     """Build GET /pulse response body (bytes JSON). Caller handles HTTP."""
-    from datetime import date as _date
     qs = parse_qs(urlparse(path).query)
     force = (qs.get('refresh', ['0'])[0] or '0') in ('1', 'true', 'yes')
     key = f'pulse:v2:{taipei_today().strftime("%Y%m%d")}:{int(time.time() // 45)}'
@@ -70,7 +69,6 @@ def build_pulse_payload(handler, path: str) -> bytes:
 
     today = taipei_today()
     ymd = today.strftime('%Y%m%d')
-    y_m_d = today.strftime('%Y-%m-%d')
 
     # 延伸因子與體質並行：OI／借券／NHNL／類股（專用 pool，不佔用全域 _pool）
     extras_fut = None
@@ -92,7 +90,7 @@ def build_pulse_payload(handler, path: str) -> bytes:
         fund = {}
 
     # 2) 廣度／指數／法人 — 優先快取；miss 時內聯建置（不經 _handle_*，避免弄亂 HTTP）
-    bd = _cache_first([f'breadth:v1:{ymd}'])
+    bd = _cache_first([breadth_cache_key(today)])
     if not (isinstance(bd, dict) and bd.get('ok')):
         try:
             bd = _deps.build_breadth_payload(force=False)

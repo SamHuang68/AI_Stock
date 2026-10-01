@@ -74,5 +74,18 @@ class PulseOrchestrationTests(unittest.TestCase):
         handler._txf_mis_session.assert_not_called()
 
 
+class BreadthCacheKeyContractTests(unittest.TestCase):
+    def test_reader_and_writer_share_one_key(self):
+        # 寫入端改成 breadth:source-date-v1 後，Pulse 讀取端仍寫死舊的 breadth:v1，
+        # 永遠 miss → 每次 Pulse 重建都多一次廣度建置。兩端現在都由 breadth_cache_key 產生。
+        from datetime import date
+        from exchange_source_dates import breadth_cache_key
+        self.assertEqual(breadth_cache_key(date(2026, 10, 1)), 'breadth:source-date-v1:20261001')
+        for name in ('pulse_orchestration.py', 'breadth_build.py'):
+            text = (SERVER / name).read_text(encoding='utf-8')
+            self.assertIn('breadth_cache_key(', text, name)
+            self.assertNotIn('breadth:v1', text, name)
+
+
 if __name__ == '__main__':
     unittest.main()

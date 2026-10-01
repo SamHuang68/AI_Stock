@@ -12,6 +12,11 @@ def taipei_today():
 def marketflow_cache_key(today):
     return f'marketflow:source-date-v1:{today.strftime("%Y%m%d")}'
 
+
+def breadth_cache_key(today):
+    """廣度快取鍵：寫入端（breadth_build）與讀取端（Pulse）必須共用，改版號只改這一處。"""
+    return f'breadth:source-date-v1:{today.strftime("%Y%m%d")}'
+
 def official_date(value):
     text = str(value or '').strip()
     match = re.fullmatch(r'(\d{3,4})[/-](\d{1,2})[/-](\d{1,2})', text)
