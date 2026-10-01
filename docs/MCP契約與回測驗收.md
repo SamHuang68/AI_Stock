@@ -36,7 +36,7 @@ MCP 本身不開 HTTP 服務，不建立憑證，不新增外部來源。`ST_MCP
 
 來源參考：[MCP 工具規格](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)、[Maverick 服務組裝](https://github.com/wshobson/maverick-mcp/blob/main/maverick/server/assembly.py)、[Maverick 回測計算](https://github.com/wshobson/maverick-mcp/blob/main/maverick/backtesting/engine.py)。本輪僅參考邊界分工概念，未複製其程式碼或安裝套件。
 
-## 回測模型 `st-backtest/4.0`
+## 回測模型 `st-backtest/4.0.1`
 
 `Backtest.run`、`runLS`、`scanStrategies`、`evaluateStrategies` 共用一個純計算成交核心；不抓取資料、不寫交易。原 `server/signal_stats_pool.py` 的事件研究、同市場基準率與樣本門檻完全獨立，不以交易模擬結果替換。
 
@@ -49,6 +49,8 @@ MCP 本身不開 HTTP 服務，不建立憑證，不新增外部來源。`ST_MCP
 - 日期在單一 `dateKey` 轉換：秒級 timestamp 依 TW／US 時區轉交易日；ISO 日期視為交易所日期。拒絕亂序、重複日與同日多根，UI 也拒絕已知非日線區間。不沿用 NYSE-only 日曆。
 
 條件組合器與腳本介面可調三種成本，顯示版本、截止日、成交口徑、每日估值、未平倉與資料限制。勝率與 Sharpe 不可定義時顯示「—」。舊儲存條件組缺成本欄位時明示載入預設情境；重新回測才產生新版績效，不混合舊結果。
+
+`4.0.1` 補齊零筆已平倉交易的缺值語意：每筆期望值、平均持有、最佳／最差等為 null，UI 顯示「—」；真實打平交易的期望值仍為 0。獲利因子在獲利與虧損同為零時為 null，只有虧損時為 0，只有獲利時為 Infinity。沒有已平倉樣本的策略列於排序末端，不冒充零期望值。
 
 ### 固定樣本外切分
 

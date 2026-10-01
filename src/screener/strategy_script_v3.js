@@ -252,15 +252,15 @@
     try { S.chartSeries.setMarkers(markers); } catch {}
   }
 
-  function fmtPF(v) { return v === Infinity ? '∞' : v.toFixed(2); }
+  function fmtPF(v) { return v == null ? '—' : v === Infinity ? '∞' : v.toFixed(2); }
   function renderResult(r) {
     const cell = (lbl, val, cls) => `<div class="ss-stat"><div class="ss-sl">${lbl}</div><div class="ss-sv ${cls || ''}">${val}</div></div>`;
     const pos = v => v >= 0 ? 'up' : 'dn';
     let h = `<div class="ss-stats">` +
       cell('總報酬（含未平倉）', (r.totalReturn >= 0 ? '+' : '') + r.totalReturn.toFixed(1) + '%', pos(r.totalReturn)) +
       cell('筆數', r.count) +
-      cell('已平倉勝率', r.winRate == null ? '—' : r.winRate.toFixed(1) + '%', r.winRate >= 50 ? 'up' : 'dn') +
-      cell('獲利因子', fmtPF(r.profitFactor), r.profitFactor >= 1 ? 'up' : 'dn') +
+      cell('已平倉勝率', r.winRate == null ? '—' : r.winRate.toFixed(1) + '%', r.winRate == null ? '' : r.winRate >= 50 ? 'up' : 'dn') +
+      cell('獲利因子', fmtPF(r.profitFactor), r.profitFactor == null ? '' : r.profitFactor >= 1 ? 'up' : 'dn') +
       cell('最大回撤', '-' + r.maxDD.toFixed(1) + '%', 'dn') +
       cell('每日夏普（年化）', r.sharpeAnn == null ? '—' : r.sharpeAnn.toFixed(2), r.sharpeAnn >= 1 ? 'up' : '') +
       `</div><canvas id="ss-curve" width="540" height="80"></canvas>`;

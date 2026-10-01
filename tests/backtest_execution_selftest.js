@@ -80,6 +80,23 @@ assert.equal(noTrades.totalReturn, 0);
 assert.equal(noTrades.maxDD, 0);
 assert.equal(noTrades.winRate, null);
 assert.equal(noTrades.sharpe, null);
+for (const result of [noTrades, open]) {
+  for (const key of ['profitFactor', 'expectancy', 'avgHoldBars', 'avgWin', 'avgLoss', 'payoff', 'best', 'worst']) {
+    assert.equal(result[key], null, `沒有已平倉樣本時 ${key} 不可冒充零績效`);
+  }
+}
+const flatFixture = copy(fixtures.us_costs);
+flatFixture.candles.forEach(b => Object.assign(b, {open:100, high:100, low:100, close:100}));
+const flat = run(flatFixture);
+assert.equal(flat.count, 1);
+assert.equal(flat.expectancy, 0, '真實打平交易的期望值維持零');
+assert.equal(flat.best, 0);
+assert.equal(flat.worst, 0);
+assert.equal(flat.profitFactor, null, '獲利與虧損都為零時比值無法定義');
+assert.equal(flat.payoff, null);
+assert.equal(flat.avgHoldBars, 1);
+assert.equal(stopResult.profitFactor, 0, '只有虧損交易的獲利因子是真實零');
+assert.equal(tw.profitFactor, Infinity, '只有獲利交易仍保留無窮大');
 assert.equal(B.runLS([], [], []).asOf, null);
 
 const gap = copy(fixtures.tw_drawdown);
