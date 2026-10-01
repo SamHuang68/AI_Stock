@@ -153,11 +153,11 @@
 
   function refresh(opts) {
     opts = opts || {};
-    if (inflight && !opts.force) return inflight;
+    if (inflight && !opts.force && !opts.strict) return inflight;
     var id = opts.correlationId || correlationId('context');
     var started = Date.now();
     var hasBody = !!(opts.riskProfile || (opts.holdings && opts.holdings.length));
-    var req = { cache: 'no-store' };
+    var req = { cache: 'no-store', signal: opts.signal };
     if (hasBody) {
       req.method = 'POST';
       req.headers = { 'Content-Type': 'application/json' };
@@ -167,13 +167,14 @@
         portfolioKind: opts.portfolioKind || 'actual'
       });
     }
+    req.headers = Object.assign({}, req.headers || {}, { 'X-ST-Trace-ID': id });
     trace('context_request_start', id, {
       method: req.method || 'GET',
       path: '/decision/context',
       portfolioKind: opts.portfolioKind || null,
       holdingsCount: (opts.holdings || []).length
     });
-    inflight = fetch(base() + '/decision/context', req)
+    var requestPromise = fetch(base() + '/decision/context', req)
       .then(function (r) {
         return r.text().then(function (raw) {
           trace('context_response', id, {
@@ -182,15 +183,26 @@
             responseChars: raw.length,
             elapsedMs: Date.now() - started
           });
-          if (!r.ok || !raw) return null;
+          if (!r.ok || !raw) {
+            if (opts.strict) {
+              var error = new Error('DecisionContext HTTP ' + r.status);
+              error.status = r.status;
+              throw error;
+            }
+            return null;
+          }
           try { return JSON.parse(raw); }
           catch (e) {
             trace('context_parse_error', id, { error: String(e && e.message || e) });
+            if (opts.strict) throw new Error('DecisionContext JSON invalid');
             return null;
           }
         });
       })
       .then(function (ctx) {
+        if (opts.strict && (!ctx || !ctx.regime || ctx.ok === false)) {
+          throw new Error('DecisionContext unavailable');
+        }
         if (ctx) {
           var published = publish(ctx, hasBody ? 'profile' : 'refresh', id);
           refreshOvernightResearch(state.context, id, false);
@@ -204,10 +216,12 @@
           error: String(err && err.message || err),
           elapsedMs: Date.now() - started
         });
+        if (opts.strict) throw err;
         return state;
       })
-      .finally(function () { inflight = null; });
-    return inflight;
+      .finally(function () { if (!opts.strict && inflight === requestPromise) inflight = null; });
+    if (!opts.strict) inflight = requestPromise;
+    return requestPromise;
   }
 
   window.DecisionData = {

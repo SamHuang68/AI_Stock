@@ -18,17 +18,34 @@
   function request(path, options) {
     options = options || {};
     var method = String(options.method || 'GET').toUpperCase();
-    var key = method === 'GET' ? method + ':' + path : null;
+    // A caller-owned deadline must not inherit another request's signal.
+    var key = method === 'GET' && !options.signal ? method + ':' + path : null;
     if (key && inflight[key]) return inflight[key].then(copyResponse);
     var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var timeoutMs = Math.max(250, Number(options.timeoutMs || 15000));
     var headers = Object.assign({ 'X-ST-Trace-ID': traceId() }, options.headers || {});
-    var timer = controller ? setTimeout(function () { controller.abort(); }, timeoutMs) : null;
+    var callerSignal = options.signal;
+    var requestSignal = controller ? controller.signal : callerSignal;
+    if (controller && callerSignal) {
+      if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.any === 'function') {
+        requestSignal = AbortSignal.any([controller.signal, callerSignal]);
+      } else {
+        // Keep forwarding through response-body consumption; both signals are
+        // request-scoped and collectable after their owners release them.
+        var abortFromCaller = function () { controller.abort(); };
+        if (callerSignal.aborted) abortFromCaller();
+        else callerSignal.addEventListener('abort', abortFromCaller, { once: true });
+      }
+    }
+    var timer = controller ? setTimeout(function () {
+      controller.abort();
+      if (abortFromCaller) callerSignal.removeEventListener('abort', abortFromCaller);
+    }, timeoutMs) : null;
     var fetchOptions = Object.assign({}, options, {
       method: method, headers: headers, cache: options.cache || 'no-store'
     });
     delete fetchOptions.timeoutMs;
-    if (controller) fetchOptions.signal = controller.signal;
+    if (requestSignal) fetchOptions.signal = requestSignal;
     var promise = fetch(base() + path, fetchOptions).then(function (response) {
       if (!response.ok) {
         var error = new Error('HTTP ' + response.status + ' for ' + path);
