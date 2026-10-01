@@ -21,6 +21,7 @@ import time
 import urllib.request
 from datetime import date, timedelta
 from typing import Any, Callable, Dict, Optional
+from exchange_source_dates import official_date, taipei_today
 
 _CODE_RE = re.compile(r'^\d{4,6}[A-Z]?$')
 
@@ -221,8 +222,8 @@ def snap_t86(tdate: str) -> Optional[Dict[str, dict]]:
     url = (f'https://www.twse.com.tw/rwd/zh/fund/T86?date={tdate}'
            f'&selectType=ALLBUT0999&response=json')
     data = _fetch_json(url)
-    from sector_flow import normalize_session_date
-    source_day = normalize_session_date((data or {}).get('date'))
+    observed = official_date((data or {}).get('date'))
+    source_day = observed.strftime('%Y%m%d') if observed and observed <= taipei_today() else None
     by = parse_t86(data) if source_day == tdate else None
     _snap_set(key, by, err=(by is None))
     return by
@@ -353,23 +354,23 @@ def snap_twtb4u(tdate: str) -> Optional[Dict[str, dict]]:
 def resolve_t86_date(max_back: int = 8):
     """往回找最近有 T86 的交易日，回 (date, by_code|None)。"""
     for back in range(0, max_back):
-        d = (date.today() - timedelta(days=back)).strftime('%Y%m%d')
+        d = (taipei_today() - timedelta(days=back)).strftime('%Y%m%d')
         by = snap_t86(d)
         if by:
             return d, by
-    return date.today().strftime('%Y%m%d'), None
+    return None, None
 
 
 def parse_tpex_inst(rows, expected_day=None):
     """上櫃法人以自身交易日與明確淨額欄位解析，不以買入量代替買賣超。"""
-    from sector_flow import normalize_session_date
     fields = {
         'foreign': 'ForeignInvestorsInclude MainlandAreaInvestors-Difference',
         'trust': 'SecuritiesInvestmentTrustCompanies-Difference',
         'dealer': 'Dealers-Difference', 'total': 'TotalDifference'}
     out = {}
     for row in rows if isinstance(rows, list) else []:
-        day = normalize_session_date(row.get('Date'))
+        observed = official_date(row.get('Date'))
+        day = observed.strftime('%Y%m%d') if observed and observed <= taipei_today() else None
         code = str(row.get('SecuritiesCompanyCode') or '').strip()
         if not day or not code or (expected_day and day != expected_day):
             raise ValueError('上櫃籌碼缺少自身交易日或日期不符')
@@ -403,7 +404,7 @@ def _tpex_inst(clean: str) -> Optional[dict]:
 def build_chip(sym: str) -> dict:
     """組出 /chip 回應 dict（呼叫端負責 HTTP cache／寫出）。"""
     clean = (sym or '').replace('.TW', '').replace('.TWO', '').strip().upper()
-    today = date.today().strftime('%Y%m%d')
+    today = taipei_today().strftime('%Y%m%d')
     if not is_equity_code(clean):
         return {
             'symbol': sym, 'date': today, 'inst': None, 'margin': None,
@@ -411,6 +412,7 @@ def build_chip(sym: str) -> dict:
         }
 
     tdate, t86 = resolve_t86_date()
+    lookup_date = tdate or today
     out = {'symbol': sym, 'date': tdate, 'inst': None, 'margin': None}
 
     if t86 and clean in t86:
@@ -429,15 +431,15 @@ def build_chip(sym: str) -> dict:
                 out['date'] = source_day
                 out['_verifiedChipDate'] = source_day
 
-    marg = snap_margn(tdate)
+    marg = snap_margn(lookup_date)
     if marg and clean in marg:
         out['margin'] = marg[clean]
 
-    lend = snap_twt72u(tdate)
+    lend = snap_twt72u(lookup_date)
     if lend and clean in lend:
         out['shortLend'] = lend[clean]
 
-    dayt = snap_twtb4u(tdate)
+    dayt = snap_twtb4u(lookup_date)
     if dayt and clean in dayt:
         out['dayTrade'] = dayt[clean]
 

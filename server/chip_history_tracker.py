@@ -15,6 +15,14 @@ import os, sys, json, urllib.request
 import time
 from datetime import date
 from pathlib import Path
+from exchange_source_dates import official_date, taipei_today
+
+
+def _validated_day(value):
+    observed = official_date(value)
+    if observed is None or observed > taipei_today():
+        raise ValueError('invalid or future official chip date')
+    return observed.strftime('%Y%m%d')
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
@@ -53,7 +61,6 @@ def fetch_t86(day):
 
 def record_snapshot(code, payload, directory=CHIP_HISTORY_PATH):
     """逐檔查詢也按可證明的來源日保存，不能把休市日讀取當成新交易日。"""
-    from datetime import datetime
     inst = (payload or {}).get('inst') or {}
     if inst.get('total') is None:
         return False
@@ -62,10 +69,13 @@ def record_snapshot(code, payload, directory=CHIP_HISTORY_PATH):
         return False
     raw_day = str(payload.get('date') or '')
     try:
-        source_day = datetime.strptime(raw_day, '%Y%m%d').date()
+        normalized = _validated_day(raw_day)
+        if normalized != raw_day:
+            return False
+        source_day = official_date(raw_day)
     except ValueError:
         return False
-    if source_day > date.today() or source_day.weekday() >= 5:
+    if source_day > taipei_today() or source_day.weekday() >= 5:
         return False
     fn = os.path.join(directory, raw_day + '.json')
     values = {key: inst.get(key) for key in ('foreign', 'trust', 'dealer', 'total')}
@@ -77,6 +87,7 @@ def record_snapshot(code, payload, directory=CHIP_HISTORY_PATH):
 
 
 def parse_and_save(day, *, directory=None):
+    day = _validated_day(day)
     data = fetch_t86(day)
     if data.get('stat') not in ('OK', 'ok'):
         print(f'[chip-tracker] {day} no data (stat={data.get("stat")}) — 非交易日?')
@@ -84,7 +95,7 @@ def parse_and_save(day, *, directory=None):
     from chip_api import parse_t86
     from datetime import datetime, timezone
     parsed = parse_t86(data)
-    source_day = str(data.get('date') or '').replace('-', '')
+    source_day = _validated_day(data.get('date'))
     if source_day != day:
         raise ValueError('來源交易日與請求不符，拒絕寫入籌碼快照')
     datetime.strptime(source_day, '%Y%m%d')
@@ -119,6 +130,7 @@ def parse_and_save(day, *, directory=None):
 
 def parse_and_save_tpex(day, *, directory=None):
     """與單檔畫面共用解析器；每日一次完整上櫃快照，日期不符時不寫入。"""
+    day = _validated_day(day)
     from chip_api import parse_tpex_inst
     from datetime import datetime, timezone
     url = 'https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading'
@@ -142,7 +154,7 @@ def parse_and_save_tpex(day, *, directory=None):
 
 
 if __name__ == '__main__':
-    day = sys.argv[1] if len(sys.argv) > 1 else date.today().strftime('%Y%m%d')
+    day = sys.argv[1] if len(sys.argv) > 1 else taipei_today().strftime('%Y%m%d')
     try:
         n = parse_and_save(day)
         sys.exit(0 if n else 1)

@@ -10,6 +10,7 @@ import time
 import urllib.request
 from datetime import date, timedelta
 from typing import Any, Callable
+from exchange_source_dates import marketflow_cache_key, taipei_today
 
 
 def breadth_trace(base_dir: str, event: str, **fields: Any) -> None:
@@ -39,7 +40,7 @@ def build_breadth_payload(
     build_tw_market_fundamental: Callable[..., dict],
 ) -> dict:
     """Build breadth payload; writes breadth:v1:{ymd} cache entry."""
-    key = f'breadth:v1:{date.today().strftime("%Y%m%d")}'
+    key = f'breadth:source-date-v1:{taipei_today().strftime("%Y%m%d")}'
     if not force:
         c = cache.get(key)
         if c is not None:
@@ -200,10 +201,7 @@ def build_breadth_payload(
         print('[breadth] fundamental', e)
 
     try:
-        mf_key = f'marketflow:{date.today().strftime("%Y%m%d")}'
-        cached_mf = cache.get(mf_key)
-        if cached_mf is None:
-            cached_mf = cache.get(f'marketflow:{date.today().strftime("%Y-%m-%d")}')
+        cached_mf = cache.get(marketflow_cache_key(taipei_today()))
         if cached_mf:
             mf = json.loads(cached_mf.decode('utf-8') if isinstance(cached_mf, (bytes, bytearray)) else cached_mf)
             out['inst'] = mf.get('inst')
