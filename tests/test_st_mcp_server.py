@@ -201,6 +201,8 @@ class StructuredContractTests(unittest.TestCase):
                 out = MCP.call_tool(name, args)['structuredContent']
                 self.assertIn('cacheOnly=1', request.call_args[0][0])
             self.assertEqual(out['metadata']['access']['mode'], 'cache-only')
+            self.assertTrue(out['metadata']['access']['backendMayUpdateCache'])
+            self.assertFalse(out['metadata']['access']['backendMayAccessNetwork'])
             self.assertTrue(listing[name]['annotations']['openWorldHint'])
         for name in ('st_signal_catalog', 'st_signal_scoreboard', 'st_market_decision', 'st_key_levels'):
             self.assertFalse(listing[name]['annotations']['openWorldHint'])
@@ -234,6 +236,14 @@ class StructuredContractTests(unittest.TestCase):
             self.assertEqual(rpc('tools/list', params)['error']['code'], -32602)
         for args in ([], False, '', None):
             self.assertEqual(rpc('tools/call', {'name': 'st_signal_catalog', 'arguments': args})['error']['code'], -32602)
+
+    def test_malformed_backend_does_not_break_next_request(self):
+        for backend in ({'items': 7}, {'signals': float('nan')}, ['not-an-object']):
+            with mock.patch.object(MCP, 'http_json', return_value=backend):
+                out = MCP.call_tool('st_signal_catalog', {})
+            self.assertEqual(out['structuredContent']['error']['code'], 'invalid_backend_result')
+            assert_schema(self, out['structuredContent'], MCP.OUTPUT_SCHEMA)
+            self.assertEqual(rpc('ping')['result'], {})
 
     def test_loopback_only_no_proxy_no_redirect_no_post(self):
         # 執行時組出明確的合成測試向量；分享包不保留看似真實憑證／信箱的字面值。

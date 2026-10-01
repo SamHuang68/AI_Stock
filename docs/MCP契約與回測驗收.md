@@ -30,7 +30,7 @@
 | `metadata.access` | 此次呼叫的傳輸、cache-only 或 backend-may-refresh 能力語意 |
 | `error` | 穩定 code、message、retryable；無錯誤為 null。unavailable 也設 MCP isError；partial 保留可用資料 |
 
-`st_stock_health`、`st_stock_evidence`、`st_watchlist_health` 沿用既有後端，預設可能補抓公開日線並更新後端快取；可傳 `cacheOnly: true` 禁止補抓。它們的 `openWorldHint` 為 true，readOnlyHint 表示沒有交易、設定或使用者狀態寫入，並非保證沒有快取更新。其餘四項只讀本機資料／定義。關鍵價位目前後端僅支援 `^TWII`、`^TWOII`、`__TXF__`，schema 與後端一致。
+`st_stock_health`、`st_stock_evidence`、`st_watchlist_health` 沿用既有後端，預設可能補抓公開日線並更新後端快取；可傳 `cacheOnly: true` 禁止網路補抓，但既有分析仍可能更新本機快取。它們的 `openWorldHint` 為 true，readOnlyHint 表示沒有交易、設定或使用者狀態寫入，並非保證沒有快取更新。其餘四項只讀本機資料／定義。關鍵價位目前後端僅支援 `^TWII`、`^TWOII`、`__TXF__`，schema 與後端一致。
 
 MCP 本身不開 HTTP 服務，不建立憑證，不新增外部來源。`ST_MCP_BASE_URL` 僅允許無憑證／路徑的 loopback HTTP 位址；停用代理及重新導向。未知市場／多餘參數／型別不符在呼叫後端前明確拒絕，不再靜默退回台股。
 

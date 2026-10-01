@@ -119,6 +119,17 @@ Object.assign(insolventFixture.candles[1], {open:100,high:250,low:100,close:250}
 const insolvent = run(insolventFixture, {short:true});
 assert.ok(insolvent.issues.some(i => i.code === 'non_positive_equity'));
 assert.equal(insolvent.trades[0].reason, 'insolvent');
+const extendedInsolvent = copy(insolventFixture);
+extendedInsolvent.candles.push({...extendedInsolvent.candles[2], time:'2026-09-24'});
+extendedInsolvent.buy = [true,false,true,true]; extendedInsolvent.sell = [false,false,false,false];
+const halted = run(extendedInsolvent, {short:true});
+assert.equal(halted.halted, true);
+assert.equal(halted.pendingOrder, null, '權益耗盡後即使跳空恢復，也不重新開倉');
+assert.equal(halted.openPosition, null);
+const pfBars = [100,100,150,100,90].map((open,i)=>({time:`2026-09-${21+i}`,open,
+  high:Math.max(open,[100,150,150,90,90][i]),low:Math.min(open,[100,150,150,90,90][i]),close:[100,150,150,90,90][i],volume:1000}));
+const pf = B.runLS(pfBars,[true,false,true,false,false],null,{...zero,maxBars:1});
+near(pf.profitFactor, 10/3, '獲利因子依實際已實現金額加總');
 
 const series = Array.from({length: 220}, (_, i) => {
   const close = 100 + 12 * Math.sin(i / 5) + i / 10;

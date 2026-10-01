@@ -85,6 +85,7 @@
     annualRiskFreeRate: 0, market: 'TW' });
   const LIMITATIONS = Object.freeze([
     '僅模擬已提供的日線；沒有交易所日曆，缺列與休市無法自動區分。',
+    '日成交量只作可成交性代理，不能證明開盤即有流動性；未提供撮合與開盤委託資料。',
     '停利／停損於收盤判斷，下次可成交開盤執行；不模擬盤中觸價、限價排隊或漲跌停成交。',
     '費用與滑價為可調情境值，非券商牌告；未含借券、融資、股息、稅務與整張限制。',
     '未驗證還原價格、點時財報與下市全集，不能宣稱已消除存活者偏差；不等同訊號成績單事件研究。',
@@ -154,7 +155,7 @@
     const start = opts.startDate == null ? null : dateKey(opts.startDate, opts.market);
     const end = opts.endDate == null ? null : dateKey(opts.endDate, opts.market);
     if (start && end && start > end) throw new Error('起日不得晚於截止日');
-    let cash = 1, equity = 1, peak = 1, maxDD = 0, position = null, pending = null, lastMark = null;
+    let cash = 1, equity = 1, peak = 1, maxDD = 0, position = null, pending = null, lastMark = null, halted = false;
     const trades = [], curve = [], dailyReturns = [], issues = [];
     const sign = opts.short ? -1 : 1;
     const slip = opts.slippageBps / 10000, entryFee = opts.entryFeeBps / 10000, exitFee = opts.exitFeeBps / 10000;
@@ -178,7 +179,7 @@
         } else if (pending.side === 'exit' && position) {
           const exit = b.open * (1 - sign * slip), fee = position.quantity * exit * exitFee;
           cash += sign * position.quantity * exit - fee;
-          trades.push({ ...position, exit, exitBar: i, exitTime: b.time, exitFee: fee,
+          trades.push({ ...position, exit, exitBar: i, exitTime: b.time, exitFee: fee, pnl: cash - position.before,
             exitSignalBar: pending.signalBar, reason: pending.reason,
             ret: cash / position.before - 1, holdBars: i - position.entryBar });
           position = null;
@@ -195,6 +196,7 @@
       // 第一根收盤為基準，之後所有日線（包括空手）用同一報酬口徑。
       if (observed > 1) dailyReturns.push(previousEquity > 0 ? equity / previousEquity - 1 : null);
       if (equity <= 0) {
+        halted = true;
         issues.push({ bar: i, date: b.date, code: 'non_positive_equity' });
         if (position && !pending) pending = { side: 'exit', signalBar: i, reason: 'insolvent' };
       }
@@ -207,14 +209,14 @@
           else if (opts.maxBars > 0 && i - position.entryBar + 1 >= opts.maxBars) reason = 'time';
           else if (sellArr && sellArr[i]) reason = 'signal';
           if (reason) pending = { side: 'exit', signalBar: i, reason };
-        } else if (buyArr[i]) pending = { side: 'entry', signalBar: i, reason: 'signal' };
+        } else if (buyArr[i] && !halted) pending = { side: 'entry', signalBar: i, reason: 'signal' };
       }
     }
     if (pending) issues.push({ bar: pending.signalBar, code: 'no_next_tradable_bar', side: pending.side });
     const openPosition = position ? { ...position, mark: lastMark, equity,
       unrealizedReturn: equity / position.before - 1, pendingExit: pending && pending.side === 'exit' ? pending.reason : null } : null;
     return { ...summarize(trades, equity, maxDD, curve, dailyReturns, opts), openPosition, pendingOrder: pending,
-      engineVersion: ENGINE_VERSION, settings: opts, issues, limitations: [...LIMITATIONS],
+      engineVersion: ENGINE_VERSION, settings: opts, issues, limitations: [...LIMITATIONS], halted,
       evaluation: 'in-sample', asOf: curve.length ? curve[curve.length - 1].date : null,
       execution: 'close-signal-next-tradable-open', equityBasis: 'daily-close-mark-to-market',
       sharpeBasis: 'daily-simple-excess-return-sample-standard-deviation' };
@@ -240,7 +242,7 @@
     const sd = excess.length > 1 ? Math.sqrt(excess.reduce((s, r) => s + (r - mean) ** 2, 0) / (excess.length - 1)) : 0;
     const sharpe = sd > 0 && excess.length === dailyReturns.length ? mean / sd * Math.sqrt(opts.periodsPerYear) : null;
     const payoff = avgLoss ? Math.abs(avgWin / avgLoss) : (avgWin ? Infinity : 0);
-    const grossWin = sum(wins), grossLoss = Math.abs(sum(losses));
+    const grossWin = wins.reduce((s, t) => s + t.pnl, 0), grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
     const profitFactor = grossLoss ? grossWin / grossLoss : (grossWin ? Infinity : 0);
     let winStreak = 0, lossStreak = 0, curW = 0, curL = 0;
     for (const t of trades) {

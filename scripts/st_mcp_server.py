@@ -314,7 +314,7 @@ def _structured(protocol_version):
 def access_policy(name, args):
     network = name in _REFRESH_TOOLS and not (name in _CACHE_OPTION_TOOLS and args.get('cacheOnly'))
     return {'transport': 'loopback-http', 'mode': 'backend-may-refresh' if network else 'cache-only',
-            'backendMayAccessNetwork': bool(network), 'backendMayUpdateCache': bool(network)}
+            'backendMayAccessNetwork': bool(network), 'backendMayUpdateCache': name in _REFRESH_TOOLS}
 
 
 def result_metadata(backend, name, args):
@@ -381,6 +381,8 @@ def call_tool(name: str, args: Dict[str, Any], protocol_version=SUPPORTED_PROTOC
         data, backend = (result.data, result.backend) if isinstance(result, BackendResult) else (result, result)
         if not isinstance(data, dict) or not isinstance(backend, dict):
             raise TypeError('後端結果必須為物件')
+        if backend.get('items') is not None and not isinstance(backend['items'], list):
+            raise TypeError('後端 items 必須為陣列')
         json.dumps(data, allow_nan=False)
         json.dumps(backend, allow_nan=False)
     except urllib.error.HTTPError as exc:
