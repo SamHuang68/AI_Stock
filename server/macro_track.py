@@ -666,10 +666,36 @@ _FRED_CIRCUIT_OPEN = False
 _FRED_CIRCUIT_REASON = ''
 
 
+_FRED_CIRCUIT_SEEN_AT: Optional[float] = None
+
+
+def _fred_cooldown_sec() -> float:
+    raw = os.environ.get('MACRO_FRED_COOLDOWN', '600').strip()
+    try:
+        return max(30.0, min(86400.0, float(raw)))
+    except Exception:
+        return 600.0
+
+
 def fred_circuit_open() -> bool:
-    return _FRED_CIRCUIT_OPEN or (
-        os.environ.get('MACRO_SKIP_FRED', '').strip().lower() in ('1', 'true', 'yes')
-    )
+    """熔斷後冷卻一段時間（預設 10 分鐘）再半開、重試一次。
+    FRED 是 us2y／spread10y2y 的唯一來源（備援已移除）；若熔斷整個程序存活期都不重試，
+    一次 3 秒網路抖動就會讓這兩條永遠空白。MACRO_SKIP_FRED=1 仍是永久關閉。"""
+    global _FRED_CIRCUIT_OPEN, _FRED_CIRCUIT_SEEN_AT
+    if os.environ.get('MACRO_SKIP_FRED', '').strip().lower() in ('1', 'true', 'yes'):
+        return True
+    if not _FRED_CIRCUIT_OPEN:
+        _FRED_CIRCUIT_SEEN_AT = None
+        return False
+    now = time.monotonic()
+    if _FRED_CIRCUIT_SEEN_AT is None:     # 設旗標的地方有三處（含 server.py），在第一次被查到時起算
+        _FRED_CIRCUIT_SEEN_AT = now
+        return True
+    if now - _FRED_CIRCUIT_SEEN_AT >= _fred_cooldown_sec():
+        _FRED_CIRCUIT_OPEN = False
+        _FRED_CIRCUIT_SEEN_AT = None
+        return False
+    return True
 
 
 def _fred_timeout_sec() -> float:
@@ -730,8 +756,12 @@ def _fred_points(series_id: str, years: int = 25) -> List[Dict[str, Any]]:
     return pts
 
 
-def _yahoo_closes(symbol: str, years: int = 25, adj: bool = False) -> List[Dict[str, Any]]:
-    """Yahoo chart API 日線；adj=True 用還原收盤（總報酬代理）。"""
+def _yahoo_closes(symbol: str, years: int = 25, adj: bool = False,
+                  adj_optional: bool = False) -> List[Dict[str, Any]]:
+    """Yahoo chart API 日線；adj=True 用還原收盤（總報酬代理）。
+    預設嚴格：缺 adjclose 就回 []，不拿原始收盤冒充（LQD／HYG／XLF 這類 ETF 總報酬代理必須如此）。
+    adj_optional=True 給指數／期貨／匯率／殖利率／BTC：沒有「還原」的概念，缺 adjclose 時
+    原始收盤就是還原值，退回原始收盤；否則 Yahoo 對這些代號不給 adjclose 時，更新會永遠失敗。"""
     end = int(time.time())
     start = end - max(1, years) * 366 * 24 * 3600
     if years >= 25:
@@ -754,9 +784,10 @@ def _yahoo_closes(symbol: str, years: int = 25, adj: bool = False) -> List[Dict[
     closes = q.get('close') or []
     if adj:
         adj_arr = ((r0.get('indicators') or {}).get('adjclose') or [{}])[0].get('adjclose') or []
-        if not adj_arr:
+        if adj_arr:
+            closes = adj_arr
+        elif not adj_optional:
             return []
-        closes = adj_arr
     pts = []
     for t, c in zip(ts, closes):
         if c is None:
@@ -1016,6 +1047,16 @@ def _seed_snapshot(spec: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
         return points, False
 
 
+def _remove_quietly(path: str) -> None:
+    """清暫存檔：Windows 上被防毒／索引鎖住時 os.remove 會拋 PermissionError，
+    在 finally 裡拋出會蓋掉真正的錯誤，讓呼叫端報錯成因不對。清不掉就留給下次。"""
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
 def _save_seed_source(spec: Dict[str, Any], digest: Optional[str] = None) -> None:
     path = _seed_path(spec['seed'])
     if digest is None:
@@ -1030,8 +1071,7 @@ def _save_seed_source(spec: Dict[str, Any], digest: Optional[str] = None) -> Non
             os.fsync(f.fileno())
         os.replace(tmp, source_path)
     finally:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+        _remove_quietly(tmp)
 
 
 _SEED_LOCKS_GUARD = threading.Lock()
@@ -1066,8 +1106,22 @@ def _backup_seed(name: str) -> None:
             if hashlib.sha256(f.read()).hexdigest() != digest:
                 raise OSError('seed backup verification failed')
     finally:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+        _remove_quietly(tmp)
+
+
+def _adj_history_covered(current: List[Dict[str, Any]], live: List[Dict[str, Any]]) -> bool:
+    """還原收盤要整段重抓（配息會讓舊值整段重算）。這次抓到的資料須涵蓋現有種子的區間；
+    容許極少數日期缺值（Yahoo 偶爾某天回 null）——過去要求「完全包含」，
+    一個日期缺值就讓每次更新都停在 refresh-incomplete，直到 Yahoo 資料自己變好。"""
+    if not current:
+        return True
+    if not live:
+        return False
+    live_dates = {p['date'] for p in live}
+    if date.fromisoformat(live[0]['date']) > date.fromisoformat(current[0]['date']) + timedelta(days=10):
+        return False
+    missing = sum(1 for p in current if p['date'] not in live_dates)
+    return missing <= max(5, len(current) // 100)
 
 
 def _resolve_series_points(
@@ -1093,37 +1147,49 @@ def _resolve_series_points_locked(
     if seed_pts and not force_live:
         return seed_pts, seed_note
 
+    # 讀取不該改檔：種子檔存在但整檔被拒收（壞列）時，GET 不重抓、不覆寫。
+    # 過去一次讀圖就會備份並以呼叫端的 years 年資料重寫成「verified」種子，把多年歷史截短。
+    # 「更新」(force_live) 才會先備份再重建；檔案根本不存在才允許讀取時初次建立。
+    canonical = s.get('canonical')
+    if not force_live and not seed_pts and seed_name and os.path.isfile(_seed_path(seed_name)):
+        return [], (f'seed-rejected:{seed_name} · unverified'
+                    '（種子檔未通過驗證，未自動覆寫；按「更新」會先備份再重建）')
+
     live: List[Dict[str, Any]] = []
     note = ''
 
-    canonical = s.get('canonical')
+    # 抓取區間：呼叫端的 years（例如經濟頁更新鈕的 5 年）只決定圖表視窗，不能決定種子保留多少歷史。
+    # 未驗證種子會以 canonical 來源整檔重建、還原收盤會整段重算；若只抓 years 年，
+    # 25 年的種子一次更新就只剩 5 年。至少涵蓋現有種子的起點。
+    fetch_years = years
+    if seed_pts and canonical and (not verified or canonical == 'yahoo_adj'):
+        first = date.fromisoformat(seed_pts[0]['date'])
+        fetch_years = max(years, (_taipei_today() - first).days // 366 + 1)
+
     src = s.get('source')
     if canonical == 'nyfed_effr':
-        live = _nyfed_effr(years)
+        live = _nyfed_effr(fetch_years)
         if live:
             note = 'NY Fed EFFR'
     elif canonical == 'bls_cpi_yoy':
-        live = _bls_cpi_yoy(years)
+        live = _bls_cpi_yoy(fetch_years)
         if live:
             note = 'BLS CPI-U NSA YoY'
     elif canonical == 'bls_unrate':
-        live = _bls_unrate(years)
+        live = _bls_unrate(fetch_years)
         if live:
             note = 'BLS UNRATE'
     elif canonical == 'yahoo_adj' and s.get('symbol'):
-        fetch_years = years
-        if verified and seed_pts:
-            first = date.fromisoformat(seed_pts[0]['date'])
-            fetch_years = max(years, (_taipei_today() - first).days // 366 + 1)
-        live = _yahoo_closes(s['symbol'], years=fetch_years, adj=True)
+        adj_kwargs = {'adj_optional': True} if s.get('adjOptional') else {}
+        live = _yahoo_closes(s['symbol'], years=fetch_years, adj=True, **adj_kwargs)
         if live:
             note = f"Yahoo {s['symbol']} adj"
     elif canonical == 'yahoo' and s.get('symbol'):
-        live = _yahoo_closes(s['symbol'], years=years, adj=False)
+        live = _yahoo_closes(s['symbol'], years=fetch_years, adj=False)
         if live:
             note = f"Yahoo {s['symbol']}"
     elif canonical == 'fred' and s.get('fred'):
-        live = _fred_points(s['fred'], years)
+        live = _fred_points(s['fred'], fetch_years)
         if live:
             note = f"FRED {s['fred']}"
     elif not canonical and src == 'fred' and s.get('fred'):
@@ -1176,9 +1242,11 @@ def _resolve_series_points_locked(
         with _seed_lock(seed_name):
             current, verified = _seed_snapshot(s)
             if canonical == 'yahoo_adj' and verified:
-                if not {p['date'] for p in current}.issubset({p['date'] for p in live}):
+                if not _adj_history_covered(current, live):
                     return current, 'refresh-incomplete:yahoo_adj · full adjusted history required'
-            by_d = {p['date']: p for p in current} if not canonical or verified else {}
+                by_d = {}   # 還原值整段重算：用這次抓到的整段，不與舊基準的值混合
+            else:
+                by_d = {p['date']: p for p in current} if not canonical or verified else {}
             for p in live:
                 by_d[p['date']] = p
             merged = [by_d[k] for k in sorted(by_d.keys())]
