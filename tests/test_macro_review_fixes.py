@@ -189,8 +189,11 @@ class MacroReviewFixes(unittest.TestCase):
     def test_fred_circuit_closes_again_after_cooldown(self):
         mt._FRED_CIRCUIT_OPEN = True
         mt._FRED_CIRCUIT_SEEN_AT = None
+        from types import SimpleNamespace
+        clock = iter([1000.0, 1599.0, 1601.0])
+        # 只換掉 macro_track 模組內的 time 名稱，不去動全域 time.monotonic（threading 等也會用到）
         with mock.patch.dict(os.environ, {'MACRO_SKIP_FRED': ''}), \
-                mock.patch.object(mt.time, 'monotonic', side_effect=[1000.0, 1599.0, 1601.0]):
+                mock.patch.object(mt, 'time', SimpleNamespace(monotonic=lambda: next(clock))):
             self.assertTrue(mt.fred_circuit_open())      # 第一次被查到起算
             self.assertTrue(mt.fred_circuit_open())      # 冷卻中
             self.assertFalse(mt.fred_circuit_open())     # 冷卻 600 秒後半開
