@@ -241,6 +241,10 @@ def fetch_breadth_day(yyyymmdd: str) -> Optional[dict]:
             d = _http_json(url, timeout=14)
             if d.get('stat') not in ('OK', 'ok'):
                 continue
+            # 回應自己說是另一天（或未來日）→ 不能存成請求日的廣度。沒帶 date 欄不擋（同 chip 區塊的寬鬆政策）。
+            observed = official_date(d.get('date'))
+            if observed is not None and (observed.strftime('%Y%m%d') != yyyymmdd or observed > _taipei_today()):
+                continue
             tables = d.get('tables') or []
             rows = None
             for t in tables:
@@ -502,12 +506,18 @@ def history(kind: str = 'breadth', n: int = 40) -> Dict[str, Any]:
             rows = conn.execute(
                 "SELECT d,open,high,low,close,change_pct,volume FROM index_daily WHERE symbol=? AND (? != '^TWOII' OR source=?) ORDER BY d DESC LIMIT ?",
                 (sym, sym, TWOII_SOURCE, n)).fetchall()
-            return {'ok': bool(rows), 'status': 'available' if rows else 'unavailable',
-                    'source': TWOII_SOURCE if sym == '^TWOII' else 'yahoo',
-                    'kind': kind, 'symbol': sym, 'rows': [
+            out = {'ok': bool(rows), 'status': 'available' if rows else 'unavailable',
+                   'source': TWOII_SOURCE if sym == '^TWOII' else 'yahoo',
+                   'kind': kind, 'symbol': sym, 'rows': [
                 {'date': r[0], 'open': r[1], 'high': r[2], 'low': r[3], 'close': r[4],
                  'changePct': r[5], 'volume': r[6]} for r in rows
             ]}
+            if sym == '^TWOII':
+                # 官方 st41 只有收盤與漲跌；tw_index_charts 以前收盤／收盤合成 open/high/low、volume 填 0。
+                # 欄位保留（既有消費端直接用數字），但明說哪些是衍生值，避免被當成真實 K 棒或成交量。
+                out['ohlcDerived'] = True
+                out['ohlcNote'] = '只有 close／changePct 是官方值；open/high/low 由前收與收盤衍生，volume 無官方資料'
+            return out
         if kind in ('pulse', 'score'):
             rows = conn.execute(
                 'SELECT d,health,risk,total,completeness,status_text,tone FROM pulse_score_daily ORDER BY d DESC LIMIT ?',

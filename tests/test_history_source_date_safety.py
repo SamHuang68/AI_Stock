@@ -80,4 +80,21 @@ class HistorySafetyTests(unittest.TestCase):
     def test_institutional_waits_for_official_day(self):
         self.assertEqual(ph._institutional_meta('2026-09-29', '2026-09-30', 1)[0], '等待當日發布')
 
+    def test_breadth_day_rejects_response_that_states_another_day(self):
+        # fetch_inst_day 已核對回應日；廣度之前直接把請求日當成資料日存起來。
+        body = {'stat': 'OK', 'date': '20260930', 'tables': [{'title': '漲跌證券數合計', 'data': [
+            ['上漲(漲停)', '1,000(10)', '800(9)'], ['下跌(跌停)', '500(2)', '400(1)'], ['持平', '100', '90']]}]}
+        with patch.object(ph, '_taipei_today', return_value=date(2026, 10, 1)), \
+                patch.object(ph, '_http_json', return_value=body):
+            self.assertIsNone(ph.fetch_breadth_day('20261001'))
+            got = ph.fetch_breadth_day('20260930')
+        self.assertEqual((got['d'], got['up'], got['down'], got['limit_up']), ('2026-09-30', 800, 400, 9))
+
+    def test_breadth_day_without_a_date_field_is_still_accepted(self):
+        body = {'stat': 'OK', 'tables': [{'title': '漲跌證券數合計', 'data': [
+            ['上漲(漲停)', '1,000(10)', '800(9)'], ['下跌(跌停)', '500(2)', '400(1)']]}]}
+        with patch.object(ph, '_taipei_today', return_value=date(2026, 10, 1)), \
+                patch.object(ph, '_http_json', return_value=body):
+            self.assertEqual(ph.fetch_breadth_day('20260930')['up'], 800)
+
 if __name__ == '__main__': unittest.main()

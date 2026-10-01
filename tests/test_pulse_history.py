@@ -91,6 +91,19 @@ class PulseHistoryTests(unittest.TestCase):
             row = conn.execute("SELECT close, change_pct, source FROM index_daily WHERE d='2026-09-02'").fetchone()
         self.assertEqual(row, (1.8, 2.0, 'b'))
 
+    def test_twoii_history_flags_derived_ohlc_but_twii_does_not(self):
+        import sqlite3
+        from contextlib import closing
+        with closing(sqlite3.connect(self.ph.DB_PATH)) as conn:
+            self.ph._upsert_index_rows(conn, '^TWOII', [('2026-09-30', 100, 101, 99, 100.5, 0.5, 0.0)], self.ph.TWOII_SOURCE, 1)
+            self.ph._upsert_index_rows(conn, '^TWII', [('2026-09-30', 1, 2, 0.5, 1.5, 1.0, 9.0)], 'yahoo', 1)
+            conn.commit()
+        otc = self.ph.history('twoii', n=5)
+        self.assertTrue(otc['ohlcDerived'])
+        self.assertIn('官方', otc['ohlcNote'])
+        self.assertEqual(otc['rows'][0]['close'], 100.5)          # 欄位與數值照舊，向後相容
+        self.assertNotIn('ohlcDerived', self.ph.history('twii', n=5))
+
 
 if __name__ == '__main__':
     unittest.main()
