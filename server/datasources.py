@@ -127,7 +127,9 @@ def _st_macro_chart(cid):
     try:
         import macro_track as mt
         st = mt.status_summary().get('charts', {}).get(cid) or {}
-        return {'updated': st.get('updated') or 0, 'count': st.get('count') or 0}
+        return {'updated': st.get('updated') or 0, 'count': st.get('count') or 0,
+                'publishable': st.get('publishable'), 'staleCount': st.get('staleCount'),
+                'series': st.get('series') or []}
     except Exception:
         return {'updated': 0, 'count': 0}
 
@@ -138,7 +140,9 @@ def _st_macro_all():
         charts = mt.status_summary().get('charts') or {}
         n = sum(int(v.get('count') or 0) for v in charts.values())
         ts = max((int(v.get('updated') or 0) for v in charts.values()), default=0)
-        return {'updated': ts, 'count': n}
+        return {'updated': ts, 'count': n,
+                'publishable': all(v.get('publishable', True) is not False for v in charts.values()),
+                'staleCount': sum(int(v.get('staleCount') or 0) for v in charts.values())}
     except Exception:
         return {'updated': 0, 'count': 0}
 
