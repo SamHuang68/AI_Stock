@@ -24,17 +24,24 @@
     var timeoutMs = Math.max(250, Number(options.timeoutMs || 15000));
     var headers = Object.assign({ 'X-ST-Trace-ID': traceId() }, options.headers || {});
     var callerSignal = options.signal;
-    var abortFromCaller = controller ? function () { controller.abort(); } : null;
-    if (callerSignal && abortFromCaller) {
-      if (callerSignal.aborted) abortFromCaller();
-      else callerSignal.addEventListener('abort', abortFromCaller, { once: true });
+    var requestSignal = controller ? controller.signal : callerSignal;
+    if (controller && callerSignal) {
+      if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.any === 'function') {
+        requestSignal = AbortSignal.any([controller.signal, callerSignal]);
+      } else {
+        // Keep forwarding through response-body consumption; both signals are
+        // request-scoped and collectable after their owners release them.
+        var abortFromCaller = function () { controller.abort(); };
+        if (callerSignal.aborted) abortFromCaller();
+        else callerSignal.addEventListener('abort', abortFromCaller, { once: true });
+      }
     }
     var timer = controller ? setTimeout(function () { controller.abort(); }, timeoutMs) : null;
     var fetchOptions = Object.assign({}, options, {
       method: method, headers: headers, cache: options.cache || 'no-store'
     });
     delete fetchOptions.timeoutMs;
-    if (controller) fetchOptions.signal = controller.signal;
+    if (requestSignal) fetchOptions.signal = requestSignal;
     var promise = fetch(base() + path, fetchOptions).then(function (response) {
       if (!response.ok) {
         var error = new Error('HTTP ' + response.status + ' for ' + path);
@@ -45,7 +52,6 @@
       return response;
     }).finally(function () {
       if (timer) clearTimeout(timer);
-      if (callerSignal && abortFromCaller) callerSignal.removeEventListener('abort', abortFromCaller);
       if (key) delete inflight[key];
     });
     if (key) inflight[key] = promise;
