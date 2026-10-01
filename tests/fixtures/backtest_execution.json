@@ -1,0 +1,43 @@
+{
+  "tw_drawdown": {
+    "market": "TW",
+    "symbol": "2330",
+    "candles": [
+      {"time":"2026-09-21","open":100,"high":100,"low":100,"close":100,"volume":1000},
+      {"time":"2026-09-22","open":100,"high":105,"low":75,"close":80,"volume":1000},
+      {"time":"2026-09-23","open":90,"high":125,"low":85,"close":120,"volume":1000},
+      {"time":"2026-09-24","open":110,"high":115,"low":105,"close":110,"volume":1000}
+    ],
+    "buy": [true,false,false,false], "sell": [false,false,true,false]
+  },
+  "us_costs": {
+    "market": "US", "symbol": "AAPL",
+    "candles": [
+      {"time":"2026-09-21","open":90,"high":90,"low":90,"close":90,"volume":2000},
+      {"time":"2026-09-22","open":100,"high":105,"low":95,"close":100,"volume":2000},
+      {"time":"2026-09-23","open":120,"high":120,"low":120,"close":120,"volume":2000}
+    ],
+    "buy": [true,false,false], "sell": [false,true,false]
+  },
+  "tw_etf_suspension": {
+    "market": "TW", "symbol": "0050",
+    "candles": [
+      {"time":"2026-09-21","open":50,"high":50,"low":50,"close":50,"volume":1000},
+      {"time":"2026-09-22","open":50,"high":50,"low":50,"close":50,"volume":0,"suspended":true},
+      {"time":"2026-09-24","open":null,"high":null,"low":null,"close":null,"volume":null},
+      {"time":"2026-09-25","open":60,"high":60,"low":60,"close":60,"volume":1000},
+      {"time":"2026-09-28","open":66,"high":66,"low":66,"close":66,"volume":1000}
+    ],
+    "buy": [true,false,false,false,false], "sell": [false,false,false,true,false]
+  },
+  "us_etf_same_bar_range": {
+    "market": "US", "symbol": "SPY",
+    "candles": [
+      {"time":"2026-09-21","open":100,"high":100,"low":100,"close":100,"volume":1000},
+      {"time":"2026-09-22","open":100,"high":150,"low":50,"close":100,"volume":1000},
+      {"time":"2026-09-23","open":100,"high":120,"low":100,"close":120,"volume":1000},
+      {"time":"2026-09-24","open":105,"high":105,"low":105,"close":105,"volume":1000}
+    ],
+    "buy": [true,false,false,false], "sell": [false,false,false,false]
+  }
+}

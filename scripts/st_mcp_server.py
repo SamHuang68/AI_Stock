@@ -6,7 +6,7 @@
 equity-research 技能，例如 /morning-note、/thesis、/catalysts）直接讀取本機 ST 的
 規則化結果：個股體檢、自選股總表、訊號成績單、市場決策情境與關鍵價位。
 
-* 只呼叫本機 ST HTTP API（預設 http://127.0.0.1:18432），不連外、不寫入任何狀態。
+* 只呼叫本機 ST HTTP API（預設 http://127.0.0.1:18432）；部分既有後端讀取會補抓並更新快取。
 * 回傳的是規則產生的事實與歷史統計；工具說明明確要求模型引用證據編號、不得給買賣指令。
 
 設定（擇一）
@@ -30,7 +30,8 @@ import urllib.request
 from typing import Any, Callable, Dict, List, Optional
 
 SERVER_NAME = 'stock-terminal'
-SERVER_VERSION = '1.0.0'
+SERVER_VERSION = '1.1.0'
+RESULT_VERSION = 'st-mcp-result/1'
 SUPPORTED_PROTOCOLS = ('2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05')
 TIMEOUT = float(os.environ.get('ST_MCP_TIMEOUT', '60'))
 _SYM_RE = re.compile(r'^[A-Za-z0-9^][A-Za-z0-9.\-^]{0,14}$')
@@ -46,18 +47,46 @@ INSTRUCTIONS = (
 
 def base_url() -> str:
     env = os.environ.get('ST_MCP_BASE_URL')
-    if env:
-        return env.rstrip('/')
-    return f"http://127.0.0.1:{os.environ.get('ST_PORT', '18432')}"
+    value = (env or f"http://127.0.0.1:{os.environ.get('ST_PORT', '18432')}").rstrip('/')
+    parsed = urllib.parse.urlsplit(value)
+    if (parsed.scheme != 'http' or parsed.hostname not in ('127.0.0.1', 'localhost', '::1')
+            or parsed.username is not None or parsed.password is not None
+            or parsed.path or parsed.query or parsed.fragment):
+        raise ValueError('ST_MCP_BASE_URL 必須是無憑證與路徑的本機 HTTP 位址')
+    parsed.port  # 驗證連接埠，不把設定中的敏感內容回傳給客戶端。
+    return value
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, '不允許重新導向', headers, fp)
 
 
 def http_json(path: str, body: Optional[Dict[str, Any]] = None) -> Any:
+    if body is not None:
+        raise ValueError('MCP 僅允許讀取')
     url = base_url() + path
-    data = json.dumps(body).encode('utf-8') if body is not None else None
-    headers = {'Content-Type': 'application/json'} if body is not None else {}
-    req = urllib.request.Request(url, data=data, headers=headers, method='POST' if body is not None else 'GET')
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+    req = urllib.request.Request(url, method='GET')
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+    with opener.open(req, timeout=TIMEOUT) as resp:
         return json.loads(resp.read().decode('utf-8'))
+
+
+class BackendResult:
+    """保留原始後端中繼資料；精簡文字輸出不改形狀。"""
+    def __init__(self, data, backend):
+        self.data, self.backend = data, backend
+
+
+class UnknownToolError(Exception):
+    pass
+
+
+def _stock_query(args, sym):
+    query = {'sym': sym, 'market': _market_arg(args, sym)}
+    if args.get('cacheOnly'):
+        query['cacheOnly'] = '1'
+    return urllib.parse.urlencode(query)
 
 
 # ── 精簡輸出（控制回傳給模型的 token 量）─────────────────────────
@@ -129,41 +158,51 @@ def _market_arg(args: Dict[str, Any], sym: str = '') -> str:
 
 def tool_stock_health(args):
     sym = _symbol_arg(args)
-    q = urllib.parse.urlencode({'sym': sym, 'market': _market_arg(args, sym)})
-    return compact_health(http_json('/stock-signals?' + q))
+    d = http_json('/stock-signals?' + _stock_query(args, sym))
+    return BackendResult(compact_health(d), d)
 
 
 def tool_stock_evidence(args):
     sym = _symbol_arg(args)
-    q = urllib.parse.urlencode({'sym': sym, 'market': _market_arg(args, sym)})
-    d = http_json('/stock-signals?' + q)
-    return {'symbol': d.get('symbol'), 'asOf': d.get('asOf'), 'ok': d.get('ok'),
+    d = http_json('/stock-signals?' + _stock_query(args, sym))
+    return BackendResult({'symbol': d.get('symbol'), 'asOf': d.get('asOf'), 'ok': d.get('ok'),
             'evidence': d.get('evidence') or {},
             'citationRule': 'Every sentence you write must cite one or more of these evidence ids; '
-                            'numbers must appear in the cited evidence.'}
+                            'numbers must appear in the cited evidence.'}, d)
 
 
 def tool_watchlist_health(args):
     raw = str(args.get('symbols') or '').strip()
     if not raw:
         raise ValueError('symbols is required, e.g. "2330,2454,AAPL:US"')
-    d = http_json('/stock-signals/batch?' + urllib.parse.urlencode({'syms': raw}))
-    return {'items': d.get('items') or [], 'disclaimer': d.get('disclaimer')}
+    parts = raw.split(',')
+    if len(parts) > 40:
+        raise ValueError('自選股最多 40 檔')
+    for part in parts:
+        ticker, sep, market = part.strip().partition(':')
+        _symbol_arg({'symbol': ticker})
+        if sep and market.upper() not in ('TW', 'US'):
+            raise ValueError('市場僅支援 TW 或 US')
+    query = {'syms': raw}
+    if args.get('cacheOnly'):
+        query['cacheOnly'] = '1'
+    d = http_json('/stock-signals/batch?' + urllib.parse.urlencode(query))
+    return BackendResult({'items': d.get('items') or [], 'disclaimer': d.get('disclaimer')}, d)
 
 
 def tool_signal_scoreboard(args):
     market = 'US' if str(args.get('market') or '').strip().upper() == 'US' else 'TW'
     d = http_json('/stock-signals/pooled?' + urllib.parse.urlencode({'market': market}))
     if not d.get('available'):
-        return {'market': market, 'available': False,
-                'hint': 'Pooled statistics not computed yet; open ST 體檢 tab → 訊號成績單 → 開始計算.'}
+        return BackendResult({'market': market, 'available': False,
+                'hint': 'Pooled statistics not computed yet; open ST 體檢 tab → 訊號成績單 → 開始計算.'}, d)
     rows = [{'signalId': r['signalId'], 'label': r['label'], 'direction': r['direction'],
              'horizons': _stats_brief({'horizons': r['horizons']}),
              'research5d': next((h.get('all') for h in (r.get('research') or {}).get('horizons', [])
                                 if h.get('horizon') == 5), None)} for r in d.get('scoreboard') or []]
     out = {k: d.get(k) for k in ('market', 'symbols', 'window', 'generatedAt', 'minSample', 'caveats', 'research')}
     out['scoreboard'] = rows
-    return out
+    return BackendResult(out, d)
 
 
 def tool_signal_catalog(args):
@@ -171,14 +210,15 @@ def tool_signal_catalog(args):
 
 
 def tool_market_decision(args):
-    return compact_decision(http_json('/decision/context?' + urllib.parse.urlencode(
-        {'market': str(args.get('market') or 'TW').upper()})))
+    d = http_json('/decision/context?' + urllib.parse.urlencode(
+        {'market': str(args.get('market') or 'TW').upper()}))
+    return BackendResult(compact_decision(d), d)
 
 
 def tool_key_levels(args):
     sym = str(args.get('symbol') or '^TWII').strip()
-    if not _SYM_RE.match(sym):
-        raise ValueError('invalid symbol')
+    if sym not in ('^TWII', '^TWOII', '__TXF__'):
+        raise ValueError('關鍵價位僅支援 ^TWII、^TWOII、__TXF__')
     return http_json('/key-levels?' + urllib.parse.urlencode({'symbol': sym}))
 
 
@@ -226,43 +266,171 @@ TOOLS: List[Dict[str, Any]] = [
                      'additionalProperties': False}},
     {'name': 'st_key_levels', 'handler': tool_key_levels,
      'title': 'Key price levels',
-     'description': 'Classic pivot, confirmed swing points, ATR and realised volatility for an index '
-                    'or stock (default ^TWII).',
-     'inputSchema': {'type': 'object', 'properties': {'symbol': _SYMBOL_SCHEMA},
+     'description': '臺灣指數本機日線的樞紐點、已確認轉折、ATR 與實現波動；預設 ^TWII。',
+     'inputSchema': {'type': 'object', 'properties': {'symbol': {
+         'type': 'string', 'enum': ['^TWII', '^TWOII', '__TXF__']}},
                      'additionalProperties': False}},
 ]
 _TOOL_BY_NAME = {t['name']: t for t in TOOLS}
+_REFRESH_TOOLS = {'st_stock_health', 'st_stock_evidence', 'st_watchlist_health'}
+_CACHE_OPTION_TOOLS = {'st_stock_health', 'st_stock_evidence', 'st_watchlist_health'}
+for _tool in TOOLS:
+    if _tool['name'] in _CACHE_OPTION_TOOLS:
+        _tool['inputSchema']['properties']['cacheOnly'] = {
+            'type': 'boolean', 'default': False,
+            'description': '只用既有後端資料，不觸發網路補抓；預設保留既有補抓行為。'}
+
+OUTPUT_SCHEMA = {
+    'type': 'object', 'additionalProperties': False,
+    'required': ['contractVersion', 'tool', 'status', 'data', 'metadata', 'error'],
+    'properties': {
+        'contractVersion': {'const': RESULT_VERSION}, 'tool': {'type': 'string'},
+        'status': {'enum': ['ok', 'partial', 'unavailable', 'error']},
+        'data': {'type': ['object', 'null']},
+        'metadata': {
+            'type': 'object', 'additionalProperties': False,
+            'required': ['source', 'asOf', 'generatedAt', 'freshness', 'calculationVersion',
+                         'backendContractVersion', 'missing', 'backendMissing', 'access'],
+            'properties': {
+                'source': {}, 'asOf': {}, 'generatedAt': {},
+                'freshness': {'type': 'object'}, 'calculationVersion': {},
+                'backendContractVersion': {},
+                'missing': {'type': 'array', 'items': {'type': 'string'}},
+                'backendMissing': {}, 'access': {'type': 'object'},
+            },
+        },
+        'error': {'type': ['object', 'null'], 'properties': {
+            'code': {'type': 'string'}, 'message': {'type': 'string'},
+            'retryable': {'type': 'boolean'}}, 'required': ['code', 'message', 'retryable'],
+            'additionalProperties': False},
+    },
+}
 
 
-def tools_list_payload() -> Dict[str, Any]:
+def _structured(protocol_version):
+    return protocol_version in ('2025-06-18', '2025-11-25')
+
+
+def access_policy(name, args):
+    network = name in _REFRESH_TOOLS and not (name in _CACHE_OPTION_TOOLS and args.get('cacheOnly'))
+    return {'transport': 'loopback-http', 'mode': 'backend-may-refresh' if network else 'cache-only',
+            'backendMayAccessNetwork': bool(network), 'backendMayUpdateCache': name in _REFRESH_TOOLS}
+
+
+def result_metadata(backend, name, args):
+    # 不把 generatedAt 視為市場資料截止日，也不從目前時間推測新鮮度。
+    freshness = {key: backend[key] for key in ('staleDays', 'dataWarning', 'dataQuality') if key in backend}
+    session = backend.get('session')
+    if isinstance(session, dict) and 'provisional' in session:
+        freshness['provisional'] = session['provisional']
+    result = {
+        'source': backend.get('dataSource', backend.get('source')),
+        'asOf': backend.get('asOf'), 'generatedAt': backend.get('generatedAt'),
+        'freshness': freshness,
+        'calculationVersion': backend.get('engine', backend.get('model')),
+        'backendContractVersion': backend.get('contractVersion'),
+        'backendMissing': backend.get('missing'),
+        'access': access_policy(name, args),
+    }
+    result['missing'] = [key for key in ('source', 'asOf', 'generatedAt', 'calculationVersion',
+                                        'backendContractVersion') if result[key] is None]
+    if not freshness:
+        result['missing'].append('freshness')
+    return result
+
+
+def _validate_args(tool, args):
+    schema = tool['inputSchema']
+    for key in schema.get('required', []):
+        if key not in args:
+            raise ValueError(f'缺少必要參數：{key}')
+    for key, value in args.items():
+        prop = schema['properties'].get(key)
+        if prop is None:
+            raise ValueError(f'未知參數：{key}')
+        expected = str if prop['type'] == 'string' else bool
+        if not isinstance(value, expected):
+            raise ValueError(f'參數型別不符：{key}')
+        if 'enum' in prop and value not in prop['enum']:
+            raise ValueError(f'參數值不支援：{key}')
+
+
+def tools_list_payload(protocol_version=SUPPORTED_PROTOCOLS[0]) -> Dict[str, Any]:
     return {'tools': [{
-        'name': t['name'], 'title': t['title'], 'description': t['description'],
+        'name': t['name'], 'title': t['title'], 'description': t['description'] + (
+            ' 後端可能補抓公開資料並更新本機快取；cacheOnly=true 可禁止補抓。'
+            if t['name'] in _REFRESH_TOOLS else ' 僅讀取既有本機資料／定義，不觸發網路補抓。'),
         'inputSchema': t['inputSchema'],
-        'annotations': {'readOnlyHint': True, 'destructiveHint': False, 'openWorldHint': False},
+        **({'outputSchema': OUTPUT_SCHEMA} if _structured(protocol_version) else {}),
+        'annotations': {'readOnlyHint': True, 'destructiveHint': False,
+                        'openWorldHint': t['name'] in _REFRESH_TOOLS},
+        '_meta': {'st/access': access_policy(t['name'], {})},
     } for t in TOOLS]}
 
 
-def call_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+def call_tool(name: str, args: Dict[str, Any], protocol_version=SUPPORTED_PROTOCOLS[0]) -> Dict[str, Any]:
     tool = _TOOL_BY_NAME.get(name)
-    if not tool:
-        return {'content': [{'type': 'text', 'text': f'Unknown tool: {name}'}], 'isError': True}
+    data, backend, error, text_error = None, {}, None, None
+    validated = False
     try:
-        data = tool['handler'](args or {})
+        if not tool:
+            raise UnknownToolError(f'Unknown tool: {name}')
+        _validate_args(tool, args)
+        validated = True
+        result = tool['handler'](args)
+        data, backend = (result.data, result.backend) if isinstance(result, BackendResult) else (result, result)
+        if not isinstance(data, dict) or not isinstance(backend, dict):
+            raise TypeError('後端結果必須為物件')
+        if backend.get('items') is not None and not isinstance(backend['items'], list):
+            raise TypeError('後端 items 必須為陣列')
+        json.dumps(data, allow_nan=False)
+        json.dumps(backend, allow_nan=False)
+    except urllib.error.HTTPError as exc:
+        error = {'code': 'backend_http_error', 'message': f'本機 ST 回傳 HTTP {exc.code}',
+                 'retryable': exc.code >= 500}
     except urllib.error.URLError as exc:
-        msg = (f'Cannot reach Stock Terminal at {base_url()} ({getattr(exc, "reason", exc)}). '
-               'Start it with START_TIP.cmd / scripts/go.sh, or set ST_MCP_BASE_URL.')
-        return {'content': [{'type': 'text', 'text': msg}], 'isError': True}
+        error = {'code': 'backend_unreachable', 'message':
+                 '無法連線本機 Stock Terminal；請用 START_TIP.cmd / scripts/go.sh 啟動並檢查 ST_MCP_BASE_URL。',
+                 'retryable': True}
+    except (TimeoutError, OSError):
+        error = {'code': 'backend_unreachable', 'message': '本機 ST 連線失敗或逾時，請檢查 START_TIP.cmd。',
+                 'retryable': True}
+    except UnknownToolError as exc:
+        error = {'code': 'unknown_tool', 'message': str(exc), 'retryable': False}
+    except ValueError as exc:
+        # JSON 解碼／非有限數字屬後端契約錯誤；參數錯誤不得觸發 HTTP。
+        error = {'code': 'invalid_backend_result' if validated and isinstance(exc, json.JSONDecodeError)
+                 or data is not None else 'invalid_arguments', 'message': str(exc), 'retryable': False}
     except Exception as exc:
-        return {'content': [{'type': 'text', 'text': f'{type(exc).__name__}: {exc}'}], 'isError': True}
-    return {'content': [{'type': 'text', 'text': json.dumps(data, ensure_ascii=False)}], 'isError': False}
+        error = {'code': 'invalid_backend_result', 'message': f'後端結果無法解析（{type(exc).__name__}）',
+                 'retryable': False}
+    if error:
+        text_error = error['message']
+        data, backend = None, {}
+    unavailable = backend.get('ok') is False or backend.get('available') is False
+    regime = backend.get('regime')
+    partial = (any(item.get('ok') is False for item in (backend.get('items') or []) if isinstance(item, dict))
+               or isinstance(regime, dict) and regime.get('id') == 'INSUFFICIENT_DATA')
+    if unavailable:
+        error = {'code': 'backend_unavailable', 'message': str(backend.get('message') or backend.get('reason')
+                 or '尚無可用的後端研究資料'), 'retryable': False}
+    envelope = {'contractVersion': RESULT_VERSION, 'tool': name,
+                'status': 'error' if text_error else 'unavailable' if unavailable else 'partial' if partial else 'ok',
+                'data': data, 'metadata': result_metadata(backend, name, args), 'error': error}
+    content = [{'type': 'text', 'text': text_error or json.dumps(data, ensure_ascii=False, allow_nan=False)}]
+    if _structured(protocol_version):
+        # 第一段保留舊客戶端讀取的原始 JSON；第二段符合 MCP 的結構化 JSON 文字副本建議。
+        content.append({'type': 'text', 'text': json.dumps(envelope, ensure_ascii=False, allow_nan=False)})
+    return {'content': content, 'isError': error is not None,
+            **({'structuredContent': envelope} if _structured(protocol_version) else {})}
 
 
 # ── JSON-RPC ────────────────────────────────────────────────
-def handle(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def handle(msg: Dict[str, Any], protocol_version=SUPPORTED_PROTOCOLS[0]) -> Optional[Dict[str, Any]]:
     """處理一則 JSON-RPC 訊息；notification（無 id）回 None。"""
     method = msg.get('method')
     mid = msg.get('id')
-    params = msg.get('params') or {}
+    params = msg.get('params', {})
     if mid is None:
         return None   # notifications/initialized 等
 
@@ -271,6 +439,9 @@ def handle(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     def err(code, message):
         return {'jsonrpc': '2.0', 'id': mid, 'error': {'code': code, 'message': message}}
+
+    if not isinstance(params, dict):
+        return err(-32602, 'params must be an object')
 
     if method == 'initialize':
         requested = str(params.get('protocolVersion') or '')
@@ -282,21 +453,28 @@ def handle(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if method == 'ping':
         return ok({})
     if method == 'tools/list':
-        return ok(tools_list_payload())
+        return ok(tools_list_payload(protocol_version))
     if method == 'tools/call':
         name = params.get('name')
         if not isinstance(name, str):
             return err(-32602, 'params.name is required')
-        args = params.get('arguments') or {}
+        args = params.get('arguments', {})
         if not isinstance(args, dict):
             return err(-32602, 'params.arguments must be an object')
-        return ok(call_tool(name, args))
+        return ok(call_tool(name, args, protocol_version))
     return err(-32601, f'Method not found: {method}')
 
 
 def serve(stdin=None, stdout=None) -> None:
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
+    protocol_version = SUPPORTED_PROTOCOLS[0]
+    def dispatch(msg):
+        nonlocal protocol_version
+        reply = handle(msg, protocol_version)
+        if msg.get('method') == 'initialize' and reply and 'result' in reply:
+            protocol_version = reply['result']['protocolVersion']
+        return reply
     for line in stdin:
         line = line.strip()
         if not line:
@@ -307,10 +485,10 @@ def serve(stdin=None, stdout=None) -> None:
             reply = {'jsonrpc': '2.0', 'id': None, 'error': {'code': -32700, 'message': 'Parse error'}}
         else:
             if isinstance(msg, list):   # 舊版協定的 batch
-                replies = [r for r in (handle(m) for m in msg if isinstance(m, dict)) if r]
+                replies = [r for r in (dispatch(m) for m in msg if isinstance(m, dict)) if r]
                 reply = replies or None
             elif isinstance(msg, dict):
-                reply = handle(msg)
+                reply = dispatch(msg)
             else:
                 reply = {'jsonrpc': '2.0', 'id': None, 'error': {'code': -32600, 'message': 'Invalid Request'}}
         if reply is not None:
