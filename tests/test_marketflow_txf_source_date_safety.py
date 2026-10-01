@@ -186,6 +186,26 @@ def test_canonical_marketflow_short_caches_total_failure_but_long_caches_real_da
     assert _marketflow_cache_ttl(with_turnover) == [1800]
 
 
+def test_marketflow_fetches_the_three_sections_concurrently():
+    # 基本面與 Pulse 都在請求執行緒上同步等這份資料；三組串行，冷快取最壞要等 FMTQIK＋7 次 BFI82U＋MI_MARGN。
+    # 三組的第一次請求都停在 barrier 上：必須同時在飛才放行，串行執行會逾時（被各組吞掉 → 該組沒資料 → 斷言失敗）。
+    import threading
+    barrier = threading.Barrier(3, timeout=3)
+    today = date(2026, 10, 1)
+    def fetch(url):
+        barrier.wait()
+        if 'FMTQIK' in url:
+            return {'stat': 'OK', 'fields': ['日期', '成交金額'], 'data': [['115/10/01', '100']]}
+        if 'BFI82U' in url:
+            return {'stat': 'OK', 'date': '20261001', 'fields': ['單位名稱', '買賣超'], 'data': [['外資', '10']]}
+        return {'stat': 'OK', 'date': '20261001', 'tables': [{'data': [['融資', '1']]}]}
+    out = marketflow_payload(fetch, today)
+    assert len(out['turnover']) == 1
+    assert out['inst']['foreign'] == 10
+    assert out['margin']['sourceDate'] == '2026-10-01'
+    assert out['date'] == '2026-10-01'
+
+
 def load_tests(loader, tests, pattern):
     import unittest
     suite = unittest.TestSuite()
