@@ -23,6 +23,7 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
+from exchange_source_dates import official_date, taipei_today
 
 if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
@@ -197,10 +198,10 @@ def _live_twoii_close() -> Optional[Tuple[str, float, float]]:
         px = float(m.get('z') or m.get('y') or 0)
         prev = float(m.get('y') or 0)
         d = str(m.get('d') or '')
-        if len(d) == 8:
-            iso = f'{d[:4]}-{d[4:6]}-{d[6:8]}'
-        else:
-            iso = date.today().isoformat()
+        observed = official_date(d)
+        if observed is None or observed > taipei_today():
+            return None
+        iso = observed.isoformat()
         if px > 0:
             return iso, px, prev if prev > 0 else px
     except Exception as e:

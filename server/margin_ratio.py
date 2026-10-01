@@ -22,6 +22,9 @@ from __future__ import annotations
 
 import csv
 import json
+import io
+import math
+from atomic_store import atomic_write_text
 import os
 import sys
 import threading
@@ -44,6 +47,10 @@ SEED_CSV = os.path.join(DATA_DIR, 'margin_ratio_history.csv')
 SYMBOL = '__MARGIN_RATIO__'
 MARKET = 'TW'
 TZ_TPE = timezone(timedelta(hours=8))
+
+def _taipei_today():
+    return datetime.now(TZ_TPE).date()
+
 
 # 風險區間參考線（前端 price line / meta 共用）
 RISK_ZONES = [
@@ -116,7 +123,7 @@ def _fnum(x) -> Optional[float]:
         return None
     try:
         v = float(s)
-        if v != v:  # NaN
+        if not math.isfinite(v):  # Reject NaN and infinity
             return None
         return v
     except Exception:
@@ -508,35 +515,54 @@ def load_seed_csv(path: str = SEED_CSV) -> List[Tuple[int, float]]:
     try:
         with open(path, 'r', encoding='utf-8-sig', newline='') as f:
             reader = csv.DictReader(f)
+            fields = set(reader.fieldnames or [])
+            if not fields.intersection(('date', 'Date')) or not fields.intersection(
+                    ('margin_ratio_pct', 'ratio', 'TotalExchangeMarginMaintenance', 'value')):
+                raise ValueError('missing seed columns')
+            previous = None
             for row in reader:
+                if None in row:
+                    raise ValueError('unexpected extra seed column')
                 d = _parse_ymd(row.get('date') or row.get('Date') or '')
-                ratio = _fnum(
-                    row.get('margin_ratio_pct')
-                    or row.get('ratio')
-                    or row.get('TotalExchangeMarginMaintenance')
-                    or row.get('value')
-                )
-                if d is None or ratio is None or ratio <= 0:
-                    continue
-                out.append((_date_to_ts(d), float(ratio)))
+                ratio = _fnum(next((row[k] for k in
+                    ('margin_ratio_pct', 'ratio', 'TotalExchangeMarginMaintenance', 'value')
+                    if row.get(k) not in (None, '')), None))
+                if d is None or ratio is None or ratio <= 0 or d > _taipei_today():
+                    raise ValueError('invalid margin-ratio seed row')
+                if previous is not None and d <= previous:
+                    raise ValueError('seed dates must strictly increase')
+                previous = d
+                out.append((_date_to_ts(d), ratio))
     except Exception as e:
-        print('[margin] seed load failed:', e)
+        print('[margin] seed rejected:', e)
+        return []
     return out
 
 
 def save_seed_csv(rows: Sequence[Tuple[int, float]], path: str = SEED_CSV) -> int:
     """rows: [(ts, ratio), ...] → 寫入正規化 CSV。"""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    uniq: Dict[int, float] = {}
+    if os.path.isfile(path) and not load_seed_csv(path):
+        raise ValueError('refuse replacement of rejected seed; repair or quarantine explicitly')
+    if not rows:
+        raise ValueError('refuse empty seed replacement')
+    uniq = {}
+    seen_dates = set()
     for ts, ratio in rows:
-        if ratio and ratio > 0:
-            uniq[int(ts)] = float(ratio)
+        ratio = float(ratio)
+        d = _ts_to_date(int(ts))
+        if not math.isfinite(ratio) or ratio <= 0 or d > _taipei_today():
+            raise ValueError('invalid margin-ratio seed row')
+        if d in seen_dates:
+            raise ValueError('duplicate seed date')
+        seen_dates.add(d)
+        uniq[_date_to_ts(d)] = ratio
     ordered = sorted(uniq.items())
-    with open(path, 'w', encoding='utf-8', newline='') as f:
-        w = csv.writer(f)
-        w.writerow(['date', 'margin_ratio_pct'])
-        for ts, ratio in ordered:
-            w.writerow([_ts_to_date(ts).isoformat(), f'{ratio:.6f}'])
+    buf = io.StringIO(newline='')
+    w = csv.writer(buf)
+    w.writerow(['date', 'margin_ratio_pct'])
+    for ts, ratio in ordered:
+        w.writerow([_ts_to_date(ts).isoformat(), f'{ratio:.6f}'])
+    atomic_write_text(path, buf.getvalue(), backup=True)
     return len(ordered)
 
 
@@ -566,7 +592,7 @@ def _fetch_finmind_history(start: date, end: Optional[date] = None) -> List[Tupl
     token = (os.environ.get('FINMIND_TOKEN') or os.environ.get('FINMIND_API_TOKEN') or '').strip()
     if not token:
         return []
-    end = end or date.today()
+    end = end or _taipei_today()
     url = (
         'https://api.finmindtrade.com/api/v4/data'
         f'?dataset=TaiwanTotalExchangeMarginMaintenance'
@@ -1063,7 +1089,7 @@ def _cli():
                 max_days = int(args[i + 1])
             if a.startswith('--start='):
                 start = _parse_ymd(a.split('=', 1)[1])
-                end = date.today()
+                end = _taipei_today()
                 print(json.dumps(backfill_history(start=start, end=end, max_days=max_days), ensure_ascii=False, indent=2))
                 return
         if full:
@@ -1071,7 +1097,7 @@ def _cli():
         else:
             print('bars:', backfill_margin_ratio(full=False))
     elif cmd == 'compute':
-        d = _parse_ymd(args[1]) if len(args) > 1 else date.today()
+        d = _parse_ymd(args[1]) if len(args) > 1 else _taipei_today()
         print(d, compute_ratio_for_date(d))
     else:
         print('usage: status | seed | today | backfill [--full] [--max N] [--start=YYYY-MM-DD] | compute YYYY-MM-DD')
