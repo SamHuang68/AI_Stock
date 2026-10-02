@@ -18,6 +18,7 @@
       hour: '2-digit', minute: '2-digit', hour12: false });
   }
   function message(text) { if ($('rw-status')) $('rw-status').textContent = text; }
+  function storageMessage(text) { if ($('rw-storage-status')) $('rw-storage-status').textContent = text; }
   function portfolioAllowed() { return !window.ST_PRIVATE_WEB_PROFILE || window.ST_PRIVATE_WEB_PROFILE.role === 'owner'; }
   function portfolio() {
     if (!portfolioAllowed()) return null;
@@ -73,7 +74,7 @@
       }
       localStorage.setItem(draftKey, JSON.stringify(draft()));
     }
-    catch (_) { message('草稿無法寫入瀏覽器；請先複製筆記或匯出，不要關閉頁面'); }
+    catch (_) { storageMessage('草稿無法寫入瀏覽器；請先複製筆記或匯出，不要關閉頁面'); }
   }
   function fillDraft(value) {
     ['title', 'note', 'hypothesis', 'invalidation'].forEach(function (name) { $('rw-' + name).value = value[name] || ''; });
@@ -92,7 +93,7 @@
     } catch (_) { storageError = '瀏覽器禁止分頁儲存，草稿無法在重新開啟後自動還原；請匯出研究備份'; }
     draftKey = 'st.research.draft.v1.' + tabId;
     target.innerHTML = '<main id="rw-root"><div class="rw-row"><h2>每日研究工作台</h2><button id="rw-refresh">讀取最新快照</button>' +
-      '<button id="rw-updates">更新工作中心</button></div><p id="rw-status" role="status" aria-live="polite">正在讀取已提交快照</p>' +
+      '<button id="rw-updates">更新工作中心</button></div><p id="rw-status" role="status" aria-live="polite">正在讀取已提交快照</p><p id="rw-storage-status" class="rw-warning" role="alert"></p>' +
       '<p class="rw-small">市場快照唯讀；私人筆記與持倉關聯只存於此瀏覽器。重新讀取不會抓行情，也不會改寫已保存研究。</p>' +
       '<section aria-labelledby="rw-today"><h3 id="rw-today">今日變化與證據</h3><div class="rw-row">' +
       '<label>目前快照<select id="rw-current"></select></label><label>比較快照<select id="rw-previous"></select></label>' +
@@ -165,10 +166,13 @@
       var rawDraft = localStorage.getItem(draftKey), savedDraft = JSON.parse(rawDraft || '{}');
       if (!savedDraft || typeof savedDraft !== 'object' || Array.isArray(savedDraft)) throw new Error('草稿格式不符');
       fillDraft(savedDraft);
-    } catch (_) { damagedDraft = typeof rawDraft === 'string' ? rawDraft : null; message('既有草稿格式無法讀取，原始內容保留並納入完整備份；新輸入會另存草稿'); }
+    } catch (_) {
+      damagedDraft = typeof rawDraft === 'string' ? rawDraft : null;
+      if (portfolioAllowed()) storageMessage('既有草稿格式無法讀取，原始內容保留並納入完整備份；新輸入會另存草稿');
+    }
     listRecords();
     if (!store) ['rw-save', 'rw-save-review', 'rw-export', 'rw-import'].forEach(function (key) { $(key).disabled = true; });
-    if (storageError) message(storageError);
+    if (storageError) storageMessage(storageError);
     if (!portfolioAllowed()) {
       ['rw-today', 'rw-subject-title', 'rw-journal-title', 'rw-ai-title', 'rw-validation-title'].forEach(function (id) {
         $(id).closest('section').hidden = true;
@@ -271,6 +275,7 @@
       var result = await studyRequest('portfolio', '/research/portfolio');
       if (!result) return;
       function metric(value) { return Number.isFinite(value) ? value.toFixed(2) + '%' : '未知／資料不足'; }
+      function ratio(value) { return Number.isFinite(value) ? value.toFixed(2) : '未知／資料不足'; }
       var labels = { complete: '計算完成（仍屬研究）', limited: '部分資料或持有權利未知', unavailable: '資料不足，尚不能計算', unknown: '未知', insufficient: '樣本不足' };
       var html = '<p>研究狀態：' + esc(labels[result.status] || result.status || '未知') + '</p>' +
         (result.reason ? '<p class="rw-warning">' + esc(result.reason) + '</p>' : '') +
@@ -282,7 +287,17 @@
           part += '<h4>' + esc(rule.label || rule.key) + '</h4>';
           Object.keys(rule.scenarios || {}).forEach(function (key) {
             var scenario = rule.scenarios[key], label = { gross: '未扣成本', baseNet: '基準成本情境', stressNet: '壓力成本情境' }[key] || key;
-            part += details(label + ' · 報酬 ' + metric(scenario.totalReturnPct) + ' · 最大回撤 ' + metric(scenario.maxDrawdownPct), scenario);
+            var sharpe = scenario.sharpeEvidence || {}, benchmark = scenario.benchmarkEvidence || {};
+            part += '<article class="rw-change" data-rw-scenario="' + esc(key) + '"><h4>' + esc(label) + '</h4>' +
+              '<p>累計報酬 ' + metric(scenario.totalReturnPct) + ' · 最大回撤 ' + metric(scenario.maxDrawdownPct) + '</p>' +
+              '<div class="rw-grid"><div><p>每日夏普：<strong data-rw-metric="dailySharpe">' + ratio(scenario.dailySharpe) + '</strong></p>' +
+              '<p class="rw-small">' + esc(sharpe.reason || '以每日報酬扣除無風險報酬計算；計算前提尚未提供。') + '</p></div>' +
+              '<div><p>相對 0050 資訊比率：<strong data-rw-metric="informationRatio">' + ratio(scenario.informationRatio) + '</strong></p>' +
+              '<p class="rw-small">' + esc(benchmark.reason || '以同期間 0050 報酬為基準；比較前提尚未提供。') + '</p></div></div>' +
+              (Number.isFinite(sharpe.annualRiskFreeRate) && Number.isFinite(sharpe.periodsPerYear) ?
+                '<p class="rw-small">無風險年率 ' + metric(sharpe.annualRiskFreeRate * 100) + '；依每年 ' + esc(sharpe.periodsPerYear) + ' 個交易日年化。兩個比率均不是百分比或勝率。</p>' : '') +
+              (scenario.noTradesReason ? '<p>' + esc(scenario.noTradesReason) + '</p>' : '') +
+              details('此成本情境的完整計算與限制', scenario) + '</article>';
           });
         });
         return part;
@@ -390,13 +405,13 @@
   function listRecords() {
     var result;
     try { result = store && portfolioAllowed() ? store.list() : { records: [], damagedKeys: [] }; }
-    catch (_) { message('瀏覽器研究清單無法讀取，原資料保留'); return; }
+    catch (_) { storageMessage('瀏覽器研究清單無法讀取，原資料保留'); return; }
     records = result.records;
     $('rw-records').innerHTML = '<option value="">選取紀錄（' + records.length + ' 筆）</option>' + records.map(function (r, index) {
       return '<option value="' + r.id + '" title="' + esc(r.createdAt + ' · ' + r.title) + '">' +
         esc(shortTime(r.createdAt)) + ' · #' + (index + 1) + '</option>';
     }).join('');
-    if (result.damagedKeys.length) message('有 ' + result.damagedKeys.length + ' 筆紀錄無法解析，原始資料保留且會包含於備份');
+    if (result.damagedKeys.length) storageMessage('有 ' + result.damagedKeys.length + ' 筆紀錄無法解析，原始資料保留且會包含於備份');
   }
   async function showRecord() {
     if (!portfolioAllowed()) return;

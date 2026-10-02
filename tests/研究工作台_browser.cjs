@@ -84,7 +84,7 @@ function html(role) {
 async function harness(browser, role = 'owner') {
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, hasTouch: true, acceptDownloads: true });
   const jobs = [JSON.parse(JSON.stringify(baseJob))];
-  const state = { failPortfolio: false, failDaily: false };
+  const state = { failPortfolio: false, failDaily: false, portfolioMetrics: false };
   await context.route('**/*', async route => {
     const request = route.request(), url = new URL(request.url());
     const entry = { role, method: request.method(), path: url.pathname, query: url.search, fixture: true }; report.requests.push(entry);
@@ -100,6 +100,19 @@ async function harness(browser, role = 'owner') {
     else if (url.pathname === '/research/portfolio' && request.method() === 'GET') {
       if (state.failPortfolio) { await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: '合成來源失敗，先前組合研究保留' }) }); return; }
       payload = { ok: true, status: 'unknown', rules: [], notes: ['合成缺資料前提：除權息權利、成本及資料覆蓋尚不足，不能把工程驗證視為策略獲利證明。'.repeat(2)] };
+      if (state.portfolioMetrics) payload = { ok: true, status: 'limited',
+        notes: ['固定測試數值，只驗證兩個指標的呈現，不代表真實績效。'],
+        rules: [{ key: 'fixture', label: '固定測試規則（非投資結果）', scenarios: {
+          baseNet: { totalReturnPct: 18.3, maxDrawdownPct: -12.35, dailySharpe: 1.25, informationRatio: -0.75,
+            sharpeEvidence: { annualRiskFreeRate: 0.02, periodsPerYear: 252, reason: '固定每日無風險超額報酬測試' },
+            benchmarkEvidence: { benchmarkSymbol: '0050', reason: '固定 0050 超額報酬測試' } },
+          gross: { totalReturnPct: 0, maxDrawdownPct: 0, dailySharpe: 0, informationRatio: null,
+            sharpeEvidence: { annualRiskFreeRate: 0, periodsPerYear: 252, reason: '固定有效零比率測試' },
+            benchmarkEvidence: { reason: '固定測試基準缺資料，不能當成零' } },
+          stressNet: { totalReturnPct: null, maxDrawdownPct: null, dailySharpe: null, informationRatio: null,
+            sharpeEvidence: { reason: '固定測試樣本不足，無法計算夏普' },
+            benchmarkEvidence: { reason: '固定測試同日基準尚未核對' }, noTradesReason: '固定測試尚無已完成交易' }
+        } }] };
     }
     else if (url.pathname === '/research/subject' && request.method() === 'GET') payload = savedSubject(url.searchParams.get('symbol'));
     else if (url.pathname === '/kline-events' && request.method() === 'GET') {
@@ -235,6 +248,19 @@ async function save(page, title, review = false) {
     await page.waitForFunction(() => document.getElementById('rw-validation').textContent.includes('已保存觀測 0 筆'));
     await page.locator('#rw-portfolio-load').click();
     await page.waitForFunction(() => document.getElementById('rw-portfolio-result').textContent.includes('合成缺資料前提'));
+    owner.state.portfolioMetrics = true;
+    await page.locator('#rw-portfolio-load').click();
+    await page.waitForFunction(() => document.querySelector('[data-rw-scenario="baseNet"]'));
+    assert.equal(await page.locator('[data-rw-scenario="baseNet"] [data-rw-metric="dailySharpe"]').textContent(), '1.25');
+    assert.equal(await page.locator('[data-rw-scenario="baseNet"] [data-rw-metric="informationRatio"]').textContent(), '-0.75');
+    assert.equal(await page.locator('[data-rw-scenario="gross"] [data-rw-metric="dailySharpe"]').textContent(), '0.00');
+    assert.equal(await page.locator('[data-rw-scenario="gross"] [data-rw-metric="informationRatio"]').textContent(), '未知／資料不足');
+    assert.equal(await page.locator('[data-rw-scenario="stressNet"] [data-rw-metric="dailySharpe"]').textContent(), '未知／資料不足');
+    const metricText = await page.locator('#rw-portfolio-result').textContent();
+    assert(metricText.includes('無風險年率 2.00%')); assert(metricText.includes('相對 0050 資訊比率'));
+    assert(metricText.includes('基準缺資料，不能當成零')); assert(metricText.includes('樣本不足，無法計算夏普'));
+    assert(!metricText.includes('1.25%')); assert(!metricText.includes('-0.75%'));
+    report.checks.push('真正每日夏普與0050資訊比率分開呈現；有效零保留、未知保留原因，比率不加百分號');
     const previousPortfolio = await page.locator('#rw-portfolio-result').textContent();
     owner.state.failPortfolio = true;
     await page.locator('#rw-portfolio-load').click();
@@ -256,6 +282,18 @@ async function save(page, title, review = false) {
     assert.deepEqual(importedRecords.find(row => row.id === first.id).subject.savedResearch, first.subject.savedResearch);
     await imported.context.close();
     report.checks.push('透過實際下載與檔案選擇器匯入兩筆研究，六領域來源、時點與完整證據均不遺失');
+
+    const damagedDraft = await harness(browser);
+    await damagedDraft.page.evaluate(() => localStorage.setItem('st.research.draft.v1.' + sessionStorage.getItem('st.research.draftTab'), '{無法解析的原始草稿'));
+    await damagedDraft.page.reload({ waitUntil: 'load' });
+    await damagedDraft.page.waitForFunction(() => document.getElementById('rw-status').textContent.includes('已讀取已提交快照'));
+    assert((await damagedDraft.page.locator('#rw-storage-status').textContent()).includes('草稿格式無法讀取'), '快照載入成功不能蓋掉損毀草稿警示');
+    await damagedDraft.page.locator('#nav-other').click(); await damagedDraft.page.locator('#nav-research').click();
+    assert.equal(await damagedDraft.page.evaluate(() => localStorage.getItem('st.research.draft.v1.' + sessionStorage.getItem('st.research.draftTab'))), '{無法解析的原始草稿');
+    const draftBackup = await damagedDraft.page.evaluate(() => new ResearchWorkflow.Store(localStorage).exportAll());
+    assert(draftBackup.unverifiedDrafts.some(item => item.raw === '{無法解析的原始草稿'));
+    await damagedDraft.context.close();
+    report.checks.push('損毀草稿警示不被讀取成功蓋掉，切頁保留原字串並納入完整備份');
 
     const unavailable = await harness(browser);
     unavailable.state.failDaily = true;
