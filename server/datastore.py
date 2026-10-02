@@ -147,9 +147,11 @@ def init_db(path=None):
     global _db_ready_logged
     with _db_write_lock:
         with closing(get_conn(path)) as conn:
-            if conn.execute('PRAGMA user_version').fetchone()[0] > SCHEMA_VERSION:
+            current_version = conn.execute('PRAGMA user_version').fetchone()[0]
+            if current_version > SCHEMA_VERSION:
                 raise RuntimeError('資料庫版本較新，拒絕降版寫入')
-            if _table_exists(conn, 'bars') and not _table_exists(conn, 'bar_quality'):
+            # 舊研究工具可能已建立品質表，但仍是 v2；不能以表存在推定已升級。
+            if _table_exists(conn, 'bars') and (current_version < SCHEMA_VERSION or not _table_exists(conn, 'bar_quality')):
                 _backup_before_market_key_migration(conn, path, '.pre-quality-v3.bak')
             migrated = _migrate_market_identity(conn, path)
             with conn:

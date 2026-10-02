@@ -32,6 +32,28 @@ class DatastoreMarketIdentityTests(unittest.TestCase):
         self.assertEqual(datastore.get_bars('SHARED', market='TW')[0][4], 1.5)
         self.assertEqual(datastore.get_bars('SHARED', market='US')[0][4], 15)
 
+    def test_v2_with_existing_quality_tables_is_backed_up_before_upgrade(self):
+        # 重現早期研究工具留下品質表，但主 schema 仍為 v2 的正式庫狀態。
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute('PRAGMA user_version=2')
+            conn.execute("INSERT INTO bars VALUES('2330','TW',100,1,2,0.5,1.5,NULL)")
+            conn.execute("INSERT INTO bar_quality VALUES('TW','2330',100,'2026-01-02','TWSE','股','原始','[]','原時間','原雜湊')")
+            conn.commit()
+        datastore.init_db()
+        backup_path=self.db_path+'.pre-quality-v3.bak'
+        self.assertTrue(os.path.isfile(backup_path))
+        with closing(sqlite3.connect(self.db_path)) as conn, closing(sqlite3.connect(backup_path)) as backup:
+            self.assertEqual(backup.execute('PRAGMA user_version').fetchone()[0],2)
+            self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0],3)
+            for table in ('bars','bar_quality'):
+                self.assertEqual(conn.execute('SELECT * FROM '+table).fetchall(),backup.execute('SELECT * FROM '+table).fetchall())
+        with open(backup_path,'rb') as stream:
+            original_backup=stream.read()
+        datastore.upsert_bars('2330','TW',[(200,2,3,1,2,20)])
+        datastore.init_db()
+        with open(backup_path,'rb') as stream:
+            self.assertEqual(stream.read(),original_backup)
+
     def test_legacy_schema_migrates_and_keeps_recovery_backup(self):
         legacy = os.path.join(self.temp.name, 'legacy.db')
         with closing(sqlite3.connect(legacy)) as conn:
