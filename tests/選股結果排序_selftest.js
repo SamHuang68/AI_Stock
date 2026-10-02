@@ -240,6 +240,24 @@ assert.equal(thCount, 12, '一般結果 11 欄 + 1 欄「加入自選」共 12 �
 // 13. 全程零 refetch
 assert.equal(fetchCount, 0, '所有排序操作皆不得呼叫 fetch');
 
+const research = [
+  {sym:'1', research:{distanceToTopPct:null, valuationDate:null}},
+  {sym:'2', research:{distanceToTopPct:0, valuationDate:'2026-10-01'}},
+  {sym:'3', research:{distanceToTopPct:-10, valuationDate:'2026-09-30'}},
+  {sym:'4', research:{distanceToTopPct:0, valuationDate:'2026-10-01'}}
+];
+const frozenResearch = JSON.stringify(research);
+test.load(research);
+test.apply('research.distanceToTopPct', 'ascending');
+assert.deepEqual(ids(research), ['3','2','4','1'], '研究巢狀欄位保留零、負值、穩定同值及缺值');
+test.apply('research.distanceToTopPct', 'descending');
+assert.deepEqual(ids(research), ['2','4','3','1']);
+test.apply('research.valuationDate', 'ascending');
+assert.deepEqual(ids(research), ['3','2','4','1'], '來源日期按實際日期排序');
+assert.match(getById('sc-results').innerHTML, /估值承接/);
+assert.equal(JSON.stringify(research), frozenResearch);
+assert.equal(fetchCount, 0, '研究排序不重新查詢');
+
 console.log('一般結果排序驗證通過：點擊 / 下拉 / 重設、負值零保留、缺值穩定置底、無 refetch、焦點與捲動保留。');
 
 // 觀察下限不能畫成完整連買；來源說明必須跳脫屬性字元。

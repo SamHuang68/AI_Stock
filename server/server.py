@@ -42,6 +42,8 @@ from ai_api import (
     load_ai_key as _load_ai_key,
 )
 from ai_routes import AiRoutesMixin
+from 研究工作流路由 import ResearchWorkflowRoutesMixin
+from 研究整合路由 import ResearchIntegrationRoutesMixin
 from etf_api import (
     etf_history_status,
     find_etf_dir,
@@ -2424,9 +2426,17 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
     request_queue_size = 64
 
-class Handler(UpdateRoutesMixin, StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, ConditionalExpectationRoutesMixin, PeakObservationRoutesMixin, PeakObservation100dRoutesMixin, Touxin5dRoutesMixin, ShadowMultifactorRoutesMixin, OptionsRoutesMixin, PulseRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
+class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, UpdateRoutesMixin, StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, ConditionalExpectationRoutesMixin, PeakObservationRoutesMixin, PeakObservation100dRoutesMixin, Touxin5dRoutesMixin, ShadowMultifactorRoutesMixin, OptionsRoutesMixin, PulseRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     _BASE = _BASE
     protocol_version = 'HTTP/1.1'   # enables keep-alive
+
+    def _research_runtime(self):
+        """研究僅注入既有快取；不把具有抓取副作用的函式傳入研究層。"""
+        with _openapi_state_lock:
+            official = dict(_openapi_ds)
+        return {'official': official, 'names': dict(_TW_NAMES.get('map') or {}),
+                'sectors': dict(_TW_SECTORS.get('map') or {}),
+                'technologySectors': set(_TECH_SECTORS), 'chipHistory': CHIP_HISTORY_PATH}
 
     def _handle_index(self):
         """tip UX only：一律送 tip 建置產物；缺 shell_v5／pulse_v5 視為壞樹。"""
@@ -2493,6 +2503,16 @@ class Handler(UpdateRoutesMixin, StockSignalsRoutesMixin, FeaturesRoutesMixin, D
             self._ok(json.dumps(daily_cache_jobs.status(), ensure_ascii=False).encode())
         elif p == '/kline-events' or p.startswith('/kline-events?'):
             self._handle_kline_events()
+        elif p.split('?')[0] in ('/research/workflow', '/research/subject', '/research/validation', '/research/portfolio'):
+            method = {'/research/workflow': self._handle_research_workflow,
+                      '/research/subject': self._handle_research_subject,
+                      '/research/validation': self._handle_research_validation,
+                      '/research/portfolio': self._handle_research_portfolio}
+            method[p.split('?')[0]]()
+        elif p.startswith('/valuation-research/'):
+            self._handle_valuation_research()
+        elif p.split('?')[0] in ('/breakout-research', '/breakout-shadow'):
+            self._handle_breakout_research()
         elif p == '/txf-intraday' or p.startswith('/txf-intraday?'):
             import txf_intraday
             self._ok(json.dumps(txf_intraday.get(), ensure_ascii=False).encode())
@@ -2838,6 +2858,8 @@ class Handler(UpdateRoutesMixin, StockSignalsRoutesMixin, FeaturesRoutesMixin, D
             self._handle_tracker_run()
         elif p == '/screen3':
             self._handle_screen3()
+        elif p == '/breakout-shadow':
+            self._handle_breakout_freeze()
         elif p == '/portfolio':
             self._handle_portfolio()
         elif p in ('/updates', '/updates/retry'):
@@ -6214,6 +6236,16 @@ class Handler(UpdateRoutesMixin, StockSignalsRoutesMixin, FeaturesRoutesMixin, D
             body = read_json_body(self, max_bytes=512 * 1024)
         except BodyReadError as e:
             self._err(str(e), e.status); return
+        if not isinstance(body, dict):
+            self._err('選股條件必須是物件', 400); return
+        research = body.get('research')
+        if research is not None and not isinstance(research, dict):
+            self._err('研究條件必須是物件', 400); return
+        if research and 'enabled' in research and not isinstance(research['enabled'], bool):
+            self._err('研究啟用欄位必須是布林值', 400); return
+        if research and research.get('enabled'):
+            self._handle_research_screen(body)
+            return
         tech = body.get('tech') or {}
         fund = body.get('fund') or {}
         chip = body.get('chip') or {}

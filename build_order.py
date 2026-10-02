@@ -18,6 +18,10 @@ import os
 
 # 相依宣告：key 必須排在 value(們) 之後。
 DEPS = {
+    '研究任務.js': ['研究工作流.js'],
+    '研究任務面板.js': ['研究任務.js', 'ai_runtime_client.js'],
+    '估值承接研究.js': ['估值承接核心.js'],
+    '研究工作台.js': ['研究工作流.js', '研究任務面板.js', 'shell_v5.js', '更新工作中心.js', '估值承接研究.js'],
     'table_sort_v5.js':     ['colors_v3.js'],
     'volume_profile_v3.js': ['pro_v2.js'],
     'strategy_builder_v3.js': ['backtest_v3.js'],
@@ -33,7 +37,7 @@ DEPS = {
     'pulse_v5.js':          ['viz_v5.js', 'market_freshness_v5.js', 'ai_runtime_client.js', 'decision_data_v5.js'],
     'decision_data_v5.js':  ['market_data_v5.js', 'feature_flags_v5.js', '投組資料契約_v5.js'],
     '更新工作_v5.js':       ['decision_data_v5.js'],
-    '更新工作中心.js':       ['shell_v5.js', '更新工作_v5.js'],
+    '更新工作中心.js':       ['shell_v5.js', '更新工作_v5.js', '研究任務.js'],
     'copilot_v3.js':        ['ai_runtime_client.js'],
     'market_data_v5.js':    ['app_kernel_v5.js', 'market_freshness_v5.js'],
     'market_freshness_v5.js': ['app_kernel_v5.js'],

@@ -15,6 +15,7 @@
   var sortState = { key: null, direction: 'original' };
   var scanGeneration = 0;
   var scanController = null;
+  var lastResearchMeta = null;
   var SORT_COLUMNS = [
     { key: 'sym', label: '代號', type: 'text' },
     { key: 'name', label: '名稱', type: 'text' },
@@ -28,6 +29,21 @@
     { key: 'trustStreak', label: '投信', type: 'number' },
     { key: 'foreignStreak', label: '外資', type: 'number' }
   ];
+  var RESEARCH_COLUMNS = [
+    { key: 'research.rangePosition', label: '箱型位置', type: 'text' },
+    { key: 'research.distanceToTopPct', label: '距箱頂%', type: 'number' },
+    { key: 'research.drawdown100', label: '百日回撤%', type: 'number' },
+    { key: 'research.breakoutVolumeRatio', label: '突破量比', type: 'number' },
+    { key: 'research.valuationDate', label: '估值日期', type: 'text' },
+    { key: 'research.priceAsOf', label: '價格日期', type: 'text' },
+    { key: 'research.dataStatus', label: '資料狀態', type: 'text' }
+  ];
+  function columnsFor(rows) {
+    return SORT_COLUMNS.concat(rows.some(function (r) { return !!r.research; }) ? RESEARCH_COLUMNS : []);
+  }
+  function sortValue(row, key) {
+    return key.split('.').reduce(function (value, part) { return value == null ? null : value[part]; }, row);
+  }
 
   function $(id) { return document.getElementById(id); }
   function esc(s) {
@@ -144,7 +160,9 @@
         trustBuyDays: numOrNull(val('sc-trust')),
         foreignBuyDays: numOrNull(val('sc-foreign'))
       },
-      sector: val('sc-sector')
+      sector: val('sc-sector'),
+      research: { enabled: ck('sc-research'), peMax: val('sc-research-pe') === '' ? 30 : numOrNull(val('sc-research-pe')),
+        excludeIp: ck('sc-research-ip') }
     };
   }
 
@@ -156,6 +174,7 @@
     setVal('sc-rsimin', ''); setVal('sc-rsimax', ''); setVal('sc-volr', '');
     setVal('sc-revyoy', ''); setVal('sc-permax', ''); setVal('sc-yield', '');
     setVal('sc-trust', ''); setVal('sc-foreign', '');
+    setChecked('sc-research', name === 'research');
     if (name === 'trend') {
       setChecked('sc-sma20', true); setChecked('sc-sma60', true); setChecked('sc-align', true);
       setVal('sc-rsimin', '45'); setVal('sc-rsimax', '75');
@@ -165,6 +184,8 @@
       setVal('sc-permax', '20'); setVal('sc-yield', '3'); setChecked('sc-sma60', true);
     } else if (name === 'chip') {
       setVal('sc-trust', '3'); setVal('sc-foreign', '3'); setChecked('sc-sma20', true);
+    } else if (name === 'research') {
+      setVal('sc-research-pe', '30'); setChecked('sc-research-ip', true);
     }
   }
 
@@ -192,12 +213,12 @@
   }
 
   function sortedResults(rows) {
-    var column = SORT_COLUMNS.find(function (c) { return c.key === sortState.key; });
+    var column = columnsFor(rows).find(function (c) { return c.key === sortState.key; });
     if (!column || sortState.direction === 'original') return rows.slice();
     var direction = sortState.direction === 'ascending' ? 1 : -1;
     return rows.map(function (row, index) { return { row: row, index: index }; }).sort(function (a, b) {
-      var av = a.row[column.key];
-      var bv = b.row[column.key];
+      var av = sortValue(a.row, column.key);
+      var bv = sortValue(b.row, column.key);
       var aHas = hasSortValue(av, column.type);
       var bHas = hasSortValue(bv, column.type);
       // 缺值永遠沉底，不因升／降冪翻到最上方。
@@ -294,6 +315,8 @@
       return;
     }
     rows = sortedResults(rows);
+    var columns = columnsFor(rows);
+    var researchRows = columns.length > SORT_COLUMNS.length;
     var V = window.Viz;
     var maxVol = 0;
     rows.forEach(function (r) {
@@ -302,9 +325,9 @@
     // 排序工具列：欄位＋方向下拉、重設鈕、即時狀態（aria-live）。
     // 僅操作目前已載入的前 80 檔，不代表全市場排序。
     var activeLabel = sortState.key
-      ? ((SORT_COLUMNS.find(function (c) { return c.key === sortState.key; }) || {}).label || '')
+      ? ((columns.find(function (c) { return c.key === sortState.key; }) || {}).label || '')
       : '';
-    var sortKeyOptions = '<option value="">原始順序</option>' + SORT_COLUMNS.map(function (c) {
+    var sortKeyOptions = '<option value="">原始順序</option>' + columns.map(function (c) {
       return '<option value="' + esc(c.key) + '"' + (sortState.key === c.key ? ' selected' : '') +
         '>' + esc(c.label) + '</option>';
     }).join('');
@@ -325,7 +348,8 @@
       '<span style="color:var(--tlo);font-size:10px">僅排序本次已載入前 ' + rows.length + ' 檔，不代表全市場排序</span>' +
       '<span class="sc-sort-state" role="status" aria-live="polite">' + stateText + '</span>' +
       '</div>';
-    h += '<table class="sc-native-sort" data-st-sort="off"><thead><tr>' + SORT_COLUMNS.map(sortHeader).join('') + '<th aria-label="加入自選"></th></tr></thead><tbody>';
+    h += '<table class="sc-native-sort" data-st-sort="off"><thead><tr>' + columns.map(sortHeader).join('') +
+      (researchRows ? '<th>承接草稿</th>' : '') + '<th aria-label="加入自選"></th></tr></thead><tbody>';
     rows.forEach(function (r) {
       var chgCls = r.changePct >= 0 ? 'up' : 'dn';
       var streak = function (v, complete) {
@@ -365,12 +389,24 @@
         explain(cell(r.per), 'per') +
         explain(cell(r['yield'] == null ? null : r['yield'] + '%'), 'yield') +
         explain(trustCell, 'trustStreak') + explain(foreignCell, 'foreignStreak') +
+        (researchRows ? RESEARCH_COLUMNS.map(function (column) {
+          var value = sortValue(r, column.key);
+          if (column.key === 'research.dataStatus') value = { available: '齊備', partial: '缺資料', not_applicable: '不適用' }[value] || value;
+          return cell(value == null ? null : esc(value));
+        }).join('') + '<td><button type="button" class="sc-btn sc-research-open" data-sym="' + esc(r.sym) + '">估值承接</button></td>' : '') +
         '<td><button type="button" class="sc-add" data-sym="' + esc(r.sym) + '">＋</button></td></tr>';
     });
     h += '</tbody></table>';
     el.innerHTML = h;
     el.querySelectorAll('.sc-code').forEach(function (td) {
       td.onclick = function () { openChart(td.getAttribute('data-sym')); };
+    });
+    el.querySelectorAll('.sc-research-open').forEach(function (button) {
+      button.onclick = function () {
+        var symbol = button.getAttribute('data-sym');
+        var row = lastResults.find(function (r) { return r.sym === symbol; });
+        if (window.ValuationResearchUI) window.ValuationResearchUI.open(symbol, row, lastResearchMeta || readForm().research);
+      };
     });
     el.querySelectorAll('.sc-sort').forEach(function (button) {
       button.onclick = function () { cycleSort(button.getAttribute('data-sort')); };
@@ -422,7 +458,7 @@
     scanController = typeof AbortController === 'function' ? new AbortController() : null;
     var msg = $('sc-msg');
     var body = readForm();
-    if (msg) msg.textContent = '掃描中…（全台股宇集，條件越多越慢）';
+    if (msg) msg.textContent = body.research.enabled ? '研究查詢中…（僅使用本機已存資料）' : '掃描中…（全台股宇集，條件越多越慢）';
     var box = $('sc-results');
     if (box) box.innerHTML = '';
     fetch(SRV + '/screen3', {
@@ -431,15 +467,25 @@
       body: JSON.stringify(body),
       signal: scanController ? scanController.signal : undefined
     })
-      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (r) { return r.json().then(function (data) {
+        if (!r.ok) throw new Error(data.error || '後端回覆 ' + r.status);
+        return data;
+      }); })
       .then(function (r) {
         if (generation !== scanGeneration) return;
         if (!r) { if (msg) msg.textContent = '掃描失敗（後端無回應）'; return; }
         lastResults = r.results || [];
+        lastResearchMeta = r.researchMeta || null;
+        if (!columnsFor(lastResults).some(function (column) { return column.key === sortState.key; })) {
+          sortState = { key: null, direction: 'original' };
+        }
         if (msg) {
           msg.innerHTML = '掃描 ' + r.scanned + ' 檔 → 技術通過 ' + r.techPass +
             ' → 交集 <b style="color:var(--gold)">' + r.matched + '</b> 檔' +
-            (r.matched > 80 ? '（顯示前 80）' : '');
+            (r.matched > 80 ? '（顯示前 80）' : '') +
+            (body.research.enabled ? ' · 本機快取研究；缺資料不代填，不代表策略驗證' +
+              (lastResearchMeta ? '<br>' + esc(lastResearchMeta.contractVersion || '') + ' · ' +
+                esc(lastResearchMeta.universeSource || '') + ' · PER 上限 ' + esc(lastResearchMeta.peMax) : '') : '');
         }
         renderResults(lastResults);
       })
@@ -478,6 +524,7 @@
                 '<button type="button" class="sc-chip" data-preset="breakout">帶量突破</button>' +
                 '<button type="button" class="sc-chip" data-preset="value">價值殖利</button>' +
                 '<button type="button" class="sc-chip" data-preset="chip">法人連買</button>' +
+                '<button type="button" class="sc-chip" data-preset="research">估值研究</button>' +
                 '<button type="button" class="sc-chip" data-preset="clear">清除</button>' +
               '</div>' +
               '<div class="sc-grp"><h4>技術面</h4>' +
@@ -499,6 +546,14 @@
                 '<label>外資 ≥ <input type="number" id="sc-foreign" placeholder="3">天</label>' +
                 '<div class="hint">chip_history 連續天數</div>' +
               '</div>' +
+              '<div class="sc-grp"><h4>估值承接研究</h4>' +
+                '<label><input type="checkbox" id="sc-research">啟用本機研究篩選</label>' +
+                '<label>PER ≤ <input type="number" id="sc-research-pe" value="30" min="1" max="200"></label>' +
+                '<label><input type="checkbox" id="sc-research-ip" checked>3529／6643 另列研究</label>' +
+                '<div class="hint">預設 30 倍，可改 40。僅既有快取；非歷史時點財報回測。</div>' +
+                '<div class="hint">IP 另案：<button type="button" class="sc-btn" data-ip-research="3529">3529</button> ' +
+                '<button type="button" class="sc-btn" data-ip-research="6643">6643</button></div>' +
+              '</div>' +
               '<div class="sc-bar">' +
                 '<select id="sc-sector"><option value="">全部產業</option><option value="__TECH__">科技電子整合</option></select>' +
               '</div>' +
@@ -506,13 +561,18 @@
             '<div class="sc-main">' +
               '<div id="sc-msg"></div>' +
               '<div id="sc-results"><div class="sc-empty">已套用「趨勢多頭」條件<br>按 <b>掃描</b> 或稍候自動執行</div></div>' +
-              '<div class="sc-note">空白＝不限；—＝缺資料／不適用。≥／≤ 表示籌碼連續紀錄尚不完整。一般結果排序僅限已載入資料；估值研究排序尚未提供。</div>' +
+              '<div class="sc-note">空白＝不限；—＝缺資料／不適用。≥／≤ 表示籌碼連續紀錄尚不完整。排序僅限已載入結果；研究提供箱型、量比與來源日期排序，未消除存活者偏差。</div>' +
             '</div>' +
           '</div>' +
         '</div>';
 
       var run = $('sc-run');
       if (run) run.onclick = scan;
+      mount.querySelectorAll('[data-ip-research]').forEach(function (button) {
+        button.onclick = function () {
+          if (window.ValuationResearchUI) window.ValuationResearchUI.open(button.getAttribute('data-ip-research'), null, readForm().research);
+        };
+      });
       mount.querySelectorAll('[data-preset]').forEach(function (b) {
         b.onclick = function () {
           var p = b.getAttribute('data-preset');
