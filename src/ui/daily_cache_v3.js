@@ -14,10 +14,10 @@
     if (!dialog?.open) return;
     try {
       const r = await api('/daily-cache/status'); jobId = r.jobId;
-      const labels = { idle: '尚未啟動更新', queued: '等待共用工作佇列', running: '更新中', completed: '已完成', failed: '未完成', cancelled: '已取消' };
+      const labels = { idle: '尚未啟動更新', queued: '等待共用工作佇列', running: '更新中', cancelling: '取消中', completed: '已完成', failed: '未完成', cancelled: '已取消' };
       $('dc-status').textContent = (labels[r.status] || r.status) + (r.range ? '｜' + r.range + '｜完成 ' + r.completed + '/' + r.symbols.length : '') + (r.error ? '｜' + r.error : '') + (r.results?.length ? '｜' + r.results.map(x => x.reused ? '已沿用快取' : ('新增 ' + (x.inserted ?? x.rows ?? 0) + '，來源差異 ' + (x.conflicts ?? '見研究品質'))).join('；') : '');
-      const busy = ['queued', 'running'].includes(r.status);
-      $('dc-start').disabled = busy; $('dc-cancel').disabled = !busy;
+      const busy = ['queued', 'running', 'cancelling'].includes(r.status);
+      $('dc-start').disabled = busy; $('dc-cancel').disabled = !['queued', 'running'].includes(r.status);
       if (busy) timer = setTimeout(poll, 1200);
     } catch (e) { $('dc-status').textContent = e.message + '；私有服務更新需要擁有者存取權。'; }
   }

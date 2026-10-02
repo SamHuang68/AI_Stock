@@ -68,6 +68,32 @@ class DailyCacheTests(unittest.TestCase):
         self.assertEqual(ds.get_bars('2330'), [])
         self.assertEqual(jobs.status()['status'], 'cancelled')
 
+    def test_queued_cancellation_is_immediate_and_old_callback_cannot_touch_new_job(self):
+        first = self.submit()
+        jobs.cancel(first['jobId'])
+        self.assertEqual(jobs.status()['status'], 'cancelled')
+        second = self.submit()
+        self.assertNotEqual(second['jobId'], first['jobId'])
+        with patch.object(ds, 'fetch_yahoo_daily') as fetch:
+            self.callbacks[0]()
+        fetch.assert_not_called()
+        self.assertEqual(jobs.status()['jobId'], second['jobId'])
+        self.assertEqual(jobs.status()['status'], 'queued')
+        row = (daily.stamp(Clock.now().date()), 100, 102, 99, 101, 1000)
+        with patch.object(ds, 'fetch_yahoo_daily', return_value=[row]): self.callbacks[1]()
+        self.assertEqual(jobs.status()['status'], 'completed')
+        self.assertEqual(jobs.status()['completed'], 1)
+
+    def test_running_cancel_remains_busy_until_worker_finalizes(self):
+        queued = self.submit()
+        def fetch(*args, **kwargs):
+            jobs.cancel(queued['jobId'])
+            self.assertEqual(jobs.status()['status'], 'cancelling')
+            self.assertFalse(self.submit()['ok'])
+            return [(daily.stamp(Clock.now().date()), 100, 102, 99, 101, 1000)]
+        with patch.object(ds, 'fetch_yahoo_daily', side_effect=fetch): self.callbacks[0]()
+        self.assertEqual(jobs.status()['status'], 'cancelled')
+
     def test_two_endpoints_without_query_coverage_must_fetch_entire_range(self):
         ds.upsert_bars('2330', 'TW', [(daily.stamp(Clock(2025, 1, 1).date()), 100, 102, 99, 101, 1000),
                                     (daily.stamp(Clock.now().date()), 100, 102, 99, 101, 1000)])

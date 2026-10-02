@@ -106,13 +106,20 @@ def cancel(job_id):
         if not _active or _active['jobId'] != job_id or _active['status'] not in ('queued', 'running'):
             raise ValueError('沒有符合的進行中工作')
         _cancel.set()
+        if _active['status'] == 'queued':
+            _active.update(status='cancelled', error='已取消排隊工作；不再取得來源或寫入資料', finishedAt=time.time(), sourceRequests=0)
+            return {'ok': True, 'jobId': job_id, 'status': 'cancelled', 'message': _active['error']}
+        _active['status'] = 'cancelling'
         return {'ok': True, 'jobId': job_id, 'status': 'cancelling', 'message': '等待目前來源請求結束，最長約 20 秒；回傳後不再寫入該批次'}
 
 
-def _run(symbols, period, kind, budget):
+def _run(symbols, period, kind, budget, job_id):
     global _active
     with _lock:
+        if not _active or _active['jobId'] != job_id or _active['status'] == 'cancelled':
+            return
         _active['status'] = 'running'
+    final_status, error = 'completed', None
     try:
         budget.check()
         datastore.init_db()
@@ -146,25 +153,21 @@ def _run(symbols, period, kind, budget):
             with _lock:
                 _active['results'].append(result)
                 _active['completed'] += 1
-        with _lock:
-            _active['status'] = 'completed'
     except Cancelled as exc:
-        with _lock:
-            _active.update(status='cancelled', error=str(exc))
+        final_status, error = 'cancelled', str(exc)
     except Exception as exc:
-        with _lock:
-            _active.update(status='cancelled' if budget.event.is_set() else 'failed', error=str(exc)[:240])
+        final_status, error = ('cancelled' if budget.event.is_set() else 'failed'), str(exc)[:240]
     finally:
         with _lock:
-            _active['finishedAt'] = time.time()
-            _active['sourceRequests'] = budget.used
+            if _active and _active['jobId'] == job_id:
+                _active.update(status=final_status, error=error, finishedAt=time.time(), sourceRequests=budget.used)
 
 
 def submit(body):
     global _active, _cancel
     symbols, period, kind = validate(body)
     with _lock:
-        if _active and _active['status'] in ('queued', 'running'):
+        if _active and _active['status'] in ('queued', 'running', 'cancelling'):
             return {'ok': False, 'reason': 'busy', **status()}
         _cancel = threading.Event()
         _active = {'jobId': uuid.uuid4().hex, 'status': 'queued', 'symbols': symbols, 'range': period,
@@ -173,7 +176,8 @@ def submit(body):
                    'limits': {'symbols': 5, 'years': 5, 'seconds': 600, 'officialRequests': 240},
                    'policy': '沿用首次價格；來源修訂另存；不自動更新整份觀察清單'}
         budget = Budget(_cancel)
-        queued = job_queue.submit('selected-daily-cache', lambda: _run(symbols, period, kind, budget))
+        job_id = _active['jobId']
+        queued = job_queue.submit('selected-daily-cache:' + job_id, lambda: _run(symbols, period, kind, budget, job_id))
         if not queued['ok']:
             _active.update(status='failed', error='共用工作佇列忙碌，請稍後重試')
         return {'ok': queued['ok'], **status()}
