@@ -80,6 +80,13 @@ def bar_date(ts: Any, market: str = 'TW') -> Optional[str]:
     return datetime.fromtimestamp(f, tz).date().isoformat()
 
 
+def complete_bar(bar):
+    """未知量與零量不同；價格不補值，缺列保留為切段邊界。"""
+    o, h, lo, c, v = (_finite(bar.get(k)) for k in ('open', 'high', 'low', 'close', 'volume'))
+    return (all(x is not None and x > 0 for x in (o, h, lo, c))
+            and lo <= min(o, c) <= max(o, c) <= h and v is not None and v >= 0)
+
+
 def normalize_bars(rows: Iterable[Any], market: str = 'TW') -> List[Dict[str, Any]]:
     """接受 datastore tuple (ts,o,h,l,c,v) 或 dict，回傳由舊到新、同日去重的日 K。"""
     by_day: Dict[str, Dict[str, Any]] = {}
@@ -95,22 +102,15 @@ def normalize_bars(rows: Iterable[Any], market: str = 'TW') -> List[Dict[str, An
                 continue
         close = _finite(c)
         day = bar_date(ts, market)
-        if close is None or close <= 0 or not day:
+        if not day:
             continue
-        high = _finite(h) or close
-        low = _finite(lo) or close
-        bar = {
-            'date': day,
-            'open': _finite(o) or close,
-            'high': max(high, close),
-            'low': min(low, close),
-            'close': close,
-            'volume': max(0.0, _finite(v) or 0.0),
-        }
-        # 同一交易日出現兩筆（盤中快照 + 收盤日 K 的時間戳不同）時，保留量較大的完整日 K；
-        # 同量則以較晚者為準。
+        bar = {'date': day, 'open': _finite(o), 'high': _finite(h), 'low': _finite(lo),
+               'close': close, 'volume': _finite(v)}
+        if not complete_bar(bar):
+            bar['qualityIssues'] = ['OHLCV 缺值或邊界無效；保留日期缺口，重新暖機']
         prev = by_day.get(day)
-        if prev is None or bar['volume'] >= prev['volume']:
+        rank = lambda b: (complete_bar(b), b['volume'] if b['volume'] is not None else -1)
+        if prev is None or rank(bar) >= rank(prev):
             by_day[day] = bar
     return [by_day[k] for k in sorted(by_day)]
 
@@ -180,6 +180,23 @@ def chip_streaks(series: Sequence[Mapping[str, Any]]) -> Dict[str, int]:
 def build_frame(bars: Sequence[Mapping[str, Any]],
                 chips: Optional[Sequence[Mapping[str, Any]]] = None) -> Dict[str, List[Any]]:
     """一次算好所有逐根序列；每個值都只依賴 ≤ 該根的資料。"""
+    if any(not complete_bar(b) for b in bars):
+        # 每段獨立重算指標，完整保留原有日期與空值，禁止跨缺口計算。
+        out = {key: [None] * len(bars) for key in build_frame([], chips)}
+        for key in ('date', 'open', 'high', 'low', 'close', 'volume'):
+            out[key] = [b.get(key) for b in bars]
+        out['validRun'] = [0] * len(bars)
+        begin = None
+        for i in range(len(bars) + 1):
+            valid = i < len(bars) and complete_bar(bars[i])
+            if valid and begin is None:
+                begin = i
+            if not valid and begin is not None:
+                part = build_frame(bars[begin:i], chips)
+                for key, values in part.items():
+                    out[key][begin:i] = values
+                begin = None
+        return out
     c = [float(b['close']) for b in bars]
     h = [float(b['high']) for b in bars]
     lo = [float(b['low']) for b in bars]
@@ -196,6 +213,7 @@ def build_frame(bars: Sequence[Mapping[str, Any]],
     v20 = ind.sma_series(v, 20)
     chip_by_date = {r['date']: r for r in (chips or [])}
     return {
+        'validRun': list(range(1, len(bars) + 1)),
         'date': d, 'open': [float(b['open']) for b in bars], 'high': h, 'low': lo,
         'close': c, 'volume': v,
         'sma5': ind.sma_series(c, 5), 'sma20': ind.sma_series(c, 20),
@@ -522,7 +540,7 @@ def catalog() -> List[Dict[str, Any]]:
 def detect_at(frame: Mapping[str, List[Any]], i: int,
               signals: Sequence[Mapping[str, Any]] = SIGNALS) -> List[Dict[str, Any]]:
     out = []
-    if i < 1:
+    if i < 1 or ('validRun' in frame and frame['validRun'][i] < min(i + 1, MIN_BARS)):
         return out
     for spec in signals:
         hit = spec['detect'](frame, i)
@@ -634,7 +652,7 @@ def event_indices(frame: Mapping[str, List[Any]], spec: Mapping[str, Any],
     out: List[int] = []
     last_hit = -10 ** 9
     for i in range(1, len(frame['close'])):
-        if i - last_hit < cooldown:
+        if ('validRun' in frame and frame['validRun'][i] < min(i + 1, MIN_BARS)) or i - last_hit < cooldown:
             continue
         if spec['detect'](frame, i):
             out.append(i)
@@ -651,7 +669,7 @@ def forward_outcomes(frame: Mapping[str, List[Any]], starts: Sequence[int], hori
     for t in starts:
         e = t + entry_lag
         x = e + horizon
-        if x > last:
+        if x > last or t < 0 or e < t or ('validRun' in frame and frame['validRun'][x] < x - t + 1):
             continue
         ret = c[x] / c[e] - 1.0
         if direction == 'bear':
@@ -903,6 +921,9 @@ def analyze(bars: Sequence[Mapping[str, Any]], *, symbol: str, market: str = 'TW
             provisional_last: bool = False, with_stats: bool = True,
             as_of_note: Optional[str] = None) -> Dict[str, Any]:
     """bars 為 ``normalize_bars`` 輸出（由舊到新）。回傳完整個股體檢契約。"""
+    original_count = len(bars)
+    last_invalid = max((i for i, bar in enumerate(bars) if not complete_bar(bar)), default=-1)
+    bars = bars[last_invalid + 1:]
     # 舊快照可能以休市日保存日期命名；未對齊個股實際日 K 的列不能增加連買賣天數。
     sessions = {b['date'] for b in bars}
     chips = [row for row in (chips or []) if row.get('date') in sessions]
@@ -910,6 +931,9 @@ def analyze(bars: Sequence[Mapping[str, Any]], *, symbol: str, market: str = 'TW
         'contractVersion': CONTRACT_VERSION, 'engine': ENGINE_ID, 'symbol': symbol,
         'market': market, 'epistemic': {'events': EPISTEMIC_EVENTS, 'stats': EPISTEMIC_STATS},
         'disclaimer': DISCLAIMER,
+        'dataQuality': {'inputBars': original_count, 'continuousBars': len(bars),
+                        'excludedBeforeLastGap': last_invalid + 1,
+                        'policy': '缺值日保留邊界；最新連續區段重新暖機，未知成交量不補零'},
     }
     if len(bars) < MIN_BARS:
         base.update({'ok': False, 'reason': 'INSUFFICIENT_BARS', 'bars': len(bars),

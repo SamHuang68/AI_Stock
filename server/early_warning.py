@@ -970,6 +970,7 @@ def _init_db(path: str = DB_PATH) -> None:
     if folder:
         os.makedirs(folder, exist_ok=True)
     with closing(sqlite3.connect(path, timeout=10)) as conn:
+        conn.execute('PRAGMA journal_mode=WAL')
         with conn:
             conn.execute('CREATE TABLE IF NOT EXISTS signal_state('
                          'signal_id TEXT PRIMARY KEY,direction TEXT,state TEXT,first_seen_at TEXT,'

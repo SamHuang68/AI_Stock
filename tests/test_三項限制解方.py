@@ -191,7 +191,7 @@ class SolutionTests(unittest.TestCase):
             chips = [{'date': b['date'], 'trust': 10 if i else 0, 'foreign': 0}
                      for i, b in enumerate(bars[-4:])]
             revised = [dict(b) for b in bars]
-            revised[-1]['close'] = 200
+            revised[-1].update(open=200, high=202, low=198, close=200)
             second = daily.capture(ledger, [('2330', revised)], bars, {'2330': chips}, now=now.replace(hour=19))
             self.assertEqual(second['eventsAdded'], 1)
             self.assertEqual(second['status'], 'completed')

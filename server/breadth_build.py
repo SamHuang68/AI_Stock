@@ -19,13 +19,8 @@ def breadth_trace(base_dir: str, event: str, **fields: Any) -> None:
         path = os.path.join(base_dir, 'logs', 'breadth_trace.jsonl')
         os.makedirs(os.path.dirname(path), exist_ok=True)
         row = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'event': event, **fields}
-        with open(path, 'a', encoding='utf-8') as fh:
-            fh.write(json.dumps(row, ensure_ascii=False, default=str) + '\n')
-        if os.path.getsize(path) > 256 * 1024:
-            with open(path, 'r', encoding='utf-8') as fh:
-                tail = fh.readlines()[-500:]
-            with open(path, 'w', encoding='utf-8') as fh:
-                fh.writelines(tail)
+        from jsonl_trace import append_jsonl
+        append_jsonl(path, row, max_bytes=256 * 1024, tail_lines=500)
     except Exception:
         pass
 

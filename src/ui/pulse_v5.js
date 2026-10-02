@@ -1219,12 +1219,69 @@
     }
     var speakBtn = $('pl-ai-speak');
     if (speakBtn) {
-      speakBtn.textContent = aiSpeechActive ? '■ 停止' : '🎙 約15秒朗讀';
+      speakBtn.textContent = aiSpeechActive ? '■ 停止' : '🎙 朗讀完整摘要';
       speakBtn.setAttribute('aria-pressed', String(aiSpeechActive));
     }
   }
 
+  var aiSpeechSession = 0;
+  var aiSpeechQueue = null;
+
+  function splitSpeechText(text) {
+    if (!String(text == null ? '' : text).trim()) return [];
+    var points = Array.from(String(text == null ? '' : text));
+    var MAX = 120;
+    var hardStops = { '。': 1, '！': 1, '？': 1, '；': 1, '\n': 1, '.': 1, '!': 1, '?': 1, ';': 1 };
+    var softStops = { '，': 1, '、': 1, ',': 1, ' ': 1, '\t': 1, '\u3000': 1 };
+    var segments = [];
+    var i = 0;
+    while (i < points.length) {
+      var end = i + MAX;
+      if (end >= points.length) {
+        var tail = points.slice(i).join('');
+        if (tail) segments.push(tail);
+        break;
+      }
+      var cut = -1;
+      for (var j = end - 1; j >= i; j--) {
+        if (hardStops[points[j]]) { cut = j + 1; break; }
+      }
+      if (cut < 0) {
+        for (var k = end - 1; k >= i; k--) {
+          if (softStops[points[k]]) { cut = k + 1; break; }
+        }
+      }
+      if (cut <= i) cut = end;
+      var seg = points.slice(i, cut).join('');
+      if (seg) segments.push(seg);
+      i = cut;
+    }
+    return segments;
+  }
+
+  function pickChineseLocalVoice() {
+    if (!window.speechSynthesis || typeof window.speechSynthesis.getVoices !== 'function') return null;
+    var voices;
+    try { voices = window.speechSynthesis.getVoices() || []; } catch (e) { return null; }
+    var zhLocal = [];
+    for (var i = 0; i < voices.length; i++) {
+      var v = voices[i];
+      if (!v || v.localService !== true) continue;
+      var lang = String(v.lang || '').toLowerCase().replace('_', '-');
+      if (/^zh(?:-|$)/.test(lang)) zhLocal.push({ voice: v, lang: lang });
+    }
+    if (!zhLocal.length) return null;
+    for (var j = 0; j < zhLocal.length; j++) {
+      if (zhLocal[j].lang === 'zh-tw' || zhLocal[j].lang.indexOf('zh-tw') === 0 || zhLocal[j].lang === 'zh-hant' || zhLocal[j].lang.indexOf('zh-hant') === 0) {
+        return zhLocal[j].voice;
+      }
+    }
+    return zhLocal[0].voice;
+  }
+
   function stopAiSpeech() {
+    aiSpeechSession++;
+    aiSpeechQueue = null;
     try {
       if (window.speechSynthesis) window.speechSynthesis.cancel();
     } catch (e) {}
@@ -1248,17 +1305,67 @@
       if (meta) meta.textContent = '摘要完成後即可朗讀';
       return;
     }
-    var utterance = new SpeechSynthesisUtterance(text.slice(0, 120));
-    utterance.lang = 'zh-TW';
-    utterance.rate = 1.2;
-    utterance.onend = utterance.onerror = function () {
-      aiSpeechActive = false;
-      syncAiSummaryControls();
-    };
+    var voice = pickChineseLocalVoice();
+    if (!voice) {
+      if (meta) meta.textContent = '需要本機中文語音，請於作業系統安裝後再試';
+      return;
+    }
+    var segments = splitSpeechText(text);
+    if (!segments.length) {
+      if (meta) meta.textContent = '摘要完成後即可朗讀';
+      return;
+    }
+    aiSpeechSession++;
+    var mySession = aiSpeechSession;
+    aiSpeechQueue = segments.slice();
     aiSpeechActive = true;
     syncAiSummaryControls();
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
+    try { window.speechSynthesis.cancel(); } catch (e) {
+      finishSession();
+      if (meta) meta.textContent = '無法停止既有語音，請稍後重試';
+      return;
+    }
+
+    function finishSession() {
+      if (mySession !== aiSpeechSession) return;
+      aiSpeechActive = false;
+      aiSpeechQueue = null;
+      syncAiSummaryControls();
+    }
+
+    function speakNext() {
+      if (mySession !== aiSpeechSession) return;
+      if (!aiSpeechQueue || !aiSpeechQueue.length) { finishSession(); return; }
+      var seg = aiSpeechQueue.shift();
+      var utterance;
+      try {
+        utterance = new window.SpeechSynthesisUtterance(seg);
+      } catch (e) {
+        finishSession();
+        return;
+      }
+      utterance.voice = voice;
+      utterance.lang = voice.lang || 'zh-TW';
+      utterance.rate = 1.2;
+      var settled = false;
+      utterance.onend = function () {
+        if (settled || mySession !== aiSpeechSession) return;
+        settled = true;
+        speakNext();
+      };
+      utterance.onerror = function () {
+        if (settled || mySession !== aiSpeechSession) return;
+        settled = true;
+        finishSession();
+        if (meta) meta.textContent = '本機語音朗讀中斷，可重新播放';
+      };
+      try {
+        window.speechSynthesis.speak(utterance);
+      } catch (e) {
+        finishSession();
+      }
+    }
+    speakNext();
   }
 
   function setAiSummaryVisible(visible) {
@@ -1680,7 +1787,7 @@
           '</div></div>' +
           '<div class="pl-ai" id="pl-ai" style="display:none">' +
             '<h4><span>大盤 AI 即時語意 <span id="pl-ai-st" style="font-weight:600;color:var(--tlo)"></span></span>' +
-              '<span class="pl-ai-tools"><button type="button" class="pl-ai-speak" id="pl-ai-speak" aria-pressed="false">🎙 約15秒朗讀</button>' +
+              '<span class="pl-ai-tools"><button type="button" class="pl-ai-speak" id="pl-ai-speak" aria-pressed="false">🎙 朗讀完整摘要</button>' +
               '<button type="button" class="pl-ai-close" id="pl-ai-close" aria-label="關閉 AI 白話懶人包">× 關閉</button></span></h4>' +
             '<div class="pl-ai-modebar" role="group" aria-label="AI 分析模式">' +
               '<button type="button" class="pl-ai-mode on" id="pl-ai-fast" aria-pressed="true">⚡ 快速摘要 · 本機</button>' +

@@ -141,18 +141,10 @@ def _keystats_trace(event, **fields):
         )
         row = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'event': event}
         row.update({k: fields.get(k) for k in allowed if k in fields})
-        with open(path, 'a', encoding='utf-8') as fh:
-            fh.write(json.dumps(row, ensure_ascii=False, default=str) + '\n')
-        if os.path.getsize(path) > 128 * 1024:
-            with open(path, 'r', encoding='utf-8') as fh:
-                tail = fh.readlines()[-300:]
-            with open(path, 'w', encoding='utf-8') as fh:
-                fh.writelines(tail)
+        from jsonl_trace import append_jsonl
+        append_jsonl(path, row, max_bytes=128 * 1024, tail_lines=300)
     except Exception:
         pass
-
-
-_FUNDAMENTAL_TRACE_LOCK = threading.Lock()
 
 
 def _fundamental_trace(event, **fields):
@@ -168,16 +160,8 @@ def _fundamental_trace(event, **fields):
         )
         row = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'event': event}
         row.update({k: fields.get(k) for k in allowed if k in fields})
-        # ThreadingHTTPServer can finish several market requests together;
-        # serialize append + compaction so every JSONL row remains parseable.
-        with _FUNDAMENTAL_TRACE_LOCK:
-            with open(path, 'a', encoding='utf-8') as fh:
-                fh.write(json.dumps(row, ensure_ascii=False, default=str) + '\n')
-            if os.path.getsize(path) > 128 * 1024:
-                with open(path, 'r', encoding='utf-8') as fh:
-                    tail = fh.readlines()[-300:]
-                with open(path, 'w', encoding='utf-8') as fh:
-                    fh.writelines(tail)
+        from jsonl_trace import append_jsonl
+        append_jsonl(path, row, max_bytes=128 * 1024, tail_lines=300)
     except Exception:
         pass
 
@@ -194,13 +178,8 @@ def _ui_route_trace(row):
         clean['serverTs'] = time.strftime('%Y-%m-%dT%H:%M:%S')
         path = os.path.join(_BASE, 'logs', 'ui_route_trace.jsonl')
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'a', encoding='utf-8') as fh:
-            fh.write(json.dumps(clean, ensure_ascii=False) + '\n')
-        if os.path.getsize(path) > 128 * 1024:
-            with open(path, 'r', encoding='utf-8') as fh:
-                tail = fh.readlines()[-300:]
-            with open(path, 'w', encoding='utf-8') as fh:
-                fh.writelines(tail)
+        from jsonl_trace import append_jsonl
+        append_jsonl(path, clean, max_bytes=128 * 1024, tail_lines=300)
     except Exception:
         pass
 
@@ -825,16 +804,14 @@ def _db_screener_arrays(code):
         return None
     if not rows or len(rows) < 70:
         return None
-    closes, highs, lows, vols = [], [], [], []
-    for _ts, _o, _h, _l, _c, _v in rows:
-        if _c is None:
-            continue
-        closes.append(_c)
-        highs.append(_h if _h is not None else _c)
-        lows.append(_l if _l is not None else _c)
-        vols.append(_v if _v is not None else 0)
-    if len(closes) < 70:
+    # 缺值切斷指標暖機，不把開高低補成收盤，也不把未知量補成零。
+    for i in range(len(rows) - 1, -1, -1):
+        if not all(isinstance(v, (int, float)) and math.isfinite(v) and v > 0 for v in rows[i][1:5]) or rows[i][5] is None:
+            rows = rows[i + 1:]
+            break
+    if len(rows) < 70:
         return None
+    closes, highs, lows, vols = ([r[k] for r in rows] for k in (4, 2, 3, 5))
     return closes, highs, lows, vols
 
 
@@ -2427,6 +2404,16 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
             sym = unquote(p[7:].split('?')[0])
             if not _safe_sym(sym): self._err('bad symbol', 400); return
             self._handle_quote(sym)
+        elif p.split('?')[0] in ('/daily-cache/refresh', '/daily-cache/cancel'):
+            self._method_not_allowed('POST')
+        elif p == '/daily-cache/status' or p.startswith('/daily-cache/status?'):
+            import daily_cache_jobs
+            self._ok(json.dumps(daily_cache_jobs.status(), ensure_ascii=False).encode())
+        elif p == '/kline-events' or p.startswith('/kline-events?'):
+            self._handle_kline_events()
+        elif p == '/txf-intraday' or p.startswith('/txf-intraday?'):
+            import txf_intraday
+            self._ok(json.dumps(txf_intraday.get(), ensure_ascii=False).encode())
         elif p == '/bars' or p.startswith('/bars?'):
             self._handle_bars()
         elif p == '/universe' or p.startswith('/universe?'):
@@ -2743,6 +2730,16 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
                 self._err(str(exc), exc.status); return
             _ui_route_trace(body)
             self._ok(json.dumps({'ok': True}).encode())
+        elif p in ('/daily-cache/refresh', '/daily-cache/cancel'):
+            try:
+                body = read_json_body(self, max_bytes=4096)
+                import daily_cache_jobs
+                result = daily_cache_jobs.cancel(body.get('jobId')) if p.endswith('/cancel') else daily_cache_jobs.submit(body)
+                self._ok(json.dumps(result, ensure_ascii=False).encode())
+            except BodyReadError as exc:
+                self._err(str(exc), exc.status)
+            except ValueError as exc:
+                self._err(str(exc), 400)
         elif p == '/ai-key':
             self._handle_ai_key_set()
         elif p == '/etf-catalog':
@@ -5198,31 +5195,41 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
         self._ok(json.dumps(payload, ensure_ascii=False).encode())
 
     def _handle_bars(self):
-        """v4.0: GET /bars?sym=2330&market=TW → 本機 DB 日線 {candles:[{time,open,high,low,close,volume}]}。
-           DB 沒有/太少則即時抓 Yahoo 5y 並寫回(供回測深度歷史用)。"""
+        """只讀指定市場日線；補抓由選定標的更新流程明示觸發。"""
         try:
             qs = parse_qs(urlparse(self.path).query)
-            sym = (qs.get('sym', [''])[0]).strip()
-            market = (qs.get('market', ['TW'])[0]).strip() or 'TW'
-            if not sym:
-                self._err('missing sym', 400); return
-            code = sym.replace('.TW', '').replace('.TWO', '')
-            rows = []
-            try:
-                import datastore
-                rows = datastore.get_bars(code)
-                if not rows or len(rows) < 80:
-                    fetched = datastore.fetch_yahoo_daily(code, market, '5y')
-                    if fetched:
-                        datastore.upsert_bars(code, market, fetched, source='Yahoo Finance')
-                        rows = datastore.get_bars(code)
-            except Exception as e:
-                print('[bars] datastore failed:', e)
-            candles = [{'time': r[0], 'open': r[1], 'high': r[2], 'low': r[3],
-                        'close': r[4], 'volume': r[5]} for r in (rows or [])]
-            self._ok(json.dumps({'sym': code, 'candles': candles}).encode())
-        except Exception as e:
-            self._err('bars failed: ' + str(e), 500)
+            sym = qs.get('sym', [''])[0].strip()
+            market = qs.get('market', ['TW'])[0].strip()
+            if not _re.fullmatch(r'[A-Za-z0-9^.=\-]{1,24}', sym) or market not in ('TW', 'US'):
+                self._err('股票代號或市場無效', 400); return
+            code = sym.removesuffix('.TW').removesuffix('.TWO') if market == 'TW' else sym
+            import datastore
+            from K線事件 import freshness
+            with datastore.read_snapshot() as conn:
+                rows = datastore.get_bars_bulk([code], market=market, connection=conn)[code]
+                status = freshness(conn, code) if market == 'TW' else {'status': '未核對最新交易日', 'fresh': False}
+            candles = [dict(zip(('time','open','high','low','close','volume'), row)) for row in rows]
+            self._ok(json.dumps({'sym': code, 'market': market, 'candles': candles, 'freshness': status,
+                                 'cacheOnly': True, 'missing': [] if rows else ['daily_bars']}, ensure_ascii=False, allow_nan=False).encode())
+        except Exception as exc:
+            self._err('本機日線讀取失敗：' + type(exc).__name__, 503)
+
+    def _handle_kline_events(self):
+        try:
+            qs = parse_qs(urlparse(self.path).query)
+            code = qs.get('sym', ['2330'])[0].strip().removesuffix('.TW').removesuffix('.TWO')
+            if not _re.fullmatch(r'[0-9A-Z]{4,7}', code):
+                self._err('台股代號無效', 400); return
+            import datastore
+            from K線事件 import report
+            result = report(datastore.DB_PATH, code, qs.get('asOf', [None])[0],
+                            period=qs.get('range', ['3y'])[0], start_date=qs.get('start', [None])[0])
+            self._ok(json.dumps(result, ensure_ascii=False, allow_nan=False).encode())
+        except ValueError as exc:
+            self._err(str(exc), 400)
+        except Exception as exc:
+            print('[kline-events] 研究讀取失敗：', type(exc).__name__)
+            self._err('事件資料尚未完整建立，請檢查日線品質狀態', 503)
 
     def _handle_universe(self):
         """GET /universe → 全台股+美股 code↔name lookup(權威判市場 / 補名 / 驗存在)。讀快取,缺則建。"""
@@ -6320,6 +6327,9 @@ class Handler(StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin,
 if __name__ == '__main__':
     os.chdir(_BASE)
     _boot_trace('boot begin exe=%s base=%s' % (sys.executable, _BASE))
+    # 啟動服務前完成新增表格與升級備份，避免唯讀路徑依賴背景工作的執行先後。
+    import datastore as _daily_store
+    _daily_store.init_db()
     # Do NOT exit for tooling pythons — launchers pin absolute path instead.
     # Soft warn only so a mis-resolved PATH never becomes a hard product ban.
     if _is_tooling_python():

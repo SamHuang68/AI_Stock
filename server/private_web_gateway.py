@@ -361,6 +361,8 @@ READ_GET_EXACT = {
     "/etf-tracker/status",
     "/quote-batch",
     "/bars",
+    "/kline-events",
+    "/txf-intraday",
     "/universe",
     "/datasources",
     "/marketflow",
@@ -422,6 +424,7 @@ READ_GET_PREFIXES = (
 
 # Personal state is visible only with the owner token.
 OWNER_GET_EXACT = {
+    "/daily-cache/status",
     "/alert/rules",
     "/alert/config",  # ST masks stored transport credentials in its response.
     "/api/override-alpha",
@@ -435,6 +438,8 @@ OWNER_GET_PREFIXES = ("/draw/",)
 
 # Deliberately narrow write surface for a long-horizon market/research user.
 CONTROL_POST_EXACT = {
+    "/daily-cache/refresh",
+    "/daily-cache/cancel",
     "/diagnostics/ui-route",
     "/screen3",
     "/portfolio",
