@@ -30,5 +30,5 @@ echo  Backend:  http://127.0.0.1:18435/  ^(production-only^)
 echo  Local development ST remains available on :18432.
 echo ============================================================
 echo.
-"!ST_WEB_PYTHON!" -u "scripts\private_web_host.py"
+"!ST_WEB_PYTHON!" -u "%~dp0scripts\private_web_host.py"
 exit /b !ERRORLEVEL!

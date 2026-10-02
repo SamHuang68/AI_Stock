@@ -50,6 +50,19 @@ class PrivateWebReleaseTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_new_stop_requires_companions_without_blocking_legacy_rollback(self):
+        target = _fake_release(self.install_root, 'abc123')
+        # 舊版本完整停止器仍可作為 rollback，無須不存在的新配套。
+        release._validate_release(target)
+        _write(target / 'STOP_PRIVATE_WEB.cmd', 'powershell -File scripts/停止私有網站.ps1')
+        with self.assertRaisesRegex(RuntimeError, '停止私有網站'):
+            release._validate_release(target)
+        _write(target / 'scripts/停止私有網站.ps1')
+        with self.assertRaisesRegex(RuntimeError, '私有停止安全'):
+            release._validate_release(target)
+        _write(target / 'tests/test_私有停止安全.py')
+        release._validate_release(target)
+
     def test_promotion_requires_explicit_approval(self):
         _fake_release(self.install_root, "abc123")
         with self.assertRaises(PermissionError):

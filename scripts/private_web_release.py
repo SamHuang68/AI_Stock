@@ -158,7 +158,12 @@ def _restore_preserved_from_archive(archive_path: Path, target: Path) -> None:
 
 
 def _validate_release(path: Path) -> None:
-    missing = sorted(rel for rel in REQUIRED_RELEASE_FILES if not (path / rel).is_file())
+    required = set(REQUIRED_RELEASE_FILES)
+    stop = path / "STOP_PRIVATE_WEB.cmd"
+    # 新停止器的配套必須完整；舊版 rollback 保留其原本完整的批次停止器。
+    if stop.is_file() and '停止私有網站.ps1' in stop.read_text(encoding='utf-8'):
+        required.update({'scripts/停止私有網站.ps1', 'tests/test_私有停止安全.py'})
+    missing = sorted(rel for rel in required if not (path / rel).is_file())
     if missing:
         raise RuntimeError("commit is not Private-Web ready; missing: " + ", ".join(missing))
 
@@ -208,6 +213,8 @@ def stage_release(
             "tests.test_private_web_release",
             "tests.test_archify_artifacts",
         ]
+        if (extracted / 'tests/test_私有停止安全.py').is_file():
+            tests.append('tests.test_私有停止安全')
         if run_tests:
             _run([python, "-m", "unittest", *tests], cwd=extracted)
             node = shutil.which("node")

@@ -184,6 +184,7 @@ PRIVATE_WEB_ONLY_PATHS = {
     "server": ("private_web_gateway.py", "private_web_access.py"),
     "scripts": (
         "private_web_host.py",
+        "停止私有網站.ps1",
         "private_web_release.py",
         "setup_private_web.py",
     ),
@@ -191,6 +192,7 @@ PRIVATE_WEB_ONLY_PATHS = {
         "test_private_web_gateway.py",
         "test_private_web_access.py",
         "test_private_web_host.py",
+        "test_私有停止安全.py",
         "test_private_web_release.py",
     ),
     "docs": ("private_web_st.md", "private_web_login_guide.md"),

@@ -109,7 +109,7 @@ class PostmarketHttpTest(unittest.TestCase):
 
     def _post(self, path, payload):
         req = urllib.request.Request(
-            self.base + path, data=json.dumps(payload).encode(),
+            self.base + path, data=b'' if payload is None else json.dumps(payload).encode(),
             headers={'Content-Type': 'application/json'}, method='POST')
         return urllib.request.urlopen(req, timeout=15)
 
@@ -117,7 +117,8 @@ class PostmarketHttpTest(unittest.TestCase):
         """驗收 §9-1：無 key → 與 /ai-proxy 相同拒絕（400 AI key not set）。"""
         ai_api.load_ai_key = lambda: ''
         with self.assertRaises(urllib.error.HTTPError) as caught:
-            self._post('/api/ai/postmarket-daily', {'symbols': ['2330']})
+            # 此分支在讀本文前拒絕；空本文避免 Windows 因未讀資料重設連線。
+            self._post('/api/ai/postmarket-daily', None)
         self.assertEqual(caught.exception.code, 400)
         body = json.loads(caught.exception.read())
         self.assertIn('AI key not set', body['error'])

@@ -150,7 +150,8 @@ class ShadowFeatureGateTests(unittest.TestCase):
 
             req = urllib.request.Request(
                 base + '/research/overnight-intraday/refresh',
-                data=b'{"market":"all","force":false}',
+                # 停用分支不讀本文，避免 Windows 關閉連線時有未讀資料。
+                data=b'',
                 headers={'Content-Type': 'application/json'},
                 method='POST',
             )
@@ -185,7 +186,8 @@ class ShadowFeatureGateTests(unittest.TestCase):
             try:
                 req = urllib.request.Request(
                     base + '/research/overnight-intraday/refresh',
-                    data=b'{"market":"all","force":true}',
+                    # 本測試驗證停用時完全不計算快照，無須傳入本文。
+                    data=b'',
                     headers={'Content-Type': 'application/json'},
                     method='POST',
                 )

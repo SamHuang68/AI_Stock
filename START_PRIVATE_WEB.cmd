@@ -44,5 +44,5 @@ echo  Stop:     Ctrl+C
 echo ============================================================
 echo Start START_TIP.cmd first if the gateway health says upstream=false.
 echo.
-"!ST_WEB_PYTHON!" -u "server\private_web_gateway.py"
+"!ST_WEB_PYTHON!" -u "%~dp0server\private_web_gateway.py"
 exit /b !ERRORLEVEL!

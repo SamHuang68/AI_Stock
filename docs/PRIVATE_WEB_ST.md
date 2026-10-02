@@ -282,9 +282,13 @@ Stop the private Gateway/host without touching development ST on `18432`:
 .\STOP_PRIVATE_WEB.cmd
 ```
 
-It works from either the development folder or the promoted `current` copy.
-The isolated-host supervisor restarts its gateway/backend when they exit, so
-the script stops it first: via its pid file in either copy (only while that pid
-is still a Python process), then by matching `private_web_host.py` on the
-command line for other install roots. It then sweeps ports `18434`/`18435` and
-exits with code 1, naming the process, if either port is still listening.
+可從開發目錄或正式 `current` 副本執行。停止器只核對這兩個安裝目錄內、
+以絕對腳本路徑啟動的 Python 程序：先停止 host，再停止其已核對的 backend
+與 gateway；每次停止前重查建立時間、命令列與父程序，避免 PID 被重新使用。
+不依埠號終止程序，也不搜尋其他安裝目錄。自訂安裝目錄可明確傳入
+`-InstallRoot` 與 `-ProductionRoot`。
+
+無法辨識的 PID、舊版相對路徑啟動的程序或停止後仍存活的已知服務會回傳
+結束碼 1，保留 PID 紀錄並顯示提示；必須核對原啟動視窗後人工停止。
+新的啟動腳本已使用絕對路徑。WaveDeck 不得使用私有網站保留埠
+`18434`／`18435`，告警單例鎖使用 `18436`，避免占用 WaveDeck 的 `18433`。
