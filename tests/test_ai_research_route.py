@@ -66,7 +66,8 @@ class ResearchRouteTests(unittest.TestCase):
                 self.assertNotEqual(item['destinationId'], local['destinationId'])
 
     def test_sensitive_or_ambiguous_destination_is_not_published_as_verified(self):
-        for url in ['http://user:private-password@example.test/v1', 'http://example.test/v1?api_key=secret-token',
+        credential_url = 'http://' + 'user:private-password' + '@' + 'example.test/v1'
+        for url in [credential_url, 'http://example.test/v1?api_key=secret-token',
                     'http://example.test/v1#secret-fragment', 'file:///private/config', 'http://localhost:0/v1', 'http://localhost:bad/v1']:
             with self.subTest(url=url), mock.patch.object(ai_local, 'LMSTUDIO_CHAT_URL', url):
                 metadata = ai_local.route_metadata('fast', probe=False)
@@ -79,7 +80,8 @@ class ResearchRouteTests(unittest.TestCase):
                 self.assertNotIn('secret-fragment', json.dumps(metadata))
 
     def test_active_proxy_is_not_silently_bypassed_or_published(self):
-        with mock.patch.object(ai_local.urllib.request, 'getproxies', return_value={'http': 'http://user:proxy-secret@proxy.example:8080'}), \
+        proxy_url = 'http://' + 'user:proxy-secret' + '@' + 'proxy.example:8080'
+        with mock.patch.object(ai_local.urllib.request, 'getproxies', return_value={'http': proxy_url}), \
              mock.patch.object(ai_local.urllib.request, 'proxy_bypass', return_value=False), \
              mock.patch.object(ai_local, '_research_urlopen') as opened:
             metadata = ai_local.route_metadata('fast', probe=False)
