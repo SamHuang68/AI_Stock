@@ -289,10 +289,14 @@
       if (holdout === true) {
         const split = window.Backtest.evaluateStrategies(candles, { ...opts,
           trainEnd: document.getElementById('sb-train-end').value, testEnd: document.getElementById('sb-test-end').value });
-        if (!split.test) { msg.textContent = split.reason; return; }
+        const trainingWarnings = split.training.map(r => {
+          const warning = window.Backtest.describeSignalIssues(r);
+          return warning ? `${r.name}：${warning}` : '';
+        }).filter(Boolean).join('。');
+        if (!split.test) { msg.textContent = split.reason + (trainingWarnings ? '。參選策略資料提醒：' + trainingWarnings : ''); return; }
         window._sbLast = { r: split.test, candles, split };
         renderResult(split.test);
-        msg.textContent = `固定切分：訓練截止 ${split.trainEnd}／測試截止 ${split.testEnd}；依訓練期淨期望值從八種既有策略選出「${window.Backtest.STRATEGIES[split.selected].name}」。測試期不再調參，以下只顯示樣本外結果。`;
+        msg.textContent = `固定切分：訓練截止 ${split.trainEnd}／測試截止 ${split.testEnd}；依訓練期淨期望值從八種既有策略選出「${window.Backtest.STRATEGIES[split.selected].name}」。測試期不再調參，以下只顯示樣本外結果。` + (trainingWarnings ? '參選策略資料提醒：' + trainingWarnings : '');
       } else {
         const cols = window.Backtest.colsOf(candles);
         const buy = evalConditions(model.entry, model.entryCombine, cols);
@@ -335,7 +339,7 @@
     }
     document.getElementById('sb-result').innerHTML = '<p id="sb-contract"></p><details><summary>模型限制與資料提醒</summary><p id="sb-limits"></p></details>' + h;
     document.getElementById('sb-contract').textContent = window.Backtest.describe(r);
-    document.getElementById('sb-limits').textContent = r.limitations.join(' ') + ' ' + r.issues.map(x => `${x.date || ''} ${x.code}`).slice(0, 20).join('；');
+    document.getElementById('sb-limits').textContent = r.limitations.join(' ') + ' ' + r.issues.map(window.Backtest.describeIssue).slice(0, 20).join('；');
     document.getElementById('sb-msg').textContent = sym ? `回測標的：${sym}（目前圖表區間）` : '';
     if (window.Backtest.drawCurve) window.Backtest.drawCurve(document.getElementById('sb-curve'), r.curve, '#fbbf24');
     const mk = document.getElementById('sb-mark'); if (mk) mk.onclick = markChart;

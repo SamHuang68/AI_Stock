@@ -55,8 +55,8 @@
   const STRATEGIES = {
     sma20_pullback: { name: '回測 20 日均線', fn: c => crossUp(c.close, sma(c.close, 20)) },
     sma60_pullback: { name: '回測 60 日均線', fn: c => crossUp(c.close, sma(c.close, 60)) },
-    breakout20: { name: '突破 20 日新高', fn: c => breakout(c.high, c.close, 20) },
-    breakout60: { name: '突破 60 日新高', fn: c => breakout(c.high, c.close, 60) },
+    breakout20: { name: '突破 20 日新高', fn: (c, issues) => breakout(c.high, c.close, 20, issues) },
+    breakout60: { name: '突破 60 日新高', fn: (c, issues) => breakout(c.high, c.close, 60, issues) },
     rsi_oversold: { name: 'RSI 超賣反彈', fn: c => { const r = rsi(c.close, 14); return c.close.map((_, i) => i > 0 && r[i - 1] != null && r[i - 1] < 30 && r[i] >= 30); } },
     rsi_overheat: { name: 'RSI 過熱(空)', fn: c => { const r = rsi(c.close, 14); return c.close.map((_, i) => i > 0 && r[i - 1] != null && r[i - 1] > 70 && r[i] != null && r[i] <= 70); }, short: true },
     bb_lower: { name: '布林下軌承接', fn: c => { const b = bbLower(c.close, 20, 2); return c.close.map((_, i) => b[i] != null && c.low[i] != null && c.low[i] <= b[i] && c.close[i] > b[i]); } },
@@ -66,11 +66,24 @@
   function crossUp(a, b) {
     return a.map((_, i) => i > 0 && a[i] != null && a[i - 1] != null && b[i - 1] != null && b[i] != null && a[i - 1] <= b[i - 1] && a[i] > b[i]);
   }
-  function breakout(high, close, p) {
+  function breakout(high, close, p, issues) {
     const out = new Array(close.length).fill(false);
-    for (let i = p; i < close.length; i++) {
+    for (let i = 0; i < close.length; i++) {
+      if (i < p) {
+        if (issues) issues.push({ bar: i, code: 'insufficient_lookback', lookback: p, availableBars: i });
+        continue;
+      }
       let hh = -Infinity;
-      for (let j = i - p; j < i; j++) hh = Number.isFinite(high[j]) ? Math.max(hh, high[j]) : NaN;
+      const missingBars = [];
+      for (let j = i - p; j < i; j++) {
+        if (Number.isFinite(high[j])) hh = Math.max(hh, high[j]);
+        else missingBars.push(j);
+      }
+      if (missingBars.length) {
+        if (issues) issues.push({ bar: i, code: 'missing_lookback_high', lookback: p,
+          windowStartBar: i - p, windowEndBar: i - 1, missingBars });
+        continue; // 未知最高價不能略過，保留保守 false。
+      }
       out[i] = Number.isFinite(close[i]) && close[i] > hh;
     }
     return out;
@@ -79,7 +92,7 @@
   // ---- 核心回測 --------------------------------------------
   // candles: [{time,open,high,low,close,volume}]
   // opts: {tp:0.15, sl:0.08, maxBars:20, short:false}
-  const ENGINE_VERSION = 'st-backtest/4.0.1';
+  const ENGINE_VERSION = 'st-backtest/4.0.2';
   const DEFAULTS = Object.freeze({ tp: 0, sl: 0, maxBars: 0, short: false,
     entryFeeBps: 10, exitFeeBps: 10, slippageBps: 5, periodsPerYear: 252,
     annualRiskFreeRate: 0, market: 'TW' });
@@ -215,7 +228,7 @@
     if (pending) issues.push({ bar: pending.signalBar, code: 'no_next_tradable_bar', side: pending.side });
     const openPosition = position ? { ...position, mark: lastMark, equity,
       unrealizedReturn: equity / position.before - 1, pendingExit: pending && pending.side === 'exit' ? pending.reason : null } : null;
-    return { ...summarize(trades, equity, maxDD, curve, dailyReturns, opts), openPosition, pendingOrder: pending,
+    return { ...summarize(trades, equity, maxDD, curve, dailyReturns, opts, !!position || trades.length > 0), openPosition, pendingOrder: pending,
       engineVersion: ENGINE_VERSION, settings: opts, issues, limitations: [...LIMITATIONS], halted,
       evaluation: 'in-sample', asOf: curve.length ? curve[curve.length - 1].date : null,
       execution: 'close-signal-next-tradable-open', equityBasis: 'daily-close-mark-to-market',
@@ -230,7 +243,7 @@
     return simulate(candles, buyArr, sellArr, opts);
   }
 
-  function summarize(trades, equity, maxDD, curve, dailyReturns, opts) {
+  function summarize(trades, equity, maxDD, curve, dailyReturns, opts, hadEntry) {
     const n = trades.length, wins = trades.filter(t => t.ret > 0), losses = trades.filter(t => t.ret <= 0);
     const sum = a => a.reduce((s, t) => s + t.ret, 0);
     const avgWin = wins.length ? sum(wins) / wins.length : 0;
@@ -241,6 +254,11 @@
     const mean = excess.length ? excess.reduce((s, r) => s + r, 0) / excess.length : 0;
     const sd = excess.length > 1 ? Math.sqrt(excess.reduce((s, r) => s + (r - mean) ** 2, 0) / (excess.length - 1)) : 0;
     const sharpe = sd > 0 && excess.length === dailyReturns.length ? mean / sd * Math.sqrt(opts.periodsPerYear) : null;
+    // 原計算規則不變；零筆「已平倉」不等於沒有成交，未平倉仍可有有效 Sharpe。
+    const sharpeReason = sharpe != null ? null
+      : excess.length !== dailyReturns.length ? 'non_positive_prior_equity'
+        : excess.length < 2 ? 'insufficient_samples'
+          : !hadEntry ? 'no_trades' : 'zero_variance';
     const payoff = avgLoss ? Math.abs(avgWin / avgLoss) : (avgWin ? Infinity : null);
     const grossWin = wins.reduce((s, t) => s + t.pnl, 0), grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
     const profitFactor = grossLoss ? grossWin / grossLoss : (grossWin ? Infinity : null);
@@ -254,7 +272,7 @@
       avgWin: wins.length ? avgWin * 100 : null, avgLoss: losses.length ? avgLoss * 100 : null,
       payoff: n ? payoff : null,
       expectancy: n ? expectancy * 100 : null, totalReturn: (equity - 1) * 100, maxDD: maxDD * 100,
-      sharpe, sharpeAnn: sharpe, profitFactor,
+      sharpe, sharpeAnn: sharpe, sharpeReason, profitFactor,
       avgHoldBars: n ? trades.reduce((s, t) => s + t.holdBars, 0) / n : null,
       maxWinStreak: winStreak, maxLossStreak: lossStreak,
       best: n ? Math.max(...rets) * 100 : null, worst: n ? Math.min(...rets) * 100 : null,
@@ -270,14 +288,26 @@
   }
 
   // ---- 多策略掃描：每策略歷史勝率 -------------------------
+  function runStrategy(candles, strategy, opts) {
+    const signalIssues = [];
+    const sig = strategy.fn(wrap(candles), signalIssues);
+    const result = run(candles, sig, { ...opts, short: !!strategy.short });
+    const evaluatedDates = new Set(result.curve.map(p => p.date));
+    const dateAt = i => dateKey(candles[i].time, result.settings.market);
+    for (const issue of signalIssues) {
+      const date = dateAt(issue.bar);
+      if (!evaluatedDates.has(date)) continue; // 暖機可以讀過去，但不能混入評估區間外的提醒。
+      result.issues.push({ ...issue, date, ...(issue.missingBars ? {
+        windowStartDate: dateAt(issue.windowStartBar), windowEndDate: dateAt(issue.windowEndBar),
+        missingDates: issue.missingBars.map(dateAt) } : {}) });
+    }
+    return result;
+  }
   function scanStrategies(candles, opts) {
     validateBars(candles, settings(opts));
-    const c = wrap(candles);
     const rows = [];
     for (const [key, st] of Object.entries(STRATEGIES)) {
-      const sig = st.fn(c);
-      const o = Object.assign({}, opts, { short: !!st.short });
-      const r = run(candles, sig, o);
+      const r = runStrategy(candles, st, opts);
       rows.push({ key, name: st.name, ...r });
     }
     return rows.sort((a, b) => a.expectancy == null ? (b.expectancy == null ? 0 : 1)
@@ -302,15 +332,37 @@
     if (!selected) return { engineVersion: ENGINE_VERSION, trainEnd, testEnd, selected: null, training: ranked,
       test: null, reason: '訓練期沒有已平倉交易，無法選定策略', limitations: [...LIMITATIONS] };
     const strategy = STRATEGIES[selected.key];
-    const test = run(prefix, strategy.fn(wrap(prefix)), { ...common, short: !!strategy.short, startDate: testStart });
+    const test = runStrategy(prefix, strategy, { ...common, startDate: testStart });
     test.evaluation = 'fixed-holdout';
     return { engineVersion: ENGINE_VERSION, trainEnd, testEnd, testStart, selected: selected.key,
       selectionMetric: 'training-net-expectancy', training: ranked, test, limitations: [...LIMITATIONS] };
   }
 
+  const SHARPE_REASONS = Object.freeze({
+    non_positive_prior_equity: '前期權益非正，部分每日報酬無法定義',
+    insufficient_samples: '不足兩個每日報酬樣本',
+    no_trades: '沒有實際成交，權益沒有波動',
+    zero_variance: '每日報酬沒有波動',
+  });
+  function describeIssue(issue) {
+    const prefix = issue.date ? issue.date + '：' : '';
+    if (issue.code === 'missing_lookback_high') return prefix + `前 ${issue.lookback} 根最高價缺值（${(issue.missingDates || issue.missingBars.map(i => `第 ${i + 1} 根`)).join('、')}），突破訊號未判定`;
+    if (issue.code === 'insufficient_lookback') return prefix + `回看需 ${issue.lookback} 根、僅有 ${issue.availableBars} 根，突破訊號未判定`;
+    const labels = { untradable_bar: '缺有效開盤／成交量或停牌，不能成交', missing_close_carried: '缺收盤價，沿用上一估值',
+      no_next_tradable_bar: '沒有下一可成交日，委託尚未執行', non_positive_equity: '權益非正，停止開新倉' };
+    return prefix + (labels[issue.code] || issue.code);
+  }
+  function describeSignalIssues(result) {
+    const missing = result.issues.filter(i => i.code === 'missing_lookback_high');
+    const warmup = result.issues.filter(i => i.code === 'insufficient_lookback');
+    return [missing.length ? `${missing.length} 根突破訊號因回看最高價缺值未判定；${describeIssue(missing[0])}` : '',
+      warmup.length ? `${warmup.length} 根突破訊號因回看根數不足未判定` : ''].filter(Boolean).join('。');
+  }
   function describe(result) {
     const s = result.settings;
-    return `${result.engineVersion}｜${s.market} 日線｜收盤訊號→下一可成交開盤｜進／出費 ${s.entryFeeBps}/${s.exitFeeBps} bp｜滑價 ${s.slippageBps} bp／邊｜每日估值、年化 ${s.periodsPerYear} 日、無風險率 ${(s.annualRiskFreeRate * 100).toFixed(2)}%｜${result.evaluation === 'fixed-holdout' ? '固定樣本外' : '樣本內'}｜截止 ${result.asOf || '無資料'}｜已平倉 ${result.count} 筆、未平倉 ${result.openPosition ? 1 : 0} 筆、待成交 ${result.pendingOrder ? 1 : 0} 筆、資料提醒 ${result.issues.length} 項。未平倉損益計入總報酬，不列勝率。`;
+    const sharpeNote = result.sharpeReason ? `每日夏普為 —：${SHARPE_REASONS[result.sharpeReason]}。` : '';
+    const signalNote = describeSignalIssues(result);
+    return `${result.engineVersion}｜${s.market} 日線｜收盤訊號→下一可成交開盤｜進／出費 ${s.entryFeeBps}/${s.exitFeeBps} bp｜滑價 ${s.slippageBps} bp／邊｜每日估值、年化 ${s.periodsPerYear} 日、無風險率 ${(s.annualRiskFreeRate * 100).toFixed(2)}%｜${result.evaluation === 'fixed-holdout' ? '固定樣本外' : '樣本內'}｜截止 ${result.asOf || '無資料'}｜已平倉 ${result.count} 筆、未平倉 ${result.openPosition ? 1 : 0} 筆、待成交 ${result.pendingOrder ? 1 : 0} 筆、資料提醒 ${result.issues.length} 項。未平倉損益計入總報酬，不列勝率。${sharpeNote}${signalNote}`;
   }
 
   // ---- 型態歷史命中率 -------------------------------------
@@ -338,14 +390,25 @@
   }
 
   // ---- 投組回測：等資金或自訂權重 -------------------------
-  function portfolio(perSymCurves, weights) {
+  function portfolio(perSymCurves, weights, markets = {}) {
     // perSymCurves: {sym: [{time,equity}]}; weights: {sym: w} (預設等權)
+    if (!markets || typeof markets !== 'object' || Array.isArray(markets)) throw new Error('組合市場對照必須是每檔 TW／US 的物件');
     const syms = Object.keys(perSymCurves);
     if (!syms.length) return null;
     const w = weights || Object.fromEntries(syms.map(s => [s, 1 / syms.length]));
     if (syms.some(s => !Number.isFinite(w[s]) || w[s] < 0) || Math.abs(syms.reduce((n, s) => n + w[s], 0) - 1) > 1e-8)
       throw new Error('組合權重須為非負數且合計為 1');
-    const points = Object.fromEntries(syms.map(s => [s, perSymCurves[s].map(p => ({ ...p, date: p.date || dateKey(p.time, 'TW') }))]));
+    const points = Object.fromEntries(syms.map(s => [s, perSymCurves[s].map(p => {
+      let date;
+      if (p.date != null) {
+        if (typeof p.date !== 'string') throw new Error('組合曲線 date 必須是明確交易日');
+        date = dateKey(p.date);
+      } else if (typeof p.time === 'number') {
+        if (!['TW', 'US'].includes(markets[s])) throw new Error(`組合曲線 ${s} 缺交易日與市場，無法判定時間戳日期；請提供 date 或 markets[標的]`);
+        date = dateKey(p.time, markets[s]);
+      } else date = dateKey(p.time); // 日期字串／BusinessDay 本身沒有時區歧義。
+      return { ...p, date };
+    })]));
     const allTimes = [...new Set(syms.flatMap(s => points[s].map(p => p.date)))].sort();
     if (!allTimes.length) return null;
     const last = {}; syms.forEach(s => last[s] = 1);
@@ -380,7 +443,7 @@
 
   window.Backtest = {
     run, runLS, scanStrategies, evaluateStrategies, patternHitRate, portfolio, drawCurve,
-    ENGINE_VERSION, DEFAULTS, LIMITATIONS, settings, dateKey, describe,
+    ENGINE_VERSION, DEFAULTS, LIMITATIONS, settings, dateKey, describe, describeIssue, describeSignalIssues,
     STRATEGIES, sma, rsi, bbLower, colsOf, crossUp, breakout,
   };
 })();

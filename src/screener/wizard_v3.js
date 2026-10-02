@@ -373,9 +373,13 @@
       <div id="wz-msg"></div>
       <div class="wz-foot"><button id="wz-back">← 改答案</button><button class="pri" id="wz-apply">✅ 套用勾選項目</button></div>`;
     const firstBacktest = Object.values(d.scanMap)[0];
+    const signalWarnings = Object.values(d.scanMap).slice(1).map(r => {
+      const warning = window.Backtest.describeSignalIssues(r);
+      return warning ? `${r.name}：${warning}` : '';
+    }).filter(Boolean).join('。');
     box.querySelector('#wz-backtest-contract').textContent = d.backtestError
       ? '歷史回測未完成：' + d.backtestError
-      : firstBacktest ? window.Backtest.describe(firstBacktest) + ' ' + firstBacktest.limitations.join(' ')
+      : firstBacktest ? firstBacktest.name + '：' + window.Backtest.describe(firstBacktest) + ' ' + signalWarnings + ' ' + firstBacktest.limitations.join(' ')
         : '尚無可用的歷史回測結果。';
     box.querySelector('#wz-back').onclick = renderQuestions;
     box.querySelector('#wz-apply').onclick = apply;

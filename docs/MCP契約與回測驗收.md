@@ -36,7 +36,7 @@ MCP 本身不開 HTTP 服務，不建立憑證，不新增外部來源。`ST_MCP
 
 來源參考：[MCP 工具規格](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)、[Maverick 服務組裝](https://github.com/wshobson/maverick-mcp/blob/main/maverick/server/assembly.py)、[Maverick 回測計算](https://github.com/wshobson/maverick-mcp/blob/main/maverick/backtesting/engine.py)。本輪僅參考邊界分工概念，未複製其程式碼或安裝套件。
 
-## 回測模型 `st-backtest/4.0.1`
+## 回測模型 `st-backtest/4.0.2`
 
 `Backtest.run`、`runLS`、`scanStrategies`、`evaluateStrategies` 共用一個純計算成交核心；不抓取資料、不寫交易。原 `server/signal_stats_pool.py` 的事件研究、同市場基準率與樣本門檻完全獨立，不以交易模擬結果替換。
 
@@ -45,12 +45,25 @@ MCP 本身不開 HTTP 服務，不建立憑證，不新增外部來源。`ST_MCP
 - 每筆使用當時淨權益的一倍名目資金，允許小數股數。進場數量為 `權益 / [成交價 × (1 + 進場費率)]`；買進滑價上加、賣出下減；雙邊費用依各次實際成交金額扣除。放空使用同一套現金／負股數帳本，不含借券供給或費率。權益耗盡後安排下一可成交開盤退出，不再開新倉；不把負權益壓成零掩蓋損失。
 - 預設進場費 10 bp、出場費 10 bp、每邊滑價 5 bp（1 bp = 0.01%），是可調情境值，非台美股／ETF 法定費率。應把適用費用納入情境，未另外模擬交易稅、股息、融資與借券。
 - 每個已提供日線都產生收盤估值曲線，包括空手日；缺收盤時沿用最近估值並標示 `carried`。缺列不自行補日曆，缺價／量不轉為零。期末保留 `openPosition`，未實現損益計入總報酬與回撤，但不列入已平倉筆數／勝率。未平倉不預扣未發生的出場費。
-- MDD 從初始權益 1 與每日收盤權益計算；不是盤中最差回撤。Sharpe 與 sharpeAnn 統一使用每日簡單報酬減每日無風險利率、樣本標準差與 `sqrt(periodsPerYear)`；預設 252 日、年化無風險率 0。無交易／零波動／不足兩個每日報酬時為 null。空手日納入樣本，不用每筆交易數年化。
+- MDD 從初始權益 1 與每日收盤權益計算；不是盤中最差回撤。Sharpe 與 sharpeAnn 統一使用每日簡單報酬減每日無風險利率、樣本標準差與 `sqrt(periodsPerYear)`；預設 252 日、年化無風險率 0。沒有實際成交／零波動／不足兩個每日報酬時為 null；存在前期權益非正而無法定義的每日報酬時亦為 null，不刪除該日重算。空手日納入樣本，不用每筆交易數年化。
 - 日期在單一 `dateKey` 轉換：秒級 timestamp 依 TW／US 時區轉交易日；ISO 日期視為交易所日期。拒絕亂序、重複日與同日多根，UI 也拒絕已知非日線區間。不沿用 NYSE-only 日曆。
 
 條件組合器與腳本介面可調三種成本，顯示版本、截止日、成交口徑、每日估值、未平倉與資料限制。勝率與 Sharpe 不可定義時顯示「—」。舊儲存條件組缺成本欄位時明示載入預設情境；重新回測才產生新版績效，不混合舊結果。
 
 `4.0.1` 補齊零筆已平倉交易的缺值語意：每筆期望值、平均持有、最佳／最差等為 null，UI 顯示「—」；真實打平交易的期望值仍為 0。獲利因子在獲利與虧損同為零時為 null，只有虧損時為 0，只有獲利時為 Infinity。沒有已平倉樣本的策略列於排序末端，不冒充零期望值。
+
+### `4.0.2` 資料提醒與相容性契約
+
+- **突破 20／60 日新高：**回看最高價缺值時維持保守 false，不跳過未知 high 推測突破。`scanStrategies` 與 `evaluateStrategies` 共用診斷：`insufficient_lookback` 含所需／已有根數；`missing_lookback_high` 含受影響 `bar/date`、回看起訖、`missingBars/missingDates`。提醒所屬日期只限實際評估區間，缺值來源可在過去暖機期。缺值離開窗口後正常恢復。低階 `breakout(high, close, p, issues?)` 及策略 `fn(cols, issues?)` 保留布林陣列回傳，選用第四／第二參數收集索引診斷；未傳診斷陣列的既有呼叫不受影響。UI 的策略精靈、條件組合器與固定樣本外比較會顯示原因；無可選策略時仍顯示訓練候選的資料不足提醒。
+- **投組日期：**`portfolio(perSymCurves, weights?, markets?)` 優先採用每個點明確且有效的 `date`。沒有 `date` 時，日期字串與 BusinessDay 維持原兩參數相容；秒級數值時間戳必須提供 `{標的: 'TW'|'US'}` 市場對照，由既有市場時區規則轉換。缺市場或市場無效時明確拒絕，不默認台北；原先只傳數值時間戳的 TW 呼叫也須補市場。例：`portfolio(curves, null, { '2330': 'TW', AAPL: 'US' })`。新引擎的原生曲線已有 `date`。此修正針對 API 相容性路徑，未宣稱正式 UI 先前曾受影響。
+- **Sharpe 原因：**新增 `sharpeReason`，有效數值時為 null。不可定義時按下表優先順序判定，`describe()` 供 UI 顯示中文原因；不改既有數值計算。零筆已平倉不等於沒有成交，未平倉權益有波動時 Sharpe 仍可有效。最後一天權益歸零，若此前分母皆為正，Sharpe 不必為 null；有下一天且前期權益非正，才產生無法定義的日報酬。
+
+| `sharpeReason` | 確切意義（由上而下優先） |
+| --- | --- |
+| `non_positive_prior_equity` | 區間內存在前期權益非正、無法定義的每日報酬 |
+| `insufficient_samples` | 少於兩個每日報酬樣本 |
+| `no_trades` | 樣本足夠但未發生進場，權益無波動；不是已平倉筆數為零 |
+| `zero_variance` | 曾成交，但每日報酬沒有波動 |
 
 ### 固定樣本外切分
 
@@ -61,3 +74,5 @@ MCP 本身不開 HTTP 服務，不建立憑證，不新增外部來源。`ST_MCP
 ### 可重現測試
 
 `tests/fixtures/backtest_execution.json` 包含台股、台灣 ETF、美股、美國 ETF 的手工日線。`tests/backtest_execution_selftest.js` 用獨立現金／股數預期值驗證跳空、雙邊成本、放空、每日回撤／Sharpe、停牌、缺價／缺量、沒有下一根、收盤停利停損、未平倉、零交易、日期／參數拒絕、指標缺值及測試集不參與選擇。現有 CI 的 JavaScript 自我測試迴圈會自動納入此檔。
+
+`tests/回測資料語意_selftest.js` 另覆蓋缺 high 的兩種補值反例、20／60 根窗口恢復、來源日期與樣本外提醒界線、US 跨日及 TW／US 混合投組、日期優先與歧義拒絕、Sharpe 四種原因，以及末日歸零、歸零後仍有下一日和負權益邊界。

@@ -266,7 +266,7 @@
       `</div><canvas id="ss-curve" width="540" height="80"></canvas>`;
     document.getElementById('ss-result').innerHTML = '<p id="ss-contract"></p><details><summary>模型限制與資料提醒</summary><p id="ss-limits"></p></details>' + h;
     document.getElementById('ss-contract').textContent = window.Backtest.describe(r);
-    document.getElementById('ss-limits').textContent = r.limitations.join(' ') + ' ' + r.issues.map(x => `${x.date || ''} ${x.code}`).slice(0, 20).join('；');
+    document.getElementById('ss-limits').textContent = r.limitations.join(' ') + ' ' + r.issues.map(window.Backtest.describeIssue).slice(0, 20).join('；');
     if (window.Backtest.drawCurve) window.Backtest.drawCurve(document.getElementById('ss-curve'), r.curve, '#fbbf24');
   }
 
