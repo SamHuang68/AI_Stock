@@ -511,11 +511,29 @@
       '；已留存 ' + esc(o.events || 0) + ' 個事件、' + esc(o.outcomes || 0) + ' 筆成熟結果。' +
       (o.activatedAt ? '<br>啟用於 ' + esc(o.activatedAt) : '') + (o.lastRun ? '<br>最近檢查 ' + esc(o.lastRun.asOf) + '：' + esc(o.lastRun.reason) : '') +
       '<br>只記錄啟用後的當日收盤事件，缺日不回填；這些是觀察紀錄，並非通過研究的候選。</div>';
+    if (o.forward) html += '<div class="sh5-foot">' + esc(o.forward.note || '') + '<br>' +
+      (o.forward.horizons || []).map(function (r) {
+        return esc(r.horizon + ' 日觀察：已成熟 ' + r.resolved + '，待核對／成熟 ' + r.pending);
+      }).join('；') + '</div>';
+    if (o.enabled && o.events > 0 && !(o.lastRun && o.lastRun.outcomeProgress)) html +=
+      '<div class="sh5-foot">尚無逐期等待原因收據；零筆成熟結果不代表零報酬，需等下一次本機留存檢查。</div>';
+    if (o.lastRun && o.lastRun.outcomeProgress) {
+      var reasons = { awaiting_observed_sessions: '實際基準日尚不足（須確認日期已經過且資料到齊）',
+        missing_stock_sessions: '個股觀察期缺日', missing_benchmark_sessions: '基準缺日，禁止順延湊期',
+        not_evaluated_current_input: '本次沒有可核對的標的輸入' };
+      html += '<div class="sh5-foot">未成熟原因：' + [5, 20].map(function (h) {
+        var values = (o.lastRun.outcomeProgress.byHorizon || {})[String(h)] || {};
+        return esc(h + ' 日：') + Object.keys(values).map(function (key) {
+          return esc((reasons[key] || key) + ' ' + values[key] + ' 筆');
+        }).join('、');
+      }).join('；') + '</div><details><summary>等待原因代表紀錄（有界摘要，完整事件仍在帳本）</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
+        esc(JSON.stringify(o.lastRun.outcomeProgress, null, 2)) + '</pre></details>';
+    }
     if (o.lastRun && o.lastRun.chipChannelsExpected != null) html += '<div class="sh5-foot">首次價量輸入 ' + esc(o.lastRun.priceInputs || 0) +
       ' 檔；籌碼訊號資料到齊 ' + esc(o.lastRun.chipChannelsComplete || 0) + '／' + esc(o.lastRun.chipChannelsExpected) +
       ' 組。籌碼稍後到齊會另留證據，不改寫首次價量。</div><details><summary>尚缺資料與排除原因</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
       esc(JSON.stringify({ missingPriceSymbols: o.lastRun.missingPriceSymbols, missingChipInputs: o.lastRun.missingChipInputs,
-        excludedInstruments: o.lastRun.excludedInstruments }, null, 2)) + '</pre></details>';
+        priceExclusions: o.lastRun.priceExclusions, excludedInstruments: o.lastRun.excludedInstruments }, null, 2)) + '</pre></details>';
     if (p.sourceRevisions && p.sourceRevisions.count) html += '<div class="sh5-warn">來源修訂 ' + esc(p.sourceRevisions.count) + ' 筆、涉及 ' +
       esc(p.sourceRevisions.symbols) + ' 檔；首次日線保留，衝突另存，尚未自動採用。</div>';
     if (p.sourceReviews && p.sourceReviews.findings) html += '<details><summary>已完成的來源核對（' + esc(p.sourceReviews.verifiedAt) +

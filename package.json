@@ -1,0 +1,11 @@
+{
+  "name": "stock-terminal-browser-checks",
+  "private": true,
+  "description": "Stock Terminal 離線觸控與前瞻狀態驗收",
+  "scripts": {
+    "test:browser": "node tests/reliability_browser.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

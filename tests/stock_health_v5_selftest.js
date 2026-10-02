@@ -25,6 +25,14 @@ if (!qualityMarkup.includes('缺資料') || !qualityMarkup.includes('待更新')
 const maintenanceMarkup = H.maintenanceHtml({ running: false, job: {status:'failed', steps:[{label:'重算',status:'failed'}]},
   observations: {enabled:true,events:0,outcomes:0}, inventory: {symbols:100,alignedSymbols:80} });
 if (!maintenanceMarkup.includes('失敗') || !maintenanceMarkup.includes('80／100') || !maintenanceMarkup.includes('0 個事件')) throw new Error('維護失敗或真實空狀態錯誤');
+const forwardMarkup = H.maintenanceHtml({observations:{enabled:true,events:534,outcomes:0,
+  forward:{note:'由事件次一實際交易日收盤起算',horizons:[{horizon:5,resolved:0,pending:534}]},
+  lastRun:{outcomeProgress:{byHorizon:{'5':{missing_stock_sessions:2,awaiting_observed_sessions:532}},
+    samples:[{symbol:'<script>',missingPriceDates:['2026-10-01']}]}}}});
+if (!forwardMarkup.includes('待核對／成熟 534') || !forwardMarkup.includes('個股觀察期缺日 2') ||
+    !forwardMarkup.includes('2026-10-01') || forwardMarkup.includes('<script>')) throw new Error('前瞻成熟理由必須明示且安全跳脫');
+const legacyForwardMarkup = H.maintenanceHtml({observations:{enabled:true,events:1,outcomes:0}});
+if (!legacyForwardMarkup.includes('尚無逐期等待原因收據') || !legacyForwardMarkup.includes('不代表零報酬')) throw new Error('舊帳本無診斷收據不能推定成功或零績效');
 const adjustmentMarkup = H.sensitivityHtml({status:'missing',coveredSymbols:0,totalSymbols:100,limitations:[]});
 const closedMarkup = H.maintenanceHtml({job:{},observations:{enabled:true,lastRun:{asOf:'2026-09-28',reason:'官方公告休市：教師節'}},
   inventory:{calendar:{reason:'官方公告休市：教師節'},knownInactive:[{symbol:'5371',label:'股份轉換<script>',stopDate:'2026-08-24',
