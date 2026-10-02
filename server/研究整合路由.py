@@ -4,20 +4,14 @@ import json
 from pathlib import Path
 import re
 import sqlite3
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import unquote, urlsplit
 
 from http_boundary import BodyReadError, read_json_body
-
-
-def query_values(path, allowed):
-    query = parse_qs(urlsplit(path).query, keep_blank_values=True)
-    if set(query) - set(allowed) or any(len(v) != 1 or not v[0] for v in query.values()):
-        raise ValueError('查詢參數不合法、重複或空白')
-    return {key: values[0] for key, values in query.items()}
+from 研究工作流路由 import query as query_values
 
 
 def stock_code(value):
-    if not isinstance(value, str) or not re.fullmatch(r'\d{4,6}(?:\.(?:TW|TWO))?', value):
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9]{4,6}[A-Z]?(?:\.(?:TW|TWO))?', value):
         raise ValueError('請提供台股代號')
     return value.removesuffix('.TWO').removesuffix('.TW')
 
@@ -95,7 +89,7 @@ class ResearchIntegrationRoutesMixin:
             else:
                 with datastore.read_snapshot(self._research_database()) as connection:
                     symbols = [code for code in datastore.list_symbols(connection=connection)
-                               if re.fullmatch(r'\d{4,6}', code)]
+                               if re.fullmatch(r'[0-9]{4,6}[A-Z]?', code)]
                 source = '本機已存台股宇集，並非歷史全市場全集'
             sector = body.get('sector') or ''
             if not isinstance(sector, str):

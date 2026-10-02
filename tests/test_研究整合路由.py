@@ -1,5 +1,4 @@
 """研究公開邊界：拒絕模糊查詢、保持唯讀與個人資料權限。"""
-import io
 import json
 from pathlib import Path
 import sys
@@ -45,6 +44,7 @@ class ResearchBoundaryTests(unittest.TestCase):
                                                   'range':'custom','start':'2026-01-01'})
         self.assertEqual(symbol, '2330')
         self.assertEqual(options, {'as_of':'2026-10-02','period':'custom','start_date':'2026-01-01'})
+        self.assertEqual(routes.stock_code('00631L.TW'), '00631L')
 
     def test_gateway_market_reads_and_personal_research(self):
         settings = SimpleNamespace(extra_read_paths=(), extra_control_paths=())
