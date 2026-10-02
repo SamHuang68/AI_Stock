@@ -4,7 +4,7 @@ import json
 import sqlite3
 import zlib
 from contextlib import closing
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import stock_signals as ss
@@ -21,6 +21,33 @@ def engine_digest():
 
 def encoded(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
+
+
+def maturity_progress(origin, sessions, price_dates, horizon):
+    """只以實際基準日與首次價格核對；不猜測未來開市或壓縮缺日。"""
+    following = sorted({day for day in sessions if day > origin})
+    expected = following[:horizon + 1]
+    prices = {day for day in price_dates if day > origin}
+    missing = [day for day in expected if day not in prices]
+    # 尚未滿期時，基準最後一日之後的個股價格也能證明基準漏日。
+    extra = sorted(day for day in prices if day not in expected and
+                   (len(expected) < horizon + 1 or day <= expected[-1]))
+    # 兩個來源同時漏掉表定交易日，仍不可把後面的日期順延湊滿期數。
+    # 僅檢查已觀測區間；未知年度不推定開市，更不補入未來日期。
+    if expected:
+        cursor, end = date.fromisoformat(origin) + timedelta(days=1), date.fromisoformat(expected[-1])
+        known = set(following)
+        while cursor <= end:
+            day = cursor.isoformat()
+            if day not in known and session(cursor)['status'] == 'scheduled':
+                extra.append(day)
+            cursor += timedelta(days=1)
+        extra = sorted(set(extra))
+    reason = ('missing_benchmark_sessions' if extra else 'missing_stock_sessions' if missing else
+              'awaiting_observed_sessions' if len(expected) < horizon + 1 else 'ready')
+    return {'status': reason, 'horizon': horizon, 'requiredFollowingSessions': horizon + 1,
+            'observedFollowingSessions': len(expected), 'benchmarkAsOf': following[-1] if following else None,
+            'expectedSessions': expected, 'missingPriceDates': missing, 'missingBenchmarkDates': extra}
 
 
 def _chip_schema(conn):
@@ -89,14 +116,26 @@ def status(path):
     if not Path(path).is_file():
         return {'enabled': False, 'events': 0, 'outcomes': 0, 'recent': [], 'status': 'disabled'}
     with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as conn:
+        conn.execute('BEGIN')  # 啟用設定、事件與成熟結果必須出自同一讀取快照。
         cfg = json.loads(conn.execute("SELECT payload FROM daily_config WHERE key='activation'").fetchone()[0])
         last = conn.execute('SELECT payload FROM daily_runs ORDER BY at DESC LIMIT 1').fetchone()
+        total = conn.execute('SELECT count(*) FROM daily_events').fetchone()[0]
+        horizons = [{'horizon': horizon, 'resolved': conn.execute(
+            'SELECT count(*) FROM daily_events e WHERE EXISTS '
+            '(SELECT 1 FROM daily_outcomes o WHERE o.event_id=e.id AND o.horizon=?)', (horizon,)).fetchone()[0],
+            'requiredFollowingSessions': horizon + 1} for horizon in (5, 20)]
+        for item in horizons:
+            item['pending'] = total - item['resolved']
         recent = [{'symbol': r[0], 'date': r[1], 'signalId': r[2], 'observedAt': r[3]}
                   for r in conn.execute('SELECT symbol,session_date,signal_id,observed_at FROM daily_events '
                                         'ORDER BY observed_at DESC,id LIMIT 20')]
-        return {'enabled': True, **cfg, 'events': conn.execute('SELECT count(*) FROM daily_events').fetchone()[0],
+        return {'enabled': True, **cfg, 'events': total,
                 'outcomes': conn.execute('SELECT count(*) FROM daily_outcomes').fetchone()[0],
                 'recent': recent, 'lastRun': json.loads(last[0]) if last else None,
+                'forward': {'horizons': horizons, 'entry': 'next_session_close',
+                            'eventRange': dict(zip(('first', 'last'), conn.execute(
+                                'SELECT min(session_date),max(session_date) FROM daily_events').fetchone())),
+                            'note': '由事件次一實際交易日收盤起算；5／20 日觀察須有事件後 6／21 個完整基準日及個股價格。'},
                 'status': 'observing', 'priceBasis': '首次留存的未還原價格',
                 'limitations': '實際結果需等待 5／20 個交易日成熟；不代表可交易候選，未計費用。'}
 
@@ -127,7 +166,18 @@ def capture(path, series, benchmark, chips=None, now=None):
     counts['calendar'] = calendar
     counts['excludedInstruments'] = []
     counts.update(chipChannelsComplete=0, chipChannelsExpected=0, missingChipInputs=[], priceInputs=0,
-                  missingPriceSymbols=[])
+                  missingPriceSymbols=[], priceExclusions=[], outcomeProgress={
+                      'byHorizon': {str(h): {} for h in (5, 20)}, 'samples': [], 'sampleLimit': 10})
+
+    def excluded_price(symbol, bars, segments=None):
+        last_day = bars[-1]['date'] if bars else None
+        consecutive = len(segments[-1]) if segments else 0
+        reason = ('missing_current_bar' if last_day != today else
+                  'insufficient_history' if len(bars) < ss.MIN_BARS else 'incomplete_or_discontinuous_history')
+        counts['missingPriceSymbols'].append(symbol)  # 保留舊客戶端欄位，詳情另列。
+        counts['priceExclusions'].append({'symbol': symbol, 'reason': reason, 'lastBarDate': last_day,
+                                         'availableBars': len(bars), 'continuousBars': consecutive,
+                                         'requiredBars': ss.MIN_BARS})
     can_capture = finalized and today in sessions and calendar['status'] != 'closed'
     if calendar['status'] == 'closed':
         counts.update(status='closed', reason=calendar['reason'] + '；不要求當日日線')
@@ -147,8 +197,7 @@ def capture(path, series, benchmark, chips=None, now=None):
             counts['scanned'] += 1
             if len(bars) < ss.MIN_BARS:
                 if can_capture and not inactive:
-                    counts['missingPriceSymbols'].append(symbol)
-                continue
+                    excluded_price(symbol, bars)
             input_id = digest([version, symbol, today])
             parts = continuous_segments(symbol, bars, sessions)
             current_bars = parts[-1] if parts else []
@@ -181,29 +230,40 @@ def capture(path, series, benchmark, chips=None, now=None):
                 counts['chipChannelsComplete'] += complete
                 counts['missingChipInputs'].extend(missing)
             elif can_capture and not inactive:
-                counts['missingPriceSymbols'].append(symbol)
+                if len(bars) >= ss.MIN_BARS:
+                    excluded_price(symbol, bars, parts)
             pending = conn.execute('SELECT e.id,e.session_date,e.input_id FROM daily_events e WHERE symbol=? '
                 'AND (SELECT count(*) FROM daily_outcomes o WHERE o.event_id=e.id)<2', (symbol,)).fetchall()
             if not pending:
                 continue
             first = min(e[1] for e in pending)
+            invalid_dates = {b['date'] for b in bars if b['date'] > first and not ss.complete_bar(b)}
             for b in bars:
-                if b['date'] > first:
+                if b['date'] > first and ss.complete_bar(b):
                     conn.execute('INSERT OR IGNORE INTO daily_prices VALUES(?,?,?,?)',
                                  (symbol, b['date'], stamp, encoded(b)))
             for event_id, origin, _ in pending:
                 if not eligible_bar(symbol, origin):
                     continue
-                expected_all = [d for d in sessions if d > origin]
-                prices = {r[0]: json.loads(r[1]) for r in conn.execute(
+                saved_prices = {r[0]: json.loads(r[1]) for r in conn.execute(
                     'SELECT session_date,payload FROM daily_prices WHERE symbol=? AND session_date>?', (symbol, origin))
                     if eligible_bar(symbol, r[0])}
+                prices = {day: bar for day, bar in saved_prices.items() if ss.complete_bar(bar)}
+                invalid = (invalid_dates | (set(saved_prices) - set(prices))) - set(prices)
                 for hz in (5, 20):
-                    expected = expected_all[:hz + 1]
-                    if len(expected) != hz + 1 or any(d not in prices for d in expected):
+                    if conn.execute('SELECT 1 FROM daily_outcomes WHERE event_id=? AND horizon=?',
+                                    (event_id, hz)).fetchone():
                         continue
-                    if sorted(d for d in prices if origin < d <= expected[-1]) != expected:
-                        continue  # 個股有交易但基準缺日，不能跳過該日向後湊足觀察期。
+                    progress = maturity_progress(origin, sessions, prices, hz)
+                    progress['invalidPriceDates'] = [day for day in progress['expectedSessions'] if day in invalid]
+                    if progress['status'] != 'ready':
+                        groups = counts['outcomeProgress']['byHorizon'][str(hz)]
+                        groups[progress['status']] = groups.get(progress['status'], 0) + 1
+                        if len(counts['outcomeProgress']['samples']) < counts['outcomeProgress']['sampleLimit']:
+                            counts['outcomeProgress']['samples'].append(
+                                {'eventId': event_id, 'symbol': symbol, 'eventDate': origin, **progress})
+                        continue
+                    expected = progress['expectedSessions']
                     observed = [prices[d] for d in expected]
                     entry = observed[0]['close']
                     out = {'horizon': hz, 'entryDate': expected[0], 'endDate': expected[-1],
@@ -217,8 +277,15 @@ def capture(path, series, benchmark, chips=None, now=None):
         if can_capture and today <= activated:
             counts.update(status='waiting', reason='啟用當日不回填；由下一個交易日開始留存')
         elif can_capture and counts['currentSymbols'] == 0:
-            counts.update(status='waiting', reason='大盤已更新，個股當日日線尚未到齊')
+            counts.update(status='waiting', reason='尚無符合完整歷史條件的當日個股輸入；請核對缺漏與排除原因')
         elif can_capture and (counts['missingPriceSymbols'] or counts['missingChipInputs']):
-            counts.update(status='partial', reason='價量與籌碼分開留存；仍有來源未到齊，當日可重試')
+            counts.update(status='partial', reason='價量與籌碼分開留存；缺來源與歷史不足分列，僅當日新增事件可重試')
+        for hz in (5, 20):
+            unresolved = conn.execute('SELECT count(*) FROM daily_events e WHERE NOT EXISTS '
+                '(SELECT 1 FROM daily_outcomes o WHERE o.event_id=e.id AND o.horizon=?)', (hz,)).fetchone()[0]
+            groups = counts['outcomeProgress']['byHorizon'][str(hz)]
+            unexamined = unresolved - sum(groups.values())
+            if unexamined > 0:
+                groups['not_evaluated_current_input'] = unexamined
         conn.execute('INSERT OR IGNORE INTO daily_runs VALUES(?,?)', (stamp, encoded(counts)))
     return counts
