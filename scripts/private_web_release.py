@@ -38,6 +38,7 @@ REQUIRED_RELEASE_FILES = {
     "server/private_web_gateway.py",
     "server/private_web_access.py",
     "scripts/private_web_host.py",
+    "scripts/停止私有網站.ps1",
     "scripts/setup_private_web.py",
     "docs/PRIVATE_WEB_ST.md",
     "docs/PRIVATE_WEB_LOGIN_GUIDE.md",
@@ -57,6 +58,7 @@ REQUIRED_RELEASE_FILES = {
     "tests/test_health_live.py",
     "tests/test_daemon_lock.py",
     "tests/test_private_web_host.py",
+    "tests/test_私有停止安全.py",
     "tests/test_ai_local.py",
     "tests/test_private_web_access.py",
     "tests/test_archify_artifacts.py",
@@ -205,6 +207,7 @@ def stage_release(
             "tests.test_private_web_gateway",
             "tests.test_private_web_access",
             "tests.test_private_web_host",
+            "tests.test_私有停止安全",
             "tests.test_private_web_release",
             "tests.test_archify_artifacts",
         ]
