@@ -309,18 +309,51 @@ function Assert-ListenerMatchesPin {
   }
 }
 
+function Get-PorcelainPath([string]$Line) {
+  if (-not $Line -or $Line.Length -lt 4) { return $null }
+  # 改名與 Git 引號跳脫無法用一般字串安全還原，一律保留原本阻擋。
+  if ($Line.Substring(0, 2) -match '[RCU]' -or $Line.Substring(3).StartsWith('"')) { return $null }
+  return $Line.Substring(3).Replace('\', '/')
+}
+
+function Test-IgnorableUpdateDirt([string]$Line) {
+  $runtimePath = Get-PorcelainPath $Line
+  if (-not $runtimePath) { return $false }
+  return ($runtimePath -match '^data/[^/]+\.(csv|sqlite3)$' -or
+          $runtimePath -match '^data/[^/]*backup[^/]*\.json$' -or
+          $runtimePath -match '^\.loop-engineering/')
+}
+
+function Assert-NoRuntimeUpdateOverlap([string[]]$RuntimeLines, [string]$TargetRef) {
+  if ($RuntimeLines.Count -eq 0) { return }
+  $incoming = @(git -c core.quotepath=false diff --no-renames --name-only HEAD $TargetRef -- data .loop-engineering)
+  if ($LASTEXITCODE -ne 0) { throw '無法核對更新涉及的執行期資料，尚未切換版本。' }
+  foreach ($line in $RuntimeLines) {
+    $runtimePath = Get-PorcelainPath $line
+    foreach ($changedPath in $incoming) {
+      if ($changedPath -eq $runtimePath -or $changedPath.StartsWith($runtimePath.TrimEnd('/') + '/', [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "更新也會改動本機資料 $runtimePath；請先明確保留或處理衝突，更新器不會暫存或丟棄變更。"
+      }
+    }
+  }
+}
+
 Write-Banner
 
 if ($Pull -or $UpdateOnly) {
   Write-Host "[update] fetch + fast-forward only: $TipBranch"
-  $dirty = @(git status --porcelain 2>$null)
+  $dirty = @(git -c core.quotepath=false status --porcelain 2>$null)
   if ($LASTEXITCODE -ne 0) { throw "git status failed" }
-  if ($dirty.Count -gt 0) {
-    git status --short
-    throw "BLOCK: worktree is dirty. Commit or preserve changes explicitly; updater will not stash, force, reset, or discard them."
+  $blocking = @($dirty | Where-Object { -not (Test-IgnorableUpdateDirt $_) })
+  $runtimeDirty = @($dirty | Where-Object { Test-IgnorableUpdateDirt $_ })
+  if ($blocking.Count -gt 0) {
+    $blocking | ForEach-Object { Write-Host $_ }
+    throw '工作區有非執行期資料的變更，請先明確保留；更新器不會暫存、重設或丟棄變更。'
   }
   git fetch origin $TipBranch
   if ($LASTEXITCODE -ne 0) { throw "git fetch failed" }
+  Assert-NoRuntimeUpdateOverlap -RuntimeLines $runtimeDirty -TargetRef "origin/$TipBranch"
+  if ($runtimeDirty.Count -gt 0) { Write-Host '[update] 保留本機行情 CSV／SQLite／備份資料，僅更新沒有資料衝突的程式。' }
   $cur = (git branch --show-current 2>$null).Trim()
   if ($cur -ne $TipBranch) {
     git show-ref --verify --quiet "refs/heads/$TipBranch"

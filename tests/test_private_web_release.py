@@ -9,6 +9,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,7 +33,10 @@ def _fake_release(root: Path, release_id: str) -> Path:
         "releaseId": release_id,
         "commit": release_id.ljust(40, "0"),
         "tests": "passed",
-        "managedTopLevel": ["server", "scripts", "stock_terminal_v2.html"],
+        "managedTopLevel": sorted(item.name for item in target.iterdir()
+                                  if item.name not in release.PRESERVE_NAMES),
+        "contentSha256": release._content_hashes(target),
+        "seedSha256": release._content_hashes(target / 'data', include_runtime=True),
     }
     _write(
         target / ".private_web_release.json",
@@ -96,6 +100,7 @@ class PrivateWebReleaseTests(unittest.TestCase):
                     "releaseId": "old000",
                     "tests": "passed",
                     "managedTopLevel": ["server", ".private_web_release.json"],
+                    "contentSha256": {"server/old_module.py": "既有管理檔案"},
                 }
             ),
         )
@@ -144,11 +149,39 @@ class PrivateWebReleaseTests(unittest.TestCase):
         self.assertTrue((tree / "server" / "server.py").is_file())
 
     def test_release_gate_includes_etf_and_shell_node_regressions(self):
-        source = (ROOT / "scripts" / "private_web_release.py").read_text(encoding="utf-8")
-        self.assertIn("tests/etf_flow_v3_selftest.js", source)
-        self.assertIn("tests/shell_v5_selftest.js", source)
-        self.assertIn('"tests.test_archify_artifacts"', source)
-        self.assertIn('shutil.which("node")', source)
+        # 驗證實際命令及順序，包含新增的自測；不靠寫死的檔名通過。
+        commit = 'a' * 40
+        calls = []
+        selftests = ['tests/etf_flow_v3_selftest.js', 'tests/shell_v5_selftest.js',
+                     'tests/新增_selftest.js']
+        extras = ['wavedeck/run.py', 'START_WAVEDECK.cmd']
+        def run(argv, *, cwd, capture=False):
+            calls.append(argv)
+            if argv[0] == 'git':
+                with zipfile.ZipFile(argv[argv.index('--output') + 1], 'w') as archive:
+                    for relative in release.REQUIRED_RELEASE_FILES | set(selftests + extras):
+                        archive.writestr(relative, '原始內容')
+            else:
+                for relative in extras:
+                    self.assertTrue((cwd / relative).is_file())
+                if 'unittest' in argv:
+                    _write(cwd / 'stock_terminal_v2.html', '清理測試改寫')
+                    _write(cwd / 'src/測試殘留.js', '不得出貨')
+                if argv[0] == 'node':
+                    self.assertEqual((cwd / 'stock_terminal_v2.html').read_text(encoding='utf-8'), '原始內容')
+                    self.assertFalse((cwd / 'src/測試殘留.js').exists())
+        with patch.object(release, 'resolve_commit', return_value=(commit, commit[:12])), \
+                patch.object(release, '_run', run), patch.object(release.shutil, 'which', return_value='node'):
+            staged = release.stage_release(self.install_root, ref=commit)
+        self.assertEqual([argv[1] for argv in calls if argv[0] == 'node'], sorted(selftests))
+        self.assertTrue(any(argv[1:] == ['-m', 'unittest', 'discover', '-s', 'tests', '-b'] for argv in calls))
+        self.assertTrue(any('wavedeck.tests.test_smoke' in argv for argv in calls))
+        self.assertTrue(any('tests.test_dist_scrub' in argv for argv in calls))
+        self.assertEqual(sum('build_v2.py' in argv for argv in calls), 3)
+        for relative in extras:
+            self.assertFalse((staged / relative).exists())
+        self.assertFalse((staged / 'src/測試殘留.js').exists())
+        release._validate_integrity(staged, release._read_manifest(staged / release.MANIFEST_NAME))
 
     def test_release_requires_archify_manifest_documents_and_validator(self):
         expected = {
