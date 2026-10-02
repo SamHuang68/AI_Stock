@@ -1,3 +1,6 @@
 # Archify 完整性清單驗證原始位元組，跨平台 checkout 必須固定使用 LF。
 docs/architecture/*.json text eol=lf
 assets/docs/archify/*.html text eol=lf
+# 含 UTF-8 文字的 Windows CMD 必須連 git archive 都保留 CRLF，避免 cmd 解析截斷。
+STOP_PRIVATE_WEB.cmd -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+wavedeck/START_WAVEDECK.cmd -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
