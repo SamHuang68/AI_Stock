@@ -2,7 +2,7 @@
   "source": "https://tw.stock.yahoo.com/quote/WTX%26",
   "verifiedDate": "2026-10-02",
   "sourceHtmlSha256": "50ea8940b2d2894bd46d39a9d127a873bfcf2be8a45f741983aebebe8daf7de6",
-  "note": "已觀測來源的節錄；保留兩端分鐘與來源未來空列，不代表連續完整歷史",
+  "note": "2026-10-02 擷取的原始節錄；數字時間卻指向 10 月 4 日，當時必須拒收。正向解析測試只在明示模擬時鐘下回放結構，不代表可用即時行情；保留兩端分鐘與來源未來空列，不代表連續完整歷史",
   "chart": {
     "meta": {
       "currency": "TWD",

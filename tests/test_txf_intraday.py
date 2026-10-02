@@ -1,5 +1,6 @@
 """分鐘標的、盤別、來源時間、缺值及日線隔離契約。"""
 import copy
+from datetime import datetime, timezone
 import json
 import sys
 import unittest
@@ -29,6 +30,18 @@ class MinuteTests(unittest.TestCase):
         self.assertTrue(all(b['time']<=out['sourceTimestamp'] for b in out['candles']))
         self.assertEqual(out['previousClose'],48669)
         self.assertEqual(out['exchangeTimezone'],'Asia/Taipei')
+
+    def test_recorded_source_is_rejected_at_actual_capture_time(self):
+        # 原始數字時間指向 10 月 4 日；實際擷取為 10 月 2 日，不可平移。
+        actual_now=datetime(2026,10,2,13,18,tzinfo=timezone.utc).timestamp()
+        with self.assertRaisesRegex(ValueError,'超前'):
+            minute.parse_html(html(self.chart),now=actual_now)
+        with patch.object(minute,'_cached',None),patch('datastore.upsert_bars') as daily_write:
+            result=minute.get(fetch=lambda:html(self.chart),now=actual_now)
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['candles'],[])
+        self.assertIn('超前',result['error'])
+        daily_write.assert_not_called()
 
     def test_identity_timezone_interval_and_session_are_required(self):
         for changes in ({'symbol':'^TWII'},{'exchange':'NYQ'},{'exchangeTimezoneName':'America/New_York'},
