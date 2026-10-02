@@ -27,7 +27,7 @@ class 更新器資料保護測試(unittest.TestCase):
         self.seed.mkdir()
         self.git(self.root, 'init', '--bare', str(self.remote))
         self.git(self.seed, 'init', '-b', 'main')
-        for key, value in [('user.name', '測試'), ('user.email', 'fixture@example.invalid'),
+        for key, value in [('user.name', '測試'), ('user.email', 'fixture@example.com'),
                            ('core.autocrlf', 'false')]:
             self.git(self.seed, 'config', key, value)
         (self.seed / 'scripts').mkdir()
