@@ -103,6 +103,19 @@ def _load_all_chips(chip_dir: str) -> Dict[str, List[Dict[str, Any]]]:
     return {code: [rows[d] for d in sorted(rows)] for code, rows in out.items()}
 
 
+def _quality_frames(bars, chips):
+    """跨市場皆以缺值切段；每段重新暖機，不將刪除缺列當作連續交易日。"""
+    result, part = [], []
+    for bar in list(bars) + [None]:
+        if bar is not None and ss.complete_bar(bar):
+            part.append(bar)
+        else:
+            if len(part) >= ss.MIN_BARS:
+                result.append(ss.build_frame(part, chips))
+            part = []
+    return result
+
+
 def compute_pooled(series: Iterable[tuple], *, market: str = 'TW',
                    horizons: Sequence[int] = ss.STAT_HORIZONS,
                    min_sample: int = POOLED_MIN_SAMPLE,
@@ -124,7 +137,7 @@ def compute_pooled(series: Iterable[tuple], *, market: str = 'TW',
         if frame_observer is not None:
             frame_observer(code, frame)
         from 台股交易參考 import continuous_frames
-        frames = continuous_frames(code, frame, sessions) if market == 'TW' and sessions is not None else [frame]
+        frames = continuous_frames(code, frame, sessions) if market == 'TW' and sessions is not None else _quality_frames(bars, (chips or {}).get(code))
         for frame in frames:
             dates, closes = frame['date'], frame['close']
             last_date = max(last_date or dates[-1], dates[-1])

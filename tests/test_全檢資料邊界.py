@@ -48,7 +48,7 @@ class ResearchBoundaryTests(unittest.TestCase):
 
     def test_terminated_rows_cannot_enter_main_study_or_pooled_outcomes(self):
         bars = series()
-        benchmark = [{**b, 'close': 100 + i} for i, b in enumerate(bars)]
+        benchmark = [{**b, 'open': 100+i, 'high': 101+i, 'low': 99+i, 'close': 100+i} for i, b in enumerate(bars)]
         study = research.Study(benchmark)
         study.add('2867', ss.build_frame(bars))
         rows = [r for hz in study.rows.values() for values in hz.values() for r in values]
@@ -78,7 +78,7 @@ class ResearchBoundaryTests(unittest.TestCase):
 
     def test_gap_resets_indicators_before_events_and_matches_separate_studies(self):
         bars = series(500)
-        benchmark = [{**b, 'close': 100 + i} for i, b in enumerate(bars)]
+        benchmark = [{**b, 'open': 100+i, 'high': 101+i, 'low': 99+i, 'close': 100+i} for i, b in enumerate(bars)]
         cut = 330
         broken = bars[:cut] + bars[cut + 1:]
         actual = research.Study(benchmark)

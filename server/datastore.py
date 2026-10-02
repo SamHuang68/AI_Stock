@@ -33,7 +33,7 @@ else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(_BASE, 'data', 'market.db')
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bars(
   symbol TEXT NOT NULL, market TEXT NOT NULL, ts INTEGER NOT NULL,
@@ -47,9 +47,10 @@ CREATE TABLE IF NOT EXISTS meta(
 );
 """
 
-def get_conn():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=30)
+def get_conn(path=None):
+    target = os.fspath(path or DB_PATH)
+    os.makedirs(os.path.dirname(os.path.abspath(target)), exist_ok=True)
+    conn = sqlite3.connect(target, timeout=30)
     conn.execute('PRAGMA journal_mode=WAL')     # 並發讀寫
     conn.execute('PRAGMA synchronous=NORMAL')
     return conn
@@ -79,12 +80,13 @@ def _primary_key(conn, table):
     return [row[1] for row in sorted((r for r in rows if r[5]), key=lambda r: r[5])]
 
 
-def _backup_before_market_key_migration(conn):
+def _backup_before_market_key_migration(conn, path=None, suffix='.pre-market-key-v2.bak'):
     """Create one recoverable SQLite backup before the destructive schema swap."""
-    backup_path = DB_PATH + '.pre-market-key-v2.bak'
+    target_path = os.fspath(path or DB_PATH)
+    backup_path = target_path + suffix
     if os.path.exists(backup_path):
         return backup_path
-    parent = os.path.dirname(DB_PATH)
+    parent = os.path.dirname(os.path.abspath(target_path))
     fd, temp_path = tempfile.mkstemp(prefix='.market-schema-', suffix='.bak', dir=parent)
     os.close(fd)
     try:
@@ -103,12 +105,12 @@ def _backup_before_market_key_migration(conn):
             os.unlink(temp_path)
 
 
-def _migrate_market_identity(conn):
+def _migrate_market_identity(conn, path=None):
     bars_pk = _primary_key(conn, 'bars')
     meta_pk = _primary_key(conn, 'meta')
     if bars_pk in ([], ['market', 'symbol', 'ts']) and meta_pk in ([], ['market', 'symbol']):
         return False
-    _backup_before_market_key_migration(conn)
+    _backup_before_market_key_migration(conn, path)
     conn.execute('BEGIN IMMEDIATE')
     try:
         if bars_pk and bars_pk != ['market', 'symbol', 'ts']:
@@ -141,13 +143,22 @@ def _migrate_market_identity(conn):
         raise
 
 
-def init_db():
+def init_db(path=None):
     global _db_ready_logged
     with _db_write_lock:
-        with closing(get_conn()) as conn:
-            migrated = _migrate_market_identity(conn)
+        with closing(get_conn(path)) as conn:
+            if conn.execute('PRAGMA user_version').fetchone()[0] > SCHEMA_VERSION:
+                raise RuntimeError('資料庫版本較新，拒絕降版寫入')
+            if _table_exists(conn, 'bars') and not _table_exists(conn, 'bar_quality'):
+                _backup_before_market_key_migration(conn, path, '.pre-quality-v3.bak')
+            migrated = _migrate_market_identity(conn, path)
             with conn:
                 conn.executescript(SCHEMA)
+                try:
+                    from .daily_quality import SCHEMA as QUALITY_SCHEMA
+                except ImportError:
+                    from daily_quality import SCHEMA as QUALITY_SCHEMA
+                conn.executescript(QUALITY_SCHEMA)
                 conn.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
     # 多 worker / 重複呼叫時只印一次，避免刷屏
     if not _db_ready_logged:
@@ -174,11 +185,20 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False,
                 url += '&events=div%2Csplits'
             try:
                 req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                if deadline is not None and hasattr(deadline, 'before_request'):
+                    deadline.before_request()
                 timeout = min(20, deadline.remaining()) if deadline is not None else 20
                 with urllib.request.urlopen(req, timeout=max(.05, timeout)) as r:
                     j = json.load(r)
                 res = j['chart']['result'][0]
-                granularity = (res.get('meta') or {}).get('dataGranularity')
+                meta = res.get('meta') or {}
+                actual_symbol = meta.get('symbol')
+                if actual_symbol and str(actual_symbol).upper() != ysym.upper():
+                    raise ValueError('來源證券代號與請求不符，拒絕寫入')
+                zone = meta.get('exchangeTimezoneName')
+                if zone and ((market == 'TW' and zone != 'Asia/Taipei') or (market == 'US' and zone not in ('America/New_York', 'America/Chicago', 'US/Eastern', 'US/Central'))):
+                    raise ValueError('來源交易所時區與市場不符，拒絕寫入')
+                granularity = meta.get('dataGranularity')
                 if granularity and granularity != '1d':
                     raise ValueError('來源回傳非日線資料，拒絕寫入日線庫')
                 ts = res['timestamp']
@@ -186,16 +206,14 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False,
                 rows = []
                 for i, t in enumerate(ts):
                     cl = q['close'][i]
-                    if cl is None or cl <= 0:
+                    if not isinstance(cl, (int, float)) or not math.isfinite(cl) or cl <= 0:
                         continue
                     op = q['open'][i]
                     hi = q['high'][i]
                     lo = q['low'][i]
-                    vol = q['volume'][i] if q['volume'][i] is not None else 0
-                    
-                    if op is None or op <= 0: op = cl
-                    if hi is None or hi <= 0: hi = cl
-                    if lo is None or lo <= 0: lo = cl
+                    vol = q['volume'][i]
+                    op, hi, lo = [v if isinstance(v, (int, float)) and math.isfinite(v) and v > 0 else None for v in (op, hi, lo)]
+                    vol = vol if isinstance(vol, (int, float)) and math.isfinite(vol) and vol >= 0 else None
                     
                     rows.append((t, op, hi, lo, cl, vol))
                 if with_research:
@@ -225,30 +243,32 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False,
             time.sleep(delay)   # 指數退避 + 抖動，仍受呼叫端總預算約束
     raise RuntimeError(f'fetch failed for {ysym}: {last}')
 
-def merge_source_bars(sym, market, rows, source):
+def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_range=None):
     """來源更新保留首次日線，修訂另存；不把短區段覆寫成不同價格基準。"""
     from stock_signals import bar_date
     from 台股交易參考 import eligible_bar
     counts = {'runId': uuid.uuid4().hex, 'symbol': sym, 'market': market, 'source': source,
               'inserted': 0, 'unchanged': 0, 'conflicts': 0, 'excluded': 0, 'observedAt': time.time()}
     with _db_write_lock, closing(get_conn()) as conn, conn:
+        check()
         conn.execute('CREATE TABLE IF NOT EXISTS bar_source_revisions('
                      'id TEXT PRIMARY KEY,symbol TEXT,market TEXT,session_date TEXT,observed_at REAL,payload TEXT)')
         conn.execute('CREATE TABLE IF NOT EXISTS bar_ingest_runs(id TEXT PRIMARY KEY,payload TEXT)')
         existing = {bar_date(r[0], market): r for r in conn.execute(
             'SELECT ts,open,high,low,close,volume FROM bars WHERE symbol=? AND market=? ORDER BY ts', (sym, market))}
         for row in rows:
-            if len(row) != 6 or any(not isinstance(v, (int, float)) or not math.isfinite(v) for v in row):
-                raise ValueError('來源日線必須提供有限的時間、OHLC 與成交量')
+            check()
+            if len(row) != 6 or not isinstance(row[0], (int, float)) or not math.isfinite(row[0]) or any(v is not None and (not isinstance(v, (int, float)) or not math.isfinite(v)) for v in row[1:]):
+                raise ValueError('來源日線必須提供有限的時間與數值；缺值須明示為 null')
             day = bar_date(row[0], market)
             if not day or (market == 'TW' and not eligible_bar(sym, day)):
                 counts['excluded'] += 1
                 continue
-            if min(row[1:5]) <= 0 or row[5] < 0 or row[2] < max(row[1], row[3], row[4]) or row[3] > min(row[1], row[2], row[4]):
+            if any(v is not None and v <= 0 for v in row[1:5]) or (row[5] is not None and row[5] < 0) or (all(v is not None for v in row[1:5]) and not row[3] <= min(row[1], row[4]) <= max(row[1], row[4]) <= row[2]):
                 raise ValueError('來源 OHLCV 欄位不一致')
             old = existing.get(day)
             if old:
-                if all(a is not None and math.isclose(a, b, rel_tol=1e-6, abs_tol=1e-5) for a, b in zip(old[1:], row[1:])):
+                if all((a is None and b is None) or (a is not None and b is not None and math.isclose(a, b, rel_tol=1e-6, abs_tol=1e-5)) for a, b in zip(old[1:], row[1:])):
                     counts['unchanged'] += 1
                     continue
                 record = {'source': source, 'original': old, 'revision': row, 'policy': '保留原始值，待核對來源修訂'}
@@ -266,6 +286,13 @@ def merge_source_bars(sym, market, rows, source):
                      (sym, market, sym, int(counts['observedAt'])))
         conn.execute('INSERT INTO bar_ingest_runs VALUES(?,?)',
                      (counts['runId'], json.dumps(counts, ensure_ascii=False)))
+        if fetched_range is not None:
+            start, end = fetched_range
+            conn.execute('INSERT OR REPLACE INTO bar_fetch_coverage VALUES(?,?,?,?,?,?)',
+                         (market, sym, source, start, end, counts['observedAt']))
+            counts['queryCoverage'] = [start, end]
+            counts['coverageMeaning'] = '曾成功取得的來源查詢期間；不保證停牌或缺日已補齊'
+        check()
     return counts
 
 
@@ -278,13 +305,29 @@ def source_revision_status(symbol=None, market='TW', *, connection=None):
         return {'count': count, 'symbols': symbols, 'policy': '來源修訂另存；首次日線保留，未自動覆寫'}
 
 
-def upsert_bars(sym, market, rows, *, source=None):
+def upsert_bars(sym, market, rows, *, source=None, source_hash='', path=None, check=lambda: None):
+    if source in ('TWSE', 'TPEX'):
+        try:
+            from .daily_quality import store_official
+        except ImportError:
+            from daily_quality import store_official
+        with _db_write_lock, closing(get_conn(path)) as conn, conn:
+            check()
+            result = store_official(conn, sym, market, rows, source, source_hash, check=check)
+            check()
+            return result
+    if path is not None:
+        raise ValueError('一般來源更新使用既有資料庫契約，不允許改寫全域路徑')
     if source:
         result = merge_source_bars(sym, market, rows, source)
         return result['inserted'] + result['unchanged']
     with _db_write_lock:
         with closing(get_conn()) as conn:
             with conn:
+                if _table_exists(conn, 'bar_quality'):
+                    from stock_signals import bar_date
+                    protected = {r[0] for r in conn.execute("SELECT session_date FROM bar_quality WHERE market=? AND symbol=?", (market, sym))}
+                    rows = [r for r in rows if bar_date(r[0], market) not in protected]
                 conn.executemany(
                     'INSERT OR REPLACE INTO bars(symbol,market,ts,open,high,low,close,volume) VALUES(?,?,?,?,?,?,?,?)',
                     [(sym, market, t, o, h, l, cl, v) for (t, o, h, l, cl, v) in rows])

@@ -52,6 +52,7 @@ def eligible_bar(symbol, day):
 
 def continuous_segments(symbol, bars, sessions):
     """以基準交易日切段；缺日、停牌、終止後價格都不能壓縮成相鄰 K 棒。"""
+    from stock_signals import complete_bar
     positions = {day: i for i, day in enumerate(sessions)}
     part, result = [], []
     for bar in bars:
@@ -59,7 +60,7 @@ def continuous_segments(symbol, bars, sessions):
         # 來源可能在全市場休市日留存平價零量列；略過該列，不中斷真實交易日。
         if session(day)['status'] == 'closed':
             continue
-        valid = day in positions and eligible_bar(symbol, day)
+        valid = day in positions and eligible_bar(symbol, day) and complete_bar(bar)
         adjacent = not part or positions.get(day) == positions[part[-1]['date']] + 1
         if part and adjacent:
             between = date.fromisoformat(part[-1]['date']) + timedelta(days=1)

@@ -55,9 +55,11 @@ class NormalizeTests(unittest.TestCase):
         rows = [(ts + 86400, 10, 11, 9, 10.5, 500), (partial, 10, 10.2, 9.9, 10.1, 300),
                 (ts, 10, 10.4, 9.8, 10.2, 900), (ts - 86400, 9, 9, 9, None, 1)]
         bars = ss.normalize_bars(rows, 'TW')
-        self.assertEqual([b['date'] for b in bars], ['2026-09-24', '2026-09-25'])
-        self.assertEqual(bars[0]['volume'], 900)   # 完整日 K 勝過盤中快照
-        self.assertEqual(bars[0]['close'], 10.2)
+        self.assertEqual([b['date'] for b in bars], ['2026-09-23', '2026-09-24', '2026-09-25'])
+        self.assertIsNone(bars[0]['close'])  # 缺值日期保留為切段邊界
+        self.assertTrue(bars[0]['qualityIssues'])
+        self.assertEqual(bars[1]['volume'], 900)   # 完整日 K 勝過盤中快照
+        self.assertEqual(bars[1]['close'], 10.2)
 
     def test_bar_date_uses_exchange_timezone(self):
         ts = int(datetime(2026, 9, 25, 1, 0, tzinfo=timezone.utc).timestamp())

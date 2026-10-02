@@ -69,6 +69,9 @@ def _split_events(snapshot):
 
 
 def _basis_match(bar, row, events):
+    close = bar.get('close')
+    if not isinstance(close, (int, float)) or not math.isfinite(close) or close <= 0:
+        return None, []
     if math.isclose(row['rawClose'], bar['close'], rel_tol=.0001, abs_tol=.005):
         return 1.0, []
     ratio, used = 1.0, []
@@ -92,7 +95,7 @@ def adjusted_bars(bars, snapshot):
     out = []
     for b in bars:
         r = values.get(b['date'])
-        if not r or _basis_match(b, r, events)[0] is None:
+        if not ss.complete_bar(b) or not r or _basis_match(b, r, events)[0] is None:
             return None
         # 本機舊日線可能尚未納入較新的分割；先驗證事件與原價，再直接轉到同一還原基準。
         factor = r['adjClose'] / b['close']
@@ -116,7 +119,7 @@ def adjusted_segments(bars, snapshot, sessions, market='TW'):
         if market == 'TW' and session(bar['date'])['status'] == 'closed':
             continue
         row = values.get(bar['date'])
-        if row and _basis_match(bar, row, events)[0] is not None:
+        if ss.complete_bar(bar) and row and _basis_match(bar, row, events)[0] is not None:
             compatible.append(bar)
         else:
             if compatible:
@@ -147,7 +150,7 @@ def alignment_issues(bars, snapshot):
     missing, mismatches, conversions = [], [], {}
     for bar in bars:
         row = values.get(bar['date'])
-        if not row:
+        if not row or not ss.complete_bar(bar):
             missing.append(bar['date'])
         else:
             ratio, used = _basis_match(bar, row, events)
