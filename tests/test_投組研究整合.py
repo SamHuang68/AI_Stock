@@ -90,7 +90,8 @@ class RealLoaderIntegrationTests(unittest.TestCase):
         self.assertEqual(report['range']['end'], DAYS[-1])
         result = report['rules'][0]['scenarios']['baseNet']
         self.assertIsNone(result['totalReturnPct'])
-        self.assertIsNone(result['dailyExcessSharpe'])
+        self.assertIsNone(result['dailySharpe'])
+        self.assertIsNone(result['informationRatio'])
         self.assertTrue(any('ETF' in issue['reason'] or '公司行動' in issue['reason'] for issue in result['decisionIssues']))
         self.assertEqual(self.path.read_bytes(), before)
         json.dumps(report, ensure_ascii=False, allow_nan=False)

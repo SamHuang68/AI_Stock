@@ -19,14 +19,15 @@ p = importlib.import_module('突破組合研究')
 DAYS = ['2026-03-02', '2026-03-03', '2026-03-04', '2026-03-05', '2026-03-06']
 
 
-def dataset(closes, opens=None, symbol='2330'):
+def dataset(closes, opens=None, symbol='2330', days=None):
     opens = opens or closes
+    days = days or DAYS
     rows = [{'date': day, 'open': op, 'high': max(op, close) + 1,
              'low': min(op, close) - 1, 'close': close, 'volume': 1000,
              'source': 'TWSE', 'priceBasis': 'unadjusted', 'issues': []}
-            for day, op, close in zip(DAYS, opens, closes)]
+            for day, op, close in zip(days, opens, closes)]
     return {'rows': rows, 'calendar_years': [2026], 'action_days': [],
-            'action_coverage': [DAYS[0], DAYS[-1], 'TWSE'],
+            'action_coverage': [days[0], days[-1], 'TWSE'],
             'action_coverage_kind': 'etf' if symbol == '0050' else 'stock'}
 
 
@@ -224,24 +225,109 @@ class FormulaAndQualityTests(unittest.TestCase):
         # 接著 -1：九期 CMO 的絕對值為 1/3，遞迴後為 13516/1323。
         self.assertAlmostEqual(p.vidya_value([10] * 20 + [12, 11]), 13516 / 1323)
 
-    def test_daily_benchmark_sharpe_uses_aligned_daily_returns(self):
-        result = p.daily_excess_sharpe([{'date': d, 'dailyReturn': r} for d, r in zip(DAYS, [0, .02, -.01])],
-                                      [{'date': d, 'dailyReturn': r} for d, r in zip(DAYS, [0, .01, -.01])])
+    def test_information_ratio_uses_aligned_daily_returns(self):
+        result = p.daily_information_ratio([{'date': d, 'dailyReturn': r} for d, r in zip(DAYS, [None, 0, .02, -.01])],
+                                      [{'date': d, 'dailyReturn': r} for d, r in zip(DAYS, [None, 0, .01, -.01])])
         # 超額日報酬 [0,.01,0]，平均 .01/3，樣本變異 .0001/3。
         self.assertAlmostEqual(result['value'], (.01 / 3) / math.sqrt(.0001 / 3) * math.sqrt(252))
         self.assertEqual(result['n'], 3)
-        zero = p.daily_excess_sharpe([{'date': d, 'dailyReturn': 0} for d in DAYS],
+        zero = p.daily_information_ratio([{'date': d, 'dailyReturn': 0} for d in DAYS],
                                     [{'date': d, 'dailyReturn': 0} for d in DAYS])
         self.assertIsNone(zero['value'])
 
-    def test_daily_excess_sharpe_negative_and_positive_independent_oracle(self):
-        curve = [{'date': d, 'dailyReturn': r} for d, r in zip(DAYS, [-.01, 0, .03])]
-        benchmark = [{'date': d, 'dailyReturn': r} for d, r in zip(DAYS, [0, 0, .01])]
+    def test_information_ratio_negative_and_positive_independent_oracle(self):
+        curve = [{'date': d, 'dailyReturn': r} for d, r in zip(DAYS, [None, -.01, 0, .03])]
+        benchmark = [{'date': d, 'dailyReturn': r} for d, r in zip(DAYS, [None, 0, 0, .01])]
         # 超額 [-.01,0,.02] 的樣本變異為 7/30000，年化比率=2×sqrt(3)。
-        result = p.daily_excess_sharpe(curve, benchmark)
+        result = p.daily_information_ratio(curve, benchmark)
         self.assertAlmostEqual(result['value'], 2 * math.sqrt(3))
         curve[1]['dailyReturn'] = float('nan')
-        self.assertIsNone(p.daily_excess_sharpe(curve, benchmark)['value'])
+        self.assertIsNone(p.daily_information_ratio(curve, benchmark)['value'])
+
+    def test_risk_free_sharpe_uses_compounded_daily_rate_and_sample_deviation(self):
+        curve = [{'date': d, 'dailyReturn': r} for d, r in zip(DAYS, [None, 0, .02, .04])]
+        # 年率 .04060401、每年四期，單期利率恰為 .01。
+        # 超額 [-.01,.01,.03] 平均 .01、樣本標準差 .02，年化夏普為 1。
+        result = p.daily_sharpe(curve, annual_risk_free_rate=.04060401, periods_per_year=4)
+        self.assertAlmostEqual(result['dailyRiskFreeRate'], .01)
+        self.assertAlmostEqual(result['meanDailyExcessReturn'], .01)
+        self.assertAlmostEqual(result['sampleStandardDeviation'], .02)
+        self.assertAlmostEqual(result['value'], 1)
+        self.assertEqual(result['n'], 3)
+        self.assertEqual(result['periodsPerYear'], 4)
+        self.assertEqual(result['baselineDate'], DAYS[0])
+        self.assertIsNone(result['reason'])
+
+    def test_default_sharpe_is_distinct_from_0050_information_ratio(self):
+        curve = [{'date': d, 'dailyReturn': r} for d, r in zip(DAYS, [None, -.01, 0, .03])]
+        benchmark = [{'date': d, 'dailyReturn': r} for d, r in zip(DAYS, [None, 0, 0, .01])]
+        # 投組平均 1/150、樣本變異 13/30000；零利率夏普=sqrt(336/13)。
+        self.assertAlmostEqual(p.daily_sharpe(curve)['value'], math.sqrt(336 / 13))
+        self.assertAlmostEqual(p.daily_information_ratio(curve, benchmark)['value'], 2 * math.sqrt(3))
+
+    def test_full_cash_curve_matches_backtest_daily_sample_fixture(self):
+        # 與既有 backtest_v3.runLS 實際交叉驗算同一組四根日線。
+        # 第一根只作基準，其後每日報酬 [0,.02,.04]，不是四個樣本。
+        result = run_case([100, 100, 102, 106.08], [100, 100, 100, 100], cost=0,
+                          config={'annualRiskFreeRate': .04060401, 'periodsPerYear': 4})
+        self.assertEqual(len(result['curve']), 4)
+        self.assertEqual(result['sharpeEvidence']['n'], 3)
+        self.assertAlmostEqual(result['dailySharpe'], 1)
+        self.assertEqual(result['sharpeEvidence']['baselineDate'], DAYS[0])
+
+    def test_risk_free_sharpe_no_trade_constant_missing_and_short_samples_are_null(self):
+        for returns, had_entry, code in [([0, 0, 0], False, 'no_trades'),
+                                         ([.01, .01, .01], True, 'zero_variance'),
+                                         ([0, None, .01], True, 'missing_daily_return'),
+                                         ([.01], True, 'insufficient_samples')]:
+            with self.subTest(code=code):
+                curve = [{'date': d, 'dailyReturn': r} for d, r in zip(DAYS, [None] + returns)]
+                result = p.daily_sharpe(curve, annual_risk_free_rate=.05, had_entry=had_entry)
+                self.assertIsNone(result['value'])
+                self.assertEqual(result['reasonCode'], code)
+        no_trade = run_case([100, 100, 100], signals=[False, False, False], cost=0,
+                            config={'annualRiskFreeRate': .05})
+        self.assertIsNone(no_trade['dailySharpe'])
+        self.assertEqual(no_trade['sharpeEvidence']['reasonCode'], 'no_trades')
+
+    def test_sharpe_of_open_position_does_not_require_closed_trade_or_0050(self):
+        days = DAYS + ['2026-03-09']
+        data = dataset([10, 10, 10, 12, 13, 13], [10, 10, 10, 12, 12, 13], days=days)
+        report = p.build_portfolio({'2330': data}, days, sample_start=3,
+                                   config={'vidyaLength': 2, 'cmoLength': 1, 'warmupBars': 3})
+        result = report['rules'][0]['scenarios']['gross']
+        # 首根收盤僅基準；其後兩日報酬 [r,0]，夏普=sqrt(126)。
+        self.assertAlmostEqual(result['dailySharpe'], math.sqrt(126))
+        self.assertEqual(result['sharpeEvidence']['n'], 2)
+        self.assertEqual(result['closedTrades'], 0)
+        self.assertEqual(result['tradeStatus'], 'open_only')
+        self.assertIsNone(result['informationRatio'])
+        self.assertIn('0050', result['benchmarkEvidence']['reason'])
+        self.assertNotIn('dailyExcessSharpe', result)
+
+    def test_unknown_price_gap_cannot_produce_sharpe_from_partial_days(self):
+        data = dataset([100, 100, 100, 101])
+        data['rows'][2]['close'] = None
+        result = p.simulate_portfolio({'2330': data}, DAYS[:4], {'2330': observations([100, 100, 100, 101])},
+                                     side_cost=0, config={'initialCapital': 1000, 'allocationFraction': 1})
+        self.assertIsNone(result['dailySharpe'])
+        self.assertEqual(result['sharpeEvidence']['reasonCode'], 'missing_daily_return')
+        self.assertEqual(result['sharpeEvidence']['n'], 0)
+
+    def test_report_keeps_risk_free_sharpe_and_benchmark_ratio_separate(self):
+        days = DAYS + ['2026-03-09']
+        data = {symbol: dataset([10, 10, 10, 12, 13, 13], [10, 10, 10, 12, 12, 13], symbol=symbol, days=days)
+                for symbol in ('2330', '0050')}
+        report = p.build_portfolio(data, days, sample_start=3,
+                                   config={'vidyaLength': 2, 'cmoLength': 1, 'warmupBars': 3})
+        result = report['rules'][0]['scenarios']['gross']
+        # 兩檔各買 41666 股，共 83332 股；基準單買 83333 股。
+        # 首根收盤僅基準；投組兩日報酬 [.083332,0]，相對差 [-.000001,0]。
+        self.assertAlmostEqual(result['dailySharpe'], math.sqrt(126))
+        self.assertAlmostEqual(result['informationRatio'], -math.sqrt(126))
+        self.assertEqual(result['sharpeEvidence']['annualRiskFreeRate'], 0)
+        self.assertEqual(result['benchmarkEvidence']['benchmarkSymbol'], '0050')
+        self.assertEqual(result['benchmarkEvidence']['n'], 2)
 
     def test_etf_source_date_suspension_and_basis_do_not_default_valid(self):
         for field, value, text in [('priceBasis', None, '原始'), ('sourceDate', '2026-03-01', '來源日期'),
@@ -255,7 +341,10 @@ class FormulaAndQualityTests(unittest.TestCase):
 
     def test_bounded_configuration_and_duplicates(self):
         for config in ({'maxPositions': 21}, {'warmupBars': 9999}, {'initialCapital': float('nan')},
-                       {'lotSize': True}, {'surprise': 1}):
+                       {'lotSize': True}, {'surprise': 1}, {'annualRiskFreeRate': -.01},
+                       {'annualRiskFreeRate': 1.01}, {'annualRiskFreeRate': float('nan')},
+                       {'annualRiskFreeRate': True}, {'periodsPerYear': 0},
+                       {'periodsPerYear': 367}, {'periodsPerYear': 2.5}):
             with self.assertRaises(ValueError):
                 p._config(config)
         data = dataset([100])

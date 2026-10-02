@@ -11,12 +11,13 @@ from contextlib import closing
 from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 
-VERSION = 'breakout-capital-vidya-engineering-v2'
+VERSION = 'breakout-capital-vidya-engineering-v3'
 SYMBOLS = ('0050', '2330')
 SCENARIOS = {'gross': 0.0, 'baseNet': 0.0025, 'stressNet': 0.005}
 DEFAULTS = {'initialCapital': 1000000.0, 'maxPositions': 2, 'allocationFraction': 0.5,
             'lotSize': 1, 'stopLossPct': 8.0, 'vidyaLength': 20, 'cmoLength': 9,
-            'warmupBars': 60, 'capitalBasis': 'initial', 'testStart': '2024-01-01'}
+            'warmupBars': 60, 'capitalBasis': 'initial', 'testStart': '2024-01-01',
+            'annualRiskFreeRate': 0.0, 'periodsPerYear': 252}
 TZ = timezone(timedelta(hours=8))
 
 
@@ -33,6 +34,16 @@ def _day(value):
     if not isinstance(value, str) or date.fromisoformat(value).isoformat() != value:
         raise ValueError('日期須為 YYYY-MM-DD')
     return value
+
+
+def _risk_settings(annual_risk_free_rate, periods_per_year):
+    if (isinstance(annual_risk_free_rate, bool) or not isinstance(annual_risk_free_rate, (int, float))
+            or not math.isfinite(annual_risk_free_rate) or not 0 <= annual_risk_free_rate <= 1):
+        raise ValueError('無風險年利率須為零至一的小數值')
+    if isinstance(periods_per_year, bool) or not isinstance(periods_per_year, int) or not 1 <= periods_per_year <= 366:
+        raise ValueError('年化日數須為一至三百六十六的整數')
+    return {'annualRiskFreeRate': annual_risk_free_rate, 'periodsPerYear': periods_per_year,
+            'dailyRiskFreeRate': (1 + annual_risk_free_rate) ** (1 / periods_per_year) - 1}
 
 
 def _config(config=None):
@@ -60,6 +71,7 @@ def _config(config=None):
         raise ValueError('配置基準須為初始本金或前一日收盤權益')
     if result['testStart'] is not None:
         _day(result['testStart'])
+    _risk_settings(result['annualRiskFreeRate'], result['periodsPerYear'])
     return result
 
 
@@ -308,8 +320,13 @@ def simulate_portfolio(datasets, market_dates, observations, *, sample_start=0, 
     pending_rows = [{'symbol': s, 'signalDate': d, 'kind': 'entry', 'reason': '缺下一根市場交易日資料，未成交'} for s, d in sorted(pending.items())]
     pending_rows += [{'symbol': s, 'signalDate': p['exitSignalDate'], 'kind': 'exit', 'reason': '缺下一根有效開盤，尚未平倉'}
                      for s, p in sorted(positions.items()) if p.get('exitSignalDate')]
+    sharpe = daily_sharpe(curve, annual_risk_free_rate=settings['annualRiskFreeRate'],
+                         periods_per_year=settings['periodsPerYear'], had_entry=bool(trades or positions))
+    if status != 'complete' and sharpe['reasonCode'] not in ('missing_daily_return', 'insufficient_samples'):
+        sharpe.update(value=None, reason='投組成交或決策證據未完整核對', reasonCode='incomplete_portfolio')
     return {'status': status, 'costRatePerSide': side_cost, 'eligibleAssetDays': eligible_days,
             'initialCapital': initial, 'finalEquity': final,
+            'dailySharpe': sharpe['value'], 'sharpeEvidence': sharpe,
             'totalReturnPct': (final / initial - 1) * 100 if final is not None and status == 'complete' else None,
             'maxDrawdownPct': drawdown if status == 'complete' else None,
             'observedDrawdownPct': drawdown, 'closedTrades': len(trades),
@@ -324,11 +341,35 @@ def simulate_portfolio(datasets, market_dates, observations, *, sample_start=0, 
             'rejected': rejected, 'decisionIssues': decision_issues, 'curve': curve}
 
 
-def daily_excess_sharpe(curve, benchmark_curve):
-    """以同日投組報酬減基準報酬、樣本標準差及 sqrt(252) 計算。"""
+def daily_sharpe(curve, *, annual_risk_free_rate=0.0, periods_per_year=252, had_entry=True):
+    """與 backtest_v3 一致：日簡單報酬減複利換算日無風險率，採樣本標準差。"""
+    settings = _risk_settings(annual_risk_free_rate, periods_per_year)
+    evidence = {**settings, 'basis': 'daily_simple_excess_return_sample_standard_deviation',
+                'baselineDate': curve[0]['date'] if curve else None,
+                'returnWindow': 'close_to_close_after_first_close',
+                'value': None, 'n': 0, 'reason': None, 'reasonCode': None}
+    # 與 backtest_v3 observed>1 一致：首根收盤只作基準，不另加初始本金的零報酬。
+    returns = [row.get('dailyReturn') for row in curve[1:]]
+    if any(not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) for value in returns):
+        return {**evidence, 'reason': '每日投組報酬未知，不跨缺日接續', 'reasonCode': 'missing_daily_return'}
+    evidence['n'] = len(returns)
+    if len(returns) < 2:
+        return {**evidence, 'reason': '不足兩個每日報酬樣本', 'reasonCode': 'insufficient_samples'}
+    excess = [value - settings['dailyRiskFreeRate'] for value in returns]
+    mean, deviation = statistics.mean(excess), statistics.stdev(excess)
+    evidence.update(meanDailyExcessReturn=mean, sampleStandardDeviation=deviation)
+    if deviation == 0:
+        return {**evidence, 'reason': '每日報酬沒有波動' if had_entry else '沒有實際成交，權益沒有波動',
+                'reasonCode': 'zero_variance' if had_entry else 'no_trades'}
+    return {**evidence, 'value': mean / deviation * math.sqrt(periods_per_year)}
+
+
+def daily_information_ratio(curve, benchmark_curve, *, periods_per_year=252):
+    """同日投組減基準報酬的年化資訊比率，不作無風險 Sharpe 使用。"""
+    _risk_settings(0, periods_per_year)
     if len(curve) != len(benchmark_curve) or any(a['date'] != b['date'] for a, b in zip(curve, benchmark_curve)):
         return {'value': None, 'n': 0, 'reason': '投組與基準日期不一致'}
-    pairs = [(a.get('dailyReturn'), b.get('dailyReturn')) for a, b in zip(curve, benchmark_curve)]
+    pairs = [(a.get('dailyReturn'), b.get('dailyReturn')) for a, b in zip(curve[1:], benchmark_curve[1:])]
     if any(not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value)
            for pair in pairs for value in pair):
         return {'value': None, 'n': 0, 'reason': '每日投組或基準報酬未知，不跨缺日接續'}
@@ -338,7 +379,7 @@ def daily_excess_sharpe(curve, benchmark_curve):
     deviation = statistics.stdev(values)
     if deviation == 0:
         return {'value': None, 'n': len(values), 'reason': '超額日報酬變異為零'}
-    return {'value': statistics.mean(values) / deviation * math.sqrt(252), 'n': len(values), 'reason': None}
+    return {'value': statistics.mean(values) / deviation * math.sqrt(periods_per_year), 'n': len(values), 'reason': None}
 
 
 def _report(datasets, dates, observations, start, settings):
@@ -350,8 +391,12 @@ def _report(datasets, dates, observations, start, settings):
         if bench is not None:
             reference[name] = bench
         aligned = bench is not None and bench['status'] == result['status'] == 'complete'
-        sharpe = daily_excess_sharpe(result['curve'], bench['curve']) if aligned else {'value': None, 'n': 0, 'reason': '投組或 0050 基準資料未完整核對'}
-        result.update(dailyExcessSharpe=sharpe['value'], sharpeEvidence=sharpe,
+        relative = daily_information_ratio(result['curve'], bench['curve'], periods_per_year=settings['periodsPerYear']) if aligned else {'value': None, 'n': 0, 'reason': '投組或 0050 基準資料未完整核對'}
+        relative.update(benchmarkSymbol='0050', periodsPerYear=settings['periodsPerYear'],
+                        baselineDate=result['curve'][0]['date'] if result['curve'] else None,
+                        returnWindow='close_to_close_after_first_close',
+                        basis='daily_benchmark_excess_return_sample_standard_deviation')
+        result.update(informationRatio=relative['value'], benchmarkEvidence=relative,
                       excessReturnPctPoints=result['totalReturnPct'] - bench['totalReturnPct'] if aligned else None)
         scenarios[name] = result
     return {'rules': [{'key': 'vidya_cross', 'label': '收盤穿越 VIDYA，次日開盤成交', 'scenarios': scenarios}],
@@ -399,7 +444,9 @@ def build_portfolio(datasets, market_dates, *, sample_start=0, as_of=None, confi
                       '每邊費用與滑價合計為 0／25／50 基點；現金流依原價乘 (1±成本) 計算，沒有稅制、最低費用或委託簿成交保證。',
                       '每日以原始收盤價估值；期末未平倉不假設賣出，沒有扣尚未發生的出場成本。',
                       '公司行動跨持有期的股數與現金權利未知，後續權益維持未知；ETF 的官方股票除權息涵蓋不等於 ETF 涵蓋。',
-                      '每日基準 Sharpe 為每日投組減 0050 報酬的平均／樣本標準差×sqrt(252)，數學上屬資訊比率，非無風險利率 Sharpe。',
+                      '每日夏普以日簡單報酬減複利換算的日無風險率，除以樣本標準差後年化；預設無風險年率為零、每年 252 日。',
+                      '每日夏普與資訊比率均以第一根收盤作基準，只從第二根收盤起形成日報酬樣本，不加入初始本金至首根收盤的零報酬。',
+                      '相對 0050 資訊比率另列 informationRatio，以同日報酬差的平均／樣本標準差年化，與無風險夏普分開。',
                       '固定切分日預設 2024-01-01；訓練區與測試區各從相同本金開始，測試暖機只用過去價格，沒有選參或最佳化。',
                       '快取與品質證據可能事後補齊，並非各歷史時點當下取得的資料快照。']}
 
