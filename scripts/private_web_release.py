@@ -14,6 +14,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import runpy
 import shutil
 import stat
 import subprocess
@@ -28,8 +29,13 @@ from typing import Iterator
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "server"))
-from daemon_lock import acquire_daemon_lock, release_daemon_lock
+# 直接執行 sealed stage 的 CLI 不可因匯入自己而新增未受測的快取。
+# -B 只禁止寫入，仍會讀取既有 pyc；bootstrap 明確從原始碼載入鎖 helper。
+if __name__ == "__main__":
+    sys.dont_write_bytecode = True
+_lock_helpers = runpy.run_path(str(ROOT / "server" / "daemon_lock.py"))
+acquire_daemon_lock = _lock_helpers["acquire_daemon_lock"]
+release_daemon_lock = _lock_helpers["release_daemon_lock"]
 
 PRESERVE_NAMES = {"data", "logs"}
 REQUIRED_RELEASE_FILES = {
@@ -153,6 +159,12 @@ def _validate_integrity(root: Path, manifest: dict) -> None:
     expected = manifest.get("contentSha256")
     if not isinstance(expected, dict) or not expected:
         raise RuntimeError("暫存版本缺少受測內容雜湊，請重新暫存版本")
+    bytecode = [path.relative_to(root).as_posix()
+                for path in _tree_entries(root, skip_runtime=False)
+                if path.name.casefold() == "__pycache__" or path.suffix.lower() in {".pyc", ".pyo"}]
+    if bytecode:
+        raise RuntimeError("暫存版本內容與受測版本不符：不得包含 Python 位元組快取："
+                           + ", ".join(bytecode[:8]))
     actual = _content_hashes(root)
     if actual != expected:
         changed = sorted(key for key in actual.keys() | expected.keys()
@@ -431,7 +443,7 @@ def _strip_private_release_extras(path: Path) -> None:
 
 def _remove_bytecode(tree: Path) -> None:
     for path in sorted(tree.rglob("*"), reverse=True):
-        if path.suffix in {".pyc", ".pyo"} or path.name == "__pycache__":
+        if path.suffix.lower() in {".pyc", ".pyo"} or path.name.casefold() == "__pycache__":
             _remove_managed(path, tree)
 
 

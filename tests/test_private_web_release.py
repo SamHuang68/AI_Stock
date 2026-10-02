@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import py_compile
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -53,6 +56,91 @@ class PrivateWebReleaseTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def prepare_cli_stage(self):
+        staged = _fake_release(self.install_root, 'abc123')
+        for relative in ('scripts/private_web_release.py', 'server/daemon_lock.py'):
+            shutil.copy2(ROOT / relative, staged / relative)
+        manifest = release._read_manifest(staged / release.MANIFEST_NAME)
+        manifest['contentSha256'] = release._content_hashes(staged)
+        _write(staged / release.MANIFEST_NAME, json.dumps(manifest))
+        return staged, manifest
+
+    def run_stage_cli(self, staged, action='promote'):
+        # 子程序刻意不帶 -B，亦不依賴呼叫者已設定的環境保護。
+        env = dict(os.environ, PYTHONIOENCODING='utf-8')
+        env.pop('PYTHONDONTWRITEBYTECODE', None)
+        env.pop('PYTHONPYCACHEPREFIX', None)
+        command = [
+            sys.executable, str(staged / 'scripts/private_web_release.py'),
+            '--install-root', str(self.install_root), action, '--approve',
+        ]
+        if action == 'promote':
+            command.extend(['--release', 'abc123'])
+        return subprocess.run(command, cwd=self.install_root, env=env, capture_output=True,
+                              text=True, encoding='utf-8', timeout=30)
+
+    def test_直接執行封存stage的CLI不新增快取且可發布(self):
+        staged, manifest = self.prepare_cli_stage()
+        current = self.install_root / 'current'
+        old_source = current / 'server/old_module.py'
+        _write(old_source, 'VALUE = 1\n')
+        _write(current / 'data/personal.db', '必須保留的原始資料')
+        _write(current / 'data/user-cache.pyc', '資料目錄內的本機檔案也必須保留')
+        _write(current / 'logs/audit.log', '原始紀錄')
+        _write(current / release.MANIFEST_NAME, json.dumps({
+            'releaseId': 'bbbbbbbbbbbb', 'commit': 'b' * 40, 'tests': 'passed',
+            'managedTopLevel': ['server'], 'contentSha256': release._content_hashes(current),
+        }))
+        py_compile.compile(str(old_source), doraise=True)
+        before = release._content_hashes(staged, include_runtime=True, include_manifest=True)
+        result = self.run_stage_cli(staged)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(before, release._content_hashes(staged, include_runtime=True, include_manifest=True))
+        release._validate_integrity(staged, manifest)
+        self.assertFalse(any(path.name == '__pycache__' for path in staged.rglob('*')))
+        self.assertFalse((current / 'server/__pycache__').exists())
+        self.assertEqual((current / 'data/public_seed.csv').read_text(), 'seed')
+        self.assertEqual((current / 'data/personal.db').read_text(encoding='utf-8'), '必須保留的原始資料')
+        result = self.run_stage_cli(staged, 'rollback')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(old_source.read_text(), 'VALUE = 1\n')
+        self.assertFalse(any(path.suffix in {'.pyc', '.pyo'} for path in (current / 'server').rglob('*')))
+        self.assertEqual((current / 'data/personal.db').read_text(encoding='utf-8'), '必須保留的原始資料')
+        self.assertEqual((current / 'data/user-cache.pyc').read_text(encoding='utf-8'), '資料目錄內的本機檔案也必須保留')
+        self.assertEqual((current / 'logs/audit.log').read_text(encoding='utf-8'), '原始紀錄')
+
+    def test_既有daemon快取不得在完整性拒絕前執行(self):
+        staged, _ = self.prepare_cli_stage()
+        source = staged / 'server/daemon_lock.py'
+        original = source.read_bytes()
+        old_stat = source.stat()
+        marker = self.install_root / '不應執行的快取.txt'
+        malicious = ('from pathlib import Path\nPath(' + repr(str(marker)) + ").write_text('未受測快取')\n").encode('utf-8')
+        self.assertLess(len(malicious), len(original))
+        source.write_bytes(malicious + b'#' * (len(original) - len(malicious)))
+        os.utime(source, ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns))
+        py_compile.compile(str(source), doraise=True, invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP)
+        source.write_bytes(original)
+        os.utime(source, ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns))
+        result = self.run_stage_cli(staged)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('不得包含 Python 位元組快取', result.stderr)
+        self.assertFalse(marker.exists())
+        self.assertFalse((self.install_root / 'current').exists())
+
+    def test_列入manifest也不允許發布位元組快取(self):
+        staged, manifest = self.prepare_cli_stage()
+        for relative in ('server/extra.pyc', 'server/extra.pyo', 'server/extra.PYC', 'server/__pycache__/extra.pyc'):
+            with self.subTest(relative=relative):
+                path = staged / relative
+                _write(path, '禁止作為程式封存內容')
+                manifest['contentSha256'] = release._content_hashes(staged)
+                with self.assertRaisesRegex(RuntimeError, '不得包含 Python 位元組快取'):
+                    release._validate_integrity(staged, manifest)
+                path.unlink()
+                if path.parent.name == '__pycache__':
+                    path.parent.rmdir()
 
     def test_new_stop_requires_companions_without_blocking_legacy_rollback(self):
         target = _fake_release(self.install_root, 'abc123')
@@ -164,6 +252,9 @@ class PrivateWebReleaseTests(unittest.TestCase):
             else:
                 for relative in extras:
                     self.assertTrue((cwd / relative).is_file())
+                if 'build_v2.py' in argv:
+                    _write(cwd / 'server/__pycache__/daemon_lock.cpython-312.pyc', '組建產生的快取')
+                    _write(cwd / 'server/legacy.pyo', '組建產生的舊快取')
                 if 'unittest' in argv:
                     _write(cwd / 'stock_terminal_v2.html', '清理測試改寫')
                     _write(cwd / 'src/測試殘留.js', '不得出貨')
@@ -181,6 +272,8 @@ class PrivateWebReleaseTests(unittest.TestCase):
         for relative in extras:
             self.assertFalse((staged / relative).exists())
         self.assertFalse((staged / 'src/測試殘留.js').exists())
+        self.assertFalse(any(path.name == '__pycache__' or path.suffix.lower() in {'.pyc', '.pyo'}
+                             for path in staged.rglob('*')))
         release._validate_integrity(staged, release._read_manifest(staged / release.MANIFEST_NAME))
 
     def test_release_requires_archify_manifest_documents_and_validator(self):
