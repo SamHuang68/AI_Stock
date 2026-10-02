@@ -26,6 +26,8 @@ def breakout_options(values):
     if set(values) - {'sym', 'asOf', 'range', 'start', 'priceBasis'}:
         raise ValueError('突破研究含有未知參數')
     code = stock_code(values.get('sym', '2330'))
+    if values.get('sym', '2330') != code:
+        raise ValueError('突破研究請使用不含交易所尾碼的代號；交易所由已存來源核對')
     period = values.get('range', '3y')
     if period not in ('30d', '3m', '6m', '1y', '3y', '5y', '10y', 'all', 'custom'):
         raise ValueError('研究區間不合法')
@@ -61,9 +63,10 @@ class ResearchIntegrationRoutesMixin:
                 if values['excludeIp'] not in ('true', 'false'):
                     raise ValueError('excludeIp 必須是 true 或 false')
                 values['excludeIp'] = values['excludeIp'] == 'true'
-            code = stock_code(unquote(urlsplit(self.path).path[len('/valuation-research/'):]))
+            identity = unquote(urlsplit(self.path).path[len('/valuation-research/'):])
+            code = stock_code(identity)
             saved = self._research_runtime()
-            self._research_json(get_research(code, database=self._research_database(),
+            self._research_json(get_research(identity, database=self._research_database(),
                 lookup=cached_lookup(saved['official']), settings=values,
                 name=saved['names'].get(code), chip_history_path=saved['chipHistory']))
         except (TypeError, ValueError) as exc:
@@ -85,7 +88,9 @@ class ResearchIntegrationRoutesMixin:
             if supplied is not None:
                 if not isinstance(supplied, list) or not supplied or len(supplied) > 4000:
                     raise ValueError('代號清單須為 1 至 4000 檔')
-                symbols = sorted({stock_code(code) for code in supplied})
+                for code in supplied:
+                    stock_code(code)
+                symbols = sorted(set(supplied))
                 source = '指定代號，僅查本機資料'
             else:
                 with datastore.read_snapshot(self._research_database()) as connection:
@@ -100,7 +105,7 @@ class ResearchIntegrationRoutesMixin:
                     self._err('尚無已存產業分類，請先更新既有資料', 503)
                     return
                 wanted = saved['technologySectors'] if sector == '__TECH__' else {sector}
-                symbols = [code for code in symbols if saved['sectors'].get(code) in wanted]
+                symbols = [code for code in symbols if saved['sectors'].get(stock_code(code)) in wanted]
             result = run_screen(body, symbols=symbols, database=self._research_database(),
                 lookup=cached_lookup(saved['official']), names=saved['names'],
                 settings=body['research'], universe_source=source,

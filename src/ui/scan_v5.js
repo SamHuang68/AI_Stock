@@ -391,7 +391,7 @@
         explain(trustCell, 'trustStreak') + explain(foreignCell, 'foreignStreak') +
         (researchRows ? RESEARCH_COLUMNS.map(function (column) {
           var value = sortValue(r, column.key);
-          if (column.key === 'research.dataStatus') value = { available: '齊備', partial: '缺資料', not_applicable: '不適用' }[value] || value;
+          if (column.key === 'research.dataStatus') value = { available: '可觀察', partial: '缺資料', not_applicable: '不適用' }[value] || value;
           return cell(value == null ? null : esc(value));
         }).join('') + '<td><button type="button" class="sc-btn sc-research-open" data-sym="' + esc(r.sym) + '">估值承接</button></td>' : '') +
         '<td><button type="button" class="sc-add" data-sym="' + esc(r.sym) + '">＋</button></td></tr>';
@@ -485,7 +485,9 @@
             (r.matched > 80 ? '（顯示前 80）' : '') +
             (body.research.enabled ? ' · 本機快取研究；缺資料不代填，不代表策略驗證' +
               (lastResearchMeta ? '<br>' + esc(lastResearchMeta.contractVersion || '') + ' · ' +
-                esc(lastResearchMeta.universeSource || '') + ' · PER 上限 ' + esc(lastResearchMeta.peMax) : '') : '');
+                esc(lastResearchMeta.universeSource || '') + ' · PER 上限 ' + esc(lastResearchMeta.peMax) +
+                (Array.isArray(lastResearchMeta.exclusions) && lastResearchMeta.exclusions.length ? '<br>未納入：' +
+                  lastResearchMeta.exclusions.map(function (item) { return esc(item.reason) + ' ' + esc(item.count) + ' 檔'; }).join('；') : '') : '') : '');
         }
         renderResults(lastResults);
       })

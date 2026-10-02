@@ -41,7 +41,7 @@ class ResearchBoundaryTests(unittest.TestCase):
                 routes.breakout_options(values)
 
     def test_query_keeps_exact_dates_and_tw_identity(self):
-        symbol, options = routes.breakout_options({'sym':'2330.TW','asOf':'2026-10-02',
+        symbol, options = routes.breakout_options({'sym':'2330','asOf':'2026-10-02',
                                                   'range':'custom','start':'2026-01-01'})
         self.assertEqual(symbol, '2330')
         self.assertEqual(options, {'as_of':'2026-10-02','period':'custom','start_date':'2026-01-01'})
@@ -65,7 +65,7 @@ class ResearchBoundaryTests(unittest.TestCase):
         with patch.object(估值趨勢,'run_screen',return_value={'results':[]}) as calculation:
             handler._handle_research_screen(payload)
         self.assertEqual(handler.status,200)
-        self.assertEqual(calculation.call_args.kwargs['symbols'],['2330','2454'])
+        self.assertEqual(calculation.call_args.kwargs['symbols'],['2330','2330.TW','2454'])
         self.assertIsNone(calculation.call_args.kwargs['lookup'](['missing'],'2330'))
         payload['sector'] = '半導體業'
         with patch.object(估值趨勢,'run_screen') as calculation:
@@ -83,6 +83,17 @@ class ResearchBoundaryTests(unittest.TestCase):
                 handler._handle_research_screen(payload)
             self.assertEqual(handler.status,400)
             calculation.assert_not_called()
+
+    def test_valuation_preserves_explicit_exchange_identity(self):
+        import 估值趨勢
+        handler = Handler('/valuation-research/2330.TWO?peMax=40&excludeIp=true')
+        with patch.object(估值趨勢, 'get_research', return_value={'row':{}}) as calculation:
+            handler._handle_valuation_research()
+        self.assertEqual(handler.status,200)
+        self.assertEqual(calculation.call_args.args, ('2330.TWO',))
+        self.assertEqual(calculation.call_args.kwargs['settings'], {'peMax':40.0,'excludeIp':True})
+        with self.assertRaises(ValueError):
+            routes.breakout_options({'sym':'2330.TWO'})
 
 
 if __name__ == '__main__':

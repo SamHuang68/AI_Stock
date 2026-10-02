@@ -42,6 +42,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: 觸控與前瞻等待狀態驗收
         run: npm run test:browser
+      - name: 研究工作台多尺寸與操作驗收
+        run: npm run test:research-browser
       - name: PowerShell launcher syntax
         if: runner.os == 'Windows'
         shell: pwsh
