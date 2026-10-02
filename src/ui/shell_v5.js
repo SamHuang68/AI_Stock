@@ -98,6 +98,9 @@
     'btn-portfolio': { label: '投組', icon: '▣' },
     'btn-screener3': { label: '三合一', icon: '🔬' },
     'btn-patterns': { label: '型態', icon: '〰' },
+    'btn-daily-cache': { label: '日線快取', icon: '▤' },
+    'btn-txf-minute': { label: '台指期分時', icon: '◷' },
+    'btn-kline-events': { label: 'K 線事件', icon: '●' },
     'btn-stratbuilder': { label: '策略', icon: '🧱' },
     'btn-wizard': { label: '精靈', icon: '🧙' },
     'btn-stratscript': { label: '腳本', icon: '📝' },
@@ -574,7 +577,7 @@
       ringFolder('screen', '選股', '▷', '篩選、策略、回測', [
         ringRoute('scan', '選股室', '▷', '三合一選股頁'),
         ringFolder('screen-tools', '策略庫', '🔬', '型態（含歷史命中率）／策略建構／精靈', [
-          ringClick('btn-patterns'),
+          ringClick('btn-patterns'), ringClick('btn-kline-events'), ringClick('btn-txf-minute'),
           ringClick('btn-stratbuilder'), ringClick('btn-wizard'),
           ringClick('btn-stratscript')
         ]),
@@ -598,7 +601,7 @@
         PRIVATE_WEB ? null : ringRoute('wavedeck', 'WaveDeck', '⚡', '開啟浪潮執行台'),
         ringFolder('sys', '系統', '⚙', '指令盤／資料／快捷（原側欄工具＋設定工具）', [
           ringClick('btn-cmdp'), /* workspace／工具 */
-          ringClick('btn-universe'), ringClick('btn-datasources'),
+          ringClick('btn-universe'), ringClick('btn-datasources'), ringClick('btn-daily-cache'),
           ringClick('btn-datahealth'), ringClick('btn-hotkeys'), ringClick('btn-alertpush'),
           ringClick('btn-toast'), ringClick('btn-live')
         ]),

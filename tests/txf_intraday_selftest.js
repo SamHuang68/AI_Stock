@@ -1,0 +1,11 @@
+'use strict';
+const fs=require('fs'),vm=require('vm'),assert=require('assert'),path=require('path');
+let network=0;
+const ctx={window:{},document:{getElementById:()=>null},setInterval:()=>1,clearInterval(){},fetch(){network++;throw Error('不得自動抓取');}};
+vm.createContext(ctx);vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/ui/txf_intraday_v3.js'),'utf8'),ctx);
+assert.equal(network,0);
+const rows=[{time:60,close:100,session:0},{time:120,close:101,session:0},{time:240,close:102,session:0},{time:300,close:103,session:1}];
+const chart=ctx.window.TxfIntradayUI.paths(rows);
+assert.equal(chart.groups.length,3);assert.equal(chart.groups[0].length,2);assert.equal(chart.lo,100);assert.equal(chart.hi,103);
+assert.equal(ctx.window.TxfIntradayUI.paths([{time:60,close:100,session:0}]).groups.length,1);
+console.log('台指期獨立分時：無自動連外、缺分鐘與跨盤別不連線，測試通過');

@@ -1,0 +1,139 @@
+{
+  "source": "https://tw.stock.yahoo.com/quote/WTX%26",
+  "verifiedDate": "2026-10-02",
+  "sourceHtmlSha256": "50ea8940b2d2894bd46d39a9d127a873bfcf2be8a45f741983aebebe8daf7de6",
+  "note": "已觀測來源的節錄；保留兩端分鐘與來源未來空列，不代表連續完整歷史",
+  "chart": {
+    "meta": {
+      "currency": "TWD",
+      "symbol": "WTX&",
+      "name": "台指期近一",
+      "exchangeName": null,
+      "exchange": "TFE",
+      "quoteType": "FUTURE_INDEX",
+      "instrumentType": null,
+      "firstTradeDate": null,
+      "regularMarketTime": 1791119880,
+      "gmtoffset": 28800,
+      "timezone": "CST",
+      "exchangeTimezoneName": "Asia/Taipei",
+      "regularMarketPrice": 49185,
+      "chartPreviousClose": 48669,
+      "previousClose": 48669,
+      "limitUpPrice": 53535,
+      "limitDownPrice": 43803,
+      "scale": 2,
+      "priceHint": 2,
+      "currentTradingPeriod": {
+        "pre": {
+          "timezone": "Asia/Taipei",
+          "start": 1791097200,
+          "end": 1791097200,
+          "gmtoffset": 28800
+        },
+        "regular": {
+          "timezone": "Asia/Taipei",
+          "start": 1791097200,
+          "end": 1791179100,
+          "gmtoffset": 28800
+        },
+        "post": {
+          "timezone": "Asia/Taipei",
+          "start": 1791179100,
+          "end": 1791179100,
+          "gmtoffset": 28800
+        }
+      },
+      "tradingPeriods": [
+        [
+          {
+            "timezone": "Asia/Taipei",
+            "start": 1791097200,
+            "end": 1791179100,
+            "gmtoffset": 28800
+          }
+        ]
+      ],
+      "preTradingPeriods": null,
+      "postTradingPeriods": null,
+      "dataGranularity": "1m",
+      "range": "1d",
+      "validRanges": [
+        "1d",
+        "5d",
+        "1mo",
+        "3mo",
+        "6mo",
+        "1y",
+        "2y",
+        "5y",
+        "10y",
+        "max"
+      ],
+      "sourceTradingPeriods": [
+        [
+          {
+            "timezone": "Asia/Taipei",
+            "start": 1791097200,
+            "end": 1791147600,
+            "gmtoffset": 28800
+          },
+          {
+            "timezone": "Asia/Taipei",
+            "start": 1791161100,
+            "end": 1791179100,
+            "gmtoffset": 28800
+          }
+        ]
+      ]
+    },
+    "timestamp": [
+      1791097260,
+      1791097320,
+      1791119820,
+      1791119880,
+      1791178980
+    ],
+    "indicators": {
+      "quote": [
+        {
+          "close": [
+            48690,
+            48712,
+            49184,
+            49185,
+            null
+          ],
+          "high": [
+            48704,
+            48721,
+            49196,
+            49191,
+            null
+          ],
+          "low": [
+            48671,
+            48686,
+            49184,
+            49185,
+            null
+          ],
+          "open": [
+            48671,
+            48689,
+            49184,
+            49191,
+            null
+          ],
+          "volume": [
+            142,
+            130,
+            17,
+            17,
+            null
+          ]
+        }
+      ]
+    }
+  }
+}

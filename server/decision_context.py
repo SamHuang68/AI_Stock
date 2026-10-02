@@ -1357,6 +1357,7 @@ def _fingerprint(pulse: dict) -> str:
 def _init_db(path: str = DB_PATH) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with closing(sqlite3.connect(path, timeout=10)) as conn:
+        conn.execute('PRAGMA journal_mode=WAL')
         with conn:
             conn.execute('CREATE TABLE IF NOT EXISTS decision_history('
                          'id INTEGER PRIMARY KEY AUTOINCREMENT, as_of TEXT, created_at INTEGER, market TEXT, '
@@ -1388,13 +1389,9 @@ def _write_trace(context: dict, input_hash: str, elapsed_ms: int, path: str = TR
         'staleFields': (context.get('dataQuality') or {}).get('staleFields') or [],
         'elapsedMs': elapsed_ms,
     }
-    with open(path, 'a', encoding='utf-8') as fh:
-        fh.write(json.dumps(row, ensure_ascii=False, separators=(',', ':')) + '\n')
-    if os.path.getsize(path) > 256 * 1024:
-        with open(path, 'r', encoding='utf-8') as fh:
-            tail = fh.readlines()[-500:]
-        with open(path, 'w', encoding='utf-8') as fh:
-            fh.writelines(tail)
+    from jsonl_trace import append_jsonl
+    append_jsonl(path, row, max_bytes=256 * 1024, tail_lines=500)
+
 
 
 def publish_context(

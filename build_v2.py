@@ -50,6 +50,7 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/core/wl_live_v3.js',
               'src/alert/alert_push_v3.js',               # v3.8 D: 後端警報推播設定 UI
               'src/screener/backtest_v3.js',                 # v3.8 C: 回測核心
+              'src/core/indicator_cache_v3.js',
               'src/ui/enhance_v3.js',                  # v3.8: 雙軸卡/量價面板/右側收合/分頁記憶
               'src/chart/aftermarket_v3.js',              # v3.8: 美股盤後/盤前延伸交易顯示
               'src/chart/overnight_v3.js',                # v3.8: 夜盤連動預警(美股期貨→台股隔日)
@@ -99,7 +100,10 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/ui/bridge_v5.js',                   # v5.0: 工具列→側欄橋接（須在 *Open 定義後、toolbar 前）
               'src/ui/visual_system_v5.js',            # v5.0: 全站 elevation / border / shadow 視覺契約
               'src/ui/chart_visual_v5.js',             # v5.0: 圖表工作站色票／層級／膠囊與數據卡契約
-              'src/ui/toolbar_v3.js',                  # v3.9: 工具列模組化(一階分類+二階下拉,設定驅動;須排最後,整理所有功能鈕)
+              'src/ui/daily_cache_v3.js',
+              'src/ui/txf_intraday_v3.js',
+              'src/ui/K線事件研究.js',
+    'src/ui/toolbar_v3.js',                  # v3.9: 工具列模組化(一階分類+二階下拉,設定驅動;須排最後,整理所有功能鈕)
               'src/chart/market_score_bar_v3.js',      # v4.1: 主圖大盤體質／市場風險資訊列（須在 market_chart 前）
               'src/chart/market_chart_v3.js']          # v4.1: 總經/大盤折線模組（融資維持率等，必須最後掛鉤蓋過 K 線 patch）
 V2_STYLES  = ['src/ui/mobile_v2.css']
