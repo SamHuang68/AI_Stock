@@ -70,6 +70,18 @@ class 預警研究驗證測試(unittest.TestCase):
         return ew.process_context(context, pulse, db_path=self.path, now=at,
                                   research_calendar=calendar(), **kwargs)
 
+    def calendar_cache(self, *, imported=None, closed=None, opened=None, years=(2026,)):
+        path = Path(self.folder.name) / 'market.db'
+        with closing(sqlite3.connect(path)) as conn, conn:
+            conn.execute('CREATE TABLE calendar_years(year INTEGER PRIMARY KEY,closed TEXT,opened TEXT,refreshed_at TEXT)')
+            conn.execute('CREATE TABLE market_sessions(session_date TEXT PRIMARY KEY,source TEXT)')
+            for year in years:
+                conn.execute('INSERT INTO calendar_years VALUES(?,?,?,?)',
+                             (year, json.dumps(closed or []), json.dumps(opened or []), '2026-08-31T00:00:00+00:00'))
+            conn.executemany('INSERT INTO market_sessions VALUES(?,?)',
+                             [(day, 'TWSE實際成交日') for day in (imported or [])])
+        return path
+
     def test_首次快照含未觸發分母且逐筆可重播(self):
         result = self.publish()
         page = ew.observation_page(path=self.path, now=START)
@@ -243,14 +255,92 @@ class 預警研究驗證測試(unittest.TestCase):
         path = Path(self.folder.name) / 'market.db'
         self.assertEqual(research.load_calendar(path)['status'], 'unknown')
         self.assertFalse(path.exists())
-        with closing(sqlite3.connect(path)) as conn, conn:
-            conn.execute('CREATE TABLE calendar_years(year INTEGER,refreshed_at TEXT)')
-            conn.execute('CREATE TABLE market_sessions(session_date TEXT,source TEXT)')
-            conn.execute("INSERT INTO calendar_years VALUES(2026,'2026-08-31T00:00:00+00:00')")
-            conn.executemany('INSERT INTO market_sessions VALUES(?,?)', [(day, 'TWSE開休市') for day in DAYS])
+        self.calendar_cache(imported=DAYS, closed=['2026-01-01'])
         before = hashlib.sha256(path.read_bytes()).hexdigest()
         self.assertEqual(research.load_calendar(path)['status'], 'ready')
         self.assertEqual(before, hashlib.sha256(path.read_bytes()).hexdigest())
+
+    def test_行情與已匯入日期共同缺日仍保留應有交易日(self):
+        missing = DAYS[2]
+        path = self.calendar_cache(imported=[day for day in DAYS if day != missing])
+        loaded = research.load_calendar(path)
+        self.assertEqual(loaded['status'], 'ready')
+        self.assertIn(missing, loaded['dates'])
+        context, pulse = fixture()
+        ew.process_context(context, pulse, db_path=self.path, now=START)
+        frozen = next(row for row in ew.observation_page(path=self.path, now=START)['observations']
+                      if row['signalId'] == 'TW_ATTACK_BUILDUP')
+        self.assertEqual(frozen['targetSessions'], DAYS[1:6])
+        self.assertTrue(frozen['eligible'])
+        at = datetime(2026, 9, 8, 11, tzinfo=timezone.utc)
+        context, pulse = fixture(at)
+        history = closes([day for day in DAYS[1:7] if day != missing])
+        ew.process_context(context, pulse, db_path=self.path, now=at, market_history=history)
+        original = next(row for row in ew.observation_page(path=self.path, now=at)['observations']
+                        if row['observationId'] == frozen['observationId'])
+        outcome = next(row for row in original['outcomes'] if row['horizonSessions'] == 3)
+        self.assertEqual(outcome['targetSession'], DAYS[3])
+        self.assertEqual(outcome['status'], 'unknown')
+        self.assertEqual(outcome['missingSessions'], [missing])
+
+    def test_只有觀測當日行情仍由年度收據凍結未來交易日(self):
+        path = self.calendar_cache(imported=[DAYS[0]], closed=['2026-01-01'])
+        loaded = research.load_calendar(path)
+        self.assertEqual(loaded['status'], 'ready')
+        self.assertFalse(loaded['priceDatesUsedAsCalendar'])
+        self.assertIn(DAYS[5], loaded['dates'])
+        context, pulse = fixture()
+        result = ew.process_context(context, pulse, db_path=self.path, now=START, market_history=closes([DAYS[0]]))
+        self.assertGreater(result['researchValidation']['eligible'], 0)
+        original = next(row for row in ew.observation_page(path=self.path, now=START)['observations']
+                        if row['signalId'] == 'TW_ATTACK_BUILDUP')
+        self.assertEqual(original['targetSessions'], DAYS[1:6])
+        self.assertEqual(original['outcomes'], [])
+
+    def test_年度休市與週末補交易例外影響同一凍結時間軸(self):
+        path = self.calendar_cache(closed=[DAYS[2]], opened=['2026-09-05'])
+        loaded = research.load_calendar(path)
+        self.assertNotIn(DAYS[2], loaded['dates'])
+        self.assertIn('2026-09-05', loaded['dates'])
+        context, pulse = fixture()
+        evaluated = ew.evaluate_context(context, pulse, now=START)
+        record = research.freeze(context, pulse, None, evaluated, evaluated['signals'],
+                                 ew._market_reference(pulse, START.isoformat()), loaded, START.isoformat())[1]
+        self.assertEqual(record['targetSessions'], [DAYS[1], DAYS[3], '2026-09-05', DAYS[4], DAYS[5]])
+        outcomes = research.resolve(record, closes(record['targetSessions']), '2026-09-08T11:00:00+00:00')
+        self.assertEqual(outcomes[1]['targetSession'], '2026-09-05')
+        self.assertEqual(outcomes[1]['status'], 'mature')
+
+    def test_只有已匯入日期沒有年度收據維持未知(self):
+        path = self.calendar_cache(imported=DAYS, years=())
+        loaded = research.load_calendar(path)
+        self.assertEqual(loaded['status'], 'unknown')
+        self.assertEqual(loaded['dates'], [])
+        context, pulse = fixture()
+        result = ew.process_context(context, pulse, db_path=self.path, now=START)
+        self.assertEqual(result['researchValidation']['eligible'], 0)
+        self.assertEqual(result['researchValidation']['ineligible'], 4)
+
+    def test_缺少中間年度不得跳到隔年壓縮期間(self):
+        path = self.calendar_cache(years=(2026, 2028))
+        loaded = research.load_calendar(path)
+        observed = datetime(2026, 12, 31, 6, tzinfo=timezone.utc)
+        context, pulse = fixture(observed)
+        evaluated = ew.evaluate_context(context, pulse, now=observed)
+        rows = research.freeze(context, pulse, None, evaluated, evaluated['signals'],
+                               ew._market_reference(pulse, observed.isoformat()), loaded, observed.isoformat())
+        self.assertTrue(all(not row['eligible'] for row in rows))
+        self.assertTrue(all('缺少完整官方' in row['unknownReason'] for row in rows))
+
+    def test_日曆矛盾跨年或沒有取得時間均不冒充已核對(self):
+        path = self.calendar_cache()
+        for closed, opened, refreshed in (([DAYS[1]], [DAYS[1]], START.isoformat()),
+                                          (['2027-01-01'], [], START.isoformat()), ([], [], None)):
+            with self.subTest(closed=closed, opened=opened, refreshed=refreshed):
+                with closing(sqlite3.connect(path)) as conn, conn:
+                    conn.execute('UPDATE calendar_years SET closed=?,opened=?,refreshed_at=?',
+                                 (json.dumps(closed), json.dumps(opened), refreshed))
+                self.assertEqual(research.load_calendar(path)['status'], 'unknown')
 
     def test_歷史查詢不偷看後續觀測或成果(self):
         self.publish()

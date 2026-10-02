@@ -8,11 +8,11 @@ import sqlite3
 from copy import deepcopy
 from decimal import Decimal
 from contextlib import closing
-from datetime import datetime, time, timezone, timedelta
+from datetime import date, datetime, time, timezone, timedelta
 from pathlib import Path
 
 TZ = timezone(timedelta(hours=8))
-VERSION = 'warning-observation-study/2026-10-v2'
+VERSION = 'warning-observation-study/2026-10-v3'
 SCHEMA_VERSION = 1
 PROTOCOL = {'version': VERSION, 'horizons': [1, 3, 5], 'materialMovePct': 2.0, 'minimumSample': 20,
             'minimumAvailableDomains': 3, 'closeAvailableHourTW': 18,
@@ -60,21 +60,48 @@ def finalized_close(row: dict | None, clock: datetime) -> bool:
 
 
 def load_calendar(db_path: str | Path) -> dict:
-    """只讀既有 TW 官方交易日曆；不建表、不呼叫可能連外的日曆更新器。"""
+    """只讀年度開休市收據建立完整時間軸；行情有價日期不作日曆分母。"""
     try:
         with closing(sqlite3.connect(Path(db_path).resolve().as_uri() + '?mode=ro', uri=True, timeout=10)) as conn:
+            conn.execute('PRAGMA query_only=ON')
             conn.execute('BEGIN')
-            years = conn.execute('SELECT year,refreshed_at FROM calendar_years ORDER BY year').fetchall()
-            rows = conn.execute('SELECT session_date,source FROM market_sessions ORDER BY session_date').fetchall()
-        covered = {int(year) for year, _ in years}
-        if any(not str(source).startswith(('TWSE', 'TPEX')) for day, source in rows if int(day[:4]) in covered):
-            raise ValueError('日曆含未核對來源')
-        dates = [day for day, source in rows if int(day[:4]) in covered]
-        if not dates or not covered:
+            years = conn.execute('SELECT year,closed,opened,refreshed_at FROM calendar_years ORDER BY year').fetchall()
+        if not years:
             raise ValueError('未建立官方市場日曆')
-        return {'status': 'ready', 'market': 'TW', 'dates': dates, 'years': sorted(covered),
-                'source': '官方市場交易日與年度日曆收據', 'sourceAsOf': max(str(at) for _, at in years),
-                'version': digest({'dates': dates, 'years': sorted(covered)})}
+        covered, dates, receipts, source_times = set(), set(), [], []
+        for raw_year, closed_raw, opened_raw, refreshed in years:
+            year = int(raw_year)
+            if year in covered:
+                raise ValueError('年度日曆重複，無法確認有效版本')
+            source_at = aware(refreshed)
+            if source_at is None:
+                raise ValueError('年度日曆取得時間無法核對')
+            parsed = []
+            for raw in (closed_raw, opened_raw):
+                values = json.loads(raw)
+                if not isinstance(values, list):
+                    raise ValueError('年度開休市清單格式錯誤')
+                days = {date.fromisoformat(value) for value in values}
+                if any(day.year != year for day in days) or len(days) != len(values):
+                    raise ValueError('年度開休市清單含跨年或重複日期')
+                parsed.append(days)
+            closed, opened = parsed
+            if closed & opened:
+                raise ValueError('年度開休市清單互相矛盾')
+            day = date(year, 1, 1)
+            while day.year == year:
+                if day not in closed and (day.weekday() < 5 or day in opened):
+                    dates.add(day.isoformat())
+                day += timedelta(days=1)
+            covered.add(year)
+            source_times.append(source_at)
+            receipts.append({'year': year, 'closed': sorted(day.isoformat() for day in closed),
+                             'opened': sorted(day.isoformat() for day in opened), 'sourceAsOf': source_at.isoformat()})
+        return {'status': 'ready', 'market': 'TW', 'dates': sorted(dates), 'years': sorted(covered),
+                'source': '官方年度開休市完整時間軸',
+                'sourceAsOf': max(source_times).astimezone(timezone.utc).isoformat(),
+                'version': digest({'annualReceipts': receipts, 'dates': sorted(dates)}),
+                'calendarBasis': 'annual_schedule', 'priceDatesUsedAsCalendar': False}
     except (sqlite3.Error, ValueError, TypeError, OSError) as exc:
         return {'status': 'unknown', 'market': 'TW', 'dates': [], 'years': [], 'source': None,
                 'sourceAsOf': None, 'version': None, 'reason': '官方市場日曆不可用：' + type(exc).__name__}
@@ -111,7 +138,11 @@ def freeze(context: dict, pulse: dict, memory: dict | None, evaluated: dict, sig
     calendar_at = aware(calendar.get('sourceAsOf'))
     market_at = aware(market_ref.get('asOf'))
     base_reason = None
-    if calendar.get('status') != 'ready' or calendar.get('market') != 'TW' or not calendar.get('version') or origin not in dates or len(targets) != 5:
+    required_years = (set(range(int(origin[:4]), int(targets[-1][:4]) + 1))
+                      if origin in dates and targets else set())
+    if (calendar.get('status') != 'ready' or calendar.get('market') != 'TW' or not calendar.get('version')
+            or origin not in dates or len(targets) != 5
+            or not required_years <= set(calendar.get('years') or [])):
         base_reason = '缺少完整官方起點及未來五個交易日曆，漏報無法判定'
     elif calendar_at is None or calendar_at > observed:
         base_reason = '日曆來源時間未知或晚於觀測'
