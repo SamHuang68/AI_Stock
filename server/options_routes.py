@@ -56,7 +56,12 @@ class OptionsRoutesMixin:
 
     def _handle_options_refresh(self):
         import decision_context as dc
-        import options_exposure
+        import job_queue
+        from 更新路由 import coordinator
+
+        if str(self.headers.get('X-ST-Gateway-Role', '')).lower() not in ('', 'owner'):
+            self._err('唯讀模式不能更新選擇權資料', 403)
+            return
 
         try:
             body = read_json_body(self, max_bytes=4096)
@@ -64,6 +69,9 @@ class OptionsRoutesMixin:
             self._err(str(exc), exc.status)
             return
         qs = parse_qs(urlparse(self.path).query)
+        if set(body) - {'expiry', 'force'}:
+            self._err('選擇權更新含有未支援欄位', 400)
+            return
         expiry = body.get('expiry') or (qs.get('expiry') or [None])[0]
         if expiry is not None and not _EXPIRY.fullmatch(str(expiry).strip()):
             self._err('expiry must be YYYYMMDD or YYYY-MM-DD', 400)
@@ -72,10 +80,15 @@ class OptionsRoutesMixin:
         if not reference:
             self._err('DecisionContext 尚未形成；請先更新市場資料。', 409)
             return
-        out = options_exposure.refresh(
-            spot=reference['price'], spot_as_of=reference.get('asOf'),
-            expiry=str(expiry).strip() if expiry else None,
-            force=bool(body.get('force', True)),
-        )
-        context = dc.update_options_structure(out)
-        self._ok(json.dumps(context, ensure_ascii=False).encode('utf-8'))
+        try:
+            params = {'force': body.get('force', True)}
+            if expiry is not None:
+                params['expiry'] = str(expiry).strip()
+            out = coordinator().submit('options', params)
+            self._ok(json.dumps(out, ensure_ascii=False).encode('utf-8'), status=202)
+        except ValueError as exc:
+            self._err(str(exc), 400)
+        except job_queue.QueueFull as exc:
+            self._err(str(exc), 429)
+        except Exception:
+            self._err('選擇權工作尚未接受，請稍後重試', 503)

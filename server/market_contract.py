@@ -6,11 +6,19 @@ from typing import Any
 
 
 def _number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
     try:
         value = float(value)
-        return value if value == value else None
+        return value if math.isfinite(value) else None
     except (TypeError, ValueError):
         return None
+
+
+def tw_symbol_code(value: Any) -> str:
+    """只移除完整交易所後綴，避免 .TWO 被截成 O。"""
+    symbol = str(value or '').strip().upper()
+    return symbol.rsplit('.', 1)[0] if symbol.endswith(('.TW', '.TWO')) else symbol
 
 
 def cumulative_volume_contract(value: Any, *, source_unit: str,

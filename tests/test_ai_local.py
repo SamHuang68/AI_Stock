@@ -36,6 +36,13 @@ class FakeStreamResponse:
 
 
 class AiLocalPolicyTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        patcher = mock.patch.object(ai_local, 'FAST_LOCK_DIR', Path(temporary.name) / 'locks')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_runtime_status_is_server_side_explicit_and_load_aware(self):
         with mock.patch.object(ai_local, "_lmstudio_models", return_value=[ai_local.FAST_MODEL]), \
              mock.patch.object(ai_local, "_resolve_hermes_exe", return_value=Path("hermes.exe")):

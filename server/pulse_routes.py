@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 from urllib.parse import parse_qs, urlparse
 
 from http_boundary import BodyReadError, read_json_body
@@ -12,9 +13,46 @@ from pulse_orchestration import build_pulse_payload
 
 class PulseRoutesMixin:
     def _handle_pulse(self):
-        """GET /pulse — market pulse intelligence (orchestrated in pulse_orchestration)."""
-        body = build_pulse_payload(self, self.path)
-        self._ok(body)
+        """僅讀已持久提交的快照；refresh 查詢也不啟動來源。"""
+        import decision_context as dc
+        try:
+            payload = dc.latest_pulse() or {'ok': False, 'error': '尚未有已提交快照',
+                'decisionSummary': dc.compact_context(dc.empty_context('pulse_not_ready'))}
+            payload['updateState'] = self._pulse_service().status()
+            self._ok(json.dumps(payload, ensure_ascii=False).encode())
+        except Exception:
+            self._err('已提交市場快照無法讀取', 503)
+
+    def _handle_pulse_update_status(self):
+        qs = parse_qs(urlparse(self.path).query)
+        job_id = (qs.get('jobId') or [None])[0]
+        if job_id is not None and not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', job_id):
+            self._err('更新工作識別碼格式不正確', 400)
+            return
+        try:
+            result = self._pulse_service().status(job_id)
+            if job_id is not None and result.get('job') is None:
+                self._err('找不到指定市場更新工作', 404)
+                return
+            self._ok(json.dumps(result, ensure_ascii=False).encode())
+        except Exception:
+            self._err('市場更新狀態無法讀取', 503)
+
+    def _handle_pulse_refresh(self):
+        if str(self.headers.get('X-ST-Gateway-Role', '')).lower() not in ('', 'owner'):
+            self._err('唯讀模式不能更新市場資料', 403)
+            return
+        try:
+            body = read_json_body(self, max_bytes=1024)
+            if body:
+                self._err('Pulse 更新只接受空物件', 400)
+                return
+            result = self._pulse_service().submit(reason='manual')
+            self._ok(json.dumps({'ok': True, **result}, ensure_ascii=False).encode(), status=202)
+        except BodyReadError as exc:
+            self._err(str(exc), exc.status)
+        except Exception:
+            self._err('更新工作尚未接受，請稍後重試', 503)
 
     def _handle_pulse_history(self):
         """GET /pulse/history?kind=breadth|institutional|index|pulse&n=40"""

@@ -9,6 +9,10 @@ from datetime import date
 from typing import Any, Iterable
 
 
+TWSE_TURNOVER_SCOPE = 'TWSE_FOUR_DIGIT_SECURITIES_BY_INDUSTRY'
+TWSE_TURNOVER_SCOPE_LABEL = '上市四碼證券（含存託憑證；未分類仍計入成交分母）'
+
+
 def _number(value: Any) -> float | None:
     try:
         value = float(str(value).replace(',', '').replace('+', '').strip())
@@ -105,7 +109,8 @@ def attach_sector_metrics(
             row['turnoverEligible'] = key in turnover and turnover.get(key) is not None
             if row['turnoverEligible']:
                 row['turnoverYi'] = turnover[key]
-                row['turnoverScope'] = 'TWSE_COMMON_STOCKS_BY_INDUSTRY'
+                row['turnoverScope'] = TWSE_TURNOVER_SCOPE
+                row['turnoverScopeLabel'] = TWSE_TURNOVER_SCOPE_LABEL
         if key in returns and returns[key] is not None:
             row['return20Pct'] = returns[key]
             row['return20Source'] = 'TWSE MI_INDEX IND daily close'
@@ -122,6 +127,8 @@ def build_sector_flow(
     total_turnover_yi: float | None = None,
     benchmark_return20_pct: float | None = None,
     proxy_basket: bool = False,
+    classification_coverage_pct: float | None = None,
+    classification_complete: bool | None = None,
 ) -> dict[str, Any]:
     """Enrich sector rows without labelling price participation as fund flow."""
     raw = [dict(x) for x in (sectors or []) if isinstance(x, dict)]
@@ -130,6 +137,9 @@ def build_sector_flow(
     eligible_rows = [x for x in raw if x.get('turnoverEligible') is not False]
     turnover_rows = [x for x in eligible_rows if _number(x.get('turnoverYi', x.get('turnover'))) is not None]
     turnover_coverage = len(turnover_rows) / len(eligible_rows) if eligible_rows else 0.0
+    classification_coverage_pct = _number(classification_coverage_pct)
+    if classification_coverage_pct is not None:
+        turnover_coverage = min(turnover_coverage, max(0.0, min(100.0, classification_coverage_pct)) / 100.0)
     rows: list[dict[str, Any]] = []
     shares: list[float] = []
 
@@ -160,6 +170,7 @@ def build_sector_flow(
             'proxyBasket': bool(row.get('proxyBasket', proxy_basket)),
             'turnoverEligible': row.get('turnoverEligible'),
             'turnoverScope': row.get('turnoverScope'),
+            'turnoverScopeLabel': row.get('turnoverScopeLabel'),
             'return20Source': row.get('return20Source'),
         })
         rows.append(enriched)
@@ -168,7 +179,8 @@ def build_sector_flow(
     if valid_change:
         participation = sum(1 for x in valid_change if float(x['changePct']) > 0) / len(valid_change) * 100.0
     scope_consistent = all(str(x.get('marketScope') or market_scope) == market_scope for x in raw)
-    flow_eligible = bool(shares) and turnover_coverage >= 0.80 and scope_consistent and not proxy_basket
+    flow_eligible = (bool(shares) and turnover_coverage >= 0.80 and scope_consistent
+                     and not proxy_basket and classification_complete is not False)
     hhi = sum((s / 100.0) ** 2 for s in shares) * 10000.0 if flow_eligible else None
     top3 = sum(sorted(shares, reverse=True)[:3]) if flow_eligible else None
     mode = 'turnover' if flow_eligible else ('partial_turnover' if shares else 'participation_proxy')
@@ -183,7 +195,10 @@ def build_sector_flow(
                   ('部分成交額（不可當完整資金流）' if shares else '漲跌參與（無產業成交額）')),
         'participationPct': round(participation, 2) if participation is not None else None,
         'turnoverCoveragePct': round(turnover_coverage * 100.0, 2),
+        'classificationCoveragePct': classification_coverage_pct,
+        'classificationComplete': classification_complete,
         'turnoverScope': next((x.get('turnoverScope') for x in rows if x.get('turnoverScope')), None),
+        'turnoverScopeLabel': next((x.get('turnoverScopeLabel') for x in rows if x.get('turnoverScopeLabel')), None),
         'top3SharePct': round(top3, 3) if top3 is not None else None,
         'hhi': round(hhi, 2) if hhi is not None else None,
         'rows': rows,

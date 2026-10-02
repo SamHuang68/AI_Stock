@@ -131,8 +131,8 @@ ok(/window\.MarketData/.test(marketData) && /marketData/.test(polish) && /\/mark
 ok(/MarketFreshness/.test(fs.readFileSync(path.join(root, 'src/core/market_freshness_v5.js'), 'utf8')) &&
   /worstAsOfMs/.test(fs.readFileSync(path.join(root, 'src/core/market_freshness_v5.js'), 'utf8')) &&
   /shellHealthText/.test(shell) && /MarketData\.refresh/.test(shell) &&
-  /行情 asOf/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')),
-  'freshness contract uses per-quote worst asOf for shell and pulse surfaces');
+  /行情來源/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')),
+  '行情效期沿用逐筆來源時間，缺時間不以畫面建置時間替代');
 var featureFlags = fs.readFileSync(path.join(root, 'src/core/feature_flags_v5.js'), 'utf8');
 var featuresRoutes = fs.readFileSync(path.join(root, 'server/features_routes.py'), 'utf8');
 var hubUi = fs.readFileSync(path.join(root, 'src/ui/hub_v5.js'), 'utf8');
@@ -179,9 +179,9 @@ ok(/src\/core\/market_intel_v5\.js/.test(build) && /window\.MarketIntelV5/.test(
 ok(/linkNewsToWatchlist/.test(decisionUi) && /dc-news-watch/.test(decisionUi) && /bindNewsLinks/.test(decisionUi) &&
   /MarketIntelV5/.test(fs.readFileSync(path.join(root, 'src/ui/pulse_v5.js'), 'utf8')),
   'decision and pulse share one direct/theme News Impact watchlist contract');
-ok(/成交口徑：上市普通股產業內占比/.test(decisionUi) && /historyDates/.test(decisionUi) &&
+ok(/turnoverScopeLabel/.test(decisionUi) && /classificationCoveragePct/.test(decisionUi) && /classificationComplete/.test(decisionUi) && /historyDates/.test(decisionUi) &&
   /turnoverEligible/.test(decisionUi) && /industryTurnoverYi/.test(pulseOrch) && /sector_history/.test(pulseOrch) &&
-  /TWSE_COMMON_STOCKS_BY_INDUSTRY/.test(sectorFlow) && /normalize_session_date/.test(sectorFlow) &&
+  /TWSE_FOUR_DIGIT_SECURITIES_BY_INDUSTRY/.test(sectorFlow) && /normalize_session_date/.test(sectorFlow) &&
   /turnoverSessionMatched/.test(pulseOrch) && /enrich_sector_rows/.test(sectorHistory),
   'sector flow exposes official-industry turnover scope and persistent RS20 readiness');
 ok(/情境訊號矩陣/.test(decisionUi) && /Evidence Ledger/.test(decisionUi) && /Risk Profile/.test(decisionUi) &&
@@ -242,13 +242,14 @@ ok(/function mandatoryControlsHtml/.test(decisionUi) && /dc-mandatory/.test(deci
 ok(/function optionsStructureHtml/.test(decisionUi) && /data-layer=\"observed\"/.test(decisionUi) &&
   /data-layer=\"derived\"/.test(decisionUi) && /data-layer=\"modeled\"/.test(decisionUi) &&
   /optionsLabOpen = true/.test(decisionUi) && /function bindOptionsLab/.test(decisionUi) &&
-  /data-st-sort=\"off\"/.test(decisionUi) && /\/options\/txo\/refresh/.test(decisionUi) &&
-  /DecisionData\.publish\(ctx, 'options-refresh'\)/.test(decisionUi),
+  /data-st-sort=\"off\"/.test(decisionUi) && /UpdateJobs\.submit\('options'/.test(decisionUi) &&
+  /UpdateJobs\.wait\(accepted\.job\.jobId/.test(decisionUi) && /await load\(true\)/.test(decisionUi),
   'TXO options structure keeps observed, derived and modeled layers distinct in one canonical DecisionContext');
 ok(/topVegaStrikes/.test(decisionUi) && /Modeled Signed VEX/.test(decisionUi) &&
   /IV \+1 波動率點（1 vol pt）/.test(decisionUi) && /dc-options-density-grid/.test(decisionUi) &&
   /function optionsHistoryHtml/.test(decisionUi) && /dc-options-change/.test(decisionUi) &&
-  /history\.status|var status = history\.status/.test(decisionUi) && /Number\(current\.contractVersion/.test(decisionUi),
+  /history\.status|var status = history\.status/.test(decisionUi) && /不跨到期別比較/.test(decisionUi) &&
+  /按下更新後取得來源資料/.test(decisionUi),
   'TXO V2 adds direction-neutral Vega density, modeled Signed VEX and same-expiry history without changing collapsed summary');
 ok(!/optionsStructure: context\.optionsStructure/.test(decisionData) &&
   /台指選擇權結構/.test(decisionUi) && /不推定造市商持倉/.test(decisionUi) &&
@@ -259,8 +260,8 @@ ok(/\/research\/overnight-intraday/.test(decisionData) && /researchObservations/
   /族群同步率/.test(decisionUi) && /Shadow · 觀察/.test(decisionUi) && /actionAuthority/.test(overnightEngine),
   'overnight/intraday research uses the canonical DecisionData writer and an explicit shadow panel');
 ok(/function refreshOvernightResearch/.test(decisionData) && !/research\/overnight-intraday/.test(decisionUi) &&
-  /summary:\s*\{[\s\S]*?model: context\.model/.test(decisionData) &&
-  !/summary:\s*\{[\s\S]*?overnightIntraday[\s\S]*?model: context\.model/.test(decisionData),
+  /var summary = \{[\s\S]*?model: context\.model/.test(decisionData) &&
+  !/var summary = \{[\s\S]*?overnightIntraday[\s\S]*?model: context\.model/.test(decisionData),
   'shadow session research does not create a second UI fetch path or enter the compact authoritative summary');
 ok(/adjustedOpen = rawOpen \* adjClose\/rawClose/.test(overnightEngine) && /IDENTITY_TOLERANCE = 1e-10/.test(overnightEngine) &&
   /"8299\.TWO"/.test(overnightEngine) && !/"3260\.TWO"/.test(overnightEngine) && /same-market daily session residual/.test(overnightEngine),
@@ -276,8 +277,8 @@ ok(/table_sort_v5\.js/.test(build) && /MutationObserver/.test(tableSortUi) && /f
   /direction === 'ascending' \? 'descending' : 'none'/.test(tableSortUi) && /升冪與降冪都將缺值固定沉底/.test(tableSortUi) &&
   /\.pf-hm,\.bk-hm/.test(tableSortUi) && /data-st-sort="off"/.test(scanUi),
   'all list-style panel tables inherit global three-state sorting while matrix/native tables opt out');
-ok(/↻ 立即更新市場資料/.test(decisionUi) && /\/pulse\?refresh=1/.test(decisionUi) &&
-  /refreshMarketData/.test(decisionUi),
+ok(/↻ 立即更新市場資料/.test(decisionUi) && /DecisionData\.refreshPulse\(/.test(decisionUi) &&
+  /refreshMarketData/.test(decisionUi) && /\/pulse\/refresh/.test(decisionData),
   'decision empty state can refresh pulse and context without route switching');
 const archifyEvidencePath = '/assets/docs/archify/st-decision-evidence-lineage.html';
 ok(decisionUi.includes(archifyEvidencePath) && consensusAttentionUi.includes(archifyEvidencePath),
@@ -355,12 +356,14 @@ ok(/plAiDrawerIn/.test(pulseBeginner) && /backdrop-filter:blur\(18px\)/.test(pul
   /id="pl-ai-speak"/.test(pulseBeginner) && /SpeechSynthesisUtterance/.test(pulseBeginner) &&
   /3 大要點速覽/.test(pulseBeginner),
   'beginner AI uses a glass drawer with bounded speech playback and three-point fallback');
+const pulseAiTransport = fs.readFileSync(path.join(root, 'src/ai/ai_runtime_client.js'), 'utf8');
 ok(/id="pl-ai-fast"/.test(pulseBeginner) && /id="pl-ai-deep"/.test(pulseBeginner) &&
-  /\/ai\/deep/.test(pulseBeginner) && /X-ST-AI-Provider/.test(pulseBeginner) &&
-  /X-ST-AI-Model/.test(pulseBeginner) && /X-ST-AI-Data-Boundary/.test(pulseBeginner) &&
+  /\/ai\/deep/.test(pulseBeginner) && /window\.STAI\.request/.test(pulseBeginner) &&
+  /X-ST-AI-Provider/.test(pulseAiTransport) && /X-ST-AI-Model/.test(pulseAiTransport) &&
+  /X-ST-AI-Data-Boundary/.test(pulseAiTransport) && /Object\.assign\(activeRoute, info\.meta\)/.test(pulseBeginner) &&
   /約 5 分鐘/.test(pulseBeginner) && /約 12 分鐘/.test(pulseBeginner) &&
   /模型載入、上下文預填與推理/.test(pulseBeginner) && /手機只顯示結果/.test(pulseBeginner),
-  'Pulse exposes truthful EVO-T1 fast/deep AI routes with conservative load-aware guidance');
+  'Pulse 沿用共同 AI 完成協定呈現真實主機、模型與資料邊界，保留快速與深度模式的載入時間提示');
 ok(/三市場趨勢雷達/.test(pulseBeginner) && /台股市場/.test(pulseBeginner) &&
   /美股市場/.test(pulseBeginner) && /期貨市場/.test(pulseBeginner) &&
   /漲跌比 /.test(pulseBeginner) && /指數熱度 /.test(pulseBeginner) && /風險偏高/.test(pulseBeginner) &&
@@ -395,12 +398,12 @@ ok(/levelsStale/.test(pulseBeginner) && /歷史壓力參考/.test(pulseBeginner)
   'stale key levels are downgraded from today boundaries and traced with their source values');
 ok(/id="pl-stock-check"/.test(pulseBeginner) && /function stockHealthAssessment/.test(pulseBeginner) &&
   /stock_health_request_start/.test(pulseBeginner) && /\/twquote\?code=/.test(pulseBeginner) &&
-  /setTimeout\(function \(\) \{ if \(controller\) controller\.abort\(\); \}, 8000\)/.test(pulseBeginner),
-  'beginner stock health check is source-backed, traced and bounded by timeout');
+  /報價查詢逾時/.test(pulseBeginner) && /\}, 8000\)/.test(pulseBeginner) && /Promise\.race\(\[request, deadline\]\)/.test(pulseBeginner),
+  '新手健診使用有來源行情、追蹤識別與明確查詢期限');
 ok(/function stockHealthFallbackQuote/.test(pulseBeginner) && /stock_health_fallback_start/.test(pulseBeginner) &&
-  /\/quote\/.*code \+ '\.TW'/.test(pulseBeginner) && /MIS盤後備援/.test(pulseBeginner) &&
-  /yahoo-v8-chart · MIS盤後備援/.test(server),
-  'stock health falls back to a labeled Yahoo quote when MIS has no post-close trade field');
+  /\/bars\?sym=/.test(pulseBeginner) && /Yahoo 日線備援/.test(pulseBeginner) &&
+  /previousDate/.test(pulseBeginner) && /缺少相同日期與期間/.test(pulseBeginner),
+  '健診備援明示歷史日線，只有相同日期與期間才比較大盤');
 ok(/key_levels_stale/.test(server + decisionEngine) && /keyLevelMeta/.test(decisionEngine) &&
   /divergenceDetails/.test(decisionEngine),
   'decision contract suppresses stale key-level triggers and publishes provenance-rich compact metadata');
@@ -906,7 +909,7 @@ ok(/Resolve-StockPython/.test(goPs) && /Test-ToolingPython/.test(goPs) &&
   /deprioritize tooling venvs/.test(goPs) && /Stock Terminal Server v5 tip/.test(goPs) &&
   /PULSE_LAYOUT_ANCHOR_3cab212/.test(goPs),
   'go.ps1 pins an absolute Python, deprioritizes tooling venvs, and launches a titled live server console');
-ok(/git status --porcelain/.test(goPs) && /git merge --ff-only/.test(goPs) &&
+ok(/git(?: -c core\.quotepath=false)? status --porcelain/.test(goPs) && /git merge --ff-only/.test(goPs) &&
   !/git reset --hard/.test(goPs) && !/git stash/.test(goPs),
   'go.ps1 preserves dirty work and only permits fast-forward updates');
 
@@ -954,8 +957,8 @@ ok(/focusByMkt/.test(heat) && /\/focus\?mkt=/.test(heat) &&
   /焦點掃描 · /.test(heat) && /美股流動池/.test(heat) &&
   /function chgCls/.test(heat),
   'heat focus loads /focus?mkt=TW|US and labels US liquid pool');
-ok(/marketSharePct/.test(heat) && /rs20VsBenchmarkPct/.test(heat) && /無同 scope 成交額/.test(heat),
-  'heat renders sector flow fields without relabeling missing turnover');
+ok(/marketSharePct/.test(heat) && /rs20VsBenchmarkPct/.test(heat) && /無相同市場範圍成交額/.test(heat),
+  '熱力圖保留來源資金流欄位並明示缺少相同市場範圍成交額');
 
 const srvPy = fs.readFileSync(path.join(root, 'server/server.py'), 'utf8');
 ok(/_US_FOCUS_UNIVERSE/.test(srvPy) && /_focus_scan_pool/.test(srvPy) &&
@@ -978,10 +981,10 @@ ok(/id: 'factors'/.test(shell) && /FactorsV5/.test(shell) && /ringRoute\('factor
   /function renderFactors/.test(hub) && /window\.FactorsV5/.test(hub) &&
   /ACTIVATORS\.factors/.test(hub),
   'factors ledger is independent shell route + hub page');
-ok(/台指期近月/.test(pl) && /__TXF__/.test(pl) && /TAIFEX MIS/.test(pl) &&
+ok(/台指期近月/.test(pl) && /quoteFreshSuffix\(txf\)/.test(pl) && /觀察期間未提供/.test(pl) &&
   /加權 \^TWII · 近 20 日/.test(pl) && !/線型＝加權 \^TWII（非台指期）/.test(pl) &&
   !/台指期 TXF'/.test(pl),
-  'pulse TXF strip labeled 近月+sources; OHLC spark identifies ^TWII without a redundant header note');
+  '台指期列保留來源與觀察期間；加權日線圖明示標的');
 
 ok(/AI科技外溢/.test(hub) && /factorScope/.test(hub) && /aiSpill/.test(hub) &&
   /spill\.ok/.test(hub) && !/美股流動池漲跌/.test(hub) && !/尚無美股漲幅資料/.test(hub),

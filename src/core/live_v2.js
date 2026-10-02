@@ -14,6 +14,11 @@
 const LIVE_POLL_MS = 30_000;   // 30 秒
 let _liveTimer = null;
 let _lastQuote = null;
+let _liveGeneration = 0;
+let _liveRequestSeq = 0;
+let _liveLastApplied = null;
+let _liveChartReady = false;
+let _liveReadyLoadSeq = null;
 
 (function bootLive() {
   if (typeof S === 'undefined') return;
@@ -82,7 +87,7 @@ let _lastQuote = null;
         <div class="sz" id="lp-ask-sz">size --</div>
       </div>
     </div>
-    <div style="margin-top:4px;font-size:7.5px;color:var(--tf);line-height:1.5;letter-spacing:.3px">資料源：Yahoo v8 chart 1m bar（台股延遲 ~15 min）<br>真即時 + 五檔需接券商 API（富邦/永豐/元大）</div>
+    <div style="margin-top:4px;font-size:7.5px;color:var(--tf);line-height:1.5;letter-spacing:.3px">資料源：<span id="lp-source">等待來源</span><br>五檔委託未提供</div>
     <div style="margin-top:4px;font-size:8px;color:var(--tf);letter-spacing:.5px;text-align:right">每 30 秒更新 · <span id="lp-time">--</span></div>`;
   document.body.appendChild(panel);
   document.getElementById('lp-close').onclick = liveDisable;
@@ -180,7 +185,7 @@ async function fetchQuote(sym, mkt) {
       }
     } catch (e) { /* 落回 Yahoo */ }
   }
-  const yfsym = mkt === 'TW' ? sym + '.TW' : sym;
+  const yfsym = mkt === 'TW' && !/\.TWO?$/.test(sym) && sym[0] !== '^' ? sym + '.TW' : sym;
   try {
     const SERVER = window.SERVER || `http://localhost:18432`;
     const r = await fetch(`${SERVER}/quote/${yfsym}`, {cache:'no-store'});
@@ -233,11 +238,17 @@ function renderQuote(q) {
   const stEl = document.getElementById('lp-state');
   stEl.textContent = stMap(st);
   stEl.className = 'lp-state ' + (['REGULAR', 'PRE', 'POST', 'CLOSED'].includes(st) ? st : 'REGULAR');
-  const d = new Date();
-  document.getElementById('lp-time').textContent = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+  const observed = q.asOf || (q.timestampMs ? new Date(q.timestampMs).toISOString() :
+    q.lastBarTime ? new Date(q.lastBarTime * 1000).toISOString() : null);
+  document.getElementById('lp-time').textContent = observed ? new Date(observed).toLocaleString('zh-TW', { hour12: false }) : '成交時間未知';
+  const sourceEl = document.getElementById('lp-source');
+  if (sourceEl) sourceEl.textContent = q.source || q._source || '來源未提供';
+  if (q.ok === false || q.stale) stEl.textContent = '報價待更新';
 
   // Update last candle on chart if price moved
-  if (S.chartSeries && S.data?.candles?.length && px != null) {
+  // 台股共用成交契約交由 realtime 的交易日／分桶防線更新，不把最新成交回填到舊日 K。
+  const canonicalTw = S.mkt === 'TW' && !!q.source;
+  if (!canonicalTw && q.ok !== false && !q.stale && S.chartSeries && S.data?.candles?.length && px != null) {
     const last = S.data.candles[S.data.candles.length - 1];
     try {
       S.chartSeries.update({
@@ -287,7 +298,7 @@ function stMap(s) {
 }
 
 async function livePollOnce() {
-  if (!S.liveEnabled || !S.sym) return;
+  if (!S.liveEnabled || !S.sym || !_liveChartReady || _liveReadyLoadSeq !== window.__loadSeq) return;
   // (1) 視窗隱藏 (Visibility API) 防護：當分頁被背景化時，暫停輪詢防止被 Yahoo 鎖 IP
   if (document.hidden) {
     console.log('[live] Tab hidden, skip polling to prevent rate limiting.');
@@ -303,12 +314,33 @@ async function livePollOnce() {
       return;
     }
   }
-  const q = await fetchQuote(S.sym, S.mkt || 'TW');
-  if (q) renderQuote(q);
+  // 綁定本次請求的圖表與啟用週期，避免晚到報價寫入另一檔或重載後的圖表。
+  const request = {
+    sym: S.sym, mkt: S.mkt || 'TW', loadSeq: window.__loadSeq,
+    generation: _liveGeneration, seq: ++_liveRequestSeq,
+  };
+  const q = await fetchQuote(request.sym, request.mkt);
+  if (!q || !S.liveEnabled || !_liveChartReady || _liveReadyLoadSeq !== window.__loadSeq ||
+      request.generation !== _liveGeneration || request.loadSeq !== window.__loadSeq ||
+      request.sym !== S.sym || request.mkt !== (S.mkt || 'TW')) return;
+  if (_liveLastApplied && request.seq <= _liveLastApplied.seq) return;
+
+  // 請求順序與來源報價時間都不可倒退；缺少來源時間時仍使用請求序號防護。
+  const timestamp = q.ok === false || q.stale ? NaN : Number(q.timestampMs) || Number(q.lastBarTime) * 1000;
+  const timestampMs = Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+  const sameContext = _liveLastApplied &&
+    request.generation === _liveLastApplied.generation && request.loadSeq === _liveLastApplied.loadSeq &&
+    request.sym === _liveLastApplied.sym && request.mkt === _liveLastApplied.mkt;
+  if (sameContext && timestampMs != null && _liveLastApplied.timestampMs != null &&
+      timestampMs < _liveLastApplied.timestampMs) return;
+  _liveLastApplied = { ...request,
+    timestampMs: timestampMs != null ? timestampMs : (sameContext ? _liveLastApplied.timestampMs : null) };
+  renderQuote(q);
 }
 
 function liveEnable() {
   if (!S.sym) { alert('先載入個股'); return; }
+  _liveGeneration += 1;
   S.liveEnabled = true;
   document.getElementById('live-panel')?.classList.add('on');
   updateLiveBtn();
@@ -317,6 +349,7 @@ function liveEnable() {
   _liveTimer = setInterval(livePollOnce, LIVE_POLL_MS);
 }
 function liveDisable() {
+  _liveGeneration += 1;
   S.liveEnabled = false;
   document.getElementById('live-panel')?.classList.remove('on');
   updateLiveBtn();
@@ -331,8 +364,14 @@ function updateLiveBtn() {
   b.title = S.liveEnabled ? '即時報價已啟用（30 秒輪詢）— 點關閉' : '點擊啟用即時報價輪詢';
 }
 
-// Refresh on sym change
+// loadSym 先更新標的才替換圖表；MarketChart 僅更新載入序號，兩者都須等完成通知。
+window.addEventListener('symLoading', () => {
+  _liveChartReady = false;
+  _liveGeneration += 1;
+});
 window.addEventListener('symLoaded', () => {
+  _liveChartReady = true;
+  _liveReadyLoadSeq = window.__loadSeq;
   if (S.liveEnabled) setTimeout(livePollOnce, 500);
 });
 

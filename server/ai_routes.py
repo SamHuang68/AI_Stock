@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import queue
+import threading
 import time
 import urllib.error
 
@@ -46,6 +48,12 @@ class AiRoutesMixin:
         if not al:
             self._err('ai_local 模組未載入', 500); return
         request_id = self._ensure_trace_id()
+        structured = 'text/event-stream' in (self.headers.get('Accept') or '')
+
+        def emit(event, **fields):
+            raw = json.dumps({'type': event, **fields}, ensure_ascii=False)
+            self.wfile.write(('data: ' + raw + '\n\n').encode('utf-8'))
+            self.wfile.flush()
         try:
             metadata = al.route_metadata(mode, probe=(mode == 'fast'))
         except Exception as exc:
@@ -62,7 +70,7 @@ class AiRoutesMixin:
         except Exception:
             pass
         self.send_response(200)
-        self.send_header('Content-Type', 'text/plain; charset=utf-8')
+        self.send_header('Content-Type', ('text/event-stream' if structured else 'text/plain') + '; charset=utf-8')
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Accel-Buffering', 'no')
         self.send_header('X-ST-AI-Request-ID', request_id)
@@ -81,21 +89,66 @@ class AiRoutesMixin:
         except Exception:
             pass
         started = time.monotonic()
-        iterator = None
+        cancelled = threading.Event()
+        pending = queue.Queue(maxsize=16)
+
+        def enqueue(kind, value=None):
+            while not cancelled.is_set():
+                try:
+                    pending.put((kind, value), timeout=0.1)
+                    return
+                except queue.Full:
+                    continue
+
+        def produce():
+            iterator = None
+            try:
+                stream = al.deep_stream if mode == 'deep' else al.chat_stream
+                iterator = stream(body.get('prompt', ''), body.get('context', ''),
+                                  request_id=request_id, cancel_event=cancelled)
+                visible = False
+                for chunk in iterator:
+                    if cancelled.is_set():
+                        return
+                    if not isinstance(chunk, str):
+                        raise al.AiRuntimeError('AI 回覆格式無效')
+                    visible = visible or bool(chunk.strip())
+                    enqueue('delta', chunk)
+                if not visible:
+                    raise al.AiRuntimeError('AI 未回傳可見正文；請重試。')
+                enqueue('done')
+            except Exception as exc:
+                enqueue('error', exc)
+            finally:
+                if iterator is not None and hasattr(iterator, 'close'):
+                    iterator.close()
+
+        # 僅工作執行緒操作模型生成器；斷線時用事件通知，避免跨執行緒 close 競態。
+        worker = threading.Thread(target=produce, name='st-ai-http-stream', daemon=True)
+        worker.start()
         output_chars = 0
         try:
-            if mode == 'deep':
-                iterator = al.deep_stream(
-                    body.get('prompt', ''), body.get('context', ''), request_id=request_id,
-                )
-            else:
-                iterator = al.chat_stream(
-                    body.get('prompt', ''), body.get('context', ''), request_id=request_id,
-                )
-            for chunk in iterator:
+            while True:
+                try:
+                    kind, chunk = pending.get(timeout=1.0)
+                except queue.Empty:
+                    if structured:
+                        # 上游尚未給正文時也能偵測使用者取消／gateway 斷線。
+                        self.wfile.write(b': keep-alive\n\n')
+                        self.wfile.flush()
+                    continue
+                if kind == 'error':
+                    raise chunk
+                if kind == 'done':
+                    if structured:
+                        emit('done')
+                    break
                 output_chars += len(chunk)
-                self.wfile.write(chunk.encode('utf-8'))
-                self.wfile.flush()
+                if structured:
+                    emit('delta', text=chunk)
+                else:
+                    self.wfile.write(chunk.encode('utf-8'))
+                    self.wfile.flush()
             al.trace_event(
                 'http_stream_completed', request_id=request_id, mode=mode,
                 provider=metadata.get('provider'), model=metadata.get('model'),
@@ -112,8 +165,11 @@ class AiRoutesMixin:
         except Exception as exc:
             message = str(exc) if isinstance(exc, getattr(al, 'AiRuntimeError', RuntimeError)) else type(exc).__name__
             try:
-                self.wfile.write(('\n⚠ ' + message).encode('utf-8'))
-                self.wfile.flush()
+                if structured:
+                    emit('error', message=message)
+                else:
+                    self.wfile.write(('\n⚠ ' + message).encode('utf-8'))
+                    self.wfile.flush()
             except (OSError, ValueError):
                 pass
             al.trace_event(
@@ -123,11 +179,9 @@ class AiRoutesMixin:
                 elapsedMs=round((time.monotonic() - started) * 1000), errorType=type(exc).__name__,
             )
         finally:
-            if iterator is not None and hasattr(iterator, 'close'):
-                try:
-                    iterator.close()
-                except Exception:
-                    pass
+            cancelled.set()
+            # 不提前釋放模型鎖；runtime 工作真正退出時才負責釋放。
+            worker.join(timeout=0.5)
 
     def _handle_ai_local(self):
         self._stream_ai_runtime('fast')

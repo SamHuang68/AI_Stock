@@ -10,6 +10,7 @@ or exposure range.  Pure ``build_decision_context`` calls are replayable;
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import math
 import os
@@ -18,20 +19,19 @@ import threading
 import time
 from collections import deque
 from contextlib import closing
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable
 
+from jsonl_trace import append_jsonl as _append_jsonl
 import exposure_lab as _exposure_lab
 import consensus_attention as _consensus_attention
-from feature_settings import (
-    disabled_consensus_attention,
-    disabled_early_warning,
-    is_enabled,
-)
+import decision_store as _store
+from feature_settings import disabled_consensus_attention, disabled_early_warning, is_enabled
 
 
 CONTRACT_VERSION = 2
 ENGINE_VERSION = 'st-decision-context/v2'
+RULES_VERSION = 'st-decision-rules/2026-09-19'
 REGIME_LABELS = {
     'BROAD_RISK_ON': '廣泛風險偏好',
     'NARROW_RALLY': '指數偏強、結構狹窄',
@@ -55,8 +55,12 @@ TRACE_PATH = os.path.join(_BASE, 'logs', 'decision_trace.jsonl')
 TW_TZ = timezone(timedelta(hours=8))
 
 _lock = threading.RLock()
+_publish_lock = threading.RLock()
+_db_ready: set[str] = set()
+_db_lock = threading.Lock()
 _latest_context: dict[str, Any] | None = None
 _latest_inputs: dict[str, Any] | None = None
+_active_db_path: str | None = None
 _recent = deque(maxlen=120)
 _status = {'lastSuccess': None, 'lastError': None, 'lastElapsedMs': None}
 
@@ -83,6 +87,73 @@ def _aware_datetime(value: Any) -> datetime | None:
         return parsed.replace(tzinfo=TW_TZ) if parsed.tzinfo is None else parsed
     except (TypeError, ValueError):
         return None
+
+
+def _source_quality(pulse: dict, twii: dict, txf: dict, now: datetime,
+                    session_calendar: dict | None = None) -> dict[str, dict]:
+    """依來源觀測時間與既有交易日曆判斷；建置時間不提供時效證明。"""
+    local = now.astimezone(TW_TZ)
+    calendar = session_calendar or {}
+    closed = set(calendar.get('closed') or [])
+    opened = set(calendar.get('opened') or [])
+    sessions = set(calendar.get('sessions') or [])
+    covered_years = set(calendar.get('coveredYears') or [])
+
+    def trading_day(day: date) -> bool:
+        key = day.isoformat()
+        if day.year in covered_years:
+            return key in sessions
+        return key not in closed and (day.weekday() < 5 or key in opened)
+
+    def completed_day(cutoff: int) -> date:
+        day = local.date()
+        if local.hour * 60 + local.minute < cutoff:
+            day -= timedelta(days=1)
+        for _ in range(370):
+            if trading_day(day):
+                return day
+            day -= timedelta(days=1)
+        return day
+
+    spot_day = completed_day(815)
+    daily_day = completed_day(1080)
+    live_spot = trading_day(local.date()) and 540 <= local.hour * 60 + local.minute < 815
+    sources = {}
+    for name, quote in (('twii', twii), ('txf', txf)):
+        market = quote.get('market') or {}
+        observed = _aware_datetime(market.get('asOf') or quote.get('asOf'))
+        status, freshness = 'unknown', 0.0
+        age = (local - observed).total_seconds() if observed else None
+        if observed is not None:
+            source_local = observed.astimezone(TW_TZ)
+            stale = market.get('stale') is True or quote.get('stale') is True
+            source_session_open = trading_day(local.date()) or (
+                name == 'txf' and local.hour * 60 + local.minute <= 300
+                and trading_day(local.date() - timedelta(days=1)))
+            if age < -5:
+                status = 'future'
+            elif source_local.date() == local.date() and source_session_open and age <= 1800 and not stale:
+                status, freshness = 'observed', 1.0 if age <= 300 else 0.8
+            elif (name == 'twii' and not live_spot and source_local.date() == spot_day
+                  and source_local.hour * 60 + source_local.minute >= 810):
+                # 收盤後與週末仍可使用最新完整交易日，不將固定秒數視為跨場次失效。
+                status, freshness = 'completed_session', 1.0
+            else:
+                status, freshness = 'stale', 0.2
+        sources[name] = {'asOf': observed.isoformat() if observed else None,
+                         'status': status, 'freshness': freshness,
+                         'ageSeconds': round(age, 1) if age is not None else None}
+    raw_day = _date_key(pulse.get('date'))
+    try:
+        breadth_day = datetime.strptime(raw_day, '%Y%m%d').date() if raw_day else None
+    except ValueError:
+        breadth_day = None
+    eligible_breadth = breadth_day == daily_day or (breadth_day == local.date() and trading_day(breadth_day))
+    sources['breadth'] = {'asOf': breadth_day.isoformat() if breadth_day else None,
+                          'status': 'completed_session' if eligible_breadth else ('stale' if breadth_day else 'unknown'),
+                          'freshness': 1.0 if eligible_breadth else (0.2 if breadth_day else 0.0),
+                          'expectedSession': daily_day.isoformat()}
+    return sources
 
 
 def _quote(pulse: dict, symbol: str, legacy: dict | None = None) -> dict:
@@ -498,10 +569,14 @@ def _detect_divergences(
 
 
 def _portfolio_summary(raw: dict | None, kind: str = 'actual') -> dict | None:
+    identity = {'kind': kind}
+    if kind == 'simulation':
+        identity.update(label='情境模擬（手動權重，非實際持倉）',
+                        premise='依使用者手動假設與既有歷史資料計算；僅供私人情境研究')
     if not isinstance(raw, dict):
-        return None
+        return {**identity, 'available': False} if kind == 'simulation' else None
     if raw.get('error'):
-        return {'kind': kind, 'available': False, 'error': str(raw.get('error'))[:180]}
+        return {**identity, 'available': False, 'error': str(raw.get('error'))[:180]}
     stocks = raw.get('stocks') or {}
     beta_sum = beta_weight = 0.0
     max_single = 0.0
@@ -517,10 +592,16 @@ def _portfolio_summary(raw: dict | None, kind: str = 'actual') -> dict | None:
     sectors = raw.get('sector') or {}
     top_sector = max(sectors.items(), key=lambda x: x[1]) if sectors else (None, None)
     port = raw.get('portfolio') or {}
+    quality = dict(raw.get('quality') or {})
+    sample_days = _number(port.get('days'))
+    available = (bool(stocks) and not raw.get('skipped') and sample_days is not None and sample_days > 30
+                 and beta_weight > 0 and abs(beta_weight - sum(_number((row or {}).get('weight')) or 0 for row in stocks.values())) < 0.01
+                 and _number(port.get('var95')) is not None and quality.get('available') is not False)
     look_through = _exposure_lab.portfolio_lookthrough(stocks)
     return {
-        'kind': kind,
-        'available': True,
+        **identity,
+        'available': available,
+        'quality': quality,
         'portfolioBeta': round(beta_sum / beta_weight, 3) if beta_weight else None,
         'volAnnualPct': _number(port.get('vol')),
         'var95DailyPct': _number(port.get('var95')),
@@ -597,12 +678,15 @@ def _position_range(
         var95 = _number(portfolio.get('var95DailyPct'))
         max_beta = _number(risk_profile.get('maxPortfolioBeta'))
         max_var = _number(risk_profile.get('maxDailyVaR'))
+        risk_scale = 1.0
         if beta is not None and max_beta not in (None, 0) and beta > max_beta:
-            cap *= max_beta / beta
+            risk_scale = min(risk_scale, max_beta / beta)
             constraints.append('portfolio_beta_cap')
         if var95 is not None and max_var not in (None, 0) and var95 > max_var:
-            cap *= max_var / var95
+            risk_scale = min(risk_scale, max_var / var95)
             constraints.append('portfolio_var_cap')
+        if risk_scale < 1.0:
+            cap *= risk_scale
         max_single = _number(portfolio.get('maxSingleNameWeightPct'))
         max_single_cfg = _number(risk_profile.get('maxSingleNameWeight'))
         if max_single is not None and max_single_cfg is not None and max_single > max_single_cfg:
@@ -772,6 +856,7 @@ def build_decision_context(
     margin_state: dict[str, Any] | None = None,
     benchmark_data: dict[str, Any] | None = None,
     options_structure: dict[str, Any] | None = None,
+    session_calendar: dict[str, Any] | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     pulse = dict(pulse or {})
@@ -783,8 +868,9 @@ def build_decision_context(
     indices = pulse.get('indices') or {}
     twii = _quote(pulse, '^TWII', (indices.get('t00') or snapshot.get('t00') or {}))
     txf = _quote(pulse, '__TXF__', (pulse.get('txf') or snapshot.get('txf') or {}))
+    source_quality = _source_quality(pulse, twii, txf, now, session_calendar)
     twii_change = _quote_change(twii)
-    txf_change = _quote_change(txf)
+    txf_change = _quote_change(txf) if source_quality['txf']['freshness'] >= 0.25 else None
     stocks = pulse.get('stocks') or snapshot.get('stocks') or {}
     adv_ratio = _number(stocks.get('advRatio'))
     advancers = _number(stocks.get('up'))
@@ -862,15 +948,7 @@ def build_decision_context(
     }
     completeness = _number(pulse.get('dataCompleteness'))
     completeness = _clamp((completeness or 0.0) / 100.0, 0.0, 1.0)
-    freshness = 1.0
-    try:
-        dt = _aware_datetime(as_of)
-        if dt is None:
-            raise ValueError('invalid asOf')
-        age = max(0.0, (now.astimezone(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds())
-        freshness = 1.0 if age <= 300 else (0.8 if age <= 1800 else (0.5 if age <= 21600 else 0.2))
-    except (TypeError, ValueError):
-        freshness = 0.8
+    freshness = min(source_quality[name]['freshness'] for name in ('twii', 'breadth'))
 
     scope_consistent = str(pulse.get('breadthScope') or 'TWSE_STOCKS') == 'TWSE_STOCKS'
     missing_core = []
@@ -1207,7 +1285,7 @@ def build_decision_context(
             reference=margin_state.get('reference') or 'trailing 52-week observations',
             market_scope='TWSE', session='regular', quality='official',
             comparison=margin_state.get('direction')))
-    stale_fields = []
+    stale_fields = [name for name, quality in source_quality.items() if quality['freshness'] < 0.25]
     if ((key_levels.get('quality') or {}).get('stale')):
         stale_fields.append('keyLevels')
     if options_structure.get('status') == 'stale' or option_quality.get('isHybridTimestamp'):
@@ -1244,16 +1322,15 @@ def build_decision_context(
         'evidence': evidence,
         'dataQuality': {
             'completeness': round(completeness, 3), 'freshness': round(freshness, 3),
+            'sourceQuality': source_quality,
+            'calendarSource': 'stored_exchange_calendar' if session_calendar else 'weekday_fallback',
             'scopeConsistency': scope_consistent, 'conflicts': conflicts,
             'staleFields': stale_fields, 'missingCore': missing_core,
         },
         'model': ENGINE_VERSION,
     }
-    context['consensusAttention'] = (
-        _consensus_attention.build_consensus_attention(context)
-        if is_enabled('shadowConsensusAttention')
-        else disabled_consensus_attention()
-    )
+    context['consensusAttention'] = (_consensus_attention.build_consensus_attention(context)
+                                     if is_enabled('shadowConsensusAttention') else disabled_consensus_attention())
     return context
 
 
@@ -1269,6 +1346,9 @@ def compact_context(context: dict | None) -> dict[str, Any]:
     exposure = context.get('exposureLab') or {}
     warnings = context.get('earlyWarnings') or {}
     return {
+        **{key: context.get(key) for key in (
+            'snapshotId', 'revision', 'inputHash', 'rulesDigest', 'publicationStatus',
+            'persistence', 'publishedAt', 'parentSnapshotId', 'parentRevision', 'viewScope', 'viewState')},
         'contractVersion': context.get('contractVersion', CONTRACT_VERSION),
         'asOf': context.get('asOf'),
         'regime': regime,
@@ -1341,32 +1421,50 @@ def compact_context(context: dict | None) -> dict[str, Any]:
     }
 
 
-def _fingerprint(pulse: dict) -> str:
-    snap = pulse.get('snapshot') or {}
-    selected = {
-        'date': pulse.get('date'), 'updatedAt': pulse.get('updatedAt'),
-        'snapshot': snap, 'riskScore': pulse.get('riskScore'), 'healthScore': pulse.get('healthScore'),
-        'dataCompleteness': pulse.get('dataCompleteness'),
-        'basis': (((pulse.get('overview') or {}).get('strip') or {}).get('basisPct')),
-        'indexTrend': (((pulse.get('overview') or {}).get('strip') or {}).get('t00Trend')),
-    }
+def _rules_digest() -> str:
+    import early_warning
+    versions = (CONTRACT_VERSION, ENGINE_VERSION, RULES_VERSION,
+                _exposure_lab.MODEL_VERSION, _consensus_attention.RANKING_VERSION,
+                getattr(early_warning, 'ENGINE_VERSION', None),
+                getattr(early_warning, 'POLICY_VERSION', None), 'decision-commit/v1',
+                tuple((key, is_enabled(key)) for key in ('shadowEarlyWarning', 'shadowConsensusAttention', 'shadowOvernightIntraday')))
+    return hashlib.sha256(json.dumps(versions).encode('utf-8')).hexdigest()
+
+
+def _fingerprint(pulse: dict, build_kwargs: dict | None = None, context: dict | None = None) -> str:
+    # 所有實際輸入與規則版本皆參與識別；直接發布的呼叫也保留完整計算結果。
+    selected = {'pulse': pulse, 'buildInputs': build_kwargs or {},
+                'context': context or {}, 'rulesDigest': _rules_digest()}
     raw = json.dumps(selected, sort_keys=True, ensure_ascii=False, default=str).encode('utf-8')
     return hashlib.sha256(raw).hexdigest()[:24]
 
 
 def _init_db(path: str = DB_PATH) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with closing(sqlite3.connect(path, timeout=10)) as conn:
-        conn.execute('PRAGMA journal_mode=WAL')
-        with conn:
-            conn.execute('CREATE TABLE IF NOT EXISTS decision_history('
-                         'id INTEGER PRIMARY KEY AUTOINCREMENT, as_of TEXT, created_at INTEGER, market TEXT, '
-                         'input_hash TEXT UNIQUE, regime TEXT, confidence REAL, completeness REAL, context_json TEXT)')
+    key = os.path.abspath(path)
+    with _db_lock:
+        if key in _db_ready and os.path.isfile(path):
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with closing(sqlite3.connect(path, timeout=10)) as conn:
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute('PRAGMA synchronous=NORMAL')
+            with conn:
+                conn.execute('CREATE TABLE IF NOT EXISTS decision_history('
+                             'id INTEGER PRIMARY KEY AUTOINCREMENT, as_of TEXT, created_at INTEGER, market TEXT, '
+                             'input_hash TEXT UNIQUE, regime TEXT, confidence REAL, completeness REAL, context_json TEXT)')
+        _db_ready.add(key)
+
+
+def _connect(path: str):
+    _init_db(path)
+    conn = sqlite3.connect(path, timeout=10)
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA synchronous=NORMAL')
+    return conn
 
 
 def _save_history(context: dict, input_hash: str, path: str = DB_PATH) -> None:
-    _init_db(path)
-    with closing(sqlite3.connect(path, timeout=10)) as conn:
+    with closing(_connect(path)) as conn:
         with conn:
             conn.execute('INSERT OR IGNORE INTO decision_history(as_of,created_at,market,input_hash,regime,confidence,completeness,context_json) '
                          'VALUES(?,?,?,?,?,?,?,?)', (
@@ -1379,9 +1477,10 @@ def _save_history(context: dict, input_hash: str, path: str = DB_PATH) -> None:
 
 
 def _write_trace(context: dict, input_hash: str, elapsed_ms: int, path: str = TRACE_PATH) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
     row = {
         'ts': _iso_now(), 'correlationId': input_hash, 'inputVersion': 'pulse/v2',
+        'snapshotId': context.get('snapshotId'), 'revision': context.get('revision'),
+        'persistence': context.get('persistence'),
         'inputHash': input_hash, 'regime': (context.get('regime') or {}).get('id'),
         'confidence': (context.get('regime') or {}).get('confidence'),
         'rulesHit': [(context.get('regime') or {}).get('ruleId')],
@@ -1389,136 +1488,288 @@ def _write_trace(context: dict, input_hash: str, elapsed_ms: int, path: str = TR
         'staleFields': (context.get('dataQuality') or {}).get('staleFields') or [],
         'elapsedMs': elapsed_ms,
     }
-    from jsonl_trace import append_jsonl
-    append_jsonl(path, row, max_bytes=256 * 1024, tail_lines=500)
+    _append_jsonl(path, row, max_bytes=256 * 1024, tail_lines=500)
 
 
+class SnapshotPublicationError(RuntimeError):
+    """發布尚未完成持久提交；保留前版並等待下一次寫入恢復。"""
 
-def publish_context(
-    context: dict,
-    *,
-    pulse: dict,
-    build_kwargs: dict[str, Any] | None = None,
-    db_path: str = DB_PATH,
-    trace_path: str = TRACE_PATH,
-    elapsed_ms: int = 0,
-) -> dict:
-    """Publish one canonical context; persistence failures never block Pulse."""
-    global _latest_context, _latest_inputs
-    fingerprint = _fingerprint(pulse)
-    context = dict(context or {})
-    if is_enabled('shadowEarlyWarning'):
-        try:
-            import early_warning as _early_warning
-            import overnight_intraday as _overnight_intraday
-            signal_db_path = _early_warning.DB_PATH
-            if os.path.abspath(db_path) != os.path.abspath(DB_PATH):
-                signal_db_path = os.path.join(os.path.dirname(os.path.abspath(db_path)), 'market_signals.db')
-            warning = _early_warning.process_context(
-                context, pulse, memory_snapshot=_overnight_intraday.latest_cached('all'),
-                market_history=(build_kwargs or {}).get('index_history'),
-                db_path=signal_db_path)
-            context['earlyWarnings'] = warning
-            source_map = {
-                'globalTech': ('Yahoo Finance', 'latest finalized US session'),
-                'anchor': ('Yahoo Finance + ST benchmark research registry', '2330 and 0050-ex-2330 residual where eligible'),
-                'memoryCycle': ('ST overnight-intraday fixed baskets', '20-session adjusted daily session structure'),
-                'breadthLiquidity': ('TWSE breadth + sector participation', 'same-session stock breadth and sector scope'),
-                'flowDerivatives': ('TWSE/TAIFEX canonical Pulse', 'institutional, same-contract OI and futures context'),
-            }
-            warning_evidence = []
-            for family in warning.get('familyScores') or []:
-                source, reference = source_map.get(family.get('id'), ('ST deterministic signal engine', 'canonical inputs'))
-                temporal = family.get('temporal') or {}
-                warning_evidence.append({
-                    'id': 'signal.family.' + str(family.get('id') or 'unknown'),
-                    'metric': 'shadowFamilyScore',
-                    'value': {
-                        'score': family.get('value'), 'quality': family.get('quality'),
-                        'available': family.get('available'), 'observed': family.get('observed') or {},
-                        'temporal': temporal,
-                    },
-                    'comparison': 'negative -1 / neutral 0 / positive +1',
-                    'source': source, 'marketScope': temporal.get('market') or 'TW_CROSS_MARKET',
-                    'session': temporal.get('session') or 'session_aligned_shadow',
-                    'asOf': temporal.get('sourceAsOf') or warning.get('asOf'), 'reference': reference,
-                    'quality': 'derived' if family.get('available') else 'insufficient',
-                    'authority': 'shadow_observation',
-                })
-            validation = warning.get('prospectiveValidation') or {}
-            validation_status = str(validation.get('status') or 'empty')
-            warning_evidence.append({
-                'id': 'signal.prospective_validation',
-                'metric': 'prospectiveSignalLedger',
-                'value': {
-                    'status': validation_status,
-                    'totalTrials': validation.get('totalTrials', 0),
-                    'resolvedOutcomes': validation.get('resolvedOutcomes', 0),
-                    'coveragePct': validation.get('coveragePct', 0),
-                    'horizons': validation.get('horizons') or [],
-                },
-                'comparison': '1 / 3 / 5 finalized sessions; empirical rates withheld below n=20',
-                'source': 'ST append-only prospective signal ledger',
-                'marketScope': 'TW_CROSS_MARKET', 'session': 'finalized_daily_close',
-                'asOf': warning.get('asOf'),
-                'reference': 'First observed tracked episode; no retrospective backfill',
-                'quality': ('observed' if validation_status == 'ready' else
-                            ('building' if validation_status in ('building', 'empty') else 'insufficient')),
-                'authority': 'shadow_validation',
-            })
-            context['evidence'] = list(context.get('evidence') or []) + warning_evidence
-        except Exception as exc:
-            try:
-                import early_warning as _early_warning
-                context['earlyWarnings'] = _early_warning.empty(type(exc).__name__)
-            except Exception:
-                context['earlyWarnings'] = disabled_early_warning(type(exc).__name__)
-    else:
-        context['earlyWarnings'] = disabled_early_warning()
-    # One canonical projection, recomputed only after the warning lifecycle is
-    # attached.  It never polls providers and never mutates DecisionContext.
-    context['consensusAttention'] = (
-        _consensus_attention.build_consensus_attention(context)
-        if is_enabled('shadowConsensusAttention')
-        else disabled_consensus_attention()
-    )
+
+def _install_committed(saved: dict, path: str, elapsed_ms: int = 0) -> None:
+    global _latest_context, _latest_inputs, _active_db_path
     with _lock:
-        _latest_context = context
-        _latest_inputs = {'pulse': pulse, **(build_kwargs or {})}
-        _recent.append(context)
-        _status['lastSuccess'] = _iso_now()
-        _status['lastError'] = None
-        _status['lastElapsedMs'] = elapsed_ms
-    try:
-        _save_history(context, fingerprint, db_path)
-    except Exception as exc:
+        _latest_context = copy.deepcopy(saved['context'])
+        _latest_inputs = copy.deepcopy(saved['inputs'])
+        _active_db_path = os.path.abspath(path)
+        _recent.append(copy.deepcopy(_latest_context))
+        _status.update(lastSuccess=_latest_context.get('publishedAt'), lastError=None,
+                       lastElapsedMs=elapsed_ms)
+
+
+def _ensure_latest(path: str | None = None) -> None:
+    global _latest_context, _latest_inputs, _active_db_path
+    target = os.path.abspath(path or _active_db_path or DB_PATH)
+    with _lock:
+        if _latest_context is not None and (path is None or _active_db_path == target):
+            return
+    with _publish_lock:
+        target = os.path.abspath(path or _active_db_path or DB_PATH)
         with _lock:
-            _status['lastError'] = 'history:' + str(exc)[:160]
+            if _latest_context is not None and (path is None or _active_db_path == target):
+                return
+        saved = _store.load(target)
+        if saved:
+            _install_committed(saved, target)
+        elif path is not None and _active_db_path != target:
+            with _lock:
+                _latest_context = None
+                _latest_inputs = None
+                _active_db_path = target
+
+
+def _deliver_committed(path: str) -> None:
+    if not is_enabled('shadowEarlyWarning'):
+        return
+    # 先持久記錄嘗試，再進入既有通知邊界；不自動重送已嘗試事件。
     try:
-        _write_trace(context, fingerprint, elapsed_ms, trace_path)
-    except Exception as exc:
-        with _lock:
-            _status['lastError'] = 'trace:' + str(exc)[:160]
-    try:
-        if alert_daemon := __import__('alert_daemon'):
-            alert_daemon.deliver_signal_events((context.get('earlyWarnings') or {}).get('newEvents') or [])
+        import alert_daemon
+        while item := _store.claim_delivery(path):
+            snapshot_id, events = item
+            try:
+                result = alert_daemon.deliver_signal_events(events)
+                failed = isinstance(result, dict) and (result.get('ok') is False or any(
+                    row.get('ok') is False for row in result.get('results', []) if isinstance(row, dict)))
+                _store.finish_delivery(path, snapshot_id, result, failed)
+                if failed:
+                    with _lock:
+                        _status['lastError'] = 'signal-delivery:通知傳送未完成，已保留結果供檢查'
+            except Exception as exc:
+                _store.finish_delivery(path, snapshot_id, {'error': str(exc)[:160]}, True)
+                with _lock:
+                    _status['lastError'] = 'signal-delivery:' + str(exc)[:160]
     except Exception as exc:
         with _lock:
             _status['lastError'] = 'signal-delivery:' + str(exc)[:160]
-    return context
 
 
-def build_and_publish(pulse: dict, **kwargs: Any) -> dict:
+def _acknowledge_committed(snapshot_id: str, path: str) -> None:
+    if not is_enabled('shadowEarlyWarning'):
+        return
+    try:
+        import early_warning
+        acknowledge = getattr(early_warning, 'acknowledge_publication', None)
+        signal_path = early_warning.DB_PATH if os.path.abspath(path) == os.path.abspath(DB_PATH) else os.path.join(
+            os.path.dirname(os.path.abspath(path)), 'market_signals.db')
+        if callable(acknowledge):
+            acknowledge(snapshot_id, db_path=signal_path)
+    except Exception as exc:
+        with _lock:
+            _status['lastError'] = 'signal-receipt:' + str(exc)[:160]
+
+
+def _finish_publication(payload: dict, path: str, trace_path: str, elapsed_ms: int) -> dict:
+    import early_warning
+    context = copy.deepcopy(payload['context'])
+    inputs = payload['inputs']
+    signal_path = early_warning.DB_PATH
+    if os.path.abspath(path) != os.path.abspath(DB_PATH):
+        signal_path = os.path.join(os.path.dirname(os.path.abspath(path)), 'market_signals.db')
+    warning = early_warning.process_context(
+        context, inputs['pulse'], memory_snapshot=payload['memory'],
+        market_history=inputs.get('index_history'), db_path=signal_path,
+        now=_aware_datetime(payload['evaluationAt']), publication_id=payload['snapshotId']) if is_enabled('shadowEarlyWarning') else disabled_early_warning()
+    context['earlyWarnings'] = warning
+    _attach_warning_evidence(context, warning)
+    context['consensusAttention'] = (_consensus_attention.build_consensus_attention(context)
+                                     if is_enabled('shadowConsensusAttention') else disabled_consensus_attention())
+    saved = _store.commit(path, context, inputs, _iso_now())
+    _install_committed(saved, path, elapsed_ms)
+    _acknowledge_committed(context['snapshotId'], path)
+    try:
+        _write_trace(saved['context'], context['inputHash'], elapsed_ms, trace_path)
+    except Exception as exc:
+        with _lock:
+            _status['lastError'] = 'trace:' + str(exc)[:160]
+    _deliver_committed(path)
+    return _current_context_view(copy.deepcopy(saved['context']), saved['inputs'])
+
+
+def publish_context(
+    context: dict, *, pulse: dict, build_kwargs: dict[str, Any] | None = None,
+    db_path: str = DB_PATH, trace_path: str = TRACE_PATH, elapsed_ms: int = 0,
+    publication_guard: Any = None,
+) -> dict:
+    """先記錄意圖，再完成可重播預警與決策提交，最後公開及處理通知。"""
+    with _publish_lock:
+        try:
+            if publication_guard is not None:
+                publication_guard()
+            _ensure_latest(db_path)
+            with _lock:
+                previous_snapshot_id = (_latest_context or {}).get('snapshotId')
+            if previous_snapshot_id:
+                _acknowledge_committed(previous_snapshot_id, db_path)
+            for payload in _store.pending(db_path):
+                if payload['context']['rulesDigest'] != _rules_digest():
+                    raise SnapshotPublicationError('待恢復決策的規則版本不同，保留意圖並停止新發布')
+                _finish_publication(payload, db_path, trace_path, elapsed_ms)
+            with _lock:
+                previous_pulse = (_latest_inputs or {}).get('pulse') or {}
+                previous = _aware_datetime(previous_pulse.get('updateStartedAt') or previous_pulse.get('updatedAt'))
+                candidate = _aware_datetime(pulse.get('updateStartedAt') or pulse.get('updatedAt'))
+                if _latest_context and previous and (candidate is None or candidate < previous):
+                    rejected = copy.deepcopy(_latest_context)
+                    rejected['publicationStatus'] = 'superseded'
+                    return rejected
+            import overnight_intraday
+            frozen_context = _store.freeze(context or {})
+            inputs = _store.freeze({'pulse': pulse, **(build_kwargs or {})})
+            memory = (_store.freeze(overnight_intraday.latest_cached('all'))
+                      if is_enabled('shadowOvernightIntraday') else None)
+            fingerprint = _fingerprint(inputs['pulse'], {**(build_kwargs or {}), 'warningMemory': memory}, frozen_context)
+            snapshot_id = 'dc-' + fingerprint
+            existing = _store.load(db_path, snapshot_id)
+            if existing:
+                _deliver_committed(db_path)
+                with _lock:
+                    current = copy.deepcopy(_latest_context)
+                if current and current['revision'] > existing['context']['revision']:
+                    current['publicationStatus'] = 'superseded'
+                    return current
+                return _current_context_view(copy.deepcopy(existing['context']), existing['inputs'])
+            frozen_context.update(inputHash=fingerprint, rulesDigest=_rules_digest(), snapshotId=snapshot_id)
+            if publication_guard is not None:
+                publication_guard()
+            payload = {'snapshotId': snapshot_id, 'context': frozen_context, 'inputs': inputs,
+                       'memory': memory, 'evaluationAt': _iso_now()}
+            _store.prepare(db_path, payload)
+            return _finish_publication(payload, db_path, trace_path, elapsed_ms)
+        except Exception as exc:
+            with _lock:
+                _status['lastError'] = 'publication:' + str(exc)[:160]
+            raise SnapshotPublicationError('決策快照尚未提交：' + str(exc)[:160]) from exc
+
+
+def _attach_warning_evidence(context: dict, warning: dict) -> None:
+    source_map = {
+        'globalTech': ('Yahoo Finance', 'latest finalized US session'),
+        'anchor': ('Yahoo Finance + ST benchmark research registry', '2330 and 0050-ex-2330 residual where eligible'),
+        'memoryCycle': ('ST overnight-intraday fixed baskets', '20-session adjusted daily session structure'),
+        'breadthLiquidity': ('TWSE breadth + sector participation', 'same-session stock breadth and sector scope'),
+        'flowDerivatives': ('TWSE/TAIFEX canonical Pulse', 'institutional, same-contract OI and futures context'),
+    }
+    warning_evidence = []
+    for family in warning.get('familyScores') or []:
+        source, reference = source_map.get(family.get('id'), ('ST deterministic signal engine', 'canonical inputs'))
+        temporal = family.get('temporal') or {}
+        warning_evidence.append({
+            'id': 'signal.family.' + str(family.get('id') or 'unknown'),
+            'metric': 'shadowFamilyScore',
+            'value': {
+                'score': family.get('value'), 'quality': family.get('quality'),
+                'available': family.get('available'), 'observed': family.get('observed') or {},
+                'temporal': temporal,
+            },
+            'comparison': 'negative -1 / neutral 0 / positive +1',
+            'source': source, 'marketScope': temporal.get('market') or 'TW_CROSS_MARKET',
+            'session': temporal.get('session') or 'session_aligned_shadow',
+            'asOf': temporal.get('sourceAsOf') or warning.get('asOf'), 'reference': reference,
+            'quality': 'derived' if family.get('available') else 'insufficient',
+            'authority': 'shadow_observation',
+        })
+    validation = warning.get('prospectiveValidation') or {}
+    validation_status = str(validation.get('status') or 'empty')
+    warning_evidence.append({
+        'id': 'signal.prospective_validation',
+        'metric': 'prospectiveSignalLedger',
+        'value': {
+            'status': validation_status,
+            'totalTrials': validation.get('totalTrials', 0),
+            'resolvedOutcomes': validation.get('resolvedOutcomes', 0),
+            'coveragePct': validation.get('coveragePct', 0),
+            'horizons': validation.get('horizons') or [],
+        },
+        'comparison': '1 / 3 / 5 finalized sessions; empirical rates withheld below n=20',
+        'source': 'ST append-only prospective signal ledger',
+        'marketScope': 'TW_CROSS_MARKET', 'session': 'finalized_daily_close',
+        'asOf': warning.get('asOf'),
+        'reference': 'First observed tracked episode; no retrospective backfill',
+        'quality': ('observed' if validation_status == 'ready' else
+                    ('building' if validation_status in ('building', 'empty') else 'insufficient')),
+        'authority': 'shadow_validation',
+    })
+    context['evidence'] = list(context.get('evidence') or []) + warning_evidence
+
+
+def build_and_publish(pulse: dict, *, publication_guard: Any = None, **kwargs: Any) -> dict:
     started = time.perf_counter()
     context = build_decision_context(pulse, **kwargs)
     elapsed = int((time.perf_counter() - started) * 1000)
     base_kwargs = {k: v for k, v in kwargs.items() if k not in ('portfolio_overlay', 'risk_profile', 'portfolio_kind')}
-    return publish_context(context, pulse=pulse, build_kwargs=base_kwargs, elapsed_ms=elapsed)
+    return publish_context(context, pulse=pulse, build_kwargs=base_kwargs, elapsed_ms=elapsed,
+                           publication_guard=publication_guard)
 
 
-def latest_context() -> dict | None:
+def _current_context_view(context: dict | None, inputs: dict, now: datetime | None = None) -> dict | None:
+    """讀取時只檢查效期，保留原觀測與內容；不發布、不寫入或推進預警。"""
+    if not context:
+        return None
+    pulse = inputs.get('pulse') or {}
+    snapshot = pulse.get('snapshot') or {}
+    twii = _quote(pulse, '^TWII', (pulse.get('indices') or {}).get('t00') or snapshot.get('t00') or {})
+    txf = _quote(pulse, '__TXF__', pulse.get('txf') or snapshot.get('txf') or {})
+    quality = _source_quality(pulse, twii, txf, now or datetime.now(timezone.utc), inputs.get('session_calendar'))
+    freshness = min(quality[name]['freshness'] for name in ('twii', 'breadth'))
+    context['viewState'] = 'source_expired' if freshness < 0.25 else 'current'
+    data_quality = context.setdefault('dataQuality', {})
+    data_quality.update(freshness=freshness, sourceQuality=quality)
+    data_quality['staleFields'] = sorted(set(data_quality.get('staleFields') or []) |
+                                         {name for name, row in quality.items() if row['freshness'] < 0.25})
+    if freshness < 0.25:
+        context['lastObservedRegime'] = copy.deepcopy(context.get('regime'))
+        context['regime'] = empty_context()['regime']
+        context['actionEnvelope'] = _action_envelope('INSUFFICIENT_DATA', context.get('divergences') or [],
+            context.get('keyLevels') or {}, 0.0, None, context.get('portfolioOverlay'), context.get('exposureLab'))
+        context['actionEnvelope']['constraints'].append('source_data_expired')
+        if isinstance(context.get('exposureLab'), dict):
+            context['exposureLab']['finalEligibleRange'] = None
+        context['consensusAttention'] = (_consensus_attention.build_consensus_attention(context)
+                                     if is_enabled('shadowConsensusAttention') else disabled_consensus_attention())
+    return context
+
+
+def latest_context(now: datetime | None = None) -> dict | None:
+    _ensure_latest()
     with _lock:
-        return json.loads(json.dumps(_latest_context, ensure_ascii=False)) if _latest_context else None
+        context = copy.deepcopy(_latest_context)
+        inputs = copy.deepcopy(_latest_inputs or {})
+    return _current_context_view(context, inputs, now)
+
+
+def latest_pulse() -> dict | None:
+    """供被取代的更新回傳已接納快照，避免把舊行情配上新摘要。"""
+    _ensure_latest()
+    with _lock:
+        pulse = copy.deepcopy((_latest_inputs or {}).get('pulse'))
+        context = copy.deepcopy(_latest_context)
+        inputs = copy.deepcopy(_latest_inputs or {})
+    if pulse and context:
+        pulse['decisionSummary'] = compact_context(_current_context_view(context, inputs))
+    return pulse
+
+
+def committed_pulse_for_job(job_id: str) -> dict | None:
+    """依工作編號核對已提交歷史，供發布意圖恢復後更正工作結果。"""
+    path = _active_db_path or DB_PATH
+    rows = _store.read_rows(path, 'SELECT snapshot_id FROM decision_commits '
+        "WHERE json_extract(inputs_json, '$.pulse.updateJobId')=? ORDER BY revision DESC LIMIT 1",
+        (job_id,))
+    saved = _store.load(path, rows[0][0]) if rows else None
+    if not saved:
+        return None
+    pulse = copy.deepcopy(saved['inputs']['pulse'])
+    pulse['decisionSummary'] = compact_context(saved['context'])
+    return pulse
 
 
 def rebuild_latest(
@@ -1526,10 +1777,14 @@ def rebuild_latest(
     risk_profile: dict | None = None,
     portfolio_overlay: dict | None = None,
     portfolio_kind: str = 'actual',
+    portfolio_input_status: str | None = None,
     options_structure: dict[str, Any] | None = None,
 ) -> dict:
+    _ensure_latest()
     with _lock:
-        inputs = dict(_latest_inputs or {})
+        parent_snapshot_id = (_latest_context or {}).get('snapshotId')
+        parent_revision = (_latest_context or {}).get('revision')
+        inputs = copy.deepcopy(_latest_inputs or {})
         latest_warning = ((_latest_context or {}).get('earlyWarnings') if _latest_context else None)
         latest_warning_evidence = [
             row for row in (((_latest_context or {}).get('evidence') if _latest_context else None) or [])
@@ -1537,25 +1792,38 @@ def rebuild_latest(
         ]
     if not inputs:
         return empty_context('pulse_not_ready')
+    # 即時 POST 不沿用回放或測試注入的固定時鐘。
+    inputs.pop('now', None)
     if options_structure is not None:
         inputs['options_structure'] = options_structure
     context = build_decision_context(**inputs, risk_profile=risk_profile, portfolio_overlay=portfolio_overlay, portfolio_kind=portfolio_kind)
+    if portfolio_input_status in ('empty', 'incomplete'):
+        # 缺持倉不是零風險，也不能用 Risk Profile 單獨推算實際部位範圍。
+        envelope = context.get('actionEnvelope') or {}
+        envelope['positionRange'] = None
+        envelope.setdefault('constraints', []).append('portfolio_input_' + portfolio_input_status)
+        context['actionEnvelope'] = envelope
+        if isinstance(context.get('exposureLab'), dict):
+            context['exposureLab']['finalEligibleRange'] = None
+        context['portfolioInputStatus'] = portfolio_input_status
+    elif portfolio_input_status:
+        context['portfolioInputStatus'] = portfolio_input_status
     if is_enabled('shadowEarlyWarning') and latest_warning:
         context['earlyWarnings'] = json.loads(json.dumps(latest_warning, ensure_ascii=False))
         context['evidence'] = list(context.get('evidence') or []) + json.loads(
             json.dumps(latest_warning_evidence, ensure_ascii=False))
-    elif not is_enabled('shadowEarlyWarning'):
+    context['consensusAttention'] = (_consensus_attention.build_consensus_attention(context)
+                                     if is_enabled('shadowConsensusAttention') else disabled_consensus_attention())
+    if not is_enabled('shadowEarlyWarning'):
         context['earlyWarnings'] = disabled_early_warning()
-    context['consensusAttention'] = (
-        _consensus_attention.build_consensus_attention(context)
-        if is_enabled('shadowConsensusAttention')
-        else disabled_consensus_attention()
-    )
+    context.update(parentSnapshotId=parent_snapshot_id, parentRevision=parent_revision, persistence='ephemeral',
+                   publicationStatus='derived', viewScope='personal', rulesDigest=_rules_digest())
     return context
 
 
 def latest_market_reference() -> dict[str, Any] | None:
     """Return the exact canonical TWII quote used by the latest Pulse build."""
+    _ensure_latest()
     with _lock:
         inputs = dict(_latest_inputs or {})
     pulse = inputs.get('pulse') or {}
@@ -1579,11 +1847,13 @@ def latest_market_reference() -> dict[str, Any] | None:
 
 def update_options_structure(options_structure: dict[str, Any]) -> dict:
     """Rebuild and publish the canonical context after an explicit TXO refresh."""
+    _ensure_latest()
     with _lock:
         inputs = dict(_latest_inputs or {})
     pulse = inputs.pop('pulse', None)
     if not pulse:
         return empty_context('pulse_not_ready')
+    inputs.pop('now', None)
     inputs['options_structure'] = dict(options_structure or {})
     started = time.perf_counter()
     context = build_decision_context(pulse, **inputs)
@@ -1591,13 +1861,12 @@ def update_options_structure(options_structure: dict[str, Any]) -> dict:
     return publish_context(context, pulse=pulse, build_kwargs=inputs, elapsed_ms=elapsed)
 
 
-def history(n: int = 40, path: str = DB_PATH) -> dict[str, Any]:
+def history(n: int = 40, path: str | None = None) -> dict[str, Any]:
+    path = path or _active_db_path or DB_PATH
     n = max(1, min(int(n or 40), 120))
     try:
-        _init_db(path)
-        with closing(sqlite3.connect(path, timeout=10)) as conn:
-            rows = conn.execute('SELECT as_of,regime,confidence,completeness,context_json FROM decision_history '
-                                'ORDER BY id DESC LIMIT ?', (n,)).fetchall()
+        rows = _store.read_rows(path, 'SELECT as_of,regime,confidence,completeness,context_json FROM decision_history '
+                                'ORDER BY id DESC LIMIT ?', (n,))
         return {'ok': True, 'model': ENGINE_VERSION, 'rows': [
             {'asOf': r[0], 'regime': r[1], 'confidence': r[2], 'completeness': r[3],
              'context': json.loads(r[4]) if r[4] else None} for r in rows
@@ -1626,9 +1895,9 @@ def replay(pulses: Iterable[dict], **kwargs: Any) -> dict[str, Any]:
 
 
 def engine_status() -> dict[str, Any]:
+    ctx = latest_context()
     with _lock:
         last = dict(_status)
-        ctx = _latest_context
     age = None
     if last.get('lastSuccess'):
         try:
@@ -1636,6 +1905,10 @@ def engine_status() -> dict[str, Any]:
         except Exception:
             age = None
     return {
+        **_store.status(_active_db_path or DB_PATH),
+        'snapshotId': (ctx or {}).get('snapshotId'),
+        'revision': (ctx or {}).get('revision'),
+        'persistence': (ctx or {}).get('persistence'),
         'version': ENGINE_VERSION,
         'contractVersion': CONTRACT_VERSION,
         'lastSuccess': last.get('lastSuccess'),

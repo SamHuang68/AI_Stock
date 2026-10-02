@@ -26,8 +26,14 @@ _HEADERS = {'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}
 
 
 def _date_key(value: Any) -> str | None:
-    text = str(value or '').strip().replace('-', '').replace('/', '')
-    return text if len(text) == 8 and text.isdigit() else None
+    text = sector_flow.normalize_session_date(value)
+    if text is None:
+        return None
+    try:
+        datetime.strptime(text, '%Y%m%d')
+        return text
+    except ValueError:
+        return None
 
 
 def _init(path: str = DB_PATH) -> None:
@@ -70,8 +76,11 @@ def available_dates(path: str = DB_PATH) -> list[str]:
             'SELECT DISTINCT date FROM sector_daily ORDER BY date DESC').fetchall()]
 
 
-def return20_by_sector(path: str = DB_PATH) -> dict[str, float]:
-    dates = available_dates(path)[:21]
+def return20_by_sector(path: str = DB_PATH, *, as_of: Any = None) -> dict[str, float]:
+    cutoff = _date_key(as_of) if as_of is not None else None
+    if as_of is not None and cutoff is None:
+        return {}
+    dates = [day for day in available_dates(path) if cutoff is None or day <= cutoff][:21]
     if len(dates) < 21:
         return {}
     latest, oldest = dates[0], dates[-1]
@@ -88,7 +97,25 @@ def return20_by_sector(path: str = DB_PATH) -> dict[str, float]:
     return out
 
 
-def benchmark_return20(bars: Iterable[dict[str, Any]] | None) -> float | None:
+def benchmark_return20(bars: Iterable[dict[str, Any]] | None, *, session_dates=None) -> float | None:
+    if session_dates is not None:
+        # 備援基準必須使用類股相同的兩個端點，不以本機最新 21 根偷換截止日。
+        from stock_signals import bar_date
+        values = {}
+        for row in bars or []:
+            if not isinstance(row, dict):
+                continue
+            try:
+                day = _date_key(bar_date(row.get('time', row.get('ts', row.get('date')))))
+            except (TypeError, ValueError, OverflowError, OSError):
+                continue
+            close = sector_flow._number(row.get('close', row.get('Close')))
+            if day and close is not None and close > 0:
+                values[day] = close
+        if len(session_dates) < 21:
+            return None
+        start, end = values.get(session_dates[-1]), values.get(session_dates[0])
+        return (end / start - 1) * 100 if start and end else None
     closes = []
     for row in bars or []:
         if not isinstance(row, dict):
@@ -164,7 +191,7 @@ def enrich_sector_rows(
     boot = {'attempted': 0, 'completed': 0, 'dates': before}
     if bootstrap and before < 21:
         boot = bootstrap_history(as_of, path=path, budget_seconds=budget_seconds)
-    returns = return20_by_sector(path)
+    returns = return20_by_sector(path, as_of=as_of)
     # Prefer the TAIEX close carried in the very same MI_INDEX snapshots.  This keeps
     # sector return and benchmark on identical sessions/source; local ^TWII bars are
     # only a labelled fallback when the official history cache is still incomplete.
@@ -172,7 +199,9 @@ def enrich_sector_rows(
     benchmark = returns.get(benchmark_key)
     benchmark_source = 'TWSE MI_INDEX IND 發行量加權股價 daily close'
     if benchmark is None:
-        benchmark = benchmark_return20(benchmark_bars)
+        cutoff = _date_key(as_of)
+        dates = [day for day in available_dates(path) if cutoff and day <= cutoff][:21]
+        benchmark = benchmark_return20(benchmark_bars, session_dates=dates)
         benchmark_source = 'local ^TWII daily bars fallback' if benchmark is not None else None
     enriched = sector_flow.attach_sector_metrics(
         rows, industry_turnover_yi=industry_turnover_yi, return20_by_sector=returns)

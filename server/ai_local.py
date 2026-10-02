@@ -13,7 +13,9 @@ import hashlib
 import json
 import os
 import shutil
+import socket
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.request
@@ -79,6 +81,8 @@ SYSTEM = (
 )
 
 _TRACE_LOCK = threading.Lock()
+# 本機版與私有網站在同一使用者下共用鎖，程序退出由作業系統釋放。
+FAST_LOCK_DIR = Path(tempfile.gettempdir()) / 'StockTerminal' / 'ai-runtime'
 
 
 class AiRuntimeError(RuntimeError):
@@ -87,6 +91,60 @@ class AiRuntimeError(RuntimeError):
 
 class AiCompletionError(AiRuntimeError):
     """The model transport completed without one trustworthy visible answer."""
+
+
+class AiCancelledError(AiRuntimeError):
+    """取消不屬於正常完成。"""
+
+
+class _StreamControl:
+    """總期限包含等待資料；取消時中斷已取得的 socket，不只在收到 token 時檢查。"""
+
+    def __init__(self, timeout: float, cancel_event=None):
+        self.deadline = time.monotonic() + timeout
+        self.cancel_event = cancel_event or threading.Event()
+        self.closed = threading.Event()
+        self.response = None
+        self.watcher = None
+
+    def check(self):
+        if self.cancel_event.is_set():
+            raise AiCancelledError('已取消本次分析；模型可能仍在收尾。')
+        if time.monotonic() >= self.deadline:
+            raise AiRuntimeError('本機模型推理超過等待上限，已停止本次分析；請稍後重試。')
+
+    def watch(self, response):
+        self.response = response
+
+        def interrupt():
+            while not self.closed.wait(0.1):
+                if self.cancel_event.is_set() or time.monotonic() >= self.deadline:
+                    # HTTPResponse.close() 可能等候讀取鎖；先 shutdown 喚醒阻塞中的 read。
+                    sock = getattr(getattr(getattr(response, 'fp', None), 'raw', None), '_sock', None)
+                    if sock is not None:
+                        try:
+                            sock.shutdown(socket.SHUT_RDWR)
+                        except OSError:
+                            pass
+                        # Windows 上 shutdown 不一定喚醒已進入 recv 的讀取。
+                        # detach 後關閉原 socket，讓 HTTPResponse 後續 close 不會
+                        # 再關閉同一個描述符，也避免 makefile 參照延後實際關閉。
+                        try:
+                            descriptor = sock.detach()
+                            if descriptor >= 0:
+                                socket.close(descriptor)
+                        except OSError:
+                            pass
+                    return
+
+        self.watcher = threading.Thread(target=interrupt, name='st-ai-stream-deadline', daemon=True)
+        self.watcher.start()
+        self.check()
+
+    def close(self):
+        self.closed.set()
+        if self.watcher is not None:
+            self.watcher.join(timeout=0.3)
 
 
 def _trace(event: str, *, request_id: str, mode: str, **details: object) -> None:
@@ -245,14 +303,14 @@ def _acquire_st_slot() -> tuple[bool, Optional[str]]:
     try:
         import llm_gate as gate
         if gate.wd_busy():
-            if not gate.wait_or_defer("st", wait_sec=2.0, ttl_sec=FAST_ESTIMATE_SECONDS + 180):
+            if not gate.wait_or_defer("st", wait_sec=2.0, ttl_sec=FAST_SOCKET_TIMEOUT + 30):
                 return False, "WD 微觀推論優先中，請稍後再試"
             return True, None
-        if not gate.acquire("st", ttl_sec=FAST_ESTIMATE_SECONDS + 180):
+        if not gate.acquire("st", ttl_sec=FAST_SOCKET_TIMEOUT + 30):
             return False, "EVO-T1 本機模型忙碌，請稍後再試"
         return True, None
     except Exception:
-        return True, None
+        return False, '無法確認本機模型占用狀態，請稍後再試'
 
 
 def _release_st_slot() -> None:
@@ -277,9 +335,11 @@ def _stream_lmstudio(
     full_prompt: str,
     *,
     diagnostics: Optional[Dict[str, Any]] = None,
+    control=None,
 ) -> Generator[str, None, None]:
     diagnostics = diagnostics if diagnostics is not None else {}
     diagnostics.update({"maxTokens": FAST_MAX_TOKENS, "outputChars": 0})
+    visible = False
     payload = {
         "model": FAST_MODEL,
         "messages": [{"role": "user", "content": full_prompt}],
@@ -292,8 +352,13 @@ def _stream_lmstudio(
         LMSTUDIO_CHAT_URL, data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json", "Accept": "text/event-stream"},
     )
-    with urllib.request.urlopen(request, timeout=FAST_SOCKET_TIMEOUT) as response:
+    timeout = max(0.01, control.deadline - time.monotonic()) if control else FAST_SOCKET_TIMEOUT
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        if control is not None:
+            control.watch(response)
         for raw in response:
+            if control is not None:
+                control.check()
             line = raw.decode("utf-8", "replace").strip()
             if not line.startswith("data:"):
                 continue
@@ -302,6 +367,8 @@ def _stream_lmstudio(
                 break
             try:
                 item = json.loads(data)
+                if not isinstance(item, dict) or item.get('error'):
+                    raise AiCompletionError('本機模型回傳無效或失敗的回覆；請重試。')
                 choices = item.get("choices") or []
                 choice = choices[0] if choices and isinstance(choices[0], dict) else {}
                 finish_reason = choice.get("finish_reason")
@@ -326,23 +393,31 @@ def _stream_lmstudio(
                 delta = choice.get("delta") or {}
                 content = delta.get("content") if isinstance(delta, dict) else None
                 if isinstance(content, str) and content:
+                    visible = visible or bool(content.strip())
                     diagnostics["outputChars"] = int(diagnostics.get("outputChars") or 0) + len(content)
                     yield content
-            except (TypeError, ValueError):
-                continue
+            except (TypeError, ValueError) as exc:
+                raise AiCompletionError('本機模型回應格式無效，無法確認完整正文；請重試。') from exc
     output_chars = int(diagnostics.get("outputChars") or 0)
     finish_reason = diagnostics.get("finishReason")
-    if output_chars <= 0 and finish_reason == "length":
+    if not visible and finish_reason == "length":
         raise AiCompletionError(
             f"本機模型已用完 {FAST_MAX_TOKENS} 個輸出 token，但尚未產生可見正文；請重試。"
         )
-    if output_chars <= 0:
+    if not visible:
         raise AiCompletionError("本機模型完成推理，但未回傳可見正文；請重試。")
     if finish_reason == "length":
         raise AiCompletionError("本機模型回覆達輸出上限，內容可能不完整；請重試。")
+    if control is not None:
+        control.check()
+    if finish_reason != 'stop':
+        raise AiCompletionError('本機模型未正常完成回覆，內容可能不完整；請重試。')
 
 
-def _stream_ollama(full_prompt: str) -> Generator[str, None, None]:
+def _stream_ollama(full_prompt: str, *, control=None) -> Generator[str, None, None]:
+    completed = False
+    output_chars = 0
+    visible = False
     payload = {
         "model": FAST_MODEL,
         "messages": [{"role": "user", "content": full_prompt}],
@@ -353,17 +428,34 @@ def _stream_ollama(full_prompt: str) -> Generator[str, None, None]:
         OLLAMA_CHAT_URL, data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(request, timeout=FAST_SOCKET_TIMEOUT) as response:
+    timeout = max(0.01, control.deadline - time.monotonic()) if control else FAST_SOCKET_TIMEOUT
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        if control is not None:
+            control.watch(response)
         for raw in response:
+            if control is not None:
+                control.check()
             try:
                 item = json.loads(raw.decode("utf-8", "replace"))
-            except (TypeError, ValueError):
-                continue
-            chunk = (item.get("message") or {}).get("content")
-            if chunk:
-                yield str(chunk)
-            if item.get("done"):
+            except (TypeError, ValueError) as exc:
+                raise AiCompletionError('本機模型回應格式無效，無法確認完整正文；請重試。') from exc
+            if not isinstance(item, dict) or item.get('error'):
+                raise AiCompletionError('本機模型回傳無效或失敗的回覆；請重試。')
+            message = item.get('message') or {}
+            chunk = message.get('content') if isinstance(message, dict) else None
+            if isinstance(chunk, str) and chunk:
+                output_chars += len(chunk)
+                visible = visible or bool(chunk.strip())
+                yield chunk
+            if item.get("done") is True:
+                if item.get('done_reason') not in (None, 'stop'):
+                    raise AiCompletionError('本機模型未正常完成回覆，內容可能不完整；請重試。')
+                completed = True
                 break
+    if control is not None:
+        control.check()
+    if not completed or not visible:
+        raise AiCompletionError('本機模型未正常完成可見正文，內容可能不完整；請重試。')
 
 
 def chat_stream(
@@ -372,20 +464,30 @@ def chat_stream(
     model: Optional[str] = None,
     *,
     request_id: Optional[str] = None,
+    cancel_event=None,
 ) -> Generator[str, None, None]:
     """Stream the fixed fast-local route; caller model overrides are ignored."""
     del model
+    control = _StreamControl(FAST_SOCKET_TIMEOUT, cancel_event)
+    control.check()
     request_id = request_id or uuid.uuid4().hex
     metadata = route_metadata("fast", probe=True)
     if not metadata.get("available"):
         raise AiRuntimeError(str(metadata.get("reason") or "快速本機模型未就緒"))
     full_prompt, digest = _full_prompt(prompt, context)
-    ok, defer = _acquire_st_slot()
-    if not ok:
-        raise AiRuntimeError(defer or "本機模型忙碌")
+    from daemon_lock import acquire_daemon_lock, release_daemon_lock
+    try:
+        runtime_lock = acquire_daemon_lock('fast-ai', lock_dir=FAST_LOCK_DIR)
+    except OSError as exc:
+        raise AiRuntimeError('無法取得本機 AI 執行鎖，請稍後重試') from exc
+    if runtime_lock is None:
+        raise AiRuntimeError('本機 AI 正在處理另一份分析；請等待完成後再試。')
     started = time.monotonic()
     output_chars = 0
+    visible = False
     diagnostics: Dict[str, Any] = {"maxTokens": FAST_MAX_TOKENS}
+    iterator = None
+    slot_acquired = False
     _trace(
         "started", request_id=request_id, mode="fast",
         provider=metadata["provider"], model=metadata["model"],
@@ -393,14 +495,22 @@ def chat_stream(
         inputChars=len(full_prompt), inputHash=digest, maxTokens=FAST_MAX_TOKENS,
     )
     try:
+        ok, defer = _acquire_st_slot()
+        if not ok:
+            raise AiRuntimeError(defer or '本機模型忙碌')
+        slot_acquired = True
+        control.check()
         iterator = (
-            _stream_lmstudio(full_prompt, diagnostics=diagnostics)
-            if FAST_PROVIDER == "lmstudio" else _stream_ollama(full_prompt)
+            _stream_lmstudio(full_prompt, diagnostics=diagnostics, control=control)
+            if FAST_PROVIDER == "lmstudio" else _stream_ollama(full_prompt, control=control)
         )
         for chunk in iterator:
+            control.check()
             output_chars += len(chunk)
+            visible = visible or bool(chunk.strip())
             yield chunk
-        if output_chars <= 0:
+        control.check()
+        if not visible:
             raise AiCompletionError("本機模型完成推理，但未回傳可見正文；請重試。")
         _trace(
             "completed", request_id=request_id, mode="fast",
@@ -413,6 +523,10 @@ def chat_stream(
             reasoningTokens=diagnostics.get("reasoningTokens"),
         )
     except Exception as exc:
+        try:
+            control.check()
+        except AiRuntimeError as interrupted:
+            exc = interrupted
         _trace(
             "failed", request_id=request_id, mode="fast",
             provider=metadata["provider"], model=metadata["model"],
@@ -426,10 +540,17 @@ def chat_stream(
             reasoningTokens=diagnostics.get("reasoningTokens"),
         )
         if isinstance(exc, AiRuntimeError):
-            raise
+            raise exc
         raise AiRuntimeError(f"{metadata['provider']} 快速摘要失敗：{type(exc).__name__}") from exc
     finally:
-        _release_st_slot()
+        try:
+            control.close()
+            if iterator is not None and hasattr(iterator, 'close'):
+                iterator.close()
+        finally:
+            if slot_acquired:
+                _release_st_slot()
+            release_daemon_lock(runtime_lock)
 
 
 def _hermes_command(executable: Path) -> list[str]:
@@ -446,6 +567,7 @@ def deep_stream(
     context: str = "",
     *,
     request_id: Optional[str] = None,
+    cancel_event=None,
 ) -> Generator[str, None, None]:
     """Run one bounded Hermes advisory turn and yield its final text."""
     request_id = request_id or uuid.uuid4().hex
@@ -465,13 +587,28 @@ def deep_stream(
     environment.update({"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
     process: subprocess.Popen[str] | None = None
     try:
+        if cancel_event is not None and cancel_event.is_set():
+            raise AiCancelledError('已取消本次分析')
         process = subprocess.Popen(
             _hermes_command(executable), cwd=ROOT, env=environment,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace",
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        stdout, stderr = process.communicate(input=full_prompt, timeout=DEEP_PROCESS_TIMEOUT)
+        supplied_input = full_prompt
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                raise AiCancelledError('已取消本次分析；模型可能仍在收尾。')
+            remaining = DEEP_PROCESS_TIMEOUT - (time.monotonic() - started)
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired('hermes', DEEP_PROCESS_TIMEOUT)
+            try:
+                stdout, stderr = process.communicate(input=supplied_input, timeout=min(0.25, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                supplied_input = None
+        if cancel_event is not None and cancel_event.is_set():
+            raise AiCancelledError('已取消本次分析')
         reply = str(stdout or "").strip()
         if process.returncode != 0:
             lines = str(stderr or "").strip().splitlines()
@@ -508,6 +645,10 @@ def deep_stream(
         if isinstance(exc, AiRuntimeError):
             raise
         raise AiRuntimeError(f"Hermes 深度分析失敗：{type(exc).__name__}") from exc
+    finally:
+        if process is not None and process.returncode is None:
+            process.kill()
+            process.communicate()
 
 
 def chat(prompt: str, context: str = "", model: Optional[str] = None) -> Dict[str, Any]:

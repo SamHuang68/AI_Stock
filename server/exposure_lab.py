@@ -474,7 +474,7 @@ def portfolio_lookthrough(stocks: dict | None) -> dict[str, Any] | None:
     tech_coverage = 0.0
     rows = []
     for raw_symbol, raw in stocks.items():
-        symbol = str(raw_symbol).upper().replace('.TW', '').replace('.TWO', '')
+        symbol = str(raw_symbol).strip().upper().removesuffix('.TWO').removesuffix('.TW')
         surface = _number((raw or {}).get('weight')) or 0.0
         product = PRODUCTS.get(symbol, {})
         multiple = _number(product.get('leverageMultiple')) or 1.0
@@ -523,7 +523,7 @@ def _actual_holding_symbols(portfolio: dict | None) -> set[str]:
         return set()
     symbols: set[str] = set()
     for raw_symbol, row in stocks.items():
-        symbol = str(raw_symbol).upper().replace('.TW', '').replace('.TWO', '')
+        symbol = str(raw_symbol).strip().upper().removesuffix('.TWO').removesuffix('.TW')
         if (_number((row or {}).get('weight')) or 0.0) > 0:
             symbols.add(symbol)
     return symbols

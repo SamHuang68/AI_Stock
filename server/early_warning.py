@@ -13,7 +13,7 @@ import json
 import os
 import sqlite3
 import time
-from contextlib import closing
+from contextlib import closing, nullcontext
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -31,6 +31,7 @@ OUTCOME_MODEL_VERSION = 'st-signal-prospective-ledger/v1'
 OUTCOME_HORIZONS = (1, 3, 5)
 OUTCOME_MIN_SAMPLE = 20
 MATERIAL_MOVE_PCT = 2.0
+_PUBLICATION_RECEIPT_RETAIN = 500
 _TRACKED_STATES = ('WATCH', 'ARMED', 'CONFIRMED', 'ACTIVE')
 _HEADLINE_SIGNAL_IDS = ('TW_DOWNSIDE_PRECURSOR', 'TW_ATTACK_BUILDUP')
 
@@ -991,6 +992,12 @@ def _init_db(path: str = DB_PATH) -> None:
             conn.execute('CREATE TABLE IF NOT EXISTS signal_events('
                          'id INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT UNIQUE,signal_id TEXT,direction TEXT,'
                          'from_state TEXT,to_state TEXT,tier TEXT,as_of TEXT,created_at TEXT,dedupe_key TEXT,event_json TEXT)')
+            conn.execute('CREATE TABLE IF NOT EXISTS signal_publication_receipts('
+                         'publication_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,result_json TEXT NOT NULL,'
+                         'committed_at TEXT)')
+            receipt_columns = {str(row[1]) for row in conn.execute('PRAGMA table_info(signal_publication_receipts)')}
+            if 'committed_at' not in receipt_columns:
+                conn.execute('ALTER TABLE signal_publication_receipts ADD COLUMN committed_at TEXT')
             conn.execute('CREATE TABLE IF NOT EXISTS signal_market_sessions('
                          'session_date TEXT PRIMARY KEY,close REAL NOT NULL,source TEXT,as_of TEXT,observed_at TEXT)')
             conn.execute('CREATE TABLE IF NOT EXISTS signal_trials('
@@ -1067,9 +1074,62 @@ def _tier(state: str) -> str:
             'CONFLICT': 'watch', 'RECOVERY': 'info', 'INVALIDATED': 'info'}.get(state, 'observation')
 
 
+def _connect(path: str):
+    _init_db(path)
+    conn = sqlite3.connect(path, timeout=10)
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA synchronous=FULL')
+    return conn
+
+
 def process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None = None,
                     market_history: Any = None, db_path: str = DB_PATH,
-                    now: datetime | None = None) -> dict[str, Any]:
+                    now: datetime | None = None, publication_id: str | None = None) -> dict[str, Any]:
+    """發布識別若已提交便回傳原收據；新收據與預警異動共用交易。"""
+    inputs = {'memory_snapshot': memory_snapshot, 'market_history': market_history,
+              'db_path': db_path, 'now': now}
+    if publication_id is None:
+        return _process_context(context, pulse, **inputs)
+    if not isinstance(publication_id, str) or not publication_id.strip():
+        raise ValueError('發布識別必須是非空白字串')
+    with closing(_connect(db_path)) as conn:
+        with conn:
+            # 先取得寫入權，讓不同程序同時重試同一識別也只推進一次。
+            conn.execute('BEGIN IMMEDIATE')
+            row = conn.execute('SELECT result_json FROM signal_publication_receipts '
+                               'WHERE publication_id=?', (publication_id,)).fetchone()
+            if row is not None:
+                result = json.loads(row[0])
+                if not isinstance(result, dict):
+                    raise ValueError('預警發布收據格式錯誤')
+                return result
+            result = _process_context(context, pulse, connection=conn, **inputs)
+            conn.execute('INSERT INTO signal_publication_receipts(publication_id,created_at,result_json) '
+                         'VALUES(?,?,?)', (publication_id, _iso_now(now),
+                         json.dumps(result, ensure_ascii=False, separators=(',', ':'), default=str)))
+            return result
+
+
+def acknowledge_publication(publication_id: str, *, db_path: str = DB_PATH) -> bool:
+    """呼叫端確認決策提交後，才將收據納入有界保留；未確認者不清除。"""
+    if not isinstance(publication_id, str) or not publication_id.strip():
+        raise ValueError('發布識別必須是非空白字串')
+    with closing(_connect(db_path)) as conn:
+        with conn:
+            conn.execute('BEGIN IMMEDIATE')
+            updated = conn.execute('UPDATE signal_publication_receipts '
+                                   'SET committed_at=COALESCE(committed_at,?) WHERE publication_id=?',
+                                   (_iso_now(), publication_id)).rowcount
+            conn.execute('DELETE FROM signal_publication_receipts WHERE committed_at IS NOT NULL '
+                         'AND publication_id NOT IN (SELECT publication_id FROM signal_publication_receipts '
+                         'WHERE committed_at IS NOT NULL ORDER BY committed_at DESC,rowid DESC LIMIT ?)',
+                         (_PUBLICATION_RECEIPT_RETAIN,))
+            return updated > 0
+
+
+def _process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None,
+                     market_history: Any, db_path: str, now: datetime | None,
+                     connection: sqlite3.Connection | None = None) -> dict[str, Any]:
     evaluated = evaluate_context(context, pulse, memory_snapshot=memory_snapshot, now=now)
     as_of = str(evaluated.get('asOf') or _iso_now(now))
     observation_key = str(evaluated.get('observationKey') or as_of)
@@ -1077,11 +1137,12 @@ def process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None 
     created_at = _iso_now(run_at)
     candidate_expiry = _twse_expiry_contract(run_at)
     market_ref = _market_reference(pulse, as_of)
-    _init_db(db_path)
+    if connection is None:
+        _init_db(db_path)
     new_events: list[dict] = []
     persisted: list[dict] = []
-    with closing(sqlite3.connect(db_path, timeout=10)) as conn:
-        with conn:
+    with (nullcontext(connection) if connection is not None else closing(_connect(db_path))) as conn:
+        with (nullcontext() if connection is not None else conn):
             for signal in evaluated.get('signals') or []:
                 signal_id = str(signal['signalId'])
                 direction = str(signal.get('direction') or 'mixed')
