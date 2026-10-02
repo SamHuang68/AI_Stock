@@ -11,6 +11,8 @@
 
   var SRV = window.SERVER || '';
   var timer = null;
+  var refreshSequence = 0, focusSequence = 0, membersSequence = 0, membersController = null;
+  var membersCache = {};
   var state = {
     mkt: 'TW',
     sort: 'chg',
@@ -19,50 +21,6 @@
     sector: null,
     sectorKey: null
   };
-
-  // 台股類股名 → 代表股（點格載入 K 線）
-  var TW_PROXY = [
-    { key: '半導體', code: '2330' },
-    { key: '電子', code: '2317' },
-    { key: '電腦', code: '2382' },
-    { key: '光電', code: '3008' },
-    { key: '通信', code: '2345' },
-    { key: '通訊', code: '2345' },
-    { key: '網通', code: '2345' },
-    { key: '金融', code: '2882' },
-    { key: '保險', code: '2882' },
-    { key: '塑膠', code: '1301' },
-    { key: '化學', code: '1303' },
-    { key: '鋼鐵', code: '2002' },
-    { key: '航運', code: '2603' },
-    { key: '汽車', code: '2207' },
-    { key: '食品', code: '1216' },
-    { key: '電信', code: '2412' },
-    { key: '生技', code: '1707' },
-    { key: '醫療', code: '1707' },
-    { key: '營建', code: '2548' },
-    { key: '建材', code: '2548' },
-    { key: '紡織', code: '1476' },
-    { key: '橡膠', code: '2105' },
-    { key: '電機', code: '2308' },
-    { key: '機械', code: '2308' },
-    { key: '水泥', code: '1101' },
-    { key: '玻璃', code: '1802' },
-    { key: '造紙', code: '1904' },
-    { key: '觀光', code: '2707' },
-    { key: '貿易', code: '2912' },
-    { key: '百貨', code: '2912' },
-    { key: '油電', code: '6505' },
-    { key: '燃氣', code: '6505' },
-    { key: '電器', code: '2377' },
-    { key: '其他電子', code: '2357' },
-    { key: '資訊服務', code: '2474' },
-    { key: '文化創意', code: '8446' },
-    { key: '農業科技', code: '1216' },
-    { key: '數位雲端', code: '2454' },
-    { key: '綠能', code: '6443' },
-    { key: '環保', code: '6443' }
-  ];
 
   var SKIP_TW = /加權|櫃買|寶島|公司治理|中型100|未含金融|未含電子|報酬指數|全市場/;
 
@@ -162,6 +120,25 @@
       '@media (max-width:980px){' +
         '#ht-body .ht-dash{grid-template-columns:1fr;grid-template-rows:minmax(0,1.1fr) minmax(0,.9fr)}' +
         '#ht-body .ht-kpi{grid-template-columns:repeat(2,minmax(0,1fr))}' +
+      '}' +
+      '#ht-root .ht-member-panel{margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);max-height:45vh;overflow:auto;flex:0 0 auto}' +
+      '#ht-root .ht-member-panel h4{font-size:13px;margin:0 0 6px;overflow-wrap:anywhere}' +
+      '#ht-root .ht-member-panel table{border-collapse:collapse;width:100%;font-size:12px}' +
+      '#ht-root .ht-member-panel th,#ht-root .ht-member-panel td{padding:6px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--border)}' +
+      '#ht-root .ht-member-panel th:first-child,#ht-root .ht-member-panel td:first-child{text-align:left}' +
+      '#ht-root .ht-member-panel button{background:none;border:0;color:var(--gold);cursor:pointer;font:inherit;text-align:left}' +
+      '@media(max-width:900px) and (orientation:portrait){' +
+        '#shell-views:has(#view-heat.on){display:block!important;overflow-y:auto!important;overflow-x:hidden!important}' +
+        '#view-heat.sv-panel.on{height:auto!important;min-height:100%;display:block!important;overflow:visible!important}' +
+        '#mount-heat,#mount-heat.sv-mount,#ht-root,#ht-body{height:auto;display:block;flex:none;overflow:visible}' +
+        '#ht-root .ht-head,#ht-root .ht-actions{flex-wrap:wrap}' +
+        '#ht-body .ht-dash{display:block;overflow:visible}#ht-body .ht-main,#ht-root .ht-focus-zone{overflow:visible;margin-bottom:8px}' +
+        '#ht-root .ht-grid-wrap{overflow:visible}#ht-root .ht-grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(92px,auto)}' +
+        '#ht-root .ht-cell .nm,#ht-root .ht-cell .pxcode{white-space:normal;overflow-wrap:anywhere;font-size:12px}' +
+        '#ht-root .ht-two{display:block;overflow:visible}#ht-root .ht-two>div{margin-bottom:8px}' +
+        '#ht-root .ht-list{max-height:380px;overflow:auto}#ht-root .ht-row{min-height:36px}' +
+        '#ht-root .ht-row .code,#ht-root .ht-row .name,#ht-root .ht-note{font-size:12px}' +
+        '#ht-root .ht-member-panel{max-height:420px;-webkit-overflow-scrolling:touch}' +
       '}';
   }
 
@@ -224,13 +201,6 @@
       .replace(/"/g, '&quot;');
   }
 
-  function proxyFor(name) {
-    for (var i = 0; i < TW_PROXY.length; i++) {
-      if (name.indexOf(TW_PROXY[i].key) >= 0) return TW_PROXY[i].code;
-    }
-    return null;
-  }
-
   function filterSectors(list, mkt) {
     var rows = (list || []).filter(function (s) {
       if (!s || s.changePct == null || !s.name) return false;
@@ -270,13 +240,13 @@
         '<div id="ht-root">' +
           '<div class="ht-head"><div>' +
             '<span class="ht-title">類股熱力</span>' +
-            '<span class="ht-sub" id="ht-sub">產業漲跌 · 點格載入代表股</span>' +
+            '<span class="ht-sub" id="ht-sub">產業漲跌 · 點格查看類股成員</span>' +
           '</div><div class="ht-actions">' +
             '<button type="button" class="ht-btn on" data-mkt="TW">TW</button>' +
             '<button type="button" class="ht-btn" data-mkt="US">US</button>' +
             '<button type="button" class="ht-btn on" data-sort="chg">漲跌</button>' +
             '<button type="button" class="ht-btn" data-sort="name">名稱</button>' +
-            '<button type="button" class="ht-btn" id="ht-refresh">↻</button>' +
+            '<button type="button" class="ht-btn" id="ht-refresh">↻ 更新焦點／行情</button>' +
             '<button type="button" class="ht-btn primary" data-shell-back>← 儀表板</button>' +
           '</div></div>' +
           '<div id="ht-body" class="ht-loading">載入類股…</div>' +
@@ -287,8 +257,8 @@
           state.sector = null;
           state.sectorKey = null;
           syncMktButtons();
-          /* 切市場時強制重抓對應焦點（TW/US 池不同） */
-          refresh(true);
+          /* 切市場只讀對應已完成焦點；掃描由更新按鈕明確啟動。 */
+          refresh(false);
         };
       });
       mount.querySelectorAll('[data-sort]').forEach(function (b) {
@@ -324,6 +294,11 @@
       box.innerHTML = '<div class="ht-note">焦點掃描暫不可用或仍在載入。</div>';
       return;
     }
+    if (j.available === false) {
+      box.innerHTML = '<div class="ht-note">' + esc(j.reason || '尚無有效的已完成焦點快取') +
+        '。按「更新焦點／行情」才會明確要求掃描。</div>';
+      return;
+    }
     function col(title, rows) {
       var V = window.Viz;
       var h = '<div><h4 style="margin:0 0 4px;font-size:10px;color:var(--gold);flex:0 0 auto">' + title +
@@ -349,7 +324,8 @@
       col('做多焦點', j.buy || []) +
       col('做空焦點', j.short || []) +
       '</div>' +
-      '<div class="ht-note">' + poolNote + ' · 點列載入 K 線</div>';
+      '<div class="ht-note">' + poolNote +
+        ' · 掃描完成 ' + esc(j.scan && j.scan.completedAt || '未提供') + ' · 點列載入 K 線</div>';
     box.querySelectorAll('.ht-row').forEach(function (el) {
       el.onclick = function () {
         openSym(el.getAttribute('data-code'), el.getAttribute('data-mkt') || mkt);
@@ -451,7 +427,7 @@
       grid += '<div class="ht-loading">無類股資料</div>';
     } else {
       rows.forEach(function (s) {
-        var code = mkt === 'US' ? (s.symbol || '') : proxyFor(s.name);
+        var code = mkt === 'US' ? (s.symbol || '') : '';
         var sk = sectorKey(s.name);
         var flowBits = [];
         if (s.marketSharePct != null) flowBits.push('占比 ' + Number(s.marketSharePct).toFixed(1) + '%');
@@ -466,9 +442,9 @@
         if (mkt === 'TW' && s.revenueGrowCount != null && s.revenueDeclineCount != null) {
           flowBits.push('營↑' + s.revenueGrowCount + '/↓' + s.revenueDeclineCount);
         }
-        grid += '<div class="ht-cell" style="background:' + pctColor(s.changePct, mkt) + '" data-code="' +
+        grid += '<div class="ht-cell" role="button" tabindex="0" style="background:' + pctColor(s.changePct, mkt) + '" data-code="' +
           esc(code || '') + '" data-mkt="' + mkt + '" data-name="' + esc(s.name) +
-          '" data-sector-key="' + esc(sk) + '" title="' + esc(s.name) + (code ? ' → ' + code : '') + '">' +
+          '" data-sector-key="' + esc(sk) + '" title="' + esc(s.name) + ' · 查看類股成員' + '">' +
           '<div class="nm">' + esc(s.name) + '</div>' +
           '<div class="pc">' + pct(s.changePct) + '</div>' +
           (flowBits.length ? '<div class="pxcode">' + esc(flowBits.join(' · ')) + '</div>' : '') +
@@ -490,31 +466,85 @@
         '<div class="ht-main"><h4><span>類股熱力圖</span>' + focusTag + '</h4>' +
           legend + '<div class="ht-grid-wrap">' + grid + '</div>' +
           '<div class="ht-note">/sectors · ' + esc(((d && d.sectorFlow) || {}).label || '漲跌參與') +
-          ' · 無同 scope 成交額時不顯示資金流 · 點格載入 K 線 · 非投資建議</div></div>' +
+          ' · 無相同市場範圍成交額時不顯示資金流 · 點格查看類股成員 · 非投資建議</div>' +
+          '<section id="ht-members" class="ht-member-panel" aria-live="polite"><div class="ht-note">選擇類股以查看可確認分類的成員；未提供的成員資料保持空白。</div></section></div>' +
         '<div class="ht-focus-zone"><h4 id="ht-focus-title">焦點掃描 · ' + mkt + '</h4>' +
-          '<div id="ht-focus" class="ht-loading">掃描中…</div></div>' +
+          '<div id="ht-focus" class="ht-loading">讀取已完成焦點快取…</div></div>' +
       '</div>';
 
     body.querySelectorAll('.ht-cell').forEach(function (el) {
       el.onclick = function () {
-        var c = el.getAttribute('data-code');
-        var m = el.getAttribute('data-mkt') || 'TW';
-        if (c) openSym(c, m);
+        state.sector = el.getAttribute('data-name');
+        state.sectorKey = el.getAttribute('data-sector-key');
+        applySectorHighlight(body);
+        loadMembers(state.sector, state.mkt);
+      };
+      el.onkeydown = function (event) {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); el.onclick(); }
       };
     });
 
     applySectorHighlight(body);
+    if (state.sector) loadMembers(state.sector, mkt);
 
     var cachedFocus = state.focusByMkt[mkt];
     if (cachedFocus) renderFocus(cachedFocus);
   }
 
+  function renderMembers(data, sector, mkt) {
+    var box = $('ht-members');
+    if (!box) return;
+    data = data || {};
+    var rows = data.ok === true && (!data.market || data.market === mkt) && Array.isArray(data.rows) ? data.rows : [];
+    var reason = data.unavailableReason || (data.ok === false ? data.error : '') || '';
+    var html = '<h4>' + esc(sector) + ' · 類股成員</h4><div class="ht-note">' +
+      esc(data.scopeLabel || '成員範圍尚未確認') + ' · 資料日 ' + esc(data.date || '未提供') +
+      ' · 來源 ' + esc(data.source || '未提供') + '</div>';
+    if (data.classificationComplete === false) html += '<div class="ht-note">分類資料未完整；以下僅列可確認成員。</div>';
+    if (reason) html += '<div class="ht-note">' + esc(reason) + '</div>';
+    if (!rows.length) html += '<div class="ht-note">目前無可確認的成員資料。</div>';
+    else html += '<table><thead><tr><th>代號／名稱</th><th>價格</th><th>漲跌幅</th><th>資料日</th></tr></thead><tbody>' +
+      rows.map(function (row) {
+        return '<tr><td><button type="button" data-member-code="' + esc(row.code || '') + '">' + esc(row.code || '') +
+          ' ' + esc(row.name || '') + '</button></td><td>' + fmt(row.price) + '</td><td class="' + chgCls(row.changePct, mkt) + '">' +
+          pct(row.changePct) + '</td><td>' + esc(row.asOf || '未提供') + '</td></tr>';
+      }).join('') + '</tbody></table>';
+    box.innerHTML = html;
+    box.querySelectorAll('[data-member-code]').forEach(function (button) {
+      button.onclick = function () { var code = button.getAttribute('data-member-code'); if (code) openSym(code, mkt); };
+    });
+  }
+
+  function loadMembers(sector, mkt) {
+    var key = mkt + ':' + sector, cached = membersCache[key], sequence = ++membersSequence;
+    if (membersController) membersController.abort();
+    membersController = null;
+    if (cached && Date.now() - cached.at < 60000) { renderMembers(cached.data, sector, mkt); return Promise.resolve(cached.data); }
+    var box = $('ht-members');
+    if (box) box.innerHTML = '<div class="ht-note">正在讀取 ' + esc(sector) + ' 的成員資料…</div>';
+    var controller = window.AbortController ? new AbortController() : null;
+    membersController = controller;
+    return fetch(SRV + '/sector-members?market=' + encodeURIComponent(mkt) + '&sector=' + encodeURIComponent(sector),
+      { cache: 'no-store', signal: controller ? controller.signal : undefined }).then(function (response) {
+        if (!response.ok) throw new Error('成員資料讀取失敗（' + response.status + '）');
+        return response.json();
+      }).then(function (data) {
+        if (sequence !== membersSequence || state.mkt !== mkt || state.sector !== sector) return;
+        membersCache[key] = { at: Date.now(), data: data }; renderMembers(data, sector, mkt); return data;
+      }).catch(function (error) {
+        if (sequence !== membersSequence || error.name === 'AbortError') return;
+        renderMembers({ ok: false, unavailableReason: error.message, rows: [] }, sector, mkt);
+      }).finally(function () { if (membersController === controller) membersController = null; });
+  }
+
   function loadFocus(force) {
+    var sequence = ++focusSequence;
     var mkt = state.mkt || 'TW';
-    var url = SRV + '/focus?mkt=' + encodeURIComponent(mkt) + (force ? '&refresh=1' : '');
+    var url = SRV + '/focus?mkt=' + encodeURIComponent(mkt) + (force ? '&refresh=1' : '&cacheOnly=1');
     fetch(url, { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) {
+        if (sequence !== focusSequence) return;
         if (j && !j.mkt) j.mkt = mkt;
         state.focusByMkt[mkt] = j;
         if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'heat' &&
@@ -530,6 +560,7 @@
 
   function refresh(forceFocus, opts) {
     opts = opts || {};
+    var sequence = ++refreshSequence, mkt = state.mkt;
     var body = ensureMount();
     if (!body) return;
     var soft = !!opts.soft || !!state.last || !!body.querySelector('.ht-grid');
@@ -540,16 +571,20 @@
     fetch(SRV + '/sectors?mkt=' + encodeURIComponent(state.mkt), { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
+        if (sequence !== refreshSequence || mkt !== state.mkt) return;
         renderHeat(d || { sectors: [] });
         var cached = state.focusByMkt[state.mkt];
         if (forceFocus || !cached) loadFocus(!!forceFocus);
         else renderFocus(cached);
       })
       .catch(function () {
+        if (sequence !== focusSequence) return;
+        if (sequence !== refreshSequence) return;
         var b = ensureMount();
         if (b && !soft) b.innerHTML = '<div class="ht-loading">載入失敗</div>';
       })
       .finally(function () {
+        if (sequence !== refreshSequence) return;
         if (window.ShellV5 && window.ShellV5.softBadge) {
           window.ShellV5.softBadge('mount-heat', false);
         }
@@ -586,6 +621,8 @@
   }
 
   function deactivate() {
+    ++refreshSequence; ++focusSequence; ++membersSequence;
+    if (membersController) { membersController.abort(); membersController = null; }
     if (timer) { clearInterval(timer); timer = null; }
   }
 

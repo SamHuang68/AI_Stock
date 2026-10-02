@@ -29,7 +29,7 @@ class SectorFlowTest(unittest.TestCase):
         out = sector_flow.build_sector_flow(rows, total_turnover_yi=600)
         self.assertTrue(out['flowEligible'])
         self.assertEqual(out['turnoverCoveragePct'], 100.0)
-        self.assertEqual(out['turnoverScope'], 'TWSE_COMMON_STOCKS_BY_INDUSTRY')
+        self.assertEqual(out['turnoverScope'], 'TWSE_FOUR_DIGIT_SECURITIES_BY_INDUSTRY')
         self.assertEqual(out['rows'][0]['marketSharePct'], 53.333)
         self.assertIsNone(out['rows'][2]['marketSharePct'])
 

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import time
@@ -299,9 +300,17 @@ _NHNL_UNIVERSE = [
 ]
 
 
+def _nhnl_usable(closes, min_bars=NHNL_MIN_BARS):
+    return bool(closes and len(closes) >= min_bars and all(
+        isinstance(v, (int, float)) and not isinstance(v, bool)
+        and math.isfinite(v) and v > 0 for v in closes[-min_bars:]))
+
+
 def count_nhnl(closes_map: Dict[str, List[float]], min_bars: int = NHNL_MIN_BARS) -> Optional[Dict[str, Any]]:
     """流動性樣本 NHNL。不足 min_bars 的序列排除；樣本 < NHNL_MIN_SAMPLE → None。"""
-    usable = {c: closes for c, closes in closes_map.items() if closes and len(closes) >= min_bars}
+    # 不壓縮無效末段：NaN／缺值占據的日期不能被更早價格補成連續 250 日。
+    usable = {c: closes[-min_bars:] for c, closes in closes_map.items()
+              if _nhnl_usable(closes, min_bars)}
     if len(usable) < NHNL_MIN_SAMPLE:
         return None
     nh = nl = 0
@@ -319,7 +328,7 @@ def count_nhnl(closes_map: Dict[str, List[float]], min_bars: int = NHNL_MIN_BARS
             nl += 1
     return {
         'ok': True,
-        'date': date.today().isoformat(),
+        'date': None,  # 純計算不知道來源日；由行情呼叫者填入。
         'newHighs': nh,
         'newLows': nl,
         'sampleN': len(usable),
@@ -341,6 +350,7 @@ def fetch_nhnl_sample(ttl: float = 3600) -> Optional[Dict[str, Any]]:
     from stock_signals import normalize_bars, _TZ
     rows_map: Dict[str, List[float]] = {}
     dates_map = {}
+    source_map = {}
     now = datetime.now(_TZ['TW'])
     def finalized(raw):
         return [b for b in normalize_bars(raw) if b['date'] < now.date().isoformat() or
@@ -352,16 +362,16 @@ def fetch_nhnl_sample(ttl: float = 3600) -> Optional[Dict[str, Any]]:
                 for code, bars in datastore.get_bars_bulk(_NHNL_UNIVERSE, connection=con).items():
                     normalized = finalized(bars)
                     closes = [b['close'] for b in normalized]
-                    if len(closes) >= NHNL_MIN_BARS:
+                    if _nhnl_usable(closes):
                         rows_map[code] = closes
                         dates_map[code] = normalized[-1]['date']
+                        source_map[code] = 'market.db'
         except Exception as e:
             print('[pulse-extras] nhnl db', type(e).__name__, e)
 
-    source = 'market.db'
     need = [c for c in _NHNL_UNIVERSE if c not in rows_map]
+    outcomes = {}
     if need:
-        source = 'market.db+yahoo' if rows_map else 'yahoo'
         deadline = Deadline(NHNL_YAHOO_BUDGET)
 
         def _one(code: str):
@@ -370,7 +380,7 @@ def fetch_nhnl_sample(ttl: float = 3600) -> Optional[Dict[str, Any]]:
                 bars = datastore.fetch_yahoo_daily(code, 'TW', '2y', retries=1, deadline=deadline)
                 normalized = finalized(bars)
                 closes = [b['close'] for b in normalized]
-                return code, closes if len(closes) >= NHNL_MIN_BARS else None, normalized[-1]['date'] if normalized else None
+                return code, closes if _nhnl_usable(closes) else None, normalized[-1]['date'] if normalized else None
             except Exception as e:
                 print('[pulse-extras] nhnl yahoo', code, type(e).__name__)
             return code, None, None
@@ -383,6 +393,7 @@ def fetch_nhnl_sample(ttl: float = 3600) -> Optional[Dict[str, Any]]:
             if closes:
                 rows_map[result_code or code] = closes
                 dates_map[result_code or code] = as_of
+                source_map[result_code or code] = 'yahoo'
         if any(value != 'ok' for value in outcomes.values()):
             print('[pulse-extras] nhnl bounded outcomes', outcomes)
 
@@ -392,9 +403,14 @@ def fetch_nhnl_sample(ttl: float = 3600) -> Optional[Dict[str, Any]]:
     out = count_nhnl(rows_map)
     if out:
         out['date'] = as_of
-        out['source'] = source
+        out['source'] = '+'.join(sorted({source_map[c] for c in rows_map}))
+        out['dateBasis'] = 'same_observed_session'
+        out['freshnessVerified'] = False
+        out['note'] += '；以共同觀測日計算，未驗證是否為最新應有交易日'
         out['requestedSymbols'] = len(_NHNL_UNIVERSE)
         out['excludedSymbols'] = [c for c in _NHNL_UNIVERSE if c not in rows_map]
+        out['sourceDetails'] = {'sourceDates': dates_map, 'sources': source_map,
+                                'notAttempted': need[36:], 'outcomes': outcomes}
         _cache_set(ck, out)
     return out
 

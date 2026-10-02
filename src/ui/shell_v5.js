@@ -1281,9 +1281,12 @@
       sbtn.type = 'button';
       sbtn.id = 'shell-sync-btn';
       sbtn.className = 'shell-sync-btn';
-      sbtn.title = '預抓歷史庫並合併最近資料';
-      sbtn.innerHTML = '⟳ <span class="lbl">同步資料</span>';
-      sbtn.addEventListener('click', function () { runSync(true); });
+      sbtn.title = '查看更新工作與資料來源狀態';
+      sbtn.innerHTML = '⟳ <span class="lbl">更新中心</span>';
+      sbtn.addEventListener('click', function () {
+        if (window.UpdateCenter && typeof window.UpdateCenter.open === 'function') window.UpdateCenter.open(sbtn);
+        else toast('更新中心尚未載入，請重新載入頁面。', 3500);
+      });
       var syncEl = $('shell-sync');
       if (syncEl && syncEl.parentElement === topbar) {
         if (syncEl.nextSibling) topbar.insertBefore(sbtn, syncEl.nextSibling);
@@ -1556,7 +1559,7 @@
       })
       .finally(function () {
         state.syncing = false;
-        if (btn) { btn.disabled = false; btn.innerHTML = '⟳ <span class="lbl">同步資料</span>'; }
+        if (btn) { btn.disabled = false; btn.innerHTML = '⟳ <span class="lbl">更新中心</span>'; }
       });
   }
 

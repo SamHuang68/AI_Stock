@@ -508,7 +508,9 @@ def latest_cached(market="all") -> dict:
         return cached[1] if cached else empty_snapshot()
 
 
-def get_snapshot(market="all", force=False, fetcher=None) -> dict:
+def get_snapshot(market="all", force=False, fetcher=None, commit_guard=None) -> dict:
+    if commit_guard:
+        commit_guard()
     key = str(market or "all").strip().upper()
     if key == "ALL":
         markets = ("TW", "US")
@@ -525,6 +527,8 @@ def get_snapshot(market="all", force=False, fetcher=None) -> dict:
             if cached and time.time() - cached[0] < CACHE_TTL_SECONDS:
                 return cached[1]
     with _REFRESH_LOCK:
+        if commit_guard:
+            commit_guard()
         if not force and not injected:
             with _CACHE_LOCK:
                 cached = _CACHE.get(cache_key)
@@ -533,6 +537,8 @@ def get_snapshot(market="all", force=False, fetcher=None) -> dict:
         snapshot = build_snapshot(markets, fetcher=fetcher)
     if not injected:
         with _CACHE_LOCK:
+            if commit_guard:
+                commit_guard()
             previous = _CACHE.get(cache_key)
             if snapshot.get("ok"):
                 _CACHE[cache_key] = (time.time(), snapshot)

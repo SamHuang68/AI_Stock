@@ -133,7 +133,8 @@ def holders_chart_id(code: str) -> str:
 
 
 def _norm_code(code: str) -> str:
-    return str(code or '').strip().upper().replace('.TW', '').replace('.TWO', '')
+    from market_contract import tw_symbol_code
+    return tw_symbol_code(code)
 
 
 def is_holders_sym(sym: str) -> bool:

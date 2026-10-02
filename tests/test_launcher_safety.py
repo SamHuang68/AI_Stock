@@ -24,7 +24,7 @@ class LauncherSafetyTests(unittest.TestCase):
         lowered = script.lower()
         for destructive in ('reset --hard', 'checkout -f', 'git stash', 'clean -fd'):
             self.assertNotIn(destructive, lowered)
-        self.assertIn('git status --porcelain', script)
+        self.assertRegex(script, r'git(?: -c core\.quotepath=false)? status --porcelain')
         self.assertIn('git merge --ff-only', script)
         self.assertIn('Resolve-StockPython', script)
 

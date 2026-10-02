@@ -7,11 +7,13 @@ import importlib.util
 import json
 import os
 import sys
+import tempfile
 import threading
 import unittest
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from datetime import datetime
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,6 +84,15 @@ def _load_server():
 
 class ShadowFeatureGateTests(unittest.TestCase):
     def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.db = str(Path(folder.name) / 'decision.db')
+        self.trace = str(Path(folder.name) / 'trace.jsonl')
+        for replacement in (patch.object(dc, '_latest_context', None),
+                            patch.object(dc, '_latest_inputs', None),
+                            patch.object(dc, '_active_db_path', self.db)):
+            replacement.start()
+            self.addCleanup(replacement.stop)
         self._saved = {key: os.environ.get(key) for key in _SHADOW_ENV_KEYS}
         for key in _SHADOW_ENV_KEYS:
             os.environ.pop(key, None)
@@ -100,7 +111,8 @@ class ShadowFeatureGateTests(unittest.TestCase):
         with patch('early_warning.process_context') as proc, \
                 patch('overnight_intraday.latest_cached') as latest, \
                 patch('consensus_attention.build_consensus_attention') as consensus:
-            out = dc.publish_context(context, pulse=pulse, build_kwargs={'key_levels': levels})
+            out = dc.publish_context(context, pulse=pulse, build_kwargs={'key_levels': levels},
+                                     db_path=self.db, trace_path=self.trace)
         proc.assert_not_called()
         latest.assert_not_called()
         consensus.assert_not_called()
@@ -119,10 +131,17 @@ class ShadowFeatureGateTests(unittest.TestCase):
         fake_warning['status'] = 'OK'
         fake_consensus = disabled_consensus_attention('TEST')
         fake_consensus['enabled'] = True
+        # 本例只測旗標；效期另有固定交易日 fixtures，避免日曆推進改變純讀投影。
+        current_view = dc._current_context_view
+        observed_at = datetime.fromisoformat('2026-08-11T08:45:00+08:00')
         with patch('early_warning.process_context', return_value=fake_warning) as proc, \
                 patch('overnight_intraday.latest_cached', return_value={'markets': []}) as latest, \
-                patch('consensus_attention.build_consensus_attention', return_value=fake_consensus) as consensus:
-            out = dc.publish_context(context, pulse=pulse, build_kwargs={'key_levels': levels})
+                patch('consensus_attention.build_consensus_attention', return_value=fake_consensus) as consensus, \
+                patch.object(dc, '_current_context_view',
+                             side_effect=lambda ctx, inputs: current_view(ctx, inputs, now=observed_at)), \
+                patch('alert_daemon.deliver_signal_events', return_value={'ok': True, 'delivered': 0}):
+            out = dc.publish_context(context, pulse=pulse, build_kwargs={'key_levels': levels},
+                                     db_path=self.db, trace_path=self.trace)
         proc.assert_called_once()
         latest.assert_called_once()
         consensus.assert_called_once()

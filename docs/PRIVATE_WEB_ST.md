@@ -93,6 +93,8 @@ The route profile is available to the owner at `/gateway/routes`.
 
 ## Release gate
 
+完整測試、逐檔雜湊、可回復目錄切換及資料保護契約，請參閱[私有發布完整性](私有發布完整性.md)。發布前由包裝流程確認 CI、建立並驗證完整 SQLite 一致備份，再停止己方服務。
+
 The normal development directory is never the production directory.
 
 ### Stage a mature commit
@@ -125,9 +127,7 @@ py -3 scripts\private_web_release.py status
 py -3 scripts\private_web_release.py promote --release <release-id> --approve
 ```
 
-The explicit `--approve` flag is required. Promotion replaces managed code but
-preserves the active production `data/` and `logs/`. Promoting a previously
-staged, tested release provides the rollback path.
+仍需傳入明確的 `--approve`。發布會保存前版程式，並直接搬移原有 `data/`、`logs/` 及保留本機設定。新版採用逐檔雜湊驗證；沒有雜湊的舊 stage 必須重新 stage，不能直接 promote。要回復本次切換前的程式，可在服務停止時執行 `rollback --approve`，保留最新執行期資料。這不會回復 DB schema，遷移前的完整 DB 備份仍不可省略。
 
 The default private install root is:
 

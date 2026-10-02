@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
@@ -42,12 +43,15 @@ def configure(**kwargs: Any) -> None:
         setattr(_deps, key, value)
 
 
-def build_pulse_payload(handler, path: str) -> bytes:
+def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=None) -> bytes:
     """Build GET /pulse response body (bytes JSON). Caller handles HTTP."""
+    update_started_at = datetime.now(timezone.utc).isoformat()
+    if publication_guard:
+        publication_guard()
     qs = parse_qs(urlparse(path).query)
     force = (qs.get('refresh', ['0'])[0] or '0') in ('1', 'true', 'yes')
     key = f'pulse:v2:{taipei_today().strftime("%Y%m%d")}:{int(time.time() // 45)}'
-    if not force:
+    if not force and job_id is None:
         c = _deps.cache.get(key)
         if c is not None:
             return c
@@ -602,6 +606,13 @@ def build_pulse_payload(handler, path: str) -> bytes:
         elif _ohlc_box['err']:
             print('[pulse] twii ohlc', _ohlc_box['err'])
 
+    if job_id is not None:
+        out['updateJobId'] = job_id
+        out['updateStartedAt'] = update_started_at
+        publication_guard()
+        if not out.get('ok'):
+            raise RuntimeError('市場來源資料不足，保留先前已提交快照')
+
     # Deterministic DecisionContext：重用本包 canonical quote／廣度／因子；
     # AI 不參與 regime、confidence、levels 或 position range。
     try:
@@ -676,6 +687,8 @@ def build_pulse_payload(handler, path: str) -> bytes:
             source=_sec_source + ((' + ' + _turnover_source) if _turnover_source else ''),
             as_of=(sec or {}).get('date') if isinstance(sec, dict) else out.get('date'),
             total_turnover_yi=_industry_turnover_total,
+            classification_coverage_pct=(movers.get('classificationCoveragePct') if _same_turnover_session else None),
+            classification_complete=(movers.get('classificationComplete') if _same_turnover_session else None),
             benchmark_return20_pct=_sec_hist_status.get('benchmarkReturn20Pct'),
             proxy_basket=('proxy' in str(_sec_source).lower()),
         )
@@ -693,9 +706,14 @@ def build_pulse_payload(handler, path: str) -> bytes:
             index_history=_index_hist, futures_history=_futures_hist,
             sector_flow=_sec_flow, margin_state=_margin_state,
             benchmark_data=_benchmark_data,
-            options_structure=_options_structure)
+            options_structure=_options_structure,
+            session_calendar=decision_session_calendar(), publication_guard=publication_guard)
+        if _ctx.get('publicationStatus') == 'superseded':
+            return json.dumps(_decision.latest_pulse() or {}, ensure_ascii=False).encode()
         out['decisionSummary'] = _decision.compact_context(_ctx)
     except Exception as e:
+        if job_id is not None:
+            raise
         print('[pulse] decision context', e)
         try:
             import decision_context as _decision_fallback
@@ -714,3 +732,24 @@ def build_pulse_payload(handler, path: str) -> bytes:
         except Exception as e:
             print('[pulse] history save', e)
     return body
+
+
+def decision_session_calendar():
+    """只讀既有官方交易日曆；沿用 market_sessions 中已核對的臨時休市修正。"""
+    import sqlite3
+    from contextlib import closing
+    from datetime import datetime, timedelta, timezone
+    from pathlib import Path
+    import datastore
+    year = datetime.now(timezone(timedelta(hours=8))).year
+    try:
+        uri = Path(datastore.DB_PATH).resolve().as_uri() + '?mode=ro'
+        with closing(sqlite3.connect(uri, uri=True, timeout=2)) as conn:
+            years = [row[0] for row in conn.execute(
+                'SELECT year FROM calendar_years WHERE year IN (?,?)', (year - 1, year))]
+            sessions = [row[0] for row in conn.execute(
+                'SELECT session_date FROM market_sessions WHERE session_date>=? AND session_date<?',
+                (f'{year - 1}-01-01', f'{year + 1}-01-01'))]
+        return {'coveredYears': years, 'sessions': sessions} if years else None
+    except (OSError, sqlite3.Error):
+        return None

@@ -3,13 +3,20 @@
   'use strict';
   var SRV = window.SERVER || '';
   var timer = null;
+  var loadSequence = 0;
+  var historySequence = 0;
+  var lifecycleSequence = 0;
   var marketRefreshInflight = null;
+  var marketRefreshController = null;
+  var marketRefreshBackground = false;
   var lastMarketRefreshAt = 0;
   var lastContext = null;
   var lastEvidenceContext = null;
   var lastHoldings = [];
   var riskDraft = {};
-  var portfolioMode = 'actual';
+  var portfolioMode = window.PortfolioContext ? PortfolioContext.getMode() : 'actual';
+  var lastPortfolioInput = null, activeRiskProfile = null, portfolioRequestKey = null;
+  var optionsController = null;
   var optionsLabOpen = true;
   var oiLabOpen = true;
   var optionsRefreshStarted = false;
@@ -51,6 +58,7 @@
     current_effective_gross_over_limit: '每日槓桿穿透後總曝險超過上限',
     lookthrough_tsmc_over_limit: '台積電經濟曝險超過單一持倉上限',
     insufficient_data_no_position_range: '核心資料不足，不發布曝險百分比',
+    source_data_expired: '來源資料已過期，不建立新方向或發布倉位範圍',
     portfolio_not_provided: '未提供實際投組；範圍未套用投組風險上限',
     observation_pool_not_risk_overlay: '等權自選僅供觀察，不作投組風險上限'
     ,breadth_divergence_risk_lock: '指數與廣度背離信心高於 70%，啟動追價／槓桿鎖定'
@@ -112,7 +120,7 @@
       '@keyframes dcFocusPulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.12)}}' +
       '#dc-root .dc-card h3{font-size:11px;color:var(--gold);margin:0 0 7px;border-left:2px solid var(--gold);padding-left:6px;display:flex;justify-content:space-between;gap:8px}' +
       '#dc-root .dc-portfolio-head{align-items:center;flex-wrap:wrap}' +
-      '#dc-root .dc-portfolio-switch{display:flex;align-items:center;gap:3px;margin-left:auto}' +
+      '#dc-root .dc-portfolio-switch{display:flex;align-items:center;flex-wrap:wrap;gap:3px;margin-left:auto;min-width:0;max-width:100%}' +
       '#dc-root .dc-source-btn{padding:3px 7px;border:1px solid #30425c;border-radius:5px;background:#091422;color:#91a4bc;' +
         'font:700 7.5px "Noto Sans TC",sans-serif;cursor:pointer;white-space:nowrap}' +
       '#dc-root .dc-source-btn:hover{border-color:var(--cyan);color:#dbeafe}' +
@@ -391,11 +399,13 @@
         '<div class="dc-sub" id="dc-sub">DecisionContext v1 · deterministic first · evidence before confidence</div></div>' +
         '<div class="dc-actions"><button class="dc-btn" data-shell-back>← 儀表板</button>' +
         '<button class="dc-btn" id="dc-ai-btn">AI 解釋</button><button class="dc-btn primary" id="dc-refresh">↻ 更新市場資料</button></div></div>' +
+        '<div class="dc-note" id="dc-update-status" role="status"></div>' +
         '<div id="dc-body"><div class="dc-card">決策資料載入中…</div></div></div>';
       $('dc-refresh').onclick = refreshMarketData;
       $('dc-ai-btn').onclick = runAi;
     }
     syncAiButtonState();
+    setRefreshState(!!marketRefreshInflight);
     bindPortfolioSwitch();
     return $('dc-body');
   }
@@ -432,6 +442,7 @@
       return response.json();
     }).then(function (payload) {
       aiAccessRole = payload && payload.role === 'owner' ? 'owner' : 'reader';
+      window.ST_PRIVATE_WEB_PROFILE = Object.assign({}, window.ST_PRIVATE_WEB_PROFILE, { role: aiAccessRole });
       return aiAccessRole;
     }).catch(function () {
       aiAccessRole = 'unknown';
@@ -509,13 +520,24 @@
     var btn = $('dc-refresh');
     if (!btn) return;
     btn.disabled = !!active;
-    btn.textContent = active ? '↻ 市場資料更新中…' : '↻ 更新市場資料';
+    btn.textContent = active ? '↻ 等待市場快照…' : (canUpdateMarket() ? '↻ 更新市場資料' : '↻ 重新讀取快照');
+  }
+
+  function canUpdateMarket() {
+    return window.DecisionData && DecisionData.canUpdateMarket ? DecisionData.canUpdateMarket()
+      : (!window.ST_PRIVATE_WEB_PROFILE || window.ST_PRIVATE_WEB_PROFILE.role === 'owner');
+  }
+
+  function marketUpdateStatus(message) {
+    var status = $('dc-update-status');
+    if (status) status.textContent = message;
   }
 
   function emptyHtml(message, detail) {
     return '<div class="dc-card dc-empty"><div class="v">' + esc(message) + '</div>' +
-      '<div class="s">' + esc(detail || '更新會重新取得總覽資料，並建立可稽核的 DecisionContext。') + '</div>' +
-      '<div class="dc-actions"><button type="button" class="dc-btn primary" id="dc-empty-refresh">↻ 立即更新市場資料</button>' +
+      '<div class="s">' + esc(detail || '伺服器會自動更新快照；頁面只讀已提交資料。') + '</div>' +
+      '<div class="dc-actions"><button type="button" class="dc-btn primary" id="dc-empty-refresh">' +
+      (canUpdateMarket() ? '↻ 立即更新市場資料' : '↻ 重新讀取快照') + '</button>' +
       '<button type="button" class="dc-btn" id="dc-empty-pulse">前往總覽</button></div>' +
       '<div class="dc-status" id="dc-empty-status"></div></div>';
   }
@@ -538,117 +560,175 @@
   }
 
   function refreshMarketData(options) {
+    if (portfolioRequestKey && !portfolioStillCurrent(portfolioRequestKey)) {
+      discardChangedPortfolio(); lastMarketRefreshAt = 0; lastContext = null;
+    }
+    var sequence = lifecycleSequence;
     var background = !!(options && options.background === true);
-    if (marketRefreshInflight) return marketRefreshInflight;
+    if (marketRefreshInflight) {
+      if (!background && marketRefreshBackground) return marketRefreshInflight.then(function () {
+        return sequence === lifecycleSequence ? refreshMarketData(options) : null;
+      });
+      return marketRefreshInflight;
+    }
     if (background && Date.now() - lastMarketRefreshAt < 45000) return Promise.resolve(lastContext);
     var body = ensureMount();
     if (!body) return Promise.resolve(null);
     var id = nextCorrelationId();
     var started = Date.now();
     var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    var timeoutId = controller ? setTimeout(function () { controller.abort(); }, 20000) : null;
-    trace('market_refresh_command_received', id, { route: 'decision' });
+    marketRefreshController = controller;
+    marketRefreshBackground = background;
+    var requestedUpdate = !background && canUpdateMarket();
+    var refreshResult = null;
+    var deadlineTimer;
+    var deadline = new Promise(function (_, reject) {
+      deadlineTimer = setTimeout(function () {
+        if (controller) controller.abort();
+        var error = new Error('等待市場決策逾時；伺服器工作仍可能繼續，可重新讀取。');
+        error.name = 'TimeoutError'; reject(error);
+      }, requestedUpdate ? 90000 : 20000);
+    });
+    trace('market_refresh_command_received', id, { route: 'decision', update: requestedUpdate });
     if (!background) {
       setRefreshState(true);
-      body.innerHTML = '<div class="dc-card dc-empty"><div class="v">正在更新市場資料…</div>' +
-        '<div class="s">依序取得總覽 Pulse、建立 DecisionContext、再載入完整證據。</div>' +
-        '<div class="dc-status">請稍候，最長等待 20 秒。</div></div>';
+      if (!lastContext) body.innerHTML = '<div class="dc-card dc-empty"><div class="v">等待已提交市場快照…</div>' +
+        '<div class="s">' + (requestedUpdate ? '已要求伺服器更新；等待最長 90 秒，離頁不會取消伺服器工作。' : '正在讀取伺服器已提交資料。') + '</div></div>';
     }
     trace('market_refresh_command_acknowledged', id, { uiState: background ? 'background' : 'loading' });
     trace('pulse_request_start', id, {
-      method: 'GET', path: '/pulse?refresh=1', origin: location.origin || null
+      method: requestedUpdate ? 'POST' : 'GET', path: requestedUpdate ? '/pulse/refresh' : '/pulse', origin: location.origin || null
     });
-    var pulseRequest = window.AppKernel && window.AppKernel.api
-      ? window.AppKernel.api.request('/pulse?refresh=1', {
-          cache: 'no-store', signal: controller ? controller.signal : undefined, timeoutMs: 20000,
-          headers: { 'X-ST-Trace-ID': id }
-        })
-      : fetch(SRV + '/pulse?refresh=1', {
-          cache: 'no-store', signal: controller ? controller.signal : undefined
-        });
-    marketRefreshInflight = pulseRequest.then(function (response) {
-      return response.text().then(function (raw) {
-        trace('pulse_response', id, {
-          status: response.status,
-          ok: response.ok,
-          responseChars: raw.length,
-          elapsedMs: Date.now() - started
-        });
-        if (!response.ok) throw new Error('Pulse HTTP ' + response.status);
-        try { return JSON.parse(raw); }
-        catch (e) { throw new Error('Pulse JSON 解析失敗'); }
-      });
-    }).then(function (pulse) {
-      if (!pulse || !pulse.ok) throw new Error((pulse && pulse.error) || 'Pulse 未回傳有效資料');
+    var pulseRequest = window.DecisionData && DecisionData.refreshPulse
+      ? DecisionData.refreshPulse({ update: requestedUpdate, signal: controller && controller.signal,
+          onStatus: function (job) {
+            if (sequence !== lifecycleSequence) return;
+            marketUpdateStatus(job.status === 'queued' ? '市場更新已排入佇列；保留目前決策。' : '正在建立市場快照；保留目前決策。');
+          } })
+      : Promise.reject(new Error('市場快照服務尚未載入'));
+    var contextRequest = pulseRequest.then(function (result) {
+      if (sequence !== lifecycleSequence) return null;
+      refreshResult = result || {};
+      var pulse = refreshResult.pulse;
+      if (!pulse || !pulse.ok) {
+        if (!lastContext) showEmpty('尚未有已提交快照', '伺服器會自動更新；可稍後重新讀取。');
+        marketUpdateStatus(refreshResult.error || (pulse && pulse.error) || '尚未有已提交快照');
+        return null;
+      }
       if (window.MarketData && MarketData.fromPulse) MarketData.fromPulse(pulse);
       if (window.DecisionData && DecisionData.fromPulse) DecisionData.fromPulse(pulse, id);
       trace('pulse_applied', id, {
         asOf: pulse.updatedAt || null,
         hasDecisionSummary: !!(pulse.decisionSummary && pulse.decisionSummary.regime)
       });
-      lastHoldings = portfolioMode === 'observation_pool' ? holdingsFromWatch() : holdingsFromPositions();
+      var contextOptions = portfolioRequestOptions(true);
       if (!window.DecisionData || !DecisionData.refresh) throw new Error('DecisionData 尚未載入');
-      return DecisionData.refresh({
-        force: true,
-        strict: true,
-        signal: controller ? controller.signal : undefined,
-        holdings: lastHoldings,
-        portfolioKind: portfolioMode,
-        correlationId: id
-      });
-    }).then(function (state) {
+      contextOptions.strict = true;
+      contextOptions.signal = controller && controller.signal;
+      contextOptions.correlationId = id;
+      return DecisionData.refresh(contextOptions);
+    });
+    var request = Promise.race([contextRequest, deadline]).then(function (state) {
+      if (sequence !== lifecycleSequence) return null;
+      if (!state) return lastContext;
+      if (!portfolioStillCurrent(portfolioRequestKey)) { discardChangedPortfolio(); return null; }
+      if (state.portfolioInputKey !== portfolioRequestKey) return null;
       var ctx = state && state.context;
       if (!ctx) throw new Error('更新完成，但後端尚未建立 DecisionContext');
       render(ctx);
+      var job = refreshResult && refreshResult.job;
+      var failed = refreshResult && refreshResult.error || (job && ['failed', 'interrupted'].indexOf(job.status) >= 0 && job.error);
+      marketUpdateStatus(failed ? '市場更新未完成：' + String(failed) + '；保留已提交決策。'
+        : (job && ['queued', 'running'].indexOf(job.status) >= 0 ? '伺服器正在更新；目前顯示已提交決策。'
+          : (canUpdateMarket() ? '已讀取最新提交的市場快照，並套用目前的個人化設定。'
+            : '唯讀模式僅顯示已提交市場決策，未套用本機持倉。')));
       lastMarketRefreshAt = Date.now();
-      trace('market_refresh_terminal_success', id, {
+      trace(failed ? 'market_refresh_terminal_failure' : 'market_refresh_terminal_success', id, {
+        error: failed || null,
         regime: (ctx.regime || {}).id || null,
         asOf: ctx.asOf || null,
         elapsedMs: Date.now() - started
       });
       return ctx;
     }).catch(function (err) {
-      var message = err && err.name === 'AbortError' ? '市場資料更新逾時' : '市場資料更新失敗';
+      if (sequence !== lifecycleSequence) return null;
+      var message = requestedUpdate ? '市場資料更新未完成' : '市場快照讀取失敗';
       var detail = String(err && err.message || err || '未知錯誤');
-      if (!background) showEmpty(message, detail + '；可重試或前往總覽檢查服務狀態。');
+      if (!lastContext) showEmpty(message, detail + '；可稍後重新讀取。');
+      marketUpdateStatus(message + '：' + detail + (lastContext ? '；保留上次已提交決策。' : ''));
       trace('market_refresh_terminal_failure', id, {
         error: detail,
         elapsedMs: Date.now() - started
       });
       return null;
     }).finally(function () {
-      if (timeoutId) clearTimeout(timeoutId);
-      if (!background) setRefreshState(false);
-      marketRefreshInflight = null;
+      clearTimeout(deadlineTimer);
+      if (sequence === lifecycleSequence && !background) setRefreshState(false);
+      if (marketRefreshController === controller) marketRefreshController = null;
+      if (marketRefreshInflight === request) marketRefreshInflight = null;
     });
+    marketRefreshInflight = request;
     return marketRefreshInflight;
   }
 
-  function holdingsFromPositions() {
-    try {
-      var state = (typeof S !== 'undefined' && S) ? S : (window.Store || {});
-      var rows = Object.keys(state.positions || {}).map(function (code) {
-        var p = state.positions[code] || {};
-        var value = Number(p.lastPrice || p.entry || 0) * Number(p.shares || 0);
-        return { sym: code, weight: value };
-      }).filter(function (x) { return x.weight > 0; });
-      return rows;
-    } catch (e) { return []; }
+  function portfolioInput() {
+    var input = window.PortfolioContext ? PortfolioContext.resolve() : {
+      kind: 'actual', label: '實際持倉', ready: false, holdings: [],
+      coverage: { total: 0, included: 0 },
+      issues: [{ message: '共用持倉契約尚未載入。', action: '請重新載入介面。' }]
+    };
+    if (input.holdings.some(function (row) { return row.market !== 'TW'; })) {
+      input.ready = false; input.holdings = [];
+      input.issues.push({ message: '目前投組分析僅支援臺股基準。', action: '其他市場成分仍保留；暫停投組計算。' });
+    }
+    return input;
+  }
+  function portfolioKey(input) {
+    return JSON.stringify({ kind: input.kind, ready: input.ready, holdings: input.holdings,
+      coverage: input.coverage, issues: input.issues, inputVersion: input.inputVersion, revision: input.revision });
+  }
+  function portfolioRequestOptions(force) {
+    lastPortfolioInput = portfolioInput();
+    portfolioMode = lastPortfolioInput.kind;
+    portfolioRequestKey = portfolioKey(lastPortfolioInput);
+    lastHoldings = lastPortfolioInput.ready ? lastPortfolioInput.holdings : [];
+    var key = portfolioRequestKey;
+    var options = { force: !!force, portfolioInputKey: key, isCurrent: function () { return portfolioStillCurrent(key); } };
+    // Reader 的瀏覽器持倉與風險設定都不送出。
+    if (!canUpdateMarket()) return options;
+    options.holdings = lastHoldings;
+    options.portfolioKind = portfolioMode;
+    options.portfolioInputStatus = lastPortfolioInput.ready ? 'complete' :
+      (lastPortfolioInput.coverage.total || lastPortfolioInput.issues.some(function (item) { return item.code !== 'empty'; }) ? 'incomplete' : 'empty');
+    if (activeRiskProfile && lastPortfolioInput.ready) options.riskProfile = activeRiskProfile;
+    return options;
+  }
+  function portfolioStatusHtml() {
+    var input = lastPortfolioInput;
+    if (!input) return '';
+    var coverage = input.coverage || {};
+    return '<div id="dc-portfolio-status" class="dc-note" role="status"><strong>' + esc(input.label) + '</strong><div>' +
+      (input.ready ? '資料可用' : '停止投組計算') + ' · 個別資料有效 ' + esc(coverage.included || 0) + '／' + esc(coverage.total || 0) + ' 檔' +
+      (input.currency ? ' · 幣別 ' + esc(input.currency) : '') + ' · ' + esc(input.sourceLabel || input.source || '來源未知') + '</div>' +
+      (input.issues || []).map(function (item) { return '<div>' + esc(item.sym ? item.sym + '：' : '') + esc(item.message) + ' ' + esc(item.action) + '</div>'; }).join('') + '</div>';
+  }
+  function portfolioStillCurrent(key) {
+    return key === portfolioKey(portfolioInput());
+  }
+  function discardChangedPortfolio() {
+    portfolioRequestKey = null; lastHoldings = []; lastPortfolioInput = portfolioInput();
+    if (lastContext) render(Object.assign({}, lastContext, {
+      portfolioOverlay: null,
+      actionEnvelope: Object.assign({}, lastContext.actionEnvelope || {}, { positionRange: null }),
+      exposureLab: Object.assign({}, lastContext.exposureLab || {}, { finalEligibleRange: null })
+    }));
+    else showEmpty('投組資料已變更', '本次結果已失效，請重新讀取以套用目前資料。');
+    marketUpdateStatus('投組資料已變更；本次個人化結果已失效，請重新讀取。');
   }
 
-  function holdingsFromWatch() {
-    try {
-      var state = (typeof S !== 'undefined' && S) ? S : {};
-      var direct = Array.isArray(state.wl) ? state.wl :
-        (state.watches && typeof state.watches === 'object' ? Object.keys(state.watches) : null);
-      var raw = direct || JSON.parse(localStorage.getItem('st_wl') || localStorage.getItem('wl_v2') ||
-        localStorage.getItem('watchlist') || '[]');
-      return (raw || []).map(function (x) {
-        var sym = typeof x === 'string' ? x : (x.sym || x.t || x.code);
-        return sym ? { sym: sym, weight: 1 } : null;
-      }).filter(Boolean).slice(0, 40);
-    } catch (e) { return []; }
-  }
+
+
+
 
   function decisionWatchlist() {
     try {
@@ -1172,7 +1252,9 @@
     var meta = '<div class="s">' + esc(sf.label || '—') + ' · scope ' + esc(sf.marketScope || '—') +
       ' · 上漲參與 ' + num(sf.participationPct, 1) + '% · 成交覆蓋 ' + num(sf.turnoverCoveragePct, 1) +
       '% · Top3 ' + num(sf.top3SharePct, 1) + '% · HHI ' + num(sf.hhi, 0) +
-      (sf.turnoverScope ? ' · 成交口徑：上市普通股產業內占比' : '') +
+      (sf.turnoverScope ? ' · 成交口徑：' + esc(sf.turnoverScopeLabel || sf.turnoverScope) : '') +
+      (sf.classificationCoveragePct != null ? ' · 分類涵蓋 ' + num(sf.classificationCoveragePct, 1) + '%' : '') +
+      (sf.classificationComplete === false ? ' · 分類未完整' : '') +
       ' · RS20 ' + (hist.rs20Available ? '完整' : ('建置 ' + num(hist.historyDates, 0) + '/21 交易日')) + '</div>';
     if (!rows.length) return meta;
     return meta + '<div class="dc-scroll" style="max-height:150px"><table><tr><th>產業</th><th>漲跌</th><th>成交占比</th><th>RS20</th><th>口徑</th></tr>' +
@@ -1189,13 +1271,22 @@
   }
 
   function portfolioHtml(ctx) {
+    if (lastPortfolioInput && !lastPortfolioInput.ready) return portfolioStatusHtml();
     var p = ctx.portfolioOverlay;
-    if (!p) return '<div class="dc-note">未偵測到實際持倉；不以自選池冒充投資組合。</div>';
-    if (p.available === false) return '<div class="dc-note">投組資料不可用：' + esc(p.error || '價格序列不足') +
-      '。在完成 Beta／VaR 檢查前不產生倉位範圍。</div>';
+    if (!p) return portfolioStatusHtml() + '<div class="dc-note">尚無目前模式的投組結果。</div>';
+    if (p.available === false) {
+      var quality = p.quality || {}, coverage = [];
+      if (quality.holdingCoveragePct != null) coverage.push('持倉涵蓋率 ' + num(quality.holdingCoveragePct, 1) + '%');
+      if (quality.betaCoveragePct != null) coverage.push('Beta 涵蓋率 ' + num(quality.betaCoveragePct, 1) + '%');
+      if (quality.commonSampleDays != null) coverage.push('共同有效報酬 ' + num(quality.commonSampleDays, 0) + ' 筆');
+      var reasons = Array.isArray(quality.reasons) ? quality.reasons.join('、') : '';
+      return portfolioStatusHtml() + '<div class="dc-note">投組資料不可用：' + esc(p.error || reasons || '價格序列不足') +
+        '。在完成 Beta／VaR 檢查前不產生倉位範圍。' +
+        (coverage.length ? '<br>' + esc(coverage.join(' · ')) : '') + '</div>';
+    }
     var look = p.lookThrough || {};
     var rows = look.rows || [];
-    return '<div class="dc-scenario">' +
+    return portfolioStatusHtml() + '<div class="dc-scenario">' +
       featureHtml('Portfolio Beta', { value: p.portfolioBeta == null ? null : Math.max(-1, Math.min(1, p.portfolioBeta - 1)), raw: p.portfolioBeta }) +
       featureHtml('1日 95% VaR', { value: p.var95DailyPct == null ? null : Math.min(1, p.var95DailyPct / 4), raw: p.var95DailyPct + '%' }) +
       featureHtml('平均相關', { value: p.averageCorrelation, raw: p.averageCorrelation }) + '</div>' +
@@ -1220,7 +1311,10 @@
         '">實際持倉</button>' +
       '<button type="button" class="dc-source-btn' + (portfolioMode === 'observation_pool' ? ' on' : '') +
         '" id="dc-use-watch" aria-pressed="' + (portfolioMode === 'observation_pool') +
-        '">等權自選觀察池</button></span>';
+        '">等權自選觀察池</button>' +
+      '<button type="button" class="dc-source-btn' + (portfolioMode === 'simulation' ? ' on' : '') +
+        '" id="dc-use-simulation" aria-pressed="' + (portfolioMode === 'simulation') + '">情境模擬（手動權重）</button>' +
+      '<button type="button" class="dc-btn" id="dc-edit-simulation">編輯共用情境</button></span>';
   }
 
   function compactNtd(value) {
@@ -1332,7 +1426,7 @@
     if (status === 'insufficient') {
       return '<details id="dc-options-lab" class="dc-lab dc-options-lab"' + openAttr + '><summary><span class="dc-options-name">台指選擇權結構</span>' +
         '<span class="dc-options-status insufficient">' + statusLabel + '</span><span class="dc-options-meta">日終研究 · 不推定造市商持倉</span></summary>' +
-        '<div class="dc-options-layer observed"><header><b>等待官方日終鏈</b><span>首次展開會自動更新</span></header>' +
+          '<div class="dc-options-layer observed"><header><b>等待官方日終鏈</b><span>按下更新後取得來源資料</span></header>' +
         '<div class="dc-note">先取得精確到期日、一般盤 OI 與結算價，資料不足時不產生 IV、Signed GEX 或 Flip。</div>' +
         '<div class="dc-options-actions"><button type="button" class="dc-btn" id="dc-options-refresh">更新期權結構</button><span class="dc-note" id="dc-options-refresh-status">—</span></div></div></details>';
     }
@@ -1376,27 +1470,29 @@
       esc((quality.warnings || []).map(optionsWarningLabel).join(' · ') || '資料來源與假設已寫入 Evidence Ledger') + '</span></div></details>';
   }
 
-  function refreshOptionsStructure(force) {
-    if (optionsRefreshStarted && !force) return;
+  async function refreshOptionsStructure(force) {
+    if (!force || !canUpdateMarket()) return;
+    if (optionsRefreshStarted) return;
     optionsRefreshStarted = true;
+    var own = new AbortController(), sequence = lifecycleSequence;
+    optionsController = own;
     var button = $('dc-options-refresh'), status = $('dc-options-refresh-status');
     if (button) { button.disabled = true; button.textContent = '更新中…'; }
     if (status) status.textContent = '下載 TAIFEX 日終鏈並驗證精確到期別…';
-    fetch(SRV + '/options/txo/refresh', {
-      method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ force: !!force })
-    }).then(function (r) {
-      return r.text().then(function (raw) {
-        if (!r.ok) throw new Error(raw || ('HTTP ' + r.status));
-        return JSON.parse(raw);
-      });
-    }).then(function (ctx) {
-      if (window.DecisionData && DecisionData.publish) DecisionData.publish(ctx, 'options-refresh');
-    }).catch(function (err) {
-      optionsRefreshStarted = false;
-      if (button) { button.disabled = false; button.textContent = '重試更新'; }
-      if (status) status.textContent = '更新失敗：' + String(err && err.message || err).slice(0, 120);
-    });
+    try {
+      if (!window.UpdateJobs) throw new Error('更新工作中心尚未載入');
+      await UpdateJobs.refresh();
+      if (own.signal.aborted) return;
+      var accepted = await UpdateJobs.submit('options', { force: true });
+      await UpdateJobs.wait(accepted.job.jobId, { signal: own.signal, timeoutMs: 240000,
+        onProgress: function (job) { if (status && !own.signal.aborted) status.textContent = job.stage || '工作已接受，可在更新工作中心查看'; } });
+      if (!own.signal.aborted && sequence === lifecycleSequence) await load(true);
+    } catch (err) {
+      if (!own.signal.aborted && sequence === lifecycleSequence && status) status.textContent = '更新尚未完成：' + String(err && err.message || err) + '；可在更新工作中心查看與重試。';
+    } finally {
+      if (optionsController === own) { optionsController = null; optionsRefreshStarted = false; }
+      if (button && !own.signal.aborted) { button.disabled = false; button.textContent = '重新整理期權結構'; }
+    }
   }
 
   function bindOptionsLab() {
@@ -1404,11 +1500,8 @@
     if (!details) return;
     details.addEventListener('toggle', function () {
       optionsLabOpen = !!details.open;
-      var current = (lastContext && lastContext.optionsStructure) || {};
-      var derived = current.derived || {};
-      var needsV2 = Number(current.contractVersion || 0) < 2 || derived.totalOiVega1VolPointNtd == null;
-      if (optionsLabOpen && ((current.status || 'insufficient') === 'insufficient' || needsV2)) refreshOptionsStructure(false);
     });
+    if (button && !canUpdateMarket()) { button.disabled = true; button.textContent = '更新期權結構（Owner）'; }
     if (button) button.onclick = function (event) {
       event.preventDefault();
       event.stopPropagation();
@@ -1421,24 +1514,17 @@
     if (!root || root.getAttribute('data-portfolio-switch-bound') === '1') return;
     root.setAttribute('data-portfolio-switch-bound', '1');
     root.addEventListener('click', function (event) {
+      if (event.target && event.target.id === 'dc-edit-simulation') { if (window.ShellV5 && ShellV5.navigate) ShellV5.navigate('book'); return; }
       var button = event.target && event.target.closest ? event.target.closest('.dc-source-btn') : null;
       if (!button || !root.contains(button)) return;
-      var nextMode = button.id === 'dc-use-watch' ? 'observation_pool' : 'actual';
+      var nextMode = button.id === 'dc-use-watch' ? 'observation_pool' : button.id === 'dc-use-simulation' ? 'simulation' : 'actual';
       setPortfolioMode(nextMode);
     }, true);
   }
 
   function setPortfolioMode(mode) {
-    var nextMode = mode === 'observation_pool' ? 'observation_pool' : 'actual';
-    if (portfolioMode === nextMode) return;
-    portfolioMode = nextMode;
-    var root = $('dc-root');
-    if (root) root.querySelectorAll('.dc-source-btn').forEach(function (item) {
-      var on = (item.id === 'dc-use-watch') === (portfolioMode === 'observation_pool');
-      item.classList.toggle('on', on);
-      item.setAttribute('aria-pressed', String(on));
-    });
-    load(true);
+    var nextMode = mode === 'observation_pool' || mode === 'simulation' ? mode : 'actual';
+    if (window.PortfolioContext) PortfolioContext.setMode(nextMode);
   }
 
   function oiTone(market, value) {
@@ -1522,7 +1608,9 @@
   function bindSessionMomentumLab() {
     var details = $('dc-oi-lab'), button = $('dc-oi-refresh'), status = $('dc-oi-refresh-status');
     if (details) details.addEventListener('toggle', function () { oiLabOpen = !!details.open; });
+    if (button && !canUpdateMarket()) { button.disabled = true; button.textContent = '更新盤別研究（Owner）'; }
     if (button) button.onclick = function (event) {
+      if (!canUpdateMarket()) return;
       event.preventDefault(); event.stopPropagation(); button.disabled = true; button.textContent = '更新中…';
       if (status) status.textContent = '正在取得固定白名單的調整後日線並驗證盤別恆等式…';
       if (window.DecisionData && DecisionData.refreshOvernightResearch) {
@@ -1730,7 +1818,8 @@
       esc(text) + '</div>';
   }
 
-  function warningTemporalHtml(warning) {
+  function warningTemporalHtml(warning, quality) {
+    quality = quality || {};
     var temporal = (warning && warning.temporalContext) || {};
     var target = temporal.target || {};
     var overlay = temporal.liveOverlay || {};
@@ -1738,18 +1827,22 @@
     var computedAt = temporal.computedAt || warning.asOf || null;
     var computedMs = computedAt ? new Date(computedAt).getTime() : NaN;
     var ageMs = isFinite(computedMs) ? Math.max(0, Date.now() - computedMs) : Infinity;
+    var sourceExpired = quality.freshness != null && isFinite(Number(quality.freshness)) && Number(quality.freshness) < 0.25;
     var overlayStatus = String(overlay.status || overlay.freshnessStatus || 'unknown');
     var delayed = overlayStatus === 'delayed' || overlayStatus === 'stale';
     var computeLabel = '最新評估';
-    if (temporal.evaluationMode === 'finalized_review') computeLabel = '收盤定稿';
+    if (sourceExpired) computeLabel = warningClock(computedAt) + ' 已保存評估';
+    else if (temporal.evaluationMode === 'finalized_review') computeLabel = '收盤定稿';
     else if (delayed) computeLabel = '最新評估 · 行情延遲';
     else if (ageMs <= 90000 && (temporal.evaluationMode !== 'overnight_monitor' || overlayStatus === 'live')) {
       computeLabel = warningClock(computedAt) + ' 即時計算';
     } else if (computedAt) computeLabel = warningClock(computedAt) + ' 最新評估';
     var from = Number(target.fromTradingSession) || 1;
     var to = Number(target.toTradingSession) || 5;
-    var freshnessLabel = freshness.status === 'mixed' ? '混合時效資料' :
-      (freshness.allInputsLive ? '即時資料' : (freshness.status ? '來源時效已標記' : '來源時效待更新'));
+    var freshnessLabel = sourceExpired ? '目前不可用：決策來源已過期' :
+      (freshness.status === 'mixed' ? '混合時效資料' :
+        (freshness.allInputsLive ? (ageMs <= 90000 && !delayed ? '即時資料' : '即時效期待更新') :
+          (freshness.status ? '來源時效已標記' : '來源時效待更新')));
     return '<div class="dc-warning-timebar" aria-label="市場前兆評估時間與目標期間">' +
       '<span class="dc-warning-time-chip target">目標 T+' + from + '～T+' + to + '</span>' +
       '<span class="dc-warning-time-chip session">' + esc(warningEvaluationLabel(temporal.evaluationMode)) + '</span>' +
@@ -1864,7 +1957,7 @@
     var thresholds = warning.thresholds || {};
     return '<div class="dc-card dc-warning-card" id="dc-section-precursors" data-dc-section="precursors"><h3 class="dc-warning-head"><span>跨市場前兆雷達</span>' +
       '<span>觀測 → 注意 → 戒備 → 確認 → 生效</span><span class="tag">SHADOW · 非下單訊號</span></h3>' +
-      warningTemporalHtml(warning) + warningMarketStripHtml(warning, down, up) +
+      warningTemporalHtml(warning, ctx.dataQuality) + warningMarketStripHtml(warning, down, up) +
       '<div class="dc-warning-disclaimer">前兆分數評估下一個至第五個台股交易日的跨市場證據強度；不是目前夜盤方向，也不是上漲／下跌機率。</div>' +
       '<div class="dc-warning-grid">' + warningSignalHtml(down, 'downside', thresholds) + warningSignalHtml(up, 'upside', thresholds) + '</div>' +
       '<div class="dc-warning-components">' + components.map(function (row) {
@@ -1936,6 +2029,11 @@
   }
 
   function render(ctx) {
+    if (lastPortfolioInput && !lastPortfolioInput.ready) {
+      ctx = Object.assign({}, ctx, {portfolioOverlay: null,
+        actionEnvelope: Object.assign({}, ctx.actionEnvelope || {}, {positionRange: null}),
+        exposureLab: Object.assign({}, ctx.exposureLab || {}, {finalEligibleRange: null})});
+    }
     var body = ensureMount();
     if (!body || !ctx) return;
     lastContext = ctx;
@@ -2002,8 +2100,10 @@
   }
 
   function loadHistory() {
+    var sequence = ++historySequence;
     fetch(SRV + '/decision/history?n=12', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
+        if (sequence !== historySequence) return;
         var box = $('dc-history'), meta = $('dc-hist-meta');
         if (!box) return;
         var rows = (d && d.rows) || [];
@@ -2017,12 +2117,15 @@
   function load(force, riskProfile) {
     var body = ensureMount();
     if (!body) return;
-    lastHoldings = portfolioMode === 'observation_pool' ? holdingsFromWatch() : holdingsFromPositions();
+    var sequence = ++loadSequence;
+    if (riskProfile) activeRiskProfile = riskProfile;
+    var opts = portfolioRequestOptions(force), key = portfolioRequestKey;
     if (!lastContext) body.innerHTML = '<div class="dc-card">決策資料載入中…</div>';
-    var opts = { force: !!force, holdings: lastHoldings, portfolioKind: portfolioMode };
-    if (riskProfile) opts.riskProfile = riskProfile;
     if (window.DecisionData && DecisionData.refresh) {
-      DecisionData.refresh(opts).then(function (st) {
+        return DecisionData.refresh(opts).then(function (st) {
+        if (sequence !== loadSequence) return;
+        if (!portfolioStillCurrent(key)) { discardChangedPortfolio(); return; }
+        if (!st || st.portfolioInputKey !== key) return;
         var ctx = st && st.context;
         if (ctx) render(ctx);
         else if (!lastContext) showEmpty(
@@ -2067,21 +2170,13 @@
       : 'decision-ai-' + Date.now().toString(36);
     var prompt = '請以 5–8 句繁中解釋既有 DecisionContext，先說支持證據，再提出最強反方觀點、衝突與失效條件；引用 evidence id。' +
       '不得改寫 regime、confidence、價格關卡或倉位數字，不得創造未提供的資料，結尾加「⚠ 非投資建議」。';
-    fetch(SRV + '/ai/local', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-ST-Trace-ID': localRequestId },
-      body: JSON.stringify({ prompt: prompt, context: JSON.stringify(slim) }),
-      credentials: 'same-origin', signal: aiController ? aiController.signal : undefined
-    }).then(function (response) {
-      var requestId = response.headers.get('X-ST-AI-Request-ID') || response.headers.get('X-ST-Trace-ID') || localRequestId;
-      return response.text().then(function (text) {
-        if (!response.ok) {
-          var httpError = new Error('HTTP ' + response.status);
-          httpError.status = response.status;
-          httpError.detail = text;
-          httpError.requestId = requestId;
-          throw httpError;
-        }
-        var answer = String(text || '').trim();
+    Promise.resolve().then(function () {
+      if (!window.STAI) throw new Error('AI 串流元件尚未載入');
+      return STAI.request({endpoint: '/ai/local', prompt: prompt, context: JSON.stringify(slim),
+        requestId: localRequestId, timeoutMs: AI_TIMEOUT_MS, signal: aiController && aiController.signal}).promise;
+    }).then(function (result) {
+        var requestId = result.meta && result.meta.requestId || localRequestId;
+        var answer = String(result.text || '').trim();
         if (!answer) {
           var emptyError = new Error('empty AI response');
           emptyError.detail = '模型完成推理但沒有輸出可見正文，請重試。';
@@ -2106,7 +2201,6 @@
         }
         var suffix = requestId ? '\n\n請求編號：' + requestId : '';
         setAiDisplay(answer + suffix, false);
-      });
     }).catch(function (error) {
       setAiDisplay(aiErrorMessage(error, localRequestId), true);
     }).then(function () {
@@ -2119,9 +2213,14 @@
 
   function activate(opts) {
     if (opts && (opts.focusSection || opts.highlightId)) pendingFocus = opts;
-    ensureMount();
+    var mount = ensureMount();
+    if (!lastContext && mount) {
+      lastPortfolioInput = portfolioInput();
+      portfolioMode = lastPortfolioInput.kind;
+      mount.innerHTML = '<div class="dc-card">正在讀取' + esc(lastPortfolioInput.label) + '的市場快照…</div>';
+    }
     resolveAiAccess();
-    load(false);
+    refreshMarketData({ background: true });
     if (timer) clearInterval(timer);
     timer = setInterval(function () {
       if (window.ShellV5 && ShellV5.route && ShellV5.route() === 'decision') {
@@ -2129,7 +2228,19 @@
       }
     }, 60000);
   }
-  function deactivate() { if (timer) { clearInterval(timer); timer = null; } }
+  function deactivate() {
+    if (window.DecisionData && DecisionData.stopResearchWait) DecisionData.stopResearchWait();
+    if (aiController) aiController.abort();
+    if (optionsController) optionsController.abort();
+    optionsController = null; optionsRefreshStarted = false;
+    ++loadSequence;
+    ++historySequence;
+    ++lifecycleSequence;
+    if (marketRefreshController) { marketRefreshController.abort(); marketRefreshController = null; }
+    marketRefreshInflight = null;
+    setRefreshState(false);
+    if (timer) { clearInterval(timer); timer = null; }
+  }
 
   window.DecisionV5 = {
     activate: activate,
@@ -2138,11 +2249,31 @@
     refreshMarketData: refreshMarketData,
     setPortfolioMode: setPortfolioMode
   };
+  window.addEventListener('portfolioContext', function () {
+    portfolioMode = window.PortfolioContext ? PortfolioContext.getMode() : 'actual';
+    ++loadSequence; ++lifecycleSequence;
+    if (marketRefreshController) { marketRefreshController.abort(); marketRefreshController = null; }
+    marketRefreshInflight = null;
+    setRefreshState(false);
+    lastContext = null; lastHoldings = []; lastPortfolioInput = portfolioInput();
+    portfolioRequestKey = null;
+    lastMarketRefreshAt = 0;
+    if (aiController) aiController.abort();
+    if (window.ShellV5 && ShellV5.route && ShellV5.route() === 'decision') load(true);
+  });
   window.addEventListener('decisionData', function (ev) {
-    var ctx = ev && ev.detail && ev.detail.state && ev.detail.state.context;
-    if (ctx && window.ShellV5 && ShellV5.route && ShellV5.route() === 'decision') render(ctx);
+    var state = ev && ev.detail && ev.detail.state;
+    var ctx = state && state.context;
+    if (!ctx || !window.ShellV5 || !ShellV5.route || ShellV5.route() !== 'decision') return;
+    if (!state.portfolioInputKey) {
+      // 一般市場發布可更新市場內容；沒有輸入識別時不得攜入其他投組的覆蓋與範圍。
+      lastPortfolioInput = portfolioInput();
+      render(Object.assign({}, ctx, {
+        portfolioOverlay: null,
+        actionEnvelope: Object.assign({}, ctx.actionEnvelope || {}, { positionRange: null }),
+        exposureLab: Object.assign({}, ctx.exposureLab || {}, { finalEligibleRange: null })
+      }));
+    } else if (portfolioRequestKey && portfolioStillCurrent(portfolioRequestKey) && state.portfolioInputKey === portfolioRequestKey) render(ctx);
   });
-  window.addEventListener('shell:route', function (ev) {
-    if (ev && ev.detail && ev.detail.route === 'decision') activate(ev.detail.opts || {});
-  });
+  // 面板生命週期由 Shell／AppKernel 統一呼叫。
 }());

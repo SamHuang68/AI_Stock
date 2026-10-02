@@ -76,9 +76,11 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/core/namesearch_v3.js',               # v3.9: 代號框打公司名自動完成(/search 反查台股名)
               'src/core/intraday_volume_v3.js',          # 累積量單位／來源切換／缺分鐘保護（須在 realtime 前）
               'src/core/realtime_v3.js',                 # v3.9: 台股盤中真即時(TWSE MIS 每10s 更新當前分鐘K,解 Yahoo 延遲)
+              'src/ai/ai_runtime_client.js',          # 共用 AI 正常完成與取消協定
               'src/ai/copilot_v3.js',                  # v4.0: AI 副駕面板(本機 LM Studio,/ai/local)
               'src/screener/wizard_v3.js',                   # v3.9: 加股設定精靈(依賴 StratLib/Backtest/drawtools/setPosition/saveWatches，排最後)
               'src/ui/shell_v5.js',                    # v5.0: 轉盤殼層+視圖路由(show/hide，預設 #pulse；須在 toolbar 前掛好 DOM)
+              'src/ui/更新工作中心.js',                 # 共用更新工作與持久化進度
               'src/ui/wavedeck_bridge_v5.js',          # v5.0: WaveDeck 浪潮執行台入口／ST→WD 橋接
               'src/ui/hub_v5.js',                      # v5.0: TW Pulse 對齊模組（指數/法人/國際/訊號/自選/風險/設定）
               'src/ui/pulse_v5.js',                    # v5.0: TW Pulse 市場脈動總覽（組合既有 API，掛 #view-pulse）
@@ -116,6 +118,8 @@ V2_SCRIPTS.insert(4, 'src/core/market_freshness_v5.js')  # per-quote asOf freshn
 V2_SCRIPTS.insert(5, 'src/core/market_data_v5.js')  # canonical market quote store
 V2_SCRIPTS.insert(6, 'src/core/decision_data_v5.js')  # canonical DecisionContext store
 V2_SCRIPTS.insert(7, 'src/core/market_intel_v5.js')  # shared theme resonance + news/watch linkage
+V2_SCRIPTS.insert(V2_SCRIPTS.index('src/core/decision_data_v5.js'), 'src/core/投組資料契約_v5.js')
+V2_SCRIPTS.insert(V2_SCRIPTS.index('src/core/decision_data_v5.js') + 1, 'src/core/更新工作_v5.js')
 
 try:
     from build_order import order_scripts

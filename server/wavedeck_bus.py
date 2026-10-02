@@ -301,7 +301,7 @@ def last_report() -> Optional[dict[str, Any]]:
 
 
 def _norm_sym(sym: Any) -> str:
-    s = str(sym or 'TXF').upper().replace('.TW', '').replace('.TWO', '').strip()
+    s = str(sym or 'TXF').strip().upper().removesuffix('.TWO').removesuffix('.TW')
     return s or 'TXF'
 
 

@@ -233,9 +233,16 @@
       '#ah-root .ah-loading,#ah-root .ah-err{font-size:10px;color:var(--tlo);padding:10px 0}' +
       '#ah-root .ah-err{color:var(--orange)}' +
       '#ah-body.ah-loading{display:flex;align-items:center}' +
-      /* 直向手機沿用殼層捲動：兩欄自然高度，表格各自橫捲，保留全部欄位。 */
+      '#ah-root .ah-inst-trend{flex:0 0 auto;overflow:hidden;isolation:isolate;margin-bottom:6px}' +
+      '#ah-root .ah-inst-trend .chart{flex:0 0 96px;height:96px;min-height:0;overflow:hidden}' +
+      '#ah-root .ah-inst-trend .chart .vz-spark-ax{height:100%;min-height:0;overflow:hidden}' +
+      '#ah-root .ah-inst-trend .chart .vz-plot,#ah-root .ah-inst-trend .chart svg{overflow:hidden;max-height:100%;min-height:0}' +
+      '#ah-root .ah-inst-cmt,#ah-root .ah-inst-mkt{position:relative;white-space:normal;overflow-wrap:anywhere}' +
+      /* 直向手機沿用殼層捲動：單欄自然高度，表格各自橫捲，保留全部欄位。 */
       '@media(max-width:900px) and (orientation:portrait){' +
         '#shell-views:has(#view-afterhours.on){overflow-x:hidden!important;overflow-y:auto!important}' +
+        '#view-afterhours.sv-panel.on{height:auto!important;min-height:100%;overflow:visible!important;display:block!important}' +
+        '#mount-afterhours,#mount-afterhours.sv-mount{height:auto;min-height:0;display:block;overflow:visible}' +
         '#ah-root,#ah-body{flex:none;height:auto;overflow:visible}' +
         '#ah-root .ah-head{flex-wrap:wrap;gap:8px;margin-bottom:8px}' +
         '#ah-root .ah-head > div:first-child{flex-basis:100%}' +
@@ -247,7 +254,7 @@
         '#ah-root .ah-strip .k,#ah-root .ah-strip .s{font-size:12px;line-height:1.5}' +
         '#ah-root .ah-strip .v{font-size:19px;line-height:1.4}' +
         '#ah-root .ah-strip .k,#ah-root .ah-strip .v,#ah-root .ah-strip .s{white-space:normal;overflow-wrap:anywhere}' +
-        '#ah-root .ah-dash{flex:none;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:auto;gap:8px;align-items:start}' +
+        '#ah-root .ah-dash{flex:none;grid-template-columns:minmax(0,1fr);grid-template-rows:auto;gap:8px;align-items:start}' +
         '#ah-root .ah-sec{height:auto;padding:8px;box-sizing:border-box;overflow:visible}' +
         '#ah-root .ah-sec h4{font-size:13px;line-height:1.5;flex-wrap:wrap;white-space:normal}' +
         '#ah-root .ah-sec:has(table) > h4:after{content:"表格可左右滑動";flex-basis:100%;font-size:11px;font-weight:400;color:var(--tlo)}' +
@@ -268,7 +275,15 @@
         '#ah-root .ah-inst-trend .chart{flex:none;height:160px}' +
         '#ah-root .ah-inst-trend .lab{flex-wrap:wrap}' +
         '#ah-root .ah-inst-cmt,#ah-root .ah-inst-mkt{font-size:12px;line-height:1.6}' +
-      '}';
+      '}' +
+      '@media(max-width:900px) and (orientation:landscape){' +
+        '#shell-views:has(#view-afterhours.on){overflow-y:auto!important;overflow-x:hidden!important}' +
+        '#view-afterhours.sv-panel.on,#mount-afterhours,#ah-root,#ah-body{height:auto;min-height:0;overflow:visible}' +
+        '#ah-root .ah-dash{grid-template-rows:auto;align-items:start}' +
+        '#ah-root .ah-sec{height:auto;overflow:visible}' +
+        '#ah-root table.ah-tbl{display:block;overflow-x:auto;max-width:100%}' +
+        '#ah-root .ah-inst-trend .chart .vz-pt{display:none}' +
+        '#ah-root .ah-sec h4{white-space:normal;flex-wrap:wrap;overflow-wrap:anywhere}}';
   }
 
   function twCls(p) {

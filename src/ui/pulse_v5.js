@@ -21,6 +21,10 @@
 
   var SRV = window.SERVER || '';
   var timer = null;
+  var refreshSequence = 0, refreshController = null, refreshPromise = null, refreshIsUpdate = false;
+  var stockHealthSequence = 0, stockHealthController = null, stockHealthView = null, stockHealthDraft = "";
+  var headMetaSequence = 0, _lastJobLabel = "待命", _lastSyncStatus = null;
+  var beginnerFocusSequence = 0;
   var layoutResizeTimer = null;
   var lastPack = null;
   var showFactors = false;
@@ -37,6 +41,7 @@
   var aiSpeechActive = false;
   var aiSummaryMode = 'fast';
   var aiSummaryInFlight = false;
+  var aiSummaryTask = null, aiSummarySequence = 0;
   var aiSummaryWaitTimer = null;
   var aiRuntimeStatus = null;
   var lastBoundaryTraceSignature = null;
@@ -913,7 +918,33 @@
       '#pl-body.pl-mode-expert .pl-drivers,#pl-body.pl-mode-expert .pl-drivers .box .k{font-size:7.5px}' +
       '#pl-body.pl-mode-expert .pl-global .g{padding:2px 4px}' +
       '#pl-body.pl-mode-expert .pl-global .g .v{font-size:7.5px}' +
-    '}';
+    '}' +
+      '#pl-root .pl-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px}' +
+      '#pl-root .pl-head-lead{min-width:0;max-width:260px;flex-wrap:wrap}' +
+      '#pl-root .pl-head-meta{min-width:0;overflow:hidden;border:1px solid rgba(245,197,24,.38);border-radius:6px;padding:4px 7px;background:#0b1423}' +
+      '#pl-root .pl-head-meta[hidden]{display:none}' +
+      '#pl-root .pl-head-meta-track{display:block;overflow-x:auto;white-space:nowrap;font-size:11px;line-height:1.5;scrollbar-width:thin}' +
+      '#pl-root .pl-head-meta-track b{color:#fde68a}' +
+      '#pl-root .pl-head-jobs{border:1px solid #3a4f68;border-radius:4px;background:#0b1423;color:#dbe7f5;font-size:11px;cursor:pointer}' +
+      '#pl-update-status{flex:0 0 auto;font-size:11px;line-height:1.5;color:var(--tlo);overflow-wrap:anywhere}' +
+      '#pl-root .pl-today-signals{margin:10px 0}' +
+      '#pl-root .pl-beginner-signals-head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;margin-bottom:6px;font-size:12px;color:#879bb2}' +
+      '#pl-root .pl-beginner-signals-head h3{margin:0;color:#e7eef8;font-size:14px}' +
+      '#pl-root .pl-signal-chips{display:flex;flex-wrap:wrap;gap:6px}' +
+      '#pl-root .pl-today-chip{position:relative;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;max-width:100%;min-width:0;padding:6px 10px;border-radius:10px;border:1px solid #314862;background:#0d1727;cursor:pointer;box-sizing:border-box}' +
+      '#pl-root .pl-today-chip em{font-style:normal;font-size:12px;color:#93a8c0}' +
+      '#pl-root .pl-today-chip b{font-size:13px;color:#f2f7ff;overflow-wrap:anywhere}' +
+      '#pl-root .pl-today-chip .detail{font-size:12px;color:#b7c6d8;overflow-wrap:anywhere}' +
+      '#pl-root .pl-today-chip .pl-method-pop{position:static;flex-basis:100%;width:auto;white-space:normal}' +
+      '#pl-root .pl-stock-result{max-height:calc(100dvh - 60px);overflow:auto}' +
+      '#pl-root .pl-strip .pl-observation{font-size:10px;line-height:1.4;color:#a8b6c8;white-space:normal;overflow-wrap:anywhere}' +
+      '#pl-root .vz-spark-ax{overflow-x:auto!important;max-width:100%;min-width:0}' +
+      'html.st-vs5 #pl-root .pl-zone>.pl-sec>h4,#pl-root .pl-zone>.pl-sec>h4,#pl-root #pl-watch-sec>h4.pl-wl-head{flex-wrap:wrap;white-space:normal;overflow:visible;overflow-wrap:anywhere}' +
+      '@media(max-width:900px){#pl-root .pl-head{grid-template-columns:minmax(0,1fr) auto;align-items:start}' +
+        '#pl-root .pl-head-lead{max-width:none}#pl-root .pl-head-meta{grid-column:1/-1;grid-row:2}' +
+        '#pl-root .pl-head-meta-track{white-space:normal;overflow-wrap:anywhere}' +
+        '#pl-root .pl-actions{flex-wrap:wrap;max-width:210px}#pl-root .pl-sub{white-space:normal;overflow-wrap:anywhere}' +
+        '#pl-root .pl-stock-result{grid-template-columns:1fr auto}#pl-root .pl-stock-result>div{grid-column:1/-1}}';
 
   /* 單行刪節的文字補上 title，懸停可看全文（不必為了看完整句子而換行）。 */
   var ELLIPSIS_SEL = '.pl-note,.pl-score-formula,.pl-inst-cmt,.pl-bd-cmt,.pl-ohlc-cmt,' +
@@ -1037,10 +1068,18 @@
     if (x == null) return '—';
     return (x >= 0 ? '+' : '') + x.toFixed(1);
   }
-  function jget(url) {
-    return fetch(SRV + url, { cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .catch(function () { return null; });
+  function jget(url, signal) {
+    var controller = window.AbortController ? new AbortController() : null, timeout, cancel;
+    var deadline = new Promise(function (resolve) {
+      cancel = function () { if (controller) controller.abort(); resolve(null); };
+      timeout = setTimeout(cancel, 8000);
+      if (signal) { if (signal.aborted) cancel(); else signal.addEventListener('abort', cancel, { once:true }); }
+    });
+    var request = fetch(SRV + url, { cache:'no-store', signal:controller ? controller.signal : signal })
+      .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+    return Promise.race([request, deadline]).finally(function () {
+      clearTimeout(timeout); if (signal) signal.removeEventListener('abort', cancel);
+    });
   }
   function esc(s) {
     return String(s == null ? '' : s)
@@ -1369,6 +1408,10 @@
   }
 
   function setAiSummaryVisible(visible) {
+    if (!visible) {
+      ++aiSummarySequence;
+      if (aiSummaryTask) aiSummaryTask.cancel();
+    }
     aiSummaryVisible = !!visible;
     if (!aiSummaryVisible) stopAiSpeech();
     syncAiSummaryControls();
@@ -1400,20 +1443,26 @@
   }
 
   function loadAiRuntimeStatus() {
-    return fetch(SRV + '/ai/local/status', { cache: 'no-store' }).then(function (r) {
+    var controller = window.AbortController ? new AbortController() : null, timeout;
+    var deadline = new Promise(function (resolve) {
+      timeout = setTimeout(function () { if (controller) controller.abort(); resolve(null); }, 3000);
+    });
+    var request = fetch(SRV + '/ai/local/status', { cache: 'no-store', signal: controller ? controller.signal : undefined }).then(function (r) {
       if (!r.ok) throw new Error('status ' + r.status);
       return r.json();
     }).then(function (d) {
       aiRuntimeStatus = d && d.modes ? d : null;
       return aiRuntimeStatus;
     }).catch(function () { return null; });
+    return Promise.race([request, deadline]).finally(function () { clearTimeout(timeout); });
   }
 
   function aiRouteLabel(route) {
     if (!route) return 'EVO-T1';
     var provider = String(route.provider || 'AI runtime');
     var model = String(route.model || '未回報模型');
-    var boundary = route.dataBoundary === 'local-only' ? '本機資料邊界' : '外部供應商資料邊界';
+    var boundary = route.dataBoundary === 'local-only' ? '本機資料邊界' :
+      route.dataBoundary === 'external-provider' ? '外部供應商資料邊界' : '資料邊界未回報';
     return String(route.host || 'EVO-T1') + ' · ' + provider + ' · ' + model + ' · ' + boundary;
   }
 
@@ -1439,31 +1488,6 @@
     aiSummaryWaitTimer = setInterval(tick, 5000);
   }
 
-  function headerRoute(response, fallback) {
-    var h = response && response.headers;
-    if (!h) return fallback;
-    var seconds = Number(h.get('X-ST-AI-Estimate-Seconds'));
-    return {
-      mode: h.get('X-ST-AI-Mode') || fallback.mode,
-      host: h.get('X-ST-AI-Host') || fallback.host,
-      provider: h.get('X-ST-AI-Provider') || fallback.provider,
-      model: h.get('X-ST-AI-Model') || fallback.model,
-      dataBoundary: h.get('X-ST-AI-Data-Boundary') || fallback.dataBoundary,
-      estimateSeconds: isFinite(seconds) && seconds > 0 ? seconds : fallback.estimateSeconds,
-      requestId: h.get('X-ST-AI-Request-ID') || ''
-    };
-  }
-
-  function friendlyAiError(status, text) {
-    var message = String(text || '').trim();
-    try {
-      var parsed = JSON.parse(message);
-      message = String(parsed.error || parsed.message || message);
-    } catch (e) {}
-    if (!message) message = 'HTTP ' + status;
-    return message.replace(/HTTP\/1\.[01][\s\S]*/g, '連線在回應期間中斷').slice(0, 220);
-  }
-
   function runAiSummary(mode) {
     var box = $('pl-ai');
     var body = $('pl-ai-body');
@@ -1473,6 +1497,7 @@
     mode = mode === 'deep' ? 'deep' : 'fast';
     aiSummaryMode = mode;
     aiSummaryInFlight = true;
+    var sequence = ++aiSummarySequence;
     aiSummaryStarted = true;
     setAiSummaryVisible(true);
     syncAiSummaryControls();
@@ -1514,6 +1539,7 @@
     var waitText = mode === 'deep' ? 'Hermes 深度分析' : '快速摘要';
 
     return loadAiRuntimeStatus().then(function (runtime) {
+      if (sequence !== aiSummarySequence) { var cancelled = new Error('已取消'); cancelled.name = 'AbortError'; throw cancelled; }
       activeRoute = runtime && runtime.modes && runtime.modes[mode] ? runtime.modes[mode] : fallbackRoute;
       var estimate = activeRoute.estimateLabel || fallbackRoute.estimateLabel;
       body.textContent = 'EVO-T1 正在準備' + waitText + '。\n' + estimate +
@@ -1521,48 +1547,36 @@
       if (mode === 'deep') body.textContent += '\n注意：深度分析會由 EVO-T1 經 Hermes 將本面板市場摘要送至外部 NVIDIA 模型。';
       if (st) st.textContent = aiRouteLabel(activeRoute);
       startAiWaitTicker(startedAt, activeRoute, meta);
-      return fetch(SRV + endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-ST-Trace-ID': traceId },
-        body: JSON.stringify({ prompt: mode === 'deep' ? deepPrompt : fastPrompt, context: ctx })
+      if (!window.STAI || !window.STAI.request) throw new Error('AI 完成協定尚未載入');
+      aiSummaryTask = window.STAI.request({ endpoint: endpoint,
+        prompt: mode === 'deep' ? deepPrompt : fastPrompt, context: ctx, requestId: traceId,
+        timeoutMs: mode === 'deep' ? 990000 : 660000,
+        onStatus: function (info) {
+          if (sequence !== aiSummarySequence || !info || !info.meta) return;
+          Object.assign(activeRoute, info.meta);
+          if (st) st.textContent = aiRouteLabel(activeRoute);
+        },
+        onText: function (text) { if (sequence === aiSummarySequence) body.textContent = text; }
       });
-    }).then(function (r) {
-      activeRoute = headerRoute(r, activeRoute);
-      if (st) st.textContent = aiRouteLabel(activeRoute);
-      startAiWaitTicker(startedAt, activeRoute, meta);
-      if (!r.ok) return r.text().then(function (t) { throw new Error(friendlyAiError(r.status, t)); });
-      if (!r.body || !r.body.getReader) return r.text().then(function (t) {
-        if (!t.trim()) throw new Error('AI 未回傳內容');
-        body.textContent = t;
-        return t;
+      return aiSummaryTask.promise.then(function (result) {
+        if (sequence !== aiSummarySequence) return;
+        activeRoute = Object.assign({}, activeRoute, result.meta);
+        if (st) st.textContent = aiRouteLabel(activeRoute);
+        body.textContent = result.text;
       });
-      var reader = r.body.getReader();
-      var dec = new TextDecoder();
-      var acc = '';
-      function pump() {
-        return reader.read().then(function (res) {
-          if (res.done) {
-            acc += dec.decode();
-            if (!acc.trim()) throw new Error('AI 未回傳內容');
-            body.textContent = acc;
-            return acc;
-          }
-          acc += dec.decode(res.value || new Uint8Array(), { stream: true });
-          body.textContent = acc;
-          return pump();
-        });
-      }
-      return pump();
     }).then(function () {
+      if (sequence !== aiSummarySequence) return;
       if (meta) meta.textContent = '完成於 ' + new Date().toLocaleTimeString('zh-TW') + ' · 實際耗時 ' +
         formatAiDuration(Date.now() - startedAt) + ' · ' + aiRouteLabel(activeRoute) +
         (activeRoute.requestId ? ' · request ' + activeRoute.requestId.slice(0, 12) : '');
     }).catch(function (err) {
+      if (sequence !== aiSummarySequence) return;
       body.textContent = pulseMode === 'beginner' ? beginnerFallbackSummary(m) : ruleFallbackSummary(m);
       if (st) st.textContent = (mode === 'deep' ? 'Hermes 深度分析' : '快速摘要') + '未完成 · 規則後援';
       if (meta) meta.textContent = 'EVO-T1 AI 路徑未完成：' + String(err && err.message || '未知錯誤').slice(0, 220) +
         ' · 已保留可讀的規則摘要 · trace ' + traceId;
     }).then(function () {
+      aiSummaryTask = null;
       stopAiWaitTicker();
       aiSummaryInFlight = false;
       syncAiSummaryControls();
@@ -1770,11 +1784,11 @@
     if (!$('pl-root')) {
       mount.innerHTML =
         '<div id="pl-root">' +
-          '<div class="pl-head"><div>' +
+          '<div class="pl-head"><div class="pl-head-lead">' +
             '<div class="pl-title">市場總覽 <span id="pl-layout-probe" style="font-size:10px;font-weight:700;letter-spacing:.03em;padding:1px 7px;border-radius:999px;border:1px solid rgba(34,211,238,.45);background:rgba(34,211,238,.12);color:#67e8f9;vertical-align:middle">實測…</span></div>' +
             '<span class="pl-wd" id="pl-wd">WaveDeck 覆寫：—</span>' +
             '<div class="pl-sub" id="pl-sub">官方資料 · 一行五框 × 上下兩區 · ' + LAYOUT_ANCHOR + '</div>' +
-          '</div><div class="pl-actions">' +
+          '</div><div class="pl-head-meta" id="pl-head-meta" hidden></div><div class="pl-actions">' +
             '<span class="pl-mode-toggle" role="group" aria-label="總覽顯示模式">' +
               '<button type="button" id="pl-view-beginner" title="只看市場狀態、行動提示與三個白話訊號">新手</button>' +
               '<button type="button" id="pl-view-expert" title="顯示完整 5+5 儀表板與原始數據">專業</button>' +
@@ -1797,6 +1811,7 @@
             '<div class="pl-ai-body" id="pl-ai-body">—</div>' +
             '<div class="pl-ai-meta" id="pl-ai-meta"></div>' +
           '</div>' +
+          '<div id="pl-update-status" role="status" aria-live="polite"></div>' +
           '<div id="pl-body" class="pl-loading">載入總覽儀表板…</div>' +
         '</div>';
       var r = $('pl-refresh');
@@ -1841,6 +1856,8 @@
   }
 
   function setPulseMode(mode) {
+    cancelStockHealth('mode_changed');
+    ++beginnerFocusSequence;
     pulseMode = mode === 'expert' ? 'expert' : 'beginner';
     if (pulseMode === 'expert') {
       beginnerAdvanced = false;
@@ -2062,6 +2079,7 @@
       volumeScore: volumeScore,
       turnoverYi: strip.turnoverYi,
       current: current,
+      twQuote: ((ov || {}).strip || {}).t00 || {},
       twChange: strip.t00 && strip.t00.changePct != null ? Number(strip.t00.changePct) : null,
       ceiling: levels.r1,
       floor: levels.s1,
@@ -2186,7 +2204,8 @@
   }
 
   function radarNumber(value) {
-    return value == null || !isFinite(Number(value)) ? null : Number(value);
+    if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '') return null;
+    return isFinite(Number(value)) ? Number(value) : null;
   }
 
   function radarClamp(value) {
@@ -2442,6 +2461,310 @@
       '</div></div>';
   }
 
+  function todaySignalChip(spec) {
+    return '<div class="pl-today-chip" data-method-card role="button" tabindex="0" aria-expanded="false" title="點擊查看資料來源">' +
+      '<em>' + esc(spec.label) + '</em><b>' + esc(spec.main) + '</b>' +
+      '<span class="detail">' + esc(spec.detail) + '</span>' +
+      '<div class="pl-method-pop" hidden>' + esc(spec.method) +
+      (spec.go ? '<a data-go="' + esc(spec.go) + '"' +
+        (spec.sym ? ' data-sym="' + esc(spec.sym) + '" data-mkt="' + esc(spec.mkt || 'TW') + '"' : '') +
+        '>查看詳細 →</a>' : '') +
+      '</div></div>';
+  }
+
+  function beginnerFactorName(list) {
+    var row = (list || []).filter(function (item) { return item && item.name; })[0];
+    return row ? String(row.name) : '';
+  }
+
+  function beginnerMaChip(ov) {
+    var tr = ((ov && ov.strip) || {}).t00Trend || {};
+    var ma5 = radarNumber(tr.ma5);
+    var vs = radarNumber(tr.vsMa5Pct);
+    var mom = radarNumber(tr.momScore);
+    var n = radarNumber(tr.n);
+    var method = '五日均沿用後端 trend_quant 的 ma5：最近至多 5 筆收盤的算術平均（SMA）。' +
+      '偏離 vsMa5Pct＝(收盤−ma5)÷ma5。樣本未滿 5 日或欄位是空值時只顯示等待，缺值時留空。';
+    if (ma5 == null || n == null || n < 5) {
+      return todaySignalChip({
+        label: '五日均', main: '等待均線', detail: n != null && n < 5 ? '樣本未滿 5 日' : '尚無完整五日均線',
+        method: method, go: 'chart', sym: '^TWII'
+      });
+    }
+    var sample = n != null && n < 5 ? '僅 ' + n + ' 日樣本' : 'SMA5';
+    var bits = [sample];
+    if (vs != null) bits.push('vs5 ' + pct(vs));
+    if (mom != null) bits.push('動能 ' + mom.toFixed(0));
+    var z = radarNumber(tr.z20), streak = radarNumber(tr.streak);
+    if (z != null) bits.push((n >= 20 ? '近20日Z ' : 'Z（樣本 ' + n + ' 日）') + z.toFixed(2));
+    if (streak != null) bits.push(streak > 0 ? '連漲 ' + streak + ' 日' : streak < 0 ? '連跌 ' + Math.abs(streak) + ' 日' : '無連續漲跌');
+    return todaySignalChip({
+      label: '五日均',
+      main: tr.level || tr.trend || '均線已更新',
+      detail: bits.join(' · ') + ' · ' + fmt(ma5, 2),
+      method: method + (tr.trend ? ' 趨勢標籤：' + tr.trend + '。' : ''),
+      go: 'chart', sym: '^TWII'
+    });
+  }
+
+  function beginnerRiskChip(p) {
+    var score = radarNumber(p && p.riskScore);
+    var label = (p && p.riskLabel) || (score == null ? '等待風險分' : '風險');
+    var pressure = beginnerFactorName(p && p.riskFactors);
+    var support = beginnerFactorName(p && p.positiveFactors);
+    var bits = [];
+    if (score != null) bits.push(score.toFixed(1));
+    if (pressure) bits.push('壓力 ' + pressure);
+    if (support) bits.push('支撐 ' + support);
+    return todaySignalChip({
+      label: '風險',
+      main: label,
+      detail: bits.join(' · ') || '風險分尚未形成',
+      method: '風險分沿用 pulse.riskScore：風險因子絕對分加總後軟封頂，越高越警戒。' +
+        '標籤沿用 riskLabel，因子名稱沿用 riskFactors／positiveFactors，前端不重算。',
+      go: 'factors'
+    });
+  }
+
+  function beginnerSpillChip(p) {
+    var spill = (p && p.aiSpill) || {};
+    var method = '科技外溢沿用 pulse.aiSpill，來源是同一包 global 的費半、那指與 VIX。缺費半與那指時 ok 為 false，前端不另抓、不補方向。';
+    if (spill.ok !== true) {
+      return todaySignalChip({
+        label: '科技外溢', main: '等待外溢', detail: '費半與那指尚未齊',
+        method: method, go: 'international'
+      });
+    }
+    var dir = spill.direction === 'pos' ? '外溢偏多' :
+      spill.direction === 'risk' ? '外溢偏空' : '外溢中性';
+    var bits = [];
+    if (radarNumber(spill.soxChangePct) != null) bits.push('費半 ' + pct(spill.soxChangePct));
+    if (radarNumber(spill.ixicChangePct) != null) bits.push('那指 ' + pct(spill.ixicChangePct));
+    if (radarNumber(spill.vixLevel) != null) bits.push('VIX ' + Number(spill.vixLevel).toFixed(1));
+    return todaySignalChip({
+      label: '科技外溢',
+      main: spill.factorName || dir,
+      detail: bits.join(' · ') || dir,
+      method: method,
+      go: 'international'
+    });
+  }
+
+  function beginnerLimitChip(ov) {
+    var strip = (ov && ov.strip) || {};
+    var up = radarNumber(strip.limitUp);
+    var down = radarNumber(strip.limitDown);
+    var ready = up != null && down != null;
+    return todaySignalChip({
+      label: '漲跌停',
+      main: ready ? ('漲 ' + fmt(up, 0) + ' · 跌 ' + fmt(down, 0)) : '等待家數',
+      detail: '官方家數',
+      method: '上市漲停／跌停家數沿用 overview.strip.limitUp／limitDown，來源是證交所 MI_INDEX 股票欄括號。' +
+        '與下方漲跌榜的近漲停清單不同，前端不把兩套數字加總。',
+      go: 'breadth'
+    });
+  }
+
+  function beginnerSectorChip(p) {
+    var snap = (p && p.snapshot) || {};
+    var hot = snap.topSector || null;
+    var cold = snap.bottomSector || null;
+    var hotPct = hot && radarNumber(hot.changePct);
+    var coldPct = cold && radarNumber(cold.changePct);
+    var hasHot = !!(hot && hot.name && hotPct != null);
+    var hasCold = !!(cold && cold.name && coldPct != null && (!hot || cold.name !== hot.name));
+    var detail = '尚無類股漲跌';
+    if (hasHot && hasCold) detail = pct(hotPct) + ' · 落後 ' + cold.name + ' ' + pct(coldPct);
+    else if (hasHot) detail = pct(hotPct);
+    else if (hasCold) detail = '落後 ' + cold.name + ' ' + pct(coldPct);
+    return todaySignalChip({
+      label: '產業',
+      main: hasHot ? hot.name : (hasCold ? cold.name : '等待產業'),
+      detail: detail,
+      method: '領先／落後沿用 pulse.snapshot.topSector／bottomSector，是同一包類股漲跌幅的最大與最小。' +
+        '不用 sectorsRanked 前 12 名的最後一檔充當落後。',
+      go: 'heat'
+    });
+  }
+
+  function beginnerNhnlChip(p) {
+    var nhnl = ((p && p.extras) || {}).nhnl || {};
+    var highs = radarNumber(nhnl.newHighs);
+    var lows = radarNumber(nhnl.newLows);
+    var sample = radarNumber(nhnl.sampleN);
+    var ready = highs != null && lows != null;
+    return todaySignalChip({
+      label: '新高低',
+      main: ready ? ('高 ' + fmt(highs, 0) + ' · 低 ' + fmt(lows, 0)) : '等待新高低',
+      detail: sample == null ? '250 日' : ('樣本 ' + fmt(sample, 0) + ' 檔'),
+      method: '250 日新高／新低家數沿用 pulse.extras.nhnl。樣本不足時後端不計入因子，這裡也不補家數。',
+      go: 'breadth'
+    });
+  }
+
+  function beginnerWarningChip(p) {
+    var summary = (p && p.decisionSummary) || {};
+    var rows = (((summary.earlyWarnings || {}).signals) || []).filter(function (row) {
+      return row && row.label;
+    });
+    var hot = {
+      WATCH: '留意', ARMED: '預備', CONFIRMED: '已確認',
+      ACTIVE: '生效中', CONFLICT: '訊號衝突'
+    };
+    var elevated = rows.filter(function (row) { return hot[row.state]; });
+    elevated.sort(function (a, b) { return Number(b.strength || 0) - Number(a.strength || 0); });
+    var lead = elevated[0] || null;
+    var invalidation = (summary.invalidation || []).map(function (item) {
+      return typeof item === 'string' ? item : (item && (item.text || item.label)) || '';
+    }).filter(Boolean)[0] || '';
+    var method = '預警沿用 decisionSummary.earlyWarnings，只顯示後端已發布的標籤與狀態。' +
+      '強度是證據強度，不是上漲機率。' +
+      (invalidation ? ' 失效條件：' + invalidation : '');
+    if (!lead) {
+      return todaySignalChip({
+        label: '預警', main: rows.length ? '預警平穩' : '等待預警',
+        detail: rows[0] ? String(rows[0].label) : '決策摘要尚未附預警',
+        method: method, go: 'decision'
+      });
+    }
+    var strength = radarNumber(lead.strength);
+    return todaySignalChip({
+      label: '預警',
+      main: hot[lead.state] || '留意',
+      detail: String(lead.label) + (strength == null ? '' : ' · 強度 ' + strength.toFixed(0)),
+      method: method, go: 'decision'
+    });
+  }
+
+  function beginnerMoverChip(p) {
+    var movers = (p && p.movers) || {};
+    var upAll = moverRows(movers, 'gainers');
+    var downAll = moverRows(movers, 'losers');
+    var up = upAll.slice(0, 2);
+    var down = downAll.slice(0, 2);
+    function names(list) {
+      return list.map(function (row) {
+        return (row.code || row.sym || '') + (row.name ? ' ' + row.name : '');
+      }).filter(Boolean).join('、');
+    }
+    var upText = names(up);
+    var downText = names(down);
+    var detail = [];
+    if (upText) detail.push('近漲停 ' + upText);
+    if (downText) detail.push('跌幅 ' + downText);
+    return todaySignalChip({
+      label: '漲跌榜',
+      main: (upAll.length || downAll.length) ? ('漲 ' + upAll.length + ' · 跌 ' + downAll.length) : '尚無極端漲跌',
+      detail: detail.join(' · ') || '沿用 movers 清單',
+      method: '漲跌榜沿用 pulse.movers，篩選與專業區相同：近漲停優先 limitUp，否則上市代號且漲幅 ≥9.9%；' +
+        '跌幅優先 limitDown，否則跌幅 ≤−7%。這裡只顯示前兩檔，不另抓報價。',
+      go: 'breadth'
+    });
+  }
+
+  function beginnerBondChip(p) {
+    var bond = (p && p.us10y) || {};
+    var value = radarNumber(bond.value);
+    return todaySignalChip({
+      label: '美債',
+      main: value == null ? '等待美債' : (value.toFixed(2) + '%'),
+      detail: bond.date ? String(bond.date) : '美國十年期',
+      method: '殖利率沿用 pulse.us10y.value，與總經序列同一來源。沒有漲跌幅欄位時不自行推算。',
+      go: 'international'
+    });
+  }
+
+  function beginnerMarginChip(p) {
+    var pillars = (p && p.pillars) || {};
+    var ratio = radarNumber(pillars.marginRatio);
+    var zone = typeof pillars.riskZone === 'string' ? pillars.riskZone : '';
+    return todaySignalChip({
+      label: '融資',
+      main: ratio == null ? '等待融資' : (ratio.toFixed(2) + '%'),
+      detail: zone || '維持率',
+      method: '融資維持率沿用 pulse.pillars.marginRatio 與 riskZone 文字，前端不重算分數。',
+      go: 'factors'
+    });
+  }
+
+  function beginnerPeChip(p) {
+    var pe = radarNumber(((p && p.pillars) || {}).medianPE);
+    return todaySignalChip({
+      label: '本益比',
+      main: pe == null ? '等待本益比' : (pe.toFixed(1) + ' 倍'),
+      detail: '全市場中位',
+      method: '本益比中位數沿用 pulse.pillars.medianPE，來自既有 universe 本益比中位，前端不重算。',
+      go: 'factors'
+    });
+  }
+
+  function beginnerFocusChip(p) {
+    var hint = (p && p.focusHint) || {};
+    var buy = hint.buy || null;
+    var sell = hint.short || null;
+    var method = '焦點只讀既有 /focus 的 TW 已完成快取，另列掃描完成時間，不屬於本頁持久快照。' +
+      'RSI(14) 使用掃描當下的後端 Wilder 值，SMA 訊號只顯示後端已寫入的名稱。' +
+      '快取沒有結果時不啟動新掃描，也不在此重算。';
+    if (hint.ok !== true || (!buy && !sell)) {
+      return todaySignalChip({
+        label: '焦點', main: '尚無焦點快取', detail: '可至熱力頁明確更新焦點',
+        method: method, go: 'heat'
+      });
+    }
+    var lead = buy || sell;
+    var side = buy ? '做多' : '做空';
+    var bits = [];
+    if (buy && buy.signals && buy.signals.length) bits.push(buy.signals.join('、'));
+    if (radarNumber(lead.rsi14) != null) bits.push('RSI ' + Number(lead.rsi14).toFixed(1));
+    if (radarNumber(lead.changePct) != null) bits.push(pct(lead.changePct));
+    if (sell && sell.sym) bits.push('做空 ' + sell.sym);
+    return todaySignalChip({
+      label: '焦點',
+      main: side + ' ' + (lead.sym || ''),
+      detail: bits.join(' · ') || (lead.name || '焦點快取'),
+      method: method,
+      go: 'chart',
+      sym: lead.sym,
+      mkt: 'TW'
+    });
+  }
+
+  function renderBeginnerSignalStrip(ov, p) {
+    return '<section class="pl-today-signals" aria-label="今日短訊號">' +
+      '<div class="pl-beginner-signals-head"><h3>今日短訊號</h3>' +
+      '<span>沿用本頁已有資料</span></div><div class="pl-signal-chips">' +
+      beginnerMaChip(ov) +
+      beginnerRiskChip(p) +
+      beginnerSpillChip(p) +
+      beginnerLimitChip(ov) +
+      beginnerSectorChip(p) +
+      beginnerNhnlChip(p) +
+      beginnerWarningChip(p) +
+      beginnerMoverChip(p) +
+      beginnerBondChip(p) +
+      beginnerMarginChip(p) +
+      beginnerPeChip(p) +
+      '<div id="pl-beginner-focus-cache">' + beginnerFocusChip({}) + '</div>' +
+      '</div></section>';
+  }
+
+  function loadBeginnerFocus() {
+    var sequence = ++beginnerFocusSequence;
+    return jget('/focus?mkt=TW&cacheOnly=1').then(function (data) {
+      if (sequence !== beginnerFocusSequence || pulseMode !== 'beginner') return;
+      var host = $('pl-beginner-focus-cache');
+      if (!host) return;
+      var valid = data && data.ok === true && data.available !== false && data.scan && data.scan.completedAt;
+      var hint = { ok: !!valid, buy: valid && (data.buy || [])[0], short: valid && (data.short || [])[0] };
+      host.innerHTML = beginnerFocusChip({ focusHint: hint }) + '<div class="pl-note">' +
+        (valid ? '獨立焦點快取 · 掃描完成 ' + esc(formatTaipeiClock(data.scan.completedAt)) :
+          (!data || data.ok !== true ? '焦點快取讀取失敗；目前無法確認結果。' :
+            '尚無有效的已完成焦點快取；不會因開啟總覽啟動掃描。')) + '</div>';
+      bind(host);
+      bindBeginner();
+    });
+  }
+
   function renderBeginner(ov, p) {
     var model = beginnerModel(ov, p);
     traceBeginnerBoundaries(model);
@@ -2481,6 +2804,7 @@
         beginnerSignal('💰', '大戶動向', money, '大戶：三大法人買賣合計', 'institutional', 'pl-beginner-money') +
         beginnerSignal('🔋', '動能氣氛', volume, '動能：市場成交量是否活躍', 'afterhours') +
       '</div>' +
+      renderBeginnerSignalStrip(ov, p) +
       renderMarketRadar(ov, p) +
       '<div class="pl-safe-box" title="' + esc(model.levelsStale ? staleDistance : '依前一交易日高低收計算；不是保證價位') + '">' +
         '<div class="pl-safe-level ceiling' + (model.levelsStale ? ' stale' : '') + '"><div class="k pl-tip" title="壓力：上方容易遇到賣壓">☁ ' +
@@ -2504,133 +2828,264 @@
       renderBeginnerAdvanced(ov, p) + '</div>';
   }
 
+  function stockHealthDate(value) {
+    if (value == null || value === '') return null;
+    if (typeof value === 'number') {
+      if (!isFinite(value) || value <= 0 || value > Date.now() + 5000) return null;
+      value = new Date(value + 8 * 3600000).toISOString().slice(0, 10);
+    } else if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+      if (!/(Z|[+-]\d{2}:\d{2})$/.test(String(value))) return null;
+      var timestamp = Date.parse(value);
+      return isFinite(timestamp) ? stockHealthDate(timestamp) : null;
+    }
+    var parsed = Date.parse(value + 'T00:00:00Z');
+    return isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === value &&
+      value >= '2000-01-01' && value <= stockHealthToday() ? value : null;
+  }
+
+  function stockHealthToday() {
+    return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+  }
+
+  function stockHealthNumber(value) {
+    if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '') return null;
+    return radarNumber(value);
+  }
+
+  function stockHealthSourceDate(q) {
+    if (!q || q.suspect || (q.ok === false && q.quoteStatus !== 'stale')) return null;
+    var days = [];
+    if (q.tradeDate != null) days.push(stockHealthDate(q.tradeDate));
+    if (q.asOf != null) days.push(stockHealthDate(q.asOf));
+    if (q.timestampMs != null) days.push(stockHealthDate(Number(q.timestampMs)));
+    return days.length && days[0] && days.every(function (day) { return day === days[0]; }) ? days[0] : null;
+  }
+
+  function stockHealthQuote(q, code) {
+    if (!q || q.suspect || (q.code && String(q.code) !== code)) return null;
+    var day = stockHealthSourceDate(q);
+    var price = stockHealthNumber(q.price);
+    if (q.quoteStatus === 'stale' && price == null) price = stockHealthNumber(q.lastKnownPrice);
+    var prev = stockHealthNumber(q.prevClose);
+    if (!day || price == null || price <= 0 || prev == null || prev <= 0 ||
+        (q.ok === false && q.quoteStatus !== 'stale')) return null;
+    return Object.assign({}, q, { code: code, price: price, prevClose: prev, tradeDate: day });
+  }
+
+  function stockHealthHistoryQuote(rows, code, source, name) {
+    var dates = {}, conflicts = {};
+    (rows || []).forEach(function (row) {
+      if (!row || typeof row !== 'object') return;
+      var time = row.time;
+      // /bars 使用 Unix 秒；Yahoo 轉換器使用毫秒，皆保留臺北交易日。
+      if (typeof time === 'number' && time < 100000000000) time *= 1000;
+      var day = stockHealthDate(time);
+      var close = stockHealthNumber(row.close);
+      if (day && close != null && close > 0) {
+        if (dates[day] != null && dates[day] !== close) conflicts[day] = true;
+        dates[day] = close;
+      }
+    });
+    var days = Object.keys(dates).filter(function (day) { return !conflicts[day]; }).sort();
+    if (days.length < 2) return null;
+    var end = days[days.length - 1], start = days[days.length - 2];
+    return { ok: true, code: code, name: name || '', price: dates[end], prevClose: dates[start],
+      tradeDate: end, previousDate: start, source: source, priceRealtime: false, historical: true };
+  }
+
+  function stockHealthYahooRows(payload) {
+    var result = (((payload || {}).chart || {}).result || [])[0] || {};
+    var closes = (((result.indicators || {}).quote || [])[0] || {}).close || [];
+    return { meta: result.meta || {}, rows: (result.timestamp || []).map(function (time, i) {
+      return { time: Number(time) * 1000, close: closes[i] };
+    }).filter(function (row) {
+      // Yahoo 偶爾附上週末報價時間；不可把它當成台股日線交易日。
+      var day = stockHealthDate(row.time);
+      if (!day) return false;
+      var weekday = new Date(day + 'T00:00:00Z').getUTCDay();
+      return weekday !== 0 && weekday !== 6;
+    }) };
+  }
+
   function stockHealthAssessment(q, model) {
-    var price = radarNumber(q && q.price);
-    var prev = radarNumber(q && q.prevClose);
-    var marketChange = radarNumber(model && model.twChange);
-    if (price == null || prev == null || prev === 0) return null;
-    var change = (price - prev) / prev * 100;
+    q = stockHealthQuote(q, String(q && q.code || ''));
+    if (!q) return null;
+    var price = q.price, change = (price - q.prevClose) / q.prevClose * 100;
+    if (!isFinite(change)) return null;
+    var benchmark = q.benchmark || (model && model.twQuote) || {};
+    var benchmarkDay = stockHealthSourceDate(benchmark);
+    var samePeriod = benchmarkDay === q.tradeDate &&
+      (!q.previousDate || benchmark.previousDate === q.previousDate);
+    var marketChange = samePeriod ? stockHealthNumber(benchmark.changePct) : null;
     var relative = marketChange == null ? null : change - marketChange;
+    if (relative != null && !isFinite(relative)) { relative = null; marketChange = null; }
     var cls = relative != null && relative >= 0.6 && change > 0 ? 'strong' :
       relative != null && relative <= -0.6 ? 'weak' : 'neutral';
-    var regime = ((_lastMacro || {}).decisionRegime || '');
-    var message;
-    if (cls === 'strong') {
-      message = regime === 'NARROW_RALLY'
-        ? '分化盤中明顯強於大盤，較可能屬於撐盤／主導型股票；仍不宜追高。'
-        : '目前相對大盤偏強，可續看量價是否維持。';
-    } else if (cls === 'weak') {
-      message = regime === 'NARROW_RALLY'
-        ? '大盤由少數權值股支撐，但這檔明顯落後；反彈時宜優先檢查風險。'
-        : '目前相對大盤偏弱，先觀察是否止跌再增加部位。';
-    } else {
-      message = '表現接近大盤，暫未形成明顯相對強弱優勢。';
-    }
+    var taipei = new Date(Date.now() + 8 * 3600000);
+    var weekend = taipei.getUTCDay() === 0 || taipei.getUTCDay() === 6;
+    var minutes = taipei.getUTCHours() * 60 + taipei.getUTCMinutes();
+    var regular = !weekend && minutes >= 540 && minutes <= 810;
+    var live = regular && q.tradeDate === stockHealthToday() && !q.stale && q.priceRealtime === true;
+    var premise = live ? '分析前提：採來源標示的當日成交資料' :
+      '分析前提：' + (weekend ? '週末休市' : !regular ? '非一般交易時段' : '未取得可確認的當日即時成交') +
+      '，以目前可取得的 ' + q.tradeDate + (q.historical ? ' 日線資料' : ' 最新成交資料') + '回顧，非即時行情';
+    if (q.historical && q.tradeDate === stockHealthToday()) premise += '；當日日線可能尚未收盤';
+    var comparison = q.previousDate ? '日線價格區間 ' + q.previousDate + ' → ' + q.tradeDate +
+      '（未調整除權息，不等同交易所當日漲跌幅）' : q.tradeDate + ' 相對來源前收參考價';
+    var message = relative == null
+      ? '個股在上述期間' + (change > 0 ? '上漲' : change < 0 ? '下跌' : '持平') +
+        '；缺少相同日期與期間的大盤基準，僅分析個股漲跌，不判定相對強弱。'
+      : (cls === 'strong' ? '該期相對加權指數偏強，可觀察後續量價能否延續。' :
+        cls === 'weak' ? '該期相對加權指數偏弱，後續宜留意量價與風險變化。' :
+        '該期表現接近加權指數，尚未形成明顯相對強弱優勢。') +
+        ' 同期加權指數 ' + (marketChange >= 0 ? '+' : '') + marketChange.toFixed(2) +
+        '%，相差 ' + (relative >= 0 ? '+' : '') + relative.toFixed(2) + ' 個百分點。';
     var quoteName = String(q.name || '').trim();
-    var titleName = quoteName && quoteName !== String(q.code || '') ? ' ' + quoteName : '';
-    return {
-      cls: cls,
-      title: String(q.code || '') + titleName + ' · ' +
-        (change >= 0 ? '▲ +' : '▼ ') + change.toFixed(2) + '%',
-      body: message + (relative == null ? '' : ' 相對大盤 ' + (relative >= 0 ? '+' : '') + relative.toFixed(2) + '%。'),
-      meta: '現價 ' + fmt(price, price >= 1000 ? 1 : 2) + ' · ' + String(q.source || '市場報價') +
-        (q.time ? ' · ' + q.time : '')
-    };
+    return { cls: cls, code: q.code, tradeDate: q.tradeDate, live: live,
+      title: q.code + (quoteName && quoteName !== q.code ? ' ' + quoteName : '') +
+        (live ? ' · 成交觀察' : ' · 歷史回顧') + ' · ' + (change >= 0 ? '▲ +' : '▼ ') + change.toFixed(2) + '%',
+      body: premise + '。' + comparison + '。' + message,
+      meta: (live ? '成交價 ' : q.historical ? '日線參考價 ' : '參考成交價 ') + fmt(price, price >= 1000 ? 1 : 2) +
+        ' · 資料日 ' + q.tradeDate + ' · ' + String(q.source || '市場報價') +
+        (!q.historical && q.time ? ' · ' + q.time + '（臺北）' : '') };
+  }
+
+  function stockHealthRequest(url, signal, traceId, code) {
+    var controller = window.AbortController ? new AbortController() : null;
+    var started = Date.now(), timeout, cancel;
+    routeTrace('stock_health_request_start', { correlationId: traceId, to: url.split('?')[0], label: code });
+    var deadline = new Promise(function (_, reject) {
+      cancel = function () { var err = new Error('健診已取消'); err.name = 'AbortError'; reject(err); if (controller) controller.abort(); };
+      timeout = setTimeout(function () {
+        var err = new Error('報價查詢逾時'); err.name = 'TimeoutError'; reject(err); if (controller) controller.abort();
+      }, 8000);
+      if (signal) { if (signal.aborted) cancel(); else signal.addEventListener('abort', cancel, { once: true }); }
+    });
+    var request = Promise.resolve().then(function () {
+      return fetch(SRV + url, { cache: 'no-store', signal: controller ? controller.signal : signal });
+    }).then(function (r) {
+      routeTrace('stock_health_response', { correlationId: traceId, to: url.split('?')[0], state: String(r.status),
+        elapsedMs: Date.now() - started, label: code });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    });
+    return Promise.race([request, deadline]).catch(function (err) {
+      routeTrace('stock_health_request_failure', { correlationId: traceId, to: url.split('?')[0],
+        state: err.name, elapsedMs: Date.now() - started, label: code });
+      throw err;
+    }).finally(function () { clearTimeout(timeout); if (signal) signal.removeEventListener('abort', cancel); });
   }
 
   function stockHealthFallbackQuote(code, controller, traceId, started) {
-    routeTrace('stock_health_fallback_start', {
-      correlationId: traceId, from: 'pulse', to: '/quote', state: 'mis_unavailable', label: code
-    });
-    return fetch(SRV + '/quote/' + encodeURIComponent(code + '.TW'), {
-      cache: 'no-store', signal: controller ? controller.signal : undefined
-    }).then(function (r) {
-      routeTrace('stock_health_fallback_response', {
-        correlationId: traceId, state: String(r.status), elapsedMs: Date.now() - started, label: code
-      });
-      if (!r.ok) throw new Error('fallback_http_' + r.status);
-      return r.json();
-    }).then(function (q) {
-      if (!q || q.price == null || q.prevClose == null) throw new Error('fallback_quote_unavailable');
-      return {
-        ok: true, code: code, name: q.name || '',
-        price: q.price, prevClose: q.prevClose,
-        open: q.open, high: q.high, low: q.low, volume: q.volume,
-        time: q.lastBarTime ? new Date(Number(q.lastBarTime) * 1000).toLocaleTimeString('zh-TW', { hour12: false }) : '',
-        source: (q.source || 'Yahoo') + ' · MIS盤後備援'
-      };
+    routeTrace('stock_health_fallback_start', { correlationId: traceId, from: 'pulse', to: '/bars', label: code });
+    var signal = controller && controller.signal;
+    var local = stockHealthRequest('/bars?sym=' + encodeURIComponent(code) + '&market=TW', signal, traceId, code)
+      .then(function (data) { return stockHealthHistoryQuote(data.candles, code, '本機歷史日線'); }).catch(function () { return null; });
+    var remote = stockHealthRequest('/yf/batch?syms=' + encodeURIComponent(code + '.TW,^TWII') +
+      '&range=1mo&interval=1d&nocache=1', signal, traceId, code).then(function (data) {
+        var stock = stockHealthYahooRows(data[code + '.TW']), index = stockHealthYahooRows(data['^TWII']);
+        var quote = stockHealthHistoryQuote(stock.rows, code, 'Yahoo 日線備援', stock.meta.shortName || stock.meta.longName);
+        if (quote) {
+          var aligned = index.rows.filter(function (row) {
+            var day = stockHealthDate(row.time); return day === quote.tradeDate || day === quote.previousDate;
+          });
+          var benchmark = stockHealthHistoryQuote(aligned, '^TWII', 'Yahoo 日線備援');
+          if (benchmark && benchmark.tradeDate === quote.tradeDate && benchmark.previousDate === quote.previousDate) {
+            benchmark.changePct = (benchmark.price - benchmark.prevClose) / benchmark.prevClose * 100;
+            quote.benchmark = benchmark;
+          }
+        }
+        return quote;
+      }).catch(function () { return null; });
+    return Promise.all([local, remote]).then(function (quotes) {
+      // 同日優先保留本機正式日線；可用 Yahoo 的同期間指數作比較基準。
+      if (quotes[0] && quotes[1] && quotes[0].tradeDate === quotes[1].tradeDate &&
+          quotes[0].previousDate === quotes[1].previousDate) quotes[0].benchmark = quotes[1].benchmark;
+      return quotes.filter(Boolean).sort(function (a, b) { return b.tradeDate.localeCompare(a.tradeDate); })[0] || null;
     });
   }
 
-  function bindStockHealth() {
-    var form = $('pl-stock-check');
-    var input = $('pl-stock-code');
-    var result = $('pl-stock-result');
-    var title = $('pl-stock-result-title');
-    var body = $('pl-stock-result-body');
-    var meta = $('pl-stock-result-meta');
+  function renderStockHealth() {
+    var result = $('pl-stock-result'), view = stockHealthView;
+    if (!result) return;
+    result.className = 'pl-stock-result' + (view ? ' on ' + (view.cls || '') : '');
+    if (!view) return;
+    $('pl-stock-result-title').textContent = view.title;
+    $('pl-stock-result-body').textContent = view.body;
+    $('pl-stock-result-meta').textContent = view.meta || '';
     var open = $('pl-stock-open');
-    var close = $('pl-stock-close');
-    if (!form || !input || !result || !title || !body || !meta || !open) return;
-    if (close) close.onclick = function () { result.className = 'pl-stock-result'; };
+    open.hidden = !view.canOpen;
+    open.onclick = function () { openChart(view.code, 'TW'); };
+  }
+
+  function cancelStockHealth(reason) {
+    ++stockHealthSequence;
+    if (stockHealthController) {
+      routeTrace('stock_health_cancelled', { correlationId: stockHealthView && stockHealthView.traceId, state: reason });
+      stockHealthController.abort(); stockHealthController = null;
+    }
+    stockHealthView = null;
+  }
+
+  function bindStockHealth() {
+    var form = $('pl-stock-check'), input = $('pl-stock-code'), close = $('pl-stock-close');
+    if (!form || !input) return;
+    input.value = stockHealthDraft;
+    input.oninput = function () { stockHealthDraft = input.value; };
+    if (close) close.onclick = function () { cancelStockHealth('closed'); renderStockHealth(); };
+    renderStockHealth();
     form.onsubmit = function (e) {
       e.preventDefault();
       var code = String(input.value || '').trim().toUpperCase();
+      stockHealthDraft = code;
+      cancelStockHealth('superseded');
+      var sequence = stockHealthSequence;
       var traceId = 'stock-health-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-      routeTrace('stock_health_command_received', { correlationId: traceId, from: 'pulse', to: 'twquote', label: code });
-      result.className = 'pl-stock-result on';
-      open.hidden = true;
+      var started = Date.now();
+      routeTrace('stock_health_command_received', { correlationId: traceId, from: 'pulse', to: '/twquote', label: code });
+      stockHealthView = { code: code, traceId: traceId, title: code + ' · 健診中…',
+        body: '讀取最新可用成交；若報價不可用，將以有日期的歷史日線分析並說明前提。' };
       if (!/^[0-9A-Z]{4,8}$/.test(code)) {
-        title.textContent = '代號格式不正確';
-        body.textContent = '請輸入 4–8 碼台股代號，例如 2330 或 00631L。';
-        meta.textContent = '';
+        stockHealthView.title = '代號格式不正確';
+        stockHealthView.body = '請輸入 4–8 碼台股代號，例如 2330 或 00631L。';
+        renderStockHealth();
         routeTrace('stock_health_terminal_failure', { correlationId: traceId, state: 'invalid_code', label: code });
         return;
       }
       setAiSummaryVisible(false);
-      title.textContent = code + ' · 健診中…';
-      body.textContent = '正在讀取證交所／櫃買即時報價並與目前大盤環境比較。';
-      meta.textContent = '';
+      renderStockHealth();
       routeTrace('stock_health_command_acknowledged', { correlationId: traceId, state: 'loading', label: code });
-      routeTrace('stock_health_request_start', { correlationId: traceId, from: 'pulse', to: '/twquote', label: code });
-      var started = Date.now();
       var controller = window.AbortController ? new AbortController() : null;
-      var timeout = setTimeout(function () { if (controller) controller.abort(); }, 8000);
-      fetch(SRV + '/twquote?code=' + encodeURIComponent(code), {
-        cache: 'no-store', signal: controller ? controller.signal : undefined
-      }).then(function (r) {
-        routeTrace('stock_health_response', {
-          correlationId: traceId, state: String(r.status), elapsedMs: Date.now() - started, label: code
-        });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      }).then(function (q) {
-        if (q && q.ok !== false && q.price != null && q.prevClose != null) return q;
-        return stockHealthFallbackQuote(code, controller, traceId, started);
-      }).then(function (q) {
-        var pack = (lastPack || {}).pulse || {};
-        var assessment = stockHealthAssessment(q, beginnerModel(pack.overview || {}, pack));
-        if (!q || q.ok === false || !assessment) throw new Error('quote_unavailable');
-        result.className = 'pl-stock-result on ' + assessment.cls;
-        title.textContent = assessment.title;
-        body.textContent = assessment.body;
-        meta.textContent = assessment.meta + ' · 僅為相對強弱觀察，非買賣指令';
-        open.hidden = false;
-        open.onclick = function () { openChart(code, 'TW'); };
-        routeTrace('stock_health_terminal_success', {
-          correlationId: traceId, state: assessment.cls, elapsedMs: Date.now() - started, label: code
-        });
-      }).catch(function (err) {
-        result.className = 'pl-stock-result on';
-        title.textContent = code + ' · 暫時無法健診';
-        body.textContent = err && err.name === 'AbortError' ? '報價查詢逾時，請稍後重試。' : '目前找不到可用即時報價。';
-        meta.textContent = '未使用推測價格';
-        routeTrace('stock_health_terminal_failure', {
-          correlationId: traceId, state: String(err && err.name || 'error'), elapsedMs: Date.now() - started, label: code
-        });
-      }).then(function () { clearTimeout(timeout); });
+      stockHealthController = controller;
+      return stockHealthRequest('/twquote?code=' + encodeURIComponent(code), controller && controller.signal, traceId, code)
+        .then(function (q) { return stockHealthQuote(q, code); }).catch(function (err) {
+          if (err.name === 'AbortError') throw err;
+          return null;
+        }).then(function (q) {
+          if (sequence !== stockHealthSequence) return null;
+          return q || stockHealthFallbackQuote(code, controller, traceId, started);
+        }).then(function (q) {
+          if (sequence !== stockHealthSequence) return;
+          var pack = (lastPack || {}).pulse || {};
+          var assessment = stockHealthAssessment(q, beginnerModel(pack.overview || {}, pack));
+          if (!assessment) throw new Error('沒有可用的帶日期行情');
+          stockHealthView = Object.assign(assessment, { canOpen: true, traceId: traceId,
+            meta: assessment.meta + ' · 僅為資料觀察，非買賣指令' });
+          renderStockHealth();
+          routeTrace('stock_health_terminal_success', { correlationId: traceId,
+            state: assessment.live ? 'current_trade' : 'historical', currentSource: q.source,
+            label: code + ' ' + q.tradeDate, elapsedMs: Date.now() - started });
+        }).catch(function (err) {
+          if (sequence !== stockHealthSequence) return;
+          stockHealthView = { code: code, traceId: traceId, title: code + ' · 資料不足，暫時無法健診',
+            body: '已查詢成交與歷史日線，但仍缺少有效日期、價格或比較前值，請稍後重試。', meta: '未使用推測價格' };
+          renderStockHealth();
+          routeTrace('stock_health_terminal_failure', { correlationId: traceId, state: err.name,
+            elapsedMs: Date.now() - started, label: code });
+        }).finally(function () { if (sequence === stockHealthSequence) stockHealthController = null; });
     };
   }
+
 
   function bindBeginner() {
     var advancedBtn = $('pl-beginner-advanced');
@@ -2800,6 +3255,7 @@
       '<div class="k">' + opts.k + '</div>' +
       '<div class="v">' + opts.vHtml + levelHtml + '</div>' +
       '<div class="s ' + toneCls + '">' + subHtml + '</div>' +
+      (opts.observationText ? '<div class="pl-observation">' + esc(opts.observationText) + '</div>' : '') +
       tabs + meter + '</div>';
   }
 
@@ -2880,10 +3336,13 @@
     bdSub.push(tone);
     var txfSrc = txf.source || '';
     var txfName = txf.name || '台指期近月';
-    var txfTip = '即時報價＝TAIFEX MIS 台指期近月' +
+    var observation = txfTr.observationPeriod || {};
+    var observationText = typeof observation === 'string' ? observation :
+      (observation.start && observation.end ? String(observation.start) + ' → ' + String(observation.end) : '觀察期間未提供');
+    var txfTip = '台指期近月報價' +
       (txfSess ? ('（' + txfSess + '）') : '') +
       (txfSrc ? (' · source ' + txfSrc) : '') + quoteFreshSuffix(txf) +
-      '｜趨勢量化＝FinMind 近月連續（代號 __TXF__，日線）覆寫最新點為當前報價｜' +
+      '｜趨勢量化沿用後端公布值；觀察期間：' + observationText + '｜' +
       'Basis＝期貨−加權現貨（盤後＝夜盤期貨−加權最新／昨收）｜顯示名：' + txfName;
     return '<div class="pl-strip">' +
       renderTrendCell({
@@ -2905,7 +3364,7 @@
             : ''),
         hero: true,
         vHtml: fmt(txf.price, 0),
-        trend: txfTr, fallbackSub: txfFb, tip: txfTip,
+        trend: txfTr, fallbackSub: txfFb, tip: txfTip, observationText: observationText,
         go: 'afterhours', mkt: 'TW'
       }) +
       '<div class="cell hero" data-go="afterhours" role="link" tabindex="0" style="cursor:pointer" title="' + turnTip + '"><div class="k">成交金額 · 量能</div><div class="v">' +
@@ -3602,6 +4061,24 @@
     });
   }
 
+  function moverRows(movers, side) {
+    if (side === 'gainers') {
+      var ups = ((movers && movers.limitUp) || []).slice(0, 10);
+      if (ups.length) return ups;
+      return ((movers && movers.gainers) || []).filter(function (r) {
+        return r && r.ex !== 'TPEx' && r.changePct != null && r.changePct >= 9.9 &&
+          /^[1-9]\d{3}$/.test(String(r.code || ''));
+      }).slice(0, 10);
+    }
+    var downs = ((movers && movers.limitDown) || []).slice();
+    if (!downs.length) {
+      downs = ((movers && movers.losers) || []).filter(function (r) {
+        return r && r.changePct != null && r.changePct <= -7;
+      });
+    }
+    return downs.slice(0, 10);
+  }
+
   function renderMovers(movers, side) {
     var V = window.Viz;
     var list = [];
@@ -4084,6 +4561,215 @@
     });
   }
 
+  function formatTaipeiClock(iso) {
+    if (!iso) return '—';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return String(iso) + '（資料日）';
+    if (typeof iso === 'string' && !/(Z|[+-]\d{2}:\d{2})$/.test(iso)) return String(iso) + '（時區未提供）';
+    var d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return String(iso).replace('T', ' ').slice(0, 19);
+    var parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Taipei',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false
+    }).formatToParts(d);
+    function part(type) {
+      var row = parts.find(function (p) { return p.type === type; });
+      return row ? row.value : '';
+    }
+    var y = part('year'), m = part('month'), day = part('day');
+    var hh = part('hour'), mm = part('minute'), ss = part('second');
+    if (!y) return String(iso).replace('T', ' ').slice(0, 19) + '（臺北）';
+    return y + '/' + m + '/' + day + ' ' + hh + ':' + mm + ':' + ss + '（臺北）';
+  }
+
+  function sessionLabel(session) {
+    var s = String(session || '').toLowerCase();
+    if (s === 'regular' || s === 'day' || s === 'regular_session') return '一般交易時段';
+    if (s === 'night' || s === 'overnight' || s === 'afterhours') return '夜盤';
+    if (s === 'mixed') return '混合盤別';
+    if (s === 'pre' || s === 'premarket') return '盤前';
+    return s && s !== 'unknown' ? session : '未知';
+  }
+
+  function sourceLabel(source) {
+    var key = String(source || '').toLowerCase();
+    if (key === 'twse-mis' || key === 'twse') return '證交所';
+    if (key === 'taifex-mis' || key === 'taifex') return '期交所';
+    if (key === 'tpex' || key === 'tpex-mis') return '櫃買中心';
+    if (key === 'yahoo') return 'Yahoo';
+    return source || '來源未標';
+  }
+
+  function freshnessLabel(freshness) {
+    if (freshness === 'fresh') return '即時';
+    if (freshness === 'delayed') return '延遲';
+    if (freshness === 'stale') return '過期';
+    return '未知';
+  }
+
+  function pickSession(snap, fresh) {
+    var status = (snap && snap.sourceStatus) || {};
+    var twse = status['twse-mis'] || status.twse;
+    if (twse && twse.sessions && twse.sessions.length) return twse.sessions[0];
+    var q = snap && snap.quotes && snap.quotes['^TWII'];
+    var m = q && q.market;
+    if (m && m.session) return m.session;
+    if (q && q.session) return q.session;
+    return (fresh && fresh.session) || (snap && snap.session);
+  }
+
+  function pickSourceQuality(snap, fresh) {
+    var status = (snap && snap.sourceStatus) || {};
+    var keys = Object.keys(status);
+    if (!keys.length) {
+      var fallback = fresh && fresh.freshness ? freshnessLabel(fresh.freshness) : '未知';
+      return '來源未標：' + fallback;
+    }
+    return keys.map(function (key) {
+      return sourceLabel(key) + '：' + freshnessLabel((status[key] || {}).freshness);
+    }).join('、');
+  }
+
+  function decisionSnapshotComparison(summary, context) {
+    if (!context) return '僅有摘要，全文未提供';
+    if (summary.viewScope === 'personal' || context.viewScope === 'personal' ||
+        summary.persistence === 'ephemeral' || context.persistence === 'ephemeral') {
+      return '摘要／全文尚未核對（個人化衍生視圖）';
+    }
+    if (!summary.snapshotId || !context.snapshotId) return '摘要／全文尚未核對（快照識別未提供）';
+    if (summary.snapshotId !== context.snapshotId) return '摘要／全文尚未核對（不同快照）';
+    if (summary.viewState !== context.viewState) return '摘要／全文效期視圖不同，尚未核對';
+    if (!summary.viewState) return '摘要／全文尚未核對（效期視圖未提供）';
+    if (summary.revision == null || context.revision == null) return '摘要／全文尚未核對（修訂未提供）';
+    if (!summary.inputHash || !context.inputHash || !summary.rulesDigest || !context.rulesDigest) {
+      return '摘要／全文尚未核對（輸入或規則識別未提供）';
+    }
+    if (summary.revision !== context.revision || summary.inputHash !== context.inputHash ||
+        summary.rulesDigest !== context.rulesDigest) return '摘要／全文快照識別不一致';
+    if (summary.persistence !== 'committed' || context.persistence !== 'committed') {
+      return '摘要／全文尚未核對（持久儲存未確認）';
+    }
+    function comparedView(value, full) {
+      var regime = value.regime || {}, quality = value.dataQuality || {};
+      var envelope = full ? (value.actionEnvelope || {}) : value;
+      var levels = full ? ((value.keyLevels || {}).levels || {}) : (value.levels || {});
+      return {
+        asOf: value.asOf || null,
+        regime: ['id', 'label', 'score', 'confidence', 'ruleId'].map(function (key) {
+          return regime[key] == null ? null : regime[key];
+        }),
+        posture: envelope.posture || null,
+        allowed: (envelope.allowed || []).slice(0, 3),
+        restricted: (envelope.restricted || []).slice(0, 3),
+        confirmation: (value.confirmation || []).slice(0, 2),
+        invalidation: (value.invalidation || []).slice(0, 2),
+        levels: ['r1', 'pivot', 's1'].map(function (key) { return levels[key] == null ? null : levels[key]; }),
+        quality: ['completeness', 'freshness', 'scopeConsistency'].map(function (key) {
+          return quality[key] == null ? null : quality[key];
+        }),
+        staleFields: (quality.staleFields || []).slice().sort()
+      };
+    }
+    return JSON.stringify(comparedView(summary, false)) === JSON.stringify(comparedView(context, true))
+      ? '摘要／全文快照與核對內容一致' : '摘要／全文核對內容不同';
+  }
+
+  function historySyncLabel(status, previous) {
+    var lastOk = (status && status.lastOk) || (previous && previous.lastOk);
+    var label;
+    if (!status || status.ok === false) label = '查詢失敗';
+    else if (status.running) label = '進行中';
+    else if (status.lastError || (status.lastResult && status.lastResult.ok === false)) {
+      label = '失敗：' + (status.lastError || status.lastResult.error || '同步未完成');
+    } else label = status.lastOk ? '已完成' : '待命';
+    return label + (lastOk ? '；最後成功 ' + lastOk : '；尚無成功紀錄');
+  }
+
+  function renderHeadMeta(pack) {
+    var sequence = ++headMetaSequence;
+    var host = $('pl-head-meta');
+    if (!host) return;
+    var p = (pack && pack.pulse) || {};
+    var snap = p.marketSnapshot || {};
+    var fresh = (window.MarketFreshness && MarketFreshness.snapshotSummary)
+      ? MarketFreshness.snapshotSummary(snap.quotes ? snap : {
+          quotes: {}, marketAsOf: null, session: snap.session || 'unknown',
+          generatedAt: snap.generatedAt
+        })
+      : (snap.freshness || null);
+    var asOf = (fresh && fresh.worstAsOf) || snap.marketAsOf;
+    // 此列說明目前 Pulse；其他頁面的個人化摘要不可覆蓋它。
+    var decision = p.decisionSummary || {};
+    var decisionState = (window.DecisionData && DecisionData.get && DecisionData.get()) || {};
+    var fullDecision = p.decision || decisionState.context || null;
+    var quality = decision.dataQuality || {};
+    var completeness = p.dataCompleteness != null ? Math.round(Number(p.dataCompleteness))
+      : (quality.completeness != null ? Math.round(Number(quality.completeness) * 100) : null);
+    var summaryNote = decisionSnapshotComparison(decision, fullDecision);
+    var revision = decision.revision;
+    var snapId = decision.snapshotId || '未提供';
+    var derived = decision.viewScope === 'personal' || decision.persistence === 'ephemeral';
+    var persistence = derived ? '未持久儲存（個人化衍生）'
+      : (decision.persistence === 'committed' ? '已持久儲存' : '未提供');
+    var publication = decision.publicationStatus === 'accepted' ? '已接納'
+      : (decision.publicationStatus === 'superseded' ? '已被取代'
+        : (decision.publicationStatus === 'derived' ? '個人化衍生' : '未提供'));
+    var scopeNote = quality.scopeConsistency === true ? '一致'
+      : (quality.scopeConsistency === false ? '不一致' : '未提供');
+    var contract = '決策 ' + (decision.contractVersion == null ? '未提供' : decision.contractVersion) +
+      '／行情 ' + (snap.contractVersion == null ? '未提供' : snap.contractVersion);
+    var decisionFreshness = quality.freshness == null ? null : Number(quality.freshness);
+    var decisionExpired = decisionFreshness != null && isFinite(decisionFreshness) && decisionFreshness < 0.25;
+    var decisionDegraded = (decisionFreshness != null && isFinite(decisionFreshness) && decisionFreshness < 1) ||
+      (Array.isArray(quality.staleFields) && quality.staleFields.length > 0);
+    var valid = decisionExpired ? '過期（決策來源）' : (!(fresh && fresh.freshness) ? '尚未確認'
+      : (fresh.freshness === 'stale' ? '過期'
+        : (decisionDegraded || (completeness != null && completeness < 80) ? '降級' : '有效')));
+    function bit(label, value) { return label + '<b>' + esc(String(value)) + '</b>'; }
+    function paint(jobLabel) {
+      if (jobLabel) _lastJobLabel = jobLabel;
+      var bits = [
+        bit(fresh && fresh.worstAsOf ? '行情最舊來源時間：' : '行情來源時間：', formatTaipeiClock(asOf)),
+        bit('盤別：', sessionLabel(pickSession(snap, fresh))),
+        bit('來源品質：', pickSourceQuality(snap, fresh)),
+        bit('決策資料完整度：', completeness == null ? '—' : completeness + '%'),
+        bit('市場範圍：', scopeNote),
+        summaryNote,
+        bit('快照：', snapId),
+        bit('修訂：', revision == null || revision === '' ? '未提供' : String(revision)),
+        bit('契約版本：', contract),
+        bit('發布狀態：', publication),
+        bit('儲存狀態：', persistence),
+        bit('效期：', valid),
+        bit('歷史資料同步：', _lastJobLabel)
+      ];
+      if (decision.parentSnapshotId) bits.push(bit('衍生來源快照：', decision.parentSnapshotId));
+      host.hidden = false;
+      host.title = bits.map(function (row) { return String(row).replace(/<[^>]+>/g, ''); }).join(' · ');
+      host.innerHTML =
+        '<button type="button" class="pl-head-jobs" id="pl-head-jobs">查看歷史資料同步</button>' +
+        '<span class="pl-head-meta-track">' + bits.map(function (row, i) {
+          return (i ? '<span aria-hidden="true"> · </span>' : '') + row;
+        }).join('') + '</span>';
+      var jobsBtn = $('pl-head-jobs');
+      if (jobsBtn) {
+        jobsBtn.onclick = function () {
+          if (window.ShellV5 && typeof window.ShellV5.go === 'function') ShellV5.go('settings');
+          else location.hash = '#settings';
+        };
+      }
+    }
+    paint(_lastJobLabel);
+    jget('/sync/status').then(function (st) {
+      if (sequence !== headMetaSequence) return;
+      paint(historySyncLabel(st, _lastSyncStatus));
+      if (st && st.ok !== false) _lastSyncStatus = st;
+    }).catch(function () {
+      if (sequence === headMetaSequence) paint(historySyncLabel(null, _lastSyncStatus));
+    });
+  }
+
   function render(pack) {
     var body = ensureMount();
     if (!body) return;
@@ -4097,13 +4783,14 @@
     if (sub) {
       var snap = p.marketSnapshot || {};
       var fresh = (window.MarketFreshness && MarketFreshness.snapshotSummary)
-        ? MarketFreshness.snapshotSummary(snap.quotes ? snap : { quotes: {}, marketAsOf: p.updatedAt, session: 'unknown' })
+        ? MarketFreshness.snapshotSummary(snap.quotes ? snap : { quotes: {}, marketAsOf: null, session: 'unknown' })
         : null;
       var worst = fresh && fresh.worstAsOf ? MarketFreshness.formatCompact(fresh.worstAsOf) : null;
       var sess = fresh && fresh.session && fresh.session !== 'unknown' ? (' · ' + fresh.session) : '';
-      sub.textContent = '行情 asOf ' + (worst || (p.updatedAt ? String(p.updatedAt).replace('T', ' ') : '—')) + sess +
+      sub.textContent = '行情來源 ' + (worst || snap.marketAsOf || '時間未提供') + sess +
         (p.date ? ' · 廣度日 ' + p.date : '');
     }
+    renderHeadMeta(pack);
     _lastMacro = buildMacroFromPack(pack);
     maybeAnnounceFlip(_lastMacro);
     pushWd(false);
@@ -4122,6 +4809,7 @@
       bind(body);
       bindBeginner();
       fillBeginnerInstitutional(ov, p);
+      loadBeginnerFocus();
       probeLayoutCols();
       return;
     }
@@ -4211,39 +4899,53 @@
     });
   }
 
-  function warmCaches() {
-    jget('/breadth');
-    jget('/sectors?mkt=TW');
-    jget('/marketflow');
-    jget('/events');
-  }
-
-  function fetchWlQuotes() {
+  function fetchWlQuotes(signal) {
     var wl = readWatchlist();
     var tw = wl.filter(function (w) { return (w.m || 'TW') === 'TW'; }).map(function (w) { return w.t; });
     var us = wl.filter(function (w) { return w.m === 'US'; }).map(function (w) { return w.t; });
-    var tasks = [];
-    if (tw.length) tasks.push(jget('/twquote-batch?codes=' + encodeURIComponent(tw.join(','))));
-    else tasks.push(Promise.resolve(null));
-    if (us.length) tasks.push(jget('/quote-batch?syms=' + encodeURIComponent(us.join(','))));
-    else tasks.push(Promise.resolve(null));
-    return Promise.all(tasks).then(function (arr) {
-      var out = {};
-      [arr[0], arr[1]].forEach(function (q) {
-        if (!q || typeof q !== 'object') return;
-        Object.keys(q).forEach(function (k) { out[k] = q[k]; });
+    var tasks = [
+      tw.length ? jget('/twquote-batch?codes=' + encodeURIComponent(tw.join(',')), signal) : Promise.resolve(null),
+      us.length ? jget('/quote-batch?syms=' + encodeURIComponent(us.join(',')), signal) : Promise.resolve(null)
+    ];
+    return Promise.all(tasks).then(function (rows) {
+      var quotes = {};
+      rows.forEach(function (row) {
+        if (!row || typeof row !== 'object') return;
+        Object.keys(row).forEach(function (key) { quotes[key] = row[key]; });
       });
-      return out;
+      return quotes;
     });
   }
 
+  function showPulseUpdateStatus(pulse, job, error) {
+    var status = $('pl-update-status');
+    if (!status) return;
+    var state = job && job.status;
+    if (error || state === 'failed' || state === 'interrupted') {
+      status.textContent = '市場更新未完成：' + String(error || job.error || '工作已中斷') +
+        (lastPack ? '；保留上次已提交資料。' : '；等待下一次伺服器更新。');
+    } else if (state === 'queued' || state === 'running') {
+      status.textContent = state === 'queued' ? '市場更新已排入佇列；保留目前快照。' : '伺服器正在建立市場快照；保留目前資料。';
+    } else if (!pulse || !pulse.ok) status.textContent = '尚未有已提交快照；伺服器會自動更新，可稍後重新讀取。';
+    else if ((pulse.dataCompleteness != null && pulse.dataCompleteness < 90) || !pulse.breadthOk) {
+      status.textContent = '資料待更新；目前顯示已提交快照，不會因讀取而另行建構。';
+    } else status.textContent = '目前顯示已提交快照；來源效期與更新工作分開判定。';
+  }
+
+
   function refresh(force) {
+    if (refreshPromise && (!force || refreshIsUpdate)) return refreshPromise;
     var body = ensureMount();
     if (!body) return;
+    var sequence = ++refreshSequence;
+    if (refreshController) refreshController.abort();
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    refreshController = controller;
+    refreshIsUpdate = !!force && !!(window.DecisionData && DecisionData.canUpdateMarket && DecisionData.canUpdateMarket());
     var btn = $('pl-refresh');
     if (btn) {
       btn.disabled = true;
-      btn.textContent = '↻ 更新中…';
+      btn.textContent = refreshIsUpdate ? '↻ 等待市場更新…' : '↻ 讀取快照…';
     }
     // stale-while-revalidate：已有畫面時不整頁清空（體感延遲主因）
     if (!lastPack) {
@@ -4254,20 +4956,23 @@
         tone.textContent = (tone.textContent || '—') + ' · 更新中…';
       }
     }
-    // 手動刷新打穿聚合快取；子源（movers/global/macro）仍走各自 TTL，伺服器側預算 ≤8s
-    var q = force ? '/pulse?refresh=1' : '/pulse';
+    // 頁面與輪詢只讀已提交快照；明確更新才經由共同工作協議送出 POST。
     var t0 = Date.now();
-    Promise.all([jget(q), fetchWlQuotes()]).then(function (arr) {
-      var pulse = arr[0];
+    var request = window.DecisionData && DecisionData.refreshPulse
+      ? DecisionData.refreshPulse({ update: !!force, signal: controller && controller.signal,
+          onStatus: function (job) { if (sequence === refreshSequence) showPulseUpdateStatus(lastPack && lastPack.pulse, job); } })
+      : Promise.reject(new Error('市場快照服務尚未載入'));
+    var promise = Promise.all([request, fetchWlQuotes(controller && controller.signal)]).then(function (arr) {
+      if (sequence !== refreshSequence) return;
+      var result = arr[0] || {}, pulse = result.pulse;
       if (!pulse || !pulse.ok) {
         if (!lastPack) {
-          body.innerHTML = '<div class="pl-note">脈動載入失敗' +
-            (pulse && pulse.error ? '：' + pulse.error : '（請重啟 server）') +
-            ' <button type="button" class="pl-btn" id="pl-retry">重試</button></div>';
+          body.innerHTML = '<div class="pl-note">' + esc(pulse && pulse.error || '尚未有已提交快照') +
+            ' <button type="button" class="pl-btn" id="pl-retry">重新讀取</button></div>';
           var retry = $('pl-retry');
-          if (retry) retry.onclick = function () { refresh(true); };
+          if (retry) retry.onclick = function () { refresh(false); };
         }
-        warmCaches();
+        showPulseUpdateStatus(pulse, result.job, result.error);
         return;
       }
       if (window.MarketData && window.MarketData.fromPulse) window.MarketData.fromPulse(pulse);
@@ -4276,24 +4981,24 @@
       var ms = Date.now() - t0;
       var sub = $('pl-sub');
       if (sub) sub.textContent = (sub.textContent || '') + ' · ' + ms + 'ms';
-      // 資料不完整：只暖快取 + soft 再取；禁止再打 refresh=1（舊邏輯會再卡 20s+）
-      if ((pulse.dataCompleteness != null && pulse.dataCompleteness < 90) || !pulse.breadthOk) {
-        warmCaches();
-        setTimeout(function () {
-          if (window.ShellV5 && window.ShellV5.route && window.ShellV5.route() === 'pulse') {
-            jget('/pulse').then(function (p2) {
-              if (p2 && p2.ok) render({ pulse: p2, wlQuotes: arr[1] || {} });
-            });
-          }
-        }, 1600);
-      }
+      showPulseUpdateStatus(pulse, result.job, result.error);
+      return pulse;
+    }).catch(function (error) {
+      if (sequence !== refreshSequence) return;
+      showPulseUpdateStatus(lastPack && lastPack.pulse, null, String(error && error.message || error));
     }).finally(function () {
+      if (sequence !== refreshSequence) return;
+      if (refreshController === controller) refreshController = null;
+      if (refreshPromise === promise) { refreshPromise = null; refreshIsUpdate = false; }
       var b = $('pl-refresh');
       if (b) {
         b.disabled = false;
-        b.textContent = '↻ 重新整理';
+        b.textContent = window.DecisionData && DecisionData.canUpdateMarket && !DecisionData.canUpdateMarket()
+          ? '↻ 重新讀取快照' : '↻ 更新市場資料';
       }
     });
+    refreshPromise = promise;
+    return promise;
   }
 
   function activate() {
@@ -4306,6 +5011,13 @@
   }
 
   function deactivate() {
+    setAiSummaryVisible(false);
+    ++beginnerFocusSequence;
+    cancelStockHealth("deactivated");
+    ++headMetaSequence;
+    ++refreshSequence;
+    if (refreshController) { refreshController.abort(); refreshController = null; }
+    refreshPromise = null; refreshIsUpdate = false;
     if (timer) { clearInterval(timer); timer = null; }
     showFactors = false;
     var body = $('pl-body');
@@ -4320,9 +5032,13 @@
   window.PulseV5 = {
     activate: activate,
     deactivate: deactivate,
-    refresh: function () { refresh(true); },
+    refresh: function () { return refresh(true); },
     formatYiCompact: formatYiCompact,
     buildWatchThemeResonance: buildWatchThemeResonance,
+    renderBeginnerSignalStrip: renderBeginnerSignalStrip,
+    stockHealthAssessment: stockHealthAssessment,
+    stockHealthHistoryQuote: stockHealthHistoryQuote,
+    decisionSnapshotComparison: decisionSnapshotComparison,
     /** 相容舊呼叫：改導向獨立因子頁 */
     focusFactors: function () {
       if (window.ShellV5 && ShellV5.go) ShellV5.go('factors');

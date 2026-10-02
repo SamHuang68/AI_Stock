@@ -369,6 +369,9 @@ READ_GET_EXACT = {
     "/breadth",
     "/pulse",
     "/pulse/history",
+    "/pulse/update-status",
+    "/updates",
+    "/updates/archive",
     "/decision/context",
     "/decision/history",
     "/signals/active",
@@ -393,6 +396,7 @@ READ_GET_EXACT = {
     "/events",
     "/flash",
     "/sectors",
+    "/sector-members",
     "/ai/local/status",
     "/screener",
     "/focus",
@@ -438,6 +442,9 @@ OWNER_GET_PREFIXES = ("/draw/",)
 
 # Deliberately narrow write surface for a long-horizon market/research user.
 CONTROL_POST_EXACT = {
+    "/pulse/refresh",
+    "/updates",
+    "/updates/retry",
     "/daily-cache/refresh",
     "/daily-cache/cancel",
     "/diagnostics/ui-route",

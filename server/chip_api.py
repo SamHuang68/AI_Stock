@@ -412,7 +412,8 @@ def _tpex_inst(clean: str) -> Optional[dict]:
 
 def build_chip(sym: str) -> dict:
     """組出 /chip 回應 dict（呼叫端負責 HTTP cache／寫出）。"""
-    clean = (sym or '').replace('.TW', '').replace('.TWO', '').strip().upper()
+    from market_contract import tw_symbol_code
+    clean = tw_symbol_code(sym)
     today = taipei_today().strftime('%Y%m%d')
     if not is_equity_code(clean):
         return {
