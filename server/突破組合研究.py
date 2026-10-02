@@ -128,18 +128,35 @@ def _quality(symbol, dataset, index, *, opening=False):
     if trading_status(symbol, row['date']) or row.get('suspended'):
         return '停止交易期間不得推定可成交'
     coverage = dataset.get('action_coverage')
+    if symbol.startswith('00') and (not coverage or dataset.get('action_coverage_kind') != 'etf'):
+        return 'ETF 公司行動涵蓋未核對'
     if not coverage or len(coverage) < 3 or not coverage[0] or not coverage[1] or not coverage[0] <= row['date'] <= coverage[1]:
         return '公司行動涵蓋未核對'
     if not str(coverage[2]).startswith(('TWSE', 'TPEX')):
         return '公司行動來源未核對'
-    if symbol.startswith('00') and dataset.get('action_coverage_kind') != 'etf':
-        return 'ETF 公司行動涵蓋未核對'
     # 開盤只查開盤可得欄位；不以當日收盤、高低價或成交量篩選可成交標的。
     keys = ('open',) if opening else ('open', 'high', 'low', 'close', 'volume')
     if not all(_positive(row.get(key)) for key in keys):
         return '開盤價格缺漏' if opening else '價格或成交量缺值／無成交'
     if not opening and not row['low'] <= min(row['open'], row['close']) <= max(row['open'], row['close']) <= row['high']:
         return '開高低收邊界無效'
+    return None
+
+
+def _fill_reason(symbol, dataset, index):
+    """事後可成交證據須完整；不從一價或零量日線假設開盤撮合成功。"""
+    reason = _quality(symbol, dataset, index, opening=True)
+    if reason:
+        return reason
+    row = dataset['rows'][index]
+    if not _positive(row.get('volume')):
+        return '成交量缺漏或無成交，不能證實開盤成交'
+    if not all(_positive(row.get(key)) for key in ('high', 'low', 'close')):
+        return '日線成交證據不完整，不能證實開盤成交'
+    if row['open'] == row['high'] == row['low'] == row['close']:
+        return '一價棒不能證實開盤成交'
+    if not row['low'] <= min(row['open'], row['close']) <= max(row['open'], row['close']) <= row['high']:
+        return '開高低收邊界無效，不能證實開盤成交'
     return None
 
 
@@ -199,7 +216,7 @@ def simulate_portfolio(datasets, market_dates, observations, *, sample_start=0, 
             if day in dataset.get('action_days', []):
                 position['accountingUnknown'] = '持有期跨公司行動，股數與現金權利未核對'
             if position.get('exitSignalDate'):
-                reason = position.get('accountingUnknown') or _quality(symbol, dataset, index, opening=True)
+                reason = position.get('accountingUnknown') or _fill_reason(symbol, dataset, index)
                 if reason:
                     rejected.append({'symbol': symbol, 'date': day, 'kind': 'exit', 'reason': reason})
                     incomplete = True
@@ -215,7 +232,7 @@ def simulate_portfolio(datasets, market_dates, observations, *, sample_start=0, 
                     del positions[symbol]
         for symbol, signal_day in sorted(pending.items()):
             dataset = prepared[symbol]
-            reason = _quality(symbol, dataset, index, opening=True)
+            reason = _fill_reason(symbol, dataset, index)
             if reason:
                 incomplete = True
             if any(p.get('accountingUnknown') for p in positions.values()):
@@ -227,6 +244,9 @@ def simulate_portfolio(datasets, market_dates, observations, *, sample_start=0, 
             budget = min(cash, (sizing or 0) * (1 if benchmark_symbol else settings['allocationFraction']))
             raw = dataset['rows'][index].get('open')
             shares = 0 if reason else math.floor(budget / (raw * (1 + side_cost)) / settings['lotSize']) * settings['lotSize']
+            # 浮點除乘可能在交易單位邊界多出極小金額；不能因容差而借入現金。
+            if shares and shares * raw * (1 + side_cost) > budget:
+                shares -= settings['lotSize']
             if shares <= 0:
                 reason = reason or '可用現金不足最小交易單位'
             if reason:
@@ -296,6 +316,10 @@ def simulate_portfolio(datasets, market_dates, observations, *, sample_start=0, 
             'netZeroTrades': sum(math.isclose(t['netPnl'], 0, abs_tol=1e-9) for t in trades),
             'winRatePct': sum(t['netPnl'] > 1e-9 for t in trades) / len(trades) * 100 if trades else None,
             'tradeStatus': 'closed' if trades else 'open_only' if positions else 'no_trades',
+            'noTradesReason': None if trades else '期末部位尚未平倉' if positions else
+                              '成交或訊號證據不足' if status != 'complete' else
+                              '收盤訊號已成立但缺下一根開盤' if pending_rows else
+                              '進場因資金或部位限制未成交' if rejected else '期間內沒有可交易的收盤穿越訊號',
             'trades': trades, 'openPositions': list(positions.values()), 'pending': pending_rows,
             'rejected': rejected, 'decisionIssues': decision_issues, 'curve': curve}
 
@@ -305,7 +329,8 @@ def daily_excess_sharpe(curve, benchmark_curve):
     if len(curve) != len(benchmark_curve) or any(a['date'] != b['date'] for a, b in zip(curve, benchmark_curve)):
         return {'value': None, 'n': 0, 'reason': '投組與基準日期不一致'}
     pairs = [(a.get('dailyReturn'), b.get('dailyReturn')) for a, b in zip(curve, benchmark_curve)]
-    if any(a is None or b is None for a, b in pairs):
+    if any(not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value)
+           for pair in pairs for value in pair):
         return {'value': None, 'n': 0, 'reason': '每日投組或基準報酬未知，不跨缺日接續'}
     values = [a - b for a, b in pairs]
     if len(values) < 2:
@@ -375,7 +400,8 @@ def build_portfolio(datasets, market_dates, *, sample_start=0, as_of=None, confi
                       '每日以原始收盤價估值；期末未平倉不假設賣出，沒有扣尚未發生的出場成本。',
                       '公司行動跨持有期的股數與現金權利未知，後續權益維持未知；ETF 的官方股票除權息涵蓋不等於 ETF 涵蓋。',
                       '每日基準 Sharpe 為每日投組減 0050 報酬的平均／樣本標準差×sqrt(252)，數學上屬資訊比率，非無風險利率 Sharpe。',
-                      '固定切分日預設 2024-01-01；訓練區與測試區各從相同本金開始，測試暖機只用過去價格，沒有選參或最佳化。']}
+                      '固定切分日預設 2024-01-01；訓練區與測試區各從相同本金開始，測試暖機只用過去價格，沒有選參或最佳化。',
+                      '快取與品質證據可能事後補齊，並非各歷史時點當下取得的資料快照。']}
 
 
 def build_saved_portfolio(db_path, as_of=None, *, now=None, config=None):
@@ -401,10 +427,16 @@ def build_saved_portfolio(db_path, as_of=None, *, now=None, config=None):
                 raise ValueError('官方最新已完成市場日尚未核對')
             cutoff = min(cutoff, date.fromisoformat(expected))
             datasets = {symbol: load_dataset(conn, symbol, cutoff.isoformat()) for symbol in SYMBOLS}
-            sessions = conn.execute('SELECT session_date,source FROM market_sessions WHERE session_date<=? ORDER BY session_date', (cutoff.isoformat(),)).fetchall()
-            if any(not str(source).startswith(('TWSE', 'TPEX')) for _, source in sessions):
+            calendar_sources = conn.execute('SELECT source FROM market_sessions WHERE session_date<=?',
+                                            (cutoff.isoformat(),)).fetchall()
+            if any(not str(source).startswith(('TWSE', 'TPEX')) for (source,) in calendar_sources):
                 raise ValueError('官方市場日曆來源未核對')
-            timeline = [r[0] for r in sessions]
+            if any('session_dates' not in dataset for dataset in datasets.values()):
+                raise ValueError('共用資料介接未提供完整市場交易日，不能以行情存在日期推定')
+            # 共用 loader 以年度休市／補班與已核對月份重建日曆；不可退回只看
+            # market_sessions 的已匯入日期，否則兩檔同日缺資料會一起被壓縮掉。
+            timeline = sorted({day for dataset in datasets.values() for day in dataset['session_dates']
+                               if day <= cutoff.isoformat()})
             start = events.range_start('5y', cutoff, None).isoformat()
             first = next((i for i, day in enumerate(timeline) if day >= start), len(timeline))
             warmup = min(settings['warmupBars'], first)

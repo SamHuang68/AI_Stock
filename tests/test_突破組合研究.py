@@ -160,6 +160,60 @@ class PortfolioHandCalculationTests(unittest.TestCase):
         self.assertEqual(second['sizingEquity'], 1050)
         self.assertEqual(second['shares'], 5)
 
+    def test_partial_allocation_three_share_lot_and_losing_costs(self):
+        result = run_case([47, 50, 43, 45], [47, 47, 45, 45], cost=.0025,
+                          config={'initialCapital': 5000, 'allocationFraction': .4, 'lotSize': 3})
+        trade = result['trades'][0]
+        # 2000 元預算、每三股一單位：42 股原價 1974，買費 4.935。
+        # 45 元賣出，原價 1890、賣費 4.725，淨損 84+9.66=93.66。
+        self.assertEqual(trade['shares'], 42)
+        self.assertAlmostEqual(trade['entryCash'], 1978.935)
+        self.assertAlmostEqual(trade['exitCash'], 1885.275)
+        self.assertAlmostEqual(trade['netPnl'], -93.66)
+        self.assertAlmostEqual(result['finalEquity'], 4906.34)
+        self.assertAlmostEqual(result['totalReturnPct'], -1.8732)
+        self.assertAlmostEqual(result['maxDrawdownPct'], 294 / 5121.065 * 100)
+
+    def test_one_price_entry_is_unconfirmed_not_a_zero_cost_fill(self):
+        data = dataset([100, 100, 110])
+        data['rows'][1].update(open=100, high=100, low=100, close=100)
+        result = p.simulate_portfolio({'2330': data}, DAYS[:3], {'2330': observations([100, 100, 110])},
+                                     side_cost=0, config={'initialCapital': 1000, 'allocationFraction': 1})
+        self.assertEqual(result['status'], 'unknown')
+        self.assertEqual(result['openPositions'], [])
+        self.assertEqual(result['finalEquity'], 1000)
+        self.assertIsNone(result['totalReturnPct'])
+        self.assertIn('一價棒', result['rejected'][0]['reason'])
+
+    def test_one_price_exit_retains_pending_until_verified_open(self):
+        data = dataset([100, 90, 80, 85], [100, 100, 80, 85])
+        data['rows'][2].update(high=80, low=80)
+        result = p.simulate_portfolio({'2330': data}, DAYS[:4], {'2330': observations([100, 90, 80, 85])},
+                                     side_cost=0, config={'initialCapital': 1000, 'allocationFraction': 1})
+        self.assertEqual(result['trades'][0]['exitDate'], DAYS[3])
+        self.assertEqual(result['trades'][0]['netPnl'], -150)
+        self.assertEqual(result['curve'][2]['equity'], 800)
+        self.assertEqual(result['status'], 'unknown')
+        self.assertIsNone(result['maxDrawdownPct'])
+
+    def test_zero_volume_never_confirms_an_open_fill(self):
+        data = dataset([100, 100, 100])
+        data['rows'][1]['volume'] = 0
+        result = p.simulate_portfolio({'2330': data}, DAYS[:3], {'2330': observations([100, 100, 100])})
+        self.assertEqual(result['openPositions'], [])
+        self.assertIn('無成交', result['rejected'][0]['reason'])
+        self.assertEqual(result['status'], 'unknown')
+
+    def test_no_price_at_tail_keeps_position_unvalued_and_does_not_sell(self):
+        data = dataset([100, 100])
+        result = p.simulate_portfolio({'2330': data}, DAYS[:3], {'2330': observations([100, 100, 100])},
+                                     side_cost=.0025, config={'initialCapital': 1000, 'allocationFraction': 1})
+        self.assertEqual(result['closedTrades'], 0)
+        self.assertEqual(len(result['openPositions']), 1)
+        self.assertIsNone(result['finalEquity'])
+        self.assertIsNone(result['curve'][-1]['equity'])
+        self.assertEqual(result['curve'][-1]['cash'], 97.75)
+
 
 class FormulaAndQualityTests(unittest.TestCase):
     def test_twenty_sma_nine_change_cmo_hand_calculation(self):
@@ -179,6 +233,15 @@ class FormulaAndQualityTests(unittest.TestCase):
         zero = p.daily_excess_sharpe([{'date': d, 'dailyReturn': 0} for d in DAYS],
                                     [{'date': d, 'dailyReturn': 0} for d in DAYS])
         self.assertIsNone(zero['value'])
+
+    def test_daily_excess_sharpe_negative_and_positive_independent_oracle(self):
+        curve = [{'date': d, 'dailyReturn': r} for d, r in zip(DAYS, [-.01, 0, .03])]
+        benchmark = [{'date': d, 'dailyReturn': r} for d, r in zip(DAYS, [0, 0, .01])]
+        # 超額 [-.01,0,.02] 的樣本變異為 7/30000，年化比率=2×sqrt(3)。
+        result = p.daily_excess_sharpe(curve, benchmark)
+        self.assertAlmostEqual(result['value'], 2 * math.sqrt(3))
+        curve[1]['dailyReturn'] = float('nan')
+        self.assertIsNone(p.daily_excess_sharpe(curve, benchmark)['value'])
 
     def test_etf_source_date_suspension_and_basis_do_not_default_valid(self):
         for field, value, text in [('priceBasis', None, '原始'), ('sourceDate', '2026-03-01', '來源日期'),
@@ -252,7 +315,7 @@ class SavedAdapterTests(unittest.TestCase):
             with self.assertRaises(sqlite3.OperationalError):
                 conn.execute('CREATE TABLE 不得建立(x)')
             called.append((symbol, cutoff))
-            return dataset([100] * 5, symbol=symbol)
+            return {**dataset([100] * 5, symbol=symbol), 'session_dates': DAYS}
         events = types.ModuleType('K線事件')
         events.freshness = lambda conn, symbol, clock: {'expectedSession': DAYS[-1]}
         events.range_start = lambda period, cutoff, start: datetime(2021, 3, 6).date()
