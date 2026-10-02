@@ -122,6 +122,7 @@ const payload = { sym: '2330', name: '台積電', asOf: candles.at(-1).date,
     return { ok: true, json: async () => ({ research, asOf: '2020-01-01', freshness: { fresh: true, expectedSession: '2020-01-01' }, historyStart: '2016-01-01', historyEnd: '2020-01-01', comparisonStatus: 'missing', comparisonReason: '尚無官方收據', limitations: [] }) };
   };
   // 查詢採最後成功載入的期間；編輯輸入欄位尚未載入時不可暗換研究範圍。
+  view.context.ST_PRIVATE_WEB_PROFILE = { role: 'owner' };
   $('ke-sym').value = '0050'; $('ke-range').value = 'all';
   await $('ke-long-load').onclick();
   assert.match(view.calls.at(-1), /breakout-research\?sym=2330&range=custom&asOf=2020-01-01&start=2016-01-01/);
@@ -137,5 +138,27 @@ const payload = { sym: '2330', name: '台積電', asOf: candles.at(-1).date,
   assert.equal(view.calls.at(-1), '/breakout-shadow?sym=2330');
   assert.match($('ke-long-shadow').innerHTML, /修訂 1 次/);
   view.context.KlineEventsUI.close();
-  console.log('K 線歷史時間軸與突破研究：期間、圖表、事件、原價與官方比較、影子保存及紀錄查閱驗證通過');
+  const reader = harness(payload), read = reader.get;
+  reader.context.ST_PRIVATE_WEB_PROFILE = { profile: 'personal-market', role: 'reader' };
+  reader.context.KlineEventsUI.open('2330'); await ready();
+  assert.equal(read('ke-long-save').disabled, true);
+  assert.equal(read('ke-long-history').disabled, true);
+  assert.match(read('ke-long-access').textContent, /唯讀模式.*可載入突破研究/);
+  reader.context.fetch = async url => {
+    reader.calls.push(url);
+    return { ok: true, json: async () => ({ research, asOf: '2020-01-01', freshness: { fresh: true, expectedSession: '2020-01-01' }, historyStart: '2016-01-01', historyEnd: '2020-01-01', limitations: [] }) };
+  };
+  await read('ke-long-load').onclick();
+  assert.match(reader.calls.at(-1), /^\/breakout-research\?sym=2330/);
+  assert.match(read('ke-long-result').innerHTML, /1.49%/);
+  assert.equal(read('ke-long-save').disabled, true);
+  assert.equal(read('ke-long-history').disabled, true);
+  // 直接呼叫事件函式，證明不能只依 disabled 屬性阻止私人請求。
+  const readerRequests = reader.calls.length;
+  await read('ke-long-save').onclick();
+  await read('ke-long-history').onclick();
+  assert.equal(reader.calls.length, readerRequests);
+  assert.equal(reader.calls.filter(url => url.startsWith('/breakout-shadow')).length, 0);
+  reader.context.KlineEventsUI.close();
+  console.log('K 線歷史時間軸與突破研究：期間、圖表、事件、官方比較、擁有者影子操作與唯讀帳號零私人請求驗證通過');
 })().catch(error => { console.error(error); process.exitCode = 1; });
