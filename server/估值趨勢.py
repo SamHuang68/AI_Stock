@@ -26,6 +26,8 @@ SCOPE_REASONS = {
     'excludedSourceDate': '官方本益比缺少有效來源日期或來源不一致',
     'excludedStale': '本益比未對齊最近已完成交易日，或交易日曆尚缺',
 }
+EXCLUSION_REASONS = {**SCOPE_REASONS,
+                     'missingTechnical': '本機完整日線不足、來源尚未核對，或技術指標計算尚不可用'}
 
 
 def validate_settings(raw=None):
@@ -309,6 +311,8 @@ def run_screen(body, *, symbols, database, lookup, names=None, settings=None,
             'matched': len(results), 'calculationVersion': VERSION,
             'researchMeta': {'enabled': True, **settings, 'contractVersion': VERSION,
                 'universeSource': universe_source, 'excluded': excluded, 'returned': min(len(results), 80),
+                'exclusions': [{'code': code, 'reason': EXCLUSION_REASONS[code], 'count': count}
+                               for code, count in sorted(excluded.items())],
                 'separateSymbols': [{'sym': code, 'name': (names or {}).get(code) or name,
                     'valuationModel': '另案估值', 'excludedFromGeneral': settings['excludeIp']}
                     for code, name in IP_REVIEW.items()],

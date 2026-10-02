@@ -62,6 +62,9 @@ class ResearchTests(unittest.TestCase):
         self.assertEqual(row['market']['source'], 'TWSE')
         self.assertFalse(row['research']['strategyValidated'])
         self.assertFalse(row['research']['pitFinancialsAvailable'])
+        # available 僅代表估值範圍與價格結構；不能推論財報或其他資料齊備。
+        self.assertIsNone(row['research']['income'])
+        self.assertTrue(any('當時可得財報' in reason for reason in row['research']['missing']))
         json.dumps(row, allow_nan=False)
 
     def test_default_30_adjustable_40_and_exceptions(self):
@@ -99,12 +102,29 @@ class ResearchTests(unittest.TestCase):
             json.dumps(row, allow_nan=False)
 
     def test_market_identity_is_not_stripped_into_wrong_exchange(self):
-        self.assertEqual(self.detail('2330.TWO')['research']['scopeReasonCode'], 'excludedMarket')
+        mismatch = self.detail('2330.TWO')
+        self.assertEqual(mismatch['research']['scopeReasonCode'], 'excludedMarket')
+        self.assertEqual(mismatch['research']['scopeReason'], research.SCOPE_REASONS['excludedMarket'])
+        self.assertFalse(mismatch['research']['scopeEligible'])
+        self.assertEqual(mismatch['research']['dataStatus'], 'partial')
+        # 官方估值本身的日期仍留作追溯，不能因此提供不同交易市場的價格。
+        self.assertEqual(mismatch['research']['valuationDate'], '2026-10-02')
+        self.assertEqual(mismatch['research']['valuationSource'], 'TWSE BWIBBU_ALL')
+        self.assertIsNone(mismatch['research']['priceAsOf'])
+        self.assertIsNone(mismatch['research']['priceSource'])
+        self.assertFalse(mismatch['research']['priceFresh'])
+        self.assertIsNone(mismatch['market']['asOf'])
         self.rows[research.PE_DATASETS[1]] = self.rows[research.PE_DATASETS[0]]
         self.assertEqual(self.detail()['research']['scopeReasonCode'], 'excludedMarket')
         del self.rows[research.PE_DATASETS[0]]
         row = self.detail('2330.TWO')
         self.assertIsNone(row['close'])
+        self.assertIsNone(row['research']['priceAsOf'])
+        self.assertIsNone(row['research']['priceSource'])
+        self.assertFalse(row['research']['priceFresh'])
+        self.assertEqual(row['research']['valuationSource'], 'TPEx peratio')
+        self.assertEqual(row['research']['valuationDate'], '2026-10-02')
+        self.assertEqual(row['research']['dataStatus'], 'partial')
         self.assertIn('日線來源與估值交易市場不一致', row['research']['missing'])
 
     def test_price_and_volume_gaps_never_receive_fallbacks(self):
@@ -173,6 +193,19 @@ class ResearchTests(unittest.TestCase):
         found = lookup([research.PE_DATASETS[0]], '2330')
         found['Date'] = '20990101'
         self.assertEqual(lookup([research.PE_DATASETS[0]], '2330')['Date'], '1151002')
+
+    def test_zero_results_include_chinese_exclusion_reasons(self):
+        args = dict(symbols=['0050', '2330', '3529'], database=self.db, lookup=self.lookup, now=NOW)
+        result = research.run_screen({'tech': {'rsiMax': 30}}, **args)
+        self.assertEqual(result['results'], [])
+        expected = {'excludedNonStock': 1, 'excludedIp': 1, 'missingTechnical': 1}
+        self.assertEqual(result['researchMeta']['excluded'], expected)
+        exclusions = result['researchMeta']['exclusions']
+        self.assertEqual({item['code']: item['count'] for item in exclusions}, expected)
+        for item in exclusions:
+            self.assertRegex(item['reason'], '[\u4e00-\u9fff]')
+            self.assertEqual(item['reason'], research.EXCLUSION_REASONS[item['code']])
+        self.assertEqual(research.run_screen({}, **{**args, 'symbols': ['2330']})['researchMeta']['exclusions'], [])
 
     def test_missing_database_remains_missing_without_creating_file(self):
         target = Path(self.temp.name) / '不存在.db'
