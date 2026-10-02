@@ -283,7 +283,10 @@ Stop the private Gateway/host without touching development ST on `18432`:
 ```
 
 可從開發目錄或正式 `current` 副本執行。停止器只核對這兩個安裝目錄內、
-以絕對腳本路徑啟動的 Python 程序：先停止 host，再停止其已核對的 backend
+以絕對腳本路徑啟動的 Python 程序。若使用既有 `StockTerminal_PrivateWeb_Host`
+排程，會先核對排程路徑、PowerShell、工作目錄、啟動腳本及 `RunHost` 安裝參數，
+再停止該次排程執行，避免失敗重啟策略重新啟動 host；不修改或停用排程設定。
+其他目錄或無法證明身分的排程不會被停止。接著停止 host，再停止其已核對的 backend
 與 gateway；每次停止前重查建立時間、命令列與父程序，避免 PID 被重新使用。
 不依埠號終止程序，也不搜尋其他安裝目錄。自訂安裝目錄可明確傳入
 `-InstallRoot` 與 `-ProductionRoot`。

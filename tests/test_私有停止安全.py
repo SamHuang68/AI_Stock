@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -117,6 +118,110 @@ class PrivateStopTests(unittest.TestCase):
         result = self.stop()
         self.assertEqual(result.returncode, 0, (result.stdout, result.stderr))
         self.assertIsNotNone(host.wait(timeout=5))
+
+    def run_powershell_fixture(self, body):
+        fixture = self.base / '排程測試.ps1'
+        fixture.write_text(body, encoding='utf-8-sig')
+        return subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(fixture)],
+                              capture_output=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+
+    def task_fixture(self):
+        root = self.base / 'installation/current'
+        (root / 'scripts').mkdir(parents=True)
+        (root / 'scripts/private_web_host.py').write_text('', encoding='utf-8')
+        runner = root.parent / 'startup/private_web_startup.ps1'
+        runner.parent.mkdir()
+        runner.write_text('', encoding='utf-8')
+        # 此假排程只交給函式；不註冊、修改或停止 Windows 的真實排程。
+        return root, f'''
+$root = '{root}'
+$action = [pscustomobject]@{{Execute=(Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'); WorkingDirectory=$root;
+    Arguments='-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{runner}" -Mode RunHost -InstallRoot "{root.parent}" -BackendPort 18435 -GatewayPort 18434'}}
+$task = [pscustomobject]@{{TaskName='StockTerminal_PrivateWeb_Host'; TaskPath='\\'; Actions=@($action); State=4}}
+'''
+
+    def test_scheduled_task_identity_rejects_foreign_and_ambiguous_actions(self):
+        root, setup = self.task_fixture()
+        body = f". '{ROOT / 'scripts/停止私有網站.ps1'}' -FunctionsOnly\n" + setup + r'''
+if (-not (Test-PrivateWebScheduledTask $task $root)) { throw '合法排程未通過' }
+$original = $action.Arguments
+foreach ($bad in @(
+    ($original -replace '-Mode RunHost', '-Mode Install'),
+    ($original + ' -InstallRoot "C:\other"'),
+    ($original + ' -c "Write-Output test"'),
+    ($original + ' -EncodedCommand anything'),
+    ($original -replace '-File "[^"]+"', '-File "relative.ps1"'),
+    ($original -replace '-InstallRoot "[^"]+"', '-InstallRoot "."'),
+    ($original -replace '-File "[^"]+"', '-File "C:\absent.ps1"')
+)) {
+    $action.Arguments = $bad
+    if (Test-PrivateWebScheduledTask $task $root) { throw '接受了不明啟動參數' }
+}
+$action.Arguments = $original
+$task.TaskPath = '\other\'
+if (Test-PrivateWebScheduledTask $task $root) { throw '接受了其他排程資料夾' }
+$task.TaskPath = '\'
+$task.Actions = @($action, $action)
+if (Test-PrivateWebScheduledTask $task $root) { throw '接受了多個啟動動作' }
+$task.Actions = @($action)
+$action.Execute = 'powershell.exe'
+if (Test-PrivateWebScheduledTask $task $root) { throw '接受了未核對的 shell' }
+$action.Execute = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$action.WorkingDirectory = Split-Path $root -Parent
+if (Test-PrivateWebScheduledTask $task $root) { throw '接受了不同的工作目錄' }
+'''
+        result = self.run_powershell_fixture(body)
+        self.assertEqual(result.returncode, 0, (result.stdout, result.stderr))
+
+    def test_scheduled_stop_precedes_host_and_fails_closed_on_scheduler_error(self):
+        root, setup = self.task_fixture()
+        for scenario, expected_code, expected_events in (
+            ('owned', 0, ['task', 'process']),
+            ('foreign', 0, ['process']),
+            ('missing', 0, ['process']),
+            ('read_error', 1, []),
+            ('stop_error', 1, []),
+        ):
+            with self.subTest(scenario=scenario):
+                events = self.base / '動作.jsonl'
+                events.write_text('', encoding='utf-8')
+                body = setup + f'''
+$scenario = '{scenario}'
+$events = '{events}'
+$global:gone = $false
+$global:stopped = $false
+function Get-ScheduledTask {{
+    [CmdletBinding()]param($TaskName, $TaskPath)
+    if ($scenario -eq 'missing') {{ Write-Error '不存在' -Category ObjectNotFound; return }}
+    if ($scenario -eq 'read_error') {{ throw '拒絕讀取排程' }}
+    if ($scenario -eq 'foreign') {{ $task.TaskPath = '\\foreign\\' }}
+    if ($global:stopped) {{ $task.State = 3 }}
+    return $task
+}}
+function Stop-ScheduledTask {{
+    [CmdletBinding()]param($TaskName, $TaskPath)
+    if ($scenario -eq 'stop_error') {{ throw '停止排程失敗' }}
+    Add-Content -LiteralPath $events -Value '"task"'
+    $global:stopped = $true
+}}
+function Get-CimInstance {{
+    param($ClassName, $Filter)
+    if (-not $global:gone) {{
+        [pscustomobject]@{{Name='python.exe'; CommandLine='"C:\\Python\\python.exe" -u "{root / 'scripts/private_web_host.py'}"';
+            ProcessId=99999; ParentProcessId=88888; CreationDate='2026-10-02'}}
+    }}
+}}
+function Stop-Process {{
+    [CmdletBinding()]param($Id, [switch]$Force)
+    Add-Content -LiteralPath $events -Value '"process"'
+    $global:gone = $true
+}}
+& '{ROOT / 'scripts/停止私有網站.ps1'}' -InstallRoot $root -ProductionRoot $root
+exit $LASTEXITCODE
+'''
+                result = self.run_powershell_fixture(body)
+                self.assertEqual(result.returncode, expected_code, (scenario, result.stdout, result.stderr))
+                self.assertEqual([json.loads(line) for line in events.read_text().splitlines()], expected_events)
 
 
 if __name__ == '__main__':

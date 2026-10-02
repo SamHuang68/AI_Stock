@@ -48,6 +48,33 @@ function Get-PrivateWebTargets($Processes, [string[]]$Roots) {
     return @($targets.Values | Sort-Object @{Expression={ if ($_.CommandLine -match 'private_web_host\.py') { 0 } else { 1 } }}, ProcessId)
 }
 
+function Test-PrivateWebScheduledTask($Task, [string]$Root) {
+    if (-not $Task -or $Task.TaskName -ne 'StockTerminal_PrivateWeb_Host' -or $Task.TaskPath -ne '\' -or @($Task.Actions).Count -ne 1) { return $false }
+    $action = $Task.Actions[0]
+    $shell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if ($action.Execute -ine $shell -or -not [IO.Path]::IsPathRooted($action.WorkingDirectory)) { return $false }
+    $working = Get-Item -LiteralPath $action.WorkingDirectory -ErrorAction SilentlyContinue
+    $rootItem = Get-Item -LiteralPath $Root -ErrorAction SilentlyContinue
+    if (-not $working -or -not $rootItem -or $working.FullName -ine $rootItem.FullName) { return $false }
+    $parts = @([regex]::Matches([string]$action.Arguments, '"[^"]*"|[^\s"]+') | ForEach-Object { $_.Value.Trim('"') })
+    $values = @{}
+    for ($index = 0; $index -lt $parts.Count; $index++) {
+        if ($parts[$index] -in @('-NoLogo', '-NoProfile', '-NonInteractive')) { continue }
+        if ($parts[$index] -notin @('-File', '-Mode', '-InstallRoot', '-WindowStyle', '-ExecutionPolicy', '-BackendPort', '-GatewayPort')) { return $false }
+        if ($values.ContainsKey($parts[$index]) -or $index + 1 -ge $parts.Count) { return $false }
+        $values[$parts[$index]] = $parts[$index + 1]
+        $index++
+    }
+    if (-not $values['-File'] -or -not $values['-InstallRoot'] -or $values['-Mode'] -ne 'RunHost' -or
+        -not [IO.Path]::IsPathRooted($values['-File']) -or -not [IO.Path]::IsPathRooted($values['-InstallRoot'])) { return $false }
+    $parent = Split-Path $rootItem.FullName -Parent
+    $expectedRunner = Get-Item -LiteralPath (Join-Path $parent 'startup\private_web_startup.ps1') -ErrorAction SilentlyContinue
+    $runner = Get-Item -LiteralPath $values['-File'] -ErrorAction SilentlyContinue
+    $install = Get-Item -LiteralPath $values['-InstallRoot'] -ErrorAction SilentlyContinue
+    return $expectedRunner -and $runner -and $install -and
+        $expectedRunner.FullName -ieq $runner.FullName -and $install.FullName -ieq $parent
+}
+
 if ($FunctionsOnly) { return }
 $roots = @($InstallRoot, $ProductionRoot | ForEach-Object { [IO.Path]::GetFullPath($_).TrimEnd('\') } | Select-Object -Unique)
 Write-Output '正在停止 Private Web ST；依安裝目錄與程序身分核對。'
@@ -70,6 +97,25 @@ foreach ($root in $roots) {
         }
     }
 }
+# 先停止經完整動作與目錄核對的既有排程，避免其失敗重啟策略再次拉起 host。
+# 不停用或修改排程設定；下次使用者啟動或既有觸發條件仍可沿用。
+$registeredTask = $null
+try { $registeredTask = Get-ScheduledTask -TaskPath '\' -TaskName 'StockTerminal_PrivateWeb_Host' -ErrorAction Stop }
+catch {
+    if ($_.CategoryInfo.Category -ne 'ObjectNotFound') { throw '無法核對既有私有排程，未執行程序停止。' }
+}
+$taskOwned = $false
+foreach ($root in $roots) {
+    if (Test-PrivateWebScheduledTask $registeredTask $root) { $taskOwned = $true }
+}
+if ($taskOwned) {
+    Stop-ScheduledTask -TaskPath '\' -TaskName $registeredTask.TaskName -ErrorAction Stop
+    for ($attempt = 0; $attempt -lt 50; $attempt++) {
+        if ([int](Get-ScheduledTask -TaskPath '\' -TaskName $registeredTask.TaskName).State -ne 4) { break }
+        Start-Sleep -Milliseconds 100
+    }
+    if ($attempt -eq 50) { throw '私有排程尚未停止，未執行程序停止。' }
+}
 foreach ($target in $targets) {
     $live = Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $target.ProcessId)
     if (-not $live) { continue }
@@ -80,6 +126,10 @@ foreach ($target in $targets) {
         continue
     }
     Stop-Process -Id $live.ProcessId -Force -ErrorAction Stop
+}
+if ($taskOwned -and [int](Get-ScheduledTask -TaskPath '\' -TaskName $registeredTask.TaskName).State -eq 4) {
+    Write-Warning '私有排程尚未停止，請核對排程狀態。'
+    $unverified = $true
 }
 if (@(Get-PrivateWebTargets @(Get-CimInstance Win32_Process) $roots).Count) {
     Write-Warning '仍有已辨識的 Private Web 程序，停止未完成。'
