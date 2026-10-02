@@ -49,6 +49,12 @@ class ForwardObservationTests(unittest.TestCase):
         value = daily.maturity_progress(self.origin, self.following, self.following + ['2026-10-08'], 5)
         self.assertEqual(value['status'], 'ready')
 
+    def test_both_sources_missing_a_scheduled_day_cannot_shift_the_horizon(self):
+        both = self.following[1:] + ['2026-10-08']
+        value = daily.maturity_progress(self.origin, both, both, 5)
+        self.assertEqual(value['status'], 'missing_benchmark_sessions')
+        self.assertEqual(value['missingBenchmarkDates'], ['2026-09-30'])
+
     def test_existing_event_can_mature_with_short_current_history(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'observations.sqlite3'

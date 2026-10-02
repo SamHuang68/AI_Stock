@@ -4,7 +4,7 @@ import json
 import sqlite3
 import zlib
 from contextlib import closing
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import stock_signals as ss
@@ -32,6 +32,17 @@ def maturity_progress(origin, sessions, price_dates, horizon):
     # 尚未滿期時，基準最後一日之後的個股價格也能證明基準漏日。
     extra = sorted(day for day in prices if day not in expected and
                    (len(expected) < horizon + 1 or day <= expected[-1]))
+    # 兩個來源同時漏掉表定交易日，仍不可把後面的日期順延湊滿期數。
+    # 僅檢查已觀測區間；未知年度不推定開市，更不補入未來日期。
+    if expected:
+        cursor, end = date.fromisoformat(origin) + timedelta(days=1), date.fromisoformat(expected[-1])
+        known = set(following)
+        while cursor <= end:
+            day = cursor.isoformat()
+            if day not in known and session(cursor)['status'] == 'scheduled':
+                extra.append(day)
+            cursor += timedelta(days=1)
+        extra = sorted(set(extra))
     reason = ('missing_benchmark_sessions' if extra else 'missing_stock_sessions' if missing else
               'awaiting_observed_sessions' if len(expected) < horizon + 1 else 'ready')
     return {'status': reason, 'horizon': horizon, 'requiredFollowingSessions': horizon + 1,
