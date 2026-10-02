@@ -14,7 +14,14 @@ function Test-PrivateWebIdentity($Process, [string]$Root, [string]$Script) {
     while ($index -lt $parts.Count -and $parts[$index] -in @('-u', '-B', '-E', '-s', '-S', '-I')) { $index++ }
     if ($index -ge $parts.Count) { return $false }
     $expected = [IO.Path]::GetFullPath((Join-Path $Root $Script))
-    return [string]::Equals($parts[$index].Replace('/', '\'), $expected, [StringComparison]::OrdinalIgnoreCase)
+    $candidate = $parts[$index].Replace('/', '\')
+    if (-not [IO.Path]::IsPathRooted($candidate) -or
+        [IO.Path]::GetPathRoot($candidate) -ne [IO.Path]::GetPathRoot($expected)) { return $false }
+    # Windows 暫存目錄可能同時以 RUNNER~1 與完整名稱呈現，先核對實際檔案路徑。
+    $actualFile = Get-Item -LiteralPath $candidate -ErrorAction SilentlyContinue
+    $expectedFile = Get-Item -LiteralPath $expected -ErrorAction SilentlyContinue
+    return $actualFile -and $expectedFile -and -not $actualFile.PSIsContainer -and
+        [string]::Equals($actualFile.FullName, $expectedFile.FullName, [StringComparison]::OrdinalIgnoreCase)
 }
 
 function Get-PrivateWebTargets($Processes, [string[]]$Roots) {

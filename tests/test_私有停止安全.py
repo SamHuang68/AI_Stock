@@ -64,11 +64,13 @@ class PrivateStopTests(unittest.TestCase):
             time.sleep(.05)
         self.assertTrue(pid_file.exists())
         child_pid = int(pid_file.read_text())
+        (self.owned / 'data/private_web_host.pid').write_text(str(host.pid), encoding='ascii')
+        (self.production / 'data/private_web_gateway.pid').write_text(str(gateway.pid), encoding='ascii')
         try:
             result = self.stop()
             self.assertEqual(result.returncode, 0, (result.stdout, result.stderr))
-            self.assertIsNotNone(host.poll())
-            self.assertIsNotNone(gateway.poll())
+            self.assertIsNotNone(host.wait(timeout=5))
+            self.assertIsNotNone(gateway.wait(timeout=5))
             self.assertIsNone(foreign.poll())
             self.assertIsNone(dev.poll())
             check = subprocess.run(['powershell', '-NoProfile', '-Command',
@@ -103,6 +105,18 @@ class PrivateStopTests(unittest.TestCase):
         record.write_text('not-a-pid', encoding='ascii')
         self.assertEqual(self.stop().returncode, 1)
         self.assertTrue(record.exists())
+
+    def test_short_install_path_matches_full_script_path(self):
+        import ctypes
+        buf = ctypes.create_unicode_buffer(4096)
+        length = ctypes.windll.kernel32.GetShortPathNameW(str(self.owned), buf, len(buf))
+        self.assertGreater(length, 0)
+        host = self.spawn(self.owned, 'scripts/private_web_host.py')
+        (self.owned / 'data/private_web_host.pid').write_text(str(host.pid), encoding='ascii')
+        self.owned = Path(buf.value)
+        result = self.stop()
+        self.assertEqual(result.returncode, 0, (result.stdout, result.stderr))
+        self.assertIsNotNone(host.wait(timeout=5))
 
 
 if __name__ == '__main__':
