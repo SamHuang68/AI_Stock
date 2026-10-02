@@ -58,6 +58,14 @@ class AiRoutesMixin:
             metadata = al.route_metadata(mode, probe=(mode == 'fast'))
         except Exception as exc:
             self._err('AI runtime 狀態讀取失敗: ' + type(exc).__name__, 503); return
+        expected_route = body.get('expectedRoute')
+        if 'expectedRoute' in body:
+            try:
+                if expected_route is None:
+                    raise al.AiRouteMismatchError('研究 AI 路由契約不完整')
+                al.validate_expected_route(expected_route, metadata)
+            except al.AiRouteMismatchError as exc:
+                self._err(str(exc), 409); return
         if not metadata.get('available'):
             self._err(str(metadata.get('reason') or 'AI runtime 未就緒'), 503); return
         try:
@@ -79,6 +87,7 @@ class AiRoutesMixin:
         self.send_header('X-ST-AI-Provider', str(metadata.get('provider') or 'unknown'))
         self.send_header('X-ST-AI-Model', str(metadata.get('model') or 'unknown'))
         self.send_header('X-ST-AI-Data-Boundary', str(metadata.get('dataBoundary') or 'unknown'))
+        self.send_header('X-ST-AI-Destination-ID', str(metadata.get('destinationId') or ''))
         self.send_header('X-ST-AI-Estimate-Seconds', str(int(metadata.get('estimateSeconds') or 0)))
         self.send_header('Connection', 'close')
         self.end_headers()
@@ -105,7 +114,8 @@ class AiRoutesMixin:
             try:
                 stream = al.deep_stream if mode == 'deep' else al.chat_stream
                 iterator = stream(body.get('prompt', ''), body.get('context', ''),
-                                  request_id=request_id, cancel_event=cancelled)
+                                  request_id=request_id, cancel_event=cancelled,
+                                  **({'expected_route': expected_route} if expected_route is not None else {}))
                 visible = False
                 for chunk in iterator:
                     if cancelled.is_set():

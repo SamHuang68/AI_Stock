@@ -34,6 +34,10 @@
     var traceId = /^[A-Za-z0-9_.-]{1,128}$/.test(suppliedId) ? suppliedId :
       'ai-' + started.toString(36) + '-' + Math.random().toString(36).slice(2, 10);
     var endpoint = options.endpoint || '/ai/local';
+    var routeFields = ['mode', 'host', 'provider', 'model', 'dataBoundary', 'destinationId'];
+    // 建立副本；呼叫端在等待期間修改物件不能改變此次核對條件。
+    var expectedRoute = options.expectedRoute === undefined ? undefined :
+      (options.expectedRoute && typeof options.expectedRoute === 'object' ? Object.assign({}, options.expectedRoute) : null);
     var requestedTimeout = Number(options.timeoutMs);
     var timeoutMs = Number.isFinite(requestedTimeout) && requestedTimeout > 0 ?
       Math.min(requestedTimeout, 1800000) : (endpoint === '/ai/deep' ? 960000 : 660000);
@@ -61,16 +65,28 @@
     var run = (async function () {
       check();
       if (endpoint !== '/ai/local' && endpoint !== '/ai/deep') throw new Error('AI 請求端點不受支援');
+      var body = { prompt: options.prompt, context: options.context || '' };
+      if (expectedRoute !== undefined) {
+        if (!expectedRoute || Object.keys(expectedRoute).length !== routeFields.length ||
+            routeFields.some(function (key) { return typeof expectedRoute[key] !== 'string' || !expectedRoute[key]; }) ||
+            expectedRoute.mode !== (endpoint === '/ai/deep' ? 'deep' : 'fast')) {
+          throw new Error('研究 AI 路由契約不完整，尚未傳送研究內容');
+        }
+        body.expectedRoute = expectedRoute;
+      }
       status();
       var response = await fetch((window.SERVER || '') + endpoint, {
         method: 'POST', signal: controller.signal,
         headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream', 'X-ST-Trace-ID': traceId },
-        body: JSON.stringify({ prompt: options.prompt, context: options.context || '' })
+        body: JSON.stringify(body)
       });
       check();
-      meta = { requestId: response.headers.get('X-ST-AI-Request-ID') || traceId,
+      var serverRequestId = response.headers.get('X-ST-AI-Request-ID') || '';
+      meta = { requestId: serverRequestId || traceId, serverRequestId: serverRequestId,
+        mode: response.headers.get('X-ST-AI-Mode') || '',
         host: response.headers.get('X-ST-AI-Host') || '', provider: response.headers.get('X-ST-AI-Provider') || '',
-        model: response.headers.get('X-ST-AI-Model') || '', dataBoundary: response.headers.get('X-ST-AI-Data-Boundary') || '' };
+        model: response.headers.get('X-ST-AI-Model') || '', dataBoundary: response.headers.get('X-ST-AI-Data-Boundary') || '',
+        destinationId: response.headers.get('X-ST-AI-Destination-ID') || '' };
       status();
       if (!response.ok) {
         var detail = await response.text();
@@ -79,6 +95,9 @@
         var failure = new Error(String(detail || ('HTTP ' + response.status)).slice(0, 260));
         failure.status = response.status;
         throw failure;
+      }
+      if (expectedRoute && (!serverRequestId || routeFields.some(function (key) { return meta[key] !== expectedRoute[key]; }))) {
+        throw new Error('研究 AI 實際路由或伺服器收據不符，本次結果不可採用');
       }
       if ((response.headers.get('Content-Type') || '').indexOf('text/event-stream') < 0) {
         throw new Error('AI 回應格式不符，無法確認完成；請重新整理後重試。');
@@ -124,6 +143,7 @@
     })();
     var promise = Promise.race([stopped, run]).catch(function (error) {
       error.requestId = meta.requestId || traceId;
+      error.serverRequestId = meta.serverRequestId || '';
       error.detail = error.message;
       throw error;
     }).finally(function () {

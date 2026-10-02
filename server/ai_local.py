@@ -10,6 +10,7 @@ Stock Terminal state. Traces never store prompts, context, keys or output.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import os
 import shutil
@@ -19,6 +20,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+import urllib.parse
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
@@ -95,6 +97,70 @@ class AiCompletionError(AiRuntimeError):
 
 class AiCancelledError(AiRuntimeError):
     """取消不屬於正常完成。"""
+
+
+class AiRouteMismatchError(AiRuntimeError):
+    """研究預期路由未經確認或已改變，不得傳送研究內容。"""
+
+
+_ROUTE_FIELDS = ('mode', 'host', 'provider', 'model', 'dataBoundary', 'destinationId')
+
+
+def _fast_destination(provider: str, url: str) -> dict[str, Any]:
+    """僅公布端點 origin 與不透明識別碼，不公布帳密、查詢或設定檔內容。"""
+    unknown = {'destinationVerified': False, 'destination': '', 'destinationId': '',
+               'dataBoundary': 'unverified', 'destinationReason': '端點格式無法確認，研究路由不可使用'}
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        hostname = parsed.hostname or ''
+        if (parsed.scheme not in ('http', 'https') or not hostname or parsed.username is not None
+                or parsed.password is not None or parsed.query or parsed.fragment
+                or any(ord(char) < 33 or ord(char) > 126 for char in url)):
+            return unknown
+        port = parsed.port if parsed.port is not None else (443 if parsed.scheme == 'https' else 80)
+        if port <= 0:
+            return unknown
+        if urllib.request.getproxies().get(parsed.scheme) and not urllib.request.proxy_bypass(parsed.netloc):
+            return dict(unknown, destinationReason='目前端點會經環境代理，無法確認研究資料的直接目的地')
+        host = hostname.lower()
+        authority = ('[' + host + ']' if ':' in host else host) + ':' + str(port)
+        origin = parsed.scheme + '://' + authority
+        canonical = origin + (parsed.path or '/')
+        try:
+            local = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            local = host == 'localhost'
+        digest = hashlib.sha256(('st-ai-direct-v1\n' + provider + '\n' + canonical).encode('utf-8')).hexdigest()
+        return {'destinationVerified': True, 'destination': origin,
+                'destinationId': 'st-ai-direct-v1:' + digest,
+                'dataBoundary': 'local-only' if local else 'external', 'destinationReason': ''}
+    except (TypeError, ValueError, OSError):
+        return unknown
+
+
+def validate_expected_route(expected_route, metadata: dict[str, Any]) -> None:
+    """expectedRoute 僅作核對，不得用來選模型、網址或供應商。"""
+    if expected_route is None:
+        return
+    if (not isinstance(expected_route, dict) or set(expected_route) != set(_ROUTE_FIELDS)
+            or any(not isinstance(expected_route.get(key), str) or not expected_route[key]
+                   for key in _ROUTE_FIELDS)):
+        raise AiRouteMismatchError('研究 AI 路由契約不完整，請重新確認執行路由')
+    if metadata.get('destinationVerified') is not True:
+        raise AiRouteMismatchError('研究 AI 實際目的地尚未驗證，未傳送研究內容')
+    if any(expected_route[key] != metadata.get(key) for key in _ROUTE_FIELDS):
+        raise AiRouteMismatchError('研究 AI 路由已改變，未傳送研究內容；請重新確認')
+
+
+class _NoResearchRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise AiRouteMismatchError('研究 AI 端點要求重新導向，未傳送至其他目的地')
+
+
+def _research_urlopen(request, timeout):
+    # 經確認的目的地採直接連線；不讓環境代理或 HTTP redirect 靜默改變路由。
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoResearchRedirect())
+    return opener.open(request, timeout=timeout)
 
 
 class _StreamControl:
@@ -257,6 +323,11 @@ def route_metadata(mode: str, *, probe: bool = True) -> dict[str, Any]:
             ),
             "phases": ["Hermes 啟動", "模型連線/載入", "上下文預填", "深度推理"],
             "reason": "" if executable else "Hermes CLI 未安裝或無法定位",
+            "destinationVerified": False,
+            "destination": "",
+            "destinationId": "",
+            "destinationReason": "目前僅能確認 Hermes 供應商與模型參數，無法確認 CLI 最終端點",
+            "expectedRoute": None,
         }
 
     provider_label = "LM Studio" if FAST_PROVIDER == "lmstudio" else "Ollama"
@@ -271,14 +342,15 @@ def route_metadata(mode: str, *, probe: bool = True) -> dict[str, Any]:
         except Exception as exc:
             available = False
             reason = f"{provider_label} 未連線（{type(exc).__name__}）"
-    return {
+    destination = _fast_destination(FAST_PROVIDER, LMSTUDIO_CHAT_URL if FAST_PROVIDER == 'lmstudio' else OLLAMA_CHAT_URL)
+    metadata = {
         "mode": "fast",
         "available": available,
         "host": HOST_LABEL,
         "provider": provider_label,
         "providerKey": FAST_PROVIDER,
         "model": FAST_MODEL,
-        "dataBoundary": "local-only",
+        **destination,
         "toolPolicy": "no tools; advisory text only",
         "estimateSeconds": FAST_ESTIMATE_SECONDS,
         "estimateLabel": _estimate_label(FAST_ESTIMATE_SECONDS),
@@ -286,6 +358,8 @@ def route_metadata(mode: str, *, probe: bool = True) -> dict[str, Any]:
         "phases": ["模型冷啟動", "上下文預填", "快速推理"],
         "reason": reason,
     }
+    metadata['expectedRoute'] = {key: metadata[key] for key in _ROUTE_FIELDS} if destination['destinationVerified'] else None
+    return metadata
 
 
 def runtime_status() -> dict[str, Any]:
@@ -343,12 +417,13 @@ def _stream_lmstudio(
     *,
     diagnostics: Optional[Dict[str, Any]] = None,
     control=None,
+    transport=None,
 ) -> Generator[str, None, None]:
     diagnostics = diagnostics if diagnostics is not None else {}
     diagnostics.update({"maxTokens": FAST_MAX_TOKENS, "outputChars": 0})
     visible = False
     payload = {
-        "model": FAST_MODEL,
+        "model": transport['model'] if transport else FAST_MODEL,
         "messages": [{"role": "user", "content": full_prompt}],
         "temperature": 0.3,
         "max_tokens": FAST_MAX_TOKENS,
@@ -356,11 +431,12 @@ def _stream_lmstudio(
         "stream_options": {"include_usage": True},
     }
     request = urllib.request.Request(
-        LMSTUDIO_CHAT_URL, data=json.dumps(payload).encode("utf-8"),
+        transport['url'] if transport else LMSTUDIO_CHAT_URL, data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json", "Accept": "text/event-stream"},
     )
     timeout = max(0.01, control.remaining()) if control else FAST_SOCKET_TIMEOUT
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    open_url = _research_urlopen if transport else urllib.request.urlopen
+    with open_url(request, timeout=timeout) as response:
         if control is not None:
             control.watch(response)
         for raw in response:
@@ -421,22 +497,23 @@ def _stream_lmstudio(
         raise AiCompletionError('本機模型未正常完成回覆，內容可能不完整；請重試。')
 
 
-def _stream_ollama(full_prompt: str, *, control=None) -> Generator[str, None, None]:
+def _stream_ollama(full_prompt: str, *, control=None, transport=None) -> Generator[str, None, None]:
     completed = False
     output_chars = 0
     visible = False
     payload = {
-        "model": FAST_MODEL,
+        "model": transport['model'] if transport else FAST_MODEL,
         "messages": [{"role": "user", "content": full_prompt}],
         "options": {"temperature": 0.3, "num_predict": FAST_MAX_TOKENS},
         "stream": True,
     }
     request = urllib.request.Request(
-        OLLAMA_CHAT_URL, data=json.dumps(payload).encode("utf-8"),
+        transport['url'] if transport else OLLAMA_CHAT_URL, data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
     timeout = max(0.01, control.remaining()) if control else FAST_SOCKET_TIMEOUT
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    open_url = _research_urlopen if transport else urllib.request.urlopen
+    with open_url(request, timeout=timeout) as response:
         if control is not None:
             control.watch(response)
         for raw in response:
@@ -472,6 +549,7 @@ def chat_stream(
     *,
     request_id: Optional[str] = None,
     cancel_event=None,
+    expected_route=None,
 ) -> Generator[str, None, None]:
     """Stream the fixed fast-local route; caller model overrides are ignored."""
     del model
@@ -479,6 +557,7 @@ def chat_stream(
     control.check()
     request_id = request_id or uuid.uuid4().hex
     metadata = route_metadata("fast", probe=True)
+    validate_expected_route(expected_route, metadata)
     if not metadata.get("available"):
         raise AiRuntimeError(str(metadata.get("reason") or "快速本機模型未就緒"))
     full_prompt, digest = _full_prompt(prompt, context)
@@ -507,9 +586,19 @@ def chat_stream(
             raise AiRuntimeError(defer or '本機模型忙碌')
         slot_acquired = True
         control.check()
+        transport = None
+        provider = FAST_PROVIDER
+        if expected_route is not None:
+            # 等待占用鎖後重新核對，並固定這次呼叫真正使用的參數。
+            transport = {'model': FAST_MODEL, 'url': LMSTUDIO_CHAT_URL if provider == 'lmstudio' else OLLAMA_CHAT_URL}
+            actual = route_metadata('fast', probe=False)
+            validate_expected_route(expected_route, actual)
+            captured = dict(actual, model=transport['model'], provider='LM Studio' if provider == 'lmstudio' else 'Ollama')
+            captured.update(_fast_destination(provider, transport['url']))
+            validate_expected_route(expected_route, captured)
         iterator = (
-            _stream_lmstudio(full_prompt, diagnostics=diagnostics, control=control)
-            if FAST_PROVIDER == "lmstudio" else _stream_ollama(full_prompt, control=control)
+            _stream_lmstudio(full_prompt, diagnostics=diagnostics, control=control, **({'transport': transport} if transport else {}))
+            if provider == "lmstudio" else _stream_ollama(full_prompt, control=control, **({'transport': transport} if transport else {}))
         )
         for chunk in iterator:
             control.check()
@@ -575,10 +664,12 @@ def deep_stream(
     *,
     request_id: Optional[str] = None,
     cancel_event=None,
+    expected_route=None,
 ) -> Generator[str, None, None]:
     """Run one bounded Hermes advisory turn and yield its final text."""
     request_id = request_id or uuid.uuid4().hex
     metadata = route_metadata("deep", probe=False)
+    validate_expected_route(expected_route, metadata)
     executable = _resolve_hermes_exe()
     if not metadata.get("available") or executable is None:
         raise AiRuntimeError(str(metadata.get("reason") or "Hermes Agent 未就緒"))
