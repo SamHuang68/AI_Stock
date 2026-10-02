@@ -441,6 +441,12 @@ python3 run.py
 
 更完整的執行台設計見 [WaveDeck 架構](wavedeck/docs/ARCHITECTURE.md)。
 
+## 離線策略研究（選用）
+
+`research/策略驗證` 提供獨立的固定均線研究、參數掃描、滾動樣本外及 ST 4.0.2 現金帳本對照。
+只讀既有行情或輸入快照，不連接券商、不下載行情，不影響技術分數、DecisionContext 或 WaveDeck。
+依賴與重播方式見 [離線研究使用說明](research/策略驗證/使用說明.md)；研究輸出保留在 `scratch`，不納入版本控制或一般分享包。
+
 ## 開發與測試
 
 ### 前端建置

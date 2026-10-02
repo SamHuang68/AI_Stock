@@ -1,0 +1,40 @@
+{
+  "說明": "僅保留離線研究所需檔案；上游檔案原樣保存，未納入資料、金鑰、下單、通知或執行服務。",
+  "files": [
+    {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "path": "lib/__init__.py"
+    },
+    {
+      "sha256": "6a609650c4f1d607273d3845e4113e56112f9e8df6a4eda49c53e51a89290b98",
+      "path": "lib/analysis.py"
+    },
+    {
+      "sha256": "5b3e965ffb1bc011b2eeeee622dacea9ab82fffd68cc861fe275e824833e2003",
+      "path": "lib/param_scan.py"
+    },
+    {
+      "sha256": "36e44d00bcee819f61d5dc3ce91a9968082945dee1c59ae7b14615b85f5164c7",
+      "path": "lib/walk_forward.py"
+    },
+    {
+      "sha256": "7073c8b960c9a893fb4cf43da934b87099ea15bba7fac08feea386c9ec2377d8",
+      "path": "lib/validation.py"
+    },
+    {
+      "sha256": "8dc81b112baf543332535a7311e364e84f2016bf5c6e2ddddcb02956aaa861fa",
+      "path": "lib/progress.py"
+    },
+    {
+      "sha256": "ccecdcd47baf033cdec5d78b5d008fd3b14047d6b2c199693e59a9c24f2ab0cc",
+      "path": "LICENSE"
+    },
+    {
+      "sha256": "89a727e53e35ab3b431b6eb8313cd79d0c6dafd9dc0cf1eaa78ec2309ed8d3cb",
+      "path": "NOTICE"
+    }
+  ],
+  "license": "Apache-2.0",
+  "commit": "eea03f1a50d034fff778a381bc2a91e61eaf1dd0",
+  "repository": "https://github.com/Blave-TW/blave-agent"
+}
