@@ -10,6 +10,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class LauncherSafetyTests(unittest.TestCase):
+    def test_windows_unicode_entrypoints_preserve_crlf_bytes(self):
+        attrs = (ROOT / '.gitattributes').read_text(encoding='utf-8')
+        for name in ('STOP_PRIVATE_WEB.cmd', 'wavedeck/START_WAVEDECK.cmd'):
+            with self.subTest(name=name):
+                raw = (ROOT / name).read_bytes()
+                self.assertIn(b'\r\n', raw)
+                self.assertNotIn(b'\n', raw.replace(b'\r\n', b''))
+                self.assertIn(name + ' -text', attrs)
+
     def test_canonical_windows_launcher_never_discards_work(self):
         script = (ROOT / 'scripts' / 'go.ps1').read_text(encoding='utf-8')
         lowered = script.lower()
