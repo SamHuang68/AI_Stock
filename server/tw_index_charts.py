@@ -4,7 +4,7 @@
 tw_index_charts.py — 台股指數／台指期可信日線（覆寫 Yahoo 壞源）
 
   ^TWOII / TWOII  → TPEx 官方「日成交量值指數」st41（櫃買指數收盤）
-  __TXF__         → FinMind TaiwanFuturesDaily（TX 近月，prefer 日盤 position）
+  __TXF__         → FinMind TaiwanFuturesDaily（TX 近月，只接受日盤 position）
 
 Yahoo ^TWOII 日線各端點數值互斥（曾見 419/269/105），不可用。
 台指期無穩定 Yahoo 連續合約代號；改走 FinMind + 本地 CSV 快取。
@@ -256,7 +256,7 @@ def ensure_twoii(years: int = 6, force: bool = False) -> List[Tuple]:
 # ── 台指期 __TXF__（FinMind 近月連續）────────────────────────
 
 def _fetch_txf_finmind(start: str, end: str) -> List[Tuple]:
-    """FinMind TaiwanFuturesDaily TX → 每日近月（position 日盤優先）。"""
+    """FinMind TaiwanFuturesDaily TX → 日盤主力合約，夜盤不得補成日線。"""
     url = (
         'https://api.finmindtrade.com/api/v4/data?'
         + urllib.parse.urlencode({
@@ -303,9 +303,10 @@ def _fetch_txf_finmind(start: str, end: str) -> List[Tuple]:
     out = []
     for d in sorted(by_day):
         rows = by_day[d]
-        # prefer 日盤 position（有結算／OI），其次 after_market
-        day = [r for r in rows if r.get('trading_session') == 'position']
-        pool = day or [r for r in rows if r.get('trading_session') == 'after_market'] or rows
+        # 日線與夜盤是不同資料契約；日盤尚未發布時保留缺日。
+        pool = [r for r in rows if r.get('trading_session') == 'position']
+        if not pool:
+            continue
         best = max(pool, key=lambda r: float(r.get('volume') or 0))
         try:
             o = float(best.get('open') or best['close'])
