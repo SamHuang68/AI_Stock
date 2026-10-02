@@ -103,6 +103,39 @@ const payload = { sym: '2330', name: '台積電', asOf: candles.at(-1).date,
   await $('ke-load').onclick(); assert.equal(view.calls.length, count);
   $('ke-start').value = '2016-01-01'; await $('ke-load').onclick();
   assert.match(view.calls.at(-1), /range=custom&asOf=2020-01-01&start=2016-01-01/);
+  const sideStats = { n: 1, gross: { mean: 2 }, baseNet: { mean: 1.49 }, stressNet: { mean: .98 } };
+  const executionCell = { counts: { mature: 1, signals: 3, excluded: 0 }, raw: sideStats,
+    trades: [{ signalDate: '2019-01-02', entryDate: '2019-01-03', exitDate: '2019-01-03', baseNet: 1.49, positionStatus: 'closed' },
+      { signalDate: '2019-12-31', positionStatus: 'open' }, { signalDate: '2020-01-01', positionStatus: 'not_entered' }],
+    benchmark: { excess: { baseNet: { mean: .2 } }, pairedCount: 1 },
+    random: { metrics: { baseNet: { median: .1 } }, status: '完成' },
+    fixedSplit: { trainEnd: '2023-12-31', testStart: '2024-01-01', train: { n: 1 }, test: { n: 0 } } };
+  const rule = { key: 'breakout_252', label: '一年高點突破觀察', horizons: { '1': executionCell, '5': executionCell } };
+  const research = { latest: { date: '2020-01-01', reason: { breakout_252: '條件首次成立' } }, rules: [rule], notes: ['不是點時或總報酬'],
+    execution: { rules: [rule], assumptions: { entry: '次日開盤', exit: '指定日收盤', costNote: '每邊費用及滑價' } } };
+  research.adjusted = { ...research, adjustmentEvidence: { events: [] } };
+  let posted;
+  view.context.fetch = async (url, options = {}) => {
+    view.calls.push(url);
+    if (options.method === 'POST') { posted = JSON.parse(options.body); return { ok: true, json: async () => ({ status: '已記錄本交易日', note: '首次不覆寫' }) }; }
+    if (url.startsWith('/breakout-shadow')) return { ok: true, json: async () => ({ status: '已讀取', records: [{ date: '2020-01-01', version: '測試', observedAt: '2020-01-01T18:00:00+08:00', inputDigest: 'abc', revisionCount: 1 }] }) };
+    return { ok: true, json: async () => ({ research, asOf: '2020-01-01', freshness: { fresh: true, expectedSession: '2020-01-01' }, historyStart: '2016-01-01', historyEnd: '2020-01-01', comparisonStatus: 'missing', comparisonReason: '尚無官方收據', limitations: [] }) };
+  };
+  // 查詢採最後成功載入的期間；編輯輸入欄位尚未載入時不可暗換研究範圍。
+  $('ke-sym').value = '0050'; $('ke-range').value = 'all';
+  await $('ke-long-load').onclick();
+  assert.match(view.calls.at(-1), /breakout-research\?sym=2330&range=custom&asOf=2020-01-01&start=2016-01-01/);
+  assert.match($('ke-long-result').innerHTML, /1.49%/);
+  assert.match($('ke-long-result').innerHTML, /不以測試結果調參/);
+  assert.equal($('ke-long-save').disabled, false);
+  $('ke-long-basis').value = 'official_reference'; $('ke-long-basis').onchange();
+  assert.match($('ke-long-result').innerHTML, /尚無官方收據/);
+  await $('ke-long-save').onclick();
+  assert.deepEqual(posted, { sym: '2330', range: 'custom', asOf: '2020-01-01', start: '2016-01-01', priceBasis: 'official_reference' });
+  assert.match($('ke-long-status').textContent, /首次不覆寫/);
+  await $('ke-long-history').onclick();
+  assert.equal(view.calls.at(-1), '/breakout-shadow?sym=2330');
+  assert.match($('ke-long-shadow').innerHTML, /修訂 1 次/);
   view.context.KlineEventsUI.close();
-  console.log('K 線歷史時間軸：期間查詢、日期驗證、分段與滑桿、日期定位、事件分頁及統計範圍驗證通過');
+  console.log('K 線歷史時間軸與突破研究：期間、圖表、事件、原價與官方比較、影子保存及紀錄查閱驗證通過');
 })().catch(error => { console.error(error); process.exitCode = 1; });

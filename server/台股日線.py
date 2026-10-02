@@ -276,7 +276,7 @@ def import_day(db: Path, exchange: str, day: date, records: list[dict], digest: 
         conn.execute('INSERT OR REPLACE INTO daily_imports VALUES(?,?,?,?,?)', (exchange, day.isoformat(), len(records), digest, retrieved))
 
 
-def run_update(db: Path, *, start: date | None = None, now: datetime | None = None, fetch=get_json, refresh_existing: bool = False) -> dict:
+def run_update(db: Path, *, start: date | None = None, now: datetime | None = None, fetch=get_json, refresh_existing: bool = False, check=lambda: None) -> dict:
     db = db.resolve()
     lock = acquire_daemon_lock('official-daily-bars', lock_dir=db.parent / 'runtime_locks')
     if lock is None:
@@ -286,11 +286,20 @@ def run_update(db: Path, *, start: date | None = None, now: datetime | None = No
     def trace(event, **fields):
         append_jsonl(str(trace_path), {'at': datetime.now(timezone.utc).isoformat(), 'runId': run_id, 'event': event, **fields}, max_bytes=4_000_000, tail_lines=2000)
     state = {'ok': False, 'runId': run_id, 'startedAt': datetime.now(timezone.utc).isoformat(), 'status': '更新中', 'database': str(db), 'completedDays': [], 'failures': []}
+    cancelled = False
+    def check_active():
+        nonlocal cancelled
+        try:
+            check()
+        except BaseException:
+            cancelled = True
+            raise
     def save():
         with closing(sqlite3.connect(db, timeout=30)) as conn, conn:
             conn.execute('INSERT OR REPLACE INTO daily_update_state VALUES(1,?)', (json.dumps(state, ensure_ascii=False),))
     try:
         datastore.init_db(db)
+        check_active()
         save()
         trace('工作開始', database=str(db))
         now = now or datetime.now(TZ)
@@ -316,6 +325,7 @@ def run_update(db: Path, *, start: date | None = None, now: datetime | None = No
             raise ValueError('官方尚未提供可核對的實際交易日')
         confirmed_through = max(actual)
         for offset in range((target - first).days + 1):
+            check_active()
             if len(state['failures']) >= 3:
                 break
             day = first + timedelta(days=offset)
@@ -331,12 +341,16 @@ def run_update(db: Path, *, start: date | None = None, now: datetime | None = No
                 url = ('https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&type=ALLBUT0999&date=' + day.strftime('%Y%m%d') if exchange == 'TWSE'
                        else 'https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?response=json&date=' + day.strftime('%Y%%2F%m%%2F%d'))
                 try:
+                    check_active()
                     data, digest = fetch(url, trace) if fetch is get_json else fetch(url)
+                    check_active()
                     records = parse_daily(data, exchange, day)
                     import_day(db, exchange, day, records, digest)
                     state['completedDays'].append({'exchange': exchange, 'date': day.isoformat(), 'rows': len(records)})
                     trace('資料已提交', exchange=exchange, sessionDate=day.isoformat(), rows=len(records), sourceHash=digest)
                 except Exception as exc:
+                    if cancelled:
+                        raise
                     state['failures'].append({'exchange': exchange, 'date': day.isoformat(), 'reason': str(exc)[:180]})
                     trace('日期更新失敗', exchange=exchange, sessionDate=day.isoformat(), error=type(exc).__name__)
                 save()
@@ -349,14 +363,36 @@ def run_update(db: Path, *, start: date | None = None, now: datetime | None = No
         with closing(sqlite3.connect(db)) as conn, conn:
             research = conn.execute("SELECT symbol,end_date FROM action_coverage WHERE market='TW'").fetchall()
         for symbol, end in research:
+            check_active()
             if end < target.isoformat():
                 try:
-                    refresh_actions(db, symbol, date.fromisoformat(end) + timedelta(days=1), target, fetch)
+                    refresh_actions(db, symbol, date.fromisoformat(end) + timedelta(days=1), target, fetch, check_active)
                 except Exception as exc:
+                    if cancelled:
+                        raise
                     state['failures'].append({'symbol': symbol, 'reason': str(exc)[:180]})
         state['ok'] = not state['failures'] and all(latest.get(ex) == target.isoformat() for ex in ('TWSE', 'TPEX'))
         state['status'] = '已更新' if state['ok'] else '資料不完整'
+        if state['ok']:
+            # 先提交已完成狀態，供純本機研究的 freshness gate 使用。
+            save()
+            check_active()
+            try:
+                try:
+                    from .突破影子紀錄 import record_daily
+                except ImportError:
+                    from 突破影子紀錄 import record_daily
+                state['researchShadow'] = record_daily(db, now=now, check=check_active)
+            except Exception as exc:
+                if cancelled:
+                    raise
+                state['researchShadow'] = {'status': '紀錄失敗', 'reason': type(exc).__name__}
+        else:
+            state['researchShadow'] = {'status': '未紀錄', 'reason': '官方日線更新尚未完整完成'}
     except Exception as exc:
+        if cancelled:
+            state.update(ok=False, status='已取消', researchShadow={'status': '已取消', 'reason': '取消後不新增觀察'})
+            raise
         state['status'] = '更新失敗'
         state['failures'].append({'reason': str(exc)[:180]})
     finally:

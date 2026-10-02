@@ -16,8 +16,8 @@ try:
 except ImportError:
     from 公司行動比較 import Comparison, PRICE_BASIS, json_safe
 
-VERSION = 'breakout-observation-v1'
-ADJUSTED_VERSION = 'breakout-observation-adjusted-v1'
+VERSION = 'breakout-observation-v2'
+ADJUSTED_VERSION = 'breakout-observation-adjusted-v2'
 WARMUP_DAYS = 253
 HORIZONS = (1, 3, 5, 10)
 RULES = (
@@ -290,7 +290,8 @@ def load_dataset(conn, symbol, cutoff):
                 sessions.add(value)
         day += timedelta(days=1)
     if 'market_sessions' in tables:
-        sessions.update(r[0] for r in conn.execute('SELECT session_date FROM market_sessions WHERE session_date BETWEEN ? AND ?', (first, cutoff)))
+        sessions.update(r[0] for r in conn.execute('SELECT session_date,source FROM market_sessions WHERE session_date BETWEEN ? AND ?', (first, cutoff))
+                        if isinstance(r[1], str) and r[1].startswith(('TWSE', 'TPEX')))
     if 'session_months' in tables:
         for month, observed, actual in conn.execute('SELECT month,observed_through,dates FROM session_months WHERE month<=?', (cutoff[:7],)):
             try:
@@ -354,6 +355,7 @@ def load_dataset(conn, symbol, cutoff):
     adjustments = load_adjustments(conn, symbol, cutoff)
     return {**base, 'rows': rows, 'session_dates': sorted(sessions), 'calendar_years': set(calendars), 'action_days': actions,
             'action_coverage': coverage, 'action_coverage_kind': 'etf' if coverage and symbol.startswith('00') else 'stock',
+            'action_coverage_evidence': '既有涵蓋範圍聲明；不是四類官方參考價完整收據',
             'adjustments': adjustments}
 
 

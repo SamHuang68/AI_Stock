@@ -90,6 +90,29 @@ class ShadowTests(unittest.TestCase):
         self.assertIn('未完整完成', found['note'])
         self.assertEqual(before, self.db.read_bytes())
 
+    def test_修訂獨立保存且重讀不覆寫首次(self):
+        first = ledger.freeze(self.db, self.result, observed_at=self.now)
+        self.assertEqual(first['code'], 'recorded')
+        revised = copy.deepcopy(self.result)
+        revised['research']['latest'].update(inputDigest='新摘要', close=123)
+        again = ledger.freeze(self.db, revised, observed_at=self.now)
+        self.assertEqual(again['code'], 'unchanged')
+        self.assertTrue(again['revised'])
+        ledger.freeze(self.db, revised, observed_at=self.now)
+        records = ledger.list_records(self.db, '2330')['records']
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]['revisionCount'], 1)
+        self.assertEqual(records[0]['evidence']['close'], 100)
+
+    def test_版本隔離及收盤前不得保存(self):
+        early = self.now.replace(day=18, hour=10)
+        self.assertFalse(ledger.append_observation(self.db, self.result, early))
+        ledger.append_observation(self.db, self.result, self.now)
+        other = copy.deepcopy(self.result)
+        other['research']['version'] = '新版研究'
+        self.assertTrue(ledger.append_observation(self.db, other, self.now))
+        self.assertEqual(len(ledger.list_records(self.db, '2330')['records']), 2)
+
 
 if __name__ == '__main__':
     unittest.main()

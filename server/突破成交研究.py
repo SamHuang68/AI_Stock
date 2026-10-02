@@ -13,7 +13,7 @@ try:
 except ImportError:
     from 突破觀察 import HORIZONS, RULES
 
-VERSION = 'breakout-execution-v1'
+VERSION = 'breakout-execution-v2'
 SCENARIOS = {'gross': 0., 'baseNet': .0025, 'stressNet': .005}
 DRAWS = 1000
 TRAIN_END = '2023-12-31'

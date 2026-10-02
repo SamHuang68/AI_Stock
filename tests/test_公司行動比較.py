@@ -66,7 +66,7 @@ class 官方比較測試(unittest.TestCase):
     def test_未提供調整時仍是原始版本且None逐值一致(self):
         self.assertEqual(self.calculate(adjustments=False), self.calculate(adjustments=None))
         result = self.calculate(adjustments=None)
-        self.assertEqual(result['version'], 'breakout-observation-v1')
+        self.assertEqual(result['version'], 'breakout-observation-v2')
         self.assertNotIn('priceBasis', result)
         self.assertNotIn('comparisonEvidence', result['latest'])
 

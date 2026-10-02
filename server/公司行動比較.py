@@ -28,6 +28,7 @@ def load_adjustments(conn, symbol, cutoff):
         WHERE market='TW' AND symbol=? AND session_date<=? ORDER BY session_date,kind""", (symbol, cutoff)).fetchall()
     try:
         return {**base, 'status': 'loaded' if coverage else 'missing',
+                'reason': None if coverage else base['reason'],
                 'coverage': {'start': coverage[0], 'end': coverage[1], 'version': coverage[2], 'sources': json.loads(coverage[3])} if coverage else None,
                 'events': [dict(zip(('date', 'kind', 'before', 'after', 'factor', 'status', 'reason', 'sourceHash', 'sourceUrl', 'retrievedAt', 'version', 'payload'), (*r[:-1], json.loads(r[-1])))) for r in events]}
     except (ValueError, TypeError):

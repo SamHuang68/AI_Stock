@@ -52,7 +52,7 @@ def append_observation(db: str | Path, result: dict, observed_at: datetime) -> b
         return added
 
 
-def record_daily(db: str | Path, *, now: datetime | None = None, observed_at: datetime | None = None) -> dict:
+def record_daily(db: str | Path, *, now: datetime | None = None, observed_at: datetime | None = None, check=lambda: None) -> dict:
     """沿用已建立公司行動涵蓋的研究股票，無遠端請求、無歷史補造。"""
     try:
         from .突破觀察 import report
@@ -64,16 +64,24 @@ def record_daily(db: str | Path, *, now: datetime | None = None, observed_at: da
     added, failures = 0, []
     recorded_at = observed_at or datetime.now(TZ)
     for symbol in symbols:
+        check()
         try:
             result = report(db, symbol, now=now, period='30d', include_execution=False)
-            recorded_at = observed_at or datetime.now(TZ)
-            added += int(append_observation(db, result, recorded_at))
-            adjusted = result.get('research', {}).get('adjusted') or {}
-            if adjusted.get('adjustmentEvidence', {}).get('coverage'):
-                # 規則版本分開留存，原始模式的首次證據不因新增基準而覆寫。
-                added += int(append_observation(db, {**result, 'research': adjusted}, recorded_at))
         except Exception as exc:
             failures.append({'symbol': symbol, 'reason': type(exc).__name__})
+            continue
+        variants = [result]
+        adjusted = (result.get('research') or {}).get('adjusted') or {}
+        if adjusted.get('adjustmentEvidence', {}).get('coverage'):
+            variants.append({**result, 'research': adjusted})
+        for selected in variants:
+            # 每次保存前檢查；在一般失敗捕捉之外，不得當作個股錯誤吞掉。
+            check()
+            recorded_at = observed_at or datetime.now(TZ)
+            try:
+                added += int(append_observation(db, selected, recorded_at))
+            except Exception as exc:
+                failures.append({'symbol': symbol, 'reason': type(exc).__name__})
     return {'status': '紀錄不完整' if failures else '已檢查', 'checked': len(symbols),
             'added': added, 'failures': failures, 'observedAt': recorded_at.isoformat()}
 
@@ -120,11 +128,11 @@ def freeze(db, result, *, price_basis='raw', observed_at=None):
     if price_basis == 'official_reference':
         research = research.get('adjusted') or {}
     if not research.get('latest'):
-        return {'status': 'missing', 'added': False, 'reason': '尚無可凍結的研究資料；請先核對日線、日曆與公司行動。'}
+        return {'code': 'missing', 'status': '尚無可保存研究', 'added': False, 'reason': '尚無可凍結的研究資料；請先核對日線、日曆與公司行動。'}
     selected = {**result, 'research': research}
     added = append_observation(db, selected, observed_at or datetime.now(TZ))
     state = summary(db, result['sym'], research, result['asOf'])
-    return {'status': 'recorded' if added else 'unchanged', 'added': added, **state}
+    return {**state, 'code': 'recorded' if added else 'unchanged', 'added': added}
 
 
 def list_records(db, symbol, *, limit=100):

@@ -173,6 +173,13 @@ class 本機資料契約測試(unittest.TestCase):
             conn.execute("UPDATE bar_quality SET session_date='2025-01-05' WHERE symbol='2330'")
         self.assertIn('官方來源日期與行情日期不一致', self.load()['rows'][0]['issues'])
 
+    def test_不以未核對市場列創造週末交易日(self):
+        with closing(sqlite3.connect(self.db)) as conn, conn:
+            conn.execute("INSERT INTO market_sessions VALUES('2025-01-11','未核對來源')")
+        with datastore.read_snapshot(self.db) as conn:
+            result = observation.load_dataset(conn, '2330', '2025-01-12')
+        self.assertNotIn('2025-01-11', result['session_dates'])
+
     def test_缺資料回傳可操作狀態且唯讀不建表(self):
         before = self.db.read_bytes()
         result = observation.report(self.db, '9999', '2025-01-08', datetime(2025, 1, 8, 18, tzinfo=daily.TZ))
