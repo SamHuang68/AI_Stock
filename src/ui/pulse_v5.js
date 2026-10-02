@@ -4730,7 +4730,7 @@
     function paint(jobLabel) {
       if (jobLabel) _lastJobLabel = jobLabel;
       var bits = [
-        bit('行情最新來源時間：', formatTaipeiClock(asOf)),
+        bit(fresh && fresh.worstAsOf ? '行情最舊來源時間：' : '行情來源時間：', formatTaipeiClock(asOf)),
         bit('盤別：', sessionLabel(pickSession(snap, fresh))),
         bit('來源品質：', pickSourceQuality(snap, fresh)),
         bit('決策資料完整度：', completeness == null ? '—' : completeness + '%'),

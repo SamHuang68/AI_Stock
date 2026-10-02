@@ -70,7 +70,11 @@ assert.match(T.renderStrip({strip:{txfTrend:{observationPeriod:{start:'2026-09-0
   nodes.set('pl-head-meta',node());
   T.renderHeadMeta({pulse:{updatedAt:'2026-09-29T12:00:00+08:00',decisionSummary:summary}});
   assert.match(nodes.get('pl-head-meta').innerHTML,/快照：<b>持久快照-1/);
-  assert.match(nodes.get('pl-head-meta').innerHTML,/行情最新來源時間：<b>—/);
+  assert.match(nodes.get('pl-head-meta').innerHTML,/行情來源時間：<b>—/);
+  reply(requests.at(-1), {ok:true,running:false}); await flush();
+  vm.runInNewContext(fs.readFileSync(path.join(root,'src/core/market_freshness_v5.js'),'utf8'),scope);
+  T.renderHeadMeta({pulse:{marketSnapshot:{quotes:{a:{asOf:'2026-09-25T01:00:00Z'},b:{asOf:'2026-09-25T02:00:00Z'}}},decisionSummary:summary}});
+  assert.match(nodes.get('pl-head-meta').innerHTML,/行情最舊來源時間：<b>2026\/09\/25 09:00:00/);
   reply(requests.at(-1), {ok:true,running:false}); await flush();
   nodes.set('pl-beginner-focus-cache',node());
   const loading=T.loadBeginnerFocus();

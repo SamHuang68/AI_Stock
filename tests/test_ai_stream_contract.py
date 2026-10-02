@@ -145,6 +145,61 @@ class AiStreamContractTests(unittest.TestCase):
             self.assertEqual(result.stdout.strip(), 'True')
         finally: release_daemon_lock(lock)
 
+    def test_socket_timeout_uses_precise_deadline_not_stale_windows_tick(self):
+        # 固定在前一個 15.625ms tick，重現 Windows socket 先逾時、粗時計尚未跳動。
+        # 不依賴排程運氣，亦驗證 HTTP timeout budget 與期限使用相同精時計。
+        for provider in ['lmstudio', 'ollama']:
+            with self.subTest(provider=provider):
+                clock = [100.0]
+                coarse = [100.0]
+                seen_timeout = []
+                class ExpiredResponse(io.BytesIO):
+                    def __iter__(self):
+                        clock[0] = 100.301
+                        coarse[0] = 100.296875
+                        raise TimeoutError('timed out')
+                def open_response(request, timeout):
+                    seen_timeout.append(timeout)
+                    return ExpiredResponse()
+                def acquire_slot():
+                    clock[0] = 100.05
+                    coarse[0] = 100.046875
+                    return True, None
+                with mock.patch.object(ai_local.time, 'monotonic', side_effect=lambda: coarse[0]), \
+                     mock.patch.object(ai_local.time, 'perf_counter', side_effect=lambda: clock[0]), \
+                     mock.patch.object(ai_local, 'FAST_SOCKET_TIMEOUT', 0.3), \
+                     mock.patch.object(ai_local, 'FAST_PROVIDER', provider), \
+                     mock.patch.object(ai_local, '_acquire_st_slot', side_effect=acquire_slot), \
+                     mock.patch.object(ai_local._StreamControl, 'watch'), \
+                     mock.patch.object(ai_local.urllib.request, 'urlopen', side_effect=open_response):
+                    with self.assertRaisesRegex(ai_local.AiRuntimeError, '超過等待上限'):
+                        list(ai_local.chat_stream('測試'))
+                self.assertAlmostEqual(seen_timeout[0], 0.25)
+
+    def test_early_transport_timeout_is_not_claimed_as_total_deadline(self):
+        clock = [100.0]
+        def early_failure(*args, **kw):
+            clock[0] = 100.1
+            raise TimeoutError('供應商提早逾時')
+        with mock.patch.object(ai_local.time, 'perf_counter', side_effect=lambda: clock[0]), \
+             mock.patch.object(ai_local, 'FAST_SOCKET_TIMEOUT', 10), \
+             mock.patch.object(ai_local.urllib.request, 'urlopen', side_effect=early_failure):
+            with self.assertRaisesRegex(ai_local.AiRuntimeError, '快速摘要失敗：TimeoutError'):
+                list(ai_local.chat_stream('測試'))
+
+    def test_cancel_wins_over_simultaneous_deadline_and_socket_error(self):
+        clock = [100.0]
+        cancelled = threading.Event()
+        def interrupted_failure(*args, **kw):
+            clock[0] = 100.301
+            cancelled.set()
+            raise TimeoutError('timed out')
+        with mock.patch.object(ai_local.time, 'perf_counter', side_effect=lambda: clock[0]), \
+             mock.patch.object(ai_local, 'FAST_SOCKET_TIMEOUT', 0.3), \
+             mock.patch.object(ai_local.urllib.request, 'urlopen', side_effect=interrupted_failure):
+            with self.assertRaisesRegex(ai_local.AiCancelledError, '已取消'):
+                list(ai_local.chat_stream('測試', cancel_event=cancelled))
+
     def test_total_deadline_and_cancel_interrupt_a_silent_socket(self):
         ready = threading.Event(); stop = threading.Event()
         class Upstream(BaseHTTPRequestHandler):

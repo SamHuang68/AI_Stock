@@ -101,16 +101,23 @@ class _StreamControl:
     """總期限包含等待資料；取消時中斷已取得的 socket，不只在收到 token 時檢查。"""
 
     def __init__(self, timeout: float, cancel_event=None):
-        self.deadline = time.monotonic() + timeout
+        # Python 3.12 / Windows 的 monotonic 使用 15.625 ms 的 GetTickCount64。
+        # socket 已逾時時它可能仍停在前一個 tick，導致誤判為一般傳輸失敗。
+        # perf_counter 同為單調時計，Windows 使用高解析度 QPC；總期限、
+        # socket 剩餘額度及 watchdog 必須全部使用同一個時計。
+        self.deadline = time.perf_counter() + timeout
         self.cancel_event = cancel_event or threading.Event()
         self.closed = threading.Event()
         self.response = None
         self.watcher = None
 
+    def remaining(self):
+        return self.deadline - time.perf_counter()
+
     def check(self):
         if self.cancel_event.is_set():
             raise AiCancelledError('已取消本次分析；模型可能仍在收尾。')
-        if time.monotonic() >= self.deadline:
+        if self.remaining() <= 0:
             raise AiRuntimeError('本機模型推理超過等待上限，已停止本次分析；請稍後重試。')
 
     def watch(self, response):
@@ -118,7 +125,7 @@ class _StreamControl:
 
         def interrupt():
             while not self.closed.wait(0.1):
-                if self.cancel_event.is_set() or time.monotonic() >= self.deadline:
+                if self.cancel_event.is_set() or self.remaining() <= 0:
                     # HTTPResponse.close() 可能等候讀取鎖；先 shutdown 喚醒阻塞中的 read。
                     sock = getattr(getattr(getattr(response, 'fp', None), 'raw', None), '_sock', None)
                     if sock is not None:
@@ -352,7 +359,7 @@ def _stream_lmstudio(
         LMSTUDIO_CHAT_URL, data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json", "Accept": "text/event-stream"},
     )
-    timeout = max(0.01, control.deadline - time.monotonic()) if control else FAST_SOCKET_TIMEOUT
+    timeout = max(0.01, control.remaining()) if control else FAST_SOCKET_TIMEOUT
     with urllib.request.urlopen(request, timeout=timeout) as response:
         if control is not None:
             control.watch(response)
@@ -428,7 +435,7 @@ def _stream_ollama(full_prompt: str, *, control=None) -> Generator[str, None, No
         OLLAMA_CHAT_URL, data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
-    timeout = max(0.01, control.deadline - time.monotonic()) if control else FAST_SOCKET_TIMEOUT
+    timeout = max(0.01, control.remaining()) if control else FAST_SOCKET_TIMEOUT
     with urllib.request.urlopen(request, timeout=timeout) as response:
         if control is not None:
             control.watch(response)
