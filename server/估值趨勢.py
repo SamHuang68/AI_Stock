@@ -114,10 +114,12 @@ def load_prices(code, database, now, expected=None, board=None):
                 conflict = (verified.get('sourceConflict') or verified.get('invalidObservation') or
                             verified.get('invalidReceipt') or verified.get('ambiguousSession'))
                 price_valid = bool((valid or verified.get('priceVerified')) and not conflict and not verified.get('priceConflict'))
-                volume_valid = bool((valid or verified.get('volumeVerified')) and not conflict and not verified.get('volumeConflict'))
+                raw_volume = number(item['volume'])
+                volume_valid = bool((valid or verified.get('volumeVerified')) and not conflict and not verified.get('volumeConflict')
+                                    and raw_volume is not None and raw_volume >= 0 and float(raw_volume).is_integer())
                 official_volume = verified.get('officialResearchVolume', {})
                 official_selected = official_volume.get('status') == 'selected'
-                research_volume = official_volume['value'] if official_selected else number(item['volume']) if volume_valid else None
+                research_volume = official_volume['value'] if official_selected else raw_volume if volume_valid else None
                 source = verified.get('source') if verified.get('priceVerified') else item['source']
                 bar = {'date': day, 'source': source, 'qualityValid': price_valid and (official_selected or volume_valid),
                        'priceVerified': verified.get('priceVerified', False),

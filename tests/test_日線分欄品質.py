@@ -355,6 +355,10 @@ class ColumnQuality(unittest.TestCase):
                     item = quality.quality_evidence(conn, '2330')[DAY]['officialResearchVolume']
                 self.assertEqual(item['status'], 'selected' if selected else 'unavailable')
                 self.assertEqual(item['value'], 0 if selected else None)
+                bars, _ = valuation.load_prices('2330', path, NOW)
+                self.assertEqual(bars[-1]['volume'], 0 if selected else None)
+                self.assertEqual(bars[-1]['qualityValid'], selected)
+                self.assertEqual(bars[-1]['volumeVerified'], selected)
         self.seed_raw()
         self.store((STAMP, 100, 102, 98, 102, 1200))
         self.assertEqual(self.evidence()['officialResearchVolume']['reason'], 'price_not_verified')

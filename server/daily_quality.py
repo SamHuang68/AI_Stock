@@ -329,7 +329,7 @@ def quality_evidence(conn, symbol, market='TW', *, board=None, start=None, end=N
         usable = complete and not source_conflict and not bad_observation and len(bars) == 1
         price_verified = bool(usable and _valid_prices(row) and not price_conflict)
         volume_verified = bool(usable and row[5] is not None and isinstance(row[5], (int, float)) and
-                               not isinstance(row[5], bool) and math.isfinite(row[5]) and row[5] >= 0 and not volume_conflict)
+                               not isinstance(row[5], bool) and math.isfinite(row[5]) and row[5] >= 0 and float(row[5]).is_integer() and not volume_conflict)
         raw_source = next((r['source'] for r in receipts if r['rawOrigin']), None)
         # 另列研究值；既有 volumeVerified／衝突計數仍核對原始 bars，不改寫原值或來源。
         official = [o['row'][5] for o in obs if o['valid']]
