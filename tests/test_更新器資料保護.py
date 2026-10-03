@@ -18,6 +18,8 @@ class 更新器資料保護測試(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.env = dict(os.environ, GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
                         GIT_CONFIG_COUNT='0', GIT_TERMINAL_PROMPT='0')
+        # 開發更新也支援 Linux PowerShell，不得依賴 Windows 本機安裝環境變數。
+        self.env.pop('LOCALAPPDATA', None)
         template = self.root / '空範本'
         template.mkdir()
         self.env['GIT_TEMPLATE_DIR'] = str(template)

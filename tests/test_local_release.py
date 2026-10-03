@@ -43,7 +43,8 @@ def stage(source, commit):
 class LocalReleaseTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name)
+        # Windows CI 的 TEMP 可能使用 8.3 短路徑；與產品端採相同實體路徑。
+        self.root = Path(self.tmp.name).resolve()
         self.source = self.root / '正式安裝'
         self.original = self.root / '原始工作樹'
         self.install = self.root / '本機安裝'

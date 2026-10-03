@@ -25,10 +25,10 @@ Set-Location $Root
 
 # 只有已登記的原工作樹正常啟動會轉接；隔離工作樹與明確開發動作維持原行為。
 # 此處必須早於 Python pin、建置、Git 檢查及任何停止程序的動作。
-$managedLocalRoot = Join-Path $env:LOCALAPPDATA 'StockTerminalLocal'
-$managedLocalConfig = Join-Path $managedLocalRoot 'local_install.json'
-if (-not ($Worktree -or $Pull -or $UpdateOnly -or $RebuildOnly) -and
-    (Test-Path -LiteralPath $managedLocalConfig)) {
+if ($env:LOCALAPPDATA -and -not ($Worktree -or $Pull -or $UpdateOnly -or $RebuildOnly)) {
+  $managedLocalRoot = Join-Path $env:LOCALAPPDATA 'StockTerminalLocal'
+  $managedLocalConfig = Join-Path $managedLocalRoot 'local_install.json'
+  if (Test-Path -LiteralPath $managedLocalConfig) {
   $localConfig = Get-Content -LiteralPath $managedLocalConfig -Raw -Encoding UTF8 | ConvertFrom-Json
   if ($localConfig.originalCheckout -and [string]::Equals(
       [IO.Path]::GetFullPath([string]$localConfig.originalCheckout).TrimEnd('\'),
@@ -39,6 +39,7 @@ if (-not ($Worktree -or $Pull -or $UpdateOnly -or $RebuildOnly) -and
     }
     & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $managedLauncher -InstallRoot $managedLocalRoot
     exit $LASTEXITCODE
+  }
   }
 }
 
