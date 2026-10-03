@@ -21,7 +21,31 @@ const html='<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name
   try{
    for(const [width,height] of [[1440,1000],[390,844],[844,390]]){
     const context=await browser.newContext({viewport:{width,height},hasTouch:true});
-    const page=await context.newPage();let commit='a'.repeat(40);
+    const page=await context.newPage();let commit='a'.repeat(40),sourceMode='normal',pendingSource=null;
+    await page.addInitScript(()=>{
+     // 追蹤固定 API 本文讀取，確保舊回覆真的交付才斷言，不依賴固定毫秒等待。
+     const nativeFetch=window.fetch.bind(window);window.fixturePendingJson=0;
+     window.fetch=(...args)=>{
+      window.fixturePendingJson++;
+      return nativeFetch(...args).then(response=>{
+       if(!response.ok){window.fixturePendingJson--;return response;}
+       const nativeJson=response.json.bind(response);
+       response.json=()=>nativeJson().finally(()=>{window.fixturePendingJson--;});
+       return response;
+      },error=>{window.fixturePendingJson--;throw error;});
+     };
+    });
+    const sourceFixture={sources:[
+     {name:'零筆快取',kind:'file',status:{count:0,updated:0}},
+     {name:'缺少統計',kind:'file',status:{count:null,updated:null}},
+     {name:'巨觀序列',kind:'file',provider:'來源<script>window.sourceInjected=true</script>',reliability:'official',
+      status:{count:12,updated:1759276800,publishable:false,staleCount:3}},
+     {name:'即時介面',kind:'live',status:{count:0,updated:0}},
+     {name:'每日介面',kind:'daily',status:{count:0,updated:0}},
+     {name:'舊版狀態',status:'等待核對',note:'<img src=x onerror="window.sourceInjected=true">'},
+     {name:'來源錯誤',status:{ok:false,error:{message:'無法讀取<script>'}}},
+     {name:'缺少狀態',reliability:'official'}
+    ]};
     page.on('pageerror',error=>report.pageErrors.push({engine,width,message:error.message}));
     await page.route('**/*',route=>{
      const req=route.request(),url=new URL(req.url());report.requests.push({engine,width,path:url.pathname,method:req.method()});
@@ -29,18 +53,51 @@ const html='<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name
      if(url.pathname==='/')return route.fulfill({contentType:'text/html; charset=utf-8',body:html});
      if(sources.has(url.pathname))return route.fulfill({contentType:'application/javascript; charset=utf-8',body:sources.get(url.pathname)});
      const responses={
-      '/health':{status:'ok',runtimeCommit:commit},'/features':{flags:{}},'/datasources':{sources:[]},
+      '/health':{status:'ok',runtimeCommit:commit},'/features':{flags:{}},'/datasources':sourceFixture,
       '/sync/status':{running:false,counts:{breadth:0},datasets:[]},
       '/daily-cache/status':{status:'completed',range:'1y',symbols:[{symbol:'2330',market:'TW'}],completed:1,
        results:[{symbol:'2330',rows:12,quality:{observed:12,accepted:5,conflicts:7,missing:2,invalid:0,
         conflictDates:['2026-09-23'],missingDates:['2026-09-29'],note:'官方與原始成交量不同；保留雙份證據，沒有自動採用。'}}]}
      };
+     if(url.pathname==='/datasources'){
+      if(sourceMode==='hold'){sourceMode='normal';pendingSource=route;return;}
+      if(sourceMode==='error')return route.fulfill({status:503,contentType:'application/json',body:'{}'});
+      if(sourceMode==='empty')responses['/datasources']={sources:[]};
+      if(sourceMode==='invalid')responses['/datasources']={sources:{count:12}};
+     }
      if(!(url.pathname in responses))return route.abort();
      return route.fulfill({contentType:'application/json; charset=utf-8',body:JSON.stringify(responses[url.pathname])});
     });
     await page.goto(origin);
     await page.evaluate(()=>SettingsV5.activate());
     await page.waitForFunction(()=>document.querySelector('#hub-runtime-commit')?.textContent==='aaaaaaaaaaaa');
+    const sourcePanel=page.locator('#hub-system-sources');
+    const sourceRow=name=>sourcePanel.locator('tr').filter({has:page.locator('td').filter({hasText:name})});
+    assert.match(await sourceRow('零筆快取').innerText(),/紀錄數 0/);
+    assert.match(await sourceRow('缺少統計').innerText(),/紀錄數未提供/);
+    assert.match(await sourceRow('巨觀序列').innerText(),/未通過發布檢查[\s\S]*過期序列 3/);
+    assert.match(await sourceRow('巨觀序列').innerText(),/檔案修改時間：2025-10-01 00:00:00 UTC/);
+    assert.match(await sourceRow('巨觀序列').innerText(),/來源類型：官方/);
+    for(const name of ['即時介面','每日介面'])assert.match(await sourceRow(name).innerText(),/尚未提供快取統計/);
+    assert.match(await sourceRow('舊版狀態').innerText(),/等待核對/);
+    assert.match(await sourceRow('來源錯誤').innerText(),/來源回報失敗：無法讀取<script>/);
+    assert.match(await sourceRow('缺少狀態').innerText(),/狀態未提供/);
+    assert.doesNotMatch(await sourcePanel.innerText(),/\[object Object\]/);
+    assert.match(await sourcePanel.innerText(),/檔案修改時間不是行情資料日/);
+    assert.equal(await sourcePanel.locator('script,img').count(),0);
+    assert.equal(await page.evaluate(()=>!!window.sourceInjected),false);
+    for(const [mode,message] of [['error','資料源載入失敗'],['empty','尚無資料源資訊'],['invalid','資料源格式無法識別']]){
+     sourceMode=mode;await page.evaluate(()=>SettingsV5.activate());
+     await page.waitForFunction(text=>document.querySelector('#hub-system-sources')?.textContent.includes(text),message);
+    }
+    // 保留前一次 API 回覆，等新版設定已顯示再交付舊回覆。
+    sourceMode='hold';await page.evaluate(()=>SettingsV5.activate());
+    await new Promise((resolve,reject)=>{let tries=0;const poll=()=>pendingSource?resolve():++tries>200?reject(new Error('未收到待交付資料源請求')):setTimeout(poll,10);poll();});
+    await page.evaluate(()=>SettingsV5.activate());
+    await page.waitForFunction(()=>document.querySelector('#hub-system-sources')?.textContent.includes('零筆快取'));
+    await pendingSource.fulfill({contentType:'application/json',body:JSON.stringify({sources:[{name:'過期設定回覆',status:'舊版'}]})});
+    await page.waitForFunction(()=>window.fixturePendingJson===0);
+    assert.doesNotMatch(await sourcePanel.innerText(),/過期設定回覆/);
     commit='<img src=x onerror="window.invalidCommitExecuted=true">';
     await page.evaluate(()=>SettingsV5.activate());
     await page.waitForFunction(()=>document.querySelector('#hub-runtime-commit')?.textContent==='版本尚未提供');
@@ -93,7 +150,8 @@ const html='<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name
     assert.equal(focusAfterMenuClose.visible,true,'快速關閉後不可留下隱藏焦點');
     assert.equal(await category.evaluate(n=>n===document.activeElement),true);
     report.checks.push({engine,version:browser.version(),width,height,keyboardEscape:true,focusReturned:true,
-      quickEscapeBeforeMenuClose:true,sourceAndQualitySeparated:true,unknownRevisionSafe:true,evidenceReadable:true,scroll});
+      quickEscapeBeforeMenuClose:true,sourceAndQualitySeparated:true,unknownRevisionSafe:true,evidenceReadable:true,
+      typedSourceStatus:true,missingDistinctFromZero:true,escapedSourceFields:true,staleSettingsDiscarded:true,scroll});
     await context.close();
    }
   }finally{await browser.close();}

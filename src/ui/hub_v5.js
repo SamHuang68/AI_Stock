@@ -1290,13 +1290,71 @@
   }
 
   // ── Settings ─────────────────────────────────────────────
+  function sourceText(value) {
+    return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+  }
+  function sourceCount(value) {
+    return typeof value === 'number' && isFinite(value) && value >= 0 && Math.floor(value) === value
+      ? value.toLocaleString('zh-TW') : null;
+  }
+  function sourceRowHtml(source) {
+    var x = source && typeof source === 'object' ? source : {};
+    var status = x.status;
+    var labels = [];
+    var notes = [];
+    var reliability = { official: '官方', vendor: '供應商', local: '本機' };
+    if (typeof status === 'string' && status) {
+      labels.push(status);
+    } else if (status && typeof status === 'object' && !Array.isArray(status)) {
+      var error = sourceText(status.error) || sourceText(status.error && status.error.message);
+      if (error || status.ok === false) labels.push('來源回報失敗' + (error ? '：' + error : ''));
+      // live／daily 的 0、0 是介面能力的占位值，不能當成實際零筆快取。
+      var placeholder = (x.kind === 'live' || x.kind === 'daily') && status.updated === 0 && status.count === 0;
+      var count = sourceCount(status.count);
+      if (placeholder) labels.push('尚未提供快取統計');
+      else labels.push(count == null ? '紀錄數未提供' : '來源回報紀錄數 ' + count);
+      if (typeof status.publishable === 'boolean') labels.push(status.publishable ? '通過發布檢查' : '未通過發布檢查');
+      var stale = sourceCount(status.staleCount);
+      if (stale != null) labels.push('過期序列 ' + stale);
+      if (typeof status.updated === 'number' && isFinite(status.updated) && status.updated > 0) {
+        var updated = new Date(status.updated * 1000);
+        if (isFinite(updated.getTime())) notes.push('檔案修改時間：' + updated.toISOString().replace('T', ' ').replace('.000Z', ' UTC'));
+      } else if (x.kind === 'file') {
+        notes.push('檔案時間未提供；快取是否存在或可讀待核對');
+      }
+    } else {
+      labels.push('狀態未提供');
+    }
+    if (sourceText(x.provider)) notes.push('提供者：' + sourceText(x.provider));
+    if (Object.prototype.hasOwnProperty.call(reliability, x.reliability)) notes.push('來源類型：' + reliability[x.reliability]);
+    if (sourceText(x.note)) notes.push(sourceText(x.note));
+    if (sourceText(x.lastUpdate)) notes.push('來源更新欄位：' + sourceText(x.lastUpdate));
+    return '<tr><td>' + esc(sourceText(x.name) || sourceText(x.id) || sourceText(x.provider) || '未命名來源') +
+      '</td><td>' + labels.map(esc).join('<br>') + '</td><td style="text-align:left">' + notes.map(esc).join('<br>') + '</td></tr>';
+  }
+  function sourcePanelHtml(ds) {
+    var list = Array.isArray(ds) ? ds : (ds && ds.sources);
+    var content;
+    if (!Array.isArray(list)) {
+      content = '<div class="hub-empty">' + (ds == null ? '資料源載入失敗，請重新開啟設定重試' : '資料源格式無法識別') + '</div>';
+    } else if (!list.length) {
+      content = '<div class="hub-empty">尚無資料源資訊</div>';
+    } else {
+      content = '<div class="hub-fill"><table><tr><th>來源</th><th>狀態</th><th>備註</th></tr>' +
+        list.slice(0, 30).map(sourceRowHtml).join('') + '</table></div>' +
+        '<div class="hub-note">檔案修改時間不是行情資料日；此清單不判定資料為最新。未提供與零筆分別顯示。</div>';
+    }
+    return '<div class="hub-sec" id="hub-system-sources"><h4>系統資料源</h4>' + content + '</div>';
+  }
   function renderSettings(el) {
     el.innerHTML = head('設定', '同步狀態 · 資料來源 · 本機歷史庫',
       '<button class="hub-btn" data-sync>同步資料</button>' +
       '<button class="hub-btn primary" data-shell-back>← 儀表板</button>') +
       '<div id="hub-set-body" class="hub-body"><div class="hub-loading">載入中…</div></div></div>';
+    var body = $('hub-set-body');
     bindCommon(el);
     Promise.all([jget('/sync/status'), jget('/datasources'), jget('/health'), jget('/features')]).then(function (arr) {
+      if (!body || body !== $('hub-set-body')) return;
       var st = arr[0] || {};
       var ds = arr[1];
       var health = arr[2] || {};
@@ -1318,22 +1376,7 @@
           (d.rows != null ? d.rows : '—') + '</td></tr>';
       });
       if (!(st.datasets || []).length) dsRows = '<tr><td colspan="5">尚無紀錄 — 按「同步資料」啟動預抓</td></tr>';
-      var srcPanel = '';
-      if (ds && (ds.sources || ds.length)) {
-        var list = ds.sources || ds;
-        var srcRows = '';
-        (Array.isArray(list) ? list : []).slice(0, 30).forEach(function (x) {
-          srcRows += '<tr><td>' + (x.name || x.id || x.provider || '') + '</td><td>' +
-            (x.status || x.reliability || '—') + '</td><td style="text-align:left">' +
-            (x.note || x.lastUpdate || '') + '</td></tr>';
-        });
-        srcPanel = '<div class="hub-sec"><h4>系統資料源</h4><div class="hub-fill"><table>' +
-          '<tr><th>來源</th><th>狀態</th><th>備註</th></tr>' + srcRows + '</table></div></div>';
-      } else {
-        srcPanel = '<div class="hub-sec"><h4>系統資料源</h4><div class="hub-empty">尚無資料源資訊</div></div>';
-      }
-      var body = $('hub-set-body');
-      if (!body) return;
+      var srcPanel = sourcePanelHtml(ds);
       var flagRows = '';
       var flagMap = (features && features.flags) || (window.FeatureFlags && FeatureFlags.getServer ? FeatureFlags.getServer() : {});
       [

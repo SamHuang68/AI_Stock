@@ -16,7 +16,7 @@ import os
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import date, datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
@@ -25,10 +25,12 @@ try:
     from . import stock_signals as ss
     from .atomic_store import StoreCorruptError, atomic_write_json, load_json
     from .http_boundary import BodyReadError, read_json_body
+    from .deadline import BoundedExecutor, Deadline
 except ImportError:
     import stock_signals as ss
     from atomic_store import StoreCorruptError, atomic_write_json, load_json
     from http_boundary import BodyReadError, read_json_body
+    from deadline import BoundedExecutor, Deadline
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
@@ -48,7 +50,13 @@ _cache_lock = threading.Lock()
 _cache: Dict[Tuple[str, str, bool], Tuple[float, Dict[str, Any]]] = {}
 _remote_fail: Dict[Tuple[str, str], float] = {}   # 補抓失敗的 neg-cache：10 分鐘內直接用本機資料
 REMOTE_FAIL_TTL = 600.0
+REMOTE_FETCH_SECONDS = 8.0
+_remote_pool = BoundedExecutor(max_workers=4, max_in_flight=4, prefix='stock-health-source')
 _db_ready = False
+
+
+class SourceBusyError(TimeoutError):
+    """本機來源工作額滿；不代表上游失聯，不記入失聯負快取。"""
 
 
 def infer_market(sym: str, market: Optional[str] = None) -> str:
@@ -112,7 +120,21 @@ def _datastore():
 
 def _fetch_remote(code: str, market: str, rng: str) -> List[tuple]:
     ds = _datastore()
-    return ds.fetch_yahoo_daily(code, market, rng, retries=2)
+    deadline = Deadline(REMOTE_FETCH_SECONDS)
+    future = _remote_pool.submit(ds.fetch_yahoo_daily, code, market, rng, retries=2, deadline=deadline)
+    if future is None:
+        raise SourceBusyError('行情更新工作繁忙')
+    done, _ = wait([future], timeout=deadline.remaining())
+    if future not in done:
+        # 瀏覽器取消無法停止阻塞中的來源連線。限制等待時間及背景工作數，
+        # 遲到的來源結果不再交回載入流程，因此不會寫入資料庫。
+        future.cancel()
+        _remote_pool.note_timeouts(1)
+        raise TimeoutError('行情更新超過本次時間預算')
+    try:
+        return future.result()
+    except TimeoutError as exc:
+        raise TimeoutError('行情來源逾時') from exc
 
 
 def load_bars(code: str, market: str, *, allow_network: bool = True,
@@ -123,6 +145,7 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
     bars = ss.normalize_bars(rows, market)
     source = 'local-db'
     error = None
+    retry_soon = False
     last = bars[-1]['date'] if bars else None
     sess = session_state(market, last, now)
     expected = sess['expectedLastDate']
@@ -133,7 +156,8 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
     live_extra: List[Dict[str, Any]] = []
     if allow_network and _remote_fail.get((code, market), 0) > time.time():
         allow_network = False
-        error = '近 10 分鐘內無法連線更新日線，先使用本機資料'
+        retry_soon = True
+        error = '最近一次行情更新未完成，暫用本機資料；重試間隔10分鐘'
     if allow_network and (need_full or behind or sess['sessionOpen']):
         gap_days = (date.fromisoformat(expected) - date.fromisoformat(last)).days if last and expected else 9999
         rng = '5y' if need_full or gap_days > 80 else ('3mo' if gap_days > 4 else '5d')
@@ -141,8 +165,12 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
             fetched = _fetch_remote(code, market, rng)
         except Exception as exc:  # 網路失敗：保留本機資料並標示
             fetched = []
-            error = f'無法連線更新日線（{type(exc).__name__}），使用本機資料'
-            _remote_fail[(code, market)] = time.time() + REMOTE_FAIL_TTL
+            retry_soon = isinstance(exc, TimeoutError)
+            error = (f'{exc}，先使用本機資料；請核對資料日期'
+                     if isinstance(exc, TimeoutError) else
+                     f'無法連線更新日線（{type(exc).__name__}），使用本機資料')
+            if not isinstance(exc, SourceBusyError):
+                _remote_fail[(code, market)] = time.time() + REMOTE_FAIL_TTL
         if fetched:
             fresh = ss.normalize_bars(fetched, market)
             today = _now_local(market, now).date().isoformat()
@@ -168,7 +196,7 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
                   if last and sess['expectedLastDate'] else None)
     return {'bars': bars, 'source': source, 'provisional': sess['provisional'],
             'staleDays': max(0, stale_days) if stale_days is not None else None,
-            'error': error}
+            'error': error, 'retrySoon': retry_soon}
 
 
 def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
@@ -211,6 +239,9 @@ def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
         result['dataQuality'] = {'status': 'unknown', 'label': '資料品質待確認', 'items': [],
                                  'notes': ['本機品質資料無法讀取；不代表資料已齊全。']}
     ttl = 300 if loaded.get('provisional') else 1800
+    # 來源逾時／額滿及負快取期間的結果只短暫快取，避免再次延長降級結果。
+    if loaded.get('retrySoon'):
+        ttl = min(ttl, 60)
     if use_cache:
         with _cache_lock:
             _cache[key] = (now_ts + ttl, result)
