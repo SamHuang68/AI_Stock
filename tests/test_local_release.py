@@ -197,6 +197,136 @@ class LocalReleaseTests(unittest.TestCase):
         report = local.read_json(next((self.install / 'backups').glob('*/備份收據.json')))
         self.assertEqual(report['status'], '失敗')
 
+    def test_關閉WAL後唯讀建立邊檔仍完成逐表驗證(self):
+        for name in ('market.db', '歷史.bak'):
+            with self.subTest(name=name):
+                db = self.original / 'data' / name
+                if name != 'market.db':
+                    shutil.copy2(self.original / 'data/market.db', db)
+                with closing(sqlite3.connect(db)) as connection:
+                    connection.execute('PRAGMA journal_mode=WAL')
+                self.assertFalse(Path(str(db) + '-wal').exists())
+                backup = local.backup_data(db.parent, self.install, self.commit, '測試已關閉 WAL')
+                report = local.read_json(backup / '備份收據.json')
+                self.assertEqual(report['status'], '已驗證')
+                self.assertEqual(report['files'][name]['tables']['bars']['rows'], 2)
+                self.assertEqual(report['sqliteSidecarChanges']['created'],
+                                 sorted([name + '-shm', name + '-wal']))
+                self.assertEqual(report['sqliteSidecarChanges']['removed'], [])
+                self.assertFalse((backup / 'data' / (name + '-wal')).exists())
+
+    def test_無WAL資料庫不產生邊檔例外(self):
+        backup = local.backup_data(self.original / 'data', self.install, self.commit, '測試無 WAL')
+        report = local.read_json(backup / '備份收據.json')
+        self.assertEqual(report['sqliteSidecars'], [])
+        self.assertEqual(report['sqliteSidecarChanges'], {'created': [], 'removed': []})
+
+    def test_WAL關閉清理邊檔仍保留已提交快照(self):
+        db = self.original / 'data/market.db'
+        connection = sqlite3.connect(db)
+        self.addCleanup(connection.close)
+        connection.execute('PRAGMA journal_mode=WAL')
+        connection.execute("INSERT INTO bars VALUES('WAL', 12, 20)")
+        connection.commit()
+        real_backup = local.sqlite_backup
+        def close_after_backup(source, target):
+            result = real_backup(source, target)
+            connection.close()
+            self.assertFalse(Path(str(db) + '-wal').exists())
+            return result
+        with patch.object(local, 'sqlite_backup', side_effect=close_after_backup):
+            backup = local.backup_data(db.parent, self.install, self.commit, '測試 WAL 清理')
+        report = local.read_json(backup / '備份收據.json')
+        self.assertEqual(report['files']['market.db']['tables']['bars']['rows'], 3)
+        self.assertEqual(report['status'], '已驗證')
+
+    def test_未知邊檔新增移除與改寫均拒絕(self):
+        for operation in ('新增', '移除', '改寫'):
+            with self.subTest(operation=operation):
+                unknown = self.original / 'data/orphan.db-wal'
+                unknown.unlink(missing_ok=True)
+                if operation != '新增':
+                    write(unknown, '原資料')
+                real_recheck = local.recheck_source
+                def change_before_recheck(source, files, records):
+                    if operation == '移除':
+                        unknown.unlink()
+                    else:
+                        write(unknown, '變更後資料')
+                    return real_recheck(source, files, records)
+                with patch.object(local, 'recheck_source', side_effect=change_before_recheck):
+                    with self.assertRaisesRegex(RuntimeError, '檔案清單改變|來源檔案已改變'):
+                        local.backup_data(self.original / 'data', self.install, self.commit, operation)
+                unknown.unlink(missing_ok=True)
+
+    def test_來源再核對期間新增未知邊檔仍拒絕(self):
+        real_signature = local.database_signature
+        calls = 0
+        def add_late(connection):
+            nonlocal calls
+            result = real_signature(connection)
+            calls += 1
+            if calls == 3:  # 備份來源、目的地、整批來源再核對。
+                write(self.original / 'data/orphan.db-shm')
+            return result
+        with patch.object(local, 'database_signature', side_effect=add_late):
+            with self.assertRaisesRegex(RuntimeError, '來源再核對期間檔案清單改變'):
+                local.backup_data(self.original / 'data', self.install, self.commit, '測試延後新增')
+
+    def test_WAL真實資料變更仍拒絕且不建立安裝(self):
+        db = self.original / 'data/market.db'
+        with closing(sqlite3.connect(db)) as connection:
+            connection.execute('PRAGMA journal_mode=WAL')
+            real_backup = local.sqlite_backup
+            def change_after_backup(source, target):
+                result = real_backup(source, target)
+                connection.execute("UPDATE bars SET volume=999 WHERE symbol='2330'")
+                connection.commit()
+                return result
+            with patch.object(local, 'sqlite_backup', side_effect=change_after_backup):
+                with self.assertRaisesRegex(RuntimeError, '來源 SQLite 已改變'):
+                    self.install_first()
+        receipt = local.read_json(next((self.install / 'backups').glob('*/備份收據.json')))
+        self.assertEqual(receipt['status'], '失敗')
+        self.assertNotIn('sourceRecheckedAt', receipt)
+        for name in ('current', local.CONFIG, local.SETUP_PENDING):
+            self.assertFalse((self.install / name).exists())
+
+    def test_SQLite備份失敗保留收據且不建立安裝(self):
+        with patch.object(local, 'sqlite_backup', side_effect=sqlite3.DatabaseError('fixture 備份失敗')):
+            with self.assertRaises(sqlite3.DatabaseError):
+                self.install_first()
+        receipt = local.read_json(next((self.install / 'backups').glob('*/備份收據.json')))
+        self.assertEqual(receipt['status'], '失敗')
+        self.assertIn('fixture 備份失敗', receipt['error'])
+        for name in ('current', local.CONFIG, local.SETUP_PENDING):
+            self.assertFalse((self.install / name).exists())
+
+    def test_DB再核對後其他檔案核對期間新WAL寫入仍拒絕(self):
+        real_digest = local.digest
+        real_recheck = local.recheck_source
+        connections = []
+        def mutate_during_final_digest(path):
+            if Path(path) == self.original / 'data/private.json':
+                connection = sqlite3.connect(self.original / 'data/market.db')
+                connections.append(connection)
+                connection.execute('PRAGMA journal_mode=WAL')
+                connection.execute("INSERT INTO bars VALUES('LATE', 12, 20)")
+                connection.commit()
+            return real_digest(path)
+        def recheck_with_late_writer(source, files, records):
+            with patch.object(local, 'digest', side_effect=mutate_during_final_digest):
+                return real_recheck(source, files, records)
+        try:
+            with patch.object(local, 'recheck_source', side_effect=recheck_with_late_writer):
+                with self.assertRaisesRegex(RuntimeError, 'SQLite 內容再核對後邊檔清單改變'):
+                    local.backup_data(self.original / 'data', self.install, self.commit, '測試核對後新 WAL 寫入')
+        finally:
+            for connection in connections:
+                connection.close()
+        receipt = local.read_json(next((self.install / 'backups').glob('*/備份收據.json')))
+        self.assertEqual(receipt['status'], '失敗')
+
     def test_promote後CONFIG寫入失敗可用相同setup修復(self):
         original_digest = local.digest(self.original / 'data/market.db')
         real_write = local.write_json
