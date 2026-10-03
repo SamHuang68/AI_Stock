@@ -302,6 +302,31 @@ class LocalReleaseTests(unittest.TestCase):
         for name in ('current', local.CONFIG, local.SETUP_PENDING):
             self.assertFalse((self.install / name).exists())
 
+    def test_DB再核對後其他檔案核對期間新WAL寫入仍拒絕(self):
+        real_digest = local.digest
+        real_recheck = local.recheck_source
+        connections = []
+        def mutate_during_final_digest(path):
+            if Path(path) == self.original / 'data/private.json':
+                connection = sqlite3.connect(self.original / 'data/market.db')
+                connections.append(connection)
+                connection.execute('PRAGMA journal_mode=WAL')
+                connection.execute("INSERT INTO bars VALUES('LATE', 12, 20)")
+                connection.commit()
+            return real_digest(path)
+        def recheck_with_late_writer(source, files, records):
+            with patch.object(local, 'digest', side_effect=mutate_during_final_digest):
+                return real_recheck(source, files, records)
+        try:
+            with patch.object(local, 'recheck_source', side_effect=recheck_with_late_writer):
+                with self.assertRaisesRegex(RuntimeError, 'SQLite 內容再核對後邊檔清單改變'):
+                    local.backup_data(self.original / 'data', self.install, self.commit, '測試核對後新 WAL 寫入')
+        finally:
+            for connection in connections:
+                connection.close()
+        receipt = local.read_json(next((self.install / 'backups').glob('*/備份收據.json')))
+        self.assertEqual(receipt['status'], '失敗')
+
     def test_promote後CONFIG寫入失敗可用相同setup修復(self):
         original_digest = local.digest(self.original / 'data/market.db')
         real_write = local.write_json

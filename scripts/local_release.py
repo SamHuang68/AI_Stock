@@ -184,6 +184,7 @@ def recheck_source(source, files, records):
     observed = {path.relative_to(source).as_posix() for path, directory in data_entries(source) if not directory}
     if observed - transient != initial - transient:
         raise RuntimeError('備份期間檔案清單改變，未進行資料切換')
+    verified_sidecars = set()
     for key, expected in records.items():
         path = checked_path(source / key)
         if expected['kind'] == 'sqlite':
@@ -192,11 +193,17 @@ def recheck_source(source, files, records):
                 actual = database_signature(connection)
             if any(actual[key] != expected[key] for key in ('schema', 'tables', 'userVersion', 'applicationId')):
                 raise RuntimeError(f'整批備份完成後來源 SQLite 已改變：{key}')
+            # 僅容許截至此 DB 內容核對完成時的生命週期變動。
+            # 若稍後才出現 WAL，不能將可能的新寫入當成已核對的暫存檔。
+            verified_sidecars.update(key + suffix for suffix in ('-wal', '-shm')
+                                     if (source / (key + suffix)).is_file())
         elif digest(path) != expected['sha256']:
             raise RuntimeError(f'整批備份完成後來源檔案已改變：{key}')
     final_paths = {path.relative_to(source).as_posix() for path, directory in data_entries(source) if not directory}
     if observed - transient != final_paths - transient:
         raise RuntimeError('來源再核對期間檔案清單改變，未進行資料切換')
+    if final_paths & transient != verified_sidecars:
+        raise RuntimeError('SQLite 內容再核對後邊檔清單改變，未進行資料切換')
     return {'created': sorted((final_paths - initial) & transient),
             'removed': sorted((initial - final_paths) & transient)}
 
