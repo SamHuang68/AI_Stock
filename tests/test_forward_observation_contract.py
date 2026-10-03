@@ -112,8 +112,9 @@ class ForwardObservationTests(unittest.TestCase):
                              ('event', 'input', '2330', self.origin, 'mom_rsi_rebound', self.origin, '{}'))
                 conn.execute('INSERT INTO daily_prices VALUES(?,?,?,?)',
                              ('2330', bad['date'], self.origin, json.dumps(bad)))
+            benchmark = [dict(b) for b in bars]  # 此案例單獨驗證股票缺口；基準維持完整。
             bars[1]['volume'] = None
-            result = daily.capture(path, [('2330', bars)], bars,
+            result = daily.capture(path, [('2330', bars)], benchmark,
                                    now=datetime(2026, 10, 7, 18, tzinfo=ss._TZ['TW']))
             self.assertEqual(result['outcomesAdded'], 0)
             sample = result['outcomeProgress']['samples'][0]
