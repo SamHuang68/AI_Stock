@@ -469,8 +469,8 @@ def update(sym, market='TW'):
     return backfill(sym, market)
 
 def get_bars(sym, limit=None, market='TW'):
-    """回傳該檔 [(ts,o,h,l,c,v),...] 依時間排序;limit 取最近 N 根。"""
-    with closing(get_conn()) as conn:
+    """唯讀既有日線；不建檔、不重設 journal mode，初始化由啟動／維護流程負責。"""
+    with read_snapshot() as conn:
         rows = conn.execute(
             'SELECT ts,open,high,low,close,volume FROM bars '
             'WHERE market=? AND symbol=? ORDER BY ts',
