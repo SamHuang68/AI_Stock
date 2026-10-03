@@ -204,6 +204,80 @@ const compare = H.comparisonHtml({ minSample: 20, historicalVerified: false, gro
 ok(compare.includes('待成熟／核對 2') && compare.includes('未核實 1') && compare.includes('版本未核實') && compare.includes('&lt;script&gt;'), '前瞻區分待核對、未核實及版本限制，來源文字跳脫');
 ok(!compare.includes('99.88%') && !compare.includes('-99.11%'), '未滿 20 筆的前瞻比例與幅度不顯示');
 
+async function researchErrorsStayWithTheirCard() {
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  function harness(fallbackStatus) {
+    const requests = [];
+    let current, timers = 0;
+    const scope = { ...sandbox, setTimeout() { timers++; }, clearTimeout() {} };
+    if (fallbackStatus) scope.fetch = async () => ({ ok:false, status:fallbackStatus });
+    else scope.AppKernel = { api: { getJson(path, options) {
+      return new Promise((resolve, reject) => requests.push({path, options, resolve, reject}));
+    } } };
+    scope.window = scope;
+    vm.createContext(scope);
+    vm.runInContext(source.replace('renderInto: renderInto,', 'bindCardForTest: bindCard, renderInto: renderInto,'), scope);
+    const el = { querySelector(key) { return key === '#sh5-research' ? current.box : key === '#sh5-research-body' ? current.body : null; },
+      querySelectorAll() { return []; } };
+    function mount() {
+      const buttons = {};
+      const body = { writes:0, markup:'尚未讀取', querySelector(key) { return buttons[key] || (buttons[key] = {}); },
+        set innerHTML(value) { this.writes++; this.markup = value; } };
+      const box = { isConnected:true, open:true,
+        querySelector(key) { return key === '#sh5-research-body' ? body : null; },
+        addEventListener(type, fn) { this.toggle = fn; } };
+      current = {body, box, buttons};
+      scope.StockHealthV5.bindCardForTest(el, {});
+      return current;
+    }
+    return {mount, requests, timerCount:() => timers};
+  }
+
+  const swapped = harness(), a = swapped.mount();
+  a.box.toggle();
+  a.box.isConnected = false;
+  const b = swapped.mount(); b.box.toggle();
+  swapped.requests[1].resolve({}); await flush();
+  const currentMarkup = b.body.markup, currentWrites = b.body.writes;
+  swapped.requests[0].reject(Object.assign(new Error('舊卡片的請求已中止'), {name:'AbortError'})); await flush();
+  ok(a.body.writes === 0 && b.body.writes === currentWrites && b.body.markup === currentMarkup,
+    '卡片 A 已移除時，A 的遲到錯誤不得覆寫已成功顯示的卡片 B');
+
+  const closed = harness(), collapsed = closed.mount();
+  collapsed.box.toggle(); collapsed.box.open = false;
+  closed.requests[0].reject(new Error('收合後的遲到錯誤')); await flush();
+  ok(collapsed.body.writes === 0, '研究區收合後不寫入遲到錯誤');
+
+  const cases = [
+    {error:Object.assign(new Error('HTTP 401'), {status:401}), permission:true, text:'HTTP 401'},
+    {error:Object.assign(new Error('HTTP 403'), {status:403}), permission:true, text:'HTTP 403'},
+    {error:Object.assign(new Error('signal is aborted without reason'), {name:'AbortError'}), text:'讀取逾時或已中止'},
+    {error:Object.assign(new Error('HTTP 500 <script>'), {status:500}), text:'HTTP 500 &lt;script&gt;'},
+    {error:new TypeError('網路連線失敗'), text:'網路連線失敗'},
+    {error:new Error(), text:'連線錯誤'}
+  ];
+  for (const value of cases) {
+    const state = harness(), card = state.mount();
+    card.box.toggle(); state.requests[0].reject(value.error); await flush();
+    ok(card.body.markup.includes('研究維護狀態無法讀取') && card.body.markup.includes(value.text) && !card.body.markup.includes('<script>') &&
+      card.body.markup.includes('需擁有者權限') === !!value.permission &&
+      typeof card.buttons['#sh5-research-retry'].onclick === 'function',
+      '目前研究卡片正確分類並保留重試：' + (value.error.message || '空白錯誤'));
+    ok(state.requests.length === 1 && state.timerCount() === 0 && state.requests[0].options.timeoutMs === 45000,
+      '錯誤不自動重試且維持原請求期限：' + (value.error.message || '空白錯誤'));
+    const retry = card.buttons['#sh5-research-retry'].onclick({type:'click'});
+    state.requests[1].resolve({}); await retry;
+    ok(state.requests.length === 2 && card.body.markup.includes('尚未執行') && !card.body.markup.includes('sh5-research-retry'),
+      '使用者明確重試成功後替換錯誤內容：' + (value.error.message || '空白錯誤'));
+  }
+  for (const status of [401, 403]) {
+    const fallback = harness(status), card = fallback.mount();
+    card.box.toggle(); await flush();
+    ok(card.body.markup.includes('需擁有者權限') && card.body.markup.includes('HTTP ' + status),
+      '未載入 AppKernel 時仍保留 HTTP 權限狀態：' + status);
+  }
+}
+
 (async function pollingKeepsReadingState() {
   let poll, toggle, writes = 0;
   let status = { evidenceReports: { running: true }, observations:{diagnostics:diagnosed}, sourceRevisions: {count:1790, symbols:13},
@@ -235,5 +309,6 @@ ok(!compare.includes('99.88%') && !compare.includes('-99.11%'), '未滿 20 筆�
   ok(writes === 2 && body.markup.includes('共2份'), '完成後的新報告仍會即時呈現');
   await buttons['#sh5-research-status'].onclick({ type: 'click' });
   ok(writes === 3, '使用者明確更新狀態仍會重新渲染');
+  await researchErrorsStayWithTheirCard();
   console.log('\nstock_health_v5_selftest PASSED');
 })().catch(error => { console.error(error); process.exitCode = 1; });

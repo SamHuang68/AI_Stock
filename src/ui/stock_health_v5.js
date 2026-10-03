@@ -37,7 +37,9 @@
     if (window.AppKernel && AppKernel.api) return AppKernel.api.getJson(path, { timeoutMs: 45000 });
     var base = window.SERVER || location.origin || 'http://localhost:18432';
     return fetch(base + path, { cache: 'no-store' }).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) {
+        var error = new Error('HTTP ' + r.status); error.status = r.status; throw error;
+      }
       return r.json();
     });
   }
@@ -732,8 +734,12 @@
           };
           if (p.running || (p.evidenceReports || {}).running) timer = setTimeout(loadResearch, 3000);
         }).catch(function (e) {
-          var body = el.querySelector('#sh5-research-body');
-          if (body) { body.innerHTML = '<div role="alert" class="sh5-warn">研究維護狀態無法讀取（需擁有者權限）：' + esc(e.message) + '</div><button class="sh5-btn" id="sh5-research-retry">重試</button>';
+          if (!researchBox.isConnected || !researchBox.open) return;
+          var body = researchBox.querySelector('#sh5-research-body');
+          var message = e && e.message ? e.message : '連線錯誤';
+          var label = e && (e.status === 401 || e.status === 403) ? '研究維護狀態無法讀取（需擁有者權限）' :
+            e && e.name === 'AbortError' ? '研究維護狀態無法讀取（讀取逾時或已中止）' : '研究維護狀態無法讀取';
+          if (body) { body.innerHTML = '<div role="alert" class="sh5-warn">' + esc(label + '：' + message) + '</div><button class="sh5-btn" id="sh5-research-retry">重試</button>';
             body.querySelector('#sh5-research-retry').onclick = loadResearch; }
         });
       };
