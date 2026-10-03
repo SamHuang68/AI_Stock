@@ -217,8 +217,12 @@ class DatabaseCase(unittest.TestCase):
         self.assertEqual(before, self.db.read_bytes())
 
     def test_default_daily_update_is_not_a_history_scan(self):
-        result = daily.run_update(self.db, now=datetime(2026, 9, 13, 8, tzinfo=daily.TZ), fetch=self.fetch)
+        with patch.object(self, 'fetch', wraps=self.fetch) as fetch:
+            result = daily.run_update(self.db, now=datetime(2026, 9, 13, 8, tzinfo=daily.TZ), fetch=fetch)
+        self.assertFalse(any('STOCK_DAY' in call.args[0] for call in fetch.call_args_list))
         self.assertEqual({item['date'] for item in result['completedDays']}, {'2026-09-11'})
+        self.assertFalse(result['sourceReceiptScope']['rawHttpReceiptStored'])
+        self.assertIn('未保存完整 HTTP 原始收據', result['sourceReceiptScope']['note'])
         rejected = daily.run_update(self.db, start=date(2020, 1, 1), now=datetime(2026, 9, 13, 8, tzinfo=daily.TZ), fetch=self.fetch)
         self.assertFalse(rejected['ok'])
         self.assertIn('31', rejected['failures'][0]['reason'])
@@ -299,7 +303,7 @@ class DatabaseCase(unittest.TestCase):
         def fail(url):
             if 'change/' in url:
                 raise TimeoutError('測試失敗')
-            return {'stat': '很抱歉，沒有符合條件的資料!'}, ''
+            return {'stat': '很抱歉，沒有符合條件的資料!'}, '0' * 64
         with self.assertRaises(TimeoutError):
             daily.refresh_actions(self.db, '2330', date(2026, 9, 1), date(2026, 9, 11), fail)
         with closing(sqlite3.connect(self.db)) as conn, conn:

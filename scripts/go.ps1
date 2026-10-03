@@ -12,7 +12,8 @@ param(
   # Backward-compatible safe update+run. Prefer -UpdateOnly, then launch.
   [switch]$Pull,
   [switch]$UpdateOnly,
-  [switch]$RebuildOnly
+  [switch]$RebuildOnly,
+  [switch]$Worktree
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,6 +22,26 @@ if (-not (Test-Path (Join-Path $Root 'build_v2.py'))) {
   $Root = (Get-Location).Path
 }
 Set-Location $Root
+
+# 只有已登記的原工作樹正常啟動會轉接；隔離工作樹與明確開發動作維持原行為。
+# 此處必須早於 Python pin、建置、Git 檢查及任何停止程序的動作。
+if ($env:LOCALAPPDATA -and -not ($Worktree -or $Pull -or $UpdateOnly -or $RebuildOnly)) {
+  $managedLocalRoot = Join-Path $env:LOCALAPPDATA 'StockTerminalLocal'
+  $managedLocalConfig = Join-Path $managedLocalRoot 'local_install.json'
+  if (Test-Path -LiteralPath $managedLocalConfig) {
+  $localConfig = Get-Content -LiteralPath $managedLocalConfig -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ($localConfig.originalCheckout -and [string]::Equals(
+      [IO.Path]::GetFullPath([string]$localConfig.originalCheckout).TrimEnd('\'),
+      [IO.Path]::GetFullPath($Root).TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) {
+    $managedLauncher = Join-Path $managedLocalRoot 'start_local.ps1'
+    if (-not (Test-Path -LiteralPath $managedLauncher -PathType Leaf)) {
+      throw '本機受管理啟動器缺少，未退回重建原工作樹；請修復本機安裝。'
+    }
+    & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $managedLauncher -InstallRoot $managedLocalRoot
+    exit $LASTEXITCODE
+  }
+  }
+}
 
 $TipBranch = 'cursor/st51-docs-ux-on-tip-3497'
 $TipFile = Join-Path $Root 'TIP_BRANCH'
@@ -459,4 +480,3 @@ Write-Host "  PYTHON=$Python  (pinned in data\stock_python.path)"
 Write-Host '  Server window title: Stock Terminal Server v5 tip'
 Write-Host '  Browser: Ctrl+F5 → badge 實測 5+5'
 Write-Host ''
-

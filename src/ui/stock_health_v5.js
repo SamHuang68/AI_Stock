@@ -478,7 +478,7 @@
       });
       html += '</ol>';
       ((r.observations || {}).horizons || []).forEach(function (h) {
-        html += '<div class="sh5-foot">' + esc(h.horizon) + '日：成熟 ' + esc(h.mature) + '、待時間累積 ' +
+        html += '<div class="sh5-foot">' + esc(h.horizon) + '日：成熟 ' + esc(h.mature) + '、期數尚不足或證據待核對 ' +
           esc(h.waiting) + '、觀察期已到仍待結算 ' + esc(h.due) + ' 筆。</div>';
       });
       html += '<details><summary>檢查項目與判定依據（' + esc((r.checks || []).length) + '項）</summary><ul>' +
@@ -494,6 +494,41 @@
       (p.running ? '本機證據檢查執行中' : '重算並檢查三項證據（僅本機）') + '</button></section>';
   }
 
+  var forwardReasons = { awaiting_observed_sessions: '實際基準日尚不足',
+    missing_stock_sessions: '個股觀察期缺日', missing_benchmark_sessions: '基準缺日，禁止順延湊期',
+    ready_unrecorded: '到期資料齊全，尚未留存結果', invalid_evidence: '事件或結果證據無效',
+    invalid_version: '版本證據無法核對', mature: '可核實成熟結果' };
+  function forwardReasonText(values) {
+    return Object.keys(values || {}).map(function (key) {
+      return esc((forwardReasons[key] || key) + ' ' + values[key] + ' 筆');
+    }).join('、');
+  }
+  function forwardDiagnosticsHtml(p) {
+    if (!p || !p.enabled) return '';
+    var html = '<section class="sh5-sec" aria-label="前瞻即時唯讀診斷"><h4>前瞻即時唯讀診斷</h4>' +
+      '<div class="sh5-foot">核對時間 ' + esc(p.checkedAt || '未留存') + '；實際基準至 ' + esc(p.benchmarkAsOf || '尚缺資料') +
+      '。<br>' + esc(p.note || '') + '</div>';
+    (p.horizons || []).forEach(function (h) {
+      html += '<div class="sh5-foot">' + esc(h.horizon) + ' 日（須有事件後 ' + esc(h.requiredFollowingSessions) +
+        ' 個實際基準日）：' + (forwardReasonText(h.reasons) || '尚無事件') + '。</div>';
+    });
+    html += '<details><summary>事件、首次留存時間與缺日追溯（最多 ' + esc(p.sampleLimit || 0) + ' 例）</summary>' +
+      '<p class="sh5-foot">' + esc(p.traceNote || '') + '</p>';
+    (p.samples || []).forEach(function (s) {
+      function days(values) { return esc((values || []).join('、') || '無'); }
+      html += '<details style="overflow-wrap:anywhere"><summary>' + esc(s.symbol) + '／' + esc(s.eventDate) + '／' + esc(s.horizon) +
+        ' 日：' + esc(forwardReasons[s.status] || s.status) + '</summary><div class="sh5-foot">' +
+        '首次事件留存：' + esc(s.eventFirstRecordedAt || '未留存') + '<br>首次輸入留存：' + esc(s.inputFirstRecordedAt || '未留存') +
+        '<br>已觀測基準 ' + esc(s.observedFollowingSessions) + '／所需 ' + esc(s.requiredFollowingSessions) +
+        '<br>期間內已觀測基準日期：' + days(s.expectedSessions) + '<br>首次留存個股日期：' + days(s.observedPriceDates) +
+        '<br>缺少個股日期：' + days(s.missingPriceDates) + '<br>缺少基準日期：' + days(s.missingBenchmarkDates) +
+        '<br>無效價格日期：' + days(s.invalidPriceDates) + '<br>事件識別：' + esc(s.eventId || '未留存') +
+        '<br>輸入識別：' + esc(s.inputId || '未留存') + '<br>規則指紋：' + esc(s.rulesDigest || '未留存') +
+        (s.currentRules ? '（目前規則）' : '（獨立版本）') + '</div><details><summary>完整追溯欄位</summary>' +
+        '<pre style="white-space:pre-wrap;overflow-wrap:anywhere">' + esc(JSON.stringify(s, null, 2)) + '</pre></details></details>';
+    });
+    return html + '</details></section>';
+  }
   function maintenanceHtml(p) {
     var j = p.job || {}, o = p.observations || {}, i = p.inventory || {};
     var names = { running: '執行中', queued: '排隊中', completed: '已完成', partial: '部分完成', failed: '失敗', interrupted: '已中斷', waiting: '等待資料', closed: '休市', disabled: '未啟用' };
@@ -508,20 +543,21 @@
     html += '<ol class="sh5-foot">' + (j.steps || []).map(function (s) { return '<li>' + esc(s.label) + '：' + esc(names[s.status] || s.status) +
       (s.detail && s.detail.reason ? '；' + esc(s.detail.reason) : '') + (s.error ? '（' + esc(s.error) + '）' : '') + '</li>'; }).join('') + '</ol>';
     html += '<div class="sh5-foot">每日事件留存：' + (o.enabled ? '已啟用，主機運行時收盤後檢查' : '尚未啟用') +
-      '；已留存 ' + esc(o.events || 0) + ' 個事件、' + esc(o.outcomes || 0) + ' 筆成熟結果。' +
+      '；已留存 ' + esc(o.events || 0) + ' 個事件、' + esc(o.outcomes || 0) + ' 筆結果收據；可核實成熟數以下方即時診斷為準。' +
       (o.activatedAt ? '<br>啟用於 ' + esc(o.activatedAt) : '') + (o.lastRun ? '<br>最近檢查 ' + esc(o.lastRun.asOf) + '：' + esc(o.lastRun.reason) : '') +
       '<br>只記錄啟用後的當日收盤事件，缺日不回填；這些是觀察紀錄，並非通過研究的候選。</div>';
     if (o.forward) html += '<div class="sh5-foot">' + esc(o.forward.note || '') + '<br>' +
       (o.forward.horizons || []).map(function (r) {
-        return esc(r.horizon + ' 日觀察：已成熟 ' + r.resolved + '，待核對／成熟 ' + r.pending);
+        return esc(r.horizon + ' 日觀察：已留存結果 ' + r.resolved + '，待核對／成熟 ' + r.pending);
       }).join('；') + '</div>';
-    if (o.enabled && o.events > 0 && !(o.lastRun && o.lastRun.outcomeProgress)) html +=
+    html += forwardDiagnosticsHtml(o.diagnostics);
+    if (!o.diagnostics && o.enabled && o.events > 0 && !(o.lastRun && o.lastRun.outcomeProgress)) html +=
       '<div class="sh5-foot">尚無逐期等待原因收據；零筆成熟結果不代表零報酬，需等下一次本機留存檢查。</div>';
     if (o.lastRun && o.lastRun.outcomeProgress) {
       var reasons = { awaiting_observed_sessions: '實際基準日尚不足（須確認日期已經過且資料到齊）',
         missing_stock_sessions: '個股觀察期缺日', missing_benchmark_sessions: '基準缺日，禁止順延湊期',
         not_evaluated_current_input: '本次沒有可核對的標的輸入' };
-      html += '<div class="sh5-foot">未成熟原因：' + [5, 20].map(function (h) {
+      html += '<div class="sh5-foot">上次留存收據記錄的未成熟原因（非即時診斷）：' + [5, 20].map(function (h) {
         var values = (o.lastRun.outcomeProgress.byHorizon || {})[String(h)] || {};
         return esc(h + ' 日：') + Object.keys(values).map(function (key) {
           return esc((reasons[key] || key) + ' ' + values[key] + ' 筆');
@@ -568,6 +604,7 @@
   function comparisonHtml(p) {
     var html = '<div class="sh5-foot">每日帳本：' + (p.enabled ? '已啟用，起始 ' + esc(p.activatedAt || '未知') : '尚未啟用') +
       ' · 實際留存 ' + esc(p.observedEvents || 0) + ' 筆事件；每個 5／20 日結果分開成熟。歷史計算時間 ' + esc(p.historicalGeneratedAt || '未知') + '。</div>';
+    html += forwardDiagnosticsHtml(p.diagnostics);
     if (!p.historicalVerified) html += '<div class="sh5-warn">歷史研究尚未附帶相符的規則與方法指紋；此對照區暫不展示其比率。請在研究維護執行本機重算。</div>';
     function stats(row) {
       if (!row || row.gate !== 'ok' || row.n < (p.minSample || 20)) return '樣本 ' + esc(row && row.n || 0) + ' · ' + (row && row.gate === 'unverified_version' ? '版本未核實' : '等待至少 ' + esc(p.minSample || 20) + ' 筆');
@@ -585,7 +622,8 @@
       (group.signals || []).forEach(function (signal) { (signal.horizons || []).forEach(function (h) {
         var historical = h.historical || {}, reference = h.reference || {};
         html += '<tr><td>' + esc(signal.label) + '<br>' + esc(h.horizon) + ' 交易日<br>留存 ' + esc(h.observed) + ' · 成熟 ' + esc(h.mature) +
-          '<br>等待 ' + esc(h.waiting) + ' · 未核實 ' + esc(h.unverified) + '</td><td>' + stats(historical) +
+          '<br>待成熟／核對 ' + esc(h.waiting) + ' · 未核實 ' + esc(h.unverified) +
+          (h.pendingReasons ? '<br>' + forwardReasonText(h.pendingReasons) : '') + '</td><td>' + stats(historical) +
           (historical.gate === 'ok' ? '<br>過去基準均值 ' + pct(historical.meanControlRet, 2) + '<br>平均差距 ' + pct(historical.meanDeltaRet, 2) : '') +
           '</td><td>' + stats(h.forward) + '</td><td>' + stats(reference) +
           (reference.gate === 'ok' ? '<br>過去基準均值 ' + pct(reference.meanControlRet, 2) + '<br>平均差距 ' + pct(reference.meanDeltaRet, 2) : '') +
@@ -641,7 +679,9 @@
         return getJson('/stock-signals/research/status').then(function (p) {
           if (!researchBox.isConnected || !researchBox.open) return;
           var body = el.querySelector('#sh5-research-body');
-          var view = JSON.stringify(p);
+          var view = JSON.stringify(p, function (key, value) {
+            return key === 'checkedAt' && this.version === 'st-forward-diagnostics/v1' ? undefined : value;
+          });
           // 未變的輪詢保留已展開報告、較早分頁與鍵盤焦點。
           if (!force && view === lastResearchView && body.querySelector('#sh5-evidence-check')) {
             if (p.running || (p.evidenceReports || {}).running) timer = setTimeout(loadResearch, 3000);

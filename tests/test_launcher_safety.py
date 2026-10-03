@@ -28,7 +28,7 @@ class LauncherSafetyTests(unittest.TestCase):
         self.assertIn('git merge --ff-only', script)
         self.assertIn('Resolve-StockPython', script)
 
-    def test_batch_files_are_ascii_shims_and_only_stop_the_owned_port(self):
+    def test_batch_files_are_ascii_shims_and_delegate_before_process_actions(self):
         go = (ROOT / 'scripts' / 'go.bat').read_bytes()
         start = (ROOT / 'START_TIP.cmd').read_bytes()
         go.decode('ascii')
@@ -37,8 +37,8 @@ class LauncherSafetyTests(unittest.TestCase):
         start_text = start.decode('ascii').lower()
         self.assertIn('go.ps1', go_text)
         self.assertNotRegex(go_text, r'(?m)^\s*git\s+')
-        self.assertIn(':18432', start_text)
-        self.assertNotIn('taskkill /im python', start_text)
+        self.assertIn('go.ps1', start_text)
+        self.assertNotIn('taskkill', start_text)
 
     def test_etf_scheduler_uses_pinned_python_shared_history_and_health_gate(self):
         wrapper = (ROOT / 'scripts' / 'daily_etf.bat').read_bytes()

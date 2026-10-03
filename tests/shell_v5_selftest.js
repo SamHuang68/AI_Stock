@@ -922,8 +922,9 @@ ok(/_is_tooling_python/.test(srv) && /_pulse_layout_probe/.test(srv) &&
   'server reports tooling Python diagnostically and exposes pulseLayout on /health');
 ok(fs.existsSync(path.join(root, 'START_TIP.cmd')), 'START_TIP.cmd exists at repo root');
 const startTip = fs.readFileSync(path.join(root, 'START_TIP.cmd'), 'utf8');
-ok(/Resolve-StockPython/.test(startTip) && /taskkill/.test(startTip) && /go\.ps1/.test(startTip),
-  'START_TIP.cmd kills python, verifies tip files, runs go.ps1');
+ok(/if not exist "%~dp0scripts\\go\.ps1"/.test(startTip) && /-File "%~dp0scripts\\go\.ps1" %\*/.test(startTip) &&
+  /exit \/b %ERRORLEVEL%/.test(startTip) && !/taskkill|Stop-Process|python\.exe/i.test(startTip),
+  'START_TIP.cmd 核對入口、轉交參數與退出碼，不自行終止程序');
 ok(fs.existsSync(path.join(root, 'scripts/diagnose_tip.ps1')), 'scripts/diagnose_tip.ps1 exists');
 
 const nw = fs.readFileSync(path.join(root, 'src/ui/news_v5.js'), 'utf8');

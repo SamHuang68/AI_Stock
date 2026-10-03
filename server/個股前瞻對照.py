@@ -1,10 +1,8 @@
 """以唯讀交易檢視每日帳本；不回填事件、不改寫價格、不晉升候選。"""
 import hashlib
 import json
-import math
 import sqlite3
 import statistics
-import zlib
 from collections import defaultdict
 from contextlib import closing
 from pathlib import Path
@@ -13,6 +11,7 @@ import stock_signals as ss
 import 每日個股留存 as daily
 import 個股訊號研究 as research
 from 個股還原研究 import COSTS, net_return, summary
+import 前瞻成熟診斷 as diagnostics
 
 
 def method_digest():
@@ -32,28 +31,8 @@ def _summarize(rows):
     return result
 
 
-def _outcome(payload, horizon, origin):
-    """驗證凍結結果可由同一組價格重現；缺漏或不一致不混入成熟統計。"""
-    if not payload:
-        return None
-    value = json.loads(payload)
-    prices, dates = value['prices'], value['expectedSessions']
-    if (value['horizon'] != horizon or len(prices) != horizon + 1 or len(dates) != horizon + 1
-            or dates != sorted(set(dates)) or dates[0] <= origin
-            or [bar['date'] for bar in prices] != dates
-            or value['entryDate'] != dates[0] or value['endDate'] != dates[-1]
-            or value['pricesDigest'] != research.digest(prices)):
-        raise ValueError('成熟結果的價格與日期不一致')
-    entry = float(prices[0]['close'])
-    if not math.isfinite(entry) or entry <= 0:
-        raise ValueError('進場價格無效')
-    ret = float(prices[-1]['close']) / entry - 1
-    adverse = min(float(bar['low']) for bar in prices[1:]) / entry - 1
-    if not all(math.isfinite(x) for x in (ret, adverse, value['ret'], value['adverse'])):
-        raise ValueError('結果不是有限數值')
-    if not math.isclose(ret, value['ret'], abs_tol=1e-10) or not math.isclose(adverse, value['adverse'], abs_tol=1e-10):
-        raise ValueError('成熟結果不能由凍結價格重現')
-    return value
+# 保留既有內部呼叫名稱；價格重現驗證與唯讀診斷共用同一契約。
+_outcome = diagnostics.validate_outcome
 
 
 def _reference(frozen, horizon):
@@ -74,8 +53,9 @@ def _reference(frozen, horizon):
     return research.Reference(frame, aligned, market).at(len(bars) - 1, horizon, market.get(origin, 'unknown'))
 
 
-def read_report(path, historical=None):
+def read_report(path, historical=None, *, sessions=None, now=None):
     rules, method = daily.engine_digest(), method_digest()
+    now = diagnostics._clock(now)
     historical = historical or {}
     study = historical.get('research') or {}
     verified_history = bool(study.get('rulesDigest') == rules and study.get('methodDigest') == method
@@ -83,17 +63,22 @@ def read_report(path, historical=None):
     history_rows = {(row['signalId'], horizon['horizon']): horizon.get('all', {})
                     for row in study.get('signals', []) for horizon in row.get('horizons', [])}
     # 所有版本各自累積；不以最新引擎重算既有事件，也不合併不同版本的樣本數。
-    groups = defaultdict(lambda: defaultdict(lambda: {'observed': 0, 'mature': [], 'waiting': 0, 'unverified': 0, 'references': []}))
+    groups = defaultdict(lambda: defaultdict(lambda: {'observed': 0, 'mature': [], 'waiting': 0, 'unverified': 0, 'references': [], 'pendingReasons': defaultdict(int)}))
     groups[rules]
     activation = None
     event_count = 0
     enabled = Path(path).is_file()
+    diagnosis = diagnostics.read_diagnostics(path, sessions, now=now) if not enabled else None
     if enabled:
+        source = {'status': 'available', 'source': '呼叫端本機大盤唯讀快照'}
+        if sessions is None:
+            sessions, source = diagnostics.load_sessions(Path(path).parent / 'market.db', now)
         with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as conn:
             conn.execute('BEGIN')
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if not {'daily_inputs', 'daily_events', 'daily_outcomes', 'daily_config'} <= tables:
                 raise ValueError('每日帳本結構不完整')
+            diagnosis, states = diagnostics.inspect_ledger(conn, sessions, now=now, rules=rules, benchmark_source=source)
             cfg = conn.execute("SELECT payload FROM daily_config WHERE key='activation'").fetchone()
             activation = json.loads(cfg[0]).get('activatedAt') if cfg else None
             records = conn.execute('SELECT e.id,e.signal_id,e.symbol,e.session_date,e.input_id,i.engine,'
@@ -104,34 +89,21 @@ def read_report(path, historical=None):
             for event_id, signal, symbol, day, input_id, version, compressed, event_payload in records:
                 event_count += 1
                 if input_id != last_input:
-                    last_input, frozen, references = input_id, None, {}
-                    try:
-                        frozen = json.loads(zlib.decompress(compressed))
-                        if (frozen['engineDigest'] != version or frozen['bars'][-1]['date'] != day
-                                or input_id != research.digest([version, symbol, day])):
-                            frozen = None
-                    except (ValueError, TypeError, KeyError, IndexError, zlib.error):
-                        frozen = None
-                try:
-                    event = json.loads(event_payload)
-                    valid_event = (event_id == research.digest([input_id, signal]) and event['date'] == day
-                                   and event['signalId'] == signal and not event.get('provisional'))
-                except (ValueError, TypeError, KeyError):
-                    valid_event = False
+                    last_input, references = input_id, {}
+                frozen, _ = diagnostics.validate_event(event_id, input_id, signal, symbol, day, version,
+                                                       compressed, event_payload)
                 for horizon in (5, 20):
                     bucket = groups[version or 'unknown'][(signal, horizon)]
                     bucket['observed'] += 1
-                    if not frozen or not valid_event:
-                        bucket['unverified'] += 1
+                    state = states[(event_id, horizon)]
+                    if state != 'mature':
+                        bucket['pendingReasons'][state] += 1
+                        if state in ('invalid_evidence', 'invalid_version'):
+                            bucket['unverified'] += 1
+                        else:
+                            bucket['waiting'] += 1
                         continue
-                    try:
-                        outcome = _outcome(outcomes.get((event_id, horizon)), horizon, day)
-                    except (ValueError, TypeError, KeyError, IndexError, ZeroDivisionError):
-                        bucket['unverified'] += 1
-                        continue
-                    if outcome is None:
-                        bucket['waiting'] += 1
-                        continue
+                    outcome = _outcome(outcomes[(event_id, horizon)], horizon, day)
                     bucket['mature'].append(outcome)
                     if version == rules and verified_history:
                         if horizon not in references:
@@ -165,13 +137,14 @@ def read_report(path, historical=None):
                     historical_row[key] = source.get(key) if historical_row['gate'] == 'ok' else None
                 horizons.append({'horizon': horizon, 'observed': bucket['observed'], 'mature': len(bucket['mature']),
                                  'waiting': bucket['waiting'], 'unverified': bucket['unverified'],
+                                 'pendingReasons': dict(sorted(bucket['pendingReasons'].items())),
                                  'forward': forward, 'reference': reference, 'historical': historical_row})
             rows.append({'signalId': signal, 'label': ss.SIGNAL_BY_ID.get(signal, {}).get('label', signal), 'horizons': horizons})
         output.append({'rulesDigest': version, 'currentRules': version == rules, 'signals': rows})
     return {'version': 'st-forward-comparison/v1', 'enabled': enabled, 'activatedAt': activation,
             'observedEvents': event_count, 'minSample': ss.MIN_SAMPLE, 'currentRulesDigest': rules,
             'currentMethodDigest': method, 'historicalVerified': verified_history,
-            'historicalGeneratedAt': historical.get('generatedAt'), 'groups': output,
+            'historicalGeneratedAt': historical.get('generatedAt'), 'groups': output, 'diagnostics': diagnosis,
             'candidatePromotion': False, 'externalCalls': 0,
             'limitations': [
                 '前瞻為啟用後首次留存事件；沒有成熟結果就等待，不回填過去事件。',

@@ -64,6 +64,10 @@ class 突破成交資料庫測試(unittest.TestCase):
         with closing(sqlite3.connect(self.db)) as conn, conn:
             for table in ('bars', 'bar_quality'):
                 conn.execute(f'DELETE FROM {table} WHERE market=? AND symbol=? AND ts=?', ('TW', symbol, daily.stamp(self.days[index])))
+            # 此處是在建立不同的首次行情 fixture，不能留下前一組官方觀測，
+            # 否則新契約會正確視為來源修訂衝突並排除訊號。
+            conn.execute('DELETE FROM official_daily_observations WHERE market=? AND symbol=? AND session_date=?',
+                         ('TW', symbol, self.days[index].isoformat()))
         datastore.upsert_bars(symbol, 'TW', [
             (daily.stamp(self.days[index]), opening, high, low, close, volume)
         ], source='TWSE')

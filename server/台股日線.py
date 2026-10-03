@@ -51,10 +51,19 @@ def get_json(url: str, trace=None) -> tuple[object, str]:
         try:
             with urlopen(Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}), timeout=25) as response:
                 raw = response.read()
+            retrieved_at = datetime.now(timezone.utc).isoformat()
             value = json.loads(raw)
             digest = hashlib.sha256(raw).hexdigest()
             if trace:
                 trace('來源完成', url=url, bytes=len(raw), elapsedMs=round((time.monotonic() - started) * 1000), sourceHash=digest)
+            if '/STOCK_DAY?' in url:
+                try:
+                    from .source_receipts import JsonSourceResponse
+                except ImportError:
+                    from source_receipts import JsonSourceResponse
+                return JsonSourceResponse(value, digest, {
+                    'url': url, 'raw_text': raw.decode('utf-8'), 'retrieved_at': retrieved_at,
+                    'parser_version': 'twse-stock-day-v1'})
             return value, digest
         except Exception as exc:
             if trace:
@@ -190,42 +199,12 @@ def reconcile_sessions(db: Path, begin: date, end: date, fetch=get_json) -> set[
 
 
 def refresh_actions(db: Path, symbol: str, begin: date, end: date, fetch=get_json, check=lambda: None) -> int:
-    """三種官方事件全數核對成功才延長涵蓋區間。"""
-    actions = []
-    endpoints = [('exRight/TWT49U', '資料日期', '除權息'),
-                 ('reducation/TWTAUU', '恢復買賣日期', '減資'),
-                 ('change/TWTB8U', '恢復買賣日期', '面額變更')]
-    for year in range(begin.year, end.year + 1):
-        first, last = max(begin, date(year, 1, 1)), min(end, date(year, 12, 31))
-        for route, date_field, kind in endpoints:
-            # 證交所公告頁亦由官方 wwwc 站提供；此站歷史範圍查詢已核對可用。
-            url = 'https://wwwc.twse.com.tw/rwd/zh/' + route + '?startDate=' + first.strftime('%Y%m%d') + '&endDate=' + last.strftime('%Y%m%d') + '&response=json'
-            data, _ = fetch(url)
-            if data.get('stat') == '很抱歉，沒有符合條件的資料!':
-                continue
-            if data.get('stat') != 'OK' or not all(k in data.get('fields', []) for k in (date_field, '股票代號')):
-                raise ValueError(kind + '資料尚未完整核對')
-            for values in data.get('data', []):
-                row = dict(zip(data['fields'], values))
-                if str(row['股票代號']).strip() != symbol:
-                    continue
-                parts = list(map(int, re.findall(r'\d+', str(row[date_field]))))
-                if len(parts) != 3:
-                    raise ValueError('公司行動日期無法辨識')
-                day = date(parts[0] + (1911 if parts[0] < 1911 else 0), parts[1], parts[2])
-                if not first <= day <= last:
-                    raise ValueError('公司行動回傳超出查詢日期')
-                actions.append(('TW', symbol, day.isoformat(), kind, 'TWSE'))
-    check()
-    with closing(sqlite3.connect(db)) as conn, conn:
-        prior = conn.execute('SELECT start_date,end_date FROM action_coverage WHERE market=? AND symbol=?', ('TW', symbol)).fetchone()
-        coverage_begin = begin.isoformat()
-        if prior and date.fromisoformat(prior[1]) + timedelta(days=1) >= begin and prior[0] <= coverage_begin:
-            coverage_begin = prior[0]
-        conn.execute('DELETE FROM corporate_actions WHERE market=? AND symbol=? AND session_date BETWEEN ? AND ?', ('TW', symbol, begin.isoformat(), end.isoformat()))
-        conn.executemany('INSERT OR REPLACE INTO corporate_actions VALUES(?,?,?,?,?)', actions)
-        conn.execute('INSERT OR REPLACE INTO action_coverage VALUES(?,?,?,?,?)', ('TW', symbol, coverage_begin, end.isoformat(), 'TWSE除權息、減資、面額變更'))
-    return len(actions)
+    """四類官方事件全數核對成功才提交；首次證據及後續修訂均保留。"""
+    try:
+        from .公司行動更新 import refresh_actions as update_actions
+    except ImportError:
+        from 公司行動更新 import refresh_actions as update_actions
+    return update_actions(db, symbol, begin, end, fetch, check)
 
 
 def parse_daily(data: dict, exchange: str, day: date) -> list[dict]:
@@ -285,7 +264,10 @@ def run_update(db: Path, *, start: date | None = None, now: datetime | None = No
     trace_path = db.parent / 'daily_bars_update.jsonl'
     def trace(event, **fields):
         append_jsonl(str(trace_path), {'at': datetime.now(timezone.utc).isoformat(), 'runId': run_id, 'event': event, **fields}, max_bytes=4_000_000, tail_lines=2000)
-    state = {'ok': False, 'runId': run_id, 'startedAt': datetime.now(timezone.utc).isoformat(), 'status': '更新中', 'database': str(db), 'completedDays': [], 'failures': []}
+    state = {'ok': False, 'runId': run_id, 'startedAt': datetime.now(timezone.utc).isoformat(), 'status': '更新中', 'database': str(db), 'completedDays': [], 'failures': [],
+             'sourceReceiptScope': {'dailySource': ['TWSE MI_INDEX', 'TPEX dailyQuotes'],
+                                    'rawHttpReceiptStored': False,
+                                    'note': '全市場匯入保存解析後日線、來源摘要與完成日期；未保存完整 HTTP 原始收據。這不等同 STOCK_DAY 完整收據核對，也不保證每筆行情無衝突；本流程不額外抓取個股月份來源。'}}
     cancelled = False
     def check_active():
         nonlocal cancelled
@@ -421,20 +403,28 @@ def seed_research(db: Path, symbol: str = '2330', years: int = 3, *, fetch=get_j
         for year in range(start.year, target.year + 1):
             stored_calendar(db, year, fetch)
         reconcile_sessions(db, start, target, fetch)
+        try:
+            from .daily_quality import quality_summary
+        except ImportError:
+            from daily_quality import quality_summary
         count = 0
+        reused_months, fetched_months = [], []
         month = start
         while month <= target:
             check()
             next_month = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
             with closing(sqlite3.connect(db)) as conn:
                 expected = {r[0] for r in conn.execute('SELECT session_date FROM market_sessions WHERE session_date>=? AND session_date<? AND session_date<=?', (month.isoformat(), next_month.isoformat(), target.isoformat()))}
-                verified = {r[0] for r in conn.execute("SELECT session_date FROM official_daily_observations WHERE market='TW' AND symbol=? AND source='TWSE' AND session_date>=? AND session_date<?", (symbol, month.isoformat(), next_month.isoformat()))}
-            if expected and expected <= verified:
+                quality = quality_summary(conn, symbol, expected, board='TWSE')
+            # 已核對的來源衝突可重用並揭露；缺原始收據或收據損壞必須在既有預算內補齊。
+            if expected and quality['observed'] == len(expected) and quality['receiptMissing'] == 0:
                 count += len(expected)
+                reused_months.append(month.isoformat()[:7])
                 month = next_month
                 continue
             url = 'https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=' + month.strftime('%Y%m%d') + '&stockNo=' + symbol
-            data, digest = fetch(url)
+            response = fetch(url)
+            data, digest = response
             check()
             if data.get('stat') != 'OK' or data.get('fields', [])[:7] != ['日期', '成交股數', '成交金額', '開盤價', '最高價', '最低價', '收盤價']:
                 raise ValueError('官方個股月份資料缺失或欄位不符')
@@ -451,7 +441,10 @@ def seed_research(db: Path, symbol: str = '2330', years: int = 3, *, fetch=get_j
                 month_rows.append((stamp(day), *prices, numeric(row[1])))
             if not month_rows:
                 raise ValueError('官方月份未提供範圍內日線，未寫入')
-            datastore.upsert_bars(symbol, 'TW', month_rows, source='TWSE', source_hash=digest, path=db, check=check)
+            receipt = getattr(response, 'source_receipt', None)
+            options = {'source_receipt': receipt} if receipt is not None else {}
+            datastore.upsert_bars(symbol, 'TW', month_rows, source='TWSE', source_hash=digest, path=db, check=check, **options)
+            fetched_months.append(month.isoformat()[:7])
             count += len(month_rows)
             print('研究日線已回補：' + month.isoformat(), flush=True)
             month = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
@@ -459,7 +452,15 @@ def seed_research(db: Path, symbol: str = '2330', years: int = 3, *, fetch=get_j
                 time.sleep(0.4)
         check()
         actions = refresh_actions(db, symbol, start, target, fetch, check)
-        return {'ok': True, 'symbol': symbol, 'rows': count, 'start': start.isoformat(), 'end': target.isoformat(), 'actions': actions}
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute('BEGIN')
+            expected = [r[0] for r in conn.execute('SELECT session_date FROM market_sessions WHERE session_date BETWEEN ? AND ? ORDER BY session_date', (start.isoformat(), target.isoformat()))]
+            quality = quality_summary(conn, symbol, expected, board='TWSE')
+        check()
+        return {'ok': True, 'symbol': symbol, 'rows': count, 'start': start.isoformat(), 'end': target.isoformat(),
+                'actions': actions, 'quality': quality, 'reusedMonths': reused_months, 'fetchedMonths': fetched_months,
+                'qualityComplete': bool(quality['expected'] and quality['accepted'] == quality['expected']),
+                'note': '工作完成表示來源已取得；衝突、缺日及缺少原始收據仍須核對，未覆寫首次行情。'}
     finally:
         release_daemon_lock(lock)
 

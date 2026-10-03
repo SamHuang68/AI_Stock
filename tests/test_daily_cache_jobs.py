@@ -4,6 +4,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -125,6 +126,32 @@ class DailyCacheTests(unittest.TestCase):
         row = (daily.stamp(Clock.now().date()), None, None, None, 100, None)
         with patch.object(ds, 'fetch_yahoo_daily', return_value=[row]): self.callbacks[0]()
         self.assertEqual(ds.get_bars('2330'), [row])
+
+    def test_later_start_coverage_cannot_shorten_requested_history(self):
+        with closing(ds.get_conn()) as conn, conn:
+            conn.execute('INSERT INTO bar_fetch_coverage VALUES(?,?,?,?,?,?)',
+                         ('TW', '2330', 'Yahoo Finance', '2026-01-01', '2026-09-10', 1))
+        self.submit()
+        row = (daily.stamp(Clock.now().date()), 100, 102, 99, 101, 1000)
+        with patch.object(ds, 'fetch_yahoo_daily', return_value=[row]) as fetch:
+            self.callbacks[0]()
+        requested = datetime.fromtimestamp(fetch.call_args.kwargs['start_ts'], daily.TZ)
+        self.assertEqual(requested.isoformat(), '2025-09-10T00:00:00+08:00')
+        self.assertEqual(jobs.status()['results'][0]['queryCoverage'], ['2025-09-10', '2026-09-11'])
+        self.assertIn('不保證', jobs.status()['results'][0]['coverageMeaning'])
+
+    def test_covered_start_and_overlapping_fetch_form_continuous_query_range(self):
+        with closing(ds.get_conn()) as conn, conn:
+            conn.execute('INSERT INTO bar_fetch_coverage VALUES(?,?,?,?,?,?)',
+                         ('TW', '2330', 'Yahoo Finance', '2025-09-01', '2026-08-31', 1))
+        self.submit()
+        row = (daily.stamp(Clock.now().date()), 100, 102, 99, 101, 1000)
+        with patch.object(ds, 'fetch_yahoo_daily', return_value=[row]) as fetch:
+            self.callbacks[0]()
+        requested = datetime.fromtimestamp(fetch.call_args.kwargs['start_ts'], daily.TZ)
+        self.assertEqual(requested.isoformat(), '2026-08-24T00:00:00+08:00')
+        self.assertEqual(jobs.status()['results'][0]['queryCoverage'], ['2025-09-10', '2026-09-11'])
+        self.assertEqual(jobs.status()['results'][0]['inserted'], 1)
 
     def test_status_is_a_copy_and_limit_precedes_any_network(self):
         self.submit()

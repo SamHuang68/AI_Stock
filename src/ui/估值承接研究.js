@@ -154,6 +154,10 @@
       pair('官方本益比／資料日', fmt(row.per) + ' 倍／' + (research.valuationDate || '未提供')) +
       pair('本益比來源', research.valuationSource || '未提供') +
       pair('價格來源／預期交易日', (research.priceSource || '未提供') + '／' + (research.expectedSession || '未核對')) +
+      pair('價格核對', research.priceVerification || '尚未核對') +
+      pair('原始日線來源', research.rawPriceSource || '未記錄；不以核對來源代替') +
+      pair('成交量核對', research.volumeConflict ? '官方量與原始量不一致，留空待核對' :
+        research.volumeVerified ? '官方收據逐欄核對' : '未保存完整來源收據或資料尚缺') +
       pair('價格基準', research.priceBasis || '未核對') +
       pair('月營收年增／期別', percent(row.revYoy) + '／' + (research.revenuePeriod || '未提供')) +
       pair('月增／累計年增', percent(research.revenueMom) + '／' + percent(research.revenueCumYoy)) +
@@ -163,6 +167,12 @@
       pair('當日量／前 20 日均量', fmt(research.breakoutVolumeRatio) + ' 倍') +
       pair('投信／外資連續天數', fmt(row.trustStreak, 0) + '／' + fmt(row.foreignStreak, 0)) +
       pair('籌碼來源日', research.trustAsOf || '未提供') + '</dl>' +
+      (Array.isArray(research.sourceReceipts) && research.sourceReceipts.length ?
+        '<details class="vr-muted" style="overflow-wrap:anywhere"><summary>查看價格核對收據</summary>' + research.sourceReceipts.map(receipt =>
+          '<p>' + esc(receipt.source || '未提供') + '／' + esc(receipt.parserVersion || '未提供') +
+          '<br>取得：' + esc(receipt.retrievedAt || '未提供') + '；寫入：' + esc(receipt.writtenAt || '未提供') +
+          '<br>來源：' + esc(receipt.url || '未提供') + '<br>雜湊：' + esc(receipt.sourceHash || '未提供') +
+          '<br>來源說明：' + esc(Array.isArray(receipt.notes) ? receipt.notes.join('；') : '未提供') + '</p>').join('') + '</details>' : '') +
       '<p class="vr-muted">營收為最近公告的單一期別，不能單憑一個月判定獲利趨勢。區間位置比較前 20 個交易日，不代表已確認的整理型態。</p>' +
       (Array.isArray(research.missing) && research.missing.length ? '<p class="vr-muted">資料限制：' + research.missing.map(esc).join('；') + '</p>' : '');
   }

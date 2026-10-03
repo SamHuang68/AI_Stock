@@ -20,6 +20,31 @@ from tests.test_stock_signals import make_bars
 
 
 class DataBoundaries(unittest.TestCase):
+    def test_one_share_source_revision_is_preserved_and_cancel_is_atomic(self):
+        with tempfile.TemporaryDirectory() as temp:
+            db = Path(temp) / 'test.db'
+            ds.init_db(db)
+            row = (daily.stamp(date(2026, 9, 11)), 100, 102, 99, 101, 20_000_000)
+            with patch.object(ds, 'DB_PATH', str(db)):
+                ds.upsert_bars('2330', 'TW', [row], source='Yahoo Finance')
+                result = ds.merge_source_bars('2330', 'TW', [(*row[:5], 20_000_001)], 'Yahoo Finance')
+                self.assertEqual((result['conflicts'], result['unchanged']), (1, 0))
+                with ds.read_snapshot(db) as conn:
+                    self.assertEqual(conn.execute('SELECT volume FROM bars').fetchone()[0], 20_000_000)
+                    saved = json.loads(conn.execute('SELECT payload FROM bar_source_revisions').fetchone()[0])
+                    self.assertEqual(saved['revision'][-1], 20_000_001)
+                    before = conn.execute('SELECT count(*) FROM bar_ingest_runs').fetchone()[0]
+                calls = []
+                def cancel():
+                    calls.append(True)
+                    if len(calls) == 3:
+                        raise RuntimeError('測試取消')
+                with self.assertRaisesRegex(RuntimeError, '測試取消'):
+                    ds.upsert_bars('2330', 'TW', [(*row[:5], 20_000_002)], source='Yahoo Finance', check=cancel)
+                with ds.read_snapshot(db) as conn:
+                    self.assertEqual(conn.execute('SELECT count(*) FROM bar_source_revisions').fetchone()[0], 1)
+                    self.assertEqual(conn.execute('SELECT count(*) FROM bar_ingest_runs').fetchone()[0], before)
+
     def test_market_and_input_shapes_are_rejected_before_network(self):
         for body in (None, [], {'symbols': [{'symbol': 'AAPL', 'market': 'TW'}]},
                      {'symbols': [{'symbol': '2330.TW', 'market': 'US'}]},
