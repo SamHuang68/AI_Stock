@@ -804,10 +804,12 @@ function replayStep(delta) {
   replayApply();
 }
 
-function showProModal(html) {
+function showProModal(html, options = {}) {
   hideProModal();
   const m = document.createElement('div');
   m.id = 'pro-modal-bg';
+  m.__proModalOwner = options.owner || null;
+  m.__proModalOnClose = typeof options.onClose === 'function' ? options.onClose : null;
   m.style.cssText = 'position:fixed;inset:0;background:rgba(6,10,18,.85);z-index:9999;display:flex;align-items:center;justify-content:center';
   m.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--gold-m);border-radius:8px;padding:20px 24px;max-width:480px;max-height:80vh;overflow-y:auto;position:relative">
     <span data-pro="modal-close" style="position:absolute;top:6px;right:14px;cursor:pointer;color:var(--tlo);font-size:20px">×</span>
@@ -815,10 +817,16 @@ function showProModal(html) {
   </div>`;
   document.body.appendChild(m);
   m.addEventListener('click', e => { if (e.target.id === 'pro-modal-bg') hideProModal(); });
+  return m;
 }
 function hideProModal() {
   const m = document.getElementById('pro-modal-bg');
-  if (m) m.remove();
+  if (m) {
+    m.remove();
+    const onClose = m.__proModalOnClose;
+    m.__proModalOnClose = null;
+    if (onClose) onClose();
+  }
 }
 document.addEventListener('click', ev => {
   const el = ev.target.closest('[data-pro="modal-close"]');

@@ -5,7 +5,8 @@
   "scripts": {
     "test:browser": "node tests/reliability_browser.cjs",
     "test:research-browser": "node tests/研究工作台_browser.cjs",
-    "test:data-browser": "node tests/資料可信度_browser.cjs"
+    "test:data-browser": "node tests/資料可信度_browser.cjs",
+    "test:pattern-browser": "node tests/pattern_modal_browser.cjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"

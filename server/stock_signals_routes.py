@@ -80,7 +80,13 @@ def _now_local(market: str, now: Optional[datetime] = None) -> datetime:
 
 def session_state(market: str, last_bar_date: Optional[str],
                   now: Optional[datetime] = None) -> Dict[str, Any]:
-    """共用台股官方休市參考，避免連假或盤前誤判落後並觸發來源補取。"""
+    """依市場共用已核對日曆，避免假日／半日收市誤判新鮮度。"""
+    if market == 'US':
+        try:
+            from .us_equity_calendar import session_state as us_state
+        except ImportError:
+            from us_equity_calendar import session_state as us_state
+        return us_state(last_bar_date, _now_local(market, now))
     try:
         from .台股交易參考 import session
     except ImportError:
@@ -175,6 +181,13 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
             # 盤中半根 K 不寫回 DB（收盤後的下一次抓取才寫入最終值）
             final_rows = [row for row in fetched
                           if not (today_live and ss.bar_date(row[0], market) == today)]
+            if market == 'US':
+                try:
+                    from .us_equity_calendar import session as us_session
+                except ImportError:
+                    from us_equity_calendar import session as us_session
+                final_rows = [row for row in final_rows if ss.bar_date(row[0], market)
+                              and us_session(ss.bar_date(row[0], market))['status'] != 'closed']
             if final_rows:
                 ds.upsert_bars(code, market, final_rows, source='Yahoo Finance')
                 rows = ds.get_bars(code, market=market)
@@ -193,7 +206,7 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
                   if last and sess['expectedLastDate'] else None)
     return {'bars': bars, 'source': source, 'provisional': sess['provisional'],
             'staleDays': max(0, stale_days) if stale_days is not None else None,
-            'error': error, 'retrySoon': retry_soon}
+            'error': error, 'retrySoon': retry_soon, 'session': sess}
 
 
 def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
@@ -219,6 +232,12 @@ def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
             pool.attach(result, pool.load_cached(market))
         except Exception:
             pass   # 合併統計是加值資訊；快取壞掉不影響個股體檢
+    if loaded.get('session'):
+        result.setdefault('session', {}).update(loaded['session'])
+        if market == 'US' and (loaded['session'].get('calendar') or {}).get('status') == 'unknown':
+            result['session']['note'] = ('交易日曆待確認：當日日線尚不能標為最終值。'
+                                        if loaded['session'].get('provisional') else
+                                        '交易日曆待確認：保留最後已知日線，最新應有交易日尚不能確認。')
     result['dataSource'] = loaded.get('source')
     result['staleDays'] = loaded.get('staleDays')
     if loaded.get('error'):

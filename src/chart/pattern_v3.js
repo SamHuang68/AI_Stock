@@ -163,7 +163,7 @@ function detectTrendStructure(candles, pivots) {
       icon: '📈', severity: 'bullish',
       description: `波峰墊高 ${fmt(hs[hs.length-2].price)} → ${fmt(hs[hs.length-1].price)}、波谷墊高 ${fmt(ls[ls.length-2].price)} → ${fmt(ls[ls.length-1].price)}。`,
       action: '順勢操作：拉回不破波谷加碼，跌破前低 (HL) 才轉空。',
-      reliability: '⭐⭐⭐⭐⭐ 趨勢追蹤最高勝率',
+      reliability: '規則確認：最近波峰與波谷皆墊高；未驗證勝率。',
       marks: [
         { price: hs[hs.length-2].price, time: hs[hs.length-2].time, label:'H1', color: COL.bear },
         { price: hs[hs.length-1].price, time: hs[hs.length-1].time, label:'H2 (HH)', color: COL.bear },
@@ -179,7 +179,7 @@ function detectTrendStructure(candles, pivots) {
       icon: '📉', severity: 'bearish',
       description: `波峰下移 ${fmt(hs[hs.length-2].price)} → ${fmt(hs[hs.length-1].price)}、波谷下移 ${fmt(ls[ls.length-2].price)} → ${fmt(ls[ls.length-1].price)}。`,
       action: '空頭操作：反彈不過波峰 (LH) 放空或減碼，突破前高才轉多。',
-      reliability: '⭐⭐⭐⭐⭐ 趨勢追蹤最高勝率',
+      reliability: '規則確認：最近波峰與波谷皆下降；未驗證勝率。',
       marks: [
         { price: hs[hs.length-2].price, time: hs[hs.length-2].time, label:'H1', color: COL.bear },
         { price: hs[hs.length-1].price, time: hs[hs.length-1].time, label:'H2 (LH)', color: COL.bear },
@@ -209,7 +209,7 @@ function detectDoubleTopBottom(candles, pivots) {
       severity: confirmed ? 'bearish' : 'caution',
       description: `兩個波峰 ${fmt(hs[0].price)} / ${fmt(hs[1].price)} 高度接近，頸線 ${fmt(neck)}。${confirmed ? '已跌破頸線。' : '未跌破頸線。'}`,
       action: confirmed ? `空方訊號確認，量度目標 ${fmt(projection)}。` : `等待跌破頸線 ${fmt(neck)} 確認。`,
-      reliability: confirmed ? '⭐⭐⭐⭐ 經典反轉' : '⭐⭐ 未確認',
+      reliability: confirmed ? '經典反轉' : '未確認',
       marks: [
         { price: hs[0].price, time: hs[0].time, label:'頂 1', color: COL.bear },
         { price: hs[1].price, time: hs[1].time, label:'頂 2', color: COL.bear },
@@ -229,7 +229,7 @@ function detectDoubleTopBottom(candles, pivots) {
       severity: confirmed ? 'bullish' : 'observing',
       description: `兩個波谷 ${fmt(ls[0].price)} / ${fmt(ls[1].price)} 底部接近，頸線 ${fmt(neck)}。${confirmed ? '已突破頸線。' : '未突破頸線。'}`,
       action: confirmed ? `多方訊號確認，量度目標 ${fmt(projection)}。` : `等待突破頸線 ${fmt(neck)} 確認。`,
-      reliability: confirmed ? '⭐⭐⭐⭐ 經典反轉' : '⭐⭐ 未確認',
+      reliability: confirmed ? '經典反轉' : '未確認',
       marks: [
         { price: ls[0].price, time: ls[0].time, label:'底 1', color: COL.bull },
         { price: ls[1].price, time: ls[1].time, label:'底 2', color: COL.bull },
@@ -268,7 +268,7 @@ function detectHeadShoulders(candles, pivots) {
           severity: confirmed ? 'bearish' : 'caution',
           description: `左肩 ${fmt(s1.price)} / 頭 ${fmt(h.price)} / 右肩 ${fmt(s2.price)}，頸線 ${fmt(neckAtNow)}。${confirmed ? '已跌破頸線。' : '形態完成，等跌破。'}`,
           action: confirmed ? `量度目標 ${fmt(projection)}（頭頂到頸線高度反推）。減碼或空單。` : '密切觀察是否跌破頸線。',
-          reliability: confirmed ? '⭐⭐⭐⭐⭐ 最經典反轉' : '⭐⭐⭐ 形態完成中',
+          reliability: confirmed ? '高低點反轉結構' : '形態完成中',
           marks: [
             { price: s1.price, time: s1.time, label:'左肩', color: COL.shoulder },
             { price: h.price,  time: h.time,  label:'頭',   color: COL.bear },
@@ -303,7 +303,7 @@ function detectHeadShoulders(candles, pivots) {
           severity: confirmed ? 'bullish' : 'observing',
           description: `左肩 ${fmt(s1.price)} / 頭 ${fmt(h.price)} / 右肩 ${fmt(s2.price)}，頸線 ${fmt(neckAtNow)}。${confirmed ? '已突破頸線。' : '形態完成，等突破。'}`,
           action: confirmed ? `量度目標 ${fmt(projection)}。可分批進場。` : '密切觀察是否突破頸線。',
-          reliability: confirmed ? '⭐⭐⭐⭐⭐ 最經典反轉' : '⭐⭐⭐ 形態完成中',
+          reliability: confirmed ? '高低點反轉結構' : '形態完成中',
           marks: [
             { price: s1.price, time: s1.time, label:'左肩', color: COL.shoulder },
             { price: h.price,  time: h.time,  label:'頭',   color: COL.bull },
@@ -338,7 +338,7 @@ function detectRange(candles) {
     type: 'range', name: `箱型整理 (${N}日 ${fmt(width,1)}%)`, icon: '↔️', severity: 'neutral',
     description: `近 ${N} 個交易日於 ${fmt(lo)} ~ ${fmt(hi)} 區間整理，振幅 ${fmt(width,1)}%。`,
     action: '下緣承接、上緣減碼；帶量突破/跌破則順勢。',
-    reliability: '⭐⭐⭐ 等待方向選擇',
+    reliability: '等待方向選擇',
     marks: [
       { price: hi, time: recent[0].time, label: `上緣 ${fmt(hi)}`, color: COL.bear },
       { price: lo, time: recent[0].time, label: `下緣 ${fmt(lo)}`, color: COL.bull },
@@ -365,7 +365,7 @@ function detectBreakout(candles) {
       type: 'breakout_up', name: '區間向上突破', icon: '🚀', severity: 'bullish',
       description: `價格 ${fmt(c)} 突破 ${N} 日整理上緣 ${fmt(hi)}。量能 ${fmt(volRatio,1)}x。`,
       action: volRatio >= 1.5 ? `量增有效，目標 ${fmt(hi+(hi-lo))}。` : '量能不足，假突破風險。',
-      reliability: volRatio >= 1.5 ? '⭐⭐⭐⭐ 量增突破' : '⭐⭐ 量不足',
+      reliability: volRatio >= 1.5 ? '量增突破' : '量不足',
       marks: [
         { price: hi, time: prior[0].time, label: `突破 ${fmt(hi)}`, color: COL.bull },
         { price: hi + (hi - lo), time: candles[candles.length-1].time, label: `目標 ${fmt(hi+(hi-lo))}`, color: COL.accent },
@@ -377,7 +377,7 @@ function detectBreakout(candles) {
       type: 'breakout_down', name: '區間向下跌破', icon: '⬇️', severity: 'bearish',
       description: `價格 ${fmt(c)} 跌破 ${N} 日整理下緣 ${fmt(lo)}。`,
       action: `量度目標 ${fmt(lo-(hi-lo))}。已持倉者停損。`,
-      reliability: '⭐⭐⭐⭐ 經典跌破',
+      reliability: '經典跌破',
       marks: [
         { price: lo, time: prior[0].time, label: `跌破 ${fmt(lo)}`, color: COL.bear },
         { price: lo - (hi - lo), time: candles[candles.length-1].time, label: `目標 ${fmt(lo-(hi-lo))}`, color: COL.accent },
@@ -406,7 +406,7 @@ function detectMaCross(candles) {
         type: 'golden_cross', name: '黃金交叉 (SMA20×60)', icon: '✨', severity: 'bullish',
         description: `${lag} 日前 SMA20 (${fmt(n20)}) 上穿 SMA60 (${fmt(n60)})，中期轉多。`,
         action: '回測 SMA20 不破即為加碼點。',
-        reliability: '⭐⭐⭐⭐ 中線經典訊號',
+        reliability: '中線經典訊號',
         marks: [
           { price: c20now, time: candles[N-1].time, label: `SMA20 ${fmt(c20now)}`, color: COL.warn },
           { price: c60now, time: candles[N-1].time, label: `SMA60 ${fmt(c60now)}`, color: COL.cyan },
@@ -418,7 +418,7 @@ function detectMaCross(candles) {
         type: 'death_cross', name: '死亡交叉 (SMA20×60)', icon: '💀', severity: 'bearish',
         description: `${lag} 日前 SMA20 (${fmt(n20)}) 下穿 SMA60 (${fmt(n60)})，中期轉空。`,
         action: '反彈不過 SMA20 即為減碼點。',
-        reliability: '⭐⭐⭐⭐ 中線經典訊號',
+        reliability: '中線經典訊號',
         marks: [
           { price: c20now, time: candles[N-1].time, label: `SMA20 ${fmt(c20now)}`, color: COL.warn },
           { price: c60now, time: candles[N-1].time, label: `SMA60 ${fmt(c60now)}`, color: COL.cyan },
@@ -453,7 +453,7 @@ function detectCupHandle(candles, pivots) {
     severity: confirmed ? 'bullish' : 'observing',
     description: `杯口 ${fmt(lip)} / 杯底 ${fmt(bot)} (深 ${fmt(depth,1)}%)、把手 ${fmt(handleDepth,1)}%。`,
     action: confirmed ? `量度目標 ${fmt(lip+(lip-bot))}。` : '等突破杯口確認。',
-    reliability: confirmed ? '⭐⭐⭐⭐ O\'Neil 經典' : '⭐⭐⭐ 形態完成中',
+    reliability: confirmed ? 'O\'Neil 經典' : '形態完成中',
     marks: [
       { price: lip, time: h1.time, label: `杯口 ${fmt(lip)}`, color: COL.warn },
       { price: bot, time: candles[botI].time, label: `杯底 ${fmt(bot)}`, color: COL.bull },
@@ -500,7 +500,7 @@ function detectTriangle(candles, pivots) {
   return {
     type: 'triangle_' + kind, name, icon, severity,
     description: desc, action: act,
-    reliability: kind === 'symmetric' ? '⭐⭐⭐ 等待方向' : '⭐⭐⭐⭐ 偏向性三角',
+    reliability: kind === 'symmetric' ? '等待方向' : '偏向性三角',
     marks: [
       { price: hs[0].price, time: hs[0].time, label: '高1', color: COL.bear },
       { price: hs[2].price, time: hs[2].time, label: '高3', color: COL.bear },
@@ -575,7 +575,7 @@ function detectABCD(candles, zz) {
     action: r.bullish
       ? `D 點為潛在多頭轉折，止損下破 D 點 1%，目標 C 或更高 (Fib 0.618/1.272 from CD)。`
       : `D 點為潛在空頭轉折，止損上破 D 點 1%，目標 C 或更低。`,
-    reliability: '⭐⭐⭐ AB=CD 經典諧波基礎',
+    reliability: 'AB=CD 經典諧波基礎',
     marks: [
       { price: r.A.price, time: r.A.time, label: 'A', color: COL.warn },
       { price: r.B.price, time: r.B.time, label: 'B', color: COL.warn },
@@ -665,7 +665,7 @@ function detectXABCD(candles, zz, includeNames) {
     action: r.bullish
       ? `D 為 PRZ (潛在反轉區)，止損 X 下方 1%，目標 0.382/0.618 of CD 或 A。`
       : `D 為 PRZ，止損 X 上方 1%，目標 0.382/0.618 of CD 或 A。`,
-    reliability: '⭐⭐⭐⭐ Pesavento/Gartley 學派經典',
+    reliability: 'Pesavento/Gartley 學派經典',
     marks: [
       { price: r.X.price, time: r.X.time, label: 'X', color: COL.x },
       { price: r.A.price, time: r.A.time, label: 'A', color: COL.warn },
@@ -725,7 +725,7 @@ function detectCypher(candles, zz) {
     severity: r.bullish ? 'bullish' : 'bearish',
     description: `X=${fmt(r.X.price)} → D=${fmt(r.D.price)}。AB/XA=${fmt(r.ab_xa,3)}、BC/XA=${fmt(r.bc_xa,3)}、CD/XC=${fmt(r.cd_xc,3)}。`,
     action: r.bullish ? `D 為買進區，止損 X 下方，目標 0.382 of CD。` : `D 為放空區，止損 X 上方，目標 0.382 of CD。`,
-    reliability: '⭐⭐⭐ Darren Oglesbee 衍生諧波',
+    reliability: 'Darren Oglesbee 衍生諧波',
     marks: [
       { price: r.X.price, time: r.X.time, label: 'X', color: COL.x },
       { price: r.A.price, time: r.A.time, label: 'A', color: COL.warn },
@@ -802,7 +802,7 @@ function detectThreeDrives(candles, zz) {
     action: r.topPattern
       ? '三推進反轉訊號，D3 為潛在頂，止損上破 D3，目標 c2 或 c1。'
       : '三推進反轉訊號，D3 為潛在底，止損下破 D3，目標 c2 或 c1。',
-    reliability: '⭐⭐⭐⭐ 衰竭型反轉',
+    reliability: '衰竭型反轉',
     marks: [
       { price: r.d1.price, time: r.d1.time, label: 'D1', color: COL.warn },
       { price: r.d2.price, time: r.d2.time, label: 'D2', color: COL.warn },
@@ -880,7 +880,7 @@ function detectElliottImpulse(candles, zz) {
     action: r.bullish
       ? '五浪推進完成，預期進入 ABC 修正。w5 為潛在賣壓區，目標 w4 → 0.382~0.618 of w1-w5。'
       : '五浪推進完成，預期進入 ABC 反彈。w5 為潛在買壓區。',
-    reliability: '⭐⭐⭐⭐⭐ Elliott 經典五浪',
+    reliability: 'Elliott 經典五浪',
     marks: [
       { price: r.w1.price, time: r.w1.time, label: 'w1', color: COL.bear },
       { price: r.w2.price, time: r.w2.time, label: 'w2', color: COL.bull },
@@ -953,7 +953,7 @@ function detectElliottCorrection(candles, zz) {
     action: r.bullish
       ? `ABC 修正完成於 C ${fmt(r.C.price)}，可能展開新一輪上漲。若 C 破 A，反轉失敗。`
       : `ABC 反彈完成於 C ${fmt(r.C.price)}，可能展開新一輪下跌。`,
-    reliability: '⭐⭐⭐⭐ Elliott 修正浪',
+    reliability: 'Elliott 修正浪',
     marks: [
       { price: r.A.price, time: r.A.time, label: 'A', color: COL.warn },
       { price: r.B.price, time: r.B.time, label: 'B', color: COL.warn },
@@ -1014,7 +1014,7 @@ function detectElliottTriangle(candles, zz) {
     severity: 'neutral',
     description: `五浪收斂三角：A=${fmt(r.A.price)} B=${fmt(r.B.price)} C=${fmt(r.C.price)} D=${fmt(r.D.price)} E=${fmt(r.E.price)}。`,
     action: 'E 完成後預期續行原趨勢（突破方向 = 進入三角前的趨勢方向）。',
-    reliability: '⭐⭐⭐⭐ Elliott 連續型三角',
+    reliability: 'Elliott 連續型三角',
     marks: [
       { price: r.A.price, time: r.A.time, label: 'A', color: COL.warn },
       { price: r.B.price, time: r.B.time, label: 'B', color: COL.warn },
@@ -1127,7 +1127,7 @@ function detectDoubleCombo(candles, zz) {
     severity: 'caution',
     description: `W=${fmt(r.W_amp)}, X=${fmt(r.X_amp)}, Y=${fmt(r.Y_amp)}, Y/W=${fmt(r.wy,2)}。雙修正結構。`,
     action: 'Y 結束後預期反轉回原趨勢方向。',
-    reliability: '⭐⭐⭐ 複雜修正',
+    reliability: '複雜修正',
     marks: [
       { price: s[0].price, time: s[0].time, label: '起', color: COL.muted },
       { price: s[3].price, time: s[3].time, label: 'W', color: COL.warn },
@@ -1184,7 +1184,7 @@ function detectTripleCombo(candles, zz) {
     severity: 'caution',
     description: `三修正 W=${fmt(r.W)}, Y=${fmt(r.Y)}, Z=${fmt(r.Z)}。連接 X1=${fmt(r.X1)}, X2=${fmt(r.X2)}。`,
     action: 'Z 結束後預期強烈反轉回原趨勢。三重組合通常是市場最複雜的修正之一。',
-    reliability: '⭐⭐⭐ 罕見且複雜',
+    reliability: '罕見且複雜',
     marks: [
       { price: s[3].price, time: s[3].time, label: 'W', color: COL.warn },
       { price: s[4].price, time: s[4].time, label: 'X', color: COL.x },
@@ -1255,7 +1255,7 @@ function detectCycle(candles) {
     severity: 'neutral',
     description: `偵測到 ${top.lag} 日主要週期 (自相關 ${fmt(top.r,3)})。其他候選週期: ${peaks.slice(1, 4).map(p => `${p.lag}d(${fmt(p.r,2)})`).join(', ')}。`,
     action: `若週期成立，預期下一個低點落於 K 線索引 ${nextLowI}（最後低點 ${lastLowI} + ${top.lag} 日）。`,
-    reliability: top.r > 0.3 ? '⭐⭐⭐⭐ 強週期' : '⭐⭐⭐ 中等週期',
+    reliability: top.r > 0.3 ? '強週期' : '中等週期',
     marks: [
       { price: lastLow, time: candles[lastLowI].time, label: `週期低 ${fmt(lastLow)}`, color: COL.bull },
     ],
@@ -1306,8 +1306,8 @@ function detectPatternsV3(candlesOverride) {
 const _patternDataCache = new Map();
 const PATTERN_CACHE_TTL = 5 * 60_000;
 
-async function loadPatternCandlesV3(sym, mkt) {
-  if (!sym) return null;
+async function loadPatternCandlesV3(sym, mkt, options = {}) {
+  if (!sym || options.signal?.aborted) return null;
   mkt = mkt || 'TW';
   const key = `${sym}|${mkt}`;
   const cached = _patternDataCache.get(key);
@@ -1315,20 +1315,17 @@ async function loadPatternCandlesV3(sym, mkt) {
   const yfsym = mkt === 'TW' ? sym + '.TW' : sym;
   const server = (typeof window !== 'undefined' && window.SERVER) || 'http://localhost:18432';
   try {
-    // v3 抓 2y 給 Elliott 等長型態更多素材
     const url = `${server}/yf/${yfsym}?range=2y&interval=1d`;
-    const r = await fetch(url, { cache: 'no-store' });
-    if (!r.ok) { console.warn('[v3] data fetch HTTP', r.status); return null; }
+    const r = await fetch(url, { cache: 'no-store', signal: options.signal });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     const raw = await r.json();
+    if (options.signal?.aborted) return null; // 本文也可能晚於取消才抵達。
     const parsed = (typeof parseYF === 'function') ? parseYF(raw) : null;
-    if (!parsed || !parsed.candles || !parsed.candles.length) {
-      console.warn('[v3] parseYF returned empty for', yfsym);
-      return null;
-    }
+    if (!parsed?.candles?.length) return null;
     _patternDataCache.set(key, { candles: parsed.candles, fetchedAt: Date.now() });
     return parsed.candles;
-  } catch (e) {
-    console.warn('[v3] loadPatternCandles error:', e);
+  } catch (error) {
+    if (!options.signal?.aborted) console.warn('[v3] 型態資料未完成：', error);
     return null;
   }
 }
@@ -1476,12 +1473,13 @@ function plainTalkV3(p) {
 // 樣本 < 20 不公開比例（與體檢統計同一門檻）。同一型態連續多日被偵測會重複計入。
 const HIT_KEYWORDS_V3 = ['雙底', '雙頂', '頭肩底', '頭肩頂', '黃金交叉', '杯柄', '上升三角', '突破'];
 const HIT_MIN_N_V3 = 20;
-function patternHitRatesV3(candles, fwd, onDone) {
+function patternHitRatesV3(candles, fwd, onDone, isCurrent = () => true) {
   const acc = {};
   HIT_KEYWORDS_V3.forEach(k => { acc[k] = []; });
   const end = candles.length - fwd;
   let i = 40;
   (function step() {
+    if (!isCurrent()) return;
     const stop = Math.min(end, i + 25);
     for (; i < stop; i++) {
       let names;
@@ -1499,11 +1497,11 @@ function patternHitRatesV3(candles, fwd, onDone) {
     }));
   })();
 }
-function renderHitRatesV3(host, candles) {
+function renderHitRatesV3(host, candles, isCurrent = () => true) {
   const fwd = 10;
   host.innerHTML = '<div style="padding:8px 12px;font-family:monospace;font-size:10px;color:var(--tlo)">⟳ 計算型態歷史命中率…</div>';
   patternHitRatesV3(candles, fwd, rows => {
-    if (!host.isConnected) return;
+    if (!host.isConnected || !isCurrent()) return;
     const col = v => window.Colors ? Colors.gain(v) : (v >= 0 ? 'var(--red)' : 'var(--green)');
     const shown = rows.filter(r => r.count > 0);
     let h = `<div style="padding:6px 12px;font-family:monospace;font-size:10px;color:var(--gold);background:rgba(251,191,36,.05);border-bottom:1px solid var(--border)">▸ 型態歷史命中率（出現後 ${fwd} 日）</div>`;
@@ -1526,7 +1524,7 @@ function renderHitRatesV3(host, candles) {
     }
     h += `</table><div style="padding:4px 12px 8px;font-family:monospace;font-size:8.5px;color:var(--tf);line-height:1.6">同一型態連續多日被偵測會重複計入；未還原除權息；過去比例不代表未來。</div>`;
     host.innerHTML = h;
-  });
+  }, isCurrent);
 }
 
 function patternsToggleV3() {
@@ -1536,24 +1534,51 @@ function patternsToggleV3() {
   drawPatternsOnChartV3(detectPatternsV3());
 }
 
+let patternModalRequest = null;
+let patternModalRevision = 0;
+
+function samePatternChart(request) {
+  return S.sym === request.sym && S.mkt === request.mkt && window.__loadSeq === request.chartRevision;
+}
+function ownsPatternModal(request) {
+  return patternModalRequest === request && !request.controller.signal.aborted && samePatternChart(request)
+    && request.modal?.isConnected && document.getElementById('pro-modal-bg') === request.modal
+    && request.modal.__proModalOwner === request;
+}
+function cancelPatternRequest(request, close = false) {
+  if (patternModalRequest === request) patternModalRequest = null;
+  request.controller.abort();
+  if (close && request.modal?.isConnected && document.getElementById('pro-modal-bg') === request.modal
+      && request.modal.__proModalOwner === request) hideProModal();
+}
+window.addEventListener('symLoaded', () => {
+  if (patternModalRequest && !samePatternChart(patternModalRequest)) cancelPatternRequest(patternModalRequest, true);
+});
+
 async function showPatternsModalV3() {
+  if (patternModalRequest) cancelPatternRequest(patternModalRequest);
   const sym = S.sym; const mkt = S.mkt;
   if (!sym) {
     if (typeof showProModal === 'function') showProModal('<div style="padding:20px;text-align:center;font-family:monospace;color:var(--tlo)">請先載入個股</div>');
     return;
   }
+  const request = { sym, mkt, revision: ++patternModalRevision, chartRevision: window.__loadSeq, controller: new AbortController() };
+  patternModalRequest = request;
   const loadingHtml = `
     <h3 style="margin:0 0 10px;color:var(--gold);font-family:monospace;font-size:14px">🤖 AI 形態辨識 v3 — ${sym}</h3>
     <div style="font-family:monospace;font-size:9.5px;color:var(--tlo);margin-bottom:10px">v3 = v2(8 種) + 11 種 TradingView 級型態：諧波 XABCD/Cypher、ABCD、三角(對稱/上升/下降)、三驅、艾略特五浪/修正/三角/雙重/三重組合、循環分析。</div>
     <div style="text-align:center;padding:40px 14px;font-family:monospace;font-size:11px;color:var(--gold)">⟳ 抓取 2 年日 K 線分析中...</div>`;
-  if (typeof showProModal === 'function') showProModal(loadingHtml);
+  if (typeof showProModal !== 'function') { cancelPatternRequest(request); return; }
+  request.modal = showProModal(`<div data-pattern-request="${request.revision}">${loadingHtml}</div>`,
+    { owner: request, onClose: () => cancelPatternRequest(request) });
 
-  const candles = await loadPatternCandlesV3(sym, mkt);
+  const candles = await loadPatternCandlesV3(sym, mkt, { signal: request.controller.signal });
+  if (!ownsPatternModal(request)) { cancelPatternRequest(request, true); return; }
   let panelHtml;
   if (!candles) {
     panelHtml = `<div style="padding:14px;text-align:center;font-family:monospace;font-size:10px;color:var(--red);line-height:1.7">
       無法載入 ${sym} 的歷史日 K 線<br>
-      <span style="font-size:9px;color:var(--tf)">請確認 server.py (:18432) 運作中</span>
+      <span style="font-size:9px;color:var(--tf)">請稍後重試，並確認資料服務可用</span>
     </div>`;
   } else {
     panelHtml = renderPatternsPanelV3(candles);
@@ -1564,12 +1589,14 @@ async function showPatternsModalV3() {
     <div style="border-top:1px solid var(--border);margin:-2px -24px 6px">${panelHtml}</div>
     ${candles ? '<div id="pat-hit-rates" style="border-top:1px solid var(--border);margin:0 -24px 6px"></div>' : ''}
     <div style="margin-top:10px;font-family:monospace;font-size:8.5px;color:var(--tf);line-height:1.7">
-      ⚠ 形態辨識僅為技術面參考。<br>
+      ⚠ 型態描述只表示符合幾何／指標規則，未經勝率排序，不代表獲利機率。<br>
       v3 諧波/艾略特/週期建議搭配基本面、量能、大盤判斷。長按 🤖 按鈕可在 chart 上 toggle overlay。
     </div>`;
-  if (typeof showProModal === 'function') showProModal(html);
-  const hitHost = document.getElementById('pat-hit-rates');
-  if (hitHost && candles) renderHitRatesV3(hitHost, candles);
+  const content = request.modal.querySelector(`[data-pattern-request="${request.revision}"]`);
+  if (!content) { cancelPatternRequest(request, true); return; }
+  content.innerHTML = html;
+  const hitHost = content.querySelector('#pat-hit-rates');
+  if (hitHost && candles) renderHitRatesV3(hitHost, candles, () => ownsPatternModal(request));
 }
 
 // ============================================================
