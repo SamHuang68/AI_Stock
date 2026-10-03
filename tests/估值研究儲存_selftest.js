@@ -221,7 +221,7 @@ test('價格核對收據與成交量衝突分開呈現且來源文字不注入 H
   h.api.renderFacts();
   const html = h.element('vr-facts').innerHTML;
   assert.match(html, /官方收據逐欄核對/);
-  assert.match(html, /官方量與原始量不一致，留空待核對/);
+  assert.match(html, /官方量與原始量不一致，研究量留空待核對/);
   assert.match(html, /未記錄；不以核對來源代替/);
   assert.match(html, /2026-10-03T01:25:00Z/);
   assert.match(html, /2026-10-03T09:00:00Z/);
@@ -298,3 +298,16 @@ test('開啟後權限降低清除畫面私人副本，但保留原儲存資料',
   console.log('通過：舊股票的延遲回應不覆蓋新研究視窗');
   console.log('估值研究儲存與頁面：' + count + ' 組測試全部通過。');
 })().catch(error => { console.error(error); process.exitCode = 1; });
+
+test('官方研究量與原始數值並列，差異不冒充來源或單位', () => {
+  const h = harness();
+  const volume = { status: 'selected', value: 15792206, rawValue: 15071494, numericDifference: 720712,
+    source: 'TWSE', asOf: '2026-10-02', unit: '股', rawSource: null, rawUnit: null };
+  h.api.open('2330', { sym: '2330', research: { volumeShares: 15792206, volumeConflict: true,
+    officialResearchVolume: volume, volumeDifferences: [volume], volumeBasis: 'official-receipt' } });
+  h.api.renderFacts();
+  const html = h.element('vr-facts').innerHTML;
+  for (const value of ['15,792,206', '15,071,494', '720,712', 'TWSE／2026-10-02',
+    '研究採完整官方股數；原始量差異保留', '單位未記錄', '查看研究期間的成交量差異']) assert.ok(html.includes(value), value);
+  assert.doesNotMatch(html, /留空待核對/);
+});

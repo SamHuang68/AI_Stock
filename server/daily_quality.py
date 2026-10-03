@@ -266,7 +266,7 @@ def quality_evidence(conn, symbol, market='TW', *, board=None, start=None, end=N
         return {}
     def in_range(day):
         return bool(day and (start is None or day >= start) and (end is None or day <= end))
-    raw, observations, linked, receipt_counts = {}, {}, {}, {}
+    raw, observations, linked, receipt_counts, covered = {}, {}, {}, {}, {}
     for row in conn.execute('SELECT ts,open,high,low,close,volume FROM bars WHERE market=? AND symbol=?', (market, symbol)):
         day = _day(row[0])
         if in_range(day):
@@ -309,7 +309,9 @@ def quality_evidence(conn, symbol, market='TW', *, board=None, start=None, end=N
                             'volumeUnit': '股'}
                 for r in records:
                     if any(o['source'] == r[1] and o['hash'] == r[2] and o['payload'] == r[3] for o in observations.get(r[0], [])):
-                        linked.setdefault(r[0], []).append({**metadata, 'linkedAt': r[12], 'rawOrigin': bool(r[13])})
+                        linked.setdefault(r[0], []).append({**metadata, 'linkedAt': r[12], 'rawOrigin': bool(r[13]),
+                                                            'sessionDate': r[0], 'volumeShares': json.loads(r[3])[5]})
+                        covered.setdefault(r[0], set()).add((r[1], r[2], r[3]))
             except (ValueError, TypeError, KeyError, IndexError, OverflowError):
                 continue
     result = {}
@@ -327,14 +329,36 @@ def quality_evidence(conn, symbol, market='TW', *, board=None, start=None, end=N
         usable = complete and not source_conflict and not bad_observation and len(bars) == 1
         price_verified = bool(usable and _valid_prices(row) and not price_conflict)
         volume_verified = bool(usable and row[5] is not None and isinstance(row[5], (int, float)) and
-                               not isinstance(row[5], bool) and math.isfinite(row[5]) and row[5] >= 0 and not volume_conflict)
+                               not isinstance(row[5], bool) and math.isfinite(row[5]) and row[5] >= 0 and float(row[5]).is_integer() and not volume_conflict)
+        raw_source = next((r['source'] for r in receipts if r['rawOrigin']), None)
+        # 另列研究值；既有 volumeVerified／衝突計數仍核對原始 bars，不改寫原值或來源。
+        official = [o['row'][5] for o in obs if o['valid']]
+        covered_all = bool(obs) and all((o['source'], o['hash'], o['payload']) in covered.get(day, set()) for o in obs)
+        shares_valid = bool(official) and all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                            and math.isfinite(v) and v >= 0 and float(v).is_integer() for v in official)
+        consensus = shares_valid and len(set(official)) == 1
+        reason = ('invalid_receipt' if bad_receipt else 'ambiguous_source_or_session' if source_conflict or len(bars) != 1 else
+                  'invalid_observation' if bad_observation else 'incomplete_receipts' if not complete or not covered_all else
+                  'unsupported_source' if sources != {'TWSE'} else 'price_not_verified' if not price_verified else
+                  'invalid_official_volume' if not shares_valid else 'official_revision_conflict' if not consensus else None)
+        selected = reason is None
+        raw_volume = row[5] if row else None
+        raw_numeric = isinstance(raw_volume, (int, float)) and not isinstance(raw_volume, bool) and math.isfinite(raw_volume)
+        research_volume = {'version': 'official-research-volume-1', 'status': 'selected' if selected else 'unavailable',
+                           'reason': reason, 'value': official[0] if selected else None,
+                           'source': 'TWSE' if selected else None, 'asOf': day, 'unit': '股' if selected else None,
+                           'receiptIds': sorted({r['receiptId'] for r in receipts}) if selected else [],
+                           'rawValue': raw_volume, 'rawSource': raw_source, 'rawUnit': '股' if raw_source == 'TWSE' else None,
+                           'numericDifference': official[0] - raw_volume if selected and raw_numeric else None,
+                           'differenceBasis': '官方股數減原始數值；原始單位未證實時僅為數值差，不推定交易類別或換算'}
         result[day] = {'priceVerified': price_verified, 'volumeVerified': volume_verified,
+                       'officialResearchVolume': research_volume,
                        'priceConflict': price_conflict, 'volumeConflict': volume_conflict,
                        'sourceConflict': source_conflict, 'receiptComplete': complete,
                        'ambiguousSession': len(bars) > 1, 'invalidObservation': bad_observation, 'invalidReceipt': bad_receipt,
                        'rawPresent': bool(bars), 'observations': len(obs),
                        'revisions': max(0, len(obs) - 1), 'source': next(iter(sources)) if len(sources) == 1 else None,
-                       'rawSource': next((r['source'] for r in receipts if r['rawOrigin']), None),
+                       'rawSource': raw_source,
                        'receipts': receipts}
     return result
 

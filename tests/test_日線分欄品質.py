@@ -59,7 +59,7 @@ class ColumnQuality(unittest.TestCase):
         with datastore.read_snapshot(self.db) as conn:
             return quality.quality_evidence(conn, '2330', board='TWSE')[DAY]
 
-    def test_volume_only_conflict_preserves_raw_and_enables_price_only(self):
+    def test_volume_only_conflict_preserves_raw_and_selects_official_research_volume(self):
         self.seed_raw()
         official = (*BASE[:5], 1200)
         self.assertEqual(self.store(official), 0)
@@ -77,8 +77,15 @@ class ColumnQuality(unittest.TestCase):
                          {'observed': 1, 'accepted': 0, 'conflicts': 1, 'missing': 1, 'priceVerified': 1})
         bars, reasons = valuation.load_prices('2330', self.db, NOW, expected=DAY, board='TWSE')
         self.assertEqual(bars[-1]['close'], 101)
-        self.assertIsNone(bars[-1]['volume'])
-        self.assertFalse(bars[-1]['qualityValid'])
+        self.assertEqual(bars[-1]['volume'], 1200)
+        self.assertTrue(bars[-1]['qualityValid'])
+        selected = bars[-1]['officialResearchVolume']
+        self.assertEqual((selected['status'], selected['value'], selected['rawValue'], selected['numericDifference']),
+                         ('selected', 1200, 1000, 200))
+        self.assertIsNone(selected['rawUnit'])
+        self.assertEqual(selected['source'], 'TWSE')
+        self.assertEqual(selected['unit'], '股')
+        self.assertEqual(selected['asOf'], DAY)
         self.assertTrue(any('成交量' in reason for reason in reasons))
         obs = valuation.price_observation(bars, expected=DAY)
         self.assertTrue(obs['priceFresh'])
@@ -86,6 +93,9 @@ class ColumnQuality(unittest.TestCase):
         self.assertIsNone(obs['breakoutVolumeRatio'])
         self.assertIsNone(obs['rangePosition'])
         self.assertEqual(obs['volumeConflictDays'], [DAY])
+        self.assertEqual(obs['volumeDifferences'], [selected])
+        self.assertEqual(obs['volumeShares'], 1200)
+        self.assertEqual(obs['volumeBasis'], 'official-receipt')
 
     def test_bare_old_observation_cannot_upgrade_to_complete_receipt(self):
         self.seed_raw()
@@ -271,6 +281,87 @@ class ColumnQuality(unittest.TestCase):
         self.assertTrue(self.evidence()['invalidReceipt'])
         bars, _ = valuation.load_prices('2330', self.db, NOW, expected=DAY)
         self.assertIsNone(bars[-1]['close'])
+
+
+    def test_official_volume_revisions_require_consensus_not_latest_wins(self):
+        self.seed_raw()
+        self.store((*BASE[:5], 1200))
+        self.store((*BASE[:5], 1300))
+        self.store((*BASE[:5], 1200))
+        selected = self.evidence()['officialResearchVolume']
+        self.assertEqual(selected['reason'], 'official_revision_conflict')
+        self.assertIsNone(selected['value'])
+        self.assertEqual(selected['rawValue'], 1000)
+        bars, _ = valuation.load_prices('2330', self.db, NOW, expected=DAY)
+        self.assertIsNone(bars[-1]['volume'])
+        self.assertFalse(bars[-1]['qualityValid'])
+
+    def test_unreceipted_observation_is_not_silently_promoted_by_another_receipt(self):
+        self.store()
+        digest, _ = receipt_for([BASE], notes=['另一份未留存的完整回應'])
+        datastore.upsert_bars('2330', 'TW', [BASE], source='TWSE', source_hash=digest, path=self.db)
+        self.assertEqual(self.evidence()['officialResearchVolume']['reason'], 'incomplete_receipts')
+
+    def test_seven_known_volume_differences_use_official_shares_and_leave_raw_unchanged(self):
+        cases = [
+            ('0050', '2026-09-23', 55410585, 58059253, 2648668),
+            ('0050', '2026-09-24', 66490792, 70487939, 3997147),
+            ('2330', '2026-09-23', 20406553, 22817873, 2411320),
+            ('2330', '2026-09-24', 13043734, 14557662, 1513928),
+            ('2330', '2026-09-29', 25532143, 26893348, 1361205),
+            ('2330', '2026-09-30', 32442982, 34282491, 1839509),
+            ('2330', '2026-10-02', 15071494, 15792206, 720712)]
+        for code, day, raw_volume, official, delta in cases:
+            with self.subTest(code=code, day=day):
+                date = datetime.fromisoformat(day).replace(tzinfo=quality.TAIPEI, hour=9)
+                row = (int(date.timestamp()), *BASE[1:5], raw_volume)
+                with closing(sqlite3.connect(self.db)) as conn, conn:
+                    conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', (code, 'TW', *row))
+                payload = {'stat': 'OK', 'date': date.strftime('%Y%m01'),
+                           'title': f'115年{date.month:02}月 {code} 測試 各日成交資訊',
+                           'fields': quality.MONTH_FIELDS,
+                           'notes': ['含一般、零股、盤後定價、鉅額交易；不含拍賣及標購。'],
+                           'data': [[date.strftime('115/%m/%d'), official, '100000', *row[1:5]]]}
+                raw = json.dumps(payload, ensure_ascii=False)
+                receipt = {'url': 'https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=' +
+                           date.strftime('%Y%m01') + '&stockNo=' + code, 'raw_text': raw,
+                           'retrieved_at': '2026-10-03T00:00:00+00:00', 'parser_version': quality.RECEIPT_PARSER_VERSION}
+                datastore.upsert_bars(code, 'TW', [(*row[:5], official)], source='TWSE',
+                                     source_hash=hashlib.sha256(raw.encode()).hexdigest(), source_receipt=receipt, path=self.db)
+                with datastore.read_snapshot(self.db) as conn:
+                    item = quality.quality_evidence(conn, code, board='TWSE', start=day, end=day)[day]
+                    self.assertEqual(conn.execute('SELECT volume FROM bars WHERE market=? AND symbol=? AND ts=?',
+                                                 ('TW', code, row[0])).fetchone()[0], raw_volume)
+                volume = item['officialResearchVolume']
+                self.assertEqual((volume['status'], volume['value'], volume['numericDifference']), ('selected', official, delta))
+                self.assertFalse(item['volumeVerified'])
+                self.assertTrue(item['volumeConflict'])
+                self.assertIsNone(volume['rawSource'])
+                self.assertEqual(volume['receiptIds'], [item['receipts'][0]['receiptId']])
+        result = valuation.get_research('0050', database=self.db, lookup=lambda *_: None, now=NOW)
+        self.assertEqual(result['row']['research']['scopeReasonCode'], 'excludedNonStock')
+
+    def test_official_zero_null_fractional_and_bad_price_stay_distinct(self):
+        for value, selected in ((0, True), (None, False), (0.5, False)):
+            with self.subTest(value=value):
+                # 不同股票獨立留存，不把本案例誤變成來源修訂。
+                path = Path(self.temp.name) / ('volume-' + str(value) + '.db')
+                datastore.init_db(path)
+                row = (*BASE[:5], value)
+                digest, receipt = receipt_for([row])
+                datastore.upsert_bars('2330', 'TW', [row], source='TWSE', source_hash=digest,
+                                     source_receipt=receipt, path=path)
+                with datastore.read_snapshot(path) as conn:
+                    item = quality.quality_evidence(conn, '2330')[DAY]['officialResearchVolume']
+                self.assertEqual(item['status'], 'selected' if selected else 'unavailable')
+                self.assertEqual(item['value'], 0 if selected else None)
+                bars, _ = valuation.load_prices('2330', path, NOW)
+                self.assertEqual(bars[-1]['volume'], 0 if selected else None)
+                self.assertEqual(bars[-1]['qualityValid'], selected)
+                self.assertEqual(bars[-1]['volumeVerified'], selected)
+        self.seed_raw()
+        self.store((STAMP, 100, 102, 98, 102, 1200))
+        self.assertEqual(self.evidence()['officialResearchVolume']['reason'], 'price_not_verified')
 
 
 if __name__ == '__main__':

@@ -15,7 +15,7 @@ from 台股基本面 import (INCOME_DATASETS, REVENUE_DATASETS, income_record,
                       number, pick, revenue_record, source_date)
 from 三合一選股 import chip_fields, load_chip_snapshots, market_sessions, matches
 
-VERSION = 'valuation-research-3'
+VERSION = 'valuation-research-4'
 IP_REVIEW = {'3529': '力旺', '6643': 'M31'}
 PE_DATASETS = ('exchangeReport/BWIBBU_ALL', 'tpex:tpex_mainboard_peratio_analysis')
 SCOPE_REASONS = {
@@ -114,9 +114,14 @@ def load_prices(code, database, now, expected=None, board=None):
                 conflict = (verified.get('sourceConflict') or verified.get('invalidObservation') or
                             verified.get('invalidReceipt') or verified.get('ambiguousSession'))
                 price_valid = bool((valid or verified.get('priceVerified')) and not conflict and not verified.get('priceConflict'))
-                volume_valid = bool((valid or verified.get('volumeVerified')) and not conflict and not verified.get('volumeConflict'))
+                raw_volume = number(item['volume'])
+                volume_valid = bool((valid or verified.get('volumeVerified')) and not conflict and not verified.get('volumeConflict')
+                                    and raw_volume is not None and raw_volume >= 0 and float(raw_volume).is_integer())
+                official_volume = verified.get('officialResearchVolume', {})
+                official_selected = official_volume.get('status') == 'selected'
+                research_volume = official_volume['value'] if official_selected else raw_volume if volume_valid else None
                 source = verified.get('source') if verified.get('priceVerified') else item['source']
-                bar = {'date': day, 'source': source, 'qualityValid': price_valid and volume_valid,
+                bar = {'date': day, 'source': source, 'qualityValid': price_valid and (official_selected or volume_valid),
                        'priceVerified': verified.get('priceVerified', False),
                        'volumeVerified': verified.get('volumeVerified', False),
                        'priceConflict': verified.get('priceConflict', False),
@@ -124,8 +129,10 @@ def load_prices(code, database, now, expected=None, board=None):
                        'receiptComplete': verified.get('receiptComplete', False),
                        'sourceReceipts': verified.get('receipts', []),
                        'rawSource': verified.get('rawSource'),
+                       'officialResearchVolume': official_volume,
+                       'volumeBasis': 'official-receipt' if official_selected else 'legacy-quality' if volume_valid else None,
                        **{k: number(item[k]) if price_valid else None for k in ('open', 'high', 'low', 'close')},
-                       'volume': number(item['volume']) if volume_valid else None}
+                       'volume': research_volume}
                 prices = [bar[k] for k in ('open', 'high', 'low', 'close')]
                 if not all(v is not None and v > 0 for v in prices) or not (
                         bar['low'] <= min(bar['open'], bar['close']) <= max(bar['open'], bar['close']) <= bar['high']):
@@ -150,8 +157,11 @@ def load_prices(code, database, now, expected=None, board=None):
         reasons.append('本機沒有可核對的已完成交易日日線')
     elif rows[-1].get('close') is None:
         reasons.append('最近交易日日線缺少官方來源、完整價格或品質核對')
-    if any(bar.get('volumeConflict') for bar in rows):
-        reasons.append('官方成交量與原始日線不一致；衝突日成交量留空，量型與技術篩選不予確認')
+    conflicts = [bar for bar in rows if bar.get('volumeConflict')]
+    if any(bar.get('officialResearchVolume', {}).get('status') == 'selected' for bar in conflicts):
+        reasons.append('部分官方成交量與原始量不同；研究採完整 TWSE 收據股數，原值、差異及來源未知狀態保留')
+    if any(bar.get('officialResearchVolume', {}).get('status') != 'selected' for bar in conflicts):
+        reasons.append('部分成交量衝突尚無一致完整官方收據；該日研究量留空，量型與技術篩選不予確認')
     if rows and rows[-1].get('priceVerified') and rows[-1].get('rawSource') is None:
         reasons.append('原始日線來源未記錄；價格僅由另存的官方收據核對，不回填原始來源')
     if not expected:
@@ -185,6 +195,10 @@ def price_observation(bars, *, expected=None):
             'priceFresh': bool(fresh and close is not None), 'volumeShares': volume,
             'priceVerified': last.get('priceVerified', False),
             'volumeVerified': last.get('volumeVerified', False),
+            'volumeBasis': last.get('volumeBasis'),
+            'officialResearchVolume': last.get('officialResearchVolume', {}),
+            'volumeDifferences': [bar['officialResearchVolume'] for bar in bars
+                                  if bar.get('volumeConflict') and bar.get('officialResearchVolume')],
             'volumeConflict': last.get('volumeConflict', False),
             'volumeConflictDays': [bar['date'] for bar in bars if bar.get('volumeConflict')],
             'sourceReceipts': last.get('sourceReceipts', []),
@@ -194,7 +208,7 @@ def price_observation(bars, *, expected=None):
             'drawdown100': (close / peak - 1) * 100 if peak and close else None,
             'rangeTop': top, 'rangeBottom': bottom, 'distanceToTopPct': distance,
             'rangePosition': state, 'breakoutVolumeRatio': ratio,
-            'breakoutVolumeBasis': '當日成交股數／前二十個完整交易日平均成交股數'}
+            'breakoutVolumeBasis': '當日研究成交股數／前二十個完整交易日平均研究成交股數；優先完整 TWSE 收據，其次既有有效品質紀錄，缺值不補零'}
 
 
 def _fundamentals(code, lookup, now, board):
