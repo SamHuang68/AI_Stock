@@ -618,7 +618,7 @@ function renderWatch() {
   h += renderWatchListBody();
   h += renderWatchForm();
   h += renderStrategyPlaybook();
-  h += '<div style="padding:14px 12px 18px;font-family:monospace;font-size:8.5px;color:var(--tf);line-height:1.7">⚠ 訊號僅供參考。多訊號共振只提升勝率，不保證獲利。資金管理 > 選股。WD chip 來自 WaveDeck 執行台狀態。</div>';
+  h += '<div style="padding:14px 12px 18px;font-family:monospace;font-size:8.5px;color:var(--tf);line-height:1.7">⚠ 訊號僅供參考。多訊號同時符合不代表勝率提高或保證獲利。資金管理 > 選股。WD chip 來自 WaveDeck 執行台狀態。</div>';
   return h;
 }
 

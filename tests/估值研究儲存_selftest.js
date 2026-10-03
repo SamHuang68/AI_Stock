@@ -311,3 +311,69 @@ test('官方研究量與原始數值並列，差異不冒充來源或單位', ()
     '研究採完整官方股數；原始量差異保留', '單位未記錄', '查看研究期間的成交量差異']) assert.ok(html.includes(value), value);
   assert.doesNotMatch(html, /留空待核對/);
 });
+
+function volumeFacts(overrides = {}, receipts, researchOverrides = {}) {
+  const h = harness();
+  const volume = { status: 'selected', value: 1000, rawValue: 1000, numericDifference: 0,
+    source: 'TWSE', asOf: '2026-10-02', unit: '股', rawSource: null, rawUnit: null,
+    receiptIds: ['當日收據'], ...overrides };
+  h.api.open('2330', { sym: '2330', research: { volumeShares: volume.value, volumeVerified: true,
+    volumeConflict: false, officialResearchVolume: volume, volumeBasis: 'official-receipt',
+    sourceReceipts: receipts === undefined ? [{ receiptId: '當日收據', sessionDate: '2026-10-02',
+      source: 'TWSE', rawOrigin: false }] : receipts, ...researchOverrides } });
+  h.api.renderFacts();
+  return h.element('vr-facts').innerHTML;
+}
+test('官方首次建列的零差異明示同源，不冒充獨立交叉核對', () => {
+  const html = volumeFacts({ rawSource: 'TWSE', rawUnit: '股' }, [{
+    receiptId: '當日收據', sessionDate: '2026-10-02', source: 'TWSE', rawOrigin: true
+  }]);
+  assert.match(html, /官方收據首次建列；同源資料，非獨立交叉核對/);
+  assert.match(html, /官方減原始數值差<\/dt><dd>0<\/dd>/);
+  assert.match(html, /交易日：2026-10-02；收據：當日收據/);
+});
+test('等值既存列保留未知原始來源，來源名稱不同也不宣稱上游獨立', () => {
+  assert.match(volumeFacts(), /既存原始值與官方收據相符；原始來源未記錄，來源獨立性未確認/);
+  const html = volumeFacts({ rawSource: '另一供應商', rawUnit: '股' });
+  assert.match(html, /來源名稱不代表上游獨立，來源獨立性未確認/);
+  assert.doesNotMatch(html, /同源資料|已完成獨立交叉核對/);
+});
+test('缺收據、別日或未選定的收據不能推定同源', () => {
+  const original = { receiptId: '當日收據', sessionDate: '2026-10-02', source: 'TWSE', rawOrigin: true };
+  const cases = [
+    [{}, []],
+    [{ receiptIds: [] }, [original]],
+    [{ receiptIds: ['當日收據', '缺少收據'] }, [original]],
+    [{}, [{ ...original, sessionDate: '2026-10-01' }]],
+    [{}, [{ ...original, receiptId: '別份收據' }]],
+    [{}, [{ ...original, source: 'TPEX' }]],
+    [{ asOf: null }, [{ ...original, sessionDate: null }]],
+    [{}, [{ ...original, rawOrigin: 'true' }]],
+    [{}, [{ ...original, rawOrigin: undefined }]],
+    [{ status: 'unavailable' }, [original]],
+  ];
+  for (const [volume, receipts] of cases) {
+    const html = volumeFacts(volume, receipts);
+    assert.match(html, /來源獨立性.*未確認/);
+    assert.doesNotMatch(html, /官方收據首次建列；同源資料/);
+  }
+});
+test('同日多份選定收據保留首次建列證據，不受陣列順序影響', () => {
+  const receipts = [
+    { receiptId: '後續收據', sessionDate: '2026-10-02', source: 'TWSE', rawOrigin: false },
+    { receiptId: '當日收據', sessionDate: '2026-10-02', source: 'TWSE', rawOrigin: true }
+  ];
+  assert.match(volumeFacts({ receiptIds: ['當日收據', '後續收據'] }, receipts), /同源資料，非獨立交叉核對/);
+  assert.match(volumeFacts({ receiptIds: ['後續收據', '當日收據'] }, receipts.slice().reverse()), /同源資料，非獨立交叉核對/);
+});
+test('來源關係說明不抹除成交量衝突，收據識別文字仍轉義', () => {
+  const volume = { value: 1200, rawValue: 1000, numericDifference: 200 };
+  const html = volumeFacts(volume, undefined, { volumeConflict: true, volumeVerified: false,
+    volumeDifferences: [{ ...volume, asOf: '2026-10-02', status: 'selected', rawUnit: null }] });
+  assert.match(html, /研究採完整官方股數；原始量差異保留/);
+  assert.match(html, /既存原始值與官方收據比對；原始來源未記錄，來源獨立性未確認/);
+  for (const value of ['1,200', '1,000', '200', '單位未記錄']) assert.ok(html.includes(value), value);
+  const escaped = volumeFacts({}, [{ receiptId: '<img>', sessionDate: '<script>', source: 'TWSE', rawOrigin: true }]);
+  assert.match(escaped, /交易日：&lt;script&gt;；收據：&lt;img&gt;/);
+  assert.doesNotMatch(escaped, /<img>|<script>/);
+});
