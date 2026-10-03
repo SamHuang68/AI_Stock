@@ -60,7 +60,8 @@ class ResearchGapTests(unittest.TestCase):
         fetch.assert_not_called()
         intraday = [(int(now.timestamp()), 100, 101, 99, 100, 10)]
         with patch.object(routes, '_datastore', return_value=ds), patch.object(ds, 'get_bars', return_value=[]), \
-                patch.object(routes, '_fetch_remote', return_value=intraday), patch.object(ds, 'upsert_bars') as write:
+                patch.object(routes, '_fetch_remote', return_value=intraday), patch.object(ds, 'upsert_bars') as write, \
+                patch.object(ds, 'source_revision_status', return_value={'count': 0}):
             result = routes.load_bars('2330', 'TW', now=now)
         self.assertTrue(result['provisional'])
         write.assert_not_called()

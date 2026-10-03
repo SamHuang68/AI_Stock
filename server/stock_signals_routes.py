@@ -52,7 +52,6 @@ _remote_fail: Dict[Tuple[str, str], float] = {}   # 補抓失敗的 neg-cache：
 REMOTE_FAIL_TTL = 600.0
 REMOTE_FETCH_SECONDS = 8.0
 _remote_pool = BoundedExecutor(max_workers=4, max_in_flight=4, prefix='stock-health-source')
-_db_ready = False
 
 
 class SourceBusyError(TimeoutError):
@@ -110,11 +109,9 @@ def session_state(market: str, last_bar_date: Optional[str],
 
 # ── 日 K 載入 ────────────────────────────────────────────────
 def _datastore():
-    global _db_ready
+    # server.py 在接收請求前完成 schema／備份；讀取體檢不可再次等待全域寫鎖。
+    # 腳本呼叫者亦須先在啟動／維護邊界初始化，不能以 GET 隱式建表或遷移。
     import datastore
-    if not _db_ready:
-        datastore.init_db()
-        _db_ready = True
     return datastore
 
 
@@ -313,8 +310,15 @@ class StockSignalsRoutesMixin:
             return
         market = infer_market(code, (qs.get('market') or [''])[0])
         cache_only = (qs.get('cacheOnly') or ['0'])[0] == '1'
+        started = time.perf_counter()
         try:
-            result = analyze_symbol(code, market, allow_network=not cache_only)
+            result = dict(analyze_symbol(code, market, allow_network=not cache_only))
+            # 與瀏覽器端總耗時區分，供下次定點驗收判斷排隊／傳輸或來源處理。
+            # 不修改共用分析快取，也不把此時間稱為完整 HTTP 往返。
+            result['requestTiming'] = {
+                'serverElapsedMs': round((time.perf_counter() - started) * 1000, 3),
+                'scope': 'handler-to-payload',
+            }
         except Exception as exc:
             self._err(f'stock signals failed: {type(exc).__name__}', 500)
             return

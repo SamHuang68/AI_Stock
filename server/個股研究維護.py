@@ -1,11 +1,13 @@
 """研究品質與維護工作；持久狀態、共用佇列、離線每日留存。"""
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import threading
 import time
 import uuid
+from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -231,10 +233,18 @@ def capture(now=None):
     if not ledger.exists():
         return {'status': 'disabled', 'reason': '尚未啟用每日留存'}
     chips = pool._load_all_chips(str(Path(datastore.DB_PATH).parent / 'chip_history'))
+    # 七十根僅限制新增訊號；既有事件仍須取得目前可用行情核對成熟度。
+    with closing(sqlite3.connect(ledger.resolve().as_uri() + '?mode=ro', uri=True, timeout=1)) as ledger_conn:
+        ledger_conn.execute('PRAGMA query_only=ON')
+        ledger_conn.execute('BEGIN')
+        pending = {row[0] for row in ledger_conn.execute(
+            'SELECT DISTINCT e.symbol FROM daily_events e WHERE '
+            '(SELECT count(*) FROM daily_outcomes o WHERE o.event_id=e.id)<2')}
     with datastore.read_snapshot() as conn:
         benchmark = ss.normalize_bars(datastore.get_bars_bulk(['^TWII'], connection=conn).get('^TWII') or [])
-        codes = datastore.list_symbols('TW', ss.MIN_BARS, connection=conn)
-        return daily.capture(ledger, pool.iter_datastore('TW', symbols=codes, connection=conn), benchmark, chips, now=now)
+        codes = sorted(set(datastore.list_symbols('TW', ss.MIN_BARS, connection=conn)) | pending)
+        series = pool.iter_datastore('TW', symbols=codes, connection=conn) if codes else ()
+        return daily.capture(ledger, series, benchmark, chips, now=now)
 
 
 def check_evidence(*, recalculate=False, nightly_day=None, now=None, errors=None):

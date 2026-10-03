@@ -156,7 +156,7 @@ def capture(path, series, benchmark, chips=None, now=None):
             tradable_dates[day] = session(day)['status'] != 'closed'
         return tradable_dates[day]
     finalized = (now.hour, now.minute) >= (14, 0)
-    benchmark = [b for b in benchmark if tradable(b['date']) and
+    benchmark = [b for b in benchmark if ss.complete_bar(b) and tradable(b['date']) and
                  (b['date'] < today or (finalized and b['date'] == today))]
     sessions = sorted({b['date'] for b in benchmark})
     counts = {'scanned': 0, 'currentSymbols': 0, 'eventsAdded': 0, 'outcomesAdded': 0,
