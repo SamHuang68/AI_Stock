@@ -147,6 +147,27 @@
   }
   function evaluate() { return core().evaluate(observation(), readProfile(), active.settings); }
   function pair(label, value) { return '<dt>' + esc(label) + '</dt><dd>' + esc(value) + '</dd>'; }
+  function volumeProvenance(volume, research) {
+    if (volume.status !== 'selected') return '官方研究量尚未選定；來源獨立性未確認';
+    const ids = Array.isArray(volume.receiptIds) ? volume.receiptIds : [];
+    const receipts = Array.isArray(research.sourceReceipts) ? research.sourceReceipts : [];
+    const selectedReceipts = receipts.filter(receipt => receipt && receipt.sessionDate === volume.asOf &&
+      receipt.source === volume.source && ids.includes(receipt.receiptId));
+    // 零差異、來源名稱或別日收據，都不能代替當日選定收據的首次建列證據。
+    const complete = volume.asOf && ids.length && ids.every(id => typeof id === 'string' && id &&
+      selectedReceipts.some(receipt => receipt.receiptId === id));
+    if (!complete) return '選定收據的日期或連結不完整；同源與來源獨立性均未確認';
+    if (selectedReceipts.some(receipt => receipt.rawOrigin === true)) {
+      return '官方收據首次建列；同源資料，非獨立交叉核對';
+    }
+    if (!selectedReceipts.every(receipt => receipt.rawOrigin === false)) {
+      return '收據未提供首次建列標記；同源與來源獨立性均未確認';
+    }
+    const relation = research.volumeVerified === true && !research.volumeConflict && volume.numericDifference === 0 ?
+      '既存原始值與官方收據相符' : '既存原始值與官方收據比對';
+    return relation + (volume.rawSource ? '；來源名稱不代表上游獨立，來源獨立性未確認' :
+      '；原始來源未記錄，來源獨立性未確認');
+  }
   function facts() {
     const row = active.row || {}, research = row.research || {};
     const volume = research.officialResearchVolume || {}, selected = volume.status === 'selected';
@@ -164,6 +185,7 @@
       pair('成交量核對', selected ? (research.volumeConflict ? '研究採完整官方股數；原始量差異保留' : '完整官方收據一致') :
         research.volumeConflict ? '官方量與原始量不一致，研究量留空待核對' :
         research.volumeVerified ? '官方收據逐欄核對' : '未保存完整來源收據或資料尚缺') +
+      pair('成交量來源關係', volumeProvenance(volume, research)) +
       pair('研究資料版本', research.contractVersion || '未提供') +
       pair('價格基準', research.priceBasis || '未核對') +
       pair('月營收年增／期別', percent(row.revYoy) + '／' + (research.revenuePeriod || '未提供')) +
@@ -177,6 +199,7 @@
       (Array.isArray(research.sourceReceipts) && research.sourceReceipts.length ?
         '<details class="vr-muted" style="overflow-wrap:anywhere"><summary>查看量價核對收據</summary>' + research.sourceReceipts.map(receipt =>
           '<p>' + esc(receipt.source || '未提供') + '／' + esc(receipt.parserVersion || '未提供') +
+          '<br>交易日：' + esc(receipt.sessionDate || '未提供') + '；收據：' + esc(receipt.receiptId || '未提供') +
           '<br>取得：' + esc(receipt.retrievedAt || '未提供') + '；寫入：' + esc(receipt.writtenAt || '未提供') +
           '<br>來源：' + esc(receipt.url || '未提供') + '<br>雜湊：' + esc(receipt.sourceHash || '未提供') +
           '<br>來源說明：' + esc(Array.isArray(receipt.notes) ? receipt.notes.join('；') : '未提供') + '</p>').join('') + '</details>' : '') +

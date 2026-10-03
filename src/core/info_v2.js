@@ -33,7 +33,7 @@ const INFO_CONTENT = {
       '• K < D：短線轉弱（死亡交叉賣出）\n' +
       '• K > 80 過熱、K < 20 過冷\n\n' +
       '【實戰】\n' +
-      'K 在 < 20 區突破 D（低檔黃金交叉）勝率最高。'
+      'K 在 < 20 區突破 D，表示符合低檔黃金交叉條件；不代表已驗證勝率。'
   },
   'ind:D': {
     title: 'KD-D（隨機指標 D 值）',
@@ -309,8 +309,8 @@ document.addEventListener('click', function (ev) {
         '\n\n【適用】\n' + p.when +
         `\n\n【包含 ${p.signals.length} 個訊號】\n` + sigList +
         '\n\n【為何組合】\n' +
-        '單一訊號勝率有限，多訊號共振 (Confluence) 可把勝率推到 70~80%。\n' +
-        '這個劇本經過專業投資人常用組合篩選，互相補強不同維度。',
+        '多訊號同時符合，表示不同條件在同一時點成立，不代表勝率提高。\n' +
+        '這些劇本是規則組合；歷史統計與真實前瞻結果需分開核對，尚未驗證的組合不推定有效。',
     };
   }
   console.log('[v2-info] loaded', Object.keys(INFO_CONTENT).length, 'info entries');

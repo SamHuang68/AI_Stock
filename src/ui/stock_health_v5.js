@@ -350,7 +350,7 @@
     if (mode !== 'beginner') {
       if (d.market === 'TW') html += '<details class="sh5-sec" id="sh5-research"><summary>研究維護與每日事件留存</summary><div id="sh5-research-body">展開後讀取本機狀態。</div></details>';
       html += '<div class="sh5-sec"><details id="sh5-pool"><summary style="cursor:pointer;font:800 11px \'Noto Sans TC\',sans-serif;color:var(--gold,#fbbf24)">' +
-        '訊號成績單（同市場合併統計：哪些訊號真的有資訊？）</summary><div id="sh5-pool-body">' + scoreboardHtml(poolCache) + '</div></details></div>';
+        '訊號成績單（同市場合併統計：哪些訊號真的有資訊？）</summary><div id="sh5-pool-body">' + scoreboardHtml(poolCache[d.market]) + '</div></details></div>';
       if (d.market === 'TW') html += '<details class="sh5-sec" id="sh5-comparison"><summary>歷史研究與真實前瞻對照</summary><div id="sh5-comparison-body">展開後唯讀檢視每日帳本。</div></details>';
     }
     if (mode === 'pro') {
@@ -436,7 +436,7 @@
   }
 
   var pushCfg = null;
-  var poolCache = null;
+  var poolCache = {};     // market → pooled snapshot；只接納仍屬於目前卡片的回覆
   function qualityHtml(q, mode) {
     if (!q) return '<div class="sh5-foot">資料品質尚未提供，請以各來源日期核對。</div>';
     var names = { aligned: '已對齊', stale: '待更新', missing: '缺資料', unknown: '待確認' };
@@ -660,8 +660,8 @@
       '<div class="sh5-foot" style="overflow-wrap:anywhere">方法指紋 ' + esc(p.currentMethodDigest || '未知') + '</div></details>';
     return html + '<button type="button" class="sh5-btn" data-comparison-refresh>重新讀取對照</button>';
   }
-  function loadPool(market) {
-    return getJson('/stock-signals/pooled?market=' + (market || 'TW')).then(function (p) { poolCache = p; return p; });
+  function loadPool(market, options) {
+    return getJson('/stock-signals/pooled?market=' + market, options);
   }
   function loadPushCfg(options) {
     return getJson('/stock-signals/push-config', options).then(function (c) { pushCfg = c; return c; })
@@ -747,7 +747,7 @@
             var c = body.querySelector('#sh5-daily-enable');
             var sourceConsent = body.querySelector('#sh5-source-consent');
             postJson('/stock-signals/research/refresh', { enableDaily: !!(c && c.checked), downloadSources: !!(sourceConsent && sourceConsent.checked) }).then(function () {
-              cache = {}; poolCache = null; return loadResearch();
+              cache = {}; poolCache = {}; return loadResearch();
             }).catch(function (e) {
               body.querySelector('#sh5-research-error').textContent = '無法開始：' + e.message;
               body.querySelector('#sh5-research-refresh').disabled = false;
@@ -788,24 +788,61 @@
     if (aiBox) aiBox.onchange = savePush;
     var pool = el.querySelector('#sh5-pool');
     if (pool) {
-      var bindPool = function () {
-        var rb = el.querySelector('#sh5-pool-refresh');
-        if (rb) rb.onclick = function () {
-          rb.disabled = true;
-          postJson('/stock-signals/pooled/refresh', { market: d.market }).then(function () {
-            return loadPool(d.market);
-          }).then(function () {
-            var body = el.querySelector('#sh5-pool-body');
-            if (body) { body.innerHTML = scoreboardHtml(poolCache); bindPool(); }
-          }).catch(function () { rb.disabled = false; });
-        };
-      };
+      var poolBody = pool.querySelector('#sh5-pool-body'), poolCard = el.firstElementChild;
+      var poolRevision = 0, poolController = null;
+      function cancelPoolRead() {
+        poolRevision++;
+        if (poolController) poolController.abort();
+        poolController = null;
+      }
+      function ownsPool(revision, cacheOwner) {
+        var cur = currentSym();
+        return revision === poolRevision && cacheOwner === poolCache && pool.open && pool.isConnected &&
+          el.firstElementChild === poolCard && el.querySelector('#sh5-pool') === pool &&
+          pool.querySelector('#sh5-pool-body') === poolBody &&
+          (el.id !== 'rpanel' || (cur && cur.sym === d.symbol && cur.mkt === d.market && S.tab === 'health' &&
+            (!window.ShellV5 || typeof ShellV5.route !== 'function' || ShellV5.route() === 'chart')));
+      }
+      function bindPool() {
+        var button = poolBody.querySelector('#sh5-pool-refresh');
+        if (button) button.onclick = function () { return readPool(true); };
+      }
+      function readPool(recalculate) {
+        cancelPoolRead();
+        var revision = poolRevision, cacheOwner = poolCache;
+        if (!ownsPool(revision, cacheOwner)) return Promise.resolve();
+        poolController = typeof AbortController === 'function' ? new AbortController() : null;
+        var options = poolController ? { signal: poolController.signal } : {};
+        var button = poolBody.querySelector('#sh5-pool-refresh');
+        if (button) button.disabled = true;
+        var oldError = poolBody.querySelector('[data-pool-error]');
+        if (oldError) oldError.remove();
+        // 已啟動的後端計算不在此取消；離開原卡片後不再接續讀取或更新畫面。
+        var start = recalculate ? postJson('/stock-signals/pooled/refresh', { market: d.market }) : Promise.resolve();
+        return start.then(function () {
+          if (ownsPool(revision, cacheOwner)) return loadPool(d.market, options);
+        }).then(function (p) {
+          if (!ownsPool(revision, cacheOwner) || !p) return;
+          poolCache[d.market] = p;
+          poolBody.innerHTML = scoreboardHtml(p);
+          bindPool();
+        }).catch(function (e) {
+          if (!ownsPool(revision, cacheOwner)) return;
+          if (!poolCache[d.market]) poolBody.innerHTML = '';
+          var error = document.createElement('div');
+          error.setAttribute('data-pool-error', '');
+          error.innerHTML = '<div role="alert" class="sh5-warn">成績單讀取失敗：' +
+            esc(e && e.message || '連線錯誤') + (poolCache[d.market] ? '；保留上次成功資料。' : '') +
+            '</div><button type="button" class="sh5-btn" data-pool-retry>重新讀取</button>';
+          poolBody.appendChild(error);
+          error.querySelector('[data-pool-retry]').onclick = function () { return readPool(false); };
+        }).finally(function () {
+          if (ownsPool(revision, cacheOwner) && button && button.isConnected) button.disabled = false;
+        });
+      }
       pool.addEventListener('toggle', function () {
-        if (!pool.open) return;
-        loadPool(d.market).then(function () {
-          var body = el.querySelector('#sh5-pool-body');
-          if (body) { body.innerHTML = scoreboardHtml(poolCache); bindPool(); }
-        }).catch(function () {});
+        if (pool.open) readPool(false);
+        else cancelPoolRead();
       });
       bindPool();
     }

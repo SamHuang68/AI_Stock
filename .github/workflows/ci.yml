@@ -48,6 +48,8 @@ jobs:
         run: npm run test:data-browser
       - name: 型態視窗回覆歸屬與證據用語驗收
         run: npm run test:pattern-browser
+      - name: 成績單市場歸屬與分析依據驗收
+        run: npm run test:health-pool-browser
       - name: PowerShell launcher syntax
         if: runner.os == 'Windows'
         shell: pwsh
