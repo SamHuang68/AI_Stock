@@ -26,6 +26,11 @@ def load_adjustments(conn, symbol, cutoff):
     events = conn.execute("""SELECT session_date,kind,previous_close,reference_price,factor,status,reason,
         source_hash,source_url,retrieved_at,parser_version,payload_json FROM action_price_evidence
         WHERE market='TW' AND symbol=? AND session_date<=? ORDER BY session_date,kind""", (symbol, cutoff)).fetchall()
+    conflicts = {(row[0], row[1]) for row in conn.execute(
+        "SELECT DISTINCT session_date,kind FROM action_price_revisions WHERE market='TW' AND symbol=? AND session_date<=?", (symbol, cutoff))} if 'action_price_revisions' in tables else set()
+    # 首次證據本身保持不可覆寫；未核對的來源修訂在讀取時阻擋比較因子。
+    events = [(*row[:5], 'conflict', '官方公司行動來源修訂尚未核對；首次證據與新收據均保留', *row[7:])
+              if (row[0], row[1]) in conflicts else row for row in events]
     try:
         return {**base, 'status': 'loaded' if coverage else 'missing',
                 'reason': None if coverage else base['reason'],

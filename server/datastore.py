@@ -270,7 +270,9 @@ def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_
                 raise ValueError('來源 OHLCV 欄位不一致')
             old = existing.get(day)
             if old:
-                if all((a is None and b is None) or (a is not None and b is not None and math.isclose(a, b, rel_tol=1e-6, abs_tol=1e-5)) for a, b in zip(old[1:], row[1:])):
+                if (old[5] == row[5] and all((a is None and b is None) or
+                        (a is not None and b is not None and math.isclose(a, b, rel_tol=1e-6, abs_tol=1e-5))
+                        for a, b in zip(old[1:5], row[1:5]))):
                     counts['unchanged'] += 1
                     continue
                 record = {'source': source, 'original': old, 'revision': row, 'policy': '保留原始值，待核對來源修訂'}
@@ -307,7 +309,7 @@ def source_revision_status(symbol=None, market='TW', *, connection=None):
         return {'count': count, 'symbols': symbols, 'policy': '來源修訂另存；首次日線保留，未自動覆寫'}
 
 
-def upsert_bars(sym, market, rows, *, source=None, source_hash='', path=None, check=lambda: None):
+def upsert_bars(sym, market, rows, *, source=None, source_hash='', path=None, check=lambda: None, source_receipt=None):
     if source in ('TWSE', 'TPEX'):
         try:
             from .daily_quality import store_official
@@ -315,13 +317,15 @@ def upsert_bars(sym, market, rows, *, source=None, source_hash='', path=None, ch
             from daily_quality import store_official
         with _db_write_lock, closing(get_conn(path)) as conn, conn:
             check()
-            result = store_official(conn, sym, market, rows, source, source_hash, check=check)
+            result = store_official(conn, sym, market, rows, source, source_hash, check=check, source_receipt=source_receipt)
             check()
             return result
+    if source_receipt is not None:
+        raise ValueError('來源收據僅支援官方日線，禁止套用至其他來源')
     if path is not None:
         raise ValueError('一般來源更新使用既有資料庫契約，不允許改寫全域路徑')
     if source:
-        result = merge_source_bars(sym, market, rows, source)
+        result = merge_source_bars(sym, market, rows, source, check=check)
         return result['inserted'] + result['unchanged']
     with _db_write_lock:
         with closing(get_conn()) as conn:

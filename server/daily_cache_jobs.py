@@ -5,7 +5,7 @@ import re
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -56,12 +56,19 @@ class Budget:
         if self.remaining() < 0.05:
             raise TimeoutError('剩餘時間不足以取得來源資料')
         with urlopen(Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}),
-                     timeout=min(15, self.remaining())) as response:
+                      timeout=min(15, self.remaining())) as response:
             raw = response.read(12_000_001)
+        retrieved_at = datetime.now(timezone.utc).isoformat()
         self.check()
         if len(raw) > 12_000_000:
             raise ValueError('來源內容超出大小限制')
-        return json.loads(raw), hashlib.sha256(raw).hexdigest()
+        value, digest = json.loads(raw), hashlib.sha256(raw).hexdigest()
+        if '/STOCK_DAY?' in url:
+            from source_receipts import JsonSourceResponse
+            return JsonSourceResponse(value, digest, {
+                'url': url, 'raw_text': raw.decode('utf-8'), 'retrieved_at': retrieved_at,
+                'parser_version': 'twse-stock-day-v1'})
+        return value, digest
 
 
 def validate(body):

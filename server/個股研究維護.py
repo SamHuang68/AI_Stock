@@ -133,7 +133,10 @@ def status(report_before=None):
     report = reports.read_reports(report_path(), report_before)
     report.update(running=job_queue.is_busy(REPORT_JOB), dailyTime='20:40',
                   note='來源更新後檢查；每日20:40起於下一次背景檢查結報（約10分鐘內，工作繁忙時依序排隊），需主機運行。歷史報告完整保留。')
-    return {'running': busy, 'job': state, 'observations': daily.status(ledger), 'evidenceReports': report,
+    from 前瞻成熟診斷 import read_diagnostics
+    observations = daily.status(ledger)
+    observations['diagnostics'] = read_diagnostics(ledger)
+    return {'running': busy, 'job': state, 'observations': observations, 'evidenceReports': report,
             'schedule': schedule_status(), 'sourceRevisions': datastore.source_revision_status(),
             'sourceReviews': references().get('sourceReviews'),
             'inventory': inventory(), 'externalCallsOnRefresh': 0}

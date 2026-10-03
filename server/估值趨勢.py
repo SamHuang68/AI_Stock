@@ -8,13 +8,14 @@ from datetime import datetime, timedelta
 from typing import Mapping
 
 from datastore import read_snapshot
+from daily_quality import quality_evidence
 from exchange_source_dates import TAIPEI
 from market_contract import quote_contract, tw_symbol_code
 from 台股基本面 import (INCOME_DATASETS, REVENUE_DATASETS, income_record,
                       number, pick, revenue_record, source_date)
 from 三合一選股 import chip_fields, load_chip_snapshots, market_sessions, matches
 
-VERSION = 'valuation-research-2'
+VERSION = 'valuation-research-3'
 IP_REVIEW = {'3529': '力旺', '6643': 'M31'}
 PE_DATASETS = ('exchangeReport/BWIBBU_ALL', 'tpex:tpex_mainboard_peratio_analysis')
 SCOPE_REASONS = {
@@ -85,6 +86,7 @@ def load_prices(code, database, now, expected=None, board=None):
     try:
         with read_snapshot(database) as conn:
             conn.row_factory = sqlite3.Row
+            evidence = quality_evidence(conn, code, board=board, end=cutoff)
             raw = conn.execute('''SELECT b.*,q.session_date,q.source,q.volume_unit,q.price_basis,
                        q.issues,q.retrieved_at FROM bars b LEFT JOIN bar_quality q
                        ON b.market=q.market AND b.symbol=q.symbol AND b.ts=q.ts
@@ -108,8 +110,22 @@ def load_prices(code, database, now, expected=None, board=None):
                     issues = ['品質紀錄無效']
                 if any('來源' in str(issue) or '修訂' in str(issue) or '無效' in str(issue) for issue in issues):
                     valid = False
-                bar = {'date': day, 'source': item['source'], 'qualityValid': valid,
-                       **{k: number(item[k]) if valid else None for k in ('open', 'high', 'low', 'close', 'volume')}}
+                verified = evidence.get(day, {})
+                conflict = (verified.get('sourceConflict') or verified.get('invalidObservation') or
+                            verified.get('invalidReceipt') or verified.get('ambiguousSession'))
+                price_valid = bool((valid or verified.get('priceVerified')) and not conflict and not verified.get('priceConflict'))
+                volume_valid = bool((valid or verified.get('volumeVerified')) and not conflict and not verified.get('volumeConflict'))
+                source = verified.get('source') if verified.get('priceVerified') else item['source']
+                bar = {'date': day, 'source': source, 'qualityValid': price_valid and volume_valid,
+                       'priceVerified': verified.get('priceVerified', False),
+                       'volumeVerified': verified.get('volumeVerified', False),
+                       'priceConflict': verified.get('priceConflict', False),
+                       'volumeConflict': verified.get('volumeConflict', False),
+                       'receiptComplete': verified.get('receiptComplete', False),
+                       'sourceReceipts': verified.get('receipts', []),
+                       'rawSource': verified.get('rawSource'),
+                       **{k: number(item[k]) if price_valid else None for k in ('open', 'high', 'low', 'close')},
+                       'volume': number(item['volume']) if volume_valid else None}
                 prices = [bar[k] for k in ('open', 'high', 'low', 'close')]
                 if not all(v is not None and v > 0 for v in prices) or not (
                         bar['low'] <= min(bar['open'], bar['close']) <= max(bar['open'], bar['close']) <= bar['high']):
@@ -132,8 +148,12 @@ def load_prices(code, database, now, expected=None, board=None):
         return [], ['本機官方日線或品質紀錄尚未保存']
     if not rows:
         reasons.append('本機沒有可核對的已完成交易日日線')
-    elif not rows[-1].get('qualityValid') or rows[-1].get('close') is None:
+    elif rows[-1].get('close') is None:
         reasons.append('最近交易日日線缺少官方來源、完整價格或品質核對')
+    if any(bar.get('volumeConflict') for bar in rows):
+        reasons.append('官方成交量與原始日線不一致；衝突日成交量留空，量型與技術篩選不予確認')
+    if rows and rows[-1].get('priceVerified') and rows[-1].get('rawSource') is None:
+        reasons.append('原始日線來源未記錄；價格僅由另存的官方收據核對，不回填原始來源')
     if not expected:
         reasons.append('官方交易日曆尚未更新，價格新鮮度與連續區間不可確認')
     return rows, reasons
@@ -163,6 +183,14 @@ def price_observation(bars, *, expected=None):
             'priceSource': last.get('source') if close is not None else None,
             'priceBasis': '原始價格；已完成交易日日收盤，未還原除權息',
             'priceFresh': bool(fresh and close is not None), 'volumeShares': volume,
+            'priceVerified': last.get('priceVerified', False),
+            'volumeVerified': last.get('volumeVerified', False),
+            'volumeConflict': last.get('volumeConflict', False),
+            'volumeConflictDays': [bar['date'] for bar in bars if bar.get('volumeConflict')],
+            'sourceReceipts': last.get('sourceReceipts', []),
+            'rawPriceSource': last.get('rawSource'),
+            'priceVerification': ('官方收據逐欄核對' if last.get('priceVerified') else
+                                  '既有品質紀錄；未保存完整來源收據' if close is not None else '尚未通過價格核對'),
             'drawdown100': (close / peak - 1) * 100 if peak and close else None,
             'rangeTop': top, 'rangeBottom': bottom, 'distanceToTopPct': distance,
             'rangePosition': state, 'breakoutVolumeRatio': ratio,

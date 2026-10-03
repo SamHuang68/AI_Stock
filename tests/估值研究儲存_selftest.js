@@ -209,6 +209,25 @@ test('過期或未通過來源門檻的資料不寫入市場觀察', () => {
     assert.equal(saved.snapshots.length, 0);
   }
 });
+test('價格核對收據與成交量衝突分開呈現且來源文字不注入 HTML', () => {
+  const h = harness();
+  h.api.open('2330', { sym: '2330', close: 101, research: {
+    priceAsOf: '2026-10-02', priceVerified: true, priceVerification: '官方收據逐欄核對',
+    volumeConflict: true, volumeShares: null, rawPriceSource: null,
+    sourceReceipts: [{ source: 'TWSE', parserVersion: 'twse-stock-day-v1',
+      retrievedAt: '2026-10-03T01:25:00Z', writtenAt: '2026-10-03T09:00:00Z',
+      url: 'https://www.twse.com.tw/<img>', sourceHash: 'abc', notes: ['含零股、盤後定價、鉅額交易', '<script>'] }]
+  } });
+  h.api.renderFacts();
+  const html = h.element('vr-facts').innerHTML;
+  assert.match(html, /官方收據逐欄核對/);
+  assert.match(html, /官方量與原始量不一致，留空待核對/);
+  assert.match(html, /未記錄；不以核對來源代替/);
+  assert.match(html, /2026-10-03T01:25:00Z/);
+  assert.match(html, /2026-10-03T09:00:00Z/);
+  assert.match(html, /含零股、盤後定價、鉅額交易/);
+  assert.doesNotMatch(html, /<img>|<script>/);
+});
 test('讀者暫時計算不讀寫擁有者假設、草稿或歷史', () => {
   const h = harness();
   h.setStore({ '2330': { revision: '私人版本', profile: { ...baseProfile, reason: '私人理由' }, snapshots: [] } });

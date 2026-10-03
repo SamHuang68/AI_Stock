@@ -33,6 +33,22 @@ if (!forwardMarkup.includes('待核對／成熟 534') || !forwardMarkup.includes
     !forwardMarkup.includes('2026-10-01') || forwardMarkup.includes('<script>')) throw new Error('前瞻成熟理由必須明示且安全跳脫');
 const legacyForwardMarkup = H.maintenanceHtml({observations:{enabled:true,events:1,outcomes:0}});
 if (!legacyForwardMarkup.includes('尚無逐期等待原因收據') || !legacyForwardMarkup.includes('不代表零報酬')) throw new Error('舊帳本無診斷收據不能推定成功或零績效');
+const diagnosed = { version:'st-forward-diagnostics/v1',enabled:true,checkedAt:'2026-10-07T18:00:00+08:00',
+  benchmarkAsOf:'2026-10-07',sampleLimit:12,note:'未成熟不是零報酬；滿20筆不證明策略有效',
+  traceNote:'時間僅顯示原有欄位，未留存即為缺值',horizons:[{horizon:5,requiredFollowingSessions:6,
+    reasons:{ready_unrecorded:1,missing_stock_sessions:2,invalid_evidence:1}}],
+  samples:[{symbol:'2330<script>',eventDate:'2026-09-29',horizon:5,status:'ready_unrecorded',
+    eventFirstRecordedAt:'2026-09-29T18:31:02+08:00',inputFirstRecordedAt:null,observedFollowingSessions:6,
+    requiredFollowingSessions:6,expectedSessions:['2026-09-30'],observedPriceDates:['2026-09-30'],
+    eventId:'事件指紋',inputId:'輸入指紋',rulesDigest:'規則指紋',currentRules:false}] };
+const diagnosedMarkup = H.maintenanceHtml({observations:{enabled:true,events:4,outcomes:0,diagnostics:diagnosed}});
+if (!diagnosedMarkup.includes('到期資料齊全，尚未留存結果 1 筆') || !diagnosedMarkup.includes('事件或結果證據無效 1 筆') ||
+    !diagnosedMarkup.includes('首次輸入留存：未留存') || !diagnosedMarkup.includes('事件指紋') ||
+    !diagnosedMarkup.includes('2026-09-29T18:31:02+08:00') || diagnosedMarkup.includes('<script>') ||
+    diagnosedMarkup.includes('需等下一次本機留存檢查')) throw new Error('即時追溯不可依賴舊留存收據或捏造時間');
+const diagnosedComparison = H.comparisonHtml({enabled:true,groups:[],diagnostics:diagnosed});
+if (!diagnosedComparison.includes('前瞻即時唯讀診斷') || !diagnosedComparison.includes('滿20筆不證明策略有效'))
+  throw new Error('比較頁必須共用唯讀成熟診斷與真實限制');
 const adjustmentMarkup = H.sensitivityHtml({status:'missing',coveredSymbols:0,totalSymbols:100,limitations:[]});
 const closedMarkup = H.maintenanceHtml({job:{},observations:{enabled:true,lastRun:{asOf:'2026-09-28',reason:'官方公告休市：教師節'}},
   inventory:{calendar:{reason:'官方公告休市：教師節'},knownInactive:[{symbol:'5371',label:'股份轉換<script>',stopDate:'2026-08-24',
@@ -157,7 +173,7 @@ const reportView = H.evidenceReportHtml({ total: 21, nextBefore: 2, lastCheckedA
   observations: { horizons: [{ horizon: 5, mature: 1, waiting: 4, due: 2 }] }
 }, history: [{ sessionDate: '2026-09-29', checkedAt: '20:40', execution: 'completed', changes: [{ label: '事件數', before: 1, after: 3 }] }] });
 ok(reportView.includes('尚未驗證優勢') && reportView.includes('no_candidate &lt;script&gt;'), '檢查完成不等於投資證據達標，來源文字跳脫');
-ok(reportView.includes('待時間累積 4') && reportView.includes('仍待結算 2'), '未到期與到期未結算分開呈現');
+ok(reportView.includes('期數尚不足或證據待核對 4') && reportView.includes('仍待結算 2'), '期數不足或待核對與到期未結算分開呈現');
 ok(reportView.includes('data-before="2"') && reportView.includes('1 → 3') && reportView.includes('&lt;img src=x&gt;'), '完整歷史分頁、變化與跳脫文字可見');
 ok(H.evidenceReportHtml({}).includes('尚無驗證報告'), '沒有報告不冒稱完成');
 ok(H.evidenceReportHtml({ latest: { execution: 'failed' } }).includes('最近檢查失敗'), '程序失敗明確保留');
@@ -185,12 +201,12 @@ const forwardRow = { n: 19, gate: 'insufficient', medianRet: .9988, medianAdvers
 const compare = H.comparisonHtml({ minSample: 20, historicalVerified: false, groups: [{ currentRules: true, rulesDigest: 'test', signals: [
   { label: '測試事件<script>', horizons: [{ horizon: 5, observed: 22, mature: 19, waiting: 2, unverified: 1,
     forward: forwardRow, historical: { n: 30, gate: 'unverified_version' }, reference: { ...forwardRow, missing: 5 } }] }] }], limitations: ['測試限制'] });
-ok(compare.includes('等待 2') && compare.includes('未核實 1') && compare.includes('版本未核實') && compare.includes('&lt;script&gt;'), '前瞻區分等待、未核實及版本限制，來源文字跳脫');
+ok(compare.includes('待成熟／核對 2') && compare.includes('未核實 1') && compare.includes('版本未核實') && compare.includes('&lt;script&gt;'), '前瞻區分待核對、未核實及版本限制，來源文字跳脫');
 ok(!compare.includes('99.88%') && !compare.includes('-99.11%'), '未滿 20 筆的前瞻比例與幅度不顯示');
 
 (async function pollingKeepsReadingState() {
   let poll, toggle, writes = 0;
-  let status = { evidenceReports: { running: true }, sourceRevisions: {count:1790, symbols:13},
+  let status = { evidenceReports: { running: true }, observations:{diagnostics:diagnosed}, sourceRevisions: {count:1790, symbols:13},
     sourceReviews: { verifiedAt:'2026-10-01', scope:'只核對本輪差異，完整歷史仍保留',
       findings:[{label:'緯穎舊基準<script>', detail:'仍排除不相容列', source:'https://www.twse.com.tw/'}] } };
   const buttons = {};
@@ -211,6 +227,7 @@ ok(!compare.includes('99.88%') && !compare.includes('-99.11%'), '未滿 20 筆�
   ok(body.markup.includes('來源修訂 1790 筆') && body.markup.includes('仍排除不相容列') &&
     body.markup.includes('只核對本輪差異') && body.markup.includes('&lt;script&gt;'), '來源核對另列範圍與限制，保留全部修訂警示及文字跳脫');
   body.readingState = '展開歷史第二頁並保留鍵盤焦點';
+  status.observations.diagnostics = {...diagnosed, checkedAt:'2026-10-07T18:00:03+08:00'};
   await poll();
   ok(writes === 1 && body.readingState, '相同輪詢不重建閱讀中的報告與分頁');
   status = { evidenceReports: { running: false, total: 2 } };

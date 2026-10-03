@@ -74,7 +74,9 @@ class ReportTests(unittest.TestCase):
             five = ['2026-09-02', '2026-09-03', '2026-09-04', '2026-09-07', '2026-09-08']
             original = path.read_bytes()
             first = reports.forward_status(path, five)
-            self.assertEqual(first['horizons'][0], {'horizon': 5, 'mature': 0, 'pending': 1, 'due': 0, 'waiting': 1})
+            self.assertEqual({k: first['horizons'][0][k] for k in ('horizon', 'mature', 'pending', 'due', 'waiting')},
+                             {'horizon': 5, 'mature': 0, 'pending': 1, 'due': 0, 'waiting': 1})
+            self.assertEqual(first['horizons'][0]['reasons'], {'invalid_version': 1})
             second = reports.forward_status(path, five + ['2026-09-09'])
             self.assertEqual(second['horizons'][0]['due'], 1)
             self.assertEqual(second['horizons'][1]['waiting'], 1)
@@ -83,8 +85,9 @@ class ReportTests(unittest.TestCase):
                 conn.execute('INSERT INTO daily_outcomes VALUES(?,?,?,?)', ('one', 5, NOW.isoformat(), '{}'))
                 conn.execute('INSERT INTO daily_outcomes VALUES(?,?,?,?)', ('unknown', 20, NOW.isoformat(), '{}'))
             final = reports.forward_status(path, five + ['2026-09-09'])
-            self.assertEqual(final['horizons'][0]['mature'], 1)
-            self.assertEqual(final['horizons'][0]['pending'], 0)
+            self.assertEqual(final['horizons'][0]['mature'], 0)  # 空白結果與不存在的輸入不能算成熟。
+            self.assertEqual(final['horizons'][0]['pending'], 1)
+            self.assertEqual(final['horizons'][0]['unverified'], 1)
             self.assertEqual(final['orphans'], 1)
             self.assertEqual(build(observations=final)['execution'], 'failed')
 

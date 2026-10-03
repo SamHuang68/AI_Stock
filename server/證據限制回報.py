@@ -1,7 +1,6 @@
 """三項證據限制的本機驗證與不可覆寫報告；不取外部來源、不變更候選。"""
 import json
 import sqlite3
-from bisect import bisect_right
 from contextlib import closing
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -22,26 +21,9 @@ METRICS = {
 
 
 def forward_status(path, sessions):
-    """只讀前瞻帳本；依已發生的交易日估計到期，不預測未來開市日。"""
-    if not Path(path).is_file():
-        return {'enabled': False, 'events': 0, 'horizons': [], 'orphans': 0}
-    with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as conn:
-        conn.execute('BEGIN')
-        events = conn.execute('SELECT id,session_date FROM daily_events').fetchall()
-        outcomes = conn.execute('SELECT event_id,horizon FROM daily_outcomes').fetchall()
-        last = conn.execute('SELECT payload FROM daily_runs ORDER BY at DESC LIMIT 1').fetchone()
-    ids = {r[0] for r in events}
-    done = set(outcomes)
-    horizons = []
-    for hz in (5, 20):
-        pending = [(eid, day) for eid, day in events if (eid, hz) not in done]
-        due = sum(len(sessions) - bisect_right(sessions, day) >= hz + 1 for _, day in pending)
-        horizons.append({'horizon': hz, 'mature': sum((eid, hz) in done for eid in ids),
-                         'pending': len(pending), 'due': due, 'waiting': len(pending) - due})
-    return {'enabled': True, 'events': len(events), 'horizons': horizons,
-            'orphans': sum(eid not in ids or hz not in (5, 20) for eid, hz in outcomes),
-            'lastRun': json.loads(last[0]) if last else None,
-            'note': '次日收盤進場，5／20日結果須再有6／21個真實交易日；到期未結算須核對缺日與來源，不補造事件。'}
+    """使用即時唯讀診斷；到期、缺資料與無效證據分開，不改當次留存收據。"""
+    from 前瞻成熟診斷 import read_diagnostics
+    return read_diagnostics(path, sessions)
 
 
 def build_report(cached, inventory, observations, sources, revisions, *, now=None, errors=None):
@@ -78,6 +60,9 @@ def build_report(cached, inventory, observations, sources, revisions, *, now=Non
           '主情境：' + main + '；固定RSI：' + rsi_state + '。通過歷史門檻也僅可前瞻觀察。')
     check('ledger', '前瞻帳本結果關聯', 'failed' if observations.get('orphans') else ('passed' if observations.get('enabled') else 'waiting'),
           '無效事件關聯或非5／20日期間：' + str(observations.get('orphans', 0)) + '筆。')
+    unverified = sum(h.get('unverified', 0) for h in observations.get('horizons', []))
+    check('forward_evidence', '前瞻凍結證據可核實', 'failed' if unverified else ('passed' if observations.get('enabled') else 'waiting'),
+          '版本或證據無效：' + str(unverified) + '個事件／期間；無效結果不計入成熟統計。')
     calendar = session(now.date())
     from stock_signals_routes import session_state
     expected = session_state('TW', benchmark, now)['expectedLastDate']
@@ -148,7 +133,7 @@ def collect_inventory(conn, now):
     import datastore
     import signal_stats_pool as pool
     benchmark = ss.normalize_bars(datastore.get_bars_bulk(['^TWII'], connection=conn).get('^TWII') or [])
-    days = sorted({b['date'] for b in benchmark if session(b['date'])['status'] != 'closed'
+    days = sorted({b['date'] for b in benchmark if ss.complete_bar(b) and session(b['date'])['status'] != 'closed'
                    and (b['date'] < now.date().isoformat() or (b['date'] == now.date().isoformat() and now.hour >= 14))})
     latest = days[-1] if days else None
     rows = conn.execute("SELECT symbol,max(ts) FROM bars WHERE market='TW' GROUP BY symbol").fetchall()
@@ -178,6 +163,8 @@ def save_report(path, report, *, nightly_day=None):
     # 僅以可比較的證據去重；每次檢查時間另外保存，不覆寫既有報告。
     stable = {k: report.get(k) for k in ('version', 'sessionDate', 'scheduledDay', 'execution', 'checks', 'constraints',
                                     'metrics', 'observations', 'coverage', 'missingAdjustedSymbols', 'pendingSources', 'provenance')}
+    if isinstance(stable.get('observations'), dict):
+        stable['observations'] = {k: v for k, v in stable['observations'].items() if k != 'checkedAt'}
     fingerprint = digest(stable)
     with closing(sqlite3.connect(path, timeout=30)) as conn, conn:
         conn.executescript('''CREATE TABLE IF NOT EXISTS evidence_reports(
