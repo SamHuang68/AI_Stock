@@ -287,6 +287,7 @@ async function save(page, title, review = false) {
     await damagedDraft.page.evaluate(() => localStorage.setItem('st.research.draft.v1.' + sessionStorage.getItem('st.research.draftTab'), '{無法解析的原始草稿'));
     await damagedDraft.page.reload({ waitUntil: 'load' });
     await damagedDraft.page.waitForFunction(() => document.getElementById('rw-status').textContent.includes('已讀取已提交快照'));
+    assert.equal(await damagedDraft.page.evaluate(() => localStorage.getItem('st.research.draft.v1.' + sessionStorage.getItem('st.research.draftTab'))), '{無法解析的原始草稿', '重新載入前的舊頁面不得覆寫外部已變更的草稿');
     assert((await damagedDraft.page.locator('#rw-storage-status').textContent()).includes('草稿格式無法讀取'), '快照載入成功不能蓋掉損毀草稿警示');
     await damagedDraft.page.locator('#nav-other').click(); await damagedDraft.page.locator('#nav-research').click();
     assert.equal(await damagedDraft.page.evaluate(() => localStorage.getItem('st.research.draft.v1.' + sessionStorage.getItem('st.research.draftTab'))), '{無法解析的原始草稿');
@@ -294,6 +295,20 @@ async function save(page, title, review = false) {
     assert(draftBackup.unverifiedDrafts.some(item => item.raw === '{無法解析的原始草稿'));
     await damagedDraft.context.close();
     report.checks.push('損毀草稿警示不被讀取成功蓋掉，切頁保留原字串並納入完整備份');
+
+    const conflict = await harness(browser);
+    await conflict.page.evaluate(() => {
+      const input = document.getElementById('rw-note');
+      input.value = '本頁尚未儲存的獨立輸入'; input.dispatchEvent(new Event('input', { bubbles: true }));
+      localStorage.setItem('st.research.draft.v1.' + sessionStorage.getItem('st.research.draftTab'), '{外部更新原始草稿');
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    const conflictBackup = await conflict.page.evaluate(() => new ResearchWorkflow.Store(localStorage).exportAll());
+    assert(conflictBackup.unverifiedDrafts.some(item => item.raw === '{外部更新原始草稿'));
+    assert(conflictBackup.unverifiedDrafts.some(item => item.raw.includes('本頁尚未儲存的獨立輸入')));
+    assert((await conflict.page.locator('#rw-storage-status').textContent()).includes('草稿已由其他頁面變更'));
+    await conflict.context.close();
+    report.checks.push('草稿外部衝突時原始內容與本頁未儲存輸入均保留於完整備份');
 
     const unavailable = await harness(browser);
     unavailable.state.failDaily = true;

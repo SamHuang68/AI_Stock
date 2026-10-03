@@ -12,7 +12,36 @@
   const labels = { not_applicable: '市場或商品不適用', source_unknown: '官方來源或日期尚未通過門檻', exclude_ip: '另案估值，排除於本次範圍', pe_unknown: '官方本益比未提供或非正值', pe_above: '超出本次本益比上限', in_scope: '符合本次本益比範圍' };
   const states = { need_assumption: '待設定估值假設', below_entry: '已到承接價以下', in_range: '尚未達承接價', above_range: '高於假設估值上緣' };
 
+  function canUsePrivateStorage() {
+    const profile = window.ST_PRIVATE_WEB_PROFILE;
+    return !profile || profile.role === 'owner';
+  }
+  function privateAccess() { return canUsePrivateStorage() && active && active.privateAccess !== false; }
+  function temporaryNote() {
+    return canUsePrivateStorage() ? '本頁為暫時計算；重新開啟研究視窗後可載入私人假設。' :
+      '讀者模式：僅提供本頁暫時計算，不載入或儲存私人假設、草稿與歷史。';
+  }
+  function updatePrivacyControls() {
+    const allowed = privateAccess();
+    if ($('vr-save')) $('vr-save').disabled = !allowed;
+    if ($('vr-discard')) $('vr-discard').textContent = allowed ? '還原已儲存假設' : '清空暫時計算';
+    if ($('vr-storage-note')) $('vr-storage-note').textContent = allowed ?
+      '假設與情境儲存在此瀏覽器。本機與私有網站的瀏覽器儲存各自獨立。' : temporaryNote();
+    if (!allowed && $('vr-save-state')) $('vr-save-state').textContent = temporaryNote();
+  }
+  function enforcePrivacy() {
+    // 權限降低時只清除目前畫面的私人副本，不刪除擁有者的瀏覽器資料。
+    if (active && active.privateAccess !== false && !canUsePrivateStorage()) {
+      active.privateAccess = false; active.saved = {}; active.dirty = false;
+      renderForm(defaults(active.symbol));
+      $('vr-history').innerHTML = '<h3>本頁暫時計算</h3><p class="vr-muted">' + esc(temporaryNote()) + '</p>';
+      $('vr-verdict').innerHTML = ''; $('vr-position').innerHTML = '';
+    }
+    updatePrivacyControls();
+    return privateAccess();
+  }
   function readStore() {
+    if (!canUsePrivateStorage()) return {};
     try {
       const data = JSON.parse(localStorage.getItem(KEY) || '{}');
       return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
@@ -67,11 +96,7 @@
       '</div></details><div id="vr-position"></div>';
     (Array.isArray(profile.tranches) && profile.tranches.length ? profile.tranches : [{ price: '', shares: '' }]).forEach(addTranche);
     $('vr-save').onclick = save;
-    $('vr-discard').onclick = () => {
-      try { localStorage.removeItem(KEY + '.draft.' + active.symbol); } catch (_) {}
-      renderForm({ ...defaults(active.symbol), ...(active.saved.profile || {}) });
-      active.dirty = false; $('vr-save-state').textContent = active.saved.profile ? '已還原儲存的假設' : '已還原空白假設'; recalculate();
-    };
+    $('vr-discard').onclick = discard;
     $('vr-add').onclick = () => { addTranche({ price: '', shares: '' }); changed(); };
     $('vr-next').onclick = () => {
       const rows = readTranches();
@@ -84,6 +109,17 @@
       addTranche({ price: empty ? base : Math.round(base * 0.9 * 10000) / 10000, shares: '' }); changed();
     };
     ['vr-form', 'vr-scenario'].forEach(id => { $(id).oninput = changed; });
+    updatePrivacyControls();
+  }
+  function discard() {
+    const allowed = enforcePrivacy();
+    if (allowed) {
+      try { localStorage.removeItem(KEY + '.draft.' + active.symbol); } catch (_) {}
+    }
+    renderForm({ ...defaults(active.symbol), ...(allowed ? active.saved.profile || {} : {}) });
+    active.dirty = false;
+    $('vr-save-state').textContent = allowed ? (active.saved.profile ? '已還原儲存的假設' : '已還原空白假設') : temporaryNote();
+    recalculate();
   }
   function addTranche(row) {
     const line = document.createElement('div'); line.className = 'vr-tranche';
@@ -97,6 +133,7 @@
       .filter(row => row.price !== '' || row.shares !== '');
   }
   function readProfile() {
+    enforcePrivacy();
     const profile = {};
     ['category', 'epsLow', 'epsHigh', 'epsPeriod', 'reason', 'peLow', 'peHigh', 'entryPrice', 'exitPrice', 'budget', 'buyFeePct', 'sellFeePct', 'sellTaxPct', 'minFee'].forEach(key => { profile[key] = $('vr-' + key).value.trim(); });
     profile.tranches = readTranches();
@@ -147,11 +184,17 @@
     return result;
   }
   function changed() {
+    if (!enforcePrivacy()) {
+      active.dirty = true; $('vr-save-state').textContent = temporaryNote(); recalculate(); return;
+    }
     active.dirty = true; $('vr-save-state').textContent = '草稿已保留，尚未儲存為假設'; recalculate();
     try { localStorage.setItem(KEY + '.draft.' + active.symbol, JSON.stringify({ profile: readProfile(), baseRevision: active.saved.revision || null })); }
     catch (_) { $('vr-save-state').textContent = '草稿儲存失敗，請保留本頁輸入。'; }
   }
   function renderHistory() {
+    if (!enforcePrivacy()) {
+      $('vr-history').innerHTML = '<h3>本頁暫時計算</h3><p class="vr-muted">' + esc(temporaryNote()) + '</p>'; return;
+    }
     const saved = active.saved || {};
     const revisions = Array.isArray(saved.profiles) ? saved.profiles : [];
     const snapshots = Array.isArray(saved.snapshots) ? saved.snapshots : [];
@@ -162,6 +205,7 @@
         esc((item.events || []).join('；') || '狀態維持') + '<br><span class="vr-muted">收盤 ' + fmt(item.price) + ' · ' + esc(states[item.priceState] || item.priceState) + '</span></div>').join('') + '</details>' : '');
   }
   function appendSnapshot(saved, result) {
+    if (!enforcePrivacy()) return;
     const obs = observation();
     const validDay = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
       Number.isFinite(new Date(value + 'T00:00:00Z').getTime()) && new Date(value + 'T00:00:00Z').toISOString().slice(0, 10) === value;
@@ -179,6 +223,7 @@
     snapshots.push(current); saved.snapshots = snapshots.slice(-40);
   }
   function persist(saved) {
+    if (!enforcePrivacy()) return false;
     try {
       const store = readStore(), latest = store[active.symbol];
       if ((latest && latest.revision || null) !== (active.saved && active.saved.revision || null)) {
@@ -188,6 +233,7 @@
     } catch (_) { $('vr-save-state').textContent = '瀏覽器儲存失敗，請保留本頁輸入後再試。'; return false; }
   }
   function save() {
+    if (!enforcePrivacy()) return;
     const result = recalculate(), profile = readProfile();
     if (result.errors.length || !(result.low > 0) || !profile.epsPeriod || !profile.reason) {
       $('vr-errors').textContent = result.errors.join('；') || '請填正值的可持續 EPS、適用期間與估值理由。'; return;
@@ -205,6 +251,7 @@
     }
   }
   async function refresh() {
+    enforcePrivacy();
     const serial = ++generation;
     if (controller) controller.abort(); controller = new AbortController();
     $('vr-refresh').disabled = true; $('vr-load-state').textContent = '正在取得最新可用資料…';
@@ -215,15 +262,17 @@
       if (!response.ok) throw new Error('資料服務回應 ' + response.status);
       const json = await response.json();
       if (serial !== generation) return;
+      enforcePrivacy();
       const row = json.row || json;
       if (String(row.sym) !== active.symbol) throw new Error('資料代號不一致');
       active.row = row; facts(); const result = recalculate();
       $('vr-load-state').textContent = row.research && row.research.dataStatus === 'available' ? '已讀取保存資料；交易日與公告期別如下。' : '保存資料不足或不適用；請核對下方來源與限制。';
-      if (!active.dirty && active.saved && active.saved.profile && !result.errors.length) {
+      if (privateAccess() && !active.dirty && active.saved && active.saved.profile && !result.errors.length) {
         const saved = { ...active.saved }; appendSnapshot(saved, result); persist(saved); renderHistory();
       }
     } catch (error) {
       if (serial !== generation) return;
+      enforcePrivacy();
       $('vr-load-state').textContent = (error.name === 'AbortError' ? '取得資料逾時' : '取得資料失敗：' + error.message) + (active.row ? '；保留先前資料，請核對資料日。' : '；估值假設仍可編輯。');
     } finally { clearTimeout(timer); if (serial === generation) $('vr-refresh').disabled = false; }
   }
@@ -242,19 +291,23 @@
     if (!dialog) { dialog = document.createElement('dialog'); dialog.id = 'vr-dialog'; document.body.appendChild(dialog); }
     const stored = readStore()[symbol];
     const saved = stored && typeof stored === 'object' ? stored : {};
-    active = { symbol, row: row || null, saved, dirty: false, settings: { peMax: 30, excludeIp: true, ...(settings || {}) } };
+    active = { symbol, row: row || null, saved, privateAccess: canUsePrivateStorage(), dirty: false,
+      settings: { peMax: 30, excludeIp: true, ...(settings || {}) } };
     dialog.innerHTML = '<div class="vr-head"><div><h2 id="vr-title">' + esc(symbol) + ' 估值承接研究</h2><div class="vr-muted">先確認獲利基礎，再觀察承接與反彈空間</div></div><button type="button" id="vr-close">關閉</button></div>' +
-      '<div class="vr-content"><p class="vr-muted">假設與情境儲存在此瀏覽器。本機與私有網站的瀏覽器儲存各自獨立。</p><div class="vr-grid"><div><section><h3>已公布資料與價格結構</h3><div class="vr-actions"><button type="button" id="vr-refresh">重新整理資料</button><span id="vr-load-state" class="vr-muted" role="status"></span></div><div id="vr-facts" style="margin-top:12px"></div></section><section id="vr-verdict" aria-live="polite"></section><section id="vr-history"></section></div><div><section id="vr-form"></section><section id="vr-scenario"></section></div></div>' +
+      '<div class="vr-content"><p class="vr-muted" id="vr-storage-note"></p><div class="vr-grid"><div><section><h3>已公布資料與價格結構</h3><div class="vr-actions"><button type="button" id="vr-refresh">重新整理資料</button><span id="vr-load-state" class="vr-muted" role="status"></span></div><div id="vr-facts" style="margin-top:12px"></div></section><section id="vr-verdict" aria-live="polite"></section><section id="vr-history"></section></div><div><section id="vr-form"></section><section id="vr-scenario"></section></div></div>' +
       '<p class="vr-muted">AI 需求成長需要以可持續獲利驗證，不能單憑題材提高倍數。高本益比、IP 授權模式與一般企業的循環高峰需要分開研究；價格調整的時點與幅度尚未確定。</p></div>';
     dialog.setAttribute('aria-labelledby', 'vr-title');
     $('vr-close').onclick = close;
     dialog.oncancel = event => { event.preventDefault(); close(); };
     let draft = null;
-    try { draft = JSON.parse(localStorage.getItem(KEY + '.draft.' + symbol) || 'null'); } catch (_) {}
+    if (privateAccess()) {
+      try { draft = JSON.parse(localStorage.getItem(KEY + '.draft.' + symbol) || 'null'); } catch (_) {}
+    }
     const restoreDraft = draft && draft.profile && (draft.baseRevision || null) === (saved.revision || null);
     renderForm({ ...defaults(symbol), ...(restoreDraft ? draft.profile : saved.profile || {}) });
     active.dirty = !!restoreDraft;
     $('vr-save-state').textContent = restoreDraft ? '已還原草稿，尚未儲存為假設' : (saved.profile ? '已載入此瀏覽器的假設' : '尚未儲存');
+    updatePrivacyControls();
     $('vr-refresh').onclick = refresh; facts(); recalculate(); renderHistory();
     dialog.showModal(); $('vr-close').focus(); refresh();
   }

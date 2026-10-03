@@ -3,6 +3,7 @@
   'use strict';
   var active = false, generation = 0, controller, data, subject, selectedRecord, store, draftTimer;
   var history = [], records = [], draftKey, damagedDraft = null, draftChanged = false;
+  var loadedDraftRaw = null, conflictDraftKey = null;
   var verifiedRecord = null, recordSequence = 0, moreController = null;
   var studyControllers = {}, observationRows = [], observationCursor = null;
   function $(id) { return document.getElementById(id); }
@@ -66,13 +67,22 @@
   }
   function preserveDraft() {
     if (!$('rw-title') || !portfolioAllowed()) return;
-    if (damagedDraft !== null && !draftChanged) return;
+    if (!draftChanged) return;
     try {
+      var nextDraftRaw = JSON.stringify(draft());
+      if (localStorage.getItem(draftKey) !== loadedDraftRaw) {
+        conflictDraftKey = conflictDraftKey || 'st.research.draftRecovery.v1.' + Date.now().toString(36) + Math.random().toString(36).slice(2);
+        localStorage.setItem(conflictDraftKey, nextDraftRaw);
+        draftChanged = false;
+        storageMessage('草稿已由其他頁面變更；保留原始內容，本頁輸入另存於完整備份，請匯出後再重新開啟。');
+        return;
+      }
       if (damagedDraft !== null) {
         var recoveryKey = 'st.research.draftRecovery.v1.' + Date.now().toString(36) + Math.random().toString(36).slice(2);
         localStorage.setItem(recoveryKey, damagedDraft); damagedDraft = null;
       }
-      localStorage.setItem(draftKey, JSON.stringify(draft()));
+      localStorage.setItem(draftKey, nextDraftRaw);
+      loadedDraftRaw = nextDraftRaw; draftChanged = false;
     }
     catch (_) { storageMessage('草稿無法寫入瀏覽器；請先複製筆記或匯出，不要關閉頁面'); }
   }
@@ -163,7 +173,9 @@
     });
     try {
       if (!portfolioAllowed()) throw new Error('唯讀使用者不讀取私人草稿');
-      var rawDraft = localStorage.getItem(draftKey), savedDraft = JSON.parse(rawDraft || '{}');
+      var rawDraft = localStorage.getItem(draftKey);
+      loadedDraftRaw = rawDraft;
+      var savedDraft = JSON.parse(rawDraft || '{}');
       if (!savedDraft || typeof savedDraft !== 'object' || Array.isArray(savedDraft)) throw new Error('草稿格式不符');
       fillDraft(savedDraft);
     } catch (_) {

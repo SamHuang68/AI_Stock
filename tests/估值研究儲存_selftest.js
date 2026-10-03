@@ -209,7 +209,44 @@ test('過期或未通過來源門檻的資料不寫入市場觀察', () => {
     assert.equal(saved.snapshots.length, 0);
   }
 });
+test('讀者暫時計算不讀寫擁有者假設、草稿或歷史', () => {
+  const h = harness();
+  h.setStore({ '2330': { revision: '私人版本', profile: { ...baseProfile, reason: '私人理由' }, snapshots: [] } });
+  h.storage.set(KEY + '.draft.2330', JSON.stringify({ profile: { ...baseProfile, reason: '私人草稿' }, baseRevision: '私人版本' }));
+  const original = Array.from(h.storage.entries()), access = [];
+  const storageApi = h.sandbox.localStorage;
+  h.sandbox.localStorage = Object.fromEntries(Object.entries(storageApi).map(([key, fn]) => [key, (...args) => { access.push(key); return fn(...args); }]));
+  h.sandbox.window.ST_PRIVATE_WEB_PROFILE = { role: 'reader' };
+  h.api.open('2330', clone(baseRow));
+  assert.equal(h.sandbox.renderedProfile.reason, '');
+  assert.equal(h.element('vr-save').disabled, true);
+  h.sandbox.renderInputs(baseProfile); h.api.changed(); h.api.save();
+  assert.equal(h.api.persist({ profile: baseProfile }), false);
+  const candidate = { snapshots: [] }; h.api.appendSnapshot(candidate, h.result());
+  assert.equal(candidate.snapshots.length, 0); h.api.close();
+  assert.deepEqual(access, []); assert.deepEqual(Array.from(h.storage.entries()), original);
+  h.sandbox.window.ST_PRIVATE_WEB_PROFILE = { role: 'owner' }; h.api.open('2330', clone(baseRow));
+  assert.equal(h.sandbox.renderedProfile.reason, '私人草稿');
+});
+test('開啟後權限降低清除畫面私人副本，但保留原儲存資料', () => {
+  const h = harness();
+  h.setStore({ '2330': { revision: '私人版本', profile: { ...baseProfile, reason: '私人理由' }, snapshots: [] } });
+  h.api.open('2330', clone(baseRow));
+  const before = Array.from(h.storage.entries()), access = [];
+  const storageApi = h.sandbox.localStorage;
+  h.sandbox.localStorage = Object.fromEntries(Object.entries(storageApi).map(([key, fn]) => [key, (...args) => { access.push(key); return fn(...args); }]));
+  h.sandbox.window.ST_PRIVATE_WEB_PROFILE = { role: 'reader' }; h.api.changed(); h.api.save();
+  assert.equal(h.sandbox.renderedProfile.reason, '');
+  assert.deepEqual(clone(h.api.getActive().saved), {});
+  assert.deepEqual(access, []); assert.deepEqual(Array.from(h.storage.entries()), before);
+});
 (async () => {
+  const reader = harness(), accesses = [];
+  reader.sandbox.window.ST_PRIVATE_WEB_PROFILE = { role: 'reader' };
+  reader.sandbox.localStorage = { getItem() { accesses.push('讀'); }, setItem() { accesses.push('寫'); }, removeItem() { accesses.push('刪'); } };
+  reader.api.open('2330', clone(baseRow)); await reader.api.refresh(); reader.api.close();
+  assert.deepEqual(accesses, []); count++;
+  console.log('通過：讀者非同步行情刷新不存取私人儲存');
   const h = harness(); h.api.open('2330', null);
   h.sandbox.fetch = async () => ({ ok: true, json: async () => ({ row: { sym: '2330', close: null,
     research: { dataStatus: 'partial', missing: ['官方快取尚缺'] } } }) });
