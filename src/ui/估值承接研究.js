@@ -257,7 +257,7 @@
     $('vr-refresh').disabled = true; $('vr-load-state').textContent = '正在取得最新可用資料…';
     const timer = setTimeout(() => controller && serial === generation && controller.abort(), 45000);
     try {
-      const query = '?peMax=' + encodeURIComponent(active.settings.peMax) + '&excludeIp=' + (active.settings.excludeIp ? '1' : '0');
+      const query = '?peMax=' + encodeURIComponent(active.settings.peMax) + '&excludeIp=' + (active.settings.excludeIp ? 'true' : 'false');
       const response = await fetch((window.SERVER || '') + '/valuation-research/' + encodeURIComponent(active.symbol) + query, { cache: 'no-store', signal: controller.signal });
       if (!response.ok) throw new Error('資料服務回應 ' + response.status);
       const json = await response.json();

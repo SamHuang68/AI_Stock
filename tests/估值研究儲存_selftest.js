@@ -241,6 +241,17 @@ test('開啟後權限降低清除畫面私人副本，但保留原儲存資料',
   assert.deepEqual(access, []); assert.deepEqual(Array.from(h.storage.entries()), before);
 });
 (async () => {
+  const query = harness();
+  for (const excludeIp of [true, false]) {
+    query.api.open('2330', null, { peMax: 40, excludeIp });
+    let requested;
+    query.sandbox.fetch = async url => { requested = new URL(url, 'https://st-offline.test'); return { ok: true, json: async () => ({ row: clone(baseRow) }) }; };
+    await query.api.refresh();
+    assert.equal(requested.pathname, '/valuation-research/2330');
+    assert.equal(requested.searchParams.get('peMax'), '40');
+    assert.equal(requested.searchParams.get('excludeIp'), String(excludeIp));
+  }
+  count++; console.log('通過：估值刷新採用 HTTP 契約的 true／false，並保留研究上限');
   const reader = harness(), accesses = [];
   reader.sandbox.window.ST_PRIVATE_WEB_PROFILE = { role: 'reader' };
   reader.sandbox.localStorage = { getItem() { accesses.push('讀'); }, setItem() { accesses.push('寫'); }, removeItem() { accesses.push('刪'); } };
