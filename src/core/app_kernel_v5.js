@@ -15,12 +15,13 @@
   function copyResponse(response) {
     return typeof response.clone === 'function' ? response.clone() : response;
   }
-  function request(path, options) {
+  function request(path, options, readJson) {
     options = options || {};
     var method = String(options.method || 'GET').toUpperCase();
     // A caller-owned deadline must not inherit another request's signal.
-    var key = method === 'GET' && !options.signal ? method + ':' + path : null;
-    if (key && inflight[key]) return inflight[key].then(copyResponse);
+    var key = method === 'GET' && !options.signal ? (readJson ? 'JSON:' : '') + method + ':' + path : null;
+    function copyResult(value) { return readJson ? JSON.parse(JSON.stringify(value)) : copyResponse(value); }
+    if (key && inflight[key]) return inflight[key].then(copyResult);
     var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var timeoutMs = Math.max(250, Number(options.timeoutMs || 15000));
     var headers = Object.assign({ 'X-ST-Trace-ID': traceId() }, options.headers || {});
@@ -37,7 +38,9 @@
         else callerSignal.addEventListener('abort', abortFromCaller, { once: true });
       }
     }
+    var timedOut = false;
     var timer = controller ? setTimeout(function () {
+      timedOut = true;
       controller.abort();
       if (abortFromCaller) callerSignal.removeEventListener('abort', abortFromCaller);
     }, timeoutMs) : null;
@@ -53,23 +56,32 @@
         error.traceId = response.headers.get('X-ST-Trace-ID') || null;
         throw error;
       }
-      return response;
+      // JSON 的截止時間涵蓋完整回應本文；原始回應保留串流及呼叫端取消權。
+      return readJson ? response.json() : response;
+    }).catch(function (error) {
+      if (timedOut) {
+        var timeout = new Error('讀取逾時，請重試');
+        timeout.name = 'TimeoutError';
+        throw timeout;
+      }
+      throw error;
     }).finally(function () {
       if (timer) clearTimeout(timer);
+      if (readJson && abortFromCaller) callerSignal.removeEventListener('abort', abortFromCaller);
       if (key) delete inflight[key];
     });
     if (key) inflight[key] = promise;
-    return promise.then(copyResponse);
+    return promise.then(copyResult);
   }
   function getJson(path, options) {
-    return request(path, options).then(function (response) { return response.json(); });
+    return request(path, options, true);
   }
   function postJson(path, value, options) {
     options = options || {};
     options.method = 'POST';
     options.headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
     options.body = JSON.stringify(value == null ? {} : value);
-    return request(path, options).then(function (response) { return response.json(); });
+    return request(path, options, true);
   }
   function registerPanel(id, lifecycle) {
     if (!id || !lifecycle) return;

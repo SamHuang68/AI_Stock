@@ -17,6 +17,25 @@
   var CACHE_MS = 60000;
   var lastWlHash = '';
   var explainCache = {};   // sym:asOf → narrative
+  var cardLoads = new WeakMap();
+  var activeHealth = null;
+  if (typeof window.addEventListener === 'function') window.addEventListener('shell:route', function (event) {
+    var detail = event.detail;
+    if (!detail) return;
+    if (detail.route === 'chart') {
+      // 返回原標的時恢復體檢；明確選股則由 loadSym 載入後重繪，避免先查舊股。
+      if (!(detail.opts && detail.opts.sym) && typeof S !== 'undefined' && S.tab === 'health') {
+        var panel = document.getElementById('rpanel');
+        if (panel && panel.isConnected !== false) renderInto(panel, false);
+      }
+      return;
+    }
+    if (activeHealth) {
+      activeHealth.active = false;
+      if (activeHealth.controller) activeHealth.controller.abort();
+      activeHealth = null;
+    }
+  });
 
   function esc(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
@@ -33,10 +52,11 @@
     if (v == null || !isFinite(n)) return '—';
     return (n * 100).toFixed(d == null ? 0 : d) + '%';
   }
-  function getJson(path) {
-    if (window.AppKernel && AppKernel.api) return AppKernel.api.getJson(path, { timeoutMs: 45000 });
+  function getJson(path, options) {
+    options = Object.assign({ timeoutMs: 45000 }, options || {});
+    if (window.AppKernel && AppKernel.api) return AppKernel.api.getJson(path, options);
     var base = window.SERVER || location.origin || 'http://localhost:18432';
-    return fetch(base + path, { cache: 'no-store' }).then(function (r) {
+    return fetch(base + path, { cache: 'no-store', signal: options.signal }).then(function (r) {
       if (!r.ok) {
         var error = new Error('HTTP ' + r.status); error.status = r.status; throw error;
       }
@@ -404,11 +424,12 @@
     return { sym: String(S.sym).toUpperCase().replace(/\.TWO?$/, ''), mkt: S.mkt === 'US' ? 'US' : 'TW' };
   }
 
-  function load(sym, mkt, force) {
+  function load(sym, mkt, force, options) {
     var key = sym + ':' + mkt;
     var hit = cache[key];
     if (!force && hit && Date.now() - hit.at < CACHE_MS) return Promise.resolve(hit.data);
-    return getJson('/stock-signals?sym=' + encodeURIComponent(sym) + '&market=' + mkt).then(function (d) {
+    return getJson('/stock-signals?sym=' + encodeURIComponent(sym) + '&market=' + mkt, options).then(function (d) {
+      if (options && options.signal && options.signal.aborted) throw Object.assign(new Error('已停止讀取'), { name: 'AbortError' });
       cache[key] = { at: Date.now(), data: d };
       return d;
     });
@@ -642,8 +663,8 @@
   function loadPool(market) {
     return getJson('/stock-signals/pooled?market=' + (market || 'TW')).then(function (p) { poolCache = p; return p; });
   }
-  function loadPushCfg() {
-    return getJson('/stock-signals/push-config').then(function (c) { pushCfg = c; return c; })
+  function loadPushCfg(options) {
+    return getJson('/stock-signals/push-config', options).then(function (c) { pushCfg = c; return c; })
       .catch(function () { return null; });
   }
 
@@ -812,6 +833,17 @@
     if (!el) return;
     injectCSS();
     var cur = currentSym();
+    var previous = cardLoads.get(el);
+    if (!force && previous && previous.active && previous.pending && cur &&
+        previous.sym === cur.sym && previous.mkt === cur.mkt && previous.host === el.firstElementChild) return;
+    if (previous) {
+      previous.active = false;
+      if (previous.controller) previous.controller.abort();
+    }
+    var state = { active: true, pending: false, sym: cur && cur.sym, mkt: cur && cur.mkt,
+      controller: typeof AbortController === 'function' ? new AbortController() : null };
+    cardLoads.set(el, state);
+    if (el.id === 'rpanel') activeHealth = state;
     if (!cur) { el.innerHTML = '<div class="sh5"><div class="sh5-empty">先載入一檔股票。</div></div>'; return; }
     if (cur.sym.charAt(0) === '^' || cur.sym.indexOf('__') === 0) {
       el.innerHTML = '<div class="sh5"><div class="sh5-empty">指數與合成序列不做個股體檢；請載入個股或 ETF。</div></div>';
@@ -824,16 +856,29 @@
       return;
     }
     el.innerHTML = '<div class="sh5"><div class="sh5-empty">' + esc(cur.sym) + ' 體檢中…</div></div>';
-    Promise.all([load(cur.sym, cur.mkt, force), pushCfg ? Promise.resolve(pushCfg) : loadPushCfg()]).then(function (res) {
-      if (typeof S !== 'undefined' && S.tab !== 'health' && el.id === 'rpanel') return;
+    state.host = el.firstElementChild;
+    state.pending = true;
+    function current() {
       var now = currentSym();
-      if (!now || now.sym !== cur.sym) {       // 載入期間標的已切換：改畫新標的
-        if (now) renderInto(el, false);
-        return;
-      }
+      return state.active && cardLoads.get(el) === state && el.isConnected !== false &&
+        state.host === el.firstElementChild && now && now.sym === cur.sym && now.mkt === cur.mkt &&
+        (el.id !== 'rpanel' || (S.tab === 'health' &&
+          (!window.ShellV5 || typeof ShellV5.route !== 'function' || ShellV5.route() === 'chart')));
+    }
+    var options = state.controller ? { signal: state.controller.signal } : {};
+    Promise.all([load(cur.sym, cur.mkt, force, options), pushCfg ? Promise.resolve(pushCfg) : loadPushCfg(options)]).then(function (res) {
+      if (!current()) return;
       paint(el, res[0]);
     }).catch(function (e) {
-      el.innerHTML = '<div class="sh5"><div class="sh5-empty">體檢載入失敗：' + esc(e && e.message ? e.message : '連線錯誤') + '</div></div>';
+      if (!current()) return;
+      var message = e && e.name === 'TimeoutError' ? '體檢讀取逾時，請重試。' :
+        '體檢載入失敗：' + (e && e.message ? e.message : '連線錯誤');
+      el.innerHTML = '<div class="sh5"><div role="alert" class="sh5-empty">' + esc(message) +
+        '</div><button type="button" class="sh5-btn" data-sh5-retry>重試體檢</button></div>';
+      var retry = el.querySelector('[data-sh5-retry]');
+      if (retry) retry.onclick = function () { renderInto(el, true); };
+    }).finally(function () {
+      state.pending = false;
     });
   }
 
