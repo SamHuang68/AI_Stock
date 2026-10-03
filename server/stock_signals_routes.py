@@ -234,9 +234,10 @@ def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
             pass   # 合併統計是加值資訊；快取壞掉不影響個股體檢
     if loaded.get('session'):
         result.setdefault('session', {}).update(loaded['session'])
-        if (market == 'US' and loaded['session'].get('provisional')
-                and (loaded['session'].get('calendar') or {}).get('status') == 'unknown'):
-            result['session']['note'] = '交易日曆待確認：當日日線尚不能標為最終值。'
+        if market == 'US' and (loaded['session'].get('calendar') or {}).get('status') == 'unknown':
+            result['session']['note'] = ('交易日曆待確認：當日日線尚不能標為最終值。'
+                                        if loaded['session'].get('provisional') else
+                                        '交易日曆待確認：保留最後已知日線，最新應有交易日尚不能確認。')
     result['dataSource'] = loaded.get('source')
     result['staleDays'] = loaded.get('staleDays')
     if loaded.get('error'):

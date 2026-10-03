@@ -115,9 +115,11 @@ class USEquityCalendarTests(unittest.TestCase):
         db.upsert_bars.assert_not_called()
 
     def test_api_preserves_calendar_evidence_and_existing_session_note(self):
-        for now in (datetime.fromisoformat('2026-12-24T14:00:00-05:00'),
-                    datetime.fromisoformat('2029-01-02T20:00:00-05:00')):
-            rows = [(int((now-timedelta(days=i)).timestamp()), 100, 101, 99, 100, 10) for i in reversed(range(150))]
+        for stamp, lag in (('2026-12-24T14:00:00-05:00', 0),
+                           ('2029-01-02T20:00:00-05:00', 0),
+                           ('2029-01-02T20:00:00-05:00', 1)):
+            now = datetime.fromisoformat(stamp)
+            rows = [(int((now-timedelta(days=i+lag)).timestamp()), 100, 101, 99, 100, 10) for i in reversed(range(150))]
             db = SimpleNamespace(get_bars=Mock(return_value=rows), upsert_bars=Mock(),
                                  read_snapshot=lambda: nullcontext(None),
                                  get_bars_bulk=lambda *args, **kwargs: {})
@@ -133,6 +135,9 @@ class USEquityCalendarTests(unittest.TestCase):
             if now.year == 2029:
                 self.assertIn('交易日曆待確認', result['session']['note'])
                 self.assertNotIn('已收盤', result['session']['note'])
+                self.assertEqual(result['session']['provisional'], lag == 0)
+                if lag:
+                    self.assertIn('最新應有交易日尚不能確認', result['session']['note'])
             else:
                 self.assertIn('已收盤', result['session']['note'])
             db.upsert_bars.assert_not_called()
