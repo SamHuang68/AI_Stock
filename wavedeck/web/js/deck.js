@@ -26,13 +26,21 @@
     toastTimer = setTimeout(function () { el.classList.remove('on'); }, 2400);
   }
 
+  function escapeHtml(value) {
+    return String(value == null ? '—' : value).replace(/[&<>"']/g, function (ch) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch];
+    });
+  }
+
   function fmtPct(x) {
+    if (x == null || x === '' || typeof x === 'boolean') return '—';
     var n = Number(x);
     if (!isFinite(n)) return '—';
     return Math.round(n * 100) + '%';
   }
 
   function money(n) {
+    if (n == null || n === '' || typeof n === 'boolean') return '—';
     var v = Number(n);
     if (!isFinite(v)) return '—';
     return v.toLocaleString('en-US');
@@ -148,7 +156,7 @@
     var spill = ov.spillover_prob;
     if (spill == null && stCtx.spilloverProb != null) spill = stCtx.spilloverProb;
     var n = Number(spill);
-    if (!isFinite(n)) {
+    if (spill == null || spill === '' || typeof spill === 'boolean' || !isFinite(n)) {
       pctEl.textContent = '—';
       if (bar) bar.style.width = '0%';
       meter.classList.remove('low', 'mid', 'high');
@@ -173,7 +181,7 @@
   function render(s) {
     state = s;
     $('clock').textContent = s.updated_at || '—';
-    $('fsm').textContent = s.fsm || '—';
+    $('fsm').textContent = ({AwaitingFill:'等待成交確認', PartialFilled:'部分成交'})[s.fsm] || s.fsm || '—';
     $('mode').textContent = s.mode || 'paper';
     $('lastTv').textContent = (s.transport && s.transport.last_tv_event) || '—';
     $('webhookStatus').textContent = (s.transport && s.transport.last_webhook_status) || '待命';
@@ -187,7 +195,7 @@
       ['緊急停止', L.kill_switch]
     ].map(function (pair) {
       var cls = 'chip ' + (pair[1] === 'ok' || pair[1] === 'run' || pair[1] === 'off' ? 'ok' : (pair[1] === 'on' || pair[1] === 'halt' ? 'bad' : 'warn'));
-      return '<span class="' + cls + '"><i class="dot"></i>' + pair[0] + ' · ' + lightLabel(pair[1]) + '</span>';
+      return '<span class="' + cls + '"><i class="dot"></i>' + pair[0] + ' · ' + escapeHtml(lightLabel(pair[1])) + '</span>';
     }).join('');
 
     var ov = s.st_overlay || {};
@@ -234,7 +242,7 @@
       ['策略', p.strategy],
       ['帳戶', p.account]
     ].map(function (row) {
-      return '<div class="kv-row"><span class="lab">' + row[0] + '</span><span class="val">' + row[1] + '</span></div>';
+      return '<div class="kv-row"><span class="lab">' + row[0] + '</span><span class="val">' + escapeHtml(row[1]) + '</span></div>';
     }).join('');
 
     var style = Number(s.style || 50);
@@ -250,16 +258,21 @@
 
     var no = s.no_overnight || {};
     $('noOvernight').innerHTML =
-      '<div class="box-hd">不留倉保護 · ' + (no.enabled ? '啟用' : '關閉') + '</div>' +
-      '<p>收盤前 ' + (no.block_new_before_close_min || 15) + ' 分鐘禁新單；' +
-      (no.force_flat_time || '13:40') + ' 強制平倉。' + (no.note ? ' ' + no.note : '') + '</p>';
+      '<div class="box-hd">不留倉限制 · ' + (no.enabled ? '啟用' : '關閉') + '</div>' +
+      '<p>' + escapeHtml(no.force_flat_time || '13:40') +
+      ' 後禁止新單；自動強制平倉尚未實作，不能視為已平倉保證。</p>';
 
     var ai = s.ai || {};
     var proc = ai.process || {};
-    $('aiLabel').textContent = ai.action_label || ai.action || '—';
+    $('aiLabel').textContent = (ai.action_label || ai.action || '—') + (ai.demo === true ? '（紙上規則）' : '');
     $('aiConf').textContent = fmtPct(ai.confidence);
     if ($('aiEvent')) $('aiEvent').textContent = ai.event || '—';
-    if ($('aiUpdated')) $('aiUpdated').textContent = ai.updated_at || '—';
+    if ($('aiUpdated')) {
+      var quote = s.quote || {};
+      $('aiUpdated').textContent = '計算：' + (ai.updated_at || '—') +
+        ' · 行情：' + (quote.as_of || '未知') + ' · 核對時：' + (quote.quality || 'unknown') +
+        (quote.demo === true ? '（示範）' : '');
+    }
 
     var bl = Number(ai.bias_long);
     var bs = Number(ai.bias_short);
@@ -288,12 +301,12 @@
     if ($('aiInvalidation')) $('aiInvalidation').textContent = invText || '—';
 
     var tags = [];
-    (ai.next_watch || []).forEach(function (t) {
-      tags.push('<span class="tag">' + t + '</span>');
+    (Array.isArray(ai.next_watch) ? ai.next_watch : []).forEach(function (t) {
+      tags.push('<span class="tag">' + escapeHtml(t) + '</span>');
     });
     if (!tags.length && ai.invalidation) {
       tags.push('<span class="tag warn">INVALIDATION_' +
-        (ai.invalidation.side === 'below' ? 'BELOW' : 'ABOVE') + '_' + ai.invalidation.price + '</span>');
+        (ai.invalidation.side === 'below' ? 'BELOW' : 'ABOVE') + '_' + escapeHtml(ai.invalidation.price) + '</span>');
     }
     if ($('aiTags')) $('aiTags').innerHTML = tags.join('') || '<span class="tag">—</span>';
 
@@ -349,21 +362,21 @@
         v = (link.status === 'down' || link.fail_safe_kind === 'heartbeat') ? 'bad' : 'warn';
       }
       if (k === 'risk_watchdog' && fsOn) v = 'warn';
-      return '<div class="light ' + lightClass(v) + '"><i></i><span class="name">' + lightNames[k] + '</span><span class="st">' + lightLabel(v) + '</span></div>';
+      return '<div class="light ' + lightClass(v) + '"><i></i><span class="name">' + lightNames[k] + '</span><span class="st">' + escapeHtml(lightLabel(v)) + '</span></div>';
     }).join('');
 
     var a = s.account || {};
     var chg = Number(a.equity_change || 0);
     var yb = Number(a.yesterday_balance || 0);
     var eq = Number(a.equity || 0);
-    var ddPct = (a.daily_dd_pct != null && isFinite(Number(a.daily_dd_pct)))
-      ? Number(a.daily_dd_pct)
-      : (yb > 0 ? Math.max(0, (yb - eq) / yb * 100) : 0);
+    var ddPct = (a.reference !== true && a.demo !== true &&
+      a.daily_dd_pct != null && isFinite(Number(a.daily_dd_pct)))
+      ? Number(a.daily_dd_pct) : null;
     var ddLim = (a.daily_dd_limit_pct != null) ? Number(a.daily_dd_limit_pct) : 5;
     var ddCls = ddPct >= ddLim ? 'down' : (ddPct >= ddLim * 0.6 ? 'down' : '');
     /* 種子／參考 Wave AI 權益數：僅攻能驗證，勿當成使用者實盤持倉 */
-    var src = String(a.source || a.ref || 'wave_ai_ref');
-    var isRef = src === 'wave_ai_ref' || src === 'reference' || src === 'demo' || a.reference === true;
+    var src = String(a.source || a.ref || 'unknown');
+    var isRef = src === 'wave_ai_ref' || src === 'reference' || src === 'demo' || a.reference === true || a.demo === true;
     var noteEl = $('acctNote');
     if (noteEl) {
       noteEl.textContent = isRef
@@ -378,12 +391,12 @@
     $('acct').innerHTML =
       '<div class="a"><div class="k">昨日餘額' + (isRef ? '（參考）' : '') + '</div><div class="v">' + money(a.yesterday_balance) + '</div></div>' +
       '<div class="a"><div class="k">當前權益' + (isRef ? '（參考）' : '') + '</div><div class="v">' + money(a.equity) + '</div></div>' +
-      '<div class="a"><div class="k">權益變動</div><div class="v ' + (chg < 0 ? 'down' : 'up') + '">' + money(chg) + '</div></div>' +
+      '<div class="a"><div class="k">權益變動</div><div class="v ' + (chg < 0 ? 'down' : 'up') + '">' + money(a.equity_change) + '</div></div>' +
       '<div class="a"><div class="k">單日回撤</div><div class="v ' + ddCls + '">' +
-        (ddPct ? (ddPct.toFixed(2) + '% / ' + ddLim + '%') : ('0% / ' + ddLim + '%')) + '</div></div>' +
-      '<div class="a"><div class="k">券商連線</div><div class="v">' + (a.broker_api || '—') + '</div></div>' +
+        (ddPct == null ? '—（未評估）' : (ddPct.toFixed(2) + '% / ' + escapeHtml(ddLim) + '%')) + '</div></div>' +
+      '<div class="a"><div class="k">券商連線</div><div class="v">' + escapeHtml(a.broker_api) + '</div></div>' +
       '<div class="a"><div class="k">Email 監控</div><div class="v">' +
-        (((s.lights || {}).email_monitor === 'ok') ? '正常' : lightLabel((s.lights || {}).email_monitor || '—')) +
+        (((s.lights || {}).email_monitor === 'ok') ? '正常' : escapeHtml(lightLabel((s.lights || {}).email_monitor || '—'))) +
       '</div></div>';
 
     var ex = s.exec || {};
@@ -391,36 +404,39 @@
       ['AI 動作', ex.last_ai_action],
       ['下單', ex.last_order_action],
       ['價格', ex.price],
-      ['口數', ex.lots]
+      ['口數', ex.lots],
+      ['成交狀態', (s.execution || {}).status || 'unknown']
     ].map(function (row) {
-      return '<div class="kv-row"><span class="lab">' + row[0] + '</span><span class="val">' + row[1] + '</span></div>';
+      return '<div class="kv-row"><span class="lab">' + row[0] + '</span><span class="val">' + escapeHtml(row[1]) + '</span></div>';
     }).join('');
 
     var c = s.costs || {};
     var stc = window.__stCostMeter || null;
     var combined = stc && stc.costs ? stc.costs.combined_usd_est : null;
     var prov = String(c.provider || ai.provider || 'heuristic');
-    var dayUsd = Number(c.day_usd || 0);
-    var dayCap = 5; // soft budget label (USD); env/UI hint only
-    var budgetCls = dayUsd >= dayCap ? 'bad' : (dayUsd >= dayCap * 0.7 ? 'warn' : '');
+    var budget = c.budget || {};
+    var dayUsd = budget.committed_usd != null ? Number(budget.committed_usd) : null;
+    var dayCap = budget.limit_usd != null ? Number(budget.limit_usd) : null;
+    var budgetCls = budget.blocked ? 'bad' : (dayCap != null && dayUsd != null && dayUsd >= dayCap * 0.7 ? 'warn' : '');
     var modeLabel = prov === 'openai' ? 'OpenAI 雲端' : (prov === 'ollama' ? 'Ollama 本機' : 'Heuristic 規則');
     $('costKv').innerHTML =
       '<div class="cost-mode"><span class="pill">' + modeLabel + '</span>' +
-        (prov === 'openai'
-          ? '<span class="pill ' + budgetCls + '">今日 $' + dayUsd + ' / 警戒 $' + dayCap + '</span>'
-          : '<span class="pill">API 費用 $0（非雲端）</span>') +
+        '<span class="pill ' + budgetCls + '">已用及預留 USD ' + escapeHtml(dayUsd) +
+          ' / 設定上限 ' + (dayCap == null ? '未配置' : ('$' + escapeHtml(dayCap))) + '</span>' +
+        '<span class="pill">' + (budget.pricing_configured === true ? '依配置費率估計' : '未配置雲端費率，禁止付費呼叫') + '</span>' +
       '</div>' +
-      '<div class="a"><div class="k">本次 USD</div><div class="v">' + (c.session_usd != null ? c.session_usd : 0) + '</div></div>' +
-      '<div class="a"><div class="k">今日 USD</div><div class="v">' + (c.day_usd != null ? c.day_usd : 0) + '</div></div>' +
-      '<div class="a"><div class="k">本月 USD</div><div class="v">' + (c.month_usd != null ? c.month_usd : 0) + '</div></div>' +
-      '<div class="a"><div class="k">提供者</div><div class="v">' + (c.provider || '—') + '</div></div>' +
+      '<div class="a"><div class="k">本次 USD</div><div class="v">' + escapeHtml(c.session_usd) + '</div></div>' +
+      '<div class="a"><div class="k">今日 USD</div><div class="v">' + escapeHtml(c.day_usd) + '</div></div>' +
+      '<div class="a"><div class="k">本月 USD</div><div class="v">' + escapeHtml(c.month_usd) + '</div></div>' +
+      '<div class="a"><div class="k">預留 USD</div><div class="v">' + escapeHtml(budget.reserved_usd) + '</div></div>' +
+      '<div class="a"><div class="k">提供者</div><div class="v">' + escapeHtml(c.provider) + '</div></div>' +
       '<div class="a"><div class="k">本機／雲端次</div><div class="v">' +
-        (c.local_calls || 0) + '/' + (c.cloud_calls || 0) + '</div></div>' +
+        escapeHtml(c.local_calls) + '/' + escapeHtml(c.cloud_calls) + '</div></div>' +
       (combined != null
-        ? '<div class="a"><div class="k">ST+WD 合計</div><div class="v">' + combined + '</div></div>'
+        ? '<div class="a"><div class="k">ST+WD 合計</div><div class="v">' + escapeHtml(combined) + '</div></div>'
         : '') +
       (stc && stc.costs
-        ? '<div class="a"><div class="k">ST 本機次</div><div class="v">' + (stc.costs.st_local_calls || 0) + '</div></div>'
+        ? '<div class="a"><div class="k">ST 本機次</div><div class="v">' + escapeHtml(stc.costs.st_local_calls) + '</div></div>'
         : '');
 
     var prov = (c.provider || 'heuristic').toLowerCase();
@@ -440,8 +456,8 @@
     ].map(function (row) {
       var v = row[1] == null ? '—' : String(row[1]);
       if (v.length > 28) v = v.slice(0, 26) + '…';
-      return '<div class="kv-row" title="' + String(row[1] == null ? '' : row[1]).replace(/"/g, '&quot;') +
-        '"><span class="lab">' + row[0] + '</span><span class="val">' + v + '</span></div>';
+      return '<div class="kv-row" title="' + escapeHtml(row[1] == null ? '' : row[1]) +
+        '"><span class="lab">' + row[0] + '</span><span class="val">' + escapeHtml(v) + '</span></div>';
     }).join('');
   }
 
@@ -475,9 +491,9 @@
           var el = $('costKv');
           if (el && el.innerHTML.indexOf('ST+WD 合計') < 0) {
             el.innerHTML +=
-              '<div class="a"><div class="k">ST+WD 合計</div><div class="v">' + combined + '</div></div>' +
+              '<div class="a"><div class="k">ST+WD 合計</div><div class="v">' + escapeHtml(combined) + '</div></div>' +
               '<div class="a"><div class="k">ST 本機次</div><div class="v">' +
-              ((meter.costs && meter.costs.st_local_calls) || 0) + '</div></div>';
+              escapeHtml(meter.costs && meter.costs.st_local_calls) + '</div></div>';
           }
         }
       }

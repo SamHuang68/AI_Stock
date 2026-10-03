@@ -21,6 +21,7 @@ import urllib.request
 from typing import Any, Optional
 
 from . import audit
+from .data_contract import assess_quote, finite_number, parse_as_of
 from .risk import daily_dd_ratio, MAX_DAILY_DD, WARN_DAILY_DD
 from .state import RUNTIME, now_iso
 from .st_push import push_async
@@ -58,6 +59,8 @@ def _default_link() -> dict[str, Any]:
         "last_ping_at": None,
         "fail_count": 0,
         "overlay_at": None,
+        "overlay_as_of": None,
+        "overlay_epoch": None,
         "fail_safe": False,
         "fail_safe_reason": "",
         "fail_safe_kind": "",  # stale_overlay | heartbeat
@@ -84,11 +87,19 @@ def scrub_fail_safe_summary(text: str | None) -> str:
     return re.sub(r"\s{2,}", " ", t).strip()
 
 
-def touch_overlay() -> None:
-    """Call when POST /bridge/st succeeds — ST resumed commanding; clear fail-safe."""
+def touch_overlay(as_of: Any = None) -> None:
+    """保留接收時間；只有新鮮且含時區的來源時間能解除 fail-safe。"""
     link = dict(RUNTIME.snapshot().get("st_link") or _default_link())
+    stamp = parse_as_of(as_of)
     link["overlay_at"] = now_iso()
-    link["overlay_epoch"] = time.time()
+    link["overlay_as_of"] = stamp.isoformat() if stamp is not None else None
+    link["overlay_epoch"] = stamp.timestamp() if stamp is not None else None
+    age = _overlay_age_sec(link)
+    if age is None or age > OVERLAY_STALE_SEC:
+        reason = "宏觀覆寫來源時間未知或在未來" if age is None else f"宏觀覆寫過期 {int(age)}s"
+        RUNTIME.patch(st_link=link)
+        enforce_fail_safe(reason, tighten=False)
+        return
     link["status"] = "ok"
     link["fail_safe"] = False
     link["fail_safe_reason"] = ""
@@ -101,7 +112,11 @@ def touch_overlay() -> None:
         ov["fail_safe"] = False
         ov["fail_safe_reason"] = None
         patch["st_overlay"] = ov
-        patch["lights"] = {"st_bridge": "ok", "risk_watchdog": "ok"}
+    dd = daily_dd_ratio(RUNTIME.snapshot())
+    risk_lamp = "warn" if dd is None or dd >= WARN_DAILY_DD else "ok"
+    if dd is not None and dd >= MAX_DAILY_DD:
+        risk_lamp = "bad"
+    patch["lights"] = {"st_bridge": "ok", "risk_watchdog": risk_lamp}
     if cleaned != str(ai.get("summary") or ""):
         ai["summary"] = cleaned
         patch["ai"] = ai
@@ -218,23 +233,18 @@ def pull_st_macro(*, force: bool = False) -> bool:
 
 
 def _overlay_age_sec(link: dict[str, Any]) -> Optional[float]:
-    ep = link.get("overlay_epoch")
+    ep = finite_number(link.get("overlay_epoch"))
     if ep is None:
         return None
-    try:
-        return max(0.0, time.time() - float(ep))
-    except Exception:
-        return None
+    age = time.time() - ep
+    return age if age >= 0 else None
 
 
 def _tighten_invalidation(ai: dict[str, Any], price: float) -> dict[str, Any]:
     inv = dict(ai.get("invalidation") or {})
     side = str(inv.get("side") or "below")
-    try:
-        inv_price = float(inv.get("price")) if inv.get("price") is not None else None
-    except Exception:
-        inv_price = None
-    if price > 0 and inv_price is not None:
+    inv_price = finite_number(inv.get("price"))
+    if price > 0 and inv_price is not None and inv_price > 0:
         if side == "below" and inv_price < price:
             inv["price"] = round(inv_price + (price - inv_price) * 0.40, 0)
         elif side == "above" and inv_price > price:
@@ -267,8 +277,9 @@ def enforce_fail_safe(reason: str | None = None, *, tighten: bool = False) -> di
     reason = str(reason or link.get("fail_safe_reason") or ov.get("fail_safe_reason") or "Fail-safe")
     kind = _kind_of(reason)
     ai = dict(st.get("ai") or {})
-    price = float((st.get("exec") or {}).get("price") or 0)
-    if tighten:
+    quote = assess_quote(st.get("quote"), st.get("symbol"), now=time.time(), mode=str(st.get("mode") or "unknown"))
+    price = quote["price"] if quote["entry_allowed"] else None
+    if tighten and price is not None:
         ai = _tighten_invalidation(ai, price)
     # Never stack banners into summary — badge UI reads fail_safe_reason
     ai["summary"] = scrub_fail_safe_summary(ai.get("summary"))
@@ -303,7 +314,8 @@ def enforce_fail_safe(reason: str | None = None, *, tighten: bool = False) -> di
         st_link=link,
         lights={"st_bridge": "warn" if kind != "heartbeat" else "bad", "risk_watchdog": "warn"},
     )
-    _write_inv_txt(ai, str(st.get("symbol") or "TXF"))
+    if st.get("mode") == "live" and not ai.get("demo"):
+        _write_inv_txt(ai, str(st.get("symbol") or "TXF"))
     return snap
 
 
@@ -352,9 +364,12 @@ def _enforce_daily_dd() -> None:
     st = RUNTIME.snapshot()
     ratio = daily_dd_ratio(st)
     acct = dict(st.get("account") or {})
-    acct["daily_dd_pct"] = round(ratio * 100, 2)
+    acct["daily_dd_pct"] = round(ratio * 100, 2) if ratio is not None else None
     acct["daily_dd_limit_pct"] = round(MAX_DAILY_DD * 100, 2)
     lights: dict[str, Any] = {}
+    if ratio is None:
+        RUNTIME.patch(account=acct, lights={"risk_watchdog": "warn"})
+        return
     if ratio >= WARN_DAILY_DD and ratio < MAX_DAILY_DD:
         lights["risk_watchdog"] = "warn"
         RUNTIME.patch(account=acct, lights=lights)
@@ -440,12 +455,14 @@ def _tick() -> None:
         age is None or age >= OVERLAY_PULL_SEC or bool(link.get("fail_safe"))
     )
     if need_pull:
-        if pull_st_macro(force=bool(link.get("fail_safe") and (age is None or age >= OVERLAY_PULL_SEC))):
-            return
+        pull_st_macro(force=bool(link.get("fail_safe") and (age is None or age >= OVERLAY_PULL_SEC)))
 
     link = dict(RUNTIME.snapshot().get("st_link") or _default_link())
     age = _overlay_age_sec(link)
-    if age is not None and age > OVERLAY_STALE_SEC:
+    if age is None:
+        apply_fail_safe("宏觀覆寫來源時間未知或在未來")
+        return
+    if age > OVERLAY_STALE_SEC:
         apply_fail_safe(f"宏觀覆寫過期 {int(age)}s")
         return
 

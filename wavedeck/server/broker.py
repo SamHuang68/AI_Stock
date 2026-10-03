@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import load_config
+from .paper_orders import ACTIVE_STATUSES, apply_paper_intent, cancel_paper_order, confirm_fill, paper_snapshot
 from .state import DATA, ROOT
 
 
@@ -100,36 +101,29 @@ def write_invalidation_txt(price: float, side: str = "below", symbol: str = "TXF
 
 
 def panic_flatten(state: dict[str, Any]) -> dict[str, Any]:
-    """Kill-side flatten: target 0 + EXIT signal for 下單大師／紙上帳戶。"""
-    symbol = str(state.get("symbol") or "TXF")
-    price = float((state.get("exec") or {}).get("price") or 0)
-    broker = get_broker()
-    decision = {
-        "action": "EXIT",
-        "action_label": "急停全平",
-        "confidence": 1.0,
-        "process": {"gate": "PANIC", "gate_reasons": ["panic_flatten"]},
-    }
-    applied = broker.apply_intent(state, decision, 0)
-    # Always write TXT side files even if paper broker skipped disk
-    try:
-        write_txt_target(0, symbol)
-        write_order_signal("EXIT", 0, price, symbol)
-    except Exception:
-        pass
-    pos = dict(applied.get("positions") or state.get("positions") or {})
-    pos["ai_suggested"] = 0
-    pos["txt_target"] = 0
+    """要求全平；紙上先取消未成交委託，再等待離線平倉回報。"""
+    broker = PaperBroker() if state.get("mode", "paper") == "paper" else get_broker()
+    work = state
+    if isinstance(broker, PaperBroker):
+        cancelled = cancel_paper_order(state, "紙上急停：未成交餘量已取消，已確認部位保持不變")
+        work = {**state, **cancelled}
+        if not (work.get("positions") or {}).get("account"):
+            applied = paper_snapshot(work, reason="紙上急停：已確認部位為零，未成交委託已取消")
+        else:
+            applied = broker.apply_intent(work, {"action": "EXIT", "action_label": "急停全平"}, 0)
+    else:
+        applied = broker.apply_intent(state, {
+            "action": "EXIT", "action_label": "急停全平", "confidence": 1.0,
+            "process": {"gate": "PANIC", "gate_reasons": ["panic_flatten"]},
+        }, 0)
     return {
-        "positions": pos,
+        **applied,
         "exec": {
             **dict(state.get("exec") or {}),
             "last_ai_action": "急停全平",
-            "last_order_action": applied.get("order_action") or "急停全平→TXT",
-            "lots": 0,
+            "last_order_action": applied.get("order_action") or "全平委託待對帳",
+            "lots": abs(int((applied.get("positions") or {}).get("account") or 0)),
         },
-        "lights": dict(applied.get("lights") or {}),
-        "account": dict(applied.get("account") or {}),
     }
 
 
@@ -142,40 +136,32 @@ class PaperBroker:
     name = "paper"
 
     def sync_positions(self, state: dict[str, Any]) -> dict[str, Any]:
-        pos = dict(state.get("positions") or {})
-        # In paper, account follows txt_target after a beat
-        pos["account"] = int(pos.get("txt_target") or 0)
-        pos["strategy"] = int(pos.get("txt_target") or 0)
-        return {
-            "positions": pos,
-            "lights": {"broker_api": "ok", "order_signal_file": "ok", "position_sync": "ok"},
-            "account": {"broker_api": "paper", "position_sync": "synced"},
+        from .data_contract import assess_quote
+        from .paper_orders import _now
+
+        order = state.get("paper_order") or {}
+        if order.get("status") not in ACTIVE_STATUSES:
+            return paper_snapshot(state)
+        if (state.get("kill_switch") or state.get("fsm") == "Halted") and order.get("action") in {"ENTER_LONG", "ENTER_SHORT"}:
+            return cancel_paper_order(state, "紙上急停：入場委託未成交餘量已取消")
+        symbol = str(state.get("symbol") or "TXF")
+        quote = assess_quote(state.get("quote"), symbol, mode="paper")
+        if not quote.get("entry_allowed"):
+            return paper_snapshot(state, accepted=False, reason="紙上委託待成交：尚無有效同商品報價")
+        receipt = {
+            "receipt_id": f"paper-fill:{order['order_id']}:{order['filled_quantity']}",
+            "order_id": order["order_id"], "symbol": symbol,
+            "quantity": order["remaining_quantity"], "price": quote["price"],
+            "filled_at": _now(), "source": "paper",
+            "quote_source": quote["source"], "quote_as_of": quote["as_of"],
         }
+        try:
+            return confirm_fill(state, receipt)
+        except ValueError as exc:
+            return paper_snapshot(state, accepted=False, reason=f"紙上成交對帳失敗：{exc}")
 
     def apply_intent(self, state: dict[str, Any], decision: dict[str, Any], lots: int) -> dict[str, Any]:
-        pos = dict(state.get("positions") or {})
-        action = decision.get("action")
-        if action == "ENTER_LONG":
-            pos["ai_suggested"] = max(1, lots)
-            pos["txt_target"] = pos["ai_suggested"]
-            pos["strategy"] = pos["ai_suggested"]
-            pos["account"] = pos["ai_suggested"]
-            order = "多單進場（紙上）"
-        elif action == "ENTER_SHORT":
-            pos["ai_suggested"] = -max(1, lots)
-            pos["txt_target"] = pos["ai_suggested"]
-            pos["strategy"] = pos["ai_suggested"]
-            pos["account"] = pos["ai_suggested"]
-            order = "空單進場（紙上）"
-        elif action in ("REDUCE", "EXIT"):
-            pos["ai_suggested"] = 0
-            pos["txt_target"] = 0
-            pos["strategy"] = 0
-            pos["account"] = 0
-            order = "平倉（紙上）" if action == "EXIT" else "減碼（紙上）"
-        else:
-            order = decision.get("action_label") or "續抱"
-        return {"positions": pos, "order_action": order}
+        return apply_paper_intent(state, decision, lots)
 
 
 class TxtMasterBroker:

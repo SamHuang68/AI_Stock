@@ -35,7 +35,7 @@ class WaveDeckSmoke(unittest.TestCase):
         )
         self.assertIn(d["action"], {"HOLD", "ENTER_LONG", "REDUCE", "EXIT", "ENTER_SHORT"})
         self.assertIn("invalidation", d)
-        self.assertGreaterEqual(d["confidence"], 0.1)
+        self.assertIsNone(d["confidence"])
 
     def test_kill_switch_blocks(self):
         st = {
@@ -83,7 +83,7 @@ class WaveDeckSmoke(unittest.TestCase):
         st = {"positions": {"ai_suggested": 0, "txt_target": 0, "strategy": 0, "account": 0}, "exec": {"price": 1}}
         out = PaperBroker().apply_intent(st, {"action": "ENTER_LONG", "action_label": "偏多進場"}, 2)
         self.assertEqual(out["positions"]["txt_target"], 2)
-        self.assertEqual(out["positions"]["account"], 2)
+        self.assertEqual(out["positions"]["account"], 0)
 
     def test_txt_master_roundtrip(self):
         with tempfile.TemporaryDirectory() as td:
@@ -305,19 +305,23 @@ class WaveDeckSmoke(unittest.TestCase):
     def test_apply_fail_safe_tightens_style(self):
         from server.st_link import apply_fail_safe, enforce_fail_safe, scrub_fail_safe_summary
         from server.state import Runtime
+        from datetime import datetime, timedelta, timezone
 
         with tempfile.TemporaryDirectory() as td:
             with mock.patch("server.state.DATA", Path(td)), mock.patch(
                 "server.state.STATE_PATH", Path(td) / "runtime_state.json"
-            ), mock.patch("server.audit.DATA", Path(td)), mock.patch(
+            ), mock.patch("server.audit.write"), mock.patch(
                 "server.st_link.push_async"
             ), mock.patch("server.st_link._write_inv_txt") as write_inv, mock.patch(
                 "server.exec_md.on_invalidation_trail", return_value={}
             ) as write_md:
-                runtime = Runtime()
+                runtime = Runtime(Path(td) / "runtime_state.json")
                 with mock.patch("server.st_link.RUNTIME", runtime):
                     runtime.patch(
                         style=70,
+                        mode="paper",
+                        quote={"symbol": "TXF", "price": 45000, "source": "offline-fixture",
+                               "as_of": (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(), "demo": False},
                         exec={"price": 45000},
                         ai={
                             "invalidation": {"side": "below", "price": 44000},
@@ -347,7 +351,7 @@ class WaveDeckSmoke(unittest.TestCase):
                         "〔Fail-safe：x〕風格→保守、降載、收緊失效。 〔Fail-safe：y〕風格→保守、降載、收緊失效。 hi"
                     )
                     self.assertEqual(washed, "hi")
-                self.assertEqual(write_inv.call_count, 2)
+                write_inv.assert_not_called()
                 write_md.assert_called_once()
 
     def test_daily_dd_hard_stop(self):
@@ -384,23 +388,24 @@ class WaveDeckSmoke(unittest.TestCase):
         self.assertFalse(g["allow"])
         self.assertTrue(any("信心度" in r for r in g["reasons"]))
 
-    def test_panic_flatten_writes_zero_target(self):
-        from server.broker import panic_flatten, write_invalidation_txt
+    def test_panic_flatten_waits_for_fill_without_txt(self):
+        from server.broker import panic_flatten
         from server import broker as broker_mod
 
-        with tempfile.TemporaryDirectory() as td:
-            with mock.patch.object(broker_mod, "_txt_dir", return_value=Path(td)):
-                st = {
-                    "symbol": "TXF",
-                    "exec": {"price": 45020, "lots": 2},
-                    "positions": {"ai_suggested": 2, "txt_target": 2, "strategy": 2, "account": 2},
-                }
-                out = panic_flatten(st)
-                self.assertEqual((out.get("positions") or {}).get("txt_target"), 0)
-                self.assertTrue((Path(td) / "target_position.txt").is_file())
-                self.assertIn("EXIT", (Path(td) / "order_signal.txt").read_text(encoding="utf-8"))
-                write_invalidation_txt(45019, "below", "TXF")
-                self.assertIn("45019", (Path(td) / "invalidation.txt").read_text(encoding="utf-8"))
+        with mock.patch.object(broker_mod, "_txt_dir", side_effect=AssertionError("紙上不可存取實盤 TXT")), mock.patch.object(
+            broker_mod, "load_config", side_effect=AssertionError("紙上不可讀取實盤設定")
+        ):
+            st = {
+                "mode": "paper", "symbol": "TXF",
+                "exec": {"price": 45020, "lots": 2},
+                "positions": {"ai_suggested": 2, "txt_target": 2, "strategy": 2, "account": 2},
+            }
+            out = panic_flatten(st)
+            self.assertEqual(out["positions"]["txt_target"], 0)
+            self.assertEqual(out["positions"]["account"], 2)
+            self.assertEqual(out["positions"]["strategy"], 2)
+            self.assertEqual(out["paper_order"]["action"], "EXIT")
+            self.assertEqual(out["execution"]["status"], "pending")
 
     def test_st_push_chip_lightweight(self):
         from server.st_push import build_report, _chip_from_snap

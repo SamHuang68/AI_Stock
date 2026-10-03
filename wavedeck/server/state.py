@@ -10,12 +10,14 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
+from .data_contract import finite_number, normalize_quote, parse_as_of
+
 TZ8 = timezone(timedelta(hours=8))
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 STATE_PATH = DATA / "runtime_state.json"
 
-VALID_STATES = ("Idle", "Arming", "InPosition", "Reducing", "Halted", "Flat")
+VALID_STATES = ("Idle", "Arming", "AwaitingFill", "PartialFilled", "InPosition", "Reducing", "Halted", "Flat")
 
 
 def now_iso() -> str:
@@ -35,44 +37,48 @@ def _default_state() -> dict[str, Any]:
             "force_flat_time": "13:40",
             "note": "收盤前禁新單；指定時間強制平倉",
         },
+        "data_contract_version": 1,
+        "quote": normalize_quote(None, "TXF"),
         "positions": {
-            "ai_suggested": 1,
-            "txt_target": 1,
-            "strategy": 1,
-            "account": 1,
+            "ai_suggested": 0,
+            "txt_target": 0,
+            "strategy": 0,
+            "account": 0,
         },
         "account": {
-            # Wave AI 參考艦橋樣本權益 — 僅供攻能驗證，非使用者實盤持倉
-            "source": "wave_ai_ref",
-            "reference": True,
-            "yesterday_balance": 72312,
-            "equity": 59888,
-            "equity_change": -12424,
-            "broker_api": "ok",
-            "position_sync": "synced",
+            "source": "paper",
+            "reference": False,
+            "demo": True,
+            "yesterday_balance": None,
+            "equity": None,
+            "equity_change": None,
+            "daily_dd_pct": None,
+            "broker_api": "paper",
+            "position_sync": "paper",
         },
         "ai": {
             "action": "HOLD",
-            "action_label": "維持續抱",
-            "confidence": 0.62,
-            "bias_long": 0.60,
-            "bias_short": 0.40,
-            "event": "TIMED_MARKET_REVIEW",
-            "summary": "既有多單仍受 MA20 與 +DI 支撐，尚未跌破短線區間低點；ADX 顯示趨勢未壞，續抱等待結構確認。",
-            "invalidation": {"price": 45015, "side": "below"},
-            "next_watch": ["失守短線結構再評估", "收盤前不留倉時窗"],
+            "action_label": "等待資料",
+            "confidence": None,
+            "bias_long": None,
+            "bias_short": None,
+            "demo": True,
+            "event": None,
+            "summary": "紙上模式目前空倉；行情與權益未知，等待有來源時間的資料。",
+            "invalidation": {"price": None, "side": None},
+            "next_watch": ["確認來源行情與失效條件"],
             "process": {
                 "route": "heuristic→gate",
-                "chase_risk": "medium",
-                "gate": "PASS",
+                "chase_risk": "unknown",
+                "gate": "PENDING",
             },
-            "updated_at": now_iso(),
+            "updated_at": None,
         },
         "exec": {
-            "last_ai_action": "維持續抱",
-            "last_order_action": "多單進場",
-            "price": 45020,
-            "lots": 1,
+            "last_ai_action": "等待資料",
+            "last_order_action": "尚無紙上委託",
+            "price": None,
+            "lots": 0,
         },
         "costs": {
             "session_usd": 0.0,
@@ -92,7 +98,7 @@ def _default_state() -> dict[str, Any]:
         },
         "lights": {
             "system": "run",
-            "broker_api": "ok",
+            "broker_api": "idle",
             "position_sync": "ok",
             "kill_switch": "off",
             "webhook": "ok",
@@ -100,7 +106,7 @@ def _default_state() -> dict[str, Any]:
             "email_monitor": "ok",
             "order_signal_file": "ok",
             "st_bridge": "idle",
-            "risk_watchdog": "ok",
+            "risk_watchdog": "warn",
             "audit_db": "ok",
             "ui_push": "ok",
         },
@@ -126,6 +132,7 @@ def _default_state() -> dict[str, Any]:
             "last_ping_at": None,
             "fail_count": 0,
             "overlay_at": None,
+            "overlay_as_of": None,
             "overlay_epoch": None,
             "fail_safe": False,
             "fail_safe_reason": "",
@@ -137,28 +144,68 @@ def _default_state() -> dict[str, Any]:
 
 
 class Runtime:
-    def __init__(self) -> None:
+    def __init__(self, path: Path | None = None) -> None:
         self._lock = threading.RLock()
-        DATA.mkdir(parents=True, exist_ok=True)
+        self._path = Path(path) if path is not None else STATE_PATH
         self._state = self._load()
 
     def _load(self) -> dict[str, Any]:
-        if STATE_PATH.is_file():
-            try:
-                raw = json.loads(STATE_PATH.read_text(encoding="utf-8"))
-                base = _default_state()
-                base.update(raw if isinstance(raw, dict) else {})
+        base = _default_state()
+        if not self._path.is_file():
+            return base
+        try:
+            raw = json.loads(self._path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
                 return base
-            except Exception:
-                pass
-        return _default_state()
+            for key, value in raw.items():
+                if isinstance(value, dict) and isinstance(base.get(key), dict):
+                    base[key].update(value)
+                else:
+                    base[key] = value
+            acct = base.get("account") or {}
+            legacy_reference = bool(acct.get("reference")) or str(acct.get("source") or "").lower() in {
+                "wave_ai_ref", "reference", "legacy_demo",
+            }
+            if legacy_reference:
+                paper = base.get("mode") == "paper"
+                acct.update({
+                    "source": "paper" if paper else "unknown",
+                    "reference": False,
+                    "demo": paper,
+                    "migrated_reference": True,
+                    "yesterday_balance": None,
+                    "equity": None,
+                    "equity_change": None,
+                    "daily_dd_pct": None,
+                    "broker_api": "paper" if paper else "unknown",
+                    "position_sync": "paper" if paper else "unknown",
+                })
+                base["positions"] = {key: 0 if paper else None for key in _default_state()["positions"]}
+                base["exec"] = _default_state()["exec"]
+                base["ai"] = _default_state()["ai"]
+                base["fsm"] = "Halted" if base.get("kill_switch") else "Idle"
+                base["lights"].update({"broker_api": "idle", "risk_watchdog": "warn"})
+            for key in ("yesterday_balance", "equity", "equity_change", "daily_dd_pct"):
+                acct[key] = finite_number(acct.get(key))
+            base["account"] = acct
+            base["quote"] = normalize_quote(raw.get("quote"), str(base.get("symbol") or "TXF"))
+            base["exec"]["price"] = base["quote"]["price"]
+            link = base.get("st_link") or {}
+            source_stamp = parse_as_of(link.get("overlay_as_of"))
+            link["overlay_epoch"] = source_stamp.timestamp() if source_stamp is not None else None
+            base["st_link"] = link
+            base["data_contract_version"] = 1
+            return base
+        except (ValueError, TypeError, AttributeError, OSError):
+            return _default_state()
 
     def save(self) -> None:
         with self._lock:
             self._state["updated_at"] = now_iso()
-            tmp = STATE_PATH.with_suffix(".tmp")
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._path.with_suffix(".tmp")
             tmp.write_text(json.dumps(self._state, ensure_ascii=False, indent=2), encoding="utf-8")
-            tmp.replace(STATE_PATH)
+            tmp.replace(self._path)
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:

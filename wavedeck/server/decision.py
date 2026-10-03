@@ -2,9 +2,9 @@
 """Decision providers — heuristic (demo) + interface for Ollama/OpenAI."""
 from __future__ import annotations
 
-import random
 from typing import Any, Optional, Protocol
 
+from .data_contract import finite_number
 from .state import now_iso
 
 
@@ -16,20 +16,11 @@ class DecisionProvider(Protocol):
 
 
 def _f(v: Any) -> Optional[float]:
-    if v is None:
-        return None
-    try:
-        return float(v)
-    except Exception:
-        return None
+    return finite_number(v)
 
 
 class HeuristicProvider:
-    """Deterministic-ish demo brain so the console is alive without API keys.
-
-    Respects ST macro overlay fields when present:
-    st_spillover_prob / st_delever / st_hot_stage / st_score / st_rotation.
-    """
+    """確定性的紙上規則演練；分數不代表經驗證的信心度或勝率。"""
 
     name = "heuristic"
 
@@ -37,7 +28,6 @@ class HeuristicProvider:
         style = int(ctx.get("style") or 50)
         event = str(ctx.get("event") or "TIMED_MARKET_REVIEW")
         pos = int((ctx.get("positions") or {}).get("account") or 0)
-        price = float(ctx.get("price") or 45020)
 
         spill = _f(ctx.get("st_spillover_prob"))
         delever = bool(ctx.get("st_delever"))
@@ -91,10 +81,15 @@ class HeuristicProvider:
         else:
             chase = "medium"
 
-        inv = round(price - (35 + (100 - eff_style) * 0.2), 0)
+        raw_inv = ctx.get("decision_invalidation") or ctx.get("st_decision_invalidation") or ctx.get("invalidation") or {}
+        raw_inv = raw_inv if isinstance(raw_inv, dict) else {}
+        inv = finite_number(raw_inv.get("price"))
+        side = raw_inv.get("side")
+        if inv is None or inv <= 0 or side not in {"below", "above"}:
+            inv, side = None, None
         bits = [
-            f"事件 {event}：均線 MA20/MA60/MA150 結構仍偏多，",
-            f"+DI/-DI 與 ADX 顯示趨勢未明顯轉壞。",
+            f"紙上規則演練（非勝率）：事件 {event}；",
+            "未驗證均線與 ADX，不據此判斷趨勢；",
             f"進場風格={style}",
         ]
         if eff_style != style:
@@ -109,12 +104,12 @@ class HeuristicProvider:
         if delever:
             bits.append("ST 降載中；")
         if action == "HOLD" and pos > 0:
-            bits.append("持倉續抱，嚴守失效價。")
+            bits.append("紙上持倉維持；" + ("依已提供失效條件觀察。" if inv is not None else "失效價未知，等待來源條件。"))
         else:
             bits.append("依風格、外溢與閘門決定下一動。")
         summary = "".join(bits)
 
-        watch = ["失守短線結構再評估", "收盤前不留倉時窗"]
+        watch = ["確認來源行情與失效條件", "收盤前不留倉時窗"]
         if hot:
             watch.insert(0, f"供應鏈最強段：{hot}")
         if spill is not None and spill < 0.35:
@@ -123,12 +118,14 @@ class HeuristicProvider:
         return {
             "action": action,
             "action_label": label,
-            "confidence": round(max(0.1, min(0.95, conf + random.uniform(-0.02, 0.02))), 2),
-            "bias_long": round(long_bias, 2),
-            "bias_short": round(short_bias, 2),
+            "confidence": None,
+            "demo": True,
+            "rule_score": round(conf, 2),
+            "bias_long": None,
+            "bias_short": None,
             "event": event,
             "summary": summary,
-            "invalidation": {"price": inv, "side": "below"},
+            "invalidation": {"price": inv, "side": side},
             "next_watch": watch[:6],
             "process": {
                 "route": "heuristic→gate",

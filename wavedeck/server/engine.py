@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from typing import Any
+from functools import wraps
+import threading
+import uuid
 
 from . import audit
+from .data_contract import finite_number, normalize_quote
+from .signal_input import validate_signal, validate_bridge
 from .broker import ensure_master_seeds, get_broker
 from .config import load_config, set_broker_kind, set_mode, set_provider
 from .override_notify import notify_async as notify_override_alpha
@@ -15,8 +20,38 @@ from .st_link import touch_overlay
 from .st_push import push_async
 
 
+_execution_lock = threading.RLock()
+
+
+def _serialized(function):
+    @wraps(function)
+    def run(*args, **kwargs):
+        with _execution_lock:
+            return function(*args, **kwargs)
+    return run
+
+
+def _persist_execution(result: dict[str, Any]) -> None:
+    patch = {key: result[key] for key in ("paper_order", "execution") if key in result}
+    if patch:
+        RUNTIME.patch(**patch)
+    state = RUNTIME.snapshot()
+    if state.get("kill_switch") or state.get("fsm") == "Halted":
+        return
+    execution = result.get("execution") or {}
+    status = execution.get("status")
+    if status in {"pending", "partial"}:
+        RUNTIME.set_fsm("PartialFilled" if status == "partial" else "AwaitingFill")
+    elif status == "confirmed":
+        RUNTIME.set_fsm("InPosition" if execution.get("confirmed_position") else "Flat")
+    elif status == "idle" and state.get("fsm") == "Arming":
+        RUNTIME.set_fsm("InPosition" if execution.get("confirmed_position") else "Idle")
+
+
+
 def apply_st_bridge(body: dict[str, Any]) -> dict[str, Any]:
     """Stock Terminal macro overlay (style / delever / rotation / spillover)."""
+    body = validate_bridge(body)
     style = body.get("style")
     delever = bool(body.get("delever"))
     note = str(body.get("note") or "")
@@ -51,7 +86,10 @@ def apply_st_bridge(body: dict[str, Any]) -> dict[str, Any]:
         "chain_contig": meta.get("chain_contig"),
         "source": str(meta.get("source") or body.get("source") or "st-macro")[:64],
         "score": meta.get("score"),
-        "advRatio": meta.get("advRatio"),
+        "advRatio": finite_number(meta.get("advRatio")),
+        "decision_as_of": meta.get("decision_as_of"),
+        "decision_contract_version": meta.get("decision_contract_version"),
+        "decision_invalidation": meta.get("decision_invalidation"),
         "fail_safe": False,
         "fail_safe_reason": None,
     }
@@ -66,7 +104,7 @@ def apply_st_bridge(body: dict[str, Any]) -> dict[str, Any]:
             pass
     snap = RUNTIME.patch(**patch)
     try:
-        touch_overlay()
+        touch_overlay(as_of=meta.get("decision_as_of"))
         snap = RUNTIME.snapshot()
     except Exception:
         pass
@@ -121,16 +159,47 @@ def set_broker(kind: str) -> dict[str, Any]:
     return {"ok": True, "broker": cfg["broker"]["kind"], "state": snap}
 
 
+def _mode_matches(state: dict, cfg: dict) -> bool:
+    mode = state.get("mode")
+    kind = (cfg.get("broker") or {}).get("kind")
+    return (mode == "paper" and kind == "paper") or (
+        mode == "live" and kind in {"txt", "txt_master", "master"})
+
+
+@_serialized
+def panic_positions() -> dict[str, Any]:
+    """停新單、撤未成交紙上進場，再建立平倉意圖；成交仍由回報確認。"""
+    from .broker import panic_flatten
+
+    st = RUNTIME.set_kill(True)
+    if not _mode_matches(st, load_config()):
+        return {"ok": False, "code": "MODE_MISMATCH", "state": st}
+    flat = panic_flatten(st)
+    patch = {key: flat[key] for key in
+             ("positions", "exec", "account", "paper_order", "execution") if key in flat}
+    patch["lights"] = {**(flat.get("lights") or {}), "kill_switch": "on", "system": "halt"}
+    RUNTIME.patch(**patch)
+    snap = RUNTIME.set_kill(True)
+    audit.write("panic_flatten", {"positions": snap.get("positions")})
+    push_async(snap, reason="panic", force=True)
+    return {"ok": True, "state": snap, "mode": "panic_flatten"}
+
+
+@_serialized
 def sync_broker_positions() -> dict[str, Any]:
-    broker = get_broker()
     st = RUNTIME.snapshot()
+    if not _mode_matches(st, load_config()):
+        return {"ok": False, "code": "MODE_MISMATCH", "state": st}
+    broker = get_broker()
     result = broker.sync_positions(st)
     patch: dict[str, Any] = {"positions": result.get("positions") or st.get("positions")}
     if result.get("lights"):
         patch["lights"] = result["lights"]
     if result.get("account"):
         patch["account"] = result["account"]
-    snap = RUNTIME.patch(**patch)
+    RUNTIME.patch(**patch)
+    _persist_execution(result)
+    snap = RUNTIME.snapshot()
     audit.write("broker_sync", {"broker": broker.name, "meta": result.get("broker_meta")})
     return {"ok": True, "broker": broker.name, "state": snap, "meta": result.get("broker_meta")}
 
@@ -153,8 +222,20 @@ def get_runtime_config() -> dict[str, Any]:
     }
 
 
+@_serialized
 def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
     st = RUNTIME.snapshot()
+    try:
+        body = validate_signal(body, str(st.get("symbol") or "TXF"))
+    except ValueError as exc:
+        return {"ok": False, "code": "INVALID_SIGNAL", "error": str(exc), "state": st}
+    signal_id = body.get("signal_id")
+    prior_intent = ((st.get("execution") or {}).get("intents") or {}).get(signal_id)
+    if signal_id and prior_intent:
+        return {"ok": True, "duplicate": True, "intent": prior_intent, "state": st}
+    cfg = load_config()
+    if not _mode_matches(st, cfg):
+        return {"ok": False, "code": "MODE_MISMATCH", "error": "模式與執行介面不一致，未送出委託", "state": st}
     event = str(body.get("event") or "MANUAL_REVIEW")
     source = str(body.get("source") or "manual")
     symbol = str(body.get("symbol") or st.get("symbol") or "TXF")
@@ -168,6 +249,11 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
             "state": st,
         }
 
+    if "quote" in body:
+        quote = normalize_quote(body["quote"], symbol)
+        RUNTIME.patch(quote=quote, exec={"price": quote["price"]})
+    elif symbol != st.get("symbol"):
+        RUNTIME.patch(quote=normalize_quote(None, symbol), exec={"price": None})
     RUNTIME.patch(
         symbol=symbol,
         transport={
@@ -201,6 +287,9 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
         "st_hot_stage": ov.get("hot_stage"),
         "st_delever": bool(ov.get("delever")),
         "st_score": ov.get("score"),
+        "quote": live.get("quote"),
+        "decision_invalidation": ov.get("decision_invalidation"),
+        "decision_as_of": ov.get("decision_as_of"),
     }
     decision, err = infer_with_fallback(ctx, preferred)
     if err:
@@ -208,6 +297,7 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
     else:
         RUNTIME.patch(lights={"openai_or_local": "ok"})
 
+    decision["intent_id"] = signal_id or uuid.uuid4().hex
     gate = evaluate_gate(RUNTIME.snapshot(), decision)
     decision["process"]["gate"] = gate["gate"]
     decision["process"]["gate_reasons"] = gate["reasons"]
@@ -227,21 +317,23 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
         if applied.get("account"):
             RUNTIME.patch(account=applied["account"])
 
-        if action == "ENTER_LONG":
-            execu["lots"] = gate["lots_effective"]
-            RUNTIME.set_fsm("InPosition")
-        elif action == "ENTER_SHORT":
-            execu["lots"] = gate["lots_effective"]
-            RUNTIME.set_fsm("InPosition")
-        elif action == "HOLD":
-            if int(pos.get("account") or 0) != 0:
-                RUNTIME.set_fsm("InPosition")
-            else:
-                RUNTIME.set_fsm("Idle")
-        elif action == "REDUCE":
-            RUNTIME.set_fsm("Reducing")
-        elif action == "EXIT":
-            RUNTIME.set_fsm("Flat")
+        if broker.name == "paper":
+            _persist_execution(applied)
+            if applied.get("accepted") is False:
+                gate["allow"] = False
+                gate["gate"] = "BLOCK"
+                gate["reasons"].append((applied.get("execution") or {}).get("reason") or "紙上委託未接受")
+                decision["process"]["gate"] = "BLOCK"
+            if applied.get("paper_order"):
+                execu["lots"] = applied["paper_order"].get("quantity", execu.get("lots"))
+        else:
+            # TXT 的意圖不可當成帳戶成交；實盤整合仍需獨立驗收。
+            target = pos.get("txt_target")
+            actual = pos.get("account")
+            confirmed = target is not None and actual is not None and target == actual and (
+                applied.get("account") or {}).get("position_sync") == "synced"
+            if action in {"ENTER_LONG", "ENTER_SHORT", "EXIT", "REDUCE"}:
+                RUNTIME.set_fsm(("InPosition" if actual else "Flat") if confirmed else "AwaitingFill")
         execu["last_order_action"] = order_action
     else:
         execu["last_ai_action"] = decision["action_label"] + "（閘門擋下）"
@@ -252,20 +344,24 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
     # Persist preferred provider used (may be fallback heuristic)
     used = decision.get("provider") or preferred
     prev_costs = dict(RUNTIME.snapshot().get("costs") or {})
-    try:
-        delta = float(decision.get("cost_usd") or 0)
-    except Exception:
-        delta = 0.0
-    local_n = int(decision.get("local_calls") or 0)
-    cloud_n = int(decision.get("cloud_calls") or 0)
+    delta = finite_number(decision.get("cost_usd"))
+    def cumulative(key):
+        previous = finite_number(prev_costs.get(key))
+        return round(previous + delta, 6) if previous is not None and delta is not None else None
     cost_patch = {
         "provider": used,
-        "session_usd": round(float(prev_costs.get("session_usd") or 0) + delta, 6),
-        "day_usd": round(float(prev_costs.get("day_usd") or 0) + delta, 6),
-        "month_usd": round(float(prev_costs.get("month_usd") or 0) + delta, 6),
-        "local_calls": int(prev_costs.get("local_calls") or 0) + local_n,
-        "cloud_calls": int(prev_costs.get("cloud_calls") or 0) + cloud_n,
+        "session_usd": cumulative("session_usd"),
+        "day_usd": cumulative("day_usd"),
+        "month_usd": cumulative("month_usd"),
+        "local_calls": int(prev_costs.get("local_calls") or 0) + int(decision.get("local_calls") or 0),
+        "cloud_calls": int(prev_costs.get("cloud_calls") or 0) + int(decision.get("cloud_calls") or 0),
     }
+    if isinstance(decision.get("budget"), dict):
+        budget = decision["budget"]
+        cost_patch["budget"] = budget
+        cost_patch["day_usd"] = (finite_number(budget.get("spent_usd"))
+                               if budget.get("unknown_requests") == 0 and
+                               budget.get("pending_requests") == 0 else None)
     # Preserve fail-safe tightened invalidation if new decision would loosen it
     prev_ai = RUNTIME.snapshot().get("ai") or {}
     prev_inv = prev_ai.get("invalidation") if isinstance(prev_ai.get("invalidation"), dict) else {}
@@ -328,7 +424,7 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
     # Soft-sync invalidation → TXT side file for 下單大師
     try:
         inv = (snap.get("ai") or {}).get("invalidation") or {}
-        if inv.get("price") is not None:
+        if snap.get("mode") == "live" and inv.get("price") is not None:
             from .broker import write_invalidation_txt
 
             write_invalidation_txt(
@@ -369,5 +465,6 @@ __all__ = [
     "set_exec_mode",
     "set_broker",
     "sync_broker_positions",
+    "panic_positions",
     "get_runtime_config",
 ]

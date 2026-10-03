@@ -21,9 +21,16 @@ _DEFAULT = {
         "model": "llama3.2",
         "timeout_sec": 45,
     },
+    # 固定臺灣日界線；依請求准入日記帳。價目未確認時，付費請求一律阻擋。
+    "cost_budget": {"daily_limit_usd": 5.0},
     "openai": {
         "base": "https://api.openai.com/v1",
         "model": "gpt-4o-mini",
+        # 精確模型鍵值須含 input_usd_per_million、output_usd_per_million、
+        # context_window_tokens、max_output_tokens、limits_source，並確認
+        # output_limit_parameter=max_completion_tokens 可限制全部可計費輸出。
+        # 費率與供應者強制限制必須先確認；不提供猜測值或預設價目。
+        "pricing": {},
         "timeout_sec": 45,
     },
     "broker": {

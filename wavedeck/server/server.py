@@ -28,6 +28,7 @@ from server.engine import (  # noqa: E402
     set_decision_provider,
     set_exec_mode,
     sync_broker_positions,
+    panic_positions,
 )
 from server.config import load_config  # noqa: E402
 from server.state import RUNTIME, now_iso  # noqa: E402
@@ -215,7 +216,10 @@ class Handler(BaseHTTPRequestHandler):
             return _json(self, 200, handle_signal(body))
 
         if path == "/bridge/st":
-            return _json(self, 200, {"ok": True, "state": apply_st_bridge(body)})
+            try:
+                return _json(self, 200, {"ok": True, "state": apply_st_bridge(body)})
+            except ValueError as exc:
+                return _json(self, 400, {"ok": False, "code": "INVALID_BRIDGE", "error": str(exc)})
 
         if path == "/api/signal":
             return _json(self, 200, handle_signal(body))
@@ -269,28 +273,8 @@ class Handler(BaseHTTPRequestHandler):
             return _json(self, 200, {"ok": True, "state": snap, "mode": "pause_new"})
 
         if path == "/api/panic":
-            # Pause new risk-on AND flatten via TXT / paper broker
-            from server.broker import panic_flatten
-
-            RUNTIME.set_kill(True)
-            flat = panic_flatten(RUNTIME.snapshot())
-            patch_kw: dict[str, Any] = {
-                "positions": flat.get("positions"),
-                "exec": flat.get("exec"),
-                "lights": {**(flat.get("lights") or {}), "kill_switch": "on", "system": "halt"},
-            }
-            if isinstance(flat.get("account"), dict):
-                patch_kw["account"] = flat["account"]
-            RUNTIME.patch(**{k: v for k, v in patch_kw.items() if v is not None})
-            snap = RUNTIME.set_kill(True)
-            audit.write("panic_flatten", {"positions": snap.get("positions")})
-            try:
-                from server.st_push import push_async
-
-                push_async(snap, reason="panic", force=True)
-            except Exception:
-                pass
-            return _json(self, 200, {"ok": True, "state": snap, "mode": "panic_flatten"})
+            result = panic_positions()
+            return _json(self, 200 if result["ok"] else 409, result)
 
         if path == "/api/control":
             cmd = str(body.get("cmd") or "")
