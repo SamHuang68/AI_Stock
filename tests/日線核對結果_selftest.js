@@ -1,0 +1,18 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const context = { window: {}, document: { getElementById() { return null; } }, setInterval() {}, clearInterval() {} };
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/ui/daily_cache_v3.js'), 'utf8'), context);
+const describe = context.window.DailyCacheUI.describeResult;
+const result = describe({ rows: 12, quality: { observed: 12, accepted: 5, conflicts: 7, missing: 2, invalid: 0 } });
+assert.match(result, /來源觀測 12，品質通過 5，來源衝突 7，缺日 2，無效 0/);
+assert.match(result, /不代表每筆行情可用/);
+assert.doesNotMatch(result, /新增 12/);
+assert.match(describe({ rows: 12 }), /來源資料 12 筆；未提供分欄品質/);
+assert.match(describe({ inserted: 0, conflicts: 0 }), /新增 0，來源差異 0/);
+assert.match(describe({ reused: true, rows: 12 }), /沿用快取；品質仍依來源收據核對/);
+assert.match(describe({ quality: { observed: null, accepted: -1, conflicts: NaN } }), /來源觀測 未提供，品質通過 未提供，來源衝突 未提供/);
+console.log('日線核對結果：取得來源、品質通過、衝突與缺日分開呈現。');

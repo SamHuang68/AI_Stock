@@ -44,15 +44,19 @@ jobs:
         run: npm run test:browser
       - name: 研究工作台多尺寸與操作驗收
         run: npm run test:research-browser
+      - name: 資料核對結果與執行版本驗收
+        run: npm run test:data-browser
       - name: PowerShell launcher syntax
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $tokens = $null
           $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path .\scripts\go.ps1), [ref]$tokens, [ref]$errors) | Out-Null
-          if ($errors.Count) { $errors | Format-List; exit 1 }
+          foreach ($file in @('.\scripts\go.ps1', '.\scripts\start_local.ps1')) {
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count) { $errors | Format-List; exit 1 }
+          }
       - name: Dist scrub (via unittest)
         run: python -m unittest tests.test_dist_scrub -v
 

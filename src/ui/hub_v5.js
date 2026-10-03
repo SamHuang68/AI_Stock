@@ -1360,8 +1360,9 @@
             '<div class="s"><span class="badge ' + (st.running ? 'warn' : 'ok') + '">' +
             (st.lastOk ? '上次成功 ' + st.lastOk : '尚未成功') + '</span></div></div>' +
           '<div class="cell"><div class="k">歷史庫列數</div><div class="v" style="font-size:11px">' + countChips + '</div></div>' +
-          '<div class="cell"><div class="k">Server</div><div class="v">' + (health.status || '—') + '</div>' +
-            '<div class="s">Stock Terminal 5.0 · loopback</div></div>' +
+          '<div class="cell"><div class="k">執行版本</div><div class="v" id="hub-runtime-commit" style="font-size:13px">' +
+            (/^[a-f0-9]{40}$/.test(health.runtimeCommit || '') ? health.runtimeCommit.slice(0, 12) : '版本尚未提供') + '</div>' +
+            '<div class="s">' + (health.status === 'ok' ? '服務正常' : '服務待核對') + ' · 本機與私人網站可對照此版本</div></div>' +
           '<div class="cell"><div class="k">策略</div><div class="v">增量 merge</div>' +
             '<div class="s">只更新新交易日</div></div>' +
         '</div>' +
