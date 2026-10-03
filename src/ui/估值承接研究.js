@@ -149,6 +149,7 @@
   function pair(label, value) { return '<dt>' + esc(label) + '</dt><dd>' + esc(value) + '</dd>'; }
   function facts() {
     const row = active.row || {}, research = row.research || {};
+    const volume = research.officialResearchVolume || {}, selected = volume.status === 'selected';
     $('vr-facts').innerHTML = '<dl class="vr-facts">' +
       pair('收盤價／交易日', fmt(row.close) + '／' + (research.priceAsOf || '未提供')) +
       pair('官方本益比／資料日', fmt(row.per) + ' 倍／' + (research.valuationDate || '未提供')) +
@@ -156,8 +157,14 @@
       pair('價格來源／預期交易日', (research.priceSource || '未提供') + '／' + (research.expectedSession || '未核對')) +
       pair('價格核對', research.priceVerification || '尚未核對') +
       pair('原始日線來源', research.rawPriceSource || '未記錄；不以核對來源代替') +
-      pair('成交量核對', research.volumeConflict ? '官方量與原始量不一致，留空待核對' :
+      pair('研究成交量／單位', fmt(research.volumeShares, 0) + '／' + (selected ? volume.unit : research.volumeBasis === 'legacy-quality' ? '股（既有品質紀錄）' : '未確認')) +
+      pair('研究量來源／交易日', selected ? volume.source + '／' + volume.asOf : '完整官方收據尚未選定') +
+      pair('原始成交量／單位', fmt(volume.rawValue, 0) + '／' + (volume.rawUnit || '未記錄')) +
+      pair('官方減原始數值差', fmt(volume.numericDifference, 0)) +
+      pair('成交量核對', selected ? (research.volumeConflict ? '研究採完整官方股數；原始量差異保留' : '完整官方收據一致') :
+        research.volumeConflict ? '官方量與原始量不一致，研究量留空待核對' :
         research.volumeVerified ? '官方收據逐欄核對' : '未保存完整來源收據或資料尚缺') +
+      pair('研究資料版本', research.contractVersion || '未提供') +
       pair('價格基準', research.priceBasis || '未核對') +
       pair('月營收年增／期別', percent(row.revYoy) + '／' + (research.revenuePeriod || '未提供')) +
       pair('月增／累計年增', percent(research.revenueMom) + '／' + percent(research.revenueCumYoy)) +
@@ -168,11 +175,17 @@
       pair('投信／外資連續天數', fmt(row.trustStreak, 0) + '／' + fmt(row.foreignStreak, 0)) +
       pair('籌碼來源日', research.trustAsOf || '未提供') + '</dl>' +
       (Array.isArray(research.sourceReceipts) && research.sourceReceipts.length ?
-        '<details class="vr-muted" style="overflow-wrap:anywhere"><summary>查看價格核對收據</summary>' + research.sourceReceipts.map(receipt =>
+        '<details class="vr-muted" style="overflow-wrap:anywhere"><summary>查看量價核對收據</summary>' + research.sourceReceipts.map(receipt =>
           '<p>' + esc(receipt.source || '未提供') + '／' + esc(receipt.parserVersion || '未提供') +
           '<br>取得：' + esc(receipt.retrievedAt || '未提供') + '；寫入：' + esc(receipt.writtenAt || '未提供') +
           '<br>來源：' + esc(receipt.url || '未提供') + '<br>雜湊：' + esc(receipt.sourceHash || '未提供') +
           '<br>來源說明：' + esc(Array.isArray(receipt.notes) ? receipt.notes.join('；') : '未提供') + '</p>').join('') + '</details>' : '') +
+      (Array.isArray(research.volumeDifferences) && research.volumeDifferences.length ?
+        '<details class="vr-muted"><summary>查看研究期間的成交量差異</summary>' + research.volumeDifferences.map(item =>
+          '<p>' + esc(item.asOf) + '：原始 ' + fmt(item.rawValue, 0) + '（' + esc(item.rawUnit || '單位未記錄') +
+          '）；研究 ' + fmt(item.value, 0) + ' 股；數值差 ' + fmt(item.numericDifference, 0) +
+          '；' + esc(item.status === 'selected' ? '採完整官方收據' : '未採用：完整一致證據不足') + '</p>').join('') +
+          '<p>差異不推定交易類別或原始單位，完整來源說明與雜湊保留於收據。</p></details>' : '') +
       '<p class="vr-muted">營收為最近公告的單一期別，不能單憑一個月判定獲利趨勢。區間位置比較前 20 個交易日，不代表已確認的整理型態。</p>' +
       (Array.isArray(research.missing) && research.missing.length ? '<p class="vr-muted">資料限制：' + research.missing.map(esc).join('；') + '</p>' : '');
   }
