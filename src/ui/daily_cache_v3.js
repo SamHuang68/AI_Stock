@@ -1,7 +1,7 @@
 /* 使用者明示選擇標的及期間；開啟畫面不下載、不回補整份清單。 */
 (function () {
   'use strict';
-  let dialog, timer, jobId, opener;
+  let dialog, timer, jobId, opener, openerFallback;
   const $ = id => document.getElementById(id);
   const esc = s => String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   function describeResult(value) {
@@ -63,13 +63,18 @@
   function close() {
     clearTimeout(timer);
     if (dialog?.open) dialog.close();
-    if (opener?.isConnected) opener.focus({ preventScroll: true });
-    opener = null;
+    const visible = el => el?.isConnected && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
+    const target = visible(opener) ? opener : (visible(openerFallback) ? openerFallback : null);
+    target?.focus({ preventScroll: true });
+    opener = openerFallback = null;
   }
   function open(event) {
     close();
     opener = event?.currentTarget instanceof HTMLElement ? event.currentTarget :
       (document.activeElement !== document.body ? document.activeElement : $('btn-daily-cache'));
+    // 工具列選單會在點擊後收合；關閉時應回到仍可見的分類入口。
+    const menuId = opener?.closest('.tbg-menu')?.id || '';
+    openerFallback = menuId.startsWith('tbg-menu-') ? $('tbg-' + menuId.slice(9))?.querySelector('.tbg-btn') : null;
     if (!dialog) { dialog = document.createElement('dialog'); dialog.id = 'dc-dialog'; document.body.appendChild(dialog); }
     dialog.style.cssText = 'width:min(620px,94vw);max-height:90vh;overflow:auto;background:#101827;color:#e2e8f0;border:1px solid #64748b;border-radius:10px;padding:20px;font:15px/1.7 system-ui';
     const current = { symbol: String(S.sym || ''), market: S.mkt === 'US' ? 'US' : 'TW' };
