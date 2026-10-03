@@ -176,8 +176,13 @@ def data_entries(root):
 
 
 def recheck_source(source, files, records):
+    initial = {path.relative_to(source).as_posix() for path in files}
+    # 唯讀開啟已關閉的 WAL 資料庫也可能建立邊檔；只容許已驗證 DB 的精確名稱。
+    # 不使用 immutable=1：那會忽略尚在 WAL 中的已提交資料。
+    transient = {key + suffix for key, record in records.items() if record['kind'] == 'sqlite'
+                 for suffix in ('-wal', '-shm')}
     observed = {path.relative_to(source).as_posix() for path, directory in data_entries(source) if not directory}
-    if observed != {path.relative_to(source).as_posix() for path in files}:
+    if observed - transient != initial - transient:
         raise RuntimeError('備份期間檔案清單改變，未進行資料切換')
     for key, expected in records.items():
         path = checked_path(source / key)
@@ -190,8 +195,10 @@ def recheck_source(source, files, records):
         elif digest(path) != expected['sha256']:
             raise RuntimeError(f'整批備份完成後來源檔案已改變：{key}')
     final_paths = {path.relative_to(source).as_posix() for path, directory in data_entries(source) if not directory}
-    if observed != final_paths:
+    if observed - transient != final_paths - transient:
         raise RuntimeError('來源再核對期間檔案清單改變，未進行資料切換')
+    return {'created': sorted((final_paths - initial) & transient),
+            'removed': sorted((initial - final_paths) & transient)}
 
 
 def backup_data(source, install_root, commit, reason, *, target_commit=None):
@@ -232,7 +239,7 @@ def backup_data(source, install_root, commit, reason, *, target_commit=None):
                 if digest(target) != before or digest(path) != before:
                     raise RuntimeError(f'備份期間檔案內容改變：{key}')
                 report['files'][key] = {'kind': 'file', 'sha256': before, 'bytes': target.stat().st_size}
-        recheck_source(source, files, report['files'])
+        report['sqliteSidecarChanges'] = recheck_source(source, files, report['files'])
         report.update(status='已驗證', sourceRecheckedAt=utc_now(), completedAt=utc_now(),
                       consistency='逐檔快照及整批完成後來源再核對；不宣稱多資料庫原子快照')
     except BaseException as exc:
