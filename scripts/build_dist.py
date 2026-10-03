@@ -213,6 +213,8 @@ REQUIRED_SHARE_FILES = (
     "server/deadline.py",
     "server/台股交易參考.py",
     "server/台股交易參考.json",
+    "server/us_equity_calendar.py",
+    "server/us_equity_calendar.json",
     "server/個股每日資料.py",
     "server/http_boundary.py",
     "server/keystats_resolution.py",
