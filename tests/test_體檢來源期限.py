@@ -47,13 +47,24 @@ class StockHealthDeadlineTests(unittest.TestCase):
             self.assertLessEqual(kwargs['deadline'].remaining(), .025)
             self.assertEqual(args[:2], ('2330', 'TW'))
             entered.set()
-            self.release.wait(2)
+            self.release.wait()
             return [(int(self.now.timestamp()), 500, 501, 499, 500, 5000)]
 
         self.ds.fetch_yahoo_daily.side_effect = stalled
-        started = time.monotonic()
-        result = routes.load_bars('2330', 'TW', now=self.now)
-        self.assertLess(time.monotonic() - started, .75)
+        real_wait = routes.wait
+        observed_timeouts = []
+
+        def wait_after_source_started(futures, timeout):
+            # 先確認固定來源已啟動；執行緒建立速度不是產品等待期限。
+            self.assertTrue(entered.wait(5), '測試來源工作未能啟動')
+            observed_timeouts.append(timeout)
+            return real_wait(futures, timeout=timeout)
+
+        with mock.patch.object(routes, 'wait', side_effect=wait_after_source_started):
+            result = routes.load_bars('2330', 'TW', now=self.now)
+        self.assertEqual(len(observed_timeouts), 1)
+        self.assertGreaterEqual(observed_timeouts[0], 0)
+        self.assertLessEqual(observed_timeouts[0], .025)
         self.assertTrue(entered.is_set())
         self.assertFalse(self.release.is_set(), 'HTTP 結果不可等待仍被阻塞的來源')
         self.assertEqual(result['source'], 'local-db')
