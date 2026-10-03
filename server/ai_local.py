@@ -186,6 +186,22 @@ class _StreamControl:
         if self.remaining() <= 0:
             raise AiRuntimeError('本機模型推理超過等待上限，已停止本次分析；請稍後重試。')
 
+    def check_transport_error(self, error):
+        self.check()
+        if not isinstance(error, TimeoutError) and not isinstance(getattr(error, 'reason', None), TimeoutError):
+            return
+        # Windows socket 的相對等待仍可能使用較粗的時計，比 QPC 總期限提早一個 tick。
+        # 僅在時計解析度附近等待真正的期限；不提前宣稱逾時，也不吞掉較早的傳輸失敗。
+        tolerance = min(0.05, max(0.001, time.get_clock_info('monotonic').resolution * 2))
+        remaining = self.remaining()
+        if remaining > tolerance:
+            return
+        while remaining > 0:
+            self.cancel_event.wait(remaining)
+            self.check()
+            remaining = self.remaining()
+        self.check()
+
     def watch(self, response):
         self.response = response
 
@@ -620,7 +636,7 @@ def chat_stream(
         )
     except Exception as exc:
         try:
-            control.check()
+            control.check_transport_error(exc)
         except AiRuntimeError as interrupted:
             exc = interrupted
         _trace(

@@ -187,6 +187,48 @@ class AiStreamContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ai_local.AiRuntimeError, '快速摘要失敗：TimeoutError'):
                 list(ai_local.chat_stream('測試'))
 
+    def test_coarse_socket_timeout_waits_for_actual_precise_deadline(self):
+        for wrapped in [False, True]:
+            with self.subTest(wrapped=wrapped):
+                clock = [100.0]
+                cancelled = threading.Event()
+                waits = []
+                def timeout(*args, **kwargs):
+                    clock[0] = 100.29
+                    error = TimeoutError('timed out')
+                    raise ai_local.urllib.error.URLError(error) if wrapped else error
+                def wait(remaining):
+                    waits.append(remaining)
+                    self.assertLess(clock[0], 100.3)
+                    clock[0] = 100.301
+                    return False
+                with mock.patch.object(ai_local.time, 'perf_counter', side_effect=lambda: clock[0]), \
+                     mock.patch.object(ai_local.time, 'get_clock_info', return_value=SimpleNamespace(resolution=0.015625)), \
+                     mock.patch.object(ai_local, 'FAST_SOCKET_TIMEOUT', 0.3), \
+                     mock.patch.object(cancelled, 'wait', side_effect=wait), \
+                     mock.patch.object(ai_local.urllib.request, 'urlopen', side_effect=timeout):
+                    with self.assertRaisesRegex(ai_local.AiRuntimeError, '超過等待上限'):
+                        list(ai_local.chat_stream('測試', cancel_event=cancelled))
+                self.assertEqual(len(waits), 1)
+                self.assertAlmostEqual(waits[0], 0.01)
+
+    def test_cancel_during_clock_alignment_keeps_cancel_semantics(self):
+        clock = [100.0]
+        cancelled = threading.Event()
+        def timeout(*args, **kwargs):
+            clock[0] = 100.29
+            raise TimeoutError('timed out')
+        def cancel(remaining):
+            cancelled.set()
+            return True
+        with mock.patch.object(ai_local.time, 'perf_counter', side_effect=lambda: clock[0]), \
+             mock.patch.object(ai_local.time, 'get_clock_info', return_value=SimpleNamespace(resolution=0.015625)), \
+             mock.patch.object(ai_local, 'FAST_SOCKET_TIMEOUT', 0.3), \
+             mock.patch.object(cancelled, 'wait', side_effect=cancel), \
+             mock.patch.object(ai_local.urllib.request, 'urlopen', side_effect=timeout):
+            with self.assertRaisesRegex(ai_local.AiCancelledError, '已取消'):
+                list(ai_local.chat_stream('測試', cancel_event=cancelled))
+
     def test_cancel_wins_over_simultaneous_deadline_and_socket_error(self):
         clock = [100.0]
         cancelled = threading.Event()
