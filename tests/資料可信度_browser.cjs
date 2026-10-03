@@ -7,7 +7,7 @@ const output=path.resolve(process.env.ST_BROWSER_OUTPUT || path.join(root,'scrat
 const origin='https://st-data-evidence.test';
 const files=['src/ui/hub_v5.js','src/ui/daily_cache_v3.js','src/ui/toolbar_v3.js'];
 const sources=new Map(files.map(file=>['/'+file,fs.readFileSync(path.join(root,file),'utf8')]));
-const report={fixtureOnly:true,physicalDevice:false,nativeSafari:false,screenReader:false,checks:[],pageErrors:[],requests:[],sourceHashes:{}};
+const report={fixtureOnly:true,physicalDevice:false,nativeSafari:false,screenReader:false,checks:[],focusInterleavings:[],pageErrors:[],requests:[],sourceHashes:{}};
 for(const [file,source] of sources)report.sourceHashes[file]=crypto.createHash('sha256').update(source).digest('hex');
 const html='<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'+
  '<title>資料可信度離線驗收</title><style>body{margin:8px;background:#101827;color:#e2e8f0;font:15px system-ui}*{box-sizing:border-box}button{font:inherit;padding:10px}#shell-views{height:78vh;min-width:0}#pro-tools{margin:8px}dialog button{font:inherit;padding:9px}</style>'+
@@ -59,9 +59,41 @@ const html='<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name
     await page.screenshot({path:path.join(output,engine+'-'+width+'x'+height+'.png')});
     await page.keyboard.press('Escape');
     await page.locator('#dc-dialog').waitFor({state:'hidden'});
-    assert.equal(await page.evaluate(()=>document.activeElement.closest('#tbg-sys')?.id),'tbg-sys');
+    const category=page.locator('#tbg-sys > .tbg-btn');
+    assert.equal(await category.evaluate(n=>n===document.activeElement),true,'正常關閉應回到分類入口');
+    assert.equal(await category.isVisible(),true);
+
+    // 固定真實存在的排程交錯：只暫留 toolbar 的 closeAll(0)，用原生 Escape
+    // 在選單仍可見時關閉 dialog，再執行原 closeAll。其他計時器／來源讀取不變。
+    await page.evaluate(()=>{
+     const nativeTimeout=window.setTimeout, pending=[];
+     window.fixtureMenuClose={pending,release(){window.setTimeout=nativeTimeout;pending.splice(0).forEach(task=>nativeTimeout(task.fn,0,...task.args));}};
+     window.setTimeout=function(fn,delay,...args){
+      if(delay===0&&typeof fn==='function'&&fn.name==='closeAll'){pending.push({fn,args});return 0;}
+      return nativeTimeout(fn,delay,...args);
+     };
+    });
+    await category.tap();
+    await page.locator('#btn-daily-cache').tap();
+    await page.waitForFunction(()=>window.fixtureMenuClose.pending.length===1);
+    assert.equal(await page.locator('#dc-dialog').evaluate(n=>n.open),true);
+    assert.equal(await page.locator('#tbg-menu-sys').isVisible(),true);
+    await page.keyboard.press('Escape');
+    await page.locator('#dc-dialog').waitFor({state:'hidden'});
+    const focusBeforeMenuClose=await page.evaluate(()=>({id:document.activeElement.id,category:document.activeElement.closest('#tbg-sys')?.id||null}));
+    await page.evaluate(()=>window.fixtureMenuClose.release());
+    await page.waitForFunction(()=>!document.querySelector('#tbg-menu-sys').classList.contains('open'));
+    const focusAfterMenuClose=await page.evaluate(()=>{
+     const node=document.activeElement;
+     return {id:node.id,category:node.closest('#tbg-sys')?.id||null,
+       visible:!!node.getClientRects().length&&getComputedStyle(node).visibility!=='hidden'};
+    });
+    report.focusInterleavings.push({engine,width,height,focusBeforeMenuClose,focusAfterMenuClose});
+    assert.equal(focusAfterMenuClose.category,'tbg-sys','快速 Escape 後選單延後收合，焦點必須仍在分類入口');
+    assert.equal(focusAfterMenuClose.visible,true,'快速關閉後不可留下隱藏焦點');
+    assert.equal(await category.evaluate(n=>n===document.activeElement),true);
     report.checks.push({engine,version:browser.version(),width,height,keyboardEscape:true,focusReturned:true,
-      sourceAndQualitySeparated:true,unknownRevisionSafe:true,evidenceReadable:true,scroll});
+      quickEscapeBeforeMenuClose:true,sourceAndQualitySeparated:true,unknownRevisionSafe:true,evidenceReadable:true,scroll});
     await context.close();
    }
   }finally{await browser.close();}

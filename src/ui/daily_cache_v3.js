@@ -64,7 +64,8 @@
     clearTimeout(timer);
     if (dialog?.open) dialog.close();
     const visible = el => el?.isConnected && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
-    const target = visible(opener) ? opener : (visible(openerFallback) ? openerFallback : null);
+    // 選單項目此刻可能仍可見，但 toolbar 已排程收合；優先回到持續可見的分類入口。
+    const target = visible(openerFallback) ? openerFallback : (visible(opener) ? opener : null);
     target?.focus({ preventScroll: true });
     opener = openerFallback = null;
   }
