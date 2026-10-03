@@ -5,7 +5,7 @@ const browsers=require(process.env.ST_PLAYWRIGHT || 'playwright');
 const root=path.resolve(__dirname,'..');
 const output=path.resolve(process.env.ST_BROWSER_OUTPUT || path.join(root,'scratch','資料可信度瀏覽器'));
 const origin='https://st-data-evidence.test';
-const files=['src/ui/hub_v5.js','src/ui/daily_cache_v3.js'];
+const files=['src/ui/hub_v5.js','src/ui/daily_cache_v3.js','src/ui/toolbar_v3.js'];
 const sources=new Map(files.map(file=>['/'+file,fs.readFileSync(path.join(root,file),'utf8')]));
 const report={fixtureOnly:true,physicalDevice:false,nativeSafari:false,screenReader:false,checks:[],pageErrors:[],requests:[],sourceHashes:{}};
 for(const [file,source] of sources)report.sourceHashes[file]=crypto.createHash('sha256').update(source).digest('hex');
@@ -45,6 +45,7 @@ const html='<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name
     await page.evaluate(()=>SettingsV5.activate());
     await page.waitForFunction(()=>document.querySelector('#hub-runtime-commit')?.textContent==='版本尚未提供');
     assert.equal(await page.evaluate(()=>!!window.invalidCommitExecuted),false);
+    await page.locator('#tbg-sys > .tbg-btn').tap();
     await page.locator('#btn-daily-cache').tap();
     await page.waitForFunction(()=>document.querySelector('#dc-status')?.textContent.includes('來源衝突 7'));
     const status=await page.locator('#dc-status').innerText();
@@ -58,7 +59,7 @@ const html='<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name
     await page.screenshot({path:path.join(output,engine+'-'+width+'x'+height+'.png')});
     await page.keyboard.press('Escape');
     await page.locator('#dc-dialog').waitFor({state:'hidden'});
-    assert.equal(await page.evaluate(()=>document.activeElement.id),'btn-daily-cache');
+    assert.equal(await page.evaluate(()=>document.activeElement.closest('#tbg-sys')?.id),'tbg-sys');
     report.checks.push({engine,version:browser.version(),width,height,keyboardEscape:true,focusReturned:true,
       sourceAndQualitySeparated:true,unknownRevisionSafe:true,evidenceReadable:true,scroll});
     await context.close();
