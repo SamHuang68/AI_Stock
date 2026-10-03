@@ -54,6 +54,7 @@
     { id: 'factors',       label: '因子', hint: '脈動因子帳本（正面／風險／未納入）',         icon: '☰' },
     { id: 'news',          label: '快訊', hint: '事件／結算／警報中樞',                     icon: '◉' },
     { id: 'scan',          label: '選股', hint: '三合一選股（技術×基本面×籌碼）',           icon: '▷' },
+    { id: 'research',      label: '研究', hint: '凍結假設、證據與驗證工作台',               icon: '◇' },
     { id: 'book',          label: '投組', hint: '投組風險（波動／VaR／曝險）',               icon: '▣' },
     { id: 'settings',      label: '設定', hint: '同步狀態與資料來源',                       icon: '⚙' },
     { id: 'wavedeck',      label: '執行', hint: '開啟 WaveDeck 浪潮執行台（微觀下單艦橋）', icon: '⚡', action: 'wavedeck' },
@@ -140,6 +141,7 @@
     factors: 'FactorsV5',
     news: 'NewsV5',
     scan: 'ScanV5',
+    research: 'ResearchDesk',
     book: 'BookV5',
     settings: 'SettingsV5'
   };
@@ -175,7 +177,7 @@
       '#view-decision.sv-panel.on,#view-breadth.sv-panel.on,#view-heat.sv-panel.on,#view-afterhours.sv-panel.on,' +
       '#view-institutional.sv-panel.on,#view-international.sv-panel.on,#view-signals.sv-panel.on,' +
       '#view-ai.sv-panel.on,#view-watchlist.sv-panel.on,#view-risk.sv-panel.on,#view-factors.sv-panel.on,#view-news.sv-panel.on,' +
-      '#view-scan.sv-panel.on,#view-book.sv-panel.on,#view-settings.sv-panel.on,' +
+      '#view-scan.sv-panel.on,#view-research.sv-panel.on,#view-book.sv-panel.on,#view-settings.sv-panel.on,' +
       '#view-pulse.sv-panel.on{max-width:none!important}' +
       '#topbar.shell-hidden{display:none !important}' +
       '#body.shell-hidden{display:none !important}' +
@@ -576,6 +578,7 @@
       ]),
       ringFolder('screen', '選股', '▷', '篩選、策略、回測', [
         ringRoute('scan', '選股室', '▷', '三合一選股頁'),
+        ringRoute('research', '研究工作台', '◇', '假設、證據、預警驗證與投組研究'),
         ringFolder('screen-tools', '策略庫', '🔬', '型態（含歷史命中率）／策略建構／精靈', [
           ringClick('btn-patterns'), ringClick('btn-kline-events'), ringClick('btn-txf-minute'),
           ringClick('btn-stratbuilder'), ringClick('btn-wizard'),

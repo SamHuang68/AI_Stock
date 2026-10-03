@@ -134,6 +134,8 @@
 
   // ---------- 主鍵盤處理 ----------
   function onKey(e) {
+    // 原生對話框自行處理 Escape／Tab 與焦點；全域導航不可攔截取消事件。
+    if (e.defaultPrevented || document.querySelector('dialog[open]')) return;
     // 快搜開啟時，交給快搜自己的 handler (已 stopPropagation)
     if (qsEl() && qsEl().style.display !== 'none') {
       if (e.key === 'Escape') closeQs();

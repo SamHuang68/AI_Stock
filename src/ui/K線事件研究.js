@@ -3,6 +3,7 @@
   'use strict';
   let dialog, controller, priorFocus, data, generation = 0, viewStart = 0, viewSize = 30, eventPage = 0;
   const EVENT_PAGE_SIZE = 50;
+  let longController, longData, longParams;
   const $ = id => document.getElementById(id);
   const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const number = v => typeof v === 'number' && Number.isFinite(v);
@@ -88,11 +89,94 @@
       return '<tr><td>' + esc(row.label) + '<small>事件總數 ' + row.cases + '</small></td><td>' + s.raw.n + (s.raw.smallSample ? '<small>小樣本</small>' : '') + '</td>' + cell(s.raw.mean) + cell(s.raw.median) + '<td>' + (number(s.raw.positivePct) ? fmt(s.raw.positivePct) + '%' : '資料不足') + '</td><td>' + pct(s.raw.q25) + '～' + pct(s.raw.q75) + '</td><td>' + pct(s.baseline.mean) + '<small>n=' + s.baseline.n + '</small></td>' + cell(s.difference, '事件平均減去同期間基準平均，單位為百分點') + '<td>' + pct(s.nonOverlapping.mean) + '<small>n=' + s.nonOverlapping.n + '</small></td></tr>';
     }).join('') + '</tbody></table>';
   }
+  function canUseShadow() {
+    const profile = window.ST_PRIVATE_WEB_PROFILE;
+    return !profile || profile.role === 'owner';
+  }
+  function syncShadowAccess() {
+    const allowed = canUseShadow(), note = $('ke-long-access');
+    if (note) note.textContent = allowed ? '影子紀錄保留首次證據與實際觀測時間。' : '唯讀模式：可載入突破研究；保存與私人影子紀錄僅供擁有者使用。';
+    if (!allowed) {
+      ['ke-long-save', 'ke-long-history'].forEach(id => { if ($(id)) $(id).disabled = true; });
+      if ($('ke-long-shadow')) $('ke-long-shadow').innerHTML = '';
+    }
+    return allowed;
+  }
+  function renderLong() {
+    syncShadowAccess();
+    const host = $('ke-long-result'); if (!host || !longData) return;
+    const research = longData.research;
+    if (!research) { host.innerHTML = '<p>' + esc((longData.missingData || []).join('；') || '研究資料尚未建立。') + '</p>'; return; }
+    const adjusted = $('ke-long-basis').value === 'official_reference';
+    const selected = adjusted ? research.adjusted : research;
+    const latest = selected && selected.latest;
+    const horizon = $('ke-long-horizon').value;
+    const assumptions = selected && selected.execution && selected.execution.assumptions;
+    const rows = selected && selected.execution ? selected.execution.rules : [];
+    host.innerHTML = '<p><strong>' + (adjusted ? '官方參考價比較' : '原始價格') + '・持有 ' + esc(horizon) + ' 日</strong><br>研究期間 ' + esc(longData.historyStart || '無資料') + '～' + esc(longData.historyEnd || '無資料') + '。' + esc((longData.missingData || []).join('；')) + '</p>' +
+      (adjusted ? '<p class="ke-state ke-warn">官方參考價僅調整訊號比較窗口，成交一律採原始價格。' + esc(longData.comparisonStatus === 'missing' ? longData.comparisonReason : '需要完整來源收據；不是股數比率或總報酬。') + '</p>' : '') +
+      '<ul>' + (selected ? selected.rules : []).map(rule => '<li><strong>' + esc(rule.label) + '</strong>：' + esc(latest ? latest.reason[rule.key] : '尚無資料') + '</li>').join('') + '</ul>' +
+      '<p class="ke-muted">' + esc(assumptions ? assumptions.entry + '；' + assumptions.exit + '。' + assumptions.costNote : '尚無成交資料。') + '</p>' +
+      '<div class="ke-scroll"><table><thead><tr><th>規則</th><th>成熟／訊號</th><th>未平倉／未進場</th><th>排除</th><th>原價毛報酬</th><th>每邊 0.25%</th><th>每邊 0.50%</th><th>0050 配對差</th><th>同年隨機中位數</th></tr></thead><tbody>' + rows.map(rule => {
+        const h = rule.horizons[horizon], trades = h.trades;
+        return '<tr><td class="ke-wrap">' + esc(rule.label) + '</td><td>' + h.counts.mature + '／' + h.counts.signals + '</td><td>' + trades.filter(t => t.positionStatus === 'open').length + '／' + trades.filter(t => t.positionStatus === 'not_entered').length + '</td><td>' + h.counts.excluded + '</td>' + cell(h.raw.gross.mean) + cell(h.raw.baseNet.mean) + cell(h.raw.stressNet.mean) + '<td>' + pct(h.benchmark.excess.baseNet.mean) + '<small>相同交易 n=' + h.benchmark.pairedCount + '，百分點</small></td><td>' + pct(h.random.metrics.baseNet.median) + '<small>' + esc(h.random.status) + '</small></td></tr>';
+      }).join('') + '</tbody></table></div><details><summary>成交日期、排除原因與固定切分</summary>' + rows.map(rule => {
+        const h = rule.horizons[horizon], split = h.fixedSplit;
+        return '<h4>' + esc(rule.label) + '</h4><p>訓練截至 ' + esc(split.trainEnd) + '：n=' + split.train.n + '；測試自 ' + esc(split.testStart) + '：n=' + split.test.n + '。不以測試結果調參。</p><ul>' + h.trades.map(t => '<li>' + esc(t.signalDate + ' 訊號 → ' + (t.entryDate || '待定') + ' 開盤 → ' + (t.exitDate || '尚未到期') + ' 收盤；' + (t.reason || '成熟')) + '；淨報酬 ' + pct(t.baseNet) + '</li>').join('') + '</ul>';
+      }).join('') + '</details><details><summary>方法、官方證據與限制</summary><ul>' + (selected ? selected.notes : []).concat(longData.limitations || []).map(n => '<li>' + esc(n) + '</li>').join('') + '</ul>' + (adjusted ? '<pre style="white-space:pre-wrap;overflow-wrap:anywhere">' + esc(JSON.stringify(selected.adjustmentEvidence, null, 2)) + '</pre>' : '') + '</details>';
+    $('ke-long-save').disabled = !(canUseShadow() && longData.freshness && longData.freshness.fresh && latest && latest.date === longData.asOf && latest.date === longData.freshness.expectedSession);
+  }
+  async function loadLong() {
+    if (!data || !longParams) return;
+    const serial = generation;
+    if (longController) longController.abort();
+    const request = longController = new AbortController();
+    $('ke-long-load').disabled = true; $('ke-long-status').textContent = '正在讀取本機長期研究…';
+    const timer = setTimeout(() => request.abort(), 30000);
+    try {
+      const response = await fetch('/breakout-research?' + longParams, { signal: request.signal });
+      if (!response.ok) throw new Error('長期研究讀取失敗，請確認日線與官方核對資料已建立。');
+      const result = await response.json();
+      if (serial !== generation || !dialog.open) return;
+      longData = result; renderLong();
+      $('ke-long-status').textContent = '已讀取本機研究；保存按鈕只凍結最新完整交易日的首次觀察。';
+    } catch (error) { if (serial === generation && dialog.open) $('ke-long-status').textContent = error.name === 'AbortError' ? '研究讀取逾時，請重新載入。' : error.message; }
+    finally { clearTimeout(timer); if (serial === generation && $('ke-long-load')) $('ke-long-load').disabled = false; }
+  }
+  async function saveLong() {
+    if (!syncShadowAccess()) return;
+    if (!longData || !longParams) return;
+    const serial = generation, button = $('ke-long-save'); button.disabled = true;
+    const request = new AbortController(), timer = setTimeout(() => request.abort(), 20000);
+    try {
+      const payload = Object.fromEntries(longParams); payload.priceBasis = $('ke-long-basis').value;
+      const response = await fetch('/breakout-shadow', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: request.signal });
+      if (!response.ok) throw new Error('保存未完成，請確認資料是最新完整交易日。');
+      const result = await response.json();
+      if (serial === generation && dialog.open) $('ke-long-status').textContent = result.status + '；' + (result.note || result.reason || '首次觀察保留，資料修訂另列。');
+    } catch (error) { if (serial === generation && dialog.open) $('ke-long-status').textContent = error.name === 'AbortError' ? '保存回應逾時；請查閱影子紀錄確認狀態，重試不會覆寫首次紀錄。' : error.message; }
+    finally { clearTimeout(timer); if (serial === generation) { button.disabled = !canUseShadow(); syncShadowAccess(); } }
+  }
+  async function showShadow() {
+    if (!syncShadowAccess()) return;
+    if (!longParams) return;
+    const serial = generation, button = $('ke-long-history'); button.disabled = true;
+    const request = new AbortController(), timer = setTimeout(() => request.abort(), 20000);
+    try {
+      const response = await fetch('/breakout-shadow?' + new URLSearchParams({ sym: longParams.get('sym') }), { signal: request.signal });
+      if (!response.ok) throw new Error('影子紀錄讀取失敗；請使用具備研究紀錄權限的帳號。');
+      const result = await response.json();
+      if (serial !== generation || !dialog.open) return;
+      $('ke-long-shadow').innerHTML = '<p>' + esc(result.status) + '</p><ul>' + (result.records || []).map(r => '<li>' + esc(r.date + '｜' + r.version + '｜首次觀測 ' + r.observedAt) + '；修訂 ' + r.revisionCount + ' 次<small style="display:block;overflow-wrap:anywhere">輸入摘要 ' + esc(r.inputDigest) + '</small></li>').join('') + '</ul><p class="ke-muted">' + esc(result.note) + '</p>';
+    } catch (error) { if (serial === generation && dialog.open) $('ke-long-status').textContent = error.name === 'AbortError' ? '影子紀錄讀取逾時，請重新載入。' : error.message; }
+    finally { clearTimeout(timer); if (serial === generation) { button.disabled = !canUseShadow(); syncShadowAccess(); } }
+  }
   function render() {
     const f = data.freshness;
     $('ke-status').className = 'ke-state' + (f.fresh ? '' : ' ke-warn');
     $('ke-status').textContent = f.status + '｜應有 ' + (f.expectedSession || '待核對') + '；資料最新 ' + (f.latestSession || '無資料') + '。本次研究截至 ' + data.asOf + '。';
     $('ke-result').innerHTML = '<p class="ke-scope"><strong>' + esc(data.range.label) + '：' + esc(data.historyStart || '無資料') + '～' + esc(data.historyEnd || '無資料') + '</strong><br><span class="ke-muted">資料庫現存日線 ' + esc(data.availableStart || '無資料') + '～' + esc(data.availableEnd || '無資料') + '；完整歷史依現有資料範圍提供，尚未核對的日期不納入事件統計。</span></p><div class="ke-kpis"><div><span class="ke-muted">研究標的</span><strong>' + esc(data.sym + ' ' + data.name) + '</strong></div><div><span class="ke-muted">期間事件天數</span><strong>' + data.events.length + '</strong></div><div><span class="ke-muted">期間可判定交易日</span><strong>' + data.eligibleDays + '</strong></div><div><span class="ke-muted">時間軸日數</span><strong>' + data.timelineDays + '</strong></div></div>' +
+      '<section><h3>長期突破與隔日開盤研究</h3><p>120／252 日首次突破、同年隨機及同日 0050 對照；僅使用本機已核對資料。</p><div class="ke-nav" data-ke-interactive><button id="ke-long-load">載入長期研究</button><label>訊號比較基準<select id="ke-long-basis"><option value="raw">原始價格</option><option value="official_reference">官方參考價比較</option></select></label><label>持有日數<select id="ke-long-horizon"><option value="1">1 日</option><option value="3">3 日</option><option value="5" selected>5 日</option><option value="10">10 日</option></select></label><button id="ke-long-save" disabled>保存首次影子觀察</button><button id="ke-long-history">查看影子紀錄</button></div><p id="ke-long-access" class="ke-muted"></p><p id="ke-long-status" role="status">尚未載入；先完成 253 日暖機及官方公司行動核對。</p><div id="ke-long-result"></div><div id="ke-long-shadow"></div></section>' +
       '<section><h3>歷史 K 線與成交量</h3><p class="ke-muted">點選 K 線或黃色點可查看當日依據。紅漲綠跌；缺值以 × 標示。圖表分段瀏覽，統計維持整個所選期間。</p><div class="ke-nav" data-ke-interactive><label>每段日數<select id="ke-size"><option value="30">30 日</option><option value="60">60 日</option><option value="120">120 日</option></select></label><button id="ke-first">最早</button><button id="ke-prev">上一段</button><button id="ke-next">下一段</button><button id="ke-last">最新</button><label>跳至日期<input id="ke-jump" type="date"></label><button id="ke-jump-go">前往日期</button></div><label class="ke-timeline" data-ke-interactive>歷史時間軸<input id="ke-position" type="range" min="0" step="1" value="0"></label><p id="ke-visible" class="ke-muted" aria-live="polite"></p><div id="ke-chart" class="ke-scroll"></div><div id="ke-detail" class="ke-detail" aria-live="polite"></div></section>' +
       '<section><h3>特殊事件與後續表現</h3><div class="ke-nav" data-ke-interactive><button id="ke-event-prev">上一頁事件</button><span id="ke-event-page" aria-live="polite"></span><button id="ke-event-next">下一頁事件</button></div><div id="ke-events" class="ke-scroll"></div><p class="ke-muted">資料不足的原因可點選該日查看；缺值與未成熟報酬皆不補零。下載報告包含所選期間全部事件。</p></section>' +
       '<section><div class="ke-inline"><h3>歷史同型態統計</h3><label>後續交易日<select id="ke-horizon"><option value="1">1 日</option><option value="3">3 日</option><option value="5" selected>5 日</option><option value="10">10 日</option></select></label></div><p class="ke-muted">研究區間 ' + esc(data.historyStart || '尚未建立') + '～' + esc(data.historyEnd || '尚未建立') + '。各期只使用成熟樣本；平均差單位為百分點。</p><div id="ke-stats" class="ke-scroll"></div></section>' +
@@ -116,6 +200,10 @@
     $('ke-event-prev').onclick = () => { eventPage--; renderEvents(); };
     $('ke-event-next').onclick = () => { eventPage++; renderEvents(); };
     $('ke-horizon').onchange = renderStats; renderStats(); renderChart(); renderEvents();
+    $('ke-long-load').onclick = loadLong; $('ke-long-save').onclick = saveLong;
+    $('ke-long-history').onclick = showShadow;
+    syncShadowAccess();
+    $('ke-long-basis').onchange = renderLong; $('ke-long-horizon').onchange = renderLong;
     $('ke-result').onclick = event => { const el = event.target.closest('[data-ke-day]'); if (el) selectDay(el.dataset.keDay); };
     $('ke-result').onkeydown = event => { const el = event.target.closest('g[data-ke-day]'); if (el && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); selectDay(el.dataset.keDay); } };
     if (data.candles.length) selectDay(data.candles[data.candles.length - 1].date);
@@ -132,6 +220,7 @@
       params.set('start', $('ke-start').value);
     }
     const serial = ++generation;
+    if (longController) longController.abort(); longData = null;
     if (controller) controller.abort(); const request = controller = new AbortController();
     $('ke-load').disabled = true; $('ke-export').disabled = true; $('ke-result').innerHTML = ''; $('ke-status').textContent = '正在讀取已核對日線與事件統計…';
     const timer = setTimeout(() => request.abort(), 20000);
@@ -140,7 +229,7 @@
       if (!response.ok) throw new Error(response.status === 400 ? '期間或日期無效，請確認開始日不晚於截至日，且不超過最新已完成交易日。' : '事件資料尚未完整建立，請檢查日線更新狀態。');
       const result = await response.json();
       if (serial !== generation || !dialog.open) return;
-      data = result; render();
+      data = result; longParams = new URLSearchParams(params); render();
     } catch (error) {
       if (serial === generation && dialog.open) { $('ke-status').className = 'ke-state ke-warn'; $('ke-status').textContent = error.name === 'AbortError' ? '讀取逾時，請重新載入。' : error.message; }
     } finally { clearTimeout(timer); if (serial === generation) $('ke-load').disabled = false; }
@@ -167,6 +256,7 @@
   }
   function close() {
     generation++; if (controller) controller.abort();
+    if (longController) longController.abort();
     if (dialog && dialog.open) dialog.close();
     if (priorFocus && priorFocus.isConnected) priorFocus.focus();
   }

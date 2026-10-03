@@ -15,7 +15,13 @@ import sqlite3
 import time
 from contextlib import closing, nullcontext
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
+
+try:
+    from . import 預警研究驗證 as warning_research
+except ImportError:
+    import 預警研究驗證 as warning_research
 
 
 if getattr(__import__('sys'), 'frozen', False):
@@ -1084,10 +1090,11 @@ def _connect(path: str):
 
 def process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None = None,
                     market_history: Any = None, db_path: str = DB_PATH,
-                    now: datetime | None = None, publication_id: str | None = None) -> dict[str, Any]:
+                    now: datetime | None = None, publication_id: str | None = None,
+                    research_calendar: dict | None = None) -> dict[str, Any]:
     """發布識別若已提交便回傳原收據；新收據與預警異動共用交易。"""
     inputs = {'memory_snapshot': memory_snapshot, 'market_history': market_history,
-              'db_path': db_path, 'now': now}
+              'db_path': db_path, 'now': now, 'research_calendar': research_calendar}
     if publication_id is None:
         return _process_context(context, pulse, **inputs)
     if not isinstance(publication_id, str) or not publication_id.strip():
@@ -1129,7 +1136,8 @@ def acknowledge_publication(publication_id: str, *, db_path: str = DB_PATH) -> b
 
 def _process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None,
                      market_history: Any, db_path: str, now: datetime | None,
-                     connection: sqlite3.Connection | None = None) -> dict[str, Any]:
+                     connection: sqlite3.Connection | None = None,
+                     research_calendar: dict | None = None) -> dict[str, Any]:
     evaluated = evaluate_context(context, pulse, memory_snapshot=memory_snapshot, now=now)
     as_of = str(evaluated.get('asOf') or _iso_now(now))
     observation_key = str(evaluated.get('observationKey') or as_of)
@@ -1235,6 +1243,24 @@ def _process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None
                 # Validation is observational.  A ledger migration or write
                 # failure must never suppress the canonical signal state.
                 prospective = _empty_prospective('unavailable', type(exc).__name__)
+            conn.execute('SAVEPOINT warning_research')
+            try:
+                calendar = research_calendar if research_calendar is not None else warning_research.load_calendar(
+                    Path(db_path).with_name('market.db'))
+                # 研究起點不承接顯示層對來源或時間的預設值。
+                quote = _market_quote(pulse, '^TWII')
+                quote_market = quote.get('market') or {}
+                reference = {**market_ref, 'source': quote_market.get('source') or quote.get('source'),
+                             'asOf': quote_market.get('asOf') or quote.get('asOf')}
+                research = warning_research.write(
+                    conn, context, pulse, memory_snapshot, evaluated, persisted, reference, calendar,
+                    created_at, market_history, _research_rules_digest())
+                conn.execute('RELEASE SAVEPOINT warning_research')
+            except Exception as exc:
+                conn.execute('ROLLBACK TO SAVEPOINT warning_research')
+                conn.execute('RELEASE SAVEPOINT warning_research')
+                research = {**warning_research.summarize([], {}, created_at), 'status': 'unavailable',
+                            'error': type(exc).__name__, 'reason': '本次研究分母未完整保存，既有預警發布仍保留'}
             conn.execute('DELETE FROM signal_observations WHERE id NOT IN '
                          '(SELECT id FROM signal_observations ORDER BY id DESC LIMIT 2000)')
             conn.execute('DELETE FROM signal_events WHERE id NOT IN '
@@ -1244,6 +1270,7 @@ def _process_context(context: dict, pulse: dict, *, memory_snapshot: dict | None
     evaluated['newEvents'] = new_events
     evaluated['activeEvents'] = [row for row in visible_signals if _is_active_signal(row)]
     evaluated['prospectiveValidation'] = prospective
+    evaluated['researchValidation'] = research
     return evaluated
 
 
@@ -1280,9 +1307,9 @@ def performance(n: int = 80, path: str = DB_PATH,
     """Read-only prospective evidence; empirical rates stay hidden below n=20."""
     n = max(1, min(int(n or 80), 500))
     clean_signal = str(signal_id or '').strip() or None
+    research_page = observation_page(n, path, clean_signal)
     try:
-        _init_db(path)
-        with closing(sqlite3.connect(path, timeout=10)) as conn:
+        with closing(warning_research.readonly(path)) as conn:
             summary = _prospective_summary_conn(conn, clean_signal)
             query = (
                 'SELECT trial_id,trial_json FROM signal_trials'
@@ -1300,9 +1327,59 @@ def performance(n: int = 80, path: str = DB_PATH,
                 ).fetchall()
                 trial['outcomes'] = [json.loads(row[0]) for row in outcomes if row and row[0]]
                 trials.append(trial)
-        return {**summary, 'trials': trials, 'returnedTrials': len(trials)}
+        return {**summary, 'trials': trials, 'returnedTrials': len(trials),
+                'researchValidation': research_page['researchValidation']}
     except Exception as exc:
-        return {**_empty_prospective('unavailable', type(exc).__name__), 'trials': []}
+        return {**_empty_prospective('unavailable', type(exc).__name__), 'trials': [],
+                'researchValidation': research_page['researchValidation']}
+
+
+def _research_rules_digest() -> str:
+    """除版本標籤外再核對實際規則程式，避免同名版本被誤認為可重播。"""
+    return hashlib.sha256(Path(__file__).read_text(encoding='utf-8').encode('utf-8')).hexdigest()
+
+
+def observation_page(n: int = 80, path: str = DB_PATH, signal_id: str | None = None, *,
+                     offset: int = 0, now: datetime | str | None = None) -> dict:
+    """唯讀分頁；彙總一律使用整個研究分母，分頁只限制逐筆觀測。"""
+    clock = _iso_now(now) if isinstance(now, datetime) or now is None else str(now)
+    if warning_research.aware(clock) is None:
+        raise ValueError('查詢時間必須含時區')
+    return warning_research.observation_page(n, path, str(signal_id or '').strip() or None,
+                                            offset=offset, now=clock)
+
+
+def replay_observation(observation_id: str, path: str = DB_PATH) -> dict:
+    """只以首次凍結輸入核對純規則，不重新推演未保存的狀態機歷史。"""
+    if not isinstance(observation_id, str) or not observation_id.strip():
+        return {'ok': False, 'status': 'invalid_request', 'reason': '觀測識別不得空白'}
+    try:
+        with closing(warning_research.readonly(path)) as conn:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='signal_research_observations'").fetchone() is None:
+                row = None
+            else:
+                row = conn.execute('SELECT payload_json FROM signal_research_observations WHERE observation_id=?',
+                                   (observation_id,)).fetchone()
+        if row is None:
+            return {'ok': False, 'status': 'not_found', 'reason': '找不到前向凍結觀測'}
+        record = json.loads(row[0])
+        replay, protocol = record['replay'], record['protocol']
+        if warning_research.digest(replay) != record['inputDigest']:
+            return {'ok': False, 'status': 'digest_mismatch', 'reason': '凍結輸入摘要不符，拒絕重播'}
+        if warning_research.digest(protocol) != record['protocolId']:
+            return {'ok': False, 'status': 'protocol_mismatch', 'reason': '協定與版本摘要不符，拒絕重播'}
+        if (protocol.get('engineVersion') != ENGINE_VERSION or protocol.get('policyVersion') != POLICY_VERSION
+                or protocol.get('rulesDigest') != _research_rules_digest()):
+            return {'ok': False, 'status': 'version_unavailable', 'record': record,
+                    'reason': '保留原始規則輸出，但目前程式不具可核對的歷史規則版本'}
+        evaluated = evaluate_context(replay['context'], replay['pulse'], memory_snapshot=replay['memory'],
+                                     now=warning_research.aware(record['observedAt']))
+        matched = warning_research.digest(evaluated) == warning_research.digest(replay['evaluated'])
+        return {'ok': matched, 'status': 'matched' if matched else 'mismatch', 'record': record,
+                'evaluated': evaluated, 'scope': '重播純規則；狀態轉移保留原始觀測，不重造歷史'}
+    except (sqlite3.Error, ValueError, KeyError, TypeError, OSError) as exc:
+        return {'ok': False, 'status': 'unavailable', 'error': type(exc).__name__,
+                'reason': '研究觀測無法唯讀核對'}
 
 
 def empty(reason: str = 'NOT_EVALUATED') -> dict[str, Any]:

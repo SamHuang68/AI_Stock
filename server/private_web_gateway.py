@@ -362,6 +362,8 @@ READ_GET_EXACT = {
     "/quote-batch",
     "/bars",
     "/kline-events",
+    "/breakout-research",
+    "/research/portfolio",
     "/txf-intraday",
     "/universe",
     "/datasources",
@@ -416,6 +418,7 @@ READ_GET_EXACT = {
     "/macro",
 }
 READ_GET_PREFIXES = (
+    "/valuation-research/",
     "/yf/",
     "/quote/",
     "/chip/",
@@ -428,6 +431,10 @@ READ_GET_PREFIXES = (
 
 # Personal state is visible only with the owner token.
 OWNER_GET_EXACT = {
+    "/research/workflow",
+    "/research/subject",
+    "/research/validation",
+    "/breakout-shadow",
     "/daily-cache/status",
     "/alert/rules",
     "/alert/config",  # ST masks stored transport credentials in its response.
@@ -442,6 +449,7 @@ OWNER_GET_PREFIXES = ("/draw/",)
 
 # Deliberately narrow write surface for a long-horizon market/research user.
 CONTROL_POST_EXACT = {
+    "/breakout-shadow",
     "/pulse/refresh",
     "/updates",
     "/updates/retry",
