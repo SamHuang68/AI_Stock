@@ -42,10 +42,10 @@ class StockHealthDeadlineTests(unittest.TestCase):
 
     def test_stalled_source_returns_local_bars_before_worker_finishes_and_never_writes_late(self):
         entered = threading.Event()
+        source_calls = []
 
         def stalled(*args, **kwargs):
-            self.assertLessEqual(kwargs['deadline'].remaining(), .025)
-            self.assertEqual(args[:2], ('2330', 'TW'))
+            source_calls.append((args[:2], kwargs['deadline'].remaining()))
             entered.set()
             self.release.wait()
             return [(int(self.now.timestamp()), 500, 501, 499, 500, 5000)]
@@ -60,11 +60,16 @@ class StockHealthDeadlineTests(unittest.TestCase):
             observed_timeouts.append(timeout)
             return real_wait(futures, timeout=timeout)
 
-        with mock.patch.object(routes, 'wait', side_effect=wait_after_source_started):
+        # 固定時鐘也覆蓋浮點相減產生略大於 0.025 的情況。
+        with mock.patch('deadline.time.monotonic', return_value=100.0), \
+                mock.patch.object(routes, 'wait', side_effect=wait_after_source_started):
             result = routes.load_bars('2330', 'TW', now=self.now)
+        self.assertEqual(len(source_calls), 1)
+        self.assertEqual(source_calls[0][0], ('2330', 'TW'))
+        self.assertAlmostEqual(source_calls[0][1], .025, delta=1e-6)
         self.assertEqual(len(observed_timeouts), 1)
         self.assertGreaterEqual(observed_timeouts[0], 0)
-        self.assertLessEqual(observed_timeouts[0], .025)
+        self.assertAlmostEqual(observed_timeouts[0], .025, delta=1e-6)
         self.assertTrue(entered.is_set())
         self.assertFalse(self.release.is_set(), 'HTTP 結果不可等待仍被阻塞的來源')
         self.assertEqual(result['source'], 'local-db')
