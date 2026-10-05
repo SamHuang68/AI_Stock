@@ -20,6 +20,7 @@ import time
 from collections import deque
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
+from datetime import time as dt_time
 from typing import Any, Iterable
 
 from jsonl_trace import append_jsonl as _append_jsonl
@@ -118,6 +119,36 @@ def _source_quality(pulse: dict, twii: dict, txf: dict, now: datetime,
     spot_day = completed_day(815)
     daily_day = completed_day(1080)
     live_spot = trading_day(local.date()) and 540 <= local.hour * 60 + local.minute < 815
+
+    def txf_completed_window() -> tuple[datetime, datetime] | None:
+        """最近一個「已結束」的台指期場次 → (結束時間, 下一場次開始時間)。
+
+        日盤 08:45–13:45（交易日）；夜盤 15:00（交易日）–隔日 05:00。結束後、下一場次開始前，
+        那一場最後一筆報價就是目前最新的完整資訊（例如 05:00 夜盤收盤是 08:45 開盤前最重要的期貨訊號），
+        不能因為「超過 30 分鐘」就判過期；與加權指數的 completed_session 同一概念。"""
+        ends: list[tuple[datetime, str]] = []
+        for back in range(10):
+            day = local.date() - timedelta(days=back)
+            if trading_day(day):
+                ends.append((datetime.combine(day, dt_time(13, 45), TW_TZ), 'day'))
+            if trading_day(day - timedelta(days=1)):
+                ends.append((datetime.combine(day, dt_time(5, 0), TW_TZ), 'night'))
+        ended = [e for e in ends if e[0] <= local]
+        if not ended:
+            return None
+        end, kind = max(ended)
+        if kind == 'day':
+            nxt = datetime.combine(end.date(), dt_time(15, 0), TW_TZ)          # 同一交易日的夜盤開始
+        else:
+            first = end.date()
+            for _ in range(10):
+                if trading_day(first):
+                    break
+                first += timedelta(days=1)
+            nxt = datetime.combine(first, dt_time(8, 45), TW_TZ)               # 下一個交易日的日盤開始
+        return (end, nxt) if local < nxt else None
+
+    txf_window = txf_completed_window()
     sources = {}
     for name, quote in (('twii', twii), ('txf', txf)):
         market = quote.get('market') or {}
@@ -130,8 +161,13 @@ def _source_quality(pulse: dict, twii: dict, txf: dict, now: datetime,
             source_session_open = trading_day(local.date()) or (
                 name == 'txf' and local.hour * 60 + local.minute <= 300
                 and trading_day(local.date() - timedelta(days=1)))
+            window_end = txf_window[0] if (name == 'txf' and txf_window) else None
             if age < -5:
                 status = 'future'
+            elif (window_end is not None and not stale
+                  and window_end - timedelta(minutes=30) <= source_local <= window_end + timedelta(minutes=5)):
+                # 場次已結束、下一場尚未開始，且這筆就是該場次的最後報價（收盤前 30 分鐘內）。
+                status, freshness = 'completed_session', 1.0
             elif source_local.date() == local.date() and source_session_open and age <= 1800 and not stale:
                 status, freshness = 'observed', 1.0 if age <= 300 else 0.8
             elif (name == 'twii' and not live_spot and source_local.date() == spot_day
