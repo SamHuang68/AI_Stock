@@ -376,6 +376,10 @@ upperBound = min(targetGross × 1.10, maxGrossExposure)
 - OHLC 缺一項就不算 Classic Pivot。
 - Swing level 不可只因接近目前價格就改名為支撐或壓力。
 - 每個關卡都顯示 method、timeframe、reference date。
+- 價位是「某個已完成交易日」的靜態價位，不是即時價位。`referenceDate` 必須等於最近一個已完成的交易日（18:00 前允許前一日；依載入的交易所日曆），否則 `quality.stale=true`、`reason=reference_not_latest_completed_session`；原本只在超過 7 個日曆日才過期的規則仍保留為底線。`referenceBar` 提供該日的 O/H/L/C。
+- 現價（加權指數與台指期中時效可用且較新的一筆）偏離參考收盤達 `max(2%, 2×ATR%)` 時，`quality.offReference=true`、`levelsActionable=false`：價位與波動度統計仍顯示，但不再產生「守穩 R1／收破 S1」確認／失效條件，並加上 `key_levels_off_reference` 限制。畫面在價位上方顯示參考日、現價與偏離百分比。
+- 選擇權結構（OI Gamma／Vega 密度、Flip Band）同理：它是日終官方資料，參考現貨是資料日收盤；現價偏離參考現貨 3% 以上時停用情境模型（`LIVE_PRICE_FAR_FROM_CHAIN_SPOT`），保留官方 OI 事實與方向中立的密度。
+- 台指期時效：場次結束後、下一場次開始前（夜盤 05:00–08:45、日盤 13:45–15:00、週末到下週一開盤前），該場次最後一筆報價視為 `completed_session`（與加權指數同概念），而不是過期。
 
 ## 9. Breadth Divergence
 
