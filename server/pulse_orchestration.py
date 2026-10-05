@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
@@ -36,6 +36,47 @@ class PulseDeps:
 
 
 _deps = PulseDeps()
+
+
+_TAIPEI = timezone(timedelta(hours=8))
+
+
+def _parse_as_of(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=_TAIPEI)
+
+
+def txf_for_scoring(txf_night: dict | None) -> dict | None:
+    """Pulse 評分（pulse_intel）沒有時效檢查；時間戳未核實的夜盤報價可以顯示，但不能悄悄計入分數。"""
+    return None if (txf_night or {}).get('timeUnverified') else txf_night
+
+
+def txf_for_snapshot(txf: dict | None, txf_night: dict | None, now: datetime | None = None) -> dict | None:
+    """決策中心用的 __TXF__ 報價：夜盤區塊與 /txf 主報價（日盤）中「已核實時間較新」的那一筆。
+
+    過去一律餵夜盤區塊，所以 08:45～13:45 的決策中心拿到的是前一晚的報價（被判過期而排除），
+    完全沒有日盤台指期。不能只看 session == 'day'：05:00～08:45 的 /txf 主報價是「前一個日盤」，
+    比剛收的夜盤舊 15 小時；因此比較時間戳，而不是看場次標籤。
+    兩筆都沒有已核實時間時維持原行為（夜盤區塊）。"""
+    day = None
+    if isinstance(txf, dict) and txf.get('ok') and txf.get('session') == 'day' and txf.get('price') is not None:
+        day = {k: v for k, v in txf.items() if k not in ('night', 'debug')}
+    if day is None:
+        return txf_night
+    if txf_night is None:
+        return day
+    now = (now or datetime.now(_TAIPEI)).astimezone(_TAIPEI)
+    night_hours = now.hour * 60 + now.minute >= 900 or now.hour * 60 + now.minute < 300
+    night_at, day_at = _parse_as_of(txf_night.get('asOf')), _parse_as_of(day.get('asOf'))
+    if night_at and day_at:
+        return day if day_at > night_at else txf_night
+    if day_at and not night_at:
+        # 夜盤價格在、時間未核實：夜盤時段仍以它為主（畫面才不會被 13:45 的日盤收盤取代）
+        return txf_night if night_hours else day
+    return txf_night
 
 
 def configure(**kwargs: Any) -> None:
@@ -141,6 +182,18 @@ def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=No
         except Exception as e:
             print('[pulse] txf night', e)
 
+    # 日盤時段（含收盤後到夜盤開始前）：/txf 快取沒命中時，Pulse 過去只會直接抓夜盤，決策中心因此拿不到日盤報價。
+    txf_primary = txf
+    _hm = datetime.now(_TAIPEI)
+    _hm = _hm.hour * 60 + _hm.minute
+    if not (txf and txf.get('ok')) and 525 <= _hm < 900:
+        try:
+            d = handler._txf_mis_session(0)
+            if d and d.get('price') is not None:
+                txf_primary = {'ok': True, **d}
+        except Exception as e:
+            print('[pulse] txf day', e)
+
     sectors = []
     if isinstance(sec, dict):
         sectors = sec.get('sectors') or sec.get('list') or []
@@ -213,7 +266,8 @@ def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=No
             stocks=stocks,
             indices=indices,
             inst=inst or {},
-            txf_night=txf_night,
+            # 時間戳未核實的夜盤報價可以顯示（out['txf']），但評分沒有時效檢查，不能悄悄計入。
+            txf_night=txf_for_scoring(txf_night),
             sectors=sectors,
             sources_present=sources,
             tx_oi=tx_oi if isinstance(tx_oi, dict) else None,
@@ -235,7 +289,7 @@ def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=No
     out['txf'] = txf_night
     # Canonical snapshot: headline renderers must not recompute a live
     # change from a daily-series close.
-    market_snap = market_snapshot(indices, txf_night)
+    market_snap = market_snapshot(indices, txf_for_snapshot(txf_primary, txf_night))
     out['marketSnapshot'] = market_snap
     out['marketflow'] = {
         'turnover': (mf or {}).get('turnover'),

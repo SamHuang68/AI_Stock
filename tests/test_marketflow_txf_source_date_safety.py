@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 from datetime import date, datetime
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'server'))
-from exchange_source_dates import official_date, response_date, txf_timestamp, TAIPEI, marketflow_payload, marketflow_cache_key
+from exchange_source_dates import official_date, response_date, txf_timestamp, txf_timestamp_check, TAIPEI, marketflow_payload, marketflow_cache_key
 from market_contract import quote_contract
 
 
@@ -100,27 +100,81 @@ def test_both_consumers_share_canonical_payload_and_cache():
         assert any(isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='_canonical_marketflow' for n in ast.walk(_function_node(consumer)))
 
 
-def test_txf_handler_rejects_missing_date_and_preserves_official_timestamp():
+def _txf_session_namespace(row, now=None):
+    """以 AST 載入 server.py 的 _txf_mis_session（不啟動 HTTP 伺服器），餵入假的 MIS 回應。"""
     import json
     from types import SimpleNamespace
-    row={'CLastPrice':'100','CRefPrice':'99','CTotalVolume':'50','CDate':'20260930','CTime':'23:01:02'}
+    now = now or datetime(2026,10,1,12,tzinfo=TAIPEI)
     class Response:
         def __enter__(self): return self
         def __exit__(self,*args): pass
         def read(self): return json.dumps({'RtData':{'QuoteList':[row]}}).encode()
-    ns={'json':json,'txf_timestamp':lambda day,clock:txf_timestamp(day,clock,datetime(2026,10,1,12,tzinfo=TAIPEI)),
+    logged=[]
+    ns={'json':json,'time':__import__('time'),
+        'txf_timestamp_check':lambda day,clock:txf_timestamp_check(day,clock,now),
+        '_txf_note_unverified_stamp':lambda session,stamp,reason:logged.append((session,reason,dict(stamp))),
         'urllib':SimpleNamespace(request=SimpleNamespace(Request=lambda *a,**k:None,urlopen=lambda *a,**k:Response()))}
     exec(compile(_function_node('_txf_mis_session'),'<txf>','exec'),ns)
     def number(raw,*keys):
         for key in keys:
             if raw.get(key) is not None: return float(raw[key])
         return None
-    handler=SimpleNamespace(_txf_fnum=number)
-    result=ns['_txf_mis_session'](handler,1)
+    return ns['_txf_mis_session'], SimpleNamespace(_txf_fnum=number), logged
+
+
+def test_txf_handler_preserves_official_timestamp():
+    row={'CLastPrice':'100','CRefPrice':'99','CTotalVolume':'50','CDate':'20260930','CTime':'23:01:02'}
+    session, handler, logged = _txf_session_namespace(row)
+    result = session(handler, 1)
     assert result['asOf']=='2026-09-30T23:01:02+08:00'
     assert result['sourceDate']=='2026-09-30'
-    del row['CDate']
-    assert ns['_txf_mis_session'](handler,1) is None
+    assert result['timeUnverified'] is False
+    assert result['timeCheck']['verified'] is True
+    assert logged == []
+
+
+def test_txf_handler_keeps_price_when_stamp_fails_validation_but_never_invents_a_time():
+    # 過去：CDate 缺漏／語意不符（例如夜盤盤前標成下一個交易日）→ 整筆報價回 None，
+    # Pulse 與決策中心完全看不到夜盤台指期，且沒有任何記錄。
+    cases = {
+        'missing_date': {'CTime': '23:01:02'},
+        'future': {'CDate': '20261002', 'CTime': '23:01:02'},      # 夜盤標成下一個交易日
+        'bad_time': {'CDate': '20260930', 'CTime': '99:99:99'},
+    }
+    for reason, stamp in cases.items():
+        row={'CLastPrice':'50000','CRefPrice':'48025','CTotalVolume':'50',**stamp}
+        session, handler, logged = _txf_session_namespace(row)
+        result = session(handler, 1)
+        assert result is not None, reason
+        assert result['price'] == 50000.0
+        assert result['asOf'] is None, '不可用本機時間或請求日冒充市場時間'
+        assert result['sourceDate'] is None
+        assert result['timeUnverified'] is True
+        assert result['timeCheck']['reason'] == reason
+        assert result['timeCheck']['CTime'] == stamp.get('CTime')
+        assert logged and logged[0][1] == reason and logged[0][0] == 'night'
+
+
+def test_txf_handler_still_returns_none_when_there_is_no_price_and_no_stamp():
+    session, handler, logged = _txf_session_namespace({'CTotalVolume':'50'})
+    result = session(handler, 1)
+    assert result is None or result['price'] is None
+
+
+def test_txf_unverified_stamp_logging_is_rate_limited():
+    import io, contextlib
+    ns={'time':__import__('time'),'_TXF_STAMP_LOG':{}}
+    exec(compile(_function_node('_txf_note_unverified_stamp'),'<log>','exec'),ns)
+    note=ns['_txf_note_unverified_stamp']
+    buf=io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        first=note('night',{'CDate':'20261002','CTime':'200000'},'future',now=1000.0)
+        again=note('night',{'CDate':'20261002','CTime':'200001'},'future',now=1100.0)
+        other=note('night',{'CDate':None,'CTime':'200001'},'missing_date',now=1100.0)
+        later=note('night',{'CDate':'20261002','CTime':'201000'},'future',now=1700.0)
+    assert (first, again, other, later) == (True, False, True, True)
+    out=buf.getvalue()
+    assert out.count('[txf]')==3 and "CDate='20261002'" in out and 'asOf left unknown' in out
 
 
 def test_partial_institution_payload_keeps_missing_values_explicit():

@@ -41,22 +41,34 @@ def response_date(payload, requested, today):
     observed = official_date(payload.get('date'))
     return observed if observed == requested and observed <= today else None
 
-def txf_timestamp(day, clock, now=None):
+def txf_timestamp_check(day, clock, now=None):
+    """回 (ISO 時間戳 | None, 原因 | None)。原因：missing_date／bad_date／missing_time／bad_time／future。
+    把「為什麼驗證失敗」留下來，才能在報價被標成「時間未核實」時看出是來源格式還是日期語意的問題。"""
+    if day is None or str(day).strip() == '':
+        return None, 'missing_date'
     observed = official_date(day)
+    if observed is None:
+        return None, 'bad_date'
     text = str(clock or '').strip()
+    if not text:
+        return None, 'missing_time'
     if re.fullmatch(r'\d{6}', text):
         text = ':'.join((text[:2], text[2:4], text[4:]))
-    if observed is None or not re.fullmatch(r'\d{2}:\d{2}:\d{2}', text):
-        return None
+    if not re.fullmatch(r'\d{2}:\d{2}:\d{2}', text):
+        return None, 'bad_time'
     try:
         stamp = datetime.combine(observed, datetime.strptime(text, '%H:%M:%S').time(), TAIPEI)
     except ValueError:
-        return None
+        return None, 'bad_time'
     # 容許本機時鐘比交易所慢一點：TAIFEX 的 CTime 可能就是「這一秒」，零容忍會讓有效報價時有時無。
     # 真正超前（日期錯、格式錯）仍然拒收。
     if stamp > (now or datetime.now(TAIPEI)) + CLOCK_SKEW_TOLERANCE:
-        return None
-    return stamp.isoformat()
+        return None, 'future'
+    return stamp.isoformat(), None
+
+
+def txf_timestamp(day, clock, now=None):
+    return txf_timestamp_check(day, clock, now)[0]
 
 def _number(value):
     try:
