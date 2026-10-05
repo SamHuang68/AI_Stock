@@ -204,6 +204,44 @@ def _source_quality(pulse: dict, twii: dict, txf: dict, now: datetime,
 
 
 OFF_REFERENCE_MIN_PCT = 2.0
+OPTIONS_OFF_SPOT_PCT = 3.0     # 選擇權鏈是日終資料；現價偏離鏈的參考現貨超過這個幅度，情境模型（Flip Band 寬約 5%）就不再有意義
+
+
+def _live_reference(twii: dict, txf: dict, source_quality: dict) -> dict | None:
+    """目前可用的現價：加權指數與台指期中「時效可用且時間較新」的那一筆（夜盤時是期貨）。"""
+    live = None
+    for name, quote in (('twii', twii), ('txf', txf)):
+        info = source_quality.get(name) or {}
+        price = _number((quote or {}).get('price'))
+        if info.get('status') in ('observed', 'completed_session') and price and info.get('asOf'):
+            if live is None or str(info['asOf']) > str(live['asOf']):
+                live = {'symbol': '^TWII' if name == 'twii' else '__TXF__', 'price': price,
+                        'asOf': info['asOf'], 'status': info['status']}
+    return live
+
+
+def _guard_options_structure(options_structure: dict | None, twii: dict, txf: dict, source_quality: dict) -> dict:
+    """選擇權結構（OI Gamma／Vega 密度、Flip Band）是官方日盤「日終」資料，參考現貨是資料日當天的收盤。
+    現價離它太遠時：標示偏離，並停用情境模型（官方 OI 事實與方向中立的密度仍保留供閱讀）。"""
+    out = dict(options_structure or {})
+    spot = _number((out.get('observed') or {}).get('spot'))
+    live = _live_reference(twii, txf, source_quality)
+    if not spot or not live:
+        return out
+    deviation = (live['price'] / spot - 1.0) * 100.0
+    quality = dict(out.get('quality') or {})
+    quality.update(liveReference=live, liveDeviationPct=round(deviation, 2),
+                   spotDeviationThresholdPct=OPTIONS_OFF_SPOT_PCT,
+                   offReference=abs(deviation) >= OPTIONS_OFF_SPOT_PCT)
+    if quality['offReference']:
+        quality['warnings'] = list(dict.fromkeys([*(quality.get('warnings') or []), 'LIVE_PRICE_FAR_FROM_CHAIN_SPOT']))
+        modeled = dict(out.get('modeled') or {})
+        if modeled.get('eligible'):
+            modeled['eligible'] = False
+            modeled['disabledReason'] = 'live_price_far_from_chain_spot'
+        out['modeled'] = modeled
+    out['quality'] = quality
+    return out
 
 
 def _guard_key_levels(key_levels: dict | None, twii: dict, txf: dict, source_quality: dict,
@@ -228,14 +266,7 @@ def _guard_key_levels(key_levels: dict | None, twii: dict, txf: dict, source_qua
             quality['reason'] = 'reference_not_latest_completed_session'
     bar = out.get('referenceBar') or {}
     close = _number(bar.get('close'))
-    live = None
-    for name, quote in (('twii', twii), ('txf', txf)):
-        info = source_quality.get(name) or {}
-        price = _number((quote or {}).get('price'))
-        if info.get('status') in ('observed', 'completed_session') and price and info.get('asOf'):
-            if live is None or str(info['asOf']) > str(live['asOf']):
-                live = {'symbol': '^TWII' if name == 'twii' else '__TXF__', 'price': price,
-                        'asOf': info['asOf'], 'status': info['status']}
+    live = _live_reference(twii, txf, source_quality)
     if live and close:
         deviation = (live['price'] / close - 1.0) * 100.0
         atr_pct = _number((out.get('atr') or {}).get('pct')) or 0.0
@@ -1148,8 +1179,8 @@ def build_decision_context(
             source='Yahoo Finance', as_of=as_of, reference='latest available US session',
             market_scope='US', session='latest_available', quality='market'))
 
-    options_structure = dict(options_structure or {
-        'status': 'insufficient', 'shadowMode': True, 'decisionUse': 'research_only'})
+    options_structure = _guard_options_structure(options_structure or {
+        'status': 'insufficient', 'shadowMode': True, 'decisionUse': 'research_only'}, twii, txf, source_quality)
     option_observed = options_structure.get('observed') or {}
     option_derived = options_structure.get('derived') or {}
     option_modeled = options_structure.get('modeled') or {}

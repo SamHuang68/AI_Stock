@@ -191,5 +191,94 @@ class LegacyAndMissingInputs(unittest.TestCase):
         self.assertEqual(levels, before)
 
 
+
+def options_fixture(spot=48025.0):
+    """畫面上的情境：參考現貨約 48,000，Flip Band 43,728–46,064（寬約 5%）。"""
+    return {
+        'status': 'ready', 'contractVersion': 2, 'shadowMode': True, 'decisionUse': 'research_only',
+        'observed': {'expiry': '2026-10-21', 'tradeDate': '2026-10-05', 'spot': spot, 'rowCount': 20,
+                     'callOpenInterest': 1200, 'putOpenInterest': 1500, 'oiPutCallRatio': 1.25,
+                     'callWall': {'strike': 50000, 'openInterest': 400},
+                     'putWall': {'strike': 45000, 'openInterest': 500}},
+        'derived': {'totalOiGamma1PctNtd': 123400000, 'totalOiGammaYi': 1.234,
+                    'totalOiVega1VolPointNtd': 4560000, 'totalOiVegaWan': 456.0, 'vegaOiCoveragePct': 92.0,
+                    'ivOiCoveragePct': 92.0, 'atmIvPct': 21.5, 'ivSkew25dPctPoint': 3.2,
+                    'topGammaStrikes': [{'strike': 46000}, {'strike': 45000}, {'strike': 47000}]},
+        'modeled': {'eligible': True, 'directionConsensus': 'DIRECTION_AMBIGUOUS',
+                    'coefficientVersion': 'txo-public-oi-scenarios/v1',
+                    'flipBand': {'status': 'ready', 'low': 43728, 'high': 46064, 'widthPct': 5.11},
+                    'scenarios': [{'id': 'balanced_proxy', 'signedGexYi': -17.46,
+                                   'scenarioVexYi': -0.04, 'primaryFlip': 45108}]},
+        'history': {},
+        'quality': {'chainAsOf': '2026-10-05', 'isHybridTimestamp': False, 'warnings': []},
+    }
+
+
+class OptionsStructureLiveDeviation(unittest.TestCase):
+    NIGHT = datetime(2026, 10, 5, 20, 30, tzinfo=TW)
+
+    def build(self, txf_price, options=None):
+        p = pulse(updated=self.NIGHT.isoformat())
+        p['date'] = '2026-10-05'
+        q = p['marketSnapshot']['quotes']
+        q['^TWII']['price'] = 48025.0
+        q['^TWII']['asOf'] = q['^TWII']['market']['asOf'] = datetime(2026, 10, 5, 13, 33, tzinfo=TW).isoformat()
+        q['__TXF__']['price'] = txf_price
+        q['__TXF__']['market']['asOf'] = q['__TXF__']['asOf'] = (self.NIGHT - timedelta(seconds=30)).isoformat()
+        return dc.build_decision_context(p, key_levels=levels_for('2026-10-05'), now=self.NIGHT,
+                                         options_structure=options or options_fixture(), risk_profile=PROFILE)
+
+    def test_far_live_price_disables_the_scenario_model_but_keeps_the_official_oi_facts(self):
+        out = self.build(50000.0)                                          # +4.1%
+        opt = out['optionsStructure']
+        self.assertTrue(opt['quality']['offReference'])
+        self.assertAlmostEqual(opt['quality']['liveDeviationPct'], 4.1, places=1)
+        self.assertIn('LIVE_PRICE_FAR_FROM_CHAIN_SPOT', opt['quality']['warnings'])
+        self.assertFalse(opt['modeled']['eligible'])
+        self.assertEqual(opt['modeled']['disabledReason'], 'live_price_far_from_chain_spot')
+        self.assertEqual(opt['status'], 'ready')                           # 官方 OI 事實仍在
+        self.assertEqual(opt['observed']['callWall']['strike'], 50000)
+        self.assertEqual(opt['modeled']['flipBand']['low'], 43728)         # 數字保留，只是不再當作有效模型
+        ids = {row['id'] for row in out['evidence']}
+        self.assertIn('options.chain', ids)
+        self.assertIn('options.gamma_density', ids)
+        self.assertNotIn('options.gex_scenario', ids)                      # 停用後不再寫進證據帳本
+        self.assertNotIn('optionsStructure', out['dataQuality']['staleFields'])   # 這不是時效問題，不拉低決策資料品質
+
+    def test_near_live_price_keeps_the_model(self):
+        out = self.build(48900.0)                                          # +1.8%
+        opt = out['optionsStructure']
+        self.assertFalse(opt['quality']['offReference'])
+        self.assertTrue(opt['modeled']['eligible'])
+        self.assertIn('options.gex_scenario', {row['id'] for row in out['evidence']})
+
+    def test_threshold_boundary_and_direction(self):
+        self.assertFalse(self.build(48025.0 * 1.0299)['optionsStructure']['quality']['offReference'])
+        self.assertTrue(self.build(48025.0 * 1.0301)['optionsStructure']['quality']['offReference'])
+        self.assertTrue(self.build(48025.0 * 0.9699)['optionsStructure']['quality']['offReference'])
+
+    def test_missing_spot_or_unusable_live_price_changes_nothing(self):
+        no_spot = options_fixture()
+        no_spot['observed'].pop('spot')
+        before = copy.deepcopy(no_spot)
+        guarded = dc._guard_options_structure(no_spot, {'price': 50000.0}, {}, {'twii': {'status': 'observed', 'asOf': 'a'}})
+        self.assertEqual(guarded, before)
+        stale_only = dc._guard_options_structure(options_fixture(), {'price': 50000.0}, {'price': 50000.0},
+                                                 {'twii': {'status': 'stale', 'asOf': 'a'}, 'txf': {'status': 'unknown', 'asOf': None}})
+        self.assertNotIn('liveDeviationPct', stale_only['quality'])
+        self.assertTrue(stale_only['modeled']['eligible'])
+
+    def test_the_default_insufficient_structure_is_left_alone(self):
+        out = dc.build_decision_context(pulse(), key_levels=levels_for('2026-10-05'), now=self.NIGHT)
+        self.assertEqual(out['optionsStructure']['status'], 'insufficient')
+        self.assertNotIn('quality', out['optionsStructure'])
+
+    def test_the_input_is_not_mutated(self):
+        options = options_fixture()
+        before = copy.deepcopy(options)
+        dc._guard_options_structure(options, {'price': 50000.0}, {}, {'twii': {'status': 'observed', 'asOf': 'a'}})
+        self.assertEqual(options, before)
+
+
 if __name__ == '__main__':
     unittest.main()
