@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'server'))
 import decision_context as dc  # noqa: E402
+from exchange_source_dates import txf_timestamp_check  # noqa: E402
 
 TW = timezone(timedelta(hours=8))
 TWII = {'price': 49000.0, 'asOf': None}
@@ -93,6 +94,21 @@ class TxfSessionTimeline(unittest.TestCase):
         self.assertEqual(txf_status(at(12, 9, 30), last, calendar)[0], 'completed_session')
         self.assertEqual(txf_status(at(13, 8, 44), last, calendar)[0], 'completed_session')
         self.assertEqual(txf_status(at(13, 8, 46), last, calendar)[0], 'stale')
+
+    def test_real_taifex_post_midnight_stamp_is_observed_not_a_day_old(self):
+        # 使用者機器實測：2026-10-06 01:50:45，TAIFEX 回 CDate=20261005（場次開始日）CTime=015041。
+        # 過去 asOf 變成 10-05 01:50（早 24 小時）→ 決策中心判為過期，畫面顯示「1 日前」。
+        now = at(6, 1, 50, 45)
+        stamp, reason = txf_timestamp_check('20261005', '015041', now, session='night')
+        self.assertIsNone(reason)
+        self.assertEqual(stamp, at(6, 1, 50, 41).isoformat())
+        quote = {'price': 50118.0, 'asOf': stamp, 'market': {'asOf': stamp, 'session': 'night'}}
+        out = dc._source_quality({}, TWII, quote, now, None)['txf']
+        self.assertEqual((out['status'], out['freshness']), ('observed', 1.0))
+        # 對照：沿用舊的組合方式（不調整日期）會被判成過期
+        legacy = txf_timestamp_check('20261005', '015041', now)[0]
+        legacy_quote = {'price': 50118.0, 'asOf': legacy, 'market': {'asOf': legacy, 'session': 'night'}}
+        self.assertEqual(dc._source_quality({}, TWII, legacy_quote, now, None)['txf']['status'], 'stale')
 
     def test_the_index_rules_are_untouched(self):
         # 加權指數仍以自己的 completed_session 規則判定（本變更只動台指期）

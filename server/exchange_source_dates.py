@@ -1,6 +1,6 @@
 """Official exchange dates; never substitute a request/fetch date."""
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import math
 import re
 
@@ -41,9 +41,18 @@ def response_date(payload, requested, today):
     observed = official_date(payload.get('date'))
     return observed if observed == requested and observed <= today else None
 
-def txf_timestamp_check(day, clock, now=None):
+# 夜盤 15:00 開盤、隔日 05:00 收盤。TAIFEX MIS 對「跨過午夜之後」的夜盤報價，CDate 仍是
+# 場次「開始日」（實測：2026-10-06 01:50 的報價 CDate=20261005），直接 CDate+CTime 會比實際早 24 小時。
+NIGHT_POST_MIDNIGHT_END = time(6, 0, 0)
+
+
+def txf_timestamp_check(day, clock, now=None, session=None):
     """回 (ISO 時間戳 | None, 原因 | None)。原因：missing_date／bad_date／missing_time／bad_time／future。
-    把「為什麼驗證失敗」留下來，才能在報價被標成「時間未核實」時看出是來源格式還是日期語意的問題。"""
+    把「為什麼驗證失敗」留下來，才能在報價被標成「時間未核實」時看出是來源格式還是日期語意的問題。
+
+    session='night' 且時間在 00:00–05:59 時，CDate 是場次開始日 → 日曆日要 +1。
+    此規則推算出的時間若超前本機時鐘（例如 TAIFEX 日後改成直接給日曆日），仍會被 'future' 擋下
+    並標成「時間未核實」，不會悄悄算出錯誤時間。"""
     if day is None or str(day).strip() == '':
         return None, 'missing_date'
     observed = official_date(day)
@@ -57,9 +66,12 @@ def txf_timestamp_check(day, clock, now=None):
     if not re.fullmatch(r'\d{2}:\d{2}:\d{2}', text):
         return None, 'bad_time'
     try:
-        stamp = datetime.combine(observed, datetime.strptime(text, '%H:%M:%S').time(), TAIPEI)
+        tick = datetime.strptime(text, '%H:%M:%S').time()
     except ValueError:
         return None, 'bad_time'
+    if session == 'night' and tick < NIGHT_POST_MIDNIGHT_END:
+        observed += timedelta(days=1)
+    stamp = datetime.combine(observed, tick, TAIPEI)
     # 容許本機時鐘比交易所慢一點：TAIFEX 的 CTime 可能就是「這一秒」，零容忍會讓有效報價時有時無。
     # 真正超前（日期錯、格式錯）仍然拒收。
     if stamp > (now or datetime.now(TAIPEI)) + CLOCK_SKEW_TOLERANCE:
@@ -67,8 +79,8 @@ def txf_timestamp_check(day, clock, now=None):
     return stamp.isoformat(), None
 
 
-def txf_timestamp(day, clock, now=None):
-    return txf_timestamp_check(day, clock, now)[0]
+def txf_timestamp(day, clock, now=None, session=None):
+    return txf_timestamp_check(day, clock, now, session)[0]
 
 def _number(value):
     try:

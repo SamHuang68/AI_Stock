@@ -5773,7 +5773,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         if price is not None and prev is not None:
             change = price - prev
         sess = 'night' if str(market_type) == '1' else 'day'
-        as_of, reason = txf_timestamp_check(best.get('CDate'), best.get('CTime'))
+        as_of, reason = txf_timestamp_check(best.get('CDate'), best.get('CTime'), session=sess)
         stamp = {'CDate': best.get('CDate'), 'CTime': best.get('CTime')}
         if as_of is None:
             if price is None:
