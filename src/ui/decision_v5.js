@@ -62,6 +62,8 @@
     portfolio_not_provided: '未提供實際投組；範圍未套用投組風險上限',
     observation_pool_not_risk_overlay: '等權自選僅供觀察，不作投組風險上限'
     ,breadth_divergence_risk_lock: '指數與廣度背離信心高於 70%，啟動追價／槓桿鎖定'
+    ,key_levels_stale: '關鍵價位參考日不是最近完成交易日：不產生守穩／收破條件，波動度節制暫停'
+    ,key_levels_off_reference: '現價已偏離關鍵價位的參考收盤：不產生守穩／收破條件'
   };
 
   function $(id) { return document.getElementById(id); }
@@ -288,6 +290,9 @@
       '#dc-root .dc-options-scroll{max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-gutter:stable}' +
       '#dc-root .dc-options-table{min-width:720px}.dc-options-table td:first-child,.dc-options-table th:first-child{white-space:nowrap}' +
       '#dc-root .dc-options-warn{margin-top:6px;padding:6px 8px;border-left:3px solid #fbbf24;background:rgba(251,191,36,.07);color:#d8c99a;font-size:7.5px;line-height:1.45}' +
+      '#dc-root .dc-levels-flag{margin:0 0 6px;font-size:9px;line-height:1.5}' +
+      '#dc-root .dc-levels-flag.stale{border-left-color:#f87171;background:rgba(248,113,113,.08);color:#f3c1c1}' +
+      '#dc-root .dc-options-kpi .s{color:#d8c99a}' +
       '#dc-root .dc-options-actions{display:flex;align-items:center;gap:7px;margin-top:7px}.dc-options-actions .dc-note{min-width:0}' +
       '#dc-root .dc-oi-lab>summary:after{content:"收合觀察"}.dc-oi-lab:not([open])>summary:after{content:"展開觀察"}' +
       '#dc-root .dc-oi-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}' +
@@ -795,10 +800,30 @@
       '<div class="meter"><i style="width:' + w + '%"></i></div><div class="dc-scale-legend"><span>-1 負向</span><span>0</span><span>+1 正向</span></div></div>';
   }
 
+  function signedPct(v) { return v == null || !isFinite(Number(v)) ? '—' : (Number(v) >= 0 ? '+' : '') + Number(v).toFixed(2) + '%'; }
+  function liveRefName(ref) { return ref && ref.symbol === '__TXF__' ? '台指期' : '加權指數'; }
+  /* 價位是「某個已完成交易日」的靜態價位：參考日、與現價的距離、過期／偏離都要看得到（原本只有尾端小字的 reference 日期）。 */
+  function levelsStatusHtml(kl) {
+    var q = kl.quality || {}, bar = kl.referenceBar || {}, ref = q.liveReference || null;
+    var head = '參考日 ' + esc(kl.referenceDate || '—') + (bar.close != null ? '（收 ' + num(bar.close, 0) + '）' : '');
+    if (q.stale) {
+      return '<div class="dc-options-warn dc-levels-flag stale" data-levels-flag="stale"><b>價位已過期</b>：' + head +
+        (q.expectedReferenceDate ? '，最近完成交易日為 ' + esc(q.expectedReferenceDate) : '') +
+        '。不產生守穩／收破條件。</div>';
+    }
+    if (q.offReference && ref) {
+      return '<div class="dc-options-warn dc-levels-flag off" data-levels-flag="off"><b>現價已偏離參考價位</b>：' +
+        liveRefName(ref) + ' ' + num(ref.price, 0) + '（' + signedPct(q.liveDeviationPct) + '，門檻 ±' + num(q.deviationThresholdPct, 1) + '%）；' +
+        head + '。價位僅供參考，不產生守穩／收破條件。</div>';
+    }
+    return '<div class="dc-note" data-levels-flag="ok" style="margin:0 0 6px">' + head +
+      (ref && q.liveDeviationPct != null ? ' · 現價 ' + liveRefName(ref) + ' ' + num(ref.price, 0) + '（' + signedPct(q.liveDeviationPct) + '）' : '') + '</div>';
+  }
+
   function levelsHtml(ctx) {
     var kl = ctx.keyLevels || {}, lv = kl.levels || {}, vol = kl.volatility || {};
     var order = [['R2', lv.r2], ['R1', lv.r1], ['PIVOT', lv.pivot], ['S1', lv.s1], ['S2', lv.s2]];
-    return '<div class="dc-levels">' + order.map(function (x) {
+    return levelsStatusHtml(kl) + '<div class="dc-levels">' + order.map(function (x) {
       return '<div class="dc-level"><span class="k">' + x[0] + '</span><b>' + num(x[1], 0) + '</b></div>';
     }).join('') + '</div><div class="dc-note" style="margin-top:6px">' +
       esc(kl.method || '尚無方法') + ' · ' + esc(kl.timeframe || '') + ' · reference ' + esc(kl.referenceDate || '—') +
@@ -1386,7 +1411,8 @@
       SPOT_CHAIN_TIMESTAMP_MISMATCH: '現貨與期權鏈資料日不同，模型已停用',
       IV_OI_COVERAGE_BELOW_80PCT: '有效 IV 對應 OI 未達 80%，模型已停用',
       STALE_OR_HYBRID_REFERENCE: '資料過期或時點混合',
-      SOURCE_REFRESH_FAILED: '官方來源更新失敗，顯示最近快取'
+      SOURCE_REFRESH_FAILED: '官方來源更新失敗，顯示最近快取',
+      LIVE_PRICE_FAR_FROM_CHAIN_SPOT: '現價與期權鏈參考現貨相差過大，情境模型已停用'
     }[value] || String(value || '');
   }
 
@@ -1446,11 +1472,17 @@
       '<div class="dc-options-kpi"><div class="k">Band 寬度</div><div class="v">' + (band.widthPct == null ? '—' : num(band.widthPct, 2) + '%') + '</div></div>' +
       '<div class="dc-options-kpi"><div class="k">穩定度</div><div class="v">' + esc(optionsStabilityLabel(band.stability)) + '</div></div></div>' +
       '<div class="dc-options-scroll"><table class="dc-options-table" data-st-sort="off"><caption class="dc-note">情境式淨 Gamma／Vega；持倉係數皆為模型假設</caption><tr><th scope="col">情境</th><th scope="col">Modeled Signed GEX</th><th scope="col">Modeled Signed VEX</th><th scope="col">Primary Flip</th><th scope="col">持倉假設</th></tr>' + scenarioRows + '</table></div>' :
-      '<div class="dc-note">模型已停用：資料過期、時點不一致或有效 IV 對應 OI 未達 80%。仍可閱讀上方官方 OI 事實。</div>';
+      '<div class="dc-note" data-options-model="off">' + (quality.offReference && quality.liveReference ?
+        '模型已停用：' + liveRefName(quality.liveReference) + ' ' + num(quality.liveReference.price, 0) + ' 與期權鏈參考現貨 ' +
+          num(observed.spot, 0) + '（資料日 ' + esc(observed.tradeDate || '—') + '）相差 ' + signedPct(quality.liveDeviationPct) +
+          '，已超過 ±' + num(quality.spotDeviationThresholdPct, 0) + '%；Flip Band 與情境 GEX 以資料日現貨為中心，不再代表目前價位。' :
+        '模型已停用：資料過期、時點不一致或有效 IV 對應 OI 未達 80%。') + '仍可閱讀上方官方 OI 事實。</div>';
     return '<details id="dc-options-lab" class="dc-lab dc-options-lab"' + openAttr + '><summary><span class="dc-options-name">台指選擇權結構</span>' +
       '<span class="dc-options-status ' + esc(status) + '">' + statusLabel + '</span><span class="dc-options-meta">' + esc(summaryMeta) + '</span></summary>' +
       '<section class="dc-options-layer observed" data-layer="observed"><header><b>已觀測資料</b><span>OI／成交量／履約價 · 官方一般盤日終資料</span></header>' +
-      '<div class="dc-options-kpis"><div class="dc-options-kpi"><div class="k">參考現貨</div><div class="v">' + num(observed.spot, 0) + '</div></div>' +
+      '<div class="dc-options-kpis"><div class="dc-options-kpi"><div class="k">參考現貨</div><div class="v">' + num(observed.spot, 0) + '</div>' +
+      (quality.liveReference ? '<div class="s">' + (quality.offReference ? '⚠ ' : '') + '現價 ' + liveRefName(quality.liveReference) + ' ' +
+        num(quality.liveReference.price, 0) + '（' + signedPct(quality.liveDeviationPct) + '）</div>' : '') + '</div>' +
       '<div class="dc-options-kpi"><div class="k">Call OI 高峰</div><div class="v">' + num(callWall.strike, 0) + '</div><div class="s">OI ' + num(callWall.openInterest, 0) + ' · 現貨±10%</div></div>' +
       '<div class="dc-options-kpi"><div class="k">Put OI 高峰</div><div class="v">' + num(putWall.strike, 0) + '</div><div class="s">OI ' + num(putWall.openInterest, 0) + ' · 現貨±10%</div></div>' +
       '<div class="dc-options-kpi"><div class="k">OI Put/Call</div><div class="v">' + num(observed.oiPutCallRatio, 2) + '</div><div class="s">到期 ' + esc(expiry) + '</div></div></div>' +
