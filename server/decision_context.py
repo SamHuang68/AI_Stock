@@ -90,10 +90,8 @@ def _aware_datetime(value: Any) -> datetime | None:
         return None
 
 
-def _source_quality(pulse: dict, twii: dict, txf: dict, now: datetime,
-                    session_calendar: dict | None = None) -> dict[str, dict]:
-    """依來源觀測時間與既有交易日曆判斷；建置時間不提供時效證明。"""
-    local = now.astimezone(TW_TZ)
+def _trading_day_checker(session_calendar: dict | None):
+    """交易日判斷：載入交易所日曆的年度以日曆為準；否則平日且不在 closed，加上 opened 補班日。"""
     calendar = session_calendar or {}
     closed = set(calendar.get('closed') or [])
     opened = set(calendar.get('opened') or [])
@@ -105,16 +103,29 @@ def _source_quality(pulse: dict, twii: dict, txf: dict, now: datetime,
         if day.year in covered_years:
             return key in sessions
         return key not in closed and (day.weekday() < 5 or key in opened)
+    return trading_day
+
+
+def _completed_trading_day(local: datetime, trading_day, cutoff_minutes: int) -> date:
+    """最近一個「已過 cutoff」的交易日（cutoff 之前算前一日）。"""
+    day = local.date()
+    if local.hour * 60 + local.minute < cutoff_minutes:
+        day -= timedelta(days=1)
+    for _ in range(370):
+        if trading_day(day):
+            return day
+        day -= timedelta(days=1)
+    return day
+
+
+def _source_quality(pulse: dict, twii: dict, txf: dict, now: datetime,
+                    session_calendar: dict | None = None) -> dict[str, dict]:
+    """依來源觀測時間與既有交易日曆判斷；建置時間不提供時效證明。"""
+    local = now.astimezone(TW_TZ)
+    trading_day = _trading_day_checker(session_calendar)
 
     def completed_day(cutoff: int) -> date:
-        day = local.date()
-        if local.hour * 60 + local.minute < cutoff:
-            day -= timedelta(days=1)
-        for _ in range(370):
-            if trading_day(day):
-                return day
-            day -= timedelta(days=1)
-        return day
+        return _completed_trading_day(local, trading_day, cutoff)
 
     spot_day = completed_day(815)
     daily_day = completed_day(1080)
@@ -190,6 +201,51 @@ def _source_quality(pulse: dict, twii: dict, txf: dict, now: datetime,
                           'freshness': 1.0 if eligible_breadth else (0.2 if breadth_day else 0.0),
                           'expectedSession': daily_day.isoformat()}
     return sources
+
+
+OFF_REFERENCE_MIN_PCT = 2.0
+
+
+def _guard_key_levels(key_levels: dict | None, twii: dict, txf: dict, source_quality: dict,
+                      now: datetime, session_calendar: dict | None = None) -> dict:
+    """關鍵價位是「某個已完成交易日」的靜態價位；補上兩個檢查，讓畫面與決策條件不會把舊價位當成現況。
+
+    1. 參考日必須是最近一個已完成的交易日（18:00 前允許前一日，之後必須是當日）。否則標 stale。
+       舊規則只在參考日超過 7 個日曆日才過期，等於舊了五個交易日都還算新鮮。
+    2. 現價（取較新的台指期／加權指數報價）偏離參考收盤達 max(2%, 2×ATR%) 時標 offReference：
+       價位仍可閱讀，但不再產生「守穩 R1／收破 S1」這類決策條件。
+    只有帶 referenceDate／referenceBar 的資料才會被檢查（舊格式不受影響）。"""
+    out = dict(key_levels or {})
+    quality = dict(out.get('quality') or {})
+    out['quality'] = quality
+    local = now.astimezone(TW_TZ)
+    ref_date = out.get('referenceDate')
+    if ref_date:
+        expected = _completed_trading_day(local, _trading_day_checker(session_calendar), 1080).isoformat()
+        quality['expectedReferenceDate'] = expected
+        if str(ref_date) < expected and not quality.get('stale'):
+            quality['stale'] = True
+            quality['reason'] = 'reference_not_latest_completed_session'
+    bar = out.get('referenceBar') or {}
+    close = _number(bar.get('close'))
+    live = None
+    for name, quote in (('twii', twii), ('txf', txf)):
+        info = source_quality.get(name) or {}
+        price = _number((quote or {}).get('price'))
+        if info.get('status') in ('observed', 'completed_session') and price and info.get('asOf'):
+            if live is None or str(info['asOf']) > str(live['asOf']):
+                live = {'symbol': '^TWII' if name == 'twii' else '__TXF__', 'price': price,
+                        'asOf': info['asOf'], 'status': info['status']}
+    if live and close:
+        deviation = (live['price'] / close - 1.0) * 100.0
+        atr_pct = _number((out.get('atr') or {}).get('pct')) or 0.0
+        threshold = max(OFF_REFERENCE_MIN_PCT, 2.0 * atr_pct)
+        quality['liveReference'] = live
+        quality['liveDeviationPct'] = round(deviation, 2)
+        quality['deviationThresholdPct'] = round(threshold, 2)
+        quality['offReference'] = abs(deviation) >= threshold
+    quality['levelsActionable'] = not quality.get('stale') and not quality.get('offReference', False)
+    return out
 
 
 def _quote(pulse: dict, symbol: str, legacy: dict | None = None) -> dict:
@@ -705,6 +761,8 @@ def _position_range(
     target = base * regime_multiplier * volatility_multiplier * confidence_multiplier
     cap = min(max_gross, max_leverage * 100.0)
     constraints: list[str] = ['key_levels_stale'] if key_levels_stale else []
+    if ((key_levels or {}).get('quality') or {}).get('offReference') and not key_levels_stale:
+        constraints.append('key_levels_off_reference')
     research_ceiling = _number((exposure or {}).get('selectedResearchCeilingPct'))
     if research_ceiling is not None and research_ceiling < cap:
         cap = research_ceiling
@@ -781,7 +839,8 @@ def _action_envelope(
     }
     posture, allowed, restricted, prohibited = catalog[regime_id]
     key_levels_stale = bool(((key_levels or {}).get('quality') or {}).get('stale'))
-    levels = {} if key_levels_stale else ((key_levels or {}).get('levels') or {})
+    levels_actionable = ((key_levels or {}).get('quality') or {}).get('levelsActionable', True) is not False
+    levels = {} if (key_levels_stale or not levels_actionable) else ((key_levels or {}).get('levels') or {})
     confirmation = [d.get('confirmation') for d in divergences if d.get('confirmation')]
     invalidation = [d.get('invalidation') for d in divergences if d.get('invalidation')]
     if levels.get('r1') is not None:
@@ -1209,7 +1268,7 @@ def build_decision_context(
     confidence = round(_clamp(confidence, 0.0, 0.95), 2)
 
     portfolio = _portfolio_summary(portfolio_overlay, portfolio_kind)
-    key_levels = dict(key_levels or {})
+    key_levels = _guard_key_levels(key_levels, twii, txf, source_quality, now, session_calendar)
     tsmc_quote = _quote(pulse, '2330', {})
     current_tsmc_price = _number(tsmc_quote.get('price'))
     exposure = _exposure_lab.build_exposure_lab(

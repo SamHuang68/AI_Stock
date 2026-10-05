@@ -190,7 +190,7 @@ def calculate_key_levels(
     today = today or now.date()
     empty = {
         'symbol': symbol, 'session': session, 'asOf': as_of, 'source': source,
-        'referenceDate': None, 'method': 'classic_pivot_v1', 'timeframe': '1d',
+        'referenceDate': None, 'referenceBar': None, 'method': 'classic_pivot_v1', 'timeframe': '1d',
         'levels': {'r2': None, 'r1': None, 'pivot': None, 's1': None, 's2': None},
         'atr': {'period': 14, 'value': None, 'pct': None, 'upper': None, 'lower': None},
         'swing': {'high': None, 'low': None, 'method': 'confirmed_fractal_2x2'},
@@ -239,6 +239,8 @@ def calculate_key_levels(
 
     out = dict(empty)
     out['referenceDate'] = ref_date
+    # 價位是哪一根 K 算出來的：畫面與「現價偏離參考收盤」的基準都要用它。
+    out['referenceBar'] = {'date': ref_date, 'open': ref['open'], 'high': high, 'low': low, 'close': close}
     out['levels'] = {k: round(v, 2) for k, v in levels.items()}
     out['atr'] = {
         'period': 14,
