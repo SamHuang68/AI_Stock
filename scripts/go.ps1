@@ -40,6 +40,14 @@ if ($env:LOCALAPPDATA -and -not ($Worktree -or $Pull -or $UpdateOnly -or $Rebuil
     & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $managedLauncher -InstallRoot $managedLocalRoot
     exit $LASTEXITCODE
   }
+  # 已有受管本機安裝，但目前資料夾不是登記的原工作樹：不能走下方開發流程，
+  # 否則 Stop-PortListeners 會關掉正在使用的本機 ST（18432）並改跑一份未受管的版本。
+  if ($localConfig.originalCheckout) {
+    throw ("ST-LAUNCHER-GUARD: 本機已有受管安裝，且此資料夾不是登記的原工作樹，已停止，未關閉任何程序。`n" +
+      "  登記的原工作樹：$($localConfig.originalCheckout)`n" +
+      "  目前資料夾　　：$Root`n" +
+      "  請到登記的資料夾執行 START_TIP.cmd；若確實要在此資料夾開發，請明確加 -Worktree（會關閉 18432 上的程序）。")
+  }
   }
 }
 
