@@ -8,7 +8,11 @@
 
 **共同對齊來源（Sam 2026-10-07 指示）：共用記憶（AI-Workspace 的 `shared-ai-memory`）與 GitHub 是 Codex、Claude、Antigravity 三者共通的對齊來源，不應因本機或雲端專案而出現歧異。** 因此雲端與本機的副本都不是各自的真源；只存在於某一邊的事實（路徑、環境、流程）要記進 GitHub（本檔、`docs/revision.md`）或共用記憶（寫入需 Sam 授權，規則 `0012`），不要只留在單一代理人的私有記憶或對話裡。
 
-與共用規則或使用者的最新指示衝突時，以後者為準。雲端工作階段**讀不到上述本機檔案**：開工前請使用者貼上相關檔案，或請使用者明說不需要。本檔內容只含從使用者機器輸出與倉庫文件驗證過的事實。
+與共用規則或使用者的最新指示衝突時，以後者為準。本檔內容只含從使用者機器輸出與倉庫文件驗證過的事實。
+
+**雲端工作階段怎麼讀共用規則**（Sam 2026-10-07 告知）：共用記憶有 GitHub 遠端，私有 repo `SamHuang68/shared-ai-memory`。雲端用 `add_repo` **唯讀**掛上（不需要 push 權限），只讀與任務相關的檔案（先讀 `_rules/0005`、`sessions/handoff-current.md`；不讀使用者輪廓等個人內容）。**遠端可能落後 Sam 的本機**（陷阱 0021；截至 2026-10-07，遠端 master 提示端 `1445557c…` 是 2026-10-03，缺少本機已有的規則 0007「程式進版、版本控管與修訂歷史」段落）：讀取時先看最新提交日期並向 Sam 說明；與 Sam 貼回的本機內容不一致時，以貼回的為準並回報差異（規則 0016）。`AI-Workspace` 的其他檔案（`workspace.json`、`docs\…`）雲端仍讀不到，需要時請 Sam 貼上。
+
+**8D 與新規則**：8D 是 Codex、Claude、Antigravity 共通的標準（規則 0004）：出問題先找 root cause，必要時新增規則防止再發。Sam 2026-10-07：「以後 8D 都同意新增 rule 不需要授權」。範圍：8D 結論所需的**新規則**；不含修改既有規則的文字，也不含 Git commit／push（規則 0007）。寫入共用記憶由本機寫入者依規則 0012 執行，雲端只有唯讀。
 
 ## 1. 位置與角色
 
@@ -31,6 +35,7 @@
 5. **更新開發工作樹：** `stock_terminal_v2.html` 是啟動時重建的產物，更新前 `git stash push -- stock_terminal_v2.html` 保留，不要丟棄；`data/` 的修改是執行期資料，不要還原；用 `git pull --ff-only origin main`。被未追蹤檔擋住時，把檔案搬到備份資料夾再 pull，不刪除；不用 `reset --hard`、`clean`、強制推送。
 6. **給使用者的指令一律是 PowerShell。** 讀 UTF-8 檔案要加 `-Encoding UTF8`（Windows PowerShell 5.1 預設用本機碼頁，中文會變成無法復原的亂碼）；要讓輸出可貼回，用 `& { … } *>&1 | Tee-Object -FilePath $log`，再 `Get-Content $log -Raw | Set-Clipboard`。
 7. **雲端工作階段的 Git 做法**（共用規則 `0007`）：只用明確檔案清單暫存（不用 `git add -A` 或 `git add .`），並用 `git diff --cached --name-only` 核對；比對與回報用完整 SHA；不 force push。在已合併 PR 的工作分支上接續工作時，把 `origin/main` 合併進分支，不要 reset 後強推。 完整 Python 測試套件與全倉庫靜態或安全掃描屬「完整掃描測試」（規則 `0008` 第 13 條）：執行前先向 Sam 說明範圍、影響與耗時並取得同意（每個 PR 推送前問一次，或依 Sam 的常設同意）；針對本次改動的測試直接跑。
+8. **例外處理與測試誠實**（共用規則 `0014`）：不得無記錄地吞掉錯誤。程式用 `server/log_once.py` 的 `log_once` 留下限頻記錄，或縮小例外型別，或重新拋出；`tests/test_no_new_silent_exceptions.py` 的棘輪會擋下新增的靜默寬鬆例外，減少時要把 `tests/silent_except_baseline.json` 一併降下。以 AST 或 mock 取函式的測試不得補上正式模組缺的名稱。
 
 ## 3. 版本與修訂歷史
 

@@ -5,6 +5,26 @@
 
 ---
 
+## v5.0 修訂 — 2026-10-07 備援路徑可觀測性與靜默例外棘輪（候選，未發布）
+
+產品版本仍為根目錄 `VERSION` 的 **5.0**。補記：PR #166 已於 2026-10-07 合併，合併（squash）修訂 `fd6efb77e08e7aae718d0ed085cbd013e66779a5`；先前「候選（尚未合併）」是當時快照，不覆寫。**發布狀態**：#164、#165、#166 與本段都未發布，正式站與受管理本機的 runtimeCommit 仍為 `e0b11475f40a980289553d18029b916be3d1e457`（2026-10-07 確認）。
+
+### 候選（本 PR）：備援路徑可觀測性、靜默例外棘輪、接線檢查
+
+- 基底：`fd6efb77e08e7aae718d0ed085cbd013e66779a5`。實作提交以本 PR 的分支歷史為準（避免在自身檔案內預先寫入自己的 SHA）。
+
+| 改動 | 原因與修正後行為 | 驗證／狀態 |
+| --- | --- | --- |
+| `server/log_once.py` 與備援路徑記錄 | #165 的 `import math` 之所以悄悄失效五天，是因為 `except Exception: return None` 吞掉 NameError。新增限頻記錄函式（同 key＋例外型別 10 分鐘一行；新的例外型別一定立刻記錄），並接到四個備援路徑：`_db_screener_arrays`（DB 失敗仍回 None，由呼叫端退回 Yahoo）、`_handle_quote_batch` 的單檔候選與 worker 例外。行為不變，只多一行記錄。 | `tests/test_log_once.py` 6 項；`tests/test_fallback_observability.py` 4 項，其中 3 項在舊 `server.py` 上失敗。 |
+| 數字解析只吞解析失敗 | `_fetch_day_movers`、`_handle_twquote` 內的 `fnum` 原本 `except Exception: return None`，會連 NameError 一起吞。改為只抓 `TypeError`、`ValueError`、`OverflowError`。**行為差異**：解析以外的程式錯誤現在會往外傳，由外層既有的處理印出（例如 `[movers] TWSE ingest …`），不再悄悄回「無資料」。 | 缺全域名稱時會印出 `[movers] TWSE ingest … name 'math' is not defined` 的測試；健康模組下排行照常有資料。 |
+| 靜默例外棘輪 | 共用規則 0014：寬鬆且靜默的例外處理（`except Exception` 等，只有 `pass`／`continue`／`break`／`return` 常數）數量只能下降。`server/` 目前 207 個（39 個檔案；`server.py` 69 個），新增或減少都使測試失敗，減少時要同步降低 `tests/silent_except_baseline.json`。本 PR 讓總數從 212 降到 207。 | `tests/test_no_new_silent_exceptions.py` 2 項；人為新增一個靜默處理時測試失敗（已驗證）。尚未清理其餘 207 個，屬後續工作。 |
+| 接線檢查 | `server.py` 內 150 個不同的 `self._xxx()` 呼叫都要在 `server/` 內有同名定義，抓拼錯的方法名稱（pyflakes 抓不到）。名稱層級，不啟動伺服器、不碰 `data/`。 | `tests/test_server_handler_wiring.py` 2 項；目前沒有缺少的定義。 |
+| 協作入口文件 | `AGENTS.md`、`CLAUDE.md` 記入：共用記憶的 GitHub 遠端與雲端唯讀讀取方式、遠端可能落後本機、8D 與「8D 後新增規則不需授權」的範圍、規則 0014 的做法。 | 文件變更；事實來自使用者回覆（遠端 repo 名稱）與雲端對遠端的唯讀核對。 |
+
+驗證：只跑了本次相關的測試與 `test_bundle_fresh`；完整 Python 套件由 CI 執行，沒有在雲端另外跑（規則 0008 第 13 條）。限制：未用即時供應商資料驗證；路由煙霧測試（啟動真實伺服器）**沒有做**——它會寫入 `data/`、啟動背景執行緒並對外連線，與規則 0007 的執行期資料保護衝突，改以上列的接線檢查代替，煙霧測試待 Sam 決定隔離方式。審查：僅作者自審，沒有跨供應商或同供應商隔離審查。使用者可見資訊：沒有減少。
+
+---
+
 ## v5.0 修訂 — 2026-10-06／07 決策中心時效、台指期時間與啟動器防呆（已推送並合併；未發布）
 
 產品版本仍為根目錄 `VERSION` 的 **5.0**；沿用「產品版本 + 精確 Git／runtime commit」辨識修訂，沒有改動版本號。以下 PR #164、#165 已合併到 `main`，PR #166 為候選；**2026-10-07 實測正式站與受管理本機的 runtimeCommit 仍為 `e0b11475f40a980289553d18029b916be3d1e457`**（正式 `.private_web_release.json` 與本機 `/health` 一致），所以全部屬「未發布」。發布須依既有 stage／promote 流程由本機發布者執行；此處不宣稱已部署。

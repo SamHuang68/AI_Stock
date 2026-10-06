@@ -79,6 +79,7 @@ from source_health import (
     snapshot as _src_snapshot,
 )
 from market_contract import attach_quote_contract, cumulative_volume_contract
+from log_once import log_once
 from exchange_source_dates import marketflow_payload, marketflow_cache_key, taipei_today, txf_timestamp, txf_timestamp_check
 from market_routes import market_snapshot, twse_mis_observation, twse_mis_stock_quote, quote_observation, guard_tw_quote
 from http_boundary import BodyReadError, is_same_local_origin, read_json_body
@@ -806,7 +807,8 @@ def _db_screener_arrays(code):
     try:
         import datastore
         rows = datastore.get_bars(str(code))
-    except Exception:
+    except Exception as exc:
+        log_once('screener-db', f'bars for {code} unavailable, falling back to Yahoo:', exc=exc)
         return None
     if not rows or len(rows) < 70:
         return None
@@ -1916,7 +1918,7 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
         try:
             number = float(str(v).replace(',', '').replace('+', '').strip())
             return number if math.isfinite(number) else None
-        except Exception:
+        except (TypeError, ValueError, OverflowError):
             return None
 
     rows = []
@@ -3249,7 +3251,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             try:
                 number = float(str(v).replace(',', ''))
                 return number if math.isfinite(number) and number > 0 else None
-            except Exception:
+            except (TypeError, ValueError, OverflowError):
                 return None
         out = _twse_mis_stock_quotes([code]).get(code) or {'ok': False, 'code': code}
         mis_volume = {k: v for k, v in out.items() if k.startswith('volume')} if out.get('volumeShares') is not None else None
@@ -3438,7 +3440,8 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                               **quote_observation(float(m.get('regularMarketTime') or 0) * 1000)}
                     # 台股盤中日期防線不能套用到不同交易時區的美股。
                     return sym, guard_tw_quote(result) if sym.endswith(('.TW', '.TWO')) else {**result, 'stale': False}
-                except Exception:
+                except Exception as exc:
+                    log_once('quote-batch', f'{cand} failed, trying the next candidate:', exc=exc)
                     continue
             return sym, None
         out = {}
@@ -3447,8 +3450,8 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             try:
                 k, v = f.result()
                 if v: out[k] = v
-            except Exception:
-                pass
+            except Exception as exc:
+                log_once('quote-batch-worker', 'worker raised:', exc=exc)
         self._ok(json.dumps(out, ensure_ascii=False).encode())
 
     def _handle_quote(self, sym):
