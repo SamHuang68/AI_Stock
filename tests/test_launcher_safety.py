@@ -60,7 +60,8 @@ class LauncherSafetyTests(unittest.TestCase):
     def test_launcher_never_kills_by_port(self):
         # 規則 0015 §4：腳本不得依埠任意終止程序。開發流程只能結束「收據登記的自己的程序」，
         # 其他占用者一律拒絕。Stop-Process 只能出現在 Stop-OwnedPortListeners 內，且在 ST-PORT-GUARD 之後。
-        script = (ROOT / 'scripts' / 'go.ps1').read_bytes().decode('utf-8-sig')
+        # Windows 的 CI 會把檔案檢出成 CRLF；以下用 \n 比對位置，所以先統一換行。
+        script = (ROOT / 'scripts' / 'go.ps1').read_bytes().decode('utf-8-sig').replace('\r\n', '\n')
         self.assertNotIn('Stop-PortListeners', script)
         self.assertNotIn('taskkill', script.lower())
         start = script.index('function Stop-OwnedPortListeners')
