@@ -2,3 +2,6 @@
 # Keep this CI-only: Stock Terminal's core runtime remains dependency-free on
 # hosts that already provide system timezone data.
 tzdata==2026.3
+
+# Static check that no module uses an undefined name (a missing import hides behind try/except).
+pyflakes==4.0.2
