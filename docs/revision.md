@@ -27,6 +27,8 @@
 
 驗證：全套 Python 1431 項通過（15 項略過，為 Windows 專用或選用套件）、22 項 JS 自測、`compileall`、`build_order`、bundle 新鮮度測試。[PR CI](https://github.com/SamHuang68/AI_Stock/actions/runs/37352435070)、[分支 push CI](https://github.com/SamHuang68/AI_Stock/actions/runs/37352430089)、[主線 CI](https://github.com/SamHuang68/AI_Stock/actions/runs/37353820420) 各四項成功。限制：TAIFEX、TWSE、Yahoo 無法從開發沙箱連線，沒有以即時供應商資料驗證；未部署。審查：僅作者自審，沒有跨供應商或同供應商隔離審查。
 
+使用者可見資訊的減少（共用規則 0009 第 1 條）：本 PR 在下列情況會減少決策中心顯示的內容，都不是悄悄進行，畫面會寫出原因。(1) Key Levels 為 off-reference 或 stale 時，不再輸出「守穩 R1／收破 S1」確認與失效條件文字；價位與波動度統計照常顯示，上方多一行參考日、現價與偏離。(2) 選擇權現價偏離 3% 以上時停用情境模型（Flip Band、GEX 情境與壓力測試數字），改顯示原因；官方 OI 與方向中立的密度仍顯示。(3) 時間未核實的台指期報價不再供決策中心與 Pulse 評分使用；價格與原始 CDate／CTime 仍由 `/txf` 提供。PR 說明已列出這些項目，Sam 以「合併」核准該 PR。
+
 ### 已推送並合併、未發布：PR #165，補 `import math`
 
 - 基底：`a525885a24dc53b36441e81d161bbe0c37097b1e`；實作：`1f5319ba011ece91cfec9b04743e1400a54f7959`。
