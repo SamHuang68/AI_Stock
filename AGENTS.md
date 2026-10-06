@@ -28,6 +28,7 @@
 4. **發布不由雲端代理人執行。** 發布走 stage → promote，工具與證據格式見第 1 節；授權分層與發布前提（CI、完整 SQLite 備份、停止服務）以共用規則 `0007` 與 `procedures/ai-stock-private-web-release.md` 為準，發布器本身不備份、不停服務。雲端代理人只提供精確 SHA、CI 結果與驗收標準，交給本機發布者。
 5. **更新開發工作樹：** `stock_terminal_v2.html` 是啟動時重建的產物，更新前 `git stash push -- stock_terminal_v2.html` 保留，不要丟棄；`data/` 的修改是執行期資料，不要還原；用 `git pull --ff-only origin main`。被未追蹤檔擋住時，把檔案搬到備份資料夾再 pull，不刪除；不用 `reset --hard`、`clean`、強制推送。
 6. **給使用者的指令一律是 PowerShell。** 讀 UTF-8 檔案要加 `-Encoding UTF8`（Windows PowerShell 5.1 預設用本機碼頁，中文會變成無法復原的亂碼）；要讓輸出可貼回，用 `& { … } *>&1 | Tee-Object -FilePath $log`，再 `Get-Content $log -Raw | Set-Clipboard`。
+7. **雲端工作階段的 Git 做法**（共用規則 `0007`）：只用明確檔案清單暫存（不用 `git add -A` 或 `git add .`），並用 `git diff --cached --name-only` 核對；比對與回報用完整 SHA；不 force push。在已合併 PR 的工作分支上接續工作時，把 `origin/main` 合併進分支，不要 reset 後強推。
 
 ## 3. 版本與修訂歷史
 
