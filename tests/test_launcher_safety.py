@@ -122,6 +122,15 @@ class ManagedInstallGuardBehaviorTests(unittest.TestCase):
             done = subprocess.run(args, cwd=tmp, env=env, capture_output=True, timeout=120)
             return done.returncode, (done.stdout + done.stderr).decode('utf-8', 'replace')
 
+    def test_windows_runs_cover_windows_powershell_5_1(self):
+        # START_TIP.cmd 實際呼叫 Windows PowerShell 5.1（powershell.exe）。Windows 上若找不到它，
+        # 行為測試就只剩 pwsh，5.1 的行為等於沒被驗證（曾因此寫出不準確的涵蓋聲明）。
+        if os.name != 'nt':
+            self.skipTest('只在 Windows 檢查 Windows PowerShell 5.1 是否被涵蓋')
+        engines = _powershell_engines()
+        self.assertIn('powershell', engines, '找不到 powershell.exe：5.1 沒有被行為測試涵蓋')
+        print('guard behaviour tests engines:', sorted(engines))
+
     def test_unregistered_checkout_is_refused_before_anything_is_stopped(self):
         for name, engine in _powershell_engines().items():
             with self.subTest(engine=name):
