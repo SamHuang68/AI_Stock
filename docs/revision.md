@@ -5,6 +5,52 @@
 
 ---
 
+## v5.0 修訂 — 2026-10-06／07 決策中心時效、台指期時間與啟動器防呆（已合併，未發布）
+
+產品版本仍為根目錄 `VERSION` 的 **5.0**；沿用「產品版本 + 精確 Git／runtime commit」辨識修訂，沒有改動版本號。以下 PR #164、#165 已合併到 `main`，PR #166 為候選；**2026-10-07 實測正式站與受管理本機的 runtimeCommit 仍為 `e0b11475f40a980289553d18029b916be3d1e457`**（正式 `.private_web_release.json` 與本機 `/health` 一致），所以全部屬「未發布」。發布須依既有 stage／promote 流程由本機發布者執行；此處不宣稱已部署。
+
+### 已合併、未發布：PR #164，決策中心時效與台指期夜盤時間
+
+- 基底：`e0b11475f40a980289553d18029b916be3d1e457`。
+- 分支提交（由舊到新）：`e8125daaf2da194af7614e533101b74679632ebd`、`44e6de5704b39f294ba81fc5b4340ff54feb6fa8`、`e3ecead7e739784238580147cc33acba9c4a391f`、`0e701f1852e8a7b703225d6863074b2ac748f417`、`2c0efcc874907b7fe75b86194c9df1e88b9864a8`、`af0c8c87bebab3078c384649259acda85e45050a`。
+- [PR #164](https://github.com/SamHuang68/AI_Stock/pull/164) 合併（squash）修訂：`a525885a24dc53b36441e81d161bbe0c37097b1e`。
+
+| 改動 | 原因與修正後行為 | 驗證／狀態 |
+| --- | --- | --- |
+| 台指期夜盤午夜後的日期 | TAIFEX MIS 在 00:00–05:59 的夜盤報價，`CDate` 仍是場次開始日（2026-10-06 01:50 回 `20261005`；2026-10-07 02:56 回 `20261006`）。直接組合 CDate＋CTime 會使 asOf 早 24 小時，證據列顯示「1 日前」，決策中心也把新鮮報價當過期。現在夜盤且時間早於 06:00 時日期加一天；日盤與午夜前不調整；調整後若超前本機時鐘超過 120 秒，仍標「時間未核實」，不悄悄移位。 | 上述兩份使用者機器上的真實樣本進入測試，另有跨月、跨年、週末與 06:00 邊界案例。使用者以 `88c5139` 程式在舊開發資料夾（非受管安裝）實測 `/txf`：asOf 為當日、`timeUnverified` 為 false、`timeCheck.verified` 為 true；該次輸出沒有存入證據資料夾。**午夜前（15:00–23:59）的 CDate 語意尚未用真實樣本確認**：若為下一個交易日，該時段報價會顯示為時間未核實。 |
+| 時間驗證失敗時保留報價 | 過去 CDate／CTime 驗證失敗會整筆丟棄，Pulse 與決策中心看不到夜盤，且沒有紀錄。現保留價格，asOf 明確為未知並標 `timeUnverified`，原始 CDate／CTime 與原因寫入 `timeCheck`，同一場次與原因每 10 分鐘最多記一行；決策中心不採用時間未知的報價，Pulse 評分排除。 | 原「缺 CDate 回 None」的斷言依新契約改為保留價格、時間未知；其餘既有測試不變。 |
+| 台指期時效 | 場次結束後、下一場次開始前（夜盤 05:00–08:45、日盤 13:45–15:00、週末與休市到下個開盤前，依交易所日曆），最後一筆視為 `completed_session` 而非過期；過去 05:30–08:45 完全不採用夜盤收盤。 | 完整時間軸測試，含週末、休市與「非場次最後一筆不得被救回」。 |
+| Pulse 快照的台指期選擇 | 快照過去一律取夜盤區塊，日盤時段會顯示昨夜報價。現取夜盤區塊與日盤報價中時間較新且已核實者；快取為空的日盤時段直接取日盤報價。 | 選擇邏輯單元測試。 |
+| Key Levels 時效與偏離 | 參考日須為最近完成交易日（18:00 截止、依交易所日曆），否則 `stale`；現價（指數與期貨中較新且可用者）偏離參考收盤達 `max(2%, 2×ATR%)` 時標 `offReference`，保留價位但不再產生「守穩 R1／收破 S1」確認與失效條件，並加 `key_levels_off_reference` 限制。`calculate_key_levels` 回傳 `referenceBar`。 | 19 個定向測試（含已回報的 45–48k 數值對 50k 現價）。2%／3% 門檻是經驗值，未用資料校準；期現貨基差未扣除。 |
+| 選擇權結構 | 現價偏離選擇權參考現貨 3% 以上時停用情境模型（Flip Band、GEX），保留官方 OI 事實與方向中立的密度，原因為 `LIVE_PRICE_FAR_FROM_CHAIN_SPOT`。 | 併入上列測試。 |
+| 決策頁呈現 | Key Levels 上方顯示參考日、現價與偏離（偏離為琥珀色、過期為紅色）；選擇權格顯示現價，模型停用時說明兩個價格。 | 以真實後端輸出對決策頁做 Playwright 檢查（已回報情境、過期參考、正常情境），無 pageerror。 |
+
+驗證：全套 Python 1431 項通過（15 項略過，為 Windows 專用或選用套件）、22 項 JS 自測、`compileall`、`build_order`、bundle 新鮮度測試。[PR CI](https://github.com/SamHuang68/AI_Stock/actions/runs/37352435070)、[分支 push CI](https://github.com/SamHuang68/AI_Stock/actions/runs/37352430089)、[主線 CI](https://github.com/SamHuang68/AI_Stock/actions/runs/37353820420) 各四項成功。限制：TAIFEX、TWSE、Yahoo 無法從開發沙箱連線，沒有以即時供應商資料驗證；未部署。
+
+### 已合併、未發布：PR #165，補 `import math`
+
+- 基底：`a525885a24dc53b36441e81d161bbe0c37097b1e`；實作：`1f5319ba011ece91cfec9b04743e1400a54f7959`。
+- [PR #165](https://github.com/SamHuang68/AI_Stock/pull/165) 合併（squash）修訂：`88c5139c17a6095703903e7f33c3cdc97246bd03`。
+
+| 改動 | 原因與修正後行為 | 驗證／狀態 |
+| --- | --- | --- |
+| `server.py` 缺 `import math` | `_fetch_day_movers`、`_handle_twquote`、`_handle_quote_batch`、`_db_screener_arrays`、`_tag_industry` 使用 `math.isfinite`，且都包在 `except Exception` 內，NameError 被吞掉：總覽漲跌幅排行永遠「無資料」、個股即時報價的 Yahoo 備援取不到數字等，沒有任何錯誤訊息。由 `a02436a`（2026-10-02）與 `bd6b75f`（2026-10-03）引入，**已包含在目前部署的 `e0b1147`**。既有測試用 AST 取出單一函式並手動注入 `math`，因此沒有發現。 | 以真實模組與假 TWSE 資料重現：修正前 `ok=False`、無排行，補 import 後 `ok=True`。新增 pyflakes 全專案 undefined-name 掃描（修正前 5 處、修正後 0 處）與不注入全域的行為測試，兩者在舊程式上失敗；pyflakes 釘版於 `requirements-ci.txt`。另四處只以靜態掃描涵蓋，未逐一用即時資料執行。 |
+
+驗證：全套 Python 1433 項通過（15 項略過）、22 項 JS 自測。[PR CI](https://github.com/SamHuang68/AI_Stock/actions/runs/37503981020)、[分支 push CI](https://github.com/SamHuang68/AI_Stock/actions/runs/37503960975)、[主線 CI](https://github.com/SamHuang68/AI_Stock/actions/runs/37514560599) 各四項成功。
+
+### 候選（尚未合併）：PR #166，啟動器防呆與協作入口
+
+- 基底：`88c5139c17a6095703903e7f33c3cdc97246bd03`。實作提交：`712872a8eb1edd242806ccd2892942ee77ba5c4d`、`c09a45620fa5e9c391198c6a421178a2612b88ce`，及其後的對齊與修訂紀錄提交（以 PR #166 為準）。
+
+| 改動 | 原因與修正後行為 | 驗證／狀態 |
+| --- | --- | --- |
+| `go.ps1` 啟動防呆 | 已登記受管本機安裝時，`go.ps1` 只在目前資料夾等於登記的 `originalCheckout` 才轉交；從其他資料夾一般啟動會落入開發流程，`Stop-PortListeners` 關掉 18432 埠上的程序，再啟動一份未受管版本。2026-10-07 發生一次：雲端代理人沿用 2026-10-03 已退役的 `C:\Users\Sam\AI_Stock` 路徑，指示使用者在該資料夾執行 `START_TIP.cmd`。現在這種情況在關閉任何程序之前以 `ST-LAUNCHER-GUARD` 停止並說明；明確的 `-Worktree`／`-Pull`／`-UpdateOnly`／`-RebuildOnly`、登記資料夾的轉接、沒有受管安裝的行為不變。 | 靜態順序／BOM 測試，加 2 個在暫存目錄實際執行 `go.ps1` 的行為測試（PowerShell 7.4），在舊 `go.ps1` 上失敗；全套 1436 項通過。**尚未在 Windows PowerShell 5.1 或使用者機器驗證**，以 PR 的 Windows CI 結果為準。 |
+| 協作入口文件 | 新增 `AGENTS.md`、`CLAUDE.md`，更新 `.cursorrules` 的過時路徑，記錄正式開發資料夾、受管本機、正式站與退役舊路徑，並指向 `AI-Workspace` 的共用規則（本機檔案，不在 Git 內，不複製其內容）。 | 文件變更，無程式行為；內容只含從使用者機器輸出與倉庫文件驗證過的事實。 |
+
+事故處置紀錄：未受管開發程序於 2026-10-07 03:33:05 啟動並佔用 18432；使用者之後改由 `%LOCALAPPDATA%\StockTerminalLocal\start_local.ps1` 啟動受管安裝，其 runtimeCommit 為 `e0b11475…`，與正式站一致；正式站（18434／18435）未受影響。是否有受管程序因此被關閉，沒有證據可以確認。
+
+---
+
 ## v5.0 修訂 — 2026-10-03 已發布與後續本機階段
 
 產品版本仍為根目錄 `VERSION` 的 **5.0**；本輪沿用「產品版本 + 精確 Git／runtime commit」辨識修訂，沒有為整理紀錄改動版本號。以下保留各階段的原因、行為、驗證與發布狀態；歷史紀錄不覆寫。
