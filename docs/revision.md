@@ -5,6 +5,24 @@
 
 ---
 
+## v5.0 修訂 — 2026-10-07 開發啟動器只結束自己的程序（候選，未發布）
+
+產品版本仍為根目錄 `VERSION` 的 **5.0**。補記：PR #167 已於 2026-10-07 由 Sam 說「合併」後合併（squash），合併修訂 `3a7deaf103ba233a365c820870fdd136d828448b`；下一段「候選（本 PR）」是當時快照，不覆寫。**發布狀態**：#164、#165、#166、#167 與本段都未發布，正式站與受管理本機的 runtimeCommit 仍為 `e0b11475f40a980289553d18029b916be3d1e457`（2026-10-07 確認）；待發布目標仍是 `fd6efb77e08e7aae718d0ed085cbd013e66779a5`（#166）。
+
+### 候選（本 PR）：`go.ps1` 不再依埠終止程序
+
+- 基底：`3a7deaf103ba233a365c820870fdd136d828448b`。實作提交以本 PR 的分支歷史為準。
+
+| 改動 | 原因與修正後行為 | 驗證／狀態 |
+| --- | --- | --- |
+| `scripts/go.ps1` 的 `Stop-PortListeners` 移除，改為 `Get-PortListenerPids`、`Write-DevServerReceipt`、`Stop-OwnedPortListeners` | PR #166 只擋了「非登記資料夾的一般啟動」；明確加 `-Worktree`／`-Pull`／`-UpdateOnly` 走開發流程時，仍會把 18432 上的所有 LISTEN 程序（含本機受管 ST）一律 `Stop-Process`，違反共用規則 0015 第 4 條。現在開發伺服器啟動並通過健康檢查後，在 `logs\dev_server.receipt.json` 登記 PID、啟動時間（UTC ticks）、資料夾與埠；下次啟動只結束「收據核對得上」的那一個程序。埠上有任何其他程序、收據來自別的資料夾、或啟動時間對不上（PID 被重用）時，以 `ST-PORT-GUARD` 結束，不終止任何程序。`Stop-Process` 只剩這一處，且在拒絕判斷之後。 | `tests/test_launcher_safety.py`：靜態檢查（沒有 `Stop-PortListeners`／`taskkill`，`Stop-Process` 只在 `Stop-OwnedPortListeners` 內）；6 項行為測試（真的在 PowerShell 執行該函式，埠上的程序用真的睡眠程序代表；覆蓋：未知占用者拒絕、收據登記的程序被結束、他處收據、啟動時間不符、受登記者旁另有占用者、沒有占用者）；Windows 上另有 1 項用真實埠與 `Get-NetTCPConnection` 的往返測試。新測試在舊 `go.ps1` 上失敗（1 失敗、7 錯誤，已驗證）。 |
+| 行為差異（使用者會看到） | 升級後第一次用開發流程啟動時，若 18432 上已有舊版啟動的開發伺服器（沒有收據），會被拒絕並印出占用者的 PID 與命令列；請確認它不是本機受管 ST 後自行結束。拒絕訊息與 `ST-LAUNCHER-GUARD` 的提示文字同步更新。 | 文件與訊息變更。 |
+| `AGENTS.md` | 記入開發分工（Stock Terminal 只交給 Claude 與 Codex；Antigravity 專注於網頁 NVM Knowledge Hub）、Claude Code 與 Codex 之後在本機主機 NucBox 執行、雲端專案與環境將退役（遷移完成前雲端做法仍適用），以及 `-Worktree` 的新行為。 | 事實來自 Sam 2026-10-07 的指示，不是從機器輸出驗證的狀態；遷移尚未完成。 |
+
+驗證：本機以 PowerShell 7.4.6（Linux）跑完 `tests/test_launcher_safety.py` 全部 15 項（2 項 Windows 專用被略過）；`go.ps1` 以語法解析確認 0 個錯誤。**Windows PowerShell 5.1 與 Windows 的真實埠測試沒有在本機跑**，由 CI 的 Windows 工作驗證；`go.ps1` 完整啟動流程（建置、`Start-Process` 啟動、健康檢查後寫收據）沒有端到端執行過，也沒有在使用者機器驗證。審查：僅作者自審，沒有隔離審查。使用者可見資訊：沒有減少。本 PR 只動啟動腳本、測試與文件，沒有改 `server/` 的執行碼。
+
+---
+
 ## v5.0 修訂 — 2026-10-07 備援路徑可觀測性與靜默例外棘輪（候選，未發布）
 
 產品版本仍為根目錄 `VERSION` 的 **5.0**。補記：PR #166 已於 2026-10-07 合併，合併（squash）修訂 `fd6efb77e08e7aae718d0ed085cbd013e66779a5`；先前「候選（尚未合併）」是當時快照，不覆寫。**發布狀態**：#164、#165、#166 與本段都未發布，正式站與受管理本機的 runtimeCommit 仍為 `e0b11475f40a980289553d18029b916be3d1e457`（2026-10-07 確認）。

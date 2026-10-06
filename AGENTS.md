@@ -10,6 +10,8 @@
 
 與共用規則或使用者的最新指示衝突時，以後者為準。本檔內容只含從使用者機器輸出與倉庫文件驗證過的事實。
 
+**開發分工與執行位置（Sam 2026-10-07 決定）**：Stock Terminal 的開發只交給 Claude 與 Codex；Antigravity 專注於另一個專案（網頁 NVM Knowledge Hub），不承接 Stock Terminal 的開發任務。Claude Code 與 Codex 之後都在本機固定主機 NucBox 上執行（不使用本地模型），目前的雲端專案與環境將退役，GitHub 倉庫保留。**遷移完成前，本檔其餘關於雲端工作階段的做法仍然適用**；遷移完成時同一輪更新本檔、`CLAUDE.md` 與共用記憶的 handoff（規則 0015 第 5 條）。上面「共同對齊來源」的原則不變。
+
 **雲端工作階段怎麼讀共用規則**（Sam 2026-10-07 告知）：共用記憶有 GitHub 遠端，私有 repo `SamHuang68/shared-ai-memory`。雲端用 `add_repo` **唯讀**掛上（不需要 push 權限），只讀與任務相關的檔案（先讀 `_rules/0005`、`sessions/handoff-current.md`；不讀使用者輪廓等個人內容）。**遠端可能落後 Sam 的本機**（陷阱 0021；截至 2026-10-07，遠端 master 提示端 `1445557c…` 是 2026-10-03，缺少本機已有的規則 0007「程式進版、版本控管與修訂歷史」段落）：讀取時先看最新提交日期並向 Sam 說明；與 Sam 貼回的本機內容不一致時，以貼回的為準並回報差異（規則 0016）。`AI-Workspace` 的其他檔案（`workspace.json`、`docs\…`）雲端仍讀不到，需要時請 Sam 貼上。
 
 **8D 與新規則**：8D 是 Codex、Claude、Antigravity 共通的標準（規則 0004）：出問題先找 root cause，必要時新增規則防止再發。Sam 2026-10-07：「以後 8D 都同意新增 rule 不需要授權」。範圍：8D 結論所需的**新規則**；不含修改既有規則的文字，也不含 Git commit／push（規則 0007）。寫入共用記憶由本機寫入者依規則 0012 執行，雲端只有唯讀。
@@ -29,7 +31,7 @@
 ## 2. 本專案的操作規則
 
 1. **先唯讀檢查，再給任何更新、啟動或部署指令**（第 4 節）。
-2. **不要在未登記的資料夾執行 `START_TIP.cmd` 或 `scripts\go.ps1`。** 在非登記資料夾它走開發流程，會關掉 18432 埠上的程序（含本機受管 ST）。`go.ps1` 現會在這種情況下拒絕執行；要刻意在別處開發必須明確加 `-Worktree`。
+2. **不要在未登記的資料夾執行 `START_TIP.cmd` 或 `scripts\go.ps1`。** 在非登記資料夾它走開發流程，會與 18432 埠上的本機受管 ST 衝突。`go.ps1` 現會在這種情況下拒絕執行；要刻意在別處開發必須明確加 `-Worktree`。`-Worktree` 與其他明確的開發參數（`-Pull`、`-UpdateOnly`、`-RebuildOnly`）走開發流程時，**只會結束「這個資料夾自己啟動、且 `logs\dev_server.receipt.json` 收據核對得上（PID、啟動時間、資料夾、埠）」的開發伺服器**；18432 被任何其他程序占用（含本機受管 ST）時以 `ST-PORT-GUARD` 拒絕，不終止任何程序，由人處置。舊版啟動的開發伺服器沒有收據，第一次也會被拒絕，請確認後自行結束它。
 3. **不要依埠 taskkill 18432。** 受管程序的命令列是 `python -B -u "%LOCALAPPDATA%\StockTerminalLocal\current\server\server.py"`，且須與 `local_process.json` 登記相符；`start_local.ps1` 遇到 18432 上的其他程序會拒絕啟動、不會終止它。開發程序是 `python -u server\server.py`，兩者不要同時跑。
 4. **發布不由雲端代理人執行。** 發布走 stage → promote，工具與證據格式見第 1 節；授權分層與發布前提（CI、完整 SQLite 備份、停止服務）以共用規則 `0007` 與 `procedures/ai-stock-private-web-release.md` 為準，發布器本身不備份、不停服務。雲端代理人只提供精確 SHA、CI 結果與驗收標準，交給本機發布者。
 5. **更新開發工作樹：** `stock_terminal_v2.html` 是啟動時重建的產物，更新前 `git stash push -- stock_terminal_v2.html` 保留，不要丟棄；`data/` 的修改是執行期資料，不要還原；用 `git pull --ff-only origin main`。被未追蹤檔擋住時，把檔案搬到備份資料夾再 pull，不刪除；不用 `reset --hard`、`clean`、強制推送。

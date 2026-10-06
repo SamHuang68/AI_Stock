@@ -41,12 +41,12 @@ if ($env:LOCALAPPDATA -and -not ($Worktree -or $Pull -or $UpdateOnly -or $Rebuil
     exit $LASTEXITCODE
   }
   # 已有受管本機安裝，但目前資料夾不是登記的原工作樹：不能走下方開發流程，
-  # 否則 Stop-PortListeners 會關掉正在使用的本機 ST（18432）並改跑一份未受管的版本。
+  # 否則開發流程會與正在使用的本機 ST（18432）搶同一個埠，並改跑一份未受管的版本。
   if ($localConfig.originalCheckout) {
     throw ("ST-LAUNCHER-GUARD: 本機已有受管安裝，且此資料夾不是登記的原工作樹，已停止，未關閉任何程序。`n" +
       "  登記的原工作樹：$($localConfig.originalCheckout)`n" +
       "  目前資料夾　　：$Root`n" +
-      "  請到登記的資料夾執行 START_TIP.cmd；若確實要在此資料夾開發，請明確加 -Worktree（會關閉 18432 上的程序）。")
+      "  請到登記的資料夾執行 START_TIP.cmd；若確實要在此資料夾開發，請明確加 -Worktree（只會結束由該資料夾自己啟動的開發伺服器；18432 被其他程序占用時會拒絕）。")
   }
   }
 }
@@ -57,6 +57,7 @@ if (Test-Path $TipFile) {
   $TipBranch = (Get-Content $TipFile -Raw).Trim()
 }
 $Port = 18432
+$DevReceipt = Join-Path $Root 'logs\dev_server.receipt.json'
 $Url = "http://localhost:${Port}/#pulse"
 
 function Write-Banner {
@@ -219,9 +220,8 @@ function Assert-TipBranch {
   }
 }
 
-function Stop-PortListeners([int]$PortNum) {
-  # Only free OUR port — never taskkill every python.exe on the machine.
-  Write-Host "[stop] free port $PortNum (listeners only)"
+# 依埠找出正在 LISTEN 的程序 PID。只回報，不終止任何程序。
+function Get-PortListenerPids([int]$PortNum) {
   $pids = New-Object System.Collections.Generic.HashSet[int]
 
   try {
@@ -236,14 +236,65 @@ function Stop-PortListeners([int]$PortNum) {
     if ($procId -match '^\d+$') { [void]$pids.Add([int]$procId) }
   }
 
-  foreach ($procId in $pids) {
-    if ($procId -le 4) { continue }
-    $path = $null
-    try { $path = (Get-Process -Id $procId -ErrorAction SilentlyContinue).Path } catch {}
-    Write-Host "       kill PID $procId  path=$path"
-    Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+  return @($pids | Where-Object { $_ -gt 4 })
+}
+
+# 程序身分：啟動時間（UTC ticks）。PID 會被作業系統重複使用，所以收據要連啟動時間一起核對。
+function Get-ProcessStartTicks([int]$ProcId) {
+  try { return [int64](Get-Process -Id $ProcId -ErrorAction Stop).StartTime.ToUniversalTime().Ticks } catch { return $null }
+}
+
+function Get-ProcessCommandLine([int]$ProcId) {
+  try { return [string](Get-CimInstance Win32_Process -Filter "ProcessId=$ProcId" -ErrorAction Stop).CommandLine } catch { return '(讀不到命令列)' }
+}
+
+# 開發伺服器啟動後登記它的身分（PID、啟動時間、資料夾）。之後只有收據登記的程序可以被這個腳本終止。
+function Write-DevServerReceipt([int]$PortNum, [string]$ReceiptPath, [string]$OwnerRoot) {
+  $listeners = @(Get-PortListenerPids $PortNum)
+  $ticks = $null
+  if ($listeners.Count -eq 1) { $ticks = Get-ProcessStartTicks $listeners[0] }
+  if ($null -eq $ticks) {
+    Write-Host "[warn] 無法確認 :$PortNum 上唯一的開發伺服器程序，未寫入收據；下次啟動若該埠仍被占用會拒絕，不會自動終止。"
+    return
+  }
+  $dir = Split-Path -Parent $ReceiptPath
+  if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+  $receipt = [ordered]@{ pid = [int]$listeners[0]; startTicksUtc = [int64]$ticks; root = $OwnerRoot; port = $PortNum }
+  ($receipt | ConvertTo-Json) | Set-Content -LiteralPath $ReceiptPath -Encoding UTF8
+  Write-Host "[receipt] 已登記開發伺服器 PID $($listeners[0])：$ReceiptPath"
+}
+
+# 只結束「這個資料夾自己啟動、且收據核對得上（PID、啟動時間、資料夾、埠）」的開發伺服器。
+# 埠上有任何其他程序（含本機受管 ST 18432）就拒絕，不終止任何程序，由人處置。
+function Stop-OwnedPortListeners([int]$PortNum, [string]$ReceiptPath, [string]$OwnerRoot) {
+  $listeners = @(Get-PortListenerPids $PortNum)
+  if ($listeners.Count -eq 0) { return }
+
+  $owned = 0
+  if (Test-Path -LiteralPath $ReceiptPath) {
+    try {
+      $r = Get-Content -LiteralPath $ReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
+      $sameRoot = [string]::Equals(
+        [IO.Path]::GetFullPath([string]$r.root).TrimEnd('\', '/'),
+        [IO.Path]::GetFullPath($OwnerRoot).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)
+      $nowTicks = Get-ProcessStartTicks ([int]$r.pid)
+      if ($sameRoot -and ([int]$r.port -eq $PortNum) -and ($null -ne $nowTicks) -and ($nowTicks -eq [int64]$r.startTicksUtc)) {
+        $owned = [int]$r.pid
+      }
+    } catch {}
   }
 
+  $foreign = @($listeners | Where-Object { $_ -ne $owned })
+  if ($foreign.Count -gt 0) {
+    $detail = ($foreign | ForEach-Object { "  占用者：PID $_  命令列：$(Get-ProcessCommandLine $_)" }) -join "`n"
+    throw ("ST-PORT-GUARD: 埠 $PortNum 被不是由此資料夾的開發流程啟動的程序占用，已停止，未終止任何程序。`n" +
+      $detail + "`n" +
+      "  若占用者是本機受管 ST（命令列含 StockTerminalLocal\current），請不要終止它；開發請改在別的埠或別的工作樹。`n" +
+      "  確認該程序不需要後，請自行手動結束它再重試。")
+  }
+
+  Write-Host "[stop] 結束此資料夾自己啟動的開發伺服器 PID $owned（埠 $PortNum）"
+  Stop-Process -Id $owned -Force -ErrorAction Stop
   Start-Sleep -Seconds 1
 }
 
@@ -432,7 +483,7 @@ if ($RebuildOnly) {
   exit 0
 }
 
-Stop-PortListeners -PortNum $Port
+Stop-OwnedPortListeners -PortNum $Port -ReceiptPath $DevReceipt -OwnerRoot $Root
 
 # Live console (NOT RedirectStandardOutput) — absolute PYTHON from pin.
 $logDir = Join-Path $Root 'logs'
@@ -475,6 +526,7 @@ Write-Host "       window title MUST be: Stock Terminal Server v5 tip"
 Write-Host "       launcher script: $launcher"
 
 Wait-TipServer
+Write-DevServerReceipt -PortNum $Port -ReceiptPath $DevReceipt -OwnerRoot $Root
 Assert-IndexIsTip
 Assert-ListenerMatchesPin
 
