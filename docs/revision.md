@@ -47,11 +47,12 @@
 | 改動 | 原因與修正後行為 | 驗證／狀態 |
 | --- | --- | --- |
 | `go.ps1` 啟動防呆 | 已登記受管本機安裝時，`go.ps1` 只在目前資料夾等於登記的 `originalCheckout` 才轉交；從其他資料夾一般啟動會落入開發流程，`Stop-PortListeners` 關掉 18432 埠上的程序，再啟動一份未受管版本。2026-10-07 發生一次：雲端代理人沿用 2026-10-03 已退役的 `C:\Users\Sam\AI_Stock` 路徑，指示使用者在該資料夾執行 `START_TIP.cmd`。現在這種情況在關閉任何程序之前以 `ST-LAUNCHER-GUARD` 停止並說明；明確的 `-Worktree`／`-Pull`／`-UpdateOnly`／`-RebuildOnly`、登記資料夾的轉接、沒有受管安裝的行為不變。 | 靜態順序／BOM 測試，加 2 個在暫存目錄實際執行 `go.ps1` 的行為測試（PowerShell 7.4），在舊 `go.ps1` 上失敗；全套 1436 項通過。**尚未在使用者機器驗證**。行為測試原先優先選 `pwsh`，Windows CI 因此只用 PowerShell 7 跑過；`START_TIP.cmd` 實際呼叫的是 Windows PowerShell 5.1，所以已改為每個找得到的引擎（5.1 與 `pwsh`）都跑，5.1 的結果以該 PR 最新 head 的 Windows CI 為準。 |
+| 停用 `scripts/apply.bat` | 舊腳本會強制 `git checkout -B` 遠端分支、`stash -u` 所有未追蹤檔並依埠 `taskkill` 18432，與受管本機安裝及「不 reset、不 force」的共用規則衝突；其預設分支檢查也拒絕 `main`（`TIP_BRANCH` 自 2026-09-07 起為 `main`），倉庫內沒有任何地方引用它。改為只印出停用說明並以 2 結束的存根（舊邏輯保留在 Git 歷史，未刪檔）。 | 靜態測試：存根不含 `taskkill`、`git checkout`、`git stash`、`git reset`、`netstat`、`server.py`、`build_v2`，且為 ASCII；未在使用者機器執行。 |
 | 協作入口文件 | 新增 `AGENTS.md`、`CLAUDE.md`，更新 `.cursorrules` 的過時路徑，記錄正式開發資料夾、受管本機、正式站與退役舊路徑，並指向 `AI-Workspace` 的共用規則（本機檔案，不在 Git 內，不複製其內容）。 | 文件變更，無程式行為；內容只含從使用者機器輸出與倉庫文件驗證過的事實。 |
 
 審查：僅作者自審，沒有跨供應商或同供應商隔離審查。
 
-事故處置紀錄：未受管開發程序於 2026-10-07 03:33:05 啟動並佔用 18432；使用者之後改由 `%LOCALAPPDATA%\StockTerminalLocal\start_local.ps1` 啟動受管安裝，其 runtimeCommit 為 `e0b11475…`，與正式站一致；正式站（18434／18435）未受影響。是否有受管程序因此被關閉，沒有證據可以確認。
+事故處置紀錄：未受管開發程序於 2026-10-07 03:33:05 啟動並佔用 18432；使用者之後改由 `%LOCALAPPDATA%\StockTerminalLocal\start_local.ps1` 啟動受管安裝，其 runtimeCommit 為 `e0b11475…`，與正式站一致；正式站（18434／18435）未受影響。使用者事後提供的證據：受管啟動收據 `createdAt` 為 2026-10-06T19:48:00Z（台北 10-07 03:48:00，即改由受管啟動器重新啟動的那次），前一份受管程序的 log 最後寫入 2026-10-05 18:41（台北），距事發約 33 小時；因此事發當時 18432 上很可能沒有受管程序在運行，很可能沒有關閉任何受管程序。這是推論，不是證明（前一份收據已被覆寫）。
 
 ---
 

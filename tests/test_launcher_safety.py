@@ -56,6 +56,17 @@ class LauncherSafetyTests(unittest.TestCase):
         self.assertLess(gate, guard)
         self.assertLess(guard, script.index('$TipBranch ='))
 
+    def test_retired_apply_bat_has_no_destructive_actions(self):
+        raw = (ROOT / 'scripts' / 'apply.bat').read_bytes()
+        lines = raw.decode('ascii').lower().splitlines()        # .bat 訊息一律 ASCII（.cursorrules）
+        # 註解（REM）可以說明舊腳本做過什麼；只檢查會執行或印出的行。
+        text = '\n'.join(line for line in lines if not line.lstrip().startswith('rem '))
+        for forbidden in ('taskkill', 'stop-process', 'git checkout', 'git stash', 'git reset', 'git clean',
+                          'netstat', 'server.py', 'build_v2'):
+            self.assertNotIn(forbidden, text)
+        self.assertIn('exit /b 2', text)
+        self.assertIn('[retired]', text)
+
     def test_etf_scheduler_uses_pinned_python_shared_history_and_health_gate(self):
         wrapper = (ROOT / 'scripts' / 'daily_etf.bat').read_bytes()
         wrapper_text = wrapper.decode('ascii').lower()
