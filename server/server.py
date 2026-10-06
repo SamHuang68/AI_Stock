@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Stock Terminal local server — ThreadingHTTPServer + worker pool + LRU cache."""
-import os, json, urllib.request, urllib.error, socketserver, glob, time, subprocess, sys, csv, io, uuid
+import os, json, math, urllib.request, urllib.error, socketserver, glob, time, subprocess, sys, csv, io, uuid
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import OrderedDict
