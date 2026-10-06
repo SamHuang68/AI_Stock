@@ -77,15 +77,22 @@ class LauncherSafetyTests(unittest.TestCase):
         self.assertIn('New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At 7pm', installer)
 
 
-def _powershell():
-    return shutil.which('pwsh') or shutil.which('powershell')
+def _powershell_engines():
+    """所有找得到的 PowerShell。START_TIP.cmd 實際呼叫的是 Windows PowerShell 5.1（powershell.exe），
+    所以 Windows 上兩種都要跑；只挑 pwsh 會讓 5.1 的行為沒被驗證。"""
+    found = {}
+    for name in ('powershell', 'pwsh'):
+        path = shutil.which(name)
+        if path:
+            found[name] = path
+    return found
 
 
-@unittest.skipIf(_powershell() is None, '找不到 PowerShell（CI 的 Windows／Ubuntu 都有）')
+@unittest.skipIf(not _powershell_engines(), '找不到 PowerShell（CI 的 Windows／Ubuntu 都有）')
 class ManagedInstallGuardBehaviorTests(unittest.TestCase):
     """真的執行 go.ps1：防呆在任何會關閉程序的動作之前就結束，所以在暫存目錄裡跑是安全的。"""
 
-    def run_go(self, original_checkout):
+    def run_go(self, engine, original_checkout):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / 'repo'
             (repo / 'scripts').mkdir(parents=True)
@@ -97,7 +104,7 @@ class ManagedInstallGuardBehaviorTests(unittest.TestCase):
             (local / 'StockTerminalLocal' / 'local_install.json').write_text(
                 json.dumps({'originalCheckout': checkout}), encoding='utf-8')
             env = dict(os.environ, LOCALAPPDATA=str(local))
-            args = [_powershell(), '-NoProfile']
+            args = [engine, '-NoProfile']
             if os.name == 'nt':
                 args += ['-ExecutionPolicy', 'Bypass']
             args += ['-File', str(repo / 'scripts' / 'go.ps1')]
@@ -105,17 +112,21 @@ class ManagedInstallGuardBehaviorTests(unittest.TestCase):
             return done.returncode, (done.stdout + done.stderr).decode('utf-8', 'replace')
 
     def test_unregistered_checkout_is_refused_before_anything_is_stopped(self):
-        code, output = self.run_go(str(Path(tempfile.gettempdir()) / 'some-other-checkout'))
-        self.assertNotEqual(code, 0)
-        self.assertIn('ST-LAUNCHER-GUARD', output)
-        self.assertNotIn('[stop]', output)
+        for name, engine in _powershell_engines().items():
+            with self.subTest(engine=name):
+                code, output = self.run_go(engine, str(Path(tempfile.gettempdir()) / 'some-other-checkout'))
+                self.assertNotEqual(code, 0)
+                self.assertIn('ST-LAUNCHER-GUARD', output)
+                self.assertNotIn('[stop]', output)
 
     def test_registered_checkout_is_not_intercepted_by_the_guard(self):
         # 已登記的資料夾要走原本的轉接流程（這裡沒有 start_local.ps1，所以以既有錯誤結束），不能被防呆擋下。
-        code, output = self.run_go('self')
-        self.assertNotEqual(code, 0)
-        self.assertNotIn('ST-LAUNCHER-GUARD', output)
-        self.assertNotIn('[stop]', output)
+        for name, engine in _powershell_engines().items():
+            with self.subTest(engine=name):
+                code, output = self.run_go(engine, 'self')
+                self.assertNotEqual(code, 0)
+                self.assertNotIn('ST-LAUNCHER-GUARD', output)
+                self.assertNotIn('[stop]', output)
 
 
 if __name__ == '__main__':
