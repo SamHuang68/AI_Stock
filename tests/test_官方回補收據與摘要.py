@@ -135,6 +135,22 @@ class SeedQualityTests(unittest.TestCase):
         self.assertEqual(result['quality']['missingDates'], ['2026-10-02'])
         self.assertFalse(result['qualityComplete'])
 
+    def test_summary_reports_actual_accepted_and_excluded_incomplete_rows(self):
+        with patch.object(datastore, 'completed_daily_cutoff', return_value=date(2026, 10, 1)):
+            result = self.run_seed(self.source())
+        self.assertEqual(result['rows'], 12)
+        self.assertEqual(result['excludedIncomplete'], 1)
+        self.assertEqual(result['quality']['observed'], 13)
+        self.assertEqual(result['quality']['missingDates'], ['2026-10-02'])
+        self.assertFalse(result['qualityComplete'])
+
+    def test_reused_month_count_uses_accepted_quality_and_reveals_no_new_exclusions(self):
+        result = self.run_seed(self.source())
+        again = self.run_seed(lambda url: self.fail('完整收據不應重抓'))
+        self.assertEqual(result['rows'], 13)
+        self.assertEqual(again['rows'], 13)
+        self.assertEqual(again['excludedIncomplete'], 0)
+
 
 if __name__ == '__main__':
     unittest.main()

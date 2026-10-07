@@ -33,6 +33,8 @@ else:
 
 DB_PATH = os.path.join(_BASE, 'data', 'pulse_history.db')
 _lock = threading.Lock()
+_sync_lock = threading.Lock()
+_initialized = {}
 _sync_state = {
     'running': False,
     'lastStart': None,
@@ -147,10 +149,23 @@ def _conn():
 
 
 def init_db():
+    path = os.path.abspath(DB_PATH)
+    try:
+        identity = (os.stat(path).st_dev, os.stat(path).st_ino)
+    except FileNotFoundError:
+        identity = None
+    if identity is not None and _initialized.get(path) == identity:
+        return
     with _lock:
-        with closing(_conn()) as conn:
-            with conn:
-                conn.executescript(SCHEMA)
+        with closing(_conn()) as conn, conn:
+            conn.executescript(SCHEMA)
+        stat = os.stat(path)
+        _initialized[path] = (stat.st_dev, stat.st_ino)
+
+
+def _read_conn():
+    from pathlib import Path
+    return sqlite3.connect(Path(DB_PATH).resolve().as_uri() + '?mode=ro', uri=True, timeout=3)
 
 
 def _set_meta(conn, dataset: str, data_date: Optional[str], status: str, note: str = '', rows: int = 0):
@@ -336,121 +351,76 @@ def fetch_inst_day(yyyymmdd: str) -> Optional[dict]:
 # ── merge sync ───────────────────────────────────────────────
 
 def sync(days: int = 40, force_full: bool = False) -> Dict[str, Any]:
-    """增量同步：只補 DB 缺口／最近日。回摘要。"""
+    """來源取得不持資料庫鎖；每批資料以短交易合併，查詢仍可讀已提交版本。"""
     init_db()
-    if _sync_state['running']:
+    if not _sync_lock.acquire(blocking=False):
         return {'ok': False, 'error': 'sync already running', 'state': status()}
-    _sync_state['running'] = True
-    _sync_state['lastStart'] = time.strftime('%Y-%m-%dT%H:%M:%S')
-    _sync_state['lastError'] = None
-    result = {
-        'ok': True, 'breadth': 0, 'inst': 0, 'index': 0, 'skipped': 0,
-        'datasets': [], 'mode': 'full' if force_full else 'merge',
-    }
+    _sync_state.update(running=True, lastStart=time.strftime('%Y-%m-%dT%H:%M:%S'), lastError=None)
+    result = {'ok': True, 'breadth': 0, 'inst': 0, 'index': 0, 'skipped': 0,
+              'datasets': [], 'mode': 'full' if force_full else 'merge'}
     try:
         today = _taipei_today()
-        with _lock:
-            with closing(_conn()) as conn:
-                # ── indices：Yahoo 一次抓 3mo，upsert 全部（天然 merge）──
-                idx_n = 0
-                for sym in ('^TWII', '^TWOII'):
-                    conn.execute('SAVEPOINT index_sync')
-                    try:
-                        rows, source = fetch_index_series(sym, '3mo')
-                        if sym == '^TWOII' and rows:
-                            _archive_legacy_twoii(conn)
-                        idx_n += _upsert_index_rows(conn, sym, rows, source, int(time.time()))
-                        last_d = rows[-1][0] if rows else None
-                        _set_meta(conn, f'index:{sym}', last_d, '同步完成' if rows else '同步失敗',
-                                  source if rows else 'official source unavailable', len(rows))
-                        conn.execute('RELEASE index_sync')
-                    except Exception as e:
-                        conn.execute('ROLLBACK TO index_sync')
-                        conn.execute('RELEASE index_sync')
-                        _set_meta(conn, f'index:{sym}', None, '同步失敗', str(e)[:160], 0)
-                result['index'] = idx_n
-                conn.commit()
-
-                # ── breadth / inst：自 max_date+1 走到今天（跳週末）──
-                max_b = None if force_full else _max_date(conn, 'breadth_daily')
-                max_i = None if force_full else _max_date(conn, 'inst_daily')
-                start_b = today - timedelta(days=days)
-                if max_b:
-                    try:
-                        start_b = max(start_b, datetime.strptime(max_b, '%Y-%m-%d').date() + timedelta(days=1))
-                    except Exception:
-                        pass
-                start_i = today - timedelta(days=days)
-                if max_i:
-                    try:
-                        start_i = max(start_i, datetime.strptime(max_i, '%Y-%m-%d').date() + timedelta(days=1))
-                    except Exception:
-                        pass
-
-                b_n = i_n = 0
-                # 若已是最新交易日則 skipped
-                cur = min(start_b, start_i)
-                if cur > today:
-                    result['skipped'] = 1
-                dcur = start_b
-                while dcur <= today:
-                    if dcur.weekday() < 5:
-                        ymd = dcur.strftime('%Y%m%d')
-                        row = fetch_breadth_day(ymd)
-                        if row:
-                            conn.execute(
-                                'INSERT OR REPLACE INTO breadth_daily(d,up,down,flat,limit_up,limit_down,adv_ratio,net,source,updated_at) '
-                                'VALUES(?,?,?,?,?,?,?,?,?,?)',
-                                (row['d'], row['up'], row['down'], row['flat'], row['limit_up'], row['limit_down'],
-                                 row['adv_ratio'], row['net'], row['source'], int(time.time())))
-                            b_n += 1
-                        time.sleep(0.25)
-                    dcur += timedelta(days=1)
-                _set_meta(conn, 'breadth', _max_date(conn, 'breadth_daily'),
-                          '同步完成' if b_n or max_b else '部分資料可用',
-                          f'merged {b_n} days', b_n)
-
-                dcur = start_i
-                while dcur <= today:
-                    if dcur.weekday() < 5:
-                        ymd = dcur.strftime('%Y%m%d')
-                        row = fetch_inst_day(ymd)
-                        if row:
-                            conn.execute(
-                                'INSERT OR REPLACE INTO inst_daily(d,foreign_net,trust_net,dealer_net,total_net,source,updated_at) '
-                                'VALUES(?,?,?,?,?,?,?)',
-                                (row['d'], row['foreign_net'], row['trust_net'], row['dealer_net'],
-                                 row['total_net'], row['source'], int(time.time())))
-                            i_n += 1
-                        time.sleep(0.25)
-                    dcur += timedelta(days=1)
-                inst_status, inst_note = _institutional_meta(
-                    _max_date(conn, 'inst_daily'), _max_date(conn, 'breadth_daily'), i_n)
-                _set_meta(conn, 'institutional', _max_date(conn, 'inst_daily'),
-                          inst_status, inst_note, i_n)
-
-                result['breadth'] = b_n
-                result['inst'] = i_n
-                conn.commit()
-
-                # datasets snapshot
-                for r in conn.execute('SELECT dataset,data_date,last_success,status,note,rows FROM sync_meta ORDER BY dataset'):
-                    result['datasets'].append({
-                        'dataset': r[0], 'dataDate': r[1], 'lastSuccess': r[2],
-                        'status': r[3], 'note': r[4], 'rows': r[5],
-                    })
-
-        _sync_state['lastOk'] = time.strftime('%Y-%m-%dT%H:%M:%S')
-        _sync_state['lastResult'] = result
+        for sym in ('^TWII', '^TWOII'):
+            try:
+                rows, source = fetch_index_series(sym, '3mo')
+                with _lock, closing(_conn()) as conn, conn:
+                    if sym == '^TWOII' and rows:
+                        _archive_legacy_twoii(conn)
+                    result['index'] += _upsert_index_rows(conn, sym, rows, source, int(time.time()))
+                    _set_meta(conn, f'index:{sym}', rows[-1][0] if rows else None,
+                              '同步完成' if rows else '同步失敗', source if rows else 'official source unavailable', len(rows))
+            except Exception as exc:
+                with _lock, closing(_conn()) as conn, conn:
+                    _set_meta(conn, f'index:{sym}', None, '同步失敗', str(exc)[:160], 0)
+        with closing(_read_conn()) as conn:
+            max_b = None if force_full else _max_date(conn, 'breadth_daily')
+            max_i = None if force_full else _max_date(conn, 'inst_daily')
+        starts = []
+        for latest in (max_b, max_i):
+            start = today - timedelta(days=days)
+            if latest:
+                try:
+                    start = max(start, date.fromisoformat(latest) + timedelta(days=1))
+                except ValueError:
+                    pass
+            starts.append(start)
+        if min(starts) > today:
+            result['skipped'] = 1
+        for kind, start, fetch in (('breadth', starts[0], fetch_breadth_day), ('inst', starts[1], fetch_inst_day)):
+            cursor = start
+            while cursor <= today:
+                if cursor.weekday() < 5:
+                    row = fetch(cursor.strftime('%Y%m%d'))
+                    if row:
+                        with _lock, closing(_conn()) as conn, conn:
+                            if kind == 'breadth':
+                                conn.execute('INSERT OR REPLACE INTO breadth_daily VALUES(?,?,?,?,?,?,?,?,?,?)',
+                                             (row['d'], row['up'], row['down'], row['flat'], row['limit_up'], row['limit_down'],
+                                              row['adv_ratio'], row['net'], row['source'], int(time.time())))
+                            else:
+                                conn.execute('INSERT OR REPLACE INTO inst_daily VALUES(?,?,?,?,?,?,?)',
+                                             (row['d'], row['foreign_net'], row['trust_net'], row['dealer_net'],
+                                              row['total_net'], row['source'], int(time.time())))
+                        result[kind] += 1
+                    time.sleep(0.25)
+                cursor += timedelta(days=1)
+        with _lock, closing(_conn()) as conn, conn:
+            _set_meta(conn, 'breadth', _max_date(conn, 'breadth_daily'),
+                      '同步完成' if result['breadth'] or max_b else '部分資料可用',
+                      f"merged {result['breadth']} days", result['breadth'])
+            inst_status, inst_note = _institutional_meta(_max_date(conn, 'inst_daily'), _max_date(conn, 'breadth_daily'), result['inst'])
+            _set_meta(conn, 'institutional', _max_date(conn, 'inst_daily'), inst_status, inst_note, result['inst'])
+            for row in conn.execute('SELECT dataset,data_date,last_success,status,note,rows FROM sync_meta ORDER BY dataset'):
+                result['datasets'].append(dict(zip(('dataset', 'dataDate', 'lastSuccess', 'status', 'note', 'rows'), row)))
+        _sync_state.update(lastOk=time.strftime('%Y-%m-%dT%H:%M:%S'), lastResult=result)
         return result
-    except Exception as e:
-        _sync_state['lastError'] = str(e)
-        result['ok'] = False
-        result['error'] = str(e)
+    except Exception as exc:
+        _sync_state['lastError'] = str(exc)
+        result.update(ok=False, error=str(exc))
         return result
     finally:
-        _sync_state['running'] = False
-        _sync_state['lastEnd'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+        _sync_state.update(running=False, lastEnd=time.strftime('%Y-%m-%dT%H:%M:%S'))
+        _sync_lock.release()
 
 
 def save_pulse_score(payload: dict) -> None:
@@ -477,7 +447,7 @@ def save_pulse_score(payload: dict) -> None:
 def history(kind: str = 'breadth', n: int = 40) -> Dict[str, Any]:
     init_db()
     n = max(1, min(int(n or 40), 120))
-    with closing(_conn()) as conn:
+    with closing(_read_conn()) as conn:
         if kind == 'breadth':
             rows = conn.execute(
                 'SELECT d,up,down,flat,limit_up,limit_down,adv_ratio,net FROM breadth_daily ORDER BY d DESC LIMIT ?',
@@ -532,7 +502,7 @@ def history(kind: str = 'breadth', n: int = 40) -> Dict[str, Any]:
 def status() -> Dict[str, Any]:
     init_db()
     datasets = []
-    with closing(_conn()) as conn:
+    with closing(_read_conn()) as conn:
         for r in conn.execute('SELECT dataset,data_date,last_success,status,note,rows FROM sync_meta ORDER BY dataset'):
             datasets.append({
                 'dataset': r[0], 'dataDate': r[1], 'lastSuccess': r[2],

@@ -211,15 +211,16 @@ class UpstreamTests(unittest.TestCase):
             'time': SimpleNamespace(monotonic=clock, strftime=lambda *_: '2026-09-13'), '_fundamental_trace': mock.Mock(),
         })
         read = namespace['_openapi_lookup']
-        with mock.patch('urllib.request.urlopen', side_effect=OSError('暫時無法連線')) as fetch:
+        with mock.patch('http_client.request', side_effect=OSError('暫時無法連線')) as fetch:
             self.assertIsNone(read(['t187ap06_L_fh'], '2885'))
             self.assertIsNone(read(['t187ap06_L_fh'], '2885'))
             self.assertEqual(fetch.call_count, 1)
         self.assertNotIn('t187ap06_L_fh', namespace['_openapi_ds'])
         clock.return_value = 311
-        reply = response(json.dumps([{'公司代號': '2885'}]).encode())
-        reply.__enter__.return_value.headers = {'Content-Type': 'application/json'}
-        with mock.patch('urllib.request.urlopen', return_value=reply):
+        from http_client import HttpResponse
+        reply = HttpResponse(200, {'Content-Type': 'application/json'}, json.dumps([{'公司代號': '2885'}]).encode(), 'https://offline.test/')
+        with mock.patch('http_client.request', return_value=reply), \
+                mock.patch('urllib.request.urlopen', side_effect=AssertionError('離線測試不得連外')):
             self.assertEqual(read(['t187ap06_L_fh'], '2885')['公司代號'], '2885')
 
 

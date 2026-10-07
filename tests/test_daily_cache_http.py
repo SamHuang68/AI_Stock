@@ -76,5 +76,35 @@ class DailyHttpTests(unittest.TestCase):
         self.assertFalse(gateway.route_permission('GET', '/daily-cache/status', 'reader', settings))
         self.assertTrue(gateway.route_permission('GET', '/kline-events', 'reader', settings))
 
+    def test_rejected_queue_returns_503(self):
+        body = {'symbols': [{'symbol': '2330', 'market': 'TW'}], 'range': '1y'}
+        req = urllib.request.Request(self.base + '/daily-cache/refresh', data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
+        with patch.object(jobs, 'submit', return_value={'ok': False, 'reason': 'queue_full', 'error': '佇列已滿'}):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(req, timeout=3)
+            self.assertEqual(caught.exception.code, 503)
+            caught.exception.close()
+
+    def test_datasource_invalid_symbols_are_bad_request(self):
+        req = urllib.request.Request(self.base + '/datasource/refresh',
+                data=json.dumps({'id': 'db', 'symbols': 'invalid'}).encode(),
+                headers={'Content-Type': 'application/json'})
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(req, timeout=3)
+        self.assertEqual(caught.exception.code, 400)
+        caught.exception.close()
+
+
+    def test_busy_job_returns_409_with_readable_message(self):
+        req = urllib.request.Request(self.base + '/daily-cache/refresh',
+                data=json.dumps({'symbols': [{'symbol': '2330', 'market': 'TW'}], 'range': '1y'}).encode(),
+                headers={'Content-Type': 'application/json'})
+        with patch.object(jobs, 'submit', return_value={'ok': False, 'reason': 'busy'}):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(req, timeout=3)
+            with caught.exception as error:
+                self.assertEqual(error.code, 409)
+                self.assertIn('更新進行中', json.load(error)['error'])
+
 
 if __name__ == '__main__': unittest.main()

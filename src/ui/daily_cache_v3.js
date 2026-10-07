@@ -19,7 +19,10 @@
   async function api(path, body) {
     const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
     const result = await r.json();
-    if (!r.ok) throw Error(result.error || '讀取失敗（HTTP ' + r.status + '）');
+    if (!r.ok) {
+      const error = Error(result.error || '讀取失敗（HTTP ' + r.status + '）');
+      error.status = r.status; throw error;
+    }
     return result;
   }
   async function poll() {
@@ -43,7 +46,10 @@
     if (!symbols.length || symbols.length > 5) { $('dc-status').textContent = '請選擇 1 至 5 個標的。'; return; }
     $('dc-start').disabled = true;
     try { await api('/daily-cache/refresh', { symbols, range: $('dc-range').value, kind: $('dc-source').value }); await poll(); }
-    catch (e) { $('dc-status').textContent = e.message; $('dc-start').disabled = false; }
+    catch (e) {
+      if (e.status === 409) { await poll(); return; }
+      $('dc-status').textContent = e.message; $('dc-start').disabled = false;
+    }
   }
   async function warm() {
     const rows = selected();

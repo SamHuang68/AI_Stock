@@ -1012,15 +1012,26 @@ _TW_SECTORS = {'date': None, 'map': {}}
 _TECH_SECTORS = {'半導體業', '電腦及週邊設備業', '光電業', '通信網路業',
                  '電子零組件業', '電子通路業', '其他電子業', '資訊服務業'}
 
-def _get_tw_sectors():
+def _get_tw_sectors(*, deadline=None):
     from datetime import date as _date
     today = _date.today().strftime('%Y%m%d')
     if _TW_SECTORS['date'] == today and _TW_SECTORS['map']:
         return _TW_SECTORS['map']
     m = dict(_TW_SECTORS['map'])
     complete = True
+    def incomplete(error):
+        # 失敗仍揭露來源狀態；已取得與先前快取的分類可供這次快照使用。
+        _TW_SECTORS['date'] = None
+        _TW_SECTORS['map'] = dict(m)
+        error.partial_sectors = dict(m)
+        raise error
     for ds in _REVENUE_DATASETS:
-        arr = _openapi_lookup_list(ds)
+        if deadline is not None and time.monotonic() >= deadline:
+            incomplete(TimeoutError('產業分類來源超過整體期限'))
+        try:
+            arr = _openapi_lookup_list(ds, deadline=deadline)
+        except TimeoutError as error:
+            incomplete(error)
         complete = complete and _openapi_meta.get(ds, {}).get('status') == 'ok'
         for row in arr:
             code = str(row.get('公司代號') or '').strip()
@@ -1030,6 +1041,8 @@ def _get_tw_sectors():
     if m:
         _TW_SECTORS['date'] = today if complete else None
         _TW_SECTORS['map'] = m
+    if deadline is not None and not complete:
+        incomplete(RuntimeError('產業分類來源未完成；保留既有快取供後續重試'))
     return m
 
 
@@ -1068,13 +1081,17 @@ def _openapi_lookup(dataset_names, clean_code):
     return None
 
 
-def _openapi_lookup_list(dataset_name):
+def _openapi_lookup_list(dataset_name, *, deadline=None):
     """成功整表快取一天；失敗保留舊快取、短暫退避，不能偽裝成當日空資料。"""
     from datetime import date as _date
     ds = _openapi_dataset(dataset_name)
     with _openapi_state_lock:
         lock = _openapi_locks.setdefault(ds, threading.Lock())
-    with lock:
+    if deadline is None:
+        lock.acquire()
+    elif not lock.acquire(timeout=max(0, deadline - time.monotonic())):
+        raise TimeoutError('官方資料快取鎖超過整體期限')
+    try:
         today = _date.today().strftime('%Y%m%d')
         key = '__list__' + ds
         cached = _openapi_ds.get(key)
@@ -1087,11 +1104,14 @@ def _openapi_lookup_list(dataset_name):
         trace = {'correlationId': uuid.uuid4().hex, 'dataset': ds, 'url': url, 'method': 'GET'}
         _fundamental_trace('openapi_fetch_start', **trace)
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                body = resp.read()
-                trace.update(httpStatus=resp.status, finalUrl=resp.url,
-                             contentType=resp.headers.get('Content-Type', ''), bytes=len(body))
+            import http_client as _hc
+            resp = _hc.request('GET', url,
+                               headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Accept-Encoding': 'gzip'},
+                               timeout=15, retries=1, deadline=deadline)
+            body = resp.body
+            trace.update(httpStatus=resp.status, finalUrl=resp.url,
+                         contentType=next((v for k, v in resp.headers.items() if k.lower() == 'content-type'), ''),
+                         bytes=len(body))
             if 'text/html' in trace['contentType'].lower() or body.lstrip().startswith(b'<'):
                 raise ValueError('官方端點回傳 HTML，未取得 JSON 資料')
             arr = json.loads(body)
@@ -1104,6 +1124,8 @@ def _openapi_lookup_list(dataset_name):
                                elapsedMs=round((time.monotonic() - started) * 1000))
             return arr
         except Exception as e:
+            if isinstance(e, _hc.HttpError):
+                trace.update(httpStatus=e.status, finalUrl=e.url)
             if isinstance(e, urllib.error.HTTPError):
                 trace.update(httpStatus=e.code, finalUrl=e.url,
                              contentType=e.headers.get('Content-Type', ''))
@@ -1113,6 +1135,8 @@ def _openapi_lookup_list(dataset_name):
                                elapsedMs=round((time.monotonic() - started) * 1000))
             print(f'[官方資料] {ds} 取得失敗：{e}；60 秒後可重試')
             return []
+    finally:
+        lock.release()
 
 
 def _revenue_deadline(today):
@@ -2006,21 +2030,21 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
                 'mkt': 'TW', 'ex': 'TPEx',
             })
 
+    source_deadline = time.monotonic() + 8.5
+
     def _get_json(url, timeout=8):
         # TPEx 約 5 MB 的批次檔曾在後端日誌累積數百次連線重設／IncompleteRead；沿用 http_client
         # 的暫態重試與 gzip。呼叫端 join 上限 9 秒，故只重試一次。
         import http_client as _hc
         return _hc.fetch_json(
             url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Accept-Encoding': 'gzip'},
-            timeout=timeout, retries=1)
+            timeout=timeout, retries=1, deadline=source_deadline)
 
     # TWSE + TPEx 並行（本函式可能在 thread pool 內執行，用獨立短線程避免巢狀死鎖）
-    twse_rows = None
-    tpex_rows = None
-    err_twse = err_tpex = None
+    source_results = {"TWSE": (None, None), "TPEx": (None, None)}
 
     def _twse():
-        nonlocal twse_rows, err_twse
+        twse_rows = None
         try:
             if target_date:
                 import sector_flow as _dated_sector_flow
@@ -2034,29 +2058,54 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
             else:
                 twse_rows = _get_json(
                     'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL', timeout=8)
+            source_results["TWSE"] = (twse_rows, None)
         except Exception as e:
-            err_twse = e
+            source_results["TWSE"] = (None, e)
 
     def _tpex():
-        nonlocal tpex_rows, err_tpex
+        tpex_rows = None
         try:
             tpex_rows = _get_json(
                 'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes', timeout=8)
+            source_results["TPEx"] = (tpex_rows, None)
         except Exception as e:
-            err_tpex = e
+            source_results["TPEx"] = (None, e)
 
     t1 = threading.Thread(target=_twse, daemon=True)
     t2 = threading.Thread(target=_tpex, daemon=True)
-    t1.start(); t2.start()
-    t1.join(9); t2.join(9)
+    sector_result = ({}, None)
+    def _sectors():
+        nonlocal sector_result
+        try:
+            sector_result = (_get_tw_sectors(deadline=source_deadline) or {}, None)
+        except Exception as error:
+            sector_result = (dict(getattr(error, 'partial_sectors', {})), error)
+    t3 = threading.Thread(target=_sectors, daemon=True)
+    t1.start(); t2.start(); t3.start()
+    t1.join(max(0, source_deadline - time.monotonic()))
+    t2.join(max(0, source_deadline - time.monotonic()))
+    t3.join(max(0, source_deadline - time.monotonic()))
+    smap, sector_error = ({}, TimeoutError('產業分類來源超過整體期限')) if t3.is_alive() else sector_result
+    # 主執行緒只使用完成後的快照；晚到 worker 不會改寫這些區域變數。
+    twse_rows, err_twse = (None, TimeoutError('TWSE 來源超過整體期限')) if t1.is_alive() else source_results['TWSE']
+    tpex_rows, err_tpex = (None, TimeoutError('TPEx 來源超過整體期限')) if t2.is_alive() else source_results['TPEx']
+    source_used = {'TWSE': False, 'TPEx': False}
     if twse_rows is not None:
+        before_rows, before_members, before_date = len(rows), len(member_rows), date_s
         try:
             ingest_twse(twse_rows)
+            if len(rows) == before_rows and len(member_rows) == before_members:
+                raise ValueError('TWSE 未取得可用資料')
+            source_used['TWSE'] = True
         except Exception as e:
+            del rows[before_rows:]; del member_rows[before_members:]
+            date_s = before_date
+            err_twse = e
             print('[movers] TWSE ingest', e)
     elif err_twse:
         print('[movers] TWSE', err_twse)
     if tpex_rows is not None:
+        before_rows, before_date = len(rows), tpex_date_s
         try:
             if target_date:
                 import sector_flow as _session_sector_flow
@@ -2064,18 +2113,24 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
                 _tpex_day = _session_sector_flow.normalize_session_date(
                     (tpex_rows[0] if tpex_rows else {}).get('Date'))
                 if _target_day and _tpex_day != _target_day:
-                    print('[movers] skip TPEx session mismatch', _tpex_day, _target_day)
-                else:
-                    ingest_tpex(tpex_rows)
-            else:
-                ingest_tpex(tpex_rows)
+                    raise ValueError('TPEx 資料日與目標交易日不一致')
+            ingest_tpex(tpex_rows)
+            if len(rows) == before_rows:
+                raise ValueError('TPEx 未取得可用資料')
+            source_used['TPEx'] = True
         except Exception as e:
+            del rows[before_rows:]
+            tpex_date_s = before_date
+            err_tpex = e
             print('[movers] TPEx ingest', e)
     elif err_tpex:
         print('[movers] TPEx', err_tpex)
+    source_errors = {name: str(error) for name, error in (('TWSE', err_twse), ('TPEx', err_tpex)) if error}
+    if sector_error:
+        source_errors['sectors'] = str(sector_error)
 
     if not rows and not (include_rows and member_rows):
-        return {'ok': False, 'date': date_s, 'gainers': [], 'losers': [], 'source': None, 'error': 'no rows'}
+        return {'ok': False, 'date': date_s, 'gainers': [], 'losers': [], 'source': None, 'error': 'no rows', 'sourceErrors': source_errors}
 
     rows.sort(key=lambda x: x['changePct'], reverse=True)
     n = max(1, min(int(n or 8), 30))
@@ -2096,11 +2151,6 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
     limit_down = [r for r in reversed(rows) if _near_twse_eq(r, 'down')][:40]
 
     # 產業別（OpenAPI 月營收「產業別」）— 供總覽近漲跌停標籤／與類股輪動聯動
-    try:
-        smap = _get_tw_sectors() or {}
-    except Exception as e:
-        print('[movers] sectors map', e)
-        smap = {}
 
     def _tag_industry(lst):
         for r in lst or []:
@@ -2167,7 +2217,9 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
         'limitDown': limit_down,
         'limitThreshold': NEAR_LIMIT,
         'limitNote': '近漲跌停近似：上市四碼證券（含存託憑證）|漲跌|≥9.9%，不含 ETF／櫃買；家數≠證交所官方括號',
-        'source': 'TWSE STOCK_DAY_ALL + TPEx daily',
+        'source': ' + '.join(name for name, used in (('TWSE STOCK_DAY_ALL', source_used['TWSE']), ('TPEx daily', source_used['TPEx'])) if used),
+        'sourceErrors': source_errors,
+        'partial': bool(source_errors),
         'count': len(rows),
         'industryTurnoverYi': industry_turnover_yi,
         'industryTurnoverTotalYi': industry_turnover_total_yi,
@@ -2175,14 +2227,14 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
         'classificationCount': len(classified_codes),
         'classificationTotal': len(classification_codes),
         'classificationCoveragePct': round(classification_coverage, 2),
-        'classificationComplete': bool(classification_codes) and classified_codes == classification_codes,
+        'classificationComplete': not sector_error and bool(classification_codes) and classified_codes == classification_codes,
         'industryTurnoverDate': date_s,
         'tpexDate': tpex_date_s,
         'industryTurnoverSource': (
             'TWSE MI_INDEX ALLBUT0999 dated TradeValue + issuer industry classification'
             if target_date else
             'TWSE STOCK_DAY_ALL TradeValue + issuer industry classification'),
-        **({'rows': member_rows, 'twseAvailable': twse_rows is not None} if include_rows else {}),
+        **({'rows': member_rows, 'twseAvailable': source_used['TWSE']} if include_rows else {}),
     }
 
 
@@ -2866,6 +2918,9 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 body = read_json_body(self, max_bytes=4096)
                 import daily_cache_jobs
                 result = daily_cache_jobs.cancel(body.get('jobId')) if p.endswith('/cancel') else daily_cache_jobs.submit(body)
+                if not result.get('ok'):
+                    self._err(result.get('error') or ('已有日線更新進行中，請等待完成或取消' if result.get('reason') == 'busy' else '日線更新未接受'), 503 if result.get('reason') == 'queue_full' else 409)
+                    return
                 self._ok(json.dumps(result, ensure_ascii=False).encode())
             except BodyReadError as exc:
                 self._err(str(exc), exc.status)
@@ -5387,9 +5442,12 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 dense=body.get('dense'),
                 step=step,
                 years=years,
+                symbols=body.get('symbols'),
             ), ensure_ascii=False).encode())
         except BodyReadError as e:
             self._err(str(e), e.status)
+        except ValueError as e:
+            self._err(str(e), 400)
         except Exception as e:
             self._err('datasource refresh failed: ' + str(e), 500)
 

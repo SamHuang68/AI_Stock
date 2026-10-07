@@ -402,8 +402,6 @@ READ_GET_EXACT = {
     "/ai/local/status",
     "/screener",
     "/focus",
-    "/alert/status",
-    "/watch/status",
     "/txf",
     "/stockfut",
     "/twindex",
@@ -431,6 +429,8 @@ READ_GET_PREFIXES = (
 
 # Personal state is visible only with the owner token.
 OWNER_GET_EXACT = {
+    "/alert/status",
+    "/watch/status",
     "/research/workflow",
     "/research/subject",
     "/research/validation",
@@ -773,11 +773,11 @@ def route_permission(method: str, path: str, role: str, settings: Settings) -> b
     if method in {"GET", "HEAD"}:
         if path in STATIC_EXACT or path.startswith(STATIC_PREFIXES):
             return True
+        if _path_matches(path, OWNER_GET_EXACT, OWNER_GET_PREFIXES):
+            return role == "owner"
         if _path_matches(path, READ_GET_EXACT, READ_GET_PREFIXES):
             return True
         if path in settings.extra_read_paths:
-            return True
-        if role == "owner" and _path_matches(path, OWNER_GET_EXACT, OWNER_GET_PREFIXES):
             return True
         return False
     if method == "POST" and role == "owner":

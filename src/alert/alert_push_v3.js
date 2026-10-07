@@ -15,6 +15,11 @@
     const opt = { method: method || 'GET' };
     if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); }
     const r = await fetch(SRV + path, opt);
+    if (!r.ok) {
+      const error = new Error('HTTP ' + r.status);
+      error.status = r.status;
+      throw error;
+    }
     return r.json();
   }
 
@@ -40,7 +45,7 @@
     document.head.appendChild(s);
   }
 
-  let cfg = null, rules = [];
+  let cfg = null, rules = [], readError = null, refreshId = 0;
 
   const COMP_INDS = [['close', '收盤'], ['sma20', 'SMA20'], ['sma60', 'SMA60'], ['rsi14', 'RSI'],
   ['bbL', '布林下軌'], ['bbU', '布林上軌'], ['volRatio', '量比'], ['high20', '20日高']];
@@ -73,14 +78,34 @@
   }
 
   async function refresh() {
-    try { cfg = await api('/alert/config'); } catch { cfg = null; }
-    try { rules = await api('/alert/rules'); } catch { rules = []; }
+    const id = ++refreshId;
+    cfg = null; rules = []; readError = null;
+    render();
+    try {
+      const nextCfg = await api('/alert/config');
+      if (id !== refreshId) return;
+      const nextRules = await api('/alert/rules');
+      if (id !== refreshId) return;
+      cfg = nextCfg; rules = nextRules;
+    } catch (error) {
+      if (id !== refreshId) return;
+      readError = error;
+    }
     render();
   }
 
   function render() {
     const box = document.getElementById('ap-body');
-    if (!box || !cfg) return;
+    if (!box) return;
+    if (!cfg) {
+      box.innerHTML = '<div id="ap-status" role="status"></div><button class="sec" id="ap-close2">關閉</button>';
+      box.querySelector('#ap-status').textContent = readError
+        ? (readError.status === 403 ? '僅擁有者可見'
+          : '讀取失敗，無法確認 daemon 狀態' + (readError.status ? '（HTTP ' + readError.status + '）' : ''))
+        : '載入中…';
+      box.querySelector('#ap-close2').onclick = close;
+      return;
+    }
     const tg = cfg.telegram || {}, em = cfg.email || {};
     box.innerHTML = `
     <section>
@@ -157,7 +182,18 @@
     box.querySelector('#ap-close2').onclick = close;
   }
 
-  async function pushRules() { await api('/alert/rules', 'POST', rules); refresh(); }
+  function reportWriteError(action, error) {
+    const message = action + '失敗' + (error && error.status
+      ? '（HTTP ' + error.status + '）' : '，連線或回應異常，請稍後再試');
+    const status = document.getElementById('ap-status');
+    if (status) status.textContent = message;
+    alert(message);
+  }
+
+  async function pushRules() {
+    try { await api('/alert/rules', 'POST', rules); await refresh(); }
+    catch (error) { reportWriteError('儲存規則', error); }
+  }
 
   function addRule() {
     const sym = document.getElementById('ap-r-sym').value.trim();
@@ -195,13 +231,17 @@
     if (tok) body.telegram.bot_token = tok;
     const pw = document.getElementById('ap-em-pw').value;
     if (pw) body.email.app_password = pw;
-    const r = await api('/alert/config', 'POST', body);
-    if (r.ok) { alert('已儲存'); refresh(); } else alert('儲存失敗: ' + JSON.stringify(r));
+    try {
+      const r = await api('/alert/config', 'POST', body);
+      if (r.ok) { alert('已儲存'); await refresh(); } else alert('儲存失敗: ' + JSON.stringify(r));
+    } catch (error) { reportWriteError('儲存設定', error); }
   }
 
   async function testPush() {
-    const r = await api('/alert/test', 'POST', {});
-    alert('測試結果：' + JSON.stringify(r.results || r, null, 1));
+    try {
+      const r = await api('/alert/test', 'POST', {});
+      alert('測試結果：' + JSON.stringify(r.results || r, null, 1));
+    } catch (error) { reportWriteError('測試推播', error); }
   }
 
   function open() {

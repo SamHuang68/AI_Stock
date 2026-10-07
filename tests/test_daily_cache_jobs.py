@@ -32,7 +32,9 @@ class DailyCacheTests(unittest.TestCase):
         self.callbacks = []
         self.queue = patch.object(jobs.job_queue, 'submit', side_effect=lambda name, fn: self.callbacks.append(fn) or {'ok': True})
         self.queue.start()
-        self.clock = patch.object(jobs, 'datetime', Clock)
+        original_cutoff = ds.completed_daily_cutoff
+        self.clock = patch.object(ds, 'completed_daily_cutoff',
+                                  side_effect=lambda market, **kwargs: original_cutoff(market, now=Clock.now()))
         self.clock.start()
 
     def tearDown(self):

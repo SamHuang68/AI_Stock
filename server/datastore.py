@@ -245,12 +245,54 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False,
             time.sleep(delay)   # 指數退避 + 抖動，仍受呼叫端總預算約束
     raise RuntimeError(f'fetch failed for {ysym}: {last}')
 
+def completed_daily_cutoff(market, *, now=None):
+    """共用已完成日線界線；未知日曆不認定當日已完成。"""
+    from datetime import datetime, timedelta
+    from stock_signals import _TZ, DAILY_SESSIONS
+    if market not in _TZ:
+        raise ValueError('日線市場未提供完成日契約')
+    current = now or datetime.now(_TZ[market])
+    current = current.astimezone(_TZ[market]) if current.tzinfo else current.replace(tzinfo=_TZ[market])
+    if market == 'US':
+        from us_equity_calendar import final_time, session
+        final = final_time(current, session(current.date()))
+    else:
+        from 台股交易參考 import session
+        (_, _), (ch, cm), settle = DAILY_SESSIONS[market]
+        final = current.replace(hour=ch, minute=cm, second=0, microsecond=0) + settle
+        if session(current.date())['status'] != 'scheduled':
+            final = None
+    return current.date() if final is not None and current >= final else current.date() - timedelta(days=1)
+
+
+def completed_daily_rows(rows, market, *, now=None, symbol=None):
+    """所有日線持久化共用完成日界線；盤中棒只供即時圖表，不進歷史庫。"""
+    from stock_signals import bar_date
+    # 既有融資維持率是衍生指標，時間戳代表觀測日期，不是個股日 K 的完成時間。
+    derived = symbol == '__MARGIN_RATIO__' and market == 'TW'
+    cutoff = None if derived else completed_daily_cutoff(market, now=now)
+    completed = []
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) != 6:
+            raise ValueError('來源日線必須提供時間及五個行情欄位；缺值須明示為 null')
+        day = bar_date(row[0], market)
+        if day is None:
+            raise ValueError('來源日線必須提供有限的時間與數值；缺值須明示為 null')
+        if derived or day <= cutoff.isoformat():
+            completed.append(row)
+    return completed
+
+
 def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_range=None):
     """來源更新保留首次日線，修訂另存；不把短區段覆寫成不同價格基準。"""
     from stock_signals import bar_date
     from 台股交易參考 import eligible_bar
     counts = {'runId': uuid.uuid4().hex, 'symbol': sym, 'market': market, 'source': source,
               'inserted': 0, 'unchanged': 0, 'conflicts': 0, 'excluded': 0, 'observedAt': time.time()}
+    rows = list(rows)
+    completed = completed_daily_rows(rows, market, symbol=sym)
+    counts['excluded'] += len(rows) - len(completed)
+    rows = completed
     with _db_write_lock, closing(get_conn()) as conn, conn:
         check()
         conn.execute('CREATE TABLE IF NOT EXISTS bar_source_revisions('
@@ -311,6 +353,7 @@ def source_revision_status(symbol=None, market='TW', *, connection=None):
 
 def upsert_bars(sym, market, rows, *, source=None, source_hash='', path=None, check=lambda: None, source_receipt=None):
     if source in ('TWSE', 'TPEX'):
+        rows = completed_daily_rows(rows, market, symbol=sym)
         try:
             from .daily_quality import store_official
         except ImportError:
@@ -327,6 +370,7 @@ def upsert_bars(sym, market, rows, *, source=None, source_hash='', path=None, ch
     if source:
         result = merge_source_bars(sym, market, rows, source, check=check)
         return result['inserted'] + result['unchanged']
+    rows = completed_daily_rows(rows, market, symbol=sym)
     with _db_write_lock:
         with closing(get_conn()) as conn:
             with conn:
@@ -455,14 +499,6 @@ def update(sym, market='TW'):
         rng = next((r for limit, r in ((20, '1mo'), (75, '3mo'), (150, '6mo'),
                                       (330, '1y'), (690, '2y'), (1700, '5y')) if days <= limit), '10y')
         rows = fetch_yahoo_daily(sym, market, rng)
-        # 盤中資料仍由 API 回傳記憶體暫定值，不寫入歷史日線庫。
-        from stock_signals import _TZ, bar_date
-        from datetime import datetime
-        local = datetime.now(_TZ.get(market, _TZ['TW']))
-        final_time = (14, 0) if market == 'TW' else (16, 30)
-        rows = [row for row in rows if bar_date(row[0], market) < local.date().isoformat()
-                or (bar_date(row[0], market) == local.date().isoformat()
-                    and (local.hour, local.minute) >= final_time)]
         n = upsert_bars(sym, market, rows, source='Yahoo Finance')
         print(f'[db] {sym}.{market}: refreshed {n} recent bars')
         return n
