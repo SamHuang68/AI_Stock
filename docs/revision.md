@@ -5,6 +5,16 @@
 
 ---
 
+## v5.0 修訂 — 2026-10-07 發布測試的編碼修正（候選，未發布）
+
+產品版本仍為 **5.0**；基底 `debb9af8b37c7eb3e559c47d7fa21dca14c5bcbc`，分支 `claude/st-release-test-utf8`，提交 SHA 見該分支與 PR。
+
+| 改動 | 原因與修正後行為 | 驗證／狀態 |
+| --- | --- | --- |
+| `tests/test_private_web_release.py` 讀取發布清單 | 清單以 UTF-8 寫入（`ensure_ascii=False`），測試用 `read_text()` 依系統預設編碼讀取；在繁中 Windows（cp950）的 `stage` 回歸測試因 `UnicodeDecodeError` 失敗（1474 個中 1 個），Linux CI 因預設 UTF-8 沒有發現。兩處改為明確 `encoding="utf-8"`。僅測試變更，產品程式不變。 | 在原失敗環境（cp950）重跑 `test_private_web_release` 12 個通過；完整 `stage` 重跑與 CI 待結果；未發布。 |
+
+---
+
 ## v5.0 修訂 — 2026-10-07 選擇權結構收盤後自動更新（本機候選，已提交，未發布）
 
 產品版本仍為 **5.0**；基底 `e0b11475f40a980289553d18029b916be3d1e457`，分支 `claude/st-options-daily-refresh`。可追溯提交 SHA 見該分支提交與 PR；本節不在檔內預寫自身 SHA。

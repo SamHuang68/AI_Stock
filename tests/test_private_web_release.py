@@ -209,14 +209,14 @@ class PrivateWebReleaseTests(unittest.TestCase):
         self.assertEqual((current / "data" / "public_seed.csv").read_text(), "seed")
         self.assertEqual((current / "logs" / "audit.jsonl").read_text(), "audit")
         self.assertEqual(shared_snapshot.read_bytes(), shared_before)
-        active = json.loads((current / ".private_web_release.json").read_text())
+        active = json.loads((current / ".private_web_release.json").read_text(encoding="utf-8"))
         self.assertEqual(active["releaseId"], "abc123")
         self.assertIn("promotedAt", active)
 
     def test_unverified_release_is_not_promoted(self):
         target = _fake_release(self.install_root, "def456")
         manifest_path = target / ".private_web_release.json"
-        manifest = json.loads(manifest_path.read_text())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["tests"] = "skipped"
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         with self.assertRaisesRegex(RuntimeError, "passed tests"):
