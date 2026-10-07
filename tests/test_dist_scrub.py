@@ -68,6 +68,7 @@ class TestDistScrub(unittest.TestCase):
             "Stock_Terminal/tests/test_benchmark_research.py",
             "Stock_Terminal/tests/test_options_exposure.py",
             "Stock_Terminal/tests/test_options_schedule.py",
+            "Stock_Terminal/tests/test_server_startup_order.py",
             "Stock_Terminal/tests/test_overnight_intraday.py",
             "Stock_Terminal/tests/layout_visual_v5_selftest.js",
             "Stock_Terminal/docs/ST_ARCHITECTURE_REMEDIATION_2026-08-16.md",

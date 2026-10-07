@@ -266,6 +266,7 @@ REQUIRED_SHARE_FILES = (
     "tests/test_benchmark_research.py",
     "tests/test_options_exposure.py",
     "tests/test_options_schedule.py",
+    "tests/test_server_startup_order.py",
     "tests/test_overnight_intraday.py",
     "tests/test_atomic_store.py",
     "tests/test_build_reproducibility.py",
