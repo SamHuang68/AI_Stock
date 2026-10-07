@@ -71,22 +71,15 @@ class DayMoversRunsWithoutInjectedGlobals(unittest.TestCase):
             {'Date': '1151006', 'Code': '2317', 'Name': '鴻海', 'ClosingPrice': '200.00', 'Change': '-3.00', 'TradeValue': '9,000,000'},
         ]
 
-        class Response(io.BytesIO):
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-        def fake_urlopen(request, timeout=None):
-            url = getattr(request, 'full_url', str(request))
+        # movers 經由 http_client 抓取；假造點必須是它，否則測試會實際連到官方站台。
+        def fake_fetch_json(url, **kwargs):
             if 'STOCK_DAY_ALL' in url:
-                return Response(json.dumps(rows).encode())
+                return rows
             if 'tpex' in url:
-                return Response(b'[]')
+                return []
             raise OSError('offline test: ' + url)
 
-        with mock.patch('urllib.request.urlopen', fake_urlopen):
+        with mock.patch('http_client.fetch_json', fake_fetch_json):
             out = server._fetch_day_movers(5)
         self.assertTrue(out.get('ok'), out)
         # 只有兩檔、n=5：兩個榜單都會列出兩檔，重點是「有資料」且排序正確（數字解析要成功）。

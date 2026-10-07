@@ -1,12 +1,12 @@
 """既有行情庫的官方盤後批次更新；不以個別頁面是否開啟決定研究覆蓋。"""
 import json
 import time
-import urllib.request
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 import datastore
+import http_client
 import stock_signals as ss
 import chip_history_tracker as chips
 from atomic_store import atomic_write_json, load_json
@@ -115,8 +115,11 @@ def run(day=None):
     for exchange, url in SOURCES.items():
         url = url.format(day=day.replace('-', ''))
         def fetch_quotes(exchange=exchange, url=url):
-            with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'}), timeout=20) as response:
-                payload = json.load(response)
+            # 官方批次檔約 5 MB；裸 urlopen 一次連線被重設就整個來源失敗。沿用既有 http_client 的
+            # 連線池、暫態重試（ConnectionReset／IncompleteRead／逾時）與 gzip，減少傳輸量與失敗機率。
+            payload = http_client.fetch_json(
+                url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Accept-Encoding': 'gzip'},
+                timeout=30, retries=2)
             rows, absent = (parse_twse_market(payload, day, symbols) if exchange == 'TWSE'
                             else parse_quotes(payload, exchange, day, symbols))
             if not rows:

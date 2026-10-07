@@ -2007,10 +2007,12 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
             })
 
     def _get_json(url, timeout=8):
-        req = urllib.request.Request(
-            url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read())
+        # TPEx 約 5 MB 的批次檔曾在後端日誌累積數百次連線重設／IncompleteRead；沿用 http_client
+        # 的暫態重試與 gzip。呼叫端 join 上限 9 秒，故只重試一次。
+        import http_client as _hc
+        return _hc.fetch_json(
+            url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Accept-Encoding': 'gzip'},
+            timeout=timeout, retries=1)
 
     # TWSE + TPEx 並行（本函式可能在 thread pool 內執行，用獨立短線程避免巢狀死鎖）
     twse_rows = None

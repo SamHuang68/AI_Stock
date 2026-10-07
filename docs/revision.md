@@ -5,6 +5,21 @@
 
 ---
 
+## v5.0 修訂 — 2026-10-08 TWSE／TPEx 批次抓取改用既有 http_client（候選，未發布）
+
+產品版本仍為 **5.0**；基底 `6f3cf19214f64192c60db7dabe77ebc5956078b2`，分支 `claude/st-tpex-fetch-retry`，提交 SHA 見該分支與 PR。
+
+| 改動 | 原因與修正後行為 | 驗證／狀態 |
+| --- | --- | --- |
+| 每日來源更新（`個股每日資料.py`）與 movers（`server.py` `_get_json`） | 兩處各自以裸 `urlopen`、無重試抓同一個約 5 MB 的 TPEx 批次檔（TWSE 也同樣）。web 後端日誌累計 `[movers] TPEx` 連線重設 371 次、IncompleteRead 286 次、逾時 54 次；每日更新一次連線被重設整個 TPEx 來源即判 `failed`。直接重現：只帶 User-Agent 的請求 26 次中約 2 次失敗，加 `Accept-Encoding: gzip` 的 26 次全成功且較快。改用既有 `http_client.fetch_json`（連線池、對 ConnectionReset／IncompleteRead／逾時／WinError 10054 的暫態重試），並要求 gzip；每日更新 timeout 30 秒、重試 2 次，movers 因呼叫端 join 上限 9 秒只重試 1 次。 | 真實站台實測：TPEx 20/20 成功（其中 2 次由重試吸收）、TWSE 5/5；新增 `http_client` 4 個案例（gzip 解壓、未要求壓縮時不變、連線被中斷後重試成功、無重試時失敗）；3 個既有測試的假造點由 `urlopen` 改為 `http_client.fetch_json`（其中 movers 測試原本會實際連到官方站台，已改為離線）；未發布。 |
+| `http_client` | 回應帶 `Content-Encoding: gzip` 時自動解壓並移除該標頭；未要求壓縮的既有呼叫者行為不變。 | 同上測試；未發布。 |
+
+釐清：local 的每日更新 `partial` **不是連線問題**。兩個來源都已抓到（TWSE 1348 檔、TPEx 988 檔），差的是追蹤清單中兩來源都沒有的 10 檔代號（2026-10-07：`00847B`、`1522A`、`2067`、`2323`、`3085`、`3632`、`4155`、`6167`、`6173`、`8183`），多半是已下市或停牌的舊代號，仍留在追蹤清單；這會使 `partial` 持續，屬資料清理而非抓取問題，本次未處理。
+
+已知限制：全專案仍有數十處裸 `urlopen`（含其他抓 TWSE／TPEx 的模組），本次只處理失敗量集中的兩處；未來若其他模組出現同類錯誤，應優先改用 `http_client`。
+
+---
+
 ## v5.0 修訂 — 2026-10-08 一鍵啟動 local 與 web（候選，未發布）
 
 產品版本仍為 **5.0**；基底 `ad2dd0f773216742ac641f30251fff02a72a7eed`，分支 `claude/st-launcher-all`，提交 SHA 見該分支與 PR。僅新增根目錄啟動檔，不改產品程式。

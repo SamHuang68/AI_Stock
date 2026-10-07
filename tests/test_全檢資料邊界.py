@@ -127,16 +127,16 @@ class SourceBoundaryTests(unittest.TestCase):
         twse = dict(Date='1150929', Code='2330', OpeningPrice='100', HighestPrice='101', LowestPrice='99', ClosingPrice='100', TradeVolume='1000')
         tpex = dict(Date='1150929', SecuritiesCompanyCode='6488', Open='100', High='101', Low='99', Close='100', TradingShares='1000')
         seen = []
-        def respond(request, **kwargs):
-            seen.append(request.full_url)
-            rows = [twse] if 'twse' in request.full_url else [tpex]
-            if 'twse' in request.full_url and len(seen) > 2:
+        def respond(url, **kwargs):
+            seen.append(url)
+            rows = [twse] if 'twse' in url else [tpex]
+            if 'twse' in url and len(seen) > 2:
                 rows.append({**twse, 'Code': '2317'})
-            if 'twse' in request.full_url:
+            if 'twse' in url:
                 rows = {'stat': 'OK', 'date': '20260929', 'tables': [{
                     'fields': ['證券代號', '開盤價', '最高價', '最低價', '收盤價', '成交股數'],
                     'data': [[r[k] for k in ('Code', 'OpeningPrice', 'HighestPrice', 'LowestPrice', 'ClosingPrice', 'TradeVolume')] for r in rows]}]}
-            return io.StringIO(json.dumps(rows))
+            return rows
         with tempfile.TemporaryDirectory() as tmp, patch.object(ds, 'DB_PATH', str(Path(tmp) / 'market.db')), \
                 patch.object(sources, 'datetime') as clock, \
                 patch.object(ds, 'list_symbols', return_value=['2330', '2317', '6488', '2867', '^TWII', '__MARGIN_RATIO__']), \
@@ -144,7 +144,7 @@ class SourceBoundaryTests(unittest.TestCase):
                 patch.object(ds, 'update', return_value=1) as benchmark, patch.object(ds, 'last_ts', return_value=int(now.timestamp())), \
                 patch.object(tracker, 'parse_and_save', return_value=2) as twse_chips, \
                 patch.object(tracker, 'parse_and_save_tpex', return_value=1), \
-                patch.object(sources.urllib.request, 'urlopen', side_effect=respond):
+                patch.object(sources.http_client, 'fetch_json', side_effect=respond):
             clock.now.return_value = now
             clock.fromisoformat.side_effect = datetime.fromisoformat
             first = sources.run()
@@ -163,7 +163,7 @@ class SourceBoundaryTests(unittest.TestCase):
                      for n in ['TPEx 日線', '大盤日線', '上市法人', '上櫃法人']]
         with tempfile.TemporaryDirectory() as tmp, patch.object(ds, 'DB_PATH', str(Path(tmp) / 'market.db')), \
                 patch.object(sources, 'datetime') as clock, patch.object(ds, 'list_symbols', return_value=['2330']), \
-                patch.object(sources.urllib.request, 'urlopen', side_effect=KeyboardInterrupt):
+                patch.object(sources.http_client, 'fetch_json', side_effect=KeyboardInterrupt):
             path = Path(tmp) / 'stock_daily_sources.json'
             path.write_text(json.dumps(dict(runId='previous', sessionDate='2026-09-29', sources=completed)), encoding='utf-8')
             clock.now.return_value = now

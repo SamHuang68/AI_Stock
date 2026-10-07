@@ -2,6 +2,7 @@
 """http_client：連線池複用、暫態重試、JSON 解析。"""
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import sys
@@ -48,6 +49,35 @@ class _Handler(BaseHTTPRequestHandler):
             body = b'hello-pool'
             self.send_response(200)
             self.send_header('Content-Type', 'text/plain')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Connection', 'keep-alive')
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path.startswith('/gzip'):
+            # 只在呼叫端要求 gzip 時壓縮，與一般官方站台行為一致。
+            body = json.dumps({'ok': True, 'rows': ['x' * 50] * 200}).encode()
+            wants_gzip = 'gzip' in (self.headers.get('Accept-Encoding') or '')
+            if wants_gzip:
+                body = gzip.compress(body)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            if wants_gzip:
+                self.send_header('Content-Encoding', 'gzip')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Connection', 'keep-alive')
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path.startswith('/reset'):
+            # 前 fail_n 次直接中斷連線（不回應），模擬官方站台重設連線。
+            if n <= fail_n:
+                self.close_connection = True
+                self.connection.close()
+                return
+            body = json.dumps({'ok': True, 'n': n}).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(body)))
             self.send_header('Connection', 'keep-alive')
             self.end_headers()
@@ -104,6 +134,30 @@ class TestHttpClient(unittest.TestCase):
         self.assertTrue(d['ok'])
         st = self.client.stats()
         self.assertGreaterEqual(st['retries'], 1)
+
+    def test_gzip_response_is_decompressed_when_requested(self):
+        data = self.client.get_json(self.base + '/gzip', headers={'Accept-Encoding': 'gzip'}, timeout=3, retries=0)
+        self.assertTrue(data['ok'])
+        self.assertEqual(len(data['rows']), 200)
+        response = self.client.request('GET', self.base + '/gzip', headers={'Accept-Encoding': 'gzip'}, timeout=3, retries=0)
+        self.assertNotIn('Content-Encoding', response.headers)
+
+    def test_uncompressed_response_is_unchanged_without_accept_encoding(self):
+        data = self.client.get_json(self.base + '/gzip', timeout=3, retries=0)
+        self.assertEqual(len(data['rows']), 200)
+
+    def test_dropped_connection_is_retried_and_then_succeeds(self):
+        with _Handler.lock:
+            _Handler.fail_first = 2
+        data = self.client.get_json(self.base + '/reset', timeout=3, retries=2)
+        self.assertTrue(data['ok'])
+        self.assertGreaterEqual(self.client.stats()['retries'], 2)
+
+    def test_dropped_connection_without_retries_fails(self):
+        with _Handler.lock:
+            _Handler.fail_first = 1
+        with self.assertRaises(hc.HttpError):
+            self.client.get_json(self.base + '/reset', timeout=3, retries=0)
 
     def test_connection_reuse(self):
         self.client.get_text(self.base + '/text', timeout=3, retries=0)
