@@ -1,4 +1,6 @@
 你是一個精通台灣股市交易系統的資深架構師。
+【最高優先】本機路徑、受管安裝與部署規則一律以 `AGENTS.md` 為準；本檔下方舊段落（尤其「執行線 — tip UX」與 `go.bat pull`）
+如與 `AGENTS.md` 衝突，以 `AGENTS.md` 為準（`TIP_BRANCH` 自 2026-09-07 起為 `main`）。
 本專案為 Stock Terminal v5.0 tip UX（Vanilla JS + TradingView），後端處理高精度技術指標。
 
 【鐵律】：
@@ -29,10 +31,10 @@
    絕對路徑（`%~dp0` 解析後驗證檔案存在）；先 `/health` 成功再開瀏覽器。
 6. 給使用者的同步指令優先 `git checkout origin/<branch> -- <paths>`；同步包／zip
    必須附「解壓到 repo 根、檢查無雙層目錄」說明，並提供攤平腳本備援。
-7. 【對使用者下指令：只用 PowerShell】使用者本機 shell 是 PowerShell（`PS C:\Users\Sam\AI_Stock>`）。
+7. 【對使用者下指令：只用 PowerShell】使用者本機 shell 是 PowerShell（`PS C:\Users\Sam\AI-Workspace\projects\stock-terminal>`；舊路徑 `C:\Users\Sam\AI_Stock` 已於 2026-10-03 退役，不得使用）。
    回覆中的可複製指令必須是 PowerShell 語法，禁止給 CMD-only 寫法（例如 `cd /d`、
    裸 `scripts\go.bat` 而不說明、或假設 `cmd.exe`）。正確範例：
-   `cd C:\Users\Sam\AI_Stock`、`git pull origin <branch>`、
+   `cd C:\Users\Sam\AI-Workspace\projects\stock-terminal`、`git pull origin <branch>`、
    `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\go.ps1`、
    `.\START_WAVEDECK.cmd`（可從 PS 呼叫）。勿再給 `/workspace` 雲端路徑當本機路徑。
 

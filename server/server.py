@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Stock Terminal local server — ThreadingHTTPServer + worker pool + LRU cache."""
-import os, json, urllib.request, urllib.error, socketserver, glob, time, subprocess, sys, csv, io, uuid
+import os, json, math, urllib.request, urllib.error, socketserver, glob, time, subprocess, sys, csv, io, uuid
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import OrderedDict
@@ -79,7 +79,8 @@ from source_health import (
     snapshot as _src_snapshot,
 )
 from market_contract import attach_quote_contract, cumulative_volume_contract
-from exchange_source_dates import marketflow_payload, marketflow_cache_key, taipei_today, txf_timestamp
+from log_once import log_once
+from exchange_source_dates import marketflow_payload, marketflow_cache_key, taipei_today, txf_timestamp, txf_timestamp_check
 from market_routes import market_snapshot, twse_mis_observation, twse_mis_stock_quote, quote_observation, guard_tw_quote
 from http_boundary import BodyReadError, is_same_local_origin, read_json_body
 from atomic_store import StoreCorruptError, atomic_write_json, load_json
@@ -806,7 +807,8 @@ def _db_screener_arrays(code):
     try:
         import datastore
         rows = datastore.get_bars(str(code))
-    except Exception:
+    except Exception as exc:
+        log_once('screener-db', f'bars for {code} unavailable, falling back to Yahoo:', exc=exc)
         return None
     if not rows or len(rows) < 70:
         return None
@@ -942,6 +944,23 @@ def _safe_sym(s):
     if not s or len(s) > 20:
         return False
     return all(c.isalnum() or c in '.^=-%_' for c in s)
+
+
+_TXF_STAMP_LOG = {}   # 'night:future' -> 最近一次記錄的 monotonic 秒數
+
+
+def _txf_note_unverified_stamp(session, stamp, reason, now=None):
+    """MIS 報價的 CDate/CTime 驗證失敗時留下原始值與原因（同一場次＋原因每 10 分鐘最多一行）。
+    以前這種情況整筆報價被無聲丟掉，從畫面完全看不出是來源格式、日期語意還是時鐘的問題。"""
+    key = f'{session}:{reason}'
+    now = time.monotonic() if now is None else now
+    last = _TXF_STAMP_LOG.get(key)
+    if last is not None and now - last < 600:
+        return False
+    _TXF_STAMP_LOG[key] = now
+    print(f"[txf] {session} quote time unverified ({reason}): CDate={stamp.get('CDate')!r} CTime={stamp.get('CTime')!r}"
+          ' — price kept, asOf left unknown')
+    return True
 
 
 # ── 個股期貨(含夜盤) 整批載入 (v3.9)：CID='' 一次抓全部，避免每檔打 MIS 被限流(520) ──
@@ -1899,7 +1918,7 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
         try:
             number = float(str(v).replace(',', '').replace('+', '').strip())
             return number if math.isfinite(number) else None
-        except Exception:
+        except (TypeError, ValueError, OverflowError):
             return None
 
     rows = []
@@ -3232,7 +3251,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             try:
                 number = float(str(v).replace(',', ''))
                 return number if math.isfinite(number) and number > 0 else None
-            except Exception:
+            except (TypeError, ValueError, OverflowError):
                 return None
         out = _twse_mis_stock_quotes([code]).get(code) or {'ok': False, 'code': code}
         mis_volume = {k: v for k, v in out.items() if k.startswith('volume')} if out.get('volumeShares') is not None else None
@@ -3421,7 +3440,8 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                               **quote_observation(float(m.get('regularMarketTime') or 0) * 1000)}
                     # 台股盤中日期防線不能套用到不同交易時區的美股。
                     return sym, guard_tw_quote(result) if sym.endswith(('.TW', '.TWO')) else {**result, 'stale': False}
-                except Exception:
+                except Exception as exc:
+                    log_once('quote-batch', f'{cand} failed, trying the next candidate:', exc=exc)
                     continue
             return sym, None
         out = {}
@@ -3430,8 +3450,8 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             try:
                 k, v = f.result()
                 if v: out[k] = v
-            except Exception:
-                pass
+            except Exception as exc:
+                log_once('quote-batch-worker', 'worker raised:', exc=exc)
         self._ok(json.dumps(out, ensure_ascii=False).encode())
 
     def _handle_quote(self, sym):
@@ -5755,12 +5775,20 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         change = None
         if price is not None and prev is not None:
             change = price - prev
-        as_of = txf_timestamp(best.get('CDate'), best.get('CTime'))
-        if as_of is None:
-            return None
         sess = 'night' if str(market_type) == '1' else 'day'
+        as_of, reason = txf_timestamp_check(best.get('CDate'), best.get('CTime'), session=sess)
+        stamp = {'CDate': best.get('CDate'), 'CTime': best.get('CTime')}
+        if as_of is None:
+            if price is None:
+                return None
+            # 價格有、時間戳驗證不過：不能把整筆報價丟掉（過去的做法會讓 Pulse／決策中心完全看不到
+            # 夜盤台指期，而且沒有任何記錄）。保留價格，asOf 明確設為未知（不拿本機時間或請求日冒充），
+            # 並標記 timeUnverified、留下原始 CDate/CTime 與原因。決策中心會因 asOf 未知而不採用它。
+            _txf_note_unverified_stamp(sess, stamp, reason)
         return {
-            'asOf': as_of, 'sourceDate': as_of[:10],
+            'asOf': as_of, 'sourceDate': (as_of[:10] if as_of else None),
+            'timeUnverified': as_of is None,
+            'timeCheck': {'verified': as_of is not None, 'reason': reason, **stamp},
             'price': price, 'prevClose': prev, 'change': change,
             'changePct': (round(chg, 4) if chg is not None else None),
             'open': opn, 'high': high, 'low': low,
@@ -5926,6 +5954,8 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 'volume': src_night.get('volume'),
                 'time': src_night.get('time') or '',
                 'asOf': src_night.get('asOf'), 'sourceDate': src_night.get('sourceDate'),
+                'timeUnverified': bool(src_night.get('timeUnverified')),
+                'timeCheck': src_night.get('timeCheck'),
                 'session': 'night',
                 'sessionLabel': '夜盤',
                 'source': src_night.get('source') or 'taifex-mis-night',
@@ -5944,6 +5974,8 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             'volume': primary.get('volume'),
             'time': primary.get('time') or '',
             'asOf': primary.get('asOf'), 'sourceDate': primary.get('sourceDate'),
+            'timeUnverified': bool(primary.get('timeUnverified')),
+            'timeCheck': primary.get('timeCheck'),
             'session': primary.get('session') or ('night' if self._txf_is_night_hours() else 'day'),
             'sessionLabel': primary.get('sessionLabel') or (
                 '夜盤' if (primary.get('session') or '') == 'night' else '日盤'

@@ -18,6 +18,77 @@
 
 ---
 
+## v5.0 修訂 — 2026-10-07 備援路徑可觀測性與靜默例外棘輪（候選，未發布）
+
+產品版本仍為根目錄 `VERSION` 的 **5.0**。補記：PR #166 已於 2026-10-07 合併，合併（squash）修訂 `fd6efb77e08e7aae718d0ed085cbd013e66779a5`；先前「候選（尚未合併）」是當時快照，不覆寫。**發布狀態**：#164、#165、#166 與本段都未發布，正式站與受管理本機的 runtimeCommit 仍為 `e0b11475f40a980289553d18029b916be3d1e457`（2026-10-07 確認）。
+
+### 候選（本 PR）：備援路徑可觀測性、靜默例外棘輪、接線檢查
+
+- 基底：`fd6efb77e08e7aae718d0ed085cbd013e66779a5`。實作提交以本 PR 的分支歷史為準（避免在自身檔案內預先寫入自己的 SHA）。
+
+| 改動 | 原因與修正後行為 | 驗證／狀態 |
+| --- | --- | --- |
+| `server/log_once.py` 與備援路徑記錄 | #165 的 `import math` 之所以悄悄失效五天，是因為 `except Exception: return None` 吞掉 NameError。新增限頻記錄函式（同 key＋例外型別 10 分鐘一行；新的例外型別一定立刻記錄），並接到四個備援路徑：`_db_screener_arrays`（DB 失敗仍回 None，由呼叫端退回 Yahoo）、`_handle_quote_batch` 的單檔候選與 worker 例外。行為不變，只多一行記錄。 | `tests/test_log_once.py` 6 項；`tests/test_fallback_observability.py` 4 項，其中 3 項在舊 `server.py` 上失敗。 |
+| 數字解析只吞解析失敗 | `_fetch_day_movers`、`_handle_twquote` 內的 `fnum` 原本 `except Exception: return None`，會連 NameError 一起吞。改為只抓 `TypeError`、`ValueError`、`OverflowError`。**行為差異**：解析以外的程式錯誤現在會往外傳，由外層既有的處理印出（例如 `[movers] TWSE ingest …`），不再悄悄回「無資料」。 | 缺全域名稱時會印出 `[movers] TWSE ingest … name 'math' is not defined` 的測試；健康模組下排行照常有資料。 |
+| 靜默例外棘輪 | 共用規則 0014：寬鬆且靜默的例外處理（`except Exception` 等，只有 `pass`／`continue`／`break`／`return` 常數）數量只能下降。`server/` 目前 207 個（39 個檔案；`server.py` 69 個），新增或減少都使測試失敗，減少時要同步降低 `tests/silent_except_baseline.json`。本 PR 讓總數從 212 降到 207。 | `tests/test_no_new_silent_exceptions.py` 2 項；人為新增一個靜默處理時測試失敗（已驗證）。尚未清理其餘 207 個，屬後續工作。 |
+| 接線檢查 | `server.py` 內 150 個不同的 `self._xxx()` 呼叫都要在 `server/` 內有同名定義，抓拼錯的方法名稱（pyflakes 抓不到）。名稱層級，不啟動伺服器、不碰 `data/`。 | `tests/test_server_handler_wiring.py` 2 項；目前沒有缺少的定義。 |
+| 協作入口文件 | `AGENTS.md`、`CLAUDE.md` 記入：共用記憶的 GitHub 遠端與雲端唯讀讀取方式、遠端可能落後本機、8D 與「8D 後新增規則不需授權」的範圍、規則 0014 的做法。 | 文件變更；事實來自使用者回覆（遠端 repo 名稱）與雲端對遠端的唯讀核對。 |
+
+驗證：只跑了本次相關的測試與 `test_bundle_fresh`；完整 Python 套件由 CI 執行，沒有在雲端另外跑（規則 0008 第 13 條）。限制：未用即時供應商資料驗證；路由煙霧測試（啟動真實伺服器）**沒有做**——它會寫入 `data/`、啟動背景執行緒並對外連線，與規則 0007 的執行期資料保護衝突，改以上列的接線檢查代替，煙霧測試待 Sam 決定隔離方式。審查：僅作者自審，沒有跨供應商或同供應商隔離審查。使用者可見資訊：沒有減少。
+
+---
+
+## v5.0 修訂 — 2026-10-06／07 決策中心時效、台指期時間與啟動器防呆（已推送並合併；未發布）
+
+產品版本仍為根目錄 `VERSION` 的 **5.0**；沿用「產品版本 + 精確 Git／runtime commit」辨識修訂，沒有改動版本號。以下 PR #164、#165 已合併到 `main`，PR #166 為候選；**2026-10-07 實測正式站與受管理本機的 runtimeCommit 仍為 `e0b11475f40a980289553d18029b916be3d1e457`**（正式 `.private_web_release.json` 與本機 `/health` 一致），所以全部屬「未發布」。發布須依既有 stage／promote 流程由本機發布者執行；此處不宣稱已部署。
+
+### 已推送並合併、未發布：PR #164，決策中心時效與台指期夜盤時間
+
+- 基底：`e0b11475f40a980289553d18029b916be3d1e457`。
+- 分支提交（由舊到新）：`e8125daaf2da194af7614e533101b74679632ebd`、`44e6de5704b39f294ba81fc5b4340ff54feb6fa8`、`e3ecead7e739784238580147cc33acba9c4a391f`、`0e701f1852e8a7b703225d6863074b2ac748f417`、`2c0efcc874907b7fe75b86194c9df1e88b9864a8`、`af0c8c87bebab3078c384649259acda85e45050a`。
+- [PR #164](https://github.com/SamHuang68/AI_Stock/pull/164) 合併（squash）修訂：`a525885a24dc53b36441e81d161bbe0c37097b1e`。
+
+| 改動 | 原因與修正後行為 | 驗證／狀態 |
+| --- | --- | --- |
+| 台指期夜盤午夜後的日期 | TAIFEX MIS 在 00:00–05:59 的夜盤報價，`CDate` 仍是場次開始日（2026-10-06 01:50 回 `20261005`；2026-10-07 02:56 回 `20261006`）。直接組合 CDate＋CTime 會使 asOf 早 24 小時，證據列顯示「1 日前」，決策中心也把新鮮報價當過期。現在夜盤且時間早於 06:00 時日期加一天；日盤與午夜前不調整；調整後若超前本機時鐘超過 120 秒，仍標「時間未核實」，不悄悄移位。 | 上述兩份使用者機器上的真實樣本進入測試，另有跨月、跨年、週末與 06:00 邊界案例。使用者以 `88c5139` 程式在舊開發資料夾（非受管安裝）實測 `/txf`：asOf 為當日、`timeUnverified` 為 false、`timeCheck.verified` 為 true；該次輸出沒有存入證據資料夾。**午夜前（15:00–23:59）的 CDate 語意尚未用真實樣本確認**：若為下一個交易日，該時段報價會顯示為時間未核實。 |
+| 時間驗證失敗時保留報價 | 過去 CDate／CTime 驗證失敗會整筆丟棄，Pulse 與決策中心看不到夜盤，且沒有紀錄。現保留價格，asOf 明確為未知並標 `timeUnverified`，原始 CDate／CTime 與原因寫入 `timeCheck`，同一場次與原因每 10 分鐘最多記一行；決策中心不採用時間未知的報價，Pulse 評分排除。 | 原「缺 CDate 回 None」的斷言依新契約改為保留價格、時間未知；其餘既有測試不變。 |
+| 台指期時效 | 場次結束後、下一場次開始前（夜盤 05:00–08:45、日盤 13:45–15:00、週末與休市到下個開盤前，依交易所日曆），最後一筆視為 `completed_session` 而非過期；過去 05:30–08:45 完全不採用夜盤收盤。 | 完整時間軸測試，含週末、休市與「非場次最後一筆不得被救回」。 |
+| Pulse 快照的台指期選擇 | 快照過去一律取夜盤區塊，日盤時段會顯示昨夜報價。現取夜盤區塊與日盤報價中時間較新且已核實者；快取為空的日盤時段直接取日盤報價。 | 選擇邏輯單元測試。 |
+| Key Levels 時效與偏離 | 參考日須為最近完成交易日（18:00 截止、依交易所日曆），否則 `stale`；現價（指數與期貨中較新且可用者）偏離參考收盤達 `max(2%, 2×ATR%)` 時標 `offReference`，保留價位但不再產生「守穩 R1／收破 S1」確認與失效條件，並加 `key_levels_off_reference` 限制。`calculate_key_levels` 回傳 `referenceBar`。 | 19 個定向測試（含已回報的 45–48k 數值對 50k 現價）。2%／3% 門檻是經驗值，未用資料校準；期現貨基差未扣除。 |
+| 選擇權結構 | 現價偏離選擇權參考現貨 3% 以上時停用情境模型（Flip Band、GEX），保留官方 OI 事實與方向中立的密度，原因為 `LIVE_PRICE_FAR_FROM_CHAIN_SPOT`。 | 併入上列測試。 |
+| 決策頁呈現 | Key Levels 上方顯示參考日、現價與偏離（偏離為琥珀色、過期為紅色）；選擇權格顯示現價，模型停用時說明兩個價格。 | 以真實後端輸出對決策頁做 Playwright 檢查（已回報情境、過期參考、正常情境），無 pageerror。 |
+
+驗證：全套 Python 1431 項通過（15 項略過，為 Windows 專用或選用套件）、22 項 JS 自測、`compileall`、`build_order`、bundle 新鮮度測試。[PR CI](https://github.com/SamHuang68/AI_Stock/actions/runs/37352435070)、[分支 push CI](https://github.com/SamHuang68/AI_Stock/actions/runs/37352430089)、[主線 CI](https://github.com/SamHuang68/AI_Stock/actions/runs/37353820420) 各四項成功。限制：TAIFEX、TWSE、Yahoo 無法從開發沙箱連線，沒有以即時供應商資料驗證；未部署。審查：僅作者自審，沒有跨供應商或同供應商隔離審查。
+
+使用者可見資訊的減少（共用規則 0009 第 1 條）：本 PR 在下列情況會減少決策中心顯示的內容，都不是悄悄進行，畫面會寫出原因。(1) Key Levels 為 off-reference 或 stale 時，不再輸出「守穩 R1／收破 S1」確認與失效條件文字；價位與波動度統計照常顯示，上方多一行參考日、現價與偏離。(2) 選擇權現價偏離 3% 以上時停用情境模型（Flip Band、GEX 情境與壓力測試數字），改顯示原因；官方 OI 與方向中立的密度仍顯示。(3) 時間未核實的台指期報價不再供決策中心與 Pulse 評分使用；價格與原始 CDate／CTime 仍由 `/txf` 提供。PR 說明已列出這些項目，Sam 以「合併」核准該 PR。
+
+### 已推送並合併、未發布：PR #165，補 `import math`
+
+- 基底：`a525885a24dc53b36441e81d161bbe0c37097b1e`；實作：`1f5319ba011ece91cfec9b04743e1400a54f7959`。
+- [PR #165](https://github.com/SamHuang68/AI_Stock/pull/165) 合併（squash）修訂：`88c5139c17a6095703903e7f33c3cdc97246bd03`。
+
+| 改動 | 原因與修正後行為 | 驗證／狀態 |
+| --- | --- | --- |
+| `server.py` 缺 `import math` | `_fetch_day_movers`、`_handle_twquote`、`_handle_quote_batch`、`_db_screener_arrays`、`_tag_industry` 使用 `math.isfinite`，且都包在 `except Exception` 內，NameError 被吞掉：總覽漲跌幅排行永遠「無資料」、個股即時報價的 Yahoo 備援取不到數字等，沒有任何錯誤訊息。由 `a02436a`（2026-10-02）與 `bd6b75f`（2026-10-03）引入，**已包含在目前部署的 `e0b1147`**。既有測試用 AST 取出單一函式並手動注入 `math`，因此沒有發現。 | 以真實模組與假 TWSE 資料重現：修正前 `ok=False`、無排行，補 import 後 `ok=True`。新增 pyflakes 全專案 undefined-name 掃描（修正前 5 處、修正後 0 處）與不注入全域的行為測試，兩者在舊程式上失敗；pyflakes 釘版於 `requirements-ci.txt`。另四處只以靜態掃描涵蓋，未逐一用即時資料執行。 |
+
+驗證：全套 Python 1433 項通過（15 項略過）、22 項 JS 自測。[PR CI](https://github.com/SamHuang68/AI_Stock/actions/runs/37503981020)、[分支 push CI](https://github.com/SamHuang68/AI_Stock/actions/runs/37503960975)、[主線 CI](https://github.com/SamHuang68/AI_Stock/actions/runs/37514560599) 各四項成功。審查：僅作者自審，沒有跨供應商或同供應商隔離審查。
+
+### 候選（尚未合併）：PR #166，啟動器防呆與協作入口
+
+- 基底：`88c5139c17a6095703903e7f33c3cdc97246bd03`。實作提交：`712872a8eb1edd242806ccd2892942ee77ba5c4d`、`c09a45620fa5e9c391198c6a421178a2612b88ce`，及其後的對齊與修訂紀錄提交（以 PR #166 為準）。
+
+| 改動 | 原因與修正後行為 | 驗證／狀態 |
+| --- | --- | --- |
+| `go.ps1` 啟動防呆 | 已登記受管本機安裝時，`go.ps1` 只在目前資料夾等於登記的 `originalCheckout` 才轉交；從其他資料夾一般啟動會落入開發流程，`Stop-PortListeners` 關掉 18432 埠上的程序，再啟動一份未受管版本。2026-10-07 發生一次：雲端代理人沿用 2026-10-03 已退役的 `C:\Users\Sam\AI_Stock` 路徑，指示使用者在該資料夾執行 `START_TIP.cmd`。現在這種情況在關閉任何程序之前以 `ST-LAUNCHER-GUARD` 停止並說明；明確的 `-Worktree`／`-Pull`／`-UpdateOnly`／`-RebuildOnly`、登記資料夾的轉接、沒有受管安裝的行為不變。 | 靜態順序／BOM 測試，加 2 個在暫存目錄實際執行 `go.ps1` 的行為測試（PowerShell 7.4），在舊 `go.ps1` 上失敗；全套 1436 項通過。**尚未在使用者機器驗證**。行為測試原先優先選 `pwsh`，Windows CI 因此只用 PowerShell 7 跑過；`START_TIP.cmd` 實際呼叫的是 Windows PowerShell 5.1，所以已改為每個找得到的引擎（5.1 與 `pwsh`）都跑，5.1 的結果以該 PR 最新 head 的 Windows CI 為準。 |
+| 停用 `scripts/apply.bat` | 舊腳本會強制 `git checkout -B` 遠端分支、`stash -u` 所有未追蹤檔並依埠 `taskkill` 18432，與受管本機安裝及「不 reset、不 force」的共用規則衝突；其預設分支檢查也拒絕 `main`（`TIP_BRANCH` 自 2026-09-07 起為 `main`），倉庫內沒有任何地方引用它。改為只印出停用說明並以 2 結束的存根（舊邏輯保留在 Git 歷史，未刪檔）。 | 靜態測試：存根不含 `taskkill`、`git checkout`、`git stash`、`git reset`、`netstat`、`server.py`、`build_v2`，且為 ASCII；未在使用者機器執行。 |
+| 協作入口文件 | 新增 `AGENTS.md`、`CLAUDE.md`，更新 `.cursorrules` 的過時路徑，記錄正式開發資料夾、受管本機、正式站與退役舊路徑，並指向 `AI-Workspace` 的共用規則（本機檔案，不在 Git 內，不複製其內容）。 | 文件變更，無程式行為；內容只含從使用者機器輸出與倉庫文件驗證過的事實。 |
+
+審查：僅作者自審，沒有跨供應商或同供應商隔離審查。
+
+事故處置紀錄：未受管開發程序於 2026-10-07 03:33:05 啟動並佔用 18432；使用者之後改由 `%LOCALAPPDATA%\StockTerminalLocal\start_local.ps1` 啟動受管安裝，其 runtimeCommit 為 `e0b11475…`，與正式站一致；正式站（18434／18435）未受影響。使用者事後提供的證據：受管啟動收據 `createdAt` 為 2026-10-06T19:48:00Z（台北 10-07 03:48:00，即改由受管啟動器重新啟動的那次），前一份受管程序的 log 最後寫入 2026-10-05 18:41（台北），距事發約 33 小時；因此事發當時 18432 上很可能沒有受管程序在運行，很可能沒有關閉任何受管程序。這是推論，不是證明（前一份收據已被覆寫）。
+
+---
+
 ## v5.0 修訂 — 2026-10-03 已發布與後續本機階段
 
 產品版本仍為根目錄 `VERSION` 的 **5.0**；本輪沿用「產品版本 + 精確 Git／runtime commit」辨識修訂，沒有為整理紀錄改動版本號。以下保留各階段的原因、行為、驗證與發布狀態；歷史紀錄不覆寫。
