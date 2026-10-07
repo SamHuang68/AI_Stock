@@ -31,11 +31,31 @@ class _Response:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def read(self, _limit: int = -1) -> bytes:
-        return self._body
+    def read(self, limit: int = -1) -> bytes:
+        # 與真實回應一致：只回傳呼叫端要求的位元組數，截斷才會在測試中現形。
+        return self._body if limit is None or limit < 0 else self._body[:limit]
 
 
 class EtfSnapshotHealthTests(unittest.TestCase):
+    def test_probe_reads_a_response_larger_than_one_mebibyte(self):
+        expected = {"latestDate": "2026-10-07", "directory": "C:/etf", "latestSha256": "abc"}
+        payload = {"date": "2026-10-07", "meta": {"history": dict(expected)},
+                   "padding": "x" * (2 * 1024 * 1024)}
+        with mock.patch.object(etf_snapshot_health.urllib.request, "urlopen",
+                               return_value=_Response(payload)):
+            result = etf_snapshot_health.probe_api("http://unit.test/etf-delta", expected)
+        self.assertEqual(result["state"], "ok")
+
+    def test_probe_rejects_a_runaway_response_instead_of_truncating_it(self):
+        expected = {"latestDate": "2026-10-07", "directory": "C:/etf", "latestSha256": "abc"}
+        payload = {"date": "2026-10-07", "padding": "x" * 4096}
+        with mock.patch.object(etf_snapshot_health, "MAX_PROBE_BYTES", 1024), \
+                mock.patch.object(etf_snapshot_health.urllib.request, "urlopen",
+                                  return_value=_Response(payload)):
+            result = etf_snapshot_health.probe_api("http://unit.test/etf-delta", expected)
+        self.assertEqual(result["state"], "response_too_large")
+        self.assertEqual(result["limitBytes"], 1024)
+
     def test_probe_requires_date_directory_and_hash_to_match(self):
         with tempfile.TemporaryDirectory() as temp:
             expected = {

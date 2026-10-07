@@ -21,7 +21,8 @@ import datastore
 import options_schedule as sched
 
 TW = ZoneInfo('Asia/Taipei')
-WEDNESDAY = (2026, 10, 7)
+WEDNESDAY = (2026, 10, 7)      # 前一交易日 2026-10-06
+MONDAY = (2026, 10, 5)         # 前一交易日 2026-10-02（跨週末）
 SATURDAY = (2026, 10, 10)
 
 
@@ -51,36 +52,47 @@ class OptionsScheduleTests(unittest.TestCase):
     def attempts(self):
         return json.loads((self.data / 'options_daily_attempts.json').read_text(encoding='utf-8'))
 
+    def test_previous_session_skips_weekends_and_unknown_calendars(self):
+        self.assertEqual(sched.previous_session('2026-10-07'), '2026-10-06')
+        self.assertEqual(sched.previous_session('2026-10-05'), '2026-10-02')
+        self.assertIsNone(sched.previous_session('2031-01-06'))
+
     def test_disabled_by_default_and_for_non_true_values(self):
-        self.assertFalse(sched.tick(at(WEDNESDAY, 18, 40), self.submit))
+        self.assertFalse(sched.tick(at(WEDNESDAY, 7, 10), self.submit))
         (self.data / 'options_daily_schedule.json').write_text('{"enabled": "yes"}', encoding='utf-8')
-        self.assertFalse(sched.tick(at(WEDNESDAY, 18, 40), self.submit))
+        self.assertFalse(sched.tick(at(WEDNESDAY, 7, 10), self.submit))
         self.assertEqual(self.calls, [])
 
     def test_submits_force_options_job_once_per_slot(self):
         self.enable()
-        self.assertTrue(sched.tick(at(WEDNESDAY, 18, 40), self.submit))
-        self.assertFalse(sched.tick(at(WEDNESDAY, 18, 50), self.submit))
+        self.assertTrue(sched.tick(at(WEDNESDAY, 7, 10), self.submit))
+        self.assertFalse(sched.tick(at(WEDNESDAY, 7, 20), self.submit))
         self.assertEqual(self.calls, [('options', {'force': True})])
-        self.assertEqual(self.attempts()['2026-10-07/1110']['status'], 'queued')
+        self.assertEqual(self.attempts()['2026-10-07/420']['status'], 'queued')
 
-    def test_next_slot_retries_when_chain_still_old(self):
+    def test_next_slot_retries_while_chain_is_still_older_than_previous_session(self):
+        self.enable()
+        self.cached = {'observed': {'tradeDate': '2026-10-05'}}
+        for moment in (at(WEDNESDAY, 7, 10), at(WEDNESDAY, 7, 40), at(WEDNESDAY, 8, 5), at(WEDNESDAY, 8, 35)):
+            self.assertTrue(sched.tick(moment, self.submit), moment.isoformat())
+        self.assertEqual(len(self.calls), 4)
+
+    def test_stops_once_previous_session_chain_is_cached(self):
         self.enable()
         self.cached = {'observed': {'tradeDate': '2026-10-06'}}
-        self.assertTrue(sched.tick(at(WEDNESDAY, 18, 40), self.submit))
-        self.assertTrue(sched.tick(at(WEDNESDAY, 19, 31), self.submit))
-        self.assertTrue(sched.tick(at(WEDNESDAY, 20, 31), self.submit))
-        self.assertEqual(len(self.calls), 3)
-
-    def test_stops_when_todays_chain_is_cached(self):
-        self.enable()
-        self.cached = {'observed': {'tradeDate': '2026-10-07'}}
-        self.assertFalse(sched.tick(at(WEDNESDAY, 19, 31), self.submit))
+        self.assertFalse(sched.tick(at(WEDNESDAY, 7, 40), self.submit))
         self.assertEqual(self.calls, [])
 
-    def test_outside_window_and_closed_days_do_nothing(self):
+    def test_monday_needs_friday_chain_not_sunday(self):
         self.enable()
-        for moment in (at(WEDNESDAY, 17, 59), at(WEDNESDAY, 18, 29), at(WEDNESDAY, 21, 0), at(SATURDAY, 19, 0)):
+        self.cached = {'observed': {'tradeDate': '2026-10-01'}}
+        self.assertTrue(sched.tick(at(MONDAY, 7, 10), self.submit))
+        self.cached = {'observed': {'tradeDate': '2026-10-02'}}
+        self.assertFalse(sched.tick(at(MONDAY, 7, 40), self.submit))
+
+    def test_outside_morning_window_and_closed_days_do_nothing(self):
+        self.enable()
+        for moment in (at(WEDNESDAY, 6, 59), at(WEDNESDAY, 9, 0), at(WEDNESDAY, 18, 40), at(SATURDAY, 7, 30)):
             self.assertFalse(sched.tick(moment, self.submit), moment.isoformat())
         self.assertEqual(self.calls, [])
 
@@ -89,9 +101,9 @@ class OptionsScheduleTests(unittest.TestCase):
 
         def reject(kind, params=None):
             raise RuntimeError('queue full')
-        self.assertFalse(sched.tick(at(WEDNESDAY, 18, 40), reject))
-        self.assertEqual(self.attempts()['2026-10-07/1110']['status'], 'rejected')
-        self.assertFalse(sched.tick(at(WEDNESDAY, 18, 50), self.submit))
+        self.assertFalse(sched.tick(at(WEDNESDAY, 7, 10), reject))
+        self.assertEqual(self.attempts()['2026-10-07/420']['status'], 'rejected')
+        self.assertFalse(sched.tick(at(WEDNESDAY, 7, 20), self.submit))
         self.assertEqual(self.calls, [])
 
 

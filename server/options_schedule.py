@@ -1,7 +1,9 @@
-"""收盤後自動更新台指選擇權結構：只排入既有的 options 更新工作，不另建來源管線。
+"""自動更新台指選擇權結構：只排入既有的 options 更新工作，不另建來源管線。
 
+TAIFEX 官方檔把 D 日資料在 D+1 約 06:36（台北）才發布，收盤後同日抓不到當日資料。
+因此在交易日開盤前（07:00–08:30，每 30 分鐘一個時段）更新，此時現貨基準仍是前一交易日收盤，
+與選擇權資料日一致；快取資料日已是前一交易日即停止。
 需擁有者在 data/options_daily_schedule.json 明確設定 enabled=true 才會外送；
-每個交易日三個時段（18:30、19:30、20:30），當日官方資料已入快取即停止，
 時段收據先寫入再排隊，程序重啟不會重複外送。
 """
 from __future__ import annotations
@@ -9,7 +11,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import datastore
@@ -18,8 +20,8 @@ import stock_signals as ss
 from atomic_store import atomic_write_json, load_json
 from 台股交易參考 import session
 
-SLOTS = (18 * 60 + 30, 19 * 60 + 30, 20 * 60 + 30)
-LAST_HOUR = 21
+SLOTS = (7 * 60, 7 * 60 + 30, 8 * 60, 8 * 60 + 30)
+OPEN_HOUR = 9
 POLL_SECONDS = 600
 _thread = None
 
@@ -38,14 +40,25 @@ def _chain_date():
     return observed.get('tradeDate')
 
 
+def previous_session(day):
+    """前一個表定交易日（ISO 字串）；日曆未涵蓋時回傳 None，不以平日推定。"""
+    cursor = date.fromisoformat(day)
+    for _ in range(10):
+        cursor -= timedelta(days=1)
+        if session(cursor)['status'] == 'scheduled':
+            return cursor.isoformat()
+    return None
+
+
 def tick(current, submit):
     """回傳是否在本次排入更新；submit(kind, params) 為統一更新中心的 submit。"""
     day = current.date().isoformat()
-    if not enabled() or session(day)['status'] != 'scheduled' or current.hour >= LAST_HOUR:
+    if not enabled() or session(day)['status'] != 'scheduled' or current.hour >= OPEN_HOUR:
         return False
     minutes = current.hour * 60 + current.minute
     slots = [value for value in SLOTS if value <= minutes]
-    if not slots or _chain_date() == day:
+    expected = previous_session(day)
+    if not slots or expected is None or (_chain_date() or '') >= expected:
         return False
     key = day + '/' + str(slots[-1])
     filename = _data_dir() / 'options_daily_attempts.json'
