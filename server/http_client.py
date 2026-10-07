@@ -135,10 +135,13 @@ class _HostPool:
                     except Exception:
                         pass
                     continue
-                try:
-                    conn.timeout = timeout
-                except Exception:
-                    pass
+                conn.timeout = timeout
+                if conn.sock is not None:
+                    try:
+                        conn.sock.settimeout(timeout)
+                    except OSError:
+                        conn.close()
+                        continue
                 return conn
         return self._open(timeout)
 
@@ -215,6 +218,7 @@ class HttpClient:
         data: Optional[bytes] = None,
         timeout: float = DEFAULT_TIMEOUT,
         retries: int = DEFAULT_RETRIES,
+        deadline: Optional[float] = None,
     ) -> HttpResponse:
         scheme, host, port, path = _parse_url(url)
         pool = self._pool(scheme, host, port)
@@ -235,6 +239,22 @@ class HttpClient:
         attempts = max(0, int(retries)) + 1
         last_exc: Optional[BaseException] = None
 
+        def remaining_timeout():
+            if deadline is None:
+                return timeout
+            budget = deadline - time.monotonic()
+            remaining = budget if timeout is None else min(timeout, budget)
+            if remaining <= 0:
+                raise TimeoutError('來源請求已超過整體期限')
+            return remaining
+
+        def backoff(attempt):
+            delay = min(0.5 * (2 ** attempt), 4.0)
+            if deadline is not None:
+                if deadline - time.monotonic() <= delay:
+                    raise HttpError('來源重試已超過整體期限', url=url, cause=TimeoutError())
+            time.sleep(delay)
+
         with self._stats_lock:
             self._stats['requests'] += 1
 
@@ -246,7 +266,7 @@ class HttpClient:
                 # 粗略：idle 非空視為 reuse（acquire 前後比對太重）
                 with pool._lock:
                     from_pool = bool(pool._idle)
-                conn = pool.acquire(timeout)
+                conn = pool.acquire(remaining_timeout())
                 if from_pool:
                     with self._stats_lock:
                         self._stats['reused'] += 1
@@ -255,16 +275,40 @@ class HttpClient:
                         self._stats['opened'] += 1
 
                 conn.request(method.upper(), path, body=data, headers=hdrs)
+                transport_sock = conn.sock
+                if deadline is not None and transport_sock is not None:
+                    transport_sock.settimeout(remaining_timeout())
                 resp = conn.getresponse()
-                body = resp.read()
+                if deadline is None:
+                    body = resp.read()
+                else:
+                    chunks = []
+                    while True:
+                        remaining = remaining_timeout()
+                        if transport_sock is not None:
+                            transport_sock.settimeout(remaining)
+                        chunk = resp.read1(64 * 1024)
+                        if not chunk:
+                            if resp.length not in (None, 0):
+                                raise http.client.IncompleteRead(b''.join(chunks), resp.length)
+                            break
+                        chunks.append(chunk)
+                    remaining_timeout()
+                    body = b''.join(chunks)
                 status = int(resp.status)
                 # 正規化 header 為 str→str
                 rh = {str(k): str(v) for k, v in resp.getheaders()}
                 # 呼叫端以 Accept-Encoding: gzip 要求壓縮時，回傳解壓後的內容（大型官方批次檔可減少傳輸量）。
                 encoding_key = next((k for k in rh if k.lower() == 'content-encoding'), None)
-                if encoding_key and rh[encoding_key].strip().lower() == 'gzip' and body:
+                wants_gzip = any(k.lower() == 'accept-encoding' and
+                                 any(token.strip().lower() == 'gzip' for token in v.split(','))
+                                 for k, v in hdrs.items())
+                if wants_gzip and encoding_key and rh[encoding_key].strip().lower() == 'gzip' and body:
                     body = gzip.decompress(body)
                     del rh[encoding_key]
+                    length_key = next((k for k in rh if k.lower() == 'content-length'), None)
+                    if length_key:
+                        rh[length_key] = str(len(body))
                 conn_hdr = (rh.get('Connection') or rh.get('connection') or '').lower()
                 reuse = ('close' not in conn_hdr) and status < 400
 
@@ -273,7 +317,7 @@ class HttpClient:
                     conn = None
                     with self._stats_lock:
                         self._stats['retries'] += 1
-                    time.sleep(min(0.5 * (2 ** attempt), 4.0))
+                    backoff(attempt)
                     continue
 
                 if status >= 400:
@@ -297,7 +341,7 @@ class HttpClient:
                 if attempt < attempts - 1 and _is_transient(e):
                     with self._stats_lock:
                         self._stats['retries'] += 1
-                    time.sleep(min(0.5 * (2 ** attempt), 4.0))
+                    backoff(attempt)
                     continue
                 with self._stats_lock:
                     self._stats['errors'] += 1

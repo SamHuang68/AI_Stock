@@ -137,8 +137,7 @@ def _run(symbols, period, kind, budget, job_id):
                 from 台股日線 import seed_research
                 result = seed_research(Path(datastore.DB_PATH), symbol, int(period[:-1]), fetch=budget.get_json, check=budget.check)
             else:
-                now = datetime.now(_TZ[market])
-                cutoff = now.date() if (now.hour, now.minute) >= ((18, 0) if market == 'TW' else (16, 30)) else now.date() - timedelta(days=1)
+                cutoff = datastore.completed_daily_cutoff(market)
                 start = cutoff - timedelta(days=RANGES[period])
                 with datastore.read_snapshot() as conn:
                     covered = conn.execute('SELECT start_date,end_date FROM bar_fetch_coverage WHERE market=? AND symbol=? AND source=? AND start_date<=? ORDER BY end_date DESC LIMIT 1',
@@ -184,7 +183,11 @@ def submit(body):
                    'policy': '沿用首次價格；來源修訂另存；不自動更新整份觀察清單'}
         budget = Budget(_cancel)
         job_id = _active['jobId']
-        queued = job_queue.submit('selected-daily-cache:' + job_id, lambda: _run(symbols, period, kind, budget, job_id))
+        try:
+            queued = job_queue.submit('selected-daily-cache:' + job_id, lambda: _run(symbols, period, kind, budget, job_id))
+        except job_queue.QueueFull as exc:
+            _active.update(status='failed', error=str(exc), finishedAt=time.time())
+            return {'ok': False, 'reason': 'queue_full', **status()}
         if not queued['ok']:
-            _active.update(status='failed', error='共用工作佇列忙碌，請稍後重試')
+            _active.update(status='failed', error='共用工作佇列忙碌，請稍後重試', finishedAt=time.time())
         return {'ok': queued['ok'], **status()}

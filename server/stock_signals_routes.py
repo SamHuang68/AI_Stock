@@ -41,10 +41,7 @@ MAX_BATCH = 40
 PUSH_MODES = ('off', 'digest', 'realtime')
 
 # 交易時段（當地時間）：開盤、收盤、收盤後多久視為最終日 K
-_SESSION = {
-    'TW': ((9, 0), (13, 30), timedelta(minutes=30)),
-    'US': ((9, 30), (16, 0), timedelta(minutes=30)),
-}
+_SESSION = ss.DAILY_SESSIONS
 
 _cache_lock = threading.Lock()
 _cache: Dict[Tuple[str, str, bool], Tuple[float, Dict[str, Any]]] = {}
@@ -100,6 +97,9 @@ def session_state(market: str, last_bar_date: Optional[str],
     calendar = session(local.date()) if market == 'TW' else None
     weekday = not closed(local.date())
     today = local.date().isoformat()
+    if calendar and calendar['status'] == 'unknown':
+        return {'provisional': last_bar_date == today, 'expectedLastDate': None,
+                'sessionOpen': False, 'calendar': calendar, 'localTime': local.isoformat()}
     provisional = bool(weekday and last_bar_date == today and open_t <= local < final_t)
     expected = local.date()
     if not weekday or local < open_t:

@@ -33,12 +33,16 @@ echo.
 echo ============================================================
 echo  2/2 Private Web ST  (scheduled task StockTerminal_PrivateWeb_Host)
 echo ============================================================
-call :gateway_up
+call :web_ready
 if not errorlevel 1 (
-  echo Gateway already answers on 127.0.0.1:18434. Not started again.
+  echo Gateway and backend already answer on 127.0.0.1:18434. Not started again.
   goto :wait_web
 )
-schtasks /query /tn "StockTerminal_PrivateWeb_Host" /fo list 2>nul | findstr /i /c:"Running" >nul
+powershell.exe -NoProfile -Command "try { if ([int](Get-ScheduledTask -TaskName 'StockTerminal_PrivateWeb_Host' -ErrorAction Stop).State -eq 4) { exit 0 }; exit 1 } catch { exit 2 }" >nul 2>nul
+if errorlevel 2 (
+  echo [FAIL] Could not query task StockTerminal_PrivateWeb_Host. No start requested.
+  goto :summary
+)
 if not errorlevel 1 (
   echo Task is already running ^(still starting^). Not started again.
   goto :wait_web

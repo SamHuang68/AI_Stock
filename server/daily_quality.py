@@ -190,6 +190,12 @@ def store_official(conn, symbol, market, rows, source, source_hash, *, check=lam
     for row in rows:
         if not _valid_row(row):
             raise ValueError('官方日線欄位無效；缺值須為 null')
+    # 官方 CLI 也直接呼叫本入口；共用同一完成日界線，不能繞過 datastore。
+    if __package__:
+        from .datastore import completed_daily_rows
+    else:
+        from datastore import completed_daily_rows
+    rows = completed_daily_rows(rows, market, symbol=symbol)
     observed = datetime.now(timezone.utc).isoformat()
     receipt_id = None
     if source_receipt is not None:

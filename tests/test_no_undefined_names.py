@@ -79,8 +79,11 @@ class DayMoversRunsWithoutInjectedGlobals(unittest.TestCase):
                 return []
             raise OSError('offline test: ' + url)
 
-        with mock.patch('http_client.fetch_json', fake_fetch_json):
+        with mock.patch('http_client.fetch_json', fake_fetch_json), \
+                mock.patch.object(server, '_get_tw_sectors', return_value={'2330': '半導體業', '2317': '其他電子業'}), \
+                mock.patch('urllib.request.urlopen', side_effect=AssertionError('離線測試禁止額外網路請求')) as external:
             out = server._fetch_day_movers(5)
+        external.assert_not_called()
         self.assertTrue(out.get('ok'), out)
         # 只有兩檔、n=5：兩個榜單都會列出兩檔，重點是「有資料」且排序正確（數字解析要成功）。
         self.assertEqual(out['gainers'][0]['code'], '2330')

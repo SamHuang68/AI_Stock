@@ -344,14 +344,22 @@ function refreshWatchBgBtn() {
   const btn = document.getElementById('watch-bg-btn');
   if (!btn) return;
   const SRV = window.SERVER || 'http://localhost:18432';
-  fetch(`${SRV}/watch/status`, { cache: 'no-store' }).then(r => r.json()).then(s => {
+  fetch(`${SRV}/watch/status`, { cache: 'no-store' }).then(r => {
+    if (!r.ok) { const error = Error('無法確認後端偵測狀態'); error.status = r.status; throw error; }
+    return r.json();
+  }).then(s => {
+    btn.disabled = false;
     const on = !!s.enabled;
     btn.dataset.on = on ? '1' : '0';
     btn.textContent = on ? '停用' : '啟用';
     btn.style.color = on ? 'var(--red)' : 'var(--green)';
     btn.style.borderColor = on ? 'var(--red)' : 'var(--green)';
     btn.title = on ? `執行中 · 規則 ${s.rules_count} 檔 · 上次 ${s.last_run || '—'}` : '點擊啟用後端 24h 偵測';
-  }).catch(() => { btn.textContent = '啟用'; });
+  }).catch(error => {
+    btn.disabled = true; btn.dataset.on = '';
+    btn.textContent = error.status === 403 ? '僅擁有者可用' : '狀態無法確認';
+    btn.title = error.status === 403 ? '後端偵測設定與私人狀態需要擁有者權限' : error.message;
+  });
 }
 async function toggleWatchBg(btn) {
   const SRV = window.SERVER || 'http://localhost:18432';

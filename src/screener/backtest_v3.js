@@ -103,8 +103,14 @@
     '費用與滑價為可調情境值，非券商牌告；未含借券、融資、股息、稅務與整張限制。',
     '未驗證還原價格、點時財報與下市全集，不能宣稱已消除存活者偏差；不等同訊號成績單事件研究。',
   ]);
-  const DATE_FORMATTERS = Object.fromEntries([['TW', 'Asia/Taipei'], ['US', 'America/New_York']].map(([market, timeZone]) =>
-    [market, new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })]));
+  const DATE_FORMATTERS = Object.create(null);
+  function dateFormatter(market) {
+    if (market !== 'TW' && market !== 'US') throw new TypeError('日線市場未提供日期契約');
+    if (!DATE_FORMATTERS[market]) DATE_FORMATTERS[market] = new Intl.DateTimeFormat('en-CA', {
+      timeZone: market === 'US' ? 'America/New_York' : 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit'
+    });
+    return DATE_FORMATTERS[market];
+  }
 
   function settings(opts) {
     const out = Object.assign({}, DEFAULTS, opts || {});
@@ -124,7 +130,7 @@
     if (typeof time === 'number' && Number.isFinite(time)) {
       const date = new Date(time * 1000);
       if (!Number.isFinite(date.getTime())) throw new Error('日線時間無效');
-      const parts = DATE_FORMATTERS[market || 'TW'].formatToParts(date);
+      const parts = dateFormatter(market || 'TW').formatToParts(date);
       const get = key => parts.find(p => p.type === key).value;
       return `${get('year')}-${get('month')}-${get('day')}`;
     }

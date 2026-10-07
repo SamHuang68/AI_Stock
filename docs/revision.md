@@ -5,6 +5,20 @@
 
 ---
 
+## v5.0 修訂 — 2026-10-08 A–M 修正與 Claude 覆核補正
+
+產品版本維持 **5.0**；基準 `d3fed73553034e7680a526f0203e2b93890d0bf8`，分支 `codex/review-fixes-20261008`。提交識別與正式發布證據依 Git 及發布清單記錄。
+
+補正選擇權長假排程、movers 共用期限與重用 socket timeout、未要求 gzip 的相容性、日線完成日界線、Reader 私人警報權限、受管程序收據、佇列拒收終態、歷史同步鎖、行情效期及日線更新契約；保留原修訂歷史與資料品質保護。
+
+Claude 的第一輪材料驗收未通過，後續補正包括：既有 `__MARGIN_RATIO__` 衍生序列不套用個股盤中 K 棒界線；分享包可離線執行修正回歸、Private Web 專屬案例明示略過；產業分類沿用既有 HTTP client 並納入 movers 共用期限；無 deadline 的 `timeout=None`／`0` 保留原傳遞語意；Reader 警報介面顯示僅擁有者可見且清除舊表單；排程以數值狀態判斷，未知狀態不啟動；更新器拒絕舊按埠停止邏輯；Pulse 測試改用公開結果與明確暫存清理，工作者未停止時保留隔離設定與證據。
+
+最終 Claude 材料與結果驗收完成後，逐項補正：deadline 讀取固定長度短回應時回報 `IncompleteRead` 並沿用既有重試；Owner 警報寫入的 HTTP／連線失敗明示提示；分類來源部分失敗仍保留已取得與舊快取，並揭露未完成；研究回補以實際接受筆數計算、明列 `excludedIncomplete`；官方日線的直接寫入與全市場匯入也共用完成日界線，未完成日不得登記完成。這批補正由 Codex 查證與驗證，沒有自動追加 Claude 輪次；原 hosted 阻塞根因仍未證實。最終提交與覆核受審版本的差異另列交付證據。
+
+驗證包含 Windows 真實 CMD、PowerShell 5.1／7、venv 程序鏈、實際分享 ZIP 與 Reader／Owner 前端離線案例。原 hosted Windows CI 的 Pulse 終態逾時與 Node VM 3000ms 錯誤根因仍未證實；本次保留失敗診斷與延後 ICU 初始化，不宣稱原 CI 根因已修復。既有疑似污染資料另有唯讀診斷及修復提案，未直接覆寫正式 DB。最新套件、覆核及發布結果另見外部交付證據。
+
+---
+
 ## v5.0 修訂 — 2026-10-08 TWSE／TPEx 批次抓取改用既有 http_client（候選，未發布）
 
 產品版本仍為 **5.0**；基底 `6f3cf19214f64192c60db7dabe77ebc5956078b2`，分支 `claude/st-tpex-fetch-retry`，提交 SHA 見該分支與 PR。
@@ -262,3 +276,37 @@ Claude 於 2026-10-03 UTC 以既有 claude.ai 官方 CLI 完成本提交的首�
 - **v3.5–3.7** Yahoo 日線落後修正、build 根因修正 + LRU TTL、全球型 ETF 持股完整抓取。
 - **v3.0** 19 種型態辨識(經典/諧波/艾略特/循環)。
 - **v2.0** 倉位管理(POS)+ 多訊號觀察(WATCH)+ 共識評分 + (i) 中文說明。
+
+
+## v5.0 修訂 — 2026-10-08 A–M 審查修正（未提交本機候選）
+
+產品版本維持 **5.0**；基準 `d3fed73553034e7680a526f0203e2b93890d0bf8`。尚未 commit、push、合併或發布；修正版本由 repository 外完整 patch 與逐檔 SHA-256 固定，不以基準 SHA 冒充候選。
+
+- A：前交易日依已涵蓋日曆回溯，不再受十天限制；遇未知年度停止。新增長假、週末、跨年與重啟收據案例。
+- B、D、K：http_client 共用 monotonic 期限及剩餘請求／退避預算，首試不強制切半；movers 使用 8.5 秒來源預算並明示超時。重用連線更新 socket timeout；只有選用 gzip 的呼叫解壓，回傳長度與 body 一致。離線首試逾時、晚到重試、長短 timeout 與 gzip 相容案例通過。DNS 等底層不合作工作以呼叫端有界等待隔離，未測真實官方來源。
+- C：movers 測試固定產業 fixture，拒絕額外 urlopen；仍載入真正模組，不注入正式 globals。
+- E：upsert 與來源合併共同排除未完成日線，涵蓋首次 backfill、update fallback 及投組呼叫；共用既有台股 14:00 完成界線，美股依既有日曆（含提早收盤）加 30 分鐘確認期。首次盤中未寫入、盤後可寫入案例通過。既有疑似污染資料未修改，另交唯讀診斷與待核准修復方案。
+- F：alert／watch status 改為 Owner-only，額外 Reader 路由不能覆寫私人邊界；路由與本機假上游 HTTP 案例通過。
+- G、M：重用 PR #168（head `9556cd0b4ba1465adc3ec24064f318844ee3ea41`）的程序收據保護，補上啟動父程序與命令列核對；Pull 使用 AST 檢查實際行為。PowerShell 5.1 與 pwsh 的未知 listener、錯誤收據、命令列不符及 Pull 註解／redirect 案例通過。未合併 PR #168。
+- H：QueueFull 拒收轉 failed 並回 HTTP 503，下一次可提交；狀態與 HTTP 案例通過。
+- I：網路與 sleep 不持寫鎖，逐批短交易合併；status／history 用唯讀連線，不反覆建表。阻塞 fetch 時查詢及同步單例案例通過。
+- J：MarketData.get 按現在時間重算效期，刷新失敗保留訊息，shell 不再沿用舊綠燈。假時鐘失效與恢復案例通過。
+- L：日線資料源更新接回既有標的選擇介面及 daily-cache 工作；缺少標的時明確拒絕，不啟動缺參數 CLI，不改為 update-universe。
+- Windows CI：Pulse teardown 必須確認 worker 停止才清理目錄，未停止時保留證據，逾時輸出工作收據與執行緒堆疊。回測核心延後建立 ICU formatter，VM 載入階段不初始化時區物件，保留 3000ms 門檻。原失敗測試在本機定向驗證通過；hosted Windows CI 未重跑。Pulse 原始阻塞點仍無法確定；ICU 成本已移出 VM 載入段，但不能證實它是該次 CI 唯一原因。
+
+驗證：最終 188 個選定整合案例通過（77.603 秒）；另有研究核心單一案例及五個 JavaScript 自測入口通過。中間修正另有 48 個定向案例通過，五個 JavaScript 自測入口通過。未執行整套測試或全倉庫掃描。靜默例外棘輪降低 http_client 5→4、pulse_history 6→4，其餘修改檔未增加。最終測試結果、patch 與候選雜湊見 `AI-Workspace/docs/stock-terminal/review-fixes-20261008`。
+
+範圍外發現：PR #173 在 gateway 存活、backend 已死時跳過 host 啟動，另列審查待辦。本候選只修 A–M。Claude 首輪因缺少必要依賴未獲封包驗收；依其意見修正 URI 編碼、無效標的 HTTP 400、慢速 gzip 預算、晚到 worker 快照、收據讀取失敗與跨平台測試邊界，補齊依賴後交同一位 Claude 複審。複審回傳指出完成時間不一致，已依既有契約修正並補測；其位置引用被封包驗收拒絕，不算通過。最新修正尚無有效的最終 Claude 覆核。實際結果見外部證據。
+
+額度恢復後最後一輪（2026-10-08）：04:41 後以既有 Claude CLI 執行，回傳五項意見，但仍有四項必要材料缺口，驗收為 not-accepted，不能稱為覆核通過。依已證實意見修正 movers 的實際採用來源／partial，遭拒用來源回滾；受管 history 工作改用共用 completed_daily_cutoff，TW 未知年度在體檢中也保持暫定；Reader 的 WATCH 狀態按鈕明示僅擁有者可用。新增測試已進入發行必要清單。Pulse 測試若工作者不能停止，保留目錄與替身並停止該批測試，不先恢復全域設定。
+
+後續定向驗證：193 個選定整合案例通過（82.942 秒），研究核心單一案例與五個 JavaScript 入口的既有成功證據保留，其中新增 Reader 降級的 JavaScript 入口已重驗。發行檢查在 repository 外的暫存 Git 索引納入兩份新增測試後通過，原 Git 索引完全未變；尚未提交的新檔在一般發行預檢下仍會被正確拒絕。最後一輪後不再追加 Claude 呼叫，排程已停用；本次後續修正沒有有效的最終 Claude 覆核。原 hosted CI 根因及正式資料疑似污染仍未判定或修復。
+
+## v5.0 修訂 — 2026-10-08 審查缺口與發布候選
+
+Sam 追加授權修正審查未通過部分，完成必要驗證後提交、推送及部署；產品版本維持 **5.0**。以下接續前一階段紀錄，既有歷史與正式資料保留。
+
+- 雙啟動器以 gateway 的 `upstream:true` 判斷完整 Web 就緒；gateway 存活而後端停止時，仍會啟動未執行的 host 排程。保留 Running 防重啟、有限輪詢及四種退出碼，ASCII／CRLF 以 Git 原始位元組保存。離線 CMD 使用外部命令替身，保留真實標籤、管線與退出碼解析。
+- 開發收據支援一層 Windows venv Python 轉接器，核對釘選／基礎執行檔、絕對工作樹命令、CMD 路徑及啟動時已捕獲的父程序建立時間。超深、未知、身分不符的程序鏈仍拒絕登記與自動停止。實際隔離 venv 與動態 loopback 埠可重現舊拒寫情境。
+- `-Pull` 快轉完成後重新載入磁碟上的新版腳本，保留開發與 RebuildOnly 語意，省略 Pull 避免重複更新；UpdateOnly 維持更新後退出。
+- 發行必要清單包含新增 CMD 回歸測試；完整版 Python、JavaScript、瀏覽器與研究驗證及 Claude 覆核結果由版本固定的外部證據回報。先前 Claude 材料未獲驗收的結果仍不算通過；原 hosted CI 的阻塞根因沒有因本機通過而改判。

@@ -1582,6 +1582,10 @@
       var market = window.MarketData && MarketData.get ? MarketData.get() : null;
       if (market && market.freshness && window.MarketFreshness && MarketFreshness.shellHealthText) {
         var health = MarketFreshness.shellHealthText(market.freshness);
+        if (market.refreshError) {
+          health.mode = health.mode === 'err' ? 'err' : 'warn';
+          health.text += ' · 刷新失敗';
+        }
         setSync(health.mode, health.text);
         return;
       }

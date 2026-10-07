@@ -43,11 +43,13 @@ def _chain_date():
 def previous_session(day):
     """前一個表定交易日（ISO 字串）；日曆未涵蓋時回傳 None，不以平日推定。"""
     cursor = date.fromisoformat(day)
-    for _ in range(10):
+    while True:
         cursor -= timedelta(days=1)
-        if session(cursor)['status'] == 'scheduled':
+        status = session(cursor)['status']
+        if status == 'unknown':
+            return None
+        if status == 'scheduled':
             return cursor.isoformat()
-    return None
 
 
 def tick(current, submit):
