@@ -6532,11 +6532,6 @@ if __name__ == '__main__':
                 print('[stock-signal] push daemon started (%s)' % _ac.get('stock_signal_push'))
         except Exception as _e:
             print('[alert] start failed:', _e)
-    try:
-        import 個股研究維護 as _research_maintenance
-        _research_maintenance.start_daemon()
-    except Exception as _e:
-        print('每日個股留存啟動失敗：', type(_e).__name__)
     if getattr(sys, 'frozen', False):
         # 打包成 app 時:啟動後自動開 tip 總覽（#pulse）；絕不開無 hash 舊圖表殼
         try:
@@ -6554,6 +6549,13 @@ if __name__ == '__main__':
                                     _pulse_decision.committed_pulse_for_job):
             raise RuntimeError('無法取得唯一 Pulse 更新工作者，停止啟動以避免快照分歧')
         configure_updates(_pulse_updates)
+        # 每日個股留存會在交易日 14:00-21:00 一啟動就排工作；必須等持久佇列接線後才能啟動，
+        # 否則舊佇列已有工作時 configure_updates 會拒絕並使服務啟動失敗。
+        try:
+            import 個股研究維護 as _research_maintenance
+            _research_maintenance.start_daemon()
+        except Exception as _e:
+            print('每日個股留存啟動失敗：', type(_e).__name__)
         try:
             import options_schedule as _options_schedule
             _options_schedule.start_daemon(_update_coordinator().submit)
