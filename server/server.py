@@ -6554,6 +6554,11 @@ if __name__ == '__main__':
                                     _pulse_decision.committed_pulse_for_job):
             raise RuntimeError('無法取得唯一 Pulse 更新工作者，停止啟動以避免快照分歧')
         configure_updates(_pulse_updates)
+        try:
+            import options_schedule as _options_schedule
+            _options_schedule.start_daemon(_update_coordinator().submit)
+        except Exception as _e:
+            print('選擇權每日更新排程啟動失敗：', type(_e).__name__)
         _http_server.serve_forever()
     finally:
         try:
