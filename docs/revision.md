@@ -5,6 +5,18 @@
 
 ---
 
+## v5.0 修訂 — 2026-10-08 一鍵啟動 local 與 web（候選，未發布）
+
+產品版本仍為 **5.0**；基底 `ad2dd0f773216742ac641f30251fff02a72a7eed`，分支 `claude/st-launcher-all`，提交 SHA 見該分支與 PR。僅新增根目錄啟動檔，不改產品程式。
+
+| 改動 | 原因與行為 | 驗證／狀態 |
+| --- | --- | --- |
+| 新增 `START_LOCAL_AND_WEB.cmd` | local 沒有開機自啟，重開機後需手動啟動兩邊。檔案依序啟動 local（`START_TIP.cmd`）與 web（排程 `StockTerminal_PrivateWeb_Host`），已在線者不重複啟動，並以 `/health` 與 gateway `upstream:true` 判斷就緒；結束碼 0＝兩邊正常、1＝local 掛、2＝web 掛、3＝都掛。`START_TIP.cmd` 在 local 由停止狀態啟動時不會返回，因此改為分離啟動並輪詢 `/health`（上限 120 秒）。web 不使用 `START_PRIVATE_WEB_HOST.cmd`（它讀原始碼目錄的資料，會形成第三套資料）。 | 已實測「兩邊都在線」路徑：兩邊 UP、結束碼 0。**未實測**：local 或 web 停止時的啟動路徑、逾時與非零結束碼。未發布。 |
+
+已知限制：只能在 local 與 web 都已安裝受管理版本時使用；web 啟動依賴既有排程，未改動排程。
+
+---
+
 ## v5.0 修訂 — 2026-10-07 選擇權排程改為開盤前、ETF 探測不再截斷回應（候選，未發布）
 
 產品版本仍為 **5.0**；基底 `6eb2769ce18aec2c086c55ff21a8bb922598187b`，分支 `claude/st-options-morning-etf-probe`，提交 SHA 見該分支與 PR。
