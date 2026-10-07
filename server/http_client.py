@@ -11,6 +11,7 @@ stdlib only（http.client）。目的：
 """
 from __future__ import annotations
 
+import gzip
 import http.client
 import json
 import socket
@@ -259,6 +260,11 @@ class HttpClient:
                 status = int(resp.status)
                 # 正規化 header 為 str→str
                 rh = {str(k): str(v) for k, v in resp.getheaders()}
+                # 呼叫端以 Accept-Encoding: gzip 要求壓縮時，回傳解壓後的內容（大型官方批次檔可減少傳輸量）。
+                encoding_key = next((k for k in rh if k.lower() == 'content-encoding'), None)
+                if encoding_key and rh[encoding_key].strip().lower() == 'gzip' and body:
+                    body = gzip.decompress(body)
+                    del rh[encoding_key]
                 conn_hdr = (rh.get('Connection') or rh.get('connection') or '').lower()
                 reuse = ('close' not in conn_hdr) and status < 400
 
