@@ -455,3 +455,9 @@ Sam 追加授權修正審查未通過部分，完成必要驗證後提交、推�
 - `server_go_ps.out.log`／`server_go_ps.err.log` 以追加方式保留，沒有自動輪替或截斷；長期開發時由使用者在已停止自有伺服器後封存。這保留原始錯誤證據，也明示日誌會成長的維運限制。
 - 原生 Windows CMD 的 `chcp 65001`／`set /p`／`if exist` 讀取邊界，在含 BOM 與無 BOM 的合成 Unicode 路徑都成功且未 fallback；不能把 BOM 存在當成 WaveDeck 啟動事故。保留現行 UTF-8 writer，釘選回歸案例補上真實 WaveDeck CMD 讀取邊界。各實際讀者與版本限制見外部查證收據，不宣稱未來 Python 版本相容。
 - 基底為 `3f24218539634168c3189f07aada2568344b9190`，VERSION 維持 5.0；本節撰寫時為未提交來源補正。單一 pin 方法與原生 CMD 讀取邊界均成功，沒有重跑完整套件或 stage；最後文件與 DONE 訊息補正以差異及執行區段位元組核對驗證。最終提交、推送與受管安裝的實際狀態，互相引用 `AI-Workspace/docs/stock-terminal/review-fixes-20261008/closeout-20261009/final-closeout-report.md`；不能由本節推定新來源已部署。
+
+### 2026-10-09 — 啟動器測試 fixture 移除 Windows 暫存環境假設
+
+- 基底為 `2524752484203703ce7db99f45467dc0c5c5621b`，VERSION 維持 5.0。該提交自動 CI 的 Ubuntu 主測試因 `TEMP` 未設定，新增健康身分 fixture 在進入被測函式前的 `Join-Path` 就失敗，五個子案例均未測到預期行為；原失敗日誌保留，不視為偶發。
+- 同類範圍掃描找到 configuration 共用 helper 的兩個方法使用此環境假設。改由 Python 已建立的隔離暫存目錄透過 `ST_TEST_FIXTURE_ROOT` 明確傳入；仍擷取正式函式，沒有注入缺少的正式 globals、跳過 Linux 案例或放寬健康身分判斷。
+- 移除 `TEMP`／`TMP` 後以 Windows 原生 PS5.1 與 pwsh 精準重現原健康方法失敗，再只驗證同 helper 的兩個方法。Linux 真實終態由補正提交的自動 CI 記錄；本條撰寫時為未提交候選，實際提交、推送、CI 及受管發布狀態引用同版本外部 `final-closeout-report.md`。沒有重跑完整本機套件或 stage，也沒有修改產品執行程式。

@@ -645,7 +645,7 @@ class LauncherConfigurationBehaviorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             script = Path(tmp) / 'configuration.ps1'
             script.write_text(source, encoding='utf-8-sig')
-            env = dict(os.environ, **{k: str(v) for k, v in values.items()})
+            env = dict(os.environ, ST_TEST_FIXTURE_ROOT=tmp, **{k: str(v) for k, v in values.items()})
             args = [engine, '-NoProfile', '-File', str(script)]
             if os.name == 'nt':
                 args[2:2] = ['-ExecutionPolicy', 'Bypass']
@@ -658,7 +658,7 @@ class LauncherConfigurationBehaviorTests(unittest.TestCase):
         for name, engine in _powershell_engines().items():
             for port in ('19234', '1', '65535', '0', '-1', '65536', 'invalid'):
                 with self.subTest(engine=name, port=port):
-                    code, out = self.run_source(engine, "$Root=$env:TEMP\n" + section + "\nWrite-Host ('PORT=' + $Port + ';CHILD=' + $env:ST_PORT)\n", ST_PORT=port)
+                    code, out = self.run_source(engine, "$Root=$env:ST_TEST_FIXTURE_ROOT\n" + section + "\nWrite-Host ('PORT=' + $Port + ';CHILD=' + $env:ST_PORT)\n", ST_PORT=port)
                     if port in ('19234', '1', '65535'):
                         self.assertEqual(code, 0, out)
                         self.assertIn('PORT=' + port + ';CHILD=' + port, out)
@@ -671,7 +671,7 @@ class LauncherConfigurationBehaviorTests(unittest.TestCase):
         section = text[text.index('function Wait-TipServer'):text.index('function Assert-IndexIsTip')]
         driver = r"""
 $ErrorActionPreference='Stop'
-$Root=$env:TEMP
+$Root=$env:ST_TEST_FIXTURE_ROOT
 $Python=Join-Path $Root 'fixture-python.exe'
 $Port=19234
 function Invoke-WebRequest {
