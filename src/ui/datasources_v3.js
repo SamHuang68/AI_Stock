@@ -102,10 +102,27 @@
     box.querySelector('#ds-list').innerHTML = '<table id="ds-tbl"><tbody>' + _data.sources.map(rowHtml).join('') + '</tbody></table>';
     box.querySelectorAll('.ds-btn[data-ds]').forEach(function (b) { b.onclick = function () { doRefresh(b.getAttribute('data-ds'), b); }; });
     var allBtn = document.getElementById('ds-all');
-    if (allBtn) allBtn.onclick = async function () { for (var i = 0; i < updatable.length; i++) { await doRefresh(updatable[i].id, null); } };
+    if (allBtn) allBtn.onclick = async function () {
+      var needsScope = updatable.some(function (s) { return s.id === 'db'; });
+      for (var i = 0; i < updatable.length; i++) {
+        if (updatable[i].id !== 'db') await doRefresh(updatable[i].id, null);
+      }
+      var status = document.getElementById('ds-st');
+      if (needsScope && status) status.textContent += '；日線未更新，請另按日線更新並選擇標的。';
+    };
   }
 
   async function doRefresh(id, btn) {
+    if (id === 'db') {
+      if (window.DailyCacheUI && DailyCacheUI.open) {
+        var modal = document.getElementById('ds-modal');
+        if (modal) modal.style.display = 'none';
+        DailyCacheUI.open(); return;
+      }
+      var status = document.getElementById('ds-st');
+      if (status) status.textContent = '日線更新介面尚未就緒，請稍後再試。';
+      return;
+    }
     var stEl = document.getElementById('ds-st');
     var densEl = document.getElementById('ds-density');
     var density = (densEl && densEl.value) || 'month';

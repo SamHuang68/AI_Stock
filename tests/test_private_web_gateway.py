@@ -136,6 +136,16 @@ def _request(url: str, *, method: str = "GET", token: str | None = None,
 
 
 class PrivateWebGatewayTests(unittest.TestCase):
+    def test_private_alert_status_is_owner_only(self):
+        for path in ('/alert/status', '/watch/status'):
+            before = len(UpstreamHandler.seen)
+            status, payload = _request(self.base + path, token='reader-secret')
+            self.assertEqual(status, 403)
+            self.assertEqual(len(UpstreamHandler.seen), before)
+            status, payload = _request(self.base + path, token='owner-secret')
+            self.assertEqual(status, 200)
+            self.assertEqual(payload['path'], path)
+
     def test_gateway_backlog_covers_dashboard_asset_fanout(self):
         self.assertGreaterEqual(gateway.PrivateWebServer.request_queue_size, 128)
 

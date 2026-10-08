@@ -15,6 +15,9 @@ from pathlib import Path
 
 import etf_paths
 
+# /etf-delta 回應已超過 2 MB；上限只防失控回應，不可截斷合法內容（截斷會使 JSON 無法解析）。
+MAX_PROBE_BYTES = 16 * 1024 * 1024
+
 
 def _trace_path() -> Path:
     # A health read must not turn a genuinely missing history directory into
@@ -51,8 +54,17 @@ def probe_api(url: str, expected: dict, timeout: float = 5.0) -> dict:
     try:
         request = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read(1024 * 1024)
+            raw = response.read(MAX_PROBE_BYTES + 1)
             status = int(getattr(response, "status", 200))
+        if len(raw) > MAX_PROBE_BYTES:
+            return {
+                "state": "response_too_large",
+                "httpStatus": status,
+                "date": None,
+                "expectedDate": expected.get("latestDate"),
+                "limitBytes": MAX_PROBE_BYTES,
+                "elapsedMs": round((time.monotonic() - started) * 1000),
+            }
         payload = json.loads(raw.decode("utf-8"))
         actual = payload.get("date") if isinstance(payload, dict) else None
         api_history = (

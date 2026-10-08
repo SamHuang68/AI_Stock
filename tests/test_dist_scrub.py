@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -34,11 +36,40 @@ class TestDistScrub(unittest.TestCase):
     def test_archive_passes_same_post_compression_scanner(self):
         self.assertEqual(build_dist.verify_archive(self.zip_path), [])
 
+    def test_review_regressions_run_from_the_actual_single_machine_share(self):
+        target = Path(self.temp_dir.name) / 'share-regression-fixture'
+        target.mkdir()
+        with zipfile.ZipFile(self.zip_path) as archive:
+            for item in archive.infolist():
+                self.assertTrue((target / item.filename).resolve().is_relative_to(target.resolve()))
+            archive.extractall(target)
+        share = target / 'Stock_Terminal'
+        self.assertFalse((share / 'server/private_web_gateway.py').exists())
+        for name in ('test_server_http_security.py', 'test_Pulse讀寫分離.py', 'test_decision_http.py'):
+            self.assertTrue((share / 'tests' / name).is_file(), name)
+        result = subprocess.run([sys.executable, '-B', '-X', 'utf8', '-m', 'unittest',
+                                 'tests.test_review_regressions', '-v'], cwd=share,
+                                env=dict(os.environ, PYTHONUTF8='1'), capture_output=True,
+                                text=True, encoding='utf-8', timeout=45)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('單機分享包不包含 Private Web gateway', result.stderr)
+        self.assertIn('OK (skipped=1)', result.stderr)
+        launcher = subprocess.run([sys.executable, '-B', '-X', 'utf8', '-m', 'unittest',
+                                   'tests.test_launcher_cmd.LauncherCmdOfflineBehaviorTests',
+                                   'tests.test_launcher_cmd.ScheduledTaskQueryOfflineTests', '-v'], cwd=share,
+                                  env=dict(os.environ, PYTHONUTF8='1'), capture_output=True,
+                                  text=True, encoding='utf-8', timeout=90)
+        self.assertEqual(launcher.returncode, 0, launcher.stdout + launcher.stderr)
+        self.assertIn('OK', launcher.stderr)
+        if os.name == 'nt':
+            self.assertNotIn('skipped=', launcher.stderr, 'Windows 分享包必須真的執行兩個啟動器類別')
+
     def test_has_core_share_files(self):
         required = {
             "Stock_Terminal/README.md",
             "Stock_Terminal/LICENSE",
             "Stock_Terminal/START_TIP.cmd",
+            "Stock_Terminal/START_LOCAL_AND_WEB.cmd",
             "Stock_Terminal/server/server.py",
             "Stock_Terminal/server/daemon_lock.py",
             "Stock_Terminal/server/market_contract.py",
@@ -68,6 +99,10 @@ class TestDistScrub(unittest.TestCase):
             "Stock_Terminal/tests/test_benchmark_research.py",
             "Stock_Terminal/tests/test_options_exposure.py",
             "Stock_Terminal/tests/test_options_schedule.py",
+            "Stock_Terminal/tests/test_review_regressions.py",
+            "Stock_Terminal/tests/test_launcher_cmd.py",
+            "Stock_Terminal/tests/test_launcher_pull.py",
+            "Stock_Terminal/tests/review_market_state_selftest.js",
             "Stock_Terminal/tests/test_server_startup_order.py",
             "Stock_Terminal/tests/test_overnight_intraday.py",
             "Stock_Terminal/tests/layout_visual_v5_selftest.js",

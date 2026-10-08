@@ -7,9 +7,9 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.request import Request, urlopen
 
 import datastore
+import http_client
 import job_queue
 from stock_signals import _TZ, bar_date
 
@@ -55,9 +55,18 @@ class Budget:
         self.before_request()
         if self.remaining() < 0.05:
             raise TimeoutError('剩餘時間不足以取得來源資料')
-        with urlopen(Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}),
-                      timeout=min(15, self.remaining())) as response:
-            raw = response.read(12_000_001)
+        try:
+            response = http_client.request('GET', url,
+                headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Accept-Encoding': 'gzip'},
+                timeout=min(15, self.remaining()), retries=0,
+                deadline=min(self.ends, time.monotonic() + 15), max_body_bytes=12_000_000)
+            raw = response.body
+        except http_client.HttpError as error:
+            if isinstance(error.cause, TimeoutError):
+                raise TimeoutError('來源請求已超過本次期限') from error
+            raise
+        finally:
+            self.check()
         retrieved_at = datetime.now(timezone.utc).isoformat()
         self.check()
         if len(raw) > 12_000_000:
@@ -117,13 +126,13 @@ def cancel(job_id):
             _active.update(status='cancelled', error='已取消排隊工作；不再取得來源或寫入資料', finishedAt=time.time(), sourceRequests=0)
             return {'ok': True, 'jobId': job_id, 'status': 'cancelled', 'message': _active['error']}
         _active['status'] = 'cancelling'
-        return {'ok': True, 'jobId': job_id, 'status': 'cancelling', 'message': '等待目前來源請求結束，最長約 20 秒；回傳後不再寫入該批次'}
+        return {'ok': True, 'jobId': job_id, 'status': 'cancelling', 'message': '等待目前來源請求結束；回傳後不再寫入該批次'}
 
 
 def _run(symbols, period, kind, budget, job_id):
     global _active
     with _lock:
-        if not _active or _active['jobId'] != job_id or _active['status'] == 'cancelled':
+        if not _active or _active['jobId'] != job_id or _active['status'] != 'queued':
             return
         _active['status'] = 'running'
     final_status, error = 'completed', None
@@ -137,8 +146,7 @@ def _run(symbols, period, kind, budget, job_id):
                 from 台股日線 import seed_research
                 result = seed_research(Path(datastore.DB_PATH), symbol, int(period[:-1]), fetch=budget.get_json, check=budget.check)
             else:
-                now = datetime.now(_TZ[market])
-                cutoff = now.date() if (now.hour, now.minute) >= ((18, 0) if market == 'TW' else (16, 30)) else now.date() - timedelta(days=1)
+                cutoff = datastore.completed_daily_cutoff(market)
                 start = cutoff - timedelta(days=RANGES[period])
                 with datastore.read_snapshot() as conn:
                     covered = conn.execute('SELECT start_date,end_date FROM bar_fetch_coverage WHERE market=? AND symbol=? AND source=? AND start_date<=? ORDER BY end_date DESC LIMIT 1',
@@ -184,7 +192,17 @@ def submit(body):
                    'policy': '沿用首次價格；來源修訂另存；不自動更新整份觀察清單'}
         budget = Budget(_cancel)
         job_id = _active['jobId']
-        queued = job_queue.submit('selected-daily-cache:' + job_id, lambda: _run(symbols, period, kind, budget, job_id))
+        try:
+            queued = job_queue.submit('selected-daily-cache:' + job_id, lambda: _run(symbols, period, kind, budget, job_id))
+        except job_queue.QueueFull as exc:
+            budget.event.set()
+            _active.update(status='failed', error=str(exc), errorType=type(exc).__name__, finishedAt=time.time(), sourceRequests=0)
+            return {'ok': False, 'reason': 'queue_full', **status()}
+        except Exception as exc:
+            budget.event.set()
+            _active.update(status='failed', error=str(exc) or type(exc).__name__, errorType=type(exc).__name__, finishedAt=time.time(), sourceRequests=0)
+            return {'ok': False, 'reason': 'queue_error', **status()}
         if not queued['ok']:
-            _active.update(status='failed', error='共用工作佇列忙碌，請稍後重試')
+            budget.event.set()
+            _active.update(status='failed', error='共用工作佇列忙碌，請稍後重試', finishedAt=time.time())
         return {'ok': queued['ok'], **status()}

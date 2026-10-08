@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class LauncherSafetyTests(unittest.TestCase):
     def test_windows_unicode_entrypoints_preserve_crlf_bytes(self):
         attrs = (ROOT / '.gitattributes').read_text(encoding='utf-8')
-        for name in ('STOP_PRIVATE_WEB.cmd', 'wavedeck/START_WAVEDECK.cmd'):
+        for name in ('STOP_PRIVATE_WEB.cmd', 'START_LOCAL_AND_WEB.cmd', 'wavedeck/START_WAVEDECK.cmd'):
             with self.subTest(name=name):
                 raw = (ROOT / name).read_bytes()
                 self.assertIn(b'\r\n', raw)
@@ -51,10 +52,29 @@ class LauncherSafetyTests(unittest.TestCase):
         script = raw.decode('utf-8-sig')
         guard = script.index('ST-LAUNCHER-GUARD')
         # 防呆必須在任何會關閉 18432 埠的動作之前，且只在「一般啟動」（沒有明確開發參數）時生效。
-        self.assertLess(guard, script.index('Stop-PortListeners -PortNum $Port'))
+        self.assertLess(guard, script.index('Stop-OwnedPortListeners -PortNum $Port'))
         gate = script.index('-not ($Worktree -or $Pull -or $UpdateOnly -or $RebuildOnly)')
         self.assertLess(gate, guard)
         self.assertLess(guard, script.index('$TipBranch ='))
+
+    def test_launcher_never_kills_by_port(self):
+        # 規則 0015 §4：腳本不得依埠任意終止程序。開發流程只能結束「收據登記的自己的程序」，
+        # 其他占用者一律拒絕。Stop-Process 只能出現在 Stop-OwnedPortListeners 內，且在 ST-PORT-GUARD 之後。
+        # Windows 的 CI 會把檔案檢出成 CRLF；以下用 \n 比對位置，所以先統一換行。
+        script = (ROOT / 'scripts' / 'go.ps1').read_bytes().decode('utf-8-sig').replace('\r\n', '\n')
+        # 行為驗收器會以字串識別並拒絕舊命令；不可把拒絕清單誤當成實際執行。
+        # 真 PowerShell AST 的函式內／外停止與 taskkill 拒絕另由 test_launcher_pull 覆蓋。
+        self.assertNotRegex(script, r'(?im)^\s*(?:function\s+)?Stop-PortListeners(?=[\s(])')
+        self.assertNotRegex(script, r'(?im)^\s*(?:&\s*)?taskkill(?:\.exe)?(?=\s|$)')
+        start = script.index('function Stop-OwnedPortListeners')
+        end = script.index('\nfunction ', start + 10)
+        body = script[start:end]
+        stop_command = r'(?m)^\s*Stop-Process(?=\s|$)'
+        self.assertEqual(len(re.findall(stop_command, script)), len(re.findall(stop_command, body)))
+        self.assertEqual(len(re.findall(stop_command, body)), 1)
+        self.assertLess(body.index('ST-PORT-GUARD'), body.index('Stop-Process'))
+        # 啟動後要登記收據，下次才認得出自己的程序。
+        self.assertLess(script.index('\nWait-TipServer\n'), script.index('\nWrite-DevServerReceipt -PortNum'))
 
     def test_retired_apply_bat_has_no_destructive_actions(self):
         raw = (ROOT / 'scripts' / 'apply.bat').read_bytes()
@@ -147,6 +167,285 @@ class ManagedInstallGuardBehaviorTests(unittest.TestCase):
                 self.assertNotEqual(code, 0)
                 self.assertNotIn('ST-LAUNCHER-GUARD', output)
                 self.assertNotIn('[stop]', output)
+
+
+_RECEIPT_DRIVER = """\
+$ErrorActionPreference = 'Stop'
+. $env:ST_TEST_FUNCS
+function Get-PortListenerPids([int]$PortNum) { return @($script:ListenerPids) }
+function ConvertTo-PidList([string]$text) { return @($text -split ',' | Where-Object { $_ } | ForEach-Object { [int]$_ }) }
+$script:ListenerPids = ConvertTo-PidList $env:ST_TEST_WRITE_PIDS
+if ($env:ST_TEST_WRITE_ROOT) {
+  Write-DevServerReceipt -PortNum 18432 -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_WRITE_ROOT -ExpectedParent ([int]$env:ST_TEST_PARENT_ID)
+}
+$script:ListenerPids = ConvertTo-PidList $env:ST_TEST_STOP_PIDS
+Stop-OwnedPortListeners -PortNum 18432 -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_STOP_ROOT
+Write-Host 'STOP-RETURNED'
+"""
+
+_REAL_PORT_DRIVER = """\
+$ErrorActionPreference = 'Stop'
+. $env:ST_TEST_FUNCS
+$port = [int]$env:ST_TEST_PORT
+Write-Host ('FOUND=' + ((Get-PortListenerPids $port) -join ','))
+try {
+  Stop-OwnedPortListeners -PortNum $port -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_ROOT
+  Write-Host 'NOT-REFUSED'
+} catch {
+  if ($_.Exception.Message -notmatch '^ST-PORT-GUARD:') { throw }
+  Write-Host 'REFUSED:ST-PORT-GUARD'
+}
+Write-DevServerReceipt -PortNum $port -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_ROOT -ExpectedParent ([int]$env:ST_TEST_PARENT_ID)
+Stop-OwnedPortListeners -PortNum $port -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_ROOT
+Write-Host 'STOPPED'
+"""
+
+
+def _go_ps1_process_helpers():
+    """go.ps1 內「找出埠上的程序、登記收據、只結束自己的程序」那一整段函式（原樣取出，不改寫）。"""
+    script = (ROOT / 'scripts' / 'go.ps1').read_bytes().decode('utf-8-sig')
+    return script[script.index('function Get-PortListenerPids'):script.index('function Assert-TipHtml')]
+
+
+@unittest.skipIf(os.name != 'nt' or not _powershell_engines(), '收據身分核對依賴 Windows CIM；其他平台保留 AST 與防呆測試')
+class DevServerReceiptBehaviorTests(unittest.TestCase):
+    """真的在 PowerShell 裡執行 go.ps1 的程序處置函式。埠上的程序用真的睡眠程序代表；
+    「哪些 PID 在聽」用替身回報（跨平台），Windows 上另有真實埠的測試。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        self.funcs = self.dir / 'process_helpers.ps1'
+        self.funcs.write_bytes(b'\xef\xbb\xbf' + _go_ps1_process_helpers().encode('utf-8'))
+        self.receipt = self.dir / 'dev_server.receipt.json'
+        self.root = str(self.dir / 'checkout-a')
+        self.procs = []
+        self.addCleanup(self._kill_all)
+
+    def _kill_all(self):
+        for proc in self.procs:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=10)
+            if proc.stdout:
+                proc.stdout.close()
+
+    def sleeper(self):
+        # 此組案例驗證直接父程序；venv 轉接另由完整程序鏈案例驗證。
+        proc = subprocess.Popen([getattr(sys, '_base_executable', sys.executable),
+                                 '-c', 'import time; time.sleep(600)'])
+        self.procs.append(proc)
+        return proc
+
+    def run_ps(self, engine, driver, **env):
+        script = self.dir / 'driver.ps1'
+        script.write_bytes(b'\xef\xbb\xbf' + driver.encode('utf-8'))
+        full_env = dict(os.environ, ST_TEST_PARENT_ID=str(os.getpid()), ST_TEST_FUNCS=str(self.funcs), ST_TEST_RECEIPT=str(self.receipt),
+                        ST_TEST_WRITE_PIDS='', ST_TEST_WRITE_ROOT='', ST_TEST_STOP_PIDS='',
+                        ST_TEST_STOP_ROOT=self.root)
+        full_env.update({k: str(v) for k, v in env.items()})
+        args = [engine, '-NoProfile']
+        if os.name == 'nt':
+            args += ['-ExecutionPolicy', 'Bypass']
+        args += ['-File', str(script)]
+        done = subprocess.run(args, cwd=self.tmp.name, env=full_env, capture_output=True, timeout=120)
+        return done.returncode, (done.stdout + done.stderr).decode('utf-8', 'replace')
+
+    def assertAlive(self, *procs):
+        for proc in procs:
+            self.assertIsNone(proc.poll(), '不該被終止的程序被終止了')
+
+    def test_identity_lookup_failure_does_not_abort_or_write_receipt(self):
+        mine = self.sleeper()
+        driver = """. $env:ST_TEST_FUNCS
+function Get-PortListenerPids([int]$PortNum) { return @([int]$env:ST_TEST_WRITE_PIDS) }
+function Get-CimInstance { throw '合成身分讀取失敗' }
+Write-DevServerReceipt -PortNum 18432 -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_ROOT -ExpectedParent ([int]$env:ST_TEST_PARENT_ID)
+Write-Host 'RECEIPT-RETURNED'
+"""
+        for name, engine in _powershell_engines().items():
+            code, output = self.run_ps(engine, driver, ST_TEST_WRITE_PIDS=mine.pid, ST_TEST_ROOT=self.root)
+            self.assertEqual(code, 0, output)
+            self.assertIn('RECEIPT-RETURNED', output)
+            self.assertFalse(self.receipt.exists())
+            self.assertAlive(mine)
+
+    def test_python_proxy_requires_pin_root_and_captured_launcher_identity(self):
+        driver = r""". $env:ST_TEST_FUNCS
+$owner = $env:ST_TEST_ROOT
+$pin = Join-Path $owner 'venv\Scripts\python.exe'
+$base = Join-Path $owner 'base\python.exe'
+$launcher = Join-Path $owner 'logs\run_server_tip.cmd'
+$command = '"' + $pin + '" -u "' + (Join-Path $owner 'server\server.py') + '"'
+$script:Processes = @{
+  50 = [pscustomobject]@{ ProcessId=50; Name='cmd.exe'; ParentProcessId=40; CommandLine=('cmd.exe /c "' + $launcher + '"') }
+  60 = [pscustomobject]@{ ProcessId=60; Name='python.exe'; ParentProcessId=50; ExecutablePath=$pin; CommandLine=$command }
+  70 = [pscustomobject]@{ ProcessId=70; Name='python.exe'; ParentProcessId=60; ExecutablePath=$base; CommandLine=$command }
+}
+$script:Ticks = @{ 50=[int64]100; 60=[int64]200; 70=[int64]300 }
+switch ($env:ST_TEST_CASE) {
+  'direct' { $script:Processes[70].ParentProcessId=50; $script:Processes[70].ExecutablePath=$pin }
+  'parent-reused' { $script:Ticks[50]=[int64]101 }
+  'future-proxy' { $script:Ticks[60]=[int64]400 }
+  'deeper' { $script:Processes[60].ParentProcessId=61 }
+  'non-python' { $script:Processes[60].Name='cmd.exe' }
+  'wrong-pin' { $script:Processes[60].ExecutablePath='C:\other\python.exe' }
+  'wrong-leaf' { $script:Processes[70].ExecutablePath='C:\other\python.exe' }
+  'different-command' { $script:Processes[60].CommandLine += ' extra' }
+  'wrong-root' { $script:Processes[70].CommandLine='python.exe -u C:\other\server\server.py' }
+  'wrong-launcher' { $script:Processes[50].CommandLine='cmd.exe /c C:\other\run_server_tip.cmd' }
+}
+function Get-PortListenerPids([int]$PortNum) { return @(70) }
+function Get-ProcessStartTicks([int]$ProcId) { return $script:Ticks[$ProcId] }
+function Get-CimInstance([string]$ClassName, [string]$Filter, $ErrorAction) {
+  if ($Filter -notmatch '^ProcessId=(\d+)$') { throw '無效測試查詢' }
+  return $script:Processes[[int]$Matches[1]]
+}
+Write-DevServerReceipt -PortNum 18432 -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $owner -ExpectedParent 50 -ExpectedParentTicks 100 -ExpectedPython $pin -ExpectedBasePython $base -ExpectedLauncher $launcher
+Write-Host ('WRITTEN=' + (Test-Path -LiteralPath $env:ST_TEST_RECEIPT))
+"""
+        cases = ('direct', 'venv', 'parent-reused', 'future-proxy', 'deeper',
+                 'non-python', 'wrong-pin', 'wrong-leaf', 'different-command',
+                 'wrong-root', 'wrong-launcher')
+        for name, engine in _powershell_engines().items():
+            for case in cases:
+                with self.subTest(engine=name, case=case):
+                    self.receipt.unlink(missing_ok=True)
+                    code, output = self.run_ps(engine, driver, ST_TEST_CASE=case,
+                                               ST_TEST_ROOT=self.root)
+                    self.assertEqual(code, 0, output)
+                    accepted = case in ('direct', 'venv')
+                    self.assertEqual(self.receipt.exists(), accepted, output)
+                    if accepted:
+                        receipt = json.loads(self.receipt.read_text(encoding='utf-8-sig'))
+                        self.assertEqual(receipt['pid'], 70)
+                        self.assertEqual(receipt['startTicksUtc'], 300)
+
+    def test_unknown_listener_is_refused_and_not_touched(self):
+        # 沒有收據：占用者可能是本機受管 ST 或任何別的程式，一律不碰。
+        other = self.sleeper()
+        for name, engine in _powershell_engines().items():
+            with self.subTest(engine=name):
+                code, out = self.run_ps(engine, _RECEIPT_DRIVER, ST_TEST_STOP_PIDS=other.pid)
+                self.assertNotEqual(code, 0, out)
+                self.assertIn('ST-PORT-GUARD', out)
+                self.assertIn('PID %d' % other.pid, out)
+                self.assertNotIn('STOP-RETURNED', out)
+                self.assertAlive(other)
+
+    def test_pull_behavior_check_ignores_comments_and_rejects_actual_redirect(self):
+        script = self.dir / 'candidate.ps1'
+        driver = ". $env:ST_TEST_FUNCS\nAssert-LauncherBehavior -Path $env:ST_TEST_SOURCE\nWrite-Host 'BEHAVIOR-OK'\n"
+        source = (ROOT / 'scripts/go.ps1').read_text(encoding='utf-8-sig')
+        for name, engine in _powershell_engines().items():
+            with self.subTest(engine=name):
+                script.write_text(source, encoding='utf-8-sig')
+                code, out = self.run_ps(engine, driver, ST_TEST_SOURCE=str(script))
+                self.assertEqual(code, 0, out)
+                self.assertIn('BEHAVIOR-OK', out)
+                script.write_text(source + '\nStart-Process sample -RedirectStandardOutput sample.log\n', encoding='utf-8-sig')
+                code, out = self.run_ps(engine, driver, ST_TEST_SOURCE=str(script))
+                self.assertNotEqual(code, 0)
+                self.assertNotIn('BEHAVIOR-OK', out)
+
+    def test_changed_command_line_receipt_is_refused(self):
+        mine = self.sleeper()
+        for name, engine in _powershell_engines().items():
+            driver = _RECEIPT_DRIVER.replace(
+                '$script:ListenerPids = ConvertTo-PidList $env:ST_TEST_STOP_PIDS',
+                "$r = Get-Content $env:ST_TEST_RECEIPT -Raw | ConvertFrom-Json\n$r.commandLine = '其他程序'\n$r | ConvertTo-Json | Set-Content $env:ST_TEST_RECEIPT -Encoding UTF8\n$script:ListenerPids = ConvertTo-PidList $env:ST_TEST_STOP_PIDS")
+            code, out = self.run_ps(engine, driver, ST_TEST_WRITE_PIDS=mine.pid,
+                                    ST_TEST_WRITE_ROOT=self.root, ST_TEST_STOP_PIDS=mine.pid)
+            self.assertNotEqual(code, 0, out)
+            self.assertIn('ST-PORT-GUARD', out)
+            self.assertAlive(mine)
+
+    def test_registered_dev_server_is_the_only_thing_stopped(self):
+        for name, engine in _powershell_engines().items():
+            with self.subTest(engine=name):
+                self.receipt.unlink(missing_ok=True)
+                mine = self.sleeper()
+                code, out = self.run_ps(engine, _RECEIPT_DRIVER, ST_TEST_WRITE_PIDS=mine.pid,
+                                        ST_TEST_WRITE_ROOT=self.root, ST_TEST_STOP_PIDS=mine.pid)
+                self.assertEqual(code, 0, out)
+                self.assertIn('STOP-RETURNED', out)
+                mine.wait(timeout=15)
+                self.assertIsNotNone(mine.poll())
+
+    def test_receipt_from_another_checkout_is_not_trusted(self):
+        mine = self.sleeper()
+        other_root = str(self.dir / 'checkout-b')
+        for name, engine in _powershell_engines().items():
+            with self.subTest(engine=name):
+                code, out = self.run_ps(engine, _RECEIPT_DRIVER, ST_TEST_WRITE_PIDS=mine.pid,
+                                        ST_TEST_WRITE_ROOT=other_root, ST_TEST_STOP_PIDS=mine.pid)
+                self.assertNotEqual(code, 0, out)
+                self.assertIn('ST-PORT-GUARD', out)
+                self.assertAlive(mine)
+
+    def test_receipt_with_a_different_start_time_is_not_trusted(self):
+        # PID 會被作業系統重複使用；收據的啟動時間對不上就不是同一個程序。
+        stale = self.sleeper()
+        self.receipt.write_text(json.dumps({'pid': stale.pid, 'startTicksUtc': 1, 'root': self.root, 'port': 18432}),
+                                encoding='utf-8')
+        for name, engine in _powershell_engines().items():
+            with self.subTest(engine=name):
+                code, out = self.run_ps(engine, _RECEIPT_DRIVER, ST_TEST_STOP_PIDS=stale.pid)
+                self.assertNotEqual(code, 0, out)
+                self.assertIn('ST-PORT-GUARD', out)
+                self.assertAlive(stale)
+
+    def test_another_listener_beside_the_registered_one_stops_everything(self):
+        mine = self.sleeper()
+        other = self.sleeper()
+        for name, engine in _powershell_engines().items():
+            with self.subTest(engine=name):
+                code, out = self.run_ps(engine, _RECEIPT_DRIVER, ST_TEST_WRITE_PIDS=mine.pid,
+                                        ST_TEST_WRITE_ROOT=self.root,
+                                        ST_TEST_STOP_PIDS='%d,%d' % (mine.pid, other.pid))
+                self.assertNotEqual(code, 0, out)
+                self.assertIn('ST-PORT-GUARD', out)
+                self.assertAlive(mine, other)
+
+    def test_nothing_listening_returns_quietly(self):
+        for name, engine in _powershell_engines().items():
+            with self.subTest(engine=name):
+                code, out = self.run_ps(engine, _RECEIPT_DRIVER)
+                self.assertEqual(code, 0, out)
+                self.assertIn('STOP-RETURNED', out)
+
+    def test_real_listener_driver_rejects_unrelated_exception(self):
+        driver = _REAL_PORT_DRIVER.replace(
+            "Write-Host ('FOUND=' + ((Get-PortListenerPids $port) -join ','))",
+            "function Stop-OwnedPortListeners { throw 'UNRELATED-FIXTURE-ERROR' }")
+        for name, engine in _powershell_engines().items():
+            with self.subTest(engine=name):
+                code, out = self.run_ps(engine, driver, ST_TEST_PORT=0, ST_TEST_ROOT=self.root)
+                self.assertNotEqual(code, 0, out)
+                self.assertIn('UNRELATED-FIXTURE-ERROR', out)
+                self.assertNotIn('REFUSED:ST-PORT-GUARD', out)
+                self.assertNotIn('STOPPED', out)
+
+    @unittest.skipUnless(os.name == 'nt', '依埠找程序用 Windows 的 Get-NetTCPConnection／netstat')
+    def test_real_listener_round_trip_on_windows(self):
+        code_src = ("import socket,time; s=socket.socket(); s.bind(('127.0.0.1',0)); s.listen(5); "
+                    "print(s.getsockname()[1], flush=True); time.sleep(600)")
+        for name, engine in _powershell_engines().items():
+            with self.subTest(engine=name):
+                self.receipt.unlink(missing_ok=True)
+                proc = subprocess.Popen([getattr(sys, '_base_executable', sys.executable),
+                                         '-c', code_src], stdout=subprocess.PIPE, text=True)
+                self.procs.append(proc)
+                port = int(proc.stdout.readline())
+                code, out = self.run_ps(engine, _REAL_PORT_DRIVER, ST_TEST_PORT=port, ST_TEST_ROOT=self.root)
+                self.assertEqual(code, 0, out)
+                self.assertIn('FOUND=%d' % proc.pid, out)
+                self.assertIn('REFUSED:ST-PORT-GUARD', out)
+                self.assertLess(out.index('REFUSED:ST-PORT-GUARD'), out.index('STOPPED'))
+                self.assertNotIn('NOT-REFUSED', out)
+                proc.wait(timeout=15)
+                self.assertIsNotNone(proc.poll())
 
 
 if __name__ == '__main__':

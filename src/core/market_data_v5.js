@@ -4,7 +4,7 @@
   var state = {
     quotes: {}, updatedAt: null, marketAsOf: null, generatedAt: null,
     sessionDate: null, session: 'unknown', sourceStatus: {}, contractVersion: 2,
-    freshness: null, worstAsOf: null
+    freshness: null, worstAsOf: null, refreshError: null
   };
   var inflight = null;
   var stockQuotes = Object.create(null);
@@ -37,7 +37,8 @@
       sourceStatus: snapshot.sourceStatus || {},
       contractVersion: snapshot.contractVersion || 2,
       freshness: snapshot.freshness || null,
-      worstAsOf: snapshot.worstAsOf || null
+      worstAsOf: snapshot.worstAsOf || null,
+      refreshError: null
     };
     window.dispatchEvent(new CustomEvent('marketData', { detail: { snapshot: state, reason: reason || 'refresh' } }));
     return state;
@@ -70,11 +71,19 @@
       ? window.AppKernel.api.getJson('/market/snapshot', { timeoutMs: 12000 })
       : fetch(base() + '/market/snapshot', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; });
     inflight = request
-      .then(function (x) { if (x && x.ok) publish(x, 'snapshot'); return state; })
-      .catch(function () { return state; })
+      .then(function (x) {
+        if (!x || !x.ok) throw new Error('行情快照刷新失敗');
+        return publish(x, 'snapshot');
+      })
+      .catch(function (error) {
+        state.refreshError = { message: error.message || '行情快照刷新失敗', at: new Date().toISOString() };
+        attachFreshness(state);
+        window.dispatchEvent(new CustomEvent('marketData', { detail: { snapshot: state, reason: 'refresh-failed' } }));
+        return state;
+      })
       .finally(function () { inflight = null; });
     return inflight;
   }
-  window.MarketData = { get: function () { return state; }, publish: publish, fromPulse: fromPulse, refresh: refresh,
+  window.MarketData = { get: function () { return attachFreshness(state); }, publish: publish, fromPulse: fromPulse, refresh: refresh,
     acceptStockQuote: acceptStockQuote };
 }());

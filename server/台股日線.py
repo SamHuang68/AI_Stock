@@ -241,6 +241,8 @@ def parse_daily(data: dict, exchange: str, day: date) -> list[dict]:
 def import_day(db: Path, exchange: str, day: date, records: list[dict], digest: str, *, min_rows: int = 500) -> None:
     if len(records) < min_rows:
         raise ValueError('官方全市場資料筆數不足，保留原資料')
+    if day > datastore.completed_daily_cutoff('TW', path=db):
+        raise ValueError('官方日線尚未達完成交易日界線，不寫入或登記完成')
     retrieved = datetime.now(timezone.utc).isoformat()
     ts = stamp(day)
     with datastore._db_write_lock, closing(datastore.get_conn(db)) as conn, conn:
@@ -408,6 +410,7 @@ def seed_research(db: Path, symbol: str = '2330', years: int = 3, *, fetch=get_j
         except ImportError:
             from daily_quality import quality_summary
         count = 0
+        excluded_incomplete = 0
         reused_months, fetched_months = [], []
         month = start
         while month <= target:
@@ -418,7 +421,7 @@ def seed_research(db: Path, symbol: str = '2330', years: int = 3, *, fetch=get_j
                 quality = quality_summary(conn, symbol, expected, board='TWSE')
             # 已核對的來源衝突可重用並揭露；缺原始收據或收據損壞必須在既有預算內補齊。
             if expected and quality['observed'] == len(expected) and quality['receiptMissing'] == 0:
-                count += len(expected)
+                count += quality['accepted']
                 reused_months.append(month.isoformat()[:7])
                 month = next_month
                 continue
@@ -443,9 +446,11 @@ def seed_research(db: Path, symbol: str = '2330', years: int = 3, *, fetch=get_j
                 raise ValueError('官方月份未提供範圍內日線，未寫入')
             receipt = getattr(response, 'source_receipt', None)
             options = {'source_receipt': receipt} if receipt is not None else {}
-            datastore.upsert_bars(symbol, 'TW', month_rows, source='TWSE', source_hash=digest, path=db, check=check, **options)
+            complete_rows = datastore.completed_daily_rows(month_rows, 'TW', symbol=symbol, path=db)
+            excluded_incomplete += len(month_rows) - len(complete_rows)
+            accepted = datastore.upsert_bars(symbol, 'TW', complete_rows, source='TWSE', source_hash=digest, path=db, check=check, **options)
             fetched_months.append(month.isoformat()[:7])
-            count += len(month_rows)
+            count += accepted
             print('研究日線已回補：' + month.isoformat(), flush=True)
             month = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
             if fetch is get_json:
@@ -457,10 +462,11 @@ def seed_research(db: Path, symbol: str = '2330', years: int = 3, *, fetch=get_j
             expected = [r[0] for r in conn.execute('SELECT session_date FROM market_sessions WHERE session_date BETWEEN ? AND ? ORDER BY session_date', (start.isoformat(), target.isoformat()))]
             quality = quality_summary(conn, symbol, expected, board='TWSE')
         check()
-        return {'ok': True, 'symbol': symbol, 'rows': count, 'start': start.isoformat(), 'end': target.isoformat(),
+        return {'ok': True, 'symbol': symbol, 'rows': count, 'excludedIncomplete': excluded_incomplete,
+                'start': start.isoformat(), 'end': target.isoformat(),
                 'actions': actions, 'quality': quality, 'reusedMonths': reused_months, 'fetchedMonths': fetched_months,
                 'qualityComplete': bool(quality['expected'] and quality['accepted'] == quality['expected']),
-                'note': '工作完成表示來源已取得；衝突、缺日及缺少原始收據仍須核對，未覆寫首次行情。'}
+                'note': '工作完成表示來源已取得；rows 為實際接受或已快取的合格列，未完成日線另列 excludedIncomplete；衝突、缺日及缺少原始收據仍須核對，未覆寫首次行情。'}
     finally:
         release_daemon_lock(lock)
 

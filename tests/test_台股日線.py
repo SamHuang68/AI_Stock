@@ -53,7 +53,7 @@ class DatabaseCase(unittest.TestCase):
         return payload(exchange, day), '資料雜湊'
 
     def history(self, count=75):
-        daily.save_calendar(self.db, 2026, set(), set())
+        daily.save_calendar(self.db, 2026, {date(2026, 1, 1)}, set())
         day, rows = date(2026, 6, 1), []
         while len(rows) < count:
             if day.weekday() < 5:
@@ -142,12 +142,12 @@ class DatabaseCase(unittest.TestCase):
         self.assertEqual(result['portfolio']['days'], 87)
 
     def test_actual_session_gap_survives_calendar_refresh(self):
-        daily.save_calendar(self.db, 2026, set(), set())
+        daily.save_calendar(self.db, 2026, {date(2026, 1, 1)}, set())
         def fetch(url):
             return {'stat': 'OK', 'date': '20260701', 'fields': ['日期'], 'data': [['115/07/09'], ['115/07/13']]}, '雜湊'
         actual = daily.reconcile_sessions(self.db, date(2026, 7, 1), date(2026, 7, 13), fetch)
         self.assertNotIn(date(2026, 7, 10), actual)
-        daily.save_calendar(self.db, 2026, set(), set())
+        daily.save_calendar(self.db, 2026, {date(2026, 1, 1)}, set())
         with closing(sqlite3.connect(self.db)) as conn:
             self.assertIsNone(conn.execute("SELECT 1 FROM market_sessions WHERE session_date='2026-07-10'").fetchone())
 
@@ -364,10 +364,10 @@ class DatabaseCase(unittest.TestCase):
 
     def test_missing_calendar_year_cannot_compress_history(self):
         self.history()
-        daily.save_calendar(self.db, 2024, set(), set())
+        daily.save_calendar(self.db, 2024, {date(2024, 1, 1)}, set())
         old = [(daily.stamp(date(2024, 12, d)), 100, 101, 99, 100, 1000) for d in range(2, 32) if date(2024, 12, d).weekday() < 5]
         datastore.upsert_bars('2330', 'TW', old, source='TWSE')
-        datastore.upsert_bars('2330', 'TW', [(daily.stamp(date(2026, 1, 1)), 100, 101, 99, 100, 1000)], source='TWSE')
+        datastore.upsert_bars('2330', 'TW', [(daily.stamp(date(2026, 1, 2)), 100, 101, 99, 100, 1000)], source='TWSE')
         with closing(sqlite3.connect(self.db)) as conn, conn:
             conn.execute("UPDATE action_coverage SET start_date='2024-01-01'")
         result = events.report(self.db, as_of='2026-06-02', period='all')
