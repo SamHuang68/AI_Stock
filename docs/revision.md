@@ -5,6 +5,16 @@
 
 ---
 
+## v5.0 修訂 — 2026-10-09 Git 封存的批次檔保留 CRLF
+
+產品版本維持 **5.0**；基準為 `5d00b2db09f897669a8570b6560815a8683521e2`。該版四項精確 main CI 通過，但完整 stage 執行 1,669 案後唯一失敗為 `START_ALL.cmd` 的 CRLF 檢查（513.150 秒；略過 5 案），原始失敗日誌保留，正式與本機受管服務尚未切換。根因為新根目錄 `START_ALL.cmd`、`START_WAVEDECK.cmd` 漏列既有 `.gitattributes` 的原始位元組保護；`git add` 把來源 CRLF 正規化成 LF，Windows checkout 又轉回 CRLF，掩蓋正式發布器使用 `core.autocrlf=false` 封存時的差異。
+
+僅為這兩個根目錄 CMD 加入與既有批次檔相同的 `-text` 及換行空白規則，並將現有 ASCII／CRLF 位元組重新明列暫存，不改啟動邏輯、發布器或原 CRLF 斷言。新增真正 Git 暫存儲存庫的封存回歸：在 `core.autocrlf=true` 下提交四個啟動入口，再以正式發布器的封存命令取得原始位元組，逐份核對 ASCII、CRLF 及與原件完全相等；舊規則只在兩個新根入口失敗。回歸放在分享包原本排除的 Private Web 測試模組，沒有新增分享包依賴。
+
+新封存回歸一案通過（0.568 秒）；原規則的負向回歸僅兩個新根入口失敗（0.573 秒），原日誌與方法搬移資訊完整保留。本條為封存失敗後的本機補正候選；只驗證本次封存與啟動器修改範圍，不額外執行完整本機測試套件。固定 Git blob／tree、提交與推送，以及新精確 main 的 CI、完整 stage 與雙端發布結果，以 `AI-Workspace/docs/stock-terminal/launcher-all-20261009` 的同版本收據追溯。既有 WaveDeck 原生隔離啟動與前端結果僅在來源位元組未改變時重用，不能冒稱新的完整 tree 已經驗收。所有舊修訂歷史保留。
+
+---
+
 ## v5.0 修訂 — 2026-10-09 整合 Stock Terminal 與 WaveDeck 啟動入口
 
 產品版本維持 **5.0**；基準為 `4deea9f617a0d35e2f5b60faddf01695ad979c5e`。原 `START_LOCAL_AND_WEB.cmd` 只啟動服務與列出網址；新增就緒後開啟 Pulse，以及 `--no-browser` 選項。新增 `START_ALL.cmd` 串接既有 local／Private Web 與 WaveDeck 入口，保留 local／web 的退出碼，另以位元 4 表示 WaveDeck 未就緒。
