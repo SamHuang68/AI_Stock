@@ -45,7 +45,7 @@
     document.head.appendChild(s);
   }
 
-  let cfg = null, rules = [], readError = null, refreshId = 0;
+  let cfg = null, rules = [], readError = null, refreshId = 0, ruleWritePending = false;
 
   const COMP_INDS = [['close', '收盤'], ['sma20', 'SMA20'], ['sma60', 'SMA60'], ['rsi14', 'RSI'],
   ['bbL', '布林下軌'], ['bbU', '布林上軌'], ['volRatio', '量比'], ['high20', '20日高']];
@@ -68,13 +68,13 @@
       if (right !== '') conds.push({ left, op, right });
     });
     if (!conds.length) { alert('請至少填一個條件'); return; }
-    rules.push({
+    const candidate = [...rules, {
       id: Date.now(), type: 'composite', sym,
       market: document.getElementById('ap-c-mkt').value,
       combine: document.getElementById('ap-c-combine').value,
       conditions: conds, enabled: true,
-    });
-    pushRules();
+    }];
+    pushRules(candidate);
   }
 
   async function refresh() {
@@ -174,7 +174,9 @@
     </div>
     <div id="ap-status">${cfg.running ? '🟢 daemon 執行中' : '⚪ daemon 未啟動'} · 規則 ${rules.length} 條</div>`;
 
-    box.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { rules.splice(+b.dataset.del, 1); pushRules(); });
+    box.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+      pushRules(rules.filter((_, index) => index !== +b.dataset.del));
+    });
     box.querySelector('#ap-r-add').onclick = addRule;
     const cAdd = box.querySelector('#ap-c-add'); if (cAdd) cAdd.onclick = addComposite;
     box.querySelector('#ap-save').onclick = saveCfg;
@@ -190,20 +192,28 @@
     alert(message);
   }
 
-  async function pushRules() {
-    try { await api('/alert/rules', 'POST', rules); await refresh(); }
+  async function pushRules(candidate) {
+    if (ruleWritePending) {
+      const message = '規則儲存中，請稍候再操作';
+      const status = document.getElementById('ap-status');
+      if (status) status.textContent = message;
+      alert(message); return;
+    }
+    ruleWritePending = true;
+    try { await api('/alert/rules', 'POST', candidate); await refresh(); }
     catch (error) { reportWriteError('儲存規則', error); }
+    finally { ruleWritePending = false; }
   }
 
   function addRule() {
     const sym = document.getElementById('ap-r-sym').value.trim();
     const price = parseFloat(document.getElementById('ap-r-price').value);
     if (!sym || !(price > 0)) { alert('請填代號與價位'); return; }
-    rules.push({
+    const candidate = [...rules, {
       id: Date.now(), sym, market: document.getElementById('ap-r-mkt').value,
       type: document.getElementById('ap-r-type').value, price, note: '', enabled: true,
-    });
-    pushRules();
+    }];
+    pushRules(candidate);
   }
 
   async function saveCfg() {

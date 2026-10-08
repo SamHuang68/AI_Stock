@@ -81,15 +81,16 @@ async function main() {
   const dialog = { open: false, style: {}, innerHTML: '', isConnected: true, appendChild() {},
     querySelectorAll: () => [{ dataset: { dcSymbol: '2330', dcMarket: 'TW' } }],
     showModal() { this.open = true; }, close() { this.open = false; } };
-  let fetches = 0;
+  let fetches = 0, cacheReject = true, cacheJobStatus = 'running';
+  const cacheTimers = [];
   const cacheScope = { window: {}, S: { sym: '2330', mkt: 'TW' }, HTMLElement: class {},
     document: { body: { appendChild() {} }, activeElement: null,
       getElementById: id => cacheElements[id] || null, createElement: () => dialog },
-    clearTimeout() {}, setTimeout() { return 1; }, setInterval() { return 1; }, clearInterval() {},
+    clearTimeout() {}, setTimeout(callback) { cacheTimers.push(callback); return cacheTimers.length; }, setInterval() { return 1; }, clearInterval() {},
     fetch: async (url) => {
       fetches++;
-      if (url === '/daily-cache/refresh') return { ok: false, status: 409, json: async () => ({ error: '已有日線更新進行中，請等待完成或取消' }) };
-      return { ok: true, json: async () => ({ jobId: 'existing', status: 'running' }) };
+      if (url === '/daily-cache/refresh' && cacheReject) return { ok: false, status: 409, json: async () => ({ error: '已有日線更新進行中，請等待完成或取消' }) };
+      return { ok: true, json: async () => ({ jobId: 'existing', status: cacheJobStatus }) };
     } };
   vm.runInNewContext(fs.readFileSync(path.join(root, 'src/ui/daily_cache_v3.js'), 'utf8'), cacheScope);
   cacheScope.window.DailyCacheUI.open();
@@ -97,8 +98,16 @@ async function main() {
   await cacheElements['dc-start'].onclick();
   assert(fetches >= 3);
   assert.match(cacheElements['dc-status'].textContent, /更新中/);
+  assert.match(cacheElements['dc-status'].textContent, /本次選擇未被接受.*已有日線更新進行中/);
+  await cacheTimers.at(-1)();
+  assert.match(cacheElements['dc-status'].textContent, /本次選擇未被接受/);
   assert.equal(cacheElements['dc-start'].disabled, true);
   assert.equal(cacheElements['dc-cancel'].disabled, false);
+  cacheJobStatus = 'completed'; await cacheTimers.at(-1)();
+  assert.equal(cacheElements['dc-start'].disabled, false);
+  assert.match(cacheElements['dc-status'].textContent, /本次選擇未被接受/);
+  cacheReject = false; await cacheElements['dc-start'].onclick();
+  assert.doesNotMatch(cacheElements['dc-status'].textContent, /本次選擇未被接受/);
   const watchButton = { disabled: false, dataset: { on: '1' }, style: {} };
   let watchResponse = { ok: false, status: 403, json() { throw Error('Reader 不得讀取私人回應'); } };
   const watchScope = { document: { getElementById: () => watchButton }, window: {},
@@ -203,11 +212,11 @@ async function main() {
   let role = 'reader', privateReads = 0, ruleList = [{ sym: '2330', market: 'TW', price: 100, note: '離線私人規則' }];
   let blockedOwnerConfig = null;
   const alertCalls = [], writeCalls = [], writeAlerts = [];
-  let writeFailure = null;
+  let writeFailure = null, pendingRuleWrite = null;
   function reply(status, data) {
     return { ok: status === 200, status, async json() {
       if (status !== 200) { privateReads++; throw Error('錯誤回應不得解析私人內容'); }
-      return data;
+      return JSON.parse(JSON.stringify(data));
     } };
   }
   const ownerConfig = { enabled: true, running: true, telegram: { enabled: true, chat_id: 'offline-private-chat' } };
@@ -218,6 +227,9 @@ async function main() {
       const endpoint = new URL(url).pathname; alertCalls.push(endpoint);
       if (options.method === 'POST') {
         writeCalls.push({ endpoint, body: JSON.parse(options.body) });
+        if (writeFailure === 'pending') return new Promise(resolve => {
+          pendingRuleWrite = () => { ruleList = JSON.parse(options.body); resolve(reply(200, { ok: true })); };
+        });
         if (writeFailure === 'network') throw Error('離線寫入連線失敗');
         if (writeFailure) return reply(writeFailure);
         if (endpoint === '/alert/rules') ruleList = JSON.parse(options.body);
@@ -307,13 +319,14 @@ async function main() {
     } },
     { selector: '[data-del]', endpoint: '/alert/rules', label: '儲存規則' },
   ];
-  let writeScenarios = 0;
+  let writeScenarios = 0, recoveryScenarios = 0;
   try {
     for (const action of actions) {
       for (const failure of [400, 503, 'network', null]) {
         role = 'owner'; writeFailure = null;
         ruleList = [{ sym: '2330', market: 'TW', price: 100, note: '離線私人規則' }];
         alertBrowser.alertPushOpen(); await settleAlert();
+        const confirmedRules = JSON.parse(JSON.stringify(ruleList));
         if (action.setup) action.setup();
         const button = alertBody().querySelector(action.selector);
         assert(button, action.selector + ' 必須由完整模組建立');
@@ -331,6 +344,22 @@ async function main() {
           assert.equal(alertStatus().textContent, writeAlerts.at(-1));
           assert.match(writeAlerts.at(-1), failure === 'network' ? /連線或回應異常/ : new RegExp('HTTP ' + failure));
           assert(alertDoc.getElementById('ap-save'), '失敗不得丟失可重試的表單');
+          assert.deepEqual(ruleList, confirmedRules, 'HTTP fixture 不得與產品共用陣列');
+          if (action.endpoint === '/alert/rules') {
+            writeFailure = null;
+            if (action.selector === '[data-del]') {
+              alertDoc.getElementById('ap-r-sym').value = '2317';
+              alertDoc.getElementById('ap-r-price').value = '120';
+              alertDoc.getElementById('ap-r-add').onclick();
+            } else alertBody().querySelector('[data-del]').onclick();
+            await settleAlert();
+            const subsequent = writeCalls.at(-1).body;
+            if (action.selector === '[data-del]') {
+              assert.deepEqual(subsequent.slice(0, 1), confirmedRules, '後續新增不得夾帶前次失敗刪除');
+              assert.equal(subsequent.length, 2);
+            } else assert.deepEqual(subsequent, [], '後續刪除不得夾帶前次失敗新增');
+            recoveryScenarios++;
+          }
         } else if (action.success) {
           assert.equal(writeAlerts.length, previousAlerts + 1);
           assert.match(writeAlerts.at(-1), action.success);
@@ -346,6 +375,22 @@ async function main() {
     }
   } finally { process.removeListener('unhandledRejection', captureUnhandledWrite); }
   assert.equal(writeScenarios, 20);
+  assert.equal(recoveryScenarios, 9);
+  ruleList = [{ sym: '2330', market: 'TW', price: 100 }];
+  writeFailure = null; alertBrowser.alertPushOpen(); await settleAlert();
+  alertDoc.getElementById('ap-r-sym').value = '2317';
+  alertDoc.getElementById('ap-r-price').value = '120';
+  writeFailure = 'pending';
+  const pendingCalls = writeCalls.length;
+  alertDoc.getElementById('ap-r-add').onclick(); await settleAlert();
+  assert.equal(typeof pendingRuleWrite, 'function');
+  alertBody().querySelector('[data-del]').onclick(); await settleAlert();
+  assert.equal(writeCalls.length, pendingCalls + 1, '寫入中重複操作不得另送未確認的快照');
+  assert.match(alertStatus().textContent, /規則儲存中/);
+  writeFailure = null; pendingRuleWrite(); await settleAlert();
+  assert.equal(ruleList.length, 2);
+  assert.equal(privateReads, 0);
+  console.log('警報失敗後 9 個後續寫入與重複操作、409 拒收跨輪詢保留及成功清除：通過');
   console.log('Owner 警報寫入 20 個情境：HTTP 400／503、網路失敗、成功、錯誤 body 零讀取與 rejected promise 收尾：通過');
   console.log('行情效期、日期初始化、選定日線更新、拒收後既有工作與 Reader／Owner 警報狀態：通過');
 }

@@ -23,7 +23,7 @@ KEYS = ('breakout_120_mid', YEAR, 'repair_risk')
 def trading_days(start, count):
     result = []
     while len(result) < count:
-        if start.weekday() < 5:
+        if start.weekday() < 5 and (start.month, start.day) != (1, 1):
             result.append(start)
         start += timedelta(days=1)
     return result
@@ -48,7 +48,7 @@ class 突破成交資料庫測試(unittest.TestCase):
         datastore.init_db()
         self.days = trading_days(date(2025, 1, 6), 300)
         for year in {day.year for day in self.days}:
-            daily.save_calendar(self.db, year, set(), set())
+            daily.save_calendar(self.db, year, {date(year, 1, 1)}, set())
         for symbol, price in (('2330', 100), ('0050', 50)):
             datastore.upsert_bars(symbol, 'TW', [
                 (daily.stamp(day), price, price + 1, price - 1, price, 1000) for day in self.days

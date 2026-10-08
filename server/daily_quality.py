@@ -195,7 +195,7 @@ def store_official(conn, symbol, market, rows, source, source_hash, *, check=lam
         from .datastore import completed_daily_rows
     else:
         from datastore import completed_daily_rows
-    rows = completed_daily_rows(rows, market, symbol=symbol)
+    rows = completed_daily_rows(rows, market, symbol=symbol, conn=conn)
     observed = datetime.now(timezone.utc).isoformat()
     receipt_id = None
     if source_receipt is not None:

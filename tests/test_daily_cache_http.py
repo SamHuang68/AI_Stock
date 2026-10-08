@@ -79,11 +79,12 @@ class DailyHttpTests(unittest.TestCase):
     def test_rejected_queue_returns_503(self):
         body = {'symbols': [{'symbol': '2330', 'market': 'TW'}], 'range': '1y'}
         req = urllib.request.Request(self.base + '/daily-cache/refresh', data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
-        with patch.object(jobs, 'submit', return_value={'ok': False, 'reason': 'queue_full', 'error': '佇列已滿'}):
-            with self.assertRaises(urllib.error.HTTPError) as caught:
-                urllib.request.urlopen(req, timeout=3)
-            self.assertEqual(caught.exception.code, 503)
-            caught.exception.close()
+        for reason in ('queue_full', 'queue_error'):
+            with self.subTest(reason=reason), patch.object(jobs, 'submit', return_value={'ok': False, 'reason': reason, 'error': '佇列拒收'}):
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(req, timeout=3)
+                self.assertEqual(caught.exception.code, 503)
+                caught.exception.close()
 
     def test_datasource_invalid_symbols_are_bad_request(self):
         req = urllib.request.Request(self.base + '/datasource/refresh',

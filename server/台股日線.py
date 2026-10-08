@@ -241,7 +241,7 @@ def parse_daily(data: dict, exchange: str, day: date) -> list[dict]:
 def import_day(db: Path, exchange: str, day: date, records: list[dict], digest: str, *, min_rows: int = 500) -> None:
     if len(records) < min_rows:
         raise ValueError('官方全市場資料筆數不足，保留原資料')
-    if day > datastore.completed_daily_cutoff('TW'):
+    if day > datastore.completed_daily_cutoff('TW', path=db):
         raise ValueError('官方日線尚未達完成交易日界線，不寫入或登記完成')
     retrieved = datetime.now(timezone.utc).isoformat()
     ts = stamp(day)
@@ -446,7 +446,7 @@ def seed_research(db: Path, symbol: str = '2330', years: int = 3, *, fetch=get_j
                 raise ValueError('官方月份未提供範圍內日線，未寫入')
             receipt = getattr(response, 'source_receipt', None)
             options = {'source_receipt': receipt} if receipt is not None else {}
-            complete_rows = datastore.completed_daily_rows(month_rows, 'TW', symbol=symbol)
+            complete_rows = datastore.completed_daily_rows(month_rows, 'TW', symbol=symbol, path=db)
             excluded_incomplete += len(month_rows) - len(complete_rows)
             accepted = datastore.upsert_bars(symbol, 'TW', complete_rows, source='TWSE', source_hash=digest, path=db, check=check, **options)
             fetched_months.append(month.isoformat()[:7])

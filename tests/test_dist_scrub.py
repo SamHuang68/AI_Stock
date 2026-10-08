@@ -54,12 +54,22 @@ class TestDistScrub(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('單機分享包不包含 Private Web gateway', result.stderr)
         self.assertIn('OK (skipped=1)', result.stderr)
+        launcher = subprocess.run([sys.executable, '-B', '-X', 'utf8', '-m', 'unittest',
+                                   'tests.test_launcher_cmd.LauncherCmdOfflineBehaviorTests',
+                                   'tests.test_launcher_cmd.ScheduledTaskQueryOfflineTests', '-v'], cwd=share,
+                                  env=dict(os.environ, PYTHONUTF8='1'), capture_output=True,
+                                  text=True, encoding='utf-8', timeout=90)
+        self.assertEqual(launcher.returncode, 0, launcher.stdout + launcher.stderr)
+        self.assertIn('OK', launcher.stderr)
+        if os.name == 'nt':
+            self.assertNotIn('skipped=', launcher.stderr, 'Windows 分享包必須真的執行兩個啟動器類別')
 
     def test_has_core_share_files(self):
         required = {
             "Stock_Terminal/README.md",
             "Stock_Terminal/LICENSE",
             "Stock_Terminal/START_TIP.cmd",
+            "Stock_Terminal/START_LOCAL_AND_WEB.cmd",
             "Stock_Terminal/server/server.py",
             "Stock_Terminal/server/daemon_lock.py",
             "Stock_Terminal/server/market_contract.py",

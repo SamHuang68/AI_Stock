@@ -2,6 +2,8 @@
 import gzip
 import io
 import json
+import socket
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -9,7 +11,7 @@ import time
 import types
 import unittest
 from contextlib import closing
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from unittest import mock
 from zoneinfo import ZoneInfo
@@ -31,6 +33,112 @@ import datasources
 
 
 class ReviewRegressions(unittest.TestCase):
+    def test_response_size_limit_bounds_plain_and_decompressed_gzip(self):
+        for compressed in (False, True):
+            for deadline in (None, time.monotonic() + 5):
+                with self.subTest(compressed=compressed, deadline=deadline):
+                    raw = b' ' * 256 + b'{}'
+                    body = gzip.compress(raw) if compressed else raw
+                    headers = [('Content-Length', str(len(body)))]
+                    if compressed:
+                        headers.append(('Content-Encoding', 'gzip'))
+                    conn, pool = self.framed_response(body, headers)
+                    client = hc.HttpClient()
+                    with mock.patch.object(client, '_pool', return_value=pool):
+                        with self.assertRaises(hc.HttpError) as caught:
+                            client.request('GET', 'http://offline.test/', retries=0,
+                                           headers={'Accept-Encoding': 'gzip'},
+                                           max_body_bytes=128, deadline=deadline)
+                    self.assertIsInstance(caught.exception.cause, ValueError)
+                    pool.release.assert_called_once_with(conn, reuse=False)
+
+    def test_official_budget_preserves_exact_raw_receipt_through_shared_client(self):
+        import hashlib
+        raw = '{ "stat": "OK", "name": "台積電" }\n'.encode('utf-8')
+        conn, pool = self.framed_response(gzip.compress(raw), [('Content-Encoding', 'gzip')])
+        budget = jobs.Budget(threading.Event())
+        client = hc.HttpClient()
+        url = 'http://offline.test/STOCK_DAY?stockNo=2330'
+        with mock.patch.object(client, '_pool', return_value=pool), \
+                mock.patch.object(hc, 'request', wraps=client.request) as request, \
+                mock.patch('urllib.request.urlopen', side_effect=AssertionError('不得另走抓取管線')):
+            result = budget.get_json(url)
+        self.assertEqual(result[0], json.loads(raw))
+        self.assertEqual(result[1], hashlib.sha256(raw).hexdigest())
+        self.assertEqual(result.source_receipt['raw_text'], raw.decode('utf-8'))
+        self.assertEqual(result.source_receipt['url'], url)
+        self.assertEqual(request.call_args.kwargs['max_body_bytes'], 12_000_000)
+        self.assertEqual(request.call_args.kwargs['retries'], 0)
+        self.assertEqual(request.call_args.kwargs['headers']['Accept-Encoding'], 'gzip')
+        self.assertLessEqual(request.call_args.kwargs['deadline'], budget.ends)
+        self.assertEqual(budget.used, 1)
+
+    def test_official_budget_stops_slow_headers_and_slow_body(self):
+        for headers in (True, False):
+            with self.subTest(headers=headers), closing(socket.socket()) as listener:
+                listener.bind(('127.0.0.1', 0)); listener.listen(1); listener.settimeout(2)
+                stop = threading.Event()
+                def source():
+                    with closing(listener.accept()[0]) as connection:
+                        connection.recv(4096)
+                        connection.sendall(b'HTTP/1.1 200 OK\r\nX-Slow: ' if headers else
+                                           b'HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n')
+                        try:
+                            for _ in range(40):
+                                if stop.wait(.03):
+                                    return
+                                connection.sendall(b' ')
+                        except OSError:
+                            return
+                worker = threading.Thread(target=source); worker.start()
+                budget = jobs.Budget(threading.Event(), seconds=.18)
+                started = time.monotonic()
+                try:
+                    with self.assertRaises(TimeoutError):
+                        budget.get_json(f'http://127.0.0.1:{listener.getsockname()[1]}/')
+                    self.assertLess(time.monotonic() - started, .6)
+                finally:
+                    stop.set(); hc.get_default_client().clear_pools(); worker.join(2)
+                self.assertFalse(worker.is_alive())
+
+    def test_official_source_deadline_is_explicit_before_overall_budget_expires(self):
+        budget = jobs.Budget(threading.Event())
+        failure = hc.HttpError('來源回應已超過整體期限', cause=TimeoutError())
+        with mock.patch.object(hc, 'request', side_effect=failure), self.assertRaises(TimeoutError):
+            budget.get_json('http://offline.test/STOCK_DAY?stockNo=2330')
+        self.assertGreater(budget.remaining(), 590)
+
+    def test_calendar_write_failure_preserves_read_response_and_remains_fail_closed(self):
+        import stock_signals_routes as routes
+        now = datetime(2026, 10, 8, 18, 30, tzinfo=ZoneInfo('Asia/Taipei'))
+        old = (int(now.replace(day=7, hour=9, minute=0).timestamp()), 100, 102, 99, 101, 1000)
+        fresh = (int(now.replace(hour=9, minute=0).timestamp()), 110, 112, 109, 111, 2000)
+        for broken_schema in (False, True):
+            with self.subTest(broken_schema=broken_schema), tempfile.TemporaryDirectory() as tmp, \
+                    mock.patch.object(ds, 'DB_PATH', str(Path(tmp) / 'market.db')), \
+                    mock.patch.object(routes, '_remote_fail', {}):
+                ds.init_db()
+                with closing(ds.get_conn()) as connection, connection:
+                    connection.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', ('2330', 'TW', *old))
+                    if broken_schema:
+                        connection.execute('ALTER TABLE calendar_years RENAME COLUMN closed TO fixture_closed')
+                    connection.execute('INSERT INTO calendar_years VALUES(?,?,?,?)', (2026, 'invalid', '[]', now.isoformat()))
+                original = ds.completed_daily_rows
+                with mock.patch.object(ds, 'completed_daily_rows', side_effect=lambda rows, market, **kw: original(rows, market, **{**kw, 'now': now})), \
+                        mock.patch.object(routes, '_fetch_remote', return_value=[fresh]) as fetch:
+                    loaded = routes.load_bars('2330', 'TW', now=now)
+                self.assertEqual(loaded['source'], 'local-db')
+                self.assertEqual(loaded['bars'][-1]['date'], '2026-10-07')
+                self.assertIn('保留已讀本機資料', loaded['error'])
+                analyzed = routes.analyze_symbol('2330', 'TW', with_stats=False, use_cache=False,
+                    bars_loader=lambda *args, **kw: loaded, chip_dir=tmp, now=now)
+                self.assertEqual(analyzed['dataSource'], 'local-db')
+                self.assertEqual(analyzed['dataWarning'], loaded['error'])
+                fetch.assert_called_once()
+                self.assertEqual(ds.get_bars('2330', market='TW'), [old])
+                with self.assertRaises(ValueError):
+                    ds.completed_daily_cutoff('TW', now=now)
+
     def test_long_holiday_and_unknown_previous_year(self):
         self.assertEqual(sched.previous_session('2026-02-23'), '2026-02-11')
         self.assertEqual(sched.previous_session('2026-10-05'), '2026-10-02')
@@ -209,6 +317,59 @@ class ReviewRegressions(unittest.TestCase):
                 client.get_json('http://offline.test/', timeout=8, retries=1, deadline=8.5)
         self.assertEqual(pool.acquire.call_args_list[-1].args[0], 2)
 
+    def test_deadline_interrupts_slow_response_headers(self):
+        stop = threading.Event()
+        with closing(socket.socket()) as listener:
+            listener.bind(('127.0.0.1', 0))
+            listener.listen(1)
+            listener.settimeout(2)
+            def source():
+                with closing(listener.accept()[0]) as connection:
+                    connection.recv(4096)
+                    connection.sendall(b'HTTP/1.1 200 OK\r\nX-Slow: ')
+                    try:
+                        for _ in range(40):
+                            if stop.wait(.03):
+                                return
+                            connection.sendall(b'x')
+                        connection.sendall(b'\r\nContent-Length: 2\r\n\r\n{}')
+                    except OSError:
+                        # 呼叫端期限到達後關閉本案連線，來源不再寫入。
+                        return
+            worker = threading.Thread(target=source)
+            worker.start()
+            client = hc.HttpClient()
+            started = time.monotonic()
+            try:
+                with self.assertRaises(hc.HttpError) as caught:
+                    client.get_json(f'http://127.0.0.1:{listener.getsockname()[1]}/',
+                                    timeout=.1, retries=0, deadline=started + .18)
+                self.assertIsInstance(caught.exception.cause, TimeoutError)
+                self.assertLess(time.monotonic() - started, .6)
+                self.assertEqual(client.stats()['requests'], 1)
+                self.assertFalse(any(pool._idle for pool in client._pools.values()))
+            finally:
+                stop.set()
+                client.clear_pools()
+                worker.join(2)
+            self.assertFalse(worker.is_alive())
+
+    def test_deadline_callback_finishes_before_connection_can_be_reused(self):
+        conn, pool = self.framed_response(b'{}', [('Content-Length', '2')])
+        client = hc.HttpClient()
+        def timer(delay, callback):
+            handle = mock.Mock()
+            handle.join.side_effect = callback
+            return handle
+        with mock.patch.object(client, '_pool', return_value=pool), \
+                mock.patch.object(hc.time, 'monotonic', return_value=0), \
+                mock.patch.object(hc.threading, 'Timer', side_effect=timer):
+            with self.assertRaises(hc.HttpError) as caught:
+                client.get_json('http://offline.test/', retries=0, deadline=5)
+        self.assertIsInstance(caught.exception.cause, TimeoutError)
+        conn.sock.shutdown.assert_called_once_with(socket.SHUT_RDWR)
+        pool.release.assert_called_once_with(conn, reuse=False)
+
     @unittest.skipUnless(gateway is not None, '單機分享包不包含 Private Web gateway')
     def test_reader_cannot_read_private_alerts_but_owner_can(self):
         settings = types.SimpleNamespace(extra_read_paths=('/alert/status', '/watch/status'), extra_control_paths=())
@@ -226,6 +387,95 @@ class ReviewRegressions(unittest.TestCase):
             self.assertEqual(result['reason'], 'queue_full')
             with mock.patch.object(jobs.job_queue, 'submit', return_value={'ok': True}):
                 self.assertTrue(jobs.submit(body)['ok'])
+
+    def test_queue_submission_errors_do_not_run_late_callbacks(self):
+        body = {'symbols': [{'symbol': '2330', 'market': 'TW'}], 'range': '1y'}
+        for error in (sqlite3.OperationalError('資料庫已鎖定'), RuntimeError('收據提交後綁定失敗')):
+            with self.subTest(error=type(error).__name__), mock.patch.object(jobs, '_active', None), \
+                    mock.patch.object(jobs, '_cancel', None), \
+                    mock.patch.object(jobs.job_queue, 'submit', side_effect=error) as enqueue, \
+                    mock.patch.object(ds, 'init_db', side_effect=AssertionError('拒收回呼不得讀取或寫入資料')):
+                result = jobs.submit(body)
+                self.assertFalse(result['ok'])
+                self.assertEqual(result['reason'], 'queue_error')
+                self.assertEqual(result['status'], 'failed')
+                self.assertEqual(result['errorType'], type(error).__name__)
+                self.assertEqual(result['sourceRequests'], 0)
+                self.assertIn('finishedAt', result)
+                callback = enqueue.call_args.args[1]
+                callback()
+                self.assertEqual(jobs.status()['status'], 'failed')
+                with mock.patch.object(jobs.job_queue, 'submit', return_value={'ok': True}):
+                    next_job = jobs.submit(body)
+                self.assertTrue(next_job['ok'])
+                callback()
+                self.assertEqual(jobs.status()['jobId'], next_job['jobId'])
+                self.assertEqual(jobs.status()['status'], 'queued')
+
+    def test_verified_same_year_calendar_takes_precedence_over_static_days(self):
+        import 台股日線 as daily
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / 'official.db'
+            ds.init_db(database)
+            after = datetime(2026, 10, 8, 20, tzinfo=ZoneInfo('Asia/Taipei'))
+            class CalendarClock(datetime):
+                @classmethod
+                def now(cls, tz=None):
+                    return after.astimezone(tz or daily.TZ)
+            with mock.patch.object(daily, 'datetime', CalendarClock):
+                daily.save_calendar(database, 2026, {date(2026, 1, 1), after.date()}, {date(2026, 10, 10)})
+            self.assertEqual(ds.completed_daily_cutoff('TW', now=after, path=database), date(2026, 10, 7))
+            saturday = after.replace(day=10)
+            self.assertEqual(ds.completed_daily_cutoff('TW', now=saturday, path=database), saturday.date())
+            self.assertEqual(ds.completed_daily_cutoff('TW', now=saturday.replace(hour=12), path=database), date(2026, 10, 9))
+            missing = Path(tmp) / 'missing.db'
+            self.assertEqual(ds.completed_daily_cutoff('TW', now=after, path=missing), after.date())
+            self.assertEqual(ds.completed_daily_cutoff('TW', now=saturday, path=missing), date(2026, 10, 9))
+            self.assertFalse(missing.exists())
+            row = (int(after.replace(hour=9).timestamp()), 100, 102, 99, 101, 1000)
+            original = ds.completed_daily_cutoff
+            with mock.patch.object(ds, 'completed_daily_cutoff', side_effect=lambda market, **kw: original(market, **{**kw, 'now': after})):
+                self.assertEqual(ds.upsert_bars('2330', 'TW', [row], source='TWSE', path=database), 0)
+            with ds.read_snapshot(database) as conn:
+                self.assertEqual(conn.execute('SELECT COUNT(*) FROM bars').fetchone()[0], 0)
+
+    def test_unknown_static_year_reuses_same_database_verified_calendar(self):
+        import 台股日線 as daily
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(ds, 'DB_PATH', str(Path(tmp) / 'other.db')):
+            database = Path(tmp) / 'official.db'
+            ds.init_db(database)
+            after = datetime(2027, 1, 4, 20, tzinfo=ZoneInfo('Asia/Taipei'))
+            class CalendarClock(datetime):
+                @classmethod
+                def now(cls, tz=None):
+                    return after.astimezone(tz or daily.TZ)
+            with mock.patch.object(daily, 'datetime', CalendarClock):
+                daily.save_calendar(database, 2027, {date(2027, 1, 1)}, {date(2027, 1, 9)})
+            row = (int(after.replace(hour=9).timestamp()), 100, 102, 99, 101, 1000)
+            self.assertEqual(ds.completed_daily_rows([row], 'TW', now=after, path=database), [row])
+            self.assertEqual(ds.completed_daily_rows([row], 'TW', now=after), [])
+            self.assertEqual(ds.completed_daily_rows([row], 'TW', now=after.replace(hour=12), path=database), [])
+            saturday = after.replace(day=9)
+            self.assertEqual(ds.completed_daily_cutoff('TW', now=saturday, path=database), saturday.date())
+            self.assertEqual(ds.completed_daily_cutoff('TW', now=after.replace(day=1), path=database), date(2026, 12, 31))
+            self.assertEqual(ds.completed_daily_cutoff('TW', now=after.replace(year=2031), path=database), date(2031, 1, 3))
+            self.assertEqual(ds.completed_daily_cutoff('TW', now=after.replace(day=12), path=database), date(2027, 1, 11))
+            original = ds.completed_daily_cutoff
+            with mock.patch.object(ds, 'completed_daily_cutoff',
+                                   side_effect=lambda market, **kw: original(market, **dict(kw, now=after))):
+                self.assertEqual(ds.upsert_bars('2330', 'TW', [row], source='TWSE', path=database), 1)
+                with ds.read_snapshot(database) as conn:
+                    self.assertEqual(conn.execute('SELECT COUNT(*) FROM official_daily_observations').fetchone()[0], 1)
+                daily.import_day(database, 'TWSE', after.date(),
+                                 [{'symbol': '2330', 'name': '離線年度案例', 'prices': [100, 102, 99, 101], 'volume': 1000}],
+                                 'fixture-all-market', min_rows=1)
+                with ds.read_snapshot(database) as conn:
+                    self.assertEqual(conn.execute('SELECT row_count FROM daily_imports WHERE exchange=? AND session_date=?',
+                                                  ('TWSE', after.date().isoformat())).fetchone()[0], 1)
+            with closing(sqlite3.connect(database)) as conn, conn:
+                conn.execute("UPDATE calendar_years SET closed='invalid' WHERE year=2027")
+            with self.assertRaisesRegex(ValueError, '年度日曆無效'):
+                ds.completed_daily_rows([row], 'TW', now=after, path=database)
 
     def test_all_daily_ingest_paths_exclude_incomplete_today(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(ds, 'DB_PATH', str(Path(tmp) / 'market.db')):
@@ -421,6 +671,37 @@ class ReviewRegressions(unittest.TestCase):
             with self.assertRaisesRegex(TimeoutError, '整體期限'):
                 ST._get_tw_sectors(deadline=108.5)
             self.assertEqual(request.call_count, 1)
+
+    def test_sector_lookup_follows_bounded_same_origin_redirects(self):
+        from tests.test_server_http_security import ST
+        rows = [{'公司代號': '2330', '產業別': '半導體業'}]
+        url = ST._openapi_url('t187ap05_L')
+        target = 'https://openapi.twse.com.tw/v1/redirected'
+        responses = [hc.HttpResponse(301, {'Location': '/v1/redirected'}, b'', url),
+                     hc.HttpResponse(200, {'Content-Type': 'application/json'}, json.dumps(rows).encode(), target)]
+        with mock.patch.object(ST, '_openapi_ds', {}), mock.patch.object(ST, '_openapi_meta', {}), \
+                mock.patch.object(ST, '_openapi_locks', {}), mock.patch.object(ST, '_fundamental_trace'), \
+                mock.patch.object(hc, 'request', side_effect=responses) as request, \
+                mock.patch('urllib.request.urlopen', side_effect=AssertionError('離線測試不得連外')):
+            self.assertEqual(ST._openapi_lookup_list('t187ap05_L', deadline=12345), rows)
+            self.assertEqual([call.args[1] for call in request.call_args_list], [url, target])
+            self.assertTrue(all(call.kwargs['deadline'] == 12345 for call in request.call_args_list))
+            self.assertEqual(ST._openapi_meta['t187ap05_L']['status'], 'ok')
+
+    def test_sector_lookup_rejects_external_missing_or_looping_redirects(self):
+        from tests.test_server_http_security import ST
+        url = ST._openapi_url('t187ap05_L')
+        for location, calls in [('https://unrelated.invalid/data', 1), (None, 1),
+                                ('https://' + 'user' + '@' + 'openapi.twse.com.tw/data', 1), (url, 4)]:
+            with self.subTest(location=location), mock.patch.object(ST, '_openapi_ds', {}), \
+                    mock.patch.object(ST, '_openapi_meta', {}), mock.patch.object(ST, '_openapi_locks', {}), \
+                    mock.patch.object(ST, '_fundamental_trace'), \
+                    mock.patch.object(hc, 'request', return_value=hc.HttpResponse(
+                        302, {} if location is None else {'Location': location}, b'', url)) as request:
+                self.assertEqual(ST._openapi_lookup_list('t187ap05_L'), [])
+                self.assertEqual(request.call_count, calls)
+                self.assertEqual(ST._openapi_meta['t187ap05_L']['status'], 'unavailable')
+                self.assertIn('轉址', ST._openapi_meta['t187ap05_L']['error'])
 
     def test_partial_sector_lookup_keeps_available_classification_and_error(self):
         from tests.test_server_http_security import ST

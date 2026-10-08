@@ -82,7 +82,7 @@ from market_contract import attach_quote_contract, cumulative_volume_contract
 from log_once import log_once
 from exchange_source_dates import marketflow_payload, marketflow_cache_key, taipei_today, txf_timestamp, txf_timestamp_check
 from market_routes import market_snapshot, twse_mis_observation, twse_mis_stock_quote, quote_observation, guard_tw_quote
-from http_boundary import BodyReadError, is_same_local_origin, read_json_body
+from http_boundary import BodyReadError, close_rejected_body, is_same_local_origin, read_json_body
 from atomic_store import StoreCorruptError, atomic_write_json, load_json
 from runtime_revision import RUNTIME_COMMIT
 import atomic_store as _atomic_store
@@ -1105,9 +1105,22 @@ def _openapi_lookup_list(dataset_name, *, deadline=None):
         _fundamental_trace('openapi_fetch_start', **trace)
         try:
             import http_client as _hc
-            resp = _hc.request('GET', url,
-                               headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Accept-Encoding': 'gzip'},
-                               timeout=15, retries=1, deadline=deadline)
+            fetch_url = url
+            origin = urllib.parse.urlsplit(url)
+            for redirects in range(4):
+                resp = _hc.request('GET', fetch_url,
+                                   headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Accept-Encoding': 'gzip'},
+                                   timeout=15, retries=1, deadline=deadline)
+                if not 300 <= resp.status < 400:
+                    break
+                location = next((v for k, v in resp.headers.items() if k.lower() == 'location'), None)
+                if resp.status not in (301, 302, 303, 307, 308) or not location or redirects == 3:
+                    raise _hc.HttpError('官方端點轉址缺少目標或超過三次限制', status=resp.status, url=resp.url)
+                target_url = urllib.parse.urljoin(fetch_url, location)
+                target = urllib.parse.urlsplit(target_url)
+                if (target.scheme, target.netloc.lower()) != (origin.scheme, origin.netloc.lower()) or target.username:
+                    raise _hc.HttpError('官方端點轉址不是同來源網址', status=resp.status, url=resp.url)
+                fetch_url = target_url
             body = resp.body
             trace.update(httpStatus=resp.status, finalUrl=resp.url,
                          contentType=next((v for k, v in resp.headers.items() if k.lower() == 'content-type'), ''),
@@ -2893,9 +2906,14 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         return origin if origin and self._wavedeck_origin_ok(origin) else None
 
     def _method_not_allowed(self, allow):
+        rejecting_body = self._rejected_body_present()
+        if rejecting_body:
+            close_rejected_body(self)
         body = json.dumps({'error': 'method not allowed', 'traceId': self._ensure_trace_id()}, ensure_ascii=False).encode('utf-8')
         self.send_response(405)
         self.send_header('Allow', allow)
+        if rejecting_body:
+            self.send_header('Connection', 'close')
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
@@ -2919,7 +2937,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 import daily_cache_jobs
                 result = daily_cache_jobs.cancel(body.get('jobId')) if p.endswith('/cancel') else daily_cache_jobs.submit(body)
                 if not result.get('ok'):
-                    self._err(result.get('error') or ('已有日線更新進行中，請等待完成或取消' if result.get('reason') == 'busy' else '日線更新未接受'), 503 if result.get('reason') == 'queue_full' else 409)
+                    self._err(result.get('error') or ('已有日線更新進行中，請等待完成或取消' if result.get('reason') == 'busy' else '日線更新未接受'), 503 if result.get('reason') in ('queue_full', 'queue_error') else 409)
                     return
                 self._ok(json.dumps(result, ensure_ascii=False).encode())
             except BodyReadError as exc:
@@ -3101,12 +3119,24 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         self.wfile.write(body)
 
     def _err(self, msg, code=404):
+        rejecting_body = self._rejected_body_present()
+        if rejecting_body:
+            close_rejected_body(self)
         body = json.dumps({'error': msg, 'traceId': self._ensure_trace_id()}, ensure_ascii=False).encode('utf-8')
         self.send_response(code)
+        if rejecting_body:
+            self.send_header('Connection', 'close')
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _rejected_body_present(self):
+        # GET 也可能宣告本文；拒絕時不能讓其殘留在 HTTP/1.1 parser。
+        lengths = self.headers.get_all('Content-Length')
+        return (getattr(self, 'command', '') in ('POST', 'PUT', 'PATCH', 'DELETE')
+                or bool(self.headers.get('Transfer-Encoding'))
+                or bool(lengths and (len(lengths) != 1 or lengths[0] != '0')))
 
     def _handle_wavedeck_bridge_get(self):
         """WD 回報／共享成本計數器（GET /bridge/wavedeck 或 /api/cost-meter）。"""
