@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import shutil
 import subprocess
@@ -23,9 +24,11 @@ if /i "%~1"=="-NoLogo" (
   if /i not "%~2"=="-NoProfile" goto :unexpected
   if /i not "%~3"=="-NonInteractive" goto :unexpected
   if /i not "%~4"=="-Command" goto :unexpected
-  if /i not "%~5"=="Start-Sleep -Seconds 3" goto :unexpected
-  >>"%ST_TEST_FIXTURE%\calls.log" echo powershell-sleep
-  exit /b 0
+  if /i "%~5"=="Start-Sleep -Seconds 3" (
+    >>"%ST_TEST_FIXTURE%\calls.log" echo powershell-sleep
+    exit /b 0
+  )
+  goto :health
 )
 if /i not "%~1"=="-NoProfile" goto :unexpected
 if /i not "%~2"=="-Command" goto :unexpected
@@ -33,6 +36,10 @@ if /i not "%~2"=="-Command" goto :unexpected
 if exist "%ST_TEST_FIXTURE%\query-fails.flag" exit /b 2
 if exist "%ST_TEST_FIXTURE%\task-running.flag" exit /b 0
 exit /b 1
+:health
+>>"%ST_TEST_FIXTURE%\calls.log" echo powershell-health
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -Command ". '%ST_TEST_FIXTURE%\health-http-boundary.ps1'; %~5"
+exit /b %ERRORLEVEL%
 :unexpected
 >>"%ST_TEST_FIXTURE%\calls.log" echo unexpected-powershell
 exit /b 99
@@ -41,6 +48,10 @@ exit /b 99
 >>"%ST_TEST_FIXTURE%\calls.log" echo curl %*
 if "%~4"=="http://127.0.0.1:18432/health" (
   if exist "%ST_TEST_FIXTURE%\local-health.flag" (
+    if exist "%ST_TEST_FIXTURE%\local-response.json" (
+      type "%ST_TEST_FIXTURE%\local-response.json"
+      exit /b 0
+    )
     echo {"runtimeCommit":"fixture"}
     exit /b 0
   )
@@ -88,8 +99,31 @@ exit /b 0
 }
 
 
+_HEALTH_HTTP_BOUNDARY = r'''
+function Invoke-RestMethod {
+  param([string]$Uri, [int]$TimeoutSec, [string]$ErrorAction)
+  if ($TimeoutSec -ne 3 -or $ErrorAction -ne 'Stop') { throw 'unexpected health request options' }
+  $fixture = $env:ST_TEST_FIXTURE
+  [IO.File]::AppendAllText((Join-Path $fixture 'calls.log'), ('health-http-fixture ' + $Uri + [Environment]::NewLine), [Text.Encoding]::UTF8)
+  if ($Uri -eq 'http://127.0.0.1:18432/health') {
+    if (-not [IO.File]::Exists((Join-Path $fixture 'local-health.flag'))) { throw 'offline local fixture' }
+    $name = 'local-response.json'
+  } elseif ($Uri -eq 'http://127.0.0.1:18434/gateway/health') {
+    if (-not [IO.File]::Exists((Join-Path $fixture 'gateway-live.flag'))) { throw 'offline gateway fixture' }
+    $name = 'gateway-response.json'
+  } else { throw 'unapproved health request' }
+  $body = [IO.File]::ReadAllText((Join-Path $fixture $name), [Text.Encoding]::UTF8)
+  $value = ConvertFrom-Json -InputObject $body -ErrorAction Stop
+  if ($name -eq 'gateway-response.json' -and -not [IO.File]::Exists((Join-Path $fixture 'gateway-custom.flag'))) {
+    $value.upstream = [IO.File]::Exists((Join-Path $fixture 'upstream-ready.flag'))
+  }
+  return $value
+}
+'''
+
+
 def _instrument_external_command_tokens(raw: bytes) -> tuple[bytes, dict[str, int]]:
-    """僅在副本換掉外部動作，原始分支、標籤、管線、findstr 與退出碼不變。"""
+    """只換外部動作；健康判定保留真 PS5 程式，僅由 HTTP 函式取得固定本文。"""
     text = raw.decode('ascii')
     counts = {}
     for name in STUBS:
@@ -99,7 +133,22 @@ def _instrument_external_command_tokens(raw: bytes) -> tuple[bytes, dict[str, in
         pattern = r'(?im)^([ \t]*)' + token + r'(?=[ \t])'
         replacement = r'\1call "%ST_TEST_FIXTURE%\\' + name + r'-stub.cmd"'
         text, counts[name] = re.subn(pattern, replacement, text)
-    expected = {'powershell': 3, 'curl': 2, 'schtasks': 1, 'start': 1}
+    health_commands = re.findall(r'-Command "([^"]*Invoke-RestMethod[^"]*)"', raw.decode('ascii'))
+    expected = {'powershell': 5, 'curl': 0, 'schtasks': 1, 'start': 1} if health_commands else {
+        'powershell': 3, 'curl': 2, 'schtasks': 1, 'start': 1}
+    if health_commands:
+        if len(health_commands) != 2:
+            raise AssertionError('健康查詢必須只有兩個明列的 JSON 邊界')
+        uris = []
+        for command in health_commands:
+            matches = re.findall(r"Invoke-RestMethod -Uri '([^']+)' -TimeoutSec 3 -ErrorAction Stop", command)
+            if len(matches) != 1 or command.count('Invoke-RestMethod') != 1:
+                raise AssertionError('來源健康 HTTP 契約已變動，不執行未知外部命令')
+            if re.search(r'Invoke-WebRequest|\bStart-Process\b|\bStop-Process\b|\bcurl\b|\bschtasks\b', command, re.I):
+                raise AssertionError('健康判定夾帶未隔離的外部動作')
+            uris.extend(matches)
+        if set(uris) != {'http://127.0.0.1:18432/health', 'http://127.0.0.1:18434/gateway/health'}:
+            raise AssertionError('健康查詢超出明列 URI')
     if counts != expected:
         raise AssertionError(f'外部命令清單已變動，需先核對隔離完整性：{counts!r}')
     unsafe = r'(?im)^[ \t]*(?:powershell(?:\.exe)?|"[^"\r\n]*[\\/]powershell\.exe"|curl(?:\.exe)?|schtasks(?:\.exe)?|timeout(?:\.exe)?|start)(?=[ \t])'
@@ -123,12 +172,22 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
         cls.run_root = Path(cls.fixture.name)
 
     def run_case(self, name, *, local=True, gateway=True, upstream=False,
-                 running=False, recover=False, run_fails=False, recover_local=False, query_fails=False):
+                 running=False, recover=False, run_fails=False, recover_local=False, query_fails=False,
+                 local_payload=None, gateway_payload=None):
         case = Path(tempfile.mkdtemp(prefix='cmd-case-', dir=self.run_root))
         self.addCleanup(self.remove_case, case)
         (case / 'launcher.cmd').write_bytes(self.instrumented)
         for command, text in STUBS.items():
             (case / f'{command}-stub.cmd').write_bytes(_crlf(text))
+        (case / 'health-http-boundary.ps1').write_text(_HEALTH_HTTP_BOUNDARY, encoding='utf-8')
+        if gateway_payload is not None:
+            (case / 'gateway-custom.flag').write_bytes(b'1')
+        local_payload = {'runtimeCommit': 'a' * 40} if local_payload is None else local_payload
+        gateway_payload = {'gateway': 'private-web', 'upstream': upstream} if gateway_payload is None else gateway_payload
+        for filename, payload in (('local-response.json', local_payload), ('gateway-response.json', gateway_payload)):
+            # 完整 HTTP 本文以位元組結束；沒有 echo 換行、合法 JSON 截斷或預先代替健康判定。
+            body = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+            (case / filename).write_bytes(body)
         states = {
             'local-health': local,
             'gateway-live': gateway,
@@ -182,6 +241,33 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
                 self.assertEqual(result['localStartCount'], 0 if local else 1)
                 self.assertEqual(result['hostRunCount'], 0 if upstream else 1)
 
+    def test_large_valid_health_does_not_restart_running_local_or_web(self):
+        # 長行溢出後 findstr 會遺失前段已找到的欄位；合法 JSON 的鍵順序不影響健康契約。
+        # 16 KiB 與欄位在末端不足重現；以超過實機 145 KiB 的本文保留前段 runtimeCommit。
+        payload = {'runtimeCommit': 'a' * 40, 'diagnostics': 'x' * 200000}
+        raw = json.dumps(payload, separators=(',', ':')).encode('ascii')
+        self.assertGreater(len(raw), 200000)
+        self.assertEqual(json.loads(raw)['runtimeCommit'], 'a' * 40)
+        code, output, result = self.run_case('超長合法 health 已在線', upstream=True,
+                                           running=True, local_payload=payload)
+        self.assertEqual(code, 0, output)
+        self.assertEqual(result['localStartCount'], 0, result)
+        self.assertEqual(result['hostRunCount'], 0, result)
+        self.assertEqual(result['taskQueryCount'], 0, result)
+        self.assertIn('Local : UP', output)
+        self.assertIn('Web   : UP', output)
+
+    def test_large_utf8_health_does_not_restart_running_local_or_web(self):
+        payload = {'runtimeCommit': 'a' * 40, 'diagnostics': '合成診斷' * 20000}
+        raw = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+        self.assertGreater(len(raw), 200000)
+        code, output, result = self.run_case('超長 UTF-8 health 已在線', upstream=True,
+                                           running=True, local_payload=payload)
+        self.assertEqual(code, 0, output)
+        self.assertEqual(result['localStartCount'], 0, result)
+        self.assertEqual(result['hostRunCount'], 0, result)
+        self.assertEqual(result['taskQueryCount'], 0, result)
+
     def test_stopped_gateway_and_backend_run_host_and_recover(self):
         code, output, result = self.run_case('兩邊停止後恢復', gateway=False,
                                            upstream=False, running=False, recover=True)
@@ -230,6 +316,52 @@ function Get-ScheduledTask {
   return [pscustomobject]@{ State = [int]$env:ST_TEST_TASK_STATE; DisplayState = $env:ST_TEST_TASK_DISPLAY }
 }
 '''
+
+
+@unittest.skipUnless(os.name == 'nt', '驗證啟動器的真 PowerShell 5.1 JSON 健康判定')
+class LauncherJsonHealthOfflineTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        source = (SOURCE_ROOT / 'START_LOCAL_AND_WEB.cmd').read_bytes().decode('ascii')
+        commands = re.findall(r'-Command "([^"]*Invoke-RestMethod[^"]*)"', source)
+        cls.commands = {}
+        for command in commands:
+            if "-Uri 'http://127.0.0.1:18432/health'" in command:
+                cls.commands['local'] = command
+            elif "-Uri 'http://127.0.0.1:18434/gateway/health'" in command:
+                cls.commands['gateway'] = command
+        if set(cls.commands) != {'local', 'gateway'}:
+            raise AssertionError('必須使用來源的兩個 JSON 健康判定命令')
+        cls.engine = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+
+    def query(self, side, payload):
+        with tempfile.TemporaryDirectory(prefix='st-health-parser-') as temp:
+            case = Path(temp)
+            filename, flag = ('local-response.json', 'local-health.flag') if side == 'local' else (
+                'gateway-response.json', 'gateway-live.flag')
+            (case / filename).write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+            (case / flag).write_bytes(b'1')
+            (case / 'gateway-custom.flag').write_bytes(b'1')
+            done = subprocess.run([str(self.engine), '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+                _HEALTH_HTTP_BOUNDARY + '\n' + self.commands[side]],
+                env=dict(os.environ, ST_TEST_FIXTURE=str(case)), stdin=subprocess.DEVNULL,
+                capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+            uri = 'http://127.0.0.1:18432/health' if side == 'local' else 'http://127.0.0.1:18434/gateway/health'
+            self.assertEqual((case / 'calls.log').read_text(encoding='utf-8-sig').splitlines(),
+                             ['health-http-fixture ' + uri])
+        return done.returncode, (done.stdout + done.stderr).decode('utf-8', 'replace')
+
+    def test_gateway_requires_boolean_true(self):
+        for value, expected in ((True, 0), (False, 1), ('true', 1), (1, 1), (None, 1)):
+            with self.subTest(upstream=value):
+                code, output = self.query('gateway', {'gateway': 'private-web', 'upstream': value})
+                self.assertEqual(code, expected, output)
+
+    def test_local_requires_complete_string_runtime_commit(self):
+        for value, expected in (('a' * 40, 0), ('a' * 40 + '\n', 1), ('fixture', 1), (None, 1), (40, 1)):
+            with self.subTest(runtimeCommit=value):
+                code, output = self.query('local', {'runtimeCommit': value})
+                self.assertEqual(code, expected, output)
 
 
 @unittest.skipUnless(os.name == 'nt', '驗證 Windows 排程查詢的 PowerShell 語意')
