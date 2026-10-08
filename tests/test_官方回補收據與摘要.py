@@ -26,7 +26,11 @@ class ReceiptTransportTests(unittest.TestCase):
         raw = b'{ "fields": ["date"], "notes": [], "data": [] }\n'
         budget = jobs.Budget(threading.Event())
         for module, fetch in ((daily, daily.get_json), (jobs, budget.get_json)):
-            with patch.object(module, 'urlopen', return_value=io.BytesIO(raw)), patch.object(daily.time, 'sleep'):
+            transport = (patch.object(daily, 'urlopen', return_value=io.BytesIO(raw)) if module is daily else
+                         patch.object(jobs.http_client, 'request',
+                                      return_value=jobs.http_client.HttpResponse(200, {}, raw, self.url)))
+            with transport, patch.object(daily.time, 'sleep'), \
+                    patch('urllib.request.urlopen', side_effect=AssertionError('離線收據測試不得連外')):
                 result = fetch(self.url)
             value, digest = result
             self.assertEqual(value, json.loads(raw))

@@ -12,6 +12,7 @@ stdlib only（http.client）。目的：
 from __future__ import annotations
 
 import gzip
+import io
 import http.client
 import json
 import socket
@@ -20,6 +21,7 @@ import threading
 import time
 import urllib.error
 import urllib.parse
+from contextlib import contextmanager
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 
@@ -101,6 +103,38 @@ def _parse_url(url: str) -> Tuple[str, str, int, str]:
     if u.query:
         path = f'{path}?{u.query}'
     return u.scheme, host, port, path
+
+
+@contextmanager
+def _response_deadline(transport_sock, deadline):
+    """已連線回應的絕對期限；逐位元組標頭也不能延長等待。"""
+    if transport_sock is None or deadline is None:
+        yield
+        return
+    expired = threading.Event()
+    def interrupt():
+        expired.set()
+        try:
+            transport_sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            # 已關閉連線不再阻塞；主呼叫仍以 expired 回報期限錯誤。
+            return
+    timer = threading.Timer(max(0, deadline - time.monotonic()), interrupt)
+    timer.daemon = True
+    timer.start()
+    try:
+        try:
+            yield
+        finally:
+            # 等 callback 完全離開後才檢查結果、歸還連線，避免中斷下一位借用者。
+            timer.cancel()
+            timer.join()
+    except Exception as error:
+        if expired.is_set():
+            raise TimeoutError('來源回應已超過整體期限') from error
+        raise
+    if expired.is_set() or time.monotonic() >= deadline:
+        raise TimeoutError('來源回應已超過整體期限')
 
 
 class _HostPool:
@@ -219,7 +253,11 @@ class HttpClient:
         timeout: float = DEFAULT_TIMEOUT,
         retries: int = DEFAULT_RETRIES,
         deadline: Optional[float] = None,
+        max_body_bytes: Optional[int] = None,
     ) -> HttpResponse:
+        if max_body_bytes is not None and (isinstance(max_body_bytes, bool) or
+                not isinstance(max_body_bytes, int) or max_body_bytes < 1):
+            raise ValueError('來源內容大小上限必須為正整數')
         scheme, host, port, path = _parse_url(url)
         pool = self._pool(scheme, host, port)
         hdrs: Dict[str, str] = {
@@ -278,37 +316,50 @@ class HttpClient:
                 transport_sock = conn.sock
                 if deadline is not None and transport_sock is not None:
                     transport_sock.settimeout(remaining_timeout())
-                resp = conn.getresponse()
-                if deadline is None:
-                    body = resp.read()
-                else:
-                    chunks = []
-                    while True:
-                        remaining = remaining_timeout()
-                        if transport_sock is not None:
-                            transport_sock.settimeout(remaining)
-                        chunk = resp.read1(64 * 1024)
-                        if not chunk:
-                            if resp.length not in (None, 0):
-                                raise http.client.IncompleteRead(b''.join(chunks), resp.length)
-                            break
-                        chunks.append(chunk)
-                    remaining_timeout()
-                    body = b''.join(chunks)
-                status = int(resp.status)
-                # 正規化 header 為 str→str
-                rh = {str(k): str(v) for k, v in resp.getheaders()}
-                # 呼叫端以 Accept-Encoding: gzip 要求壓縮時，回傳解壓後的內容（大型官方批次檔可減少傳輸量）。
-                encoding_key = next((k for k in rh if k.lower() == 'content-encoding'), None)
-                wants_gzip = any(k.lower() == 'accept-encoding' and
-                                 any(token.strip().lower() == 'gzip' for token in v.split(','))
-                                 for k, v in hdrs.items())
-                if wants_gzip and encoding_key and rh[encoding_key].strip().lower() == 'gzip' and body:
-                    body = gzip.decompress(body)
-                    del rh[encoding_key]
-                    length_key = next((k for k in rh if k.lower() == 'content-length'), None)
-                    if length_key:
-                        rh[length_key] = str(len(body))
+                with _response_deadline(transport_sock, deadline):
+                    resp = conn.getresponse()
+                    if deadline is None and max_body_bytes is None:
+                        body = resp.read()
+                    else:
+                        chunks = []
+                        size = 0
+                        while True:
+                            remaining = remaining_timeout()
+                            if transport_sock is not None:
+                                transport_sock.settimeout(remaining)
+                            read_size = (64 * 1024 if max_body_bytes is None else
+                                         min(64 * 1024, max_body_bytes + 1 - size))
+                            chunk = resp.read1(read_size)
+                            if not chunk:
+                                if resp.length not in (None, 0):
+                                    raise http.client.IncompleteRead(b''.join(chunks), resp.length)
+                                break
+                            chunks.append(chunk)
+                            size += len(chunk)
+                            if max_body_bytes is not None and size > max_body_bytes:
+                                raise ValueError('來源內容超出大小限制')
+                        remaining_timeout()
+                        body = b''.join(chunks)
+                    status = int(resp.status)
+                    # 正規化 header 為 str→str
+                    rh = {str(k): str(v) for k, v in resp.getheaders()}
+                    # 只有呼叫端選用 gzip 時解壓，未選用者保持既有行為。
+                    encoding_key = next((k for k in rh if k.lower() == 'content-encoding'), None)
+                    wants_gzip = any(k.lower() == 'accept-encoding' and
+                                     any(token.strip().lower() == 'gzip' for token in v.split(','))
+                                     for k, v in hdrs.items())
+                    if wants_gzip and encoding_key and rh[encoding_key].strip().lower() == 'gzip' and body:
+                        if max_body_bytes is None:
+                            body = gzip.decompress(body)
+                        else:
+                            with gzip.GzipFile(fileobj=io.BytesIO(body)) as compressed:
+                                body = compressed.read(max_body_bytes + 1)
+                            if len(body) > max_body_bytes:
+                                raise ValueError('來源內容超出大小限制')
+                        del rh[encoding_key]
+                        length_key = next((k for k in rh if k.lower() == 'content-length'), None)
+                        if length_key:
+                            rh[length_key] = str(len(body))
                 conn_hdr = (rh.get('Connection') or rh.get('connection') or '').lower()
                 reuse = ('close' not in conn_hdr) and status < 400
 

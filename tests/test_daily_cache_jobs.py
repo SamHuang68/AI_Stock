@@ -160,7 +160,7 @@ class DailyCacheTests(unittest.TestCase):
         external = jobs.status(); external['symbols'].clear()
         self.assertEqual(len(jobs.status()['symbols']), 1)
         budget = jobs.Budget(threading.Event(), requests=0)
-        with patch.object(jobs, 'urlopen') as request, self.assertRaises(RuntimeError): budget.get_json('https://example.invalid')
+        with patch.object(jobs.http_client, 'request') as request, self.assertRaises(RuntimeError): budget.get_json('https://example.invalid')
         request.assert_not_called()
         expired = jobs.Budget(threading.Event(), seconds=0)
         with self.assertRaises(TimeoutError): expired.check()

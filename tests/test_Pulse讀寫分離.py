@@ -89,11 +89,11 @@ class PulseReadWriteTest(unittest.TestCase):
             self.fail('拒絕清理不在測試暫存區內的路徑：' + str(target))
         shutil.rmtree(target)
 
-    def request(self, path, data=None, origin=None):
+    def request(self, path, data=None, origin=None, method=None):
         headers = {'Content-Type': 'application/json'}
         if origin:
             headers['Origin'] = origin
-        request = urllib.request.Request(self.base + path, data=(json.dumps(data).encode() if data is not None else None), headers=headers)
+        request = urllib.request.Request(self.base + path, data=(json.dumps(data).encode() if data is not None else None), headers=headers, method=method)
         try:
             with urllib.request.urlopen(request, timeout=3) as response:
                 return response.status, json.load(response)
@@ -209,9 +209,48 @@ class PulseReadWriteTest(unittest.TestCase):
     def test_post_validation_origin_and_unknown_status(self):
         self.assertEqual(self.request('/pulse/refresh', {'force': True})[0], 400)
         self.assertEqual(self.request('/pulse/refresh', [], origin=None)[0], 422)
+        # 空本文與真正 JSON 本文都必須收到明確拒絕。
+        self.assertEqual(self.request('/pulse/refresh', origin='https://example.invalid', method='POST')[0], 403)
         self.assertEqual(self.request('/pulse/refresh', {}, origin='https://example.invalid')[0], 403)
         self.assertEqual(self.request('/pulse/update-status?jobId=missing')[0], 404)
         self.assertEqual(self.request('/pulse/update-status?jobId=..%2Fsecret')[0], 400)
+        self.assertFalse(self.queue_db.exists())
+
+    def test_get_method_rejection_also_closes_declared_body(self):
+        import http.client
+        connection = http.client.HTTPConnection('127.0.0.1', self.http.server_port, timeout=3)
+        try:
+            connection.request('GET', '/sync', body=b'{}')
+            with connection.getresponse() as response:
+                self.assertEqual(response.status, 405)
+                self.assertEqual(response.getheader('Connection'), 'close')
+                self.assertTrue(response.will_close)
+                response.read()
+        finally:
+            connection.close()
+
+    def test_early_post_rejection_closes_connection_without_parsing_leftover_body(self):
+        import http.client
+        for status, headers, body in (
+                (403, {'Origin': 'https://example.invalid', 'Content-Type': 'application/json'}, b'{}'),
+                (415, {'Content-Type': 'text/plain'}, b'{}'),
+                (413, {'Content-Type': 'application/json', 'Content-Length': '999999'}, b'{}'),
+                (400, {'Content-Type': 'application/json', 'Content-Length': '-1'}, b'{}')):
+            with self.subTest(status=status):
+                connection = http.client.HTTPConnection('127.0.0.1', self.http.server_port, timeout=3)
+                try:
+                    connection.request('POST', '/pulse/refresh', body=body, headers=headers)
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, status)
+                    self.assertEqual(response.getheader('Connection'), 'close')
+                    self.assertTrue(response.will_close)
+                    self.assertIn('error', json.loads(response.read()))
+                    connection.request('GET', '/pulse/update-status')
+                    with connection.getresponse() as next_response:
+                        self.assertEqual(next_response.status, 200)
+                        next_response.read()
+                finally:
+                    connection.close()
         self.assertFalse(self.queue_db.exists())
 
     def test_expired_publication_is_rejected_before_intent_warning_and_commit(self):

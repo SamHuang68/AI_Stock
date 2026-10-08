@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -188,16 +189,22 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
                     from us_equity_calendar import session as us_session
                 final_rows = [row for row in final_rows if ss.bar_date(row[0], market)
                               and us_session(ss.bar_date(row[0], market))['status'] != 'closed']
-            if final_rows:
-                ds.upsert_bars(code, market, final_rows, source='Yahoo Finance')
-                rows = ds.get_bars(code, market=market)
-                bars = ss.normalize_bars(rows, market)
-            if today_live and fresh and fresh[-1]['date'] == today:
-                live_extra = [fresh[-1]]
-            source = 'local-db+yahoo'
-            revision = ds.source_revision_status(code, market)
-            if revision['count']:
-                error = '來源有歷史修訂，首次日線已保留；價格基準仍須核對，不以新來源靜默覆寫'
+            try:
+                updated_bars = bars
+                if final_rows:
+                    ds.upsert_bars(code, market, final_rows, source='Yahoo Finance')
+                    updated_rows = ds.get_bars(code, market=market)
+                    updated_bars = ss.normalize_bars(updated_rows, market)
+                revision = ds.source_revision_status(code, market)
+            except (ValueError, sqlite3.Error, OSError) as exc:
+                error = f'日線更新未完成，保留已讀本機資料（{type(exc).__name__}）：{exc}'
+            else:
+                bars = updated_bars
+                if today_live and fresh and fresh[-1]['date'] == today:
+                    live_extra = [fresh[-1]]
+                source = 'local-db+yahoo'
+                if revision['count']:
+                    error = '來源有歷史修訂，首次日線已保留；價格基準仍須核對，不以新來源靜默覆寫'
     if live_extra and (not bars or bars[-1]['date'] < live_extra[0]['date']):
         bars = bars + live_extra
     last = bars[-1]['date'] if bars else None
