@@ -17,5 +17,6 @@ if not defined WD_DIR (
   exit /b 1
 )
 
-call "%WD_DIR%\START_WAVEDECK.cmd"
-endlocal
+call "%WD_DIR%\START_WAVEDECK.cmd" %*
+set "WD_RC=%ERRORLEVEL%"
+endlocal & exit /b %WD_RC%

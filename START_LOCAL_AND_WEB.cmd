@@ -4,6 +4,8 @@ REM Keep ASCII for the Windows console. Safe to run when either side is already 
 REM Exit code: 0 = both healthy, 1 = local down, 2 = web down, 3 = both down.
 setlocal EnableExtensions
 cd /d "%~dp0"
+set "OPEN_BROWSER=1"
+if /i "%~1"=="--no-browser" set "OPEN_BROWSER=0"
 
 echo ============================================================
 echo  1/2 Local ST  (START_TIP.cmd, managed install, 127.0.0.1:18432)
@@ -73,12 +75,18 @@ goto :wait
 echo.
 echo ------------------------------------------------------------
 set "RC=0"
+set "LOCAL_READY=0"
 call :local_up
-if errorlevel 1 (echo  Local : DOWN  http://127.0.0.1:18432/& set /a RC^|=1) else (echo  Local : UP    http://127.0.0.1:18432/)
+if errorlevel 1 (echo  Local : DOWN  http://127.0.0.1:18432/& set /a RC^|=1) else (echo  Local : UP    http://127.0.0.1:18432/& set "LOCAL_READY=1")
 call :web_ready
 if errorlevel 1 (echo  Web   : DOWN  http://127.0.0.1:18434/  ^(gateway or backend not ready^)& set /a RC^|=2) else (echo  Web   : UP    http://127.0.0.1:18434/)
 echo ------------------------------------------------------------
+if "%OPEN_BROWSER%"=="1" if "%LOCAL_READY%"=="1" call :open_local
 exit /b %RC%
+
+:open_local
+start "" "http://127.0.0.1:18432/#pulse"
+exit /b 0
 
 :local_up
 "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -Command "try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:18432/health' -TimeoutSec 3 -ErrorAction Stop; if ($r.runtimeCommit -is [string] -and $r.runtimeCommit -cmatch '\A[a-f0-9]{40}\z') { exit 0 }; exit 1 } catch { exit 1 }" >nul 2>nul

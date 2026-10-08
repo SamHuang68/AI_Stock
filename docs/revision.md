@@ -5,6 +5,18 @@
 
 ---
 
+## v5.0 修訂 — 2026-10-09 整合 Stock Terminal 與 WaveDeck 啟動入口
+
+產品版本維持 **5.0**；基準為 `4deea9f617a0d35e2f5b60faddf01695ad979c5e`。原 `START_LOCAL_AND_WEB.cmd` 只啟動服務與列出網址；新增就緒後開啟 Pulse，以及 `--no-browser` 選項。新增 `START_ALL.cmd` 串接既有 local／Private Web 與 WaveDeck 入口，保留 local／web 的退出碼，另以位元 4 表示 WaveDeck 未就緒。
+
+WaveDeck 仍沿用 `run.py`、釘選 Python 與原有埠 fallback；將無條件刪除埠收據／重複啟動改為先核對健康回應的服務、目錄、實際埠與布林就緒欄位。健康端點新增目錄、Python、PID 與實際埠身分；不改 provider、執行模式或券商設定。啟動在背景執行並保留 stdout／stderr 日誌，等待有三十秒期限；不停止任何未知程序。缺少身分的舊 WaveDeck 會明確拒絕重複啟動。移除健康處理函式內與既有全域名稱重疊的 `sys` 匯入，避免新身分欄位發生區域變數未綁定。
+
+定向驗證：真實 CMD 串接、開頁邊界與原有 local／web 健康契約共 **26 案通過**；真實 PowerShell 5.1 的 WaveDeck 離線邊界共 **7 案通過**，涵蓋已在線重用、保留埠、身分型別、Python pin、fallback、逾時與啟動失敗；探測或 Python 解析耗盡期限後不再啟動程序，新期限保護的成功路徑另通過一案。健康端點由動態 loopback HTTP 回應證明實際埠與來源目錄一致。分享包必要檔案及同一內容保護掃描共 **2 案通過**；CMD 保持 ASCII／CRLF，PowerShell 保持 UTF-8 BOM。不同定向案例合計 **35 案**，沒有執行完整測試、完整 stage 或模型第二意見，也沒有啟動或更動受管 runtime。
+
+本條建立時為未提交的本機候選；來源工作樹與定向日誌在 `AI-Workspace/worktrees/stock-terminal/launcher-all-20261009`、`AI-Workspace/docs/stock-terminal/launcher-all-20261009`。沒有 commit、push、部署；既有正式與本機 runtime 版本維持各自現況，所有舊修訂歷史保留。
+
+---
+
 ## v5.0 修訂 — 2026-10-08 分享包啟動器驗證的個別期限與日誌
 
 產品版本維持 **5.0**；基準為 `c295e34c6519d38b64073edde5f017fcfd2fe564`。該版四項精確 CI 成功，但完整 stage 在真正分享 ZIP 的啟動器驗證失敗：兩個類別共用九十秒，與原有每次 CMD 三十秒／PowerShell 十五秒及多情境累積預算不相容。原始失敗收據保留；另一次相同分享包診斷於 78.641 秒成功，不能據此認定舊失敗為偶發或已找出當時最後阻塞方法。
