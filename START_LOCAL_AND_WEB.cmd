@@ -15,14 +15,14 @@ if not errorlevel 1 (
 )
 REM START_TIP.cmd does not return while it starts the server, so start it detached and poll /health.
 start "ST local launcher" /min "%SystemRoot%\System32\cmd.exe" /c ""%~dp0START_TIP.cmd""
-echo Local launcher started. Waiting for /health ^(up to 120 seconds^)...
+echo Local launcher started. Waiting for /health ^(up to 40 checks; each request up to 3 seconds^)...
 set /a TRIES=0
 :wait_local
 call :local_up
 if not errorlevel 1 goto :web
 set /a TRIES+=1
 if %TRIES% GEQ 40 (
-  echo [WARN] Local did not become healthy within 120 seconds. Check StockTerminalLocal\logs.
+  echo [WARN] Local did not become healthy after 40 checks. Check StockTerminalLocal\logs.
   goto :web
 )
 "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 3" >nul
@@ -62,7 +62,7 @@ call :web_ready
 if not errorlevel 1 goto :summary
 set /a TRIES+=1
 if %TRIES% GEQ 20 (
-  echo [WARN] Web did not become ready within 60 seconds. Check StockTerminalPrivateWeb\current\logs.
+  echo [WARN] Web did not become ready after 20 checks. Check StockTerminalPrivateWeb\current\logs.
   echo If the gateway answers but its backend is down, run the managed STOP_PRIVATE_WEB.cmd, then retry.
   goto :summary
 )
@@ -81,9 +81,9 @@ echo ------------------------------------------------------------
 exit /b %RC%
 
 :local_up
-curl.exe -s -m 3 http://127.0.0.1:18432/health 2>nul | findstr /c:"runtimeCommit" >nul
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -Command "try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:18432/health' -TimeoutSec 3 -ErrorAction Stop; if ($r.runtimeCommit -is [string] -and $r.runtimeCommit -match '\A[a-f0-9]{40}\z') { exit 0 }; exit 1 } catch { exit 1 }" >nul 2>nul
 exit /b %ERRORLEVEL%
 
 :web_ready
-curl.exe -s -m 3 http://127.0.0.1:18434/gateway/health 2>nul | findstr /r /c:"upstream.:true" >nul
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -Command "try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:18434/gateway/health' -TimeoutSec 3 -ErrorAction Stop; if ($r.upstream -is [bool] -and $r.upstream) { exit 0 }; exit 1 } catch { exit 1 }" >nul 2>nul
 exit /b %ERRORLEVEL%
