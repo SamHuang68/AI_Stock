@@ -157,6 +157,19 @@ def _instrument_external_command_tokens(raw: bytes) -> tuple[bytes, dict[str, in
     return _crlf(text), counts
 
 
+def _limit_fixture_poll_attempts(raw: bytes) -> tuple[bytes, dict[str, int]]:
+    """離線案例只縮短副本的重試次數；真實健康解析、分支與 30 秒期限保留。"""
+    text = raw.decode('ascii')
+    budgets = {}
+    for side, expected in (('local', 40), ('web', 20)):
+        pattern = rf'(?m)^if %TRIES% GEQ {expected} \(\s*$'
+        text, count = re.subn(pattern, 'if %TRIES% GEQ 2 (', text)
+        if count != 1:
+            raise AssertionError(f'{side} 原始輪詢次數契約變動：{count}')
+        budgets[side] = expected
+    return _crlf(text), budgets
+
+
 @unittest.skipUnless(os.name == 'nt', '此行為驗證依賴 Windows 真實 CMD 解析器')
 class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
     """無連線、排程操作、正式埠監聽或 GUI 的真實 CMD 行為回歸。"""
@@ -165,7 +178,8 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
     def setUpClass(cls):
         cls.source = SOURCE_ROOT / 'START_LOCAL_AND_WEB.cmd'
         cls.raw = cls.source.read_bytes()
-        cls.instrumented, cls.substitution_counts = _instrument_external_command_tokens(cls.raw)
+        actions, cls.substitution_counts = _instrument_external_command_tokens(cls.raw)
+        cls.instrumented, cls.production_poll_budgets = _limit_fixture_poll_attempts(actions)
         cls.cmd = Path(os.environ['SystemRoot']) / 'System32' / 'cmd.exe'
         cls.fixture = tempfile.TemporaryDirectory(prefix='st-cmd-fixtures-')
         cls.addClassCleanup(cls.fixture.cleanup)
@@ -209,6 +223,7 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
         output = (done.stdout + done.stderr).decode('ascii', 'replace')
         calls = (case / 'calls.log').read_text(encoding='ascii').splitlines()
         self.assertFalse(any(line.startswith('unexpected-') for line in calls), calls)
+        self.assertLessEqual(calls.count('powershell-health'), 8, calls)
         run_calls = [line for line in calls if line.startswith('schtasks /run ')]
         query_calls = [line for line in calls if line == 'powershell-query']
         start_calls = [line for line in calls if line == 'start']
@@ -230,6 +245,12 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
         self.assertIn(b'\r\n', self.raw)
         self.assertNotIn(b'\n', self.raw.replace(b'\r\n', b''))
         self.assertNotIn(b'\r', self.raw.replace(b'\r\n', b''))
+
+    def test_fixture_reduces_shell_startups_and_preserves_production_poll_budgets(self):
+        self.assertEqual(self.production_poll_budgets, {'local': 40, 'web': 20})
+        self.assertEqual(self.instrumented.count(b'if %TRIES% GEQ 2 ('), 2)
+        self.assertIn(b'if %TRIES% GEQ 40 (', self.raw)
+        self.assertIn(b'if %TRIES% GEQ 20 (', self.raw)
 
     def assert_health_exit_code(self, local, upstream, expected):
         code, output, result = self.run_case(
@@ -367,7 +388,7 @@ class LauncherJsonHealthOfflineTests(unittest.TestCase):
                 self.assertEqual(code, expected, output)
 
     def test_local_requires_complete_string_runtime_commit(self):
-        for value, expected in (('a' * 40, 0), ('a' * 40 + '\n', 1), ('fixture', 1), (None, 1), (40, 1)):
+        for value, expected in (('a' * 40, 0), ('A' * 40, 1), ('a' * 40 + '\n', 1), ('fixture', 1), (None, 1), (40, 1)):
             with self.subTest(runtimeCommit=value):
                 code, output = self.query('local', {'runtimeCommit': value})
                 self.assertEqual(code, expected, output)

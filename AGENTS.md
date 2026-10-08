@@ -29,13 +29,14 @@
 ## 2. 本專案的操作規則
 
 1. **先唯讀檢查，再給任何更新、啟動或部署指令**（第 4 節）。
-2. **不要在未登記的資料夾執行 `START_TIP.cmd` 或 `scripts\go.ps1`。** 在非登記資料夾它走開發流程，會關掉 18432 埠上的程序（含本機受管 ST）。`go.ps1` 現會在這種情況下拒絕執行；要刻意在別處開發必須明確加 `-Worktree`。
+2. **不要在未登記的資料夾執行一般 `START_TIP.cmd` 或 `scripts\go.ps1`。** 已登記的原工作樹正常啟動會轉交本機受管啟動器；其他位置一般啟動會拒絕。明確加 `-Worktree` 的開發流程沿用 `ST_PORT`（預設 18432），只允許結束本工作樹收據、程序建立時間及命令列全部相符的程序，並保留核對時的程序物件；未知占用者一律拒絕。新收據還須符合本次 CMD／釘選 Python／父程序鏈與健康回應的工作樹、Python 及埠。
 3. **不要依埠 taskkill 18432。** 受管程序的命令列是 `python -B -u "%LOCALAPPDATA%\StockTerminalLocal\current\server\server.py"`，且須與 `local_process.json` 登記相符；`start_local.ps1` 遇到 18432 上的其他程序會拒絕啟動、不會終止它。開發程序是 `python -u server\server.py`，兩者不要同時跑。
 4. **發布不由雲端代理人執行。** 發布走 stage → promote，工具與證據格式見第 1 節；授權分層與發布前提（CI、完整 SQLite 備份、停止服務）以共用規則 `0007` 與 `procedures/ai-stock-private-web-release.md` 為準，發布器本身不備份、不停服務。雲端代理人只提供精確 SHA、CI 結果與驗收標準，交給本機發布者。
 5. **更新開發工作樹：** `stock_terminal_v2.html` 是啟動時重建的產物，更新前 `git stash push -- stock_terminal_v2.html` 保留，不要丟棄；`data/` 的修改是執行期資料，不要還原；用 `git pull --ff-only origin main`。被未追蹤檔擋住時，把檔案搬到備份資料夾再 pull，不刪除；不用 `reset --hard`、`clean`、強制推送。
 6. **給使用者的指令一律是 PowerShell。** 讀 UTF-8 檔案要加 `-Encoding UTF8`（Windows PowerShell 5.1 預設用本機碼頁，中文會變成無法復原的亂碼）；要讓輸出可貼回，用 `& { … } *>&1 | Tee-Object -FilePath $log`，再 `Get-Content $log -Raw | Set-Clipboard`。
 7. **雲端工作階段的 Git 做法**（共用規則 `0007`）：只用明確檔案清單暫存（不用 `git add -A` 或 `git add .`），並用 `git diff --cached --name-only` 核對；比對與回報用完整 SHA；不 force push。在已合併 PR 的工作分支上接續工作時，把 `origin/main` 合併進分支，不要 reset 後強推。 完整 Python 測試套件與全倉庫靜態或安全掃描屬「完整掃描測試」（規則 `0008` 第 13 條）：執行前先向 Sam 說明範圍、影響與耗時並取得同意（每個 PR 推送前問一次，或依 Sam 的常設同意）；針對本次改動的測試直接跑。
 8. **例外處理與測試誠實**（共用規則 `0014`）：不得無記錄地吞掉錯誤。程式用 `server/log_once.py` 的 `log_once` 留下限頻記錄，或縮小例外型別，或重新拋出；`tests/test_no_new_silent_exceptions.py` 的棘輪會擋下新增的靜默寬鬆例外，減少時要把 `tests/silent_except_baseline.json` 一併降下。以 AST 或 mock 取函式的測試不得補上正式模組缺的名稱。
+9. **依變更範圍驗證**（Sam 2026-10-09 指示）：續接收尾時，未改動部分沿用固定版本的有效證據；有新修改才驗證受影響部分，不因整理報告或補第二意見而重跑完整套件或完整 stage。完整發布的既有驗收門檻仍適用，不以跳過測試的 stage 取代。開發啟動驗收入口為 `python -m unittest tests.test_launcher_safety`；需真實程序驗收時，明確設定 `ST_LAUNCHER_E2E=1` 執行 `tests/test_launcher_startup_windows.py`，使用隔離複本、空白資料、動態 loopback 埠與禁止連外的 fixture。
 
 ## 3. 版本與修訂歷史
 

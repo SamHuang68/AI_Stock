@@ -81,7 +81,7 @@ echo ------------------------------------------------------------
 exit /b %RC%
 
 :local_up
-"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -Command "try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:18432/health' -TimeoutSec 3 -ErrorAction Stop; if ($r.runtimeCommit -is [string] -and $r.runtimeCommit -match '\A[a-f0-9]{40}\z') { exit 0 }; exit 1 } catch { exit 1 }" >nul 2>nul
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -Command "try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:18432/health' -TimeoutSec 3 -ErrorAction Stop; if ($r.runtimeCommit -is [string] -and $r.runtimeCommit -cmatch '\A[a-f0-9]{40}\z') { exit 0 }; exit 1 } catch { exit 1 }" >nul 2>nul
 exit /b %ERRORLEVEL%
 
 :web_ready

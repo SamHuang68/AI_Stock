@@ -149,6 +149,8 @@ print(json.dumps(list(cases(unittest.defaultTestLoader.loadTestsFromName('tests.
             "Stock_Terminal/tests/test_review_regressions.py",
             "Stock_Terminal/tests/test_launcher_cmd.py",
             "Stock_Terminal/tests/test_launcher_pull.py",
+            "Stock_Terminal/tests/test_launcher_startup_windows.py",
+            "Stock_Terminal/tests/fixtures/launcher_loopback_only/sitecustomize.py",
             "Stock_Terminal/tests/review_market_state_selftest.js",
             "Stock_Terminal/tests/test_server_startup_order.py",
             "Stock_Terminal/tests/test_overnight_intraday.py",

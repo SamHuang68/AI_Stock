@@ -430,3 +430,28 @@ Sam 追加授權修正審查未通過部分，完成必要驗證後提交、推�
 - 開發收據支援一層 Windows venv Python 轉接器，核對釘選／基礎執行檔、絕對工作樹命令、CMD 路徑及啟動時已捕獲的父程序建立時間。超深、未知、身分不符的程序鏈仍拒絕登記與自動停止。實際隔離 venv 與動態 loopback 埠可重現舊拒寫情境。
 - `-Pull` 快轉完成後重新載入磁碟上的新版腳本，保留開發與 RebuildOnly 語意，省略 Pull 避免重複更新；UpdateOnly 維持更新後退出。
 - 發行必要清單包含新增 CMD 回歸測試；完整版 Python、JavaScript、瀏覽器與研究驗證及 Claude 覆核結果由版本固定的外部證據回報。先前 Claude 材料未獲驗收的結果仍不算通過；原 hosted CI 的阻塞根因沒有因本機通過而改判。
+
+## 2026-10-09 — PR #168 本機候選的啟動器安全補正與覆核收尾
+
+- 基底：`3f24218539634168c3189f07aada2568344b9190`。參考尚未推送的本機候選 `5d140b5f108bd2fed66f60f353c8b272c4133f2b`，在目前 main 最小整合，未合併衝突的舊 draft #168，也未帶回舊版 `-Pull` 自我誤判或較弱收據。
+- 開發流程沿用 `ST_PORT` 並在建置／程序動作前驗證範圍；Python pin 使用 UTF-8，ASCII CMD 透過環境傳入 Unicode 路徑。健康檢查核對既有 `baseDir`、`pythonExe`、`port`；完成 HTML／JS 檢查後才寫強來源收據，無法證明來源時拒絕成功回報。
+- 停止目標保留核對時的 Windows Process handle，以程序物件停止；未知程序、身分漂移及 PID 重用一律拒絕，已退出程序安全返回。保留原有 CMD、釘選 Python、父鏈時間及命令列防護。
+- 實機隔離驗收發現 Windows venv 會改寫子程序命令列的 Python 路徑；改為分別核對釘選／基礎執行檔與相同的精確伺服器引數，不以父子命令列全文相同判斷，也不接受額外引數。
+- 承接四個 Windows 隔離啟動案例及 loopback-only fixture；分享包必要清單與清單測試包含新檔。使用空白資料、隔離 AppData 與動態埠，背景來源不得連外；不修改受管安裝、正式資料庫或執行中受管程序。
+- 依 Sam 本輪要求只驗證修改部分，沒有再次執行完整套件或完整 stage。逐次失敗、修正及定向收據保存在 `AI-Workspace/docs/stock-terminal/review-fixes-20261008/closeout-20261009`；Claude 唯讀第二意見與發布終態另以該處固定版本的收據記錄，不能由本文推定通過。
+- 歷史日線僅針對既有 15 個疑點在原一致備份做主鍵追查；缺少首次原始回應、首次寫入時間與逐日工作對照，仍無安全修復個案。保留原值及證據，零筆確證不代表零污染。
+- VERSION 維持 5.0；本條為來源工具補正，正式站及本機受管正常執行鏈沒有改動，受管 runtime 維持已完整驗收的 `3f24218539634168c3189f07aada2568344b9190`。本條不表示新來源已部署，不使用跳過完整測試的 stage 繞過發布器。
+### 2026-10-09 — Claude 收尾覆核後的最小補正
+
+- Windows 開發伺服器使用隱藏背景 CMD，標準輸出與錯誤追加至 `logs/server_go_ps.out.log`、`logs/server_go_ps.err.log`。移除失敗後的無限 `pause`，CMD 保留 Python 退出碼並結束；就緒逾時明列可查看的日誌，不再指向不可見視窗。受管正常啟動入口仍先委派既有安裝。
+- 雙端啟動器嚴格接受小寫完整 `runtimeCommit`；離線測試副本將原始 40／20 次輪詢縮短為各兩次，並核對來源仍保留原始有限次數。健康 JSON 解析仍使用真 Windows PowerShell 5.1，每案最多八次啟動，維持既有 30 秒外層期限。
+- 直接執行安全測試時，入口放在全部類別定義之後，避免漏掉埠與健康身分案例。只新增／驗證受影響案例，逐項結果與 Claude 意見處置見同版本外部交付紀錄；不把過去完整測試誤記為本次執行。
+- 本條為未提交補正；最終提交、推送、整合及覆核狀態由固定版本的外部收據相互引用。產品 VERSION 維持 5.0；受管 runtime 仍為上述已發布版本，不由來源補正推定新發布。
+
+### 2026-10-09 — 背景開發伺服器操作補註與釘選讀者查證
+
+- 背景開發伺服器重啟：在該工作樹再次執行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\go.ps1 -Worktree`，由強收據核對自己的程序後結束並重啟。收據不符時會拒絕重啟，須先人工核對佔用者，不能依埠停止。一般 `START_TIP.cmd` 可能委派受管安裝，不用它代替指定開發工作樹的重啟。
+- 單純停止：先讀本工作樹 `logs/dev_server.receipt.json`，用 PowerShell 的 `Get-Process`／`Get-CimInstance` 比對收據 PID、UTC 建立時間、完整命令與絕對路徑；`startTicksUtc` 為 .NET 的 UTC ticks，可用 `[datetime]::new([long]$receipt.startTicksUtc, [DateTimeKind]::Utc)` 換算。確認工作管理員詳細資料是同一個 Python 程序後才結束。無法核對時保留程序，不依埠停止。此為使用者手動操作說明，不新增自動停止入口。
+- `server_go_ps.out.log`／`server_go_ps.err.log` 以追加方式保留，沒有自動輪替或截斷；長期開發時由使用者在已停止自有伺服器後封存。這保留原始錯誤證據，也明示日誌會成長的維運限制。
+- 原生 Windows CMD 的 `chcp 65001`／`set /p`／`if exist` 讀取邊界，在含 BOM 與無 BOM 的合成 Unicode 路徑都成功且未 fallback；不能把 BOM 存在當成 WaveDeck 啟動事故。保留現行 UTF-8 writer，釘選回歸案例補上真實 WaveDeck CMD 讀取邊界。各實際讀者與版本限制見外部查證收據，不宣稱未來 Python 版本相容。
+- 基底為 `3f24218539634168c3189f07aada2568344b9190`，VERSION 維持 5.0；本節撰寫時為未提交來源補正。單一 pin 方法與原生 CMD 讀取邊界均成功，沒有重跑完整套件或 stage；最後文件與 DONE 訊息補正以差異及執行區段位元組核對驗證。最終提交、推送與受管安裝的實際狀態，互相引用 `AI-Workspace/docs/stock-terminal/review-fixes-20261008/closeout-20261009/final-closeout-report.md`；不能由本節推定新來源已部署。

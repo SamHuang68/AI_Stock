@@ -280,6 +280,8 @@ REQUIRED_SHARE_FILES = (
     "tests/test_deadline.py",
     "tests/test_http_boundary.py",
     "tests/test_launcher_safety.py",
+    "tests/test_launcher_startup_windows.py",
+    "tests/fixtures/launcher_loopback_only/sitecustomize.py",
     "tests/test_secret_migration.py",
     "tests/test_secret_store.py",
     "tests/test_server_http_security.py",

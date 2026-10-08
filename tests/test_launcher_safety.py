@@ -276,7 +276,7 @@ class DevServerReceiptBehaviorTests(unittest.TestCase):
         for proc in procs:
             self.assertIsNone(proc.poll(), '不該被終止的程序被終止了')
 
-    def test_identity_lookup_failure_does_not_abort_or_write_receipt(self):
+    def test_identity_lookup_failure_refuses_completion_without_writing_receipt(self):
         mine = self.sleeper()
         driver = r""". $env:ST_TEST_FUNCS
 function Get-PortListenerPids([int]$PortNum) { return @([int]$env:ST_TEST_WRITE_PIDS) }
@@ -286,8 +286,9 @@ Write-Host 'RECEIPT-RETURNED'
 """
         for name, engine in _powershell_engines().items():
             code, output = self.run_ps(engine, driver, ST_TEST_WRITE_PIDS=mine.pid, ST_TEST_ROOT=self.root)
-            self.assertEqual(code, 0, output)
-            self.assertIn('RECEIPT-RETURNED', output)
+            self.assertNotEqual(code, 0, output)
+            self.assertIn('ST-RECEIPT-GUARD', output)
+            self.assertNotIn('RECEIPT-RETURNED', output)
             self.assertIn('CIM-FIXTURE-CALLED', output)
             self.assertFalse(self.receipt.exists())
             self.assertAlive(mine)
@@ -302,11 +303,11 @@ $command = '"' + $pin + '" -u "' + (Join-Path $owner 'server\server.py') + '"'
 $script:Processes = @{
   50 = [pscustomobject]@{ ProcessId=50; Name='cmd.exe'; ParentProcessId=40; CommandLine=('cmd.exe /c "' + $launcher + '"') }
   60 = [pscustomobject]@{ ProcessId=60; Name='python.exe'; ParentProcessId=50; ExecutablePath=$pin; CommandLine=$command }
-  70 = [pscustomobject]@{ ProcessId=70; Name='python.exe'; ParentProcessId=60; ExecutablePath=$base; CommandLine=$command }
+  70 = [pscustomobject]@{ ProcessId=70; Name='python.exe'; ParentProcessId=60; ExecutablePath=$base; CommandLine=$command.Replace($pin,$base) }
 }
 $script:Ticks = @{ 50=[int64]100; 60=[int64]200; 70=[int64]300 }
 switch ($env:ST_TEST_CASE) {
-  'direct' { $script:Processes[70].ParentProcessId=50; $script:Processes[70].ExecutablePath=$pin }
+  'direct' { $script:Processes[70].ParentProcessId=50; $script:Processes[70].ExecutablePath=$pin; $script:Processes[70].CommandLine=$command }
   'parent-reused' { $script:Ticks[50]=[int64]101 }
   'future-proxy' { $script:Ticks[60]=[int64]400 }
   'deeper' { $script:Processes[60].ParentProcessId=61 }
@@ -323,13 +324,20 @@ function Get-CimInstance([string]$ClassName, [string]$Filter, $ErrorAction) {
   if ($Filter -notmatch '^ProcessId=(\d+)$') { throw '無效測試查詢' }
   return $script:Processes[[int]$Matches[1]]
 }
+function Get-Process([int]$Id,$ErrorAction) {
+  $p = [pscustomobject]@{Id=$Id;Handle=1;StartTime=[datetime]::new($script:Ticks[$Id], [DateTimeKind]::Utc);HasExited=$false}
+  $p | Add-Member -MemberType ScriptMethod -Name Refresh -Value {}
+  return $p
+}
+try {
 Write-DevServerReceipt -PortNum 18432 -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $owner -ExpectedParent 50 -ExpectedParentTicks 100 -ExpectedPython $pin -ExpectedBasePython $base -ExpectedLauncher $launcher
+} catch { if ($_.Exception.Message -notmatch '^ST-RECEIPT-GUARD:') { throw }; Write-Host 'REFUSED:ST-RECEIPT-GUARD' }
 Write-Host ('WRITTEN=' + (Test-Path -LiteralPath $env:ST_TEST_RECEIPT))
 $script:Stopped = @()
 function Get-ProcessCommandLine([int]$ProcId) { return [string]$script:Processes[$ProcId].CommandLine }
-function Stop-Process([int]$Id,[switch]$Force,$ErrorAction) {
-  if ($Id -ne 70) { throw '合成停止只接受本例 leaf 70。' }
-  $script:Stopped += $Id
+function Stop-Process($InputObject,[int]$Id,[switch]$Force,$ErrorAction) {
+  if ($Id -or $InputObject.Id -ne 70) { throw '合成停止只接受已核對的程序物件 leaf 70。' }
+  $script:Stopped += $InputObject.Id
 }
 function Start-Sleep([int]$Seconds) {}
 if (Test-Path -LiteralPath $env:ST_TEST_RECEIPT) {
@@ -378,7 +386,7 @@ function Get-CimInstance([string]$ClassName,[string]$Filter,$ErrorAction) {
   return $script:Processes[[int]$Matches[1]]
 }
 function Get-ProcessCommandLine([int]$ProcId) {return [string]$script:Processes[$ProcId].CommandLine}
-function Stop-Process([int]$Id,[switch]$Force,$ErrorAction) {$script:Stopped += $Id}
+function Stop-Process($InputObject,[int]$Id,[switch]$Force,$ErrorAction) {if($Id){throw '禁止重新依 PID 選取目標'}; $script:Stopped += $InputObject.Id}
 function Start-Sleep([int]$Seconds) {}
 $values = @{PortNum=18432;ReceiptPath=$env:ST_TEST_RECEIPT;OwnerRoot=$owner;ExpectedParent=50;ExpectedParentTicks=100;ExpectedPython=$pin;ExpectedBasePython=$base;ExpectedLauncher=$launcher}
 if($env:ST_TEST_WEAK_PARAM) {
@@ -387,8 +395,13 @@ if($env:ST_TEST_WEAK_PARAM) {
   elseif($env:ST_TEST_WEAK_KIND -eq 'tab') {$values[$env:ST_TEST_WEAK_PARAM]=[string][char]9}
   else {$values[$env:ST_TEST_WEAK_PARAM]=''}
 }
+function Get-Process([int]$Id,$ErrorAction) {
+  $p = [pscustomobject]@{Id=$Id;Handle=1;StartTime=[datetime]::new(300, [DateTimeKind]::Utc);HasExited=$false}
+  $p | Add-Member -MemberType ScriptMethod -Name Refresh -Value {}
+  return $p
+}
 $functionName = 'Write-' + 'DevServerReceipt'
-& $functionName @values
+try { & $functionName @values } catch { if ($_.Exception.Message -notmatch '^ST-RECEIPT-GUARD:') { throw }; Write-Host 'REFUSED:ST-RECEIPT-GUARD' }
 if(Test-Path -LiteralPath $env:ST_TEST_RECEIPT) {
   Stop-OwnedPortListeners -PortNum 18432 -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $owner
 }
@@ -408,6 +421,67 @@ Write-Host ('FAKESTOP=' + ($script:Stopped -join ','))
                         stopped = re.search(r'(?m)^FAKESTOP=(.*)$', output)
                         self.assertIsNotNone(stopped, output)
                         self.assertEqual(stopped.group(1).strip(), '70' if accepted else '', output)
+
+    def test_unicode_python_pin_round_trip_on_both_engines(self):
+        script = (ROOT / 'scripts' / 'go.ps1').read_text(encoding='utf-8-sig')
+        helpers = script[script.index('function Save-StockPythonPin'):script.index('function Test-PythonUsable')]
+        python_path = self.dir / 'Python space 驗收' / 'python.exe'
+        python_path.parent.mkdir()
+        # 此測試只驗證 pin 的持久化契約，不將這個檔案當作 Python 執行。
+        python_path.touch()
+        driver = "$Root = $env:ST_TEST_STOP_ROOT\n" + helpers + "\nSave-StockPythonPin $env:ST_TEST_PYTHON\nWrite-Host ('PIN=' + (Read-StockPythonPin))\n"
+        for name, engine in _powershell_engines().items():
+            with self.subTest(engine=name):
+                code, out = self.run_ps(engine, driver, ST_TEST_PYTHON=python_path)
+                self.assertEqual(code, 0, out)
+                self.assertIn('PIN=' + str(python_path), out)
+                pin = Path(self.root) / 'data' / 'stock_python.path'
+                self.assertEqual(pin.read_text(encoding='utf-8-sig').strip(), str(python_path))
+                if os.name == 'nt':
+                    # 真正 WaveDeck 的同一個 CMD 讀取邊界；不啟動 WaveDeck 或 fallback Python。
+                    wave = (ROOT / 'wavedeck/START_WAVEDECK.cmd').read_bytes().decode('utf-8-sig').replace('\r\n','\n')
+                    first = wave.index('set "PYEXE="')
+                    last = wave.index('if not defined PYEXE for /f', first)
+                    read_cmd = self.dir / 'read-wave-pin.cmd'
+                    body = '@echo off\nchcp 65001 >nul\nset "ST_ROOT=%ST_TEST_PIN_ROOT%"\n' + wave[first:last] + 'if not defined PYEXE exit /b 1\necho %PYEXE%\n'
+                    read_cmd.write_bytes(body.replace('\n','\r\n').encode('ascii'))
+                    cmd = Path(os.environ['SystemRoot']) / 'System32/cmd.exe'
+                    line = f'"{cmd}" /d /s /c ""{read_cmd}""'
+                    result = subprocess.run(line, env=dict(os.environ, ST_TEST_PIN_ROOT=self.root),
+                        capture_output=True, timeout=8, creationflags=subprocess.CREATE_NO_WINDOW)
+                    output = (result.stdout + result.stderr).decode('utf-8', 'replace')
+                    self.assertEqual(result.returncode, 0, output)
+                    self.assertEqual(output.strip(), str(python_path))
+
+
+
+    def test_owned_process_exiting_after_validation_does_not_retarget_by_pid(self):
+        other = self.sleeper()
+        driver = _TEST_LEGACY_RECEIPT_SEED + r"""
+$ErrorActionPreference = 'Stop'
+. $env:ST_TEST_FUNCS
+function Get-PortListenerPids([int]$PortNum) { return @([int]$env:ST_TEST_MINE_PID) }
+Seed-TestOwnedLegacyReceipt -PortNum 18432 -ListenerPids @([int]$env:ST_TEST_MINE_PID) -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_STOP_ROOT
+function Write-Host {
+  param([string]$Object)
+  if ($Object.StartsWith('[stop]')) {
+    $leaving = Get-Process -Id ([int]$env:ST_TEST_MINE_PID)
+    $leaving.Kill()
+    $leaving.WaitForExit()
+  }
+  Microsoft.PowerShell.Utility\Write-Host $Object
+}
+Stop-OwnedPortListeners -PortNum 18432 -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_STOP_ROOT
+Write-Host 'STOP-RETURNED'
+"""
+        for name, engine in _powershell_engines().items():
+            with self.subTest(engine=name):
+                mine = self.sleeper()
+                code, out = self.run_ps(engine, driver, ST_TEST_MINE_PID=mine.pid)
+                self.assertEqual(code, 0, out)
+                self.assertIn('STOP-RETURNED', out)
+                mine.wait(timeout=10)
+                self.assertAlive(other)
 
     def test_unknown_listener_is_refused_and_not_touched(self):
         # 沒有收據：占用者可能是本機受管 ST 或任何別的程式，一律不碰。
@@ -562,6 +636,116 @@ Write-Host ('FAKESTOP=' + ($script:Stopped -join ','))
                 self.assertNotIn('NOT-REFUSED', out)
                 proc.wait(timeout=15)
                 self.assertIsNotNone(proc.poll())
+
+
+
+@unittest.skipIf(not _powershell_engines(), '找不到 PowerShell')
+class LauncherConfigurationBehaviorTests(unittest.TestCase):
+    def run_source(self, engine, source, **values):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / 'configuration.ps1'
+            script.write_text(source, encoding='utf-8-sig')
+            env = dict(os.environ, **{k: str(v) for k, v in values.items()})
+            args = [engine, '-NoProfile', '-File', str(script)]
+            if os.name == 'nt':
+                args[2:2] = ['-ExecutionPolicy', 'Bypass']
+            done = subprocess.run(args, env=env, capture_output=True, timeout=15)
+            return done.returncode, (done.stdout + done.stderr).decode('utf-8', 'replace')
+
+    def test_configured_port_is_shared_and_invalid_values_refuse_before_build(self):
+        text = (ROOT / 'scripts/go.ps1').read_text(encoding='utf-8-sig')
+        section = text[text.index('$Port = 18432'):text.index('function Write-Banner')]
+        for name, engine in _powershell_engines().items():
+            for port in ('19234', '1', '65535', '0', '-1', '65536', 'invalid'):
+                with self.subTest(engine=name, port=port):
+                    code, out = self.run_source(engine, "$Root=$env:TEMP\n" + section + "\nWrite-Host ('PORT=' + $Port + ';CHILD=' + $env:ST_PORT)\n", ST_PORT=port)
+                    if port in ('19234', '1', '65535'):
+                        self.assertEqual(code, 0, out)
+                        self.assertIn('PORT=' + port + ';CHILD=' + port, out)
+                    else:
+                        self.assertNotEqual(code, 0, out)
+                        self.assertIn('ST-PORT-CONFIG', out)
+
+    def test_health_requires_matching_root_python_and_port(self):
+        text = (ROOT / 'scripts/go.ps1').read_text(encoding='utf-8-sig')
+        section = text[text.index('function Wait-TipServer'):text.index('function Assert-IndexIsTip')]
+        driver = r"""
+$ErrorActionPreference='Stop'
+$Root=$env:TEMP
+$Python=Join-Path $Root 'fixture-python.exe'
+$Port=19234
+function Invoke-WebRequest {
+  $h=@{tipUx=$true;baseDir=$Root;pythonExe=$Python;port=$Port}
+  switch($env:ST_TEST_CASE) {
+    'root' {$h.baseDir=Join-Path $Root 'another-root'}
+    'python' {$h.pythonExe=Join-Path $Root 'another-python.exe'}
+    'port' {$h.port=18432}
+    'missing' {$h.Remove('baseDir')}
+  }
+  return [pscustomobject]@{Content=($h|ConvertTo-Json)}
+}
+""" + section + "\nWait-TipServer\nWrite-Host 'HEALTH-ACCEPTED'\n"
+        for name, engine in _powershell_engines().items():
+            for case in ('valid', 'root', 'python', 'port', 'missing'):
+                with self.subTest(engine=name, case=case):
+                    code, out = self.run_source(engine, driver, ST_TEST_CASE=case)
+                    if case == 'valid':
+                        self.assertEqual(code, 0, out)
+                        self.assertIn('HEALTH-ACCEPTED', out)
+                    else:
+                        self.assertNotEqual(code, 0, out)
+                        self.assertIn('ST-HEALTH-GUARD', out)
+                        self.assertNotIn('HEALTH-ACCEPTED', out)
+
+
+@unittest.skipUnless(os.name == 'nt', '驗證原生 CMD 日誌與失敗退出')
+class LauncherBackgroundLogTests(unittest.TestCase):
+    def test_failed_python_writes_logs_and_cmd_exits_without_pause(self):
+        source = (ROOT / 'scripts/go.ps1').read_text(encoding='utf-8-sig')
+        section = source[source.index("$logDir = Join-Path $Root 'logs'"):source.index('$p = Start-Process -FilePath $launcher')]
+        for name, engine in _powershell_engines().items():
+            with self.subTest(engine=name), tempfile.TemporaryDirectory(prefix='st-log-fixture-') as temporary:
+                case = Path(temporary) / 'repo space 驗收'
+                case.mkdir()
+                driver = case / 'generate.ps1'
+                driver.write_text("$ErrorActionPreference='Stop'\n$Root=$env:ST_TEST_ROOT\n$Python=$env:ST_TEST_PYTHON\n$head='fixture'\n$Url='http://localhost:19234/'\n" + section, encoding='utf-8-sig')
+                done = subprocess.run([engine, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(driver)],
+                    env=dict(os.environ, ST_TEST_ROOT=str(case), ST_TEST_PYTHON=sys.executable),
+                    capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                # 故意沒有 server/server.py：真 Python 回報啟動錯誤，CMD 必須保留原退出碼。
+                cmd = Path(os.environ['SystemRoot']) / 'System32/cmd.exe'
+                launcher = case / 'logs/run_server_tip.cmd'
+                launcher.read_bytes().decode('ascii')
+                environment = dict(os.environ, ST_LAUNCH_ROOT=str(case), ST_LAUNCH_PYTHON=sys.executable,
+                    ST_LAUNCH_LOG_OUT=str(case / 'logs/server_go_ps.out.log'),
+                    ST_LAUNCH_LOG_ERR=str(case / 'logs/server_go_ps.err.log'))
+                line = f'"{cmd}" /d /s /c ""{launcher}""'
+                result = subprocess.run(line, cwd=case, env=environment, capture_output=True,
+                    timeout=8, creationflags=subprocess.CREATE_NO_WINDOW)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                out_log = case / 'logs/server_go_ps.out.log'
+                err_log = case / 'logs/server_go_ps.err.log'
+                self.assertTrue(out_log.is_file())
+                self.assertTrue(err_log.is_file())
+                self.assertIn(b"can't open file", err_log.read_bytes())
+                self.assertNotIn(b'pause', launcher.read_bytes().lower())
+
+    def test_health_timeout_points_to_real_log_files(self):
+        source = (ROOT / 'scripts/go.ps1').read_text(encoding='utf-8-sig')
+        section = source[source.index('function Wait-TipServer'):source.index('function Assert-IndexIsTip')]
+        for name, engine in _powershell_engines().items():
+            with self.subTest(engine=name), tempfile.TemporaryDirectory(prefix='st-health-log-') as temporary:
+                driver = Path(temporary) / 'timeout.ps1'
+                driver.write_text("$ErrorActionPreference='Stop'\n$Root=$env:ST_TEST_ROOT\n$Port=19234\nfunction Invoke-WebRequest { return [pscustomobject]@{Content='{}'} }\n" + section + '\nWait-TipServer\n', encoding='utf-8-sig')
+                result = subprocess.run([engine, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(driver)],
+                    env=dict(os.environ, ST_TEST_ROOT=temporary), capture_output=True,
+                    timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+                output = (result.stdout + result.stderr).decode('utf-8', 'replace')
+                self.assertNotEqual(result.returncode, 0, output)
+                self.assertIn('server_go_ps.out.log', output)
+                self.assertIn('server_go_ps.err.log', output)
+                self.assertNotIn('console window', output)
 
 
 if __name__ == '__main__':
