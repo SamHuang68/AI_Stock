@@ -5,6 +5,24 @@
 
 ---
 
+## v5.0 修訂 — 2026-10-09 整合 Stock Terminal 與 WaveDeck 啟動入口
+
+產品版本維持 **5.0**；基準為 `4deea9f617a0d35e2f5b60faddf01695ad979c5e`。原 `START_LOCAL_AND_WEB.cmd` 只啟動服務與列出網址；新增就緒後開啟 Pulse，以及 `--no-browser` 選項。新增 `START_ALL.cmd` 串接既有 local／Private Web 與 WaveDeck 入口，保留 local／web 的退出碼，另以位元 4 表示 WaveDeck 未就緒。
+
+WaveDeck 仍沿用 `run.py`、釘選 Python 與原有埠 fallback；將無條件刪除埠收據／重複啟動改為先核對健康回應的服務、目錄、實際埠與布林就緒欄位。健康端點新增目錄、Python、PID 與實際埠身分；不改 provider、執行模式或券商設定。啟動在背景執行並保留 stdout／stderr 日誌，等待有三十秒期限；不停止任何未知程序。缺少身分的舊 WaveDeck 會明確拒絕重複啟動。移除健康處理函式內與既有全域名稱重疊的 `sys` 匯入，避免新身分欄位發生區域變數未綁定。
+
+定向驗證：真實 CMD 串接、開頁邊界與原有 local／web 健康契約共 **26 案通過**；真實 PowerShell 5.1 的 WaveDeck 離線邊界共 **7 案通過**，涵蓋已在線重用、保留埠、身分型別、Python pin、fallback、逾時與啟動失敗；探測或 Python 解析耗盡期限後不再啟動程序，新期限保護的成功路徑另通過一案。健康端點由動態 loopback HTTP 回應證明實際埠與來源目錄一致。分享包必要檔案及同一內容保護掃描共 **2 案通過**；CMD 保持 ASCII／CRLF，PowerShell 保持 UTF-8 BOM。不同定向案例合計 **35 案**，沒有執行完整測試、完整 stage 或模型第二意見，也沒有啟動或更動受管 runtime。
+
+本條建立時為未提交的本機候選；來源工作樹與定向日誌在 `AI-Workspace/worktrees/stock-terminal/launcher-all-20261009`、`AI-Workspace/docs/stock-terminal/launcher-all-20261009`。沒有 commit、push、部署；既有正式與本機 runtime 版本維持各自現況，所有舊修訂歷史保留。
+
+Sam 隨後授權 commit、push、deploy；初始啟動器候選已提交為 `ce4021e831dccf95a17c915ad43b30a9355ecd94`。發布前沿用 Private Web 原有排除 WaveDeck 的契約，同步排除呼叫 WaveDeck 的 `START_ALL.cmd`，避免受管發布產物留下依賴缺失的入口；主專案與單機分享包保留完整整合入口。負向回歸證明原排除清單會留下該入口；補正後只重驗兩個發布邊界案例，實際發布及最終 SHA 以本輪同版本收據追溯。完整 stage 仍按既有發布門檻執行，不放寬測試或資料保存保護。
+
+Windows CI 補正：提交 `56ca00e0fc8d6a8ff6bc183d14e9c2aa79bf094a` 的自動 push／PR CI（`37856060050`／`37856073708`）在 Windows 單元測試失敗，Ubuntu 與兩項離線研究通過，原始日誌保留。已用 Windows 原生 8.3 別名重現 WaveDeck 同目錄被誤認的行為；啟動目錄與健康身分統一展開為完整長路徑，雙向短／長別名均不得新增程序，八個受影響案例通過（6.999 秒）。舊 Python pin 測試改為 dot-source 正式 helper 並呼叫真正的讀取函式，PS5／PS7、UTF-8 有／無 BOM、Unicode／空白路徑的單一案例通過（2.500 秒），保留原八秒子程序期限。
+
+持久提交測試先同步完成真實 SQLite revision 2 與通知 claim，再以受控通知 worker 檢驗讀者不受發布鎖阻塞；保留原 0.5 秒讀取期限、worker 錯誤傳遞、通知仍等待的斷言及 finally 釋放／回收，不改產品持久化程式。舊讀者搶發布鎖的負向變體實際逾時，真實行為的單一案例通過（0.282 秒）；通知 worker 注入錯誤時能顯示真正的例外。原 hosted 失敗究竟是 SQLite 準備耗時或 worker 錯誤，舊日誌不足以判斷，沒有宣稱已證明該歷史根因。只執行修改部分的定向驗證；新版精確 CI、一次完整 stage 與雙端實際發布結果另以同版本交付收據追溯。
+
+---
+
 ## v5.0 修訂 — 2026-10-08 分享包啟動器驗證的個別期限與日誌
 
 產品版本維持 **5.0**；基準為 `c295e34c6519d38b64073edde5f017fcfd2fe564`。該版四項精確 CI 成功，但完整 stage 在真正分享 ZIP 的啟動器驗證失敗：兩個類別共用九十秒，與原有每次 CMD 三十秒／PowerShell 十五秒及多情境累積預算不相容。原始失敗收據保留；另一次相同分享包診斷於 78.641 秒成功，不能據此認定舊失敗為偶發或已找出當時最後阻塞方法。

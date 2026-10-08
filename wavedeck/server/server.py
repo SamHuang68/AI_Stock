@@ -125,6 +125,10 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "ok": True,
                     "service": "WaveDeck",
+                    "baseDir": str(ROOT),
+                    "pythonExe": sys.executable,
+                    "pid": os.getpid(),
+                    "port": self.server.server_port,
                     "version": (ROOT / "VERSION").read_text(encoding="utf-8").strip(),
                     "ts": now_iso(),
                     "fsm": snap.get("fsm"),
@@ -148,7 +152,6 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path == "/api/llm_busy":
             try:
-                import sys
                 from pathlib import Path as _P
 
                 _root = _P(__file__).resolve().parents[2]

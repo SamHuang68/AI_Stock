@@ -250,10 +250,12 @@ class PrivateWebReleaseTests(unittest.TestCase):
         tree = self.install_root / "candidate"
         _write(tree / "wavedeck" / "run.py", "wd")
         _write(tree / "START_WAVEDECK.cmd", "wd")
+        _write(tree / "START_ALL.cmd", "combined")
         _write(tree / "server" / "server.py", "st")
         release._strip_private_release_extras(tree)
         self.assertFalse((tree / "wavedeck").exists())
         self.assertFalse((tree / "START_WAVEDECK.cmd").exists())
+        self.assertFalse((tree / "START_ALL.cmd").exists())
         self.assertTrue((tree / "server" / "server.py").is_file())
 
     def test_release_gate_includes_etf_and_shell_node_regressions(self):
@@ -262,7 +264,7 @@ class PrivateWebReleaseTests(unittest.TestCase):
         calls = []
         selftests = ['tests/etf_flow_v3_selftest.js', 'tests/shell_v5_selftest.js',
                      'tests/新增_selftest.js']
-        extras = ['wavedeck/run.py', 'START_WAVEDECK.cmd']
+        extras = ['wavedeck/run.py', 'START_WAVEDECK.cmd', 'START_ALL.cmd']
         def run(argv, *, cwd, capture=False):
             calls.append(argv)
             if argv[0] == 'git':

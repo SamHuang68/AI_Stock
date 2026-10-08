@@ -92,6 +92,10 @@ if /i "%~1"=="/run" (
 exit /b 99
 ''',
     'start': r'''@echo off
+if "%~2"=="http://127.0.0.1:18432/#pulse" (
+  >>"%ST_TEST_FIXTURE%\calls.log" echo browser-local
+  exit /b 0
+)
 >>"%ST_TEST_FIXTURE%\calls.log" echo start
 if exist "%ST_TEST_FIXTURE%\recover-local-on-start.flag" >"%ST_TEST_FIXTURE%\local-health.flag" echo 1
 exit /b 0
@@ -134,7 +138,7 @@ def _instrument_external_command_tokens(raw: bytes) -> tuple[bytes, dict[str, in
         replacement = r'\1call "%ST_TEST_FIXTURE%\\' + name + r'-stub.cmd"'
         text, counts[name] = re.subn(pattern, replacement, text)
     health_commands = re.findall(r'-Command "([^"]*Invoke-RestMethod[^"]*)"', raw.decode('ascii'))
-    expected = {'powershell': 5, 'curl': 0, 'schtasks': 1, 'start': 1} if health_commands else {
+    expected = {'powershell': 5, 'curl': 0, 'schtasks': 1, 'start': 2} if health_commands else {
         'powershell': 3, 'curl': 2, 'schtasks': 1, 'start': 1}
     if health_commands:
         if len(health_commands) != 2:
@@ -187,7 +191,7 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
 
     def run_case(self, name, *, local=True, gateway=True, upstream=False,
                  running=False, recover=False, run_fails=False, recover_local=False, query_fails=False,
-                 local_payload=None, gateway_payload=None):
+                 local_payload=None, gateway_payload=None, no_browser=False):
         case = Path(tempfile.mkdtemp(prefix='cmd-case-', dir=self.run_root))
         self.addCleanup(self.remove_case, case)
         (case / 'launcher.cmd').write_bytes(self.instrumented)
@@ -217,7 +221,8 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
                 (case / (flag + '.flag')).write_bytes(b'1\r\n')
         env = dict(os.environ, ST_TEST_FIXTURE=str(case))
         # /s 去除外層引號後，留下有引號的完整 launcher 路徑；不啟動可見視窗。
-        command_line = f'"{self.cmd}" /d /s /c ""{case / "launcher.cmd"}""'
+        args = ' --no-browser' if no_browser else ''
+        command_line = f'"{self.cmd}" /d /s /c ""{case / "launcher.cmd"}"{args}"'
         done = subprocess.run(command_line, cwd=case, env=env, capture_output=True,
                               timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
         output = (done.stdout + done.stderr).decode('ascii', 'replace')
@@ -229,6 +234,7 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
         start_calls = [line for line in calls if line == 'start']
         result = {'name': name, 'exitCode': done.returncode, 'hostRunCount': len(run_calls),
                   'taskQueryCount': len(query_calls), 'localStartCount': len(start_calls),
+                  'browserOpenCount': calls.count('browser-local'),
                   'upstreamReadyAfterRun': (case / 'upstream-ready.flag').exists()}
         return done.returncode, output, result
 
@@ -258,6 +264,19 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
         self.assertEqual(code, expected, output)
         self.assertEqual(result['localStartCount'], 0 if local else 1)
         self.assertEqual(result['hostRunCount'], 0 if upstream else 1)
+        self.assertEqual(result['browserOpenCount'], 1 if local else 0)
+
+    def test_no_browser_keeps_services_ready_without_opening_a_window(self):
+        code, output, result = self.run_case('僅服務不開視窗', upstream=True, no_browser=True)
+        self.assertEqual(code, 0, output)
+        self.assertEqual(result['browserOpenCount'], 0, result)
+        self.assertEqual(result['localStartCount'], 0, result)
+
+    def test_recovered_local_opens_browser_once(self):
+        code, output, result = self.run_case('本機啟動後開畫面', local=False, upstream=True, recover_local=True)
+        self.assertEqual(code, 0, output)
+        self.assertEqual(result['localStartCount'], 1, result)
+        self.assertEqual(result['browserOpenCount'], 1, result)
 
     def test_both_up_exit_zero(self):
         self.assert_health_exit_code(True, True, 0)

@@ -38,6 +38,16 @@ cd C:\path\to\AI_Stock   # 或你的本機 clone 目錄（例如 C:\Stock_Termin
 .\START_TIP.cmd
 ```
 
+Sam 的受管本機環境可一次啟動 local、Private Web 與 WaveDeck，並在就緒後開啟 Stock Terminal 和 WaveDeck：
+
+```powershell
+.\START_ALL.cmd
+```
+
+`START_LOCAL_AND_WEB.cmd` 也會在 local 就緒後開啟 Stock Terminal；若只啟動服務、不開瀏覽器，在上述批次入口加上 `--no-browser`。`START_ALL.cmd` 沿用既有 Private Web 排程，需要本機已安裝 `StockTerminal_PrivateWeb_Host`；一般分享包使用者仍可使用 `START_TIP.cmd` 與 `START_WAVEDECK.cmd`。
+
+重跑時重用同目錄的已在線 WaveDeck，按實際埠開頁，不固定假設為 18433。WaveDeck 在背景執行，診斷日誌位於 `wavedeck/logs/launcher-*-stdout.log`／`stderr.log`；不會更改既有的模式、provider 或券商設定。若已有缺少目錄身分的舊 WaveDeck，入口會提示從原視窗停止後重開，避免新增另一份。`START_ALL.cmd` 的退出碼以位元組合：1 為 local 未就緒、2 為 web 未就緒、4 為 WaveDeck 未就緒，例如 6 表示 web 與 WaveDeck 未就緒。
+
 ### Linux / macOS
 
 ```bash

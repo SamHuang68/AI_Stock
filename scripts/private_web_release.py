@@ -79,7 +79,7 @@ REQUIRED_RELEASE_FILES = {
     "tests/test_archify_artifacts.py",
     "stock_terminal_v2.html",
 }
-PRIVATE_RELEASE_EXCLUDES = {"wavedeck", "START_WAVEDECK.cmd"}
+PRIVATE_RELEASE_EXCLUDES = {"wavedeck", "START_WAVEDECK.cmd", "START_ALL.cmd"}
 MANIFEST_NAME = ".private_web_release.json"
 TRANSITION_NAME = ".private_web_transition.json"
 
