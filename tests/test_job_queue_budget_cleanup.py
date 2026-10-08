@@ -51,9 +51,15 @@ class ManagedCallableBudgetTests(unittest.TestCase):
     def terminal(self, job_id):
         deadline = time.monotonic() + 4
         while time.monotonic() < deadline:
-            job = self.queue.get(job_id)
-            if job and job['status'] not in ('queued', 'running') and job_id not in self.queue._callables:
-                return job
+            # 清理 callback 與 handler 同持這把鎖；不能觀測中途快照。
+            if not self.queue._lock.acquire(timeout=max(0, deadline - time.monotonic())):
+                break
+            try:
+                job = self.queue.get(job_id)
+                if job and job['status'] not in ('queued', 'running') and job_id not in self.queue._callables:
+                    return job
+            finally:
+                self.queue._lock.release()
             time.sleep(0.005)
         self.fail('持久終態與 callback 清理未於期限內完成。')
 
@@ -197,6 +203,49 @@ class ManagedCallableBudgetTests(unittest.TestCase):
         interrupted = self.terminal(second['job']['jobId'])
         self.assertEqual(interrupted['status'], 'interrupted')
         self.assertNotIn(interrupted['type'], self.queue._handlers)
+
+    def test_terminal_waits_for_complete_registration_cleanup_snapshot(self):
+        entered, release = threading.Event(), threading.Event()
+        reader_started, reader_done = threading.Event(), threading.Event()
+        self.release_events.append(release)
+        read = self.queue._read
+        outcomes, errors = [], []
+
+        def pause_cleanup(sql, args=()):
+            if "WHERE kind=? AND status IN ('queued','running')" in sql and args == ('legacy:cleanup-snapshot',):
+                entered.set()
+                if not release.wait(3):
+                    raise AssertionError('清理 fixture 必須由測試放行。')
+            return read(sql, args)
+
+        def observe(job_id):
+            reader_started.set()
+            try:
+                outcomes.append(self.terminal(job_id))
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                reader_done.set()
+
+        with patch.object(self.queue, '_read', side_effect=pause_cleanup):
+            result = self.queue.submit_callable('cleanup-snapshot', lambda: {'value': 1})
+            self.assertTrue(entered.wait(2))
+            # DB 已提交且 callback 已移除，但持同一把鎖的 handler 清理尚未完成。
+            self.assertEqual(self.queue.get(result['job']['jobId'])['status'], 'succeeded')
+            self.assertNotIn(result['job']['jobId'], self.queue._callables)
+            self.assertIn(result['job']['type'], self.queue._handlers)
+            reader = threading.Thread(target=observe, args=(result['job']['jobId'],))
+            reader.start()
+            try:
+                self.assertTrue(reader_started.wait(2))
+                self.assertFalse(reader_done.wait(0.2), '終態等待不能把清理中的註冊視為完整快照。')
+            finally:
+                release.set()
+                reader.join(3)
+            self.assertFalse(reader.is_alive())
+            self.assertEqual(errors, [])
+            self.assertEqual(outcomes[0]['status'], 'succeeded')
+            self.assertNotIn(result['job']['type'], self.queue._handlers)
 
     def test_terminal_sql_failure_retains_callback_until_commit(self):
         attempted, allow_commit = threading.Event(), threading.Event()
