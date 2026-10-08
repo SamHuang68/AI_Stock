@@ -41,8 +41,8 @@ class SqliteGuardPathTests(unittest.TestCase):
         cases = (
             ('file:///tmp/guard%252F/market%20data.db?mode=ro', unquote,
              '/tmp/guard%2F/market data.db'),
-            ('file:///C:/Users/Sam/guard%252F/market%20data.db?mode=ro',
-             nturl2path.url2pathname, 'C:\\Users\\Sam\\guard%2F\\market data.db'),
+            ('file:///C:/fixture/guard%252F/market%20data.db?mode=ro',
+             nturl2path.url2pathname, 'C:\\fixture\\guard%2F\\market data.db'),
         )
         for uri, decoder, expected in cases:
             with self.subTest(uri=uri):
