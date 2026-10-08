@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import os
+import ctypes
+from ctypes import wintypes
 import subprocess
 import tempfile
 import unittest
@@ -18,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $env:WAVEDECK_HOST = $null
 $env:WAVEDECK_PORT = $null
-$homePath = $env:WD_TEST_HOME
+$homePath = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $env:WD_TEST_HOME -ErrorAction Stop).ProviderPath).TrimEnd('\','/')
 $pythonPath = $env:WD_TEST_PYTHON
 . $env:WD_TEST_LAUNCHER
 function Assert-That([bool]$Condition, [string]$Message) {
@@ -82,7 +84,8 @@ Reset-Fixture
 
 @unittest.skipUnless(os.name == 'nt' and POWERSHELL.is_file(), '此定向測試需要 Windows PowerShell 5.1')
 class WaveDeckLauncher(unittest.TestCase):
-    def run_ps(self, source: str, *, fixture: bool = True, timeout: int = 12):
+    def run_ps(self, source: str, *, fixture: bool = True, timeout: int = 12,
+               short_home: bool = False):
         with tempfile.TemporaryDirectory(prefix='wd-launcher-offline-') as temporary:
             base = Path(temporary)
             home = base / 'project with spaces' / 'wavedeck'
@@ -96,7 +99,7 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $env:WAVEDECK_HOST = $null
 $env:WAVEDECK_PORT = $null
-$homePath = $env:WD_TEST_HOME
+$homePath = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $env:WD_TEST_HOME -ErrorAction Stop).ProviderPath).TrimEnd('\','/')
 $pythonPath = $env:WD_TEST_PYTHON
 . $env:WD_TEST_LAUNCHER
 function Assert-That([bool]$Condition, [string]$Message) {
@@ -106,7 +109,19 @@ function Start-Process { throw '定向測試禁止啟動任何程序' }
 function Invoke-RestMethod { throw '定向測試禁止實際網路' }
 '''
             driver.write_text(prefix + source + '\nWrite-Output "WD-TEST-OK"\n', encoding='utf-8-sig')
-            environment = dict(os.environ, WD_TEST_HOME=str(home), WD_TEST_PYTHON=str(python),
+            home_input = str(home)
+            if short_home:
+                get_short = ctypes.WinDLL('kernel32', use_last_error=True).GetShortPathNameW
+                get_short.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+                get_short.restype = wintypes.DWORD
+                buffer = ctypes.create_unicode_buffer(32768)
+                size = get_short(home_input, buffer, len(buffer))
+                self.assertGreater(size, 0, 'Windows 原生短路徑查詢失敗')
+                self.assertLess(size, len(buffer), 'Windows 原生短路徑超過緩衝區')
+                home_input = buffer.value
+                if home_input.casefold() == str(home.resolve()).casefold():
+                    self.skipTest('此 Windows 磁碟沒有可用的原生 8.3 別名；不以合成字串代替此案例')
+            environment = dict(os.environ, WD_TEST_HOME=home_input, WD_TEST_PYTHON=str(python),
                                WD_TEST_LAUNCHER=str(LAUNCHER))
             result = subprocess.run(
                 [str(POWERSHELL), '-NoLogo', '-NoProfile', '-NonInteractive',
@@ -161,6 +176,23 @@ $script:Responses[18433] = New-Health 18433
 $rc = Invoke-WaveDeckLaunch -WaveDeckRoot $homePath -TimeoutSec 1 -NoBrowser
 Assert-That ($rc -eq 0 -and $script:Starts.Count -eq 0) 'NoBrowser 不開頁且不重啟'
 ''')
+
+    def test_native_short_home_alias_reuses_canonical_service(self):
+        self.run_ps(r'''
+$inputHome = $env:WD_TEST_HOME
+$fullHome = [IO.Path]::GetFullPath($inputHome).TrimEnd('\','/')
+$providerHome = (Resolve-Path -LiteralPath $inputHome -ErrorAction Stop).ProviderPath.TrimEnd('\','/')
+$itemHome = (Get-Item -LiteralPath $inputHome -ErrorAction Stop).FullName
+Write-Output ('WD-PATH-DIAG=' + ([ordered]@{input=$inputHome;getFullPath=$fullHome;provider=$providerHome;item=$itemHome} | ConvertTo-Json -Compress))
+Assert-That ($inputHome -ine $fullHome) '必須使用實際不同字串的 8.3 別名'
+$script:Responses[18433] = New-Health 18433 $fullHome
+$rc = Invoke-WaveDeckLaunch -WaveDeckRoot $inputHome -TimeoutSec 1 -NoBrowser
+Assert-That ($rc -eq 0 -and $script:Starts.Count -eq 0) '短路徑啟動輸入與長路徑健康身分必須重用同一服務，不可新增程序'
+Reset-Fixture
+$script:Responses[18433] = New-Health 18433 $inputHome
+$rc = Invoke-WaveDeckLaunch -WaveDeckRoot $fullHome -TimeoutSec 1 -NoBrowser
+Assert-That ($rc -eq 0 -and $script:Starts.Count -eq 0) '長路徑啟動輸入與短路徑健康身分必須重用同一服務'
+''', short_home=True)
 
     def test_identity_checks_skip_foreign_services_and_reject_old_wavedeck(self):
         self.run_ps(r'''

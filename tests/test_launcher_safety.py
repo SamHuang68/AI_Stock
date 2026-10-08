@@ -438,20 +438,33 @@ Write-Host ('FAKESTOP=' + ($script:Stopped -join ','))
                 pin = Path(self.root) / 'data' / 'stock_python.path'
                 self.assertEqual(pin.read_text(encoding='utf-8-sig').strip(), str(python_path))
                 if os.name == 'nt':
-                    # 真正 WaveDeck 的同一個 CMD 讀取邊界；不啟動 WaveDeck 或 fallback Python。
-                    wave = (ROOT / 'wavedeck/START_WAVEDECK.cmd').read_bytes().decode('utf-8-sig').replace('\r\n','\n')
-                    first = wave.index('set "PYEXE="')
-                    last = wave.index('if not defined PYEXE for /f', first)
-                    read_cmd = self.dir / 'read-wave-pin.cmd'
-                    body = '@echo off\nchcp 65001 >nul\nset "ST_ROOT=%ST_TEST_PIN_ROOT%"\n' + wave[first:last] + 'if not defined PYEXE exit /b 1\necho %PYEXE%\n'
-                    read_cmd.write_bytes(body.replace('\n','\r\n').encode('ascii'))
-                    cmd = Path(os.environ['SystemRoot']) / 'System32/cmd.exe'
-                    line = f'"{cmd}" /d /s /c ""{read_cmd}""'
-                    result = subprocess.run(line, env=dict(os.environ, ST_TEST_PIN_ROOT=self.root),
-                        capture_output=True, timeout=8, creationflags=subprocess.CREATE_NO_WINDOW)
-                    output = (result.stdout + result.stderr).decode('utf-8', 'replace')
-                    self.assertEqual(result.returncode, 0, output)
-                    self.assertEqual(output.strip(), str(python_path))
+                    # 載入正式 WaveDeck helper，再呼叫真正的 pin 讀取函式；不啟動產品或 fallback Python。
+                    wave_root = Path(self.root) / 'wavedeck'
+                    wave_root.mkdir(exist_ok=True)
+                    wave_driver = r"""$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+. $env:ST_TEST_WAVE_HELPER
+function Start-Process { throw '此 pin 測試禁止啟動程序或瀏覽器。' }
+function Invoke-RestMethod { throw '此 pin 測試禁止網路。' }
+function Get-Command { throw '此 pin 測試不得退回 Python launcher。' }
+Write-Host ('WAVE-PIN=' + (Resolve-WaveDeckPython -WaveDeckRoot $env:ST_TEST_WAVE_ROOT))
+"""
+                    wave_script = self.dir / 'read-wave-pin.ps1'
+                    wave_script.write_text(wave_driver, encoding='utf-8-sig')
+                    for encoding in ('utf-8', 'utf-8-sig'):
+                        with self.subTest(pin_encoding=encoding):
+                            pin.write_text(str(python_path) + '\n', encoding=encoding)
+                            self.assertEqual(pin.read_bytes().startswith(b'\xef\xbb\xbf'),
+                                             encoding == 'utf-8-sig')
+                            result = subprocess.run(
+                                [engine, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(wave_script)],
+                                cwd=self.dir, env=dict(os.environ,
+                                    ST_TEST_WAVE_HELPER=str(ROOT / 'wavedeck/start_wavedeck.ps1'),
+                                    ST_TEST_WAVE_ROOT=str(wave_root)),
+                                capture_output=True, timeout=8, creationflags=subprocess.CREATE_NO_WINDOW)
+                            output = (result.stdout + result.stderr).decode('utf-8', 'replace')
+                            self.assertEqual(result.returncode, 0, output)
+                            self.assertIn('WAVE-PIN=' + str(python_path), output.splitlines())
 
 
 

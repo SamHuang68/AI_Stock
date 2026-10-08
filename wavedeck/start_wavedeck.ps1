@@ -88,7 +88,7 @@ function Open-WaveDeckBrowser {
 function Invoke-WaveDeckLaunch {
     param([string]$WaveDeckRoot, [switch]$NoBrowser, [int]$TimeoutSec = 30)
     try {
-        $WaveDeckRoot = (Resolve-Path -LiteralPath $WaveDeckRoot -ErrorAction Stop).ProviderPath.TrimEnd('\', '/')
+        $WaveDeckRoot = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $WaveDeckRoot -ErrorAction Stop).ProviderPath).TrimEnd('\', '/')
         $runFile = Join-Path $WaveDeckRoot 'run.py'
         if (-not (Test-Path -LiteralPath $runFile -PathType Leaf)) { throw "找不到 WaveDeck 入口：$runFile" }
         if ($env:WAVEDECK_HOST -and $env:WAVEDECK_HOST -ne '127.0.0.1') { throw '此本機啟動器要求 WAVEDECK_HOST 為 127.0.0.1。' }
