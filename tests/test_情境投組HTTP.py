@@ -16,7 +16,6 @@ from unittest.mock import patch
 from tests import test_decision_http as decision_fixture
 import datastore
 import portfolio
-import private_web_gateway as gateway
 
 dc = decision_fixture.dc
 st_server = decision_fixture.st_server
@@ -30,6 +29,8 @@ PROFILE = {
 
 
 class SimulationHttpTest(unittest.TestCase):
+    run = decision_fixture.DecisionHttpTest.run
+    cleanup_isolation = decision_fixture.DecisionHttpTest.cleanup_isolation
     tearDown = decision_fixture.DecisionHttpTest.tearDown
 
     def setUp(self):
@@ -52,12 +53,12 @@ class SimulationHttpTest(unittest.TestCase):
             patch.object(st_server, '_TW_NAMES', {'map': {'2330': '測試公司', '0050': '測試基金'}}),
         ):
             replacement.start()
-            self.addCleanup(replacement.stop)
+            self.patches.append(replacement)
         for module, name in ((datastore, 'fetch_yahoo_daily'), (datastore, 'upsert_bars'),
                              (st_server, '_get_tw_sectors'), (st_server, '_get_tw_names')):
             replacement = patch.object(module, name, side_effect=AssertionError('情境不得回補或更新來源'))
             self.blocked.append(replacement.start())
-            self.addCleanup(replacement.stop)
+            self.patches.append(replacement)
         original_connection = socket.create_connection
 
         def local_only(address, *args, **kwargs):
@@ -67,7 +68,7 @@ class SimulationHttpTest(unittest.TestCase):
 
         replacement = patch.object(socket, 'create_connection', side_effect=local_only)
         replacement.start()
-        self.addCleanup(replacement.stop)
+        self.patches.append(replacement)
 
     def post(self, path, body, base=None, token=None):
         headers = {'Content-Type': 'application/json'}
@@ -155,6 +156,8 @@ class SimulationHttpTest(unittest.TestCase):
         self.assert_sources_untouched()
 
     def test_reader_is_denied_by_real_gateway_before_any_simulation_compute(self):
+        import private_web_gateway as gateway
+
         settings = gateway.Settings(
             listen_host='127.0.0.1', listen_port=0, upstream_host='127.0.0.1',
             upstream_port=self.httpd.server_port, owner_token='test-owner', read_token='test-reader',

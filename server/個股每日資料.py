@@ -76,8 +76,11 @@ def run(day=None):
     day = day or now.date().isoformat()
     if day != now.date().isoformat() or now.hour < 14:
         raise ValueError('每日更新只在當日收盤後執行，不用現在資料補造過去觀察')
-    if session(day)['status'] != 'scheduled':
-        return {'status': 'closed', 'reason': session(day)['reason'], 'sessionDate': day}
+    trading_day = session(day)
+    if trading_day['status'] == 'unknown':
+        raise ValueError(trading_day['reason'])
+    if trading_day['status'] == 'closed':
+        return {'status': 'closed', 'reason': trading_day['reason'], 'sessionDate': day}
     data = Path(datastore.DB_PATH).parent
     state_path = data / 'stock_daily_sources.json'
     logfile = data / 'stock_daily_sources.jsonl'

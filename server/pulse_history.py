@@ -394,11 +394,13 @@ def sync(days: int = 40, force_full: bool = False) -> Dict[str, Any]:
                     if row:
                         with _lock, closing(_conn()) as conn, conn:
                             if kind == 'breadth':
-                                conn.execute('INSERT OR REPLACE INTO breadth_daily VALUES(?,?,?,?,?,?,?,?,?,?)',
+                                conn.execute('INSERT OR REPLACE INTO breadth_daily(d,up,down,flat,limit_up,limit_down,adv_ratio,net,source,updated_at) '
+                                         'VALUES(?,?,?,?,?,?,?,?,?,?)',
                                              (row['d'], row['up'], row['down'], row['flat'], row['limit_up'], row['limit_down'],
                                               row['adv_ratio'], row['net'], row['source'], int(time.time())))
                             else:
-                                conn.execute('INSERT OR REPLACE INTO inst_daily VALUES(?,?,?,?,?,?,?)',
+                                conn.execute('INSERT OR REPLACE INTO inst_daily(d,foreign_net,trust_net,dealer_net,total_net,source,updated_at) '
+                                         'VALUES(?,?,?,?,?,?,?)',
                                              (row['d'], row['foreign_net'], row['trust_net'], row['dealer_net'],
                                               row['total_net'], row['source'], int(time.time())))
                         result[kind] += 1

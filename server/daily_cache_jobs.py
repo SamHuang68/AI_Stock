@@ -176,6 +176,10 @@ def _run(symbols, period, kind, budget, job_id):
         with _lock:
             if _active and _active['jobId'] == job_id:
                 _active.update(status=final_status, error=error, finishedAt=time.time(), sourceRequests=budget.used)
+                outcome = copy.deepcopy(_active)
+            else:
+                outcome = None
+    return outcome
 
 
 def submit(body):
@@ -192,8 +196,13 @@ def submit(body):
                    'policy': '沿用首次價格；來源修訂另存；不自動更新整份觀察清單'}
         budget = Budget(_cancel)
         job_id = _active['jobId']
+        def invoke_job():
+            outcome = _run(symbols, period, kind, budget, job_id)
+            if isinstance(outcome, dict) and outcome.get('status') == 'failed':
+                raise RuntimeError(outcome.get('error') or '日線更新失敗')
+            return outcome
         try:
-            queued = job_queue.submit('selected-daily-cache:' + job_id, lambda: _run(symbols, period, kind, budget, job_id))
+            queued = job_queue.submit('selected-daily-cache:' + job_id, invoke_job, timeout=660)
         except job_queue.QueueFull as exc:
             budget.event.set()
             _active.update(status='failed', error=str(exc), errorType=type(exc).__name__, finishedAt=time.time(), sourceRequests=0)

@@ -24,6 +24,21 @@ def session(day):
     return {'status': 'unknown', 'reason': '尚無該年度官方日曆，不以平日推定已交易', 'source': None}
 
 
+def previous_session(day, *, session_lookup=None):
+    """前一個已涵蓋的表定交易日；當日或回溯年度未知時停止。"""
+    cursor = date.fromisoformat(day) if isinstance(day, str) else day
+    lookup = session_lookup or session
+    if str(cursor.year) != references()['calendar']['year'] or lookup(cursor)['status'] == 'unknown':
+        return None
+    while True:
+        cursor -= timedelta(days=1)
+        state = lookup(cursor)['status']
+        if state == 'unknown':
+            return None
+        if state == 'scheduled':
+            return cursor.isoformat()
+
+
 def instrument(symbol, as_of=None):
     item = references()['instruments'].get(symbol)
     if not item or (as_of and as_of < item['stopDate']):

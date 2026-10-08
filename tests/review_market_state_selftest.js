@@ -35,6 +35,48 @@ async function main() {
   await context.MarketData.refresh();
   assert.equal(context.MarketData.get().freshness.freshness, 'fresh');
   assert.equal(context.MarketData.get().refreshError, null);
+  const goodQuotes = context.MarketData.get().quotes;
+  for (const invalid of [{ ok: true }, { ok: true, quotes: {} }, { ok: true, quotes: [] }]) {
+    response = invalid;
+    await context.MarketData.refresh();
+    assert.equal(context.MarketData.get().quotes, goodQuotes, '空快照不得清掉已確認報價');
+    assert(context.MarketData.get().refreshError, '空快照必須保留刷新失敗');
+  }
+  // 直接載入正式 shell 的探測函式，驗證狀態燈消費同一行情狀態。
+  const shell = fs.readFileSync(path.join(root, 'src/ui/shell_v5.js'), 'utf8');
+  const probe = shell.slice(shell.indexOf('  function probeHealth() {'),
+                           shell.indexOf('  function panelApi(id) {'));
+  assert.match(probe, /function probeHealth/);
+  const syncStates = [];
+  Object.assign(context, { PRIVATE_WEB: true,
+    setSync: (mode, text) => syncStates.push({ mode, text }),
+    setTimeout: () => 1, clearTimeout() {},
+    fetch: async url => ({ ok: true, json: async () => url === '/health' ? { ok: true } : { running: false } }) });
+  vm.runInContext(probe, context);
+  async function shellMode() {
+    context.probeHealth();
+    await new Promise(resolve => setImmediate(resolve));
+    return syncStates.at(-1);
+  }
+  assert.equal((await shellMode()).mode, 'warn');
+  assert.match(syncStates.at(-1).text, /刷新失敗/);
+  now += 121000;
+  assert.equal((await shellMode()).mode, 'warn');
+  now += 900000;
+  assert.equal((await shellMode()).mode, 'err');
+  const freshness = context.MarketFreshness;
+  context.MarketFreshness = null;
+  assert.equal((await shellMode()).mode, 'warn', '效期模組缺少時也不得顯示刷新成功');
+  // 來源刷新成功仍須判斷資料效期；效期模組缺少不能把舊報價標為正常。
+  response = { ok: true, quotes: { '^TWII': { market: { asOf: new Clock(now - 3600000).toISOString() } } } };
+  assert.equal((await shellMode()).mode, 'warn');
+  assert.equal(context.MarketData.get().refreshError, null);
+  assert.equal(context.MarketData.get().freshness, null);
+  assert.equal(syncStates.at(-1).text, '行情資料效期待確認');
+  context.MarketFreshness = freshness;
+  response = { ok: true, quotes: { '^TWII': { market: { asOf: new Clock().toISOString() } } } };
+  assert.equal((await shellMode()).mode, 'ok');
+  assert.equal(context.MarketData.get().refreshError, null);
   // 載入核心不得初始化 ICU；首次日期轉換才建 formatter，之後重用。
   let constructors = 0;
   const scope = { window: {}, Intl: { DateTimeFormat: function (...args) {
