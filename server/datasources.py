@@ -234,7 +234,7 @@ def refresh(sid, density=None, dense=None, step=None, years=None, symbols=None):
     if sid == 'db':
         import daily_cache_jobs
         if not symbols:
-            return {'ok': False, 'error': '請先選擇日線更新標的（最多五檔），再提交受管更新工作。'}
+            raise ValueError('請先選擇日線更新標的（最多五檔），再提交受管更新工作。')
         return daily_cache_jobs.submit({'symbols': symbols, 'range': '1mo', 'kind': 'history'})
     if sid == 'margin_ratio':
         return _spawn('margin_ratio.py', 'backfill', '--full')

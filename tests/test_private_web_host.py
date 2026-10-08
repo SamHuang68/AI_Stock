@@ -44,6 +44,7 @@ class PrivateWebHostTests(unittest.TestCase):
                         "ok": True,
                         "gateway": "private-web",
                         "mode": "dev-linked",
+                        "upstream": False,
                     },
                 ),
                 mock.patch.object(host, "_spawn") as spawn,

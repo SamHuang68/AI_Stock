@@ -19,6 +19,127 @@ from pulse_updates import PulseUpdates
 
 
 class PulseReadWriteTest(unittest.TestCase):
+    def _boundary_connection(self):
+        import http.client
+        connection = http.client.HTTPConnection('127.0.0.1', self.http.server_port,
+                                                 timeout=3)
+        self.addCleanup(connection.close)
+        return connection
+
+    def _boundary_following_status(self, connection, previous_socket, *, reusable):
+        connection.request('GET', '/pulse/update-status')
+        if reusable:
+            self.assertIs(connection.sock, previous_socket)
+        else:
+            self.assertIsNot(connection.sock, previous_socket)
+        with connection.getresponse() as response:
+            self.assertEqual(response.status, 200)
+            json.loads(response.read())
+        self.assertFalse(self.queue_db.exists())
+
+    def test_stdlib_errors_close_declared_body_and_next_request_is_clean(self):
+        missing = str(Path(self.temp.name) / 'missing-static.txt')
+        self.assertFalse(Path(missing).exists())
+        close_original = st_server.close_rejected_body
+        for method, path, expected in (
+                ('PUT', '/boundary-no-route', 501),
+                ('PATCH', '/boundary-no-route', 501),
+                ('DELETE', '/boundary-no-route', 501),
+                ('GET', '/assets/boundary-missing.txt', 404)):
+            with self.subTest(method=method, expected=expected):
+                connection = self._boundary_connection()
+                # 真 stdlib send_head 缺檔，路徑限定在本測試的隔離目錄。
+                with patch.object(st_server.Handler, 'translate_path', return_value=missing), \
+                        patch.object(st_server, 'close_rejected_body', wraps=close_original) as close:
+                    connection.request(method, path, body=b'{}')
+                    previous_socket = connection.sock
+                    with connection.getresponse() as response:
+                        self.assertEqual(response.status, expected)
+                        self.assertEqual(response.getheader('Connection'), 'close')
+                        self.assertTrue(response.will_close)
+                        response.read()
+                    close.assert_called_once()
+                    self._boundary_following_status(connection, previous_socket, reusable=False)
+                    close.assert_called_once()
+                connection.close()
+
+    def test_header_parser_error_before_headers_assignment_returns_431(self):
+        import http.client
+        original_parser = http.client.parse_headers
+        test_thread = threading.current_thread()
+        raised = threading.Event()
+
+        def read_then_reject(*args, **kwargs):
+            headers = original_parser(*args, **kwargs)
+            # 先由真正 parser 讀完 header，避免把未讀 header 的 RST 混進 guard。
+            # client 接收回應時仍走原 parser，僅拒絕服務端第一次解析。
+            if threading.current_thread() is not test_thread and not raised.is_set():
+                raised.set()
+                raise http.client.HTTPException('合成標頭解析失敗')
+            return headers
+
+        connection = self._boundary_connection()
+        with patch.object(http.client, 'parse_headers', side_effect=read_then_reject), \
+                patch.object(st_server, 'close_rejected_body', wraps=st_server.close_rejected_body) as close:
+            connection.request('GET', '/pulse/update-status')
+            with connection.getresponse() as response:
+                self.assertEqual(response.status, 431)
+                self.assertEqual(response.getheader('Connection'), 'close')
+                response.read()
+            self.assertTrue(raised.is_set())
+            close.assert_not_called()
+        self.assertFalse(self.queue_db.exists())
+
+    def test_request_line_error_before_headers_exists_returns_original_error(self):
+        import socket
+        with socket.create_connection(('127.0.0.1', self.http.server_port), timeout=3) as connection:
+            connection.sendall(b'GET / HTTP/not-a-number\r\n')
+            result = bytearray()
+            while True:
+                part = connection.recv(4096)
+                if not part:
+                    break
+                result.extend(part)
+            # stdlib 在 request_version 尚未建立時使用 HTTP/0.9 形式的 HTML 本文。
+            self.assertIn(b'Error code: 400', result)
+            self.assertIn(b'Bad request version', result)
+        self.assertFalse(self.queue_db.exists())
+
+    def test_options_with_declared_body_closes_but_preserves_204(self):
+        connection = self._boundary_connection()
+        with patch.object(st_server, 'close_rejected_body', wraps=st_server.close_rejected_body) as close:
+            connection.request('OPTIONS', '/bridge/wavedeck', body=b'{}',
+                               headers={'Origin': 'http://127.0.0.1:18433'})
+            previous_socket = connection.sock
+            with connection.getresponse() as response:
+                self.assertEqual(response.status, 204)
+                self.assertEqual(response.getheader('Connection'), 'close')
+                self.assertTrue(response.will_close)
+                self.assertEqual(response.getheader('Access-Control-Allow-Origin'),
+                                 'http://127.0.0.1:18433')
+                self.assertEqual(response.read(), b'')
+            close.assert_called_once()
+            self._boundary_following_status(connection, previous_socket, reusable=False)
+            close.assert_called_once()
+
+    def test_options_without_body_preserves_204_and_same_connection(self):
+        connection = self._boundary_connection()
+        with patch.object(st_server, 'close_rejected_body', wraps=st_server.close_rejected_body) as close:
+            # 直接送標頭，保證沒有被 client 自動補 Content-Length: 0。
+            connection.putrequest('OPTIONS', '/bridge/wavedeck')
+            connection.putheader('Origin', 'http://127.0.0.1:18433')
+            connection.endheaders()
+            previous_socket = connection.sock
+            with connection.getresponse() as response:
+                self.assertEqual(response.status, 204)
+                self.assertIsNone(response.getheader('Connection'))
+                self.assertFalse(response.will_close)
+                self.assertEqual(response.read(), b'')
+            close.assert_not_called()
+            self._boundary_following_status(connection, previous_socket, reusable=True)
+            close.assert_not_called()
+
+
     def run(self, result=None):
         own_result = result is None
         self.test_result = self.defaultTestResult() if own_result else result
@@ -72,16 +193,28 @@ class PulseReadWriteTest(unittest.TestCase):
             return
         self._cleanup_attempted = True
         self.release.set()
+        failures = []
         if self.http is not None:
-            if self.thread is not None and self.thread.is_alive():
-                self.http.shutdown()
-                self.thread.join(2)
-            self.http.server_close()
-        stopped = self.queue is None or self.queue.stop(timeout=3)
-        if not stopped:
-            # 保留目錄與仍被工作者使用的替身；停止本次測試批次，避免恢復全域後繼續外寫。
+            try:
+                if self.thread is not None and self.thread.is_alive():
+                    self.http.shutdown()
+                    self.thread.join(2)
+                self.http.server_close()
+                if self.thread is not None and self.thread.is_alive():
+                    failures.append('HTTP 服務未停止')
+            except Exception as error:
+                failures.append('HTTP 清理：' + type(error).__name__)
+        # HTTP 停止失敗仍須通知佇列；原有停止期限維持不變。
+        if self.queue is not None:
+            try:
+                if not self.queue.stop(timeout=3):
+                    failures.append('工作者未停止')
+            except Exception as error:
+                failures.append('工作者停止：' + type(error).__name__)
+        if failures:
+            # 保留目錄與替身並停止批次，避免未停止的工作者在恢復全域後繼續外寫。
             self.test_result.stop()
-            self.fail('工作者未停止，保留證據目錄與隔離設定：' + self.temp.name)
+            self.fail('；'.join(failures) + '；保留證據目錄與隔離設定：' + self.temp.name)
         for item in reversed(self.patches):
             item.stop()
         target = Path(self.temp.name).resolve()
@@ -235,6 +368,7 @@ class PulseReadWriteTest(unittest.TestCase):
                 (403, {'Origin': 'https://example.invalid', 'Content-Type': 'application/json'}, b'{}'),
                 (415, {'Content-Type': 'text/plain'}, b'{}'),
                 (413, {'Content-Type': 'application/json', 'Content-Length': '999999'}, b'{}'),
+                (400, {'Content-Type': 'application/json', 'Content-Length': 'invalid'}, b'{}'),
                 (400, {'Content-Type': 'application/json', 'Content-Length': '-1'}, b'{}')):
             with self.subTest(status=status):
                 connection = http.client.HTTPConnection('127.0.0.1', self.http.server_port, timeout=3)

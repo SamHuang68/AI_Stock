@@ -8,6 +8,10 @@
   };
   var inflight = null;
   var stockQuotes = Object.create(null);
+  function hasQuotes(snapshot) {
+    var quotes = snapshot && snapshot.quotes;
+    return !!(quotes && typeof quotes === 'object' && !Array.isArray(quotes) && Object.keys(quotes).length);
+  }
   function acceptStockQuote(symbol, quote) {
     var stamp = Number(quote && quote.timestampMs);
     if (!quote || quote.ok === false || typeof quote.price !== 'number' || !isFinite(quote.price) || !(quote.price > 0) || !isFinite(stamp) || stamp <= 0) return false;
@@ -25,7 +29,7 @@
     return snapshot;
   }
   function publish(snapshot, reason) {
-    if (!snapshot || !snapshot.quotes) return state;
+    if (!hasQuotes(snapshot)) return state;
     attachFreshness(snapshot);
     state = {
       quotes: snapshot.quotes,
@@ -72,7 +76,7 @@
       : fetch(base() + '/market/snapshot', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; });
     inflight = request
       .then(function (x) {
-        if (!x || !x.ok) throw new Error('行情快照刷新失敗');
+        if (!x || !x.ok || !hasQuotes(x)) throw new Error('行情快照刷新失敗');
         return publish(x, 'snapshot');
       })
       .catch(function (error) {

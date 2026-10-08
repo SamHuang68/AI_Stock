@@ -30,7 +30,11 @@ class DailyCacheTests(unittest.TestCase):
         self.old_active, self.old_cancel = jobs._active, jobs._cancel
         jobs._active = None
         self.callbacks = []
-        self.queue = patch.object(jobs.job_queue, 'submit', side_effect=lambda name, fn: self.callbacks.append(fn) or {'ok': True})
+        def enqueue(name, fn, *, timeout):
+            self.assertEqual(timeout, 660)
+            self.callbacks.append(fn)
+            return {'ok': True}
+        self.queue = patch.object(jobs.job_queue, 'submit', side_effect=enqueue)
         self.queue.start()
         original_cutoff = ds.completed_daily_cutoff
         self.clock = patch.object(ds, 'completed_daily_cutoff',

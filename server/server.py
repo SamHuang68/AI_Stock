@@ -1137,6 +1137,12 @@ def _openapi_lookup_list(dataset_name, *, deadline=None):
                                elapsedMs=round((time.monotonic() - started) * 1000))
             return arr
         except Exception as e:
+            if (isinstance(e, _hc.HttpError) and e.status is None and
+                    isinstance(e.cause, _hc.RequestDeadlineExceeded)):
+                # 呼叫端預算耗盡不是共用來源故障，不能封鎖其他讀取者。
+                _fundamental_trace('openapi_fetch_failed', **trace, error=str(e),
+                                   elapsedMs=round((time.monotonic() - started) * 1000))
+                raise e.cause
             if isinstance(e, _hc.HttpError):
                 trace.update(httpStatus=e.status, finalUrl=e.url)
             if isinstance(e, urllib.error.HTTPError):
@@ -2516,6 +2522,18 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
     _BASE = _BASE
     protocol_version = 'HTTP/1.1'   # enables keep-alive
 
+    def parse_request(self):
+        # parser 可能在賦值 headers 前拒絕；不能保留上一個請求的標頭。
+        self.headers = self.MessageClass()
+        return super().parse_request()
+
+    def send_error(self, code, message=None, explain=None):
+        if getattr(self, 'headers', None) is None:
+            self.headers = self.MessageClass()
+        if self._rejected_body_present():
+            close_rejected_body(self)
+        return super().send_error(code, message, explain)
+
     def _research_runtime(self):
         """研究僅注入既有快取；不把具有抓取副作用的函式傳入研究層。"""
         with _openapi_state_lock:
@@ -2936,10 +2954,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 body = read_json_body(self, max_bytes=4096)
                 import daily_cache_jobs
                 result = daily_cache_jobs.cancel(body.get('jobId')) if p.endswith('/cancel') else daily_cache_jobs.submit(body)
-                if not result.get('ok'):
-                    self._err(result.get('error') or ('已有日線更新進行中，請等待完成或取消' if result.get('reason') == 'busy' else '日線更新未接受'), 503 if result.get('reason') in ('queue_full', 'queue_error') else 409)
-                    return
-                self._ok(json.dumps(result, ensure_ascii=False).encode())
+                self._respond_daily_cache_result(result)
             except BodyReadError as exc:
                 self._err(str(exc), exc.status)
             except ValueError as exc:
@@ -3065,7 +3080,12 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         if not origin:
             self._err('forbidden (cross-origin)', 403)
             return
+        declared_body = self._rejected_body_present()
+        if declared_body:
+            close_rejected_body(self)
         self.send_response(204)
+        if declared_body:
+            self.send_header('Connection', 'close')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-ST-Trace-ID')
         self.send_header('Access-Control-Expose-Headers', 'X-ST-Trace-ID')
@@ -4662,7 +4682,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         out = _fetch_day_movers(n)
         body = json.dumps(out, ensure_ascii=False).encode()
         if out.get('ok'):
-            _cache.set(key, body, ttl=300)
+            _cache.set(key, body, ttl=30 if out.get('partial') or out.get('sourceErrors') else 300)
         self._ok(body)
 
     def _handle_breadth(self):
@@ -4813,7 +4833,8 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             raw = None if refresh else _cache.get(key)
             snapshot = json.loads(raw) if raw is not None else _fetch_day_movers(include_rows=True)
             if raw is None and snapshot.get('twseAvailable') and snapshot.get('classificationCount'):
-                _cache.set(key, json.dumps(snapshot, ensure_ascii=False).encode(), ttl=300)
+                _cache.set(key, json.dumps(snapshot, ensure_ascii=False).encode(),
+                           ttl=30 if snapshot.get('partial') or snapshot.get('sourceErrors') else 300)
             out = build_tw_members(snapshot, sector)
         except Exception as error:
             print('[類股成員] 來源不可用：', type(error).__name__)
@@ -5466,20 +5487,34 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 years = int(years) if years not in (None, '') else None
             except Exception:
                 years = None
-            self._ok(json.dumps(datasources.refresh(
-                (body.get('id') or '').strip(),
+            source_id = (body.get('id') or '').strip()
+            result = datasources.refresh(
+                source_id,
                 density=body.get('density'),
                 dense=body.get('dense'),
                 step=step,
                 years=years,
                 symbols=body.get('symbols'),
-            ), ensure_ascii=False).encode())
+            )
+            if source_id == 'db':
+                self._respond_daily_cache_result(result)
+            else:
+                self._ok(json.dumps(result, ensure_ascii=False).encode())
         except BodyReadError as e:
             self._err(str(e), e.status)
         except ValueError as e:
             self._err(str(e), 400)
         except Exception as e:
             self._err('datasource refresh failed: ' + str(e), 500)
+
+    def _respond_daily_cache_result(self, result):
+        """新舊日線入口共用佇列接受／拒收契約。"""
+        if not result.get('ok'):
+            message = result.get('error') or ('已有日線更新進行中，請等待完成或取消'
+                                             if result.get('reason') == 'busy' else '日線更新未接受')
+            self._err(message, 503 if result.get('reason') in ('queue_full', 'queue_error') else 409)
+            return
+        self._ok(json.dumps(result, ensure_ascii=False).encode())
 
     def _handle_notify(self):
         """v4.0: POST /notify  body:{text, subject?} → 用 alert_config 的 Telegram/Email 寄出

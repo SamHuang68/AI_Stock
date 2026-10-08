@@ -47,6 +47,8 @@ _SESSION = ss.DAILY_SESSIONS
 _cache_lock = threading.Lock()
 _cache: Dict[Tuple[str, str, bool], Tuple[float, Dict[str, Any]]] = {}
 _remote_fail: Dict[Tuple[str, str], float] = {}   # 補抓失敗的 neg-cache：10 分鐘內直接用本機資料
+_remote_fail_errors: Dict[Tuple[str, str], str] = {}
+_revision_status_unknown: Dict[Tuple[str, str], bool] = {}
 REMOTE_FAIL_TTL = 600.0
 REMOTE_FETCH_SECONDS = 8.0
 _remote_pool = BoundedExecutor(max_workers=4, max_in_flight=4, prefix='stock-health-source')
@@ -150,6 +152,7 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
     source = 'local-db'
     error = None
     retry_soon = False
+    revision_status_unknown = False
     last = bars[-1]['date'] if bars else None
     sess = session_state(market, last, now)
     expected = sess['expectedLastDate']
@@ -158,10 +161,32 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
     need_full = len(bars) < 130
     behind = expected is not None and (last or '') < expected
     live_extra: List[Dict[str, Any]] = []
-    if allow_network and _remote_fail.get((code, market), 0) > time.time():
+    failure_key = (code, market)
+    revision_status_unknown = bool(_revision_status_unknown.get(failure_key))
+    if _remote_fail.get(failure_key, 0) <= time.time():
+        _remote_fail.pop(failure_key, None)
+        _remote_fail_errors.pop(failure_key, None)
+        if revision_status_unknown:
+            # metadata 重試只讀既有 DB；資料齊全或禁止連網時也能解除未知。
+            try:
+                revision = ds.source_revision_status(code, market)
+            except (ValueError, sqlite3.Error, OSError) as exc:
+                error = f'來源修訂狀態待確認，保留已讀日線（{type(exc).__name__}）：{exc}'
+                _remote_fail[failure_key] = time.time() + 60
+                _remote_fail_errors[failure_key] = error
+            else:
+                _revision_status_unknown.pop(failure_key, None)
+                revision_status_unknown = False
+                if revision['count']:
+                    error = '來源有歷史修訂，首次日線已保留；價格基準仍須核對，不以新來源靜默覆寫'
+    if revision_status_unknown:
+        error = _remote_fail_errors.get(failure_key) or '來源修訂狀態待確認，保留已讀日線'
+        retry_soon = True
+    if allow_network and _remote_fail.get(failure_key, 0) > time.time():
         allow_network = False
         retry_soon = True
-        error = '最近一次行情更新未完成，暫用本機資料；重試間隔10分鐘'
+        error = _remote_fail_errors.get(failure_key) or '最近一次行情更新未完成，暫用本機資料；重試間隔10分鐘'
+        revision_status_unknown = bool(_revision_status_unknown.get(failure_key))
     if allow_network and (need_full or behind or sess['sessionOpen']):
         gap_days = (date.fromisoformat(expected) - date.fromisoformat(last)).days if last and expected else 9999
         rng = '5y' if need_full or gap_days > 80 else ('3mo' if gap_days > 4 else '5d')
@@ -174,7 +199,8 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
                      if isinstance(exc, TimeoutError) else
                      f'無法連線更新日線（{type(exc).__name__}），使用本機資料')
             if not isinstance(exc, SourceBusyError):
-                _remote_fail[(code, market)] = time.time() + REMOTE_FAIL_TTL
+                _remote_fail[failure_key] = time.time() + REMOTE_FAIL_TTL
+                _remote_fail_errors.pop(failure_key, None)
         if fetched:
             fresh = ss.normalize_bars(fetched, market)
             today = _now_local(market, now).date().isoformat()
@@ -195,25 +221,45 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
                     ds.upsert_bars(code, market, final_rows, source='Yahoo Finance')
                     updated_rows = ds.get_bars(code, market=market)
                     updated_bars = ss.normalize_bars(updated_rows, market)
-                revision = ds.source_revision_status(code, market)
             except (ValueError, sqlite3.Error, OSError) as exc:
                 error = f'日線更新未完成，保留已讀本機資料（{type(exc).__name__}）：{exc}'
+                retry_soon = True
+                _remote_fail[failure_key] = time.time() + 60
+                _remote_fail_errors[failure_key] = error
             else:
+                # 已持久化且成功讀回的snapshot保留；修訂中繼資料另行確認。
                 bars = updated_bars
-                if today_live and fresh and fresh[-1]['date'] == today:
-                    live_extra = [fresh[-1]]
-                source = 'local-db+yahoo'
-                if revision['count']:
-                    error = '來源有歷史修訂，首次日線已保留；價格基準仍須核對，不以新來源靜默覆寫'
+                if final_rows:
+                    source = 'local-db+yahoo'
+                try:
+                    revision = ds.source_revision_status(code, market)
+                except (ValueError, sqlite3.Error, OSError) as exc:
+                    error = f'來源修訂狀態待確認，保留已讀日線（{type(exc).__name__}）：{exc}'
+                    revision_status_unknown = True
+                    retry_soon = True
+                    _remote_fail[failure_key] = time.time() + 60
+                    _remote_fail_errors[failure_key] = error
+                    _revision_status_unknown[failure_key] = True
+                else:
+                    _revision_status_unknown.pop(failure_key, None)
+                    revision_status_unknown = False
+                    if today_live and fresh and fresh[-1]['date'] == today:
+                        live_extra = [fresh[-1]]
+                    source = 'local-db+yahoo'
+                    if revision['count']:
+                        error = '來源有歷史修訂，首次日線已保留；價格基準仍須核對，不以新來源靜默覆寫'
     if live_extra and (not bars or bars[-1]['date'] < live_extra[0]['date']):
         bars = bars + live_extra
+    if revision_status_unknown:
+        retry_soon = True
     last = bars[-1]['date'] if bars else None
     sess = session_state(market, last, now)
     stale_days = ((date.fromisoformat(sess['expectedLastDate']) - date.fromisoformat(last)).days
                   if last and sess['expectedLastDate'] else None)
     return {'bars': bars, 'source': source, 'provisional': sess['provisional'],
             'staleDays': max(0, stale_days) if stale_days is not None else None,
-            'error': error, 'retrySoon': retry_soon, 'session': sess}
+            'error': error, 'retrySoon': retry_soon, 'session': sess,
+            'sourceRevisionStatusUnknown': revision_status_unknown}
 
 
 def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
@@ -261,6 +307,8 @@ def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
     except Exception:
         result['dataQuality'] = {'status': 'unknown', 'label': '資料品質待確認', 'items': [],
                                  'notes': ['本機品質資料無法讀取；不代表資料已齊全。']}
+    if loaded.get('sourceRevisionStatusUnknown'):
+        result['dataQuality'].update(status='unknown', label='來源修訂狀態待確認')
     ttl = 300 if loaded.get('provisional') else 1800
     # 來源逾時／額滿及負快取期間的結果只短暫快取，避免再次延長降級結果。
     if loaded.get('retrySoon'):
@@ -278,6 +326,8 @@ def clear_cache() -> None:
     with _cache_lock:
         _cache.clear()
     _remote_fail.clear()
+    _remote_fail_errors.clear()
+    _revision_status_unknown.clear()
 
 
 # ── 自選股清單（供收盤摘要／即時推播）───────────────────────

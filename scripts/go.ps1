@@ -250,6 +250,11 @@ function Get-ProcessCommandLine([int]$ProcId) {
 
 # 開發伺服器啟動後登記它的身分（PID、啟動時間、資料夾）。之後只有收據登記的程序可以被這個腳本終止。
 function Write-DevServerReceipt([int]$PortNum, [string]$ReceiptPath, [string]$OwnerRoot, [int]$ExpectedParent, [int64]$ExpectedParentTicks = 0, [string]$ExpectedPython = '', [string]$ExpectedBasePython = '', [string]$ExpectedLauncher = '') {
+  if ($ExpectedParent -gt 4 -and ([string]::IsNullOrWhiteSpace($ExpectedPython) -or
+      [string]::IsNullOrWhiteSpace($ExpectedBasePython) -or [string]::IsNullOrWhiteSpace($ExpectedLauncher))) {
+    Write-Host '[warn] 缺少本次釘選 Python、基礎 Python 或 CMD 身分；保持程序運行，不寫入自動終止收據。'
+    return
+  }
   $listeners = @(Get-PortListenerPids $PortNum)
   $ticks = $null
   if ($listeners.Count -eq 1) { $ticks = Get-ProcessStartTicks $listeners[0] }
@@ -349,6 +354,16 @@ function Assert-LauncherBehavior([string]$Path) {
   $resolver = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Resolve-StockPython' }, $true)
   $ownedStop = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Stop-OwnedPortListeners' }, $true)
   $receipt = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Write-DevServerReceipt' }, $true)
+  $receiptCalls = @($ast.FindAll({ param($n)
+    $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Write-DevServerReceipt'
+  }, $true))
+  $weakReceiptCalls = @($receiptCalls | Where-Object {
+    $names = @($_.CommandElements | Where-Object {
+      $_ -is [System.Management.Automation.Language.CommandParameterAst]
+    } | ForEach-Object { $_.ParameterName })
+    $missing = @('ExpectedPython', 'ExpectedBasePython', 'ExpectedLauncher') | Where-Object { $names -notcontains $_ }
+    @($missing).Count -gt 0
+  })
   $unsafeStop = $ast.FindAll({ param($n)
     ($n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Stop-PortListeners') -or
     ($n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Stop-PortListeners')
@@ -363,7 +378,7 @@ function Assert-LauncherBehavior([string]$Path) {
     while ($null -ne $scope -and $scope -isnot [System.Management.Automation.Language.FunctionDefinitionAst]) { $scope = $scope.Parent }
     return $null -eq $scope -or $scope.Name -ne 'Stop-OwnedPortListeners'
   }, $true)
-  if ($parseErrors.Count -gt 0 -or $resolver.Count -ne 1 -or $ownedStop.Count -ne 1 -or $receipt.Count -ne 1 -or $unsafeStop.Count -gt 0 -or $redirect.Count -gt 0 -or $unownedKill.Count -gt 0) {
+  if ($parseErrors.Count -gt 0 -or $resolver.Count -ne 1 -or $ownedStop.Count -ne 1 -or $receipt.Count -ne 1 -or $receiptCalls.Count -lt 1 -or $weakReceiptCalls.Count -gt 0 -or $unsafeStop.Count -gt 0 -or $redirect.Count -gt 0 -or $unownedKill.Count -gt 0) {
     throw '啟動腳本行為檢查失敗，請核對拉取版本。'
   }
 }

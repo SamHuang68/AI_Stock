@@ -169,21 +169,41 @@ class ManagedInstallGuardBehaviorTests(unittest.TestCase):
                 self.assertNotIn('[stop]', output)
 
 
-_RECEIPT_DRIVER = """\
+_TEST_LEGACY_RECEIPT_SEED = """\
+# 只供 Stop-Owned 行為測試，明示建立舊收據；不冒充正式強 writer。
+function Seed-TestOwnedLegacyReceipt([int]$PortNum, [int[]]$ListenerPids, [string]$ReceiptPath, [string]$OwnerRoot) {
+  if ($ListenerPids.Count -ne 1) { throw '測試收據只接受一個 listener。' }
+  $childId = $ListenerPids[0]
+  $child = Get-CimInstance Win32_Process -Filter "ProcessId=$childId" -ErrorAction Stop
+  $parentId = [int]$env:ST_TEST_PARENT_ID
+  $childTicks = Get-ProcessStartTicks $childId
+  $parentTicks = Get-ProcessStartTicks $parentId
+  if (-not $child -or $child.Name -notin @('python.exe','pythonw.exe') -or
+      [int]$child.ParentProcessId -ne $parentId -or $null -eq $childTicks -or
+      $null -eq $parentTicks -or $childTicks -lt $parentTicks -or -not $child.CommandLine) {
+    throw '測試 child 的父程序、CIM、啟動時間或命令列不符；不建立收據。'
+  }
+  $receipt = [ordered]@{pid=$childId;startTicksUtc=[int64]$childTicks;root=$OwnerRoot;port=$PortNum;commandLine=[string]$child.CommandLine}
+  $receipt | ConvertTo-Json | Set-Content -LiteralPath $ReceiptPath -Encoding UTF8
+}
+"""
+
+
+_RECEIPT_DRIVER = _TEST_LEGACY_RECEIPT_SEED + """\
 $ErrorActionPreference = 'Stop'
 . $env:ST_TEST_FUNCS
 function Get-PortListenerPids([int]$PortNum) { return @($script:ListenerPids) }
 function ConvertTo-PidList([string]$text) { return @($text -split ',' | Where-Object { $_ } | ForEach-Object { [int]$_ }) }
 $script:ListenerPids = ConvertTo-PidList $env:ST_TEST_WRITE_PIDS
 if ($env:ST_TEST_WRITE_ROOT) {
-  Write-DevServerReceipt -PortNum 18432 -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_WRITE_ROOT -ExpectedParent ([int]$env:ST_TEST_PARENT_ID)
+  Seed-TestOwnedLegacyReceipt -PortNum 18432 -ListenerPids $script:ListenerPids -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_WRITE_ROOT
 }
 $script:ListenerPids = ConvertTo-PidList $env:ST_TEST_STOP_PIDS
 Stop-OwnedPortListeners -PortNum 18432 -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_STOP_ROOT
 Write-Host 'STOP-RETURNED'
 """
 
-_REAL_PORT_DRIVER = """\
+_REAL_PORT_DRIVER = _TEST_LEGACY_RECEIPT_SEED + """\
 $ErrorActionPreference = 'Stop'
 . $env:ST_TEST_FUNCS
 $port = [int]$env:ST_TEST_PORT
@@ -195,7 +215,7 @@ try {
   if ($_.Exception.Message -notmatch '^ST-PORT-GUARD:') { throw }
   Write-Host 'REFUSED:ST-PORT-GUARD'
 }
-Write-DevServerReceipt -PortNum $port -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_ROOT -ExpectedParent ([int]$env:ST_TEST_PARENT_ID)
+Seed-TestOwnedLegacyReceipt -PortNum $port -ListenerPids @(Get-PortListenerPids $port) -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_ROOT
 Stop-OwnedPortListeners -PortNum $port -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_ROOT
 Write-Host 'STOPPED'
 """
@@ -258,16 +278,17 @@ class DevServerReceiptBehaviorTests(unittest.TestCase):
 
     def test_identity_lookup_failure_does_not_abort_or_write_receipt(self):
         mine = self.sleeper()
-        driver = """. $env:ST_TEST_FUNCS
+        driver = r""". $env:ST_TEST_FUNCS
 function Get-PortListenerPids([int]$PortNum) { return @([int]$env:ST_TEST_WRITE_PIDS) }
-function Get-CimInstance { throw '合成身分讀取失敗' }
-Write-DevServerReceipt -PortNum 18432 -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_ROOT -ExpectedParent ([int]$env:ST_TEST_PARENT_ID)
+function Get-CimInstance { Write-Host 'CIM-FIXTURE-CALLED'; throw '合成身分讀取失敗' }
+Write-DevServerReceipt -PortNum 18432 -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $env:ST_TEST_ROOT -ExpectedParent ([int]$env:ST_TEST_PARENT_ID) -ExpectedPython 'C:\fixture\python.exe' -ExpectedBasePython 'C:\fixture\base-python.exe' -ExpectedLauncher 'C:\fixture\run_server_tip.cmd'
 Write-Host 'RECEIPT-RETURNED'
 """
         for name, engine in _powershell_engines().items():
             code, output = self.run_ps(engine, driver, ST_TEST_WRITE_PIDS=mine.pid, ST_TEST_ROOT=self.root)
             self.assertEqual(code, 0, output)
             self.assertIn('RECEIPT-RETURNED', output)
+            self.assertIn('CIM-FIXTURE-CALLED', output)
             self.assertFalse(self.receipt.exists())
             self.assertAlive(mine)
 
@@ -304,6 +325,17 @@ function Get-CimInstance([string]$ClassName, [string]$Filter, $ErrorAction) {
 }
 Write-DevServerReceipt -PortNum 18432 -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $owner -ExpectedParent 50 -ExpectedParentTicks 100 -ExpectedPython $pin -ExpectedBasePython $base -ExpectedLauncher $launcher
 Write-Host ('WRITTEN=' + (Test-Path -LiteralPath $env:ST_TEST_RECEIPT))
+$script:Stopped = @()
+function Get-ProcessCommandLine([int]$ProcId) { return [string]$script:Processes[$ProcId].CommandLine }
+function Stop-Process([int]$Id,[switch]$Force,$ErrorAction) {
+  if ($Id -ne 70) { throw '合成停止只接受本例 leaf 70。' }
+  $script:Stopped += $Id
+}
+function Start-Sleep([int]$Seconds) {}
+if (Test-Path -LiteralPath $env:ST_TEST_RECEIPT) {
+  Stop-OwnedPortListeners -PortNum 18432 -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $owner
+}
+Write-Host ('FAKESTOP=' + ($script:Stopped -join ','))
 """
         cases = ('direct', 'venv', 'parent-reused', 'future-proxy', 'deeper',
                  'non-python', 'wrong-pin', 'wrong-leaf', 'different-command',
@@ -317,10 +349,65 @@ Write-Host ('WRITTEN=' + (Test-Path -LiteralPath $env:ST_TEST_RECEIPT))
                     self.assertEqual(code, 0, output)
                     accepted = case in ('direct', 'venv')
                     self.assertEqual(self.receipt.exists(), accepted, output)
+                    stopped = re.search(r'(?m)^FAKESTOP=(.*)$', output)
+                    self.assertIsNotNone(stopped, output)
+                    self.assertEqual(stopped.group(1).strip(), '70' if accepted else '', output)
                     if accepted:
                         receipt = json.loads(self.receipt.read_text(encoding='utf-8-sig'))
                         self.assertEqual(receipt['pid'], 70)
                         self.assertEqual(receipt['startTicksUtc'], 300)
+
+
+    def test_blank_strong_identity_is_refused_even_with_indirect_invocation(self):
+        """空白或缺省強身分一律拒絕；只有完整值可建立收據。"""
+        driver = r""". $env:ST_TEST_FUNCS
+$owner = $env:ST_TEST_ROOT
+$pin = Join-Path $owner 'venv\Scripts\python.exe'
+$base = Join-Path $owner 'base\python.exe'
+$launcher = Join-Path $owner 'logs\run_server_tip.cmd'
+$command = '"' + $pin + '" -u "' + (Join-Path $owner 'server\server.py') + '"'
+$script:Processes = @{
+  50 = [pscustomobject]@{ProcessId=50;Name='cmd.exe';ParentProcessId=40;CommandLine=('cmd.exe /c "' + $launcher + '"')}
+  70 = [pscustomobject]@{ProcessId=70;Name='python.exe';ParentProcessId=50;ExecutablePath=$pin;CommandLine=$command}
+}
+$script:Stopped = @()
+function Get-PortListenerPids([int]$PortNum) {return @(70)}
+function Get-ProcessStartTicks([int]$ProcId) {return $(if($ProcId -eq 50){[int64]100}else{[int64]300})}
+function Get-CimInstance([string]$ClassName,[string]$Filter,$ErrorAction) {
+  if($Filter -notmatch '^ProcessId=(\d+)$') {throw '無效合成查詢'}
+  return $script:Processes[[int]$Matches[1]]
+}
+function Get-ProcessCommandLine([int]$ProcId) {return [string]$script:Processes[$ProcId].CommandLine}
+function Stop-Process([int]$Id,[switch]$Force,$ErrorAction) {$script:Stopped += $Id}
+function Start-Sleep([int]$Seconds) {}
+$values = @{PortNum=18432;ReceiptPath=$env:ST_TEST_RECEIPT;OwnerRoot=$owner;ExpectedParent=50;ExpectedParentTicks=100;ExpectedPython=$pin;ExpectedBasePython=$base;ExpectedLauncher=$launcher}
+if($env:ST_TEST_WEAK_PARAM) {
+  if($env:ST_TEST_WEAK_KIND -eq 'omitted') {$values.Remove($env:ST_TEST_WEAK_PARAM)}
+  elseif($env:ST_TEST_WEAK_KIND -eq 'space') {$values[$env:ST_TEST_WEAK_PARAM]='  '}
+  elseif($env:ST_TEST_WEAK_KIND -eq 'tab') {$values[$env:ST_TEST_WEAK_PARAM]=[string][char]9}
+  else {$values[$env:ST_TEST_WEAK_PARAM]=''}
+}
+$functionName = 'Write-' + 'DevServerReceipt'
+& $functionName @values
+if(Test-Path -LiteralPath $env:ST_TEST_RECEIPT) {
+  Stop-OwnedPortListeners -PortNum 18432 -ReceiptPath $env:ST_TEST_RECEIPT -OwnerRoot $owner
+}
+Write-Host ('FAKESTOP=' + ($script:Stopped -join ','))
+"""
+        for name, engine in _powershell_engines().items():
+            for parameter in ('ExpectedPython', 'ExpectedBasePython', 'ExpectedLauncher', ''):
+                kinds = ('empty', 'space', 'tab', 'omitted') if parameter else ('complete',)
+                for kind in kinds:
+                    with self.subTest(engine=name, parameter=parameter, kind=kind):
+                        self.receipt.unlink(missing_ok=True)
+                        code, output = self.run_ps(engine, driver, ST_TEST_ROOT=self.root,
+                                                   ST_TEST_WEAK_PARAM=parameter, ST_TEST_WEAK_KIND=kind)
+                        self.assertEqual(code, 0, output)
+                        accepted = not parameter
+                        self.assertEqual(self.receipt.exists(), accepted, output)
+                        stopped = re.search(r'(?m)^FAKESTOP=(.*)$', output)
+                        self.assertIsNotNone(stopped, output)
+                        self.assertEqual(stopped.group(1).strip(), '70' if accepted else '', output)
 
     def test_unknown_listener_is_refused_and_not_touched(self):
         # 沒有收據：占用者可能是本機受管 ST 或任何別的程式，一律不碰。
@@ -348,6 +435,35 @@ Write-Host ('WRITTEN=' + (Test-Path -LiteralPath $env:ST_TEST_RECEIPT))
                 code, out = self.run_ps(engine, driver, ST_TEST_SOURCE=str(script))
                 self.assertNotEqual(code, 0)
                 self.assertNotIn('BEHAVIOR-OK', out)
+
+    def test_pull_behavior_check_rejects_omitted_strong_receipt_parameters(self):
+        script = self.dir / 'candidate.ps1'
+        driver = ". $env:ST_TEST_FUNCS\nAssert-LauncherBehavior -Path $env:ST_TEST_SOURCE\nWrite-Host 'BEHAVIOR-OK'\n"
+        source = (ROOT / 'scripts/go.ps1').read_text(encoding='utf-8-sig')
+        fragments = (' -ExpectedPython $Python',
+                     ' -ExpectedBasePython $basePythonLines[0].Trim()',
+                     ' -ExpectedLauncher $launcher')
+        for fragment in fragments:
+            self.assertEqual(source.count(fragment), 1)
+        weak_new_call = "\nWrite-DevServerReceipt -PortNum 18432 -ReceiptPath sample -OwnerRoot sample -ExpectedParent 50\n"
+        good_new_call = weak_new_call.rstrip() + ' -ExpectedPython python -ExpectedBasePython base -ExpectedLauncher launcher\n'
+        for name, engine in _powershell_engines().items():
+            for label, candidate, expected in (
+                ('original', source, 0),
+                ('comment-only', source + '# Write-DevServerReceipt -ExpectedParent 50\n', 0),
+                ('explicit-new-call', source + good_new_call, 0),
+                *[(fragment, source.replace(fragment, '', 1), 1) for fragment in fragments],
+                ('omitted-new-call', source + weak_new_call, 1),
+            ):
+                with self.subTest(engine=name, mutation=label):
+                    script.write_text(candidate, encoding='utf-8-sig')
+                    code, output = self.run_ps(engine, driver, ST_TEST_SOURCE=str(script))
+                    if expected == 0:
+                        self.assertEqual(code, 0, output)
+                        self.assertIn('BEHAVIOR-OK', output)
+                    else:
+                        self.assertNotEqual(code, 0, output)
+                        self.assertNotIn('BEHAVIOR-OK', output)
 
     def test_changed_command_line_receipt_is_refused(self):
         mine = self.sleeper()

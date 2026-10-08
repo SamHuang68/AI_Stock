@@ -25,7 +25,7 @@ if %TRIES% GEQ 40 (
   echo [WARN] Local did not become healthy within 120 seconds. Check StockTerminalLocal\logs.
   goto :web
 )
-timeout /t 3 /nobreak >nul
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 3" >nul
 goto :wait_local
 
 :web
@@ -63,9 +63,10 @@ if not errorlevel 1 goto :summary
 set /a TRIES+=1
 if %TRIES% GEQ 20 (
   echo [WARN] Web did not become ready within 60 seconds. Check StockTerminalPrivateWeb\current\logs.
+  echo If the gateway answers but its backend is down, run the managed STOP_PRIVATE_WEB.cmd, then retry.
   goto :summary
 )
-timeout /t 3 /nobreak >nul
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 3" >nul
 goto :wait
 
 :summary
@@ -81,10 +82,6 @@ exit /b %RC%
 
 :local_up
 curl.exe -s -m 3 http://127.0.0.1:18432/health 2>nul | findstr /c:"runtimeCommit" >nul
-exit /b %ERRORLEVEL%
-
-:gateway_up
-curl.exe -s -m 3 http://127.0.0.1:18434/gateway/health 2>nul | findstr /c:"private-web" >nul
 exit /b %ERRORLEVEL%
 
 :web_ready

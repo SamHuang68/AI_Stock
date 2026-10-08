@@ -35,6 +35,10 @@ RETRY_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
 _WIN_TRANSIENT = frozenset({10053, 10054, 10060, 10065})
 
 
+class RequestDeadlineExceeded(TimeoutError):
+    """呼叫端整體期限或重試預算耗盡，與來源自身逾時分開。"""
+
+
 class HttpError(Exception):
     """統一外呼失敗。"""
 
@@ -131,10 +135,10 @@ def _response_deadline(transport_sock, deadline):
             timer.join()
     except Exception as error:
         if expired.is_set():
-            raise TimeoutError('來源回應已超過整體期限') from error
+            raise RequestDeadlineExceeded('來源回應已超過整體期限') from error
         raise
     if expired.is_set() or time.monotonic() >= deadline:
-        raise TimeoutError('來源回應已超過整體期限')
+        raise RequestDeadlineExceeded('來源回應已超過整體期限')
 
 
 class _HostPool:
@@ -283,15 +287,23 @@ class HttpClient:
             budget = deadline - time.monotonic()
             remaining = budget if timeout is None else min(timeout, budget)
             if remaining <= 0:
-                raise TimeoutError('來源請求已超過整體期限')
+                raise RequestDeadlineExceeded('來源請求已超過整體期限')
             return remaining
 
-        def backoff(attempt):
+        def backoff(attempt, original):
             delay = min(0.5 * (2 ** attempt), 4.0)
-            if deadline is not None:
-                if deadline - time.monotonic() <= delay:
-                    raise HttpError('來源重試已超過整體期限', url=url, cause=TimeoutError())
+
+            def check_budget(required):
+                if deadline is not None and deadline - time.monotonic() <= required:
+                    expired = RequestDeadlineExceeded('來源重試已超過整體期限')
+                    expired.__cause__ = original
+                    status = original.status if isinstance(original, HttpError) else None
+                    raise HttpError(str(expired), status=status, url=url, cause=expired) from original
+
+            check_budget(delay)
             time.sleep(delay)
+            # 排程延遲可能使實際等待更久；尚未開下一次請求時保留首試原因。
+            check_budget(0)
 
         with self._stats_lock:
             self._stats['requests'] += 1
@@ -363,14 +375,6 @@ class HttpClient:
                 conn_hdr = (rh.get('Connection') or rh.get('connection') or '').lower()
                 reuse = ('close' not in conn_hdr) and status < 400
 
-                if status in RETRY_STATUS and attempt < attempts - 1:
-                    pool.release(conn, reuse=False)
-                    conn = None
-                    with self._stats_lock:
-                        self._stats['retries'] += 1
-                    backoff(attempt)
-                    continue
-
                 if status >= 400:
                     pool.release(conn, reuse=False)
                     conn = None
@@ -390,9 +394,14 @@ class HttpClient:
                     pool.release(conn, reuse=False)
                     conn = None
                 if attempt < attempts - 1 and _is_transient(e):
+                    try:
+                        backoff(attempt, e)
+                    except HttpError:
+                        with self._stats_lock:
+                            self._stats['errors'] += 1
+                        raise
                     with self._stats_lock:
                         self._stats['retries'] += 1
-                    backoff(attempt)
                     continue
                 with self._stats_lock:
                     self._stats['errors'] += 1

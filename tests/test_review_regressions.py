@@ -11,7 +11,7 @@ import time
 import types
 import unittest
 from contextlib import closing
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 from zoneinfo import ZoneInfo
@@ -33,6 +33,543 @@ import datasources
 
 
 class ReviewRegressions(unittest.TestCase):
+    def test_short_sector_deadline_does_not_cool_shared_source(self):
+        from tests.test_server_http_security import ST
+
+        first, second = ST._REVENUE_DATASETS
+        rows = [{'公司代號': '2330', '產業別': '半導體業'}]
+        body = json.dumps(rows).encode()
+        for mode in ('late', 'backoff', 'http503', 'source-timeout'):
+            with self.subTest(mode=mode):
+                clock, second_attempts, calls = [100.0], [0], []
+
+                class Response:
+                    def __init__(self, status=200):
+                        self.status, self.body, self.length = status, body, len(body)
+
+                    def getheaders(self):
+                        return [('Content-Type', 'application/json')]
+
+                    def read1(self, size):
+                        part, self.body = self.body[:size], self.body[size:]
+                        self.length -= len(part)
+                        return part
+
+                    def read(self):
+                        return self.read1(len(self.body))
+
+                class Connection:
+                    sock = None
+
+                    def request(self, method, path, **kwargs):
+                        self.path = path
+
+                    def getresponse(self):
+                        if mode == 'source-timeout':
+                            raise TimeoutError('來源自身逾時')
+                        if 't187ap05_L' in self.path:
+                            clock[0] = 108.45 if mode == 'late' else 108.25
+                        elif second_attempts[0] == 0:
+                            second_attempts[0] += 1
+                            if mode == 'late':
+                                clock[0] = 108.51
+                            elif mode == 'backoff':
+                                raise ConnectionResetError('可重試的來源重設')
+                            elif mode == 'http503':
+                                return Response(503)
+                        return Response()
+
+                pool = mock.Mock()
+                pool._lock, pool._idle = threading.Lock(), []
+                pool.acquire.side_effect = lambda timeout: Connection()
+                client = hc.HttpClient()
+
+                def request(method, url, **kwargs):
+                    calls.append((url, kwargs.get('deadline')))
+                    return client.request(method, url, **kwargs)
+
+                def sleep(seconds):
+                    clock[0] += seconds
+
+                with mock.patch.object(ST, '_TW_SECTORS', {'date': None, 'map': {}}), \
+                        mock.patch.object(ST, '_openapi_ds', {}), mock.patch.object(ST, '_openapi_meta', {}), \
+                        mock.patch.object(ST, '_openapi_locks', {}), mock.patch.object(ST, '_fundamental_trace') as trace, \
+                        mock.patch.object(ST, 'time', types.SimpleNamespace(monotonic=lambda: clock[0], strftime=lambda *a: 'fixture')), \
+                        mock.patch.object(hc.time, 'monotonic', side_effect=lambda: clock[0]), \
+                        mock.patch.object(hc.time, 'sleep', side_effect=sleep), \
+                        mock.patch.object(client, '_pool', return_value=pool), \
+                        mock.patch.object(hc, 'request', side_effect=request), \
+                        mock.patch('socket.create_connection', side_effect=AssertionError('離線案例不得連外')), \
+                        mock.patch('urllib.request.urlopen', side_effect=AssertionError('分類不得繞過共用來源')):
+                    if mode == 'source-timeout':
+                        self.assertEqual(ST._openapi_lookup_list(second), [])
+                        self.assertEqual(ST._openapi_lookup_list(second), [])
+                        self.assertEqual(len(calls), 1)
+                        self.assertGreater(ST._openapi_meta[second]['retryAt'], clock[0])
+                    elif mode == 'http503':
+                        with self.assertRaises(RuntimeError):
+                            ST._get_tw_sectors(deadline=108.5)
+                        self.assertEqual(ST._openapi_lookup_list(second), [])
+                        self.assertEqual(len(calls), 2)
+                        self.assertTrue(any(call.kwargs.get('httpStatus') == 503 for call in trace.call_args_list))
+                        self.assertGreater(ST._openapi_meta[second]['retryAt'], clock[0])
+                    else:
+                        with self.assertRaises(TimeoutError) as caught:
+                            ST._get_tw_sectors(deadline=108.5)
+                        self.assertEqual(caught.exception.partial_sectors, {'2330': '半導體業'})
+                        self.assertNotIn(second, ST._openapi_meta)
+                        self.assertEqual(ST._openapi_lookup_list(second), rows)
+                        self.assertEqual(len(calls), 3)
+                        self.assertIsNone(calls[-1][1])
+
+    def test_simulation_cleanup_retains_every_child_patch_until_workers_stop(self):
+        from tests.test_decision_http import DecisionHttpTest, dc, ox, st_server
+        from tests.test_情境投組HTTP import SimulationHttpTest
+        import shutil
+
+        original_db, original_history = ds.DB_PATH, ox.HISTORY_PATH
+        original_fetch, original_socket = ds.fetch_yahoo_daily, socket.create_connection
+        observed = []
+
+        def isolated_base(fixture):
+            fixture._cleanup_attempted = False
+            fixture.temp_root = Path(tempfile.gettempdir()).resolve()
+            fixture.tmp = types.SimpleNamespace(name=tempfile.mkdtemp(prefix='simulation-cleanup-proof-'))
+            fixture.httpd = fixture.thread = None
+            fixture.old_options_history = ox.HISTORY_PATH
+            ox.HISTORY_PATH = str(Path(fixture.tmp.name) / 'options-history.json')
+            fixture.patches = []
+            fixture.queue, fixture.pulse_updates = mock.Mock(), mock.Mock()
+            fixture.queue.stop.return_value = False
+            fixture.pulse_updates.stop.return_value = True
+            fixture.addCleanup(fixture.cleanup_isolation)
+            observed.append(fixture)
+
+        class Fixture(SimulationHttpTest):
+            def runTest(self):
+                pass
+
+        result = unittest.TestResult()
+        with mock.patch.object(DecisionHttpTest, 'setUp', isolated_base):
+            Fixture('runTest').run(result)
+        fixture = observed[0]
+        try:
+            self.assertEqual(len(result.failures), 1, result.errors)
+            self.assertFalse(result.errors)
+            self.assertTrue(result.shouldStop)
+            fixture.queue.stop.assert_called_once_with()
+            fixture.pulse_updates.stop.assert_called_once_with()
+            self.assertEqual(ds.DB_PATH, str(fixture.market_path))
+            self.assertEqual(st_server._TW_NAMES['map']['2330'], '測試公司')
+            self.assertIsNot(ds.fetch_yahoo_daily, original_fetch)
+            self.assertIsNot(socket.create_connection, original_socket)
+            self.assertEqual(len(fixture.patches), 8)
+            self.assertTrue(Path(fixture.tmp.name).is_dir())
+        finally:
+            # 此案例沒有真實背景工作者；明確釋放所有仍保留的隔離設定。
+            fixture.doCleanups()
+            for item in reversed(fixture.patches):
+                item.stop()
+            ox.HISTORY_PATH = original_history
+            target = Path(fixture.tmp.name).resolve()
+            self.assertTrue(target.is_relative_to(fixture.temp_root))
+            shutil.rmtree(target)
+        self.assertEqual(ds.DB_PATH, original_db)
+        self.assertIs(ds.fetch_yahoo_daily, original_fetch)
+        self.assertIs(socket.create_connection, original_socket)
+
+    def test_decision_cleanup_stops_both_workers_and_retains_isolation_on_failure(self):
+        from tests.test_decision_http import DecisionHttpTest, dc, ox
+        import shutil
+
+        for queue_result, pulse_result, queue_raises in ((False, True, False),
+                                                       (True, False, False),
+                                                       (False, True, True)):
+            with self.subTest(queue=queue_result, pulse=pulse_result, raises=queue_raises):
+                observed = []
+                original_db_path, original_history = dc._active_db_path, ox.HISTORY_PATH
+
+                class Fixture(DecisionHttpTest):
+                    def setUp(self):
+                        self._cleanup_attempted = False
+                        self.temp_root = Path(tempfile.gettempdir()).resolve()
+                        self.tmp = types.SimpleNamespace(name=tempfile.mkdtemp(prefix='decision-cleanup-proof-'))
+                        self.httpd = self.thread = None
+                        self.old_options_history = ox.HISTORY_PATH
+                        ox.HISTORY_PATH = str(Path(self.tmp.name) / 'options-history.json')
+                        isolation = mock.patch.object(dc, '_active_db_path', str(Path(self.tmp.name) / 'decision.db'))
+                        isolation.start()
+                        self.patches = [isolation]
+                        self.queue, self.pulse_updates = mock.Mock(), mock.Mock()
+                        self.queue.stop.return_value = queue_result
+                        self.pulse_updates.stop.return_value = pulse_result
+                        if queue_raises:
+                            self.queue.stop.side_effect = OSError('合成停止錯誤')
+                        self.addCleanup(self.cleanup_isolation)
+                        observed.append(self)
+                    def runTest(self):
+                        pass
+
+                marker = mock.Mock()
+                result = unittest.TestResult()
+                unittest.TestSuite([Fixture('runTest'), unittest.FunctionTestCase(lambda: marker())]).run(result)
+                fixture = observed[0]
+                try:
+                    self.assertEqual(len(result.failures), 1, result.errors)
+                    self.assertFalse(result.errors)
+                    self.assertTrue(result.shouldStop)
+                    marker.assert_not_called()
+                    fixture.queue.stop.assert_called_once_with()
+                    fixture.pulse_updates.stop.assert_called_once_with()
+                    self.assertTrue(Path(fixture.tmp.name).is_dir())
+                    self.assertEqual(dc._active_db_path, str(Path(fixture.tmp.name) / 'decision.db'))
+                    self.assertEqual(ox.HISTORY_PATH, str(Path(fixture.tmp.name) / 'options-history.json'))
+                finally:
+                    # 此合成案例沒有真工作者；由測試本身明確釋放保留的替身與目錄。
+                    for item in reversed(fixture.patches):
+                        item.stop()
+                    ox.HISTORY_PATH = original_history
+                    target = Path(fixture.tmp.name).resolve()
+                    self.assertTrue(target.is_relative_to(fixture.temp_root))
+                    shutil.rmtree(target)
+                self.assertEqual(dc._active_db_path, original_db_path)
+
+    def test_decision_cleanup_success_restores_globals_and_removes_isolated_folder(self):
+        from tests.test_decision_http import DecisionHttpTest, dc, ox
+        observed = []
+        original_db_path, original_history = dc._active_db_path, ox.HISTORY_PATH
+
+        class Fixture(DecisionHttpTest):
+            def setUp(self):
+                self._cleanup_attempted = False
+                self.temp_root = Path(tempfile.gettempdir()).resolve()
+                self.tmp = types.SimpleNamespace(name=tempfile.mkdtemp(prefix='decision-cleanup-success-'))
+                self.httpd = self.thread = None
+                self.old_options_history = ox.HISTORY_PATH
+                ox.HISTORY_PATH = str(Path(self.tmp.name) / 'options-history.json')
+                isolation = mock.patch.object(dc, '_active_db_path', str(Path(self.tmp.name) / 'decision.db'))
+                isolation.start()
+                self.patches = [isolation]
+                self.queue, self.pulse_updates = mock.Mock(), mock.Mock()
+                self.queue.stop.return_value = self.pulse_updates.stop.return_value = True
+                self.addCleanup(self.cleanup_isolation)
+                observed.append(self)
+            def runTest(self):
+                pass
+
+        marker = mock.Mock()
+        result = unittest.TestResult()
+        unittest.TestSuite([Fixture('runTest'), unittest.FunctionTestCase(lambda: marker())]).run(result)
+        fixture = observed[0]
+        self.assertFalse(result.failures, result.failures)
+        self.assertFalse(result.errors, result.errors)
+        self.assertFalse(result.shouldStop)
+        marker.assert_called_once_with()
+        fixture.queue.stop.assert_called_once_with()
+        fixture.pulse_updates.stop.assert_called_once_with()
+        self.assertFalse(Path(fixture.tmp.name).exists())
+        self.assertEqual(dc._active_db_path, original_db_path)
+        self.assertEqual(ox.HISTORY_PATH, original_history)
+
+
+    def test_decision_teardown_attempts_both_worker_stops(self):
+        from tests.test_decision_http import DecisionHttpTest, ox
+        fixture = DecisionHttpTest('runTest')
+        fixture._cleanup_attempted = False
+        fixture.test_result = unittest.TestResult()
+        fixture.httpd, fixture.thread = mock.Mock(), mock.Mock()
+        fixture.thread.is_alive.return_value = False
+        fixture.queue, fixture.pulse_updates = mock.Mock(), mock.Mock()
+        fixture.queue.stop.return_value = False
+        fixture.pulse_updates.stop.return_value = True
+        fixture.patches = []
+        fixture.tmp = None
+        fixture.old_options_history = ox.HISTORY_PATH
+        with self.assertRaises(AssertionError):
+            fixture.tearDown()
+        fixture.queue.stop.assert_called_once_with()
+        fixture.pulse_updates.stop.assert_called_once_with()
+        self.assertTrue(fixture.test_result.shouldStop)
+
+    def test_legacy_daily_update_http_rejections_and_empty_symbols(self):
+        """真實 HTTP：舊版六項會回 200，修正後須回 503/409/400。"""
+        import http.client
+        from http.server import ThreadingHTTPServer
+        import daily_cache_jobs as jobs
+        from tests.test_server_http_security import ST
+        server = ThreadingHTTPServer(('127.0.0.1', 0), ST.Handler)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            rows = [('queue_full', 503), ('queue_error', 503), ('busy', 409)]
+            for reason, expected in rows:
+                with self.subTest(reason=reason), mock.patch.object(jobs, 'submit',
+                        return_value={'ok': False, 'reason': reason, 'error': '固定拒收案例'}) as submit:
+                    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+                    try:
+                        body = {'id': 'db', 'symbols': [{'symbol': '2330', 'market': 'TW'}]}
+                        connection.request('POST', '/datasource/refresh', json.dumps(body), {'Content-Type': 'application/json'})
+                        response = connection.getresponse()
+                        data = json.loads(response.read())
+                        self.assertEqual(response.status, expected)
+                        self.assertEqual(data['error'], '固定拒收案例')
+                        submit.assert_called_once_with({'symbols': body['symbols'], 'range': '1mo', 'kind': 'history'})
+                    finally:
+                        connection.close()
+            for symbols in (None, [], False):
+                with self.subTest(symbols=symbols), mock.patch.object(jobs, 'submit',
+                        side_effect=AssertionError('無標的不得進入提交')) as submit:
+                    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+                    try:
+                        connection.request('POST', '/datasource/refresh', json.dumps({'id': 'db', 'symbols': symbols}),
+                                           {'Content-Type': 'application/json'})
+                        response = connection.getresponse()
+                        data = json.loads(response.read())
+                        self.assertEqual(response.status, 400)
+                        self.assertTrue(data['error'])
+                        submit.assert_not_called()
+                    finally:
+                        connection.close()
+            with mock.patch.object(jobs, 'submit', return_value={'ok': True, 'status': 'queued'}) as submit:
+                connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+                try:
+                    connection.request('POST', '/datasource/refresh', json.dumps(
+                        {'id': 'db', 'symbols': [{'symbol': '2330', 'market': 'TW'}]}), {'Content-Type': 'application/json'})
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 200)
+                    self.assertTrue(json.loads(response.read())['ok'])
+                    submit.assert_called_once()
+                finally:
+                    connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(2)
+        self.assertFalse(worker.is_alive())
+
+    def test_unknown_source_calendar_is_not_reported_as_closed(self):
+        """不新增來源狀態；未知日曆走既有 ValueError 邊界且不抓資料。"""
+        import 個股每日資料 as sources
+        fixed = datetime(2027, 1, 4, 18, tzinfo=ZoneInfo('Asia/Taipei'))
+        class CalendarClock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed.astimezone(tz or ZoneInfo('Asia/Taipei'))
+        with mock.patch.object(sources, 'datetime', CalendarClock), \
+                mock.patch.object(sources.http_client, 'fetch_json', side_effect=AssertionError('未知年度不得抓取')) as fetch, \
+                mock.patch.object(sources.datastore, 'list_symbols', side_effect=AssertionError('未知年度不得讀行情')):
+            with self.assertRaisesRegex(ValueError, '日曆'):
+                sources.run()
+            fetch.assert_not_called()
+
+    def test_stored_calendar_expiry_future_and_source_validation(self):
+        """真實 SQLite 僅用 tempfile；這些是舊碼應已通過的缺漏案例。"""
+        import datastore as ds
+        import 台股日線 as daily
+        for year, current, fresh_closed in (
+                (2026, datetime(2026, 10, 8, 20, tzinfo=ZoneInfo('Asia/Taipei')), {date(2026, 1, 1), date(2026, 10, 8)}),
+                (2027, datetime(2027, 1, 4, 20, tzinfo=ZoneInfo('Asia/Taipei')), {date(2027, 1, 1)})):
+            with self.subTest(year=year), tempfile.TemporaryDirectory() as tmp:
+                database = Path(tmp) / 'calendar-fixture.db'
+                ds.init_db(database)
+                daily.save_calendar(database, year, fresh_closed, set())
+                for age, expected in (
+                        (timedelta(days=1), current.date() - timedelta(days=1) if year == 2026 else current.date()),
+                        (timedelta(days=7), current.date() - timedelta(days=1) if year == 2026 else current.date()),
+                        (timedelta(days=8), current.date() if year == 2026 else current.date() - timedelta(days=1)),
+                        (-timedelta(seconds=1), current.date() if year == 2026 else current.date() - timedelta(days=1))):
+                    with self.subTest(age=age), closing(sqlite3.connect(database)) as connection, connection:
+                        connection.execute('UPDATE calendar_years SET refreshed_at=? WHERE year=?',
+                                           ((current - age).isoformat(), year))
+                    self.assertEqual(ds.completed_daily_cutoff('TW', now=current, path=database), expected)
+                    with ds.read_snapshot(database) as connection:
+                        observed = connection.execute('SELECT refreshed_at FROM calendar_years WHERE year=?', (year,)).fetchone()[0]
+                    self.assertEqual(observed, (current - age).isoformat())
+                # 開市日才會查 source；以 2027 已存新鮮年度驗證合法來源與未知來源。
+                if year == 2027:
+                    with closing(sqlite3.connect(database)) as connection, connection:
+                        connection.execute('UPDATE calendar_years SET refreshed_at=? WHERE year=?', (current.isoformat(), year))
+                    for source in ('TWSE開休市', 'TWSE實際成交日', 'fixture-unverified-source'):
+                        with self.subTest(source=source), closing(sqlite3.connect(database)) as connection, connection:
+                            connection.execute('UPDATE market_sessions SET source=? WHERE session_date=?', (source, current.date().isoformat()))
+                        if source.startswith('fixture-'):
+                            with self.assertRaisesRegex(ValueError, '來源未核對'):
+                                ds.completed_daily_cutoff('TW', now=current, path=database)
+                        else:
+                            self.assertEqual(ds.completed_daily_cutoff('TW', now=current, path=database), current.date())
+
+    def test_unknown_calendar_metadata_and_warning_remain_visible(self):
+        """沿既有 metadata 驗證未知；沒有新增 calendar metadata API。"""
+        import datastore as ds
+        import stock_signals_routes as routes
+        now = datetime(2031, 1, 6, 20, tzinfo=ZoneInfo('Asia/Taipei'))
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(ds, 'DB_PATH', str(Path(tmp) / 'market.db')):
+            ds.init_db()
+            with mock.patch.object(routes, '_fetch_remote', side_effect=AssertionError('唯讀不得抓取')):
+                loaded = routes.load_bars('2330', 'TW', allow_network=False, now=now)
+                analyzed = routes.analyze_symbol('2330', 'TW', with_stats=False, allow_network=False,
+                    use_cache=False, bars_loader=lambda *args, **kwargs: loaded, chip_dir=tmp, now=now)
+            self.assertEqual(loaded['session']['calendar']['status'], 'unknown')
+            self.assertIsNone(loaded['session']['calendar']['source'])
+            self.assertIsNone(loaded['session']['expectedLastDate'])
+            self.assertIn('尚無', loaded['session']['calendar']['reason'])
+            self.assertIn('日曆', analyzed['dataWarning'])
+            self.assertEqual(analyzed['session']['calendar']['status'], 'unknown')
+
+    def test_storage_failure_uses_short_cache_preserves_reason_and_retries(self):
+        """分層驗證儲存、讀回與修訂中繼資料故障，原原因及短快取皆保留。"""
+        import datastore as ds
+        import stock_signals_routes as routes
+        now = datetime(2026, 10, 8, 18, 30, tzinfo=ZoneInfo('Asia/Taipei'))
+        old = (int(now.replace(day=7, hour=9, minute=0).timestamp()), 100, 102, 99, 101, 1000)
+        fresh = (int(now.replace(hour=9, minute=0).timestamp()), 110, 112, 109, 111, 2000)
+        for phase in ('upsert', 'read-after-write', 'revision-status'):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as tmp, \
+                    mock.patch.object(ds, 'DB_PATH', str(Path(tmp) / 'market.db')), \
+                    mock.patch.object(routes, '_cache', {}), mock.patch.object(routes, '_remote_fail', {}), \
+                    mock.patch.object(routes, '_remote_fail_errors', {}), \
+                    mock.patch.object(routes, '_revision_status_unknown', {}):
+                ds.init_db()
+                with closing(ds.get_conn()) as connection, connection:
+                    connection.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', ('2330', 'TW', *old))
+                clock = [1000.0]
+                failure = [True]
+                after_write = [False]
+                original_get = ds.get_bars
+                original_upsert = ds.upsert_bars
+                original_revision = ds.source_revision_status
+                original_cutoff = ds.completed_daily_cutoff
+                def get_bars(*args, **kwargs):
+                    if failure[0] and phase == 'read-after-write' and after_write[0]:
+                        after_write[0] = False
+                        raise sqlite3.OperationalError('固定讀回失敗')
+                    return original_get(*args, **kwargs)
+                def upsert(*args, **kwargs):
+                    if failure[0]:
+                        if phase == 'upsert':
+                            raise ValueError('固定日曆寫入失敗')
+                        after_write[0] = True
+                    return original_upsert(*args, **kwargs)
+                def revision(*args, **kwargs):
+                    if failure[0] and phase == 'revision-status':
+                        raise OSError('固定收據讀取失敗')
+                    return original_revision(*args, **kwargs)
+                with mock.patch.object(routes, 'time', types.SimpleNamespace(time=lambda: clock[0])), \
+                        mock.patch.object(ds, 'completed_daily_cutoff', side_effect=lambda market, **kwargs:
+                            original_cutoff(market, **{**kwargs, 'now': now})), \
+                        mock.patch.object(ds, 'get_bars', side_effect=get_bars), \
+                        mock.patch.object(ds, 'upsert_bars', side_effect=upsert), \
+                        mock.patch.object(ds, 'source_revision_status', side_effect=revision), \
+                        mock.patch.object(routes, '_fetch_remote', return_value=[fresh]) as fetch:
+                    loaded = routes.load_bars('2330', 'TW', now=now)
+                    self.assertTrue(loaded['retrySoon'])
+                    persisted_readback = phase == 'revision-status'
+                    self.assertEqual(loaded['source'], 'local-db+yahoo' if persisted_readback else 'local-db')
+                    self.assertEqual(loaded['bars'][-1]['date'], '2026-10-08' if persisted_readback else '2026-10-07')
+                    self.assertEqual(loaded['sourceRevisionStatusUnknown'], persisted_readback)
+                    self.assertIn('固定', loaded['error'])
+                    repeated = routes.load_bars('2330', 'TW', now=now)
+                    self.assertEqual(fetch.call_count, 1)
+                    self.assertTrue(repeated['retrySoon'])
+                    self.assertIn(loaded['error'], repeated['error'])
+                    analyzed = routes.analyze_symbol('2330', 'TW', with_stats=False, use_cache=True,
+                        bars_loader=lambda *args, **kwargs: loaded, chip_dir=tmp, now=now)
+                    self.assertEqual(analyzed['dataWarning'], loaded['error'])
+                    ttl = routes._cache[('2330', 'TW', False)][0] - clock[0]
+                    self.assertGreater(ttl, 0)
+                    self.assertLessEqual(ttl, 60)
+                    clock[0] += 61
+                    failure[0] = False
+                    recovered = routes.load_bars('2330', 'TW', now=now)
+                    self.assertEqual(fetch.call_count, 2)
+                    self.assertFalse(recovered['retrySoon'])
+                    self.assertEqual(recovered['source'], 'local-db+yahoo')
+                    self.assertEqual(recovered['bars'][-1]['date'], '2026-10-08')
+
+
+    def test_movers_and_member_cache_retry_partial_after_thirty_seconds(self):
+        from tests.test_decision_http import st_server as ST
+        import lru_cache
+        import 類股成員 as members
+        for partial in (True, False):
+            for route, method in (('/movers', '_handle_movers'),
+                                  ('/sector-members?sector=半導體業', '_handle_sector_members')):
+                with self.subTest(partial=partial, route=route):
+                    now = [0]
+                    snapshot = {'ok': True, 'partial': partial, 'twseAvailable': True,
+                                'classificationCount': 1, 'sourceErrors': {'tpex': '中斷'} if partial else {}}
+                    handler = ST.Handler.__new__(ST.Handler)
+                    handler.path = route
+                    handler._ok = mock.Mock()
+                    with mock.patch.object(lru_cache, 'time', types.SimpleNamespace(time=lambda: now[0])), \
+                            mock.patch.object(ST, '_cache', ST.LRUCache(10)), \
+                            mock.patch.object(ST, '_fetch_day_movers', return_value=snapshot) as fetch, \
+                            mock.patch.object(members, 'build_tw_members', return_value={'ok': True}):
+                        getattr(handler, method)()
+                        now[0] = 29
+                        getattr(handler, method)()
+                        self.assertEqual(fetch.call_count, 1)
+                        now[0] = 31
+                        getattr(handler, method)()
+                        self.assertEqual(fetch.call_count, 2 if partial else 1)
+                        if not partial:
+                            now[0] = 301
+                            getattr(handler, method)()
+                            self.assertEqual(fetch.call_count, 2)
+
+    def test_backoff_exhaustion_preserves_cause_status_and_terminal_stats(self):
+        import http.client
+        for original in (ConnectionResetError('首試中斷'), http.client.IncompleteRead(b'x', 2), None):
+            with self.subTest(error=type(original).__name__):
+                conn, pool = self.framed_response(b'{}', [('Content-Length', '2')], status=503)
+                if original is not None:
+                    conn.request.side_effect = original
+                client = hc.HttpClient()
+                with mock.patch.object(client, '_pool', return_value=pool), \
+                        mock.patch.object(hc, 'time', types.SimpleNamespace(
+                            monotonic=lambda: 100, sleep=mock.Mock(), time=time.time)) as clock:
+                    with self.assertRaises(hc.HttpError) as caught:
+                        client.request('GET', 'http://offline.test/', retries=1, deadline=100.4)
+                self.assertIsInstance(caught.exception.cause, TimeoutError)
+                self.assertIn('整體期限', str(caught.exception.cause))
+                if original is None:
+                    self.assertEqual(caught.exception.status, 503)
+                    self.assertEqual(caught.exception.cause.__cause__.status, 503)
+                else:
+                    self.assertIs(caught.exception.cause.__cause__, original)
+                self.assertEqual(client.stats()['errors'], 1)
+                self.assertEqual(client.stats()['retries'], 0)
+                self.assertEqual(pool.acquire.call_count, 1)
+                clock.sleep.assert_not_called()
+
+    def test_backoff_oversleep_preserves_original_error_without_counting_another_attempt(self):
+        for original in (ConnectionResetError('首試中斷'), None):
+            with self.subTest(error=type(original).__name__):
+                conn, pool = self.framed_response(b'{}', [('Content-Length', '2')], status=503)
+                if original is not None:
+                    conn.request.side_effect = original
+                client, now = hc.HttpClient(), [100.0]
+
+                def oversleep(delay):
+                    self.assertEqual(delay, .5)
+                    now[0] += .7
+
+                with mock.patch.object(client, '_pool', return_value=pool), \
+                        mock.patch.object(hc, 'time', types.SimpleNamespace(
+                            monotonic=lambda: now[0], sleep=oversleep, time=time.time)):
+                    with self.assertRaises(hc.HttpError) as caught:
+                        client.request('GET', 'http://offline.test/', retries=1, deadline=100.6)
+                self.assertIsInstance(caught.exception.cause, TimeoutError)
+                if original is None:
+                    self.assertEqual(caught.exception.status, 503)
+                    self.assertEqual(caught.exception.cause.__cause__.status, 503)
+                else:
+                    self.assertIs(caught.exception.cause.__cause__, original)
+                self.assertEqual(client.stats()['errors'], 1)
+                self.assertEqual(client.stats()['retries'], 0)
+                self.assertEqual(pool.acquire.call_count, 1)
+                self.assertEqual(conn.request.call_count, 1)
+
     def test_response_size_limit_bounds_plain_and_decompressed_gzip(self):
         for compressed in (False, True):
             for deadline in (None, time.monotonic() + 5):
@@ -537,7 +1074,8 @@ class ReviewRegressions(unittest.TestCase):
     def test_db_refresh_requires_explicit_scope_and_uses_existing_job(self):
         with mock.patch.object(datasources, '_spawn', side_effect=AssertionError('不得啟動缺參數 CLI')), \
                 mock.patch.object(jobs, 'submit', return_value={'ok': True, 'status': 'queued'}) as submit:
-            self.assertFalse(datasources.refresh('db')['ok'])
+            with self.assertRaises(ValueError):
+                datasources.refresh('db')
             symbols = [{'symbol': '2330', 'market': 'TW'}]
             self.assertEqual(datasources.refresh('db', symbols=symbols)['status'], 'queued')
             submit.assert_called_once_with({'symbols': symbols, 'range': '1mo', 'kind': 'history'})
@@ -895,6 +1433,62 @@ class ReviewRegressions(unittest.TestCase):
                     end = conn.execute('SELECT end_date FROM bar_fetch_coverage WHERE symbol=? AND market=?',
                                        (symbol, market)).fetchone()[0]
                 self.assertEqual(end, now.date().isoformat())
+
+    def test_pulse_http_stop_failure_retains_isolation_and_still_stops_queue(self):
+        from tests.test_Pulse讀寫分離 import PulseReadWriteTest, dc
+        import shutil
+
+        original_db = dc.DB_PATH
+        for shutdown_error in (None, OSError('隔離 HTTP 停止失敗')):
+            with self.subTest(shutdown_error=shutdown_error is not None):
+                observed = []
+
+                class Fixture(PulseReadWriteTest):
+                    def setUp(self):
+                        self._cleanup_attempted = False
+                        self.temp_root = Path(tempfile.gettempdir()).resolve()
+                        self.temp = types.SimpleNamespace(name=tempfile.mkdtemp(prefix='pulse-http-stop-proof-'))
+                        self.release = threading.Event()
+                        self.http, self.thread, self.queue = mock.Mock(), mock.Mock(), mock.Mock()
+                        self.thread.is_alive.return_value = True  # 有界替身，不建立真的掛住執行緒。
+                        self.http.shutdown.side_effect = shutdown_error
+                        self.queue.stop.return_value = True
+                        isolated_db = str(Path(self.temp.name) / 'decision.db')
+                        replacement = mock.patch.object(dc, 'DB_PATH', isolated_db)
+                        replacement.start()
+                        self.patches = [replacement]
+                        self.addCleanup(self.cleanup_isolation)
+                        observed.append(self)
+
+                    def runTest(self):
+                        pass
+
+                marker = mock.Mock()
+                result = unittest.TestResult()
+                unittest.TestSuite([Fixture('runTest'), unittest.FunctionTestCase(lambda: marker())]).run(result)
+                fixture = observed[0]
+                try:
+                    self.assertEqual(len(result.failures), 1, result.errors)
+                    self.assertFalse(result.errors)
+                    self.assertTrue(result.shouldStop)
+                    marker.assert_not_called()
+                    self.assertTrue(Path(fixture.temp.name).exists())
+                    self.assertEqual(dc.DB_PATH, str(Path(fixture.temp.name) / 'decision.db'))
+                    fixture.queue.stop.assert_called_once_with(timeout=3)
+                    fixture.http.shutdown.assert_called_once_with()
+                    if shutdown_error is None:
+                        fixture.thread.join.assert_called_once_with(2)
+                        fixture.http.server_close.assert_called_once_with()
+                    else:
+                        fixture.thread.join.assert_not_called()
+                finally:
+                    for replacement in reversed(fixture.patches):
+                        replacement.stop()
+                    target = Path(fixture.temp.name).resolve()
+                    self.assertTrue(target.is_relative_to(fixture.temp_root) and target != fixture.temp_root)
+                    if target.exists():
+                        shutil.rmtree(target)
+                self.assertEqual(dc.DB_PATH, original_db)
 
     def test_failed_worker_stop_retains_isolation_and_stops_the_test_batch(self):
         from tests.test_Pulse讀寫分離 import PulseReadWriteTest

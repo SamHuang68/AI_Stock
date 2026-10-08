@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -18,10 +19,23 @@ def _crlf(text: str) -> bytes:
 
 STUBS = {
     'powershell': r'''@echo off
+if /i "%~1"=="-NoLogo" (
+  if /i not "%~2"=="-NoProfile" goto :unexpected
+  if /i not "%~3"=="-NonInteractive" goto :unexpected
+  if /i not "%~4"=="-Command" goto :unexpected
+  if /i not "%~5"=="Start-Sleep -Seconds 3" goto :unexpected
+  >>"%ST_TEST_FIXTURE%\calls.log" echo powershell-sleep
+  exit /b 0
+)
+if /i not "%~1"=="-NoProfile" goto :unexpected
+if /i not "%~2"=="-Command" goto :unexpected
 >>"%ST_TEST_FIXTURE%\calls.log" echo powershell-query
 if exist "%ST_TEST_FIXTURE%\query-fails.flag" exit /b 2
 if exist "%ST_TEST_FIXTURE%\task-running.flag" exit /b 0
 exit /b 1
+:unexpected
+>>"%ST_TEST_FIXTURE%\calls.log" echo unexpected-powershell
+exit /b 99
 ''',
     'curl': r'''@echo off
 >>"%ST_TEST_FIXTURE%\calls.log" echo curl %*
@@ -56,7 +70,7 @@ if /i "%~1"=="/query" (
 )
 if /i "%~1"=="/run" (
   if exist "%ST_TEST_FIXTURE%\run-fails.flag" exit /b 1
-  if exist "%ST_TEST_FIXTURE%\recover-on-run.flag" (
+  if exist "%ST_TEST_FIXTURE%\recover-on-run.flag" if not exist "%ST_TEST_FIXTURE%\gateway-live.flag" (
     >"%ST_TEST_FIXTURE%\gateway-live.flag" echo 1
     >"%ST_TEST_FIXTURE%\upstream-ready.flag" echo 1
   )
@@ -65,10 +79,6 @@ if /i "%~1"=="/run" (
 )
 >>"%ST_TEST_FIXTURE%\calls.log" echo unexpected-schtasks
 exit /b 99
-''',
-    'timeout': r'''@echo off
->>"%ST_TEST_FIXTURE%\calls.log" echo timeout
-exit /b 0
 ''',
     'start': r'''@echo off
 >>"%ST_TEST_FIXTURE%\calls.log" echo start
@@ -83,13 +93,16 @@ def _instrument_external_command_tokens(raw: bytes) -> tuple[bytes, dict[str, in
     text = raw.decode('ascii')
     counts = {}
     for name in STUBS:
-        pattern = r'(?im)^([ \t]*)' + re.escape(name) + r'(?:\.exe)?(?=[ \t])'
+        token = re.escape(name) + r'(?:\.exe)?'
+        if name == 'powershell':
+            token = r'(?:' + token + r'|"%SystemRoot%\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe")'
+        pattern = r'(?im)^([ \t]*)' + token + r'(?=[ \t])'
         replacement = r'\1call "%ST_TEST_FIXTURE%\\' + name + r'-stub.cmd"'
         text, counts[name] = re.subn(pattern, replacement, text)
-    expected = {'powershell': 1, 'curl': 3, 'schtasks': 1, 'timeout': 2, 'start': 1}
+    expected = {'powershell': 3, 'curl': 2, 'schtasks': 1, 'start': 1}
     if counts != expected:
         raise AssertionError(f'外部命令清單已變動，需先核對隔離完整性：{counts!r}')
-    unsafe = r'(?im)^[ \t]*(?:powershell(?:\.exe)?|curl(?:\.exe)?|schtasks(?:\.exe)?|timeout(?:\.exe)?|start)(?=[ \t])'
+    unsafe = r'(?im)^[ \t]*(?:powershell(?:\.exe)?|"[^"\r\n]*[\\/]powershell\.exe"|curl(?:\.exe)?|schtasks(?:\.exe)?|timeout(?:\.exe)?|start)(?=[ \t])'
     if re.search(unsafe, text):
         raise AssertionError('副本仍有未隔離的外部動作')
     return _crlf(text), counts
@@ -169,13 +182,22 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
                 self.assertEqual(result['localStartCount'], 0 if local else 1)
                 self.assertEqual(result['hostRunCount'], 0 if upstream else 1)
 
-    def test_gateway_alive_dead_backend_runs_host_and_recovers(self):
-        code, output, result = self.run_case('後端停止後恢復', gateway=True,
+    def test_stopped_gateway_and_backend_run_host_and_recover(self):
+        code, output, result = self.run_case('兩邊停止後恢復', gateway=False,
                                            upstream=False, running=False, recover=True)
         self.assertEqual(code, 0, output)
         self.assertEqual(result['taskQueryCount'], 1)
         self.assertEqual(result['hostRunCount'], 1)
         self.assertTrue(result['upstreamReadyAfterRun'])
+
+    def test_orphan_gateway_task_ready_cannot_be_adopted_by_host(self):
+        code, output, result = self.run_case('孤兒 gateway 保持未就緒', gateway=True,
+                                           upstream=False, running=False, recover=True)
+        self.assertEqual(code, 2, output)
+        self.assertEqual(result['taskQueryCount'], 1)
+        self.assertEqual(result['hostRunCount'], 1)
+        self.assertFalse(result['upstreamReadyAfterRun'])
+        self.assertIn('Web   : DOWN', output)
 
     def test_running_task_is_not_restarted(self):
         code, output, result = self.run_case('工作執行中不重啟', upstream=False,
@@ -217,7 +239,8 @@ class ScheduledTaskQueryOfflineTests(unittest.TestCase):
         raw = (SOURCE_ROOT / 'START_LOCAL_AND_WEB.cmd').read_bytes()
         source = raw.decode('ascii')
         pattern = r'(?im)^[ \t]*(?:powershell(?:\.exe)?|"[^"\r\n]*[\\/]powershell\.exe")[ \t]+[^\r\n]*?-Command[ \t]+"(?P<command>[^"\r\n]+)"'
-        matches = list(re.finditer(pattern, source))
+        matches = [match for match in re.finditer(pattern, source)
+                   if 'Get-ScheduledTask' in match.group('command')]
         if len(matches) != 1:
             raise AssertionError('必須恰有一個可核對的 PowerShell 排程查詢邊界')
         cls.command = matches[0].group('command')
@@ -246,6 +269,33 @@ class ScheduledTaskQueryOfflineTests(unittest.TestCase):
             with self.subTest(engine=name):
                 code, output = self.query(engine, 'throw', '合成查詢失敗')
                 self.assertEqual(code, 2, output)
+
+
+
+@unittest.skipUnless(os.name == 'nt', '驗證 Windows 原生等待在 stdin 導向時仍有效')
+class LauncherNativeWaitTests(unittest.TestCase):
+    def test_source_wait_command_ignores_redirected_stdin(self):
+        raw = (SOURCE_ROOT / 'START_LOCAL_AND_WEB.cmd').read_bytes()
+        source = raw.decode('ascii')
+        # 只執行兩個輪詢分支的等待命令，不執行啟動器。舊命令保留在允許清單以驗證失敗。
+        commands = re.findall(r'(?im)^(?P<command>[^\r\n]+)\r?\n[ \t]*goto :(?:wait_local|wait)[ \t]*\r?$', source)
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0], commands[1])
+        expected = r'"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 3" >nul'
+        self.assertIn(commands[0], (expected, 'timeout /t 3 /nobreak >nul'))
+        with tempfile.TemporaryDirectory(prefix='st-wait-command-') as temp:
+            script = Path(temp) / 'wait-only.cmd'
+            script.write_bytes(_crlf('@echo off\n' + commands[0] + '\nexit /b %errorlevel%\n'))
+            cmd = Path(os.environ['SystemRoot']) / 'System32/cmd.exe'
+            command_line = f'"{cmd}" /d /s /c ""{script}""'
+            started = time.monotonic()
+            done = subprocess.run(command_line, cwd=temp, stdin=subprocess.DEVNULL,
+                                  capture_output=True, timeout=15,
+                                  creationflags=subprocess.CREATE_NO_WINDOW)
+            elapsed = time.monotonic() - started
+        output = (done.stdout + done.stderr).decode('utf-8', 'replace')
+        self.assertEqual(done.returncode, 0, output)
+        self.assertGreaterEqual(elapsed, 2.8, (elapsed, output))
 
 if __name__ == '__main__':
     unittest.main()

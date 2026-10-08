@@ -30,6 +30,7 @@ from typing import Any, Callable, Iterable
 from zoneinfo import ZoneInfo
 
 from http_client import fetch_json
+from 台股交易參考 import previous_session, session
 
 
 CONTRACT_VERSION = 2
@@ -638,7 +639,12 @@ def build_options_structure(
     age_days = None
     if trade_date:
         age_days = max(0, (now.astimezone(TW_TZ).date() - date.fromisoformat(trade_date)).days)
-    stale = bool((age_days is not None and age_days > 4) or hybrid)
+    today = now.astimezone(TW_TZ).date()
+    expected = previous_session(today)
+    # 官方鏈在次日發布；同日或未知日曆的資料不能冒充已完成日。
+    date_ready = bool(expected and trade_date and expected <= trade_date < today.isoformat()
+                      and session(trade_date)['status'] == 'scheduled')
+    stale = bool(not date_ready or hybrid)
     if stale:
         warnings.append('STALE_OR_HYBRID_REFERENCE')
     status = ('insufficient' if not raw_contracts or not selected_expiry else

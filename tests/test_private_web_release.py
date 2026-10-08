@@ -43,12 +43,32 @@ def _fake_release(root: Path, release_id: str) -> Path:
     }
     _write(
         target / ".private_web_release.json",
-        json.dumps(manifest),
+        json.dumps(manifest, ensure_ascii=False),
     )
     return target
 
 
 class PrivateWebReleaseTests(unittest.TestCase):
+    def test_manifest_readers_survive_cp950_default(self):
+        original = Path.read_text
+
+        def read_with_cp950(path, *args, **kwargs):
+            if path.name == release.MANIFEST_NAME and not args and kwargs.get('encoding') is None:
+                kwargs = dict(kwargs, encoding='cp950')
+            return original(path, *args, **kwargs)
+
+        # 執行真正的兩個清單讀取情境；只模擬清單的非 UTF-8 預設，不修改系統 locale。
+        suite = unittest.TestSuite(PrivateWebReleaseTests(name) for name in (
+            'test_promote_replaces_code_but_preserves_runtime_data_and_logs',
+            'test_unverified_release_is_not_promoted',
+        ))
+        result = unittest.TestResult()
+        with patch.object(Path, 'read_text', new=read_with_cp950):
+            suite.run(result)
+        self.assertEqual(result.testsRun, 2)
+        self.assertFalse(result.errors, result.errors)
+        self.assertFalse(result.failures, result.failures)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.install_root = Path(self.temp.name) / "private" / "install"

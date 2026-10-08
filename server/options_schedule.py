@@ -11,14 +11,14 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import datastore
 import options_exposure
 import stock_signals as ss
 from atomic_store import atomic_write_json, load_json
-from 台股交易參考 import session
+from 台股交易參考 import previous_session as calendar_previous_session, session
 
 SLOTS = (7 * 60, 7 * 60 + 30, 8 * 60, 8 * 60 + 30)
 OPEN_HOUR = 9
@@ -35,21 +35,18 @@ def enabled():
     return config.get('enabled') is True
 
 
-def _chain_date():
-    observed = (options_exposure.latest_cached() or {}).get('observed') or {}
-    return observed.get('tradeDate')
+def _chain_complete(expected):
+    value = options_exposure.latest_cached() or {}
+    quality = value.get('quality') or {}
+    return bool(value.get('ok') and value.get('status') == 'ready'
+                and not quality.get('isHybridTimestamp')
+                and 'SOURCE_REFRESH_FAILED' not in quality.get('warnings', [])
+                and ((value.get('observed') or {}).get('tradeDate') or '') >= expected)
 
 
 def previous_session(day):
     """前一個表定交易日（ISO 字串）；日曆未涵蓋時回傳 None，不以平日推定。"""
-    cursor = date.fromisoformat(day)
-    while True:
-        cursor -= timedelta(days=1)
-        status = session(cursor)['status']
-        if status == 'unknown':
-            return None
-        if status == 'scheduled':
-            return cursor.isoformat()
+    return calendar_previous_session(day, session_lookup=session)
 
 
 def tick(current, submit):
@@ -60,7 +57,7 @@ def tick(current, submit):
     minutes = current.hour * 60 + current.minute
     slots = [value for value in SLOTS if value <= minutes]
     expected = previous_session(day)
-    if not slots or expected is None or (_chain_date() or '') >= expected:
+    if not slots or expected is None or _chain_complete(expected):
         return False
     key = day + '/' + str(slots[-1])
     filename = _data_dir() / 'options_daily_attempts.json'
