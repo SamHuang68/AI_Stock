@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -22,8 +24,9 @@ import build_dist  # noqa: E402
 class TestDistScrub(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.temp_dir = tempfile.TemporaryDirectory()
-        cls.zip_path = Path(cls.temp_dir.name) / "Stock_Terminal_v5.0.zip"
+        cls.temp_dir = Path(tempfile.mkdtemp(prefix='st-dist-tests-'))
+        cls.pending_share_processes = []
+        cls.zip_path = cls.temp_dir / "Stock_Terminal_v5.0.zip"
         build_dist.build(cls.zip_path)
         cls.checksum_path, cls.manifest_path = build_dist.sidecar_paths(cls.zip_path)
         with zipfile.ZipFile(cls.zip_path, "r") as archive:
@@ -31,13 +34,19 @@ class TestDistScrub(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.temp_dir.cleanup()
+        if cls.pending_share_processes:
+            # 未確認終態的子程序可能仍使用分享包；保留它與輸出，不猜測子樹已停止。
+            return
+        resolved = cls.temp_dir.resolve()
+        if resolved.parent != Path(tempfile.gettempdir()).resolve() or not resolved.name.startswith('st-dist-tests-'):
+            raise AssertionError('拒絕清理未知的發布測試目錄')
+        shutil.rmtree(resolved)
 
     def test_archive_passes_same_post_compression_scanner(self):
         self.assertEqual(build_dist.verify_archive(self.zip_path), [])
 
     def test_review_regressions_run_from_the_actual_single_machine_share(self):
-        target = Path(self.temp_dir.name) / 'share-regression-fixture'
+        target = self.temp_dir / 'share-regression-fixture'
         target.mkdir()
         with zipfile.ZipFile(self.zip_path) as archive:
             for item in archive.infolist():
@@ -54,15 +63,53 @@ class TestDistScrub(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('單機分享包不包含 Private Web gateway', result.stderr)
         self.assertIn('OK (skipped=1)', result.stderr)
-        launcher = subprocess.run([sys.executable, '-B', '-X', 'utf8', '-m', 'unittest',
-                                   'tests.test_launcher_cmd.LauncherCmdOfflineBehaviorTests',
-                                   'tests.test_launcher_cmd.ScheduledTaskQueryOfflineTests', '-v'], cwd=share,
-                                  env=dict(os.environ, PYTHONUTF8='1'), capture_output=True,
-                                  text=True, encoding='utf-8', timeout=90)
-        self.assertEqual(launcher.returncode, 0, launcher.stdout + launcher.stderr)
-        self.assertIn('OK', launcher.stderr)
-        if os.name == 'nt':
-            self.assertNotIn('skipped=', launcher.stderr, 'Windows 分享包必須真的執行兩個啟動器類別')
+        discovery = """
+import json, unittest
+def cases(suite):
+    for item in suite:
+        if isinstance(item, unittest.TestSuite):
+            yield from cases(item)
+        else:
+            yield item.id()
+print(json.dumps(list(cases(unittest.defaultTestLoader.loadTestsFromName('tests.test_launcher_cmd')))))
+"""
+        listing = subprocess.run([sys.executable, '-B', '-X', 'utf8', '-c', discovery], cwd=share,
+                                 env=dict(os.environ, PYTHONUTF8='1'), capture_output=True,
+                                 text=True, encoding='utf-8', timeout=15)
+        self.assertEqual(listing.returncode, 0, listing.stdout + listing.stderr)
+        ids = json.loads(listing.stdout)
+        self.assertTrue(ids)
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertTrue(all(name.startswith('tests.test_launcher_cmd.') for name in ids), ids)
+        self.assertTrue(any('.LauncherJsonHealthOfflineTests.' in name for name in ids))
+        self.assertTrue(any('.LauncherNativeWaitTests.' in name for name in ids))
+        records = []
+        # 複合情境已拆開；每個具名案例保留原外層90秒，內層CMD30／PS15不變。
+        for number, name in enumerate(ids):
+            argv = [sys.executable, '-B', '-u', '-X', 'utf8', '-m', 'unittest', name, '-v']
+            started = time.monotonic()
+            stdout_path = target / f'launcher-case-{number}-stdout.log'
+            stderr_path = target / f'launcher-case-{number}-stderr.log'
+            # Windows 的 PIPE reader 可能等到 EOF 才交回部分輸出；從啟動起直接留檔。
+            with stdout_path.open('wb') as out, stderr_path.open('wb') as err:
+                process = subprocess.Popen(argv, cwd=share, env=dict(os.environ, PYTHONUTF8='1'),
+                                           stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+                                           creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+                try:
+                    process.wait(timeout=90)
+                except subprocess.TimeoutExpired:
+                    type(self).pending_share_processes.append(process)
+                    self.fail(f'分享包案例 {name} 超時；保留自有程序 handle、PID {process.pid}、fixture {target} 與已寫日誌，未終止子樹。')
+            stdout = stdout_path.read_text(encoding='utf-8')
+            stderr = stderr_path.read_text(encoding='utf-8')
+            records.append({'id': name, 'seconds': time.monotonic() - started,
+                            'exitCode': process.returncode, 'outerSeconds': 90})
+            (target / 'launcher-case-results.json').write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding='utf-8')
+            self.assertEqual(process.returncode, 0, name + '\n' + stdout + stderr)
+            self.assertIn('OK', stderr)
+            if os.name == 'nt':
+                self.assertNotIn('skipped=', stderr, 'Windows 分享包必須真的執行每個啟動器案例：' + name)
+        self.assertEqual({record['id'] for record in records}, set(ids))
 
     def test_has_core_share_files(self):
         required = {

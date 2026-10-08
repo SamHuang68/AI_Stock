@@ -231,15 +231,24 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
         self.assertNotIn(b'\n', self.raw.replace(b'\r\n', b''))
         self.assertNotIn(b'\r', self.raw.replace(b'\r\n', b''))
 
-    def test_all_four_health_exit_codes(self):
-        for local, upstream, expected in ((True, True, 0), (False, True, 1),
-                                          (True, False, 2), (False, False, 3)):
-            with self.subTest(local=local, upstream=upstream):
-                code, output, result = self.run_case(
-                    f'local-{local}-upstream-{upstream}', local=local, upstream=upstream)
-                self.assertEqual(code, expected, output)
-                self.assertEqual(result['localStartCount'], 0 if local else 1)
-                self.assertEqual(result['hostRunCount'], 0 if upstream else 1)
+    def assert_health_exit_code(self, local, upstream, expected):
+        code, output, result = self.run_case(
+            f'local-{local}-upstream-{upstream}', local=local, upstream=upstream)
+        self.assertEqual(code, expected, output)
+        self.assertEqual(result['localStartCount'], 0 if local else 1)
+        self.assertEqual(result['hostRunCount'], 0 if upstream else 1)
+
+    def test_both_up_exit_zero(self):
+        self.assert_health_exit_code(True, True, 0)
+
+    def test_local_down_exit_one(self):
+        self.assert_health_exit_code(False, True, 1)
+
+    def test_web_down_exit_two(self):
+        self.assert_health_exit_code(True, False, 2)
+
+    def test_both_down_exit_three(self):
+        self.assert_health_exit_code(False, False, 3)
 
     def test_large_valid_health_does_not_restart_running_local_or_web(self):
         # 長行溢出後 findstr 會遺失前段已找到的欄位；合法 JSON 的鍵順序不影響健康契約。
@@ -388,13 +397,23 @@ class ScheduledTaskQueryOfflineTests(unittest.TestCase):
                               capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
         return done.returncode, (done.stdout + done.stderr).decode('utf-8', 'replace')
 
-    def test_numeric_state_ignores_localized_display(self):
+    def assert_numeric_state_display(self, state, expected, display):
         for name, engine in self.engines.items():
-            for state, expected, displays in ((4, 0, ('Running', '執行中')), (3, 1, ('Ready', '就緒'))):
-                for display in displays:
-                    with self.subTest(engine=name, state=state, display=display):
-                        code, output = self.query(engine, state, display)
-                        self.assertEqual(code, expected, output)
+            with self.subTest(engine=name, state=state, display=display):
+                code, output = self.query(engine, state, display)
+                self.assertEqual(code, expected, output)
+
+    def test_numeric_running_state_with_english_display(self):
+        self.assert_numeric_state_display(4, 0, 'Running')
+
+    def test_numeric_running_state_with_traditional_display(self):
+        self.assert_numeric_state_display(4, 0, '執行中')
+
+    def test_numeric_ready_state_with_english_display(self):
+        self.assert_numeric_state_display(3, 1, 'Ready')
+
+    def test_numeric_ready_state_with_traditional_display(self):
+        self.assert_numeric_state_display(3, 1, '就緒')
 
     def test_query_failure_is_not_reported_as_running(self):
         for name, engine in self.engines.items():
