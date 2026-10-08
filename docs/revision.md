@@ -5,6 +5,31 @@
 
 ---
 
+## v5.0 修訂 — 2026-10-08 PR #168 Windows 啟動器隔離驗收與程序來源補強（本機候選，未推送、未發布）
+
+- 基底：PR #168 遠端 HEAD `9556cd0b4ba1465adc3ec24064f318844ee3ea41`。本機分支 `codex/pr168-launcher-acceptance`，工作樹 `C:\Users\Sam\AI-Workspace\worktrees\stock-terminal\pr168-launcher-acceptance`。實作完整 SHA 與檔案雜湊由同版本驗收單 `C:\Users\Sam\AI-Workspace\docs\stock-terminal\pr168-launcher-acceptance\acceptance.md` 記錄；不要求本次提交預先包含自己的 SHA。
+- 版本策略維持 `VERSION=5.0`，以精確 Git 修訂識別本次啟動器修正。PR 仍為草稿、尚未合併，與 main 有衝突；此次不處理其他功能的合併衝突，不推送、不合併、不部署或發布。
+
+原因與修正：
+
+1. 原收據只認「埠上唯一監聽程序」，沒有證明它由本次啟動建立。實際執行原函式可替外部 PID 寫收據。現在核對本次啟動的程序物件、監聽器啟動時間、釘選 Python 與父鏈；父程序必須早於子程序，拒絕可能已被重用的父 PID。Windows venv 的轉接器沿同一父鏈查證，沒有另建啟動來源。健康檢查沿用 `/health` 的 `baseDir`、`pythonExe`、`port`，並在 HTML 驗證成功後才寫收據。
+2. 原伺服器支援 `ST_PORT`，啟動器卻固定檢查 18432。在隔離複本實際重現原版追蹤錯埠並遭拒絕；受管占用者未被終止。現在沿用既有 `ST_PORT`、驗證 1–65535，Python、guard、HTTP、收據與 URL 使用同一埠。
+3. ASCII 命令檔原本嵌入 Unicode 路徑，Python pin 也以 ASCII 寫入。CMD 保留 ASCII，路徑由子程序繼承環境取得；pin 改為 UTF-8 讀寫。真實含中文與空白的工作樹、Python venv 路徑及清除 override 後的 pin 重用都已驗收。
+4. 終止時保留已核對的 Process 物件與 handle，使用 `Stop-Process -InputObject`，避免核對後重新依 PID 解析；核對後程序自行退出時安全返回。監聽器列舉也保留 PID 4 等未知系統占用者，不能因無法讀取身分就視為空埠。
+
+驗證與防再發：
+
+- Windows PowerShell `5.1.26100.9549` 的實際行為、真實 socket 往返，以及 PowerShell 7 對照均通過。`tests/test_launcher_safety.py` 22 項與 `tests/test_bundle_fresh.py` 1 項，共 23 項通過。
+- `tests/test_launcher_startup_windows.py` 的 4 項隔離驗收通過：兩種 PowerShell 的真實建置／啟動／HTTP／收據／重啟／清理；未知 socket 保留；guard 後相同 root 的外部伺服器搶埠、不得被採納且再次啟動仍保留；Windows PowerShell 5.1 下 Unicode／空白路徑的真實 Python 3.14 venv 與 pin 重用。一般真實啟動使用受管安裝目前釘選的 Python 3.14，沒有修改受管安裝。
+- 原版錯誤採納與 Unicode pin 先重現失敗，再修正。父晚於子的 PID 重用情境以最小 CIM fixture 重現；核對後自行退出以真實程序與時序 hook 驗證，沒有宣稱作業系統實際重用 PID。
+- 只使用獨立程式複本、空白 data、隔離 AppData、動態 loopback 埠。測試只隱藏視窗並記錄瀏覽器開啟要求，核心建置、程序、HTTP、收據均真實執行；未驗收瀏覽器畫面、行情供應商、通知或受管發布。第一輪測試收集器因 CMD 繼承 pipe 而等待，已改為直接寫檔，該輪不列入通過結果。
+- 同供應商隔離唯讀覆核提出的程序來源、Unicode pin、程序 handle 與父鏈時間一致性項目均已補正並加入對應驗證。未執行完整 Python 套件或全倉庫掃描。
+- 開始時正式開發來源為 `projects\stock-terminal`；本輪工作期間另一聊天將它從 `f62678cd1035563dc9666391dfa0699d95bfe4ea` 快轉至 `3bdd02da77bf0bd9fc62665387236e9bf5ea1164`。這不是本次 PR #168 候選的部署。最後唯讀比對時，本機／正式安裝 manifest 仍為 `764883fb166d14a2fa534eff74142534bd53ad76`，18432／18434／18435 原監聽 PID 56368／8564／43824 均保留。正式來源原有六個 dirty 資料檔 SHA-256 與本輪基線一致；SQLite 執行期資料未納入版本控管。
+
+交付範圍只有 `AGENTS.md`、`docs/revision.md`、`scripts/go.ps1`、`tests/test_launcher_safety.py`、`tests/test_launcher_startup_windows.py`。證據保留於上述 Git 外的驗收目錄。狀態：本機候選，提交後由驗收單記錄完整 SHA；`push=false`、`merge=false`、`deploy=false`、`publish=false`。使用者可見資訊未減少；保留即時伺服器主控台的既有行為。
+
+---
+
 ## v5.0 修訂 — 2026-10-07 開發啟動器只結束自己的程序（候選，未發布）
 
 產品版本仍為根目錄 `VERSION` 的 **5.0**。補記：PR #167 已於 2026-10-07 由 Sam 說「合併」後合併（squash），合併修訂 `3a7deaf103ba233a365c820870fdd136d828448b`；下一段「候選（本 PR）」是當時快照，不覆寫。**發布狀態**：#164、#165、#166、#167 與本段都未發布，正式站與受管理本機的 runtimeCommit 仍為 `e0b11475f40a980289553d18029b916be3d1e457`（2026-10-07 確認）；待發布目標仍是 `fd6efb77e08e7aae718d0ed085cbd013e66779a5`（#166）。

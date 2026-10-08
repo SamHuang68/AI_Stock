@@ -57,6 +57,13 @@ if (Test-Path $TipFile) {
   $TipBranch = (Get-Content $TipFile -Raw).Trim()
 }
 $Port = 18432
+if ($env:ST_PORT) {
+  if (-not [int]::TryParse($env:ST_PORT, [ref]$Port) -or $Port -lt 1 -or $Port -gt 65535) {
+    throw 'ST-PORT-CONFIG: ST_PORT 必須是 1 到 65535 的整數；尚未建置或啟動。'
+  }
+}
+# 沿用伺服器既有的 ST_PORT 契約，所有檢查、收據與子程序使用同一個埠。
+$env:ST_PORT = [string]$Port
 $DevReceipt = Join-Path $Root 'logs\dev_server.receipt.json'
 $Url = "http://localhost:${Port}/#pulse"
 
@@ -86,14 +93,14 @@ function Save-StockPythonPin([string]$ExePath) {
   $pinDir = Join-Path $Root 'data'
   if (-not (Test-Path $pinDir)) { New-Item -ItemType Directory -Path $pinDir | Out-Null }
   $pin = Join-Path $pinDir 'stock_python.path'
-  Set-Content -LiteralPath $pin -Value $ExePath -Encoding ASCII
+  Set-Content -LiteralPath $pin -Value $ExePath -Encoding UTF8
   Write-Host "[python] pinned -> $pin"
 }
 
 function Read-StockPythonPin {
   $pin = Join-Path $Root 'data\stock_python.path'
   if (-not (Test-Path -LiteralPath $pin)) { return $null }
-  $p = (Get-Content -LiteralPath $pin -Raw).Trim()
+  $p = (Get-Content -LiteralPath $pin -Raw -Encoding UTF8).Trim()
   if ($p -and (Test-Path -LiteralPath $p)) { return $p }
   return $null
 }
@@ -236,7 +243,7 @@ function Get-PortListenerPids([int]$PortNum) {
     if ($procId -match '^\d+$') { [void]$pids.Add([int]$procId) }
   }
 
-  return @($pids | Where-Object { $_ -gt 4 })
+  return @($pids | Where-Object { $_ -gt 0 })
 }
 
 # 程序身分：啟動時間（UTC ticks）。PID 會被作業系統重複使用，所以收據要連啟動時間一起核對。
@@ -249,13 +256,53 @@ function Get-ProcessCommandLine([int]$ProcId) {
 }
 
 # 開發伺服器啟動後登記它的身分（PID、啟動時間、資料夾）。之後只有收據登記的程序可以被這個腳本終止。
-function Write-DevServerReceipt([int]$PortNum, [string]$ReceiptPath, [string]$OwnerRoot) {
+function Write-DevServerReceipt([int]$PortNum, [string]$ReceiptPath, [string]$OwnerRoot,
+    [System.Diagnostics.Process]$StartedProcess, [string]$PythonPath) {
   $listeners = @(Get-PortListenerPids $PortNum)
   $ticks = $null
   if ($listeners.Count -eq 1) { $ticks = Get-ProcessStartTicks $listeners[0] }
-  if ($null -eq $ticks) {
-    Write-Host "[warn] 無法確認 :$PortNum 上唯一的開發伺服器程序，未寫入收據；下次啟動若該埠仍被占用會拒絕，不會自動終止。"
-    return
+  $startedHere = $false
+  if ($StartedProcess -and $null -ne $ticks) {
+    $StartedProcess.Refresh()
+    if (-not $StartedProcess.HasExited) {
+      $startTicks = $StartedProcess.StartTime.ToUniversalTime().Ticks
+      if ($listeners[0] -eq $StartedProcess.Id) {
+        $startedHere = ($ticks -eq $startTicks)
+      } else {
+        # CMD → Python，或 CMD → Windows venv 轉接器 → Python。
+        # 只沿此監聽者的父程序查證，必須經過釘選的 Python 並回到本次 CMD。
+        $ancestorId = [int]$listeners[0]
+        $samePython = $false
+        $childStartTicks = $null
+        $serverPath = Join-Path $OwnerRoot 'server\server.py'
+        for ($depth = 0; $depth -lt 4; $depth++) {
+          try {
+            $child = Get-CimInstance Win32_Process -Filter "ProcessId=$ancestorId" -ErrorAction Stop
+          } catch {
+            throw "ST-RECEIPT-GUARD: 無法查證監聽程序的來源，未寫入收據：$($_.Exception.Message)"
+          }
+          if (-not $child -or $child.CreationDate.ToUniversalTime().Ticks -lt $startTicks) { break }
+          $creationTicks = $child.CreationDate.ToUniversalTime().Ticks
+          # CIM 時間精度為微秒，Process.StartTime 為 100ns；最多容許末位 9 ticks。
+          if ($depth -eq 0 -and [Math]::Abs($creationTicks - $ticks) -gt 9) { break }
+          # 父程序必須早於子程序；否則 ParentProcessId 已指到被重用的新 PID。
+          if ($null -ne $childStartTicks -and $creationTicks -gt $childStartTicks) { break }
+          if ($depth -eq 0 -and $child.CommandLine -notmatch [regex]::Escape($serverPath)) { break }
+          if ([string]::Equals($child.ExecutablePath, $PythonPath, [StringComparison]::OrdinalIgnoreCase)) {
+            $samePython = $true
+          }
+          if ($child.ParentProcessId -eq $StartedProcess.Id) {
+            $startedHere = $samePython
+            break
+          }
+          $ancestorId = [int]$child.ParentProcessId
+          $childStartTicks = $creationTicks
+        }
+      }
+    }
+  }
+  if (-not $startedHere) {
+    throw "ST-RECEIPT-GUARD: 無法證明 :$PortNum 的唯一監聽程序由本次啟動建立；未寫入收據，未終止任何程序。"
   }
   $dir = Split-Path -Parent $ReceiptPath
   if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
@@ -271,17 +318,23 @@ function Stop-OwnedPortListeners([int]$PortNum, [string]$ReceiptPath, [string]$O
   if ($listeners.Count -eq 0) { return }
 
   $owned = 0
+  $ownedProcess = $null
   if (Test-Path -LiteralPath $ReceiptPath) {
     try {
       $r = Get-Content -LiteralPath $ReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
       $sameRoot = [string]::Equals(
         [IO.Path]::GetFullPath([string]$r.root).TrimEnd('\', '/'),
         [IO.Path]::GetFullPath($OwnerRoot).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)
-      $nowTicks = Get-ProcessStartTicks ([int]$r.pid)
+      # 保留程序物件與 Windows handle，避免核對後又依 PID 解析出被重用的新程序。
+      $ownedProcess = Get-Process -Id ([int]$r.pid) -ErrorAction Stop
+      $null = $ownedProcess.Handle
+      $nowTicks = $ownedProcess.StartTime.ToUniversalTime().Ticks
       if ($sameRoot -and ([int]$r.port -eq $PortNum) -and ($null -ne $nowTicks) -and ($nowTicks -eq [int64]$r.startTicksUtc)) {
         $owned = [int]$r.pid
       }
-    } catch {}
+    } catch {
+      Write-Host "[warn] 開發收據無法核對，將拒絕未知占用者：$($_.Exception.Message)"
+    }
   }
 
   $foreign = @($listeners | Where-Object { $_ -ne $owned })
@@ -294,7 +347,8 @@ function Stop-OwnedPortListeners([int]$PortNum, [string]$ReceiptPath, [string]$O
   }
 
   Write-Host "[stop] 結束此資料夾自己啟動的開發伺服器 PID $owned（埠 $PortNum）"
-  Stop-Process -Id $owned -Force -ErrorAction Stop
+  if ($ownedProcess.HasExited) { return }
+  Stop-Process -InputObject $ownedProcess -Force -ErrorAction Stop
   Start-Sleep -Seconds 1
 }
 
@@ -330,14 +384,22 @@ function Wait-TipServer {
     try {
       $h = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -UseBasicParsing -TimeoutSec 2
       $j = $h.Content | ConvertFrom-Json
-      if ($j.tipUx -eq $true -or $j.ux -eq 'tip') {
-        Write-Host "[ok] /health tipUx=true (try $i) version=$($j.version)"
-        return
-      }
-      Write-Host "[warn] /health up but tipUx missing (try $i) — wrong server?"
     } catch {
+      Write-Host "[wait] /health 尚未就緒（第 $i 次）：$($_.Exception.Message)"
       Start-Sleep -Milliseconds 500
+      continue
     }
+    if ($j.tipUx -eq $true -or $j.ux -eq 'tip') {
+      if ($j.port -ne $Port -or -not $j.baseDir -or -not $j.pythonExe -or
+          -not [string]::Equals([IO.Path]::GetFullPath([string]$j.baseDir).TrimEnd('\'),
+            [IO.Path]::GetFullPath($Root).TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase) -or
+          -not [string]::Equals([string]$j.pythonExe, $Python, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "ST-HEALTH-GUARD: /health 的埠、工作樹或 Python 與本次啟動不符；未寫入收據。"
+      }
+      Write-Host "[ok] /health tipUx=true (try $i) version=$($j.version) root=$($j.baseDir) port=$Port"
+      return
+    }
+    Write-Host "[warn] /health up but tipUx missing (try $i) — wrong server?"
   }
   throw "Server on :$Port is not tip UX. Check the 'Stock Terminal Server' console window for traceback."
 }
@@ -372,7 +434,7 @@ function Assert-IndexIsTip {
 }
 
 function Assert-ListenerMatchesPin {
-  Write-Host '[check] :18432 listener uses pinned Stock Python (warn only if tooling)'
+  Write-Host "[check] :$Port listener uses pinned Stock Python (warn only if tooling)"
   try {
     $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     foreach ($c in $conns) {
@@ -497,21 +559,25 @@ Write-Host "        cwd=$Root"
 Write-Host "        logs: $logOut / $logErr"
 
 $launcher = Join-Path $logDir 'run_server_tip.cmd'
+# CMD 檔維持 ASCII；Unicode 路徑由子程序繼承環境取得，避免轉成問號。
+$env:ST_LAUNCH_ROOT = $Root
+$env:ST_LAUNCH_PYTHON = $Python
 @(
   '@echo off'
+  'setlocal DisableDelayedExpansion'
   'chcp 65001 >nul'
   'title Stock Terminal Server v5 tip'
-  "cd /d `"$Root`""
+  'cd /d "%ST_LAUNCH_ROOT%"'
   'set ST_LAUNCHED_BY=go.ps1'
   "echo ============================================"
   "echo  Stock Terminal Server v5 tip"
   "echo  HEAD=$head"
-  "echo  PYTHON=$Python"
-  "echo  cwd=$Root"
+  'echo  PYTHON="%ST_LAUNCH_PYTHON%"'
+  'echo  cwd="%ST_LAUNCH_ROOT%"'
   "echo  url=$Url"
   "echo ============================================"
   "echo."
-  "`"$Python`" -u server\server.py"
+  '"%ST_LAUNCH_PYTHON%" -u "%ST_LAUNCH_ROOT%\server\server.py"'
   'echo.'
   'echo SERVER EXITED — window stays open so you can read the error.'
   'pause'
@@ -526,8 +592,8 @@ Write-Host "       window title MUST be: Stock Terminal Server v5 tip"
 Write-Host "       launcher script: $launcher"
 
 Wait-TipServer
-Write-DevServerReceipt -PortNum $Port -ReceiptPath $DevReceipt -OwnerRoot $Root
 Assert-IndexIsTip
+Write-DevServerReceipt -PortNum $Port -ReceiptPath $DevReceipt -OwnerRoot $Root -StartedProcess $p -PythonPath $Python
 Assert-ListenerMatchesPin
 
 Write-Host "[open] $Url"
