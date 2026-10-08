@@ -15,6 +15,8 @@ WaveDeck 仍沿用 `run.py`、釘選 Python 與原有埠 fallback；將無條件
 
 本條建立時為未提交的本機候選；來源工作樹與定向日誌在 `AI-Workspace/worktrees/stock-terminal/launcher-all-20261009`、`AI-Workspace/docs/stock-terminal/launcher-all-20261009`。沒有 commit、push、部署；既有正式與本機 runtime 版本維持各自現況，所有舊修訂歷史保留。
 
+Sam 隨後授權 commit、push、deploy；初始啟動器候選已提交為 `ce4021e831dccf95a17c915ad43b30a9355ecd94`。發布前沿用 Private Web 原有排除 WaveDeck 的契約，同步排除呼叫 WaveDeck 的 `START_ALL.cmd`，避免受管發布產物留下依賴缺失的入口；主專案與單機分享包保留完整整合入口。負向回歸證明原排除清單會留下該入口；補正後只重驗兩個發布邊界案例，實際發布及最終 SHA 以本輪同版本收據追溯。完整 stage 仍按既有發布門檻執行，不放寬測試或資料保存保護。
+
 ---
 
 ## v5.0 修訂 — 2026-10-08 分享包啟動器驗證的個別期限與日誌
