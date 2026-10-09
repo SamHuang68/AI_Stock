@@ -12,7 +12,7 @@ jobs:
   test:
     env:
       PYTHONUTF8: '1'
-      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/../playwright-browsers
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}-playwright-browsers
     strategy:
       fail-fast: false
       matrix:
