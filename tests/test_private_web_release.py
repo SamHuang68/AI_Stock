@@ -191,6 +191,51 @@ class PrivateWebReleaseTests(unittest.TestCase):
         self.assertEqual(argv[-1], "a" * 40)
         self.assertIn(str(archive_path), argv)
 
+    def test_exact_stage_archive_preserves_all_launcher_crlf_bytes(self):
+        filenames = ('START_ALL.cmd', 'START_LOCAL_AND_WEB.cmd', 'START_WAVEDECK.cmd',
+                     'wavedeck/START_WAVEDECK.cmd')
+        with tempfile.TemporaryDirectory(prefix='st-launcher-archive-') as temporary:
+            base = Path(temporary)
+            repository = base / 'fixture'
+            repository.mkdir()
+            hooks = base / 'empty-hooks'
+            hooks.mkdir()
+            (repository / '.gitattributes').write_bytes((ROOT / '.gitattributes').read_bytes())
+            expected = {}
+            for filename in filenames:
+                # fixture 的初始 CMD 模擬 Windows checkout；只正規化複本，不改受審來源。
+                raw = (ROOT / filename).read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+                raw.decode('ascii')
+                expected[filename] = raw
+                target = repository / filename
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(raw)
+
+            def run(command):
+                result = subprocess.run(command, cwd=repository, capture_output=True,
+                    text=True, encoding='utf-8', timeout=15,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                return result.stdout.strip()
+
+            run(['git', '-c', 'init.defaultBranch=fixture', '-c', 'init.templateDir=', 'init'])
+            run(['git', '-c', 'core.autocrlf=true', 'add', '--', '.gitattributes', *filenames])
+            run(['git', '-c', 'user.name=Launcher Fixture',
+                 '-c', 'user.email=launcher-fixture@example.invalid',
+                 '-c', 'commit.gpgsign=false', '-c', f'core.hooksPath={hooks}',
+                 'commit', '-m', '驗證啟動器封存位元組'])
+            commit = run(['git', 'rev-parse', 'HEAD'])
+            archive_path = base / 'exact-stage.zip'
+            run(release._git_archive_argv(archive_path, commit))
+            with zipfile.ZipFile(archive_path) as archive:
+                for filename in filenames:
+                    with self.subTest(filename=filename):
+                        actual = archive.read(filename)
+                        actual.decode('ascii')
+                        self.assertIn(b'\r\n', actual)
+                        self.assertNotIn(b'\n', actual.replace(b'\r\n', b''))
+                        self.assertEqual(actual, expected[filename])
+
     def test_promote_replaces_code_but_preserves_runtime_data_and_logs(self):
         _fake_release(self.install_root, "abc123")
         current = self.install_root / "current"

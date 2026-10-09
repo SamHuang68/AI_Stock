@@ -4,6 +4,8 @@ assets/docs/archify/*.html text eol=lf
 # 含 UTF-8 文字的 Windows CMD 必須連 git archive 都保留 CRLF，避免 cmd 解析截斷。
 STOP_PRIVATE_WEB.cmd -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 START_LOCAL_AND_WEB.cmd -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+START_ALL.cmd -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+START_WAVEDECK.cmd -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 wavedeck/START_WAVEDECK.cmd -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 # 第三方研究來源以原始位元組核對 SHA-256，保留上游換行及授權檔。
 research/策略驗證/第三方/blave/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
