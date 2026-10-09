@@ -496,10 +496,10 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
             if not node:
                 raise RuntimeError("發布回歸測試需要 Node.js")
             commands = [
+                # discovery 已包含 test_dist_scrub.py；完整測試只執行一次。
                 [python, "-m", "unittest", "discover", "-s", "tests", "-b"],
                 [python, "-W", "error::ResourceWarning", "-m", "unittest",
                  "wavedeck.tests.test_smoke", "-b"],
-                [python, "-m", "unittest", "tests.test_dist_scrub", "-b"],
             ]
             for command in commands:
                 _run(command, cwd=extracted)

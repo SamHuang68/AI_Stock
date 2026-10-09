@@ -332,9 +332,9 @@ class PrivateWebReleaseTests(unittest.TestCase):
                 patch.object(release, '_run', run), patch.object(release.shutil, 'which', return_value='node'):
             staged = release.stage_release(self.install_root, ref=commit)
         self.assertEqual([argv[1] for argv in calls if argv[0] == 'node'], sorted(selftests))
-        self.assertTrue(any(argv[1:] == ['-m', 'unittest', 'discover', '-s', 'tests', '-b'] for argv in calls))
+        self.assertEqual(sum(argv[1:] == ['-m', 'unittest', 'discover', '-s', 'tests', '-b'] for argv in calls), 1)
         self.assertTrue(any('wavedeck.tests.test_smoke' in argv for argv in calls))
-        self.assertTrue(any('tests.test_dist_scrub' in argv for argv in calls))
+        self.assertFalse(any('tests.test_dist_scrub' in argv for argv in calls))
         self.assertEqual(sum('build_v2.py' in argv for argv in calls), 3)
         for relative in extras:
             self.assertFalse((staged / relative).exists())
@@ -342,6 +342,22 @@ class PrivateWebReleaseTests(unittest.TestCase):
         self.assertFalse(any(path.name == '__pycache__' or path.suffix.lower() in {'.pyc', '.pyo'}
                              for path in staged.rglob('*')))
         release._validate_integrity(staged, release._read_manifest(staged / release.MANIFEST_NAME))
+
+    def test_standard_discovery_includes_dist_scrub_without_running_it_twice(self):
+        # 只收集這個模組，確認正式 discovery 會涵蓋它；不執行分享包建置。
+        suite = unittest.TestLoader().discover(str(ROOT / 'tests'), pattern='test_dist_scrub.py')
+
+        def cases(group):
+            for item in group:
+                if isinstance(item, unittest.TestSuite):
+                    yield from cases(item)
+                else:
+                    yield item
+
+        ids = [case.id() for case in cases(suite)]
+        self.assertTrue(ids)
+        self.assertTrue(all('.TestDistScrub.test_' in name for name in ids), ids)
+        self.assertEqual(len(ids), len(set(ids)))
 
     def test_release_requires_archify_manifest_documents_and_validator(self):
         expected = {

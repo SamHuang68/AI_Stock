@@ -1,5 +1,15 @@
 # Revision History（內部文件 — 不對外分享）
 
+## v5.0 修訂 — 2026-10-09 發布驗證去重與 Chromium 快取
+
+依發布耗時 8D 改善 CI 與 stage 的重疊工作：分支 push 不再與 PR 重複觸發完整 CI，保留 PR 及 main push 的四項必要工作；同一 PR 的舊回合可取消，main 驗證不取消。CI 及私有發布 stage 移除獨立的 dist 測試命令，由原完整 tests discovery 執行同一批案例一次；WaveDeck 隔離測試、JavaScript、自測後重新封存與所有完整性保護保持。
+
+Chromium 使用 runner OS／架構與 package-lock 雜湊隔離的快取；命中快取仍執行既有安裝命令，保留 Linux 系統依賴檢查及全部瀏覽器驗收。首輪可能未命中，未取得命中收據前不宣稱節省秒數。
+
+本次只修改發布工具、CI 與對應測試，VERSION 維持 5.0，沒有產品 runtime 行為變更。局部驗證與提交／CI 終態以 `AI-Workspace/docs/stock-terminal/release-workflow-efficiency/` 的同版本收據追溯；未取得的結果不視為通過。共用記憶同步另受環境限制，既有修訂歷史完整保留。
+
+---
+
 > 各版本「改了什麼 / 修了什麼」的詳細紀錄,內部追蹤用。
 > 對外分享的功能介紹在 `README.md`;本檔由 `scripts/build_dist.bat` 排除,不進分享包。
 
