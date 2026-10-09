@@ -62,6 +62,8 @@ jobs:
         run: npm run test:pattern-browser
       - name: 成績單市場歸屬與分析依據驗收
         run: npm run test:health-pool-browser
+      - name: 決策 AI 解釋可見回饋驗收
+        run: npm run test:decision-ai-browser
       - name: PowerShell launcher syntax
         if: runner.os == 'Windows'
         shell: pwsh

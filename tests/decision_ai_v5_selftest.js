@@ -73,4 +73,35 @@ console.log('Decision AI selftest passed.');
   assert.match(h.nodes.get('dc-ai-body').textContent, /已完成測試/);
   assert.equal(JSON.stringify(h.c.DecisionData.get()), before);
   console.log('通過：決策AI完成收據/截斷錯誤/證據prompt與市場Context不可變');
+
+  for (const role of ['owner', 'reader', 'unknown']) {
+    const pending = harness('unknown');
+    pending.c.dispatchEvent(new pending.c.CustomEvent('decisionData', { detail: { state: { context: {
+      regime: { id: '權限測試' }, actionEnvelope: {}, evidence: []
+    } } } }));
+    let calls = 0;
+    pending.c.STAI = { request() { calls++; return { promise: Promise.resolve({ text: '權限確認完成', meta: {} }) }; } };
+    const button = pending.nodes.get('dc-ai-btn');
+    button.onclick(); button.onclick();
+    assert.equal(button.disabled, true);
+    assert.match(pending.nodes.get('dc-ai-body').textContent, /正在確認 Private Web 權限/);
+    assert.equal(pending.requests.filter(request => request.path === '/gateway/whoami').length, 1);
+    await pending.complete(pending.pending('/gateway/whoami'), { role }, role === 'unknown' ? 503 : 200);
+    assert.equal(calls, role === 'owner' ? 1 : 0);
+    assert.equal(button.disabled, role === 'reader');
+    assert.match(pending.nodes.get('dc-ai-body').textContent, role === 'owner' ? /權限確認完成/ : role === 'reader' ? /僅 Owner/ : /無法確認/);
+  }
+  console.log('通過：首次權限確認立即回饋、防重複與 Owner／Reader／查核失敗分流');
+
+  const missing = harness('unknown');
+  missing.c.DecisionV5.activate();
+  let missingCalls = 0;
+  missing.c.STAI = { request() { missingCalls++; throw new Error('缺少決策資料不應呼叫模型'); } };
+  missing.nodes.get('dc-ai-btn').onclick();
+  await missing.complete(missing.pending('/gateway/whoami'), { role: 'owner' });
+  assert.equal(missingCalls, 0);
+  assert.equal(missing.nodes.get('dc-ai-btn').disabled, false);
+  assert.match(missing.nodes.get('dc-ai-body').textContent, /尚無可用資料[\s\S]*更新市場資料/);
+  assert.match(missing.nodes.get('dc-ai-status').textContent, /解釋未完成/);
+  console.log('通過：首次權限確認後缺少決策資料時，明確顯示未完成而非假成功');
 })().catch(error => { console.error(error); process.exitCode = 1; });
