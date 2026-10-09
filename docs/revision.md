@@ -6,6 +6,8 @@
 
 Chromium 使用 runner OS／架構與 package-lock 雜湊隔離的快取；命中快取仍執行既有安裝命令，保留 Linux 系統依賴檢查及全部瀏覽器驗收。首輪可能未命中，未取得命中收據前不宣稱節省秒數。
 
+後續修正：Actions 快取不接受 `..` 路徑段，改用工作目錄名稱加尾碼的同層絕對目錄，避免測試通過卻未保存快取；以實際保存收據確認功能。
+
 本次只修改發布工具、CI 與對應測試，VERSION 維持 5.0，沒有產品 runtime 行為變更。局部驗證與提交／CI 終態以 `AI-Workspace/docs/stock-terminal/release-workflow-efficiency/` 的同版本收據追溯；未取得的結果不視為通過。共用記憶同步另受環境限制，既有修訂歷史完整保留。
 
 ---
