@@ -135,11 +135,11 @@ class 變更驗證測試(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '刪檔映射'):
             self.run_plan()
 
-    def test_CI只取同倉庫成功證據且不接受外部分支(self):
+    def test_CI可沿用失敗工作流中的成功案例且拒絕外部分支(self):
         runs = [
             {'id': 1, 'conclusion': 'success', 'event': 'pull_request', 'head_repository': {'full_name': '外部/專案'}},
-            {'id': 2, 'conclusion': 'failure', 'event': 'push', 'head_repository': {'full_name': '本機/專案'}},
-            {'id': 3, 'conclusion': 'success', 'event': 'pull_request', 'head_repository': {'full_name': '本機/專案'}},
+            {'id': 2, 'conclusion': 'cancelled', 'event': 'push', 'head_repository': {'full_name': '本機/專案'}},
+            {'id': 3, 'conclusion': 'failure', 'event': 'pull_request', 'head_repository': {'full_name': '本機/專案'}},
         ]
         imported = {'status': 'passed', 'exitCode': 0, 'identity': {'fixture': '既有收據'}}
         imported['fingerprint'] = engine.digest(imported['identity'])
@@ -150,6 +150,7 @@ class 變更驗證測試(unittest.TestCase):
             destination.mkdir()
             (destination / (imported['fingerprint'] + '.json')).write_text(json.dumps(imported), encoding='utf-8')
             (destination / '執行收據.json').write_text('{}', encoding='utf-8')
+            (destination / ('a' * 64 + '.json')).write_text(json.dumps({'status': 'failed', 'exitCode': 1}), encoding='utf-8')
 
         responses = [json.dumps({'workflow_runs': runs}).encode(),
                      json.dumps({'artifacts': [{'name': '平台證據', 'expired': False}]}).encode()]

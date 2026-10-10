@@ -393,7 +393,7 @@ class PrivateWebReleaseTests(unittest.TestCase):
                 patch.object(release, '_run') as run, \
                 patch.object(release, '_validation_helpers') as helpers:
             result = release.stage_release(self.install_root, ref=commit)
-        self.assertEqual(result, staged)
+        self.assertTrue(os.path.samefile(result, staged))
         run.assert_not_called()
         helpers.assert_not_called()
 

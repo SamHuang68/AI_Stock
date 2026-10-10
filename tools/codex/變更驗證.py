@@ -242,13 +242,13 @@ def run_plan(root, plan_path, evidence_dir, *, base_root=None, target_commit=Non
 
 
 def restore_ci_receipts(evidence, artifact_name):
-    """只取同倉庫成功 ci 的指定證據；每項證據仍由內容與環境重新核對。"""
+    """只取同倉庫已完成 ci 的成功案例；其他案例失敗不作廢有效證據。"""
     repository = os.environ.get('GITHUB_REPOSITORY')
     require(repository and os.environ.get('GH_TOKEN'), '缺少 GitHub 證據讀取環境。')
-    response = subprocess.check_output(['gh', 'api', f'repos/{repository}/actions/workflows/ci.yml/runs?status=success&per_page=20'])
+    response = subprocess.check_output(['gh', 'api', f'repos/{repository}/actions/workflows/ci.yml/runs?status=completed&per_page=20'])
     runs = json.loads(response)['workflow_runs']
     for run in runs:
-        if (run.get('conclusion') != 'success' or run.get('event') not in ('push', 'pull_request')
+        if (run.get('conclusion') not in ('success', 'failure') or run.get('event') not in ('push', 'pull_request')
                 or (run.get('head_repository') or {}).get('full_name') != repository):
             continue
         listing = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repository}/actions/runs/{run["id"]}/artifacts']))
@@ -265,7 +265,7 @@ def restore_ci_receipts(evidence, artifact_name):
                 target = evidence / path.name
                 if not target.exists():
                     target.write_bytes(path.read_bytes())
-        # 最近一個同平台成功收據已包含本次之前沿用的證據，避免下載多份。
+        # 最近一個同平台收據已包含本次之前沿用的成功案例，避免下載多份。
         break
 
 
