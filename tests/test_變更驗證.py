@@ -160,7 +160,8 @@ class 變更驗證測試(unittest.TestCase):
             engine.restore_ci_receipts(self.evidence, '平台證據')
         self.assertEqual(api.call_count, 2)
         self.assertEqual(download_call.call_count, 1)
-        self.assertEqual([p.name for p in self.evidence.iterdir()], [imported['fingerprint'] + '.json'])
+        self.assertEqual({p.name for p in self.evidence.iterdir()}, {imported['fingerprint'] + '.json', 'a' * 64 + '.json'})
+        self.assertEqual(json.loads((self.evidence / ('a' * 64 + '.json')).read_text())['status'], 'failed')
 
     def test_CI自動路徑只走局部計畫_完整路徑僅明確授權(self):
         ci = (ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')

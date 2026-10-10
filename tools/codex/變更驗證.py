@@ -242,7 +242,7 @@ def run_plan(root, plan_path, evidence_dir, *, base_root=None, target_commit=Non
 
 
 def restore_ci_receipts(evidence, artifact_name):
-    """只取同倉庫已完成 ci 的成功案例；其他案例失敗不作廢有效證據。"""
+    """取同倉庫已完成 ci 的案例收據；成功可沿用，失敗紀錄保留以阻擋盲目重跑。"""
     repository = os.environ.get('GITHUB_REPOSITORY')
     require(repository and os.environ.get('GH_TOKEN'), '缺少 GitHub 證據讀取環境。')
     response = subprocess.check_output(['gh', 'api', f'repos/{repository}/actions/workflows/ci.yml/runs?status=completed&per_page=20'])
@@ -257,14 +257,14 @@ def restore_ci_receipts(evidence, artifact_name):
         destination = evidence.parent / ('匯入-' + str(run['id']))
         subprocess.run(['gh', 'run', 'download', str(run['id']), '--repo', repository, '--name', artifact_name, '--dir', str(destination)], check=True)
         evidence.mkdir(parents=True, exist_ok=True)
-        for path in destination.glob('*.json'):
-            if not re.fullmatch('[0-9a-f]{64}\\.json', path.name):
+        for path in destination.iterdir():
+            if not re.fullmatch('[0-9a-f]{64}\\.(json|active)', path.name):
                 continue
-            receipt = json.loads(path.read_text(encoding='utf-8'))
-            if receipt.get('status') == 'passed' and receipt.get('exitCode') == 0 and digest(receipt.get('identity')) == path.stem:
-                target = evidence / path.name
-                if not target.exists():
-                    target.write_bytes(path.read_bytes())
+            # 不丟棄失敗／毀損／進行中紀錄來製造「沒有證據」；
+            # run_plan 對命中指紋的收據做嚴格核對，只有成功可以 REUSE。
+            target = evidence / path.name
+            if not target.exists():
+                target.write_bytes(path.read_bytes())
         # 最近一個同平台收據已包含本次之前沿用的成功案例，避免下載多份。
         break
 
