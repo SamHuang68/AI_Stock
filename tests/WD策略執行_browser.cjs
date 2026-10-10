@@ -97,7 +97,12 @@ const initialState = {
         }
         await page.locator('[data-style="35"]').click();
         await page.waitForFunction(() => document.getElementById('styleVal').textContent === '35');
-        await page.locator('#btnDemo').click();
+        const [demoResponse] = await Promise.all([
+          page.waitForResponse(response => new URL(response.url()).pathname === '/api/demo_tick'
+            && response.request().method() === 'POST'),
+          page.locator('#btnDemo').click()
+        ]);
+        assert.equal(demoResponse.status(), 200, '模擬請求實際回應成功');
         assert.equal(calls.filter(c => c.path === '/api/demo_tick').length, 1);
         const summary = page.locator('#strategyDetails summary');
         await summary.focus();
@@ -157,7 +162,14 @@ const initialState = {
         await page.locator('#btnDiscretionary').click();
         await page.waitForFunction(() => document.getElementById('strategyMode').textContent.includes('AI 自主判斷'));
         for (const command of ['start', 'stop', 'restart', 'refresh']) {
-          await page.locator(`[data-cmd="${command}"]`).click();
+          // click 返回只表示點擊完成；先建立等待，核對同一指令的回應再判讀紀錄。
+          const [controlResponse] = await Promise.all([
+            page.waitForResponse(response => new URL(response.url()).pathname === '/api/control'
+              && response.request().method() === 'POST'
+              && response.request().postDataJSON().cmd === command),
+            page.locator(`[data-cmd="${command}"]`).click()
+          ]);
+          assert.equal(controlResponse.status(), 200, '控制請求實際回應成功：' + command);
         }
         assert.deepEqual(calls.filter(c => c.path === '/api/control').map(c => c.body.cmd), ['start', 'stop', 'restart', 'refresh']);
       }
