@@ -303,45 +303,180 @@ class PrivateWebReleaseTests(unittest.TestCase):
         self.assertFalse((tree / "START_ALL.cmd").exists())
         self.assertTrue((tree / "server" / "server.py").is_file())
 
-    def test_release_gate_includes_etf_and_shell_node_regressions(self):
-        # 驗證實際命令及順序，包含新增的自測；不靠寫死的檔名通過。
+    def stage_fixture(self, *, include_plan=True, run_tests=True):
         commit = 'a' * 40
         calls = []
-        selftests = ['tests/etf_flow_v3_selftest.js', 'tests/shell_v5_selftest.js',
-                     'tests/新增_selftest.js']
+        validations = []
         extras = ['wavedeck/run.py', 'START_WAVEDECK.cmd', 'START_ALL.cmd']
+        identity = {'schemaVersion': 1, 'runner': 'c' * 64, 'case': '局部流程',
+                    'kind': 'unittest', 'targets': ['tests.test_private_web_release'],
+                    'inputs': {'server/server.py': 'd' * 64}, 'environment': {'python': '測試環境'}}
+        fingerprint = release.hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        receipt = {
+            'schemaVersion': 1, 'status': 'passed', 'commit': commit,
+            'baseCommit': 'b' * 40, 'tree': 'e' * 40, 'changedFiles': ['server/server.py'],
+            'cases': [{'id': '局部流程', 'decision': 'EXECUTED', 'fingerprint': fingerprint,
+                       'identity': identity, 'status': 'passed', 'commit': commit,
+                       'command': ['python', '-m', 'unittest', 'tests.test_private_web_release'],
+                       'inputs': identity['inputs'], 'environment': identity['environment'],
+                       'exitCode': 0, 'evidence': '局部驗證證據'}],
+        }
+
         def run(argv, *, cwd, capture=False):
             calls.append(argv)
             if argv[0] == 'git':
                 with zipfile.ZipFile(argv[argv.index('--output') + 1], 'w') as archive:
-                    for relative in release.REQUIRED_RELEASE_FILES | set(selftests + extras):
+                    for relative in release.REQUIRED_RELEASE_FILES | set(extras):
                         archive.writestr(relative, '原始內容')
-            else:
-                for relative in extras:
-                    self.assertTrue((cwd / relative).is_file())
-                if 'build_v2.py' in argv:
-                    _write(cwd / 'server/__pycache__/daemon_lock.cpython-312.pyc', '組建產生的快取')
-                    _write(cwd / 'server/legacy.pyo', '組建產生的舊快取')
-                if 'unittest' in argv:
-                    _write(cwd / 'stock_terminal_v2.html', '清理測試改寫')
-                    _write(cwd / 'src/測試殘留.js', '不得出貨')
-                if argv[0] == 'node':
-                    self.assertEqual((cwd / 'stock_terminal_v2.html').read_text(encoding='utf-8'), '原始內容')
-                    self.assertFalse((cwd / 'src/測試殘留.js').exists())
+                    if include_plan:
+                        archive.writestr('.github/驗證計畫.json', '{}')
+            elif 'build_v2.py' in argv:
+                _write(cwd / 'server/__pycache__/daemon_lock.cpython-312.pyc', '組建產生的快取')
+
+        def read_plan(root, path, *, base_root, target_commit):
+            self.assertEqual(base_root, release.ROOT)
+            self.assertEqual(target_commit, commit)
+            self.assertTrue(path.is_file())
+            self.assertNotEqual(root, base_root)
+            return {'commit': target_commit}
+
+        def run_plan(root, path, evidence_dir, *, base_root, target_commit):
+            validations.append((root, path, evidence_dir, target_commit))
+            for relative in extras:
+                self.assertTrue((root / relative).is_file())
+            _write(root / 'stock_terminal_v2.html', '清理測試改寫')
+            _write(root / 'src/測試殘留.js', '不得出貨')
+            return receipt
+
+        helpers = {'read_plan': read_plan, 'run_plan': run_plan}
         with patch.object(release, 'resolve_commit', return_value=(commit, commit[:12])), \
-                patch.object(release, '_run', run), patch.object(release.shutil, 'which', return_value='node'):
-            staged = release.stage_release(self.install_root, ref=commit)
-        self.assertEqual([argv[1] for argv in calls if argv[0] == 'node'], sorted(selftests))
-        self.assertEqual(sum(argv[1:] == ['-m', 'unittest', 'discover', '-s', 'tests', '-b'] for argv in calls), 1)
-        self.assertEqual(sum(argv[-6:] == ['discover', '-s', 'wavedeck/tests', '-p', 'test_*.py', '-b'] for argv in calls), 1)
-        self.assertFalse(any('tests.test_dist_scrub' in argv for argv in calls))
-        self.assertEqual(sum('build_v2.py' in argv for argv in calls), 3)
-        for relative in extras:
-            self.assertFalse((staged / relative).exists())
+                patch.object(release, '_run', run), \
+                patch.object(release, '_validation_helpers', return_value=helpers) as loader:
+            staged = release.stage_release(self.install_root, ref=commit, run_tests=run_tests)
+            if run_tests:
+                loader.assert_called_once_with(validations[0][0])
+        return staged, calls, validations
+
+    def test_驗證器從封存入口載入且缺少核心拒絕(self):
+        tree = self.install_root / '封存樹'
+        _write(tree / 'scripts/變更驗證.py', (ROOT / 'scripts/變更驗證.py').read_text(encoding='utf-8'))
+        with self.assertRaisesRegex(RuntimeError, '封存版本缺少'):
+            release._validation_helpers(tree)
+        _write(tree / 'tools/codex/變更驗證.py', "封存識別 = '封存核心'\n")
+        helpers = release._validation_helpers(tree)
+        self.assertEqual(helpers['封存識別'], '封存核心')
+
+    def test_發布只執行明列計畫且重建排除測試殘留(self):
+        staged, calls, validations = self.stage_fixture()
+        self.assertEqual(len(validations), 1)
+        self.assertFalse(any('discover' in command for command in calls))
+        self.assertFalse(any(command[0] == 'node' for command in calls))
+        self.assertEqual(sum('build_v2.py' in command for command in calls), 2)
+        self.assertFalse((staged / 'wavedeck').exists())
         self.assertFalse((staged / 'src/測試殘留.js').exists())
-        self.assertFalse(any(path.name == '__pycache__' or path.suffix.lower() in {'.pyc', '.pyo'}
-                             for path in staged.rglob('*')))
-        release._validate_integrity(staged, release._read_manifest(staged / release.MANIFEST_NAME))
+        self.assertEqual((staged / 'stock_terminal_v2.html').read_text(encoding='utf-8'), '原始內容')
+        self.assertFalse(any(path.name == '__pycache__' for path in staged.rglob('*')))
+        manifest = release._read_manifest(staged / release.MANIFEST_NAME)
+        self.assertEqual(manifest['manifestVersion'], 3)
+        self.assertEqual(len(manifest['validationCommands']), 1)
+        release._validate_integrity(staged, manifest)
+
+    def test_發布缺少計畫不自動擴大測試(self):
+        with self.assertRaisesRegex(RuntimeError, '缺少明確驗證計畫'):
+            self.stage_fixture(include_plan=False)
+        self.assertFalse((self.install_root / 'releases' / ('a' * 12)).exists())
+
+    def test_相同SHA的舊版通過證據不重跑(self):
+        staged = _fake_release(self.install_root, 'abc123')
+        commit = 'abc123'.ljust(40, '0')
+        with patch.object(release, 'resolve_commit', return_value=(commit, 'abc123')), \
+                patch.object(release, '_run') as run, \
+                patch.object(release, '_validation_helpers') as helpers:
+            result = release.stage_release(self.install_root, ref=commit)
+        self.assertEqual(result, staged)
+        run.assert_not_called()
+        helpers.assert_not_called()
+
+    def test_新收據stage的CLI發布不需要驗證模組(self):
+        staged, _, _ = self.stage_fixture()
+        for relative in ('scripts/private_web_release.py', 'server/daemon_lock.py'):
+            shutil.copy2(ROOT / relative, staged / relative)
+        manifest = release._read_manifest(staged / release.MANIFEST_NAME)
+        manifest['contentSha256'] = release._content_hashes(staged)
+        _write(staged / release.MANIFEST_NAME, json.dumps(manifest))
+        command = [sys.executable, str(staged / 'scripts/private_web_release.py'),
+                   '--install-root', str(self.install_root), 'promote', '--approve',
+                   '--release', staged.name]
+        result = subprocess.run(command, cwd=self.install_root, capture_output=True,
+                                text=True, encoding='utf-8', timeout=30,
+                                env=dict(os.environ, PYTHONIOENCODING='utf-8'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((staged / 'scripts/變更驗證.py').exists())
+        release._validate_integrity(staged, manifest)
+
+    def test_略過計畫的stage不能發布(self):
+        staged, _, validations = self.stage_fixture(include_plan=False, run_tests=False)
+        self.assertFalse(validations)
+        with self.assertRaisesRegex(RuntimeError, 'passed tests'):
+            release.promote_release(self.install_root, release_id=staged.name, approved=True)
+
+    def test_新版本發布拒絕缺失或篡改驗證收據(self):
+        staged, _, _ = self.stage_fixture()
+        manifest_path = staged / release.MANIFEST_NAME
+        original_manifest = release._read_manifest(manifest_path)
+        receipt_path = staged / release.VALIDATION_RECEIPT_NAME
+        original_bytes = receipt_path.read_bytes()
+        for mode in ('遺失', '篡改', '不同版本', '失敗案例', '缺少描述', '空案例',
+                     '缺少命令', '缺少環境', '缺少輸入', '缺少樹', '錯誤指紋', '身分摘要不符'):
+            with self.subTest(mode=mode):
+                receipt_path.write_bytes(original_bytes)
+                manifest = dict(original_manifest)
+                if mode == '遺失':
+                    receipt_path.unlink()
+                elif mode == '篡改':
+                    receipt_path.write_text('{}', encoding='utf-8')
+                elif mode == '缺少描述':
+                    manifest.pop('validationReceipt')
+                else:
+                    receipt = json.loads(original_bytes)
+                    if mode == '不同版本':
+                        receipt['commit'] = 'b' * 40
+                    elif mode == '失敗案例':
+                        receipt['cases'][0]['exitCode'] = 1
+                    elif mode == '空案例':
+                        receipt['cases'] = []
+                    elif mode == '缺少樹':
+                        receipt.pop('tree')
+                    elif mode == '錯誤指紋':
+                        receipt['cases'][0]['fingerprint'] = '通過'
+                    elif mode == '身分摘要不符':
+                        receipt['cases'][0]['identity']['runner'] = 'f' * 64
+                    else:
+                        receipt['cases'][0].pop({'缺少命令': 'command', '缺少環境': 'environment',
+                                                 '缺少輸入': 'inputs'}[mode])
+                    _write(receipt_path, json.dumps(receipt))
+                    manifest['validationReceipt'] = {
+                        'path': release.VALIDATION_RECEIPT_NAME,
+                        'sha256': release.hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
+                    }
+                # 即使內容清單被重算，仍須獨立核對驗證收據。
+                manifest['contentSha256'] = release._content_hashes(staged)
+                manifest['managedTopLevel'] = sorted(item.name for item in staged.iterdir()
+                    if item.name not in release.PRESERVE_NAMES | {release.MANIFEST_NAME})
+                _write(manifest_path, json.dumps(manifest))
+                with self.assertRaisesRegex(RuntimeError, '驗證收據'):
+                    release.promote_release(self.install_root, release_id=staged.name, approved=True)
+                self.assertFalse((self.install_root / 'current').exists())
+
+    def test_沿用案例保留舊SHA而整體收據綁定新SHA(self):
+        staged, _, _ = self.stage_fixture()
+        manifest = release._read_manifest(staged / release.MANIFEST_NAME)
+        path = staged / release.VALIDATION_RECEIPT_NAME
+        receipt = release._read_manifest(path)
+        receipt['cases'][0].update(decision='REUSE', commit='b' * 40)
+        _write(path, json.dumps(receipt))
+        manifest['validationReceipt']['sha256'] = release.hashlib.sha256(path.read_bytes()).hexdigest()
+        release._validate_receipt(staged, manifest)
 
     def test_standard_discovery_includes_dist_scrub_without_running_it_twice(self):
         # 只收集這個模組，確認正式 discovery 會涵蓋它；不執行分享包建置。
