@@ -28,9 +28,19 @@ from server.engine import (  # noqa: E402
     set_decision_provider,
     set_exec_mode,
     sync_broker_positions,
+    activate_strategy,
+    set_strategy_mode,
+    set_no_overnight,
+    set_kill_switch,
+    panic,
+    system_control,
 )
+from server import 策略契約 as strategy_contract  # noqa: E402
 from server.config import load_config  # noqa: E402
 from server.state import RUNTIME, now_iso  # noqa: E402
+from server.版本身分 import read_release_identity  # noqa: E402
+
+RELEASE_IDENTITY = read_release_identity(ROOT)
 
 HOST = os.environ.get("WAVEDECK_HOST", "127.0.0.1")
 PRIVATE_WEB_PORTS = frozenset({18434, 18435})
@@ -87,10 +97,12 @@ def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     n = int(handler.headers.get("Content-Length") or 0)
     if n <= 0:
         return {}
+    if n > 262144:
+        raise ValueError("JSON 請求超過 256 KiB 上限")
     try:
         return json.loads(handler.rfile.read(n).decode("utf-8"))
-    except Exception:
-        return {}
+    except (ValueError, UnicodeError):
+        raise ValueError("無法解析 JSON 請求") from None
 
 
 def _check_secret(handler: BaseHTTPRequestHandler) -> bool:
@@ -101,7 +113,7 @@ def _check_secret(handler: BaseHTTPRequestHandler) -> bool:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "WaveDeck/0.1.14"
+    server_version = "WaveDeck/" + (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("[wavedeck] " + (fmt % args) + "\n")
@@ -130,6 +142,7 @@ class Handler(BaseHTTPRequestHandler):
                     "pid": os.getpid(),
                     "port": self.server.server_port,
                     "version": (ROOT / "VERSION").read_text(encoding="utf-8").strip(),
+                    **RELEASE_IDENTITY,
                     "ts": now_iso(),
                     "fsm": snap.get("fsm"),
                     "mode": snap.get("mode"),
@@ -212,7 +225,27 @@ class Handler(BaseHTTPRequestHandler):
         if not _check_secret(self) and path.startswith("/webhook"):
             return _json(self, 401, {"ok": False, "error": "bad secret"})
 
-        body = _read_json(self)
+        try:
+            body = _read_json(self)
+        except ValueError as exc:
+            return _json(self, 400, {"ok": False, "error": str(exc)})
+
+        if path in ("/api/strategy/register", "/api/strategy/activate", "/api/strategy/mode", "/api/no_overnight"):
+            origin = self.headers.get("Origin")
+            if origin and origin not in ("http://" + self.headers.get("Host", ""), "https://" + self.headers.get("Host", "")):
+                return _json(self, 403, {"ok": False, "error": "設定操作須由本機控制臺發起"})
+            if not isinstance(body, dict):
+                return _json(self, 400, {"ok": False, "error": "設定內容須為 JSON 物件"})
+            try:
+                if path == "/api/strategy/register":
+                    return _json(self, 200, {"ok": True, "manifest": strategy_contract.register(body.get("manifest"))})
+                if path == "/api/strategy/activate":
+                    return _json(self, 200, activate_strategy(body))
+                if path == "/api/strategy/mode":
+                    return _json(self, 200, set_strategy_mode(str(body.get("mode") or "")))
+                return _json(self, 200, set_no_overnight(body))
+            except (ValueError, TypeError) as exc:
+                return _json(self, 400, {"ok": False, "error": str(exc)})
 
         if path in ("/webhook", "/webhook/tradingview"):
             return _json(self, 200, handle_signal(body))
@@ -262,7 +295,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/kill":
             on = bool(body.get("on"))
-            snap = RUNTIME.set_kill(on)
+            snap = set_kill_switch(on)
             try:
                 from server.st_push import push_async
 
@@ -272,48 +305,13 @@ class Handler(BaseHTTPRequestHandler):
             return _json(self, 200, {"ok": True, "state": snap, "mode": "pause_new"})
 
         if path == "/api/panic":
-            # Pause new risk-on AND flatten via TXT / paper broker
-            from server.broker import panic_flatten
-
-            RUNTIME.set_kill(True)
-            flat = panic_flatten(RUNTIME.snapshot())
-            patch_kw: dict[str, Any] = {
-                "positions": flat.get("positions"),
-                "exec": flat.get("exec"),
-                "lights": {**(flat.get("lights") or {}), "kill_switch": "on", "system": "halt"},
-            }
-            if isinstance(flat.get("account"), dict):
-                patch_kw["account"] = flat["account"]
-            RUNTIME.patch(**{k: v for k, v in patch_kw.items() if v is not None})
-            snap = RUNTIME.set_kill(True)
-            audit.write("panic_flatten", {"positions": snap.get("positions")})
-            try:
-                from server.st_push import push_async
-
-                push_async(snap, reason="panic", force=True)
-            except Exception:
-                pass
-            return _json(self, 200, {"ok": True, "state": snap, "mode": "panic_flatten"})
+            return _json(self, 200, panic())
 
         if path == "/api/control":
-            cmd = str(body.get("cmd") or "")
-            st = RUNTIME.snapshot()
-            if cmd == "start":
-                if st.get("fsm") == "Halted" and not st.get("kill_switch"):
-                    RUNTIME.set_fsm("Idle")
-                RUNTIME.patch(lights={"system": "run"})
-            elif cmd == "stop":
-                RUNTIME.patch(lights={"system": "stop"})
-            elif cmd == "restart":
-                RUNTIME.set_kill(False)
-                RUNTIME.set_fsm("Idle")
-                RUNTIME.patch(lights={"system": "run"})
-            elif cmd == "refresh":
-                sync_broker_positions()
-            else:
-                return _json(self, 400, {"ok": False, "error": "unknown cmd"})
-            audit.write("control", {"cmd": cmd})
-            return _json(self, 200, {"ok": True, "state": RUNTIME.snapshot()})
+            try:
+                return _json(self, 200, system_control(str(body.get("cmd") or "")))
+            except ValueError as exc:
+                return _json(self, 400, {"ok": False, "error": str(exc)})
 
         if path == "/api/demo_tick":
             return _json(

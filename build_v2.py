@@ -61,6 +61,7 @@ V2_SCRIPTS = ['src/core/colors_v3.js',   # 顏色管理表(單一真理來源,�
               'src/chart/multichart_v3.js',               # v3.9 P1: 多圖連動布局 (grid overlay)
               'src/chart/spread_v3.js',                   # v3.9 P1: 價差/比值圖
               'src/chart/hotkeys_v3.js',                  # v3.9 P1: 全鍵盤快捷 (打字即搜尋/Space切自選/Alt切時框)
+              'src/screener/策略版本.js',                    # 固定策略版本與跨語言雜湊契約
               'src/screener/strategy_builder_v3.js',         # v3.9 P2: 樂高式策略條件組合器 (提供 window.StratLib，須在 backtest_v3 後)
               'src/screener/strategy_script_v3.js',          # v3.9 P2: 迷你策略腳本 DSL (依賴 StratLib，須在 strategy_builder 後)
               'src/chart/drawtools_v3.js',                # v3.9 P3: 進階畫線(canvas overlay)+雲端記憶

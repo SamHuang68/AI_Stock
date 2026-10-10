@@ -315,7 +315,8 @@
       '#dc-root .dc-oi-table{min-width:720px}.dc-oi-table td:first-child{white-space:nowrap}' +
       '#dc-root .dc-oi-authority{margin-top:8px;padding:8px 10px;border-left:3px solid #facc15;background:rgba(250,204,21,.06);color:#d8c99a;font-size:10px;line-height:1.5;border-radius:5px}' +
       '#dc-root .dc-oi-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}' +
-      '#dc-root .dc-ai{white-space:pre-wrap;font-family:"Noto Sans TC",sans-serif;font-size:10px;line-height:1.65;color:#d4deea}' +
+      '#dc-root .dc-ai{white-space:pre-wrap;overflow-wrap:anywhere;font-family:"Noto Sans TC",sans-serif;font-size:14px;line-height:1.7;color:#d4deea}' +
+      '#dc-ai-title:focus-visible{outline:2px solid #67e8f9;outline-offset:4px}#dc-ai-status{font-size:11px;color:#a7b8cc}' +
       '#dc-root .dc-ai.is-error{color:#fecaca}' +
       '#dc-root .dc-note{font-size:8px;color:#71839a;line-height:1.5}' +
       '#dc-root .dc-empty{text-align:center;padding:26px 14px}' +
@@ -403,8 +404,9 @@
         '<a class="dc-doc-link" href="/assets/docs/archify/st-decision-evidence-lineage.html" target="_blank" rel="noopener noreferrer" aria-label="在新分頁開啟決策證據鏈圖">ⓘ 決策證據鏈 ↗</a></div>' +
         '<div class="dc-sub" id="dc-sub">DecisionContext v1 · deterministic first · evidence before confidence</div></div>' +
         '<div class="dc-actions"><button class="dc-btn" data-shell-back>← 儀表板</button>' +
-        '<button class="dc-btn" id="dc-ai-btn">AI 解釋</button><button class="dc-btn primary" id="dc-refresh">↻ 更新市場資料</button></div></div>' +
+        '<button class="dc-btn" id="dc-ai-btn" aria-controls="dc-ai-card" aria-expanded="false">AI 解釋</button><button class="dc-btn primary" id="dc-refresh">↻ 更新市場資料</button></div></div>' +
         '<div class="dc-note" id="dc-update-status" role="status"></div>' +
+        '<section class="dc-card" id="dc-ai-card" style="display:none" aria-labelledby="dc-ai-title"><h3><span id="dc-ai-title" tabindex="-1">AI 解釋</span><span id="dc-ai-status" role="status" aria-live="polite"></span></h3><div id="dc-ai-body" class="dc-ai"></div></section>' +
         '<div id="dc-body"><div class="dc-card">決策資料載入中…</div></div></div>';
       $('dc-refresh').onclick = refreshMarketData;
       $('dc-ai-btn').onclick = runAi;
@@ -420,6 +422,11 @@
     if (!button) return;
     button.disabled = !!aiBusy || aiAccessRole === 'reader';
     button.setAttribute('aria-busy', aiBusy ? 'true' : 'false');
+    button.setAttribute('aria-expanded', aiDisplayState.visible ? 'true' : 'false');
+    var status = $('dc-ai-status');
+    if (status) status.textContent = !aiDisplayState.visible ? '' :
+      (aiBusy ? '正在處理解釋…' : (aiAccessRole === 'reader' ? '此帳號僅可閱讀' :
+        (aiDisplayState.error ? '解釋未完成，可重試' : '解釋已完成')));
     if (aiBusy) {
       button.textContent = 'AI 解釋中…';
       button.title = '分析在 EVO-T1 執行；請勿重複送出。';
@@ -463,6 +470,14 @@
   function setAiDisplay(text, error) {
     aiDisplayState = { visible: true, text: String(text || ''), error: !!error };
     restoreAiDisplay();
+    syncAiButtonState();
+  }
+
+  // 僅在主動操作時帶到近端解釋區；完成及背景重繪都保留使用者的閱讀位置。
+  function revealAiDisplay() {
+    var card = $('dc-ai-card'), title = $('dc-ai-title');
+    if (card && typeof card.scrollIntoView === 'function') card.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+    if (title && typeof title.focus === 'function') title.focus({ preventScroll: true });
   }
 
   function restoreAiDisplay() {
@@ -2104,7 +2119,6 @@
         '<div class="dc-card" id="dc-section-evidence" data-dc-section="evidence"><h3><span>Evidence Ledger · 證據帳本</span><span>' + (lastEvidenceContext.evidence || []).length + ' 筆 · 原始值未改寫</span></h3>' + evidenceHtml(lastEvidenceContext) + '</div>' +
         '<div class="dc-card"><h3><span>News Impact</span><span>deterministic tag</span></h3>' + newsHtml(ctx) + '</div>' +
         '<div class="dc-card"><h3><span>Regime History</span><span id="dc-hist-meta">載入中</span></h3><div id="dc-history" class="dc-note">—</div></div>' +
-        '<div class="dc-card" id="dc-ai-card" style="display:none"><h3><span>AI Explanation</span><span>唯讀解釋</span></h3><div id="dc-ai-body" class="dc-ai"></div></div>' +
       '</div></div><div class="dc-note">Decision support only · AI 不得覆寫 regime、confidence、key levels 或倉位公式。</div>';
     restoreAiDisplay();
     bindRisk();
@@ -2171,9 +2185,13 @@
   function runAi() {
     if (aiBusy) return;
     if (aiAccessRole === 'unknown') {
+      aiBusy = true;
+      setAiDisplay('正在確認 Private Web 權限，確認後將開始產生解釋。', false);
+      revealAiDisplay();
       resolveAiAccess().then(function (role) {
+        aiBusy = false;
         if (role === 'owner') runAi();
-        else if (role === 'reader') syncAiButtonState();
+        else if (role === 'reader') setAiDisplay('此登入帳號為 Reader；AI 解釋目前僅 Owner 可執行。', true);
         else setAiDisplay('目前無法確認 Private Web 權限，請檢查連線後再試。', true);
       });
       return;
@@ -2184,11 +2202,14 @@
     }
     if (!lastContext) {
       showEmpty('AI 解釋尚無可用資料', '請先按「更新市場資料」，建立 DecisionContext 後再執行 AI 解釋。');
+      setAiDisplay('AI 解釋尚無可用資料；請先按「更新市場資料」，建立決策資料後再試。', true);
+      revealAiDisplay();
       return;
     }
     aiBusy = true;
     syncAiButtonState();
     setAiDisplay('EVO-T1 正在準備本機快速模型。請預留約 8 分鐘；此時間已包含冷啟動、模型載入、上下文預填與推理，通常會提早完成。最長等待 12 分鐘。', false);
+    revealAiDisplay();
     aiController = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var timeoutId = aiController ? setTimeout(function () { aiController.abort(); }, AI_TIMEOUT_MS) : null;
     var slim = {

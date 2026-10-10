@@ -333,7 +333,7 @@ class PrivateWebReleaseTests(unittest.TestCase):
             staged = release.stage_release(self.install_root, ref=commit)
         self.assertEqual([argv[1] for argv in calls if argv[0] == 'node'], sorted(selftests))
         self.assertEqual(sum(argv[1:] == ['-m', 'unittest', 'discover', '-s', 'tests', '-b'] for argv in calls), 1)
-        self.assertTrue(any('wavedeck.tests.test_smoke' in argv for argv in calls))
+        self.assertEqual(sum(argv[-6:] == ['discover', '-s', 'wavedeck/tests', '-p', 'test_*.py', '-b'] for argv in calls), 1)
         self.assertFalse(any('tests.test_dist_scrub' in argv for argv in calls))
         self.assertEqual(sum('build_v2.py' in argv for argv in calls), 3)
         for relative in extras:
