@@ -429,7 +429,11 @@ Write-Host ('FAKESTOP=' + ($script:Stopped -join ','))
         python_path.parent.mkdir()
         # 此測試只驗證 pin 的持久化契約，不將這個檔案當作 Python 執行。
         python_path.touch()
-        driver = "$Root = $env:ST_TEST_STOP_ROOT\n" + helpers + "\nSave-StockPythonPin $env:ST_TEST_PYTHON\nWrite-Host ('PIN=' + (Read-StockPythonPin))\n"
+        # 完整 stage 會在無主控台子程序中執行；明確設為 UTF-8，符合 run_ps 的解碼方式。
+        driver = ("$Root = $env:ST_TEST_STOP_ROOT\n" + helpers +
+                  "\n[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)\n" +
+                  "Save-StockPythonPin $env:ST_TEST_PYTHON\n" +
+                  "Write-Host ('PIN=' + (Read-StockPythonPin))\n")
         for name, engine in _powershell_engines().items():
             with self.subTest(engine=name):
                 code, out = self.run_ps(engine, driver, ST_TEST_PYTHON=python_path)
