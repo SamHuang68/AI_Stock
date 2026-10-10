@@ -36,7 +36,7 @@
 6. **給使用者的指令一律是 PowerShell。** 讀 UTF-8 檔案要加 `-Encoding UTF8`（Windows PowerShell 5.1 預設用本機碼頁，中文會變成無法復原的亂碼）；要讓輸出可貼回，用 `& { … } *>&1 | Tee-Object -FilePath $log`，再 `Get-Content $log -Raw | Set-Clipboard`。
 7. **雲端工作階段的 Git 做法**（共用規則 `0007`）：只用明確檔案清單暫存（不用 `git add -A` 或 `git add .`），並用 `git diff --cached --name-only` 核對；比對與回報用完整 SHA；不 force push。在已合併 PR 的工作分支上接續工作時，把 `origin/main` 合併進分支，不要 reset 後強推。 完整 Python 測試套件與全倉庫靜態或安全掃描屬「完整掃描測試」（規則 `0008` 第 13 條）：執行前先向 Sam 說明範圍、影響與耗時並取得同意（每個 PR 推送前問一次，或依 Sam 的常設同意）；針對本次改動的測試直接跑。
 8. **例外處理與測試誠實**（共用規則 `0014`）：不得無記錄地吞掉錯誤。程式用 `server/log_once.py` 的 `log_once` 留下限頻記錄，或縮小例外型別，或重新拋出；`tests/test_no_new_silent_exceptions.py` 的棘輪會擋下新增的靜默寬鬆例外，減少時要把 `tests/silent_except_baseline.json` 一併降下。以 AST 或 mock 取函式的測試不得補上正式模組缺的名稱。
-9. **依變更範圍驗證**（Sam 2026-10-09 指示）：續接收尾時，未改動部分沿用固定版本的有效證據；有新修改才驗證受影響部分，不因整理報告或補第二意見而重跑完整套件或完整 stage。完整發布的既有驗收門檻仍適用，不以跳過測試的 stage 取代。開發啟動驗收入口為 `python -m unittest tests.test_launcher_safety`；需真實程序驗收時，明確設定 `ST_LAUNCHER_E2E=1` 執行 `tests/test_launcher_startup_windows.py`，使用隔離複本、空白資料、動態 loopback 埠與禁止連外的 fixture。
+9. **依變更範圍驗證**（Sam 2026-10-11 明確修訂）：日常 CI 與 stage 使用 `.github/驗證計畫.json`，只驗修改所影響的案例，按實際輸入與環境沿用有效證據。沒有對應案例的變更直接拒絕，不自動全套；全套改由明確授權的手動流程執行。保留產物完整性、資料備份／保留、程序歸屬及部署身分等安全門檻，略過測試的 stage 仍不可發布。細節見 `docs/局部驗證與證據沿用.md`；全域工具在 `C:/Users/Sam/AI-Workspace/tools/codex/`，不限本專案。開發啟動驗收入口仍為 `python -m unittest tests.test_launcher_safety`；真實程序驗收須明確設定 `ST_LAUNCHER_E2E=1`，使用隔離複本、空白資料、動態 loopback 埠與禁止連外 fixture，只有改動啟動流程才執行。
 
 ## 3. 版本與修訂歷史
 
