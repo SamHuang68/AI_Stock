@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 from typing import Any
 
-from .state import TZ8
+from .不留倉 import deadline_status
 
 # Entry confidence floor (heuristic/LLM). 0 = disabled.
 MIN_ENTRY_CONFIDENCE = float(os.environ.get("WD_MIN_ENTRY_CONFIDENCE", "0.70"))
@@ -29,7 +29,9 @@ def daily_dd_ratio(state: dict[str, Any]) -> float:
     return max(0.0, (yb - eq) / yb)
 
 
-def evaluate_gate(state: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
+def evaluate_gate(
+    state: dict[str, Any], decision: dict[str, Any], *, now: datetime | None = None
+) -> dict[str, Any]:
     """Return gate result; mutates nothing."""
     reasons: list[str] = []
     allow = True
@@ -50,19 +52,10 @@ def evaluate_gate(state: dict[str, Any], decision: dict[str, Any]) -> dict[str, 
     }:
         reasons.append(f"單日回撤警戒 {dd:.1%}（上限 {MAX_DAILY_DD:.0%}）")
 
-    no = state.get("no_overnight") or {}
-    if no.get("enabled"):
-        now = datetime.now(TZ8)
-        force = str(no.get("force_flat_time") or "13:40")
-        try:
-            fh, fm = [int(x) for x in force.split(":")[:2]]
-            if (now.hour, now.minute) >= (fh, fm) and decision.get("action") in {
-                "ENTER_LONG", "ENTER_SHORT"
-            }:
-                allow = False
-                reasons.append("不留倉：收盤前禁止新單")
-        except Exception:
-            pass
+    no = deadline_status(state, now)
+    if no["blocked_new"] and decision.get("action") in {"ENTER_LONG", "ENTER_SHORT"}:
+        allow = False
+        reasons.append(no["error"] or "不留倉：已進入截止前禁新單時窗")
 
     st = state.get("st_overlay") or {}
     link = state.get("st_link") or {}
@@ -109,7 +102,11 @@ def evaluate_gate(state: dict[str, Any], decision: dict[str, Any]) -> dict[str, 
         reasons.append("外溢偏低：新單口數減半")
 
     chase = (decision.get("process") or {}).get("chase_risk") or "medium"
-    if chase == "high" and int(state.get("style") or 50) < 55:
+    if (
+        chase == "high"
+        and int(state.get("style") or 50) < 55
+        and decision.get("action") in {"ENTER_LONG", "ENTER_SHORT"}
+    ):
         allow = False
         reasons.append("追價風險高且風格偏保守")
     if (

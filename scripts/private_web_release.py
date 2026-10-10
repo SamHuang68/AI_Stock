@@ -499,7 +499,7 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
                 # discovery 已包含 test_dist_scrub.py；完整測試只執行一次。
                 [python, "-m", "unittest", "discover", "-s", "tests", "-b"],
                 [python, "-W", "error::ResourceWarning", "-m", "unittest",
-                 "wavedeck.tests.test_smoke", "-b"],
+                 "discover", "-s", "wavedeck/tests", "-p", "test_*.py", "-b"],
             ]
             for command in commands:
                 _run(command, cwd=extracted)

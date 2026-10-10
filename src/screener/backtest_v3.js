@@ -344,6 +344,28 @@
       selectionMetric: 'training-net-expectancy', training: ranked, test, limitations: [...LIMITATIONS] };
   }
 
+  // 固定自訂定義：訓練與測試各自編譯截止日前資料，持倉與待成交委託不跨界。
+  function evaluateCustom(candles, definition, compile, opts) {
+    if (!opts || !opts.trainEnd || !opts.testEnd) throw new Error('須先固定訓練與測試截止日');
+    const config = settings(opts), bars = validateBars(candles, config);
+    const trainEnd = dateKey(opts.trainEnd, config.market), testEnd = dateKey(opts.testEnd, config.market);
+    if (trainEnd >= testEnd) throw new Error('訓練截止日必須早於測試截止日');
+    const train = candles.filter((_, i) => bars[i].date <= trainEnd);
+    const prefix = candles.filter((_, i) => bars[i].date <= testEnd);
+    const testStart = bars.find(b => b.date > trainEnd && b.date <= testEnd)?.date;
+    if (!train.length || !testStart) throw new Error('固定切分的訓練期或測試期沒有日線');
+    const common = { ...config }; delete common.startDate; delete common.endDate;
+    const execute = (data, extra) => {
+      const signals = compile(definition, colsOf(data));
+      return runLS(data, signals.buy, signals.sell, { ...common, ...extra });
+    };
+    const training = execute(train), test = execute(prefix, { startDate: testStart });
+    test.evaluation = 'fixed-holdout';
+    return { engineVersion: ENGINE_VERSION, trainEnd, testStart, testEnd, training, test,
+      selectionMetric: 'fixed-custom-definition', warmup: 'past-only', positionReset: true,
+      limitations: [...LIMITATIONS, '自訂條件已固定；反覆依測試結果改條件仍可能污染樣本外驗證。'] };
+  }
+
   const SHARPE_REASONS = Object.freeze({
     non_positive_prior_equity: '前期權益非正，部分每日報酬無法定義',
     insufficient_samples: '不足兩個每日報酬樣本',
@@ -448,7 +470,7 @@
   }
 
   window.Backtest = {
-    run, runLS, scanStrategies, evaluateStrategies, patternHitRate, portfolio, drawCurve,
+    run, runLS, scanStrategies, evaluateStrategies, evaluateCustom, patternHitRate, portfolio, drawCurve,
     ENGINE_VERSION, DEFAULTS, LIMITATIONS, settings, dateKey, describe, describeIssue, describeSignalIssues,
     STRATEGIES, sma, rsi, bbLower, colsOf, crossUp, breakout,
   };

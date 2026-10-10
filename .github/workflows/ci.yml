@@ -33,7 +33,7 @@ jobs:
       - name: Unit tests
         run: python -m unittest discover -s tests -v
       - name: WaveDeck 隔離測試
-        run: python -W error::ResourceWarning -m unittest wavedeck.tests.test_smoke -v
+        run: python -W error::ResourceWarning -m unittest discover -s wavedeck/tests -p "test_*.py" -v
       - name: build_order self-test
         run: python build_order.py
       - name: JavaScript contract self-tests
@@ -64,6 +64,10 @@ jobs:
         run: npm run test:health-pool-browser
       - name: 決策 AI 解釋可見回饋驗收
         run: npm run test:decision-ai-browser
+      - name: 策略版本與既有入口驗收
+        run: npm run test:strategy-browser
+      - name: WaveDeck 訊號與成交畫面驗收
+        run: npm run test:wd-strategy-browser
       - name: PowerShell launcher syntax
         if: runner.os == 'Windows'
         shell: pwsh

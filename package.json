@@ -8,7 +8,10 @@
     "test:data-browser": "node tests/資料可信度_browser.cjs",
     "test:pattern-browser": "node tests/pattern_modal_browser.cjs",
     "test:health-pool-browser": "node tests/stock_health_pool_browser.cjs",
-    "test:decision-ai-browser": "node tests/決策AI可見回饋_browser.cjs"
+    "test:decision-ai-browser": "node tests/決策AI可見回饋_browser.cjs",
+    "test:strategy-oos": "node tests/自訂策略樣本外_selftest.js",
+    "test:strategy-browser": "node tests/自訂策略版本瀏覽器.cjs",
+    "test:wd-strategy-browser": "node tests/WD策略執行_browser.cjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"
