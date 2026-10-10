@@ -2898,6 +2898,12 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             '/api/override-alpha', '/api/override-alpha/review', '/api/llm-gate',
         }
 
+    @staticmethod
+    def _wavedeck_read_cors_path(path):
+        # 沿用 WD 已使用的市場 API；只開放加權指數，保留路由的單次解碼契約。
+        return path in {'/twindex', '/breadth'} or (
+            path.startswith('/fundamental/') and unquote(path[13:]) == '^TWII')
+
     def _wavedeck_origin_ok(self, origin):
         if not self._bridge_cors_path(self.path.split('?')[0]):
             return False
@@ -2919,9 +2925,24 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         return self._wavedeck_origin_ok(o)
 
     def _cors_origin(self):
-        """Only the explicit WaveDeck bridge is cross-origin capable."""
+        """橋接與唯讀市場查詢分開授權，不擴張 POST 的來源白名單。"""
         origin = self.headers.get('Origin') or ''
-        return origin if origin and self._wavedeck_origin_ok(origin) else None
+        if not origin:
+            return None
+        if self._wavedeck_origin_ok(origin):
+            return origin
+        if not self._wavedeck_read_cors_path(self.path.split('?', 1)[0]):
+            return None
+        method = getattr(self, 'command', '')
+        if method == 'OPTIONS':
+            method = self.headers.get('Access-Control-Request-Method', 'GET')
+        if method != 'GET':
+            return None
+        import wavedeck_bus as wdb
+        # 沿用既有 WD 埠清單；精確比對瀏覽器 Origin，不接受帳密、路徑或非 HTTP。
+        allowed = {f'http://{host}:{port}'
+                   for host in ('127.0.0.1', 'localhost') for port in wdb.WD_PORTS}
+        return origin if origin in allowed else None
 
     def _method_not_allowed(self, allow):
         rejecting_body = self._rejected_body_present()
@@ -3086,7 +3107,9 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         self.send_response(204)
         if declared_body:
             self.send_header('Connection', 'close')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        methods = ('GET, OPTIONS' if self._wavedeck_read_cors_path(self.path.split('?', 1)[0])
+                   else 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', methods)
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-ST-Trace-ID')
         self.send_header('Access-Control-Expose-Headers', 'X-ST-Trace-ID')
         self.end_headers()
