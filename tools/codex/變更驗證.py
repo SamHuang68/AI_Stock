@@ -75,6 +75,32 @@ def case_command(root, case):
                     '命令案例的每個目標必須同時列入 inputs 與命令參數。')
         require(not any(any(char in part for char in '*?[') for part in command[1:]),
                 '命令案例不接受萬用字元；請明列受影響檔案。')
+        # 此入口限直接 runner；unittest 已有專用類型，不以 -m 暗中載入探索器。
+        if command[0] == 'python':
+            arguments = command[1:]
+            if arguments[0] == '-B':
+                arguments = arguments[1:]
+            require(arguments and arguments[0].endswith('.py') and arguments[0] in case['inputs'],
+                    'Python command 必須直接指定已列入 inputs 的 runner，不接受 -m。')
+        for argument in command[1:]:
+            if argument.startswith('-'):
+                continue
+            candidate = root / argument.split('::', 1)[0]
+            require(not candidate.is_dir(), '命令不得附帶整個目錄作為額外驗證範圍。')
+            if candidate.is_file() and ('.test.' in candidate.name or '.spec.' in candidate.name
+                                        or candidate.name.startswith('test_')):
+                require(argument in targets, '命令包含未列於 targets 的額外案例。')
+        if command[0] == 'node' and '--test' in command:
+            selected = gate_module().explicit_selectors(command[command.index('--test') + 1:],
+                ('--test-name-pattern', '--test-skip-pattern', '--test-reporter', '--test-reporter-destination'),
+                ('.js', '.mjs', '.cjs'), 'Node --test')
+            require(set(selected) == set(targets), 'Node 實際 selector 必須與 targets 完全一致。')
+        if command[0] == 'node' and any(Path(part).name in ('vitest.mjs', 'vitest.js') for part in command[1:]):
+            require('run' in command, 'Vitest 必須明列 run。')
+            selected = gate_module().explicit_selectors(command[command.index('run') + 1:],
+                ('-t', '--testNamePattern', '--config', '--reporter', '--pool'),
+                ('.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx'), 'Vitest')
+            require(set(selected) == set(targets), 'Vitest 實際 selector 必須與 targets 完全一致。')
         executable = sys.executable if command[0] == 'python' else shutil.which('node')
         require(executable, '缺少命令指定的執行環境。')
         return [executable, *command[1:]]

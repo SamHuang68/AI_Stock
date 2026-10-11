@@ -24,6 +24,28 @@ def text(value):
     return isinstance(value, str) and bool(value.strip())
 
 
+def explicit_selectors(arguments, options_with_values, suffixes, label):
+    """每個非選項參數都是實際 selector，不能附帶整個目錄。"""
+    selected = []
+    skip_value = False
+    for argument in arguments:
+        if skip_value:
+            skip_value = False
+            continue
+        if argument in options_with_values:
+            skip_value = True
+            continue
+        if argument.startswith('-'):
+            require(argument != '--pyargs', '局部案例不接受套件探索。')
+            continue
+        name = argument.split('::', 1)[0]
+        require(name.endswith(suffixes) and not any(char in name for char in '*?['),
+                label + ' 的每個 selector 都須是明列案例檔，不接受目錄或探索。')
+        selected.append(name)
+    require(selected and not skip_value, label + ' 必須明列案例檔且選項值完整。')
+    return selected
+
+
 def reject_broad_targeted(command):
     """只辨識已知危險入口；不宣稱能理解任意 shell 或腳本內容。"""
     names = [Path(value).name.lower() for value in command]
@@ -40,13 +62,17 @@ def reject_broad_targeted(command):
         require(not any(value in ('-e', '--eval', '-p', '--print', '-') or value.startswith('--eval=')
                         for value in lower[1:]), 'targeted 不接受內嵌 Node；請展開明列案例。')
         if '--test' in lower:
-            require(any(value.endswith(('.js', '.mjs', '.cjs')) and not value.startswith('-')
-                        for value in command[lower.index('--test') + 1:]),
-                    'Node --test 必須明列案例檔，不接受預設探索。')
+            explicit_selectors(command[lower.index('--test') + 1:],
+                               ('--test-name-pattern', '--test-skip-pattern', '--test-reporter', '--test-reporter-destination'),
+                               ('.js', '.mjs', '.cjs'), 'Node --test')
         if any(name in ('vitest.mjs', 'vitest.js') for name in names[1:]):
-            require('run' in lower and any(('.test.' in value or '.spec.' in value)
-                    and not value.startswith('-') for value in command[1:]),
-                    'Vitest 必須使用 run 並明列測試檔，不接受全套或監看模式。')
+            require('run' in lower, 'Vitest 必須使用 run，不接受全套或監看模式。')
+            selectors = explicit_selectors(command[lower.index('run') + 1:],
+                                            ('-t', '--testNamePattern', '--config', '--reporter', '--pool'),
+                                            ('.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx'), 'Vitest')
+            require(all('.test.' in value or '.spec.' in value for value in selectors), 'Vitest 必須明列測試檔。')
+            require(not any(value in ('--watch', '-w') or value.startswith('--watch=') for value in lower),
+                    '局部案例不接受持續監看。')
     if 'unittest' in lower:
         args = command[lower.index('unittest') + 1:]
         require('discover' not in args and not any(value in ('tests', 'tests/', 'tests\\', '.') for value in args)
@@ -56,12 +82,8 @@ def reject_broad_targeted(command):
         start = lower.index('pytest') + 1 if 'pytest' in lower else 1
         args = command[start:]
         options_with_values = ('-c', '--confcutdir', '--rootdir', '--ignore', '--ignore-glob',
-                               '--deselect', '--override-ini', '-o', '--junitxml', '--log-file')
-        selectors = any(not value.startswith('-') and (i == 0 or args[i - 1] not in options_with_values)
-                        and value.split('::')[0].endswith('.py') for i, value in enumerate(args))
-        selectors = selectors or any(value in ('-k', '-m') and i + 1 < len(args)
-                                    and not args[i + 1].startswith('-') for i, value in enumerate(args))
-        require(selectors, 'pytest 必須明列案例檔、節點或選擇條件；目錄與預設全套不屬局部驗證。')
+                               '--deselect', '--override-ini', '-o', '--junitxml', '--log-file', '-k', '-m')
+        explicit_selectors(args, options_with_values, ('.py',), 'pytest')
     if executable.removesuffix('.cmd') in ('npm', 'npx', 'pnpm', 'yarn'):
         require(len(lower) > 1 and lower[1] == 'test' and '--' in lower
                 and lower.index('--') + 1 < len(lower),
