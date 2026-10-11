@@ -33,6 +33,36 @@
       "reason": "共用完整計畫路徑轉接器尚未測試，不以文件或舊證據宣告通過。",
       "user_quote": "補完 不跑測試",
       "source": "Sam 本對話，2026-10-12"
+    },
+    {
+      "path": "server/datastore.py",
+      "reason": "首次來源保全候選已實作；本輪依指示不執行測試，不宣稱歷史資料已修復或服務已部署。",
+      "user_quote": "補完 不跑測試",
+      "source": "Sam 本對話，2026-10-12"
+    },
+    {
+      "path": "server/daily_cache_jobs.py",
+      "reason": "首次來源保全候選已實作；本輪依指示不執行測試，不宣稱歷史資料已修復或服務已部署。",
+      "user_quote": "補完 不跑測試",
+      "source": "Sam 本對話，2026-10-12"
+    },
+    {
+      "path": "server/server.py",
+      "reason": "首次來源保全候選已實作；本輪依指示不執行測試，不宣稱歷史資料已修復或服務已部署。",
+      "user_quote": "補完 不跑測試",
+      "source": "Sam 本對話，2026-10-12"
+    },
+    {
+      "path": "server/stock_signals_routes.py",
+      "reason": "首次來源保全候選已實作；本輪依指示不執行測試，不宣稱歷史資料已修復或服務已部署。",
+      "user_quote": "補完 不跑測試",
+      "source": "Sam 本對話，2026-10-12"
+    },
+    {
+      "path": "server/日線來源收據.py",
+      "reason": "首次來源保全候選已實作；本輪依指示不執行測試，不宣稱歷史資料已修復或服務已部署。",
+      "user_quote": "補完 不跑測試",
+      "source": "Sam 本對話，2026-10-12"
     }
   ]
 }
