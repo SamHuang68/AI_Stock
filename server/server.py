@@ -5672,9 +5672,10 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 try:
                     r = datastore.get_bars(c)
                     if not r or len(r) < 80:
-                        f = datastore.fetch_yahoo_daily(c, 'TW', '5y')
+                        receipt = {}
+                        f = datastore.fetch_yahoo_daily(c, 'TW', '5y', receipt_out=receipt)
                         if f:
-                            datastore.upsert_bars(c, 'TW', f, source='Yahoo Finance')
+                            datastore.upsert_bars(c, 'TW', f, source='Yahoo Finance', ingest_receipt=receipt)
                 except Exception:
                     pass
             sectors = self._decision_saved_sector_map() if portfolio_kind == 'simulation' else _get_tw_sectors()

@@ -21,6 +21,10 @@ import math
 import uuid
 from contextlib import closing, nullcontext, contextmanager
 from pathlib import Path
+if __package__:
+    from . import 日線來源收據 as source_provenance
+else:
+    import 日線來源收據 as source_provenance
 
 # 進程內全域寫入鎖
 _db_write_lock = threading.Lock()
@@ -172,7 +176,7 @@ def _yf_symbol(sym, market):
         return sym
     return sym + '.TW' if market == 'TW' else sym
 
-def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False, start_ts=None, deadline=None):
+def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False, start_ts=None, deadline=None, receipt_out=None):
     """自 Yahoo v8 chart API 抓日線(query1/query2 雙端點 + 限流退避重試)。"""
     ysym = _yf_symbol(sym, market)
     last = None
@@ -191,33 +195,13 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False,
                     deadline.before_request()
                 timeout = min(20, deadline.remaining()) if deadline is not None else 20
                 with urllib.request.urlopen(req, timeout=max(.05, timeout)) as r:
-                    j = json.load(r)
-                res = j['chart']['result'][0]
-                meta = res.get('meta') or {}
-                actual_symbol = meta.get('symbol')
-                if actual_symbol and str(actual_symbol).upper() != ysym.upper():
-                    raise ValueError('來源證券代號與請求不符，拒絕寫入')
-                zone = meta.get('exchangeTimezoneName')
-                if zone and ((market == 'TW' and zone != 'Asia/Taipei') or (market == 'US' and zone not in ('America/New_York', 'America/Chicago', 'US/Eastern', 'US/Central'))):
-                    raise ValueError('來源交易所時區與市場不符，拒絕寫入')
-                granularity = meta.get('dataGranularity')
-                if granularity and granularity != '1d':
-                    raise ValueError('來源回傳非日線資料，拒絕寫入日線庫')
+                    raw = r.read()
+                res, rows = source_provenance.parse_yahoo_daily(raw, ysym, market)
                 ts = res['timestamp']
                 q = res['indicators']['quote'][0]
-                rows = []
-                for i, t in enumerate(ts):
-                    cl = q['close'][i]
-                    if not isinstance(cl, (int, float)) or not math.isfinite(cl) or cl <= 0:
-                        continue
-                    op = q['open'][i]
-                    hi = q['high'][i]
-                    lo = q['low'][i]
-                    vol = q['volume'][i]
-                    op, hi, lo = [v if isinstance(v, (int, float)) and math.isfinite(v) and v > 0 else None for v in (op, hi, lo)]
-                    vol = vol if isinstance(vol, (int, float)) and math.isfinite(vol) and vol >= 0 else None
-                    
-                    rows.append((t, op, hi, lo, cl, vol))
+                if receipt_out is not None:
+                    receipt_out.clear()
+                    receipt_out.update(source_provenance.capture_yahoo(raw, url, sym, market, ysym))
                 if with_research:
                     return {'rows': rows, 'timestamps': ts, 'quoteClose': q['close'],
                             'adjclose': ((res['indicators'].get('adjclose') or [{}])[0]).get('adjclose', []),
@@ -232,8 +216,12 @@ def fetch_yahoo_daily(sym, market, rng='10y', retries=3, *, with_research=False,
                 except (OSError, ValueError):
                     pass
                 if market == 'TW' and e.code == 404 and ysym.endswith('.TW'):
-                    return fetch_yahoo_daily(sym.removesuffix('.TW') + '.TWO', market, rng, retries,
-                                             with_research=with_research, start_ts=start_ts, deadline=deadline)
+                    result = fetch_yahoo_daily(sym.removesuffix('.TW') + '.TWO', market, rng, retries,
+                                               with_research=with_research, start_ts=start_ts, deadline=deadline,
+                                               receipt_out=receipt_out)
+                    if receipt_out is not None:
+                        receipt_out['symbol'] = sym
+                    return result
                 if e.code == 429:        # 被限流 → 兩端點都跳過,退避後整體重試
                     break
             except Exception as e:
@@ -332,12 +320,16 @@ def completed_daily_rows(rows, market, *, now=None, symbol=None, path=None, conn
     return completed
 
 
-def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_range=None):
+def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_range=None, ingest_receipt=None, job_id=None):
     """來源更新保留首次日線，修訂另存；不把短區段覆寫成不同價格基準。"""
     from stock_signals import bar_date
     from 台股交易參考 import eligible_bar
     counts = {'runId': uuid.uuid4().hex, 'symbol': sym, 'market': market, 'source': source,
               'inserted': 0, 'unchanged': 0, 'conflicts': 0, 'excluded': 0, 'observedAt': time.time()}
+    if job_id is not None:
+        if not isinstance(job_id, str) or not job_id.strip():
+            raise ValueError('日線取得工作識別必須是非空字串')
+        counts['jobId'] = job_id
     rows = list(rows)
     completed = completed_daily_rows(rows, market, symbol=sym)
     counts['excluded'] += len(rows) - len(completed)
@@ -347,6 +339,10 @@ def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_
         conn.execute('CREATE TABLE IF NOT EXISTS bar_source_revisions('
                      'id TEXT PRIMARY KEY,symbol TEXT,market TEXT,session_date TEXT,observed_at REAL,payload TEXT)')
         conn.execute('CREATE TABLE IF NOT EXISTS bar_ingest_runs(id TEXT PRIMARY KEY,payload TEXT)')
+        receipt_id = None
+        if ingest_receipt is not None:
+            receipt_id = source_provenance.store_receipt(conn, ingest_receipt, sym, market, source, rows)
+            counts['sourceReceiptId'] = receipt_id
         existing = {bar_date(r[0], market): r for r in conn.execute(
             'SELECT ts,open,high,low,close,volume FROM bars WHERE symbol=? AND market=? ORDER BY ts', (sym, market))}
         for row in rows:
@@ -371,9 +367,13 @@ def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_
                 key = hashlib.sha256((sym + market + day + payload).encode('utf-8')).hexdigest()
                 conn.execute('INSERT OR IGNORE INTO bar_source_revisions VALUES(?,?,?,?,?,?)',
                              (key, sym, market, day, counts['observedAt'], payload))
+                if receipt_id is not None:
+                    source_provenance.link_revision(conn, key, counts['runId'], receipt_id)
                 counts['conflicts'] += 1
                 continue
             conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', (sym, market, *row))
+            if receipt_id is not None:
+                source_provenance.link_first_insert(conn, market, sym, row, counts['runId'], receipt_id)
             existing[day] = row
             counts['inserted'] += 1
         conn.execute('INSERT INTO meta(symbol,market,name,last_update) VALUES(?,?,?,?) '
@@ -400,7 +400,9 @@ def source_revision_status(symbol=None, market='TW', *, connection=None):
         return {'count': count, 'symbols': symbols, 'policy': '來源修訂另存；首次日線保留，未自動覆寫'}
 
 
-def upsert_bars(sym, market, rows, *, source=None, source_hash='', path=None, check=lambda: None, source_receipt=None):
+def upsert_bars(sym, market, rows, *, source=None, source_hash='', path=None, check=lambda: None, source_receipt=None, ingest_receipt=None):
+    if ingest_receipt is not None and source != 'Yahoo Finance':
+        raise ValueError('一般來源收據目前僅支援 Yahoo 日線')
     if source in ('TWSE', 'TPEX'):
         rows = completed_daily_rows(rows, market, symbol=sym, path=path)
         try:
@@ -417,7 +419,7 @@ def upsert_bars(sym, market, rows, *, source=None, source_hash='', path=None, ch
     if path is not None:
         raise ValueError('一般來源更新使用既有資料庫契約，不允許改寫全域路徑')
     if source:
-        result = merge_source_bars(sym, market, rows, source, check=check)
+        result = merge_source_bars(sym, market, rows, source, check=check, ingest_receipt=ingest_receipt)
         return result['inserted'] + result['unchanged']
     rows = completed_daily_rows(rows, market, symbol=sym)
     with _db_write_lock:
@@ -438,8 +440,9 @@ def upsert_bars(sym, market, rows, *, source=None, source_hash='', path=None, ch
     return len(rows)
 
 def backfill(sym, market='TW', rng='10y'):
-    rows = fetch_yahoo_daily(sym, market, rng)
-    n = upsert_bars(sym, market, rows, source='Yahoo Finance')
+    receipt = {}
+    rows = fetch_yahoo_daily(sym, market, rng, receipt_out=receipt)
+    n = upsert_bars(sym, market, rows, source='Yahoo Finance', ingest_receipt=receipt)
     print(f'[db] {sym}.{market}: stored {n} bars ({rng})')
     return n
 
@@ -492,14 +495,17 @@ def backfill_universe(market='TW', rng='5y', workers=4, resume=True):
     ok = fail = 0
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {ex.submit(fetch_yahoo_daily, c, market, rng): c for c in todo}
+        receipts = {c: {} for c in todo}
+        futs = {ex.submit(fetch_yahoo_daily, c, market, rng, receipt_out=receipts[c]): c for c in todo}
         for i, fut in enumerate(as_completed(futs), 1):
             c = futs[fut]
             try:
-                upsert_bars(c, market, fut.result(), source='Yahoo Finance')   # 主執行緒序列寫入
+                upsert_bars(c, market, fut.result(), source='Yahoo Finance', ingest_receipt=receipts[c])   # 主執行緒序列寫入
                 ok += 1
             except Exception:
                 fail += 1
+            finally:
+                receipts.pop(c, None)
             if i % 100 == 0:
                 print(f'  ...{i}/{len(todo)}  ok={ok} fail={fail}  ({int(time.time()-t0)}s)')
     print(f'[db] done: ok={ok} fail={fail} / {len(todo)}  ({int(time.time()-t0)}s)')
@@ -547,8 +553,9 @@ def update(sym, market='TW'):
         days = max(0, (time.time() - latest) / 86400)
         rng = next((r for limit, r in ((20, '1mo'), (75, '3mo'), (150, '6mo'),
                                       (330, '1y'), (690, '2y'), (1700, '5y')) if days <= limit), '10y')
-        rows = fetch_yahoo_daily(sym, market, rng)
-        n = upsert_bars(sym, market, rows, source='Yahoo Finance')
+        receipt = {}
+        rows = fetch_yahoo_daily(sym, market, rng, receipt_out=receipt)
+        n = upsert_bars(sym, market, rows, source='Yahoo Finance', ingest_receipt=receipt)
         print(f'[db] {sym}.{market}: refreshed {n} recent bars')
         return n
     return backfill(sym, market)
