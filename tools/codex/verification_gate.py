@@ -1,6 +1,8 @@
 """依明列計畫執行驗證；完整驗證需授權依據，相同成功輸入直接重用。"""
+import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import platform
 import subprocess
@@ -37,6 +39,14 @@ def reject_broad_targeted(command):
     if executable == 'node':
         require(not any(value in ('-e', '--eval', '-p', '--print', '-') or value.startswith('--eval=')
                         for value in lower[1:]), 'targeted 不接受內嵌 Node；請展開明列案例。')
+        if '--test' in lower:
+            require(any(value.endswith(('.js', '.mjs', '.cjs')) and not value.startswith('-')
+                        for value in command[lower.index('--test') + 1:]),
+                    'Node --test 必須明列案例檔，不接受預設探索。')
+        if any(name in ('vitest.mjs', 'vitest.js') for name in names[1:]):
+            require('run' in lower and any(('.test.' in value or '.spec.' in value)
+                    and not value.startswith('-') for value in command[1:]),
+                    'Vitest 必須使用 run 並明列測試檔，不接受全套或監看模式。')
     if 'unittest' in lower:
         args = command[lower.index('unittest') + 1:]
         require('discover' not in args and not any(value in ('tests', 'tests/', 'tests\\', '.') for value in args)
@@ -148,7 +158,7 @@ def validate_impact(plan, command, inputs, cwd):
     return matches[0]['id']
 
 
-def main(plan_path, workspace_root=None):
+def main(plan_path, workspace_root=None, reuse_only=False):
     plan = json.loads(Path(plan_path).read_text(encoding='utf-8-sig'))
     require(plan.get('scope') in ('targeted', 'full'), '必須明列 targeted 或 full 範圍。')
     require(text(plan.get('reason')), '必須說明本次驗證與變更／失敗的關係。')
@@ -180,7 +190,7 @@ def main(plan_path, workspace_root=None):
     require(type(plan.get('timeout_seconds')) in (int, float) and plan['timeout_seconds'] >= plan['expected_seconds'], '必須設定不小於預估耗時的觀察上限。')
     root = Path(workspace_root or r'C:\Users\Sam\AI-Workspace').resolve(strict=True)
     output = Path(plan['evidence_dir']).resolve()
-    require(output.is_relative_to(root) and output != root, '證據目錄必須位於 AI-Workspace 的子目錄。')
+    require(output.is_relative_to(root) and output != root, '證據目錄必須位於指定工作區的子目錄。')
     fingerprints = {str(Path(p).resolve(strict=True)): sha(p) for p in sorted(set(inputs))}
     identity = {'command': command, 'cwd': str(cwd), 'inputs': fingerprints,
                 'environment': plan['environment'], 'verification_id': plan['verification_id'],
@@ -200,6 +210,8 @@ def main(plan_path, workspace_root=None):
         print(json.dumps({'decision': 'REUSE', 'message': '相同輸入及環境已通過，本次沒有執行命令。',
                           'artifact': plan['artifact'], 'verified_artifact': prior.get('artifact'), 'receipt': str(latest)}, ensure_ascii=False))
         return 0
+    require(not (reuse_only or os.environ.get('CODEX_VERIFICATION_REUSE_ONLY') == '1'),
+            '目前只允許沿用有效的靜態成功證據；未啟動測試或即時檢查。')
     require(not prior or prior.get('exit_code') == 0 or rerun, '前次同版本失敗；須先讀失敗紀錄並提供新的重跑依據。')
     used = prior.get('used_evidence', []) if prior else []
     if rerun:
@@ -260,8 +272,12 @@ def main(plan_path, workspace_root=None):
 
 if __name__ == '__main__':
     try:
-        require(len(sys.argv) == 2, '用法：python verification_gate.py <plan.json>')
-        sys.exit(main(sys.argv[1]))
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument('plan')
+        parser.add_argument('--workspace-root', help='CI 或其他主機的明確證據根目錄')
+        parser.add_argument('--reuse-only', action='store_true', help='不啟動任何驗證命令，只沿用有效證據')
+        args = parser.parse_args()
+        sys.exit(main(args.plan, workspace_root=args.workspace_root, reuse_only=args.reuse_only))
     except (ValueError, KeyError, OSError) as error:
         print(json.dumps({'decision': 'DENY', 'message': str(error)}, ensure_ascii=False))
         sys.exit(2)

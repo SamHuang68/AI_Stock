@@ -2,35 +2,37 @@
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock",
-  "baseCommit": "3a2356134a4fdc4b4e6a9232779594097a9f1b1d",
-  "documentation": ["AGENTS.md", "docs/revision.md", "docs/局部驗證與證據沿用.md", "tools/codex/README.md", "tools/codex/全域驗證規則.md"],
-  "cases": [
+  "baseCommit": "1f8c909fb72c856346002e4b4c3b2542c1066f2b",
+  "documentation": [
+    "docs/revision.md",
+    "docs/局部驗證與證據沿用.md",
+    "tools/codex/README.md"
+  ],
+  "cases": [],
+  "deferred": [
     {
-      "id": "變更選擇與CI接線",
-      "reason": "通用案例選擇、跨提交證據沿用、非ST專案隔離與CI只執行明列案例",
-      "kind": "unittest",
-      "targets": ["tests.test_變更驗證"],
-      "changes": ["tools/codex/變更驗證.py", "scripts/變更驗證.py", "tests/test_變更驗證.py", ".github/workflows/ci.yml", ".github/workflows/完整驗證.yml"],
-      "inputs": ["tools/codex/變更驗證.py", "tools/codex/verification_gate.py", "scripts/變更驗證.py", "tests/test_變更驗證.py", ".github/workflows/ci.yml", ".github/workflows/完整驗證.yml", "requirements-ci.txt"],
-      "timeoutSeconds": 90
+      "path": "scripts/private_web_release.py",
+      "reason": "本輪僅完成流程實作與作者閱讀，未執行測試，不以舊證據宣告通過。",
+      "user_quote": "補完 不跑測試",
+      "source": "Sam 本對話，2026-10-12"
     },
     {
-      "id": "全域驗證防呆",
-      "reason": "全域修改範圍對應、全套命令拒絕、有效證據重用與失敗逾時保護",
-      "kind": "unittest",
-      "targets": ["tests.test_驗證防呆"],
-      "changes": ["tools/codex/verification_gate.py", "tests/test_驗證防呆.py"],
-      "inputs": ["tools/codex/verification_gate.py", "tests/test_驗證防呆.py", "requirements-ci.txt"],
-      "timeoutSeconds": 90
+      "path": "tools/codex/verification_gate.py",
+      "reason": "本輪僅完成流程實作與作者閱讀，未執行測試，不以舊證據宣告通過。",
+      "user_quote": "補完 不跑測試",
+      "source": "Sam 本對話，2026-10-12"
     },
     {
-      "id": "發布stage與安全契約",
-      "reason": "stage局部計畫、封存驗證器與收據拒絕條件，以及既有資料保留與rollback的隔離fixture",
-      "kind": "unittest",
-      "targets": ["tests.test_private_web_release"],
-      "changes": ["scripts/private_web_release.py", "tests/test_private_web_release.py"],
-      "inputs": ["scripts/private_web_release.py", "tests/test_private_web_release.py", "server/daemon_lock.py", "scripts/變更驗證.py", "tools/codex/變更驗證.py", "tools/codex/verification_gate.py", "requirements-ci.txt"],
-      "timeoutSeconds": 90
+      "path": "tools/codex/變更驗證.py",
+      "reason": "本輪僅完成流程實作與作者閱讀，未執行測試，不以舊證據宣告通過。",
+      "user_quote": "補完 不跑測試",
+      "source": "Sam 本對話，2026-10-12"
+    },
+    {
+      "path": "tools/codex/完整驗證入口.py",
+      "reason": "共用完整計畫路徑轉接器尚未測試，不以文件或舊證據宣告通過。",
+      "user_quote": "補完 不跑測試",
+      "source": "Sam 本對話，2026-10-12"
     }
   ]
 }

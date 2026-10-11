@@ -61,3 +61,16 @@ command 必須 exact 對應 impact.cases 中唯一案例。每個案例的 input
 ```
 
 測試使用暫存目錄及秒級假 runner，包含兩個非 Stock Terminal 專案的隔離，不讀寫全域、不部署、不連網。main(plan_path, workspace_root=...) 第二參數可由程式指定證據根目錄，命令列仍使用固定 AI-Workspace 根目錄。
+# 跨專案接入與不啟動測試（2026-10-12）
+
+本次新增以下入口；本輪依 Sam「補完 不跑測試」僅完成程式修改與作者閱讀，沒有執行測試、語法檢查、建置或 CI，不能引用舊版通過結果證明這份修改已通過。
+
+- `變更驗證.py --reuse-only`：先核對所有案例的成功收據。任一項缺少、失效、失敗或仍在執行，就在啟動案例前拒絕。`CODEX_VERIFICATION_REUSE_ONLY=1` 適用兩個共用入口；不是跳過門檻並宣告成功。
+- `verification_gate.py <計畫> --workspace-root <根目錄>`：跨平台使用明確的證據根目錄，證據仍須位於其子目錄；完整驗證仍須原文、來源及必要性。
+- `變更驗證.py --ci-workflow <工作流程檔名>`：從該專案自己的 CI 還原同環境證據，不固定使用 ST 的 `ci.yml`。搭配既有 `--restore-ci <產物名稱>`。
+- `kind=command`：`command` 為以 `node` 或 `python` 開始的完整參數陣列，不經 shell 或 npm 包裝。`targets` 明列實際案例或來源檔，必須同時出現在命令參數及 `inputs`。直接 runner、測試、設定及鎖檔均納入輸入；例如 Vitest 用 `node_modules/vitest/vitest.mjs run tests/實際案例.test.ts`，禁止預設探索或監看。第三方 runner 檔案也須列入 `inputs`，因此 CI 先以 `npm ci --ignore-scripts` 安裝再核對計畫。
+- 只有明列 Markdown 文件及計畫自身變更時，可用 `cases=[]`；收據標示 `documentation-only`，不提供產品發布成功證據。
+
+使用者明確要求本輪不跑測試時，逐檔列入 `deferred`，每項包含 `path`、`reason`、`user_quote`、`source`。`cases` 可為空，但所有非文件變更仍須逐項對應。此計畫回報 `deferred`、退出碼 3，沒有任何測試程序；CI 與 stage 保持未驗證狀態，不發布未測候選。後續取得相應測試指示時，將受影響檔案改為真實案例計畫，不刪除缺口或沿用無關成功紀錄。
+
+ST stage 新增 `--reuse-only`，沿用資料備份、程序歸屬、產物完整性與 promote 條件；未測計畫及文件計畫不能建立可發布 stage。工具仍無法自動證明人填寫的全部輸入與影響範圍正確，也無法攔截任意 shell。

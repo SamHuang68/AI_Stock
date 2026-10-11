@@ -528,15 +528,18 @@ def stage_release(
     run_tests: bool = True,
     validation_plan: Path | None = None,
     evidence_dir: Path | None = None,
+    reuse_only: bool = False,
 ) -> Path:
     install_root = safe_install_root(install_root)
     with _release_lock(install_root):
         return _stage_release(install_root, ref=ref, python=python, run_tests=run_tests,
-                              validation_plan=validation_plan, evidence_dir=evidence_dir)
+                              validation_plan=validation_plan, evidence_dir=evidence_dir,
+                              reuse_only=reuse_only)
 
 
 def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool,
-                   validation_plan: Path | None = None, evidence_dir: Path | None = None) -> Path:
+                   validation_plan: Path | None = None, evidence_dir: Path | None = None,
+                   reuse_only: bool = False) -> Path:
     commit, release_id = resolve_commit(ref)
     releases = install_root / "releases"
     if _is_link(releases):
@@ -571,6 +574,10 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
             plan = helpers['read_plan'](extracted, plan_path, base_root=ROOT, target_commit=commit)
             if plan.get('commit') != commit:
                 raise RuntimeError("驗證計畫版本與封存版本不符")
+            if plan.get('deferred'):
+                raise RuntimeError("此候選依使用者要求未執行測試；保留來源交付，不建立可發布 stage。")
+            if not plan.get('cases'):
+                raise RuntimeError("文件計畫不提供產品發布證據，不能用來建立可發布 stage。")
 
         _run([python, "build_v2.py"], cwd=extracted)
         _remove_bytecode(extracted)
@@ -581,6 +588,7 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
                 extracted, plan_path,
                 evidence_dir.resolve() if evidence_dir is not None else install_root / '驗證證據',
                 base_root=ROOT, target_commit=commit,
+                **({'reuse_only': True} if reuse_only else {}),
             )
             # 所有測試的寫入均不成為發布輸入；最後再以同一封存重建。
             _remove_managed(extracted, temp)
@@ -824,6 +832,7 @@ def main() -> None:
     stage.add_argument("--skip-tests", action="store_true")
     stage.add_argument("--validation-plan", type=Path, help="明列修改範圍與必要案例的驗證計畫")
     stage.add_argument("--evidence-dir", type=Path, help="供相同輸入沿用通過證據的收據目錄")
+    stage.add_argument("--reuse-only", action="store_true", help="缺少可沿用證據時停止，不啟動任何測試")
 
     promote = sub.add_parser("promote", help="make a staged release current")
     promote.add_argument("--release", required=True)
@@ -842,6 +851,7 @@ def main() -> None:
             run_tests=not args.skip_tests,
             validation_plan=args.validation_plan,
             evidence_dir=args.evidence_dir,
+            reuse_only=args.reuse_only,
         )
         print(json.dumps({"staged": str(path)}, ensure_ascii=False, indent=2))
     elif args.command == "promote":
