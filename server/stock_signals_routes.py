@@ -124,10 +124,11 @@ def _datastore():
     return datastore
 
 
-def _fetch_remote(code: str, market: str, rng: str) -> List[tuple]:
+def _fetch_remote(code: str, market: str, rng: str, *, receipt_out=None) -> List[tuple]:
     ds = _datastore()
     deadline = Deadline(REMOTE_FETCH_SECONDS)
-    future = _remote_pool.submit(ds.fetch_yahoo_daily, code, market, rng, retries=2, deadline=deadline)
+    future = _remote_pool.submit(ds.fetch_yahoo_daily, code, market, rng, retries=2, deadline=deadline,
+                                 receipt_out=receipt_out)
     if future is None:
         raise SourceBusyError('行情更新工作繁忙')
     done, _ = wait([future], timeout=deadline.remaining())
@@ -191,7 +192,8 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
         gap_days = (date.fromisoformat(expected) - date.fromisoformat(last)).days if last and expected else 9999
         rng = '5y' if need_full or gap_days > 80 else ('3mo' if gap_days > 4 else '5d')
         try:
-            fetched = _fetch_remote(code, market, rng)
+            receipt = {}
+            fetched = _fetch_remote(code, market, rng, receipt_out=receipt)
         except Exception as exc:  # 網路失敗：保留本機資料並標示
             fetched = []
             retry_soon = isinstance(exc, TimeoutError)
@@ -218,7 +220,7 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
             try:
                 updated_bars = bars
                 if final_rows:
-                    ds.upsert_bars(code, market, final_rows, source='Yahoo Finance')
+                    ds.upsert_bars(code, market, final_rows, source='Yahoo Finance', ingest_receipt=receipt)
                     updated_rows = ds.get_bars(code, market=market)
                     updated_bars = ss.normalize_bars(updated_rows, market)
             except (ValueError, sqlite3.Error, OSError) as exc:

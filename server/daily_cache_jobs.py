@@ -158,13 +158,16 @@ def _run(symbols, period, kind, budget, job_id):
                     # 已有足夠深度只從最後日期前七天續補，避免固定一個月留下缺口。
                     query_start = max(start, datetime.fromisoformat(covered[1]).date() - timedelta(days=7)) if covered else start
                     start_ts = int(datetime.combine(query_start, datetime.min.time(), _TZ[market]).timestamp())
-                    rows = datastore.fetch_yahoo_daily(symbol, market, period, retries=1, start_ts=start_ts, deadline=budget)
+                    receipt = {}
+                    rows = datastore.fetch_yahoo_daily(symbol, market, period, retries=1, start_ts=start_ts, deadline=budget,
+                                                       receipt_out=receipt)
                     budget.check()
                     rows = [r for r in rows if query_start.isoformat() <= bar_date(r[0], market) <= cutoff.isoformat()]
                     if not rows:
                         raise ValueError('來源沒有已完成的日線；未寫入')
                     result = datastore.merge_source_bars(symbol, market, rows, 'Yahoo Finance', check=budget.check,
-                                                         fetched_range=(start.isoformat(), cutoff.isoformat()))
+                                                         fetched_range=(start.isoformat(), cutoff.isoformat()),
+                                                         ingest_receipt=receipt, job_id=job_id)
             with _lock:
                 _active['results'].append(result)
                 _active['completed'] += 1
