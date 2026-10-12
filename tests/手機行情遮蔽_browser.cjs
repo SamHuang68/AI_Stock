@@ -81,8 +81,9 @@ async function checkScrolledControls(page) {
     for(const el of await page.locator(selector).all()) {
       if(!await el.isVisible()) continue;
       await el.scrollIntoViewIfNeeded();
-      const hit = await el.evaluate(node=>{const r=node.getBoundingClientRect(), top=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {id:node.id||node.textContent.trim(),reachable:r.x>=0&&r.right<=innerWidth&&top&&(top===node||node.contains(top))};});
-      assert.ok(hit.reachable,`橫向捲動後入口仍被遮蔽：${hit.id}`); checked.push(hit.id);
+      // 捲動位置採整數像素，字型寬度可有小數；容許半像素捨入，中心命中仍須是該按鈕。
+      const hit = await el.evaluate(node=>{const r=node.getBoundingClientRect(), top=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {id:node.id||node.textContent.trim(),rect:{x:r.x,y:r.y,right:r.right,bottom:r.bottom},viewport:{width:innerWidth,height:innerHeight},hit:top?.id||top?.className,reachable:r.x>=-.5&&r.right<=innerWidth+.5&&top&&(top===node||node.contains(top))};});
+      assert.ok(hit.reachable,`橫向捲動後入口仍被遮蔽：${JSON.stringify(hit)}`); checked.push(hit.id);
     }
   }
   const lastGroup=page.locator('#pro-tools .tbg-btn').last();
