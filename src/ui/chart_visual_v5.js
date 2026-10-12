@@ -223,7 +223,6 @@ html.st-vs5 .mkt-cell .ch:before{content:"· ";color:#536178}
   html.st-vs5 #mkt-bar-inner,html.st-vs5 .mkt-bar-inner{
     grid-auto-columns:max-content;width:max-content;min-width:100%;padding-bottom:4px;
   }
-  html.st-vs5 .mkt-cell{min-width:148px}
   html.st-vs5 .mkt-panel:focus-visible{outline:1px solid var(--gold);outline-offset:-2px}
   html.st-vs5 #wlbar{height:65px!important;padding:0 4px;gap:2px}
   html.st-vs5 #wlchips{column-gap:2px;row-gap:0}
@@ -245,6 +244,16 @@ html.st-vs5 .mkt-cell .ch:before{content:"· ";color:#536178}
   html.st-vs5 .dual-half{min-height:102px}
   html.st-vs5 #ctag-now,html.st-vs5 #ctag-prev{right:1px!important}
 }
+/* 手機行情以內容決定寬度；縮字時同步收緊留白，長數值仍完整顯示。 */
+@media(max-width:900px), (orientation:landscape) and (max-height:500px) and (max-width:1100px){
+  html.st-vs5 #mkt-bar{height:72px;min-height:72px;max-height:72px;padding:2px 3px}
+  html.st-vs5 #mkt-bar-tabs{margin-right:2px}
+  html.st-vs5 #mkt-bar-inner,html.st-vs5 .mkt-bar-inner{gap:2px}
+  html.st-vs5 .mkt-cell{min-width:110px;min-height:28px;padding:2px 5px;gap:0}
+  html.st-vs5 .mkt-cell .row1{gap:4px}
+  html.st-vs5 .mkt-cell .row2{gap:3px}
+  html.st-vs5 .mkt-cell .px{font-size:10.5px;letter-spacing:0}
+}
 /* 瀏覽器列會壓縮手機橫向高度；固定列共用高度預算，把剩餘空間留給 K 線。 */
 @media(orientation:landscape) and (max-height:500px) and (max-width:1100px){
   html.st-vs5[data-st5-route="chart"] #topbar{
@@ -265,7 +274,7 @@ html.st-vs5 .mkt-cell .ch:before{content:"· ";color:#536178}
     height:30px!important;min-height:30px;max-height:30px;flex-wrap:nowrap;
     overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none;
   }
-  html.st-vs5[data-st5-route="chart"] #mkt-bar{height:44px;min-height:44px;max-height:44px;padding:2px 3px}
+  html.st-vs5[data-st5-route="chart"] #mkt-bar{height:36px;min-height:36px;max-height:36px;padding:2px 3px}
   html.st-vs5[data-st5-route="chart"] #mkt-bar-tabs{width:64px;flex:0 0 64px;flex-direction:row}
   html.st-vs5[data-st5-route="chart"] .mkt-tab{writing-mode:horizontal-tb;letter-spacing:0;padding:2px;font-size:10px}
   html.st-vs5[data-st5-route="chart"] .mkt-panel{overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:none}
@@ -273,7 +282,7 @@ html.st-vs5 .mkt-cell .ch:before{content:"· ";color:#536178}
   html.st-vs5[data-st5-route="chart"] .mkt-bar-inner{
     grid-template-rows:1fr;grid-auto-columns:max-content;width:max-content;min-width:100%;padding-bottom:0;
   }
-  html.st-vs5[data-st5-route="chart"] .mkt-cell{min-width:148px;min-height:36px}
+  html.st-vs5[data-st5-route="chart"] .mkt-cell{min-width:110px;min-height:28px}
 }
 @media(prefers-reduced-motion:reduce){
   html.st-vs5 .wlchip,html.st-vs5 .mkt-cell,html.st-vs5 #chart-search #gobtn{transition:none!important}

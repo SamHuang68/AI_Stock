@@ -98,17 +98,17 @@
     var style = document.createElement('style');
     style.id = 'stock-health-v5-css';
     style.textContent =
-      '.sh5{padding:8px 9px 14px;color:var(--text,#cdd6e4);font-family:"Noto Sans TC",sans-serif}' +
+      '.sh5{container-type:inline-size;padding:8px 9px 14px;color:var(--text,#cdd6e4);font-family:"Noto Sans TC",sans-serif}' +
       '.sh5-head{display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;margin-bottom:7px}' +
       '.sh5-title{font:800 13px/1.3 "Noto Sans TC",sans-serif;color:var(--thi,#f2f5fa)}' +
       '.sh5-title small{font:600 9px "JetBrains Mono",monospace;color:var(--tlo);margin-left:6px}' +
       '.sh5-modes{display:inline-flex;border:1px solid var(--border,#22324a);border-radius:999px;overflow:hidden}' +
       '.sh5-modes button{background:transparent;border:0;color:var(--tlo);font:700 10px "Noto Sans TC",sans-serif;padding:3px 9px;cursor:pointer}' +
       '.sh5-modes button.on{background:rgba(251,191,36,.16);color:var(--gold,#fbbf24)}' +
-      '.sh5-lights{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;margin:6px 0 8px}' +
-      '.sh5-light{border:1px solid rgba(90,106,130,.35);border-radius:8px;padding:6px 4px;text-align:center;background:rgba(10,18,30,.55)}' +
-      '.sh5-light .k{font-size:10px;color:var(--tlo)}' +
-      '.sh5-light .v{font-size:13px;font-weight:800;margin-top:2px;white-space:nowrap}' +
+      '.sh5-lights{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;margin:6px 0 8px}' +
+      '.sh5-light{min-width:0;border:1px solid rgba(90,106,130,.35);border-radius:8px;padding:5px 3px;text-align:center;background:rgba(10,18,30,.55)}' +
+      '.sh5-light .k{font-size:9px;line-height:1.25;color:var(--tlo)}' +
+      '.sh5-light .v{font-size:11px;line-height:1.25;font-weight:700;margin-top:2px;white-space:normal;overflow-wrap:anywhere}' +
       '.sh5-light .p{font-size:10px;color:#b8c7d9;margin-top:4px;line-height:1.45;text-align:left}' +
       '.sh5-sum{font-size:13px;line-height:1.65;color:#f4f8fc;font-weight:700;padding:8px 10px;border-radius:8px;' +
         'background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.22)}' +
@@ -152,7 +152,8 @@
       '.sh5-scroll{overflow:auto;max-width:100%}.sh5-professional pre{font-size:10px;line-height:1.5}' +
       '.sh5 :focus-visible{outline:2px solid var(--gold,#fbbf24);outline-offset:2px}' +
       '.sh5-dot{display:inline-block;min-width:34px;font:800 10px "Noto Sans TC",sans-serif;margin-right:3px;white-space:nowrap}' +
-      '@media(max-width:520px){.sh5-lights{grid-template-columns:repeat(3,minmax(0,1fr))}}';
+      '@media(max-width:520px){.sh5-lights{grid-template-columns:repeat(3,minmax(0,1fr))}}' +
+      '@container(max-width:290px){.sh5-lights{grid-template-columns:repeat(3,minmax(0,1fr))}}';
     document.head.appendChild(style);
   }
 

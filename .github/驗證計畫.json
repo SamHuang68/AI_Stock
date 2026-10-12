@@ -2,29 +2,24 @@
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock",
-  "baseCommit": "4e2ef2c0090be3f299f3ebbb95f8aa8399efbc3c",
+  "baseCommit": "b0461db128493eb8228682cb8826e91a7e36ca89",
   "documentation": [
-    "docs/revision.md",
-    "tests/fixtures/圖表引擎來源.md"
+    "docs/revision.md"
   ],
   "cases": [
     {
       "id": "手機行情遮蔽",
-      "reason": "照片已證實短橫向 K 線被固定列擠壓；新增真實圖表引擎與固定 OHLCV，僅驗受影響版面與入口",
+      "reason": "手機行情字級、內距與列高緊縮；體檢五燈號縮字及窄容器重排，只驗受影響顯示與入口",
       "kind": "node",
       "targets": [
         "tests/手機行情遮蔽_browser.cjs"
       ],
       "changes": [
         "src/ui/chart_visual_v5.js",
+        "src/ui/stock_health_v5.js",
         "stock_terminal_v2.html",
         "tests/手機行情遮蔽_browser.cjs",
-        "tests/fixtures/lightweight-charts-4.2.0.js",
-        "tests/fixtures/lightweight-charts-LICENSE.txt",
-        "tests/fixtures/lightweight-charts-NOTICE.txt",
-        "src/ui/toolbar_v3.js",
-        "stock_terminal.html",
-        "src/ui/mobile_v2.css"
+        "src/core/pro_v2.js"
       ],
       "inputs": [
         "src/ui/chart_visual_v5.js",
