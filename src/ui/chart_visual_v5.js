@@ -217,12 +217,23 @@ html.st-vs5 .mkt-cell .px{font-size:12.5px;color:#edf4fb}
 html.st-vs5 .mkt-cell .ch:before{content:"· ";color:#536178}
 
 @media(max-width:900px){
+  /* 行情保留完整數值；窄螢幕以兩列橫向捲動取代六欄等分擠壓。 */
+  html.st-vs5 #mkt-bar{height:88px;min-height:88px;max-height:88px}
+  html.st-vs5 .mkt-panel{overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:thin}
+  html.st-vs5 #mkt-bar-inner,html.st-vs5 .mkt-bar-inner{
+    grid-auto-columns:max-content;width:max-content;min-width:100%;padding-bottom:4px;
+  }
+  html.st-vs5 .mkt-cell{min-width:148px}
+  html.st-vs5 .mkt-panel:focus-visible{outline:1px solid var(--gold);outline-offset:-2px}
   html.st-vs5 #wlbar{height:65px!important;padding:0 4px;gap:2px}
   html.st-vs5 #wlchips{column-gap:2px;row-gap:0}
   html.st-vs5 .wlchip{height:30px!important;padding:0 5px!important}
   html.st-vs5 .wladd{height:64px}
-  html.st-vs5 #topbar{padding-right:46px!important}
-  html.st-vs5 #topbar #keybtn{margin-right:36px!important}
+  html.st-vs5 #topbar{
+    height:auto!important;min-height:42px;max-height:none;flex-wrap:wrap;
+    padding-block:4px;padding-right:46px!important;row-gap:4px;
+  }
+  html.st-vs5 #topbar #keybtn{margin-left:0!important;margin-right:0!important}
   html.st-vs5 #topbar .shell-dash-btn{
     position:absolute!important;right:4px;top:5px;z-index:20;
     width:34px;height:32px;margin:0!important;padding:4px!important;gap:0;
