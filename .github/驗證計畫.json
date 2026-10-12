@@ -127,7 +127,12 @@
         "node",
         "browser"
       ],
-      "timeoutSeconds": 90
+      "timeoutSeconds": 90,
+      "environmentKeys": [
+        "ST_PLAYWRIGHT",
+        "ST_MOBILE_BASELINE",
+        "PLAYWRIGHT_BROWSERS_PATH"
+      ]
     }
   ]
 }
