@@ -16,7 +16,12 @@ const bars = Array.from({length:90},(_,i) => {
 });
 const quote = Object.fromEntries(['open','high','low','close','volume'].map(k=>[k,bars.map(b=>b[k])]));
 const fixture = {chart:{result:[{timestamp:bars.map(b=>b.time),indicators:{quote:[quote]},meta:{symbol:'2330.TW',shortName:'台積電',currency:'TWD',regularMarketPrice:bars.at(-1).close,regularMarketPreviousClose:bars.at(-2).close,regularMarketTime:bars.at(-1).time}}],error:null}};
-const changed = ['src/ui/polish_v3.js', 'src/ui/chart_visual_v5.js', 'src/ui/mobile_v2.css', 'src/ui/toolbar_v3.js'];
+const changed = ['src/ui/chart_visual_v5.js', 'src/ui/stock_health_v5.js', 'src/core/pro_v2.js'];
+// 沿用正式燈號契約，包含四字狀態與進階說明；只驗排版，不推導市場結論。
+const healthFixture = {ok:true,symbol:'2330',market:'TW',asOf:'2026-10-12',events:[],health:{
+  lights:[['趨勢','bull','上升'],['動能','bull','轉強'],['量能','bull','放量上漲'],['籌碼','caution','分歧'],['風險','unknown','資料不足']]
+    .map(([label,state,tag],i)=>({label,state,tag,evidenceId:'版面證據'+i,plain:'保留完整狀態說明，依原始證據判讀。'})),
+  summary:{sentence:'版面固定案例，非即時市場結論。'}}};
 const report = { fixtureOnly: true, inputs: ['stock_terminal_v2.html', ...assetPaths], cases: [], pageErrors: [] };
 
 async function measure(page) {
@@ -44,10 +49,24 @@ async function measure(page) {
       const covered = (fab && el !== fab && intersects(r, rect(fab))) || controls.some(other => other !== el && intersects(r,rect(other)));
       return outside || textCut || covered ? [{ id:el.id || el.className, outside, textCut, covered,rect:r,innerHeight }] : [];
     });
-    return { clipped, controlIssues, market:rect(bar), fab:rect(fab), fabOverlap:intersects(rect(bar),rect(fab)),
+    const cell=panel.querySelector('.mkt-cell'), style=getComputedStyle(cell);
+    return { clipped, controlIssues, market:rect(bar), cell:rect(cell), priceFont:getComputedStyle(cell.querySelector('.px')).fontSize,
+      padding:style.padding, minWidth:style.minWidth, fab:rect(fab), fabOverlap:intersects(rect(bar),rect(fab)),
       scrollWidth:panel.scrollWidth, clientWidth:panel.clientWidth, scrollLeft:panel.scrollLeft,
       documentOverflow:document.documentElement.scrollWidth > innerWidth,
       counts:[...document.querySelectorAll('.mkt-panel')].map(p => p.querySelectorAll('.mkt-cell').length) };
+  });
+}
+
+async function measureHealth(page) {
+  return page.evaluate(() => {
+    const lights=[...document.querySelectorAll('#rpanel .sh5-light')];
+    return {count:lights.length,columns:getComputedStyle(document.querySelector('#rpanel .sh5-lights')).gridTemplateColumns,
+      lights:lights.map(cell=>{const r=cell.getBoundingClientRect(),v=cell.querySelector('.v'),k=cell.querySelector('.k');
+        const clipped=[...cell.querySelectorAll('.k,.v,.p')].flatMap(el=>{const range=document.createRange();range.selectNodeContents(el);
+          return [...range.getClientRects()].some(t=>t.left<r.left-.5||t.right>r.right+.5||t.top<r.top-.5||t.bottom>r.bottom+.5)?[el.className]:[];});
+        return {label:k.textContent,value:v.textContent,font:getComputedStyle(v).fontSize,labelFont:getComputedStyle(k).fontSize,
+          width:r.width,height:r.height,clipped,evidence:cell.dataset.ev,plain:cell.querySelector('.p')?.textContent};})};
   });
 }
 
@@ -105,7 +124,7 @@ async function checkScrolledControls(page) {
       const sources = {...assets};
       const pageHtml = version === '修改前' ? fs.readFileSync(path.join(process.env.ST_MOBILE_BASELINE,'stock_terminal_v2.html'),'utf8') : html;
       if (version === '修改前') for (const file of changed) sources[file] = fs.readFileSync(path.join(process.env.ST_MOBILE_BASELINE,file),'utf8');
-      const viewports = version === '修改前' ? [[844,300],[844,390]] : [[320,740],[375,812],[390,844],[667,300],[844,300],[844,330],[844,390],[932,300],[1440,900]];
+      const viewports = version === '修改前' ? [[375,812],[844,300]] : [[320,740],[375,812],[390,844],[667,300],[844,300],[844,330],[844,390],[932,300],[1440,900]];
       for (const [width,height] of viewports) {
         const mobile = width <= 1100;
         const shortLandscape = mobile && width>height;
@@ -121,6 +140,8 @@ async function checkScrolledControls(page) {
             contentType:file === '' ? 'text/html; charset=utf-8' : file.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/javascript; charset=utf-8', body:file === '' ? pageHtml : sources[file] });
           if(url.href.includes('lightweight-charts@4.2.0/')) return route.fulfill({contentType:'application/javascript',body:chartLibrary});
           if(url.pathname.startsWith('/yf/') && !url.pathname.endsWith('/batch')) return route.fulfill({contentType:'application/json',body:JSON.stringify(fixture)});
+          if(url.pathname==='/stock-signals') return route.fulfill({contentType:'application/json',body:JSON.stringify(healthFixture)});
+          if(url.pathname==='/stock-signals/push-config') return route.fulfill({contentType:'application/json',body:JSON.stringify({mode:'off',symbols:0})});
           // 其他網路一律隔離；正式 loadSym／指標／圖表仍用上面的固定日線完成渲染。
           return route.fulfill({ contentType:'application/json', body:'{}' });
         });
@@ -144,6 +165,40 @@ async function checkScrolledControls(page) {
           });
         });
         const entry = { version, width, height, tabs:[] }; report.cases.push(entry);
+        // 先量測體檢；再進行捲動、收合與轉盤操作，避免操作狀態干擾同條件字級對照。
+        await page.evaluate(()=>window.ShellV5.closeRing());
+        if(width<=768 && width<height) {
+          await page.locator('#rpage-next').click();
+          await page.locator('#rpage-next').click();
+        } else await page.locator('#tab-health').click();
+        try { await page.waitForSelector('#rpanel .sh5-light'); }
+        catch(error) {
+          entry.healthFailure=await page.evaluate(()=>({sym:S.sym,tab:S.tab,route:ShellV5.route(),panel:document.querySelector('#rpanel').innerHTML}));
+          await page.screenshot({path:path.join(output,`${version}-${width}x${height}-體檢入口失敗.png`)});
+          throw error;
+        }
+        entry.health=[];
+        for(const mode of ['beginner','advanced']) {
+          await page.locator(`[data-sh5-mode="${mode}"]`).click();
+          const measured=await measureHealth(page);entry.health.push({mode,...measured});
+          if(version==='候選') {
+            assert.equal(measured.count,5);
+            measured.lights.forEach((light,i)=>{
+              assert.equal(light.font,'11px');assert.equal(light.labelFont,'9px');
+              assert.deepEqual(light.clipped,[],`${width} 體檢${light.label}文字裁切`);
+              assert.ok(light.value.endsWith(healthFixture.health.lights[i].tag));
+              assert.equal(light.evidence,healthFixture.health.lights[i].evidenceId);
+              if(mode==='advanced') assert.equal(light.plain,healthFixture.health.lights[i].plain);
+            });
+          }
+          await page.screenshot({path:path.join(output,`${version}-${width}x${height}-體檢-${mode}.png`)});
+        }
+        if(width<=768 && width<height) {
+          await page.locator('#rpage-prev').click();
+          await page.locator('#rpage-prev').click();
+          await page.waitForFunction(()=>document.querySelector('#chart-wrap').getBoundingClientRect().height>100);
+          await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+        }
         entry.chart = await measureChart(page);
         if(shortLandscape) await page.screenshot({path:path.join(output,`${version}-${width}x${height}-圖表.png`)});
         if(version==='候選' && shortLandscape) {
@@ -172,6 +227,9 @@ async function checkScrolledControls(page) {
             assert.equal(result.fabOverlap,false,`${width} 轉盤遮住行情`);
             assert.equal(result.documentOverflow,false,`${width} 整頁溢位`);
             assert.deepEqual(result.controlIssues,[],`${width} 相鄰控制入口遮蔽`);
+            assert.equal(result.priceFont,'10.5px');
+            assert.equal(result.minWidth,'110px');
+            assert.ok(result.market.height<=(shortLandscape?36:72),'行情列仍占用多餘高度');
           }
           if (width === 375 || (version === '候選' && tab === 'mkt')) await page.screenshot({path:path.join(output,`${version}-${width}x${height}-${tab}.png`)});
         }
@@ -200,7 +258,12 @@ async function checkScrolledControls(page) {
       }
     }
     if (process.env.ST_MOBILE_BASELINE) {
-      assert.ok(report.cases[0].chart.chart.height<60,'修改前應重現短橫向 K 線被壓縮');
+      for(const before of report.cases.filter(c=>c.version==='修改前')) {
+        const after=report.cases.find(c=>c.version==='候選'&&c.width===before.width&&c.height===before.height);
+        assert.ok(after.tabs[0].cell.width<before.tabs[0].cell.width,'同資料行情格須更緊湊');
+        assert.ok(after.tabs[0].market.height<before.tabs[0].market.height,'行情列須減少留白');
+        assert.ok(parseFloat(after.health[0].lights[0].font)<parseFloat(before.health[0].lights[0].font),'體檢狀態字須縮小');
+      }
     }
     assert.deepEqual(report.pageErrors,[],'頁面執行錯誤');
     report.status = '通過';

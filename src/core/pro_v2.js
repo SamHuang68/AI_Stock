@@ -954,7 +954,8 @@ document.addEventListener('click', ev => {
   if (!right || !rtabs) return;
   // Detect taps on the top 14px (where ::before handle sits in mobile CSS)
   rtabs.addEventListener('click', (e) => {
-    if (window.innerWidth > 768) return;
+    // 橫向沒有抽屜把手；頁籤按鈕也不能被頂部收合熱區攔截。
+    if (window.innerWidth > 768 || window.matchMedia('(orientation: landscape)').matches || e.target.closest('button')) return;
     const rect = rtabs.getBoundingClientRect();
     if (e.clientY - rect.top <= 16) {
       right.classList.toggle('collapsed');
