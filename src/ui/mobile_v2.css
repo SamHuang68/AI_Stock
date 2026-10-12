@@ -304,9 +304,15 @@
   #rpanel-pager {
     flex: 0 0 calc(54px + env(safe-area-inset-bottom,0px)) !important;
     z-index: 140 !important;
+    /* 轉盤與分頁各有空間，避免按鈕覆蓋行情或下一頁入口。 */
+    padding-right: 56px;
   }
   html[data-st5-route="chart"] #st-ring-fab {
-    bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+    right: 7px !important;
+    bottom: calc(6px + env(safe-area-inset-bottom, 0px)) !important;
+    width: 42px !important;
+    height: 42px !important;
+    z-index: 141 !important;
   }
   #live-panel {
     bottom: calc(62px + env(safe-area-inset-bottom, 0px)) !important;
