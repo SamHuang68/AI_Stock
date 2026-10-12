@@ -329,7 +329,7 @@
     height: 100% !important;
     flex: 1 1 60% !important;
   }
-  #body > #right {
+  body:not(.right-collapsed) #body > #right {
     display: flex !important;
     width: 40% !important;
     height: 100% !important;

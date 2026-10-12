@@ -2,24 +2,29 @@
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock",
-  "baseCommit": "1f8c909fb72c856346002e4b4c3b2542c1066f2b",
+  "baseCommit": "4e2ef2c0090be3f299f3ebbb95f8aa8399efbc3c",
   "documentation": [
-    "docs/revision.md"
+    "docs/revision.md",
+    "tests/fixtures/圖表引擎來源.md"
   ],
   "cases": [
     {
       "id": "手機行情遮蔽",
-      "reason": "只驗手機行情完整文字、相鄰控制與轉盤避讓、兩頁籤19項保留、橫向觸控及末端代號委派；桌面僅保存對照畫面",
+      "reason": "照片已證實短橫向 K 線被固定列擠壓；新增真實圖表引擎與固定 OHLCV，僅驗受影響版面與入口",
       "kind": "node",
       "targets": [
         "tests/手機行情遮蔽_browser.cjs"
       ],
       "changes": [
         "src/ui/chart_visual_v5.js",
-        "src/ui/mobile_v2.css",
-        "src/ui/polish_v3.js",
         "stock_terminal_v2.html",
-        "tests/手機行情遮蔽_browser.cjs"
+        "tests/手機行情遮蔽_browser.cjs",
+        "tests/fixtures/lightweight-charts-4.2.0.js",
+        "tests/fixtures/lightweight-charts-LICENSE.txt",
+        "tests/fixtures/lightweight-charts-NOTICE.txt",
+        "src/ui/toolbar_v3.js",
+        "stock_terminal.html",
+        "src/ui/mobile_v2.css"
       ],
       "inputs": [
         "src/ui/chart_visual_v5.js",
@@ -121,7 +126,11 @@
         "src/ui/K線事件研究.js",
         "src/ui/toolbar_v3.js",
         "src/chart/market_score_bar_v3.js",
-        "src/chart/market_chart_v3.js"
+        "src/chart/market_chart_v3.js",
+        "tests/fixtures/lightweight-charts-4.2.0.js",
+        "tests/fixtures/lightweight-charts-LICENSE.txt",
+        "tests/fixtures/lightweight-charts-NOTICE.txt",
+        "stock_terminal.html"
       ],
       "prepare": [
         "node",

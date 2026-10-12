@@ -110,21 +110,17 @@
     if (!btn) return;
     if (menu.parentElement !== document.body) document.body.appendChild(menu);
     var r = btn.getBoundingClientRect();
-    menu.style.top = Math.round(r.bottom + 5) + 'px';
-    menu.style.left = Math.round(r.left) + 'px';
+    menu.style.maxHeight = 'min(70vh,420px)';
     menu.classList.add('open');
-    // 右側溢出時往左收
+    // 短橫向畫面可能上下都放不下；選較寬裕的一側，選單內捲動保留全部操作。
     var mr = menu.getBoundingClientRect();
-    var maxR = window.innerWidth - 8;
-    if (mr.right > maxR) {
-      menu.style.left = Math.max(8, Math.round(maxR - mr.width)) + 'px';
-    }
-    // 下方溢出時往上開
-    var maxB = window.innerHeight - 8;
+    var below = Math.max(0, window.innerHeight - 8 - r.bottom - 5);
+    var above = Math.max(0, r.top - 5 - 8);
+    var openAbove = mr.height > below && above > below;
+    menu.style.maxHeight = Math.floor(Math.min(mr.height, openAbove ? above : below)) + 'px';
     mr = menu.getBoundingClientRect();
-    if (mr.bottom > maxB && r.top > mr.height + 10) {
-      menu.style.top = Math.round(r.top - mr.height - 5) + 'px';
-    }
+    menu.style.top = Math.max(8, Math.round(openAbove ? r.top - mr.height - 5 : r.bottom + 5)) + 'px';
+    menu.style.left = Math.max(8, Math.round(Math.min(r.left, window.innerWidth - 8 - mr.width))) + 'px';
   }
 
   // ── 開合控制 ────────────────────────────────────────────────────────────
