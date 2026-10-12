@@ -165,6 +165,8 @@ async function checkScrolledControls(page) {
           });
         });
         const entry = { version, width, height, tabs:[] }; report.cases.push(entry);
+        entry.chart = await measureChart(page);
+        if(shortLandscape) await page.screenshot({path:path.join(output,`${version}-${width}x${height}-圖表.png`)});
         // 先量測體檢；再進行捲動、收合與轉盤操作，避免操作狀態干擾同條件字級對照。
         await page.evaluate(()=>window.ShellV5.closeRing());
         if(width<=768 && width<height) {
@@ -199,8 +201,6 @@ async function checkScrolledControls(page) {
           await page.waitForFunction(()=>document.querySelector('#chart-wrap').getBoundingClientRect().height>100);
           await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
         }
-        entry.chart = await measureChart(page);
-        if(shortLandscape) await page.screenshot({path:path.join(output,`${version}-${width}x${height}-圖表.png`)});
         if(version==='候選' && shortLandscape) {
           assert.ok(entry.chart.chart.height>=110,`${width}x${height} K 線高度不足：${entry.chart.chart.height}`);
           assert.ok(entry.chart.analysis.width>=width*.3 && entry.chart.analysis.height>=180,'橫向分析區仍須同屏可見');
