@@ -252,8 +252,9 @@ function syncAppVisualViewport(reason) {
   try {
     const viewport = window.visualViewport;
     const measured = viewport && Number.isFinite(viewport.height) ? viewport.height : window.innerHeight;
-    const height = Math.max(320, Math.round(measured || window.innerHeight || 0));
-    if (!height) return;
+    // 手機橫向扣除瀏覽器列後可低於 320px，不能把行情列推到可視範圍之外。
+    const height = Math.round(measured || window.innerHeight || 0);
+    if (height <= 0) return;
     const next = height + 'px';
     if (document.documentElement.style.getPropertyValue('--st-app-height') !== next) {
       document.documentElement.style.setProperty('--st-app-height', next);

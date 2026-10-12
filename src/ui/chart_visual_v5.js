@@ -245,6 +245,36 @@ html.st-vs5 .mkt-cell .ch:before{content:"· ";color:#536178}
   html.st-vs5 .dual-half{min-height:102px}
   html.st-vs5 #ctag-now,html.st-vs5 #ctag-prev{right:1px!important}
 }
+/* 瀏覽器列會壓縮手機橫向高度；固定列共用高度預算，把剩餘空間留給 K 線。 */
+@media(orientation:landscape) and (max-height:500px) and (max-width:1100px){
+  html.st-vs5[data-st5-route="chart"] #topbar{
+    height:34px!important;min-height:34px;max-height:34px;flex-wrap:nowrap;
+    padding:0 4px!important;gap:5px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;
+  }
+  html.st-vs5[data-st5-route="chart"] #topbar > *{flex-shrink:0}
+  html.st-vs5[data-st5-route="chart"] #topbar .shell-dash-btn{
+    position:relative!important;inset:auto!important;width:30px;height:28px;padding:2px!important;
+  }
+  html.st-vs5[data-st5-route="chart"] #topbar .shell-dash-label{display:none!important}
+  html.st-vs5[data-st5-route="chart"] #topbar .shell-dash-glyph{width:23px;height:23px}
+  html.st-vs5[data-st5-route="chart"] #wlbar{height:51px!important;padding:0 4px;gap:2px}
+  html.st-vs5[data-st5-route="chart"] #wlchips{row-gap:0;column-gap:2px}
+  html.st-vs5[data-st5-route="chart"] .wlchip{height:24px!important;padding:0 5px!important}
+  html.st-vs5[data-st5-route="chart"] .wladd{height:50px}
+  html.st-vs5[data-st5-route="chart"] #pro-tools{
+    height:30px!important;min-height:30px;max-height:30px;flex-wrap:nowrap;
+    overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none;
+  }
+  html.st-vs5[data-st5-route="chart"] #mkt-bar{height:44px;min-height:44px;max-height:44px;padding:2px 3px}
+  html.st-vs5[data-st5-route="chart"] #mkt-bar-tabs{width:64px;flex:0 0 64px;flex-direction:row}
+  html.st-vs5[data-st5-route="chart"] .mkt-tab{writing-mode:horizontal-tb;letter-spacing:0;padding:2px;font-size:10px}
+  html.st-vs5[data-st5-route="chart"] .mkt-panel{overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:none}
+  html.st-vs5[data-st5-route="chart"] #mkt-bar-inner,
+  html.st-vs5[data-st5-route="chart"] .mkt-bar-inner{
+    grid-template-rows:1fr;grid-auto-columns:max-content;width:max-content;min-width:100%;padding-bottom:0;
+  }
+  html.st-vs5[data-st5-route="chart"] .mkt-cell{min-width:148px;min-height:36px}
+}
 @media(prefers-reduced-motion:reduce){
   html.st-vs5 .wlchip,html.st-vs5 .mkt-cell,html.st-vs5 #chart-search #gobtn{transition:none!important}
   html.st-vs5 .wlchip:hover,html.st-vs5 .mkt-cell:hover{transform:none!important}
