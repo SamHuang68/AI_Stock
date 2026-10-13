@@ -1400,6 +1400,27 @@
       ],
       "expectedSeconds": 2,
       "timeoutSeconds": 30
+    },
+    {
+      "id": "CI來源位元組與局部驗證接線",
+      "reason": "Windows CI 自動轉 CRLF 使 Git blob／archive 的 LF 輸入無法沿用證據；只驗證 checkout 前停用自動換行轉換與既有局部驗證接線，保留各平台真實輸入證據",
+      "kind": "unittest",
+      "targets": [
+        "tests.test_變更驗證.變更驗證測試.test_CI自動路徑只走局部計畫_完整路徑僅明確授權"
+      ],
+      "changes": [
+        ".github/workflows/ci.yml",
+        "tests/test_變更驗證.py"
+      ],
+      "inputs": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/完整驗證.yml",
+        "tests/test_變更驗證.py",
+        "tools/codex/變更驗證.py",
+        "tools/codex/verification_gate.py"
+      ],
+      "expectedSeconds": 5,
+      "timeoutSeconds": 60
     }
   ]
 }

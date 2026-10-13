@@ -165,6 +165,11 @@ class 變更驗證測試(unittest.TestCase):
 
     def test_CI自動路徑只走局部計畫_完整路徑僅明確授權(self):
         ci = (ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')
+        newline_setup = '        run: git config --global core.autocrlf false\n'
+        checkout = '      - uses: actions/checkout@v7\n'
+        self.assertEqual(ci.count(newline_setup), 1)
+        self.assertEqual(ci.count(checkout), 1)
+        self.assertLess(ci.index(newline_setup), ci.index(checkout))
         self.assertIn('scripts/變更驗證.py --check', ci)
         self.assertIn('--restore-ci', ci)
         self.assertNotIn('unittest discover', ci)
