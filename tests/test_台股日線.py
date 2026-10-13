@@ -134,10 +134,12 @@ class DatabaseCase(unittest.TestCase):
     def test_portfolio_preserves_return_dates_around_missing_close(self):
         from portfolio import _dated_rets, compute
         self.assertEqual(_dated_rets({1: 100, 2: None, 3: 110, 4: 121}, [1, 2, 3, 4]), {4: 121 / 110 - 1})
-        rows = [(daily.stamp(date(2026, 1, 1) + timedelta(days=i)), 100, 100, 100, 100 + i, 1000) for i in range(90)]
+        from tests.已核對資料 import 價格資料, 交易日
+        rows = [(daily.stamp(d), 100+i, 101+i, 99+i, 100+i, 1000)
+                for i, d in enumerate(交易日('2026-01-01', 90))]
         missing = list(rows)
         missing[45] = (rows[45][0], None, None, None, None, 0)
-        with patch('datastore.get_bars_bulk', return_value={'2330': missing, '^TWII': rows}):
+        with 價格資料({'2330': missing, '^TWII': rows}):
             result = compute([{'sym': '2330', 'weight': 1}])
         self.assertEqual(result['portfolio']['days'], 87)
 

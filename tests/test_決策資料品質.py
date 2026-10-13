@@ -134,13 +134,18 @@ class SourceQualityTest(unittest.TestCase):
         self.assertIsNone(view['actionEnvelope']['positionRange'])
 
 
+from tests.已核對資料 import 價格資料, 交易日
+
+
 class PortfolioCoverageTest(unittest.TestCase):
     @staticmethod
     def bars(start, end):
-        return [(1767225600 + i * 86400, 100, 105, 95, 100 + i % 5, 1000) for i in range(start, end)]
+        days = 交易日('2026-01-01', end)
+        return [(int(datetime.combine(days[i], datetime.min.time(), timezone.utc).timestamp()),
+                 100, 105, 95, 100 + i % 5, 1000) for i in range(start, end)]
 
     def build(self, data, holdings, *, kind='actual'):
-        with patch.object(portfolio.datastore, 'get_bars_bulk', return_value=data):
+        with 價格資料(data):
             overlay = portfolio.compute(holdings)
         context = dc.build_decision_context(pulse(), now=FIXED_NOW, key_levels=KEYS,
             risk_profile=PROFILE, portfolio_overlay=overlay, portfolio_kind=kind)

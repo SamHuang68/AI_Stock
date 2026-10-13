@@ -599,6 +599,22 @@ class PrivateWebGatewayTests(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertEqual(UpstreamHandler.seen, [])
 
+    def test_macro_refresh_owner_post_requires_browser_origin(self):
+        path = self.base + '/macro/refresh/vix'
+        for method, token, basic, origin, expected in (
+            ('GET', 'owner-secret', False, None, 403),
+            ('GET', 'reader-secret', False, None, 403),
+            ('POST', 'reader-secret', False, None, 403),
+            ('POST', 'owner-secret', True, None, 403),
+            ('POST', 'owner-secret', True, 'https://invalid.example', 403),
+            ('POST', 'owner-secret', True, self.base, 200),
+            ('POST', 'owner-secret', False, None, 200),
+        ):
+            with self.subTest(method=method, token=token, basic=basic, origin=origin):
+                status, _ = _request(path, method=method, token=token, basic=basic,
+                                     origin=origin, body={} if method == 'POST' else None)
+                self.assertEqual(status, expected)
+
     def test_basic_browser_write_requires_same_origin(self):
         status, _ = _request(
             self.base + "/portfolio",

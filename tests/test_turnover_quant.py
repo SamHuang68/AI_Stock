@@ -25,8 +25,9 @@ class TestTurnoverQuant(unittest.TestCase):
         self.assertTrue(q['streak'] > 0)
 
     def test_latest_yi_override(self):
-        turns = [{'amount': x * 1e8} for x in (8000, 8100, 8200)]
-        q = tq.turnover_quant(turns, latest_yi=9000)
+        turns = [{'date': d, 'amount': x * 1e8} for d, x in zip(
+            ('2026-10-01', '2026-10-02', '2026-10-05'), (8000, 8100, 8200))]
+        q = tq.turnover_quant(turns, latest_yi=9000, latest_date='2026-10-06')
         self.assertEqual(q['yi'], 9000.0)
         self.assertGreater(q['n'], 3)
 

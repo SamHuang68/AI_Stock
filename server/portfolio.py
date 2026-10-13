@@ -33,14 +33,19 @@ def _risk_series(connection, code, rows, *, benchmark=False):
         return {}, '日線品質或來源存在衝突'
     tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if 'bar_quality' in tables:
-        issues = connection.execute('SELECT issues FROM bar_quality WHERE market=? AND symbol=? AND session_date BETWEEN ? AND ?',
+        issues = connection.execute('SELECT session_date,issues FROM bar_quality WHERE market=? AND symbol=? AND session_date BETWEEN ? AND ?',
                                     ('TW', code, first, last)).fetchall()
-        if any(json.loads(row[0]) for row in issues):
+        # 官方量價差異共用舊標籤；價格已有分欄核對時，純成交量差異不能否決收盤風險。
+        if any(json.loads(raw) and not (
+                json.loads(raw) == ['官方來源與原始日線不同；原始值保留']
+                and evidence.get(day, {}).get('priceVerified')) for day, raw in issues):
             return {}, '日線品質紀錄尚有未解問題'
     # 指數本身不適用個股公司行動；來源衝突仍會在上方擋下。
     if benchmark and code.startswith('^'):
         return {b['date']: b['close'] for b in bars}, None
-    adjusted = adjusted_bars(bars, load_snapshot(connection, code))
+    # 缺收盤的日期留給 _dated_rets 阻擋兩側報酬；不因此丟棄其他已核對價格。
+    priced = [b for b in bars if b.get('close') is not None and math.isfinite(b['close']) and b['close'] > 0]
+    adjusted = adjusted_bars(priced, load_snapshot(connection, code)) if priced else None
     if adjusted:
         return {b['date']: b['close'] for b in adjusted}, None
     coverage = connection.execute('SELECT start_date,end_date FROM action_coverage WHERE market=? AND symbol=?', ('TW', code)).fetchone() if 'action_coverage' in tables else None
@@ -176,7 +181,7 @@ def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
                     price_issues[code] = issue
             observed = sorted({t for values in series.values() for t in values})
             from 台股交易參考 import verified_sessions
-            dates = verified_sessions(observed[0], observed[-1], connection=connection) if observed else []
+            dates = verified_sessions(observed[0], observed[-1], connection=connection, allow_partial=True) if observed else []
             if dates is None:
                 dates = []
                 price_issues['calendar'] = '交易日曆涵蓋不足'

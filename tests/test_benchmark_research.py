@@ -10,6 +10,19 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 import benchmark_research as br  # noqa: E402
 
 
+from tests.已核對資料 import 日曆資料, 交易日
+
+
+def setUpModule():
+    global _calendar_fixture
+    _calendar_fixture = 日曆資料()
+    _calendar_fixture.__enter__()
+
+
+def tearDownModule():
+    _calendar_fixture.__exit__(None, None, None)
+
+
 class BenchmarkResearchTest(unittest.TestCase):
     def test_parses_official_openapi_roc_dates(self):
         rows = br.parse_tai50_payload([
@@ -37,15 +50,17 @@ class BenchmarkResearchTest(unittest.TestCase):
             path = os.path.join(tmp, 'tai50_daily.csv')
             level = 10000.0
             rows = []
-            start = date.today() - timedelta(days=819)
+            start = date.today() - timedelta(days=1147)
+            sessions = 交易日(start, 820)
             for index in range(820):
                 level *= 1.003 if index % 2 else 0.998
                 rows.append({
-                    'date': (start + timedelta(days=index)).isoformat(),
+                    'date': sessions[index].isoformat(),
                     'priceIndex': level * 0.45,
                     'totalReturnIndex': level,
                 })
             br._write_rows(rows, path)
+            br.atomic_write_json(str(path) + '.coverage.json', {'requestedStart': rows[0]['date'], 'failedMonths': {}})
             loaded = br._read_rows(path)
             self.assertEqual(len(loaded), 820)
             contract = br.snapshot(allow_network=False, path=path)['FTSE_TAIWAN_50']

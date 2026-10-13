@@ -31,9 +31,7 @@ except Exception:
 
 
 def _bar_day(base: date, close: float, offset: int = 0) -> tuple:
-    day = base + timedelta(days=offset)
-    while day.weekday() >= 5:
-        day += timedelta(days=1)
+    day = 交易日(base, offset + 1)[-1]
     ts = datetime.combine(day, datetime.min.time().replace(hour=13, minute=30), TZ_TPE).timestamp()
     return (ts, close, close, close, close, 1_000_000)
 
@@ -46,6 +44,19 @@ def _synthetic_bars(n: int = 120, start_close: float = 100.0, drift: float = 0.1
         close = max(1.0, close + drift + (0.08 if i % 5 == 0 else -0.03))
         rows.append(_bar_day(base, close, i))
     return rows
+
+
+from tests.已核對資料 import 日曆資料, 交易日
+
+
+def setUpModule():
+    global _calendar_fixture
+    _calendar_fixture = 日曆資料()
+    _calendar_fixture.__enter__()
+
+
+def tearDownModule():
+    _calendar_fixture.__exit__(None, None, None)
 
 
 class DeviationZBinTests(unittest.TestCase):

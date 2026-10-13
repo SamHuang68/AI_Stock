@@ -19,6 +19,9 @@ import 台股日線 as daily
 from tests.test_stock_signals import make_bars
 
 
+from tests.已核對資料 import 價格資料, 交易日
+
+
 class DataBoundaries(unittest.TestCase):
     def test_one_share_source_revision_is_preserved_and_cancel_is_atomic(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -62,9 +65,9 @@ class DataBoundaries(unittest.TestCase):
                 ds.fetch_yahoo_daily('2330', 'TW', retries=1)
 
     def test_equal_sessions_with_different_times_have_equal_returns(self):
-        rows = [(daily.stamp(date(2026, 1, 1) + timedelta(days=i)), 100+i, 101+i, 99+i, 100+i, 1000) for i in range(90)]
+        rows = [(daily.stamp(交易日('2026-01-01', 90)[i]), 100+i, 101+i, 99+i, 100+i, 1000) for i in range(90)]
         offset = [(r[0]+3600, *r[1:]) for r in rows]
-        with patch.object(ds, 'get_bars_bulk', return_value={'2330': rows, '2317': offset, '^TWII': rows}):
+        with 價格資料({'2330': rows, '2317': offset, '^TWII': rows}):
             result = portfolio.compute([{'sym': '2330', 'weight': 1}, {'sym': '2317', 'weight': 1}])
         self.assertEqual(result['portfolio']['days'], 89)
         self.assertEqual(result['corr']['2330|2317'], 1)

@@ -477,7 +477,7 @@ CONTROL_POST_EXACT = {
     "/stock-signals/research/refresh",
     "/stock-signals/explain",
 }
-CONTROL_POST_PREFIXES = ("/draw/",)
+CONTROL_POST_PREFIXES = ("/draw/", "/macro/refresh/")
 
 # These backend endpoints are intentionally not remotely reachable, even with
 # the owner token.  They are listed here for status/documentation responses.
