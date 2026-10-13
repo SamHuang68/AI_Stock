@@ -261,6 +261,111 @@ class 資料修正案例(unittest.TestCase):
         self.assertEqual(out['txf']['price'], 120)
         self.assertEqual(out['overview']['strip']['txfTrend']['spark'], [100])
         self.assertFalse(out['overview']['strip']['txfTrend']['latestMerged'])
+    def _記憶體日曆(self):
+        conn = sqlite3.connect(':memory:')
+        self.addCleanup(conn.close)
+        conn.executescript('CREATE TABLE calendar_years(year INTEGER,closed TEXT,opened TEXT);'
+                           'CREATE TABLE session_months(month TEXT,observed_through TEXT,dates TEXT);')
+        return conn
+
+    def test_日曆_未知年份與年度開休市實際查詢(self):
+        conn = self._記憶體日曆()
+        self.assertIsNone(calendar.verified_sessions('2024-01-01', '2024-01-05', connection=conn))
+        conn.execute('INSERT INTO calendar_years VALUES(?,?,?)',
+                     (2024, json.dumps(['2024-01-02']), json.dumps(['2024-01-06'])))
+        self.assertEqual(calendar.verified_sessions('2024-01-01', '2024-01-07', connection=conn),
+                         ['2024-01-01', '2024-01-03', '2024-01-04', '2024-01-05', '2024-01-06'])
+
+    def test_日曆_實際月份缺日優先年度並只保留已核對尾段(self):
+        conn = self._記憶體日曆()
+        conn.execute('INSERT INTO calendar_years VALUES(?,?,?)', (2024, '[]', '[]'))
+        conn.execute('INSERT INTO session_months VALUES(?,?,?)',
+                     ('2024-01', '2024-01-05', json.dumps(['2024-01-02', '2024-01-04', '2024-01-05'])))
+        self.assertEqual(calendar.verified_sessions('2024-01-01', '2024-01-05', connection=conn),
+                         ['2024-01-02', '2024-01-04', '2024-01-05'])
+        conn.execute('DELETE FROM calendar_years')
+        conn.execute('INSERT INTO session_months VALUES(?,?,?)',
+                     ('2024-03', '2024-03-05', json.dumps(['2024-03-01', '2024-03-04', '2024-03-05'])))
+        self.assertIsNone(calendar.verified_sessions('2024-01-01', '2024-03-05', connection=conn))
+        self.assertEqual(calendar.verified_sessions('2024-01-01', '2024-03-05', connection=conn, allow_partial=True),
+                         ['2024-03-01', '2024-03-04', '2024-03-05'])
+        self.assertEqual(calendar.verified_sessions('2024-01-01', '2024-03-06', connection=conn, allow_partial=True), [])
+
+    def test_F08_正式分割參考阻擋未還原價格(self):
+        conn = sqlite3.connect(':memory:')
+        self.addCleanup(conn.close)
+        conn.executescript(datastore.SCHEMA)
+        calendar.references.cache_clear()
+        self.addCleanup(calendar.references.cache_clear)
+        events = calendar.split_references('0050')
+        self.assertTrue(any(row['date'] == '2025-06-18' and row['ratio'] == 4 for row in events))
+        values, issue = portfolio._risk_series(conn, '0050', 日線(['2025-06-17', '2025-06-18']))
+        self.assertEqual(values, {})
+        self.assertIn('公司行動', issue)
+
+    def test_F23_WATCH與警報來源解析保留缺值並共用真實日曆(self):
+        from contextlib import nullcontext
+        from io import BytesIO
+        import alert_daemon
+        import watch_daemon
+        conn = self._記憶體日曆()
+        conn.execute('INSERT INTO calendar_years VALUES(?,?,?)', (2025, '[]', '[]'))
+        days = [day for day in 日期(100) if date.fromisoformat(day).weekday() < 5][:65]
+        bars = 日線(days)
+        bars[0]['close'] = None
+        for key in ('high', 'low', 'volume'):
+            bars[-2][key] = None
+        payload = {'chart': {'result': [{'timestamp': days, 'indicators': {'quote': [
+            {key: [bar[key] for bar in bars] for key in ('open', 'high', 'low', 'close', 'volume')}
+        ]}}]}}
+        encoded = json.dumps(payload).encode()
+        results = []
+        with patch('urllib.request.urlopen', side_effect=lambda *a, **k: BytesIO(encoded)) as provider, \
+             patch.object(datastore, 'read_snapshot', side_effect=lambda: nullcontext(conn)):
+            for fetch, calculate in [(watch_daemon._fetch_daily, watch_daemon._ind),
+                                     (alert_daemon._fetch_daily_candles, alert_daemon._calc_ind)]:
+                candles = fetch('2330', 'TW')
+                self.assertEqual(len(candles), 65)
+                self.assertEqual([row['time'] for row in candles], days)
+                self.assertIsNone(candles[0]['close'])
+                self.assertIsNone(candles[-2]['high'])
+                self.assertIsNone(candles[-2]['low'])
+                self.assertIsNone(candles[-2]['volume'])
+                out = calculate(candles, 'TW', '2330')
+                self.assertEqual(out['close'], 165)
+                self.assertIsNotNone(out['sma60'])
+                self.assertIsNotNone(out['rsi14'])
+                self.assertIsNone(out['high20'])
+                self.assertIsNone(out['volRatio'])
+                results.append(out)
+            self.assertEqual(provider.call_count, 2)
+        self.assertEqual({key: results[0][key] for key in results[1]}, results[1])
+
+    def test_F23_WATCH與警報缺交易日後重新暖機(self):
+        from contextlib import nullcontext
+        from io import BytesIO
+        import alert_daemon
+        import watch_daemon
+        conn = self._記憶體日曆()
+        conn.execute('INSERT INTO calendar_years VALUES(?,?,?)', (2025, '[]', '[]'))
+        days = [day for day in 日期(100) if date.fromisoformat(day).weekday() < 5][:65]
+        bars = 日線(days)
+        kept = bars[:60] + bars[61:]
+        payload = {'chart': {'result': [{'timestamp': [row['date'] for row in kept], 'indicators': {'quote': [
+            {key: [bar[key] for bar in kept] for key in ('open', 'high', 'low', 'close', 'volume')}
+        ]}}]}}
+        encoded = json.dumps(payload).encode()
+        with patch('urllib.request.urlopen', side_effect=lambda *a, **k: BytesIO(encoded)), \
+             patch.object(datastore, 'read_snapshot', side_effect=lambda: nullcontext(conn)):
+            for fetch, calculate in [(watch_daemon._fetch_daily, watch_daemon._ind),
+                                     (alert_daemon._fetch_daily_candles, alert_daemon._calc_ind)]:
+                candles = fetch('2330', 'TW')
+                self.assertEqual(len(candles), 64)
+                out = calculate(candles, 'TW', '2330')
+                self.assertEqual(out['close'], 165)
+                self.assertIsNone(out['sma20'])
+                self.assertIsNone(out['rsi14'])
+                self.assertIsNone(out['volRatio'])
 
 if __name__ == '__main__':
     unittest.main()

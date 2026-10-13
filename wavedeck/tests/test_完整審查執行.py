@@ -2,6 +2,7 @@
 import importlib
 import importlib.util
 import subprocess
+import shutil
 import sys
 import threading
 import unittest
@@ -27,11 +28,13 @@ class 執行修正測試(unittest.TestCase):
         self.engine.system_control("stop")
         for index, action in enumerate(("ENTER_LONG", "ENTER_SHORT", "REDUCE", "EXIT")):
             with self.subTest(動作=action):
-                result = self.engine.handle_signal(self.signal(signal_id=f"停止訊號{index}", action=action))
+                # 識別欄位依正式 ASCII 契約，不使用介面顯示文字當作識別碼。
+                result = self.engine.handle_signal(self.signal(signal_id=f"stop-signal-{index}", action=action))
+                self.assertIn("gate", result, result)
                 self.assertEqual(result["gate"]["allow"], action in {"REDUCE", "EXIT"})
         self.assertEqual(self.runtime.snapshot()["positions"]["account"], 0)
         self.engine.system_control("start")
-        self.assertTrue(self.engine.handle_signal(self.signal(signal_id="恢復訊號"))["gate"]["allow"])
+        self.assertTrue(self.engine.handle_signal(self.signal(signal_id="restart-signal"))["gate"]["allow"])
 
     def test_推論途中停止後不得新增部位(self):
         self.engine.set_strategy_mode("discretionary")
@@ -136,6 +139,44 @@ class 執行修正測試(unittest.TestCase):
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
         with module.acquire(directory):
             self.assertTrue((directory / "wavedeck.instance.lock").is_file())
+
+    def test_真實服務匯入入口先取得單例才初始化狀態及稽核(self):
+        root = self.home / "服務入口"
+        shutil.copytree(self.home / "server", root / "server", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        shutil.copyfile(Path(__file__).resolve().parents[1] / "VERSION", root / "VERSION")
+        lock_module = importlib.import_module(self.package + ".程序單例")
+        directory = root / "data"
+        child = r'''
+import runpy, socket, sys
+from pathlib import Path
+from unittest.mock import patch
+root = Path(sys.argv[1])
+blocked = sys.argv[2] == 'blocked'
+def forbidden(*args, **kwargs):
+    raise AssertionError('匯入入口不得監聽或連線')
+with patch.object(socket.socket, 'connect', forbidden), patch.object(socket.socket, 'bind', forbidden):
+    try:
+        namespace = runpy.run_path(str(root / 'server' / 'server.py'), run_name='_隔離服務入口')
+    except RuntimeError as exc:
+        assert blocked, str(exc)
+        assert '單例鎖' in str(exc), str(exc)
+        assert 'server.state' not in sys.modules, '取得單例前已初始化狀態'
+        assert 'server.audit' not in sys.modules, '取得單例前已載入稽核'
+    else:
+        assert not blocked, '已被占用的資料目錄仍成功匯入服務'
+        assert 'server.state' in sys.modules, '成功取得鎖後未初始化狀態'
+        assert 'server.audit' in sys.modules, '成功取得鎖後未載入稽核'
+        assert not namespace['_INSTANCE_LOCK'].closed, '服務未持續持有單例鎖'
+'''
+        command = [sys.executable, "-B", "-c", child, str(root)]
+        with lock_module.acquire(directory):
+            before = {path.name: path.read_bytes() for path in directory.iterdir() if path.is_file()}
+            blocked = subprocess.run(command + ["blocked"], cwd=root, capture_output=True, timeout=8)
+            self.assertEqual(blocked.returncode, 0, blocked.stdout + blocked.stderr)
+            after = {path.name: path.read_bytes() for path in directory.iterdir() if path.is_file()}
+            self.assertEqual(after, before, "拒絕第二個服務前已改寫資料")
+        accepted = subprocess.run(command + ["accepted"], cwd=root, capture_output=True, timeout=8)
+        self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
 
 
 del _base

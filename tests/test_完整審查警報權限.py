@@ -162,6 +162,25 @@ class 警報與權限案例(unittest.TestCase):
         self.alert.save_rules(before, expected_revision=revision)
         self.assertEqual(self.alert.load_rules(strict=True)[0]['_last_fired'], 9)
 
+    def test_真正輪詢取價途中修改不被整份舊快照覆蓋(self):
+        original = [{'id': key, 'sym': key, 'price': price}
+                    for key, price in (('a', 1), ('b', 2), ('c', 3))]
+        self.alert.save_rules(original)
+        current = [dict(original[1], price=22), original[2], {'id': 'd', 'sym': 'd', 'price': 4}]
+
+        def quote(symbol, market):
+            if symbol == 'a':
+                self.alert.save_rules(current)
+            return 10
+
+        with mock.patch.object(self.alert, 'load_config', return_value={'enabled': True}), \
+                mock.patch.object(self.alert, 'fetch_price', side_effect=quote), \
+                mock.patch.object(self.alert, 'notify') as notify:
+            self.alert._check_once()
+        notify.assert_not_called()
+        self.assertEqual(self.alert.load_rules(strict=True),
+                         [current[0], dict(original[2], _last_side='above'), current[2]])
+
     def test_局部設定與遮罩不重寫金鑰且明確空字串才清除(self):
         value = copy.deepcopy(self.alert._DEFAULT_CONFIG)
         value['telegram']['bot_token'] = 'fixture-secret'

@@ -74,6 +74,7 @@
         "server/公司行動比較.py",
         "server/公司行動更新.py",
         "server/台股日線.py",
+        "server/台股交易參考.json",
         "server/台股交易參考.py",
         "server/台股基本面.py",
         "server/估值趨勢.py",
@@ -237,6 +238,7 @@
         "server/公司行動比較.py",
         "server/公司行動更新.py",
         "server/台股日線.py",
+        "server/台股交易參考.json",
         "server/台股交易參考.py",
         "server/台股基本面.py",
         "server/估值趨勢.py",
@@ -422,7 +424,8 @@
         "wavedeck/server/st_push.py",
         "wavedeck/server/state.py",
         "wavedeck/tests/test_完整審查執行.py",
-        "wavedeck/tests/test_策略訊號整合.py"
+        "wavedeck/tests/test_策略訊號整合.py",
+        "wavedeck/VERSION"
       ],
       "expectedSeconds": 15,
       "timeoutSeconds": 90
