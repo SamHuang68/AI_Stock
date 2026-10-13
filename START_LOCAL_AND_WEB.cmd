@@ -16,7 +16,7 @@ if not errorlevel 1 (
   goto :web
 )
 REM START_TIP.cmd does not return while it starts the server, so start it detached and poll /health.
-start "ST local launcher" /min "%SystemRoot%\System32\cmd.exe" /c ""%~dp0START_TIP.cmd""
+start "ST local launcher" /min "%SystemRoot%\System32\cmd.exe" /c ""%~dp0START_TIP.cmd" -NoBrowser"
 echo Local launcher started. Waiting for /health ^(up to 40 checks; each request up to 3 seconds^)...
 set /a TRIES=0
 :wait_local
@@ -76,16 +76,26 @@ echo.
 echo ------------------------------------------------------------
 set "RC=0"
 set "LOCAL_READY=0"
+set "WEB_READY=0"
 call :local_up
 if errorlevel 1 (echo  Local : DOWN  http://127.0.0.1:18432/& set /a RC^|=1) else (echo  Local : UP    http://127.0.0.1:18432/& set "LOCAL_READY=1")
 call :web_ready
-if errorlevel 1 (echo  Web   : DOWN  http://127.0.0.1:18434/  ^(gateway or backend not ready^)& set /a RC^|=2) else (echo  Web   : UP    http://127.0.0.1:18434/)
+if errorlevel 1 (echo  Web   : DOWN  http://127.0.0.1:18434/  ^(gateway or backend not ready^)& set /a RC^|=2) else (echo  Web   : UP    http://127.0.0.1:18434/& set "WEB_READY=1")
 echo ------------------------------------------------------------
 if "%OPEN_BROWSER%"=="1" if "%LOCAL_READY%"=="1" call :open_local
+if "%OPEN_BROWSER%"=="1" if "%WEB_READY%"=="1" call :open_web
 exit /b %RC%
 
 :open_local
 start "" "http://127.0.0.1:18432/#pulse"
+exit /b 0
+
+:open_web
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0scripts\inspect_tailscale_private_web.ps1" -OpenBrowser
+if errorlevel 1 (
+  echo [WARN] Private Web is running, but its Tailscale page could not be opened.
+  set /a RC^|=2
+)
 exit /b 0
 
 :local_up

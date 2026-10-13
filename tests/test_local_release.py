@@ -521,6 +521,27 @@ if (Test-LocalHealth $health $base 'def' $python) {{throw '錯誤 SHA 未拒絕'
             self.assertTrue((managed / '轉接成功.txt').is_file())
             self.assertEqual((checkout / 'stock_terminal_v2.html').read_text(encoding='utf-8'), '未提交修改')
 
+    def test_受管轉接保留預設開頁且傳遞不開頁選項(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            checkout = root / '工作樹'
+            (checkout / 'scripts').mkdir(parents=True)
+            shutil.copy2(ROOT / 'scripts/go.ps1', checkout / 'scripts/go.ps1')
+            write(checkout / 'build_v2.py', 'raise RuntimeError("不應執行建置")')
+            managed = root / 'appdata/StockTerminalLocal'
+            managed.mkdir(parents=True)
+            local.write_json(managed / CONFIG_NAME, {'originalCheckout': str(checkout)})
+            (managed / 'start_local.ps1').write_text(
+                "param([string]$InstallRoot,[switch]$NoBrowser)\n"
+                "[IO.File]::WriteAllText((Join-Path $InstallRoot '開頁參數.txt'),[string][bool]$NoBrowser)\nexit 0\n",
+                encoding='utf-8-sig')
+            command = str(checkout / 'scripts/go.ps1').replace("'", "''")
+            for argument, expected in (('', 'False'), (' -NoBrowser', 'True')):
+                with self.subTest(argument=argument):
+                    self.run_ps(f"& '{command}'{argument}\nexit $LASTEXITCODE",
+                                env=dict(os.environ, LOCALAPPDATA=str(root / 'appdata')))
+                    self.assertEqual((managed / '開頁參數.txt').read_text(), expected)
+
 
 if __name__ == '__main__':
     unittest.main()

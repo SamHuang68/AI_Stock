@@ -2,68 +2,57 @@
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock",
-  "baseCommit": "65856dd7759e2f44b77178847357d184cf1ceac6",
+  "baseCommit": "7cd52f739b4babc3526748d16e15e9b30a824756",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "曝險品質與保守約束",
-      "reason": "融資覆蓋、過期來源、真實期間、新舊評分分離與既有風險警告保全",
+      "id": "啟動分頁與參數傳遞",
+      "reason": "冷暖啟動每端只開一次、無瀏覽器參數、Serve HTTPS 路由與失敗碼保全",
       "kind": "unittest",
       "targets": [
-        "tests.test_曝險壓力",
-        "tests.test_margin_cycle_state",
-        "tests.test_exposure_lab.ExposureLabTest.test_contract_separates_monthly_core_from_weekly_monitor",
-        "tests.test_exposure_lab.ExposureLabTest.test_shareable_default_hides_holding_specific_hypotheses",
-        "tests.test_consensus_attention.ConsensusAttentionTest.test_owner_exposure_never_appears_for_observation_pool"
+        "tests.test_launcher_cmd.LauncherCmdOfflineBehaviorTests.test_source_is_ascii_and_preserves_crlf",
+        "tests.test_launcher_cmd.LauncherCmdOfflineBehaviorTests.test_no_browser_keeps_services_ready_without_opening_a_window",
+        "tests.test_launcher_cmd.LauncherCmdOfflineBehaviorTests.test_recovered_local_opens_browser_once",
+        "tests.test_launcher_cmd.LauncherCmdOfflineBehaviorTests.test_cold_no_browser_suppresses_child_and_both_pages",
+        "tests.test_launcher_cmd.LauncherCmdOfflineBehaviorTests.test_web_url_failure_preserves_local_and_reports_web_bit",
+        "tests.test_launcher_cmd.LauncherCmdOfflineBehaviorTests.test_both_up_exit_zero",
+        "tests.test_launcher_cmd.LauncherCmdOfflineBehaviorTests.test_local_down_exit_one",
+        "tests.test_launcher_cmd.LauncherCmdOfflineBehaviorTests.test_web_down_exit_two",
+        "tests.test_launcher_cmd.LauncherCmdOfflineBehaviorTests.test_both_down_exit_three",
+        "tests.test_local_release.LocalPowerShellTests.test_受管轉接保留預設開頁且傳遞不開頁選項",
+        "tests.test_啟動網址.PrivateWebBrowserTests",
+        "tests.test_start_all.StartAllTests.test_all_exit_bits_and_no_browser_argument_are_preserved",
+        "tests.test_launcher_safety.ManagedInstallGuardBehaviorTests.test_unregistered_checkout_is_refused_before_anything_is_stopped"
       ],
       "changes": [
-        "server/margin_cycle.py",
-        "server/exposure_lab.py",
-        "server/consensus_attention.py",
-        "tests/test_曝險壓力.py"
+        "START_LOCAL_AND_WEB.cmd",
+        "scripts/go.ps1",
+        "scripts/inspect_tailscale_private_web.ps1",
+        "tests/test_launcher_cmd.py",
+        "tests/test_local_release.py",
+        "tests/test_啟動網址.py"
       ],
       "inputs": [
-        "server/margin_cycle.py",
-        "server/exposure_lab.py",
-        "server/consensus_attention.py",
-        "tests/test_曝險壓力.py",
-        "tests/test_margin_cycle_state.py",
-        "tests/test_exposure_lab.py",
-        "tests/test_consensus_attention.py",
-        "requirements-ci.txt"
+        "START_LOCAL_AND_WEB.cmd",
+        "scripts/go.ps1",
+        "scripts/inspect_tailscale_private_web.ps1",
+        "tests/test_launcher_cmd.py",
+        "tests/test_local_release.py",
+        "tests/test_啟動網址.py",
+        "START_ALL.cmd",
+        "START_TIP.cmd",
+        "tests/test_start_all.py",
+        "tests/test_launcher_safety.py",
+        "scripts/start_local.ps1",
+        "scripts/local_release.py",
+        "scripts/private_web_release.py",
+        "server/daemon_lock.py",
+        "requirements-ci.txt",
+        ".gitattributes"
       ],
-      "timeoutSeconds": 30
-    },
-    {
-      "id": "曝險壓力畫面",
-      "reason": "綜合評估資料不足、保守約束及分項日期區間在手機與桌面完整呈現",
-      "kind": "node",
-      "targets": [
-        "tests/曝險壓力_browser.cjs"
-      ],
-      "changes": [
-        "src/ui/decision_v5.js",
-        "tests/曝險壓力_browser.cjs",
-        "stock_terminal_v2.html"
-      ],
-      "inputs": [
-        "src/ui/decision_v5.js",
-        "tests/曝險壓力_browser.cjs",
-        "package.json",
-        "package-lock.json",
-        "stock_terminal_v2.html"
-      ],
-      "prepare": [
-        "node",
-        "browser"
-      ],
-      "environmentKeys": [
-        "ST_PLAYWRIGHT",
-        "PLAYWRIGHT_BROWSERS_PATH"
-      ],
-      "timeoutSeconds": 90
+      "timeoutSeconds": 120
     }
   ]
 }

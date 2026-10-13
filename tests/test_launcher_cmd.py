@@ -23,6 +23,14 @@ STUBS = {
 if /i "%~1"=="-NoLogo" (
   if /i not "%~2"=="-NoProfile" goto :unexpected
   if /i not "%~3"=="-NonInteractive" goto :unexpected
+  if /i "%~4"=="-ExecutionPolicy" (
+    if /i not "%~5"=="Bypass" goto :unexpected
+    if /i not "%~6"=="-File" goto :unexpected
+    if /i not "%~8"=="-OpenBrowser" goto :unexpected
+    >>"%ST_TEST_FIXTURE%\calls.log" echo browser-web
+    if exist "%ST_TEST_FIXTURE%\web-open-fails.flag" exit /b 1
+    exit /b 0
+  )
   if /i not "%~4"=="-Command" goto :unexpected
   if /i "%~5"=="Start-Sleep -Seconds 3" (
     >>"%ST_TEST_FIXTURE%\calls.log" echo powershell-sleep
@@ -97,6 +105,8 @@ if "%~2"=="http://127.0.0.1:18432/#pulse" (
   exit /b 0
 )
 >>"%ST_TEST_FIXTURE%\calls.log" echo start
+echo %* | "%SystemRoot%\System32\findstr.exe" /c:"-NoBrowser" >nul
+if errorlevel 1 >>"%ST_TEST_FIXTURE%\calls.log" echo browser-local
 if exist "%ST_TEST_FIXTURE%\recover-local-on-start.flag" >"%ST_TEST_FIXTURE%\local-health.flag" echo 1
 exit /b 0
 ''',
@@ -138,7 +148,7 @@ def _instrument_external_command_tokens(raw: bytes) -> tuple[bytes, dict[str, in
         replacement = r'\1call "%ST_TEST_FIXTURE%\\' + name + r'-stub.cmd"'
         text, counts[name] = re.subn(pattern, replacement, text)
     health_commands = re.findall(r'-Command "([^"]*Invoke-RestMethod[^"]*)"', raw.decode('ascii'))
-    expected = {'powershell': 5, 'curl': 0, 'schtasks': 1, 'start': 2} if health_commands else {
+    expected = {'powershell': 6, 'curl': 0, 'schtasks': 1, 'start': 2} if health_commands else {
         'powershell': 3, 'curl': 2, 'schtasks': 1, 'start': 1}
     if health_commands:
         if len(health_commands) != 2:
@@ -191,7 +201,7 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
 
     def run_case(self, name, *, local=True, gateway=True, upstream=False,
                  running=False, recover=False, run_fails=False, recover_local=False, query_fails=False,
-                 local_payload=None, gateway_payload=None, no_browser=False):
+                 local_payload=None, gateway_payload=None, no_browser=False, web_open_fails=False):
         case = Path(tempfile.mkdtemp(prefix='cmd-case-', dir=self.run_root))
         self.addCleanup(self.remove_case, case)
         (case / 'launcher.cmd').write_bytes(self.instrumented)
@@ -215,6 +225,7 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
             'run-fails': run_fails,
             'query-fails': query_fails,
             'recover-local-on-start': recover_local,
+            'web-open-fails': web_open_fails,
         }
         for flag, enabled in states.items():
             if enabled:
@@ -235,6 +246,7 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
         result = {'name': name, 'exitCode': done.returncode, 'hostRunCount': len(run_calls),
                   'taskQueryCount': len(query_calls), 'localStartCount': len(start_calls),
                   'browserOpenCount': calls.count('browser-local'),
+                  'webBrowserOpenCount': calls.count('browser-web'),
                   'upstreamReadyAfterRun': (case / 'upstream-ready.flag').exists()}
         return done.returncode, output, result
 
@@ -265,11 +277,13 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
         self.assertEqual(result['localStartCount'], 0 if local else 1)
         self.assertEqual(result['hostRunCount'], 0 if upstream else 1)
         self.assertEqual(result['browserOpenCount'], 1 if local else 0)
+        self.assertEqual(result['webBrowserOpenCount'], 1 if upstream else 0)
 
     def test_no_browser_keeps_services_ready_without_opening_a_window(self):
         code, output, result = self.run_case('僅服務不開視窗', upstream=True, no_browser=True)
         self.assertEqual(code, 0, output)
         self.assertEqual(result['browserOpenCount'], 0, result)
+        self.assertEqual(result['webBrowserOpenCount'], 0, result)
         self.assertEqual(result['localStartCount'], 0, result)
 
     def test_recovered_local_opens_browser_once(self):
@@ -277,6 +291,22 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertEqual(result['localStartCount'], 1, result)
         self.assertEqual(result['browserOpenCount'], 1, result)
+        self.assertEqual(result['webBrowserOpenCount'], 1, result)
+
+    def test_cold_no_browser_suppresses_child_and_both_pages(self):
+        code, output, result = self.run_case('冷啟動只啟動服務', local=False,
+                                            upstream=True, recover_local=True, no_browser=True)
+        self.assertEqual(code, 0, output)
+        self.assertEqual(result['localStartCount'], 1, result)
+        self.assertEqual(result['browserOpenCount'], 0, result)
+        self.assertEqual(result['webBrowserOpenCount'], 0, result)
+
+    def test_web_url_failure_preserves_local_and_reports_web_bit(self):
+        code, output, result = self.run_case('Web 網址解析失敗', upstream=True, web_open_fails=True)
+        self.assertEqual(code, 2, output)
+        self.assertEqual(result['browserOpenCount'], 1, result)
+        self.assertEqual(result['webBrowserOpenCount'], 1, result)
+        self.assertIn('[WARN]', output)
 
     def test_both_up_exit_zero(self):
         self.assert_health_exit_code(True, True, 0)

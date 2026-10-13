@@ -13,7 +13,8 @@ param(
   [switch]$Pull,
   [switch]$UpdateOnly,
   [switch]$RebuildOnly,
-  [switch]$Worktree
+  [switch]$Worktree,
+  [switch]$NoBrowser
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,7 +38,9 @@ if ($env:LOCALAPPDATA -and -not ($Worktree -or $Pull -or $UpdateOnly -or $Rebuil
     if (-not (Test-Path -LiteralPath $managedLauncher -PathType Leaf)) {
       throw '本機受管理啟動器缺少，未退回重建原工作樹；請修復本機安裝。'
     }
-    & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $managedLauncher -InstallRoot $managedLocalRoot
+    $browserArguments = @()
+    if ($NoBrowser) { $browserArguments += '-NoBrowser' }
+    & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $managedLauncher -InstallRoot $managedLocalRoot @browserArguments
     exit $LASTEXITCODE
   }
   # 已有受管本機安裝，但目前資料夾不是登記的原工作樹：不能走下方開發流程，
@@ -647,8 +650,10 @@ Assert-IndexIsTip
 Write-DevServerReceipt -PortNum $Port -ReceiptPath $DevReceipt -OwnerRoot $Root -ExpectedParent $p.Id -ExpectedParentTicks $launcherStartTicks -ExpectedPython $Python -ExpectedBasePython $basePythonLines[0].Trim() -ExpectedLauncher $launcher
 Assert-ListenerMatchesPin
 
-Write-Host "[open] $Url"
-Start-Process $Url
+if (-not $NoBrowser) {
+  Write-Host "[open] $Url"
+  Start-Process $Url
+}
 
 Write-Host ''
 Write-Host 'DONE.'
