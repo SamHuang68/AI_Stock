@@ -30,15 +30,17 @@ class 啟動修正測試(unittest.TestCase):
                 "print(json.dumps({'needsSync':os.environ['ST_TEST_CASE']=='舊版','installedCommit':'a'*40}))\n", encoding="utf-8")
             script = r'''
 $ErrorActionPreference='Stop'
+[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 $root=$env:ST_TEST_ROOT
 $python=$env:ST_TEST_PYTHON
 $base=Join-Path $root 'current'
 $command='"'+$python+'" -B -u "'+(Join-Path $base 'server\server.py')+'"'
-$script:proc=[pscustomobject]@{ProcessId=123;CreationDate=[datetime]'2026-10-03T01:00:00Z';ExecutablePath=$python;CommandLine=$command}
-$receipt=@{pid=123;createdAt=$script:proc.CreationDate.ToUniversalTime().ToString('o');commandLine=$command;baseDir=$base}
+$global:StReviewProcess=[pscustomobject]@{ProcessId=123;CreationDate=[datetime]'2026-10-03T01:00:00Z';ExecutablePath=$python;CommandLine=$command}
+$receipt=@{pid=123;createdAt=$global:StReviewProcess.CreationDate.ToUniversalTime().ToString('o');commandLine=$command;baseDir=$base}
 $receipt|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $root 'local_process.json') -Encoding UTF8
-if ($env:ST_TEST_CASE -eq '錯誤程序') {$script:proc.CommandLine='其他程序'}
-function Get-CimInstance { return $script:proc }
+if ($env:ST_TEST_CASE -eq '錯誤程序') {$global:StReviewProcess.CommandLine='其他程序'}
+# 受測腳本有自己的 script scope；fixture 跨入口回傳明確的同一程序。
+function Get-CimInstance { return $global:StReviewProcess }
 function Get-NetTCPConnection { return [pscustomobject]@{LocalAddress='127.0.0.1';LocalPort=18432;OwningProcess=123} }
 function Invoke-RestMethod {
   param($Uri,$TimeoutSec)
