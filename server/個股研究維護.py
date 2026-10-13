@@ -29,7 +29,7 @@ def schedule_status():
     data = Path(datastore.DB_PATH).parent
     config = load_json(str(data / 'stock_daily_schedule.json'), default={}, expected_type=dict)
     return {'enabled': config.get('enabled') is True, 'consentAt': config.get('consentAt'),
-            'times': ['18:30', '19:30', '20:30'], 'scope': 'TWSE／TPEx 官方批次日線及法人、Yahoo 大盤日線及個股還原快照',
+            'times': ['18:30', '19:30', '20:30'], 'scope': 'TWSE／TPEx 官方批次日線及法人、Yahoo 大盤日線及個股還原快照、既有官方研究續補（最多前月與當月原始收據及公司行動）',
             'lastSources': load_json(str(data / 'stock_daily_sources.json'), default={}, expected_type=dict)}
 
 

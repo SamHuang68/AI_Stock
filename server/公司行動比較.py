@@ -26,14 +26,33 @@ def load_adjustments(conn, symbol, cutoff):
     events = conn.execute("""SELECT session_date,kind,previous_close,reference_price,factor,status,reason,
         source_hash,source_url,retrieved_at,parser_version,payload_json FROM action_price_evidence
         WHERE market='TW' AND symbol=? AND session_date<=? ORDER BY session_date,kind""", (symbol, cutoff)).fetchall()
-    conflicts = {(row[0], row[1]) for row in conn.execute(
-        "SELECT DISTINCT session_date,kind FROM action_price_revisions WHERE market='TW' AND symbol=? AND session_date<=?", (symbol, cutoff))} if 'action_price_revisions' in tables else set()
-    # 首次證據本身保持不可覆寫；未核對的來源修訂在讀取時阻擋比較因子。
+    conflicts, revision_classifications = set(), []
+    if 'action_price_revisions' in tables:
+        try:
+            from .公司行動更新 import metadata_only_revision, REVISION_CLASSIFICATION_VERSION
+        except ImportError:
+            from 公司行動更新 import metadata_only_revision, REVISION_CLASSIFICATION_VERSION
+        originals = {(row[2], row[3]): row for row in conn.execute(
+            "SELECT * FROM action_price_evidence WHERE market='TW' AND symbol=? AND session_date<=?", (symbol, cutoff))}
+        for identity, day, kind, old, new, receipt_id in conn.execute(
+                "SELECT id,session_date,kind,original_payload,revision_payload,source_receipt_id FROM action_price_revisions "
+                "WHERE market='TW' AND symbol=? AND session_date<=? ORDER BY session_date,kind,id", (symbol, cutoff)):
+            receipt = conn.execute('SELECT * FROM action_source_receipts WHERE id=?', (receipt_id,)).fetchone() if 'action_source_receipts' in tables else None
+            metadata_only = metadata_only_revision(old, new, originals.get((day, kind), ()), receipt)
+            revision_classifications.append({'id': identity, 'date': day, 'kind': kind,
+                'status': 'metadata_only' if metadata_only else 'conflict',
+                'classificationVersion': REVISION_CLASSIFICATION_VERSION,
+                'changedFields': metadata_only['changedFields'] if metadata_only else None,
+                'reason': '僅最新申報附加資料改變，原始事件與兩份收據均保留' if metadata_only else '事件語意修訂、撤回或修訂證據未完整核對'})
+            if not metadata_only:
+                conflicts.add((day, kind))
+    # 首次證據與歷史修訂均保持不可覆寫；只有已核對的附加資料更新不阻擋比較因子。
     events = [(*row[:5], 'conflict', '官方公司行動來源修訂尚未核對；首次證據與新收據均保留', *row[7:])
               if (row[0], row[1]) in conflicts else row for row in events]
     try:
         return {**base, 'status': 'loaded' if coverage else 'missing',
                 'reason': None if coverage else base['reason'],
+                'revisionClassifications': revision_classifications,
                 'coverage': {'start': coverage[0], 'end': coverage[1], 'version': coverage[2], 'sources': json.loads(coverage[3])} if coverage else None,
                 'events': [dict(zip(('date', 'kind', 'before', 'after', 'factor', 'status', 'reason', 'sourceHash', 'sourceUrl', 'retrievedAt', 'version', 'payload'), (*r[:-1], json.loads(r[-1])))) for r in events]}
     except (ValueError, TypeError):
@@ -78,6 +97,7 @@ class Comparison:
         self.dates = [row['date'] for row in rows]
         self.coverage = copy.deepcopy(adjustments.get('coverage'))
         self.symbol = adjustments.get('symbol')
+        self.revision_classifications = copy.deepcopy(adjustments.get('revisionClassifications', []))
         self.events: dict[str, list[dict]] = {}
         self.errors: dict[str, str] = {}
         self.factors: dict[str, Decimal] = {}
@@ -255,11 +275,15 @@ class Comparison:
                 for event in self.events[day]:
                     relevant.append({**copy.deepcopy(event), 'verified': day in self.factors,
                                      'verificationReason': self.errors.get(day)})
-        return json_safe({'anchorDate': end, 'windowStart': start, 'coverage': clipped, 'events': relevant})
+        classified = [item for item in self.revision_classifications
+                      if isinstance(item, dict) and start < str(item.get('date', '')) <= end]
+        return json_safe({'anchorDate': end, 'windowStart': start, 'coverage': clipped, 'events': relevant,
+                          'revisionClassifications': classified})
 
     def digest_evidence(self, first: int, last: int) -> dict:
         evidence = self.evidence(first, last)
         # 同一經濟因子單純重抓，不得把新的擷取時刻當作價格資料修訂。
+        evidence.pop('revisionClassifications', None)
         fields = ('date', 'kind', 'before', 'after', 'factor', 'status', 'version', 'verified', 'verificationReason')
         evidence['events'] = [{key: event.get(key) for key in fields} for event in evidence['events']]
         evidence.update(symbol=self.symbol, coverageReason=self.reason(first, last))

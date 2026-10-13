@@ -18,6 +18,13 @@ ROUTES = (
     ('split/TWTCAU', '恢復買賣日期', 'ETF代號', 'ETF分割', '停止買賣前收盤價格', '恢復買賣參考價'),
 )
 CONFLICT_REASON = '官方公司行動來源修訂尚未核對；首次證據與新收據均保留'
+# TWT49U 會把目前最新申報資料附在歷史事件列；這三欄不是事件生效時的價格條件。
+# 本機官方原件 83b86c2b…：2025-12-11 的 2330 列附 115 年第 2 季財報；notes 明示為最近一次申報資料。
+# 只排除已核對的確切欄名，未知欄位與其他公司行動來源仍參與修訂比較。
+CURRENT_FILING_FIELDS = frozenset((
+    '最近一次申報資料 季別/日期', '最近一次申報每股 (單位)淨值', '最近一次申報每股 (單位)盈餘',
+))
+REVISION_CLASSIFICATION_VERSION = 'action-revision-classification-2'
 
 
 def encoded(value):
@@ -115,8 +122,66 @@ def _response_period(data, first, last, kind):
 
 def _meaning(row):
     """不同查詢範圍、回應雜湊或取得時間本身不代表事件數值修訂。"""
+    if not isinstance(row, (list, tuple)) or len(row) != 14:
+        raise ValueError('公司行動修訂列格式無效')
+    if any(value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))
+                                 or not math.isfinite(value) or value <= 0) for value in row[4:7]):
+        raise ValueError('公司行動修訂價格或因子格式無效')
     payload = json.loads(row[13])
-    return list(row[2:9]) + [row[12], dict(zip(payload['fields'], payload['row']))]
+    if not isinstance(payload, dict):
+        raise ValueError('公司行動修訂原始欄位格式無效')
+    fields, values = payload.get('fields'), payload.get('row')
+    if (not isinstance(fields, list) or not isinstance(values, list) or len(fields) != len(values)
+            or not all(isinstance(field, str) for field in fields) or len(set(fields)) != len(fields)):
+        raise ValueError('公司行動修訂原始欄位缺漏或重複')
+    route = next((item for item in ROUTES if item[3] == row[3]), None)
+    if route is None:
+        raise ValueError('公司行動修訂種類無法核對')
+    raw = dict(zip(fields, values))
+    required = {route[1], route[2], route[4], route[5]}
+    required.update(('權/息',) if row[3] == '除權息' else ('分割(反分割)',) if row[3] == 'ETF分割' else ())
+    if not required <= raw.keys():
+        raise ValueError('公司行動修訂缺少事件必要欄位')
+    if row[3] == '除權息':
+        raw = {key: value for key, value in raw.items() if key not in CURRENT_FILING_FIELDS}
+    return list(row[:9]) + [row[12], sorted(fields), raw]
+
+
+def metadata_only_revision(original, revision, saved, receipt):
+    """回傳已核對的非事件差異；原件、欄位集合、語意與修訂收據不符均回 None。"""
+    try:
+        old, new = json.loads(original), json.loads(revision)
+        if not isinstance(old, list) or tuple(old) != tuple(saved) or _meaning(old) != _meaning(new):
+            return None
+        old_payload, payload = json.loads(old[13]), json.loads(new[13])
+        old_fields = dict(zip(old_payload['fields'], old_payload['row']))
+        new_fields = dict(zip(payload['fields'], payload['row']))
+        changed = sorted(key for key in old_fields if old_fields[key] != new_fields[key])
+        if old[3] != '除權息' or not changed or not set(changed) <= CURRENT_FILING_FIELDS:
+            return None
+        if receipt is None or len(receipt) != 11:
+            return None
+        identity, market, symbol, route, begin, end, digest, url, retrieved, version, raw_response = receipt
+        if (new[:2] != [market, symbol] or not begin <= new[2] <= end
+                or new[9:13] != [url, digest, retrieved, version]
+                or not re.fullmatch(r'[0-9a-fA-F]{64}', digest)
+                or version != PARSER_VERSION or route != 'exRight/TWT49U'
+                or identity != hashlib.sha256(encoded([symbol, url, digest, version]).encode()).hexdigest()):
+            return None
+        parsed = urlparse(url)
+        if (parsed.scheme != 'https' or parsed.hostname not in ('www.twse.com.tw', 'wwwc.twse.com.tw', 'openapi.twse.com.tw')
+                or not parsed.path.endswith('/' + route.rsplit('/', 1)[-1])
+                or datetime.fromisoformat(retrieved).tzinfo is None):
+            return None
+        response = json.loads(raw_response)
+        if (payload.get('request') != {'start': begin, 'end': end} or response.get('stat') != 'OK'
+                or response.get('fields') != payload['fields'] or not isinstance(response.get('data'), list)
+                or payload['row'] not in response['data']):
+            return None
+        _response_period(response, date.fromisoformat(begin), date.fromisoformat(end), new[3])
+        return {'classificationVersion': REVISION_CLASSIFICATION_VERSION, 'changedFields': changed}
+    except (TypeError, ValueError, KeyError, IndexError, AttributeError):
+        return None
 
 
 def refresh_actions(db, symbol, begin, end, fetch, check=lambda: None):
@@ -222,6 +287,25 @@ def refresh_actions(db, symbol, begin, end, fetch, check=lambda: None):
                 route = next(route for route, _, _, kind, *_ in ROUTES if kind == old[3])
                 receipt_id = next(identity for identity, receipt, _ in receipts
                                   if receipt['route'] == route and receipt['start'] <= old[2] <= receipt['end'])
+            # 分類規則改版不重複建立同一原件／修訂；不刪除或改寫既有稽核資料。
+            # 同一收據的再次取得時間不是新修訂，其餘列值及原始 payload 必須完全相同。
+            duplicate = False
+            for (existing_payload,) in conn.execute(
+                    'SELECT revision_payload FROM action_price_revisions WHERE market=? AND symbol=? '
+                    'AND session_date=? AND kind=? AND original_payload=? AND source_receipt_id=?',
+                    ('TW', symbol, old[2], old[3], encoded(old), receipt_id)):
+                try:
+                    existing = json.loads(existing_payload)
+                    candidate = list(new) if new is not None else None
+                    if candidate is not None and isinstance(existing, list) and len(existing) == 14:
+                        candidate[11] = existing[11]
+                    if candidate == existing:
+                        duplicate = True
+                        break
+                except (TypeError, ValueError):
+                    continue
+            if duplicate:
+                continue
             payload = encoded(new) if new is not None else 'null'
             identity = hashlib.sha256(encoded([symbol, key, _meaning(old), _meaning(new) if new else None, receipt_id]).encode()).hexdigest()
             conn.execute('INSERT OR IGNORE INTO action_price_revisions VALUES(?,?,?,?,?,?,?,?,?,?)',

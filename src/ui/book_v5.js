@@ -23,6 +23,22 @@
 
   function finiteMetric(v) { return typeof v === 'number' && isFinite(v); }
   function riskValue(v, digits, suffix) { return finiteMetric(v) ? v.toFixed(digits) + (suffix || '') : '資料不足'; }
+  function riskPeriod(start, end) {
+    var day = /^\d{4}-\d{2}-\d{2}$/;
+    return day.test(start || '') && day.test(end || '') && start <= end ? start + '～' + end : '期間尚未核對';
+  }
+  function riskBasisNotes(q) {
+    return Object.keys(q.priceCoverage || {}).filter(function (symbol) {
+      return (q.priceCoverage[symbol] || {}).priceBasis === 'twse-reference-comparison';
+    }).map(function (symbol) {
+      var item = q.priceCoverage[symbol], details = [];
+      if (Array.isArray(item.basisConversions) && item.basisConversions.length) details.push('已核對基準轉換 ' + item.basisConversions.length + ' 筆');
+      if (Array.isArray(item.excludedReturnDates) && item.excludedReturnDates.length) details.push('不計單日報酬 ' + item.excludedReturnDates.length + ' 日');
+      if (Array.isArray(item.limitations)) details = details.concat(item.limitations.filter(function (value) { return typeof value === 'string'; }));
+      return symbol + '：官方參考價比較，歷史 ' + riskPeriod(item.historyStart, item.historyEnd) +
+        '，基準日 ' + (item.anchorDate || '尚未核對') + '；非含息總報酬' + (details.length ? '；' + details.join('；') : '');
+    });
+  }
   function riskSummary(d) {
     var stocks = d.stocks || {}, codes = Object.keys(stocks), p = d.portfolio || {}, q = d.quality || {};
     var cv = Object.keys(d.corr || {}).map(function (k) { return d.corr[k]; }).filter(finiteMetric);
@@ -41,6 +57,7 @@
     if (finiteMetric(q.commonSampleDays)) notes.push('共同有效報酬 ' + q.commonSampleDays + ' 筆');
     if (Array.isArray(q.reasons) && q.reasons.length) notes.push('原因：' + q.reasons.join('、'));
     if (!betaComplete && !(q.reasons || []).length) notes.push('投組 Beta 未涵蓋全部持倉');
+    notes = notes.concat(riskBasisNotes(q));
     return { vol: p.vol, var95: p.var95, days: p.days,
       correlation: cv.length ? cv.reduce(function (a, b) { return a + b; }, 0) / cv.length : null,
       beta: betaComplete && Math.abs(weight - 100) < 0.01 ? beta / 100 : null, note: notes.join(' · ') };
@@ -428,7 +445,8 @@
     }
     h += '</div></div>';
 
-    h += '<div class="bk-note">/portfolio · 5年日線 vs ' + esc(d.benchmark || '^TWII') +
+    var samplePeriod = (d.quality || {}).samplePeriod || {};
+    h += '<div class="bk-note">/portfolio · 共同有效報酬：' + esc(riskPeriod(samplePeriod.start, samplePeriod.end)) + ' · 基準 ' + esc(d.benchmark || '^TWII') +
       (d.skipped && d.skipped.length ? ' · 略過：' + esc(d.skipped.join('、')) : '') +
       ' · ⚠ 非投資建議</div>';
 

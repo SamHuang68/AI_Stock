@@ -24,6 +24,7 @@
     "5371": {"status": "terminated", "label": "股份轉換後已終止上櫃，3718 為不同代號，不拼接行情", "stopDate": "2026-08-24", "endDate": "2026-09-03", "source": "https://www.tpex.org.tw/storage/eb_data/11508/11500050581.html"}
   },
   "suspensions": {
+    "0050": [{"from": "2025-06-11", "through": "2025-06-17", "resumeDate": "2025-06-18", "label": "受益憑證分割停止交易", "source": "https://www.twse.com.tw/zh/ETFortune/announcement?company=A00005&date=20250617&fund=0050&seq=1&type=other", "verifiedAt": "2026-10-13"}],
     "1441": [{"from": "2026-09-17", "through": "2026-09-28", "resumeDate": "2026-09-29", "label": "減資換股停止交易", "source": "https://wwwc.twse.com.tw/en/announcement/announcement/list.html", "reference": "1150017640"}],
     "6550": [{"from": "2026-09-17", "through": "2026-09-28", "resumeDate": "2026-09-29", "label": "減資換股停止交易", "source": "https://wwwc.twse.com.tw/en/announcement/announcement/list.html", "reference": "1150017502"}]
   },

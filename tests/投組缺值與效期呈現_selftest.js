@@ -51,6 +51,8 @@ for (const text of views) {
   assert.match(text, /部分持倉缺少足夠歷史/);
   assert.match(text, /台積電/); assert.match(text, /9999/);
   assert.doesNotMatch(text, /(?:年化波動|1日95%VaR) 0\.0/);
+  assert.match(text, /共同有效報酬：期間尚未核對/);
+  assert.doesNotMatch(text, /5年日線/);
 }
 assert.equal(book.meters.length, 0, '未知波動、VaR、相關性、完整投組 Beta 不可畫成零風險');
 
@@ -93,6 +95,39 @@ assert.doesNotMatch(partialSector, /上市普通股產業內占比/);
 const note = decision.render.portfolio({ portfolioOverlay: { available: false, quality: fixture().quality } });
 assert.match(note, /持倉涵蓋率 50\.0%/); assert.match(note, /部分持倉缺少足夠歷史/);
 assert.doesNotMatch(note, /null%/);
+assert.match(note, /共同有效報酬：期間尚未核對/);
+
+const official = JSON.parse(JSON.stringify(zero));
+official.quality.samplePeriod = { start: '2021-09-02', end: '2026-10-13' };
+official.quality.priceCoverage = {
+  '2330': { priceBasis: 'twse-reference-comparison', historyStart: '2016-06-20', historyEnd: '2026-10-13',
+    anchorDate: '2026-10-13', basisConversions: [{ date: '2021-08-30' }],
+    excludedReturnDates: ['2025-06-18'], limitations: ['停牌缺口兩側不當成連續單日報酬'] },
+  '0050': { priceBasis: 'vendor_adjusted_snapshot', historyStart: '2021-08-30', historyEnd: '2026-10-13' }
+};
+function sourceViews(data) {
+  return checkViews(data).concat([false, true].map(available => decision.render.portfolio({
+    portfolioOverlay: { available, quality: data.quality, portfolioBeta: 1, var95DailyPct: 1.25,
+      averageCorrelation: 0.5, maxSingleNameWeightPct: 50, topSectorWeightPct: 50, sampleDays: 60 }
+  })));
+}
+for (const text of sourceViews(official)) {
+  assert.match(text, /2330：官方參考價比較，歷史 2016-06-20～2026-10-13/);
+  assert.match(text, /基準日 2026-10-13；非含息總報酬/);
+  assert.match(text, /共同有效報酬：2021-09-02～2026-10-13/);
+  assert.match(text, /已核對基準轉換 1 筆/); assert.match(text, /不計單日報酬 1 日/);
+  assert.match(text, /停牌缺口兩側不當成連續單日報酬/);
+  assert.doesNotMatch(text, /0050：官方參考價比較|5年日線/);
+}
+const unknownPeriod = JSON.parse(JSON.stringify(official));
+unknownPeriod.quality.samplePeriod = { start: '2026-10-13', end: '2021-09-02' };
+unknownPeriod.quality.priceCoverage['2330'].historyStart = null;
+unknownPeriod.quality.priceCoverage['2330'].limitations = ['來源 <img src=x onerror=alert(1)>'];
+for (const text of sourceViews(unknownPeriod)) {
+  assert.match(text, /共同有效報酬：期間尚未核對/);
+  assert.match(text, /官方參考價比較，歷史 期間尚未核對/);
+  assert.match(text, /&lt;img/); assert.doesNotMatch(text, /<img/);
+}
 assert.match(decision.render.constraint('source_data_expired'), /來源資料已過期/);
 const oldAsOf = new Date(Date.now() - 2 * 86400000).toISOString();
 const oldWarning = { asOf: oldAsOf, temporalContext: {
@@ -127,5 +162,5 @@ assert.match(head(1), /效期：<b>有效/);
   await new Promise(resolve => setImmediate(resolve));
   assert.match(pulse.nodes.get('pl-head-meta').innerHTML, /效期：<b>過期（決策來源）/,
     '較舊同步工作回應不可將目前過期效期覆寫成有效');
-  console.log('投組缺值與效期呈現：完整模組 render、文字、零值、涵蓋率、計量圖與來源效期通過');
+  console.log('投組缺值與效期呈現：完整模組 render、文字、零值、涵蓋率、價格口徑與期間、計量圖及來源效期通過');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1311,10 +1311,29 @@
       }).join('') + '</table></div>';
   }
 
+  function portfolioBasisNote(quality) {
+    function period(start, end) {
+      var day = /^\d{4}-\d{2}-\d{2}$/;
+      return day.test(start || '') && day.test(end || '') && start <= end ? start + '～' + end : '期間尚未核對';
+    }
+    var sample = quality.samplePeriod || {}, notes = ['共同有效報酬：' + period(sample.start, sample.end)];
+    Object.keys(quality.priceCoverage || {}).forEach(function (symbol) {
+      var item = quality.priceCoverage[symbol] || {}, details = [];
+      if (item.priceBasis !== 'twse-reference-comparison') return;
+      if (Array.isArray(item.basisConversions) && item.basisConversions.length) details.push('已核對基準轉換 ' + item.basisConversions.length + ' 筆');
+      if (Array.isArray(item.excludedReturnDates) && item.excludedReturnDates.length) details.push('不計單日報酬 ' + item.excludedReturnDates.length + ' 日');
+      if (Array.isArray(item.limitations)) details = details.concat(item.limitations.filter(function (value) { return typeof value === 'string'; }));
+      notes.push(symbol + '：官方參考價比較，歷史 ' + period(item.historyStart, item.historyEnd) +
+        '，基準日 ' + (item.anchorDate || '尚未核對') + '；非含息總報酬' + (details.length ? '；' + details.join('；') : ''));
+    });
+    return notes.join(' · ');
+  }
+
   function portfolioHtml(ctx) {
     if (lastPortfolioInput && !lastPortfolioInput.ready) return portfolioStatusHtml();
     var p = ctx.portfolioOverlay;
     if (!p) return portfolioStatusHtml() + '<div class="dc-note">尚無目前模式的投組結果。</div>';
+    var basisNote = portfolioBasisNote(p.quality || {});
     if (p.available === false) {
       var quality = p.quality || {}, coverage = [];
       if (quality.holdingCoveragePct != null) coverage.push('持倉涵蓋率 ' + num(quality.holdingCoveragePct, 1) + '%');
@@ -1323,7 +1342,7 @@
       var reasons = Array.isArray(quality.reasons) ? quality.reasons.join('、') : '';
       return portfolioStatusHtml() + '<div class="dc-note">投組資料不可用：' + esc(p.error || reasons || '價格序列不足') +
         '。在完成 Beta／VaR 檢查前不產生倉位範圍。' +
-        (coverage.length ? '<br>' + esc(coverage.join(' · ')) : '') + '</div>';
+        (coverage.length ? '<br>' + esc(coverage.join(' · ')) : '') + '<br>' + esc(basisNote) + '</div>';
     }
     var look = p.lookThrough || {};
     var rows = look.rows || [];
@@ -1332,7 +1351,7 @@
       featureHtml('1日 95% VaR', { value: p.var95DailyPct == null ? null : Math.min(1, p.var95DailyPct / 4), raw: p.var95DailyPct + '%' }) +
       featureHtml('平均相關', { value: p.averageCorrelation, raw: p.averageCorrelation }) + '</div>' +
       '<div class="dc-note">單一持倉上限 ' + num(p.maxSingleNameWeightPct, 1) + '% · 最大產業 ' + esc(p.topSector || '—') +
-      ' ' + num(p.topSectorWeightPct, 1) + '% · 樣本 ' + esc(p.sampleDays || '—') + ' 日</div>' +
+      ' ' + num(p.topSectorWeightPct, 1) + '% · 樣本 ' + esc(p.sampleDays || '—') + ' 日<br>' + esc(basisNote) + '</div>' +
       (look.effectiveGrossExposurePct == null ? '' : '<div class="dc-lab-grid" style="margin-top:6px">' +
         '<div class="dc-lab-box"><div class="k">每日槓桿穿透總曝險</div><div class="v">' + num(look.effectiveGrossExposurePct, 1) + '%</div></div>' +
         '<div class="dc-lab-box"><div class="k">台積電經濟曝險</div><div class="v">' + num(look.tsmcEconomicExposurePct, 1) + '%</div></div>' +

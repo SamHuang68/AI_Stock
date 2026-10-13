@@ -31,8 +31,7 @@ def _risk_series(connection, code, rows, *, benchmark=False, details=None):
     first, last = bars[0]['date'], bars[-1]['date']
     evidence = quality_evidence(connection, code, start=first, end=last)
     conflicts = ('priceConflict', 'sourceConflict', 'ambiguousSession', 'invalidObservation', 'invalidReceipt')
-    if any(any(item.get(k) for k in conflicts) for item in evidence.values()):
-        return {}, '日線品質或來源存在衝突'
+    has_conflict = any(any(item.get(k) for k in conflicts) for item in evidence.values())
     tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if 'bar_quality' in tables:
         issues = connection.execute('SELECT session_date,issues FROM bar_quality WHERE market=? AND symbol=? AND session_date BETWEEN ? AND ?',
@@ -40,8 +39,20 @@ def _risk_series(connection, code, rows, *, benchmark=False, details=None):
         # 官方量價差異共用舊標籤；價格已有分欄核對時，純成交量差異不能否決收盤風險。
         if any(json.loads(raw) and not (
                 json.loads(raw) == ['官方來源與原始日線不同；原始值保留']
-                and evidence.get(day, {}).get('priceVerified')) for day, raw in issues):
+                and (evidence.get(day, {}).get('priceVerified') or
+                     evidence.get(day, {}).get('officialPrices', {}).get('status') == 'verified')) for day, raw in issues):
             return {}, '日線品質紀錄尚有未解問題'
+    def official_series(rejected_reason):
+        from 投組官方價格 import full_history
+        values, detail, reason = full_history(connection, code, bars, evidence)
+        if values and details is not None:
+            details.update(detail, snapshotRejectedReason=rejected_reason)
+        return values, reason
+    if has_conflict:
+        values, issue = official_series('原始資料存在價格基準差異，逐日以官方收據及明示分割核對') if not benchmark else ({}, None)
+        if not values and issue and details is not None:
+            details.update(officialRejectedReason=issue)
+        return (values, None) if values else ({}, '日線品質或來源存在衝突')
     # 指數本身不適用個股公司行動；來源衝突仍會在上方擋下。
     if benchmark and code.startswith('^'):
         return {b['date']: b['close'] for b in bars}, None
@@ -71,11 +82,16 @@ def _risk_series(connection, code, rows, *, benchmark=False, details=None):
             details.update(snapshotAsOf=max((r['date'] for r in snapshot['rows']), default=None),
                            excludedDates=sorted(missing), priceBasis='vendor_adjusted_snapshot')
         return {b['date']: b['close'] for b in adjusted}, None
+    official, official_issue = official_series(snapshot_issue or '缺少可比供應商還原快照')
+    if official:
+        return official, None
     coverage = connection.execute('SELECT start_date,end_date FROM action_coverage WHERE market=? AND symbol=?', ('TW', code)).fetchone() if 'action_coverage' in tables else None
     actions = connection.execute('SELECT session_date FROM corporate_actions WHERE market=? AND symbol=? AND session_date>? AND session_date<=?',
                                  ('TW', code, first, last)).fetchall() if 'corporate_actions' in tables else []
     known_split = any(first < item['date'] <= last for item in split_references(code))
     if actions or known_split:
+        if details is not None:
+            details.update(officialRejectedReason=official_issue)
         return {}, snapshot_issue or '涵蓋公司行動但缺少可比還原價格'
     if not coverage or not coverage[0] <= first <= last <= coverage[1]:
         return {}, snapshot_issue or '公司行動涵蓋不足，原價基準未核對'
@@ -219,6 +235,11 @@ def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
             if dates:
                 calendar_period = {'start': dates[0], 'end': dates[-1],
                                    'startTrimmed': dates[0] > observed[0]}
+                if calendar_period['startTrimmed'] and any(
+                        d.get('priceBasis') == 'twse-reference-comparison'
+                        and d['historyStart'] < dates[0] for d in price_coverage.values()):
+                    dates = []
+                    price_issues['calendar'] = '完整官方價格比較不接受截短交易日曆'
     except (sqlite3.Error, OSError, ValueError, TypeError, KeyError) as exc:
         from log_once import log_once
         log_once('portfolio-price-quality', '投組價格品質核對失敗', exc=exc)

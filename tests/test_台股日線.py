@@ -378,5 +378,69 @@ class DatabaseCase(unittest.TestCase):
         self.assertIn('交易日曆', last_old['returns']['1']['reason'])
 
 
+class 明列歷史起點(unittest.TestCase):
+    def test_完整月份含月末休市而當月不推定缺日(self):
+        from 台股交易參考 import verified_sessions
+        with tempfile.TemporaryDirectory() as folder:
+            db = Path(folder) / 'market.db'
+            datastore.init_db(db)
+            calls = []
+            def fetch(url):
+                month = parse_qs(urlparse(url).query)['date'][0]
+                calls.append(month)
+                dates = ['105/07/29'] if month == '20160701' else ['105/08/01']
+                return {'stat': 'OK', 'date': month, 'fields': ['日期'], 'data': [[day] for day in dates]}, month
+            daily.reconcile_sessions(db, date(2016, 7, 1), date(2016, 8, 2), fetch)
+            with closing(sqlite3.connect(db)) as conn:
+                self.assertEqual(verified_sessions('2016-07-29', '2016-08-01', connection=conn), ['2016-07-29', '2016-08-01'])
+                self.assertIsNone(verified_sessions('2016-07-29', '2016-08-02', connection=conn))
+                self.assertEqual(conn.execute("SELECT observed_through FROM session_months WHERE month='2016-07'").fetchone()[0], '2016-07-31')
+            calls.clear()
+            daily.reconcile_sessions(db, date(2016, 7, 1), date(2016, 8, 2), fetch)
+            self.assertNotIn('20160701', calls)
+
+    def test_官方0050停牌公告起訖不外推(self):
+        from 台股交易參考 import trading_status
+        self.assertIsNone(trading_status('0050', '2025-06-10'))
+        self.assertEqual(trading_status('0050', '2025-06-11')['status'], 'suspended')
+        self.assertEqual(trading_status('0050', '2025-06-17')['status'], 'suspended')
+        self.assertIsNone(trading_status('0050', '2025-06-18'))
+
+    def test_非法日期不抓來源(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = Path(folder) / 'market.db'
+            for begin in ('2016-06-01', date(2009, 12, 31), datetime(2026, 1, 1)):
+                with self.subTest(begin=begin), patch.object(daily, 'get_json') as fetch:
+                    with self.assertRaises(ValueError):
+                        daily.seed_research(db, begin=begin, fetch=fetch)
+                    fetch.assert_not_called()
+
+    def test_同月未完成日不得因月首正規化被接受(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = Path(folder) / 'market.db'
+            with patch.object(daily, 'stored_calendar', return_value=(set(), set())), patch.object(daily, 'reconcile_sessions') as monthly:
+                with self.assertRaisesRegex(ValueError, '晚於'):
+                    daily.seed_research(db, begin=date(2026, 10, 14), now=datetime(2026, 10, 13, 19, tzinfo=daily.TZ))
+                monthly.assert_not_called()
+
+    def test_多年明列起點使用實際月份且預設仍核對年度(self):
+        # 在來源邊界停止：明列範圍可涵蓋舊年，不向舊年度假日端點猜資料。
+        class 來源邊界(Exception):
+            pass
+        with tempfile.TemporaryDirectory() as folder:
+            db = Path(folder) / 'market.db'
+            now = datetime(2026, 10, 13, 19, tzinfo=daily.TZ)
+            with patch.object(daily, 'stored_calendar', return_value=(set(), set())) as annual, patch.object(daily, 'reconcile_sessions', side_effect=來源邊界) as monthly:
+                with self.assertRaises(來源邊界):
+                    daily.seed_research(db, begin=date(2016, 6, 22), now=now)
+                self.assertEqual([call.args[1] for call in annual.call_args_list], [2026])
+                self.assertEqual(monthly.call_args.args[1:3], (date(2016, 6, 1), date(2026, 10, 13)))
+                annual.reset_mock()
+                with self.assertRaises(來源邊界):
+                    daily.seed_research(db, years=1, now=now)
+                self.assertEqual([call.args[1] for call in annual.call_args_list], [2026, 2025, 2026])
+                self.assertEqual(monthly.call_args.args[1:3], (date(2025, 10, 1), date(2026, 10, 13)))
+
+
 if __name__ == '__main__':
     unittest.main()
