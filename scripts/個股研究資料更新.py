@@ -8,7 +8,6 @@ import os
 import sys
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -91,58 +90,17 @@ def main(argv=None):
             time.sleep(.25)
         day += timedelta(days=1)
     if args.adjustments:
-        import signal_stats_pool as pool
         import 個股還原研究 as adjusted
-        from stock_signals import bar_date, normalize_bars, _TZ
+        from stock_signals import bar_date
         benchmark_ts = datastore.last_ts('^TWII')
         benchmark_day = bar_date(benchmark_ts) if benchmark_ts else None
         codes = args.symbols.split(',') if args.symbols else datastore.list_symbols('TW', 1)
-        tasks = {}
-        for code in codes:
-            if not pool._TICKER_RE['TW'].fullmatch(code):
-                continue
-            with datastore.read_snapshot() as conn:
-                previous = adjusted.load_snapshot(conn, code)
-                existing_rows = datastore.get_bars_bulk([code], connection=conn).get(code) or []
-            bars = normalize_bars(existing_rows)
-            if not bars:
-                continue
-            fetched = datetime.fromtimestamp(previous['fetchedAt'], _TZ['TW']) if previous else None
-            current = datetime.now(_TZ['TW'])
-            if (previous and fetched.date() == current.date()
-                    and (current.hour < 14 or fetched.hour >= 14)
-                    and benchmark_day is not None
-                    and max((r['date'] for r in previous.get('rows', [])), default='') >= benchmark_day
-                    and adjusted.adjusted_bars(bars, previous) is not None):
-                trace('還原來源沿用當日快照', symbol=code)
-                continue
-            # 明確期間保留日線粒度；range=max 可能被來源自動改成月線。
-            tasks[code] = min(r[0] for r in existing_rows) - 86400
-        with ThreadPoolExecutor(max_workers=args.workers) as executor:
-            futures = {}
-            for code, start_ts in tasks.items():
-                trace('還原來源排程', symbol=code, host='finance.yahoo.com', startTimestamp=start_ts)
-                futures[executor.submit(datastore.fetch_yahoo_daily, code, 'TW', '10y',
-                                        with_research=True, start_ts=start_ts)] = code
-            for future in as_completed(futures):
-                code = futures[future]
-                try:
-                    pack = future.result()
-                    count = adjusted.save_snapshot(code, 'TW', pack)
-                    current = datetime.now(_TZ['TW'])
-                    # 依交易日期去重，避免來源時間戳不同造成同一天兩根日線。
-                    existing = {bar_date(r[0]) for r in datastore.get_bars(code)}
-                    first_day = min(existing)
-                    # 查詢緩衝只用來確保首日完整，不能讓每次重跑都向前增加一天。
-                    fresh = list({bar_date(r[0]): r for r in pack['rows'] if first_day <= bar_date(r[0]) and bar_date(r[0]) not in existing and
-                                  (bar_date(r[0]) < current.date().isoformat() or
-                                   (bar_date(r[0]) == current.date().isoformat() and current.hour >= 14))}.values())
-                    if fresh:
-                        datastore.upsert_bars(code, 'TW', fresh, source='Yahoo Finance')
-                    trace('還原來源完成', symbol=code, rows=count, appendedBars=len(fresh))
-                except Exception as exc:
-                    failures.append('adjustment:' + code)
-                    trace('還原來源失敗', symbol=code, errorType=type(exc).__name__, reason=str(exc)[:400])
+        result = adjusted.refresh_snapshots(codes, expected_day=benchmark_day,
+            append_missing=True, trace=trace, workers=args.workers)
+        if result['status'] != 'completed':
+            failures.extend('adjustment:' + code for code, item in result['results'].items()
+                            if item['status'] != 'completed')
+            failures.extend('adjustment:' + code for code in result['pendingSymbols'])
     trace('工作結束', ok=not failures, failures=failures, coveredDays=len(state), chipScope='僅上市 T86')
     return int(bool(failures))
 

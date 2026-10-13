@@ -71,7 +71,7 @@ def parse_quotes(payload, exchange, expected_day, symbols):
     return output, unavailable
 
 
-def run(day=None):
+def run(day=None, *, adjustment_budget_seconds=120):
     now = datetime.now(ss._TZ['TW'])
     day = day or now.date().isoformat()
     if day != now.date().isoformat() or now.hour < 14:
@@ -87,11 +87,14 @@ def run(day=None):
     run_id = uuid.uuid4().hex
     previous = load_json(str(state_path), default={}, expected_type=dict)
     completed = {r['name']: r for r in previous.get('sources', []) if r.get('status') == 'completed'} if previous.get('sessionDate') == day else {}
-    names = ['TWSE 日線', 'TPEx 日線', '大盤日線', '上市法人', '上櫃法人']
+    # 快照依賴必須依現在的日線重新核對，不能沿用「先前已完成」掩蓋新增行情。
+    completed.pop('還原快照', None)
+    completed.pop('官方研究續補', None)
+    names = ['TWSE 日線', 'TPEx 日線', '大盤日線', '上市法人', '上櫃法人', '官方研究續補', '還原快照']
     state = {'runId': run_id, 'sessionDate': day, 'startedAt': now.isoformat(), 'status': 'running',
              'sources': [{**completed[name], 'reusedFromRun': previous.get('runId')} if name in completed
                          else {'name': name, 'status': 'pending'} for name in names],
-             'externalCalls': '官方批次日線及法人、既有 Yahoo 大盤日線'}
+             'externalCalls': '官方批次日線及法人、既有官方研究最近月份、Yahoo 大盤日線與單一還原快照'}
     def trace(event, **details):
         state['updatedAt'] = datetime.now(ss._TZ['TW']).isoformat()
         atomic_write_json(str(state_path), state, backup=True)
@@ -107,7 +110,7 @@ def run(day=None):
         started = time.monotonic()
         try:
             row['result'] = action()
-            row['status'] = 'partial' if (row['result'].get('conflicts') or
+            row['status'] = 'partial' if (row['result'].get('status') == 'partial' or row['result'].get('conflicts') or
                                          row['result'].get('unavailableSymbols')) else 'completed'
         except Exception as exc:
             row.update(status='failed', error=type(exc).__name__, reason=str(exc)[:300])
@@ -166,6 +169,19 @@ def run(day=None):
         return {'rows': n, 'sourceDate': day}
     step('上市法人', 'TWSE/T86', twse_chips)
     step('上櫃法人', 'TPEx/3insti', tpex_chips)
+    def official_research():
+        from 官方研究續補 import refresh
+        prior = next((s.get('result') or {} for s in previous.get('sources', []) if s.get('name') == '官方研究續補'), {})
+        return refresh(Path(datastore.DB_PATH), day, now=now,
+                       previous_attempts=prior.get('attemptedAt'), previous_pending=prior.get('pendingSymbols'))
+    step('官方研究續補', 'TWSE/STOCK_DAY/既有公司行動', official_research)
+    def adjustments():
+        from deadline import Deadline
+        from 個股還原研究 import refresh_snapshots
+        prior = next((s.get('result') or {} for s in previous.get('sources', []) if s.get('name') == '還原快照'), {})
+        return refresh_snapshots(symbols, expected_day=day, deadline=Deadline(adjustment_budget_seconds),
+                                 previous_attempts=prior.get('attemptedAt'), previous_results=prior.get('results'), workers=4)
+    step('還原快照', 'Yahoo Finance/quote/adjclose', adjustments)
     state['status'] = 'partial' if any(s['status'] != 'completed' for s in state['sources']) else 'completed'
     trace('工作結束', status=state['status'])
     return state

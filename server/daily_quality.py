@@ -357,7 +357,18 @@ def quality_evidence(conn, symbol, market='TW', *, board=None, start=None, end=N
                            'rawValue': raw_volume, 'rawSource': raw_source, 'rawUnit': '股' if raw_source == 'TWSE' else None,
                            'numericDifference': official[0] - raw_volume if selected and raw_numeric else None,
                            'differenceBasis': '官方股數減原始數值；原始單位未證實時僅為數值差，不推定交易類別或換算'}
+        # 保留原始 priceConflict；此欄只提供完整原始收據一致的官方 OHLC，
+        # 呼叫者仍須證明原價相等或明示的分割基準轉換，不能將衝突當成已通過。
+        official_prices = [o['row'][1:5] for o in obs if o['valid']]
+        prices_consistent = bool(official_prices) and all(_valid_prices(o['row']) for o in obs) and all(
+            all(_equal(a, b) for a, b in zip(values, official_prices[0])) for values in official_prices)
+        prices_ready = (usable and covered_all and sources == {'TWSE'} and prices_consistent)
+        research_prices = {'status': 'verified' if prices_ready else 'unavailable',
+                           'source': 'TWSE' if prices_ready else None, 'priceBasis': 'unadjusted',
+                           'values': official_prices[0] if prices_ready else None,
+                           'receiptIds': sorted({r['receiptId'] for r in receipts}) if prices_ready else []}
         result[day] = {'priceVerified': price_verified, 'volumeVerified': volume_verified,
+                       'officialPrices': research_prices,
                        'officialResearchVolume': research_volume,
                        'priceConflict': price_conflict, 'volumeConflict': volume_conflict,
                        'sourceConflict': source_conflict, 'receiptComplete': complete,

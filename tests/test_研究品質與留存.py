@@ -20,7 +20,7 @@ import 個股還原研究 as adjusted
 import 每日個股留存 as daily
 import 個股研究維護 as maintenance
 import industry_revenue as revenue
-from test_個股訊號研究 import bars
+from tests.test_個股訊號研究 import bars
 
 
 class QualityTests(unittest.TestCase):
@@ -57,6 +57,176 @@ class QualityTests(unittest.TestCase):
 
 
 class AdjustmentTests(unittest.TestCase):
+    def snapshot_fixture(self, symbols=('0050', '2330')):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        target = patch.object(datastore, 'DB_PATH', str(Path(tmp.name) / 'market.db'))
+        target.start()
+        self.addCleanup(target.stop)
+        stamp = int(datetime(2026, 9, 21, 9, tzinfo=ss._TZ['TW']).timestamp())
+        stamps = [stamp + day * 86400 for day in range(4)]
+        with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+            conn.executescript(datastore.SCHEMA)
+            for symbol in symbols:
+                for ts in stamps:
+                    conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', (symbol, 'TW', ts, 10, 10, 10, 10, 1))
+        return {'timestamps': stamps, 'quoteClose': [10] * 4, 'adjclose': [9] * 4,
+                'events': {}, 'source': '本機測試', 'fetchedAt': 2, 'rows': []}
+
+    def test_inspection_budget_exhaustion_is_pending_and_next_run_is_fair(self):
+        pack = self.snapshot_fixture()
+        class Budget:
+            spent = False
+            def expired(self):
+                return self.spent
+        budget = Budget()
+        original = datastore.get_bars_bulk
+        def consume(*args, **kwargs):
+            result = original(*args, **kwargs)
+            budget.spent = True
+            return result
+        with patch.object(datastore, 'get_bars_bulk', side_effect=consume), \
+                patch.object(datastore, 'fetch_yahoo_daily', side_effect=AssertionError('檢查用盡預算不得下載')) as fetch:
+            first = adjusted.refresh_snapshots(['0050', '2330'], expected_day='2026-09-24', deadline=budget)
+        self.assertEqual(first['pendingSymbols'], ['0050', '2330'])
+        self.assertIn('0050', first['attemptedAt'])
+        self.assertNotIn('2330', first['attemptedAt'])
+        self.assertIn('0050', first['pendingDetails'])
+        fetch.assert_not_called()
+        with patch.object(datastore, 'fetch_yahoo_daily', return_value=pack) as fetch:
+            second = adjusted.refresh_snapshots(['0050', '2330'], expected_day='2026-09-24',
+                previous_attempts=first['attemptedAt'])
+        self.assertEqual(fetch.call_args_list[0].args[0], '2330')
+        self.assertEqual(second['status'], 'completed')
+
+    def test_bad_snapshot_json_is_isolated_from_other_symbols(self):
+        pack = self.snapshot_fixture()
+        adjusted.save_snapshot('0050', 'TW', pack)
+        with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+            conn.execute("UPDATE stock_adjustment_snapshots SET payload='{' WHERE symbol='0050'")
+        with patch.object(datastore, 'fetch_yahoo_daily', return_value=pack) as fetch:
+            out = adjusted.refresh_snapshots(['0050', '2330'], expected_day='2026-09-24')
+        self.assertEqual(out['results']['0050']['status'], 'failed')
+        self.assertEqual(out['results']['0050']['error'], 'JSONDecodeError')
+        self.assertEqual(out['results']['2330']['status'], 'completed')
+        self.assertEqual(fetch.call_count, 1)
+
+    def test_new_internal_gap_or_truncated_start_cannot_replace_old_snapshot(self):
+        pack = self.snapshot_fixture(('2330',))
+        old = {**pack, 'timestamps': pack['timestamps'][:3], 'quoteClose': [10] * 3,
+               'adjclose': [9] * 3, 'fetchedAt': 1}
+        adjusted.save_snapshot('2330', 'TW', old)
+        for indexes in ((0, 2, 3), (1, 2, 3)):
+            with self.subTest(indexes=indexes):
+                candidate = {**pack, 'timestamps': [pack['timestamps'][i] for i in indexes],
+                             'quoteClose': [10] * 3, 'adjclose': [9] * 3}
+                with patch.object(datastore, 'fetch_yahoo_daily', return_value=candidate):
+                    out = adjusted.refresh_snapshots(['2330'], expected_day='2026-09-24')
+                result = out['results']['2330']
+                self.assertEqual(result['status'], 'partial')
+                self.assertFalse(result['savedSnapshot'])
+                self.assertEqual(len(result['rejectedSnapshot']['removedDates']), 1)
+                self.assertEqual(result['rejectedSnapshot']['candidate']['fetchedAt'], 2)
+                self.assertEqual(result['rejectedSnapshot']['candidate']['rows'], 3)
+                self.assertEqual(len(result['rejectedSnapshot']['candidate']['sha256']), 64)
+                self.assertNotIn('events', result['rejectedSnapshot']['candidate'])
+                with datastore.read_snapshot() as conn:
+                    self.assertEqual(adjusted.load_snapshot(conn, '2330')['fetchedAt'], 1)
+                prior = out['results']
+                with patch.object(datastore, 'fetch_yahoo_daily', side_effect=AssertionError('同日相同拒絕不得重抓')):
+                    reused = adjusted.refresh_snapshots(['2330'], expected_day='2026-09-24', previous_results=prior)
+                self.assertEqual(reused['status'], 'partial')
+                self.assertTrue(reused['results']['2330']['reusedRejection'])
+                for change in ('start', 'content', 'snapshot', 'next_day'):
+                    with self.subTest(changed_input=change):
+                        if change == 'start':
+                            with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+                                conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)',
+                                    ('2330', 'TW', pack['timestamps'][0] - 3 * 86400, 10, 10, 10, 10, 1))
+                        elif change == 'content':
+                            with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+                                conn.execute('UPDATE bars SET volume=2 WHERE symbol=?', ('2330',))
+                        elif change == 'snapshot':
+                            adjusted.save_snapshot('2330', 'TW', {**old, 'fetchedAt': 3})
+                        future = datetime.now(ss._TZ['TW']) + timedelta(days=1)
+                        class Clock(datetime):
+                            @classmethod
+                            def now(cls, tz=None):
+                                return future if change == 'next_day' else datetime.now(tz)
+                        with patch.object(adjusted, 'datetime', Clock), patch.object(datastore, 'fetch_yahoo_daily', return_value=candidate) as fetch:
+                            refreshed = adjusted.refresh_snapshots(['2330'], expected_day='2026-09-24', previous_results=prior)
+                        fetch.assert_called_once()
+                        self.assertFalse(refreshed['results']['2330'].get('reusedRejection', False))
+                        with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+                            conn.execute('DELETE FROM bars WHERE ts<?', (pack['timestamps'][0],))
+                            conn.execute('UPDATE bars SET volume=1')
+                            conn.execute('DELETE FROM stock_adjustment_snapshots WHERE fetched_at>1')
+        truncated = {**pack, 'timestamps': pack['timestamps'][1:], 'quoteClose': [10] * 3,
+                     'adjclose': [9] * 3, 'fetchedAt': int(datetime.now(ss._TZ['TW']).timestamp())}
+        for legacy in (False, True):
+            with self.subTest(existing_truncated=legacy):
+                with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+                    conn.execute('DELETE FROM stock_adjustment_snapshots')
+                if legacy:
+                    adjusted.save_snapshot('2330', 'TW', truncated)
+                with patch.object(datastore, 'fetch_yahoo_daily', return_value=truncated) as fetch:
+                    out = adjusted.refresh_snapshots(['2330'], expected_day='2026-09-24')
+                result = out['results']['2330']
+                fetch.assert_called_once()
+                self.assertFalse(result['reused'])
+                self.assertFalse(result['savedSnapshot'])
+                self.assertTrue(result['rejectedSnapshot']['truncatedStart'])
+                with datastore.read_snapshot() as conn:
+                    self.assertEqual(conn.execute('SELECT count(*) FROM stock_adjustment_snapshots').fetchone()[0], int(legacy))
+
+    def test_same_day_partial_reuse_requires_closed_session_and_no_future_timestamp(self):
+        pack = self.snapshot_fixture(('2330',))
+        fixed = datetime(2026, 9, 24, 18, tzinfo=ss._TZ['TW'])
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed
+        for hour, reuse in ((17, True), (13, False), (19, False)):
+            with self.subTest(hour=hour):
+                partial = {**pack, 'timestamps': [pack['timestamps'][i] for i in (0, 2, 3)],
+                           'quoteClose': [10] * 3, 'adjclose': [9] * 3,
+                           'fetchedAt': int(fixed.replace(hour=hour).timestamp())}
+                with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+                    if conn.execute("SELECT 1 FROM sqlite_master WHERE name='stock_adjustment_snapshots'").fetchone():
+                        conn.execute('DELETE FROM stock_adjustment_snapshots')
+                adjusted.save_snapshot('2330', 'TW', partial)
+                with patch.object(adjusted, 'datetime', Clock), patch.object(datastore, 'fetch_yahoo_daily', return_value=pack) as fetch:
+                    out = adjusted.refresh_snapshots(['2330'], expected_day='2026-09-24')
+                self.assertEqual(out['results']['2330']['reused'], reuse)
+                self.assertEqual(fetch.call_count, 0 if reuse else 1)
+                if reuse:
+                    self.assertEqual(out['status'], 'partial')
+                    self.assertEqual(out['results']['2330']['alignment']['missingDates'], ['2026-09-22'])
+
+    def test_daily_run_rechecks_snapshot_dependency_after_reusing_daily_sources(self):
+        import 個股每日資料 as sources
+        fixed = datetime(2026, 9, 24, 18, tzinfo=ss._TZ['TW'])
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed
+        with tempfile.TemporaryDirectory() as tmp, patch.object(datastore, 'DB_PATH', str(Path(tmp) / 'market.db')):
+            previous = {'sessionDate': '2026-09-24', 'runId': '前次', 'sources': [
+                {'name': name, 'status': 'completed', 'result': {'receivedSymbols': ['2330']}}
+                for name in ('TWSE 日線', 'TPEx 日線', '大盤日線', '上市法人', '上櫃法人', '還原快照')]}
+            previous['sources'][-1]['result']['attemptedAt'] = {'2330': 1}
+            previous['sources'][-1]['result']['results'] = {'2330': {'status': 'partial', 'rejectionFingerprint': '前次拒絕'}}
+            (Path(tmp) / 'stock_daily_sources.json').write_text(json.dumps(previous), encoding='utf-8')
+            with patch.object(sources, 'datetime', Clock), patch.object(datastore, 'list_symbols', return_value=['2330']), \
+                    patch.object(sources.http_client, 'fetch_json', side_effect=AssertionError('已完成官方來源不得重抓')), \
+                    patch.object(adjusted, 'refresh_snapshots', return_value={'status': 'partial', 'pendingSymbols': ['2330']}) as refresh:
+                out = sources.run()
+            self.assertEqual(out['status'], 'partial')
+            self.assertEqual(refresh.call_args.kwargs['expected_day'], '2026-09-24')
+            self.assertEqual(refresh.call_args.kwargs['previous_attempts'], {'2330': 1})
+            self.assertEqual(refresh.call_args.kwargs['previous_results'], previous['sources'][-1]['result']['results'])
+            self.assertEqual(out['sources'][-1]['status'], 'partial')
+
     def test_source_update_includes_short_history_and_does_not_duplicate_session(self):
         spec = importlib.util.spec_from_file_location('research_source_test', ROOT / 'scripts/個股研究資料更新.py')
         updater = importlib.util.module_from_spec(spec)
@@ -74,9 +244,81 @@ class AdjustmentTests(unittest.TestCase):
             with patch.object(datastore, 'update', return_value=0), patch.object(datastore, 'fetch_yahoo_daily', return_value=pack) as fetch, \
                     patch.object(updater.tracker, 'CHIP_HISTORY_PATH', str(Path(tmp) / 'chip_history')), redirect_stdout(io.StringIO()):
                 code = updater.main(['--start', '2026-09-27', '--end', '2026-09-27', '--data-dir', tmp, '--adjustments'])
-            self.assertEqual(code, 0)
+            # 首存 10 與來源 11 不相容：追加能力保留，但不能把下載成功誤報為研究可用。
+            self.assertEqual(code, 1)
             self.assertEqual(fetch.call_args.kwargs['start_ts'], stamp - 86400)
             self.assertEqual([row[4] for row in datastore.get_bars('2330')], [10, 12])
+
+    def test_refresh_reuses_compatible_snapshot_and_preserves_bad_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(datastore, 'DB_PATH', str(Path(tmp) / 'market.db')):
+            stamp = int(datetime(2026, 9, 23, 9, tzinfo=ss._TZ['TW']).timestamp())
+            with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+                conn.executescript(datastore.SCHEMA)
+                conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', ('2330', 'TW', stamp, 10, 10, 10, 10, 1))
+            pack = {'timestamps': [stamp], 'quoteClose': [10], 'adjclose': [9],
+                    'events': {}, 'source': '本機測試', 'fetchedAt': 1, 'rows': []}
+            adjusted.save_snapshot('2330', 'TW', pack)
+            with patch.object(datastore, 'fetch_yahoo_daily', side_effect=AssertionError('有效快照不應重抓')):
+                out = adjusted.refresh_snapshots(['2330'], expected_day='2026-09-23')
+            self.assertEqual(out['status'], 'completed')
+            self.assertTrue(out['results']['2330']['reused'])
+            with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+                conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', ('2330', 'TW', stamp + 86400, 12, 12, 12, 12, 1))
+            bad = {**pack, 'timestamps': [stamp, stamp + 86400], 'quoteClose': [11, 12],
+                   'adjclose': [10, 12], 'fetchedAt': 2}
+            with patch.object(datastore, 'fetch_yahoo_daily', return_value=bad):
+                out = adjusted.refresh_snapshots(['2330'], expected_day='2026-09-24')
+            self.assertEqual(out['status'], 'partial')
+            with datastore.read_snapshot() as conn:
+                self.assertEqual(adjusted.load_snapshot(conn, '2330')['fetchedAt'], 1)
+
+    def test_refresh_deadline_resumes_least_recently_attempted_symbol(self):
+        from deadline import Deadline
+        with tempfile.TemporaryDirectory() as tmp, patch.object(datastore, 'DB_PATH', str(Path(tmp) / 'market.db')):
+            stamp = int(datetime(2026, 9, 24, 9, tzinfo=ss._TZ['TW']).timestamp())
+            with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+                conn.executescript(datastore.SCHEMA)
+                for code in ('2330', '0050'):
+                    conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', (code, 'TW', stamp, 10, 10, 10, 10, 1))
+            with patch.object(datastore, 'fetch_yahoo_daily', side_effect=AssertionError('預算用盡不得連外')):
+                out = adjusted.refresh_snapshots(['0050', '2330'], expected_day='2026-09-24',
+                    deadline=Deadline(0), previous_attempts={'0050': 100})
+            self.assertEqual(out['pendingSymbols'], ['2330', '0050'])
+            self.assertEqual(out['status'], 'partial')
+
+    def test_refresh_accepts_one_complete_new_snapshot_without_rewriting_bars(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(datastore, 'DB_PATH', str(Path(tmp) / 'market.db')):
+            stamp = int(datetime(2026, 9, 24, 9, tzinfo=ss._TZ['TW']).timestamp())
+            with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+                conn.executescript(datastore.SCHEMA)
+                conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', ('2330', 'TW', stamp, 10, 10, 10, 10, 1))
+            pack = {'timestamps': [stamp], 'quoteClose': [10], 'adjclose': [9],
+                    'events': {}, 'source': '本機測試', 'fetchedAt': 2, 'rows': [(stamp, 11, 11, 11, 11, 1)]}
+            with patch.object(datastore, 'fetch_yahoo_daily', return_value=pack) as fetch:
+                out = adjusted.refresh_snapshots(['2330'], expected_day='2026-09-24')
+            self.assertEqual(out['status'], 'completed')
+            self.assertEqual(fetch.call_args.kwargs['start_ts'], stamp - 86400)
+            self.assertEqual(datastore.get_bars('2330')[0][4], 10)
+            with datastore.read_snapshot() as conn:
+                self.assertEqual(adjusted.load_snapshot(conn, '2330')['fetchedAt'], 2)
+
+    def test_refresh_preserves_explicit_gaps_without_claiming_complete(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(datastore, 'DB_PATH', str(Path(tmp) / 'market.db')):
+            stamp = int(datetime(2026, 9, 22, 9, tzinfo=ss._TZ['TW']).timestamp())
+            with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+                conn.executescript(datastore.SCHEMA)
+                for ts in (stamp, stamp + 86400, stamp + 172800):
+                    conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', ('2330', 'TW', ts, 10, 10, 10, 10, 1))
+            pack = {'timestamps': [stamp, stamp + 172800], 'quoteClose': [10, 10], 'adjclose': [9, 9],
+                    'events': {}, 'source': '本機測試', 'fetchedAt': 2, 'rows': []}
+            with patch.object(datastore, 'fetch_yahoo_daily', return_value=pack):
+                out = adjusted.refresh_snapshots(['2330'], expected_day='2026-09-24')
+            self.assertEqual(out['status'], 'partial')
+            self.assertTrue(out['results']['2330']['savedSnapshot'])
+            self.assertEqual(out['results']['2330']['alignment']['missingDates'], ['2026-09-23'])
+            with datastore.read_snapshot() as conn:
+                saved = adjusted.load_snapshot(conn, '2330')
+            self.assertEqual([row['date'] for row in saved['rows']], ['2026-09-22', '2026-09-24'])
 
     def test_explicit_period_preserves_daily_history_and_otc_fallback(self):
         import urllib.error

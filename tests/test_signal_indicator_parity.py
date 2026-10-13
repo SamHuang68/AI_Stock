@@ -13,8 +13,9 @@ import watch_daemon  # noqa: E402
 
 
 def _candles(closes):
-    return [{'close': c, 'high': c * 1.01, 'low': c * 0.99, 'volume': 1000 + i}
-            for i, c in enumerate(closes)]
+    return [{'date': d.isoformat(), 'open': c, 'close': c, 'high': c * 1.01,
+             'low': c * 0.99, 'volume': 1000 + i}
+            for i, (d, c) in enumerate(zip(交易日('2025-01-02', len(closes)), closes))]
 
 
 def _random_walk(seed, n=260):
@@ -23,6 +24,19 @@ def _random_walk(seed, n=260):
     for _ in range(n - 1):
         px.append(px[-1] * (1 + rnd.gauss(0.0004, 0.018)))
     return px
+
+
+from tests.已核對資料 import 日曆資料, 交易日
+
+
+def setUpModule():
+    global _calendar_fixture
+    _calendar_fixture = 日曆資料()
+    _calendar_fixture.__enter__()
+
+
+def tearDownModule():
+    _calendar_fixture.__exit__(None, None, None)
 
 
 class DaemonRsiParityTests(unittest.TestCase):

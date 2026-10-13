@@ -22,6 +22,8 @@ jobs:
       VALIDATION_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}-playwright-browsers
     steps:
+      - name: 在取出來源前保留 Git 原始換行位元組
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0

@@ -262,6 +262,125 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
             'sourceRevisionStatusUnknown': revision_status_unknown}
 
 
+def load_alert_bars(code, market, remote_loader, *, now=None):
+    """警報唯讀來源選擇；整份選源，不拼接不同價格基準，也不隱式寫入。"""
+    if market != 'TW':
+        return {'bars': remote_loader(code, market) or [], 'source': 'yahoo', 'error': None}
+    from 台股交易參考 import trading_status, verified_sessions
+    from daily_quality import quality_evidence
+    import math
+    code = str(code).removesuffix('.TWO').removesuffix('.TW')
+    result = {'bars': [], 'source': 'local-db', 'error': None,
+              'sourceRevisionStatusUnknown': False}
+    try:
+        ds = _datastore()
+        with ds.read_snapshot() as conn:
+            bars = ss.normalize_bars(ds.get_bars_bulk([code], market=market, connection=conn).get(code), market)
+            revision = ds.source_revision_status(code, market, connection=conn)
+            revisions = conn.execute(
+                'SELECT session_date,payload FROM bar_source_revisions WHERE symbol=? AND market=?',
+                (code, market)).fetchall() if revision['count'] else []
+            if len(revisions) != revision['count']:
+                raise ValueError('來源修訂筆數無法核對')
+            evidence = quality_evidence(conn, code, market) if bars else {}
+        blocked = {}
+        for day, item in evidence.items():
+            fields = blocked.setdefault(day, set())
+            if item.get('priceConflict'):
+                fields.update(('open', 'high', 'low', 'close'))
+            if item.get('volumeConflict'):
+                fields.add('volume')
+            if any(item.get(key) for key in ('sourceConflict', 'ambiguousSession', 'invalidReceipt', 'invalidObservation')):
+                fields.update(('open', 'high', 'low', 'close', 'volume'))
+        for day, payload in revisions:
+            record = json.loads(payload)
+            original, updated = record['original'], record['revision']
+            if len(original) != 6 or len(updated) != 6:
+                raise ValueError('來源修訂欄位無法核對')
+            fields = blocked.setdefault(day, set())
+            for index, key in enumerate(('open', 'high', 'low', 'close', 'volume'), 1):
+                a, b = original[index], updated[index]
+                equal = ((a is None and b is None) or (a is not None and b is not None
+                         and (a == b if key == 'volume' else math.isclose(a, b, rel_tol=1e-6, abs_tol=1e-5))))
+                if not equal:
+                    fields.add(key)
+        selected_volumes = {}
+        for day, item in evidence.items():
+            official = item.get('officialResearchVolume') or {}
+            value = official.get('value')
+            if ('volume' in blocked.get(day, set()) and item.get('receiptComplete') and item.get('priceVerified')
+                    and official.get('status') == 'selected' and official.get('source') == 'TWSE'
+                    and official.get('unit') == '股' and official.get('asOf') == day
+                    and official.get('receiptIds') and isinstance(value, (int, float))
+                    and not isinstance(value, bool) and math.isfinite(value) and value >= 0
+                    and float(value).is_integer()
+                    and not any(item.get(key) for key in ('priceConflict', 'sourceConflict',
+                                'ambiguousSession', 'invalidReceipt', 'invalidObservation'))
+                    and not (blocked.get(day, set()) & {'open', 'high', 'low', 'close'})):
+                selected_volumes[day] = dict(official)
+                blocked[day].discard('volume')
+        result['officialResearchVolumes'] = selected_volumes
+        result['qualityBlockedFields'] = {day: sorted(fields) for day, fields in blocked.items() if fields}
+
+        def mask_fields(rows):
+            return [{**bar, **({'volume': selected_volumes[bar['date']]['value']}
+                              if bar['date'] in selected_volumes else {}),
+                     **{key: None for key in blocked.get(bar['date'], ())}} for bar in rows]
+
+        # 保留完整時間軸，只遮罩證據有疑義的欄位；各指標自行按窗口暖機。
+        raw_bars = bars
+        bars = mask_fields(bars)
+        sess = session_state(market, bars[-1]['date'] if bars else None, now)
+        result['session'] = sess
+        expected = sess['expectedLastDate']
+        if expected is None or trading_status(code, expected):
+            result['error'] = '交易日曆或可交易狀態待確認，保留既有警報狀態'
+            return result
+
+        def current(rows):
+            return bool(rows and rows[-1]['date'] == expected)
+
+        def complete_window(rows):
+            if not current(rows):
+                return False
+            tail = rows[-65:]
+            days = verified_sessions(tail[0]['date'], expected, allow_partial=True)
+            return bool(days and days[-1] == expected and len(tail) >= 60
+                        and [bar['date'] for bar in tail] == days
+                        and all(ss.complete_bar(bar) for bar in tail))
+
+        chosen = bars
+        if not complete_window(raw_bars):
+            # 備援整個視窗仍須與本機重疊價格同基準；禁止補一根或比例調整。
+            fresh = ss.normalize_bars(remote_loader(code, market) or [], market)
+            overlap = {bar['date']: bar for bar in raw_bars}
+            pairs = [(bar, overlap[bar['date']]) for bar in fresh if bar['date'] in overlap]
+            comparable = not bars or any(left.get('close') is not None and right.get('close') is not None
+                                         for left, right in pairs)
+            for left, right in pairs:
+                for key in ('open', 'high', 'low', 'close'):
+                    a, b = left.get(key), right.get(key)
+                    if a is not None and b is not None and not math.isclose(a, b, rel_tol=1e-6, abs_tol=1e-6):
+                        comparable = False
+            fresh = mask_fields(fresh)
+            if complete_window(fresh) and comparable:
+                chosen = fresh
+                result['source'] = 'yahoo'
+            elif not bars and current(fresh):
+                # 新標的允許分欄暖機與自訂價位；指標仍由日期保全入口把關。
+                chosen = fresh
+                result['source'] = 'yahoo'
+        if not current(chosen):
+            result['error'] = '日線日期未對齊應有交易日，保留既有警報狀態'
+            return result
+        result['bars'] = [{'time': bar['date'], **bar} for bar in chosen]
+        return result
+    except (ValueError, TypeError, KeyError, sqlite3.Error, OSError) as exc:
+        result.update(error=f'警報來源或品質無法核對（{type(exc).__name__}），保留既有狀態',
+                      sourceRevisionStatusUnknown=True)
+        return result
+
+
 def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
                    allow_network: bool = True, now: Optional[datetime] = None,
                    bars_loader: Optional[Callable[..., Dict[str, Any]]] = None,

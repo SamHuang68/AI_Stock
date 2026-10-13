@@ -32,7 +32,8 @@ class TestPriceSeriesQuant(unittest.TestCase):
 
     def test_latest_overlay(self):
         closes = [100, 101, 102]
-        q = tq.price_series_quant(closes, latest=110)
+        q = tq.price_series_quant(closes, latest=110,
+            dates=['2026-10-01', '2026-10-02', '2026-10-05'], latest_date='2026-10-06')
         self.assertEqual(q['close'], 110.0)
         self.assertGreater(q['n'], 3)
 
@@ -40,7 +41,8 @@ class TestPriceSeriesQuant(unittest.TestCase):
         # 期貨夜盤／換月時，日線最後一筆可能與官方昨收基準不同；
         # 頂列漲跌必須與同卡即時報價一致，而不是拿日線快取反推方向。
         q = tq.price_series_quant(
-            [43000, 43800, 44280], latest=44719, quote_change_pct=-0.6024)
+            [43000, 43800, 44280], latest=44719, quote_change_pct=-0.6024,
+            dates=['2026-10-01', '2026-10-02', '2026-10-05'], latest_date='2026-10-06')
         self.assertEqual(q['close'], 44719.0)
         self.assertAlmostEqual(q['chgPct'], -0.60, places=2)
         self.assertGreater(q['vsMa5Pct'], 0)  # 日線水位仍可獨立呈現
