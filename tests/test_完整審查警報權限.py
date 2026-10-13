@@ -6,6 +6,7 @@ import http.client
 import importlib
 import importlib.util
 import json
+import logging
 from pathlib import Path
 import shutil
 import socket
@@ -51,6 +52,7 @@ class 警報與權限案例(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        logging.shutdown()
         cls.directory.cleanup()
 
     def setUp(self):
@@ -66,6 +68,9 @@ class 警報與權限案例(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
         self.http = self.backend.ThreadingHTTPServer(('127.0.0.1', 0), self.backend.Handler)
+        port_patch = mock.patch.object(self.backend, 'PORT', self.http.server_port)
+        port_patch.start()
+        self.addCleanup(port_patch.stop)
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
         self.thread.start()
         self.addCleanup(self._close_server, self.http, self.thread)
