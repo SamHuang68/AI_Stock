@@ -173,7 +173,7 @@ def run(day=None, *, adjustment_budget_seconds=120):
         from 個股還原研究 import refresh_snapshots
         prior = next((s.get('result') or {} for s in previous.get('sources', []) if s.get('name') == '還原快照'), {})
         return refresh_snapshots(symbols, expected_day=day, deadline=Deadline(adjustment_budget_seconds),
-                                 previous_attempts=prior.get('attemptedAt'), workers=4)
+                                 previous_attempts=prior.get('attemptedAt'), previous_results=prior.get('results'), workers=4)
     step('還原快照', 'Yahoo Finance/quote/adjclose', adjustments)
     state['status'] = 'partial' if any(s['status'] != 'completed' for s in state['sources']) else 'completed'
     trace('工作結束', status=state['status'])

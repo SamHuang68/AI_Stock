@@ -182,6 +182,20 @@ class 警報日線來源(unittest.TestCase):
              patch.object(watch_daemon, '_save_state') as save:
             watch_daemon.check_once()
             save.assert_called_once_with(old)
+        # 已知未突破時，量比未知不妨礙解除；仍沿用價格遲滯。
+        for close, should_reset in ((98, True), (99.5, False)):
+            with self.subTest(close=close):
+                below = {**ind, 'close': close}
+                self.assertEqual(watch_daemon._eval('breakout_n_high', below, {})[0], 'wait')
+                with patch.object(watch_daemon.alert_daemon, 'load_config', return_value={'watch_enabled': True}), \
+                     patch.object(watch_daemon, 'load_rules', return_value={'2330': {'signals': [{'id': 'x', 'strategy': 'breakout_n_high'}]}}), \
+                     patch.object(watch_daemon, '_load_state', return_value=old.copy()), \
+                     patch.object(watch_daemon, '_fetch_daily', return_value=self.bars), \
+                     patch.object(watch_daemon, '_ind', return_value=below), \
+                     patch.object(watch_daemon, '_save_state') as save:
+                    watch_daemon.check_once()
+                expected = {'2330:x': {'status': None, 'last_fired_time': 100, 'fired_price': None}} if should_reset else old
+                save.assert_called_once_with(expected)
         self.assertEqual(watch_daemon._eval('breakout_n_high', {**ind, 'volRatio': 1}, {})[0], 'partial')
         self.assertEqual(watch_daemon._eval('breakout_n_high', {**ind, 'volRatio': 2}, {})[0], 'trigger')
 

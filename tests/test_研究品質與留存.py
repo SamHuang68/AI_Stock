@@ -127,8 +127,40 @@ class AdjustmentTests(unittest.TestCase):
                 self.assertFalse(result['savedSnapshot'])
                 self.assertEqual(len(result['rejectedSnapshot']['removedDates']), 1)
                 self.assertEqual(result['rejectedSnapshot']['candidate']['fetchedAt'], 2)
+                self.assertEqual(result['rejectedSnapshot']['candidate']['rows'], 3)
+                self.assertEqual(len(result['rejectedSnapshot']['candidate']['sha256']), 64)
+                self.assertNotIn('events', result['rejectedSnapshot']['candidate'])
                 with datastore.read_snapshot() as conn:
                     self.assertEqual(adjusted.load_snapshot(conn, '2330')['fetchedAt'], 1)
+                prior = out['results']
+                with patch.object(datastore, 'fetch_yahoo_daily', side_effect=AssertionError('同日相同拒絕不得重抓')):
+                    reused = adjusted.refresh_snapshots(['2330'], expected_day='2026-09-24', previous_results=prior)
+                self.assertEqual(reused['status'], 'partial')
+                self.assertTrue(reused['results']['2330']['reusedRejection'])
+                for change in ('start', 'content', 'snapshot', 'next_day'):
+                    with self.subTest(changed_input=change):
+                        if change == 'start':
+                            with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+                                conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)',
+                                    ('2330', 'TW', pack['timestamps'][0] - 3 * 86400, 10, 10, 10, 10, 1))
+                        elif change == 'content':
+                            with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+                                conn.execute('UPDATE bars SET volume=2 WHERE symbol=?', ('2330',))
+                        elif change == 'snapshot':
+                            adjusted.save_snapshot('2330', 'TW', {**old, 'fetchedAt': 3})
+                        future = datetime.now(ss._TZ['TW']) + timedelta(days=1)
+                        class Clock(datetime):
+                            @classmethod
+                            def now(cls, tz=None):
+                                return future if change == 'next_day' else datetime.now(tz)
+                        with patch.object(adjusted, 'datetime', Clock), patch.object(datastore, 'fetch_yahoo_daily', return_value=candidate) as fetch:
+                            refreshed = adjusted.refresh_snapshots(['2330'], expected_day='2026-09-24', previous_results=prior)
+                        fetch.assert_called_once()
+                        self.assertFalse(refreshed['results']['2330'].get('reusedRejection', False))
+                        with closing(sqlite3.connect(datastore.DB_PATH)) as conn, conn:
+                            conn.execute('DELETE FROM bars WHERE ts<?', (pack['timestamps'][0],))
+                            conn.execute('UPDATE bars SET volume=1')
+                            conn.execute('DELETE FROM stock_adjustment_snapshots WHERE fetched_at>1')
         truncated = {**pack, 'timestamps': pack['timestamps'][1:], 'quoteClose': [10] * 3,
                      'adjclose': [9] * 3, 'fetchedAt': int(datetime.now(ss._TZ['TW']).timestamp())}
         for legacy in (False, True):
@@ -183,6 +215,7 @@ class AdjustmentTests(unittest.TestCase):
                 {'name': name, 'status': 'completed', 'result': {'receivedSymbols': ['2330']}}
                 for name in ('TWSE 日線', 'TPEx 日線', '大盤日線', '上市法人', '上櫃法人', '還原快照')]}
             previous['sources'][-1]['result']['attemptedAt'] = {'2330': 1}
+            previous['sources'][-1]['result']['results'] = {'2330': {'status': 'partial', 'rejectionFingerprint': '前次拒絕'}}
             (Path(tmp) / 'stock_daily_sources.json').write_text(json.dumps(previous), encoding='utf-8')
             with patch.object(sources, 'datetime', Clock), patch.object(datastore, 'list_symbols', return_value=['2330']), \
                     patch.object(sources.http_client, 'fetch_json', side_effect=AssertionError('已完成官方來源不得重抓')), \
@@ -191,6 +224,7 @@ class AdjustmentTests(unittest.TestCase):
             self.assertEqual(out['status'], 'partial')
             self.assertEqual(refresh.call_args.kwargs['expected_day'], '2026-09-24')
             self.assertEqual(refresh.call_args.kwargs['previous_attempts'], {'2330': 1})
+            self.assertEqual(refresh.call_args.kwargs['previous_results'], previous['sources'][-1]['result']['results'])
             self.assertEqual(out['sources'][-1]['status'], 'partial')
 
     def test_source_update_includes_short_history_and_does_not_duplicate_session(self):

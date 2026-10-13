@@ -1,5 +1,6 @@
 """既有行情來源的還原快照及成本敏感度；不覆寫原價、不產生候選。"""
 import json
+import hashlib
 import math
 import statistics
 import time
@@ -44,7 +45,7 @@ def save_snapshot(symbol, market, pack):
 
 
 def refresh_snapshots(symbols, *, expected_day=None, deadline=None, previous_attempts=None,
-                      append_missing=False, trace=None, workers=1):
+                      previous_results=None, append_missing=False, trace=None, workers=1):
     """沿用同一來源取得完整快照；逐檔先核對，逾時留下可續作集合。"""
     import datastore
     from concurrent.futures import ThreadPoolExecutor
@@ -57,6 +58,10 @@ def refresh_snapshots(symbols, *, expected_day=None, deadline=None, previous_att
                    key=lambda c: (attempts.get(c, 0), c))
     results, pending_details = {}, {}
 
+    def digest(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
+                              allow_nan=False, separators=(',', ':')).encode('utf-8')).hexdigest()
+
     def check_budget():
         if deadline is not None and deadline.expired():
             raise TimeoutError('還原快照檢查與下載共用時間預算已用盡')
@@ -68,10 +73,12 @@ def refresh_snapshots(symbols, *, expected_day=None, deadline=None, previous_att
             evidence = quality_evidence(conn, code, start=bars[0]['date'], end=bars[-1]['date']) if bars else {}
             revisions = datastore.source_revision_status(code, connection=conn)
             quality_issues = []
+            quality_records = []
             if bars and conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bar_quality'").fetchone():
                 for day, issues_json in conn.execute('SELECT session_date,issues FROM bar_quality WHERE market=? AND symbol=? AND session_date BETWEEN ? AND ?',
                         ('TW', code, bars[0]['date'], bars[-1]['date'])):
                     issues = json.loads(issues_json)
+                    quality_records.append([day, issues])
                     if issues and not (issues == ['官方來源與原始日線不同；原始值保留']
                                        and evidence.get(day, {}).get('priceVerified')):
                         quality_issues.append(day)
@@ -83,6 +90,7 @@ def refresh_snapshots(symbols, *, expected_day=None, deadline=None, previous_att
         ready = bool(bars and issues['status'] == 'aligned' and not quality_conflicts and not quality_issues
                      and (not expected_day or bars[-1]['date'] >= expected_day and through >= expected_day))
         return raw, {'status': 'completed' if ready else 'partial', 'alignment': issues,
+                     'inputFingerprint': digest([raw, snapshot, evidence, sorted(quality_records), revisions]),
                      'qualityConflictDates': quality_conflicts, 'qualityIssueDates': quality_issues, 'sourceRevisions': revisions,
                      'sourceDate': through or None, 'sourceStart': snapshot_start or None,
                      'barStart': bars[0]['date'] if bars else None, 'barDate': bars[-1]['date'] if bars else None}
@@ -98,6 +106,14 @@ def refresh_snapshots(symbols, *, expected_day=None, deadline=None, previous_att
         check_budget()
         fetched = datetime.fromtimestamp(previous['fetchedAt'], ss._TZ['TW']) if previous else None
         now = datetime.now(ss._TZ['TW'])
+        rejection_fingerprint = digest(['snapshot-rejection/v1', now.date().isoformat(),
+            expected_day, append_missing, result['inputFingerprint'], result['alignment']])
+        prior_result = (previous_results or {}).get(code) or {}
+        if (prior_result.get('status') == 'partial' and prior_result.get('rejectedSnapshot')
+                and prior_result.get('rejectionFingerprint') == rejection_fingerprint):
+            return {**prior_result, 'status': 'partial', 'reusedRejection': True,
+                    'inspectionSeconds': round(inspection_seconds, 3),
+                    'reuseReason': '同日相關輸入未變，沿用拒絕收據；仍未完成'}
         # 當日已取得的部分快照仍回報缺口，但不用同日反覆下載完全相同的完整歷史。
         known_partial = bool(previous and fetched <= now and fetched.date() == now.date()
             and (now.hour < 14 or fetched.hour >= 14)
@@ -148,10 +164,13 @@ def refresh_snapshots(symbols, *, expected_day=None, deadline=None, previous_att
         # 最新候選須保留舊快照所有日期；新增缺日／截頭僅留診斷，不遮蔽正常版本。
         truncated_start = bool(result['sourceStart'] and result['barStart'] and result['sourceStart'] > result['barStart'])
         if removed_dates or truncated_start:
-            result.update(status='partial', rejectedSnapshot={'reason': '新快照截短本機歷史或縮減既有涵蓋，未採用候選',
+            result.update(status='partial', rejectionFingerprint=rejection_fingerprint,
+                rejectedSnapshot={'reason': '新快照截短本機歷史或縮減既有涵蓋，未採用候選',
                 'removedDates': removed_dates, 'truncatedStart': truncated_start,
                 'previousFetchedAt': (previous or {}).get('fetchedAt'),
-                'candidate': candidate})
+                'candidate': {'source': candidate['source'], 'fetchedAt': candidate['fetchedAt'],
+                    'rows': len(candidate['rows']), 'start': min(candidate_dates),
+                    'end': max(candidate_dates), 'sha256': digest(candidate)}})
         elif result['status'] == 'completed' or usable_partial:
             check_budget()
             result['rows'] = save_snapshot(code, 'TW', pack)

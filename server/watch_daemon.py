@@ -167,9 +167,9 @@ def _eval(strategy, ind, params):
         if any(value is None for value in prior): return ('none', '')
         mx = max(prior)
         vr = ind.get('volRatio')
-        if vr is None:
-            return ('none', '')
         if c > mx:
+            if vr is None:
+                return ('none', '')
             if vr is not None and vr >= vm:
                 return ('trigger', f'突破 {days} 日新高 {mx:.2f} + 量 {vr:.1f}x')
             return ('partial', f'價突破 {mx:.2f} 但量不足')
