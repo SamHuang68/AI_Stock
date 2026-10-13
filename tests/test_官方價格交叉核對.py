@@ -40,6 +40,44 @@ class OfficialPriceCrosscheckTests(unittest.TestCase):
         self.assertEqual(cross.parse_receipt('2330', digest, receipt),
                          {'2024-01-10': {'open': 100, 'high': 103, 'low': 99, 'close': 101}})
 
+    def test_回應結構非物件即使雜湊自洽仍拒絕(self):
+        for data in ([], None, '無效回應', 1, True):
+            digest, receipt = self.receipt(raw=json.dumps(data, ensure_ascii=False))
+            with self.subTest(回應=data), self.assertRaisesRegex(ValueError, '回應必須是物件'):
+                cross.parse_receipt('2330', digest, receipt)
+
+    def test_收據網址與取得時間必須是文字(self):
+        digest, receipt = self.receipt()
+        for key in ('url', 'retrieved_at'):
+            for value in (None, [], {}, 1):
+                with self.subTest(欄位=key, 內容=value), self.assertRaisesRegex(ValueError, '網址或取得時間格式無效'):
+                    cross.parse_receipt('2330', digest, {**receipt, key: value})
+
+    def test_月收盤資料列與日期型別無效均拒絕(self):
+        _, receipt = self.receipt()
+        original = json.loads(receipt['raw_text'])
+        cases = [('資料非清單', value) for value in (None, {}, '無效資料', 1)]
+        cases += [('列非清單', [value]) for value in (None, {}, '無效列', 1)]
+        cases += [('日期非文字', [[value, '101']]) for value in (None, [], {}, 1)]
+        for label, rows in cases:
+            digest, item = self.receipt(data={**original, 'data': rows})
+            with self.subTest(原因=label, 內容=rows), self.assertRaises(ValueError):
+                cross.parse_receipt('2330', digest, item)
+
+    def test_全市場表格欄位與資料列型別無效均拒絕(self):
+        _, receipt = self.receipt(market=True)
+        original = json.loads(receipt['raw_text'])
+        table = original['tables'][0]
+        cases = [('表格集合非清單', value) for value in (None, {}, '無效表格', 1)]
+        cases += [('表格非物件', [value]) for value in (None, [], '無效表格', 1)]
+        cases += [('欄位非文字清單', [{**table, 'fields': value}]) for value in (None, {}, '無效欄位', [None], [[]])]
+        cases += [('資料非清單', [{**table, 'data': value}]) for value in (None, {}, '無效資料', 1)]
+        cases += [('列非清單', [{**table, 'data': [value, *table['data']]}]) for value in (None, {}, '無效列', 1)]
+        for label, tables in cases:
+            digest, item = self.receipt(market=True, data={**original, 'tables': tables})
+            with self.subTest(原因=label, 內容=tables), self.assertRaises(ValueError):
+                cross.parse_receipt('2330', digest, item)
+
     def test_wrong_hash_route_host_version_and_duplicate_request_are_rejected(self):
         digest, receipt = self.receipt()
         variants = [('hash', '0' * 64, receipt),

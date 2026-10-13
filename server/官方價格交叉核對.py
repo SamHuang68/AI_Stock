@@ -17,6 +17,8 @@ def parse_receipt(symbol, digest, receipt):
     raw = receipt.get('raw_text')
     if not isinstance(raw, str) or len(raw.encode('utf-8')) > 12_000_000 or hashlib.sha256(raw.encode('utf-8')).hexdigest() != digest:
         raise ValueError('交叉核對原始回應雜湊不符')
+    if any(not isinstance(receipt.get(key), str) or not receipt[key] for key in ('url', 'retrieved_at')):
+        raise ValueError('交叉核對網址或取得時間格式無效')
     url = urlsplit(receipt['url'])
     query = parse_qs(url.query)
     observed = datetime.fromisoformat(receipt['retrieved_at'].replace('Z', '+00:00'))
@@ -27,6 +29,8 @@ def parse_receipt(symbol, digest, receipt):
         raise ValueError('交叉核對網址、時間或參數無效')
     requested = datetime.strptime(query['date'][0], '%Y%m%d').date()
     data = json.loads(raw, object_pairs_hook=_unique_object)
+    if not isinstance(data, dict):
+        raise ValueError('交叉核對回應必須是物件')
     observed_day = observed.astimezone(TAIPEI).date()
     if data.get('stat') != 'OK' or data.get('date') != requested.strftime('%Y%m%d') or requested > observed_day:
         raise ValueError('交叉核對回應日期或狀態不符')
@@ -36,9 +40,14 @@ def parse_receipt(symbol, digest, receipt):
         if (requested.day != 1 or query.get('stockNo') != [symbol] or data.get('fields') != ['日期', '收盤價']
                 or not re.search(title, str(data.get('title', '')))):
             raise ValueError('交叉核對月收盤標的或欄位不符')
-        for row in data['data']:
-            if len(row) != 2:
+        rows = data.get('data')
+        if not isinstance(rows, list):
+            raise ValueError('交叉核對月收盤資料必須是列清單')
+        for row in rows:
+            if not isinstance(row, list) or len(row) != 2:
                 raise ValueError('交叉核對月收盤欄數不符')
+            if not isinstance(row[0], str):
+                raise ValueError('交叉核對月收盤日期必須是文字')
             if row[0] == '月平均收盤價':
                 continue
             y, m, d = map(int, row[0].split('/'))
@@ -48,14 +57,26 @@ def parse_receipt(symbol, digest, receipt):
             result[day.isoformat()] = {'close': _receipt_number(row[1], price=True)}
     elif url.path == '/exchangeReport/MI_INDEX' and query.get('type') == ['ALLBUT0999']:
         names = ['證券代號', '開盤價', '最高價', '最低價', '收盤價']
-        tables = [t for t in data.get('tables', []) if set(names) <= set(t.get('fields', []))]
+        source_tables = data.get('tables')
+        if not isinstance(source_tables, list) or any(not isinstance(table, dict) for table in source_tables):
+            raise ValueError('交叉核對全市場表格必須是物件清單')
+        tables = []
+        for table in source_tables:
+            fields = table.get('fields', [])
+            if not isinstance(fields, list) or any(not isinstance(field, str) for field in fields):
+                raise ValueError('交叉核對全市場欄名必須是文字清單')
+            if set(names) <= set(fields):
+                tables.append(table)
         if len(tables) != 1:
             raise ValueError('交叉核對全市場價格表不足或重複')
         table = tables[0]
         fields = table['fields']
         if len(set(fields)) != len(fields):
             raise ValueError('交叉核對全市場欄名重複')
-        rows = [r for r in table['data'] if len(r) == len(fields) and str(r[fields.index(names[0])]).strip() == symbol]
+        source_rows = table.get('data')
+        if not isinstance(source_rows, list) or any(not isinstance(row, list) for row in source_rows):
+            raise ValueError('交叉核對全市場資料必須是列清單')
+        rows = [r for r in source_rows if len(r) == len(fields) and str(r[fields.index(names[0])]).strip() == symbol]
         if len(rows) != 1:
             raise ValueError('交叉核對全市場標的缺失或重複')
         result[requested.isoformat()] = {k: _receipt_number(rows[0][fields.index(n)], price=True)

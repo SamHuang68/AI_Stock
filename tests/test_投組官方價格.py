@@ -133,6 +133,30 @@ class 官方投組價格(unittest.TestCase):
         self.assertNotIn('source', result['quality']['priceIssues'])
         self.assertIn('第二官方收據', result['quality']['priceCoverage']['2330']['officialRejectedReason'])
 
+    def test_自洽陣列交叉原件由完整歷史拒絕且不使投組失敗(self):
+        from 官方價格交叉核對 import TABLE, VERSION
+        from 投組官方價格 import full_history
+        self.seed(raw_error=True)
+        raw = '[]'
+        digest = hashlib.sha256(raw.encode('utf-8')).hexdigest()
+        receipt = {'url': 'https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&type=ALLBUT0999&date=20250102',
+                   'raw_text': raw, 'retrieved_at': '2025-12-31T12:00:00+00:00', 'parser_version': VERSION}
+        identity = hashlib.sha256(json.dumps([self.symbol, digest, receipt['url'], receipt['retrieved_at']], ensure_ascii=False).encode()).hexdigest()
+        with closing(sqlite3.connect(self.db)) as conn, conn:
+            conn.execute(f'CREATE TABLE {TABLE}(id TEXT,symbol TEXT,source_hash TEXT,receipt TEXT)')
+            conn.execute(f'INSERT INTO {TABLE} VALUES(?,?,?,?)', (identity, self.symbol, digest, json.dumps(receipt, ensure_ascii=False)))
+        bars = [{'date': day.isoformat(), **dict(zip(('open', 'high', 'low', 'close'), row[1:5]))}
+                for day, row in zip(self.days, self.original)]
+        with datastore.read_snapshot(self.db) as conn:
+            values, detail, reason = full_history(conn, self.symbol, bars, quality.quality_evidence(conn, self.symbol))
+        self.assertEqual((values, detail), ({}, {}))
+        self.assertEqual(reason, '第二官方收據無法核對：交叉核對回應必須是物件')
+        result = self.result()
+        self.assertFalse(result['quality']['available'])
+        self.assertIsNone(result['portfolio']['vol'])
+        self.assertNotIn('source', result['quality']['priceIssues'])
+        self.assertEqual(result['quality']['priceCoverage'][self.symbol]['officialRejectedReason'], reason)
+
     def test_基準更早但持股完整日曆不可被連帶截斷(self):
         self.seed()
         with closing(sqlite3.connect(self.db)) as conn, conn:
