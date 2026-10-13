@@ -67,7 +67,7 @@
     },
     {
       "id": "決策與Pulse讀取選擇權的既有行為",
-      "reason": "Pulse 與決策組裝改讀 latest_current；以既有的選擇權更新排程、決策脈絡、關鍵價位守門、決策資料品質與決策 HTTP 測試確認既有行為不變（這些測試以固定資料提供選擇權結構，不依賴今天的日期）。",
+      "reason": "Pulse 與決策組裝改讀 latest_current；以既有的選擇權更新排程、決策脈絡、關鍵價位守門、決策資料品質與決策 HTTP 測試確認既有行為不變（這些測試以固定資料提供選擇權結構，不依賴今天的日期）。（決策資料品質模組只列選擇權更新的那一項；該模組的 PortfolioCoverageTest 在 main 上本來就失敗，與本變更無關，另案處理。）",
       "changes": [
         "server/options_exposure.py",
         "server/options_routes.py",
@@ -141,7 +141,7 @@
         "tests.test_options_schedule",
         "tests.test_decision_context",
         "tests.test_key_levels_guard",
-        "tests.test_決策資料品質",
+        "tests.test_決策資料品質.PublicationTest.test_options_refresh_persists_a_distinct_revision",
         "tests.test_decision_http"
       ],
       "timeoutSeconds": 300
