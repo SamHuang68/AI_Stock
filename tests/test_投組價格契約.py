@@ -98,3 +98,54 @@ class 投組價格契約(unittest.TestCase):
             futures = [pool.submit(verified_sessions,'2025-01-02','2025-01-06') for _ in range(2)]
             for future in futures:
                 self.assertEqual(future.result(),['2025-01-02','2025-01-03','2025-01-06'])
+
+    def _snapshot_case(self, index, mismatch=False):
+        days = 交易日('2025-01-02', 80)
+        rows = [(stamp(d),100+i,101+i,99+i,100+i,1000) for i,d in enumerate(days)]
+        with 價格資料({'2330':rows,'^TWII':rows}) as conn:
+            payload = json.loads(conn.execute("SELECT payload FROM stock_adjustment_snapshots WHERE symbol='2330'").fetchone()[0])
+            if mismatch:
+                payload['rows'][index]['rawClose'] += 10
+            else:
+                del payload['rows'][index]
+            conn.execute("UPDATE stock_adjustment_snapshots SET payload=? WHERE symbol='2330'", (json.dumps(payload),))
+            conn.commit()
+            result = portfolio.compute([{'sym':'2330','weight':1}])
+        return days, result
+
+    def test_還原來源內部缺日只排除兩側報酬並揭露(self):
+        days, result = self._snapshot_case(40)
+        self.assertTrue(result['quality']['available'])
+        self.assertEqual(result['portfolio']['days'], 77)
+        self.assertEqual(result['quality']['priceCoverage']['2330']['excludedDates'], [days[40].isoformat()])
+        self.assertEqual(result['quality']['samplePeriod']['end'], days[-1].isoformat())
+
+    def test_還原來源缺最新日仍拒絕舊快照(self):
+        _, result = self._snapshot_case(79)
+        self.assertFalse(result['quality']['available'])
+        self.assertIsNone(result['portfolio']['var95'])
+        self.assertIn('最新日線', result['quality']['priceIssues']['2330'])
+
+    def test_還原來源截短開頭不可當內部缺日(self):
+        _, result = self._snapshot_case(0)
+        self.assertFalse(result['quality']['available'])
+        self.assertIsNone(result['portfolio']['var95'])
+        self.assertIn('歷史起點', result['quality']['priceIssues']['2330'])
+
+    def test_無公司行動且官方逐日核對仍保留原價路徑(self):
+        self.store(BASE)
+        payload = {'rows': [{'date': DAY, 'rawClose': 102, 'adjClose': 99}], 'events': {}}
+        with closing(sqlite3.connect(self.db)) as conn, conn:
+            conn.execute('CREATE TABLE stock_adjustment_snapshots(market TEXT,symbol TEXT,fetched_at INTEGER,payload TEXT)')
+            conn.execute('INSERT INTO stock_adjustment_snapshots VALUES(?,?,?,?)',
+                         ('TW', '2330', 1, json.dumps(payload)))
+        evidence, values, issue = self.result()
+        self.assertTrue(evidence['priceVerified'])
+        self.assertEqual(values, {DAY: 101})
+        self.assertIsNone(issue)
+
+    def test_還原來源價格衝突不可當缺日排除(self):
+        _, result = self._snapshot_case(40, mismatch=True)
+        self.assertFalse(result['quality']['available'])
+        self.assertIsNone(result['portfolio']['var95'])
+        self.assertIn('基準衝突', result['quality']['priceIssues']['2330'])

@@ -18,10 +18,10 @@ import datastore
 from stock_signals import bar_date, normalize_bars
 
 
-def _risk_series(connection, code, rows, *, benchmark=False):
+def _risk_series(connection, code, rows, *, benchmark=False, details=None):
     """沿用來源品質及單一還原快照；未核對的原價不能推導投組風險。"""
     from daily_quality import quality_evidence
-    from 個股還原研究 import load_snapshot, adjusted_bars
+    from 個股還原研究 import load_snapshot, adjusted_bars, alignment_issues
     from 台股交易參考 import split_references
     bars = normalize_bars(rows, 'TW')
     if not bars:
@@ -47,19 +47,44 @@ def _risk_series(connection, code, rows, *, benchmark=False):
         return {b['date']: b['close'] for b in bars}, None
     # 缺收盤的日期留給 _dated_rets 阻擋兩側報酬；不因此丟棄其他已核對價格。
     priced = [b for b in bars if b.get('close') is not None and math.isfinite(b['close']) and b['close'] > 0]
-    adjusted = adjusted_bars(priced, load_snapshot(connection, code)) if priced else None
+    snapshot = load_snapshot(connection, code)
+    compatible = priced
+    snapshot_issue = None
+    missing = set()
+    if snapshot and priced:
+        alignment = alignment_issues(priced, snapshot)
+        if alignment['priceMismatches'] or alignment['invalidTradeDates']:
+            snapshot_issue = '還原來源與原價基準衝突'
+        snapshot_dates = {r['date'] for r in snapshot['rows']}
+        missing = {b['date'] for b in priced if b['date'] not in snapshot_dates}
+        if not snapshot_issue and priced[-1]['date'] in missing:
+            snapshot_issue = '還原快照尚未涵蓋最新日線'
+        if not snapshot_issue and (not snapshot_dates or priced[0]['date'] < min(snapshot_dates)):
+            snapshot_issue = '還原快照缺少歷史起點，不能當成內部缺日'
+        if not snapshot_issue and set(alignment['missingDates']) - missing:
+            snapshot_issue = '日線欄位不完整，不能當成還原來源缺日'
+        # 單一來源快照缺日只排除該日；完整交易日軸仍阻擋缺口兩側報酬。
+        compatible = [b for b in priced if b['date'] not in missing]
+    adjusted = adjusted_bars(compatible, snapshot) if compatible and not snapshot_issue else None
     if adjusted:
+        if details is not None:
+            details.update(snapshotAsOf=max((r['date'] for r in snapshot['rows']), default=None),
+                           excludedDates=sorted(missing), priceBasis='vendor_adjusted_snapshot')
         return {b['date']: b['close'] for b in adjusted}, None
     coverage = connection.execute('SELECT start_date,end_date FROM action_coverage WHERE market=? AND symbol=?', ('TW', code)).fetchone() if 'action_coverage' in tables else None
     actions = connection.execute('SELECT session_date FROM corporate_actions WHERE market=? AND symbol=? AND session_date>? AND session_date<=?',
                                  ('TW', code, first, last)).fetchall() if 'corporate_actions' in tables else []
     known_split = any(first < item['date'] <= last for item in split_references(code))
     if actions or known_split:
-        return {}, '涵蓋公司行動但缺少可比還原價格'
+        return {}, snapshot_issue or '涵蓋公司行動但缺少可比還原價格'
     if not coverage or not coverage[0] <= first <= last <= coverage[1]:
-        return {}, '公司行動涵蓋不足，原價基準未核對'
+        return {}, snapshot_issue or '公司行動涵蓋不足，原價基準未核對'
     if any(not evidence.get(b['date'], {}).get('priceVerified') for b in bars):
-        return {}, '原價品質尚未核對'
+        return {}, snapshot_issue or '原價品質尚未核對'
+    # 保留原有官方原價路徑：完整涵蓋內無公司行動且逐日價格已核對，才可獨立使用。
+    if details is not None:
+        details.update(priceBasis='official_verified_raw', snapshotRejectedReason=snapshot_issue,
+                       excludedDates=[])
     return {b['date']: b['close'] for b in bars}, None
 
 ANN = math.sqrt(252)   # 日 → 年化
@@ -172,14 +197,17 @@ def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
     if not codes:
         return {'error': 'no holdings', 'rejected': rejected}
 
-    series, price_issues = {}, {}
+    series, price_issues, price_coverage = {}, {}, {}
     calendar_period = {'start': None, 'end': None, 'startTrimmed': False}
     try:
         with datastore.read_snapshot() as connection:
             data = datastore.get_bars_bulk(codes + [benchmark], connection=connection)
             for code in codes + [benchmark]:
-                values, issue = _risk_series(connection, code, data.get(code) or [], benchmark=code == benchmark)
+                detail = {}
+                values, issue = _risk_series(connection, code, data.get(code) or [], benchmark=code == benchmark, details=detail)
                 series[code] = values
+                if detail:
+                    price_coverage[code] = detail
                 if issue:
                     price_issues[code] = issue
             observed = sorted({t for values in series.values() for t in values})
@@ -295,6 +323,7 @@ def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
             'commonSampleDays': len(inter),
             'reasons': reasons,
             'priceIssues': price_issues,
+            'priceCoverage': price_coverage,
             'calendarPeriod': calendar_period,
             'samplePeriod': {'start': inter[0] if inter else None, 'end': inter[-1] if inter else None},
         },

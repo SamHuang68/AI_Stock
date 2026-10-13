@@ -59,6 +59,32 @@ class ActionUpdateTests(unittest.TestCase):
             self.assertEqual(coverage[:2], ('2026-09-23', '2026-09-30'))
             self.assertIn('ETF分割', coverage[2])
 
+    def test_real_ex_dividend_chinese_date_schema_and_fail_closed_boundaries(self):
+        # 2026-10-13 取得 TWT49U 的 20251001–20251231 原始 2330 列，僅裁掉無關欄位。
+        # 快取來源：83b86c2ba1787567cd89b57b0468cdc8ceeb05a16b339e350ef9fd2acd441efc.json。
+        def response(event_date):
+            def fetch(url):
+                value = {'stat': '很抱歉，沒有符合條件的資料!'}
+                if '/exRight/' in url:
+                    value = {'stat': 'OK', 'strDate': '20251001', 'endDate': '20251231',
+                        'fields': ['資料日期', '股票代號', '股票名稱', '除權息前收盤價', '除權息參考價', '權/息'],
+                        'data': [[event_date, '2330', '台積電', '1,505.00', '1,499.99', '息']]}
+                return value, hashlib.sha256(json.dumps(value).encode()).hexdigest()
+            return fetch
+        first, last = date(2025, 10, 1), date(2025, 12, 31)
+        for invalid in ('114年12月11日待確認', '114年12/11日', '114年02月30日', '115年01月01日'):
+            with self.subTest(date=invalid):
+                before = self.snapshot()
+                with self.assertRaises(ValueError):
+                    actions.refresh_actions(self.db, '2330', first, last, response(invalid))
+                self.assertEqual(self.snapshot(), before)
+        self.assertEqual(actions.refresh_actions(self.db, '2330', first, last, response('114年12月11日')), 1)
+        with closing(sqlite3.connect(self.db)) as conn:
+            row = conn.execute('SELECT session_date,kind,previous_close,reference_price,status,payload_json FROM action_price_evidence').fetchone()
+            self.assertEqual(row[:5], ('2025-12-11', '除權息', 1505, 1499.99, 'supported'))
+            self.assertEqual(json.loads(row[5])['row'][0], '114年12月11日')
+            self.assertEqual(conn.execute('SELECT count(*) FROM action_source_receipts').fetchone()[0], 4)
+
     def test_fourth_source_failure_or_invalid_digest_preserves_every_table(self):
         for fetch in (self.response(failed='split/'), lambda url: ({'stat': '很抱歉，沒有符合條件的資料!'}, '')):
             before = self.snapshot()

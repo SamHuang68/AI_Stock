@@ -322,8 +322,8 @@ class 資料修正案例(unittest.TestCase):
         results = []
         with patch('urllib.request.urlopen', side_effect=lambda *a, **k: BytesIO(encoded)) as provider, \
              patch.object(datastore, 'read_snapshot', side_effect=lambda: nullcontext(conn)):
-            for fetch, calculate in [(watch_daemon._fetch_daily, watch_daemon._ind),
-                                     (alert_daemon._fetch_daily_candles, alert_daemon._calc_ind)]:
+            for fetch, calculate in [(watch_daemon._fetch_daily_remote, watch_daemon._ind),
+                                     (alert_daemon._fetch_daily_candles_remote, alert_daemon._calc_ind)]:
                 candles = fetch('2330', 'TW')
                 self.assertEqual(len(candles), 65)
                 self.assertEqual([row['time'] for row in candles], days)
@@ -357,8 +357,8 @@ class 資料修正案例(unittest.TestCase):
         encoded = json.dumps(payload).encode()
         with patch('urllib.request.urlopen', side_effect=lambda *a, **k: BytesIO(encoded)), \
              patch.object(datastore, 'read_snapshot', side_effect=lambda: nullcontext(conn)):
-            for fetch, calculate in [(watch_daemon._fetch_daily, watch_daemon._ind),
-                                     (alert_daemon._fetch_daily_candles, alert_daemon._calc_ind)]:
+            for fetch, calculate in [(watch_daemon._fetch_daily_remote, watch_daemon._ind),
+                                     (alert_daemon._fetch_daily_candles_remote, alert_daemon._calc_ind)]:
                 candles = fetch('2330', 'TW')
                 self.assertEqual(len(candles), 64)
                 out = calculate(candles, 'TW', '2330')

@@ -70,7 +70,18 @@ def _log(text):
 
 
 # ---- 抓日線 ------------------------------------------------
-def _fetch_daily(code, mkt):
+def _fetch_daily(code, market):
+    from stock_signals_routes import load_alert_bars
+    loaded = load_alert_bars(code, market, _fetch_daily_remote)
+    _state.setdefault('daily_sources', {})[f'{market}:{code}'] = {
+        key: value for key, value in loaded.items() if key != 'bars'}
+    if loaded.get('error'):
+        from log_once import log_once
+        log_once(f'警報日線-{market}-{code}', loaded['error'])
+    return loaded['bars'] or None
+
+
+def _fetch_daily_remote(code, mkt):
     suffixes = ([''] if mkt == 'US' else ['.TW', '.TWO'])
     for suf in suffixes:
         yf = code + suf if suf or mkt != 'US' else code
@@ -156,6 +167,8 @@ def _eval(strategy, ind, params):
         if any(value is None for value in prior): return ('none', '')
         mx = max(prior)
         vr = ind.get('volRatio')
+        if vr is None:
+            return ('none', '')
         if c > mx:
             if vr is not None and vr >= vm:
                 return ('trigger', f'突破 {days} 日新高 {mx:.2f} + 量 {vr:.1f}x')
@@ -212,6 +225,9 @@ def check_once():
         ind = _ind(candles, mkt, code)
         for sig in sigs:
             status, detail = _eval(sig.get('strategy'), ind, sig.get('params'))
+            if status == 'none':
+                # 未知不是條件解除；保留冷卻與去重狀態。
+                continue
             key = f"{code}:{sig.get('id')}"
             
             # 讀取與標準化舊狀態
@@ -320,6 +336,7 @@ def status():
         'last_run': _state['last_run'],
         'recent_fired': _state['fired'][-20:],
         'running': bool(_state['thread'] and _state['thread'].is_alive()),
+        'daily_sources': _state.get('daily_sources', {}),
     }
 
 

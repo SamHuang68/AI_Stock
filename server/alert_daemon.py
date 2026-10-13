@@ -363,7 +363,18 @@ def _log(text):
 
 
 # ---- 複合警示：抓日線 + 指標 + 多條件 (v3.9 P5) -------------
-def _fetch_daily_candles(sym, market):
+def _fetch_daily_candles(code, market):
+    from stock_signals_routes import load_alert_bars
+    loaded = load_alert_bars(code, market, _fetch_daily_candles_remote)
+    _state.setdefault('daily_sources', {})[f'{market}:{code}'] = {
+        key: value for key, value in loaded.items() if key != 'bars'}
+    if loaded.get('error'):
+        from log_once import log_once
+        log_once(f'警報日線-{market}-{code}', loaded['error'])
+    return loaded['bars'] or None
+
+
+def _fetch_daily_candles_remote(sym, market):
     suffixes = [''] if market == 'US' else ['.TW', '.TWO']
     for suf in suffixes:
         yf = sym if market == 'US' else sym + suf
@@ -418,7 +429,7 @@ def _eval_composite(rule, ind):
     for c in conds:
         a = val(c.get('left')); b = val(c.get('right'))
         if a is None or b is None:
-            results.append(False); continue
+            results.append(None); continue
         op = c.get('op', 'gt')
         ok = (a > b if op == 'gt' else a < b if op == 'lt'
               else a >= b if op == 'gte' else a <= b if op == 'lte' else False)
@@ -426,7 +437,10 @@ def _eval_composite(rule, ind):
         opsym = {'gt': '>', 'lt': '<', 'gte': '≥', 'lte': '≤'}.get(op, op)
         rname = LBL.get(c.get('right'), c.get('right'))
         details.append(f"{LBL.get(c.get('left'), c.get('left'))}({a:.2f}){opsym}{rname}")
-    satisfied = all(results) if combine == 'AND' else any(results)
+    if combine == 'AND':
+        satisfied = False if False in results else (None if None in results else True)
+    else:
+        satisfied = True if True in results else (None if None in results else False)
     return satisfied, ('；'.join(details))
 
 
@@ -437,6 +451,9 @@ def _check_composite(r, cfg):
         return False
     ind = _calc_ind(candles, r.get('market', 'TW'), r.get('sym', ''))
     satisfied, detail = _eval_composite(r, ind)
+    # 三值邏輯：已知假可解除 AND，只有整體未知才保留舊狀態。
+    if satisfied is None:
+        return False
     prev = r.get('_last_fired')
     r['_last_fired'] = satisfied
     if satisfied and not prev:
@@ -567,6 +584,7 @@ def status():
         'recent_fired': _state['fired'][-20:],
         'last_quotes': _state['last_quotes'],
         'running': bool(_state['thread'] and _state['thread'].is_alive()),
+        'daily_sources': _state.get('daily_sources', {}),
     }
 
 

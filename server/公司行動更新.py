@@ -161,7 +161,11 @@ def refresh_actions(db, symbol, begin, end, fetch, check=lambda: None):
                 raw = dict(zip(fields, values))
                 if str(raw[code_field]).strip() != symbol:
                     continue
-                parts = re.fullmatch(r'\s*(\d{2,4})[/-](\d{1,2})[/-](\d{1,2})\s*', str(raw[date_field]))
+                # TWT49U 實際回傳「114年12月11日」；其他路徑仍保留原斜線格式。
+                # 僅接受完整日期，不任意移除文字，避免註記或錯誤字串變成有效交易日。
+                text = str(raw[date_field])
+                parts = (re.fullmatch(r'\s*(\d{2,4})年(\d{1,2})月(\d{1,2})日\s*', text)
+                         or re.fullmatch(r'\s*(\d{2,4})[/-](\d{1,2})[/-](\d{1,2})\s*', text))
                 if not parts:
                     raise ValueError('公司行動日期無法辨識')
                 y, m, d = map(int, parts.groups())
