@@ -177,10 +177,13 @@
   }
 
   async function loadPanel(p) {
+    const request = p.request = (p.request || 0) + 1;
+    const { sym, mkt, rg } = p;
     p.body.innerHTML = '<div class="mc-load">載入中…</div>';
     if (!p.sym) { p.body.innerHTML = '<div class="mc-empty">敲代號 Enter</div>'; return; }
-    const parsed = await fetchPanel(p.sym, p.mkt, p.rg);
-    if (!active) return;
+    const parsed = await fetchPanel(sym, mkt, rg);
+    if (!active || p.request !== request || !panels.includes(p) || !p.body.isConnected
+        || p.sym !== sym || p.mkt !== mkt || p.rg !== rg) return;
     p.body.innerHTML = '';
     if (!parsed || !parsed.candles.length) { p.body.innerHTML = '<div class="mc-empty">無資料: ' + p.sym + '</div>'; return; }
     if (p.nameEl) p.nameEl.textContent = parsed.name || '';

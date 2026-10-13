@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 from typing import Any, Dict, List, Optional
+from trend_quant import merge_dated_series
 
 
 def volume_score_yi(yi: float) -> float:
@@ -15,7 +16,7 @@ def volume_score_yi(yi: float) -> float:
     return max(0.0, min(100.0, 50.0 + 50.0 * math.tanh((float(yi) - 8000.0) / 4000.0)))
 
 
-def turnover_quant(turns: Optional[List[dict]], latest_yi: Optional[float] = None) -> Dict[str, Any]:
+def turnover_quant(turns: Optional[List[dict]], latest_yi: Optional[float] = None, latest_date=None) -> Dict[str, Any]:
     """由日成交序列＋可選當日官方億元，建量能量化指標。
 
     turns: [{amount: 元, ...}, ...]
@@ -26,25 +27,14 @@ def turnover_quant(turns: Optional[List[dict]], latest_yi: Optional[float] = Non
         'z20': None, 'volumeScore': None, 'streak': None,
         'trend': None, 'level': None, 'n': 0,
     }
-    series: List[float] = []
+    values, dates = [], []
     for t in turns or []:
+        dates.append(t.get('sourceDate') or t.get('date'))
         try:
-            if t.get('amount') is not None:
-                series.append(float(t['amount']) / 1e8)
-        except Exception:
-            continue
-    if latest_yi is not None:
-        try:
-            cur0 = float(latest_yi)
-        except Exception:
-            cur0 = None
-        if cur0 is not None:
-            if not series:
-                series = [cur0]
-            elif abs(series[-1] - cur0) / max(abs(cur0), 1.0) <= 0.03:
-                series[-1] = cur0
-            else:
-                series.append(cur0)
+            values.append(float(t['amount']) / 1e8)
+        except (TypeError, ValueError, KeyError):
+            values.append(None)
+    series, quality = merge_dated_series(values, dates, latest_yi, latest_date, allow_zero=True)
     if not series:
         return empty
     cur = series[-1]
@@ -109,4 +99,5 @@ def turnover_quant(turns: Optional[List[dict]], latest_yi: Optional[float] = Non
         'trend': trend,
         'level': level,
         'n': len(series),
+        **quality,
     }

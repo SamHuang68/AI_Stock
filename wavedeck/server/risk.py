@@ -40,6 +40,11 @@ def evaluate_gate(
         allow = False
         reasons.append("Kill Switch / Halted")
 
+    # 停止一般執行時仍保留減碼與平倉；所有新風險在送單前統一阻擋。
+    if (state.get("lights") or {}).get("system") in {"stop", "halt"} and decision.get("action") in {"ENTER_LONG", "ENTER_SHORT"}:
+        allow = False
+        reasons.append("系統已停止：禁止新單，仍允許減碼與平倉")
+
     # Hard daily max drawdown — block new risk-on (and note when already locked)
     dd = daily_dd_ratio(state)
     if dd >= MAX_DAILY_DD and decision.get("action") in {

@@ -310,6 +310,28 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── WEB WORKER (inline blob) ─────────────────────────────────────
+// 主圖與策略共用 EMA；與後端 ema_series 的連續 SMA 種子及缺值規則一致。
+window.stEmaSeries = function (arr, p) {
+  const out = new Array(arr.length).fill(null);
+  if (!Number.isInteger(p) || p <= 0) return out;
+  let run = 0, start = -1;
+  for (let i = 0; i < arr.length; i++) {
+    run = arr[i] != null && Number.isFinite(arr[i]) ? run + 1 : 0;
+    if (run === p) { start = i; break; }
+  }
+  if (start < 0) return out;
+  let prev = 0;
+  for (let i = start - p + 1; i <= start; i++) prev += arr[i];
+  prev /= p;
+  out[start] = prev;
+  const alpha = 2 / (p + 1);
+  for (let i = start + 1; i < arr.length; i++) {
+    if (arr[i] == null || !Number.isFinite(arr[i])) break;
+    prev = alpha * arr[i] + (1 - alpha) * prev;
+    out[i] = prev;
+  }
+  return out;
+};
 const WORKER_SRC = `
 self.onmessage = function(e) {
   const {candles} = e.data;
@@ -328,16 +350,7 @@ self.onmessage = function(e) {
     }
     return r;
   }
-  // EMA：前 p 期用 SMA 種子（標準 MACD 作法），之後 EMA
-  function ema(arr,p){
-    const r=new Array(arr.length).fill(null);
-    if(arr.length<p) return r;
-    let s=0; for(let i=0;i<p;i++) s+=arr[i];
-    s/=p; r[p-1]=s;
-    const k=2/(p+1);
-    for(let i=p;i<arr.length;i++){ s=arr[i]*k+s*(1-k); r[i]=s; }
-    return r;
-  }
+  const ema = ${window.stEmaSeries.toString()};
   // Wilder's RSI（與 server._calc_ind 對齊，禁止簡易末14平均）
   function rsiWilder(arr,period){
     if(arr.length<=period) return null;
@@ -757,6 +770,8 @@ async function loadSym(sym, mkt, silent) {
   }
   const _myLoad = (window.__loadSeq = (window.__loadSeq || 0) + 1);   // 切股 race 守衛
   S.sym = sym; S.mkt = mkt;
+  S.ind = null;
+  S.dataIdentity = null; // 載入完成前不得將舊行情當成目前標的的快照。
   try { window.dispatchEvent(new CustomEvent('symLoading', {detail:{sym, mkt, loadSeq:_myLoad}})); } catch(e){}
   document.getElementById('syminput').value = sym;
   setMktUI(mkt);
@@ -952,7 +967,9 @@ async function loadSym(sym, mkt, silent) {
     parsed.rangeChgLbl = _rangeLbl;
   }
 
+  if (_myLoad !== window.__loadSeq || S.sym !== sym || S.mkt !== mkt) return;
   S.data = parsed;
+  S.dataIdentity = { sym, mkt, loadSeq: _myLoad };
   renderChart(parsed.candles);
   document.getElementById('chart-loading').style.display='none';
   document.getElementById('chart-info').style.display='block';
@@ -995,8 +1012,9 @@ async function loadSym(sym, mkt, silent) {
     S.ind = null;
     try { clearInd(); } catch (e) {}
   } else {
-    S.ind = await runWorker(parsed.candles);
-    if (_myLoad !== window.__loadSeq) return;   // 切股 race：指標算完前已切別檔→不覆寫
+    const indicators = await runWorker(parsed.candles);
+    if (_myLoad !== window.__loadSeq || S.sym !== sym || S.mkt !== mkt) return;
+    S.ind = indicators;
     renderInd(S.ind, last, mkt);
     if (S.ind && typeof window.updateEtfFlowIndV3 === 'function') window.updateEtfFlowIndV3();
   }

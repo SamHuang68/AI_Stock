@@ -19,6 +19,11 @@ WEB = ROOT / "web"
 _SCRIPT_DIR = str(Path(__file__).resolve().parent)
 sys.path = [str(ROOT)] + [p for p in sys.path if p not in ("", ".", _SCRIPT_DIR)]
 
+from server.程序單例 import acquire as acquire_instance  # noqa: E402
+
+# 必須早於 audit／engine／state 的匯入；RUNTIME 在模組載入時就會讀寫資料。
+_INSTANCE_LOCK = acquire_instance(ROOT / "data")
+
 from server import audit  # noqa: E402
 from server.engine import (  # noqa: E402
     apply_st_bridge,

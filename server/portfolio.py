@@ -12,8 +12,48 @@ portfolio.py — v4.0 投組風險引擎(純 stdlib)
 避免在後端重編一份而分歧。
 """
 import math
+import json
+import sqlite3
 import datastore
-from stock_signals import bar_date
+from stock_signals import bar_date, normalize_bars
+
+
+def _risk_series(connection, code, rows, *, benchmark=False):
+    """沿用來源品質及單一還原快照；未核對的原價不能推導投組風險。"""
+    from daily_quality import quality_evidence
+    from 個股還原研究 import load_snapshot, adjusted_bars
+    from 台股交易參考 import split_references
+    bars = normalize_bars(rows, 'TW')
+    if not bars:
+        return {}, '缺少歷史'
+    first, last = bars[0]['date'], bars[-1]['date']
+    evidence = quality_evidence(connection, code, start=first, end=last)
+    conflicts = ('priceConflict', 'sourceConflict', 'ambiguousSession', 'invalidObservation', 'invalidReceipt')
+    if any(any(item.get(k) for k in conflicts) for item in evidence.values()):
+        return {}, '日線品質或來源存在衝突'
+    tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if 'bar_quality' in tables:
+        issues = connection.execute('SELECT issues FROM bar_quality WHERE market=? AND symbol=? AND session_date BETWEEN ? AND ?',
+                                    ('TW', code, first, last)).fetchall()
+        if any(json.loads(row[0]) for row in issues):
+            return {}, '日線品質紀錄尚有未解問題'
+    # 指數本身不適用個股公司行動；來源衝突仍會在上方擋下。
+    if benchmark and code.startswith('^'):
+        return {b['date']: b['close'] for b in bars}, None
+    adjusted = adjusted_bars(bars, load_snapshot(connection, code))
+    if adjusted:
+        return {b['date']: b['close'] for b in adjusted}, None
+    coverage = connection.execute('SELECT start_date,end_date FROM action_coverage WHERE market=? AND symbol=?', ('TW', code)).fetchone() if 'action_coverage' in tables else None
+    actions = connection.execute('SELECT session_date FROM corporate_actions WHERE market=? AND symbol=? AND session_date>? AND session_date<=?',
+                                 ('TW', code, first, last)).fetchall() if 'corporate_actions' in tables else []
+    known_split = any(first < item['date'] <= last for item in split_references(code))
+    if actions or known_split:
+        return {}, '涵蓋公司行動但缺少可比還原價格'
+    if not coverage or not coverage[0] <= first <= last <= coverage[1]:
+        return {}, '公司行動涵蓋不足，原價基準未核對'
+    if any(not evidence.get(b['date'], {}).get('priceVerified') for b in bars):
+        return {}, '原價品質尚未核對'
+    return {b['date']: b['close'] for b in bars}, None
 
 ANN = math.sqrt(252)   # 日 → 年化
 
@@ -125,19 +165,26 @@ def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
     if not codes:
         return {'error': 'no holdings', 'rejected': rejected}
 
-    data = datastore.get_bars_bulk(codes + [benchmark])
-    series = {}
-    for code in codes + [benchmark]:
-        values = {}
-        for row in data.get(code) or []:
-            try:
-                day = bar_date(row[0], 'TW')
-                if day:
-                    values[day] = row[4]
-            except (TypeError, ValueError, IndexError, OverflowError, OSError):
-                continue
-        series[code] = values
-    dates = sorted({t for values in series.values() for t in values})
+    series, price_issues = {}, {}
+    try:
+        with datastore.read_snapshot() as connection:
+            data = datastore.get_bars_bulk(codes + [benchmark], connection=connection)
+            for code in codes + [benchmark]:
+                values, issue = _risk_series(connection, code, data.get(code) or [], benchmark=code == benchmark)
+                series[code] = values
+                if issue:
+                    price_issues[code] = issue
+            observed = sorted({t for values in series.values() for t in values})
+            from 台股交易參考 import verified_sessions
+            dates = verified_sessions(observed[0], observed[-1], connection=connection) if observed else []
+            if dates is None:
+                dates = []
+                price_issues['calendar'] = '交易日曆涵蓋不足'
+    except (sqlite3.Error, OSError, ValueError, TypeError, KeyError) as exc:
+        from log_once import log_once
+        log_once('portfolio-price-quality', '投組價格品質核對失敗', exc=exc)
+        dates = []
+        price_issues['source'] = '價格品質或公司行動資料無法核對'
     dated_returns = {c: _dated_rets(values, dates) for c, values in series.items()}
     vcodes = [c for c in codes if len(dated_returns.get(c, {})) > 60]
 
@@ -194,7 +241,7 @@ def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
     coverage_pct = sum(weights.values()) * 100.0
     beta_coverage_pct = sum(weights[c] for c in vcodes if per[c]['beta'] is not None) * 100.0
 
-    reasons = []
+    reasons = [f'{code}：{issue}' for code, issue in price_issues.items()]
     if skipped:
         reasons.append('部分持倉缺少足夠歷史')
     if len(inter) <= 30:
@@ -236,5 +283,6 @@ def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
             'betaCoveragePct': round(beta_coverage_pct, 4),
             'commonSampleDays': len(inter),
             'reasons': reasons,
+            'priceIssues': price_issues,
         },
     }

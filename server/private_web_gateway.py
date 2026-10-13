@@ -482,6 +482,12 @@ CONTROL_POST_PREFIXES = ("/draw/",)
 # These backend endpoints are intentionally not remotely reachable, even with
 # the owner token.  They are listed here for status/documentation responses.
 BLOCKED_REMOTE_PATHS = {
+    "GET /macro/refresh",
+    "GET /macro/refresh/*",
+    "GET /macro/backfill-mix",
+    "GET /macro/track/backfill-mix",
+    "POST /macro/backfill-mix",
+    "POST /macro/track/backfill-mix",
     "POST /ai-key",
     "POST /etf-catalog",
     "POST /etf-tracker/run",
@@ -771,6 +777,9 @@ def _is_static_navigation(path: str) -> bool:
 
 def route_permission(method: str, path: str, role: str, settings: Settings) -> bool:
     if method in {"GET", "HEAD"}:
+        # 有副作用的總經入口不可被唯讀前綴或額外白名單放行。
+        if path in {"/macro/refresh", "/macro/backfill-mix", "/macro/track/backfill-mix"} or path.startswith("/macro/refresh/"):
+            return False
         if path in STATIC_EXACT or path.startswith(STATIC_PREFIXES):
             return True
         if _path_matches(path, OWNER_GET_EXACT, OWNER_GET_PREFIXES):

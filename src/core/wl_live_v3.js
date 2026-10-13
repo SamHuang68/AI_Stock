@@ -212,16 +212,22 @@
     _inflight = true;
     _posDirty = false;
     try {
-      // First pass — TW with .TW suffix, US raw
+      // 自選股與持倉共用正規化；保留 JP／既有市場尾碼與合成序列。
+      const quoteSymbol = (code, market) => {
+        let sym = String(code || '').trim().toUpperCase();
+        if (market === 'JP' && /^\d{4}$/.test(sym)) sym += '.T';
+        const mkt = window.Market ? Market.of(sym) : (market || (/^\d/.test(sym) ? 'TW' : 'US'));
+        return mkt === 'TW' && /^\d{4,6}[A-Z]?$/.test(sym) ? sym + '.TW' : sym;
+      };
       const symMap = new Map();   // yfsym → wl item（或 {_pos: code} 持倉標記）
       for (const w of (S.wl || [])) {
         // ^ 開頭=指數(如 ^TWII/^GSPC)，原樣不加 .TW
-        const yfsym = (w.t && w.t[0] === '^') ? w.t : (w.m === 'TW' ? w.t + '.TW' : w.t);
+        const yfsym = quoteSymbol(w.t, w.m);
         symMap.set(yfsym, w);
       }
-      // 持倉代號（不在自選股的也要抓）：數字開頭視為台股 .TW，否則美股原樣
+      // 不在自選股的持倉仍取行情，市場沿用保存值與 Market.of。
       for (const code of Object.keys(S.positions || {})) {
-        const yf = /^[0-9]/.test(code) ? code + '.TW' : code;
+        const yf = quoteSymbol(code, S.positions[code].mkt);
         if (!symMap.has(yf)) symMap.set(yf, { _pos: code });
         else if (symMap.get(yf) && symMap.get(yf).t) symMap.get(yf)._posAlso = code;
       }

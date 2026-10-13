@@ -18,6 +18,7 @@
 // ============================================================
 
 const LS_KEY_WATCH = 'stock_terminal_watches_v2';
+let _watchSyncTimer = null;
 
 // ── State bootstrap (with migration from old single-signal format) ──
 (function bootWatches() {
@@ -75,7 +76,6 @@ function saveWatches() {
 }
 
 // 同步觀察清單到 server（debounce），供 watch_daemon 後端評估
-let _watchSyncTimer = null;
 function syncWatchesToServer() {
   clearTimeout(_watchSyncTimer);
   _watchSyncTimer = setTimeout(() => {

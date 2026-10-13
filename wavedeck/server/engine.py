@@ -14,7 +14,7 @@ from .broker import execution_pending, get_broker
 from .config import load_config, set_broker_kind, set_mode, set_provider
 from .override_notify import notify_async as notify_override_alpha
 from .providers import infer_with_fallback
-from .risk import evaluate_gate
+from .risk import evaluate_gate, daily_dd_ratio, MAX_DAILY_DD, WARN_DAILY_DD
 from .state import RUNTIME, TZ8, now_iso
 from . import 策略契約 as contracts
 from .不留倉 import deadline_status
@@ -48,6 +48,34 @@ def panic() -> dict:
     audit.write("panic_flatten", {"positions": snap.get("positions"), "execution": snap.get("execution")})
     push_async(snap, reason="panic", force=True)
     return {"ok": True, "state": snap, "mode": "panic_flatten"}
+
+
+@_serialized
+def enforce_daily_drawdown(flatten: bool, already_locked: bool) -> bool:
+    """回撤偵測、急停與平倉共用送單鎖，避免舊進場覆蓋平倉。"""
+    st = RUNTIME.snapshot()
+    ratio = daily_dd_ratio(st)
+    account = {"daily_dd_pct": round(ratio * 100, 2),
+               "daily_dd_limit_pct": round(MAX_DAILY_DD * 100, 2)}
+    if ratio < MAX_DAILY_DD:
+        RUNTIME.patch(account=account, **({"lights": {"risk_watchdog": "warn"}} if ratio >= WARN_DAILY_DD else {}))
+        return already_locked and bool(st.get("kill_switch"))
+    RUNTIME.patch(account=account, lights={"risk_watchdog": "bad"})
+    if st.get("kill_switch") and already_locked:
+        return True
+    RUNTIME.set_kill(True)
+    audit.write("daily_dd_lock", {"ratio": ratio, "limit": MAX_DAILY_DD,
+                                 "yesterday": (st.get("account") or {}).get("yesterday_balance"),
+                                 "equity": (st.get("account") or {}).get("equity"), "flatten": flatten})
+    if flatten:
+        try:
+            panic()
+        except Exception as exc:
+            audit.write("daily_dd_flatten_error", {"error": str(exc)})
+            push_async(RUNTIME.snapshot(), reason="daily_dd_lock", force=True)
+            return False
+    push_async(RUNTIME.snapshot(), reason="daily_dd_lock", force=True)
+    return True
 
 
 @_serialized
@@ -211,7 +239,11 @@ def set_decision_provider(name: str) -> dict[str, Any]:
 
 @_serialized
 def set_exec_mode(mode: str) -> dict[str, Any]:
-    cfg = set_mode(mode)
+    return _publish_execution_config(set_mode(mode))
+
+
+def _publish_execution_config(cfg: dict) -> dict[str, Any]:
+    """在送單鎖內同步設定、執行狀態及兩個切換入口的推播。"""
     snap = RUNTIME.patch(
         mode=cfg["mode"],
         account={"broker_api": cfg["broker"]["kind"]},
@@ -231,12 +263,9 @@ def set_exec_mode(mode: str) -> dict[str, Any]:
 @_serialized
 def set_broker(kind: str) -> dict[str, Any]:
     cfg = set_broker_kind(kind)
-    snap = RUNTIME.patch(
-        account={"broker_api": cfg["broker"]["kind"]},
-        lights={"broker_api": "ok", "order_signal_file": "ok"},
-    )
+    result = _publish_execution_config(cfg)
     audit.write("broker", {"kind": cfg["broker"]["kind"]})
-    return {"ok": True, "broker": cfg["broker"]["kind"], "state": snap}
+    return result
 
 
 def sync_broker_positions() -> dict[str, Any]:
@@ -250,6 +279,7 @@ def sync_broker_positions() -> dict[str, Any]:
         return {"ok": True, "broker": broker.name, "state": snap, "meta": result.get("broker_meta")}
 
 
+@_serialized
 def get_runtime_config() -> dict[str, Any]:
     cfg = load_config()
     st = RUNTIME.snapshot()
@@ -510,8 +540,8 @@ def enforce_no_overnight(now: datetime | None = None) -> dict:
         unresolved = execution_pending(execution) or (execution.get("status") == "filled" and not execution.get("position_confirmed"))
         if account_known and positions.get("account") == 0 and positions.get("txt_target") == 0 and not unresolved:
             progress.update(status="confirmed", message="已核對平倉" + ("（紙上模擬）" if get_broker().name == "paper" else ""))
-        elif st.get("kill_switch") or st.get("fsm") == "Halted" or (st.get("lights") or {}).get("system") in {"stop", "halt"}:
-            progress.update(status="blocked", message="系統停止或緊急停止中；平倉尚未完成")
+        elif st.get("kill_switch") or st.get("fsm") == "Halted":
+            progress.update(status="blocked", message="緊急停止中；平倉尚未完成")
         elif execution.get("target") == 0 and unresolved:
             progress.update(status="pending", message="平倉委託已送出，等待核對；不重複送單")
         elif not account_known:

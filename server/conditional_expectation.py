@@ -81,16 +81,40 @@ def _last_tw_close_day(now: datetime) -> date:
 
 
 def _session_date_from_ts(ts: float | int) -> date:
+    if isinstance(ts, str) and len(ts) >= 10 and ts[4] == '-':
+        return date.fromisoformat(ts[:10])
     return datetime.fromtimestamp(float(ts), TZ_TPE).date()
 
 
-def _bars_upto_date(bars: list, as_of: date) -> list:
+def _research_rows(bars, as_of=None):
+    """以已核對交易日保留缺列；日曆未知時不產生持有期統計。"""
+    from stock_signals import normalize_bars
+    from 台股交易參考 import verified_sessions
+    normalized = normalize_bars(bars, 'TW')
+    if as_of is not None:
+        normalized = [b for b in normalized if b['date'] <= as_of.isoformat()]
+    if not normalized:
+        return []
+    stop = as_of.isoformat() if as_of else normalized[-1]['date']
+    sessions = verified_sessions(normalized[0]['date'], stop, allow_partial=True)
+    if sessions is None:
+        return []
+    by_day = {b['date']: b for b in normalized}
+    return [(int(datetime.combine(date.fromisoformat(day), dtime(0), TZ_TPE).timestamp()),
+             *(by_day.get(day, {}).get(k) for k in ('open', 'high', 'low', 'close', 'volume')))
+            for day in sessions]
+
+
+def _bars_upto_date(bars: list, as_of: date, *, prepared=False) -> list:
+    """只以收盤與交易日連續性切段；其他欄位由各指標判定。"""
     out = []
-    for row in bars or []:
-        if not row or row[4] is None:
-            continue
+    for row in (bars if prepared else _research_rows(bars, as_of)) or []:
         if _session_date_from_ts(row[0]) <= as_of:
-            out.append(row)
+            close = row[4]
+            if isinstance(close, (int, float)) and not isinstance(close, bool) and math.isfinite(close) and close > 0:
+                out.append(row)
+            else:
+                out = []
     return out
 
 
@@ -335,11 +359,17 @@ def bin_state(
     bars: list,
     chip_inst_by_date: dict[str, float] | None = None,
     regime_id: str | None = None,
+    prepared: bool = False,
 ) -> dict[str, Any]:
     """Compute rule-bin state using features available only on or before ``as_of_date``."""
     code = str(symbol or '').strip().upper()
-    pit_bars = _bars_upto_date(bars, as_of_date)
+    pit_bars = _bars_upto_date(bars, as_of_date, prepared=prepared)
     tech = tech_summary_from_bars(pit_bars)
+    # RSI／偏離／相對強弱僅需收盤；量比必須有完整 20 日有效量，不補零。
+    if tech and (len(pit_bars) < 20 or any(
+            not isinstance(row[5], (int, float)) or isinstance(row[5], bool)
+            or not math.isfinite(row[5]) or row[5] < 0 for row in pit_bars[-20:])):
+        tech['volRatio'] = None
     closes = [float(row[4]) for row in pit_bars if row and row[4] is not None]
     devz = _deviation_z(closes)
     rs_pct = _relative_strength_percentile(closes)
@@ -353,7 +383,7 @@ def bin_state(
         'symbol': code,
         'asOfDate': as_of_date.isoformat(),
         'binModelId': BIN_MODEL_ID,
-        'binId': bin_id,
+        'binId': bin_id if len(pit_bars) >= MIN_OBSERVATION_BARS else None,
         'binLabel': _make_bin_label(rsi_label, devz_label, rs_label, inst_label, regime_key),
         'features': {
             'rsi14': (tech or {}).get('rsi14'),
@@ -406,12 +436,19 @@ def _quantile(values: list[float], q: float) -> float | None:
     return ordered[idx]
 
 
-def _forward_outcome(rows: list, origin_idx: int, horizon: int) -> dict[str, float] | None:
+def _forward_outcome(rows: list, origin_idx: int, horizon: int, *, prepared=False) -> dict[str, float] | None:
     if origin_idx < 0 or origin_idx + horizon >= len(rows):
         return None
-    entry = float(rows[origin_idx][4])
-    if entry <= 0:
+    sample = rows[origin_idx:origin_idx + horizon + 1]
+    if not prepared:
+        from 台股交易參考 import verified_sessions
+        days = [_session_date_from_ts(row[0]).isoformat() for row in sample]
+        if verified_sessions(days[0], days[-1]) != days:
+            return None
+    if any(not isinstance(row[4], (int, float)) or isinstance(row[4], bool)
+           or not math.isfinite(row[4]) or row[4] <= 0 for row in sample):
         return None
+    entry = float(rows[origin_idx][4])
     exit_close = float(rows[origin_idx + horizon][4])
     path = [float(rows[j][4]) for j in range(origin_idx + 1, origin_idx + horizon + 1)]
     return {
@@ -428,14 +465,13 @@ def collect_pit_observations(
     regime_lookup: Callable[[date], str] | None = None,
 ) -> list[dict[str, Any]]:
     """Walk daily bars and emit PIT bin assignments with forward outcomes."""
-    rows = [r for r in (bars or []) if r and r[4] is not None]
-    if len(rows) < MIN_OBSERVATION_BARS + max(HORIZONS):
+    rows = _research_rows(bars)
+    if len(rows) < MIN_OBSERVATION_BARS + min(HORIZONS):
         return []
     lookup = regime_lookup or regime_at_date
     chip_map = chip_inst_by_date or {}
     observations: list[dict[str, Any]] = []
-    max_h = max(HORIZONS)
-    for idx in range(MIN_OBSERVATION_BARS - 1, len(rows) - max_h):
+    for idx in range(MIN_OBSERVATION_BARS - 1, len(rows) - min(HORIZONS)):
         session = _session_date_from_ts(rows[idx][0])
         state = bin_state(
             symbol,
@@ -443,10 +479,13 @@ def collect_pit_observations(
             bars=rows,
             chip_inst_by_date=chip_map,
             regime_id=lookup(session),
+            prepared=True,
         )
+        if not state.get('binId'):
+            continue
         outcomes: dict[str, dict[str, float]] = {}
         for horizon in HORIZONS:
-            outcome = _forward_outcome(rows, idx, horizon)
+            outcome = _forward_outcome(rows, idx, horizon, prepared=True)
             if outcome is not None:
                 outcomes[str(horizon)] = outcome
         if not outcomes:
@@ -521,7 +560,7 @@ def compute_card_stats(
     regime_lookup: Callable[[date], str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     """Return (bin_state, horizons) for the symbol at ``as_of_date``."""
-    rows = [r for r in (bars or []) if r and r[4] is not None]
+    rows = _research_rows(bars, as_of_date)
     if not rows:
         empty = {
             'symbol': str(symbol or '').strip().upper(),
@@ -542,6 +581,7 @@ def compute_card_stats(
         bars=rows,
         chip_inst_by_date=chip_inst_by_date,
         regime_id=lookup(as_of_date),
+        prepared=True,
     )
     observations = collect_pit_observations(
         symbol,

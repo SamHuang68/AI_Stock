@@ -217,7 +217,10 @@ def prior_extreme(values: Sequence[Number], period: int, idx: Optional[int] = No
         idx = len(values) - 1
     if period <= 0 or idx - period < 0:
         return None
-    window = [float(v) for v in values[idx - period : idx]]
+    raw = values[idx - period : idx]
+    if any(v is None or not math.isfinite(v) for v in raw):
+        return None
+    window = [float(v) for v in raw]
     return max(window) if highest else min(window)
 
 
@@ -229,10 +232,26 @@ def candle_snapshot(candles: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     rsiPrevMin5 = 當根之前 5 根 RSI 的最小值，供「曾跌破 30 後回升」這類跨越判斷。
     資料不足的欄位回 None，由呼叫端決定不觸發，而不是用 0 或 50 補值。
     """
-    closes = [float(c['close']) for c in candles]
-    highs = [float(c.get('high') if c.get('high') is not None else c['close']) for c in candles]
-    lows = [float(c.get('low') if c.get('low') is not None else c['close']) for c in candles]
-    vols = [float(c.get('volume') or 0) for c in candles]
+    def number(value, *, zero=False):
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return None
+        return value if math.isfinite(value) and (value >= 0 if zero else value > 0) else None
+
+    closes = [number(c.get('close')) for c in candles]
+    # 缺收盤／缺交易日後重新暖機；其他欄位缺值只影響依賴它的指標。
+    start = max((i + 1 for i, value in enumerate(closes) if value is None), default=0)
+    candles, closes = candles[start:], closes[start:]
+    highs, lows = [], []
+    for candle, close in zip(candles, closes):
+        high, low, opened = (number(candle.get(k)) for k in ('high', 'low', 'open'))
+        known = [v for v in (close, opened) if v is not None]
+        highs.append(high if high is not None and all(high >= v for v in known) else None)
+        lows.append(low if low is not None and all(low <= v for v in known) else None)
+    vols = [number(c.get('volume'), zero=True) for c in candles]
     n = len(closes)
     if n == 0:
         return {'close': None, 'sma5': None, 'sma20': None, 'sma60': None, 'rsi14': None,
@@ -259,3 +278,40 @@ def candle_snapshot(candles: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         'low20': prior_extreme(lows, 20, highest=False),
         'highs': highs,
     }
+
+
+def dated_candle_snapshot(candles, market='TW', symbol=''):
+    """警報共用日期保全入口；各欄位保留未知，不補高低價或成交量。"""
+    from datetime import date, timedelta
+    from stock_signals import normalize_bars
+    bars = normalize_bars(candles, market)
+    if not bars:
+        return candle_snapshot([])
+    by_day = {bar['date']: bar for bar in bars}
+    usable = []
+    if market == 'TW':
+        from 台股交易參考 import verified_sessions, trading_status
+        days = verified_sessions(bars[0]['date'], bars[-1]['date'], allow_partial=True)
+        for day in days or []:
+            if trading_status(symbol, day):
+                usable = []
+            else:
+                usable.append(by_day.get(day, {}))
+    elif market == 'US':
+        from us_equity_calendar import session
+        cursor, end = date.fromisoformat(bars[0]['date']), date.fromisoformat(bars[-1]['date'])
+        while cursor <= end:
+            state = session(cursor)['status']
+            if state == 'unknown':
+                usable = []
+            elif state == 'scheduled':
+                usable.append(by_day.get(cursor.isoformat(), {}))
+            cursor += timedelta(days=1)
+    result = candle_snapshot(usable)
+    # 自訂價位只需要有效收盤，保留不依賴完整歷史的既有能力。
+    close = bars[-1].get('close')
+    result['close'] = close if close is not None and math.isfinite(close) and close > 0 else None
+    result['asOf'] = bars[-1]['date']
+    last_gap = max((i + 1 for i, bar in enumerate(usable) if bar.get('close') is None), default=0)
+    result['continuousBars'] = len(usable) - last_gap
+    return result
