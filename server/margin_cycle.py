@@ -291,6 +291,10 @@ def margin_balance_state(rows: Optional[List[Dict[str, Any]]] = None) -> Dict[st
     last_date, current = clean[-1]
     trailing = [(d, value) for d, value in clean if d >= last_date - timedelta(days=364)]
     percentile = _percentile_rank([value for _, value in trailing], current)
+    first_date = trailing[0][0]
+    coverage_days = (last_date - first_date).days + 1
+    # 這是資料覆蓋門檻，不是投資風險門檻；少量樣本的新高不能冒充全年排名。
+    sufficient_window = len(trailing) >= 200 and coverage_days >= 330
     target = last_date - timedelta(days=28)
     prior_candidates = [(d, value) for d, value in clean if d <= target]
     prior = prior_candidates[-1] if prior_candidates else None
@@ -304,10 +308,15 @@ def margin_balance_state(rows: Optional[List[Dict[str, Any]]] = None) -> Dict[st
         'percentile52w': round(percentile, 1),
         'change4wPct': round(change4w, 2) if change4w is not None else None,
         'direction': direction, 'samples52w': len(trailing),
+        'sampleStart': first_date.isoformat(), 'sampleEnd': last_date.isoformat(),
+        'targetWindowStart': (last_date - timedelta(days=364)).isoformat(),
+        'coverageDays': coverage_days,
+        'windowQuality': 'sufficient' if sufficient_window else 'partial',
+        'windowRequirement': {'minimumSamples': 200, 'minimumCalendarDays': 330},
         'source': 'TWSE MI_MARGN MS',
-        'reference': 'latest listed-market margin balance versus trailing 52-week observations',
+        'reference': f'目標52週內現有{len(trailing)}筆融資樣本；{first_date}～{last_date}',
         'role': 'risk_brake_only',
-        'confidence': 'medium' if len(trailing) >= 100 else 'low',
+        'confidence': 'medium' if sufficient_window else 'low',
     }
 
 
