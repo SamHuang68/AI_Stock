@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from contextlib import closing
 from datetime import date
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 from tests.test_日線分欄品質 import BASE, DAY, receipt_for
 from tests.已核對資料 import 價格資料, 交易日
@@ -71,6 +72,9 @@ class 投組價格契約(unittest.TestCase):
             out = portfolio.compute([{'sym':'2330','weight':1}])
         self.assertEqual(out['portfolio']['days'],79)
         self.assertTrue(out['quality']['available'])
+        self.assertEqual(out['quality']['calendarPeriod']['start'], '2020-01-01')
+        self.assertTrue(out['quality']['calendarPeriod']['startTrimmed'])
+        self.assertEqual(out['quality']['samplePeriod']['start'],days[1].isoformat())
 
     def test_日曆全未知不能變成可用風險(self):
         days = 交易日('2016-01-04',80)
@@ -79,3 +83,18 @@ class 投組價格契約(unittest.TestCase):
             out = portfolio.compute([{'sym':'2330','weight':1}])
         self.assertEqual(out['portfolio']['days'],0)
         self.assertFalse(out['quality']['available'])
+        self.assertIn('已核對區間',out['quality']['priceIssues']['calendar'])
+
+    def test_非正收盤明確拒絕(self):
+        with 價格資料({'2330':[(*BASE[:4],0,BASE[5])]}):
+            with datastore.read_snapshot() as conn:
+                values, issue = portfolio._risk_series(conn,'2330',[(*BASE[:4],0,BASE[5])])
+        self.assertEqual(values,{})
+        self.assertIn('非正數',issue)
+
+    def test_日曆來源跨執行緒仍走真實查詢(self):
+        from 台股交易參考 import verified_sessions
+        with 價格資料({}), ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(verified_sessions,'2025-01-02','2025-01-06') for _ in range(2)]
+            for future in futures:
+                self.assertEqual(future.result(),['2025-01-02','2025-01-03','2025-01-06'])

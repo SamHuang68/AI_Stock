@@ -193,8 +193,14 @@ class ConditionalExpectationP1RouteTests(unittest.TestCase):
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
         base = f'http://127.0.0.1:{httpd.server_port}'
+        from unittest.mock import patch
+        import conditional_expectation_routes as routes
+        bars = _synthetic_bars(300)
+        context = {'quote': None, 'chips': None, 'bars': bars, 'chip_history': {}}
         try:
-            with urllib.request.urlopen(
+            with patch.object(routes, '_load_symbol_context', return_value=context), \
+                 patch.object(ce, '_last_tw_close_day', return_value=ce._session_date_from_ts(bars[-1][0])), \
+                 urllib.request.urlopen(
                 base + '/research/conditional-expectation/p1?symbol=2330', timeout=15,
             ) as resp:
                 body = json.load(resp)
@@ -204,6 +210,7 @@ class ConditionalExpectationP1RouteTests(unittest.TestCase):
             self.assertIsNotNone(p1_payload['volRegimeSwitch'])
             self.assertEqual(p1_payload['deferred']['integrationScore']['status'], 'DEFERRED')
             self.assertNotIn('eventWindows', p1_payload)
+            self.assertTrue(p1_payload['volRegimeSwitch']['positionWidthHint'])
         finally:
             httpd.shutdown()
             httpd.server_close()

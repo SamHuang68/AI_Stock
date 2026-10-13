@@ -249,8 +249,14 @@ class ConditionalExpectationRouteTests(unittest.TestCase):
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
         base = f'http://127.0.0.1:{httpd.server_port}'
+        from unittest.mock import patch
+        import conditional_expectation_routes as routes
+        bars = _synthetic_bars(300)
+        context = {'quote': None, 'chips': None, 'bars': bars, 'chip_history': {}}
         try:
-            with urllib.request.urlopen(
+            with patch.object(routes, '_load_symbol_context', return_value=context), \
+                 patch.object(ce, '_last_tw_close_day', return_value=ce._session_date_from_ts(bars[-1][0])), \
+                 urllib.request.urlopen(
                 base + '/research/conditional-expectation?symbol=2330', timeout=10,
             ) as resp:
                 body = json.load(resp)
@@ -261,6 +267,7 @@ class ConditionalExpectationRouteTests(unittest.TestCase):
             self.assertIn('horizons', card)
             self.assertEqual(set(card['horizons'].keys()), {'1', '5', '20'})
             self.assertIn('pitAssumptions', card)
+            self.assertIsNotNone(card['binId'])
         finally:
             httpd.shutdown()
             httpd.server_close()

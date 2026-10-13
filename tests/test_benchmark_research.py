@@ -60,6 +60,13 @@ class BenchmarkResearchTest(unittest.TestCase):
                     'totalReturnIndex': level,
                 })
             br._write_rows(rows, path)
+            without_receipt = br.snapshot(allow_network=False, path=path)['FTSE_TAIWAN_50']
+            self.assertEqual(without_receipt['quality'], 'partial_scope')
+            br.atomic_write_json(str(path) + '.coverage.json', {
+                'requestedStart': rows[0]['date'], 'failedMonths': {'2025-06': '合成來源失敗'}})
+            failed_month = br.snapshot(allow_network=False, path=path)['FTSE_TAIWAN_50']
+            self.assertEqual(failed_month['quality'], 'partial_scope')
+            self.assertFalse(failed_month['coverage']['continuous'])
             br.atomic_write_json(str(path) + '.coverage.json', {'requestedStart': rows[0]['date'], 'failedMonths': {}})
             loaded = br._read_rows(path)
             self.assertEqual(len(loaded), 820)

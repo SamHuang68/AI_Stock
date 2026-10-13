@@ -677,6 +677,15 @@ class PrivateWebGatewayTests(unittest.TestCase):
             )
             self.assertEqual(status, 403, path)
 
+    def test_macro_refresh_rejects_noncanonical_ids_before_upstream(self):
+        for suffix in ('', 'vix/extra', '../vix', '%2Fvix', 'vix;extra', '/vix'):
+            with self.subTest(suffix=suffix):
+                before = len(UpstreamHandler.seen)
+                status, _ = _request(self.base + '/macro/refresh/' + suffix,
+                                     method='POST', token='owner-secret', body={})
+                self.assertEqual(status, 403)
+                self.assertEqual(len(UpstreamHandler.seen), before)
+
     def test_ai_proxy_forwards_first_small_chunk_without_large_buffer_wait(self):
         UpstreamHandler.ai_stream_mode = "gated"
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)

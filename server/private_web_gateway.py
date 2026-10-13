@@ -477,7 +477,7 @@ CONTROL_POST_EXACT = {
     "/stock-signals/research/refresh",
     "/stock-signals/explain",
 }
-CONTROL_POST_PREFIXES = ("/draw/", "/macro/refresh/")
+CONTROL_POST_PREFIXES = ("/draw/",)
 
 # These backend endpoints are intentionally not remotely reachable, even with
 # the owner token.  They are listed here for status/documentation responses.
@@ -776,6 +776,9 @@ def _is_static_navigation(path: str) -> bool:
 
 
 def route_permission(method: str, path: str, role: str, settings: Settings) -> bool:
+    if path.startswith('/macro/refresh/'):
+        # Sam 核准單一 id 更新；拒絕多段及編碼分隔符，不擴成其他控制路徑。
+        return method == 'POST' and role == 'owner' and re.fullmatch(r'/macro/refresh/[A-Za-z0-9_-]+', path) is not None
     if method in {"GET", "HEAD"}:
         # 有副作用的總經入口不可被唯讀前綴或額外白名單放行。
         if path in {"/macro/refresh", "/macro/backfill-mix", "/macro/track/backfill-mix"} or path.startswith("/macro/refresh/"):

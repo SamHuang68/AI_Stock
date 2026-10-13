@@ -26,6 +26,8 @@ def _risk_series(connection, code, rows, *, benchmark=False):
     bars = normalize_bars(rows, 'TW')
     if not bars:
         return {}, '缺少歷史'
+    if any(b.get('close') is not None and b['close'] <= 0 for b in bars):
+        return {}, '收盤價非正數，不視為一般缺值'
     first, last = bars[0]['date'], bars[-1]['date']
     evidence = quality_evidence(connection, code, start=first, end=last)
     conflicts = ('priceConflict', 'sourceConflict', 'ambiguousSession', 'invalidObservation', 'invalidReceipt')
@@ -171,6 +173,7 @@ def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
         return {'error': 'no holdings', 'rejected': rejected}
 
     series, price_issues = {}, {}
+    calendar_period = {'start': None, 'end': None, 'startTrimmed': False}
     try:
         with datastore.read_snapshot() as connection:
             data = datastore.get_bars_bulk(codes + [benchmark], connection=connection)
@@ -182,9 +185,12 @@ def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
             observed = sorted({t for values in series.values() for t in values})
             from 台股交易參考 import verified_sessions
             dates = verified_sessions(observed[0], observed[-1], connection=connection, allow_partial=True) if observed else []
-            if dates is None:
+            if observed and not dates:
                 dates = []
-                price_issues['calendar'] = '交易日曆涵蓋不足'
+                price_issues['calendar'] = '交易日曆無可用的已核對區間'
+            if dates:
+                calendar_period = {'start': dates[0], 'end': dates[-1],
+                                   'startTrimmed': dates[0] > observed[0]}
     except (sqlite3.Error, OSError, ValueError, TypeError, KeyError) as exc:
         from log_once import log_once
         log_once('portfolio-price-quality', '投組價格品質核對失敗', exc=exc)
@@ -289,5 +295,7 @@ def compute(holdings, sectors_map=None, names_map=None, benchmark='^TWII'):
             'commonSampleDays': len(inter),
             'reasons': reasons,
             'priceIssues': price_issues,
+            'calendarPeriod': calendar_period,
+            'samplePeriod': {'start': inter[0] if inter else None, 'end': inter[-1] if inter else None},
         },
     }

@@ -1,7 +1,9 @@
 """明示合成交易日曆及單一還原快照；不替換產品品質判定。"""
 import json
 import sqlite3
-from contextlib import contextmanager
+import tempfile
+from pathlib import Path
+from contextlib import contextmanager, closing
 from datetime import date, timedelta
 from unittest.mock import patch
 
@@ -43,16 +45,18 @@ def 建立價格快照(conn, data):
 @contextmanager
 def 價格資料(data):
     import datastore
-    conn = sqlite3.connect(':memory:')
-    建立價格快照(conn, data)
-    @contextmanager
-    def snapshot(*args, **kwargs):
-        yield conn
-    try:
+    # HTTP handler 與主測試執行緒各自取得唯讀連線，不共用 thread-bound connection。
+    with tempfile.TemporaryDirectory() as folder, closing(sqlite3.connect(Path(folder) / 'market.db')) as conn:
+        path = Path(folder) / 'market.db'
+        建立價格快照(conn, data)
+        @contextmanager
+        def snapshot(*args, **kwargs):
+            with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as reader:
+                reader.execute('PRAGMA query_only=ON')
+                reader.execute('BEGIN')
+                yield reader
         with patch.object(datastore, 'read_snapshot', side_effect=snapshot):
             yield conn
-    finally:
-        conn.close()
 
 
 @contextmanager

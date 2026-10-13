@@ -195,7 +195,8 @@ class ShadowMultifactorRouteTests(unittest.TestCase):
         thread.start()
         base = f'http://127.0.0.1:{httpd.server_port}'
         try:
-            with patch.object(sm, '_load_bars', return_value=bars):
+            with patch.object(sm, '_load_bars', return_value=bars), \
+                 patch('conditional_expectation._last_tw_close_day', return_value=date(2024, 8, 1)):
                 with urllib.request.urlopen(
                     base + '/research/shadow-multifactor?symbols=AAA,BBB&limit=2', timeout=10,
                 ) as resp:
@@ -204,6 +205,7 @@ class ShadowMultifactorRouteTests(unittest.TestCase):
             self.assertTrue(body['shadowOnly'])
             self.assertEqual(body['decisionUse'], 'research_only')
             self.assertIn('basket', body['ranking'])
+            self.assertEqual(len(body['ranking']['basket']), 2)
             self.assertEqual(body['promotionGate']['verdict'], 'FAIL')
             self.assertIn('No production Decision wiring', body['nonGoals'][0])
         finally:
