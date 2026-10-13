@@ -170,10 +170,13 @@ with patch.object(socket.socket, 'connect', forbidden), patch.object(socket.sock
 '''
         command = [sys.executable, "-B", "-c", child, str(root)]
         with lock_module.acquire(directory):
-            before = {path.name: path.read_bytes() for path in directory.iterdir() if path.is_file()}
+            # Windows 位元組鎖禁止其他 handle 讀取鎖定位元組；資料保全核對排除鎖檔本身。
+            before = {path.name: path.read_bytes() for path in directory.iterdir()
+                      if path.is_file() and path.name != "wavedeck.instance.lock"}
             blocked = subprocess.run(command + ["blocked"], cwd=root, capture_output=True, timeout=8)
             self.assertEqual(blocked.returncode, 0, blocked.stdout + blocked.stderr)
-            after = {path.name: path.read_bytes() for path in directory.iterdir() if path.is_file()}
+            after = {path.name: path.read_bytes() for path in directory.iterdir()
+                     if path.is_file() and path.name != "wavedeck.instance.lock"}
             self.assertEqual(after, before, "拒絕第二個服務前已改寫資料")
         accepted = subprocess.run(command + ["accepted"], cwd=root, capture_output=True, timeout=8)
         self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
