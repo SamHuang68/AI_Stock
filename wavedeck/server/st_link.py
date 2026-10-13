@@ -21,7 +21,6 @@ import urllib.request
 from typing import Any, Optional
 
 from . import audit
-from .risk import daily_dd_ratio, MAX_DAILY_DD, WARN_DAILY_DD
 from .state import RUNTIME, now_iso
 from .st_push import push_async
 
@@ -347,53 +346,11 @@ def apply_fail_safe(reason: str) -> dict[str, Any]:
 
 
 def _enforce_daily_dd() -> None:
-    """Hard stop when session equity drawdown ≥ MAX_DAILY_DD (default 5%)."""
+    """回撤急停沿用執行層序列化入口。"""
     global _dd_locked
-    st = RUNTIME.snapshot()
-    ratio = daily_dd_ratio(st)
-    acct = dict(st.get("account") or {})
-    acct["daily_dd_pct"] = round(ratio * 100, 2)
-    acct["daily_dd_limit_pct"] = round(MAX_DAILY_DD * 100, 2)
-    lights: dict[str, Any] = {}
-    if ratio >= WARN_DAILY_DD and ratio < MAX_DAILY_DD:
-        lights["risk_watchdog"] = "warn"
-        RUNTIME.patch(account=acct, lights=lights)
-        return
-    if ratio < MAX_DAILY_DD:
-        if _dd_locked and not st.get("kill_switch"):
-            _dd_locked = False
-        RUNTIME.patch(account=acct)
-        return
+    from .engine import enforce_daily_drawdown
 
-    lights["risk_watchdog"] = "bad"
-    RUNTIME.patch(account=acct, lights=lights)
-    if st.get("kill_switch") and _dd_locked:
-        return
-    RUNTIME.set_kill(True)
-    _dd_locked = True
-    audit.write(
-        "daily_dd_lock",
-        {
-            "ratio": ratio,
-            "limit": MAX_DAILY_DD,
-            "yesterday": acct.get("yesterday_balance"),
-            "equity": acct.get("equity"),
-            "flatten": DD_FLATTEN,
-        },
-    )
-    if DD_FLATTEN:
-        try:
-            from .broker import panic_flatten
-
-            flat = panic_flatten(RUNTIME.snapshot())
-            RUNTIME.patch(
-                positions=flat.get("positions"),
-                exec=flat.get("exec"),
-            )
-            RUNTIME.set_kill(True)
-        except Exception:
-            pass
-    push_async(RUNTIME.snapshot(), reason="daily_dd_lock", force=True)
+    _dd_locked = enforce_daily_drawdown(DD_FLATTEN, _dd_locked)
 
 
 def _tick() -> None:

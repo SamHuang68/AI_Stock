@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlparse
 
 from deadline import collect_named
 from market_routes import market_snapshot
-from exchange_source_dates import breadth_cache_key, marketflow_cache_key, taipei_today
+from exchange_source_dates import breadth_cache_key, marketflow_cache_key, taipei_today, official_date
 
 
 @dataclass
@@ -469,12 +469,14 @@ def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=No
         except Exception as e:
             print('[pulse] fmtqik', e)
             turns = []
+    turnover_date = (bd or {}).get('date') if turnover_yi is not None else None
     if turnover_yi is None and turns:
         try:
             turnover_yi = float(turns[-1]['amount']) / 1e8
+            turnover_date = turns[-1].get('sourceDate') or turns[-1].get('date')
         except Exception:
             pass
-    tq = _deps.turnover_quant(turns or [], latest_yi=turnover_yi)
+    tq = _deps.turnover_quant(turns or [], latest_yi=turnover_yi, latest_date=turnover_date)
     if turnover_yi is None and tq.get('yi') is not None:
         turnover_yi = tq['yi']
     turnover_chg = tq.get('chgPct')
@@ -483,17 +485,19 @@ def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=No
     o00 = indices.get('o00') or {}
     # 加權／櫃買／台指期：與成交金額同構的趨勢量化（vs5／Z／連漲跌／動能分）
     try:
-        t00_closes = _deps.fmtqik_index_closes(turns)
+        t00_closes = _deps.fmtqik_index_closes(turns, dated=True)
         t00_trend = _deps.price_series_quant(
-            t00_closes, latest=t00.get('price'), quote_change_pct=t00.get('changePct'))
+            t00_closes, latest=t00.get('price'), quote_change_pct=t00.get('changePct'),
+            latest_date=t00.get('tradeDate') or t00.get('sourceDate'))
     except Exception as e:
         print('[pulse] t00 trend', e)
         t00_trend = _deps.price_series_quant(
             [], latest=t00.get('price'), quote_change_pct=t00.get('changePct'))
     try:
-        o00_closes = _deps.tw_index_closes('^TWOII', n=30)
+        o00_closes = _deps.tw_index_closes('^TWOII', n=30, dated=True)
         o00_trend = _deps.price_series_quant(
-            o00_closes, latest=o00.get('price'), quote_change_pct=o00.get('changePct'))
+            o00_closes, latest=o00.get('price'), quote_change_pct=o00.get('changePct'),
+            latest_date=o00.get('tradeDate') or o00.get('sourceDate'))
     except Exception as e:
         print('[pulse] o00 trend', e)
         o00_trend = _deps.price_series_quant(
@@ -505,12 +509,14 @@ def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=No
             txf_live = txf_night.get('price')
         if txf_live is None and isinstance(txf, dict):
             txf_live = txf.get('price')
-        txf_closes = _deps.tw_index_closes('__TXF__', n=30)
+        txf_closes = _deps.tw_index_closes('__TXF__', n=30, dated=True)
         # 頂列台指期使用與 p.txf 完全相同的 TAIFEX 即時 session。
         # 日線只提供 vs5／Z／趨勢；漲跌幅不可從跨日／換月快取反推。
         txf_trend = _deps.price_series_quant(
             txf_closes, latest=txf_live,
-            quote_change_pct=(txf_night or {}).get('changePct'))
+            quote_change_pct=(txf_night or {}).get('changePct'),
+            latest_date=((txf_night or {}).get('tradeDate') or (txf_night or {}).get('sourceDate'))
+            if (txf_night or {}).get('session') in ('day', 'regular') else None)
     except Exception as e:
         print('[pulse] txf trend', e)
         txf_trend = _deps.price_series_quant([])
@@ -604,6 +610,8 @@ def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=No
             'dataLabel': '官方盤後／即時混成' if out.get('breadthOk') else '部分資料可用',
         },
         'ohlc': {
+            'sourceDate': t00.get('tradeDate') or t00.get('sourceDate'),
+            'source': t00.get('source'),
             'open': t00.get('open'), 'high': t00.get('high'), 'low': t00.get('low'),
             'prevClose': t00.get('prevClose'), 'price': t00.get('price'),
             'changePct': t00.get('changePct'), 'name': t00.get('name') or '加權指數',
@@ -642,19 +650,26 @@ def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=No
                 if res:
                     q = ((res[0].get('indicators') or {}).get('quote') or [{}])[0]
 
-                    def _last(arr):
-                        for x in reversed(arr or []):
-                            if x is not None:
-                                return x
-                        return None
-
-                    if ohlc.get('open') is None:
-                        ohlc['open'] = _last(q.get('open'))
-                    if ohlc.get('high') is None:
-                        ohlc['high'] = _last(q.get('high'))
-                    if ohlc.get('low') is None:
-                        ohlc['low'] = _last(q.get('low'))
-                    ohlc['source'] = (ohlc.get('source') or '') + '+yahoo'
+                    from stock_signals import bar_date
+                    target = official_date(ohlc.get('sourceDate'))
+                    stamps = res[0].get('timestamp') or []
+                    match = next((i for i in range(len(stamps) - 1, -1, -1)
+                                  if target and bar_date(stamps[i], 'TW') == target.isoformat()), None)
+                    if match is not None:
+                        candidate = dict(ohlc)
+                        for key in ('open', 'high', 'low'):
+                            values = q.get(key) or []
+                            if candidate.get(key) is None and match < len(values):
+                                candidate[key] = values[match]
+                        import math
+                        prices = [candidate.get(k) for k in ('open', 'high', 'low', 'price')]
+                        known = [p for p in prices if isinstance(p, (int, float)) and math.isfinite(p) and p > 0]
+                        valid = len(known) == sum(p is not None for p in prices)
+                        high, low = candidate.get('high'), candidate.get('low')
+                        if valid and (high is None or all(p <= high for p in known)) and (low is None or all(p >= low for p in known)):
+                            ohlc.update(candidate)
+                            ohlc['sourceDate'] = target.isoformat()
+                            ohlc['source'] = (ohlc.get('source') or '') + '+yahoo'
             except Exception as e:
                 print('[pulse] twii ohlc', e)
         elif _ohlc_box['err']:

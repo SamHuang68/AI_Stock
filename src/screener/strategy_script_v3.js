@@ -29,7 +29,11 @@
       if (c === '#') { while (i < src.length && src[i] !== '\n') i++; continue; }
       if (c === '\n') { toks.push({ t: 'nl' }); i++; continue; }
       if (c === ' ' || c === '\t' || c === '\r') { i++; continue; }
-      if (isNum(c)) { let b = ''; while (i < src.length && isNum(src[i])) b += src[i++]; toks.push({ t: 'num', v: parseFloat(b) }); continue; }
+      if (isNum(c)) {
+        let b = ''; while (i < src.length && isNum(src[i])) b += src[i++];
+        if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(b) || !Number.isFinite(Number(b))) throw new Error('數字格式錯誤：' + b);
+        toks.push({ t: 'num', v: Number(b) }); continue;
+      }
       if (isId(c)) {
         let b = ''; while (i < src.length && isIdN(src[i])) b += src[i++];
         const low = b.toLowerCase();
@@ -56,7 +60,14 @@
     const plots = [];
 
     const arrOf = x => Array.isArray(x) ? x : new Array(clen).fill(x);
-    const num = x => Array.isArray(x) ? (x.length ? x[x.length - 1] : 0) : x;
+    const period = n => {
+      if (!Number.isInteger(n) || n <= 0) throw new Error('指標期數必須是正整數純量');
+      return n;
+    };
+    const multiplier = n => {
+      if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) throw new Error('布林倍數必須是正數純量');
+      return n;
+    };
     function broadcast(a, b, fn) {
       if (!Array.isArray(a) && !Array.isArray(b)) return fn(a, b);
       const A = arrOf(a), B = arrOf(b);
@@ -66,11 +77,11 @@
     }
 
     const FUNCS = {
-      sma: (s, n) => L.sma(arrOf(s), num(n)),
-      ema: (s, n) => L.ema(arrOf(s), num(n)),
-      rsi: (s, n) => L.rsi(arrOf(s), num(n)),
-      highest: (s, n) => L.highest(arrOf(s), num(n)),
-      lowest: (s, n) => L.lowest(arrOf(s), num(n)),
+      sma: (s, n) => L.sma(arrOf(s), period(n)),
+      ema: (s, n) => L.ema(arrOf(s), period(n)),
+      rsi: (s, n) => L.rsi(arrOf(s), period(n)),
+      highest: (s, n) => L.highest(arrOf(s), period(n)),
+      lowest: (s, n) => L.lowest(arrOf(s), period(n)),
       crossover: (a, b) => L.crossover(arrOf(a), arrOf(b)),
       crossunder: (a, b) => L.crossunder(arrOf(a), arrOf(b)),
       k: () => L.kd(cols.high, cols.low, cols.close).k,
@@ -78,11 +89,20 @@
       macd: () => L.macd(cols.close).macd,
       macdsig: () => L.macd(cols.close).signal,
       macdhist: () => L.macd(cols.close).hist,
-      bbupper: (n, k) => L.bb(cols.close, n ? num(n) : 20, k ? num(k) : 2).upper,
-      bbmid: (n, k) => L.bb(cols.close, n ? num(n) : 20, k ? num(k) : 2).mid,
-      bblower: (n, k) => L.bb(cols.close, n ? num(n) : 20, k ? num(k) : 2).lower,
+      bbupper: (n = 20, k = 2) => L.bb(cols.close, period(n), multiplier(k)).upper,
+      bbmid: (n = 20, k = 2) => L.bb(cols.close, period(n), multiplier(k)).mid,
+      bblower: (n = 20, k = 2) => L.bb(cols.close, period(n), multiplier(k)).lower,
       abs: (s) => Array.isArray(s) ? s.map(v => v == null ? null : Math.abs(v)) : Math.abs(s),
     };
+    const ARITY = { sma: [2, 2], ema: [2, 2], rsi: [2, 2], highest: [2, 2], lowest: [2, 2],
+      crossover: [2, 2], crossunder: [2, 2], k: [0, 0], d: [0, 0], macd: [0, 0],
+      macdsig: [0, 0], macdhist: [0, 0], bbupper: [0, 2], bbmid: [0, 2], bblower: [0, 2], abs: [1, 1] };
+    function numericInput(value, allowBoolean) {
+      const valid = v => v == null || (typeof v === 'number' && Number.isFinite(v)) || (allowBoolean && typeof v === 'boolean');
+      if (Array.isArray(value) ? value.length !== clen || !value.every(valid) : !valid(value) || value == null) {
+        throw new Error('函式參數必須是有限數值或等長的有效序列');
+      }
+    }
 
     // 解析狀態
     let toks, pos;
@@ -127,7 +147,13 @@
           eat();
           const fn = FUNCS[name.toLowerCase()];
           if (!fn) throw new Error('未知函式: ' + name);
-          return () => fn(...args.map(a => a()));
+          const fname = name.toLowerCase(), arity = ARITY[fname];
+          if (args.length < arity[0] || args.length > arity[1]) throw new Error('函式 ' + name + ' 的參數數量不正確');
+          return () => {
+            const values = args.map(a => a());
+            values.forEach(v => numericInput(v, fname === 'crossover' || fname === 'crossunder'));
+            return fn(...values);
+          };
         }
         // 變數 / 價格
         const lname = name.toLowerCase();
@@ -145,30 +171,37 @@
     for (let ln = 0; ln < lines.length; ln++) {
       const line = lines[ln];
       if (!line.trim() || line.trim().startsWith('#')) continue;
-      toks = tokenize(line); pos = 0;
-      // 過濾尾端 nl
-      const first = peek();
-      if (!first) continue;
-      if (first.t === 'id' && first.v.toLowerCase() === 'plot') {
-        eat();
-        do {
-          const startTokName = peek();
+      try {
+        toks = tokenize(line); pos = 0;
+        const requireEnd = () => {
+          if (!peek() || peek().t !== 'nl' || pos !== toks.length - 1) throw new Error('非預期的剩餘符號：' + (peek()?.v ?? '行尾'));
+        };
+        // 過濾尾端 nl
+        const first = peek();
+        if (!first) continue;
+        if (first.t === 'id' && first.v.toLowerCase() === 'plot') {
+          eat();
+          do {
+            const startTokName = peek();
+            const e = parseExpr();
+            const label = (startTokName && startTokName.t === 'id') ? startTokName.v : 'plot';
+            const val = e(); plots.push({ label, series: arrOf(val) });
+            if (peek() && peek().t === 'op' && peek().v === ',') { eat(); continue; }
+            break;
+          } while (true);
+          requireEnd();
+          continue;
+        }
+        // 賦值: id = expr
+        if (first.t === 'id' && toks[1] && toks[1].t === 'op' && toks[1].v === '=') {
+          const vname = eat().v.toLowerCase(); eat(); // name, '='
           const e = parseExpr();
-          const label = (startTokName && startTokName.t === 'id') ? startTokName.v : 'plot';
-          try { const val = e(); plots.push({ label, series: arrOf(val) }); } catch (err) { throw new Error('第 ' + (ln + 1) + ' 行 plot: ' + err.message); }
-          if (peek() && peek().t === 'op' && peek().v === ',') { eat(); continue; }
-          break;
-        } while (true);
-        continue;
-      }
-      // 賦值: id = expr
-      if (first.t === 'id' && toks[1] && toks[1].t === 'op' && toks[1].v === '=') {
-        const vname = eat().v.toLowerCase(); eat(); // name, '='
-        const e = parseExpr();
-        try { env[vname] = e(); } catch (err) { throw new Error('第 ' + (ln + 1) + ' 行: ' + err.message); }
-        continue;
-      }
-      throw new Error('第 ' + (ln + 1) + ' 行語法錯誤(需 name = expr 或 plot ...)');
+          requireEnd();
+          env[vname] = e();
+          continue;
+        }
+        throw new Error('語法錯誤（需 name = expr 或 plot ...）');
+      } catch (err) { throw new Error('第 ' + (ln + 1) + ' 行：' + err.message); }
     }
 
     return { env, plots };

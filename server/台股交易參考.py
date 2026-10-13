@@ -107,3 +107,57 @@ def continuous_frames(symbol, frame, sessions):
     chips = [{k: frame[k][i] for k in ('date', 'trust', 'foreign')}
              for i in range(len(frame['date']))]
     return [ss.build_frame(part, chips) for part in parts if len(part) >= ss.MIN_BARS]
+
+
+def verified_sessions(start, end, *, connection=None, allow_partial=False):
+    """唯讀日曆；預設要求完整涵蓋，明示部分模式只回最後已核對尾段。"""
+    import sqlite3
+    import datastore
+    begin, stop = date.fromisoformat(str(start)[:10]), date.fromisoformat(str(end)[:10])
+    if begin > stop:
+        return []
+    if connection is None:
+        try:
+            with datastore.read_snapshot() as conn:
+                return verified_sessions(start, end, connection=conn, allow_partial=allow_partial)
+        except (OSError, sqlite3.Error, ValueError, TypeError) as exc:
+            from log_once import log_once
+            log_once('research-session-calendar', '研究交易日曆無法核對：' + str(exc))
+            return None
+    tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    calendars, months = {}, {}
+    if 'calendar_years' in tables:
+        for year, closed, opened in connection.execute('SELECT year,closed,opened FROM calendar_years WHERE year BETWEEN ? AND ?', (begin.year, stop.year)):
+            closed, opened = json.loads(closed), json.loads(opened)
+            if not isinstance(closed, list) or not isinstance(opened, list):
+                raise ValueError('年度日曆內容不是日期清單')
+            if any(date.fromisoformat(day).year != year for day in closed + opened) or set(closed) & set(opened):
+                raise ValueError('年度日曆日期或開休市內容矛盾')
+            calendars[year] = (set(closed), set(opened))
+    if 'session_months' in tables:
+        for month, through, days in connection.execute('SELECT month,observed_through,dates FROM session_months WHERE month BETWEEN ? AND ?', (begin.isoformat()[:7], stop.isoformat()[:7])):
+            days = json.loads(days)
+            if not isinstance(days, list) or not str(through).startswith(month) or any(date.fromisoformat(day).isoformat()[:7] != month or day > through for day in days):
+                raise ValueError('實際交易月份收據的日期無效')
+            months[month] = (through, set(days))
+    result, cursor = [], begin
+    while cursor <= stop:
+        day = cursor.isoformat()
+        month = months.get(day[:7])
+        if month and day <= month[0]:
+            opened = day in month[1]
+        elif cursor.year in calendars:
+            closed, extra = calendars[cursor.year]
+            opened = day not in closed and (cursor.weekday() < 5 or day in extra)
+        elif str(cursor.year) == references()['calendar']['year']:
+            opened = session(cursor)['status'] == 'scheduled'
+        else:
+            if not allow_partial:
+                return None
+            result = []
+            cursor += timedelta(days=1)
+            continue
+        if opened:
+            result.append(day)
+        cursor += timedelta(days=1)
+    return result

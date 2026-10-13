@@ -309,7 +309,9 @@ def _rows_to_values(rows: list[Any], preferred: tuple[str, ...]) -> tuple[list[f
     if rows and all(isinstance(row, dict) for row in rows):
         for key in preferred:
             values = [_number(row.get(key)) for row in rows]
-            valid = [value for value in values if value is not None and value > 0]
+            start = max((i + 1 for i, value in enumerate(values)
+                         if value is None or value <= 0), default=0)
+            valid = values[start:]
             if len(valid) >= 3:
                 return valid, key
         return [], None
@@ -323,14 +325,29 @@ def _rows_to_values(rows: list[Any], preferred: tuple[str, ...]) -> tuple[list[f
 def _benchmark_volatility(benchmark_id: str, contract: dict | None) -> dict[str, Any]:
     contract = contract or {}
     rows = contract.get('rows') or []
+    from 台股交易參考 import verified_sessions
+    dated_rows = {str(row.get('date')): row for row in rows if isinstance(row, dict) and row.get('date')}
+    days = sorted(dated_rows)
+    expected = verified_sessions(days[0], days[-1]) if days else None
+    # 只計算最後一段完整交易日，缺日之後重新累積 20／252／756 日視窗。
+    continuous_rows = []
+    if expected is not None:
+        for day in expected:
+            row = dated_rows.get(day)
+            if row is None:
+                continuous_rows = []
+            else:
+                continuous_rows.append(row)
+    rows = continuous_rows
     values, series_key = _rows_to_values(
         rows, ('totalReturnIndex', 'total_return', 'priceIndex', 'close', 'value'))
+    rows = rows[-len(values):] if values else []
     as_of = contract.get('asOf')
     source = contract.get('source') or 'benchmark-series-unavailable'
     quality = contract.get('quality') or ('insufficient' if not values else 'partial_scope')
     stale = bool(contract.get('stale') or quality == 'stale')
-    state = _downside_log_vol(values, 21)
-    rv252 = _annualized_log_vol(values, 253)
+    state = _downside_log_vol(values, 21) if len(values) >= 21 else None
+    rv252 = _annualized_log_vol(values, 253) if len(values) >= 253 else None
     long_run = _rolling_three_year_vol_median(values)
     candidates = [x for x in (rv252, long_run) if x is not None]
     horizon = max(candidates) if candidates else None
@@ -341,7 +358,7 @@ def _benchmark_volatility(benchmark_id: str, contract: dict | None) -> dict[str,
              and _number(row.get(series_key)) > 0]
     return {
         'benchmarkId': benchmark_id,
-        'status': 'insufficient' if insufficient else ('stale' if stale else ('ready' if len(values) >= 757 else 'partial')),
+        'status': 'insufficient' if insufficient else ('stale' if stale else ('ready' if len(values) >= 757 and quality == 'ready' else 'partial')),
         'seriesKey': series_key,
         'sampleDays': len(values),
         'periods': {

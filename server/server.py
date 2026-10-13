@@ -1389,7 +1389,7 @@ except Exception:
         import math
         return max(0.0, min(100.0, 50.0 + 50.0 * math.tanh((float(yi) - 8000.0) / 4000.0)))
 
-    def _turnover_quant(turns, latest_yi=None):
+    def _turnover_quant(turns, latest_yi=None, latest_date=None):
         return {'yi': None, 'chgPct': None, 'ma5Yi': None, 'vsMa5Pct': None,
                 'z20': None, 'volumeScore': None, 'streak': None,
                 'trend': None, 'level': None, 'n': 0}
@@ -1398,7 +1398,7 @@ except Exception:
 try:
     from trend_quant import price_series_quant as _price_series_quant
 except Exception:
-    def _price_series_quant(closes, latest=None, quote_change_pct=None):
+    def _price_series_quant(closes, latest=None, quote_change_pct=None, dates=None, latest_date=None):
         return {
             'close': None, 'chgPct': None, 'ma5': None, 'vsMa5Pct': None,
             'z20': None, 'momScore': None, 'streak': None,
@@ -1406,7 +1406,7 @@ except Exception:
         }
 
 
-def _fmtqik_index_closes(turns) -> list:
+def _fmtqik_index_closes(turns, dated=False) -> list:
     """FMTQIK 列中的加權指數收盤序列（舊→新）。"""
     out = []
     for t in turns or []:
@@ -1414,13 +1414,13 @@ def _fmtqik_index_closes(turns) -> list:
             if t.get('index') is not None:
                 v = float(t['index'])
                 if v > 0:
-                    out.append(v)
+                    out.append({'date': t.get('sourceDate') or t.get('date'), 'close': v} if dated else v)
         except Exception:
             continue
     return out
 
 
-def _tw_index_closes(symbol: str, n: int = 30) -> list:
+def _tw_index_closes(symbol: str, n: int = 30, dated=False) -> list:
     """櫃買／台指期近 n 日收盤；CSV 過期超過 5 日才允許網路補齊。"""
     try:
         import tw_index_charts as _tic
@@ -1437,6 +1437,8 @@ def _tw_index_closes(symbol: str, n: int = 30) -> list:
                 allow_net = True
         else:
             allow_net = True
+        if dated:
+            return list(_tic.recent_rows(symbol, n=n, allow_network=allow_net) or [])
         return list(_tic.recent_closes(symbol, n=n, allow_network=allow_net) or [])
     except Exception as e:
         print('[pulse] tw_index_closes', symbol, e)
@@ -3034,6 +3036,8 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             self._handle_universe_refresh()
         elif p == '/datasource/refresh':
             self._handle_datasource_refresh()
+        elif p in ('/macro/backfill-mix', '/macro/track/backfill-mix'):
+            self._handle_macro_backfill()
         elif p == '/macro/refresh' or p.startswith('/macro/refresh/'):
             # UI 一鍵更新追蹤圖（POST body 可帶 {id, dense, density, step, years}）
             try:
@@ -3063,6 +3067,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 data = mt.refresh_chart(
                     str(cid), dense=bool(dense), density=density, step=step, years=years,
                 )
+                _macro_cache_invalidate()
                 self._ok(json.dumps(data, ensure_ascii=False).encode())
             except Exception as e:
                 self._err('macro refresh failed: ' + str(e), 500)
@@ -3110,8 +3115,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         methods = ('GET, OPTIONS' if self._wavedeck_read_cors_path(self.path.split('?', 1)[0])
                    else 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Methods', methods)
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-ST-Trace-ID')
-        self.send_header('Access-Control-Expose-Headers', 'X-ST-Trace-ID')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-ST-Trace-ID, If-Match')
         self.end_headers()
 
     def _ensure_trace_id(self):
@@ -3147,9 +3151,10 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             self.send_header('Access-Control-Allow-Origin', origin)
             self.send_header('Vary', 'Origin')
         self.send_header('X-ST-Trace-ID', self._ensure_trace_id())
+        self.send_header('Access-Control-Expose-Headers', 'X-ST-Trace-ID, ETag')
         super().end_headers()
 
-    def _ok(self, body, ct='application/json', status=200):
+    def _ok(self, body, ct='application/json', status=200, headers=None):
         if isinstance(body, str):
             body = body.encode('utf-8')
         self.send_response(status)
@@ -3158,6 +3163,8 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             self.send_header('Cache-Control', 'no-store')
         self.send_header('Content-Type', ct)
         self.send_header('Content-Length', str(len(body)))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -5776,7 +5783,11 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
     def _alert_get_rules(self):
         if not alert_daemon:
             self._err('alert daemon unavailable', 503); return
-        self._ok(json.dumps(alert_daemon.load_rules(), ensure_ascii=False).encode())
+        try:
+            rules, revision = alert_daemon.rules_snapshot()
+            self._ok(json.dumps(rules, ensure_ascii=False).encode(), headers={'ETag': revision})
+        except (alert_daemon.StoreCorruptError, ValueError, OSError) as exc:
+            self._err('警報規則讀取失敗：' + type(exc).__name__, 503)
 
     def _alert_post_rules(self):
         if not alert_daemon:
@@ -5785,17 +5796,25 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             rules = self._read_json_body(max_bytes=1024 * 1024, expected_type=list)
             if not isinstance(rules, list):
                 self._err('rules must be a list', 400); return
-            alert_daemon.save_rules(rules)
-            self._ok(json.dumps({'ok': True, 'count': len(rules)}).encode())
+            revision = alert_daemon.save_rules(rules, expected_revision=self.headers.get('If-Match'))
+            self._ok(json.dumps({'ok': True, 'count': len(rules)}).encode(), headers={'ETag': revision})
         except BodyReadError as e:
             self._err(str(e), e.status)
+        except alert_daemon.RulesConflictError as e:
+            self._err(str(e), 409)
+        except ValueError as e:
+            self._err(str(e), 400)
         except Exception as e:
             self._err('save rules failed: ' + str(e), 500)
 
     def _alert_get_config(self):
         if not alert_daemon:
             self._err('alert daemon unavailable', 503); return
-        cfg = alert_daemon.load_config()
+        try:
+            cfg = alert_daemon.load_config(strict=True)
+        except (alert_daemon.StoreCorruptError, ValueError, OSError) as exc:
+            self._err('警報設定讀取失敗：' + type(exc).__name__, 503)
+            return
         # 遮蔽敏感欄位
         safe = json.loads(json.dumps(cfg))
         if safe.get('telegram', {}).get('bot_token'):
@@ -5809,17 +5828,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             self._err('alert daemon unavailable', 503); return
         try:
             incoming = self._read_json_body()
-            cur = alert_daemon.load_config()
-            # 合併：'***set***' 代表前端沒改，保留原值
-            for sect in ('telegram', 'email'):
-                if isinstance(incoming.get(sect), dict):
-                    for k, v in incoming[sect].items():
-                        if v == '***set***':
-                            continue
-                        cur.setdefault(sect, {})[k] = v
-                    incoming.pop(sect)
-            cur.update(incoming)
-            alert_daemon.save_config(cur)
+            cur = alert_daemon.update_config(incoming)
             if cur.get('enabled') and alert_daemon:
                 alert_daemon.start()
             self._ok(json.dumps({'ok': True}).encode())
@@ -6287,9 +6296,39 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             self._err('margin_ratio failed: ' + str(e), 500)
 
     # ── 總經數據 (v3.9 P4) + MacroMicro 追蹤圖 (v4.1) ─────────
+    def _handle_macro_backfill(self):
+        from datetime import date
+        try:
+            body = self._read_json_body(max_bytes=16 * 1024)
+            qs = parse_qs(urlparse(self.path).query)
+            start = str(body.get('start') or qs.get('start', ['2018-01-01'])[0])
+            start_date = date.fromisoformat(start)
+            step = max(1, int(body.get('step', qs.get('step', ['14'])[0])))
+        except BodyReadError as exc:
+            self._err(str(exc), exc.status)
+            return
+        except (TypeError, ValueError):
+            self._err('回補起日須為 YYYY-MM-DD，步長須為整數。', 400)
+            return
+
+        def _run():
+            try:
+                import macro_track as mt
+                count = mt.backfill_margin_mix(start_date, step_days=step)
+                _macro_cache_invalidate()
+                print('[macro_track] 融資比回補完成', count)
+            except Exception as exc:
+                print('[macro_track] 融資比回補失敗', exc)
+
+        threading.Thread(target=_run, daemon=True).start()
+        self._ok(json.dumps({'ok': True, 'started': True, 'start': start, 'step': step}).encode())
+
     def _handle_macro(self, series):
         from datetime import date as _date, timedelta as _td
         series = (series or '').strip()
+        if series in ('refresh', 'backfill-mix', 'track/backfill-mix') or series.startswith('refresh/'):
+            self._method_not_allowed('POST')
+            return
         # /macro/charts — 多序列追蹤圖目錄
         if series in ('charts', 'track', 'track/list'):
             try:
@@ -6314,49 +6353,6 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 self._err('unknown macro chart: ' + cid, 404); return
             except Exception as e:
                 self._err('macro chart failed: ' + str(e), 500); return
-        # /macro/track/backfill-mix — 觸發融資比回補（query years/step）
-        if series in ('backfill-mix', 'track/backfill-mix'):
-            qs = parse_qs(urlparse(self.path).query)
-            start = qs.get('start', ['2018-01-01'])[0]
-            step = int(qs.get('step', ['14'])[0] or 14)
-            def _run():
-                try:
-                    import macro_track as mt
-                    y, m, d = map(int, start.split('-'))
-                    n = mt.backfill_margin_mix(_date(y, m, d), step_days=max(1, step))
-                    print('[macro_track] backfill-mix done', n)
-                except Exception as e:
-                    print('[macro_track] backfill-mix failed', e)
-            threading.Thread(target=_run, daemon=True).start()
-            self._ok(json.dumps({'ok': True, 'started': True, 'start': start, 'step': step}).encode()); return
-
-        # /macro/refresh 或 /macro/refresh/<ID> — UI 一鍵更新（免 CLI）
-        if series == 'refresh' or series.startswith('refresh/'):
-            qs = parse_qs(urlparse(self.path).query)
-            cid = 'ALL'
-            if series.startswith('refresh/'):
-                cid = series.split('/', 1)[1].strip() or 'ALL'
-            cid = (qs.get('id', [cid])[0] or cid).strip()
-            dense = (qs.get('dense', ['1'])[0] or '1').lower() in ('1', 'true', 'yes')
-            density = qs.get('density', [None])[0]
-            step = qs.get('step', [None])[0]
-            years = qs.get('years', [None])[0]
-            try:
-                step = int(step) if step not in (None, '') else None
-            except Exception:
-                step = None
-            try:
-                years = int(years) if years not in (None, '') else None
-            except Exception:
-                years = None
-            try:
-                import macro_track as mt
-                data = mt.refresh_chart(cid, dense=dense, density=density, step=step, years=years)
-                _macro_cache_invalidate()      # 圖表更新會改寫多個共用種子（fedfunds 等）
-                self._ok(json.dumps(data, ensure_ascii=False).encode()); return
-            except Exception as e:
-                self._err('macro refresh failed: ' + str(e), 500); return
-
         qs = parse_qs(urlparse(self.path).query)
         if series == '' or series == 'list':
             cat = [{'key': k, 'label': v['label'], 'unit': v.get('unit', ''), 'provider': v['p']}
@@ -6583,12 +6579,12 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             self._err('watch/alert daemon unavailable', 503); return
         try:
             inc = self._read_json_body(max_bytes=16 * 1024)
-            cur = alert_daemon.load_config()
+            update = {}
             if 'enabled' in inc:
-                cur['watch_enabled'] = bool(inc['enabled'])
+                update['watch_enabled'] = bool(inc['enabled'])
             if 'poll_seconds' in inc:
-                cur['watch_poll_seconds'] = int(inc['poll_seconds'])
-            alert_daemon.save_config(cur)
+                update['watch_poll_seconds'] = int(inc['poll_seconds'])
+            cur = alert_daemon.update_config(update)
             if cur.get('watch_enabled'):
                 watch_daemon.start()
             self._ok(json.dumps({'ok': True, 'watch_enabled': cur.get('watch_enabled')}).encode())

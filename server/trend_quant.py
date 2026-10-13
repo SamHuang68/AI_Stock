@@ -8,6 +8,44 @@ from __future__ import annotations
 
 import math
 from typing import Any, Dict, List, Optional, Sequence
+from exchange_source_dates import official_date
+
+
+def merge_dated_series(values, dates, latest=None, latest_date=None, *, allow_zero=False):
+    """依明示交易日更新；沒有日期的舊呼叫不混入即時價。"""
+    pairs = []
+    for i, raw in enumerate(values):
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            value = None
+        day = official_date(dates[i]) if i < len(dates) else None
+        valid = value is not None and math.isfinite(value) and (value >= 0 if allow_zero else value > 0)
+        pairs.append((day, value if valid else None))
+    dated = bool(pairs) and all(day is not None for day, _ in pairs)
+    if dated:
+        pairs = sorted(dict(pairs).items())
+    day = official_date(latest_date)
+    try:
+        current = float(latest) if latest is not None else None
+    except (TypeError, ValueError):
+        current = None
+    merged = False
+    if day and current is not None and math.isfinite(current) and (current >= 0 if allow_zero else current > 0):
+        if not pairs or dated and day >= pairs[-1][0]:
+            if pairs and day == pairs[-1][0]:
+                pairs[-1] = (day, current)
+            else:
+                pairs.append((day, current))
+            merged = True
+    # 缺值保留切段意義，不把缺值兩側串成相鄰觀測。
+    start = max((i + 1 for i, (_, value) in enumerate(pairs) if value is None), default=0)
+    pairs = pairs[start:]
+    return [value for _, value in pairs], {
+        'asOf': pairs[-1][0].isoformat() if pairs and pairs[-1][0] else None,
+        'latestMerged': merged,
+        'dateVerified': bool(pairs) and all(day is not None for day, _ in pairs),
+    }
 
 
 def momentum_score(vs_ma5_pct: Optional[float], z20: Optional[float] = None,
@@ -32,7 +70,8 @@ def momentum_score(vs_ma5_pct: Optional[float], z20: Optional[float] = None,
 
 def price_series_quant(closes: Optional[Sequence[float]],
                        latest: Optional[float] = None,
-                       quote_change_pct: Optional[float] = None) -> Dict[str, Any]:
+                       quote_change_pct: Optional[float] = None,
+                       dates=None, latest_date=None) -> Dict[str, Any]:
     """由收盤價序列＋可選當日即時價，建趨勢量化指標。
 
     closes: 由舊到新的日線收盤價。
@@ -47,26 +86,11 @@ def price_series_quant(closes: Optional[Sequence[float]],
         'z20': None, 'momScore': None, 'streak': None,
         'trend': None, 'level': None, 'n': 0, 'spark': [],
     }
-    series: List[float] = []
-    for c in closes or []:
-        try:
-            v = float(c)
-            if v > 0 and math.isfinite(v):
-                series.append(v)
-        except Exception:
-            continue
-    if latest is not None:
-        try:
-            cur0 = float(latest)
-        except Exception:
-            cur0 = None
-        if cur0 is not None and cur0 > 0 and math.isfinite(cur0):
-            if not series:
-                series = [cur0]
-            elif abs(series[-1] - cur0) / max(abs(cur0), 1.0) <= 0.03:
-                series[-1] = cur0
-            else:
-                series.append(cur0)
+    rows = list(closes or [])
+    if rows and isinstance(rows[0], dict):
+        dates = [row.get('sourceDate') or row.get('date') for row in rows]
+        rows = [row.get('close') for row in rows]
+    series, quality = merge_dated_series(rows, list(dates or []), latest, latest_date)
     if not series:
         return empty
     cur = series[-1]
@@ -145,4 +169,5 @@ def price_series_quant(closes: Optional[Sequence[float]],
         'level': level,
         'n': len(series),
         'spark': spark,
+        **quality,
     }
