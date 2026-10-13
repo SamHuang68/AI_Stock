@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const root = path.join(__dirname, '..');
-const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+// CI 的 Windows checkout 可為 CRLF；只正規化讀入字串，保留全部受測程式與斷言。
+const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
 const plain = value => JSON.parse(JSON.stringify(value));
 function between(source, start, end) {
   const a = source.indexOf(start), b = source.indexOf(end, a + start.length);
