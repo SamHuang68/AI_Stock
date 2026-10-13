@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from datetime import date, timedelta
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 
@@ -24,6 +25,12 @@ def tearDownModule():
 
 
 class BenchmarkResearchTest(unittest.TestCase):
+    def setUp(self):
+        self.today = date(2026, 10, 13)
+        clock = mock.patch.object(br, 'date', wraps=date)
+        clock.start().today.return_value = self.today
+        self.addCleanup(clock.stop)
+
     def test_parses_official_openapi_roc_dates(self):
         rows = br.parse_tai50_payload([
             {'Date': '1150814', 'Taiwan50Index': '42,499.44',
@@ -50,7 +57,7 @@ class BenchmarkResearchTest(unittest.TestCase):
             path = os.path.join(tmp, 'tai50_daily.csv')
             level = 10000.0
             rows = []
-            start = date.today() - timedelta(days=1147)
+            start = self.today - timedelta(days=1147)
             sessions = 交易日(start, 820)
             for index in range(820):
                 level *= 1.003 if index % 2 else 0.998
@@ -79,7 +86,7 @@ class BenchmarkResearchTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, 'tai50_daily.csv')
             br._write_rows([{
-                'date': date.today().isoformat(),
+                'date': self.today.isoformat(),
                 'priceIndex': 100.0, 'totalReturnIndex': 200.0,
             }], path)
             contract = br.snapshot(allow_network=False, path=path)['FTSE_TAIWAN_50']

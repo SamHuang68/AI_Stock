@@ -397,7 +397,9 @@
       "reason": "PR198 直接受影響的既有測試及本輪修正負面案例；不跑完整測試、不部署",
       "kind": "unittest",
       "targets": [
-        "tests.test_private_web_gateway"
+        "tests.test_private_web_gateway",
+        "tests.test_完整審查警報權限.警報與權限案例.test_有副作用的總經讀取在後端與閘道均拒絕",
+        "tests.test_完整審查警報權限.警報與權限案例.test_本機回補保留受控寫入且驗證輸入"
       ],
       "changes": [
         "server/private_web_gateway.py",
@@ -646,7 +648,9 @@
         "src/ui/研究任務面板.js",
         "src/ui/研究工作台.js",
         "stock_terminal.html",
-        "tests/test_private_web_gateway.py"
+        "tests/test_private_web_gateway.py",
+        "tests/test_完整審查警報權限.py",
+        "VERSION"
       ],
       "expectedSeconds": 45,
       "timeoutSeconds": 180

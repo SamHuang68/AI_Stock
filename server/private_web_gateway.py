@@ -778,7 +778,11 @@ def _is_static_navigation(path: str) -> bool:
 def route_permission(method: str, path: str, role: str, settings: Settings) -> bool:
     if path.startswith('/macro/refresh/'):
         # Sam 核准單一 id 更新；拒絕多段及編碼分隔符，不擴成其他控制路徑。
-        return method == 'POST' and role == 'owner' and re.fullmatch(r'/macro/refresh/[A-Za-z0-9_-]+', path) is not None
+        if method != 'POST' or role != 'owner' or re.fullmatch(r'/macro/refresh/[A-Za-z0-9_-]+', path) is None:
+            return False
+        from macro_track import is_macro_chart
+        # 沿用來源登錄表，排除全部更新別名及未知圖表；單圖歷史參數保留。
+        return is_macro_chart(path.rsplit('/', 1)[1])
     if method in {"GET", "HEAD"}:
         # 有副作用的總經入口不可被唯讀前綴或額外白名單放行。
         if path in {"/macro/refresh", "/macro/backfill-mix", "/macro/track/backfill-mix"} or path.startswith("/macro/refresh/"):
