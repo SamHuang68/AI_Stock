@@ -17,6 +17,8 @@ from conditional_expectation import (
     _deviation_z,
     _relative_strength_percentile,
     _session_date_from_ts,
+    _research_rows,
+    _forward_outcome as _shared_forward_outcome,
     aggregate_horizon_stats,
     bin_state,
     evaluate_asof_gate,
@@ -209,20 +211,8 @@ def ml_experiment_stub(factors: dict[str, float | None]) -> dict[str, Any]:
     }
 
 
-def _forward_outcome(rows: list, origin_idx: int, horizon: int) -> dict[str, float] | None:
-    if origin_idx < 0 or origin_idx + horizon >= len(rows):
-        return None
-    entry = float(rows[origin_idx][4])
-    if entry <= 0:
-        return None
-    exit_close = float(rows[origin_idx + horizon][4])
-    path = [float(rows[j][4]) for j in range(origin_idx + 1, origin_idx + horizon + 1)]
-    worst = 0.0
-    for price in path:
-        drawdown = (float(price) / float(entry) - 1.0) * 100.0
-        if drawdown < worst:
-            worst = drawdown
-    return {'returnPct': (exit_close / entry - 1.0) * 100.0, 'maxDrawdownPct': worst}
+def _forward_outcome(rows: list, origin_idx: int, horizon: int, *, prepared=False) -> dict[str, float] | None:
+    return _shared_forward_outcome(rows, origin_idx, horizon, prepared=prepared)
 
 
 def _collect_long_horizon_observations(
@@ -231,13 +221,12 @@ def _collect_long_horizon_observations(
     *,
     chip_inst_by_date: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
-    rows = [r for r in (bars or []) if r and r[4] is not None]
-    max_h = max(LONG_HORIZONS)
-    if len(rows) < MIN_BARS + max_h:
+    rows = _research_rows(bars)
+    if len(rows) < MIN_BARS + min(LONG_HORIZONS):
         return []
     chip_map = chip_inst_by_date or {}
     observations: list[dict[str, Any]] = []
-    for idx in range(MIN_BARS - 1, len(rows) - max_h):
+    for idx in range(MIN_BARS - 1, len(rows) - min(LONG_HORIZONS)):
         session = _session_date_from_ts(rows[idx][0])
         state = bin_state(
             symbol,
@@ -245,10 +234,13 @@ def _collect_long_horizon_observations(
             bars=rows,
             chip_inst_by_date=chip_map,
             regime_id=regime_at_date(session),
+            prepared=True,
         )
+        if not state.get('binId'):
+            continue
         outcomes: dict[str, dict[str, float]] = {}
         for horizon in LONG_HORIZONS:
-            outcome = _forward_outcome(rows, idx, horizon)
+            outcome = _forward_outcome(rows, idx, horizon, prepared=True)
             if outcome is not None:
                 outcomes[str(horizon)] = outcome
         if not outcomes:
@@ -267,7 +259,13 @@ def _long_horizon_card(
     *,
     bars: list,
     chip_inst_by_date: dict[str, float] | None = None,
+    as_of: date | None = None,
 ) -> dict[str, Any] | None:
+    if as_of is None and bars:
+        as_of = max(_session_date_from_ts(row[0]) for row in bars if row)
+    if as_of is None:
+        return None
+    bars = [row for row in bars if row and _session_date_from_ts(row[0]) <= as_of]
     observations = _collect_long_horizon_observations(
         symbol,
         bars,
@@ -275,7 +273,9 @@ def _long_horizon_card(
     )
     if not observations:
         return None
-    current = observations[-1]
+    current = bin_state(symbol, as_of, bars=bars, chip_inst_by_date=chip_inst_by_date,
+                        regime_id=regime_at_date(as_of))
+    observations = [row for row in observations if current.get('binId') and row['binId'] == current['binId']]
     horizons: dict[str, Any] = {}
     for horizon in LONG_HORIZONS:
         key = str(horizon)
@@ -296,7 +296,9 @@ def _long_horizon_card(
         'horizons': horizons,
         'binId': current.get('binId'),
         'binModelId': current.get('binModelId'),
-        'label': f'Long-horizon conditional stats H∈{{{",".join(str(h) for h in LONG_HORIZONS)}}}',
+        'asOfDate': current.get('asOfDate'),
+        'evidenceAsOf': current.get('evidenceAsOf'),
+        'label': f'目前狀態長期條件統計：{",".join(str(h) for h in LONG_HORIZONS)} 個交易日',
     }
 
 
@@ -406,7 +408,7 @@ def build_research_snapshot(
     for code in lh_symbols[:5]:
         bars = _load_bars(code)
         chip_map = load_chip_inst_history(code)
-        card = _long_horizon_card(code, bars=bars, chip_inst_by_date=chip_map)
+        card = _long_horizon_card(code, bars=bars, chip_inst_by_date=chip_map, as_of=as_of)
         if card:
             long_cards.append(card)
     ml_block = None

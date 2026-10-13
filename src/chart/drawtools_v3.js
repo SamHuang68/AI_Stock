@@ -23,6 +23,18 @@
 
   let store = {};          // {sym: [obj,...]}
   try { store = JSON.parse(localStorage.getItem('draw_v3') || '{}'); } catch { store = {}; }
+  const knownSymbols = new Set(Object.keys(store).filter(sym => Array.isArray(store[sym]) && store[sym].length));
+  // 舊版重繪也會建立空陣列；另外記錄已載入／明確清空，避免把未知誤當成清空。
+  try {
+    const known = JSON.parse(localStorage.getItem('draw_v3_known') || '[]');
+    if (Array.isArray(known)) known.forEach(sym => knownSymbols.add(sym));
+  } catch (err) { console.warn('讀取畫線載入狀態失敗', err); }
+  const revisions = new Map();
+  function markEdited(sym) {
+    if (!sym) return;
+    knownSymbols.add(sym);
+    revisions.set(sym, (revisions.get(sym) || 0) + 1);
+  }
 
   let mode = 'off';        // 'off' | 'select' | 工具名
   let color = COLORS[0];
@@ -34,8 +46,13 @@
 
   function curSym() { return (typeof S !== 'undefined' && S.sym) ? S.sym : ''; }
   function objs() { const s = curSym(); if (!s) return []; return store[s] || (store[s] = []); }
-  function saveLocal() { try { localStorage.setItem('draw_v3', JSON.stringify(store)); } catch {} }
-  function saveAll() { saveLocal(); cloudSave(); }
+  function saveLocal() {
+    try {
+      localStorage.setItem('draw_v3', JSON.stringify(store));
+      localStorage.setItem('draw_v3_known', JSON.stringify([...knownSymbols]));
+    } catch (err) { console.warn('儲存畫線失敗', err); }
+  }
+  function saveAll() { markEdited(curSym()); saveLocal(); cloudSave(); }
 
   // ---- 雲端 best-effort ----
   async function cloudSave() {
@@ -223,6 +240,7 @@
   function onMove(e) {
     mouse = evtXY(e);
     if (drag) {
+      markEdited(curSym());
       const t = tAt(mouse.x), p = pAt(mouse.y);
       const o = drag.obj;
       if (drag.anchor === 'p') { if (p != null) o.p = p; }
@@ -362,9 +380,15 @@
   window.addEventListener('symLoaded', async (e) => {
     const sym = e && e.detail && e.detail.sym; if (!sym) return;
     setTimeout(attach, 80);
-    if (!store[sym] || !store[sym].length) {
+    if (!knownSymbols.has(sym)) {
+      const revision = revisions.get(sym) || 0;
       const cloud = await cloudLoad(sym);
-      if (cloud && cloud.length) { store[sym] = cloud; saveLocal(); scheduleRedraw(); }
+      if (cloud && !knownSymbols.has(sym) && (revisions.get(sym) || 0) === revision) {
+        store[sym] = cloud;
+        knownSymbols.add(sym);
+        saveLocal();
+        if (curSym() === sym) scheduleRedraw();
+      }
     }
   });
 
@@ -401,6 +425,7 @@
     if (!store[sym]) store[sym] = [];
     if (opts && opts.replaceSource) store[sym] = store[sym].filter(o => o.source !== opts.replaceSource);
     arr.forEach(o => store[sym].push(o));
+    markEdited(sym);
     saveLocal();
     try {
       fetch(`${SRV}/draw/${encodeURIComponent(sym)}`, {

@@ -10,17 +10,19 @@
 # 觸發紀錄存 logs/alerts/alerts_YYYY-MM.log
 # ============================================================
 import os, json, time, threading, urllib.request, urllib.parse, smtplib, ssl
+import copy
+import hashlib
 from email.mime.text import MIMEText
 from datetime import datetime
 
 try:
     from .atomic_store import StoreCorruptError, atomic_write_json, load_json
     from .secret_store import load_secret_json, save_secret_json
-    from .indicators import candle_snapshot
+    from .indicators import dated_candle_snapshot
 except ImportError:
     from atomic_store import StoreCorruptError, atomic_write_json, load_json
     from secret_store import load_secret_json, save_secret_json
-    from indicators import candle_snapshot
+    from indicators import dated_candle_snapshot
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_FILE = os.path.join(_BASE, 'data', 'alert_config.json')
@@ -50,10 +52,21 @@ _DEFAULT_CONFIG = {
 #   type: 'cross_up' 過壓力 | 'cross_down' 破支撐
 _state = {'thread': None, 'stop': False, 'last_quotes': {}, 'fired': []}
 _lock = threading.Lock()
+_config_lock = threading.RLock()
+_rules_lock = threading.RLock()
+
+
+class RulesConflictError(ValueError):
+    """使用者規則已變更，拒絕用舊快照覆寫。"""
 
 
 # ---- config / rules I/O -----------------------------------
-def load_config():
+def load_config(*, strict=False):
+    with _config_lock:
+        return _load_config_locked(strict=strict)
+
+
+def _load_config_locked(*, strict=False):
     default = json.loads(json.dumps(_DEFAULT_CONFIG))
     try:
         c = load_json(CONFIG_FILE, default={}, expected_type=dict)
@@ -77,44 +90,143 @@ def load_config():
         return merged
     except (StoreCorruptError, ValueError, OSError) as exc:
         print('[alert-store] config unavailable:', type(exc).__name__)
+        if strict:
+            raise
         return default
 
 
 def save_config(c):
-    clean = json.loads(json.dumps(c if isinstance(c, dict) else {}))
-    try:
+    with _config_lock:
+        _save_config_locked(c)
+
+
+def _save_config_locked(c):
+    if not isinstance(c, dict):
+        raise ValueError('警報設定必須是物件。')
+    clean = copy.deepcopy(c)
+    # 讀取失敗必須中止；無法解密不等於沒有金鑰。
+    secret_changes = any(
+        isinstance(clean.get(section), dict)
+        and field in clean[section] and clean[section][field] != '***set***'
+        for section, field in (('telegram', 'bot_token'), ('email', 'app_password'))
+    )
+    secrets = None
+    if secret_changes:
         secrets = load_secret_json(SECRETS_FILE)
-    except Exception:
-        secrets = {}
+    original_secrets = copy.deepcopy(secrets)
     for section, field, secret_key in (
         ('telegram', 'bot_token', 'telegram_bot_token'),
         ('email', 'app_password', 'email_app_password'),
     ):
         part = clean.setdefault(section, {})
+        if not isinstance(part, dict):
+            raise ValueError('警報通道設定必須是物件。')
         value = part.get(field)
-        if value == '***set***':
-            pass
-        elif value:
-            secrets[secret_key] = str(value)
-        else:
-            secrets.pop(secret_key, None)
+        # 缺少欄位及遮罩保留原值；只有明確空字串才清除。
+        if field in part and value != '***set***':
+            if value is None:
+                raise ValueError('清除金鑰請明確提供空字串。')
+            if value:
+                secrets[secret_key] = str(value)
+            else:
+                secrets.pop(secret_key, None)
         part[field] = ''
-    save_secret_json(SECRETS_FILE, secrets)
+    if secrets != original_secrets:
+        save_secret_json(SECRETS_FILE, secrets)
     # The config and its recovery copy are deliberately secret-free.
     atomic_write_json(CONFIG_FILE, clean, backup=False, private=True)
     atomic_write_json(CONFIG_FILE + '.bak', clean, backup=False, private=True)
 
 
-def load_rules():
+def update_config(incoming):
+    """在同一交易內合併局部設定，不讓讀取失敗變成清除。"""
+    if not isinstance(incoming, dict):
+        raise ValueError('警報設定必須是物件。')
+    with _config_lock:
+        current = load_config(strict=True)
+        for key, value in incoming.items():
+            if key in ('telegram', 'email', 'webhook'):
+                if not isinstance(value, dict):
+                    raise ValueError('警報通道設定必須是物件。')
+                current[key].update({k: v for k, v in value.items() if v != '***set***'})
+            else:
+                current[key] = value
+        # 沒有修改金鑰的操作不重寫金鑰檔，也不翻動其復原副本。
+        persisted = copy.deepcopy(current)
+        for section, field in (('telegram', 'bot_token'), ('email', 'app_password')):
+            supplied = incoming.get(section, {})
+            if field not in supplied or supplied[field] == '***set***':
+                persisted[section][field] = '***set***'
+        _save_config_locked(persisted)
+        return current
+
+
+def load_rules(*, strict=False):
     try:
-        return load_json(RULES_FILE, default=[], expected_type=list)
+        with _rules_lock:
+            rules = load_json(RULES_FILE, default=[], expected_type=list)
+            if any(not isinstance(rule, dict) for rule in rules):
+                raise StoreCorruptError('警報規則含非物件項目；保留原檔並拒絕覆寫。')
+            return rules
     except StoreCorruptError as exc:
         print('[alert-store] rules unavailable:', type(exc).__name__)
+        if strict:
+            raise
         return []
 
 
-def save_rules(rules):
-    atomic_write_json(RULES_FILE, rules, backup=True, private=True)
+def _rule_settings(rule):
+    return {key: value for key, value in rule.items() if not key.startswith('_last_')}
+
+
+def rules_revision(rules):
+    settings = [_rule_settings(rule) for rule in rules]
+    raw = json.dumps(settings, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
+    return '"' + hashlib.sha256(raw.encode('utf-8')).hexdigest() + '"'
+
+
+def rules_snapshot():
+    with _rules_lock:
+        rules = load_rules(strict=True)
+        return rules, rules_revision(rules)
+
+
+def save_rules(rules, *, expected_revision=None):
+    if not isinstance(rules, list) or any(not isinstance(rule, dict) for rule in rules):
+        raise ValueError('警報規則必須是物件陣列。')
+    with _rules_lock:
+        current = load_rules(strict=True)
+        if expected_revision is not None and expected_revision != rules_revision(current):
+            raise RulesConflictError('警報規則已被更新，請重新讀取後再保存。')
+        # 相同規則保留最新評估狀態，避免前端的舊狀態回捲冷卻時間。
+        latest = {json.dumps(_rule_settings(r), sort_keys=True, ensure_ascii=False): r for r in current}
+        merged = copy.deepcopy(rules)
+        for rule in merged:
+            old = latest.get(json.dumps(_rule_settings(rule), sort_keys=True, ensure_ascii=False))
+            if old is not None:
+                for key in tuple(rule):
+                    if key.startswith('_last_'):
+                        rule.pop(key)
+                rule.update({key: value for key, value in old.items() if key.startswith('_last_')})
+        atomic_write_json(RULES_FILE, merged, backup=True, private=True)
+        return rules_revision(merged)
+
+
+def _merge_rule_state(before, evaluated):
+    """網路評估結束後，只合併仍存在且內容未變的規則狀態。"""
+    with _rules_lock:
+        current = load_rules(strict=True)
+        changed = False
+        for old, result in zip(before, evaluated):
+            if old == result:
+                continue
+            for rule in current:
+                if rule == old:
+                    rule.update({key: value for key, value in result.items() if key.startswith('_last_')})
+                    changed = True
+                    break
+        if changed:
+            atomic_write_json(RULES_FILE, current, backup=True, private=True)
 
 
 # ---- Yahoo 報價 (自足) -------------------------------------
@@ -267,14 +379,9 @@ def _fetch_daily_candles(sym, market):
                 ts = res['timestamp']
                 candles = []
                 for i in range(len(ts)):
-                    cl = q['close'][i]
-                    if cl is None:
-                        continue
-                    candles.append({
-                        'high': q['high'][i] if q['high'][i] is not None else cl,
-                        'low': q['low'][i] if q['low'][i] is not None else cl,
-                        'close': cl, 'volume': q['volume'][i] or 0,
-                    })
+                    candles.append({'time': ts[i], **{
+                        key: (q.get(key) or [])[i] if i < len(q.get(key) or []) else None
+                        for key in ('open', 'high', 'low', 'close', 'volume')}})
                 if len(candles) >= 20:
                     return candles
             except Exception:
@@ -284,10 +391,10 @@ def _fetch_daily_candles(sym, market):
     return None
 
 
-def _calc_ind(candles):
-    """複合警示指標：一律走 indicators.candle_snapshot（Wilder RSI、母體σ布林），
+def _calc_ind(candles, market='TW', symbol=''):
+    """複合警示指標：一律走 indicators.dated_candle_snapshot（Wilder RSI、母體σ布林），
     與畫面 pro_v2 同口徑；不得在 daemon 內自寫近似版 RSI。"""
-    snap = candle_snapshot(candles)
+    snap = dated_candle_snapshot(candles, market, symbol)
     return {k: snap.get(k) for k in
             ('close', 'sma20', 'sma60', 'rsi14', 'bbL', 'bbU', 'volRatio', 'high20')}
 
@@ -328,7 +435,7 @@ def _check_composite(r, cfg):
     candles = _fetch_daily_candles(r.get('sym'), r.get('market', 'TW'))
     if not candles:
         return False
-    ind = _calc_ind(candles)
+    ind = _calc_ind(candles, r.get('market', 'TW'), r.get('sym', ''))
     satisfied, detail = _eval_composite(r, ind)
     prev = r.get('_last_fired')
     r['_last_fired'] = satisfied
@@ -351,7 +458,8 @@ def _check_once():
     cfg = load_config()
     if not cfg.get('enabled'):
         return
-    rules = load_rules()
+    rules = load_rules(strict=True)
+    original_rules = copy.deepcopy(rules)
     changed = False
     for r in rules:
         if not r.get('enabled', True):
@@ -412,7 +520,7 @@ def _check_once():
             _state['fired'].append({'t': now, 'text': text})
             _state['fired'] = _state['fired'][-100:]
     if changed:
-        save_rules(rules)
+        _merge_rule_state(original_rules, rules)
 
 
 def _loop():

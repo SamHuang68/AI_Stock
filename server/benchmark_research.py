@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import os
 import sys
 import threading
@@ -21,7 +22,7 @@ import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from atomic_store import atomic_write_text
+from atomic_store import atomic_write_text, atomic_write_json
 
 
 if getattr(sys, 'frozen', False):
@@ -48,7 +49,7 @@ _status: dict[str, Any] = {
 def _number(value: Any) -> float | None:
     try:
         value = float(str(value).replace(',', '').strip())
-        return value if value > 0 else None
+        return value if math.isfinite(value) and value > 0 else None
     except (TypeError, ValueError):
         return None
 
@@ -151,11 +152,27 @@ def _fetch_month(year: int, month: int) -> list[dict[str, Any]]:
     return parse_tai50_payload(_http_json(f'{HISTORY_URL}?{query}'))
 
 
+def _read_coverage(path):
+    try:
+        with open(str(path) + '.coverage.json', encoding='utf-8') as handle:
+            value = json.load(handle)
+            return value if isinstance(value, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as exc:
+        from log_once import log_once
+        log_once('benchmark-coverage', '基準涵蓋收據無法讀取', exc=exc)
+        return {}
+
+
 def refresh(years: int = 6, *, today: date | None = None, path: str = TAI50_CSV) -> dict[str, Any]:
     """Refresh current month or bootstrap a bounded multi-year official cache."""
     today = today or date.today()
     with _lock:
         by_date = {row['date']: row for row in _read_rows(path)}
+        coverage = _read_coverage(path)
+    covered_months = set(coverage.get('coveredMonths') or [])
+    failed = dict(coverage.get('failedMonths') or {})
     failed_months: list[str] = []
     attempted_months = 0
     if years > 0:
@@ -163,10 +180,19 @@ def refresh(years: int = 6, *, today: date | None = None, path: str = TAI50_CSV)
         cursor = start
         while cursor <= today:
             attempted_months += 1
+            month_key = cursor.strftime('%Y-%m')
             try:
-                for row in _fetch_month(cursor.year, cursor.month):
+                fetched = [row for row in _fetch_month(cursor.year, cursor.month)
+                           if row['date'][:7] == month_key and row['date'] <= today.isoformat()]
+                if not fetched:
+                    raise ValueError('月份未提供有效基準資料')
+                for row in fetched:
                     by_date[row['date']] = row
+                covered_months.add(month_key)
+                failed.pop(month_key, None)
             except Exception as exc:
+                failed[month_key] = type(exc).__name__
+                covered_months.discard(month_key)
                 failed_months.append(
                     f'{cursor.year:04d}-{cursor.month:02d}:{type(exc).__name__}')
             if cursor.month == 12:
@@ -181,16 +207,20 @@ def refresh(years: int = 6, *, today: date | None = None, path: str = TAI50_CSV)
         if not by_date:
             raise
     rows = [by_date[key] for key in sorted(by_date)]
-    if years > 0 and len(rows) < 253:
-        raise RuntimeError(
-            f'Taiwan 50 bootstrap insufficient: {len(rows)} rows; '
-            f'{len(failed_months)}/{attempted_months} month requests failed')
     with _lock:
         _write_rows(rows, path)
+        atomic_write_json(str(path) + '.coverage.json', {
+            'coveredMonths': sorted(covered_months), 'failedMonths': failed,
+            'requestedStart': start.isoformat() if years > 0 else coverage.get('requestedStart'),
+            'requestedThrough': today.isoformat(), 'source': SOURCE,
+        }, backup=True, private=False)
+    if years > 0 and len(rows) < 253:
+        raise RuntimeError(f'臺灣 50 基準資料不足：{len(rows)} 筆；{len(failed_months)}/{attempted_months} 個月份失敗')
     return {
         'ok': bool(rows), 'rows': len(rows), 'asOf': rows[-1]['date'] if rows else None,
         'source': SOURCE, 'attemptedMonths': attempted_months,
-        'failedMonths': failed_months,
+        'failedMonths': [f'{month}:{error}' for month, error in sorted(failed.items())],
+        'coveredMonths': sorted(covered_months),
     }
 
 
@@ -259,6 +289,7 @@ def _local_product_series() -> dict[str, Any]:
 def snapshot(*, allow_network: bool = False, path: str = TAI50_CSV) -> dict[str, Any]:
     """Return a bounded, auditable contract; network refresh never blocks caller."""
     rows = _read_rows(path)
+    coverage = _read_coverage(path)
     newest = rows[-1]['date'] if rows else None
     age_days = None
     if newest:
@@ -266,12 +297,18 @@ def snapshot(*, allow_network: bool = False, path: str = TAI50_CSV) -> dict[str,
             age_days = max(0, (date.today() - date.fromisoformat(newest)).days)
         except ValueError:
             age_days = None
-    enough_long_run = len(rows) >= 757
+    from 台股交易參考 import verified_sessions
+    expected = verified_sessions(coverage.get('requestedStart') or rows[0]['date'], newest) if rows else None
+    observed = {row['date'] for row in rows}
+    missing = sorted(set(expected or []) - observed)
+    continuous = expected is not None and not missing and not coverage.get('failedMonths')
+    enough_long_run = len(rows) >= 757 and continuous and bool(coverage.get('requestedStart'))
     stale = age_days is None or age_days > 10
     quality = 'ready' if enough_long_run and not stale else (
         'stale' if enough_long_run else ('partial_scope' if rows else 'insufficient'))
-    if allow_network and (not enough_long_run or stale):
-        start_background_refresh(6 if not enough_long_run else 0)
+    need_backfill = len(rows) < 757 or bool(missing) or bool(coverage.get('failedMonths')) or not coverage.get('requestedStart')
+    if allow_network and (need_backfill or stale):
+        start_background_refresh(6 if need_backfill else 0)
     with _lock:
         status = dict(_status)
     return {
@@ -283,6 +320,8 @@ def snapshot(*, allow_network: bool = False, path: str = TAI50_CSV) -> dict[str,
             'stale': stale,
             'pointInTimeAudited': True,
             'sampleDays': len(rows),
+            'coverage': {**coverage, 'calendarVerified': expected is not None,
+                         'missingSessions': missing, 'continuous': continuous},
             'refresh': status,
             'reference': 'official Taiwan 50 price and total-return index; available since 2002-10-18',
         },

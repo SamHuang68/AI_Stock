@@ -17,17 +17,7 @@
   // 全部接受/回傳「與 K 線等長、不足期數為 null」的陣列。
   // SMA／Wilder RSI 與回測核心同一份（backtest_v3 先載入）
   const sma = window.Backtest.sma;
-  function ema(arr, p) {
-    const out = new Array(arr.length).fill(null);
-    const k = 2 / (p + 1); let prev = null;
-    for (let i = 0; i < arr.length; i++) {
-      const v = arr[i];
-      if (v == null) { out[i] = prev; continue; }
-      prev = prev == null ? v : v * k + prev * (1 - k);
-      if (i >= p - 1) out[i] = prev;
-    }
-    return out;
-  }
+  const ema = window.stEmaSeries;
   const rsi = window.Backtest.rsi;
   // 隨機指標 KD (n=9, 平滑3)
   function kd(high, low, close, n, sm) {
@@ -54,7 +44,7 @@
     f = f || 12; s = s || 26; sig = sig || 9;
     const ef = ema(close, f), es = ema(close, s);
     const line = close.map((_, i) => (ef[i] == null || es[i] == null) ? null : ef[i] - es[i]);
-    const signal = ema(line.map(v => v == null ? 0 : v), sig).map((v, i) => line[i] == null ? null : v);
+    const signal = ema(line, sig);
     const hist = line.map((v, i) => (v == null || signal[i] == null) ? null : v - signal[i]);
     return { macd: line, signal, hist };
   }

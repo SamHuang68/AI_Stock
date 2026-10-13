@@ -37,14 +37,23 @@ function getPosition(sym) {
   if (!S.positions) S.positions = {};
   return S.positions[sym || S.sym] || null;
 }
-function setPosition(entry, shares, target, stop, notes) {
+function currentPositionPrice() {
+  const identity = S.dataIdentity;
+  if (!identity || identity.sym !== S.sym || identity.mkt !== S.mkt || identity.loadSeq !== window.__loadSeq) return null;
+  return S.data?.candles?.[S.data.candles.length - 1]?.close ?? null;
+}
+function setPosition(entry, shares, target, stop, notes, identity) {
   if (typeof S === 'undefined') { alert('v2 未正確載入，請 Ctrl+Shift+R 重新整理'); return false; }
   if (!S.positions) S.positions = {};   // defensive — bootPositions may have bailed
   if (!S.sym) { alert('尚未選擇股票'); return false; }
+  if (identity && (identity.sym !== S.sym || identity.mkt !== S.mkt)) {
+    alert('標的已切換，原表單內容尚未儲存。請回到原標的確認後再儲存。');
+    return false;
+  }
   const e = parseFloat(entry), s = parseInt(shares, 10);
   if (!isFinite(e) || e <= 0) { alert('進場價必須是正數'); return false; }
   if (!isFinite(s) || s <= 0) { alert('股數必須是正整數'); return false; }
-  const lastClose = S.data?.candles?.[S.data.candles.length - 1]?.close ?? null;
+  const lastClose = currentPositionPrice();
   S.positions[S.sym] = {
     entry:  e,
     shares: s,
@@ -363,8 +372,7 @@ function renderPosition() {
     return '<div style="padding:16px;font-family:JetBrains Mono,monospace;font-size:10px;color:var(--tlo)">尚未選擇個股</div>';
   }
   const pos = getPosition();
-  const last = S.data && S.data.candles ? S.data.candles[S.data.candles.length - 1] : null;
-  const c = pos && pos.quoteTimestampMs ? pos.lastPrice : (last ? last.close : null);
+  const c = pos && pos.quoteTimestampMs ? pos.lastPrice : currentPositionPrice();
 
   let h = renderPositionList();
   h += `<div class="stat-hdr">倉位管理 · ${S.sym}</div>`;
@@ -401,7 +409,7 @@ function renderPosition() {
       const d = new Date(pos.addedAt);
       h += row('建倉日', `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`);
     }
-    h += `<div style="padding:10px 12px"><button data-act="clear-pos" style="width:100%;padding:7px;background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--red);font-family:monospace;font-size:10px;cursor:pointer">清除倉位</button></div>`;
+    h += `<div style="padding:10px 12px"><button data-act="clear-pos" data-sym="${escapeHtml(S.sym)}" data-mkt="${escapeHtml(S.mkt)}" style="width:100%;padding:7px;background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--red);font-family:monospace;font-size:10px;cursor:pointer">清除倉位</button></div>`;
   }
 
   // ── Position input form ──
@@ -415,7 +423,7 @@ function renderPosition() {
 
   h += `<div class="stat-sect">${pos ? '更新倉位' : '建立倉位'}</div>`;
   h += `<div style="padding:8px 12px;display:flex;flex-direction:column;gap:6px">
-    <input id="pos-entry"  type="text" inputmode="decimal" autocomplete="off" placeholder="進場價" value="${pos?.entry ?? ''}"  style="${inpStyle()}">
+    <input id="pos-entry" data-sym="${escapeHtml(S.sym)}" data-mkt="${escapeHtml(S.mkt)}" type="text" inputmode="decimal" autocomplete="off" placeholder="進場價" value="${pos?.entry ?? ''}"  style="${inpStyle()}">
     <div style="display:flex;gap:4px">
       <input id="pos-shares" type="text" inputmode="numeric" autocomplete="off" placeholder="${unitLot ? '張數' : '股數'}" value="${sharesDisplay}" style="${inpStyle()};flex:1">
       <select id="pos-unit" style="${inpStyle()};width:64px;cursor:pointer">
@@ -483,6 +491,7 @@ function attachPosition() {
       if (act === 'save-pos')  { ev.preventDefault(); submitPosition(); }
       if (act === 'clear-pos') {
         ev.preventDefault();
+        if (btn.dataset.sym !== S.sym || btn.dataset.mkt !== S.mkt) { alert('標的已切換，請重新開啟目前標的的倉位面板。'); return; }
         if (confirm(`清除 ${S.sym} 倉位？`)) clearPosition();
       }
       if (act === 'goto-pos') {
@@ -580,7 +589,7 @@ function submitPosition() {
     s = String(parseFloat(s) * 1000);
   }
 
-  const ok = setPosition(e, s, t, p, n);
+  const ok = setPosition(e, s, t, p, n, { sym: entryEl.dataset.sym, mkt: entryEl.dataset.mkt });
   if (ok) showPosToast(`✓ ${S.sym} 倉位已儲存`);
 }
 

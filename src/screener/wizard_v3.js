@@ -388,6 +388,7 @@
   // ---- 套用核心（單檔/批次共用）----
   async function applyCore(sym, mkt, diag, sug, sel) {
     const done = [];
+    const failures = [];
     // WATCH
     if (sel.watch && typeof S !== 'undefined') {
       if (!S.watches) S.watches = {};
@@ -405,19 +406,32 @@
     }
     // 警報
     if (sel.alert) {
-      let rules = [];
-      try { rules = await fetch(`${SRV}/alert/rules`).then(r => r.ok ? r.json() : []); } catch {}
-      if (!Array.isArray(rules)) rules = [];
-      rules = rules.filter(r => !(r.source === 'wizard' && r.sym === sym));
-      sug.alerts.forEach((a, i) => rules.push({ id: Date.now() + i, sym, market: mkt, type: a.type, price: a.price, note: a.note, enabled: true, source: 'wizard' }));
-      if (sug.composite) rules.push({ id: Date.now() + 99, type: 'composite', sym, market: mkt, combine: sug.composite.combine, conditions: sug.composite.conditions, note: sug.composite.note, enabled: true, source: 'wizard' });
-      try { await fetch(`${SRV}/alert/rules`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rules) }); done.push('警報'); } catch {}
+      try {
+        const response = await fetch(`${SRV}/alert/rules`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('讀取警報失敗，既有警報未變更');
+        let rules = await response.json();
+        const revision = response.headers.get('ETag');
+        if (!Array.isArray(rules) || rules.some(r => !r || typeof r !== 'object' || Array.isArray(r)) || !revision) {
+          throw new Error('警報資料或版本資訊不完整，已停止儲存');
+        }
+        rules = rules.filter(r => !(r.source === 'wizard' && r.sym === sym));
+        sug.alerts.forEach((a, i) => rules.push({ id: Date.now() + i, sym, market: mkt, type: a.type, price: a.price, note: a.note, enabled: true, source: 'wizard' }));
+        if (sug.composite) rules.push({ id: Date.now() + 99, type: 'composite', sym, market: mkt, combine: sug.composite.combine, conditions: sug.composite.conditions, note: sug.composite.note, enabled: true, source: 'wizard' });
+        const saved = await fetch(`${SRV}/alert/rules`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': revision }, body: JSON.stringify(rules) });
+        if (!saved.ok) throw new Error(saved.status === 409 ? '警報已由其他操作更新，請重新套用' : '警報儲存失敗，請稍後重試');
+        const result = await saved.json();
+        if (!result || result.ok !== true) throw new Error('無法確認警報已儲存，請重新讀取警報確認');
+        done.push('警報');
+      } catch (err) {
+        failures.push('警報未完成：' + err.message);
+      }
     }
     // 持倉/計畫
     if (sel.pos) {
       if (wz.use === 'hold' && typeof setPosition === 'function' && typeof S !== 'undefined' && S.sym === sym) {
-        setPosition(wz.entry || diag.price, wz.shares || 0, sug.target, sug.stopPrice, '精靈建議: ' + (sug.conclusion || ''));
-        done.push('持倉');
+        const saved = setPosition(wz.entry || diag.price, wz.shares || 0, sug.target, sug.stopPrice, '精靈建議: ' + (sug.conclusion || ''), { sym, mkt });
+        if (!saved) failures.push('持倉未儲存，請確認標的與輸入內容');
+        else done.push('持倉');
       } else {
         try { const k = 'wizard_plans'; const o = JSON.parse(localStorage.getItem(k) || '{}'); o[sym] = { buyLo: sug.buyLo, buyHi: sug.buyHi, stop: sug.stopPrice, target: sug.target, fullShares: sug.fullShares, riskShares: sug.riskShares, ts: Date.now() }; localStorage.setItem(k, JSON.stringify(o)); done.push('買進計畫'); } catch {}
       }
@@ -431,6 +445,7 @@
     }
     // 結論備註
     try { const k = 'wizard_notes'; const o = JSON.parse(localStorage.getItem(k) || '{}'); o[sym] = { note: sug.conclusion, ts: Date.now() }; localStorage.setItem(k, JSON.stringify(o)); } catch {}
+    if (failures.length) throw new Error(failures.join('；') + '。已完成：' + (done.join('、') || '無'));
     return done;
   }
 

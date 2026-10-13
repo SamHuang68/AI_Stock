@@ -126,11 +126,4 @@ def set_broker_kind(kind: str) -> dict[str, Any]:
         want = "txt_master"
     if want not in ("paper", "txt_master"):
         raise ValueError("broker must be paper|txt_master")
-    cfg = load_config()
-    cfg.setdefault("broker", {})["kind"] = want
-    if want == "txt_master":
-        cfg["mode"] = "live"
-    else:
-        cfg["mode"] = "paper"
-    save_config(cfg)
-    return cfg
+    return set_mode("live" if want == "txt_master" else "paper")

@@ -10,25 +10,7 @@ if /i "%~1"=="--no-browser" set "OPEN_BROWSER=0"
 echo ============================================================
 echo  1/2 Local ST  (START_TIP.cmd, managed install, 127.0.0.1:18432)
 echo ============================================================
-call :local_up
-if not errorlevel 1 (
-  echo Local ST already answers on 127.0.0.1:18432. Not started again.
-  goto :web
-)
-REM START_TIP.cmd does not return while it starts the server, so start it detached and poll /health.
-start "ST local launcher" /min "%SystemRoot%\System32\cmd.exe" /c ""%~dp0START_TIP.cmd" -NoBrowser"
-echo Local launcher started. Waiting for /health ^(up to 40 checks; each request up to 3 seconds^)...
-set /a TRIES=0
-:wait_local
-call :local_up
-if not errorlevel 1 goto :web
-set /a TRIES+=1
-if %TRIES% GEQ 40 (
-  echo [WARN] Local did not become healthy after 40 checks. Check StockTerminalLocal\logs.
-  goto :web
-)
-"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 3" >nul
-goto :wait_local
+call "%~dp0START_TIP.cmd" -NoBrowser
 
 :web
 echo.
@@ -99,7 +81,7 @@ if errorlevel 1 (
 exit /b 0
 
 :local_up
-"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -Command "try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:18432/health' -TimeoutSec 3 -ErrorAction Stop; if ($r.runtimeCommit -is [string] -and $r.runtimeCommit -cmatch '\A[a-f0-9]{40}\z') { exit 0 }; exit 1 } catch { exit 1 }" >nul 2>nul
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0scripts\start_local.ps1" -CheckOnly >nul 2>nul
 exit /b %ERRORLEVEL%
 
 :web_ready

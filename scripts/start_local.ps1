@@ -1,6 +1,7 @@
 ﻿param(
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'StockTerminalLocal'),
     [switch]$NoBrowser,
+    [switch]$CheckOnly,
     [switch]$FunctionsOnly
 )
 $ErrorActionPreference = 'Stop'
@@ -83,6 +84,23 @@ if (-not [IO.Path]::IsPathRooted($python) -or -not (Test-Path -LiteralPath $pyth
 }
 $baseDir = Join-Path $InstallRoot 'current'
 $receiptPath = Join-Path $InstallRoot 'local_process.json'
+if ($CheckOnly) {
+    # 組合入口沿用受管版本與程序契約；純觀測，不同步或建立啟動鎖。
+    $state = Invoke-LocalRelease $python $InstallRoot 'status'
+    if ($state.needsSync) { throw '本機尚未同步正式版本。' }
+    $receipt = if (Test-Path -LiteralPath $receiptPath) { Get-Content -LiteralPath $receiptPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
+    $owned = if ($receipt) { Get-CimInstance Win32_Process -Filter ('ProcessId = ' + [int]$receipt.pid) } else { $null }
+    $listeners = @(Get-NetTCPConnection -State Listen -LocalPort 18432 -ErrorAction SilentlyContinue)
+    Assert-LocalListeners $listeners $owned $receipt $baseDir $python
+    if (-not $listeners.Count -or -not (Test-ManagedLocalIdentity $owned $receipt $baseDir $python)) {
+        throw '尚無符合收據的本機 ST 程序。'
+    }
+    $health = Invoke-RestMethod -Uri 'http://127.0.0.1:18432/health' -TimeoutSec 3
+    if (-not (Test-LocalHealth $health $baseDir $state.installedCommit $python)) {
+        throw '本機 ST 的版本、資料目錄或程序身分不符。'
+    }
+    return
+}
 $lockPath = Join-Path $InstallRoot '.launcher.lock'
 $launchLock = [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
 $previousUtf8 = $env:PYTHONUTF8; $previousPythonEncoding = $env:PYTHONIOENCODING

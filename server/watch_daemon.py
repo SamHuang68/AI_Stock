@@ -17,10 +17,10 @@ from datetime import datetime
 from daemon_lock import acquire_daemon_lock
 try:
     from .atomic_store import StoreCorruptError, atomic_write_json, load_json
-    from .indicators import candle_snapshot
+    from .indicators import dated_candle_snapshot
 except ImportError:
     from atomic_store import StoreCorruptError, atomic_write_json, load_json
-    from indicators import candle_snapshot
+    from indicators import dated_candle_snapshot
 
 try:
     import alert_daemon
@@ -88,15 +88,9 @@ def _fetch_daily(code, mkt):
                 ts = res['timestamp']
                 candles = []
                 for i in range(len(ts)):
-                    cl = q['close'][i]
-                    if cl is None:
-                        continue
-                    candles.append({
-                        'high': q['high'][i] if q['high'][i] is not None else cl,
-                        'low': q['low'][i] if q['low'][i] is not None else cl,
-                        'close': cl,
-                        'volume': q['volume'][i] or 0,
-                    })
+                    candles.append({'time': ts[i], **{
+                        key: (q.get(key) or [])[i] if i < len(q.get(key) or []) else None
+                        for key in ('open', 'high', 'low', 'close', 'volume')}})
                 if len(candles) >= 20:
                     return candles
             except Exception:
@@ -107,9 +101,9 @@ def _fetch_daily(code, mkt):
 
 
 # ---- 指標 --------------------------------------------------
-def _ind(candles):
-    """WATCH 背景偵測指標：與前端 watch_v2／pro_v2 同一口徑（indicators.candle_snapshot）。"""
-    return candle_snapshot(candles)
+def _ind(candles, mkt='TW', symbol=''):
+    """與複合警報共用日期及分欄品質契約。"""
+    return dated_candle_snapshot(candles, mkt, symbol)
 
 
 # ---- 策略評估（對齊 watch_v2 STRATEGIES.check）-------------
@@ -158,7 +152,9 @@ def _eval(strategy, ind, params):
         days = int(p.get('days', 20)); vm = p.get('volMult', 1.5)
         highs = ind.get('highs') or []
         if len(highs) < days + 1: return ('none', '')
-        mx = max(highs[-(days + 1):-1])
+        prior = highs[-(days + 1):-1]
+        if any(value is None for value in prior): return ('none', '')
+        mx = max(prior)
         vr = ind.get('volRatio')
         if c > mx:
             if vr is not None and vr >= vm:
@@ -213,7 +209,7 @@ def check_once():
         candles = _fetch_daily(code, mkt)
         if not candles:
             continue
-        ind = _ind(candles)
+        ind = _ind(candles, mkt, code)
         for sig in sigs:
             status, detail = _eval(sig.get('strategy'), ind, sig.get('params'))
             key = f"{code}:{sig.get('id')}"
