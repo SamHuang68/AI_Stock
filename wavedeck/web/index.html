@@ -45,7 +45,22 @@
           <div class="style-readout">當前 <strong id="styleVal">50</strong></div>
         </div>
 
-        <div class="box guard" id="noOvernight"></div>
+        <div class="box guard" id="noOvernight">
+          <div class="box-hd" id="overnightHeading">不留倉保護</div>
+          <p id="overnightSummary"></p>
+          <p id="overnightProgress" role="status"></p>
+          <details class="execution-settings">
+            <summary>設定每日截止</summary>
+            <form id="overnightForm">
+              <label class="check-label"><input id="overnightEnabled" type="checkbox" />啟用不留倉保護</label>
+              <label>截止時間（臺灣時間）<input id="overnightTime" type="time" required value="13:40" /></label>
+              <label>截止前禁新單（分鐘）<input id="overnightMinutes" type="number" min="0" max="1440" step="1" required value="15" /></label>
+              <p class="execution-note">每日按臺灣時間重算，不推定交易所日夜盤或假日。尚未完成的平倉仍須追蹤。</p>
+              <button class="btn cyan" id="btnSaveOvernight" type="submit">儲存不留倉設定</button>
+              <p id="overnightMessage" role="status" aria-live="polite"></p>
+            </form>
+          </details>
+        </div>
 
         <div class="box">
           <div class="box-hd">最新執行 · API 費用</div>
@@ -189,6 +204,29 @@
           <div class="kv pos-grid" id="transportKv"></div>
           <div class="muted-line">通道 <span id="transport">—</span> · WD <span id="wdSyncTxt">…</span></div>
         </div>
+        <section class="box strategy-box" aria-labelledby="strategyHeading">
+          <h2 class="box-hd" id="strategyHeading">固定策略與委託回報</h2>
+          <p id="strategyMode" class="execution-status">目前模式：AI 自主判斷</p>
+          <p id="strategyActive" class="execution-note"></p>
+          <p id="executionReceipt" role="status">尚無委託回報</p>
+          <details id="strategyDetails" class="execution-settings">
+            <summary>匯入與啟用策略版本</summary>
+            <p class="execution-note">匯入僅保存固定規則資料；外部訊號來源負責計算進出場。ST 日線股票回測不代表 WD 已支援期貨回測。</p>
+            <label for="strategyFile">選擇匯出的策略 JSON</label>
+            <input id="strategyFile" type="file" accept=".json,application/json" aria-describedby="strategyMessage" />
+            <dl id="strategyPreview" class="strategy-preview"></dl>
+            <div class="strategy-actions">
+              <button class="btn" id="btnRegisterStrategy" type="button" disabled>匯入此版本</button>
+              <button class="btn cyan" id="btnActivateStrategy" type="button" disabled>啟用固定規則</button>
+              <button class="btn" id="btnDiscretionary" type="button">切回 AI 自主判斷</button>
+            </div>
+            <p id="strategyMessage" role="status" aria-live="polite">尚未選擇檔案；匯入不會自動啟用。</p>
+            <label for="strategyWebhook">Webhook 訊號範本（僅供複製）</label>
+            <textarea id="strategyWebhook" rows="9" readonly spellcheck="false" aria-describedby="webhookNote"></textarea>
+            <p id="webhookNote" class="execution-note">請由訊號來源填入唯一識別碼、實際收 K 時間、成交參考價及動作；預設 HOLD。此處不送單。</p>
+            <button class="btn" id="btnCopyWebhook" type="button" disabled>複製訊號範本</button>
+          </details>
+        </section>
       </aside>
     </section>
 
@@ -220,7 +258,7 @@
     </footer>
   </div>
 
-  <div class="toast" id="toast"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="/js/deck.js"></script>
 </body>
 </html>

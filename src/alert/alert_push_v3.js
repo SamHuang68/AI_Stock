@@ -15,6 +15,11 @@
     const opt = { method: method || 'GET' };
     if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); }
     const r = await fetch(SRV + path, opt);
+    if (!r.ok) {
+      const error = new Error('HTTP ' + r.status);
+      error.status = r.status;
+      throw error;
+    }
     return r.json();
   }
 
@@ -40,7 +45,7 @@
     document.head.appendChild(s);
   }
 
-  let cfg = null, rules = [];
+  let cfg = null, rules = [], readError = null, refreshId = 0, ruleWritePending = false;
 
   const COMP_INDS = [['close', '收盤'], ['sma20', 'SMA20'], ['sma60', 'SMA60'], ['rsi14', 'RSI'],
   ['bbL', '布林下軌'], ['bbU', '布林上軌'], ['volRatio', '量比'], ['high20', '20日高']];
@@ -63,24 +68,44 @@
       if (right !== '') conds.push({ left, op, right });
     });
     if (!conds.length) { alert('請至少填一個條件'); return; }
-    rules.push({
+    const candidate = [...rules, {
       id: Date.now(), type: 'composite', sym,
       market: document.getElementById('ap-c-mkt').value,
       combine: document.getElementById('ap-c-combine').value,
       conditions: conds, enabled: true,
-    });
-    pushRules();
+    }];
+    pushRules(candidate);
   }
 
   async function refresh() {
-    try { cfg = await api('/alert/config'); } catch { cfg = null; }
-    try { rules = await api('/alert/rules'); } catch { rules = []; }
+    const id = ++refreshId;
+    cfg = null; rules = []; readError = null;
+    render();
+    try {
+      const nextCfg = await api('/alert/config');
+      if (id !== refreshId) return;
+      const nextRules = await api('/alert/rules');
+      if (id !== refreshId) return;
+      cfg = nextCfg; rules = nextRules;
+    } catch (error) {
+      if (id !== refreshId) return;
+      readError = error;
+    }
     render();
   }
 
   function render() {
     const box = document.getElementById('ap-body');
-    if (!box || !cfg) return;
+    if (!box) return;
+    if (!cfg) {
+      box.innerHTML = '<div id="ap-status" role="status"></div><button class="sec" id="ap-close2">關閉</button>';
+      box.querySelector('#ap-status').textContent = readError
+        ? (readError.status === 403 ? '僅擁有者可見'
+          : '讀取失敗，無法確認 daemon 狀態' + (readError.status ? '（HTTP ' + readError.status + '）' : ''))
+        : '載入中…';
+      box.querySelector('#ap-close2').onclick = close;
+      return;
+    }
     const tg = cfg.telegram || {}, em = cfg.email || {};
     box.innerHTML = `
     <section>
@@ -149,7 +174,9 @@
     </div>
     <div id="ap-status">${cfg.running ? '🟢 daemon 執行中' : '⚪ daemon 未啟動'} · 規則 ${rules.length} 條</div>`;
 
-    box.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { rules.splice(+b.dataset.del, 1); pushRules(); });
+    box.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+      pushRules(rules.filter((_, index) => index !== +b.dataset.del));
+    });
     box.querySelector('#ap-r-add').onclick = addRule;
     const cAdd = box.querySelector('#ap-c-add'); if (cAdd) cAdd.onclick = addComposite;
     box.querySelector('#ap-save').onclick = saveCfg;
@@ -157,17 +184,36 @@
     box.querySelector('#ap-close2').onclick = close;
   }
 
-  async function pushRules() { await api('/alert/rules', 'POST', rules); refresh(); }
+  function reportWriteError(action, error) {
+    const message = action + '失敗' + (error && error.status
+      ? '（HTTP ' + error.status + '）' : '，連線或回應異常，請稍後再試');
+    const status = document.getElementById('ap-status');
+    if (status) status.textContent = message;
+    alert(message);
+  }
+
+  async function pushRules(candidate) {
+    if (ruleWritePending) {
+      const message = '規則儲存中，請稍候再操作';
+      const status = document.getElementById('ap-status');
+      if (status) status.textContent = message;
+      alert(message); return;
+    }
+    ruleWritePending = true;
+    try { await api('/alert/rules', 'POST', candidate); await refresh(); }
+    catch (error) { reportWriteError('儲存規則', error); }
+    finally { ruleWritePending = false; }
+  }
 
   function addRule() {
     const sym = document.getElementById('ap-r-sym').value.trim();
     const price = parseFloat(document.getElementById('ap-r-price').value);
     if (!sym || !(price > 0)) { alert('請填代號與價位'); return; }
-    rules.push({
+    const candidate = [...rules, {
       id: Date.now(), sym, market: document.getElementById('ap-r-mkt').value,
       type: document.getElementById('ap-r-type').value, price, note: '', enabled: true,
-    });
-    pushRules();
+    }];
+    pushRules(candidate);
   }
 
   async function saveCfg() {
@@ -195,13 +241,17 @@
     if (tok) body.telegram.bot_token = tok;
     const pw = document.getElementById('ap-em-pw').value;
     if (pw) body.email.app_password = pw;
-    const r = await api('/alert/config', 'POST', body);
-    if (r.ok) { alert('已儲存'); refresh(); } else alert('儲存失敗: ' + JSON.stringify(r));
+    try {
+      const r = await api('/alert/config', 'POST', body);
+      if (r.ok) { alert('已儲存'); await refresh(); } else alert('儲存失敗: ' + JSON.stringify(r));
+    } catch (error) { reportWriteError('儲存設定', error); }
   }
 
   async function testPush() {
-    const r = await api('/alert/test', 'POST', {});
-    alert('測試結果：' + JSON.stringify(r.results || r, null, 1));
+    try {
+      const r = await api('/alert/test', 'POST', {});
+      alert('測試結果：' + JSON.stringify(r.results || r, null, 1));
+    } catch (error) { reportWriteError('測試推播', error); }
   }
 
   function open() {

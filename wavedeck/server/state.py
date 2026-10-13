@@ -27,6 +27,9 @@ def _default_state() -> dict[str, Any]:
         "fsm": "Idle",
         "mode": "paper",  # paper | live
         "symbol": "TXF",
+        "strategy_execution": {"mode": "discretionary", "strategy_id": None, "version": None, "max_signal_age_sec": 300},
+        "execution": {},
+        "overnight_enforcement": {},
         "kill_switch": False,
         "style": 50,  # 35 / 50 / 65 / custom
         "no_overnight": {

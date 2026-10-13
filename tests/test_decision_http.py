@@ -10,6 +10,8 @@ import importlib.util
 import os
 import sys
 import tempfile
+import types
+import shutil
 import threading
 import unittest
 import urllib.request
@@ -73,24 +75,43 @@ def _pulse() -> dict:
 
 
 class DecisionHttpTest(unittest.TestCase):
+    def run(self, result=None):
+        own_result = result is None
+        self.test_result = self.defaultTestResult() if own_result else result
+        if own_result:
+            self.test_result.startTestRun()
+        try:
+            # 共用 fixture 亦由其他 TestCase 委派使用，不要求繼承本類。
+            return unittest.TestCase.run(self, self.test_result)
+        finally:
+            if own_result:
+                self.test_result.stopTestRun()
+
     def setUp(self):
+        self._cleanup_attempted = False
+        self.patches = []
+        self.httpd = self.thread = self.queue = self.pulse_updates = None
+        self.tmp = None
+        self.temp_root = (ROOT / 'scratch').resolve()
+        self.old_options_history = ox.HISTORY_PATH
+        self.addCleanup(self.cleanup_isolation)
         flags = patch.dict(os.environ, {'ST_ENABLE_SHADOW_RESEARCH': '1', 'ST_SHADOW_OVERNIGHT_INTRADAY': '1'})
-        flags.start(); self.addCleanup(flags.stop)
+        flags.start(); self.patches.append(flags)
         delivery = patch('alert_daemon.deliver_signal_events', return_value={'ok': True, 'delivered': 0})
-        delivery.start(); self.addCleanup(delivery.stop)
+        delivery.start(); self.patches.append(delivery)
         (ROOT / 'scratch').mkdir(exist_ok=True)
-        self.tmp = tempfile.TemporaryDirectory(prefix='決策HTTP-', dir=ROOT / 'scratch')
+        self.tmp = types.SimpleNamespace(name=tempfile.mkdtemp(prefix='decision-http-', dir=self.temp_root))
         self.signal_db_path = str(Path(self.tmp.name) / 'market_signals.db')
         # 訊號讀取函式的預設路徑在定義時已綁定；只改 DB_PATH 不會隔離 HTTP 查詢。
         # 保留真實查詢與序列化流程，讓讀取端與下方發布端共用本次測試資料庫。
         for name in ('active', 'history', 'performance'):
             replacement = patch.object(ew, name, partial(getattr(ew, name), path=self.signal_db_path))
             replacement.start()
-            self.addCleanup(replacement.stop)
+            self.patches.append(replacement)
         for replacement in (patch.object(dc, '_latest_context', None), patch.object(dc, '_latest_inputs', None),
                             patch.object(dc, '_active_db_path', None)):
             replacement.start()
-            self.addCleanup(replacement.stop)
+            self.patches.append(replacement)
         publish = dc.publish_context
         def isolated_publish(context, **kwargs):
             kwargs.update(db_path=str(Path(self.tmp.name) / 'decision.db'),
@@ -98,7 +119,7 @@ class DecisionHttpTest(unittest.TestCase):
             return publish(context, **kwargs)
         publication = patch.object(dc, 'publish_context', side_effect=isolated_publish)
         publication.start()
-        self.addCleanup(publication.stop)
+        self.patches.append(publication)
         self.old_options_history = ox.HISTORY_PATH
         ox.HISTORY_PATH = str(Path(self.tmp.name) / 'options-history.json')
         with oi._CACHE_LOCK:
@@ -118,20 +139,50 @@ class DecisionHttpTest(unittest.TestCase):
         for replacement in (patch.object(updates, '_service', self.coordinator),
                             patch.object(st_server, '_pulse_updates', self.pulse_updates)):
             replacement.start()
-            self.addCleanup(replacement.stop)
+            self.patches.append(replacement)
         self.httpd = ThreadingHTTPServer(('127.0.0.1', 0), st_server.Handler)
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.thread.start()
         self.base = f'http://127.0.0.1:{self.httpd.server_port}'
 
     def tearDown(self):
-        self.httpd.shutdown()
-        self.httpd.server_close()
-        self.thread.join(timeout=2)
-        self.assertTrue(self.queue.stop())
-        self.assertTrue(self.pulse_updates.stop())
+        self.cleanup_isolation()
+
+    def cleanup_isolation(self):
+        if self._cleanup_attempted:
+            return
+        self._cleanup_attempted = True
+        failures = []
+        if self.httpd is not None:
+            try:
+                if self.thread is not None and self.thread.is_alive():
+                    self.httpd.shutdown()
+                    self.thread.join(timeout=2)
+                self.httpd.server_close()
+                if self.thread is not None and self.thread.is_alive():
+                    failures.append('HTTP 服務未停止')
+            except Exception as error:
+                failures.append('HTTP 清理：' + type(error).__name__)
+        # 任一停止失敗也必須通知另一個工作者；停止預設期限維持原契約。
+        for label, worker in (('受管更新', self.queue), ('Pulse', self.pulse_updates)):
+            if worker is None:
+                continue
+            try:
+                if not worker.stop():
+                    failures.append(label + '工作者未停止')
+            except Exception as error:
+                failures.append(label + '停止：' + type(error).__name__)
+        if failures:
+            self.test_result.stop()
+            self.fail('；'.join(failures) + '；保留隔離與證據目錄：' + str(getattr(self.tmp, 'name', None)))
+        for item in reversed(self.patches):
+            item.stop()
         ox.HISTORY_PATH = self.old_options_history
-        self.tmp.cleanup()
+        if self.tmp is not None:
+            target = Path(self.tmp.name).resolve()
+            if target == self.temp_root or not target.is_relative_to(self.temp_root):
+                self.fail('拒絕清理不在測試暫存區內的路徑：' + str(target))
+            shutil.rmtree(target)
 
     def wait_for(self, predicate):
         deadline = time.monotonic() + 5

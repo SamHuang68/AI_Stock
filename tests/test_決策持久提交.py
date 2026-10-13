@@ -201,22 +201,49 @@ class DurablePublicationTest(unittest.TestCase):
 
     def test_read_of_committed_context_does_not_wait_for_notification(self):
         self.publish()
-        entered = threading.Event()
+        # 真實持久化是前置條件；讀取契約不要求 SQLite 提交在兩秒內完成。
+        with patch.object(dc, '_deliver_committed'):
+            committed = self.publish(1)
+        self.assertEqual(committed['revision'], 2)
+        notification = store.claim_delivery(self.db)
+        self.assertIsNotNone(notification)
+        from concurrent.futures import Future
+        entered = Future()
         release = threading.Event()
         def delayed(events):
-            entered.set()
-            release.wait(3)
+            entered.set_result(None)
+            if not release.wait(3):
+                raise AssertionError('測試未釋放通知邊界')
             return {'ok': True}
         self.delivery.side_effect = delayed
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            writer = pool.submit(self.publish, 1)
-            self.assertTrue(entered.wait(2))
+        def notify():
             try:
-                reader = pool.submit(dc.latest_context)
-                self.assertEqual(reader.result(timeout=0.5)['revision'], 2)
-            finally:
-                release.set()
-            writer.result(timeout=2)
+                # 重現發布者仍持鎖且停在通知邊界的情境。
+                with dc._publish_lock:
+                    dc._deliver_committed(self.db)
+                if not entered.done():
+                    raise AssertionError('通知 worker 未進入通知邊界：' + str(dc._status.get('lastError')))
+            except BaseException as exc:
+                if not entered.done():
+                    entered.set_exception(exc)
+                raise
+        # claim 已同步持久化；finish 留到同步收尾，並行區段只測通知與讀者。
+        with patch.object(store, 'claim_delivery', side_effect=[notification, None]), \
+                patch.object(store, 'finish_delivery') as finished:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                writer = pool.submit(notify)
+                try:
+                    entered.result(timeout=2)
+                    self.assertFalse(release.is_set())
+                    self.assertFalse(writer.done())
+                    reader = pool.submit(dc.latest_context)
+                    self.assertEqual(reader.result(timeout=0.5)['revision'], 2)
+                    self.assertFalse(writer.done())
+                finally:
+                    release.set()
+                    writer.result(timeout=2)
+        finished.assert_called_once_with(self.db, notification[0], {'ok': True}, False)
+        store.finish_delivery(self.db, notification[0], {'ok': True}, False)
 
     def test_receipt_ack_failure_does_not_turn_committed_result_into_failure(self):
         with patch.object(ew, 'acknowledge_publication', side_effect=OSError('注入收據確認失敗')):

@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Stage and explicitly promote committed ST revisions to Private Web ST.
+"""從指定 Git 提交封存建立私人網站候選，依明列計畫驗證並保存收據。
 
-The release flow never copies the dirty development worktree.  ``stage`` uses
-``git archive`` for an exact commit, rebuilds the generated UI and runs the
-private-Web regression tests.  ``promote`` requires an explicit approval flag
-and preserves the production ``data`` and ``logs`` directories.
+發布流程不複製開發工作樹。stage 重建介面並核對受測內容；promote
+需要明確授權，核對內容與驗證收據，並保留正式環境 data 與 logs。
 """
 from __future__ import annotations
 
@@ -79,9 +77,80 @@ REQUIRED_RELEASE_FILES = {
     "tests/test_archify_artifacts.py",
     "stock_terminal_v2.html",
 }
-PRIVATE_RELEASE_EXCLUDES = {"wavedeck", "START_WAVEDECK.cmd"}
+PRIVATE_RELEASE_EXCLUDES = {"wavedeck", "START_WAVEDECK.cmd", "START_ALL.cmd"}
 MANIFEST_NAME = ".private_web_release.json"
 TRANSITION_NAME = ".private_web_transition.json"
+VALIDATION_RECEIPT_NAME = ".發布驗證收據.json"
+
+
+def _validation_helpers(root: Path | None = None) -> dict:
+    # promote／rollback 可直接使用已封存 CLI，不需匯入驗證執行器。
+    source = root if root is not None else ROOT
+    for relative in ('scripts/變更驗證.py', 'tools/codex/變更驗證.py'):
+        path = source / relative
+        if not path.is_file() or _is_link(path) or not _within(path, source):
+            raise RuntimeError('封存版本缺少安全的驗證入口或核心：' + relative)
+    return runpy.run_path(str(source / "scripts" / "變更驗證.py"))
+
+
+def _hex_digest(value: object, length: int) -> bool:
+    return isinstance(value, str) and len(value) == length and all(ch in '0123456789abcdef' for ch in value)
+
+
+def _valid_case_receipt(case: object) -> bool:
+    if not isinstance(case, dict):
+        return False
+    identity = case.get('identity')
+    inputs = case.get('inputs')
+    command = case.get('command')
+    if (case.get('decision') not in {'EXECUTED', 'REUSE'} or case.get('status') != 'passed'
+            or type(case.get('exitCode')) is not int or case['exitCode'] != 0
+            or not isinstance(case.get('id'), str) or not case['id']
+            or not _hex_digest(case.get('commit'), 40)
+            or not _hex_digest(case.get('fingerprint'), 64)
+            or not isinstance(case.get('evidence'), str) or not case['evidence']
+            or not isinstance(command, list) or not command
+            or not all(isinstance(part, str) and part for part in command)
+            or not isinstance(inputs, dict) or not inputs
+            or not all(isinstance(name, str) and name and _hex_digest(value, 64)
+                       for name, value in inputs.items())
+            or not isinstance(case.get('environment'), dict)
+            or not isinstance(identity, dict) or identity.get('schemaVersion') != 1
+            or not _hex_digest(identity.get('runner'), 64)
+            or identity.get('case') != case['id']
+            or identity.get('kind') not in {'unittest', 'node', 'syntax'}
+            or not isinstance(identity.get('targets'), list) or not identity['targets']
+            or not all(isinstance(target, str) and target for target in identity['targets'])
+            or identity.get('inputs') != inputs or identity.get('environment') != case['environment']):
+        return False
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return digest == case['fingerprint']
+
+
+def _validate_receipt(root: Path, manifest: dict) -> None:
+    descriptor = manifest.get("validationReceipt")
+    if manifest.get("manifestVersion", 2) < 3 and descriptor is None:
+        return
+    if not isinstance(descriptor, dict) or descriptor.get("path") != VALIDATION_RECEIPT_NAME:
+        raise RuntimeError("暫存版本缺少驗證收據，請重新暫存版本")
+    path = root / VALIDATION_RECEIPT_NAME
+    if not path.is_file() or _is_link(path):
+        raise RuntimeError("暫存版本驗證收據遺失或路徑不安全")
+    if hashlib.sha256(path.read_bytes()).hexdigest() != descriptor.get("sha256"):
+        raise RuntimeError("暫存版本驗證收據雜湊不符")
+    receipt = _read_manifest(path)
+    cases = receipt.get("cases")
+    if (receipt.get("schemaVersion") != 1 or receipt.get("status") != "passed"
+            or receipt.get("commit") != manifest.get("commit")
+            or not _hex_digest(receipt.get("baseCommit"), 40)
+            or not _hex_digest(receipt.get("tree"), 40)
+            or not isinstance(receipt.get("changedFiles"), list)
+            or not all(isinstance(name, str) and name for name in receipt['changedFiles'])
+            or not isinstance(cases, list) or not cases
+            or any(not _valid_case_receipt(case) for case in cases)
+            or any(case['decision'] == 'EXECUTED' and case['commit'] != receipt['commit'] for case in cases)
+            or len({case['id'] for case in cases}) != len(cases)):
+        raise RuntimeError("暫存版本驗證收據未通過或版本不符")
 
 
 def _tree_entries(root: Path, *, skip_runtime: bool = True):
@@ -179,6 +248,8 @@ def _validate_integrity(root: Path, manifest: dict) -> None:
                             if item.name not in PRESERVE_NAMES | {MANIFEST_NAME})
     if managed != actual_managed:
         raise RuntimeError("暫存版本管理清單不符")
+    if manifest.get("tests") == "passed":
+        _validate_receipt(root, manifest)
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -455,13 +526,17 @@ def stage_release(
     ref: str,
     python: str = sys.executable,
     run_tests: bool = True,
+    validation_plan: Path | None = None,
+    evidence_dir: Path | None = None,
 ) -> Path:
     install_root = safe_install_root(install_root)
     with _release_lock(install_root):
-        return _stage_release(install_root, ref=ref, python=python, run_tests=run_tests)
+        return _stage_release(install_root, ref=ref, python=python, run_tests=run_tests,
+                              validation_plan=validation_plan, evidence_dir=evidence_dir)
 
 
-def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool) -> Path:
+def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool,
+                   validation_plan: Path | None = None, evidence_dir: Path | None = None) -> Path:
     commit, release_id = resolve_commit(ref)
     releases = install_root / "releases"
     if _is_link(releases):
@@ -487,35 +562,26 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
         _safe_extract(archive_path, extracted)
         _validate_release(extracted)
 
+        helpers = None
+        plan_path = validation_plan.resolve() if validation_plan is not None else extracted / '.github/驗證計畫.json'
+        if run_tests:
+            if not plan_path.is_file():
+                raise RuntimeError("缺少明確驗證計畫；請提供 --validation-plan 或封存內的 .github/驗證計畫.json")
+            helpers = _validation_helpers(extracted)
+            plan = helpers['read_plan'](extracted, plan_path, base_root=ROOT, target_commit=commit)
+            if plan.get('commit') != commit:
+                raise RuntimeError("驗證計畫版本與封存版本不符")
+
         _run([python, "build_v2.py"], cwd=extracted)
         _remove_bytecode(extracted)
         tested_hashes = _content_hashes(extracted)
-        commands = []
+        receipt = None
         if run_tests:
-            node = shutil.which("node")
-            if not node:
-                raise RuntimeError("發布回歸測試需要 Node.js")
-            commands = [
-                [python, "-m", "unittest", "discover", "-s", "tests", "-b"],
-                [python, "-W", "error::ResourceWarning", "-m", "unittest",
-                 "wavedeck.tests.test_smoke", "-b"],
-                [python, "-m", "unittest", "tests.test_dist_scrub", "-b"],
-            ]
-            for command in commands:
-                _run(command, cwd=extracted)
-            # 發布 ZIP 的隱私清理測試會改寫來源 HTML。清除測試樹，
-            # 從同一份 Git 位元組重建，再驗證真正要出貨的前端。
-            _remove_managed(extracted, temp)
-            extracted.mkdir()
-            _safe_extract(archive_path, extracted)
-            _run([python, "build_v2.py"], cwd=extracted)
-            _remove_bytecode(extracted)
-            if _content_hashes(extracted) != tested_hashes:
-                raise RuntimeError("清理測試後無法重現原始受測組建")
-            for selftest in sorted((extracted / "tests").glob("*selftest.js"), key=lambda path: path.name):
-                command = [node, selftest.relative_to(extracted).as_posix()]
-                commands.append(command)
-                _run(command, cwd=extracted)
+            receipt = helpers['run_plan'](
+                extracted, plan_path,
+                evidence_dir.resolve() if evidence_dir is not None else install_root / '驗證證據',
+                base_root=ROOT, target_commit=commit,
+            )
             # 所有測試的寫入均不成為發布輸入；最後再以同一封存重建。
             _remove_managed(extracted, temp)
             extracted.mkdir()
@@ -525,11 +591,18 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
             if _content_hashes(extracted) != tested_hashes:
                 raise RuntimeError("最終發布組建與受測內容不符")
 
-        # 完整封存內容供所有自測使用；通過後才排除私人網站不出貨的執行內容。
+        # 封存內容供明列案例使用；通過後才排除私人網站不出貨的執行內容。
         _strip_private_release_extras(extracted)
         # 組建不應改寫種子；最後仍以 Git 原始位元組恢復 data/logs。
         _restore_preserved_from_archive(archive_path, extracted)
         _remove_bytecode(extracted)
+
+        descriptor = None
+        if receipt is not None:
+            receipt_path = extracted / VALIDATION_RECEIPT_NAME
+            _write_json(receipt_path, receipt)
+            descriptor = {'path': VALIDATION_RECEIPT_NAME,
+                          'sha256': hashlib.sha256(receipt_path.read_bytes()).hexdigest()}
 
         managed = sorted(item.name for item in extracted.iterdir() if item.name not in PRESERVE_NAMES)
         manifest = {
@@ -541,8 +614,9 @@ def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool
             "managedTopLevel": managed,
             "contentSha256": _content_hashes(extracted),
             "seedSha256": _content_hashes(extracted / "data", include_runtime=True),
-            "validationCommands": [command[1:] for command in commands],
-            "manifestVersion": 2,
+            "validationCommands": [case['command'] for case in receipt['cases']] if receipt else [],
+            "manifestVersion": 3,
+            "validationReceipt": descriptor,
         }
         (extracted / ".private_web_release.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
@@ -748,6 +822,8 @@ def main() -> None:
     stage = sub.add_parser("stage", help="build and test an exact committed revision")
     stage.add_argument("--ref", required=True, help="commit, tag or branch to stage")
     stage.add_argument("--skip-tests", action="store_true")
+    stage.add_argument("--validation-plan", type=Path, help="明列修改範圍與必要案例的驗證計畫")
+    stage.add_argument("--evidence-dir", type=Path, help="供相同輸入沿用通過證據的收據目錄")
 
     promote = sub.add_parser("promote", help="make a staged release current")
     promote.add_argument("--release", required=True)
@@ -764,6 +840,8 @@ def main() -> None:
             args.install_root,
             ref=args.ref,
             run_tests=not args.skip_tests,
+            validation_plan=args.validation_plan,
+            evidence_dir=args.evidence_dir,
         )
         print(json.dumps({"staged": str(path)}, ensure_ascii=False, indent=2))
     elif args.command == "promote":

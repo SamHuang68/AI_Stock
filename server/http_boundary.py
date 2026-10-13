@@ -9,6 +9,8 @@ handlers so a new route cannot accidentally re-introduce an unbounded read.
 from __future__ import annotations
 
 import json
+import socket
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -41,12 +43,57 @@ def content_length(handler: Any, *, max_bytes: int) -> int:
 
 def read_body(handler: Any, *, max_bytes: int = DEFAULT_JSON_LIMIT) -> bytes:
     length = content_length(handler, max_bytes=max_bytes)
+    handler._body_headers = handler.headers
+    handler._body_bytes_read = 0
     if not length:
         return b''
     data = handler.rfile.read(length)
+    handler._body_bytes_read = len(data)
     if len(data) != length:
         raise BodyReadError('incomplete request body', 400)
     return data
+
+
+def close_rejected_body(handler: Any, *, max_bytes: int = 64 * 1024,
+                        seconds: float = 0.1) -> None:
+    """拒絕後停止連線重用；在大小及總時間上限內丟棄未讀位元組。"""
+    handler.close_connection = True
+    headers = handler.headers
+    lengths = headers.get_all('Content-Length') if hasattr(headers, 'get_all') else [headers.get('Content-Length')]
+    remaining = max_bytes
+    if not headers.get('Transfer-Encoding') and not lengths:
+        remaining = 0
+    elif not headers.get('Transfer-Encoding') and len(lengths or []) == 1:
+        try:
+            length = content_length(handler, max_bytes=max_bytes)
+        except BodyReadError:
+            # 無效或過大的長度不能作為讀取依據；只丟棄有界原始位元組。
+            pass
+        else:
+            consumed = (getattr(handler, '_body_bytes_read', 0)
+                        if getattr(handler, '_body_headers', None) is headers else 0)
+            remaining = max(0, length - consumed)
+    # 未知 framing 不解析、不推定完整本文，也不重用此連線。
+    connection = getattr(handler, 'connection', None)
+    if not remaining or connection is None:
+        return
+    deadline = time.monotonic() + seconds
+    previous_timeout = connection.gettimeout()
+    try:
+        while remaining:
+            budget = deadline - time.monotonic()
+            if budget <= 0:
+                break
+            connection.settimeout(budget)
+            chunk = handler.rfile.read1(min(remaining, 8192))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+    except (socket.timeout, OSError):
+        # 慢送／中斷只終止排空；此連線無論如何都不能再解析請求。
+        pass
+    finally:
+        connection.settimeout(previous_timeout)
 
 
 def read_json_body(

@@ -31,8 +31,15 @@ class _SecurityHandler(ST.Handler):
             return
         self._ok(json.dumps({'ok': True, 'body': body}).encode())
 
-    def _wavedeck_origin_ok(self, origin):
-        return self._bridge_cors_path(self.path.split('?')[0]) and origin == 'http://127.0.0.1:18433'
+    # 隔離市場抓取；HTTP 路由、來源判斷與 CORS 標頭使用正式實作。
+    def _handle_twindex(self):
+        self._ok(json.dumps({'indices': {'t00': {'price': 22000}}}).encode())
+
+    def _handle_breadth(self):
+        self._ok(json.dumps({'stocks': {'advRatio': 0.6}}).encode())
+
+    def _handle_fundamental(self, sym):
+        self._ok(json.dumps({'symbol': sym, 'score': 60}).encode())
 
 
 class ServerHttpSecurityTests(unittest.TestCase):
@@ -112,6 +119,71 @@ class ServerHttpSecurityTests(unittest.TestCase):
             urllib.request.urlopen(forbidden, timeout=3)
         self.assertEqual(caught.exception.code, 403)
         caught.exception.close()
+
+    def test_wavedeck_market_reads_preserve_payload_and_allowlisted_origins(self):
+        cases = (
+            ('/twindex', 'indices'), ('/breadth?view=wd', 'stocks'),
+            ('/fundamental/^TWII', 'score'), ('/fundamental/%5ETWII', 'score'),
+        )
+        for host in ('127.0.0.1', 'localhost'):
+            for port in (18433, 18765, 28765, 38433, 8765):
+                origin = f'http://{host}:{port}'
+                for path, key in cases:
+                    with self.subTest(origin=origin, path=path):
+                        req = urllib.request.Request(self.base + path, headers={'Origin': origin})
+                        with urllib.request.urlopen(req, timeout=3) as response:
+                            self.assertEqual(response.headers['Access-Control-Allow-Origin'], origin)
+                            self.assertEqual(response.headers['Vary'], 'Origin')
+                            self.assertIsNone(response.headers['Access-Control-Allow-Credentials'])
+                            self.assertIn(key, json.load(response))
+
+    def test_wavedeck_market_preflight_and_post_keep_read_only_boundary(self):
+        origin = 'http://127.0.0.1:18433'
+        for path in ('/twindex', '/breadth', '/fundamental/%5ETWII'):
+            req = urllib.request.Request(self.base + path, method='OPTIONS', headers={
+                'Origin': origin, 'Access-Control-Request-Method': 'GET'})
+            with urllib.request.urlopen(req, timeout=3) as response:
+                self.assertEqual(response.status, 204)
+                self.assertEqual(response.headers['Access-Control-Allow-Methods'], 'GET, OPTIONS')
+            for method in ('POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'):
+                req = urllib.request.Request(self.base + path, method='OPTIONS', headers={
+                    'Origin': origin, 'Access-Control-Request-Method': method})
+                with self.subTest(path=path, preflight=method):
+                    with self.assertRaises(urllib.error.HTTPError) as caught:
+                        urllib.request.urlopen(req, timeout=3)
+                    self.assertEqual(caught.exception.code, 403)
+                    self.assertIsNone(caught.exception.headers['Access-Control-Allow-Origin'])
+                    caught.exception.close()
+            req = urllib.request.Request(self.base + path, data=b'', method='POST',
+                                         headers={'Origin': origin})
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(req, timeout=3)
+            self.assertEqual(caught.exception.code, 403)
+            self.assertIsNone(caught.exception.headers['Access-Control-Allow-Origin'])
+            caught.exception.close()
+
+    def test_market_cors_rejects_other_origins_and_other_symbols(self):
+        for origin in (
+            'http://127.0.0.1:18432', 'http://127.0.0.1:18434',
+            'http://127.0.0.1:18435', 'http://127.0.0.1:9999',
+            'https://evil.example', 'http://127.0.0.1.evil.example:18433',
+            'null', 'https://127.0.0.1:18433',
+        ):
+            for path in ('/twindex', '/breadth', '/fundamental/%5ETWII'):
+                with self.subTest(origin=origin, path=path):
+                    req = urllib.request.Request(self.base + path, headers={'Origin': origin})
+                    with urllib.request.urlopen(req, timeout=3) as response:
+                        self.assertIsNone(response.headers['Access-Control-Allow-Origin'])
+        for path in ('/fundamental/2330', '/fundamental/^TWOII',
+                     '/fundamental/%255ETWII', '/twindex/extra', '/health', '/sync'):
+            with self.subTest(path=path):
+                req = urllib.request.Request(self.base + path, method='OPTIONS', headers={
+                    'Origin': 'http://127.0.0.1:18433', 'Access-Control-Request-Method': 'GET'})
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(req, timeout=3)
+                self.assertEqual(caught.exception.code, 403)
+                self.assertIsNone(caught.exception.headers['Access-Control-Allow-Origin'])
+                caught.exception.close()
 
     def test_archify_html_has_static_document_security_boundary(self):
         path = '/assets/docs/archify/st-decision-evidence-lineage.html'

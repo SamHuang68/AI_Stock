@@ -14,6 +14,9 @@
   var toastTimer = null;
   var _lastReportAt = 0;
   var REPORT_MIN_MS = 12000;
+  var pendingManifest = null;
+  var registeredManifest = null;
+  var overnightDirty = false;
 
   function $(id) { return document.getElementById(id); }
 
@@ -249,10 +252,20 @@
     });
 
     var no = s.no_overnight || {};
-    $('noOvernight').innerHTML =
-      '<div class="box-hd">不留倉保護 · ' + (no.enabled ? '啟用' : '關閉') + '</div>' +
-      '<p>收盤前 ' + (no.block_new_before_close_min || 15) + ' 分鐘禁新單；' +
-      (no.force_flat_time || '13:40') + ' 強制平倉。' + (no.note ? ' ' + no.note : '') + '</p>';
+    $('overnightHeading').textContent = '不留倉保護 · ' + (no.enabled ? '啟用' : '關閉');
+    $('overnightSummary').textContent = '截止前 ' + (no.block_new_before_close_min == null ? 15 : no.block_new_before_close_min) +
+      ' 分鐘禁新單；' + (no.force_flat_time || '13:40') + ' 強制平倉。' + (no.note ? ' ' + no.note : '');
+    if (!overnightDirty) {
+      $('overnightEnabled').checked = !!no.enabled;
+      $('overnightTime').value = no.force_flat_time || '13:40';
+      $('overnightMinutes').value = no.block_new_before_close_min == null ? 15 : no.block_new_before_close_min;
+    }
+    var enforcement = s.overnight_enforcement || {};
+    var overnightLabels = { pending: '平倉尚未完成', confirmed: '平倉倉位已核對', blocked: '平倉受阻', failed: '平倉失敗' };
+    $('overnightProgress').textContent = enforcement.status
+      ? (overnightLabels[enforcement.status] || '平倉狀態：' + enforcement.status) + (enforcement.message ? ' · ' + enforcement.message : '')
+      : '尚未觸發截止平倉';
+    renderStrategyState(s);
 
     var ai = s.ai || {};
     var proc = ai.process || {};
@@ -445,6 +458,150 @@
     }).join('');
   }
 
+  function renderStrategyState(s) {
+    var active = s.strategy_execution || {};
+    $('strategyMode').textContent = '目前模式：' + (active.mode === 'rules' ? '固定規則' : 'AI 自主判斷');
+    $('strategyActive').textContent = active.strategy_id
+      ? '策略 ' + active.strategy_id + ' · 版本 ' + (active.version || '未提供') : '尚未啟用固定策略版本';
+    var receipt = s.execution || {};
+    var labels = { sent: '已送出，尚未取得成交確認', pending: '等待委託確認', filled: '已取得成交確認', failed: '委託失敗', blocked: '委託受阻', rejected: '委託遭拒', unknown: '委託結果待確認' };
+    var status = receipt.position_confirmed ? '倉位已核對；未取得成交明細'
+      : (receipt.status ? (labels[receipt.status] || '回報狀態：' + receipt.status) : '尚無委託回報');
+    $('executionReceipt').textContent = (receipt.simulated ? '紙上模擬 · ' : '') + status +
+      (receipt.evidence_kind ? ' · 依據：' + receipt.evidence_kind : '');
+  }
+
+  function previewManifest(manifest) {
+    var context = manifest.context || {};
+    var execution = manifest.execution || {};
+    var rows = [
+      ['商品／資產', (context.symbol || '未提供') + ' / ' + (context.asset_type || '未提供')],
+      ['K 線週期', execution.timeframe || '未提供'],
+      ['策略識別碼', manifest.strategy_id], ['完整版本雜湊', manifest.version],
+      ['規則類型', (manifest.definition || {}).kind || '未提供'],
+      ['持有上限', execution.maxBars === 0 ? '未設定 K 棒上限' : String(execution.maxBars) + ' 根 K 棒'],
+      ['成本假設', '進場 ' + execution.entryFeeBps + '、出場 ' + execution.exitFeeBps + '、滑價 ' + execution.slippageBps + ' 基點']
+    ];
+    var list = $('strategyPreview');
+    list.replaceChildren();
+    rows.forEach(function (row) {
+      var term = document.createElement('dt');
+      var value = document.createElement('dd');
+      term.textContent = row[0];
+      value.textContent = row[1] == null ? '未提供' : String(row[1]);
+      list.append(term, value);
+    });
+    $('strategyWebhook').value = JSON.stringify({
+      event: 'STRATEGY_SIGNAL', source: 'external_rules', strategy_id: manifest.strategy_id,
+      version: manifest.version, symbol: context.symbol, timeframe: execution.timeframe,
+      signal_id: 'replace-with-unique-id', action: 'HOLD',
+      bar_close_time: new Date().toISOString(), price: null, lots: 1
+    }, null, 2);
+    $('btnCopyWebhook').disabled = false;
+  }
+
+  async function strategyRequest(button, statusId, operation) {
+    if (button.disabled) return;
+    var message = $(statusId);
+    var strategyControls = statusId === 'strategyMessage';
+    if (strategyControls) {
+      ['strategyFile', 'btnRegisterStrategy', 'btnActivateStrategy', 'btnDiscretionary'].forEach(function (id) { $(id).disabled = true; });
+    }
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    message.textContent = '處理中…';
+    try { await operation(); }
+    catch (error) { message.textContent = '未完成：' + String(error.message || error); }
+    finally {
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+      if (strategyControls) {
+        $('strategyFile').disabled = false;
+        $('btnRegisterStrategy').disabled = !pendingManifest;
+        $('btnActivateStrategy').disabled = !registeredManifest;
+        $('btnDiscretionary').disabled = false;
+      }
+    }
+  }
+
+  function bindStrategyControls() {
+    $('strategyFile').addEventListener('change', async function () {
+      pendingManifest = null;
+      registeredManifest = null;
+      $('btnRegisterStrategy').disabled = true;
+      $('btnActivateStrategy').disabled = true;
+      $('btnCopyWebhook').disabled = true;
+      $('strategyPreview').replaceChildren();
+      $('strategyWebhook').value = '';
+      var file = this.files[0];
+      if (!file) { $('strategyMessage').textContent = '尚未選擇策略檔案'; return; }
+      try {
+        if (file.size > 1048576) throw new Error('策略檔案超過 1 MB，請選擇匯出的策略 JSON');
+        var manifest = JSON.parse(await file.text());
+        if (!manifest || manifest.schema !== 'st.strategy/v1' || !manifest.strategy_id ||
+            !/^[a-f0-9]{64}$/i.test(manifest.version || '') || !manifest.context || !manifest.execution || !manifest.definition) {
+          throw new Error('缺少固定策略欄位，請重新從 ST 匯出策略版本');
+        }
+        pendingManifest = manifest;
+        previewManifest(manifest);
+        $('btnRegisterStrategy').disabled = false;
+        $('strategyMessage').textContent = '已預覽；請匯入此版本，伺服器將核對內容與雜湊。';
+      } catch (error) { $('strategyMessage').textContent = '檔案無法匯入：' + String(error.message || error); }
+    });
+    $('btnRegisterStrategy').addEventListener('click', function () {
+      strategyRequest(this, 'strategyMessage', async function () {
+        var manifest = pendingManifest;
+        var response = await api('/api/strategy/register', { method: 'POST', body: JSON.stringify({ manifest: manifest }) });
+        if (manifest !== pendingManifest) return;
+        registeredManifest = response.manifest || manifest;
+        previewManifest(registeredManifest);
+        $('btnActivateStrategy').disabled = false;
+        $('strategyMessage').textContent = '版本已匯入，尚未啟用。請確認商品及週期後明確啟用。';
+      });
+    });
+    $('btnActivateStrategy').addEventListener('click', function () {
+      strategyRequest(this, 'strategyMessage', async function () {
+        if (!registeredManifest) throw new Error('請先匯入策略版本');
+        var response = await api('/api/strategy/activate', { method: 'POST', body: JSON.stringify({
+          strategy_id: registeredManifest.strategy_id, version: registeredManifest.version,
+          mode: 'rules', max_signal_age_sec: 300
+        }) });
+        render(response.state);
+        $('strategyMessage').textContent = '已啟用固定規則；等待相符的外部策略訊號。';
+      });
+    });
+    $('btnDiscretionary').addEventListener('click', function () {
+      strategyRequest(this, 'strategyMessage', async function () {
+        var response = await api('/api/strategy/mode', { method: 'POST', body: JSON.stringify({ mode: 'discretionary' }) });
+        render(response.state);
+        $('strategyMessage').textContent = '已切回 AI 自主判斷；券商與紙上／實盤模式維持原設定。';
+      });
+    });
+    $('btnCopyWebhook').addEventListener('click', async function () {
+      try {
+        await navigator.clipboard.writeText($('strategyWebhook').value);
+        $('strategyMessage').textContent = '已複製範本；請填入實際訊號資料，此操作沒有送單。';
+      } catch (error) {
+        $('strategyWebhook').focus();
+        $('strategyWebhook').select();
+        $('strategyMessage').textContent = '瀏覽器未允許自動複製，已選取範本，請按 Ctrl+C 複製。';
+      }
+    });
+    $('overnightForm').addEventListener('input', function () { overnightDirty = true; });
+    $('overnightForm').addEventListener('submit', function (event) {
+      event.preventDefault();
+      strategyRequest($('btnSaveOvernight'), 'overnightMessage', async function () {
+        var response = await api('/api/no_overnight', { method: 'POST', body: JSON.stringify({
+          enabled: $('overnightEnabled').checked, force_flat_time: $('overnightTime').value,
+          block_new_before_close_min: Number($('overnightMinutes').value)
+        }) });
+        overnightDirty = false;
+        render(response.state);
+        $('overnightMessage').textContent = '不留倉設定已儲存。';
+      });
+    });
+  }
+
   async function setStyle(n) {
     var fs = state && ((state.st_overlay && state.st_overlay.fail_safe) || (state.st_link && state.st_link.fail_safe));
     if (fs && Number(n) > 35) {
@@ -596,6 +753,7 @@
   }
 
   async function boot() {
+    bindStrategyControls();
     try {
       await refreshWd();
     } catch (e) {
@@ -635,6 +793,10 @@
     });
 
     $('btnDemo').addEventListener('click', async function () {
+      if (state && (state.strategy_execution || {}).mode === 'rules') {
+        toast('固定規則模式需要完整策略訊號；請使用右欄的 Webhook 範本。');
+        return;
+      }
       try {
         var j = await api('/api/demo_tick', { method: 'POST', body: '{}' });
         render(j.state);

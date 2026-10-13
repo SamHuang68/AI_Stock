@@ -1,0 +1,61 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const { webcrypto, createHash } = require('node:crypto');
+const store = new Map();
+const sandbox = { window: {}, console, crypto: webcrypto, TextEncoder,
+  localStorage: { getItem: k => store.get(k) ?? null, setItem: (k,v) => store.set(k,v) } };
+vm.createContext(sandbox);
+for (const file of ['backtest_v3.js', '策略版本.js', 'strategy_builder_v3.js']) {
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/screener', file), 'utf8'), sandbox);
+}
+const { Backtest: B, StrategyVersion: V, StrategyBuilder: C } = sandbox.window;
+const cond = (cmp, num, ind = 'close', n = 3) => ({ left: { ind, n }, cmp, rightMode: 'num', rightNum: num, right: { ind: 'close' } });
+const definition = { kind: 'builder', entry: [cond('gt', 0)], exit: [cond('gt', 0)], entryCombine: 'AND', exitCombine: 'OR' };
+const bars = Array.from({length: 12}, (_, i) => ({ time: '2026-01-' + String(i + 1).padStart(2,'0'),
+  open: 100 + i, high: 102 + i, low: 99 + i, close: 101 + i, volume: 100 }));
+const opts = { ...B.DEFAULTS, trainEnd: '2026-01-06', testEnd: '2026-01-12' };
+const split = B.evaluateCustom(bars, definition, C.compileDefinition, opts);
+assert.equal(split.training.curve.length, 6);
+assert.equal(split.test.curve.length, 6);
+assert.equal(split.test.curve[0].equity, 1, '測試起點空手且不承接訓練末日委託');
+assert.equal(split.test.trades[0].signalBar, 6);
+assert.equal(split.test.trades[0].entryBar, 7, '下一根開盤成交');
+assert.equal(split.test.trades[0].exitBar, 8);
+assert.equal(split.test.trades[0].entry, 107 * 1.0005);
+assert.ok(split.test.trades[0].entryFee > 0);
+assert.ok(split.training.curve.every(p => p.date <= opts.trainEnd));
+assert.ok(split.test.curve.every(p => p.date > opts.trainEnd));
+const noBuy = { ...definition, entry: [cond('lt', 0)] };
+assert.equal(B.evaluateCustom(bars, noBuy, C.compileDefinition, opts).test.count, 0, '確實使用自訂條件');
+const warmup = { ...definition, entry: [cond('gt', 0, 'sma', 8)] };
+const w = B.evaluateCustom(bars, warmup, C.compileDefinition, opts);
+assert.equal(w.training.count, 0);
+assert.equal(w.test.trades[0].signalBar, 7, '測試日指標可使用過去訓練日暖機');
+const changedFuture = bars.map((b, i) => i < 6 ? b : ({ ...b, open: b.open * 3, high: b.high * 3, low: b.low * 3, close: b.close * 3 }));
+assert.deepEqual(B.evaluateCustom(changedFuture, definition, C.compileDefinition, opts).training, split.training, '未來資料不影響訓練');
+assert.throws(() => B.evaluateCustom(bars, definition, C.compileDefinition, { ...opts, testEnd: opts.trainEnd }));
+assert.throws(() => C.compileDefinition({ ...definition, entry: [cond('gt', 0, 'unknown')] }, B.colsOf(bars)));
+(async () => {
+  const execution = { timeframe: '1d', ...B.DEFAULTS };
+  const context = { symbol: '2330', asset_type: 'equity', regime: 'unspecified' };
+  const a = await V.freeze(definition, execution, context, '11111111-1111-4111-8111-111111111111');
+  await V.save(a);
+  assert.ok(Object.isFrozen(a.definition.entry));
+  assert.equal(a.version, createHash('sha256').update(a.canonical_json).digest('hex'));
+  const b = await V.freeze(noBuy, execution, context, a.strategy_id);
+  assert.notEqual(a.version, b.version);
+  assert.equal(a.strategy_id, b.strategy_id);
+  await V.save(b); await V.save(a);
+  assert.equal(V.list().length, 2, '舊版本不被覆寫且重複保存不增加');
+  assert.equal(V.list()[0].version, a.version);
+  const tampered = JSON.parse(JSON.stringify(a)); tampered.execution.maxBars = 4;
+  await assert.rejects(V.verify(tampered));
+  const badTimeframe = { ...execution, timeframe: '1h' };
+  await assert.rejects(V.freeze(definition, badTimeframe, context));
+  const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/固定策略版本.json'), 'utf8'));
+  await V.verify(fixture);
+  assert.equal(fixture.version, a.version);
+  console.log('自訂樣本外與版本保存：通過（邊界、暖機、成本、資料隔離、不可覆寫及跨語言雜湊）');
+})().catch(e => { console.error(e); process.exitCode = 1; });

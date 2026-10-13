@@ -38,6 +38,16 @@ cd C:\path\to\AI_Stock   # 或你的本機 clone 目錄（例如 C:\Stock_Termin
 .\START_TIP.cmd
 ```
 
+Sam 的受管本機環境可一次啟動 local、Private Web 與 WaveDeck，並在就緒後開啟 Stock Terminal 和 WaveDeck：
+
+```powershell
+.\START_ALL.cmd
+```
+
+`START_LOCAL_AND_WEB.cmd` 也會在 local 就緒後開啟 Stock Terminal；若只啟動服務、不開瀏覽器，在上述批次入口加上 `--no-browser`。`START_ALL.cmd` 沿用既有 Private Web 排程，需要本機已安裝 `StockTerminal_PrivateWeb_Host`；一般分享包使用者仍可使用 `START_TIP.cmd` 與 `START_WAVEDECK.cmd`。
+
+重跑時重用同目錄的已在線 WaveDeck，按實際埠開頁，不固定假設為 18433。WaveDeck 在背景執行，診斷日誌位於 `wavedeck/logs/launcher-*-stdout.log`／`stderr.log`；不會更改既有的模式、provider 或券商設定。若已有缺少目錄身分的舊 WaveDeck，入口會提示從原視窗停止後重開，避免新增另一份。`START_ALL.cmd` 的退出碼以位元組合：1 為 local 未就緒、2 為 web 未就緒、4 為 WaveDeck 未就緒，例如 6 表示 web 與 WaveDeck 未就緒。
+
 ### Linux / macOS
 
 ```bash
@@ -179,7 +189,7 @@ flowchart TB
 | 中長期曝險研究 | `server/exposure_lab.py` | 月度凍結核心、台積電 EPS 證據分層、同基準長短波動、正二效率差、研究上限、商品機制與 ETF 底層穿透 |
 | 研究基準資料 | `server/benchmark_research.py` | 非阻塞讀取／背景更新證交所臺灣50價位與報酬指數；只提供單一 canonical contract，不另建 UI 刷新路徑 |
 | 決策路由 | `server/decision_routes.py` | `/decision/context`、歷史與關鍵價位 API；輸入驗證 |
-| 期權結構 | `server/options_exposure.py`、`server/options_routes.py` | 精確到期鏈、IV／Greeks、方向中立 OI Gamma／Vega Density、情境 GEX／VEX／Flip、同到期日歷史、快取與更新命令 |
+| 期權結構 | `server/options_exposure.py`、`server/options_routes.py`、`server/options_schedule.py` | 精確到期鏈、IV／Greeks、方向中立 OI Gamma／Vega Density、情境 GEX／VEX／Flip、同到期日歷史、快取與更新命令 |
 | 盤別動量研究 | `server/overnight_intraday.py`、`server/overnight_intraday_routes.py` | 調整後 OHLC、ON／ID 恆等式、20／60 日結構、固定籃子 quorum、cache-only GET 與白名單更新 |
 | 衍生分析 | `server/key_levels.py`、`server/sector_flow.py`、`server/news_impact.py` | 可重現價位、20／60 日波動與尾端分布、同口徑產業參與、新聞影響層級 |
 | 前端建置 | `build_v2.py`、`build_order.py` | 依相依順序組裝 tip UX HTML |

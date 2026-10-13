@@ -284,7 +284,7 @@ def resolve_narrative(
     cfg: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     cfg = cfg or _cfg()
-    mode = str(cfg.get("mode") or "auto").lower()
+    mode = "template" if decision.get("provider") in ("rules", "risk_watchdog") else str(cfg.get("mode") or "auto").lower()
     templ = narrative_template(metrics, decision)
     templ["narrative_source"] = "template"
     if mode == "template":

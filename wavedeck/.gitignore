@@ -3,6 +3,7 @@ data/wavedeck_config.json
 data/wavedeck_secrets.json
 data/wavedeck_audit.db
 data/wavedeck.port
+data/程式版本.json
 data/master/
 data/exec_md/*.md
 data/exec_md/index.json

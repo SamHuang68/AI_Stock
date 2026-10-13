@@ -30,9 +30,15 @@ class DailyCacheTests(unittest.TestCase):
         self.old_active, self.old_cancel = jobs._active, jobs._cancel
         jobs._active = None
         self.callbacks = []
-        self.queue = patch.object(jobs.job_queue, 'submit', side_effect=lambda name, fn: self.callbacks.append(fn) or {'ok': True})
+        def enqueue(name, fn, *, timeout):
+            self.assertEqual(timeout, 660)
+            self.callbacks.append(fn)
+            return {'ok': True}
+        self.queue = patch.object(jobs.job_queue, 'submit', side_effect=enqueue)
         self.queue.start()
-        self.clock = patch.object(jobs, 'datetime', Clock)
+        original_cutoff = ds.completed_daily_cutoff
+        self.clock = patch.object(ds, 'completed_daily_cutoff',
+                                  side_effect=lambda market, **kwargs: original_cutoff(market, now=Clock.now()))
         self.clock.start()
 
     def tearDown(self):
@@ -158,7 +164,7 @@ class DailyCacheTests(unittest.TestCase):
         external = jobs.status(); external['symbols'].clear()
         self.assertEqual(len(jobs.status()['symbols']), 1)
         budget = jobs.Budget(threading.Event(), requests=0)
-        with patch.object(jobs, 'urlopen') as request, self.assertRaises(RuntimeError): budget.get_json('https://example.invalid')
+        with patch.object(jobs.http_client, 'request') as request, self.assertRaises(RuntimeError): budget.get_json('https://example.invalid')
         request.assert_not_called()
         expired = jobs.Budget(threading.Event(), seconds=0)
         with self.assertRaises(TimeoutError): expired.check()

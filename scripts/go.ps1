@@ -13,7 +13,8 @@ param(
   [switch]$Pull,
   [switch]$UpdateOnly,
   [switch]$RebuildOnly,
-  [switch]$Worktree
+  [switch]$Worktree,
+  [switch]$NoBrowser
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,16 +38,18 @@ if ($env:LOCALAPPDATA -and -not ($Worktree -or $Pull -or $UpdateOnly -or $Rebuil
     if (-not (Test-Path -LiteralPath $managedLauncher -PathType Leaf)) {
       throw '本機受管理啟動器缺少，未退回重建原工作樹；請修復本機安裝。'
     }
-    & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $managedLauncher -InstallRoot $managedLocalRoot
+    $browserArguments = @()
+    if ($NoBrowser) { $browserArguments += '-NoBrowser' }
+    & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $managedLauncher -InstallRoot $managedLocalRoot @browserArguments
     exit $LASTEXITCODE
   }
   # 已有受管本機安裝，但目前資料夾不是登記的原工作樹：不能走下方開發流程，
-  # 否則開發流程會與正在使用的本機 ST（18432）搶同一個埠，並改跑一份未受管的版本。
+  # 開發流程不得搶用正在使用的受管本機 ST 埠。
   if ($localConfig.originalCheckout) {
     throw ("ST-LAUNCHER-GUARD: 本機已有受管安裝，且此資料夾不是登記的原工作樹，已停止，未關閉任何程序。`n" +
       "  登記的原工作樹：$($localConfig.originalCheckout)`n" +
       "  目前資料夾　　：$Root`n" +
-      "  請到登記的資料夾執行 START_TIP.cmd；若確實要在此資料夾開發，請明確加 -Worktree（只會結束由該資料夾自己啟動的開發伺服器；18432 被其他程序占用時會拒絕）。")
+      "  請到登記的資料夾執行 START_TIP.cmd；若確實要在此資料夾開發，請明確加 -Worktree（只允許結束收據核對相符的開發程序；未知占用者會拒絕）。")
   }
   }
 }
@@ -57,6 +60,13 @@ if (Test-Path $TipFile) {
   $TipBranch = (Get-Content $TipFile -Raw).Trim()
 }
 $Port = 18432
+if ($env:ST_PORT) {
+  if (-not [int]::TryParse($env:ST_PORT, [ref]$Port) -or $Port -lt 1 -or $Port -gt 65535) {
+    throw 'ST-PORT-CONFIG: ST_PORT 必須是 1 到 65535 的整數；尚未建置或啟動。'
+  }
+}
+# 沿用伺服器既有埠設定，所有檢查、收據與子程序使用同一個值。
+$env:ST_PORT = [string]$Port
 $DevReceipt = Join-Path $Root 'logs\dev_server.receipt.json'
 $Url = "http://localhost:${Port}/#pulse"
 
@@ -86,14 +96,14 @@ function Save-StockPythonPin([string]$ExePath) {
   $pinDir = Join-Path $Root 'data'
   if (-not (Test-Path $pinDir)) { New-Item -ItemType Directory -Path $pinDir | Out-Null }
   $pin = Join-Path $pinDir 'stock_python.path'
-  Set-Content -LiteralPath $pin -Value $ExePath -Encoding ASCII
+  Set-Content -LiteralPath $pin -Value $ExePath -Encoding UTF8
   Write-Host "[python] pinned -> $pin"
 }
 
 function Read-StockPythonPin {
   $pin = Join-Path $Root 'data\stock_python.path'
   if (-not (Test-Path -LiteralPath $pin)) { return $null }
-  $p = (Get-Content -LiteralPath $pin -Raw).Trim()
+  $p = (Get-Content -LiteralPath $pin -Raw -Encoding UTF8).Trim()
   if ($p -and (Test-Path -LiteralPath $p)) { return $p }
   return $null
 }
@@ -236,7 +246,7 @@ function Get-PortListenerPids([int]$PortNum) {
     if ($procId -match '^\d+$') { [void]$pids.Add([int]$procId) }
   }
 
-  return @($pids | Where-Object { $_ -gt 4 })
+  return @($pids | Where-Object { $_ -gt 0 })
 }
 
 # 程序身分：啟動時間（UTC ticks）。PID 會被作業系統重複使用，所以收據要連啟動時間一起核對。
@@ -249,17 +259,64 @@ function Get-ProcessCommandLine([int]$ProcId) {
 }
 
 # 開發伺服器啟動後登記它的身分（PID、啟動時間、資料夾）。之後只有收據登記的程序可以被這個腳本終止。
-function Write-DevServerReceipt([int]$PortNum, [string]$ReceiptPath, [string]$OwnerRoot) {
+function Write-DevServerReceipt([int]$PortNum, [string]$ReceiptPath, [string]$OwnerRoot, [int]$ExpectedParent, [int64]$ExpectedParentTicks = 0, [string]$ExpectedPython = '', [string]$ExpectedBasePython = '', [string]$ExpectedLauncher = '') {
+  if ($ExpectedParent -gt 4 -and ([string]::IsNullOrWhiteSpace($ExpectedPython) -or
+      [string]::IsNullOrWhiteSpace($ExpectedBasePython) -or [string]::IsNullOrWhiteSpace($ExpectedLauncher))) {
+    throw 'ST-RECEIPT-GUARD: 缺少本次釘選 Python、基礎 Python 或 CMD 身分；未寫入收據，未終止任何程序。'
+  }
   $listeners = @(Get-PortListenerPids $PortNum)
   $ticks = $null
   if ($listeners.Count -eq 1) { $ticks = Get-ProcessStartTicks $listeners[0] }
+  $commandLine = $null
+  if ($null -ne $ticks -and $ExpectedParent -gt 4) {
+    try {
+      $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listeners[0])" -ErrorAction Stop
+      $launchTicks = Get-ProcessStartTicks $ExpectedParent
+      if ($ExpectedParentTicks -eq 0) { $ExpectedParentTicks = $launchTicks }
+      if ($ExpectedPython) {
+        $allowedPaths = @($ExpectedPython, $ExpectedBasePython) | Where-Object { $_ }
+        if ($allowedPaths -notcontains [string]$process.ExecutablePath -or
+            [string]$process.CommandLine -notmatch [regex]::Escape((Join-Path $OwnerRoot 'server\server.py'))) {
+          throw '伺服器命令與釘選 Python 或工作樹不符。'
+        }
+      }
+      if ($ExpectedLauncher) {
+        $launcherProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$ExpectedParent" -ErrorAction Stop
+        if ([string]$launcherProcess.Name -ne 'cmd.exe' -or
+            [string]$launcherProcess.CommandLine -notmatch [regex]::Escape($ExpectedLauncher)) {
+          throw '啟動程序與本次產生的 CMD 不符。'
+        }
+      }
+      if ($null -ne $launchTicks -and $launchTicks -eq $ExpectedParentTicks -and $launchTicks -le $ticks) {
+        if ([int]$process.ParentProcessId -eq $ExpectedParent) {
+          $commandLine = [string]$process.CommandLine
+        } elseif ([string]$process.Name -eq 'python.exe') {
+          # Windows venv 會改寫 argv[0]；核對各自釘選執行檔及相同伺服器引數，保留父鏈／時間條件。
+          $proxy = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.ParentProcessId)" -ErrorAction Stop
+          $proxyTicks = Get-ProcessStartTicks ([int]$proxy.ProcessId)
+          $serverArguments = '-u "' + (Join-Path $OwnerRoot 'server\server.py') + '"'
+          $pinCommand = '^\s*"' + [regex]::Escape($ExpectedPython) + '"\s+' + [regex]::Escape($serverArguments) + '\s*$'
+          $baseCommand = '^\s*"' + [regex]::Escape($ExpectedBasePython) + '"\s+' + [regex]::Escape($serverArguments) + '\s*$'
+          if ($ExpectedPython -and ([string]$proxy.ExecutablePath -eq $ExpectedPython) -and
+              [string]$proxy.Name -eq 'python.exe' -and [int]$proxy.ParentProcessId -eq $ExpectedParent -and
+              ([string]$proxy.CommandLine -cmatch $pinCommand) -and
+              ([string]$process.CommandLine -cmatch $baseCommand) -and
+              $null -ne $proxyTicks -and $launchTicks -le $proxyTicks -and $proxyTicks -le $ticks) {
+            $commandLine = [string]$process.CommandLine
+          }
+        }
+      }
+    } catch {
+      Write-Host '[warn] 無法讀取程序身分；保持伺服器運行，不寫入自動終止收據。'
+    }
+  }
+  if (-not $commandLine) { $ticks = $null }
   if ($null -eq $ticks) {
-    Write-Host "[warn] 無法確認 :$PortNum 上唯一的開發伺服器程序，未寫入收據；下次啟動若該埠仍被占用會拒絕，不會自動終止。"
-    return
+    throw "ST-RECEIPT-GUARD: 無法證明 :$PortNum 的唯一監聽程序由本次啟動建立；未寫入收據，未終止任何程序。"
   }
   $dir = Split-Path -Parent $ReceiptPath
   if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-  $receipt = [ordered]@{ pid = [int]$listeners[0]; startTicksUtc = [int64]$ticks; root = $OwnerRoot; port = $PortNum }
+  $receipt = [ordered]@{ pid = [int]$listeners[0]; startTicksUtc = [int64]$ticks; root = $OwnerRoot; port = $PortNum; commandLine = $commandLine }
   ($receipt | ConvertTo-Json) | Set-Content -LiteralPath $ReceiptPath -Encoding UTF8
   Write-Host "[receipt] 已登記開發伺服器 PID $($listeners[0])：$ReceiptPath"
 }
@@ -271,17 +328,24 @@ function Stop-OwnedPortListeners([int]$PortNum, [string]$ReceiptPath, [string]$O
   if ($listeners.Count -eq 0) { return }
 
   $owned = 0
+  $ownedProcess = $null
   if (Test-Path -LiteralPath $ReceiptPath) {
     try {
       $r = Get-Content -LiteralPath $ReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
       $sameRoot = [string]::Equals(
         [IO.Path]::GetFullPath([string]$r.root).TrimEnd('\', '/'),
         [IO.Path]::GetFullPath($OwnerRoot).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)
-      $nowTicks = Get-ProcessStartTicks ([int]$r.pid)
-      if ($sameRoot -and ([int]$r.port -eq $PortNum) -and ($null -ne $nowTicks) -and ($nowTicks -eq [int64]$r.startTicksUtc)) {
+      # 保留 Windows 程序 handle；核對後不得重新依 PID 選取停止目標。
+      $ownedProcess = Get-Process -Id ([int]$r.pid) -ErrorAction Stop
+      $null = $ownedProcess.Handle
+      $nowTicks = $ownedProcess.StartTime.ToUniversalTime().Ticks
+      $sameCommand = $r.commandLine -and ([string]$r.commandLine -ceq (Get-ProcessCommandLine ([int]$r.pid)))
+      if ($sameRoot -and $sameCommand -and ([int]$r.port -eq $PortNum) -and ($null -ne $nowTicks) -and ($nowTicks -eq [int64]$r.startTicksUtc)) {
         $owned = [int]$r.pid
       }
-    } catch {}
+    } catch {
+      Write-Host '[warn] 開發收據無法核對，將拒絕未知占用者。'
+    }
   }
 
   $foreign = @($listeners | Where-Object { $_ -ne $owned })
@@ -294,8 +358,50 @@ function Stop-OwnedPortListeners([int]$PortNum, [string]$ReceiptPath, [string]$O
   }
 
   Write-Host "[stop] 結束此資料夾自己啟動的開發伺服器 PID $owned（埠 $PortNum）"
-  Stop-Process -Id $owned -Force -ErrorAction Stop
+  $ownedProcess.Refresh()
+  if ($ownedProcess.HasExited) { return }
+  if ($ownedProcess.StartTime.ToUniversalTime().Ticks -ne [int64]$r.startTicksUtc -or (Get-ProcessCommandLine $owned) -cne [string]$r.commandLine) {
+    throw 'ST-PORT-GUARD: 終止前程序身分已變動，拒絕終止。'
+  }
+  if ($ownedProcess.HasExited) { return }
+  Stop-Process -InputObject $ownedProcess -Force -ErrorAction Stop
   Start-Sleep -Seconds 1
+}
+
+function Assert-LauncherBehavior([string]$Path) {
+  # 依 PowerShell AST 檢查實際函式與啟動參數，註解不參與版本判斷。
+  $tokens = $null; $parseErrors = $null
+  $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$parseErrors)
+  $resolver = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Resolve-StockPython' }, $true)
+  $ownedStop = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Stop-OwnedPortListeners' }, $true)
+  $receipt = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Write-DevServerReceipt' }, $true)
+  $receiptCalls = @($ast.FindAll({ param($n)
+    $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Write-DevServerReceipt'
+  }, $true))
+  $weakReceiptCalls = @($receiptCalls | Where-Object {
+    $names = @($_.CommandElements | Where-Object {
+      $_ -is [System.Management.Automation.Language.CommandParameterAst]
+    } | ForEach-Object { $_.ParameterName })
+    $missing = @('ExpectedPython', 'ExpectedBasePython', 'ExpectedLauncher') | Where-Object { $names -notcontains $_ }
+    @($missing).Count -gt 0
+  })
+  $unsafeStop = $ast.FindAll({ param($n)
+    ($n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Stop-PortListeners') -or
+    ($n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Stop-PortListeners')
+  }, $true)
+  $redirect = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandParameterAst] -and $n.ParameterName -eq 'RedirectStandardOutput' }, $true)
+  $unownedKill = $ast.FindAll({ param($n)
+    if ($n -isnot [System.Management.Automation.Language.CommandAst]) { return $false }
+    $command = $n.GetCommandName()
+    if ($command -eq 'taskkill' -or $command -eq 'taskkill.exe') { return $true }
+    if ($command -ne 'Stop-Process') { return $false }
+    $scope = $n.Parent
+    while ($null -ne $scope -and $scope -isnot [System.Management.Automation.Language.FunctionDefinitionAst]) { $scope = $scope.Parent }
+    return $null -eq $scope -or $scope.Name -ne 'Stop-OwnedPortListeners'
+  }, $true)
+  if ($parseErrors.Count -gt 0 -or $resolver.Count -ne 1 -or $ownedStop.Count -ne 1 -or $receipt.Count -ne 1 -or $receiptCalls.Count -lt 1 -or $weakReceiptCalls.Count -gt 0 -or $unsafeStop.Count -gt 0 -or $redirect.Count -gt 0 -or $unownedKill.Count -gt 0) {
+    throw '啟動腳本行為檢查失敗，請核對拉取版本。'
+  }
 }
 
 function Assert-TipHtml {
@@ -330,16 +436,23 @@ function Wait-TipServer {
     try {
       $h = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -UseBasicParsing -TimeoutSec 2
       $j = $h.Content | ConvertFrom-Json
-      if ($j.tipUx -eq $true -or $j.ux -eq 'tip') {
-        Write-Host "[ok] /health tipUx=true (try $i) version=$($j.version)"
-        return
-      }
-      Write-Host "[warn] /health up but tipUx missing (try $i) — wrong server?"
     } catch {
       Start-Sleep -Milliseconds 500
+      continue
     }
+    if ($j.tipUx -eq $true -or $j.ux -eq 'tip') {
+      if ($j.port -ne $Port -or -not $j.baseDir -or -not $j.pythonExe -or
+          -not [string]::Equals([IO.Path]::GetFullPath([string]$j.baseDir).TrimEnd('\', '/'),
+            [IO.Path]::GetFullPath($Root).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase) -or
+          -not [string]::Equals([string]$j.pythonExe, $Python, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'ST-HEALTH-GUARD: /health 的埠、工作樹或 Python 與本次啟動不符；未寫入收據。'
+      }
+      Write-Host "[ok] /health tipUx=true (try $i) version=$($j.version) port=$Port"
+      return
+    }
+    Write-Host "[warn] /health up but tipUx missing (try $i) — wrong server?"
   }
-  throw "Server on :$Port is not tip UX. Check the 'Stock Terminal Server' console window for traceback."
+  throw "伺服器 :$Port 尚未就緒；請查看 $(Join-Path $Root 'logs\server_go_ps.out.log') 與 $(Join-Path $Root 'logs\server_go_ps.err.log')。"
 }
 
 function Assert-IndexIsTip {
@@ -372,7 +485,7 @@ function Assert-IndexIsTip {
 }
 
 function Assert-ListenerMatchesPin {
-  Write-Host '[check] :18432 listener uses pinned Stock Python (warn only if tooling)'
+  Write-Host "[check] :$Port listener uses pinned Stock Python (warn only if tooling)"
   try {
     $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     foreach ($c in $conns) {
@@ -457,6 +570,10 @@ if ($Pull -or $UpdateOnly) {
     Write-Host "[OK] update complete. Re-run START_TIP.cmd to build and launch."
     exit 0
   }
+  # 更新後重入磁碟上的新腳本，讓本次啟動也使用新版的程序保護函式。
+  Assert-LauncherBehavior -Path $PSCommandPath
+  & $PSCommandPath -Worktree -RebuildOnly:$RebuildOnly
+  exit $LASTEXITCODE
 }
 
 $Python = Resolve-StockPython
@@ -465,13 +582,6 @@ Write-Host " PYTHON: $Python"
 Assert-TipBranch
 $head = (git rev-parse --short HEAD)
 Write-Host " HEAD: $head"
-if ($Pull) {
-  # 舊 go.ps1 特徵：沒有 Resolve-StockPython。若仍看到 RedirectStandardOutput 啟動＝拉碼失敗。
-  $self = Get-Content -LiteralPath $PSCommandPath -Raw -Encoding UTF8
-  if ($self -notmatch 'Resolve-StockPython' -or $self -match 'RedirectStandardOutput') {
-    throw "This go.ps1 is STALE (pre pin-python fix). Re-pull tip and re-run START_TIP.cmd"
-  }
-}
 
 Write-Host "[build] `"$Python`" build_v2.py"
 & $Python build_v2.py
@@ -485,7 +595,7 @@ if ($RebuildOnly) {
 
 Stop-OwnedPortListeners -PortNum $Port -ReceiptPath $DevReceipt -OwnerRoot $Root
 
-# Live console (NOT RedirectStandardOutput) — absolute PYTHON from pin.
+# 背景 CMD 使用檔案日誌，保留 Python 原退出碼；不透過 PowerShell redirect 參數。
 $logDir = Join-Path $Root 'logs'
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
 $logOut = Join-Path $logDir 'server_go_ps.out.log'
@@ -497,46 +607,61 @@ Write-Host "        cwd=$Root"
 Write-Host "        logs: $logOut / $logErr"
 
 $launcher = Join-Path $logDir 'run_server_tip.cmd'
+# CMD 維持 ASCII；Unicode 路徑由環境變數傳入。
+$env:ST_LAUNCH_ROOT = $Root
+$env:ST_LAUNCH_PYTHON = $Python
+$env:ST_LAUNCH_LOG_OUT = $logOut
+$env:ST_LAUNCH_LOG_ERR = $logErr
 @(
   '@echo off'
+  'setlocal DisableDelayedExpansion'
   'chcp 65001 >nul'
   'title Stock Terminal Server v5 tip'
-  "cd /d `"$Root`""
+  'cd /d "%ST_LAUNCH_ROOT%"'
   'set ST_LAUNCHED_BY=go.ps1'
   "echo ============================================"
   "echo  Stock Terminal Server v5 tip"
   "echo  HEAD=$head"
-  "echo  PYTHON=$Python"
-  "echo  cwd=$Root"
+  'echo  PYTHON="%ST_LAUNCH_PYTHON%"'
+  'echo  cwd="%ST_LAUNCH_ROOT%"'
   "echo  url=$Url"
   "echo ============================================"
   "echo."
-  "`"$Python`" -u server\server.py"
-  'echo.'
-  'echo SERVER EXITED — window stays open so you can read the error.'
-  'pause'
+  '"%ST_LAUNCH_PYTHON%" -u "%ST_LAUNCH_ROOT%\server\server.py" 1>>"%ST_LAUNCH_LOG_OUT%" 2>>"%ST_LAUNCH_LOG_ERR%"'
+  'set "ST_SERVER_EXIT=%ERRORLEVEL%"'
+  'exit /b %ST_SERVER_EXIT%'
 ) | Set-Content -Path $launcher -Encoding ASCII
 
 $p = Start-Process -FilePath $launcher `
   -WorkingDirectory $Root `
-  -WindowStyle Normal `
+  -WindowStyle Hidden `
   -PassThru
+$launcherStartTicks = $p.StartTime.ToUniversalTime().Ticks
 Write-Host "       launcher PID $($p.Id)"
-Write-Host "       window title MUST be: Stock Terminal Server v5 tip"
+Write-Host "       背景程序輸出寫入上述日誌。"
 Write-Host "       launcher script: $launcher"
 
 Wait-TipServer
-Write-DevServerReceipt -PortNum $Port -ReceiptPath $DevReceipt -OwnerRoot $Root
+Assert-ListenerMatchesPin
+$basePythonLines = @(& $Python -c "import sys; print(sys._base_executable)")
+$basePythonExit = $LASTEXITCODE
+if ($basePythonExit -ne 0 -or $basePythonLines.Count -ne 1 -or -not $basePythonLines[0]) { throw '無法讀取釘選 Python 的基礎執行檔身分。' }
 Assert-IndexIsTip
+Write-DevServerReceipt -PortNum $Port -ReceiptPath $DevReceipt -OwnerRoot $Root -ExpectedParent $p.Id -ExpectedParentTicks $launcherStartTicks -ExpectedPython $Python -ExpectedBasePython $basePythonLines[0].Trim() -ExpectedLauncher $launcher
 Assert-ListenerMatchesPin
 
-Write-Host "[open] $Url"
-Start-Process $Url
+if (-not $NoBrowser) {
+  Write-Host "[open] $Url"
+  Start-Process $Url
+}
 
 Write-Host ''
 Write-Host 'DONE.'
 Write-Host "  HEAD=$head"
 Write-Host "  PYTHON=$Python  (pinned in data\stock_python.path)"
-Write-Host '  Server window title: Stock Terminal Server v5 tip'
+Write-Host "  伺服器日誌：$logOut / $logErr"
+Write-Host '  重啟：powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\go.ps1 -Worktree。'
+Write-Host '  停止：先比對 logs/dev_server.receipt.json 的 PID、startTicksUtc、命令與路徑；不符即保留程序。'
+Write-Host '  日誌會持續追加；確認自有伺服器已停止後再手動封存，不自動截斷。'
 Write-Host '  Browser: Ctrl+F5 → badge 實測 5+5'
 Write-Host ''

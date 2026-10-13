@@ -18,7 +18,7 @@ function ok(cond, msg) {
   else console.log('OK  ', msg);
 }
 
-ok(/^0\.1\.20/.test(ver), 'VERSION is 0.1.20');
+ok(ver === '0.1.21', 'WD 版本精確為 0.1.21');
 ok(fs.existsSync(path.join(root, 'wavedeck/server/exec_md.py')), 'exec_md module exists');
 ok(/btnExecMd/.test(html) && /aiMarketStatus/.test(html) && /執行 MD/.test(html),
   'console has Wave AI–style exec MD button + status/reasoning slots');

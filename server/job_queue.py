@@ -89,13 +89,13 @@ def _worker_loop() -> None:
 
 
 def submit(name: str, fn: Callable[[], Any], *, coalesce: bool = True,
-           meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+           meta: Optional[Dict[str, Any]] = None, timeout: float = 300) -> Dict[str, Any]:
     """
     提交背景任務。
     coalesce=True（預設）：同名已在跑或排隊 → 回 skipped。
     """
     if _durable_default is not None:
-        return _durable_default.submit_callable(name, fn, meta=meta, coalesce=coalesce)
+        return _durable_default.submit_callable(name, fn, meta=meta, coalesce=coalesce, timeout=timeout)
     _ensure_worker()
     name = str(name or '').strip() or 'anonymous'
     meta = dict(meta or {})
@@ -285,14 +285,19 @@ class DurableJobQueue:
             try:
                 with closing(self._connect()) as conn, conn:
                     self._initialize(conn)
+                    legacy_interrupted = conn.execute(
+                        f"SELECT job_id,kind FROM {_JOB_TABLE} WHERE status='running' AND kind LIKE 'legacy:%'").fetchall()
                     conn.execute(f"UPDATE {_JOB_TABLE} SET status='interrupted',stage='服務重啟',"
                                  "finished_at=?,error='前次執行已中斷，請檢查後重試' WHERE status='running'", (self.clock(),))
                     # 沒有可重建函式的舊 H5 工作只保留收據，不猜測重跑。
                     for row in conn.execute(f"SELECT job_id,kind FROM {_JOB_TABLE} WHERE status='queued'").fetchall():
                         if row['kind'] not in self._handlers or row['kind'].startswith('legacy:'):
-                            self._callables.pop(row['job_id'], None)
+                            if row['kind'].startswith('legacy:'):
+                                legacy_interrupted.append(row)
                             conn.execute(f"UPDATE {_JOB_TABLE} SET status='interrupted',stage='無法重建',"
                                          "finished_at=?,error='工作無可恢復的註冊函式' WHERE job_id=?", (self.clock(), row['job_id']))
+                for row in legacy_interrupted:
+                    self._release_legacy_registration(row['kind'], row['job_id'])
                 self._lease = lease
                 self._stop.clear()
                 self._thread = threading.Thread(target=self._run, daemon=True, name='st-managed-updates')
@@ -345,20 +350,36 @@ class DurableJobQueue:
             raise ValueError('工作不存在、仍在執行或不允許重試')
         return self.submit_registered(job['type'], job['params'], reason='retry', parent=job)
 
-    def submit_callable(self, name, fn, *, meta=None, coalesce=True):
+    def submit_callable(self, name, fn, *, meta=None, coalesce=True, timeout=300):
         kind = 'legacy:' + str(name or 'anonymous')
         def invoke(context, params):
             with self._lock:
-                callback = self._callables.pop(context.job['jobId'])
+                callback = self._callables[context.job['jobId']]
             return callback()
         # _run 取得函式時也持同一把鎖，避免工作先啟動才綁定 callback。
         with self._lock:
-            self.register(kind, invoke, priority=80, timeout=300)
-            result = self.submit_registered(kind, {}, reason='legacy', unique=not coalesce)
+            self.register(kind, invoke, priority=80, timeout=timeout)
+            try:
+                result = self.submit_registered(kind, {}, reason='legacy', unique=not coalesce)
+            except Exception:
+                self._release_legacy_registration(kind)
+                raise
             if not result['coalesced']:
                 self._callables[result['job']['jobId']] = fn
         return dict(result, ok=not result['coalesced'], queued=not result['coalesced'], skipped=result['coalesced'], name=name,
                     reason='running' if result['coalesced'] else None)
+
+    def _release_legacy_registration(self, kind, job_id=None):
+        if not kind.startswith('legacy:'):
+            return
+        with self._lock:
+            if job_id is not None:
+                self._callables.pop(job_id, None)
+            active = self._read(
+                f"SELECT job_id FROM {_JOB_TABLE} WHERE kind=? AND status IN ('queued','running') LIMIT 1",
+                (kind,))
+            if not active:
+                self._handlers.pop(kind, None)
 
     def legacy_status(self):
         state = self.status()
@@ -393,6 +414,7 @@ class DurableJobQueue:
                          (status, {'succeeded': '完成', 'failed': '失敗', 'timed_out': '逾時後已結束', 'interrupted': '已中斷'}[status],
                           self.clock(), json.dumps(result, ensure_ascii=False, allow_nan=False) if result is not None else None,
                           error, job['jobId']))
+        self._release_legacy_registration(job['type'], job['jobId'])
 
     def _run(self):
         try:

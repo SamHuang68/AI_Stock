@@ -49,7 +49,12 @@ class ResearchGapTests(unittest.TestCase):
             state = routes.session_state('TW', '2027-09-29', now.replace(hour=hour))
             self.assertIsNone(state['expectedLastDate'])
             self.assertFalse(state['sessionOpen'])
-            self.assertEqual(state['provisional'], hour == 11)
+            # 年度日曆未知時不能按鐘點推定今日已完成；與持久化入口的保守界線一致。
+            self.assertTrue(state['provisional'])
+            prior = routes.session_state('TW', '2027-09-28', now.replace(hour=hour))
+            self.assertFalse(prior['provisional'])
+            self.assertIsNone(prior['expectedLastDate'])
+            self.assertFalse(prior['sessionOpen'])
         rows = [(int((now-timedelta(days=i)).timestamp()), 100, 101, 99, 100, 10) for i in reversed(range(1, 151))]
         routes.clear_cache()
         with patch.object(routes, '_datastore', return_value=ds), patch.object(ds, 'get_bars', return_value=rows), \

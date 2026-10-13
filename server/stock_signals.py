@@ -34,6 +34,12 @@ try:
 except Exception:  # pragma: no cover - Windows 無 tzdata 時的保守退路
     _TZ = {'TW': timezone(timedelta(hours=8)), 'US': timezone(timedelta(hours=-5))}
 
+# 既有體檢與共同持久化使用相同收盤確認期；美股提早收盤依年度日曆。
+DAILY_SESSIONS = {
+    'TW': ((9, 0), (13, 30), timedelta(minutes=30)),
+    'US': ((9, 30), (16, 0), timedelta(minutes=30)),
+}
+
 CONTRACT_VERSION = 1
 ENGINE_ID = 'st-stock-signals/v1'
 EPISTEMIC_EVENTS = 'FACT'

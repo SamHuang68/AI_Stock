@@ -227,7 +227,8 @@
     var alertLine = '—';
     var alertDetail = '未連線';
     if (alertSt) {
-      if (alertSt.running === true || alertSt.ok === true) { alertLine = '運行中'; alertDetail = '後端警報服務正常'; }
+      if (alertSt.ownerOnly) { alertLine = '僅擁有者可見'; alertDetail = '警報設定與狀態僅擁有者可見'; }
+      else if (alertSt.running === true || alertSt.ok === true) { alertLine = '運行中'; alertDetail = '後端警報服務正常'; }
       else if (alertSt.error) { alertLine = '異常'; alertDetail = String(alertSt.error).slice(0, 80); }
       else {
         alertLine = alertSt.status || (alertSt.enabled ? '已設定' : '未啟用');
@@ -377,7 +378,10 @@
     if (!soft) body.innerHTML = '<div class="nw-loading">載入快訊…</div>';
     Promise.all([
       fetch(SRV + '/events', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; }),
-      fetch(SRV + '/alert/status', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
+      fetch(SRV + '/alert/status', { cache: 'no-store' }).then(function (r) {
+        if (r.status === 403) return { ownerOnly: true };
+        return r.ok ? r.json() : { error: '讀取失敗（HTTP ' + r.status + '）' };
+      }).catch(function () { return { error: '讀取失敗，無法確認警報狀態' }; }),
       fetch(SRV + '/flash?n=36', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; })
     ]).then(function (arr) { render(arr[0], arr[1], arr[2]); })
       .finally(function () {

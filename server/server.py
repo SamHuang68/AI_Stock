@@ -82,7 +82,7 @@ from market_contract import attach_quote_contract, cumulative_volume_contract
 from log_once import log_once
 from exchange_source_dates import marketflow_payload, marketflow_cache_key, taipei_today, txf_timestamp, txf_timestamp_check
 from market_routes import market_snapshot, twse_mis_observation, twse_mis_stock_quote, quote_observation, guard_tw_quote
-from http_boundary import BodyReadError, is_same_local_origin, read_json_body
+from http_boundary import BodyReadError, close_rejected_body, is_same_local_origin, read_json_body
 from atomic_store import StoreCorruptError, atomic_write_json, load_json
 from runtime_revision import RUNTIME_COMMIT
 import atomic_store as _atomic_store
@@ -1012,15 +1012,26 @@ _TW_SECTORS = {'date': None, 'map': {}}
 _TECH_SECTORS = {'半導體業', '電腦及週邊設備業', '光電業', '通信網路業',
                  '電子零組件業', '電子通路業', '其他電子業', '資訊服務業'}
 
-def _get_tw_sectors():
+def _get_tw_sectors(*, deadline=None):
     from datetime import date as _date
     today = _date.today().strftime('%Y%m%d')
     if _TW_SECTORS['date'] == today and _TW_SECTORS['map']:
         return _TW_SECTORS['map']
     m = dict(_TW_SECTORS['map'])
     complete = True
+    def incomplete(error):
+        # 失敗仍揭露來源狀態；已取得與先前快取的分類可供這次快照使用。
+        _TW_SECTORS['date'] = None
+        _TW_SECTORS['map'] = dict(m)
+        error.partial_sectors = dict(m)
+        raise error
     for ds in _REVENUE_DATASETS:
-        arr = _openapi_lookup_list(ds)
+        if deadline is not None and time.monotonic() >= deadline:
+            incomplete(TimeoutError('產業分類來源超過整體期限'))
+        try:
+            arr = _openapi_lookup_list(ds, deadline=deadline)
+        except TimeoutError as error:
+            incomplete(error)
         complete = complete and _openapi_meta.get(ds, {}).get('status') == 'ok'
         for row in arr:
             code = str(row.get('公司代號') or '').strip()
@@ -1030,6 +1041,8 @@ def _get_tw_sectors():
     if m:
         _TW_SECTORS['date'] = today if complete else None
         _TW_SECTORS['map'] = m
+    if deadline is not None and not complete:
+        incomplete(RuntimeError('產業分類來源未完成；保留既有快取供後續重試'))
     return m
 
 
@@ -1068,13 +1081,17 @@ def _openapi_lookup(dataset_names, clean_code):
     return None
 
 
-def _openapi_lookup_list(dataset_name):
+def _openapi_lookup_list(dataset_name, *, deadline=None):
     """成功整表快取一天；失敗保留舊快取、短暫退避，不能偽裝成當日空資料。"""
     from datetime import date as _date
     ds = _openapi_dataset(dataset_name)
     with _openapi_state_lock:
         lock = _openapi_locks.setdefault(ds, threading.Lock())
-    with lock:
+    if deadline is None:
+        lock.acquire()
+    elif not lock.acquire(timeout=max(0, deadline - time.monotonic())):
+        raise TimeoutError('官方資料快取鎖超過整體期限')
+    try:
         today = _date.today().strftime('%Y%m%d')
         key = '__list__' + ds
         cached = _openapi_ds.get(key)
@@ -1087,11 +1104,27 @@ def _openapi_lookup_list(dataset_name):
         trace = {'correlationId': uuid.uuid4().hex, 'dataset': ds, 'url': url, 'method': 'GET'}
         _fundamental_trace('openapi_fetch_start', **trace)
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                body = resp.read()
-                trace.update(httpStatus=resp.status, finalUrl=resp.url,
-                             contentType=resp.headers.get('Content-Type', ''), bytes=len(body))
+            import http_client as _hc
+            fetch_url = url
+            origin = urllib.parse.urlsplit(url)
+            for redirects in range(4):
+                resp = _hc.request('GET', fetch_url,
+                                   headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Accept-Encoding': 'gzip'},
+                                   timeout=15, retries=1, deadline=deadline)
+                if not 300 <= resp.status < 400:
+                    break
+                location = next((v for k, v in resp.headers.items() if k.lower() == 'location'), None)
+                if resp.status not in (301, 302, 303, 307, 308) or not location or redirects == 3:
+                    raise _hc.HttpError('官方端點轉址缺少目標或超過三次限制', status=resp.status, url=resp.url)
+                target_url = urllib.parse.urljoin(fetch_url, location)
+                target = urllib.parse.urlsplit(target_url)
+                if (target.scheme, target.netloc.lower()) != (origin.scheme, origin.netloc.lower()) or target.username:
+                    raise _hc.HttpError('官方端點轉址不是同來源網址', status=resp.status, url=resp.url)
+                fetch_url = target_url
+            body = resp.body
+            trace.update(httpStatus=resp.status, finalUrl=resp.url,
+                         contentType=next((v for k, v in resp.headers.items() if k.lower() == 'content-type'), ''),
+                         bytes=len(body))
             if 'text/html' in trace['contentType'].lower() or body.lstrip().startswith(b'<'):
                 raise ValueError('官方端點回傳 HTML，未取得 JSON 資料')
             arr = json.loads(body)
@@ -1104,6 +1137,14 @@ def _openapi_lookup_list(dataset_name):
                                elapsedMs=round((time.monotonic() - started) * 1000))
             return arr
         except Exception as e:
+            if (isinstance(e, _hc.HttpError) and e.status is None and
+                    isinstance(e.cause, _hc.RequestDeadlineExceeded)):
+                # 呼叫端預算耗盡不是共用來源故障，不能封鎖其他讀取者。
+                _fundamental_trace('openapi_fetch_failed', **trace, error=str(e),
+                                   elapsedMs=round((time.monotonic() - started) * 1000))
+                raise e.cause
+            if isinstance(e, _hc.HttpError):
+                trace.update(httpStatus=e.status, finalUrl=e.url)
             if isinstance(e, urllib.error.HTTPError):
                 trace.update(httpStatus=e.code, finalUrl=e.url,
                              contentType=e.headers.get('Content-Type', ''))
@@ -1113,6 +1154,8 @@ def _openapi_lookup_list(dataset_name):
                                elapsedMs=round((time.monotonic() - started) * 1000))
             print(f'[官方資料] {ds} 取得失敗：{e}；60 秒後可重試')
             return []
+    finally:
+        lock.release()
 
 
 def _revenue_deadline(today):
@@ -2006,19 +2049,21 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
                 'mkt': 'TW', 'ex': 'TPEx',
             })
 
+    source_deadline = time.monotonic() + 8.5
+
     def _get_json(url, timeout=8):
-        req = urllib.request.Request(
-            url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read())
+        # TPEx 約 5 MB 的批次檔曾在後端日誌累積數百次連線重設／IncompleteRead；沿用 http_client
+        # 的暫態重試與 gzip。呼叫端 join 上限 9 秒，故只重試一次。
+        import http_client as _hc
+        return _hc.fetch_json(
+            url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Accept-Encoding': 'gzip'},
+            timeout=timeout, retries=1, deadline=source_deadline)
 
     # TWSE + TPEx 並行（本函式可能在 thread pool 內執行，用獨立短線程避免巢狀死鎖）
-    twse_rows = None
-    tpex_rows = None
-    err_twse = err_tpex = None
+    source_results = {"TWSE": (None, None), "TPEx": (None, None)}
 
     def _twse():
-        nonlocal twse_rows, err_twse
+        twse_rows = None
         try:
             if target_date:
                 import sector_flow as _dated_sector_flow
@@ -2032,29 +2077,54 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
             else:
                 twse_rows = _get_json(
                     'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL', timeout=8)
+            source_results["TWSE"] = (twse_rows, None)
         except Exception as e:
-            err_twse = e
+            source_results["TWSE"] = (None, e)
 
     def _tpex():
-        nonlocal tpex_rows, err_tpex
+        tpex_rows = None
         try:
             tpex_rows = _get_json(
                 'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes', timeout=8)
+            source_results["TPEx"] = (tpex_rows, None)
         except Exception as e:
-            err_tpex = e
+            source_results["TPEx"] = (None, e)
 
     t1 = threading.Thread(target=_twse, daemon=True)
     t2 = threading.Thread(target=_tpex, daemon=True)
-    t1.start(); t2.start()
-    t1.join(9); t2.join(9)
+    sector_result = ({}, None)
+    def _sectors():
+        nonlocal sector_result
+        try:
+            sector_result = (_get_tw_sectors(deadline=source_deadline) or {}, None)
+        except Exception as error:
+            sector_result = (dict(getattr(error, 'partial_sectors', {})), error)
+    t3 = threading.Thread(target=_sectors, daemon=True)
+    t1.start(); t2.start(); t3.start()
+    t1.join(max(0, source_deadline - time.monotonic()))
+    t2.join(max(0, source_deadline - time.monotonic()))
+    t3.join(max(0, source_deadline - time.monotonic()))
+    smap, sector_error = ({}, TimeoutError('產業分類來源超過整體期限')) if t3.is_alive() else sector_result
+    # 主執行緒只使用完成後的快照；晚到 worker 不會改寫這些區域變數。
+    twse_rows, err_twse = (None, TimeoutError('TWSE 來源超過整體期限')) if t1.is_alive() else source_results['TWSE']
+    tpex_rows, err_tpex = (None, TimeoutError('TPEx 來源超過整體期限')) if t2.is_alive() else source_results['TPEx']
+    source_used = {'TWSE': False, 'TPEx': False}
     if twse_rows is not None:
+        before_rows, before_members, before_date = len(rows), len(member_rows), date_s
         try:
             ingest_twse(twse_rows)
+            if len(rows) == before_rows and len(member_rows) == before_members:
+                raise ValueError('TWSE 未取得可用資料')
+            source_used['TWSE'] = True
         except Exception as e:
+            del rows[before_rows:]; del member_rows[before_members:]
+            date_s = before_date
+            err_twse = e
             print('[movers] TWSE ingest', e)
     elif err_twse:
         print('[movers] TWSE', err_twse)
     if tpex_rows is not None:
+        before_rows, before_date = len(rows), tpex_date_s
         try:
             if target_date:
                 import sector_flow as _session_sector_flow
@@ -2062,18 +2132,24 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
                 _tpex_day = _session_sector_flow.normalize_session_date(
                     (tpex_rows[0] if tpex_rows else {}).get('Date'))
                 if _target_day and _tpex_day != _target_day:
-                    print('[movers] skip TPEx session mismatch', _tpex_day, _target_day)
-                else:
-                    ingest_tpex(tpex_rows)
-            else:
-                ingest_tpex(tpex_rows)
+                    raise ValueError('TPEx 資料日與目標交易日不一致')
+            ingest_tpex(tpex_rows)
+            if len(rows) == before_rows:
+                raise ValueError('TPEx 未取得可用資料')
+            source_used['TPEx'] = True
         except Exception as e:
+            del rows[before_rows:]
+            tpex_date_s = before_date
+            err_tpex = e
             print('[movers] TPEx ingest', e)
     elif err_tpex:
         print('[movers] TPEx', err_tpex)
+    source_errors = {name: str(error) for name, error in (('TWSE', err_twse), ('TPEx', err_tpex)) if error}
+    if sector_error:
+        source_errors['sectors'] = str(sector_error)
 
     if not rows and not (include_rows and member_rows):
-        return {'ok': False, 'date': date_s, 'gainers': [], 'losers': [], 'source': None, 'error': 'no rows'}
+        return {'ok': False, 'date': date_s, 'gainers': [], 'losers': [], 'source': None, 'error': 'no rows', 'sourceErrors': source_errors}
 
     rows.sort(key=lambda x: x['changePct'], reverse=True)
     n = max(1, min(int(n or 8), 30))
@@ -2094,11 +2170,6 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
     limit_down = [r for r in reversed(rows) if _near_twse_eq(r, 'down')][:40]
 
     # 產業別（OpenAPI 月營收「產業別」）— 供總覽近漲跌停標籤／與類股輪動聯動
-    try:
-        smap = _get_tw_sectors() or {}
-    except Exception as e:
-        print('[movers] sectors map', e)
-        smap = {}
 
     def _tag_industry(lst):
         for r in lst or []:
@@ -2165,7 +2236,9 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
         'limitDown': limit_down,
         'limitThreshold': NEAR_LIMIT,
         'limitNote': '近漲跌停近似：上市四碼證券（含存託憑證）|漲跌|≥9.9%，不含 ETF／櫃買；家數≠證交所官方括號',
-        'source': 'TWSE STOCK_DAY_ALL + TPEx daily',
+        'source': ' + '.join(name for name, used in (('TWSE STOCK_DAY_ALL', source_used['TWSE']), ('TPEx daily', source_used['TPEx'])) if used),
+        'sourceErrors': source_errors,
+        'partial': bool(source_errors),
         'count': len(rows),
         'industryTurnoverYi': industry_turnover_yi,
         'industryTurnoverTotalYi': industry_turnover_total_yi,
@@ -2173,14 +2246,14 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
         'classificationCount': len(classified_codes),
         'classificationTotal': len(classification_codes),
         'classificationCoveragePct': round(classification_coverage, 2),
-        'classificationComplete': bool(classification_codes) and classified_codes == classification_codes,
+        'classificationComplete': not sector_error and bool(classification_codes) and classified_codes == classification_codes,
         'industryTurnoverDate': date_s,
         'tpexDate': tpex_date_s,
         'industryTurnoverSource': (
             'TWSE MI_INDEX ALLBUT0999 dated TradeValue + issuer industry classification'
             if target_date else
             'TWSE STOCK_DAY_ALL TradeValue + issuer industry classification'),
-        **({'rows': member_rows, 'twseAvailable': twse_rows is not None} if include_rows else {}),
+        **({'rows': member_rows, 'twseAvailable': source_used['TWSE']} if include_rows else {}),
     }
 
 
@@ -2448,6 +2521,18 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
 class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, UpdateRoutesMixin, StockSignalsRoutesMixin, FeaturesRoutesMixin, DecisionRoutesMixin, OvernightIntradayRoutesMixin, ConditionalExpectationRoutesMixin, PeakObservationRoutesMixin, PeakObservation100dRoutesMixin, Touxin5dRoutesMixin, ShadowMultifactorRoutesMixin, OptionsRoutesMixin, PulseRoutesMixin, AiRoutesMixin, EtfRoutesMixin, SimpleHTTPRequestHandler):
     _BASE = _BASE
     protocol_version = 'HTTP/1.1'   # enables keep-alive
+
+    def parse_request(self):
+        # parser 可能在賦值 headers 前拒絕；不能保留上一個請求的標頭。
+        self.headers = self.MessageClass()
+        return super().parse_request()
+
+    def send_error(self, code, message=None, explain=None):
+        if getattr(self, 'headers', None) is None:
+            self.headers = self.MessageClass()
+        if self._rejected_body_present():
+            close_rejected_body(self)
+        return super().send_error(code, message, explain)
 
     def _research_runtime(self):
         """研究僅注入既有快取；不把具有抓取副作用的函式傳入研究層。"""
@@ -2813,6 +2898,12 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             '/api/override-alpha', '/api/override-alpha/review', '/api/llm-gate',
         }
 
+    @staticmethod
+    def _wavedeck_read_cors_path(path):
+        # 沿用 WD 已使用的市場 API；只開放加權指數，保留路由的單次解碼契約。
+        return path in {'/twindex', '/breadth'} or (
+            path.startswith('/fundamental/') and unquote(path[13:]) == '^TWII')
+
     def _wavedeck_origin_ok(self, origin):
         if not self._bridge_cors_path(self.path.split('?')[0]):
             return False
@@ -2834,14 +2925,34 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         return self._wavedeck_origin_ok(o)
 
     def _cors_origin(self):
-        """Only the explicit WaveDeck bridge is cross-origin capable."""
+        """橋接與唯讀市場查詢分開授權，不擴張 POST 的來源白名單。"""
         origin = self.headers.get('Origin') or ''
-        return origin if origin and self._wavedeck_origin_ok(origin) else None
+        if not origin:
+            return None
+        if self._wavedeck_origin_ok(origin):
+            return origin
+        if not self._wavedeck_read_cors_path(self.path.split('?', 1)[0]):
+            return None
+        method = getattr(self, 'command', '')
+        if method == 'OPTIONS':
+            method = self.headers.get('Access-Control-Request-Method', 'GET')
+        if method != 'GET':
+            return None
+        import wavedeck_bus as wdb
+        # 沿用既有 WD 埠清單；精確比對瀏覽器 Origin，不接受帳密、路徑或非 HTTP。
+        allowed = {f'http://{host}:{port}'
+                   for host in ('127.0.0.1', 'localhost') for port in wdb.WD_PORTS}
+        return origin if origin in allowed else None
 
     def _method_not_allowed(self, allow):
+        rejecting_body = self._rejected_body_present()
+        if rejecting_body:
+            close_rejected_body(self)
         body = json.dumps({'error': 'method not allowed', 'traceId': self._ensure_trace_id()}, ensure_ascii=False).encode('utf-8')
         self.send_response(405)
         self.send_header('Allow', allow)
+        if rejecting_body:
+            self.send_header('Connection', 'close')
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
@@ -2864,7 +2975,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 body = read_json_body(self, max_bytes=4096)
                 import daily_cache_jobs
                 result = daily_cache_jobs.cancel(body.get('jobId')) if p.endswith('/cancel') else daily_cache_jobs.submit(body)
-                self._ok(json.dumps(result, ensure_ascii=False).encode())
+                self._respond_daily_cache_result(result)
             except BodyReadError as exc:
                 self._err(str(exc), exc.status)
             except ValueError as exc:
@@ -2990,8 +3101,15 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         if not origin:
             self._err('forbidden (cross-origin)', 403)
             return
+        declared_body = self._rejected_body_present()
+        if declared_body:
+            close_rejected_body(self)
         self.send_response(204)
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        if declared_body:
+            self.send_header('Connection', 'close')
+        methods = ('GET, OPTIONS' if self._wavedeck_read_cors_path(self.path.split('?', 1)[0])
+                   else 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', methods)
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-ST-Trace-ID')
         self.send_header('Access-Control-Expose-Headers', 'X-ST-Trace-ID')
         self.end_headers()
@@ -3044,12 +3162,24 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         self.wfile.write(body)
 
     def _err(self, msg, code=404):
+        rejecting_body = self._rejected_body_present()
+        if rejecting_body:
+            close_rejected_body(self)
         body = json.dumps({'error': msg, 'traceId': self._ensure_trace_id()}, ensure_ascii=False).encode('utf-8')
         self.send_response(code)
+        if rejecting_body:
+            self.send_header('Connection', 'close')
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _rejected_body_present(self):
+        # GET 也可能宣告本文；拒絕時不能讓其殘留在 HTTP/1.1 parser。
+        lengths = self.headers.get_all('Content-Length')
+        return (getattr(self, 'command', '') in ('POST', 'PUT', 'PATCH', 'DELETE')
+                or bool(self.headers.get('Transfer-Encoding'))
+                or bool(lengths and (len(lengths) != 1 or lengths[0] != '0')))
 
     def _handle_wavedeck_bridge_get(self):
         """WD 回報／共享成本計數器（GET /bridge/wavedeck 或 /api/cost-meter）。"""
@@ -4575,7 +4705,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         out = _fetch_day_movers(n)
         body = json.dumps(out, ensure_ascii=False).encode()
         if out.get('ok'):
-            _cache.set(key, body, ttl=300)
+            _cache.set(key, body, ttl=30 if out.get('partial') or out.get('sourceErrors') else 300)
         self._ok(body)
 
     def _handle_breadth(self):
@@ -4726,7 +4856,8 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             raw = None if refresh else _cache.get(key)
             snapshot = json.loads(raw) if raw is not None else _fetch_day_movers(include_rows=True)
             if raw is None and snapshot.get('twseAvailable') and snapshot.get('classificationCount'):
-                _cache.set(key, json.dumps(snapshot, ensure_ascii=False).encode(), ttl=300)
+                _cache.set(key, json.dumps(snapshot, ensure_ascii=False).encode(),
+                           ttl=30 if snapshot.get('partial') or snapshot.get('sourceErrors') else 300)
             out = build_tw_members(snapshot, sector)
         except Exception as error:
             print('[類股成員] 來源不可用：', type(error).__name__)
@@ -5379,17 +5510,34 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 years = int(years) if years not in (None, '') else None
             except Exception:
                 years = None
-            self._ok(json.dumps(datasources.refresh(
-                (body.get('id') or '').strip(),
+            source_id = (body.get('id') or '').strip()
+            result = datasources.refresh(
+                source_id,
                 density=body.get('density'),
                 dense=body.get('dense'),
                 step=step,
                 years=years,
-            ), ensure_ascii=False).encode())
+                symbols=body.get('symbols'),
+            )
+            if source_id == 'db':
+                self._respond_daily_cache_result(result)
+            else:
+                self._ok(json.dumps(result, ensure_ascii=False).encode())
         except BodyReadError as e:
             self._err(str(e), e.status)
+        except ValueError as e:
+            self._err(str(e), 400)
         except Exception as e:
             self._err('datasource refresh failed: ' + str(e), 500)
+
+    def _respond_daily_cache_result(self, result):
+        """新舊日線入口共用佇列接受／拒收契約。"""
+        if not result.get('ok'):
+            message = result.get('error') or ('已有日線更新進行中，請等待完成或取消'
+                                             if result.get('reason') == 'busy' else '日線更新未接受')
+            self._err(message, 503 if result.get('reason') in ('queue_full', 'queue_error') else 409)
+            return
+        self._ok(json.dumps(result, ensure_ascii=False).encode())
 
     def _handle_notify(self):
         """v4.0: POST /notify  body:{text, subject?} → 用 alert_config 的 Telegram/Email 寄出
@@ -6532,11 +6680,6 @@ if __name__ == '__main__':
                 print('[stock-signal] push daemon started (%s)' % _ac.get('stock_signal_push'))
         except Exception as _e:
             print('[alert] start failed:', _e)
-    try:
-        import 個股研究維護 as _research_maintenance
-        _research_maintenance.start_daemon()
-    except Exception as _e:
-        print('每日個股留存啟動失敗：', type(_e).__name__)
     if getattr(sys, 'frozen', False):
         # 打包成 app 時:啟動後自動開 tip 總覽（#pulse）；絕不開無 hash 舊圖表殼
         try:
@@ -6554,6 +6697,18 @@ if __name__ == '__main__':
                                     _pulse_decision.committed_pulse_for_job):
             raise RuntimeError('無法取得唯一 Pulse 更新工作者，停止啟動以避免快照分歧')
         configure_updates(_pulse_updates)
+        # 每日個股留存會在交易日 14:00-21:00 一啟動就排工作；必須等持久佇列接線後才能啟動，
+        # 否則舊佇列已有工作時 configure_updates 會拒絕並使服務啟動失敗。
+        try:
+            import 個股研究維護 as _research_maintenance
+            _research_maintenance.start_daemon()
+        except Exception as _e:
+            print('每日個股留存啟動失敗：', type(_e).__name__)
+        try:
+            import options_schedule as _options_schedule
+            _options_schedule.start_daemon(_update_coordinator().submit)
+        except Exception as _e:
+            print('選擇權每日更新排程啟動失敗：', type(_e).__name__)
         _http_server.serve_forever()
     finally:
         try:

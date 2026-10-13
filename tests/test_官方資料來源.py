@@ -16,15 +16,13 @@ spec = importlib.util.spec_from_file_location('st_openapi_test', ROOT / 'server/
 st = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(st)
 import industry_revenue as revenue
+import http_client
 
 
 def response(value, *, html=False):
     body = value.encode() if isinstance(value, str) else json.dumps(value).encode()
-    obj = Mock(status=200, url='https://openapi.twse.com.tw/404.html' if html else 'https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O')
-    obj.headers = {'Content-Type': 'text/html' if html else 'application/json'}
-    obj.read.return_value = body
-    obj.__enter__ = Mock(return_value=obj)
-    obj.__exit__ = Mock(return_value=False)
+    obj = http_client.HttpResponse(200, {'Content-Type': 'text/html' if html else 'application/json'}, body,
+                                  'https://openapi.twse.com.tw/404.html' if html else 'https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O')
     return obj
 
 
@@ -34,19 +32,20 @@ class OfficialSourceTests(unittest.TestCase):
         st._openapi_meta.clear()
         st._openapi_locks.clear()
         self.trace = patch.object(st, '_fundamental_trace').start()
+        patch('urllib.request.urlopen', side_effect=AssertionError('官方來源測試不得連外')).start()
         self.addCleanup(patch.stopall)
 
     def test_otc_alias_and_single_lookup_share_one_batch(self):
         rows = [{'公司代號': '5347', '公司名稱': '世界'}]
-        with patch.object(st.urllib.request, 'urlopen', return_value=response(rows)) as fetch:
+        with patch.object(http_client, 'request', return_value=response(rows)) as fetch:
             self.assertEqual(st._openapi_lookup_list('t187ap05_O'), rows)
             self.assertEqual(st._openapi_lookup(['tpex:mopsfin_t187ap05_O'], '5347'), rows[0])
         self.assertEqual(fetch.call_count, 1)
-        self.assertEqual(fetch.call_args.args[0].full_url, 'https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O')
+        self.assertEqual(fetch.call_args.args[1], 'https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O')
 
     def test_concurrent_consumers_fetch_dataset_once(self):
         rows = [{'Code': '2330'}]
-        with patch.object(st.urllib.request, 'urlopen', return_value=response(rows)) as fetch:
+        with patch.object(http_client, 'request', return_value=response(rows)) as fetch:
             with ThreadPoolExecutor(max_workers=6) as pool:
                 results = list(pool.map(st._openapi_lookup_list, ['t187ap05_L'] * 6))
         self.assertEqual(results, [rows] * 6)
@@ -59,7 +58,7 @@ class OfficialSourceTests(unittest.TestCase):
         clock = [100.0]
         rows = [{'公司代號': '2330'}]
         with patch.object(st.time, 'monotonic', side_effect=lambda: clock[0]), \
-                patch.object(st.urllib.request, 'urlopen', side_effect=[response('<html>404</html>', html=True), response(rows)]) as fetch:
+                patch.object(http_client, 'request', side_effect=[response('<html>404</html>', html=True), response(rows)]) as fetch:
             self.assertEqual(st._openapi_lookup_list(ds), [])
             self.assertEqual(st._openapi_ds['__list__' + ds], old)
             self.assertEqual(st._openapi_meta[ds]['status'], 'unavailable')
@@ -74,13 +73,13 @@ class OfficialSourceTests(unittest.TestCase):
         self.assertIn('correlationId', failed.kwargs)
 
     def test_schema_failure_is_not_a_successful_empty_day(self):
-        with patch.object(st.urllib.request, 'urlopen', return_value=response({'error': '維護中'})):
+        with patch.object(http_client, 'request', return_value=response({'error': '維護中'})):
             self.assertEqual(st._openapi_lookup_list('t187ap05_L'), [])
         self.assertNotIn('__list__t187ap05_L', st._openapi_ds)
         self.assertEqual(st._openapi_meta['t187ap05_L']['status'], 'unavailable')
 
     def test_real_empty_array_is_success_and_cached(self):
-        with patch.object(st.urllib.request, 'urlopen', return_value=response([])) as fetch:
+        with patch.object(http_client, 'request', return_value=response([])) as fetch:
             self.assertEqual(st._openapi_lookup_list('exchangeReport/TWT48U_ALL'), [])
             self.assertEqual(st._openapi_lookup_list('exchangeReport/TWT48U_ALL'), [])
         self.assertEqual(fetch.call_count, 1)
@@ -91,11 +90,11 @@ class OfficialSourceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp, patch.object(st, '_BASE', temp), \
                 patch.object(st, '_TW_NAMES', {'date': None, 'map': {}}), \
                 patch.object(st, '_TW_SECTORS', {'date': None, 'map': {}}), \
-                patch.object(st.urllib.request, 'urlopen', return_value=response(rows)) as fetch:
+                patch.object(http_client, 'request', return_value=response(rows)) as fetch:
             self.assertEqual(st._get_tw_names()['5347'], '世界')
             self.assertEqual(st._get_tw_sectors()['5347'], '半導體業')
             self.assertEqual(fetch.call_count, 4)
-            self.assertNotIn('/opendata/t187ap05_O', '\n'.join(c.args[0].full_url for c in fetch.call_args_list))
+            self.assertNotIn('/opendata/t187ap05_O', '\n'.join(c.args[1] for c in fetch.call_args_list))
 
     def test_dividend_parser_uses_official_fields_without_truncation(self):
         rows = [{'Code': str(1000 + n), 'Name': '測試', 'Date': '1151001', 'Exdividend': '息'} for n in range(220)]
@@ -117,7 +116,7 @@ class OfficialSourceTests(unittest.TestCase):
         captured = []
         handler = SimpleNamespace(path='/events?code=2330', _ok=captured.append)
         fake_cache = SimpleNamespace(get=lambda _: None, set=Mock())
-        with patch.object(st, '_cache', fake_cache), patch.object(st.urllib.request, 'urlopen', side_effect=TimeoutError('來源逾時')):
+        with patch.object(st, '_cache', fake_cache), patch.object(http_client, 'request', side_effect=TimeoutError('來源逾時')):
             st.Handler._handle_events(handler)
         payload = json.loads(captured[0])
         self.assertEqual(payload['exDividendSource']['status'], 'unavailable')

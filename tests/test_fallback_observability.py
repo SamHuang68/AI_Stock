@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import contextlib
 import io
-import json
 import sys
 import unittest
 from pathlib import Path
@@ -24,27 +23,26 @@ TWSE_ROWS = [
 ]
 
 
-class _Response(io.BytesIO):
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
-
-
-def _fake_urlopen(request, timeout=None):
-    url = getattr(request, 'full_url', str(request))
+def _fake_fetch_json(url, **kwargs):
     if 'STOCK_DAY_ALL' in url:
-        return _Response(json.dumps(TWSE_ROWS).encode())
+        return TWSE_ROWS
     if 'tpex' in url:
-        return _Response(b'[]')
-    raise OSError('offline test: ' + url)
+        return []
+    raise AssertionError('測試未明列的來源：' + url)
 
 
 def _run_day_movers():
     out = io.StringIO()
-    with mock.patch('urllib.request.urlopen', _fake_urlopen), contextlib.redirect_stdout(out):
+    with mock.patch('http_client.fetch_json', _fake_fetch_json), \
+            mock.patch.object(server, '_get_tw_sectors', return_value={'2330': '半導體業', '2317': '其他電子業'}), \
+            mock.patch('urllib.request.urlopen', side_effect=AssertionError('離線測試禁止額外來源')) as extra, \
+            mock.patch('http_client._HostPool.acquire', side_effect=AssertionError('離線測試禁止連線池外連')) as pool, \
+            mock.patch('socket.create_connection', side_effect=AssertionError('離線測試禁止 socket 外連')) as network, \
+            contextlib.redirect_stdout(out):
         result = server._fetch_day_movers(5)
+    extra.assert_not_called()
+    pool.assert_not_called()
+    network.assert_not_called()
     return result, out.getvalue()
 
 
@@ -52,6 +50,9 @@ class NumericParsersDoNotSwallowProgramErrors(unittest.TestCase):
     def test_with_a_healthy_module_the_ranking_has_rows_and_no_ingest_error_is_logged(self):
         result, output = _run_day_movers()
         self.assertTrue(result.get('ok'), result)
+        self.assertEqual(result['gainers'][0]['code'], '2330')
+        self.assertEqual(result['losers'][0]['code'], '2317')
+        self.assertEqual(result['gainers'][0]['price'], 1050.0)
         self.assertNotIn('[movers] TWSE ingest', output)
 
     def test_a_missing_global_is_logged_instead_of_silently_producing_no_rows(self):

@@ -26,7 +26,11 @@ class ReceiptTransportTests(unittest.TestCase):
         raw = b'{ "fields": ["date"], "notes": [], "data": [] }\n'
         budget = jobs.Budget(threading.Event())
         for module, fetch in ((daily, daily.get_json), (jobs, budget.get_json)):
-            with patch.object(module, 'urlopen', return_value=io.BytesIO(raw)), patch.object(daily.time, 'sleep'):
+            transport = (patch.object(daily, 'urlopen', return_value=io.BytesIO(raw)) if module is daily else
+                         patch.object(jobs.http_client, 'request',
+                                      return_value=jobs.http_client.HttpResponse(200, {}, raw, self.url)))
+            with transport, patch.object(daily.time, 'sleep'), \
+                    patch('urllib.request.urlopen', side_effect=AssertionError('離線收據測試不得連外')):
                 result = fetch(self.url)
             value, digest = result
             self.assertEqual(value, json.loads(raw))
@@ -134,6 +138,22 @@ class SeedQualityTests(unittest.TestCase):
         self.assertEqual(result['quality']['missing'], 1)
         self.assertEqual(result['quality']['missingDates'], ['2026-10-02'])
         self.assertFalse(result['qualityComplete'])
+
+    def test_summary_reports_actual_accepted_and_excluded_incomplete_rows(self):
+        with patch.object(datastore, 'completed_daily_cutoff', return_value=date(2026, 10, 1)):
+            result = self.run_seed(self.source())
+        self.assertEqual(result['rows'], 12)
+        self.assertEqual(result['excludedIncomplete'], 1)
+        self.assertEqual(result['quality']['observed'], 13)
+        self.assertEqual(result['quality']['missingDates'], ['2026-10-02'])
+        self.assertFalse(result['qualityComplete'])
+
+    def test_reused_month_count_uses_accepted_quality_and_reveals_no_new_exclusions(self):
+        result = self.run_seed(self.source())
+        again = self.run_seed(lambda url: self.fail('完整收據不應重抓'))
+        self.assertEqual(result['rows'], 13)
+        self.assertEqual(again['rows'], 13)
+        self.assertEqual(again['excludedIncomplete'], 0)
 
 
 if __name__ == '__main__':

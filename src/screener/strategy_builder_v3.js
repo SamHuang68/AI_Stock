@@ -169,7 +169,29 @@
     return res;
   }
 
+  function validateDefinition(d) {
+    if (!d || d.kind !== 'builder') throw new Error('策略須為條件組合器定義');
+    for (const group of ['entry', 'exit']) {
+      if (!Array.isArray(d[group]) || !['AND', 'OR'].includes(d[group + 'Combine'])) throw new Error('策略條件組無效');
+      for (const c of d[group]) {
+        if (!c || !Object.hasOwn(COMPARATORS, c.cmp) || !['num', 'ind'].includes(c.rightMode)) throw new Error('策略比較條件無效');
+        for (const spec of [c.left, ...(c.rightMode === 'ind' ? [c.right] : [])]) {
+          if (!spec || !Object.hasOwn(INDICATORS, spec.ind)) throw new Error('策略指標無效');
+          if (INDICATORS[spec.ind].kind === 'n' && (!Number.isInteger(spec.n) || spec.n < 1)) throw new Error('指標期數須為正整數');
+        }
+        if (c.rightMode === 'num' && !Number.isFinite(c.rightNum)) throw new Error('比較數值無效');
+      }
+    }
+    return true;
+  }
+  function compileDefinition(d, cols) {
+    validateDefinition(d);
+    return { buy: evalConditions(d.entry, d.entryCombine, cols), sell: evalConditions(d.exit, d.exitCombine, cols) };
+  }
+  window.StrategyBuilder = { validateDefinition, compileDefinition };
+
   // ---------- 狀態 ----------
+  let frozenVersion = null;
   let model = null;   // {entry:[],entryCombine,exit:[],exitCombine,tp,sl,maxBars}
   function blankCond() { return { left: { ind: 'sma', n: 20 }, cmp: 'xup', rightMode: 'ind', right: { ind: 'sma', n: 60 }, rightNum: 0 }; }
   function defModel() {
@@ -306,6 +328,63 @@
         renderResult(r);
       }
     } catch (error) { msg.textContent = '回測未完成：' + error.message; }
+  }
+
+  function currentDefinition() {
+    return JSON.parse(JSON.stringify({ kind: 'builder', entry: model.entry, exit: model.exit,
+      entryCombine: model.entryCombine, exitCombine: model.exitCombine }));
+  }
+  async function freezeCurrent() {
+    readUI();
+    const opts = window.Backtest.settings(executionOptions());
+    const execution = { timeframe: '1d' };
+    for (const key of Object.keys(window.Backtest.DEFAULTS)) execution[key] = opts[key];
+    const context = { symbol: typeof S !== 'undefined' ? S.sym : '',
+      asset_type: document.getElementById('sb-asset-type').value, regime: 'unspecified' };
+    const manifest = await window.StrategyVersion.freeze(currentDefinition(), execution, context, model.strategy_id);
+    await window.StrategyVersion.save(manifest);
+    model.strategy_id = manifest.strategy_id;
+    frozenVersion = manifest;
+    refreshVersions();
+    return manifest;
+  }
+  function refreshVersions() {
+    const select = document.getElementById('sb-versions');
+    if (!select || !window.StrategyVersion) return;
+    select.replaceChildren(new Option('— 凍結版本 —', ''));
+    window.StrategyVersion.list().forEach(m => select.add(new Option(
+      `${m.context.symbol}｜${m.created_at}｜${m.version.slice(0, 12)}`, m.strategy_id + ':' + m.version)));
+    if (frozenVersion) select.value = frozenVersion.strategy_id + ':' + frozenVersion.version;
+  }
+  async function versionAction(action) {
+    const msg = document.getElementById('sb-msg');
+    const controls = [...document.querySelectorAll('#sb-box input,#sb-box select,#sb-box button:not(.x)')];
+    const disabled = controls.map(c => c.disabled);
+    controls.forEach(c => c.disabled = true);
+    try { await action(msg); } catch (error) { msg.textContent = '策略版本作業未完成：' + error.message; }
+    finally { controls.forEach((c, i) => c.disabled = disabled[i]); }
+  }
+  async function runCustom(msg) {
+    window._sbLast = null;
+    document.getElementById('sb-result').textContent = '';
+    const candles = getCandles();
+    if (!candles || candles.length < 60) throw new Error('請先載入至少 60 根日線');
+    // 先複製資料與截止日，再進行非同步雜湊，避免切圖造成身分漂移。
+    const data = JSON.parse(JSON.stringify(candles));
+    const splitOptions = { trainEnd: document.getElementById('sb-custom-train-end').value,
+      testEnd: document.getElementById('sb-custom-test-end').value };
+    const manifest = await freezeCurrent();
+    const split = window.Backtest.evaluateCustom(data, manifest.definition, compileDefinition,
+      { ...manifest.execution, ...splitOptions });
+    const report = { schema: 'st.strategy-oos/v1', manifest, strategy_id: manifest.strategy_id,
+      version: manifest.version, created_at: new Date().toISOString(),
+      data_hash: await window.StrategyVersion.hash(data), data_bars: data.length,
+      data_start: window.Backtest.dateKey(data[0].time, manifest.execution.market),
+      data_end: window.Backtest.dateKey(data[data.length - 1].time, manifest.execution.market),
+      engine_version: split.engineVersion, split };
+    window._sbLast = { r: split.test, candles: data, split, report };
+    renderResult(split.test);
+    msg.textContent = `固定自訂策略 ${manifest.version.slice(0, 12)}｜訓練截止 ${split.trainEnd}／測試 ${split.testStart} 至 ${split.testEnd}。進出場條件與成本完全固定；指標讀取過去暖機，測試期持倉與待成交委託重設。反覆修改仍可能污染樣本外結果。`;
   }
 
   function fmtPF(v) { return v == null ? '—' : v === Infinity ? '∞' : v.toFixed(2); }
@@ -451,6 +530,15 @@
         <details><summary>八種既有策略的固定樣本外比較</summary><p>先固定日期，僅用訓練期挑選策略；沿用上方成本與停利停損。反覆查看測試結果後改設定，仍可能造成樣本外污染。</p>
           <div class="sb-split"><label>訓練截止 <input id="sb-train-end" type="date" /></label><label>測試截止 <input id="sb-test-end" type="date" /></label><button id="sb-holdout">執行固定切分</button></div>
         </details>
+        <details><summary>目前自訂條件的版本與樣本外驗證</summary>
+          <p>固定目前進出場條件與成本，不另選策略。資產類別由使用者確認，僅支援股票／ETF 日線。</p>
+          <div class="sb-split"><label>訓練截止 <input id="sb-custom-train-end" type="date" /></label><label>測試截止 <input id="sb-custom-test-end" type="date" /></label></div>
+          <div class="sb-toolbar"><label>資產類別 <select id="sb-asset-type"><option value="equity">股票</option><option value="etf">ETF</option></select></label>
+            <button id="sb-freeze">凍結目前版本</button><button id="sb-custom-holdout">執行自訂樣本外驗證</button></div>
+          <div class="sb-toolbar"><label>已保存版本 <select id="sb-versions" style="max-width:100%"></select></label>
+            <button id="sb-export-version">匯出選定版本 JSON</button><button id="sb-export-report">匯出本次樣本外報告</button></div>
+          <p>修改參數會產生新版本；既有版本保留。雜湊用於核對內容，不是安全簽章。版本匯出不會自動啟用 WaveDeck 執行。</p>
+        </details>
         <div id="sb-msg" role="status" aria-live="polite"></div>
         <div id="sb-result"></div>
       </div>`;
@@ -460,12 +548,30 @@
       m.querySelector('#sb-run').onclick = () => run(false);
       m.querySelector('#sb-holdout').onclick = () => run(true);
       m.querySelector('#sb-save').onclick = saveModel;
+      m.querySelector('#sb-freeze').onclick = () => versionAction(async msg => {
+        const v = await freezeCurrent(); msg.textContent = '已保存凍結版本：' + v.version;
+      });
+      m.querySelector('#sb-custom-holdout').onclick = () => versionAction(runCustom);
+      m.querySelector('#sb-export-version').onclick = () => versionAction(async msg => {
+        const selected = document.getElementById('sb-versions').value;
+        const v = window.StrategyVersion.list().find(v => v.strategy_id + ':' + v.version === selected);
+        if (!v) throw new Error('請先凍結或選擇版本');
+        await window.StrategyVersion.verify(v);
+        window.StrategyVersion.download(v, '策略版本-' + v.version.slice(0, 12) + '.json');
+        msg.textContent = '已產生選定策略版本下載';
+      });
+      m.querySelector('#sb-export-report').onclick = () => versionAction(async msg => {
+        if (!window._sbLast?.report) throw new Error('請先完成自訂樣本外驗證');
+        window.StrategyVersion.download(window._sbLast.report, '樣本外報告-' + window._sbLast.report.version.slice(0, 12) + '.json');
+        msg.textContent = '已產生本次樣本外報告下載';
+      });
       m.querySelector('#sb-saved').onchange = e => { if (e.target.value) loadModel(e.target.value); };
     }
     m.style.display = 'flex';
     if (!m.open) m.showModal();
     renderGroups();
     refreshSavedList();
+    try { refreshVersions(); } catch (error) { document.getElementById('sb-msg').textContent = error.message; }
   }
   function close() { const m = document.getElementById('sb-modal'); if (m) { m.close(); m.style.display = 'none'; } }
 

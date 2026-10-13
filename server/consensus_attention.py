@@ -227,21 +227,30 @@ def _owner_exposure_item(context: dict[str, Any]) -> dict[str, Any] | None:
     severity = 'warning' if tone == 'hot' else ('watch' if tone == 'watch' else 'info')
     look = portfolio.get('lookThrough') or {}
     components = temperature.get('components') or []
+    described = temperature.get('assessmentVersion') == 1
+    constraint_state = {'cool': '偏低', 'steady': '中性', 'watch': '偏高', 'hot': '偏高'}.get(tone, '待確認')
+    title = f'持倉曝險約束{constraint_state}' if described else f'持倉曝險{state}'
+    insight = ('穿透總曝險 ' + str(look.get('effectiveGrossExposurePct')) + '%') \
+        if look.get('effectiveGrossExposurePct') is not None else '持倉風險條件已載入。'
+    if described:
+        insight += '；日資料與月度模型，非盤中即時。'
+        if temperature.get('quality') != 'ready':
+            insight += '綜合評估資料不足；保守約束仍保留。'
     return {
-        'id': 'OWNER_EXPOSURE', 'theme': 'owner_exposure', 'title': f'持倉曝險{state}',
+        'id': 'OWNER_EXPOSURE', 'theme': 'owner_exposure', 'title': title,
         'market': 'OWNER_PORTFOLIO', 'direction': 'risk', 'severity': severity,
         'lifecycleState': lifecycle, 'strength': round(score, 1),
         'evidenceQuality': _clamp((context.get('dataQuality') or {}).get('completeness')),
         'evidenceIds': ['portfolio.look_through', 'exposure.temperature'],
         'sourceDomains': ['owner_portfolio'],
-        'insight': ('穿透總曝險 ' + str(look.get('effectiveGrossExposurePct')) + '%')
-                   if look.get('effectiveGrossExposurePct') is not None else '持倉風險條件已載入。',
+        'insight': insight,
         'confirmation': '曝險壓力燈號下降且限制條件解除',
         'invalidation': '持倉或風險設定變更後必須重新計算',
         'conflict': {'flag': False, 'reasons': []}, 'novelty': 0.72,
         'navigation': {'route': 'decision', 'focusSection': 'exposure', 'highlightId': tone},
         'privacyClass': 'owner_only',
-        'components': [{k: row.get(k) for k in ('key', 'label', 'score', 'state')} for row in components],
+        'components': [{k: row.get(k) for k in ('key', 'label', 'score', 'state', 'quality', 'periodLabel')}
+                       for row in components],
     }
 
 

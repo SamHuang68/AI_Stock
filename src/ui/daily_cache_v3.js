@@ -1,7 +1,7 @@
 /* 使用者明示選擇標的及期間；開啟畫面不下載、不回補整份清單。 */
 (function () {
   'use strict';
-  let dialog, timer, jobId, opener, openerFallback;
+  let dialog, timer, jobId, opener, openerFallback, rejectedSelection = '';
   const $ = id => document.getElementById(id);
   const esc = s => String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   function describeResult(value) {
@@ -19,7 +19,10 @@
   async function api(path, body) {
     const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
     const result = await r.json();
-    if (!r.ok) throw Error(result.error || '讀取失敗（HTTP ' + r.status + '）');
+    if (!r.ok) {
+      const error = Error(result.error || '讀取失敗（HTTP ' + r.status + '）');
+      error.status = r.status; throw error;
+    }
     return result;
   }
   async function poll() {
@@ -27,7 +30,7 @@
     try {
       const r = await api('/daily-cache/status'); jobId = r.jobId;
       const labels = { idle: '尚未啟動更新', queued: '等待共用工作佇列', running: '更新中', cancelling: '取消中', completed: '已完成', failed: '未完成', cancelled: '已取消' };
-      $('dc-status').textContent = (labels[r.status] || r.status) + (r.range ? '｜' + r.range + '｜完成 ' + r.completed + '/' + r.symbols.length : '') + (r.error ? '｜' + r.error : '') + (r.results?.length ? '｜' + r.results.map(describeResult).join('；') : '');
+      $('dc-status').textContent = (rejectedSelection ? rejectedSelection + '｜' : '') + (labels[r.status] || r.status) + (r.range ? '｜' + r.range + '｜完成 ' + r.completed + '/' + r.symbols.length : '') + (r.error ? '｜' + r.error : '') + (r.results?.length ? '｜' + r.results.map(describeResult).join('；') : '');
       const evidence = $('dc-evidence');
       if (evidence) { evidence.hidden = !r.results?.length; evidence.querySelector('pre').textContent = JSON.stringify(r.results || [], null, 2); }
       const busy = ['queued', 'running', 'cancelling'].includes(r.status);
@@ -42,8 +45,12 @@
     const symbols = selected();
     if (!symbols.length || symbols.length > 5) { $('dc-status').textContent = '請選擇 1 至 5 個標的。'; return; }
     $('dc-start').disabled = true;
+    rejectedSelection = '';
     try { await api('/daily-cache/refresh', { symbols, range: $('dc-range').value, kind: $('dc-source').value }); await poll(); }
-    catch (e) { $('dc-status').textContent = e.message; $('dc-start').disabled = false; }
+    catch (e) {
+      if (e.status === 409) { rejectedSelection = '本次選擇未被接受：' + e.message; await poll(); return; }
+      $('dc-status').textContent = e.message; $('dc-start').disabled = false;
+    }
   }
   async function warm() {
     const rows = selected();
@@ -71,6 +78,7 @@
   }
   function open(event) {
     close();
+    rejectedSelection = '';
     opener = event?.currentTarget instanceof HTMLElement ? event.currentTarget :
       (document.activeElement !== document.body ? document.activeElement : $('btn-daily-cache'));
     // 工具列選單會在點擊後收合；關閉時應回到仍可見的分類入口。

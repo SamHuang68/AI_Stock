@@ -1582,10 +1582,23 @@
       var market = window.MarketData && MarketData.get ? MarketData.get() : null;
       if (market && market.freshness && window.MarketFreshness && MarketFreshness.shellHealthText) {
         var health = MarketFreshness.shellHealthText(market.freshness);
+        if (market.refreshError) {
+          health.mode = health.mode === 'err' ? 'err' : 'warn';
+          health.text += ' · 刷新失敗';
+        }
         setSync(health.mode, health.text);
         return;
       }
       var n = s && s.counts ? (s.counts.index || 0) : 0;
+      if (market && market.refreshError) {
+        setSync('warn', '行情刷新失敗 · 資料效期待確認');
+        return;
+      }
+      if (market && market.quotes && typeof market.quotes === 'object' &&
+          !Array.isArray(market.quotes) && Object.keys(market.quotes).length) {
+        setSync('warn', '行情資料效期待確認');
+        return;
+      }
       setSync('ok', n ? ('DB ' + n) : 'SYNC OK');
     }).finally(function () { clearTimeout(t); });
     if (!PRIVATE_WEB) probeWaveDeck();

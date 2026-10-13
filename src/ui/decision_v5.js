@@ -243,7 +243,8 @@
       '#dc-root .dc-temp-light{display:grid;grid-template-columns:10px 1fr;align-items:center;gap:5px;padding:6px;background:#07101d;border:1px solid #203049;border-radius:6px;min-width:0}' +
       '#dc-root .dc-temp-light .lamp{width:9px;height:9px;border-radius:50%;box-shadow:0 0 8px currentColor}' +
       '#dc-root .dc-temp-light .k{font-size:7.5px;color:#8fa2bb}.dc-temp-light .v{font-size:9px;font-weight:850;color:#d8e3f0;white-space:nowrap}' +
-      '#dc-root .dc-temp-light .s{grid-column:1/-1;text-align:center;font-size:6.5px;color:#667990;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '#dc-root .dc-temp-light .s{grid-column:1/-1;font-size:10px;color:#a9bad0;white-space:normal;overflow-wrap:anywhere;line-height:1.5}' +
+      '#dc-root .dc-temp-light>div,#dc-root .dc-temp-main>div{min-width:0}#dc-root .dc-temp-light .v{white-space:normal;overflow-wrap:anywhere}#dc-root .dc-temp-context{grid-column:1/-1;min-width:0;overflow-wrap:anywhere;font-size:11px;line-height:1.6;color:#a9bad0}#dc-root .dc-temp-constraint{border-top:1px solid #24344b;padding-top:7px;color:#d8e3f0}#dc-root .dc-temp-quality{color:#facc15}#dc-root .dc-temp-period{color:#a9bad0}' +
       '#dc-root .dc-tone-cool{color:#60a5fa}#dc-root .dc-tone-steady{color:#38bdf8}#dc-root .dc-tone-watch{color:#facc15}#dc-root .dc-tone-hot{color:#fb923c}#dc-root .dc-tone-unknown{color:#64748b}' +
       '#dc-root .dc-lab-detail{margin-top:7px;border-top:1px solid #24344b;padding-top:6px}#dc-root .dc-lab-detail>summary{margin:0!important;font-weight:800}' +
       '#dc-root .dc-lab-authority{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:7px 0}' +
@@ -315,7 +316,8 @@
       '#dc-root .dc-oi-table{min-width:720px}.dc-oi-table td:first-child{white-space:nowrap}' +
       '#dc-root .dc-oi-authority{margin-top:8px;padding:8px 10px;border-left:3px solid #facc15;background:rgba(250,204,21,.06);color:#d8c99a;font-size:10px;line-height:1.5;border-radius:5px}' +
       '#dc-root .dc-oi-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}' +
-      '#dc-root .dc-ai{white-space:pre-wrap;font-family:"Noto Sans TC",sans-serif;font-size:10px;line-height:1.65;color:#d4deea}' +
+      '#dc-root .dc-ai{white-space:pre-wrap;overflow-wrap:anywhere;font-family:"Noto Sans TC",sans-serif;font-size:14px;line-height:1.7;color:#d4deea}' +
+      '#dc-ai-title:focus-visible{outline:2px solid #67e8f9;outline-offset:4px}#dc-ai-status{font-size:11px;color:#a7b8cc}' +
       '#dc-root .dc-ai.is-error{color:#fecaca}' +
       '#dc-root .dc-note{font-size:8px;color:#71839a;line-height:1.5}' +
       '#dc-root .dc-empty{text-align:center;padding:26px 14px}' +
@@ -403,8 +405,9 @@
         '<a class="dc-doc-link" href="/assets/docs/archify/st-decision-evidence-lineage.html" target="_blank" rel="noopener noreferrer" aria-label="在新分頁開啟決策證據鏈圖">ⓘ 決策證據鏈 ↗</a></div>' +
         '<div class="dc-sub" id="dc-sub">DecisionContext v1 · deterministic first · evidence before confidence</div></div>' +
         '<div class="dc-actions"><button class="dc-btn" data-shell-back>← 儀表板</button>' +
-        '<button class="dc-btn" id="dc-ai-btn">AI 解釋</button><button class="dc-btn primary" id="dc-refresh">↻ 更新市場資料</button></div></div>' +
+        '<button class="dc-btn" id="dc-ai-btn" aria-controls="dc-ai-card" aria-expanded="false">AI 解釋</button><button class="dc-btn primary" id="dc-refresh">↻ 更新市場資料</button></div></div>' +
         '<div class="dc-note" id="dc-update-status" role="status"></div>' +
+        '<section class="dc-card" id="dc-ai-card" style="display:none" aria-labelledby="dc-ai-title"><h3><span id="dc-ai-title" tabindex="-1">AI 解釋</span><span id="dc-ai-status" role="status" aria-live="polite"></span></h3><div id="dc-ai-body" class="dc-ai"></div></section>' +
         '<div id="dc-body"><div class="dc-card">決策資料載入中…</div></div></div>';
       $('dc-refresh').onclick = refreshMarketData;
       $('dc-ai-btn').onclick = runAi;
@@ -420,6 +423,11 @@
     if (!button) return;
     button.disabled = !!aiBusy || aiAccessRole === 'reader';
     button.setAttribute('aria-busy', aiBusy ? 'true' : 'false');
+    button.setAttribute('aria-expanded', aiDisplayState.visible ? 'true' : 'false');
+    var status = $('dc-ai-status');
+    if (status) status.textContent = !aiDisplayState.visible ? '' :
+      (aiBusy ? '正在處理解釋…' : (aiAccessRole === 'reader' ? '此帳號僅可閱讀' :
+        (aiDisplayState.error ? '解釋未完成，可重試' : '解釋已完成')));
     if (aiBusy) {
       button.textContent = 'AI 解釋中…';
       button.title = '分析在 EVO-T1 執行；請勿重複送出。';
@@ -463,6 +471,14 @@
   function setAiDisplay(text, error) {
     aiDisplayState = { visible: true, text: String(text || ''), error: !!error };
     restoreAiDisplay();
+    syncAiButtonState();
+  }
+
+  // 僅在主動操作時帶到近端解釋區；完成及背景重繪都保留使用者的閱讀位置。
+  function revealAiDisplay() {
+    var card = $('dc-ai-card'), title = $('dc-ai-title');
+    if (card && typeof card.scrollIntoView === 'function') card.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+    if (title && typeof title.focus === 'function') title.focus({ preventScroll: true });
   }
 
   function restoreAiDisplay() {
@@ -1691,22 +1707,45 @@
     }).join('');
     var finalRange = lab.finalEligibleRange;
     var temp = lab.temperature || {};
-    var tempScore = temp.score == null ? 0 : Math.max(0, Math.min(100, Number(temp.score) || 0));
-    var tone = /^(cool|steady|watch|hot)$/.test(temp.tone) ? temp.tone : 'unknown';
+    var assessed = temp.assessmentVersion === 1;
+    var ready = assessed && temp.quality === 'ready' && temp.compositeScore != null && isFinite(Number(temp.compositeScore));
+    var tempScore = ready ? Math.max(0, Math.min(100, Number(temp.compositeScore))) : 0;
+    var tone = ready && /^(cool|steady|watch|hot)$/.test(temp.compositeTone) ? temp.compositeTone : 'unknown';
     var toneColor = { cool: '#60a5fa', steady: '#38bdf8', watch: '#facc15', hot: '#fb923c', unknown: '#64748b' }[tone];
     var pressureState = { cool: '偏低', steady: '中性', watch: '偏高', hot: '過熱', unknown: '資料不足' };
     var pressureLabels = { volatility: '波動壓力', margin: '融資擁擠', leverage: '槓桿適配', portfolio: '投組曝險' };
+    var qualityLabels = { partial: '樣本不足', review_due: '模型待複查', unknown: '資料不足' };
     var lights = (temp.components || []).map(function (item) {
-      var itemTone = /^(cool|steady|watch|hot)$/.test(item.tone) ? item.tone : 'unknown';
-      return '<div class="dc-temp-light" title="' + esc(item.detail || '') + '"><i class="lamp dc-tone-' + itemTone + '" style="background:currentColor"></i>' +
-        '<div><div class="k">' + esc(pressureLabels[item.key] || item.label || '—') + '</div><div class="v">' + pressureState[itemTone] +
-        (item.score == null ? '' : ' · ' + esc(item.score)) + '</div></div><div class="s">' + esc(item.detail || '') + '</div></div>';
+      var itemReady = assessed && item.quality === 'ready';
+      var itemTone = itemReady && /^(cool|steady|watch|hot)$/.test(item.tone) ? item.tone : 'unknown';
+      var itemState = itemReady ? pressureState[itemTone] : (assessed ? qualityLabels[item.quality] || '資料不足' : '資料說明待更新');
+      return '<div class="dc-temp-light"><i class="lamp dc-tone-' + itemTone + '" style="background:currentColor"></i>' +
+        '<div><div class="k">' + esc(pressureLabels[item.key] || item.label || '—') + '</div><div class="v">' + esc(itemState) +
+        (item.score == null ? '' : ' · ' + (itemReady ? '' : '參考 ') + esc(item.score)) + '</div></div>' +
+        '<div class="s">' + esc(item.detail || '') + '</div>' +
+        (item.qualityNote ? '<div class="s dc-temp-quality">' + esc(item.qualityNote) + '</div>' : '') +
+        '<div class="s dc-temp-period">' + esc(item.periodLabel || '資料期間未知') + '</div></div>';
     }).join('');
+    var constraint = assessed ? temp.conservativeConstraint || {} : { score: temp.score };
+    var qualityReasons = assessed ? (temp.qualityReasons || []) : ['資料說明待更新；舊版保守約束不可當作綜合評估'];
+    if (!ready && !qualityReasons.length) qualityReasons = ['資料未完整，暫不提供綜合分數'];
+    var drivers = (constraint.drivers || []).map(function (item) {
+      return (pressureLabels[item.key] || item.label || '分項') + (item.score == null ? '' : ' ' + item.score) +
+        (item.quality && item.quality !== 'ready' ? '（' + (qualityLabels[item.quality] || '資料不足') + '）' : '');
+    }).join('、');
     var temperature = '<div class="dc-temp"><div class="dc-temp-main"><div class="dc-thermo" aria-hidden="true"><i class="tube"><b style="height:' +
       tempScore + '%;background:' + toneColor + '"></b></i><i class="bulb" style="background:' + toneColor + ';box-shadow:0 0 12px ' + toneColor + '"></i></div>' +
-      '<div><div class="k">曝險壓力</div><div class="dc-temp-score">' + (temp.score == null ? '—' : esc(temp.score)) + '<small>/100</small></div>' +
-      '<div class="dc-temp-state dc-tone-' + tone + '">' + pressureState[tone] + '</div><div class="dc-temp-help">分數越高，曝險約束應越嚴格；與市場方向無關</div></div></div>' +
-      '<div class="dc-temp-lights">' + lights + '</div></div>';
+      '<div><div class="k">曝險壓力 · 綜合評估</div><div class="dc-temp-score">' + (ready ? esc(temp.compositeScore) : '—') + '<small>/100</small></div>' +
+      '<div class="dc-temp-state dc-tone-' + tone + '">' + (ready ? esc(temp.compositeState || pressureState[tone]) : '資料不足') + '</div>' +
+      '<div class="dc-temp-help">分數越高，曝險約束應越嚴格；與市場方向無關</div></div></div>' +
+      '<div class="dc-temp-lights">' + lights + '</div>' +
+      '<div class="dc-temp-context"><div class="dc-temp-constraint"><b>保守約束 ' + (constraint.score == null ? '—' : esc(constraint.score)) + '/100</b>' +
+      (constraint.formula ? '<div>' + esc(constraint.formula) + '</div>' : '<div>保守約束公式待更新</div>') +
+      (drivers ? '<div>約束主因：' + esc(drivers) + '</div>' : '') + '</div>' +
+      (qualityReasons.length ? '<div class="dc-temp-quality">' + qualityReasons.map(esc).join('；') + '</div>' : '') +
+      '<div>評估範圍：' + esc(temp.scopeLabel || '範圍說明待更新') + '</div>' +
+      '<div>快照：' + esc(temp.calculatedAt || ctx.asOf || '時間未知') + '</div>' +
+      '<div>' + esc(temp.cadence || '日資料與月度模型；非盤中即時') + '</div></div></div>';
     var flags = (weekly.flags || []).map(function (item) {
       var labels = { short_vol_elevated: '短期波動偏高', margin_elevated: '融資高檔', margin_elevated_and_rising: '融資高檔增加', core_anchor_move: '核心錨偏離' };
       return '<span class="tag medium">' + esc(labels[item] || item) + '</span>';
@@ -2104,7 +2143,6 @@
         '<div class="dc-card" id="dc-section-evidence" data-dc-section="evidence"><h3><span>Evidence Ledger · 證據帳本</span><span>' + (lastEvidenceContext.evidence || []).length + ' 筆 · 原始值未改寫</span></h3>' + evidenceHtml(lastEvidenceContext) + '</div>' +
         '<div class="dc-card"><h3><span>News Impact</span><span>deterministic tag</span></h3>' + newsHtml(ctx) + '</div>' +
         '<div class="dc-card"><h3><span>Regime History</span><span id="dc-hist-meta">載入中</span></h3><div id="dc-history" class="dc-note">—</div></div>' +
-        '<div class="dc-card" id="dc-ai-card" style="display:none"><h3><span>AI Explanation</span><span>唯讀解釋</span></h3><div id="dc-ai-body" class="dc-ai"></div></div>' +
       '</div></div><div class="dc-note">Decision support only · AI 不得覆寫 regime、confidence、key levels 或倉位公式。</div>';
     restoreAiDisplay();
     bindRisk();
@@ -2171,9 +2209,13 @@
   function runAi() {
     if (aiBusy) return;
     if (aiAccessRole === 'unknown') {
+      aiBusy = true;
+      setAiDisplay('正在確認 Private Web 權限，確認後將開始產生解釋。', false);
+      revealAiDisplay();
       resolveAiAccess().then(function (role) {
+        aiBusy = false;
         if (role === 'owner') runAi();
-        else if (role === 'reader') syncAiButtonState();
+        else if (role === 'reader') setAiDisplay('此登入帳號為 Reader；AI 解釋目前僅 Owner 可執行。', true);
         else setAiDisplay('目前無法確認 Private Web 權限，請檢查連線後再試。', true);
       });
       return;
@@ -2184,11 +2226,14 @@
     }
     if (!lastContext) {
       showEmpty('AI 解釋尚無可用資料', '請先按「更新市場資料」，建立 DecisionContext 後再執行 AI 解釋。');
+      setAiDisplay('AI 解釋尚無可用資料；請先按「更新市場資料」，建立決策資料後再試。', true);
+      revealAiDisplay();
       return;
     }
     aiBusy = true;
     syncAiButtonState();
     setAiDisplay('EVO-T1 正在準備本機快速模型。請預留約 8 分鐘；此時間已包含冷啟動、模型載入、上下文預填與推理，通常會提早完成。最長等待 12 分鐘。', false);
+    revealAiDisplay();
     aiController = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var timeoutId = aiController ? setTimeout(function () { aiController.abort(); }, AI_TIMEOUT_MS) : null;
     var slim = {

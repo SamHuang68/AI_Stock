@@ -7,10 +7,12 @@ waiting for the next TradingView webhook.
 from __future__ import annotations
 
 import os
+import logging
 import threading
+from datetime import datetime
 from typing import Optional
 
-from .state import RUNTIME
+from .state import RUNTIME, TZ8
 
 # Flat / idle cadence
 IDLE_SEC = float(os.environ.get("WD_REVIEW_IDLE_SEC", "180"))
@@ -21,6 +23,8 @@ INPOS_LLM_SEC = float(os.environ.get("WD_REVIEW_INPOS_LLM_SEC", "180"))
 
 _stop = threading.Event()
 _thread: Optional[threading.Thread] = None
+_risk_thread: Optional[threading.Thread] = None
+_logger = logging.getLogger(__name__)
 
 
 def _interval_sec(state: dict) -> float:
@@ -39,6 +43,9 @@ def _interval_sec(state: dict) -> float:
 
 def _tick() -> None:
     st = RUNTIME.snapshot()
+    # 規則模式的持倉同步與截止風控由獨立監控執行，不向 AI 徵求開倉。
+    if (st.get("strategy_execution") or {}).get("mode") == "rules":
+        return
     if st.get("kill_switch") or st.get("fsm") == "Halted":
         return
     # Skip if lights say system stopped
@@ -63,27 +70,49 @@ def _loop() -> None:
     while not _stop.is_set():
         try:
             _tick()
-        except Exception as exc:
-            try:
-                import sys
-
-                sys.stderr.write(f"[wavedeck] review_loop: {exc}\n")
-            except Exception:
-                pass
+        except Exception:
+            _logger.exception("WaveDeck 定期檢視失敗")
         wait = _interval_sec(RUNTIME.snapshot())
         if _stop.wait(wait):
             break
 
 
+def _risk_tick(now: datetime | None = None) -> None:
+    from .engine import enforce_no_overnight
+
+    enforce_no_overnight(now if now is not None else datetime.now(TZ8))
+
+
+def _risk_loop() -> None:
+    # 獨立於 AI 呼叫及 90／180 秒檢視節奏，啟動即檢查，其後每秒檢查。
+    # 關閉一般檢視不影響風控；隔離測試或明確維護可另行關閉風控監控。
+    failures = 0
+    while not _stop.is_set():
+        try:
+            _risk_tick()
+            failures = 0
+        except Exception:
+            failures += 1
+            if failures == 1 or failures % 60 == 0:
+                _logger.exception("WaveDeck 不留倉監控失敗，連續失敗次數：%s", failures)
+        if _stop.wait(1.0):
+            break
+
+
 def start() -> None:
-    global _thread
-    if os.environ.get("WD_REVIEW_LOOP", "1") in ("0", "false", "off"):
-        return
-    if _thread and _thread.is_alive():
+    global _thread, _risk_thread
+    # stop 後若舊工作仍未返回，不清除停止旗標，避免舊執行緒復活。
+    if _stop.is_set() and any(t and t.is_alive() for t in (_thread, _risk_thread)):
         return
     _stop.clear()
-    _thread = threading.Thread(target=_loop, name="wd-review-loop", daemon=True)
-    _thread.start()
+    if os.environ.get("WD_RISK_WATCHDOG", "1").lower() not in ("0", "false", "off"):
+        if not _risk_thread or not _risk_thread.is_alive():
+            _risk_thread = threading.Thread(target=_risk_loop, name="wd-risk-watchdog", daemon=True)
+            _risk_thread.start()
+    if os.environ.get("WD_REVIEW_LOOP", "1").lower() not in ("0", "false", "off"):
+        if not _thread or not _thread.is_alive():
+            _thread = threading.Thread(target=_loop, name="wd-review-loop", daemon=True)
+            _thread.start()
 
 
 def stop() -> None:

@@ -276,7 +276,9 @@ function setMktBarTab(tabId, persist) {
   const bar = document.getElementById('mkt-bar');
   if (!bar) return;
   bar.querySelectorAll('.mkt-tab').forEach(btn => {
-    btn.classList.toggle('on', btn.getAttribute('data-mkt-tab') === id);
+    const selected = btn.getAttribute('data-mkt-tab') === id;
+    btn.classList.toggle('on', selected);
+    btn.setAttribute('aria-selected', String(selected));
   });
   bar.querySelectorAll('.mkt-panel').forEach(p => {
     p.classList.toggle('on', p.getAttribute('data-mkt-panel') === id);
@@ -307,7 +309,7 @@ function setMktBarTab(tabId, persist) {
     `</div>` +
     `<div id="mkt-bar-panels">` +
       Object.values(MKT_TABS).map(t =>
-        `<div class="mkt-panel${t.id === saved ? ' on' : ''}" data-mkt-panel="${t.id}" role="tabpanel">` +
+        `<div class="mkt-panel${t.id === saved ? ' on' : ''}" data-mkt-panel="${t.id}" role="tabpanel" tabindex="0" aria-label="${t.label}行情，可橫向捲動">` +
           `<div class="mkt-bar-inner">${t.items.map(_mktCellHtml).join('')}</div>` +
         `</div>`
       ).join('') +

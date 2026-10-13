@@ -9,6 +9,9 @@ import json
 import tempfile
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -108,6 +111,70 @@ def _delta_row(month_week, strike, cp, delta, settlement_day):
 
 
 class StructureContractTests(unittest.TestCase):
+    def _dated_fixture(self, trade, expiry):
+        month = expiry.replace('-', '')[:6] + 'W1'
+        years = ox._time_to_expiry(trade, expiry)
+        report, delta = [], []
+        for strike in (90, 95, 100, 105, 110):
+            for cp in ('C', 'P'):
+                values = ox.black_scholes(100, strike, years, .015, .020, .25, cp)
+                report.append(_report_row(month, strike, cp, values['price'], 100,
+                                          day=trade.replace('-', '')))
+                delta.append(_delta_row(month, strike, cp, values['delta'], expiry.replace('-', '')))
+        return report, delta
+
+    def test_calendar_freshness_survives_long_holidays_and_rejects_unknown_days(self):
+        cases = (
+            ('2026-02-23', '2026-02-11', '2026-03-04', 'ready'),
+            ('2026-09-29', '2026-09-24', '2026-10-07', 'ready'),
+            ('2026-10-05', '2026-10-02', '2026-10-07', 'ready'),
+            ('2026-01-02', '2025-12-31', '2026-01-07', 'stale'),
+            ('2027-01-01', '2026-12-31', '2027-01-06', 'stale'),
+            ('2027-01-02', '2026-12-31', '2027-01-06', 'stale'),
+            ('2026-10-07', '2026-10-05', '2026-10-14', 'stale'),
+            ('2026-10-07', '2026-10-07', '2026-10-14', 'stale'),
+        )
+        for today, trade, expiry, status in cases:
+            with self.subTest(today=today, trade=trade):
+                report, delta = self._dated_fixture(trade, expiry)
+                now = datetime.fromisoformat(today + 'T07:00:00').replace(tzinfo=ox.TW_TZ)
+                value = ox.build_options_structure(report, delta, spot=100, spot_as_of=trade,
+                                                   expiry=expiry, now=now)
+                self.assertEqual(value['status'], status)
+                self.assertEqual(value['modeled']['eligible'], status == 'ready')
+                self.assertEqual(value['quality']['ageCalendarDays'],
+                                 (now.date() - datetime.fromisoformat(trade).date()).days)
+
+    def test_long_holiday_refresh_reaches_existing_market_coordinator(self):
+        import decision_context
+        from 更新路由 import UpdateCoordinator
+        for today, trade, expiry in (
+                ('2026-02-23', '2026-02-11', '2026-03-04'),
+                ('2026-09-29', '2026-09-24', '2026-10-07')):
+            with self.subTest(today=today), tempfile.TemporaryDirectory() as tmp:
+                report, delta = self._dated_fixture(trade, expiry)
+                now = datetime.fromisoformat(today + 'T07:00:00').replace(tzinfo=ox.TW_TZ)
+                fetcher = mock.Mock(side_effect=[report, delta])
+                original_refresh = ox.refresh
+                coordinator = UpdateCoordinator.__new__(UpdateCoordinator)
+                coordinator._submit_market_after_source = mock.Mock(return_value={
+                    'job': {'jobId': 'fixture-market'}, 'coalesced': False})
+                context = SimpleNamespace(stage=mock.Mock(), check=mock.Mock())
+                with mock.patch.object(ox, 'CACHE_PATH', str(Path(tmp) / 'cache.json')), \
+                        mock.patch.object(ox, 'HISTORY_PATH', str(Path(tmp) / 'history.json')), \
+                        mock.patch.object(ox, '_memory_cache', {'loaded': False}), \
+                        mock.patch.object(decision_context, 'latest_market_reference',
+                                          return_value={'price': 100, 'asOf': trade}), \
+                        mock.patch.object(ox, 'refresh', side_effect=lambda **kw:
+                                          original_refresh(**kw, now=now, fetcher=fetcher)):
+                    result = coordinator._options(context, {'force': True, 'expiry': expiry})
+                    self.assertEqual(result['marketJobId'], 'p-fixture-market')
+                    self.assertEqual(result['sourceAsOf'], trade)
+                    self.assertEqual(ox.latest_cached()['status'], 'ready')
+                    coordinator._submit_market_after_source.assert_called_once_with(context, 'options')
+                    self.assertEqual(fetcher.call_args_list[0].args, (ox.REPORT_URL,))
+                    self.assertEqual(fetcher.call_args_list[1].args, (ox.DELTA_URL,))
+
     def _fixture(self):
         spot, expiry = 100.0, '20260819'
         trade = '20260814'

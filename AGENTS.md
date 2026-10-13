@@ -10,8 +10,6 @@
 
 與共用規則或使用者的最新指示衝突時，以後者為準。本檔內容只含從使用者機器輸出與倉庫文件驗證過的事實。
 
-**開發分工與執行位置（Sam 2026-10-07 決定）**：Stock Terminal 的開發只交給 Claude 與 Codex；Antigravity 專注於另一個專案（網頁 NVM Knowledge Hub），不承接 Stock Terminal 的開發任務。Claude Code 與 Codex 之後都在本機固定主機 NucBox 上執行（不使用本地模型），目前的雲端專案與環境將退役，GitHub 倉庫保留。**遷移完成前，本檔其餘關於雲端工作階段的做法仍然適用**；遷移完成時同一輪更新本檔、`CLAUDE.md` 與共用記憶的 handoff（規則 0015 第 5 條）。上面「共同對齊來源」的原則不變。
-
 **雲端工作階段怎麼讀共用規則**（Sam 2026-10-07 告知）：共用記憶有 GitHub 遠端，私有 repo `SamHuang68/shared-ai-memory`。雲端用 `add_repo` **唯讀**掛上（不需要 push 權限），只讀與任務相關的檔案（先讀 `_rules/0005`、`sessions/handoff-current.md`；不讀使用者輪廓等個人內容）。**遠端可能落後 Sam 的本機**（陷阱 0021；截至 2026-10-07，遠端 master 提示端 `1445557c…` 是 2026-10-03，缺少本機已有的規則 0007「程式進版、版本控管與修訂歷史」段落）：讀取時先看最新提交日期並向 Sam 說明；與 Sam 貼回的本機內容不一致時，以貼回的為準並回報差異（規則 0016）。`AI-Workspace` 的其他檔案（`workspace.json`、`docs\…`）雲端仍讀不到，需要時請 Sam 貼上。
 
 **8D 與新規則**：8D 是 Codex、Claude、Antigravity 共通的標準（規則 0004）：出問題先找 root cause，必要時新增規則防止再發。Sam 2026-10-07：「以後 8D 都同意新增 rule 不需要授權」。範圍：8D 結論所需的**新規則**；不含修改既有規則的文字，也不含 Git commit／push（規則 0007）。寫入共用記憶由本機寫入者依規則 0012 執行，雲端只有唯讀。
@@ -31,13 +29,14 @@
 ## 2. 本專案的操作規則
 
 1. **先唯讀檢查，再給任何更新、啟動或部署指令**（第 4 節）。
-2. **不要在未登記的資料夾執行 `START_TIP.cmd` 或 `scripts\go.ps1`。** 在非登記資料夾它走開發流程，會與 18432 埠上的本機受管 ST 衝突。`go.ps1` 現會在這種情況下拒絕執行；要刻意在別處開發必須明確加 `-Worktree`。`-Worktree` 與其他明確的開發參數（`-Pull`、`-UpdateOnly`、`-RebuildOnly`）走開發流程時，**只會結束「這個資料夾自己啟動、且 `logs\dev_server.receipt.json` 收據核對得上（PID、啟動時間、資料夾、埠）」的開發伺服器**；18432 被任何其他程序占用（含本機受管 ST）時以 `ST-PORT-GUARD` 拒絕，不終止任何程序，由人處置。舊版啟動的開發伺服器沒有收據，第一次也會被拒絕，請確認後自行結束它。
+2. **不要在未登記的資料夾執行一般 `START_TIP.cmd` 或 `scripts\go.ps1`。** 已登記的原工作樹正常啟動會轉交本機受管啟動器；其他位置一般啟動會拒絕。明確加 `-Worktree` 的開發流程沿用 `ST_PORT`（預設 18432），只允許結束本工作樹收據、程序建立時間及命令列全部相符的程序，並保留核對時的程序物件；未知占用者一律拒絕。新收據還須符合本次 CMD／釘選 Python／父程序鏈與健康回應的工作樹、Python 及埠。
 3. **不要依埠 taskkill 18432。** 受管程序的命令列是 `python -B -u "%LOCALAPPDATA%\StockTerminalLocal\current\server\server.py"`，且須與 `local_process.json` 登記相符；`start_local.ps1` 遇到 18432 上的其他程序會拒絕啟動、不會終止它。開發程序是 `python -u server\server.py`，兩者不要同時跑。
 4. **發布不由雲端代理人執行。** 發布走 stage → promote，工具與證據格式見第 1 節；授權分層與發布前提（CI、完整 SQLite 備份、停止服務）以共用規則 `0007` 與 `procedures/ai-stock-private-web-release.md` 為準，發布器本身不備份、不停服務。雲端代理人只提供精確 SHA、CI 結果與驗收標準，交給本機發布者。
 5. **更新開發工作樹：** `stock_terminal_v2.html` 是啟動時重建的產物，更新前 `git stash push -- stock_terminal_v2.html` 保留，不要丟棄；`data/` 的修改是執行期資料，不要還原；用 `git pull --ff-only origin main`。被未追蹤檔擋住時，把檔案搬到備份資料夾再 pull，不刪除；不用 `reset --hard`、`clean`、強制推送。
 6. **給使用者的指令一律是 PowerShell。** 讀 UTF-8 檔案要加 `-Encoding UTF8`（Windows PowerShell 5.1 預設用本機碼頁，中文會變成無法復原的亂碼）；要讓輸出可貼回，用 `& { … } *>&1 | Tee-Object -FilePath $log`，再 `Get-Content $log -Raw | Set-Clipboard`。
 7. **雲端工作階段的 Git 做法**（共用規則 `0007`）：只用明確檔案清單暫存（不用 `git add -A` 或 `git add .`），並用 `git diff --cached --name-only` 核對；比對與回報用完整 SHA；不 force push。在已合併 PR 的工作分支上接續工作時，把 `origin/main` 合併進分支，不要 reset 後強推。 完整 Python 測試套件與全倉庫靜態或安全掃描屬「完整掃描測試」（規則 `0008` 第 13 條）：執行前先向 Sam 說明範圍、影響與耗時並取得同意（每個 PR 推送前問一次，或依 Sam 的常設同意）；針對本次改動的測試直接跑。
 8. **例外處理與測試誠實**（共用規則 `0014`）：不得無記錄地吞掉錯誤。程式用 `server/log_once.py` 的 `log_once` 留下限頻記錄，或縮小例外型別，或重新拋出；`tests/test_no_new_silent_exceptions.py` 的棘輪會擋下新增的靜默寬鬆例外，減少時要把 `tests/silent_except_baseline.json` 一併降下。以 AST 或 mock 取函式的測試不得補上正式模組缺的名稱。
+9. **依變更範圍驗證**（Sam 2026-10-11 明確修訂）：日常 CI 與 stage 使用 `.github/驗證計畫.json`，只驗修改所影響的案例，按實際輸入與環境沿用有效證據。沒有對應案例的變更直接拒絕，不自動全套；全套改由明確授權的手動流程執行。保留產物完整性、資料備份／保留、程序歸屬及部署身分等安全門檻，略過測試的 stage 仍不可發布。細節見 `docs/局部驗證與證據沿用.md`；全域工具在 `C:/Users/Sam/AI-Workspace/tools/codex/`，不限本專案。開發啟動驗收入口仍為 `python -m unittest tests.test_launcher_safety`；真實程序驗收須明確設定 `ST_LAUNCHER_E2E=1`，使用隔離複本、空白資料、動態 loopback 埠與禁止連外 fixture，只有改動啟動流程才執行。
 
 ## 3. 版本與修訂歷史
 
