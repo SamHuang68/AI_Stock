@@ -19,6 +19,7 @@ import hashlib
 import json
 import math
 import statistics
+from datetime import date
 from typing import Any
 
 
@@ -327,6 +328,7 @@ def _benchmark_volatility(benchmark_id: str, contract: dict | None) -> dict[str,
     as_of = contract.get('asOf')
     source = contract.get('source') or 'benchmark-series-unavailable'
     quality = contract.get('quality') or ('insufficient' if not values else 'partial_scope')
+    stale = bool(contract.get('stale') or quality == 'stale')
     state = _downside_log_vol(values, 21)
     rv252 = _annualized_log_vol(values, 253)
     long_run = _rolling_three_year_vol_median(values)
@@ -334,34 +336,44 @@ def _benchmark_volatility(benchmark_id: str, contract: dict | None) -> dict[str,
     horizon = max(candidates) if candidates else None
     ratio = state / horizon if state is not None and horizon and horizon > 0 else None
     insufficient = len(values) < 253 or horizon is None
+    dated = [str(row.get('date') or row.get('time') or '')[:10] for row in rows
+             if isinstance(row, dict) and _number(row.get(series_key)) is not None
+             and _number(row.get(series_key)) > 0]
     return {
         'benchmarkId': benchmark_id,
-        'status': 'insufficient' if insufficient else ('ready' if len(values) >= 757 else 'partial'),
+        'status': 'insufficient' if insufficient else ('stale' if stale else ('ready' if len(values) >= 757 else 'partial')),
         'seriesKey': series_key,
         'sampleDays': len(values),
+        'periods': {
+            'stateStart': dated[-21] if len(dated) >= 21 else (dated[0] if dated else None),
+            'forecastStart': dated[-253] if len(dated) >= 253 else (dated[0] if dated else None),
+            'sampleEnd': dated[-1] if dated else as_of,
+            'stateSessions': min(20, max(0, len(values) - 1)),
+            'forecastSessions': min(252, max(0, len(values) - 1)),
+        },
         'stateDownside20AnnualPct': _field(
             round(state, 2) if state is not None else None, source=source, as_of=as_of,
             reference='negative log-return semideviation, latest 20 sessions', scope=benchmark_id,
             benchmark_id=benchmark_id, horizon='state_20_sessions', kind='derived',
-            method='downside_log_semideviation_v1', confidence='medium', quality=quality,
+            method='downside_log_semideviation_v1', confidence='medium', quality=quality, stale=stale,
             point_in_time_audited=bool(contract.get('pointInTimeAudited'))),
         'realized252AnnualPct': _field(
             round(rv252, 2) if rv252 is not None else None, source=source, as_of=as_of,
             reference='latest 252-session annualized log-return volatility', scope=benchmark_id,
             benchmark_id=benchmark_id, horizon='252_sessions', kind='derived',
-            method='log_return_rv252_v1', confidence='medium', quality=quality,
+            method='log_return_rv252_v1', confidence='medium', quality=quality, stale=stale,
             point_in_time_audited=bool(contract.get('pointInTimeAudited'))),
         'longRunMedianAnnualPct': _field(
             round(long_run, 2) if long_run is not None else None, source=source, as_of=as_of,
             reference='median of 756-session rolling annualized volatility, sampled monthly', scope=benchmark_id,
             benchmark_id=benchmark_id, horizon='rolling_3_year', kind='derived',
             method='rolling_756_log_vol_median_v1', confidence='low' if long_run is None else 'medium',
-            quality=quality, point_in_time_audited=bool(contract.get('pointInTimeAudited'))),
+            quality=quality, stale=stale, point_in_time_audited=bool(contract.get('pointInTimeAudited'))),
         'horizonForecastAnnualPct': _field(
             round(horizon, 2) if horizon is not None else None, source=source, as_of=as_of,
             reference='conservative ST proxy=max(RV252, rolling 3-year volatility median); not the author 52-week forecast',
             scope=benchmark_id, benchmark_id=benchmark_id, horizon='12_month_research', kind='derived',
-            method=VOL_METHOD_VERSION, confidence='low' if insufficient else 'medium', quality=quality,
+            method=VOL_METHOD_VERSION, confidence='low' if insufficient else 'medium', quality=quality, stale=stale,
             point_in_time_audited=bool(contract.get('pointInTimeAudited')),
             uncertainty='The article 52-week mean-reversion coefficients are unpublished; ST uses a transparent proxy.'),
         'stateToForecastRatio': round(ratio, 3) if ratio is not None else None,
@@ -820,6 +832,118 @@ def _exposure_temperature(
     }
 
 
+def _pressure_assessment(
+    temperature: dict[str, Any], *, margin_state: dict | None,
+    volatility: dict[str, Any], assumptions: dict[str, Any],
+    benchmark_rows: list[dict[str, Any]], actual_symbols: set[str], as_of: str | None,
+) -> None:
+    """分開資料品質、可得分項平均與既有保守約束；不改寫下游風險權限。"""
+    def calendar_date(value: Any) -> str | None:
+        try:
+            return date.fromisoformat(str(value)[:10]).isoformat()
+        except (TypeError, ValueError):
+            return None
+
+    observed = calendar_date(as_of)
+    margin = margin_state or {}
+    periods = volatility.get('periods') or {}
+    vol_field = volatility.get('stateDownside20AnnualPct') or {}
+    forecast_field = volatility.get('horizonForecastAnnualPct') or {}
+    vol_date = calendar_date(vol_field.get('asOf'))
+    forecast_date = calendar_date(forecast_field.get('asOf'))
+    margin_date = calendar_date(margin.get('asOf'))
+    core_date = calendar_date(assumptions.get('asOf'))
+    review_date = calendar_date(assumptions.get('frozenUntil'))
+    review_due = bool(observed and review_date and observed >= review_date)
+    reasons = [] if observed else ['計算快照日期未知，暫不提供綜合分數']
+    components = temperature['components']
+    for row in components:
+        key = row['key']
+        row.update(quality='ready', qualityNote='', asOf=None, periodLabel='資料期間未知')
+        if key == 'volatility':
+            row['asOf'] = vol_date
+            start = calendar_date(periods.get('stateStart'))
+            forecast_start = calendar_date(periods.get('forecastStart'))
+            row['periodLabel'] = (
+                f'日資料截至 {vol_date or "未知"}；短期近{periods.get("stateSessions", 20)}交易日'
+                + (f'（{start}～{vol_date}）' if start and vol_date else '（起日未提供）')
+                + f'；中長期基準截至 {forecast_date or "未知"}'
+                + (f'，現有{periods.get("forecastSessions", "未知")}筆日報酬 {forecast_start}～{forecast_date}'
+                   if forecast_start else '，依該基準模型區間')
+                + ('，並參考滾動3年波動' if (volatility.get('longRunMedianAnnualPct') or {}).get('value') is not None
+                   else '；尚無滾動3年參考值')
+            )
+            if (row['score'] is None or not vol_date or not forecast_date
+                    or volatility.get('status') in ('insufficient', 'stale', 'mixed_no_aggregate')
+                    or vol_field.get('stale') or forecast_field.get('stale')
+                    or vol_field.get('quality') in ('stale', 'insufficient')
+                    or forecast_field.get('quality') in ('stale', 'insufficient')
+                    or forecast_field.get('confidence') == 'low'):
+                row.update(quality='partial', qualityNote='波動比較資料不足或來源已標示過期')
+        elif key == 'margin':
+            row['asOf'] = margin_date
+            count = margin.get('samples52w')
+            start = calendar_date(margin.get('sampleStart'))
+            row['periodLabel'] = (f'日資料 {start or "起日未知"}～{margin_date or "迄日未知"}'
+                                  f'；{count if count is not None else "未知"}筆；目標52週')
+            if row['score'] is not None:
+                row['detail'] = f'現有樣本第 {row["score"]} 百分位'
+            if (not margin.get('available') or row['score'] is None or not start or not margin_date
+                    or margin.get('windowQuality') != 'sufficient' or margin.get('confidence') == 'low'):
+                row.update(quality='partial', qualityNote='歷史覆蓋不足；不作完整52週判定')
+        elif key == 'leverage':
+            row['asOf'] = core_date
+            vol_dates = sorted({calendar_date(((item.get('volatility') or {}).get(
+                'horizonForecastAnnualPct') or {}).get('asOf')) or '未知' for item in benchmark_rows})
+            row['periodLabel'] = (f'月度模型假設 {core_date or "日期未知"}；12個月研究'
+                                  f'；波動基準截至 {"、".join(vol_dates)}'
+                                  f'；原定複查 {review_date or "未知"}')
+            if review_due:
+                row.update(quality='review_due', qualityNote='模型已到複查期限；不能視為當期結論')
+            elif row['score'] is None or not core_date or not review_date:
+                row.update(quality='partial', qualityNote='模型資料或複查日期未完整')
+        else:
+            row['asOf'] = as_of if actual_symbols else None
+            row['periodLabel'] = (f'此次提交持倉的計算快照 {as_of or "時間未知"}；行情依各標的來源'
+                                  if actual_symbols else '未載入實際持倉；不計入市場分項平均')
+            if row['score'] is None:
+                row.update(quality='unknown', qualityNote='未提供可用實際持倉')
+        source_date = calendar_date(row.get('asOf'))
+        if observed and source_date and source_date > observed:
+            row.update(quality='partial', qualityNote='來源日期晚於計算日期，待核對')
+        if (key != 'portfolio' or actual_symbols) and row['quality'] != 'ready':
+            reasons.append(f'{row["label"]}：{row["qualityNote"]}')
+
+    weights = {'volatility': 0.30, 'margin': 0.20, 'leverage': 0.20, 'portfolio': 0.30}
+    available = [row for row in components if row['score'] is not None]
+    weight_sum = sum(weights[row['key']] for row in available)
+    mean = (sum(row['score'] * weights[row['key']] for row in available) / weight_sum
+            if weight_sum else None)
+    maximum = max((row['score'] for row in available), default=None)
+    floor = maximum * 0.85 if maximum is not None else None
+    composite = round(mean, 1) if mean is not None and not reasons else None
+    tone, state = _temperature_band(composite)
+    temperature.update(
+        assessmentVersion=1, compositeScore=composite, compositeTone=tone, compositeState=state,
+        rawWeightedScore=round(mean, 1) if mean is not None else None,
+        quality='incomplete' if reasons or mean is None else 'ready', qualityReasons=reasons,
+        calculatedAt=as_of, cadence='日資料與月度模型；非盤中即時',
+        scopeLabel='含實際投組的分項評估' if actual_symbols else '市場分項評估；未含實際持倉',
+        conservativeConstraint={
+            'score': temperature['score'], 'tone': temperature['tone'], 'state': temperature['state'],
+            'floor': round(floor, 1) if floor is not None else None,
+            'active': bool(floor is not None and mean is not None and floor > mean),
+            'drivers': [{k: row[k] for k in ('key', 'label', 'score', 'quality')}
+                        for row in available if row['score'] == maximum],
+            'formula': (
+                '、'.join(f'{row["label"]}{row["score"]}×85%={floor:g}'
+                         for row in available if row['score'] == maximum)
+                + '；保守約束取此下限與可得分項平均之較高者，不代表即時過熱。'
+                if floor is not None else '資料不足，無法形成保守約束。'),
+        },
+    )
+
+
 def build_exposure_lab(
     *, key_levels: dict | None = None,
     benchmark_data: dict[str, Any] | None = None,
@@ -951,6 +1075,10 @@ def build_exposure_lab(
 
     temperature = _exposure_temperature(
         weekly_health, benchmark_rows, lookthrough, actual_symbols, selected_benchmark)
+    _pressure_assessment(
+        temperature, margin_state=margin_state, volatility=selected_volatility,
+        assumptions=assumptions, benchmark_rows=selected_rows,
+        actual_symbols=actual_symbols, as_of=as_of)
     reliability = tsmc_guidance_reliability()
     return {
         'contractVersion': CONTRACT_VERSION, 'model': MODEL_VERSION, 'asOf': as_of,

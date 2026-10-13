@@ -243,7 +243,8 @@
       '#dc-root .dc-temp-light{display:grid;grid-template-columns:10px 1fr;align-items:center;gap:5px;padding:6px;background:#07101d;border:1px solid #203049;border-radius:6px;min-width:0}' +
       '#dc-root .dc-temp-light .lamp{width:9px;height:9px;border-radius:50%;box-shadow:0 0 8px currentColor}' +
       '#dc-root .dc-temp-light .k{font-size:7.5px;color:#8fa2bb}.dc-temp-light .v{font-size:9px;font-weight:850;color:#d8e3f0;white-space:nowrap}' +
-      '#dc-root .dc-temp-light .s{grid-column:1/-1;text-align:center;font-size:6.5px;color:#667990;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '#dc-root .dc-temp-light .s{grid-column:1/-1;font-size:10px;color:#a9bad0;white-space:normal;overflow-wrap:anywhere;line-height:1.5}' +
+      '#dc-root .dc-temp-light>div,#dc-root .dc-temp-main>div{min-width:0}#dc-root .dc-temp-light .v{white-space:normal;overflow-wrap:anywhere}#dc-root .dc-temp-context{grid-column:1/-1;min-width:0;overflow-wrap:anywhere;font-size:11px;line-height:1.6;color:#a9bad0}#dc-root .dc-temp-constraint{border-top:1px solid #24344b;padding-top:7px;color:#d8e3f0}#dc-root .dc-temp-quality{color:#facc15}#dc-root .dc-temp-period{color:#a9bad0}' +
       '#dc-root .dc-tone-cool{color:#60a5fa}#dc-root .dc-tone-steady{color:#38bdf8}#dc-root .dc-tone-watch{color:#facc15}#dc-root .dc-tone-hot{color:#fb923c}#dc-root .dc-tone-unknown{color:#64748b}' +
       '#dc-root .dc-lab-detail{margin-top:7px;border-top:1px solid #24344b;padding-top:6px}#dc-root .dc-lab-detail>summary{margin:0!important;font-weight:800}' +
       '#dc-root .dc-lab-authority{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:7px 0}' +
@@ -1706,22 +1707,45 @@
     }).join('');
     var finalRange = lab.finalEligibleRange;
     var temp = lab.temperature || {};
-    var tempScore = temp.score == null ? 0 : Math.max(0, Math.min(100, Number(temp.score) || 0));
-    var tone = /^(cool|steady|watch|hot)$/.test(temp.tone) ? temp.tone : 'unknown';
+    var assessed = temp.assessmentVersion === 1;
+    var ready = assessed && temp.quality === 'ready' && temp.compositeScore != null && isFinite(Number(temp.compositeScore));
+    var tempScore = ready ? Math.max(0, Math.min(100, Number(temp.compositeScore))) : 0;
+    var tone = ready && /^(cool|steady|watch|hot)$/.test(temp.compositeTone) ? temp.compositeTone : 'unknown';
     var toneColor = { cool: '#60a5fa', steady: '#38bdf8', watch: '#facc15', hot: '#fb923c', unknown: '#64748b' }[tone];
     var pressureState = { cool: '偏低', steady: '中性', watch: '偏高', hot: '過熱', unknown: '資料不足' };
     var pressureLabels = { volatility: '波動壓力', margin: '融資擁擠', leverage: '槓桿適配', portfolio: '投組曝險' };
+    var qualityLabels = { partial: '樣本不足', review_due: '模型待複查', unknown: '資料不足' };
     var lights = (temp.components || []).map(function (item) {
-      var itemTone = /^(cool|steady|watch|hot)$/.test(item.tone) ? item.tone : 'unknown';
-      return '<div class="dc-temp-light" title="' + esc(item.detail || '') + '"><i class="lamp dc-tone-' + itemTone + '" style="background:currentColor"></i>' +
-        '<div><div class="k">' + esc(pressureLabels[item.key] || item.label || '—') + '</div><div class="v">' + pressureState[itemTone] +
-        (item.score == null ? '' : ' · ' + esc(item.score)) + '</div></div><div class="s">' + esc(item.detail || '') + '</div></div>';
+      var itemReady = assessed && item.quality === 'ready';
+      var itemTone = itemReady && /^(cool|steady|watch|hot)$/.test(item.tone) ? item.tone : 'unknown';
+      var itemState = itemReady ? pressureState[itemTone] : (assessed ? qualityLabels[item.quality] || '資料不足' : '資料說明待更新');
+      return '<div class="dc-temp-light"><i class="lamp dc-tone-' + itemTone + '" style="background:currentColor"></i>' +
+        '<div><div class="k">' + esc(pressureLabels[item.key] || item.label || '—') + '</div><div class="v">' + esc(itemState) +
+        (item.score == null ? '' : ' · ' + (itemReady ? '' : '參考 ') + esc(item.score)) + '</div></div>' +
+        '<div class="s">' + esc(item.detail || '') + '</div>' +
+        (item.qualityNote ? '<div class="s dc-temp-quality">' + esc(item.qualityNote) + '</div>' : '') +
+        '<div class="s dc-temp-period">' + esc(item.periodLabel || '資料期間未知') + '</div></div>';
     }).join('');
+    var constraint = assessed ? temp.conservativeConstraint || {} : { score: temp.score };
+    var qualityReasons = assessed ? (temp.qualityReasons || []) : ['資料說明待更新；舊版保守約束不可當作綜合評估'];
+    if (!ready && !qualityReasons.length) qualityReasons = ['資料未完整，暫不提供綜合分數'];
+    var drivers = (constraint.drivers || []).map(function (item) {
+      return (pressureLabels[item.key] || item.label || '分項') + (item.score == null ? '' : ' ' + item.score) +
+        (item.quality && item.quality !== 'ready' ? '（' + (qualityLabels[item.quality] || '資料不足') + '）' : '');
+    }).join('、');
     var temperature = '<div class="dc-temp"><div class="dc-temp-main"><div class="dc-thermo" aria-hidden="true"><i class="tube"><b style="height:' +
       tempScore + '%;background:' + toneColor + '"></b></i><i class="bulb" style="background:' + toneColor + ';box-shadow:0 0 12px ' + toneColor + '"></i></div>' +
-      '<div><div class="k">曝險壓力</div><div class="dc-temp-score">' + (temp.score == null ? '—' : esc(temp.score)) + '<small>/100</small></div>' +
-      '<div class="dc-temp-state dc-tone-' + tone + '">' + pressureState[tone] + '</div><div class="dc-temp-help">分數越高，曝險約束應越嚴格；與市場方向無關</div></div></div>' +
-      '<div class="dc-temp-lights">' + lights + '</div></div>';
+      '<div><div class="k">曝險壓力 · 綜合評估</div><div class="dc-temp-score">' + (ready ? esc(temp.compositeScore) : '—') + '<small>/100</small></div>' +
+      '<div class="dc-temp-state dc-tone-' + tone + '">' + (ready ? esc(temp.compositeState || pressureState[tone]) : '資料不足') + '</div>' +
+      '<div class="dc-temp-help">分數越高，曝險約束應越嚴格；與市場方向無關</div></div></div>' +
+      '<div class="dc-temp-lights">' + lights + '</div>' +
+      '<div class="dc-temp-context"><div class="dc-temp-constraint"><b>保守約束 ' + (constraint.score == null ? '—' : esc(constraint.score)) + '/100</b>' +
+      (constraint.formula ? '<div>' + esc(constraint.formula) + '</div>' : '<div>保守約束公式待更新</div>') +
+      (drivers ? '<div>約束主因：' + esc(drivers) + '</div>' : '') + '</div>' +
+      (qualityReasons.length ? '<div class="dc-temp-quality">' + qualityReasons.map(esc).join('；') + '</div>' : '') +
+      '<div>評估範圍：' + esc(temp.scopeLabel || '範圍說明待更新') + '</div>' +
+      '<div>快照：' + esc(temp.calculatedAt || ctx.asOf || '時間未知') + '</div>' +
+      '<div>' + esc(temp.cadence || '日資料與月度模型；非盤中即時') + '</div></div></div>';
     var flags = (weekly.flags || []).map(function (item) {
       var labels = { short_vol_elevated: '短期波動偏高', margin_elevated: '融資高檔', margin_elevated_and_rising: '融資高檔增加', core_anchor_move: '核心錨偏離' };
       return '<span class="tag medium">' + esc(labels[item] || item) + '</span>';
