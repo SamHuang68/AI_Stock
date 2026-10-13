@@ -752,7 +752,7 @@ def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=No
         _sec_flow['turnoverSessionMatched'] = _same_turnover_session
         try:
             import options_exposure as _options_exposure
-            _options_structure = _options_exposure.latest_cached()
+            _options_structure = _options_exposure.latest_current()
         except Exception:
             _options_structure = None
         _ctx = _decision.build_and_publish(

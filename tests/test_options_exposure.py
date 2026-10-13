@@ -248,6 +248,90 @@ class StructureContractTests(unittest.TestCase):
             ox.clear_memory_cache()
 
 
+class ReadTimeFreshnessTests(unittest.TestCase):
+    """快取的 status 是建立當下算的；畫面與決策讀取時必須用現在的日期重算（只降級、不升級）。"""
+
+    def _ready_cache(self, trade='2026-08-14', expiry='2026-08-19', built_on='2026-08-17'):
+        helper = StructureContractTests()
+        report, delta = helper._dated_fixture(trade, expiry)
+        now = datetime.fromisoformat(built_on + 'T07:00:00').replace(tzinfo=ox.TW_TZ)
+        value = ox.build_options_structure(report, delta, spot=100, spot_as_of=trade, expiry=expiry, now=now)
+        self.assertEqual(value['status'], 'ready')      # 建立當下確實是完成的
+        self.assertTrue(value['modeled']['eligible'])
+        return value
+
+    def _at(self, day, hour=7):
+        return datetime.fromisoformat(day + 'T%02d:00:00' % hour).replace(tzinfo=ox.TW_TZ)
+
+    def test_old_ready_cache_becomes_stale_when_read_weeks_later(self):
+        value = self._ready_cache()
+        before = json.dumps(value, sort_keys=True)
+        out = ox.with_current_freshness(value, self._at('2026-10-13'))
+        self.assertEqual(out['status'], 'stale')
+        self.assertFalse(out['modeled']['eligible'])
+        self.assertEqual(out['quality']['ageCalendarDays'], 60)
+        self.assertIn('STALE_OR_HYBRID_REFERENCE', out['quality']['warnings'])
+        self.assertEqual(json.dumps(value, sort_keys=True), before, '不可改動傳入的快取物件')
+
+    def test_cache_stays_ready_on_the_next_session_morning_and_is_returned_as_is(self):
+        value = self._ready_cache()
+        # 資料日 2026-08-14（週五）；下一個交易日 08-17 早上讀取，前一交易日仍是 08-14。
+        out = ox.with_current_freshness(value, self._at('2026-08-17'))
+        self.assertIs(out, value)
+        self.assertEqual(out['status'], 'ready')
+
+    def test_cache_becomes_stale_once_a_newer_session_has_closed(self):
+        value = self._ready_cache()
+        out = ox.with_current_freshness(value, self._at('2026-08-18'))      # 前一交易日已是 08-17
+        self.assertEqual(out['status'], 'stale')
+        self.assertEqual(out['quality']['ageCalendarDays'], 4)
+
+    def test_never_upgrades_and_leaves_other_states_alone(self):
+        value = self._ready_cache()
+        stale = ox.with_current_freshness(value, self._at('2026-10-13'))
+        again = ox.with_current_freshness(stale, self._at('2026-08-17'))     # 已是 stale，不因日期再變回 ready
+        self.assertEqual(again['status'], 'stale')
+        self.assertIs(again, stale)
+        insufficient = {'status': 'insufficient', 'observed': {}}
+        self.assertIs(ox.with_current_freshness(insufficient, self._at('2026-10-13')), insufficient)
+        self.assertIsNone(ox.with_current_freshness(None, self._at('2026-10-13')))
+        no_date = {'status': 'ready', 'observed': {}, 'modeled': {'eligible': True}}
+        out = ox.with_current_freshness(no_date, self._at('2026-10-13'))
+        self.assertEqual(out['status'], 'stale')                              # 沒有資料日不能當作新鮮
+        self.assertNotIn('ageCalendarDays', out.get('quality', {}))
+
+    def test_latest_current_reads_the_cache_and_does_not_rewrite_it(self):
+        value = self._ready_cache()
+        with mock.patch.object(ox, 'latest_cached', return_value=value) as cached:
+            out = ox.latest_current(self._at('2026-10-13'))
+        cached.assert_called_once_with()
+        self.assertEqual(out['status'], 'stale')
+        self.assertEqual(value['status'], 'ready')
+
+    def test_options_route_serves_the_current_status_not_the_stored_one(self):
+        from options_routes import OptionsRoutesMixin
+
+        class Handler(OptionsRoutesMixin):
+            body = None
+
+            def _ok(self, body, **_kwargs):
+                self.body = body
+
+        value = self._ready_cache()          # 2026-08-14 的資料：只要現在晚於 2026-08-18 就一定是過期
+        handler = Handler()
+        with mock.patch.object(ox, 'latest_cached', return_value=value):
+            handler._handle_options_structure()
+        served = json.loads(handler.body.decode('utf-8'))
+        self.assertEqual(served['status'], 'stale')
+        self.assertFalse(served['modeled']['eligible'])
+
+    def test_decision_pipeline_reads_the_current_view(self):
+        # 決策／Pulse 組裝不可再直接取原始快取（那會把幾週前建立的 ready 原樣送進決策）。
+        source = (Path(ROOT) / 'server' / 'pulse_orchestration.py').read_text(encoding='utf-8')
+        self.assertIn('_options_exposure.latest_current()', source)
+        self.assertNotIn('_options_exposure.latest_cached()', source)
+
+
 class OptionsHistoryTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

@@ -115,6 +115,22 @@ WaveDeck 沿用稽核資料庫保存版本與訊號收據，區分 AI 裁量及�
 
 ---
 
+## v5.0 修訂 — 2026-10-13 選擇權結構的新鮮度改為讀取時重算
+
+產品版本維持 **5.0**；基準為 `3b67d2d3d069e08c60e8b1285730f6874358894f`。**候選，未發布**：本條建立時是未提交的候選；合併 SHA、精確提交的 CI 與發布狀態以新段落或發布收據補記，不在這裡預先寫入。
+
+**問題**：2026-10-07 兩份截圖顯示，本機 ST 的「台指選擇權結構」標示「資料完成」，但資料日是 2026-08-14，而正式站同一區塊標示「資料過期」。原因在程式：`options_exposure.build_options_structure` 在建立快取的當下依資料日算出 `status` 與 `modeled.eligible`，快取檔照存；之後 `GET /options/txo/structure` 與 Pulse／決策組裝都直接取快取（`latest_cached()`），不再重算。所以幾週前建立、當時是 ready 的結構，之後一直顯示 ready。
+
+**修正後行為**：新增 `with_current_freshness` 與 `latest_current`。讀取時用現在日期，以建立快取時同一個判斷（`_date_ready`：資料日必須是最近一個已完成交易日，且不是當日、日曆須涵蓋）再核對一次；原本 ready 但現在不符的，改為 `stale`、`modeled.eligible=false`、`quality.ageCalendarDays` 更新為現在的天數，並加上 `STALE_OR_HYBRID_REFERENCE`。只降級、不升級；`stale`、`insufficient` 與沒有資料日的值不受影響（沒有資料日的 ready 會被視為過期）。傳入的快取物件不被改動，快取檔也不被改寫。`GET /options/txo/structure` 與 Pulse 組裝改讀 `latest_current`；更新排程與 TTL 判斷仍用 `latest_cached`。
+
+**使用者可見資訊的減少（規則 0009 第 1 項）**：資料日已落後的選擇權結構，原本可能仍顯示「資料完成」與情境式 Gamma／Vega 表；現在會顯示「資料過期」，情境表以既有的「模型已停用」說明取代，仍可閱讀上方官方 OI 事實。這是預期結果，不是新增的隱藏。
+
+**驗證**：`tests.test_options_exposure` 新增 7 項（舊程式上全部失敗，已驗證），含舊快取數週後轉為過期、下一交易日早上仍為 ready 且原物件回傳、新交易日收盤後轉為過期、不升級、`latest_current` 不改寫快取、GET 路由與 Pulse 組裝都讀現在的版本；既有的日曆新鮮度、hybrid、分層案例保留。另跑選擇權更新排程、決策脈絡、關鍵價位守門、決策資料品質、決策 HTTP、統一更新中心、審查回歸共約 175 項，皆通過。依 `.github/驗證計畫.json` 的兩個案例由 CI 執行。
+
+**限制與沒做的事**：沒有用即時 TAIFEX 資料驗證；沒有改畫面（徽章會自動改成「資料過期」，但沒有新增「N 天前」字樣）；沒有改變選擇權的更新時機。程式裡確有每日自動更新（`server/options_schedule.py`，交易日台北時間 07:00–08:30 的四個時段），但必須在 `data/options_daily_schedule.json` 設 `enabled: true` 才會送出，且只在 ST 正在運行時執行；兩個執行環境是否啟用、是否成功，需要查看各自的 `data/options_daily_schedule.json` 與 `data/options_daily_attempts.json`，這次沒有證據。本機與正式站不共用 DB（`docs/本機與正式版本同步.md`），兩邊資料不一致的架構問題不在這次範圍。審查：僅作者自審，沒有隔離審查。
+
+---
+
 ## v5.0 修訂 — 2026-10-09 發布驗證去重與 Chromium 快取
 
 依發布耗時 8D 改善 CI 與 stage 的重疊工作：分支 push 不再與 PR 重複觸發完整 CI，保留 PR 及 main push 的四項必要工作；同一 PR 的舊回合可取消，main 驗證不取消。CI 及私有發布 stage 移除獨立的 dist 測試命令，由原完整 tests discovery 執行同一批案例一次；WaveDeck 隔離測試、JavaScript、自測後重新封存與所有完整性保護保持。
