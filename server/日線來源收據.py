@@ -78,21 +78,26 @@ def store_receipt(conn, receipt, symbol, market, source, rows):
     conn.execute('CREATE TABLE IF NOT EXISTS bar_source_receipts('
                  'receipt_id TEXT PRIMARY KEY,source TEXT NOT NULL,symbol TEXT NOT NULL,market TEXT NOT NULL,'
                  'source_url TEXT NOT NULL,raw_payload BLOB NOT NULL,source_hash TEXT NOT NULL,'
-                 'retrieved_at REAL NOT NULL,parser_version TEXT NOT NULL,volume_contract TEXT NOT NULL)')
+                 'retrieved_at REAL NOT NULL,parser_version TEXT NOT NULL,volume_contract TEXT NOT NULL) WITHOUT ROWID')
     conn.execute('CREATE TABLE IF NOT EXISTS bar_first_ingest('
                  'market TEXT NOT NULL,symbol TEXT NOT NULL,ts INTEGER NOT NULL,run_id TEXT NOT NULL,'
                  'receipt_id TEXT NOT NULL,written_at REAL NOT NULL,payload TEXT NOT NULL,'
-                 'PRIMARY KEY(market,symbol,ts))')
+                 'PRIMARY KEY(market,symbol,ts)) WITHOUT ROWID')
+    conn.execute('CREATE TABLE IF NOT EXISTS bar_reinsert_ingest('
+                 'market TEXT NOT NULL,symbol TEXT NOT NULL,ts INTEGER NOT NULL,run_id TEXT NOT NULL,'
+                 'receipt_id TEXT NOT NULL,written_at REAL NOT NULL,payload TEXT NOT NULL,'
+                 'PRIMARY KEY(market,symbol,ts,run_id)) WITHOUT ROWID')
     conn.execute('CREATE TABLE IF NOT EXISTS bar_revision_ingest('
                  'revision_id TEXT NOT NULL,run_id TEXT NOT NULL,receipt_id TEXT NOT NULL,'
-                 'PRIMARY KEY(revision_id,run_id))')
-    for table in ('bar_source_receipts', 'bar_first_ingest', 'bar_revision_ingest'):
+                 'PRIMARY KEY(revision_id,run_id)) WITHOUT ROWID')
+    for table in ('bar_source_receipts', 'bar_first_ingest', 'bar_reinsert_ingest', 'bar_revision_ingest'):
         for action in ('UPDATE', 'DELETE'):
             conn.execute(f'CREATE TRIGGER IF NOT EXISTS {table}_no_{action.lower()} '
                          f'BEFORE {action} ON {table} BEGIN SELECT RAISE(ABORT,\'首次來源證據不可覆寫或刪除\'); END')
     # INSERT OR REPLACE 不會觸發 DELETE 觸發器，另以同主鍵的 BEFORE INSERT 擋下；正常寫入先自行檢查，不會觸發。
     for table, key in (('bar_source_receipts', 'receipt_id=NEW.receipt_id'),
                        ('bar_first_ingest', 'market=NEW.market AND symbol=NEW.symbol AND ts=NEW.ts'),
+                       ('bar_reinsert_ingest', 'market=NEW.market AND symbol=NEW.symbol AND ts=NEW.ts AND run_id=NEW.run_id'),
                        ('bar_revision_ingest', 'revision_id=NEW.revision_id AND run_id=NEW.run_id')):
         conn.execute(f'CREATE TRIGGER IF NOT EXISTS {table}_no_replace BEFORE INSERT ON {table} '
                      f'WHEN EXISTS(SELECT 1 FROM {table} WHERE {key}) '
@@ -111,12 +116,19 @@ def link_first_insert(conn, market, symbol, row, run_id, receipt_id):
     """只在本次確實新增 bars 時呼叫；既有資料缺證據不得回填。"""
     # 已有首次證據（bars 曾被別處刪除後重新取得）時保留原證據、不建立第二筆「首次」，
     # 也不讓整個標的的更新因主鍵衝突而永久失敗。
-    if conn.execute('SELECT 1 FROM bar_first_ingest WHERE market=? AND symbol=? AND ts=?',
-                    (market, symbol, row[0])).fetchone():
+    payload = json.dumps(row, ensure_ascii=False, allow_nan=False)
+    old = conn.execute('SELECT payload FROM bar_first_ingest WHERE market=? AND symbol=? AND ts=?',
+                       (market, symbol, row[0])).fetchone()
+    if old:
+        # 值相同視為同一筆；值不同則另存本次重插與其收據，兩次寫入都能追溯。
+        if old[0] != payload and not conn.execute(
+                'SELECT 1 FROM bar_reinsert_ingest WHERE market=? AND symbol=? AND ts=? AND run_id=?',
+                (market, symbol, row[0], run_id)).fetchone():
+            conn.execute('INSERT INTO bar_reinsert_ingest VALUES(?,?,?,?,?,?,?)',
+                         (market, symbol, row[0], run_id, receipt_id, time.time(), payload))
         return False
     conn.execute('INSERT INTO bar_first_ingest VALUES(?,?,?,?,?,?,?)',
-                 (market, symbol, row[0], run_id, receipt_id, time.time(),
-                  json.dumps(row, ensure_ascii=False, allow_nan=False)))
+                 (market, symbol, row[0], run_id, receipt_id, time.time(), payload))
     return True
 
 

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock",
-  "baseCommit": "719b6dcd35519b5d99341b18b43cdd551f25125d",
+  "baseCommit": "cf07f1f222d9f8538b590eaa3260c2bf9f81da60",
   "documentation": [
     "docs/revision.md",
     "docs/大盤當日漲跌8D報告.md"
