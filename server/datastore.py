@@ -397,7 +397,9 @@ def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_
             existing[day] = row
             counts['inserted'] += 1
         if source == 'Yahoo Finance':
-            counts['sourceReceipt'] = 'stored' if receipt_id else ('rejected' if receipt_failed else 'absent')
+            # not_needed：有附收據，但這次沒有新增 bars 或新的修訂，所以沒有保存原始回應。
+            counts['sourceReceipt'] = ('stored' if receipt_id else 'rejected' if receipt_failed
+                                       else 'not_needed' if ingest_receipt else 'absent')
             if counts['inserted'] and counts['sourceReceipt'] == 'absent':
                 from log_once import log_once
                 log_once('daily-source-receipt-absent', f'{sym}.{market} 新增 {counts["inserted"]} 筆 Yahoo 日線但呼叫端未附來源收據')

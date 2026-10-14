@@ -2,22 +2,17 @@
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock",
-  "baseCommit": "71380cfc259d2eb1a0e94bac95c6921043ff954e",
+  "baseCommit": "abbe3a2164d002ff5c7d80c226b6056f0a75ad56",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "Yahoo日線首次來源收據保存且不影響既有寫入",
-      "reason": "datastore 的一般來源寫入新增可選的 Yahoo 原始回應收據（不可覆寫表、與新增 bars 的逐筆關聯），並改動 fetch_yahoo_daily、merge_source_bars、upsert_bars 與兩個呼叫端。驗證新收據行為（核對失敗仍寫入並標記、持續衝突不重複保存、bars 被刪後重新取得、INSERT OR REPLACE 被拒、原始回應與雜湊保存、逐筆關聯、無變動更新不累積原始回應、修訂關聯、更新與刪除被拒、收據不符與偽造列被拒、空收據照舊寫入），並重跑直接依賴這些函式的既有案例（日線快取工作、市場身分、資料邊界、修訂中繼資料、快取 HTTP）。不跑完整套件；歷史資料不回填，也不宣稱污染已修復。",
+      "id": "日線來源收據結果標記區分未附與無需保存",
+      "reason": "有附收據但本次沒有新增 bars 或新修訂時，sourceReceipt 原先標成 absent，與呼叫端漏傳收據無法區分。新增 not_needed 並以收據案例與直接依賴既有案例回歸。不跑完整套件。",
       "changes": [
-        "server/daily_cache_jobs.py",
         "server/datastore.py",
-        "server/server.py",
-        "server/stock_signals_routes.py",
-        "server/日線來源收據.py",
-        "tests/test_daily_source_receipt.py",
-        "tests/test_stock_signals_revision_metadata.py"
+        "tests/test_daily_source_receipt.py"
       ],
       "inputs": [
         ".gitattributes",
