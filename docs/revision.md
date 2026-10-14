@@ -1,3 +1,21 @@
+## v5.0 修訂 — 2026-10-14 補完 main 上既有測試的紅燈（候選，未發布）
+
+基底 `17bad12031b26a3a09ba4cd413cfa5b4244b2971`；與同一個 Draft PR 的大盤昨收修正、選擇權新鮮度修正分開記錄。實作提交由 PR 指向，合併 SHA 尚未產生。`VERSION` 維持 5.0。Sam 2026-10-14 同意在雲端沙盒執行完整 Python 套件與全部 Node 自測（規則 0008 第 13 條）。
+
+**原因**：PR #198／#199 的 CI 只跑各 PR 計畫列出的案例，被改動函式的既有測試不在其中，`main` 上累積了既有測試的紅燈。本次逐項判斷，**只更新過時的測試與基準，沒有改產品程式、沒有放寬任何斷言、沒有跳過或停用測試**。
+
+| 測試 | 判斷 | 處置 |
+|---|---|---|
+| `tests/indicator_cache_selftest.js` | 測試過時。PR #198 把 EMA 抽成 `window.stEmaSeries` 並內嵌進 worker 模板，自測只擷取模板，在沒有 `window` 的環境失敗 | 先執行 `stock_terminal.html` 內同一份 EMA 定義，再取 worker 模板 |
+| `tests/shell_v5_selftest.js`（決策頁溫度燈說明） | 測試過時。`cc5e9bd` 刻意把說明由 6.5px 置中不換行改為 10px 可換行，斷言仍是舊樣式 | 改斷言目前的整列寬且可換行樣式 |
+| `tests/test_no_new_silent_exceptions.py`（`silent_except_baseline.json`） | 基準未下修。PR #198 讓 `trend_quant` 由 2 降為 1、`turnover_quant` 降為 0；規則 0014 要求減少時一併降基準 | `trend_quant` 2→1，移除 `turnover_quant` |
+| `tests/test_三項限制解方.py`、`tests/test_全檢資料邊界.py` 各一項日資料重試測試 | 測試過時。PR #199 在每日來源流程加入「官方研究續補」與「還原快照」兩步；測試沒有模擬新步驟，第二次執行因還原快照為 partial 而不是 completed | 模擬還原快照步驟；新增斷言：還原快照兩次執行都重新核對（`call_count == 2`），證明沒有沿用「先前已完成」 |
+| `tests.test_bundle_fresh` | 追蹤中的 `stock_terminal_v2.html` 與原始碼不一致 | 已於同一 PR 重建（見上一則） |
+
+**驗證**：上列各案例單獨執行通過，並列入 `.github/驗證計畫.json`。
+
+**限制**：沒有在真實資料上驗證；以上都是測試層級的修正。未發布。
+
 ## v5.0 修訂 — 2026-10-14 大盤當日漲跌基準改用官方昨收（候選，未發布）
 
 基底 `17bad12031b26a3a09ba4cd413cfa5b4244b2971`（main，PR #199 之後）；實作提交由 Draft PR 指向，合併 SHA 尚未產生。`VERSION` 維持 5.0。

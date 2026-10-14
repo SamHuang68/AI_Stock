@@ -226,7 +226,7 @@ ok(/Exposure Lab/.test(decisionUi) && /Shadow · 研究上限/.test(decisionUi) 
   /hypotheses\.map/.test(decisionUi) &&
   !/00685L/.test(decisionUi) && /selectedResearchCeilingPct/.test(decisionUi),
   'Exposure Lab opens with professional exposure-pressure lights and expanded evidence');
-ok(/dc-temp-light \.s\{grid-column:1\/-1;text-align:center/.test(decisionUi) &&
+ok(/dc-temp-light \.s\{grid-column:1\/-1;font-size:10px[^}]*white-space:normal/.test(decisionUi) &&
   /num\(x\[1\], 0\)/.test(decisionUi) && /function confidenceIcon/.test(decisionUi) &&
   /dc-confidence/.test(decisionUi) && /width:54px;height:54px/.test(decisionUi) &&
   /conic-gradient\(#22d3ee var\(--confidence\)/.test(decisionUi) && /percentage \+ '<small>%/.test(decisionUi) &&

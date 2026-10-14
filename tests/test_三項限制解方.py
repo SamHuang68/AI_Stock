@@ -162,6 +162,7 @@ class SolutionTests(unittest.TestCase):
                 patch.object(ds, 'last_ts', return_value=int(now.timestamp())), \
                 patch.object(tracker, 'parse_and_save', return_value=2), \
                 patch.object(tracker, 'parse_and_save_tpex', return_value=1), \
+                patch.object(adj, 'refresh_snapshots', return_value={'status': 'completed', 'pendingSymbols': [], 'results': {}}) as snapshots, \
                 patch.object(sources.http_client, 'fetch_json', side_effect=respond):
             clock.now.return_value = now
             clock.fromisoformat.side_effect = datetime.fromisoformat
@@ -172,6 +173,8 @@ class SolutionTests(unittest.TestCase):
             self.assertEqual(second['status'], 'completed')
             self.assertEqual(len(seen), 3)
             self.assertIn('reusedFromRun', second['sources'][1])
+            # 還原快照依賴現在的日線，不沿用「先前已完成」：兩次執行都重新核對。
+            self.assertEqual(snapshots.call_count, 2)
 
     def test_price_input_is_immutable_and_late_chips_have_separate_evidence(self):
         bars = series()

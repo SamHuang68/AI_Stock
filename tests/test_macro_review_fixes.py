@@ -260,15 +260,6 @@ class MacroServerFixes(unittest.TestCase):
         self.assertIn('OSError', seen[0]['refreshError'])
         self.assertEqual(ns['_macro_cache'], {})
 
-    def test_chart_level_refresh_clears_the_whole_macro_cache(self):
-        from types import SimpleNamespace
-        ns = self._handler_ns(lambda *a, **k: ([], 'empty'))
-        ns['_macro_cache'].update({'fedfunds:10:20260901': b'x', 'us10y:10:20260901': b'y'})
-        request = SimpleNamespace(path='/macro/refresh/__US_RATES_CREDIT__', _ok=lambda body: None)
-        with mock.patch.object(mt, 'refresh_chart', return_value={'ok': True}):
-            ns['_handle_macro'](request, 'refresh/__US_RATES_CREDIT__')
-        self.assertEqual(ns['_macro_cache'], {})
-
     def test_policy_rate_and_ndc_signal_use_realistic_freshness_windows(self):
         specs = self.api['MACRO_SERIES']
         # 央行利率：階梯函數，抓取後第 3 個營業日不該就被標成過期
@@ -306,6 +297,56 @@ class MacroServerFixes(unittest.TestCase):
             src = f.read()
         self.assertNotIn('BAML IG/HY', src)
         self.assertNotIn("'FRED CPI/Fed", src)
+
+
+class MacroChartRefreshHttpTests(unittest.TestCase):
+    """PR198 起重新整理只接受 POST（GET 為 405）；以正式 Handler 驗證 POST 後整份 macro 快取清空。"""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        import threading
+        from http.server import ThreadingHTTPServer
+        spec = importlib.util.spec_from_file_location(
+            'st_server_macro_refresh_test', os.path.join(ROOT, 'server', 'server.py'))
+        cls.st = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.st)
+        cls.httpd = ThreadingHTTPServer(('127.0.0.1', 0), cls.st.Handler)
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.base = f'http://127.0.0.1:{cls.httpd.server_port}'
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        cls.thread.join(timeout=2)
+
+    def test_get_refresh_is_method_not_allowed_and_does_not_touch_the_cache(self):
+        import urllib.error
+        import urllib.request
+        self.st._macro_cache.update({'fedfunds:10:20260901': b'x'})
+        with mock.patch.object(mt, 'refresh_chart') as refresh:
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(self.base + '/macro/refresh/__US_RATES_CREDIT__', timeout=5)
+        self.assertEqual(caught.exception.code, 405)
+        self.assertEqual(caught.exception.headers['Allow'], 'POST')
+        caught.exception.close()
+        refresh.assert_not_called()
+        self.assertEqual(self.st._macro_cache, {'fedfunds:10:20260901': b'x'})
+        self.st._macro_cache.clear()
+
+    def test_chart_level_refresh_clears_the_whole_macro_cache(self):
+        import urllib.request
+        self.st._macro_cache.update({'fedfunds:10:20260901': b'x', 'us10y:10:20260901': b'y'})
+        request = urllib.request.Request(
+            self.base + '/macro/refresh/__US_RATES_CREDIT__', data=b'{}',
+            headers={'Content-Type': 'application/json'}, method='POST')
+        with mock.patch.object(mt, 'refresh_chart', return_value={'ok': True}) as refresh:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                self.assertEqual(response.status, 200)
+        self.assertEqual(refresh.call_args.args[0], '__US_RATES_CREDIT__')
+        self.assertEqual(self.st._macro_cache, {})
 
 
 if __name__ == '__main__':

@@ -31,6 +31,14 @@ _prior_server_modules = {
 }
 for _name in list(_prior_server_modules):
     sys.modules.pop(_name, None)
+# WaveDeck 的 server 模組在匯入時就取得「實際資料目錄」的單例鎖並持有到程序結束。
+# 這支測試只需要它的 Handler，不該長期占住真實的 wavedeck/data：否則同一程序內稍後
+# 以子程序啟動 WaveDeck 的測試（例如 test_start_all）會取不到鎖，本機正在執行 WaveDeck 時
+# 也會讓整支測試匯入失敗。改以拋棄式暫存目錄取得同一種真鎖。
+_wd_lock = importlib.import_module('server.程序單例')
+_wd_real_acquire = _wd_lock.acquire
+_wd_lock_dir = tempfile.mkdtemp(prefix='wd-bridge-http-lock-')
+_wd_lock.acquire = lambda data: _wd_real_acquire(Path(_wd_lock_dir))
 try:
     _wd_engine = importlib.import_module('server.engine')
     wd_server = importlib.import_module('server.server')
@@ -40,6 +48,7 @@ try:
     apply_st_bridge = _wd_engine.apply_st_bridge
     estimate_openai_usd = _wd_providers.estimate_openai_usd
 finally:
+    _wd_lock.acquire = _wd_real_acquire
     for _name in [name for name in list(sys.modules) if name == 'server' or name.startswith('server.')]:
         sys.modules.pop(_name, None)
     sys.modules.update(_prior_server_modules)
