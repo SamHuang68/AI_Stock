@@ -1,0 +1,32 @@
+{
+  "說明": "2026-10-14 使用者貼回的數值，來源記錄見 docs/revision.md 與大盤當日漲跌8D報告；不是完整原始網路封包。OHLC 為沿用既有測試的合成值，不作歷史行情證據。",
+  "tradeDate": "2026-10-14",
+  "official": {
+    "price": 48625.83,
+    "prevClose": 48341.31,
+    "change": 284.52,
+    "changePct": 0.5885649354558329,
+    "name": "發行量加權股價指數",
+    "source": "twse-mis",
+    "session": "regular",
+    "open": 48400.0,
+    "high": 48700.5,
+    "low": 48310.25,
+    "tradeDate": "2026-10-14"
+  },
+  "yahoo": {
+    "prevClose": 49302.0
+  },
+  "expected": {
+    "header": "+284.52 (+0.59%)",
+    "stripRoundedChange": 285,
+    "wrongHeader": "-676.17 (-1.37%)",
+    "snapshotMarket": {
+      "price": 48625.83,
+      "referencePrice": 48341.31,
+      "referenceType": "previous_close",
+      "displayChange": 284.52,
+      "displayChangePct": 0.5886
+    }
+  }
+}

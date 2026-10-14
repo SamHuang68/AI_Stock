@@ -1,3 +1,19 @@
+## v5.0 修訂 — 2026-10-14 大盤日漲跌 8D 與同快照防再發案例
+
+調查基底 `8356ca3cfb820652b405f5e92ac723b2c767c836`；提交前整合主線 `7aa94a38c23498a6455f9ec7c81c0b5f8f3595a0`，分支 `codex/大盤漲跌8D預防`，`VERSION` 維持 5.0。完整提交、PR 與 CI 狀態由該分支及 `C:/Users/Sam/AI-Workspace/docs/stock-terminal/大盤漲跌8D預防/交付收據.json` 對應，避免在同一提交內預填自己的 SHA。
+
+原因：使用者要求追查主圖 −676.17、小框 +285 的根因並提交 8D。隔離重現證實 PR #198 修改前與 PR #199 的相同官方校正區塊都會漏掉「今日 K 正確、Yahoo 昨收錯誤」；Git 時間線不支持 PR #199 覆蓋之後才合併的 Claude 修正。Codex 先前驗收缺少同一快照的跨表面數值核對，此缺口列入 `docs/大盤當日漲跌8D報告.md`。
+
+本次保留 Claude 正式程式，只補強兩份既有案例：前後端共用已確認官方昨收 48341.31 的 fixture；前端執行主圖與小框正式函式並保留所有原有邊界，後端新增從 MIS 解析器到三個實際 HTTP 路由的一致性案例。加入本專案入口指引與局部 CI 計畫，不新增行情管線。
+
+本機驗證：8 個 Python 案例、13 組前端情境通過（2026-10-15 補強，見下方「審查更正」）；歷史來源重現通過；本機 18432 與正式後端 18435 的三端點實際 GET 都為 48625.83／48341.31／+0.5885649355%。當次 runtimeCommit 均為 `06d94771d19a03c9ece5006cf6e030fa823904b6`。沒有跑完整測試、沒有重新操作真瀏覽器。所有計畫與輸出保存於上述外部證據目錄。
+
+發布狀態：本輪不修改產品來源、不部署、不更動使用者資料。交付的是 8D 與預防案例；本機提交、遠端 CI、PR 狀態以交付收據為準。官方不可用時仍有既有 Yahoo 備援，`/quote` 與 `/quote-batch` 未含市場日期；沒有擴張成新契約。
+
+審查更正（2026-10-15，Claude 接手）：Cursor Bugbot 指出前端案例 12 驗收的 `refreshTwIndexCells` 在產品中沒有任何呼叫者，下方小框實際由 `MarketData.refresh`（`/market/snapshot`）→ `marketData` 事件 → `renderCanonicalMarketQuote` 填入，並讀 `displayChange`／`displayChangePct`。逐條對照程式碼屬實（`grep` 僅有定義處）。處理：前端案例 12 改為經 `marketData` 事件執行正式監聽與 `renderCanonicalMarketQuote`，新增案例 13（帶 Yahoo 昨收，確認同一路徑重現事故畫面）；後端新增第 8 個案例，經 `/market/snapshot` 路由驗證 `market` 欄位與 fixture 的 `snapshotMarket` 一致；fixture 新增 `expected.snapshotMarket` 供前後端共用。變異檢查：把 `renderCanonicalMarketQuote` 的差額或標頭昨收改成 Yahoo 值，案例 12 皆失敗。未修改產品來源；`refreshTwIndexCells` 死碼保留，是否移除另行決定。尚未做瀏覽器視覺驗收，也未部署。
+
+---
+
 ## v5.0 修訂 — 2026-10-14 WaveDeck 測試字串不再被分享封存的郵件掃描器封鎖（候選，未發布）
 
 基底 `06d94771d19a03c9ece5006cf6e030fa823904b6`（main，PR #202 的合併 SHA），分支 `claude/dist-scrub-wd-email`，提交 SHA 見該分支與 PR。`VERSION` 維持 5.0。
