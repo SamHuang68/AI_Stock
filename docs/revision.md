@@ -6,9 +6,11 @@
 
 本次保留 Claude 正式程式，只補強兩份既有案例：前後端共用已確認官方昨收 48341.31 的 fixture；前端執行主圖與小框正式函式並保留所有原有邊界，後端新增從 MIS 解析器到三個實際 HTTP 路由的一致性案例。加入本專案入口指引與局部 CI 計畫，不新增行情管線。
 
-本機驗證：7 個 Python 案例、12 組前端情境通過；歷史來源重現通過；本機 18432 與正式後端 18435 的三端點實際 GET 都為 48625.83／48341.31／+0.5885649355%。當次 runtimeCommit 均為 `06d94771d19a03c9ece5006cf6e030fa823904b6`。沒有跑完整測試、沒有重新操作真瀏覽器。所有計畫與輸出保存於上述外部證據目錄。
+本機驗證：8 個 Python 案例、13 組前端情境通過（2026-10-15 補強，見下方「審查更正」）；歷史來源重現通過；本機 18432 與正式後端 18435 的三端點實際 GET 都為 48625.83／48341.31／+0.5885649355%。當次 runtimeCommit 均為 `06d94771d19a03c9ece5006cf6e030fa823904b6`。沒有跑完整測試、沒有重新操作真瀏覽器。所有計畫與輸出保存於上述外部證據目錄。
 
 發布狀態：本輪不修改產品來源、不部署、不更動使用者資料。交付的是 8D 與預防案例；本機提交、遠端 CI、PR 狀態以交付收據為準。官方不可用時仍有既有 Yahoo 備援，`/quote` 與 `/quote-batch` 未含市場日期；沒有擴張成新契約。
+
+審查更正（2026-10-15，Claude 接手）：Cursor Bugbot 指出前端案例 12 驗收的 `refreshTwIndexCells` 在產品中沒有任何呼叫者，下方小框實際由 `MarketData.refresh`（`/market/snapshot`）→ `marketData` 事件 → `renderCanonicalMarketQuote` 填入，並讀 `displayChange`／`displayChangePct`。逐條對照程式碼屬實（`grep` 僅有定義處）。處理：前端案例 12 改為經 `marketData` 事件執行正式監聽與 `renderCanonicalMarketQuote`，新增案例 13（帶 Yahoo 昨收，確認同一路徑重現事故畫面）；後端新增第 8 個案例，經 `/market/snapshot` 路由驗證 `market` 欄位與 fixture 的 `snapshotMarket` 一致；fixture 新增 `expected.snapshotMarket` 供前後端共用。變異檢查：把 `renderCanonicalMarketQuote` 的差額或標頭昨收改成 Yahoo 值，案例 12 皆失敗。未修改產品來源；`refreshTwIndexCells` 死碼保留，是否移除另行決定。尚未做瀏覽器視覺驗收，也未部署。
 
 ---
 

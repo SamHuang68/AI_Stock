@@ -20,6 +20,13 @@
   "expected": {
     "header": "+284.52 (+0.59%)",
     "stripRoundedChange": 285,
-    "wrongHeader": "-676.17 (-1.37%)"
+    "wrongHeader": "-676.17 (-1.37%)",
+    "snapshotMarket": {
+      "price": 48625.83,
+      "referencePrice": 48341.31,
+      "referenceType": "previous_close",
+      "displayChange": 284.52,
+      "displayChangePct": 0.5886
+    }
   }
 }

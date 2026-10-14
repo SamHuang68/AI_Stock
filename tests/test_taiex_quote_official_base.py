@@ -147,6 +147,38 @@ class TaiexQuoteOfficialBaseTests(unittest.TestCase):
             self.assertIn('ex_ch=' + 頻道 + '&', 呼叫.args[1])
         Yahoo來源.assert_not_called()
 
+    def test_市場快照路由使用同一官方昨收並輸出前端實際讀取的欄位(self):
+        """前端下方小框與主圖標頭讀的是 /market/snapshot 的 market 欄位，不是 /twindex 原始欄位。"""
+        官方快照 = {'msgArray': [{
+            'ch': 't00.tw', 'n': OFFICIAL_T00['name'],
+            'z': str(OFFICIAL_T00['price']), 'y': str(OFFICIAL_T00['prevClose']),
+            'o': str(OFFICIAL_T00['open']), 'h': str(OFFICIAL_T00['high']),
+            'l': str(OFFICIAL_T00['low']),
+            'd': 案例資料['tradeDate'].replace('-', ''), 't': '13:30:00',
+        }]}
+        原始連線 = socket.create_connection
+
+        def 僅允許測試伺服器連線(address, *args, **kwargs):
+            if address != ('127.0.0.1', self.httpd.server_port):
+                raise AssertionError('快照案例禁止外部網路連線')
+            return 原始連線(address, *args, **kwargs)
+
+        with mock.patch.object(self.st, '_src_fetch_json', return_value=官方快照),              mock.patch.object(self.st, '_cache') as 隔離快取,              mock.patch.object(self.st, 'fetch_one', side_effect=_yahoo_must_not_be_called) as Yahoo來源,              mock.patch.object(self.st.Handler, '_txf_mis_session', return_value=None),              mock.patch.object(socket, 'create_connection', side_effect=僅允許測試伺服器連線):
+            隔離快取.get.return_value = None
+            快照 = self.get_json('/market/snapshot')
+
+        self.assertTrue(快照['ok'])
+        市場 = 快照['quotes']['^TWII']['market']
+        預期 = 案例資料['expected']['snapshotMarket']
+        self.assertEqual(市場['source'], 'twse-mis')
+        self.assertEqual(市場['referenceType'], 預期['referenceType'])
+        self.assertAlmostEqual(市場['price'], 預期['price'], places=9)
+        self.assertAlmostEqual(市場['referencePrice'], 預期['referencePrice'], places=9)
+        self.assertAlmostEqual(市場['displayChange'], 預期['displayChange'], places=9)
+        self.assertEqual(市場['displayChangePct'], 預期['displayChangePct'])
+        self.assertNotEqual(市場['referencePrice'], 案例資料['yahoo']['prevClose'])
+        Yahoo來源.assert_not_called()
+
     def test_yahoo_value_is_not_used_even_when_it_is_the_only_wrong_number(self):
         """Yahoo 回 49302.0 時，批次與單檔都不得把 -676.17 算進去。"""
         wrong_yahoo = {'chart': {'result': [{
