@@ -165,6 +165,52 @@ class DailySourceReceiptTests(unittest.TestCase):
         self.assertEqual(self.scalar('SELECT receipt_id FROM bar_first_ingest WHERE ts=?', T2), receipt['receiptId'])
         self.assertEqual(self.scalar('SELECT COUNT(*) FROM bar_first_ingest'), 2)
 
+    def test_bar_removed_and_fetched_again_with_different_values_keeps_both_traces(self):
+        rows, receipt = self.fetch(yahoo_payload())
+        datastore.merge_source_bars('2330', 'TW', rows, 'Yahoo Finance', ingest_receipt=receipt)
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute('DELETE FROM bars WHERE ts=?', (T2,))
+            conn.commit()
+        rows2, receipt2 = self.fetch(yahoo_payload(closes=(100.0, 150.0)))
+        again = datastore.merge_source_bars('2330', 'TW', rows2, 'Yahoo Finance', ingest_receipt=receipt2)
+        self.assertEqual(again['inserted'], 1)
+        self.assertEqual(self.scalar('SELECT close FROM bars WHERE ts=?', T2), 150.0)
+        # 原首次證據保留，重插以另一筆不可覆寫的關聯指向新的收據。
+        self.assertEqual(self.scalar('SELECT receipt_id FROM bar_first_ingest WHERE ts=?', T2), receipt['receiptId'])
+        self.assertEqual(self.scalar('SELECT receipt_id FROM bar_reinsert_ingest WHERE ts=?', T2), receipt2['receiptId'])
+        self.assertEqual(self.scalar('SELECT run_id FROM bar_reinsert_ingest WHERE ts=?', T2), again['runId'])
+
+    def test_evidence_tables_have_no_hidden_rowid_to_replace_through(self):
+        rows, receipt = self.fetch(yahoo_payload())
+        datastore.merge_source_bars('2330', 'TW', rows, 'Yahoo Finance', ingest_receipt=receipt)
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            for table in ('bar_source_receipts', 'bar_first_ingest', 'bar_reinsert_ingest', 'bar_revision_ingest'):
+                with self.subTest(table=table), self.assertRaises(sqlite3.DatabaseError):
+                    conn.execute('SELECT rowid FROM %s' % table)
+            before = conn.execute('SELECT receipt_id, raw_payload FROM bar_source_receipts').fetchall()
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute('INSERT OR REPLACE INTO bar_source_receipts(rowid,receipt_id,source,symbol,market,'
+                             'source_url,raw_payload,source_hash,retrieved_at,parser_version,volume_contract) '
+                             "VALUES(1,'B','Yahoo Finance','2330','TW','u',x'02','h',1.0,'p','v')")
+            self.assertEqual(conn.execute('SELECT receipt_id, raw_payload FROM bar_source_receipts').fetchall(), before)
+
+    def test_malformed_receipt_structure_does_not_break_the_write(self):
+        import hashlib
+        rows, receipt = self.fetch(yahoo_payload())
+        cases = {
+            'sourceSymbol 型別錯誤（TypeError）': dict(receipt, sourceSymbol=['x']),
+            '雜湊正確但結構無效（KeyError）': dict(receipt, raw=b'{}', sha256=hashlib.sha256(b'{}').hexdigest()),
+        }
+        for name, bad in cases.items():
+            with self.subTest(name):
+                result = datastore.merge_source_bars('2330', 'TW', rows, 'Yahoo Finance', ingest_receipt=bad)
+                self.assertEqual(result['sourceReceipt'], 'rejected')
+                self.assertIn('sourceReceiptError', result)
+                self.assertEqual(self.scalar('SELECT COUNT(*) FROM bars'), 2)
+                with closing(sqlite3.connect(self.db_path)) as conn:
+                    conn.execute('DELETE FROM bars')
+                    conn.commit()
+
     def test_insert_or_replace_cannot_overwrite_any_evidence_table(self):
         rows, receipt = self.fetch(yahoo_payload())
         result = datastore.merge_source_bars('2330', 'TW', rows, 'Yahoo Finance', ingest_receipt=receipt)
