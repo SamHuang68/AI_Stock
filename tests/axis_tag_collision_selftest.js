@@ -112,13 +112,14 @@ const gap = (a, b) => {
   assert.strictEqual(t['ctag-prev'].y, 330 + (48625.83 - 49302) * PX_PER_POINT);
 }
 
-// 5) 讓開後超出圖高 → 整組上移，仍不重疊且在圖內。
+// 5) 昨收標籤原本完全在圖內，被讓開後才超出圖高 → 整組上移，仍不重疊且在圖內。
 {
-  const env = makeEnv({ wrapHeight: 340 });
+  const env = makeEnv({ wrapHeight: 350 });   // 昨收原本下緣 339 + 6.5 = 345.5 ≤ 350；讓開後下緣 353.5 > 350
   env.render(48625.83, 48341.31);
   const t = env.tags();
   assert(gap(t['ctag-now'], t['ctag-prev']) >= 0, JSON.stringify(t));
-  assert(t['ctag-prev'].y + t['ctag-prev'].h / 2 <= 340 + 1e-9, '下方標籤不得超出圖高');
+  assert(t['ctag-prev'].y + t['ctag-prev'].h / 2 <= 350 + 1e-9, '下方標籤不得超出圖高');
+  assert(t['ctag-now'].y < 330, '被讓開而超出圖高時，整組才上移');
 }
 
 // 6) 沒有昨收 → 只有今收標籤，不報錯、不移動。
@@ -128,6 +129,30 @@ const gap = (a, b) => {
   const t = env.tags();
   assert.deepStrictEqual(Object.keys(t), ['ctag-now']);
   assert.strictEqual(t['ctag-now'].y, 330);
+}
+
+// 7) 昨收跳空到畫面外（例如隔夜大幅跳空或漲跌停）：priceToCoordinate 仍回傳畫面外的座標。
+//    畫面內的今收標籤不得被拖離自己的價位，畫面外的昨收標籤也不動。
+{
+  const env = makeEnv({ wrapHeight: 600, prevClose: 40000 });   // 昨收約在 y = 330 + 8625.83 * PX_PER_POINT ≈ 598 之下
+  const farBelow = 330 + (48625.83 - 30000) * PX_PER_POINT;      // 保證在畫面外
+  const env2 = makeEnv({ wrapHeight: 600, prevClose: 30000 });
+  env2.render(48625.83, 30000);
+  const t = env2.tags();
+  assert(farBelow > 600, '測試前提：昨收在畫面外');
+  assert.strictEqual(t['ctag-now'].y, 330, '畫面內的今收標籤不得被拖離自己的價位');
+  assert.strictEqual(t['ctag-prev'].y, farBelow, '畫面外的昨收標籤維持原座標');
+  env.render(48625.83, 40000);   // 畫面內且距離夠遠：同樣不移動
+  assert.strictEqual(env.tags()['ctag-now'].y, 330);
+}
+
+// 8) 今收跳空到畫面上方之外、昨收在畫面內：昨收標籤不得被推到別處。
+{
+  const env = makeEnv({ wrapHeight: 600, topOfNow: -50 });       // 今收在畫面上方之外
+  env.render(48625.83, 48341.31);
+  const t = env.tags();
+  assert.strictEqual(t['ctag-now'].y, -50);
+  assert.strictEqual(t['ctag-prev'].y, -50 + (48625.83 - 48341.31) * PX_PER_POINT, '畫面外的標籤不參與避讓');
 }
 
 console.log('axis_tag_collision_selftest: ok');

@@ -1262,15 +1262,23 @@ function renderCloseReadout(close, prevClose) {
 // 今收與昨收只差一點點時（例如大盤昨收與現價相差 0.6%），兩個標籤各貼自己的價位高度會互相蓋住。
 // 畫面上較下方的標籤往下讓開；昨收虛線與標籤文字仍是精確價位。若讓開後超出圖高，整組上移，保持間距。
 function separateAxisTags(tags, areaHeight) {
-  const sorted = tags.slice().sort((a, b) => a.y - b.y);
+  // 價位在畫面外的標籤（跳空、漲跌停時 priceToCoordinate 仍回傳畫面外的座標）看不見，
+  // 不參與避讓，也不能把畫面內的標籤拖離自己的價位。
+  const sorted = tags
+    .filter(t => areaHeight <= 0 || (t.y + t.h / 2 > 0 && t.y - t.h / 2 < areaHeight))
+    .sort((a, b) => a.y - b.y);
+  sorted.forEach(t => { t.y0 = t.y; });
   for (let i = 1; i < sorted.length; i++) {
     const need = sorted[i - 1].y + sorted[i - 1].h / 2 + sorted[i].h / 2 + 2;   // 2px 空隙：offsetHeight 為整數，實際高度有小數
     if (sorted[i].y < need) sorted[i].y = need;
   }
+  // 只抵銷「被讓開而推出去」的那一段：標籤原本的下緣若已經壓在圖底邊（價位本身貼邊），
+  // 不能因此把另一個標籤拉離自己的價位。
   const last = sorted[sorted.length - 1];
-  if (last && areaHeight > 0 && last.y + last.h / 2 > areaHeight) {
-    const shift = last.y + last.h / 2 - areaHeight;
-    sorted.forEach(t => { t.y -= shift; });
+  if (last && areaHeight > 0) {
+    const limit = Math.max(areaHeight, last.y0 + last.h / 2);
+    const shift = last.y + last.h / 2 - limit;
+    if (shift > 0) sorted.forEach(t => { t.y -= shift; });
   }
   sorted.forEach(t => { t.el.style.top = t.y + 'px'; });
   return sorted;
