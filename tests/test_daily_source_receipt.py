@@ -109,24 +109,79 @@ class DailySourceReceiptTests(unittest.TestCase):
         self.assertEqual(result['inserted'], 2)
         self.assertNotIn('sourceReceiptId', result)
 
-    def test_receipt_for_another_symbol_is_rejected_and_nothing_is_written(self):
-        rows, receipt = self.fetch(yahoo_payload())
-        with self.assertRaises(ValueError):
-            datastore.merge_source_bars('2317', 'TW', rows, 'Yahoo Finance', ingest_receipt=receipt)
-        self.assertEqual(self.scalar('SELECT COUNT(*) FROM bars'), 0)
+    def assert_rejected_receipt_still_writes_bars(self, symbol, rows, receipt, expected_bars):
+        result = datastore.merge_source_bars(symbol, 'TW', rows, 'Yahoo Finance', ingest_receipt=receipt)
+        self.assertEqual(result['sourceReceipt'], 'rejected')
+        self.assertIn('sourceReceiptError', result)
+        self.assertNotIn('sourceReceiptId', result)
+        self.assertEqual(self.scalar('SELECT COUNT(*) FROM bars'), expected_bars)
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for table in ('bar_source_receipts', 'bar_first_ingest'):
+                # 核對失敗發生在建表之前：表不存在，或存在但沒有任何證據列。
+                if table in tables:
+                    self.assertEqual(conn.execute('SELECT COUNT(*) FROM ' + table).fetchone()[0], 0)
 
-    def test_rows_outside_the_captured_response_are_rejected(self):
+    def test_receipt_for_another_symbol_is_flagged_and_does_not_block_the_write(self):
+        rows, receipt = self.fetch(yahoo_payload())
+        self.assert_rejected_receipt_still_writes_bars('2317', rows, receipt, 2)
+
+    def test_rows_outside_the_captured_response_are_flagged_and_do_not_block_the_write(self):
         rows, receipt = self.fetch(yahoo_payload())
         forged = rows + [(T2 + 86400, 1.0, 2.0, 0.5, 1.5, 10)]
-        with self.assertRaises(ValueError):
-            datastore.merge_source_bars('2330', 'TW', forged, 'Yahoo Finance', ingest_receipt=receipt)
-        self.assertEqual(self.scalar('SELECT COUNT(*) FROM bars'), 0)
+        self.assert_rejected_receipt_still_writes_bars('2330', forged, receipt, 3)
 
-    def test_tampered_raw_response_fails_the_hash_check(self):
+    def test_tampered_raw_response_is_flagged_and_does_not_block_the_write(self):
         rows, receipt = self.fetch(yahoo_payload())
         receipt['raw'] = receipt['raw'] + b' '
-        with self.assertRaises(ValueError):
-            datastore.merge_source_bars('2330', 'TW', rows, 'Yahoo Finance', ingest_receipt=receipt)
+        self.assert_rejected_receipt_still_writes_bars('2330', rows, receipt, 2)
+
+    def test_missing_receipt_is_visible_in_the_result(self):
+        rows, _ = self.fetch(yahoo_payload())
+        result = datastore.merge_source_bars('2330', 'TW', rows, 'Yahoo Finance')
+        self.assertEqual(result['sourceReceipt'], 'absent')
+
+    def test_persistent_conflict_does_not_store_another_raw_copy_each_run(self):
+        rows, receipt = self.fetch(yahoo_payload())
+        datastore.merge_source_bars('2330', 'TW', rows, 'Yahoo Finance', ingest_receipt=receipt)
+        for _ in range(3):
+            rows2, receipt2 = self.fetch(yahoo_payload(closes=(100.0, 150.0)))
+            datastore.merge_source_bars('2330', 'TW', rows2, 'Yahoo Finance', ingest_receipt=receipt2)
+        self.assertEqual(self.scalar('SELECT COUNT(*) FROM bar_source_receipts'), 2)
+        self.assertEqual(self.scalar('SELECT COUNT(*) FROM bar_revision_ingest'), 1)
+        self.assertEqual(self.scalar('SELECT COUNT(*) FROM bar_source_revisions'), 1)
+
+    def test_bar_removed_elsewhere_can_be_fetched_again_and_keeps_the_original_evidence(self):
+        rows, receipt = self.fetch(yahoo_payload())
+        datastore.merge_source_bars('2330', 'TW', rows, 'Yahoo Finance', ingest_receipt=receipt)
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute('DELETE FROM bars WHERE ts=?', (T2,))
+            conn.commit()
+        rows2, receipt2 = self.fetch(yahoo_payload())
+        again = datastore.merge_source_bars('2330', 'TW', rows2, 'Yahoo Finance', ingest_receipt=receipt2)
+        self.assertEqual(again['inserted'], 1)
+        self.assertEqual(self.scalar('SELECT COUNT(*) FROM bars'), 2)
+        self.assertEqual(self.scalar('SELECT receipt_id FROM bar_first_ingest WHERE ts=?', T2), receipt['receiptId'])
+        self.assertEqual(self.scalar('SELECT COUNT(*) FROM bar_first_ingest'), 2)
+
+    def test_insert_or_replace_cannot_overwrite_any_evidence_table(self):
+        rows, receipt = self.fetch(yahoo_payload())
+        result = datastore.merge_source_bars('2330', 'TW', rows, 'Yahoo Finance', ingest_receipt=receipt)
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            revision = ('rev', result['runId'], receipt['receiptId'])
+            conn.execute('INSERT INTO bar_revision_ingest VALUES(?,?,?)', revision)
+            for sql, args in (
+                    ('INSERT OR REPLACE INTO bar_source_receipts VALUES(?,?,?,?,?,?,?,?,?,?)',
+                     (receipt['receiptId'], 'Yahoo Finance', '2330', 'TW', 'u', b'x', 'h', 1.0, 'p', 'v')),
+                    ('INSERT OR REPLACE INTO bar_first_ingest VALUES(?,?,?,?,?,?,?)',
+                     ('TW', '2330', T1, 'r', 'x', 1.0, '{}')),
+                    ('INSERT OR REPLACE INTO bar_revision_ingest VALUES(?,?,?)', ('rev', result['runId'], 'other'))):
+                with self.subTest(sql=sql), self.assertRaises(sqlite3.DatabaseError):
+                    conn.execute(sql, args)
+            for table in ('bar_revision_ingest',):
+                for sql in ("UPDATE %s SET receipt_id='x'" % table, 'DELETE FROM %s' % table):
+                    with self.subTest(sql=sql), self.assertRaises(sqlite3.DatabaseError):
+                        conn.execute(sql)
 
     def test_receipt_is_limited_to_yahoo_through_upsert_bars(self):
         rows, receipt = self.fetch(yahoo_payload())

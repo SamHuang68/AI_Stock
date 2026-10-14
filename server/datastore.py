@@ -340,13 +340,24 @@ def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_
                      'id TEXT PRIMARY KEY,symbol TEXT,market TEXT,session_date TEXT,observed_at REAL,payload TEXT)')
         conn.execute('CREATE TABLE IF NOT EXISTS bar_ingest_runs(id TEXT PRIMARY KEY,payload TEXT)')
         receipt_id = None
+        receipt_failed = False
 
         def receipt_for_write():
-            # 空收據（來源呼叫端未提供）視為未附證據；有收據時只在真的新增 bars 或另存修訂時才保存原始回應，
+            # 空收據（來源呼叫端未提供）視為未附證據；有收據時只在真的新增 bars 或新的修訂時才保存原始回應，
             # 避免每次無變動的更新都累積一份完整原始回應。
-            nonlocal receipt_id
-            if ingest_receipt and receipt_id is None:
-                receipt_id = source_provenance.store_receipt(conn, ingest_receipt, sym, market, source, rows)
+            # 收據核對失敗不得拖累既有寫入：bars 照舊寫入，但標記失敗並留下限頻記錄，不靜默。
+            nonlocal receipt_id, receipt_failed
+            if not ingest_receipt or receipt_failed:
+                return None
+            if receipt_id is None:
+                try:
+                    receipt_id = source_provenance.store_receipt(conn, ingest_receipt, sym, market, source, rows)
+                except ValueError as exc:
+                    receipt_failed = True
+                    counts['sourceReceiptError'] = str(exc)
+                    from log_once import log_once
+                    log_once('daily-source-receipt', f'{sym}.{market} 日線來源收據未通過核對；日線照舊寫入但沒有首次來源證據：{exc}', exc=exc)
+                    return None
                 counts['sourceReceiptId'] = receipt_id
             return receipt_id
         existing = {bar_date(r[0], market): r for r in conn.execute(
@@ -371,9 +382,10 @@ def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_
                 record = {'source': source, 'original': old, 'revision': row, 'policy': '保留原始值，待核對來源修訂'}
                 payload = json.dumps(record, ensure_ascii=False, allow_nan=False)
                 key = hashlib.sha256((sym + market + day + payload).encode('utf-8')).hexdigest()
-                conn.execute('INSERT OR IGNORE INTO bar_source_revisions VALUES(?,?,?,?,?,?)',
-                             (key, sym, market, day, counts['observedAt'], payload))
-                linked = receipt_for_write()
+                added = conn.execute('INSERT OR IGNORE INTO bar_source_revisions VALUES(?,?,?,?,?,?)',
+                                     (key, sym, market, day, counts['observedAt'], payload)).rowcount
+                # 內容雜湊相同的修訂已記錄過，持續衝突時不再重複保存原始回應。
+                linked = receipt_for_write() if added else None
                 if linked is not None:
                     source_provenance.link_revision(conn, key, counts['runId'], linked)
                 counts['conflicts'] += 1
@@ -384,6 +396,11 @@ def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_
                 source_provenance.link_first_insert(conn, market, sym, row, counts['runId'], linked)
             existing[day] = row
             counts['inserted'] += 1
+        if source == 'Yahoo Finance':
+            counts['sourceReceipt'] = 'stored' if receipt_id else ('rejected' if receipt_failed else 'absent')
+            if counts['inserted'] and counts['sourceReceipt'] == 'absent':
+                from log_once import log_once
+                log_once('daily-source-receipt-absent', f'{sym}.{market} 新增 {counts["inserted"]} 筆 Yahoo 日線但呼叫端未附來源收據')
         conn.execute('INSERT INTO meta(symbol,market,name,last_update) VALUES(?,?,?,?) '
                      'ON CONFLICT(market,symbol) DO UPDATE SET last_update=excluded.last_update',
                      (sym, market, sym, int(counts['observedAt'])))
