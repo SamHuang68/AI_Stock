@@ -1234,9 +1234,9 @@ function renderCloseReadout(close, prevClose) {
   const tw = _cvTheme ? _cvTheme.redUp : _isRedUpSym(S.sym);
   // 半字級小標籤，貼在 Y 軸刻度數字右邊（不蓋刻度），對應價位高度
   const mk = (id, price, prefix, color) => {
-    if (price == null || price <= 0) return;
+    if (price == null || price <= 0) return null;
     let y; try { y = S.chartSeries.priceToCoordinate(price); } catch { y = null; }
-    if (y == null) return;
+    if (y == null) return null;
     const el = document.createElement('div');
     el.id = id;
     el.textContent = `${prefix}${price.toFixed(2)}`;
@@ -1244,6 +1244,7 @@ function renderCloseReadout(close, prevClose) {
       `z-index:7;pointer-events:none;font-family:'JetBrains Mono',monospace;font-size:6.5px;` +
       `font-weight:700;color:${color};text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap`;
     wrap.appendChild(el);
+    return { el, y, h: el.offsetHeight || 14 };   // 讀不到高度時以 14px 估計
   };
   // 今收：依漲跌上色（台股紅漲綠跌）；昨收：灰
   let nowCol = 'var(--tlo)';
@@ -1253,8 +1254,26 @@ function renderCloseReadout(close, prevClose) {
       ? (_cvTheme ? _cvTheme.candleUp : (tw ? '#f87171' : '#4ade80'))
       : (_cvTheme ? _cvTheme.candleDown : (tw ? '#4ade80' : '#f87171'));
   }
-  mk('ctag-now', close, '今', nowCol);
-  mk('ctag-prev', prevClose, '昨', 'rgba(190,195,205,.9)');
+  const tags = [mk('ctag-now', close, '今', nowCol),
+                mk('ctag-prev', prevClose, '昨', 'rgba(190,195,205,.9)')].filter(Boolean);
+  separateAxisTags(tags, wrap.clientHeight || 0);
+}
+
+// 今收與昨收只差一點點時（例如大盤昨收與現價相差 0.6%），兩個標籤各貼自己的價位高度會互相蓋住。
+// 畫面上較下方的標籤往下讓開；昨收虛線與標籤文字仍是精確價位。若讓開後超出圖高，整組上移，保持間距。
+function separateAxisTags(tags, areaHeight) {
+  const sorted = tags.slice().sort((a, b) => a.y - b.y);
+  for (let i = 1; i < sorted.length; i++) {
+    const need = sorted[i - 1].y + sorted[i - 1].h / 2 + sorted[i].h / 2 + 2;   // 2px 空隙：offsetHeight 為整數，實際高度有小數
+    if (sorted[i].y < need) sorted[i].y = need;
+  }
+  const last = sorted[sorted.length - 1];
+  if (last && areaHeight > 0 && last.y + last.h / 2 > areaHeight) {
+    const shift = last.y + last.h / 2 - areaHeight;
+    sorted.forEach(t => { t.y -= shift; });
+  }
+  sorted.forEach(t => { t.el.style.top = t.y + 'px'; });
+  return sorted;
 }
 
 function renderChartLegend() {
