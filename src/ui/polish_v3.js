@@ -814,12 +814,18 @@ function applyMarketColorClass(mkt) {
 // (3) Chart legend + (4) volume color + (5) prev close line
 // All applied by patching renderChart
 // ============================================================
-// ── 台股指數(^TWII/^TWOII)早盤 Yahoo 日線落後一日 → 用 TWSE 即時校正頂部數字 ──
-// Yahoo ^TWII 早盤最後一根日 K 還停在昨天 → 頂部現價/% 與底部總體列(用 TWSE 即時)不一致。
-// 只在「偵測到落後(最後一根 K 收盤≈昨收)」時,用同一個 /twindex 源校正頂部現價/漲跌%/昨收。
-// 正常盤(主圖已是今天)完全不介入,保留 Yahoo。
+// ── 台股指數(^TWII/^TWOII)日漲跌：以 TWSE 官方昨收為準 ─────────────────
+// 1) 早盤 Yahoo ^TWII 最後一根日 K 還停在昨天 → 頂部現價/%/昨收整組改用 TWSE 即時,
+//    與底部總體列(同一個 /twindex 源)一致。
+// 2) 主圖已是今天時,Yahoo 的 chartPreviousClose 仍可能是錯的日期(曾出現基準 49302.00,
+//    官方昨收 48340.83：頂部 -1.37%、底部 +0.59%)。此時只把日漲跌基準換成官方昨收,
+//    現價維持主圖值,昨收虛線與右軸讀數一併重畫。
+// 換基準必須「主圖最新一根與 MIS 同一交易日」;主圖仍是上一交易日時不動,否則會被換成 0%。
+// /twindex 取不到(盤前無成交／休市／斷線)就保留 Yahoo 值。
 (function patchTwIndexHeader() {
   const TW_IDX = { '^TWII': 't00', '^TWOII': 'o00' };
+  // 與 /twindex 的 tradeDate 同口徑:台北日期。
+  const taipeiDate = sec => new Date((Number(sec) + 8 * 3600) * 1000).toISOString().slice(0, 10);
   window.addEventListener('symLoaded', async () => {
     const sym = S.sym;
     const code = TW_IDX[sym]; if (!code) return;
@@ -831,10 +837,18 @@ function applyMarketColorClass(mkt) {
       const cs = S.data && S.data.candles; if (!cs || !cs.length) return;
       const lb = cs[cs.length - 1];
       const lagging = Math.abs(lb.close - ix.prevClose) < Math.max(1, ix.prevClose * 1e-5);
-      if (!lagging) return;   // 主圖最後一根已是今天 → Yahoo 已正確,不介入
-      const price = ix.price, prev = ix.prevClose, pct = (price - prev) / prev * 100;
+      const prev = ix.prevClose;
+      const haveBase = S.data.yesterdayClose > 0 ? S.data.yesterdayClose : null;
+      const baseOff = haveBase == null || Math.abs(haveBase - prev) > Math.max(0.005, prev * 1e-7);
+      const sameSession = !!ix.tradeDate && lb.time != null && taipeiDate(lb.time) === ix.tradeDate;
+      if (!lagging && !(sameSession && baseOff)) return;             // 主圖正確且昨收一致 → 不介入
+      const hero = S.data.heroPrice > 0 ? S.data.heroPrice : lb.close;
+      const price = lagging ? ix.price : hero;
+      const pct = (price - prev) / prev * 100;
       if (S.data) S.data.yesterdayClose = prev;
-      const pEl = document.getElementById('ci-price'); if (pEl) pEl.textContent = price.toFixed(2);
+      if (lagging) {
+        const pEl = document.getElementById('ci-price'); if (pEl) pEl.textContent = price.toFixed(2);
+      }
       // 日漲跌 + 區間漲跌一併更新（區間基準不變，只刷新現價差額）
       if (typeof updateHeaderChg === 'function') {
         updateHeaderChg(price, prev, S.data && S.data.rangeBase, S.data && S.data.rangeChgLbl, 'TW', sym);
@@ -846,7 +860,10 @@ function applyMarketColorClass(mkt) {
           cEl.style.color = window.Colors ? Colors.dir(sym, pct) : (pct > 0 ? 'var(--red)' : pct < 0 ? 'var(--green)' : '');
         }
       }
-      console.log('[polish-v3] ^TW index header corrected via TWSE (early-session lag):', sym, price, pct.toFixed(2) + '%');
+      try { applyPrevCloseMarks(prev, lb.close); } catch (e) { /* 圖未就緒:下次 renderChart 會用 S.data.yesterdayClose */ }
+      if (S.tab === 'stats' && typeof renderRpanel === 'function') renderRpanel();
+      console.log('[polish-v3] ^TW index day-change base corrected via TWSE:', sym, haveBase, '→', prev,
+        lagging ? '(early-session lag)' : '(Yahoo 昨收與官方不符)', price, pct.toFixed(2) + '%');
     } catch (e) { /* keep Yahoo on failure */ }
   });
 })();
@@ -1168,24 +1185,13 @@ function _renderMarginRatioMacroChartFallback(candles) {
         //   (= meta.chartPreviousClose). The second-to-last 5min K is NOT
         //   yesterday's close — it's the previous 5min bar (~4345 vs real 4640).
         if (S.chartSeries && S.data?.candles?.length >= 1) {
-          if (S._prevLine) try { S.chartSeries.removePriceLine(S._prevLine); } catch {}
           const cands = S.data.candles;
           const last = cands[cands.length - 1];
           const prev = cands.length >= 2 ? cands[cands.length - 2] : null;
           const yPrice = (S.data.yesterdayClose != null && S.data.yesterdayClose > 0)
             ? S.data.yesterdayClose
             : (prev ? prev.close : null);
-          if (yPrice != null && yPrice > 0) {
-            S._prevLine = S.chartSeries.createPriceLine({
-              price: yPrice,
-              color: 'rgba(200, 200, 200, .35)',
-              lineWidth: 1,
-              lineStyle: LightweightCharts.LineStyle.Dashed,
-              axisLabelVisible: false,           // 不顯示浮動大框，改用右下小字讀數
-              title: '',
-            });
-          }
-          renderCloseReadout(last ? last.close : null, yPrice);
+          applyPrevCloseMarks(yPrice, last ? last.close : null);
         }
         // (d) Legend overlay
         renderChartLegend();
@@ -1196,6 +1202,23 @@ function _renderMarginRatioMacroChartFallback(candles) {
 
 // MarketChart 模組會維持最外層 hook；此處不再延遲重掛，避免與 MarketChart 搶 renderChart。
 // （舊 ensureMarginChartOutermost 已移除）
+
+// 昨收虛線 + 右軸讀數：renderChart 之後與「官方昨收校正」共用同一份畫法。
+function applyPrevCloseMarks(yPrice, lastClose) {
+  if (!S.chartSeries) return;
+  if (S._prevLine) try { S.chartSeries.removePriceLine(S._prevLine); } catch {}
+  if (yPrice != null && yPrice > 0) {
+    S._prevLine = S.chartSeries.createPriceLine({
+      price: yPrice,
+      color: 'rgba(200, 200, 200, .35)',
+      lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible: false,           // 不顯示浮動大框，改用右下小字讀數
+      title: '',
+    });
+  }
+  renderCloseReadout(lastClose, yPrice);
+}
 
 // 在右側價格軸「對應價位高度」放昨收/今收小標籤（不橫跨、不蓋 K 線）
 // 像原生現價標一樣貼在軸上，今收=漲跌色、昨收=灰。
