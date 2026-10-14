@@ -1,3 +1,21 @@
+## v5.0 修訂 — 2026-10-14 WaveDeck 測試字串不再被分享封存的郵件掃描器封鎖（候選，未發布）
+
+基底 `06d94771d19a03c9ece5006cf6e030fa823904b6`（main，PR #202 的合併 SHA），分支 `claude/dist-scrub-wd-email`，提交 SHA 見該分支與 PR。`VERSION` 維持 5.0。
+
+**問題**：`tests.test_dist_scrub` 在主線上整個失敗（`setUpClass`）。分享封存建置時，`scripts/build_dist.py` 的內容掃描器把 `wavedeck/tests/test_request_guard.py` 第 37 行的 `127.0.0.1` 後接 at 符號再接 `evil.example:18433` 判為郵件地址（規則 `email-address`，只有 `@example.com` 結尾才放行）並封鎖。該字串是 PR #200 為驗證 userinfo 攻擊刻意寫的測試資料，不是真實信箱。
+
+**為什麼主線 CI 沒有發現**：驗證計畫只跑受影響的案例，#200 與其後的 PR 都沒有案例涵蓋 `test_dist_scrub`。這是「局部驗證」的盲點：一個測試檔的內容會被另一個流程（分享封存）掃描，但兩者之間沒有對應關係。
+
+**修正後行為**：測試改以拼接組出同一個字串（`"127.0.0.1" + "@" + "evil.example:18433"`），語意不變，單元測試仍斷言該主機被拒絕；**不放寬掃描器**（它是安全防線）。註解中也不再寫出完整字串（第一次修正時我自己又把完整字串寫進註解，被同一個掃描器抓到）。
+
+**防再發**：驗證計畫新增案例「WD測試字串不被分享封存掃描器封鎖」，改動 `wavedeck/tests/test_request_guard.py` 時會跑 `test_dist_scrub` 中與歸檔掃描相關的 11 個方法加上 WaveDeck 自身的測試。已證明：把原本的寫法放回去，這些方法的 `setUpClass` 立刻失敗並印出 `[BLOCK] wavedeck/tests/test_request_guard.py (email-address)`。
+
+**驗證（本機）**：`wavedeck.tests.test_request_guard`（15 個）與歸檔掃描相關的 5 個方法實際執行通過；計畫閘門見 PR。**未執行**：CI、完整測試。
+
+**已知限制（與本次無關、未處理）**：`tests.test_dist_scrub.TestDistScrub.test_review_regressions_run_from_the_actual_single_machine_share` 在修正後仍失敗，因為它會從分享封存內執行 `tests.test_launcher_cmd`，而該測試在乾淨的 main 上本來就失敗：`LauncherCmdOfflineBehaviorTests`、`LauncherJsonHealthOfflineTests` 的 `setUpClass` 斷言「健康查詢必須只有兩個明列的 JSON 邊界」，但 2026-10-13 重寫後的 `START_LOCAL_AND_WEB.cmd` 只有一個 `Invoke-RestMethod`（local 改用 `start_local.ps1 -CheckOnly`），另有 `LauncherNativeWaitTests` 一項失敗。這是啟動器與其測試不同步，屬 10/13 該批變更的範圍，應由其作者決定改測試或改啟動器。狀態：本機候選，未發布。
+
+---
+
 ## v5.0 修訂 — 2026-10-14 右軸「今」「昨」標籤價位接近時不再互相蓋住（候選，未發布）
 
 基底 `404eb58ab8768a8f5f6ccd426addbaf598148a07`（main，PR #201 的合併 SHA，也是 2026-10-14 發布到正式站與本機受管安裝的版本），分支 `claude/axis-tag-collision`，提交 SHA 見該分支與 PR。`VERSION` 維持 5.0。
