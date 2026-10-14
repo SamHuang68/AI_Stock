@@ -3,6 +3,7 @@
 """WaveDeck stdlib HTTP server — bind 127.0.0.1:18433 by default."""
 from __future__ import annotations
 
+import hmac
 import json
 import mimetypes
 import os
@@ -41,6 +42,8 @@ from server.engine import (  # noqa: E402
     system_control,
 )
 from server import 策略契約 as strategy_contract  # noqa: E402
+from server import request_guard  # noqa: E402
+from server.st_link import ST_URL  # noqa: E402
 from server.config import load_config  # noqa: E402
 from server.state import RUNTIME, now_iso  # noqa: E402
 from server.版本身分 import read_release_identity  # noqa: E402
@@ -62,6 +65,8 @@ def _configured_port(value: str) -> int:
 
 PORT = _configured_port(os.environ.get("WAVEDECK_PORT", "18433"))
 SECRET = os.environ.get("WAVEDECK_SECRET", "")
+# Stock Terminal 畫面（瀏覽器）跨來源呼叫 WaveDeck 的來源；其他網頁一律不是合法來源。
+ST_ORIGINS = request_guard.st_origins(ST_URL)
 # Windows 常把某些埠段列為 excluded（WinError 10013），預設失敗時改試這些埠
 PORT_FALLBACKS = [
     PORT,
@@ -87,13 +92,21 @@ def _boot_sync_config() -> None:
         sys.stderr.write(f"[wavedeck] boot config sync skipped: {exc}\n")
 
 
+def _send_cors(handler: BaseHTTPRequestHandler) -> None:
+    """只對已知的 Stock Terminal 畫面來源回 CORS；永不使用萬用字元。"""
+    origin = request_guard.cors_origin((handler.headers.get("Origin") or "").strip().lower(), ST_ORIGINS)
+    if origin:
+        handler.send_header("Access-Control-Allow-Origin", origin)
+        handler.send_header("Vary", "Origin")
+
+
 def _json(handler: BaseHTTPRequestHandler, code: int, obj: Any) -> None:
     raw = json.dumps(obj, ensure_ascii=False).encode("utf-8")
     handler.send_response(code)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(raw)))
     handler.send_header("Cache-Control", "no-store")
-    handler.send_header("Access-Control-Allow-Origin", "*")
+    _send_cors(handler)
     handler.end_headers()
     handler.wfile.write(raw)
 
@@ -114,7 +127,7 @@ def _check_secret(handler: BaseHTTPRequestHandler) -> bool:
     if not SECRET:
         return True
     got = handler.headers.get("X-WaveDeck-Secret") or ""
-    return got == SECRET
+    return hmac.compare_digest(got.encode("utf-8"), SECRET.encode("utf-8"))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -123,14 +136,33 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("[wavedeck] " + (fmt % args) + "\n")
 
+    def _guard(self, method: str) -> bool:
+        """Host 白名單與 Origin 判定；回 True 代表已拒絕並回應 403。"""
+        path = urlparse(self.path).path.rstrip("/") or "/"
+        origin = request_guard.request_origin(
+            self.headers.get("Origin"), self.headers.get("Referer"), method=method)
+        ok, reason = request_guard.check_request(
+            method=method, path=path, host=self.headers.get("Host"), origin=origin,
+            sec_fetch_site=self.headers.get("Sec-Fetch-Site"), server_port=self.server.server_port,
+            st_allowed=ST_ORIGINS, allowed_hosts=request_guard.extra_hosts())
+        if ok:
+            return False
+        _json(self, 403, {"ok": False, "error": reason})
+        return True
+
     def do_OPTIONS(self) -> None:  # noqa: N802
+        if self._guard("OPTIONS"):
+            return
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        _send_cors(self)
         self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type,X-WaveDeck-Secret")
+        self.send_header("Access-Control-Max-Age", "600")
         self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802
+        if self._guard("GET"):
+            return
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
 
@@ -225,6 +257,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self) -> None:  # noqa: N802
+        if self._guard("POST"):
+            return
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
         if not _check_secret(self) and path.startswith("/webhook"):
@@ -236,9 +270,6 @@ class Handler(BaseHTTPRequestHandler):
             return _json(self, 400, {"ok": False, "error": str(exc)})
 
         if path in ("/api/strategy/register", "/api/strategy/activate", "/api/strategy/mode", "/api/no_overnight"):
-            origin = self.headers.get("Origin")
-            if origin and origin not in ("http://" + self.headers.get("Host", ""), "https://" + self.headers.get("Host", "")):
-                return _json(self, 403, {"ok": False, "error": "設定操作須由本機控制臺發起"})
             if not isinstance(body, dict):
                 return _json(self, 400, {"ok": False, "error": "設定內容須為 JSON 物件"})
             try:
