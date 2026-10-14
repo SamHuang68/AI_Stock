@@ -177,6 +177,21 @@ class RequestGuardHttpTests(unittest.TestCase):
                     self.assertIsNone(response.getheader("Access-Control-Allow-Origin"))
         self.assertEqual(self.state(), before)
 
+    def test_rejected_post_with_a_large_body_still_returns_403_instead_of_resetting_the_connection(self):
+        # 防護拒絕時若尚未讀完請求本體就關閉連線，Windows 會送出 RST，客戶端可能讀不到 403。
+        # 本體越大越容易重現，因此以接近上限的本體重複多次，任何一次連線被中止都算失敗。
+        body = {"pad": "x" * 200000}
+        failures = []
+        for attempt in range(25):
+            try:
+                status, parsed, _ = self.request("POST", "/api/style", body=body, headers={"Origin": FOREIGN})
+            except OSError as exc:
+                failures.append((attempt, type(exc).__name__, getattr(exc, "winerror", None)))
+                continue
+            if status != 403 or not parsed or parsed.get("ok") is not False:
+                failures.append((attempt, status, parsed))
+        self.assertEqual(failures, [])
+
     def test_referer_only_and_fetch_metadata_cannot_bypass_the_origin_check(self):
         before = self.state()
         status, _, _ = self.request("POST", "/api/style", body={"style": 99}, headers={"Referer": FOREIGN + "/attack"})
@@ -284,6 +299,23 @@ class RequestGuardHttpTests(unittest.TestCase):
             status, _, _ = self.request("POST", "/api/style", body={"style": 99},
                                         headers={"X-WaveDeck-Secret": "s3cret"}, **tunnel)
             self.assertEqual(status, 403)
+
+    def test_webhook_with_a_wrong_secret_and_a_large_body_still_returns_401(self):
+        # 密鑰檢查也在讀取本體之前回應；與防護拒絕相同，不可讓連線被重設。
+        failures = []
+        with patch.object(self.server_module, "SECRET", "s3cret"), \
+                patch.object(self.server_module, "handle_signal", return_value={"ok": True}) as signal:
+            for attempt in range(25):
+                try:
+                    status, _, _ = self.request("POST", "/webhook", body={"pad": "x" * 200000},
+                                                headers={"X-WaveDeck-Secret": "wrong"}, host="tunnel.example")
+                except OSError as exc:
+                    failures.append((attempt, type(exc).__name__, getattr(exc, "winerror", None)))
+                    continue
+                if status != 401:
+                    failures.append((attempt, status))
+            signal.assert_not_called()
+        self.assertEqual(failures, [])
 
 
 if __name__ == "__main__":
