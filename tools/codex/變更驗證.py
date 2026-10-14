@@ -226,13 +226,7 @@ def run_plan(root, plan_path, evidence_dir, *, base_root=None, target_commit=Non
             require(identity_for(root, case) == identity, '驗證期間輸入改變，拒絕保存成功。')
             result.update(exitCode=code, status='passed' if code == 0 else 'failed', elapsedSeconds=round(time.time() - started, 3))
             receipt_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
-            tail = ''
-            if code != 0:
-                try:
-                    tail = '\n' + '\n'.join((evidence / (key + '.log')).read_text(encoding='utf-8', errors='replace').splitlines()[-80:])
-                except OSError:
-                    pass
-            require(code == 0, '局部驗證失敗（' + case['id'] + '），請讀取紀錄：' + str(evidence / (key + '.log')) + tail)
+            require(code == 0, '局部驗證失敗，請讀取紀錄：' + str(evidence / (key + '.log')))
         except subprocess.TimeoutExpired:
             # 保留 active 與原程序，禁止逾時後再啟一份。
             raise RuntimeError('局部驗證逾時；保留原程序及 active 紀錄，禁止盲目重跑。')

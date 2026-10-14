@@ -1098,8 +1098,7 @@
         "docs/局部驗證與證據沿用.md",
         "docs/PR198後續分類.md",
         "docs/完整審查修正.md",
-        "tests/test_變更驗證.py",
-        "tools/codex/變更驗證.py"
+        "tests/test_變更驗證.py"
       ],
       "inputs": [
         ".gitattributes",
