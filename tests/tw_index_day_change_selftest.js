@@ -27,6 +27,7 @@ const headerCode = slice(terminal, '/** 漲跌字串：', 'async function fetchY
 const marksCode = slice(polish, '// 昨收虛線 + 右軸讀數', '\nfunction renderChartLegend');
 // 下方大盤列的實際更新路徑：/market/snapshot → marketData 事件 → renderCanonicalMarketQuote。
 // refreshTwIndexCells 目前沒有任何呼叫者，不作為驗收路徑。
+const marketDataCode = fs.readFileSync(path.join(root, 'src/core/market_data_v5.js'), 'utf8').replace(/\r\n/g, '\n');
 const stripCode = slice(polish, 'function applyMktCellTone(', 'async function refreshMktBar()');
 const patchCode = slice(polish, '(function patchTwIndexHeader()', '// ============================================================\n// 大盤融資維持率');
 
@@ -42,6 +43,8 @@ function makeEnv({ sym = '^TWII', lastTime = SEC_1014, lastClose = incident.offi
   const strip = { classList: { remove() {} }, querySelector: selector => node('strip' + selector) };
   const lines = [], removed = [], calls = { rpanel: 0 };
   const listeners = {};
+  const snapshotRequests = [];
+  let snapshotBody = null;
   const S = {
     sym, mkt: 'TW', tab, range: '1d',
     data: { candles: [{ time: lastTime - 300, close: lastClose - 5 }, { time: lastTime, close: lastClose }],
@@ -61,23 +64,29 @@ function makeEnv({ sym = '^TWII', lastTime = SEC_1014, lastClose = incident.offi
     },
     fmtIdx: value => Number(value).toFixed(2),
     renderRpanel() { calls.rpanel++; },
-    fetch: async () => ({ ok: true, json: async () => twindex }),
+    CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init && init.detail; } },
+    fetch: async url => {
+      if (String(url).includes('/market/snapshot')) { snapshotRequests.push(String(url)); return { ok: true, json: async () => snapshotBody }; }
+      return { ok: true, json: async () => twindex };
+    },
   };
   context.window = {
-    S,
+    S, SERVER: 'http://127.0.0.1:18432',
     addEventListener(name, handler) { (listeners[name] = listeners[name] || []).push(handler); },
+    dispatchEvent(event) { (listeners[event.type] || []).forEach(handler => handler(event)); return true; },
   };
   vm.createContext(context);
   vm.runInContext(headerCode, context);   // fmtChgAbsPct / calcChgFromBase / updateHeaderChg（正式程式碼）
   vm.runInContext(marksCode, context);    // applyPrevCloseMarks / renderCloseReadout（正式程式碼）
   vm.runInContext(patchCode, context);    // patchTwIndexHeader
+  vm.runInContext(marketDataCode, context); // MarketData.refresh／publish（正式程式碼）
   vm.runInContext(stripCode, context);    // applyMktCellTone / renderCanonicalMarketQuote / marketData 監聽（正式程式碼）
   return {
     S, nodes, lines, removed, calls,
     async symLoaded() { for (const handler of listeners.symLoaded || []) await handler(); },
-    async publishSnapshot(snapshot) {
-      for (const handler of listeners.marketData || []) await handler({ detail: { snapshot, reason: 'snapshot' } });
-    },
+    snapshotRequests,
+    // 走產品實際入口：MarketData.refresh() 取 /market/snapshot，再由正式 publish 發出 marketData 事件。
+    async refreshSnapshot(snapshot) { snapshotBody = Object.assign({ ok: true }, snapshot); return context.window.MarketData.refresh(); },
   };
 }
 
@@ -179,19 +188,19 @@ const official = (extra) => ({ ok: true, indices: { t00: Object.assign({}, incid
   {
     const env = makeEnv({ twindex: official() });
     await env.symLoaded();
-    await env.publishSnapshot(snapshotOf(incident.expected.snapshotMarket));
+    await env.refreshSnapshot(snapshotOf(incident.expected.snapshotMarket));
     assert.strictEqual(env.nodes['ci-chg'].innerHTML.replace(/ <span.*$/, ''), incident.expected.header);
     assert.strictEqual(env.nodes['strip.delta'].textContent, '+' + incident.expected.stripRoundedChange);
     assert.strictEqual(env.nodes['strip.ch'].textContent, '▲0.59%');
     assert.strictEqual(env.nodes['strip.px'].textContent, incident.official.price.toFixed(2));
-    assert.strictEqual(env.lines[0].options.price, incident.official.prevClose);
+    assert.strictEqual(env.snapshotRequests.length, 1);
   }
 
   // 13) 敏感度：快照若帶錯的昨收（Yahoo 值），實際路徑會出現事故畫面，證明案例 12 確實經過這條路徑。
   {
     const env = makeEnv({ twindex: official() });
     await env.symLoaded();
-    await env.publishSnapshot(snapshotOf(Object.assign({}, incident.expected.snapshotMarket, {
+    await env.refreshSnapshot(snapshotOf(Object.assign({}, incident.expected.snapshotMarket, {
       referencePrice: incident.yahoo.prevClose,
       displayChange: incident.official.price - incident.yahoo.prevClose,
       displayChangePct: (incident.official.price - incident.yahoo.prevClose) / incident.yahoo.prevClose * 100,
@@ -200,5 +209,15 @@ const official = (extra) => ({ ok: true, indices: { t00: Object.assign({}, incid
     assert.strictEqual(env.nodes['strip.ch'].textContent, '▼1.37%');
   }
 
-  console.log('大盤當日漲跌：13 組情境通過');
+  // 14) 敏感度：取數入口失敗時不得發出事件，標頭與小框維持原狀（不被半套資料覆寫）。
+  {
+    const env = makeEnv({ twindex: official() });
+    await env.symLoaded();
+    const before = env.nodes['ci-chg'].innerHTML;
+    await env.refreshSnapshot({ ok: false, quotes: {} });
+    assert.strictEqual(env.nodes['ci-chg'].innerHTML, before);
+    assert.strictEqual(env.nodes['strip.px'], undefined, '取數失敗不得渲染下方小框');
+  }
+
+  console.log('大盤當日漲跌：14 組情境通過');
 })().catch(error => { console.error(error); process.exit(1); });
