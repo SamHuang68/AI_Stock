@@ -114,7 +114,8 @@ class StockSignalsRevisionMetadataTests(unittest.TestCase):
         self.fetches = []
 
     def remote(self, payload):
-        def fetch(*arguments):
+        def fetch(*arguments, **options):
+            # _fetch_remote 另有可選的 receipt_out；替身不產生原始回應，收據維持空值（視為未附證據）。
             self.fetches.append(arguments)
             return list(payload)
         return mock.patch.object(routes, '_fetch_remote', side_effect=fetch)
