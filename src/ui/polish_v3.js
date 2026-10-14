@@ -1236,7 +1236,7 @@ function renderCloseReadout(close, prevClose) {
   const mk = (id, price, prefix, color) => {
     if (price == null || price <= 0) return null;
     let y; try { y = S.chartSeries.priceToCoordinate(price); } catch { y = null; }
-    if (y == null) return null;
+    if (y == null || !Number.isFinite(y)) return null;   // NaN 會讓 top 失效並使排序不穩，不畫該標籤
     const el = document.createElement('div');
     el.id = id;
     el.textContent = `${prefix}${price.toFixed(2)}`;
@@ -1256,7 +1256,13 @@ function renderCloseReadout(close, prevClose) {
   }
   const tags = [mk('ctag-now', close, '今', nowCol),
                 mk('ctag-prev', prevClose, '昨', 'rgba(190,195,205,.9)')].filter(Boolean);
-  separateAxisTags(tags, wrap.clientHeight || 0);
+  // 避讓的下限用價格窗格的高度（容器 #chart-wrap 還含時間軸，實測 444 對 436）；讀不到才退回容器高度。
+  let areaHeight = wrap.clientHeight || 0;
+  try {
+    const pane = S.chart && typeof S.chart.paneSize === 'function' ? S.chart.paneSize() : null;
+    if (pane && pane.height > 0) areaHeight = pane.height;
+  } catch (e) { /* 舊版圖表函式庫沒有 paneSize：沿用容器高度 */ }
+  separateAxisTags(tags, areaHeight);
 }
 
 // 今收與昨收只差一點點時（例如大盤昨收與現價相差 0.6%），兩個標籤各貼自己的價位高度會互相蓋住。
@@ -1278,7 +1284,10 @@ function separateAxisTags(tags, areaHeight) {
   if (last && areaHeight > 0) {
     const limit = Math.max(areaHeight, last.y0 + last.h / 2);
     const shift = last.y + last.h / 2 - limit;
-    if (shift > 0) sorted.forEach(t => { t.y -= shift; });
+    // 上移也不能把最上面的標籤推出圖頂；圖極矮、兩邊都放不下時寧可讓下方標籤超出圖底。
+    const room = Math.max(0, sorted[0].y - sorted[0].h / 2);
+    const applied = Math.min(shift, room);
+    if (applied > 0) sorted.forEach(t => { t.y -= applied; });
   }
   sorted.forEach(t => { t.el.style.top = t.y + 'px'; });
   return sorted;

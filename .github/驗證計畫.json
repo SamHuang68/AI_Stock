@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock",
-  "baseCommit": "404eb58ab8768a8f5f6ccd426addbaf598148a07",
+  "baseCommit": "06d94771d19a03c9ece5006cf6e030fa823904b6",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
       "id": "右軸今昨標籤價位接近時不重疊",
-      "reason": "大盤今收 48625.83 與官方昨收 48341.31 只差 0.59% 時，右軸「今」「昨」兩個標籤各貼自己的價位高度而互相蓋住，實機量到垂直重疊 8～9px（桌機、844×390、390×844）。價位在畫面上較下方的標籤往下讓開並保留 2px 空隙，超出圖高時整組上移；昨收虛線與標籤文字仍是精確價位。新測試執行正式的 renderCloseReadout，舊程式碼下失敗",
+      "reason": "大盤今收 48625.83 與官方昨收 48341.31 只差 0.59% 時，右軸「今」「昨」兩個標籤各貼自己的價位高度而互相蓋住，實機量到垂直重疊 8～9px（桌機、844×390、390×844）。價位在畫面上較下方的標籤往下讓開並保留 2px 空隙，超出圖高時整組上移；昨收虛線與標籤文字仍是精確價位。新測試執行正式的 renderCloseReadout，舊程式碼下失敗；後續補強：NaN 座標不畫、避讓下限改用價格窗格高度、圖極矮時上移不推出圖頂，自測擴為 15 個案例",
       "changes": [
         "src/ui/polish_v3.js",
         "tests/axis_tag_collision_selftest.js"
