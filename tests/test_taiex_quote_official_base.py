@@ -8,6 +8,7 @@ Yahoo 昨收會讓現價 48625.83 變成 -676.17 (-1.37%)，官方口徑是 +284
 import importlib.util
 import json
 import os
+import socket
 import sys
 import threading
 import unittest
@@ -19,12 +20,10 @@ from unittest import mock
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.join(ROOT, 'server'))
 
-OFFICIAL_T00 = {
-    'price': 48625.83, 'prevClose': 48341.31, 'change': 284.52,
-    'changePct': (48625.83 - 48341.31) / 48341.31 * 100,
-    'name': '發行量加權股價指數', 'source': 'twse-mis', 'session': 'regular',
-    'open': 48400.0, 'high': 48700.5, 'low': 48310.25,
-}
+with open(os.path.join(os.path.dirname(__file__), 'fixtures', '大盤昨收分歧.json'),
+          encoding='utf-8') as 案例檔:
+    案例資料 = json.load(案例檔)
+OFFICIAL_T00 = 案例資料['official']
 
 
 _REAL_URLOPEN = urllib.request.urlopen
@@ -93,6 +92,92 @@ class TaiexQuoteOfficialBaseTests(unittest.TestCase):
         self.assertEqual(row['price'], 48625.83)
         self.assertAlmostEqual(row['changePct'], OFFICIAL_T00['changePct'], places=9)
         self.assertEqual(row['source'], 'twse-mis')
+
+    def test_同一官方快照通過三個正式HTTP端點仍保持昨收與漲跌一致(self):
+        """只替換外部 MIS 回應；正式解析器與三條 HTTP 路由都須實際執行。"""
+        官方快照 = {'msgArray': [{
+            'ch': 't00.tw', 'n': OFFICIAL_T00['name'],
+            'z': str(OFFICIAL_T00['price']), 'y': str(OFFICIAL_T00['prevClose']),
+            'o': str(OFFICIAL_T00['open']), 'h': str(OFFICIAL_T00['high']),
+            'l': str(OFFICIAL_T00['low']),
+            'd': 案例資料['tradeDate'].replace('-', ''), 't': '13:30:00',
+        }]}
+        原始連線 = socket.create_connection
+
+        def 僅允許測試伺服器連線(address, *args, **kwargs):
+            if address != ('127.0.0.1', self.httpd.server_port):
+                raise AssertionError('一致性案例禁止外部網路連線')
+            return 原始連線(address, *args, **kwargs)
+
+        with mock.patch.object(self.st, '_src_fetch_json', return_value=官方快照) as 官方來源, \
+             mock.patch.object(self.st, '_cache') as 隔離快取, \
+             mock.patch.object(self.st, 'fetch_one', side_effect=_yahoo_must_not_be_called) as Yahoo來源, \
+             mock.patch.object(socket, 'create_connection', side_effect=僅允許測試伺服器連線):
+            隔離快取.get.return_value = None
+            大盤回應 = self.get_json('/twindex')
+            單檔回應 = self.get_json('/quote/%5ETWII')
+            批次回應 = self.get_json('/quote-batch?syms=%5ETWII')['^TWII']
+
+        self.assertTrue(大盤回應['ok'])
+        self.assertEqual(大盤回應['source'], 'twse-mis')
+        大盤報價 = 大盤回應['indices']['t00']
+        for 端點, 報價 in (('/twindex', 大盤報價), ('/quote', 單檔回應),
+                          ('/quote-batch', 批次回應)):
+            with self.subTest(端點=端點):
+                for 欄位 in ('price', 'prevClose', 'changePct'):
+                    self.assertAlmostEqual(報價[欄位], OFFICIAL_T00[欄位], places=9)
+                    self.assertAlmostEqual(報價[欄位], 大盤報價[欄位], places=9)
+                self.assertEqual(報價['source'], 'twse-mis')
+                self.assertNotEqual(報價['prevClose'], 案例資料['yahoo']['prevClose'])
+                self.assertGreater(報價['changePct'], 0)
+
+        # 日期目前僅由 /twindex 暴露；不得拿 serverTime 當市場日期。
+        self.assertEqual(大盤報價['tradeDate'], 案例資料['tradeDate'])
+        self.assertEqual(大盤報價['asOf'], 案例資料['tradeDate'] + 'T13:30:00+08:00')
+        self.assertEqual(大盤報價['market']['asOf'], 大盤報價['asOf'])
+        self.assertEqual(大盤報價['referencePrice'], OFFICIAL_T00['prevClose'])
+        self.assertEqual(大盤報價['referenceType'], 'previous_close')
+        self.assertAlmostEqual(大盤報價['displayChange'], OFFICIAL_T00['change'], places=9)
+        self.assertEqual(大盤報價['displayChangePct'], round(OFFICIAL_T00['changePct'], 4))
+        self.assertAlmostEqual(單檔回應['change'], 大盤報價['change'], places=9)
+        self.assertEqual(官方來源.call_count, 3)
+        for 呼叫, 頻道 in zip(官方來源.call_args_list,
+                             ('tse_t00.tw|otc_o00.tw', 'tse_t00.tw', 'tse_t00.tw')):
+            self.assertEqual(呼叫.args[0], 'twse-mis')
+            self.assertIn('ex_ch=' + 頻道 + '&', 呼叫.args[1])
+        Yahoo來源.assert_not_called()
+
+    def test_市場快照路由使用同一官方昨收並輸出前端實際讀取的欄位(self):
+        """前端下方小框與主圖標頭讀的是 /market/snapshot 的 market 欄位，不是 /twindex 原始欄位。"""
+        官方快照 = {'msgArray': [{
+            'ch': 't00.tw', 'n': OFFICIAL_T00['name'],
+            'z': str(OFFICIAL_T00['price']), 'y': str(OFFICIAL_T00['prevClose']),
+            'o': str(OFFICIAL_T00['open']), 'h': str(OFFICIAL_T00['high']),
+            'l': str(OFFICIAL_T00['low']),
+            'd': 案例資料['tradeDate'].replace('-', ''), 't': '13:30:00',
+        }]}
+        原始連線 = socket.create_connection
+
+        def 僅允許測試伺服器連線(address, *args, **kwargs):
+            if address != ('127.0.0.1', self.httpd.server_port):
+                raise AssertionError('快照案例禁止外部網路連線')
+            return 原始連線(address, *args, **kwargs)
+
+        with mock.patch.object(self.st, '_src_fetch_json', return_value=官方快照),              mock.patch.object(self.st, '_cache') as 隔離快取,              mock.patch.object(self.st, 'fetch_one', side_effect=_yahoo_must_not_be_called) as Yahoo來源,              mock.patch.object(self.st.Handler, '_txf_mis_session', return_value=None),              mock.patch.object(socket, 'create_connection', side_effect=僅允許測試伺服器連線):
+            隔離快取.get.return_value = None
+            快照 = self.get_json('/market/snapshot')
+
+        self.assertTrue(快照['ok'])
+        市場 = 快照['quotes']['^TWII']['market']
+        預期 = 案例資料['expected']['snapshotMarket']
+        self.assertEqual(市場['source'], 'twse-mis')
+        self.assertEqual(市場['referenceType'], 預期['referenceType'])
+        self.assertAlmostEqual(市場['price'], 預期['price'], places=9)
+        self.assertAlmostEqual(市場['referencePrice'], 預期['referencePrice'], places=9)
+        self.assertAlmostEqual(市場['displayChange'], 預期['displayChange'], places=9)
+        self.assertEqual(市場['displayChangePct'], 預期['displayChangePct'])
+        self.assertNotEqual(市場['referencePrice'], 案例資料['yahoo']['prevClose'])
+        Yahoo來源.assert_not_called()
 
     def test_yahoo_value_is_not_used_even_when_it_is_the_only_wrong_number(self):
         """Yahoo 回 49302.0 時，批次與單檔都不得把 -676.17 算進去。"""

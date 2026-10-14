@@ -59,4 +59,6 @@ Get-NetTCPConnection -LocalPort 18432 -State Listen -ErrorAction SilentlyContinu
 
 ## 5. 事故紀錄
 
+2026-10-14 大盤日漲跌來源契約：見 `docs/大盤當日漲跌8D報告.md`。後續修改主圖日漲跌／昨收校正，或 `/twindex`、`/quote`、`/quote-batch` 的大盤報價來源時，局部驗證須對應 `tests/tw_index_day_change_selftest.js` 與 `tests/test_taiex_quote_official_base.py` 的受影響情境，沿用 `tests/fixtures/大盤昨收分歧.json` 的同一快照。不要以 K 棒已是當日推論昨收也正確，不要用小框取整漲點反推基準。主圖、小框、昨收線及報價端點按既有欄位契約逐項核對；此指引不要求無關修改重跑，也不擴張為完整驗證。
+
 2026-10-07：雲端代理人沿用已退役的 `C:\Users\Sam\AI_Stock`，指示使用者在該資料夾執行 `START_TIP.cmd`。該資料夾不是登記的 `originalCheckout`，`go.ps1` 走開發流程並關掉 18432 埠上的程序，改跑一份未受管的開發版（03:33:05 啟動）。處置：改由 `%LOCALAPPDATA%\StockTerminalLocal\start_local.ps1` 啟動受管安裝（03:48:00 啟動，runtimeCommit `e0b1147…`）。根因：路徑遷移沒有記錄在倉庫、`go.ps1` 沒有防呆。對應修正：本檔、`go.ps1` 的拒絕檢查，以及把同類的 `scripts\apply.bat`（強制 checkout、`stash -u`、依埠 taskkill）改為停用的存根。事後證據：前一份受管程序的 log 最後寫入 2026-10-05 18:41，距事發約 33 小時，事發當時 18432 上很可能沒有受管程序在運行，因此很可能沒有關閉任何受管程序；這是推論，不是證明（前一份 receipt 已被新啟動覆寫，無法查看）。
