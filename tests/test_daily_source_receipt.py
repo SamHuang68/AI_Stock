@@ -83,6 +83,7 @@ class DailySourceReceiptTests(unittest.TestCase):
         again = datastore.merge_source_bars('2330', 'TW', rows2, 'Yahoo Finance', ingest_receipt=receipt2)
         self.assertEqual((again['inserted'], again['unchanged']), (0, 2))
         self.assertNotIn('sourceReceiptId', again)
+        self.assertEqual(again['sourceReceipt'], 'not_needed')
         self.assertEqual(self.scalar('SELECT COUNT(*) FROM bar_source_receipts'), 1)
 
     def test_conflicting_value_keeps_original_and_links_the_revision(self):
