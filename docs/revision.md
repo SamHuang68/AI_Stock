@@ -15,6 +15,8 @@
 - 日線來源收據：正式庫尚未發生過會建立收據表的新增日線寫入；增長量只有合成回應的估算，全市場回補前須先決定壓縮或限制。
 - 仍未解的獨立問題：`tests.test_launcher_cmd` 與 10/13 重寫的 `START_LOCAL_AND_WEB.cmd` 契約不一致，冷啟動時 `START_TIP.cmd` 是否返回未在真實主控台驗證，已交給 Codex 判定。
 
+**同時修正（演練發布驗證時發現）**：PR #205 帶入的 `docs/大盤當日漲跌8D報告.md` 有兩處絕對使用者路徑（`C:/Users/...`），被分享封存的內容掃描器擋下（`windows-user-path`、`mac-user-path`），使 main 上 `tests.test_dist_scrub.TestDistScrub` 的 `setUpClass` 整個失敗。#205 的局部 CI 只跑兩組案例，沒有涵蓋分享封存，所以當時是綠的。已把兩處路徑改為 `<AI-Workspace>/...`，語意不變，不放寬掃描器。驗證：`test_has_core_share_files`、`test_archive_passes_same_post_compression_scanner`、`test_excludes_internal_context_and_runtime_state` 通過（本機 targeted）。這是文件字串，不影響已發布的程式行為。
+
 證據：`C:/Users/Sam/AI-Workspace/docs/stock-terminal/指定版本發布-7aa94a38/`、`指定版本發布-d586f9af/`（發布紀錄、備份證據）。
 
 ---

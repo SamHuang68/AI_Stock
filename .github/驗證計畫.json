@@ -9,9 +9,10 @@
   "cases": [
     {
       "id": "修訂紀錄補記後分享封存仍通過同一掃描器",
-      "reason": "本次只在 docs/revision.md 補記發布狀態，不改程式。分享封存會收錄 revision.md 並以同一內容掃描器檢查，文件內若含看似信箱或敏感值的字串會讓封存失敗，因此以分享封存的核心檔案與掃描器案例回歸。不跑完整套件。",
+      "reason": "本次只改文件：在 docs/revision.md 補記發布狀態，並把大盤 8D 報告中的絕對使用者路徑改為中性寫法。分享封存會收錄這些文件並以同一內容掃描器檢查（含使用者路徑），main 上該報告曾使 test_dist_scrub 的 setUpClass 失敗，因此以分享封存案例回歸。不跑完整套件。",
       "changes": [
-        "docs/revision.md"
+        "docs/revision.md",
+        "docs/大盤當日漲跌8D報告.md"
       ],
       "inputs": [
         ".gitattributes",
@@ -121,6 +122,7 @@
         "docs/前瞻即時診斷.md",
         "docs/可靠性補完與待證據清單.md",
         "docs/報價與投組缺值契約.md",
+        "docs/大盤當日漲跌8D報告.md",
         "docs/完整審查修正.md",
         "docs/官方公司行動與回補品質.md",
         "docs/官方資料來源修復驗收.md",
