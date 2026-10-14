@@ -123,6 +123,40 @@ def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
         raise ValueError("無法解析 JSON 請求") from None
 
 
+def _drain_request_body(handler: BaseHTTPRequestHandler, limit: int = 262144) -> None:
+    """被拒絕的請求仍要先讀完本體再回應。
+
+    伺服器在本體尚未讀完時回應並關閉連線，Windows 會對仍有未讀資料的連線送出 RST，
+    客戶端可能還沒讀到 403 就收到 WinError 10053／10054。只讀到與 _read_json 相同的上限，
+    並設短逾時，避免惡意請求拖住處理緒；超過上限的請求不讀取，直接關閉連線。
+    """
+    try:
+        length = int(handler.headers.get("Content-Length") or 0)
+    except ValueError:
+        length = 0
+    if length <= 0:
+        return
+    if length > limit:
+        handler.close_connection = True
+        return
+    previous = handler.connection.gettimeout()
+    handler.connection.settimeout(2.0)
+    try:
+        remaining = length
+        while remaining > 0:
+            chunk = handler.rfile.read(min(remaining, 65536))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+    except OSError:
+        handler.close_connection = True
+    finally:
+        try:
+            handler.connection.settimeout(previous)
+        except OSError:
+            pass
+
+
 def _check_secret(handler: BaseHTTPRequestHandler) -> bool:
     if not SECRET:
         return True
@@ -147,6 +181,8 @@ class Handler(BaseHTTPRequestHandler):
             st_allowed=ST_ORIGINS, allowed_hosts=request_guard.extra_hosts())
         if ok:
             return False
+        if method == "POST":
+            _drain_request_body(self)
         _json(self, 403, {"ok": False, "error": reason})
         return True
 
@@ -262,6 +298,7 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
         if not _check_secret(self) and path.startswith("/webhook"):
+            _drain_request_body(self)  # 與防護拒絕相同：回應前先讀完本體，避免連線被重設
             return _json(self, 401, {"ok": False, "error": "bad secret"})
 
         try:

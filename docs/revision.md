@@ -1,3 +1,19 @@
+## v5.0 修訂 — 2026-10-14 WaveDeck 被拒請求先讀完本體，消除 Windows 上的偶發連線重設（候選，未發布）
+
+基底 `d5871f5fdfafb03f13a129f767c92c46933437cb`（main，PR #200 的合併 SHA），分支 `claude/wavedeck-guard-drain-body`，提交 SHA 見該分支與 PR。`VERSION` 維持 5.0。
+
+**問題**：PR #200 新增的 `wavedeck/tests/test_request_guard.py` 在 Windows 上偶發失敗（`ConnectionAbortedError: [WinError 10053]`），2026-10-14 發布 `d5871f5f…` 時使 `private_web_release.py stage` 的局部驗證失敗，發布工具並依設計拒絕「前次驗證失敗後原樣重跑」。單檔連跑實測：修正前約 6 次中 1 次、7 次中 2 次、20 次中 1 次失敗，每次失敗的案例不同。
+
+**根因**：`wavedeck/server/server.py` 的 `do_POST` 在讀取請求本體之前就回應並結束，共兩處：`_guard` 拒絕（403）與 `/webhook` 密鑰錯誤（401）。伺服器在本體尚未讀完時關閉連線，Windows 會對仍有未讀資料的連線送出 RST，客戶端可能還沒讀到回應就收到 WinError 10053／10054。Linux 上通常不會撞上，所以 CI 的 Ubuntu 一直通過。
+
+**修正後行為**：新增 `_drain_request_body`，這兩處回應前先讀完 `Content-Length` 指定的本體。讀取上限與 `_read_json` 相同（256 KiB），讀取期間設 2 秒逾時，避免惡意請求拖住處理緒；超過上限的請求不讀取、直接關閉連線；讀取失敗也關閉連線。被拒絕的請求仍回原本的 403／401，錯誤內容不變，也不新增可被利用的資料路徑。
+
+**驗證（只含本機定向測試，沒有 CI 與完整測試結果）**：新增兩個案例（防護拒絕、webhook 密鑰錯誤，各以約 200 KB 本體重複 25 次）；兩者在舊程式碼下各 3/3 失敗、修正後各 3/3 通過；修正後 `wavedeck.tests.test_request_guard` 整檔連跑 30 次，0 次失敗。這證明該案例檔在本機的偶發失敗已消失，不代表 WaveDeck 其他部分已驗證。
+
+**不變**：WaveDeck 不隨私有站發布，本修正不影響正式站與本機受管安裝的執行行為；發布狀態：本機候選，未提交以外的任何階段。
+
+---
+
 ## v5.0 修訂 — 2026-10-14 加權指數 /quote 與 /quote-batch 改用官方昨收（候選，未發布）
 
 基底 `aa2be1bdd5d7966fe0008d68ae046adc71e3ef0b`（main，PR #197 的合併 SHA；補記下方「大盤當日漲跌基準改用官方昨收」與「補完 main 上既有測試的紅燈」兩則的合併 SHA，兩則原文保留）。實作提交由 Draft PR 指向，合併 SHA 尚未產生。`VERSION` 維持 5.0。這是 Sam 2026-10-14 「先修完待處理」對上一則「未解」第三項的處置。
