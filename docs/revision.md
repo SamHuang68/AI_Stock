@@ -1,6 +1,6 @@
 ## v5.0 修訂 — 2026-10-14 大盤日漲跌 8D 與同快照防再發案例
 
-基底 `8356ca3cfb820652b405f5e92ac723b2c767c836`，分支 `codex/大盤漲跌8D預防`，`VERSION` 維持 5.0。完整提交、PR 與 CI 狀態由該分支及 `C:/Users/Sam/AI-Workspace/docs/stock-terminal/大盤漲跌8D預防/交付收據.json` 對應，避免在同一提交內預填自己的 SHA。
+調查基底 `8356ca3cfb820652b405f5e92ac723b2c767c836`；提交前整合主線 `7aa94a38c23498a6455f9ec7c81c0b5f8f3595a0`，分支 `codex/大盤漲跌8D預防`，`VERSION` 維持 5.0。完整提交、PR 與 CI 狀態由該分支及 `C:/Users/Sam/AI-Workspace/docs/stock-terminal/大盤漲跌8D預防/交付收據.json` 對應，避免在同一提交內預填自己的 SHA。
 
 原因：使用者要求追查主圖 −676.17、小框 +285 的根因並提交 8D。隔離重現證實 PR #198 修改前與 PR #199 的相同官方校正區塊都會漏掉「今日 K 正確、Yahoo 昨收錯誤」；Git 時間線不支持 PR #199 覆蓋之後才合併的 Claude 修正。Codex 先前驗收缺少同一快照的跨表面數值核對，此缺口列入 `docs/大盤當日漲跌8D報告.md`。
 
@@ -9,6 +9,24 @@
 本機驗證：7 個 Python 案例、12 組前端情境通過；歷史來源重現通過；本機 18432 與正式後端 18435 的三端點實際 GET 都為 48625.83／48341.31／+0.5885649355%。當次 runtimeCommit 均為 `06d94771d19a03c9ece5006cf6e030fa823904b6`。沒有跑完整測試、沒有重新操作真瀏覽器。所有計畫與輸出保存於上述外部證據目錄。
 
 發布狀態：本輪不修改產品來源、不部署、不更動使用者資料。交付的是 8D 與預防案例；本機提交、遠端 CI、PR 狀態以交付收據為準。官方不可用時仍有既有 Yahoo 備援，`/quote` 與 `/quote-batch` 未含市場日期；沒有擴張成新契約。
+
+---
+
+## v5.0 修訂 — 2026-10-14 WaveDeck 測試字串不再被分享封存的郵件掃描器封鎖（候選，未發布）
+
+基底 `06d94771d19a03c9ece5006cf6e030fa823904b6`（main，PR #202 的合併 SHA），分支 `claude/dist-scrub-wd-email`，提交 SHA 見該分支與 PR。`VERSION` 維持 5.0。
+
+**問題**：`tests.test_dist_scrub` 在主線上整個失敗（`setUpClass`）。分享封存建置時，`scripts/build_dist.py` 的內容掃描器把 `wavedeck/tests/test_request_guard.py` 第 37 行的 `127.0.0.1` 後接 at 符號再接 `evil.example:18433` 判為郵件地址（規則 `email-address`，只有 `@example.com` 結尾才放行）並封鎖。該字串是 PR #200 為驗證 userinfo 攻擊刻意寫的測試資料，不是真實信箱。
+
+**為什麼主線 CI 沒有發現**：驗證計畫只跑受影響的案例，#200 與其後的 PR 都沒有案例涵蓋 `test_dist_scrub`。這是「局部驗證」的盲點：一個測試檔的內容會被另一個流程（分享封存）掃描，但兩者之間沒有對應關係。
+
+**修正後行為**：測試改以拼接組出同一個字串（`"127.0.0.1" + "@" + "evil.example:18433"`），語意不變，單元測試仍斷言該主機被拒絕；**不放寬掃描器**（它是安全防線）。註解中也不再寫出完整字串（第一次修正時我自己又把完整字串寫進註解，被同一個掃描器抓到）。
+
+**防再發**：驗證計畫新增案例「WD測試字串不被分享封存掃描器封鎖」，改動 `wavedeck/tests/test_request_guard.py` 時會跑 `test_dist_scrub` 中與歸檔掃描相關的 11 個方法加上 WaveDeck 自身的測試。已證明：把原本的寫法放回去，這些方法的 `setUpClass` 立刻失敗並印出 `[BLOCK] wavedeck/tests/test_request_guard.py (email-address)`。
+
+**驗證（本機）**：`wavedeck.tests.test_request_guard`（15 個）與歸檔掃描相關的 5 個方法實際執行通過；計畫閘門見 PR。**未執行**：CI、完整測試。
+
+**已知限制（與本次無關、未處理）**：`tests.test_dist_scrub.TestDistScrub.test_review_regressions_run_from_the_actual_single_machine_share` 在修正後仍失敗，因為它會從分享封存內執行 `tests.test_launcher_cmd`，而該測試在乾淨的 main 上本來就失敗：`LauncherCmdOfflineBehaviorTests`、`LauncherJsonHealthOfflineTests` 的 `setUpClass` 斷言「健康查詢必須只有兩個明列的 JSON 邊界」，但 2026-10-13 重寫後的 `START_LOCAL_AND_WEB.cmd` 只有一個 `Invoke-RestMethod`（local 改用 `start_local.ps1 -CheckOnly`），另有 `LauncherNativeWaitTests` 一項失敗。這是啟動器與其測試不同步，屬 10/13 該批變更的範圍，應由其作者決定改測試或改啟動器。狀態：本機候選，未發布。
 
 ---
 
