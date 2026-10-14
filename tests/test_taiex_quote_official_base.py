@@ -1,0 +1,125 @@
+# -*- coding: utf-8 -*-
+"""加權指數 ^TWII 的 /quote 與 /quote-batch 必須和 /twindex 使用同一個官方昨收。
+
+重現（2026-10-14）：Yahoo chartPreviousClose = previousClose = 49302.0，官方昨收 48341.31。
+Yahoo 昨收會讓現價 48625.83 變成 -676.17 (-1.37%)，官方口徑是 +284.52 (+0.59%)。
+以正式 Handler 驗證：^TWII 只信 TWSE MIS，不碰 Yahoo；MIS 沒有成交價時仍退回 Yahoo。
+"""
+import importlib.util
+import json
+import os
+import sys
+import threading
+import unittest
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
+from unittest import mock
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(ROOT, 'server'))
+
+OFFICIAL_T00 = {
+    'price': 48625.83, 'prevClose': 48341.31, 'change': 284.52,
+    'changePct': (48625.83 - 48341.31) / 48341.31 * 100,
+    'name': '發行量加權股價指數', 'source': 'twse-mis', 'session': 'regular',
+    'open': 48400.0, 'high': 48700.5, 'low': 48310.25,
+}
+
+
+_REAL_URLOPEN = urllib.request.urlopen
+
+
+def _yahoo_must_not_be_called(*args, **kwargs):
+    raise AssertionError('^TWII 不應再請求 Yahoo 昨收')
+
+
+def _urlopen_but_never_yahoo(request, *args, **kwargs):
+    """測試本身也用 urlopen 打本機伺服器；只攔下對 Yahoo 的請求。"""
+    url = request if isinstance(request, str) else request.full_url
+    if 'yahoo' in url:
+        _yahoo_must_not_be_called()
+    return _REAL_URLOPEN(request, *args, **kwargs)
+
+
+class TaiexQuoteOfficialBaseTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location(
+            'st_server_taiex_quote_test', os.path.join(ROOT, 'server', 'server.py'))
+        cls.st = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.st)
+        cls.httpd = ThreadingHTTPServer(('127.0.0.1', 0), cls.st.Handler)
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.base = f'http://127.0.0.1:{cls.httpd.server_port}'
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        cls.thread.join(timeout=2)
+
+    def get_json(self, path):
+        with _REAL_URLOPEN(self.base + path, timeout=5) as response:
+            self.assertEqual(response.status, 200)
+            return json.loads(response.read().decode('utf-8'))
+
+    def test_the_override_table_lists_both_taiwan_indices(self):
+        self.assertEqual(self.st._BAD_YF['^TWII'][:2], ('tse_t00.tw', 't00'))
+        self.assertEqual(self.st._BAD_YF['^TWOII'][:2], ('otc_o00.tw', 'o00'))
+
+    def test_quote_uses_the_official_previous_close_and_never_asks_yahoo(self):
+        with mock.patch.object(self.st, '_twse_mis_index', return_value={'t00': OFFICIAL_T00}) as mis, \
+             mock.patch.object(self.st.urllib.request, 'urlopen', side_effect=_urlopen_but_never_yahoo):
+            # 前端用 encodeURIComponent 與未編碼兩種寫法都要走官方口徑
+            quotes = [self.get_json('/quote/%5ETWII'), self.get_json('/quote/^TWII')]
+        for quote in quotes:
+            self.assertEqual(quote['prevClose'], 48341.31)
+            self.assertEqual(quote['price'], 48625.83)
+            self.assertAlmostEqual(quote['change'], 284.52, places=2)
+            self.assertAlmostEqual(quote['changePct'], 0.5885, places=3)
+            self.assertEqual(quote['source'], 'twse-mis')
+            self.assertEqual((quote['open'], quote['high'], quote['low']), (48400.0, 48700.5, 48310.25))
+            self.assertFalse(quote['suspect'])
+        self.assertEqual(mis.call_args_list[0].args, ('tse_t00.tw',))
+
+    def test_quote_batch_returns_the_same_base_as_the_twindex_row(self):
+        with mock.patch.object(self.st, '_twse_mis_index', return_value={'t00': OFFICIAL_T00}), \
+             mock.patch.object(self.st, 'fetch_one', side_effect=_yahoo_must_not_be_called):
+            batch = self.get_json('/quote-batch?syms=%5ETWII')
+        row = batch['^TWII']
+        self.assertEqual(row['prevClose'], 48341.31)
+        self.assertEqual(row['price'], 48625.83)
+        self.assertAlmostEqual(row['changePct'], OFFICIAL_T00['changePct'], places=9)
+        self.assertEqual(row['source'], 'twse-mis')
+
+    def test_yahoo_value_is_not_used_even_when_it_is_the_only_wrong_number(self):
+        """Yahoo 回 49302.0 時，批次與單檔都不得把 -676.17 算進去。"""
+        wrong_yahoo = {'chart': {'result': [{
+            'meta': {'regularMarketPrice': 48625.83, 'chartPreviousClose': 49302.0, 'previousClose': 49302.0},
+            'timestamp': [1760419800], 'indicators': {'quote': [{'close': [48625.83]}]}}]}}
+        payload = json.dumps(wrong_yahoo).encode('utf-8')
+        with mock.patch.object(self.st, '_twse_mis_index', return_value={'t00': OFFICIAL_T00}), \
+             mock.patch.object(self.st, 'fetch_one', return_value=('^TWII', payload, False)):
+            batch = self.get_json('/quote-batch?syms=%5ETWII')
+        self.assertGreater(batch['^TWII']['changePct'], 0)
+
+    def test_without_an_official_trade_the_quote_falls_back_to_yahoo(self):
+        """盤前 MIS 沒有成交價與開盤價：維持原本行為，不回空。"""
+        empty = dict(OFFICIAL_T00, price=None, change=None, changePct=None)
+        self.assertIsNone(self.st._trusted_quote_override('2330'))
+        with mock.patch.object(self.st, '_twse_mis_index', return_value={'t00': empty}):
+            self.assertIsNone(self.st._trusted_quote_override('^TWII'))
+        with mock.patch.object(self.st, '_twse_mis_index', side_effect=RuntimeError('MIS down')):
+            self.assertIsNone(self.st._trusted_quote_override('^TWII'))
+
+    def test_other_symbols_are_unaffected(self):
+        with mock.patch.object(self.st, '_twse_mis_index') as mis:
+            self.assertIsNone(self.st._trusted_quote_override('^GSPC'))
+            self.assertIsNone(self.st._trusted_quote_override('^N225'))
+        mis.assert_not_called()
+
+
+if __name__ == '__main__':
+    unittest.main()

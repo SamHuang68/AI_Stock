@@ -1874,7 +1874,11 @@ def _anom_quote(price, prev, chg, kind='stock'):
 
 
 # Yahoo 不可信標的 → 改走 TWSE MIS。 sym -> (ex_ch, code, kind)
-_BAD_YF = {'^TWOII': ('otc_o00.tw', 'o00', 'index')}   # 櫃買:Yahoo 三端點三值,只信 MIS
+# 櫃買:Yahoo 三端點三值,只信 MIS。
+# 加權:Yahoo 的昨收曾與官方不同(2026-10-14 chartPreviousClose=49302.0,官方 48341.31,
+#       頂部標頭 -676 而底部總體列 +285),/quote 與 /quote-batch 與 /twindex 須同一個昨收。
+_BAD_YF = {'^TWOII': ('otc_o00.tw', 'o00', 'index'),
+           '^TWII': ('tse_t00.tw', 't00', 'index')}
 
 
 def _twse_mis_stock_quotes(codes):
@@ -2404,7 +2408,8 @@ def _trusted_quote_override(sym):
         if idx.get('price') is None:
             return None
         return {'price': idx['price'], 'prevClose': idx['prevClose'],
-                'changePct': idx['changePct'], 'source': 'twse-mis'}
+                'changePct': idx['changePct'], 'source': 'twse-mis',
+                'open': idx.get('open'), 'high': idx.get('high'), 'low': idx.get('low')}
     except Exception:
         return None
 
@@ -3609,6 +3614,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 'symbol': sym, 'price': ov['price'], 'prevClose': ov['prevClose'],
                 'change': (ov['price'] - ov['prevClose']) if ov['prevClose'] else None,
                 'changePct': ov['changePct'], 'source': ov['source'],
+                'open': ov.get('open'), 'high': ov.get('high'), 'low': ov.get('low'),
                 'serverTime': int(time.time()), 'suspect': False,
             }, ensure_ascii=False).encode('utf-8'))
             return
