@@ -56,14 +56,14 @@ def get_json(url: str, trace=None) -> tuple[object, str]:
             digest = hashlib.sha256(raw).hexdigest()
             if trace:
                 trace('來源完成', url=url, bytes=len(raw), elapsedMs=round((time.monotonic() - started) * 1000), sourceHash=digest)
-            if '/STOCK_DAY?' in url:
+            if any(route in url for route in ('/STOCK_DAY?', '/STOCK_DAY_AVG?', '/MI_INDEX?')):
                 try:
                     from .source_receipts import JsonSourceResponse
                 except ImportError:
                     from source_receipts import JsonSourceResponse
                 return JsonSourceResponse(value, digest, {
                     'url': url, 'raw_text': raw.decode('utf-8'), 'retrieved_at': retrieved_at,
-                    'parser_version': 'twse-stock-day-v1'})
+                    'parser_version': 'twse-stock-day-v1' if '/STOCK_DAY?' in url else 'twse-price-crosscheck-v1'})
             return value, digest
         except Exception as exc:
             if trace:
@@ -169,10 +169,13 @@ def reconcile_sessions(db: Path, begin: date, end: date, fetch=get_json) -> set[
     month = begin.replace(day=1)
     while month <= end:
         next_month = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
+        month_end = next_month - timedelta(days=1)
+        complete_month = month_end < end
         with closing(sqlite3.connect(db)) as conn:
             cached = conn.execute('SELECT observed_through,dates FROM session_months WHERE month=?', (month.strftime('%Y-%m'),)).fetchone()
             expected_end = conn.execute('SELECT MAX(session_date) FROM market_sessions WHERE session_date>=? AND session_date<? AND session_date<=?', (month.isoformat(), next_month.isoformat(), end.isoformat())).fetchone()[0]
-        if cached and expected_end and cached[0] >= expected_end:
+        required_through = month_end.isoformat() if complete_month else expected_end
+        if cached and required_through and cached[0] >= required_through:
             actual.update(date.fromisoformat(d) for d in json.loads(cached[1]) if d <= end.isoformat())
             month = next_month
             continue
@@ -189,10 +192,13 @@ def reconcile_sessions(db: Path, begin: date, end: date, fetch=get_json) -> set[
                 dates.append(day)
         if not dates or len(set(dates)) != len(dates):
             raise ValueError('實際交易日期不足或重複')
+        # 已結束月份的官方全月成交日清單也證實月末休市日；當月仍只
+        # 涵蓋最後實際成交日，不能把尚未公布的最新交易日推定為休市。
+        through = month_end if complete_month else max(dates)
         with closing(sqlite3.connect(db)) as conn, conn:
-            conn.execute('DELETE FROM market_sessions WHERE session_date BETWEEN ? AND ?', (month.isoformat(), max(dates).isoformat()))
+            conn.execute('DELETE FROM market_sessions WHERE session_date BETWEEN ? AND ?', (month.isoformat(), through.isoformat()))
             conn.executemany('INSERT OR REPLACE INTO market_sessions VALUES(?,?)', [(d.isoformat(), 'TWSE實際成交日') for d in dates])
-            conn.execute('INSERT OR REPLACE INTO session_months VALUES(?,?,?,?)', (month.strftime('%Y-%m'), max(dates).isoformat(), json.dumps([d.isoformat() for d in dates]), digest))
+            conn.execute('INSERT OR REPLACE INTO session_months VALUES(?,?,?,?)', (month.strftime('%Y-%m'), through.isoformat(), json.dumps([d.isoformat() for d in dates]), digest))
         actual.update(dates)
         month = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
     return actual
@@ -389,10 +395,13 @@ def run_update(db: Path, *, start: date | None = None, now: datetime | None = No
     return state
 
 
-def seed_research(db: Path, symbol: str = '2330', years: int = 3, *, fetch=get_json, check=lambda: None, now=None) -> dict:
+def seed_research(db: Path, symbol: str = '2330', years: int = 3, *, fetch=get_json, check=lambda: None, now=None,
+                  begin: date | None = None) -> dict:
     """以官方月份資料補齊研究股票，另核對公司行動與完整交易日曆。"""
     if not re.fullmatch(r'\d{4}', symbol) or years not in range(1, 6):
         raise ValueError('研究回補只接受上市四碼股票與一至五年')
+    if begin is not None and (type(begin) is not date or begin < date(2010, 1, 1)):
+        raise ValueError('明列歷史起點須為 2010 年以後的日期')
     now = now or datetime.now(TZ)
     lock = acquire_daemon_lock('official-daily-bars', lock_dir=db.parent / 'runtime_locks')
     if lock is None:
@@ -401,9 +410,16 @@ def seed_research(db: Path, symbol: str = '2330', years: int = 3, *, fetch=get_j
         check()
         datastore.init_db(db)
         target = latest_session(now, *stored_calendar(db, now.year, fetch))
-        start = date(target.year - years, target.month, 1)
-        for year in range(start.year, target.year + 1):
-            stored_calendar(db, year, fetch)
+        if begin is not None and begin > target:
+            raise ValueError('歷史起點晚於最近完整交易日')
+        start = begin.replace(day=1) if begin is not None else date(target.year - years, target.month, 1)
+        if start > target:
+            raise ValueError('歷史起點晚於最近完整交易日')
+        # 明列歷史起點時以各月份實際成交日期核對，避免官方舊年度假日端點
+        # 未提供該年而用現今年度推估；預設回補保留原年度日曆契約。
+        if begin is None:
+            for year in range(start.year, target.year + 1):
+                stored_calendar(db, year, fetch)
         reconcile_sessions(db, start, target, fetch)
         try:
             from .daily_quality import quality_summary

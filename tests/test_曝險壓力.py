@@ -139,8 +139,14 @@ class PressureAssessmentTest(unittest.TestCase):
 
     def test_short_volatility_history_uses_actual_window(self):
         for days, count in ((10, 9), (30, 29), (300, 252)):
-            lab = exposure_lab.build_exposure_lab(
-                benchmark_data={'FTSE_TAIWAN_50': benchmark_contract(days=days)}, as_of='2026-10-13')
+            from tests.已核對資料 import 日曆資料, 交易日
+            contract = benchmark_contract(days=days)
+            for row, day in zip(contract['rows'], 交易日('2023-01-02', days)):
+                row['date'] = day.isoformat()
+            contract['asOf'] = contract['rows'][-1]['date']
+            with 日曆資料():
+                lab = exposure_lab.build_exposure_lab(
+                    benchmark_data={'FTSE_TAIWAN_50': contract}, as_of='2026-10-13')
             period = lab['temperature']['components'][0]['periodLabel']
             self.assertIn(f'現有{count}筆日報酬', period)
             self.assertNotIn('並參考滾動3年', period)

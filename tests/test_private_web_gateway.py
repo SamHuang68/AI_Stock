@@ -599,6 +599,22 @@ class PrivateWebGatewayTests(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertEqual(UpstreamHandler.seen, [])
 
+    def test_macro_refresh_owner_post_requires_browser_origin(self):
+        path = self.base + '/macro/refresh/__TW_MARGIN_MIX__'
+        for method, token, basic, origin, expected in (
+            ('GET', 'owner-secret', False, None, 403),
+            ('GET', 'reader-secret', False, None, 403),
+            ('POST', 'reader-secret', False, None, 403),
+            ('POST', 'owner-secret', True, None, 403),
+            ('POST', 'owner-secret', True, 'https://invalid.example', 403),
+            ('POST', 'owner-secret', True, self.base, 200),
+            ('POST', 'owner-secret', False, None, 200),
+        ):
+            with self.subTest(method=method, token=token, basic=basic, origin=origin):
+                status, _ = _request(path, method=method, token=token, basic=basic,
+                                     origin=origin, body={} if method == 'POST' else None)
+                self.assertEqual(status, expected)
+
     def test_basic_browser_write_requires_same_origin(self):
         status, _ = _request(
             self.base + "/portfolio",
@@ -660,6 +676,30 @@ class PrivateWebGatewayTests(unittest.TestCase):
                 body={},
             )
             self.assertEqual(status, 403, path)
+
+    def test_macro_refresh_rejects_noncanonical_ids_before_upstream(self):
+        for suffix in ('', 'vix/extra', '../vix', '%2Fvix', 'vix;extra', '/vix',
+                       'ALL', 'all', 'MACRO_TRACKS', 'macro_tracks', '*', 'vix'):
+            with self.subTest(suffix=suffix):
+                before = len(UpstreamHandler.seen)
+                status, _ = _request(self.base + '/macro/refresh/' + suffix,
+                                     method='POST', token='owner-secret', body={})
+                self.assertEqual(status, 403)
+                self.assertEqual(len(UpstreamHandler.seen), before)
+
+    def test_macro_refresh_preserves_single_chart_history_parameters(self):
+        from macro_track import CHARTS
+        params = {'dense': True, 'density': 'day', 'step': 1, 'years': 25}
+        for chart_id in CHARTS:
+            with self.subTest(chart_id=chart_id):
+                path = '/macro/refresh/' + chart_id
+                for query, body in (('', params), ('?' + urlencode(params), {})):
+                    status, _ = _request(self.base + path + query, method='POST',
+                                         token='owner-secret', basic=True,
+                                         origin=self.base, body=body)
+                    self.assertEqual(status, 200)
+                    self.assertEqual(UpstreamHandler.seen[-1]['path'], path + query)
+                    self.assertEqual(json.loads(UpstreamHandler.seen[-1]['body']), body)
 
     def test_ai_proxy_forwards_first_small_chunk_without_large_buffer_wait(self):
         UpstreamHandler.ai_stream_mode = "gated"
@@ -776,6 +816,9 @@ class FrontendRouteCoverageTests(unittest.TestCase):
             if path in self.NOT_PROXIED or path in blocked:
                 continue
             probe = path + "x" if path.endswith("/") else path
+            if path == '/macro/refresh/':
+                from macro_track import CHARTS
+                probe = path + next(iter(CHARTS))
             if (gateway.route_permission("GET", probe, "owner", self.SETTINGS)
                     or gateway.route_permission("POST", probe, "owner", self.SETTINGS)):
                 continue

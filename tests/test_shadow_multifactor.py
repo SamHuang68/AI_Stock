@@ -31,9 +31,7 @@ except Exception:
 
 
 def _bar_day(base: date, close: float, offset: int = 0) -> tuple:
-    day = base + timedelta(days=offset)
-    while day.weekday() >= 5:
-        day += timedelta(days=1)
+    day = 交易日(base, offset + 1)[-1]
     ts = datetime.combine(day, datetime.min.time().replace(hour=13, minute=30), TZ_TPE).timestamp()
     return (ts, close, close, close, close, 1_000_000)
 
@@ -46,6 +44,19 @@ def _synthetic_bars(n: int = 200, start_close: float = 100.0, drift: float = 0.2
         close = max(1.0, close + drift + (0.05 if i % 7 == 0 else -0.02))
         rows.append(_bar_day(base, close, i))
     return rows
+
+
+from tests.已核對資料 import 日曆資料, 交易日
+
+
+def setUpModule():
+    global _calendar_fixture
+    _calendar_fixture = 日曆資料()
+    _calendar_fixture.__enter__()
+
+
+def tearDownModule():
+    _calendar_fixture.__exit__(None, None, None)
 
 
 class ShadowMultifactorUnitTests(unittest.TestCase):
@@ -184,7 +195,8 @@ class ShadowMultifactorRouteTests(unittest.TestCase):
         thread.start()
         base = f'http://127.0.0.1:{httpd.server_port}'
         try:
-            with patch.object(sm, '_load_bars', return_value=bars):
+            with patch.object(sm, '_load_bars', return_value=bars), \
+                 patch('conditional_expectation._last_tw_close_day', return_value=date(2024, 8, 1)):
                 with urllib.request.urlopen(
                     base + '/research/shadow-multifactor?symbols=AAA,BBB&limit=2', timeout=10,
                 ) as resp:
@@ -193,6 +205,7 @@ class ShadowMultifactorRouteTests(unittest.TestCase):
             self.assertTrue(body['shadowOnly'])
             self.assertEqual(body['decisionUse'], 'research_only')
             self.assertIn('basket', body['ranking'])
+            self.assertEqual(len(body['ranking']['basket']), 2)
             self.assertEqual(body['promotionGate']['verdict'], 'FAIL')
             self.assertIn('No production Decision wiring', body['nonGoals'][0])
         finally:

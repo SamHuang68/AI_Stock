@@ -29,9 +29,7 @@ except Exception:
 
 
 def _bar_day(base: date, close: float, offset: int = 0) -> tuple:
-    day = base + timedelta(days=offset)
-    while day.weekday() >= 5:
-        day += timedelta(days=1)
+    day = 交易日(base, offset + 1)[-1]
     ts = datetime.combine(day, datetime.min.time().replace(hour=13, minute=30), TZ_TPE).timestamp()
     return (ts, close, close, close, close, 1_000_000)
 
@@ -44,6 +42,19 @@ def _synthetic_bars(n: int = 80, start_close: float = 100.0, drift: float = 0.2)
         close = max(1.0, close + drift + (0.1 if i % 7 == 0 else -0.05))
         rows.append(_bar_day(base, close, i))
     return rows
+
+
+from tests.已核對資料 import 日曆資料, 交易日
+
+
+def setUpModule():
+    global _calendar_fixture
+    _calendar_fixture = 日曆資料()
+    _calendar_fixture.__enter__()
+
+
+def tearDownModule():
+    _calendar_fixture.__exit__(None, None, None)
 
 
 class ConditionalExpectationGateTests(unittest.TestCase):
@@ -238,8 +249,14 @@ class ConditionalExpectationRouteTests(unittest.TestCase):
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
         base = f'http://127.0.0.1:{httpd.server_port}'
+        from unittest.mock import patch
+        import conditional_expectation_routes as routes
+        bars = _synthetic_bars(300)
+        context = {'quote': None, 'chips': None, 'bars': bars, 'chip_history': {}}
         try:
-            with urllib.request.urlopen(
+            with patch.object(routes, '_load_symbol_context', return_value=context), \
+                 patch.object(ce, '_last_tw_close_day', return_value=ce._session_date_from_ts(bars[-1][0])), \
+                 urllib.request.urlopen(
                 base + '/research/conditional-expectation?symbol=2330', timeout=10,
             ) as resp:
                 body = json.load(resp)
@@ -250,6 +267,7 @@ class ConditionalExpectationRouteTests(unittest.TestCase):
             self.assertIn('horizons', card)
             self.assertEqual(set(card['horizons'].keys()), {'1', '5', '20'})
             self.assertIn('pitAssumptions', card)
+            self.assertIsNotNone(card['binId'])
         finally:
             httpd.shutdown()
             httpd.server_close()

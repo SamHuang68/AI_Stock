@@ -16,6 +16,8 @@ from unittest.mock import patch
 from tests import test_decision_http as decision_fixture
 import datastore
 import portfolio
+from tests.已核對資料 import 建立價格快照, 交易日
+from datetime import datetime, timezone
 
 dc = decision_fixture.dc
 st_server = decision_fixture.st_server
@@ -38,12 +40,14 @@ class SimulationHttpTest(unittest.TestCase):
         path = Path(self.tmp.name) / 'market.db'
         with closing(sqlite3.connect(path)) as conn:
             conn.executescript(datastore.SCHEMA)
+            fixture = {}
             for symbol, multiplier in (('2330', 1), ('0050', 2), ('^TWII', 3)):
-                conn.executemany('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', [
-                    (symbol, 'TW', 1767225600 + day * 86400, price, price, price, price, 1000)
+                fixture[symbol] = [
+                    (int(datetime.combine(交易日('2026-01-01', 80)[day], datetime.min.time(), timezone.utc).timestamp()), price, price, price, price, 1000)
                     for day in range(80)
                     for price in [multiplier * (100 + day * .2 + day % 5 * .03)]
-                ])
+                ]
+            建立價格快照(conn, fixture)
             conn.commit()
         self.market_path = path
         self.blocked = []
