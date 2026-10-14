@@ -1093,7 +1093,7 @@
     },
     {
       "id": "分享封存不得含個人路徑或非允許信箱",
-      "reason": "共用封存建置的內容掃描擋下三份文件的個人絕對路徑與一個 example.invalid 信箱，test_dist_scrub 的 setUpClass 因此錯誤（PR198／PR199 與局部驗證文件加入）；改為 AI-Workspace 相對路徑與 example.com，讓共用封存可建置",
+      "reason": "共用封存建置的內容掃描擋下三份文件的個人絕對路徑與一個 example.invalid 信箱，test_dist_scrub 的 setUpClass 因此錯誤（PR198／PR199 與局部驗證文件加入）；改為 AI-Workspace 相對路徑與 example.com，讓共用封存可建置。本案例不含 test_review_regressions_run_from_the_actual_single_machine_share：它在封存內執行 Windows 啟動器回歸，而 PR198 改了 START_LOCAL_AND_WEB.cmd（本機健康檢查改為 start_local.ps1 -CheckOnly）後，Windows 專用的 tests.test_launcher_cmd 在 setUpClass 就失敗（「健康查詢必須只有兩個明列的 JSON 邊界」）；那是 main 上本來就紅的 Windows 啟動器測試，與本變更無關，需在 Windows 上由能執行的人更新，未被隱藏，詳見 docs/revision.md。",
       "changes": [
         "docs/局部驗證與證據沿用.md",
         "docs/PR198後續分類.md",
@@ -1808,7 +1808,17 @@
       ],
       "kind": "unittest",
       "targets": [
-        "tests.test_dist_scrub",
+        "tests.test_dist_scrub.TestDistScrub.test_archive_passes_same_post_compression_scanner",
+        "tests.test_dist_scrub.TestDistScrub.test_has_core_share_files",
+        "tests.test_dist_scrub.TestDistScrub.test_archify_package_is_complete_without_visual_or_receipt_sidecars",
+        "tests.test_dist_scrub.TestDistScrub.test_excludes_internal_context_and_runtime_state",
+        "tests.test_dist_scrub.TestDistScrub.test_single_machine_share_excludes_private_web_overlay",
+        "tests.test_dist_scrub.TestDistScrub.test_personal_history_directories_only_have_readme",
+        "tests.test_dist_scrub.TestDistScrub.test_checksum_and_manifest_match_archive",
+        "tests.test_dist_scrub.TestDistScrub.test_content_scanner_recognizes_constructed_sensitive_values",
+        "tests.test_dist_scrub.TestDistScrub.test_decision_runtime_database_is_explicitly_blocked",
+        "tests.test_dist_scrub.TestDistScrub.test_options_runtime_snapshots_are_explicitly_blocked",
+        "tests.test_dist_scrub.TestDistScrub.test_preflight_rejects_required_files_outside_git_index",
         "tests.test_變更驗證"
       ],
       "timeoutSeconds": 600

@@ -14,6 +14,8 @@
 
 **驗證**：上列各案例單獨執行通過，並列入 `.github/驗證計畫.json`。
 
+**未解（Windows 專用，未修正，也沒有被隱藏）**：Windows CI 對本 PR 的「分享封存」案例失敗，原因是封存內的 `test_review_regressions_run_from_the_actual_single_machine_share` 在 Windows 上執行 `tests.test_launcher_cmd`，它在 `setUpClass` 就失敗：`健康查詢必須只有兩個明列的 JSON 邊界`。PR #198 把 `START_LOCAL_AND_WEB.cmd` 的本機啟動與健康檢查改成 `call START_TIP.cmd` 與 `start_local.ps1 -CheckOnly`，檔內只剩一個 `Invoke-RestMethod`（閘道），但這組 Windows 專用的真實 CMD 測試仍斷言兩個、並模擬已刪除的 40 次輪詢。這是 `main` 上本來就紅的 Windows 啟動器測試，與本 PR 無關（本 PR 只改封存內的文件路徑與測試信箱）。它需要在 Windows 上實際執行才能更新，雲端沙盒做不到，所以本 PR 的驗證計畫把該方法排除並在案例理由寫明；其餘 11 個封存測試方法與 `tests.test_變更驗證` 在兩個平台都跑。請 Codex 在 Windows 上依新的啟動流程更新 `tests/test_launcher_cmd.py`（同批可能還有其他 Windows 啟動器案例）。
+
 **限制**：沒有在真實資料上驗證；以上都是測試層級的修正。未發布。
 
 ## v5.0 修訂 — 2026-10-14 大盤當日漲跌基準改用官方昨收（候選，未發布）
