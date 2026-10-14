@@ -1,3 +1,23 @@
+## v5.0 修訂 — 2026-10-14 加權指數 /quote 與 /quote-batch 改用官方昨收（候選，未發布）
+
+基底 `aa2be1bdd5d7966fe0008d68ae046adc71e3ef0b`（main，PR #197 的合併 SHA；補記下方「大盤當日漲跌基準改用官方昨收」與「補完 main 上既有測試的紅燈」兩則的合併 SHA，兩則原文保留）。實作提交由 Draft PR 指向，合併 SHA 尚未產生。`VERSION` 維持 5.0。這是 Sam 2026-10-14 「先修完待處理」對上一則「未解」第三項的處置。
+
+**Sam 貼回的唯讀檢查（本機與雲端無法互通，以貼回為準）**：本機與正式站的 `runtimeCommit` 都是 `17bad12031b26a3a09ba4cd413cfa5b4244b2971`（不含 PR #197，所以畫面仍是舊行為）。`/twindex` 的 `t00`：現價 48625.83、`prevClose` 48341.31、`tradeDate` 2026-10-14、`asOf` 2026-10-14T13:33:00+08:00。Yahoo 的 `meta`：現價 48625.83、`chartPreviousClose` = `previousClose` = 49302.0、`regularMarketPreviousClose` 為空，最後一根 K 棒 2026-10-14 13:30（台北）。根因因此有資料佐證：Yahoo 昨收 49302.0 讓日漲跌成為 48625.83 − 49302.0 = −676.17（−1.37%），官方昨收 48341.31 的口徑是 +284.52（+0.59%），底部列四捨五入顯示 +285。前一則寫的「請確認官方昨收是否為 48340.83」已有答案：是 48341.31（48340.83 來自當時畫面推算）。
+
+**問題**：PR #197 只修了圖表標頭（前端 `patchTwIndexHeader`）。伺服器的 `/quote/^TWII` 與 `/quote-batch` 仍以 Yahoo 昨收計算，`_BAD_YF` 只列 `^TWOII`。凡是走這兩條路徑的大盤日漲跌（日線載入時的昨收補值、分 K 空白時以即時報價合成今日 K 棒、自選清單與 Pulse 以 `/quote-batch` 取報價）會與 `/twindex` 的官方昨收不同源。
+
+**修正後行為**：`^TWII` 加入 `_BAD_YF`，與 `^TWOII` 相同：只信 TWSE MIS（`t00`），`price`、`prevClose`、`changePct` 與 `/twindex` 同一個官方來源，不再請求 Yahoo。`/quote/^TWII` 回應多帶 MIS 的 `open`／`high`／`low`。盤前 MIS 沒有成交價也沒有開盤價、或 MIS 請求失敗時，維持原本行為退回 Yahoo，不回空。其他標的不受影響（`^GSPC`、`^N225` 等不呼叫 MIS）。
+
+**可見的縮減（規則 0009 第 1 條）**：沒有功能被移除。`/quote/^TWII` 在 MIS 有成交價時的回應形狀與 `^TWOII` 現有的相同，不再含 Yahoo 才有的 `volume`、`marketState`、`lastBarTime`、`bid`／`ask`。即時報價面板的備援路徑（`/twindex` 失敗後才會走 `/quote/^TWII`）因此可能顯示「成交時間未知」並用本地時間推算盤別；`/twindex` 正常時面板本來就不走這條路徑。
+
+**驗證**：新增 `tests/test_taiex_quote_official_base.py`，6 個案例，以正式 `Handler` 與 `urllib` 載入真的 `server/server.py`：`/quote/%5ETWII` 與 `/quote/^TWII` 回官方昨收 48341.31、`change` 284.52、`changePct` 約 0.5885 且不呼叫 Yahoo；`/quote-batch` 與 `/twindex` 同一個昨收；Yahoo 回 49302.0 時批次結果仍為正漲幅；MIS 無成交價或請求失敗時 `_trusted_quote_override` 回 `None`（退回 Yahoo）；其他標的不呼叫 MIS。把 `server/server.py` 暫時還原成修正前，4 個案例失敗（3 個錯誤、1 個斷言），證明測試抓得到這個錯誤。相關測試共 84 個（含新增的 6 個，另含 `test_台股即時報價`、`test_server_http_security`、`test_no_undefined_names`、`test_no_new_silent_exceptions`、`test_bundle_fresh`）與 `tests/tw_index_day_change_selftest.js` 通過。列入 `.github/驗證計畫.json` 的案例「加權指數報價官方昨收」。
+
+**未解／限制**：
+- 沒有在真實 TWSE／Yahoo 即時回應與真瀏覽器上驗證；上面的資料是 Sam 貼回的單一時間點，不是自動化驗證。
+- Windows 專用的 `tests/test_launcher_cmd.py` 仍紅（見下方「補完 main 上既有測試的紅燈」的「未解」），需要在 Windows 上由 Codex 或 Sam 依新的啟動流程更新；雲端無法執行，未處理。
+- `shell_v5_selftest` 的失敗已於 PR #197 修正，不在此列。
+- 未發布。發布須 Sam 指定完整 SHA 的明確授權。
+
 ## v5.0 修訂 — 2026-10-14 WaveDeck 控制面加上請求防護（候選，未發布）
 
 基底 `aa2be1bdd5d7966fe0008d68ae046adc71e3ef0b`（main，PR #197 之後）；實作提交由 Draft PR 指向，合併 SHA 尚未產生。`VERSION` 維持 5.0。這是 Sam 2026-10-14 「照建議執行」對完整審查最高風險發現的處置。
