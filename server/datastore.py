@@ -340,9 +340,15 @@ def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_
                      'id TEXT PRIMARY KEY,symbol TEXT,market TEXT,session_date TEXT,observed_at REAL,payload TEXT)')
         conn.execute('CREATE TABLE IF NOT EXISTS bar_ingest_runs(id TEXT PRIMARY KEY,payload TEXT)')
         receipt_id = None
-        if ingest_receipt is not None:
-            receipt_id = source_provenance.store_receipt(conn, ingest_receipt, sym, market, source, rows)
-            counts['sourceReceiptId'] = receipt_id
+
+        def receipt_for_write():
+            # 空收據（來源呼叫端未提供）視為未附證據；有收據時只在真的新增 bars 或另存修訂時才保存原始回應，
+            # 避免每次無變動的更新都累積一份完整原始回應。
+            nonlocal receipt_id
+            if ingest_receipt and receipt_id is None:
+                receipt_id = source_provenance.store_receipt(conn, ingest_receipt, sym, market, source, rows)
+                counts['sourceReceiptId'] = receipt_id
+            return receipt_id
         existing = {bar_date(r[0], market): r for r in conn.execute(
             'SELECT ts,open,high,low,close,volume FROM bars WHERE symbol=? AND market=? ORDER BY ts', (sym, market))}
         for row in rows:
@@ -367,13 +373,15 @@ def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_
                 key = hashlib.sha256((sym + market + day + payload).encode('utf-8')).hexdigest()
                 conn.execute('INSERT OR IGNORE INTO bar_source_revisions VALUES(?,?,?,?,?,?)',
                              (key, sym, market, day, counts['observedAt'], payload))
-                if receipt_id is not None:
-                    source_provenance.link_revision(conn, key, counts['runId'], receipt_id)
+                linked = receipt_for_write()
+                if linked is not None:
+                    source_provenance.link_revision(conn, key, counts['runId'], linked)
                 counts['conflicts'] += 1
                 continue
             conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', (sym, market, *row))
-            if receipt_id is not None:
-                source_provenance.link_first_insert(conn, market, sym, row, counts['runId'], receipt_id)
+            linked = receipt_for_write()
+            if linked is not None:
+                source_provenance.link_first_insert(conn, market, sym, row, counts['runId'], linked)
             existing[day] = row
             counts['inserted'] += 1
         conn.execute('INSERT INTO meta(symbol,market,name,last_update) VALUES(?,?,?,?) '
@@ -401,7 +409,7 @@ def source_revision_status(symbol=None, market='TW', *, connection=None):
 
 
 def upsert_bars(sym, market, rows, *, source=None, source_hash='', path=None, check=lambda: None, source_receipt=None, ingest_receipt=None):
-    if ingest_receipt is not None and source != 'Yahoo Finance':
+    if ingest_receipt and source != 'Yahoo Finance':
         raise ValueError('一般來源收據目前僅支援 Yahoo 日線')
     if source in ('TWSE', 'TPEX'):
         rows = completed_daily_rows(rows, market, symbol=sym, path=path)

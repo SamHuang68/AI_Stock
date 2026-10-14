@@ -2,16 +2,22 @@
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock",
-  "baseCommit": "8356ca3cfb820652b405f5e92ac723b2c767c836",
+  "baseCommit": "7aa94a38c23498a6455f9ec7c81c0b5f8f3595a0",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "WD測試字串不被分享封存掃描器封鎖",
-      "reason": "wavedeck/tests/test_request_guard.py 為驗證 userinfo 攻擊而寫的字串（loopback 位址後接 at 符號再接攻擊者網域）長得像信箱，被分享封存的郵件地址掃描器封鎖，使 tests.test_dist_scrub 的 setUpClass 在主線上整個失敗。測試字串改為拼接（語意不變，單元測試仍斷言該主機被拒絕），不放寬掃描器；並以歸檔掃描相關的方法作為此檔案的回歸案例，之後改到 wavedeck/tests 就會在 CI 抓到同類問題。不含 test_review_regressions_run_from_the_actual_single_machine_share：它在主線上另因啟動器與 test_launcher_cmd 不符而失敗，與本次無關",
+      "id": "Yahoo日線首次來源收據保存且不影響既有寫入",
+      "reason": "datastore 的一般來源寫入新增可選的 Yahoo 原始回應收據（不可覆寫表、與新增 bars 的逐筆關聯），並改動 fetch_yahoo_daily、merge_source_bars、upsert_bars 與兩個呼叫端。驗證新收據行為（原始回應與雜湊保存、逐筆關聯、無變動更新不累積原始回應、修訂關聯、更新與刪除被拒、收據不符與偽造列被拒、空收據照舊寫入），並重跑直接依賴這些函式的既有案例（日線快取工作、市場身分、資料邊界、修訂中繼資料、快取 HTTP）。不跑完整套件；歷史資料不回填，也不宣稱污染已修復。",
       "changes": [
-        "wavedeck/tests/test_request_guard.py"
+        "server/daily_cache_jobs.py",
+        "server/datastore.py",
+        "server/server.py",
+        "server/stock_signals_routes.py",
+        "server/日線來源收據.py",
+        "tests/test_daily_source_receipt.py",
+        "tests/test_stock_signals_revision_metadata.py"
       ],
       "inputs": [
         ".gitattributes",
@@ -314,6 +320,7 @@
         "server/官方價格交叉核對.py",
         "server/官方研究續補.py",
         "server/投組官方價格.py",
+        "server/日線來源收據.py",
         "server/更新路由.py",
         "server/每日個股留存.py",
         "server/研究工作流.py",
@@ -489,6 +496,7 @@
         "tests/test_daily_cache_http.py",
         "tests/test_daily_cache_jobs.py",
         "tests/test_daily_data_boundaries.py",
+        "tests/test_daily_source_receipt.py",
         "tests/test_datastore_market_identity.py",
         "tests/test_deadline.py",
         "tests/test_decision_context.py",
@@ -721,18 +729,12 @@
       ],
       "kind": "unittest",
       "targets": [
-        "wavedeck.tests.test_request_guard",
-        "tests.test_dist_scrub.TestDistScrub.test_archive_passes_same_post_compression_scanner",
-        "tests.test_dist_scrub.TestDistScrub.test_has_core_share_files",
-        "tests.test_dist_scrub.TestDistScrub.test_archify_package_is_complete_without_visual_or_receipt_sidecars",
-        "tests.test_dist_scrub.TestDistScrub.test_excludes_internal_context_and_runtime_state",
-        "tests.test_dist_scrub.TestDistScrub.test_single_machine_share_excludes_private_web_overlay",
-        "tests.test_dist_scrub.TestDistScrub.test_personal_history_directories_only_have_readme",
-        "tests.test_dist_scrub.TestDistScrub.test_checksum_and_manifest_match_archive",
-        "tests.test_dist_scrub.TestDistScrub.test_content_scanner_recognizes_constructed_sensitive_values",
-        "tests.test_dist_scrub.TestDistScrub.test_decision_runtime_database_is_explicitly_blocked",
-        "tests.test_dist_scrub.TestDistScrub.test_options_runtime_snapshots_are_explicitly_blocked",
-        "tests.test_dist_scrub.TestDistScrub.test_preflight_rejects_required_files_outside_git_index"
+        "tests.test_daily_source_receipt",
+        "tests.test_daily_cache_jobs",
+        "tests.test_datastore_market_identity",
+        "tests.test_daily_data_boundaries",
+        "tests.test_stock_signals_revision_metadata",
+        "tests.test_daily_cache_http"
       ],
       "timeoutSeconds": 600
     }
