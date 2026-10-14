@@ -11,6 +11,7 @@ const path = require('path');
 const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
+const incident = JSON.parse(fs.readFileSync(path.join(root, 'tests/fixtures/大盤昨收分歧.json'), 'utf8'));
 const polish = fs.readFileSync(path.join(root, 'src/ui/polish_v3.js'), 'utf8').replace(/\r\n/g, '\n');
 const terminal = fs.readFileSync(path.join(root, 'stock_terminal.html'), 'utf8').replace(/\r\n/g, '\n');
 
@@ -24,17 +25,19 @@ function slice(source, startMarker, endMarker) {
 
 const headerCode = slice(terminal, '/** 漲跌字串：', 'async function fetchYF');
 const marksCode = slice(polish, '// 昨收虛線 + 右軸讀數', '\nfunction renderChartLegend');
+const stripCode = slice(polish, 'async function refreshTwIndexCells()', '\nasync function refreshTxfCell()');
 const patchCode = slice(polish, '(function patchTwIndexHeader()', '// ============================================================\n// 大盤融資維持率');
 
 // 2026-10-14 09:30 台北 = 2026-10-14 01:30 UTC；前一交易日 2026-10-13。
 const SEC_1014 = Date.UTC(2026, 9, 14, 1, 30) / 1000;
 const SEC_1013 = Date.UTC(2026, 9, 13, 1, 30) / 1000;
 
-function makeEnv({ sym = '^TWII', lastTime = SEC_1014, lastClose = 48625.83, hero = 48625.83,
-                   yesterdayClose = 49302.0, twindex, tab = 'chart' }) {
+function makeEnv({ sym = '^TWII', lastTime = SEC_1014, lastClose = incident.official.price, hero = incident.official.price,
+                   yesterdayClose = incident.yahoo.prevClose, twindex, tab = 'chart' }) {
   const nodes = {};
   const node = id => (nodes[id] = nodes[id] || { id, textContent: '', innerHTML: '', style: {}, classList: { add() {}, remove() {} } });
   ['ci-price', 'ci-chg', 'ci-range-chg'].forEach(node);
+  const strip = { classList: { remove() {} }, querySelector: selector => node('strip' + selector) };
   const lines = [], removed = [], calls = { rpanel: 0 };
   const listeners = {};
   const S = {
@@ -50,7 +53,12 @@ function makeEnv({ sym = '^TWII', lastTime = SEC_1014, lastClose = 48625.83, her
     S, console: { log() {}, warn() {}, error() {} }, Date, Number, Math, isFinite, Map,
     SERVER_P: 'http://127.0.0.1:18432',
     LightweightCharts: { LineStyle: { Dashed: 2 } },
-    document: { getElementById: id => (id === 'chart-wrap' ? null : node(id)) },
+    document: {
+      getElementById: id => (id === 'chart-wrap' ? null : node(id)),
+      querySelector: selector => selector === '[data-mkt-sym="^TWII"]' ? strip : null,
+    },
+    fmtIdx: value => Number(value).toFixed(2),
+    applyMktCellTone() {},
     renderRpanel() { calls.rpanel++; },
     fetch: async () => ({ ok: true, json: async () => twindex }),
   };
@@ -61,24 +69,25 @@ function makeEnv({ sym = '^TWII', lastTime = SEC_1014, lastClose = 48625.83, her
   vm.runInContext(headerCode, context);   // fmtChgAbsPct / calcChgFromBase / updateHeaderChg（正式程式碼）
   vm.runInContext(marksCode, context);    // applyPrevCloseMarks / renderCloseReadout（正式程式碼）
   vm.runInContext(patchCode, context);    // patchTwIndexHeader
+  vm.runInContext(stripCode, context);    // 下方大盤列的正式格式化與計算
   return {
     S, nodes, lines, removed, calls,
     async symLoaded() { for (const handler of listeners.symLoaded || []) await handler(); },
+    async refreshStrip() { await context.refreshTwIndexCells(); },
   };
 }
 
-const official = (extra) => ({ ok: true, indices: { t00: Object.assign({
-  price: 48625.83, prevClose: 48340.83, tradeDate: '2026-10-14', source: 'twse-mis' }, extra) } });
+const official = (extra) => ({ ok: true, indices: { t00: Object.assign({}, incident.official, extra) } });
 
 (async () => {
-  // 1) 重現畫面：Yahoo 昨收 49302.00 → 應改用官方昨收 48340.83，標頭 +285.00 (+0.59%)
+  // 1) 重現畫面：Yahoo 昨收 49302.00 → 應改用官方昨收 48341.31，標頭 +284.52 (+0.59%)
   {
     const env = makeEnv({ twindex: official() });
     await env.symLoaded();
-    assert.strictEqual(env.S.data.yesterdayClose, 48340.83);
-    assert.strictEqual(env.nodes['ci-chg'].innerHTML.replace(/ <span.*$/, ''), '+285.00 (+0.59%)');
+    assert.strictEqual(env.S.data.yesterdayClose, incident.official.prevClose);
+    assert.strictEqual(env.nodes['ci-chg'].innerHTML.replace(/ <span.*$/, ''), incident.expected.header);
     assert.strictEqual(env.lines.length, 1, '昨收虛線須以官方昨收重畫');
-    assert.strictEqual(env.lines[0].options.price, 48340.83);
+    assert.strictEqual(env.lines[0].options.price, 48341.31);
     assert.strictEqual(env.nodes['ci-price'].textContent, '', '主圖已是今天時不覆寫現價');
     assert.strictEqual(env.calls.rpanel, 0, '非統計分頁不重繪右側面板');
   }
@@ -92,7 +101,7 @@ const official = (extra) => ({ ok: true, indices: { t00: Object.assign({
 
   // 3) 昨收已與官方一致 → 不介入（不重畫、不動標頭）
   {
-    const env = makeEnv({ twindex: official(), yesterdayClose: 48340.83 });
+    const env = makeEnv({ twindex: official(), yesterdayClose: 48341.31 });
     await env.symLoaded();
     assert.strictEqual(env.lines.length, 0);
     assert.strictEqual(env.nodes['ci-chg'].innerHTML, '');
@@ -100,7 +109,7 @@ const official = (extra) => ({ ok: true, indices: { t00: Object.assign({
 
   // 4) 浮點誤差不算不一致
   {
-    const env = makeEnv({ twindex: official(), yesterdayClose: 48340.83000000001 });
+    const env = makeEnv({ twindex: official(), yesterdayClose: 48341.31000000001 });
     await env.symLoaded();
     assert.strictEqual(env.lines.length, 0);
   }
@@ -122,12 +131,12 @@ const official = (extra) => ({ ok: true, indices: { t00: Object.assign({
 
   // 7) 早盤 Yahoo 落後一日（最後一根收盤≈官方昨收）→ 沿用原行為：現價與基準整組改官方
   {
-    const env = makeEnv({ lastTime: SEC_1013, lastClose: 48340.83, hero: 48340.83, yesterdayClose: 48000,
+    const env = makeEnv({ lastTime: SEC_1013, lastClose: 48341.31, hero: 48341.31, yesterdayClose: 48000,
                           twindex: official({ price: 48400.5 }) });
     await env.symLoaded();
     assert.strictEqual(env.nodes['ci-price'].textContent, '48400.50');
-    assert.strictEqual(env.S.data.yesterdayClose, 48340.83);
-    assert.strictEqual(env.nodes['ci-chg'].innerHTML.replace(/ <span.*$/, ''), '+59.67 (+0.12%)');
+    assert.strictEqual(env.S.data.yesterdayClose, 48341.31);
+    assert.strictEqual(env.nodes['ci-chg'].innerHTML.replace(/ <span.*$/, ''), '+59.19 (+0.12%)');
   }
 
   // 8) /twindex 無成交價（盤前／休市）或昨收缺 → 保留 Yahoo 值
@@ -160,5 +169,17 @@ const official = (extra) => ({ ok: true, indices: { t00: Object.assign({
     assert.strictEqual(env.S.data.yesterdayClose, 49302.0);
   }
 
-  console.log('tw_index_day_change_selftest: ok');
+  // 12) 同一事故快照同時進入主圖與下方小框；取整不得反推成另一個昨收。
+  {
+    const env = makeEnv({ twindex: official() });
+    await env.symLoaded();
+    await env.refreshStrip();
+    assert.strictEqual(env.nodes['ci-chg'].innerHTML.replace(/ <span.*$/, ''), incident.expected.header);
+    assert.strictEqual(env.nodes['strip.delta'].textContent, '+' + incident.expected.stripRoundedChange);
+    assert.strictEqual(env.nodes['strip.ch'].textContent, '▲0.59%');
+    assert.strictEqual(env.nodes['strip.px'].textContent, incident.official.price.toFixed(2));
+    assert.strictEqual(env.lines[0].options.price, incident.official.prevClose);
+  }
+
+  console.log('大盤當日漲跌：12 組情境通過');
 })().catch(error => { console.error(error); process.exit(1); });
