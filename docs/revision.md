@@ -1,3 +1,45 @@
+## v5.0 修訂 — 2026-10-14 補完 main 上既有測試的紅燈（候選，未發布）
+
+基底 `17bad12031b26a3a09ba4cd413cfa5b4244b2971`；與同一個 Draft PR 的大盤昨收修正、選擇權新鮮度修正分開記錄。實作提交由 PR 指向，合併 SHA 尚未產生。`VERSION` 維持 5.0。Sam 2026-10-14 同意在雲端沙盒執行完整 Python 套件與全部 Node 自測（規則 0008 第 13 條）。
+
+**原因**：PR #198／#199 的 CI 只跑各 PR 計畫列出的案例，被改動函式的既有測試不在其中，`main` 上累積了既有測試的紅燈。本次逐項判斷，**只更新過時的測試與基準，沒有改產品程式、沒有放寬任何斷言、沒有跳過或停用測試**。
+
+| 測試 | 判斷 | 處置 |
+|---|---|---|
+| `tests/indicator_cache_selftest.js` | 測試過時。PR #198 把 EMA 抽成 `window.stEmaSeries` 並內嵌進 worker 模板，自測只擷取模板，在沒有 `window` 的環境失敗 | 先執行 `stock_terminal.html` 內同一份 EMA 定義，再取 worker 模板 |
+| `tests/shell_v5_selftest.js`（決策頁溫度燈說明） | 測試過時。`cc5e9bd` 刻意把說明由 6.5px 置中不換行改為 10px 可換行，斷言仍是舊樣式 | 改斷言目前的整列寬且可換行樣式 |
+| `tests/test_no_new_silent_exceptions.py`（`silent_except_baseline.json`） | 基準未下修。PR #198 讓 `trend_quant` 由 2 降為 1、`turnover_quant` 降為 0；規則 0014 要求減少時一併降基準 | `trend_quant` 2→1，移除 `turnover_quant` |
+| `tests/test_三項限制解方.py`、`tests/test_全檢資料邊界.py` 各一項日資料重試測試 | 測試過時。PR #199 在每日來源流程加入「官方研究續補」與「還原快照」兩步；測試沒有模擬新步驟，第二次執行因還原快照為 partial 而不是 completed | 模擬還原快照步驟；新增斷言：還原快照兩次執行都重新核對（`call_count == 2`），證明沒有沿用「先前已完成」 |
+| `tests.test_bundle_fresh` | 追蹤中的 `stock_terminal_v2.html` 與原始碼不一致 | 已於同一 PR 重建（見上一則） |
+
+**驗證**：上列各案例單獨執行通過，並列入 `.github/驗證計畫.json`。
+
+**未解（Windows 專用，未修正，也沒有被隱藏）**：Windows CI 對本 PR 的「分享封存」案例失敗，原因是封存內的 `test_review_regressions_run_from_the_actual_single_machine_share` 在 Windows 上執行 `tests.test_launcher_cmd`，它在 `setUpClass` 就失敗：`健康查詢必須只有兩個明列的 JSON 邊界`。PR #198 把 `START_LOCAL_AND_WEB.cmd` 的本機啟動與健康檢查改成 `call START_TIP.cmd` 與 `start_local.ps1 -CheckOnly`，檔內只剩一個 `Invoke-RestMethod`（閘道），但這組 Windows 專用的真實 CMD 測試仍斷言兩個、並模擬已刪除的 40 次輪詢。這是 `main` 上本來就紅的 Windows 啟動器測試，與本 PR 無關（本 PR 只改封存內的文件路徑與測試信箱）。它需要在 Windows 上實際執行才能更新，雲端沙盒做不到，所以本 PR 的驗證計畫把該方法排除並在案例理由寫明；其餘 11 個封存測試方法與 `tests.test_變更驗證` 在兩個平台都跑。請 Codex 在 Windows 上依新的啟動流程更新 `tests/test_launcher_cmd.py`（同批可能還有其他 Windows 啟動器案例）。
+
+**限制**：沒有在真實資料上驗證；以上都是測試層級的修正。未發布。
+
+## v5.0 修訂 — 2026-10-14 大盤當日漲跌基準改用官方昨收（候選，未發布）
+
+基底 `17bad12031b26a3a09ba4cd413cfa5b4244b2971`（main，PR #199 之後）；實作提交由 Draft PR 指向，合併 SHA 尚未產生。`VERSION` 維持 5.0。
+
+**症狀**：同一張畫面，圖表標頭顯示加權 48625.83「-676.17 (-1.37%)」，底部加權條顯示「+285 (+0.59%)」。兩個數字各自自洽，但昨收基準不同：標頭基準 49302.00，底部 48340.83。
+
+**根因（由程式碼與畫面推得，未在真實 Yahoo／TWSE 回應上重現）**：標頭的日漲跌基準 `S.data.yesterdayClose` 來自 Yahoo `meta.chartPreviousClose`（盤中分 K）或 `/quote` 的 Yahoo 昨收。伺服器端 `server/server.py` 已有註解記載 Yahoo 在雙伺服器不同步時會把上上日收盤當昨收。`polish_v3.js` 的 `patchTwIndexHeader` 只在「Yahoo 日線落後一日（最後一根收盤≈官方昨收）」時才用 `/twindex`（TWSE MIS）校正，其餘情況註解寫「主圖已是今天，Yahoo 已正確，不介入」。這個假設不成立：主圖已是今天時，Yahoo 的昨收仍可能錯。底部加權條一直用 `/twindex`，所以兩者分歧。
+
+**修正後行為**：`^TWII`／`^TWOII` 在主圖最新一根與 MIS 同一交易日（`tradeDate`）、且 Yahoo 昨收與官方昨收不同時，日漲跌基準改為 `/twindex` 的官方昨收；現價維持主圖值，昨收虛線與右軸讀數重畫，統計分頁開著時一併重繪。原有「早盤落後」整組校正不變。以下情況不介入、保留 Yahoo 值：昨收已一致（容許 0.005 點浮點誤差）、主圖仍是上一個交易日、`/twindex` 沒有 `tradeDate`／成交價／昨收、非大盤指數、取不到 `/twindex`。重畫昨收虛線的程式抽成 `applyPrevCloseMarks`，`renderChart` 之後與校正共用。
+
+**可見的縮減（規則 0009 第 1 條）**：無功能被移除。唯一可見變化是大盤標頭的日漲跌數字與昨收虛線位置，在 Yahoo 昨收錯誤時改為官方值。
+
+**驗證**：新增 `tests/tw_index_day_change_selftest.js`，在 VM 內執行 `polish_v3.js` 與 `stock_terminal.html` 的正式程式碼，11 個情境通過，含畫面重現（49302.00 → 48340.83，標頭 +285.00 (+0.59%)）。把閘門暫時還原成「只在落後時校正」，畫面重現情境失敗，證明測試抓得到這個錯誤。相關前端自測 `range_chg`、`台股即時報價`、`js_syntax`、`chart_visual_v5`、`layout_visual_v5`、`完整審查前端`、`圖表生命週期`、`LIVE報價一致性` 通過。
+
+**重建 `stock_terminal_v2.html`**：追蹤中的 v2 在 `main` 上就與原始碼不一致（`tests.test_bundle_fresh` 在乾淨的 `17bad12` 失敗；差異是 PR #198／#199 已合併的前端來源，如共用 EMA 與 mobile_v2.css 版本戳）。本次重建把這些一併帶入，`tests.test_bundle_fresh` 通過。
+
+**未解／限制**：
+- 沒有在真實資料上驗證。請確認當時 TWSE 官方昨收是否為 48340.83。
+- `tests/shell_v5_selftest.js` 在乾淨的 `17bad12` 就有 1 項失敗（`decision uses visual divergence overlays…`，第一個條件 `dc-temp-light` 樣式找不到），與本次無關，未處理。
+- 伺服器 `/quote/^TWII`、`/quote-batch` 仍使用 Yahoo 昨收（`_BAD_YF` 只列 `^TWOII`）。目前沒有找到會顯示 `^TWII` 日漲跌的其他畫面使用這條路徑；若要同源，需另行決定。
+- 未發布。發布須 Sam 指定完整 SHA 的明確授權。
+
 ## 2026-10-13 — PR199 完整歷史根因補完候選
 
 版本維持 **5.0**；本輪起點 `bd573cb9997a2d25103c226c90864211fc00c04d`。Sam 明確要求解決剩餘實際問題，並追加「可直接部署」，取代下方較早的 HOLD 授權狀態。新增完整官方比較讀取：所有交易日原件、四類公司行動與全期日曆到齊才可使用；不截短、不混合還原快照，不修改首次行情。2330 的 24 天原價差異須雙官方報表逐欄一致；0050 舊分割基準、官方停牌日期與公司行動非經濟修訂皆有可追溯判定。月末日曆邊界修正及有界每日續補防止相同缺口重現，UI 揭露實際期間與價格基準。
@@ -150,6 +192,22 @@ WaveDeck 沿用稽核資料庫保存版本與訊號收據，區分 AI 裁量及�
 同供應商唯讀差異審查發現「首次權限確認完成但缺少市場資料」可能殘留等待正文並誤標完成，已在缺資料分支同步近端錯誤及更新指引，並用新增回歸確認模型呼叫為零、按鈕恢復、狀態明確未完成。Reader 狀態另標示「此帳號僅可閱讀」，避免顯示無法使用的重試指引。
 
 本條為本機交付候選；提交完整 SHA、來源雜湊與驗證收據見 `C:/Users/Sam/AI-Workspace/docs/stock-terminal/decision-ai-visible-20261010/交付收據.json`。尚未推送、合併或部署，CI 未執行；正式及本機受管服務不受本輪工作樹修改影響。舊修訂歷史保留。
+
+---
+
+## v5.0 修訂 — 2026-10-13 選擇權結構的新鮮度改為讀取時重算
+
+產品版本維持 **5.0**；基準為 `3b67d2d3d069e08c60e8b1285730f6874358894f`。**候選，未發布**：本條建立時是未提交的候選；合併 SHA、精確提交的 CI 與發布狀態以新段落或發布收據補記，不在這裡預先寫入。
+
+**問題**：2026-10-07 兩份截圖顯示，本機 ST 的「台指選擇權結構」標示「資料完成」，但資料日是 2026-08-14，而正式站同一區塊標示「資料過期」。原因在程式：`options_exposure.build_options_structure` 在建立快取的當下依資料日算出 `status` 與 `modeled.eligible`，快取檔照存；之後 `GET /options/txo/structure` 與 Pulse／決策組裝都直接取快取（`latest_cached()`），不再重算。所以幾週前建立、當時是 ready 的結構，之後一直顯示 ready。
+
+**修正後行為**：新增 `with_current_freshness` 與 `latest_current`。讀取時用現在日期，以建立快取時同一個判斷（`_date_ready`：資料日必須是最近一個已完成交易日，且不是當日、日曆須涵蓋）再核對一次；原本 ready 但現在不符的，改為 `stale`、`modeled.eligible=false`、`quality.ageCalendarDays` 更新為現在的天數，並加上 `STALE_OR_HYBRID_REFERENCE`。只降級、不升級；`stale`、`insufficient` 與沒有資料日的值不受影響（沒有資料日的 ready 會被視為過期）。傳入的快取物件不被改動，快取檔也不被改寫。`GET /options/txo/structure` 與 Pulse 組裝改讀 `latest_current`；更新排程與 TTL 判斷仍用 `latest_cached`。
+
+**使用者可見資訊的減少（規則 0009 第 1 項）**：資料日已落後的選擇權結構，原本可能仍顯示「資料完成」與情境式 Gamma／Vega 表；現在會顯示「資料過期」，情境表以既有的「模型已停用」說明取代，仍可閱讀上方官方 OI 事實。這是預期結果，不是新增的隱藏。
+
+**驗證**：`tests.test_options_exposure` 新增 7 項（舊程式上全部失敗，已驗證），含舊快取數週後轉為過期、下一交易日早上仍為 ready 且原物件回傳、新交易日收盤後轉為過期、不升級、`latest_current` 不改寫快取、GET 路由與 Pulse 組裝都讀現在的版本；既有的日曆新鮮度、hybrid、分層案例保留。另跑選擇權更新排程、決策脈絡、關鍵價位守門、決策資料品質、決策 HTTP、統一更新中心、審查回歸共約 175 項，皆通過。依 `.github/驗證計畫.json` 的兩個案例由 CI 執行。
+
+**限制與沒做的事**：沒有用即時 TAIFEX 資料驗證；沒有改畫面（徽章會自動改成「資料過期」，但沒有新增「N 天前」字樣）；沒有改變選擇權的更新時機。程式裡確有每日自動更新（`server/options_schedule.py`，交易日台北時間 07:00–08:30 的四個時段），但必須在 `data/options_daily_schedule.json` 設 `enabled: true` 才會送出，且只在 ST 正在運行時執行；兩個執行環境是否啟用、是否成功，需要查看各自的 `data/options_daily_schedule.json` 與 `data/options_daily_attempts.json`，這次沒有證據。本機與正式站不共用 DB（`docs/本機與正式版本同步.md`），兩邊資料不一致的架構問題不在這次範圍。審查：僅作者自審，沒有隔離審查。
 
 ---
 

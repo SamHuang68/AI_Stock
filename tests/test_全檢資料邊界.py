@@ -144,6 +144,7 @@ class SourceBoundaryTests(unittest.TestCase):
                 patch.object(ds, 'update', return_value=1) as benchmark, patch.object(ds, 'last_ts', return_value=int(now.timestamp())), \
                 patch.object(tracker, 'parse_and_save', return_value=2) as twse_chips, \
                 patch.object(tracker, 'parse_and_save_tpex', return_value=1), \
+                patch.object(adjusted, 'refresh_snapshots', return_value={'status': 'completed', 'pendingSymbols': [], 'results': {}}) as snapshots, \
                 patch.object(sources.http_client, 'fetch_json', side_effect=respond):
             clock.now.return_value = now
             clock.fromisoformat.side_effect = datetime.fromisoformat
@@ -156,6 +157,8 @@ class SourceBoundaryTests(unittest.TestCase):
             self.assertEqual(len(seen), 4)
             benchmark.assert_called_once()
             twse_chips.assert_called_once()
+            # 還原快照依賴現在的日線，不沿用「先前已完成」：兩次執行都重新核對。
+            self.assertEqual(snapshots.call_count, 2)
 
     def test_retry_interrupt_preserves_later_source_receipts(self):
         now = datetime(2026, 9, 29, 19, tzinfo=ss._TZ['TW'])

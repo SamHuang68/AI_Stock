@@ -28,7 +28,7 @@ class 變更驗證測試(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
         self.git('init', '-q')
-        self.git('config', 'user.email', 'fixture@example.invalid')
+        self.git('config', 'user.email', 'fixture@example.com')
         self.git('config', 'user.name', '流程驗證')
         self.git('config', 'core.autocrlf', 'false')
         self.git('config', 'commit.gpgsign', 'false')

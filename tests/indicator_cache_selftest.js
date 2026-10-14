@@ -3,7 +3,9 @@ const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:a
 const {webcrypto} = require('node:crypto');
 const html = fs.readFileSync(require('node:path').join(__dirname, '../stock_terminal.html'), 'utf8');
 const definition = html.match(/const WORKER_SRC = `[\s\S]*?`;/)[0];
-const sourceContext = {}; vm.runInNewContext(definition + '; globalThis.source=WORKER_SRC;', sourceContext);
+// worker 模板內嵌 window.stEmaSeries.toString()：先執行正式頁面中的同一份 EMA 定義。
+const emaDefinition = html.match(/window\.stEmaSeries = function[\s\S]*?\n\};/)[0];
+const sourceContext = {window:{}}; vm.runInNewContext(emaDefinition + '\n' + definition + '; globalThis.source=WORKER_SRC;', sourceContext);
 const source = sourceContext.source;
 const code = fs.readFileSync(require('node:path').join(__dirname, '../src/core/indicator_cache_v3.js'), 'utf8');
 let calls = 0;

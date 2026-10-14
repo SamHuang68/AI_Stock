@@ -17,7 +17,7 @@ class OptionsRoutesMixin:
     def _handle_options_structure(self):
         """GET returns cache only; it never hides a network refresh in a read."""
         import options_exposure
-        out = options_exposure.latest_cached()
+        out = options_exposure.latest_current()
         if not out:
             out = {
                 'ok': False, 'contractVersion': 2, 'model': 'st-options-structure/v2',

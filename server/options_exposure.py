@@ -428,6 +428,14 @@ def _scenario_profile(
     }
 
 
+def _date_ready(trade_date: str | None, now: datetime) -> bool:
+    """官方鏈在次日發布；同日或未知日曆的資料不能冒充已完成日。建立快取與讀取快取共用這一個判斷。"""
+    today = now.astimezone(TW_TZ).date()
+    expected = previous_session(today)
+    return bool(expected and trade_date and expected <= trade_date < today.isoformat()
+                and session(trade_date)['status'] == 'scheduled')
+
+
 def build_options_structure(
     report_rows: Iterable[dict[str, Any]] | None,
     delta_rows: Iterable[dict[str, Any]] | None,
@@ -639,11 +647,7 @@ def build_options_structure(
     age_days = None
     if trade_date:
         age_days = max(0, (now.astimezone(TW_TZ).date() - date.fromisoformat(trade_date)).days)
-    today = now.astimezone(TW_TZ).date()
-    expected = previous_session(today)
-    # 官方鏈在次日發布；同日或未知日曆的資料不能冒充已完成日。
-    date_ready = bool(expected and trade_date and expected <= trade_date < today.isoformat()
-                      and session(trade_date)['status'] == 'scheduled')
+    date_ready = _date_ready(trade_date, now)
     stale = bool(not date_ready or hybrid)
     if stale:
         warnings.append('STALE_OR_HYBRID_REFERENCE')
@@ -967,6 +971,35 @@ def latest_cached() -> dict[str, Any] | None:
             _memory_cache['value'] = _read_disk_cache()
             _memory_cache['loaded'] = True
         return deepcopy(_memory_cache['value']) if _memory_cache['value'] else None
+
+
+def with_current_freshness(value: dict[str, Any] | None, now: datetime | None = None) -> dict[str, Any] | None:
+    """快取裡的 status 是建立當下算的，之後放多久都不會變。讀取時用現在的日期再核對一次：
+    原本 ready 但資料日已不是最近完成交易日的，改成 stale、停用情境模型、更新資料天數並加警示。
+    只降級、不升級；stale、insufficient 與沒有資料日的值原樣回傳。不改動傳入的物件。"""
+    if not isinstance(value, dict) or value.get('status') != 'ready':
+        return value
+    now = now or datetime.now(timezone.utc)
+    trade_date = (value.get('observed') or {}).get('tradeDate')
+    if _date_ready(trade_date, now):
+        return value
+    out = deepcopy(value)
+    out['status'] = 'stale'
+    out.setdefault('modeled', {})['eligible'] = False
+    quality = out.setdefault('quality', {})
+    try:
+        quality['ageCalendarDays'] = max(0, (now.astimezone(TW_TZ).date() - date.fromisoformat(trade_date)).days)
+    except (TypeError, ValueError):
+        pass
+    warnings = quality.setdefault('warnings', [])
+    if 'STALE_OR_HYBRID_REFERENCE' not in warnings:
+        warnings.append('STALE_OR_HYBRID_REFERENCE')
+    return out
+
+
+def latest_current(now: datetime | None = None) -> dict[str, Any] | None:
+    """給畫面與決策讀的版本：最近一次快取，加上依現在日期重算的新鮮度。內部（更新排程、TTL）仍用 latest_cached。"""
+    return with_current_freshness(latest_cached(), now)
 
 
 def refresh(
