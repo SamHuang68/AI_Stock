@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock",
-  "baseCommit": "abbe3a2164d002ff5c7d80c226b6056f0a75ad56",
+  "baseCommit": "d586f9afd5600d0a13085c98f631e336ce096c6a",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "日線來源收據結果標記區分未附與無需保存",
-      "reason": "有附收據但本次沒有新增 bars 或新修訂時，sourceReceipt 原先標成 absent，與呼叫端漏傳收據無法區分。新增 not_needed 並以收據案例與直接依賴既有案例回歸。不跑完整套件。",
+      "id": "修訂紀錄補記後分享封存仍通過同一掃描器",
+      "reason": "本次只改文件：在 docs/revision.md 補記發布狀態，並把大盤 8D 報告中的絕對使用者路徑改為中性寫法。分享封存會收錄這些文件並以同一內容掃描器檢查（含使用者路徑），main 上該報告曾使 test_dist_scrub 的 setUpClass 失敗，因此以分享封存案例回歸。不跑完整套件。",
       "changes": [
-        "server/datastore.py",
-        "tests/test_daily_source_receipt.py"
+        "docs/revision.md",
+        "docs/大盤當日漲跌8D報告.md"
       ],
       "inputs": [
         ".gitattributes",
@@ -106,6 +106,7 @@
         "docs/market-source-date-safety.md",
         "docs/research/event_window_deferred.json",
         "docs/research/integration_score_deferred.json",
+        "docs/revision.md",
         "docs/st-evidence-presentation.md",
         "docs/st-health-forward-volume.md",
         "docs/st-official-research-volume.md",
@@ -121,6 +122,7 @@
         "docs/前瞻即時診斷.md",
         "docs/可靠性補完與待證據清單.md",
         "docs/報價與投組缺值契約.md",
+        "docs/大盤當日漲跌8D報告.md",
         "docs/完整審查修正.md",
         "docs/官方公司行動與回補品質.md",
         "docs/官方資料來源修復驗收.md",
@@ -724,12 +726,9 @@
       ],
       "kind": "unittest",
       "targets": [
-        "tests.test_daily_source_receipt",
-        "tests.test_daily_cache_jobs",
-        "tests.test_datastore_market_identity",
-        "tests.test_daily_data_boundaries",
-        "tests.test_stock_signals_revision_metadata",
-        "tests.test_daily_cache_http"
+        "tests.test_dist_scrub.TestDistScrub.test_has_core_share_files",
+        "tests.test_dist_scrub.TestDistScrub.test_archive_passes_same_post_compression_scanner",
+        "tests.test_dist_scrub.TestDistScrub.test_excludes_internal_context_and_runtime_state"
       ],
       "timeoutSeconds": 600
     }
