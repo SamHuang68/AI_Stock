@@ -26,6 +26,11 @@ if /i "%~1"=="-NoLogo" (
   if /i "%~4"=="-ExecutionPolicy" (
     if /i not "%~5"=="Bypass" goto :unexpected
     if /i not "%~6"=="-File" goto :unexpected
+    if /i "%~8"=="-CheckOnly" (
+      >>"%ST_TEST_FIXTURE%\calls.log" echo local-check %~nx7
+      if exist "%ST_TEST_FIXTURE%\local-health.flag" exit /b 0
+      exit /b 1
+    )
     if /i not "%~8"=="-OpenBrowser" goto :unexpected
     >>"%ST_TEST_FIXTURE%\calls.log" echo browser-web
     if exist "%ST_TEST_FIXTURE%\web-open-fails.flag" exit /b 1
@@ -113,16 +118,21 @@ exit /b 0
 }
 
 
+START_TIP_STUB = r'''@echo off
+>>"%ST_TEST_FIXTURE%\calls.log" echo start-tip %*
+if exist "%ST_TEST_FIXTURE%\tip-fails.flag" exit /b 1
+if exist "%ST_TEST_FIXTURE%\recover-local-on-start.flag" >"%ST_TEST_FIXTURE%\local-health.flag" echo 1
+exit /b 0
+'''
+
+
 _HEALTH_HTTP_BOUNDARY = r'''
 function Invoke-RestMethod {
   param([string]$Uri, [int]$TimeoutSec, [string]$ErrorAction)
   if ($TimeoutSec -ne 3 -or $ErrorAction -ne 'Stop') { throw 'unexpected health request options' }
   $fixture = $env:ST_TEST_FIXTURE
   [IO.File]::AppendAllText((Join-Path $fixture 'calls.log'), ('health-http-fixture ' + $Uri + [Environment]::NewLine), [Text.Encoding]::UTF8)
-  if ($Uri -eq 'http://127.0.0.1:18432/health') {
-    if (-not [IO.File]::Exists((Join-Path $fixture 'local-health.flag'))) { throw 'offline local fixture' }
-    $name = 'local-response.json'
-  } elseif ($Uri -eq 'http://127.0.0.1:18434/gateway/health') {
+  if ($Uri -eq 'http://127.0.0.1:18434/gateway/health') {
     if (-not [IO.File]::Exists((Join-Path $fixture 'gateway-live.flag'))) { throw 'offline gateway fixture' }
     $name = 'gateway-response.json'
   } else { throw 'unapproved health request' }
@@ -147,22 +157,27 @@ def _instrument_external_command_tokens(raw: bytes) -> tuple[bytes, dict[str, in
         pattern = r'(?im)^([ \t]*)' + token + r'(?=[ \t])'
         replacement = r'\1call "%ST_TEST_FIXTURE%\\' + name + r'-stub.cmd"'
         text, counts[name] = re.subn(pattern, replacement, text)
-    health_commands = re.findall(r'-Command "([^"]*Invoke-RestMethod[^"]*)"', raw.decode('ascii'))
-    expected = {'powershell': 6, 'curl': 0, 'schtasks': 1, 'start': 2} if health_commands else {
-        'powershell': 3, 'curl': 2, 'schtasks': 1, 'start': 1}
-    if health_commands:
-        if len(health_commands) != 2:
-            raise AssertionError('健康查詢必須只有兩個明列的 JSON 邊界')
-        uris = []
-        for command in health_commands:
-            matches = re.findall(r"Invoke-RestMethod -Uri '([^']+)' -TimeoutSec 3 -ErrorAction Stop", command)
-            if len(matches) != 1 or command.count('Invoke-RestMethod') != 1:
-                raise AssertionError('來源健康 HTTP 契約已變動，不執行未知外部命令')
-            if re.search(r'Invoke-WebRequest|\bStart-Process\b|\bStop-Process\b|\bcurl\b|\bschtasks\b', command, re.I):
-                raise AssertionError('健康判定夾帶未隔離的外部動作')
-            uris.extend(matches)
-        if set(uris) != {'http://127.0.0.1:18432/health', 'http://127.0.0.1:18434/gateway/health'}:
+    source_text = raw.decode('ascii')
+    # 本機入口：無條件、恰好一次 call 同資料夾的 START_TIP.cmd -NoBrowser；冷啟動與冪等由它負責。
+    if len(re.findall(r'(?im)^call "%~dp0START_TIP\.cmd" -NoBrowser\s*$', source_text)) != 1 \
+            or source_text.lower().count('start_tip') != 2:
+        raise AssertionError('本機入口契約已變動：必須恰有一次 call START_TIP.cmd -NoBrowser')
+    health_commands = re.findall(r'-Command "([^"]*Invoke-RestMethod[^"]*)"', source_text)
+    expected = {'powershell': 5, 'curl': 0, 'schtasks': 1, 'start': 1}
+    if len(health_commands) != 1:
+        raise AssertionError('健康查詢必須只有一個明列的閘道 JSON 邊界；本機改由受管 -CheckOnly 負責')
+    for command in health_commands:
+        matches = re.findall(r"Invoke-RestMethod -Uri '([^']+)' -TimeoutSec 3 -ErrorAction Stop", command)
+        if len(matches) != 1 or command.count('Invoke-RestMethod') != 1:
+            raise AssertionError('來源健康 HTTP 契約已變動，不執行未知外部命令')
+        if re.search(r'Invoke-WebRequest|\bStart-Process\b|\bStop-Process\b|\bcurl\b|\bschtasks\b', command, re.I):
+            raise AssertionError('健康判定夾帶未隔離的外部動作')
+        if matches != ['http://127.0.0.1:18434/gateway/health']:
             raise AssertionError('健康查詢超出明列 URI')
+    check_calls = re.findall(r'(?im)^"%SystemRoot%\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe" -NoLogo -NoProfile '
+                             r'-NonInteractive -ExecutionPolicy Bypass -File "%~dp0scripts\\start_local\.ps1" -CheckOnly >nul 2>nul\s*$', source_text)
+    if len(check_calls) != 1:
+        raise AssertionError('本機狀態必須恰有一次受管 start_local.ps1 -CheckOnly')
     if counts != expected:
         raise AssertionError(f'外部命令清單已變動，需先核對隔離完整性：{counts!r}')
     unsafe = r'(?im)^[ \t]*(?:powershell(?:\.exe)?|"[^"\r\n]*[\\/]powershell\.exe"|curl(?:\.exe)?|schtasks(?:\.exe)?|timeout(?:\.exe)?|start)(?=[ \t])'
@@ -175,7 +190,7 @@ def _limit_fixture_poll_attempts(raw: bytes) -> tuple[bytes, dict[str, int]]:
     """離線案例只縮短副本的重試次數；真實健康解析、分支與 30 秒期限保留。"""
     text = raw.decode('ascii')
     budgets = {}
-    for side, expected in (('local', 40), ('web', 20)):
+    for side, expected in (('web', 20),):
         pattern = rf'(?m)^if %TRIES% GEQ {expected} \(\s*$'
         text, count = re.subn(pattern, 'if %TRIES% GEQ 2 (', text)
         if count != 1:
@@ -201,18 +216,18 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
 
     def run_case(self, name, *, local=True, gateway=True, upstream=False,
                  running=False, recover=False, run_fails=False, recover_local=False, query_fails=False,
-                 local_payload=None, gateway_payload=None, no_browser=False, web_open_fails=False):
+                 gateway_payload=None, no_browser=False, web_open_fails=False, tip_fails=False):
         case = Path(tempfile.mkdtemp(prefix='cmd-case-', dir=self.run_root))
         self.addCleanup(self.remove_case, case)
         (case / 'launcher.cmd').write_bytes(self.instrumented)
         for command, text in STUBS.items():
             (case / f'{command}-stub.cmd').write_bytes(_crlf(text))
         (case / 'health-http-boundary.ps1').write_text(_HEALTH_HTTP_BOUNDARY, encoding='utf-8')
+        (case / 'START_TIP.cmd').write_bytes(_crlf(START_TIP_STUB))
         if gateway_payload is not None:
             (case / 'gateway-custom.flag').write_bytes(b'1')
-        local_payload = {'runtimeCommit': 'a' * 40} if local_payload is None else local_payload
         gateway_payload = {'gateway': 'private-web', 'upstream': upstream} if gateway_payload is None else gateway_payload
-        for filename, payload in (('local-response.json', local_payload), ('gateway-response.json', gateway_payload)):
+        for filename, payload in (('gateway-response.json', gateway_payload),):
             # 完整 HTTP 本文以位元組結束；沒有 echo 換行、合法 JSON 截斷或預先代替健康判定。
             body = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
             (case / filename).write_bytes(body)
@@ -226,6 +241,7 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
             'query-fails': query_fails,
             'recover-local-on-start': recover_local,
             'web-open-fails': web_open_fails,
+            'tip-fails': tip_fails,
         }
         for flag, enabled in states.items():
             if enabled:
@@ -242,10 +258,13 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
         self.assertLessEqual(calls.count('powershell-health'), 8, calls)
         run_calls = [line for line in calls if line.startswith('schtasks /run ')]
         query_calls = [line for line in calls if line == 'powershell-query']
-        start_calls = [line for line in calls if line == 'start']
+        start_calls = [line for line in calls if line.startswith('start-tip')]
         result = {'name': name, 'exitCode': done.returncode, 'hostRunCount': len(run_calls),
                   'taskQueryCount': len(query_calls), 'localStartCount': len(start_calls),
                   'browserOpenCount': calls.count('browser-local'),
+                  'localCheckCount': calls.count('local-check start_local.ps1'),
+                  'startTipFirst': bool(calls) and calls[0] == 'start-tip -NoBrowser',
+                  'localHealthHttpCount': len([c for c in calls if '18432/health' in c]),
                   'webBrowserOpenCount': calls.count('browser-web'),
                   'upstreamReadyAfterRun': (case / 'upstream-ready.flag').exists()}
         return done.returncode, output, result
@@ -265,16 +284,22 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
         self.assertNotIn(b'\r', self.raw.replace(b'\r\n', b''))
 
     def test_fixture_reduces_shell_startups_and_preserves_production_poll_budgets(self):
-        self.assertEqual(self.production_poll_budgets, {'local': 40, 'web': 20})
-        self.assertEqual(self.instrumented.count(b'if %TRIES% GEQ 2 ('), 2)
-        self.assertIn(b'if %TRIES% GEQ 40 (', self.raw)
+        self.assertEqual(self.production_poll_budgets, {'web': 20})
+        self.assertEqual(self.instrumented.count(b'if %TRIES% GEQ 2 ('), 1)
         self.assertIn(b'if %TRIES% GEQ 20 (', self.raw)
+        # 本機不再有啟動器自己的輪詢；就緒等待在 start_local.ps1（60 次、每次 0.5 秒）。
+        self.assertNotIn(b'GEQ 40', self.raw)
+        self.assertNotIn(b':wait_local', self.raw)
 
     def assert_health_exit_code(self, local, upstream, expected):
         code, output, result = self.run_case(
             f'local-{local}-upstream-{upstream}', local=local, upstream=upstream)
         self.assertEqual(code, expected, output)
-        self.assertEqual(result['localStartCount'], 0 if local else 1)
+        # 本機入口無條件呼叫一次 START_TIP.cmd（已在線時由它自行略過啟動）；啟動器自己不查本機 /health。
+        self.assertEqual(result['localStartCount'], 1)
+        self.assertEqual(result['startTipFirst'], True)
+        self.assertEqual(result['localCheckCount'], 1)
+        self.assertEqual(result['localHealthHttpCount'], 0)
         self.assertEqual(result['hostRunCount'], 0 if upstream else 1)
         self.assertEqual(result['browserOpenCount'], 1 if local else 0)
         self.assertEqual(result['webBrowserOpenCount'], 1 if upstream else 0)
@@ -284,7 +309,7 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertEqual(result['browserOpenCount'], 0, result)
         self.assertEqual(result['webBrowserOpenCount'], 0, result)
-        self.assertEqual(result['localStartCount'], 0, result)
+        self.assertEqual(result['localStartCount'], 1, result)
 
     def test_recovered_local_opens_browser_once(self):
         code, output, result = self.run_case('本機啟動後開畫面', local=False, upstream=True, recover_local=True)
@@ -320,32 +345,50 @@ class LauncherCmdOfflineBehaviorTests(unittest.TestCase):
     def test_both_down_exit_three(self):
         self.assert_health_exit_code(False, False, 3)
 
-    def test_large_valid_health_does_not_restart_running_local_or_web(self):
+    def test_large_valid_gateway_health_does_not_restart_running_local_or_web(self):
         # 長行溢出後 findstr 會遺失前段已找到的欄位；合法 JSON 的鍵順序不影響健康契約。
-        # 16 KiB 與欄位在末端不足重現；以超過實機 145 KiB 的本文保留前段 runtimeCommit。
-        payload = {'runtimeCommit': 'a' * 40, 'diagnostics': 'x' * 200000}
+        # 以超過實機 145 KiB 的本文保留前段欄位。本機健康已改由受管腳本判定，這裡只驗閘道邊界。
+        payload = {'gateway': 'private-web', 'upstream': True, 'diagnostics': 'x' * 200000}
         raw = json.dumps(payload, separators=(',', ':')).encode('ascii')
         self.assertGreater(len(raw), 200000)
-        self.assertEqual(json.loads(raw)['runtimeCommit'], 'a' * 40)
-        code, output, result = self.run_case('超長合法 health 已在線', upstream=True,
-                                           running=True, local_payload=payload)
+        code, output, result = self.run_case('超長合法閘道 health 已在線', upstream=True,
+                                           running=True, gateway_payload=payload)
         self.assertEqual(code, 0, output)
-        self.assertEqual(result['localStartCount'], 0, result)
         self.assertEqual(result['hostRunCount'], 0, result)
         self.assertEqual(result['taskQueryCount'], 0, result)
         self.assertIn('Local : UP', output)
         self.assertIn('Web   : UP', output)
 
-    def test_large_utf8_health_does_not_restart_running_local_or_web(self):
-        payload = {'runtimeCommit': 'a' * 40, 'diagnostics': '合成診斷' * 20000}
+    def test_large_utf8_gateway_health_does_not_restart_running_local_or_web(self):
+        payload = {'gateway': 'private-web', 'upstream': True, 'diagnostics': '合成診斷' * 20000}
         raw = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
         self.assertGreater(len(raw), 200000)
-        code, output, result = self.run_case('超長 UTF-8 health 已在線', upstream=True,
-                                           running=True, local_payload=payload)
+        code, output, result = self.run_case('超長 UTF-8 閘道 health 已在線', upstream=True,
+                                           running=True, gateway_payload=payload)
         self.assertEqual(code, 0, output)
-        self.assertEqual(result['localStartCount'], 0, result)
         self.assertEqual(result['hostRunCount'], 0, result)
         self.assertEqual(result['taskQueryCount'], 0, result)
+
+    def test_local_entry_failure_does_not_block_the_web_side(self):
+        # START_TIP.cmd 失敗（例如版本需同步而被拒）時，網站流程仍要繼續，並如實回報本機 DOWN。
+        # 網站原本也是停止的：若啟動器因本機失敗而中止，就不會啟動排程工作，這個案例才抓得到。
+        code, output, result = self.run_case('本機入口失敗不擋網站', local=False, gateway=False,
+                                           upstream=False, running=False, recover=True, tip_fails=True)
+        self.assertEqual(code, 1, output)
+        self.assertEqual(result['localStartCount'], 1, result)
+        self.assertEqual(result['hostRunCount'], 1, result)
+        self.assertTrue(result['upstreamReadyAfterRun'], result)
+        self.assertEqual(result['browserOpenCount'], 0, result)
+        self.assertEqual(result['webBrowserOpenCount'], 1, result)
+        self.assertIn('Local : DOWN', output)
+        self.assertIn('Web   : UP', output)
+
+    def test_cold_start_calls_the_local_entry_before_any_web_step(self):
+        code, output, result = self.run_case('冷啟動順序', local=False, upstream=True, recover_local=True)
+        self.assertEqual(code, 0, output)
+        self.assertTrue(result['startTipFirst'], result)
+        self.assertEqual(result['localCheckCount'], 1, result)
+        self.assertEqual(result['localHealthHttpCount'], 0, result)
 
     def test_stopped_gateway_and_backend_run_host_and_recover(self):
         code, output, result = self.run_case('兩邊停止後恢復', gateway=False,
@@ -405,19 +448,16 @@ class LauncherJsonHealthOfflineTests(unittest.TestCase):
         commands = re.findall(r'-Command "([^"]*Invoke-RestMethod[^"]*)"', source)
         cls.commands = {}
         for command in commands:
-            if "-Uri 'http://127.0.0.1:18432/health'" in command:
-                cls.commands['local'] = command
-            elif "-Uri 'http://127.0.0.1:18434/gateway/health'" in command:
+            if "-Uri 'http://127.0.0.1:18434/gateway/health'" in command:
                 cls.commands['gateway'] = command
-        if set(cls.commands) != {'local', 'gateway'}:
-            raise AssertionError('必須使用來源的兩個 JSON 健康判定命令')
+        if set(cls.commands) != {'gateway'} or len(commands) != 1:
+            raise AssertionError('啟動器必須只有閘道一個 JSON 健康判定命令；本機由受管 -CheckOnly 負責')
         cls.engine = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
 
     def query(self, side, payload):
         with tempfile.TemporaryDirectory(prefix='st-health-parser-') as temp:
             case = Path(temp)
-            filename, flag = ('local-response.json', 'local-health.flag') if side == 'local' else (
-                'gateway-response.json', 'gateway-live.flag')
+            filename, flag = 'gateway-response.json', 'gateway-live.flag'
             (case / filename).write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
             (case / flag).write_bytes(b'1')
             (case / 'gateway-custom.flag').write_bytes(b'1')
@@ -425,7 +465,7 @@ class LauncherJsonHealthOfflineTests(unittest.TestCase):
                 _HEALTH_HTTP_BOUNDARY + '\n' + self.commands[side]],
                 env=dict(os.environ, ST_TEST_FIXTURE=str(case)), stdin=subprocess.DEVNULL,
                 capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
-            uri = 'http://127.0.0.1:18432/health' if side == 'local' else 'http://127.0.0.1:18434/gateway/health'
+            uri = 'http://127.0.0.1:18434/gateway/health'
             self.assertEqual((case / 'calls.log').read_text(encoding='utf-8-sig').splitlines(),
                              ['health-http-fixture ' + uri])
         return done.returncode, (done.stdout + done.stderr).decode('utf-8', 'replace')
@@ -436,12 +476,52 @@ class LauncherJsonHealthOfflineTests(unittest.TestCase):
                 code, output = self.query('gateway', {'gateway': 'private-web', 'upstream': value})
                 self.assertEqual(code, expected, output)
 
-    def test_local_requires_complete_string_runtime_commit(self):
-        for value, expected in (('a' * 40, 0), ('A' * 40, 1), ('a' * 40 + '\n', 1), ('fixture', 1), (None, 1), (40, 1)):
-            with self.subTest(runtimeCommit=value):
-                code, output = self.query('local', {'runtimeCommit': value})
-                self.assertEqual(code, expected, output)
 
+@unittest.skipUnless(os.name == 'nt', '驗證受管本機腳本的真 PowerShell 5.1 健康判定')
+class ManagedLocalHealthContractTests(unittest.TestCase):
+    """本機健康判定已由 START_LOCAL_AND_WEB.cmd 的 JSON 查詢，移到 scripts/start_local.ps1 的
+    Test-LocalHealth（-CheckOnly 與啟動都使用同一函式）。這裡保留原本「必須是完整字串 SHA」的保護，
+    並涵蓋新增的版本、綁定、埠、目錄與 Python 核對。"""
+
+    COMMIT = 'a' * 40
+
+    def check(self, **overrides):
+        health = {'status': 'ok', 'runtimeCommit': self.COMMIT, 'bind': '127.0.0.1', 'port': 18432,
+                  'baseDir': 'C:\\測試\\current', 'pythonExe': 'C:\\Python\\python.exe'}
+        health.update(overrides)
+        launcher = str(SOURCE_ROOT / 'scripts/start_local.ps1').replace("'", "''")
+        body = json.dumps(health, ensure_ascii=False).replace("'", "''")
+        script = (
+            "$ErrorActionPreference='Stop'\n"
+            f". '{launcher}' -FunctionsOnly\n"
+            f"$h = '{body}' | ConvertFrom-Json\n"
+            "$base='C:\\測試\\current'; $python='C:\\Python\\python.exe'\n"
+            f"if (Test-LocalHealth $h $base '{self.COMMIT}' $python) {{ exit 0 }} else {{ exit 1 }}\n")
+        with tempfile.TemporaryDirectory(prefix='st-local-health-') as folder:
+            path = Path(folder) / '核對.ps1'
+            path.write_text(script, encoding='utf-8-sig')
+            shell = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+            done = subprocess.run([str(shell), '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(path)],
+                                  stdin=subprocess.DEVNULL, capture_output=True, timeout=30,
+                                  creationflags=subprocess.CREATE_NO_WINDOW)
+        return done.returncode, (done.stdout + done.stderr).decode('utf-8', 'replace')
+
+    def test_complete_matching_health_is_accepted(self):
+        code, output = self.check()
+        self.assertEqual(code, 0, output)
+
+    def test_runtime_commit_must_be_the_exact_installed_string(self):
+        for value in ('A' * 40, self.COMMIT + '\n', self.COMMIT[:-1], 'fixture', None, 40, ['a']):
+            with self.subTest(runtimeCommit=value):
+                code, output = self.check(runtimeCommit=value)
+                self.assertEqual(code, 1, output)
+
+    def test_status_bind_port_and_paths_must_match(self):
+        for field, value in (('status', 'degraded'), ('bind', '0.0.0.0'), ('port', 18433),
+                             ('baseDir', 'C:\\其他\\current'), ('pythonExe', 'C:\\Other\\python.exe')):
+            with self.subTest(**{field: value}):
+                code, output = self.check(**{field: value})
+                self.assertEqual(code, 1, output)
 
 @unittest.skipUnless(os.name == 'nt', '驗證 Windows 排程查詢的 PowerShell 語意')
 class ScheduledTaskQueryOfflineTests(unittest.TestCase):
@@ -498,10 +578,9 @@ class LauncherNativeWaitTests(unittest.TestCase):
     def test_source_wait_command_ignores_redirected_stdin(self):
         raw = (SOURCE_ROOT / 'START_LOCAL_AND_WEB.cmd').read_bytes()
         source = raw.decode('ascii')
-        # 只執行兩個輪詢分支的等待命令，不執行啟動器。舊命令保留在允許清單以驗證失敗。
-        commands = re.findall(r'(?im)^(?P<command>[^\r\n]+)\r?\n[ \t]*goto :(?:wait_local|wait)[ \t]*\r?$', source)
-        self.assertEqual(len(commands), 2)
-        self.assertEqual(commands[0], commands[1])
+        # 只執行輪詢分支的等待命令，不執行啟動器。舊命令保留在允許清單以驗證失敗。
+        commands = re.findall(r'(?im)^(?P<command>[^\r\n]+)\r?\n[ \t]*goto :wait[ \t]*\r?$', source)
+        self.assertEqual(len(commands), 1)
         expected = r'"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 3" >nul'
         self.assertIn(commands[0], (expected, 'timeout /t 3 /nobreak >nul'))
         with tempfile.TemporaryDirectory(prefix='st-wait-command-') as temp:
