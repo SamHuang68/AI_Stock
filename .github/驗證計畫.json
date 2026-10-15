@@ -2,16 +2,22 @@
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock",
-  "baseCommit": "e27eee97534bd76941782dc2d58b76cdf8ec00bf",
+  "baseCommit": "e3a6744f6c6f24ca35a8d4430c4e862e303bb7eb",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "啟動器測試對齊本機入口與受管檢查契約",
-      "reason": "tests/test_launcher_cmd.py 仍照 10/13 前的契約驗證 START_LOCAL_AND_WEB.cmd，在乾淨 main 上 3 個案例失敗並連帶使分享封存內的回歸案例失敗。冷啟動已在真實終端機驗證能返回，故不改啟動器，只更新測試到新契約。以該模組全部案例，加上會從封存內執行它的分享封存案例回歸。不跑完整套件。",
+      "id": "Yahoo日線寫入路徑補齊來源收據並偵測舊形狀證據表",
+      "reason": "審查發現兩條實際寫入 Yahoo 日線的路徑沒附收據、舊形狀證據表會被沿用、收據例外白名單漏 OverflowError，並發現 #206 弄壞了 update() 的既有測試。以收據案例回歸，並重跑所有引用 fetch_yahoo_daily／upsert_bars／merge_source_bars／_fetch_remote／ingest_receipt 的測試模組（25 個，不是完整套件）。",
       "changes": [
-        "tests/test_launcher_cmd.py"
+        "scripts/個股研究資料更新.py",
+        "server/datastore.py",
+        "server/個股還原研究.py",
+        "server/日線來源收據.py",
+        "tests/test_daily_source_receipt.py",
+        "tests/test_個股研究資料更新.py",
+        "tests/test_研究品質與留存.py"
       ],
       "inputs": [
         ".gitattributes",
@@ -725,8 +731,31 @@
       ],
       "kind": "unittest",
       "targets": [
-        "tests.test_launcher_cmd",
-        "tests.test_dist_scrub.TestDistScrub.test_review_regressions_run_from_the_actual_single_machine_share"
+        "tests.test_daily_cache_http",
+        "tests.test_daily_cache_jobs",
+        "tests.test_daily_data_boundaries",
+        "tests.test_daily_source_receipt",
+        "tests.test_datastore_market_identity",
+        "tests.test_job_queue_budget_cleanup",
+        "tests.test_review_regressions",
+        "tests.test_signal_stats_pool",
+        "tests.test_stock_signals_revision_metadata",
+        "tests.test_txf_intraday",
+        "tests.test_us_equity_calendar",
+        "tests.test_三項限制解方",
+        "tests.test_個股研究資料更新",
+        "tests.test_全檢資料邊界",
+        "tests.test_台股日線",
+        "tests.test_官方回補收據與摘要",
+        "tests.test_情境投組HTTP",
+        "tests.test_投組價格契約",
+        "tests.test_投組官方價格",
+        "tests.test_日線分欄品質",
+        "tests.test_研究品質與留存",
+        "tests.test_研究缺口補完",
+        "tests.test_突破成交研究",
+        "tests.test_突破觀察",
+        "tests.test_體檢來源期限"
       ],
       "timeoutSeconds": 600
     }

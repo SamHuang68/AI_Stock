@@ -99,6 +99,29 @@ class AdjustmentTests(unittest.TestCase):
         self.assertEqual(fetch.call_args_list[0].args[0], '2330')
         self.assertEqual(second['status'], 'completed')
 
+    def test_append_missing_writes_yahoo_days_with_the_receipt_of_the_same_fetch(self):
+        pack = self.snapshot_fixture(symbols=('2330',))
+        missing_day = int(datetime(2026, 9, 25, 9, tzinfo=ss._TZ['TW']).timestamp())
+        pack['rows'] = [(missing_day, 10, 10, 10, 10, 1)]
+        written = {}
+
+        def fetch(code, market, period, **kwargs):
+            kwargs['receipt_out'].update({'receiptId': 'b' * 32})
+            return pack
+
+        def write(code, market, rows, **kwargs):
+            written.update(kwargs, rows=list(rows))
+            return len(rows)
+
+        with patch.object(datastore, 'fetch_yahoo_daily', side_effect=fetch) as fetched, \
+                patch.object(datastore, 'upsert_bars', side_effect=write):
+            adjusted.refresh_snapshots(['2330'], expected_day='2026-09-24', append_missing=True)
+        receipt = fetched.call_args.kwargs['receipt_out']
+        self.assertEqual(receipt['receiptId'], 'b' * 32)
+        self.assertIs(written['ingest_receipt'], receipt)
+        self.assertEqual(written['source'], 'Yahoo Finance')
+        self.assertEqual([row[0] for row in written['rows']], [missing_day])
+
     def test_bad_snapshot_json_is_isolated_from_other_symbols(self):
         pack = self.snapshot_fixture()
         adjusted.save_snapshot('0050', 'TW', pack)

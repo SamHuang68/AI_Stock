@@ -128,8 +128,9 @@ def refresh_snapshots(symbols, *, expected_day=None, deadline=None, previous_att
         if not raw:
             return result
         check_budget()
+        receipt = {}
         pack = datastore.fetch_yahoo_daily(code, 'TW', '10y', with_research=True,
-                    start_ts=min(r[0] for r in raw) - 86400, deadline=deadline)
+                    start_ts=min(r[0] for r in raw) - 86400, deadline=deadline, receipt_out=receipt)
         check_budget()
         candidate = {**_snapshot_payload(pack, 'TW'), 'symbol': code}
         old_dates = {row['date'] for row in (previous or {}).get('rows', [])}
@@ -147,7 +148,7 @@ def refresh_snapshots(symbols, *, expected_day=None, deadline=None, previous_att
                      or ss.bar_date(r[0]) == now.date().isoformat() and now.hour >= 14)}.values())
             check_budget()
             if fresh:
-                appended = datastore.upsert_bars(code, 'TW', fresh, source='Yahoo Finance')
+                appended = datastore.upsert_bars(code, 'TW', fresh, source='Yahoo Finance', ingest_receipt=receipt)
         check_budget()
         inspection_started = time.monotonic()
         _, result = inspect(code, candidate)
