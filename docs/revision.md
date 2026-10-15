@@ -1,3 +1,25 @@
+## v5.0 修訂 — 2026-10-15 啟動器測試對齊 10/13 契約（候選，未發布）
+
+基底 `e27eee97534bd76941782dc2d58b76cdf8ec00bf`（main）；分支 `claude/st-launcher-test`，`VERSION` 維持 5.0，**不改啟動器與任何產品程式，只改 `tests/test_launcher_cmd.py`**。
+
+**判定（先驗證，再改測試）**：2026-10-13 的提交 `b3bdcf7` 把 `START_LOCAL_AND_WEB.cmd` 改成無條件 `call START_TIP.cmd -NoBrowser`，本機狀態改由受管的 `scripts\start_local.ps1 -CheckOnly`（核對受管版本、程序身分、綁定、埠與目錄）判定，並移除啟動器自己的「背景啟動後輪詢 40 次」。`tests.test_launcher_cmd` 仍照舊契約，3 個案例在乾淨 main 上失敗。先前懷疑新流程在冷啟動時 `START_TIP.cmd` 不返回而卡住網站；**2026-10-15 在真實終端機分頁實測：本機停止後執行 `START_LOCAL_AND_WEB.cmd --no-browser`，13 秒返回（12:17:33→12:17:46），印出「本機 ST 已就緒」、`Local : UP`、`Web : UP`，啟動器結束後服務仍在**。2026-10-14 觀察到的「不返回」是在擷取輸出的管線下發生（推測為背景程序繼承管線控制代碼，未另行重現）。結論：啟動器沒有退化，是測試過時。
+
+**測試改動（保留原有保護，不刪斷言以求通過）**：
+- 新增 `START_TIP.cmd` 替身（啟動器以 `%~dp0` 呼叫同資料夾的檔案）與 `powershell -File start_local.ps1 -CheckOnly` 分支；來源必須恰有一次 `call START_TIP.cmd -NoBrowser`、一次受管 `-CheckOnly`、恰一個閘道 JSON 查詢；外部命令清單改為 powershell 5、schtasks 1、start 1。
+- 啟動器若自行查本機 `18432/health` 即為未核准請求（HTTP 邊界替身只核准閘道），以防倒退回舊流程。
+- 原「本機 `runtimeCommit` 必須是完整字串 SHA」的保護，移到受管腳本真正使用的 `Test-LocalHealth`（`-FunctionsOnly` 載入，真 PS 5.1）：必須與已安裝 SHA 完全相同（大小寫、換行、長度、型別），並核對 `status`、綁定位址、埠、目錄與 Python。
+- 網站輪詢仍為 20 次（保留）；本機偵測式輪詢 40 次已隨 `b3bdcf7` 移除，改由 `start_local.ps1` 內 60 次、每次 0.5 秒的就緒等待；測試明確斷言啟動器內不再有 `GEQ 40` 與 `:wait_local`，等待命令（stdin 導向仍有效）改驗單一處。
+- 新增案例：本機入口失敗時網站仍被啟動並如實回報本機 DOWN；冷啟動時本機入口先於任何網站步驟；超長（>200 KB）閘道 health 不觸發重啟。原兩個超長「本機」health 案例改為閘道版本。
+- 共 29 項（原 18 項加 11 項）。
+
+**驗證（本機 targeted；非完整套件）**：`tests.test_launcher_cmd` 29 項通過；連帶的 `tests.test_dist_scrub...test_review_regressions_run_from_the_actual_single_machine_share`（從分享封存內執行這組測試）通過。變異檢查 6 項皆被抓到：移除 `call START_TIP`、本機永遠視為 UP、`Test-LocalHealth` 放寬為不分大小寫、`Test-LocalHealth` 不核對綁定位址、本機入口失敗就中止、網站輪詢改 40 次（其中「入口失敗就中止」一項第一版案例沒抓到，因網站原本就在線；已改為網站需被啟動的情境後抓到）。
+
+**未驗證**：真實 `START_TIP.cmd`／`start_local.ps1` 與替身的差異（替身只模擬結果）；多螢幕、UAC、非 Windows Terminal 主控台下的冷啟動；啟動器的網站端排程工作在真機上的完整流程（本次真機只涵蓋「網站已在線」的分支）。
+
+發布狀態：候選，只改測試，未合併、未部署；不影響已發布的 `172d378f` 執行行為。
+
+---
+
 ## v5.0 修訂 — 2026-10-15 發布狀態補記（172d378f）
 
 基底 `172d378f986e4eac1506e176e7f9572b64ed4d52`（main）；分支 `claude/st-release-status-2`，只補記發布狀態，不改程式。歷史段落不覆寫，以下為後續狀態。

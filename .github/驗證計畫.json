@@ -2,16 +2,16 @@
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock",
-  "baseCommit": "172d378f986e4eac1506e176e7f9572b64ed4d52",
+  "baseCommit": "e27eee97534bd76941782dc2d58b76cdf8ec00bf",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "修訂紀錄補記後分享封存仍通過同一掃描器",
-      "reason": "本次只在 docs/revision.md 補記發布狀態，不改程式。分享封存會收錄 revision.md 並以同一內容掃描器檢查（含使用者路徑與信箱類字串），因此以分享封存案例回歸。不跑完整套件。",
+      "id": "啟動器測試對齊本機入口與受管檢查契約",
+      "reason": "tests/test_launcher_cmd.py 仍照 10/13 前的契約驗證 START_LOCAL_AND_WEB.cmd，在乾淨 main 上 3 個案例失敗並連帶使分享封存內的回歸案例失敗。冷啟動已在真實終端機驗證能返回，故不改啟動器，只更新測試到新契約。以該模組全部案例，加上會從封存內執行它的分享封存案例回歸。不跑完整套件。",
       "changes": [
-        "docs/revision.md"
+        "tests/test_launcher_cmd.py"
       ],
       "inputs": [
         ".gitattributes",
@@ -725,9 +725,8 @@
       ],
       "kind": "unittest",
       "targets": [
-        "tests.test_dist_scrub.TestDistScrub.test_has_core_share_files",
-        "tests.test_dist_scrub.TestDistScrub.test_archive_passes_same_post_compression_scanner",
-        "tests.test_dist_scrub.TestDistScrub.test_excludes_internal_context_and_runtime_state"
+        "tests.test_launcher_cmd",
+        "tests.test_dist_scrub.TestDistScrub.test_review_regressions_run_from_the_actual_single_machine_share"
       ],
       "timeoutSeconds": 600
     }
