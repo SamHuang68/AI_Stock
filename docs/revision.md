@@ -1,3 +1,25 @@
+## v5.0 修訂 — 2026-10-15 發布狀態補記（172d378f）
+
+基底 `172d378f986e4eac1506e176e7f9572b64ed4d52`（main）；分支 `claude/st-release-status-2`，只補記發布狀態，不改程式。歷史段落不覆寫，以下為後續狀態。
+
+| 版本 | 內容 | 發布時間（本機時間） | 狀態 |
+| --- | --- | --- | --- |
+| `172d378f986e4eac1506e176e7f9572b64ed4d52` | PR #208 發布狀態補記與 8D 報告路徑修正、PR #209 日線來源收據證據表防覆寫（Codex 第二意見三項）、PR #210 大盤案例改經正式 `MarketData.refresh` | 2026-10-15 04:56 前後 | 已發布到本機與正式後端；前一版為 `d586f9af` |
+
+**依據（實測，不是推定）**：發布後查詢本機 `127.0.0.1:18432/health` 與正式後端 `127.0.0.1:18435/health`，`runtimeCommit` 皆等於目標 SHA；閘道 `/gateway/health` 為 `ok`、`upstream` 為 true。發布前確認兩端沒有 queued／running 的更新工作；正式站停止後以 `backup-databases.py` 備份 14 個 SQLite 並逐表核對；promote 後 `data/` 保留 82 項，正式庫日線 1,492,443 筆、`quick_check` ok。
+
+**對先前「候選，未發布」段落的後續狀態**：2026-10-15 的 Codex 第二意見三項修正（日線來源收據、大盤案例）已隨本版發布；先前標示「候選」者以此為準。
+
+**未驗證（不可視為已驗收）**：
+- 閘道與 Tailscale 端的版本：需要 Owner token，未能確認該端的 SHA。
+- 日線來源收據的三張證據表在正式庫**尚未建立**（已查：沒有 `bar_source_receipts`、`bar_first_ingest`、`bar_revision_ingest`、`bar_reinsert_ingest`）；會在第一次真的新增日線並附收據時以 `WITHOUT ROWID` 定義建立。第一次建表在運作中的鎖等待、真實 Yahoo 回應大小與增長量皆未驗證；全市場回補前須先決定壓縮或限制。
+- 大盤標頭與小框、右軸標籤的實機畫面：只有前端自測與後端案例，沒有瀏覽器視覺驗收。
+- 仍未解的獨立問題：`tests.test_launcher_cmd` 與 10/13 重寫的 `START_LOCAL_AND_WEB.cmd` 契約不一致，冷啟動時 `START_TIP.cmd` 是否返回未在真實主控台驗證，待 Codex 判定；Codex 指出但未處理的 `init_db`／交易區段完整審查與舊庫相容性。
+
+證據：`<AI-Workspace>/docs/stock-terminal/指定版本發布-172d378f/`（發布紀錄、備份證據）。
+
+---
+
 ## v5.0 修訂 — 2026-10-15 大盤案例：Codex 第二意見三項修正（候選，未發布）
 
 基底 `719b6dcd35519b5d99341b18b43cdd551f25125d`（main）；分支 `claude/st-index-tests`，`VERSION` 維持 5.0，不改產品程式。
