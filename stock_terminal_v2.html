@@ -162,7 +162,7 @@ html,body{height:var(--st-app-height,100dvh);max-height:var(--st-app-height,100d
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
-<link rel="stylesheet" href="src/ui/mobile_v2.css?v=a45597bc931c">
+<link rel="stylesheet" href="src/ui/mobile_v2.css?v=90404ded81eb">
 </head>
 <body>
 <div id="app">
@@ -588,6 +588,16 @@ function patchTodayDailyBarWithLive(candles, meta, interval) {
 function updateHeaderHigh(candles, rangeLbl, livePrice, sessionDayHigh) {
   const el = document.getElementById('ci-high');
   if (!el) return null;
+  // 行情標頭的同盤最高不能從一年歷史 K 線取最大值。
+  if (typeof S !== 'undefined' && S.range === '1d' && S.data && S.data.marketHeadline) {
+    const m = S.data.marketHeadline;
+    const high = typeof m.high === 'number' && Number.isFinite(m.high) && m.high >= m.price ? m.high : null;
+    const prefix = m.session === 'night' ? '夜盤最高' : '最近日盤最高';
+    el.innerHTML = `${prefix} <b>${high != null ? high.toFixed(2) : '未提供'}</b>`;
+    el.style.display = '';
+    S.data.periodHigh = high;
+    return high;
+  }
   if (!candles || !candles.length) {
     el.style.display = 'none';
     el.textContent = '';
@@ -772,6 +782,8 @@ async function loadSym(sym, mkt, silent) {
   S.sym = sym; S.mkt = mkt;
   S.ind = null;
   S.dataIdentity = null; // 載入完成前不得將舊行情當成目前標的的快照。
+  const marketStamp = document.getElementById('ci-market-asof');
+  if (marketStamp) marketStamp.style.display = 'none';
   try { window.dispatchEvent(new CustomEvent('symLoading', {detail:{sym, mkt, loadSeq:_myLoad}})); } catch(e){}
   document.getElementById('syminput').value = sym;
   setMktUI(mkt);
@@ -969,6 +981,7 @@ async function loadSym(sym, mkt, silent) {
 
   if (_myLoad !== window.__loadSeq || S.sym !== sym || S.mkt !== mkt) return;
   S.data = parsed;
+  parsed.intradayUnavailable = S.range === '1d' && (rdef.interval === '1d' || rdef.interval === '1wk');
   S.dataIdentity = { sym, mkt, loadSeq: _myLoad };
   renderChart(parsed.candles);
   document.getElementById('chart-loading').style.display='none';
@@ -1006,6 +1019,7 @@ async function loadSym(sym, mkt, silent) {
       : (sym === '^TWOII')
         ? '櫃買指數'
         : parsed.name;
+  if (typeof applyCanonicalMarketHeadline === 'function') applyCanonicalMarketHeadline();
 
   // compute indicators — 融資維持率為總經折線，略過技術指標
   if (sym === '__MARGIN_RATIO__') {
@@ -2053,24 +2067,28 @@ function renderStats() {
   const m = S.data.meta;
   const last = S.data.candles[S.data.candles.length-1];
   const prev = S.data.candles[S.data.candles.length-2];
+  const headlinePrice = S.data.marketHeadline ? S.data.marketHeadline.price : last.close;
   // 日漲跌：權威昨收優先（與頂部 ci-chg 對齊），缺才退前一根 K
   const _dayBase = (S.data.yesterdayClose != null && S.data.yesterdayClose > 0)
     ? S.data.yesterdayClose : (prev ? prev.close : null);
-  const chg = (_dayBase > 0) ? (last.close - _dayBase) : 0;
+  const chg = (_dayBase > 0) ? (headlinePrice - _dayBase) : 0;
   const chgPct = (_dayBase > 0) ? (chg / _dayBase * 100) : 0;
   // 區間漲跌：對齊所選時間區間（與頂部 ci-range-chg 同源）
   const _rBase = S.data.rangeBase;
   const _rLbl = S.data.rangeChgLbl || ((typeof currentRangeDef === 'function' ? currentRangeDef() : null) || {}).chgLbl || '';
-  const _rChg = (_rBase > 0) ? (last.close - _rBase) : null;
+  const _rChg = (_rBase > 0) ? (headlinePrice - _rBase) : null;
   const _rPct = (_rBase > 0) ? (_rChg / _rBase * 100) : null;
   const mktCap = m.marketCap ? (m.marketCap>1e12?(m.marketCap/1e12).toFixed(2)+'T':(m.marketCap>1e9?(m.marketCap/1e9).toFixed(2)+'B':(m.marketCap/1e6).toFixed(0)+'M')) : '--';
   const cur = S.mkt==='TW' ? 'TWD' : (S.mkt==='JP' ? 'JPY' : 'USD');
   const rows = [
-    ['PRICE',`${last.close.toFixed(2)} ${cur}`],
+    ['PRICE',`${headlinePrice.toFixed(2)} ${cur}`],
     ['CHANGE',`${chg>=0?'+':''}${chg.toFixed(2)} (${chgPct>=0?'+':''}${chgPct.toFixed(2)}%)`],
   ];
   if (S.range !== '1d' && _rChg != null && _rPct != null) {
     rows.push(['RANGE',`${_rChg>=0?'+':''}${_rChg.toFixed(2)} (${_rPct>=0?'+':''}${_rPct.toFixed(2)}%) · ${_rLbl}`]);
+  }
+  if (S.data.marketHeadline) {
+    rows.push(['K 線資料時間', new Date((last.time + 8 * 3600) * 1000).toISOString().slice(0, 16).replace('T', ' ')]);
   }
   rows.push(
     ['OPEN',last.open.toFixed(2)],['HIGH',last.high.toFixed(2)],['LOW',last.low.toFixed(2)],
@@ -2166,100 +2184,100 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
 });
 </script>
-<script src="src/core/colors_v3.js?v=a45597bc931c"></script>
-<script src="src/core/app_kernel_v5.js?v=a45597bc931c"></script>
-<script src="src/core/feature_flags_v5.js?v=a45597bc931c"></script>
-<script src="src/core/epistemic_badges_v5.js?v=a45597bc931c"></script>
-<script src="src/core/market_freshness_v5.js?v=a45597bc931c"></script>
-<script src="src/core/market_data_v5.js?v=a45597bc931c"></script>
-<script src="src/core/投組資料契約_v5.js?v=a45597bc931c"></script>
-<script src="src/core/decision_data_v5.js?v=a45597bc931c"></script>
-<script src="src/core/更新工作_v5.js?v=a45597bc931c"></script>
-<script src="src/core/market_intel_v5.js?v=a45597bc931c"></script>
-<script src="src/core/table_sort_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/viz_v5.js?v=a45597bc931c"></script>
-<script src="src/core/market_v3.js?v=a45597bc931c"></script>
-<script src="src/core/fields_v3.js?v=a45597bc931c"></script>
-<script src="src/core/chart_registry_v3.js?v=a45597bc931c"></script>
-<script src="src/ui/share_v3.js?v=a45597bc931c"></script>
-<script src="src/ui/datasources_v3.js?v=a45597bc931c"></script>
-<script src="src/core/etf_flow_tip_v3.js?v=a45597bc931c"></script>
-<script src="src/core/position_v2.js?v=a45597bc931c"></script>
-<script src="src/core/watch_v2.js?v=a45597bc931c"></script>
-<script src="src/core/info_v2.js?v=a45597bc931c"></script>
-<script src="src/core/pro_v2.js?v=a45597bc931c"></script>
-<script src="src/chart/volume_profile_v3.js?v=a45597bc931c"></script>
-<script src="src/chart/pattern_v3.js?v=a45597bc931c"></script>
-<script src="src/core/live_v2.js?v=a45597bc931c"></script>
-<script src="src/fundamental/chip_v3.js?v=a45597bc931c"></script>
-<script src="src/fundamental/fundamental_v3.js?v=a45597bc931c"></script>
-<script src="src/ui/polish_v3.js?v=a45597bc931c"></script>
-<script src="src/core/wl_live_v3.js?v=a45597bc931c"></script>
-<script src="src/alert/alert_push_v3.js?v=a45597bc931c"></script>
-<script src="src/screener/backtest_v3.js?v=a45597bc931c"></script>
-<script src="src/core/indicator_cache_v3.js?v=a45597bc931c"></script>
-<script src="src/ui/enhance_v3.js?v=a45597bc931c"></script>
-<script src="src/chart/aftermarket_v3.js?v=a45597bc931c"></script>
-<script src="src/chart/overnight_v3.js?v=a45597bc931c"></script>
-<script src="src/fundamental/supplychain_v3.js?v=a45597bc931c"></script>
-<script src="src/fundamental/chainmom_v3.js?v=a45597bc931c"></script>
-<script src="src/fundamental/valuation_v3.js?v=a45597bc931c"></script>
-<script src="src/alert/calendar_v3.js?v=a45597bc931c"></script>
-<script src="src/chart/multichart_v3.js?v=a45597bc931c"></script>
-<script src="src/chart/spread_v3.js?v=a45597bc931c"></script>
-<script src="src/chart/hotkeys_v3.js?v=a45597bc931c"></script>
-<script src="src/screener/策略版本.js?v=a45597bc931c"></script>
-<script src="src/screener/strategy_builder_v3.js?v=a45597bc931c"></script>
-<script src="src/screener/strategy_script_v3.js?v=a45597bc931c"></script>
-<script src="src/chart/drawtools_v3.js?v=a45597bc931c"></script>
-<script src="src/core/etf_v3.js?v=a45597bc931c"></script>
-<script src="src/core/indices_v3.js?v=a45597bc931c"></script>
-<script src="src/alert/datahealth_v3.js?v=a45597bc931c"></script>
-<script src="src/alert/toast_v3.js?v=a45597bc931c"></script>
-<script src="src/alert/settle_v3.js?v=a45597bc931c"></script>
-<script src="src/ai/cmdpalette_v3.js?v=a45597bc931c"></script>
-<script src="src/ui/dragwin_v3.js?v=a45597bc931c"></script>
-<script src="src/core/liverefresh_v3.js?v=a45597bc931c"></script>
-<script src="src/core/namesearch_v3.js?v=a45597bc931c"></script>
-<script src="src/core/intraday_volume_v3.js?v=a45597bc931c"></script>
-<script src="src/core/realtime_v3.js?v=a45597bc931c"></script>
-<script src="src/ai/ai_runtime_client.js?v=a45597bc931c"></script>
-<script src="src/core/研究工作流.js?v=a45597bc931c"></script>
-<script src="src/core/研究任務.js?v=a45597bc931c"></script>
-<script src="src/core/估值承接核心.js?v=a45597bc931c"></script>
-<script src="src/ai/copilot_v3.js?v=a45597bc931c"></script>
-<script src="src/screener/wizard_v3.js?v=a45597bc931c"></script>
-<script src="src/ui/shell_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/更新工作中心.js?v=a45597bc931c"></script>
-<script src="src/ui/估值承接研究.js?v=a45597bc931c"></script>
-<script src="src/ui/研究任務面板.js?v=a45597bc931c"></script>
-<script src="src/ui/研究工作台.js?v=a45597bc931c"></script>
-<script src="src/ui/wavedeck_bridge_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/hub_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/pulse_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/decision_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/consensus_attention_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/heat_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/book_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/scan_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/ai_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/breadth_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/afterhours_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/news_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/postmarket_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/conditional_expectation_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/peak_observation_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/peak_observation_100d_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/touxin_5d_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/stock_health_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/bridge_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/visual_system_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/chart_visual_v5.js?v=a45597bc931c"></script>
-<script src="src/ui/daily_cache_v3.js?v=a45597bc931c"></script>
-<script src="src/ui/txf_intraday_v3.js?v=a45597bc931c"></script>
-<script src="src/ui/K線事件研究.js?v=a45597bc931c"></script>
-<script src="src/ui/toolbar_v3.js?v=a45597bc931c"></script>
-<script src="src/chart/market_score_bar_v3.js?v=a45597bc931c"></script>
-<script src="src/chart/market_chart_v3.js?v=a45597bc931c"></script>
+<script src="src/core/colors_v3.js?v=90404ded81eb"></script>
+<script src="src/core/app_kernel_v5.js?v=90404ded81eb"></script>
+<script src="src/core/feature_flags_v5.js?v=90404ded81eb"></script>
+<script src="src/core/epistemic_badges_v5.js?v=90404ded81eb"></script>
+<script src="src/core/market_freshness_v5.js?v=90404ded81eb"></script>
+<script src="src/core/market_data_v5.js?v=90404ded81eb"></script>
+<script src="src/core/投組資料契約_v5.js?v=90404ded81eb"></script>
+<script src="src/core/decision_data_v5.js?v=90404ded81eb"></script>
+<script src="src/core/更新工作_v5.js?v=90404ded81eb"></script>
+<script src="src/core/market_intel_v5.js?v=90404ded81eb"></script>
+<script src="src/core/table_sort_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/viz_v5.js?v=90404ded81eb"></script>
+<script src="src/core/market_v3.js?v=90404ded81eb"></script>
+<script src="src/core/fields_v3.js?v=90404ded81eb"></script>
+<script src="src/core/chart_registry_v3.js?v=90404ded81eb"></script>
+<script src="src/ui/share_v3.js?v=90404ded81eb"></script>
+<script src="src/ui/datasources_v3.js?v=90404ded81eb"></script>
+<script src="src/core/etf_flow_tip_v3.js?v=90404ded81eb"></script>
+<script src="src/core/position_v2.js?v=90404ded81eb"></script>
+<script src="src/core/watch_v2.js?v=90404ded81eb"></script>
+<script src="src/core/info_v2.js?v=90404ded81eb"></script>
+<script src="src/core/pro_v2.js?v=90404ded81eb"></script>
+<script src="src/chart/volume_profile_v3.js?v=90404ded81eb"></script>
+<script src="src/chart/pattern_v3.js?v=90404ded81eb"></script>
+<script src="src/core/live_v2.js?v=90404ded81eb"></script>
+<script src="src/fundamental/chip_v3.js?v=90404ded81eb"></script>
+<script src="src/fundamental/fundamental_v3.js?v=90404ded81eb"></script>
+<script src="src/ui/polish_v3.js?v=90404ded81eb"></script>
+<script src="src/core/wl_live_v3.js?v=90404ded81eb"></script>
+<script src="src/alert/alert_push_v3.js?v=90404ded81eb"></script>
+<script src="src/screener/backtest_v3.js?v=90404ded81eb"></script>
+<script src="src/core/indicator_cache_v3.js?v=90404ded81eb"></script>
+<script src="src/ui/enhance_v3.js?v=90404ded81eb"></script>
+<script src="src/chart/aftermarket_v3.js?v=90404ded81eb"></script>
+<script src="src/chart/overnight_v3.js?v=90404ded81eb"></script>
+<script src="src/fundamental/supplychain_v3.js?v=90404ded81eb"></script>
+<script src="src/fundamental/chainmom_v3.js?v=90404ded81eb"></script>
+<script src="src/fundamental/valuation_v3.js?v=90404ded81eb"></script>
+<script src="src/alert/calendar_v3.js?v=90404ded81eb"></script>
+<script src="src/chart/multichart_v3.js?v=90404ded81eb"></script>
+<script src="src/chart/spread_v3.js?v=90404ded81eb"></script>
+<script src="src/chart/hotkeys_v3.js?v=90404ded81eb"></script>
+<script src="src/screener/策略版本.js?v=90404ded81eb"></script>
+<script src="src/screener/strategy_builder_v3.js?v=90404ded81eb"></script>
+<script src="src/screener/strategy_script_v3.js?v=90404ded81eb"></script>
+<script src="src/chart/drawtools_v3.js?v=90404ded81eb"></script>
+<script src="src/core/etf_v3.js?v=90404ded81eb"></script>
+<script src="src/core/indices_v3.js?v=90404ded81eb"></script>
+<script src="src/alert/datahealth_v3.js?v=90404ded81eb"></script>
+<script src="src/alert/toast_v3.js?v=90404ded81eb"></script>
+<script src="src/alert/settle_v3.js?v=90404ded81eb"></script>
+<script src="src/ai/cmdpalette_v3.js?v=90404ded81eb"></script>
+<script src="src/ui/dragwin_v3.js?v=90404ded81eb"></script>
+<script src="src/core/liverefresh_v3.js?v=90404ded81eb"></script>
+<script src="src/core/namesearch_v3.js?v=90404ded81eb"></script>
+<script src="src/core/intraday_volume_v3.js?v=90404ded81eb"></script>
+<script src="src/core/realtime_v3.js?v=90404ded81eb"></script>
+<script src="src/ai/ai_runtime_client.js?v=90404ded81eb"></script>
+<script src="src/core/研究工作流.js?v=90404ded81eb"></script>
+<script src="src/core/研究任務.js?v=90404ded81eb"></script>
+<script src="src/core/估值承接核心.js?v=90404ded81eb"></script>
+<script src="src/ai/copilot_v3.js?v=90404ded81eb"></script>
+<script src="src/screener/wizard_v3.js?v=90404ded81eb"></script>
+<script src="src/ui/shell_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/更新工作中心.js?v=90404ded81eb"></script>
+<script src="src/ui/估值承接研究.js?v=90404ded81eb"></script>
+<script src="src/ui/研究任務面板.js?v=90404ded81eb"></script>
+<script src="src/ui/研究工作台.js?v=90404ded81eb"></script>
+<script src="src/ui/wavedeck_bridge_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/hub_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/pulse_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/decision_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/consensus_attention_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/heat_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/book_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/scan_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/ai_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/breadth_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/afterhours_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/news_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/postmarket_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/conditional_expectation_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/peak_observation_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/peak_observation_100d_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/touxin_5d_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/stock_health_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/bridge_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/visual_system_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/chart_visual_v5.js?v=90404ded81eb"></script>
+<script src="src/ui/daily_cache_v3.js?v=90404ded81eb"></script>
+<script src="src/ui/txf_intraday_v3.js?v=90404ded81eb"></script>
+<script src="src/ui/K線事件研究.js?v=90404ded81eb"></script>
+<script src="src/ui/toolbar_v3.js?v=90404ded81eb"></script>
+<script src="src/chart/market_score_bar_v3.js?v=90404ded81eb"></script>
+<script src="src/chart/market_chart_v3.js?v=90404ded81eb"></script>
 </body>
 </html>

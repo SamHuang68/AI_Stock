@@ -38,7 +38,8 @@ const SEC_1013 = Date.UTC(2026, 9, 13, 1, 30) / 1000;
 function makeEnv({ sym = '^TWII', lastTime = SEC_1014, lastClose = incident.official.price, hero = incident.official.price,
                    yesterdayClose = incident.yahoo.prevClose, twindex, tab = 'chart' }) {
   const nodes = {};
-  const node = id => (nodes[id] = nodes[id] || { id, textContent: '', innerHTML: '', style: {}, classList: { add() {}, remove() {} } });
+  const node = id => (nodes[id] = nodes[id] || { id, textContent: '', innerHTML: '', style: {}, classList: { add() {}, remove() {} },
+    insertAdjacentElement() {} });
   ['ci-price', 'ci-chg', 'ci-range-chg'].forEach(node);
   const strip = { classList: { remove() {} }, querySelector: selector => node('strip' + selector) };
   const lines = [], removed = [], calls = { rpanel: 0 };
@@ -47,6 +48,7 @@ function makeEnv({ sym = '^TWII', lastTime = SEC_1014, lastClose = incident.offi
   let snapshotBody = null;
   const S = {
     sym, mkt: 'TW', tab, range: '1d',
+    dataIdentity: { sym, loadSeq: 1 },
     data: { candles: [{ time: lastTime - 300, close: lastClose - 5 }, { time: lastTime, close: lastClose }],
             heroPrice: hero, yesterdayClose, rangeBase: null, rangeChgLbl: '' },
     chartSeries: {
@@ -55,34 +57,37 @@ function makeEnv({ sym = '^TWII', lastTime = SEC_1014, lastClose = incident.offi
     },
   };
   const context = {
-    S, console: { log() {}, warn() {}, error() {} }, Date, Number, Math, isFinite, Map,
+    fixtureState: S, console: { log() {}, warn() {}, error() {} }, Date, Number, Math, isFinite, Map,
     SERVER_P: 'http://127.0.0.1:18432',
     LightweightCharts: { LineStyle: { Dashed: 2 } },
     document: {
       getElementById: id => (id === 'chart-wrap' ? null : node(id)),
-      querySelector: selector => selector === '[data-mkt-sym="^TWII"]' ? strip : null,
+      querySelector: selector => selector === `[data-mkt-sym="${sym}"]` ? strip : null,
+      createElement: () => node('created'),
     },
     fmtIdx: value => Number(value).toFixed(2),
     renderRpanel() { calls.rpanel++; },
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init && init.detail; } },
     fetch: async url => {
       if (String(url).includes('/market/snapshot')) { snapshotRequests.push(String(url)); return { ok: true, json: async () => snapshotBody }; }
-      return { ok: true, json: async () => twindex };
+      return { ok: true, json: async () => typeof twindex === 'function' ? twindex() : twindex };
     },
   };
   context.window = {
-    S, SERVER: 'http://127.0.0.1:18432',
+    SERVER: 'http://127.0.0.1:18432', __loadSeq: 1,
     addEventListener(name, handler) { (listeners[name] = listeners[name] || []).push(handler); },
     dispatchEvent(event) { (listeners[event.type] || []).forEach(handler => handler(event)); return true; },
   };
   vm.createContext(context);
+  // 正式頁面使用 lexical let；不可自行注入 window.S 讓錯誤守衛通過。
+  vm.runInContext('let S = fixtureState; delete globalThis.fixtureState;', context);
   vm.runInContext(headerCode, context);   // fmtChgAbsPct / calcChgFromBase / updateHeaderChg（正式程式碼）
   vm.runInContext(marksCode, context);    // applyPrevCloseMarks / renderCloseReadout（正式程式碼）
   vm.runInContext(patchCode, context);    // patchTwIndexHeader
   vm.runInContext(marketDataCode, context); // MarketData.refresh／publish（正式程式碼）
   vm.runInContext(stripCode, context);    // applyMktCellTone / renderCanonicalMarketQuote / marketData 監聽（正式程式碼）
   return {
-    S, nodes, lines, removed, calls,
+    S, nodes, lines, removed, calls, window: context.window,
     async symLoaded() { for (const handler of listeners.symLoaded || []) await handler(); },
     snapshotRequests,
     // 走產品實際入口：MarketData.refresh() 取 /market/snapshot，再由正式 publish 發出 marketData 事件。
@@ -190,7 +195,7 @@ const official = (extra) => ({ ok: true, indices: { t00: Object.assign({}, incid
     await env.symLoaded();
     await env.refreshSnapshot(snapshotOf(incident.expected.snapshotMarket));
     assert.strictEqual(env.nodes['ci-chg'].innerHTML.replace(/ <span.*$/, ''), incident.expected.header);
-    assert.strictEqual(env.nodes['strip.delta'].textContent, '+' + incident.expected.stripRoundedChange);
+    assert.strictEqual(env.nodes['strip.delta'].textContent, '+' + (incident.official.price - incident.official.prevClose).toFixed(2));
     assert.strictEqual(env.nodes['strip.ch'].textContent, '▲0.59%');
     assert.strictEqual(env.nodes['strip.px'].textContent, incident.official.price.toFixed(2));
     assert.strictEqual(env.snapshotRequests.length, 1);
@@ -209,7 +214,7 @@ const official = (extra) => ({ ok: true, indices: { t00: Object.assign({}, incid
     assert.strictEqual(env.nodes['strip.ch'].textContent, '▼1.37%');
   }
 
-  // 14) 敏感度：取數入口失敗時不得發出事件，標頭與小框維持原狀（不被半套資料覆寫）。
+  // 14) 空初始快照失敗：雖發出 refresh-failed，沒有半套資料可覆寫畫面。
   {
     const env = makeEnv({ twindex: official() });
     await env.symLoaded();
@@ -219,5 +224,95 @@ const official = (extra) => ({ ok: true, indices: { t00: Object.assign({}, incid
     assert.strictEqual(env.nodes['strip.px'], undefined, '取數失敗不得渲染下方小框');
   }
 
-  console.log('大盤當日漲跌：14 組情境通過');
+  const txf = (price, ref, asOf, high = price + 20) => ({ quotes: { '__TXF__': { high,
+    market: { price, referencePrice: ref, asOf, source: 'taifex-mis', session: 'night' } } } });
+  // 15) 台指期主圖整組同步，不依賴 window.S，亦不改寫歷史 K 線。
+  {
+    const env = makeEnv({ sym: '__TXF__', lastClose: 46979, hero: 46979, yesterdayClose: 48792 });
+    const before = JSON.stringify(env.S.data.candles);
+    assert.strictEqual(env.window.S, undefined);
+    await env.refreshSnapshot(txf(47366, 46931, '2026-10-16T04:59:58+08:00', 47520));
+    assert.strictEqual(env.nodes['ci-price'].textContent, '47366.00');
+    assert.match(env.nodes['ci-chg'].innerHTML, /^\+435.00 \(\+0.93%\)/);
+    assert.match(env.nodes['ci-high'].innerHTML, /夜盤最高.*47520.00/);
+    assert.strictEqual(env.S.data.yesterdayClose, 46931);
+    assert.strictEqual(JSON.stringify(env.S.data.candles), before);
+    // 市場圖建立的空別名不能改變結果。
+    env.window.S = {};
+    await env.refreshSnapshot(txf(47367, 46931, '2026-10-16T05:00:00+08:00', 47520));
+    assert.strictEqual(env.nodes['ci-price'].textContent, '47367.00');
+  }
+  // 16–18) 舊 Pulse、缺價格的新快照與刷新失敗皆保留原整組及時間。
+  {
+    const env = makeEnv({ sym: '__TXF__' });
+    await env.refreshSnapshot(txf(47366, 46931, '2026-10-16T04:59:58+08:00'));
+    env.window.MarketData.fromPulse({ marketSnapshot: txf(47000, 48000, '2026-10-15T18:00:00+08:00') });
+    assert.strictEqual(env.nodes['ci-price'].textContent, '47366.00');
+    await env.refreshSnapshot(txf(null, 47366, '2026-10-16T08:30:00+08:00'));
+    assert.strictEqual(env.S.data.yesterdayClose, 46931);
+    await env.refreshSnapshot({ ok: false, quotes: {} });
+    assert.strictEqual(env.nodes['ci-price'].textContent, '47366.00');
+    assert.strictEqual(env.window.MarketData.get().quotes.__TXF__.market.asOf, '2026-10-16T04:59:58+08:00');
+  }
+  // 19) 日盤接續夜盤，依每筆來源時間接受，不依來源抵達順序或快照頂層日期。
+  {
+    const env = makeEnv({ sym: '__TXF__' });
+    await env.refreshSnapshot(txf(47366, 46931, '2026-10-16T04:59:58+08:00'));
+    const day = txf(47400, 47366, '2026-10-16T08:46:00+08:00');
+    day.quotes.__TXF__.market.session = 'day';
+    await env.refreshSnapshot(day);
+    assert.strictEqual(env.S.data.yesterdayClose, 47366);
+    assert.match(env.nodes['ci-high'].innerHTML, /最近日盤最高/);
+  }
+  // 20) 高點缺少時明示，不把歷史最大值當作今日最高。
+  {
+    const env = makeEnv({ sym: '__TXF__' });
+    await env.refreshSnapshot(txf(47366, 46931, '2026-10-16T04:59:58+08:00', null));
+    assert.match(env.nodes['ci-high'].innerHTML, /未提供/);
+  }
+  // 21) 切股載入尚未完成，舊資料不得套上新標的報價。
+  {
+    const env = makeEnv({ sym: '__TXF__' }); env.S.dataIdentity = null;
+    await env.refreshSnapshot(txf(47366, 46931, '2026-10-16T04:59:58+08:00'));
+    assert.strictEqual(env.nodes['ci-price'].textContent, '');
+  }
+  // 22) 官方當日價格不能被較晚到達的同日 Yahoo 日線備援蓋回去。
+  {
+    const env = makeEnv({ twindex: official() });
+    const officialSnap = snapshotOf(Object.assign({}, incident.expected.snapshotMarket, {asOf:'2026-10-14T10:00:00+08:00'}));
+    await env.refreshSnapshot(officialSnap);
+    const fallback = snapshotOf({price:47000, referencePrice:49000, asOf:'2026-10-14T10:01:00+08:00'});
+    fallback.quotes['^TWII'].chartFallback = true;
+    env.window.MarketData.publish(fallback, 'chart-fallback');
+    assert.strictEqual(env.nodes['ci-price'].textContent, incident.official.price.toFixed(2));
+  }
+  // 23) 冷啟動先發出的舊 twindex 不得在較新 canonical 快照之後覆寫標頭。
+  {
+    let resolveIndex;
+    const waiting = new Promise(resolve => {resolveIndex=resolve;});
+    const env = makeEnv({ twindex: () => waiting });
+    const pending = env.symLoaded();
+    await env.refreshSnapshot(snapshotOf(incident.expected.snapshotMarket));
+    resolveIndex(official({prevClose:49000})); await pending;
+    assert.strictEqual(env.S.data.yesterdayClose,incident.official.prevClose);
+    assert.strictEqual(env.nodes['ci-chg'].innerHTML.replace(/ <span.*$/, ''),incident.expected.header);
+  }
+  // 24) 同標的切換期間後舊回應仍須作廢，不能只檢查代號相同。
+  {
+    let resolveIndex;
+    const env=makeEnv({twindex:()=>new Promise(resolve=>{resolveIndex=resolve;})});
+    const pending=env.symLoaded();
+    await Promise.resolve();
+    env.window.__loadSeq++;
+    resolveIndex(official()); await pending;
+    assert.strictEqual(env.S.data.yesterdayClose,49302);
+  }
+  // 25) 已掛載的統計區間漲跌，在第二筆報價到達後仍與主圖一致。
+  {
+    const env=makeEnv({sym:'__TXF__'});env.S.range='6mo';env.S.data.rangeBase=40000;env.S.data.rangeChgLbl='6月';
+    await env.refreshSnapshot(txf(47366,46931,'2026-10-16T04:59:58+08:00'));
+    await env.refreshSnapshot(txf(47400,46931,'2026-10-16T05:00:00+08:00'));
+    assert.strictEqual(env.nodes['rp-RANGE'].textContent,'+7400.00 (+18.50%) · 6月');
+  }
+  console.log('大盤與台指期標頭：25 組局部情境通過');
 })().catch(error => { console.error(error); process.exit(1); });

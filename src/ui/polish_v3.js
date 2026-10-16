@@ -373,29 +373,76 @@ function renderCanonicalMarketQuote(sym, quote) {
   const cell = document.querySelector(`[data-mkt-sym="${sym}"]`);
   const m = quote && (quote.market || quote);
   if (!cell || !m || m.price == null) return;
-  const delta = m.displayChange != null ? Number(m.displayChange) : (Number(m.price) - Number(m.referencePrice));
-  const pct = m.displayChangePct != null ? Number(m.displayChangePct) : null;
+  const delta = m.referencePrice > 0 ? m.price - m.referencePrice : null;
+  const pct = delta != null ? delta / m.referencePrice * 100 : null;
   cell.classList.remove('loading');
   cell.querySelector('.px').textContent = fmtIdx(m.price);
   applyMktCellTone(cell, delta, true);
   const dEl = cell.querySelector('.delta');
   const ch = cell.querySelector('.ch');
-  if (dEl) dEl.textContent = isFinite(delta) ? (delta > 0 ? '+' : '') + delta.toFixed(Math.abs(delta) >= 100 ? 0 : 2) : '--';
+  if (dEl) dEl.textContent = delta != null && isFinite(delta) ? (delta > 0 ? '+' : '') + delta.toFixed(2) : '--';
   if (ch) ch.textContent = pct != null && isFinite(pct) ? (pct > 0 ? '▲' : pct < 0 ? '▼' : '—') + Math.abs(pct).toFixed(2) + '%' : '--';
   cell.title = `${m.source || 'unknown'} · ${m.session || 'regular'} · ${m.referenceType || 'previous_close'} · ${m.asOf || ''}`;
+}
+
+// 沿用行情列既有的價格與參考價整組更新主圖，歷史 K 棒及指標不改寫。
+function applyCanonicalMarketHeadline() {
+  if (typeof S === 'undefined' || !S || !S.data || !window.MarketData ||
+      !['^TWII', '^TWOII', '__TXF__'].includes(S.sym) ||
+      !S.dataIdentity || S.dataIdentity.sym !== S.sym || S.dataIdentity.loadSeq !== window.__loadSeq) return false;
+  const q = window.MarketData.get().quotes[S.sym];
+  if (!window.MarketData.completeQuote(q)) return false;
+  const m = q.market || q;
+  S.data.marketHeadline = Object.assign({}, m, {
+    high: m.high != null ? m.high : q.high,
+    timeUnverified: !!q.timeUnverified || !m.asOf,
+  });
+  S.data.heroPrice = m.price;
+  S.data.yesterdayClose = m.referencePrice;
+  S.data.sessionDayHigh = S.data.marketHeadline.high;
+  const price = document.getElementById('ci-price');
+  if (price) { price.textContent = m.price.toFixed(2); price.title = m.source + ' · ' + (m.asOf || '來源時間未核實'); }
+  updateHeaderChg(m.price, m.referencePrice, S.data.rangeBase, S.data.rangeChgLbl, 'TW', S.sym);
+  const label = document.querySelector('#ci-chg .ci-lbl');
+  if (label) label.textContent = m.session === 'night' ? '夜盤' : '日';
+  updateHeaderHigh(S.data.candles, S.data.rangeChgLbl, m.price, S.data.sessionDayHigh);
+  // 沿用原台指期同步方式：已掛載的統計欄也接受同一現價，不把日 K 收盤配上夜盤參考價。
+  const statsPrice = document.getElementById('rp-PRICE');
+  const statsChange = document.getElementById('rp-CHANGE');
+  const delta = m.price - m.referencePrice, pct = delta / m.referencePrice * 100;
+  if (statsPrice) statsPrice.textContent = m.price.toFixed(2) + ' TWD';
+  if (statsChange) statsChange.textContent = (delta >= 0 ? '+' : '') + delta.toFixed(2) +
+    ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%)';
+  const statsRange = document.getElementById('rp-RANGE');
+  if (statsRange && S.range !== '1d' && S.data.rangeBase > 0) {
+    const rangeDelta = m.price - S.data.rangeBase, rangePct = rangeDelta / S.data.rangeBase * 100;
+    statsRange.textContent = (rangeDelta >= 0 ? '+' : '') + rangeDelta.toFixed(2) +
+      ' (' + (rangePct >= 0 ? '+' : '') + rangePct.toFixed(2) + '%) · ' + S.data.rangeChgLbl;
+  }
+  if (S.chartSeries && typeof applyPrevCloseMarks === 'function') applyPrevCloseMarks(m.referencePrice, m.price);
+  const name = document.getElementById('ci-name');
+  if (name) {
+    let stamp = document.getElementById('ci-market-asof');
+    if (!stamp) {
+      stamp = document.createElement('div'); stamp.id = 'ci-market-asof';
+      stamp.style.cssText = 'font-size:10px;color:var(--tlo);line-height:1.4;margin-top:2px;max-width:250px';
+      name.insertAdjacentElement('afterend', stamp);
+    }
+    const at = Date.parse(m.asOf);
+    stamp.textContent = (m.session === 'night' ? '夜盤' : '日盤') + ' · ' +
+      (Number.isFinite(at) ? new Date(at + 28800000).toISOString().slice(5, 16).replace('T', ' ') : '來源時間未核實') +
+      (S.data.intradayUnavailable ? ' · 分時未提供，顯示日線歷史' : '');
+    stamp.title = m.source || '';
+    stamp.style.display = '';
+  }
+  return true;
 }
 
 window.addEventListener('marketData', function (ev) {
   const quotes = ev && ev.detail && ev.detail.snapshot && ev.detail.snapshot.quotes;
   if (!quotes) return;
   ['^TWII', '^TWOII', '__TXF__'].forEach(sym => renderCanonicalMarketQuote(sym, quotes[sym]));
-  // The selected market chart gets the identical headline reference as Pulse/top bar.
-  const active = window.S && S.sym;
-  const q = active && quotes[active];
-  const m = q && q.market;
-  if (m && typeof updateHeaderChg === 'function' && m.price != null && m.referencePrice != null) {
-    updateHeaderChg(m.price, m.referencePrice, null, m.referenceType, 'TW', active);
-  }
+  applyCanonicalMarketHeadline();
 });
 
 async function refreshMktBar() {
@@ -440,6 +487,18 @@ async function refreshMktBar() {
       if (cur == null || prev == null || !isFinite(prev) || prev <= 0) continue;
       const delta = cur - prev;
       const chgPct = delta / prev * 100;
+      if ((m.sym === '^TWII' || m.sym === '^TWOII') && window.MarketData) {
+        // 保留既有行情列日線算法，只讓主圖共用同一組結果；不改用分 K 的 chartPreviousClose。
+        const at = Number(rmt || last.t);
+        const market = { symbol: m.sym, market: 'TW', price: cur, referencePrice: prev,
+          referenceType: 'previous_close', displayChange: delta, displayChangePct: chgPct,
+          source: meta._source || 'yahoo-chart', session: 'regular',
+          asOf: Number.isFinite(at) && at > 0 ? new Date(at * 1000).toISOString() : null };
+        const q = { market, chartFallback: true, high: meta.regularMarketDayHigh || null };
+        window.MarketData.publish(Object.assign({}, window.MarketData.get(), { quotes: { [m.sym]: q } }), 'chart-fallback');
+        renderCanonicalMarketQuote(m.sym, window.MarketData.get().quotes[m.sym]);
+        continue;
+      }
       const cell = document.querySelector(`[data-mkt-sym="${m.sym}"]`);
       if (!cell) continue;
       cell.classList.remove('loading');
@@ -700,6 +759,7 @@ async function refreshMarginRatioCell() {
   }
 
   window.addEventListener('symLoaded', () => {
+    if (applyCanonicalMarketHeadline()) return;
     setTimeout(() => applyMarginEnhance(true), 80);
   });
 })();
@@ -828,12 +888,15 @@ function applyMarketColorClass(mkt) {
   const taipeiDate = sec => new Date((Number(sec) + 8 * 3600) * 1000).toISOString().slice(0, 10);
   window.addEventListener('symLoaded', async () => {
     const sym = S.sym;
+    const loadSeq = window.__loadSeq, loadedData = S.data;
     const code = TW_IDX[sym]; if (!code) return;
+    if (applyCanonicalMarketHeadline()) return;
     try {
       const d = await fetch(`${SERVER_P}/twindex`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null);
       const ix = d && d.indices && d.indices[code];
       if (!ix || ix.price == null || ix.prevClose == null) return;   // 盤後/假日無即時 → 不動
-      if (S.sym !== sym) return;                                     // race:已切股
+      if (S.sym !== sym || window.__loadSeq !== loadSeq || S.data !== loadedData) return;
+      if (applyCanonicalMarketHeadline()) return;                    // 等待期間已取得正式快照
       const cs = S.data && S.data.candles; if (!cs || !cs.length) return;
       const lb = cs[cs.length - 1];
       const lagging = Math.abs(lb.close - ix.prevClose) < Math.max(1, ix.prevClose * 1e-5);
@@ -1192,6 +1255,7 @@ function _renderMarginRatioMacroChartFallback(candles) {
             ? S.data.yesterdayClose
             : (prev ? prev.close : null);
           applyPrevCloseMarks(yPrice, last ? last.close : null);
+          applyCanonicalMarketHeadline();
         }
         // (d) Legend overlay
         renderChartLegend();
@@ -1301,7 +1365,7 @@ function renderChartLegend() {
   if (!east) {
     const row = document.createElement('div'); row.id = 'ci-row';
     const left = document.createElement('div'); left.className = 'ci-left';
-    ['ci-price', 'ci-high', 'ci-chg', 'ci-range-chg', 'ci-name', 'market-score-bar'].forEach(id => {
+    ['ci-price', 'ci-high', 'ci-chg', 'ci-range-chg', 'ci-name', 'ci-market-asof', 'market-score-bar'].forEach(id => {
       const el = document.getElementById(id); if (el) left.appendChild(el);
     });
     east = document.createElement('div'); east.id = 'ci-east';
