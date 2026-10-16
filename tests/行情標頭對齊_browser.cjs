@@ -16,10 +16,17 @@ function chart(sym, intraday) {
   const lastTime = Date.parse('2026-10-15T13:30:00+08:00') / 1000;
   const timestamp = intraday ? Array.from({length:20}, (_, i) => lastTime - (19-i)*60) : [lastTime-172800,lastTime-86400,lastTime];
   const close = intraday ? timestamp.map((_, i) => prices[2] - 19 + i) : prices;
-  return { chart: { result: [{meta:{symbol:sym, longName:sym, currency:'TWD', exchangeTimezoneName:'Asia/Taipei',
+  const payload = { chart: { result: [{meta:{symbol:sym, longName:sym, currency:'TWD', exchangeTimezoneName:'Asia/Taipei',
     regularMarketPrice:prices[2],regularMarketTime:lastTime,previousClose:48341.3,chartPreviousClose:48341.3,
     regularMarketDayHigh: sym === '^TWII' ? 48382.75 : 50194, dataGranularity:intraday?'1m':'1d'}, timestamp,
     indicators:{quote:[{open:close.map(x=>x-2), high:close.map(x=>x+20), low:close.map(x=>x-20), close, volume:close.map(()=>100)}]}}],error:null} };
+  // 兩標的一日契約已改為驗證分鐘；保留原標頭、夜盤及區間斷言。
+  if (intraday && ['__TXF__','^TWOII'].includes(sym)) {
+    payload.chart.result[0].meta._verifiedIntraday = true;
+    payload.chart.result[0].meta._intraday = {ok:true,sourceTimestamp:lastTime,source:'固定分鐘來源',
+      sessions:[{start:timestamp[0],end:lastTime}],candles:timestamp.map(time=>({time,session:0})),freshness:{stale:false}};
+  }
+  return payload;
 }
 function snapshot() {
   return {ok:true, quotes:{

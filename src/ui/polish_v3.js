@@ -1227,6 +1227,7 @@ function _renderMarginRatioMacroChartFallback(candles) {
           const flatAlpha = _cvTheme ? _cvTheme.volumeFlat : 'rgba(156,163,175,0.30)';
 
           S.volSeries.setData(_cs.map(c => {
+            if (c._volumeUnknown) return {time:c.time + _tz};
             const _pc = _prevMap.get(c.time);
             const _base = (_pc != null && _pc > 0) ? _pc : c.open;
             let col;
@@ -1365,7 +1366,7 @@ function renderChartLegend() {
   if (!east) {
     const row = document.createElement('div'); row.id = 'ci-row';
     const left = document.createElement('div'); left.className = 'ci-left';
-    ['ci-price', 'ci-high', 'ci-chg', 'ci-range-chg', 'ci-name', 'ci-market-asof', 'market-score-bar'].forEach(id => {
+    ['ci-price', 'ci-high', 'ci-chg', 'ci-range-chg', 'ci-name', 'ci-market-asof', 'ci-intraday-asof', 'market-score-bar'].forEach(id => {
       const el = document.getElementById(id); if (el) left.appendChild(el);
     });
     east = document.createElement('div'); east.id = 'ci-east';
