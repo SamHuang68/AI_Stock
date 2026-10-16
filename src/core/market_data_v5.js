@@ -8,6 +8,34 @@
   };
   var inflight = null;
   var stockQuotes = Object.create(null);
+  // 同一標的只接受完整的一組報價；較晚抵達不代表行情較新。
+  function completeQuote(quote) {
+    var m = quote && (quote.market || quote);
+    return !!(m && typeof m.price === 'number' && isFinite(m.price) && m.price > 0 &&
+      typeof m.referencePrice === 'number' && isFinite(m.referencePrice) && m.referencePrice > 0);
+  }
+  function mergeQuotes(incoming, reason) {
+    var quotes = Object.assign({}, state.quotes);
+    Object.keys(incoming).forEach(function (symbol) {
+      var next = incoming[symbol], previous = quotes[symbol];
+      if (!completeQuote(next)) {
+        if (!completeQuote(previous)) quotes[symbol] = next;
+        return;
+      }
+      var m = next.market || next, old = previous && (previous.market || previous);
+      var stamp = Date.parse(m.asOf), oldStamp = Date.parse(old && old.asOf);
+      if (completeQuote(previous)) {
+        if (isFinite(oldStamp) && (!isFinite(stamp) || stamp < oldStamp)) return;
+        // Yahoo 日線僅承接官方缺成交的情境，不覆寫同日已取得的官方報價。
+        if (reason === 'chart-fallback' && !previous.chartFallback &&
+            (!isFinite(stamp) || !isFinite(oldStamp) ||
+             new Date(stamp + 28800000).toISOString().slice(0, 10) ===
+             new Date(oldStamp + 28800000).toISOString().slice(0, 10))) return;
+      }
+      quotes[symbol] = next;
+    });
+    return quotes;
+  }
   function hasQuotes(snapshot) {
     var quotes = snapshot && snapshot.quotes;
     return !!(quotes && typeof quotes === 'object' && !Array.isArray(quotes) && Object.keys(quotes).length);
@@ -30,6 +58,7 @@
   }
   function publish(snapshot, reason) {
     if (!hasQuotes(snapshot)) return state;
+    snapshot = Object.assign({}, snapshot, { quotes: mergeQuotes(snapshot.quotes, reason) });
     attachFreshness(snapshot);
     state = {
       quotes: snapshot.quotes,
@@ -89,5 +118,6 @@
     return inflight;
   }
   window.MarketData = { get: function () { return attachFreshness(state); }, publish: publish, fromPulse: fromPulse, refresh: refresh,
+    completeQuote: completeQuote,
     acceptStockQuote: acceptStockQuote };
 }());
