@@ -1,3 +1,34 @@
+## v5.0 修訂 — 2026-10-16 init_db／交易區段審查結果與收據補齊（候選，未發布）
+
+基底 `e3a6744f6c6f24ca35a8d4430c4e862e303bb7eb`（main，已含發布的 `172d378f`）；分支 `claude/st-receipt-callers`，`VERSION` 維持 5.0。
+
+**審查範圍與完成度（誠實記錄）**：六個面向（`init_db` 與遷移、交易邊界、併發與鎖、舊庫相容與周邊工具、證據邏輯、呼叫端）。原定以 workflow 讓六位審查者各自實驗、每個發現再由兩位獨立查證者覆核。執行中連續三次遇到使用量限額，**只有三個面向由獨立審查者完成：交易邊界、證據邏輯、呼叫端**；其發現的雙重查證沒有執行，下列「成立」是我（主控）逐條對照程式碼並實驗後的判定。另外三個面向（`init_db` 與遷移、併發與鎖、舊庫相容與周邊工具）**改由我直接審查並實驗完成**（沒有獨立審查者，也沒有反方查證，同作者自審），結果見下方。
+
+**交易邊界面向的結論（審查者以 78 個故障注入情境、逐一陳述句注入共 84 個點、10 次 `os._exit` 真實程序中斷實測）**：`merge_source_bars` 一律整次回復或整次提交，沒有「bars 有但證據沒有」「證據有但 bars 沒有」「只寫入部分日期」；兩張帳本表（`bar_source_revisions`、`bar_ingest_runs`）的建立在交易外、失敗後可能留下空表（無害）；四張證據表與觸發器在第一個寫入之後建立，隨失敗回復；`counts` 與資料庫實況一致；持鎖期間沒有網路；備份副本上單檔日更約 22 ms、新標的 10 年回補約 57 ms。**這項結論依據審查者的實驗輸出，我只重跑了其中與本次修正有關的部分。**
+
+**後補三個面向的結果（我直接審查與實驗，2026-10-16；在 `e3a6744` 上）**：
+- **`init_db` 與遷移：沒有發現問題。** 合成 v1 舊庫（`bars` 主鍵為 `(symbol, ts)`、市場欄為空或 NULL）遷移後 `user_version`=3、主鍵為 `(market, symbol, ts)`、市場補成 TW，並產生 `.pre-market-key-v2.bak` 與 `.pre-quality-v3.bak`；遷移後可正常附收據寫入。v2 且已有品質表的庫升級時建立備份、`bars` 逐列位元不變；`init_db` 第二次執行冪等（備份數不變）；`user_version` 較新時拒絕降版；在 `DROP TABLE bars_legacy_v1` 注入失敗後整個遷移回復（`bars` 位元不變、無殘留 legacy 表），再次執行可完成。在 354 MB 真實庫備份副本上 `init_db` 0.02 至 0.2 秒，無任何結構變動。**資訊（既有行為，非本次引入）**：v1 遷移用 `INSERT OR REPLACE`，若舊庫有「同標的同日、市場為空值與 TW 各一筆」，遷移後只留一筆（實驗中保留 TW 那筆）；遷移前已建立 `.bak` 可還原。首次遷移時 `init_db` 在持有全域寫入鎖期間備份整個資料庫（大庫會較久，一次性）。
+- **併發與鎖：沒有發現問題。** 寫入 `market.db` 的路徑只有 `datastore`（`merge_source_bars`、`upsert_bars`、`init_db`）、`個股還原研究.save_snapshot`、`台股日線.import_day`，皆取同一把 `_db_write_lock`；持鎖期間可達的呼叫沒有再取同一把（非可重入）鎖的路徑，無死結。`early_warning` 等模組寫的是 `market_signals.db`，不同檔案。8 執行緒同時對同標的重疊日期（半數製造衝突）寫入，重跑 3 次：無錯誤、`bars` 5、首次證據 5 且每日唯一、修訂 1、收據 2、修訂關聯 1、`integrity_check` ok。實驗中曾出現一次 `no such table: bars`，經查是我的測試腳本用 `mock.patch` 在多執行緒各自改 `DB_PATH` 造成（先結束者把它還原），不是產品問題；改為全域設定後排除。**未量測**：`台股日線.import_day` 在單一交易內寫約 1,400 檔而持鎖數秒，對 Yahoo 更新的等待影響；跨程序壓力（見下方未處理項）。
+- **舊庫相容與周邊工具：沒有發現問題。** 全專案對 `sqlite_master`／`table_info` 的使用都是「某表是否存在」的成員檢查，新增表與觸發器不影響它們。對含四張證據表與 18 個觸發器（含原有 6 個官方收據觸發器）的 354 MB 庫實跑：發布前備份工具 `backup-databases.py` 的 `signature`（28 張表）與本機同步工具 `local_release.sqlite_backup`（`integrity_check` ok、備份後簽章一致、觸發器與證據列保留）皆通過，各約 19 秒。`market.db` 與其 `-wal`／`-shm` 本來就在分享封存的排除清單。舊形狀證據表由本 PR 的形狀檢查處理。
+
+**成立並已修正（本 PR）**：
+1. **中：兩條實際寫入 Yahoo 日線的路徑沒附來源收據**（`server/個股還原研究.py` 的 `append_missing`、`scripts/個股研究資料更新.py` 的 `--benchmark-range`）。我以 grep 核對全部呼叫端屬實：新增日線沒有首次來源證據，違反「事後可稽核每一筆新增日線」。`fetch_yahoo_daily` 的 `with_research` 路徑同樣會填收據。處理：兩處都傳 `receipt_out`，並以同一份收據寫入。
+2. **低：舊形狀（無 `WITHOUT ROWID`）的證據表會被沿用，不可覆寫保證靜默失效**（`CREATE TABLE IF NOT EXISTS` 不升級）。處理：建表後檢查定義，不符就走既有的 `rejected` 路徑（日線照寫、標記、限頻記錄），不沿用。正式與本機庫目前都沒有這些表，這是防止開發或測試資料庫的潛在風險。
+3. **低：收據核對的例外白名單漏接 `OverflowError`。** 已補。
+4. **審查過程中另發現：`main` 上有一個既有測試被 PR #206 弄壞**——`tests/test_個股研究資料更新.py::test_stale_benchmark_fetches_enough_history` 以 `assert_called_once_with('^TWII','TW','6mo')` 驗證 `update()`，而 #206 讓 `update()` 多傳 `receipt_out`。局部 CI 只跑計畫內的案例，所以當時是綠的。處理：改為驗證位置參數並斷言有傳入收據字典。為排除同類問題，我把所有引用 `fetch_yahoo_daily`／`upsert_bars`／`merge_source_bars`／`_fetch_remote`／`datastore.update`／`backfill_universe`／`ingest_receipt`／`receipt_out` 的測試模組（25 個）全跑過，只有這一項失敗。
+
+**審查者所報、未經獨立查證、本 PR 不處理（留待決定）**：
+- 低：`existing` 讀取在寫入交易之外，跨程序同時更新同標的同日會讓整批以 IntegrityError 回復（審查者在 git 歷史確認自 2026-09-29 的 `6e57d70` 就存在，非收據 PR 引入；建議 `BEGIN IMMEDIATE`，觸及核心寫入路徑，需單獨評估）。
+- 低：證據表的 sqlite3 錯誤不在「核對失敗仍寫入」範圍，會讓整批失敗（原子、不損毀，但與契約字面不同；需先決定要原子失敗還是降級，降級可用 `SAVEPOINT`）。
+- 低：`log_once` 在持鎖且未提交的交易內輸出（stdout 失敗會使整筆回復；記錄可能先於提交）。
+- 低或資訊：同值重插保存了無人引用的原始回應卻標 `stored`；`bar_first_ingest` 記錄的是「首次留有證據的寫入」；`json.dumps` 比較對 int／float 寫法敏感；修訂首次出現時無收據則之後補不上關聯；`log_once` 限頻 key 會蓋掉不同標的或原因；「不可覆寫」不涵蓋 `DROP TABLE`／`ALTER`／`writable_schema`；`observedAt` 在等鎖前取得、帳本 payload 缺 `queryCoverage`；證據表沒有故障回復的測試。
+
+**驗證（本機 targeted，非完整套件）**：新增 3 個案例（兩條補收據路徑、舊形狀證據表不沿用），收據模組 18 項；25 個相關測試模組共 376 項全通過。變異檢查：把兩處呼叫端改回原狀、移除形狀檢查，三個新案例皆失敗。**未驗證**：真實 Yahoo 回應、這兩條路徑在正式環境的實際觸發頻率；斷電時 `synchronous=NORMAL` 的耐久性（只用程序中斷模擬）；全市場回補時證據表與 WAL 的實際增長量；後補三個面向沒有獨立審查者與反方查證。
+
+發布狀態：候選，未合併、未部署。正式與本機仍為 `172d378f`。
+
+---
+
 ## v5.0 修訂 — 2026-10-15 啟動器測試對齊 10/13 契約（候選，未發布）
 
 基底 `e27eee97534bd76941782dc2d58b76cdf8ec00bf`（main）；分支 `claude/st-launcher-test`，`VERSION` 維持 5.0，**不改啟動器與任何產品程式，只改 `tests/test_launcher_cmd.py`**。

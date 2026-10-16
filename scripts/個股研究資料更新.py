@@ -51,14 +51,15 @@ def main(argv=None):
         trace('大盤來源開始', host='finance.yahoo.com', symbol='^TWII', before=before)
         if args.benchmark_range:
             # 完整重建歷史由既有來源提供；保留 SQLite 中其他代號。
-            rows = datastore.fetch_yahoo_daily('^TWII', 'TW', args.benchmark_range)
+            receipt = {}
+            rows = datastore.fetch_yahoo_daily('^TWII', 'TW', args.benchmark_range, receipt_out=receipt)
             from stock_signals import bar_date, _TZ
             current = datetime.now(_TZ['TW'])
             rows = [r for r in rows if bar_date(r[0], 'TW') < current.date().isoformat()
                     or (bar_date(r[0], 'TW') == current.date().isoformat() and current.hour >= 14)]
             if not rows:
                 raise ValueError('來源沒有已收盤日線')
-            count = datastore.upsert_bars('^TWII', 'TW', rows, source='Yahoo Finance')
+            count = datastore.upsert_bars('^TWII', 'TW', rows, source='Yahoo Finance', ingest_receipt=receipt)
         else:
             count = datastore.update('^TWII')
         trace('大盤資料已提交', rows=count, after=datastore.last_ts('^TWII'))

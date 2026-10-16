@@ -37,7 +37,43 @@ class UpdateTests(unittest.TestCase):
                 patch.object(ds, 'fetch_yahoo_daily', return_value=[row]) as fetch, \
                 patch.object(ds, 'upsert_bars', return_value=1):
             self.assertEqual(ds.update('^TWII'), 1)
-        fetch.assert_called_once_with('^TWII', 'TW', '6mo')
+        fetch.assert_called_once()
+        self.assertEqual(fetch.call_args.args, ('^TWII', 'TW', '6mo'))
+        # 之後可稽核每一筆新增的 Yahoo 日線：必須要求收據字典，並與寫入共用同一份。
+        self.assertIsInstance(fetch.call_args.kwargs.get('receipt_out'), dict)
+        self.assertEqual(set(fetch.call_args.kwargs), {'receipt_out'})
+
+    def test_full_benchmark_rebuild_writes_with_the_receipt_of_its_own_fetch(self):
+        import importlib.util
+        root_dir = Path(__file__).resolve().parents[1]
+        spec = importlib.util.spec_from_file_location('research_update_script', root_dir / 'scripts' / '個股研究資料更新.py')
+        script = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(script)
+        row = (int(time.time()) - 5 * 86400, 10, 11, 9, 10, 100)
+        written = {}
+
+        def fetch(symbol, market, period, **kwargs):
+            kwargs['receipt_out'].update({'receiptId': 'a' * 32})
+            return [row]
+
+        def write(symbol, market, rows, **kwargs):
+            written.update(kwargs)
+            return len(rows)
+
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(ds, 'DB_PATH', ds.DB_PATH), patch.object(ct, 'CHIP_HISTORY_PATH', ct.CHIP_HISTORY_PATH), \
+                patch.object(ds, 'fetch_yahoo_daily', side_effect=fetch) as fetched, \
+                patch.object(ds, 'upsert_bars', side_effect=write), patch.object(ds, 'last_ts', return_value=0):
+            data = Path(folder) / 'data'
+            data.mkdir()
+            (data / 'market.db').write_bytes(b'')
+            # 2026-10-10 是週六：不會進入籌碼逐日更新迴圈。
+            script.main(['--start', '2026-10-10', '--end', '2026-10-10', '--benchmark-range', '10y',
+                         '--data-dir', str(data)])
+        receipt = fetched.call_args.kwargs['receipt_out']
+        self.assertEqual(receipt['receiptId'], 'a' * 32)
+        self.assertIs(written['ingest_receipt'], receipt)
+        self.assertEqual(written['source'], 'Yahoo Finance')
 
     def test_snapshot_merges_fields_and_zero_reaches_ledger(self):
         with tempfile.TemporaryDirectory() as root:

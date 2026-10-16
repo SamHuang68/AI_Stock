@@ -7,6 +7,9 @@ import uuid
 from urllib.parse import urlparse, parse_qs
 
 
+EVIDENCE_TABLES = ('bar_source_receipts', 'bar_first_ingest', 'bar_reinsert_ingest', 'bar_revision_ingest')
+
+
 def parse_yahoo_daily(raw, source_symbol, market):
     """擷取與收據核對共用同一解析器，保留既有缺值與日線契約。"""
     res = json.loads(raw)['chart']['result'][0]
@@ -102,6 +105,10 @@ def store_receipt(conn, receipt, symbol, market, source, rows):
         conn.execute(f'CREATE TRIGGER IF NOT EXISTS {table}_no_replace BEFORE INSERT ON {table} '
                      f'WHEN EXISTS(SELECT 1 FROM {table} WHERE {key}) '
                      f'BEGIN SELECT RAISE(ABORT,\'首次來源證據不可覆寫或刪除\'); END')
+    for table in EVIDENCE_TABLES:
+        definition = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
+        if definition is None or 'WITHOUT ROWID' not in (definition[0] or '').upper():
+            raise ValueError('證據表 %s 的定義不是 WITHOUT ROWID（可能是舊版建立）；不沿用，以免不可覆寫的保證失效' % table)
     values = (receipt_id, source, symbol, market, receipt['url'], raw, receipt['sha256'],
               retrieved, receipt['parserVersion'], receipt['volumeContract'])
     old = conn.execute('SELECT * FROM bar_source_receipts WHERE receipt_id=?', (receipt_id,)).fetchone()

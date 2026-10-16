@@ -352,7 +352,7 @@ def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_
             if receipt_id is None:
                 try:
                     receipt_id = source_provenance.store_receipt(conn, ingest_receipt, sym, market, source, rows)
-                except (ValueError, TypeError, KeyError, IndexError, AttributeError) as exc:
+                except (ValueError, TypeError, KeyError, IndexError, AttributeError, OverflowError) as exc:
                     receipt_failed = True
                     counts['sourceReceiptError'] = str(exc)
                     from log_once import log_once

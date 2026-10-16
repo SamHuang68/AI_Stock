@@ -194,6 +194,22 @@ class DailySourceReceiptTests(unittest.TestCase):
                              "VALUES(1,'B','Yahoo Finance','2330','TW','u',x'02','h',1.0,'p','v')")
             self.assertEqual(conn.execute('SELECT receipt_id, raw_payload FROM bar_source_receipts').fetchall(), before)
 
+    def test_evidence_table_created_with_a_rowid_is_not_reused(self):
+        # 早期版本（沒有 WITHOUT ROWID）建立的表：IF NOT EXISTS 不會升級，不可靜默沿用而讓防覆寫失效。
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute('CREATE TABLE bar_source_receipts(receipt_id TEXT PRIMARY KEY,source TEXT NOT NULL,'
+                         'symbol TEXT NOT NULL,market TEXT NOT NULL,source_url TEXT NOT NULL,raw_payload BLOB NOT NULL,'
+                         'source_hash TEXT NOT NULL,retrieved_at REAL NOT NULL,parser_version TEXT NOT NULL,'
+                         'volume_contract TEXT NOT NULL)')
+            conn.commit()
+        rows, receipt = self.fetch(yahoo_payload())
+        result = datastore.merge_source_bars('2330', 'TW', rows, 'Yahoo Finance', ingest_receipt=receipt)
+        self.assertEqual(result['sourceReceipt'], 'rejected')
+        self.assertIn('WITHOUT ROWID', result['sourceReceiptError'])
+        self.assertEqual(result['inserted'], 2)
+        self.assertEqual(self.scalar('SELECT COUNT(*) FROM bars'), 2)
+        self.assertEqual(self.scalar('SELECT COUNT(*) FROM bar_source_receipts'), 0)
+
     def test_malformed_receipt_structure_does_not_break_the_write(self):
         import hashlib
         rows, receipt = self.fetch(yahoo_payload())
