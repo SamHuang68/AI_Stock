@@ -1,0 +1,223 @@
+{
+  "description": "2026-10-16 加權：官方成交統計與指數日報獨立確認；Yahoo當日日K缺值與25秒時戳差重現",
+  "capturedAt": "2026-10-17T06:12:30+08:00",
+  "sources": [
+    "https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date=20261016&response=json",
+    "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date=20261016&type=IND&response=json"
+  ],
+  "officialDailySha256": "ee484919d690a2d011d4c14dbd6637e74a62f0395335e5bc5a32de60dff29822",
+  "expected": {
+    "changePct": 0.3,
+    "change": 141.39,
+    "referencePrice": 46969.87,
+    "referenceDate": "2026-10-15",
+    "tradeDate": "2026-10-16",
+    "price": 47111.26
+  },
+  "yahoo": {
+    "timestamp": [
+      1791939600,
+      1792026000,
+      1792112400
+    ],
+    "meta": {
+      "currency": "TWD",
+      "symbol": "^TWII",
+      "exchangeName": "TAI",
+      "fullExchangeName": "Taiwan",
+      "instrumentType": "INDEX",
+      "firstTradeDate": 867805200,
+      "regularMarketTime": 1792128805,
+      "hasPrePostMarketData": false,
+      "gmtoffset": 28800,
+      "timezone": "CST",
+      "exchangeTimezoneName": "Asia/Taipei",
+      "regularMarketPrice": 47111.26,
+      "regularMarketChangePercent": 0.301,
+      "fulldayPrice": 47111.26,
+      "fulldayChange": 141.391,
+      "fulldayChangePercent": 0.301,
+      "fiftyTwoWeekHigh": 49968.92,
+      "fiftyTwoWeekLow": 26395.98,
+      "regularMarketDayHigh": 47520.6,
+      "regularMarketDayLow": 46995.03,
+      "regularMarketVolume": 0,
+      "longName": "TSEC CAPITALIZATION WEIGHTED ST",
+      "shortName": "TSEC CAPITALIZATION WEIGHTED ST",
+      "chartPreviousClose": 49301.96,
+      "priceHint": 2,
+      "currentTradingPeriod": {
+        "pre": {
+          "timezone": "CST",
+          "start": 1792112400,
+          "end": 1792112400,
+          "gmtoffset": 28800
+        },
+        "regular": {
+          "timezone": "CST",
+          "start": 1792112400,
+          "end": 1792128600,
+          "gmtoffset": 28800
+        },
+        "post": {
+          "timezone": "CST",
+          "start": 1792128600,
+          "end": 1792128600,
+          "gmtoffset": 28800
+        }
+      },
+      "dataGranularity": "1d",
+      "range": "5d",
+      "validRanges": [
+        "1d",
+        "5d",
+        "1mo",
+        "3mo",
+        "6mo",
+        "1y",
+        "2y",
+        "5y",
+        "10y",
+        "ytd",
+        "max"
+      ]
+    },
+    "close": [
+      48625.828125,
+      46969.87109375,
+      null
+    ]
+  },
+  "official": {
+    "ok": true,
+    "contractVersion": 2,
+    "quotes": {
+      "^TWII": {
+        "price": 47111.26,
+        "prevClose": 46969.87,
+        "change": 141.38999999999942,
+        "changePct": 0.30102276203872697,
+        "name": "發行量加權股價指數",
+        "source": "twse-mis",
+        "session": "regular",
+        "open": 46995.03,
+        "high": 47520.6,
+        "low": 46995.03,
+        "asOf": "2026-10-16T13:33:00+08:00",
+        "tradeDate": "2026-10-16",
+        "market": {
+          "symbol": "^TWII",
+          "market": "TW",
+          "price": 47111.26,
+          "referencePrice": 46969.87,
+          "referenceType": "previous_close",
+          "displayChange": 141.38999999999942,
+          "displayChangePct": 0.301,
+          "session": "regular",
+          "source": "twse-mis",
+          "asOf": "2026-10-16T13:33:00+08:00"
+        },
+        "displayChange": 141.38999999999942,
+        "displayChangePct": 0.301,
+        "referencePrice": 46969.87,
+        "referenceType": "previous_close"
+      },
+      "^TWOII": {
+        "price": 400.26,
+        "prevClose": 396.9,
+        "change": 3.3600000000000136,
+        "changePct": 0.8465608465608501,
+        "name": "櫃買指數",
+        "source": "twse-mis",
+        "session": "regular",
+        "open": 397.67,
+        "high": 404.96,
+        "low": 396.8,
+        "asOf": "2026-10-16T13:33:00+08:00",
+        "tradeDate": "2026-10-16",
+        "market": {
+          "symbol": "^TWOII",
+          "market": "TW",
+          "price": 400.26,
+          "referencePrice": 396.9,
+          "referenceType": "previous_close",
+          "displayChange": 3.3600000000000136,
+          "displayChangePct": 0.8466,
+          "session": "regular",
+          "source": "twse-mis",
+          "asOf": "2026-10-16T13:33:00+08:00"
+        },
+        "displayChange": 3.3600000000000136,
+        "displayChangePct": 0.8466,
+        "referencePrice": 396.9,
+        "referenceType": "previous_close"
+      },
+      "__TXF__": {
+        "asOf": "2026-10-17T04:59:57+08:00",
+        "sourceDate": "2026-10-17",
+        "timeUnverified": false,
+        "timeCheck": {
+          "verified": true,
+          "reason": null,
+          "CDate": "20261016",
+          "CTime": "045957"
+        },
+        "price": 46140.0,
+        "prevClose": 47284.0,
+        "change": -1144.0,
+        "changePct": -2.42,
+        "open": 47269.0,
+        "high": 47380.0,
+        "low": 46107.0,
+        "ampRate": 2.69,
+        "volume": 40941.0,
+        "time": "045957",
+        "session": "night",
+        "sessionLabel": "夜盤",
+        "name": "臺指期106",
+        "source": "taifex-mis-night",
+        "market": {
+          "symbol": "__TXF__",
+          "market": "TW",
+          "price": 46140.0,
+          "referencePrice": 47284.0,
+          "referenceType": "previous_close",
+          "displayChange": -1144.0,
+          "displayChangePct": -2.42,
+          "session": "night",
+          "source": "taifex-mis-night",
+          "asOf": "2026-10-17T04:59:57+08:00"
+        },
+        "displayChange": -1144.0,
+        "displayChangePct": -2.42,
+        "referencePrice": 47284.0,
+        "referenceType": "previous_close"
+      }
+    },
+    "updatedAt": "2026-10-16T20:59:57Z",
+    "generatedAt": "2026-10-16T22:12:31.000994Z",
+    "marketAsOf": "2026-10-16T20:59:57Z",
+    "sessionDate": "2026-10-16",
+    "session": "mixed",
+    "sourceStatus": {
+      "twse-mis": {
+        "quoteCount": 2,
+        "sessions": [
+          "regular"
+        ],
+        "asOf": "2026-10-16T05:33:00Z",
+        "ageSeconds": 59971.0,
+        "freshness": "stale"
+      },
+      "taifex-mis-night": {
+        "quoteCount": 1,
+        "sessions": [
+          "night"
+        ],
+        "asOf": "2026-10-16T20:59:57Z",
+        "ageSeconds": 4354.0,
+        "freshness": "stale"
+      }
+    }
+  }
+}

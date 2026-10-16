@@ -481,17 +481,31 @@ async function refreshMktBar() {
       // -8% 等離譜值且與主圖不一致 → 改吃官方昨收,只在缺時才退回陣列。
       // 後端 pulse 全球影響 (_yf_mktbar_day_change) 必須與此公式完全一致。
       const _rmpc = meta.regularMarketPreviousClose;
-      const cur = (rmp != null && isFinite(rmp) && rmp > 0) ? rmp : last.c;
-      const prev = (_rmpc != null && isFinite(_rmpc) && _rmpc > 0) ? _rmpc
+      const hasCurrentPrice = rmp != null && isFinite(rmp) && rmp > 0;
+      const cur = hasCurrentPrice ? rmp : last.c;
+      const priceTime = hasCurrentPrice ? (rmt || last.t) : last.t;
+      let prev = (_rmpc != null && isFinite(_rmpc) && _rmpc > 0) ? _rmpc
                  : (prevC != null ? prevC : (meta.chartPreviousClose || meta.previousClose));
+      let referenceDate = null;
+      if (m.sym === '^TWII' || m.sym === '^TWOII') {
+        // 當日日 K 可能尚未填值：按現價交易日選最後一筆較早日期，不能固定取倒數第二筆。
+        const dayKey = t => Number.isFinite(Number(t)) && Number(t) > 0
+          ? new Date(Number(t) * 1000 + 28800000).toISOString().slice(0, 10) : null;
+        const priceDay = dayKey(priceTime);
+        const prior = valid.filter(v => dayKey(v.t) && dayKey(v.t) < priceDay).at(-1);
+        if (!hasCurrentPrice || !(_rmpc != null && isFinite(_rmpc) && _rmpc > 0)) {
+          prev = prior ? prior.c : null;
+          referenceDate = prior ? dayKey(prior.t) : null;
+        }
+      }
       if (cur == null || prev == null || !isFinite(prev) || prev <= 0) continue;
       const delta = cur - prev;
       const chgPct = delta / prev * 100;
       if ((m.sym === '^TWII' || m.sym === '^TWOII') && window.MarketData) {
-        // 保留既有行情列日線算法，只讓主圖共用同一組結果；不改用分 K 的 chartPreviousClose。
-        const at = Number(rmt || last.t);
+        // 日線備援附上實際基準日；同日正式行情可校正此組值。
+        const at = Number(priceTime);
         const market = { symbol: m.sym, market: 'TW', price: cur, referencePrice: prev,
-          referenceType: 'previous_close', displayChange: delta, displayChangePct: chgPct,
+          referenceType: 'previous_close', referenceDate, displayChange: delta, displayChangePct: chgPct,
           source: meta._source || 'yahoo-chart', session: 'regular',
           asOf: Number.isFinite(at) && at > 0 ? new Date(at * 1000).toISOString() : null };
         const q = { market, chartFallback: true, high: meta.regularMarketDayHigh || null };

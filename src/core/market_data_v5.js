@@ -25,12 +25,17 @@
       var m = next.market || next, old = previous && (previous.market || previous);
       var stamp = Date.parse(m.asOf), oldStamp = Date.parse(old && old.asOf);
       if (completeQuote(previous)) {
-        if (isFinite(oldStamp) && (!isFinite(stamp) || stamp < oldStamp)) return;
+        var sameTaiwanDay = isFinite(stamp) && isFinite(oldStamp) &&
+          new Date(stamp + 28800000).toISOString().slice(0, 10) ===
+          new Date(oldStamp + 28800000).toISOString().slice(0, 10);
+        // 加權／櫃買同一交易日以正式行情校正日線備援；不同供應商的秒差不代表品質。
+        var officialCorrection = (symbol === '^TWII' || symbol === '^TWOII') &&
+          sameTaiwanDay && previous.chartFallback && !next.chartFallback;
+        if (!officialCorrection && isFinite(oldStamp) && (!isFinite(stamp) || stamp < oldStamp)) return;
         // Yahoo 日線僅承接官方缺成交的情境，不覆寫同日已取得的官方報價。
         if (reason === 'chart-fallback' && !previous.chartFallback &&
             (!isFinite(stamp) || !isFinite(oldStamp) ||
-             new Date(stamp + 28800000).toISOString().slice(0, 10) ===
-             new Date(oldStamp + 28800000).toISOString().slice(0, 10))) return;
+             sameTaiwanDay)) return;
       }
       quotes[symbol] = next;
     });
