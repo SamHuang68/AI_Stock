@@ -2,22 +2,17 @@
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock",
-  "baseCommit": "e3a6744f6c6f24ca35a8d4430c4e862e303bb7eb",
+  "baseCommit": "a6fa19888f562f44468b04c097e28e336ee211c9",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "Yahoo日線寫入路徑補齊來源收據並偵測舊形狀證據表",
-      "reason": "審查發現兩條實際寫入 Yahoo 日線的路徑沒附收據、舊形狀證據表會被沿用、收據例外白名單漏 OverflowError，並發現 #206 弄壞了 update() 的既有測試。以收據案例回歸，並重跑所有引用 fetch_yahoo_daily／upsert_bars／merge_source_bars／_fetch_remote／ingest_receipt 的測試模組（25 個，不是完整套件）。",
+      "id": "merge_source_bars寫入交易涵蓋讀取且證據層錯誤降級",
+      "reason": "跨程序同時更新同標的同日會整批 IntegrityError（existing 在寫入交易之外讀取），以及證據層 sqlite 錯誤會讓整批日線失敗。改為 BEGIN IMMEDIATE 涵蓋讀取，並以 SAVEPOINT 隔離證據步驟。以收據案例與所有引用相關函式的測試模組回歸（不是完整套件），並含靜默例外棘輪。",
       "changes": [
-        "scripts/個股研究資料更新.py",
         "server/datastore.py",
-        "server/個股還原研究.py",
-        "server/日線來源收據.py",
-        "tests/test_daily_source_receipt.py",
-        "tests/test_個股研究資料更新.py",
-        "tests/test_研究品質與留存.py"
+        "tests/test_daily_source_receipt.py"
       ],
       "inputs": [
         ".gitattributes",
@@ -755,7 +750,8 @@
         "tests.test_研究缺口補完",
         "tests.test_突破成交研究",
         "tests.test_突破觀察",
-        "tests.test_體檢來源期限"
+        "tests.test_體檢來源期限",
+        "tests.test_no_new_silent_exceptions"
       ],
       "timeoutSeconds": 600
     }

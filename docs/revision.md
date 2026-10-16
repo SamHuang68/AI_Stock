@@ -1,3 +1,24 @@
+## v5.0 修訂 — 2026-10-16 merge_source_bars 兩個缺口：跨程序競態與證據層錯誤降級（候選，未發布）
+
+基底 `a6fa19888f562f44468b04c097e28e336ee211c9`（main，含 PR #214）；分支 `claude/st-txn-gaps`，`VERSION` 維持 5.0。只改 `server/datastore.py` 的 `merge_source_bars` 與測試。
+
+這是 init_db／交易區段審查留下的兩個缺口（見 PR #214 的修訂段落）。
+
+**缺口 1：`existing` 在寫入交易之外讀取，跨程序同時更新同標的同日會整批失敗（既有行為，自 2026-09-29 的 `6e57d70` 就存在）。** `_db_write_lock` 只在行程內互斥；legacy 交易語意下 SELECT 與 DDL 不開交易，隱式 BEGIN 要到第一個 INSERT 才發出。另一個程序（`scripts/個股研究資料更新.py`、`datastore` CLI）在讀 `existing` 與第一個 INSERT 之間提交同一天，本次的 INSERT 會撞主鍵、整批以 `IntegrityError` 回復，呼叫端顯示更新失敗。處理：取得鎖並建立連線、做任何讀取或建表之前先 `BEGIN IMMEDIATE`，讀取與所有寫入在同一個寫入交易內；等待對方提交後再讀，該日自然視為未變動。兩張帳本表的建立因此也進入交易，失敗時一併回復（原本會在失敗後留下空表）。
+
+**缺口 2：證據層的 sqlite 錯誤會讓整批日線寫入失敗，與「不得拖累既有寫入」的契約字面不符。** 這是設計取捨，本次採用契約已寫明的方向：**證據層失敗只回復證據本身，日線照舊寫入並標記**。以 `SAVEPOINT` 隔離每一個證據步驟（保存收據、首次寫入關聯、修訂關聯）；失敗時 `ROLLBACK TO` 一併撤銷該步驟建立的表、觸發器與列，標記 `sourceReceiptError`（含例外型別），並以 `log_once` 留下限頻記錄。預期的證據錯誤（`ValueError`、`TypeError`、`KeyError`、`IndexError`、`AttributeError`、`OverflowError`、`sqlite3.Error`）才降級；`KeyboardInterrupt` 等仍整個交易回復。新增旗標值 `partial`：收據已保存，但後續某一步證據失敗，部分日線沒有關聯。**語意變更（需知悉）**：以前證據層的 sqlite 錯誤是全有或全無，現在改成日線優先、證據可能缺漏並如實標示；`ROLLBACK TO` 或 `RELEASE` 本身失敗（例如磁碟錯誤）仍會讓整個交易回復。`BEGIN IMMEDIATE` 是 `SAVEPOINT` 的前提：交易已開啟時它是巢狀的，不會在釋放時提前提交。
+
+**驗證（本機 targeted，非完整套件）**：
+- 新增 3 個案例（共 21 項收據案例）：另一連線持有寫入交易並已寫入同日時，merge 等待、提交後視為未變動而不失敗（**此案例在舊程式碼上重現 `IntegrityError`**；第一版案例因測試庫是全新的、DDL 恰好需要寫入鎖而沒有重現，已改為先建立帳本表以貼近正式庫）；證據表欄位不符時日線照舊寫入並標記；失敗步驟的證據隨 SAVEPOINT 撤銷。降級案例在舊程式碼上失敗。
+- 對 `merge_source_bars` 的每一個 `execute` 逐一注入 `sqlite3.OperationalError`（冷庫新增 45 個點、暖庫含衝突 35 個點，共 80 點）：例外往外傳時，資料庫與執行前逐表逐列相同（28 點）；沒有例外時，日線全數寫入、每筆證據列都指向存在的收據與日線、`integrity_check` ok，也沒有『注入失敗卻回報 stored』（52 點降級）。不變式違反 0。
+- 所有引用 `fetch_yahoo_daily`／`upsert_bars`／`merge_source_bars`／`_fetch_remote`／`datastore.update`／`backfill_universe`／`ingest_receipt`／`receipt_out` 的測試模組（25 個）379 項通過；`tests.test_no_new_silent_exceptions` 通過。
+
+**未驗證**：兩個真實 OS 程序在正式資料量下的競態（案例用同程序內的第二連線模擬跨程序的鎖語意）；`BEGIN IMMEDIATE` 對寫入等待時間的實際影響（每次 merge 的寫入鎖多涵蓋一次 `SELECT existing`，備份副本上單檔日更約 22 ms，未重新量測）；`log_once` 仍在持鎖交易內輸出（審查所報的低度項目，本次未改）。
+
+發布狀態：候選，未合併、未部署。正式與本機仍為 `172d378f`；證據表尚未在正式庫建立。
+
+---
+
 ## v5.0 修訂 — 2026-10-16 init_db／交易區段審查結果與收據補齊（候選，未發布）
 
 基底 `e3a6744f6c6f24ca35a8d4430c4e862e303bb7eb`（main，已含發布的 `172d378f`）；分支 `claude/st-receipt-callers`，`VERSION` 維持 5.0。
