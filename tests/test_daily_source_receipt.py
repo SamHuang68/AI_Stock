@@ -8,6 +8,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import closing
 from datetime import datetime, timezone
@@ -209,6 +210,78 @@ class DailySourceReceiptTests(unittest.TestCase):
         self.assertEqual(result['inserted'], 2)
         self.assertEqual(self.scalar('SELECT COUNT(*) FROM bars'), 2)
         self.assertEqual(self.scalar('SELECT COUNT(*) FROM bar_source_receipts'), 0)
+
+    def test_another_process_committing_the_same_day_meanwhile_does_not_fail_the_batch(self):
+        # 另一個連線（等同另一個程序，不受 _db_write_lock 約束）持有寫入交易並已寫入同一天；
+        # merge 必須等它提交後再讀 existing，把該日視為未變動，而不是在 INSERT 時撞主鍵讓整批失敗。
+        import threading
+        rows, receipt = self.fetch(yahoo_payload())
+        # 正式庫的兩張帳本表早已存在：此時 CREATE TABLE IF NOT EXISTS 不需要寫入鎖，舊寫法會在對方提交前
+        # 就讀走過期的 existing。若測試庫是全新的，DDL 需要寫入鎖而恰好等到對方提交，就重現不了這個競態。
+        with closing(sqlite3.connect(self.db_path)) as warm:
+            warm.execute('CREATE TABLE IF NOT EXISTS bar_source_revisions('
+                         'id TEXT PRIMARY KEY,symbol TEXT,market TEXT,session_date TEXT,observed_at REAL,payload TEXT)')
+            warm.execute('CREATE TABLE IF NOT EXISTS bar_ingest_runs(id TEXT PRIMARY KEY,payload TEXT)')
+            warm.commit()
+        other = sqlite3.connect(self.db_path, timeout=30)
+        other.execute('BEGIN IMMEDIATE')
+        other.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', ('2330', 'TW', rows[0][0], *rows[0][1:]))
+        outcome = {}
+
+        def run():
+            try:
+                outcome['result'] = datastore.merge_source_bars('2330', 'TW', rows, 'Yahoo Finance', ingest_receipt=receipt)
+            except Exception as exc:  # 測試要看到實際例外
+                outcome['error'] = repr(exc)
+
+        worker = threading.Thread(target=run)
+        worker.start()
+        time.sleep(0.5)
+        self.assertTrue(worker.is_alive(), 'merge 應在等待另一個寫入交易')
+        other.commit()
+        other.close()
+        worker.join(30)
+        self.assertNotIn('error', outcome)
+        self.assertEqual((outcome['result']['inserted'], outcome['result']['unchanged']), (1, 1))
+        self.assertEqual(self.scalar('SELECT COUNT(*) FROM bars'), 2)
+        # 第一天是另一個程序寫的，沒有首次證據；只有本次新增的那天有。
+        self.assertEqual(self.scalar('SELECT COUNT(*) FROM bar_first_ingest'), 1)
+
+    def test_evidence_layer_sqlite_errors_degrade_without_blocking_the_bars(self):
+        broken = {
+            'bar_source_receipts': 'CREATE TABLE bar_source_receipts(receipt_id TEXT PRIMARY KEY, x TEXT) WITHOUT ROWID',
+            'bar_first_ingest': 'CREATE TABLE bar_first_ingest(market TEXT, symbol TEXT, ts INTEGER, PRIMARY KEY(market,symbol,ts)) WITHOUT ROWID',
+        }
+        for table, ddl in broken.items():
+            with self.subTest(table=table):
+                with closing(sqlite3.connect(self.db_path)) as conn:
+                    for name in ('bar_source_receipts', 'bar_first_ingest', 'bar_reinsert_ingest', 'bar_revision_ingest'):
+                        conn.execute('DROP TABLE IF EXISTS ' + name)
+                    conn.execute('DELETE FROM bars')
+                    conn.execute(ddl)
+                    conn.commit()
+                rows, receipt = self.fetch(yahoo_payload())
+                result = datastore.merge_source_bars('2330', 'TW', rows, 'Yahoo Finance', ingest_receipt=receipt)
+                # 證據表欄位不符（sqlite3.OperationalError）：日線照舊寫入，旗標與錯誤如實標示，不丟例外。
+                self.assertEqual(result['inserted'], 2)
+                self.assertIn(result['sourceReceipt'], ('rejected', 'partial'))
+                self.assertIn('OperationalError', result['sourceReceiptError'])
+                self.assertEqual(self.scalar('SELECT COUNT(*) FROM bars'), 2)
+                self.assertEqual(self.scalar('PRAGMA integrity_check'), 'ok')
+
+    def test_evidence_failure_rolls_back_only_the_evidence_step(self):
+        # 失敗步驟若已建立表或寫入列，必須隨 SAVEPOINT 一併撤銷，不留半套證據。
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute('CREATE TABLE bar_first_ingest(market TEXT, symbol TEXT, ts INTEGER, '
+                         'PRIMARY KEY(market,symbol,ts)) WITHOUT ROWID')
+            conn.commit()
+        rows, receipt = self.fetch(yahoo_payload())
+        result = datastore.merge_source_bars('2330', 'TW', rows, 'Yahoo Finance', ingest_receipt=receipt)
+        self.assertEqual(result['sourceReceipt'], 'partial')
+        # 收據步驟已成功釋放；失敗的是第一筆關聯，之後不再嘗試其他證據步驟。
+        self.assertEqual(self.scalar('SELECT COUNT(*) FROM bar_source_receipts'), 1)
+        self.assertEqual(self.scalar('SELECT COUNT(*) FROM bar_first_ingest'), 0)
+        self.assertEqual(self.scalar('SELECT COUNT(*) FROM bars'), 2)
 
     def test_malformed_receipt_structure_does_not_break_the_write(self):
         import hashlib

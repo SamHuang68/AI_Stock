@@ -336,30 +336,55 @@ def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_
     rows = completed
     with _db_write_lock, closing(get_conn()) as conn, conn:
         check()
+        # _db_write_lock 只在行程內互斥。legacy 交易語意下 SELECT 與 DDL 不開交易，若不先取得寫入鎖，
+        # 另一個程序可在讀 existing 與 INSERT 之間提交同日資料而使整批以 IntegrityError 失敗。
+        # 先 BEGIN IMMEDIATE：讀取、建表與所有寫入同在一個寫入交易內，並使下方的 SAVEPOINT 安全巢狀。
+        conn.execute('BEGIN IMMEDIATE')
         conn.execute('CREATE TABLE IF NOT EXISTS bar_source_revisions('
                      'id TEXT PRIMARY KEY,symbol TEXT,market TEXT,session_date TEXT,observed_at REAL,payload TEXT)')
         conn.execute('CREATE TABLE IF NOT EXISTS bar_ingest_runs(id TEXT PRIMARY KEY,payload TEXT)')
         receipt_id = None
         receipt_failed = False
 
+        def evidence(step, *arguments):
+            """證據層（收據與關聯）的任何失敗只回復證據本身，不拖累日線寫入；失敗會標記並留下限頻記錄。
+
+            回傳 (是否成功, 值)。以 SAVEPOINT 隔離：失敗時 ROLLBACK TO 會一併撤銷該步驟建立的表與觸發器。
+            只攔證據層預期的錯誤；KeyboardInterrupt 等仍往外傳，整個交易回復。
+            """
+            nonlocal receipt_failed
+            if receipt_failed:
+                return False, None
+            conn.execute('SAVEPOINT evidence_step')
+            try:
+                value = step(*arguments)
+            except (ValueError, TypeError, KeyError, IndexError, AttributeError, OverflowError, sqlite3.Error) as exc:
+                conn.execute('ROLLBACK TO SAVEPOINT evidence_step')
+                conn.execute('RELEASE SAVEPOINT evidence_step')
+                receipt_failed = True
+                counts['sourceReceiptError'] = '%s: %s' % (type(exc).__name__, exc)
+                from log_once import log_once
+                log_once('daily-source-receipt',
+                         f'{sym}.{market} 日線來源證據層失敗；日線照舊寫入但沒有完整首次來源證據：{type(exc).__name__}: {exc}',
+                         exc=exc)
+                return False, None
+            conn.execute('RELEASE SAVEPOINT evidence_step')
+            return True, value
+
         def receipt_for_write():
             # 空收據（來源呼叫端未提供）視為未附證據；有收據時只在真的新增 bars 或新的修訂時才保存原始回應，
             # 避免每次無變動的更新都累積一份完整原始回應。
-            # 收據核對失敗不得拖累既有寫入：bars 照舊寫入，但標記失敗並留下限頻記錄，不靜默。
-            nonlocal receipt_id, receipt_failed
+            nonlocal receipt_id
             if not ingest_receipt or receipt_failed:
                 return None
             if receipt_id is None:
-                try:
-                    receipt_id = source_provenance.store_receipt(conn, ingest_receipt, sym, market, source, rows)
-                except (ValueError, TypeError, KeyError, IndexError, AttributeError, OverflowError) as exc:
-                    receipt_failed = True
-                    counts['sourceReceiptError'] = str(exc)
-                    from log_once import log_once
-                    log_once('daily-source-receipt', f'{sym}.{market} 日線來源收據未通過核對；日線照舊寫入但沒有首次來源證據：{exc}', exc=exc)
+                ok, value = evidence(source_provenance.store_receipt, conn, ingest_receipt, sym, market, source, rows)
+                if not ok:
                     return None
+                receipt_id = value
                 counts['sourceReceiptId'] = receipt_id
             return receipt_id
+
         existing = {bar_date(r[0], market): r for r in conn.execute(
             'SELECT ts,open,high,low,close,volume FROM bars WHERE symbol=? AND market=? ORDER BY ts', (sym, market))}
         for row in rows:
@@ -387,18 +412,20 @@ def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_
                 # 內容雜湊相同的修訂已記錄過，持續衝突時不再重複保存原始回應。
                 linked = receipt_for_write() if added else None
                 if linked is not None:
-                    source_provenance.link_revision(conn, key, counts['runId'], linked)
+                    evidence(source_provenance.link_revision, conn, key, counts['runId'], linked)
                 counts['conflicts'] += 1
                 continue
             conn.execute('INSERT INTO bars VALUES(?,?,?,?,?,?,?,?)', (sym, market, *row))
             linked = receipt_for_write()
             if linked is not None:
-                source_provenance.link_first_insert(conn, market, sym, row, counts['runId'], linked)
+                evidence(source_provenance.link_first_insert, conn, market, sym, row, counts['runId'], linked)
             existing[day] = row
             counts['inserted'] += 1
         if source == 'Yahoo Finance':
             # not_needed：有附收據，但這次沒有新增 bars 或新的修訂，所以沒有保存原始回應。
-            counts['sourceReceipt'] = ('stored' if receipt_id else 'rejected' if receipt_failed
+            # partial：收據已保存，但後續某一步證據失敗，部分日線沒有關聯（見 sourceReceiptError）。
+            counts['sourceReceipt'] = ('partial' if receipt_id and receipt_failed else 'stored' if receipt_id
+                                       else 'rejected' if receipt_failed
                                        else 'not_needed' if ingest_receipt else 'absent')
             if counts['inserted'] and counts['sourceReceipt'] == 'absent':
                 from log_once import log_once
