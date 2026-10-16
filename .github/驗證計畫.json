@@ -2,17 +2,16 @@
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock",
-  "baseCommit": "a6fa19888f562f44468b04c097e28e336ee211c9",
+  "baseCommit": "58c36aeca1b6d080891059b961e37d9abb197209",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "merge_source_bars寫入交易涵蓋讀取且證據層錯誤降級",
-      "reason": "跨程序同時更新同標的同日會整批 IntegrityError（existing 在寫入交易之外讀取），以及證據層 sqlite 錯誤會讓整批日線失敗。改為 BEGIN IMMEDIATE 涵蓋讀取，並以 SAVEPOINT 隔離證據步驟。以收據案例與所有引用相關函式的測試模組回歸（不是完整套件），並含靜默例外棘輪。",
+      "id": "修訂紀錄補記後分享封存仍通過同一掃描器",
+      "reason": "本次只在 docs/revision.md 補記發布狀態，不改程式。分享封存會收錄 revision.md 並以同一內容掃描器檢查（含使用者路徑與信箱類字串），因此以分享封存案例回歸。不跑完整套件。",
       "changes": [
-        "server/datastore.py",
-        "tests/test_daily_source_receipt.py"
+        "docs/revision.md"
       ],
       "inputs": [
         ".gitattributes",
@@ -726,32 +725,9 @@
       ],
       "kind": "unittest",
       "targets": [
-        "tests.test_daily_cache_http",
-        "tests.test_daily_cache_jobs",
-        "tests.test_daily_data_boundaries",
-        "tests.test_daily_source_receipt",
-        "tests.test_datastore_market_identity",
-        "tests.test_job_queue_budget_cleanup",
-        "tests.test_review_regressions",
-        "tests.test_signal_stats_pool",
-        "tests.test_stock_signals_revision_metadata",
-        "tests.test_txf_intraday",
-        "tests.test_us_equity_calendar",
-        "tests.test_三項限制解方",
-        "tests.test_個股研究資料更新",
-        "tests.test_全檢資料邊界",
-        "tests.test_台股日線",
-        "tests.test_官方回補收據與摘要",
-        "tests.test_情境投組HTTP",
-        "tests.test_投組價格契約",
-        "tests.test_投組官方價格",
-        "tests.test_日線分欄品質",
-        "tests.test_研究品質與留存",
-        "tests.test_研究缺口補完",
-        "tests.test_突破成交研究",
-        "tests.test_突破觀察",
-        "tests.test_體檢來源期限",
-        "tests.test_no_new_silent_exceptions"
+        "tests.test_dist_scrub.TestDistScrub.test_has_core_share_files",
+        "tests.test_dist_scrub.TestDistScrub.test_archive_passes_same_post_compression_scanner",
+        "tests.test_dist_scrub.TestDistScrub.test_excludes_internal_context_and_runtime_state"
       ],
       "timeoutSeconds": 600
     }
