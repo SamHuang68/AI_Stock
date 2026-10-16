@@ -63,7 +63,8 @@
 
   // ---- 資料 ----
   async function fetchPanel(sym, mkt, rgKey) {
-    const r = RANGES.find(x => x.key === rgKey) || RANGES.find(x => x.key === '6mo');
+    let r = RANGES.find(x => x.key === rgKey) || RANGES.find(x => x.key === '6mo');
+    if (rgKey === '1d' && ['__TXF__', '^TWOII'].includes(sym)) r = {...r, interval:'1m'};
     const url = `${SRV}/yf/${encodeURIComponent(yf(sym, mkt))}?range=${r.range}&interval=${r.interval}`;
     try {
       const raw = await fetch(url, { cache: 'no-store' }).then(x => x.ok ? x.json() : null);
@@ -86,11 +87,11 @@
     let candles = (parsed && parsed.candles) ? parsed.candles : [];
     const isIntraday = (RANGES.find(x => x.key === p.rg) || {}).interval !== '1d'
       && (RANGES.find(x => x.key === p.rg) || {}).interval !== '1wk';
-    if (isIntraday && window.IntradayVolumeV3) {
+    if (isIntraday && !parsed?.meta?._verifiedIntraday && window.IntradayVolumeV3) {
       candles = window.IntradayVolumeV3.filterTwRegularSession(candles, p.mkt).candles;
     }
     p.candles = candles;
-    const tz = t => (t == null ? t : t + tzOff());
+    const tz = t => (t == null ? t : t + (parsed?.meta?._verifiedIntraday ? 28800 : tzOff()));
 
     // ── 最後一根量回補 (對齊主程式 loadSym) ─────────────────────
     // 盤中累計總量不可塞進延遲的最後一分鐘；只有明示完整的收盤快照可補。
@@ -100,7 +101,7 @@
     if (candles.length >= 2 && _rmv != null && isFinite(_rmv) && _rmv > 0) {
       const _li = candles.length - 1;
       if (isIntraday) {
-        if (window.IntradayVolumeV3) {
+        if (!_meta._verifiedIntraday && window.IntradayVolumeV3) {
           window.IntradayVolumeV3.backfillClosingAuction(candles, _meta, p.mkt);
         }
       } else if (!(candles[_li].volume > 0)) {
@@ -134,7 +135,7 @@
 
     const vs = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol' });
     chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-    vs.setData(candles.map(c => ({ time: tz(c.time), value: c.volume, color: c.close >= c.open ? 'rgba(74,222,128,0.25)' : 'rgba(248,113,113,0.25)' })));
+    vs.setData(candles.map(c => c._volumeUnknown ? {time:tz(c.time)} : ({ time: tz(c.time), value: c.volume, color: c.close >= c.open ? 'rgba(74,222,128,0.25)' : 'rgba(248,113,113,0.25)' })));
     p.vs = vs;
 
     if (!isIntraday && candles.length >= 20) {

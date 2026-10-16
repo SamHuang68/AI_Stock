@@ -114,6 +114,10 @@ def fetch_one(sym, rng=None, interval=None, nocache=False) -> Tuple[str, Any, bo
         _raw = unquote(str(sym or ''))
         if tic.is_tw_index_chart_sym(_raw) or tic.is_tw_index_chart_sym(str(sym or '')):
             canon = '__TXF__' if 'TXF' in str(sym).upper() else '^TWOII'
+            if rng == '1d' and (interval or yf_interval) not in ('1d', '1wk', '1mo'):
+                # 共用現有分鐘來源及其 60 秒快取；不混用日線快取或備援。
+                import txf_intraday
+                return canon, txf_intraday.chart_json(canon), False
             cache_key = f'{canon}|1d|{rng or "max"}'
             if cache is not None and not nocache:
                 cached = cache.get(cache_key)
@@ -126,6 +130,8 @@ def fetch_one(sym, rng=None, interval=None, nocache=False) -> Tuple[str, Any, bo
     except Exception as e:
         if log:
             log.warning('fetch_one tw_index: %s', e)
+        if str(sym or '').upper() in ('__TXF__', 'TXF', '__TXF', '^TWOII', 'TWOII', '%5ETWOII'):
+            return sym, {'chart': {'result': None, 'error': '指定指數來源讀取失敗'}}, False
 
     _sym_up = str(sym or '').upper()
     cid = _resolve_macro_id(_sym_up)

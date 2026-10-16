@@ -14,6 +14,7 @@
     if (!el || (el.textContent || '').trim() !== '1天') return false;   // 1天=唯一分鐘盤中視圖
     // 台股盤中由 realtime_v3(MIS 即時)逐分鐘累積,不在此全圖重載(否則會清掉累積的即時棒);
     // 美股盤中無 MIS → 仍用 Yahoo liverefresh。
+    if (typeof S !== 'undefined' && S && ['__TXF__', '^TWOII'].includes(S.sym)) return true;
     if (typeof S !== 'undefined' && S && S.mkt === 'TW') return false;
     return true;
   }

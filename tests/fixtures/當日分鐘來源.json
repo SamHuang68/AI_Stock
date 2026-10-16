@@ -1,0 +1,290 @@
+{
+  "說明": "實際來源節錄；時間、meta 與 OHLCV 原樣保留，未平移或補造。缺分鐘為節錄結果，不代表來源完整度。",
+  "sources": {
+    "__TXF__": {
+      "observedAt": "2026-10-16T02:13:59.813289+00:00",
+      "url": "https://tw.stock.yahoo.com/quote/WTX%26",
+      "sourceSha256": "67b3b14da809eeb11662dde3b84f221170bfb0880322bc8ff32157cd6690c5c7",
+      "截取規則": "有效分鐘首根、臺北 05:00、08:45、最後兩根；排序去重；另保留來源首列與台指期 08:45 原始空列，不將空列補成價格",
+      "originalIndices": [
+        0,
+        1,
+        840,
+        841,
+        929,
+        930
+      ],
+      "originalCount": 931,
+      "chart": {
+        "meta": {
+          "currency": "TWD",
+          "symbol": "WTX&",
+          "name": "台指期近一",
+          "exchangeName": null,
+          "exchange": "TFE",
+          "quoteType": "FUTURE_INDEX",
+          "instrumentType": null,
+          "firstTradeDate": null,
+          "regularMarketTime": 1792116840,
+          "gmtoffset": 28800,
+          "timezone": "CST",
+          "exchangeTimezoneName": "Asia/Taipei",
+          "regularMarketPrice": 47531,
+          "chartPreviousClose": 46931,
+          "previousClose": 46931,
+          "limitUpPrice": 51624,
+          "limitDownPrice": 42238,
+          "scale": 2,
+          "priceHint": 2,
+          "currentTradingPeriod": {
+            "pre": {
+              "timezone": "Asia/Taipei",
+              "start": 1792047600,
+              "end": 1792047600,
+              "gmtoffset": 28800
+            },
+            "regular": {
+              "timezone": "Asia/Taipei",
+              "start": 1792047600,
+              "end": 1792129500,
+              "gmtoffset": 28800
+            },
+            "post": {
+              "timezone": "Asia/Taipei",
+              "start": 1792129500,
+              "end": 1792129500,
+              "gmtoffset": 28800
+            }
+          },
+          "tradingPeriods": [
+            [
+              {
+                "timezone": "Asia/Taipei",
+                "start": 1792047600,
+                "end": 1792129500,
+                "gmtoffset": 28800
+              }
+            ]
+          ],
+          "preTradingPeriods": null,
+          "postTradingPeriods": null,
+          "dataGranularity": "1m",
+          "range": "1d",
+          "validRanges": [
+            "1d",
+            "5d",
+            "1mo",
+            "3mo",
+            "6mo",
+            "1y",
+            "2y",
+            "5y",
+            "10y",
+            "max"
+          ],
+          "sourceTradingPeriods": [
+            [
+              {
+                "timezone": "Asia/Taipei",
+                "start": 1792047600,
+                "end": 1792098000,
+                "gmtoffset": 28800
+              },
+              {
+                "timezone": "Asia/Taipei",
+                "start": 1792111500,
+                "end": 1792129500,
+                "gmtoffset": 28800
+              }
+            ]
+          ]
+        },
+        "timestamp": [
+          1792047600,
+          1792047660,
+          1792098000,
+          1792111500,
+          1792116780,
+          1792116840
+        ],
+        "indicators": {
+          "quote": [
+            {
+              "open": [
+                null,
+                46926,
+                47341,
+                null,
+                47457,
+                47476
+              ],
+              "high": [
+                null,
+                46944,
+                47367,
+                null,
+                47488,
+                47536
+              ],
+              "low": [
+                null,
+                46820,
+                47330,
+                null,
+                47457,
+                47463
+              ],
+              "close": [
+                null,
+                46898,
+                47366,
+                null,
+                47472,
+                47535
+              ],
+              "volume": [
+                null,
+                506,
+                35,
+                null,
+                218,
+                384
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "^TWOII": {
+      "observedAt": "2026-10-16T02:13:59.814207+00:00",
+      "url": "https://tw.stock.yahoo.com/quote/%5ETWOII",
+      "sourceSha256": "0e48a1f9cac3e59b4bf0ea22b937f350e0fb9f3755c67aa7ce0ecfe8d4fa8553",
+      "截取規則": "有效分鐘首根、中間、最後兩根；排序去重；另保留來源首列與台指期 08:45 原始空列，不將空列補成價格",
+      "originalIndices": [
+        0,
+        1,
+        38,
+        73,
+        74
+      ],
+      "originalCount": 75,
+      "chart": {
+        "meta": {
+          "currency": "TWD",
+          "symbol": "^TWOII",
+          "name": "櫃檯指數",
+          "exchangeName": null,
+          "exchange": "TWO",
+          "quoteType": "INDEX",
+          "instrumentType": null,
+          "firstTradeDate": null,
+          "regularMarketTime": 1792116840,
+          "gmtoffset": 28800,
+          "timezone": "CST",
+          "exchangeTimezoneName": "Asia/Taipei",
+          "regularMarketPrice": 403.77,
+          "chartPreviousClose": 396.9,
+          "previousClose": 396.9,
+          "limitUpPrice": "-",
+          "limitDownPrice": "-",
+          "scale": 2,
+          "priceHint": 2,
+          "currentTradingPeriod": {
+            "pre": {
+              "timezone": "Asia/Taipei",
+              "start": 1792112400,
+              "end": 1792112400,
+              "gmtoffset": 28800
+            },
+            "regular": {
+              "timezone": "Asia/Taipei",
+              "start": 1792112400,
+              "end": 1792128600,
+              "gmtoffset": 28800
+            },
+            "post": {
+              "timezone": "Asia/Taipei",
+              "start": 1792128600,
+              "end": 1792128600,
+              "gmtoffset": 28800
+            }
+          },
+          "tradingPeriods": [
+            [
+              {
+                "timezone": "Asia/Taipei",
+                "start": 1792112400,
+                "end": 1792128600,
+                "gmtoffset": 28800
+              }
+            ]
+          ],
+          "preTradingPeriods": null,
+          "postTradingPeriods": null,
+          "dataGranularity": "1m",
+          "range": "1d",
+          "validRanges": [
+            "1d",
+            "5d",
+            "1mo",
+            "3mo",
+            "6mo",
+            "1y",
+            "2y",
+            "5y",
+            "10y",
+            "max"
+          ]
+        },
+        "timestamp": [
+          1792112400,
+          1792112460,
+          1792114680,
+          1792116780,
+          1792116840
+        ],
+        "indicators": {
+          "quote": [
+            {
+              "open": [
+                null,
+                397.67,
+                403.93,
+                403.39,
+                403.49
+              ],
+              "high": [
+                null,
+                399.63,
+                404.09,
+                403.51,
+                403.78
+              ],
+              "low": [
+                null,
+                397.67,
+                403.81,
+                403.26,
+                403.46
+              ],
+              "close": [
+                null,
+                399.63,
+                404.06,
+                403.48,
+                403.77
+              ],
+              "volume": [
+                null,
+                9545,
+                1176,
+                511,
+                769
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}
