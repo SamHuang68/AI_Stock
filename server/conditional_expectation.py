@@ -510,7 +510,9 @@ def aggregate_horizon_stats(
         'medianReturnPct': round(_median(returns), 4) if qualified else None,
         'winRate': round(sum(1 for value in returns if value > 0) / n, 4) if qualified else None,
         'n': n,
-        'maxDrawdownQ90Pct': round(_quantile(drawdowns, 0.90), 4) if qualified else None,
+        # 回撤是帶號值（0 為無回撤、越負越糟）：「90% 樣本不劣於」的尾端是升冪第 10 百分位，
+        # 取第 90 百分位會落在最溫和的一端（實務上恆為 0）。
+        'maxDrawdownQ90Pct': round(_quantile(drawdowns, 0.10), 4) if qualified else None,
         'ratesAvailable': qualified,
     }
 
