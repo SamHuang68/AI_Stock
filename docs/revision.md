@@ -1,3 +1,26 @@
+## 2026-10-19 WaveDeck 回撤鎖定自動全平、急停仍放行平倉（WD-01）
+
+- 基底：`edd97ae53a6a4557d1b917522a3e7ea837a6b040`（origin/main）；分支 `claude/wd-drawdown-flatten`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查 WD-01）：急停的目的是擋新風險，但舊版三處一起把部位鎖在場內：
+  1. `WD_DD_FLATTEN` 預設關閉，當日回撤達上限只急停不平倉；
+  2. `risk.evaluate_gate` 在急停或 Halted 時連 EXIT／REDUCE 都拒絕；
+  3. `engine.enforce_no_overnight` 在急停時停在 blocked，不留倉截止送不出平倉，部位會過夜。
+- 修正後行為（Sam 2026-10-19 選擇「兩者都做」）：
+  - `st_link.DD_FLATTEN` 預設開啟，設 `WD_DD_FLATTEN=0` 可改回只急停；
+  - 急停或 Halted 時閘門仍拒絕 ENTER_LONG／ENTER_SHORT，只放行 EXIT 與 REDUCE；
+  - 不留倉截止在急停中照常經閘門送一次平倉，急停狀態維持不變；`handle_signal` 在急停時拒收所有訊號的行為不變。
+- 契約變更與測試：
+  - `test_不留倉.test_減倉仍尊重緊急停止` 改寫為 `test_緊急停止只擋新倉_平倉與減碼放行`；
+  - `test_策略訊號整合.test_急停時不留倉不自動送單` 改寫為 `test_急停時不留倉仍送平倉一次且維持急停`；
+  - 新增 `test_完整審查執行.test_緊急停止中仍執行截止平倉`。
+  - 新案例在舊程式上確認會失敗（2 FAIL），新程式通過。
+- 驗證：
+  - 本機以 repo 根目錄執行 `wavedeck.tests` 的 exec_md、request_guard、smoke、不留倉、完整審查執行、策略HTTP、策略訊號整合，共 90 案例，連續兩次全數通過。
+  - 第一次執行時 `test_策略HTTP` 的過大 JSON 案例出現一次 WinError 10053（連線中止）；單獨執行與後續兩次全組皆通過，修改前的 main 單獨執行也通過，判定為與本修改無關的偶發失敗，未修改該測試。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## v5.0 修訂 — 2026-10-19 兩份新文件改用中性路徑，恢復分享封存掃描（候選，未發布）
 
 基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/docs-abs-paths`，只改文件。

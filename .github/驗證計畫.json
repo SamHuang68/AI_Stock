@@ -1,31 +1,49 @@
 {
   "documentation": [
-    "docs/revision.md",
-    "docs/加權行情錯誤8D.md",
-    "docs/當日分時修復.md"
+    "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "新文件改用中性路徑後分享封存通過",
-      "reason": "兩份新文件含絕對使用者路徑使分享封存掃描失敗；改為中性寫法後以分享封存案例回歸。不跑完整套件。",
+      "id": "WaveDeck急停放行平倉與回撤全平",
+      "kind": "unittest",
+      "timeoutSeconds": 300,
+      "reason": "急停只擋新倉、不留倉截止與回撤鎖定仍能平倉（WD-01）",
+      "targets": [
+        "wavedeck.tests.test_不留倉",
+        "wavedeck.tests.test_完整審查執行",
+        "wavedeck.tests.test_策略訊號整合",
+        "wavedeck.tests.test_smoke",
+        "wavedeck.tests.test_策略HTTP",
+        "wavedeck.tests.test_exec_md",
+        "wavedeck.tests.test_request_guard"
+      ],
       "changes": [
-        "docs/加權行情錯誤8D.md",
-        "docs/當日分時修復.md"
+        "wavedeck/server/st_link.py",
+        "wavedeck/server/risk.py",
+        "wavedeck/server/engine.py",
+        "wavedeck/tests/test_不留倉.py",
+        "wavedeck/tests/test_完整審查執行.py",
+        "wavedeck/tests/test_策略訊號整合.py"
       ],
       "inputs": [
-        "docs/加權行情錯誤8D.md",
-        "docs/當日分時修復.md",
-        "scripts/build_dist.py",
-        "tests/test_dist_scrub.py"
-      ],
-      "kind": "unittest",
-      "targets": [
-        "tests.test_dist_scrub"
-      ],
-      "timeoutSeconds": 600
+        "wavedeck/server/broker.py",
+        "wavedeck/server/engine.py",
+        "wavedeck/server/review_loop.py",
+        "wavedeck/server/risk.py",
+        "wavedeck/server/st_link.py",
+        "wavedeck/server/state.py",
+        "wavedeck/server/不留倉.py",
+        "wavedeck/tests/test_exec_md.py",
+        "wavedeck/tests/test_request_guard.py",
+        "wavedeck/tests/test_smoke.py",
+        "wavedeck/tests/test_不留倉.py",
+        "wavedeck/tests/test_完整審查執行.py",
+        "wavedeck/tests/test_策略HTTP.py",
+        "wavedeck/tests/test_策略訊號整合.py"
+      ]
     }
   ],
-  "baseCommit": "a12f5c533d0008aa95a5dce6b290ad866c429662",
+  "baseCommit": "2c93ae001d693bb58ca2259b0458c942815c30eb",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"
